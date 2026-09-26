@@ -15,9 +15,13 @@
 #      the wrapper's depfile names every member. Without that the stale object
 #      would be linked silently.
 #
-# Steps 3-4 need `ninja` on PATH (the same staleness rules also drive lhd's
-# built-in fallback, but only ninja can answer "what would rebuild" without
-# rebuilding).
+# Steps 3-4 exercise the built-in builder and inspect object timestamps.
+#
+#   5. (LHD_EXTERNAL_SIM=1 only, see AGENTS.md) the same contract under ninja,
+#      the builder `lhd sim` uses by default when it is on PATH: `ninja -n`
+#      reports no work after a warm build, and plans the batch object after a
+#      member edit (only ninja can answer "what would rebuild" without
+#      rebuilding).
 
 set -u
 
@@ -69,7 +73,7 @@ test top.chain(cycles:u20 = 2) {
 EOF
 
 run_sim() {
-  "$LHD" sim "$W/tb.prp" --set compile.upass.inline=false --diag-fmt pretty --workdir "$W/wd" >"$W/run.log" 2>&1
+  "$LHD" sim "$W/tb.prp" --set compile.upass.inline=false --set sim.ninja=false --set sim.tune.profile=off --diag-fmt pretty --workdir "$W/wd" >"$W/run.log" 2>&1
 }
 
 if ! run_sim; then
@@ -90,16 +94,11 @@ objects=$(grep -c '^build .*\.o: cc ' "$S/build.ninja")
 # 16 + (0 + 1 + ... + 19) = 206
 grep -q 'unity chain: got=206' "$W/run.log" || { cat "$W/run.log" >&2; fail "wrong simulation result from the batched build"; }
 
-if ! command -v ninja >/dev/null 2>&1; then
-  fail "Ninja is required for the rebuild checks"
-fi
-
-# ---- 3. a warm rebuild has no work --------------------------------------------
-plan=$(ninja -C "$S" -n 2>&1 | grep -v '^ninja: Entering')
-case "$plan" in
-*"no work to do"*) ;;
-*) fail "a rebuild with nothing changed still has work to do: $plan" ;;
-esac
+# ---- 3. a warm built-in rebuild has no work ----------------------------------
+touch "$W/build-marker"
+run_sim || { cat "$W/run.log" >&2; fail "warm build failed"; }
+[ -z "$(find "$S" \( -name '*.o' -o -name drv.bin \) -newer "$W/build-marker")" ] \
+  || fail "a warm build rewrote objects or relinked the simulator"
 
 # ---- 4. rewriting a batched source rebuilds its batch -------------------------
 # Widen one leaf's input port: its interface -- and so its generated sources --
@@ -122,15 +121,45 @@ grep -q 'leaf_7(a:u9)' "$W/leaves.prp" || fail "the interface edit did not apply
   || { cat "$W/setup.log" >&2; fail "lhd sim --setup-only failed after the edit"; }
 [ -n "$(find "$S" -maxdepth 1 -name "$victim_cpp" -newer "$W/marker")" ] \
   || fail "the interface edit did not rewrite $victim_cpp (test assumption broken)"
-# build.ninja is rewritten by the build step, not by setup: the plan below is
-# computed from the PREVIOUS build file, exactly what the next build starts from.
-plan=$(ninja -C "$S" -n 2>&1 | grep -v '^ninja: Entering')
-case "$plan" in
-*"$batch_obj"*) ;;
-*) fail "rewriting $victim_cpp did not rebuild its batch $batch_obj -- the wrapper's depfile is not tracking members: $plan" ;;
-esac
-
+touch "$W/build-marker"
 run_sim || { cat "$W/run.log" >&2; fail "lhd sim failed after the edit"; }
+[ -n "$(find "$S" -name "$batch_obj" -newer "$W/build-marker")" ] \
+  || fail "rewriting $victim_cpp did not rebuild its batch $batch_obj"
 grep -q 'unity chain: got=206' "$W/run.log" || { cat "$W/run.log" >&2; fail "wrong simulation result after the edit"; }
+
+# ---- 5. the same contract under ninja -----------------------------------------
+if [ -z "${LHD_EXTERNAL_SIM:-}" ]; then
+  echo "note: external-simulator leg skipped (set LHD_EXTERNAL_SIM=1)"
+else
+  command -v ninja >/dev/null 2>&1 || fail "LHD_EXTERNAL_SIM is set but ninja is not on PATH"
+  # Its own workdir: objects from the built-in builder have no .ninja_log, so
+  # ninja would plan everything.
+  NW="$W/wd_ninja"
+  NS="$NW/sim"
+  "$LHD" sim "$W/tb.prp" --set compile.upass.inline=false --set sim.ninja=true --set sim.tune.profile=off \
+    --diag-fmt pretty --workdir "$NW" >"$W/ninja.log" 2>&1 \
+    || { cat "$W/ninja.log" >&2; fail "lhd sim failed under ninja"; }
+  [ -f "$NS/.ninja_log" ] || fail "sim.ninja=true did not build with ninja (no $NS/.ninja_log)"
+  grep -q 'unity chain: got=206' "$W/ninja.log" || { cat "$W/ninja.log" >&2; fail "wrong simulation result from the ninja build"; }
+  plan=$(ninja -C "$NS" -n 2>&1 | grep -v '^ninja: Entering')
+  case "$plan" in
+  *"no work to do"*) ;;
+  *) fail "ninja: a rebuild with nothing changed still has work to do: $plan" ;;
+  esac
+  ninja_obj=$(basename "$(grep -l "\"\.\./$victim_cpp\"" "$NS"/unity/unity-*.cpp)" .cpp).o
+  [ "$ninja_obj" != ".o" ] || fail "ninja: $victim_cpp is not batched in $NS/unity (test assumption broken)"
+  sed -e 's/pub comb leaf_7(a:u9)/pub comb leaf_7(a:u10)/' "$W/leaves.prp" > "$W/leaves.new" && mv "$W/leaves.new" "$W/leaves.prp"
+  grep -q 'leaf_7(a:u10)' "$W/leaves.prp" || fail "the second interface edit did not apply (test bug)"
+  "$LHD" sim "$W/tb.prp" --set compile.upass.inline=false --setup-only --workdir "$NW" >"$W/setup_n.log" 2>&1 \
+    || { cat "$W/setup_n.log" >&2; fail "lhd sim --setup-only failed after the edit (ninja leg)"; }
+  # build.ninja is rewritten by the build step, not by setup: the plan below is
+  # computed from the PREVIOUS build file, exactly what the next build starts from.
+  plan=$(ninja -C "$NS" -n 2>&1 | grep -v '^ninja: Entering')
+  case "$plan" in
+  *"$ninja_obj"*) ;;
+  *) fail "ninja: rewriting $victim_cpp did not rebuild its batch $ninja_obj -- the wrapper's depfile is not tracking members: $plan" ;;
+  esac
+  echo "ok: ninja plans no work after a warm build and rebuilds $ninja_obj after a member edit"
+fi
 
 echo "PASS (batched build, correct result, warm rebuild is a no-op, a member edit rebuilds its batch)"

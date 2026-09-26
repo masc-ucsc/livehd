@@ -201,6 +201,22 @@ static Pin resolve_clk_input(Pin p) {
   return gu::is_graph_input_pin(base) ? base : Pin{};
 }
 
+std::optional<std::string> flop_clock_input(const hhds::Occurrence_node& node) {
+  for (const auto& sink : node.inp_sorted_pins()) {
+    if (sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Flop, "clock_pin")) {
+      continue;
+    }
+    for (const auto& driver : sink.get_driver_pins()) {
+      if (auto ci = resolve_clk_input(driver); !ci.is_invalid()) {
+        return std::string(gu::pin_name_of(ci));
+      }
+      break;  // first driver of the clock_pin sink == the first edge the old walk saw
+    }
+    break;  // that `break` left the WHOLE walk
+  }
+  return std::nullopt;
+}
+
 // 2f-latch M9 -- decode a clock_pin driver that is (or reaches, through the
 // width-mask wrappers a typed port read picks up) a `Clock_cell`.
 //
@@ -372,9 +388,7 @@ static std::string normalize_reg_name(std::string_view raw) {
   if (auto p = s.find("___ssa_"); p != std::string_view::npos) {
     s = s.substr(0, p);
   }
-  std::string out{s};
-  out.erase(std::remove(out.begin(), out.end(), '`'), out.end());
-  return out;
+  return gu::logical_hier_name(s);
 }
 
 // A ROLLED comptime loop (compile.unroll=false, the default) is ONE replicated
@@ -457,7 +471,7 @@ std::string canon_flop_name(std::string_view hier_name) {
   if (auto p = sv.find("___ssa_"); p != std::string_view::npos) {
     sv = sv.substr(0, p);
   }
-  std::string s(sv);
+  std::string s = gu::logical_hier_name(sv);
   // Pyrope backticks and Verilog's leading backslash quote identifiers but are
   // not part of their RTL names. After an instance prefix is attached, the
   // latter can appear in the middle of a hierarchical name
@@ -1150,6 +1164,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   }
   const ankerl::unordered_dense::set<hhds::Gid>* opaque = opaque_subs.empty() ? nullptr : &opaque_subs;
   std::vector<hhds::Occurrence_node>             flops;
+  absl::flat_hash_set<std::string>               flop_names;
   std::vector<int>                               flop_depths;     // pipe_min depth per flop (>=1)
   std::vector<std::vector<Val>>                  flop_internals;  // depth>1: the d-1 INTERNAL stage
                                                                   // current-states, din-side -> Q-side
@@ -1248,10 +1263,20 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     if (w == 0) {
       w = 1;
     }
-    bool        sgn        = !gu::is_unsign(qpin);
-    std::string nm         = flop_key(node.get_hier_name());
-    Val         v          = seed_state(nm, w, sgn);
-    bool        was_shared = shared_inputs != nullptr && shared_inputs->find(nm) != shared_inputs->end();
+    bool        sgn = !gu::is_unsign(qpin);
+    std::string nm  = flop_key(node.get_hier_name());
+    // A logical name is not a physical identity. Transparent wrappers (or
+    // explicit aliases) must never merge two distinct state occurrences.
+    // Check the actual encoding view, respecting opaque/certified children;
+    // scanning the fully expanded design would defeat compact-loop proofs.
+    // A structural refusal: the same graph always collides, so no retry or
+    // bigger budget can change it.
+    if (!flop_names.insert(nm).second) {
+      return fail_unsupported("ambiguous logical state name '" + nm
+                              + "': distinct state occurrences require distinct logical names");
+    }
+    Val  v          = seed_state(nm, w, sgn);
+    bool was_shared = shared_inputs != nullptr && shared_inputs->find(nm) != shared_inputs->end();
     if (const char* dump_enc = std::getenv("LEC_DUMP_ENC");
         dump_enc != nullptr && (dump_enc[0] == '\0' || nm.find(dump_enc) != std::string::npos)) {
       std::fprintf(stderr,
@@ -1318,6 +1343,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     int                               mtype  = -1;
     bool                              is_rom = false;
     cvc5::Term                        a_cur;
+    cvc5::Term                        x_cur;                 // BMC reference memory knowledge (null = all known)
+    bool                              x_track      = false;  // reference port memory: an unknown write builds x_cur
     // a_cur came from `shared_mems` (the SAME symbol on both designs) rather
     // than being minted per-design. The whole-array bulk-update record is only
     // meaningful then: `a_next = cond ? from_bus(bus) : a_cur` proves nothing
@@ -1522,6 +1549,19 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     if (mc.a_cur.isNull()) {
       mc.a_cur = tm_.mkConst(asort, std::string(prefix) + mc.key);
     }
+    // Port memories must retain unknown write data/control across cycles,
+    // just like enabled flops. The array starts with the existing shared
+    // initial-state relation; only later unknown writes cloud that relation.
+    // The plane is LAZY: a memory that has only ever seen known writes carries
+    // no knowledge array at all (null = every bit known). An always-zero array
+    // chain threaded through every BMC step changes nothing semantically but
+    // can turn a trivial bounded proof into a solver timeout.
+    if (x_dontcare_ && memory_x_state_ && !mc.is_comb && !mc.is_whole && !mc.is_rom) {
+      mc.x_track = true;
+      if (auto it = memory_x_state_->find(mc.key); it != memory_x_state_->end()) {
+        mc.x_cur = it->second;
+      }
+    }
     // Cell write-port count: the `undef`/`fwd` matrices are laid out with THIS
     // stride (bit r*n_wr_cells + w). Phase 2's `n_wr` is the same count
     // (applied_upto gets one entry per non-read port plus a sentinel), so the
@@ -1622,6 +1662,19 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // their undefined plane before the combinational consumers are encoded.
       if (x_dontcare_ && xm.isNull() && !dout_dpin.is_invalid()
           && (static_cast<uint64_t>(mc.sig.size) < (uint64_t{1} << mc.sig.addr_w))) {
+        xm                                = tm_.mkConst(bv(mc.sig.bits), std::string(prefix) + rk + ":xm");
+        pin2val[pinkey(dout_dpin)].x_mask = sync_threaded ? carried_xm : xm;
+      }
+      // The memory's knowledge plane: an entry left unknown by an earlier
+      // write (x_cur), or a write this cycle that the read forwards. With
+      // neither, every word the read can see is known and no plane is minted.
+      bool fwd_write = false;
+      if (mc.x_track && mc.fwd) {
+        for (size_t w = 0; w < n_wr_cells && !fwd_write; ++w) {
+          fwd_write = mc.fwd->bit_test(static_cast<int>(static_cast<size_t>(n_rd_pos) * n_wr_cells + w));
+        }
+      }
+      if ((!mc.x_cur.isNull() || fwd_write) && xm.isNull() && !dout_dpin.is_invalid()) {
         xm                                = tm_.mkConst(bv(mc.sig.bits), std::string(prefix) + rk + ":xm");
         pin2val[pinkey(dout_dpin)].x_mask = sync_threaded ? carried_xm : xm;
       }
@@ -2659,18 +2712,20 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           if (all.size() < 2) {
             return fail("EQ expects >= 2 operands");
           }
-          // Verilog comparison signedness: the operation is signed ONLY if EVERY
-          // operand is signed; one unsigned operand makes the whole compare
-          // unsigned. The width extension must follow that effective sign, not each
-          // operand's own sign — else a 1-bit `signed` control (value 1 == -1)
-          // would sign-extend to all-ones inside an `== 1` and never match.
-          int  cw         = 0;
-          bool eff_signed = true;
+          // LGraph compares integer values, independently of Verilog's
+          // expression coercions. Extend each operand with its own sign and
+          // retain an unsigned operand's leading zero when signs are mixed.
+          // Otherwise s4(-1) incorrectly equals u4(15).
+          int  cw           = 0;
+          bool any_signed   = false;
+          bool any_unsigned = false;
           for (const auto& v : all) {
-            cw         = std::max(cw, v.width);
-            eff_signed = eff_signed && v.is_signed;
+            cw           = std::max(cw, v.width);
+            any_signed   = any_signed || v.is_signed;
+            any_unsigned = any_unsigned || !v.is_signed;
           }
-          auto ext = [&](const Val& v) { return fit_to(tm_, Val{v.term, v.width, eff_signed}, cw); };
+          cw       += any_signed && any_unsigned;
+          auto ext  = [&](const Val& v) { return fit_to(tm_, v, cw); };
           Term acc;
           for (size_t i = 1; i < all.size(); ++i) {
             Term eq = tm_.mkTerm(Kind::EQUAL, {ext(all[0]), ext(all[i])});
@@ -3583,6 +3638,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       if (gu::type_op_of(node) != Ntype_op::Sub) {
         continue;
       }
+      // PHYSICAL occurrence path: unique and never empty for an instance. A
+      // logical name would collide for two transparent instances (and be
+      // empty for one at the top), so taps are keyed like the CLI binds them.
       const std::string hname{node.get_hier_name()};
       if (!port_taps_->contains(hname)) {
         continue;
@@ -3704,17 +3762,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
   // Distinct clock INPUT nets across this design's flops.
   absl::flat_hash_set<std::string> clk_inputs;
   for (const auto& fn : flops) {
-    for (const auto& sink : fn.inp_sorted_pins()) {
-      if (sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Flop, "clock_pin")) {
-        continue;
-      }
-      for (const auto& driver : sink.get_driver_pins()) {
-        if (auto ci = resolve_clk_input(driver); !ci.is_invalid()) {
-          clk_inputs.insert(std::string(gu::pin_name_of(ci)));
-        }
-        break;  // first driver of the clock_pin sink == the first edge the old walk saw
-      }
-      break;  // that `break` left the WHOLE walk
+    if (auto ci = flop_clock_input(fn)) {
+      clk_inputs.insert(std::move(*ci));
     }
   }
   const bool multi_clock = clk_inputs.size() >= 2;
@@ -3809,6 +3858,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     bool enable_const_false = false;
     bool has_enable         = false;
     Term en_hot;
+    Term en_unknown;
     if (auto en_d = absorb_gate ? hhds::Occurrence_pin{} : hier_sink_driver(node, "enable"); !en_d.is_invalid()) {
       if (en_d.is_const()) {
         enable_const_false = gu::const_of(en_d).is_known_false();
@@ -3819,6 +3869,14 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         }
         en_hot     = tm_.mkTerm(Kind::DISTINCT, {ev.term, bv_const(tm_, ev.width, 0)});
         has_enable = true;
+        if (x_dontcare_ && !ev.x_mask.isNull()) {
+          // Uncertain only when some bit is unknown AND no known bit is one: a
+          // known-one bit already makes the enable true in hardware.
+          const Term known_ones = tm_.mkTerm(Kind::BITVECTOR_AND, {ev.term, tm_.mkTerm(Kind::BITVECTOR_NOT, {ev.x_mask})});
+          en_unknown            = tm_.mkTerm(Kind::AND,
+                                             {tm_.mkTerm(Kind::DISTINCT, {ev.x_mask, bv_const(tm_, ev.width, 0)}),
+                                              tm_.mkTerm(Kind::EQUAL, {known_ones, bv_const(tm_, ev.width, 0)})});
+        }
       }
     }
 
@@ -4176,9 +4234,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       }
       // A SYNC reset is part of the transition and belongs INSIDE the commit
       // gate; an ASYNC one overrides regardless of the clock and stays outside.
-      // (Without a phase schedule the two are indistinguishable -- one step is
-      // one commit -- so the legacy shape is preserved bit-for-bit.)
-      const bool sync_inside = has_reset && !async_reset && phased && !single_step();
+      // This applies both to scheduled microsteps and to explicit multi-clock
+      // edges. With no commit predicate, a step is already one active edge.
+      const bool sync_inside = has_reset && !async_reset && !commits.isNull();
       if (sync_inside) {
         nval = tm_.mkTerm(Kind::ITE, {rst_hot, initv, nval});
       }
@@ -4198,7 +4256,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // hold path inherits the Q's plane; a reset override is known).
         Term self_u = (k + 1 < depth) ? fit_x_mask_to(tm_, internals[static_cast<size_t>(k)], w) : fit_x_mask_to(tm_, qv, w);
         Term src_u  = (k == 0) ? (has_din ? din_xm : self_u) : fit_x_mask_to(tm_, internals[static_cast<size_t>(k - 1)], w);
-        if (!self_u.isNull() || !src_u.isNull()) {
+        if (!self_u.isNull() || !src_u.isNull() || !en_unknown.isNull()) {
           auto zw = tm_.mkBitVector(static_cast<uint32_t>(w), 0);
           Term su = self_u.isNull() ? zw : self_u;
           Term du = src_u.isNull() ? zw : src_u;
@@ -4207,8 +4265,23 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             nu = su;
           } else if (has_enable) {
             nu = tm_.mkTerm(Kind::ITE, {en_hot, du, su});
+            // An unknown enable may select either the write or hold path.
+            // Keep only bits known and equal on BOTH paths; choosing a free
+            // power-on enable's value must not turn unwritten state into
+            // known data and falsely refute a differently shaped netlist.
+            if (!en_unknown.isNull()) {
+              auto merged = tm_.mkTerm(Kind::BITVECTOR_OR,
+                                       {tm_.mkTerm(Kind::BITVECTOR_OR, {du, su}), tm_.mkTerm(Kind::BITVECTOR_XOR, {source, self})});
+              nu          = tm_.mkTerm(Kind::ITE, {en_unknown, merged, nu});
+            }
           }
-          if (has_reset) {
+          if (sync_inside) {
+            nu = tm_.mkTerm(Kind::ITE, {rst_hot, zw, nu});
+          }
+          if (!commits.isNull()) {
+            nu = tm_.mkTerm(Kind::ITE, {commits, nu, su});
+          }
+          if (has_reset && !sync_inside) {
             nu = tm_.mkTerm(Kind::ITE, {rst_hot, zw, nu});
           }
           nv.x_mask = nu;
@@ -4383,6 +4456,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // writes below STORE on top of it (per-port wins). update_enable gates the
     // whole array (hold = a_cur). A plain memory starts from a_cur unchanged.
     Term a_next = mc.a_cur;
+    Term x_next = mc.x_cur;
     if (mc.is_whole) {
       Val uv = driver_val(mc.update, ok);
       if (!ok) {
@@ -4460,12 +4534,14 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // ordinal to its a_after index, since a port with no din is skipped by the
     // fold but still occupies a column of the `fwd` matrix.
     std::vector<Term>                  a_after;
+    std::vector<Term>                  x_after;
     std::vector<size_t>                applied_upto;
     // Per cell write-port ordinal (lockstep with `applied_upto`): the resolved
     // (address, per-bit write mask) this port drives, for the `undef` X-plane
     // below. A null address = "this column writes nothing this cycle".
     std::vector<std::pair<Term, Term>> wr_am;
     a_after.emplace_back(a_next);
+    x_after.emplace_back(x_next);
     for (auto& p : mc.ports) {
       if (p.rd) {
         continue;
@@ -4481,7 +4557,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         return fail("memory '" + gu::debug_name(mc.node) + "' write addr/din not encodable");
       }
       Term addr = fit_unsigned(av, mc.sig.addr_w);
-      Term din  = fit_to(tm_, Val{dv.term, dv.width, false}, mc.sig.bits);
+      // A narrowed signed din (e.g. an s5 Sum driving an s8 memory) sign-fills
+      // the word, as cgen's `.wr_din_j(<signed wire>)` connection does and as
+      // the X plane below is widened; forcing unsigned stores 0x10 for -16 and
+      // lets a zero-extending implementation false-PROVE.
+      Term din  = fit_to(tm_, dv, mc.sig.bits);
       // Per-lane write mask: word-enable (wensize<=1) replicates the enable hot
       // bit across the whole word. Otherwise each of the `wensize` enable bits
       // controls one contiguous `bits/wensize` lane. This must expand every lane,
@@ -4490,6 +4570,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // the two equivalent port decompositions only match under the real lane
       // semantics.
       Term wmask;
+      Term enable_x;
       if (p.en.is_invalid()) {
         wmask = tm_.mkTerm(Kind::BITVECTOR_NOT, {bv_const(tm_, mc.sig.bits, 0)});
       } else {
@@ -4497,12 +4578,17 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         if (!ok) {
           return fail("memory '" + gu::debug_name(mc.node) + "' enable not encodable");
         }
+        if (mc.x_track) {
+          enable_x = ev.x_mask;
+        }
         if (mc.wensize > 1 && mc.sig.bits % mc.wensize == 0) {
           const int  lane_bits = mc.sig.bits / mc.wensize;
           // A narrowed signed mask (e.g. 0/-1) sign-fills the declared lanes;
           // forcing unsigned would enable only lane zero after bitwidth.
           const Term lanes     = fit_to(tm_, ev, mc.wensize);
           Term       mask;
+          Term       xmask;
+          Term       xlanes = fit_x_mask_to(tm_, ev, mc.wensize);
           for (int lane = mc.wensize - 1; lane >= 0; --lane) {
             const Term bit = bv_extract(tm_, lanes, lane, lane);
             const Term hot = tm_.mkTerm(Kind::DISTINCT, {bit, bv_const(tm_, 1, 0)});
@@ -4510,10 +4596,28 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
                 = tm_.mkTerm(Kind::ITE,
                              {hot, tm_.mkTerm(Kind::BITVECTOR_NOT, {bv_const(tm_, lane_bits, 0)}), bv_const(tm_, lane_bits, 0)});
             mask = mask.isNull() ? lane_mask : tm_.mkTerm(Kind::BITVECTOR_CONCAT, {mask, lane_mask});
+            if (!enable_x.isNull()) {
+              auto xu = tm_.mkTerm(Kind::DISTINCT, {bv_extract(tm_, xlanes, lane, lane), bv_const(tm_, 1, 0)});
+              auto xm
+                  = tm_.mkTerm(Kind::ITE,
+                               {xu, tm_.mkTerm(Kind::BITVECTOR_NOT, {bv_const(tm_, lane_bits, 0)}), bv_const(tm_, lane_bits, 0)});
+              xmask = xmask.isNull() ? xm : tm_.mkTerm(Kind::BITVECTOR_CONCAT, {xmask, xm});
+            }
           }
           wmask = mask;
+          enable_x = xmask;
         } else {
           Term en_hot = tm_.mkTerm(Kind::DISTINCT, {ev.term, bv_const(tm_, ev.width, 0)});
+          if (!enable_x.isNull()) {
+            // As for a flop enable: a known-one bit makes the write certain.
+            auto known_ones = tm_.mkTerm(Kind::BITVECTOR_AND, {ev.term, tm_.mkTerm(Kind::BITVECTOR_NOT, {enable_x})});
+            auto xu         = tm_.mkTerm(Kind::AND,
+                                         {tm_.mkTerm(Kind::DISTINCT, {enable_x, bv_const(tm_, ev.width, 0)}),
+                                          tm_.mkTerm(Kind::EQUAL, {known_ones, bv_const(tm_, ev.width, 0)})});
+            enable_x
+                = tm_.mkTerm(Kind::ITE,
+                             {xu, tm_.mkTerm(Kind::BITVECTOR_NOT, {bv_const(tm_, mc.sig.bits, 0)}), bv_const(tm_, mc.sig.bits, 0)});
+          }
           wmask       = tm_.mkTerm(
               Kind::ITE,
               {en_hot, tm_.mkTerm(Kind::BITVECTOR_NOT, {bv_const(tm_, mc.sig.bits, 0)}), bv_const(tm_, mc.sig.bits, 0)});
@@ -4534,12 +4638,48 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       Term keep     = tm_.mkTerm(Kind::BITVECTOR_AND, {tm_.mkTerm(Kind::BITVECTOR_NOT, {wmask}), old});
       Term set      = tm_.mkTerm(Kind::BITVECTOR_AND, {wmask, din});
       Term new_word = tm_.mkTerm(Kind::BITVECTOR_OR, {keep, set});
+      auto data_x   = mc.x_track ? fit_x_mask_to(tm_, dv, mc.sig.bits) : Term{};
+      // A known write into an all-known memory keeps it all-known: the plane
+      // is materialized only once some unknown can actually be stored.
+      if (mc.x_track && x_next.isNull() && (!data_x.isNull() || !enable_x.isNull() || !av.x_mask.isNull())) {
+        x_next = tm_.mkConstArray(a_next.getSort(), bv_const(tm_, mc.sig.bits, 0));
+      }
+      if (mc.x_track && !x_next.isNull()) {
+        auto zero  = bv_const(tm_, mc.sig.bits, 0);
+        auto old_x = tm_.mkTerm(Kind::SELECT, {x_next, addr});
+        if (data_x.isNull()) {
+          data_x = zero;
+        }
+        auto next_x = tm_.mkTerm(Kind::BITVECTOR_OR,
+                                 {tm_.mkTerm(Kind::BITVECTOR_AND, {tm_.mkTerm(Kind::BITVECTOR_NOT, {wmask}), old_x}),
+                                  tm_.mkTerm(Kind::BITVECTOR_AND, {wmask, data_x})});
+        if (!enable_x.isNull()) {
+          if (!mem_commit.isNull()) {
+            enable_x = tm_.mkTerm(Kind::ITE, {mem_commit, enable_x, zero});
+          }
+          auto either = tm_.mkTerm(Kind::BITVECTOR_OR,
+                                   {tm_.mkTerm(Kind::BITVECTOR_OR, {old_x, data_x}), tm_.mkTerm(Kind::BITVECTOR_XOR, {old, din})});
+          next_x      = tm_.mkTerm(Kind::BITVECTOR_OR, {next_x, tm_.mkTerm(Kind::BITVECTOR_AND, {enable_x, either})});
+        }
+        x_next = tm_.mkTerm(Kind::STORE, {x_next, addr, next_x});
+        if (!av.x_mask.isNull()) {
+          // An unknown write address may touch any entry. Conservatively cloud
+          // the array on a possible write; later known writes restore knowledge.
+          auto possible  = enable_x.isNull() ? wmask : tm_.mkTerm(Kind::BITVECTOR_OR, {wmask, enable_x});
+          auto uncertain = tm_.mkTerm(
+              Kind::AND,
+              {tm_.mkTerm(Kind::DISTINCT, {av.x_mask, bv_const(tm_, av.width, 0)}), tm_.mkTerm(Kind::DISTINCT, {possible, zero})});
+          auto unknown_array = tm_.mkConstArray(x_next.getSort(), tm_.mkBitVector(mc.sig.bits, std::string(mc.sig.bits, '1'), 2));
+          x_next             = tm_.mkTerm(Kind::ITE, {uncertain, unknown_array, x_next});
+        }
+      }
       a_next        = tm_.mkTerm(Kind::STORE, {a_next, addr, new_word});
       // Snapshot after each write port so a read port can source the array as
       // of its own program position: `fwd` row r is a PREFIX of the write ports
       // under ordering="program" (and all/none under "fwd"/"none"), so
       // a_after[m] is exactly what read port r with m forwarded writes sees.
       a_after.emplace_back(a_next);
+      x_after.emplace_back(x_next);
       // The bit-vector inputs this port contributes to the chain: equal inputs on
       // both sides => equal chains, provable without the array theory.
       out.mem_wr[mc.key].push_back(Encoded::Mem_wr_port{addr, wmask, din});
@@ -4566,6 +4706,19 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           init_bus = ok ? fit_unsigned(iv, mc.sig.size * mc.sig.bits) : bv_const(tm_, mc.sig.size * mc.sig.bits, 0);
         } else {
           init_bus = bv_const(tm_, mc.sig.size * mc.sig.bits, 0);
+        }
+        if (mc.x_track) {
+          Term init_xm;
+          if (!mc.init.is_invalid()) {
+            auto iv = driver_val(mc.init, ok);
+            init_xm = fit_x_mask_to(tm_, iv, mc.sig.size * mc.sig.bits);
+          }
+          // Resetting to fully known contents needs a plane only if one exists.
+          if (!x_next.isNull() || !init_xm.isNull()) {
+            auto known  = tm_.mkConstArray(a_next.getSort(), bv_const(tm_, mc.sig.bits, 0));
+            auto init_x = init_xm.isNull() ? known : array_from_bus(known, init_xm);
+            x_next      = tm_.mkTerm(Kind::ITE, {rst_hot, init_x, x_next.isNull() ? known : x_next});
+          }
         }
         Term a_init = array_from_bus(mc.a_cur, init_bus);
         a_next      = tm_.mkTerm(Kind::ITE, {rst_hot, a_init, a_next});
@@ -4594,9 +4747,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // as a snapshot, so it keeps the historical coarse behavior (any bit set =>
     // read the fully-written array).
     auto         fwd_bit   = [&](size_t r, size_t w) { return mc.fwd && mc.fwd->bit_test(static_cast<int>(r * n_wr + w)); };
-    auto         rd_source = [&](size_t r) -> const Term& {
+    auto         rd_source = [&](size_t r, bool x = false) -> const Term& {
+      const auto& cur   = x ? mc.x_cur : mc.a_cur;
+      const auto& next  = x ? x_next : a_next;
+      const auto& after = x ? x_after : a_after;
       if (mc.is_comb || mc.is_whole || n_wr == 0) {
-        return mc.is_comb ? a_next : ((mc.fwd && !mc.fwd->is_known_false()) ? a_next : mc.a_cur);
+        return mc.is_comb ? next : ((mc.fwd && !mc.fwd->is_known_false()) ? next : cur);
       }
       size_t forwarded_writes = 0;
       while (forwarded_writes < n_wr && fwd_bit(r, forwarded_writes)) {
@@ -4610,13 +4766,13 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // false PROVEN. Over-forwarding (a_next) is the safe direction.
       for (size_t w = forwarded_writes; w < n_wr; ++w) {
         if (fwd_bit(r, w)) {
-          return a_next;  // historical coarse behavior
+          return next;  // historical coarse behavior
         }
       }
       if (forwarded_writes == 0) {
-        return mc.a_cur;
+        return cur;
       }
-      return a_after[applied_upto[forwarded_writes]];
+      return after[applied_upto[forwarded_writes]];
     };
     for (size_t k = 0; k < mc.rd_fresh.size(); ++k) {
       const Term& rd_src = rd_source(k);
@@ -4636,6 +4792,17 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       if (k < mc.rd_xmask.size() && !mc.rd_xmask[k].isNull()) {
         Term zero    = bv_const(tm_, mc.sig.bits, 0);
         Term plane   = zero;
+        // A null knowledge array (none yet, or a snapshot taken before the
+        // first unknown write this cycle) is the all-known plane.
+        if (mc.x_track) {
+          if (const Term& x_src = rd_source(k, true); !x_src.isNull()) {
+            plane = tm_.mkTerm(Kind::SELECT, {x_src, addr});
+          }
+        }
+        if (!av.x_mask.isNull()) {
+          auto unknown = tm_.mkTerm(Kind::DISTINCT, {av.x_mask, bv_const(tm_, av.width, 0)});
+          plane        = tm_.mkTerm(Kind::ITE, {unknown, tm_.mkTerm(Kind::BITVECTOR_NOT, {zero}), plane});
+        }
         Term claimed = zero;  // bits a HIGHER-priority write column already resolved
         // Walk the write columns HIGH -> LOW, the priority gen_mem_wrapper's ITE
         // chain gives the emitted RTL: the first rung that HITS decides the bit,
@@ -4726,13 +4893,17 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // contents are a pure function of this cycle's update, compared as outputs).
     if (!mc.is_comb) {
       out.next_mem[mc.key] = a_next;
+      if (!x_next.isNull()) {
+        out.next_mem_x[mc.key] = x_next;
+      }
     }
   }
 
   // ---- Outputs: value driving each output sink, fit to the declared width.
   // Read through the HIER resolver, not the class edges: an output driven
   // DIRECTLY by a descended sub-instance's output pin (the pass.partition /
-  // pass.abc wrapper shape: `out <- u_top__c0.f_o` with no comb node between)
+  // pass.abc wrapper shape: `out <- __flat___top__c0.f_o`, an anonymous region
+  // wrapper's output pin with no comb node between)
   // has no pin2val entry for the boundary pin itself — the encoded producer
   // lives inside the child body and is keyed by ITS hier frame. A hier-context
   // handle's get_driver_pins() resolves the output sink to the real leaf drivers

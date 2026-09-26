@@ -2,6 +2,7 @@
 
 #include "cprop.hpp"
 
+#include <bit>
 #include <chrono>
 #include <functional>
 #include <tuple>
@@ -639,7 +640,40 @@ int64_t mux_eval(Test_pin pin, Test_values& values) {
   };
   int64_t result = 0;
   if (op == Ntype_op::Mux) {
-    result = at(at(0) != 0 ? 2 : 1);
+    const auto count  = node.inp_pins_snapshot().size() - 1;
+    const auto select = at(0);
+    const auto arm    = count == 2                                             ? size_t(select != 0)
+                        : select < 0 || static_cast<uint64_t>(select) >= count ? count - 1
+                                                                               : size_t(select);
+    result            = at(arm + 1);
+  } else if (op == Ntype_op::Not) {
+    result = ~at(0);
+  } else if (op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::LT || op == Ntype_op::GT) {
+    int64_t a = op == Ntype_op::Mult ? 1 : 0, b = 0;
+    for (auto sink : node.inp_sorted_pins()) {
+      const auto value = mux_eval(sink.get_driver_pin(), values);
+      if (Ntype::sink_bank(op, sink.get_port_id()) == 1) {
+        b += value;
+      } else if (op == Ntype_op::Mult) {
+        a *= value;
+      } else {
+        a += value;
+      }
+    }
+    result = op == Ntype_op::LT ? a < b : op == Ntype_op::GT ? a > b : a - b;
+  } else if (op == Ntype_op::Div || op == Ntype_op::Rem) {
+    const auto a = at(0), b = at(1);
+    EXPECT_NE(b, 0);
+    result = b == 0 ? 0 : op == Ntype_op::Div ? a / b : a % b;
+  } else if (op == Ntype_op::Sext) {
+    const auto bit   = at(1) - 1;
+    const auto mask  = (int64_t{1} << bit) - 1;
+    const auto value = at(0);
+    result           = (value & (int64_t{1} << bit)) ? (value | ~mask) : (value & mask);
+  } else if (op == Ntype_op::Rxor || op == Ntype_op::Popcount) {
+    const auto value = static_cast<uint64_t>(at(0)) & ((uint64_t{1} << at(1)) - 1);
+    const auto count = std::popcount(value);
+    result           = op == Ntype_op::Rxor ? count % 2 : count;
   } else if (op == Ntype_op::Hotmux) {
     auto inputs = gu::hotmux_inputs(node);
     bool found  = false;
@@ -820,8 +854,10 @@ TEST(CpropMuxSharing, PriorityTreePreservesEveryControlCombination) {
     }
     root.connect_sink(f.graph->get_output_pin("out"));
     Cprop{}.do_trans(f.graph);
-    EXPECT_EQ(f.count(Ntype_op::Mux), 0);
-    EXPECT_EQ(f.count(Ntype_op::Hotmux), 1);
+    // The innermost identical-arm mux folds. Rebuilding the remaining chain
+    // as a select tree is equal-cost, so A3 leaves it alone.
+    EXPECT_EQ(f.count(Ntype_op::Mux), 5);
+    EXPECT_EQ(f.count(Ntype_op::Hotmux), 0);
     EXPECT_EQ(gu::bits_of(f.output()), 32);
     EXPECT_EQ(gu::is_unsign(f.output()), !sign);
     for (uint64_t mask = 0; mask < 64; ++mask) {
@@ -839,7 +875,7 @@ TEST(CpropMuxSharing, PriorityTreePreservesEveryControlCombination) {
       }
     }
     Cprop{}.do_trans(f.graph);
-    EXPECT_EQ(f.count(Ntype_op::Hotmux), 1);
+    EXPECT_EQ(f.count(Ntype_op::Hotmux), 0);
   }
 }
 
@@ -976,8 +1012,8 @@ TEST(CpropMuxSharing, DeepPriorityChainHasLinearGeneratedSize) {
     ++nodes;
     edges += n.inp_pins_snapshot().size();
   }
-  EXPECT_EQ(f.count(Ntype_op::Mux), 0);
-  EXPECT_EQ(f.count(Ntype_op::Hotmux), 1);
+  EXPECT_EQ(f.count(Ntype_op::Mux), depth - 1);
+  EXPECT_EQ(f.count(Ntype_op::Hotmux), 0);
   EXPECT_LT(nodes, 5 * depth);
   EXPECT_LT(edges, 12 * depth);
 }
@@ -1266,16 +1302,102 @@ TEST(CpropMuxSharing, ZeroOneSelectionsStayMuxes) {
 TEST(CpropMuxSharing, WidthHintsDoNotGateSharingButColorsDo) {
   for (bool colored : {false, true}) {
     Mux_graph f(colored ? "colored_mux" : "narrow_mux", 6, colored ? 32 : 1);
-    auto      root = f.b;
-    for (int i = 5; i >= 0; --i) {
-      root = f.mux(f.controls[i], root, i % 2 ? f.b : f.a);
-      if (colored) {
-        gu::set_color(root.get_master_node(), 7);
-      }
+    auto      left  = f.mux(f.controls[1], f.a, f.b);
+    auto      right = f.mux(f.controls[2], f.a, f.b);
+    auto      root  = f.mux(f.controls[0], left, right);
+    if (colored) {
+      gu::set_color(root.get_master_node(), 7);
     }
     root.connect_sink(f.graph->get_output_pin("out"));
     Cprop{}.do_trans(f.graph);
-    EXPECT_EQ(f.count(Ntype_op::Hotmux), colored ? 0 : 1);
+    EXPECT_EQ(f.count(Ntype_op::Mux), colored ? 3 : 2);
+    EXPECT_EQ(f.count(Ntype_op::Hotmux), 0);
+  }
+}
+
+TEST(CpropMuxSharing, TwoGroupSelectTreePreservesWideSignedControlsAndBooleanData) {
+  for (bool boolean_data : {false, true}) {
+    Mux_graph f("two_group_" + std::to_string(boolean_data), 3, 8, true, true);
+    auto      a = f.a, b = f.b;
+    if (boolean_data) {
+      a = gu::create_get_mask(*f.graph, a, 0, 1).create_driver_pin(0);
+      b = gu::create_get_mask(*f.graph, b, 0, 1).create_driver_pin(0);
+    }
+    f.mux(f.controls[0], f.mux(f.controls[1], a, b), f.mux(f.controls[2], a, b)).connect_sink(f.graph->get_output_pin("out"));
+    Cprop{}.do_trans(f.graph);
+    EXPECT_EQ(f.count(Ntype_op::Mux), 2);
+    EXPECT_EQ(f.count(Ntype_op::Hotmux), 0);
+    EXPECT_EQ(f.count(Ntype_op::EQ), 0);
+    for (int s : {-2, 0, 1, 4}) {
+      for (int c : {-2, 0, 1, 4}) {
+        for (int d : {-2, 0, 1, 4}) {
+          auto values                                   = f.inputs(0, -7, 26);
+          values[f.controls[0].get_class_index().value] = s;
+          values[f.controls[1].get_class_index().value] = c;
+          values[f.controls[2].get_class_index().value] = d;
+          const auto expected                           = (s ? d : c) ? 26 : -7;
+          EXPECT_EQ(mux_eval(f.output(), values), boolean_data ? expected & 1 : expected);
+        }
+      }
+    }
+  }
+}
+
+TEST(CpropMuxSharing, TwoGroupEqualCostRejectionLeavesNoResidue) {
+  Mux_graph f("two_group_no_gain", 3);
+  auto      left  = f.mux(f.controls[1], f.a, f.b);
+  auto      right = f.mux(f.controls[2], f.b, f.a);
+  auto      root  = f.mux(f.controls[0], left, right);
+  root.connect_sink(f.graph->get_output_pin("out"));
+  // Opposite leaf order costs an inversion, cancelling the saved mux.
+  livehd::share_mux_regions(*f.graph, false);
+  EXPECT_EQ(f.count(Ntype_op::Mux), 3);
+  EXPECT_EQ(f.count(Ntype_op::EQ), 0);
+  EXPECT_EQ(f.count(Ntype_op::Hotmux), 0);
+  EXPECT_EQ(root.get_master_node().get_sink_pin(1).get_driver_pin(), left);
+  EXPECT_EQ(root.get_master_node().get_sink_pin(2).get_driver_pin(), right);
+}
+
+TEST(CpropMuxSharing, NamedInteriorRemainsAddressable) {
+  Mux_graph f("two_group_named", 3);
+  auto left = f.mux(f.controls[1], f.a, f.b);
+  auto right = f.mux(f.controls[2], f.a, f.b);
+  gu::set_pin_name(left, "visible_selection");
+  f.mux(f.controls[0], left, right).connect_sink(f.graph->get_output_pin("out"));
+  livehd::share_mux_regions(*f.graph, false);
+  EXPECT_EQ(f.count(Ntype_op::Mux), 3);
+  EXPECT_EQ(gu::pin_name_of(left), "visible_selection");
+  EXPECT_EQ(gu::type_op_of(left.get_master_node()), Ntype_op::Mux);
+}
+
+TEST(CpropMuxSharing, TwoGroupHotmuxPreservesDefaultAndUnprovenObligation) {
+  for (bool exclusive : {false, true}) {
+    for (bool default_is_b : {false, true}) {
+      Mux_graph f("two_group_hot_" + std::to_string(exclusive) + std::to_string(default_is_b), 3);
+      auto      root = f.node(Ntype_op::Hotmux);
+      root.create_sink_pin(0).connect_driver(exclusive ? f.eq(f.controls[0], 0) : f.controls[0]);
+      root.create_sink_pin(1).connect_driver(f.mux(f.controls[1], f.a, f.b));
+      root.create_sink_pin(2).connect_driver(exclusive ? f.eq(f.controls[0], 1) : f.controls[1]);
+      root.create_sink_pin(3).connect_driver(f.mux(f.controls[2], f.a, f.b));
+      root.create_sink_pin(4).connect_driver(default_is_b ? f.b : f.a);
+      root.create_driver_pin(0).connect_sink(f.graph->get_output_pin("out"));
+      livehd::share_mux_regions(*f.graph, false);
+      EXPECT_EQ(f.count(Ntype_op::Mux), exclusive ? 1 : 2);
+      EXPECT_EQ(f.count(Ntype_op::Hotmux), 1);
+      if (!exclusive) {
+        EXPECT_EQ(gu::type_op_of(root), Ntype_op::Hotmux);
+        EXPECT_FALSE(gu::has_proven(root));
+        continue;
+      }
+      for (unsigned mask = 0; mask < 8; ++mask) {
+        for (int select : {0, 1, 2}) {
+          auto values                                   = f.inputs(mask, 37, 91);
+          values[f.controls[0].get_class_index().value] = select;
+          const bool choose_b = select == 0 ? bool(mask & 2) : select == 1 ? bool(mask & 4) : default_is_b;
+          EXPECT_EQ(mux_eval(f.output(), values), choose_b ? 91 : 37);
+        }
+      }
+    }
   }
 }
 }  // namespace
@@ -1363,9 +1485,11 @@ TEST(CpropMasks, StraddlingSliceOfLongWriteChainGathersItsLanes) {
   auto out = g->get_output_pin("q").get_driver_pin();
   ASSERT_FALSE(out.is_invalid());
   auto head = out.get_master_node();
-  // The four lane muxes vectorize too: {m299..m296} is one 4-bit Mux over
-  // a[3:0] / b[3:0] (300 % 8 == 4, so the lanes read bits 4..7).
-  ASSERT_EQ(gu::type_op_of(head), Ntype_op::Mux);
+  // The four lane muxes vectorize, then operator sharing factors their equal
+  // masks: Get_mask(Mux(s,a,b), [0,4)). Only one word mux and one read remain.
+  ASSERT_EQ(gu::type_op_of(head), Ntype_op::Get_mask);
+  EXPECT_EQ(gu::const_of(gu::get_driver_of_sink_name(head, "mask")).to_just_i64(), 15);
+  EXPECT_EQ(gu::type_op_of(gu::get_driver_of_sink_name(head, "a").get_master_node()), Ntype_op::Mux);
   EXPECT_EQ(gu::bits_of(out), 4);
   size_t muxes = 0;
   for (auto n : g->body().nodes()) {
@@ -1566,3 +1690,250 @@ TEST(CpropBool, SpecializedProducerInvalidatesItsCseEntry) {
     EXPECT_EQ(mux_eval(f.observed(), b), !bool(mask & 1) && bool(mask & 2));
   }
 }
+
+TEST(CpropBool, XorInversionRequiresStructuralBooleanValue) {
+  for (bool boolean : {false, true}) {
+    for (bool bitwise_not : {false, true}) {
+      Mux_graph f("inversion_domain_" + std::to_string(boolean) + std::to_string(bitwise_not), 1, 8, true, true);
+      auto      source = f.controls[0];
+      if (boolean) {
+        source = gu::create_get_mask(*f.graph, source, 0, 1).create_driver_pin(0);
+      } else {
+        gu::set_ubits(source, 1);  // A hint is not a bool01 proof.
+      }
+      auto inversion = f.node(bitwise_not ? Ntype_op::Not : Ntype_op::Xor);
+      gu::setup_sink_pid(inversion, 0).connect_driver(source);
+      if (!bitwise_not) {
+        gu::setup_sink_pid(inversion, 0).connect_driver(f.constant(1));
+      }
+      f.mux(inversion.create_driver_pin(0), f.a, f.b).connect_sink(f.graph->get_output_pin("out"));
+      Cprop{}.do_trans(f.graph);
+      if (boolean && !bitwise_not) {
+        EXPECT_EQ(f.count(Ntype_op::Xor), 0);
+      } else {
+        EXPECT_EQ(f.count(bitwise_not ? Ntype_op::Not : Ntype_op::Xor), 1);
+      }
+      for (int64_t input : {-2, -1, 0, 1, 2, 127, 128}) {
+        auto values                                   = f.inputs(0, -7, 26);
+        values[f.controls[0].get_class_index().value] = input;
+        const auto value                              = boolean ? input & 1 : input;
+        const auto select                             = bitwise_not ? ~value : value ^ 1;
+        EXPECT_EQ(mux_eval(f.output(), values), select ? 26 : -7);
+      }
+    }
+  }
+}
+
+namespace {
+TEST(CpropOpSharing, PositionalAndBankedOperatorsPreserveValues) {
+  for (auto op :
+       {Ntype_op::Sum,  Ntype_op::Mult, Ntype_op::And,      Ntype_op::Or,       Ntype_op::Xor,      Ntype_op::EQ,    Ntype_op::LT,
+        Ntype_op::GT,   Ntype_op::Ror,  Ntype_op::Not,      Ntype_op::SHL,      Ntype_op::SRA,      Ntype_op::Div,   Ntype_op::Rem,
+        Ntype_op::Sext, Ntype_op::Rxor, Ntype_op::Popcount, Ntype_op::Get_mask, Ntype_op::Set_mask, Ntype_op::Concat}) {
+    SCOPED_TRACE(std::string{Ntype::get_name(op)});
+    Mux_graph  f("opshare_" + std::string{Ntype::get_name(op)}, 2, 8, false, true);
+    const auto expr = [&](Test_pin value, bool second) {
+      auto n = f.node(op);
+      if (op == Ntype_op::Get_mask || op == Ntype_op::Set_mask) {
+        gu::connect_mask_operands(n, value, f.constant(15), op == Ntype_op::Set_mask ? f.controls[1] : Test_pin{});
+      } else if (op == Ntype_op::Concat) {
+        auto lane = gu::create_get_mask(*f.graph, value, 0, 8);
+        n.create_sink_pin(0).connect_driver(lane.create_driver_pin(0));
+        n.create_sink_pin(1).connect_driver(f.constant(8));
+        n.create_sink_pin(2).connect_driver(f.controls[1]);
+        n.create_sink_pin(3).connect_driver(f.constant(8));
+        gu::set_ubits(n.create_driver_pin(0), 16);
+      } else {
+        gu::setup_sink_pid(n, 0).connect_driver(value);
+        if (Ntype::sink_bank_count(op)) {
+          gu::setup_sink_pid(n, Ntype::sink_bank_count(op) == 2 && op != Ntype_op::Sum ? 1 : 0).connect_driver(f.controls[1]);
+        } else if (op != Ntype_op::Not) {
+          n.create_sink_pin(1).connect_driver(f.constant(op == Ntype_op::SHL || op == Ntype_op::SRA ? (second ? 2 : 1) : 3));
+        }
+      }
+      return n.create_driver_pin(0);
+    };
+    auto root = f.mux(f.controls[0], expr(f.a, false), expr(f.b, true));
+    root.connect_sink(f.graph->get_output_pin("out"));
+    std::vector<int64_t> expected;
+    for (unsigned mask = 0; mask < 4; ++mask) {
+      for (int a : {1, 7, 15, 31}) {
+        auto inputs = f.inputs(mask, a, 5, true, true);
+        expected.push_back(mux_eval(f.output(), inputs));
+      }
+    }
+    Cprop{}.do_trans(f.graph);
+    EXPECT_EQ(f.count(op), 1);
+    size_t i = 0;
+    for (unsigned mask = 0; mask < 4; ++mask) {
+      for (int a : {1, 7, 15, 31}) {
+        auto inputs = f.inputs(mask, a, 5, true, true);
+        EXPECT_EQ(mux_eval(f.output(), inputs), expected[i++]);
+      }
+    }
+  }
+}
+
+TEST(CpropOpSharing, MultisetsRetainDuplicatesAndBothBanks) {
+  Mux_graph  f("opshare_banks", 2);
+  const auto expr = [&](bool second) {
+    auto n = f.node(Ntype_op::Sum);
+    for (auto p : {second ? f.b : f.a, second ? f.b : f.a, f.controls[1]}) {
+      gu::setup_sink_pid(n, 0).connect_driver(p);
+    }
+    gu::setup_sink_pid(n, 1).connect_driver(second ? f.a : f.b);
+    gu::setup_sink_pid(n, 1).connect_driver(second ? f.clock : f.en);
+    return n.create_driver_pin(0);
+  };
+  f.mux(f.controls[0], expr(false), expr(true)).connect_sink(f.graph->get_output_pin("out"));
+  Cprop{}.do_trans(f.graph);
+  ASSERT_EQ(f.count(Ntype_op::Sum), 1);
+  for (unsigned mask = 0; mask < 4; ++mask) {
+    auto values = f.inputs(mask, 17, 5);
+    EXPECT_EQ(mux_eval(f.output(), values), (mask & 1 ? -7 : 28) + int64_t((mask >> 1) & 1));
+  }
+}
+
+TEST(CpropOpSharing, ConcatDoesNotCreateOverwideMixedSignLanes) {
+  Mux_graph f("opshare_concat_signed", 1, 8, true, true);
+  f.graph->get_io()->set_unsign("b", true);
+  gu::set_ubits(f.b, 8);
+  const auto concat = [&](Test_pin value) {
+    auto n = f.node(Ntype_op::Concat);
+    n.create_sink_pin(0).connect_driver(value);
+    n.create_sink_pin(1).connect_driver(f.constant(8));
+    n.create_sink_pin(2).connect_driver(f.controls[0]);
+    n.create_sink_pin(3).connect_driver(f.constant(8));
+    gu::set_ubits(n.create_driver_pin(0), 16);
+    return n.create_driver_pin(0);
+  };
+  f.mux(f.controls[0], concat(f.a), concat(f.b)).connect_sink(f.graph->get_output_pin("out"));
+  Cprop{}.do_trans(f.graph);
+  EXPECT_EQ(f.count(Ntype_op::Concat), 2);
+  Bitwidth{10}.do_trans(f.graph);
+  for (unsigned select : {0, 1}) {
+    auto values = f.inputs(select, -1, 255);
+    EXPECT_EQ(mux_eval(f.output(), values), (255 << 8) + select);
+  }
+}
+
+TEST(CpropOpSharing, IndexedSelectionPreservesAllInRangeOperandSlots) {
+  Mux_graph f("opshare_index", 1, 8, false, true);
+  auto      mux           = f.node(Ntype_op::Mux);
+  auto      selected_bits = gu::create_get_mask(*f.graph, f.controls[0], 0, 2);
+  mux.create_sink_pin(0).connect_driver(selected_bits.create_driver_pin(0));
+  for (int i = 0; i < 4; ++i) {
+    auto n = f.node(Ntype_op::Sum);
+    gu::setup_sink_pid(n, 0).connect_driver(f.a);
+    gu::setup_sink_pid(n, 0).connect_driver(f.constant(10 + i));
+    mux.create_sink_pin(i + 1).connect_driver(n.create_driver_pin(0));
+  }
+  mux.create_driver_pin(0).connect_sink(f.graph->get_output_pin("out"));
+  Cprop{}.do_trans(f.graph);
+  EXPECT_EQ(f.count(Ntype_op::Sum), 1);
+  for (int select : {-1, 0, 1, 2, 3, 4, 128}) {
+    auto values                                   = f.inputs(0, 7, 0);
+    values[f.controls[0].get_class_index().value] = select;
+    EXPECT_EQ(mux_eval(f.output(), values), 17 + (select & 3));
+  }
+}
+
+TEST(CpropOpSharing, SharedNamedAndColoredArmsAreNotRetired) {
+  for (int mode = 0; mode < 3; ++mode) {
+    Mux_graph f("opshare_private_" + std::to_string(mode), 1);
+    auto      a = f.node(Ntype_op::Sum), b = f.node(Ntype_op::Sum);
+    gu::setup_sink_pid(a, 0).connect_driver(f.a);
+    gu::setup_sink_pid(a, 0).connect_driver(f.constant(3));
+    gu::setup_sink_pid(b, 0).connect_driver(f.b);
+    gu::setup_sink_pid(b, 0).connect_driver(f.constant(5));
+    const auto ap = a.create_driver_pin(0);
+    if (mode == 0) {
+      ap.connect_sink(f.graph->get_output_pin("observe"));
+    } else if (mode == 1) {
+      gu::set_pin_name(ap, "visible_arm");
+    } else {
+      gu::set_color(a, 7);
+    }
+    f.mux(f.controls[0], ap, b.create_driver_pin(0)).connect_sink(f.graph->get_output_pin("out"));
+    Cprop{}.do_trans(f.graph);
+    EXPECT_EQ(f.count(Ntype_op::Sum), 2);
+    EXPECT_EQ(gu::type_op_of(f.output().get_master_node()), Ntype_op::Mux);
+  }
+}
+
+TEST(CpropOpSharing, OutputNarrowingDoesNotNarrowSelectedOperands) {
+  for (int hint : {0, 1, 8, 32}) {
+    Mux_graph f("opshare_width_" + std::to_string(hint), 1, 8, true, true);
+    f.graph->get_io()->set_bits("out", 3);
+    f.graph->get_io()->set_unsign("b", true);
+    gu::set_ubits(f.b, 8);
+    auto a = f.node(Ntype_op::SRA), b = f.node(Ntype_op::SRA);
+    a.create_sink_pin(0).connect_driver(f.a);
+    b.create_sink_pin(0).connect_driver(f.b);
+    for (auto n : {a, b}) {
+      n.create_sink_pin(1).connect_driver(f.constant(4));
+      gu::set_sbits(n.create_driver_pin(0), hint);
+    }
+    auto root = f.mux(f.controls[0], a.create_driver_pin(0), b.create_driver_pin(0));
+    gu::set_sbits(root, hint);
+    root.connect_sink(f.graph->get_output_pin("out"));
+    Cprop{}.do_trans(f.graph);
+    ASSERT_EQ(f.count(Ntype_op::SRA), 1);
+    const auto shared  = f.output().get_master_node();
+    const auto operand = gu::get_driver_of_sink_name(shared, "a");
+    ASSERT_EQ(gu::type_op_of(operand.get_master_node()), Ntype_op::Mux);
+    EXPECT_EQ(gu::bits_of(operand), 0) << "fresh operand mux cannot inherit the narrow result hint";
+    Bitwidth{10}.do_trans(f.graph);
+    EXPECT_EQ(gu::bits_of(operand), 9) << "signed u8/s8 union needs an extra sign bit";
+    EXPECT_FALSE(gu::is_unsign(operand));
+    EXPECT_EQ(gu::bits_of(f.output()), 3) << "only the final observation may be capped";
+  }
+}
+}  // namespace
+
+namespace {
+TEST(CpropOpSharing, IndexRangeMustBeStructural) {
+  Mux_graph f("opshare_index_range", 1, 8, false, true);
+  gu::set_ubits(f.controls[0], 2);  // a hint is not a selector-range proof
+  auto mux = f.node(Ntype_op::Mux);
+  mux.create_sink_pin(0).connect_driver(f.controls[0]);
+  for (int i = 0; i < 4; ++i) {
+    auto n = f.node(Ntype_op::Sum);
+    gu::setup_sink_pid(n, 0).connect_driver(f.a);
+    gu::setup_sink_pid(n, 0).connect_driver(f.constant(i + 5));
+    mux.create_sink_pin(i + 1).connect_driver(n.create_driver_pin(0));
+  }
+  mux.create_driver_pin(0).connect_sink(f.graph->get_output_pin("out"));
+  Cprop{}.do_trans(f.graph);
+  EXPECT_EQ(f.count(Ntype_op::Sum), 4);
+}
+
+TEST(CpropOpSharing, DeepCascadeHasLinearGeneratedSize) {
+  constexpr int depth = 2048;
+  Mux_graph     f("opshare_cascade", 1, 16, true);
+  auto          a = f.a, b = f.b;
+  for (int i = 0; i < depth; ++i) {
+    const auto wrap = [&](Test_pin value) {
+      auto n = f.node(i % 2 ? Ntype_op::Not : Ntype_op::Sum);
+      gu::setup_sink_pid(n, 0).connect_driver(value);
+      if (i % 2 == 0) {
+        gu::setup_sink_pid(n, 0).connect_driver(f.constant(3));
+      }
+      return n.create_driver_pin(0);
+    };
+    a = wrap(a);
+    b = wrap(b);
+  }
+  f.mux(f.controls[0], a, b).connect_sink(f.graph->get_output_pin("out"));
+  Cprop{}.do_trans(f.graph);
+  EXPECT_EQ(f.count(Ntype_op::Sum) + f.count(Ntype_op::Not), depth);
+  EXPECT_EQ(f.count(Ntype_op::Mux), 1);
+  size_t edges = 0;
+  for (auto n : f.graph->body().nodes()) {
+    for ([[maybe_unused]] auto p : n.inp_sorted_pins()) {
+      ++edges;
+    }
+  }
+  EXPECT_LE(edges, 2 * depth + 3);
+}
+}  // namespace

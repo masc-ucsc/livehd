@@ -450,27 +450,17 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
         if (spliced != 0) {
           break;
         }
-        // pass.color names an absorbed region `<host>__c<N>` and inserts an
-        // UNNAMED Sub at the host boundary.  Its fallback instance name
-        // (`sub_<nid>`) is not source hierarchy and is unstable across the two
-        // graphs; retaining it turns every otherwise preserved register name
-        // into `sub_20.foo` and defeats flop correspondence after collapse.
-        // Drop the prefix only for that reserved generated shape.  A real
-        // named instance, and any ordinary helper definition, keeps its full
-        // hierarchy so distinct occurrences cannot alias.
-        bool synthetic_partition = false;
-        if (livehd::graph_util::node_name_of(inst).empty()) {
-          auto        sio      = inst.get_subnode_io();
-          std::string host_ent = str_tools::canonical_entity_name(host->get_name());
-          std::string def_ent  = sio == nullptr ? std::string{} : str_tools::canonical_entity_name(sio->get_name());
-          std::string marker   = host_ent + "__c";
-          if (def_ent.starts_with(marker) && def_ent.size() > marker.size()) {
-            synthetic_partition = std::all_of(def_ent.begin() + static_cast<std::ptrdiff_t>(marker.size()),
-                                              def_ent.end(),
-                                              [](unsigned char c) { return std::isdigit(c); });
-          }
-        }
-        spliced += livehd::graph_util::inline_sub_instance(host, inst, "pass.lec", nullptr, false, !synthetic_partition) ? 1 : 0;
+        // Inlining prefixes spliced names with the instance's LOGICAL prefix
+        // (graph_util::logical_instance_prefix). An unnamed instance -- such as
+        // pass.color's `<host>__c<N>` region wrapper or any other generated
+        // wrapper -- and a `__flat___*` instance are hierarchy-transparent: they
+        // add no component, matching HHDS get_hier_name, so every preserved
+        // register name keeps its flop correspondence after collapse. A named
+        // instance keeps its `inst.` component. Two transparent occurrences of
+        // one stateful def therefore share logical state names, and the encoder
+        // refuses them as ambiguous rather than merging them (graph/README.md,
+        // "Transparent hierarchy wrappers").
+        spliced += livehd::graph_util::inline_sub_instance(host, inst, "pass.lec") ? 1 : 0;
       }
       if (spliced == 0) {
         break;  // nothing inlinable left (a real blackbox): stop rather than spin

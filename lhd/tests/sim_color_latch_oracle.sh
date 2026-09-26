@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
-# Independent event-semantics anchor for todo/livehd/3d-sim-color subtask B.
-# A transparent-high latch fed by a posedge flop must see the flop's NBA update
-# while the latch remains open. The retired module scheduler samples pre-commit
-# Q in this shape; the occurrence-wide schedule deliberately does not preserve
-# that stale behavior.
+# todo/livehd/3d-sim-color subtask B schedule gate. A transparent-high latch
+# fed by a posedge flop must see the flop's NBA update while the latch remains
+# open. The retired module scheduler samples pre-commit Q in this shape; the
+# occurrence-wide schedule deliberately does not preserve that stale behavior.
+#
+# Default run: the shape must select the color-direct schedule (generated-header
+# check). The post-rise VALUE is asserted by
+# //inou/prp:prp-sim-flop_feeds_transparent_high_latch. With LHD_EXTERNAL_SIM=1
+# (see AGENTS.md) a hand-written always_ff/always_latch Icarus model is the
+# independent event-semantics anchor for that ruling, with a load-bearing
+# pre-commit negative control.
 
 set -euo pipefail
 
@@ -12,18 +18,20 @@ SIM_SRC="${SIM_SRC:-inou/prp/tests/sim/flop_feeds_transparent_high_latch.prp}"
 oracle_tmp="$(mktemp -d "${TMPDIR:-/tmp}/lhd-sim-color-latch.XXXXXX")"
 trap 'rm -rf "$oracle_tmp"' EXIT
 
-# The product regression must select and execute the replacement path; a green
-# assertion suite on the retired module scheduler is not evidence for this TODO.
+# The product regression must select the replacement path; a green assertion
+# suite on the retired module scheduler is not evidence for this TODO.
 "$LHD" sim "$SIM_SRC" --setup-only --workdir "$oracle_tmp/setup" -q >/dev/null
 color_header="$(ls "$oracle_tmp"/setup/sim/*flop_high_latch.hpp | head -1)"
 grep -q 'color-direct eligible=true' "$color_header" \
   || { echo "FAIL: flop->transparent-high latch did not select the color-direct schedule"; exit 1; }
-"$LHD" sim "$SIM_SRC" --workdir "$oracle_tmp/run" -q >/dev/null
 
-if ! command -v iverilog >/dev/null 2>&1 || ! command -v vvp >/dev/null 2>&1; then
-  echo "PASS: color-direct latch regression (independent iverilog/vvp oracle skipped: tools not found)"
+if [ -z "${LHD_EXTERNAL_SIM:-}" ]; then
+  echo "note: external-simulator leg skipped (set LHD_EXTERNAL_SIM=1)"
+  echo "PASS: flop->transparent-high latch selects the color-direct schedule"
   exit 0
 fi
+command -v iverilog >/dev/null 2>&1 && command -v vvp >/dev/null 2>&1 \
+  || { echo "FAIL: LHD_EXTERNAL_SIM is set but iverilog/vvp are not on PATH"; exit 1; }
 
 cat > "$oracle_tmp/oracle.sv" <<'EOF'
 `timescale 1ns/1ps
@@ -78,4 +86,4 @@ if ! grep -q "SIM_COLOR_LATCH_EVENT_OK" <<<"$oracle_out"; then
   echo "$oracle_out"
   exit 1
 fi
-echo "PASS: color-direct transparent-high latch reads the flop's post-rise value; Icarus pre-commit control differs"
+echo "PASS: flop->transparent-high latch selects the color-direct schedule; Icarus confirms the post-rise ruling and the pre-commit control differs"

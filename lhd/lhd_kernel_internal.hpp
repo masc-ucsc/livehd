@@ -442,6 +442,11 @@ bool              lnastfmt_enabled(const Options& opts);
 bool              verify_frozen_enabled(const Options& opts);
 bool              compile_unroll_requested(const Options& opts);  // compile.unroll (default false)
 std::optional<bool> satopt_setting(const Options& opts);  // the explicit pass.satopt, if any
+// Options for materializing a --lib model library (lg: -> cgen Verilog): no
+// --lib recursion, no top selection (a cell library holds many unrelated
+// tops), and satopt pinned off -- an explicit pass.satopt=true targets the
+// elaborated design, never the model library.
+Options           library_model_opts(const Options& opts);
 // satopt in the compile graph pipeline: explicit setting, else on for synth/lec
 // compiling a Pyrope/Verilog source (`from_source`).
 bool              satopt_during_compile(const Options& opts, bool from_source);

@@ -17,6 +17,11 @@
 - **Independent tests**: LiveHD scripts and BUILD rules must not access sibling
   benchmark repositories. Test inputs must be provided by this repository or
   declared build dependencies.
+- **External simulators**: the default suite must not need iverilog, vvp,
+  verilator or ninja. Optional independent event-simulator legs are skipped
+  unless `LHD_EXTERNAL_SIM` is set:
+  `bazel test --test_env=LHD_EXTERNAL_SIM=1 --test_env=PATH=<dir-with-tools>:$PATH <target>`.
+  A requested leg whose tool is missing FAILS rather than skipping.
 - **lhd CLI**: `./bazel-bin/lhd/lhd` — the only driver, for all flows
   (`lhd help`, `lhd describe <cmd>`); `lhd pyrope lsp` serves the Pyrope LSP
   and `lhd pyrope fmt` formats Pyrope source. The old `lgshell` REPL was

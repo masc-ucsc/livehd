@@ -98,6 +98,20 @@ int wbits_of(const hhds::Pin_class& pin) {
 
 const char* op_name(Ntype_op op) { return Ntype::get_name(op).data(); }
 
+// Is a state element's `clock_pin` driver ONE BIT of a wider clock vector
+// (`posedge g[1]` over `wire [2:0] g = {3{clk}} & en`)? The scalar ICG leaf
+// list of such a cone names the whole enable BUS, so testing those leaves
+// commits the flop whenever ANY bit is set. Only a projection of the selected
+// bit is a correct commit guard; when none can be built the flop must be
+// refused, never folded through the leaves.
+bool is_vector_clock_slice(const hhds::Pin_class& clock_driver) {
+  if (clock_driver.is_invalid() || clock_driver.is_const() || type_op_of(clock_driver.get_master_node()) != Ntype_op::Get_mask) {
+    return false;
+  }
+  const auto inputs = livehd::graph_util::inp_sink_drivers(clock_driver.get_master_node());
+  return !inputs.empty() && wbits_of(inputs.front().driver) > 1;
+}
+
 // ---- Dead-temporary sweep over ONE finished method body ----
 //
 // Binding is demand-driven and cone-based, so a temporary can be emitted for a
@@ -2321,22 +2335,50 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
           return absl::StrCat("Slop<", tw, ">::rand_op(", source, ", ", bits, ")");
         }
       }
-      int cw = std::max({wbits_of(e[0].get_driver_pin()), wbits_of(e[1].get_driver_pin()), 1});
-      // An ORDERED compare (LT/GT) is sign-aware: a signed operand read at its OWN
-      // width is not sign-extended, so its stored value stays a positive magnitude
-      // (0xF8 == 248, not -8) and the compare goes wrong. Give one extra bit of
-      // headroom when EITHER side is signed so `operand()`'s signed read actually
-      // sign-extends. EQ is a bit-pattern compare -- no headroom (would break the
-      // signed-vs-unsigned same-bits case).
-      if (op != Ntype_op::EQ && (!is_unsign(e[0].get_driver_pin()) || !is_unsign(e[1].get_driver_pin()))) {
-        cw += 1;
-      }
       const char* m         = (op == Ntype_op::LT) ? "lt_op" : (op == Ntype_op::GT) ? "gt_op" : "eq_op";
+      const char* predicate = (op == Ntype_op::LT) ? "lt_bool" : (op == Ntype_op::GT) ? "gt_bool" : "eq_bool";
+      if (e.size() > 2) {
+        // EQ compares every operand with the first. LT/GT require every
+        // cross-bank pair to satisfy the ordering; later operands cannot be
+        // discarded merely because the result is a single bit.
+        std::string result;
+        const auto  append = [&](const hhds::Pin_class& a, const hhds::Pin_class& b) {
+          // The predicate overload chooses the full operand carrier width;
+          // Slop<tw>::eq_op alone compares only tw's words for wide operands.
+          auto comparison = absl::StrCat("Slop<",
+                                         tw,
+                                         ">::create_integer(Slop<1>::",
+                                         predicate,
+                                         "(",
+                                         operation_operand(a),
+                                         ", ",
+                                         operation_operand(b),
+                                         "))");
+          result          = result.empty() ? comparison : absl::StrCat("Slop<", tw, ">::and_op(", result, ", ", comparison, ")");
+        };
+        if (op == Ntype_op::EQ) {
+          for (size_t i = 1; i < e.size(); ++i) {
+            append(e[0].get_driver_pin(), e[i].get_driver_pin());
+          }
+        } else {
+          for (auto a : e) {
+            if (Ntype::sink_bank(op, a.get_port_id()) != 0) {
+              continue;
+            }
+            for (auto b : e) {
+              if (Ntype::sink_bank(op, b.get_port_id()) == 1) {
+                append(a.get_driver_pin(), b.get_driver_pin());
+              }
+            }
+          }
+        }
+        return result.empty() ? absl::StrCat("Slop<", tw, ">::create_integer(0)") : result;
+      }
       // `!x` lowers to EQ(x, 0) (upass_tolg's lower_log_not), and so does a
       // written `x == 0`. Both are lnot_op, which asks the question without
       // materializing a FULL-WIDTH zero to compare against -- on a 512-bit
       // operand that constant was the whole cost of the cell.
-      int         lnot_side = -1;
+      int lnot_side = -1;
       if (op == Ntype_op::EQ) {
         for (int i = 0; i < 2; ++i) {
           if (e[i].get_driver_pin().is_const() && const_of(e[i].get_driver_pin()).is_known_zero()) {
@@ -2350,13 +2392,13 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
       // compares signed) and materializes a 0/1 MAGNITUDE at the node width.
       // That replaces three emitted conversions -- two operand reads plus the
       // `.zext_to<1>().zext_to<tw>()` clamp that existed only because the member
-      // form used to return an all-ones true. The `cw += 1` headroom above is
-      // likewise unnecessary here: it existed only to force cw != operand width so
-      // the cross-width ctor would fire instead of the copy ctor.
+      // form used to return an all-ones true. Each unsigned operand needs its
+      // own leading zero; using only max(bits_of(a),bits_of(b)) would reinterpret
+      // unsigned high bits as a sign or truncate a constant's significant bits.
       const auto output = node.get_driver_pin(0);
-      const auto args   = lnot_side >= 0
-                              ? raw_operand(e[lnot_side].get_driver_pin(), cw)
-                              : absl::StrCat(raw_operand(e[0].get_driver_pin(), cw), ", ", raw_operand(e[1].get_driver_pin(), cw));
+      const auto args
+          = lnot_side >= 0 ? operation_operand(e[lnot_side].get_driver_pin())
+                           : absl::StrCat(operation_operand(e[0].get_driver_pin()), ", ", operation_operand(e[1].get_driver_pin()));
       if (lnot_side >= 0) {
         m = "lnot_op";
       }
@@ -2364,7 +2406,8 @@ std::string Cgen_sim::node_expr(const hhds::Node_class& node, int wbits) {
         slop_u_expr_ = true;
         return absl::StrCat("Slop_u<", wbits - 1, ">::", m, "(", args, ")");
       }
-      return absl::StrCat("Slop<", tw, ">::", m, "(", args, ")");
+      return lnot_side >= 0 ? absl::StrCat("Slop<", tw, ">::", m, "(", args, ")")
+                            : absl::StrCat("Slop<", tw, ">::create_integer(Slop<1>::", predicate, "(", args, "))");
     }
     case Ntype_op::SHL:
     case Ntype_op::SRA: {
@@ -4452,7 +4495,11 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       // flavour (fall-committed guards), so the scan opts in the same way the
       // flop construction below does.
       bool scan_fall = false;
-      if (!icg_guards(d, clock_port, &design_clocks, is_type_flop(node) ? &scan_fall : nullptr).empty()) {
+      // A selected bit of a vector clock folds only through the projected
+      // non-inverted cone (see is_vector_clock_slice); an inverted one has no
+      // bit-exact guard, so refuse it here rather than at emission.
+      if (!icg_guards(d, clock_port, &design_clocks, is_type_flop(node) ? &scan_fall : nullptr).empty()
+          && !(scan_fall && is_vector_clock_slice(d))) {
         clock_nets.insert("\x01implicit");  // folded: commits on the reference clock, qualified
         continue;
       }
@@ -11036,8 +11083,8 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       }
       return {};
     };
-    // operand() materializes a literal AT the width it is asked for, so the
-    // C++ type is Slop<1>; the VALUE keeps the literal's own width.
+    // Keep the full literal width: vector clock masks and concat lanes can
+    // carry more than one bit even though the final guard is Boolean.
     //
     // `mag` is the LITERAL container width (Dlop::get_payload_bits), NOT the
     // signed carrier, which is one wider for every non-negative literal (3
@@ -11049,7 +11096,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
       const auto  cpin  = pin.base_pin();
       const auto& value = const_of(cpin);
       const int   mag   = std::max({wbits_of(cpin), static_cast<int>(value.get_payload_bits()), 1});
-      return Bool_expr{operand(cpin, 1), 1, mag};
+      return Bool_expr{operand(cpin, mag + 1), mag + 1, mag};
     };
     // `~x` used as a boolean has to be complemented at the VALUE's width and
     // masked back to it: the member `Slop<W>::not_op()` exists only on Slop
@@ -11076,8 +11123,12 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     // compares at max(operand carriers) -- never truncating a wide operand the
     // way a `Slop<1>` result does -- and lands a canonical single bit, which is
     // what keeps the bits <= mag + 1 invariant true for a `Not` above it.
-    const auto bool_eq_expr = [](const Bool_expr& lhs, const Bool_expr& rhs) {
-      return Bool_expr{absl::StrCat("Slop_u<1>::eq_op(", lhs.text, ", ", rhs.text, ")"), 2, 1};
+    const auto bool_eq_expr = [&](const std::vector<Bool_expr>& inputs) {
+      std::vector<Bool_expr> comparisons;
+      for (size_t i = 1; i < inputs.size(); ++i) {
+        comparisons.push_back({absl::StrCat("Slop_u<1>::eq_op(", inputs[0].text, ", ", inputs[i].text, ")"), 2, 1});
+      }
+      return bool_bit_expr("and_op", comparisons);
     };
     const auto bool_mask_expr = [&](const hhds::Occurrence_node& node, const Bool_expr& input) -> Bool_expr {
       const auto mask_pin = get_driver(find_sink_pin(node.base_node(), "mask"));
@@ -11160,7 +11211,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         return bool_bit_expr(op == Ntype_op::And ? "and_op" : op == Ntype_op::Or ? "or_op" : "xor_op", inputs);
       }
       if (op == Ntype_op::EQ && inputs.size() >= 2) {
-        return bool_eq_expr(inputs[0], inputs[1]);
+        return bool_eq_expr(inputs);
       }
       if (op == Ntype_op::Get_mask) {
         return bool_mask_expr(node, inputs.front());
@@ -11320,7 +11371,41 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         return bool_bit_expr(op == Ntype_op::And ? "and_op" : op == Ntype_op::Or ? "or_op" : "xor_op", inputs);
       }
       if (op == Ntype_op::EQ && inputs.size() >= 2) {
-        return bool_eq_expr(inputs[0], inputs[1]);
+        return bool_eq_expr(inputs);
+      }
+      if (op == Ntype_op::Concat) {
+        const auto lanes = livehd::graph_util::concat_lanes(node.base_node());
+        if (lanes.empty() || inputs.size() != 2 * lanes.size()) {
+          return {};
+        }
+        std::string args;
+        for (size_t i = 0; i < lanes.size(); ++i) {
+          absl::StrAppend(&args, i == 0 ? "" : ", ", "Slop_u<", lanes[i].width, ">{", inputs[2 * i].text, "}");
+        }
+        const int width = livehd::graph_util::concat_total_width(lanes);
+        return Bool_expr{absl::StrCat("Slop_u<", width, ">::concat_op(", args, ")"), width + 1, width};
+      }
+      if (op == Ntype_op::Mux && inputs.size() == 3) {
+        // Land both arms in a carrier of the Mux OUTPUT's signedness: a wider
+        // And/Or/Xor above sign-extends a signed operand (bool_bit_expr only
+        // does so for a signed `Slop<k>`), so a `Slop_u` landing would
+        // zero-extend a signed mux and drop its high guard bits.
+        const int         width   = std::max(wbits_of(pin.base_pin()), 1);
+        const bool        unsign  = is_unsign(pin.base_pin());
+        const std::string carrier = absl::StrCat(unsign ? "Slop_u<" : "Slop<", width, ">");
+        return Bool_expr{absl::StrCat("(",
+                                      inputs[0].text,
+                                      ".is_known_true() ? ",
+                                      carrier,
+                                      "{",
+                                      inputs[2].text,
+                                      "} : ",
+                                      carrier,
+                                      "{",
+                                      inputs[1].text,
+                                      "})"),
+                         unsign ? width + 1 : width,
+                         width};
       }
       if (op == Ntype_op::Get_mask) {
         return bool_mask_expr(node, inputs.front());
@@ -15124,7 +15209,27 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               }
               return operand(guard, 1);
             };
-            const auto state_clock = get_driver(find_sink_pin(node, "clock_pin"));
+            const auto state_clock         = get_driver(find_sink_pin(node, "clock_pin"));
+            // A flop on one bit of a vector clock (is_vector_clock_slice) has no
+            // scalar fallback: its ICG leaves name the whole enable bus. When the
+            // selected bit's cone cannot be projected (inverted, not
+            // representable, clock root not found), fail closed rather than
+            // commit on ANY bit of the bus -- or, for an unbound leaf, never.
+            const bool vector_slice        = is_vector_clock_slice(state_clock);
+            const auto refuse_vector_slice = [&]() {
+              livehd::diag::err("inou.cgen.sim", "gated-clock-unsupported", "unsupported")
+                  .msg("module `{}`: flop `{}` has a derived clock inou.cgen.sim cannot fold into a commit guard",
+                       node.get_graph() == nullptr ? std::string_view{gname} : node.get_graph()->get_name(),
+                       debug_name(node))
+                  .hint(
+                      "only the ICG shape `<clock> & <enable>` is folded (commit when the enable is high at the reference "
+                      "edge); a selected bit of a vector clock is folded only when its own bit of the gate can be "
+                      "projected, and any other derived clock would be simulated as if it ticked every step, with the "
+                      "gate as dead code — a silent miscompile. Model the gate as the flop's `enable` instead, or "
+                      "simulate the emitted Verilog with an event-driven simulator")
+                  .emit();
+              cycle_reported_ = true;
+            };
             if (!state_clock.is_invalid() && type_op_of(state_clock.get_master_node()) == Ntype_op::Clock_cell) {
               // A Clock_cell color produces its normalized activation enable;
               // the reference edge itself is represented by the execution-slot
@@ -15149,8 +15254,35 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
               // direct color has no legacy pin2var forest for those leaves, so
               // bind graph inputs and state Qs explicitly before falling back to
               // the ordinary expression resolver.
-              for (const auto& guard : local_flop->clock_guards) {
-                commit_test = combine_activation(commit_test, emit_known_true(guard_expr(guard)));
+              // A selected bit of a vector clock must select the same bit
+              // of its enable bus. The scalar ICG leaf list loses that slice;
+              // evaluate the complete projected cone with its clock replaced
+              // by the reference event instead of reading an unscheduled bus.
+              // Only a non-inverted cone projects that way (substituting the
+              // reference level for the clock); the rest is refused.
+              if (vector_slice) {
+                const auto cone = livehd::latch_contract::clock_op_of(state_clock, local_clocks_for(node.get_graph()));
+                if (cone && !cone->clock_inverted && cone->div == 1) {
+                  for (size_t input = 0; input < definition_inputs.size(); ++input) {
+                    if (definition_inputs[input].sink.get_port_id() == Ntype::get_sink_pid(op, "clock_pin")) {
+                      const auto activation = occurrence_guard_expr(occurrence_inputs[input].driver,
+                                                                    cone->clock,
+                                                                    livehd::sim::Color_plan::commit_slot_of(version),
+                                                                    0);
+                      if (!activation.empty()) {
+                        commit_test = emit_known_true(activation);
+                      }
+                      break;
+                    }
+                  }
+                }
+                if (commit_test.empty()) {
+                  refuse_vector_slice();
+                }
+              } else {
+                for (const auto& guard : local_flop->clock_guards) {
+                  commit_test = combine_activation(commit_test, emit_known_true(guard_expr(guard)));
+                }
               }
             }
             if (commit_test.empty() && node.get_graph() != g) {
@@ -15187,6 +15319,33 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                                                                 livehd::sim::Color_plan::commit_slot_of(version),
                                                                 0);
                   commit_test           = activation.empty() ? std::string{} : emit_known_true(activation);
+                  break;
+                }
+                if (vector_slice) {
+                  // Same projection as the local vector-slice fold above, over
+                  // the occurrence cone. The child's clock operand resolves across
+                  // the boundary to a parent driver, so the reference that gets
+                  // replaced by the event is that driver's root -- accepted only
+                  // when it is a plain (non-inverted) input of this root.
+                  std::string activation;
+                  const auto  cone = livehd::latch_contract::clock_op_of(state_clock, local_clocks_for(node.get_graph()));
+                  if (cone && !cone->clock_inverted && cone->div == 1) {
+                    if (const auto occurrence_clock = resolve_occurrence_pin(resolved, cone->clock, 0)) {
+                      const auto clock_root = livehd::latch_contract::control_root(*occurrence_clock);
+                      if (!clock_root.inverted && !clock_root.net.is_invalid() && clock_root.net.get_graph() == g
+                          && livehd::graph_util::is_graph_input_pin(clock_root.net)) {
+                        activation = occurrence_guard_expr(resolved,
+                                                           clock_root.net.base_pin(),
+                                                           livehd::sim::Color_plan::commit_slot_of(version),
+                                                           0);
+                      }
+                    }
+                  }
+                  if (activation.empty()) {
+                    refuse_vector_slice();
+                  } else {
+                    commit_test = emit_known_true(activation);
+                  }
                   break;
                 }
                 bool       resolved_fall   = false;

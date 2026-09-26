@@ -112,6 +112,19 @@ cc_library(
 
 exports_files(["arith.hpp"])
 
+cc_test(
+    name = "blast_compare_smoke",
+    size = "small",
+    srcs = ["blast_compare_smoke.cpp"],
+    copts = COPTS,
+    deps = [
+        ":synth",
+        "//graph",
+        "//pass/partition:pass_partition",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # Functional unit test for the backend-agnostic adder/comparator builders
 # (arith.hpp), instantiated with a software bit model.
 cc_test(
@@ -141,7 +154,6 @@ cc_test(
     name = "region_cache_test",
     srcs = ["region_cache_test.cpp"],
     copts = COPTS,
-    linkopts = ["-lz"],  # pass/formal links pass/lec, whose cone prover uses ABC's io layer
     deps = [
         ":synth",
         "//graph",

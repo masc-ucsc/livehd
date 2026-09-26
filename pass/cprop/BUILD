@@ -46,3 +46,16 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "cprop_opshare_test",
+    srcs = ["cprop_opshare_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":pass_cprop",
+        "//graph",
+        "//pass/bitwidth:pass_bitwidth",
+        "//pass/lec:lec_query",
+        "@googletest//:gtest_main",
+    ],
+)

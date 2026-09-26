@@ -4,8 +4,9 @@
 # Incremental regeneration of the sim tree. `lhd sim --setup-only` re-emits the
 # C++ for every module whose structural digest moved, and File_output skips the
 # write when the bytes are unchanged — so a generated file's MTIME is the signal
-# the generated build.ninja keys on. This test pins the properties that make the
-# host build incremental, and the ones that make the reuse SOUND:
+# the host build (built-in builder or the generated build.ninja) keys on. This
+# test pins the properties that make the host build incremental, and the ones
+# that make the reuse SOUND:
 #
 #   1. re-running setup with nothing changed rewrites NO generated file;
 #   2. a COMMENT-only Pyrope edit rewrites NO generated file (the digest is
@@ -20,8 +21,17 @@
 #      cone while its own body hash is unchanged);
 #   5. deleting one recorded artifact is a cold miss, not a partial hit.
 #
-# Plus, when `ninja` is available, the end-to-end consequence: a second build
-# with nothing changed compiles nothing at all.
+# Plus, using the built-in builder, the end-to-end consequence: a second build
+# with nothing changed compiles nothing at all (6), and an interface change
+# rebuilds the parent through its depfile (7).
+#
+#   8. a default generic specialization (named after its template) survives a
+#      partial graph restore, and the regenerated sim executes the edited
+#      sibling (checked against an lhd.incremental=false oracle).
+#
+# Usage: lhd_sim_incremental_test.sh [rebuild|identity]. `rebuild` (the
+# default) runs steps 1-7 and `identity` runs step 8; they are two bazel
+# targets only to keep each under the per-test runtime budget.
 #
 # Steps 1-5 drive only --setup-only, so they need no host compiler and no ninja.
 #
@@ -39,6 +49,15 @@ fail() {
   echo "FAIL: $*" >&2
   exit 1
 }
+
+part="${1:-rebuild}"
+case "$part" in
+rebuild | identity) ;;
+*) fail "unknown part '$part' (expected rebuild or identity)" ;;
+esac
+
+# ======================== part `rebuild`: steps 1-7 ========================
+if [ "$part" = rebuild ]; then
 
 # A leaf whose body can change without its ports changing, and a parent that
 # instantiates it — so the parent's object depends on the leaf's header.
@@ -187,10 +206,7 @@ setup
   || fail "deleting the recorded artifact '$victim' did not force a re-emission — an incomplete tree reads as a hit"
 
 # ---- 6. compile-only stops at drv.bin; a second build compiles nothing -------
-if ! command -v ninja >/dev/null 2>&1; then
-  fail "Ninja is required for the end-to-end rebuild check"
-fi
-if ! "$LHD" sim "$W/tb.prp" --run-only --set sim.compile_only=true \
+if ! "$LHD" sim "$W/tb.prp" --run-only --set sim.compile_only=true --set sim.ninja=false --set sim.tune.profile=off \
   --diag-fmt pretty --workdir "$W/wd" >"$W/build1.log" 2>&1; then
   cat "$W/build1.log" >&2
   fail "generated simulator host build failed"
@@ -199,36 +215,40 @@ fi
 grep -qa "hello world" "$W/build1.log" && fail "compile-only executed the testbench"
 [ -f "$W/wd/sim/build.ninja" ] || fail "no build.ninja was written next to the generated sources"
 
-# Nothing changed since that build, so ninja must have no work left.
-plan=$(ninja -C "$W/wd/sim" -n 2>&1 | grep -v '^ninja: Entering')
-case "$plan" in
-*"no work to do"*) ;;
-*) fail "a second build with nothing changed still has work to do: $plan" ;;
-esac
+# A second built-in build must neither compile nor link.
+touch "$W/build-marker"
+"$LHD" sim "$W/tb.prp" --run-only --set sim.compile_only=true \
+  --set sim.ninja=false --set sim.tune.profile=off --workdir "$W/wd" >"$W/build2.log" 2>&1 \
+  || { cat "$W/build2.log" >&2; fail "warm build failed"; }
+[ -z "$(find "$W/wd/sim" \( -name '*.o' -o -name drv.bin \) -newer "$W/build-marker")" ] \
+  || fail "a warm build rewrote objects or relinked the simulator"
 
 # ---- 7. an INTERFACE change must reach the parent, via the depfile ------------
-# The parent's object depends on the leaf's header, and NOTHING in build.ninja
-# says so — only the `-MD` depfile does. Ninja accepts a rule whose command
-# never writes that depfile without complaining (it just records zero deps), and
-# the failure is silent and permanent: header edits stop rebuilding anything.
-# So assert the parent actually rebuilds.
+# The parent's object depends on the leaf's header only through the compiler's
+# `-MD` depfile, which both the built-in builder and build.ninja read. If that
+# dependency is lost, header edits stop rebuilding the parent. So assert the
+# parent actually rebuilds.
 sed -e 's/b:u8/b:u7/' "$W/leaf.prp" > "$W/leaf.new" && mv "$W/leaf.new" "$W/leaf.prp"
 grep -q 'b:u7' "$W/leaf.prp" || fail "the interface edit did not apply (test bug)"
 sed -e 's/b = y/b = y#[0..=6]/' "$W/top.prp" > "$W/top.new" && mv "$W/top.new" "$W/top.prp"
 setup
-plan=$(ninja -C "$W/wd/sim" -n 2>&1 | grep -v '^ninja: Entering')
-case "$plan" in
-*"no work to do"*) fail "an interface change rebuilt nothing — the emitter did not see it" ;;
-esac
-case "$plan" in
-*leaf.leaf.o*) ;;
-*) fail "an interface change did not rebuild the leaf's own object: $plan" ;;
-esac
-case "$plan" in
-*top.top.o*) ;;
-*) fail "an interface change did not rebuild the PARENT's object — the depfile dependency on the leaf header is not being tracked: $plan" ;;
-esac
+touch "$W/build-marker"
+"$LHD" sim "$W/tb.prp" --run-only --set sim.compile_only=true \
+  --set sim.ninja=false --set sim.tune.profile=off --workdir "$W/wd" >"$W/build3.log" 2>&1 \
+  || { cat "$W/build3.log" >&2; fail "interface rebuild failed"; }
+for obj in leaf.leaf.o top.top.o; do
+  [ -n "$(find "$W/wd/sim" -name "$obj" -newer "$W/build-marker")" ] \
+    || fail "an interface change did not rebuild $obj"
+done
 
+echo "PASS (steps 1-7): warm rebuild is a no-op; interface changes rebuild dependents"
+exit 0
+fi
+
+# ======================== part `identity`: step 8 ==========================
+# ---- 8. default generic specialization: partial graph restore + sim regen ----
+# The compile-level twin lives in lhd_compile_cache_test.sh (identity block);
+# this step adds the `lhd sim` regenerate-and-execute obligation.
 # A default generic specialization shares its template's name. A partial
 # graph restore must retain both lowered trees, then regenerate and execute
 # the root using a freshly changed sibling. This is Minion's one-module edit
@@ -260,7 +280,7 @@ identity_run() {
   local tag=$1 wd=$2 expected=$3
   shift 3
   "$LHD" sim "$IW/tb.prp" --workdir "$wd" --arg "expected=$expected" \
-    --set sim.tune.profile=off --result-json "$IW/$tag.json" "$@" >"$IW/$tag.log" 2>&1 \
+    --set sim.ninja=false --set sim.tune.profile=off --result-json "$IW/$tag.json" "$@" >"$IW/$tag.log" 2>&1 \
     || { cat "$IW/$tag.log" >&2; fail "default-specialization simulation failed ($tag)"; }
 }
 identity_run cold "$IW/w" 3
@@ -273,5 +293,4 @@ assert cache['hits'] > 0 and cache['misses'] > 0 and cache['refused'] == 0, cach
 PY
 identity_run oracle "$IW/oracle" 2 --set lhd.incremental=false
 
-echo "PASS (steps 1-8; warm rebuild is a no-op, interface changes reach dependents,"
-echo "      the occurrence root is cached with a hierarchical key and a complete artifact set)"
+echo "PASS (step 8): default specialization uses the edited sibling after partial graph reuse"

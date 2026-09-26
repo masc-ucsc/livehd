@@ -2,7 +2,7 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # todo/livehd/2f-latch M8 steps 3b + 3g — ALL FOUR COMMIT CLASSES IN ONE MODULE,
-# validated against ICARUS VERILOG.
+# discriminated through `lhd lec` and validated against ICARUS VERILOG.
 #
 # Before this test no design in the tree held more than two of the four commit
 # classes, so a slot table that quietly COLLAPSED two of them onto one slot
@@ -35,6 +35,9 @@
 #      AND after" cannot see a transformation that is wrong but applied
 #      identically to both sides, so anything edge-shaped is gated against
 #      iverilog, never against our own encoder on both sides.
+#
+#      This leg needs iverilog/vvp, so it runs only with LHD_EXTERNAL_SIM=1
+#      (see AGENTS.md); the default run keeps the 3g legs.
 #
 #      Sampling obeys the observation-visibility rule, which is not optional
 #      here: a real latch reads THROUGH while its window is open, so each latch
@@ -145,13 +148,16 @@ for m in "m_latch|the two LATCH classes collapsed (transparent-low written as tr
 done
 
 # ---- 3b: trace-level validation against iverilog ----------------------------
-if ! command -v iverilog >/dev/null 2>&1 || ! command -v vvp >/dev/null 2>&1; then
-  echo "note: iverilog/vvp not found — the INDEPENDENT trace validation was SKIPPED."
-  echo "      Everything above compares our own encoder against itself, which by"
-  echo "      the cross-model gating rule cannot validate the transformation."
+# Optional: a requested leg (LHD_EXTERNAL_SIM=1) with a missing tool FAILS.
+if [ -z "${LHD_EXTERNAL_SIM:-}" ]; then
+  echo "note: external-simulator leg skipped (set LHD_EXTERNAL_SIM=1). Everything"
+  echo "      above compares our own encoder against itself, which by the"
+  echo "      cross-model gating rule cannot validate the transformation."
   echo "PASS: single_edge_four_classes_test (lec legs only)"
   exit 0
 fi
+command -v iverilog >/dev/null 2>&1 && command -v vvp >/dev/null 2>&1 \
+  || fail "LHD_EXTERNAL_SIM is set but iverilog/vvp are not on PATH"
 
 rm -rf "$W/lg_four_n"
 "$LHD" pass single_edge --top four8 "lg:$W/lg_four" --emit-dir "lg:$W/lg_four_n" \

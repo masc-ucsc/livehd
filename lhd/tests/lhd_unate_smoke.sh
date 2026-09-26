@@ -2,8 +2,8 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # pass.usyn end to end: every region is covered by domino gates (the LUT
-# cover), and the cover goes to ABC -- the pass.abc flow (abc=opt, the
-# default) or technology mapping only (abc=tmap). Synthesis proves nothing
+# cover), and the cover goes to ABC -- technology mapping only (abc=tmap,
+# the default) or the pass.abc flow (abc=opt). Synthesis proves nothing
 # itself: every netlist here is checked by a separate `lhd lec` (check_lec).
 set -euo pipefail
 LHD=lhd/lhd
@@ -50,13 +50,13 @@ cp "$W/main/synth/qor.json.usyn.json" "$W/cold_report.json"
 python3 - "$W/cold_report.json" <<'PY'
 import json,sys
 report=json.load(open(sys.argv[1]))
-assert report['schema_version']==4 and report['kind']=='usyn' and report['abc']=='opt',report
+assert report['schema_version']==4 and report['kind']=='usyn' and report['abc']=='tmap',report
 assert report['recipe']=={'support':2,'literals':8,'series':2},report
 rows=report['regions_searched']
 t=report['totals']
-assert rows and t['abc_opt']==len(rows) and t['abc_fallback']==0,report
+assert rows and t['abc_tmap']==len(rows) and t['abc_fallback']==0,report
 row=rows[0]
-assert row['status']=='abc_opt' and row['variant']=='opt' and row['reason']=='',row
+assert row['status']=='abc_tmap' and row['variant']=='tmap' and row['reason']=='',row
 assert row['region_ms']>=row['cover_ms'] and not row['resources']['exhausted'],row
 # Three AND2 functions at support 2: three domino gates, two levels deep.
 assert row['domino']==3 and row['nonunate']==0 and row['domino_in2']==3,row
@@ -97,7 +97,7 @@ import json,sys
 stats=json.load(open(sys.argv[1]))
 report=json.load(open(sys.argv[2]))
 assert stats['incremental']['abc']['misses']>0,stats
-assert report['regions_searched'] and all(row['status']=='abc_opt' for row in report['regions_searched']),report
+assert report['regions_searched'] and all(row['status']=='abc_tmap' for row in report['regions_searched']),report
 PY
 echo '// comment-only edit' >>"$W/shared.v"
 run "${SYNTH[@]}" --workdir "$W/main" --emit "verilog:$W/comment.v"
@@ -122,18 +122,18 @@ run "${SYNTH[@]}" --workdir "$W/fresh" --emit "verilog:$W/fresh.v"
 cmp "$W/edited.v" "$W/fresh.v"
 check_lec "$W/main/synth/net" "$W/fresh/synth/lg" shared
 
-# Technology mapping only: the cover network through `&nf`, with its own area.
-run pass usyn "lg:$W/fresh/synth/lg" --top shared --set synth.liberty="$LIB" --set pass.usyn.abc=tmap --workdir "$W/tmap" --emit-dir "lg:$W/tmap_net"
-python3 - "$W/tmap/qor.json.usyn.json" "$W/tmap/qor.json" <<'PY'
+# Explicit full optimization remains available as an alternative to the default.
+run pass usyn "lg:$W/fresh/synth/lg" --top shared --set synth.liberty="$LIB" --set pass.usyn.abc=opt --workdir "$W/opt" --emit-dir "lg:$W/opt_net"
+python3 - "$W/opt/qor.json.usyn.json" "$W/opt/qor.json" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1]))
 rows=r['regions_searched']
-assert rows and all(row['status']=='abc_tmap' and row['domino']>0 for row in rows),r
-assert r['totals']['abc_tmap']==len(rows),r
+assert rows and all(row['status']=='abc_opt' and row['domino']>0 for row in rows),r
+assert r['totals']['abc_opt']==len(rows),r
 q=json.load(open(sys.argv[2]))
 assert q['regions'] and all(row['area']>0 for row in q['regions']),q
 PY
-check_lec "$W/tmap_net" "$W/fresh/synth/lg" shared
+check_lec "$W/opt_net" "$W/fresh/synth/lg" shared
 # No cover: the original region logic through the pass.abc flow.
 run pass usyn "lg:$W/fresh/synth/lg" --top shared --set synth.liberty="$LIB" --set pass.usyn.abc=only --workdir "$W/only" --emit-dir "lg:$W/only_net"
 python3 - "$W/only/qor.json.usyn.json" <<'PY'
@@ -188,7 +188,7 @@ import json,sys
 r=json.load(open(sys.argv[1]))
 if sys.argv[2]=='cold':
     assert r['regions_searched'] and not r['regions_reused'],r
-    assert all(row['status']=='abc_opt' and not row['resources']['exhausted'] for row in r['regions_searched']),r
+    assert all(row['status']=='abc_tmap' and not row['resources']['exhausted'] for row in r['regions_searched']),r
 else:
     assert r['regions_reused'] and not r['regions_searched'],r
 PY
@@ -216,7 +216,7 @@ python3 - "$W/hierarchy/synth/qor.json.usyn.json" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1]))
 rows=r['regions_searched']+[row['decision'] for row in r['regions_reused']]
-assert rows and all(row['status']=='abc_opt' for row in rows),r
+assert rows and all(row['status']=='abc_tmap' for row in rows),r
 PY
 check_lec "$W/hierarchy/synth/net" "$W/hierarchy/synth/lg" hierarchy
 

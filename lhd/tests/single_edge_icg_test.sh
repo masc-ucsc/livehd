@@ -27,6 +27,8 @@
 # one. Using the latch's Q instead is a full cycle late — the classic L1 error,
 # and it is invisible to a symmetric before/after gate because both sides would
 # be wrong the same way. Hence the iverilog leg below, and its negative control.
+# The iverilog legs are the independent oracle and run only with
+# LHD_EXTERNAL_SIM=1 (see AGENTS.md); the default run keeps the lec legs.
 #
 # The resolution deliberately FAILS CLOSED when it cannot tell the clock operand
 # from the enable: in the canonical `clk & en` BOTH are graph inputs, so "is it
@@ -51,6 +53,17 @@ trap 'rm -rf "$W"' EXIT
 fail() {
   echo "FAIL: $*"
   exit 1
+}
+
+# Optional independent event-simulator legs: skipped by default, and a requested
+# leg (LHD_EXTERNAL_SIM=1) with a missing tool FAILS instead of skipping.
+external_sim() {
+  if [ -z "${LHD_EXTERNAL_SIM:-}" ]; then
+    echo "note: external-simulator leg skipped (set LHD_EXTERNAL_SIM=1)"
+    return 1
+  fi
+  command -v iverilog >/dev/null 2>&1 && command -v vvp >/dev/null 2>&1 \
+    || fail "LHD_EXTERNAL_SIM is set but iverilog/vvp are not on PATH"
 }
 
 cat > "$W/icg.prp" <<'EOF'
@@ -128,13 +141,8 @@ grep -q "REFUTED" "$W/l2.log" \
 echo "ok: lec REFUTES a real difference inside an ICG design (not vacuous)"
 
 # ---- iverilog: the rewrite is semantics-preserving --------------------------
-if ! command -v iverilog >/dev/null 2>&1 || ! command -v vvp >/dev/null 2>&1; then
-  echo "note: iverilog/vvp not found — the INDEPENDENT check of the rewrite was SKIPPED."
-  echo "PASS: single_edge_icg_test (lec legs only)"
-  exit 0
-fi
-
-cat > "$W/tb.v" <<'EOF'
+if external_sim; then
+  cat > "$W/tb.v" <<'EOF'
 `timescale 1ns/1ps
 module tb;
   reg clk = 0, reset = 1, en = 0;
@@ -167,26 +175,27 @@ module tb;
 endmodule
 EOF
 
-iverilog -g2012 -o "$W/tb.vvp" "$W/src.v" "$W/norm.v" "$W/tb.v" >"$W/iv.log" 2>&1 \
-  || { cat "$W/iv.log"; fail "iverilog could not elaborate the source+normalized pair"; }
-out="$(vvp "$W/tb.vvp" 2>&1)"
-grep -q "ICG_DIFF_OK" <<<"$out" \
-  || { echo "$out" | head -8; fail "the normalized design does not match the real always_latch + gated-clock source under iverilog"; }
-echo "ok: source ICG and normalized flop-with-enable agree over 29 cycles under iverilog"
+  iverilog -g2012 -o "$W/tb.vvp" "$W/src.v" "$W/norm.v" "$W/tb.v" >"$W/iv.log" 2>&1 \
+    || { cat "$W/iv.log"; fail "iverilog could not elaborate the source+normalized pair"; }
+  out="$(vvp "$W/tb.vvp" 2>&1)"
+  grep -q "ICG_DIFF_OK" <<<"$out" \
+    || { echo "$out" | head -8; fail "the normalized design does not match the real always_latch + gated-clock source under iverilog"; }
+  echo "ok: source ICG and normalized flop-with-enable agree over 29 cycles under iverilog"
 
-# NEGATIVE CONTROL: use the enable latch's HELD Q instead of the value it passes
-# through. That is the L1 error the bypass exists to prevent, and it must fail
-# here -- otherwise the agreement above proves nothing about the bypass.
-sed 's/^if (en) begin/if (enl) begin/' "$W/norm.v" > "$W/norm_late.v"
-if ! cmp -s "$W/norm.v" "$W/norm_late.v"; then
-  iverilog -g2012 -o "$W/late.vvp" "$W/src.v" "$W/norm_late.v" "$W/tb.v" >"$W/iv2.log" 2>&1 \
-    || { cat "$W/iv2.log"; fail "could not build the L1 negative control"; }
-  out="$(vvp "$W/late.vvp" 2>&1)"
-  grep -q "ICG_DIFF_FAIL" <<<"$out" \
-    || fail "reading the enable latch's HELD Q still matched the source -- the harness cannot see a one-cycle-late enable, so the agreement above is not evidence"
-  echo "ok: reading the enable latch's held Q instead FAILS (the bypass is load-bearing)"
-else
-  fail "the L1 negative control did not apply (the normalized netlist does not spell its enable as expected)"
+  # NEGATIVE CONTROL: use the enable latch's HELD Q instead of the value it passes
+  # through. That is the L1 error the bypass exists to prevent, and it must fail
+  # here -- otherwise the agreement above proves nothing about the bypass.
+  sed 's/^if (en) begin/if (enl) begin/' "$W/norm.v" > "$W/norm_late.v"
+  if ! cmp -s "$W/norm.v" "$W/norm_late.v"; then
+    iverilog -g2012 -o "$W/late.vvp" "$W/src.v" "$W/norm_late.v" "$W/tb.v" >"$W/iv2.log" 2>&1 \
+      || { cat "$W/iv2.log"; fail "could not build the L1 negative control"; }
+    out="$(vvp "$W/late.vvp" 2>&1)"
+    grep -q "ICG_DIFF_FAIL" <<<"$out" \
+      || fail "reading the enable latch's HELD Q still matched the source -- the harness cannot see a one-cycle-late enable, so the agreement above is not evidence"
+    echo "ok: reading the enable latch's held Q instead FAILS (the bypass is load-bearing)"
+  else
+    fail "the L1 negative control did not apply (the normalized netlist does not spell its enable as expected)"
+  fi
 fi
 
 # ---- the shape REAL designs actually have: an INSTANTIATED ICG cell ---------
@@ -276,7 +285,7 @@ grep -qE "always @\(posedge clk" "$W"/v_cdn/*.v \
   || { grep -hE "always" "$W"/v_cdn/*.v | head -3; fail "the normalized latch is not a plain posedge flop on clk"; }
 echo "ok: a clk-AND-data gated latch lowers to a posedge flop with the data enable"
 
-if command -v iverilog >/dev/null 2>&1 && command -v vvp >/dev/null 2>&1; then
+if external_sim; then
   cat "$W"/v_cds/*.v > "$W/cd_src.v"
   sed 's/^module dut(/module dut_n(/' "$W"/v_cdn/*.v > "$W/cd_norm.v"
   cat > "$W/cdtb.v" <<'EOF'

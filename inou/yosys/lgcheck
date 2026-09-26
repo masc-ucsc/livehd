@@ -550,7 +550,7 @@ if ! [[ "$LGCHECK_HEURISTIC_TIMEOUT" =~ ^[0-9]+$ ]]; then
   echo "lgcheck: LGCHECK_HEURISTIC_TIMEOUT must be a non-negative integer (got '$LGCHECK_HEURISTIC_TIMEOUT')"
   exit 5
 fi
-LGCHECK_BMC_STEPS="${LGCHECK_BMC_STEPS:-5}"
+LGCHECK_BMC_STEPS="${LGCHECK_BMC_STEPS:-6}"
 # Failed correspondence guesses do not refute the public outputs. Reserve a
 # bounded share for the final counterexample search, including solver startup,
 # so a short shared budget cannot expire before that search even starts.
@@ -972,6 +972,7 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
                ${bmc_sat_cmds}
                " \
     2>lgcheck_bmc.err >lgcheck_bmc.log
+  bmc_status=$?
 
   if grep -q "model found: FAIL" lgcheck_bmc.log; then
     echo "WARN: bounded check found a mismatch within ${LGCHECK_BMC_STEPS} steps (see lgcheck_bmc.log)."
@@ -994,6 +995,8 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
   # INCONCLUSIVE result; only the structural/inductive engines above may exit 0.
   if [ "$(grep -c 'no model found: SUCCESS' lgcheck_bmc.log)" -eq "${LGCHECK_BMC_STEPS}" ]; then
     echo "BMC: found no counterexample within ${LGCHECK_BMC_STEPS} steps top:${fm_top}; this bounded result is not a proof."
+  elif [ "$bmc_status" -eq 124 ]; then
+    echo "TIMEOUT: bounded miter exhausted the shared equivalence budget (${LGCHECK_EQUIV_TIMEOUT}s)."
   else
     echo "WARN: bounded miter check did not run to completion (see lgcheck_bmc.err); inconclusive."
   fi

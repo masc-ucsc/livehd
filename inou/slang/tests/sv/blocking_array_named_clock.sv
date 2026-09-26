@@ -3,9 +3,15 @@
 // `__store_clock_pin`/`__store_posclk` attr, which is only emitted for the
 // symbols the process writes -- a blocking write that is not folded into that
 // set leaves the array on a phantom `clock` input, on the WRONG edge. LEC cuts
-// at flops and cannot express "this array moved only on ITS edge", so check the
-// edges behaviorally.
+// at flops and cannot express "this array moved only on ITS edge", and native
+// sim refuses the two unrelated clock roots, so roundtrip_sim pins the edges
+// structurally (:verilog_re:) and keeps a refusal tripwire (:sim_unsupported:).
+// The event-level bench blocking_array_named_clock_tb.v (slot moves only on a
+// falling sclk) runs only with LHD_EXTERNAL_SIM=1 (iverilog/vvp).
 // :test: roundtrip_sim
+// :verilog_re: always @\(negedge sclk[[:space:])]
+// :verilog_re: always @\(posedge clk[[:space:])]
+// :sim_unsupported: occurrence-wide color scheduler
 module blocking_array_named_clock (
   input  logic       clk,
   input  logic       sclk,

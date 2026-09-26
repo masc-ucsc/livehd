@@ -86,6 +86,9 @@ protected:
   void cse_pass(const std::vector<hhds::Node_class>& order);
   // Expected-linear mux sharing over disjoint, single-consumer regions.
   void mux_share_pass();
+  // Factor private, same-shape operators out of binary/index mux arms.
+  // Fresh operand muxes have no width hints; bitwidth infers them afterwards.
+  void mux_op_share_pass();
   // One round of bit-slice vectorization: runs of 1-bit Mux(s, x[j], y[j+d])
   // over consecutive j become one Mux(s, x[j0..], y[j0+d..]). true = changed.
   bool vectorize_bit_muxes();

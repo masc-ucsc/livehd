@@ -127,7 +127,7 @@ struct Search_options {
   // full pass.abc optimize-and-map flow. only: no cover -- the original region
   // logic through the pass.abc flow (same partition as the other modes).
   enum class Abc_mode { tmap, opt, only };
-  Abc_mode              abc_mode            = Abc_mode::opt;
+  Abc_mode              abc_mode            = Abc_mode::tmap;
   std::function<bool()> admission{};
 };
 

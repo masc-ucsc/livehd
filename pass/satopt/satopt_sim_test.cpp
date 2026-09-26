@@ -188,3 +188,38 @@ TEST(WordSim, BitwiseOperandsExtendByTheirOwnSign) {
   EXPECT_EQ(prover.masked_const(out, 9, all, *Dlop::create_integer(511)).verdict, livehd::formal::Verdict::Proven);
   EXPECT_EQ(prover.masked_const(out, 9, all, *Dlop::create_integer(255)).verdict, livehd::formal::Verdict::Refuted);
 }
+
+TEST(WordSim, OrderedComparisonsUseEveryOperandInBothBanks) {
+  for (auto op : {Ntype_op::LT, Ntype_op::GT}) {
+    Adder f("sim_compare_banks");
+    gu::set_sbits(f.a, 8);
+    auto      n       = gu::create_typed_node(*f.g, op);
+    const int bound_a = op == Ntype_op::LT ? -3 : 129;
+    const int bound_b = op == Ntype_op::LT ? 5 : 3;
+    // Both outcomes are reachable for each operation. The constants must
+    // participate even though a and b were connected first.
+    gu::setup_sink_pid(n, 0).connect_driver(f.a);
+    gu::setup_sink_pid(n, 1).connect_driver(f.b);
+    gu::setup_sink_pid(n, 0).connect_driver(gu::create_const(*f.g, *Dlop::create_integer(bound_a)));
+    gu::setup_sink_pid(n, 1).connect_driver(gu::create_const(*f.g, *Dlop::create_integer(bound_b)));
+    auto out = n.create_driver_pin(0);
+    gu::set_ubits(out, 1);
+    Word_sim sim({.samples = 32});
+    for (int a : {-7, 10}) {
+      ASSERT_TRUE(sim.add_model({
+          {{}, f.a, *Dlop::create_integer(a)},
+          {{}, f.b, *Dlop::create_integer(0)}
+      }));
+    }
+    const auto* values = sim.values(out);
+    ASSERT_NE(values, nullptr);
+    const auto& as = *sim.values(f.a);
+    const auto& bs = *sim.values(f.b);
+    for (size_t j = 0; j < values->size(); ++j) {
+      const auto a = as[j].to_just_i64(), b = bs[j].to_just_i64();
+      const bool expected = op == Ntype_op::LT ? std::max<int64_t>(a, bound_a) < std::min<int64_t>(b, bound_b)
+                                               : std::min<int64_t>(a, bound_a) > std::max<int64_t>(b, bound_b);
+      EXPECT_EQ((*values)[j].to_just_i64(), expected) << j;
+    }
+  }
+}

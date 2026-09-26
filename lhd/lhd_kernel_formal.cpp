@@ -136,6 +136,18 @@ bool mixed_loop_structural_identity(hhds::Graph* compact, hhds::Graph* unrolled,
   return livehd::semdiff::structural_equivalent_traversal(top.get(), unrolled, options);
 }
 
+// res.inputs keeps one entry per path (stable, first occurrence wins): a side
+// and each --lib it materializes can be recorded more than once.
+static void dedup_inputs(Result& res) {
+  std::vector<std::string> dedup;
+  for (const auto& p : res.inputs) {
+    if (std::find(dedup.begin(), dedup.end(), p) == dedup.end()) {
+      dedup.push_back(p);
+    }
+  }
+  res.inputs = std::move(dedup);
+}
+
 // Load one --impl/--ref side into `var.graphs` WITHOUT cgen. lg: libraries load
 // directly; pyrope:/ln: parse/load then lower (upass + tolg + recipe) to
 // graphs; verilog: always elaborates through native Slang (SV -> LNAST).
@@ -220,13 +232,34 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
       }
     } else if (kind == "verilog") {  // slang: the direct SV -> LNAST front-end
       check_inputs_exist({path});
-      run_step("inou.slang",
-               var,
-               {
-                   {"files", path}
-      },
-               opts,
-               res);
+      // Slang needs definitions while elaborating a mapped Verilog side;
+      // resolving --lib only later in the encoder is too late. Keep the
+      // original source as the only positional input (relative includes belong
+      // to it) and hand each graph library's emitted models to slang as a
+      // LIBRARY file (`-v`): a model is elaborated only when the design
+      // instantiates it, so unused cells never become auto-top roots and an
+      // RTL side keeps the sole-module top fallback. Do not recurse through
+      // --lib again while materializing those graph-only inputs.
+      auto        model_opts = library_model_opts(opts);
+      std::string lib_flags;
+      for (size_t i = 0; i < opts.libs.size(); ++i) {
+        const auto& lp = opts.libs[i];
+        if (lp.kind != "lg") {
+          const char* cmd = opts.command == "lec" ? "lec" : "formal verify";
+          throw Lhd_error{"usage", std::format("{} --lib expects lg:DIR, got '{}:'", cmd, lp.kind), ""};
+        }
+        auto mv = materialize_verilog(model_opts, res, lp.kind, lp.path, std::format("{}_models{}", side, i));
+        lib_flags += std::format("{}-v\x1f{}", lib_flags.empty() ? "" : "\x1f", mv);
+      }
+      Eprp_var::Eprp_dict reader_labels{
+          {"files", path}
+      };
+      merge_sets(opts, "compile.slang", reader_labels);
+      if (!lib_flags.empty()) {  // append: a user compile.slang.slang_flags stays in force
+        auto& flags = reader_labels["slang_flags"];
+        flags       = flags.empty() ? lib_flags : flags + "\x1f" + lib_flags;
+      }
+      run_step("inou.slang", var, std::move(reader_labels), opts, res);
     } else {  // ln:
       if (!fs::is_directory(path)) {
         throw Lhd_error{"missing_file", std::format("ln: input not found: {}", path), "an ln: input is a Forest save directory"};
@@ -2109,7 +2142,11 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         return false;
       };
       if (refuted_under_collapse) {
-        if (deepen_if_bounded(rf)) {
+        // An unsettled confirmation (a demoted bounded pass, or Unknown from
+        // the start: a timeout or an encoder refusal of the flat miter) keeps
+        // the collapsed REFUTE unconfirmed; the int-blast retry below re-solves
+        // the COLLAPSED miter and must not decide it.
+        if (deepen_if_bounded(rf) || rf.verdict == Verdict::Unknown) {
           absorb_demoted = true;  // see the int_blast_retry guard below
         }
         rf.detail      = "flat-confirm after collapsed-box REFUTE" + std::string(rf.detail.empty() ? "" : "; ") + rf.detail
@@ -3855,6 +3892,7 @@ void lec_command(Options& opts, Result& res) {
   load_side_graphs(opts, res, opts.ref_kind, opts.ref_path, "ref", ref_var);
   load_side_graphs(opts, res, opts.impl_kind, opts.impl_path, "impl", impl_var);
   opts.sets.resize(assume_sets);
+  dedup_inputs(res);  // each verilog: side re-records the --lib directories it materialized
 
   // "pass.lec" = the proof itself, everything after both sides are loaded. It
   // is NOT a run_step (lec drives the engine in-kernel rather than through
@@ -4864,26 +4902,32 @@ void lec_command(Options& opts, Result& res) {
 
   auto impl_v = fs::absolute(materialize_verilog(opts, res, opts.impl_kind, opts.impl_path, "impl")).string();
   auto ref_v  = fs::absolute(materialize_verilog(opts, res, opts.ref_kind, opts.ref_path, "ref")).string();
-  // cross mode re-materializes both sides through materialize_verilog, which
-  // re-records their input paths (load_side_graphs already did above) — collapse
-  // res.inputs back to one entry per side (stable, first occurrence wins).
-  {
-    std::vector<std::string> dedup;
-    for (const auto& p : res.inputs) {
-      if (std::find(dedup.begin(), dedup.end(), p) == dedup.end()) {
-        dedup.push_back(p);
-      }
-    }
-    res.inputs = std::move(dedup);
-  }
+  // cross mode re-materializes both sides (and every --lib) through
+  // materialize_verilog, which re-records their input paths (load_side_graphs
+  // already did above) — collapse res.inputs back to one entry per path.
+  dedup_inputs(res);
   auto lgcheck = locate_lgcheck();
   auto yosys   = locate_lgcheck_yosys();
   auto rundir  = fs::absolute(workdir(opts)).string();
-  auto cmd     = std::format("cd {} && {} --implementation {} --reference {} --gold_reader slang --gate_reader slang",
-                             shell_quote(rundir),
-                             shell_quote(lgcheck),
-                             shell_quote(impl_v),
-                             shell_quote(ref_v));
+  // lgcheck's bounded miter counts clk2fflogic GLOBAL-clock steps (the clock
+  // is a free input sampled every step), and a rising edge becomes visible only
+  // every second step: a divergence k edges deep needs 2k steps (measured:
+  // count==5 from init 0 refutes at 10 steps, not 9; count==2 at 4, not 3).
+  // Native step s observes the state after s-1 edges, so covering the native
+  // window of `cycles` steps takes 2*(cycles-1) lgcheck steps. `cycles` is the
+  // REQUESTED design-cycle bound (formal.bound, the native default 6 when <= 0),
+  // not o.bound: an edge-normalized design scales o.bound into sub-steps, while
+  // lgcheck reads the un-normalized Verilog.
+  const int requested_bound = std::atoi(label("bound", "6").c_str());
+  const int lg_cycles       = requested_bound > 0 ? requested_bound : 6;  // native BMC default (pass/lec/query.cpp)
+  const int lg_bmc_steps    = std::max(1, 2 * (lg_cycles - 1));
+  auto      cmd
+      = std::format("cd {} && LGCHECK_BMC_STEPS={} {} --implementation {} --reference {} --gold_reader slang --gate_reader slang",
+                    shell_quote(rundir),
+                    lg_bmc_steps,
+                    shell_quote(lgcheck),
+                    shell_quote(impl_v),
+                    shell_quote(ref_v));
   if (!yosys.empty()) {
     cmd += std::format(" --yosys {}", shell_quote(yosys));
   }
@@ -4903,15 +4947,43 @@ void lec_command(Options& opts, Result& res) {
     cmd += " --descend_on_inconclusive";
   }
   res.recipe_steps.emplace_back("pass.lec cross-check:lgcheck");
-  auto log                      = next_log_path(opts, "lec.lgcheck");
-  cmd                          += std::format(" >> {} 2>&1", shell_quote(fs::absolute(log).string()));
-  const int status              = std::system(cmd.c_str());
-  const int code                = status != -1 && WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-  res.lec.crosscheck_verdict    = code == 0 ? "proven" : code == 1 ? "refuted" : "unknown";
-  res.lec.crosscheck_exit_code  = code;
-  const bool lg_known           = code == 0 || code == 1;
-  const bool lg_equiv           = code == 0;
-  const auto lg_verdict         = lg_known ? (lg_equiv ? "equivalent" : "different") : "unknown";
+  auto log              = next_log_path(opts, "lec.lgcheck");
+  // Truncate, never append: the log name repeats across runs sharing a
+  // --workdir, and the marker scan below must only ever see THIS run's output.
+  cmd                  += std::format(" > {} 2>&1", shell_quote(fs::absolute(log).string()));
+  const int status      = std::system(cmd.c_str());
+  const int code        = status != -1 && WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+  // lgcheck reserves exit 0 for unbounded equivalence. Its complete BMC is a
+  // bounded result over lgcheck's OWN window: zero-init (-set-init-zero), from
+  // t=1 without a reset, or reset held at t=1-2 and checked from t=4. That is
+  // not the native after_reset window (native adds reset_hold cycles and uses
+  // its own init policy), and the reset-bearing alignment is unverified. So a
+  // bounded lgcheck pass may CORROBORATE a native pass, but never contradicts
+  // a native REFUTE. The marker is emitted only after every depth succeeds;
+  // failures and incomplete runs retain their original verdict.
+  bool      lg_bounded  = false;
+  if (code == 2) {
+    std::ifstream proof_log(log);
+    std::string   line;
+    const auto    marker = std::format("BMC: found no counterexample within {} steps top:", lg_bmc_steps);
+    while (std::getline(proof_log, line)) {
+      if (line.starts_with("INCONCLUSIVE:")) {
+        break;  // later descent diagnostics concern children, not this miter
+      }
+      lg_bounded |= line.starts_with(marker);
+    }
+  }
+  res.lec.crosscheck_bounded   = lg_bounded;
+  res.lec.crosscheck_bound     = lg_bounded ? lg_cycles : 0;
+  res.lec.crosscheck_verdict   = code == 0 || lg_bounded ? "proven" : code == 1 ? "refuted" : "unknown";
+  res.lec.crosscheck_exit_code = code;
+  const bool        lg_known   = code == 0 || code == 1 || (lg_bounded && lec_equiv);
+  const bool        lg_equiv   = code == 0 || (lg_bounded && lec_equiv);
+  const std::string lg_verdict
+      = !lg_known  ? std::string{"unknown"}
+        : !lg_equiv ? std::string{"different"}
+        : code != 0 ? std::format("equivalent for {} cycles (bounded; deeper cycles not checked)", lg_cycles)
+                    : std::string{"equivalent"};
 
   std::print("lec cross-check: engine={} -> {}; lgcheck -> {}\n",
              o.engine,
@@ -4926,7 +4998,13 @@ void lec_command(Options& opts, Result& res) {
   if (!lg_known) {
     throw Lhd_error{code == 2 ? "unsupported" : "dependency",
                     code == 2 ? "lgcheck cross-check did not decide equivalence" : "lgcheck cross-check failed to run",
-                    std::format("lgcheck exit status {}; see {}. This is not a disproof.", code, log)};
+                    std::format("lgcheck exit status {}; see {}.{} This is not a disproof.",
+                                code,
+                                log,
+                                lg_bounded ? std::format(" Its zero-init {}-step bounded window did not reach the native "
+                                                         "counterexample.",
+                                                         lg_bmc_steps)
+                                           : std::string{})};
   }
   if (lec_equiv != lg_equiv) {
     throw Lhd_error{
@@ -6049,7 +6127,23 @@ void formal_verify_command(Options& opts, Result& res) {
             }
             auto sio = node.get_subnode_io();
             if (sio != nullptr && entity(sio->get_name()) == entity(blk.target)) {
-              inst_prefixes.emplace_back(node.get_hier_name());
+              // Bind by the PHYSICAL occurrence path: unique and non-empty for
+              // every non-top instance. A logical name drops transparent
+              // (`__flat___*`) components, so it can be "" -- the sentinel for
+              // the top itself, which would read the TOP's ports -- or collide
+              // across instances. Logical naming applies only to the flop keys
+              // (resolve() canonicalizes prefix.sig through canon_flop_name).
+              std::string hname{node.get_hier_name()};
+              if (hname.empty() || std::find(inst_prefixes.begin(), inst_prefixes.end(), hname) != inst_prefixes.end()) {
+                throw Lhd_error{"usage",
+                                std::format("formal block '{}': an instance of module '{}' in '{}' has {} hierarchical name",
+                                            blk.name,
+                                            blk.target,
+                                            g->get_name(),
+                                            hname.empty() ? "an empty" : std::format("a duplicate ('{}')", hname)),
+                                "each bound instance needs a distinct, non-empty instance name"};
+              }
+              inst_prefixes.emplace_back(std::move(hname));
             }
           }
           if (inst_prefixes.empty()) {

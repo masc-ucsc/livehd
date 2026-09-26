@@ -3111,6 +3111,7 @@ std::string materialize_verilog(Options& opts, Result& res, const std::string& k
   // (Both sides produce the SAME model text, so this repeats one load+cgen per
   // run; caching it must NOT go through the reusable --workdir, where a stale
   // file from an earlier run with a different --lib would silently win.)
+  auto lib_opts = library_model_opts(opts);  // the model library is not a proof side
   for (size_t i = 0; i < opts.libs.size(); ++i) {
     const auto& lp = opts.libs[i];
     if (lp.kind != "lg") {
@@ -3118,9 +3119,9 @@ std::string materialize_verilog(Options& opts, Result& res, const std::string& k
     }
     Eprp_var lib_var;
     auto     lib_side = std::format("{}_lib{}", side, i);
-    load_side_graphs(opts, res, lp.kind, lp.path, lib_side, lib_var);
+    load_side_graphs(lib_opts, res, lp.kind, lp.path, lib_side, lib_var);
     auto          scratch = std::format("{}/check_{}", workdir(opts), lib_side);
-    auto          names   = cgen_into(opts, res, lib_var, scratch);
+    auto          names   = cgen_into(lib_opts, res, lib_var, scratch);
     std::ofstream ofs(out, std::ios::app);
     for (const auto& n : names) {
       append_file(ofs, std::format("{}/{}.v", scratch, livehd::unit_file_stem(n)));

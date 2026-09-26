@@ -42,8 +42,8 @@ checked separately with `lhd lec`: synthesis proves nothing itself.
    the source by simulation; a mismatch is an internal error.
 3. **Hand-off.** `cover_network` turns the cover into a coarse Lnet over the
    region's boundary (one LUT per gate, its minimum SOP as side data), returned
-   as a `Region_rewrite`: `abc=opt` (default) runs it through the full pass.abc
-   flow, `abc=tmap` technology-maps it only (`&nf`, then the sizing tail), and
+   as a `Region_rewrite`: `abc=opt` runs it through the full pass.abc
+   flow, `abc=tmap` (default) technology-maps it only (`&nf`, then the sizing tail), and
    `abc=only` leaves the region to the ABC flow without a cover. The ABC
    backend builds the SOP network in the region's own PI/PO/latch skeleton
    (`pass/abc/abc_lnet.cpp`, `lnet_into_logic`).
@@ -66,13 +66,14 @@ A region the cover refuses -- a time or memory budget (`time_budget_ms`,
 | `fanout_boundary` | 0 | a node with this many sinks is always a gate boundary |
 | `recovery_rounds` | 2 | exact-area recovery sweeps |
 | `max_nodes` | 2,000,000 | largest region the cover admits |
-| `abc` | opt | hand-off: `opt`, `tmap` or `only` |
+| `abc` | tmap | hand-off: `opt`, `tmap` or `only` |
 | `ware_trials` | false | re-run the architecture trials through this mapper |
 | `large_ge` | 0 | the ABC size tier stays off for the cover's hand-off |
 
-The defaults are the best measured configuration (abc_cleanup.md step 8): on
-dino, `--set synth.mapper=usyn` alone reproduces it. `pass.usyn` maps one
-region at a time (`synth.threads` is ignored).
+The default preserves the USYN cover through technology mapping without
+running full ABC optimization afterward. To reproduce the earlier dino
+configuration (abc_cleanup.md step 8), also set `pass.usyn.abc=opt`.
+`pass.usyn` maps one region at a time (`synth.threads` is ignored).
 
 ## Reports and reuse
 

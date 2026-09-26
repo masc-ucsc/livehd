@@ -324,7 +324,7 @@ grep -q 'guarded-instance-property' "$DIAG" \
   && fail "the guarded-instance-property limitation should be gone: $(cat "$DIAG")"
 grep -q '__valid' "$VOUT" || fail "conditional callee lacks its activation ABI: $(cat "$VOUT")"
 grep -q 'assert (' "$VOUT" || fail "callee property disappeared: $(cat "$VOUT")"
-grep -q '= (__valid ==' "$VOUT" \
+grep -Eq '= \(+__valid\)* ==' "$VOUT" \
   || fail "callee property is not implication-guarded by activation: $(cat "$VOUT")"
 # Control: an unguarded call still compiles cleanly and binds activation true
 # when this same definition is activation-capable elsewhere in the registry.

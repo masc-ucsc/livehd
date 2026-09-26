@@ -23,7 +23,6 @@ cc_test(
     name = "legalize_test",
     srcs = ["tests/legalize_test.cpp"],
     copts = COPTS,
-    linkopts = ["-lz"],  # via //pass/lec:lec_query -> @abc (zlib-backed readers)
     deps = [
         ":legalize",
         "//pass/lec:lec_query",

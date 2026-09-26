@@ -30,8 +30,39 @@ computed forward once, with a bounded representation size.
 
 ## Mux sharing
 
+`cprop_opshare.cpp` factors private same-shape operators out of binary muxes
+before region sharing. Operand banks retain their arity and multiplicity;
+positional parameters (mask, extension position, reduction count and Concat
+lane widths) must agree. Fresh operand muxes are unstamped: bitwidth unions
+their full signed/unsigned ranges afterwards. The retained output still has
+the original observation boundary. Cprop must be followed by bitwidth before
+finite-width simulation, emission or LEC; a result hint is not a truncation
+operator in cprop's integer algebra.
+
+For each differing Concat lane, every arm must have a structural unsigned
+bound within the declared lane width. Otherwise the matcher rejects sharing:
+a lossless mixed-sign mux can exceed the lane window, and adding a mask would
+consume the binary rewrite's operator saving. Width hints do not bypass this
+guard.
+
+The matcher rejects named/shared arm operators, colored/check-bearing nodes,
+unknown literals and latch-Q operands. Its worklist uses pin generations and
+a graph-size work/edge budget; operand sorting has its usual logarithmic cost.
+Index sharing currently requires a structurally proven in-range selector:
+the runtime's invalid result, cprop's zero and LEC's last-arm out-of-range
+behavior need reconciliation before general indexed sharing. Hotmux operator
+sharing is still pending. Existing mux-region grouping below is independent.
+
 `cprop_mux.cpp` groups repeated data values across binary `Mux` and exclusive
-`Hotmux` regions. A selector activates a child under `parent_active & selector`;
+`Hotmux` regions. With exactly two values, it first plans a predicate over the
+owned selection tree, replacing terminals by false/true. Local folds can use
+a wide signed selector directly when only its truth value matters. Both result
+polarities are considered; all reachable new predicate nodes and the final
+data mux must total fewer nodes than the old region. Rejected plans create no
+graph nodes. Named interiors remain separate region roots. This two-value
+rule also applies to bool01 data; equal-cost priority chains stay unchanged.
+
+For larger groups, a selector activates a child under `parent_active & selector`;
 the fallback uses `parent_active & !OR(selectors)`. These predicates stay shared
 graph expressions. The pass never enumerates paths or expands Boolean expressions
 into sums of products. Conditions reaching the same terminal are ORed together,

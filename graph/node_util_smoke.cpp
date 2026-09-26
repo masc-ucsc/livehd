@@ -84,3 +84,14 @@ TEST(NodeUtil, MaskConstructionChecksBeforeCreatingNodes) {
   EXPECT_NO_THROW((void)gu::create_get_mask(*graph, value, whole));
   EXPECT_NO_THROW((void)gu::create_set_mask(*graph, value, whole, value));
 }
+
+TEST(NodeUtil, TransparentInstanceLogicalNames) {
+  EXPECT_EQ(gu::logical_hier_name("foo.__flat___region42.bar.reg"), "foo.bar.reg");
+  EXPECT_EQ(gu::logical_hier_name("__flat___a.foo.__flat___b.`bar.reg`"), "foo.bar.reg");
+  EXPECT_EQ(gu::logical_hier_name("foo.__flat___a.__flat___b.reg"), "foo.reg");
+  EXPECT_EQ(gu::logical_hier_name("foo.__flat___reg"), "foo.__flat___reg");
+  EXPECT_EQ(gu::logical_hier_name("foo.__flat___region", true), "foo");
+  EXPECT_EQ(gu::logical_hier_name("__flat___region", true), "");
+  EXPECT_EQ(gu::logical_hier_name("foo.__flat__ordinary.reg"), "foo.__flat__ordinary.reg");
+  EXPECT_EQ(gu::logical_hier_name("foo.my__flat___ordinary.reg"), "foo.my__flat___ordinary.reg");
+}

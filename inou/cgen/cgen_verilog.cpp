@@ -2350,44 +2350,12 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
   } else if (op == Ntype_op::LT || op == Ntype_op::GT) {
     std::vector<std::string> lhs;
     std::vector<std::string> rhs;
-    bool                     signed_compare = !is_unsign(dpin);
-    auto                     cmp_expr       = [&](hhds::Pin_class cmp_dpin) {
-      if (signed_compare && !cmp_dpin.is_invalid() && !cmp_dpin.is_const()) {
-        auto cmp_node = cmp_dpin.get_master_node();
-        if (type_op_of(cmp_node) == Ntype_op::Get_mask) {
-          auto a_dpin    = get_driver(find_sink_pin(cmp_node, "a"));
-          auto mask_dpin = get_driver(find_sink_pin(cmp_node, "mask"));
-          if (!a_dpin.is_invalid() && mask_dpin.is_const() && !is_unsign(a_dpin)) {
-            const auto& mask_v  = const_of(mask_dpin);
-            auto        out_w   = bits_of(cmp_dpin);
-            auto        a_w     = bits_of(a_dpin);
-            bool        all_one = mask_v.is_just_i64() && mask_v.to_just_i64() == -1;
-            if (!all_one && mask_v.is_just_i64() && out_w > 0 && out_w <= 62) {
-              all_one = mask_v.to_just_i64() == ((int64_t{1} << out_w) - 1);
-            }
-            if (!all_one && mask_v.is_just_i64() && a_w > 0 && a_w <= 62) {
-              all_one = mask_v.to_just_i64() == ((int64_t{1} << a_w) - 1);
-            }
-
-            // get_unsigned_dpin() can leave a Get_mask(a,-1) wrapper around a
-            // signed value. For signed comparisons, that wrapper would
-            // zero-extend the value and break guards such as signed(~addr) < 0.
-            // Real zero-extensions over unsigned RTLIL wires are protected by
-            // the imported pin signedness: !is_unsign(a_dpin) is false.
-            if (all_one && a_w > 0 && out_w > 0 && out_w >= a_w) {
-              cmp_dpin = a_dpin;
-            }
-          }
-        }
-      }
-
+    // The result is always bool01; its sign says nothing about the inputs.
+    // Preserve explicit Get_mask zero-extension and compare operand VALUES.
+    const bool               signed_compare = mixes_operand_signs(node);
+    const auto               cmp_expr       = [&](hhds::Pin_class cmp_dpin) {
       auto expr = get_expression(cmp_dpin);
-      if (signed_compare) {
-        // A declared-UNSIGNED net needs the zero-bit pad: bare `$signed(x)`
-        // reinterprets its msb as a sign, so an unsigned 8'hff compares as -1.
-        return declared_unsigned_net(cmp_dpin) ? signed_operand(cmp_dpin, expr) : absl::StrCat("$signed(", expr, ")");
-      }
-      return expr;
+      return signed_compare ? signed_operand(cmp_dpin, expr) : expr;
     };
     for (const auto& sink : node.inp_sorted_pins()) {
       const auto drv = sink.get_driver_pin();
@@ -2626,6 +2594,26 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       absl::StrAppend(&body, lane_at_width(l.value, l.width));
     }
     final_expr = absl::StrCat("{", body, "}");
+  } else if (op == Ntype_op::EQ) {
+    // EQ is all-equal, not Verilog's left-associated (a == b) == c.
+    // Cast mixed signs per operand so equality compares integer values.
+    const bool  mixed_signs = mixes_operand_signs(node);
+    std::string first;
+    for (const auto& sink : node.inp_sorted_pins()) {
+      const auto driver  = sink.get_driver_pin();
+      auto       operand = get_expression(driver);
+      if (mixed_signs) {
+        operand = signed_operand(driver, operand);
+      }
+      if (first.empty()) {
+        first = std::move(operand);
+      } else {
+        if (!final_expr.empty()) {
+          absl::StrAppend(&final_expr, " && ");
+        }
+        absl::StrAppend(&final_expr, "((", first, ") == (", operand, "))");
+      }
+    }
   } else if (op == Ntype_op::AttrSet) {
     return {};  // drop
   } else {
@@ -2638,8 +2626,6 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       txt_op = "|";
     } else if (op == Ntype_op::Xor) {
       txt_op = "^";
-    } else if (op == Ntype_op::EQ) {
-      txt_op = "==";
     }
     // FAIL CLOSED on an op with no lowering here. `I()` alone is NOT enough:
     // it compiles out under NDEBUG (the default `-c opt` build), and the loop
@@ -2725,14 +2711,17 @@ std::string Cgen_verilog::sub_instance_name(const hhds::Node_class& node) {
   } else if (auto io = node.get_subnode_io()) {
     // Anonymous instance (partition leaves region wrappers unnamed so the leaf
     // hier names stay transparent): derive a stable, readable name from the
-    // module -- not `sub_<nid>`, which churns every recompile.
-    base = "u_" + std::string{io->get_name()};
+    // module -- not `sub_<nid>`, which churns every recompile. Use the emitted
+    // (flat, dot-free) module identifier, never the raw `file.entity` GraphIO
+    // name: an escaped dotted instance name reloads as two hierarchy levels and
+    // logical_hier_name would drop only `__flat___file`, keeping the entity.
+    base = std::string{livehd::graph_util::transparent_instance_prefix} + flat_module_name(io->get_name());
   } else {
     base = default_instance_name(node);
   }
   // De-collide against wires and other instances (two anonymous instances of one
   // module -- e.g. a deduplicated region mapped once and instantiated twice --
-  // would otherwise both be `u_<module>`).
+  // would otherwise both be `__flat___<module>`).
   auto name = get_unique_decl_name(get_scaped_name(base));
   sub_instance_names_.emplace(node.get_class_index(), name);
   return name;

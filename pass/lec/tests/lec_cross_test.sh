@@ -136,6 +136,46 @@ for variant in latch latch_bad; do
   fi
 done
 
+# Bounded windows must line up. lgcheck's bounded miter counts clk2fflogic
+# global-clock steps (two per clock edge), so lhd converts formal.bound design
+# cycles into that depth. This resetless counter first diverges at native step 6
+# (after 5 edges): at bound 5 both engines pass their window and lgcheck
+# corroborates it as bounded (bound 5, in design cycles); at bound 6 both refute.
+# A depth mismatch shows up as a DISAGREE or as a bounded lgcheck "proof" of a
+# window native refutes.
+cat > "$WORK/cnt_ref.v" <<'EOF'
+module cnt(input clock, output o);
+  reg [3:0] count = 0;
+  always @(posedge clock) count <= count + 1'b1;
+  assign o = count == 4'd5;
+endmodule
+EOF
+cat > "$WORK/cnt_impl.v" <<'EOF'
+module cnt(input clock, output o);
+  reg [3:0] count = 0;
+  always @(posedge clock) count <= count + 1'b1;
+  assign o = 1'b0;
+endmodule
+EOF
+for bound in 5 6; do
+  $LHD lec --impl "$WORK/cnt_impl.v" --ref "$WORK/cnt_ref.v" --top cnt \
+    --set formal.solver=lgyosys --set formal.bound=$bound --set formal.simfail_run=false \
+    --workdir "$WORK/cnt_$bound" --result-json "$WORK/cnt_$bound.json" > "$WORK/cnt_$bound.log" 2>&1
+  rc=$?
+  if [ "$bound" -eq 5 ]; then
+    expected=0
+    cross='"crosscheck":{"solver":"lgyosys","verdict":"proven","exit_code":2,"bounded":true,"bound":5}'
+  else
+    expected=10
+    cross='"crosscheck":{"solver":"lgyosys","verdict":"refuted","exit_code":1}'
+  fi
+  if [ "$rc" -ne "$expected" ] || grep -qi DISAGREE "$WORK/cnt_$bound.log" || ! grep -qF "$cross" "$WORK/cnt_$bound.json"; then
+    echo "FAIL: bounded counter cross-check at formal.bound=$bound returned rc=$rc, expected $expected with $cross"
+    cat "$WORK/cnt_$bound.log" "$WORK/cnt_$bound.json"
+    fail=1
+  fi
+done
+
 # Deterministic process-status controls: UNKNOWN and a crashed/setup oracle
 # must not be reported as a counterexample or agreement with native REFUTED.
 for oracle_rc in 2 5; do

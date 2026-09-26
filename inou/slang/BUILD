@@ -166,8 +166,17 @@ _SV_SOURCES = glob(
     ],
 )
 
+# Fixtures with a `// :lec_solver: lgyosys` header: they shell out to lgcheck.
+_SV_LGYOSYS = [
+    "tests/sv/memory_sync_reset.v",
+]
+
 # A new ordinary SV regression is one source file: no per-case BUILD or script.
-# Optional // :test: roundtrip|error|lec_no_x headers select shared checks.
+# Optional // :test: roundtrip|roundtrip_sim|error|lec_no_x headers select shared
+# checks (see tests/slang_compile.sh). A roundtrip_sim fixture carries its
+# :verilog_re:/:verilog_not_re: structure checks and either a sibling
+# <stem>_tb.prp native testbench or a :sim_unsupported: refusal tripwire; an
+# optional <stem>_tb.v event-level bench runs only with LHD_EXTERNAL_SIM=1.
 [sh_test(
     name = "slang_%s" % src.split("/")[-1].rsplit(".", 1)[0],
     srcs = ["tests/slang_compile.sh"],
@@ -180,9 +189,13 @@ _SV_SOURCES = glob(
         "//inou/prp:tests/lec.py",
         "//lhd",
     ] + glob(
-        [src.rsplit(".", 1)[0] + "_tb.v"],
+        [
+            src.rsplit(".", 1)[0] + "_tb.prp",
+            src.rsplit(".", 1)[0] + "_tb.v",
+        ],
         allow_empty = True,
-    ),
+    ) + (["//inou/yosys:scripts"] if src in _SV_LGYOSYS else []),
+    # `lhd sim` finds the host C++ compiler (and LHD_EXTERNAL_SIM iverilog) on PATH.
     env_inherit = ["PATH"],
     # Keep bounded formal checks from oversubscribing frontend/solver capacity.
     tags = ["cpu:4"],
@@ -232,7 +245,13 @@ sh_test(
     name = "slang_memory_clock_diagnostic",
     size = "large",
     srcs = ["tests/memory_clock_diagnostic.sh"],
-    data = ["//lhd"],
+    data = [
+        "//lhd",
+        "//tools:native_sim.py",
+        "//ware:cgen_memory_rtl",
+    ],
+    # `lhd sim` finds the host C++ compiler (and LHD_EXTERNAL_SIM iverilog) on PATH.
+    env_inherit = ["PATH"],
 )
 
 test_suite(

@@ -101,7 +101,22 @@ uint64_t process_peak_rss_bytes() {
 #if defined(__APPLE__)
   return static_cast<uint64_t>(usage.ru_maxrss);  // bytes on Darwin
 #else
-  return static_cast<uint64_t>(usage.ru_maxrss) * 1024;  // KiB on Linux
+  // Linux's rusage high-water counter can lag the current RSS (observable
+  // immediately after faults). /proc reports max(high-water, current RSS),
+  // so prefer its VmHWM while retaining rusage when procfs is unavailable.
+  uint64_t peak = static_cast<uint64_t>(usage.ru_maxrss) * 1024;  // KiB on Linux
+  if (auto* status = std::fopen("/proc/self/status", "r")) {
+    char line[256];
+    while (std::fgets(line, sizeof(line), status) != nullptr) {
+      unsigned long kb = 0;
+      if (std::sscanf(line, "VmHWM: %lu kB", &kb) == 1) {
+        peak = std::max(peak, static_cast<uint64_t>(kb) * 1024);
+        break;
+      }
+    }
+    std::fclose(status);
+  }
+  return peak;
 #endif
 }
 

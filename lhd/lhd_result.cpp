@@ -860,6 +860,12 @@ void write_result(const Options& opts, const Result& res) {
       w.String(res.lec.crosscheck_verdict.c_str());
       w.Key("exit_code");
       w.Int(res.lec.crosscheck_exit_code);
+      if (res.lec.crosscheck_bounded) {
+        w.Key("bounded");
+        w.Bool(true);
+        w.Key("bound");
+        w.Int64(res.lec.crosscheck_bound);
+      }
       w.EndObject();
     }
     w.Key("bounded");

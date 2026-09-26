@@ -63,7 +63,7 @@ void Pass_usyn::setup() {
                        "hand-off to ABC: tmap (the cover network, gates as minimum SOPs, technology-mapped only), opt (that "
                        "network through the full pass.abc flow), only (no cover: the original region logic through the "
                        "pass.abc flow)",
-                       "opt");
+                       "tmap");
   m.add_label_optional("ware_trials",
                        "true: pass.abc's ware trials re-map each arithmetic ware region under alternative architectures "
                        "(re-running this mapper) and keep the best",
@@ -110,7 +110,7 @@ bool read_options(const Eprp_var& var, livehd::usyn::Search_options& options) {
     return false;
   }
   using Abc_mode = livehd::usyn::Search_options::Abc_mode;
-  const auto abc = std::string{var.get_stage("abc", "opt")};
+  const auto abc = std::string{var.get_stage("abc", "tmap")};
   if (abc == "tmap") {
     options.abc_mode = Abc_mode::tmap;
   } else if (abc == "opt") {

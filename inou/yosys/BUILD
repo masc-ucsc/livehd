@@ -56,7 +56,6 @@ cc_binary(
     copts = COPTS + ["-Wno-shadow"],
     features = ["-use_header_modules"],
     linkopts = [
-        "-lz",
         "-rdynamic",
     ],
     visibility = ["//visibility:public"],

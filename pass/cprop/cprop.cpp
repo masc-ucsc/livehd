@@ -17,6 +17,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/str_cat.h"
+#include "cprop_muxctx.hpp"
 #include "cprop_profile.hpp"
 #include "cprop_value.hpp"
 #include "hhds/graph.hpp"
@@ -148,25 +149,12 @@ template <typename T>
 
 [[nodiscard]] hhds::Pin_class drv_at(const hhds::Node_class& n, uint32_t pid);
 
-struct Bool_condition {
-  hhds::Pin_class base;
-  bool            true_when_base = true;
-};
+using livehd::muxctx::Bool_condition;
 
 [[nodiscard]] bool same_pin(const hhds::Pin_class& a, const hhds::Pin_class& b) {
   return !a.is_invalid() && !b.is_invalid() && a.get_class_index() == b.get_class_index();
 }
 
-[[nodiscard]] std::optional<bool> const_truth(const hhds::Pin_class& p) {
-  if (p.is_invalid() || !p.is_const()) {
-    return std::nullopt;
-  }
-  const auto& c = const_of(p);
-  if (c.has_unknowns()) {
-    return std::nullopt;
-  }
-  return !c.is_known_zero();
-}
 
 // Truth identity and polarity are computed from canonical producers once.
 // References follow forwarding and retain their generation across ID reuse.
@@ -192,52 +180,7 @@ struct Bool_condition {
 // trip: `s ? 1 : 0`, its inverse, and `x == 0` chains. This is deliberately a
 // structural decoder, not a general boolean-equivalence proof.
 [[nodiscard]] std::optional<Bool_condition> compute_bool_condition(const hhds::Pin_class& p) {
-  if (p.is_invalid()) {
-    return std::nullopt;
-  }
-  if (p.is_const() || is_graph_input_pin(p)) {
-    return Bool_condition{p, true};
-  }
-  auto n = p.get_master_node();
-  if (type_op_of(n) == Ntype_op::Mux && is_two_arm_mux(ordered_inp_edges(n))) {
-    auto sel  = drv_at(n, 0);
-    auto arm0 = drv_at(n, 1);
-    auto arm1 = drv_at(n, 2);
-    auto v0   = const_truth(arm0);
-    auto v1   = const_truth(arm1);
-    if (!sel.is_invalid() && v0.has_value() && v1.has_value() && *v0 != *v1) {
-      auto result = lookup_bool_condition(sel);
-      if (result.has_value() && !*v1) {  // arm1 false, arm0 true => !selector
-        result->true_when_base = !result->true_when_base;
-      }
-      return result;
-    }
-  } else if (type_op_of(n) == Ntype_op::EQ) {
-    // The lowering spells truth tests as `(x == 0) == 0`; peel each equality
-    // against known zero and carry its inversion bit. EQ's operands occupy
-    // CONSECUTIVE sink pins of one bank, so walk the pins rather than drv_at().
-    hhds::Pin_class value;
-    int             zeros  = 0;
-    int             values = 0;
-    for (auto isnk : n.inp_sorted_pins()) {
-      auto idrv  = isnk.get_driver_pin();
-      auto truth = const_truth(idrv);
-      if (truth.has_value() && !*truth) {
-        ++zeros;
-      } else {
-        value = idrv;
-        ++values;
-      }
-    }
-    if (zeros == 1 && values == 1) {
-      auto result = lookup_bool_condition(value);
-      if (result.has_value()) {
-        result->true_when_base = !result->true_when_base;
-      }
-      return result;
-    }
-  }
-  return Bool_condition{p, true};
+  return livehd::muxctx::compute_condition(p, lookup_bool_condition, livehd::cprop_value::is_bool01);
 }
 
 [[nodiscard]] std::optional<Bool_condition> decode_bool_condition(const hhds::Pin_class& p) {
@@ -3433,6 +3376,7 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
     canonicalize_concat_pack(current_graph, *it);
   }
   vectorize_bit_muxes();
+  mux_op_share_pass();
   mux_share_pass();
   vectorize_bit_reductions();
   // Concats containing vectorized lanes are the explicit consumers affected

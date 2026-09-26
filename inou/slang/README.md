@@ -155,6 +155,14 @@ Optional leading comments select additional expectations:
 - `// :test: lec_no_x` also rejects introduced X/Z literals.
 - `// :test: error` requires a clean compiler error with a structured diagnostic;
   optional `// :error: REGEX` matches the diagnostic message.
+- `// :test: roundtrip_sim` value-checks the Pyrope round trip instead of
+  running LEC (see below).
+- `// :lec_timeout: N` raises the per-fixture LEC budget (watchdog 2N).
+- `// :lec_solver: NAME` runs `lhd lec --set formal.solver=NAME`. With
+  `lgyosys`, the native proof is cross-checked by lgcheck under
+  `LGCHECK_EQUIV_TIMEOUT=<lec_timeout>`, and the fixture requires lgcheck's
+  unbounded proof (crosscheck `exit_code` 0), not a bounded-clean window. Add
+  the fixture to `_SV_LGYOSYS` in `BUILD` so it stages `//inou/yosys:scripts`.
 
 These tests share the five-second internal LEC budget and ten-second watchdog
 below. Dedicated tests remain for warning details, generated storage complexity,
@@ -280,11 +288,27 @@ Run the automatically discovered SV corpus with
 `bazel test -c opt //inou/slang:integration`. Each fixture remains an individual
 Bazel test, so failures identify the source and runtimes stay bounded.
 
-`// :test: roundtrip_sim` emits and recompiles Pyrope, then runs a mandatory
-sibling `<stem>_tb.v` with Icarus against the generated Verilog. This profile
-covers behavior the formal encoder cannot represent, such as flop-driven
-clocks; it does not claim a proof or accept an unsupported LEC verdict. The
-bench must call `$fatal` on mismatch. Ordinary roundtrips still use LEC.
+`// :test: roundtrip_sim` emits and recompiles Pyrope, then checks the
+re-emitted Verilog without LEC. This profile covers behavior the formal encoder
+cannot represent, such as flop-driven clocks; it does not claim a proof or
+accept an unsupported LEC verdict. Ordinary roundtrips still use LEC.
+
+1. Every `// :verilog_re: ERE` header must match the re-emitted Verilog and no
+   `// :verilog_not_re: ERE` may (for example, an asynchronous reset must keep
+   its sensitivity list in every block).
+2. The sibling `<stem>_tb.prp` Pyrope testbench (`import("lg:<top>")`, `tick`
+   directed vectors, `assert`) runs under `lhd sim lg:` with
+   `sim.unknown_zero=true`. Native simulation is cycle-based: each `step` is
+   one reference-clock cycle, so edge polarity, a reset asserted between edges,
+   and sub-cycle toggles are not observable there. Pin those with step 1.
+3. A design native simulation refuses declares `// :sim_unsupported: TEXT`
+   instead of a `_tb.prp`; the refusal (exit 7, class `unsupported`, `TEXT` in
+   the message) is required, so a newly supported schedule fails until it gets
+   a testbench.
+4. An optional `<stem>_tb.v` event-level bench (it must `$fatal` on mismatch)
+   runs under Icarus only with `LHD_EXTERNAL_SIM=1`, for example
+   `bazel test --test_env=LHD_EXTERNAL_SIM=1 //inou/slang:slang_writer_divclk`
+   with iverilog/vvp on `PATH`. The default suite needs no external simulator.
 
 The discovered integration cases reserve four Bazel CPUs each so concurrent
 frontend/solver jobs do not exhaust the fixed LEC watchdog through resource

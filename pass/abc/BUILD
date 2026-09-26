@@ -88,7 +88,6 @@ cc_test(
     srcs = ["abc_map_test.cpp"],
     copts = COPTS,
     data = ["//inou/prp:abc_tests"],
-    linkopts = ["-lz"],
     deps = [
         ":pass_abc",
         "//graph",
@@ -101,7 +100,6 @@ cc_test(
     name = "abc_lnet_test",
     srcs = ["abc_lnet_test.cpp"],
     copts = COPTS,
-    linkopts = ["-lz"],
     deps = [
         ":pass_abc",
         "@abc",
@@ -114,7 +112,6 @@ cc_test(
     srcs = ["abc_flow_test.cpp"],
     copts = COPTS,
     data = ["//inou/prp:abc_tests"],
-    linkopts = ["-lz"],
     deps = [
         ":pass_abc",
         "@abc",
@@ -126,7 +123,6 @@ cc_test(
     name = "abc_session_smoke",
     srcs = ["abc_session_smoke.cpp"],
     copts = COPTS,
-    linkopts = ["-lz"],
     deps = [
         "//core",
         "@abc",
@@ -138,7 +134,6 @@ cc_test(
     name = "abc_satopt_test",
     srcs = ["abc_satopt_test.cpp"],
     copts = COPTS,
-    linkopts = ["-lz"],
     deps = [
         ":pass_abc",
         "//graph",
@@ -152,7 +147,6 @@ cc_test(
     srcs = ["pass_abc_test.cpp"],
     copts = COPTS,
     data = ["//inou/prp:abc_tests"],
-    linkopts = ["-lz"],
     deps = [
         ":pass_abc",
         "//graph",

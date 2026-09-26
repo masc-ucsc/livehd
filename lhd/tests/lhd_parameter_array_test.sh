@@ -36,22 +36,6 @@ python3 - "$W/result.json" <<'PY'
 import json,sys
 r=json.load(open(sys.argv[1]))['lec']; assert r['verdict']=='proven',r
 PY
-cat > "$W/tb.v" <<'SV'
-module tb;
-reg [6:0] addr;
-wire [63:0] ascending, descending, a_ref, d_ref;
-wire signed [15:0] signed_value, s_ref;
-parameter_array dut(.*);
-reference golden(.addr(addr),.ascending(a_ref),.descending(d_ref),.signed_value(s_ref));
-initial begin
-  for (integer k=0;k<128;k=k+1) begin
-    addr=k; #1;
-    if (ascending !== a_ref || descending !== d_ref || signed_value !== s_ref) $fatal(1,"parameter lookup mismatch %d",k);
-  end
-  $finish;
-end
-endmodule
-SV
-iverilog -g2012 -s tb -o "$W/sim" "$W/compiled.v" "$W/ref.v" "$W/tb.v"
-vvp "$W/sim"
+run lec --impl verilog:"$W/compiled.v" --ref verilog:"$W/ref.v" --impl-top parameter_array --ref-top reference \
+  --set formal.timeout=20 --workdir "$W/emitted"
 echo 'PASS: parameter-array lookup preserves range direction, bounds, wide entries, and signed values'

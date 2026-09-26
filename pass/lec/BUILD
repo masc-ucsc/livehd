@@ -93,12 +93,13 @@ cc_test(
     size = "small",
     srcs = ["tests/query_test.cpp"],
     copts = COPTS,
-    linkopts = ["-lz"],  # via :lec_query -> @abc (zlib-backed aiger/liberty readers)
     deps = [
         ":lec_query",
         "//graph",
         "//pass/bitwidth:pass_bitwidth",
         "//pass/enableopt:pass_enableopt",
+        "//pass/partition:flatten",  # transparent-hierarchy LecNames cases
+        "//pass/semdiff",
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",
     ],
@@ -111,7 +112,6 @@ cc_test(
     name = "cone_abc_test",
     srcs = ["tests/cone_abc_test.cpp"],
     copts = COPTS,
-    linkopts = ["-lz"],  # @abc's aiger/liberty readers pull in zlib (as //lhd does)
     deps = [
         ":lec_query",
         "@cvc5",

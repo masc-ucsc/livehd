@@ -138,6 +138,9 @@ cc_library(
     ],
     includes = ["src"],
     visibility = ["//visibility:public"],
+    # ABC's aiger/liberty readers use gz*; link the hermetic BCR zlib (zlib-ng in
+    # ZLIB_COMPAT mode) instead of a system -lz, which needs zlib dev files.
+    deps = ["@llvm_zlib//:zlib"],
 )
 
 #cc_library(

@@ -29,21 +29,7 @@ EOF
 cat > "$W/models.v" <<'EOF'
 module HARD_BUF(input A, output Y); assign Y = ~A; endmodule
 module HARD_XOR(input A, B, output Y); assign Y = A ^ B; endmodule
-module tb;
-  reg clk,a,b,c;
-  wire y,q;
-  macro_declarations dut(.clk(clk), .a(a), .b(b), .c(c), .y(y), .q(q));
-  integer i;
-  initial begin
-    for(i=0;i<8;i=i+1) begin
-      clk=0; {a,b,c}=i; #1;
-      if(y !== (~a ^ b ^ c)) $fatal(1,"macro connectivity lost at input %d",i);
-      clk=1; #1;
-      if(q !== y) $fatal(1,"macro register clock lost at input %d",i);
-    end
-    $finish;
-  end
-endmodule
+
 EOF
 for reader in yosys-verilog yosys-slang; do
   for temperature in cold warm; do
@@ -70,7 +56,9 @@ for reader in yosys-verilog yosys-slang; do
   "$LHD" pass liberty gensim inou/prp/tests/abc/test.lib \
     --emit-dir verilog:"$W/cells-$reader" --workdir "$W/models-$reader" > "$W/models-$reader.log" 2>&1 \
     || { cat "$W/models-$reader.log"; exit 1; }
-  iverilog -g2012 -s tb -o "$W/sim" "$W/models.v" "$W/$reader.v" "$W/cells-$reader"/*.v
-  vvp "$W/sim"
+  cat "$W/models.v" "$W/$reader.v" "$W/cells-$reader"/*.v > "$W/impl.v"
+  cat "$W/models.v" "$W/source.v" > "$W/ref.v"
+  "$LHD" lec --impl "$W/impl.v" --ref "$W/ref.v" --top macro_declarations \
+    --workdir "$W/$reader-lec" -q
 done
 echo 'PASS: Liberty and Verilog hard macros preserve ports and behavior through mapping'

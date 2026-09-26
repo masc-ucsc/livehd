@@ -141,7 +141,7 @@ std::string normalize_reg_name(std::string_view raw) {
   if (auto p = s.find("___ssa_"); p != std::string_view::npos) {
     s = s.substr(0, p);
   }
-  return std::string{s};
+  return gu::logical_hier_name(s);
 }
 
 std::string state_key(hhds::Graph* g, const hhds::Node_class& node) {
@@ -167,7 +167,10 @@ std::string state_key(hhds::Graph* g, const hhds::Node_class& node) {
 
 // The cross-side identity of a cut point. A cut Sub is keyed by its INSTANCE
 // hierarchical name (node_kind_key already folds the def gid, so the def identity
-// is covered separately); a state cell keeps its existing state_key.
+// is covered separately); a state cell keeps its existing state_key. The
+// instance keeps its OWN name even when it is a transparent `__flat___` wrapper
+// (normalize_reg_name drops only transparent ancestors): dropping it would give
+// every transparent sibling the same key, and a cut key is a per-node identity.
 std::string cut_point_key(hhds::Graph* g, const hhds::Node_class& node) {
   if (gu::type_op_of(node) == Ntype_op::Sub) {
     return "u:" + normalize_reg_name(node.get_hier_name());
@@ -1606,17 +1609,25 @@ void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Si
     absl::flat_hash_map<std::string, uint64_t> ka, kb;  // compare point -> csig
     absl::flat_hash_set<std::string>           ua, ub;  // ... or "undecidable"
     auto collect_cuts = [&](const Side& s, absl::flat_hash_map<std::string, uint64_t>& k, absl::flat_hash_set<std::string>& u) {
+      // A key seen twice on one side (two state cells normalizing to one
+      // logical name, two anonymous instances of one def, ...) cannot be paired
+      // by name: keeping only the first obligation would silently drop the
+      // other, so the key becomes undecidable instead.
+      auto add = [&](const std::string& key, bool known, uint64_t sig) {
+        if (known && !u.contains(key) && k.emplace(key, sig).second) {
+          return;
+        }
+        k.erase(key);
+        u.insert(key);
+      };
       for (const auto& node : s.order) {
         if (!is_cut(node, opts.blackbox_subs)) {
           continue;
         }
-        uint64_t csig = 0;
-        auto     key  = cut_point_key(s.g, node);
-        if (cut_signature(s, node, csig)) {
-          k.emplace(key, csig);
-        } else {
-          u.insert(key);  // an operand had no fsig: NEVER dischargeable
-        }
+        uint64_t csig  = 0;
+        auto     key   = cut_point_key(s.g, node);
+        bool     known = cut_signature(s, node, csig);  // false: an operand had no fsig, NEVER dischargeable
+        add(key, known, csig);
       }
       // Graph outputs are compare points too — a swapped output perturbs only the
       // (discarded) backward signature, so the node set alone cannot see it.
@@ -1627,12 +1638,9 @@ void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Si
         for (const auto& sink : onode.inp_sorted_pins()) {
           auto     key  = s.matching_io_names ? "o:" + std::string(gu::pin_name_of(sink))
                                               : "p:" + std::to_string(static_cast<uint32_t>(sink.get_port_id()));
-          uint64_t dsig = 0;
-          if (resolve_driver(s, sink.get_driver_pin(), dsig)) {
-            k.emplace(key, dsig);
-          } else {
-            u.insert(key);
-          }
+          uint64_t dsig  = 0;
+          bool     known = resolve_driver(s, sink.get_driver_pin(), dsig);
+          add(key, known, dsig);
         }
       }
     };

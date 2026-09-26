@@ -53,10 +53,38 @@ EOF
       [ "$rc" -eq 7 ] || { cat "$W/$kind-lec.log"; exit 1; }
     fi
     grep -q 'FALLING clock edge' "$W/$kind-lec.log"
-    # Emission is supported even though native formal does not model this
-    # schedule. Compare both edges against the original RTL in simulation.
-    sed 's/module memory_clock/module reference_clock/' "$W/$kind.v" > "$W/negative-ref.v"
-    cat > "$W/negative-tb.v" <<'SV'
+    # Cycle-level data check of the falling-edge memory (both write ports,
+    # explicit expected contents). native_sim advances one whole reference
+    # `clk` cycle per vector, so it cannot see edge polarity: a posedge memory
+    # passes it too. Polarity is pinned only by the .clk(~(clk)) grep above
+    # (formal refuses FALLING-edge memories), and event-level by the
+    # LHD_EXTERNAL_SIM leg below.
+    python3 - "$W/vectors.json" <<'PYV'
+import json, sys
+vectors = []
+memory = [0, 1, 2, 3]
+def add(inputs, expected=None):
+    vectors.append(dict(inputs=inputs, outputs={} if expected is None else dict(q=expected)))
+add(dict(clk_b=0, we_a=1, we_b=0, a=0, b=0, d_a=0, d_b=0))
+for k in range(4):
+    add(dict(a=k, d_a=k), k)
+for k in range(16):
+    a, b, da, db, wa, wb = k%4, (k+1)%4, k*3, k*5, k&1, (k>>1)&1
+    if wa: memory[a] = da
+    if wb: memory[b] = db
+    add(dict(a=a, b=b, d_a=da, d_b=db, we_a=wa, we_b=wb), memory[a])
+open(sys.argv[1], 'w').write(json.dumps(vectors))
+PYV
+    LHD="$LHD" python3 tools/native_sim.py "$W/$kind-out.v" memory_clock "$W/vectors.json" "$W/native"
+    # Event-level oracle (external simulator only): compare against the source
+    # RTL before the falling edge, after it, and after the rising edge.
+    if [ -n "${LHD_EXTERNAL_SIM:-}" ]; then
+      for tool in iverilog vvp; do
+        command -v "$tool" >/dev/null 2>&1 \
+          || { echo "FAIL: LHD_EXTERNAL_SIM is set but $tool is not on PATH"; exit 1; }
+      done
+      sed 's/module memory_clock/module reference_clock/' "$W/$kind.v" > "$W/negative-ref.v"
+      cat > "$W/negative-tb.v" <<'SV'
 module tb;
   reg clk=1, clk_b=0, we_a=1, we_b=0;
   reg [1:0] a=0, b=0;
@@ -80,8 +108,11 @@ module tb;
   end
 endmodule
 SV
-    iverilog -g2012 -I ware/rtl -s tb -o "$W/negative-sim" "$W/negative-out.v" "$W/negative-ref.v" "$W/negative-tb.v"
-    vvp "$W/negative-sim"
+      iverilog -g2012 -I ware/rtl -s tb -o "$W/negative-sim" "$W/negative-out.v" "$W/negative-ref.v" "$W/negative-tb.v"
+      vvp -n "$W/negative-sim"
+    else
+      echo "note: external-simulator leg skipped (set LHD_EXTERNAL_SIM=1)"
+    fi
   else
     "$LHD" lec --impl "$W/$kind-out.v" --ref "$W/$kind.v" --top memory_clock \
       --workdir "$W/$kind-lec" -q > "$W/$kind-lec.log" 2>&1 \

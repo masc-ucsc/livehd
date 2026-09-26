@@ -199,3 +199,21 @@ cc_test(
         "@hhds//hhds:graph",
     ],
 )
+
+sh_test(
+    name = "variadic_eq",
+    size = "small",
+    srcs = ["tests/variadic_eq.sh"],
+    args = [
+        "$(location :cgen_verilog_test)",
+        "$(location //lhd:lhd)",
+        "$(location tests/variadic_eq_ref.v)",
+        "$(location //tools:native_sim.py)",
+    ],
+    data = [
+        ":cgen_verilog_test",
+        "tests/variadic_eq_ref.v",
+        "//lhd:lhd",
+        "//tools:native_sim.py",
+    ],
+)

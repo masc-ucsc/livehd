@@ -157,7 +157,7 @@ sh_test(
     name = "lhd_lec_verilog_test",
     size = "large",
     srcs = ["lhd_lec_verilog_test.sh"],
-    data = _FLOW_DATA + glob(["merge_demo/*"]),
+    data = _FLOW_DATA + glob(["merge_demo/*"]) + ["//inou/prp:abc_tests"],
 )
 
 sh_test(
@@ -220,12 +220,21 @@ sh_test(
 # Incremental regeneration of the sim tree: a no-op re-setup and a comment-only
 # Pyrope edit must rewrite NO generated C++, and a body-only edit must rewrite
 # the module's .cpp but NOT its .hpp (else every parent's object is needlessly
-# invalidated). Those mtimes are what the generated build.ninja keys on, so this
-# is the test that keeps the host build incremental. Steps 1-3 need only
-# --setup-only; the end-to-end warm-rebuild check requires Ninja.
+# invalidated). The end-to-end checks use the built-in builder and verify
+# object timestamps after a warm build and an interface edit. The `identity`
+# part (step 8, its own target only for the runtime budget): a default-
+# specialization partial restore must simulate the edited sibling.
 sh_test(
     name = "lhd_sim_incremental_test",
     srcs = ["lhd_sim_incremental_test.sh"],
+    data = ["//lhd"],
+    env_inherit = ["PATH"],
+)
+
+sh_test(
+    name = "lhd_sim_incremental_test_identity",
+    srcs = ["lhd_sim_incremental_test.sh"],
+    args = ["identity"],
     data = ["//lhd"],
     env_inherit = ["PATH"],
 )
@@ -237,7 +246,8 @@ sh_test(
 )
 
 # Keep each fixture/backend under the test runtime budget. The Slop leg also
-# checks the backend-independent LEC proof and external Verilator twin.
+# checks the backend-independent LEC proof and, with LHD_EXTERNAL_SIM=1 (see
+# AGENTS.md), the external Verilator twin.
 _ROUNDTRIP_CASES = [
     "latch_window",
     "cache_control",
@@ -297,7 +307,8 @@ sh_test(
 # Unity batching of the small generated simulator TUs: batches are written and
 # linked, the batched build simulates correctly, a warm rebuild is a no-op, and
 # rewriting a batched source rebuilds its batch (the wrapper's depfile tracks
-# every member). See the unity note in lhd/lhd_kernel_sim.cpp.
+# every member). See the unity note in lhd/lhd_kernel_sim.cpp. With
+# LHD_EXTERNAL_SIM=1 (see AGENTS.md) the same contract is checked under ninja.
 sh_test(
     name = "sim_unity_batch_test",
     size = "large",
@@ -767,24 +778,6 @@ sh_test(
     data = ["//lhd"],
 )
 
-# LIVE test for todo/livehd/2f-latch M8 steps 3b + 3g: all FOUR commit classes
-# (posedge, negedge, transparent-high, transparent-low) in ONE module. Discrimination
-# is checked through `lhd lec` (collapsing any two classes must REFUTE, and a
-# semantically-identical rewrite must still PROVE), and the transformation ITSELF is
-# validated trace-level against Icarus Verilog -- the source netlist (real always_latch
-# + negedge) vs the normalized one (posedge flops + phase divider), the normalized side
-# clocked P times per source period and sampled under the observation-visibility rule.
-# That iverilog leg is what the binding cross-model gating rule requires: our own
-# encoder on both sides of a miter cannot see a transformation that is wrong but applied
-# identically to both. It SKIPS with a note when iverilog is absent (it is a host tool,
-# not a bazel dep -- same status as inou/cgen/tests/sim/diff_test.py).
-# LIVE test for CLOCK GATING (todo/livehd/2f-latch): an ICG is recognized and
-# rewritten into a FLOP ENABLE rather than modelled as a gated clock -- sound
-# (the encoder has no clock-identity model, so gated and ungated otherwise look
-# identical) and cheaper (no per-step commit term). Checks the rewrite through
-# `lhd lec` in both directions AND against Icarus, with the L1 negative control
-# that pins the enable-latch bypass: reading the latch's HELD Q instead of the
-# value it passes through is a full cycle late and must fail.
 # LIVE TRACKER for todo/livehd/2f-latch: a latch or negedge flop inside a DEF is
 # refused (not lowered), which is exactly why lhdsuite's minion still needs its
 # `lec_trust` list -- running minion_lec with an EMPTY list refuses naming
@@ -914,26 +907,45 @@ sh_test(
     ],
 )
 
+# LIVE test for CLOCK GATING (todo/livehd/2f-latch): an ICG is recognized and
+# rewritten into a FLOP ENABLE rather than modelled as a gated clock -- sound
+# (the encoder has no clock-identity model, so gated and ungated otherwise look
+# identical) and cheaper (no per-step commit term). Checks the rewrite through
+# `lhd lec` in both directions; with LHD_EXTERNAL_SIM=1 (see AGENTS.md) also
+# against Icarus, with the L1 negative control that pins the enable-latch
+# bypass: reading the latch's HELD Q instead of the value it passes through is a
+# full cycle late and must fail.
 sh_test(
     name = "single_edge_icg_test",
     size = "large",
     srcs = ["single_edge_icg_test.sh"],
     data = ["//lhd"],
-    tags = ["no-sandbox"],  # invokes the host iverilog/vvp
 )
 
+# LIVE test for todo/livehd/2f-latch M8 steps 3b + 3g: all FOUR commit classes
+# (posedge, negedge, transparent-high, transparent-low) in ONE module.
+# Discrimination is checked through `lhd lec` (collapsing any two classes must
+# REFUTE, and a semantically-identical rewrite must still PROVE). With
+# LHD_EXTERNAL_SIM=1 the transformation ITSELF is also validated trace-level
+# against Icarus (source always_latch + negedge vs the normalized posedge flops +
+# phase divider, with P=1 and slot-swap negative controls) -- the independent
+# oracle the cross-model gating rule asks for, since our own encoder on both
+# sides of a miter cannot see a transformation that is wrong but applied
+# identically to both.
 sh_test(
     name = "single_edge_four_classes_test",
     size = "large",
     srcs = ["single_edge_four_classes_test.sh"],
     data = ["//lhd"],
-    tags = ["no-sandbox"],  # invokes the host iverilog/vvp
 )
 
-# 3d-sim-color subtask B: settle the one semantic direction on which the old
-# module scheduler and a real event simulator disagree before assigning color
-# windows. The hand-written Icarus source has a load-bearing pre-commit negative
-# control; the Color_plan unit consumes this ruling as post-rise -> fall-commit.
+# 3d-sim-color subtask B: the flop->transparent-high latch shape (where the old
+# module scheduler and a real event simulator disagree) must select the
+# color-direct schedule (generated-header check). The post-rise value semantics
+# are asserted by //inou/prp:prp-sim-flop_feeds_transparent_high_latch. With
+# LHD_EXTERNAL_SIM=1 (see AGENTS.md) a hand-written Icarus source, with a
+# load-bearing pre-commit negative control, is the independent anchor for the
+# ruling the Color_plan unit consumes as post-rise -> fall-commit.
 sh_test(
     name = "sim_color_latch_oracle",
     srcs = ["sim_color_latch_oracle.sh"],
@@ -941,7 +953,6 @@ sh_test(
         "//inou/prp:tests/sim/flop_feeds_transparent_high_latch.prp",
         "//lhd",
     ],
-    tags = ["no-sandbox"],  # invokes the host iverilog/vvp
 )
 
 # 3d-sim-color migration rung I: generated-structure plus live execution gate
@@ -1835,11 +1846,14 @@ sh_test(
     env = {"ABC_TEST_THREADS": "2"},
 )
 
+# One target for all three pass.abc.memory modes: the synth/LEC/identity prefix
+# runs once, then native simulation runs once per distinct emitted netlist.
 sh_test(
     name = "lhd_memory_hierarchy_test",
     size = "large",
     srcs = ["lhd_memory_hierarchy_test.sh"],
     data = _FLOW_DATA + [
+        "//tools:native_sim.py",
         "//inou/prp:abc_tests",
         "//ware:cgen_memory_rtl",
     ],
@@ -1930,4 +1944,3 @@ sh_test(
     srcs = ["sim_live_words_invariance_test.sh"],
     data = ["//lhd"],
 )
-

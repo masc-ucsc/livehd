@@ -9,9 +9,9 @@ The Liberty models are local test data. Synthesis tests run exclusively.
 The shared `../integration.py synth FILE` flow compiles the source, synthesizes
 its graph, emits a nonempty mapped netlist, generates behavioral cell models,
 and compares the mapped graph with the original. A sibling `<stem>_ref.v`
-provides a handwritten reference instead. A sibling `<stem>_tb.v` is also
-compiled and executed with Icarus; missing tools and failed assertions fail.
-Reference/testbench sidecars do not become separate synthesis targets.
+provides a handwritten reference instead. The emitted mapped Verilog is re-read
+and checked by a second LEC run against the same reference. Reference sidecars
+(`<stem>_ref.v`) do not become separate synthesis targets.
 
 Optional `:key: value` source-header fields (JSON profiles use the same keys):
 
@@ -24,13 +24,18 @@ Optional `:key: value` source-header fields (JSON profiles use the same keys):
 | `libs` | Local Liberty stems; defaults to `test`, optionally `test test_qn` |
 | `readers` | Compile reader names; defaults to the normal reader |
 | `ref_top` | Handwritten reference top; defaults to `reference` |
-| `lec_set` | LEC options, such as `formal.bound=2` |
+| `lec_set` | LEC options, such as `formal.bound=2` or `pass.satopt=true` |
+| `lec_may_timeout` | `true` downgrades both LEC runs to the sanity budget below |
 
-Synthesis LEC is a sanity check: five seconds internally, ten seconds for the
-whole process including setup/loading. Only an explicit internal timeout is
-accepted as **inconclusive**. Refutations, unsupported operations, crashes,
-missing verdicts, and external watchdog overruns fail. The small equivalence
-fixtures under `../equiv/lec/` require a definitive expected verdict instead.
+Post-synthesis equivalence is the whole claim of a fixture, so both LEC runs are
+strict: a 20-second internal budget, a 40-second outer watchdog, and anything
+but a proof fails. A fixture that genuinely cannot be decided sets
+`lec_may_timeout: true`, which makes each run a sanity check (five seconds
+internally, ten for the whole process) where only an explicit internal timeout
+is accepted as **inconclusive**. Refutations, unsupported operations, crashes,
+missing verdicts, and external watchdog overruns always fail. The small
+equivalence fixtures under `../equiv/lec/` require a definitive expected
+verdict instead.
 
 This integration deliberately replaces per-design temporary-name greps, exact
 mapped gate/flop counts, and repeated equivalent representations. Dedicated

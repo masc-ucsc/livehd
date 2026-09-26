@@ -271,7 +271,18 @@ std::optional<Dlop> Word_sim::column(const Key& k, uint32_t j) {
       return std::nullopt;
     }
     v = livehd::eval_set_mask(*a, *m, *s);
-  } else if (op == Ntype_op::Sext || op == Ntype_op::SHL || op == Ntype_op::SRA || op == Ntype_op::LT || op == Ntype_op::GT) {
+  } else if (op == Ntype_op::LT || op == Ntype_op::GT) {
+    const auto as = ins.find(0), bs = ins.find(1);
+    if (as == ins.end() || bs == ins.end() || as->second.empty() || bs->second.empty()) {
+      return std::nullopt;
+    }
+    v = *Dlop::create_integer(1);
+    for (const auto* a : as->second) {
+      for (const auto* b : bs->second) {
+        v = *v.and_op(op == Ntype_op::LT ? a->lt_op(*b) : a->gt_op(*b));
+      }
+    }
+  } else if (op == Ntype_op::Sext || op == Ntype_op::SHL || op == Ntype_op::SRA) {
     const auto *a = arg(0), *b = arg(1);
     if (a == nullptr || b == nullptr) {
       return std::nullopt;
@@ -285,9 +296,7 @@ std::optional<Dlop> Word_sim::column(const Key& k, uint32_t j) {
         v = *a->sext_op(b->sub_op(Dlop::create_integer(1)));
         break;
       case Ntype_op::SHL: v = *a->shl_op(*b); break;
-      case Ntype_op::SRA: v = *a->sra_op(*b); break;
-      case Ntype_op::LT: v = *a->lt_op(*b); break;
-      default: v = *a->gt_op(*b); break;
+      default           : v = *a->sra_op(*b); break;
     }
   } else if (op == Ntype_op::Sum || op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor || op == Ntype_op::Mult
              || op == Ntype_op::EQ || op == Ntype_op::Ror) {

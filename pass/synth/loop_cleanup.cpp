@@ -197,7 +197,10 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
       // Colors are local to each definition. A source block with its own ABC
       // settings remains a boundary so those settings retain their identity.
       auto info = child->get_input_node().attr(livehd::attrs::coloring_info);
-      if (info.has() && std::string_view(info.get()).find("region_opts") != std::string_view::npos) {
+      // Search the std::string directly: gcc 14 -c dbg rejects the TU when the
+      // string_view range constructor is considered here (concept satisfaction
+      // "changed from <expression error>" inside <format>).
+      if (info.has() && info.get().find("region_opts") != std::string::npos) {
         continue;
       }
       if (!gu::inline_sub_instance(graph.get(), inst, "pass.abc", nullptr, false, true, true)) {

@@ -78,7 +78,7 @@ def synth(label, directory):
     report = value["qor"]["usyn"]
     # Synthesis proves nothing itself: prove() below is the separate `lhd lec`.
     rows = report["regions_searched"] + [row["decision"] for row in report["regions_reused"]]
-    assert rows and all(row["status"] == "abc_opt" for row in rows), (label, report)
+    assert rows and all(row["status"] == "abc_tmap" for row in rows), (label, report)
     return value, report
 
 

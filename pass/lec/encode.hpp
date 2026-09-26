@@ -92,6 +92,7 @@ struct Encoded {
   // corresponding memories "collapse"), and its post-cycle contents are the
   // next-state array. Read douts are ordinary BV terms in `outputs`/pin2val.
   Io_name_map<cvc5::Term> next_mem;  // key -> next-state array
+  Io_name_map<cvc5::Term> next_mem_x;  // reference-side unknown bits, threaded by BMC
 
   // M4 SYNC-read latency. A type==1 (registered / latency-1) read port's dout is
   // a 1-cycle REGISTERED value: the dout this cycle is a CURRENT-STATE symbol
@@ -309,6 +310,12 @@ std::string canon_flop_name(std::string_view hier_name);
 std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Node_class& node, int width, bool x_as_undefined = false);
 std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Occurrence_node& node, int width, bool x_as_undefined = false);
 
+// Name of the graph clock INPUT driving a state cell's clock_pin, seen through
+// width wrappers; nullopt for a derived, constant or absent clock. The encoder
+// counts distinct names from this walk to decide multi-clock edge gating, and
+// prove_equal uses the same count for its reset-prologue power-on policy.
+std::optional<std::string> flop_clock_input(const hhds::Occurrence_node& node);
+
 // Extend (sign/zero per v.is_signed) or truncate `v` to exactly `width` bits.
 cvc5::Term fit_to(cvc5::TermManager& tm, const Val& v, int width);
 
@@ -413,6 +420,7 @@ public:
   // undef bit-plane on every Val (see Val::undef) instead of being silently
   // masked to 0. Toggled ON only while encoding the REFERENCE design.
   void set_x_dontcare(bool on) { x_dontcare_ = on; }
+  void set_memory_x_state(const Io_name_map<cvc5::Term>* state) { memory_x_state_ = state; }
 
   // 2f-verify: while true, each `fproperty` Sub (a user assert/assume/
   // assert_always materialized by tolg — see graph_util::fproperty_module_name)
@@ -505,6 +513,7 @@ private:
   const absl::flat_hash_map<std::string, Comb_box>*   comb_boxes_    = nullptr;
   const Io_name_map<std::string>*                     box_keys_      = nullptr;
   int                                                 sub_depth_     = 0;      // Sub flattening recursion guard
+  const Io_name_map<cvc5::Term>*                       memory_x_state_ = nullptr;
   bool                                                x_dontcare_    = false;  // ref-side X = don't-care (lec.gold_x=ignore)
   bool                                                emit_props_ = false;  // emit fproperty conds as \x04prop: outputs (2f-verify)
   const absl::flat_hash_set<std::string>*             port_taps_  = nullptr;  // sub instances whose ports get \x05tap: outputs

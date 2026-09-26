@@ -1224,6 +1224,19 @@ std::optional<bool> satopt_setting(const Options& opts) {
   return value;
 }
 
+Options library_model_opts(const Options& opts) {
+  auto model_opts = opts;
+  model_opts.libs.clear();
+  model_opts.top.clear();
+  model_opts.impl_top.clear();
+  model_opts.ref_top.clear();
+  // Appended last, so it wins over a user pass.satopt (satopt_setting keeps the
+  // LAST entry): with every top cleared, satopt's pick_top_graph would reject
+  // the multi-cell library.
+  model_opts.sets.emplace_back("pass.satopt", "false");
+  return model_opts;
+}
+
 bool satopt_during_compile(const Options& opts, bool from_source) {
   // satopt is part of the compile graph pipeline only. `lhd synth` and `lhd
   // lec` compiling a Pyrope/Verilog SOURCE default it on, so `lhd synth

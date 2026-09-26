@@ -57,3 +57,30 @@ and `d` when neither is active. Frontends preserve source-level fall-through
 and register holds through this default port. No packed selector or explicit
 none-of predicate is needed in the graph. Regenerate persisted graphs from
 builds that used the previous packed-selector Hotmux encoding.
+
+## Transparent hierarchy wrappers
+
+`__flat___<suffix>` is reserved for transformation-generated **instance** names
+that do not contribute to logical hierarchy. For example,
+`foo.__flat___region42.bar.q` has logical name `foo.bar.q`. Nested transparent
+wrappers are skipped too. An ordinary instance (including a similar but not
+identical prefix) retains its name. A signal whose own leaf name starts with
+`__flat___` is not a wrapper and retains that name.
+
+Use `graph_util::logical_hier_name` for correspondence names and
+`logical_instance_prefix` when physically inlining. HHDS occurrence paths and
+`get_hier_name()` remain physical identities; do not use logical names as
+same-design node IDs or wiring/cache keys. Semdiff and LEC normalize names
+through the shared helper; a semdiff cut instance still keys on its own
+instance name, so transparent siblings stay distinct compare points. Anonymous
+partition instances remain anonymous in LGraph; cgen assigns reserved-prefix
+names (`__flat___<module>`, built from the flat, dot-free module identifier)
+when Verilog requires an identifier, so transparency survives emission and
+reload.
+
+A transparent wrapper groups existing logical state; it does not introduce a
+new state namespace. A transformation duplicating state must give the copies
+distinct logical names or use ordinary named instances. LEC rejects ambiguous
+state cuts instead of merging them, and semdiff leaves a compare-point key that
+repeats on one side undecidable. Replicated loop instances must retain their
+ordinary occurrence names/ordinals; they are not transparent wrappers.

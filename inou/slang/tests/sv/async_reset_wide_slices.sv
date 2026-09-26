@@ -4,9 +4,12 @@
 // then no longer took effect off the clock edge, a real behaviour change LEC
 // refutes. The reset constant deliberately sets bits ABOVE 63 (its top slice is
 // all ones), so a 64-bit truncation anywhere in the fold is visible in the
-// value, and the testbench asserts the reset between clock edges, where a
-// demoted reset cannot fire.
+// value checked by the native directed vectors (async_reset_wide_slices_tb.prp).
+// Native sim is cycle-based and cannot assert the reset between clock edges, so
+// the asynchronous sensitivity list is pinned structurally by the regex headers.
 // :test: roundtrip_sim
+// :verilog_re: always @\(posedge clk or posedge rst
+// :verilog_not_re: always @\(posedge clk[[:space:]]*\)
 module async_reset_wide_slices (
   input  logic        clk,
   input  logic        rst,

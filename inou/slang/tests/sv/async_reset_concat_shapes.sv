@@ -1,4 +1,12 @@
+// An ASYNCHRONOUS reset written through concatenated, mixed-direction, signed,
+// extended and truncated lvalues. roundtrip_sim: the reset/data VALUES are
+// checked by native directed vectors (async_reset_concat_shapes_tb.prp), and
+// every register must keep its asynchronous sensitivity list -- one demoted
+// block fails :verilog_not_re: (native sim is cycle-based and cannot see a
+// reset asserted between clock edges).
 // :test: roundtrip_sim
+// :verilog_re: always @\(posedge clk or posedge rst
+// :verilog_not_re: always @\(posedge clk[[:space:]]*\)
 module async_reset_concat_shapes (
   input logic clk,
   input logic rst,

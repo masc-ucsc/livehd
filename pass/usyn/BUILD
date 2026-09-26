@@ -103,7 +103,6 @@ cc_binary(
     name = name,
     srcs = [name + ".cpp"],
     copts = COPTS,
-    linkopts = ["-lz"],
     data = data,
     deps = [
         ":pass_usyn",

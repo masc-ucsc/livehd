@@ -7,8 +7,9 @@
 // module scheduler. At the rising edge `f` takes d. The high-transparent latch
 // remains open after that edge, so it observes the NEW f and closes with that
 // value at the fall. Sampling f before its rise commit makes h one period late.
-// The matching independent always_ff/always_latch Icarus oracle lives in
-// //lhd/tests:sim_color_latch_oracle.
+// //lhd/tests:sim_color_latch_oracle checks that this shape selects the
+// color-direct schedule; with LHD_EXTERNAL_SIM=1 it also runs the matching
+// independent always_ff/always_latch Icarus oracle.
 pub mod flop_high_latch(clk:bool, d:u8) -> (qf:u8@[1], qh:u8@[1]) {
   reg f:u8:[clock_pin=ref clk] = 0
   reg h:u8:[latch=true] = 0

@@ -4,8 +4,115 @@ Goal: close useful gaps in cprop and satopt, using Yosys and mux-tree research
 as references. This is an implementation plan, not a claim that the proposed
 rewrites are implemented or that downstream synthesis cannot recover them.
 
-Reviewed against the working tree on 2026-09-25. All checkboxes below are
-pending implementation or validation. Keep this plan in Markdown as requested.
+Reviewed against the working tree on 2026-09-25. Checked items have implementation
+or validation evidence below; unchecked items remain pending.
+
+## Implementation progress (2026-09-25)
+
+- Binary operator sharing and structurally in-range index sharing are implemented
+  in `pass/cprop/cprop_opshare.cpp`. General index sharing and Hotmux operator
+  sharing remain pending.
+- Width policy: `Bitwidth::bw_pass` ignores derived arithmetic/mux hints and
+  recomputes ranges; `set_bits_sign` only caps a result observed exclusively at
+  finite declared boundaries. Fresh operand muxes have no hint, so inference
+  restores a lossless signed/unsigned union. Explicit masks/extensions remain
+  operands, and cprop output must pass through bitwidth before finite encoding.
+- The index audit found a real discrepancy: cprop and Verilog emission use zero
+  for out-of-range selectors, LEC uses the last arm, and Dlop/Slop return invalid.
+  Resolve this before allowing unbounded selectors in index sharing. The current
+  guard uses structural range facts, never width hints.
+- Debug validation passed: `cprop_test` (including 20 operator kinds, mixed-sign
+  narrowing, private-use guards and a 2048-level cascade), `cprop_lowlane_test`,
+  `bitwidth_test`, `enableopt_test`, `query_test`, and new `cprop_opshare_test`
+  (24 symbolic pre/post cases across 12 operators and narrow/wide outputs,
+  plus four independent signed-equality cases). Tests take 0.1–2.3 seconds each.
+- Stronger mixed-sign tests exposed LEC's incorrect Verilog-style coercion
+  for integer `EQ`; the encoder now extends each operand with its own sign,
+  with headroom for unsigned values. A signed four-bit -1 no longer equals 15.
+- Concat sharing rejects varying lanes without a structural unsigned bound
+  inside their declared width. A new mixed-sign operand mux can otherwise need
+  nine bits for an eight-bit lane. Adding a mask would consume the binary
+  rewrite's operator saving; existing explicit masks still permit sharing.
+- Source fixture `inou/prp/tests/equiv/lec/muxopt_width.v`: `prplec.py` proves
+  `_1.v` and refutes the intentionally narrowed `_2.v`. Native simulation via
+  `tools/native_sim.py` passes 48 directed vectors for both base and `_1.v`
+  (negative signed data, unsigned high bits, selectors 0/128). Base emitted
+  Verilog roundtrip LEC is Proven for both base and `_1.v`. Logs, vectors and
+  `correctness-manifest.json` (source hashes and native verdicts) are under
+  `/tmp/livehd-muxopt-validation/`; QoR measurements remain pending.
+- A3 now plans two-group select trees before mutation, folds predicates, tries
+  both polarities and requires strict total-node reduction. The basic identity
+  uses two muxes instead of three, including bool01 data and wide signed
+  controls. Equal-cost priority chains remain mux trees instead of expanding
+  into control gates plus a Hotmux. Named interiors remain addressable.
+  Unit truth-table, default, rejection, naming and obligation checks pass, as
+  do four symbolic pre/post LEC cases (including a required inversion).
+  `muxopt_lru_select.v` versus `_1.v` is Proven structurally after compilation;
+  native simulation passes all 32 combinations of its inputs. These tests
+  cover a small LRU selection kernel, not an external cache benchmark.
+- The variadic audit found and fixed backend discrepancies: Verilog now emits
+  n-ary EQ as all-equal comparisons, native simulation includes every EQ and
+  LT/GT operand, and Verilog LT/GT derive coercion from operand signs while
+  retaining explicit masks. Native comparisons use full operand carriers,
+  including upper words, rather than the one-bit result width.
+  `//inou/cgen:variadic_eq` proved six EQ operand permutations plus mixed-sign
+  LT/GT and binary EQ against an independent Verilog reference, and passed
+  native directed checks on the original graph with a 128-bit unsigned operand
+  (8.2 seconds debug). Its undeclared outputs retain the emitted Verilog and
+  both verdict JSON files. Existing cgen simulation tests pass (30.5 seconds
+  debug); optimized-mode runtime remains to be measured.
+
+### Reproducing the current correctness checks
+
+From the repository root, with the debug CLI built:
+
+```sh
+bazel test -c dbg //pass/cprop:cprop_test //pass/cprop:cprop_opshare_test \
+  //pass/cprop:cprop_lowlane_test //pass/bitwidth:bitwidth_test \
+  //pass/enableopt:enableopt_test //pass/lec:query_test --test_output=errors
+bazel build -c dbg //lhd:lhd
+bazel test -c dbg //inou/cgen:variadic_eq --test_output=errors
+python3 inou/prp/tests/prplec.py inou/prp/tests/equiv/lec/muxopt_width.v -v
+python3 inou/prp/tests/prplec.py inou/prp/tests/equiv/lec/muxopt_lru_select.v -v
+```
+
+For the directed native checks, generate the repository-owned fixture vectors
+without an external simulator:
+
+```sh
+mkdir -p /tmp/livehd-muxopt-validation
+python3 - <<'PY'
+import json
+from pathlib import Path
+work = Path('/tmp/livehd-muxopt-validation')
+width = []
+for a in [-128, -17, -1, 0, 7, 127]:
+    for b in [0, 15, 128, 255]:
+        for s in [0, 128]:
+            v = b if s else a
+            width.append(dict(inputs=dict(a=a, b=b, s=s),
+                              outputs=dict(shifted=(v >> 4) & 7, added=(v + 3) & 7,
+                                           less=int(v < 7), clipped=v & 15)))
+lru = [dict(inputs=dict(lru=q, access=a, bank=b), outputs=dict(victim=(q >> ((a >> b) & 1)) & 1))
+       for q in range(4) for a in range(4) for b in range(2)]
+for name, vectors in [('vectors', width), ('lru-vectors', lru)]:
+    (work / (name + '.json')).write_text(json.dumps(vectors))
+PY
+LHD=./bazel-bin/lhd/lhd python3 tools/native_sim.py \
+  inou/prp/tests/equiv/lec/muxopt_width.v top \
+  /tmp/livehd-muxopt-validation/vectors.json /tmp/livehd-muxopt-validation/native
+LHD=./bazel-bin/lhd/lhd python3 tools/native_sim.py \
+  inou/prp/tests/equiv/lec/muxopt_width_1.v top \
+  /tmp/livehd-muxopt-validation/vectors.json /tmp/livehd-muxopt-validation/native-shared
+LHD=./bazel-bin/lhd/lhd python3 tools/native_sim.py \
+  inou/prp/tests/equiv/lec/muxopt_lru_select.v top \
+  /tmp/livehd-muxopt-validation/lru-vectors.json /tmp/livehd-muxopt-validation/native-lru
+```
+
+These results use proposal commit `829de19198f324cc63d9fb133a755020e4e6d928`
+plus the dirty implementation tree. They are correctness evidence, not a
+before/after timing or area sweep. The shared workspace also contains unrelated
+changes, so benchmark provenance must include a full diff when measurements run.
 
 ## Review findings that change the plan
 
@@ -105,12 +212,12 @@ not guaranteed for standalone cprop, and there is no whole-graph fixed point.
 
 ## A0. Resolve semantic and infrastructure prerequisites
 
-- [ ] Reconcile width behavior before enabling A1. Inspect the Mux/Hotmux
+- [x] Reconcile width behavior before enabling A1. Inspect the Mux/Hotmux
   cases in `pass/lec/encode.cpp`, `inou/cgen/cgen_sim.cpp`, Verilog emission,
   and bitwidth inference/rewrite. The first two explicitly fit arms to a typed
   result width; document when that narrowing is legal and how it survives
   moving an operator across a mux.
-- [ ] Specify metadata handling for the retained root and each new operand
+- [x] Specify metadata handling for the retained root and each new operand
   mux. Do not copy the narrowest arm's annotation or assume maximum `bits`
   suffices for mixed signs. Derive a lossless carrier when justified, or leave
   intermediate hints unset for inference; retain any required explicit mask
@@ -120,6 +227,11 @@ not guaranteed for standalone cprop, and there is no whole-graph fixed point.
   operands, negative and wide constants, and explicit `Get_mask`/`Sext`.
   Compare native simulation, emitted Verilog and LEC, so the same encoder bug
   cannot validate both sides unnoticed.
+- [ ] Complete the variadic backend audit. EQ Verilog/native emission and
+  native/Verilog LT/GT are fixed and tested above. The synthesis blaster still
+  retains only the last operand of each LT/GT bank; Word_sim refuses banks
+  with multiple operands. Fix and test those before declaring the complete
+  A1 banked-operator whitelist validated across backends.
 - [ ] Define a reusable operand-shape descriptor and bounded private-region
   ownership walk. Keep pass-local state out of persistent graph attributes.
 - [ ] Audit pass ordering with `split_selfref`'s Get_mask distribution,
@@ -198,7 +310,8 @@ implementation leaves these cells untouched.
 
 **Implementation TODO:**
 
-- [ ] Land binary sharing and operand-shape matching after A0.
+- [x] Implement binary sharing and operand-shape matching with the A0 width
+  policy. Full A0/A1 acceptance still requires the pending integration checks.
 - [ ] Add index muxes, then exclusive Hotmux groups/defaults as separate steps.
 - [ ] Fold the existing paired `Set_mask` rule into the engine only after its
   regressions pass; preserve the separate one-arm lane-update optimization.
@@ -261,18 +374,18 @@ Current `Mux_sharing` emits shared predicate DAGs and a Hotmux; it does **not**
 expand paths into a sum of products. Its all-bool01 bailout prevents predicate
 logic from outweighing the saved data selection.
 
-- [ ] For exactly two groups and no hold/check boundary, build predicate `p`
+- [x] For exactly two groups and no hold/check boundary, build predicate `p`
   from the owned mux skeleton: group A terminals become 1, group B terminals
   become 0. Emit `mux(p, B, A)`; preserve fallback semantics for Hotmux nodes.
-- [ ] Normalize the new predicate locally, before evaluating gain. In the
+- [x] Normalize the new predicate locally, before evaluating gain. In the
   example, the direct select-tree form above avoids gratuitous inversions.
   If boolean inversion is needed, use a zero test or a bool01-safe XOR.
-- [ ] Count **all** removable and emitted mux/control nodes for A3, with shared
+- [x] Count **all** removable and emitted mux/control nodes for A3, with shared
   nodes counted once. Require a strict total-node reduction after bounded
   folding. A1's mux-free operator metric is not applicable here.
-- [ ] Relax the bool01 bailout only for profitable two-group results. Keep it
+- [x] Relax the bool01 bailout only for profitable two-group results. Keep it
   for three or more groups until measured separately.
-- [ ] No speculative graph residue on rejection; use a planned descriptor or
+- [x] No speculative graph residue on rejection; use a planned descriptor or
   explicitly retire temporary nodes and invalidate facts.
 
 Acceptance: exhaustive versions of the identity, asymmetric/repeated controls,
@@ -454,6 +567,6 @@ For every implementation step:
   during a measurement sweep; after a rebuild, run warm commands twice and
   report the second warm result because code salts invalidate caches.
 
-No implementation has been validated by this document review. Width behavior,
-unproven-Hotmux sharing and B3's integration remain explicit design tasks;
-the other items have concrete guards and acceptance criteria above.
+The progress section records completed validation. General index behavior,
+Hotmux operator sharing, A2/A4 and B1–B3, remaining A3 acceptance coverage and
+QoR remain pending; unit proofs alone do not complete the proposal.

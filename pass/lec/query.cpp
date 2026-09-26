@@ -2793,10 +2793,10 @@ std::optional<Mem_entry_bank> find_mem_entry_bank(const std::string& mem_name, c
 struct Packed_scalar_bridge {
   std::string              wide_key;
   std::vector<std::string> bit_keys;  // LSB first
-  // pass.partition wraps mapped regions in synthetic `sub_<id>` instances.
-  // Once the LEC hierarchy driver inlines that one-sided wrapper, the prefix
-  // is representation-only and the embedded source register name is exact.
-  // Other suffix matches remain speculative and require a reachable base.
+  // A mapped region's partition wrapper prefix is representation-only: once
+  // the LEC hierarchy driver inlines that one-sided wrapper, the embedded
+  // source register name is exact. Other suffix matches remain speculative and
+  // require a reachable base.
   bool                     structural_partition = false;
   std::vector<int>         widths;  // empty for one-bit cells; otherwise one width per field
   int                      width_at(size_t i) const { return widths.empty() ? 1 : widths[i]; }
@@ -2809,6 +2809,10 @@ struct Packed_scalar_bridge {
   }
 };
 
+// Legacy spelling only. pass.partition now leaves its region wrappers
+// anonymous: inline/flatten give them an empty prefix and cgen emits them as
+// `__flat___<module>`, which logical_hier_name already treats as transparent.
+// The `sub_<digits>` match remains for netlists emitted before that naming.
 bool is_synthetic_partition_prefix(std::string_view prefix) {
   constexpr std::string_view marker = "sub_";
   if (!prefix.starts_with(marker) || prefix.size() == marker.size()) {
@@ -3530,7 +3534,16 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                      canon_flop_name(node.get_hier_name()).c_str(),
                      boxes_by_def[defkey].size());
       }
-      boxes_by_def[defkey].push_back(Box_inst{std::move(nk), canon_flop_name(node.get_hier_name()), node, in_ref});
+      // Logical names let a box under a transparent wrapper pair by name with
+      // the same instance spelled flat on the other side. A transparent box
+      // instance ITSELF has an empty logical name, so its siblings of one def
+      // would all tie at "" and pair by walk order; name it by its unique
+      // physical path instead. (Keys stay per-node either way: nothing merges.)
+      std::string cname = canon_flop_name(graph_util::logical_hier_name(node.get_hier_name(), true));
+      if (cname.empty()) {
+        cname = std::string(node.get_hier_name());
+      }
+      boxes_by_def[defkey].push_back(Box_inst{std::move(nk), std::move(cname), node, in_ref});
     }
   };
   scan_boxes(ref, true);
@@ -3924,6 +3937,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // stack (RenameBuffer: propagateRowLemma -> preRegisterTermInternal).
   // Propagate existing reads only; lazy array lemmas retain the same theory.
   solver.setOption("arrays-prop", "1");
+  // The BMC reference's memory knowledge plane starts as a constant array.
+  solver.setOption("arrays-exp", "true");
 
   // Per-checkSat wall-clock bound (formal.timeout seconds; 0 = unbounded). Hard
   // nonlinear miters (a chain of two multiplies — associativity, distributivity,
@@ -4565,8 +4580,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // Per-side key sets, for the bit-blast pairing below. `fw` is a UNION, so it
       // cannot tell "this key exists on both sides" from "only one side has it".
       Io_name_map<int>  fw_side[2];
-      int               side_ix       = 0;
-      auto              collect_flops = [&](hhds::Graph* g) {
+      // Keys with a reset pin on either side, and the distinct clock inputs
+      // across both designs: the reset-prologue power-on policy below.
+      absl::flat_hash_set<std::string> reset_state_keys;
+      absl::flat_hash_set<std::string> clk_inputs;
+      int                              side_ix       = 0;
+      auto                             collect_flops = [&](hhds::Graph* g) {
         // NOT fast_hier, despite the opaque scope now being honored by both: `fw` is
         // an explicit min-compare (order-free), but `init` below is FIRST-wins, and
         // eff() = canon_flop_name + alias is NOT injective (see the "canonical name
@@ -4630,11 +4649,17 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           // reason: eff() is NOT injective, so plain assignment would make the
           // pinned power-on state of a soundness-critical miter depend on the
           // occurrence walk order.
-          if (nop == Ntype_op::Flop && gu::get_driver_of_sink_name(node, "reset_pin").is_invalid()
-              && !power_init[side_ix].count(key)) {
+          const bool has_reset_pin = !gu::get_driver_of_sink_name(node, "reset_pin").is_invalid();
+          if (nop == Ntype_op::Flop && !has_reset_pin && !power_init[side_ix].count(key)) {
             if (auto iv = flop_initial(tm, node, w, opts.gold_x != "zero")) {
               power_init[side_ix][key] = *iv;
             }
+          }
+          if (nop == Ntype_op::Flop && has_reset_pin) {
+            reset_state_keys.insert(key);
+          }
+          if (auto ci = flop_clock_input(node)) {
+            clk_inputs.insert(std::move(*ci));
           }
         }
       };
@@ -4752,12 +4777,23 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         dump_keys(ref, "REF");
         dump_keys(impl, "IMPL");
       }
+      // A reset prologue starts BEFORE reset has reached the registers, and
+      // equal names do not justify equal power-on bits: mapping can invert a
+      // reset flop's state while preserving its name. Only with two or more
+      // clock inputs can another domain capture that arbitrary pre-reset value
+      // and retain it beyond the prologue, so only then is a reset-bearing
+      // key's power-on value tracked as unknown. Single-clock runs, and state
+      // no reset ever writes, keep the shared s0 relation: an uncorrelated
+      // per-bit unknown plane on unreset state would never clear and would
+      // mask every output it reaches.
+      const bool multi_clock_prologue = phase_run && !reset_negset.empty() && clk_inputs.size() >= 2;
       for (const auto& [key, w] : fw) {
         if (bitblast_bits.count(key) != 0) {
           continue;  // seeded below as a bit-slice of its N-bit ref counterpart
         }
         Val        v;
-        const bool synth_init = init_no_reset || unpaired_state.count(key) != 0;
+        const bool synth_init  = init_no_reset || unpaired_state.count(key) != 0;
+        const bool pre_reset_x = multi_clock_prologue && reset_state_keys.contains(key);
         if (synth_init && opts.gold_x == "zero") {
           v = Val{tm.mkBitVector(static_cast<uint32_t>(w), 0), w, fsgn.at(key)};
         } else if ((!phase_run || livehd::graph_util::is_single_edge_phase_key(key)) && init.count(key)) {
@@ -4766,7 +4802,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           v = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), "s0_" + key), w, fsgn.at(key)};
         }
         ref_state[key] = v;
-        if (synth_init && opts.gold_x != "zero") {
+        if ((synth_init || pre_reset_x) && opts.gold_x != "zero") {
+          // Explicit per-side initial values are restored below.
           // No-reset power-on is hardware '?': preserve an arbitrary value term
           // for dataflow, but mark every REF bit unknown so gold_x=ignore masks
           // only observations still depending on unwritten state. A real write
@@ -4916,6 +4953,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // collapse to the same initial contents); threaded forward like flop state.
     Io_name_map<cvc5::Term> ref_mem  = build_shared_mems("m0_");
     Io_name_map<cvc5::Term> impl_mem = ref_mem;
+    Io_name_map<cvc5::Term> ref_mem_x;
 
     // ── Memory <-> single-wide-flop init bridge ───────────────────────────────
     // A behavioral memory (one SMT array) on one design can appear on the OTHER
@@ -5473,8 +5511,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // skipping Latch, so the two sides would mint independent latch symbols.
       const bool ref_use_plan = use_plan && (use_phase || ref_plan.needs_plan());
       enc.set_phase_plan(ref_use_plan ? &ref_plan : nullptr, ms);
+      enc.set_memory_x_state(&ref_mem_x);
       Encoded re = enc.encode(ref, &sh_ref, "r" + std::to_string(step) + "_", &ref_mem, &ref_reads);
       enc.set_x_dontcare(false);
+      enc.set_memory_x_state(nullptr);
       if (!re.ok) {
         res.verdict      = Verdict::Unknown;
         res.unsupported  = re.unsupported;
@@ -5673,6 +5713,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       ref_state  = std::move(rn);
       impl_state = std::move(in);
       ref_mem    = std::move(re.next_mem);
+      ref_mem_x  = std::move(re.next_mem_x);
       impl_mem   = std::move(ie.next_mem);
       ref_reads  = std::move(re.next_read);
       impl_reads = std::move(ie.next_read);

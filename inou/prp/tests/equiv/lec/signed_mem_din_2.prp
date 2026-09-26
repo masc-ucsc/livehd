@@ -1,0 +1,14 @@
+/*
+Negative control: the sum's five bits zero-extended, so a negative sum reads
+back positive. semdiff is off so the memory encoder decides the pair.
+:lec_expect: refuted
+:lec_set: formal.lec.semdiff=none
+*/
+pub mod signed_mem_din::[timecheck=false](clk:u1, we:u1, wa:u2, ra:u2, a:s4, b:s4) -> (q:s8@[]) {
+  reg mem:[4]s8:[ordering="old"]
+  if we != 0 {
+    const s = a + b
+    mem[wa] = s#[0..=4]
+  }
+  q = mem[ra]
+}

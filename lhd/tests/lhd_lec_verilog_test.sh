@@ -378,6 +378,117 @@ for code in 0 1 2 99; do
     || fail "independent crosscheck verdict missing from JSON"
 done
 
+# lgcheck's complete bounded miter (exit 2 plus its full-window marker) may
+# corroborate a native pass as a BOUNDED cross-check, reported in native design
+# cycles. lgcheck counts clk2fflogic global-clock steps, two per clock edge, so
+# formal.bound=N exports LGCHECK_BMC_STEPS=2*(N-1); formal.bound=0 is the native
+# default 6. The mock records the exported depth and prints the marker.
+cat >"$W/lgcheck_bounded.sh" <<'SH'
+#!/bin/sh
+echo "$LGCHECK_BMC_STEPS" >"$LGCHECK_STEPS_OUT"
+echo "BMC: found no counterexample within ${LGCHECK_BMC_STEPS} steps top:inv; this bounded result is not a proof."
+echo "INCONCLUSIVE: equivalence undetermined"
+exit 2
+SH
+cat >"$W/lgcheck_short.sh" <<'SH'
+#!/bin/sh
+echo "BMC: found no counterexample within $((LGCHECK_BMC_STEPS - 1)) steps top:inv; this bounded result is not a proof."
+exit 2
+SH
+cat >"$W/lgcheck_late.sh" <<'SH'
+#!/bin/sh
+echo "INCONCLUSIVE: equivalence undetermined"
+echo "BMC: found no counterexample within ${LGCHECK_BMC_STEPS} steps top:inv; this bounded result is not a proof."
+exit 2
+SH
+printf '#!/bin/sh\nexit 2\n' >"$W/lgcheck_silent.sh"
+chmod +x "$W/lgcheck_bounded.sh" "$W/lgcheck_short.sh" "$W/lgcheck_late.sh" "$W/lgcheck_silent.sh"
+for bound in 7 0; do
+  cycles=$bound
+  [ "$bound" -gt 0 ] || cycles=6
+  LHD_LGCHECK="$W/lgcheck_bounded.sh" LGCHECK_STEPS_OUT="$W/bounded_steps_$bound" "$LHD" lec \
+    --impl "$INV" --ref "$INV" --top inv --set formal.solver=lgyosys --set formal.bound=$bound \
+    --workdir "$W/crosscheck_bounded_$bound" --result-json "$W/crosscheck_bounded_$bound.json" \
+    >"$W/crosscheck_bounded_$bound.log" 2>&1 \
+    || fail "complete bounded lgcheck window did not corroborate a native proof: $(cat "$W/crosscheck_bounded_$bound.log")"
+  grep -q "\"crosscheck\":{\"solver\":\"lgyosys\",\"verdict\":\"proven\",\"exit_code\":2,\"bounded\":true,\"bound\":$cycles}" \
+    "$W/crosscheck_bounded_$bound.json" || fail "bounded crosscheck missing from JSON: $(cat "$W/crosscheck_bounded_$bound.json")"
+  grep -q "lgcheck -> equivalent for $cycles cycles (bounded" "$W/crosscheck_bounded_$bound.log" \
+    || fail "bounded lgcheck result printed without its bound"
+  [ "$(cat "$W/bounded_steps_$bound")" = "$((2 * (cycles - 1)))" ] \
+    || fail "formal.bound=$bound exported LGCHECK_BMC_STEPS=$(cat "$W/bounded_steps_$bound"), expected $((2 * (cycles - 1)))"
+done
+# An incomplete window stays unknown: a marker for fewer steps, a marker after
+# the INCONCLUSIVE line, and (stale log) a silent oracle re-run in the SAME
+# --workdir, whose lgcheck log name repeats and still holds the earlier marker.
+for control in short late silent; do
+  wd="$W/crosscheck_$control"
+  [ "$control" != silent ] || wd="$W/crosscheck_bounded_7"
+  LHD_LGCHECK="$W/lgcheck_$control.sh" "$LHD" lec --impl "$INV" --ref "$INV" --top inv \
+    --set formal.solver=lgyosys --set formal.bound=7 --workdir "$wd" \
+    --result-json "$W/crosscheck_$control.json" >"$W/crosscheck_$control.log" 2>&1 \
+    && fail "incomplete lgcheck window ($control) passed"
+  grep -q '"crosscheck":{"solver":"lgyosys","verdict":"unknown","exit_code":2}' "$W/crosscheck_$control.json" \
+    || fail "incomplete lgcheck window ($control) was not unknown: $(cat "$W/crosscheck_$control.json")"
+done
+[ "$(ls "$W/crosscheck_bounded_7/logs/"*_lhd_lec_lgcheck.log | wc -l)" -eq 1 ] \
+  || fail "stale-log control did not reuse the earlier lgcheck log name"
+echo "PASS: a complete lgcheck BMC is a bounded cross-check; incomplete or stale windows stay unknown"
+
+# Verilog netlists elaborate the --lib cell models. slang reads them as library
+# files: a model is elaborated only when instantiated, so the RTL reference
+# below keeps the sole-module top fallback. An explicit satopt optimizes the
+# elaborated sides, never the multi-root model library (native and lgcheck
+# materialization alike), and a wrong cell refutes.
+L="$W/lib_models"
+mkdir -p "$L"
+"$LHD" pass liberty gensim inou/prp/tests/abc/test.lib --emit-dir "lg:$L/models" --workdir "$L/gensim" -q >/dev/null \
+  || fail "gensim failed"
+cat >"$L/rtl.v" <<'V'
+module rtl(input a, b, output y); assign y = ~(a & b); endmodule
+V
+cat >"$L/net.v" <<'V'
+module net(input a, b, output y); NAND2x1 u(.A(a), .B(b), .Y(y)); endmodule
+V
+sed 's/NAND2x1/NOR2x1/' "$L/net.v" >"$L/bad.v"
+"$LHD" lec --impl "$L/net.v" --ref "$L/rtl.v" --impl-top net --lib "lg:$L/models" \
+  --workdir "$L/equal" -q --result-json "$L/equal.json" \
+  || fail "Verilog netlist did not elaborate --lib cells: $(cat "$L/equal.json")"
+python3 - "$L/equal.json" <<'PY' || fail "mapped Verilog proof is not an unbounded proof"
+import json, sys
+r = json.load(open(sys.argv[1]))['lec']
+assert r['verdict'] == 'proven' and not r.get('bounded'), r
+PY
+for solver in cvc5 lgyosys; do
+  "$LHD" lec --ref "$L/net.v" --impl "$L/rtl.v" --ref-top net --impl-top rtl --lib "lg:$L/models" \
+    --set pass.satopt=true --set formal.solver=$solver --workdir "$L/reversed_$solver" -q \
+    --result-json "$L/reversed_$solver.json" \
+    || fail "reference-side --lib with pass.satopt=true ($solver): $(cat "$L/reversed_$solver.json")"
+  grep -q '"verdict":"proven"' "$L/reversed_$solver.json" || fail "reference-side --lib proof missing ($solver)"
+done
+# Explicit frontend selection reaches slang on both sides: an unselected root
+# that references a missing cell is never elaborated.
+cat "$L/net.v" >"$L/scoped.v"
+printf 'module unused; missing_cell u(); endmodule\n' >>"$L/scoped.v"
+"$LHD" lec --ref "$L/scoped.v" --impl "$L/scoped.v" --top net --lib "lg:$L/models" \
+  --set compile.slang.top=net --workdir "$L/scoped" -q --result-json "$L/scoped.json" \
+  || fail "compile.slang.top did not scope --lib elaboration: $(cat "$L/scoped.json")"
+"$LHD" lec --impl "$L/bad.v" --ref "$L/rtl.v" --impl-top net --ref-top rtl --lib "lg:$L/models" \
+  --set formal.simfail_run=false --workdir "$L/different" -q --result-json "$L/bad.json" >"$L/bad.log" 2>&1
+[ $? -eq 10 ] || fail "wrong mapped cell was not refuted: $(cat "$L/bad.json")"
+grep -q '"verdict":"refuted"' "$L/bad.json" || fail "wrong mapped cell lacked a refuted verdict"
+# `formal verify` shares the Verilog side loader: --lib must not break its
+# sole-module top pick, and a bad --lib kind names the command that ran.
+cat >"$L/fv.v" <<'V'
+module fv(input a, b, output y); assign y = a & b; always_comb assert (!(y && !a)); endmodule
+V
+"$LHD" formal verify "$L/fv.v" --lib "lg:$L/models" --workdir "$L/fv" -q --result-json "$L/fv.json" \
+  || fail "formal verify with --lib lost the sole-module top: $(cat "$L/fv.json")"
+"$LHD" formal verify "$L/fv.v" --lib "verilog:$L/fv.v" --workdir "$L/fv_bad" -q --result-json "$L/fv_bad.json" \
+  && fail "formal verify accepted a verilog: --lib"
+grep -q 'formal verify --lib expects lg:DIR' "$L/fv_bad.json" || fail "bad --lib error names the wrong command"
+echo "PASS: Verilog netlists elaborate --lib models; a wrong cell refutes"
+
 # A bounded BMC window is a counterexample search, not an equivalence proof.
 # This pair first diverges after more than five clocks: the short window must be
 # INCONCLUSIVE (never PROVEN), while a deeper window must find the real CEX.

@@ -657,6 +657,76 @@ TEST(Semdiff, EscapedVerilogStateNameUsesCanonicalIdentity) {
   EXPECT_EQ(0U, r.state.b_unpaired);
 }
 
+// A `__flat___` instance component is not logical hierarchy (graph/README.md):
+// foo.__flat___region.bar.x names the same state as foo.bar.x, while an
+// ordinary `region` level is a different name.
+TEST(Semdiff, TransparentInstanceComponentsNormalizeStateNames) {
+  auto flat = build_pipe2("lgdb_semdiff_tr_flat", "foo.bar.x", "foo.bar.y");
+  auto tr   = build_pipe2("lgdb_semdiff_tr_tr", "foo.__flat___region.bar.x", "foo.__flat___region.bar.y");
+  auto ord  = build_pipe2("lgdb_semdiff_tr_ord", "foo.region.bar.x", "foo.region.bar.y");
+
+  livehd::semdiff::Semdiff_options o;
+  o.matching_names = true;
+  EXPECT_TRUE(livehd::semdiff::structural_identical(flat.get(), tr.get(), o));
+  EXPECT_EQ(livehd::semdiff::canonical_digest(flat.get()), livehd::semdiff::canonical_digest(tr.get()));
+  EXPECT_FALSE(livehd::semdiff::structural_identical(flat.get(), ord.get(), o));
+  EXPECT_NE(livehd::semdiff::canonical_digest(flat.get()), livehd::semdiff::canonical_digest(ord.get()));
+}
+
+// top: two instances of `lane` (s = ~a) on d0/d1, q = s0 - s1 (or s1 - s0 when
+// `swap`). `n0`/`n1` name the instances ("" leaves one anonymous).
+std::shared_ptr<hhds::Graph> build_two_lanes(const std::string& dir, const std::string& n0, const std::string& n1, bool swap) {
+  auto& lib = livehd::Hhds_graph_library::instance(dir);
+  auto  cio = lib.create_io("lane");
+  cio->add_input("a", 0);
+  cio->add_output("s", 1);
+  auto cg  = cio->create_graph();
+  auto inv = create_typed_node(*cg, Ntype_op::Not);
+  cg->get_input_pin("a").connect_sink(setup_sink_pid(inv, 0));
+  inv.create_driver_pin(0).connect_sink(cg->get_output_pin("s"));
+
+  auto pio = lib.create_io("top");
+  pio->add_input("d0", 0);
+  pio->add_input("d1", 1);
+  pio->add_output("q", 2);
+  auto            pg = pio->create_graph();
+  hhds::Pin_class s[2];
+  for (int i = 0; i < 2; ++i) {
+    auto sub = create_typed_node(*pg, Ntype_op::Sub);
+    sub.set_subnode(cio);
+    if (const auto& name = i == 0 ? n0 : n1; !name.empty()) {
+      sub.set_name(name);
+    }
+    pg->get_input_pin(i == 0 ? "d0" : "d1").connect_sink(setup_sink_pid(sub, 0));
+    s[i] = sub.create_driver_pin(1);
+  }
+  auto sum = create_typed_node(*pg, Ntype_op::Sum);
+  s[swap ? 1 : 0].connect_sink(livehd::graph_util::setup_sink_by_name(sum, "as"));
+  s[swap ? 0 : 1].connect_sink(livehd::graph_util::setup_sink_by_name(sum, "bs"));
+  sum.create_driver_pin(0).connect_sink(pg->get_output_pin("q"));
+  return pg;
+}
+
+// Sibling cut Subs are told apart by their OWN instance names, even transparent
+// `__flat___` ones (dropping them keyed every sibling "u:" and the swapped
+// operands proved PROVEN with no solver). Siblings that genuinely share a key
+// (two anonymous instances of one def) must stay undecidable, never merged.
+TEST(Semdiff, TransparentSiblingInstancesKeepDistinctCutKeys) {
+  livehd::semdiff::Semdiff_options o;
+  o.matching_names = true;
+  o.blackbox_subs  = true;
+
+  auto a  = build_two_lanes("lgdb_semdiff_tsib_a", "__flat___a", "__flat___b", false);
+  auto a2 = build_two_lanes("lgdb_semdiff_tsib_a2", "__flat___a", "__flat___b", false);
+  auto b  = build_two_lanes("lgdb_semdiff_tsib_b", "__flat___a", "__flat___b", true);
+  EXPECT_TRUE(livehd::semdiff::structural_identical(a.get(), a2.get(), o));
+  EXPECT_FALSE(livehd::semdiff::structural_identical(a.get(), b.get(), o));
+
+  auto anon  = build_two_lanes("lgdb_semdiff_tsib_anon", "", "", false);
+  auto anonb = build_two_lanes("lgdb_semdiff_tsib_anonb", "", "", true);
+  EXPECT_FALSE(livehd::semdiff::structural_identical(anon.get(), anonb.get(), o));
+}
+
 TEST(Semdiff, AggregateProvenanceLossKeepsPhysicalLeafIdentity) {
   auto make = [](const std::string& dir, bool keep_provenance) {
     auto& lib = livehd::Hhds_graph_library::instance(dir);

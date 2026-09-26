@@ -81,7 +81,6 @@ cc_test(
     name = "satopt_test",
     srcs = ["satopt_test.cpp"],
     copts = COPTS,
-    linkopts = ["-lz"],  # pass/formal links pass/lec, whose cone prover uses ABC's io layer
     deps = [
         ":satopt",
         "//graph",
@@ -94,7 +93,6 @@ cc_test(
     name = "satopt_memory_test",
     srcs = ["satopt_memory_test.cpp"],
     copts = COPTS,
-    linkopts = ["-lz"],  # pass/formal links pass/lec, whose cone prover uses ABC's io layer
     deps = [
         ":satopt",
         "//graph",
@@ -108,7 +106,6 @@ cc_test(
     name = "satopt_stages_test",
     srcs = ["satopt_stages_test.cpp"],
     copts = COPTS,
-    linkopts = ["-lz"],  # pass/formal links pass/lec, whose cone prover uses ABC's io layer
     deps = [
         ":satopt",
         "//graph",
@@ -120,7 +117,6 @@ cc_test(
     name = "satopt_sim_test",
     srcs = ["satopt_sim_test.cpp"],
     copts = COPTS,
-    linkopts = ["-lz"],  # pass/formal links pass/lec, whose cone prover uses ABC's io layer
     deps = [
         ":satopt",
         "//graph",
@@ -133,7 +129,6 @@ cc_test(
     name = "satopt_sweep_test",
     srcs = ["satopt_sweep_test.cpp"],
     copts = COPTS,
-    linkopts = ["-lz"],  # pass/formal links pass/lec, whose cone prover uses ABC's io layer
     deps = [
         ":satopt",
         "//graph",
@@ -145,7 +140,6 @@ cc_test(
     name = "satopt_ctrl_test",
     srcs = ["satopt_ctrl_test.cpp"],
     copts = COPTS,
-    linkopts = ["-lz"],
     deps = [
         ":satopt",
         "//graph",

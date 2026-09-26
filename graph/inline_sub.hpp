@@ -10,7 +10,9 @@ namespace livehd::graph_util {
 // Structurally inline ONE Sub instance into the body that holds it, in place.
 //
 // The child's nodes are cloned into `parent` (node/wire names prefixed with the
-// instance name, `alu.foo`), every edge crossing the boundary is rewired to what
+// instance's logical prefix, `alu.foo`; an unnamed or `__flat___*` instance is
+// hierarchy-transparent and adds no component -- see logical_instance_prefix in
+// node_util.hpp), every edge crossing the boundary is rewired to what
 // is on the other side of it, and the Sub node itself is deleted. The child def
 // is untouched -- it stays in the library for its other instantiation sites, and
 // the caller decides when (or whether) it becomes garbage.
@@ -36,12 +38,13 @@ namespace livehd::graph_util {
 // `name_state` names an UNNAMED spliced state node (a cell model's internal
 // flop) after the INSTANCE, so a flop-cut correspondence key survives the
 // inline. Without it the cut is keyed on a synthesized net name that has no
-// counterpart on the other design.
+// counterpart on the other design. Only an instance with a non-transparent name
+// (a non-empty logical prefix) can name the flop.
 // `inherit_color` stamps cloned nodes with the parent instance color when
 // inlining an already-colored private backend graph.
 // `prefix_instance` preserves the ordinary `instance.child` hierarchy names.
-// A caller dissolving an UNNAMED, compiler-generated wrapper may set it false:
-// the wrapper's `sub_<nid>` default is storage noise rather than RTL hierarchy.
+// An unnamed instance already gets an empty prefix, so false only matters for a
+// NAMED instance: it drops that instance's component too.
 [[nodiscard]] bool inline_sub_instance(hhds::Graph* parent, const hhds::Node_class& inst, std::string_view from_pass,
                                        hhds::Graph* def = nullptr, bool name_state = false, bool prefix_instance = true,
                                        bool inherit_color = false);

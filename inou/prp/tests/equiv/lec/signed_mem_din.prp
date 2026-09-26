@@ -1,0 +1,17 @@
+/*
+:lec_top: signed_mem_din
+:lec_set: formal.simfail=false
+A signed write narrower than the memory word sign-fills it: `a + b` is an s5
+Sum driving the s8 memory's din directly (cgen connects it as a signed [4:0]
+wire to the word-wide port), so -16 stores 0xF0. LEC used to widen per-port
+write data as UNSIGNED and store 0x10: `_1`, the same write sign-extended
+explicitly, was falsely refuted, and `_2`, which really zero-extends the sum,
+was falsely proven.
+*/
+pub mod signed_mem_din::[timecheck=false](clk:u1, we:u1, wa:u2, ra:u2, a:s4, b:s4) -> (q:s8@[]) {
+  reg mem:[4]s8:[ordering="old"]
+  if we != 0 {
+    mem[wa] = a + b
+  }
+  q = mem[ra]
+}

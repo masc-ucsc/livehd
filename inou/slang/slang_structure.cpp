@@ -6368,8 +6368,13 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
         }
         for (const auto& [sym, value] : arm.stores) {
           (void)value;
-          if (reset_attr_syms_.contains(sym) || cont_assign_syms_.contains(sym)) {
-            ok = false;  // already reset, or only PARTLY a register
+          if (reset_attr_syms_.contains(sym) || cont_assign_syms_.contains(sym) || mem_syms_.contains(sym)) {
+            // Per-port Memory lowering has no reset-pin transition: its
+            // `initial` only initializes power-on contents. Keep a synchronous
+            // memory reset as an ordinary guarded write, including subsequent
+            // reset assertions after data has been stored. Peeling this arm
+            // would retain only `!reset && enable` writes and lose the reset.
+            ok = false;  // already reset, partly a register, or native memory
             break;
           }
         }

@@ -16,11 +16,13 @@ def worker(mode, directory):
     (directory / "root.pid").write_text(str(os.getpid()))
     child = subprocess.Popen([sys.executable, __file__, "leaf", mode, str(directory)],
                              start_new_session=True)
-    (directory / "child.pid").write_text(str(child.pid))
     child.wait()
 
 
 def leaf(mode, directory):
+    # Publish before allocating: the memory guard can kill the worker as soon
+    # as this leaf grows, including while the worker is writing a PID file.
+    Path(directory, "child.pid").write_text(str(os.getpid()))
     # Separate session intentionally escapes the root's process group.
     size = 256 if mode == "memory" else 16
     payload = bytearray(size * 1024 * 1024)
@@ -50,8 +52,14 @@ def run(label, command, seconds=5, memory=1024, code=0):
     report = json.loads((archive / "measurement.json").read_text())
     samples = [json.loads(line) for line in (archive / "samples.jsonl").read_text().splitlines()]
     assert len(samples) == report["samples"] and not report["omitted_sample_rows"], report
-    assert report["sampled_peak_bytes"] == max(row["bytes"] for row in samples), report
-    assert sum(p["bytes"] for p in report["peak_processes"]) == report["sampled_peak_bytes"], report
+    if report["sampled_peak_bytes"] is None:
+        # A short-lived failed command can exit before the first RSS read.
+        # Missing measurements are null, not a fabricated zero-byte peak.
+        assert all(row["bytes"] == 0 for row in samples), report
+        assert report["missing_readings"] > 0 and not report["peak_processes"], report
+    else:
+        assert report["sampled_peak_bytes"] == max(row["bytes"] for row in samples), report
+        assert sum(p["bytes"] for p in report["peak_processes"]) == report["sampled_peak_bytes"], report
     assert report["wall_ms"] >= max(row["ms"] for row in samples), report
     assert unrelated.poll() is None, "monitor killed unrelated process"
     assert unrelated.pid not in [p["pid"] for p in report["peak_processes"]], report

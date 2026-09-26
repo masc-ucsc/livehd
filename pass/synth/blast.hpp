@@ -509,35 +509,42 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
       slots[b] = acc[b];
     }
   } else if (op == Ntype_op::LT || op == Ntype_op::GT) {
-    // 1-bit result. pid 0 = a, pid 1 = b; LT = a<b, GT = a>b == b<a. Compare
-    // at max(width)+1 (one guard bit so a-b can't overflow the signed range).
-    hhds::Pin_class a_d;
-    hhds::Pin_class b_d;
-    for (const auto& in_pin : n.inp_sorted_pins()) {
-      const auto in_drv = in_pin.get_driver_pin();
-      // Bank, not raw pid: an LT/GT operand lives on its own pin (even pid = the
-      // `a` side, odd = the `b` side -- Ntype::sink_bank).
-      if (Ntype::sink_bank(op, in_pin.get_port_id()) == 0) {
-        a_d = in_drv;
-      } else {
-        b_d = in_drv;
+    // Every cross-bank pair must satisfy the relation. Comparing just the
+    // last driver of each bank makes the result depend on operand order.
+    std::vector<hhds::Pin_class> lhs, rhs;
+    for (const auto& sink : n.inp_sorted_pins()) {
+      (Ntype::sink_bank(op, sink.get_port_id()) == 0 ? lhs : rhs).push_back(sink.get_driver_pin());
+    }
+    if (lhs.empty() || rhs.empty()) {
+      refuse(n, "invalid-compare", "unsupported", "LT/GT requires an operand in each bank", "check the comparison's input banks");
+      return;
+    }
+    const auto unsigned_value
+        = [&](const hhds::Pin_class& pin) { return pin.is_const() ? !gu::const_of(pin).is_negative() : gu::is_unsign(pin); };
+    Bit result = abc_const1();
+    for (auto a : lhs) {
+      for (auto b : rhs) {
+        const bool       a_unsigned = unsigned_value(a), b_unsigned = unsigned_value(b);
+        const bool       uns = a_unsigned && b_unsigned;
+        // The signed builder reads the subtraction's sign bit. First make
+        // unsigned magnitudes positive signed values, then reserve a guard
+        // bit for subtraction: s2(-2) - u2(3) needs four signed bits, not three.
+        const int        w   = uns ? std::max(eff_width(a), eff_width(b))
+                                   : std::max(eff_width(a) + int(a_unsigned), eff_width(b) + int(b_unsigned)) + 1;
+        const int        bs  = opts_.block_size > 0 ? opts_.block_size : arith::default_block_size(w);
+        std::vector<Bit> av(w), bv(w);
+        for (int i = 0; i < w; ++i) {
+          av[i] = abc_eff_bit(a, i);
+          bv[i] = abc_eff_bit(b, i);
+        }
+        auto pair = op == Ntype_op::LT ? arith::build_lt(opts_.adder, bs, ops, av, bv, uns)
+                                       : arith::build_lt(opts_.adder, bs, ops, bv, av, uns);
+        result    = ops.and_(result, pair);
       }
     }
-    bool             uns = gu::is_unsign(a_d) && gu::is_unsign(b_d);
-    // eff_width: a constant operand has no bits attribute (see the EQ case).
-    int              w   = std::max(eff_width(a_d), eff_width(b_d)) + 1;
-    int              bs  = opts_.block_size > 0 ? opts_.block_size : arith::default_block_size(w);
-    std::vector<Bit> av(w);
-    std::vector<Bit> bv(w);
-    for (int i = 0; i < w; ++i) {
-      av[i] = abc_bit(a_d, i);
-      bv[i] = abc_bit(b_d, i);
-    }
-    Bit res  = op == Ntype_op::LT ? arith::build_lt(opts_.adder, bs, ops, av, bv, uns)
-                                  : arith::build_lt(opts_.adder, bs, ops, bv, av, uns);
-    slots[0] = res;
+    slots[0] = result;
     for (int b = 1; b < out_bits; ++b) {
-      slots[b] = abc_const_bit(false);
+      slots[b] = abc_const0();
     }
   } else if (op == Ntype_op::EQ) {
     // 1-bit result; n-ary all-equal (operands on pid 0). Compare at

@@ -12,6 +12,12 @@
 #   lg:dir2 -> verilog
 #   lhd lec (partitioned vs original): must be LEC-equivalent
 #
+# It also pins the transparent-wrapper contract (graph/README.md): the anonymous
+# region wrappers are emitted as plain `__flat___<module>` instances, so the
+# reloaded state names match the original BY NAME (formal.lec.state_pairing=false
+# must still give an unbounded proof), and a changed transition behind them is
+# refuted.
+#
 # Fixtures (inou/prp/tests/pyrope):
 #   hier_comb  - combinational, top instances `adder` x2 + `bitmix`
 #   hier_seq   - sequential 3-level, top -> stage_unit x2 -> delayer (flops)
@@ -69,9 +75,39 @@ for entry in "${DESIGNS[@]}"; do
     grep -q "__c" "$D/part.v" || fail "$FIX/$ALG: multi-region partition has no per-color submodules"
     # 6. LEC: the partitioned hierarchical design must equal the original
     run lec --impl verilog:"$D/part.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
+    # 7. The anonymous region wrappers are emitted with the reserved transparent
+    # prefix as a plain identifier (an escaped dotted `\__flat___file.entity`
+    # reloads as two levels and keeps a spurious `entity` level in state names).
+    grep -q '__flat___' "$D/part.v" || fail "$FIX/$ALG: region wrappers not emitted with the transparent __flat___ prefix"
+    grep -qF '\__flat___' "$D/part.v" && fail "$FIX/$ALG: transparent wrapper emitted as an escaped/dotted identifier"
+    # Name-only correspondence: no tier-2 pairing, and the proof must be
+    # unbounded (a wrapper that is not transparent on reload leaves unmatched
+    # state cuts: UNKNOWN, or only a bounded PASS from the auto engine).
+    run lec --impl verilog:"$D/part.v" --ref verilog:"$D/ref.v" --top "$TOP" \
+      --set formal.lec.state_pairing=false --workdir "$D/cn"
+    python3 -c 'import json,sys; l=json.load(open(sys.argv[1]))["lec"]; sys.exit(0 if l["verdict"]=="proven" and not l.get("bounded") else 1)' \
+      "$W/r.json" || fail "$FIX/$ALG: transparent wrappers not name-matched: $(cat "$W/r.json")"
     echo "PASS: $FIX [$ALG] hierarchical partition is LEC-equivalent to the original"
   done
 done
+
+# Negative control for the name-only proof: a changed stage_unit transition
+# behind the transparent region wrappers must be REFUTED. `^` -> `&` (d1 and d2
+# are bit-disjoint, so `^` -> `|` would be a correct rewrite and must prove).
+ND="$W/neg"
+mkdir -p "$ND"
+sed 's/r = d1 ^ d2/r = d1 \& d2/' inou/prp/tests/pyrope/hier_seq.prp > "$ND/hier_seq.prp"
+grep -q 'r = d1 & d2' "$ND/hier_seq.prp" || fail "negative control: mutation did not apply"
+run compile "$ND/hier_seq.prp" --top hier_seq.top --emit-dir lg:"$ND/lg" --workdir "$ND/w1"
+run pass color acyclic --top hier_seq.top lg:"$ND/lg" --workdir "$ND/w2"
+run pass partition --top hier_seq.top lg:"$ND/lg" --emit-dir lg:"$ND/lg2" --workdir "$ND/w3"
+run compile lg:"$ND/lg2" --top hier_seq.top --emit verilog:"$ND/part.v" --workdir "$ND/w4"
+"$LHD" lec --impl verilog:"$ND/part.v" --ref verilog:"$W/hier_seq/acyclic/ref.v" --top hier_seq.top \
+  --set formal.lec.state_pairing=false --set formal.engine=bmc --set formal.bound=3 \
+  --workdir "$ND/c" -q --result-json "$ND/c.json" && fail "mutated transition behind transparent wrappers unexpectedly proved"
+python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["lec"]["verdict"]=="refuted" else 1)' "$ND/c.json" \
+  || fail "negative control not refuted: $(cat "$ND/c.json")"
+echo "PASS: changed transition behind transparent region wrappers is refuted"
 
 # The single-region optimization: a def that IS one region is emitted directly
 # under its own name -- no `<def>__c<id>` wrapper whose only body is one region

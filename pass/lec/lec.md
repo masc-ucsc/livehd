@@ -200,7 +200,10 @@ everything the encoder needs.
   a **bounded bmc PASS is never claimed directly** while pairs apply (shared-s0
   over-constraint could mask a bounded CEX). That result triggers one pair-free
   BMC retry through the normal prologue. A detected primary reset establishes
-  state normally. Without reset, otherwise-uninitialized reference state starts
+  state normally, except in a multi-clock design: there the pre-reset value of
+  reset-bearing state is tracked unknown (`?`) until its own reset lands, since
+  a domain's reset need not arrive before another domain samples that state.
+  Without reset, otherwise-uninitialized reference state starts
   with a tracked full `?` plane under the default `gold_x=ignore` (implementation
   power-on remains arbitrary); `gold_x=zero` instead gives both sides canonical
   zero. A bounded PASS from that pair-free query is accepted; timeout/Unknown
@@ -421,7 +424,14 @@ it for `type==1` only makes the miter stricter). Gated by
 bare path; verilog elaborates through `--reader`, default slang). The top is
 picked per side via `--impl-top` / `--ref-top`, falling back to `--top`, falling
 back to the sole module. `--lib lg:DIR` (repeatable) supplies Sub def graphs for
-inline flattening.
+inline flattening. On a `verilog:` side (and a `formal verify` Verilog design)
+each `--lib` is also re-emitted to Verilog through cgen and handed to slang as a
+**library file** (`-v`), so a mapped netlist resolves its cells at elaboration
+time. A library cell is elaborated only when the design instantiates it: unused
+cells never become roots, and an RTL side keeps the sole-module fallback. A
+netlist side does gain its instantiated cells as modules, so it needs
+`--impl-top`/`--ref-top`/`--top`. Only `lg:` libraries are accepted. An explicit
+`--set pass.satopt=true` optimizes the elaborated sides, never the model library.
 
 ```
 lhd lec --impl impl.prp --ref ref.v
@@ -478,10 +488,25 @@ blows up (memory / register-file equivalence is SAT-hard for bit-blasting;
 cvc5 uses bit-vector + array reasoning and reachable-state unrolling);
 `formal.solver=lgyosys` for Verilog-in-hand and gate-level netlists. lgcheck
 runs `equiv_make` + `equiv_simple` + `equiv_induct`, then a **bounded miter**
-of `LGCHECK_BMC_STEPS` cycles (environment variable, default 5) whose
+of `LGCHECK_BMC_STEPS` steps (default 6 when lgcheck runs standalone) whose
 counterexample lands in lgcheck's `lgcheck_bmc.log`; the per-step log is the
-`lec.lgcheck` entry under `--workdir`. Exit 0 = equivalent; non-zero =
-`equiv_fail` (or timeout).
+`lec.lgcheck` entry under `--workdir` (rewritten on every run, never appended).
+The miter runs after `clk2fflogic`, so a step is one global-clock sample and a
+clock edge takes two: `lhd lec` always sets `LGCHECK_BMC_STEPS = 2*(N-1)` (at
+least 1) from `formal.bound` = N design cycles (`N <= 0` is the native default
+6), overriding the environment, so lgcheck covers the native window of N steps
+(N-1 edges). lgcheck exit codes: 0 = unbounded equivalence, 1 = refuted
+(counterexample), 2 = inconclusive, 5 = setup failure. An exit 2 whose log
+carries the complete-window marker (`BMC: found no counterexample within
+<steps> steps top:`) before any `INCONCLUSIVE:` line is a **bounded** result
+over lgcheck's own window (zero-init; a reset is held only at steps 1-2 instead
+of the native reset-hold prologue, an alignment that is unverified): it may
+corroborate a native pass, recorded as
+`crosscheck: {verdict: proven, exit_code: 2, bounded: true, bound: N}` and
+printed as `lgcheck -> equivalent for N cycles (bounded; deeper cycles not
+checked)`, but it never contradicts a native REFUTE (that pair stays
+`lgcheck cross-check did not decide`, exit 7). Any other non-zero exit is
+unknown, never a disproof.
 
 ## The simfail witness testbench (`lhd lec --workdir DIR`)
 

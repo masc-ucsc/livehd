@@ -1,5 +1,12 @@
-// LEC explicitly refuses flop-driven clocks; check the emitted circuit in RTL simulation.
+// LEC explicitly refuses flop-driven clocks, and native sim refuses to fold a
+// derived clock, so roundtrip_sim pins both clock roots structurally
+// (:verilog_re:) and keeps a refusal tripwire (:sim_unsupported:). The
+// event-level bench writer_divclk_tb.v (64 cycles against an event reference,
+// with async reset) runs only with LHD_EXTERNAL_SIM=1 (iverilog/vvp).
 // :test: roundtrip_sim
+// :verilog_re: always @\(posedge clk_i([^_[:alnum:]]|$)
+// :verilog_re: always @\(posedge div_q([^_[:alnum:]]|$)
+// :sim_unsupported: derived clock
 // :top: divclk
 module divclk (
   input  logic       clk_i,

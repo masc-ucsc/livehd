@@ -55,8 +55,8 @@ for mapper in ('usyn', 'abc'):
 usyn = json.loads((root / 'usyn/qor.json.usyn.json').read_text())
 # Equivalence is the separate `lhd lec` step above; synthesis itself proves nothing.
 rows = usyn['regions_searched']
-assert rows and all(r['status'] == 'abc_opt' for r in rows), rows
-assert usyn['totals']['abc_opt'] == len(rows) and usyn['totals']['domino'] > 0, usyn['totals']
+assert rows and all(r['status'] == 'abc_tmap' for r in rows), rows
+assert usyn['totals']['abc_tmap'] == len(rows) and usyn['totals']['domino'] > 0, usyn['totals']
 assert usyn['recipe']['support'] == 2 and all(r['domino_in3'] == 0 for r in rows), rows
 override = json.loads((work / 'override/synth/qor.json').read_text())
 assert override['regions'] and all(row['budget'] == 160 for row in override['regions']), override

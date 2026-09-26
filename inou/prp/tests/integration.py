@@ -79,7 +79,6 @@ def synth(lhd, source, meta, work, mapper='abc'):
     source = source.parent / meta['source'] if 'source' in meta else source
     top = meta.get('top', tags(source).get('pyrope_top', source.stem))
     ref = fixture.with_name(fixture.stem + '_ref.v')
-    tb = fixture.with_name(fixture.stem + '_tb.v')
     compile_args = settings(meta.get('compile_set', ''))
     for reader in meta.get('readers', 'default').split():
         base = work / reader
@@ -102,26 +101,23 @@ def synth(lhd, source, meta, work, mapper='abc'):
             if 'pass.abc.memory=true' in meta.get('synth_set', '') and re.search(
                     'memory-unlowered|memory-max-bits', diagnostics):
                 raise RuntimeError('memory was not mapped: ' + diagnostics)
+            # `lhd lec --lib lg:` materializes the model Verilog a Verilog side
+            # needs itself, so gensim only has to emit the graph library.
             run([lhd, 'pass', 'liberty', 'gensim', lib,
-                 '--emit-dir', 'lg:' + str(dest / 'models'), '--emit', 'verilog:' + str(dest / 'models.v'),
-                 '--workdir', dest / 'gensim'])
+                 '--emit-dir', 'lg:' + str(dest / 'models'), '--workdir', dest / 'gensim'])
             reference = str(ref) if ref.exists() else 'lg:' + str(base / 'source')
+            ref_top = meta.get('ref_top', 'reference') if ref.exists() else top
             extra = ['--lib', 'lg:' + str(dest / 'models')] + settings(meta.get('lec_set', ''))
             # strict: post-synthesis equivalence is the entire claim of a synth
             # fixture, so an UNKNOWN that merely hit the solver budget must fail
             # (measured 2026-09-21: 17/17 report `proven`). A fixture that
             # genuinely cannot be decided opts out with `:lec_may_timeout: true`.
-            check(lhd, 'lg:' + str(dest / 'mapped'), reference, top, dest / 'lec', extra,
-                  meta.get('ref_top', 'reference') if ref.exists() else top,
-                  strict=not str(meta.get('lec_may_timeout', '')).strip().lower() in ('true', '1', 'yes'))
-            # Handwritten RTL oracles remain executable fixtures. A missing tool,
-            # failed compilation, or failed assertion is a failure, never a skip.
-            if tb.exists():
-                rtl = [tb, dest / 'mapped.v', dest / 'models.v']
-                if ref.exists():
-                    rtl.append(ref)
-                run(['iverilog', '-g2012', '-s', 'tb', '-o', dest / 'sim', *rtl])
-                run(['vvp', dest / 'sim'])
+            strict = str(meta.get('lec_may_timeout', '')).strip().lower() not in ('true', '1', 'yes')
+            check(lhd, 'lg:' + str(dest / 'mapped'), reference, top, dest / 'lec', extra, ref_top,
+                  strict=strict)
+            # The emitted mapped netlist, re-read through the Verilog reader.
+            check(lhd, 'verilog:' + str(dest / 'mapped.v'), reference, top, dest / 'lec-verilog',
+                  extra, ref_top, strict=strict)
 
 
 def main():

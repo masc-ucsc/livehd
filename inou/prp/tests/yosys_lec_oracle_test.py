@@ -8,7 +8,8 @@ the exit-code mapping would leave all 326 pairs printing a tolerated line and
 passing forever, reproducing at the harness level the very failure (passing
 while checking nothing) the oracle was added to catch.
 
-So: one pair the oracle must PROVE, one it must REFUTE, and the opt-out tag.
+So: one pair the oracle must PROVE, two it must REFUTE (the second only after
+a mid-run reset), and the opt-out tag.
 Hand-written Verilog only — no lhd, no Pyrope — so a compile regression cannot
 turn this into a false green.
 """
@@ -29,6 +30,23 @@ IMPL = """module oracle_dut(input clk, input [3:0] a, output reg [3:0] y);
 endmodule
 """
 GOLD_DIFF = IMPL.replace("a + 4'd1", "a + 4'd2")
+
+# A 1-entry memory with a SYNCHRONOUS reset arm, and a model that clears it only
+# at power-on (the old slang lowering of a packed memory's reset arm). The two
+# differ only once `rst` is re-asserted AFTER a write, so a miter that explored
+# just the power-on prologue would pass them. The slang fixture
+# inou/slang/tests/sv/memory_sync_reset.v (`// :lec_solver: lgyosys`) relies on
+# lgcheck telling them apart.
+MEM_RESET_GOLD = """module memory_reset(input clk, rst, we, input [4:0] d, output [4:0] q);
+  reg [4:0] mem [0:0];
+  always @(posedge clk) if (rst) mem[0] <= 0; else if (we) mem[0] <= d;
+  assign q = mem[0];
+endmodule
+"""
+MEM_RESET_POWER_ON_ONLY = """module memory_reset(input clk, rst, we, input [4:0] d, output reg [4:0] q = 0);
+  always @(posedge clk) if (!rst && we) q <= d;
+endmodule
+"""
 
 HEADER = """/*
 :name: yosys_lec_oracle
@@ -76,6 +94,14 @@ def main():
         rc |= check("off-by-one pair (oracle MUST refute it)",
                     runner.run_yosys_lec(test, str(impl), "oracle_dut", str(diff), "oracle_dut",
                                          os.path.join(tmp, "diff")),
+                    1)
+        mem_gold = Path(tmp) / "mem_reset_gold.v"
+        mem_gold.write_text(MEM_RESET_GOLD)
+        mem_bad = Path(tmp) / "mem_reset_power_on_only.v"
+        mem_bad.write_text(MEM_RESET_POWER_ON_ONLY)
+        rc |= check("power-on-only memory reset (oracle MUST refute a reset re-asserted after a write)",
+                    runner.run_yosys_lec(test, str(mem_bad), "memory_reset", str(mem_gold), "memory_reset",
+                                         os.path.join(tmp, "mem_reset")),
                     1)
         # ...and the documented opt-out must still opt out.
         rc |= check(":yosys_lec: false on a broken pair (skipped)",

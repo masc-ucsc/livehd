@@ -116,6 +116,23 @@ simd() {
 
 store_of() { ls "$1"/incr/scopes/sim/*/tune.jsonl 2>/dev/null | head -1; }
 
+# `cow`: whether $W supports the copy-on-write clone the tuner retains its
+# incumbent tree with (lhd_tune.cpp clone_tree: `cp --reflink=always` on Linux,
+# clonefile on macOS). Only without it may a losing or crashed trial keep no
+# tree, so the "no retained incumbent tree" fallback is accepted only then.
+cow() {
+  echo x >"$W/.cow_src" || return 1
+  rm -f "$W/.cow_dst"
+  local rc=1
+  case "$(uname -s)" in
+    Linux) /bin/cp --reflink=always "$W/.cow_src" "$W/.cow_dst" 2>/dev/null && rc=0 ;;
+    Darwin) python3 -c 'import ctypes, sys; sys.exit(ctypes.CDLL(None).clonefile(sys.argv[1].encode(), sys.argv[2].encode(), 0) != 0)' \
+      "$W/.cow_src" "$W/.cow_dst" 2>/dev/null && rc=0 ;;
+  esac
+  rm -f "$W/.cow_src" "$W/.cow_dst"
+  return $rc
+}
+
 # `row FILE KEY`: a field of the envelope's first test row.
 row() {
   python3 - "$1" "$2" <<'PY'
@@ -259,6 +276,15 @@ case "$(tune "$W/lfsr2.json" verdict.result)" in
 esac
 [ "$(tune "$W/lfsr2.json" verdict.oracle)" = "equal" ] || fail "L0 oracle: $(tune "$W/lfsr2.json" verdict)"
 [ "$(tune "$W/lfsr2.json" converged)" = "true" ] || fail "the LFSR must converge after its one trial: $(tune "$W/lfsr2.json" note)"
+# A rejected trial on a filesystem without CoW has no retained tree to
+# restore. Its documented fallback needs one setup to rebuild the incumbent;
+# subsequent converged setups must still preserve their generated sources.
+if tune "$W/lfsr2.json" note | grep -q "no retained incumbent tree"; then
+  cow && fail "copy-on-write is available in $W but the rejected LFSR trial kept no incumbent tree"
+  [ "$LFSR_KEPT" = "$L1" ] || fail "an accepted trial must not require restoration"
+  sim "$W/lfsr_restore.json" "$LFSR" --workdir "$L" --setup-only || fail "incumbent restoration setup failed"
+  [ "$(tune "$W/lfsr_restore.json" applied.vector)" = "$L1" ] || fail "restoration must select the incumbent"
+fi
 touch "$W/lfsr.marker"
 sleep 1
 sim "$W/lfsr3.json" "$LFSR" --workdir "$L" --arg cycles=1000 || fail "lfsr run 3 failed"
@@ -423,7 +449,16 @@ for k in 1 2; do
   chmod +x "$C/sim/drv.bin"
   sim "$W/cr${k}c.json" "$IDLE" --workdir "$C" --run-only --arg cycles="$N_IDLE" && fail "the crashing trial run must fail"
   [ "$(tune "$W/cr${k}c.json" verdict.result)" = "run-failed" ] || fail "crash $k: $(tune "$W/cr${k}c.json" note)"
-  tune "$W/cr${k}c.json" note | grep -q "reverted to the retained incumbent tree" || fail "crash $k was not reverted"
+  if cow; then
+    tune "$W/cr${k}c.json" note | grep -q "reverted to the retained incumbent tree" \
+      || fail "crash $k was not reverted (copy-on-write is available in $W): $(tune "$W/cr${k}c.json" note)"
+  else
+    tune "$W/cr${k}c.json" note | grep -q "no retained incumbent tree" || fail "crash $k did not report the no-CoW fallback"
+    sim "$W/cr${k}_closed.json" "$IDLE" --workdir "$C" --run-only --arg cycles=1000 \
+      && fail "the failed trial without a retained tree must refuse --run-only"
+    [ "$(row "$W/cr${k}_closed.json" verdict)" != "pass" ] || fail "closed trial reported a passing test"
+    grep -q '"class":"usage"' "$W/cr${k}_closed.json" || fail "closed trial must require a setup"
+  fi
   sim "$W/cr${k}d.json" "$IDLE" --workdir "$C" --arg cycles="$N_IDLE" || fail "the incumbent after crash $k failed"
   [ "$(tune "$W/cr${k}d.json" applied.vector)" = "$L1" ] || fail "after crash $k the incumbent must run"
   echo "crash $k: $(tune "$W/cr${k}c.json" note) || next: $(tune "$W/cr${k}d.json" note)"

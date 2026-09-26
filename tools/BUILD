@@ -2,6 +2,8 @@
 
 load("@build_bazel_apple_support//xcode:xcode_config.bzl", "xcode_config")
 
+exports_files(["native_sim.py"])
+
 # An empty Xcode version list selects apple_support's Command Line Tools
 # toolchain, without discovering an unrelated /Applications/Xcode.app.
 xcode_config(

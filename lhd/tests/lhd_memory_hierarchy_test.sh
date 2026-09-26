@@ -55,8 +55,52 @@ for m in texts:
 print('PASS: stable memory instance identities across all three modes and parent flatten; bounded LEC proven')
 PY
 
-# Exercise initialization before the first edge, followed by a longer sequence
-# of writes and asynchronous reads, on the emitted Verilog in every mode.
+# Native values check initialization and writes without inventing reset
+# inputs when comparing a memory graph against its lowered Verilog. Outputs are
+# observed after each `step` only, so a read-during-write bypass (a pre-edge
+# value) is NOT observable here; only the LHD_EXTERNAL_SIM leg below checks it.
+python3 - "$W/vectors.json" <<'PYV'
+import json, sys
+left = list(range(4))
+right = list(range(4))
+vectors = []
+for k in range(4):
+    vectors.append(dict(inputs=dict(we=0, addr=k, din=0), outputs=dict(a=k,b=k)))
+for k in range(16):
+    addr, data, we = (k*3+k//7)%4, (k*37+13)&255, int(k%3 != 0)
+    if we:
+        left[addr], right[addr] = data, data ^ 255
+    vectors.append(dict(inputs=dict(we=we, addr=addr, din=data), outputs=dict(a=left[addr],b=right[addr])))
+open(sys.argv[1], 'w').write(json.dumps(vectors))
+PYV
+# One native run per DISTINCT emitted netlist, concurrently (each is a compile
+# plus a host C++ build, the bulk of this test's wall time).
+native=()
+for mode in default false true; do
+  # memory=auto folds exactly like memory=true: do not simulate a byte-identical
+  # netlist twice.
+  if [ "$mode" = default ] && cmp -s "$W/default.v" "$W/true.v"; then continue; fi
+  cat "$W/$mode.v" "$W/models.v" > "$W/$mode-impl.v"
+  LHD="$LHD" python3 tools/native_sim.py "$W/$mode-impl.v" memory_hierarchy "$W/vectors.json" "$W/$mode-native" \
+    >"$W/$mode-native.log" 2>&1 &
+  native+=("$!:$mode")
+done
+for job in "${native[@]}"; do
+  wait "${job%%:*}" || { cat "$W/${job#*:}-native.log"; echo "FAIL: native simulation of the ${job#*:} netlist"; exit 1; }
+done
+
+if [ -z "${LHD_EXTERNAL_SIM:-}" ]; then
+  echo "note: external-simulator leg skipped (set LHD_EXTERNAL_SIM=1)"
+  echo 'PASS: emitted memory initialization and writes match explicit expected values in every mode'
+  exit 0
+fi
+command -v iverilog >/dev/null 2>&1 && command -v vvp >/dev/null 2>&1 \
+  || { echo "FAIL: LHD_EXTERNAL_SIM is set but iverilog/vvp are not on PATH"; exit 1; }
+
+# Independent oracle (LHD_EXTERNAL_SIM=1, see AGENTS.md): Icarus compares every
+# mode's emitted Verilog against the source over initialization plus 128 cycles
+# of writes and asynchronous reads, checking before AND after each edge (so it
+# also sees the read-during-write bypass the native leg cannot).
 sed 's/module memory_hierarchy(/module reference(/' "$W/memory_hierarchy.v" > "$W/reference.v"
 cat > "$W/tb.v" <<'SV'
 module tb;
@@ -83,4 +127,4 @@ for mode in default false true; do
   iverilog -g2012 -I ware/rtl -s tb -o "$W/$mode-sim" "$W/$mode.v" "$W/models.v" "$W/reference.v" "$W/tb.v"
   vvp "$W/$mode-sim"
 done
-echo 'PASS: native and lowered memory Verilog preserve initialization and 128 cycles of reads/writes'
+echo 'PASS: emitted memory initialization and writes match explicit expected values in every mode; Icarus agrees over 128 cycles'

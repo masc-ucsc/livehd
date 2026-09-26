@@ -1179,7 +1179,7 @@ void splice(const Cone& rep, const Cone& occ, const Match* match, const Port_pla
   }
 
   // The instance. Anonymous on purpose (partition's hier-name transparency
-  // convention -- cgen synthesizes a stable u_<module> at emit), and NOT
+  // convention -- cgen emits it as the transparent `__flat___<module>`), and NOT
   // colored: color ids are per-def region ids that pass.partition consumes,
   // and a fresh 1..P stamp would collide with whatever coloring the graphs
   // already carry. Pattern identity is the instance's target def name (pat_*).

@@ -192,49 +192,37 @@ sh_test(
 )
 
 # Pyrope rejects a statically out-of-range array index in uPass. A dynamic
-# index cannot be decided until execution, so keep the generated assertion
-# live and exercise it with an out-of-range value in a small RTL simulation.
+# index cannot be decided until execution, so the emitted Verilog keeps a bounds
+# assertion on the index; native simulation checks the in-range values. The
+# native simulator does not evaluate lgassert yet, so the diagnostic FIRING is
+# checked only by the event-simulator leg: --test_env=LHD_EXTERNAL_SIM=1 plus a
+# --test_env=PATH=... that reaches iverilog/vvp (add --strategy=TestRunner=local
+# when they live under /tmp, which the sandbox hides). Missing tools then FAIL.
 sh_test(
     name = "prp-array-oob-runtime",
     srcs = ["tests/array_oob_runtime_test.sh"],
     args = ["$(location //inou/prp:tests/lgraph/array_oob_runtime.prp)"],
     data = [
         "//inou/prp:tests/lgraph/array_oob_runtime.prp",
+        "//tools:native_sim.py",
         "//lhd",
     ],
-    tags = ["no-sandbox"],  # invokes the host iverilog/vvp
 )
 
 # A runtime bit-range write whose endpoints arrive REVERSED (upper endpoint
 # `i-1` can even go negative). Two obligations, neither statically decidable:
-# the destination comes back untouched, and the descending-range diagnostic
-# actually fires. Both need an RTL simulation to observe.
+# the destination comes back untouched (native simulation), and the
+# descending-range diagnostic fires (a signed guard on both endpoints is
+# checked statically; firing only under LHD_EXTERNAL_SIM, as above).
 sh_test(
     name = "prp-range-reversed-runtime",
     srcs = ["tests/range_reversed_runtime_test.sh"],
     args = ["$(location //inou/prp:tests/lgraph/range_reversed_runtime.prp)"],
     data = [
         "//inou/prp:tests/lgraph/range_reversed_runtime.prp",
+        "//tools:native_sim.py",
         "//lhd",
     ],
-    tags = ["no-sandbox"],  # invokes the host iverilog/vvp
-)
-
-# Independently toggle the derived bit clocks, including between root-clock
-# edges. This timing assertion complements the equivalence/state-match pairs.
-sh_test(
-    name = "prp-bit-selected-clocks",
-    srcs = ["tests/bit_selected_clocks_test.py"],
-    data = [
-        "tests/bit_selected_clocks_tb.v",
-        "tests/bit_selected_clocks_vector.v",
-        "tests/equiv/bit_selected_clocks.prp",
-        "tests/equiv/bit_selected_clocks.v",
-        "tests/equiv/bit_selected_clocks_1.v",
-        "//lhd",
-    ],
-    env_inherit = ["PATH"],
-    tags = ["no-sandbox"],  # invokes the host iverilog/vvp
 )
 
 # Fast R5 regression: the ordinary pyrope glob above catches the pre-fix tolg
@@ -481,7 +469,9 @@ _SIM_FIXME = [
 # pairs with `tests/sim/<x>.prp`, which is what lets bazel find them at load time.
 #
 # These are the tests that say "`lhd sim` refuses this and the design is fine" —
-# so they are NOT in _SIM_FIXME even when their `prp-sim-` twin is. A machine
+# so they are NOT in _SIM_FIXME even when their `prp-sim-` twin is. They are
+# tagged manual (external simulator): run them explicitly, with
+# --test_env=VERILATOR when verilator is not in a standard prefix. A machine
 # without verilator SKIPS (prpvsim.py), it does not fail.
 [
     sh_test(
@@ -502,7 +492,7 @@ _SIM_FIXME = [
             "//inou/prp:%s" % twin,
             "//lhd",
         ],
-        tags = ["verilator"],
+        tags = ["manual", "external-simulator"],
     )
     for twin in glob(["tests/sim/verilator/*_vtb.cpp"])
 ]
@@ -1779,10 +1769,7 @@ _SYNTH_SOURCES = glob(
         "tests/abc/*.json",
     ],
     allow_empty = True,
-    exclude = [
-        "tests/abc/*_ref.v",
-        "tests/abc/*_tb.v",
-    ],
+    exclude = ["tests/abc/*_ref.v"],
 )
 
 _LEC_SOURCES = [

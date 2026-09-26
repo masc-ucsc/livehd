@@ -50,8 +50,8 @@ _VERILATOR_PREFIXES = (
 
 
 def verilator_bin():
-    # $VERILATOR wins (bazel passes it through the test sandbox), then PATH,
-    # then the install prefixes bazel's PATH drops.
+    # $VERILATOR wins (under bazel it needs --test_env=VERILATOR; .bazelrc no
+    # longer forwards it), then PATH, then the install prefixes bazel's PATH drops.
     v = os.environ.get('VERILATOR')
     if v and (os.path.isfile(v) or shutil.which(v)):
         return v
@@ -108,7 +108,8 @@ def run_verilator_diff(runner, tmp_dir, test):
         # the line has to say plainly that NOTHING WAS COMPARED, because bazel
         # reports this target as PASSED either way.
         print('{} - vsim - SKIP: verilator not installed, so the differential DID NOT RUN '
-              '(brew/apt install verilator, or export VERILATOR=<path>)'.format(name))
+              '(brew/apt install verilator, or export VERILATOR=<path> and run bazel with '
+              '--test_env=VERILATOR)'.format(name))
         return 0
 
     # ABSOLUTE throughout: `lhd compile` runs with cwd=tmp_dir while verilator

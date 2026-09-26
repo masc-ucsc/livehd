@@ -17,6 +17,7 @@ genrule(
     name = "formal_salt",
     srcs = [
         "//core:formal_srcs",  # canonical_entity_name / reset_name_polarity moved here; pairing + reset semantics must stay salted
+        "//graph:node_util.hpp",  # logical hierarchy names are proof/cache identity
         "//graph:split_selfref.cpp",
         "//graph:split_selfref.hpp",
         "//pass/lec:formal_srcs",
@@ -214,10 +215,9 @@ cc_binary(
     ],
     # Export Yosys symbols for optional user plugins; read_slang is built in.
     linkopts = select({
-        "@platforms//os:macos": ["-lz"],
+        "@platforms//os:macos": [],
         "//conditions:default": [
             "-Wl,--export-dynamic",
-            "-lz",
         ],
     }),
     visibility = ["//visibility:public"],
@@ -238,7 +238,6 @@ cc_test(
         "lhd_kernel_internal.hpp",
     ],
     copts = COPTS,
-    linkopts = ["-lz"],
     # The full driver uses static third-party libraries (including Slang).
     linkstatic = True,
     deps = [

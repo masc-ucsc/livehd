@@ -522,6 +522,50 @@ template <typename Node_like>
   return std::string{Ntype::get_name(type_op_of(node))} + "_" + std::to_string(static_cast<uint64_t>(node.get_debug_nid()));
 }
 
+// Reserved for transformation-introduced instances which do not contribute
+// to logical hierarchy. Their physical names/occurrence paths remain intact.
+inline constexpr std::string_view transparent_instance_prefix = "__flat___";
+
+[[nodiscard]] inline bool is_transparent_instance_name(std::string_view name) {
+  return name.starts_with(transparent_instance_prefix);
+}
+
+// Canonical logical path shared by matching and hierarchy transformations.
+// Reader quoting is not identity. Only INSTANCE components are transparent:
+// a final register/wire named __flat___something is still an ordinary leaf.
+// Set instance=true when the path itself denotes an instance (not a signal).
+[[nodiscard]] inline std::string logical_hier_name(std::string_view physical, bool instance = false) {
+  std::string raw;
+  raw.reserve(physical.size());
+  for (char ch : physical) {
+    if (ch != '`' && ch != '\\') {
+      raw += ch;
+    }
+  }
+  std::string out;
+  for (size_t begin = 0; begin < raw.size();) {
+    const auto end  = raw.find('.', begin);
+    const auto part = std::string_view{raw}.substr(begin, end == std::string::npos ? raw.size() - begin : end - begin);
+    if (!((instance || end != std::string::npos) && is_transparent_instance_name(part))) {
+      if (!out.empty()) {
+        out += '.';
+      }
+      out += part;
+    }
+    if (end == std::string::npos) {
+      break;
+    }
+    begin = end + 1;
+  }
+  return out;
+}
+
+// Match HHDS's anonymous-instance transparency also when physically inlining.
+[[nodiscard]] inline std::string logical_instance_prefix(const hhds::Node_class& instance) {
+  auto name = logical_hier_name(node_name_of(instance), true);
+  return name.empty() ? name : name + ".";
+}
+
 // LiveHD's `debug_name` (cell+nid+name) — used in error messages.
 [[nodiscard]] inline std::string debug_name(const hhds::Node_class& node) {
   auto n    = node_name_of(node);

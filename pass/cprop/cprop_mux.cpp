@@ -292,7 +292,7 @@ class Mux_sharing {
     // to exactly one tree, even if the enclosing dataflow is a reconvergent DAG.
     for (auto& c : candidates) {
       const auto consumer = sole_consumer(c.node);
-      if (!consumer) {
+      if (!consumer || gu::has_name(c.node) || !gu::pin_name_of(c.node.get_driver_pin(0)).empty()) {
         continue;
       }
       auto it = candidate_ids.find(consumer->sink.get_master_node().get_class_index());
@@ -331,6 +331,138 @@ class Mux_sharing {
       return {};
     }
     return flop;
+  }
+
+  // Plan predicate trees without touching the graph. A predicate only needs
+  // the right truth value, so mux(s,0,1) can use s even when s is wide/signed.
+  // This is essential to mux(s,mux(c,a,b),mux(d,a,b)) ->
+  // mux(mux(s,c,d),a,b) without introducing gratuitous boolean gates.
+  void two_group_tree(Candidate& root, const std::vector<Visit>& visits, const std::vector<Group>& groups) {
+    struct Ref {
+      Pin    pin;
+      size_t expression = absent;
+      bool   operator==(const Ref& other) const { return expression == other.expression && pin == other.pin; }
+    };
+    struct Expression {
+      Ntype_op         op;
+      std::vector<Ref> inputs;
+    };
+    struct Plan {
+      std::vector<Expression> expressions;
+      std::vector<bool>       live;
+      Ref                     result;
+      size_t                  cost = 0;
+      size_t                  true_group;
+    };
+    const Ref  z{zero}, o{one};
+    const auto plan_for = [&](size_t true_group) {
+      Plan       plan{{}, {}, {}, 0, true_group};
+      const auto add = [&](Ntype_op op, std::vector<Ref> inputs) {
+        const auto id = plan.expressions.size();
+        plan.expressions.push_back({op, std::move(inputs)});
+        return Ref{{}, id};
+      };
+      const auto mux = [&](Pin select, Ref f, Ref t) {
+        if (f == t) {
+          return f;
+        }
+        if (select.is_const()) {
+          return gu::const_of(select).is_known_zero() ? f : t;
+        }
+        if (f == z && t == o) {
+          return Ref{select};
+        }
+        if (f == o && t == z) {
+          return add(Ntype_op::EQ, {{select}, z});
+        }
+        return add(Ntype_op::Mux, {{select}, f, t});
+      };
+      std::vector<Ref> predicates(visits.size());
+      for (size_t i = visits.size(); i-- > 0;) {
+        const auto& visit  = visits[i];
+        const auto& c      = candidates[visit.candidate];
+        const auto  target = [&](size_t j) {
+          const auto t = visit.targets[j];
+          return t.internal ? predicates[t.index] : t.index == true_group ? o : z;
+        };
+        if (c.arms.size() == 1) {
+          predicates[i] = mux(c.arms[0].first, target(1), target(0));
+          continue;
+        }
+        const auto       fallback = target(c.arms.size());
+        bool             same     = true;
+        std::vector<Ref> inputs;
+        for (size_t j = 0; j < c.arms.size(); ++j) {
+          auto value = target(j);
+          same       = same && value == fallback;
+          inputs.push_back({c.arms[j].first});
+          inputs.push_back(value);
+        }
+        inputs.push_back(fallback);
+        predicates[i] = same ? fallback : add(Ntype_op::Hotmux, std::move(inputs));
+      }
+      plan.result = predicates[0];
+      plan.live.resize(plan.expressions.size());
+      std::vector<Ref> pending{plan.result};
+      for (size_t i = 0; i < pending.size(); ++i) {
+        const auto id = pending[i].expression;
+        if (id == absent || plan.live[id]) {
+          continue;
+        }
+        plan.live[id] = true;
+        ++plan.cost;
+        for (auto input : plan.expressions[id].inputs) {
+          pending.push_back(input);
+        }
+      }
+      return plan;
+    };
+    auto plan     = plan_for(0);
+    auto inverted = plan_for(1);
+    if (inverted.cost < plan.cost) {
+      plan = std::move(inverted);
+    }
+    // One final data mux, plus EVERY reachable predicate/control node. The
+    // old cost counts cells, including each Hotmux once, not its arm count.
+    if (plan.cost + 1 >= visits.size()) {
+      return;
+    }
+    std::vector<Pin> emitted(plan.expressions.size());
+    const auto       pin = [&](Ref ref) { return ref.expression == absent ? ref.pin : emitted[ref.expression]; };
+    for (size_t i = 0; i < plan.expressions.size(); ++i) {
+      if (!plan.live[i]) {
+        continue;
+      }
+      const auto& expression = plan.expressions[i];
+      auto        node       = livehd::cprop_value::make_node(graph, expression.op);
+      for (size_t j = 0; j < expression.inputs.size(); ++j) {
+        gu::setup_sink_pid(node, j).connect_driver(pin(expression.inputs[j]));
+      }
+      if (expression.op == Ntype_op::Hotmux) {
+        // Same controls as the original, already proven/decoded exclusive.
+        gu::set_proven(node, gu::kFormalOnehot);
+      }
+      emitted[i] = node.create_driver_pin(0);
+      if (expression.op == Ntype_op::EQ) {
+        gu::set_ubits(emitted[i], 1);
+      }
+      livehd::cprop_value::remember(node);
+    }
+    livehd::cprop_value::forget(root.node.get_driver_pin(0));
+    for (auto sink : root.node.inp_pins_snapshot()) {
+      sink.del_sink();
+    }
+    gu::clear_proven(root.node);
+    gu::set_type_op(root.node, Ntype_op::Mux);
+    gu::setup_sink_pid(root.node, 0).connect_driver(pin(plan.result));
+    gu::setup_sink_pid(root.node, 1).connect_driver(groups[1 - plan.true_group].value);
+    gu::setup_sink_pid(root.node, 2).connect_driver(groups[plan.true_group].value);
+    livehd::cprop_value::remember(root.node);
+    for (size_t i = 1; i < visits.size(); ++i) {
+      auto node = candidates[visits[i].candidate].node;
+      I(!node.has_out_edges());
+      livehd::cprop_value::retire(node);
+    }
   }
 
   void rewrite(size_t root_id) {
@@ -399,6 +531,10 @@ class Mux_sharing {
     }
     const size_t data_count = groups.size() - (hold != absent);
     if (!data_count) {
+      return;
+    }
+    if (!state_context && groups.size() == 2) {
+      two_group_tree(root, visits, groups);
       return;
     }
     // A selection among PROVEN 0/1 values stays the Mux nest it is. Flattening

@@ -8,7 +8,7 @@ import tempfile
 import time
 import unittest
 
-from lec import final_verdict, run_lec, verdict
+from lec import DBG_WATCHDOG_SCALE, final_verdict, run_lec, verdict, watchdog_scale
 
 
 class LecHarness(unittest.TestCase):
@@ -46,12 +46,20 @@ class LecHarness(unittest.TestCase):
                       'subprocess.Popen([sys.executable,"-c",{!r}]); '
                       'print("started",flush=True); time.sleep(10)').format(child)
             started = time.monotonic()
-            result = run_lec([sys.executable, '-c', parent, '--set', 'formal.timeout=.1'], timeout=5)
+            result = run_lec([sys.executable, '-c', parent, '--set', 'formal.timeout=.1'], timeout=5, scale=1)
             self.assertEqual(result.returncode, 124)
             self.assertIn(b'outer watchdog', result.stdout)
             self.assertLess(time.monotonic() - started, 2)
             time.sleep(.5)
             self.assertFalse(os.path.exists(marker), 'watchdog left its simulator/solver child running')
+
+    def test_watchdog_scales_only_in_dbg_trees(self):
+        base = '/x/execroot/_main/bazel-out/{}/bin/inou/prp/t.runfiles'
+        self.assertEqual(watchdog_scale(base.format('k8-dbg')), DBG_WATCHDOG_SCALE)
+        self.assertEqual(watchdog_scale(base.format('darwin_arm64-dbg')), DBG_WATCHDOG_SCALE)
+        for mode in ('k8-opt', 'k8-fastbuild'):
+            self.assertEqual(watchdog_scale(base.format(mode)), 1)
+        self.assertEqual(watchdog_scale('/home/u/dbg-work/livehd'), 1)
 
     def test_unbounded_budget_is_rejected(self):
         for budget in ('0', '-1', 'nan', 'inf'):

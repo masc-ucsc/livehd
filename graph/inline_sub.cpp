@@ -44,8 +44,8 @@ private:
   // cell model's internal flop carries no name attr, so the cut would otherwise
   // be keyed on a synthesized net name that corresponds to nothing.
   bool             name_state_      = false;
-  // False only for an unnamed compiler-generated wrapper whose default
-  // `sub_<nid>` name is not part of the source hierarchy.
+  // False drops a NAMED instance's component too; an unnamed or `__flat___*`
+  // instance adds none either way (logical_instance_prefix).
   bool             prefix_instance_ = true;
   bool             inherit_color_   = false;
   hhds::Graph*     child_           = nullptr;
@@ -389,7 +389,7 @@ bool Sub_inliner::run() {
     return false;
   }
   child_  = cg.get();
-  prefix_ = prefix_instance_ ? default_instance_name(inst_) + "." : std::string{};
+  prefix_ = prefix_instance_ ? logical_instance_prefix(inst_) : std::string{};
 
   auto gio = child_->get_io();
   if (!gio) {

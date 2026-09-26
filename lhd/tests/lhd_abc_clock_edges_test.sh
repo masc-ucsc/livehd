@@ -5,6 +5,18 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 LHD="${LHD:-lhd/lhd}"
 W="$(mktemp -d)"
 trap 'rm -rf "$W"' EXIT
+# Both LEC legs push the negedge `late` register through our own single_edge
+# encoding on both sides. With LHD_EXTERNAL_SIM=1 (see AGENTS.md) Icarus also
+# runs the mapped netlist + gensim cell models against a hand-written
+# posedge/negedge reference, the independent both-edge oracle.
+sim_iv=
+if [ -n "${LHD_EXTERNAL_SIM:-}" ]; then
+  command -v iverilog >/dev/null 2>&1 && command -v vvp >/dev/null 2>&1 \
+    || { echo "FAIL: LHD_EXTERNAL_SIM is set but iverilog/vvp are not on PATH"; exit 1; }
+  sim_iv=1
+else
+  echo "note: external-simulator leg skipped (set LHD_EXTERNAL_SIM=1)"
+fi
 cat > "$W/edges.prp" <<'PRP'
 pub mod edges::[timecheck=false](clk:u1, d:u3) -> (q:u3@[]) {
   reg early:u3:[clock_pin=ref clk]
@@ -58,12 +70,14 @@ for kind in test test_qn native; do
   run synth lg:"$W/ref" --top edges --set synth.liberty="$LIB" --set synth.opentimer=false \
     --emit-dir lg:"$D/net" --emit verilog:"$D/net.v" --workdir "$D/synth"
   run pass liberty gensim "$LIB" --emit-dir lg:"$D/models" --emit verilog:"$D/models.v" --workdir "$D/gensim"
-  iverilog -g2012 -s tb -o "$D/sim" "$W/tb.v" "$D/net.v" "$D/models.v"
-  vvp "$D/sim"
+  if [ -n "$sim_iv" ]; then
+    iverilog -g2012 -s tb -o "$D/sim" "$W/tb.v" "$D/net.v" "$D/models.v"
+    vvp "$D/sim"
+  fi
   run lec --impl lg:"$D/net" --ref lg:"$W/ref" --lib lg:"$D/models" --top edges \
     --set formal.timeout=60 --workdir "$D/native"
   cat "$D/net.v" "$D/models.v" > "$D/impl.v"
   run lec --impl verilog:"$D/impl.v" --ref verilog:"$W/ref.v" --top edges \
-    --set formal.timeout=60 --workdir "$D/yosys"
+    --set formal.timeout=60 --workdir "$D/verilog"
 done
 echo 'PASS: rising and falling register edges survive mapped Q and QN cells'

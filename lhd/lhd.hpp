@@ -342,6 +342,8 @@ struct Result {
     // Independent oracle result; a native proof cannot stand in for this.
     std::string crosscheck_verdict{};  // empty until invoked; proven | refuted | unknown
     int         crosscheck_exit_code{-1};
+    bool        crosscheck_bounded{false};  // proven only by lgcheck's complete bounded miter
+    int64_t     crosscheck_bound{0};        // that window, in native design cycles (formal.bound)
   } lec;
 
   // Internal hand-off from Tier A (source/LNAST sync) to Tier B (final LGraph  // Internal hand-off from Tier A (source/LNAST sync)

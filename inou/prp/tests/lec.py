@@ -9,7 +9,20 @@ import subprocess
 import sys
 
 
-def run_lec(cmd, cwd=None, timeout=5):
+# `-c dbg` builds lhd (and yosys/abc) at -O0: everything LiveHD-side runs ~9x
+# slower while the prebuilt cvc5 does not, so formal.timeout (solve time) holds
+# but the outer watchdog -- which also covers parse/upass/satopt -- must scale.
+DBG_WATCHDOG_SCALE = 10
+
+
+def watchdog_scale(path=None):
+    """Outer-watchdog multiplier: DBG_WATCHDOG_SCALE when running from a bazel dbg tree."""
+    if path is None:
+        path = os.environ.get('TEST_SRCDIR') or os.getcwd()
+    return DBG_WATCHDOG_SCALE if re.search(r'/bazel-out/[^/]*-dbg/', path) else 1
+
+
+def run_lec(cmd, cwd=None, timeout=5, scale=None):
     """Return CompletedProcess with bytes output; kill the whole owned group on overrun."""
     for i, arg in enumerate(cmd):
         if arg == '--set' and i + 1 < len(cmd) and cmd[i + 1].startswith('formal.timeout='):
@@ -21,10 +34,11 @@ def run_lec(cmd, cwd=None, timeout=5):
     # therefore remove the budget entirely -- the opposite of the check above.
     # Send whole seconds to the engine; keep the float for the outer watchdog.
     cmd = list(cmd) + ['--set', 'formal.timeout={}'.format(max(1, math.ceil(timeout)))]
+    watchdog = 2 * timeout * (watchdog_scale() if scale is None else scale)
     proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             start_new_session=True)
     try:
-        out, _ = proc.communicate(timeout=2 * timeout)
+        out, _ = proc.communicate(timeout=watchdog)
     except subprocess.TimeoutExpired:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
@@ -32,7 +46,7 @@ def run_lec(cmd, cwd=None, timeout=5):
             pass  # The process group exited between the deadline and kill.
         out, _ = proc.communicate()
         out += ('\nFAIL: LEC outer watchdog exceeded {:g}s (internal budget {:g}s)\n'
-                .format(2 * timeout, timeout)).encode()
+                .format(watchdog, timeout)).encode()
         return subprocess.CompletedProcess(cmd, 124, out)
     return subprocess.CompletedProcess(cmd, proc.returncode, out)
 

@@ -1121,8 +1121,8 @@ int help_pass(const std::string& sub) {
         "\n"
         "Every region is covered by domino gates over dual-rail inputs (support/literals/series limits;\n"
         "static LUTs where no domino gate builds a function), minimizing a transistor proxy under a domino\n"
-        "depth requirement. The cover then goes to ABC: technology mapping only (abc=tmap) or the pass.abc\n"
-        "flow (abc=opt, the default); abc=only skips the cover. A region the cover cannot handle takes the\n"
+        "depth requirement. The cover then goes to ABC: technology mapping only (abc=tmap, the default) or the pass.abc\n"
+        "flow (abc=opt); abc=only skips the cover. A region the cover cannot handle takes the\n"
         "ordinary ABC flow. State and latency are preserved; check equivalence with `lhd lec`.\n"
         "The fused command selects this pass with --set synth.mapper=usyn; abc.* tuning is inherited.\n");
     return print_options_section({"pass.usyn."});

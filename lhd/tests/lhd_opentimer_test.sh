@@ -48,8 +48,9 @@ grep -q '"kind":"sta"' "$W/wt/timing.json" || fail "timing.json missing kind:sta
 grep -q '"max_delay":' "$W/wt/timing.json" || fail "timing.json missing max_delay"
 # The critical pin is a mapped GATE pin, not a port. `<inst>.` prefix optional:
 # the mapped netlist is hierarchical whenever the coloring opens more than one
-# region in the def (the shipped `cones` default routinely does), and the pin
-# then reads `sub_16.g76_NAND2x1__n188:Y`.
+# region in the def (the shipped `cones` default routinely does), but its region
+# wrappers are anonymous and flattening adds no component for them, so the pin
+# reads `g76_NAND2x1__n188:Y`. The prefix appears only under a NAMED instance.
 grep -q '"critical_pin":"\([A-Za-z0-9_.]*\.\)\{0,1\}g[0-9]*_[A-Za-z0-9_]*__n[0-9]*:' "$W/wt/timing.json" \
   || fail "timing.json missing a gate critical_pin"
 grep -q '"critical_src":"[^"]*abc_comb.prp:[0-9]*"' "$W/wt/timing.json" || fail "critical path not source-attributed"

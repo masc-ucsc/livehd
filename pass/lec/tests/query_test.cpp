@@ -8,6 +8,7 @@
 #include "query.hpp"
 
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -18,11 +19,14 @@
 #include "enableopt.hpp"
 #include "bitwidth.hpp"
 #include "encode.hpp"
+#include "flatten.hpp"
 #include "gtest/gtest.h"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
+#include "inline_sub.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
+#include "semdiff.hpp"
 
 using namespace livehd;
 using livehd::lec::Verdict;
@@ -342,6 +346,42 @@ TEST(LecState, PartialUnknownInitialPreservesKnownBits) {
   ASSERT_TRUE(concrete.has_value());
   EXPECT_EQ(solver.simplify(concrete->term), tm.mkBitVector(4, "1001", 2));
   EXPECT_TRUE(concrete->x_mask.isNull());
+}
+
+TEST(LecState, UnknownWriteEnableMergesWriteAndHoldKnowledge) {
+  hhds::GraphLibrary lib;
+  auto               io = lib.create_io("enabled");
+  for (const auto name : {"clock", "enable"}) {
+    io->add_input(name, name == std::string("clock") ? 0 : 1);
+    io->set_bits(name, 1);
+    io->set_unsign(name, true);
+  }
+  io->add_output("out", 2);
+  io->set_bits("out", 4);
+  io->set_unsign("out", true);
+  auto g    = io->create_graph();
+  auto flop = graph_util::create_typed_node(*g, Ntype_op::Flop);
+  flop.set_name("state");
+  auto q = flop.create_driver_pin(0);
+  graph_util::set_ubits(q, 4);
+  q.connect_sink(g->get_output_pin("out"));
+  g->get_input_pin("clock").connect_sink(graph_util::setup_sink_by_name(flop, "clock_pin"));
+  g->get_input_pin("enable").connect_sink(graph_util::setup_sink_by_name(flop, "enable"));
+  graph_util::create_const(*g, *Dlop::from_binary("1010", true)).connect_sink(graph_util::setup_sink_by_name(flop, "din"));
+  cvc5::TermManager tm;
+  cvc5::Solver      solver(tm);
+  for (int enable : {0, 1}) {
+    lec::Io_name_map<lec::Val> inputs;
+    inputs["state"]  = {tm.mkBitVector(4, 8), 4, false, tm.mkBitVector(4, 1)};
+    inputs["enable"] = {tm.mkBitVector(1, enable), 1, false, tm.mkBitVector(1, 1)};
+    lec::Encoder encoder(tm);
+    encoder.set_x_dontcare(true);
+    auto encoded = encoder.encode(g.get(), &inputs);
+    ASSERT_TRUE(encoded.ok) << encoded.error;
+    const auto& next = encoded.outputs.at("\x01nxt:state");
+    // 10?0 vs 100?: bit 1 differs and bit 0 is unknown; high bits agree.
+    EXPECT_EQ(solver.simplify(next.x_mask), tm.mkBitVector(4, 3));
+  }
 }
 
 TEST(LecState, PowerOnInitialIsPerDesignWithOrWithoutOtherReset) {
@@ -765,4 +805,195 @@ TEST(CombEquiv, WindowInsertionPreservesAndClearsPositionalUnknowns) {
   const auto& n = encoded.outputs.at("negative");
   EXPECT_EQ(solver.simplify(n.x_mask), tm.mkBitVector(8, 0));
   EXPECT_EQ(solver.simplify(n.term), tm.mkBitVector(8, 0x5b));
+}
+
+// ---- transparent `__flat___` hierarchy wrappers (graph/README.md) -----------
+// The virtual (HHDS occurrence), physically flattened and inlined forms of a
+// hierarchy with transparent wrappers must all name the state `foo.bar.q`.
+
+namespace {
+
+struct Transparent_design {
+  hhds::GraphLibrary                        lib;
+  std::vector<std::shared_ptr<hhds::Graph>> graphs;
+
+  std::shared_ptr<hhds::Graph> empty() {
+    auto io = lib.create_io("m" + std::to_string(graphs.size()));
+    io->add_input("clk", 0);
+    io->add_input("d", 1);
+    io->add_output("q", 2);
+    for (auto name : {"clk", "d", "q"}) {
+      io->set_bits(name, 1);
+      io->set_unsign(name, true);
+    }
+    auto g = io->create_graph();
+    graphs.push_back(g);
+    return g;
+  }
+
+  std::shared_ptr<hhds::Graph> state(const std::string& name, bool wrong = false) {
+    auto g    = empty();
+    auto flop = graph_util::create_typed_node(*g, Ntype_op::Flop);
+    flop.set_name(name);
+    auto d = g->get_input_pin("d");
+    if (wrong) {
+      auto inv = graph_util::create_typed_node(*g, Ntype_op::Not);
+      d.connect_sink(graph_util::setup_sink_by_name(inv, "a"));
+      d = inv.create_driver_pin(0);
+      graph_util::set_ubits(d, 1);
+    }
+    d.connect_sink(graph_util::setup_sink_by_name(flop, "din"));
+    g->get_input_pin("clk").connect_sink(graph_util::setup_sink_by_name(flop, "clock_pin"));
+    graph_util::create_const(*g, *Dlop::create_integer(0)).connect_sink(graph_util::setup_sink_by_name(flop, "initial"));
+    auto q = flop.create_driver_pin(0);
+    graph_util::set_ubits(q, 1);
+    graph_util::set_pin_name(q, name);
+    q.connect_sink(g->get_output_pin("q"));
+    return g;
+  }
+
+  hhds::Node_class instance(hhds::Graph* g, const std::shared_ptr<hhds::Graph>& child, const std::string& name) {
+    auto n = graph_util::create_typed_node(*g, Ntype_op::Sub);
+    n.set_subnode(child->get_io());
+    if (!name.empty()) {
+      n.set_name(name);
+    }
+    g->get_input_pin("clk").connect_sink(n.create_sink_pin(0));
+    g->get_input_pin("d").connect_sink(n.create_sink_pin(1));
+    graph_util::set_ubits(n.create_driver_pin(2), 1);
+    return n;
+  }
+
+  std::shared_ptr<hhds::Graph> wrap(const std::shared_ptr<hhds::Graph>& child, const std::string& name) {
+    auto g = empty();
+    auto n = instance(g.get(), child, name);
+    n.create_driver_pin(2).connect_sink(g->get_output_pin("q"));
+    return g;
+  }
+
+  std::shared_ptr<hhds::Graph> hierarchy(bool wrong = false) {
+    return wrap(wrap(wrap(wrap(state("q", wrong), "__flat___inner"), "bar"), "__flat___outer"), "foo");
+  }
+};
+
+// Logical state names over the virtual (occurrence) hierarchy.
+std::set<std::string> logical_state_names(hhds::Graph* g) {
+  std::set<std::string> names;
+  for (const auto& n : g->occurrences().nodes()) {
+    if (graph_util::type_op_of(n) == Ntype_op::Flop) {
+      names.insert(graph_util::logical_hier_name(n.get_hier_name()));
+    }
+  }
+  return names;
+}
+
+// RAW (un-normalized) flop names of a physical body: flatten/inline must not
+// spell a transparent wrapper into the names they build.
+std::set<std::string> raw_flop_names(hhds::Graph* g) {
+  std::set<std::string> names;
+  for (auto n : g->body().nodes()) {
+    if (graph_util::type_op_of(n) == Ntype_op::Flop) {
+      names.insert(std::string{graph_util::node_name_of(n)});
+    }
+  }
+  return names;
+}
+
+// Inline every Sub of `g`'s body (outermost first), one splice per collection.
+void inline_all(hhds::Graph* g) {
+  for (;;) {
+    hhds::Node_class sub;
+    for (auto n : g->body().nodes()) {
+      if (graph_util::type_op_of(n) == Ntype_op::Sub) {
+        sub = n;
+        break;
+      }
+    }
+    if (sub.is_invalid()) {
+      return;
+    }
+    ASSERT_TRUE(graph_util::inline_sub_instance(g, sub, "test"));
+  }
+}
+
+}  // namespace
+
+TEST(LecNames, TransparentVirtualPhysicalAndInlineNamesAgree) {
+  Transparent_design d;
+  auto               flat = d.state("foo.bar.q");
+  auto               hier = d.hierarchy();
+  EXPECT_EQ(logical_state_names(hier.get()), logical_state_names(flat.get()));
+  auto materialized = livehd::partition::flatten_hierarchy(hier.get(), &d.lib, "materialized");
+  ASSERT_NE(materialized, nullptr);
+  EXPECT_EQ(raw_flop_names(materialized.get()), (std::set<std::string>{"foo.bar.q"}));
+  EXPECT_EQ(logical_state_names(materialized.get()), logical_state_names(flat.get()));
+  semdiff::Semdiff_options so;
+  so.matching_names = true;
+  EXPECT_TRUE(semdiff::structural_identical(flat.get(), materialized.get(), so));
+  lec::Lec_options lo;
+  lo.engine          = "ind";
+  lo.timeout         = 2;
+  auto virtual_proof = lec::prove_equal(flat.get(), hier.get(), lo);
+  EXPECT_EQ(virtual_proof.verdict, Verdict::Proven) << virtual_proof.detail;
+  // Inline the outer call first: a subsequently inlined wrapper carries the
+  // combined name foo.__flat___outer. Both forms must preserve foo.bar.q.
+  inline_all(hier.get());
+  EXPECT_EQ(raw_flop_names(hier.get()), (std::set<std::string>{"foo.bar.q"}));
+  EXPECT_EQ(logical_state_names(hier.get()), logical_state_names(flat.get()));
+  EXPECT_TRUE(semdiff::structural_identical(flat.get(), hier.get(), so));
+  auto proof = lec::prove_equal(flat.get(), hier.get(), lo);
+  EXPECT_EQ(proof.verdict, Verdict::Proven) << proof.detail;
+}
+
+// An ANONYMOUS instance is transparent too (HHDS get_hier_name drops it), and
+// flatten/inline must agree rather than spell a `sub_<nid>` level.
+TEST(LecNames, AnonymousInstanceIsTransparentWhenMaterialized) {
+  Transparent_design d;
+  auto               mid = d.wrap(d.state("q"), "");
+  auto               top = d.wrap(mid, "foo");
+  auto               m   = livehd::partition::flatten_hierarchy(top.get(), &d.lib, "materialized");
+  ASSERT_NE(m, nullptr);
+  EXPECT_EQ(raw_flop_names(m.get()), (std::set<std::string>{"foo.q"}));
+  // Deep inline walks children first (graph/inline_sub.hpp): dissolving the
+  // anonymous level inside `mid` adds no component, then `foo.` is prefixed.
+  inline_all(mid.get());
+  inline_all(top.get());
+  EXPECT_EQ(raw_flop_names(top.get()), (std::set<std::string>{"foo.q"}));
+}
+
+TEST(LecNames, TransparentChangedTransitionDoesNotMatch) {
+  Transparent_design d;
+  auto               ref = d.state("foo.bar.q");
+  auto               bad = d.hierarchy(true);
+  lec::Lec_options   lo;
+  lo.engine  = "bmc";
+  lo.bound   = 2;
+  lo.timeout = 2;
+  auto proof = lec::prove_equal(ref.get(), bad.get(), lo);
+  EXPECT_EQ(proof.verdict, Verdict::Refuted) << proof.detail;
+  auto flat_bad = livehd::partition::flatten_hierarchy(bad.get(), &d.lib, "bad_flat");
+  ASSERT_NE(flat_bad, nullptr);
+  semdiff::Semdiff_options so;
+  so.matching_names = true;
+  EXPECT_FALSE(semdiff::structural_identical(ref.get(), flat_bad.get(), so));
+}
+
+// Two transparent instances of one stateful def share the logical state name
+// `q`: the encoder must refuse the ambiguity, never merge the two registers.
+TEST(LecNames, TransparentRepeatedInstancesDoNotMergeState) {
+  Transparent_design d;
+  auto               child = d.state("q");
+  auto               top   = d.wrap(child, "left");
+  auto               right = d.instance(top.get(), child, "right");
+  EXPECT_EQ(logical_state_names(top.get()), (std::set<std::string>{"left.q", "right.q"}));
+  for (auto n : top->body().nodes()) {
+    if (graph_util::type_op_of(n) == Ntype_op::Sub) {
+      n.set_name(n == right ? "__flat___right" : "__flat___left");
+    }
+  }
+  lec::Lec_options lo;
+  lo.engine  = "ind";
+  auto proof = lec::prove_equal(top.get(), top.get(), lo);
+  EXPECT_EQ(proof.verdict, Verdict::Unknown) << proof.detail;
+  EXPECT_NE(proof.detail.find("ambiguous logical state name"), std::string::npos);
 }

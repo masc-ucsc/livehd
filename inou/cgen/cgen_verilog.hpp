@@ -76,7 +76,9 @@ private:
   // Chosen instance name per Sub node, computed once (in reserve_instance_names)
   // and de-collided, so every emit site renders the same name. An ANONYMOUS Sub
   // (no `name` attr -- e.g. a re-partition wrapper left transparent so hier names
-  // are preserved) is named `u_<module>`; a named Sub keeps its name.
+  // are preserved) is named `__flat___<module>` (graph_util::
+  // transparent_instance_prefix, so logical_hier_name keeps it transparent on
+  // reload); a named Sub keeps its name.
   absl::flat_hash_map<node_key_t, std::string>          sub_instance_names_;
   // Memory-wrapper instance identifiers are emission-only and need not expose
   // the source aggregate path. Keep them simple (no escaped `foo.bar` token):
@@ -194,7 +196,7 @@ private:
   void        reserve_instance_names(hhds::Graph* graph);
   // The emit-time instance name for a Sub node (cached in sub_instance_names_,
   // computed on first call, so it can be called for its reserving side effect).
-  // Named Sub keeps its name; an anonymous Sub becomes `u_<module>`, de-collided
+  // Named Sub keeps its name; an anonymous Sub becomes `__flat___<module>`, de-collided
   // against every already-chosen name.
   std::string sub_instance_name(const hhds::Node_class& node);
   std::string memory_instance_name(const hhds::Node_class& node);

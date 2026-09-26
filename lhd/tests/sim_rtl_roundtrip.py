@@ -22,7 +22,12 @@ ARGS = parser.parse_args()
 
 LHD = str(Path(os.environ.get("LHD", "lhd/lhd")).resolve())
 WORK = Path(os.environ.get("TEST_TMPDIR") or tempfile.mkdtemp(prefix="lhd-rtl-roundtrip-")).resolve()
-VERILATOR = os.environ.get("VERILATOR") or shutil.which("verilator")
+# The external Verilator twin is an optional independent oracle: it runs only
+# with LHD_EXTERNAL_SIM=1 (see AGENTS.md), and then a missing verilator FAILS.
+EXTERNAL_SIM = bool(os.environ.get("LHD_EXTERNAL_SIM"))
+VERILATOR = (os.environ.get("VERILATOR") or shutil.which("verilator")) if EXTERNAL_SIM else None
+if EXTERNAL_SIM and ARGS.backend != "llvm" and not VERILATOR:
+    raise SystemExit("FAIL: LHD_EXTERNAL_SIM is set but verilator is not on PATH (or $VERILATOR)")
 
 
 def run(args, log):
@@ -43,7 +48,7 @@ def check(name, rtl, stimulus, checks, cpp):
     run([LHD, "compile", source, "--top", "top", "--emit-dir", f"lg:{work}/lg",
          "--emit-dir", f"pyrope:{work}/prp", "--workdir", work / "compile", "--set", "compile.upass.inline=false"], work / "compile.log")
     # LEC is independent of the simulator backend; check it once in the Slop
-    # leg (or the unsplit manual run), alongside the external Verilator twin.
+    # leg (or the unsplit manual run), alongside the optional Verilator twin.
     if ARGS.backend != "llvm":
         lec = run([LHD, "lec", "--ref", source, "--impl", work / "prp/top.prp", "--top", "top",
                    "--workdir", work / "lec", "--set", "compile.upass.inline=false"], work / "lec.log")
@@ -67,7 +72,7 @@ test top.compare {{
         # Both C++/Slop and LLVM must implement the same phase dependencies.
         for backend in ((ARGS.backend,) if ARGS.backend else ("slop", "llvm")):
             run([LHD, "sim", *inputs, "--workdir", work / f"{language}-{backend}",
-                 "--set", "sim.tune.profile=off", "--set", f"sim.tune.backend={backend}",
+                 "--set", "sim.ninja=false", "--set", "sim.tune.profile=off", "--set", f"sim.tune.backend={backend}",
                  "--set", "compile.upass.inline=false"],
                 work / f"{language}-{backend}.log")
     if VERILATOR and ARGS.backend != "llvm":
@@ -83,8 +88,8 @@ int main(int argc, char **argv) {
         run([VERILATOR, "--cc", "--exe", "--build", "--top-module", "top", "--Mdir", work / "vobj",
              source, twin], work / "verilator-build.log")
         run([work / "vobj/Vtop"], work / "verilator-run.log")
-    elif not VERILATOR and ARGS.backend != "llvm":
-        print("SKIP: external Verilator comparison (set VERILATOR to enable)")
+    elif ARGS.backend != "llvm":
+        print("note: external-simulator leg skipped (set LHD_EXTERNAL_SIM=1)")
     print(f"PASS: {name}: RTL and generated Pyrope, "
           f"{'LEC and ' if ARGS.backend != 'llvm' else ''}{ARGS.backend or 'Slop and LLVM'} simulation")
 

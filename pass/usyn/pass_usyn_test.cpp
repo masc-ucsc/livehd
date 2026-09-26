@@ -86,7 +86,7 @@ TEST_F(PassSynth, RepeatedRunsMapUnateRegionsAndReuseTheCache) {
     const auto text = read(report + ".usyn.json");
     EXPECT_NE(text.find("\"kind\":\"usyn\""), std::string::npos) << text;
     if (i == 0) {
-      EXPECT_NE(text.find("\"status\":\"abc_opt\""), std::string::npos) << text;
+      EXPECT_NE(text.find("\"status\":\"abc_tmap\""), std::string::npos) << text;
       EXPECT_NE(text.find("\"reused\":0"), std::string::npos) << text;
     } else {
       EXPECT_EQ(text.find("\"reused\":0"), std::string::npos) << text;  // warm: regions come from the cache

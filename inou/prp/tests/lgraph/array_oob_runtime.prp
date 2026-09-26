@@ -1,3 +1,7 @@
+// A runtime index can exceed the 4 lanes (idx is u3), so the emitted bounds
+// assert must stay live. array_oob_runtime_test.sh checks that it tests idx and
+// the in-range values (native sim); LHD_EXTERNAL_SIM=1 also checks that idx=4
+// diagnoses. The test matches the diagnostic location: the read on line 11.
 pub comb array_oob_runtime(idx:u3) -> (o:u8) {
   mut lanes:[4]u8 = 0
   lanes[0] = 0x11
