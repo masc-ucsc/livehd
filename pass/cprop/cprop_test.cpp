@@ -1882,7 +1882,8 @@ TEST(CpropOpSharing, OutputNarrowingDoesNotNarrowSelectedOperands) {
     const auto shared  = f.output().get_master_node();
     const auto operand = gu::get_driver_of_sink_name(shared, "a");
     ASSERT_EQ(gu::type_op_of(operand.get_master_node()), Ntype_op::Mux);
-    EXPECT_EQ(gu::bits_of(operand), 0) << "fresh operand mux cannot inherit the narrow result hint";
+    EXPECT_EQ(gu::bits_of(operand), 9) << "fresh operand mux takes the lossless s8/u8 union, never the narrow result hint";
+    EXPECT_FALSE(gu::is_unsign(operand));
     Bitwidth{10}.do_trans(f.graph);
     EXPECT_EQ(gu::bits_of(operand), 9) << "signed u8/s8 union needs an extra sign bit";
     EXPECT_FALSE(gu::is_unsign(operand));
@@ -1892,6 +1893,42 @@ TEST(CpropOpSharing, OutputNarrowingDoesNotNarrowSelectedOperands) {
 }  // namespace
 
 namespace {
+// An unstamped Mux result is as wide as its selected arm, but an unstamped
+// Get_mask (or any other op) reads as ONE bit to the LEC encoder and cgen,
+// and LEC's post-inline cprop has no bitwidth pass after it. Re-typing such a
+// root must carry the arms' common stamp; differing arm stamps block the
+// rewrite (br_mux_bin_structured_gates was REFUTED through this).
+TEST(CpropOpSharing, UnstampedRootKeepsArmRealization) {
+  for (bool same_stamp : {true, false}) {
+    Mux_graph  f(same_stamp ? "opshare_unstamped_root" : "opshare_unstamped_mixed", 1, 8, true);
+    const auto slice = [&](Test_pin value, int bits) {
+      auto n = f.node(Ntype_op::Get_mask, bits);
+      gu::connect_mask_operands(n, value, f.constant(15), Test_pin{});
+      return n.create_driver_pin(0);
+    };
+    auto root = gu::create_typed_node(*f.graph, Ntype_op::Mux, 0);
+    root.create_sink_pin(0).connect_driver(f.controls[0]);
+    root.create_sink_pin(1).connect_driver(slice(f.a, 4));
+    root.create_sink_pin(2).connect_driver(slice(f.b, same_stamp ? 4 : 5));
+    auto out = root.create_driver_pin(0);
+    ASSERT_EQ(gu::bits_of(out), 0);
+    out.connect_sink(f.graph->get_output_pin("out"));
+    Cprop{}.do_trans(f.graph);
+    const auto result = f.output();
+    if (!same_stamp) {
+      EXPECT_EQ(f.count(Ntype_op::Get_mask), 2);
+      continue;
+    }
+    ASSERT_EQ(gu::type_op_of(result.get_master_node()), Ntype_op::Get_mask);
+    EXPECT_EQ(gu::bits_of(result), 4);
+    EXPECT_TRUE(gu::is_unsign(result));
+    const auto operand = gu::get_driver_of_sink_name(result.get_master_node(), "a");
+    ASSERT_EQ(gu::type_op_of(operand.get_master_node()), Ntype_op::Mux);
+    EXPECT_EQ(gu::bits_of(operand), 8);
+    EXPECT_FALSE(gu::is_unsign(operand));
+  }
+}
+
 TEST(CpropOpSharing, IndexRangeMustBeStructural) {
   Mux_graph f("opshare_index_range", 1, 8, false, true);
   gu::set_ubits(f.controls[0], 2);  // a hint is not a selector-range proof

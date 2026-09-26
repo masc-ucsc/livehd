@@ -173,6 +173,39 @@ bool align(const Shape& base, Shape& other) {
   other.operands = std::move(paired);
   return true;
 }
+
+// Smallest carrier {bits, unsigned} holding every value operand `j` can take,
+// or none when some operand's realization is unknown (unstamped or negative
+// constant). Mixed signs need one extra bit above an unsigned operand.
+std::optional<std::pair<int32_t, bool>> union_carrier(const std::vector<Shape>& shapes, size_t j) {
+  int32_t ubits = 0, sbits = 0;
+  bool    any_signed = false;
+  for (const auto& shape : shapes) {
+    const auto& value = shape.operands[j].value;
+    if (value.is_const()) {
+      const int width = cv::unsigned_width(value);
+      if (width < 0) {
+        return {};
+      }
+      ubits = std::max(ubits, std::max(width, 1));
+      continue;
+    }
+    const auto bits = gu::bits_of(value);
+    if (bits <= 0) {
+      return {};
+    }
+    if (gu::is_unsign(value)) {
+      ubits = std::max(ubits, bits);
+    } else {
+      any_signed = true;
+      sbits      = std::max(sbits, bits);
+    }
+  }
+  if (!any_signed) {
+    return std::pair<int32_t, bool>{ubits, true};
+  }
+  return std::pair<int32_t, bool>{std::max(sbits, ubits == 0 ? 0 : ubits + 1), false};
+}
 }  // namespace
 
 void Cprop::mux_op_share_pass() {
@@ -249,6 +282,25 @@ void Cprop::mux_op_share_pass() {
       continue;
     }
     const auto& base = shapes.front();
+    // An UNSTAMPED Mux result means "as wide as the selected arm" (the LEC
+    // encoder models it that way), but an unstamped result of any other op is
+    // read as one bit by the encoder and cgen. The root is re-typed in place,
+    // so it must carry the arms' realization: when every arm has the same
+    // stamp (bits+sign, possibly none), the shared op at that stamp equals the
+    // selected arm. Differing arm stamps have no single equivalent here.
+    // Concat stamps its own total width below.
+    const bool stamp_root = base.op != Ntype_op::Concat && gu::bits_of(root.get_driver_pin(0)) == 0;
+    if (stamp_root) {
+      const auto arm_bits = gu::bits_of(pins[1]);
+      const auto arm_uns  = gu::is_unsign(pins[1]);
+      if (!std::all_of(pins.begin() + 2, pins.end(), [&](const Pin& p) {
+            return gu::bits_of(p) == arm_bits && (arm_bits == 0 || gu::is_unsign(p) == arm_uns);
+          })) {
+        continue;
+      }
+    }
+    const auto root_bits = gu::bits_of(pins[1]);
+    const auto root_uns  = gu::is_unsign(pins[1]);
     if (base.op == Ntype_op::Concat) {
       // A mixed-sign mux may need a wider carrier than either input. Concat
       // requires each carrier to fit its declared lane window. Without a
@@ -300,7 +352,20 @@ void Cprop::mux_op_share_pass() {
       for (size_t i = 0; i < shapes.size(); ++i) {
         gu::setup_sink_pid(mux, i + 1).connect_driver(shapes[i].operands[j].value);
       }
-      operands.push_back(mux.create_driver_pin(0));
+      auto out = mux.create_driver_pin(0);
+      // Not every consumer re-runs bitwidth (LEC re-simplifies inlined
+      // hierarchy with cprop alone, and cgen declares an unstamped net as one
+      // bit). When every operand's realization is known, stamp the LOSSLESS
+      // union carrier -- never the narrower result/arm hint -- which is what
+      // bitwidth would infer anyway.
+      if (const auto carrier = union_carrier(shapes, j)) {
+        if (carrier->second) {
+          gu::set_ubits(out, carrier->first);
+        } else {
+          gu::set_sbits(out, carrier->first);
+        }
+      }
+      operands.push_back(out);
       created.push_back(mux);
     }
     cv::forget(root.get_driver_pin(0));
@@ -314,6 +379,12 @@ void Cprop::mux_op_share_pass() {
     }
     if (base.op == Ntype_op::Concat) {
       gu::set_ubits(root.get_driver_pin(0), gu::concat_total_width(root));
+    } else if (stamp_root && root_bits != 0) {
+      if (root_uns) {
+        gu::set_ubits(root.get_driver_pin(0), root_bits);
+      } else {
+        gu::set_sbits(root.get_driver_pin(0), root_bits);
+      }
     }
     // Inputs have already been transferred. Retiring the private arms cannot
     // delete anything queued other than those exact generation-tagged nodes.
