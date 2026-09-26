@@ -456,6 +456,12 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
                      dff_sel.areset_ladder[1].empty() ? "" : jesc(dff_sel.areset_ladder[1].front().name));
     // The integrated clock-gate pick (empty: gated-clock registers stay native).
     j += std::format(",\"icg\":\"{}\"", dff_sel.icg_ladder.empty() ? "" : jesc(dff_sel.icg_ladder.front().name));
+    // The transparent data-latch picks, active-high / active-low enable
+    // (empty: that latch polarity maps through the other one plus an inverter,
+    // or stays native without either).
+    j += std::format(",\"latch\":\"{}\",\"latch_n\":\"{}\"",
+                     dff_sel.latch_ladder[0][0].empty() ? "" : jesc(dff_sel.latch_ladder[0][0].front().name),
+                     dff_sel.latch_ladder[1][0].empty() ? "" : jesc(dff_sel.latch_ladder[1][0].front().name));
     j          += ",\"cells\":{";
     bool first  = true;
     for (const auto& [name, n] : dff_count) {

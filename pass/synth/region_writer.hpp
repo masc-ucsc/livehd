@@ -40,6 +40,11 @@ public:
     const std::vector<liberty::Dff_cell>*   areset1 = nullptr;
     // Integrated clock-gate cell ladder (Region_blast::icgs); null or empty = none.
     const std::vector<liberty::Icg_cell>*   icg     = nullptr;
+    // Transparent data-latch cell ladders (Dff_selection::latch_ladder,
+    // [enable active-low][plain / reset-to-0 / reset-to-1]) for the latches
+    // the blaster planned onto cells (Bbox::latch); null = none.
+    using Latch_ladders                     = std::vector<liberty::Dff_cell>[2][3];
+    const Latch_ladders*                    latch   = nullptr;
   };
 
   void set_outlib(hhds::GraphLibrary* outlib) { outlib_ = outlib; }

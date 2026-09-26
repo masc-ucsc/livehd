@@ -87,6 +87,7 @@ public:
     areset_ladder_[0] = sel.areset_ladder[0];
     areset_ladder_[1] = sel.areset_ladder[1];
     icg_ladder_       = sel.icg_ladder;
+    copy_latch_ladders(sel);
     dff_preset_       = true;
   }
 
@@ -172,6 +173,16 @@ private:
   // The integrated clock-gate cells (liberty::Dff_selection::icg_ladder).
   // Empty: a register on a latch+AND clock gate stays a native flop.
   std::vector<liberty::Icg_cell>   icg_ladder_;
+  // The transparent data-latch cells (liberty::Dff_selection::latch_ladder).
+  // All empty: every level-sensitive latch stays a native Latch.
+  std::vector<liberty::Dff_cell>   latch_ladder_[2][3];
+  void                             copy_latch_ladders(const liberty::Dff_selection& sel) {
+    for (int low = 0; low < 2; ++low) {
+      for (int kind = 0; kind < 3; ++kind) {
+        latch_ladder_[low][kind] = sel.latch_ladder[low][kind];
+      }
+    }
+  }
   bool                             dff_preset_     = false;
   hhds::GraphLibrary*              outlib_         = nullptr;  // where blackbox cell defs are declared
   Region_cache*                    incr_           = nullptr;  // optional region cache (2opt-incr)

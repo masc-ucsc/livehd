@@ -54,6 +54,16 @@ struct Blast_options {
   // Why `icg` is off, for the derived-clock-native report: false = the flow may
   // reshape latches, true = the Liberty has no ICG cell (or no DFF cell).
   bool              icg_flow_ok    = true;
+  // The Liberty's transparent data-latch cells (Dff_selection::latch_ladder),
+  // [enable active-low][0 plain, 1 reset-to-0, 2 reset-to-1]: -1 none, else
+  // that pick's q_inverted (0/1). A level-sensitive Latch whose shape a cell
+  // covers is still a native boundary for ABC (a level-sensitive latch never
+  // crosses as an ABC latch), but the read-back mints one cell per bit
+  // (Bbox::latch_map) instead of rebuilding the native Latch.
+  int8_t            latch_cell[2][3] = {{-1, -1, -1}, {-1, -1, -1}};
+  // The reset pin level of each reset latch pick (Dff_cell::reset_low): the
+  // level a computed reset crosses at.
+  bool              latch_reset_low[2][3] = {{false, false, false}, {false, false, false}};
   bool              verbose        = false;
 };
 

@@ -1411,6 +1411,205 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     hooks.rewrite_rems();
   }
 
+  // --- data latches onto Liberty latch cells (Latch_map) ---
+  bool any_latch_cell = false;
+  for (const auto& pol : options.latch_cell) {
+    for (const auto k : pol) {
+      any_latch_cell = any_latch_cell || k >= 0;
+    }
+  }
+  const bool latch_mapping = options.map_register && any_latch_cell;
+  // Latches kept native, keyed by the precise reason (std::map: stable report).
+  std::map<std::string, absl::flat_hash_set<hhds::Node_class>> latch_native_by;
+  // A 1-bit control through its wire identities (1-bit Get_mask/Sext), Nots
+  // and `x == 0` / `x == 1` tests, stopping at a region input or a recognized
+  // clock gate's output; `inv` accumulates the complement parity. Only bit 0
+  // of the start matters (the caller checks it is one bit wide), and every
+  // step keeps bit 0: slang spells `!clk` as `clk == 0`.
+  auto peel_control = [&](hhds::Pin_class p, bool& inv) -> hhds::Pin_class {
+    for (int guard = 0; guard < 64 && !p.is_invalid(); ++guard) {  // guard: a wiring cycle, > any sane chain
+      if (p.is_const() || region_in_name.contains(p) || icg_of_gclk.contains(p)) {
+        break;
+      }
+      const auto m  = p.get_master_node();
+      const auto op = gu::type_op_of(m);
+      if (op == Ntype_op::Not || op == Ntype_op::Sext) {
+        auto a = gu::get_driver_of_sink_name(m, "a");
+        if (a.is_invalid()) {
+          break;
+        }
+        inv ^= op == Ntype_op::Not;
+        p = a;
+        continue;
+      }
+      if (op == Ntype_op::Get_mask) {
+        auto a    = gu::get_driver_of_sink_name(m, "a");
+        auto mask = gu::get_driver_of_sink_name(m, "mask");
+        if (a.is_invalid() || mask.is_invalid() || !mask.is_const() || !gu::const_of(mask).bit_test(0)) {
+          break;
+        }
+        p = a;
+        continue;
+      }
+      if (op == Ntype_op::EQ) {
+        std::vector<hhds::Pin_class> ops_in;
+        for (const auto& in_pin : m.inp_sorted_pins()) {
+          for (auto d : in_pin.get_driver_pins()) {
+            ops_in.push_back(d);
+          }
+        }
+        if (ops_in.size() != 2 || ops_in[0].is_const() == ops_in[1].is_const()) {
+          break;
+        }
+        const auto& k = ops_in[0].is_const() ? ops_in[0] : ops_in[1];
+        const auto& x = ops_in[0].is_const() ? ops_in[1] : ops_in[0];
+        const auto& c = gu::const_of(k);
+        // `x == 0` / `x == 1` of a 1-bit x only (a signed x's `== -1`, a wider
+        // constant: not a plain test).
+        if (real_width(x) != 1 || c.has_unknowns() || !c.is_just_i64() || (c.to_just_i64() != 0 && c.to_just_i64() != 1)
+            || (c.to_just_i64() == 1 && !gu::is_unsign(x))) {
+          break;
+        }
+        inv ^= c.to_just_i64() == 0;
+        p = x;
+        continue;
+      }
+      break;
+    }
+    return p;
+  };
+  // Why a latch cannot map onto a cell (empty: it can, and `lm` is filled).
+  auto plan_latch = [&](const hhds::Node_class& n, Latch_map& lm) -> std::string {
+    const auto q = n.get_driver_pin(0);
+    lm.bits      = std::max(1, gu::bits_of(q));
+    lm.name      = gu::wire_name(q);
+    if (lm.name.empty()) {
+      lm.name = std::format("{}__latch{}", rb.module_name, n.get_debug_nid());
+    }
+    const auto din = gu::get_driver_of_sink_name(n, "din");
+    lm.en_drv      = gu::get_driver_of_sink_name(n, "enable");
+    lm.rst_drv     = gu::get_driver_of_sink_name(n, "reset_pin");
+    const auto ini = gu::get_driver_of_sink_name(n, "initial");
+    if (din.is_invalid()) {
+      return "latch(es) kept native — the latch has no data input";
+    }
+    if (lm.en_drv.is_invalid() || lm.en_drv.is_const()) {
+      return "latch(es) kept native — the enable is absent or constant (an always-transparent latch is a buffer, a "
+             "never-open one a constant; neither is a latch cell)";
+    }
+    if (auto pc = gu::get_driver_of_sink_name(n, "posclk"); pc.is_const()) {
+      lm.en_neg = gu::const_of(pc).is_known_false();
+    } else if (!pc.is_invalid()) {
+      return "latch(es) kept native — the enable polarity (`posclk`) is not a constant";
+    }
+    if (!gu::get_driver_of_sink_name(n, "clock_pin").is_invalid()) {
+      return "latch(es) kept native — the latch carries a `clock_pin`, which no latch cell has";
+    }
+    if (lm.rst_drv.is_invalid()) {
+      // Without a reset an `initial` is a POWER-ON value no latch cell holds.
+      bool power_on = !ini.is_invalid() && !ini.is_const();
+      for (int b = 0; !power_on && !ini.is_invalid() && b < lm.bits; ++b) {
+        power_on = !gu::const_of(ini).unknown_bit_test(b);
+      }
+      if (power_on) {
+        return "latch(es) kept native — the latch carries a power-on value (`initial` without a reset), which no "
+               "latch cell has";
+      }
+    } else {
+      if (lm.rst_drv.is_const()) {
+        return "latch(es) kept native — the reset is a constant";
+      }
+      if (real_width(lm.rst_drv) != 1) {
+        return "latch(es) kept native — the reset is a multi-bit value (asserted when non-zero), not one wire a cell's "
+               "reset pin can take";
+      }
+      if (!ini.is_invalid() && !ini.is_const()) {
+        return "latch(es) kept native — the reset value is not a constant, which no latch cell can load";
+      }
+      lm.init = ini.is_invalid() ? *Dlop::create_integer(0) : gu::const_of(ini);
+      if (auto nr = gu::get_driver_of_sink_name(n, "negreset"); nr.is_const()) {
+        lm.rst_neg = gu::const_of(nr).bit_test(0);
+      } else if (!nr.is_invalid()) {
+        return "latch(es) kept native — the reset polarity (`negreset`) is not a constant";
+      }
+    }
+    // The enable's natural cell polarity: the level of the traced source that
+    // opens the latch (no inverter), or the latch's own spelling for a
+    // computed enable (ABC absorbs either level for free).
+    bool en_inv_parity = false;
+    auto en_root       = real_width(lm.en_drv) == 1 ? peel_control(lm.en_drv, en_inv_parity) : hhds::Pin_class{};
+    const bool native_en = !en_root.is_invalid() && (region_in_name.contains(en_root) || icg_of_gclk.contains(en_root));
+    const bool root_low  = lm.en_neg != en_inv_parity;  // en_root opens the latch at 0
+    const bool natural   = native_en ? root_low : lm.en_neg;
+    // Which ladders the bits need: plain (no reset), else per bit reset value.
+    std::vector<int> kinds;
+    if (!lm.rst_drv.is_invalid()) {
+      lm.rst_val.assign(static_cast<size_t>(lm.bits), false);
+    }
+    auto covers = [&](bool low) {
+      if (lm.rst_drv.is_invalid()) {
+        return options.latch_cell[low ? 1 : 0][0] >= 0;
+      }
+      for (int b = 0; b < lm.bits; ++b) {
+        bool v = false;
+        if (lm.init.unknown_bit_test(b)) {
+          v = options.latch_cell[low ? 1 : 0][1] < 0;  // either value is the source's; take a cell the library has
+        } else {
+          v = lm.init.bit_test(b);
+        }
+        if (options.latch_cell[low ? 1 : 0][v ? 2 : 1] < 0) {
+          return false;
+        }
+      }
+      return true;
+    };
+    if (covers(natural)) {
+      lm.cell_low = natural;
+    } else if (covers(!natural)) {
+      lm.cell_low = !natural;
+    } else if (!lm.rst_drv.is_invalid() && (options.latch_cell[natural ? 1 : 0][0] >= 0 || options.latch_cell[natural ? 0 : 1][0] >= 0)) {
+      // No reset cell for some bit: fold the reset into D and the enable (a
+      // plain latch cell), exact for a level-sensitive latch.
+      lm.fold     = true;
+      lm.cell_low = options.latch_cell[natural ? 1 : 0][0] >= 0 ? natural : !natural;
+    } else {
+      return lm.rst_drv.is_invalid()
+                 ? "latch(es) kept native — the Liberty has no usable transparent latch cell (a `latch` group with a bare "
+                   "data_in/enable, not dont_use, isolation or clock-gate)"
+                 : "latch(es) kept native — the Liberty has no usable transparent latch cell for a latch with a reset";
+    }
+    if (!lm.rst_drv.is_invalid() && !lm.fold) {
+      lm.reset_cells = true;
+      for (int b = 0; b < lm.bits; ++b) {
+        bool v = lm.init.unknown_bit_test(b) ? options.latch_cell[lm.cell_low ? 1 : 0][1] < 0 : lm.init.bit_test(b);
+        lm.rst_val[static_cast<size_t>(b)] = v;
+      }
+      bool rinv  = false;
+      auto rroot = peel_control(lm.rst_drv, rinv);
+      if (!rroot.is_invalid() && region_in_name.contains(rroot) && real_width(rroot) == 1) {
+        lm.rst_src     = rroot;
+        lm.rst_src_low = lm.rst_neg != rinv;
+      }
+    }
+    // The enable source: native (region input / gate output) unless the reset
+    // folds into it.
+    if (native_en && !lm.fold) {
+      if (auto it = icg_of_gclk.find(en_root); it != icg_of_gclk.end()) {
+        lm.en_icg = it->second;
+      } else {
+        lm.en_src = en_root;
+      }
+      lm.en_inv = root_low != lm.cell_low;
+    }
+    lm.map = true;
+    return {};
+  };
+  // The Latch sink pins a mapped latch owns (everything but `din`, which
+  // crosses like any black-box input unless the reset folds into it).
+  auto latch_owned_pin = [](const Latch_map& lm, hhds::Port_id pid) {
+    return pid != Ntype::get_sink_pid(Ntype_op::Latch, "din") || lm.fold;
+  };
+
   for (const auto& n : rb.nodes) {
     auto op = gu::type_op_of(n);
     // A materialized PROPERTY marker (`fproperty` from a user assert/assume,
@@ -1477,6 +1676,16 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     Bbox bb;
     bb.node                              = n;
     bb.op                                = op;
+    if (latch_boundary && options.map_register) {
+      if (!latch_mapping) {
+        latch_native_by["latch(es) kept native — the Liberty has no usable transparent latch cell (a `latch` group with a "
+                        "bare data_in/enable, not dont_use, isolation or clock-gate)"]
+            .insert(n);
+      } else if (auto why = plan_latch(n, bb.latch); !why.empty()) {
+        bb.latch = Latch_map{};
+        latch_native_by[why].insert(n);
+      }
+    }
     int                           bb_idx = static_cast<int>(bboxes.size());
     absl::flat_hash_map<int, int> concat_lane_width;
     if (op == Ntype_op::Concat) {
@@ -1527,6 +1736,9 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     // output buffer per bit. It also subsumes the clock/reset/enable treatment
     // for native flop/latch boundaries.
     for (const auto& in_pin : n.inp_sorted_pins()) {
+      if (bb.latch.map && latch_owned_pin(bb.latch, in_pin.get_port_id())) {
+        continue;  // a latch cell's control pin (or its folded D): wired from Latch_map
+      }
       for (auto in_drv : in_pin.get_driver_pins()) {
         // The compact carry edge means previous ordinal, not same-instance
         // Boolean feedback. Keep it out of ABC and restore it with the descriptor.
@@ -1566,6 +1778,20 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
       }
     }
     bboxes.push_back(std::move(bb));
+  }
+  for (const auto& [why, set] : latch_native_by) {
+    std::vector<hhds::Node_class> kept(set.begin(), set.end());
+    std::sort(kept.begin(), kept.end(), [](const auto& a, const auto& b) { return a.get_debug_nid() < b.get_debug_nid(); });
+    auto w = livehd::diag::warn("pass.abc", "latch-native", "unsupported");
+    w.at(node_span(rb, kept.front())).msg("pass.abc region '{}': {} {}", rb.module_name, kept.size(), why);
+    constexpr size_t kMaxNamed = 5;
+    for (size_t k = 0; k < std::min(kMaxNamed, kept.size()); ++k) {
+      w.note(std::format("kept native: {}", node_identity(kept[k])), node_span(rb, kept[k]));
+    }
+    if (kept.size() > kMaxNamed) {
+      w.note(std::format("... and {} more latch(es)", kept.size() - kMaxNamed));
+    }
+    w.emit();
   }
 
   // --- bit-blast each region node in dependency order. `rb.nodes` (the order
@@ -1969,8 +2195,71 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
         result.icgs[static_cast<size_t>(f.icg)].fanout += f.bits;
       }
     }
+    for (const auto& bb : bboxes) {
+      if (bb.latch.map && bb.latch.en_icg >= 0) {
+        result.icgs[static_cast<size_t>(bb.latch.en_icg)].fanout += bb.latch.bits;
+      }
+    }
   }
   trace_stage("icg-pos");
+
+  // --- latch cells: computed enables, resets and folded D -> ABC POs ---
+  // (after the ICG POs) Each is created at the level its cell pin wants, so
+  // ABC maps any inversion with the rest of the logic; the read-back wires
+  // them in pass 2b like an internal async reset.
+  {
+    const size_t first = lnet.outputs().size();
+    for (size_t bi = 0; bi < bboxes.size(); ++bi) {
+      auto& lm = bboxes[bi].latch;
+      if (!lm.map) {
+        continue;
+      }
+      // The latch's control levels as ABC nets: `open` is 1 while the source
+      // latch is transparent, `rst` while its reset is asserted.
+      std::optional<Lid> rst;
+      if (!lm.rst_drv.is_invalid()) {
+        rst = abc_bit(lm.rst_drv, 0);
+        if (lm.rst_neg) {
+          rst = ops.inv(*rst);
+        }
+      }
+      if (lm.en_src.is_invalid() && lm.en_icg < 0) {
+        Lid open = reduce_or(lm.en_drv);  // a multi-bit enable opens on (en != 0)
+        if (lm.en_neg) {
+          open = ops.inv(open);
+        }
+        if (lm.fold) {
+          open = ops.or_(open, *rst);  // the folded reset opens the latch too
+        }
+        lm.en_po = static_cast<int32_t>(lnet.outputs().size());
+        lnet.add_output(lm.cell_low ? ops.inv(open) : open, std::format("__lat{}_en", bi));
+      }
+      if (lm.reset_cells && lm.rst_src.is_invalid()) {
+        for (int b = 0; b < lm.bits; ++b) {
+          const int  kind    = lm.rst_val[static_cast<size_t>(b)] ? 2 : 1;
+          const bool pin_low = options.latch_reset_low[lm.cell_low ? 1 : 0][kind];
+          auto&      slot    = lm.rst_po[pin_low ? 1 : 0];
+          if (slot < 0) {
+            slot = static_cast<int32_t>(lnet.outputs().size());
+            lnet.add_output(pin_low ? ops.inv(*rst) : *rst, std::format("__lat{}_rst{}", bi, pin_low ? "n" : "p"));
+          }
+        }
+      }
+      if (lm.fold) {
+        const auto din   = gu::get_driver_of_sink_name(bboxes[bi].node, "din");
+        const bool q_inv = options.latch_cell[lm.cell_low ? 1 : 0][0] == 1;
+        lm.d_po.assign(static_cast<size_t>(lm.bits), -1);
+        for (int b = 0; b < lm.bits; ++b) {
+          const Lid init = lm.init.unknown_bit_test(b) ? ops.konst(false) : ops.konst(lm.init.bit_test(b));
+          const Lid d    = ops.mux(*rst, init, abc_bit(din, b));  // rst ? init : din
+          lm.d_po[static_cast<size_t>(b)] = static_cast<int32_t>(lnet.outputs().size());
+          lnet.add_output(q_inv ? ops.inv(d) : d, std::format("__lat{}_d{}", bi, b));
+        }
+      }
+    }
+    result.latch_pos = lnet.outputs().size() - first;
+  }
+  trace_stage("latch-pos");
 
   // A region made entirely of direct native boundaries has no real ABC
   // outputs. ABC's dch implementation crashes on that empty network; retain a

@@ -1180,6 +1180,9 @@ uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, c
   if (design.dff.has_value()) {
     R.dff_names.insert(design.dff->name);
   }
+  for (const auto& n : design.latch_cell_names) {
+    R.dff_names.insert(n);  // a latch cell: a register-like boundary (d=1, q=3), never a gate
+  }
 
   // 1. the defs reachable from top, children after parents does not matter:
   // every def is imported before any environment is read.
@@ -1647,6 +1650,9 @@ synth::Ware_score Abc_backend::score(hhds::GraphLibrary& outlib, std::string_vie
   }
   if (design.dff.has_value()) {
     R.dff_names.insert(design.dff->name);
+  }
+  for (const auto& n : design.latch_cell_names) {
+    R.dff_names.insert(n);  // a latch cell: a register-like boundary (d=1, q=3), never a gate
   }
 
   // 1. the defs reachable from top, children after parents does not matter:

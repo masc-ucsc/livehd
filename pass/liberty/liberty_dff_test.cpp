@@ -582,3 +582,142 @@ TEST(LibertyDff, NoIcgCellLeavesTheLadderEmpty) {
   ASSERT_TRUE(sel.base.has_value());
   EXPECT_EQ(livehd::liberty::dff_selection_descriptor(sel), livehd::liberty::dff_descriptor(*sel.base));
 }
+
+namespace {
+
+// A transparent data latch in either PDK's spelling: `latch(state, nstate)`
+// with data_in / enable (and optional clear / preset), outputs by function
+// (`outs` is a comma list of PIN:FUNCTION).
+std::string latch_cell(const std::string& name, double area, const std::string& en, const std::string& extra_group = "",
+                       const std::vector<std::string>& extra_in = {}, const std::string& outs = "Q:IQ",
+                       const std::string& head = "", const std::string& state = "IQ, IQN", const std::string& data_in = "D") {
+  const std::string enpin = en.front() == '!' ? en.substr(1) : en;
+  std::string       s     = "  cell (" + name + ") {\n    area : " + std::to_string(area) + ";\n" + head;
+  s += "    latch (" + state + ") { data_in : \"" + data_in + "\"; enable : \"" + en + "\";" + extra_group + " }\n";
+  s += "    pin (" + enpin + ") { direction : input; clock : true; }\n    pin (D) { direction : input; }\n";
+  for (const auto& p : extra_in) {
+    s += "    pin (" + p + ") { direction : input; }\n";
+  }
+  size_t b = 0;
+  while (b < outs.size()) {
+    size_t e = outs.find(',', b);
+    if (e == std::string::npos) {
+      e = outs.size();
+    }
+    const std::string o     = outs.substr(b, e - b);
+    const auto        colon = o.find(':');
+    s += "    pin (" + o.substr(0, colon) + ") { direction : output; function : \"" + o.substr(colon + 1) + "\"; }\n";
+    b = e + 1;
+  }
+  return s + "  }\n";
+}
+
+}  // namespace
+
+TEST(LibertyDff, Asap7LatchLaddersPerEnablePolarity) {
+  // ASAP7: DHLx1..x3 (enable CLK) and DLLx1..x3 (enable !CLK), pins D/CLK/Q,
+  // no reset latch. They are never flops, and the flop pick is unchanged.
+  std::string  cells;
+  const double hl[] = {0.2187, 0.23328, 0.24786};
+  const double ll[] = {0.2187, 0.23328, 0.26244};
+  for (int i = 0; i < 3; ++i) {
+    cells += latch_cell("DHLx" + std::to_string(i + 1) + "_ASAP7_75t_R", hl[i], "CLK");
+    cells += latch_cell("DLLx" + std::to_string(i + 1) + "_ASAP7_75t_R", ll[i], "!CLK");
+  }
+  const auto path = write_lib("asap7_latch.lib", lib(qn_cell("DFFHQNx1", 0.2916) + cells));
+  auto       sel  = livehd::liberty::resolve_dff_cells(path);
+  ASSERT_TRUE(sel.base.has_value());
+  EXPECT_EQ(sel.base->name, "DFFHQNx1");
+  EXPECT_TRUE(sel.has_latch_cells());
+  const auto& hi = sel.latch_ladder[0][0];
+  const auto& lo = sel.latch_ladder[1][0];
+  ASSERT_EQ(hi.size(), 3U);
+  ASSERT_EQ(lo.size(), 3U);
+  EXPECT_EQ(hi[0].name, "DHLx1_ASAP7_75t_R");
+  EXPECT_EQ(hi[2].name, "DHLx3_ASAP7_75t_R");
+  EXPECT_EQ(lo[0].name, "DLLx1_ASAP7_75t_R");
+  EXPECT_TRUE(hi[0].latch);
+  EXPECT_FALSE(hi[0].en_low);
+  EXPECT_TRUE(lo[0].en_low);
+  EXPECT_EQ(hi[0].d_pin, "D");
+  EXPECT_EQ(hi[0].clk_pin, "CLK");
+  EXPECT_EQ(hi[0].q_pin, "Q");
+  EXPECT_FALSE(hi[0].q_inverted);
+  EXPECT_FALSE(hi[0].is_async());
+  for (int low = 0; low < 2; ++low) {
+    EXPECT_TRUE(sel.latch_ladder[low][1].empty());
+    EXPECT_TRUE(sel.latch_ladder[low][2].empty());
+  }
+  EXPECT_EQ(livehd::liberty::scan_latch_cells(path).size(), 6U);
+  EXPECT_EQ(livehd::liberty::scan_dff_cells(path).size(), 1U);
+  EXPECT_EQ(livehd::liberty::selection_cells(sel).size(), 7U);
+  EXPECT_NE(livehd::liberty::dff_selection_descriptor(sel).find("|latch10=DLLx1_ASAP7_75t_R:D:!CLK:Q:0:latch"), std::string::npos);
+}
+
+TEST(LibertyDff, Sky130LatchPicksSkipDontUseIsolationScanAndClockGates) {
+  // dlxtp_1 (GATE) / dlxtn_1 (!GATE_N) are the plain picks, the dearer
+  // two-output dlxbp_1 only a drive rung; dlrtp_1 / dlrtn_1 (clear !RESET_B) serve reset-to-0.
+  // A cheaper dont_use latch, an isolation latch, a scan latch (an extra
+  // input), an ICG built on a latch group and a latch whose only output is
+  // gated never qualify.
+  const std::string icg_latch =
+      "  cell (dlclkp_1) {\n    area : 1;\n    clock_gating_integrated_cell : \"latch_posedge\";\n    latch (IQ, IQN) { "
+      "data_in : \"GATE\"; enable : \"!CLK\"; }\n    pin (CLK) { direction : input; clock_gate_clock_pin : true; }\n    pin "
+      "(GATE) { direction : input; clock_gate_enable_pin : true; }\n    pin (GCLK) { direction : output; clock_gate_out_pin : "
+      "true; function : \"IQ & CLK\"; }\n  }\n";
+  const auto path = write_lib(
+      "sky130_latch.lib",
+      lib(q_cell("dfxtp_1", 20.02) + latch_cell("sky130_fd_sc_hd__dlxbp_1", 18.77, "GATE", "", {}, "Q:IQ,Q_N:IQN")
+          + latch_cell("sky130_fd_sc_hd__dlxtp_1", 15.01, "GATE") + latch_cell("sky130_fd_sc_hd__dlxtn_1", 15.01, "!GATE_N")
+          + latch_cell("sky130_fd_sc_hd__dlrtp_1", 16.27, "GATE", " clear : \"!RESET_B\";", {"RESET_B"})
+          + latch_cell("sky130_fd_sc_hd__dlrtn_1", 16.27, "!GATE_N", " clear : \"!RESET_B\";", {"RESET_B"})
+          + latch_cell("cheap_dont_use", 1, "GATE", "", {}, "Q:IQ", "    dont_use : true;\n")
+          + latch_cell("iso_latch", 1, "GATE", "", {}, "Q:IQ", "    is_isolation_cell : true;\n")
+          + latch_cell("scan_latch", 1, "GATE", "", {"SCE"}) + latch_cell("gated_out", 1, "GATE", "", {}, "Q:IQ & GATE")
+          + icg_latch));
+  auto sel = livehd::liberty::resolve_dff_cells(path);
+  // The two-output dlxbp_1 has the same pins/polarity: the dearer ladder rung.
+  ASSERT_EQ(sel.latch_ladder[0][0].size(), 2U);
+  EXPECT_EQ(sel.latch_ladder[0][0][0].name, "sky130_fd_sc_hd__dlxtp_1");
+  EXPECT_EQ(sel.latch_ladder[0][0][1].name, "sky130_fd_sc_hd__dlxbp_1");
+  ASSERT_EQ(sel.latch_ladder[1][0].size(), 1U);
+  EXPECT_EQ(sel.latch_ladder[1][0][0].name, "sky130_fd_sc_hd__dlxtn_1");
+  EXPECT_EQ(sel.latch_ladder[1][0][0].clk_pin, "GATE_N");
+  ASSERT_EQ(sel.latch_ladder[0][1].size(), 1U);
+  const auto& r = sel.latch_ladder[0][1][0];
+  EXPECT_EQ(r.name, "sky130_fd_sc_hd__dlrtp_1");
+  EXPECT_EQ(r.reset0_pin, "RESET_B");
+  EXPECT_TRUE(r.reset0_low);
+  EXPECT_TRUE(r.reset1_pin.empty());
+  ASSERT_EQ(sel.latch_ladder[1][1].size(), 1U);
+  EXPECT_EQ(sel.latch_ladder[1][1][0].name, "sky130_fd_sc_hd__dlrtn_1");
+  EXPECT_TRUE(sel.latch_ladder[0][2].empty());  // no preset latch
+  EXPECT_TRUE(sel.latch_ladder[1][2].empty());
+  const auto all = livehd::liberty::scan_latch_cells(path);
+  EXPECT_EQ(all.size(), 5U);  // dlxbp, dlxtp, dlxtn, dlrtp, dlrtn
+  for (const auto& c : all) {
+    EXPECT_TRUE(c.name.starts_with("sky130_fd_sc_hd__")) << c.name << " must not qualify";
+  }
+}
+
+TEST(LibertyDff, LatchQnOnlyCellIsInvertedWithResetsInPinTerms) {
+  // `latch(IQN, IQNN) { data_in : "!D" }` with only QN = IQN: the pin shows !D
+  // while transparent (q_inverted). A clear drives the stored var -- the pin
+  // -- to 0 (reset0); a preset on the same shape would be reset1.
+  const auto path = write_lib("qn_latch.lib",
+                              lib(latch_cell("LQN", 3, "!CLK", " clear : \"!RN\";", {"RN"}, "QN:IQN", "", "IQN, IQNN", "!D")
+                                  + latch_cell("LQNP", 3, "CLK", " preset : \"S\";", {"S"}, "QN:IQN", "", "IQN, IQNN", "!D")));
+  auto sel = livehd::liberty::resolve_dff_cells(path);
+  ASSERT_EQ(sel.latch_ladder[1][1].size(), 1U);
+  const auto& c = sel.latch_ladder[1][1][0];
+  EXPECT_EQ(c.name, "LQN");
+  EXPECT_EQ(c.q_pin, "QN");
+  EXPECT_TRUE(c.q_inverted);
+  EXPECT_TRUE(c.en_low);
+  EXPECT_EQ(c.reset0_pin, "RN");
+  EXPECT_TRUE(c.reset0_low);
+  ASSERT_EQ(sel.latch_ladder[0][2].size(), 1U);
+  EXPECT_EQ(sel.latch_ladder[0][2][0].reset1_pin, "S");
+  EXPECT_FALSE(sel.latch_ladder[0][2][0].reset1_low);
+  EXPECT_TRUE(sel.latch_ladder[0][0].empty());  // a reset cell is not a plain pick
+}

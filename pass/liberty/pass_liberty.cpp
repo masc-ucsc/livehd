@@ -287,7 +287,9 @@ void Pass_liberty::gensim(Eprp_var& var) {
   // for LEC/sim. The whole drive ladder is modeled: pass.abc instantiates any
   // rung by Q-net fanout (DFFHQNx1/x2/x3 on ASAP7), and an unmodeled rung would
   // leave the LEC a blackbox. So are the asynchronous clear/preset cells
-  // pass.abc maps async-reset registers onto (Flop with async reset_pin).
+  // pass.abc maps async-reset registers onto (Flop with async reset_pin), and
+  // the transparent data-latch cells it maps level-sensitive latches onto
+  // (Latch(din, enable), see emit_dff_model).
   const auto dff_sel = livehd::liberty::resolve_dff_cells(files);
   // The integrated clock-gate cells pass.abc maps latch+AND clock gates onto
   // (a statetable cell ABC also drops): Latch(!CLK, en|test) & CLK.
@@ -310,9 +312,12 @@ void Pass_liberty::gensim(Eprp_var& var) {
     livehd::liberty::emit_dff_model(outlib, dff);
     ++modeled;
     if (verbose) {
-      std::print("[pass.liberty] gensim: DFF model '{}' (d={}, clk={}, {}={}{}{}{}, area={})\n",
+      std::print("[pass.liberty] gensim: {} model '{}' (d={}, {}={}{}, {}={}{}{}{}, area={})\n",
+                 dff.latch ? "latch" : "DFF",
                  dff.name,
                  dff.d_pin,
+                 dff.latch ? "enable" : "clk",
+                 dff.latch && dff.en_low ? "!" : "",
                  dff.clk_pin,
                  dff.q_inverted ? "qn" : "q",
                  dff.q_pin,

@@ -1450,6 +1450,24 @@ sh_test(
     env = {"MAPPER": mapper},
 ) for suffix, mapper in _MAPPERS]
 
+# Level-sensitive data latches map onto the Liberty's transparent latch cells
+# (both enable polarities, a QN-only cell, clear/preset reset latches or a
+# folded reset, latches enabled by an ICG output) with sky130- and
+# ASAP7-shaped hermetic libraries: graph LEC proves, lgcheck does not refute,
+# broken twins refute, and a latch-less library keeps them native.
+[sh_test(
+    name = "lhd_abc_latch_test" + suffix,
+    srcs = ["lhd_abc_latch_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_icg_q.lib",
+        "abc_latch_mix.v",
+        "abc_latch_q.lib",
+        "abc_latch_qn.lib",
+        "abc_latch_rst.prp",
+    ],
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
+
 # 2a-abc subtask 5: sequential tech-mapping (seq=true). Flops cross into ABC as
 # latches and return as native flops (name + reset preserved); memories and Sub
 # instances are blackbox boundaries. Each region is sequentially LEC-equivalent

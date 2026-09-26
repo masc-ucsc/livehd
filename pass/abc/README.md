@@ -272,6 +272,32 @@ a single-root region (one register name) collapses to one named flop, a 1:1
 multi-register region rebuilds one flop per register, and a retiming-reshaped
 region falls back to `<region>__r<n>` 1-bit flops (all LEC-correct).
 
+**Data latches** (a level-sensitive `Latch`, never an ABC latch: it stays a
+native boundary whose Q bits are PIs and whose D crosses as POs) map onto the
+Liberty's own **transparent latch cells** (`Dff_selection::latch_ladder`, read
+from `latch(IQ,IQN) { data_in; enable; [clear; preset] }` groups: per enable
+polarity -- ASAP7 DHLx1 `CLK` / DLLx1 `!CLK`, sky130 dlxtp GATE / dlxtn GATE_N
+-- and per reset value, smallest area first with a same-shaped drive ladder;
+dont_use, isolation, level-shifter and clock-gate cells, and any cell with an
+input beyond data/enable/bare clear-preset, never qualify), one cell per bit
+named after the latch (`<latch>[<bit>]` per core/bus_name.hpp, with aggregate
+provenance, when wide).
+The enable reaches the cell natively when it traces through 1-bit identities,
+Nots and `x == 0` to a region input or to a recognized clock gate's output
+(the ICG cell drives it -- minion's register-file preview latches), picking the
+polarity that needs no inverter (the other one plus one shared INV when the
+library has only that); a computed enable (`clk && en`, a reset the reader
+folded into it) crosses as one PO at the level the cell wants. A Latch with its
+own `reset_pin` (a Pyrope `reg x:[latch=true] = v`) maps onto clear (bits
+resetting to 0) / preset (to 1) latch cells, or -- when the library lacks one --
+folds the reset (`rst ? init : (en ? d : q)` == enable `en | rst`, D `rst ? init
+: d`, exact for a level-sensitive latch) onto plain cells. A QN-only cell takes
+an inverter on D. The latch stays native with the precise reason
+(`latch-native`) only for a Liberty without a usable cell, a constant or absent
+enable, a power-on `initial` without a reset, or a non-constant polarity /
+reset value. gensim models each latch cell as `Latch(din, enable)` (`Not(CLK)`
+for an active-low cell, `Not(D)` for a QN one, the Latch reset for clear/preset).
+
 **DFF cell choice** (`pass/liberty/liberty_dff.cpp`): the smallest-area plain
 posedge D-flop in the Liberty — an `ff` group with a bare posedge `clocked_on`
 (a `!CLK` cell is negedge and never qualifies), a `next_state` that is one pin

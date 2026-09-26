@@ -149,6 +149,7 @@ void Region_driver::ensure_dff_cells() {
   areset_ladder_[0] = sel.areset_ladder[0];
   areset_ladder_[1] = sel.areset_ladder[1];
   icg_ladder_       = sel.icg_ladder;
+  copy_latch_ladders(sel);
   if (dff_.has_value() && dff_ladder_.empty()) {
     dff_ladder_.push_back(*dff_);  // a ladder always has its base rung
   }
@@ -699,6 +700,11 @@ void Region_driver::map_regions(std::span<const livehd::partition::Region_body> 
           worker->areset_ladder_[0]  = areset_ladder_[0];
           worker->areset_ladder_[1]  = areset_ladder_[1];
           worker->icg_ladder_        = icg_ladder_;
+          for (int low = 0; low < 2; ++low) {
+            for (int kind = 0; kind < 3; ++kind) {
+              worker->latch_ladder_[low][kind] = latch_ladder_[low][kind];
+            }
+          }
           worker->dff_preset_        = dff_preset_;
           lane.driver                = worker.get();
           parallel_drivers_.push_back(std::move(worker));
@@ -1116,6 +1122,15 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   // per-latch attribution reason as the async cells.
   blast_options.icg         = dff_.has_value() && plan.preserves_latches && !icg_ladder_.empty();
   blast_options.icg_flow_ok = plan.preserves_latches;
+  // Level-sensitive latches never cross ABC (they stay boundaries), so any
+  // flow may map them onto the Liberty's latch cells.
+  for (int low = 0; low < 2; ++low) {
+    for (int kind = 0; kind < 3; ++kind) {
+      const auto& l                           = latch_ladder_[low][kind];
+      blast_options.latch_cell[low][kind]      = l.empty() ? static_cast<int8_t>(-1) : static_cast<int8_t>(l.front().q_inverted ? 1 : 0);
+      blast_options.latch_reset_low[low][kind] = !l.empty() && kind != 0 && l.front().reset_low(kind == 2);
+    }
+  }
   blast_options.verbose        = opts_.verbose;
   Blast_hooks hooks;
   hooks.stage      = trace_stage;
@@ -1216,7 +1231,7 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   // --- read back: the mapped cells -> the region body ---
   Region_writer::Counts          counts{qor_.back().gates, qor_.back().area, qor_.back().bypassed};
   const Region_writer::Registers registers{opts_.map_register, &dff_, &dff_ladder_, &areset_ladder_[0], &areset_ladder_[1],
-                                           &icg_ladder_};
+                                           &icg_ladder_, &latch_ladder_};
   writer_.set_outlib(outlib_);
   writer_.set_flat(flat_);
   if (!writer_.write(rb, blast, *cells, backend_->cells(), registers, counts, trace_stage)) {
@@ -1625,6 +1640,14 @@ void Region_driver::optimize_ware(hhds::GraphLibrary& outlib, std::string_view t
   }
 }
 Design_ctx Region_driver::design_ctx() {
+  std::vector<std::string> latch_names;
+  for (const auto& pol : latch_ladder_) {
+    for (const auto& l : pol) {
+      for (const auto& c : l) {
+        latch_names.push_back(c.name);
+      }
+    }
+  }
   return Design_ctx{qor_,
                     incr_,
                     region_delay_targets_,
@@ -1633,7 +1656,8 @@ Design_ctx Region_driver::design_ctx() {
                     areset_ladder_[0],
                     areset_ladder_[1],
                     [this](float target, bool has_flops) { return region_budget(target, has_flops); },
-                    timing_requested()};
+                    timing_requested(),
+                    std::move(latch_names)};
 }
 
 uint64_t Region_driver::refine_boundaries(hhds::GraphLibrary& outlib, std::string_view top) {

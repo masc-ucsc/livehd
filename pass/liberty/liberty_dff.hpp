@@ -59,6 +59,16 @@ struct Dff_cell {
   // shows: L=0, H=1), -1 when the library leaves it unstated or N/T/X.
   // pass.abc never asserts both; the model (emit_dff_model) needs a value.
   int         both_value = -1;
+  // A transparent LATCH cell (a Liberty `latch(IQ,IQN) {data_in; enable}`
+  // group) rather than a flop: `clk_pin` is then its ENABLE pin, `d_pin` its
+  // data_in, and the cell is transparent while clk_pin is 1 (`en_low` false:
+  // ASAP7 DHLx1, sky130 dlxtp GATE) or 0 (`en_low` true: `enable : "!CLK"`,
+  // ASAP7 DLLx1, sky130 dlxtn GATE_N). q_inverted / reset0 / reset1 keep their
+  // flop meaning (q_pin shows !D while transparent; a reset pin forces q_pin
+  // to 0 / 1 with priority over the enable). The same IO port convention
+  // (create_dff_io: d=1, enable=2, q=3, reset0=4, reset1=5) applies.
+  bool        latch  = false;
+  bool        en_low = false;
   [[nodiscard]] bool is_async() const { return !reset0_pin.empty() || !reset1_pin.empty(); }
   [[nodiscard]] const std::string& reset_pin(bool value) const { return value ? reset1_pin : reset0_pin; }
   [[nodiscard]] bool               reset_low(bool value) const { return value ? reset1_low : reset0_low; }
@@ -144,12 +154,36 @@ struct Dff_selection {
   // the library has none, and gated
   // registers stay native flops. Independent of `prefer`.
   std::vector<Icg_cell> icg_ladder;
+  // The transparent data-latch cells (Dff_cell::latch) a level-sensitive LATCH
+  // maps onto: latch_ladder[en_low][kind], kind 0 = a plain latch, 1 = one
+  // whose reset forces q_pin to 0 (reset0_pin), 2 = to 1 (reset1_pin). Each is
+  // ranked like the flop picks (area, then fewer outputs / reset pins, Q over
+  // QN, name) -- front() is the pick, the rest its same-shaped drive ladder by
+  // area. dont_use, isolation / level-shifter / clock-gate cells, and any cell
+  // with an input beyond data, enable and bare clear/preset pins never
+  // qualify. Empty = that latch shape stays native. Independent of `prefer`.
+  std::vector<Dff_cell> latch_ladder[2][3];
+  [[nodiscard]] bool    has_latch_cells() const {
+    for (const auto& pol : latch_ladder) {
+      for (const auto& l : pol) {
+        if (!l.empty()) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
 };
 Dff_selection resolve_dff_cells(const std::string& lib_files, std::string_view prefer = "");
 
+// Every transparent data-latch cell (Dff_cell::latch) in the Liberty that
+// qualifies for latch_ladder (see there), in file order; unranked.
+std::vector<Dff_cell> scan_latch_cells(const std::string& lib_files);
+
 // Every distinct cell a register may be mapped to under `sel`: the plain
 // ladder, then each asynchronous-reset ladder (a cell serving both reset values
-// once). What gensim models and what a netlist reader treats as a register.
+// once), then the data-latch ladders. What gensim models and what a netlist
+// reader treats as a register.
 std::vector<Dff_cell> selection_cells(const Dff_selection& sel);
 
 // `name:d:clk:q:inverted` -- the resolved pick as one string, for the pass.abc
@@ -174,7 +208,11 @@ std::shared_ptr<hhds::GraphIO> create_dff_io(hhds::GraphLibrary& outlib, const D
 // initial=its forced value; both pins => reset_pin = act0|act1 and initial =
 // act1 (both_value 1) or act1&!act0 (otherwise). Mirrors
 // pass.liberty gensim's combinational cell models so a mapped DFF Sub resolves
-// for LEC/sim. No-op when a model of that name already exists.
+// for LEC/sim. A latch cell (Dff_cell::latch) is `q = Latch(din=d, enable=clk)`
+// instead -- `enable = Not(clk)` for an active-low cell, `din = Not(d)` for a QN
+// one (the state IS the pin, as for the flop), and a reset as the Latch's
+// reset_pin/negreset/initial (the same q_pin-terms mapping). No-op when a model
+// of that name already exists.
 void emit_dff_model(hhds::GraphLibrary& outlib, const Dff_cell& dff);
 
 // `name:clk:en:test:out` for the incremental-cache salt (dff_selection_descriptor

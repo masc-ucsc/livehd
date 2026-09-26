@@ -111,9 +111,51 @@ struct Bbox_in {
   int             bits;
   bool            sign;  // operand signedness — load-bearing for a Div boundary (the LEC fit()s its operands by sign)
 };
+// A level-sensitive Latch the read-back maps onto the Liberty's transparent
+// latch cells, one per bit (Blast_options::latch_cell), instead of rebuilding
+// the native Latch. It stays an ABC boundary exactly like a native latch (Q
+// bits are PIs, D crosses as POs through the ordinary Bbox::ins / native_ins
+// / const_ins of its `din`), except that its control pins are owned here:
+//   - the enable reaches the cell's enable pin natively when it traces
+//     (through 1-bit identities, Nots and `x == 0`) to a region input or to a
+//     recognized clock gate's output (the ICG cell's output pin, never through
+//     mapped logic), else it crosses as one PO at the level the cell wants;
+//   - a reset (`reset_pin`, level-sensitive with priority) drives the cell's
+//     clear / preset pin the same two ways, per bit's reset value;
+//   - with no reset cell for some bit the reset is FOLDED instead -- the
+//     exact latch identity `rst ? init : (en ? d : q)` == a plain latch with
+//     enable `en | rst` and D `rst ? init : d` -- and D crosses as per-bit POs
+//     (`d_po`, already complemented for a QN cell).
+struct Latch_map {
+  bool                 map      = false;
+  bool                 cell_low = false;  // the cell family's enable polarity: latch_ladder[cell_low]
+  std::string          name;              // the latch's Q name (cell instances: name / name_<bit>)
+  int                  bits = 1;
+  // enable: a region-input driver, a recognized gate (Region_blast::icgs), or a PO
+  hhds::Pin_class      en_src;
+  int32_t              en_icg = -1;
+  bool                 en_inv = false;  // en_src / the gate output is at the opposite level: one inverter
+  int32_t              en_po  = -1;     // already at the cell's level
+  // reset onto the cells' clear/preset pins (reset_cells), per bit value
+  bool                 reset_cells = false;
+  std::vector<bool>    rst_val;
+  hhds::Pin_class      rst_src;             // a region-input driver, or invalid: crossed as rst_po
+  bool                 rst_src_low = false;  // rst_src asserts at 0
+  int32_t              rst_po[2]   = {-1, -1};  // by the pin's level (index 1: asserted at 0)
+  // folded reset: per-bit D POs (the enable PO carries `| rst`)
+  bool                 fold = false;
+  std::vector<int32_t> d_po;
+  // source-side handles the PO construction reads (blast only)
+  hhds::Pin_class      en_drv, rst_drv;
+  bool                 en_neg  = false;  // `posclk` false: transparent while en == 0
+  bool                 rst_neg = false;  // `negreset`
+  Dlop                 init;
+};
+
 struct Bbox {
   hhds::Node_class                             node;
   Ntype_op                                     op;
+  Latch_map                                    latch;  // op == Latch only
   std::vector<Bbox_out>                        outs;
   std::vector<Bbox_in>                         ins;
   std::vector<std::pair<int, hhds::Pin_class>> const_ins;   // (port_id, const driver)
@@ -174,6 +216,7 @@ struct Region_blast {
   size_t                                            arst_pos     = 0;      // internal async-reset POs, after bbox_po
   std::vector<Icg_gate>                             icgs;                  // recognized clock gates (Seq_flop::icg)
   size_t                                            icg_pos      = 0;      // ICG enable POs, after the async-reset POs
+  size_t                                            latch_pos    = 0;      // latch-cell enable/reset/D POs, after the ICG POs
   uint64_t                                          rss_before   = 0;      // the admission baseline (0: no admission)
 };
 

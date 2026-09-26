@@ -350,6 +350,60 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   const auto readers      = mapped.readers();
   const auto cell_readers = mapped.cell_readers();
 
+  auto const0_pin = [&]() { return gu::create_const(*body, *Dlop::create_integer(0)); };
+
+  // Reassemble a vector of LSB-first one-bit drivers as one canonical Concat
+  // (whose lanes are MSB-first). A Set_mask chain creates W full-width
+  // intermediate values; downstream Verilog tools then expand W*W bits.
+  hhds::Pin_class concat_width_one;
+  auto            assemble_bits = [&](std::vector<hhds::Pin_class>& dbit, bool sign, hhds::SourceId sid = hhds::SourceId_invalid) {
+    I(!dbit.empty());
+    const auto      w = static_cast<int>(dbit.size());
+    hhds::Pin_class out;
+    if (w == 1) {
+      out = dbit.front();
+    } else {
+      if (concat_width_one.is_invalid()) {
+        concat_width_one = gu::create_const(*body, *Dlop::create_integer(1));
+      }
+      auto concat = gu::create_typed_node(*body, Ntype_op::Concat);
+      if (sid != hhds::SourceId_invalid) {
+        concat.attr(hhds::attrs::srcid).set(sid);
+      }
+      // Port IDs still encode MSB-first lanes, but create them in descending
+      // order. HHDS's per-node pin list is sorted; ascending creation rescans
+      // the growing list for every pin and makes a W-bit Concat O(W^2).
+      for (size_t b = 0; b < dbit.size(); ++b) {
+        auto data_pid = static_cast<hhds::Port_id>(2 * (dbit.size() - 1 - b));
+        concat_width_one.connect_sink(livehd::graph_util::setup_sink_pid(concat, data_pid + 1));
+        dbit[b].connect_sink(concat.create_sink_pin(data_pid));
+      }
+      out = concat.create_driver_pin(0);
+      gu::set_bits(out, w);
+      // A Concat driver is UNSIGNED by construction and every consumer relies
+      // on it: each lane masks into its own window, so the value is in
+      // [0, 2^sum(w)).
+      gu::set_unsign(out);
+    }
+    if (!sign) {
+      return out;
+    }
+    // Preserve the operand's signedness on the reassembled value. For a Div
+    // the LEC fit()s each operand by its sign (SDIV/UDIV sign-extend vs
+    // zero-extend), so a signed operand narrower than the divider's width must
+    // stay signed or ref/impl diverge.
+    auto sx = gu::create_typed_node(*body, Ntype_op::Sext);
+    if (sid != hhds::SourceId_invalid) {
+      sx.attr(hhds::attrs::srcid).set(sid);
+    }
+    out.connect_sink(gu::setup_sink_by_name(sx, "a"));
+    gu::create_const(*body, *Dlop::create_integer(w)).connect_sink(gu::setup_sink_by_name(sx, "b"));
+    auto sout = sx.create_driver_pin(0);
+    gu::set_bits(sout, w);
+    gu::set_sign(sout);
+    return sout;
+  };
+
   // pass 1.bbox: rebuild each blackbox node (Sub instance / memory) natively.
   // Its output pins drive the boundary PIs (mapped in pass 1a); its inputs are
   // wired in pass 2c once their driving cones resolve. Const inputs are wired now.
@@ -358,6 +412,162 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     std::vector<hhds::Pin_class>              out_pin;  // [out idx] -> reconstructed full-width driver
     std::vector<std::vector<hhds::Pin_class>> out_bit;  // [out idx][bit] -> body driver
     std::vector<std::vector<hhds::Pin_class>> in_bit;   // [in idx][bit] -> body driver (filled pass 3)
+    // A latch mapped onto Liberty latch cells (Bbox::latch): no native node,
+    // one cell Sub per bit (`node` stays invalid).
+    std::vector<hhds::Node_class>             lcell;
+    std::vector<const liberty::Dff_cell*>     lcell_type;
+    hhds::Node_class                          lbus;  // the reassembled Q bus (a Concat), deleted when unread
+  };
+  std::vector<Bbox_recon> bbox_recon(bboxes.size());
+  // --- latch cells (Bbox::latch) ---
+  static const std::vector<liberty::Dff_cell> kNoLatchCells;
+  auto latch_ladder = [&](bool low, int kind) -> const std::vector<liberty::Dff_cell>& {
+    return registers.latch != nullptr ? (*registers.latch)[low ? 1 : 0][kind] : kNoLatchCells;
+  };
+  int    latch_cells     = 0;
+  double latch_area      = 0.0;
+  int    latch_inv_cells = 0;  // D-side inverters (QN cells) and enable/reset level inverters
+  // One min-size library inverter (the same cell a negedge clock or a reset
+  // polarity takes), shared per source where the caller caches it.
+  auto mint_inverter = [&](const hhds::Pin_class& src, const std::string& name) -> hhds::Pin_class {
+    const auto inv_type = lib.inverter();
+    I(inv_type.has_value());  // a backend refuses a library without an inverter
+    const auto& desc = lib.decl(*outlib_, *inv_type);
+    auto        inv  = gu::create_typed_node(*body, Ntype_op::Sub);
+    inv.set_subnode(desc.io);
+    inv.attr(hhds::attrs::name).set(name);
+    src.connect_sink(inv.create_sink_pin(desc.input_names.front()));
+    auto out = inv.create_driver_pin(desc.output_name);
+    gu::set_ubits(out, 1);
+    ++latch_inv_cells;
+    return out;
+  };
+  // Bit b of a latch cell's D: straight to the pin, through an inverter for a
+  // QN cell (whose state is the pin: it must latch ~d).
+  auto latch_d_connect = [&](Bbox_recon& br, int b, hhds::Pin_class drv) {
+    const auto* cell = br.lcell_type[static_cast<size_t>(b)];
+    if (cell->q_inverted) {
+      drv = mint_inverter(drv, std::format("{}__dinv", std::string{br.lcell[static_cast<size_t>(b)].attr(hhds::attrs::name).get_or("")}));
+    }
+    drv.connect_sink(br.lcell[static_cast<size_t>(b)].create_sink_pin(cell->d_pin));
+  };
+  // A whole D bus (a region input, a native boundary output, a constant):
+  // split per bit (sign/zero extended past its width).
+  auto latch_d_bus = [&](Bbox_recon& br, const hhds::Pin_class& bus) {
+    const int  w    = std::max(1, gu::bits_of(bus));
+    const bool sign = !gu::is_unsign(bus);
+    for (int b = 0; b < static_cast<int>(br.lcell.size()); ++b) {
+      hhds::Pin_class bit;
+      if (bus.is_const()) {
+        bit = gu::create_const(*body, *Dlop::create_integer(gu::const_of(bus).bit_test(b) ? 1 : 0));
+      } else if (w == 1 && (b == 0 || sign)) {
+        bit = bus;
+      } else if (b < w || sign) {
+        bit = extract_body_bit(bus, std::min(b, w - 1));
+      } else {
+        bit = const0_pin();
+      }
+      latch_d_connect(br, b, bit);
+    }
+  };
+  // Per latch bit, the loads its Q drives in the mapped logic (the ABC PI's
+  // readers): the drive-ladder rung, like a DFF cell's.
+  std::vector<std::vector<int>> latch_fanout(bboxes.size());
+  for (size_t i = 0; i < mapped.sources.size() && i < all_pi_order.size(); ++i) {
+    if (all_pi_order[i].kind != Pi_kind::bbox_output) {
+      continue;
+    }
+    const auto [bx, oi, b] = bbox_pi[all_pi_order[i].index];
+    if (!bboxes[static_cast<size_t>(bx)].latch.map) {
+      continue;
+    }
+    auto& fo = latch_fanout[static_cast<size_t>(bx)];
+    if (static_cast<int>(fo.size()) <= b) {
+      fo.resize(static_cast<size_t>(b) + 1, 0);
+    }
+    fo[static_cast<size_t>(b)] += static_cast<int>(readers[mapped.sources[i]]);
+  }
+  absl::flat_hash_map<std::string, int> latch_name_used;
+  auto build_latch_cells = [&](size_t bi) {
+    const auto& bb = bboxes[bi];
+    const auto& lm = bb.latch;
+    auto&       br = bbox_recon[bi];
+    hhds::SourceId sid = hhds::SourceId_invalid;
+    if (auto a = bb.node.attr(hhds::attrs::srcid); a.has() && a.get() != 0) {
+      sid = out_srcmap.import_from(rb.src->source_locator(), a.get());
+    }
+    std::vector<hhds::Pin_class> qbits;
+    for (int b = 0; b < lm.bits; ++b) {
+      const int   kind   = lm.reset_cells ? (lm.rst_val[static_cast<size_t>(b)] ? 2 : 1) : 0;
+      const auto& ladder = latch_ladder(lm.cell_low, kind);
+      I(!ladder.empty());  // the blaster planned this latch only when its cell exists
+      const auto& fo     = latch_fanout[bi];
+      const int   loads  = b < static_cast<int>(fo.size()) ? fo[static_cast<size_t>(b)] : 1;
+      const auto  rung   = std::min<size_t>(loads <= 8 ? 0 : (loads <= 16 ? 1 : 2), ladder.size() - 1);
+      const auto& cell   = ladder[rung];
+      auto        sub    = gu::create_typed_node(*body, Ntype_op::Sub);
+      sub.set_subnode(liberty::create_dff_io(*outlib_, cell));
+      // The source latch's name (the standard `x[i]` bit name when wide,
+      // core/bus_name.hpp, with the aggregate provenance a DFF-mapped register
+      // bit carries), so the post-synthesis LEC pairs the cell state with the
+      // source latch by name.
+      std::string name = lm.bits == 1 ? lm.name : livehd::bus_name::bit(lm.name, b);
+      if (int& n = latch_name_used[name]; n++ != 0) {
+        name = std::format("{}__dup{}", name, n - 1);
+      }
+      sub.attr(hhds::attrs::name).set(name);
+      if (sid != hhds::SourceId_invalid) {
+        sub.attr(hhds::attrs::srcid).set(sid);
+      }
+      if (lm.bits > 1) {
+        sub.attr(livehd::attrs::aggregate_origin).set(lm.name);
+        sub.attr(livehd::attrs::aggregate_extent).set(lm.bits);
+        sub.attr(livehd::attrs::aggregate_lane_ordinal).set(b);
+        sub.attr(livehd::attrs::aggregate_source_index).set(static_cast<int32_t>(bi) + 1);
+        sub.attr(livehd::attrs::aggregate_bit_offset).set(b);
+        sub.attr(livehd::attrs::aggregate_bit_width).set(1);
+      }
+      auto q = sub.create_driver_pin(cell.q_pin);
+      gu::set_bits(q, 1);
+      gu::set_unsign(q);
+      qbits.push_back(q);
+      br.lcell.push_back(sub);
+      br.lcell_type.push_back(&cell);
+      ++latch_cells;
+      latch_area += cell.area;
+    }
+    // The Q port (a Latch has one output, port 0): each demanded bit reads its
+    // cell directly; whole-bus readers (a native boundary, a direct output)
+    // read the reassembled bus.
+    br.out_pin.resize(bb.outs.size());
+    br.out_bit.resize(bb.outs.size());
+    for (size_t oi = 0; oi < bb.outs.size(); ++oi) {
+      const auto& o = bb.outs[oi];
+      br.out_bit[oi].assign(static_cast<size_t>(o.bits), hhds::Pin_class{});
+      for (int b = 0; b < o.bits && b < lm.bits; ++b) {
+        br.out_bit[oi][static_cast<size_t>(b)] = qbits[static_cast<size_t>(b)];
+      }
+      auto bits = qbits;
+      auto bus  = assemble_bits(bits, o.sign);
+      if (lm.bits > 1 || o.sign) {
+        br.lbus = bus.get_master_node();
+      }
+      br.out_pin[oi] = bus;
+    }
+    for (const auto& [pid, cdrv] : bb.const_ins) {
+      if (pid == static_cast<int>(Ntype::get_sink_pid(Ntype_op::Latch, "din"))) {
+        latch_d_bus(br, gu::create_const(*body, gu::const_of(cdrv)));
+      }
+    }
+    for (const auto& [pid, src_drv] : bb.native_ins) {
+      if (auto it = region_in_name.find(src_drv); it != region_in_name.end()) {
+        latch_d_bus(br, body->get_input_pin(it->second));  // din is the only data pin a mapped latch leaves generic
+      }
+    }
+    br.in_bit.resize(bb.ins.size());
+    for (size_t ii = 0; ii < bb.ins.size(); ++ii) {
+      br.in_bit[ii].assign(bb.ins[ii].bits, hhds::Pin_class{});
+    }
   };
   // Only these boundary bits became ABC PIs.  Recreate selectors for exactly
   // that set; extracting every bit of the full bus here would merely move the
@@ -371,10 +581,13 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     I(oi >= 0 && static_cast<size_t>(oi) < bbox_demand[static_cast<size_t>(bx)].size());
     bbox_demand[static_cast<size_t>(bx)][static_cast<size_t>(oi)].push_back(bit);
   }
-  std::vector<Bbox_recon> bbox_recon(bboxes.size());
   for (size_t bi = 0; bi < bboxes.size(); ++bi) {
     auto& bb = bboxes[bi];
     auto& br = bbox_recon[bi];
+    if (bb.latch.map) {
+      build_latch_cells(bi);
+      continue;
+    }
     auto  nn = gu::create_typed_node(*body, bb.op);
     if (bb.op == Ntype_op::Sub) {
       if (auto child = bb.node.get_subnode_io()) {
@@ -502,7 +715,11 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
         continue;  // already connected above from the body input pin
       }
       if (auto it = native_boundary_driver.find(src_drv); it != native_boundary_driver.end()) {
-        it->second.connect_sink(bbox_recon[bi].node.create_sink_pin(pid));
+        if (bboxes[bi].latch.map) {
+          latch_d_bus(bbox_recon[bi], it->second);  // a latch cell's D from another native boundary
+        } else {
+          it->second.connect_sink(bbox_recon[bi].node.create_sink_pin(pid));
+        }
       }
     }
     for (const auto& [pid, src_drv, bits, sign] : bboxes[bi].fit_native_ins) {
@@ -586,6 +803,70 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     icg_area += cell.area;
     return out;
   };
+
+  // --- latch cells: enable and reset pins (Latch_map) ---
+  // A traced source reaches the pin natively (one shared inverter when its
+  // level disagrees with the cell's); a computed one through its PO, wired in
+  // pass 2b with the clock-gate enables. A clear+preset cell's other reset pin
+  // is tied inactive.
+  {
+    absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class> latch_inverted;
+    auto level = [&](const hhds::Pin_class& src, bool invert, std::string_view what) -> hhds::Pin_class {
+      if (src.is_invalid() || !invert) {
+        return src;
+      }
+      if (auto it = latch_inverted.find(src); it != latch_inverted.end()) {
+        return it->second;
+      }
+      auto inv = mint_inverter(src, std::format("abc_latch_{}_inv_{}", what, latch_inv_cells));
+      latch_inverted.emplace(src, inv);
+      return inv;
+    };
+    for (size_t bi = 0; bi < bboxes.size(); ++bi) {
+      const auto& lm = bboxes[bi].latch;
+      if (!lm.map) {
+        continue;
+      }
+      auto&           br = bbox_recon[bi];
+      hhds::Pin_class en;
+      if (lm.en_icg >= 0) {
+        en = level(icg_output(static_cast<size_t>(lm.en_icg)), lm.en_inv, "en");
+      } else if (auto it = lm.en_src.is_invalid() ? region_in_name.end() : region_in_name.find(lm.en_src);
+                 it != region_in_name.end()) {
+        en = level(body->get_input_pin(it->second), lm.en_inv, "en");
+      }
+      hhds::Pin_class rst_src;
+      if (auto it = lm.rst_src.is_invalid() ? region_in_name.end() : region_in_name.find(lm.rst_src); it != region_in_name.end()) {
+        rst_src = body->get_input_pin(it->second);
+      }
+      for (size_t b = 0; b < br.lcell.size(); ++b) {
+        const auto& cell = *br.lcell_type[b];
+        auto        sub  = br.lcell[b];
+        if (!en.is_invalid()) {
+          en.connect_sink(sub.create_sink_pin(cell.clk_pin));
+        } else {
+          I(lm.en_po >= 0);  // the blaster made the PO for every enable it did not trace
+          icg_en_pending.emplace_back(sub, cell.clk_pin, lm.en_po);
+        }
+        if (lm.reset_cells) {
+          const bool v       = lm.rst_val[b];
+          const bool pin_low = cell.reset_low(v);
+          if (!rst_src.is_invalid()) {
+            level(rst_src, pin_low != lm.rst_src_low, "rst").connect_sink(sub.create_sink_pin(cell.reset_pin(v)));
+          } else {
+            I(lm.rst_po[pin_low ? 1 : 0] >= 0);
+            icg_en_pending.emplace_back(sub, cell.reset_pin(v), lm.rst_po[pin_low ? 1 : 0]);
+          }
+          if (const auto& other = cell.reset_pin(!v); !other.empty()) {
+            gu::create_const(*body, *Dlop::create_integer(cell.reset_low(!v) ? 1 : 0)).connect_sink(sub.create_sink_pin(other));
+          }
+        }
+        if (lm.fold) {
+          icg_en_pending.emplace_back(sub, cell.d_pin, lm.d_po[b]);  // already complemented for a QN cell
+        }
+      }
+    }
+  }
 
   // pass 1a: PI nets -> body input bit drivers (match by creation order — ABC
   // preserves CI/CO order across the flow, more robust than name parsing).
@@ -1314,7 +1595,6 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   trace_stage("readback-cells");
 
   // pass 2: wire each Sub's fanins (fanin k <-> Liberty pin k)
-  auto const0_pin = [&]() { return gu::create_const(*body, *Dlop::create_integer(0)); };
   for (auto& [sub, c] : gates) {
     const auto& pins   = cell_desc(cell_type[c]).input_names;
     const auto& fanins = mapped.cells[c].fanins;
@@ -1334,58 +1614,6 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       }
     }
   }
-
-  // Reassemble a vector of LSB-first one-bit drivers as one canonical Concat
-  // (whose lanes are MSB-first). A Set_mask chain creates W full-width
-  // intermediate values; downstream Verilog tools then expand W*W bits.
-  hhds::Pin_class concat_width_one;
-  auto            assemble_bits = [&](std::vector<hhds::Pin_class>& dbit, bool sign, hhds::SourceId sid = hhds::SourceId_invalid) {
-    I(!dbit.empty());
-    const auto      w = static_cast<int>(dbit.size());
-    hhds::Pin_class out;
-    if (w == 1) {
-      out = dbit.front();
-    } else {
-      if (concat_width_one.is_invalid()) {
-        concat_width_one = gu::create_const(*body, *Dlop::create_integer(1));
-      }
-      auto concat = gu::create_typed_node(*body, Ntype_op::Concat);
-      if (sid != hhds::SourceId_invalid) {
-        concat.attr(hhds::attrs::srcid).set(sid);
-      }
-      // Port IDs still encode MSB-first lanes, but create them in descending
-      // order. HHDS's per-node pin list is sorted; ascending creation rescans
-      // the growing list for every pin and makes a W-bit Concat O(W^2).
-      for (size_t b = 0; b < dbit.size(); ++b) {
-        auto data_pid = static_cast<hhds::Port_id>(2 * (dbit.size() - 1 - b));
-        concat_width_one.connect_sink(livehd::graph_util::setup_sink_pid(concat, data_pid + 1));
-        dbit[b].connect_sink(concat.create_sink_pin(data_pid));
-      }
-      out = concat.create_driver_pin(0);
-      gu::set_bits(out, w);
-      // A Concat driver is UNSIGNED by construction and every consumer relies
-      // on it: each lane masks into its own window, so the value is in
-      // [0, 2^sum(w)).
-      gu::set_unsign(out);
-    }
-    if (!sign) {
-      return out;
-    }
-    // Preserve the operand's signedness on the reassembled value. For a Div
-    // the LEC fit()s each operand by its sign (SDIV/UDIV sign-extend vs
-    // zero-extend), so a signed operand narrower than the divider's width must
-    // stay signed or ref/impl diverge.
-    auto sx = gu::create_typed_node(*body, Ntype_op::Sext);
-    if (sid != hhds::SourceId_invalid) {
-      sx.attr(hhds::attrs::srcid).set(sid);
-    }
-    out.connect_sink(gu::setup_sink_by_name(sx, "a"));
-    gu::create_const(*body, *Dlop::create_integer(w)).connect_sink(gu::setup_sink_by_name(sx, "b"));
-    auto sout = sx.create_driver_pin(0);
-    gu::set_bits(sout, w);
-    gu::set_sign(sout);
-    return sout;
-  };
 
   // pass 2b (seq): wire each reconstructed flop's din from the body driver that
   // feeds its latch D net (now resolvable: PIs in 1a, gates in 1b/2).
@@ -1436,7 +1664,9 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
                                                                    : hhds::Pin_class{};
     if (drv.is_invalid()) {
       livehd::diag::err("pass.abc", "abc-readback", "internal")
-          .msg("pass.abc region '{}': asynchronous-reset / clock-gate enable PO {} has no read-back driver", rb.module_name, pr.po)
+          .msg("pass.abc region '{}': asynchronous-reset / clock-gate enable / latch-cell PO {} has no read-back driver",
+               rb.module_name,
+               pr.po)
           .fatal();
       return false;
     }
@@ -1446,9 +1676,9 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   // saw: count them where the identity-buffer bypass corrected the same row,
   // so abc.json `gates`/`area` (what lhdtrack scores as lhd_area, and what the
   // incremental cache persists) describe the netlist that was actually written.
-  if (qn_inv_cells != 0 || clock_inv_cells != 0 || reset_inv_cells != 0 || icg_cells != 0) {
-    counts.gates += qn_inv_cells + clock_inv_cells + reset_inv_cells + icg_cells;
-    counts.area  += qn_inv_area + (clock_inv_cells + reset_inv_cells) * inv_area + icg_area;
+  if (qn_inv_cells != 0 || clock_inv_cells != 0 || reset_inv_cells != 0 || icg_cells != 0 || latch_cells != 0) {
+    counts.gates += qn_inv_cells + clock_inv_cells + reset_inv_cells + icg_cells + latch_cells + latch_inv_cells;
+    counts.area  += qn_inv_area + (clock_inv_cells + reset_inv_cells + latch_inv_cells) * inv_area + icg_area + latch_area;
   }
   trace_stage("readback-fanins");
 
@@ -1459,17 +1689,19 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     int w = rb.outputs[po].bits == 0 ? 1 : rb.outputs[po].bits;
     out_bits[po].resize(w);
   }
-  if (mapped.outputs.size() != po_order.size() + bbox_po.size() + blast.arst_pos + blast.icg_pos + (has_dummy_po ? 1 : 0)) {
+  if (mapped.outputs.size()
+      != po_order.size() + bbox_po.size() + blast.arst_pos + blast.icg_pos + blast.latch_pos + (has_dummy_po ? 1 : 0)) {
     livehd::diag::warn("pass.abc", "abc-readback", "internal")
         .msg("pass.abc: region '{}': mapped PO count {} != created {} (region {} + bbox {} + async reset {} + clock-gate "
-             "enable {}) — read-back misaligned",
+             "enable {} + latch cell {}) — read-back misaligned",
              rb.module_name,
              mapped.outputs.size(),
-             po_order.size() + bbox_po.size() + blast.arst_pos + blast.icg_pos,
+             po_order.size() + bbox_po.size() + blast.arst_pos + blast.icg_pos + blast.latch_pos,
              po_order.size(),
              bbox_po.size(),
              blast.arst_pos,
-             blast.icg_pos)
+             blast.icg_pos,
+             blast.latch_pos)
         .emit();
   }
   for (int i = 0; i < static_cast<int>(mapped.outputs.size()); ++i) {
@@ -1513,6 +1745,23 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   for (size_t bx = 0; bx < bboxes.size(); ++bx) {
     auto& bb = bboxes[bx];
     auto& br = bbox_recon[bx];
+    if (bb.latch.map) {
+      // A latch cell per bit: its D straight from that bit's PO driver (din
+      // is the only pin a mapped latch leaves to the generic inputs).
+      for (size_t ii = 0; ii < bb.ins.size(); ++ii) {
+        auto& dbit = br.in_bit[ii];
+        for (int b = 0; b < static_cast<int>(br.lcell.size()); ++b) {
+          hhds::Pin_class d;
+          if (b < static_cast<int>(dbit.size())) {
+            d = dbit[static_cast<size_t>(b)];
+          } else if (bb.ins[ii].sign && !dbit.empty()) {
+            d = dbit.back();  // sign-extend a narrower signed din
+          }
+          latch_d_connect(br, b, d.is_invalid() ? const0_pin() : d);
+        }
+      }
+      continue;
+    }
     for (size_t ii = 0; ii < bb.ins.size(); ++ii) {
       int                  w    = bb.ins[ii].bits;
       auto                 sink = br.node.create_sink_pin(bb.ins[ii].port_id);
@@ -1653,6 +1902,33 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     }
   }
   trace_stage("readback-srcmap");
+
+  // A latch's reassembled Q bus nothing read (every reader took a cell bit):
+  // drop it with the Concat/Sext it was built from.
+  for (auto& br : bbox_recon) {
+    std::vector<hhds::Node_class> work;
+    if (!br.lbus.is_invalid()) {
+      work.push_back(br.lbus);
+    }
+    while (!work.empty()) {
+      auto n = work.back();
+      work.pop_back();
+      if (n.has_out_edges()) {
+        continue;
+      }
+      std::vector<hhds::Node_class> feeders;
+      for (const auto& sink : n.inp_pins_snapshot()) {
+        for (const auto& drv : sink.get_driver_pins()) {
+          const auto d = drv.get_master_node();
+          if (!drv.is_const() && (gu::type_op_of(d) == Ntype_op::Concat || gu::type_op_of(d) == Ntype_op::Sext)) {
+            feeders.push_back(d);
+          }
+        }
+      }
+      n.del_node();
+      work.insert(work.end(), feeders.begin(), feeders.end());
+    }
+  }
 
   bypass_setmask_bit_reads(body);
   trace_stage("readback-packed-bits");

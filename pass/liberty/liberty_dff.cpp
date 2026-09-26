@@ -435,7 +435,7 @@ std::optional<Dff_cell> parse_cell(const std::string& name, const std::string& b
   std::string ff_args;
   size_t      ff_open = find_group(body, "ff", 0, ff_args);
   if (ff_open == std::string::npos) {
-    return std::nullopt;  // combinational (or a latch, which we do not map)
+    return std::nullopt;  // combinational (or a latch: parse_latch_cell)
   }
   size_t ff_close = match_brace(body, ff_open);
   if (ff_close == std::string::npos) {
@@ -630,7 +630,7 @@ bool rank_less(const Dff_cell& a, const Dff_cell& b) {
 bool same_shape(const Dff_cell& a, const Dff_cell& b) {
   return a.d_pin == b.d_pin && a.clk_pin == b.clk_pin && a.q_pin == b.q_pin && a.q_inverted == b.q_inverted
          && a.reset0_pin == b.reset0_pin && a.reset0_low == b.reset0_low && a.reset1_pin == b.reset1_pin
-         && a.reset1_low == b.reset1_low && a.both_value == b.both_value;
+         && a.reset1_low == b.reset1_low && a.both_value == b.both_value && a.latch == b.latch && a.en_low == b.en_low;
 }
 
 // A `latch_posedge*` integrated clock gate (Icg_cell). The Liberty's
@@ -720,6 +720,150 @@ std::optional<Icg_cell> parse_icg_cell(const std::string& name, const std::strin
   return c;
 }
 
+// A transparent data LATCH cell (Dff_cell::latch): a `latch(IQ,IQN)` group
+// whose data_in and enable are each one pin or its complement (`enable :
+// "!CLK"` is the active-low flavour, ASAP7 DLLx1 / sky130 dlxtn GATE_N), an
+// optional bare clear/preset, and an output whose function is a state var.
+// Every input must be one of those pins: a scan latch (an SE/SI pair), an
+// extra enable or a sleep pin is a shape the mapper does not drive. Isolation
+// / level-shifter / clock-gate cells hold a latch too but are not data
+// latches, and never qualify.
+std::optional<Dff_cell> parse_latch_cell(const std::string& name, const std::string& body) {
+  const std::string top = top_level_only(body);
+  auto              is_true = [](std::string v) {
+    v = unquote_trim(v);
+    std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return v == "true";
+  };
+  if (is_true(scalar_attr(top, "is_isolation_cell")) || is_true(scalar_attr(top, "is_level_shifter"))
+      || !scalar_attr(top, "clock_gating_integrated_cell").empty()) {
+    return std::nullopt;
+  }
+  std::string ff_args;
+  if (find_group(body, "ff", 0, ff_args) != std::string::npos || find_group(body, "statetable", 0, ff_args) != std::string::npos) {
+    return std::nullopt;
+  }
+  std::string  l_args;
+  const size_t l_open = find_group(body, "latch", 0, l_args);
+  if (l_open == std::string::npos) {
+    return std::nullopt;
+  }
+  const size_t l_close = match_brace(body, l_open);
+  if (l_close == std::string::npos) {
+    return std::nullopt;
+  }
+  if (std::string more; find_group(body, "latch", l_close, more) != std::string::npos) {
+    return std::nullopt;  // a multi-bit / master-slave pair: not one data latch
+  }
+  const std::string l_body = body.substr(l_open + 1, l_close - (l_open + 1));
+  std::string       d_pin;
+  std::string       en_pin;
+  bool              d_inv  = false;
+  bool              en_low = false;
+  if (!parse_next_state(scalar_attr(l_body, "data_in"), d_pin, d_inv)
+      || !parse_next_state(scalar_attr(l_body, "enable"), en_pin, en_low) || d_pin == en_pin) {
+    return std::nullopt;
+  }
+  const std::string clear_expr  = scalar_attr(l_body, "clear");
+  const std::string preset_expr = scalar_attr(l_body, "preset");
+  std::string       clear_pin;
+  std::string       preset_pin;
+  bool              clear_low  = false;
+  bool              preset_low = false;
+  if (!clear_expr.empty() && !parse_next_state(clear_expr, clear_pin, clear_low)) {
+    return std::nullopt;
+  }
+  if (!preset_expr.empty() && !parse_next_state(preset_expr, preset_pin, preset_low)) {
+    return std::nullopt;
+  }
+  for (const auto* rp : {&clear_pin, &preset_pin}) {
+    if (!rp->empty() && (*rp == d_pin || *rp == en_pin)) {
+      return std::nullopt;
+    }
+  }
+  if (!clear_pin.empty() && clear_pin == preset_pin) {
+    return std::nullopt;
+  }
+  auto cp_value = [](const std::string& raw) -> int {
+    const std::string v = unquote_trim(raw);
+    return v == "L" ? 0 : (v == "H" ? 1 : -1);
+  };
+  const int   both_state  = cp_value(scalar_attr(l_body, "clear_preset_var1"));
+  const int   both_nstate = cp_value(scalar_attr(l_body, "clear_preset_var2"));
+  std::string state_var;
+  std::string nstate_var;
+  if (size_t comma = l_args.find(','); comma != std::string::npos) {
+    state_var  = unquote_trim(l_args.substr(0, comma));
+    nstate_var = unquote_trim(l_args.substr(comma + 1));
+  } else {
+    state_var = unquote_trim(l_args);
+  }
+  std::string q_pin;
+  std::string qn_pin;
+  int         n_output = 0;
+  bool        has_d = false, has_en = false, has_clr = clear_pin.empty(), has_pre = preset_pin.empty();
+  std::string pin_args;
+  for (size_t p = find_group(body, "pin", 0, pin_args); p != std::string::npos; p = find_group(body, "pin", p + 1, pin_args)) {
+    const size_t pclose = match_brace(body, p);
+    if (pclose == std::string::npos) {
+      return std::nullopt;
+    }
+    const std::string pin_name = unquote_trim(pin_args);
+    const std::string ptop     = top_level_only(body.substr(p + 1, pclose - (p + 1)));
+    const std::string dir      = scalar_attr(ptop, "direction");
+    if (dir == "output") {
+      ++n_output;
+      const std::string fun = scalar_attr(ptop, "function");
+      if (fun == state_var && q_pin.empty()) {
+        q_pin = pin_name;
+      } else if (!nstate_var.empty() && fun == nstate_var && qn_pin.empty()) {
+        qn_pin = pin_name;
+      }
+    } else if (dir == "input") {
+      if (pin_name == d_pin) {
+        has_d = true;
+      } else if (pin_name == en_pin) {
+        has_en = true;
+      } else if (pin_name == clear_pin) {
+        has_clr = true;
+      } else if (pin_name == preset_pin) {
+        has_pre = true;
+      } else {
+        return std::nullopt;  // an input the mapper would not know how to drive
+      }
+    } else if (dir == "inout") {
+      return std::nullopt;
+    }
+  }
+  if (!has_d || !has_en || !has_clr || !has_pre) {
+    return std::nullopt;
+  }
+  // Q (the state var) over QN (its complement); never a sole output whose
+  // function names neither -- that is an ICG-like gated output, not the state.
+  const bool out_inv = q_pin.empty();
+  if (out_inv && qn_pin.empty()) {
+    return std::nullopt;
+  }
+  Dff_cell c;
+  c.name       = name;
+  c.latch      = true;
+  c.en_low     = en_low;
+  c.d_pin      = d_pin;
+  c.clk_pin    = en_pin;
+  c.q_pin      = out_inv ? qn_pin : q_pin;
+  c.q_inverted = d_inv != out_inv;
+  c.area       = parse_area(body);
+  c.n_out      = n_output;
+  if (!clear_pin.empty() || !preset_pin.empty()) {
+    c.reset0_pin = out_inv ? preset_pin : clear_pin;
+    c.reset0_low = out_inv ? preset_low : clear_low;
+    c.reset1_pin = out_inv ? clear_pin : preset_pin;
+    c.reset1_low = out_inv ? clear_low : preset_low;
+    c.both_value = out_inv ? both_nstate : both_state;
+  }
+  return c;
+}
+
 // ICG pick: area first (missing area LAST), then no test pin (nothing to tie
 // off), then the name.
 bool icg_rank_less(const Icg_cell& a, const Icg_cell& b) {
@@ -774,6 +918,7 @@ struct Cell_scan {
   std::vector<Dff_cell>    dffs;      // the plain flop cells, dont_use ones excluded
   std::vector<Dff_cell>    async;     // the async clear/preset flop cells, dont_use ones excluded
   std::vector<Icg_cell>    icgs;      // the integrated clock-gate cells, dont_use ones excluded
+  std::vector<Dff_cell>    latches;   // the transparent data-latch cells, dont_use ones excluded
   std::vector<std::string> dont_use;  // every cell marked `dont_use : true`, in file order
 };
 
@@ -827,6 +972,8 @@ Cell_scan scan_cells(const std::string& lib_files) {
       (dff->is_async() ? out.async : out.dffs).push_back(std::move(*dff));
     } else if (auto icg = parse_icg_cell(name, body)) {
       out.icgs.push_back(std::move(*icg));
+    } else if (auto lat = parse_latch_cell(name, body)) {
+      out.latches.push_back(std::move(*lat));
     }
   }
   return out;
@@ -841,6 +988,8 @@ std::vector<Dff_cell> scan_async_dff_cells(const std::string& lib_files) { retur
 std::vector<std::string> scan_dont_use_cells(const std::string& lib_files) { return scan_cells(lib_files).dont_use; }
 
 std::vector<Icg_cell> scan_icg_cells(const std::string& lib_files) { return scan_cells(lib_files).icgs; }
+
+std::vector<Dff_cell> scan_latch_cells(const std::string& lib_files) { return scan_cells(lib_files).latches; }
 
 Dff_selection resolve_dff_cells(const std::string& lib_files, std::string_view prefer) {
   Dff_selection sel;
@@ -882,6 +1031,33 @@ Dff_selection resolve_dff_cells(const std::string& lib_files, std::string_view p
       }
     }
     std::stable_sort(sel.areset_ladder[v].begin(), sel.areset_ladder[v].end(), async_rank_less);
+  }
+  // Data latches: per enable polarity, a plain pick (no reset pin) and one per
+  // reset value, each with its same-shaped drive ladder.
+  for (int low = 0; low < 2; ++low) {
+    for (int kind = 0; kind < 3; ++kind) {
+      std::vector<Dff_cell> cand;
+      for (const auto& c : scan.latches) {
+        if (c.en_low != (low != 0)) {
+          continue;
+        }
+        if (kind == 0 ? c.is_async() : c.reset_pin(kind == 2).empty()) {
+          continue;
+        }
+        cand.push_back(c);
+      }
+      auto best = std::min_element(cand.begin(), cand.end(), async_rank_less);
+      if (best == cand.end()) {
+        continue;
+      }
+      auto& ladder = sel.latch_ladder[low][kind];
+      for (const auto& c : cand) {
+        if (same_shape(c, *best)) {
+          ladder.push_back(c);
+        }
+      }
+      std::stable_sort(ladder.begin(), ladder.end(), async_rank_less);
+    }
   }
   if (!prefer.empty()) {
     // Explicit request: take it as-is (the ladder is that one cell -- the user
@@ -927,6 +1103,13 @@ std::vector<Dff_cell> selection_cells(const Dff_selection& sel) {
       add(c);
     }
   }
+  for (const auto& pol : sel.latch_ladder) {
+    for (const auto& l : pol) {
+      for (const auto& c : l) {
+        add(c);
+      }
+    }
+  }
   return out;
 }
 
@@ -946,6 +1129,19 @@ std::vector<Dff_cell> find_dff_ladder(const std::string& lib_files, const Dff_ce
 }
 
 std::string dff_descriptor(const Dff_cell& dff) {
+  if (dff.latch) {
+    return std::format("{}:{}:{}{}:{}:{}:latch:r0={}{}:r1={}{}",
+                       dff.name,
+                       dff.d_pin,
+                       dff.en_low ? "!" : "",
+                       dff.clk_pin,
+                       dff.q_pin,
+                       dff.q_inverted ? 1 : 0,
+                       dff.reset0_pin,
+                       dff.reset0_low ? "/L" : "",
+                       dff.reset1_pin,
+                       dff.reset1_low ? "/L" : "");
+  }
   return std::format("{}:{}:{}:{}:{}", dff.name, dff.d_pin, dff.clk_pin, dff.q_pin, dff.q_inverted ? 1 : 0);
 }
 
@@ -967,6 +1163,14 @@ std::string dff_selection_descriptor(const Dff_selection& sel, std::string_view 
   }
   for (size_t i = 0; i < sel.icg_ladder.size(); ++i) {
     d += std::format("{}{}", i == 0 ? "|icg=" : ",", icg_descriptor(sel.icg_ladder[i]));
+  }
+  for (int low = 0; low < 2; ++low) {
+    for (int kind = 0; kind < 3; ++kind) {
+      const auto& l = sel.latch_ladder[low][kind];
+      for (size_t i = 0; i < l.size(); ++i) {
+        d += std::format("{}{}", i == 0 ? std::format("|latch{}{}=", low, kind) : std::string{","}, dff_descriptor(l[i]));
+      }
+    }
   }
   return d;
 }
@@ -1063,11 +1267,29 @@ void emit_dff_model(hhds::GraphLibrary& outlib, const Dff_cell& dff) {
   auto io   = create_dff_io(outlib, dff);
   auto body = io->create_graph();
 
-  auto F  = gu::create_typed_node(*body, Ntype_op::Flop);
+  // A data latch: the same state-is-the-pin encoding as the flop below, with
+  // the enable polarity spelled the way the readers spell it (an active-high
+  // `enable`, through a Not for the active-low cell -- the ICG model and
+  // latch_contract::control_root agree on that form) and the Latch's own
+  // level-sensitive reset (priority over the enable, cgen's `if (rst) q <=
+  // init; else if (en) q <= d;`).
+  const Ntype_op state_op = dff.latch ? Ntype_op::Latch : Ntype_op::Flop;
+  auto           F        = gu::create_typed_node(*body, state_op);
   auto Fq = F.create_driver_pin(0);
   gu::set_bits(Fq, 1);
   gu::set_unsign(Fq);
-  body->get_input_pin(dff.clk_pin).connect_sink(gu::setup_sink_by_name(F, "clock_pin"));
+  if (!dff.latch) {
+    body->get_input_pin(dff.clk_pin).connect_sink(gu::setup_sink_by_name(F, "clock_pin"));
+  } else if (!dff.en_low) {
+    body->get_input_pin(dff.clk_pin).connect_sink(gu::setup_sink_by_name(F, "enable"));
+  } else {
+    auto N = gu::create_typed_node(*body, Ntype_op::Not);
+    body->get_input_pin(dff.clk_pin).connect_sink(gu::setup_sink_by_name(N, "a"));
+    auto nen = N.create_driver_pin(0);
+    gu::set_bits(nen, 1);
+    gu::set_unsign(nen);
+    nen.connect_sink(gu::setup_sink_by_name(F, "enable"));
+  }
   hhds::Pin_class din = body->get_input_pin(dff.d_pin);
   if (dff.q_inverted) {
     // A QN cell shows the complement of what it latched (QN = !IQN, IQN <- D)
@@ -1107,7 +1329,9 @@ void emit_dff_model(hhds::GraphLibrary& outlib, const Dff_cell& dff) {
       }
       return one_bit(n.create_driver_pin(0));
     };
-    konst(1).connect_sink(gu::setup_sink_by_name(F, "async"));
+    if (!dff.latch) {
+      konst(1).connect_sink(gu::setup_sink_by_name(F, "async"));  // a latch reset is level-sensitive by definition
+    }
     if (dff.reset0_pin.empty() || dff.reset1_pin.empty()) {
       const bool v = dff.reset0_pin.empty();
       body->get_input_pin(dff.reset_pin(v)).connect_sink(gu::setup_sink_by_name(F, "reset_pin"));

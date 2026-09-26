@@ -184,6 +184,10 @@ struct Design_ctx {
   std::function<float(float target, bool has_flops)> region_budget;
   // A delay target anywhere in the run (see Region_ctx::timing_requested).
   bool                                               timing_requested = false;
+  // The transparent data-latch cells (Dff_selection::latch_ladder) a region
+  // may instantiate: register-like boundaries to a netlist reader (d=1,
+  // enable=2, q=3, liberty::create_dff_io), never combinational gates.
+  std::vector<std::string>                           latch_cell_names = {};
 };
 
 class Region_backend {
