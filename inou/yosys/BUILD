@@ -140,3 +140,12 @@ sh_test(
     srcs = ["tests/yosys_qn_reset_test.sh"],
     data = [":scripts"],
 )
+
+# The temporal-induction stage must not constrain a conventionally named reset
+# inside its checked window (a vacuous base case PROVED f^d == f+d when the
+# port was named rst). Non-equivalent pairs refute with and without the name.
+sh_test(
+    name = "yosys_reset_soundness_test",
+    srcs = ["tests/yosys_reset_soundness_test.sh"],
+    data = [":scripts"],
+)

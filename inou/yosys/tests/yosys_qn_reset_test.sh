@@ -61,8 +61,9 @@ V
 # valid alone is mapped the other common way (D pin = next value, Q recovered
 # by an inverter on QN): the same model then powers up at v=1 against the
 # RTL's 0. valid is reset, so after the clocked reset the two agree; before
-# it (the tempinduct base case, whose reset is not clocked) they differ, which
-# keeps that engine inconclusive so the bounded check decides this pair.
+# it they differ. The temporal induction starts after its reset prologue and
+# may PROVE this pair (sound); when it does not, the bounded check must run
+# clean on it. Either way the broken twins below must reach the bounded check.
 # p is q[0] split over both values of the UN-RESET hold register (a Shannon
 # expansion yosys opt does not fold): equal to the RTL's p for every defined
 # state, but X under sat's pessimistic X model while hold is still X.
@@ -119,14 +120,12 @@ case "$rc" in
   fail "QN-mapped synchronous-reset netlist was not accepted (rc=$rc)"
   ;;
 esac
-grep -q "clocks the reset window .* on: clk" "$W/impl.log" || {
-  cat "$W/impl.log"
-  fail "bounded check did not drive the clock during reset"
-}
-grep -q "BMC: found no counterexample" "$W/impl.log" || {
-  cat "$W/impl.log"
-  fail "bounded check did not run clean on the equivalent netlist"
-}
+if [ "$rc" -eq 2 ]; then
+  grep -q "BMC: found no counterexample" "$W/impl.log" || {
+    cat "$W/impl.log"
+    fail "bounded check did not run clean on the equivalent netlist"
+  }
+fi
 echo "PASS: QN-mapped synchronous-reset netlist is not refuted (rc=$rc)"
 
 for variant in bad badrst; do
@@ -139,6 +138,10 @@ for variant in bad badrst; do
   grep -q "bounded check found a mismatch" "$W/$variant.log" || {
     cat "$W/$variant.log"
     fail "broken QN netlist $variant was not refuted by the bounded check"
+  }
+  grep -q "clocks the reset window .* on: clk" "$W/$variant.log" || {
+    cat "$W/$variant.log"
+    fail "bounded check did not drive the clock during reset ($variant)"
   }
   echo "PASS: broken QN netlist $variant is refuted after reset"
 done

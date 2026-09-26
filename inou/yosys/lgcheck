@@ -864,9 +864,25 @@ if [ "$reset_name" != "" ]; then
   esac
   reset_signal="in_${reset_name}"
 
-  # Assert the miter's shared reset for the first two cycles, then release it
-  # from cycle 2 — a deterministic LEC start that brings both sides through
-  # their reset path to a known state.
+  # Reset prologue of the temporal-induction stage: the miter's shared reset
+  # is asserted in the first TEMPINDUCT_RESET_STEPS sat steps and the proof
+  # starts AFTER them (`sat -tempinduct -seq N`: steps 1..N are a prefix whose
+  # property is not checked). From step N+1 on the reset is a FREE input in
+  # the base case, and the induction step never sees any reset constraint
+  # (yosys does not copy -set-at into its induction instance).
+  #
+  # Why a `-seq` prefix and not plain `-set-at` (a FALSE PROOF: f^d PROVED
+  # equal to f+d whenever the reset port was named rst): the tempinduct base
+  # case adds yosys' simple-path constraint (force_unique_state: every state
+  # of the checked window distinct). That is sound only when the inputs of
+  # the window are free, because then the shortest counterexample is loop
+  # free. With `-set-at 1 rst 1 -set-at 2 rst 0` inside the window, the
+  # zero-initialized state at step 1 and the reset state at step 2 are the
+  # SAME state, so every base case of length >=2 was UNSAT (vacuously
+  # "proven") and the induction step then closed by exhausting the small
+  # state space. With the prefix the unique-state window begins after the
+  # reset, where every input is free again. (`-set-at 0` was a no-op: sat
+  # timesteps are 1-based.)
   #
   # 2d-reg fix: the prior `-set in_reset 1` applied the constraint to EVERY
   # temporal-induction timestep (not just cycle 0/1), pinning reset high
@@ -875,7 +891,11 @@ if [ "$reset_name" != "" ]; then
   # add-vs-sub "matched"). Use per-cycle `-set-at` so reset is high only at
   # cycles 0 and 1 and the induction step runs with reset free (normal
   # operation), where a real difference is actually observable.
-  RESET_STMT="-set-at 0 ${reset_signal} ${reset_assert} -set-at 1 ${reset_signal} ${reset_assert} -set-at 2 ${reset_signal} ${reset_release}"
+  TEMPINDUCT_RESET_STEPS=2
+  RESET_STMT="-seq ${TEMPINDUCT_RESET_STEPS}"
+  for ((t = 1; t <= TEMPINDUCT_RESET_STEPS; t++)); do
+    RESET_STMT+=" -set-at ${t} ${reset_signal} ${reset_assert}"
+  done
 else
   RESET_STMT=""
 fi
