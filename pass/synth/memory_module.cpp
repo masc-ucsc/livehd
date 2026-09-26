@@ -467,10 +467,19 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
     });
     auto script = dir / "lower.ys";
     {
+      // `-keepdc` on the post-memory_map opt keeps EVERY entry's storage flop:
+      // without it opt_dff folds an uninitialized entry whose next state is a
+      // constant (an entry hard-wired by a clockless constant write port, e.g.
+      // minion's prim_rf_2r1w_preview `assign rf_q[0] = '0`) into that
+      // constant -- an X-refinement at power-on that drops the entry from the
+      // `<mem>__mem<i>` storage bank, so pass/lec can no longer pair the bank
+      // with the source Memory (find_mem_entry_bank needs every entry) and the
+      // mapped netlist REFUTES on a read of a never-written entry. A scalar
+      // constant-D reg keeps its flop the same way.
       std::ofstream out(script);
       out << "read_slang --top " << name << " --no-proc --ignore-timing -I " << rtl_dir.string() << ' '
           << (dir / (name + ".v")).string() << '\n'
-          << "hierarchy -top " << name << "\nflatten\nproc -ifx\nopt -nosdff\nmemory_map\nopt -nosdff\npmuxtree\nbmuxmap\n"
+          << "hierarchy -top " << name << "\nflatten\nproc -ifx\nopt -nosdff\nmemory_map\nopt -nosdff -keepdc\npmuxtree\nbmuxmap\n"
           << "yosys2lg -path {{path}}\n";
     }
     Eprp_var parsed;

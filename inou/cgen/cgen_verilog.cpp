@@ -1614,8 +1614,21 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       auto expr = get_wire_or_const(pin, 1, true);
       return mem_posclk ? expr : absl::StrCat("~(", expr, ")");
     };
-    bool            single_clock    = true;
-    hhds::Pin_class base_clock_dpin = port_vector.empty() ? hhds::Pin_class{} : port_vector[0].clock;
+    // The base clock is the FIRST clock any port carries, not port zero's (the
+    // same rule as the inline path above). A port with no clock of its own
+    // commits on that shared clock -- the one-clock-per-array reading pass/lec
+    // and inou.cgen.sim use too. tolg leaves a store with no process clock
+    // (the slang reader's `assign rf_q[0] = '0` next to an `always_ff` writing
+    // the other entries -- minion's prim_rf_2r1w_preview) clockless, and it
+    // can be port 0 while later ports carry the array's clock.
+    bool            single_clock = true;
+    hhds::Pin_class base_clock_dpin;
+    for (const auto& p : port_vector) {
+      if (!p.clock.is_invalid()) {
+        base_clock_dpin = p.clock;
+        break;
+      }
+    }
     for (auto& p : port_vector) {
       auto& dpin = p.clock;
       if (dpin.is_invalid()) {

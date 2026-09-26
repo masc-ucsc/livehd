@@ -1800,6 +1800,19 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 
+# A Memory whose write port 0 is clockless (a continuous assign to one entry of
+# an always_ff register file) emits through cgen with the shared clock, and
+# synthesizes (abc + usyn) to a netlist LEC-proven against the design.
+sh_test(
+    name = "lhd_mem_clockless_port_test",
+    size = "medium",
+    srcs = ["lhd_mem_clockless_port_test.sh"],
+    data = _FLOW_DATA + [
+        "mem_clockless_port.sv",
+        "//inou/prp:abc_tests",
+    ],
+)
+
 sh_test(
     name = "lhd_constant_table_test",
     size = "medium",
