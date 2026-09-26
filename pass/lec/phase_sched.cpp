@@ -231,7 +231,48 @@ Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clo
           }
         }
       }
-      if (n_clock == 1 && !ens.empty()) {
+      // A held-latch operand is rewritten to the latch's transparent arm below,
+      // which keeps no polarity: that is right for `clk & en_l` and for the
+      // active-low flavour `clk | ~en_l` (both gate on en_l), but `clk & ~en_l`
+      // / `clk | en_l` gate on the COMPLEMENT -- the guard is an occurrence pin
+      // with no node to carry the inversion, and dropping it gated the clock on
+      // the opposite enable (a design whose gate enable was inverted came back
+      // PROVEN). Not a recognized gate: fail closed.
+      // The same rewrite also assumes the latch is CLOSED at the gated edge --
+      // transparent while the clock operand is low for `&`, high for `|`. A
+      // latch open on the gated phase (`if (clk) en_l = en; clk & en_l`) passes
+      // the enable straight through while the gated clock is high, so it is
+      // not sampled before the edge at all; rewriting it to the arm proved such
+      // a gate equivalent to the real one. Checked only when the latch's enable
+      // provably reaches the same root as the clock operand (an activation
+      // qualifier such as `!clk & __valid` keeps the old treatment).
+      const bool inverted_latch_enable = std::any_of(ens.begin(), ens.end(), [&](const hhds::Occurrence_pin& en) {
+        const auto er = lc::control_root(en, /*stop_at_clock_cell=*/true);
+        if (er.net.is_invalid() || gu::is_graph_input_pin(er.net) || er.net.is_const()
+            || gu::type_op_of(er.net.get_master_node()) != Ntype_op::Latch) {
+          return false;
+        }
+        if (er.inverted != (op == Ntype_op::Or)) {
+          return true;
+        }
+        const auto latch = er.net.get_master_node();
+        const auto len   = lc::sink_driver_hier(latch, "enable");
+        if (len.is_invalid() || clk_op.is_invalid()) {
+          return false;
+        }
+        const auto lr = lc::control_root(len, /*stop_at_clock_cell=*/true);
+        const auto kr = lc::control_root(clk_op, /*stop_at_clock_cell=*/true);
+        if (lr.net.is_invalid() || kr.net.is_invalid() || !(lr.net == kr.net)) {
+          return false;
+        }
+        bool active_low = false;
+        if (auto pc = lc::sink_driver_hier(latch, "posclk"); pc.is_const()) {
+          active_low = gu::const_of(pc).is_known_false();
+        }
+        const bool open_while_low = (lr.inverted != active_low) != kr.inverted;
+        return open_while_low != (op == Ntype_op::And);
+      });
+      if (n_clock == 1 && !ens.empty() && !inverted_latch_enable) {
         ch.live_guards.insert(ch.live_guards.end(), ens.begin(), ens.end());
         for (auto& en : ens) {
           // THE L1 ERROR. A real ICG latches its enable on the opposite phase

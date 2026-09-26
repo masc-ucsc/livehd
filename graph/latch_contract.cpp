@@ -1476,12 +1476,23 @@ std::optional<Icg_def_match> match_icg_def(hhds::Graph* def) {
         continue;  // a width mask, not an operand
       }
       const Phase ph = resolve_phase(drv);
+      // The operand POLARITIES are part of the shape, and the match result
+      // carries neither: `clk & L` / `clk | ~L` gate the reference edges with
+      // enable L, while `clk & ~L` (enable ~L) or `~clk & L` (the falling edge)
+      // are different gates. Accepting them dropped the inversion, so a design
+      // whose gate enable was inverted came back PROVEN against the original.
       if (!ph.net.is_invalid() && gu::is_graph_input_pin(ph.net)) {
+        if (ph.inverted) {
+          return std::nullopt;
+        }
         ++n_ports;
         clk_port = ph.net;
         continue;
       }
       if (!ph.net.is_invalid() && !ph.net.is_const() && gu::type_op_of(ph.net.get_master_node()) == Ntype_op::Latch) {
+        if (ph.inverted != (gate_op == Ntype_op::Or)) {
+          return std::nullopt;
+        }
         ++n_latched;
         latched = ph.net;
         continue;
