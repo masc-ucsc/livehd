@@ -24,6 +24,7 @@ struct Resource_budget {
   uint64_t    peak_bytes          = 0;
   uint64_t    samples             = 0;
   std::string reason;
+  bool        out_of_time = false;  // reason is the wall-time gate (else a memory gate)
   bool        admit(double elapsed, uint64_t footprint);
 };
 }  // namespace livehd::usyn

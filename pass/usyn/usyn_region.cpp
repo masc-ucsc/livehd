@@ -61,7 +61,15 @@ livehd::synth::Region_rewrite rewrite_region(const livehd::synth::Lnet& net, con
   // The source network is the blaster's own gates, hashed (Lnet STRASH),
   // never optimized by the backend.
   std::optional<livehd::synth::Lnet> source;
-  if (!admit()) {
+  // Blasted memories (unless covered) and abc=only never reach the cover, so
+  // no cover limit can turn them into a fallback.
+  const bool backend_only = search.abc_mode == Search_options::Abc_mode::only
+                            || (!search.cover_memories && region.find("cgen_memory") != std::string_view::npos);
+  if (backend_only) {
+    // No cover: the backend maps the original region logic with its own flow.
+    status       = "abc_only";
+    variant_name = "only";
+  } else if (!admit()) {
     reason = effort.reason;
   } else if (net.size() > search.max_nodes) {
     reason = "source node limit";
@@ -74,13 +82,7 @@ livehd::synth::Region_rewrite rewrite_region(const livehd::synth::Lnet& net, con
       source.reset();
     }
   }
-  if (source
-      && (search.abc_mode == Search_options::Abc_mode::only
-          || (!search.cover_memories && region.find("cgen_memory") != std::string_view::npos))) {
-    // No cover: the backend maps the original region logic with its own flow.
-    status       = "abc_only";
-    variant_name = "only";
-  } else if (source) {
+  if (source) {
     // The LUT cover: domino gates and static (non-unate) LUTs minimizing the
     // transistor proxy. `lhd lec` checks the stitched netlist.
     source_metrics           = source_metrics_json(*source);
@@ -122,6 +124,36 @@ livehd::synth::Region_rewrite rewrite_region(const livehd::synth::Lnet& net, con
   }
   if (status == "abc_fallback" && reason.empty()) {
     reason = effort.reason;
+  }
+  if (status == "abc_fallback" && !search.fallback && !effort.reason.empty() && reason == effort.reason) {
+    // A time or memory budget is a resource refusal, reported exactly as the
+    // pass.abc flow reports one (memory-oversize / time budget), never mapped.
+    const bool process_gate = reason.starts_with("process");
+    const auto limit_mib    = (process_gate ? effort.process_limit_bytes : effort.growth_limit_bytes) >> 20;
+    const auto used_mib     = (process_gate || effort.peak_bytes < effort.entry_bytes ? effort.peak_bytes
+                                                                                      : effort.peak_bytes - effort.entry_bytes)
+                          >> 20;
+    const auto why = effort.out_of_time
+                         ? std::format("the usyn cover ran out of time: {:.0f} ms, budget {:.0f} ms ({})",
+                                       effort.elapsed_ms, effort.time_limit_ms, reason)
+                         : std::format("the usyn cover does not fit in memory: {} MiB, budget {} MiB ({})",
+                                       used_mib, limit_mib, reason);
+    if (effort.out_of_time ? static_cast<bool>(ctx.refuse_time) : static_cast<bool>(ctx.refuse_memory)) {
+      (effort.out_of_time ? ctx.refuse_time : ctx.refuse_memory)(why);
+      rewrite.map = Map::refused;
+      sample();
+      report = std::format(R"({{"region":"{}","status":"refused","reason":"{}"}})",
+                           livehd::json_util::escape(region), livehd::json_util::escape(reason));
+      return rewrite;
+    }
+  }
+  if (status == "abc_fallback" && !search.fallback) {
+    livehd::diag::err("pass.usyn", "cover-unavailable", "unsupported")
+        .msg("region '{}' ({} source nodes) was not covered: {}", region, net.size(), reason.empty() ? "unknown" : reason)
+        .hint("usyn maps every non-memory region through its cover; raise pass.usyn.max_nodes or the region budget, "
+              "or --set pass.usyn.fallback=true to map it with the pass.abc flow instead")
+        .fatal();
+    return rewrite;
   }
   sample();
   const auto& din = cover.domino_inputs;

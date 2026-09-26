@@ -128,6 +128,10 @@ struct Search_options {
   // logic through the pass.abc flow (same partition as the other modes).
   enum class Abc_mode { tmap, opt, only };
   Abc_mode              abc_mode            = Abc_mode::tmap;
+  // false: a covered mode never hands a region the cover could not build to
+  // the ABC flow -- it is an error naming the reason. true: that region is
+  // mapped from its own logic by the pass.abc flow (abc_fallback).
+  bool                  fallback            = false;
   std::function<bool()> admission{};
 };
 

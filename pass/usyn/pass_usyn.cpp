@@ -64,6 +64,10 @@ void Pass_usyn::setup() {
                        "network through the full pass.abc flow), only (no cover: the original region logic through the "
                        "pass.abc flow)",
                        "tmap");
+  m.add_label_optional("fallback",
+                       "true: a region the cover cannot build (node limit, budget, infeasible cover) is mapped by the "
+                       "pass.abc flow; false: it is an error, so every non-memory region is the cover, technology-mapped",
+                       "false");
   m.add_label_optional("ware_trials",
                        "true: pass.abc's ware trials re-map each arithmetic ware region under alternative architectures "
                        "(re-running this mapper) and keep the best",
@@ -105,7 +109,7 @@ bool read_options(const Eprp_var& var, livehd::usyn::Search_options& options) {
       || !number(var.get_stage("cover_cuts", "12"), options.cover_cuts) || options.cover_cuts == 0 || options.cover_cuts > 64
       || !number(var.get_stage("domino_levels", "2"), options.domino_levels) || options.domino_levels > 64
       || !number(var.get_stage("fanout_boundary", "0"), options.fanout_boundary) || !flag("duplicate", "false", options.duplicate)
-      || !flag("cover_memories", "false", options.cover_memories)
+      || !flag("cover_memories", "false", options.cover_memories) || !flag("fallback", "false", options.fallback)
       || !number(var.get_stage("depth_slack", "0"), options.depth_slack) || options.depth_slack < -1 || options.depth_slack > 64) {
     return false;
   }
@@ -150,7 +154,7 @@ void Pass_usyn::work(Eprp_var& var) {
     livehd::diag::err("pass.usyn", "invalid-search-options", "syntax")
         .msg(
             "invalid cover options; expected support=2..8, literals=2..4096, series=2..32, recovery_rounds=0..8, "
-            "cover_cuts=1..64, domino_levels=0..64, depth_slack=-1..64, max_nodes>0, duplicate/cover_memories=true|false "
+            "cover_cuts=1..64, domino_levels=0..64, depth_slack=-1..64, max_nodes>0, duplicate/cover_memories/fallback=true|false "
             "and abc=tmap|opt|only")
         .emit();
     return;

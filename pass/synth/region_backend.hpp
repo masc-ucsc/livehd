@@ -35,6 +35,7 @@ struct Region_rewrite {
     region,  // no rewrite: the backend maps the region's own logic with its flow
     flow,    // `logic` replaces the region's logic as the backend flow's input
     tmap,    // `logic` is technology-mapped only: no restructuring
+    refused, // the hook recorded a time/memory refusal (ctx.refuse_*): map nothing
   };
   Map         map = Map::region;
   // Over the region Lnet's boundary: its inputs and latches in CI order, its

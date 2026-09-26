@@ -2,6 +2,7 @@
 #include "usyn_region.hpp"
 
 #include <array>
+#include <stdexcept>
 
 #include "gtest/gtest.h"
 #include "rapidjson/document.h"
@@ -103,6 +104,7 @@ TEST(UsynRegion, OnlyAndOverLimitRegionsStayWithTheBackend) {
       search.abc_mode = Search_options::Abc_mode::only;
     } else {
       search.max_nodes = 3;
+      search.fallback  = true;
     }
     std::string report;
     const auto  rewrite = rewrite_region(majority_net(), region.ctx, search, report);
@@ -113,6 +115,27 @@ TEST(UsynRegion, OnlyAndOverLimitRegionsStayWithTheBackend) {
     }
     EXPECT_EQ(rewrite.map, Map::region);
   }
+}
+
+TEST(UsynRegion, WithoutFallbackAnUncoverableRegionIsAnError) {
+  Region         region;
+  Search_options search;
+  search.max_nodes = 3;
+  std::string report;
+  EXPECT_THROW(rewrite_region(majority_net(), region.ctx, search, report), std::runtime_error);
+}
+
+TEST(UsynRegion, MemoryRegionsGoToTheBackendBeforeAnyCoverLimit) {
+  Region region;
+  region.rb.module_name = "top__cgen_memory_1rd_1wr";
+  Search_options search;
+  search.cover_memories = false;
+  search.max_nodes      = 3;  // would be an error for a non-memory region
+  std::string report;
+  const auto  rewrite = rewrite_region(majority_net(), region.ctx, search, report);
+  auto        doc     = parse(report);
+  EXPECT_STREQ(doc["status"].GetString(), "abc_only") << report;
+  EXPECT_EQ(rewrite.map, Map::region);
 }
 
 }  // namespace

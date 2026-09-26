@@ -26,7 +26,7 @@ checked separately with `lhd lec`: synthesis proves nothing itself.
    STRASH form (`livehd::synth::strash`): the sources in CI order, structurally
    hashed 2-input gates with complemented edges folded into their tables, dead
    logic dropped. An XOR stays one node when one domino gate admits its
-   4-literal, 2-series form. A region over `max_nodes` goes to the ABC flow.
+   4-literal, 2-series form. A region over `max_nodes` is an error (see `fallback`).
 2. **Cover** (`lut_cover.cpp`). Priority cuts (`cover_cuts` per node) with
    composed truth tables of at most `support` inputs; every cut's function is
    costed once (`function_cost`): a domino gate when some polarity has an exact
@@ -48,9 +48,13 @@ checked separately with `lhd lec`: synthesis proves nothing itself.
    backend builds the SOP network in the region's own PI/PO/latch skeleton
    (`pass/abc/abc_lnet.cpp`, `lnet_into_logic`).
 
-A region the cover refuses -- a time or memory budget (`time_budget_ms`,
-`memory_budget_mb`), the node limit, or a memory region under
-`cover_memories=false` -- takes the ordinary ABC flow and says why.
+Every non-memory region goes through the cover. A memory region under
+`cover_memories=false` (and every region under `abc=only`) takes the ordinary
+ABC flow before any cover limit applies. A region the cover cannot build -- a
+time or memory budget (`time_budget_ms`, `memory_budget_mb`), the node limit, or
+an infeasible cover -- is an error (`cover-unavailable`) naming the reason, never
+a silent full-ABC substitute; `fallback=true` maps it with the ABC flow instead
+(`abc_fallback`).
 
 ## Options (`--set pass.usyn.<flag>=value`)
 
@@ -67,6 +71,7 @@ A region the cover refuses -- a time or memory budget (`time_budget_ms`,
 | `recovery_rounds` | 2 | exact-area recovery sweeps |
 | `max_nodes` | 2,000,000 | largest region the cover admits |
 | `abc` | tmap | hand-off: `opt`, `tmap` or `only` |
+| `fallback` | false | map a region the cover cannot build with the ABC flow instead of failing |
 | `ware_trials` | false | re-run the architecture trials through this mapper |
 | `large_ge` | 0 | the ABC size tier stays off for the cover's hand-off |
 

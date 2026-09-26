@@ -142,8 +142,15 @@ rows=json.load(open(sys.argv[1]))['regions_searched']
 assert rows and all(row['status']=='abc_only' and row['domino']==0 for row in rows),rows
 PY
 check_lec "$W/only_net" "$W/fresh/synth/lg" shared
-# Over the node limit, a region takes the ABC flow and says why.
-run pass usyn "lg:$W/fresh/synth/lg" --top shared --set synth.liberty="$LIB" --set pass.usyn.max_nodes=1 --workdir "$W/limited" --emit-dir "lg:$W/limited_net"
+# Over the node limit, a region is an error by default: every non-memory
+# region is the cover, never a silent full-ABC substitute.
+if "$LHD" pass usyn "lg:$W/fresh/synth/lg" --top shared --set synth.liberty="$LIB" --set pass.usyn.max_nodes=1 --workdir "$W/strict" --emit-dir "lg:$W/strict_net" -q --result-json "$W/strict.json" >/dev/null 2>&1; then
+  echo "an uncoverable region was accepted without pass.usyn.fallback"; exit 1
+fi
+grep -q 'was not covered' "$W/strict.json" || { cat "$W/strict.json"; exit 1; }
+grep -q 'source node limit' "$W/strict.json" || { cat "$W/strict.json"; exit 1; }
+# With fallback=true, it takes the ABC flow and says why.
+run pass usyn "lg:$W/fresh/synth/lg" --top shared --set synth.liberty="$LIB" --set pass.usyn.max_nodes=1 --set pass.usyn.fallback=true --workdir "$W/limited" --emit-dir "lg:$W/limited_net"
 python3 - "$W/limited/qor.json.usyn.json" <<'PY'
 import json,sys
 rows=json.load(open(sys.argv[1]))['regions_searched']

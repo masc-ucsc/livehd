@@ -19,7 +19,8 @@ bool Resource_budget::admit(double elapsed, uint64_t footprint) {
     return false;
   }
   if (time_limit_ms > 0 && elapsed_ms >= time_limit_ms) {
-    reason = "region wall-time budget exhausted";
+    reason      = "region wall-time budget exhausted";
+    out_of_time = true;
   } else if (process_limit_bytes && footprint > process_limit_bytes) {
     reason = "process physical-memory budget exhausted";
   } else if (growth_limit_bytes && entry_bytes && footprint > entry_bytes && footprint - entry_bytes > growth_limit_bytes) {

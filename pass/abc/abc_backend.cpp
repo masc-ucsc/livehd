@@ -586,6 +586,9 @@ std::optional<synth::Cell_netlist> Abc_backend::map(const synth::Region_ctx& ctx
   const auto  rss_before   = blast.rss_before;
   const auto  blast_total  = blast.blast_total;
   const float budget       = ctx.budget;
+  if (rewrite.map == synth::Region_rewrite::Map::refused) {
+    return std::nullopt;  // the hook recorded the refusal; publish nothing
+  }
 
   // The ABC objects are allocated here, not while blasting (the loop above
   // only estimated them), so this is where their footprint first shows.
