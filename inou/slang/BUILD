@@ -62,6 +62,12 @@ sh_test(
 )
 
 sh_test(
+    name = "slang_missing_source",
+    srcs = ["tests/missing_source.sh"],
+    data = ["//lhd"],
+)
+
+sh_test(
     name = "slang_test.sh",
     srcs = ["tests/slang_test.sh"],
     data = [

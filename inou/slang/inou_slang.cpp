@@ -307,7 +307,20 @@ void Inou_slang::work(Eprp_var& var) {
     }
     argv_final.emplace_back(nullptr);
 
-    slang_main(argv_final.size() - 1, argv_final.data(), tree);  // compile to lnasts
+    const auto errors_before = livehd::diag::sink().count(livehd::diag::Severity::error);
+    const int  rc            = slang_main(argv_final.size() - 1, argv_final.data(), tree);  // compile to lnasts
+    // slang reports command-line / -F filelist failures (e.g. a missing source)
+    // straight to stderr, not through the diag sink. Never let such a failure
+    // continue as an empty design that exits 0.
+    if (rc != 0 && livehd::diag::sink().count(livehd::diag::Severity::error) == errors_before) {
+      livehd::diag::err("inou.slang", "slang-frontend-failed", "io")
+          .msg("the slang front end failed ({}) before elaboration",
+               rc == 1   ? "invalid command line or -F filelist"
+               : rc == 2 ? "invalid options, or a missing or unreadable source file"
+                         : std::format("exit code {}", rc))
+          .hint("slang's own message is on stderr above")
+          .emit();
+    }
 
     for (auto& ln : tree.pick_lnast()) {
       ln->set_skip_timecheck(!keep_timecheck);
