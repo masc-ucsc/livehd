@@ -1696,12 +1696,28 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         mc.ra_fresh                = tm_.mkConst(bv(rw), std::string(prefix) + mc.key + ":ra");
         pin2val[pinkey(mc.ra_pin)] = Val{mc.ra_fresh, rw, sgn};
       } else {
-        Term bus = tm_.mkTerm(Kind::SELECT, {mc.a_cur, bv_const(tm_, mc.sig.addr_w, 0)});  // entry 0 (low bits)
-        for (int i = 1; i < mc.sig.size; ++i) {
-          Term ei = tm_.mkTerm(Kind::SELECT, {mc.a_cur, bv_const(tm_, mc.sig.addr_w, static_cast<uint64_t>(i))});
-          bus     = tm_.mkTerm(Kind::BITVECTOR_CONCAT, {ei, bus});  // CONCAT arg0 = high
+        auto whole = [&](const Term& arr) {
+          Term bus = tm_.mkTerm(Kind::SELECT, {arr, bv_const(tm_, mc.sig.addr_w, 0)});  // entry 0 (low bits)
+          for (int i = 1; i < mc.sig.size; ++i) {
+            Term ei = tm_.mkTerm(Kind::SELECT, {arr, bv_const(tm_, mc.sig.addr_w, static_cast<uint64_t>(i))});
+            bus     = tm_.mkTerm(Kind::BITVECTOR_CONCAT, {ei, bus});  // CONCAT arg0 = high
+          }
+          return bus;
+        };
+        Val ra{whole(mc.a_cur), rw, sgn};
+        // The committed contents may carry entries an earlier write under an
+        // unknown enable/data left unknown (the reference's knowledge array,
+        // threaded as x_cur). A read_all exposes EVERY entry, so it must expose
+        // that plane too, exactly like a per-address read port does: dropping
+        // it turned "ref entry unknown" into "ref entry = this concrete s0
+        // choice", and the impl's own (unpaired) power-on choice then refuted an
+        // equivalent netlist (bedrock br_tracker_linked_list_ctrl `head`, a
+        // onehot mux over the whole `ll_head` array written under the un-reset
+        // br_delay_valid select stage).
+        if (mc.x_track && !mc.x_cur.isNull()) {
+          ra.x_mask = whole(mc.x_cur);
         }
-        pin2val[pinkey(mc.ra_pin)] = Val{bus, rw, sgn};
+        pin2val[pinkey(mc.ra_pin)] = ra;
       }
     }
     mem_cuts.push_back(std::move(mc));
