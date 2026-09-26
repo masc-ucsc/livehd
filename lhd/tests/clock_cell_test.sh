@@ -369,13 +369,23 @@ out="$("$LHD" lec --impl "lg:$W/lg_icg_write_commit_dm" --ref "lg:$W/lg_icg_writ
 expect_proven "$out" "case 7 (Clock_cell level in resettable write-commit latch)"
 echo "ok: a resettable write-commit latch reads the scheduled Clock_cell level and proves"
 
-# The phase-local clock value must still carry the gate. Removing it changes
-# which high windows can write q and therefore must refute.
+# Removing the gate changes which high windows can write q (lgcheck refutes
+# it). The phase schedule used to REFUTE this by encoding q_o's window
+# `rst | (clk & en_1p)` as a gate that commits at the fall iff `rst & en_1p` --
+# the same model PROVED a twin whose reset only fires while en_1p holds, a real
+# difference (lec_gated_latch_soundness_test.sh). q_o's window is open on BOTH
+# clock levels while rst is high, so no closing edge models it; the solver
+# route now refuses the design by name instead. It must never be PROVEN.
 sed 's/write_commit u_wc(.clk_i(gclk)/write_commit u_wc(.clk_i(clk)/' "$W/icg_write_commit.v" > "$W/icg_write_commit_ungated.v"
 build icg_write_commit_ungated "$W/icg_write_commit_ungated.v" dut
 out="$("$LHD" lec --impl "lg:$W/lg_icg_write_commit_ungated" --ref "lg:$W/lg_icg_write_commit" --top dut --workdir "$W/l7b" 2>&1)"
-expect_refuted "$out" "case 7b (gated vs ungated write-commit latch)"
-echo "ok: removing the write-commit gate REFUTES -- the phase-local Clock_cell value retains its enable"
+if grep -qa "PROVEN equivalent" <<<"$out"; then
+  tail -8 <<<"$out"
+  fail "case 7b (gated vs ungated write-commit latch): PROVED two different designs"
+fi
+grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted"|is not closed for a whole clock phase' <<<"$out" \
+  || { tail -8 <<<"$out"; fail "case 7b: neither refuted nor refused by name"; }
+echo "ok: removing the write-commit gate is never PROVEN (the rst-opened window is refused by name)"
 
 # ---------------------------------------------------------------------------
 # 8. A Clock_cell feeding a COLLAPSED child's structural clock input.

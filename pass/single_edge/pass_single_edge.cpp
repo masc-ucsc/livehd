@@ -308,11 +308,44 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks) {
           if (gu::type_op_of(dn) != Ntype_op::Latch) {
             continue;
           }
+          // The bypass is exact ONLY for a latch on the OPPOSITE phase: open for
+          // the whole phase before the gated edge, shut for the whole phase
+          // after it. A latch open on the GATED phase (`if (clk) en_l = en;
+          // clk & en_l`) passes a change of `en` straight through while the
+          // gated clock is high -- an extra, glitch edge the real gate was built
+          // to suppress -- so reading its arm PROVED that twin equal to a real
+          // clock gate. The same phase rule pass/lec/phase_sched.cpp applies to
+          // its own bypass; here it fails closed rather than mis-time.
+          const bool closed_after = e.cc.rising;  // the reference level after the gated edge
+          if (!lc::gated_latch_closed_at(dn, e.icg->clock, closed_after)
+              || !lc::latch_open_at(dn, e.icg->clock, !closed_after)) {
+            plan.code = "clock-gate-latch-phase";
+            plan.why  = "state element `" + label_of(n) + "` is clocked through a gate whose enable latch `" + label_of(dn)
+                        + "` is not transparent exactly on the phase opposite the gated edge";
+            return plan;
+          }
           if (auto arm = lc::latch_transparent_arm(dn); !arm.is_invalid()) {
             en = arm;
           }
         }
       }
+    }
+    // A GATED LATCH is lowered to "commit at the closing edge iff the gate's
+    // enable held", i.e. a gated-OFF clock HOLDS it. That is only the latch's
+    // behavior when the gated-off clock keeps its window SHUT. A window open
+    // while the gated clock is LOW (`if (!(clk & en_l)) p = d`, minion's
+    // register-file preview latch) is transparent for the WHOLE period when
+    // gated off, which no slot can express -- lowering it anyway PROVED it
+    // equal to a latch that really holds. Decline -- unless every reader of the
+    // latch is masked by that same gated clock (an ICG's own enable latch on a
+    // gated clock), which makes the gated-off window unobservable.
+    if (e.is_latch && e.icg && e.cc.role == lc::Net_role::Clock
+        && !lc::gated_latch_closed_at(n, e.icg->clock, /*closed_level=*/e.cc.rising) && !lc::gated_latch_masked_off(n)) {
+      plan.code = "gated-latch-open-when-off";
+      plan.why  = "latch `" + label_of(n)
+                  + "` has a gated clock window that stays transparent while the gate is off, which one commit edge "
+                    "cannot represent";
+      return plan;
     }
     plan.elems.push_back(e);
     if (cc->role == lc::Net_role::Clock) {
@@ -872,6 +905,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     }
   }
 
+  std::vector<hhds::Pin_class> orphaned_clocks;  // old clock_pin drivers the rebind below disconnects
   for (const auto& e : plan.elems) {
     if (e.is_latch) {
       // `posclk` on a Latch is the ENABLE POLARITY, not an edge. Carrying it
@@ -991,6 +1025,9 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     if (!plan.ref_clk_pin.is_invalid()) {
       auto cur = sink_driver(e.node, "clock_pin");
       if (cur.is_invalid() || cur.get_class_index() != plan.ref_clk_pin.get_class_index()) {
+        if (!cur.is_invalid()) {
+          orphaned_clocks.push_back(cur);
+        }
         drop_sink(e.node, "clock_pin");
         plan.ref_clk_pin.connect_sink(gu::setup_sink_by_name(e.node, "clock_pin"));
       }
@@ -1093,6 +1130,41 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
         aq.connect_sink(gu::setup_sink_by_name(e.node, "enable"));
       }
       ++r.flops_slotted;
+    }
+  }
+
+  // ---- the derived clock cones the rebind left behind -------------------
+  // A cone that only ever fed a clock_pin is dead once every element commits
+  // on the reference clock, but it is not GONE: the encoder skips a node with
+  // no fanout, not a node whose fanout is itself dead, so the head of such a
+  // cone is still encoded -- as DATA. For a negedge register behind an ICG
+  // (`INV(Clock_cell)` in a mapped netlist) that head reads the timing-only
+  // Clock_cell output and the whole def came back UNKNOWN. Remove what became
+  // unreachable, stopping at state, instances, IO and anything still read.
+  {
+    std::vector<hhds::Pin_class>           work = std::move(orphaned_clocks);
+    absl::flat_hash_set<hhds::Class_index> gone;  // a DAG reaches a node twice; never touch a deleted one
+    while (!work.empty()) {
+      auto p = work.back();
+      work.pop_back();
+      if (p.is_invalid() || p.is_const() || gu::is_graph_input_pin(p)) {
+        continue;
+      }
+      auto n = p.get_master_node();
+      if (gone.contains(n.get_class_index())) {
+        continue;
+      }
+      const auto op = gu::type_op_of(n);
+      if (n.is_invalid() || n.has_out_edges() || gu::is_type_register(n) || op == Ntype_op::Sub || op == Ntype_op::Memory) {
+        continue;
+      }
+      for (auto sink : n.inp_sorted_pins()) {
+        for (const auto& drv : sink.get_driver_pins()) {
+          work.push_back(drv);
+        }
+      }
+      gone.insert(n.get_class_index());
+      n.del_node();
     }
   }
 

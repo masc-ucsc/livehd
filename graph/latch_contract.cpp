@@ -619,6 +619,197 @@ hhds::Occurrence_pin latch_transparent_arm(const hhds::Occurrence_node& n) {
 
 namespace {
 
+// The SET of values a boolean control net can take while the reference clock
+// `root` is held at one level and every other leaf is free: bit 0 = "can be 0",
+// bit 1 = "can be nonzero". An over-approximation by construction -- any shape
+// the walk does not decode is "either" -- so a caller that needs "provably 0"
+// can only ever be told no by mistake, never yes.
+constexpr uint8_t kCan0 = 1;
+constexpr uint8_t kCan1 = 2;
+constexpr uint8_t kAny  = kCan0 | kCan1;
+
+uint8_t flip_vals(uint8_t v) { return static_cast<uint8_t>(((v & kCan0) != 0 ? kCan1 : 0) | ((v & kCan1) != 0 ? kCan0 : 0)); }
+
+// AND / OR over value sets. Width-safe where it matters: an AND is provably 0
+// when ANY operand is (any width), but "provably nonzero" from all-nonzero
+// operands holds only for a 1-bit result (`2 & 1 == 0`); an OR is provably 0
+// only when ALL operands are, and nonzero when ANY is.
+uint8_t and_vals(uint8_t a, uint8_t b) {
+  uint8_t r = 0;
+  if ((a & kCan0) != 0 || (b & kCan0) != 0) {
+    r |= kCan0;
+  }
+  if ((a & kCan1) != 0 && (b & kCan1) != 0) {
+    r |= kCan1;
+  }
+  return r;
+}
+uint8_t or_vals(uint8_t a, uint8_t b) {
+  uint8_t r = 0;
+  if ((a & kCan0) != 0 && (b & kCan0) != 0) {
+    r |= kCan0;
+  }
+  if ((a & kCan1) != 0 || (b & kCan1) != 0) {
+    r |= kCan1;
+  }
+  return r;
+}
+
+template <typename Pin>
+uint8_t values_with_root(const Pin& p, const Pin& root, bool level, int depth) {
+  if (p.is_invalid() || depth > 24) {
+    return kAny;
+  }
+  const auto ph  = resolve_phase(p, /*stop_at_clock_cell=*/true);
+  auto       val = [&]() -> uint8_t {
+    if (ph.net.is_invalid()) {
+      return kAny;
+    }
+    if (ph.net == root) {
+      return level ? kCan1 : kCan0;
+    }
+    if (ph.net.is_const()) {
+      const auto& c = gu::const_of(ph.net);
+      if (c.is_just_i64()) {
+        return c.to_just_i64() == 0 ? kCan0 : kCan1;
+      }
+      return kAny;
+    }
+    if (gu::is_graph_input_pin(ph.net)) {
+      return kAny;
+    }
+    const auto n  = ph.net.get_master_node();
+    const auto op = gu::type_op_of(n);
+    if (op == Ntype_op::And || op == Ntype_op::Or) {
+      const bool is_and = op == Ntype_op::And;
+      uint8_t    acc    = is_and ? kCan1 : kCan0;  // the operation's identity
+      int        n_ops  = 0;
+      for (const auto& in : gu::inp_sink_drivers(n)) {
+        acc = is_and ? and_vals(acc, values_with_root(in.driver, root, level, depth + 1))
+                     : or_vals(acc, values_with_root(in.driver, root, level, depth + 1));
+        ++n_ops;
+      }
+      if (n_ops == 0) {
+        return kAny;
+      }
+      if (is_and && acc == kCan1 && gu::bits_of(ph.net) != 1) {
+        acc |= kCan0;  // see and_vals: all-nonzero operands prove nothing wider than a bit
+      }
+      return acc;
+    }
+    if (op == Ntype_op::Clock_cell) {
+      // `clk_ref & en`, or the active-low flavour `clk_ref | ~en`. A divider has
+      // no single-level answer at all.
+      if (const auto d = sink_driver_hier(n, "div"); !d.is_invalid() && !const_is(d, 1)) {
+        return kAny;
+      }
+      const auto inv = sink_driver_hier(n, "invert");
+      if (!inv.is_invalid() && !inv.is_const()) {
+        return kAny;
+      }
+      const bool    invert = !inv.is_invalid() && !inv.is_known_false();
+      const auto    en     = sink_driver_hier(n, "en");
+      const uint8_t ev     = en.is_invalid() ? kCan1 : values_with_root(en, root, level, depth + 1);
+      const uint8_t rv     = values_with_root(sink_driver_hier(n, "clk_ref"), root, level, depth + 1);
+      return invert ? or_vals(rv, flip_vals(ev)) : and_vals(rv, ev);
+    }
+    return kAny;
+  }();
+  return ph.inverted ? flip_vals(val) : val;
+}
+
+// The set of values of a latch's WINDOW (1 = transparent) with `root` at `level`.
+template <typename Node, typename Pin>
+uint8_t latch_window_at(const Node& latch, const Pin& root, bool level) {
+  if (latch.is_invalid() || root.is_invalid() || gu::type_op_of(latch) != Ntype_op::Latch) {
+    return kAny;
+  }
+  const auto en = sink_driver_hier(latch, "enable");
+  if (en.is_invalid()) {
+    return kCan1;  // no enable: permanently transparent
+  }
+  uint8_t win = values_with_root(en, root, level, 0);
+  if (sink_driver_hier(latch, "posclk").is_known_false()) {
+    win = flip_vals(win);  // active-LOW enable: the window is open while it is 0
+  }
+  return win;
+}
+
+// Window exactly `!G` for a gate output G, and every reader of Q AND-ed with G
+// itself (an And operand, or the `en` of a Clock_cell on G). See the header.
+template <typename Node, typename Pin>
+bool gated_latch_masked_off_impl(const Node& latch) {
+  if (latch.is_invalid() || gu::type_op_of(latch) != Ntype_op::Latch) {
+    return false;
+  }
+  const auto en = sink_driver_hier(latch, "enable");
+  if (en.is_invalid()) {
+    return false;
+  }
+  const auto cr        = resolve_phase(en, /*stop_at_clock_cell=*/true);
+  const bool active_lo = sink_driver_hier(latch, "posclk").is_known_false();
+  if (cr.net.is_invalid() || cr.net.is_const() || gu::is_graph_input_pin(cr.net) || cr.inverted == active_lo) {
+    return false;  // the window is not `!G` for an internal gate net G
+  }
+  const Pin  g  = cr.net;
+  const auto gop = gu::type_op_of(g.get_master_node());
+  if (gop != Ntype_op::And && gop != Ntype_op::Clock_cell) {
+    return false;
+  }
+  const Pin  q      = latch.get_driver_pin(0);
+  const auto en_pid = Ntype::get_sink_pid(Ntype_op::Clock_cell, "en");
+  for (const auto& e : q.out_edges()) {
+    const auto sn = e.sink.get_master_node();
+    const auto op = gu::type_op_of(sn);
+    bool       masked = false;
+    if (op == Ntype_op::And) {
+      for (const auto& in : gu::inp_sink_drivers(sn)) {
+        if (in.driver == q) {
+          continue;
+        }
+        const auto r = resolve_phase(in.driver, /*stop_at_clock_cell=*/true);
+        if (!r.inverted && r.net == g) {
+          masked = true;
+          break;
+        }
+      }
+    } else if (op == Ntype_op::Clock_cell && e.sink.get_port_id() == en_pid) {
+      const auto inv = sink_driver_hier(sn, "invert");
+      const auto d   = sink_driver_hier(sn, "div");
+      const auto r   = resolve_phase(sink_driver_hier(sn, "clk_ref"), /*stop_at_clock_cell=*/true);
+      masked = (inv.is_invalid() || inv.is_known_false()) && (d.is_invalid() || const_is(d, 1)) && !r.inverted && r.net == g;
+    }
+    if (!masked) {
+      return false;
+    }
+  }
+  return true;
+}
+
+}  // namespace
+
+bool gated_latch_masked_off(const hhds::Node_class& latch) {
+  return gated_latch_masked_off_impl<hhds::Node_class, hhds::Pin_class>(latch);
+}
+
+bool gated_latch_masked_off(const hhds::Occurrence_node& latch) {
+  return gated_latch_masked_off_impl<hhds::Occurrence_node, hhds::Occurrence_pin>(latch);
+}
+
+bool gated_latch_closed_at(const hhds::Node_class& latch, const hhds::Pin_class& root, bool closed_level) {
+  return latch_window_at(latch, root, closed_level) == kCan0;
+}
+
+bool gated_latch_closed_at(const hhds::Occurrence_node& latch, const hhds::Occurrence_pin& root, bool closed_level) {
+  return latch_window_at(latch, root, closed_level) == kCan0;
+}
+
+bool latch_open_at(const hhds::Node_class& latch, const hhds::Pin_class& root, bool level) {
+  return latch_window_at(latch, root, level) == kCan1;
+}
+
+namespace {
+
 [[nodiscard]] bool const_true(const hhds::Pin_class& p) { return p.is_known_true(); }
 
 [[nodiscard]] std::optional<Reset_input_port> reset_root_port(const hhds::Pin_class& driver, bool active_low) {

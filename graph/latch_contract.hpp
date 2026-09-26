@@ -278,6 +278,41 @@ struct Icg_def_match {
 [[nodiscard]] hhds::Pin_class      latch_transparent_arm(const hhds::Node_class& n);
 [[nodiscard]] hhds::Occurrence_pin latch_transparent_arm(const hhds::Occurrence_node& n);
 
+// Is a CLOCK-GATED latch's window provably CLOSED for the whole clock phase in
+// which the commit-at-closing-edge model says it holds, whatever the gate's
+// enables are? `root` is the reference clock the window resolves to and
+// `closed_level` its level during that phase (1 for a latch that closes on the
+// rise, 0 for one that closes on the fall).
+//
+// Every consumer that folds a gated clock into a latch's commit condition
+// ("commit at the closing edge iff the enable held") assumes that a gated-OFF
+// clock keeps the window SHUT. That holds for `clk & en` driving an active-high
+// window, and for `!clk & en`, but NOT for a window that is open while the
+// gated clock is LOW -- `if (!(clk & en_l)) p = d`, minion's register-file
+// preview latch. Gated off, that clock stays low and the latch is transparent
+// for the whole period; modelling it as a hold both refuted it against its own
+// flattening and PROVED it equal to a latch that really holds. Answer false for
+// that shape (and for any cone the walk cannot bound), so callers fail closed.
+[[nodiscard]] bool gated_latch_closed_at(const hhds::Node_class& latch, const hhds::Pin_class& root, bool closed_level);
+[[nodiscard]] bool gated_latch_closed_at(const hhds::Occurrence_node& latch, const hhds::Occurrence_pin& root,
+                                         bool closed_level);
+
+// The exception to the rule above that IS modelled exactly: a latch whose
+// window is exactly `!G` for a gate output G (an ICG's own enable latch, or
+// minion's write-commit `en_1p`, clocked by an already-gated clock) and whose
+// every reader ANDs Q with that same G. Gated off, G stays low and every reader
+// is forced to 0, so what the latch holds or passes through then is
+// unobservable; once G fires again the latch has been transparent for the
+// whole low phase before the edge in both the real circuit and the hold model.
+[[nodiscard]] bool gated_latch_masked_off(const hhds::Node_class& latch);
+[[nodiscard]] bool gated_latch_masked_off(const hhds::Occurrence_node& latch);
+
+// The dual: is the latch's window provably OPEN whenever `root` is at `level`,
+// whatever every other input is? An ICG's enable latch may be bypassed to its
+// transparent arm only when it is open for the whole phase before the gated
+// edge and shut for the whole phase after it.
+[[nodiscard]] bool latch_open_at(const hhds::Node_class& latch, const hhds::Pin_class& root, bool level);
+
 // Inline every instance whose output drives a state element's `clock_pin` and
 // whose def contains a Latch — i.e. an INTEGRATED CLOCK GATE CELL.
 //

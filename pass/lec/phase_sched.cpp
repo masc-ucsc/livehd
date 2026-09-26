@@ -493,6 +493,30 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
       e.phase                                       = rising ? Phase::Rise : Phase::Fall;
       (rising ? plan.n_mem_rise : plan.n_mem_fall) += 1;
     } else if (is_latch && clock_role) {
+      // A GATED window is encoded below as "commit at the closing edge iff the
+      // gate's enable held", i.e. a gated-OFF clock HOLDS the latch. That is
+      // only true when the gated-off clock keeps the window SHUT. A window
+      // open while the gated clock is LOW (`if (!(clk & en_l)) p = d`, minion's
+      // register-file preview latch) is transparent for the whole period when
+      // gated off -- modelling it as a hold refuted the latch against its own
+      // flattening and proved it equal to a latch that really holds. The same
+      // holds for a window with an OR-ed data term (`rst | (clk & en_1p)`,
+      // minion's write-commit latch): the Or hop was read as the active-low
+      // gate flavour and the window encoded as "commit iff rst & en_1p",
+      // which proved a twin whose reset only fires under en_1p. No microstep
+      // models a window that stays open across both phases, so fail closed
+      // rather than pick a wrong closing edge.
+      // (A latch whose every reader is masked by that same gated clock -- an
+      // ICG's own enable latch on a gated clock -- is unobservable while gated
+      // off, so the hold model stays exact for it.)
+      if (ch.gated && !lc::gated_latch_closed_at(node, ch.root, /*closed_level=*/rising)
+          && !lc::gated_latch_masked_off(node)) {
+        refuse("latch `" + gu::debug_name(node)
+               + "` has a gated clock window that is not closed for a whole clock phase (it can stay transparent "
+                 "through the phase it would hold in: gated off, or opened by an OR-ed term); the phase schedule "
+                 "cannot model it");
+        continue;
+      }
       // Transparent-LOW closes at the RISE, so it must commit in the microstep
       // IMMEDIATELY BEFORE the rise batch; transparent-HIGH closes at the FALL.
       e.phase                                          = rising ? Phase::Close_low : Phase::Close_high;

@@ -1079,6 +1079,24 @@ sh_test(
     ],
 )
 
+# `lhd lec` soundness around gated latches and the edge-normalization time
+# base: a latch transparent while its gated clock is off (or opened by an OR-ed
+# reset) is refused instead of refuted/proved as a hold, an ICG enable latch
+# open on the gated phase is never bypassed, and a negedge register against a
+# netlist of DFF cell instances reaches a verdict instead of stopping at "edge
+# normalization failed". Each "must not" pair reproduced before the fix; the
+# controls pin that the engines still decide the legitimate shapes.
+sh_test(
+    name = "lec_gated_latch_soundness_test",
+    size = "large",
+    srcs = ["lec_gated_latch_soundness_test.sh"],
+    data = [
+        "abc_icg_mix.v",
+        "abc_icg_qn.lib",
+        "//lhd",
+    ],
+)
+
 # LIVE fail-closed test for todo/livehd/2f-latch M0 (landed 2026-07-20). Every
 # shape it covers used to report SUCCESS while silently doing the wrong thing,
 # which makes every downstream gate vacuous: a latch design under `lhd formal

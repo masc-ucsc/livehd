@@ -471,6 +471,46 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
   return done;
 }
 
+namespace {
+
+// Flatten `host`: splice every instance under it (a mapped DFF cell kept as an
+// ordinary module, the INV cell that makes its clock a negedge, a
+// register-holding child), so the phase divider needs no port threading and
+// every clock cone is visible in the body. Semantics-preserving. Skips a boxed
+// (collapsed/trusted) def, a bodyless blackbox, a compact loop and a clock-gate
+// cell (recognized as a Clock_cell already). One splice per collection: a
+// splice invalidates every other handle into `host`. Returns the number of
+// instances spliced. Only run when a P>1 time base cannot be built otherwise.
+size_t inline_instances_for_divider(hhds::Graph* host, const std::function<bool(const hhds::Graph*)>& is_boxed) {
+  if (host == nullptr) {
+    return 0;
+  }
+  size_t done = 0;
+  while (done < 100000) {
+    bool spliced = false;
+    for (auto n : host->body().nodes()) {
+      if (livehd::graph_util::type_op_of(n) != Ntype_op::Sub || n.is_loop_subnode()) {
+        continue;
+      }
+      auto def_g = n.get_subnode_graph();
+      if (!def_g || (is_boxed && is_boxed(def_g.get())) || livehd::latch_contract::match_icg_def(def_g.get())) {
+        continue;
+      }
+      if (livehd::graph_util::inline_sub_instance(host, n, "pass.lec")) {
+        spliced = true;
+        ++done;
+        break;  // `n` and the walk are stale now: re-collect
+      }
+    }
+    if (!spliced) {
+      break;
+    }
+  }
+  return done;
+}
+
+}  // namespace
+
 Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::vector<hhds::Graph*>& ref_defs, hhds::Graph* impl,
                             std::vector<hhds::Graph*>& impl_defs, bool quiet_decline,
                             const std::function<bool(const hhds::Graph*)>& is_boxed) {
@@ -553,6 +593,48 @@ Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::v
   // differently.
   Options ao;
   ao.force_slots        = std::max(pr.slots, pi.slots);
+  // PROBE AGAIN AT THE SHARED P before rewriting anything. Each side was
+  // planned at its OWN P above, and a side that needs nothing (P=1) never ran
+  // the checks that only bite under a phase divider -- chiefly a STATEFUL
+  // INSTANCE, which the divider cannot be threaded into. Forcing P=2 onto such a
+  // side used to fail only AFTER the other side had been rewritten, and the run
+  // stopped at "edge normalization failed" with no verdict: a negedge register
+  // (behind an ICG) compared against its mapped netlist, whose DFF cells stay
+  // ordinary module instances on the Verilog path.
+  //
+  // Such a side is flattened instead: inlining is semantics-preserving and puts
+  // its flops -- and the inverter cells in their clock cones -- in the body,
+  // where the divider and the commit-class walk reach them. Anything the
+  // forced plan still refuses stays the hard error it was (the read-only phase
+  // schedule is NOT a safe fallback here: it misreads a negedge register that
+  // lives in a child clocked by an inverted parent net).
+  if (ao.force_slots > 1) {
+    Options fo = ao;
+    fo.dry_run = true;
+    fo.quiet   = true;
+    auto probe_forced = [&](hhds::Graph* side, std::vector<hhds::Graph*>& defs, const char* which) {
+      auto res = normalize(side, defs, fo);
+      if (res.error) {
+        if (const auto n = inline_instances_for_divider(side, is_boxed); n > 0) {
+          tb.recipe_steps.emplace_back(std::format("pass.single_edge flattened {} {} instance(s) for P={}",
+                                                   n,
+                                                   which,
+                                                   ao.force_slots));
+          res = normalize(side, defs, fo);
+        }
+      }
+      return res;
+    };
+    const auto fr = probe_forced(ref, ref_defs, "ref");
+    const auto fi = ref == impl ? fr : probe_forced(impl, impl_defs, "impl");
+    if (fr.error || fi.error) {
+      tb.error = std::format("lec: edge normalization cannot put both sides in one P={} time base ({})",
+                             ao.force_slots,
+                             fr.error ? fr.reason : fi.reason);
+      tb.error_hint = "the verdict would need a phase divider threaded through a module boundary; nothing was compared";
+      return tb;
+    }
+  }
   const auto rn         = normalize(ref, ref_defs, ao);
   // SAME GRAPH OBJECT on both sides (`--impl X --ref X`, the vacuity-guard
   // idiom): normalizing again would find nothing left to lower and report
