@@ -142,6 +142,48 @@ void Pass_opentimer::ensure_libs() {
   // names against the loaded library at queue time. The design is still empty,
   // so this is a no-op timing update.
   timer.update_timing();
+  // A transparent LATCH cell (pass.abc maps level-sensitive latches onto the
+  // Liberty's own: ASAP7 DHLx1/DLLx1, sky130 dlxtp/dlxtn) carries a
+  // combinational data->Q arc beside its enable->Q edge arc. OpenTimer times
+  // that arc like a gate's, chaining every latch pipeline end to end through
+  // the transparent windows (minion: a 50 ns path through ~600 latch cells,
+  // Q->D hold loops included). The native Latch these cells replace is a hard
+  // path boundary here (transparency and time borrowing are not modeled; see
+  // the 4th phase in opentimer.cpp), so keep that convention for the cell:
+  // drop the data->Q arc, and a latch cell ends a path at its D setup check
+  // and launches one from its enable edge, exactly like a flop cell. The cells
+  // are recognized by that arc shape (an output with an edge-triggered arc AND
+  // a combinational arc from a different pin), before any gate is inserted.
+  for (const auto corner : {ot::MIN, ot::MAX}) {
+    const auto& lib = timer.celllib(corner);
+    if (!lib) {
+      continue;
+    }
+    for (auto& [cell_name, cell] : const_cast<ot::Celllib&>(*lib).cells) {
+      (void)cell_name;
+      for (auto& [pin_name, pin] : cell.cellpins) {
+        (void)pin_name;
+        if (pin.direction != ot::CellpinDirection::OUTPUT) {
+          continue;
+        }
+        absl::flat_hash_set<std::string> edge_pins;
+        for (const auto& t : pin.timings) {
+          if (t.is_rising_edge_triggered() || t.is_falling_edge_triggered()) {
+            edge_pins.insert(t.related_pin);
+          }
+        }
+        if (edge_pins.empty()) {
+          continue;
+        }
+        std::erase_if(pin.timings, [&](const ot::Timing& t) {
+          const auto type = t.type.value_or(ot::TimingType::COMBINATIONAL);  // the Liberty default
+          return (type == ot::TimingType::COMBINATIONAL || type == ot::TimingType::COMBINATIONAL_RISE
+                  || type == ot::TimingType::COMBINATIONAL_FALL)
+                 && !edge_pins.contains(t.related_pin);
+        });
+      }
+    }
+  }
 }
 
 // SDC is Tcl: its options are ORDER-FREE, so every directive below is parsed by
