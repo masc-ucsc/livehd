@@ -148,6 +148,7 @@ void Region_driver::ensure_dff_cells() {
   dff_ladder_       = sel.ladder;
   areset_ladder_[0] = sel.areset_ladder[0];
   areset_ladder_[1] = sel.areset_ladder[1];
+  icg_ladder_       = sel.icg_ladder;
   if (dff_.has_value() && dff_ladder_.empty()) {
     dff_ladder_.push_back(*dff_);  // a ladder always has its base rung
   }
@@ -697,6 +698,7 @@ void Region_driver::map_regions(std::span<const livehd::partition::Region_body> 
           worker->dff_ladder_        = dff_ladder_;
           worker->areset_ladder_[0]  = areset_ladder_[0];
           worker->areset_ladder_[1]  = areset_ladder_[1];
+          worker->icg_ladder_        = icg_ladder_;
           worker->dff_preset_        = dff_preset_;
           lane.driver                = worker.get();
           parallel_drivers_.push_back(std::move(worker));
@@ -1109,6 +1111,11 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
     blast_options.areset_low[v]  = !areset_ladder_[v].empty() && areset_ladder_[v].front().reset_low(v != 0);
   }
   blast_options.areset_flow_ok = plan.preserves_latches;
+  // Registers on a latch+AND clock gate cross as latches clocked by an
+  // integrated clock-gate cell -- under a latch-preserving flow, for the same
+  // per-latch attribution reason as the async cells.
+  blast_options.icg         = dff_.has_value() && plan.preserves_latches && !icg_ladder_.empty();
+  blast_options.icg_flow_ok = plan.preserves_latches;
   blast_options.verbose        = opts_.verbose;
   Blast_hooks hooks;
   hooks.stage      = trace_stage;
@@ -1208,7 +1215,8 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
 
   // --- read back: the mapped cells -> the region body ---
   Region_writer::Counts          counts{qor_.back().gates, qor_.back().area, qor_.back().bypassed};
-  const Region_writer::Registers registers{opts_.map_register, &dff_, &dff_ladder_, &areset_ladder_[0], &areset_ladder_[1]};
+  const Region_writer::Registers registers{opts_.map_register, &dff_, &dff_ladder_, &areset_ladder_[0], &areset_ladder_[1],
+                                           &icg_ladder_};
   writer_.set_outlib(outlib_);
   writer_.set_flat(flat_);
   if (!writer_.write(rb, blast, *cells, backend_->cells(), registers, counts, trace_stage)) {

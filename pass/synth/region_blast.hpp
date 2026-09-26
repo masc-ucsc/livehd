@@ -68,6 +68,11 @@ struct Seq_flop {
   // Per bit, the value the async reset loads (the `initial` bit; 0 without
   // one; an unknown bit takes whichever cell the library has).
   std::vector<bool>       arst_val;
+  // Index into Region_blast::icgs when the register's clock is a recognized
+  // latch+AND clock gate: it still crosses as a latch, and the read-back clocks
+  // its cell from that gate's ICG cell output (clk_drv is then the gate's
+  // source-side output pin, not a region input). -1 otherwise.
+  int32_t                 icg = -1;
   // The `initial` (power-on / reset) value, SNAPSHOT at crossing time. The
   // read-back below runs after map_region has rewritten the region, so the
   // source const node behind `rval_drv` may already be gone -- re-reading the
@@ -116,9 +121,10 @@ struct Bbox {
   std::vector<std::tuple<int, hhds::Pin_class, int, bool>> fit_native_ins;  // direct driver, truncated to a Concat lane
 };
 
-// How a PI came to exist: a demanded bit of a region input, or of a native
-// boundary (black box) output.
-enum class Pi_kind : uint8_t { region_input, bbox_output };
+// How a PI came to exist: a demanded bit of a region input, of a native
+// boundary (black box) output, or a recognized clock gate's output (index =
+// Region_blast::icgs).
+enum class Pi_kind : uint8_t { region_input, bbox_output, icg_output };
 struct Pi_origin {
   Pi_kind kind;
   size_t  index;
@@ -127,6 +133,25 @@ struct Bbox_po_target {
   int bx;
   int input;
   int bit;
+};
+
+// A recognized latch-based clock gate, `gclk = clk & L` with `L` a latch
+// transparent while `clk` is low holding `en` -- mapped onto the Liberty's
+// integrated clock-gate cell. Its latch and AND (and the 1-bit identities
+// between them) are absorbed: neither bit-blasted nor kept native. `en`
+// crosses ABC as an extra PO (`en_po`, after the async-reset POs) so the
+// mapped logic drives the cell's enable pin; the gated clock is a PI of the
+// mapped logic (Pi_kind::icg_output, index = this gate) read back from the
+// cell's output; the cell's clock pin is the region input `clk_src`, or the
+// `parent` gate's cell output for a gate chain.
+struct Icg_gate {
+  hhds::Pin_class gclk;         // source-side AND output: the gated clock the registers' clk_drv resolve to
+  hhds::Pin_class clk_src;      // source-side reference clock: a region-input driver, or the parent gate's gclk
+  int32_t         parent = -1;  // Region_blast::icgs index of the gate driving clk_src, -1: a region input
+  hhds::Pin_class en_drv;       // source-side driver of the latched enable (bit 0 is latched)
+  int32_t         en_po  = -1;
+  std::string     name;         // the enable latch's name, for the cell instance
+  int             fanout = 0;   // crossed register bits it clocks (the drive-ladder pick)
 };
 
 struct Region_blast {
@@ -147,6 +172,8 @@ struct Region_blast {
   bool                                              has_dummy_po = false;  // a sentinel PO no read-back target reads
   size_t                                            blast_total  = 0;      // nodes scheduled for blasting
   size_t                                            arst_pos     = 0;      // internal async-reset POs, after bbox_po
+  std::vector<Icg_gate>                             icgs;                  // recognized clock gates (Seq_flop::icg)
+  size_t                                            icg_pos      = 0;      // ICG enable POs, after the async-reset POs
   uint64_t                                          rss_before   = 0;      // the admission baseline (0: no admission)
 };
 

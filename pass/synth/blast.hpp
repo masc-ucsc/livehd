@@ -46,6 +46,14 @@ struct Blast_options {
   // The flow keeps every latch as crossed (why an async cell may be absent:
   // reported precisely in the reset-native diagnostic).
   bool              areset_flow_ok = true;
+  // The Liberty has an integrated clock-gate cell (Dff_selection::icg_ladder)
+  // and the flow keeps every latch as crossed: a register clocked by a
+  // recognized latch+AND clock gate crosses as a latch clocked by an ICG cell
+  // (Region_blast::icgs) instead of staying a native flop.
+  bool              icg            = false;
+  // Why `icg` is off, for the derived-clock-native report: false = the flow may
+  // reshape latches, true = the Liberty has no ICG cell (or no DFF cell).
+  bool              icg_flow_ok    = true;
   bool              verbose        = false;
 };
 

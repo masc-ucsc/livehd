@@ -38,6 +38,8 @@ public:
     // Asynchronous clear (0) / preset (1) cell ladders; null or empty = none.
     const std::vector<liberty::Dff_cell>*   areset0 = nullptr;
     const std::vector<liberty::Dff_cell>*   areset1 = nullptr;
+    // Integrated clock-gate cell ladder (Region_blast::icgs); null or empty = none.
+    const std::vector<liberty::Icg_cell>*   icg     = nullptr;
   };
 
   void set_outlib(hhds::GraphLibrary* outlib) { outlib_ = outlib; }

@@ -1596,6 +1596,7 @@ void Color_synth::label_cones(hhds::Graph* g) {
       }
     }
   }
+  keep_clock_gates_whole(g);
   const int n_colors = apply_coloring(g, flat_node2id, o, o.sizes);
 
   if (cn.ctrl_cones) {

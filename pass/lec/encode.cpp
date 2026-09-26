@@ -4356,6 +4356,16 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       if (sit == sampled_key_ms.end()) {
         continue;
       }
+      // The plan is the WHOLE design's, but this encode may be one Sub def of
+      // it (a mapped standard cell's model under an ICG-gated clock): a cone
+      // rooted in another graph is not reachable from here, and the encode of
+      // the graph that owns it samples it. Encoding it here failed the whole
+      // def ("no encodable enable cone") and left the LEC undecided.
+      if (std::any_of(cones.begin(), cones.end(), [&](const hhds::Occurrence_pin& c) {
+            return c.get_occurrence_index().path.root_gid() != g->get_gid();
+          })) {
+        continue;
+      }
       const Val cur       = seed_state(gkey, 1, false);
       const int sample_ms = sit->second;
       Term      nxt       = cur.term;

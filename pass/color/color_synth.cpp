@@ -226,6 +226,50 @@ void Color_synth::preserve_arith_cuts() {
   }
 }
 
+void Color_synth::keep_clock_gates_whole(hhds::Graph* g) {
+  // A latch-based CLOCK GATE (`clk & en_l`, en_l a latch whose Q feeds only
+  // that AND) is one cell to pass.abc -- the Liberty integrated clock-gate --
+  // and is recognized only when its latch and AND share a region. A register
+  // joins the color of its din cone (place_state_and_sweep), which puts the
+  // latch with its enable logic and the AND with whatever the clock tree
+  // landed in: minion's eight txfma multype_f1 gates came out split that way
+  // and stayed a native latch + mapped AND. Move such a latch (and the 1-bit
+  // Get_mask/Sext identities between it and the AND) into the AND's color.
+  for (auto node : g->body().nodes()) {
+    if (type_op_of(node) != Ntype_op::Latch) {
+      continue;
+    }
+    std::vector<hhds::Node_class> path{node};
+    hhds::Node_class              gate;
+    bool                          ok = true;
+    for (size_t k = 0; k < path.size() && ok && path.size() < 8; ++k) {
+      for (const auto& e : path[k].out_edges()) {
+        const auto sn = e.sink.get_master_node();
+        const auto so = type_op_of(sn);
+        if (so == Ntype_op::And && (gate.is_invalid() || sn == gate)) {
+          gate = sn;
+        } else if ((so == Ntype_op::Get_mask || so == Ntype_op::Sext) && k + 1 == path.size()) {
+          path.push_back(sn);
+        } else {
+          ok = false;
+          break;
+        }
+      }
+    }
+    if (!ok || gate.is_invalid()) {
+      continue;
+    }
+    auto git = flat_node2id.find(gate);
+    if (git == flat_node2id.end()) {
+      continue;
+    }
+    const int c = git->second;
+    for (const auto& p : path) {
+      flat_node2id[p] = c;
+    }
+  }
+}
+
 void Color_synth::label(hhds::Graph* g) {
   last_free_id = 1;
   flat_node2id.clear();
@@ -266,6 +310,7 @@ void Color_synth::label(hhds::Graph* g) {
   if (mode != Mode::pipe) {
     preserve_arith_cuts();
   }
+  keep_clock_gates_whole(g);
   int n_colors = apply_coloring(g, flat_node2id, o, o.sizes);
   if (opts.verbose) {
     std::print(stderr, "[color.synth] {} -> {} clusters\n", g->get_name(), n_colors);

@@ -288,7 +288,25 @@ void Pass_liberty::gensim(Eprp_var& var) {
   // rung by Q-net fanout (DFFHQNx1/x2/x3 on ASAP7), and an unmodeled rung would
   // leave the LEC a blackbox. So are the asynchronous clear/preset cells
   // pass.abc maps async-reset registers onto (Flop with async reset_pin).
-  for (const auto& dff : livehd::liberty::selection_cells(livehd::liberty::resolve_dff_cells(files))) {
+  const auto dff_sel = livehd::liberty::resolve_dff_cells(files);
+  // The integrated clock-gate cells pass.abc maps latch+AND clock gates onto
+  // (a statetable cell ABC also drops): Latch(!CLK, en|test) & CLK.
+  for (const auto& icg : dff_sel.icg_ladder) {
+    livehd::liberty::emit_icg_model(outlib, icg);
+    ++modeled;
+    if (verbose) {
+      std::print("[pass.liberty] gensim: ICG model '{}' ({} = {} & latch(!{}, {}{}{}), area={})\n",
+                 icg.name,
+                 icg.out_pin,
+                 icg.clk_pin,
+                 icg.clk_pin,
+                 icg.en_pin,
+                 icg.test_pin.empty() ? "" : " | ",
+                 icg.test_pin,
+                 icg.area);
+    }
+  }
+  for (const auto& dff : livehd::liberty::selection_cells(dff_sel)) {
     livehd::liberty::emit_dff_model(outlib, dff);
     ++modeled;
     if (verbose) {

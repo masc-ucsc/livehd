@@ -16,6 +16,7 @@
 #include "cell.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "host_mem.hpp"
+#include "latch_contract.hpp"
 #include "lnet_ops.hpp"
 #include "node_util.hpp"
 #include "synthesis_cost.hpp"
@@ -426,6 +427,13 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
   // before any combinational node is bit-blasted.
   using Bbox_output_origin = std::pair<int, int>;  // (bbox index, output index)
   absl::flat_hash_map<hhds::Pin_class, Bbox_output_origin> bbox_output_index;
+  // Recognized integrated clock gates (see "integrated clock gates" below):
+  // the latch/AND nodes they absorb, gate output -> Region_blast::icgs index
+  // (the gated clock is a PI of the mapped logic, read back from the cell),
+  // and gate output -> why it stays native.
+  absl::flat_hash_set<hhds::Node_class>             icg_absorbed;
+  absl::flat_hash_map<hhds::Pin_class, int32_t>     icg_of_gclk;
+  absl::flat_hash_map<hhds::Pin_class, std::string> icg_rejected;
   for (size_t pi = 0; pi < rb.inputs.size(); ++pi) {
     region_input_index.emplace(rb.inputs[pi].src_driver, pi);
   }
@@ -467,6 +475,14 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
       slots[eff]     = net;
       all_pi_order.push_back({Pi_kind::bbox_output, bbox_pi.size()});
       bbox_pi.emplace_back(it->second.first, it->second.second, eff);
+      return net;
+    }
+    if (auto it = icg_of_gclk.find(drv); it != icg_of_gclk.end()) {
+      // A recognized clock gate's output: the ICG cell drives it on read-back.
+      I(eff == 0);  // a gate output is one bit (wider reads sign/zero-extend above)
+      const auto net = lnet.add_input(std::format("__icg{}_gclk", it->second));
+      slots[eff]     = net;
+      all_pi_order.push_back({Pi_kind::icg_output, static_cast<size_t>(it->second)});
       return net;
     }
     auto master = drv.get_master_node();
@@ -524,6 +540,18 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
   // (18.196 vs 17.729 um^2, 114.5 vs 102.8 ps on ASAP7), and left every
   // reset-cone node native with fanout 77-113 (br_amba_axi_demux 2045 ps).
   absl::flat_hash_set<hhds::Node_class> clk_demoted;
+  // Derived-clock registers kept native, keyed by the precise reason.
+  std::map<std::string, absl::flat_hash_set<hhds::Node_class>> clk_demoted_by;
+  const std::string_view icg_unavailable
+      = options.icg ? "register(s) clocked by region-internal logic (a gated/derived clock) kept as native flops — a DFF "
+                      "cell cannot take its clock from mapped logic; the clock cone is still mapped and reconnected"
+        : options.icg_flow_ok
+            ? "register(s) clocked by region-internal logic (a gated/derived clock) kept as native flops — the Liberty "
+              "has no usable integrated clock-gate cell (latch_posedge, not dont_use) for a latch-based clock gate; the "
+              "clock cone is still mapped and reconnected"
+            : "register(s) clocked by region-internal logic (a gated/derived clock) kept as native flops — the synthesis "
+              "flow is a user command list that may reshape latches, so a clock-gate cell could not be attributed to "
+              "its registers; the clock cone is still mapped and reconnected";
   // Async-reset registers kept native, keyed by the precise reason (std::map:
   // a stable report order).
   std::map<std::string, absl::flat_hash_set<hhds::Node_class>> reset_demoted_by;
@@ -626,6 +654,282 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     f.arst_low = low;
     return {};
   };
+
+  // tolg may wrap a call-site clock in 1-bit Get_mask coercions (`x:u1`
+  // casts survive cprop when the source is signed), and yosys' signed
+  // clock-pin carrier is a 1-bit Sext. On a 1-bit operand they are wire
+  // identities regardless of the declared output width -- trace to the root so
+  // a register's clock is recognized as region-input-driven and the DFF clock
+  // pin connects DIRECTLY to it (never through mapped logic). Whole-design
+  // flatten can stack one such coercion per hierarchy level.
+  //
+  // Stop AT the partition boundary. A region input IS the structural clock
+  // source as far as this region is concerned (its port is what the read-back
+  // wires the DFF clk pin from), and peeling past it lands on a pin the region
+  // never sees -- which then fails the region_in_name test and demoted every
+  // such register to a native flop. The shipped `cones` coloring routinely
+  // leaves a clock-carrying Sext in a neighbour region, so this is the common
+  // case, not a corner: without the stop, a yosys-read design's only register
+  // stays native (lhd_macro_declarations_test).
+  auto peel_clock = [&](hhds::Pin_class p) -> hhds::Pin_class {
+    for (int guard = 0; guard < 64 && !p.is_invalid(); ++guard) {  // guard: cycle net, > any sane hierarchy depth
+      if (region_in_name.contains(p) || p.is_const()) {
+        break;
+      }
+      auto m = p.get_master_node();
+      if (gu::type_op_of(m) == Ntype_op::Sext && real_width(p) == 1) {
+        auto a = gu::get_driver_of_sink_name(m, "a");
+        if (a.is_invalid() || real_width(a) != 1) {
+          break;
+        }
+        p = a;
+        continue;
+      }
+      if (gu::type_op_of(m) != Ntype_op::Get_mask) {
+        break;
+      }
+      auto a    = gu::get_driver_of_sink_name(m, "a");
+      auto mask = gu::get_driver_of_sink_name(m, "mask");
+      if (a.is_invalid() || real_width(a) != 1 || mask.is_invalid() || !mask.is_const() || !gu::const_of(mask).bit_test(0)) {
+        break;
+      }
+      p = a;  // get_mask(bit0) of a 1-bit wire == the wire
+    }
+    return p;
+  };
+
+  // --- integrated clock gates ---
+  // A latch-based clock gate,
+  //   always_latch if (!clk) en_l = en;   assign gclk = clk & en_l;
+  // (minion's prim_clk_gate, lowRISC's, every "generic behavioral ICG") IS the
+  // Liberty's integrated clock-gate cell: a latch transparent while CLK is low,
+  // ANDed with CLK. Without that cell the registers it clocks have no DFF clock
+  // source on read-back and stay native. So the gate maps onto the cell:
+  //   - its latch and AND (plus the 1-bit identities between them) are
+  //     ABSORBED: neither bit-blasted nor kept as a native boundary;
+  //   - the latch's D (`en`) crosses ABC as a PO (Icg_gate::en_po), so mapped
+  //     logic drives the cell's enable pin;
+  //   - the gated clock is a PI of the mapped logic (Pi_kind::icg_output), read
+  //     back from the cell's output -- so ANY consumer keeps working (another
+  //     gate's clock, a data latch's enable, a memory clock, a region output);
+  //   - a register whose clock resolves to it crosses as a latch like any other
+  //     and its DFF cell takes the cell output as clock (Seq_flop::icg).
+  // Recognition is strict; anything else falls back to the native path with
+  // the precise reason (derived-clock-native):
+  //   - the AND has exactly two live operands (constant operands must keep bit
+  //     0): one the reference clock -- a region input or another recognized
+  //     gate's output (a gate chain), through 1-bit identities and never
+  //     inverted -- the other the Q of a 1-bit latch (through 1-bit identities);
+  //   - that latch is transparent exactly while the same reference clock is
+  //     low (latch_contract::control_root of its enable against the clock
+  //     operand's, with the latch's own enable polarity), carries no reset or
+  //     power-on value, and its Q feeds nothing but this AND.
+  if (options.map_register) {  // without options.icg: recognition only, for the icg-native report
+    // `root`'s consumers, through 1-bit identities (collected into `idents`),
+    // are all `only`; false on anything else.
+    auto consumers_only = [&](const hhds::Pin_class& root, const hhds::Node_class& only, std::vector<hhds::Node_class>& idents) {
+      std::vector<hhds::Pin_class> work{root};
+      for (size_t i = 0; i < work.size(); ++i) {
+        if (work.size() > 64) {
+          return false;  // guard: an enable latch's Q does not fan through dozens of identities
+        }
+        for (const auto& e : work[i].out_edges()) {
+          const auto sn = e.sink.get_master_node();
+          if (sn == only) {
+            continue;
+          }
+          const auto op = gu::type_op_of(sn);
+          if (region.contains(sn) && (op == Ntype_op::Get_mask || op == Ntype_op::Sext)) {
+            auto out = sn.get_driver_pin(0);
+            if (!out.is_invalid() && peel_clock(out) == root) {
+              idents.push_back(sn);
+              for (const auto& o : sn.out_sorted_pins()) {
+                work.push_back(o);
+              }
+              continue;
+            }
+          }
+          return false;
+        }
+      }
+      return true;
+    };
+    // gate output -> 1: being recognized (a cycle), 2: done (see icg_of_gclk /
+    // icg_rejected for the answer).
+    absl::flat_hash_map<hhds::Pin_class, int> visiting;
+    std::function<std::string(const hhds::Pin_class&)> recognize = [&](const hhds::Pin_class& gclk) -> std::string {
+      if (icg_of_gclk.contains(gclk)) {
+        return {};
+      }
+      if (auto it = icg_rejected.find(gclk); it != icg_rejected.end()) {
+        return it->second;
+      }
+      if (visiting[gclk] == 1) {
+        return "the clock gate is part of a gate cycle";
+      }
+      visiting[gclk] = 1;
+      auto why = [&]() -> std::string {
+        auto g = gclk.get_master_node();
+        if (gu::type_op_of(g) == Ntype_op::Or) {
+          return "the clock is an OR (`clk | ~latch`, the active-low gate flavour, or other OR logic), which no "
+                 "latch_posedge integrated clock-gate cell implements";
+        }
+        if (gu::type_op_of(g) != Ntype_op::And || real_width(gclk) != 1) {
+          return "the clock is computed by logic that is not a latch-based clock gate (`clk & latch`)";
+        }
+        std::vector<hhds::Pin_class> live;
+        for (const auto& in_pin : g.inp_sorted_pins()) {
+          for (auto drv : in_pin.get_driver_pins()) {
+            if (drv.is_const()) {
+              if (!gu::const_of(drv).bit_test(0)) {
+                return "the clock gate is tied off by a constant operand";
+              }
+              continue;
+            }
+            live.push_back(drv);
+          }
+        }
+        if (live.size() != 2) {
+          return "the clock gate AND does not have exactly two operands (a clock and one latched enable)";
+        }
+        hhds::Pin_class clk_op, clk_src, latch_q;
+        for (const auto& op : live) {
+          const auto root = peel_clock(op);
+          if (!root.is_invalid() && !root.is_const() && !region_in_name.contains(root)
+              && gu::type_op_of(root.get_master_node()) == Ntype_op::Latch && root.get_port_id() == 0 && latch_q.is_invalid()) {
+            latch_q = root;
+          } else {
+            clk_op  = op;
+            clk_src = root;
+          }
+        }
+        if (latch_q.is_invalid() || clk_src.is_invalid() || clk_src.is_const()) {
+          return "the clock gate is not `<clock> & <latch>`";
+        }
+        int32_t parent = -1;
+        if (!region_in_name.contains(clk_src)) {
+          // A gate chain: the reference clock must itself be a recognized gate.
+          if (auto pwhy = recognize(clk_src); !pwhy.empty()) {
+            return std::format("the clock gate's reference clock is neither a region input nor a mappable clock gate ({})",
+                               pwhy);
+          }
+          parent = icg_of_gclk.at(clk_src);
+        } else if (real_width(clk_src) != 1) {
+          return "the clock gate's reference clock is wider than one bit";
+        }
+        const auto latch = latch_q.get_master_node();
+        if (real_width(latch_q) != 1) {
+          return "the clock gate's enable latch is wider than one bit";
+        }
+        for (std::string_view pin : {"reset_pin", "initial"}) {
+          if (auto d = gu::get_driver_of_sink_name(latch, pin); !d.is_invalid()) {
+            return "the clock gate's enable latch has a reset or power-on value an ICG cell does not have";
+          }
+        }
+        const auto en  = gu::get_driver_of_sink_name(latch, "enable");
+        const auto din = gu::get_driver_of_sink_name(latch, "din");
+        if (en.is_invalid() || din.is_invalid()) {
+          return "the clock gate's enable latch has no enable or data input";
+        }
+        bool active_low = false;
+        if (auto pc = gu::get_driver_of_sink_name(latch, "posclk"); pc.is_const()) {
+          active_low = gu::const_of(pc).is_known_false();
+        } else if (!pc.is_invalid()) {
+          return "the clock gate's enable latch has a non-constant enable polarity";
+        }
+        const auto er = livehd::latch_contract::control_root(en, /*stop_at_clock_cell=*/true);
+        const auto cr = livehd::latch_contract::control_root(clk_op, /*stop_at_clock_cell=*/true);
+        if (cr.net.is_invalid() || er.net.is_invalid() || !(er.net == cr.net)) {
+          return "the clock gate's latch is not enabled by the gate's own clock";
+        }
+        if (cr.inverted) {
+          return "the clock gate ANDs the INVERTED clock (a falling-edge gate)";
+        }
+        if (er.inverted == active_low) {
+          return "the clock gate's latch is transparent while the clock is HIGH (an AND gate needs it transparent while "
+                 "LOW)";
+        }
+        // The latch Q feeds only this AND (through identities): no feedback
+        // into its own D, no data use of the held enable.
+        std::vector<hhds::Node_class> q_idents;
+        if (!consumers_only(latch_q, g, q_idents)) {
+          return "the clock gate's enable latch is also read by other logic";
+        }
+        icg_absorbed.insert(latch);
+        icg_absorbed.insert(g);
+        icg_absorbed.insert(q_idents.begin(), q_idents.end());
+        Icg_gate gate;
+        gate.gclk    = gclk;
+        gate.clk_src = clk_src;
+        gate.parent  = parent;
+        gate.en_drv  = din;
+        gate.name    = gu::wire_name(latch_q);
+        if (gate.name.empty()) {
+          gate.name = std::format("icg{}", latch.get_debug_nid());
+        }
+        icg_of_gclk.emplace(gclk, static_cast<int32_t>(result.icgs.size()));
+        result.icgs.push_back(std::move(gate));
+        return {};
+      }();
+      visiting[gclk] = 2;
+      if (!why.empty()) {
+        icg_rejected.emplace(gclk, why);
+      }
+      return why;
+    };
+    for (const auto& n : rb.nodes) {
+      if (gu::type_op_of(n) == Ntype_op::Flop) {
+        // Every register on a derived clock asks, so its rejection reason is
+        // on record for the derived-clock-native report.
+        const auto c = peel_clock(gu::get_driver_of_sink_name(n, "clock_pin"));
+        if (!c.is_invalid() && !c.is_const() && !region_in_name.contains(c)) {
+          (void)recognize(c);
+        }
+        continue;
+      }
+      // A gate clocking only memories, data latches or other gates maps too.
+      if (gu::type_op_of(n) == Ntype_op::And && !icg_absorbed.contains(n)) {
+        auto out = n.get_driver_pin(0);
+        if (!out.is_invalid() && real_width(out) == 1) {
+          bool latch_operand = false;
+          for (const auto& in_pin : n.inp_sorted_pins()) {
+            for (const auto& drv : in_pin.get_driver_pins()) {
+              const auto r = peel_clock(drv);
+              latch_operand = latch_operand
+                              || (!r.is_invalid() && !r.is_const() && !region_in_name.contains(r)
+                                  && gu::type_op_of(r.get_master_node()) == Ntype_op::Latch);
+            }
+          }
+          if (latch_operand) {
+            (void)recognize(out);
+          }
+        }
+      }
+    }
+    if (!options.icg && !result.icgs.empty()) {
+      // Recognition only, to say what stays native and why: without a cell
+      // (or under a latch-reshaping flow) the gates keep their native latch and
+      // mapped AND, and their registers take the derived-clock path.
+      const auto& first = result.icgs.front();
+      livehd::diag::warn("pass.abc", "icg-native", "unsupported")
+          .at(node_span(rb, first.gclk.get_master_node()))
+          .msg("pass.abc region '{}': {} latch-based clock gate(s) kept as a native latch + mapped gate — {}",
+               rb.module_name,
+               result.icgs.size(),
+               options.icg_flow_ok ? "the Liberty has no usable integrated clock-gate cell (latch_posedge, a `CLK & state` "
+                                     "output, not dont_use)"
+                                   : "the synthesis flow is a user command list that may reshape latches")
+          .note(std::format("first: the gate latching `{}`", first.name))
+          .emit();
+      // icg_rejected stays: a register on a clock that is not a gate at all
+      // keeps its structural reason; one on a recognized gate reports the
+      // missing cell (icg_unavailable).
+      icg_absorbed.clear();
+      icg_of_gclk.clear();
+      result.icgs.clear();
+    }
+  }
+
   if (options.map_register) {
     for (const auto& n : rb.nodes) {
       if (!gu::is_type_flop(n)) {
@@ -674,57 +978,25 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
         }
         f.has_reset = true;
       }
-      // tolg may wrap a call-site clock in 1-bit Get_mask coercions (`x:u1`
-      // casts survive cprop when the source is signed). On a 1-bit operand they are wire
-      // identities regardless of the declared output width — trace to the root
-      // so the register's clock is recognized as region-input-driven and the
-      // DFF clock pin connects DIRECTLY to it (never through mapped logic).
-      //
-      // Whole-design flatten can stack one such coercion per hierarchy level,
-      // so trace the identity chain to the structural clock source.
-      for (int guard = 0; guard < 64 && !f.clk_drv.is_invalid(); ++guard) {  // guard: cycle net, > any sane hierarchy depth
-        // Stop AT the partition boundary. A region input IS the structural
-        // clock source as far as this region is concerned (its port is what
-        // the read-back wires the DFF clk pin from), and peeling past it lands
-        // on a pin the region never sees -- which then fails the
-        // region_in_name test below and demoted every such register to a
-        // native flop. The shipped `cones` coloring routinely leaves a
-        // clock-carrying Sext in a neighbour region, so this is the common
-        // case, not a corner: without the break, a yosys-read design's only
-        // register stays native (lhd_macro_declarations_test).
-        if (region_in_name.contains(f.clk_drv)) {
-          break;
-        }
-        auto m = f.clk_drv.get_master_node();
-        if (gu::type_op_of(m) == Ntype_op::Sext && real_width(f.clk_drv) == 1) {
-          // Yosys' signed clock-pin carrier preserves the single input bit.
-          auto a = gu::get_driver_of_sink_name(m, "a");
-          if (a.is_invalid() || real_width(a) != 1) {
-            break;
-          }
-          f.clk_drv = a;
+      // The clock through its 1-bit identities (peel_clock above).
+      f.clk_drv = peel_clock(f.clk_drv);
+      // A clock driven by region-INTERNAL logic (a genuinely gated/derived
+      // clock -- a shape whole-design flatten makes reachable, since everything
+      // is one region) cannot cross as a latch unless it is a recognized
+      // clock gate (icg_of_gclk): the read-back has no native source for the
+      // DFF/flop clock pin and used to silently drop the connection. Demote the
+      // register to a boundary box (the register=false machinery): it stays a
+      // native flop and its clock cone is technology-mapped and reconnected
+      // like any comb-driven boundary input.
+      if (!f.clk_drv.is_invalid() && !f.clk_drv.is_const() && !region_in_name.contains(f.clk_drv)) {
+        if (auto it = icg_of_gclk.find(f.clk_drv); it != icg_of_gclk.end()) {
+          f.icg = it->second;
+        } else {
+          auto why = icg_rejected.find(f.clk_drv);
+          clk_demoted_by[why != icg_rejected.end() ? why->second : std::string{icg_unavailable}].insert(n);
+          clk_demoted.insert(n);
           continue;
         }
-        if (gu::type_op_of(m) != Ntype_op::Get_mask) {
-          break;
-        }
-        auto a    = gu::get_driver_of_sink_name(m, "a");
-        auto mask = gu::get_driver_of_sink_name(m, "mask");
-        if (a.is_invalid() || real_width(a) != 1 || mask.is_invalid() || !mask.is_const() || !gu::const_of(mask).bit_test(0)) {
-          break;
-        }
-        f.clk_drv = a;  // get_mask(bit0) of a 1-bit wire == the wire
-      }
-      // A clock driven by region-INTERNAL logic (a genuinely gated/derived
-      // clock — a shape whole-design flatten makes reachable, since everything
-      // is one region) cannot cross as a latch: the read-back has no native
-      // source for the DFF/flop clock pin and used to silently drop the
-      // connection. Demote the register to a boundary box (the register=false
-      // machinery): it stays a native flop and its clock cone is
-      // technology-mapped and reconnected like any comb-driven boundary input.
-      if (!f.clk_drv.is_invalid() && !f.clk_drv.is_const() && !region_in_name.contains(f.clk_drv)) {
-        clk_demoted.insert(n);
-        continue;
       }
       if (auto nr = gu::get_driver_of_sink_name(n, "negreset"); nr.is_const()) {
         f.neg_reset = gu::const_of(nr).bit_test(0);
@@ -808,10 +1080,15 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
       }
       w.emit();
     };
-    report_demoted(clk_demoted,
-                   "derived-clock-native",
-                   "register(s) clocked by region-internal logic (a gated/derived clock) kept as native flops — a DFF "
-                   "cell cannot take its clock from mapped logic; the clock cone is still mapped and reconnected");
+    for (const auto& [why, set] : clk_demoted_by) {
+      report_demoted(set,
+                     "derived-clock-native",
+                     why.starts_with("register(s)")
+                         ? why
+                         : std::format("register(s) on a gated/derived clock kept as native flops — {}; the clock cone is "
+                                       "still mapped and reconnected",
+                                       why));
+    }
     for (const auto& [why, set] : reset_demoted_by) {
       report_demoted(set, "reset-native", why);
     }
@@ -1151,6 +1428,9 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     if (gu::is_property_marker(n)) {
       continue;
     }
+    if (icg_absorbed.contains(n)) {
+      continue;  // a recognized clock gate's latch/AND: rebuilt as an ICG cell, not a boundary
+    }
     // A flop in a !seq (combinational-only) map is kept as a native boundary,
     // exactly like a Sub/Memory: its Q feeds the mapped logic as a fresh PI, its
     // din/enable/clock/reset are cut as POs (or recreated when const), and the
@@ -1317,6 +1597,9 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
       if (op == Ntype_op::Latch) {
         continue;  // level-sensitive latch: always a native boundary (2f-latch M2), never bit-blasted
       }
+      if (icg_absorbed.contains(n)) {
+        continue;  // a recognized clock gate's AND / 1-bit identities: the ICG cell computes the gated clock
+      }
       pending.push_back(n);
     }
     absl::flat_hash_set<hhds::Pin_class> ready;  // driver pins with materialized (or scheduled) bit slots
@@ -1330,6 +1613,9 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     // and a later slice can be read before it has been bit-blasted.
     for (const auto& kv : bbox_output_index) {
       ready.insert(kv.first);
+    }
+    for (const auto& kv : icg_of_gclk) {
+      ready.insert(kv.first);  // a clock gate's output: a demand-created PI too
     }
     absl::flat_hash_map<hhds::Node_class, size_t>                       unresolved;
     absl::flat_hash_map<hhds::Pin_class, std::vector<hhds::Node_class>> waiters;
@@ -1666,6 +1952,25 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     result.arst_pos = lnet.outputs().size() - first;
   }
   trace_stage("arst-pos");
+
+  // --- integrated clock gates -> one ABC PO per gate: the latched enable ---
+  // (after the async-reset POs) The mapped logic drives the ICG cell's enable
+  // pin; the read-back wires it in pass 2b like an internal async reset.
+  {
+    const size_t first = lnet.outputs().size();
+    for (size_t i = 0; i < result.icgs.size(); ++i) {
+      auto& gate = result.icgs[i];
+      gate.en_po = static_cast<int32_t>(lnet.outputs().size());
+      lnet.add_output(abc_bit(gate.en_drv, 0), std::format("__icg{}_en", i));
+    }
+    result.icg_pos = lnet.outputs().size() - first;
+    for (const auto& f : flops) {
+      if (f.icg >= 0) {
+        result.icgs[static_cast<size_t>(f.icg)].fanout += f.bits;
+      }
+    }
+  }
+  trace_stage("icg-pos");
 
   // A region made entirely of direct native boundaries has no real ABC
   // outputs. ABC's dch implementation crashes on that empty network; retain a

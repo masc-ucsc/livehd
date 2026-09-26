@@ -633,6 +633,111 @@ bool same_shape(const Dff_cell& a, const Dff_cell& b) {
          && a.reset1_low == b.reset1_low && a.both_value == b.both_value;
 }
 
+// A `latch_posedge*` integrated clock gate (Icg_cell). The Liberty's
+// clock_gate_*_pin attributes name the pins; the gated-clock output's
+// (state_)function must be the AND of the clock pin and one state variable
+// (`CLK & IQ`, `(CLK*M0)`), which is what makes the posedge flavour a clock that
+// only rises with CLK. Any other input or output (an `_obs` pin, a second
+// enable) is a shape the mapper does not drive: the cell does not qualify.
+std::optional<Icg_cell> parse_icg_cell(const std::string& name, const std::string& body) {
+  const std::string kind = unquote_trim(scalar_attr(top_level_only(body), "clock_gating_integrated_cell"));
+  if (!kind.starts_with("latch_posedge") || kind.ends_with("_obs")) {
+    return std::nullopt;
+  }
+  auto is_true = [](std::string v) {
+    v = unquote_trim(v);
+    std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return v == "true";
+  };
+  Icg_cell    c;
+  std::string out_fn;
+  std::string pin_args;
+  for (size_t p = find_group(body, "pin", 0, pin_args); p != std::string::npos; p = find_group(body, "pin", p + 1, pin_args)) {
+    size_t pclose = match_brace(body, p);
+    if (pclose == std::string::npos) {
+      return std::nullopt;
+    }
+    const std::string pin_name = unquote_trim(pin_args);
+    const std::string top      = top_level_only(body.substr(p + 1, pclose - (p + 1)));
+    const std::string dir      = scalar_attr(top, "direction");
+    std::string*      slot     = nullptr;
+    if (dir == "input") {
+      if (is_true(scalar_attr(top, "clock_gate_clock_pin"))) {
+        slot = &c.clk_pin;
+      } else if (is_true(scalar_attr(top, "clock_gate_enable_pin"))) {
+        slot = &c.en_pin;
+      } else if (is_true(scalar_attr(top, "clock_gate_test_pin"))) {
+        slot = &c.test_pin;
+      } else {
+        return std::nullopt;  // an input the mapper would not know how to drive
+      }
+    } else if (dir == "output") {
+      if (!is_true(scalar_attr(top, "clock_gate_out_pin"))) {
+        return std::nullopt;
+      }
+      slot   = &c.out_pin;
+      out_fn = scalar_attr(top, "state_function");
+      if (out_fn.empty()) {
+        out_fn = scalar_attr(top, "function");
+      }
+    } else {
+      continue;  // internal state node
+    }
+    if (!slot->empty()) {
+      return std::nullopt;  // two pins claim one role
+    }
+    *slot = pin_name;
+  }
+  if (c.clk_pin.empty() || c.en_pin.empty() || c.out_pin.empty()) {
+    return std::nullopt;
+  }
+  // `CLK & S` / `(CLK*S)` / `S CLK` (Liberty's implicit AND): exactly two
+  // bare operands, one the clock pin, the other neither input pin.
+  std::vector<std::string> ops;
+  std::string              cur;
+  for (char ch : out_fn + " ") {
+    if (ident_char(ch)) {
+      cur.push_back(ch);
+      continue;
+    }
+    if (!cur.empty()) {
+      ops.push_back(cur);
+      cur.clear();
+    }
+    if (ch != ' ' && ch != '\t' && ch != '(' && ch != ')' && ch != '&' && ch != '*' && ch != '"') {
+      return std::nullopt;  // a negation, an OR, ...: not the posedge AND
+    }
+  }
+  if (ops.size() != 2) {
+    return std::nullopt;
+  }
+  const std::string& other = ops[0] == c.clk_pin ? ops[1] : ops[0];
+  if ((ops[0] != c.clk_pin && ops[1] != c.clk_pin) || other == c.clk_pin || other == c.en_pin || other == c.test_pin) {
+    return std::nullopt;
+  }
+  c.name = name;
+  c.area = parse_area(body);
+  return c;
+}
+
+// ICG pick: area first (missing area LAST), then no test pin (nothing to tie
+// off), then the name.
+bool icg_rank_less(const Icg_cell& a, const Icg_cell& b) {
+  const double aa = a.area > 0 ? a.area : std::numeric_limits<double>::infinity();
+  const double ba = b.area > 0 ? b.area : std::numeric_limits<double>::infinity();
+  if (aa != ba) {
+    return aa < ba;
+  }
+  if (a.test_pin.empty() != b.test_pin.empty()) {
+    return a.test_pin.empty();
+  }
+  return a.name < b.name;
+}
+
+bool icg_same_shape(const Icg_cell& a, const Icg_cell& b) {
+  return a.clk_pin == b.clk_pin && a.en_pin == b.en_pin && a.test_pin == b.test_pin && a.out_pin == b.out_pin;
+}
+
 // The async pick for one reset value: area first (like rank_less), then a
 // single-purpose cell over one that also carries the other pin (it ties that
 // pin off for nothing), then rank_less's remaining tie-breaks.
@@ -668,6 +773,7 @@ bool cell_is_dont_use(const std::string& body) {
 struct Cell_scan {
   std::vector<Dff_cell>    dffs;      // the plain flop cells, dont_use ones excluded
   std::vector<Dff_cell>    async;     // the async clear/preset flop cells, dont_use ones excluded
+  std::vector<Icg_cell>    icgs;      // the integrated clock-gate cells, dont_use ones excluded
   std::vector<std::string> dont_use;  // every cell marked `dont_use : true`, in file order
 };
 
@@ -719,6 +825,8 @@ Cell_scan scan_cells(const std::string& lib_files) {
     }
     if (auto dff = parse_cell(name, body, unit_at(p))) {
       (dff->is_async() ? out.async : out.dffs).push_back(std::move(*dff));
+    } else if (auto icg = parse_icg_cell(name, body)) {
+      out.icgs.push_back(std::move(*icg));
     }
   }
   return out;
@@ -732,11 +840,31 @@ std::vector<Dff_cell> scan_async_dff_cells(const std::string& lib_files) { retur
 
 std::vector<std::string> scan_dont_use_cells(const std::string& lib_files) { return scan_cells(lib_files).dont_use; }
 
+std::vector<Icg_cell> scan_icg_cells(const std::string& lib_files) { return scan_cells(lib_files).icgs; }
+
 Dff_selection resolve_dff_cells(const std::string& lib_files, std::string_view prefer) {
   Dff_selection sel;
   auto          scan  = scan_cells(lib_files);
   auto&         cells = scan.dffs;
   sel.dont_use        = std::move(scan.dont_use);
+  if (auto best = std::min_element(scan.icgs.begin(), scan.icgs.end(), icg_rank_less); best != scan.icgs.end()) {
+    std::vector<Icg_cell> same;
+    for (const auto& c : scan.icgs) {
+      if (icg_same_shape(c, *best)) {
+        same.push_back(c);
+      }
+    }
+    std::stable_sort(same.begin(), same.end(), icg_rank_less);
+    // A drive ladder only where area strictly grows (an equal-area sibling --
+    // ASAP7's five 0.69984 um^2 `*DC` cells -- says nothing about drive), and
+    // at most five rungs (x1..x5 on ASAP7, dlclkp_1/2/4 on sky130).
+    for (const auto& c : same) {
+      if (sel.icg_ladder.size() == 5 || (!sel.icg_ladder.empty() && !(c.area > sel.icg_ladder.back().area))) {
+        break;
+      }
+      sel.icg_ladder.push_back(c);
+    }
+  }
   for (int v = 0; v < 2; ++v) {
     std::vector<Dff_cell> cand;
     for (const auto& c : scan.async) {
@@ -837,7 +965,71 @@ std::string dff_selection_descriptor(const Dff_selection& sel, std::string_view 
                      c.reset1_low ? "/L" : "",
                      c.both_value);
   }
+  for (size_t i = 0; i < sel.icg_ladder.size(); ++i) {
+    d += std::format("{}{}", i == 0 ? "|icg=" : ",", icg_descriptor(sel.icg_ladder[i]));
+  }
   return d;
+}
+
+std::string icg_descriptor(const Icg_cell& icg) {
+  return std::format("{}:{}:{}:{}:{}", icg.name, icg.clk_pin, icg.en_pin, icg.test_pin, icg.out_pin);
+}
+
+std::shared_ptr<hhds::GraphIO> create_icg_io(hhds::GraphLibrary& outlib, const Icg_cell& icg) {
+  if (auto existing = outlib.find_io(icg.name)) {
+    return existing;
+  }
+  auto io  = outlib.create_io(icg.name);
+  auto in1 = [&](const std::string& pin, hhds::Port_id pid) {
+    io->add_input(pin, pid);
+    io->set_bits(pin, 1);
+    io->set_unsign(pin, true);
+  };
+  in1(icg.clk_pin, 1);
+  in1(icg.en_pin, 2);
+  if (!icg.test_pin.empty()) {
+    in1(icg.test_pin, 3);
+  }
+  io->add_output(icg.out_pin, 4);
+  io->set_bits(icg.out_pin, 1);
+  io->set_unsign(icg.out_pin, true);
+  return io;
+}
+
+void emit_icg_model(hhds::GraphLibrary& outlib, const Icg_cell& icg) {
+  if (outlib.find_io(icg.name)) {
+    return;  // already modeled
+  }
+  auto io   = create_icg_io(outlib, icg);
+  auto body = io->create_graph();
+  auto bit1 = [](hhds::Pin_class p) {
+    gu::set_bits(p, 1);
+    gu::set_unsign(p);
+    return p;
+  };
+  auto clk = body->get_input_pin(icg.clk_pin);
+  // The latched value: the enable, forced on by the (active-high) test pin.
+  hhds::Pin_class d = body->get_input_pin(icg.en_pin);
+  if (!icg.test_pin.empty()) {
+    auto o = gu::create_typed_node(*body, Ntype_op::Or);
+    d.connect_sink(gu::setup_sink_pid(o, 0));
+    body->get_input_pin(icg.test_pin).connect_sink(gu::setup_sink_pid(o, 0));
+    d = bit1(o.create_driver_pin(0));
+  }
+  // Transparent while CLK is low: an active-high enable driven by !CLK (the
+  // polarity spelling every reader and match_icg_def agree on).
+  auto nclk = gu::create_typed_node(*body, Ntype_op::Not);
+  clk.connect_sink(gu::setup_sink_by_name(nclk, "a"));
+  auto L  = gu::create_typed_node(*body, Ntype_op::Latch);
+  auto Lq = bit1(L.create_driver_pin(0));
+  L.attr(hhds::attrs::name).set("IQ");
+  d.connect_sink(gu::setup_sink_by_name(L, "din"));
+  bit1(nclk.create_driver_pin(0)).connect_sink(gu::setup_sink_by_name(L, "enable"));
+  auto g = gu::create_typed_node(*body, Ntype_op::And);
+  clk.connect_sink(gu::setup_sink_pid(g, 0));
+  Lq.connect_sink(gu::setup_sink_pid(g, 0));
+  bit1(g.create_driver_pin(0)).connect_sink(body->get_output_pin(icg.out_pin));
+  body->commit();
 }
 
 std::shared_ptr<hhds::GraphIO> create_dff_io(hhds::GraphLibrary& outlib, const Dff_cell& dff) {

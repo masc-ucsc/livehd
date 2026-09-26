@@ -432,6 +432,9 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     for (const auto& c : livehd::liberty::selection_cells(dff_sel)) {  // plain ladder + async clear/preset cells
       dff_count.emplace(c.name, 0);
     }
+    for (const auto& c : dff_sel.icg_ladder) {  // integrated clock-gate cells (gated-clock registers)
+      dff_count.emplace(c.name, 0);
+    }
     for (const auto& [src, kids] : hier.children) {
       const auto     it   = instances.find(src);
       const uint64_t mult = it == instances.end() ? 0 : it->second;
@@ -451,6 +454,8 @@ void emit_qor(const std::vector<livehd::abc::Region_qor>& qor, std::string_view 
     j += std::format("],\"clear\":\"{}\",\"preset\":\"{}\"",
                      dff_sel.areset_ladder[0].empty() ? "" : jesc(dff_sel.areset_ladder[0].front().name),
                      dff_sel.areset_ladder[1].empty() ? "" : jesc(dff_sel.areset_ladder[1].front().name));
+    // The integrated clock-gate pick (empty: gated-clock registers stay native).
+    j += std::format(",\"icg\":\"{}\"", dff_sel.icg_ladder.empty() ? "" : jesc(dff_sel.icg_ladder.front().name));
     j          += ",\"cells\":{";
     bool first  = true;
     for (const auto& [name, n] : dff_count) {

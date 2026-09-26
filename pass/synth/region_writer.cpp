@@ -534,6 +534,58 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   }
   trace_stage("readback-boundaries");
 
+  // --- integrated clock-gate cells (Region_blast::icgs) ---
+  // A recognized clock gate becomes ONE Liberty ICG cell, minted on first use
+  // (a register clock, a PI read by mapped logic, or a child gate's clock): CLK
+  // from the region input -- or from the parent gate's cell for a gate chain --
+  // the test pin tied inactive (0), EN from the gate's ABC PO (pass 2b).
+  int                                              icg_cells = 0;
+  double                                           icg_area  = 0.0;
+  static const std::vector<liberty::Icg_cell>      kNoIcgs;
+  const auto&                                      icg_ladder = registers.icg != nullptr ? *registers.icg : kNoIcgs;
+  absl::flat_hash_set<std::string>                 icg_names;
+  std::vector<hhds::Pin_class>                     icg_out(blast.icgs.size());
+  std::vector<std::tuple<hhds::Node_class, std::string, int32_t>> icg_en_pending;  // (cell, EN pin, PO) for pass 2b
+  std::function<hhds::Pin_class(size_t)>           icg_output = [&](size_t i) -> hhds::Pin_class {
+    auto& out = icg_out[i];
+    if (!out.is_invalid()) {
+      return out;
+    }
+    const auto& gate = blast.icgs[i];
+    I(!icg_ladder.empty());  // the blaster recognizes gates only when the library has a cell
+    // <=8 clocked register bits: the smallest cell; then one rung per doubling.
+    size_t rung = 0;
+    for (int load = 8; gate.fanout > load && rung + 1 < icg_ladder.size(); load *= 2) {
+      ++rung;
+    }
+    const auto& cell = icg_ladder[rung];
+    std::string name = std::format("{}__icg", gate.name);
+    for (int k = 1; !icg_names.insert(name).second; ++k) {
+      name = std::format("{}__icg{}", gate.name, k);
+    }
+    hhds::Pin_class clk;
+    if (gate.parent >= 0) {
+      clk = icg_output(static_cast<size_t>(gate.parent));
+    } else if (auto it = region_in_name.find(gate.clk_src); it != region_in_name.end()) {
+      clk = body->get_input_pin(it->second);
+    }
+    auto sub = gu::create_typed_node(*body, Ntype_op::Sub);
+    sub.set_subnode(liberty::create_icg_io(*outlib_, cell));
+    sub.attr(hhds::attrs::name).set(name);
+    if (!clk.is_invalid()) {
+      clk.connect_sink(sub.create_sink_pin(cell.clk_pin));
+    }
+    if (!cell.test_pin.empty()) {
+      gu::create_const(*body, *Dlop::create_integer(0)).connect_sink(sub.create_sink_pin(cell.test_pin));
+    }
+    icg_en_pending.emplace_back(sub, cell.en_pin, gate.en_po);
+    out = sub.create_driver_pin(cell.out_pin);
+    gu::set_ubits(out, 1);
+    ++icg_cells;
+    icg_area += cell.area;
+    return out;
+  };
+
   // pass 1a: PI nets -> body input bit drivers (match by creation order — ABC
   // preserves CI/CO order across the flow, more robust than name parsing).
   for (int i = 0; i < static_cast<int>(mapped.sources.size()); ++i) {
@@ -544,6 +596,8 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     if (origin.kind == Pi_kind::region_input) {
       const auto [pi, b] = pi_order[origin.index];
       set_net_driver(mapped.sources[i], input_bit(pi, b));
+    } else if (origin.kind == Pi_kind::icg_output) {
+      set_net_driver(mapped.sources[i], icg_output(origin.index));
     } else {
       const auto [bx, oi, b] = bbox_pi[origin.index];
       set_net_driver(mapped.sources[i], bbox_recon[bx].out_bit[oi][b]);
@@ -815,7 +869,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     for (const auto& port : rb.inputs) {
       src_in_to_name[port.src_driver] = port.name;
     }
-    auto body_pin_for_src = [&](const hhds::Pin_class& d) -> hhds::Pin_class {
+    auto body_pin_for_src_plain = [&](const hhds::Pin_class& d) -> hhds::Pin_class {
       if (d.is_invalid()) {
         return {};
       }
@@ -827,7 +881,23 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       }
       return {};
     };
-    auto region_clk = body_pin_for_src(flops.front().clk_drv);
+    // A register on a recognized clock gate takes that gate's ICG cell output
+    // (icg_output above) -- a DFF cell's clock pin, a native flop's, or the
+    // shared negedge inverter.
+    absl::flat_hash_map<hhds::Pin_class, size_t> icg_of_src;
+    for (size_t i = 0; i < blast.icgs.size(); ++i) {
+      icg_of_src.emplace(blast.icgs[i].gclk, i);
+    }
+    auto body_pin_for_src = [&](const hhds::Pin_class& d) -> hhds::Pin_class {
+      if (auto it = d.is_invalid() ? icg_of_src.end() : icg_of_src.find(d); it != icg_of_src.end()) {
+        return icg_output(it->second);
+      }
+      return body_pin_for_src_plain(d);
+    };
+    // (the retime-reshaped fallback only: with the latch count preserved every
+    // latch has its owner, and minting an unused clock-gate cell here would
+    // leave it dangling)
+    auto region_clk = latch_owner.empty() ? body_pin_for_src(flops.front().clk_drv) : hhds::Pin_class{};
 
     // surviving latches (`lat`, filled before pass 1b) in stable vBoxes order
     int m = static_cast<int>(lat.size());
@@ -978,6 +1048,20 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       // pin as Q on the wrong one is a silent miscompile. Unreachable (only the
       // built-in flow sets d_inverted, and it never retimes); a guard, not a
       // path -- every other flow takes the read-back absorption.
+      if (spans.empty() && std::any_of(flops.begin(), flops.end(), [](const Seq_flop& f) { return f.icg >= 0; })) {
+        // Seq_flop::icg crosses only under a latch-preserving flow
+        // (Blast_options::icg); without the per-latch owner there is no telling
+        // which gated clock a register cell must take.
+        livehd::diag::err("pass.abc", "abc-readback", "internal")
+            .msg(
+                "pass.abc region '{}': the latch set was reshaped ({} latches for {} register bits) with a register on "
+                "a mapped clock gate crossed -- its clock cannot be attributed",
+                rb.module_name,
+                m,
+                crossed_bits)
+            .fatal();
+        return false;
+      }
       if (spans.empty() && std::any_of(flops.begin(), flops.end(), [](const Seq_flop& f) { return f.async_reset; })) {
         // Seq_flop::async_reset crosses only under a latch-preserving flow
         // (Blast_options::areset_flow_ok); without the per-latch owner there
@@ -1342,12 +1426,15 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     }
     d.connect_sink(rd.sub.create_sink_pin(rd.cell->d_pin));
   }
+  for (const auto& [sub, pin, po] : icg_en_pending) {
+    pending_resets.push_back({sub, pin, po});
+  }
   for (const auto& pr : pending_resets) {
     auto drv = pr.po < static_cast<int32_t>(mapped.outputs.size()) ? get_net_driver(mapped.outputs[static_cast<size_t>(pr.po)])
                                                                    : hhds::Pin_class{};
     if (drv.is_invalid()) {
       livehd::diag::err("pass.abc", "abc-readback", "internal")
-          .msg("pass.abc region '{}': asynchronous-reset PO {} has no read-back driver", rb.module_name, pr.po)
+          .msg("pass.abc region '{}': asynchronous-reset / clock-gate enable PO {} has no read-back driver", rb.module_name, pr.po)
           .fatal();
       return false;
     }
@@ -1357,9 +1444,9 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   // saw: count them where the identity-buffer bypass corrected the same row,
   // so abc.json `gates`/`area` (what lhdtrack scores as lhd_area, and what the
   // incremental cache persists) describe the netlist that was actually written.
-  if (qn_inv_cells != 0 || clock_inv_cells != 0 || reset_inv_cells != 0) {
-    counts.gates += qn_inv_cells + clock_inv_cells + reset_inv_cells;
-    counts.area  += qn_inv_area + (clock_inv_cells + reset_inv_cells) * inv_area;
+  if (qn_inv_cells != 0 || clock_inv_cells != 0 || reset_inv_cells != 0 || icg_cells != 0) {
+    counts.gates += qn_inv_cells + clock_inv_cells + reset_inv_cells + icg_cells;
+    counts.area  += qn_inv_area + (clock_inv_cells + reset_inv_cells) * inv_area + icg_area;
   }
   trace_stage("readback-fanins");
 
@@ -1370,16 +1457,17 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     int w = rb.outputs[po].bits == 0 ? 1 : rb.outputs[po].bits;
     out_bits[po].resize(w);
   }
-  if (mapped.outputs.size() != po_order.size() + bbox_po.size() + blast.arst_pos + (has_dummy_po ? 1 : 0)) {
+  if (mapped.outputs.size() != po_order.size() + bbox_po.size() + blast.arst_pos + blast.icg_pos + (has_dummy_po ? 1 : 0)) {
     livehd::diag::warn("pass.abc", "abc-readback", "internal")
-        .msg("pass.abc: region '{}': mapped PO count {} != created {} (region {} + bbox {} + async reset {}) — read-back "
-             "misaligned",
+        .msg("pass.abc: region '{}': mapped PO count {} != created {} (region {} + bbox {} + async reset {} + clock-gate "
+             "enable {}) — read-back misaligned",
              rb.module_name,
              mapped.outputs.size(),
-             po_order.size() + bbox_po.size() + blast.arst_pos,
+             po_order.size() + bbox_po.size() + blast.arst_pos + blast.icg_pos,
              po_order.size(),
              bbox_po.size(),
-             blast.arst_pos)
+             blast.arst_pos,
+             blast.icg_pos)
         .emit();
   }
   for (int i = 0; i < static_cast<int>(mapped.outputs.size()); ++i) {

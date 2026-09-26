@@ -495,3 +495,90 @@ TEST(LibertyDff, PlainOnlyLibraryHasNoAsyncPick) {
   ASSERT_TRUE(sel.base.has_value());
   EXPECT_EQ(livehd::liberty::dff_selection_descriptor(sel), livehd::liberty::dff_descriptor(*sel.base));
 }
+
+// --- integrated clock-gate cells (Dff_selection::icg_ladder) -----------------
+
+namespace {
+
+// A clock-gate cell in either PDK's spelling: pins named by the Liberty's
+// clock_gate_*_pin attributes, the gated clock as a state_function.
+std::string icg_cell(const std::string& name, double area, const std::string& kind, const std::string& en,
+                     const std::string& test = "", const std::string& fn = "CLK & IQ", bool dont_use = false,
+                     const std::string& extra_pin = "") {
+  std::string s = "  cell (" + name + ") {\n    area : " + std::to_string(area) + ";\n";
+  if (dont_use) {
+    s += "    dont_use : true;\n";
+  }
+  s += "    clock_gating_integrated_cell : " + kind + ";\n";
+  s += "    statetable (\"CLK " + en + "\", \"IQ\") { table : \"L L : - : L, L H : - : H, H - : - : N\"; }\n";
+  s += "    pin (IQ) { direction : internal; internal_node : \"IQ\"; }\n";
+  s += "    pin (GCLK) { clock_gate_out_pin : true; direction : output; state_function : \"" + fn + "\"; }\n";
+  s += "    pin (CLK) { clock : true; clock_gate_clock_pin : true; direction : input; }\n";
+  s += "    pin (" + en + ") { clock_gate_enable_pin : true; direction : input; }\n";
+  if (!test.empty()) {
+    s += "    pin (" + test + ") { clock_gate_test_pin : true; direction : input; }\n";
+  }
+  if (!extra_pin.empty()) {
+    s += "    pin (" + extra_pin + ") { direction : input; }\n";
+  }
+  return s + "  }\n";
+}
+
+}  // namespace
+
+TEST(LibertyDff, Asap7IcgLadderByArea) {
+  // ASAP7: ICGx1..x5 plus equal-area `*DC` siblings; the ladder stops at the
+  // first area tie. The test pin SE is recorded (the mapper ties it 0).
+  std::string  cells;
+  const double areas[] = {0.26244, 0.27702, 0.2916, 0.30618, 0.32076};
+  for (int i = 0; i < 5; ++i) {
+    cells += icg_cell("ICGx" + std::to_string(i + 1) + "_ASAP7_75t_R", areas[i], "latch_posedge_precontrol", "ENA", "SE");
+  }
+  cells += icg_cell("ICGx4DC_ASAP7_75t_R", 0.69984, "latch_posedge_precontrol", "ENA", "SE");
+  cells += icg_cell("ICGx8DC_ASAP7_75t_R", 0.69984, "latch_posedge_precontrol", "ENA", "SE");
+  const auto path = write_lib("asap7_icg.lib", lib(qn_cell("DFFHQNx1", 0.2916) + cells));
+  auto       sel  = livehd::liberty::resolve_dff_cells(path);
+  ASSERT_EQ(sel.icg_ladder.size(), 5U);
+  const auto& c = sel.icg_ladder.front();
+  EXPECT_EQ(c.name, "ICGx1_ASAP7_75t_R");
+  EXPECT_EQ(c.clk_pin, "CLK");
+  EXPECT_EQ(c.en_pin, "ENA");
+  EXPECT_EQ(c.test_pin, "SE");
+  EXPECT_EQ(c.out_pin, "GCLK");
+  EXPECT_EQ(sel.icg_ladder[4].name, "ICGx5_ASAP7_75t_R");
+  EXPECT_EQ(livehd::liberty::scan_icg_cells(path).size(), 7U);
+  EXPECT_NE(livehd::liberty::dff_selection_descriptor(sel).find("|icg=ICGx1_ASAP7_75t_R:CLK:ENA:SE:GCLK"), std::string::npos);
+}
+
+TEST(LibertyDff, Sky130IcgPickSkipsDontUseNegedgeAndOddShapes) {
+  // dlclkp_1 (no test pin) is the pick over the dearer sdlclkp_1; a cheaper
+  // dont_use cell, a latch_negedge cell, an OR-gated output, an `_obs` cell and
+  // a cell with an unknown extra input never qualify.
+  const auto path = write_lib(
+      "sky130_icg.lib",
+      lib(q_cell("dfxtp_1", 20.02) + icg_cell("sky130_fd_sc_hd__dlclkp_1", 17.5168, "\"latch_posedge\"", "GATE", "", "(CLK*M0)")
+          + icg_cell("sky130_fd_sc_hd__dlclkp_2", 18.768, "\"latch_posedge\"", "GATE", "", "(CLK*M0)")
+          + icg_cell("sky130_fd_sc_hd__sdlclkp_1", 18.768, "\"latch_posedge_precontrol\"", "GATE", "SCE", "(CLK*M0)")
+          + icg_cell("cheap_dont_use", 5, "latch_posedge", "GATE", "", "CLK & IQ", /*dont_use=*/true)
+          + icg_cell("negedge", 4, "latch_negedge", "GATE", "", "CLK | IQ")
+          + icg_cell("or_gated", 3, "latch_posedge", "GATE", "", "CLK + IQ")
+          + icg_cell("observed", 3, "latch_posedge_precontrol_obs", "GATE", "SCE")
+          + icg_cell("extra_input", 2, "latch_posedge", "GATE", "", "CLK & IQ", false, "RN")));
+  auto sel = livehd::liberty::resolve_dff_cells(path);
+  ASSERT_EQ(sel.icg_ladder.size(), 2U);
+  EXPECT_EQ(sel.icg_ladder[0].name, "sky130_fd_sc_hd__dlclkp_1");
+  EXPECT_TRUE(sel.icg_ladder[0].test_pin.empty());
+  EXPECT_EQ(sel.icg_ladder[0].en_pin, "GATE");
+  EXPECT_EQ(sel.icg_ladder[1].name, "sky130_fd_sc_hd__dlclkp_2");
+  for (const auto& c : livehd::liberty::scan_icg_cells(path)) {
+    EXPECT_TRUE(c.name.starts_with("sky130_fd_sc_hd__")) << c.name;
+  }
+}
+
+TEST(LibertyDff, NoIcgCellLeavesTheLadderEmpty) {
+  const auto path = write_lib("no_icg.lib", lib(q_cell("DFFx1", 6)));
+  auto       sel  = livehd::liberty::resolve_dff_cells(path);
+  EXPECT_TRUE(sel.icg_ladder.empty());
+  ASSERT_TRUE(sel.base.has_value());
+  EXPECT_EQ(livehd::liberty::dff_selection_descriptor(sel), livehd::liberty::dff_descriptor(*sel.base));
+}

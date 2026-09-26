@@ -96,6 +96,10 @@ private:
   // so it reuses is_arith_cut / is_seeded / driver_bits and writes the same
   // flat_node2id the shared tail consumes.
   void label_cones(hhds::Graph* g);
+
+  // Recolor each latch-based clock gate's latch into its AND's color (see
+  // color_synth.cpp), right before apply_coloring in every mode.
+  void keep_clock_gates_whole(hhds::Graph* g);
 };
 
 }  // namespace livehd::color

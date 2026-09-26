@@ -86,6 +86,7 @@ public:
     dff_ladder_       = sel.ladder;
     areset_ladder_[0] = sel.areset_ladder[0];
     areset_ladder_[1] = sel.areset_ladder[1];
+    icg_ladder_       = sel.icg_ladder;
     dff_preset_       = true;
   }
 
@@ -168,6 +169,9 @@ private:
   // a drive ladder like dff_ladder_ (liberty::Dff_selection::areset_ladder).
   // Empty: an async-reset register needing that value stays a native flop.
   std::vector<liberty::Dff_cell>   areset_ladder_[2];
+  // The integrated clock-gate cells (liberty::Dff_selection::icg_ladder).
+  // Empty: a register on a latch+AND clock gate stays a native flop.
+  std::vector<liberty::Icg_cell>   icg_ladder_;
   bool                             dff_preset_     = false;
   hhds::GraphLibrary*              outlib_         = nullptr;  // where blackbox cell defs are declared
   Region_cache*                    incr_           = nullptr;  // optional region cache (2opt-incr)

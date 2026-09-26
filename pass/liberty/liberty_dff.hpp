@@ -64,6 +64,29 @@ struct Dff_cell {
   [[nodiscard]] bool               reset_low(bool value) const { return value ? reset1_low : reset0_low; }
 };
 
+// An INTEGRATED CLOCK GATE cell: `clock_gating_integrated_cell :
+// latch_posedge[_precontrol|_postcontrol]` -- the enable (OR the test pin) is
+// held by a latch transparent while CLK is LOW, and the gated clock is
+// `CLK & latch`. So its output rises only on a CLK rise whose enable was
+// sampled high, which is exactly the latch-based gate RTL spells as
+// `always_latch if (!clk) en_l = en; assign gclk = clk & en_l;`. ASAP7:
+// ICGx1_ASAP7_75t_R (CLK, ENA, SE -> GCLK); sky130: dlclkp_1 (CLK, GATE ->
+// GCLK) and sdlclkp_1 (+ SCE). Pins are identified by the Liberty's own
+// clock_gate_{clock,enable,test,out}_pin attributes, never by spelling.
+struct Icg_cell {
+  std::string name;
+  std::string clk_pin;   // clock_gate_clock_pin
+  std::string en_pin;    // clock_gate_enable_pin
+  std::string test_pin;  // clock_gate_test_pin (active high; tied 0), empty when the cell has none
+  std::string out_pin;   // clock_gate_out_pin
+  double      area = 0;
+};
+
+// Every non-dont_use `latch_posedge*` ICG cell whose pins are exactly one
+// clock, one enable, at most one test input and one gated-clock output whose
+// (state_)function is `CLK & <state>`. File order; unranked.
+std::vector<Icg_cell> scan_icg_cells(const std::string& lib_files);
+
 // Every plain POSEDGE D-flop in the whitespace-separated Liberty file list: a
 // cell with an `ff(){}` group whose `clocked_on` is a bare pin (posedge, not
 // `!CLK` -- that is what keeps ASAP7's negedge DFFLQ* / sky130's dfrtn out),
@@ -114,6 +137,13 @@ struct Dff_selection {
   // Empty = the library has no such cell, and those register bits stay native
   // flops. Independent of `prefer` (which names the plain register cell).
   std::vector<Dff_cell> areset_ladder[2];
+  // The integrated clock-gate cells a latch+AND clock gate maps onto: the
+  // smallest-area cell (a test-pin-less one on an area tie), then its
+  // same-pinned drive ladder by strictly increasing area (at most five rungs;
+  // the read-back picks one per doubling of the clocked bits past 8). Empty =
+  // the library has none, and gated
+  // registers stay native flops. Independent of `prefer`.
+  std::vector<Icg_cell> icg_ladder;
 };
 Dff_selection resolve_dff_cells(const std::string& lib_files, std::string_view prefer = "");
 
@@ -146,5 +176,20 @@ std::shared_ptr<hhds::GraphIO> create_dff_io(hhds::GraphLibrary& outlib, const D
 // pass.liberty gensim's combinational cell models so a mapped DFF Sub resolves
 // for LEC/sim. No-op when a model of that name already exists.
 void emit_dff_model(hhds::GraphLibrary& outlib, const Dff_cell& dff);
+
+// `name:clk:en:test:out` for the incremental-cache salt (dff_selection_descriptor
+// appends it as `|icg=...`).
+std::string icg_descriptor(const Icg_cell& icg);
+
+// Create-or-find the 1-bit blackbox IO decl of an ICG cell. Port ids: clk=1,
+// en=2, test=3 (when present), out=4.
+std::shared_ptr<hhds::GraphIO> create_icg_io(hhds::GraphLibrary& outlib, const Icg_cell& icg);
+
+// Emit the ICG's behavioral model into `outlib`: a Latch transparent while CLK
+// is low (enable = !CLK) holding `en | test`, and `out = CLK & latch` -- the
+// same body shape a reader produces for the RTL clock gate, so
+// latch_contract::match_icg_def recognizes a mapped ICG Sub exactly like the
+// source gate. No-op when a model of that name already exists.
+void emit_icg_model(hhds::GraphLibrary& outlib, const Icg_cell& icg);
 
 }  // namespace livehd::liberty

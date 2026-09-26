@@ -247,8 +247,25 @@ level the pin wants, so mapped logic drives it. The register stays a native
 boundary (`reset-native`, naming the precise reason) only when the Liberty has
 no clear (or preset) cell for a needed value, the reset value is not a
 constant, the reset is multi-bit, or a user `flow` may reshape latches; its
-surrounding data logic is still mapped. Latch init comes from a
-resetless power-on constant only (a reset-backed latch is a don't-care to ABC:
+surrounding data logic is still mapped. A register on a **latch-based clock
+gate** (`always_latch if (!clk) en_l = en; assign gclk = clk & en_l;`, minion's
+`prim_clk_gate`) maps too: the gate itself becomes the Liberty's **integrated
+clock-gate cell** (`Dff_selection::icg_ladder`: a `clock_gating_integrated_cell
+: latch_posedge*` cell whose pins come from its `clock_gate_*_pin` attributes
+and whose gated output is `CLK & <state>`, smallest area first, dont_use
+skipped -- ASAP7 ICGx1, sky130 dlclkp_1; a rung per doubling of clocked bits
+past 8), with its test pin tied 0. The blaster recognizes the AND of a region
+input (or of another recognized gate's output: a chain) with a 1-bit latch
+transparent exactly while that clock is low, whose Q feeds only the AND; the
+latch and AND are absorbed, the latch's D crosses as an extra ABC PO driving the
+cell's enable, and the gate output becomes a PI read back from the cell -- so
+the registers cross as ordinary latches clocked by the cell (a negedge one
+through the shared clock inverter) and any other reader of the gated clock
+keeps working. Anything else (the active-low `clk | ~latch` flavour, a latch
+with a reset or open on the wrong phase, a Liberty without such a cell) stays
+native with the precise reason (`derived-clock-native`, `icg-native`); pass.color
+keeps a gate's latch in its AND's color so the two meet in one region. Latch
+init comes from a resetless power-on constant only (a reset-backed latch is a don't-care to ABC:
 the cell it maps to powers on X). On read-back, latches rebuild into native
 flops or plain Liberty DFF cells according to the `register` option:
 a single-root region (one register name) collapses to one named flop, a 1:1

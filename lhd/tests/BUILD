@@ -1416,6 +1416,22 @@ sh_test(
     env = {"MAPPER": mapper},
 ) for suffix, mapper in _MAPPERS]
 
+# Latch-based clock gates map onto the Liberty's integrated clock-gate cell and
+# their registers onto DFF / clear / preset cells clocked by it (sky130- and
+# ASAP7-shaped hermetic libraries): graph LEC proves, lgcheck does not refute,
+# broken twins refute, and the OR flavour / an ICG-less library stay native.
+[sh_test(
+    name = "lhd_abc_icg_test" + suffix,
+    srcs = ["lhd_abc_icg_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "abc_icg_mix.v",
+        "abc_icg_q.lib",
+        "abc_icg_qn.lib",
+    ],
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
+
 # 2a-abc subtask 5: sequential tech-mapping (seq=true). Flops cross into ABC as
 # latches and return as native flops (name + reset preserved); memories and Sub
 # instances are blackbox boundaries. Each region is sequentially LEC-equivalent

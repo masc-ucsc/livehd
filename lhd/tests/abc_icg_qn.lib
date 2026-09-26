@@ -1,0 +1,122 @@
+/* Hermetic Liberty for integrated clock-gate mapping (ASAP7-shaped): the
+ * QN register cells of abc_arst_qn.lib plus ASAP7's ICG pin names -- the
+ * enable ENA and an active-high test pin SE, tied inactive by pass.abc:
+ *   ICGx1  area 4   latch_posedge_precontrol (CLK, ENA, SE -> GCLK) -> the pick
+ *   ICGx2  area 4.5 same pins                                       -> its drive ladder
+ */
+library(abc_icg_qn) {
+  delay_model : table_lookup;
+  time_unit : "1ns";
+  capacitive_load_unit (1,pf);
+  default_inout_pin_cap : 0.0;
+  default_input_pin_cap : 0.0;
+  default_output_pin_cap : 0.0;
+  default_fanout_load : 1.0;
+
+  cell(INVx1) {
+    area : 1;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "A'";
+      timing() { related_pin : "A"; cell_rise(scalar){values("0.1");} cell_fall(scalar){values("0.1");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(BUFx1) {
+    area : 2;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "A";
+      timing() { related_pin : "A"; cell_rise(scalar){values("0.1");} cell_fall(scalar){values("0.1");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(NAND2x1) {
+    area : 3;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(B) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "(A B)'";
+      timing() { related_pin : "A"; cell_rise(scalar){values("0.2");} cell_fall(scalar){values("0.2");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} }
+      timing() { related_pin : "B"; cell_rise(scalar){values("0.2");} cell_fall(scalar){values("0.2");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(NOR2x1) {
+    area : 3;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(B) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "(A+B)'";
+      timing() { related_pin : "A"; cell_rise(scalar){values("0.2");} cell_fall(scalar){values("0.2");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} }
+      timing() { related_pin : "B"; cell_rise(scalar){values("0.2");} cell_fall(scalar){values("0.2");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(AND2x1) {
+    area : 3.5;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(B) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "(A B)";
+      timing() { related_pin : "A"; cell_rise(scalar){values("0.25");} cell_fall(scalar){values("0.25");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} }
+      timing() { related_pin : "B"; cell_rise(scalar){values("0.25");} cell_fall(scalar){values("0.25");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(XOR2x1) {
+    area : 5;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(B) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "(A^B)";
+      timing() { related_pin : "A"; cell_rise(scalar){values("0.3");} cell_fall(scalar){values("0.3");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} }
+      timing() { related_pin : "B"; cell_rise(scalar){values("0.3");} cell_fall(scalar){values("0.3");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(DFFNx1) {
+    area : 5;
+    ff(IQN, IQNN) { next_state : "!D"; clocked_on : "CLK";  }
+    pin(CLK) { direction : input; capacitance : 1; clock : true; }
+    pin(D)   { direction : input; capacitance : 1; }
+    pin(QN) { direction : output; function : "IQN";
+      timing() { related_pin : "CLK"; timing_type : rising_edge;
+                 cell_rise(scalar){values("0.1");} cell_fall(scalar){values("0.1");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(DFFASRNx1) {
+    area : 6.5;
+    ff(IQN, IQNN) { next_state : "!D"; clocked_on : "CLK"; clear : "!SETN"; preset : "!RESETN"; clear_preset_var1 : L; clear_preset_var2 : L; }
+    pin(CLK) { direction : input; capacitance : 1; clock : true; }
+    pin(D)   { direction : input; capacitance : 1; }
+    pin(RESETN) { direction : input; capacitance : 1; }
+    pin(SETN) { direction : input; capacitance : 1; }
+    pin(QN) { direction : output; function : "IQN";
+      timing() { related_pin : "CLK"; timing_type : rising_edge;
+                 cell_rise(scalar){values("0.1");} cell_fall(scalar){values("0.1");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(ICGx1) {
+    area : 4;
+    clock_gating_integrated_cell : "latch_posedge_precontrol";
+    statetable("CLK ENA SE", "IQ") { table : "L L L : - : L, L L H : - : H, L H L : - : H, L H H : - : H, H - - : - : N"; }
+    pin(IQ) { direction : internal; internal_node : "IQ"; }
+    pin(CLK) { direction : input; capacitance : 1; clock : true; clock_gate_clock_pin : true; }
+    pin(ENA) { direction : input; capacitance : 1; clock_gate_enable_pin : true;
+      timing() { related_pin : "CLK"; timing_type : setup_rising;
+                 rise_constraint(scalar){values("0.05");} fall_constraint(scalar){values("0.05");} } }
+    pin(SE) { direction : input; capacitance : 1; clock_gate_test_pin : true; }
+    pin(GCLK) { direction : output; clock_gate_out_pin : true; state_function : "CLK & IQ";
+      timing() { related_pin : "CLK"; timing_type : combinational;
+                 cell_rise(scalar){values("0.1");} cell_fall(scalar){values("0.1");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+  cell(ICGx2) {
+    area : 4.5;
+    clock_gating_integrated_cell : "latch_posedge_precontrol";
+    statetable("CLK ENA SE", "IQ") { table : "L L L : - : L, L L H : - : H, L H L : - : H, L H H : - : H, H - - : - : N"; }
+    pin(IQ) { direction : internal; internal_node : "IQ"; }
+    pin(CLK) { direction : input; capacitance : 1; clock : true; clock_gate_clock_pin : true; }
+    pin(ENA) { direction : input; capacitance : 1; clock_gate_enable_pin : true;
+      timing() { related_pin : "CLK"; timing_type : setup_rising;
+                 rise_constraint(scalar){values("0.05");} fall_constraint(scalar){values("0.05");} } }
+    pin(SE) { direction : input; capacitance : 1; clock_gate_test_pin : true; }
+    pin(GCLK) { direction : output; clock_gate_out_pin : true; state_function : "CLK & IQ";
+      timing() { related_pin : "CLK"; timing_type : combinational;
+                 cell_rise(scalar){values("0.1");} cell_fall(scalar){values("0.1");}
+                 rise_transition(scalar){values("0.1");} fall_transition(scalar){values("0.1");} } }
+  }
+}
