@@ -162,7 +162,6 @@ fi
   --workdir "$WORK_DIR/lean" --emit-dir lean:"$LEAN_DIR" \
   --result-json "$LOG_DIR/lhd_lean_result.json" \
   --set formal.lean.strict=true \
-  --set formal.lean.normalize=true \
   --set formal.lean.emit_cert="$EMIT_CERT" \
   --set formal.lean.emit_fast_bridge="$EMIT_FAST_BRIDGE" \
   --set formal.lean.cert_wf="$CERT_WF" \

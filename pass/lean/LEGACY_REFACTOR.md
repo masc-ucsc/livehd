@@ -1,7 +1,7 @@
 # Legacy pass: shared architecture (L0–L8)
 
 Baseline: `1af4e1492` on `b1-b2-verified-compiler`. This change implements the
-legacy work packages in `PASS_LEAN_RESTRUCTURE_PLAN.md`; it does not integrate
+legacy work packages in [PASS_LEAN_RESTRUCTURE_PLAN.md](PASS_LEAN_RESTRUCTURE_PLAN.md); it does not integrate
 D2, D4, or other research branches.
 
 ## Ownership and entry points
@@ -21,10 +21,11 @@ its graph traversal have been deleted.
 
 | Library | Responsibility |
 |---|---|
+| `lean_format` | Shared literals, collections, lookup trees, operation spelling, atomic writes |
 | `lean_legacy_schema` | Named ports/state, globally unique selectors, RTL mapping comments |
 | `lean_legacy_fast_model` | Pure `lower_fast_expr(CertificateIR, CertNode)` and simultaneous next state |
 | `lean_legacy_graph_cert` | Sparse-ID GraphCert, source environment, output/state projections |
-| `lean_legacy_cert_wf` | Optional chunk proofs and dense-slot uniqueness checks |
+| `lean_legacy_cert_wf` | Optional chunk proofs with indexed dependency and uniqueness checks |
 | `lean_legacy_bridge` | Optional per-node operator lemma instantiations |
 | `lean_legacy_emitter` | Coordinate the preceding libraries |
 
@@ -32,8 +33,11 @@ Only `pass_lean` is `alwayslink`. The scan now preserves raw state names and
 output declaration identity. Flop/memory drivers retain origin and read-port
 provenance, so naming never reconstructs memory policy or allocates semantic IDs.
 Shared `lean_format` owns literals, lists/arrays, lookup trees, operation spelling,
-and atomic file writes. Exceptions preserve the previous complete output and
-remove the temporary file.
+and atomic file writes. Both the verified emitter and legacy schema depend on
+this small library; legacy emission no longer links the verified emitter.
+Exceptions preserve the previous complete output and remove the temporary file.
+The unused `normalize` pass option has been removed; width normalization remains
+the responsibility of the shared scan/certificate pipeline.
 
 ## Intentional changes at integration
 
@@ -57,7 +61,13 @@ The final integration is not a move-only change:
   requires the existing full/low sign-position lemma shape.
 - `cert_wf=chunked` now emits actual proofs; the baseline only emitted a pending
   comment. Constants use a symbolic constant-chunk lemma. Mixed chunks separate
-  local shape checks from concrete dependency-subset checks. Global uniqueness
+  local shape checks from concrete dependency checks. A shared dense ID array is
+  checked once against `G.sources ++ G.topo`. Each dependency uses a balanced
+  sparse-ID-to-slot lookup and checks that array entry against its ID; a generic
+  lemma recovers semantic list membership. Missing, out-of-range, or mismatched
+  slots cannot satisfy the check. This takes O(D log N) lookup work for D
+  dependency occurrences and N IDs, without scanning the full graph lists for
+  each dependency. Global uniqueness
   maps sparse IDs to the canonical dense slots and proves injectivity via a
   range, avoiding a giant `distinct all_ids` evaluation. Unsupported shapes fail
   by default. `eval`/the explicit `eval` fallback use local concrete checks;
@@ -74,6 +84,10 @@ this refactor does not expand the verified compiler's operation set.
 
 `bazel build -c dbg //pass/lean:pass_lean //pass/lean:lean_export_graph` and
 `bazel test -c dbg //pass/lean:lean_export_tests` pass (three C++ test binaries).
+Removing `normalize` also updates the five Lean corpus scripts and stops
+forwarding `formal.normalize` to Lean from `lhd`; the scripts pass `bash -n`.
+The separate `//lhd:lhd_lib` build is blocked during dependency fetching by the
+existing pinned `yosys-slang` archive checksum mismatch, before C++ compilation.
 
 | Saved corpus | Legacy baseline accepted | Shared legacy accepted | Verified accepted |
 |---|---:|---:|---:|
@@ -104,6 +118,28 @@ this refactor does not expand the verified compiler's operation set.
 - The remaining 14 saved corpus graphs refuse on combinational cycles in both
   modes. There is no silent fallback.
 
+### Full legacy typechecking and L6 acceptance
+
+Lean 4.31.0 checks the complete generated legacy files, including the named fast
+model and GraphCert declarations. `/usr/bin/time -v` measurements and source
+hashes are recorded in [tests/LEGACY_SCALABILITY_RESULTS.json](tests/LEGACY_SCALABILITY_RESULTS.json).
+
+| Legacy artifact | Wall time | Peak RSS | Result |
+|---|---:|---:|---|
+| SingleCycleCPU, full chunked WF | 4:20.07 | 9.78 GiB | Pass |
+| PipelinedCPU, default legacy | 3:32.47 | 4.80 GiB | Pass |
+| PipelinedDualIssueCPU, default legacy | 19:33.21 | 15.89 GiB | Pass |
+
+SingleCycle uses all 4,438 sources and 4,772 nodes: 191 chunks of up to 25
+certificates, no chunk limit and no fallback. The complete
+`SingleCycleCPU_graphCert_wf` theorem typechecks; its axiom audit has no `sorryAx`
+and explicitly lists 385 native-decision axioms. This completes the full DINO
+chunked-WF acceptance gate for L6. It measures one full design, not an asymptotic
+benchmark across design sizes. The two default legacy model checks run
+sequentially; the SingleCycle WF and tiny checks overlap them. Peak RSS is per
+Lean process. All three default DINO exports remain byte-identical after these
+review fixes.
+
 No RTL frontend or LEC run is claimed here. These gates re-export saved graph
 DBs. Upstream RTL-to-LGraph LEC remains a separate validation gate.
 
@@ -124,8 +160,23 @@ The original dirty workspace is only a source of read-only graph copies.
   arithmetic/state and constant-chunk oracle artifacts.
 - `tests/LEGACY_REFACTOR_GOLDENS.tsv`: baseline hashes.
 - `tests/LEGACY_SHARED_RESULTS.tsv`: final corpus hashes and counts.
+- `tests/legacy_wf_index.lean`: valid sparse IDs, wrong/missing/out-of-range
+  slots, empty graphs, and conversion from indexed checks to semantic membership.
 
 Build `LeanSemanticPrimitives.Translation.LegacyCertWF` with the support package
 before elaborating generated `cert_wf` artifacts. The standalone exporter accepts
 optional `LABEL=VALUE` arguments after its mode, including `emit_fast_bridge`,
 `cert_wf`, `cert_chunk_size`, and `cert_chunk_limit`.
+
+For a full WF measurement, with the built support package in `LEAN_PATH`, use a
+project-local copy of the saved graph and run:
+
+```sh
+bazel-bin/pass/lean/lean_export_graph GRAPH_COPY SingleCycleCPU OUTPUT legacy cert_wf=chunked cert_chunk_size=25
+/usr/bin/time -v -o OUTPUT/proof.time lean OUTPUT/SingleCycleCPU_Lgraph.lean > OUTPUT/proof.log 2>&1
+```
+
+For the other two legacy models, export with `legacy` and no optional proof
+flags, then time the complete `PipelinedCPU_Lgraph.lean` and
+`PipelinedDualIssueCPU_Lgraph.lean` files in the same way. Review-run logs are
+under `generated/legacy_refactor/review/`; the JSON records their relative paths.

@@ -20,7 +20,6 @@ void Pass_lean::setup() {
   m1.add_label_optional("strict",
                         "true|false. Abort on unsupported ops (formal.strict applies too; formal.lean.strict wins)",
                         "true");
-  m1.add_label_optional("normalize", "true|false. Normalize pre-export width artifacts (formal.normalize applies too)", "true");
   m1.add_label_optional("emit_cert", "true|false. Emit graph certificate and cert-model definitions.", "true");
   m1.add_label_optional("emit_fast_bridge", "true|false. Emit the fast-view bridge (_comb=_comb_cert, step 5).", "false");
   m1.add_label_optional("mode",

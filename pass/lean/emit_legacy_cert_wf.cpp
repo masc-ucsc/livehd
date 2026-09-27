@@ -56,9 +56,27 @@ void emit_legacy_cert_wf(const CertificateIR& c, const LegacyNames& n, const Leg
   }
   // Eval is an explicit request for concrete local checks. It shares chunked
   // composition; it never evaluates global all_ids for each node/chunk.
-  const auto               size  = std::max<size_t>(1, o.cert_chunk_size);
-  const auto               count = (c.nodes.size() + size - 1) / size;
-  const auto               limit = o.cert_chunk_limit ? std::min(count, o.cert_chunk_limit) : count;
+  const auto            size  = std::max<size_t>(1, o.cert_chunk_size);
+  const auto            count = (c.nodes.size() + size - 1) / size;
+  const auto            limit = o.cert_chunk_limit ? std::min(count, o.cert_chunk_limit) : count;
+  const auto            ids   = n.base + "_wf_ids";
+  const auto            slot  = n.base + "_wf_slot";
+  std::vector<uint32_t> all_ids;
+  for (const auto& source : c.sources) {
+    all_ids.push_back(source.id);
+  }
+  for (const auto& node : c.nodes) {
+    all_ids.push_back(node.id);
+  }
+  std::vector<std::pair<uint32_t, std::string>> slots;
+  for (const auto& [id, index] : c.slot_of) {
+    slots.emplace_back(id, std::to_string(index));
+  }
+  os << "def " << ids << " : Array Nat := " << nat_array(all_ids) << "\n";
+  os << "def " << n.base << "_wf_slots : OpBridge.BT Nat :=\n  " << bst_literal(slots) << "\n";
+  os << "def " << slot << " (id : Nat) : Nat := (OpBridge.BT.find " << n.base << "_wf_slots id).getD " << ids << ".size\n";
+  os << "theorem " << ids << "_enumeration : " << ids << ".toList = " << g << ".sources ++ " << g
+     << ".topo := by native_decide\n\n";
   std::vector<std::string> chunks;
   for (size_t i = 0; i < limit; ++i) {
     const auto name = n.base + "_wf_chunk" + std::to_string(i);
@@ -91,9 +109,10 @@ void emit_legacy_cert_wf(const CertificateIR& c, const LegacyNames& n, const Leg
       } else {
         os << "  · native_decide\n";
       }
-      // Only this chunk's concrete dependency subset is checked here. The
-      // graph's node lookup is a balanced tree whenever WF is requested.
-      os << "  · native_decide\n\n";
+      // Sparse-to-dense lookup is logarithmic; the actual ID check is an array
+      // access. The generic lemma recovers semantic membership without scans.
+      os << "  · exact LegacyCertWF.deps_indexed " << g << " " << ids << " " << slot << " " << ids << "_enumeration (nodeCertDeps "
+         << name << ") (by native_decide)\n\n";
     }
   }
   if (limit != count) {
@@ -101,15 +120,9 @@ void emit_legacy_cert_wf(const CertificateIR& c, const LegacyNames& n, const Leg
     os << "-- No whole-graph well-formedness theorem is asserted.\n\n";
     return;
   }
-  std::vector<std::pair<uint32_t, std::string>> slots;
-  for (const auto& [id, slot] : c.slot_of) {
-    slots.emplace_back(id, std::to_string(slot));
-  }
-  os << "def " << n.base << "_wf_slots : OpBridge.BT Nat :=\n  " << bst_literal(slots) << "\n";
   os << "theorem " << n.base << "_graphCert_wf : graphCertWf " << g << " := by\n";
   os << "  apply LegacyCertWF.graph_of_chunks " << g << "\n";
-  os << "  · exact LegacyCertWF.dense_nodup _ (fun id => (OpBridge.BT.find " << n.base
-     << "_wf_slots id).getD 0) (by native_decide)\n";
+  os << "  · exact LegacyCertWF.dense_nodup _ " << slot << " (by native_decide)\n";
   os << "  · exact ";
   for (const auto& chunk : chunks) {
     os << "(LegacyCertWF.chunk_append " << g << " _ _ " << chunk << "_wf ";

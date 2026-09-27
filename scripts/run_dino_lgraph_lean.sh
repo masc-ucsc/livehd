@@ -89,7 +89,6 @@ run_design() {
     --emit-dir lean:"$LEAN_DIR" \
     --set yosys.setundef=zero \
     --set formal.lean.strict="$STRICT" \
-    --set formal.lean.normalize=true \
     --set formal.lean.emit_cert="$EMIT_CERT" \
     --set formal.lean.mode="$LEAN_MODE" \
     --set formal.lean.max_width="$MAX_WIDTH" \

@@ -1631,8 +1631,8 @@ void emit_isabelle_outputs(Options& opts, Result& res, Eprp_var& var) {
       labels["top"] = opts.top;
     }
     // The formal tools share the `formal.` root (user ruling 2026-07-17):
-    // formal.strict / formal.normalize apply to every emitter, and the
-    // tool-specific formal.isabelle.* overrides them.
+    // formal.strict applies to both emitters; formal.normalize applies to
+    // Isabelle. The tool-specific formal.isabelle.* overrides these defaults.
     for (const auto& [k, v] : opts.sets) {
       if (k == "formal.strict") {
         labels["strict"] = v;
@@ -1664,8 +1664,6 @@ void emit_lean_outputs(Options& opts, Result& res, Eprp_var& var) {
     for (const auto& [k, v] : opts.sets) {
       if (k == "formal.strict") {
         labels["strict"] = v;
-      } else if (k == "formal.normalize") {
-        labels["normalize"] = v;
       }
     }
     merge_sets(opts, "formal.lean", labels);

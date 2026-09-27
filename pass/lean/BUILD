@@ -22,9 +22,9 @@ cc_library(
 )
 
 cc_library(
-    name = "lean_emitters",
-    srcs = ["emit_design_cert.cpp", "lean_format.cpp"],
-    hdrs = ["emit_design_cert.hpp", "lean_format.hpp"],
+    name = "lean_format",
+    srcs = ["lean_format.cpp"],
+    hdrs = ["lean_format.hpp"],
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
@@ -32,11 +32,21 @@ cc_library(
 )
 
 cc_library(
+    name = "lean_emitters",
+    srcs = ["emit_design_cert.cpp"],
+    hdrs = ["emit_design_cert.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [":lean_format"],
+)
+
+cc_library(
     name = "lean_legacy_schema",
     srcs = ["emit_legacy_schema.cpp"],
     hdrs = ["emit_legacy_schema.hpp"],
     copts = COPTS,
-    deps = [":lean_emitters"],
+    deps = [":lean_format"],
     visibility = ["//visibility:public"],
 )
 
@@ -137,7 +147,7 @@ cc_test(
     name = "legacy_model_test",
     srcs = ["legacy_model_test.cpp"],
     copts = COPTS,
-    deps = [":lean_legacy_emitter", "@googletest//:gtest_main"],
+    deps = [":lean_legacy_emitter", ":lean_emitters", "@googletest//:gtest_main"],
 )
 
 test_suite(

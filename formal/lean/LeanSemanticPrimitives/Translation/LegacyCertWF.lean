@@ -1,11 +1,28 @@
 import LeanSemanticPrimitives.Translation.OpBridge
 
 /- Small symbolic composition lemmas for the optional legacy WF emitter.
-   Concrete checks are local shapes, dependency subsets, and dense-slot maps;
+   Concrete checks are local shapes, indexed dependencies, and dense-slot maps;
    no chunk evaluates nodeCertChunkWfBool over a global allIds list. -/
 deriving instance DecidableEq for NodeCert
 
 namespace LegacyCertWF
+
+/- The enumeration is checked once per graph. Each dependency check uses a
+   dense array access, rather than membership in either complete graph list.
+   A bad/missing slot cannot validate an ID: the array entry must match too. -/
+def depsIndexed (ids : Array Nat) (slot : Nat → Nat) (ds : List Nat) : Bool :=
+  ds.all fun d => ids[slot d]? == some d
+
+theorem deps_indexed (G : GraphCert) (ids : Array Nat) (slot : Nat → Nat)
+    (enumeration : ids.toList = G.sources ++ G.topo) (ds : List Nat)
+    (checked : depsIndexed ids slot ds = true) :
+    ∀ d ∈ ds, d ∈ G.topo ∨ d ∈ G.sources := by
+  intro d hd
+  have h : ids[slot d]? = some d := by
+    simpa only [beq_iff_eq] using List.all_eq_true.mp checked d hd
+  have hm := Array.mem_toList_iff.mpr (Array.mem_of_getElem? h)
+  rw [enumeration] at hm
+  exact (List.mem_append.mp hm).symm
 
 def ChunkWf (G : GraphCert) (ids : List Nat) : Prop :=
   ∀ n ∈ ids, match G.nodes n with

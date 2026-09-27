@@ -51,9 +51,6 @@ LeanOptions::LeanOptions(const Eprp_var& var) {
   auto s = var.get("strict");
   strict = (s == "false") ? false : true;
 
-  auto n    = var.get("normalize");
-  normalize = (n == "false") ? false : true;
-
   auto ec   = var.get("emit_cert");
   emit_cert = (ec == "false") ? false : true;
 
