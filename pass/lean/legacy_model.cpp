@@ -7,6 +7,7 @@
 
 #include "pass_lean.hpp"
 #include "legacy_support.hpp"
+#include "lean_format.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -42,46 +43,19 @@ using namespace lean_pass;
 // upper bound is disabled while the separate `w == 0` unsized-node check stays).
 // A positive integer sets that cap; empty/garbage falls back to the default.
 
-const std::unordered_set<std::string> kLeanReserved = {
-    "abbrev", "axiom", "by",       "class", "def",     "deriving", "do",      "else",   "end",
-    "example", "false", "for",      "fun",   "if",      "import",   "in",      "inductive",
-    "instance", "let",  "match",    "mutual", "namespace", "open",  "opaque",  "partial",
-    "private", "protected", "rec", "set_option", "structure", "theorem", "then", "true",
-    "universe", "variable", "where", "with",
-};
-
-std::string sanitize_lean(std::string_view name) {
-  std::string out;
-  out.reserve(name.size() + 4);
-
-  for (unsigned char c : name) {
-    const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
-    if (ok) {
-      out.push_back(static_cast<char>(c));
-    } else {
-      char buf[16];
-      std::snprintf(buf, sizeof(buf), "_x%02x_", c);
-      out += buf;
-    }
-  }
-
-  if (out.empty()) {
-    out = "id";
-  }
-  if (out[0] >= '0' && out[0] <= '9') {
-    out = "id_" + out;
-  }
-  if (kLeanReserved.count(out) > 0) {
-    out = "id_" + out;
-  }
-  return out;
-}
+using lean_export::sanitize_lean;
+using lean_export::lean_integer;
+using lean_export::lit_bv;
+using lean_export::lit_zero;
+using lean_export::lit_one;
+using lean_export::bst_literal;
+using lean_export::nat_list;
 
 std::string make_field_name(std::string_view role, std::string_view rtl_name, absl::flat_hash_set<std::string>& used) {
   std::string base = std::string(role) + sanitize_lean(rtl_name);
   std::string name = base;
   size_t      n    = 0;
-  while (used.count(name) > 0 || kLeanReserved.count(name) > 0) {
+  while (used.count(name) > 0) {
     ++n;
     name = base + "_" + std::to_string(n);
   }
@@ -114,19 +88,6 @@ std::string make_field_name(std::string_view role, std::string_view rtl_name, ab
 // not affect the emitted mem_read/mem_write model, tolerate a non-constant
 // driver and fall back to a default instead of aborting.  (pass.isabelle still
 // requires these constant — a shared over-strict check worth relaxing there too.)
-
-std::string lean_int_literal(std::string_view decimal) {
-  if (!decimal.empty() && decimal.front() == '-') {
-    return "(-Int.ofNat " + std::string(decimal.substr(1)) + ")";
-  }
-  return "(Int.ofNat " + std::string(decimal) + ")";
-}
-
-std::string lit_bv(uint32_t w, std::string_view v) { return "(BitVec.ofInt " + std::to_string(w) + " (" + std::string(v) + "))"; }
-
-std::string lit_zero(uint32_t w) { return "(0#" + std::to_string(w) + ")"; }
-
-std::string lit_one(uint32_t w) { return "(1#" + std::to_string(w) + ")"; }
 
 std::string int_of_const(const LeanCtx& ctx, const Node& node, const Dlop& v);
 
@@ -183,9 +144,9 @@ std::string int_of_const(const LeanCtx& ctx, const Node& node, const Dlop& v) {
     return "(-Int.ofNat 1)";
   }
   if (v.is_just_i64()) {
-    return lean_int_literal(std::to_string(v.to_just_i64()));
+    return lean_integer(std::to_string(v.to_just_i64()));
   }
-  return lean_int_literal(v.to_decimal_string());
+  return lean_integer(v.to_decimal_string());
 }
 
 // Follow width-only reshaping back to the pin that really drives a signal.
@@ -725,33 +686,6 @@ std::vector<Node> reachable_topo_order(const std::vector<Node_pin>& roots, const
 // lookup and O(N^2) over the design.  `BT.find` navigates the tree *value*
 // instead — O(log N) per lookup, O(N) overall.  Emit values as closures so the
 // tree stays independent of the design inputs.
-std::string bst_literal(const std::vector<std::pair<uint32_t, std::string>>& sorted, size_t lo, size_t hi) {
-  if (lo >= hi) {
-    return "BT.lf";
-  }
-  const size_t mid = lo + (hi - lo) / 2;
-  return "(BT.nd " + std::to_string(sorted[mid].first) + " (" + sorted[mid].second + ") "
-         + bst_literal(sorted, lo, mid) + " " + bst_literal(sorted, mid + 1, hi) + ")";
-}
-
-std::string bst_literal(std::vector<std::pair<uint32_t, std::string>> pairs) {
-  std::sort(pairs.begin(), pairs.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-  return bst_literal(pairs, 0, pairs.size());
-}
-
-std::string nat_list(const std::vector<uint32_t>& xs) {
-  std::ostringstream oss;
-  oss << "[";
-  for (size_t i = 0; i < xs.size(); ++i) {
-    if (i != 0) {
-      oss << ", ";
-    }
-    oss << xs[i];
-  }
-  oss << "]";
-  return oss.str();
-}
-
 uint32_t cert_dep_id(const LeanCtx& ctx, CertBuild& build, const Node_pin& pin, uint32_t expected_w) {
   auto n = pin_node(pin);
   if (pin_is_const(pin)) {

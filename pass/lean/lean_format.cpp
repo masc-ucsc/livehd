@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "lean_format.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -81,4 +82,37 @@ void write_atomic(const std::string& path, const std::function<void(std::ostream
     throw;
   }
 }
+std::string lit_bv(uint32_t w, std::string_view v) { return "(BitVec.ofInt " + std::to_string(w) + " (" + std::string(v) + "))"; }
+
+std::string lit_zero(uint32_t w) { return "(0#" + std::to_string(w) + ")"; }
+
+std::string lit_one(uint32_t w) { return "(1#" + std::to_string(w) + ")"; }
+
+std::string bst_literal(const std::vector<std::pair<uint32_t, std::string>>& sorted, size_t lo, size_t hi) {
+  if (lo >= hi) {
+    return "BT.lf";
+  }
+  const size_t mid = lo + (hi - lo) / 2;
+  return "(BT.nd " + std::to_string(sorted[mid].first) + " (" + sorted[mid].second + ") " + bst_literal(sorted, lo, mid) + " "
+         + bst_literal(sorted, mid + 1, hi) + ")";
+}
+
+std::string bst_literal(std::vector<std::pair<uint32_t, std::string>> pairs) {
+  std::sort(pairs.begin(), pairs.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+  return bst_literal(pairs, 0, pairs.size());
+}
+
+std::string nat_list(const std::vector<uint32_t>& xs) {
+  std::ostringstream oss;
+  oss << "[";
+  for (size_t i = 0; i < xs.size(); ++i) {
+    if (i != 0) {
+      oss << ", ";
+    }
+    oss << xs[i];
+  }
+  oss << "]";
+  return oss.str();
+}
+
 }  // namespace lean_export
