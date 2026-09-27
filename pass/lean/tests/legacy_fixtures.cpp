@@ -45,6 +45,10 @@ int main(int argc, char** argv) {
     const auto width = op == Ntype_op::EQ || op == Ntype_op::LT || op == Ntype_op::GT || op == Ntype_op::Ror ? 1 : 8;
     io->set_bits("y", width);
     auto g = io->create_graph();
+    for (const auto& decl : io->get_input_pin_decls()) {
+      auto pin = g->get_input_pin(decl.name);
+      set_bits(pin, bits_of(pin, *io, decl.name));
+    }
     auto n = create_typed_node(*g, op);
     set_bits(n.create_driver_pin(0), width);
     auto constant
@@ -79,6 +83,10 @@ int main(int argc, char** argv) {
     io->add_output("q", 1);
     io->set_bits("q", 8);
     auto g = io->create_graph();
+    for (const auto& decl : io->get_input_pin_decls()) {
+      auto pin = g->get_input_pin(decl.name);
+      set_bits(pin, bits_of(pin, *io, decl.name));
+    }
     auto f = create_typed_node(*g, Ntype_op::Flop);
     set_bits(f.create_driver_pin(0), 8);
     auto pin    = [&](std::string_view name) { return f.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, name)); };
@@ -117,6 +125,10 @@ int main(int argc, char** argv) {
     io->add_output("q", 1);
     io->set_bits("q", 8);
     auto g = io->create_graph();
+    for (const auto& decl : io->get_input_pin_decls()) {
+      auto pin = g->get_input_pin(decl.name);
+      set_bits(pin, bits_of(pin, *io, decl.name));
+    }
     auto m = create_typed_node(*g, Ntype_op::Memory);
     set_bits(m.create_driver_pin(0), 8);
     auto pin = [&](std::string_view name, int port = 0) {
