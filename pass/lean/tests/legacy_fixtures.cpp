@@ -169,7 +169,7 @@ int main(int argc, char** argv) {
     } else {
       policy("fwd", kind == "forward_ram" ? 1 : 0);
     }
-    m.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+    m.create_driver_pin(immutable ? 0 : 1).connect_sink(g->get_output_pin("q"));
     std::cout << top << '\n';
   }
   livehd::Hhds_graph_library::save(argv[1]);

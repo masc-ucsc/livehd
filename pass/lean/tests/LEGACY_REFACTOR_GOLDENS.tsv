@@ -24,10 +24,10 @@ tiny	tiny_active_low	1	-	-	-	-
 tiny	tiny_nonzero	1	-	-	-	-
 tiny	tiny_negedge	1	-	-	-	-
 tiny	tiny_pipeline	1	-	-	-	-
-tiny	tiny_ram	1	-	-	-	-
-tiny	tiny_sync_ram	1	-	-	-	-
-tiny	tiny_byte_ram	1	-	-	-	-
-tiny	tiny_forward_ram	1	-	-	-	-
+tiny	tiny_ram	0	3188d8df9e5936c3bb63d51a7fdd0f67a49751b912f1124a4a1e30702721d1e1	e28e6cbebf71f523aa4e75a5022ac5544932576778df162be3a9bcbaa662d57c	7	4
+tiny	tiny_sync_ram	0	ccb7abc597c92f8d5ab995c0053938987e4b710570b6b6b1e7ef3e0b1486fef4	fbcec72272456516e9152e962d6521d4d9bd4ee1ac1da89042d8d6ecda9dec54	8	6
+tiny	tiny_byte_ram	0	edca6cf156c5b31169dd148024e66521f4db52183ba405122c817b2dea77fec6	f044c60681dfa7328a1167722b53547c305b4ebb42b7991a42ec04b70ef99a25	7	4
+tiny	tiny_forward_ram	0	fed01a7dae9607e78e86c2b311471a5aee77cd0f4e66c8695a709cb9407cda7d	533c9ca60b0166f23b6d8dd8f518cdcf7ba8126cc117a92f0aba05d11140b1d0	7	4
 tiny	tiny_rom	1	-	-	-	-
 tiny	tiny_sync_rom	1	-	-	-	-
 tiny	tiny_ram_init	1	-	-	-	-
