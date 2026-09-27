@@ -242,8 +242,9 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
       driver.enable = b.dep(*f.enable, 1);
     }
     driver.reset_value      = f.initial;
-    // Preserve B1 output in the move-only refactor. Polarity fix is separate.
-    driver.reset_active_low = false;
+    // The polarity flag controls both immediate async reads and next-state
+    // reset priority; it is independent of the reset signal itself.
+    driver.reset_active_low = f.active_low;
     flops.emplace(f.id, driver);
   }
   for (const auto& [id, f] : flops) {

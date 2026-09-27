@@ -101,3 +101,38 @@ and `compileAndRun_correct` use only `propext`, `Classical.choice`, and
 `_step_correct`, with no `sorryAx` (their existing `native_decide` acceptance
 checks remain part of the trust boundary). Measured DINO elaboration times were
 42.9 s, 50.5 s, and 108.2 s, respectively.
+
+### Separate correction: active-low flop next state
+
+After committing the byte-preserving refactor as `afafd4f70`, fix the existing
+B1 reset-polarity omission separately. The old exporter set
+`FlopDesc.resetActiveLow` by consulting `flop_negreset`, a map that the scanner
+never filled. The actual polarity was recorded in `flop_active_low` and used
+only for `SourceDesc.flopQAsync`. Consequently an asserted active-low reset
+changed the combinational read but the next-state rule treated that same reset
+as active-high.
+
+The certificate builder now carries `Flop.active_low` to both descriptors.
+The new graph test follows a primary reset through a resize node and checks the
+resulting source and flop. Its optional Lean oracle checks immediate reset,
+reset priority over a disabled enable, holding state with reset released, and
+taking `din` when enabled. Both the C++ assertion and the Lean next-state checks
+fail before the correction; all pass afterward. No Lean semantics or compiler
+proof is changed. The final suite has **14 passing C++ tests**.
+
+All 134 accepted corpus graphs were regenerated after the fix. The only text
+changes are `resetActiveLow := false` becoming `true` in 3626 flop descriptors
+across 46 designs. All three DINO files remain byte-identical to the already
+proved versions. `tests/B1_RESET_POLARITY.tsv` records the changed files and
+final hashes; unchanged files retain the hashes in `B1_REFACTOR_GOLDENS.tsv`.
+
+To reproduce the small Lean oracle after building the C++ test:
+
+```sh
+mkdir -p generated/b1_refactor/reset_check
+LEAN_RESET_FIXTURE="$PWD/generated/b1_refactor/reset_check/reset.lean" \
+  bazel-bin/pass/lean/design_scan_test \
+  --gtest_filter=DesignScan.ActiveLowAsyncResetSurvivesResizingAndControlsNextState
+cd formal/lean
+lake env lean ../../generated/b1_refactor/reset_check/reset.lean
+```

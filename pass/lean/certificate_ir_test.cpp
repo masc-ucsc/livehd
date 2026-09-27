@@ -175,6 +175,7 @@ TEST(CertificateIR, AsyncResetSourceAndFlopControlsRemainDistinct) {
   EXPECT_EQ(c.flops[0].reset_pin, 2000000000);
   EXPECT_EQ(c.flops[0].enable, 2000000001);
   EXPECT_EQ(c.flops[0].reset_value, "7");
+  EXPECT_TRUE(c.flops[0].reset_active_low);
   EXPECT_TRUE(c.sources[0].async_reset);
   EXPECT_TRUE(c.sources[0].reset_active_low);
   d.flops[0].reset_input.reset();

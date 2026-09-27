@@ -1,6 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "design_scan.hpp"
 
+#include <cstdlib>
+#include <fstream>
 #include <sstream>
 
 #include "certificate_ir.hpp"
@@ -82,6 +84,66 @@ TEST(DesignScan, SynchronousRomRetainsContentsAndEnable) {
   EXPECT_TRUE(cert.memories.empty());
   EXPECT_EQ(cert.sources[0].rom_contents, (std::vector<std::string>{"1", "2", "3"}));
   EXPECT_EQ(cert.nodes.back().op.kind, Operation::MuxBool);
+}
+TEST(DesignScan, ActiveLowAsyncResetSurvivesResizingAndControlsNextState) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_reset");
+  auto  io  = lib.create_io("reset_fixture");
+  io->add_input("clk", 1);
+  io->set_bits("clk", 1);
+  io->add_input("enable", 2);
+  io->set_bits("enable", 1);
+  io->add_input("rst", 3);
+  io->set_bits("rst", 1);
+  io->add_output("q", 1);
+  io->set_bits("q", 8);
+  auto g    = io->create_graph();
+  auto flop = create_typed_node(*g, Ntype_op::Flop);
+  set_bits(flop.create_driver_pin(0), 8);
+  auto resize = create_typed_node(*g, Ntype_op::Or);
+  set_bits(resize.create_driver_pin(0), 1);
+  g->get_input_pin("rst").connect_sink(resize.create_sink_pin(0));
+  resize.create_driver_pin(0).connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "reset_pin")));
+  g->get_input_pin("enable").connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "enable")));
+  g->get_input_pin("clk").connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "clock_pin")));
+  auto drive = [&](std::string_view name, int64_t value) {
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(value))
+        .connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, name)));
+  };
+  drive("din", 12);
+  drive("initial", 7);
+  drive("async", 1);
+  drive("negreset", 1);
+  flop.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+  const auto design = scan_design(*g, {});
+  ASSERT_EQ(design.flops.size(), 1);
+  EXPECT_TRUE(design.flops[0].active_low);
+  EXPECT_EQ(design.flops[0].reset_input, design.inputs[2].id);
+  const auto cert = build_certificate(design, {});
+  ASSERT_EQ(cert.flops.size(), 1);
+  EXPECT_TRUE(cert.flops[0].reset_active_low);
+  EXPECT_TRUE(cert.sources[0].async_reset);
+  EXPECT_TRUE(cert.sources[0].reset_active_low);
+  // Optional end-to-end Lean oracle, always written under the caller's project
+  // runtime directory. Run this test with LEAN_RESET_FIXTURE=<path>.lean, then
+  // elaborate that file with the compiler library on LEAN_PATH.
+  if (const char* path = std::getenv("LEAN_RESET_FIXTURE")) {
+    std::ofstream out(path);
+    emit_design_cert(design, cert, out);
+    out << R"(
+def reset_fixture_initial : RuntimeState := ⟨#[mk_bv 8 5], #[]⟩
+-- rst=0 asserts reset, even with enable=0: both Q and the next state are 7.
+example : bv_uint ((reset_fixture_step #[mk_bv 1 0, mk_bv 1 0, mk_bv 1 0]
+    reset_fixture_initial).outputs[0]!) = 7 := by native_decide
+example : bv_uint ((reset_fixture_step #[mk_bv 1 0, mk_bv 1 0, mk_bv 1 0]
+    reset_fixture_initial).nextState.flops[0]!) = 7 := by native_decide
+-- rst=1 releases reset. Disabled state holds 5; enabled state takes din=12.
+example : bv_uint ((reset_fixture_step #[mk_bv 1 0, mk_bv 1 0, mk_bv 1 1]
+    reset_fixture_initial).nextState.flops[0]!) = 5 := by native_decide
+example : bv_uint ((reset_fixture_step #[mk_bv 1 0, mk_bv 1 1, mk_bv 1 1]
+    reset_fixture_initial).nextState.flops[0]!) = 12 := by native_decide
+)";
+    ASSERT_TRUE(out.good());
+  }
 }
 TEST(DesignScan, RejectsCombinationalCycleAndZeroWidth) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_cycle");
