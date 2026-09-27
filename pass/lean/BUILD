@@ -57,6 +57,13 @@ cc_binary(
     deps = [":pass_lean", "//graph", "//pass/common:pass"],
 )
 
+cc_binary(
+    name = "lean_legacy_fixtures",
+    srcs = ["tests/legacy_fixtures.cpp"],
+    copts = COPTS,
+    deps = ["//graph"],
+)
+
 cc_test(
     name = "certificate_ir_test",
     srcs = ["certificate_ir_test.cpp"],
