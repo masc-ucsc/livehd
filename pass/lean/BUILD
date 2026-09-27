@@ -59,6 +59,24 @@ cc_library(
 )
 
 cc_library(
+    name = "lean_legacy_cert_wf",
+    srcs = ["emit_legacy_cert_wf.cpp"],
+    hdrs = ["emit_legacy_cert_wf.hpp", "lean_options.hpp", "legacy_model.hpp"],
+    copts = COPTS,
+    deps = [":lean_legacy_graph_cert"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
+    name = "lean_legacy_bridge",
+    srcs = ["emit_legacy_fast_bridge.cpp"],
+    hdrs = ["emit_legacy_fast_bridge.hpp"],
+    copts = COPTS,
+    deps = [":lean_legacy_fast_model"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "pass_lean",
     srcs = ["pass_lean.cpp", "lean_options.cpp", "legacy_model.cpp"],
     hdrs = ["pass_lean.hpp", "lean_options.hpp", "legacy_support.hpp"],
