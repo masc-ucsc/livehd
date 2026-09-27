@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "emit_legacy_fast_model.hpp"
+#include "emit_legacy_graph_cert.hpp"
 #include "lean_format.hpp"
 namespace lean_export {
 void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, const LegacyNames& names, std::ostream& ofs) {
@@ -181,10 +182,10 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
       sext_mode = true;
       sext_a    = raw_dep(info.deps[0]);
       sext_amt  = raw_dep(info.deps[1]);
-    } else if (info.op.kind == Operation::SLT && info.deps.size() == 2 && width_of(info.deps[0]) == width_of(info.deps[1])) {
-      bridge_call = "slt_bridge";
-    } else if (info.op.kind == Operation::SGT && info.deps.size() == 2 && width_of(info.deps[0]) == width_of(info.deps[1])) {
-      bridge_call = "sgt_bridge";
+    } else if (info.op.kind == Operation::SLT && info.deps.size() == 2) {
+      bridge_call = width_of(info.deps[0]) == width_of(info.deps[1]) ? "slt_bridge" : "slt_widths_bridge";
+    } else if (info.op.kind == Operation::SGT && info.deps.size() == 2) {
+      bridge_call = width_of(info.deps[0]) == width_of(info.deps[1]) ? "sgt_bridge" : "sgt_widths_bridge";
     } else if ((info.op.kind == Operation::Sum && info.op.parameter == 1) && info.deps.size() == 2) {
       bridge_call = "sum1_bridge";
     } else {
@@ -214,6 +215,21 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
     ofs << "theorem " << base_name << "_rec" << info.id << " " << P << " : " << base_name << "_phi " << A << " " << info.id << " = "
         << eval_node_fn << " " << G << " (" << base_name << "_phi " << A << ") " << info.id << " := by\n";
     if (supported) {
+      if (sext_mode) {
+        // Reduce lookups separately: a direct `show` can unfold wide Sext
+        // arithmetic while checking definitional equality of the recurrence.
+        std::string args;
+        for (const auto dep : info.deps) {
+          if (!args.empty()) {
+            args += ", ";
+          }
+          args += mem_mode ? "CertVal.bv (" + phi_dep(dep) + ")" : phi_dep(dep);
+        }
+        const auto value = "bvenc (" + base_name + "_fv" + std::to_string(info.id) + " " + A + ")";
+        ofs << "  apply " << (mem_mode ? "evalNodeC_bridge" : "evalNode_bridge") << " " << G << " (" << base_name << "_phi " << A
+            << ") " << info.id << " (" << legacy_node_cert(info) << ") [" << args << "] ("
+            << (mem_mode ? "CertVal.bv (" + value + ")" : value) << ") (by rfl) (by rfl) (by rfl)\n";
+      }
       if (mem_mode) {
         const std::string ctor   = mem_result ? "CertVal.mem" : "CertVal.bv";
         const std::string enc    = mem_result ? "memenc" : "bvenc";

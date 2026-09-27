@@ -82,7 +82,7 @@ cc_library(
     srcs = ["emit_legacy_fast_bridge.cpp"],
     hdrs = ["emit_legacy_fast_bridge.hpp"],
     copts = COPTS,
-    deps = [":lean_legacy_fast_model"],
+    deps = [":lean_legacy_fast_model", ":lean_legacy_graph_cert"],
     visibility = ["//visibility:public"],
 )
 

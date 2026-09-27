@@ -144,13 +144,39 @@ TEST(LegacyModel, ArithmeticAndSimultaneousStateOracleFixtures) {
            {  "tiny_div_narrow",  ScanOp::Div,  4},
            {"tiny_sext_dynamic", ScanOp::Sext,  8},
            {   "tiny_slt_mixed",   ScanOp::LT,  1},
+           {   "tiny_sgt_mixed",   ScanOp::GT,  1},
            {    "tiny_sra_wide",  ScanOp::SRA, 16}
   }) {
     auto d                              = binary(op, width);
     d.name                              = name;
     d.inputs[1].width                   = 4;
     d.nodes[0].operands[1].driver.width = 4;
-    d.nodes[0].is_signed                = op == ScanOp::LT;
+    d.nodes[0].is_signed                = op == ScanOp::LT || op == ScanOp::GT;
+    designs.push_back(d);
+  }
+  for (const auto& [name, operand_width, result_width] : std::vector<std::tuple<std::string, uint32_t, uint32_t>>{
+           { "tiny_sext_trunc32",  64, 32},
+           { "tiny_sext_trunc64", 127, 64},
+           {  "tiny_sext_same32",  32, 32},
+           {"tiny_sext_memory64", 127, 64}
+  }) {
+    auto d                              = binary(ScanOp::Sext, result_width);
+    d.name                              = name;
+    d.inputs[0].width                   = operand_width;
+    d.nodes[0].operands[0].driver.width = operand_width;
+    d.nodes[0].operands[1].driver       = constant(std::to_string(result_width), result_width == 32 ? 6 : 7);
+    if (name == "tiny_sext_memory64") {
+      Memory memory;
+      memory.id         = 20;
+      memory.bits       = operand_width;
+      memory.addr_width = 1;
+      memory.size       = 2;
+      memory.ports.push_back({0, 0, constant("0", 1), {}, constant("1", 1), std::nullopt});
+      memory.read_ports = {0};
+      d.memories.emplace(memory.id, memory);
+      d.nodes[0].operands[0].driver = PinRef{PinKind::Memory, memory.id, 0, operand_width, 0, {}};
+      d.nodes.insert(d.nodes.begin(), {memory.id, ScanOp::Memory, 0, false, {}});
+    }
     designs.push_back(d);
   }
   DesignScan swap;
@@ -169,7 +195,16 @@ TEST(LegacyModel, ArithmeticAndSimultaneousStateOracleFixtures) {
   for (const auto& d : designs) {
     const auto         c = build_certificate(d, {});
     std::ostringstream legacy, verified;
-    emit_legacy_model(d, c, {}, legacy);
+    LegacyEmitOptions  options;
+    const bool         signed_compare = d.name == "tiny_slt_mixed" || d.name == "tiny_sgt_mixed";
+    options.emit_fast_bridge          = signed_compare || (d.name.starts_with("tiny_sext_") && d.name != "tiny_sext_dynamic");
+    emit_legacy_model(d, c, options, legacy);
+    if (signed_compare) {
+      EXPECT_NE(legacy.str().find(d.name == "tiny_slt_mixed" ? "slt_widths_bridge" : "sgt_widths_bridge"), std::string::npos);
+    }
+    if (d.name == "tiny_sext_memory64") {
+      EXPECT_NE(legacy.str().find("evalNodeC_bridge"), std::string::npos);
+    }
     emit_design_cert(d, c, verified);
     EXPECT_FALSE(legacy.str().empty());
     if (!destination) {

@@ -21,6 +21,31 @@ import LeanSemanticPrimitives.Translation.GraphRefine
 
 namespace OpBridge
 
+/-- Keep concrete graph lookup reduction separate from operator evaluation.
+This prevents elaboration of a local recurrence from unfolding wide arithmetic
+before its operator bridge lemma can be applied. -/
+theorem evalNode_bridge (G : GraphCert) (rho : Nat → BV) (n : Nat)
+    (c : NodeCert) (args : List BV) (v : BV)
+    (lookup : G.nodes n = some c) (deps : c.deps.map rho = args)
+    (value : rho n = v) (op : v = eval_op c.op c.width args) :
+    rho n = evalNode G rho n := by
+  unfold evalNode evalNodeG
+  rw [lookup]
+  change rho n = eval_op c.op c.width (c.deps.map rho)
+  rw [deps]
+  exact value.trans op
+
+theorem evalNodeC_bridge (G : GraphCert) (rho : Nat → CertVal) (n : Nat)
+    (c : NodeCert) (args : List CertVal) (v : CertVal)
+    (lookup : G.nodes n = some c) (deps : c.deps.map rho = args)
+    (value : rho n = v) (op : v = eval_op_cert c.op c.width args) :
+    rho n = evalNodeC G rho n := by
+  unfold evalNodeC evalNodeG
+  rw [lookup]
+  change rho n = eval_op_cert c.op c.width (c.deps.map rho)
+  rw [deps]
+  exact value.trans op
+
 /-- Encode a fixed-width `BitVec` as a runtime-width certificate `BV`.  Matches
 the `mk_bv w (Int.ofNat (BitVec.toNat _))` form the emitter uses in `sourceEnv`. -/
 def bvenc {w : Nat} (x : BitVec w) : BV := mk_bv w (Int.ofNat x.toNat)
@@ -678,6 +703,21 @@ theorem ror1_bridge {wa : Nat} (a : BitVec wa) :
   rw [show eval_op LGraphOp.Op_Ror 1 [bvenc a] = mk_bv 1 (if bitvec_nonzero a then (1:Int) else 0) from by
         simp [eval_op, bv_nonzero_bvenc]]
   rw [bvenc_bool]
+
+/-- Signed comparisons interpret each operand at its own width. -/
+theorem slt_widths_bridge {wa wb : Nat} (a : BitVec wa) (b : BitVec wb) :
+    eval_op LGraphOp.Op_SLT 1 [bvenc a, bvenc b]
+      = bvenc (bool_to_bv1 (a.toInt < b.toInt)) := by
+  rw [show eval_op LGraphOp.Op_SLT 1 [bvenc a, bvenc b]
+        = mk_bv 1 (if a.toInt < b.toInt then (1:Int) else 0) from by simp [eval_op, bv_sint_bvenc]]
+  rw [bvenc_bool]; simp only [decide_eq_true_eq]
+
+theorem sgt_widths_bridge {wa wb : Nat} (a : BitVec wa) (b : BitVec wb) :
+    eval_op LGraphOp.Op_SGT 1 [bvenc a, bvenc b]
+      = bvenc (bool_to_bv1 (a.toInt > b.toInt)) := by
+  rw [show eval_op LGraphOp.Op_SGT 1 [bvenc a, bvenc b]
+        = mk_bv 1 (if a.toInt > b.toInt then (1:Int) else 0) from by simp [eval_op, bv_sint_bvenc]]
+  rw [bvenc_bool]; simp only [decide_eq_true_eq]
 
 theorem slt_bridge {cw : Nat} (a b : BitVec cw) :
     eval_op LGraphOp.Op_SLT 1 [bvenc a, bvenc b]

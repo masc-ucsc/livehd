@@ -105,8 +105,15 @@ existing pinned `yosys-slang` archive checksum mismatch, before C++ compilation.
   retain explicit refusals (unsupported operators, clock/depth policies,
   initialized RAM, whole-array memory, undefined/unknown forwarding, malformed
   memory policy, and unsupported initialization forms).
-- Five additional owned-data oracles pass: narrow division, dynamic Sext,
-  unequal-width signed comparison, widening SRA, and simultaneous flop swap.
+- Six additional owned-data oracles pass: narrow division, dynamic Sext,
+  unequal-width signed less-than and greater-than comparisons, widening SRA,
+  and simultaneous flop swap. Both mixed-width comparisons also elaborate their
+  complete optional bridge proofs; `intpipe_alu` exposed the missing dispatch.
+- Four wide Sext regressions cover 64-to-32-bit truncation, 127-to-64-bit
+  truncation, equal 32-bit widths, and a 127-bit memory read truncated to 64 bits.
+  Their complete bridges and semantic oracles pass. Symbolic node-lookup lemmas
+  prevent elaboration from evaluating wide Sext arithmetic before applying the
+  operator lemma.
 - All 24 supported tiny mixed-chunk WF artifacts and one explicit constant-only
   chunk pass Lean and their axiom audits. Three unsupported simple shapes refuse
   by default. Dense uniqueness and multi-chunk composition are exercised by RAM.
@@ -127,21 +134,34 @@ hashes are recorded in [tests/LEGACY_SCALABILITY_RESULTS.json](tests/LEGACY_SCAL
 | Legacy artifact | Wall time | Peak RSS | Result |
 |---|---:|---:|---|
 | SingleCycleCPU, full chunked WF | 4:20.07 | 9.78 GiB | Pass |
+| PipelinedCPU, full chunked WF | 5:05.72 | 9.99 GiB | Pass |
+| PipelinedDualIssueCPU, full chunked WF | 19:44.96 | 18.50 GiB | Pass |
 | PipelinedCPU, default legacy | 3:32.47 | 4.80 GiB | Pass |
 | PipelinedDualIssueCPU, default legacy | 19:33.21 | 15.89 GiB | Pass |
 
 SingleCycle uses all 4,438 sources and 4,772 nodes: 191 chunks of up to 25
 certificates, no chunk limit and no fallback. The complete
 `SingleCycleCPU_graphCert_wf` theorem typechecks; its axiom audit has no `sorryAx`
-and explicitly lists 385 native-decision axioms. This completes the full DINO
-chunked-WF acceptance gate for L6. It measures one full design, not an asymptotic
-benchmark across design sizes. The two default legacy model checks run
-sequentially; the SingleCycle WF and tiny checks overlap them. Peak RSS is per
-Lean process. All three default DINO exports remain byte-identical after these
-review fixes.
+and explicitly lists 385 native-decision axioms. Pipelined uses all 5,061 nodes
+in 203 chunks; DualIssue uses all 10,740 nodes in 430 chunks. Their whole-graph
+WF theorems also pass without `sorryAx`, completing the three-variant L6 gate.
+These are structural certificate proofs. Fast/certificate equivalence requires
+the separate `emit_fast_bridge=true` run and its refinement theorem audits.
+
+The two default legacy model checks ran sequentially and overlapped the initial
+SingleCycle WF check. The later Pipelined and DualIssue WF-only checks overlapped
+three WF+bridge checks. Peak RSS is per Lean process; wall times reflect that
+loaded-server schedule. All three DINO WF+bridge exports remain byte-identical
+after adding support for mixed-width signed comparison bridges.
 
 No RTL frontend or LEC run is claimed here. These gates re-export saved graph
 DBs. Upstream RTL-to-LGraph LEC remains a separate validation gate.
+
+The expanded historical regression set and its distinct proof/typecheck gates
+are described in [LEGACY_PROOF_REPLAY.md](LEGACY_PROOF_REPLAY.md). It includes
+the ten previously proven CVA6 blocks, 69 CORE-ET cases, and eight small fixtures
+in addition to DINO. Export and structural-comparison results do not substitute
+for successful complete Lean checks.
 
 ## Reproduction and artifacts
 

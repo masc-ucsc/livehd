@@ -23,6 +23,22 @@ def structure(text):
             # Parentheses and whitespace only; do not normalize identifiers,
             # arithmetic, signs, widths, values, or memory/bitvector constructors.
             result['source_values'][sid] = re.sub(r'[\s()]', '', expr)
+    tree = re.search(r'def \w+_srcTree .*?:=\n(.*?)(?=\ndef )', text, re.S)
+    if tree:
+        # Bridge mode uses balanced lookups. Extract each parenthesized closure
+        # so source-value parity is checked here as well as in plain mode.
+        body = tree[1]
+        for match in re.finditer(r'BT.nd (\d+) \(', body):
+            start, end, depth = match.end(), match.end(), 1
+            while depth and end < len(body):
+                depth += (body[end] == '(') - (body[end] == ')')
+                end += 1
+            if depth:
+                raise ValueError('unbalanced source closure for ' + match[1])
+            expr = re.sub(r'^fun \w+(?: \w+)? => ', '', body[start:end - 1])
+            result['source_values'][match[1]] = re.sub(r'[\s()]', '', expr)
+    if set(result['source_values']) != {str(sid) for sid in basic['sources']}:
+        raise ValueError('could not extract every certificate source value')
     projection = re.search(r'def \w+_outputsFromCert .*?:=\n(.*?)(?=\ndef |\ntheorem )', text, re.S)
     result['outputs'] = re.sub(r'[\s()]', '', projection[1]) if projection else ''
     state = re.search(r'def \w+_nextStateFromCert .*?:=\n(.*?)(?=\ndef )', text, re.S)
