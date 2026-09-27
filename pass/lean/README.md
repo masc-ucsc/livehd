@@ -4,6 +4,11 @@
 is intentionally modeled after `pass.isabelle`, but it is a separate pass and a
 separate proof stack.
 
+On `b1-b2-verified-compiler`, use `formal.lean.mode=verified_compiler` to emit
+an owned-scan-based `DesignCert` for the proved compiler. See
+[B1_REFACTOR.md](B1_REFACTOR.md) for module interfaces and validation. The
+legacy mode described below remains a compatibility path.
+
 In macos, you may need to install Lean 4:
 ```
 brew install elan
