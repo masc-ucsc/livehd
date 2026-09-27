@@ -7,7 +7,9 @@ separate proof stack.
 On `b1-b2-verified-compiler`, use `formal.lean.mode=verified_compiler` to emit
 an owned-scan-based `DesignCert` for the proved compiler. See
 [B1_REFACTOR.md](B1_REFACTOR.md) for module interfaces and validation. The
-legacy mode described below remains a compatibility path.
+legacy mode described below remains a compatibility path. Both modes now use
+one owned scan and certificate pipeline; see [LEGACY_REFACTOR.md](LEGACY_REFACTOR.md)
+for the L0–L8 library boundaries, behavior changes, and current validation gates.
 
 In macos, you may need to install Lean 4:
 ```
@@ -33,7 +35,7 @@ brew install elan
 - `pass.lean` is registered as a LiveHD pass and currently emits:
   - concrete Lean input/output/state structures;
   - concrete `<Top>_comb`, `<Top>_next`, and `<Top>_step` definitions for the
-    supported non-memory graph subset;
+    supported bit-vector and memory graph subset;
   - concrete `NodeCert` lists and `GraphCert` data for the same topo-ordered
     graph nodes;
   - `outputsFromCert`, `nextStateFromCert`, `<Top>_comb_cert`,
@@ -456,8 +458,7 @@ designs and cost us a 26-minute run to discover) → the target module.
 **Expected work per module, in the order it will surface:**
 - **New op bridges.** CVA6 reaches ops DINO never used — `Mult`, `Div`/`UDiv`/
   `SDiv`, `SetMask`, wider `Sum` arities.  The emitter already flags an
-  unsupported op with a marked `sorry`, so the static gate catches it
-  immediately; each needs one `OpBridge` lemma in the established
+  unsupported bridge shape with an atomic export failure; each needs one `OpBridge` lemma in the established
   `eval_op OP w [bvenc …] = bvenc (fast …)` shape.
 - **Memories are a hard blocker.** `emit_fast_bridge` is gated on
   `memory_nodes.empty()`, so any module containing arrays is excluded until the
@@ -601,12 +602,10 @@ Same pipeline and same static gates as CVA6.  Work to scope first:
 
 ## Remaining Implementation Work
 
-1. Port scalable certificate checking.
-   - const-only chunks
-   - simple mixed chunks
-   - concrete dependency-list subset checks
-   - chunked uniqueness
-   - eventually dense topological certificates
+1. Scalable legacy certificate checking is implemented by
+   `emit_legacy_cert_wf` and `LegacyCertWF.lean`: symbolic constant chunks,
+   simple mixed shapes, concrete dependency subsets, and dense-slot uniqueness.
+   See [LEGACY_REFACTOR.md](LEGACY_REFACTOR.md) for options and limits.
 
 2. Emit per-design fast-view bridge theorems — **done, behind
    `--set formal.lean.emit_fast_bridge=true`** (see "Step 5 — fast-view bridge"

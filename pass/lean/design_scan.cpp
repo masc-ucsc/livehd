@@ -89,7 +89,6 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
   design.name   = std::string(graph.get_name());
   design.policy = options;
   lean_pass::LeanCtx ctx;
-  ctx.verified_compiler = true;
   ctx.g                 = &graph;
   ctx.strict            = options.strict;
   ctx.max_width         = options.max_width;

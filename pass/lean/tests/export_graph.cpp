@@ -7,8 +7,8 @@
 #include "pass_lean.hpp"
 
 int main(int argc, char** argv) {
-  if (argc < 4 || argc > 5) {
-    std::cerr << "usage: lean_export_graph LGDB TOP OUTPUT_DIR [legacy|verified_compiler]\n";
+  if (argc < 4) {
+    std::cerr << "usage: lean_export_graph LGDB TOP OUTPUT_DIR [legacy|verified_compiler] [LABEL=VALUE ...]\n";
     return 2;
   }
   try {
@@ -25,8 +25,16 @@ int main(int argc, char** argv) {
     Eprp_var var;
     var.add("path", argv[3]);
     var.add("top", argv[2]);
-    var.add("mode", argc == 5 ? argv[4] : "verified_compiler");
+    var.add("mode", argc >= 5 ? argv[4] : "verified_compiler");
     var.add("max_width", "unlimited");
+    for (int i = 5; i < argc; ++i) {
+      const std::string label = argv[i];
+      const auto        eq    = label.find('=');
+      if (eq == std::string::npos) {
+        throw std::invalid_argument("expected LABEL=VALUE: " + label);
+      }
+      var.add(label.substr(0, eq), label.substr(eq + 1));
+    }
     var.add(graph);
     Pass_lean::work(var);
     return 0;

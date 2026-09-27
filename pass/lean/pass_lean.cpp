@@ -8,6 +8,7 @@
 #include "diag.hpp"
 #include "emit_design_cert.hpp"
 #include "lean_format.hpp"
+#include "legacy_model.hpp"
 
 static Pass_plugin pass_plugin_lean("pass_lean", Pass_lean::setup);
 Pass_lean::Pass_lean(const Eprp_var& var) : Pass("pass.lean", var), LeanOptions(var) {}
@@ -21,9 +22,7 @@ void Pass_lean::setup() {
                         "true");
   m1.add_label_optional("normalize", "true|false. Normalize pre-export width artifacts (formal.normalize applies too)", "true");
   m1.add_label_optional("emit_cert", "true|false. Emit graph certificate and cert-model definitions.", "true");
-  m1.add_label_optional("emit_fast_bridge",
-                        "true|false. Emit the fast-view bridge (_comb=_comb_cert, step 5). Non-memory only.",
-                        "false");
+  m1.add_label_optional("emit_fast_bridge", "true|false. Emit the fast-view bridge (_comb=_comb_cert, step 5).", "false");
   m1.add_label_optional("mode",
                         "legacy|verified_compiler. verified_compiler emits ONLY <Top>_designCert; the model comes from "
                         "the proved compiler Compiler.compileDesign instead of from this pass.",
@@ -44,10 +43,6 @@ void Pass_lean::work(Eprp_var& var) {
 }
 
 void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const {
-  if (!verified_compiler) {
-    emit_legacy_graph(graph);
-    return;
-  }
   if (!graph) {
     livehd::diag::warn("pass.lean", "no-input", "io").msg("received a null Graph instance").emit();
     return;
@@ -58,8 +53,15 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   const auto base_name   = lean_export::sanitize_lean(raw_name);
   const auto output_dir  = (path == "/INVALID" || path.empty()) ? std::string(".") : path;
   const auto lean_path   = output_dir + "/" + base_name + "_Lgraph.lean";
-  lean_export::write_design_cert(base_name, certificate, lean_path);
-  std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " (verified_compiler: " << certificate.sources.size()
-            << " sources, " << certificate.nodes.size() << " nodes, " << certificate.flops.size() << " flops, "
-            << certificate.memories.size() << " memories)\n";
+  if (verified_compiler) {
+    lean_export::write_design_cert(base_name, certificate, lean_path);
+  } else {
+    const lean_export::LegacyEmitOptions
+        options{top, emit_cert, emit_fast_bridge, cert_wf, cert_wf_fallback, cert_chunk_size, cert_chunk_limit};
+    lean_export::write_atomic(lean_path,
+                              [&](std::ostream& out) { lean_export::emit_legacy_model(design, certificate, options, out); });
+  }
+  std::cout << "pass.lean: " << raw_name << " -> " << lean_path << (verified_compiler ? " (verified_compiler: " : " (legacy: ")
+            << certificate.sources.size() << " sources, " << certificate.nodes.size() << " nodes, " << certificate.flops.size()
+            << " flops, " << certificate.memories.size() << " memories)\n";
 }

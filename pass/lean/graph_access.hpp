@@ -68,9 +68,7 @@ struct Memory_port_info {
 
 struct Memory_info {
   Node                          node;
-  uint32_t                      nid = 0;
-  std::string                   field;
-  std::string                   raw_name;
+  uint32_t                      nid        = 0;
   uint32_t                      bits       = 0;
   uint32_t                      addr_width = 1;
   uint64_t                      size       = 0;
@@ -92,8 +90,7 @@ struct Memory_info {
   std::vector<Memory_port_info> ports;
   std::vector<size_t>           read_ports;
   std::vector<size_t>           write_ports;
-  bool                          sync = false;    // type == 1 (registered read data)
-  std::map<size_t, std::string> read_reg_field;  // port_id -> st_ read-data register field (sync only)
+  bool                          sync = false;  // type == 1 (registered read data)
 
   // Initialization / whole-array pins (graph/cell.cpp pids 11..14).  RECORDED
   // during the pin walk and CLASSIFIED after it: the strict ROM test needs the
@@ -115,42 +112,13 @@ struct Memory_info {
 };
 
 struct LeanCtx {
-  hhds::Graph* g = nullptr;
-  std::string  top_name;
-  std::string  base_name;
-  bool         strict            = true;
-  // `formal.lean.mode=verified_compiler`.  Read by parse_memory_info: features
-  // whose Lean counterpart exists ONLY in the verified-compiler model (ROM
-  // contents, async reset, a nonzero reset value) are accepted there and still
-  // refused on the legacy path, where the corresponding state is unconstrained.
-  bool         verified_compiler = false;
-  size_t       max_width         = 1024;
-
-  absl::flat_hash_set<std::string> used_fields;
-
-  std::map<std::string, std::string> input_field;
-  std::map<std::string, uint32_t>    input_width;
-  std::map<std::string, uint32_t>    input_source_id;
-
-  std::map<std::string, std::string> output_field;
-  std::map<std::string, uint32_t>    output_width;
-
-  std::map<uint32_t, std::string> flop_field;
+  hhds::Graph*                    g         = nullptr;
+  bool                            strict    = true;
+  size_t                          max_width = 1024;
+  std::map<std::string, uint32_t> input_width;
+  std::map<std::string, uint32_t> input_source_id;
   std::map<uint32_t, uint32_t>    flop_width;
-
   std::map<uint32_t, Memory_info> memory_info;
-  // (memory nid << 32 | read driver_pid) -> certificate id of that read port's
-  // Op_MemRead node.  Populated by cert_memory_expand; read by driver_expr, which
-  // in bridge mode must name the factored `fv` def (there is no let-chain to bind
-  // `n_<mem>_p<pid>`).
-  std::map<uint64_t, uint32_t>    mem_read_fv;
-
-  // Fast-view bridge (step 5) emission: when bridge_fv_mode is set, driver_expr
-  // references an internal node's value as a factored top-level def
-  // `<base>_fv<id><bridge_fv_args>` (e.g. " i" or " i s") instead of the local
-  // let name `n_<id>`, so φ and the per-node have-chain can name each value.
-  bool        bridge_fv_mode = false;
-  std::string bridge_fv_args;
 };
 
 [[noreturn]] void fatal(const LeanCtx& ctx, const std::string& msg);

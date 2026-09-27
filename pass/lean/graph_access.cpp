@@ -425,12 +425,6 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
       }
     }
 
-    if (!ctx.verified_compiler) {
-      fatal(ctx, memory_policy_summary(mi)
-                     + ". `init` (ROM contents) needs formal.lean.mode=verified_compiler. The legacy path's memory "
-                       "state is an UNCONSTRAINED function with no initial-state constraint, so accepting the "
-                       "contents there would prove a theorem about an arbitrary table.");
-    }
     mi.is_rom = true;
   }
 

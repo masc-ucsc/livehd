@@ -14,5 +14,4 @@ public:
 
 private:
   void emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const;
-  void emit_legacy_graph(const std::shared_ptr<hhds::Graph>& graph) const;
 };

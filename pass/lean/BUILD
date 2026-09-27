@@ -77,13 +77,23 @@ cc_library(
 )
 
 cc_library(
+    name = "lean_legacy_emitter",
+    srcs = ["legacy_model.cpp"],
+    hdrs = ["legacy_model.hpp"],
+    copts = COPTS,
+    deps = [":lean_legacy_schema", ":lean_legacy_fast_model", ":lean_legacy_graph_cert", ":lean_legacy_cert_wf", ":lean_legacy_bridge"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "pass_lean",
-    srcs = ["pass_lean.cpp", "lean_options.cpp", "legacy_model.cpp"],
-    hdrs = ["pass_lean.hpp", "lean_options.hpp", "legacy_support.hpp"],
+    srcs = ["pass_lean.cpp", "lean_options.cpp"],
+    hdrs = ["pass_lean.hpp", "lean_options.hpp"],
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        ":lean_legacy_emitter",
         ":lean_graph_scan",
         ":lean_emitters",
         "//graph",
@@ -123,7 +133,14 @@ cc_test(
     deps = [":lean_graph_scan", ":lean_emitters", "//graph", "@googletest//:gtest_main"],
 )
 
+cc_test(
+    name = "legacy_model_test",
+    srcs = ["legacy_model_test.cpp"],
+    copts = COPTS,
+    deps = [":lean_legacy_emitter", "@googletest//:gtest_main"],
+)
+
 test_suite(
     name = "lean_export_tests",
-    tests = [":certificate_ir_test", ":design_scan_test"],
+    tests = [":certificate_ir_test", ":design_scan_test", ":legacy_model_test"],
 )
