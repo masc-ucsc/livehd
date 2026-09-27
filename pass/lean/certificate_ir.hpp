@@ -60,6 +60,9 @@ struct Output {
   uint32_t id = 0, width = 0;
 };
 struct FlopDriver {
+  // Origin is diagnostic/schema provenance, never a second semantic ID.
+  uint32_t                origin = 0;
+  std::optional<size_t>   read_port;
   uint32_t                width = 0, din = 0;
   std::optional<uint32_t> enable, reset_pin;
   std::string             reset_value      = "0";
@@ -67,6 +70,7 @@ struct FlopDriver {
 };
 struct MemoryDriver {
   uint32_t addr_w = 0, data_w = 0, next_img = 0;
+  uint32_t origin = 0;
 };
 struct CertificateIR {
   std::vector<Source>          sources;

@@ -230,7 +230,8 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
   // Allocate sources in graph iteration order, preserve runtime ordinals by nid.
   for (const auto& f : design.flops) {
     FlopDriver driver;
-    driver.width = f.width;
+    driver.origin = f.id;
+    driver.width  = f.width;
     if (!f.din) {
       fail("flop n_" + std::to_string(f.id) + " has no `din` driver.");
     }

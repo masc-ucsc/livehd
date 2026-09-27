@@ -6,7 +6,10 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "certificate_ir.hpp"
 namespace lean_export {
+std::string format_op(const Op& op);
 std::string sanitize_lean(std::string_view name);
 std::string lean_integer(std::string_view decimal);
 std::string nat_array(const std::vector<uint32_t>& values);

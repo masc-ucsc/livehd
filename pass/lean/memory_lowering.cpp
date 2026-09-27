@@ -66,8 +66,10 @@ void lower_memory(CertificateBuilder& b, const Memory& m) {
       const auto enable = resize(p.enable, b.pin_width(p.enable));
       const auto next   = b.emit({Operation::MuxBool, 0, {}}, m.bits, {enable, reg.id, raw});
       FlopDriver f;
-      f.width = m.bits;
-      f.din   = next;
+      f.origin    = m.id;
+      f.read_port = p.port_id;
+      f.width     = m.bits;
+      f.din       = next;
       b.read_registers.emplace(reg.id, f);
       b.memory_reads.emplace(key, reg.id);
     } else {
@@ -82,7 +84,7 @@ void lower_memory(CertificateBuilder& b, const Memory& m) {
   }
   const auto next = chain(all);
   if (!m.is_rom) {
-    b.memory_drivers.emplace(m.id, MemoryDriver{m.addr_width, m.bits, next});
+    b.memory_drivers.emplace(m.id, MemoryDriver{m.addr_width, m.bits, next, m.id});
   }
 }
 }  // namespace lean_export::detail

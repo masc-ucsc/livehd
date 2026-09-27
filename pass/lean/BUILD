@@ -32,6 +32,15 @@ cc_library(
 )
 
 cc_library(
+    name = "lean_legacy_schema",
+    srcs = ["emit_legacy_schema.cpp"],
+    hdrs = ["emit_legacy_schema.hpp"],
+    copts = COPTS,
+    deps = [":lean_emitters"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "pass_lean",
     srcs = ["pass_lean.cpp", "lean_options.cpp", "legacy_model.cpp"],
     hdrs = ["pass_lean.hpp", "lean_options.hpp", "legacy_support.hpp"],

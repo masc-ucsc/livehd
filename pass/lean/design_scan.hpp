@@ -55,6 +55,7 @@ struct Flop {
   bool                    active_low   = false;
   std::string             initial      = "0";
   std::optional<uint32_t> reset_input;
+  std::string             raw_name;
 };
 struct MemoryPort {
   size_t                port_id    = 0;
@@ -73,6 +74,7 @@ struct Memory {
   std::vector<std::string> rom_contents;
   std::vector<MemoryPort>  ports;
   std::vector<size_t>      read_ports, write_ports;
+  std::string              raw_name;
 };
 // No graph handles or formatting state survive scanning. Safe to use after the
 // graph is closed, and reusable by consumers that do not link HHDS or EPRP.

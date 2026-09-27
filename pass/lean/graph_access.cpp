@@ -10,7 +10,7 @@ std::string input_name_for_pin(const LeanCtx& ctx, const Node_pin& pin) {
   // pin_name_of resolves a graph-input pin's declared port name directly (via
   // the graph's IO maps); no need to identity-match against get_input_pin.
   auto pname = std::string(livehd::graph_util::pin_name_of(pin));
-  if (!pname.empty() && ctx.input_field.contains(pname)) {
+  if (!pname.empty() && ctx.input_width.contains(pname)) {
     return pname;
   }
   return {};

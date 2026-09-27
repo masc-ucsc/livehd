@@ -7,35 +7,6 @@
 namespace lean_export {
 namespace {
 std::string opt_nat(const std::optional<uint32_t>& n) { return n ? "some " + std::to_string(*n) : "none"; }
-std::string format_op(const Op& op) {
-  switch (op.kind) {
-    case Operation::Const     : return std::string("LGraphOp.Op_Const") + " (" + lean_integer(op.value) + ")";
-    case Operation::Sum       : return std::string("LGraphOp.Op_Sum") + " " + std::to_string(op.parameter);
-    case Operation::Mult      : return std::string("LGraphOp.Op_Mult");
-    case Operation::UDiv      : return std::string("LGraphOp.Op_UDiv");
-    case Operation::And       : return std::string("LGraphOp.Op_And");
-    case Operation::Or        : return std::string("LGraphOp.Op_Or");
-    case Operation::Xor       : return std::string("LGraphOp.Op_Xor");
-    case Operation::Ror       : return std::string("LGraphOp.Op_Ror");
-    case Operation::EQ        : return std::string("LGraphOp.Op_EQ");
-    case Operation::Not       : return std::string("LGraphOp.Op_Not");
-    case Operation::SLT       : return std::string("LGraphOp.Op_SLT");
-    case Operation::ULT       : return std::string("LGraphOp.Op_ULT");
-    case Operation::SGT       : return std::string("LGraphOp.Op_SGT");
-    case Operation::UGT       : return std::string("LGraphOp.Op_UGT");
-    case Operation::SHL       : return std::string("LGraphOp.Op_SHL");
-    case Operation::SRA       : return std::string("LGraphOp.Op_SRA");
-    case Operation::MuxBool   : return std::string("LGraphOp.Op_MuxBool");
-    case Operation::MuxN      : return std::string("LGraphOp.Op_MuxN");
-    case Operation::Sext      : return std::string("LGraphOp.Op_Sext");
-    case Operation::GetMask   : return std::string("LGraphOp.Op_GetMask");
-    case Operation::SetMask   : return std::string("LGraphOp.Op_SetMask");
-    case Operation::MemRead   : return std::string("LGraphOp.Op_MemRead");
-    case Operation::MemWrite  : return std::string("LGraphOp.Op_MemWrite");
-    case Operation::MemWriteBE: return std::string("LGraphOp.Op_MemWriteBE") + " " + std::to_string(op.parameter);
-  }
-  throw std::invalid_argument("unknown certificate operation");
-}
 }  // namespace
 void emit_design_cert(const std::string& base, const CertificateIR& d, std::ostream& os) {
   // ---- sources ------------------------------------------------------------

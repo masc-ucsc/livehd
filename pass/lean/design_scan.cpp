@@ -20,6 +20,16 @@ std::string decimal(const LeanCtx& ctx, const Node_pin& pin) {
   return value.is_known_zero() ? "0" : value.is_just_i64() ? std::to_string(value.to_just_i64()) : value.to_decimal_string();
 }
 
+std::string state_name(const Node& node, std::string_view prefix) {
+  for (const auto& edge : node.out_edges()) {
+    const auto name = livehd::graph_util::wire_name(edge.driver);
+    if (!name.empty() && name.front() != '_') {
+      return std::string(name);
+    }
+  }
+  return std::string(prefix) + std::to_string(node_id(node));
+}
+
 PinRef capture_pin(const LeanCtx& ctx, const Node_pin& pin) {
   PinRef     result;
   const auto node = pin_node(pin);
@@ -79,10 +89,10 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
   design.name   = std::string(graph.get_name());
   design.policy = options;
   lean_pass::LeanCtx ctx;
+  ctx.verified_compiler = true;
   ctx.g                 = &graph;
   ctx.strict            = options.strict;
   ctx.max_width         = options.max_width;
-  ctx.verified_compiler = true;  // shared compatibility parser's ROM capability
   const auto gio        = graph.get_io();
   uint32_t   next_input = 2000000000;
   for (const auto& decl : gio->get_input_pin_decls()) {
@@ -90,7 +100,6 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
     const auto pin   = graph.get_input_pin(decl.name);
     const auto width = static_cast<uint32_t>(livehd::graph_util::bits_of(pin, *gio, decl.name));
     check_width(ctx, pin_node(pin), width, "input port");
-    ctx.input_field[name]     = name;
     ctx.input_width[name]     = width;
     ctx.input_source_id[name] = next_input++;
   }
@@ -102,7 +111,7 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
     const auto pin   = graph.get_output_pin(decl.name);
     const auto width = static_cast<uint32_t>(livehd::graph_util::bits_of(pin, *gio, decl.name));
     check_width(ctx, pin_node(pin), width, "output port");
-    design.outputs.push_back({std::string(decl.name), 0, width, std::nullopt});
+    design.outputs.push_back({std::string(decl.name), static_cast<uint32_t>(design.outputs.size()), width, std::nullopt});
   }
   std::vector<Node> flop_nodes, memory_nodes;
   for (const auto node : graph.fast_class()) {
@@ -119,6 +128,7 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
     const auto info = parse_memory_info(ctx, node);
     Memory     m;
     m.id           = info.nid;
+    m.raw_name     = state_name(node, "mem_");
     m.bits         = info.bits;
     m.addr_width   = info.addr_width;
     m.size         = info.size;
@@ -163,8 +173,9 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
   std::map<uint32_t, Node_pin> flop_din, flop_reset, flop_enable;
   for (const auto& node : flop_nodes) {
     Flop f;
-    f.id    = node_id(node);
-    f.width = ctx.flop_width.at(f.id);
+    f.id       = node_id(node);
+    f.raw_name = state_name(node, "flop_");
+    f.width    = ctx.flop_width.at(f.id);
     for (const auto& e : inp_edges_ordered(node)) {
       const auto name = sink_pin_name(e);
       if (name == "din") {
