@@ -1,0 +1,477 @@
+{
+  "scope": "Textual expression differences; casts and equivalent formatting remain differences. Not semantic equivalence proof.",
+  "counts": {
+    "LGraphOp.Op_SLT": 122,
+    "LGraphOp.Op_SGT": 7
+  },
+  "examples": {
+    "LGraphOp.Op_SLT": {
+      "top": "intpipe_alu",
+      "node": 676,
+      "before": "(bool_to_bv1 (BitVec.toInt ((bv_zext n_14240) : BitVec 7) < BitVec.toInt ((bv_zext (BitVec.ofInt 7 ((Int.ofNat 64)))) : BitVec 7)))",
+      "after": "(bool_to_bv1 (BitVec.toInt (n_14240) < BitVec.toInt (BitVec.ofInt 7 ((Int.ofNat 64)))))"
+    },
+    "LGraphOp.Op_SGT": {
+      "top": "txfma_c2",
+      "node": 716,
+      "before": "(bool_to_bv1 (BitVec.toInt ((bv_zext n_4448) : BitVec 32) > BitVec.toInt ((bv_zext (BitVec.ofInt 32 (0))) : BitVec 32)))",
+      "after": "(bool_to_bv1 (BitVec.toInt (n_4448) > BitVec.toInt (BitVec.ofInt 32 (0))))"
+    }
+  },
+  "by_case": [
+    {
+      "top": "intpipe_alu",
+      "textual_expression_changes_by_operator": {
+        "LGraphOp.Op_SLT": 30
+      },
+      "certificate_node_count": 5118,
+      "matched_node_expression_count": 5118,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "cva6_alu_export",
+      "textual_expression_changes_by_operator": {
+        "LGraphOp.Op_SLT": 25
+      },
+      "certificate_node_count": 6305,
+      "matched_node_expression_count": 6305,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "cva6_compressed_decoder_gate",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 1946,
+      "matched_node_expression_count": 1946,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "cva6_instr_scan_gate",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 638,
+      "matched_node_expression_count": 638,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "cva6_pmp_gate",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 5344,
+      "matched_node_expression_count": 5344,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "cva6_raw_checker_gate",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 345,
+      "matched_node_expression_count": 345,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "debug_breakpoint",
+      "textual_expression_changes_by_operator": {
+        "LGraphOp.Op_SLT": 1
+      },
+      "certificate_node_count": 165,
+      "matched_node_expression_count": 165,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "intpipe_decode",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 6659,
+      "matched_node_expression_count": 6659,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "intpipe_fp_scoreboard",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 1427,
+      "matched_node_expression_count": 1427,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "intpipe_imm",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 242,
+      "matched_node_expression_count": 242,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "intpipe_inst_bits_stage",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 176,
+      "matched_node_expression_count": 176,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "intpipe_int_scoreboard",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 1095,
+      "matched_node_expression_count": 1095,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "intpipe_mask_scoreboard",
+      "textual_expression_changes_by_operator": {
+        "LGraphOp.Op_SLT": 8
+      },
+      "certificate_node_count": 953,
+      "matched_node_expression_count": 953,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "intpipe_rf",
+      "textual_expression_changes_by_operator": {
+        "LGraphOp.Op_SLT": 2
+      },
+      "certificate_node_count": 1618,
+      "matched_node_expression_count": 1618,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "minion_dcache_atomic_alu_unit",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 919,
+      "matched_node_expression_count": 919,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "minion_dcache_lru_array",
+      "textual_expression_changes_by_operator": {
+        "LGraphOp.Op_SLT": 1
+      },
+      "certificate_node_count": 286,
+      "matched_node_expression_count": 286,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "minion_dcache_miss_handler",
+      "textual_expression_changes_by_operator": {
+        "LGraphOp.Op_SLT": 2
+      },
+      "certificate_node_count": 1663,
+      "matched_node_expression_count": 1663,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "minion_dcache_pma_unit",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 532,
+      "matched_node_expression_count": 532,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "minion_dcache_scratchpad_ctrl",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 165,
+      "matched_node_expression_count": 165,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "minion_dcache_store_merge_unit",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 3152,
+      "matched_node_expression_count": 3152,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "minion_dcache_writeback_unit",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 357,
+      "matched_node_expression_count": 357,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "minion_frontend_rvc_expander",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 1829,
+      "matched_node_expression_count": 1829,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "prim_phase_pair_lo_hi",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 37,
+      "matched_node_expression_count": 37,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "prim_write_commit_en",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 20,
+      "matched_node_expression_count": 20,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "prim_write_commit_rst_en",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 23,
+      "matched_node_expression_count": 23,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "tima_adder",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 4,
+      "matched_node_expression_count": 4,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_4_2_compressor",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 42,
+      "matched_node_expression_count": 42,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_4_2_compressor_array",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 4048,
+      "matched_node_expression_count": 4048,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_align_shf",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 3,
+      "matched_node_expression_count": 3,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_booth_ppg_32r4_msb",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 11,
+      "matched_node_expression_count": 11,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_c0",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 2902,
+      "matched_node_expression_count": 2902,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_c1",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 178,
+      "matched_node_expression_count": 178,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_c2",
+      "textual_expression_changes_by_operator": {
+        "LGraphOp.Op_SLT": 4,
+        "LGraphOp.Op_SGT": 3
+      },
+      "certificate_node_count": 1785,
+      "matched_node_expression_count": 1785,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_c3",
+      "textual_expression_changes_by_operator": {
+        "LGraphOp.Op_SLT": 2,
+        "LGraphOp.Op_SGT": 1
+      },
+      "certificate_node_count": 2030,
+      "matched_node_expression_count": 2030,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_c4",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 303,
+      "matched_node_expression_count": 303,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_c5",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 601,
+      "matched_node_expression_count": 601,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_c6",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 1320,
+      "matched_node_expression_count": 1320,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_csa",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 21,
+      "matched_node_expression_count": 21,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_e1",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 489,
+      "matched_node_expression_count": 489,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_e2",
+      "textual_expression_changes_by_operator": {
+        "LGraphOp.Op_SLT": 1,
+        "LGraphOp.Op_SGT": 1
+      },
+      "certificate_node_count": 2161,
+      "matched_node_expression_count": 2161,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_e4",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 3,
+      "matched_node_expression_count": 3,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_e6",
+      "textual_expression_changes_by_operator": {
+        "LGraphOp.Op_SGT": 2,
+        "LGraphOp.Op_SLT": 2
+      },
+      "certificate_node_count": 133,
+      "matched_node_expression_count": 133,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_ediff_opdorder_logic",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 1445,
+      "matched_node_expression_count": 1445,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_exp_special_detect",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 360,
+      "matched_node_expression_count": 360,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_f4",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 4028,
+      "matched_node_expression_count": 4028,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_frac_zero_detect",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 4,
+      "matched_node_expression_count": 4,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_lxd",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 2659,
+      "matched_node_expression_count": 2659,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_norm_shf",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 19,
+      "matched_node_expression_count": 19,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_rnd_adder",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 35,
+      "matched_node_expression_count": 35,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_trz",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 167,
+      "matched_node_expression_count": 167,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_trz2",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 1189,
+      "matched_node_expression_count": 1189,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_wallace1",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 11043,
+      "matched_node_expression_count": 11043,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "txfma_wallace2",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 6515,
+      "matched_node_expression_count": 6515,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "vpu_bypass",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 554,
+      "matched_node_expression_count": 554,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "vpu_decoder",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 4844,
+      "matched_node_expression_count": 4844,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "vpu_ml",
+      "textual_expression_changes_by_operator": {
+        "LGraphOp.Op_SLT": 22
+      },
+      "certificate_node_count": 5046,
+      "matched_node_expression_count": 5046,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "vpu_tensorfma",
+      "textual_expression_changes_by_operator": {
+        "LGraphOp.Op_SLT": 19
+      },
+      "certificate_node_count": 2971,
+      "matched_node_expression_count": 2971,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "vpu_tensorquant",
+      "textual_expression_changes_by_operator": {
+        "LGraphOp.Op_SLT": 3
+      },
+      "certificate_node_count": 1436,
+      "matched_node_expression_count": 1436,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "vpu_tensorreduce",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 546,
+      "matched_node_expression_count": 546,
+      "unmatched_node_ids": []
+    },
+    {
+      "top": "vpu_uinst_decoder",
+      "textual_expression_changes_by_operator": {},
+      "certificate_node_count": 572,
+      "matched_node_expression_count": 572,
+      "unmatched_node_ids": []
+    }
+  ],
+  "total_nodes": 100481,
+  "total_matched": 100481
+}

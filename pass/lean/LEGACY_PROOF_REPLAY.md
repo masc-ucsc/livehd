@@ -5,8 +5,11 @@ blocks, 69 CORE-ET cases (including three primitive fixtures), and eight small
 arithmetic/register/memory fixtures. This is the legacy named fast model's
 fast/certificate bridge. Verified-compiler proof ledgers are separate evidence.
 
-The expanded full bridge replay is in progress. The inventory defines coverage;
-it does not mean all listed artifacts have passed the new check.
+The corrected DINO WF+bridge checks pass for all three variants. At the
+2026-09-28T04:07:56+00:00 snapshot, 65/87 historical checks pass, one is running,
+and 21 are queued. Eight passes are saved-artifact compatibility checks.
+Every case and measurement is recorded in [LEGACY_PROOF_COVERAGE.md](LEGACY_PROOF_COVERAGE.md);
+pending cases are not accepted as proven.
 
 ## Inventory and provenance
 
@@ -100,3 +103,9 @@ The replay uses saved graph databases. It does not rerun RTL elaboration or LEC.
 The separate `lhd` dependency fetch currently encounters the pinned
 `yosys-slang` archive checksum mismatch; the standalone Lean exporter and its
 C++ tests build successfully.
+
+The historical/current semantic differences and their commit provenance are
+recorded in [LEGACY_SEMANTIC_AUDIT.md](LEGACY_SEMANTIC_AUDIT.md). A new matched-input
+baseline export audit accepts 60/79 with matching certificate/source structure;
+the other 19 refuse asynchronous reset in the old legacy exporter. This separates
+older saved-artifact differences from changes introduced by the legacy refactor.

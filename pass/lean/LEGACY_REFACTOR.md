@@ -136,6 +136,9 @@ hashes are recorded in [tests/LEGACY_SCALABILITY_RESULTS.json](tests/LEGACY_SCAL
 | SingleCycleCPU, full chunked WF | 4:20.07 | 9.78 GiB | Pass |
 | PipelinedCPU, full chunked WF | 5:05.72 | 9.99 GiB | Pass |
 | PipelinedDualIssueCPU, full chunked WF | 19:44.96 | 18.50 GiB | Pass |
+| SingleCycleCPU, full WF + fast bridge | 24:14.13 | 14.56 GiB | Pass |
+| PipelinedCPU, full WF + fast bridge | 25:20.65 | 15.71 GiB | Pass |
+| PipelinedDualIssueCPU, full WF + fast bridge | 57:09.31 | 30.11 GiB | Pass |
 | PipelinedCPU, default legacy | 3:32.47 | 4.80 GiB | Pass |
 | PipelinedDualIssueCPU, default legacy | 19:33.21 | 15.89 GiB | Pass |
 
@@ -200,3 +203,10 @@ For the other two legacy models, export with `legacy` and no optional proof
 flags, then time the complete `PipelinedCPU_Lgraph.lean` and
 `PipelinedDualIssueCPU_Lgraph.lean` files in the same way. Review-run logs are
 under `generated/legacy_refactor/review/`; the JSON records their relative paths.
+
+The corrected full DINO WF+bridge proofs pass for all three variants with no
+`sorryAx`. The committed [coverage snapshot](LEGACY_PROOF_COVERAGE.md) lists all
+90 replay cases, including 68 passes and 22 unfinished checks, plus the earlier
+export and fixture coverage. The [semantic audit](LEGACY_SEMANTIC_AUDIT.md)
+distinguishes historical fixes, newly enabled legacy support, and fast-renderer
+changes. Current bridge success is not a claim of general old/new equivalence.
