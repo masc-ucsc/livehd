@@ -178,7 +178,9 @@ void uPass_bitwidth::clear_range(std::string_view name) {
   if (name.empty()) {
     return;
   }
-  if (runner_st != nullptr) {
+  // Like write_bw, only scalar names have a writable range entry. A call
+  // result may name a dotted instance/bundle path, which is not a bare var.
+  if (runner_st != nullptr && name.find('.') == std::string_view::npos) {
     if (auto b = runner_st->get_bundle_for_write(name); b && (b->is_empty() || b->has_trivial(bundle_path::of_string("0")))) {
       Bundle::Entry e = b->get_entry(bundle_path::of_string("0"));
       e.immutable     = false;

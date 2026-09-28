@@ -529,6 +529,8 @@ Mem_sig read_mem_sig(const hhds::Node_class& node) {
       if (gu::is_const_pin(e.driver)) {
         sig.size = static_cast<int>(gu::hydrate_const(e.driver).to_just_i64());
       }
+    } else if (pin_name == "type" && gu::is_const_pin(e.driver)) {
+      sig.is_comb = gu::hydrate_const(e.driver).to_just_i64() == 2;
     } else if (std::string_view(pin_name).find("rdport") != std::string_view::npos) {
       if (gu::is_const_pin(e.driver)) {
         if (gu::hydrate_const(e.driver).is_known_false()) {
@@ -548,7 +550,7 @@ Mem_sig read_mem_sig(const hhds::Node_class& node) {
 // count of prior same-signature memories in forward_class() order) disambiguates
 // multiple identical memories. Both designs enumerate in the same RTL order, so
 // corresponding memories collapse to one shared array symbol. See M4 in lec.md.
-// NOTE: the key is the size×bits SHAPE + occurrence ONLY — deliberately NOT the
+// NOTE: the key is storage kind + size×bits + occurrence — deliberately NOT the
 // read/write PORT COUNTS. The shared symbol is the memory's INITIAL CONTENTS, which
 // depend only on the array shape, not on how many ports access it. firtool unrolls a
 // dynamic write `regs[wr]<=d` into ~N const-address write ports, so the same RTL array
@@ -558,9 +560,14 @@ Mem_sig read_mem_sig(const hhds::Node_class& node) {
 // (both designs enumerate memories in the same RTL order) is the same premise already used
 // for flop-state correspondence; the per-design read/write topology is still honored when
 // building each side's next-state relation.
-std::string mem_state_key(const Mem_sig& sig, int occ) {
-  return std::format("\x01m:{}x{}#{}", sig.size, sig.bits, occ);
+std::string mem_shape_key(const Mem_sig& sig) {
+  // A combinational scratch array cannot correspond to a register array.
+  // Keep its occurrence counter separate so adding/removing scratch storage
+  // in one frontend does not shift the persistent-state correspondence.
+  return std::format("{}{}x{}", sig.is_comb ? "comb:" : "", sig.size, sig.bits);
 }
+
+std::string mem_state_key(const Mem_sig& sig, int occ) { return std::format("\x01m:{}#{}", mem_shape_key(sig), occ); }
 
 // Structural node identity within one design (see encode.hpp). Must stay in
 // lock-step with the encoder's pinkey convention (INVALID -> ROOT), so the
@@ -1034,7 +1041,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     if (mc.sig.bits <= 0 || mc.sig.size <= 0) {
       return fail("memory '" + gu::debug_name(node) + "' missing bits/size");
     }
-    std::string sg = std::to_string(mc.sig.size) + "x" + std::to_string(mc.sig.bits);  // shape only; occ matches by RTL order
+    std::string sg = mem_shape_key(mc.sig);  // storage kind + shape; occurrence follows RTL order
     mc.key = mem_state_key(mc.sig, mem_occ[sg]++);
     mc.ignored = mem_ignored(node);
     // ---- FAIL CLOSED on a memory clocked by anything but the reference clock.
@@ -1191,7 +1198,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // outputs makes equal inits PROVE and differing inits REFUTE.
     Sort asort  = tm_.mkArraySort(bv(mc.sig.addr_w), bv(mc.sig.bits));
     mc.is_rom   = (!mc.is_comb && !mc.is_whole && mc.sig.n_wr == 0 && !mc.init.is_invalid());
-    if (shared_mems != nullptr && !mc.is_rom) {
+    if (shared_mems != nullptr && !mc.is_rom && !mc.is_comb) {
       if (auto it = shared_mems->find(mc.key); it != shared_mems->end()) {
         mc.a_cur        = it->second;
         mc.a_cur_shared = true;

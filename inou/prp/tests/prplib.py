@@ -517,8 +517,11 @@ class PrpRunner:
         # independent oracle is the v2prp2v original-Verilog leg plus
         # lhd/tests/single_edge_four_classes_test.sh (Icarus on source vs
         # normalized netlists).
+        # Some legal RTL shapes (e.g. blocking assignments to flop state)
+        # need the Yosys reader. The proof still uses our own LEC engine.
+        equiv_reader = (test.params.get('equiv_reader') or 'slang').strip()
         lec_cmd = [self.lhd, 'lec', '--impl', 'verilog:' + impl, '--ref', 'verilog:' + gold,
-                   '--impl-top', pyrope_top, '--ref-top', verilog_top, '--reader', 'slang',
+                   '--impl-top', pyrope_top, '--ref-top', verilog_top, '--reader', equiv_reader,
                    '--workdir', os.path.join(odir, 'w_lec')]
         lec = subprocess.Popen(lec_cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:

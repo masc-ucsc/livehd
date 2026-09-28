@@ -30,8 +30,8 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
 # 1. Total solver budget. Two hard 32-bit multiply identities plus one trivial
-#    sibling. engine=bmc (one strategy, no fork). A generous outer wall-clock cap
-#    confirms the run does NOT spend timeout PER hard obligation.
+#    sibling. engine=bmc (one strategy, no fork). A generous engine-time cap
+#    excludes frontend compilation while checking the shared solver budget.
 # ---------------------------------------------------------------------------
 cat >"$W/hard2.prp" <<'EOF'
 mod hard2(a:u32, b:u32, c:u32, en:bool) -> (o:u8@[0]) {
@@ -90,9 +90,13 @@ grep -qE "spec_mining_timeout core \([1-9][0-9]*/[0-9]+ obligation" "$W/budget.o
   || fail "the timeout-core must report a non-empty toxic subset: $(cat "$W/budget.out")"
 grep -q "distrib" "$W/budget.out" \
   || fail "the toxic core must name a hard (distrib) obligation: $(cat "$W/budget.out")"
-if [ "$elapsed" -ge 10 ]; then
-  fail "total solver budget not honored: ${elapsed}s (want < 10s)"
-fi
+# Compilation is outside the solver budget. Use the engine's elapsed time,
+# including timeout-core diagnosis, rather than timing the frontend as well.
+python3 - "$W/budget/formal_report.json" <<'PYEOF' || fail "total solver budget not honored"
+import json, sys
+engine_ms = json.load(open(sys.argv[1]))["run"]["elapsed_ms"]
+assert 0 < engine_ms < 10000, f"formal engine took {engine_ms}ms (want < 10000ms)"
+PYEOF
 echo "ok: strict inconclusive policy, shared budget, floor disclosure, and timeout core checked in ${elapsed}s"
 echo "ok: spec_mining_timeout named the toxic obligation core"
 
