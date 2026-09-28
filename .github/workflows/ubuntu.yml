@@ -2,7 +2,13 @@ name: Ubuntu
 
 on:
   push:
+    branches: [master]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test-opt:
@@ -16,12 +22,14 @@ jobs:
         uses: actions/checkout@v7
 
 
-      - name: Mount bazel cache
-        uses: actions/cache@v6.1.0
+      - name: Restore bazel cache
+        id: bazel-cache
+        uses: actions/cache/restore@v6.1.0
         with:
           path: "~/.cache/bazel"
-          key: bazel-gcc-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}
+          key: bazel-gcc-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
+            bazel-gcc-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}-
             bazel-gcc-${{ runner.os }}-
             bazel-gcc-
 
@@ -30,7 +38,17 @@ jobs:
           "$CC" --version
           "$CXX" --version
 
-      - run: bazel test -c dbg -s //...
+      - run: bazel test -c dbg --test_output=errors //...
+
+      # Preserve completed build actions even when a later build or test fails.
+      # Per-run keys let a restored partial cache grow instead of freezing it.
+      - name: Save bazel cache
+        if: ${{ !cancelled() && steps.bazel-cache.outputs.cache-primary-key != '' && steps.bazel-cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: "~/.cache/bazel"
+          key: ${{ steps.bazel-cache.outputs.cache-primary-key }}
 
   coverage:
     name: Gather coverage metrics
@@ -45,12 +63,14 @@ jobs:
         uses: actions/checkout@v7
 
 
-      - name: Mount bazel cache
-        uses: actions/cache@v6.1.0
+      - name: Restore bazel cache
+        id: bazel-cache
+        uses: actions/cache/restore@v6.1.0
         with:
           path: "~/.cache/bazel"
-          key: bazel-coverage-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}
+          key: bazel-coverage-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
+            bazel-coverage-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}-
             bazel-coverage-${{ runner.os }}-
             bazel-coverage-
 
@@ -68,7 +88,16 @@ jobs:
         continue-on-error: true
         # Same instrumentation filter as scripts/getcov.sh so the dashboard
         # measures the main packages only (no third_party / helper tooling).
-        run: bazel coverage --keep_going --collect_code_coverage --test_tag_filters=-fixme --combined_report=lcov --test_output=all --instrumentation_filter='^//(core|graph|lnast|parser|inou|lhd|lsp|pass|upass|ware|simlib|packages)(/|:)' //...
+        # Keep the long-test and benchmark exclusions from .bazelrc.
+        run: bazel coverage --keep_going --collect_code_coverage --combined_report=lcov --test_output=errors --instrumentation_filter='^//(core|graph|lnast|parser|inou|lhd|lsp|pass|upass|ware|simlib|packages)(/|:)' //...
+
+      - name: Save bazel cache
+        if: ${{ !cancelled() && steps.bazel-cache.outputs.cache-primary-key != '' && steps.bazel-cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: "~/.cache/bazel"
+          key: ${{ steps.bazel-cache.outputs.cache-primary-key }}
 
       - uses: codecov/codecov-action@v7
         with:
