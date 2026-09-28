@@ -247,7 +247,6 @@ struct Mem_sig {
   int addr_w = 1;  // index width = clog2(size)
   int n_rd   = 0;  // read ports
   int n_wr   = 0;  // write ports
-  bool is_comb = false;  // type==2: within-cycle logic, not persistent state
 };
 
 // Decode the size/bits/port-count signature of a Memory node from its config
@@ -255,7 +254,6 @@ struct Mem_sig {
 // running count of prior same-signature memories in forward_class() order, so
 // the key is stable and identical across the two front-ends.
 Mem_sig     read_mem_sig(const hhds::Node_class& node);
-std::string mem_shape_key(const Mem_sig& sig);
 std::string mem_state_key(const Mem_sig& sig, int occ);
 
 // Real bus width of a pin (signed magnitude+1 count; unsigned drops the spare

@@ -119,15 +119,11 @@ esac
 echo "  body-only edit rewrote: $got"
 
 # ---- 4. end-to-end: a second build compiles nothing (needs ninja + a cxx) -----
-if ! ninja_bin=$(command -v ninja); then
+if ! command -v ninja >/dev/null 2>&1; then
   echo "PASS (steps 1-3; no ninja on PATH, skipped the end-to-end build check)"
   exit 0
 fi
-# Test the Ninja build explicitly. lhd's automatic selection deliberately
-# rejects relative PATH hits and can otherwise use its built-in builder, which
-# does not populate Ninja's dependency log. Use the same absolute tool below.
-ninja_bin=$(python3 -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$ninja_bin")
-if ! "$LHD" sim "$W/tb.prp" --run-only --set "sim.ninja=$ninja_bin" --diag-fmt pretty --workdir "$W/wd" >"$W/run1.log" 2>&1; then
+if ! "$LHD" sim "$W/tb.prp" --run-only --diag-fmt pretty --workdir "$W/wd" >"$W/run1.log" 2>&1; then
   # No host compiler / no sim runtime headers in this environment: the
   # incremental properties above are still proven, so do not fail on it.
   echo "PASS (steps 1-3; the host build did not run here: $(tail -1 "$W/run1.log"))"
@@ -137,7 +133,7 @@ grep -qa "hello world" "$W/run1.log" || fail "the built sim printed no hello wor
 [ -f "$W/wd/sim/build.ninja" ] || fail "no build.ninja was written next to the generated sources"
 
 # Nothing changed since that build, so ninja must have no work left.
-plan=$("$ninja_bin" -C "$W/wd/sim" -n -d explain 2>&1 | grep -v '^ninja: Entering')
+plan=$(ninja -C "$W/wd/sim" -n 2>&1 | grep -v '^ninja: Entering')
 case "$plan" in
 *"no work to do"*) ;;
 *) fail "a second build with nothing changed still has work to do: $plan" ;;
@@ -153,7 +149,7 @@ sed -e 's/b:u8/b:u7/' "$W/leaf.prp" > "$W/leaf.new" && mv "$W/leaf.new" "$W/leaf
 grep -q 'b:u7' "$W/leaf.prp" || fail "the interface edit did not apply (test bug)"
 sed -e 's/b = y/b = y#[0..=6]/' "$W/top.prp" > "$W/top.new" && mv "$W/top.new" "$W/top.prp"
 setup
-plan=$("$ninja_bin" -C "$W/wd/sim" -n -d explain 2>&1 | grep -v '^ninja: Entering')
+plan=$(ninja -C "$W/wd/sim" -n 2>&1 | grep -v '^ninja: Entering')
 case "$plan" in
 *"no work to do"*) fail "an interface change rebuilt nothing — the emitter did not see it" ;;
 esac

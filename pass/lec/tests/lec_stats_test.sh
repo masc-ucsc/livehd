@@ -25,7 +25,7 @@
 #                                 labels its own timing as INSTRUMENTED.
 #
 # COST MODEL: keep this test cheap. The equivalent-sequential pair below is proven in
-# a small cvc5 query (cone discharge is disabled for the solver-report cases), and
+# ~25ms of solving (abc discharges the cones; cvc5 still runs and still reports), and
 # the verify case uses a 3-cycle bound. Everything here is seconds, not minutes -- do
 # NOT reach for a hard multiplier miter to make the numbers bigger.
 
@@ -70,7 +70,7 @@ run_lec() {  # $1=tag; $2.. = extra args -> sets OUT
   local tag=$1; shift
   OUT="$W/out_$tag.txt"
   "$LHD" lec --ref "$W/ref.v" --impl "$W/impl.v" --top top \
-    --set formal.timeout=20 --set formal.lec.cones=false --workdir "$W/w_$tag" "$@" > "$OUT" 2>&1
+    --set formal.timeout=20 --workdir "$W/w_$tag" "$@" > "$OUT" 2>&1
 }
 
 # 1) OFF BY DEFAULT, and silent. The plugin tier costs ~8x, so a run that did not

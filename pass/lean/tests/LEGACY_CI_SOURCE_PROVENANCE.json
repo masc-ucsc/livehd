@@ -1,0 +1,98 @@
+{
+  "pr": 624,
+  "base": "1af4e14924db5bb3259e3506ba4d8f62bf109615",
+  "pre_fix_head": "70ba1aed433cd61d6d4f87581705a49cef0c95bb",
+  "files": [
+    {
+      "path": "pass/lec/encode.cpp",
+      "base_blob": "18f09e4adf5b0df537049fab4f60ea6ca0875ee2",
+      "pre_fix_pr_blob": "18f09e4adf5b0df537049fab4f60ea6ca0875ee2",
+      "identical": true
+    },
+    {
+      "path": "pass/lec/encode.hpp",
+      "base_blob": "49b5ee2a53d6d6cfd069fd8f34b70ed45cd5d659",
+      "pre_fix_pr_blob": "49b5ee2a53d6d6cfd069fd8f34b70ed45cd5d659",
+      "identical": true
+    },
+    {
+      "path": "pass/lec/query.cpp",
+      "base_blob": "91271653776c60e177a45c271f9305a89fa067a8",
+      "pre_fix_pr_blob": "91271653776c60e177a45c271f9305a89fa067a8",
+      "identical": true
+    },
+    {
+      "path": "pass/lec/tests/lec_stats_test.sh",
+      "base_blob": "9e3412f01a8d3057d2532bd3195b74b6f027d766",
+      "pre_fix_pr_blob": "9e3412f01a8d3057d2532bd3195b74b6f027d766",
+      "identical": true
+    },
+    {
+      "path": "pass/lec/tests/lec_mem_diverge_test.sh",
+      "base_blob": "5d441e693dceb182a3b635177cfd5987fc040ab6",
+      "pre_fix_pr_blob": "5d441e693dceb182a3b635177cfd5987fc040ab6",
+      "identical": true
+    },
+    {
+      "path": "upass/func_extract/upass_func_extract.cpp",
+      "base_blob": "c2f1ba1a49668cf874a0ab9f949fbc66356738a5",
+      "pre_fix_pr_blob": "c2f1ba1a49668cf874a0ab9f949fbc66356738a5",
+      "identical": true
+    },
+    {
+      "path": "upass/bitwidth/upass_bitwidth.cpp",
+      "base_blob": "e21bf7b7838fb114f779d03614b3921f44bd2542",
+      "pre_fix_pr_blob": "e21bf7b7838fb114f779d03614b3921f44bd2542",
+      "identical": true
+    },
+    {
+      "path": "upass/core/symbol_table.cpp",
+      "base_blob": "38784674f8a2249e1f9cc234d3bf9c30a75cf218",
+      "pre_fix_pr_blob": "38784674f8a2249e1f9cc234d3bf9c30a75cf218",
+      "identical": true
+    },
+    {
+      "path": "pass/abc/abc_map.cpp",
+      "base_blob": "aa26a7586aec65b1aa42e1f3cb5fdb203f5e5230",
+      "pre_fix_pr_blob": "aa26a7586aec65b1aa42e1f3cb5fdb203f5e5230",
+      "identical": true
+    },
+    {
+      "path": "inou/prp/tests/prplib.py",
+      "base_blob": "068bca230e1a7173697cb4adbfb2cffa0c1956b9",
+      "pre_fix_pr_blob": "068bca230e1a7173697cb4adbfb2cffa0c1956b9",
+      "identical": true
+    },
+    {
+      "path": "inou/prp/tests/equiv/blocking_ff_state.prp",
+      "base_blob": "0e668cb2e2da94216d9acc6915899e86a624e911",
+      "pre_fix_pr_blob": "0e668cb2e2da94216d9acc6915899e86a624e911",
+      "identical": true
+    },
+    {
+      "path": "inou/prp/tests/equiv/blocking_ff_state.v",
+      "base_blob": "96e1eb876ceb29f73709aa01ea631c03fb98299a",
+      "pre_fix_pr_blob": "96e1eb876ceb29f73709aa01ea631c03fb98299a",
+      "identical": true
+    },
+    {
+      "path": "lhd/tests/lhd_formal_budget_mine_test.sh",
+      "base_blob": "affea177bf71a7bafe33c294bf0432a8dce5f221",
+      "pre_fix_pr_blob": "affea177bf71a7bafe33c294bf0432a8dce5f221",
+      "identical": true
+    },
+    {
+      "path": "lhd/tests/lhd_sim_incremental_test.sh",
+      "base_blob": "d6a6c17bba98318cfb4a3d08ad36952fc412b8b0",
+      "pre_fix_pr_blob": "d6a6c17bba98318cfb4a3d08ad36952fc412b8b0",
+      "identical": true
+    },
+    {
+      "path": "lhd/tests/lhd_abc_math_test.sh",
+      "base_blob": "4936c0300b6d670a2095b70da51a298da9022e10",
+      "pre_fix_pr_blob": "4936c0300b6d670a2095b70da51a298da9022e10",
+      "identical": true
+    }
+  ],
+  "limitation": "Source identity and observed PR failures; no successful unmodified full base-branch test run is claimed."
+}

@@ -380,16 +380,12 @@ struct Lambda_extractor {
       }
       auto lvit = latest_outer_value.find(rhs_text);
       if (lvit != latest_outer_value.end()) {
-        // Inserting lhs_name can rehash this flat map and invalidate lvit.
-        // Copy the source before obtaining the destination slot.
-        auto value                   = lvit->second;
-        latest_outer_value[lhs_name] = std::move(value);
+        latest_outer_value[lhs_name] = lvit->second;
         return;
       }
       auto lbit = latest_outer_bundle.find(rhs_text);
       if (lbit != latest_outer_bundle.end()) {
-        auto value                    = lbit->second;
-        latest_outer_bundle[lhs_name] = std::move(value);
+        latest_outer_bundle[lhs_name] = lbit->second;
         return;
       }
     }

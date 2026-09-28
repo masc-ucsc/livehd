@@ -2856,7 +2856,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           continue;
         }
         auto        sig = read_mem_sig(node);
-        std::string sg  = mem_shape_key(sig);
+        std::string sg  = std::to_string(sig.size) + "x" + std::to_string(sig.bits);
         std::string key = mem_state_key(sig, occ[sg]++);  // advance for EVERY memory: the
         if (!ign_named(node)) {                           // occurrence order must not shift
           continue;
@@ -3027,7 +3027,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       if (sig.bits <= 0 || sig.size <= 0) {
         continue;
       }
-      by[mem_shape_key(sig)].push_back(std::string(node.get_hier_name()));
+      by[std::to_string(sig.size) + "x" + std::to_string(sig.bits)].push_back(std::string(node.get_hier_name()));
     }
     return by;
   };
@@ -3132,7 +3132,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         if (sig.bits <= 0 || sig.size <= 0) {
           continue;
         }
-        std::string sg = mem_shape_key(sig);  // storage kind + shape; occurrence follows RTL order
+        std::string sg = std::to_string(sig.size) + "x" + std::to_string(sig.bits);  // shape only; occ matches by RTL order
         if (!shape_collapse_ok(sg)) {
           continue;  // ambiguous bucket semdiff flagged as diverged: leave every memory of this shape uncollapsed
         }
@@ -3701,7 +3701,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           if (sig.bits <= 0 || sig.size <= 0) {
             continue;
           }
-          std::string sg  = mem_shape_key(sig);
+          std::string sg  = std::to_string(sig.size) + "x" + std::to_string(sig.bits);
           std::string key = mem_state_key(sig, occ[sg]++);
           out.emplace(key, sig);  // first occurrence wins (matches build_shared_mems)
         }
@@ -3806,7 +3806,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         if (sig.bits <= 0 || sig.size <= 0) {
           continue;
         }
-        std::string sg   = mem_shape_key(sig);
+        std::string sg   = std::to_string(sig.size) + "x" + std::to_string(sig.bits);
         std::string key  = mem_state_key(sig, occ[sg]++);
         auto        init = graph_util::get_driver_of_sink_name(node, "init");
         if (init.is_invalid() || !graph_util::is_const_pin(init)) {
@@ -3852,7 +3852,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         if (sig.bits <= 0 || sig.size <= 0) {
           continue;
         }
-        std::string sg  = mem_shape_key(sig);
+        std::string sg  = std::to_string(sig.size) + "x" + std::to_string(sig.bits);
         std::string key = mem_state_key(sig, occ[sg]++);
         out.emplace(key, sig);
       }
@@ -3870,7 +3870,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         if (sig.bits <= 0 || sig.size <= 0) {
           continue;
         }
-        std::string sg   = mem_shape_key(sig);
+        std::string sg   = std::to_string(sig.size) + "x" + std::to_string(sig.bits);
         std::string key  = mem_state_key(sig, occ[sg]++);
         int         type = -1;
         auto        tpin = graph_util::get_driver_of_sink_name(node, "type");
@@ -4835,9 +4835,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         if (sig.bits <= 0 || sig.size <= 0) {
           continue;
         }
-        // Keep occurrence counting identical to the encoder and shared-state
-        // census. Port counts must not participate in the correspondence key.
-        std::string sg  = mem_shape_key(sig);
+        std::string sg  = std::to_string(sig.size) + "x" + std::to_string(sig.bits);  // shape only; occ matches by RTL
+                                                                                      // order (see mem_state_key + the
+                                                                                      // build_shared_mems / collect_mem_keys
+                                                                                      // sites — port counts must NOT key occ)
         std::string key = mem_state_key(sig, occ[sg]++);
         out[key]        = MemRec{sig};
       }
@@ -7367,7 +7368,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       if (sig.bits <= 0 || sig.size <= 0) {
         continue;
       }
-      std::string sg  = mem_shape_key(sig);
+      std::string sg  = std::to_string(sig.size) + "x" + std::to_string(sig.bits);
       std::string key = mem_state_key(sig, occ[sg]++);
       if (mem.count(key)) {
         continue;

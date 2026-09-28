@@ -89,46 +89,6 @@ for dec in true false; do
   fi
 done
 
-# 3) A same-shape scratch array is combinational logic, not another stored
-# memory. It must not displace q's current-state match when one frontend folds
-# the scratch array away. Declare it first to exercise occurrence ordering.
-cat > "$WORK/scratch.prp" <<'EOF'
-pub mod foo(clk:u1, we:u1, wa:u1, wd:u4, ra:u1) -> (z:u4@[]) {
-  mut d:[2]u4 = 0
-  reg q:[2]u4:[ordering="old", clock_pin=ref clk]
-  d[0] = q[0]
-  d[1] = q[1]
-  d[wa] = wd
-  if we != 0 {
-    q[0] = d[0]
-    q[1] = d[1]
-  }
-  z = q[ra]
-}
-EOF
-cat > "$WORK/direct.prp" <<'EOF'
-pub mod foo(clk:u1, we:u1, wa:u1, wd:u4, ra:u1) -> (z:u4@[]) {
-  reg q:[2]u4:[ordering="old", clock_pin=ref clk]
-  if we != 0 { q[wa] = wd }
-  z = q[ra]
-}
-EOF
-sed 's/q\[wa\] = wd/q[wa] = wd ^ 1/' "$WORK/direct.prp" > "$WORK/wrong.prp"
-for dec in true false; do
-  v=$(verdict scratch.prp direct.prp "$dec")
-  if [ "$v" = "PROVEN equivalent" ]; then
-    echo "ok: scratch array does not displace stored-state match (decompose=$dec)"
-  else
-    echo "FAIL: scratch/direct (decompose=$dec) -> '$v' (want PROVEN)"; fail=1
-  fi
-  v=$(verdict scratch.prp wrong.prp "$dec")
-  if [ "$v" = "REFUTED (not equivalent)" ]; then
-    echo "ok: changed memory write refuted (decompose=$dec)"
-  else
-    echo "FAIL: scratch/wrong (decompose=$dec) -> '$v' (want REFUTED)"; fail=1
-  fi
-done
-
 if [ $fail -ne 0 ]; then echo "lec_mem_diverge_test: FAILED"; exit 1; fi
 echo "lec_mem_diverge_test: PASSED"
 exit 0

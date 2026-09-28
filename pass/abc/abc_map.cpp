@@ -1544,13 +1544,11 @@ void Mapper::map_region(const livehd::partition::Region_body& rb) {
         }
         res = arith::build_shr(ops, av, bv, fill);
       }
-      // The LEC preserves the operand's sign on an SRA even when the result
-      // pin's metadata says unsigned. Extend the truncated result with that
-      // sign when materializing the wider region boundary (e.g. s4 -8 is
-      // 11000 at a five-bit output, not 01000).
-      auto* extension = a_sign && !res.empty() ? res[out_w - 1] : abc_const_bit(false);
+      // result = low out_w bits of the cw-wide shift; the spare bit(s) above the
+      // magnitude width are 0 (an unsigned result is non-negative). A signed
+      // result has out_w == bits_of so there are no spare bits to fill.
       for (int b = 0; b < out_bits; ++b) {
-        slots[b] = (b < out_w && b < static_cast<int>(res.size())) ? res[b] : extension;
+        slots[b] = (b < out_w && b < static_cast<int>(res.size())) ? res[b] : abc_const_bit(false);
       }
     } else if (op == Ntype_op::Mult) {
       // n-ary product of every input driver (all on pid 0), at width out_bits
