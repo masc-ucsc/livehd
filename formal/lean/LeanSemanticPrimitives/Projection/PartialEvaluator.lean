@@ -253,6 +253,39 @@ structure Prepared where
 /-- The denotation: bindings wrapped around the value's reified code. -/
 def Prepared.toPRes (p : Prepared) : PRes := .lets p.binds p.value.toPRes
 
+/-- Split a result into the bindings its code leaves need and a partial value
+whose `dyn` leaves index them.
+
+INDEX DISCIPLINE.  `wrapLets bs body` puts `bs`'s LAST binding at index 0, so a
+leaf bound as binding `j` of `k` sits at `k - 1 - j`, and a reference the caller
+already held shifts UP by `k`.  Both are arithmetic on `PVal`, which is exactly
+why leaves are `stat`/`dyn` and never arbitrary code.
+
+WHY THERE IS A FALLBACK.  Two sibling subtrees that BOTH need bindings cannot
+have their binding lists concatenated: the second list's terms were produced in
+the caller's scope and would then sit under the first list's binders, so they
+would need de Bruijn weakening -- the operation this development avoids by
+threading the environment instead.  When that happens `prepare` binds the whole
+subtree once and loses its spine.  `I_hw` never reaches it: the environment
+argument is `cons (node value) (spine of variables)`, so exactly one side ever
+needs a binding.
+
+A `lets` PACKAGE concatenates safely, and only it does: its inner bindings
+genuinely live under its outer ones, so no shift is owed. -/
+def prepare : PRes → Prepared
+  | .stat v        => ⟨[], .stat v⟩
+  -- already a reference; binding it again would be a wasted let
+  | .code (.var i) => ⟨[], .dyn i⟩
+  | .code t        => ⟨[t], .dyn 0⟩
+  | .cons a b =>
+    match prepare a, prepare b with
+    | ⟨[], va⟩, ⟨bb, vb⟩ => ⟨bb, .cons (PVal.shift bb.length va) vb⟩
+    | ⟨ba, va⟩, ⟨[], vb⟩ => ⟨ba, .cons va (PVal.shift ba.length vb)⟩
+    | _,        _        => ⟨[PRes.toCode (.cons a b)], .dyn 0⟩
+  | .lets bs r =>
+    let p := prepare r
+    ⟨bs ++ p.binds, p.value⟩
+
 /-! ## Structural answers for the list primitives
 
 `hd`/`tl`/`isNil` can often be answered from a spine `mix` already holds,

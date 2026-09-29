@@ -627,6 +627,37 @@ theorem Prepared.Scoped_toPRes {p : Prepared} {d : Nat} (h : Prepared.Scoped d p
     PRes.Scoped d p.toPRes :=
   ⟨h.1, PVal.Scoped_toPRes h.2⟩
 
+/-- Appending binding lists: the second runs UNDER the first, which is why the
+depth advances by the first's length.  This is the one place concatenation is
+sound, and `prepare`'s `lets` case is the one caller entitled to it -- an inner
+package's bindings genuinely live under its outer ones, so no weakening is owed.
+-/
+theorem ScopedLets_append : ∀ (a b : List Term) (d : Nat),
+    ScopedLets d a → ScopedLets (d + a.length) b → ScopedLets d (a ++ b)
+  | [],      _, _, _,  hb => by simpa using hb
+  | t :: ts, b, d, ha, hb => by
+      refine ⟨ha.1, ScopedLets_append ts b (d + 1) ha.2 ?_⟩
+      have he : d + 1 + ts.length = d + (t :: ts).length := by simp; omega
+      rw [he]; exact hb
+
+/- `prepare_scoped` -- preparation preserves scope -- is NOT yet proved.  The
+statement is
+
+    PRes.Scoped d r → Prepared.Scoped d (prepare r)
+
+and it is true; the obstacle is bookkeeping, not content.  Two specific points
+cost several attempts and are recorded so the next go is shorter:
+
+  * in the `code (.var i)` case the goal reduces to `i < d + [].length` while
+    the hypothesis is `Term.Scoped d (.var i)`.  `omega` does not unfold the
+    `Term.Scoped` match on its own, so the hypothesis has to be restated as
+    `i < d` first.
+  * in the two `cons` cases the goal's depth mentions
+    `(prepare a).binds.length` while the `split` equations name `ba`/`bb`.  The
+    equations have to be rewritten INTO the goal before `PVal.Scoped_shift`
+    applies.
+-/
+
 theorem PEnv.Scoped_stat_map (d : Nat) : ∀ vs : List Val, PEnv.Scoped d (vs.map PVal.stat)
   | []      => trivial
   | _ :: vs => ⟨trivial, PEnv.Scoped_stat_map d vs⟩
