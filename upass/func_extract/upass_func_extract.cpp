@@ -13,7 +13,9 @@
 #include "upass_func_extract.hpp"
 
 #include <functional>
+#include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -58,6 +60,18 @@ std::optional<Dlop> resolve_child_scalar(const std::string& name, bool is_ref, b
   return std::nullopt;
 }
 
+// A concat lane must FIT its declared window: Dlop::concat_op debug-asserts it
+// ("concat_op lane does not fit its declared width"), so an over-wide lane
+// would ABORT a -c dbg build instead of leaving the temp unfolded. The kernel
+// measures the BASE plane's signed width; Dlop::get_payload_bits() is that
+// count minus the zero sign slot of a non-negative lane, only ever rounded UP
+// for unknowns, so this test is always at least as strict as the assert. A
+// negative lane spends its top bit on the sign (that is how -1 lands as 0b111
+// in a 3-bit window).
+bool concat_lane_fits(const Dlop& v, int bits) {
+  return v.get_payload_bits() <= bits;
+}
+
 // The split is a stateful single DFS over the module tree (mirroring the old
 // runner walk + func_extract pass hooks) followed by a rebuild that drops the
 // extracted func_defs. All cursor navigation goes through an Lnast_manager so
@@ -68,23 +82,23 @@ struct Lambda_extractor {
   std::shared_ptr<Lnast_manager> lm;
 
   std::vector<std::shared_ptr<Lnast>> extracted_lnasts;
-  absl::flat_hash_set<std::string>     extracted_names;
+  absl::flat_hash_set<std::string>    extracted_names;
   // Class-index keys of the func_def nodes pulled out — the rebuild skips these
   // subtrees (and only these) when copying the module body.
-  std::unordered_set<uint64_t> drop_keys;
+  std::unordered_set<uint64_t>        drop_keys;
 
   // Live walk-time capture state — identical to the old pass. See
   // upass_func_extract.hpp history for the per-map rationale; in short:
   // latest_outer_value/bundle/import hold the comptime constants visible at the
   // current def site, temp_* recover SSA-temp values, outer_non_const records
   // names disqualified from capture.
-  absl::flat_hash_map<std::string, Dlop>                                  latest_outer_value;
+  absl::flat_hash_map<std::string, Dlop>                                   latest_outer_value;
   absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, Dlop>> latest_outer_bundle;
-  absl::flat_hash_map<std::string, Dlop>                                  temp_scalar_value;
+  absl::flat_hash_map<std::string, Dlop>                                   temp_scalar_value;
   absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, Dlop>> temp_bundle_value;
-  absl::flat_hash_map<std::string, std::string>                           temp_import_text;
-  absl::flat_hash_map<std::string, std::string>                           latest_outer_import;
-  absl::flat_hash_set<std::string>                                        outer_non_const;
+  absl::flat_hash_map<std::string, std::string>                            temp_import_text;
+  absl::flat_hash_map<std::string, std::string>                            latest_outer_import;
+  absl::flat_hash_set<std::string>                                         outer_non_const;
 
   int  stmts_depth{0};
   bool drop_current_func_def{false};
@@ -101,8 +115,10 @@ struct Lambda_extractor {
   // ── tree-copy helpers (into an extracted-function Lnast; verbatim) ──────
   void copy_current_subtree(const std::shared_ptr<Lnast>& dst, const Lnast_nid& parent) {
     const auto type       = lm->current_type();
-    auto       new_parent = (Lnast_ntype::is_ref(type) || Lnast_ntype::is_const(type)) ? dst->add_child(parent, lm->current_node())
-                                                                                       : dst->add_child(parent, type);
+    auto       new_parent = dst->add_child(parent, type);
+    if (Lnast_ntype::is_ref(type) || Lnast_ntype::is_const(type)) {
+      dst->set_name_id(new_parent, lm->get_lnast()->get_name_id(lm->get_current_nid()));
+    }
     if (Lnast::srcid_carries(type)) {
       const auto& src = lm->get_lnast();
       if (const auto id = src->get_srcid(lm->get_current_nid()); id != hhds::SourceId_invalid) {
@@ -234,6 +250,76 @@ struct Lambda_extractor {
     lm->restore_cursor(saved);
   }
 
+  // `concat(dst, v_msb, w_msb, …, v_lsb, w_lsb)` — deliberately NOT routed
+  // through fold_temp_nary: the operands are INTERLEAVED (value, width) pairs,
+  // so a left-fold over every child would assemble each window width as if it
+  // were a lane. Each lane instead drops into its OWN window and the result is
+  // the non-negative sum-of-widths value — Dlop's n-ary concat_op (the binary
+  // member form sizes by SIGNIFICANT bits, which is exactly what a concat
+  // window may not be sized by).
+  //
+  // A width that is still the `nil` sentinel means no pass has bound that
+  // lane's declared type yet. Leave the temp unfolded rather than guess:
+  // narrowing one window shifts every lane above it.
+  void fold_temp_concat() {
+    if (!lm->has_child()) {
+      return;
+    }
+    const auto saved = lm->save_cursor();
+    lm->move_to_child();
+    if (!Lnast_ntype::is_ref(lm->current_type())) {
+      lm->restore_cursor(saved);
+      return;
+    }
+    std::string lhs_name(lm->current_text());
+
+    // `values` must outlive the Concat_lane span (it borrows each value), so
+    // collect both halves first and only then build the lane view.
+    std::vector<Dlop> values;
+    std::vector<int>  widths;
+    while (lm->move_to_sibling()) {
+      auto v = resolve_child_scalar(std::string(lm->current_text()),
+                                    Lnast_ntype::is_ref(lm->current_type()),
+                                    Lnast_ntype::is_const(lm->current_type()),
+                                    latest_outer_value,
+                                    temp_scalar_value);
+      if (!v.has_value() || v->is_invalid() || !lm->move_to_sibling()) {
+        lm->restore_cursor(saved);  // unresolvable lane, or a lane with no width operand
+        return;
+      }
+      auto w = resolve_child_scalar(std::string(lm->current_text()),
+                                    Lnast_ntype::is_ref(lm->current_type()),
+                                    Lnast_ntype::is_const(lm->current_type()),
+                                    latest_outer_value,
+                                    temp_scalar_value);
+      if (!w.has_value() || w->is_invalid() || !w->is_integer() || !w->is_just_i64()) {
+        lm->restore_cursor(saved);  // still `nil`, or not a comptime width
+        return;
+      }
+      const auto bits = w->to_just_i64();
+      if (bits <= 0 || bits > std::numeric_limits<int>::max() || !concat_lane_fits(*v, static_cast<int>(bits))) {
+        lm->restore_cursor(saved);
+        return;
+      }
+      values.push_back(*v);
+      widths.push_back(static_cast<int>(bits));
+    }
+    if (values.empty()) {
+      lm->restore_cursor(saved);
+      return;
+    }
+    std::vector<Dlop::Concat_lane> lanes;
+    lanes.reserve(values.size());
+    for (size_t i = 0; i < values.size(); ++i) {
+      lanes.push_back(Dlop::Concat_lane{&values[i], widths[i]});
+    }
+    auto r = Dlop::concat_op(std::span<const Dlop::Concat_lane>(lanes.data(), lanes.size()));
+    if (r && !r->is_invalid()) {
+      temp_scalar_value[lhs_name] = *r;
+    }
+    lm->restore_cursor(saved);
+  }
+
   void process_tuple_add() {
     if (!lm->has_child()) {
       return;
@@ -345,8 +431,7 @@ struct Lambda_extractor {
     if (outer_non_const.contains(lhs_name)) {
       return;
     }
-    if (latest_outer_value.contains(lhs_name) || latest_outer_bundle.contains(lhs_name)
-        || latest_outer_import.contains(lhs_name)) {
+    if (latest_outer_value.contains(lhs_name) || latest_outer_bundle.contains(lhs_name) || latest_outer_import.contains(lhs_name)) {
       invalidate();
       return;
     }
@@ -378,14 +463,21 @@ struct Lambda_extractor {
         latest_outer_import[lhs_name] = imit->second;
         return;
       }
+      // Self-referential copy (`a = b`, both already outer values): the
+      // `operator[]` insert can rehash the very map the iterator points into,
+      // so materialize the source BEFORE the insert. Reading `it->second` as
+      // the assignment's RHS is a use-after-free (absl aborts with "Use of
+      // destroyed hash table" on the nested bundle map).
       auto lvit = latest_outer_value.find(rhs_text);
       if (lvit != latest_outer_value.end()) {
-        latest_outer_value[lhs_name] = lvit->second;
+        auto copy                    = lvit->second;
+        latest_outer_value[lhs_name] = std::move(copy);
         return;
       }
       auto lbit = latest_outer_bundle.find(rhs_text);
       if (lbit != latest_outer_bundle.end()) {
-        latest_outer_bundle[lhs_name] = lbit->second;
+        auto copy                     = lbit->second;
+        latest_outer_bundle[lhs_name] = std::move(copy);
         return;
       }
     }
@@ -409,6 +501,15 @@ struct Lambda_extractor {
       return;
     }
     const auto func_kind = std::string(current_text());
+
+    // prp2lnast leaves a compact declaration/hash marker in the source-unit
+    // wrapper after streaming the real body directly into a sibling Lnast.
+    // Drop the marker, but do not manufacture a second (empty) function.
+    if (func_kind.starts_with("__streamed_")) {
+      drop_current_func_def = true;
+      move_to_parent();
+      return;
+    }
 
     if ((func_kind != "comb" && func_kind != "pipe" && func_kind != "mod") || func_name.empty()) {
       move_to_parent();
@@ -458,7 +559,7 @@ struct Lambda_extractor {
 
     std::vector<std::string> generics;
     std::vector<std::string> generic_defaults;  // aligned; "" = no default (3g B)
-    if (move_to_sibling()) {  // kind -> generics
+    if (move_to_sibling()) {                    // kind -> generics
       if (lm->has_child()) {
         const auto saved_g = lm->save_cursor();
         move_to_child();
@@ -590,7 +691,7 @@ struct Lambda_extractor {
         process_func_def();
         if (drop_current_func_def) {
           drop_keys.insert(key_of(c));
-          any_dropped          = true;
+          any_dropped           = true;
           drop_current_func_def = false;
         }
         continue;  // never descend into a func_def body (verbatim, like the old pass)
@@ -615,6 +716,8 @@ struct Lambda_extractor {
         fold_temp_nary([](const Dlop& a, const Dlop& b) { return *a.or_op(b); });
       } else if (Lnast_ntype::is_bit_xor(t)) {
         fold_temp_nary([](const Dlop& a, const Dlop& b) { return *a.xor_op(b); });
+      } else if (Lnast_ntype::is_concat(t)) {
+        fold_temp_concat();  // interleaved (value, width) pairs — see the helper
       } else if (Lnast_ntype::is_tuple_add(t)) {
         process_tuple_add();
       } else if (Lnast_ntype::is_func_call(t)) {

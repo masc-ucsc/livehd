@@ -15,11 +15,65 @@
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools:lhd.bzl", "lhd_verilog")
 
+# The technology mappers `lhd synth --set synth.mapper=` / `lhd pass <mapper>`
+# select. Every script below asserts mapper-agnostic behavior (equivalence,
+# netlist shape, option handling, incremental reuse), so ONE script covers both
+# through the MAPPER env var; the abc targets keep their historical names and
+# only the `_usyn` twins are new. ABC-internal claims (flow strings, GENLIB,
+# abc.rc aliases, the boundary re-refinement count) stay gated inside the
+# scripts -- see the `if [ "$MAPPER" = abc ]` blocks.
+_MAPPERS = [
+    ("", "abc"),
+    ("_usyn", "usyn"),
+]
+
+
+sh_test(
+    name = "lhd_unate_smoke",
+    srcs = ["lhd_unate_smoke.sh"],
+    data = ["//lhd", "//inou/prp:abc_tests", "//pass/usyn:provenance_checker"],
+)
+
+sh_test(
+    name = "lhd_synth_instances_smoke",
+    srcs = ["lhd_synth_instances_smoke.py"],
+    data = ["//lhd", "//inou/prp:abc_tests", "//pass/usyn:measure_synth"],
+)
+
+sh_test(
+    name = "lhd_synth_instance_defs_smoke",
+    srcs = ["lhd_synth_instances_smoke.py"],
+    args = ["definitions"],
+    data = ["//lhd", "//inou/prp:abc_tests", "//pass/usyn:measure_synth"],
+)
+
+sh_test(
+    name = "lhd_synth_instance_colors_smoke",
+    srcs = ["lhd_synth_instances_smoke.py"],
+    args = ["occurrences"],
+    data = ["//lhd", "//inou/prp:abc_tests", "//pass/usyn:measure_synth"],
+)
+
+sh_test(
+    name = "lhd_yosys_runfiles_smoke",
+    srcs = ["lhd_yosys_runfiles_smoke.sh"],
+    data = [
+        "//inou/yosys:inou_yosys_scripts",
+        "//lhd",
+    ],
+)
+
+sh_test(
+    name = "lhd_comb_blocks_test",
+    size = "large",
+    srcs = ["lhd_comb_blocks_test.sh"],
+    data = ["//lhd"],
+)
+
 lhd_verilog(
     name = "trivial_net",
     srcs = ["trivial.v"],
     out = "trivial.gen.v",
-    recipe = "O1",
     top = "trivial",
 )
 
@@ -37,8 +91,8 @@ _FLOWS = [
     ("pyrope", "ln", "pass"),
     ("pyrope", "lg", "pass"),
     ("verilog", "verilog", "pass"),
-    ("verilog", "pyrope", "unsupported"),  # no LGraph -> LNAST decompiler
-    ("verilog", "ln", "unsupported"),  # verilog elaborates to LGraphs
+    ("verilog", "pyrope", "pass"),  # native Slang retains LNAST
+    ("verilog", "ln", "pass"),  # native Slang elaborates to LNAST
     ("verilog", "lg", "pass"),
     ("ln", "verilog", "pass"),
     ("ln", "pyrope", "pass"),
@@ -83,20 +137,43 @@ sh_test(
     data = _FLOW_DATA,
 )
 
+# EMITTED-WIDTH SCOREBOARD: sum the declared bits of every port/net in the
+# emitted Verilog for a pinned design list and compare against a golden table.
+# Width inflation is always CORRECT (an extra bit never changes behaviour), so
+# neither debug_check_pin_hint nor `lhd lec` can see it -- a pinned number is
+# the only way an always-legal regression gets caught. Regenerate the table
+# with UPDATE_GOLDEN=1.
+sh_test(
+    name = "width_scoreboard_test",
+    size = "medium",
+    srcs = ["width_scoreboard_test.sh"],
+    data = _FLOW_DATA + ["width_scoreboard_golden.txt"],
+)
+
 # `lhd lec` as the single equivalence command: verilog inputs (slang default +
-# --reader yosys-* override), the cvc5 (default) and lgyosys backends via
-# --set formal.solver, and the retired `check` command's migration error.
+# explicit Yosys-to-lg frontend comparison), the default solver, and the retired `check`
+# command's migration error.
 sh_test(
     name = "lhd_lec_verilog_test",
     size = "large",
     srcs = ["lhd_lec_verilog_test.sh"],
-    data = _FLOW_DATA + glob(["merge_demo/*"]),
+    data = _FLOW_DATA + glob(["merge_demo/*"]) + ["//inou/prp:abc_tests"],
 )
 
 sh_test(
     name = "lhd_scan_test",
     srcs = ["lhd_scan_test.sh"],
     data = _FLOW_DATA + ["scan_imports.prp"],
+)
+
+sh_test(
+    name = "lhd_compile_cache_test",
+    size = "large",
+    srcs = ["lhd_compile_cache_test.sh"],
+    data = [
+        "//inou/prp:abc_tests",
+        "//lhd",
+    ],
 )
 
 # `lhd sim` runtime test-parameter flags: each `test name(params)` parameter is a
@@ -110,16 +187,134 @@ sh_test(
     data = ["//lhd"],
 )
 
+# sim.init_zero supplies a power-on zero only to state with neither an explicit
+# initializer nor a reset; declared initial/reset values remain unchanged. The
+# same generated driver supports both choices, including --run-only.
+sh_test(
+    name = "lhd_sim_init_zero_test",
+    size = "large",
+    srcs = ["lhd_sim_init_zero_test.sh"],
+    data = ["//lhd"],
+)
+
+# The occurrence-wide color planner may refine a child packed-input read to one
+# lane of its caller's concat. A constant lane is not a bindable Value_use, so
+# its slice coordinates must stay absolute on the original packed carrier.
+sh_test(
+    name = "lhd_sim_packed_child_input_test",
+    size = "large",
+    srcs = ["lhd_sim_packed_child_input_test.sh"],
+    data = ["//lhd"],
+)
+
+# C++ keeps class tags and ordinary member identifiers in overlapping lookup
+# scopes.  Two child occurrences, where the first instance is named exactly
+# like its module, must therefore still host-compile and simulate.
+sh_test(
+    name = "lhd_sim_sub_type_shadow_test",
+    size = "large",
+    srcs = ["lhd_sim_sub_type_shadow_test.sh"],
+    data = ["//lhd"],
+)
+
 # Incremental regeneration of the sim tree: a no-op re-setup and a comment-only
 # Pyrope edit must rewrite NO generated C++, and a body-only edit must rewrite
 # the module's .cpp but NOT its .hpp (else every parent's object is needlessly
-# invalidated). Those mtimes are what the generated build.ninja keys on, so this
-# is the test that keeps the host build incremental. Steps 1-3 need only
-# --setup-only; the end-to-end warm-rebuild check self-skips without ninja.
+# invalidated). The end-to-end checks use the built-in builder and verify
+# object timestamps after a warm build and an interface edit. The `identity`
+# part (step 8, its own target only for the runtime budget): a default-
+# specialization partial restore must simulate the edited sibling.
 sh_test(
     name = "lhd_sim_incremental_test",
     srcs = ["lhd_sim_incremental_test.sh"],
     data = ["//lhd"],
+    env_inherit = ["PATH"],
+)
+
+sh_test(
+    name = "lhd_sim_incremental_test_identity",
+    srcs = ["lhd_sim_incremental_test.sh"],
+    args = ["identity"],
+    data = ["//lhd"],
+    env_inherit = ["PATH"],
+)
+
+sh_test(
+    name = "sim_slot_incremental_smoke",
+    srcs = ["sim_slot_incremental_smoke.sh"],
+    data = ["//lhd"],
+)
+
+# Keep each fixture/backend under the test runtime budget. The Slop leg also
+# checks the backend-independent LEC proof and, with LHD_EXTERNAL_SIM=1 (see
+# AGENTS.md), the external Verilator twin.
+_ROUNDTRIP_CASES = [
+    "latch_window",
+    "cache_control",
+    "cache_control_bundle",
+    "array_copy",
+    "bundle_link",
+    "partial_pipeline",
+    "function_accumulate",
+    "packed_bulk_override",
+    "next_state_memory",
+    "data_latch_edges",
+    "gated_latch_pair",
+]
+
+[
+    sh_test(
+        name = "sim_rtl_roundtrip_" + case + "_" + backend,
+        size = "small",
+        srcs = ["sim_rtl_roundtrip.py"],
+        args = [
+            "--case",
+            case,
+            "--backend",
+            backend,
+        ],
+        data = ["//lhd"],
+    )
+    for case in _ROUNDTRIP_CASES
+    for backend in [
+        "slop",
+        "llvm",
+    ]
+]
+
+test_suite(
+    name = "sim_rtl_roundtrip",
+    tests = [
+        "sim_rtl_roundtrip_" + case + "_" + backend
+        for case in _ROUNDTRIP_CASES
+        for backend in [
+            "slop",
+            "llvm",
+        ]
+    ],
+)
+
+sh_test(
+    name = "lhd_sim_explicit_clock_edges",
+    size = "small",
+    srcs = ["lhd_sim_explicit_clock_edges.sh"],
+    data = [
+        "//inou/prp:tests/sim/flop_sim_negedge_sole_clock.prp",
+        "//lhd",
+    ],
+)
+
+# Unity batching of the small generated simulator TUs: batches are written and
+# linked, the batched build simulates correctly, a warm rebuild is a no-op, and
+# rewriting a batched source rebuilds its batch (the wrapper's depfile tracks
+# every member). See the unity note in lhd/lhd_kernel_sim.cpp. With
+# LHD_EXTERNAL_SIM=1 (see AGENTS.md) the same contract is checked under ninja.
+sh_test(
+    name = "sim_unity_batch_test",
+    size = "large",
+    srcs = ["sim_unity_batch_test.sh"],
+    data = ["//lhd"],
+    env_inherit = ["PATH"],
 )
 
 # Stage 0 of the cgen_sim false-combinational-loop fix: a combinational
@@ -133,27 +328,6 @@ sh_test(
     name = "cgen_sim_comb_loop_test",
     srcs = ["cgen_sim_comb_loop_test.sh"],
     data = ["//lhd"],
-)
-
-# The per-field WRITE CHAIN false combinational loop on a NESTED packed-struct
-# VARIABLE: `c.f0=..; c.f1=..; c.f2=..` in one always_comb lowers to a Set_mask
-# CHAIN on one packed net (a nested struct variable cannot be split into
-# per-leaf nets), so a later read of one field binds to the LAST version and any
-# field written after it that depends on that read closes a WORD-level cycle the
-# bit-level design does not have. Pins BOTH legs of the pass/cprop fix
-# separately -- the disjoint-lane skip and the contained-slice re-base onto
-# `value` -- by reusing the two equiv-corpus goldens. The equiv harnesses cannot
-# gate this (prp-equiv never reads the .v, while prp-v2prp2v's original-Verilog
-# leg goes through yosys and its native leg deliberately scores an encoder
-# refusal as inconclusive), so the strict "must come back PROVEN" assertion
-# lives here.
-sh_test(
-    name = "struct_field_chain_cycle_test",
-    srcs = ["struct_field_chain_cycle_test.sh"],
-    data = [
-        "//inou/prp:equiv_tests",
-        "//lhd",
-    ],
 )
 
 # `lhd sim` VCD clock/reset waveforms + the `tick clocks=(name=ratio)
@@ -172,8 +346,7 @@ sh_test(
 # test names + parameters as JSON (a pure parse, no build); `--setup-only`
 # generates ONE driver (drv.cpp) holding every `test` block with the registry +
 # embedded JSON + `--test`/`--seed` flags; `--set sim.vcd=true` resets the VCD
-# timeline per test. The structural checks run hermetically; when the sibling
-# ../hlop + ../iassert headers are present it also host-compiles + runs the binary
+# timeline per test. Runtime checks host-compile and run using declared dependencies
 # (binary `--list-tests` == `lhd sim --list-tests`, `--test` selection, two-test
 # VCD run produces both .vcd without crashing).
 sh_test(
@@ -188,7 +361,7 @@ sh_test(
 # absorbed lg: library joins the DESIGN so the DUT body is actually emitted, and a
 # slang `--top X --emit-dir ln:` publishes the whole forest (it used to drop every
 # module X instantiates, leaving an ln: dir that could not be linked). Structural
-# checks are hermetic; with the sibling ../hlop + ../iassert headers it also runs
+# checks and runtime checks use declared dependencies; the test runs
 # both IR forms and the plain two-source baseline and requires the same verdict.
 sh_test(
     name = "lhd_sim_ir_inputs_test",
@@ -201,8 +374,7 @@ sh_test(
 # tick loop), and both operand VALUES of a top-level comparison (a literal operand
 # prints only its source); `lhd sim --result-json` enriches the result envelope
 # with a per-test {test,status,cycle,failing_assert,prp_file,line,msg} array. The
-# structural checks run hermetically; when the sibling ../hlop + ../iassert headers
-# are present it also host-compiles + runs and checks the located stdout + array.
+# structural and runtime checks verify the located stdout and result array.
 sh_test(
     name = "lhd_sim_located_assert_test",
     srcs = ["lhd_sim_located_assert_test.sh"],
@@ -213,8 +385,7 @@ sh_test(
 # dump_state/load_state/design_hash per module; the driver runs a periodic
 # fork-checkpoint cadence in the tick loop writing <workdir>/ckpt/<test>/ckp<N>/
 # {regs.json,*.hex,tb.json,meta.json}, pruned to `sim.checkpoint_max` and evenly
-# spaced; `sim.checkpoint=false` disables it. Structural checks run hermetically;
-# the run checks need the sibling ../hlop + ../iassert headers.
+# spaced; `sim.checkpoint=false` disables it. All runtime checks use declared dependencies.
 sh_test(
     name = "lhd_sim_checkpoint_test",
     srcs = ["lhd_sim_checkpoint_test.sh"],
@@ -222,11 +393,11 @@ sh_test(
 )
 
 # `lhd sim` RESTART + windowed VCD (sim_checkpoint_debug_plan, Stage C):
-# `--restart-at N` loads the nearest checkpoint <= N (DUT + testbench frame) and
+# `--restart-cycle N` loads the nearest checkpoint <= N (DUT + testbench frame) and
 # resumes there, so an accumulating tb local matches a full run bit-exactly and
 # only cycles >= the checkpoint re-run; a target before any checkpoint replays
 # from 0; `--vcd-from Y --vcd-to Z` traces a VCD over just [Y, Z]. Structural
-# checks run hermetically; the run checks need the sibling ../hlop/../iassert.
+# checks and runtime checks use declared dependencies.
 sh_test(
     name = "lhd_sim_restart_test",
     srcs = ["lhd_sim_restart_test.sh"],
@@ -236,8 +407,8 @@ sh_test(
 # `lhd sim --vcd-on-fail` (sim_checkpoint_debug_plan, Stage D): on an assert fire,
 # the driver re-runs the failed test from the nearest checkpoint with a VCD window
 # around the failing cycle (reusing Stage C), producing `<test>.vcd` of the failure
-# region with its stdout suppressed (the verdict is unchanged). Structural checks
-# run hermetically; the run checks need the sibling ../hlop/../iassert headers.
+# region with its stdout suppressed (the verdict is unchanged). Runtime checks
+# use declared dependencies.
 sh_test(
     name = "lhd_sim_vcd_on_fail_test",
     srcs = ["lhd_sim_vcd_on_fail_test.sh"],
@@ -248,8 +419,7 @@ sh_test(
 # per instance, sub io+flops traced) + the `sim.vcdfakedelay` style knob (default:
 # X settle window after each edge; false: plain edge-aligned updates) + the real
 # `clock` label through a flopless pass-through wrapper (the lecfail dut-pair
-# shape). Structural checks run hermetically; the run checks need the sibling
-# ../hlop/../iassert headers.
+# shape). Structural checks run hermetically; runtime checks use declared dependencies.
 sh_test(
     name = "lhd_sim_vcd_hier_test",
     srcs = ["lhd_sim_vcd_hier_test.sh"],
@@ -260,11 +430,20 @@ sh_test(
 # re-instrumenting. cgen emits describe_signals/probe_signals per module; the
 # result envelope's "debug" member carries --list-signals (the observable signal
 # set), --probe (a per-cycle JSON trajectory), and --break-when (the first cycle a
-# SIG OP V condition holds). Structural checks run hermetically; the run checks
-# need the sibling ../hlop/../iassert headers.
+# SIG OP V condition holds). Runtime checks use declared dependencies.
 sh_test(
     name = "lhd_sim_observe_test",
     srcs = ["lhd_sim_observe_test.sh"],
+    data = ["//lhd"],
+)
+
+# Native compact-loop cgen_sim: COUNT only sizes a std::array and runtime loop;
+# warm digests include the descriptor, and every occurrence-facing surface uses
+# stable `instance[ordinal]` paths.
+sh_test(
+    name = "lhd_sim_compact_loop_test",
+    size = "large",
+    srcs = ["lhd_sim_compact_loop_test.sh"],
     data = ["//lhd"],
 )
 
@@ -273,7 +452,7 @@ sh_test(
 # per-test sim_catalog.json (now carrying outputs and memories, which the legacy
 # describe_signals catalog never had), the five v1 operation families, and the
 # unchanged legacy --probe/--break-when shapes. Structural checks run
-# hermetically; the run checks need the sibling ../hlop/../iassert headers.
+# hermetically using declared runtime dependencies.
 sh_test(
     name = "lhd_sim_query_test",
     srcs = ["lhd_sim_query_test.sh"],
@@ -314,7 +493,7 @@ sh_test(
 # 2f-verify V1: `lhd formal verify` — single-design assert/assume BMC on the
 # pass/lec engine: per-assert bounded-proven / refuted-at-cycle-with-trace
 # verdict table, assume-as-disclosed-constraint, per-obligation timeout
-# isolation (+ formal.strict), formal.*/lec.* knob aliases, `formal lec` alias.
+# isolation and unconditional UNKNOWN failure, formal.*/lec.* knob aliases, `formal lec` alias.
 sh_test(
     name = "lhd_formal_verify_test",
     size = "large",
@@ -334,6 +513,52 @@ sh_test(
     name = "lhd_formal_list_tests_test",
     size = "large",
     srcs = ["lhd_formal_list_tests_test.sh"],
+    data = ["//lhd"],
+)
+
+# `past(x, n)` in a formal block: the first temporal operator. History is
+# resolved by the ENGINE indexing the unroll (Monitor::Bind::delay), so the
+# monitor stays combinational and the "property holds STATE" refusal must not
+# fire; cycles without enough history behind them are skipped and DISCLOSED.
+sh_test(
+    name = "lhd_formal_past_test",
+    size = "large",
+    srcs = ["lhd_formal_past_test.sh"],
+    data = ["//lhd"],
+)
+
+# SystemVerilog `$past`/`$rose`/`$fell`/`$stable`/`$changed` in DESIGN source.
+# History is a real flop chain in the DESIGN (declared before the body, updated
+# after it, deepest stage first), not a monitor-side trick -- a flop inside a
+# combinational monitor would be a fresh free symbol per step. The depth-2 case
+# is what catches a chain that shifts twice in a cycle or lands one stage short.
+sh_test(
+    name = "lhd_sv_past_test",
+    size = "large",
+    srcs = ["lhd_sv_past_test.sh"],
+    data = ["//lhd"],
+)
+
+# WINDOWED temporal operators: SVA's `##[m:n]`. The window looks FORWARD from
+# the anchor cycle, which the engine (backward-indexing only) supports by
+# RETIMING the statement, so the monitor stays combinational here too. The
+# directional claims in this test hold one way and refute the other, which is
+# what catches a window read backwards or off by one.
+sh_test(
+    name = "lhd_formal_window_test",
+    size = "large",
+    srcs = ["lhd_formal_window_test.sh"],
+    data = ["//lhd"],
+)
+
+# SystemVerilog IMMEDIATE assert/assume become design obligations (the same
+# LNAST cassert -> fproperty path a Pyrope `assert` takes). These used to be
+# dropped silently, so a design whose properties are all immediate asserts
+# verified as "no obligations found" -- proving nothing at exit 0.
+sh_test(
+    name = "lhd_sv_immediate_assert_test",
+    size = "large",
+    srcs = ["lhd_sv_immediate_assert_test.sh"],
     data = ["//lhd"],
 )
 
@@ -391,7 +616,7 @@ sh_test(
     name = "lec_formal_helpers_test",
     size = "medium",
     srcs = ["lec_formal_helpers_test.sh"],
-    data = ["//lhd:lhd"],
+    data = ["//lhd"],
 )
 
 # 2f-lec tier-2 uncertain state correspondence: semdiff full-match pairs
@@ -402,7 +627,7 @@ sh_test(
     name = "lec_state_pairing_test",
     size = "medium",
     srcs = ["lec_state_pairing_test.sh"],
-    data = ["//lhd:lhd"],
+    data = ["//lhd"],
 )
 
 # run_id slice scoping: a lec lg: side hashes only its --top slice, so edits
@@ -433,16 +658,6 @@ sh_test(
     name = "lhd_diag_span_test",
     size = "large",
     srcs = ["lhd_diag_span_test.sh"],
-    data = ["//lhd"],
-)
-
-# Regression for the cvc5 LEC/formal encoder's `#sext` sign propagation: a
-# partial sign-extend slice must sign-extend (not zero-extend) when widened,
-# arithmetic-shifted, or signed-compared. cvc5-only (in-process), so just //lhd.
-sh_test(
-    name = "lec_sext_sign_test",
-    size = "large",
-    srcs = ["lec_sext_sign_test.sh"],
     data = ["//lhd"],
 )
 
@@ -477,16 +692,6 @@ sh_test(
     ],
 )
 
-# lec.gold_x=ignore (reference-side X = don't-care, the yosys -ignore_gold_x
-# analogue): an impl that concretizes a ref X arm to ANY value must prove; a
-# real bug on non-X bits must still refute; gold_x=zero keeps legacy behavior.
-sh_test(
-    name = "lec_gold_x_test",
-    size = "large",
-    srcs = ["lec_gold_x_test.sh"],
-    data = ["//lhd"],
-)
-
 # The MEMORY half of the same machinery: `ordering="none"` (the Memory cell's
 # `undef` matrix) must leave a same-cycle read-during-write window undefined for
 # the miter, so BOTH the committed-value and the forwarding implementation of it
@@ -495,19 +700,6 @@ sh_test(
     name = "lec_mem_undef_test",
     size = "large",
     srcs = ["lec_mem_undef_test.sh"],
-    data = ["//lhd"],
-)
-
-# Regression for the slang reader lowering a scalar packed-struct variable as a
-# per-field BUNDLE (independent nets) instead of one flat packed bus: a struct
-# whose '{...} write computes a field from reads of its OTHER fields (the
-# dual-issue ALU `io`) becomes a false combinational self-loop as one node, which
-# the cvc5 LEC/formal encoder cannot encode. Asserts the bundle representation
-# AND cvc5-proves equivalence to the struct-free twin (just //lhd).
-sh_test(
-    name = "lec_packed_struct_test",
-    size = "large",
-    srcs = ["lec_packed_struct_test.sh"],
     data = ["//lhd"],
 )
 
@@ -569,26 +761,8 @@ sh_test(
     size = "large",
     srcs = ["slang_minion_features_test.sh"],
     data = ["//lhd"],
-)
-
-# LIVE test for todo/livehd/2f-latch M4 (partially landed 2026-07-20) — clock
-# awareness in `lhd lec`. pass/lec/encode.cpp never read a Flop's
-# clock_pin/posclk, so it FALSELY PROVED three plainly-different pairs. Two are
-# now closed and asserted REFUTED: gated-vs-ungated (the ICG cone folds to a
-# commit guard) and two-clock-vs-one-clock (each flop commits on its own net's
-# edge, with the previous level SHARED by both miter sides).
-#
-# The third — negedge vs posedge on the SAME clock — is still PROVEN, and the
-# script says so rather than pretending: it needs SUB-CYCLE resolution (a rise
-# phase then a fall phase) which a step-granular relational encoding cannot
-# express. Promoted from `fixme` to live because it now guards real behavior;
-# the open case is reported as a note, and flips to an assertion when the
-# two-phase encoder lands.
-sh_test(
-    name = "lec_clock_blindness_test",
-    size = "large",
-    srcs = ["lec_clock_blindness_test.sh"],
-    data = ["//lhd"],
+    # Three simulator host builds overlap; reserve their compiler fan-out.
+    tags = ["cpu:6"],
 )
 
 # LIVE blast-radius test for todo/livehd/2f-latch M8 (steps 1h + 3a): edge
@@ -604,24 +778,6 @@ sh_test(
     data = ["//lhd"],
 )
 
-# LIVE test for todo/livehd/2f-latch M8 steps 3b + 3g: all FOUR commit classes
-# (posedge, negedge, transparent-high, transparent-low) in ONE module. Discrimination
-# is checked through `lhd lec` (collapsing any two classes must REFUTE, and a
-# semantically-identical rewrite must still PROVE), and the transformation ITSELF is
-# validated trace-level against Icarus Verilog -- the source netlist (real always_latch
-# + negedge) vs the normalized one (posedge flops + phase divider), the normalized side
-# clocked P times per source period and sampled under the observation-visibility rule.
-# That iverilog leg is what the binding cross-model gating rule requires: our own
-# encoder on both sides of a miter cannot see a transformation that is wrong but applied
-# identically to both. It SKIPS with a note when iverilog is absent (it is a host tool,
-# not a bazel dep -- same status as inou/cgen/tests/sim/diff_test.py).
-# LIVE test for CLOCK GATING (todo/livehd/2f-latch): an ICG is recognized and
-# rewritten into a FLOP ENABLE rather than modelled as a gated clock -- sound
-# (the encoder has no clock-identity model, so gated and ungated otherwise look
-# identical) and cheaper (no per-step commit term). Checks the rewrite through
-# `lhd lec` in both directions AND against Icarus, with the L1 negative control
-# that pins the enable-latch bypass: reading the latch's HELD Q instead of the
-# value it passes through is a full cycle late and must fail.
 # LIVE TRACKER for todo/livehd/2f-latch: a latch or negedge flop inside a DEF is
 # refused (not lowered), which is exactly why lhdsuite's minion still needs its
 # `lec_trust` list -- running minion_lec with an EMPTY list refuses naming
@@ -687,7 +843,7 @@ sh_test(
 # pin that the surviving edge now comes from every clocked port, not just the
 # write side.
 # MEMORY READ FORWARDING under cvc5, MUTANT-GATED. A memory (Pyrope) against
-# four named flops + muxes (Verilog), with a self-referential write and a
+# two named flops + muxes (Verilog), with a self-referential write and a
 # forwarding read at a RUNTIME index -- the `needs_array` shape. Every proof is
 # paired with a mutant that must still refute (forward dropped; forward not
 # gated by the write enable; write-data self-read dropped), because a model that
@@ -722,41 +878,6 @@ sh_test(
     data = ["//lhd"],
 )
 
-# REGRESSION: a packed-struct field must lower to a LEAF net at every nesting
-# depth. `struct_port_bundle_ok` used to disqualify a whole port as soon as one
-# field was itself a struct, keeping it a packed WORD — so writing field X while
-# reading a DISJOINT field Y became a self-reference on that word, i.e. a FALSE
-# combinational cycle that `pass.lec` refused to encode. That cost three defs on
-# lhdsuite //bench:minion_lec (vpu_tensorfma, plus vpu_ctrl and vpu_ml which
-# instantiate it); see lhdsuite fixme.md issue 1b. Cases 2/3 are controls that
-# pass either way — they prove the RTL really is acyclic, so a case-1 failure is
-# a lowering defect. The structural check rejects any surviving packed-word
-# masking, so the test cannot be satisfied by a smarter cycle breaker.
-sh_test(
-    name = "struct_nested_field_leaf_test",
-    size = "medium",
-    srcs = ["struct_nested_field_leaf_test.sh"],
-    data = ["//lhd"],
-)
-
-# REGRESSION: the Pyrope writer must not hoist a clock gate's ENABLE CONE above
-# the always_comb that cone reads. Verilog always_comb is order-independent,
-# Pyrope assignment is sequential, so a relocated read landing above its writes
-# silently captures the seed value. The writer therefore never reorders body
-# statements for a `clock_pin`/`reset_pin` ref: the pin net is made
-# POSITION-INDEPENDENT instead (already a `wire`/`reg`, a `wire X` pre-declare,
-# or a minted `X__pinw` alias assigned the final value at the region end). The
-# old cone-relocation machinery this replaces caused lhdsuite
-# //bench:minion_lec's minion_dcache_cache_op_unit_l2 and
-# minion_frontend_thread_buffer{,_p1} refutations; see lhdsuite fixme.md 1f
-# and 1f-bis.
-sh_test(
-    name = "prp_writer_clock_cone_order_test",
-    size = "medium",
-    srcs = ["prp_writer_clock_cone_order_test.sh"],
-    data = ["//lhd"],
-)
-
 # REGRESSION: a TRUSTED def's struct ports must pair across the two front ends.
 # Box ports are keyed by NAME, so a flat bus on one side and per-leaf ports on
 # the other never meet — the box outputs become unrelated free symbols and the
@@ -786,38 +907,132 @@ sh_test(
     ],
 )
 
+# LIVE test for CLOCK GATING (todo/livehd/2f-latch): an ICG is recognized and
+# rewritten into a FLOP ENABLE rather than modelled as a gated clock -- sound
+# (the encoder has no clock-identity model, so gated and ungated otherwise look
+# identical) and cheaper (no per-step commit term). Checks the rewrite through
+# `lhd lec` in both directions; with LHD_EXTERNAL_SIM=1 (see AGENTS.md) also
+# against Icarus, with the L1 negative control that pins the enable-latch
+# bypass: reading the latch's HELD Q instead of the value it passes through is a
+# full cycle late and must fail.
 sh_test(
     name = "single_edge_icg_test",
     size = "large",
     srcs = ["single_edge_icg_test.sh"],
     data = ["//lhd"],
-    tags = ["no-sandbox"],  # invokes the host iverilog/vvp
 )
 
+# LIVE test for todo/livehd/2f-latch M8 steps 3b + 3g: all FOUR commit classes
+# (posedge, negedge, transparent-high, transparent-low) in ONE module.
+# Discrimination is checked through `lhd lec` (collapsing any two classes must
+# REFUTE, and a semantically-identical rewrite must still PROVE). With
+# LHD_EXTERNAL_SIM=1 the transformation ITSELF is also validated trace-level
+# against Icarus (source always_latch + negedge vs the normalized posedge flops +
+# phase divider, with P=1 and slot-swap negative controls) -- the independent
+# oracle the cross-model gating rule asks for, since our own encoder on both
+# sides of a miter cannot see a transformation that is wrong but applied
+# identically to both.
 sh_test(
     name = "single_edge_four_classes_test",
     size = "large",
     srcs = ["single_edge_four_classes_test.sh"],
     data = ["//lhd"],
-    tags = ["no-sandbox"],  # invokes the host iverilog/vvp
 )
 
-# LIVE oracle-pinning test for todo/livehd/2f-latch (M0 "pin the lgyosys
-# latch-LEC verdict" — resolved 2026-07-20): lgcheck's bounded-miter stage
-# DECIDES latch designs (equiv_simple alone cannot discharge $dlatch) and
-# genuinely DISCRIMINATES latch enable polarity (a port-matched
-# transparent-high vs transparent-low flip REFUTES with a counterexample).
-# This is the independent latch oracle the 2f-latch cross-model gating rule
-# uses. Note the power is latch-polarity only: for FLOP clock/edge differences
-# lgcheck is as blind as the native encoder (lec_clock_blindness_test above).
+# 3d-sim-color subtask B: the flop->transparent-high latch shape (where the old
+# module scheduler and a real event simulator disagree) must select the
+# color-direct schedule (generated-header check). The post-rise value semantics
+# are asserted by //inou/prp:prp-sim-flop_feeds_transparent_high_latch. With
+# LHD_EXTERNAL_SIM=1 (see AGENTS.md) a hand-written Icarus source, with a
+# load-bearing pre-commit negative control, is the independent anchor for the
+# ruling the Color_plan unit consumes as post-rise -> fall-commit.
 sh_test(
-    name = "lec_latch_polarity_test",
-    size = "large",
-    srcs = ["lec_latch_polarity_test.sh"],
+    name = "sim_color_latch_oracle",
+    srcs = ["sim_color_latch_oracle.sh"],
     data = [
-        "//inou/yosys:scripts",
+        "//inou/prp:tests/sim/flop_feeds_transparent_high_latch.prp",
         "//lhd",
     ],
+)
+
+# 3d-sim-color migration rung I: generated-structure plus live execution gate
+# for the first replacement emitter class (flat, ordinary-posedge state).
+sh_test(
+    name = "sim_color_staged_flat_test",
+    size = "large",
+    srcs = ["sim_color_staged_flat_test.sh"],
+    data = ["//lhd"],
+    # The two simulator builds run concurrently; each saturates ~2 cores
+    # (drv.cpp is one serial TU and dominates), so reserve 4.
+    tags = ["cpu:4"],
+)
+
+sh_test(
+    name = "sim_color_vcd_fall_test",
+    size = "large",
+    srcs = ["sim_color_vcd_fall_test.sh"],
+    data = [
+        "//inou/prp:tests/sim/flop_sim_negedge_sole_clock.prp",
+        "//lhd",
+    ],
+)
+
+sh_test(
+    name = "sim_color_random_test",
+    size = "large",
+    srcs = ["sim_color_random_test.sh"],
+    data = [
+        "//inou/prp:tests/sim/mem_none_color_random.prp",
+        "//inou/prp:tests/sim/packed_update_chain.prp",
+        "//lhd",
+    ],
+)
+
+sh_test(
+    name = "sim_color_kernel_reuse_test",
+    size = "large",
+    srcs = ["sim_color_kernel_reuse_test.sh"],
+    data = [
+        "//inou/prp:tests/sim/color_kernel_multiwrite.prp",
+        "//inou/prp:tests/sim/color_kernel_unsigned_msb.prp",
+        "//lhd",
+    ],
+    # The two simulator builds run concurrently; each saturates ~2 cores
+    # (drv.cpp is one serial TU and dominates), so reserve 4.
+    tags = ["cpu:4"],
+)
+
+sh_test(
+    name = "sim_color_llvm_smoke",
+    size = "large",
+    srcs = ["sim_color_llvm_smoke.sh"],
+    data = [
+        "//inou/prp:tests/sim/color_kernel_llvm_mem_whole.prp",
+        "//inou/prp:tests/sim/color_kernel_llvm_reg.prp",
+        "//inou/prp:tests/sim/color_kernel_llvm_reg_const.prp",
+        "//inou/prp:tests/sim/color_kernel_llvm_scalar.prp",
+        "//inou/prp:tests/sim/color_kernel_llvm_wide.prp",
+        "//inou/prp:tests/sim/color_kernel_multiwrite.prp",
+        "//inou/prp:tests/sim/div_narrow_result.prp",
+        "//inou/prp:tests/sim/loop_carry_kinds_sim.prp",
+        "//inou/prp:tests/sim/loop_fused_state.prp",
+        "//inou/prp:tests/sim/loop_hierarchy.prp",
+        "//inou/prp:tests/sim/loop_inlined_array.prp",
+        "//inou/prp:tests/sim/loop_inlined_capture.prp",
+        "//inou/prp:tests/sim/loop_invariant_broadcast.prp",
+        "//inou/prp:tests/sim/loop_mixed_carry.prp",
+        "//inou/prp:tests/sim/loop_roll_conditional_state_call.prp",
+        "//inou/prp:tests/sim/loop_state_multi_carry.prp",
+        "//inou/prp:tests/sim/mem_sim_gated_clock.prp",
+        "//inou/prp:tests/sim/mem_wensize_lanes.prp",
+        "//inou/prp:tests/sim/reduce_wide.prp",
+        "//lhd",
+    ],
+    # Two batched drivers (SIM_COLOR_SMOKE_JOBS=8 compiler jobs each), plus the
+    # shard and backend switch checks (SIM_COLOR_BRANCH_JOBS=6 each). Reserve
+    # their actual host compiler fan-out so the test does not oversubscribe
+    # concurrent solver tests.
+    tags = ["cpu:28"],
 )
 
 # LIVE test for todo/livehd/2f-latch M2 (landed 2026-07-20) — the latch's cell
@@ -864,11 +1079,29 @@ sh_test(
     ],
 )
 
+# `lhd lec` soundness around gated latches and the edge-normalization time
+# base: a latch transparent while its gated clock is off (or opened by an OR-ed
+# reset) is refused instead of refuted/proved as a hold, an ICG enable latch
+# open on the gated phase is never bypassed, and a negedge register against a
+# netlist of DFF cell instances reaches a verdict instead of stopping at "edge
+# normalization failed". Each "must not" pair reproduced before the fix; the
+# controls pin that the engines still decide the legitimate shapes.
+sh_test(
+    name = "lec_gated_latch_soundness_test",
+    size = "large",
+    srcs = ["lec_gated_latch_soundness_test.sh"],
+    data = [
+        "abc_icg_mix.v",
+        "abc_icg_qn.lib",
+        "//lhd",
+    ],
+)
+
 # LIVE fail-closed test for todo/livehd/2f-latch M0 (landed 2026-07-20). Every
 # shape it covers used to report SUCCESS while silently doing the wrong thing,
 # which makes every downstream gate vacuous: a latch design under `lhd formal
 # verify` exited 0 on an ENCODER REFUSAL (distinct from a solver give-up — no
-# budget can help, so `formal.strict` must not be needed to see it); `lhd sim`
+# budget can help, so it must fail immediately); `lhd sim`
 # on a latch died with a misleading `combinational-loop` error naming an
 # internal node; and a gated-clock or two-clock design simulated to a
 # plausible-looking WRONG waveform at exit 0. Asserts the diagnostic CODE, not
@@ -927,18 +1160,6 @@ sh_test(
     data = ["//lhd"],
 )
 
-# Regression for the "conditional reg write with no covering else does NOT
-# auto-hold" trap: an unwritten conditional path must HOLD the flop q, not lower
-# to a don't-care. Covers the empty-`elif` (PC stall), pure-write (register
-# file), and `unique if`/match forms. Asserts no don't-care in the next-state
-# AND cvc5-proves equivalence to an explicit-hold Verilog reference (just //lhd).
-sh_test(
-    name = "reg_cond_hold_test",
-    size = "large",
-    srcs = ["reg_cond_hold_test.sh"],
-    data = ["//lhd"],
-)
-
 # Hierarchical-LEC box-instance correspondence + verdict safety: stateless
 # collapsed leaves prove reversed interchangeable instances PAIRING-FREE
 # (per-def UF congruence), stateful ones pair name-first (sorted cross-design
@@ -956,12 +1177,6 @@ sh_test(
 # `reg x:[name="..."]` sets the local flop name, so a `mod` instantiated twice
 # yields the hierarchical flop names (pipeA_ex_mem.reg_mem_writedata, …) LEC
 # uses to correspond state with a hierarchical Verilog reference (cvc5-proven).
-sh_test(
-    name = "callsite_name_test",
-    size = "large",
-    srcs = ["callsite_name_test.sh"],
-    data = ["//lhd"],
-)
 
 # compile.upass.inline=false leaves a fully-defined `comb` as a Sub module
 # INSTANCE (tolg lowers it) instead of inlining it into the caller — preserving
@@ -986,16 +1201,33 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:hier_tests"],
 )
 
-# 2c-color-size subtask D: `pass.color synth` ABSORBS every def below the size
-# window's `min` (structural inline, so its logic can share an ABC region with
-# its neighbours -- a Sub is a blackbox to ABC). Absorb rewrites the netlist, so
-# the test that matters is the one only an end-to-end run gives: the absorbed
-# design is still LEC-equivalent to the original.
+# `pass.color synth` colours the FLAT view of the hierarchy (virtual
+# flattening), so a colour can span module boundaries. It rewrites nothing --
+# the flat def is scratch -- and instead records "hier_flat":true, which is what
+# makes pass.partition / pass.abc flatten downstream. Only an end-to-end run can
+# see that handoff, and that the flattened result is still LEC-equivalent.
 sh_test(
-    name = "lhd_color_absorb_test",
+    name = "lhd_color_hier_flat_test",
     size = "large",
-    srcs = ["lhd_color_absorb_test.sh"],
+    srcs = ["lhd_color_hier_flat_test.sh"],
     data = _FLOW_DATA + ["//inou/prp:hier_tests"],
+)
+
+# 2c-color-synthcones: `pass.color synth --set pass.color.synth.mode=cones` -- one BACKWARD
+# cone per register din/enable, merged by shared logic under a predicted-AIG
+# threshold. The gtests pin the walk and the merge; this pins the plumbing they
+# cannot reach: the --set spelling, the recorded coloring_info (mode,
+# max_gate, and the unconditional "packed":true a first-wins cone needs), that
+# pass.partition and pass.abc accept the result, and that the partitioned design
+# is still LEC-equivalent.
+sh_test(
+    name = "lhd_color_cones_test",
+    size = "large",
+    srcs = ["lhd_color_cones_test.sh"],
+    data = _FLOW_DATA + [
+        "//inou/prp:abc_tests",
+        "//inou/prp:hier_tests",
+    ],
 )
 
 # `pass.color reduce`: repeated combinational cones become ONE shared def
@@ -1021,19 +1253,77 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 
+sh_test(
+    name = "lhd_satopt_test",
+    size = "large",
+    srcs = ["lhd_satopt_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+# A dynamic word select maps as an affine word mux with satopt on and off,
+# on is not larger, and both netlists LEC against their compiled reference.
+sh_test(
+    name = "lhd_satopt_word_select_test",
+    size = "large",
+    srcs = ["lhd_satopt_word_select_test.sh"],
+    data = _FLOW_DATA + [
+        "satopt_word_select.sv",
+        "//inou/prp:abc_tests",
+    ],
+)
+
+sh_test(
+    name = "lhd_satopt_noctrl_test",
+    size = "large",
+    srcs = ["lhd_satopt_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+    env = {"CTRL_CONES": "false"},
+)
+
+# A Bedrock-style 5x34 one-hot mux under the hermetic NLDM Liberty. The default
+# fanout treatment must not invoke an unconstrained speed-grade upsize after the
+# requested delay is already met.
+sh_test(
+    name = "lhd_abc_onehot_qor_smoke",
+    size = "large",
+    srcs = ["lhd_abc_onehot_qor_smoke.sh"],
+    data = _FLOW_DATA + [
+        "br_mux_onehot.sv",
+        "//inou/prp:abc_tests",
+    ],
+)
+
 # 2opt-incr A+C: incremental pass.abc. A persistent region cache keyed by a
 # canonical digest: a NoChange run is all hits and zero ABC; editing one module
 # re-synthesizes only the regions it touched; every assembled netlist is
 # LEC-gated against the original logic.
-sh_test(
-    name = "lhd_abc_incr_test",
+[sh_test(
+    name = "lhd_abc_incr_test" + suffix,
     size = "large",
     srcs = ["lhd_abc_incr_test.sh"],
     data = _FLOW_DATA + [
         "//inou/prp:abc_tests",
         "//inou/prp:hier_tests",
     ],
-)
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
+
+# `lhd synth`: the one-shot compile -> color synth -> abc -> opentimer flow
+# over one in-memory design, plus the ONE shared incremental switch
+# (lhd.incremental): workdir layout, the {kind:synth, abc, sta} qor member,
+# warm re-run hits at both tiers with byte-identical Verilog, an honest cold
+# run, no-workdir scratch mode with --emit-dir lg:/report:, a read-only lg:
+# input, and the negative controls (one Liberty spelling, retired cache flags).
+[sh_test(
+    name = "lhd_synth_test" + suffix,
+    size = "large",
+    srcs = ["lhd_synth_test.sh"],
+    data = _FLOW_DATA + [
+        "//inou/prp:abc_tests",
+        "//inou/prp:hier_tests",
+    ],
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
 
 # 2opt-incr subtask 0: pass.abc memory admission. A whole-design ABC region can
 # exhaust the machine (flat XSCore reached 221 GB before the OS killed it), so
@@ -1041,12 +1331,13 @@ sh_test(
 # not fit. Pinned with memory_budget_mb so the refusal is deterministic on any
 # host: refuse + emit no partial netlist + allow_oversize override + no false
 # positive on a design that fits.
-sh_test(
-    name = "lhd_abc_memory_test",
+[sh_test(
+    name = "lhd_abc_memory_test" + suffix,
     size = "large",
     srcs = ["lhd_abc_memory_test.sh"],
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
-)
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
 
 # 2opt-incr: design-size gate (node-count memory admission). pass.color warns and
 # pass.abc/lec refuse (with an override) when a flattened design is over the
@@ -1070,6 +1361,18 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 
+# INCREMENTAL pass.opentimer: the whole-design STA result cache under --workdir,
+# keyed on the netlist's canonical digest + the timing environment. An unchanged
+# netlist replays a byte-identical timing.json without parsing the Liberty; a
+# re-mapped netlist, a changed option and a salt mismatch all re-time; and a warm
+# `lhd synth --stats` re-stamps only `resynth`.
+sh_test(
+    name = "lhd_sta_incr_test",
+    size = "large",
+    srcs = ["lhd_sta_incr_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
 # 2opt-freq B: `{ ::[abc='…', color=N] … }` block-scoped synthesis attributes —
 # LEC-invariant annotation, own region + per-region flow override (with and
 # without a pass.color run: seeded precedence), netlist LEC vs the partition
@@ -1081,45 +1384,199 @@ sh_test(
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
 )
 
+# Partition-boundary environment (pass/abc/abc_boundary.cpp): a region is sized
+# against the loads, drivers and timing budgets beyond its ports (NAND2x1 ->
+# NAND2x2 on the crossing driver), the refined netlist LECs against the
+# partition twin, boundary=false restores the load-free ports, and an all-hit
+# incremental run reuses the refined bodies without starting ABC.
+[sh_test(
+    name = "lhd_abc_boundary_test" + suffix,
+    size = "large",
+    srcs = ["lhd_abc_boundary_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
+
 # 2i-abc_arith: every selectable adder architecture (rca/cska/cla + block_size)
 # tech-maps the arithmetic fixture and is LEC-equivalent to the original logic.
-sh_test(
-    name = "lhd_abc_arith_test",
+[sh_test(
+    name = "lhd_abc_arith_test" + suffix,
     size = "large",
     srcs = ["lhd_abc_arith_test.sh"],
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
-)
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
 
 # 2a-abc follow-on: the multiplier (array) + right-shift (sra) bit-blast and the
 # division blackbox. Maps mult/sra and keeps div native (with a div-blackbox
 # warning), proving every region LEC-equivalent to the original logic over signed
 # and unsigned operands, plus a non-default adder and a no-lib negative control.
-sh_test(
-    name = "lhd_abc_math_test",
+[sh_test(
+    name = "lhd_abc_math_test" + suffix,
     size = "large",
     srcs = ["lhd_abc_math_test.sh"],
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
-)
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
+
+# Asynchronous-reset registers map onto the Liberty's clear/preset flop cells
+# (sky130-shaped single-pin cells and an ASAP7-shaped dual QN cell), proven by
+# the graph-native LEC and by lgyosys on the Verilog netlist + gensim models;
+# a flipped reset value and an async-made-sync reset must refute.
+[sh_test(
+    name = "lhd_abc_arst_test" + suffix,
+    srcs = ["lhd_abc_arst_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_mix.v",
+        "abc_arst_q.lib",
+        "abc_arst_qn.lib",
+    ],
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
+
+# Latch-based clock gates map onto the Liberty's integrated clock-gate cell and
+# their registers onto DFF / clear / preset cells clocked by it (sky130- and
+# ASAP7-shaped hermetic libraries): graph LEC proves, lgcheck does not refute,
+# broken twins refute, and the OR flavour / an ICG-less library stay native.
+[sh_test(
+    name = "lhd_abc_icg_test" + suffix,
+    srcs = ["lhd_abc_icg_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_q.lib",
+        "abc_icg_mix.v",
+        "abc_icg_q.lib",
+        "abc_icg_qn.lib",
+    ],
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
+
+# Level-sensitive data latches map onto the Liberty's transparent latch cells
+# (both enable polarities, a QN-only cell, clear/preset reset latches or a
+# folded reset, latches enabled by an ICG output) with sky130- and
+# ASAP7-shaped hermetic libraries: graph LEC proves, lgcheck does not refute,
+# broken twins refute, and a latch-less library keeps them native.
+[sh_test(
+    name = "lhd_abc_latch_test" + suffix,
+    srcs = ["lhd_abc_latch_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_icg_q.lib",
+        "abc_latch_mix.v",
+        "abc_latch_q.lib",
+        "abc_latch_qn.lib",
+        "abc_latch_rst.prp",
+    ],
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
 
 # 2a-abc subtask 5: sequential tech-mapping (seq=true). Flops cross into ABC as
 # latches and return as native flops (name + reset preserved); memories and Sub
 # instances are blackbox boundaries. Each region is sequentially LEC-equivalent
 # (yosys BMC/induction) to its original-logic twin, plus a negative control.
-sh_test(
-    name = "lhd_abc_seq_test",
-    size = "large",
+# One script shares the fixtures; each target selects a distinct regression
+# family so debug runs have bounded latency without dropping any mapping mode.
+[sh_test(
+    name = name + suffix,
     srcs = ["lhd_abc_seq_test.sh"],
-    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+    args = [group],
+    env = {"MAPPER": mapper},
+    data = _FLOW_DATA + [
+        "abc_async_reset.prp",
+        "abc_qn_fanout.prp",
+        "abc_qn_twin.prp",
+        "abc_resetless_sync.prp",
+        "//inou/prp:abc_tests",
+    ],
+) for name, group in [
+    ("lhd_abc_seq_test", "registers"),
+    ("lhd_abc_qn_test", "qn"),
+    ("lhd_abc_memory_modes_test", "memory"),
+] for suffix, mapper in _MAPPERS]
+
+# pass.abc memory=true (explicitly enabled) bit-blast, on the shapes the constant-
+# address / per-lane mem_lower rework fixed: a constant-index multi-writer tile
+# (32x8 guards on ABC input nodes + mapped cells; 8x8 LEC'd on graphs and
+# Verilog against the source memory through gensim cell models), a whole-array
+# read_all memory (was refused), memory=false / memory_max_bits keeping a memory
+# native, and the wide-constant EQ (`x[3:0] == 8'd100` -> constant 0).
+sh_test(
+    name = "lhd_abc_memlower_test",
+    size = "large",
+    srcs = ["lhd_abc_memlower_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_memall.sv",
+        "abc_memtile.sv",
+        "//inou/prp:abc_tests",
+    ],
+    # Ten independent mappings run concurrently, then two LEC queries per
+    # fixture. Reserve the fan-out so it does not oversubscribe other tests.
+    tags = ["cpu:8"],
+)
+
+# pass/lec memory <-> storage-flop bank bridge: a resetless 1rd/1wr register
+# file bit-blasted by pass.abc memory=true (one-bit DFF cells on a Q cell, on a
+# QN-only cell through the Flop(Not(D)) model, and whole native storage flops
+# under register_max_bits=1) is PROVEN unbounded with cvc5 against its Memory
+# through gensim models and emitted Verilog, and the same bank shape with
+# a corrupted write address still REFUTES.
+sh_test(
+    name = "lhd_lec_membank_test",
+    size = "medium",
+    srcs = ["lhd_lec_membank_test.sh"],
+    data = _FLOW_DATA + [
+        "lec_membank.sv",
+        "lec_membank_multi.sv",
+        "//inou/prp:abc_tests",
+    ],
+)
+
+# Bus-expansion naming standard (core/bus_name.hpp): a register split into
+# per-bit DFF cells `rot[i]` round-trips through the emitted netlist Verilog and
+# proves unbounded against the original RTL (state pairing regroups the bits);
+# D-swapped / D-inverted mutants refute.
+sh_test(
+    name = "lhd_lec_busbit_test",
+    size = "medium",
+    srcs = ["lhd_lec_busbit_test.sh"],
+    data = _FLOW_DATA + [
+        "lec_busbit.sv",
+        "//inou/prp:abc_tests",
+    ],
 )
 
 # Whole-design flatten: `pass.color flat` + pass.abc/pass.partition inline the
 # hierarchy into ONE output module (flatten=auto), LEC-proven vs the original;
 # flatten=false keeps the classic per-def decomposition.
-sh_test(
-    name = "lhd_abc_flat_test",
+[sh_test(
+    name = "lhd_abc_flat_test" + suffix,
     size = "large",
     srcs = ["lhd_abc_flat_test.sh"],
     data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+    env = {"MAPPER": mapper},
+) for suffix, mapper in _MAPPERS]
+
+# Wide native wiring boundaries are demand-driven through ABC: a sparse read
+# cannot expand a 4k-bit bus into thousands of PI/readback selector nodes.
+sh_test(
+    name = "lhd_abc_sparse_boundary_test",
+    size = "medium",
+    srcs = ["lhd_abc_sparse_boundary_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_sparse_boundary.prp",
+        "//inou/prp:abc_tests",
+    ],
+)
+
+# A false word-level loop through two pure-comb instances (arbiter
+# request/can_grant handshake): bitwidth must bound the per-element output
+# reassembly chain, and abc/usyn must map it LEC-equivalently.
+sh_test(
+    name = "lhd_synth_false_loop_test",
+    size = "small",
+    srcs = ["lhd_synth_false_loop_test.sh"],
+    data = _FLOW_DATA + [
+        "synth_false_loop_arb.sv",
+        "//inou/prp:abc_tests",
+    ],
 )
 
 # 2c-color: every coloring algorithm (acyclic|cgen|synth|path|mincut|flat) +
@@ -1203,8 +1660,9 @@ sh_test(
     data = _FLOW_DATA + glob(["merge_demo/*"]),
 )
 
-# --reader yosys-verilog|yosys-slang|slang trichotomy (slang = direct
-# inou.slang SV->LNAST front-end: ln:/pyrope: only until tolg can lower it).
+# --reader slang|yosys|yosys-slang|yosys-verilog (slang = direct inou.slang
+# SV->LNAST front-end; yosys/yosys-slang = yosys's built-in read_slang). The
+# latch leg reuses the shared inou/yosys/tests/latch_async.v fixture.
 sh_test(
     name = "lhd_reader_test",
     srcs = ["lhd_reader_test.sh"],
@@ -1259,31 +1717,60 @@ sh_test(
 
 # `lhd help X` == `lhd X --help` parity, sub-command-specific pages, and the
 # --diag-fmt pretty|jsonl rendering of every help page.
+# size=large (900s), not the default medium (300s): the script launches the lhd
+# binary ~200 times (every command x help/--help x pretty/jsonl), and a -c dbg
+# build spends ~1s per launch on pass registration alone. It measured 289s
+# against the 300s medium budget -- 96% of it -- so any addition to the command
+# surface tips it into a timeout that says nothing about the help contract.
 sh_test(
     name = "lhd_help_test",
+    size = "large",
     srcs = ["lhd_help_test.sh"],
     data = ["//lhd"],
 )
 
-# --recipe O2 (pass.cprop + pass.bitwidth): cell-type mix LEC'd against the
+# Standard compilation (pass.cprop + pass.bitwidth): cell-type mix LEC'd against the
 # source, recipe provenance in --result-json, and the memory sizing path.
 sh_test(
-    name = "lhd_bitwidth_o2_test",
+    name = "lhd_bitwidth_test",
     size = "large",
-    srcs = ["lhd_bitwidth_o2_test.sh"],
+    srcs = ["lhd_bitwidth_test.sh"],
     data = _FLOW_DATA + [
         "bw_mem.v",
         "bw_mix.v",
     ],
 )
 
-# --recipe O1 (pass.cprop): a runtime Set_mask write chain plus single-bit
+# A runtime Set_mask write chain plus single-bit
 # reads must fold through Cprop::try_find_single_driver_pin (the recursive
 # single-driver resolver) so y0->a and y2->c in the generated Verilog.
 sh_test(
     name = "lhd_setmask_bitread_test",
     srcs = ["lhd_setmask_bitread_test.sh"],
-    data = _FLOW_DATA + ["setmask_bitread.prp"],
+    data = _FLOW_DATA + [
+        "setmask_bitread.prp",
+        "setmask_identity.prp",
+    ],
+)
+
+# Single-use equal-width Set_mask chains share one emitted procedural
+# accumulator. This avoids quadratic full-width copies in downstream Yosys.
+sh_test(
+    name = "lhd_setmask_chain_emit_test",
+    srcs = ["lhd_setmask_chain_emit_test.sh"],
+    data = _FLOW_DATA + [
+        "setmask_chain_cycle.sv",
+        "setmask_chain_emit.prp",
+    ],
+)
+
+# pass.cprop must collapse a constant SRA + low mask into one nonzero contiguous
+# Get_mask range, which cgen then lowers through HLOP's direct range extraction.
+# An unrelated runtime source shift remains, proving the check is selective.
+sh_test(
+    name = "lhd_getmask_range_test",
+    srcs = ["lhd_getmask_range_test.sh"],
+    data = _FLOW_DATA + ["getmask_range.v"],
 )
 
 # `--emit-dir pyrope:DIR` re-emission of a construct-rich source: the
@@ -1310,6 +1797,13 @@ sh_test(
 sh_test(
     name = "lhd_fmt_test",
     srcs = ["lhd_fmt_test.sh"],
+    data = ["//lhd"],
+)
+
+# Tree-sitter style analysis: repeated blocks, partial parses, and diagnostics.
+sh_test(
+    name = "lhd_style_test",
+    srcs = ["lhd_style_test.py"],
     data = ["//lhd"],
 )
 
@@ -1345,28 +1839,227 @@ sh_test(
 # input is discharged (or refuted) by what the PARENT binds, not by the submodule
 # in isolation. Case 3 (a parent that violates the assume must FAIL) is what
 # keeps the test honest — without it, never checking anything would look correct.
-# Tagged fixme: today the assume is only evaluated in module isolation, so the
-# submodule cannot be compiled on its own and a violating parent still passes.
 sh_test(
     name = "hier_property_test",
     srcs = ["hier_property_test.sh"],
     data = ["//lhd"],
-    tags = ["fixme"],
 )
 
-# LIVE fail-closed test: a variable BLOCKING-assigned in an EDGE-sensitive
-# process and read outside it is persistent flop state that `--reader slang`
-# does not model. collect_state_vars documented the refusal, but it only ever
-# fired for module OUTPUTS and unpacked arrays -- an internal scalar fell
-# through, was declared a plain `mut`, and the REGISTER VANISHED: a
-# `always @(posedge p) ms = ms + 1;` counter read by `assign o = ms` lowered to
-# a stateless `comb` whose output folded to a constant, exit 0 with no warning,
-# and lgcheck refuted it. Pins the diagnostic CODE (a crash also exits nonzero)
-# and the acceptance half: a process-LOCAL blocking temp and an ordinary `<=`
-# register must both still compile, with the register still real state.
+# pass.formal's TOTAL wall-clock budget (compile.formal.timeout): property
+# checking is otherwise unbounded compile time. It must BIND (a tiny budget stops
+# discharging obligations) and DEGRADE SOUNDLY (an exhausted budget defers to
+# runtime checks and still compiles), read against the default-budget baseline.
 sh_test(
-    name = "blocking_ff_state_test",
-    size = "small",
-    srcs = ["blocking_ff_state_test.sh"],
+    name = "formal_budget_test",
+    srcs = ["formal_budget_test.sh"],
+    data = ["//lhd"],
+)
+
+# Design-body assumptions constrain the existing hierarchical LEC translation.
+# Assumption-bearing child cones stay transparent until box-boundary contracts
+# exist; contradictory unchecked contracts are rejected as vacuous.
+sh_test(
+    name = "lec_design_assume_test",
+    srcs = ["lec_design_assume_test.sh"],
+    data = ["//lhd"],
+)
+
+# A structural RCA with an unchecked carry_in==true top contract must match
+# a flat +1 adder in both hierarchical LEC and verify.  Removing the contract
+# must refute both flows.
+sh_test(
+    name = "formal_assume_rca_test",
+    srcs = ["formal_assume_rca_test.sh"],
+    data = ["//lhd"],
+)
+
+# SAT learned-clause reduction and exhaustive mapped quadratic simulation.
+sh_test(
+    name = "lhd_abc_fraig_test",
+    size = "large",
+    srcs = ["lhd_abc_fraig_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+# A Memory whose write port 0 is clockless (a continuous assign to one entry of
+# an always_ff register file) emits through cgen with the shared clock, and
+# synthesizes (abc + usyn) to a netlist LEC-proven against the design.
+sh_test(
+    name = "lhd_mem_clockless_port_test",
+    size = "medium",
+    srcs = ["lhd_mem_clockless_port_test.sh"],
+    data = _FLOW_DATA + [
+        "mem_clockless_port.sv",
+        "//inou/prp:abc_tests",
+    ],
+)
+
+sh_test(
+    name = "lhd_constant_table_test",
+    size = "medium",
+    srcs = ["lhd_constant_table_test.sh"],
+    data = _FLOW_DATA,
+)
+
+sh_test(
+    name = "lhd_macro_declarations_test",
+    size = "large",
+    srcs = ["lhd_macro_declarations_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_abc_clock_edges_test",
+    size = "large",
+    srcs = ["lhd_abc_clock_edges_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_loop_cleanup_test",
+    size = "large",
+    srcs = ["lhd_loop_cleanup_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_parameter_array_test",
+    size = "large",
+    srcs = ["lhd_parameter_array_test.sh"],
+    data = _FLOW_DATA,
+)
+
+# Critical-path ware trials, rollback, explicit selectors and mapped LEC.
+sh_test(
+    name = "lhd_ware_test",
+    size = "large",
+    srcs = ["lhd_ware_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_hotmux_pairs_smoke",
+    size = "large",  # 3 compiles + 2 LECs + a slop AND an llvm simulator build
+    srcs = ["lhd_hotmux_pairs_smoke.sh"],
+    data = [
+        "//inou/prp:equiv_tests",
+        "//lhd",
+    ],
+    # The two simulator builds run concurrently; each saturates ~2 cores
+    # (drv.cpp is one serial TU and dominates), so reserve 4.
+    tags = ["cpu:4"],
+)
+
+sh_test(
+    name = "lhd_synth_parallel_smoke",
+    size = "large",
+    srcs = ["lhd_synth_parallel_smoke.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+)
+
+sh_test(
+    name = "lhd_abc_boundary_parallel_smoke",
+    size = "large",
+    srcs = ["lhd_abc_boundary_test.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+    env = {"ABC_TEST_THREADS": "2"},
+)
+
+# One target for all three pass.abc.memory modes: the synth/LEC/identity prefix
+# runs once, then native simulation runs once per distinct emitted netlist.
+sh_test(
+    name = "lhd_memory_hierarchy_test",
+    size = "large",
+    srcs = ["lhd_memory_hierarchy_test.sh"],
+    data = _FLOW_DATA + [
+        "//tools:native_sim.py",
+        "//inou/prp:abc_tests",
+        "//ware:cgen_memory_rtl",
+    ],
+)
+
+sh_test(
+    name = "lhd_ware_options_smoke",
+    size = "large",
+    srcs = ["lhd_ware_options_smoke.sh"],
+    data = _FLOW_DATA + ["//inou/prp:abc_tests"],
+    # ~70 independent single-threaded synth/lec runs, driven 8 at a time.
+    # Reserve the fan-out so the pool does not oversubscribe concurrent tests.
+    tags = ["cpu:8"],
+)
+
+sh_test(
+    name = "lhd_ln_generic_test",
+    srcs = ["lhd_ln_generic_test.sh"],
+    data = _FLOW_DATA,
+)
+
+sh_test(
+    name = "lec_tuple_register_test",
+    size = "medium",
+    srcs = ["lec_tuple_register_test.sh"],
+    data = [
+        "//inou/prp:generic_tuple_register_fixture",
+        "//lhd",
+    ],
+)
+
+sh_test(
+    name = "lhd_abc_loop_test",
+    size = "medium",
+    srcs = ["lhd_abc_loop_test.sh"],
+    data = _FLOW_DATA + [
+        "//inou/prp:abc_tests",
+        "//inou/prp:tests/sim/loop_roll_carry.prp",
+    ],
+)
+
+# sim.tune (profile-guided `lhd sim` tuning): the option surface -- listing,
+# directed renames of the old spellings, grammar, the [sim.tune] config table,
+# P0.1 (a sim.* flip keeps the compile cache warm), the envelope member and the
+# --emit-dir sim: BUILD srcs. Setup-only: no simulation run.
+sh_test(
+    name = "sim_tune_options_test",
+    size = "medium",
+    srcs = ["sim_tune_options_test.sh"],
+    data = ["//lhd"],
+)
+
+# Each independent tuning lifecycle has its own scratch directory and target.
+# Keep real profiling runs above the tuner's 0.2 s quality gate.
+[sh_test(
+    name = "sim_tune_%s_test" % group,
+    srcs = ["sim_tune_profile_test.sh"],
+    args = [group],
+    data = [
+        "//inou/prp:tests/sim/tune_idle_tables.prp",
+        "//inou/prp:tests/sim/tune_lfsr.prp",
+        "//lhd",
+    ],
+    tags = ["cpu:4"],
+) for group in [
+    "profile",
+    "lfsr",
+    "pins",
+    "unknown_zero",
+    "stale",
+    "exhaustion",
+    "crash",
+    "edit",
+    "trial_gate",
+    "closed",
+    "divergence",
+    "resetup",
+]]
+
+# sim.tune.* knobs are speed-only: an ICG-gated design must pass with the same
+# per-test end_digest at live_words 256 / 1 / 2 and with dirty gating. At
+# live_words=1 the ICG latch and the flop whose commit guard reads its `_din`
+# land in different colors; the latch kept a guarded `_din` store and the flop
+# read it stale (SILENT miscompile, 2026-09-18). Inline fixture: just //lhd.
+sh_test(
+    name = "sim_live_words_invariance_test",
+    size = "large",
+    srcs = ["sim_live_words_invariance_test.sh"],
     data = ["//lhd"],
 )

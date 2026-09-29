@@ -7,11 +7,11 @@
 # adder architecture, and prove every one equivalent to the original logic with
 # `lhd lec` (the graph-native cvc5 engine).
 #
-#   prp -> lg (O1) -> pass color synth
+#   prp -> lg -> pass color synth
 #   pass partition --emit-dir lg:re   (the original-logic twin)
 #   pass liberty gensim test.lib --emit-dir lg:models   (cell behavioural models)
 #   for adder in rca, cska, cla (+ a non-default block_size):
-#       pass abc --set pass.abc.adder=<a> [--set pass.abc.block_size=<n>] -> lg:net
+#       pass <mapper> --set pass.<mapper>.adder=<a> [--set pass.<mapper>.block_size=<n>] -> lg:net
 #       lhd lec --impl lg:net --ref lg:re --lib lg:models   (per region)
 #
 # lec flattens the netlist's blackbox standard-cell `Sub` instances inline by
@@ -24,6 +24,19 @@
 # Hermetic: small vendored Liberty (inou/prp/tests/abc/test.lib), not the PDK.
 
 set -u
+
+# One script, both technology mappers: MAPPER=abc (default) runs `lhd pass abc`
+# and MAPPER=usyn runs `lhd pass usyn`. Every claim below is mapper-agnostic
+# (equivalence, netlist shape, option handling); lhd/tests/BUILD generates the
+# `_usyn` twin from this same file.
+MAPPER="${MAPPER:-abc}"
+case "$MAPPER" in
+  abc | usyn) ;;
+  *)
+    echo "FAIL: bad MAPPER=$MAPPER (expected abc|usyn)" >&2
+    exit 1
+    ;;
+esac
 
 LHD=lhd/lhd
 LIB=inou/prp/tests/abc/test.lib
@@ -39,7 +52,7 @@ run() { "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json
 [ -f "$LIB" ] || fail "missing liberty $LIB"
 
 # Shared once: compile + color, the original-logic twin, the cell models.
-run compile "$PRP" --top "$TOP" --recipe O1 --emit-dir lg:"$W/lg" --workdir "$W/w1"
+run compile "$PRP" --top "$TOP" --emit-dir lg:"$W/lg" --workdir "$W/w1"
 run pass color synth --top "$TOP" lg:"$W/lg" --workdir "$W/w2"
 run pass partition --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/re" --workdir "$W/w4"
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/w5"
@@ -64,7 +77,7 @@ map_and_lec() {
   local adder="$1" bstag="$2"; shift 2
   local tag="${adder}_${bstag}"
   rm -rf "$W/net_$tag"
-  run pass abc --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_$tag" --set pass.abc.library="$LIB" "$@" --workdir "$W/wa_$tag"
+  run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_$tag" --set synth.liberty="$LIB" "$@" --workdir "$W/wa_$tag"
   # the netlist really is a standard-cell netlist (Sub instances of Liberty cells)
   ls "$W/net_$tag"/graph_* >/dev/null 2>&1 || fail "$tag: no mapped netlist emitted"
   lec_regions "$W/net_$tag" "$tag"
@@ -72,14 +85,14 @@ map_and_lec() {
 }
 
 # Default (rca; block_size ignored). Fully-qualified flag.
-map_and_lec rca default --set pass.abc.adder=rca
+map_and_lec rca default --set pass.$MAPPER.adder=rca
 # Carry-skip, auto block_size and an explicit one.
-map_and_lec cska auto --set pass.abc.adder=cska
-map_and_lec cska 4 --set pass.abc.adder=cska --set pass.abc.block_size=4
+map_and_lec cska auto --set pass.$MAPPER.adder=cska
+map_and_lec cska 4 --set pass.$MAPPER.adder=cska --set pass.$MAPPER.block_size=4
 # Carry-lookahead, auto and explicit. Also exercise the 2h-set_path abbreviation
-# (`--set adder=cla` after `pass abc` resolves to pass.abc.adder).
+# (`--set adder=cla` after `pass <mapper>` resolves to pass.abc.adder).
 map_and_lec cla auto --set adder=cla
-map_and_lec cla 3 --set pass.abc.adder=cla --set pass.abc.block_size=3
+map_and_lec cla 3 --set pass.$MAPPER.adder=cla --set pass.$MAPPER.block_size=3
 
 # Control: the PROVEN results are load-bearing on the cell models. Without
 # --lib, the netlist's blackbox cell `Sub`s are unresolved, so lec must NOT
@@ -89,7 +102,6 @@ map_and_lec cla 3 --set pass.abc.adder=cla --set pass.abc.block_size=3
 # control strict, where any non-Proven outcome is a hard failure exit.
 one_region=$(echo "$REGIONS" | head -1)
 if "$LHD" lec --impl lg:"$W/net_rca_default" --ref lg:"$W/re" --top "$one_region" \
-    --set formal.strict=true \
     --workdir "$W/wlec_nolib" -q --result-json "$W/rn.json" 2>/dev/null; then
   fail "lec proved equivalence with no --lib (unresolved cells must not vacuously pass)"
 fi
@@ -111,9 +123,9 @@ CTOP=abc_constmul.abc_constmul
 C="$W/constmul"
 mkdir -p "$C"
 [ -f "$CPRP" ] || fail "missing fixture $CPRP"
-run compile "$CPRP" --top "$CTOP" --recipe O1 --emit-dir lg:"$C/lg" --workdir "$C/w1"
-# uncolored pass abc warns once (color-0 region) — tolerated by run()'s exit check
-run pass abc --top "$CTOP" lg:"$C/lg" --emit-dir lg:"$C/net" --set pass.abc.library="$LIB" --workdir "$C/w2"
+run compile "$CPRP" --top "$CTOP" --emit-dir lg:"$C/lg" --workdir "$C/w1"
+# uncolored pass <mapper> warns once (color-0 region) — tolerated by run()'s exit check
+run pass "$MAPPER" --top "$CTOP" lg:"$C/lg" --emit-dir lg:"$C/net" --set synth.liberty="$LIB" --workdir "$C/w2"
 run pass partition --top "$CTOP" lg:"$C/lg" --emit-dir lg:"$C/re" --workdir "$C/w3"
 CREGIONS=$(grep -oE '^graph_io [0-9]+ [A-Za-z0-9_.]+' "$C/re/library.txt" | awk '{print $3}' | sort -u)
 [ -n "$CREGIONS" ] || fail "no region modules in the constmul partition twin: $(cat "$C/re/library.txt")"

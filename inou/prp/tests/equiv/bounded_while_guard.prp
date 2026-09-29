@@ -1,0 +1,18 @@
+/*
+:name: bounded_while_guard
+:type: equiv
+:verilog_top: bounded_while_guard
+:pyrope_top: bounded_while_guard
+*/
+// Independent first-set priority and sum of visited positions.
+pub comb bounded_while_guard(num:u8) -> (count:u3, total:u5, skipped:u3) {
+  count = 6
+  for k in 0..<4 {
+    if num#[5-k] != 0 { count = 5-k }
+  }
+  skipped = 6
+  total = 1
+  for j in 2..<6 {
+    if j < count { total += j }
+  }
+}

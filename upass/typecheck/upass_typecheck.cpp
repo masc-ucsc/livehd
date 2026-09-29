@@ -4,6 +4,7 @@
 
 #include <format>
 
+#include "decl_facts.hpp"
 #include "diag.hpp"
 #include "hlop/dlop.hpp"
 #include "lnast.hpp"
@@ -11,6 +12,18 @@
 // Registered once here (static-init at link time; alwayslink keeps it alive).
 // depends_on {"attributes"} so the resolver runs attributes first.
 static upass::uPass_plugin plugin_typecheck("typecheck", upass::uPass_wrapper<uPass_typecheck>::get_upass, {"attributes"});
+
+namespace {
+// `x___ssa_2` is a VERSION of the user variable `x` (upass.ssa versions every
+// re-assigned `mut`). A read-modify-write reads one version and writes the
+// next, so its two ends only ever agree on the base name.
+std::string_view ssa_base(std::string_view name) {
+  if (const auto pos = name.find("___ssa_"); pos != std::string_view::npos) {
+    return name.substr(0, pos);
+  }
+  return name;
+}
+}  // namespace
 
 const char* uPass_typecheck::kind_name(Kind k) {
   switch (k) {
@@ -33,7 +46,7 @@ int uPass_typecheck::eq_class(Kind k) {
   // not this coarse class — a var's type cannot change, even int↔tuple.)
   switch (k) {
     case Kind::integer:
-    case Kind::range:
+    case Kind::range  :
     case Kind::tuple  : return 0;
     case Kind::boolean: return 1;
     case Kind::string : return 2;
@@ -88,8 +101,27 @@ uPass_typecheck::Kind uPass_typecheck::kind_of(std::string_view name) const {
   if (name.empty() || runner_st == nullptr) {
     return Kind::unknown;
   }
-  const auto b = runner_st->get_bundle(name);
-  return b ? kind_of_bundle(*b) : Kind::unknown;
+  if (const auto b = runner_st->get_bundle(name); b) {
+    if (const Kind k = kind_of_bundle(*b); k != Kind::unknown) {
+      return k;
+    }
+  }
+  // A module IO PORT is never a table-backed value: its declared type lives on
+  // the Lnast io_meta side-channel, so the bundle above reports `unknown` and
+  // `if en { … }` on a `u1` port used to slip through the condition check that
+  // the identical `mut en:u1` local trips. decl_facts is the single source of
+  // truth for "what was `name` declared as" — ask it before giving up.
+  const auto f = upass::decl_facts::lookup(*runner_st, lm ? lm->get_lnast().get() : nullptr, name);
+  if (!f) {
+    return Kind::unknown;
+  }
+  switch (upass::decl_facts::io_kind_from_num(f->kind, f->range_max || f->range_min)) {
+    case Io_kind::boolean: return Kind::boolean;
+    case Io_kind::string : return Kind::string;
+    case Io_kind::integer: return Kind::integer;
+    case Io_kind::none   : break;
+  }
+  return Kind::unknown;
 }
 
 void uPass_typecheck::set_dst_kind(Bundle& dst, Kind k) {
@@ -198,12 +230,64 @@ void uPass_typecheck::require_shift(std::string_view sym, Bundle& dst, upass::Sr
   }
   if (has_nil) {
     emit_type_error("nil-operand",
-                    std::format("`nil` is invalid in operator `{}` (only copy, `==nil`/`!=nil`, and `.[valid]` are allowed)",
-                                sym));
+                    std::format("`nil` is invalid in operator `{}` (only copy, `==nil`/`!=nil`, and `.[valid]` are allowed)", sym));
   } else if (bad) {
     emit_type_error("type-mismatch-arith",
                     std::format("operator `{}` requires integer operands ({})", sym, name_operands(src)),
                     "no implicit conversion — cast explicitly (e.g. `signed(b)`, `signed(true)==-1`)");
+  }
+  set_dst_kind(dst, Kind::integer);
+}
+
+void uPass_typecheck::require_concat(Bundle& dst, upass::Src_span src) {
+  // `concat(msb, …, lsb)`: each lane is an integer bit window, so the rule is
+  // require_all(integer) — EXCEPT that an ORDERED positional tuple/array lane
+  // is also legal: `concat(t)` splices its fields (field 0 most significant).
+  // A multi-field NAMED bundle is rejected by the runner's concat shape check:
+  // names have identity but no order, so the caller must select its fields as
+  // separate lanes. All this kind pass does is let tuple-shaped operands reach
+  // that structural check. Booleans stay errors (no bool<->int interop).
+  //
+  // Nothing here looks at a lane's WIDTH: the declared-width rule that sizes
+  // each window belongs to upass.bitwidth + upass.tolg, not to a kind check.
+  // Operands are INTERLEAVED (value, width) pairs. Only the EVEN ones are
+  // lanes; the odd ones are the window widths, which are `nil` until an upass
+  // pass binds them -- so walking every operand would report that pending
+  // `nil` as a nil-in-concat type error.
+  //
+  // ONE EXCEPTION to "booleans stay errors": a SINGLE-lane concat is not a
+  // packing of several values, it is a reinterpret of ONE -- there is nothing
+  // to interop with. uPass_runner lowers the sanctioned bool->int cast
+  // `unsigned(b)`/`signed(b)` through a get_mask, and the bit-select handler
+  // wraps the value in exactly such a one-lane concat (upass_runner.cpp,
+  // "bitsel-pack"). Rejecting a boolean lane there made that cast IMPOSSIBLE to
+  // write: the hint below says «cast explicitly (e.g. `unsigned(b)`)», and the
+  // cast lands right back here -- a circular diagnostic. The runner already
+  // treats the case as legal ("a bool operand always fits") and emits a 1-bit
+  // mask for it. A MULTI-lane packing keeps the strict no-bool<->int rule.
+  const bool single_lane = src.size() <= 2;
+  bool       bad         = false;
+  bool       has_nil     = false;
+  for (std::size_t i = 0; i < src.size(); i += 2) {
+    const Kind k = kind_of_operand(src[i]);
+    if (k == Kind::nil) {
+      has_nil = true;
+    } else if (k == Kind::unknown || k == Kind::integer || k == Kind::tuple) {
+      // wildcard, a scalar lane, or a tuple lane awaiting the shape check — ok
+    } else if (k == Kind::boolean && single_lane) {
+      // one-lane reinterpret of a boolean: a 1-bit window (see above)
+    } else {
+      bad = true;
+    }
+  }
+  if (has_nil) {
+    emit_type_error("nil-operand", "`nil` is invalid in `concat` (only copy, `==nil`/`!=nil`, and `.[valid]` are allowed)");
+  } else if (bad) {
+    emit_type_error("type-mismatch-concat",
+                    std::format("`concat` requires integer lanes ({})", name_operands(src)),
+                    "a lane is an integer bit window (an ordered positional tuple/array lane splices its fields) — "
+                    "no implicit conversion, "
+                    "cast explicitly (e.g. `unsigned(b)`)");
   }
   set_dst_kind(dst, Kind::integer);
 }
@@ -257,7 +341,7 @@ upass::Vote uPass_typecheck::process_store(std::string_view dst_name, Bundle& ds
   // changes the kind. Field-path stores — selector children (src.size() > 1)
   // or a dotted dst ref (`store(CFG.gain, v)`) — pass through: `dst` is the
   // whole destination bundle there, and per-field checks are follow-up work.
-  if (dst_name.empty() || src.size() != 1 || dst_name.find('.') != std::string_view::npos) {
+  if (dst_name.empty() || src.size() != 1 || !bundle_key::is_single_level(dst_name)) {  // backtick-aware
     return Vote::keep;
   }
   const Kind rhs = kind_of_operand(src.front());
@@ -308,6 +392,20 @@ upass::Vote uPass_typecheck::process_store(std::string_view dst_name, Bundle& ds
   // Established kind: a known rhs of a DIFFERENT kind is a type change (exact —
   // even int→tuple, unlike the coarse `==` class). A var's type cannot change.
   if (rhs != Kind::unknown && rhs != cur) {
+    // A typed positional array has an integer packed-bit view. A bit-range
+    // update lowers to set_mask(integer) followed by a whole store back into
+    // the array; that store changes representation, not the source type.
+    // ONLY that store: the RHS must be the round trip's own temp, cut from THIS
+    // array (process_set_mask records it). Every other integer RHS — plainly
+    // `arr = 5` — stays a type error, or it would silently broadcast the scalar
+    // into every lane. Named tuples have no implicit bit order: also rejected.
+    if (cur == Kind::tuple && rhs == Kind::integer && !dst.has_named_top() && !dst.get_attr("__elem_max").is_invalid()
+        && !src.front().name.empty()) {
+      const auto it = bitview_tmp_.find(src.front().name);
+      if (it != bitview_tmp_.end() && it->second == ssa_base(dst_name)) {
+        return Vote::keep;
+      }
+    }
     emit_type_error("assign-type-mismatch",
                     std::format("cannot assign {} value to `{}` (it is {}); a variable's type cannot change",
                                 kind_name(rhs),
@@ -340,10 +438,9 @@ void uPass_typecheck::process_if() {
       } else if (k != Kind::unknown && k != Kind::boolean) {
         emit_type_error("cond-not-bool",
                         std::format("condition must be boolean, got {}", kind_name(k)),
-                        k == Kind::integer
-                            ? "an integer (e.g. a bit select `x#[0]`) is a value, not a condition — "
-                              "did you mean `!= 0`? (write `if x#[0] != 0`)"
-                            : "compare explicitly, e.g. `if x != 0`",
+                        k == Kind::integer ? "an integer (e.g. a bit select `x#[0]`) is a value, not a condition — "
+                                             "did you mean `!= 0`? (write `if x#[0] != 0`)"
+                                           : "compare explicitly, e.g. `if x != 0`",
                         span_from_nid(if_nid));
       }
     }
@@ -368,10 +465,9 @@ void uPass_typecheck::process_while() {
     } else if (k != Kind::unknown && k != Kind::boolean) {
       emit_type_error("cond-not-bool",
                       std::format("while condition must be boolean, got {}", kind_name(k)),
-                      k == Kind::integer
-                          ? "an integer (e.g. a bit select `x#[0]`) is a value, not a condition — "
-                            "did you mean `!= 0`? (write `while x#[0] != 0`)"
-                          : "compare explicitly, e.g. `while x != 0`",
+                      k == Kind::integer ? "an integer (e.g. a bit select `x#[0]`) is a value, not a condition — "
+                                           "did you mean `!= 0`? (write `while x#[0] != 0`)"
+                                         : "compare explicitly, e.g. `while x != 0`",
                       span_from_nid(while_nid));
     }
   }
@@ -475,10 +571,10 @@ upass::Vote uPass_typecheck::process_log_and(std::string_view, Bundle& dst, upas
 upass::Vote uPass_typecheck::process_log_or(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::boolean, Kind::boolean, "or", "type-mismatch-logical", dst, src); return Vote::keep; }
 upass::Vote uPass_typecheck::process_log_not(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::boolean, Kind::boolean, "not", "type-mismatch-logical", dst, src); return Vote::keep; }
 
-// ── reductions (→ bool) / popcount (→ int): int operand ─────────────────────
-upass::Vote uPass_typecheck::process_red_or(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::boolean, "|", "type-mismatch-arith", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_red_and(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::boolean, "&", "type-mismatch-arith", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_red_xor(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::boolean, "^", "type-mismatch-arith", dst, src); return Vote::keep; }
+// ── reductions / popcount: integer operand → unsigned integer ──────────────
+upass::Vote uPass_typecheck::process_red_or(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "|", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_red_and(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "&", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_red_xor(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "^", "type-mismatch-arith", dst, src); return Vote::keep; }
 upass::Vote uPass_typecheck::process_popcount(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "#+", "type-mismatch-arith", dst, src); return Vote::keep; }
 
 // ── comparison: eq/ne same-class → bool; ordering int → bool ────────────────
@@ -490,9 +586,45 @@ upass::Vote uPass_typecheck::process_gt(std::string_view, Bundle& dst, upass::Sr
 upass::Vote uPass_typecheck::process_ge(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::boolean, ">=", "type-mismatch-compare", dst, src); return Vote::keep; }
 
 // ── bit manipulation / type-id: result kind only (operands not kind-checked) ─
-upass::Vote uPass_typecheck::process_set_mask(std::string_view, Bundle& dst, upass::Src_span) { set_dst_kind(dst, Kind::integer); return Vote::keep; }
 upass::Vote uPass_typecheck::process_sext(std::string_view, Bundle& dst, upass::Src_span) { set_dst_kind(dst, Kind::integer); return Vote::keep; }
+upass::Vote uPass_typecheck::process_concat(std::string_view, Bundle& dst, upass::Src_span src) { require_concat(dst, src); return Vote::keep; }
 // clang-format on
+
+upass::Vote uPass_typecheck::process_set_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  set_dst_kind(dst, Kind::integer);
+  // Record the packed-bit-view round trip so process_store can admit its (and
+  // only its) integer-into-array write-back. src[0] is the value being updated:
+  // the array itself on the first write of a chain, the prior round-trip temp
+  // afterwards. Anything else UNRECORDS the dst — a name re-defined by an
+  // ordinary set_mask is no longer a bit view of an array.
+  if (!dst_name.empty()) {
+    // COPY the root out: it may be a view of a bitview_tmp_ VALUE, and the
+    // insert below can rehash the map out from under it.
+    const std::string root{src.empty() ? std::string_view{} : bitview_root_of(src.front())};
+    if (root.empty()) {
+      bitview_tmp_.erase(dst_name);
+    } else {
+      bitview_tmp_[std::string(dst_name)] = root;
+    }
+  }
+  return Vote::keep;
+}
+
+std::string_view uPass_typecheck::bitview_root_of(const upass::Operand& o) const {
+  if (o.name.empty()) {
+    return {};  // a const literal is nobody's bit view
+  }
+  if (const auto it = bitview_tmp_.find(o.name); it != bitview_tmp_.end()) {
+    return it->second;  // chained write: `set_mask(%t1, %t0, …)` keeps %t0's array
+  }
+  // A typed positional array: unnamed (positional) tops carrying the element
+  // envelope a comp_type_array declare bakes. Named tuples have no implicit bit
+  // order, so they are never a bit view.
+  if (!o.bundle || o.bundle->has_named_top() || o.bundle->get_attr("__elem_max").is_invalid()) {
+    return {};
+  }
+  return ssa_base(o.name);
+}
 
 // ── aggregates: passthrough kinds, no homogeneity check ─────────────────────
 upass::Vote uPass_typecheck::process_tuple_add(std::string_view, Bundle& dst, upass::Src_span src) {

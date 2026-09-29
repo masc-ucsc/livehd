@@ -1,0 +1,18 @@
+/*
+:name: tuple_keys
+:type: comptime
+:verifier_pass: 9
+:verifier_fail: 0
+*/
+const b = (const a=1, const b=3, const c=5, 7, 11)
+cassert(b.keys() == ('a','b','c'))
+cassert(b.keys() == b.[fields])
+cassert((1,2).keys() == ())
+cassert(().keys() == ())
+for (index, value, key) in b {
+  cassert((index==0 and value==7 and key=='') or
+          (index==1 and value==11 and key=='') or
+          (index==2 and value==1 and key=='a') or
+          (index==3 and value==3 and key=='b') or
+          (index==4 and value==5 and key=='c'))
+}

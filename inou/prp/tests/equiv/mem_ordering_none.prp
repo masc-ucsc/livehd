@@ -27,7 +27,11 @@
 // prove when collision values genuinely do not matter (in which case program
 // ordering was never needed).
 pub mod mem_ordering_none(clk:u1, a1:u2, we:u1, a2:u2, d2:u2, a4:u2) -> (o1:u2@[], o4:u2@[]) {
-  reg mem:[4]u2:[ordering="none"] = 0
+  // `= nil` (no initializer) ON PURPOSE: an array init is a RESET VALUE
+  // (restored by a one-entry-per-cycle sweep), and this pair is about
+  // same-cycle ORDERING only — the golden below declares the array with no
+  // power-on contents and no reset, exactly like this.
+  reg mem:[4]u2:[ordering="none"]
   o1 = mem[a1]
   if we != 0 {
     mem[a2] = d2

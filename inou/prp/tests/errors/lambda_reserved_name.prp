@@ -1,0 +1,23 @@
+/*
+:name: lambda_reserved_name
+:type: error
+:error: (is a built-in|may not take that name)
+:help: (rename the|not a built-in call)
+*/
+
+// BUG (silently dead code): `concat` is a compiler built-in whose call site is
+// intercepted UNCONDITIONALLY -- every `concat(a, b)` is rewritten into the
+// n-ary LNAST concat node before any lambda lookup happens. A user lambda by
+// that name therefore parsed fine, bound nothing, and its body was never
+// reached; the failure surfaced far away as an unrelated `concat-untyped-lane`.
+// It must be rejected where it is DEFINED.
+//
+// A method is still fine: `x.concat(…)` has a receiver and is never
+// intercepted. Only this top-level source-named shape is an error.
+comb concat(a:u3, b:u4) -> (res:u7) {
+  res = a
+}
+
+comb top(i:u3, j:u4) -> (o:u7) {
+  o = concat(i, j)
+}

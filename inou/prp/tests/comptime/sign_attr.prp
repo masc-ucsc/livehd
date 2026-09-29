@@ -15,7 +15,7 @@ const b:s4 = -1
 cassert(b.[sign])        // signed → signed
 
 const c:bool = true
-cassert(c.[sign])        // bool is a 1-bit signed value (min=-1) → signed
+cassert(!c.[sign])       // a bool is the hardware u1 (true == 1) → not signed
 
 const d:u3 = 2
 cassert(!d.[sign])

@@ -1,0 +1,42 @@
+/*
+:name: loop_carry_kinds
+:type: lec
+:lec_set: formal.engine=ind
+*/
+// PYROPE-vs-PYROPE group: this file is the REFERENCE, and every
+// `loop_carry_kinds_<N>.prp` beside it is LEC'd against it.
+//
+// The three carry shapes `graph/loop_split.hpp` classifies, in one design, so a
+// change to how loops are proved or mapped has to keep all three honest at once:
+//
+//   `any`  IDEMPOTENT reduction (`|`). op(x,x) == x, so once a bit is set no
+//          further iteration can clear it -- the shape that makes two loops with
+//          DIFFERENT trip counts legitimately equal.
+//   `sum`  ASSOCIATIVE but NOT idempotent (`+`). Re-associates into a tree, but
+//          every extra iteration changes the value: count-SENSITIVE.
+//   `lane` DISJOINT-SLICE write. Structurally a carry (each step reads and
+//          rewrites `lane`), semantically parallel: step i writes only bit i and
+//          reads nothing it wrote.
+//
+//   _1  same counts, `any` widened to a range whose extra steps add already-set
+//       bits -- PROVEN, because an idempotent reduction saturates
+//   _2  same shape but the non-idempotent `sum` gets an extra step -- REFUTED
+pub mod top(x:u4) -> (any:bool@[0], sum:u16@[0], lane:u4@[0]) {
+  mut a:bool = false
+  for i in 0..<4 {
+    a = a or boolean(x#[i])
+  }
+  any = a
+
+  mut s:u16 = 0
+  for i in 0..<4 {
+    s = s + x
+  }
+  sum = s
+
+  mut l:u4 = 0
+  for i in 0..<4 {
+    l#[i] = x#[i]
+  }
+  lane = l
+}

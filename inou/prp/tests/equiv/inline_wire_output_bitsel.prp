@@ -1,0 +1,38 @@
+/*
+:name: inline_wire_output_bitsel
+:type: equiv
+:verilog_top: inline_wire_output_bitsel.inline_wire_output_bitsel
+:pyrope_top: inline_wire_output_bitsel
+*/
+
+// An inlined comb whose OUTPUT is re-declared `wire` in its own body (the shape
+// generated Pyrope takes when the Verilog output is also read inside the
+// module -- lhdsuite minion's `intpipe_alu.adder_out`), read by the caller
+// through a BIT SELECT.
+//
+// The comb inliner seeds every callee output `inlN_out = nil` in the call
+// prologue. A plain output loses that seed when the body's store arrives, but
+// constprop never binds a store to a `wire`, so the nil stayed on the binding
+// and rode the epilogue tuple into the caller. Every operator guards against
+// such a runtime placeholder except get_mask, which folded it: the bit select
+// became nil, its statement was dropped, and the consumer kept a dangling temp.
+//   x  lowered to all-X behind a lone `unresolved ref ... wiring nil` warning
+//      (a hard tolg-error in a unit without `timecheck=false`);
+//   e  folded to the constant 1 with NO diagnostic at all.
+// In minion that was `ex_dcache_req.addr` (every dcache request address) and
+// `addr_msb_err`.
+comb sub_alu(in1:u64, in2:u64) -> (out:u64, adder_out:u64) {
+  wire adder_out:u64
+  adder_out = (in1 + in2)#[0..=63]
+  out = in1 ^ in2
+}
+
+pub comb inline_wire_output_bitsel(a:u64, b:u64) -> (x:u48, e:u1, y:u64) {
+  const alu = sub_alu(in1 = a, in2 = b)
+  x = alu.adder_out#[0..=47]
+  e = 0
+  if alu.adder_out#[3] != 0 {
+    e = 1
+  }
+  y = alu.out
+}

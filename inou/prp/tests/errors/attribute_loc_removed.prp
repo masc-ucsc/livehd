@@ -1,0 +1,12 @@
+/*
+:name: attribute_loc_removed
+:type: error
+:error: not a Pyrope attribute name
+:help: source-location reads were removed
+*/
+
+// `.[loc]` was registered but nothing ever derived it (the documented `puts`
+// example printed nil); it is out of the vocabulary and errors instead of
+// silently folding to nil as a user attribute.
+mut x = 0
+const y = x.[loc]  // locate_error_here

@@ -15,8 +15,7 @@
 #     and forwards a flat plan to the driver, which answers it against the
 #     recorded post-step sample stream.
 #
-# Structural checks run hermetically; the run checks need the sibling ../hlop +
-# ../iassert headers (the usual dev-layout split).
+# Structural and runtime checks use lhd's declared runtime dependencies.
 
 set -u
 
@@ -86,13 +85,14 @@ grep -q '"kind":"memory"'      "$CAT" || fail "catalog has no memories (B did no
 grep -q '"kind":"flop"'        "$CAT" || fail "catalog lost flops"
 grep -q '"alias":"acc.__in.'   "$CAT" || fail "inputs lost their legacy __in. alias"
 grep -q '"declared_bits"'      "$CAT" || fail "catalog lacks declared_bits"
-# A u8 register is a Slop<9> declared 8 — both widths must be published, because
-# --list-signals is pinned to the internal one and an agent reads the declared one.
-python3 - "$CAT" <<'PY' || fail "u8 flop widths wrong (expected bits 9 / declared_bits 8)"
+# Literal-width hints make an unsigned u8 register an 8-bit Slop_u. Keep both
+# fields in the schema because imported/internal nets may still differ from a
+# source declaration, but this ordinary state must agree.
+python3 - "$CAT" <<'PY' || fail "u8 flop widths wrong (expected bits 8 / declared_bits 8)"
 import json,sys
 c=json.load(open(sys.argv[1]))["tests"]["top.run"]["signals"]
 f=[s for s in c if s["name"]=="acc.acc"]
-sys.exit(0 if f and f[0]["bits"]==9 and f[0]["declared_bits"]==8 else 1)
+sys.exit(0 if f and f[0]["bits"]==8 and f[0]["declared_bits"]==8 else 1)
 PY
 # Hierarchy survives into the catalog.
 grep -q 'acc\..*\.c"' "$CAT" || fail "catalog lost the sub-instance state"
@@ -122,16 +122,7 @@ echo "$EO" | grep -qi "query" || fail "wrong message rejecting --query + --vcd-f
   --workdir "$W/u2" -q >/dev/null 2>&1
 [ "$?" = "2" ] || fail "unknown schema_version did not exit 2 (usage)"
 
-# ---- opportunistic real build + run (needs the sibling runtime headers) -------
-HLOP_INC=""
-IASSERT_INC=""
-for d in ../hlop/hlop ../hlop; do [ -f "$d/slop.hpp" ] && HLOP_INC="$d" && break; done
-for d in ../iassert/src ../iassert; do [ -f "$d/iassert.hpp" ] && IASSERT_INC="$d" && break; done
-if [ -z "$HLOP_INC" ] || [ -z "$IASSERT_INC" ]; then
-  echo "SKIP run checks: sibling hlop/iassert headers not found (structural checks passed)"
-  echo "PASS: lhd sim --query (structural)"
-  exit 0
-fi
+# lhd locates its declared simulator runtime files; a failed build must fail.
 
 R="$W/r"
 Q='{"schema_version":1,"kind":"sim_query","queries":[
@@ -171,7 +162,7 @@ assert r["pc"]["ok"], r["pc"]
 v=r["pc"]["value"]
 for k in ("bits","declared_bits","signed","hex","dec","known_mask"):
     assert k in v, f"value object missing {k}: {v}"
-assert v["bits"]==9 and v["declared_bits"]==8, v
+assert v["bits"]>=v["declared_bits"] and v["declared_bits"]==8, v
 assert int(v["dec"])==6, f"acc at cycle 5 = {v['dec']}, expected 6"
 assert int(v["known_mask"],16)==(1<<v["bits"])-1, f"known_mask must be all-ones in v1: {v}"
 

@@ -29,7 +29,7 @@
 // handlers live in sibling files:
 //
 //   * upass_attributes_sticky.cpp   — `_*` / `debug` sticky propagation
-//   * upass_attributes_wrap_sat.cpp — category-A wrap / saturate / const
+//   * upass_attributes_wrap_sat.cpp — category-A wrap / sat / const
 //   * upass_attributes_wiring.cpp   — category-B LGraph-wiring attrs
 //   * upass_attributes_read.cpp     — `.[attr]` read evaluation
 //   * upass_attributes_tuple.cpp    — aggregate (tuple/array) shape tracking
@@ -78,6 +78,19 @@ public:
   upass::Vote process_sext(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_get_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_set_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  // `concat(dst, v_msb, w_msb, …, v_lsb, w_lsb)` is assignment-shaped like
+  // every op above, so sticky taint has to observe it. on_assign_like walks the
+  // node under the cursor, which is why the INTERLEAVED (value, width) operand
+  // pairs need no decoding here — the width consts read as ordinary rhs
+  // constants. Written out instead of joining the .cpp's EXPR_PROCESS list
+  // purely to keep this landing inside the one file this change owns.
+  upass::Vote process_concat(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    on_assign_like(/*is_assign_node=*/false);
+    return upass::Vote::keep;
+  }
 
   // Attribute set/get nodes are dispatched to per-attribute handlers.
   void process_attr_set() override;
@@ -121,6 +134,15 @@ public:
   // const single-bind tally in record_assign pauses while the window is open.
   void notify_init_construction_begin() override { ++init_construction_depth_; }
   void notify_init_construction_end() override { --init_construction_depth_; }
+
+  // A RUNTIME if-arm: the runner walks EVERY arm, so `if c { x = a } else
+  // { x = b }` reaches record_assign twice for a `const x` even though exactly
+  // ONE bind happens per cycle. Counting stores cannot tell that apart from a
+  // real rebind, so the tally pauses inside an uncertain arm and the
+  // control-flow-aware check in inou.prp (check_wire_scope, which takes the max
+  // driver count over an if/match's arms) owns the runtime case.
+  void notify_uncertain_arm_begin() override { ++uncertain_arm_depth_; }
+  void notify_uncertain_arm_end() override { --uncertain_arm_depth_; }
 
   // Read-side accessor for tests / cross-handler queries.
   upass::attributes::Handler_registry& registry() { return reg; }
@@ -363,6 +385,10 @@ private:
   // notify_init_construction_* overrides) — record_assign skips the const
   // single-bind tally for the synthesized constructor stores.
   int init_construction_depth_ = 0;
+
+  // >0 while the runner is inside a runtime (non-comptime-decided) if-arm —
+  // see the notify_uncertain_arm_* overrides.
+  int uncertain_arm_depth_ = 0;
 
   // Read evaluator (read.cpp): compute the attribute's value when possible, store it
   // in tmp_fold[dst] so downstream reads pick it up. base_text is the raw

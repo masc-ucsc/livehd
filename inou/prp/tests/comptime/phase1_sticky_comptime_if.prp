@@ -31,7 +31,7 @@ if false {
   b = p + 1     // taken: no sticky
 }
 cassert(b == 8)
-cassert(!b.[debug])
+cassert(b.[debug] == nil)
 
 mut c = 0
 if d > 0 {
@@ -48,4 +48,4 @@ if t.[_foo] {
   e = p         // sticky attr read in condition taints the assignment
 }
 cassert(e == 7)
-cassert(e.[_foo] and !e.[foo])
+cassert(e.[_foo] and e.[foo] == nil)

@@ -1,4 +1,5 @@
-//  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+//  This file is distributed under the BSD 3-Clause License. See LICENSE for
+//  details.
 
 #include "cell.hpp"
 
@@ -7,7 +8,12 @@
 #include "iassert.hpp"
 
 namespace {
-// Pre-register every LiveHD attribute tag at static-init. The HHDS
+// Pre-register every LiveHD attribute tag at static-init.
+//
+// The tag list is LIVEHD_FOR_EACH_ATTR_TAG (graph/attrs.hpp): this block and
+// graph/attr_carry.hpp both expand it, so a tag added there is registered here
+// AND carried by every graph->graph rebuild (legalize, flatten, inline_sub,
+// occurrence materialize) with nothing to keep in step by hand. The HHDS
 // attribute registry is not thread-safe on first-touch (two threads
 // racing to register the same tag both find the registry empty and try
 // to insert). Pre-registering before main() keeps the lazy attr() path
@@ -15,24 +21,10 @@ namespace {
 struct Livehd_attr_init {
   Livehd_attr_init() {
     hhds::register_attr_tag<hhds::attrs::name_t>("hhds::attrs::name");
-    hhds::register_attr_tag<livehd::attrs::bits_t>("livehd::attrs::bits");
-    hhds::register_attr_tag<livehd::attrs::pin_offset_t>("livehd::attrs::pin_offset");
-    hhds::register_attr_tag<livehd::attrs::pin_name_t>("livehd::attrs::pin_name");
-    hhds::register_attr_tag<livehd::attrs::pin_delay_t>("livehd::attrs::pin_delay");
-    hhds::register_attr_tag<livehd::attrs::pin_signed_t>("livehd::attrs::pin_signed");
-    hhds::register_attr_tag<livehd::attrs::color_t>("livehd::attrs::color");
-    hhds::register_attr_tag<livehd::attrs::hier_color_t>("livehd::attrs::hier_color");
-    hhds::register_attr_tag<livehd::attrs::coloring_info_t>("livehd::attrs::coloring_info");
-    hhds::register_attr_tag<livehd::attrs::match_t>("livehd::attrs::match");
-    hhds::register_attr_tag<livehd::attrs::proven_t>("livehd::attrs::proven");
-    hhds::register_attr_tag<livehd::attrs::runtime_check_t>("livehd::attrs::runtime_check");
-    hhds::register_attr_tag<livehd::attrs::place_t>("livehd::attrs::place");
     // source provenance rides hhds::attrs::srcid (self-registering)
-    hhds::register_attr_tag<livehd::attrs::const_value_t>("livehd::attrs::const_value");
-    hhds::register_attr_tag<livehd::attrs::pin_const_value_t>("livehd::attrs::pin_const_value");
-    hhds::register_attr_tag<livehd::attrs::lut_t>("livehd::attrs::lut");
-    hhds::register_attr_tag<livehd::attrs::time_range_t>("livehd::attrs::time_range");
-    hhds::register_attr_tag<livehd::attrs::pending_time_t>("livehd::attrs::pending_time");
+#define LIVEHD_REGISTER_ATTR_TAG(tag) hhds::register_attr_tag<livehd::attrs::tag##_t>("livehd::attrs::" #tag);
+    LIVEHD_FOR_EACH_ATTR_TAG(LIVEHD_REGISTER_ATTR_TAG)
+#undef LIVEHD_REGISTER_ATTR_TAG
   }
 };
 [[maybe_unused]] const Livehd_attr_init livehd_attr_init_{};
@@ -41,15 +33,11 @@ struct Livehd_attr_init {
 Ntype::_init Ntype::_static_initializer;
 
 Ntype::_init::_init() {
-  // Sparse iteration: Ntype_op values are no longer contiguous (bit 0 of
-  // the underlying value is reserved for is_loop_last, see cell.hpp). Op
-  // indices between valid ops behave as no-ops here — sink_*[op] slots
-  // stay livehd::Port_invalid / "invalid" and get_sink_name_slow returns
-  // "invalid" for them, so the inner loop's `pin_name == "invalid"`
-  // check skips them. Starting at 1 still skips Ntype_op::Invalid (== 0).
+  // Dense: every value in [1, Last_invalid) is a real op. Starting at 1 skips
+  // Ntype_op::Invalid (== 0).
   for (uint8_t op = 1; op < static_cast<uint8_t>(Ntype_op::Last_invalid); ++op) {
     for (auto& e : sink_name2pid) {
-      e[op] = livehd::Port_invalid;
+      e[op] = hhds::Port_invalid;
     }
 
     for (auto& e : sink_pid2name) {
@@ -67,9 +55,9 @@ Ntype::_init::_init() {
 
       sink_pid2name[pid][op] = pin_name;
 
-      auto [it, inserted] = name2pid.emplace(pin_name, pid);
+      auto [it, inserted] = name2pid[op].emplace(pin_name, pid);
       if (!inserted) {
-        I(it->second == pid);  // same name should always have same PID
+        I(it->second == pid);  // a name has one PID within its cell type
       }
 
       if (static_cast<Ntype_op>(op) != Ntype_op::Memory && is_unlimited_sink(static_cast<Ntype_op>(op)) && pid >= 10) {
@@ -79,8 +67,8 @@ Ntype::_init::_init() {
       // First-claim-wins on the per-op first-char slot: two sink names of the
       // same op may share a leading char (Flop posclk/pipe_min/pipe_max all
       // start with 'p'); the later pins resolve through get_sink_pid's slow
-      // path (global name2pid + per-op verify) instead of this table.
-      if (sink_name2pid[pin_name[0]][op] == livehd::Port_invalid) {
+      // path (the cell type's name2pid map) instead of this table.
+      if (sink_name2pid[pin_name[0]][op] == hhds::Port_invalid) {
         sink_name2pid[pin_name[0]][op] = pid;
       }
       assert(pid == Ntype::get_sink_pid(static_cast<Ntype_op>(op), pin_name));
@@ -105,41 +93,42 @@ Ntype::_init::_init() {
     // (see get_sink_name_slow) but their leading char is still 'a'/'b', so the
     // pid stays 0/1 here and the get_sink_pid fast path is unaffected.
     pid = sink_name2pid['a'][op];
-    assert(pid == livehd::Port_invalid || pid == 0);
+    assert(pid == hhds::Port_invalid || pid == 0);
 
     pid = sink_name2pid['b'][op];
-    assert(pid == livehd::Port_invalid || pid == 1);
+    assert(pid == hhds::Port_invalid || pid == 1);
 
     pid = sink_name2pid['c'][op];
-    assert(pid == livehd::Port_invalid || pid == 2);
+    assert(pid == hhds::Port_invalid || pid == 2);
 
     pid = sink_name2pid['d'][op];
-    assert(pid == livehd::Port_invalid || pid == 3);
+    assert(pid == hhds::Port_invalid || pid == 3);
 
     pid = sink_name2pid['e'][op];
-    assert(pid == livehd::Port_invalid || pid == 4);
+    assert(pid == hhds::Port_invalid || pid == 4);
 
     pid = sink_name2pid['f'][op];
-    assert(pid == livehd::Port_invalid || pid == 5);
+    assert(pid == hhds::Port_invalid || pid == 5);
   }
 
-  // cell_name_sv is sparse; "invalid" placeholders at gap indices must not
-  // overwrite cell_name_map["invalid"] (which legitimately maps to
-  // Ntype_op::Invalid == 0).
+  // cell_name_sv is sized Last_invalid + 1, so its TAIL slot (and slot 0) still
+  // spell the "invalid" placeholder. Only slot 0 may claim that name: letting
+  // the tail overwrite it makes Ntype::get_op("invalid") answer `Last_invalid`,
+  // an out-of-range op that then indexes one past every Last_invalid-sized pin
+  // table in this class.
   for (size_t pos = 0; pos < cell_name_sv.size(); ++pos) {
-    auto e = cell_name_sv[pos];
-    if (pos != 0 && e == "invalid") {
+    if (pos != 0 && cell_name_sv[pos] == "invalid") {
       continue;
     }
-    cell_name_map[std::string{e}] = static_cast<Ntype_op>(pos);
+    cell_name_map[std::string{cell_name_sv[pos]}] = static_cast<Ntype_op>(pos);
   }
 }
 
 constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id pid) {
   switch (op) {
     case Ntype_op::Invalid: return "invalid"; break;
-    case Ntype_op::Sum:
-    case Ntype_op::LT:
+    case Ntype_op::Sum    :
+    case Ntype_op::LT     :
     case Ntype_op::GT:
       // a,b are multi-driver sinks (drivers folded: Sum sums, LT/GT reduce) ->
       // 's'-suffixed names. Keep in sync with Ntype::is_sink_single_driver.
@@ -151,10 +140,10 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       return "invalid";
       break;
     case Ntype_op::Mult:
-    case Ntype_op::And:
-    case Ntype_op::Or:
-    case Ntype_op::Xor:
-    case Ntype_op::Ror:
+    case Ntype_op::And :
+    case Ntype_op::Or  :
+    case Ntype_op::Xor :
+    case Ntype_op::Ror :
     case Ntype_op::EQ:
       // single multi-driver sink a -> "as".
       if (pid == 0) {
@@ -168,13 +157,16 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       }
       return "invalid";
       break;
+    case Ntype_op::Rxor    :
+    case Ntype_op::Popcount:
     case Ntype_op::Sext:
-    case Ntype_op::Div:
-    case Ntype_op::Rem:
-    case Ntype_op::SRA:
+    case Ntype_op::Div :
+    case Ntype_op::Rem :
+    case Ntype_op::SRA :
     case Ntype_op::SHL:
       // a,b are single-driver positional operands -> plain names. (SHL no longer
-      // folds multiple one-hot shift amounts on b; that runtime form was removed.)
+      // folds multiple one-hot shift amounts on b; that runtime form was
+      // removed.)
       if (pid == 0) {
         return "a";
       } else if (pid == 1) {
@@ -182,19 +174,26 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       }
       return "invalid";
       break;
-    case Ntype_op::Nconst:  // No drivers to Constants
-      return "invalid";
-      break;
-    case Ntype_op::Mux:     // unlimited case: 1,2,3,4,5.... // Y = (pid0 == true) ? pid2 : pid1
-    case Ntype_op::Hotmux:  // unlimited case: pid0 = one-hot sel, pid1..N = values
+    case Ntype_op::Mux:  // unlimited case: 1,2,3,4,5.... // Y = (pid0 == true) ?
+                         // pid2 : pid1
       if (pid == 0) {
         return "s";
       }
       [[fallthrough]];
-    case Ntype_op::IO:
-    case Ntype_op::LUT:  // unlimited case: 1,2,3,4,5....
-    case Ntype_op::Sub:  // unlimited case: 1,2,3,4,5....
+    case Ntype_op::IO    :
+    case Ntype_op::LUT   :  // unlimited case: 1,2,3,4,5....
+    case Ntype_op::Sub   :  // unlimited case: 1,2,3,4,5....
+    case Ntype_op::Hotmux:  // (control, value) pairs, optional trailing default
+    case Ntype_op::Concat:  // unlimited case: INTERLEAVED (value, width) pairs;
+                            // lane i at 2i/2i+1
       assert(is_unlimited_sink(op));
+      // p0..p15 -- the whole 0..Memory_port_stride-1 range that `sink_pid2name`
+      // can hold. It used to stop at p10, leaving 11..15 as "invalid": pid >= 16
+      // works (get_sink_name wraps it to "16p0" and get_sink_pid parses the
+      // leading digits back), but 11..15 fell into the default and made
+      // get_sink_name's `name != "invalid"` assert fire. Reachable today by an
+      // 11-arm Mux, and immediately by Concat, whose interleaved (value, width)
+      // encoding spends two pids per lane -- so a 6-lane concat lands on 11.
       switch (pid) {
         case 0 : return "p0";
         case 1 : return "p1";
@@ -206,53 +205,80 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
         case 7 : return "p7";
         case 8 : return "p8";
         case 9 : return "p9";
-        case 10: return "p10";  // >10 handled with loop at get_sink_pid
+        case 10: return "p10";
+        case 11: return "p11";
+        case 12: return "p12";
+        case 13: return "p13";
+        case 14: return "p14";
+        case 15:
+          return "p15";  // >15 handled by the Memory_port_stride wrap in
+                         // get_sink_name
         default: return "invalid";
       }
       return "invalid";
       break;
     case Ntype_op::Memory:
       switch (pid) {
-        case 0 : return "addr";       // runtime  x n_ports
-        case 1 : return "bits";       // comptime x 1
-        case 2 : return "clock_pin";  // runtime  x 1 or n_ports
-        case 3 : return "din";        // runtime  x n_ports
-        case 4 : return "enable";     // runtime  x n_ports
-        case 5 : return "fwd";        // comptime x 1 -- per-(READ-port,WRITE-port) forwarding MATRIX: bit
-                                      // (r*n_wr + w) set => read port r sees write port w's new data on a
-                                      // same-cycle same-address collision (r/w = read/write ordinals, n_wr =
-                                      // the cell's TOTAL write-port count). A zero row => that read returns
-                                      // the committed contents. A 1-read-port memory encodes bit-identically
-                                      // to the old per-write-port mask. Built from the Pyrope `ordering`
-                                      // attr: "program" => row r is the PREFIX of writes preceding read r in
-                                      // program order; "fwd" => all ones; "none" => all zeros.
-        case 6 : return "posclk";     // comptime x 1
-        case 7 : return "type";       // comptime x 1 (0:async, 1:sync: 2:array)
-        case 8 : return "wensize";    // comptime x 1  -- number of Write Enable bits
-        case 9 : return "size";       // comptime x 1
-        case 10: return "rdport";     // comptime x n_ports (1 rd, 0 wr)
+        case 0: return "addr";       // runtime  x n_ports
+        case 1: return "bits";       // comptime x 1
+        case 2: return "clock_pin";  // runtime  x 1 or n_ports
+        case 3: return "din";        // runtime  x n_ports
+        case 4: return "enable";     // runtime  x n_ports
+        case 5:
+          return "fwd";             // comptime x 1 -- per-(READ-port,WRITE-port) forwarding
+                                    // MATRIX: bit (r*n_wr + w) set => read port r sees write
+                                    // port w's new data on a same-cycle same-address collision
+                                    // (r/w = read/write ordinals, n_wr = the cell's TOTAL
+                                    // write-port count). A zero row => that read returns the
+                                    // committed contents. A 1-read-port memory encodes
+                                    // bit-identically to the old per-write-port mask. Built
+                                    // from the Pyrope `ordering` attr: "program" => row r is
+                                    // the PREFIX of writes preceding read r in program order;
+                                    // "fwd" => all ones; "none" => all zeros.
+        case 6 : return "posclk";   // comptime x 1
+        case 7 : return "type";     // comptime x 1 (0:async, 1:sync: 2:array)
+        case 8 : return "wensize";  // comptime x 1  -- number of Write Enable bits
+        case 9 : return "size";     // comptime x 1
+        case 10: return "rdport";   // comptime x n_ports (1 rd, 0 wr)
         case 11:
-          return "init";  // comptime x 1 -- contents (entry 0 in the low `bits`, row-major); a reg array with a bound reset
-                          // restores it via per-entry write ports (tolg). For a WHOLE-ARRAY cell (the `update` pin is
-                          // driven) `init` is RUNTIME-capable and carries the reset-value bus (entry 0 in the low `bits`).
-        // Whole-array pins (cell has these driven => one `update`/`read_all` bus instead of N per-entry ports).
-        case 12: return "update";         // runtime  x 1 -- whole-array next-state bus (size*bits, entry 0 low)
-        case 13: return "update_enable";  // runtime  x 1 -- optional bulk-update enable (absent => always-on)
-        case 14: return "reset";          // runtime  x 1 -- 1-bit reset condition (active high; tolg pre-inverts negreset)
-        case 15: return "undef";      // comptime x 1 -- per-(READ-port,WRITE-port) UNDEFINED matrix, bit-identical
-                                      // layout to `fwd`: bit (r*n_wr + w) set => read port r's data is UNDEFINED (x)
-                                      // when write port w collides (same address, enabled) in the same cycle. `fwd`
-                                      // and `undef` are MUTUALLY EXCLUSIVE per (r,w): fwd says "see the NEW data",
-                                      // undef says "see nothing definite", both clear says "see the COMMITTED data".
-                                      // That third state is why this pin exists -- a zero `fwd` row alone cannot tell
-                                      // "defined old" from "undefined", which is yosys $mem_v2's
-                                      // RD_TRANSPARENCY_MASK / RD_COLLISION_X_MASK pair. Built from the Pyrope
-                                      // `ordering` attr: "none" => every USER write column set (restore/reset ports
-                                      // never, exactly like `fwd`); "program"/"fwd"/"old" => all zeros.
-                                      // Consumers: cgen passes it as the wrapper's UNDEF parameter (x on collision);
-                                      // the cvc5 lec encoder turns it into a read-dout X bit-plane so the miter
-                                      // treats the window as don't-care; every bit-blasting consumer (pass.abc,
-                                      // cgen_sim) may REFINE it to any concrete value.
+          return "initial";  // comptime x 1 -- contents (entry 0 in the low `bits`,
+                             // row-major); a reg array with a bound reset restores
+                             // it in ONE cycle through the `reset` pin (14) below
+                             // (tolg). For a WHOLE-ARRAY cell (the `update` pin is
+                             // driven) `initial` is RUNTIME-capable and carries the
+                             // reset-value bus (entry 0 in the low `bits`).
+        // Whole-array pins (cell has these driven => one `update`/`read_all` bus
+        // instead of N per-entry ports).
+        case 12:
+          return "update";  // runtime  x 1 -- whole-array next-state bus (size*bits,
+                            // entry 0 low)
+        case 13:
+          return "update_enable";  // runtime  x 1 -- optional bulk-update enable
+                                   // (absent => always-on)
+        case 14:
+          return "reset";  // runtime  x 1 -- 1-bit reset condition (active high;
+                           // tolg pre-inverts negreset)
+        case 15:
+          return "undef";  // comptime x 1 -- per-(READ-port,WRITE-port) UNDEFINED
+                           // matrix, bit-identical layout to `fwd`: bit (r*n_wr + w)
+                           // set => read port r's data is UNDEFINED (x) when write
+                           // port w collides (same address, enabled) in the same
+                           // cycle. `fwd` and `undef` are MUTUALLY EXCLUSIVE per
+                           // (r,w): fwd says "see the NEW data", undef says "see
+                           // nothing definite", both clear says "see the COMMITTED
+                           // data". That third state is why this pin exists -- a
+                           // zero `fwd` row alone cannot tell "defined old" from
+                           // "undefined", which is yosys $mem_v2's
+                           // RD_TRANSPARENCY_MASK / RD_COLLISION_X_MASK pair. Built
+                           // from the Pyrope `ordering` attr: "none" => every USER
+                           // write column set (restore/reset ports never, exactly
+                           // like `fwd`); "program"/"fwd"/"old" => all zeros.
+                           // Consumers: cgen passes it as the wrapper's UNDEF
+                           // parameter (x on collision); the cvc5 lec encoder turns
+                           // it into a read-dout X bit-plane so the miter treats the
+                           // window as don't-care; every bit-blasting consumer
+                           // (pass.abc, cgen_sim) may REFINE it to any concrete
+                           // value.
         default: return "invalid";
       }
       break;
@@ -287,8 +313,8 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       // commit-class analysis needs no per-op special case. `pipe_min`/
       // `pipe_max` are deliberately absent: a latch has no pipeline depth.
       //
-      // `posclk` ON A LATCH IS THE ENABLE POLARITY, NOT A CLOCK (user ruling,
-      // 2026-07-20). A latch has an `enable` signal and the only question is
+      // `posclk` ON A LATCH IS THE ENABLE POLARITY, NOT A CLOCK. A latch has an
+      // `enable` signal and the only question is
       // whether it is active HIGH or active LOW:
       //     unset / true  -> enable is active HIGH: transparent while enable==1,
       //                      so it COMMITS on that net's FALL
@@ -308,15 +334,16 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       // the ruling above collapses. `clock_pin` is reserved (see below) but
       // tolg still REFUSES it on a latch — no consumer gives it meaning yet.
       switch (pid) {
-        case 0 : return "async";     // reserved for M7 (async set/reset latches)
-        case 1 : return "initial";   // reset / power-on value
-        case 2 : return "clock_pin"; // reserved; NOT the gate (the enable is)
+        case 0: return "async";    // reserved for M7 (async set/reset latches)
+        case 1: return "initial";  // reset / power-on value
+        case 2:
+          return "clock_pin";  // reserved; NOT the gate (the enable is)
         // No 1 to keep din at pos 3 (a,b,c)
         case 3 : return "din";
         case 4 : return "enable";
-        case 5 : return "negreset";  // reserved for M7
-        case 6 : return "posclk";    // ENABLE POLARITY — see the note above
-        case 7 : return "reset_pin"; // reserved for M7
+        case 5 : return "negreset";   // reserved for M7
+        case 6 : return "posclk";     // ENABLE POLARITY — see the note above
+        case 7 : return "reset_pin";  // reserved for M7
         default: return "invalid";
       }
       break;

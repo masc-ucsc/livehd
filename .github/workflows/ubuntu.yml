@@ -1,4 +1,4 @@
-name: Ubuntu
+name: macOS 26
 
 on:
   push:
@@ -13,66 +13,70 @@ concurrency:
 jobs:
   test-opt:
     name: Build everything
-    runs-on: ubuntu-24.04
+    runs-on: macos-26
     env:
-      CC: gcc-14
-      CXX: g++-14
+      CC: clang
+      CXX: clang++
     steps:
       - name: Checkout repo
         uses: actions/checkout@v7
 
-
-      - name: Restore bazel cache
+      - name: Restore Bazel cache
         id: bazel-cache
         uses: actions/cache/restore@v6.1.0
         with:
-          path: "~/.cache/bazel"
-          key: bazel-gcc-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ~/Library/Caches/bazel
+          key: bazel-build-${{ runner.os }}-${{ runner.arch }}-clang21-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            bazel-gcc-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}-
-            bazel-gcc-${{ runner.os }}-
-            bazel-gcc-
+            bazel-build-${{ runner.os }}-${{ runner.arch }}-clang21-${{ github.sha }}-
+            bazel-build-${{ runner.os }}-${{ runner.arch }}-clang21-
 
       - name: Show compiler selection
         run: |
           "$CC" --version
           "$CXX" --version
 
+      - name: Install Verilog simulator
+        run: |
+          brew install icarus-verilog
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+          command -v iverilog vvp
+
       - run: bazel test -c dbg --test_output=errors //...
 
-      # Preserve completed build actions even when a later build or test fails.
-      # Per-run keys let a restored partial cache grow instead of freezing it.
-      - name: Save bazel cache
+      # A full build is expensive and failures tend to happen late. Keep
+      # successfully produced Bazel outputs for the next run either way.
+      - name: Save Bazel cache
         if: ${{ !cancelled() && steps.bazel-cache.outputs.cache-primary-key != '' && steps.bazel-cache.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v6.1.0
         with:
-          path: "~/.cache/bazel"
+          path: |
+            ~/Library/Caches/bazel
           key: ${{ steps.bazel-cache.outputs.cache-primary-key }}
 
   coverage:
     name: Gather coverage metrics
-    runs-on: ubuntu-24.04
+    runs-on: macos-26
     env:
-      CC: gcc-14
-      CXX: g++-14
-      GCOV: gcov-14  # must match CC, or gcov rejects the .gcda/.gcno data (version 'B42*', prefer 'B33*')
+      CC: clang
+      CXX: clang++
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v7
 
-
-      - name: Restore bazel cache
+      - name: Restore Bazel cache
         id: bazel-cache
         uses: actions/cache/restore@v6.1.0
         with:
-          path: "~/.cache/bazel"
-          key: bazel-coverage-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ~/Library/Caches/bazel
+          key: bazel-coverage-${{ runner.os }}-${{ runner.arch }}-clang21-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            bazel-coverage-${{ runner.os }}-${{ hashFiles('.bazelrc', '.bazelversion', 'WORKSPACE*', 'MODULE.bazel') }}-
-            bazel-coverage-${{ runner.os }}-
-            bazel-coverage-
+            bazel-coverage-${{ runner.os }}-${{ runner.arch }}-clang21-${{ github.sha }}-
+            bazel-coverage-${{ runner.os }}-${{ runner.arch }}-clang21-
 
       - name: Print the list of targets
         run: bazel query --output label_kind //...
@@ -82,24 +86,19 @@ jobs:
           "$CC" --version
           "$CXX" --version
 
+      - name: Install Verilog simulator
+        run: |
+          brew install icarus-verilog
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
+          command -v iverilog vvp
+
       # continue-on-error so partial coverage is still uploaded when some
       # tests fail (the failure is re-raised after the upload below).
       - id: coverage
         continue-on-error: true
-        # Match scripts/getcov.sh: run optimized coverage, with debug builds
-        # tested separately in the other job.
-        # Same instrumentation filter so the dashboard
+        # Same instrumentation filter as scripts/getcov.sh so the dashboard
         # measures the main packages only (no third_party / helper tooling).
-        # Keep the long-test and benchmark exclusions from .bazelrc.
         run: bazel coverage -c opt --keep_going --collect_code_coverage --combined_report=lcov --test_output=errors --instrumentation_filter='^//(core|graph|lnast|parser|inou|lhd|lsp|pass|upass|ware|simlib|packages)(/|:)' //...
-
-      - name: Save bazel cache
-        if: ${{ !cancelled() && steps.bazel-cache.outputs.cache-primary-key != '' && steps.bazel-cache.outputs.cache-hit != 'true' }}
-        continue-on-error: true
-        uses: actions/cache/save@v6.1.0
-        with:
-          path: "~/.cache/bazel"
-          key: ${{ steps.bazel-cache.outputs.cache-primary-key }}
 
       - uses: codecov/codecov-action@v7
         with:
@@ -111,3 +110,12 @@ jobs:
       - name: Propagate test failures
         if: steps.coverage.outcome == 'failure'
         run: exit 1
+
+      - name: Save Bazel cache
+        if: ${{ !cancelled() && steps.bazel-cache.outputs.cache-primary-key != '' && steps.bazel-cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: |
+            ~/Library/Caches/bazel
+          key: ${{ steps.bazel-cache.outputs.cache-primary-key }}

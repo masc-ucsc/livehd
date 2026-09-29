@@ -5,15 +5,28 @@
 // (and, in the lec.cross path, lgcheck). Graphs are built programmatically so
 // the test needs no reader.
 
+#include "query.hpp"
+
 #include <memory>
+#include <set>
+#include <stdexcept>
 #include <string>
+#include <tuple>
+#include <vector>
 
 #include "cell.hpp"
+#include "cprop.hpp"
+#include "enableopt.hpp"
+#include "bitwidth.hpp"
+#include "encode.hpp"
+#include "flatten.hpp"
 #include "gtest/gtest.h"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
+#include "inline_sub.hpp"
 #include "node_util.hpp"
-#include "query.hpp"
+#include "occurrence_materialize.hpp"
+#include "semdiff.hpp"
 
 using namespace livehd;
 using livehd::lec::Verdict;
@@ -27,13 +40,15 @@ std::shared_ptr<hhds::Graph> build_binop(hhds::GraphLibrary& lib, const std::str
                                          bool swap = false) {
   auto gio = lib.create_io(mod);
   gio->add_input("a", 0);
-  gio->set_bits("a", bits + 1);  // unsigned: bits attr = magnitude+1
+  gio->set_bits("a", bits);
   gio->set_unsign("a", true);
   gio->add_input("b", 1);
-  gio->set_bits("b", bits + 1);
+  gio->set_bits("b", bits);
   gio->set_unsign("b", true);
   gio->add_output("out", 2);
-  gio->set_bits("out", bits + 1);
+  const int out_bits
+      = op == Ntype_op::Sum ? bits + 1 : ((op == Ntype_op::EQ || op == Ntype_op::LT || op == Ntype_op::GT) ? 1 : bits);
+  gio->set_bits("out", out_bits);
   gio->set_unsign("out", true);
 
   auto g    = gio->create_graph();
@@ -51,8 +66,7 @@ std::shared_ptr<hhds::Graph> build_binop(hhds::GraphLibrary& lib, const std::str
   }
 
   auto dpin = node.create_driver_pin(0);
-  graph_util::set_bits(dpin, bits + 1);
-  graph_util::set_unsign(dpin);
+  graph_util::set_ubits(dpin, out_bits);
   dpin.connect_sink(g->get_output_pin("out"));
   return g;
 }
@@ -61,7 +75,7 @@ std::shared_ptr<hhds::Graph> build_binop(hhds::GraphLibrary& lib, const std::str
 std::shared_ptr<hhds::Graph> build_add_const(hhds::GraphLibrary& lib, const std::string& mod, int64_t k, int bits) {
   auto gio = lib.create_io(mod);
   gio->add_input("a", 0);
-  gio->set_bits("a", bits + 1);
+  gio->set_bits("a", bits);
   gio->set_unsign("a", true);
   gio->add_output("out", 1);
   gio->set_bits("out", bits + 1);
@@ -77,13 +91,340 @@ std::shared_ptr<hhds::Graph> build_add_const(hhds::GraphLibrary& lib, const std:
   cpin.connect_sink(sink_a);
 
   auto dpin = node.create_driver_pin(0);
-  graph_util::set_bits(dpin, bits + 1);
-  graph_util::set_unsign(dpin);
+  graph_util::set_ubits(dpin, bits + 1);
   dpin.connect_sink(g->get_output_pin("out"));
   return g;
 }
 
+// Build a 4-bit Concat lane from an 8-bit input. The Concat cell contract is
+// `value mod 2^window`; `pretruncate` spells that mask explicitly on one side.
+std::shared_ptr<hhds::Graph> build_overwide_concat(hhds::GraphLibrary& lib, const std::string& mod, bool pretruncate) {
+  auto gio = lib.create_io(mod);
+  gio->add_input("a", 0);
+  gio->set_bits("a", 8);
+  gio->set_unsign("a", true);
+  gio->add_output("out", 1);
+  gio->set_bits("out", 4);  // unsigned u4
+  gio->set_unsign("out", true);
+
+  auto g    = gio->create_graph();
+  auto lane = g->get_input_pin("a");
+  if (pretruncate) {
+    auto mask = graph_util::create_typed_node(*g, Ntype_op::Get_mask, 4);
+    lane.connect_sink(livehd::graph_util::setup_sink_pid(mask, 0));
+    graph_util::create_const(*g, *Dlop::create_integer(15)).connect_sink(livehd::graph_util::setup_sink_pid(mask, 2));
+    lane = mask.create_driver_pin(0);
+    graph_util::set_ubits(lane, 4);
+  }
+
+  auto concat = graph_util::create_typed_node(*g, Ntype_op::Concat, 4);
+  lane.connect_sink(livehd::graph_util::setup_sink_pid(concat, 0));
+  graph_util::create_const(*g, *Dlop::create_integer(4)).connect_sink(livehd::graph_util::setup_sink_pid(concat, 1));
+  auto out = concat.create_driver_pin(0);
+  graph_util::set_ubits(out, 4);
+  out.connect_sink(g->get_output_pin("out"));
+  return g;
+}
+
+std::shared_ptr<hhds::Graph> build_active_loop(hhds::GraphLibrary& lib, uint64_t count = 3) {
+  auto body_io = lib.create_io("active_body");
+  body_io->add_input("carry", 0);
+  body_io->add_input("active", 1);
+  body_io->add_output("next_carry", 2);
+  body_io->add_output("next_active", 3);
+  body_io->set_bits("carry", 9);
+  body_io->set_bits("active", 1);
+  body_io->set_bits("next_carry", 9);
+  body_io->set_bits("next_active", 1);
+  body_io->set_unsign("carry", true);
+  body_io->set_unsign("active", true);
+  body_io->set_unsign("next_carry", true);
+  body_io->set_unsign("next_active", true);
+  auto body = body_io->create_graph();
+
+  auto sum = graph_util::create_typed_node(*body, Ntype_op::Sum, 9);
+  body->get_input_pin("carry").connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
+  graph_util::create_const(*body, *Dlop::create_integer(1)).connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
+
+  // The lifted body itself preserves the carry while inactive; the occurrence
+  // realization additionally inserts the inter-ordinal bypass required by the
+  // compact call-binding contract.
+  auto mux = graph_util::create_typed_node(*body, Ntype_op::Mux, 9);
+  body->get_input_pin("active").connect_sink(livehd::graph_util::setup_sink_pid(mux, 0));
+  body->get_input_pin("carry").connect_sink(livehd::graph_util::setup_sink_pid(mux, 1));
+  sum.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(mux, 2));
+  auto next_carry = mux.create_driver_pin(0);
+  graph_util::set_bits(next_carry, 9);
+  graph_util::set_unsign(next_carry);
+  next_carry.connect_sink(body->get_output_pin("next_carry"));
+  graph_util::create_const(*body, *Dlop::create_integer(0)).connect_sink(body->get_output_pin("next_active"));
+
+  auto top_io = lib.create_io("active_top");
+  top_io->add_input("seed", 0);
+  top_io->add_input("enable", 1);
+  top_io->add_output("result", 2);
+  top_io->set_bits("seed", 9);
+  top_io->set_bits("enable", 1);
+  top_io->set_bits("result", 9);
+  top_io->set_unsign("seed", true);
+  top_io->set_unsign("enable", true);
+  top_io->set_unsign("result", true);
+  auto top  = top_io->create_graph();
+  auto call = graph_util::create_typed_node(*top, Ntype_op::Sub);
+  call.set_subnode(body_io,
+                   hhds::Subnode_loop{
+                       .first              = 0,
+                       .step               = 1,
+                       .count              = count,
+                       .index_input        = std::nullopt,
+                       .activation_input   = 1,
+                       .next_active_output = 3,
+                   });
+  top->get_input_pin("seed").connect_sink(livehd::graph_util::setup_sink_pid(call, 0));
+  top->get_input_pin("enable").connect_sink(livehd::graph_util::setup_sink_pid(call, 1));
+  call.create_driver_pin(2).connect_sink(livehd::graph_util::setup_sink_pid(call, 0));
+  call.create_driver_pin(2).connect_sink(top->get_output_pin("result"));
+  call.subnode_group().validate();
+  return top;
+}
+
+std::shared_ptr<hhds::Graph> build_indexed_carry_loop(hhds::GraphLibrary& lib, int64_t first, uint64_t count,
+                                                      bool observe_plain_output = false) {
+  auto body_io = lib.create_io("indexed_body");
+  body_io->add_input("index", 0);
+  body_io->add_input("x", 1);
+  body_io->add_input("carry", 2);
+  body_io->add_output("next_carry", 3);
+  for (const auto name : {"index", "x", "carry", "next_carry"}) {
+    body_io->set_bits(name, 17);
+    body_io->set_unsign(name, true);
+  }
+  if (observe_plain_output) {
+    body_io->add_output("body_value", 4);
+    body_io->set_bits("body_value", 17);
+    body_io->set_unsign("body_value", true);
+  }
+  auto body = body_io->create_graph();
+  auto sum  = graph_util::create_typed_node(*body, Ntype_op::Sum, 17);
+  body->get_input_pin("index").connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
+  body->get_input_pin("x").connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
+  body->get_input_pin("carry").connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
+  auto sum_out = sum.create_driver_pin(0);
+  graph_util::set_bits(sum_out, 17);
+  graph_util::set_unsign(sum_out);
+  sum_out.connect_sink(body->get_output_pin("next_carry"));
+  if (observe_plain_output) {
+    body->get_input_pin("x").connect_sink(body->get_output_pin("body_value"));
+  }
+
+  auto top_io = lib.create_io("indexed_top");
+  top_io->add_input("x", 0);
+  top_io->add_output("result", 1);
+  top_io->set_bits("x", 17);
+  top_io->set_bits("result", 17);
+  top_io->set_unsign("x", true);
+  top_io->set_unsign("result", true);
+  if (observe_plain_output) {
+    top_io->add_output("observed", 2);
+    top_io->set_bits("observed", 17);
+    top_io->set_unsign("observed", true);
+  }
+  auto top  = top_io->create_graph();
+  auto loop = graph_util::create_typed_node(*top, Ntype_op::Sub);
+  loop.set_name("loop_site");
+  loop.set_subnode(body_io,
+                   hhds::Subnode_loop{
+                       .first              = first,
+                       .step               = 1,
+                       .count              = count,
+                       .index_input        = 0,
+                       .activation_input   = std::nullopt,
+                       .next_active_output = std::nullopt,
+                   });
+  top->get_input_pin("x").connect_sink(livehd::graph_util::setup_sink_pid(loop, 1));
+  graph_util::create_const(*top, *Dlop::create_integer(0)).connect_sink(livehd::graph_util::setup_sink_pid(loop, 2));
+  auto result = loop.create_driver_pin(3);
+  graph_util::set_bits(result, 17);
+  graph_util::set_unsign(result);
+  result.connect_sink(livehd::graph_util::setup_sink_pid(loop, 2));
+  result.connect_sink(top->get_output_pin("result"));
+  if (observe_plain_output) {
+    auto observed = loop.create_driver_pin(4);
+    graph_util::set_bits(observed, 17);
+    graph_util::set_unsign(observed);
+    observed.connect_sink(top->get_output_pin("observed"));
+  }
+  loop.subnode_group().validate();
+  return top;
+}
+
 }  // namespace
+
+TEST(LecNames, PyropeQuotedStateMatchesDirectRtlName) {
+  EXPECT_EQ(lec::canon_flop_name("`msg_port_enabled.e0`"), lec::canon_flop_name("msg_port_enabled.e0"));
+  EXPECT_EQ(lec::canon_flop_name("top.`state.part`"), lec::canon_flop_name("top.state.part"));
+  EXPECT_EQ(lec::canon_flop_name("csrMod\\_Mhpmevent10_0"), lec::canon_flop_name("csrMod_Mhpmevent10_0"));
+}
+
+TEST(CombEquiv, PackedFeedbackSlicesAreRepairedPrivately) {
+  hhds::GraphLibrary lib;
+  auto               build = [&](const std::string& name, bool packed, int invert, bool real_cycle = false) {
+    namespace gu = graph_util;
+    auto io      = lib.create_io(name);
+    io->add_input("a", 0);
+    io->set_bits("a", 2);
+    io->set_unsign("a", true);
+    io->add_output("out", 1);
+    io->set_bits("out", 4);
+    io->set_unsign("out", true);
+    auto g      = io->create_graph();
+    auto concat = gu::create_typed_node(*g, Ntype_op::Concat, 4);
+    auto word   = concat.create_driver_pin(0);
+    gu::set_ubits(word, 4);
+    auto lane = g->get_input_pin("a");
+    if (packed) {
+      auto slice = gu::create_typed_node(*g, Ntype_op::Get_mask, 2);
+      word.connect_sink(livehd::graph_util::setup_sink_pid(slice, 0));
+      gu::create_const(*g, *Dlop::create_integer(real_cycle ? 3 : 12)).connect_sink(livehd::graph_util::setup_sink_pid(slice, 2));
+      lane = slice.create_driver_pin(0);
+      gu::set_ubits(lane, 2);
+    }
+    auto flip = gu::create_typed_node(*g, Ntype_op::Xor, 2);
+    lane.connect_sink(livehd::graph_util::setup_sink_pid(flip, 0));
+    gu::create_const(*g, *Dlop::create_integer(invert)).connect_sink(livehd::graph_util::setup_sink_pid(flip, 0));
+    auto high = flip.create_driver_pin(0);
+    gu::set_ubits(high, 2);
+    g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(concat, 0));
+    gu::create_const(*g, *Dlop::create_integer(2)).connect_sink(livehd::graph_util::setup_sink_pid(concat, 1));
+    high.connect_sink(livehd::graph_util::setup_sink_pid(concat, 2));
+    gu::create_const(*g, *Dlop::create_integer(2)).connect_sink(livehd::graph_util::setup_sink_pid(concat, 3));
+    word.connect_sink(g->get_output_pin("out"));
+    return g;
+  };
+  auto             ref    = build("ref", false, 3);
+  auto             packed = build("packed", true, 3);
+  auto             wrong  = build("wrong", true, 1);
+  auto             cycle  = build("cycle", true, 3, true);
+  lec::Lec_options opts;
+  opts.engine = "ind";
+  auto good   = lec::prove_equal(ref.get(), packed.get(), opts);
+  EXPECT_EQ(good.verdict, Verdict::Proven) << good.detail;
+  EXPECT_NE(good.detail.find("packed-cycle slice repair"), std::string::npos) << good.detail;
+  auto bad = lec::prove_equal(ref.get(), wrong.get(), opts);
+  EXPECT_EQ(bad.verdict, Verdict::Refuted) << bad.detail;
+  auto unresolved = lec::prove_equal(ref.get(), cycle.get(), opts);
+  EXPECT_EQ(unresolved.verdict, Verdict::Unknown) << unresolved.detail;
+  EXPECT_TRUE(unresolved.unsupported);
+  // The shared input remains cyclic: normalization belongs to the query copy.
+  cvc5::TermManager tm;
+  lec::Encoder      encoder(tm);
+  auto              original = encoder.encode(packed.get());
+  EXPECT_FALSE(original.ok);
+  EXPECT_NE(original.error.find("WORD-LEVEL CYCLE"), std::string::npos) << original.error;
+}
+
+TEST(LecState, PartialUnknownInitialPreservesKnownBits) {
+  hhds::GraphLibrary lib;
+  auto               gio = lib.create_io("top");
+  gio->add_output("q", 0);
+  gio->set_bits("q", 4);
+  gio->set_unsign("q", true);
+  auto g    = gio->create_graph();
+  auto flop = graph_util::create_typed_node(*g, Ntype_op::Flop);
+  graph_util::create_const(*g, *Dlop::from_binary("10?1", /*unsigned_result=*/true))
+      .connect_sink(graph_util::setup_sink_by_name(flop, "initial"));
+
+  cvc5::TermManager tm;
+  cvc5::Solver      solver(tm);
+  auto              init = lec::flop_initial(tm, flop, 4, /*x_as_undefined=*/true);
+  ASSERT_TRUE(init.has_value());
+  EXPECT_EQ(init->width, 4);
+  EXPECT_EQ(solver.simplify(init->term), tm.mkBitVector(4, "1001", 2));
+  EXPECT_EQ(solver.simplify(init->x_mask), tm.mkBitVector(4, "0010", 2));
+
+  auto concrete = lec::flop_initial(tm, flop, 4, /*x_as_undefined=*/false);
+  ASSERT_TRUE(concrete.has_value());
+  EXPECT_EQ(solver.simplify(concrete->term), tm.mkBitVector(4, "1001", 2));
+  EXPECT_TRUE(concrete->x_mask.isNull());
+}
+
+TEST(LecState, UnknownWriteEnableMergesWriteAndHoldKnowledge) {
+  hhds::GraphLibrary lib;
+  auto               io = lib.create_io("enabled");
+  for (const auto name : {"clock", "enable"}) {
+    io->add_input(name, name == std::string("clock") ? 0 : 1);
+    io->set_bits(name, 1);
+    io->set_unsign(name, true);
+  }
+  io->add_output("out", 2);
+  io->set_bits("out", 4);
+  io->set_unsign("out", true);
+  auto g    = io->create_graph();
+  auto flop = graph_util::create_typed_node(*g, Ntype_op::Flop);
+  flop.set_name("state");
+  auto q = flop.create_driver_pin(0);
+  graph_util::set_ubits(q, 4);
+  q.connect_sink(g->get_output_pin("out"));
+  g->get_input_pin("clock").connect_sink(graph_util::setup_sink_by_name(flop, "clock_pin"));
+  g->get_input_pin("enable").connect_sink(graph_util::setup_sink_by_name(flop, "enable"));
+  graph_util::create_const(*g, *Dlop::from_binary("1010", true)).connect_sink(graph_util::setup_sink_by_name(flop, "din"));
+  cvc5::TermManager tm;
+  cvc5::Solver      solver(tm);
+  for (int enable : {0, 1}) {
+    lec::Io_name_map<lec::Val> inputs;
+    inputs["state"]  = {tm.mkBitVector(4, 8), 4, false, tm.mkBitVector(4, 1)};
+    inputs["enable"] = {tm.mkBitVector(1, enable), 1, false, tm.mkBitVector(1, 1)};
+    lec::Encoder encoder(tm);
+    encoder.set_x_dontcare(true);
+    auto encoded = encoder.encode(g.get(), &inputs);
+    ASSERT_TRUE(encoded.ok) << encoded.error;
+    const auto& next = encoded.outputs.at("\x01nxt:state");
+    // 10?0 vs 100?: bit 1 differs and bit 0 is unknown; high bits agree.
+    EXPECT_EQ(solver.simplify(next.x_mask), tm.mkBitVector(4, 3));
+  }
+}
+
+TEST(LecState, PowerOnInitialIsPerDesignWithOrWithoutOtherReset) {
+  for (bool other_reset : {false, true}) {
+    hhds::GraphLibrary lib;
+    auto               build = [&](const std::string& name, const char* initial) {
+      auto io = lib.create_io(name);
+      io->add_input("clock", 0);
+      io->set_bits("clock", 1);
+      io->set_unsign("clock", true);
+      if (other_reset) {
+        io->add_input("reset", 1);
+        io->set_bits("reset", 1);
+        io->set_unsign("reset", true);
+      }
+      io->add_output("out", 2);
+      io->set_bits("out", 4);
+      io->set_unsign("out", true);
+      auto g = io->create_graph();
+      auto f = graph_util::create_typed_node(*g, Ntype_op::Flop);
+      f.set_name("state");  // Same name must not override different contents.
+      auto q = f.create_driver_pin(0);
+      graph_util::set_ubits(q, 4);
+      q.connect_sink(graph_util::setup_sink_by_name(f, "din"));
+      q.connect_sink(g->get_output_pin("out"));
+      g->get_input_pin("clock").connect_sink(graph_util::setup_sink_by_name(f, "clock_pin"));
+      graph_util::create_const(*g, *Dlop::from_binary(initial, /*unsigned_result=*/true))
+          .connect_sink(graph_util::setup_sink_by_name(f, "initial"));
+      return g;
+    };
+    auto             ref  = build("ref", "10?1");
+    auto             same = build("same", "1011");
+    auto             bad  = build("bad", "0011");
+    lec::Lec_options opts;
+    opts.engine      = "bmc";
+    opts.phase       = "after_reset";
+    opts.gold_x      = "ignore";
+    auto good_result = lec::prove_equal(ref.get(), same.get(), opts);
+    EXPECT_EQ(good_result.verdict, Verdict::Proven) << good_result.detail;
+    auto bad_result = lec::prove_equal(ref.get(), bad.get(), opts);
+    EXPECT_EQ(bad_result.verdict, Verdict::Refuted) << bad_result.detail;
+  }
+}
 
 TEST(CombEquiv, AndCommutativeProven) {
   hhds::GraphLibrary lib;
@@ -130,6 +471,15 @@ TEST(CombEquiv, AddConstOffByOneRefuted) {
   EXPECT_EQ(r.verdict, Verdict::Refuted) << r.detail;
 }
 
+TEST(CombEquiv, ConcatTruncatesOverwideLaneToDeclaredWindow) {
+  hhds::GraphLibrary lib;
+  auto               ref  = build_overwide_concat(lib, "ref", false);
+  auto               impl = build_overwide_concat(lib, "impl", true);
+
+  auto r = lec::prove_equal(ref.get(), impl.get());
+  EXPECT_EQ(r.verdict, Verdict::Proven) << r.detail;
+}
+
 TEST(CombEquiv, EngineBmcRefutes) {
   hhds::GraphLibrary lib;
   auto               ref  = build_binop(lib, "ref", Ntype_op::And, 4);
@@ -139,4 +489,511 @@ TEST(CombEquiv, EngineBmcRefutes) {
   o.engine = "bmc";
   auto r   = lec::prove_equal(ref.get(), impl.get(), o);
   EXPECT_EQ(r.verdict, Verdict::Refuted) << r.detail;
+}
+
+TEST(CombEquiv, NativeActivationLoopMatchesPrivatePhysicalRealization) {
+  hhds::GraphLibrary compact_lib;
+  auto               compact = build_active_loop(compact_lib);
+
+  hhds::GraphLibrary physical_lib;
+  ASSERT_TRUE(physical_lib.copy_from(compact_lib, "active_body"));
+  ASSERT_TRUE(physical_lib.copy_from(compact_lib, "active_top"));
+  auto physical = physical_lib.find_io("active_top")->get_graph();
+  ASSERT_EQ(graph_util::materialize_occurrences(physical.get(), "test"), 1);
+
+  lec::Lec_options options;
+  options.engine = "ind";
+  auto result    = lec::prove_equal(compact.get(), physical.get(), options);
+  EXPECT_EQ(result.verdict, Verdict::Proven) << result.detail;
+}
+
+TEST(CombEquiv, ProvenBodyAndMatchedDescriptorUseCompactLoopCertificate) {
+  constexpr uint64_t kPastMaterializationCap = (1u << 20) + 1;
+  hhds::GraphLibrary ref_lib;
+  hhds::GraphLibrary impl_lib;
+  auto               ref  = build_active_loop(ref_lib, kPastMaterializationCap);
+  auto               impl = build_active_loop(impl_lib, kPastMaterializationCap);
+
+  lec::Lec_options body_options;
+  body_options.engine = "ind";
+  auto body_result    = lec::prove_equal(ref_lib.find_io("active_body")->get_graph().get(),
+                                      impl_lib.find_io("active_body")->get_graph().get(),
+                                      body_options);
+  ASSERT_EQ(body_result.verdict, Verdict::Proven) << body_result.detail;
+
+  lec::Lec_options top_options;
+  top_options.engine   = "ind";
+  top_options.collapse = {"active_body"};  // the discharged body theorem
+  auto result          = lec::prove_equal(ref.get(), impl.get(), top_options);
+  EXPECT_EQ(result.verdict, Verdict::Proven) << result.detail;
+  EXPECT_NE(result.detail.find("loop certificate: 1 matched compact recurrence"), std::string::npos) << result.detail;
+  ASSERT_EQ(result.loop_certificates.size(), 1);
+  EXPECT_NE(result.loop_certificates.front().find("P0=descriptor-exact"), std::string::npos);
+  EXPECT_NE(result.loop_certificates.front().find("P4/P5=ordinal-recurrence"), std::string::npos);
+}
+
+TEST(CombEquiv, IndexedCarryLoopCertificateOmitsNoDescriptorObligation) {
+  hhds::GraphLibrary ref_lib;
+  hhds::GraphLibrary impl_lib;
+  auto               ref  = build_indexed_carry_loop(ref_lib, 0, 4);
+  auto               impl = build_indexed_carry_loop(impl_lib, 0, 4);
+
+  lec::Lec_options options;
+  options.engine   = "ind";
+  options.collapse = {"indexed_body"};
+  auto result      = lec::prove_equal(ref.get(), impl.get(), options);
+  EXPECT_EQ(result.verdict, Verdict::Proven) << result.detail;
+  EXPECT_NE(result.detail.find("loop certificate: 1 matched compact recurrence"), std::string::npos) << result.detail;
+  ASSERT_EQ(result.loop_certificates.size(), 1);
+  EXPECT_NE(result.loop_certificates.front().find("body=indexed_body"), std::string::npos);
+}
+
+TEST(CombEquiv, NestedLoopCertificatesSurviveUnresolvedParents) {
+  constexpr uint64_t count = (1u << 20) + 1;
+  for (bool outer_loop : {false, true}) {
+    SCOPED_TRACE(outer_loop);
+    hhds::GraphLibrary ref_lib, impl_lib;
+    auto               ref_child  = build_active_loop(ref_lib, count);
+    auto               impl_child = build_active_loop(impl_lib, count);
+    lec::Lec_options   options;
+    options.engine   = "ind";
+    options.collapse = {"active_body"};
+    auto child_proof = lec::prove_equal(ref_child.get(), impl_child.get(), options);
+    ASSERT_EQ(child_proof.verdict, Verdict::Proven) << child_proof.detail;
+    const auto wrap = [&](hhds::GraphLibrary& lib, const std::shared_ptr<hhds::Graph>& child) {
+      auto io = lib.create_io("wrapper");
+      io->add_input("seed", 0);
+      io->add_input("enable", 1);
+      io->add_output("result", 2);
+      for (auto name : {"seed", "enable", "result"}) {
+        io->set_bits(name, std::string_view(name) == "enable" ? 1 : 9);
+        io->set_unsign(name, true);
+      }
+      auto graph = io->create_graph();
+      auto node  = graph_util::create_typed_node(*graph, Ntype_op::Sub);
+      if (outer_loop) {
+        node.set_subnode(child->get_io(),
+                         hhds::Subnode_loop{
+                             .first              = 0,
+                             .step               = 1,
+                             .count              = count,
+                             .index_input        = std::nullopt,
+                             .activation_input   = std::nullopt,
+                             .next_active_output = std::nullopt,
+                         });
+        node.create_driver_pin(2).connect_sink(livehd::graph_util::setup_sink_pid(node, 0));
+      } else {
+        node.set_subnode(child->get_io());
+      }
+      graph->get_input_pin("seed").connect_sink(livehd::graph_util::setup_sink_pid(node, 0));
+      graph->get_input_pin("enable").connect_sink(livehd::graph_util::setup_sink_pid(node, 1));
+      auto result = node.create_driver_pin(2);
+      graph_util::set_ubits(result, 9);
+      result.connect_sink(graph->get_output_pin("result"));
+      return graph;
+    };
+    auto ref  = wrap(ref_lib, ref_child);
+    auto impl = wrap(impl_lib, impl_child);
+    if (outer_loop) {
+      // The outer body theorem was just discharged; even the huge inner
+      // loop implementation must now be excluded from this obligation.
+      options.collapse = {"active_top"};
+    }
+    auto result = lec::prove_equal(ref.get(), impl.get(), options);
+    EXPECT_EQ(result.verdict, Verdict::Proven) << result.detail;
+    EXPECT_EQ(result.loop_certificates.size(), 1);
+  }
+}
+
+TEST(CombEquiv, IndexedCarryDescriptorMismatchFallsBackAndRefutes) {
+  hhds::GraphLibrary ref_lib;
+  hhds::GraphLibrary impl_lib;
+  auto               ref  = build_indexed_carry_loop(ref_lib, 0, 4);
+  auto               impl = build_indexed_carry_loop(impl_lib, 1, 4);
+
+  lec::Lec_options options;
+  options.engine   = "ind";
+  options.collapse = {"indexed_body"};
+  auto result      = lec::prove_equal(ref.get(), impl.get(), options);
+  EXPECT_EQ(result.verdict, Verdict::Refuted) << result.detail;
+  EXPECT_EQ(result.detail.find("loop certificate:"), std::string::npos) << result.detail;
+  EXPECT_TRUE(result.loop_certificates.empty());
+}
+
+TEST(CombEquiv, ZeroCountObservedPlainOutputIsRejectedBeforeCertification) {
+  hhds::GraphLibrary lib;
+  EXPECT_THROW((void)build_indexed_carry_loop(lib, 0, 0, true), std::logic_error);
+}
+
+// --- worker-pipe framing -----------------------------------------------------
+//
+// The soundness contract of frame_blob/unframe_blob: a blob the pipe truncated
+// must FAIL to unframe, so the parent tags the worker "no result" (Unknown)
+// instead of reading a half-parsed Query_result whose trailing soundness
+// qualifiers (bounded / unsupported / nothing_compared) silently default to
+// "nothing to worry about". Before framing, a child SIGKILLed mid-write handed
+// the parent an UNBOUNDED Proven for a bounded claim.
+TEST(WorkerFrame, RoundTripsAnyPayload) {
+  for (const auto& payload : std::vector<std::string>{{}, {"x"}, std::string(9000, '\x01')}) {
+    const std::string framed = livehd::lec::frame_blob(payload);
+    EXPECT_EQ(framed.size(), payload.size() + sizeof(uint64_t));
+    std::string_view got;
+    ASSERT_TRUE(livehd::lec::unframe_blob(framed, got));
+    EXPECT_EQ(std::string(got), payload);
+  }
+}
+
+TEST(WorkerFrame, TruncationIsNotAResult) {
+  const std::string payload(4096, '\x7f');  // > PIPE_BUF: a real short-write shape
+  const std::string framed = livehd::lec::frame_blob(payload);
+  std::string_view  got;
+  // Every proper prefix must be rejected: a header cut mid-length, a header with
+  // no payload, and a payload cut at any point (including one byte short).
+  for (size_t n = 0; n < framed.size(); ++n) {
+    EXPECT_FALSE(livehd::lec::unframe_blob(std::string_view{framed}.substr(0, n), got))
+        << "a " << n << "-byte prefix of a " << framed.size() << "-byte frame was accepted";
+  }
+  // Trailing garbage (two children's writes interleaved) is not a result either.
+  EXPECT_FALSE(livehd::lec::unframe_blob(framed + "junk", got));
+  EXPECT_TRUE(livehd::lec::unframe_blob(framed, got));
+}
+
+// Prove the cprop rewrite against an untouched graph, with every data bit and
+// control symbolic. Induction covers both arbitrary old state and initialization;
+// reset is free to toggle, including while the original enable is false.
+TEST(LecState, CpropMuxSharingPreservesTransition) {
+  namespace gu = graph_util;
+  for (bool decoded : {false, true}) {
+    for (bool signed_data : {false, true}) {
+      hhds::GraphLibrary ref_lib;
+      auto               io = ref_lib.create_io("mux_sharing");
+      for (int i = 0; i < 6; ++i) {
+        auto name = "c" + std::to_string(i);
+        io->add_input(name, i);
+        io->set_bits(name, 8);  // binary Mux tests nonzero, not only bit zero
+        io->set_unsign(name, false);
+      }
+      for (const auto& [name, pid, bits] : std::vector<std::tuple<std::string, int, int>>{
+               {       "a",  6, 16},
+               {       "b",  7, 16},
+               {"selector",  8,  3},
+               {   "clock",  9,  1},
+               {   "reset", 10,  1},
+               {      "en", 11,  1}
+      }) {
+        io->add_input(name, pid);
+        io->set_bits(name, bits);
+        io->set_unsign(name, name == "a" || name == "b" ? !signed_data : true);
+      }
+      io->add_output("out", 12);
+      io->set_bits("out", 16);
+      io->set_unsign("out", !signed_data);
+      auto ref      = io->create_graph();
+      auto constant = [&](int64_t k) { return gu::create_const(*ref, *Dlop::create_integer(k)); };
+      auto make     = [&](Ntype_op op) {
+        auto node = gu::create_typed_node(*ref, op, 16);
+        if (signed_data) {
+          gu::set_sbits(node.create_driver_pin(0), 16);
+        } else {
+          gu::set_ubits(node.create_driver_pin(0), 16);
+        }
+        return node;
+      };
+      auto flop = make(Ntype_op::Flop);
+      flop.set_name("state");
+      auto q = flop.create_driver_pin(0);
+      q.connect_sink(ref->get_output_pin("out"));
+      gu::setup_sink_by_name(flop, "enable").connect_driver(ref->get_input_pin("en"));
+      gu::setup_sink_by_name(flop, "clock_pin").connect_driver(ref->get_input_pin("clock"));
+      gu::setup_sink_by_name(flop, "reset_pin").connect_driver(ref->get_input_pin("reset"));
+      gu::setup_sink_by_name(flop, "posclk").connect_driver(constant(1));
+      gu::setup_sink_by_name(flop, "initial").connect_driver(constant(signed_data ? -3 : 37));
+      auto data = q;
+      if (decoded) {
+        auto hot = make(Ntype_op::Hotmux);
+        for (int i = 0; i < 6; ++i) {
+          auto eq = gu::create_typed_node(*ref, Ntype_op::EQ, 1);
+          gu::set_ubits(eq.create_driver_pin(0), 1);
+          livehd::graph_util::setup_sink_pid(eq, 0).connect_driver(ref->get_input_pin("selector"));
+          livehd::graph_util::setup_sink_pid(eq, 0).connect_driver(constant(i));
+          hot.create_sink_pin(2 * i).connect_driver(eq.create_driver_pin(0));
+          hot.create_sink_pin(2 * i + 1).connect_driver(i % 3 == 2 ? q : ref->get_input_pin(i % 3 ? "b" : "a"));
+        }
+        livehd::graph_util::setup_sink_pid(hot, 12).connect_driver(q);
+        data = hot.create_driver_pin(0);
+      } else {
+        for (int i = 5; i >= 0; --i) {
+          auto mux = make(Ntype_op::Mux);
+          livehd::graph_util::setup_sink_pid(mux, 0).connect_driver(ref->get_input_pin("c" + std::to_string(i)));
+          livehd::graph_util::setup_sink_pid(mux, 1).connect_driver(data);
+          livehd::graph_util::setup_sink_pid(mux, 2).connect_driver(i % 3 == 2 ? q : ref->get_input_pin(i % 3 ? "b" : "a"));
+          data = mux.create_driver_pin(0);
+        }
+      }
+      data.connect_sink(gu::setup_sink_by_name(flop, "din"));
+      hhds::GraphLibrary impl_lib;
+      ASSERT_TRUE(impl_lib.copy_from(ref_lib, "mux_sharing"));
+      auto impl = impl_lib.find_io("mux_sharing")->get_graph();
+      Cprop{}.do_trans(impl);
+      Bitwidth{10}.do_trans(impl);
+      Enableopt{}.do_trans(impl);
+      Cprop{}.do_trans(impl);
+      Bitwidth{10}.do_trans(impl);
+      size_t muxes = 0;
+      for (auto n : impl->body().nodes()) {
+        muxes += gu::type_op_of(n) == Ntype_op::Mux;
+        if (gu::type_op_of(n) == Ntype_op::Flop) {
+          EXPECT_NE(gu::get_driver_of_sink_name(n, "enable"), impl->get_input_pin("en"));
+        }
+      }
+      EXPECT_EQ(muxes, 0);
+      lec::Lec_options options;
+      options.engine  = "ind";
+      options.cones   = "false";
+      options.phase   = "free_toreset";
+      options.timeout = 20;
+      auto result     = lec::prove_equal(ref.get(), impl.get(), options);
+      EXPECT_EQ(result.verdict, Verdict::Proven) << result.detail << " decoded=" << decoded << " signed=" << signed_data;
+    }
+  }
+}
+
+// Positional X-plane insertion: each Set_mask writes ONE window (graph/cell.hpp),
+// so the unknown bits it covers become known and the ones outside it stay
+// unknown -- and a window that is not [0, W) is what makes that positional.
+TEST(CombEquiv, WindowInsertionPreservesAndClearsPositionalUnknowns) {
+  hhds::GraphLibrary lib;
+  auto               io = lib.create_io("window_mask");
+  io->add_output("partial", 0);
+  io->add_output("complete", 1);
+  io->add_output("negative", 2);
+  for (const auto name : {"partial", "complete", "negative"}) {
+    io->set_bits(name, 8);
+    io->set_unsign(name, true);
+  }
+  auto g      = io->create_graph();
+  auto insert = [&](hhds::Pin_class base, int mask, const char* value) {
+    auto node = graph_util::create_typed_node(*g, Ntype_op::Set_mask);
+    base.connect_sink(graph_util::setup_sink_by_name(node, "a"));
+    graph_util::create_const(*g, *Dlop::create_integer(mask)).connect_sink(graph_util::setup_sink_by_name(node, "mask"));
+    graph_util::create_const(*g, *Dlop::from_binary(value, true)).connect_sink(graph_util::setup_sink_by_name(node, "value"));
+    auto out = node.create_driver_pin(0);
+    graph_util::set_ubits(out, 8);
+    return out;
+  };
+  const auto all_unknown = [&] { return graph_util::create_const(*g, *Dlop::from_binary("????????", true)); };
+  // bits [2,6) <- 1,?,0,1 (LSB-first), so bits 0,1,6,7 and bit 3 stay unknown.
+  auto partial = insert(all_unknown(), 0x3c, "10?1");
+  // Three more windows cover every remaining unknown bit, bit 3 included.
+  auto complete = insert(insert(insert(partial, 0x03, "01"), 0xc0, "10"), 0x08, "1");
+  // The -1 spelling is "replace the whole value": nothing of the base survives.
+  auto negative = insert(all_unknown(), -1, "1011011");
+  partial.connect_sink(g->get_output_pin("partial"));
+  complete.connect_sink(g->get_output_pin("complete"));
+  negative.connect_sink(g->get_output_pin("negative"));
+  cvc5::TermManager tm;
+  cvc5::Solver      solver(tm);
+  lec::Encoder      encoder(tm);
+  encoder.set_x_dontcare(true);
+  auto encoded = encoder.encode(g.get());
+  ASSERT_TRUE(encoded.ok) << encoded.error;
+  const auto& p = encoded.outputs.at("partial");
+  const auto& c = encoded.outputs.at("complete");
+  EXPECT_EQ(solver.simplify(p.x_mask), tm.mkBitVector(8, 0xcb));  // bits 0,1,3,6,7
+  EXPECT_EQ(solver.simplify(c.x_mask), tm.mkBitVector(8, 0));
+  EXPECT_EQ(solver.simplify(c.term), tm.mkBitVector(8, 0xad));
+  const auto& n = encoded.outputs.at("negative");
+  EXPECT_EQ(solver.simplify(n.x_mask), tm.mkBitVector(8, 0));
+  EXPECT_EQ(solver.simplify(n.term), tm.mkBitVector(8, 0x5b));
+}
+
+// ---- transparent `__flat___` hierarchy wrappers (graph/README.md) -----------
+// The virtual (HHDS occurrence), physically flattened and inlined forms of a
+// hierarchy with transparent wrappers must all name the state `foo.bar.q`.
+
+namespace {
+
+struct Transparent_design {
+  hhds::GraphLibrary                        lib;
+  std::vector<std::shared_ptr<hhds::Graph>> graphs;
+
+  std::shared_ptr<hhds::Graph> empty() {
+    auto io = lib.create_io("m" + std::to_string(graphs.size()));
+    io->add_input("clk", 0);
+    io->add_input("d", 1);
+    io->add_output("q", 2);
+    for (auto name : {"clk", "d", "q"}) {
+      io->set_bits(name, 1);
+      io->set_unsign(name, true);
+    }
+    auto g = io->create_graph();
+    graphs.push_back(g);
+    return g;
+  }
+
+  std::shared_ptr<hhds::Graph> state(const std::string& name, bool wrong = false) {
+    auto g    = empty();
+    auto flop = graph_util::create_typed_node(*g, Ntype_op::Flop);
+    flop.set_name(name);
+    auto d = g->get_input_pin("d");
+    if (wrong) {
+      auto inv = graph_util::create_typed_node(*g, Ntype_op::Not);
+      d.connect_sink(graph_util::setup_sink_by_name(inv, "a"));
+      d = inv.create_driver_pin(0);
+      graph_util::set_ubits(d, 1);
+    }
+    d.connect_sink(graph_util::setup_sink_by_name(flop, "din"));
+    g->get_input_pin("clk").connect_sink(graph_util::setup_sink_by_name(flop, "clock_pin"));
+    graph_util::create_const(*g, *Dlop::create_integer(0)).connect_sink(graph_util::setup_sink_by_name(flop, "initial"));
+    auto q = flop.create_driver_pin(0);
+    graph_util::set_ubits(q, 1);
+    graph_util::set_pin_name(q, name);
+    q.connect_sink(g->get_output_pin("q"));
+    return g;
+  }
+
+  hhds::Node_class instance(hhds::Graph* g, const std::shared_ptr<hhds::Graph>& child, const std::string& name) {
+    auto n = graph_util::create_typed_node(*g, Ntype_op::Sub);
+    n.set_subnode(child->get_io());
+    if (!name.empty()) {
+      n.set_name(name);
+    }
+    g->get_input_pin("clk").connect_sink(n.create_sink_pin(0));
+    g->get_input_pin("d").connect_sink(n.create_sink_pin(1));
+    graph_util::set_ubits(n.create_driver_pin(2), 1);
+    return n;
+  }
+
+  std::shared_ptr<hhds::Graph> wrap(const std::shared_ptr<hhds::Graph>& child, const std::string& name) {
+    auto g = empty();
+    auto n = instance(g.get(), child, name);
+    n.create_driver_pin(2).connect_sink(g->get_output_pin("q"));
+    return g;
+  }
+
+  std::shared_ptr<hhds::Graph> hierarchy(bool wrong = false) {
+    return wrap(wrap(wrap(wrap(state("q", wrong), "__flat___inner"), "bar"), "__flat___outer"), "foo");
+  }
+};
+
+// Logical state names over the virtual (occurrence) hierarchy.
+std::set<std::string> logical_state_names(hhds::Graph* g) {
+  std::set<std::string> names;
+  for (const auto& n : g->occurrences().nodes()) {
+    if (graph_util::type_op_of(n) == Ntype_op::Flop) {
+      names.insert(graph_util::logical_hier_name(n.get_hier_name()));
+    }
+  }
+  return names;
+}
+
+// RAW (un-normalized) flop names of a physical body: flatten/inline must not
+// spell a transparent wrapper into the names they build.
+std::set<std::string> raw_flop_names(hhds::Graph* g) {
+  std::set<std::string> names;
+  for (auto n : g->body().nodes()) {
+    if (graph_util::type_op_of(n) == Ntype_op::Flop) {
+      names.insert(std::string{graph_util::node_name_of(n)});
+    }
+  }
+  return names;
+}
+
+// Inline every Sub of `g`'s body (outermost first), one splice per collection.
+void inline_all(hhds::Graph* g) {
+  for (;;) {
+    hhds::Node_class sub;
+    for (auto n : g->body().nodes()) {
+      if (graph_util::type_op_of(n) == Ntype_op::Sub) {
+        sub = n;
+        break;
+      }
+    }
+    if (sub.is_invalid()) {
+      return;
+    }
+    ASSERT_TRUE(graph_util::inline_sub_instance(g, sub, "test"));
+  }
+}
+
+}  // namespace
+
+TEST(LecNames, TransparentVirtualPhysicalAndInlineNamesAgree) {
+  Transparent_design d;
+  auto               flat = d.state("foo.bar.q");
+  auto               hier = d.hierarchy();
+  EXPECT_EQ(logical_state_names(hier.get()), logical_state_names(flat.get()));
+  auto materialized = livehd::partition::flatten_hierarchy(hier.get(), &d.lib, "materialized");
+  ASSERT_NE(materialized, nullptr);
+  EXPECT_EQ(raw_flop_names(materialized.get()), (std::set<std::string>{"foo.bar.q"}));
+  EXPECT_EQ(logical_state_names(materialized.get()), logical_state_names(flat.get()));
+  semdiff::Semdiff_options so;
+  so.matching_names = true;
+  EXPECT_TRUE(semdiff::structural_identical(flat.get(), materialized.get(), so));
+  lec::Lec_options lo;
+  lo.engine          = "ind";
+  lo.timeout         = 2;
+  auto virtual_proof = lec::prove_equal(flat.get(), hier.get(), lo);
+  EXPECT_EQ(virtual_proof.verdict, Verdict::Proven) << virtual_proof.detail;
+  // Inline the outer call first: a subsequently inlined wrapper carries the
+  // combined name foo.__flat___outer. Both forms must preserve foo.bar.q.
+  inline_all(hier.get());
+  EXPECT_EQ(raw_flop_names(hier.get()), (std::set<std::string>{"foo.bar.q"}));
+  EXPECT_EQ(logical_state_names(hier.get()), logical_state_names(flat.get()));
+  EXPECT_TRUE(semdiff::structural_identical(flat.get(), hier.get(), so));
+  auto proof = lec::prove_equal(flat.get(), hier.get(), lo);
+  EXPECT_EQ(proof.verdict, Verdict::Proven) << proof.detail;
+}
+
+// An ANONYMOUS instance is transparent too (HHDS get_hier_name drops it), and
+// flatten/inline must agree rather than spell a `sub_<nid>` level.
+TEST(LecNames, AnonymousInstanceIsTransparentWhenMaterialized) {
+  Transparent_design d;
+  auto               mid = d.wrap(d.state("q"), "");
+  auto               top = d.wrap(mid, "foo");
+  auto               m   = livehd::partition::flatten_hierarchy(top.get(), &d.lib, "materialized");
+  ASSERT_NE(m, nullptr);
+  EXPECT_EQ(raw_flop_names(m.get()), (std::set<std::string>{"foo.q"}));
+  // Deep inline walks children first (graph/inline_sub.hpp): dissolving the
+  // anonymous level inside `mid` adds no component, then `foo.` is prefixed.
+  inline_all(mid.get());
+  inline_all(top.get());
+  EXPECT_EQ(raw_flop_names(top.get()), (std::set<std::string>{"foo.q"}));
+}
+
+TEST(LecNames, TransparentChangedTransitionDoesNotMatch) {
+  Transparent_design d;
+  auto               ref = d.state("foo.bar.q");
+  auto               bad = d.hierarchy(true);
+  lec::Lec_options   lo;
+  lo.engine  = "bmc";
+  lo.bound   = 2;
+  lo.timeout = 2;
+  auto proof = lec::prove_equal(ref.get(), bad.get(), lo);
+  EXPECT_EQ(proof.verdict, Verdict::Refuted) << proof.detail;
+  auto flat_bad = livehd::partition::flatten_hierarchy(bad.get(), &d.lib, "bad_flat");
+  ASSERT_NE(flat_bad, nullptr);
+  semdiff::Semdiff_options so;
+  so.matching_names = true;
+  EXPECT_FALSE(semdiff::structural_identical(ref.get(), flat_bad.get(), so));
+}
+
+// Two transparent instances of one stateful def share the logical state name
+// `q`: the encoder must refuse the ambiguity, never merge the two registers.
+TEST(LecNames, TransparentRepeatedInstancesDoNotMergeState) {
+  Transparent_design d;
+  auto               child = d.state("q");
+  auto               top   = d.wrap(child, "left");
+  auto               right = d.instance(top.get(), child, "right");
+  EXPECT_EQ(logical_state_names(top.get()), (std::set<std::string>{"left.q", "right.q"}));
+  for (auto n : top->body().nodes()) {
+    if (graph_util::type_op_of(n) == Ntype_op::Sub) {
+      n.set_name(n == right ? "__flat___right" : "__flat___left");
+    }
+  }
+  lec::Lec_options lo;
+  lo.engine  = "ind";
+  auto proof = lec::prove_equal(top.get(), top.get(), lo);
+  EXPECT_EQ(proof.verdict, Verdict::Unknown) << proof.detail;
+  EXPECT_NE(proof.detail.find("ambiguous logical state name"), std::string::npos);
 }

@@ -1,32 +1,39 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 // Simulation and source-level checking commands.
 
-#include "lhd_kernel_internal.hpp"
-
 #include <sys/wait.h>
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <map>
+#include <optional>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <thread>
 
 #include "absl/strings/str_join.h"
+#include "cgen_verilog.hpp"
 #include "diag.hpp"
+#include "file_name.hpp"  // livehd::unit_file_stem — the shared long-name policy
 #include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
+#include "lhd_kernel_internal.hpp"
+#include "lhd_sim_tune_session.hpp"
 #include "pass.hpp"
 #include "prp_sim.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
+#include "worker_pool.hpp"  // livehd::run_workers (big-stack workers)
 
 namespace lhd {
 
@@ -71,8 +78,9 @@ struct Q_fail {
 };
 
 // One sim_catalog.json record. Widths are BOTH reported on purpose: `bits` is
-// the internal Slop width (9 for a `u8` register — today's pinned probe
-// behavior) and `declared_bits` is what the source asked for.
+// the literal internal carrier width and `declared_bits` is what the source
+// asked for. They agree for ordinary typed values, but both remain useful for
+// imported or conservatively widened internal nets.
 struct Cat_sig {
   std::string name;
   std::string alias;  // the legacy spelling (`acc.__in.din`), empty when none
@@ -822,8 +830,8 @@ Query_plan plan_sim_query(const std::string& request, const Sim_catalog& cat, co
 
   // A failure-anchored bound has no value until the run happens, so the batch
   // cannot bound its sampling window: it must observe the whole run.
-  bool        any_event = false;
-  const auto  tok       = [&](const Q_time& t) {
+  bool       any_event = false;
+  const auto tok       = [&](const Q_time& t) {
     if (t.is_event) {
       any_event = true;
       return std::format("F{}{}", t.offset < 0 ? "" : "+", t.offset);
@@ -921,8 +929,8 @@ Query_plan plan_sim_query(const std::string& request, const Sim_catalog& cat, co
         if (!q.HasMember("at")) {
           query_usage(std::format("{}: `{}` needs an \"at\"", where, op));
         }
-        const auto t = parse_time(q["at"], std::format("{}.at", where));
-        auto hits = resolve_sel(sel, cat, where);
+        const auto t    = parse_time(q["at"], std::format("{}.at", where));
+        auto       hits = resolve_sel(sel, cat, where);
         std::erase_if(hits, [&](size_t i) { return cat.sigs[i].kind == "memory"; });  // selectors never enumerate memory words
         if (hits.empty()) {
           throw Q_fail{"unknown_signal",
@@ -1142,9 +1150,9 @@ std::string bytes_to_dec(std::vector<uint8_t> v) {
 
 // The signed decimal rendering of a hex value. The interpretation WIDTH is the
 // source-declared one (an `s12` holding -3 is "-3", not 4093) — but only when
-// the value actually fits there: an internal width carries one more bit than
-// the declaration (9 for a `u8`), and truncating a value that uses it would
-// silently report a different number than `hex` says.
+// the value actually fits there. An imported or conservatively widened
+// internal net can exceed its declaration, and truncating a value that uses
+// those bits would silently report a different number than `hex` says.
 std::string hex_to_dec(std::string_view hx, long bits, long declared_bits, bool is_signed) {
   auto v = hex_to_bytes(hx);
   if (v.empty()) {
@@ -1217,8 +1225,7 @@ void write_value_enriched(Json_writer& w, const rj::Value& v, const Cat_sig* c) 
   w.String(c->kind == "output" ? "during_period" : "settled");
   for (auto it = v.MemberBegin(); it != v.MemberEnd(); ++it) {
     const std::string_view k = it->name.GetString();
-    if (k == "hex" || k == "bits" || k == "declared_bits" || k == "signed" || k == "dec" || k == "known_mask"
-        || k == "sampled") {
+    if (k == "hex" || k == "bits" || k == "declared_bits" || k == "signed" || k == "dec" || k == "known_mask" || k == "sampled") {
       continue;  // ours; a driver that starts emitting them must not double-write
     }
     w.Key(it->name.GetString());
@@ -1408,8 +1415,7 @@ std::string finalize_sim_query(const Query_plan& plan, const Sim_catalog& cat, c
 // generate a C++ driver that runs the `tick` loop and turns `assert`s into
 // runtime checks, then host-compile + run it and report pass/fail.
 //
-// NOT bazel — this comment used to say "bazel-build", and it was wrong. Setup
-// does write a standalone bazel module next to the sources (BUILD +
+// NOT bazel. Setup does write a standalone bazel module next to the sources (BUILD +
 // MODULE.bazel, see sim_into in lhd_kernel_common.cpp) so the dir stays
 // hand-buildable with `cd <simdir> && bazel run //:drv`, but `lhd sim` never
 // invokes it: it shells out to the host compiler directly (the "fast run path"
@@ -1427,7 +1433,10 @@ std::string finalize_sim_query(const Query_plan& plan, const Sim_catalog& cat, c
 // always reproduces exactly what lhd did — unlike the bazel project, which
 // nothing executes.
 void sim_command(Options& opts, Result& res) {
-  res.command = "sim pyrope";
+  res.command             = "sim pyrope";
+  // Captured FIRST: compile_sources later mints a scratch workdir when the user
+  // named none, and the sim tuner must never keep its store in one.
+  const bool user_workdir = !opts.workdir.empty() && !opts.workdir_scratch;
   if (opts.files.empty()) {
     throw Lhd_error{"usage", "sim requires a .prp file", "e.g. `lhd sim foo.prp` or `lhd sim foo.prp test.name`"};
   }
@@ -1456,11 +1465,42 @@ void sim_command(Options& opts, Result& res) {
   if (sources.empty()) {
     throw Lhd_error{"usage", "sim requires a .prp file", "e.g. `lhd sim foo.prp` or `lhd sim foo.prp test.name`"};
   }
-  const std::string file       = sources.back();
-  const bool        setup_only = opts.sim_setup_only;
-  const bool        run_only   = opts.sim_run_only;
-  const bool        list_only  = opts.list_tests;
-  const bool        pretty     = opts.diag_fmt == Diag_fmt::pretty;
+  // The LAST source is the primary, test-containing file by convention — but
+  // accept either order: when the last source holds no `test` block and an
+  // earlier positional does, that one is the testbench
+  // (`lhd sim tb.prp dut.prp` behaves the same as `lhd sim dut.prp tb.prp`).
+  std::string file = sources.back();
+  if (sources.size() > 1) {
+    std::vector<prp_sim::Test_info> probe;
+    std::string                     perr;
+    // A non-zero return means the probe FAILED — but list_tests conflates two
+    // failures under rc=1: a real read/parse error (the user's problem, must
+    // surface) and "parsed fine, holds no `test` block" (the REORDER SIGNAL —
+    // the last positional is the DUT, `lhd sim tb.prp dut.prp`). Telling them
+    // apart by the message keeps genuine errors loud while making both
+    // argument orders work; treating both as fatal made tb-first invocations
+    // die with "no test blocks found in <dut>.prp" before the reorder scan
+    // ever ran.
+    const int                       rc            = prp_sim::list_tests(file, "", probe, perr);
+    const bool                      last_testless = rc != 0 && perr.rfind("no test blocks found", 0) == 0;
+    if (rc != 0 && !last_testless) {
+      throw Lhd_error{"usage", perr.empty() ? std::format("cannot read `{}`", file) : perr, ""};
+    }
+    if (probe.empty()) {
+      for (auto it = std::next(sources.rbegin()); it != sources.rend(); ++it) {
+        probe.clear();
+        perr.clear();
+        if (prp_sim::list_tests(*it, "", probe, perr) == 0 && !probe.empty()) {
+          file = *it;
+          break;
+        }
+      }
+    }
+  }
+  const bool setup_only = opts.sim_setup_only;
+  const bool run_only   = opts.sim_run_only;
+  const bool list_only  = opts.list_tests;
+  const bool pretty     = opts.diag_fmt == Diag_fmt::pretty;
   if (setup_only && run_only) {
     throw Lhd_error{"usage", "--setup-only and --run-only are mutually exclusive", ""};
   }
@@ -1537,11 +1577,14 @@ void sim_command(Options& opts, Result& res) {
   // --set sim.vcd=true: dump one VCD per test, `<workdir>/<test.name>.vcd`. The
   // path is absolute (the driver binary is run from the caller's cwd), and when
   // on, the fast build also links hlop's VCD writer (vcd_writer.cpp).
+  bool compile_only      = false;
   bool vcd_on            = false;
   bool vcd_fakedelay     = true;  // sim.vcdfakedelay: X + settle delay after each edge (default); false = edge-aligned
   bool vcd_fakedelay_set = false;
   for (const auto& [k, v] : opts.sets) {
-    if (k == "sim.vcd") {
+    if (k == "sim.compile_only") {
+      compile_only = (v == "true" || v == "1" || v == "on");
+    } else if (k == "sim.vcd") {
       // bool-or-FILE: any non-false value turns tracing on (an explicit FILE
       // only matters for compiled/baked binaries; `lhd sim` derives per-test paths)
       vcd_on = !(v == "false" || v == "0" || v == "off" || v.empty());
@@ -1555,28 +1598,55 @@ void sim_command(Options& opts, Result& res) {
   if (opts.sim_vcd_from >= 0 || opts.sim_vcd_on_fail) {
     vcd_on = true;
   }
+  // Hierarchical combinational port mirrors are compile-time instrumentation.
+  // Keep them out of the ordinary fast binary; emit them only for a run that
+  // actually requests waveform or value observation.
+  // --list-signals is deliberately NOT here: describe_signals() walks the
+  // declared state/IO members, so it needs the runtime-support state walk
+  // below, never the hierarchical mirrors.
+  opts.sim_observe          = vcd_on || !opts.sim_probe.empty() || !opts.sim_break_when.empty() || !opts.sim_query.empty();
   const std::string vcd_dir = vcd_on ? fs::absolute(simroot).string() : std::string{};
 
   // --set sim.checkpoint* : periodic editable checkpoints of DUT + testbench state
   // under <simroot>/ckpt/<test>/ckp<cycle>/ (regs.json + *.hex + tb.json +
   // meta.json). Default ON; a short run (< the min-secs floor) writes none. The
   // settings are forwarded to the driver, which owns the fork cadence + prune.
-  bool        ckpt_on = true;
+  bool        ckpt_on          = true;
+  bool        ckpt_explicit    = false;  // the user configured checkpoints (sim.tune: auto does not profile then)
+  bool        init_zero        = false;
+  bool        unknown_zero     = false;
+  bool        unknown_zero_set = false;  // an explicit sim.unknown_zero is always followed (sim.tune ruling 3)
   std::string ckpt_min_secs, ckpt_max, ckpt_max_overhead, ckpt_every;
   for (const auto& [k, v] : opts.sets) {
     if (k == "sim.checkpoint") {
-      ckpt_on = (v == "true" || v == "1" || v == "on");
+      ckpt_on       = (v == "true" || v == "1" || v == "on");
+      ckpt_explicit = true;
     } else if (k == "sim.checkpoint_min_secs") {
       ckpt_min_secs = v;
+      ckpt_explicit = true;
     } else if (k == "sim.checkpoint_max") {
-      ckpt_max = v;
+      ckpt_max      = v;
+      ckpt_explicit = true;
     } else if (k == "sim.checkpoint_max_overhead") {
       ckpt_max_overhead = v;
+      ckpt_explicit     = true;
     } else if (k == "sim.checkpoint_every") {
-      ckpt_every = v;
+      ckpt_every    = v;
+      ckpt_explicit = true;
+    } else if (k == "sim.init_zero") {
+      init_zero = (v == "true" || v == "1" || v == "on");
+    } else if (k == "sim.unknown_zero") {
+      // Read here for the TESTBENCH literals (prp_sim); the DUT side gets the
+      // same flag as an inou.cgen.sim label (lhd_kernel_common's sim.* mapping).
+      unknown_zero     = (v == "true" || v == "1" || v == "on");
+      unknown_zero_set = true;
     }
   }
   const std::string ckpt_dir = ckpt_on ? (fs::absolute(simroot).string() + "/ckpt") : std::string{};
+  // The default checkpoint-capable build retains the editable state-walk
+  // surface. An explicit checkpoint-off performance build may omit it, unless
+  // VCD/probe/query/--list-signals needs the same generated control plane.
+  opts.sim_runtime_support   = ckpt_on || opts.sim_observe || opts.sim_list_signals;
 
   // Debug-flag sanity (sim_checkpoint_debug_plan): catch contradictory combinations
   // up front instead of silently producing a degenerate run.
@@ -1586,21 +1656,43 @@ void sim_command(Options& opts, Result& res) {
   if (opts.sim_vcd_from >= 0 && opts.sim_vcd_to >= 0 && opts.sim_vcd_from > opts.sim_vcd_to) {
     throw Lhd_error{"usage", std::format("--vcd-from {} is after --vcd-to {}", opts.sim_vcd_from, opts.sim_vcd_to), ""};
   }
-  if (ckpt_dir.empty() && opts.sim_restart_at >= 0) {
+  if (ckpt_dir.empty() && opts.sim_restart_cycle >= 0) {
     throw Lhd_error{"usage",
-                    "--restart-at needs checkpoints — do not combine it with --set sim.checkpoint=false",
-                    "run once with checkpointing on to create them, then --restart-at"};
+                    "--restart-cycle needs checkpoints — do not combine it with --set sim.checkpoint=false",
+                    "run once with checkpointing on to create them, then --restart-cycle"};
   }
   // --query owns the replay: it plans ONE traversal over the union of the
-  // batch's time ranges and picks its own checkpoint. --restart-at and the VCD
+  // batch's time ranges and picks its own checkpoint. --restart-cycle and the VCD
   // window flags plan the same replay differently (--vcd-from silently doubles
   // as a restart target), so the two planners would fight over one run. v1 says
   // so instead of picking a winner; composition can come later.
   if (!opts.sim_query.empty()
-      && (opts.sim_restart_at >= 0 || opts.sim_vcd_from >= 0 || opts.sim_vcd_to >= 0 || opts.sim_vcd_on_fail)) {
+      && (opts.sim_restart_cycle >= 0 || opts.sim_vcd_from >= 0 || opts.sim_vcd_to >= 0 || opts.sim_vcd_on_fail)) {
     throw Lhd_error{"usage",
-                    "--query cannot be combined with --restart-at / --vcd-from / --vcd-to / --vcd-on-fail",
+                    "--query cannot be combined with --restart-cycle / --vcd-from / --vcd-to / --vcd-on-fail",
                     "run the query batch on its own; a VCD or a restart is a separate invocation"};
+  }
+
+  // ---- sim.tune: resolve the tune vector (explicit --set > sim.tune.file > the
+  // workdir's tuned decision > default) into opts.sim_tune BEFORE the compile,
+  // ingest pending profiles, judge or apply a trial (lhd_sim_tune_session.cpp).
+  // Its destructor finishes on every return path below.
+  Sim_tune_session tune(opts,
+                        res,
+                        Sim_tune_shape{.user_workdir        = user_workdir,
+                                       .setup_only          = setup_only,
+                                       .run_only            = run_only,
+                                       .compile_only        = compile_only,
+                                       .observation         = vcd_on || opts.sim_observe || opts.sim_list_signals
+                                                              || opts.sim_restart_cycle >= 0 || opts.sim_vcd_from >= 0,
+                                       .unknown_zero_set    = unknown_zero_set,
+                                       .unknown_zero        = unknown_zero,
+                                       .checkpoint_explicit = ckpt_on && ckpt_explicit,
+                                       .simroot             = simroot,
+                                       .simdir              = simdir,
+                                       .sources             = sources});
+  if (tune.refused()) {
+    return;  // a --run-only of a closed trial tree: res carries the usage error
   }
 
   std::vector<prp_sim::Test_info> tests;
@@ -1628,21 +1720,37 @@ void sim_command(Options& opts, Result& res) {
     if (res.status != "pass") {
       return;
     }
+    tune.after_compile();
     std::string err;
-    if (prp_sim::generate(file, simdir, test_sel, vcd_dir, tests, err) != 0) {
+    int         gen_rc = 0;
+    {
+      Phase_timer drvgen(res, "sim.drvgen");  // the testbench driver generation (drv.cpp)
+      gen_rc = prp_sim::generate(file,
+                                 simdir,
+                                 test_sel,
+                                 vcd_dir,
+                                 opts.sim_observe,
+                                 opts.sim_runtime_support,
+                                 unknown_zero,
+                                 tests,
+                                 err);
+    }
+    if (gen_rc != 0) {
       res.status        = "fail";
       res.error_class   = "unsupported";
       res.error_message = err;
       res.exit_code     = exit_code_for(res.error_class);
       return;
     }
+    tune.after_generate();
     // Also append a single `drv` cc_binary so the generated dir stays
     // bazel-buildable (`cd <simdir> && bazel run //:drv -- --test ...`); the
     // default `lhd sim` flow runs it via the fast host-compile below, no bazel.
     std::ofstream bf(std::format("{}/BUILD", simdir), std::ios::app);
     bf << "\nload(\"@rules_cc//cc:defs.bzl\", \"cc_binary\")\n";
     bf << std::format(
-        "cc_binary(\n    name = \"{0}\",\n    srcs = [\"{0}.cpp\"],\n    copts = [\"-std=c++23\"],\n"
+        "cc_binary(\n    name = \"{0}\",\n    srcs = [\"{0}.cpp\"],\n    copts = [\"-std=c++23\", \"-pthread\"],\n"
+        "    linkopts = [\"-pthread\"],\n"
         "    deps = [\":sim\", \"@hlop//hlop\"],\n)\n",
         prp_sim::kDriverBasename);
     bf.close();
@@ -1693,18 +1801,51 @@ void sim_command(Options& opts, Result& res) {
   // driver lacks the trace machinery) would silently produce no waveform — reject
   // it so the user regenerates instead. The `vcd::global_timestamp` line is emitted
   // iff VCD codegen was on (prp_sim).
+  bool observation_baked = false;  // a --run-only driver built with VCD/observation code is never profiled
   if (run_only) {
     std::ifstream     dfs(drv_cpp);
     std::stringstream dss;
     dss << dfs.rdbuf();
-    const bool baked_vcd = dss.str().find("vcd::global_timestamp") != std::string::npos;
-    if (vcd_on && !baked_vcd) {
+    const auto driver_source         = dss.str();
+    const bool baked_vcd             = driver_source.find("vcd::global_timestamp") != std::string::npos;
+    const bool baked_observation     = driver_source.find("hierarchical-observation: true") != std::string::npos;
+    const bool baked_runtime_support = driver_source.find("runtime-control-support: true") != std::string::npos
+                                       || driver_source.find(".dump_state(") != std::string::npos;
+    const bool observation_requested = !opts.sim_probe.empty() || !opts.sim_break_when.empty() || !opts.sim_query.empty();
+    observation_baked                = baked_vcd || baked_observation;
+    if (init_zero && driver_source.find("--init-zero") == std::string::npos) {
       res.status        = "fail";
       res.error_class   = "usage";
+      res.error_message = "this --run-only sim predates sim.init_zero; re-run --setup-only with the current lhd";
+      res.exit_code     = exit_code_for(res.error_class);
+      return;
+    }
+    if (vcd_on && !baked_vcd) {
+      res.status      = "fail";
+      res.error_class = "usage";
       res.error_message
           = "this --run-only sim was generated without VCD; re-run without --run-only (or "
-                          "--setup-only --set sim.vcd=true) so the driver gets the trace machinery";
-      res.exit_code     = exit_code_for(res.error_class);
+            "--setup-only --set sim.vcd=true) so the driver gets the trace machinery";
+      res.exit_code = exit_code_for(res.error_class);
+      return;
+    }
+    if (observation_requested && !baked_observation) {
+      res.status      = "fail";
+      res.error_class = "usage";
+      res.error_message
+          = "this --run-only sim was generated without hierarchical observation; re-run without --run-only so "
+            "--probe/--break-when/--query instrumentation is generated";
+      res.exit_code = exit_code_for(res.error_class);
+      return;
+    }
+    if (opts.sim_runtime_support && !baked_runtime_support) {
+      res.status      = "fail";
+      res.error_class = "usage";
+      res.error_message
+          = "this --run-only sim was generated without checkpoint/observation support (no checkpointing, "
+            "--list-signals, --probe, --break-when or --query); repeat --set sim.checkpoint=false or re-run "
+            "--setup-only with runtime support enabled";
+      res.exit_code = exit_code_for(res.error_class);
       return;
     }
     // PERSIST the setup-time decision. sim.vcd is a DRIVER-AFFECTING setting:
@@ -1740,12 +1881,13 @@ void sim_command(Options& opts, Result& res) {
       res.error_class   = "usage";
       res.error_message = std::format(
           "this --run-only sim was generated with sim.vcd_fake_delay={}; the style is baked "
-                                      "at codegen — re-run --setup-only with the desired --set sim.vcd_fake_delay",
-                                      baked_fakedelay ? "true" : "false");
-      res.exit_code     = exit_code_for(res.error_class);
+          "at codegen — re-run --setup-only with the desired --set sim.vcd_fake_delay",
+          baked_fakedelay ? "true" : "false");
+      res.exit_code = exit_code_for(res.error_class);
       return;
     }
   }
+  tune.inspect_driver(observation_baked);
   const std::string hlop_inc    = sim_hlop_include_dir(opts);
   const std::string iassert_inc = sim_iassert_include_dir(opts);
   if (hlop_inc.empty() || iassert_inc.empty()) {
@@ -1770,6 +1912,7 @@ void sim_command(Options& opts, Result& res) {
   // The DUT bodies: every non-driver *.cpp in simdir. inou.cgen.sim does NOT emit
   // the `%`-named `test` units, so these are exactly the real module bodies.
   std::vector<std::string> bodies;
+  std::vector<std::string> direct_objects;
   {
     std::error_code ec;
     for (auto& de : fs::directory_iterator(simdir, ec)) {
@@ -1777,6 +1920,10 @@ void sim_command(Options& opts, Result& res) {
         continue;
       }
       auto fn = de.path().filename().string();
+      if (fn.ends_with(".llvm.o")) {
+        direct_objects.push_back(de.path().string());
+        continue;
+      }
       if (fn.size() < 5 || fn.substr(fn.size() - 4) != ".cpp") {
         continue;
       }
@@ -1786,6 +1933,7 @@ void sim_command(Options& opts, Result& res) {
       bodies.push_back(de.path().string());
     }
     std::sort(bodies.begin(), bodies.end());
+    std::sort(direct_objects.begin(), direct_objects.end());
   }
 
   const std::string exe = std::format("{}/{}.bin", simdir, prp_sim::kDriverBasename);
@@ -1800,7 +1948,7 @@ void sim_command(Options& opts, Result& res) {
   }
 
   // -O2, not -O1 (todo/livehd/2f-latch M7 efficiency item b). The optimization
-  // level is NOT the lever here; the job count is. Measured 2026-07-30 on
+  // level is NOT the lever here; the job count is. Measured on
   // dino's whole-CPU driver (18 TUs, 5372 generated lines, 18-core arm64):
   //
   //   one serial clang++ over all TUs   -O2 36.5s  -O1 31.6s  -Os 30.9s  -O0 17.3s
@@ -1817,15 +1965,14 @@ void sim_command(Options& opts, Result& res) {
   // with its cwd set to the sim dir (so its .ninja_deps/.ninja_log land there),
   // where a relative `-Iw/sim` would resolve to nothing.
   const std::string simdir_abs = fs::absolute(simdir).string();
-  const std::string cflags     = std::format("-std=c++23 -DNDEBUG -O2 -I{} -I{} -I{}",
+  std::string       cflags     = std::format("-std=c++23 -DNDEBUG -O2 -pthread -I{} -I{} -I{}",
                                              shell_quote(simdir_abs),
                                              shell_quote(hlop_inc),
                                              shell_quote(iassert_inc));
-
   // --set sim.jobs=N bounds the fan-out (0/unset = one per hardware thread).
   // Pin it to make a build-time measurement reproducible, or to leave the
   // machine usable while a big design builds. Also becomes `ninja -j`.
-  int jobs = 0;
+  int               jobs       = 0;
   for (const auto& [k, v] : opts.sets) {
     if (k == "sim.jobs") {
       jobs = std::atoi(v.c_str());
@@ -1863,6 +2010,268 @@ void sim_command(Options& opts, Result& res) {
       res.error_class   = "unsupported";
       res.error_message = std::format("two sim translation units map to the same object file ({}) — rename one module", *dup);
       res.exit_code     = exit_code_for(res.error_class);
+      return;
+    }
+  }
+
+  // LLVM color kernels are bitcode, grouped with the generated evaluator TU
+  // that calls them. Compile that TU to host-compiler bitcode, then let the
+  // companion LLVM binary inline all of its kernels and lower one native
+  // object. Keeping this boundary per evaluator preserves the
+  // parallel/incremental host build and avoids asking the system linker to
+  // understand lhd's LLVM bitcode version.
+  //
+  // Large modules split their evaluator into `<module>.color-eval-N.cpp`
+  // shards. A filename-prefix association would put every kernel into the
+  // unsplit `<module>.cpp` object even though the calls live in those shards;
+  // the inliner then quite correctly DCEs the unreferenced definitions and the
+  // final native link reports them undefined. The generated symbol spelling is
+  // deterministic, so associate each bitcode file with the ONE TU containing
+  // its call instead.
+  //
+  // ONE pass per body, into a symbol -> TU index: a per-kernel full-text search
+  // would be O(kernels x TUs x bytes), and the sharded designs this association
+  // exists for are exactly the ones with hundreds of kernels over hundreds of
+  // megabytes of generated C++. Nothing is read at all when the design has no
+  // bitcode kernels (every `sim.tune.backend=slop` run), so no body text is ever
+  // resident for the host build and simulation that follow.
+  std::vector<std::vector<std::string>> llvm_kernels(tus.size());
+  if (!direct_objects.empty()) {
+    constexpr std::string_view                 kernel_prefix = "__lhd_color_kernel_";
+    std::map<std::string, std::vector<size_t>> symbol_tus;
+    for (size_t i = 0; i < bodies.size(); ++i) {
+      std::ifstream body(bodies[i]);
+      if (!body) {
+        res.status        = "fail";
+        res.error_class   = "internal";
+        res.error_message = std::format("could not read generated sim body {}", bodies[i]);
+        res.exit_code     = exit_code_for(res.error_class);
+        return;
+      }
+      std::stringstream text;
+      text << body.rdbuf();
+      const std::string body_text = std::move(text).str();
+      for (auto pos = body_text.find(kernel_prefix); pos != std::string::npos;
+           pos      = body_text.find(kernel_prefix, pos + kernel_prefix.size())) {
+        auto end = pos;
+        while (end < body_text.size() && (std::isalnum(static_cast<unsigned char>(body_text[end])) != 0 || body_text[end] == '_')) {
+          ++end;
+        }
+        auto& owners = symbol_tus[body_text.substr(pos, end - pos)];
+        if (owners.empty() || owners.back() != i) {
+          owners.push_back(i);  // bodies are visited in order, so this dedups
+        }
+      }
+    }
+    // `Cgen_sim::cpp_id`, spelled once here: a graph name that sanitizes to
+    // nothing or starts with a digit gains a leading '_' in the emitted symbol,
+    // and the file stem it is recovered from does not carry that.
+    const auto cpp_id = [](std::string_view text) {
+      std::string id;
+      id.reserve(text.size() + 1);
+      for (const char c : text) {
+        id.push_back(std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_' ? c : '_');
+      }
+      if (id.empty() || std::isdigit(static_cast<unsigned char>(id.front())) != 0) {
+        id.insert(id.begin(), '_');
+      }
+      return id;
+    };
+    for (const auto& kernel : direct_objects) {
+      const auto                 filename   = fs::path(kernel).filename().string();
+      constexpr std::string_view marker     = ".color-kernel-";
+      constexpr std::string_view suffix     = ".llvm.o";
+      const auto                 marker_pos = filename.find(marker);
+      if (marker_pos == std::string::npos || !filename.ends_with(suffix)
+          || marker_pos + marker.size() + suffix.size() > filename.size()) {
+        res.status        = "fail";
+        res.error_class   = "internal";
+        res.error_message = std::format("malformed LLVM simulator kernel filename {}", kernel);
+        res.exit_code     = exit_code_for(res.error_class);
+        return;
+      }
+      // `<stem>.color-kernel-<signature>-color-<n>.llvm.o` was minted from
+      // `__lhd_color_kernel_<cpp_id(stem)>_<signature>_color_<n>_llvm`, where
+      // cgen mapped every non-alphanumeric signature character to '_'.
+      std::string instance(filename, marker_pos + marker.size(), filename.size() - (marker_pos + marker.size()) - suffix.size());
+      for (char& c : instance) {
+        if (std::isalnum(static_cast<unsigned char>(c)) == 0) {
+          c = '_';
+        }
+      }
+      const auto symbol = std::format("{}{}_{}_llvm", kernel_prefix, cpp_id(filename.substr(0, marker_pos)), instance);
+
+      const auto found = symbol_tus.find(symbol);
+      if (found == symbol_tus.end() || found->second.size() != 1) {
+        res.status      = "fail";
+        res.error_class = "internal";
+        res.error_message
+            = std::format("could not associate LLVM simulator kernel {} ({}) with exactly one evaluator", kernel, symbol);
+        res.exit_code = exit_code_for(res.error_class);
+        return;
+      }
+      llvm_kernels[found->second.front()].push_back(kernel);
+    }
+  }
+
+  // Unity batching of the SMALL generated translation units. A module body that
+  // holds only cold members (dump/load/probe/describe ...), a 70-statement
+  // commit shard, or a tune table is a few KB of source, yet each cost ~0.8 s of
+  // host compile on its own: parsing slop.hpp/<format>/<map> and instantiating
+  // the same Slop/std::format templates again, not its own code. MEASURED on
+  // minion (Verilog, 6P+12E-core arm64, same sources): a prototype on AC power
+  // went 547 CPU-s / 31.7 s wall -> ~210 CPU-s / 13.9 s; this bucketing on
+  // battery (low-power mode) went 281 TUs / 68 s -> 42 TUs / 32 s. The large
+  // evaluator shards stay one TU each: they are most of what is left, and
+  // batching them would only lengthen the critical path.
+  //
+  // A batch is an `#include` wrapper under <simdir>/unity/ (the body scan above
+  // is not recursive, so the next run does not mistake it for a module). Its
+  // depfile names every member, so ninja and the built-in path both rebuild it
+  // when any member changes. Membership is a stable hash of the file NAME into a
+  // bucket count that depends only on the design, never on the host's core
+  // count: an edit to one module rebuilds just its own batch, and two machines
+  // compile the same TUs. A design with at most kUnityMinTus small TUs is left
+  // alone -- there the per-TU parallelism is free -- as is any TU with LLVM
+  // kernels (it lowers through its own bitcode + llvm_inline pair). This needs
+  // every generated TU to be unity-safe: no two may define the same file-scope
+  // name (cgen_sim_tune.cpp's per-module table namespace exists for this).
+  {
+    constexpr std::uintmax_t kUnityMaxBytes    = 256 * 1024;
+    constexpr std::uintmax_t kUnityTargetBytes = 1024 * 1024;
+    constexpr size_t         kUnityMaxFiles    = 12;
+    constexpr size_t         kUnityMinTus      = 16;
+    std::vector<size_t>      candidates;
+    std::uintmax_t           candidate_bytes = 0;
+    for (size_t i = 0; i < bodies.size(); ++i) {  // tus[0, bodies.size()) are the simdir bodies
+      if (!llvm_kernels[i].empty() || fs::path(tus[i]).filename().string().find(".color-eval-") != std::string::npos) {
+        continue;  // evaluator shards already bound compiler work; do not batch them back together
+      }
+      std::error_code ec;
+      const auto      bytes = fs::file_size(tus[i], ec);
+      if (ec || bytes >= kUnityMaxBytes) {
+        continue;
+      }
+      candidates.push_back(i);
+      candidate_bytes += bytes;
+    }
+    const std::string     unity_dir = simdir + "/unity";
+    std::set<std::string> unity_files;
+    if (candidates.size() > kUnityMinTus) {
+      const size_t buckets = std::max<size_t>({1,
+                                               static_cast<size_t>((candidate_bytes + kUnityTargetBytes - 1) / kUnityTargetBytes),
+                                               (candidates.size() + kUnityMaxFiles - 1) / kUnityMaxFiles});
+      std::vector<std::vector<size_t>> members(buckets);
+      for (const auto i : candidates) {
+        // FNV-1a: stable across runs, hosts and standard libraries (std::hash is none of those).
+        uint64_t h = 1469598103934665603ULL;
+        for (const char c : fs::path(tus[i]).filename().string()) {
+          h = (h ^ static_cast<unsigned char>(c)) * 1099511628211ULL;
+        }
+        members[h % buckets].push_back(i);
+      }
+      std::vector<bool>        batched(tus.size(), false);
+      std::vector<std::string> unity_tus;
+      std::vector<std::string> unity_objs;
+      for (size_t b = 0; b < buckets; ++b) {
+        if (members[b].size() < 2) {
+          continue;  // a lone member keeps its own TU, and so its object name
+        }
+        std::string text = "// Generated by `lhd sim`: a unity batch of small generated translation units.\n";
+        for (const auto i : members[b]) {
+          text       += std::format("#include \"../{}\"\n", fs::path(tus[i]).filename().string());
+          batched[i]  = true;
+        }
+        const std::string name = std::format("unity-{}.cpp", b);
+        const std::string path = unity_dir + "/" + name;
+        unity_files.insert(name);
+        // Write-if-different, like every other generated source: ninja keys on
+        // mtimes, and an unconditional rewrite would rebuild every batch.
+        std::string     old;
+        std::error_code ec;
+        if (fs::exists(path, ec)) {
+          std::ifstream in(path);
+          old.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        }
+        if (old != text) {
+          ensure_dir(unity_dir);
+          std::ofstream out(path, std::ios::trunc);
+          out << text;
+          if (!out) {
+            res.status        = "fail";
+            res.error_class   = "internal";
+            res.error_message = std::format("could not write the sim unity batch {}", path);
+            res.exit_code     = exit_code_for(res.error_class);
+            return;
+          }
+        }
+        unity_tus.push_back(path);
+        unity_objs.push_back(std::format("{}/unity-{}.o", objdir, b));
+      }
+      if (!unity_tus.empty()) {
+        std::vector<std::string>              kept_tus;
+        std::vector<std::string>              kept_objs;
+        std::vector<std::vector<std::string>> kept_kernels;
+        for (size_t i = 0; i < tus.size(); ++i) {
+          if (!batched[i]) {
+            kept_tus.push_back(std::move(tus[i]));
+            kept_objs.push_back(std::move(objs[i]));
+            kept_kernels.push_back(std::move(llvm_kernels[i]));
+          }
+        }
+        for (size_t b = 0; b < unity_tus.size(); ++b) {
+          kept_tus.push_back(std::move(unity_tus[b]));
+          kept_objs.push_back(std::move(unity_objs[b]));
+          kept_kernels.emplace_back();
+        }
+        tus          = std::move(kept_tus);
+        objs         = std::move(kept_objs);
+        llvm_kernels = std::move(kept_kernels);
+      }
+    }
+    // Batches a previous run wrote and this one does not reference (the design
+    // shrank, or no longer batches at all) would only confuse `ninja -C`.
+    std::error_code ec;
+    for (const auto& de : fs::directory_iterator(unity_dir, ec)) {
+      if (de.path().extension() == ".cpp" && !unity_files.contains(de.path().filename().string())) {
+        std::error_code rm_ec;
+        fs::remove(de.path(), rm_ec);
+      }
+    }
+  }
+  std::vector<std::string> compile_objs = objs;
+  bool                     has_llvm     = false;
+  for (size_t i = 0; i < tus.size(); ++i) {
+    if (!llvm_kernels[i].empty()) {
+      compile_objs[i] = fs::path(objs[i]).replace_extension(".bc").string();
+      has_llvm        = true;
+    }
+  }
+  const std::string llvm_link_tool = has_llvm ? sim_llvm_link_tool() : std::string{};
+  if (has_llvm && llvm_link_tool.empty()) {
+    res.status        = "fail";
+    res.error_class   = "dependency";
+    res.error_message = "could not locate llvm_sim_link in lhd's runfiles";
+    res.exit_code     = exit_code_for(res.error_class);
+    return;
+  }
+  // The `cc_bc` rule below hands the host compiler `-emit-llvm`, which is a
+  // CLANG flag. sim_host_cxx() prefers clang++ but falls back to c++/g++/$CXX,
+  // so a gcc-only host reaches this path and dies inside ninja as a `compile`
+  // error over generated code -- pointing the user at the simulator instead of
+  // at their toolchain. Probe once and name the real problem, the same way the
+  // missing-llvm_sim_link case above does.
+  if (has_llvm) {
+    int probe_rc = 0;
+    (void)capture(std::format("{} -x c++ -emit-llvm -c - -o /dev/null < /dev/null 2>/dev/null", shell_quote(cxx)), probe_rc);
+    if (probe_rc != 0) {
+      res.status        = "fail";
+      res.error_class   = "dependency";
+      res.error_message = std::format(
+          "the host C++ compiler ({}) does not accept -emit-llvm, which sim.tune.backend=llvm needs to compile the "
+          "evaluator to bitcode; use a clang++ (set $CXX) or re-run with --set sim.tune.backend=slop",
+          cxx);
+      res.exit_code = exit_code_for(res.error_class);
       return;
     }
   }
@@ -1928,7 +2337,9 @@ void sim_command(Options& opts, Result& res) {
        << "# Regenerated on every build, so edits here are lost.\n"
        << "ninja_required_version = 1.3\n\n"
        << "cxx = " << cxx << "\n"
-       << "cflags = " << nflags << "\n\n"
+       << "llvm_link = " << shell_quote(llvm_link_tool) << "\n"
+       << "cflags = " << nflags
+       << "\n\n"
        // $in/$out are NOT shell-quoted here: ninja already shell-escapes each
        // path as it expands them into `command`, so wrapping them would hand
        // the compiler an argument containing literal quote characters. The
@@ -1941,11 +2352,31 @@ void sim_command(Options& opts, Result& res) {
        << "  description = CC $out\n"
        << "  depfile = $out.d\n"
        << "  deps = gcc\n\n"
+       << "rule cc_bc\n"
+       << "  command = $cxx $cflags -emit-llvm -MD -MF $out.d -c $in -o $out\n"
+       << "  description = BC $out\n"
+       << "  depfile = $out.d\n"
+       << "  deps = gcc\n\n"
+       << "rule llvm_inline\n"
+       << "  command = $llvm_link $out $in\n"
+       << "  description = LLVM-LINK $out\n\n"
        << "rule link\n"
-       << "  command = $cxx $in -o $out\n"
+       << "  command = $cxx $in -pthread -o $out\n"
        << "  description = LINK $out\n\n";
     for (size_t i = 0; i < tus.size(); ++i) {
-      nf << "build " << nesc(objs[i]) << ": cc " << nesc(tus[i]) << "\n";
+      if (llvm_kernels[i].empty()) {
+        nf << "build " << nesc(objs[i]) << ": cc " << nesc(tus[i]) << "\n";
+      } else {
+        nf << "build " << nesc(compile_objs[i]) << ": cc_bc " << nesc(tus[i]) << "\n";
+        nf << "build " << nesc(objs[i]) << ": llvm_inline " << nesc(compile_objs[i]);
+        for (const auto& kernel : llvm_kernels[i]) {
+          nf << " " << nesc(kernel);
+        }
+        // The helper is an implicit input as well as the command. Otherwise a
+        // rebuilt helper at the same path leaves Ninja's command hash unchanged
+        // and silently reuses a native object produced by the old optimizer.
+        nf << " | " << nesc(llvm_link_tool) << "\n";
+      }
     }
     nf << "\nbuild " << nesc(exe) << ": link";
     for (const auto& o : objs) {
@@ -2031,44 +2462,157 @@ void sim_command(Options& opts, Result& res) {
     }
   };
 
+  // "sim.hostbuild": compiling + linking the generated driver into drv.bin,
+  // whichever of the two build paths runs. Recorded on a failed build too (the
+  // destructor fires on the early return) — a build that burned two minutes and
+  // then failed is exactly the number an incremental study wants.
+  Phase_timer build_phase(res, "sim.hostbuild");
   if (!ninja_bin.empty()) {
     // ninja owns compile AND link, and skips whatever is already up to date.
     // Its own output is already per-edge buffered and ordered, so it is both
     // the log body and what gets shown.
-    const std::string nc = std::format("{} -C {} -j {} 2>&1", shell_quote(ninja_bin), shell_quote(simdir), jobs);
-    int               nrc = 0;
+    const std::string nc   = std::format("{} -C {} -j {} 2>&1", shell_quote(ninja_bin), shell_quote(simdir), jobs);
+    int               nrc  = 0;
     auto              nout = capture(nc, nrc);
     if (nrc != 0) {
       fail_build(nc + "\n\n" + nout, nout);
       return;
     }
   } else {
-    // Built-in fallback: compile every TU, `jobs` at a time, then link. No
-    // staleness check — this path always rebuilds, because without depfiles it
-    // cannot know which headers a TU read, and a wrong answer there is a
-    // silently stale binary reporting wrong simulation values.
+    // Built-in fallback: compile every TU, `jobs` at a time, then link, SKIPPING
+    // whatever is already up to date. Staleness is decided exactly the way the
+    // generated build.ninja decides it, and for the same reason it is sound
+    // there (see the write-if-different note above): the compiler emits a
+    // depfile (`-MD -MF`), so the headers a TU actually read are KNOWN rather
+    // than guessed, and a stamp beside each output records the command line
+    // that produced it, so a changed flag rebuilds even when no input is newer.
+    //
+    // This path used to rebuild unconditionally, on the grounds that without
+    // depfiles it could not know which headers a TU read. That is true, and the
+    // fix is to ASK the compiler rather than to give up: a build sandbox with no
+    // `ninja` on PATH (bazel's test PATH is exactly that) otherwise pays a full
+    // recompile on every `lhd sim` against an unchanged workdir — seconds per
+    // run, on every run.
+    //
+    // Ninja's freshness rule is reproduced verbatim, including its one gap: an
+    // output is fresh when it is NOT OLDER than its inputs, so a source
+    // rewritten inside the same filesystem timestamp tick as its object is
+    // missed (sub-second stamps make that window vanishing on APFS/ext4/btrfs).
+    auto mtime_of = [](const std::string& path) -> std::optional<fs::file_time_type> {
+      std::error_code ec;
+      const auto      t = fs::last_write_time(path, ec);
+      if (ec) {
+        return std::nullopt;
+      }
+      return t;
+    };
+    auto not_older_than_all = [&](const std::string& out, const std::vector<std::string>& ins) {
+      const auto ot = mtime_of(out);
+      if (!ot) {
+        return false;
+      }
+      for (const auto& in : ins) {
+        const auto it = mtime_of(in);
+        if (!it || *it > *ot) {
+          return false;  // a missing input is a rebuild too: it may reappear
+        }
+      }
+      return true;
+    };
+    auto stamp_path    = [](const std::string& out) { return out + ".cmd"; };
+    auto stamp_matches = [&](const std::string& out, const std::string& cmd) {
+      std::ifstream f(stamp_path(out));
+      if (!f.is_open()) {
+        return false;
+      }
+      const std::string prev((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+      return prev == cmd;
+    };
+    auto drop_stamp = [&](const std::string& out) {
+      std::error_code ec;
+      fs::remove(stamp_path(out), ec);
+    };
+    auto write_stamp = [&](const std::string& out, const std::string& cmd) {
+      std::ofstream f(stamp_path(out));
+      if (f.is_open()) {
+        f << cmd;
+      }
+    };
+    // A `-MD` depfile is one make rule: `out: prereq prereq \<newline> prereq`.
+    // Backslash-newline continues a line and `\ ` is a literal space in a path;
+    // nothing else in the format needs unescaping.
+    auto read_depfile = [](const std::string& dep) {
+      std::vector<std::string> prereqs;
+      std::ifstream            f(dep);
+      if (!f.is_open()) {
+        return prereqs;
+      }
+      const std::string all((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+      const auto        colon = all.find(':');
+      if (colon == std::string::npos) {
+        return prereqs;
+      }
+      std::string cur;
+      for (size_t i = colon + 1; i < all.size(); ++i) {
+        const char c = all[i];
+        if (c == '\\' && i + 1 < all.size()) {
+          const char n = all[i + 1];
+          if (n == '\n' || n == '\r') {
+            ++i;
+            continue;
+          }
+          if (n == ' ') {
+            cur += ' ';
+            ++i;
+            continue;
+          }
+        }
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+          if (!cur.empty()) {
+            prereqs.push_back(cur);
+            cur.clear();
+          }
+          continue;
+        }
+        cur += c;
+      }
+      if (!cur.empty()) {
+        prereqs.push_back(cur);
+      }
+      return prereqs;
+    };
+
     std::vector<std::string> cmds(tus.size()), outs(tus.size());
     std::vector<int>         rcs(tus.size(), 0);
     {
       std::atomic<size_t> cursor{0};
       auto                worker = [&] {
         for (size_t i = cursor.fetch_add(1); i < tus.size(); i = cursor.fetch_add(1)) {
-          cmds[i] = std::format("{} {} -c {} -o {} 2>&1",
-                                shell_quote(cxx),
-                                cflags,
-                                shell_quote(tus[i]),
-                                shell_quote(objs[i]));
+          const std::string dep = compile_objs[i] + ".d";
+          cmds[i]               = std::format("{} {}{} -MD -MF {} -c {} -o {} 2>&1",
+                                              shell_quote(cxx),
+                                              cflags,
+                                              llvm_kernels[i].empty() ? "" : " -emit-llvm",
+                                              shell_quote(dep),
+                                              shell_quote(tus[i]),
+                                              shell_quote(compile_objs[i]));
+          if (stamp_matches(compile_objs[i], cmds[i])) {
+            const auto prereqs = read_depfile(dep);
+            // An empty prereq list means no usable depfile (ninja consumes and
+            // deletes them), which is a rebuild, not a free pass.
+            if (!prereqs.empty() && not_older_than_all(compile_objs[i], prereqs)) {
+              outs[i] = "(up to date)\n";
+              continue;
+            }
+          }
+          drop_stamp(compile_objs[i]);
           outs[i] = capture(cmds[i], rcs[i]);
+          if (rcs[i] == 0) {
+            write_stamp(compile_objs[i], cmds[i]);
+          }
         }
       };
-      std::vector<std::thread> pool;
-      pool.reserve(static_cast<size_t>(jobs));
-      for (int t = 0; t < jobs; ++t) {
-        pool.emplace_back(worker);
-      }
-      for (auto& t : pool) {
-        t.join();
-      }
+      livehd::run_workers(static_cast<size_t>(jobs), [&](size_t) { worker(); });
     }
 
     // Every TU's command + output reaches build.log in TU order, so the log is
@@ -2091,17 +2635,86 @@ void sim_command(Options& opts, Result& res) {
       return;
     }
 
+    // Inline/lower each LLVM-bearing evaluator after all host compiles. These
+    // are independent module objects, so retain the same bounded fan-out as
+    // the C++ compilation stage.
+    std::vector<std::string> llvm_cmds(tus.size()), llvm_outs(tus.size());
+    std::vector<int>         llvm_rcs(tus.size(), 0);
+    {
+      std::atomic<size_t> cursor{0};
+      auto                worker = [&] {
+        for (size_t i = cursor.fetch_add(1); i < tus.size(); i = cursor.fetch_add(1)) {
+          if (llvm_kernels[i].empty()) {
+            continue;
+          }
+          llvm_cmds[i] = std::format("{} {} {}", shell_quote(llvm_link_tool), shell_quote(objs[i]), shell_quote(compile_objs[i]));
+          for (const auto& kernel : llvm_kernels[i]) {
+            llvm_cmds[i] += " " + shell_quote(kernel);
+          }
+          llvm_cmds[i] += " 2>&1";
+          // Inputs are fully known here (no headers), so the depfile has no role:
+          // the module bitcode, every kernel object, and the helper itself — the
+          // helper by path, because a rebuilt optimizer at the same path must not
+          // leave the old native object in place.
+          std::vector<std::string> ins{compile_objs[i], llvm_link_tool};
+          ins.insert(ins.end(), llvm_kernels[i].begin(), llvm_kernels[i].end());
+          if (stamp_matches(objs[i], llvm_cmds[i]) && not_older_than_all(objs[i], ins)) {
+            llvm_outs[i] = "(up to date)\n";
+            continue;
+          }
+          drop_stamp(objs[i]);
+          llvm_outs[i] = capture(llvm_cmds[i], llvm_rcs[i]);
+          if (llvm_rcs[i] == 0) {
+            write_stamp(objs[i], llvm_cmds[i]);
+          }
+        }
+      };
+      livehd::run_workers(static_cast<size_t>(jobs), [&](size_t) { worker(); });
+    }
+    shown.clear();
+    n_failed = 0;
+    for (size_t i = 0; i < tus.size(); ++i) {
+      if (llvm_cmds[i].empty()) {
+        continue;
+      }
+      log_body += llvm_cmds[i] + "\n\n" + llvm_outs[i] + "\n";
+      if (llvm_rcs[i] != 0 && n_failed++ == 0) {
+        shown = llvm_outs[i];
+      }
+    }
+    if (n_failed != 0) {
+      if (n_failed > 1) {
+        shown += std::format("({} more LLVM module(s) also failed; see build.log)\n", n_failed - 1);
+      }
+      fail_build(log_body, shown);
+      return;
+    }
+
     std::string link = shell_quote(cxx);
     for (const auto& o : objs) {
       link += " " + shell_quote(o);
     }
-    link += " -o " + shell_quote(exe) + " 2>&1";  // merge linker diagnostics into the capture
-    int  link_rc  = 0;
-    auto link_out = capture(link, link_rc);
-    if (link_rc != 0) {
-      fail_build(link + "\n\n" + link_out, link_out);
-      return;
+    link += " -pthread -o " + shell_quote(exe) + " 2>&1";  // merge linker diagnostics into the capture
+    if (!stamp_matches(exe, link) || !not_older_than_all(exe, objs)) {
+      drop_stamp(exe);
+      int  link_rc  = 0;
+      auto link_out = capture(link, link_rc);
+      if (link_rc != 0) {
+        fail_build(link + "\n\n" + link_out, link_out);
+        return;
+      }
+      write_stamp(exe, link);
     }
+  }
+  build_phase.stop();
+  tune.after_build();
+
+  // The incremental build benchmark wants the real generated host-build path
+  // (including Ninja's depfile-based reuse) but deliberately no simulation.
+  // Returning here leaves drv.bin as the successful endpoint and guarantees
+  // that no testbench side effects or design-dependent cycle time enter it.
+  if (compile_only) {
+    return;
   }
 
   // Run the one binary. A test selector (`lhd sim foo.prp my.test`) becomes
@@ -2115,6 +2728,9 @@ void sim_command(Options& opts, Result& res) {
   if (opts.seed_explicit) {
     run_args += " --seed " + shell_quote(opts.seed);
   }
+  if (init_zero) {
+    run_args += " --init-zero";
+  }
   // Always ask the driver for its per-test result array (a sidecar JSON file);
   // it is read back below and embedded verbatim as the envelope's "tests" member
   // (so `lhd sim --result-json r.json` carries {test,status,cycle,failing_assert,
@@ -2126,8 +2742,11 @@ void sim_command(Options& opts, Result& res) {
   }
   run_args += " --result-json " + shell_quote(sim_tests_path);
   // Checkpoint creation (sim.checkpoint*): enabled by default; the driver owns the
-  // fork cadence / prune and only writes once the min-secs floor elapses.
-  if (!ckpt_dir.empty()) {
+  // fork cadence / prune and only writes once the min-secs floor elapses. A
+  // sim.tune profiling run takes none (driver_args() says --no-checkpoint).
+  if (tune.profiling()) {
+    // no checkpoint arguments: see driver_args()
+  } else if (!ckpt_dir.empty()) {
     run_args += " --ckpt-dir " + shell_quote(ckpt_dir);
     if (!ckpt_min_secs.empty()) {
       run_args += " --checkpoint-min-secs " + shell_quote(ckpt_min_secs);
@@ -2144,9 +2763,13 @@ void sim_command(Options& opts, Result& res) {
   } else {
     run_args += " --no-checkpoint";
   }
+  // sim.tune: `--set sim.tune.profile=on` + its raw-file dir + the zero fill of a
+  // profiling run, and on --run-only the pinned codegen knobs drv.bin checks
+  // against what it baked. Only for a driver carrying the --set parser.
+  run_args += tune.driver_args();
   // Debug replay: jump to the failure region (loads the nearest checkpoint <= N).
-  if (opts.sim_restart_at >= 0) {
-    run_args += " --restart-at " + shell_quote(std::to_string(opts.sim_restart_at));
+  if (opts.sim_restart_cycle >= 0) {
+    run_args += " --restart-cycle " + shell_quote(std::to_string(opts.sim_restart_cycle));
   }
   // Windowed VCD: restart near Y, run silent to Y, trace [Y, Z].
   if (opts.sim_vcd_from >= 0) {
@@ -2257,8 +2880,13 @@ void sim_command(Options& opts, Result& res) {
   // through to the user's stderr UNCHANGED — that is where the driver prints its
   // warnings (e.g. a `--arg` that matches no test parameter) and usage errors, so
   // they stay visible in JSON mode too (not only in the pretty relay below).
-  int  rc  = 0;
-  auto out = capture(std::format("{}{}", shell_quote(exe), run_args), rc);
+  int         rc = 0;
+  std::string out;
+  tune.before_run();
+  {
+    Phase_timer run_phase(res, "sim.run");  // the driver binary itself, argv assembly excluded
+    out = capture(std::format("{}{}", shell_quote(exe), run_args), rc);
+  }
 
   // Read back the per-test result array (present whenever the driver ran, even on
   // assert failure); embedded as the envelope's "tests" member. Absent if the
@@ -2297,6 +2925,10 @@ void sim_command(Options& opts, Result& res) {
   if (query_plan.active) {
     res.sim_query_json = finalize_sim_query(query_plan, query_cat, sim_query_path);
   }
+
+  // sim.tune: ingest this run's profile, judge a trial (reverting a loser with a
+  // pointer swap), propose the next step.
+  tune.after_run(rc);
 
   // The binary's EXIT CODE is the authoritative verdict (0 = all selected tests
   // passed, 1 = a test failed, 2 = a usage error, <0 = the driver crashed). The
@@ -2375,9 +3007,16 @@ std::string locate_lgcheck() {
   if (const char* env = std::getenv("LHD_LGCHECK"); env != nullptr && ::access(env, X_OK) == 0) {
     return fs::absolute(env).string();
   }
-  auto exe_dir = file_utils::get_exe_path();
+  if (const auto dir = find_header_in_runfiles("inou/yosys/lgcheck"); !dir.empty()) {
+    const auto cand = dir + "/lgcheck";
+    if (::access(cand.c_str(), X_OK) == 0) {
+      return fs::absolute(cand).string();
+    }
+  }
+  auto exe_dir = livehd::file_utils::get_exe_path();
   for (const auto& cand : {std::string{"./inou/yosys/lgcheck"},
                            std::string{"inou/yosys/lgcheck"},
+                           exe_dir + "/../inou/yosys/lgcheck",
                            exe_dir + "/lhd.runfiles/_main/inou/yosys/lgcheck",
                            exe_dir + "/lhd.runfiles/livehd/inou/yosys/lgcheck"}) {
     if (::access(cand.c_str(), X_OK) == 0) {
@@ -2397,7 +3036,13 @@ std::string locate_lgcheck_yosys() {
   if (const char* env = std::getenv("LHD_YOSYS"); env != nullptr && ::access(env, X_OK) == 0) {
     return fs::absolute(env).string();
   }
-  auto exe_dir = file_utils::get_exe_path();
+  if (const auto dir = find_header_in_runfiles("inou/yosys/yosys2"); !dir.empty()) {
+    const auto cand = dir + "/yosys2";
+    if (::access(cand.c_str(), X_OK) == 0) {
+      return fs::absolute(cand).string();
+    }
+  }
+  auto exe_dir = livehd::file_utils::get_exe_path();
   for (const auto& cand : {std::string{"bazel-bin/inou/yosys/yosys2"},
                            exe_dir + "/../inou/yosys/yosys2",
                            exe_dir + "/lhd.runfiles/_main/inou/yosys/yosys2",
@@ -2420,116 +3065,69 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
 // cgen into the scratch workdir.
 std::string materialize_verilog(Options& opts, Result& res, const std::string& kind, const std::string& path,
                                 std::string_view side) {
+  // Concatenating with `ofs << ifs.rdbuf()` is wrong twice: inserting an EMPTY
+  // streambuf sets failbit and silently drops every later module written to the
+  // same stream, and a source without a trailing newline glues its `endmodule`
+  // onto the next `module`.  Read, then append with a guaranteed separator.
+  auto append_file = [](std::ofstream& ofs, const std::string& p) {
+    std::ifstream      ifs(p);
+    std::ostringstream oss;
+    oss << ifs.rdbuf();
+    const auto text = oss.str();
+    if (text.empty()) {
+      return;
+    }
+    ofs << text;
+    if (text.back() != '\n') {
+      ofs << '\n';
+    }
+  };
+
+  auto out = std::format("{}/check_{}.v", workdir(opts), side);
   if (kind == "verilog") {
     res.inputs.push_back(path);
     check_inputs_exist({path});
-    return path;
+    if (opts.libs.empty()) {
+      return path;
+    }
+    std::ofstream ofs(out);
+    append_file(ofs, path);
+  } else {
+    Eprp_var var;
+    load_side_graphs(opts, res, kind, path, side, var);  // lg/pyrope/ln -> graphs (throws if empty)
+    auto          scratch  = std::format("{}/check_{}", workdir(opts), side);
+    const auto&   side_top = side == "ref" ? opts.ref_top : opts.impl_top;
+    auto          names    = cgen_into(opts, res, var, scratch, false, side_top.empty() ? opts.top : side_top);
+    std::ofstream ofs(out);
+    for (const auto& n : names) {
+      append_file(ofs, std::format("{}/{}.v", scratch, livehd::unit_file_stem(n)));
+    }
   }
-  Eprp_var var;
-  load_side_graphs(opts, res, kind, path, side, var);  // lg/pyrope/ln -> graphs (throws if empty)
-  auto          scratch = std::format("{}/check_{}", workdir(opts), side);
-  auto          names   = cgen_into(opts, res, var, scratch);
-  auto          out     = std::format("{}/check_{}.v", workdir(opts), side);
-  std::ofstream ofs(out);
-  for (const auto& n : names) {
-    std::ifstream ifs(std::format("{}/{}.v", scratch, n));
-    ofs << ifs.rdbuf();
+
+  // The in-process solvers resolve mapped cells directly from --lib LGraphs.
+  // lgcheck consumes Verilog, so materialize those same model definitions into
+  // both sides.  Without this, every standard cell is an undefined module and
+  // the Yosys backend reports SETUP FAILED before it can compare behavior.
+  // (Both sides produce the SAME model text, so this repeats one load+cgen per
+  // run; caching it must NOT go through the reusable --workdir, where a stale
+  // file from an earlier run with a different --lib would silently win.)
+  auto lib_opts = library_model_opts(opts);  // the model library is not a proof side
+  for (size_t i = 0; i < opts.libs.size(); ++i) {
+    const auto& lp = opts.libs[i];
+    if (lp.kind != "lg") {
+      throw Lhd_error{"usage", std::format("lec --lib expects lg:DIR, got '{}:'", lp.kind), ""};
+    }
+    Eprp_var lib_var;
+    auto     lib_side = std::format("{}_lib{}", side, i);
+    load_side_graphs(lib_opts, res, lp.kind, lp.path, lib_side, lib_var);
+    auto          scratch = std::format("{}/check_{}", workdir(opts), lib_side);
+    auto          names   = cgen_into(lib_opts, res, lib_var, scratch);
+    std::ofstream ofs(out, std::ios::app);
+    for (const auto& n : names) {
+      append_file(ofs, std::format("{}/{}.v", scratch, livehd::unit_file_stem(n)));
+    }
   }
   return out;
-}
-
-// The yosys-slang plugin (slang.so) for lgcheck's `--gold_reader slang`: lets
-// yosys read SystemVerilog packed-struct sources (CIRCT output) that
-// read_verilog cannot parse. Same candidates inou_yosys_api probes.
-std::string locate_yosys_slang_plugin() {
-  auto exe_path = file_utils::get_exe_path();
-  for (const auto& cand : {absl::StrCat(exe_path, "/../external/+_repo_rules+yosys_slang/slang.so"),
-                           absl::StrCat(exe_path, "/../external/+http_archive+yosys_slang/slang.so"),
-                           absl::StrCat(exe_path, "/lhd.runfiles/+http_archive+yosys_slang/slang.so")}) {
-    if (::access(cand.c_str(), R_OK) == 0) {
-      return cand;
-    }
-  }
-  return "";
-}
-
-// The lgyosys backend (`--set formal.solver=lgyosys`): materialize both sides to
-// Verilog and discharge with inou/yosys/lgcheck (the former `lhd check`).
-// Verilog sides pass straight through; pyrope:/ln:/lg: are compiled first.
-void lec_lgyosys(Options& opts, Result& res) {
-  auto impl_v  = fs::absolute(materialize_verilog(opts, res, opts.impl_kind, opts.impl_path, "impl")).string();
-  auto ref_v   = fs::absolute(materialize_verilog(opts, res, opts.ref_kind, opts.ref_path, "ref")).string();
-  auto lgcheck = locate_lgcheck();
-  auto yosys   = locate_lgcheck_yosys();
-
-  // --set formal.lec.gold_reader=slang: read the REFERENCE side through yosys-slang
-  // (SystemVerilog packed structs / '{...} patterns exceed read_verilog).
-  std::string gold_reader = "verilog";
-  for (const auto& [k, v] : opts.sets) {
-    if (k == "formal.lec.gold_reader" && !v.empty()) {
-      gold_reader = v;
-    }
-  }
-  if (gold_reader != "verilog" && gold_reader != "slang") {
-    throw Lhd_error{"usage", std::format("--set formal.lec.gold_reader expects verilog|slang, got '{}'", gold_reader), ""};
-  }
-  std::string slang_plugin;
-  if (gold_reader == "slang") {
-    slang_plugin = locate_yosys_slang_plugin();
-    if (slang_plugin.empty()) {
-      throw Lhd_error{"dependency",
-                      "formal.lec.gold_reader=slang: yosys-slang plugin (slang.so) not found",
-                      "build //inou/yosys (the @yosys_slang external) or use the default gold_reader"};
-    }
-  }
-
-  // Run lgcheck FROM the scratch workdir so its cwd droppings (trace*.v,
-  // lgcheck*.log) never land in the caller's directory (hermetic kernel).
-  auto rundir = fs::absolute(workdir(opts)).string();
-  auto cmd    = std::format("cd {} && {} --implementation {} --reference {}",
-                            shell_quote(rundir),
-                            shell_quote(lgcheck),
-                            shell_quote(impl_v),
-                            shell_quote(ref_v));
-  if (!yosys.empty()) {
-    cmd += std::format(" --yosys {}", shell_quote(yosys));
-  }
-  if (gold_reader == "slang") {
-    cmd += std::format(" --gold_reader slang --slang_plugin {}", shell_quote(slang_plugin));
-  }
-  if (!opts.impl_top.empty()) {
-    cmd += std::format(" --implementation_top {}", shell_quote(opts.impl_top));
-  }
-  if (!opts.ref_top.empty()) {
-    cmd += std::format(" --reference_top {}", shell_quote(opts.ref_top));
-  }
-  if (opts.impl_top.empty() && opts.ref_top.empty() && !opts.top.empty()) {
-    cmd += std::format(" --top {}", shell_quote(opts.top));
-  }
-  auto log  = next_log_path(opts, "lec.lgcheck");
-  cmd      += std::format(" >> {} 2>&1", shell_quote(fs::absolute(log).string()));
-
-  res.recipe_steps.emplace_back("pass.lec solver:lgyosys (lgcheck)");
-  int rc   = std::system(cmd.c_str());
-  int code = WIFEXITED(rc) ? WEXITSTATUS(rc) : -1;
-  if (opts.verbose) {
-    mirror_log_to_stderr(log);
-  }
-  std::string name = !opts.impl_top.empty() ? opts.impl_top : opts.impl_path;
-  // lgcheck exit codes: 0 = proven equivalent, 2 = INCONCLUSIVE (could not prove
-  // AND found no counterexample — yosys' equiv flow often can't prove a
-  // cgen-restructured netlist equal to its source even when it is), anything else
-  // = a real refutation. Only a real refute is a hard failure.
-  if (code == 2) {
-    std::print("lec: '{}' INCONCLUSIVE (solver=lgyosys; could not prove, no counterexample)\n", name);
-    return;
-  }
-  std::print("lec: '{}' {} (solver=lgyosys)\n", name, code == 0 ? "PROVEN equivalent" : "REFUTED (not equivalent)");
-  if (code != 0) {
-    throw Lhd_error{"equiv_fail",
-                    std::format("equivalence check failed ({} vs {})", opts.impl_path, opts.ref_path),
-                    std::format("see {}", log)};
-  }
 }
 
 }  // namespace lhd

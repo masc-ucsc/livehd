@@ -1,0 +1,28 @@
+/*
+:name: loop_capture_constants
+:type: simulation
+:expect_instances: u_loop_0=2 *=3
+*/
+// Two nested loop bodies plus the generated bounds-check assertion. Captured width and domain constants must stay local
+// constants, and must not prevent either loop from remaining compact.
+mod loop_capture_constants(x:u8) -> (total:u16@[0]) {
+  comptime const OUTER = 3
+  comptime const INNER = 4
+  comptime const DATA_BITS = 8
+  mut acc:u16 = x
+  for i in 0..<OUTER {
+    for j in 0..<INNER {
+      acc = acc + x#[(j*2) ..+ 2] + DATA_BITS
+    }
+  }
+  total = acc
+}
+
+test loop_capture_constants.values {
+  mut dut = loop_capture_constants
+  tick 2 {
+    dut.x = if clock == 0 { 27 } else { 228 }
+    step
+    assert(dut.total == (if clock == 0 { 141 } else { 342 }))
+  }
+}

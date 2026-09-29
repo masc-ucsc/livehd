@@ -1,0 +1,12 @@
+/*
+:name: bad_if_expr_compr
+:type: error
+:error: condition must be boolean
+*/
+
+// en!=0 or en==0 is valid
+// if en!=0 { d } else {0}
+
+mod bad_if_expr_compr(en:u1, d:u64) -> (y:u64@[0]) {
+  y = if en { d } else { 0 } // locate_error_here
+}

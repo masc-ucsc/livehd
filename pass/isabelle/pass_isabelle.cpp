@@ -41,6 +41,8 @@
 #include "hlop/dlop.hpp"
 #include "node_util.hpp"
 #include "perf_tracing.hpp"
+#include "reduce_lower.hpp"
+#include "str_tools.hpp"
 
 static Pass_plugin pass_plugin_isabelle("pass_isabelle", Pass_isabelle::setup);
 
@@ -58,7 +60,7 @@ Ntype_op node_op(const Node& node) { return livehd::graph_util::type_op_of(node)
 
 bool node_is_op(const Node& node, Ntype_op op) { return node_op(node) == op; }
 
-bool node_is_const(const Node& node) { return livehd::graph_util::is_type_const(node) || node_op(node) == Ntype_op::Nconst; }
+bool node_is_const(const Node& node) { return livehd::graph_util::is_type_const(node); }
 
 bool node_is_flop(const Node& node) { return livehd::graph_util::is_type_flop(node); }
 
@@ -66,33 +68,34 @@ bool node_is_memory(const Node& node) { return node_op(node) == Ntype_op::Memory
 
 bool pin_is_input(const Node_pin& pin) { return livehd::graph_util::is_graph_input_pin(pin); }
 
-bool pin_is_const(const Node_pin& pin) { return livehd::graph_util::is_const_pin(pin); }
+bool pin_is_const(const Node_pin& pin) { return pin.is_const(); }
 
-livehd::graph_util::Edge_vec inp_edges_ordered(const Node& node) {
-  auto edges = node.inp_edges();
-  std::sort(edges.begin(), edges.end(), [](const Edge& a, const Edge& b) {
-    const auto ap = a.sink.get_port_id();
-    const auto bp = b.sink.get_port_id();
-    if (ap != bp) {
-      return ap < bp;
-    }
-    return a.driver.get_class_index().value < b.driver.get_class_index().value;
-  });
-  return edges;
-}
+// The node's DRIVEN sink pins, ascending by port id, one driver each.
+//
+// This used to materialize the in-edges and then sort_drivers_within_pin() them
+// for deterministic emission. ONE DRIVER PER SINK PIN retires that tie-break
+// entirely: a commutative cell now spends one sink pid per operand, so the
+// hhds ascending-port contract IS the total order. A SNAPSHOT (not the lazy
+// inp_sorted_pins view) because the old return value was a vector.
+//
+// ONE DRIVER PER SINK PIN holds for everything this pass can certify. The one
+// sanctioned exception -- a compact loop's carry-in sink, which holds the seed
+// AND a self edge (pass/legalize/legalize.cpp:301) -- lives on an Ntype_op::Sub,
+// and Sub is rejected as unsupported below, so it never reaches an operand
+// walk here.
+absl::InlinedVector<hhds::Pin_class, 8> inp_sinks_ordered(const Node& node) { return node.inp_pins_snapshot(); }
 
-std::string sink_pin_name(const Edge& edge) {
-  const auto sink_node = pin_node(edge.sink);
-  return std::string(Ntype::get_sink_name(node_op(sink_node), edge.sink.get_port_id()));
+// Named by its SINK PIN: one driver per sink pin, so the edge adds nothing.
+std::string sink_pin_name(const Node_pin& sink) {
+  const auto sink_node = pin_node(sink);
+  return std::string(Ntype::get_sink_name(node_op(sink_node), sink.get_port_id()));
 }
 
 uint32_t raw_pin_width(const Node_pin& pin) { return static_cast<uint32_t>(livehd::graph_util::bits_of(pin)); }
 
 uint32_t raw_node_width(const Node& node) { return raw_pin_width(node.create_driver_pin(0)); }
 
-Dlop pin_const_value(const Node_pin& pin) { return livehd::graph_util::hydrate_const(pin); }
-
-Dlop node_const_value(const Node& node) { return livehd::graph_util::hydrate_const(node); }
+const Dlop& pin_const_value(const Node_pin& pin) { return livehd::graph_util::const_of(pin); }
 
 CertWFMode parse_cert_wf_mode(std::string_view mode) {
   if (mode == "eval") {
@@ -117,29 +120,6 @@ CertWFFallback parse_cert_wf_fallback(std::string_view mode) {
   return CertWFFallback::Fail;
 }
 
-// Parse the max_width knob. "0"/"unlimited"/"inf"/"none" (case-insensitive) mean
-// no cap -> SIZE_MAX (every `w > max_width` guard is then always-false, so the
-// upper bound is disabled while the separate `w == 0` unsized-node check stays).
-// A positive integer sets that cap; empty/garbage falls back to the default.
-size_t parse_max_width(std::string_view s, size_t dflt = 1024) {
-  if (s.empty()) {
-    return dflt;
-  }
-  std::string l(s);
-  for (auto& c : l) {
-    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  }
-  if (l == "unlimited" || l == "inf" || l == "none" || l == "0") {
-    return std::numeric_limits<size_t>::max();
-  }
-  try {
-    size_t v = std::stoul(l);
-    return v == 0 ? std::numeric_limits<size_t>::max() : v;
-  } catch (...) {
-    return dflt;
-  }
-}
-
 uint32_t ceil_log2_u64(uint64_t v) {
   if (v <= 1) {
     return 1;
@@ -161,8 +141,6 @@ Pass_isabelle::Pass_isabelle(const Eprp_var& var) : Pass("pass.isabelle", var) {
   strict           = (s == "false") ? false : true;
   auto n           = var.get("normalize");
   normalize        = (n == "false") ? false : true;
-  auto efb         = var.get("emit_fast_bridge");
-  emit_fast_bridge = (efb == "true") ? true : false;
   top              = std::string(var.get("top"));
   cert_wf          = parse_cert_wf_mode(var.get("cert_wf"));
   cert_wf_fallback = parse_cert_wf_fallback(var.get("cert_wf_fallback"));
@@ -192,7 +170,7 @@ Pass_isabelle::Pass_isabelle(const Eprp_var& var) : Pass("pass.isabelle", var) {
     cert_chunk_limit = 0;
   }
 
-  max_width = parse_max_width(var.get("max_width"));
+  max_width = str_tools::parse_max_width(var.get("max_width"));
 }
 
 void Pass_isabelle::setup() {
@@ -201,11 +179,10 @@ void Pass_isabelle::setup() {
                  &Pass_isabelle::work);
   m1.add_label_optional("path", "Output directory for emitted *_Lgraph.thy");
   m1.add_label_optional("top", "Top module name (informational only)");
-  m1.add_label_optional("strict", "true|false. Abort on unsupported ops (formal.strict applies too; formal.isabelle.strict wins)", "true");
+  m1.add_label_optional("strict",
+                        "true|false. Abort on unsupported ops",
+                        "true");
   m1.add_label_optional("normalize", "true|false. Normalize pre-export width artifacts (formal.normalize applies too)", "true");
-  m1.add_label_optional("emit_fast_bridge",
-                        "true|false. Emit the fast-view bridge (<Top>_comb = evaluated certificate). Non-memory designs only.",
-                        "false");
   m1.add_label_optional("max_width", "Hard cap on node Bits width; 0 or 'unlimited' = no cap (default 1024).", "1024");
   m1.add_label_optional("cert_wf", "skip|eval|sorry|chunked. Certificate well-formedness proof mode.", "skip");
   m1.add_label_optional("cert_wf_fallback", "fail|sorry|eval for unsupported cert_wf:chunked chunk shapes.", "fail");
@@ -352,6 +329,19 @@ std::string lit_const_decimal(const Dlop& v, uint32_t w) {
   return "((word_of_int " + isabelle_int_literal(v.to_decimal_string()) + ") :: " + std::to_string(w) + " word)";
 }
 
+std::string cert_op_tag_from_expr(const std::string& expr) {
+  const std::string marker = "op = ";
+  auto              pos    = expr.find(marker);
+  if (pos == std::string::npos) {
+    return "unknown";
+  }
+  pos      += marker.size();
+  auto end  = expr.find_first_of(" ,", pos);
+  if (end == std::string::npos) {
+    return expr.substr(pos);
+  }
+  return expr.substr(pos, end - pos);
+}
 
 std::string chunk_op_summary(const std::vector<std::string>& tags, size_t begin, size_t end) {
   std::map<std::string, size_t> counts;
@@ -477,15 +467,6 @@ struct Ctx {
   size_t         cert_chunk_limit;
   std::string    output_dir;
 
-  // Bridge mode: internal nodes are referenced as `<top>_fv<id> i s` (top-level
-  // definitions, one per node) instead of `n_<id>` (a let-binding).  The bridge
-  // needs each node's value to have a NAME so its recurrence lemma can talk
-  // about it; it also removes the two monolithic `definition`s, which are single
-  // declarations and therefore single-threaded (measured 107 s + 83 s at DINO).
-  // Empty means the classic let-chain naming.
-  std::string    fv_args;      // " i s" (sequential) or " i" (combinational)
-  bool           fv_naming = false;
-
   // Field name registries.
   absl::flat_hash_set<std::string> used_fields;
 
@@ -560,49 +541,49 @@ Memory_info parse_memory_info(Ctx& ctx, const Node& node) {
   mi.node = node;
   mi.nid  = node_id(node);
 
-  for (const auto& e : inp_edges_ordered(node)) {
-    const auto raw_pid = static_cast<size_t>(e.sink.get_port_id());
+  for (const auto& e : inp_sinks_ordered(node)) {
+    const auto       raw_pid    = static_cast<size_t>(e.get_port_id());
     // Memory sink pids are laid out in blocks of Ntype::Memory_port_stride
     // (graph/cell.hpp). This used to hardcode 11, which both truncated the
     // cell-global pins (`init`/`update`/`reset`/`undef` all live at pid >= 11)
     // and fabricated phantom ports for them (e.g. `undef` at pid 15 decoded as
     // port 1's `enable`).
     constexpr size_t mem_stride = static_cast<size_t>(Ntype::Memory_port_stride);
-    const auto pname   = std::string(Ntype::get_sink_name(Ntype_op::Memory, raw_pid % mem_stride));
-    const auto port_id = raw_pid / mem_stride;
+    const auto       pname      = std::string(Ntype::get_sink_name(Ntype_op::Memory, raw_pid % mem_stride));
+    const auto       port_id    = raw_pid / mem_stride;
     if (mi.ports.size() <= port_id) {
       mi.ports.resize(port_id + 1);
     }
     mi.ports[port_id].port_id = port_id;
 
     if (pname == "bits") {
-      const auto v = const_pin_int(ctx, e.driver, node, pname);
+      const auto v = const_pin_int(ctx, e.get_driver_pin(), node, pname);
       if (v <= 0) {
         fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " has non-positive bits.");
       }
       mi.bits = static_cast<uint32_t>(v);
     } else if (pname == "size") {
-      const auto v = const_pin_int(ctx, e.driver, node, pname);
+      const auto v = const_pin_int(ctx, e.get_driver_pin(), node, pname);
       if (v <= 0) {
         fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " has non-positive size.");
       }
       mi.size = static_cast<uint64_t>(v);
     } else if (pname == "wensize") {
-      const auto v = const_pin_int(ctx, e.driver, node, pname);
+      const auto v = const_pin_int(ctx, e.get_driver_pin(), node, pname);
       if (v < 0) {
         fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " has negative wensize.");
       }
       mi.wensize = static_cast<uint32_t>(v);
     } else if (pname == "type") {
-      mi.type = const_pin_int(ctx, e.driver, node, pname);
+      mi.type = const_pin_int(ctx, e.get_driver_pin(), node, pname);
     } else if (pname == "fwd") {
       // The per-(read,write) matrix (graph/cell.cpp) can exceed the 62-bit
       // is_just_i64 window on a many-port memory, and const_pin_int would
       // FATAL on it. This value is only echoed in the debug summary here, so
       // degrade to 0 rather than aborting the pass with a misleading message.
       mi.fwd = 0;
-      if (pin_is_const(e.driver)) {
-        auto fv = pin_const_value(e.driver);
+      if (pin_is_const(e.get_driver_pin())) {
+        auto fv = pin_const_value(e.get_driver_pin());
         if (fv.is_just_i64()) {
           mi.fwd = fv.to_just_i64();
         }
@@ -618,22 +599,22 @@ Memory_info parse_memory_info(Ctx& ctx, const Node& node) {
       // wider than the 62-bit i64 window still registers as set, and a
       // non-const driver on this comptime pin refuses instead of guessing.
       mi.undef = true;
-      if (pin_is_const(e.driver)) {
-        mi.undef = !pin_const_value(e.driver).is_known_false();
+      if (pin_is_const(e.get_driver_pin())) {
+        mi.undef = !pin_const_value(e.get_driver_pin()).is_known_false();
       }
     } else if (pname == "posclk") {
-      mi.posclk = const_pin_int(ctx, e.driver, node, pname);
+      mi.posclk = const_pin_int(ctx, e.get_driver_pin(), node, pname);
     } else if (pname == "rdport") {
-      const bool rd            = const_pin_int(ctx, e.driver, node, pname) != 0;
+      const bool rd            = const_pin_int(ctx, e.get_driver_pin(), node, pname) != 0;
       mi.ports[port_id].rdport = rd;
     } else if (pname == "addr") {
-      mi.ports[port_id].addr = e.driver;
+      mi.ports[port_id].addr = e.get_driver_pin();
     } else if (pname == "din") {
-      mi.ports[port_id].din = e.driver;
+      mi.ports[port_id].din = e.get_driver_pin();
     } else if (pname == "enable") {
-      mi.ports[port_id].enable = e.driver;
+      mi.ports[port_id].enable = e.get_driver_pin();
     } else if (pname == "clock_pin") {
-      mi.ports[port_id].clock = e.driver;
+      mi.ports[port_id].clock = e.get_driver_pin();
     }
   }
 
@@ -781,12 +762,9 @@ std::string driver_expr(const Ctx& ctx, const Node_pin& dpin) {
     auto v = pin_const_value(dpin);
     auto w = raw_pin_width(dpin);
     if (w == 0) {
-      w = std::max<uint32_t>(1, static_cast<uint32_t>(v.get_bits()));
+      w = std::max<uint32_t>(1, static_cast<uint32_t>(v.get_signed_bits()));
     }
     return lit_const_at(ctx, driver_node, v, w);
-  }
-  if (ctx.fv_naming) {
-    return "(" + ctx.top_name + "_fv" + std::to_string(node_id(driver_node)) + ctx.fv_args + ")";
   }
   return "n_" + std::to_string(node_id(driver_node));
 }
@@ -801,7 +779,7 @@ std::string driver_expr_at(const Ctx& ctx, const Node_pin& dpin, uint32_t expect
 
 uint32_t minimal_unsigned_const_width(const Dlop& v) {
   if (!v.is_just_i64()) {
-    return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_bits()));
+    return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_signed_bits()));
   }
   const int64_t iv = v.to_just_i64();
   if (iv <= 0) {
@@ -1009,19 +987,8 @@ std::string cert_const_pin_expr(const Ctx& ctx, const Node_pin& pin, uint32_t sy
   return oss.str();
 }
 
-// Structured form of one emitted node_cert record.  The fast-view bridge needs
-// (nid, op, width, deps) per node to print its recurrence lemma; recovering that
-// by re-parsing the rendered Isabelle text (as cert_op_tag_from_expr did) is
-// fragile.  Mirrors CertNodeInfo in pass/lean/pass_lean.cpp.
-struct Cert_node_info {
-  uint32_t              nid = 0;
-  std::string           op_expr;  // e.g. "Op_And", "Op_Const (- 1)"
-  uint32_t              width = 0;
-  std::vector<uint32_t> deps;
-};
-
 std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, const std::string& forced_op = "",
-                           const std::vector<uint32_t>& forced_deps = {}, Cert_node_info* info = nullptr) {
+                           const std::vector<uint32_t>& forced_deps = {}) {
   uint32_t w = 0;
   if (node_is_const(node)) {
     w = raw_node_width(node);
@@ -1034,15 +1001,14 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
 
   if (op_expr.empty()) {
     switch (node_op(node)) {
-      case Ntype_op::Nconst: op_expr = "Op_Const " + int_of_const(ctx, node, node_const_value(node), w); break;
-
       case Ntype_op::Sum: {
         std::vector<uint32_t> a_terms, b_terms;
-        for (const auto& e : inp_edges_ordered(node)) {
-          if (e.sink.get_port_id() == 0) {
-            a_terms.push_back(cert_dep_id(ctx, build, e.driver, w));
-          } else if (e.sink.get_port_id() == 1) {
-            b_terms.push_back(cert_dep_id(ctx, build, e.driver, w));
+        for (const auto& e : inp_sinks_ordered(node)) {
+          // Bank parity: EVEN sink pid adds, ODD subtracts (graph/cell.hpp).
+          if (Ntype::sink_bank(Ntype_op::Sum, e.get_port_id()) == 0) {
+            a_terms.push_back(cert_dep_id(ctx, build, e.get_driver_pin(), w));
+          } else {
+            b_terms.push_back(cert_dep_id(ctx, build, e.get_driver_pin(), w));
           }
         }
         deps = a_terms;
@@ -1053,21 +1019,21 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
 
       case Ntype_op::Mult:
         op_expr = "Op_Mult";
-        for (const auto& e : inp_edges_ordered(node)) {
-          deps.push_back(cert_dep_id(ctx, build, e.driver, w));
+        for (const auto& e : inp_sinks_ordered(node)) {
+          deps.push_back(cert_dep_id(ctx, build, e.get_driver_pin(), w));
         }
         break;
 
       case Ntype_op::Div: {
         Node_pin a, b;
         bool     have_a = false, have_b = false;
-        for (const auto& e : inp_edges_ordered(node)) {
+        for (const auto& e : inp_sinks_ordered(node)) {
           auto pname = sink_pin_name(e);
-          if (pname == "a" || e.sink.get_port_id() == 0) {
-            a      = e.driver;
+          if (pname == "a" || e.get_port_id() == 0) {
+            a      = e.get_driver_pin();
             have_a = true;
-          } else if (pname == "b" || e.sink.get_port_id() == 1) {
-            b      = e.driver;
+          } else if (pname == "b" || e.get_port_id() == 1) {
+            b      = e.get_driver_pin();
             have_b = true;
           }
         }
@@ -1108,12 +1074,13 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
         uint32_t   dep_w  = w;
         if (node_op(node) == Ntype_op::EQ) {
           dep_w = 1;
-          for (const auto& e : inp_edges_ordered(node)) {
-            dep_w = std::max(dep_w, pin_width(ctx, e.driver, node));
+          for (const auto& e : inp_sinks_ordered(node)) {
+            dep_w = std::max(dep_w, pin_width(ctx, e.get_driver_pin(), node));
           }
         }
-        for (const auto& e : inp_edges_ordered(node)) {
-          deps.push_back(cert_dep_id(ctx, build, e.driver, is_ror ? pin_width(ctx, e.driver, node) : dep_w));
+        for (const auto& e : inp_sinks_ordered(node)) {
+          const auto drv = e.get_driver_pin();
+          deps.push_back(cert_dep_id(ctx, build, drv, is_ror ? pin_width(ctx, drv, node) : dep_w));
         }
         break;
       }
@@ -1121,8 +1088,8 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
       case Ntype_op::Not: {
         Node_pin a;
         bool     have = false;
-        for (const auto& e : inp_edges_ordered(node)) {
-          a    = e.driver;
+        for (const auto& e : inp_sinks_ordered(node)) {
+          a    = e.get_driver_pin();
           have = true;
           break;
         }
@@ -1143,8 +1110,8 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
           op_expr = is_signed ? "Op_SGT" : "Op_UGT";
         }
         std::vector<Node_pin> drivers;
-        for (const auto& e : inp_edges_ordered(node)) {
-          drivers.push_back(e.driver);
+        for (const auto& e : inp_sinks_ordered(node)) {
+          drivers.push_back(e.get_driver_pin());
         }
         if (drivers.size() != 2) {
           fatal(ctx, "LT/GT node n_" + std::to_string(node_id(node)) + " is not binary.");
@@ -1158,13 +1125,13 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
         Node_pin              a;
         std::vector<Node_pin> bs;
         bool                  have_a = false;
-        for (const auto& e : inp_edges_ordered(node)) {
+        for (const auto& e : inp_sinks_ordered(node)) {
           auto pname = sink_pin_name(e);
-          if (pname == "a" || e.sink.get_port_id() == 0) {
-            a      = e.driver;
+          if (pname == "a" || e.get_port_id() == 0) {
+            a      = e.get_driver_pin();
             have_a = true;
-          } else if (pname == "B" || pname == "b" || e.sink.get_port_id() == 1) {
-            bs.push_back(e.driver);
+          } else if (pname == "B" || pname == "b" || e.get_port_id() == 1) {
+            bs.push_back(e.get_driver_pin());
           }
         }
         if (!have_a || bs.empty()) {
@@ -1189,14 +1156,14 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
         Node_pin              a, b;
         bool                  have_a = false, have_b = false;
         std::vector<Node_pin> ordered;
-        for (const auto& e : inp_edges_ordered(node)) {
-          ordered.push_back(e.driver);
+        for (const auto& e : inp_sinks_ordered(node)) {
+          ordered.push_back(e.get_driver_pin());
           auto pname = sink_pin_name(e);
-          if (pname == "a" || e.sink.get_port_id() == 0) {
-            a      = e.driver;
+          if (pname == "a" || e.get_port_id() == 0) {
+            a      = e.get_driver_pin();
             have_a = true;
-          } else if (pname == "B" || pname == "b" || e.sink.get_port_id() == 1) {
-            b      = e.driver;
+          } else if (pname == "B" || pname == "b" || e.get_port_id() == 1) {
+            b      = e.get_driver_pin();
             have_b = true;
           }
         }
@@ -1229,14 +1196,14 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
         bool                    have_sel = false;
         std::map<int, Node_pin> options;
         uint32_t                sel_w = 0;
-        for (const auto& e : inp_edges_ordered(node)) {
-          int pid = e.sink.get_port_id();
+        for (const auto& e : inp_sinks_ordered(node)) {
+          int pid = e.get_port_id();
           if (pid == 0) {
-            sel      = e.driver;
+            sel      = e.get_driver_pin();
             have_sel = true;
-            sel_w    = pin_width(ctx, e.driver, node);
+            sel_w    = pin_width(ctx, e.get_driver_pin(), node);
           } else {
-            options[pid] = e.driver;
+            options[pid] = e.get_driver_pin();
           }
         }
         if (!have_sel || options.size() < 2) {
@@ -1257,13 +1224,13 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
       case Ntype_op::Sext: {
         Node_pin a, b;
         bool     have_a = false, have_b = false;
-        for (const auto& e : inp_edges_ordered(node)) {
+        for (const auto& e : inp_sinks_ordered(node)) {
           auto pname = sink_pin_name(e);
-          if (pname == "a" || e.sink.get_port_id() == 0) {
-            a      = e.driver;
+          if (pname == "a" || e.get_port_id() == 0) {
+            a      = e.get_driver_pin();
             have_a = true;
-          } else if (pname == "b" || e.sink.get_port_id() == 1) {
-            b      = e.driver;
+          } else if (pname == "b" || e.get_port_id() == 1) {
+            b      = e.get_driver_pin();
             have_b = true;
           }
         }
@@ -1287,14 +1254,14 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
         Node_pin              a, mask;
         bool                  have_a = false, have_m = false;
         std::vector<Node_pin> ordered;
-        for (const auto& e : inp_edges_ordered(node)) {
-          ordered.push_back(e.driver);
+        for (const auto& e : inp_sinks_ordered(node)) {
+          ordered.push_back(e.get_driver_pin());
           auto pname = sink_pin_name(e);
-          if (pname == "a" || e.sink.get_port_id() == 0) {
-            a      = e.driver;
+          if (pname == "a" || e.get_port_id() == 0) {
+            a      = e.get_driver_pin();
             have_a = true;
-          } else if (pname == "mask" || e.sink.get_port_id() == 1) {
-            mask   = e.driver;
+          } else if (pname == "mask" || e.get_port_id() == 1) {
+            mask   = e.get_driver_pin();
             have_m = true;
           }
         }
@@ -1319,16 +1286,16 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
       case Ntype_op::Set_mask: {
         Node_pin a, mask, value;
         bool     have_a = false, have_m = false, have_v = false;
-        for (const auto& e : inp_edges_ordered(node)) {
+        for (const auto& e : inp_sinks_ordered(node)) {
           auto pname = sink_pin_name(e);
-          if (pname == "a" || e.sink.get_port_id() == 0) {
-            a      = e.driver;
+          if (pname == "a" || e.get_port_id() == 0) {
+            a      = e.get_driver_pin();
             have_a = true;
-          } else if (pname == "mask" || e.sink.get_port_id() == 1) {
-            mask   = e.driver;
+          } else if (pname == "mask" || e.get_port_id() == 1) {
+            mask   = e.get_driver_pin();
             have_m = true;
-          } else if (pname == "value" || e.sink.get_port_id() == 2) {
-            value  = e.driver;
+          } else if (pname == "value" || e.get_port_id() == 2) {
+            value  = e.get_driver_pin();
             have_v = true;
           }
         }
@@ -1342,15 +1309,23 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
         break;
       }
 
+      case Ntype_op::Concat:
+        // Deliberate refusal, not an oversight.  The certificate op set is fixed
+        // DATA in Translation_LGraph_Model.thy (`datatype lgraph_op`), a file
+        // this pass does not own, and it has no constructor carrying the
+        // per-lane width list that a Concat needs.  No present op can stand in
+        // either: a dep reaches the evaluator as a bv at its OWN width and
+        // unshifted, so an Op_Sum/Op_Or over the lane deps loses both the
+        // per-lane window mask and the per-lane offset and would certify a
+        // different bus.  The fast model does handle Concat, so a design with
+        // one still exports its executable theory.
+        fatal(ctx,
+              "Concat node n_" + std::to_string(node_id(node))
+                  + " has no certificate encoding: lgraph_op (Translation_LGraph_Model.thy) has no Op_Concat carrying the lane "
+                    "widths. Add it there first (lgraph_op, denote_op, eval_op, simple_op_cert_wf_bool).");
+
       default: fatal(ctx, "Unsupported op in certificate for node n_" + std::to_string(node_id(node)));
     }
-  }
-
-  if (info != nullptr) {
-    info->nid     = node_id(node);
-    info->op_expr = op_expr;
-    info->width   = w;
-    info->deps    = deps;
   }
 
   std::ostringstream oss;
@@ -1435,22 +1410,17 @@ void emit_cert_theory(const Ctx& ctx, const std::vector<Node>& topo, const std::
   const std::string next_name        = ctx.top_name + "_next_state_from_cert";
   const std::string cert_step_name   = ctx.top_name + "_cert_step";
 
-  Cert_build                  build;
-  std::vector<std::string>    internal_exprs;
-  std::vector<std::string>    internal_op_tags;
-  std::vector<uint32_t>       internal_ids;
-  std::vector<Cert_node_info> internal_infos;  // structured form, for the bridge
+  Cert_build               build;
+  std::vector<std::string> internal_exprs;
+  std::vector<std::string> internal_op_tags;
+  std::vector<uint32_t>    internal_ids;
   internal_exprs.reserve(topo.size());
   internal_op_tags.reserve(topo.size());
   internal_ids.reserve(topo.size());
-  internal_infos.reserve(topo.size());
   for (const auto& node : topo) {
-    Cert_node_info info;
-    internal_exprs.push_back(cert_node_expr(ctx, build, node, "", {}, &info));
-    // op tag straight from the structured record, not re-parsed out of the text
-    internal_op_tags.push_back(info.op_expr.substr(0, info.op_expr.find(' ')));
+    internal_exprs.push_back(cert_node_expr(ctx, build, node));
+    internal_op_tags.push_back(cert_op_tag_from_expr(internal_exprs.back()));
     internal_ids.push_back(node_id(node));
-    internal_infos.push_back(std::move(info));
   }
 
   std::map<std::string, uint32_t> out_driver_ids;
@@ -1606,39 +1576,6 @@ void emit_cert_theory(const Ctx& ctx, const std::vector<Node>& topo, const std::
   ofs << "      nodes = " << nodes_name << "\\<rparr>\"\n\n";
 
   const bool sequential = !flop_nodes.empty();
-  // ---- bridge: fast values for the synthesized Op_Const nodes ------------
-  // cprop folds constants onto operator PINS, so by certificate time there are
-  // no standalone Nconst nodes left (measured: 204 of 204 Op_Const in DINO, and
-  // 3 of 3 in add2, are synthesized).  The fast model inlines such a constant as
-  // a literal because it is built from terms; the certificate must give it an id
-  // because eval_op takes a dep list of ids.  So each one is a topo node with no
-  // counterpart among the per-node fv definitions, and the per-node recurrence
-  // would not be uniform without these.
-  //
-  // The literal MUST be spelled by lit_const_at -- the same renderer the fast
-  // model uses -- or the two sides would differ textually and the node's proof
-  // could not close.
-  if (ctx.fv_naming) {
-    const bool seq = !ctx.flop_field.empty();
-    ofs << "(* Fast values for constants promoted to certificate nodes.  Spelled by the\n"
-           "   same renderer the fast model inlines with, so the two agree textually. *)\n";
-    for (const auto& kv : build.const_pins) {
-      const auto id_it = build.const_ids.find(kv.first);
-      if (id_it == build.const_ids.end()) {
-        continue;  // already diagnosed above
-      }
-      const uint32_t cid = id_it->second;
-      const uint32_t cw  = kv.first.second;
-      ofs << "definition " << ctx.top_name << "_fv" << cid << " :: \"" << ctx.top_name << "_in \\<Rightarrow> ";
-      if (seq) {
-        ofs << ctx.top_name << "_state \\<Rightarrow> ";
-      }
-      ofs << cw << " word\" where\n";
-      ofs << "  \"" << ctx.top_name << "_fv" << cid << ctx.fv_args << " = ("
-          << lit_const_at(ctx, pin_node(kv.second), pin_const_value(kv.second), cw) << ")\"\n\n";
-    }
-  }
-
   ofs << "definition " << source_env_name << " :: \"" << ctx.top_name << "_in \\<Rightarrow> ";
   if (sequential) {
     ofs << ctx.top_name << "_state \\<Rightarrow> ";
@@ -1966,27 +1903,21 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
 
   // Gather sink edges grouped by pin.
   // For multi-driver pin groups (Sum's A/B, EQ's variadic A, And's variadic A,
-  // SHL's variadic B), use `inp_edges_ordered()` to get stable ordering.
+  // SHL's variadic B), use `inp_sinks_ordered()` to get stable ordering.
 
   switch (op) {
-    case Ntype_op::Nconst: {
-      // Dlop expression is inlined at use site by driver_expr().
-      // But emit_node_expr is called when the node is in the let-chain
-      // (which we suppress for Dlop). If somehow reached, format directly.
-      return lit_const_at(ctx, node, node_const_value(node), w);
-    }
-
     case Ntype_op::IO: throw Emit_error("internal: emit_node_expr called on IO node");
 
     case Ntype_op::Sum: {
-      // pid 0 = A (additive, n-ary), pid 1 = B (subtractive, n-ary)
+      // EVEN pid = the A (additive) bank, ODD = the B (subtractive) one; one
+      // pid per operand (graph/cell.hpp's ONE DRIVER PER SINK PIN block).
       std::vector<std::string> a_terms, b_terms;
-      for (const auto& e : inp_edges_ordered(node)) {
-        auto pid  = e.sink.get_port_id();
-        auto expr = ucast_pin_at(ctx, e.driver, w);
+      for (const auto& e : inp_sinks_ordered(node)) {
+        auto pid  = Ntype::sink_bank(Ntype_op::Sum, e.get_port_id());
+        auto expr = ucast_pin_at(ctx, e.get_driver_pin(), w);
         if (pid == 0) {
           a_terms.push_back(expr);
-        } else if (pid == 1) {
+        } else {
           b_terms.push_back(expr);
         }
       }
@@ -2004,8 +1935,8 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
 
     case Ntype_op::Mult: {
       std::vector<std::string> terms;
-      for (const auto& e : inp_edges_ordered(node)) {
-        terms.push_back(ucast_pin_at(ctx, e.driver, w));
+      for (const auto& e : inp_sinks_ordered(node)) {
+        terms.push_back(ucast_pin_at(ctx, e.get_driver_pin(), w));
       }
       if (terms.empty()) {
         fatal(ctx, "Mult node n_" + std::to_string(node_id(node)) + " is empty.");
@@ -2017,13 +1948,13 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
       // v1: emit sem_udiv unconditionally.
       Node_pin a, b;
       bool     have_a = false, have_b = false;
-      for (const auto& e : inp_edges_ordered(node)) {
+      for (const auto& e : inp_sinks_ordered(node)) {
         auto pname = sink_pin_name(e);
-        if (pname == "a" || e.sink.get_port_id() == 0) {
-          a      = e.driver;
+        if (pname == "a" || e.get_port_id() == 0) {
+          a      = e.get_driver_pin();
           have_a = true;
-        } else if (pname == "b" || e.sink.get_port_id() == 1) {
-          b      = e.driver;
+        } else if (pname == "b" || e.get_port_id() == 1) {
+          b      = e.get_driver_pin();
           have_b = true;
         }
       }
@@ -2039,8 +1970,8 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
 
     case Ntype_op::And: {
       std::vector<std::string> terms;
-      for (const auto& e : inp_edges_ordered(node)) {
-        terms.push_back(ucast_pin_at(ctx, e.driver, w));
+      for (const auto& e : inp_sinks_ordered(node)) {
+        terms.push_back(ucast_pin_at(ctx, e.get_driver_pin(), w));
       }
       if (terms.empty()) {
         fatal(ctx, "And node n_" + std::to_string(node_id(node)) + " is empty.");
@@ -2050,8 +1981,8 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
 
     case Ntype_op::Or: {
       std::vector<std::string> terms;
-      for (const auto& e : inp_edges_ordered(node)) {
-        terms.push_back(ucast_pin_at(ctx, e.driver, w));
+      for (const auto& e : inp_sinks_ordered(node)) {
+        terms.push_back(ucast_pin_at(ctx, e.get_driver_pin(), w));
       }
       if (terms.empty()) {
         return lit_zero(w);
@@ -2061,8 +1992,8 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
 
     case Ntype_op::Xor: {
       std::vector<std::string> terms;
-      for (const auto& e : inp_edges_ordered(node)) {
-        terms.push_back(ucast_pin_at(ctx, e.driver, w));
+      for (const auto& e : inp_sinks_ordered(node)) {
+        terms.push_back(ucast_pin_at(ctx, e.get_driver_pin(), w));
       }
       if (terms.empty()) {
         return lit_zero(w);
@@ -2073,9 +2004,10 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
     case Ntype_op::Ror: {
       // Output is 1 word. Mixed input widths handled by `(expr) \<noteq> 0` per operand.
       std::vector<std::string> bools;
-      for (const auto& e : inp_edges_ordered(node)) {
-        auto ew = pin_width(ctx, e.driver, node);
-        bools.push_back("(" + driver_expr_at(ctx, e.driver, ew) + ") \\<noteq> 0");
+      for (const auto& e : inp_sinks_ordered(node)) {
+        const auto drv = e.get_driver_pin();
+        auto       ew  = pin_width(ctx, drv, node);
+        bools.push_back("(" + driver_expr_at(ctx, drv, ew) + ") \\<noteq> 0");
       }
       if (bools.empty()) {
         return lit_zero(1);
@@ -2091,8 +2023,8 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
     case Ntype_op::Not: {
       Node_pin a;
       bool     have = false;
-      for (const auto& e : inp_edges_ordered(node)) {
-        a    = e.driver;
+      for (const auto& e : inp_sinks_ordered(node)) {
+        a    = e.get_driver_pin();
         have = true;
         break;
       }
@@ -2106,8 +2038,8 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
     case Ntype_op::GT: {
       // Result type is 1 word; operands compare at cmp_w = max width of inputs.
       std::vector<std::pair<int, Node_pin>> ordered;
-      for (const auto& e : inp_edges_ordered(node)) {
-        ordered.emplace_back(e.sink.get_port_id(), e.driver);
+      for (const auto& e : inp_sinks_ordered(node)) {
+        ordered.emplace_back(e.get_port_id(), e.get_driver_pin());
       }
       // pid 0 = A (n-ary, signed-flag uses pid 1 in lgraph; for v1 we treat
       //              standard LT/GT as 2-input unsigned).
@@ -2135,8 +2067,8 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
 
     case Ntype_op::EQ: {
       std::vector<Node_pin> drivers;
-      for (const auto& e : inp_edges_ordered(node)) {
-        drivers.push_back(e.driver);
+      for (const auto& e : inp_sinks_ordered(node)) {
+        drivers.push_back(e.get_driver_pin());
       }
       if (drivers.empty()) {
         fatal(ctx, "EQ node n_" + std::to_string(node_id(node)) + " is empty.");
@@ -2161,13 +2093,13 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
       Node_pin              a;
       std::vector<Node_pin> bs;
       bool                  have_a = false;
-      for (const auto& e : inp_edges_ordered(node)) {
+      for (const auto& e : inp_sinks_ordered(node)) {
         auto pname = sink_pin_name(e);
-        if (pname == "a" || e.sink.get_port_id() == 0) {
-          a      = e.driver;
+        if (pname == "a" || e.get_port_id() == 0) {
+          a      = e.get_driver_pin();
           have_a = true;
-        } else if (pname == "B" || pname == "b" || e.sink.get_port_id() == 1) {
-          bs.push_back(e.driver);
+        } else if (pname == "B" || pname == "b" || e.get_port_id() == 1) {
+          bs.push_back(e.get_driver_pin());
         }
       }
       if (!have_a || bs.empty()) {
@@ -2182,7 +2114,11 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
         auto bw = pin_width(ctx, bs[0], node);
         return "(push_bit (unat (" + shift_amount_expr_at(ctx, bs[0], bw) + ")) " + a_cast + ")";
       }
-      // Multi-shift-OR: inline OR-chain
+      // More than one `b` driver can no longer arise: SHL's `b` is a plain
+      // single-driver sink (graph/cell.cpp; the runtime one-hot multi-amount
+      // form was removed). The OR-chain is kept as dead-but-defensive code so
+      // this model and the per-driver cert deps (SHL case of the cert builder)
+      // stay in step; pass/lean fatals on the same shape.
       std::vector<std::string> shifts;
       for (auto& bd : bs) {
         auto bw = pin_width(ctx, bd, node);
@@ -2196,15 +2132,15 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
       bool                     have_a = false, have_b = false;
       std::vector<Node_pin>    ordered;
       std::vector<std::string> pins;
-      for (const auto& e : inp_edges_ordered(node)) {
-        ordered.push_back(e.driver);
+      for (const auto& e : inp_sinks_ordered(node)) {
+        ordered.push_back(e.get_driver_pin());
         auto pname = sink_pin_name(e);
-        pins.push_back(pname + "#" + std::to_string(e.sink.get_port_id()));
-        if (pname == "a" || e.sink.get_port_id() == 0) {
-          a      = e.driver;
+        pins.push_back(pname + "#" + std::to_string(e.get_port_id()));
+        if (pname == "a" || e.get_port_id() == 0) {
+          a      = e.get_driver_pin();
           have_a = true;
-        } else if (pname == "B" || pname == "b" || e.sink.get_port_id() == 1) {
-          b      = e.driver;
+        } else if (pname == "B" || pname == "b" || e.get_port_id() == 1) {
+          b      = e.get_driver_pin();
           have_b = true;
         }
       }
@@ -2239,15 +2175,7 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
       if (pin_is_const(b)) {
         shift_w = std::max<uint32_t>(shift_w, minimal_unsigned_const_width(pin_const_value(b)));
       }
-      // scast, NOT ucast.  sem_sra returns a word of the OPERAND's width, so
-      // widening to the node width must preserve the sign -- an arithmetic right
-      // shift exists precisely to propagate it.  ucast fills zeros, which for a
-      // negative shifted value disagrees with the certificate (mk_bv w of a
-      // negative int is its two's complement, i.e. sign-extended) and, more to
-      // the point, with the RTL: cgen_sim.cpp reads the shifted operand as
-      // signed.  For w <= value_w the two casts coincide (both keep the low w
-      // bits), so scast is correct in both directions.
-      return "((scast (sem_sra " + ucast_pin_at(ctx, a, value_w) + " " + shift_amount_expr_at(ctx, b, shift_w)
+      return "((ucast (sem_sra " + ucast_pin_at(ctx, a, value_w) + " " + shift_amount_expr_at(ctx, b, shift_w)
              + ") :: " + std::to_string(w) + " word))";
     }
 
@@ -2258,14 +2186,14 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
       // Collect drivers indexed by pid (1, 2, 3, ...)
       std::map<int, Node_pin> options;
       uint32_t                sel_w = 0;
-      for (const auto& e : inp_edges_ordered(node)) {
-        int pid = e.sink.get_port_id();
+      for (const auto& e : inp_sinks_ordered(node)) {
+        int pid = e.get_port_id();
         if (pid == 0) {
-          sel      = e.driver;
+          sel      = e.get_driver_pin();
           have_sel = true;
-          sel_w    = pin_width(ctx, e.driver, node);
+          sel_w    = pin_width(ctx, e.get_driver_pin(), node);
         } else {
-          options[pid] = e.driver;
+          options[pid] = e.get_driver_pin();
         }
       }
       if (!have_sel || options.size() < 2) {
@@ -2294,13 +2222,13 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
     case Ntype_op::Sext: {
       Node_pin a, b;
       bool     have_a = false, have_b = false;
-      for (const auto& e : inp_edges_ordered(node)) {
+      for (const auto& e : inp_sinks_ordered(node)) {
         auto pname = sink_pin_name(e);
-        if (pname == "a" || e.sink.get_port_id() == 0) {
-          a      = e.driver;
+        if (pname == "a" || e.get_port_id() == 0) {
+          a      = e.get_driver_pin();
           have_a = true;
-        } else if (pname == "b" || e.sink.get_port_id() == 1) {
-          b      = e.driver;
+        } else if (pname == "b" || e.get_port_id() == 1) {
+          b      = e.get_driver_pin();
           have_b = true;
         }
       }
@@ -2311,7 +2239,7 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
         }
         return undefined_at(w, reason);
       }
-      uint32_t src_w = pin_width(ctx, a, node);
+      uint32_t src_w    = pin_width(ctx, a, node);
       // The sign position is a VALUE, not a bit slice. LiveHD routinely gives a
       // constant amount a 1-bit pin, and `unat (32 :: 1 word) = 0` silently
       // turns the sign-extend into a no-op. Widen the amount to hold its value,
@@ -2330,15 +2258,15 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
       bool                     have_a = false, have_m = false;
       std::vector<Node_pin>    ordered;
       std::vector<std::string> pins;
-      for (const auto& e : inp_edges_ordered(node)) {
-        ordered.push_back(e.driver);
+      for (const auto& e : inp_sinks_ordered(node)) {
+        ordered.push_back(e.get_driver_pin());
         auto pname = sink_pin_name(e);
-        pins.push_back(pname + "#" + std::to_string(e.sink.get_port_id()));
-        if (pname == "a" || e.sink.get_port_id() == 0) {
-          a      = e.driver;
+        pins.push_back(pname + "#" + std::to_string(e.get_port_id()));
+        if (pname == "a" || e.get_port_id() == 0) {
+          a      = e.get_driver_pin();
           have_a = true;
-        } else if (pname == "mask" || e.sink.get_port_id() == 1) {
-          mask   = e.driver;
+        } else if (pname == "mask" || e.get_port_id() == 1) {
+          mask   = e.get_driver_pin();
           have_m = true;
         }
       }
@@ -2359,7 +2287,7 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
         }
         return undefined_at(w, reason);
       }
-      uint32_t src_w = pin_width(ctx, a, node);
+      uint32_t src_w  = pin_width(ctx, a, node);
       // The canonical zext idiom Get_mask(a, -1) declares the -1 mask at 1 bit;
       // emitting sem_get_mask at that width would select only bit 0. Widen the
       // mask to at least the source width (matches pass.lean and cgen_sim).
@@ -2370,16 +2298,16 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
     case Ntype_op::Set_mask: {
       Node_pin a, mask, value;
       bool     have_a = false, have_m = false, have_v = false;
-      for (const auto& e : inp_edges_ordered(node)) {
+      for (const auto& e : inp_sinks_ordered(node)) {
         auto pname = sink_pin_name(e);
-        if (pname == "a" || e.sink.get_port_id() == 0) {
-          a      = e.driver;
+        if (pname == "a" || e.get_port_id() == 0) {
+          a      = e.get_driver_pin();
           have_a = true;
-        } else if (pname == "mask" || e.sink.get_port_id() == 1) {
-          mask   = e.driver;
+        } else if (pname == "mask" || e.get_port_id() == 1) {
+          mask   = e.get_driver_pin();
           have_m = true;
-        } else if (pname == "value" || e.sink.get_port_id() == 2) {
-          value  = e.driver;
+        } else if (pname == "value" || e.get_port_id() == 2) {
+          value  = e.get_driver_pin();
           have_v = true;
         }
       }
@@ -2394,6 +2322,62 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
       auto value_w = pin_width(ctx, value, node);
       return "(sem_set_mask " + ucast_pin_at(ctx, a, w) + " " + driver_expr_at(ctx, mask, mask_w) + " "
              + driver_expr_at(ctx, value, value_w) + ")";
+    }
+
+    case Ntype_op::Concat: {
+      // out = SUM_i (value_i mod 2^w_i) << offset_i, lanes MSB-first.
+      //
+      // The lane table comes from the SHARED decoder. A lane's window width is
+      // an explicit operand precisely because it is NOT recoverable from the
+      // driver: bits_of is an upper bound that bitwidth/cprop narrow freely and
+      // the value's significant bits are narrower still, so re-deriving it here
+      // would shift every lane above the one that got it wrong. An empty table
+      // means the cell is malformed.
+      const auto lanes = livehd::graph_util::concat_lanes(node);
+      if (lanes.empty()) {
+        const auto reason
+            = "Concat node n_" + std::to_string(node_id(node)) + " is malformed (missing lane value or non-constant lane width)";
+        if (ctx.strict) {
+          fatal(ctx, reason + ".");
+        }
+        return undefined_at(w, reason);
+      }
+      int64_t total = 0;  // 64-bit: each lane width alone may be up to INT32_MAX
+      for (const auto& lane : lanes) {
+        total += lane.width;
+      }
+      // The driver pin carries the literal sum(w_i) bits. A NARROWER stamp is a graph inconsistency,
+      // not a truncating assignment to model around: the let-binding is typed at
+      // `w word`, every lane above it would vanish, and the emitted theory would
+      // then prove the wrong bus.  Hard-fail like the Memory width mismatch
+      // below, in strict mode or not.
+      if (total > static_cast<int64_t>(w)) {
+        fatal(ctx,
+              "Concat node n_" + std::to_string(node_id(node)) + " assembles " + std::to_string(total)
+                  + " lane bits but its driver pin is stamped " + std::to_string(w)
+                  + " bits; the most significant lanes would be dropped.");
+      }
+      if (const auto lane_bad = livehd::graph_util::concat_lane_violation(lanes); !lane_bad.empty()) {
+        fatal(ctx, lane_bad);
+      }
+      // Each lane occupies its OWN window before it is widened, so a negative
+      // lane lands as its two's-complement pattern (-1 at w=3 is 0b111) -- per
+      // lane and positional rather than smeared over the whole plane. A driver
+      // WIDER than its window was rejected just above, so the ucast below only
+      // ever extends.
+      //
+      // word_cat states the same value more directly, but it reads the lane width
+      // off the operand's TYPE and returns a fresh type variable per step; every
+      // other arm here normalizes operands with `ucast ... :: n word` at an
+      // explicit width, and the push_bit/or form (the SHL arm's spelling) keeps
+      // the result at the node width w that the let-chain already expects.
+      std::vector<std::string> terms;
+      terms.reserve(lanes.size());
+      for (const auto& lane : lanes) {
+        const auto masked = ucast_at(ucast_pin_at(ctx, lane.value, static_cast<uint32_t>(lane.width)), w);
+        terms.push_back(lane.offset == 0 ? masked : "(push_bit " + std::to_string(lane.offset) + " " + masked + ")");
+      }
+      return nary_op_func("Bit_Operations.or", terms);
     }
 
     case Ntype_op::Memory: {
@@ -2456,9 +2440,10 @@ std::vector<Node> reachable_topo_order(Ctx& /*ctx*/, const std::vector<Node_pin>
       }
       visited = true;
       // Push children (driver pins of input edges).
-      for (const auto& e : inp_edges_ordered(cur)) {
-        auto child = pin_node(e.driver);
-        if (pin_is_input(e.driver) || pin_is_const(e.driver)) {
+      for (const auto& e : inp_sinks_ordered(cur)) {
+        const auto drv   = e.get_driver_pin();
+        auto       child = pin_node(drv);
+        if (pin_is_input(drv) || pin_is_const(drv)) {
           continue;
         }
         if (flop_nids.count(node_id(child)) > 0) {
@@ -2474,17 +2459,18 @@ std::vector<Node> reachable_topo_order(Ctx& /*ctx*/, const std::vector<Node_pin>
   return order;
 }
 
-template <typename Edge>
-uint32_t consumer_expected_width(const Edge& e) {
-  auto sink = e.sink;
-  auto sw   = raw_pin_width(sink);
+// Takes the SINK PIN rather than an edge: under one-driver-per-sink-pin the
+// consumer is fully described by the pin it lands on.
+template <typename SinkPin>
+uint32_t consumer_expected_width(const SinkPin& sink) {
+  auto sw = raw_pin_width(sink);
   if (sw > 0) {
     return static_cast<uint32_t>(sw);
   }
 
   auto sn = pin_node(sink);
   if (node_is_flop(sn)) {
-    auto pname = sink_pin_name(e);
+    auto pname = sink_pin_name(sink);
     if (pname == "din") {
       return static_cast<uint32_t>(raw_node_width(sn));
     }
@@ -2505,16 +2491,21 @@ void normalize_zero_width_get_masks(const Ctx& ctx, const std::vector<Node>& top
 
     uint32_t    expected = 0;
     std::string consumers;
-    for (const auto& e : node.out_edges()) {
-      const auto ew  = consumer_expected_width(e);
-      consumers     += " n_" + std::to_string(node_id(pin_node(e.sink))) + ":" + std::to_string(ew);
-      if (ew == 0) {
-        continue;
-      }
-      if (expected == 0) {
-        expected = ew;
-      } else if (expected != ew) {
-        fatal(ctx, "Get_mask node n_" + std::to_string(node_id(node)) + " has conflicting consumer widths:" + consumers);
+    // Pin-centric: out_sorted_pins() yields this node's CONNECTED driver pins;
+    // a driver's fanout stays a SET, so the consumers come from the pin's own
+    // out_edges(). Read-only walk.
+    for (const auto& dpin : node.out_sorted_pins()) {
+      for (const auto& oe : dpin.out_edges()) {
+        const auto ew  = consumer_expected_width(oe.sink);
+        consumers     += " n_" + std::to_string(node_id(pin_node(oe.sink))) + ":" + std::to_string(ew);
+        if (ew == 0) {
+          continue;
+        }
+        if (expected == 0) {
+          expected = ew;
+        } else if (expected != ew) {
+          fatal(ctx, "Get_mask node n_" + std::to_string(node_id(node)) + " has conflicting consumer widths:" + consumers);
+        }
       }
     }
 
@@ -2543,7 +2534,9 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
     livehd::diag::warn("pass.isabelle", "no-input", "io").msg("received a null Graph instance").emit();
     return;
   }
-  auto* g = graph.get();
+  hhds::GraphLibrary reduction_scratch;
+  auto               lowered = livehd::graph_util::lower_counted_reductions_copy(graph, reduction_scratch);
+  auto*              g       = lowered.get();
 
   Ctx ctx;
   ctx.g                = g;
@@ -2590,14 +2583,16 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
   // Flops
   std::vector<Node>             flop_nodes;
   absl::flat_hash_set<uint32_t> flop_nids;
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     if (node_is_flop(node)) {
       flop_nodes.emplace_back(node);
       flop_nids.insert(node_id(node));
-      // Use first user-visible out-edge driver name, else fall back to nid.
+      // First user-visible DRIVER PIN name, else fall back to nid. This only
+      // ever looked at the driver side, so the pin walk yields each candidate
+      // once instead of once per fanout edge.
       std::string flop_raw;
-      for (const auto& e : node.out_edges()) {
-        auto wn = livehd::graph_util::wire_name(e.driver);
+      for (const auto& dpin : node.out_sorted_pins()) {
+        auto wn = livehd::graph_util::wire_name(dpin);
         if (!wn.empty() && wn[0] != '_') {
           flop_raw = std::string(wn);
           break;
@@ -2620,7 +2615,7 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
   // subset; parse_memory_info rejects the rest before emission.
   std::vector<Node>             memory_nodes;
   absl::flat_hash_set<uint32_t> memory_nids;
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     if (node_is_memory(node)) {
       auto        mi = parse_memory_info(ctx, node);
       std::string mem_raw;
@@ -2642,27 +2637,15 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
 
   bool sequential = !flop_nodes.empty() || !memory_nodes.empty();
 
-  // Bridge mode.  Refused for memory-bearing designs: the certificate has no
-  // memory operator at all (they get a counts-only stub), so a bridge over one
-  // would be unprovable rather than merely slow.
-  if (emit_fast_bridge) {
-    if (!memory_nodes.empty()) {
-      fatal(ctx, "formal.isabelle.emit_fast_bridge is not supported for designs with memory nodes: "
-                 "the graph certificate has no memory operator.");
-    }
-    ctx.fv_naming = true;
-    ctx.fv_args   = sequential ? " i s" : " i";
-  }
-
   // ---- Compute root set for reachability -------------------------------
   std::vector<Node_pin>           roots;
   // (a) drivers of every graph output
   std::map<std::string, Node_pin> out_drivers;
   for (const auto& decl : gio->get_output_pin_decls()) {
     auto out_sink = g->get_output_pin(decl.name);
-    auto edges    = out_sink.inp_edges();
-    if (!edges.empty()) {
-      out_drivers[std::string(decl.name)] = edges.front().driver;
+    auto drv      = out_sink.get_driver_pin();  // one driver per sink pin
+    if (!drv.is_invalid()) {
+      out_drivers[std::string(decl.name)] = drv;
     }
   }
   for (auto& kv : out_drivers) {
@@ -2672,16 +2655,16 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
   // (b) drivers of every flop's D/reset/enable input
   std::map<uint32_t, Node_pin> flop_din, flop_reset, flop_enable;
   for (auto& fn : flop_nodes) {
-    for (const auto& e : inp_edges_ordered(fn)) {
+    for (const auto& e : inp_sinks_ordered(fn)) {
       auto pname = sink_pin_name(e);
       if (pname == "din") {
-        flop_din[node_id(fn)] = e.driver;
+        flop_din[node_id(fn)] = e.get_driver_pin();
       } else if (pname == "reset_pin") {
-        flop_reset[node_id(fn)] = e.driver;
+        flop_reset[node_id(fn)] = e.get_driver_pin();
       } else if (pname == "enable") {
-        flop_enable[node_id(fn)] = e.driver;
+        flop_enable[node_id(fn)] = e.get_driver_pin();
       } else if (pname == "negreset") {
-        flop_reset[node_id(fn)] = e.driver;
+        flop_reset[node_id(fn)] = e.get_driver_pin();
       }
     }
   }
@@ -2778,50 +2761,8 @@ void Pass_isabelle::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) co
     }
 
     // <top>_comb body: shared let-chain over the topo-ordered emit set.
-    // ---- bridge mode: one top-level definition per node ------------------
-    // Emitted in topological order, so each fv definition only mentions fv
-    // definitions already introduced.  Constants are `topo` nodes in the
-    // Isabelle certificate (unlike Lean, where they are sources), so every topo
-    // id gets an fv counterpart and the per-node recurrence stays uniform.
-    const bool bridge = ctx.fv_naming;
-    if (bridge) {
-      ofs << "(* Per-node fast values.  One definition per certificate topo node, so the\n"
-             "   bridge's recurrence lemmas can name each node's value.  Replaces the\n"
-             "   monolithic let-chain, which was a single declaration and therefore\n"
-             "   single-threaded. *)\n";
-      for (const auto& n : topo) {
-        const auto w = node_is_memory(n) ? memory_info_for(ctx, n).bits : node_width(ctx, n);
-        ofs << "definition " << ctx.top_name << "_fv" << node_id(n) << " :: \"" << ctx.top_name << "_in \\<Rightarrow> ";
-        if (sequential) {
-          ofs << ctx.top_name << "_state \\<Rightarrow> ";
-        }
-        ofs << std::to_string(w) << " word\" where\n";
-        ofs << "  \"" << ctx.top_name << "_fv" << node_id(n) << ctx.fv_args << " = (" << emit_node_expr(ctx, n) << " "
-            << ty_word(w) << ")\"\n\n";
-      }
-    }
-
     auto emit_let_chain = [&]() -> std::string {
       std::ostringstream oss;
-      if (bridge) {
-        // bindings live in the fv definitions; emit only the output record
-        oss << "    (\\<lparr>";
-        bool bf = true;
-        for (auto& kv : ctx.output_field) {
-          if (!bf) { oss << ", "; }
-          bf                   = false;
-          const auto& out_name = kv.first;
-          auto        drv      = out_drivers.find(out_name);
-          if (drv == out_drivers.end()) {
-            oss << kv.second << " = " << lit_zero(ctx.output_width[out_name]);
-          } else {
-            oss << kv.second << " = " << ucast_pin_at(ctx, drv->second, ctx.output_width[out_name]);
-          }
-        }
-        if (ctx.output_field.empty()) { oss << "out_dummy = (0 :: 1 word)"; }
-        oss << "\\<rparr>)";
-        return oss.str();
-      }
       oss << "    (let\n";
       bool first = true;
       for (const auto& n : topo) {

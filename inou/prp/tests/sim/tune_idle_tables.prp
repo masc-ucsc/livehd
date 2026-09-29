@@ -1,0 +1,76 @@
+/*
+:name: tune_idle_tables
+:type: simulation
+*/
+// sim.tune fixture: the idle-tables regime. A 16-entry table is written once
+// every 64K cycles and hashed through a deep multiply/xor chain; between writes
+// nothing the hash reads changes, so dirty tracking (sim.tune.dirty=on) skips
+// the whole DUT. The testbench does a fixed amount of its own arithmetic per
+// cycle, so the dirty-on run still costs real CPU (the tuner's quality gate
+// needs >= 0.2 s) while being several times cheaper per cycle. The tuner must
+// profile it, trial dirty=on and keep it (lhd/tests/sim_tune_profile_test.sh
+// runs it for millions of cycles through `--arg cycles=N`; the default keeps
+// the prp-sim target short).
+
+mod tune_idle_tables(we:bool, waddr:u4, wdata:u32) -> (hash:u32@[0]) {
+  reg tab:[16]u32 = 0
+
+  mut h:u32 = 0x811C_9DC5
+  for round in 0..<4 {
+    for i in 0..<16 {
+      wrap h = ((h ^ tab[i]) * 0x0100_0193) + round
+    }
+  }
+  hash = h
+
+  if we { tab[waddr] = wdata }
+}
+
+test tune_idle_tables.run(cycles:u32 = 1000) {
+  mut dut      = tune_idle_tables
+  mut last     = 0
+  mut x:u32    = 1
+  tick cycles {
+    dut.we    = (clock & 0xFFFF) == 0xFFFF
+    dut.waddr = (clock >> 16) & 0xF
+    dut.wdata = (clock >> 16) & 0xFFFF
+    step
+    last = dut.hash
+    // the testbench's own per-cycle work (identical under every tune vector)
+    wrap x = ((x ^ (x >> 7)) * 0x2545_F491) + 1
+    wrap x = ((x ^ (x >> 9)) * 0x0100_0193) + 3
+    wrap x = ((x ^ (x >> 5)) * 0x2545_F491) + 5
+    wrap x = ((x ^ (x >> 11)) * 0x0100_0193) + 7
+    wrap x = ((x ^ (x >> 13)) * 0x2545_F491) + 9
+    wrap x = ((x ^ (x >> 3)) * 0x0100_0193) + 11
+    wrap x = ((x ^ (x >> 7)) * 0x2545_F491) + 13
+    wrap x = ((x ^ (x >> 9)) * 0x0100_0193) + 15
+    wrap x = ((x ^ (x >> 5)) * 0x2545_F491) + 17
+    wrap x = ((x ^ (x >> 11)) * 0x0100_0193) + 19
+    wrap x = ((x ^ (x >> 13)) * 0x2545_F491) + 21
+    wrap x = ((x ^ (x >> 3)) * 0x0100_0193) + 23
+    wrap x = ((x ^ (x >> 7)) * 0x2545_F491) + 25
+    wrap x = ((x ^ (x >> 9)) * 0x0100_0193) + 27
+    wrap x = ((x ^ (x >> 5)) * 0x2545_F491) + 29
+    wrap x = ((x ^ (x >> 11)) * 0x0100_0193) + 31
+    wrap x = ((x ^ (x >> 13)) * 0x2545_F491) + 33
+    wrap x = ((x ^ (x >> 3)) * 0x0100_0193) + 35
+    wrap x = ((x ^ (x >> 7)) * 0x2545_F491) + 37
+    wrap x = ((x ^ (x >> 9)) * 0x0100_0193) + 39
+    wrap x = ((x ^ (x >> 5)) * 0x2545_F491) + 41
+    wrap x = ((x ^ (x >> 11)) * 0x0100_0193) + 43
+    wrap x = ((x ^ (x >> 13)) * 0x2545_F491) + 45
+    wrap x = ((x ^ (x >> 3)) * 0x0100_0193) + 47
+    wrap x = ((x ^ (x >> 7)) * 0x2545_F491) + 49
+    wrap x = ((x ^ (x >> 9)) * 0x0100_0193) + 51
+    wrap x = ((x ^ (x >> 5)) * 0x2545_F491) + 53
+    wrap x = ((x ^ (x >> 11)) * 0x0100_0193) + 55
+    wrap x = ((x ^ (x >> 13)) * 0x2545_F491) + 57
+    wrap x = ((x ^ (x >> 3)) * 0x0100_0193) + 59
+    wrap x = ((x ^ (x >> 7)) * 0x2545_F491) + 61
+    wrap x = ((x ^ (x >> 9)) * 0x0100_0193) + 63
+  }
+  puts("tune_idle_tables hash={last}")
+  assert(cycles < 0x10000 or last != 0x811C_9DC5, "a written table changes the hash")
+  assert(x != 0 or cycles == 0, "the testbench work stays live")
+}

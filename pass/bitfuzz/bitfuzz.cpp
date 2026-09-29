@@ -5,6 +5,7 @@
 #include "bitwidth.hpp"
 #include "cell.hpp"
 #include "diag.hpp"
+#include "hash_util.hpp"
 #include "node_util.hpp"
 
 namespace gu = livehd::graph_util;
@@ -28,24 +29,16 @@ constexpr int32_t kSentinelBits = 32768;
 // not confuse the two.
 [[nodiscard]] bool has_no_inference_rule(Ntype_op op) {
   switch (op) {
-    case Ntype_op::Div:
-    case Ntype_op::Rem:
-    case Ntype_op::LUT:
+    case Ntype_op::Rem       :
+    case Ntype_op::LUT       :
     case Ntype_op::Clock_cell: return true;
-    default: return false;
+    default                  : return false;
   }
 }
 
 // Deterministic per-pin coin flip: a pure function of (seed, node, port), never
 // of traversal order, so `--set compile.bitfuzz.seed=N` reproduces exactly the
 // same cleared set on a re-run (what M3's bisect needs).
-[[nodiscard]] uint64_t splitmix64(uint64_t x) {
-  x += 0x9e3779b97f4a7c15ULL;
-  x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
-  x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
-  return x ^ (x >> 31);
-}
-
 [[nodiscard]] bool selected(uint64_t seed, const hhds::Node_class& node, hhds::Port_id pid, int pct) {
   if (pct >= 100) {
     return true;
@@ -53,7 +46,7 @@ constexpr int32_t kSentinelBits = 32768;
   if (pct <= 0) {
     return false;
   }
-  const auto h = splitmix64(seed ^ splitmix64((static_cast<uint64_t>(node.get_debug_nid()) << 16) ^ pid));
+  const auto h = hash_util::combine64(seed, (static_cast<uint64_t>(node.get_debug_nid()) << 16) ^ pid);
   return static_cast<int>(h % 100) < pct;
 }
 
@@ -66,16 +59,16 @@ constexpr int32_t kSentinelBits = 32768;
   if (node.is_invalid()) {
     return false;
   }
-  for (const auto& e : node.inp_edges()) {
-    const auto& d = e.driver;
-    if (d.is_invalid() || gu::is_graph_input_pin(d) || gu::is_const_pin(d)) {
-      continue;
-    }
-    if (gu::type_op_of(d.get_master_node()) == Ntype_op::Nconst) {
-      continue;
-    }
-    if (is_pathological(gu::bits_of(d))) {
-      return true;
+  for (auto sink : node.inp_sorted_pins()) {  // read-only pin walk
+    // PLURAL: a compact loop's carry-in sink holds two drivers
+    // (pass/legalize/legalize.cpp:301).
+    for (const auto& d : sink.get_driver_pins()) {
+      if (d.is_invalid() || gu::is_graph_input_pin(d) || d.is_const()) {
+        continue;
+      }
+      if (is_pathological(gu::bits_of(d))) {
+        return true;
+      }
     }
   }
   return false;
@@ -85,12 +78,12 @@ struct Snap {
   hhds::Node_class node;
   hhds::Pin_class  pin;
   std::string      name;
-  Ntype_op         op         = Ntype_op::Invalid;
-  int32_t          bits       = 0;
-  bool             unsign     = true;
-  bool             is_state   = false;
-  bool             restored   = false;
-  bool             cyclic     = false;
+  Ntype_op         op       = Ntype_op::Invalid;
+  int32_t          bits     = 0;
+  bool             unsign   = true;
+  bool             is_state = false;
+  bool             restored = false;
+  bool             cyclic   = false;
 };
 
 // Every driver pin this pass is allowed to strip.
@@ -99,20 +92,19 @@ struct Snap {
 //   graph IO      - the source RTL interface; bitwidth pins them anyway
 //                   (bitwidth.cpp:167-172) and the LEC comparison is only
 //                   well-defined while both sides keep the same port widths.
-//   Nconst        - the width IS the value (process_const re-derives it).
 //   const pins    - same, and they live on the shared CONST_NODE singleton.
 //   Memory        - state contract, plus its geometry sinks must stay constant
 //                   (process_memory hard-errors otherwise).
 //   Sub           - instance boundary; treated like IO in v1.
 //   Flop/Latch    - state, unless Mode::All.
 //
-// fast_class() never emits the INPUT/OUTPUT/CONST singletons (hhds graph.hpp),
+// body().nodes() never emits the INPUT/OUTPUT/CONST singletons (hhds graph.hpp),
 // so IO and constant pins are excluded by construction.
 [[nodiscard]] std::vector<Snap> collect(hhds::Graph* g, const Options& opts) {
   std::vector<Snap> out;
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     const auto op = gu::type_op_of(node);
-    if (op == Ntype_op::Invalid || op == Ntype_op::Nconst || op == Ntype_op::Sub || op == Ntype_op::Memory) {
+    if (op == Ntype_op::Invalid || op == Ntype_op::Sub || op == Ntype_op::Memory) {
       continue;
     }
     const bool is_state = op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch;
@@ -138,7 +130,7 @@ struct Snap {
       }
     }
     for (const auto& dpin : dpins) {
-      if (dpin.is_invalid() || !dpin.is_driver() || gu::is_const_pin(dpin)) {
+      if (dpin.is_invalid() || !dpin.is_driver() || dpin.is_const()) {
         continue;
       }
       if (is_state && !selected(opts.seed, node, dpin.get_port_id(), opts.reg_pct)) {
@@ -192,7 +184,9 @@ void restore(const Snap& s) {
 }
 
 void infer(const std::shared_ptr<hhds::Graph>& g, const Options& opts) {
-  Bitwidth bw(opts.max_iterations);
+  // Audit the mathematical range, including bits discarded at graph outputs.
+  // Normal compilation may realize only the demanded output bits.
+  Bitwidth bw(opts.max_iterations, false);
   bw.do_trans(g);
 }
 
@@ -201,8 +195,8 @@ void infer(const std::shared_ptr<hhds::Graph>& g, const Options& opts) {
 std::string_view mode_name(Mode m) {
   switch (m) {
     case Mode::Wires: return "wires";
-    case Mode::All: return "all";
-    default: return "off";
+    case Mode::All  : return "all";
+    default         : return "off";
   }
 }
 
@@ -217,6 +211,19 @@ bool mode_from_string(std::string_view s, Mode* out) {
     return false;
   }
   return true;
+}
+
+Stats strip_annotations(const std::shared_ptr<hhds::Graph>& g, const Options& opts) {
+  Stats st;
+  if (!g || opts.mode == Mode::Off) {
+    return st;
+  }
+  for (const auto& s : collect(g.get(), opts)) {
+    strip(s);
+    ++st.cleared;
+    st.cleared_state += s.is_state;
+  }
+  return st;
 }
 
 Stats fuzz(const std::shared_ptr<hhds::Graph>& g, const Options& opts) {
@@ -319,9 +326,9 @@ Stats fuzz(const std::shared_ptr<hhds::Graph>& g, const Options& opts) {
       continue;
     }
 
-    const auto now    = gu::bits_of(s.pin);
-    f.now_bits        = now;
-    f.now_unsign      = gu::is_unsign(s.pin);
+    const auto now = gu::bits_of(s.pin);
+    f.now_bits     = now;
+    f.now_unsign   = gu::is_unsign(s.pin);
 
     if (s.restored || is_pathological(now)) {
       f.kind = "unrecovered";

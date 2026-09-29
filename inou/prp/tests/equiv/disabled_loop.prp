@@ -1,0 +1,10 @@
+/*
+:name: disabled_loop
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+pub mod top(a:u8) -> (y:u8@[0]) {
+  y = a
+}

@@ -1,0 +1,50 @@
+/*
+:name: inline_tuple_out_in_branch
+:type: lgraph compile
+*/
+
+// Regression: a comb whose ONE output is a TUPLE, whose result is bound at the
+// top of the caller but read ONLY inside a branch.
+//
+// The inliner decides the result SHAPE from how the call site consumes it: a
+// consumed `dst.<out>` keeps the output NAME (`u = (data_o=(…))`), an
+// unconsumed one drops it (`u` IS the tuple). collect_return_consumption used
+// to scan only the fcall's straight-line SIBLINGS, so a read that lives inside
+// an `if`/`match` arm looked like NO consumption -- the name was dropped and
+// the branch read failed with `unknown field data_o on tuple u_rom`.
+//
+// This is the shape EVERY Verilog-imported instance has (`mut u = Mod(...)` at
+// the top, its ports read inside the always-block branches), so it broke
+// whole designs, not a corner (minion: 74 of 107 errors).
+
+pub comb rom_c0::[timecheck=false](index_i:u8) -> (data_o:(exc:u1, mask:u7)) {
+  data_o.exc  = index_i#[7]
+  data_o.mask = index_i#[0..=6]
+}
+
+// One scalar output, same branch-only read: its epilogue takes the other arm.
+pub comb dec_c0::[timecheck=false](index_i:u8) -> (bit_o:u1) {
+  bit_o = index_i#[3]
+}
+
+pub comb top(a:u8, s:u2) -> (o:u8) {
+  mut u_rom = rom_c0::[name=u_rom](index_i = a)
+  mut u_dec = dec_c0::[name=u_dec](index_i = a)
+  mut res:u8 = 0
+  match s {
+    == 0 {
+      res = u_rom.data_o.mask       // read reachable ONLY from inside this arm
+    }
+    == 1 {
+      if a#[0] != 0 {
+        res = u_rom.data_o.exc      // ... and from a nested block
+      } else {
+        res = u_dec.bit_o
+      }
+    }
+    else {
+      res = 0
+    }
+  }
+  o = res
+}

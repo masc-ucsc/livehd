@@ -160,6 +160,13 @@ public:
   // void process_sext() override { check_binary(); }
   // void process_set_mask() override { check_binary(); }
   // void process_get_mask() override { check_binary(); }
+  upass::Vote process_concat(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    check_concat();
+    return upass::Vote::keep;
+  }
   // - Comparison
   upass::Vote process_ne(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
     (void)dst_name;
@@ -268,6 +275,29 @@ private:
     check_type(Lnast_ntype::Lnast_ntype_ref, Lnast_ntype::Lnast_ntype_const);
     end_of_siblings();
     move_to_parent();
+  }
+
+  // `concat(dst, v_msb, w_msb, …, v_lsb, w_lsb)` — the n-ary spelling of
+  // check_binary. It cannot BE check_binary: the operands are INTERLEAVED
+  // (value, width) pairs, so a 2-lane concat already has five children and the
+  // fixed 3-child shape would reject every real concat. The shape invariant
+  // worth asserting is that the dst is a ref and the operands come in whole
+  // (value, width) PAIRS — a lane without its window is the malformed node
+  // upass.tolg reports as `concat-malformed`.
+  void check_concat() {
+    move_to_child();
+    check_type(Lnast_ntype::Lnast_ntype_ref);  // dst
+    std::size_t operands = 0;
+    while (move_to_sibling()) {
+      // A width is a const; a value may be a ref or (once constprop folds a
+      // comptime lane) a const.
+      check_type(Lnast_ntype::Lnast_ntype_ref, Lnast_ntype::Lnast_ntype_const);
+      ++operands;
+    }
+    move_to_parent();
+    if (operands == 0 || (operands % 2) != 0) {
+      upass::error("concat: operands must be whole (value, width) pairs, got {}\n", operands);
+    }
   }
 
   void end_of_siblings() const {

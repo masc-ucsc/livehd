@@ -19,15 +19,15 @@ test mem_whole_cond_const.sig {
     s = s * 6364136223846793005 + 1442695040888963407
     acc.we = s & 0x1
     s = s * 6364136223846793005 + 1442695040888963407
-    acc.waddr = s & 0x7
+    acc.waddr = s & 0x3
     s = s * 6364136223846793005 + 1442695040888963407
-    acc.wdata = s & 0x3ff
+    acc.wdata = s & 0x3f
     s = s * 6364136223846793005 + 1442695040888963407
-    acc.idx = s & 0x7
+    acc.idx = s & 0x3
     step
     if clock >= 32 {
-      sig = sig * 1099511628211 + (acc.r & 0x3ff)
+      sig = sig * 1099511628211 + (acc.r & 0x3f)
     }
   }
-  assert((sig & 0x3FFFFFFFFFFFFFFF) == 4360102869586704624, "signature mismatch vs iverilog golden mem_whole_cond_const")
+  assert((sig & 0x3FFFFFFFFFFFFFFF) == 4393332539242446064, "signature mismatch vs iverilog golden mem_whole_cond_const")
 }

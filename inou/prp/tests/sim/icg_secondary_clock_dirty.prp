@@ -1,0 +1,69 @@
+/*
+:name: icg_secondary_clock_dirty
+:type: simulation
+:set: sim.tune.dirty=on sim.tune.live_words=1
+*/
+// A gated flop must be re-evaluated when its clock-enable LATCH changes, even
+// when nothing else it reads does.
+//
+// Shape (lhdsuite minion's txfma pipeline, reduced): two `prim_clk_gate`-style
+// ICGs (transparent-low enable latch ANDed with the clock) in the parent, their
+// gated clocks handed to a child as two clock PORTS. `ra` sits on the child's
+// reference clock `ca`; `rb` sits on `cb`, a SECONDARY clock. The secondary
+// flop's commit guard is resolved through the occurrence edge
+// (icg_guards + occurrence_bool_value) and names the parent's enable latch
+// member directly -- no state-current boundary slot carries it, so under
+// dirty gating the latch's commit re-dirtied the slot consumers but never
+// `rb`'s capture color. The data is held constant across the enable edge, so
+// nothing else woke that color: `rb` never loaded under dirty=on (minion's
+// f3..f5 flops kept their power-on draws) while dirty=off loaded it. `:set:`
+// pins a vector that splits the latch and the capture into separate colors.
+//
+// The asserts only pin what every vector must agree on. (`rb` loads one
+// period after `ra` today: a secondary-clock guard samples the latch's
+// current value, not its closing-edge pending value -- see the report; this
+// fixture is about the missing re-evaluation, not that lag.)
+pub mod clk_gate(clk_i:u1, en_i:u1) -> (clk_o:u1@[]) {
+  reg en_latch:u1:[latch=true]
+  if clk_i == 0 {
+    en_latch = en_i
+  }
+  clk_o = clk_i & en_latch & 1
+}
+
+pub mod two_clock_stage(ca:u1, cb:u1, da:u8, db:u8) -> (qa:u8@[], qb:u8@[]) {
+  reg ra:u8:[clock_pin=ref ca] = 0
+  reg rb:u8:[clock_pin=ref cb] = 0
+  ra = da
+  rb = db
+  qa = ra
+  qb = rb
+}
+
+pub mod icg_secondary_clock_dirty(clk:u1, ena:u1, enb:u1, d:u8) -> (qa:u8@[], qb:u8@[]) {
+  mut ga = clk_gate::[name=ga](clk_i = clk, en_i = ena)
+  mut gb = clk_gate::[name=gb](clk_i = clk, en_i = enb)
+  mut s  = two_clock_stage::[name=s](ca = ga, cb = gb, da = d, db = d)
+  qa = s.qa
+  qb = s.qb
+}
+
+test icg_secondary_clock_dirty.gated_flops_load_when_the_gate_opens {
+  mut acc = icg_secondary_clock_dirty
+  tick 8 {
+    acc.ena = clock >= 4
+    acc.enb = clock >= 4
+    acc.d   = if clock < 2 { 7 } else { 9 }  // constant from clock 2 on: only the gates move
+    step
+    if clock < 4 {
+      assert(acc.qa == 0, "gate closed: ra holds its initial value")
+      assert(acc.qb == 0, "gate closed: rb holds its initial value")
+    }
+    if clock >= 4 {
+      assert(acc.qa == 9, "gate open: ra loads the held data")
+    }
+    if clock >= 5 {
+      assert(acc.qb == 9, "gate open: rb loads the held data (its color must wake on the latch change)")
+    }
+  }
+}

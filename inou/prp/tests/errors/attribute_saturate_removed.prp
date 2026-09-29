@@ -1,0 +1,11 @@
+/*
+:name: attribute_saturate_removed
+:type: error
+:error: not a Pyrope attribute name
+:help: use `sat`
+*/
+
+// `sat` is the ONE spelling of the saturating overflow policy (the grammar
+// keyword, prpparse/prp_keywords.def). `saturate` was a call-only alias that
+// the statement form never accepted (`saturate x = …` did not parse).
+mut x:u8:[saturate] = 0  // locate_error_here

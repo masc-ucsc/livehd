@@ -1,0 +1,51 @@
+/*
+:name: generic_value_bind
+:type: compile
+*/
+
+// 3g-generics — a generic is a COMPTIME INPUT, so its call-site bind accepts
+// any comptime VALUE, not just a literal. Three spellings that all used to die
+// before this landed:
+//   * a named comptime constant  (`<N=SIZE>`)      -> `unresolved reference
+//     'inl<n>_N'`: the ref fell through to the named-TYPE path, so nothing
+//     emitted a value binding for the generic.
+//   * a parenthesized expression (`<N=(SIZE >> 1)>`) -> `lnast-malformed: ref
+//     text '(SIZE >> 1)' is not a valid identifier`: prp2lnast passed the
+//     argument's SOURCE TEXT through as a ref instead of lowering it.
+//   * a local constant declared inside the caller.
+// The generic rvalue is parsed with the TYPE grammar (a bare `>` would close
+// the generic list), so a compound expression must be parenthesized.
+comptime const SIZE = 8
+comptime const FLAG = true
+comptime const NAME = 'hi'
+
+comb add_n<N>(x:u8) -> (y:u8) {
+  mut value:u8 = x
+  for i in 0..<N {
+    value = (value + 1)#[0..=7]
+  }
+  y = value
+}
+
+comb scale<K>(x:u8) -> (y:u8) {
+  y = (x + K)#[0..=7]
+}
+
+comb pick<B>(x:u8) -> (y:u8) {
+  y = if B { x } else { 0 }
+}
+
+comb tag<S>(x:u8) -> (y:u8) {
+  y = if S == 'hi' { x } else { 0 }
+}
+
+pub comb generic_value_bind(x:u8) -> (a:u8, b:u8, c:u8, d:u8, e:u8, f:u8) {
+  comptime const LOCAL = 3
+
+  a = add_n<N=SIZE>(x=x)            // named file-scope comptime const
+  b = add_n<N=(SIZE >> 1)>(x=x)     // parenthesized comptime expression
+  c = add_n<N=LOCAL>(x=x)           // caller-local comptime const
+  d = scale<K=(SIZE - LOCAL)>(x=x)  // generic read as a plain value, not a bound
+  e = pick<B=FLAG>(x=x)             // comptime BOOL const (not just `true`)
+  f = tag<S=NAME>(x=x)              // comptime STRING const
+}

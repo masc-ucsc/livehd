@@ -1,0 +1,120 @@
+library(timing_lib) {
+  delay_model : table_lookup;
+  time_unit : "1ps";
+  capacitive_load_unit (1,ff);
+
+  lu_table_template(delay_3x3) {
+    variable_1 : input_net_transition;
+    variable_2 : total_output_net_capacitance;
+    index_1 ("5, 10, 20");
+    index_2 ("1, 2, 4");
+  }
+
+  cell(INVx1) {
+    area : 1;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "A'";
+      timing() { related_pin : "A";
+        cell_rise(delay_3x3) { values("10, 11, 13", "11, 12, 14", "12, 13, 15"); }
+        cell_fall(delay_3x3) { values("10, 11, 13", "11, 12, 14", "12, 13, 15"); }
+        rise_transition(delay_3x3) { values("5, 6, 8", "6, 7, 9", "7, 8, 10"); }
+        fall_transition(delay_3x3) { values("5, 6, 8", "6, 7, 9", "7, 8, 10"); }
+      }
+    }
+  }
+
+  cell(BUFx1) {
+    area : 2;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "A";
+      timing() { related_pin : "A";
+        cell_rise(delay_3x3) { values("11, 12, 14", "12, 13, 15", "13, 14, 16"); }
+        cell_fall(delay_3x3) { values("11, 12, 14", "12, 13, 15", "13, 14, 16"); }
+        rise_transition(delay_3x3) { values("5, 6, 8", "6, 7, 9", "7, 8, 10"); }
+        fall_transition(delay_3x3) { values("5, 6, 8", "6, 7, 9", "7, 8, 10"); }
+      }
+    }
+  }
+
+  cell(NAND2x1) {
+    area : 3;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(B) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "(A B)'";
+      timing() { related_pin : "A";
+        cell_rise(delay_3x3) { values("20, 21, 23", "21, 22, 24", "22, 23, 25"); }
+        cell_fall(delay_3x3) { values("20, 21, 23", "21, 22, 24", "22, 23, 25"); }
+        rise_transition(delay_3x3) { values("7, 8, 10", "8, 9, 11", "9, 10, 12"); }
+        fall_transition(delay_3x3) { values("7, 8, 10", "8, 9, 11", "9, 10, 12"); }
+      }
+      timing() { related_pin : "B";
+        cell_rise(delay_3x3) { values("21, 22, 24", "22, 23, 25", "23, 24, 26"); }
+        cell_fall(delay_3x3) { values("21, 22, 24", "22, 23, 25", "23, 24, 26"); }
+        rise_transition(delay_3x3) { values("7, 8, 10", "8, 9, 11", "9, 10, 12"); }
+        fall_transition(delay_3x3) { values("7, 8, 10", "8, 9, 11", "9, 10, 12"); }
+      }
+    }
+  }
+
+  // A second drive strength guards the all-cells GENLIB needed by ABC's
+  // upsize/dnsize tail. Representative-only mapping omits this cell.
+  cell(NAND2x2) {
+    area : 5;
+    pin(A) { direction : input; capacitance : 2; }
+    pin(B) { direction : input; capacitance : 2; }
+    pin(Y) { direction : output; function : "(A B)'";
+      timing() { related_pin : "A";
+        cell_rise(delay_3x3) { values("10, 11, 13", "11, 12, 14", "12, 13, 15"); }
+        cell_fall(delay_3x3) { values("10, 11, 13", "11, 12, 14", "12, 13, 15"); }
+        rise_transition(delay_3x3) { values("5, 6, 8", "6, 7, 9", "7, 8, 10"); }
+        fall_transition(delay_3x3) { values("5, 6, 8", "6, 7, 9", "7, 8, 10"); }
+      }
+      timing() { related_pin : "B";
+        cell_rise(delay_3x3) { values("11, 12, 14", "12, 13, 15", "13, 14, 16"); }
+        cell_fall(delay_3x3) { values("11, 12, 14", "12, 13, 15", "13, 14, 16"); }
+        rise_transition(delay_3x3) { values("5, 6, 8", "6, 7, 9", "7, 8, 10"); }
+        fall_transition(delay_3x3) { values("5, 6, 8", "6, 7, 9", "7, 8, 10"); }
+      }
+    }
+  }
+
+  cell(NOR2x1) {
+    area : 3;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(B) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "(A+B)'";
+      timing() { related_pin : "A";
+        cell_rise(delay_3x3) { values("22, 23, 25", "23, 24, 26", "24, 25, 27"); }
+        cell_fall(delay_3x3) { values("22, 23, 25", "23, 24, 26", "24, 25, 27"); }
+        rise_transition(delay_3x3) { values("8, 9, 11", "9, 10, 12", "10, 11, 13"); }
+        fall_transition(delay_3x3) { values("8, 9, 11", "9, 10, 12", "10, 11, 13"); }
+      }
+      timing() { related_pin : "B";
+        cell_rise(delay_3x3) { values("23, 24, 26", "24, 25, 27", "25, 26, 28"); }
+        cell_fall(delay_3x3) { values("23, 24, 26", "24, 25, 27", "25, 26, 28"); }
+        rise_transition(delay_3x3) { values("8, 9, 11", "9, 10, 12", "10, 11, 13"); }
+        fall_transition(delay_3x3) { values("8, 9, 11", "9, 10, 12", "10, 11, 13"); }
+      }
+    }
+  }
+
+  cell(XOR2x1) {
+    area : 5;
+    pin(A) { direction : input; capacitance : 1; }
+    pin(B) { direction : input; capacitance : 1; }
+    pin(Y) { direction : output; function : "(A^B)";
+      timing() { related_pin : "A";
+        cell_rise(delay_3x3) { values("30, 31, 33", "31, 32, 34", "32, 33, 35"); }
+        cell_fall(delay_3x3) { values("30, 31, 33", "31, 32, 34", "32, 33, 35"); }
+        rise_transition(delay_3x3) { values("10, 11, 13", "11, 12, 14", "12, 13, 15"); }
+        fall_transition(delay_3x3) { values("10, 11, 13", "11, 12, 14", "12, 13, 15"); }
+      }
+      timing() { related_pin : "B";
+        cell_rise(delay_3x3) { values("31, 32, 34", "32, 33, 35", "33, 34, 36"); }
+        cell_fall(delay_3x3) { values("31, 32, 34", "32, 33, 35", "33, 34, 36"); }
+        rise_transition(delay_3x3) { values("10, 11, 13", "11, 12, 14", "12, 13, 15"); }
+        fall_transition(delay_3x3) { values("10, 11, 13", "11, 12, 14", "12, 13, 15"); }
+      }
+    }
+  }
+}

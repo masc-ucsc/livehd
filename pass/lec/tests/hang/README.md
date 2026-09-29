@@ -53,10 +53,10 @@ if (opts.timeout > 0)
 
 A timed-out `checkSat` returns `unknown`, which both `checkSat()` sites already
 map to `Verdict::Unknown` — a SOUND degrade (never a false Proven/Refuted). The
-**CLI default is now `lec.timeout=120` seconds** (`pass_lec.cpp`,
+**CLI default is now `formal.timeout=120` seconds** (`pass_lec.cpp`,
 `lhd_kernel.cpp`), so `lhd lec` degrades to `UNKNOWN` instead of freezing; the
 library `prove_equal()` default stays `0` (unbounded) for programmatic callers.
-Adjust per run with `--set lec.timeout=<seconds>` (`0` = unbounded). Regression:
+Adjust per run with `--set formal.timeout=<seconds>` (`0` = unbounded). Regression:
 `//pass/lec:lec_timeout_test`. (`tlimit-per` bounds *each* `checkSat`; `tlimit`
 bounds the whole run.)
 ```

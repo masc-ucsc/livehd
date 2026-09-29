@@ -26,6 +26,16 @@
 // comb nodes and its comb-only subgraph is a single connected component -- there
 // is nothing there to cut. The regions live in the module hierarchy; this is a
 // per-def coloring.
+//
+// The DEFAULT mode, `cones`, lives behind the same class and the same --set
+// (todo/livehd/2c-color-synthcones.html). It inverts the walk: instead of
+// propagating an id forward from every comb node, it seeds one BACKWARD cone per
+// register data input (and one per enable), lets cones record how much logic
+// they share, and merges the most-sharing pairs while the union stays under a
+// predicted-AIG threshold (`max_gate`). Its body is color_synth_cones.cpp; it
+// shares this class's cut/seed/driver helpers and nothing else. All three
+// algorithms are kept and a --set selects one; `cones` is what pass.color and
+// `lhd synth` run when nothing asks otherwise.
 
 #include <string_view>
 
@@ -38,29 +48,58 @@ namespace livehd::color {
 
 class Color_synth {
 public:
+  // `alg` is one of pipe|synth|cones; the driver (Pass_color::color) validates
+  // the spelling, so anything reaching here is one of the three.
   Color_synth(Color_opts opts, std::string_view alg);
   void label(hhds::Graph* g);
 
 private:
+  // Which boundary rule this instance runs. Spelled out rather than kept as a
+  // boolean: with three modes a `bool synth` reads as "not pipe" at every use
+  // and silently sends `cones` down the forward-propagation path.
+  enum class Mode : uint8_t { pipe, synth, cones };
+
   Color_opts opts;
-  bool       synth = true;
+  Mode       mode   = Mode::synth;
   // Does this graph carry source-seeded (block-attribute) regions? Re-read per
-  // def in label(), since the driver reuses one Color_synth across defs.
-  bool seeded = false;
+  // def in label(): Pass_color::run_one constructs a fresh Color_synth per def,
+  // but label() may also be called repeatedly by a direct caller.
+  bool       seeded = false;
 
   int last_free_id = 1;
 
   absl::flat_hash_map<hhds::Node_class, int> flat_node2id;
   Int_union_find                             uf;
 
-  int  get_free_id() { return last_free_id++; }
-  void set_id(const hhds::Node_class& node, int id);
-  void force_id(const hhds::Node_class& node, int id);
-  [[nodiscard]] bool is_cut(const hhds::Node_class& node) const;
-  [[nodiscard]] bool is_seeded(const hhds::Node_class& node) const;
-  [[nodiscard]] int  data_cone_id(const hhds::Node_class& node);
-  void mark_ids(hhds::Graph* g);
-  void merge_ids();
+  int                       get_free_id() { return last_free_id++; }
+  void                      set_id(const hhds::Node_class& node, int id);
+  void                      force_id(const hhds::Node_class& node, int id);
+  [[nodiscard]] bool        is_cut(const hhds::Node_class& node) const;
+  // The ARITHMETIC half of is_cut (Mult/Div, Sum wider than 8), without the
+  // loop-break arm. cones needs the two apart: a loop break stops a cone walk
+  // dead, while an arithmetic cut is a root of its own color that still records
+  // contact overlap with the cones that reach it.
+  [[nodiscard]] static bool is_arith_cut(const hhds::Node_class& node);
+  [[nodiscard]] bool        is_arith_boundary(const hhds::Node_class& node) const;
+  [[nodiscard]] bool        is_seeded(const hhds::Node_class& node) const;
+  [[nodiscard]] int         data_cone_id(const hhds::Node_class& node);
+  void                      mark_ids(hhds::Graph* g);
+  void                      merge_ids();
+  void                      preserve_arith_cuts();
+
+  // Driver-pin bits for a node, read off its out-edges. 0 means "width unknown
+  // here". Private static so color_synth_cones.cpp can share it without
+  // widening any public API.
+  [[nodiscard]] static int driver_bits(const hhds::Node_class& node);
+
+  // The cones algorithm (color_synth_cones.cpp). A method, not a free function,
+  // so it reuses is_arith_cut / is_seeded / driver_bits and writes the same
+  // flat_node2id the shared tail consumes.
+  void label_cones(hhds::Graph* g);
+
+  // Recolor each latch-based clock gate's latch into its AND's color (see
+  // color_synth.cpp), right before apply_coloring in every mode.
+  void keep_clock_gates_whole(hhds::Graph* g);
 };
 
 }  // namespace livehd::color

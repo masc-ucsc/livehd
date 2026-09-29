@@ -14,6 +14,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        "//core",
         "//graph",
         "//pass/bitwidth:pass_bitwidth",
         "//pass/common:pass",
@@ -27,6 +28,7 @@ cc_test(
     copts = COPTS,
     deps = [
         ":pass_bitfuzz",
+        "//pass/cprop:pass_cprop",
         "//core",
         "//graph",
         "@googletest//:gtest_main",

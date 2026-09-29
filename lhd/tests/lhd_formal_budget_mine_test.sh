@@ -12,9 +12,8 @@
 #     the explicitly selected `formal.min_timeout` floor.
 #   * spec_mining_timeout timeout-core diagnosis: under an INDEPENDENT spec_mining_timeout budget a
 #     timed-out run NAMES the toxic obligation subset ("spec_mining_timeout core (k/n ...)").
-#   * INCONCLUSIVE is a FAILURE by default (`formal.strict`, default true since
-#     2026-07-29): an UNKNOWN proves nothing, so the run EXITS 7 and says why.
-#     (`formal.strict=false` opt-out coverage lives in lhd_formal_verify_test.)
+#   * INCONCLUSIVE always fails.
+
 #   * induction + reset soundness: a true twin-register invariant proves UNBOUNDED
 #     (the induction step pins the PRIMARY reset input deasserted), while an
 #     unequal-reset twin is still REFUTED — induction never manufactures a proof.
@@ -22,7 +21,7 @@ set -u
 
 LHD="$(pwd)/lhd/lhd"
 [ -x "$LHD" ] || LHD="$(pwd)/bazel-bin/lhd/lhd"
-[ -x "$LHD" ] || { echo "SKIP: lhd binary not found"; exit 0; }
+[ -x "$LHD" ] || { echo "FAIL: required lhd binary not found" >&2; exit 1; }
 
 W="${TEST_TMPDIR:-/tmp/lhd_formal_budget_mine_$$}"
 mkdir -p "$W"
@@ -57,14 +56,14 @@ rc=$?
 end=$(date +%s); elapsed=$((end-start))
 
 # A budget-limited UNKNOWN is still an UNKNOWN: it proves nothing and disproves
-# nothing, so the DEFAULT (`formal.strict`, flipped true 2026-07-29) is to FAIL
+# nothing, so the result is a failure
 # with the `unsupported` class (rc 7) rather than exit 0 on a warning. The
 # hardness here is real and not a tool bug: the same three obligations are
 # PROVEN inductively in ~1.5s at 4-bit operands, and only the 32-bit
 # bit-blasted nonlinear products outrun the solver (120s/obligation still
 # UNKNOWN) — exactly the budget-limited case this file exists to account for.
 # The failure must NAME that cause, not just die.
-[ "$rc" -eq 7 ] || fail "an inconclusive UNKNOWN must fail with the unsupported class rc=7 under the default formal.strict (rc=$rc): $(cat "$W/budget.out")"
+[ "$rc" -eq 7 ] || fail "an inconclusive UNKNOWN must fail with the unsupported class rc=7 (rc=$rc): $(cat "$W/budget.out")"
 grep -q "could not decide" "$W/budget.out" \
   || fail "the strict failure must explain WHY it failed (could not decide): $(cat "$W/budget.out")"
 grep -q "budget-limited depth" "$W/budget.out" \
@@ -90,10 +89,25 @@ grep -qE "spec_mining_timeout core \([1-9][0-9]*/[0-9]+ obligation" "$W/budget.o
   || fail "the timeout-core must report a non-empty toxic subset: $(cat "$W/budget.out")"
 grep -q "distrib" "$W/budget.out" \
   || fail "the toxic core must name a hard (distrib) obligation: $(cat "$W/budget.out")"
-if [ "$elapsed" -ge 10 ]; then
-  fail "total solver budget not honored: ${elapsed}s (want < 10s)"
+budget_actual=$(sed -nE 's/.*budget 1s target \/ ([0-9]+\.[0-9]+)s actual.*/\1/p' "$W/budget.out" | head -1)
+[ -n "$budget_actual" ] || fail "could not read actual solver spend: $(cat "$W/budget.out")"
+# This is a BLOWUP guard, not a precision bound. What it discriminates is
+# "the total was honored at all": an obligation that never got a grant does not
+# overshoot by a few seconds, it FREEZES on these 32-bit multiply identities, so
+# any finite bound catches it. The number therefore only has to sit clear of the
+# noise. The reported spend is cvc5's own WALL clock, so it stretches with host
+# load exactly like the `elapsed` cap below does -- measured 11.2s on a machine
+# running the rest of the suite against 5.2s idle, which is what made a 10s
+# bound fail roughly one run in three under `bazel test //lhd/tests:all`.
+awk -v actual="$budget_actual" 'BEGIN { exit !(actual < 20.0) }' \
+  || fail "total solver budget not honored: ${budget_actual}s solver time (want < 20s)"
+# Parsing/lowering and host contention are outside the solver budget. Retain a
+# broad wall cap to catch hangs without making a loaded CI worker fail a solver
+# accounting test whose own report is within bounds.
+if [ "$elapsed" -ge 30 ]; then
+  fail "formal verify wall time is excessive: ${elapsed}s (want < 30s)"
 fi
-echo "ok: strict inconclusive policy, shared budget, floor disclosure, and timeout core checked in ${elapsed}s"
+echo "ok: strict inconclusive policy, shared budget, floor disclosure, and timeout core checked in ${budget_actual}s solver / ${elapsed}s wall"
 echo "ok: spec_mining_timeout named the toxic obligation core"
 
 # ---------------------------------------------------------------------------

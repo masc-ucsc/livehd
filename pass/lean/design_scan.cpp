@@ -57,7 +57,6 @@ PinRef capture_pin(const LeanCtx& ctx, const Node_pin& pin) {
 
 ScanOp scan_op(const LeanCtx& ctx, const Node& node) {
   switch (node_op(node)) {
-    case Ntype_op::Nconst  : return ScanOp::Constant;
     case Ntype_op::Sum     : return ScanOp::Sum;
     case Ntype_op::Mult    : return ScanOp::Mult;
     case Ntype_op::Div     : return ScanOp::Div;
@@ -113,7 +112,7 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
     design.outputs.push_back({std::string(decl.name), static_cast<uint32_t>(design.outputs.size()), width, std::nullopt});
   }
   std::vector<Node> flop_nodes, memory_nodes;
-  for (const auto node : graph.fast_class()) {
+  for (const auto node : graph.body().nodes()) {
     if (node_is_flop(node)) {
       const auto width = raw_node_width(node);
       check_width(ctx, node, width, "flop");
@@ -162,10 +161,10 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
     ctx.memory_info.emplace(info.nid, info);
   }
   for (auto& output : design.outputs) {
-    const auto edges = graph.get_output_pin(output.name).inp_edges();
-    if (!edges.empty()) {
-      output.driver = capture_pin(ctx, edges.front().driver);
-      roots.push_back(edges.front().driver);
+    const auto drivers = graph.get_output_pin(output.name).get_driver_pins();
+    if (!drivers.empty()) {
+      output.driver = capture_pin(ctx, drivers.front());
+      roots.push_back(drivers.front());
     }
   }
   std::sort(design.outputs.begin(), design.outputs.end(), [](const Port& a, const Port& b) { return a.name < b.name; });
@@ -260,7 +259,7 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
             n.width     = node_width(ctx, node);
             n.is_signed = node_output_is_signed(node);
             for (const auto& e : inp_edges_ordered(node)) {
-              n.operands.push_back({e.sink.get_port_id(), capture_pin(ctx, e.driver)});
+              n.operands.push_back({Ntype::sink_bank(node_op(node), e.sink.get_port_id()), capture_pin(ctx, e.driver)});
             }
           }
           design.nodes.push_back(std::move(n));

@@ -1,0 +1,19 @@
+/*
+:name: mem_enable_attr
+:type: error
+:tolg: 1
+:error: SILENTLY DROPPED
+*/
+// The fail-closed rule of latch_attr_drop, for an ARRAY/memory reg.
+//
+// finalize_regs lowers `:[enable=<cond>]` on a plain flop, but the Memory cell
+// path takes its per-port write enable from the CONDITION OF THE STORE — there
+// is no whole-cell enable to bind the attribute to. Before this refusal the
+// attr_set landed in pending_attrs_, nothing ever read it, and the array was
+// written on every cycle with zero diagnostics (`wr_enable_0` was just
+// "not in reset"). Authoring an attr that vanishes is worse than not having it.
+pub mod menable(clk:u1, rst:u1, wen:u1, a:u3, d:u8) -> (q:u8@[0]) {
+  reg m:[8]u8:[clock_pin=ref clk, reset_pin=ref rst, enable=(wen!=0)] = 0
+  m[a] = d
+  q = m[a]
+}

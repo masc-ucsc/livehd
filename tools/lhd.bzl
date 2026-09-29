@@ -1,6 +1,6 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-"""Thin Starlark ruleset over the `lhd` stateless kernel (task 1y-bazel).
+"""Thin Starlark ruleset over the `lhd` stateless kernel.
 
 The kernel is a pure function (declared inputs, config) -> (declared outputs,
 exit code), so wiring it as a build action is a genrule: every input is
@@ -21,7 +21,6 @@ Example:
         name   = "foo_net",
         top    = "foo",
         srcs   = ["foo.v", "bar.v"],
-        recipe = "O2",
         out    = "foo.gen.v",   # also writes foo.gen.v.result.json
     )
 """
@@ -31,7 +30,7 @@ _LHD = "//lhd"
 def _src_locations(srcs):
     return " ".join(["$(locations %s)" % s for s in srcs])
 
-def lhd_verilog(name, top, srcs, out, recipe = "O1", reader = "yosys-verilog", visibility = None):
+def lhd_verilog(name, top, srcs, out, reader = "yosys-verilog", visibility = None):
     """Compile Verilog sources to optimized Verilog through the lhd kernel."""
     result = out + ".result.json"
     native.genrule(
@@ -41,30 +40,13 @@ def lhd_verilog(name, top, srcs, out, recipe = "O1", reader = "yosys-verilog", v
         cmd = (
             "$(location {lhd}) compile verilog ".format(lhd = _LHD) +
             _src_locations(srcs) +
-            " --top {top} --reader {reader} --recipe {recipe}".format(
+            " --top {top} --reader {reader}".format(
                 top = top,
                 reader = reader,
-                recipe = recipe,
             ) +
             " --workdir $(RULEDIR)/{name}.lhd_work".format(name = name) +
             " --emit verilog:$(location {out})".format(out = out) +
             " --result-json $(location {result})".format(result = result) +
-            " --quiet"
-        ),
-        visibility = visibility,
-    )
-
-def lhd_pyrope_lnast(name, srcs, outdir, visibility = None):
-    """Elaborate Pyrope sources into an `ln:` TreeArtifact (hhds Forest dir)."""
-    native.genrule(
-        name = name,
-        srcs = srcs + [_LHD],
-        outs = [outdir],
-        cmd = (
-            "$(location {lhd}) elaborate ".format(lhd = _LHD) +
-            _src_locations(srcs) +
-            " --workdir $(RULEDIR)/{name}.lhd_work".format(name = name) +
-            " --emit-dir ln:$(location {outdir})".format(outdir = outdir) +
             " --quiet"
         ),
         visibility = visibility,

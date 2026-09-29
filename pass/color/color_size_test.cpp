@@ -21,6 +21,7 @@
 using livehd::color::apply_size_window;
 using livehd::color::Node2Id;
 using livehd::color::Size_window_stats;
+using livehd::color::synthesis_ge_weight;
 using livehd::graph_util::create_typed_node;
 using livehd::graph_util::ge_weight;
 using livehd::graph_util::set_bits;
@@ -45,8 +46,8 @@ Chain make_chain(const char* dir, const char* name, int n, int bits) {
   set_bits(in, bits);
 
   Chain c;
-  c.g          = g;
-  auto     prev = in;
+  c.g       = g;
+  auto prev = in;
   for (int i = 0; i < n; ++i) {
     auto node = create_typed_node(*g, Ntype_op::And);
     prev.connect_sink(node.create_sink_pin(0));
@@ -191,7 +192,7 @@ TEST(ColorSize, EveryNodeKeepsExactlyOneRegion) {
   }
 }
 
-// Ids are minted in forward_class() first-encounter order, so they are a function
+// Ids are minted in body().nodes(hhds::Node_order::forward) first-encounter order, so they are a function
 // of the graph rather than of hash iteration. This is what lets a caller (and
 // pass.partition's `<def>__c<id>` module names) be reproducible run to run.
 TEST(ColorSize, IdsAreDeterministicAndDense) {
@@ -213,7 +214,7 @@ TEST(ColorSize, IdsAreDeterministicAndDense) {
     EXPECT_GE(id, 1);
     EXPECT_LE(id, static_cast<int>(ge.size()));
   }
-  for (auto n : c.g->forward_class()) {
+  for (auto n : c.g->body().nodes(hhds::Node_order::forward)) {
     if (a.contains(n)) {
       EXPECT_EQ(a.at(n), 1) << "ids are minted in forward_class order";
       break;
@@ -262,6 +263,113 @@ TEST(ColorSize, IndivisibleOversizeNodeIsCountedNotDropped) {
 
   EXPECT_EQ(out.size(), 1u) << "the node survives";
   EXPECT_EQ(st.left_over, 1u) << "an unsplittable region must be reported";
+}
+
+// A wide runtime SRA followed only by a narrow constant slice is not a full
+// width synthesis cone: pass.abc demand-builds just the selected prefix, but
+// only while the shift and Get_mask remain in the same region. The window must
+// budget that actual demand or it isolates the SRA and creates the full barrel
+// shifter it was trying to bound (ROB c819 took over ten minutes that way).
+TEST(ColorSize, WideSraUsesNarrowSliceDemand) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_cs_sra_demand");
+  auto  gio = lib.create_io("sra_demand");
+  gio->add_input("a", 0);
+  gio->add_input("amount", 1);
+  gio->add_output("y", 2);
+  gio->add_output("full", 3);
+  auto g = gio->create_graph();
+
+  auto a      = g->get_input_pin("a");
+  auto amount = g->get_input_pin("amount");
+  set_bits(a, 1024);
+  set_bits(amount, 10);
+  auto sra = create_typed_node(*g, Ntype_op::SRA);
+  a.connect_sink(livehd::graph_util::setup_sink_by_name(sra, "a"));
+  amount.connect_sink(livehd::graph_util::setup_sink_by_name(sra, "b"));
+  auto shifted = sra.create_driver_pin(0);
+  set_bits(shifted, 1024);
+
+  auto slice = create_typed_node(*g, Ntype_op::Get_mask);
+  shifted.connect_sink(livehd::graph_util::setup_sink_by_name(slice, "a"));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer((int64_t{1} << 20) - 1))
+      .connect_sink(livehd::graph_util::setup_sink_by_name(slice, "mask"));
+  auto word = slice.create_driver_pin(0);
+  set_bits(word, 20);
+  word.connect_sink(g->get_output_pin("y"));
+
+  // 8344 muxes * 3 gates/mux * 2x shift safety. build_shr_prefix trims
+  // BACKWARDS from the demanded 20 bits -- need[] = {1024,1024,1024,1024,1024,
+  // 1012,980,916,788,532,20} -- so only the last five of the ten stages narrow
+  // at all. The slice is worth ~19%, not the ~98% a flat `demand * stages`
+  // would claim; asserting the flat product here is what let the window certify
+  // a color at its ceiling and hand ABC an order of magnitude more gates.
+  EXPECT_EQ(synthesis_ge_weight(sra), 50064u);
+  Node2Id m;
+  m[sra]   = 1;
+  m[slice] = 1;
+  Size_window_stats st;
+  (void)apply_size_window(g.get(), m, 0, 55000, &st);
+  EXPECT_EQ(st.splits, 0u) << "the narrow slice must stay with its shift";
+  EXPECT_EQ(st.left_over, 0u);
+
+  // The SHIPPED default window (pass_color.cpp max_ge=5000) is the case that
+  // actually matters: the SRA alone is over it, so a split cannot bring the
+  // region under the cap -- and if the weightless Get_mask were chopped off,
+  // pass.abc would lose the in-region precondition for the demand slice and
+  // build the FULL 10240-mux barrel instead of 8344.
+  Size_window_stats sd;
+  const auto        dflt = apply_size_window(g.get(), m, 500, 5000, &sd);
+  EXPECT_EQ(dflt.at(sra), dflt.at(slice)) << "the shift and its constant slice must stay in one region under the default window";
+  EXPECT_EQ(sd.left_over, 1u) << "one node heavier than max is honestly reported, not chopped around";
+
+  // Any unsliced observer needs the full result, so the discount disappears.
+  shifted.connect_sink(g->get_output_pin("full"));
+  EXPECT_EQ(synthesis_ge_weight(sra), 61440u);
+}
+
+// A complemented shift mask must stay together until its finite slice.
+TEST(ColorSize, WideShlAndNotKeepTheirNarrowMask) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_cs_shl_mask");
+  auto  io  = lib.create_io("shl_mask");
+  io->add_input("amount", 0);
+  io->add_output("y", 1);
+  io->add_output("full", 2);
+  auto g      = io->create_graph();
+  auto amount = g->get_input_pin("amount");
+  livehd::graph_util::set_ubits(amount, 16);
+  auto shift = create_typed_node(*g, Ntype_op::SHL);
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(255)).connect_sink(shift.create_sink_pin(0));
+  amount.connect_sink(shift.create_sink_pin(1));
+  auto shifted = shift.create_driver_pin(0);
+  livehd::graph_util::set_ubits(shifted, 65543);
+  auto invert = create_typed_node(*g, Ntype_op::Not);
+  shifted.connect_sink(invert.create_sink_pin(0));
+  auto inverted = invert.create_driver_pin(0);
+  livehd::graph_util::set_sbits(inverted, 65544);
+  auto slice = create_typed_node(*g, Ntype_op::Get_mask);
+  inverted.connect_sink(slice.create_sink_pin(0));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(255)).connect_sink(slice.create_sink_pin(2));
+  auto y = slice.create_driver_pin(0);
+  livehd::graph_util::set_ubits(y, 8);
+  y.connect_sink(g->get_output_pin("y"));
+
+  EXPECT_EQ(synthesis_ge_weight(shift), 8u * 16 * 6);
+  EXPECT_EQ(synthesis_ge_weight(invert), 8u);
+  Node2Id m{
+      { shift, 1},
+      {invert, 1},
+      { slice, 1}
+  };
+  Size_window_stats stats;
+  const auto        grouped = apply_size_window(g.get(), m, 1000, 25000, &stats);
+  EXPECT_EQ(grouped.at(shift), grouped.at(slice));
+  EXPECT_EQ(grouped.at(invert), grouped.at(slice));
+  EXPECT_EQ(stats.splits, 0u);
+
+  // Crossing a region boundary invalidates the narrow-demand assumption.
+  EXPECT_EQ(livehd::graph_util::masked_output_width(shift, [&](const auto& n) { return n != invert; }), 65543u);
+  shifted.connect_sink(g->get_output_pin("full"));
+  EXPECT_EQ(synthesis_ge_weight(shift), 65543u * 16 * 6);
 }
 
 // Isolated leftovers are BIN-PACKED. Two clouds that share no node-node edge
@@ -333,8 +441,8 @@ TEST(ColorSize, SubWeighsMappableNotPortBits) {
   auto pio = lib.create_io("subw_parent");
   pio->add_input("a", 0);
   pio->add_output("z", 1);
-  auto pg  = pio->create_graph();
-  auto in  = pg->get_input_pin("a");
+  auto pg = pio->create_graph();
+  auto in = pg->get_input_pin("a");
   set_bits(in, 100);
   auto sub = create_typed_node(*pg, Ntype_op::Sub);
   sub.set_subnode(cio);

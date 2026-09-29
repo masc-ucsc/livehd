@@ -1,0 +1,31 @@
+/*
+:name: loop_carry_kinds_1
+:lec_expect: proven
+*/
+// The IDEMPOTENT reduction saturates, so extra iterations over bits that are
+// already accounted for change nothing. `x` is u4, so `x#[i]` for i in 4..<8 is
+// zero-extension: `a or false` is `a`. `or` being idempotent is what makes this
+// PROVEN rather than merely "probably fine" -- with `+` in that loop (see _2)
+// the same edit is a refutation.
+//
+// The other two carries are unchanged, which is the point: this isolates the
+// count change to the one carry kind that tolerates it.
+pub mod top(x:u4) -> (any:bool@[0], sum:u16@[0], lane:u4@[0]) {
+  mut a:bool = false
+  for i in 0..<8 {
+    a = a or boolean(x#[i])
+  }
+  any = a
+
+  mut s:u16 = 0
+  for i in 0..<4 {
+    s = s + x
+  }
+  sum = s
+
+  mut l:u4 = 0
+  for i in 0..<4 {
+    l#[i] = x#[i]
+  }
+  lane = l
+}

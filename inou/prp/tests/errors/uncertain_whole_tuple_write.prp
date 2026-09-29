@@ -1,0 +1,22 @@
+/*
+:name: uncertain_whole_tuple_write
+:type: error
+:tolg: 1
+:error: (no driver|no hardware lowering)
+*/
+
+// A WHOLE-tuple write inside a runtime `if` arm leaves every field
+// runtime-divergent, so the tuple has no single comptime value to read out of
+// the arm.  The refusal has to be shape-independent: `Symbol_table::leave_scope`
+// used to take its scalar fast path on `is_scalar()`, which is
+// `has_scalar_ || fields_.size() <= 1` — a ONE-FIELD tuple answered true, the
+// invalidation landed on the absent unnamed slot "0", and leaf `a` kept the
+// arm's constant.  `p.a` then folded to 5 and the `if` vanished from the
+// emitted hardware, silently, while the two-field spelling was refused.
+pub comb uncertain_whole_tuple_write(c:bool) -> (o:u8) {
+  mut p = (mut a=1)
+  if c {
+    p = (mut a=5)
+  }
+  o = p.a
+}

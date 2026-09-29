@@ -6,9 +6,9 @@
 */
 // Comparing a boolean to an integer is a compile error — Pyrope never implicitly
 // converts across a `==`. A bit-select `#[N]` yields `int(min=0,max=1)`, while a
-// reduction `#^`/`#|` yields a bool, so `flag == bit` mixes the two. The diagnostic
+// comparison yields a bool, so `flag == bit` mixes the two. The diagnostic
 // must suggest turning the integer side into a bool with `!= 0` (for `==`).
 const x    = 0xA
-const flag = x#^[0..=3]   // xor-reduction → bool
+const flag = x != 0   // comparison → bool
 const bit  = x#[1]        // bit-select   → int(min=0, max=1)
 const r = flag == bit     // bool == int  → error, hint: `bit != 0`

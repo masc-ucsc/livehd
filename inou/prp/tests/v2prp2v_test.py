@@ -1,48 +1,9 @@
 #!/usr/bin/env python3
-"""Verilog -> Pyrope -> Verilog gated test with two equivalence checks.
+"""Verilog -> Pyrope -> Verilog regression using the default LEC solver.
 
-A golden `.v` goes all the way THROUGH Pyrope and back. The emitted Pyrope is
-first checked against the hand-written Pyrope twin, then inou/yosys/lgcheck
-checks the generated Verilog against the ORIGINAL Verilog:
-
-    lhd compile foo.v      --emit-dir pyrope:P/   --workdir W1   # slang -> lg -> prp_writer
-    lhd compile P/*.prp    --emit-dir verilog:V/  --workdir W2   # inou.prp -> tolg -> cgen
-    lhd lec --impl P/<top>.prp --ref equiv/foo.prp ...
-    lgcheck --reference foo.v --implementation V/all.v \
-            --reference_top <vtop> --implementation_top <flat vtop>
-
-The Pyrope leg is deliberate. The old harness went slang -> lg -> cgen DIRECTLY,
-which skipped upass/prp_writer and the Pyrope re-read entirely, so a writer that
-emitted un-re-parseable or lossy Pyrope was invisible here (three such bugs --
-a dropped array type, an undeclared `_mux_N`, an unescaped module name -- passed
-this test while failing everywhere else). Routing through the writer makes ONE
-run cover the whole `v -> prp -> v` path, which is the path the corpus fuzzing
-actually exercises.
-
-The native LEC check used to be a separate `prp-v2prp-*` target which repeated
-the Verilog -> Pyrope conversion. Keeping it here preserves that check without
-running the conversion twice. The original-Verilog check remains independent:
-yosys read_verilog (or yosys-slang via the sibling .prp's `:gold_reader: slang`
-header) reads the reference, so a slang misread or a lowering miscompile that
-reaches the emitted netlist refutes the miter.
-
-Per-side tops: the reference top is the sibling .prp's `:verilog_top:` header
-(the golden module name) or the first module declared in the .v. The
-implementation top is the same name FLATTENED to its entity (cgen emits flat
-module names: `file.entity` -> `entity`).
-
-Gate semantics:
-  native LEC equivalent -> pass
-  native LEC not-equivalent -> FAIL
-  native LEC refusal/unknown/timeout -> INCONCLUSIVE
-  lgcheck exit 0 -> pass
-  lgcheck exit 1 -> FAIL (bounded counterexample or a hard yosys error: the
-                    designs are not equivalent, or cannot even be compared)
-  lgcheck exit 2 -> INCONCLUSIVE: pass with an honest note (no proof, but no
-                    counterexample either)
-  wall-clock timeout -> inconclusive, NOT a fail
-
-  python3 inou/prp/tests/v2prp2v_test.py -i inou/prp/tests/equiv/trivial_if.v
+Both emitted Pyrope versus its handwritten twin and emitted Verilog versus
+its original source must pass. Source Verilog is always read by native Slang;
+unknown results, refusals, and timeouts fail the regression.
 """
 
 import argparse
@@ -53,8 +14,12 @@ import shutil
 import subprocess
 import sys
 
-NATIVE_CHECK_TIMEOUT = 60
-VERILOG_CHECK_TIMEOUT = 240
+from lec import run_lec, verdict
+
+NATIVE_CHECK_TIMEOUT = 20
+# Budget for comparing emitted Verilog with its source using default LEC.
+# A fixture can override it with :verilog_check_timeout:; timeouts fail.
+VERILOG_CHECK_TIMEOUT = 20
 
 
 def _header(prp_path, key):
@@ -70,28 +35,17 @@ def _header(prp_path, key):
 def _modules(vpath):
     try:
         with open(vpath) as f:
-            return re.findall(r"\bmodule\s+\\?([^\s(]+)", f.read())
+            # Anchored at the START OF A LINE: an unanchored `\bmodule\s+` also matches the
+            # word inside a golden's own prose comment. See prplib.PrpRunner._verilog_modules.
+            return re.findall(r"^\s*module\s+\\?([^\s(]+)", f.read(), re.M)
     except OSError:
         return []
-
-
-def _slang_plugin():
-    # yosys-slang plugin for `:gold_reader: slang` goldens (same probes as
-    # prplib._yosys_slang_plugin; cwd is the runfiles _main dir under bazel,
-    # the repo root on manual runs).
-    for cand in ("../+http_archive+yosys_slang/slang.so",
-                 "../+_repo_rules+yosys_slang/slang.so",
-                 "bazel-bin/external/+http_archive+yosys_slang/slang.so",
-                 "bazel-bin/external/+_repo_rules+yosys_slang/slang.so"):
-        path = os.path.normpath(cand)
-        if os.path.exists(path):
-            return path
-    return None
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-i", "--input", required=True, help="golden .v file")
+    ap.add_argument("--native-only", action="store_true", help="check the emitted Pyrope against its handwritten twin")
     args = ap.parse_args()
 
     lhd = "./bazel-bin/lhd/lhd" if os.path.exists("./bazel-bin/lhd/lhd") else "./lhd/lhd"
@@ -160,50 +114,18 @@ def main():
     # 1b. Check the emitted Pyrope against the hand-written Pyrope twin. This
     # is the unique assertion formerly made by every prp-v2prp-* target.
     impl_arg = "pyrope:" + prpdir + "/" if len(prps) > 1 else "pyrope:" + emitted
-    native_failed = False
-    try:
-        native = subprocess.run(
-            [lhd, "lec", "--impl", impl_arg, "--ref", "pyrope:" + ref_prp,
-             "--impl-top", vtop, "--ref-top", ptop,
-             "--workdir", os.path.join(work, "w_native_check")],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            timeout=NATIVE_CHECK_TIMEOUT)
-    # OUR ENGINE MUST DECIDE (user ruling 2026-08-02). The two legs have
-    # DIFFERENT contracts on purpose:
-    #
-    #   lgcheck  an INDEPENDENT oracle. A definitive FAIL is always an error --
-    #            it caught a real difference. Its INCONCLUSIVE is NOT an error:
-    #            lgcheck simply could not decide, which says nothing about us.
-    #
-    #   lhd lec  OUR engine, on OUR corpus. It must PROVE. Anything else --
-    #            UNKNOWN, an encoder refusal, a timeout -- is a gap in the tool
-    #            that this corpus exists to surface, so it FAILS the test rather
-    #            than printing a note nobody reads. PASS(n) counts as proven (a
-    #            complete BMC is a real result, just annotated with its depth).
-    except subprocess.TimeoutExpired:
-        print("{} - v2prp2v - FAILED: lhd lec TIMED OUT >{}s on our own corpus "
-              "(our engine must decide these)".format(name, NATIVE_CHECK_TIMEOUT))
-        native_failed = True
+    native = run_lec(
+        [lhd, "lec", "--impl", impl_arg, "--ref", "pyrope:" + ref_prp,
+         "--impl-top", vtop, "--ref-top", ptop,
+         "--workdir", os.path.join(work, "w_native_check")], timeout=NATIVE_CHECK_TIMEOUT)
+    native_failed = verdict(native) != "proven"
+    if native_failed:
+        print("{} - v2prp2v - FAILED: native Pyrope proof".format(name))
+        print(native.stdout.decode("utf-8", "replace"))
     else:
-        native_out = native.stdout.decode("utf-8", "ignore")
-        if native.returncode == 0 and "INCONCLUSIVE" not in native_out and "UNKNOWN" not in native_out:
-            print("{} - v2prp2v - native Pyrope check success "
-                  "(impl-top:{} ref-top:{})".format(name, vtop, ptop))
-        elif native.returncode == 0:
-            print("{} - v2prp2v - FAILED: lhd lec did not PROVE (inconclusive on our own "
-                  "corpus; impl-top:{} ref-top:{})".format(name, vtop, ptop))
-            print(native_out)
-            native_failed = True
-        elif "REFUSAL, not a timeout" in native_out:
-            print("{} - v2prp2v - FAILED: lhd lec REFUSED to encode (unmodelled cell; "
-                  "impl-top:{} ref-top:{})".format(name, vtop, ptop))
-            print(native_out)
-            native_failed = True
-        else:
-            native_failed = True
-            print("{} - v2prp2v - FAILED: emitted Pyrope not equivalent to reference "
-                  "(impl-top:{} ref-top:{})".format(name, vtop, ptop))
-            print(native_out)
+        print("{} - v2prp2v - native Pyrope proof passed".format(name))
+    if args.native_only:
+        return int(native_failed)
 
     # 1c. PYROPE -> LGraph -> Verilog. Emitting every unit at once is the normal
     # case; a design whose units import each other rejects the duplicates, so
@@ -238,37 +160,29 @@ def main():
                 out.write(f.read())
                 out.write("\n")
 
-    # 2. lgcheck: reference = the ORIGINAL .v (independent yosys read).
-    cmd = ["./inou/yosys/lgcheck", "--reference", v, "--implementation", impl,
-           "--reference_top", vtop, "--implementation_top", impl_top]
-    if (_header(ref_prp, "gold_reader") or "") == "slang":
-        plugin = _slang_plugin()
-        if not plugin:
-            print("{} - v2prp2v - FAILED: :gold_reader: slang but yosys-slang plugin not found".format(name))
+    # 2. Compare the round-trip Verilog with its source using native Slang LEC.
+    verilog_timeout = VERILOG_CHECK_TIMEOUT
+    hdr_timeout = _header(ref_prp, "verilog_check_timeout")
+    if hdr_timeout:
+        try:
+            verilog_timeout = int(hdr_timeout)
+        except ValueError:
+            print("{} - v2prp2v - FAILED: :verilog_check_timeout: must be an "
+                  "integer (got '{}')".format(name, hdr_timeout))
             return 1
-        cmd += ["--gold_reader", "slang", "--slang_plugin", plugin]
-    try:
-        chk = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                             timeout=VERILOG_CHECK_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        print("{} - v2prp2v - original Verilog check inconclusive "
-              "(lgcheck timeout >{}s, NOT a fail)".format(name, VERILOG_CHECK_TIMEOUT))
-        return 1 if native_failed else 0
+
+    cmd = [lhd, "lec", "--ref", v, "--impl", impl,
+           "--ref-top", vtop, "--impl-top", impl_top,
+           "--workdir", os.path.join(work, "w_verilog_check")]
+    chk = run_lec(cmd, timeout=verilog_timeout)
 
     out = chk.stdout.decode("utf-8", "ignore")
-    if chk.returncode == 0:
+    if verdict(chk) == "proven":
         print("{} - v2prp2v - original Verilog check success "
               "(ref_top:{} impl_top:{})".format(name, vtop, impl_top))
         return 1 if native_failed else 0
-    if chk.returncode == 2:
-        # lgcheck's explicit INCONCLUSIVE: no proof but NO counterexample.
-        print("{} - v2prp2v - original Verilog check inconclusive "
-              "(no proof, no counterexample; ref_top:{} impl_top:{})".format(
-            name, vtop, impl_top))
-        return 1 if native_failed else 0
-    print("{} - v2prp2v - FAILED: round-trip not equivalent "
-          "(ref_top:{} impl_top:{})".format(
-        name, vtop, impl_top))
+    print("{} - v2prp2v - FAILED: round-trip did not prove equivalent "
+          "(ref_top:{} impl_top:{})".format(name, vtop, impl_top))
     print(out)
     return 1
 

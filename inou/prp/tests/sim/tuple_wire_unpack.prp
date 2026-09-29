@@ -1,0 +1,31 @@
+/*
+:name: tuple_wire_unpack
+:type: simulation
+*/
+
+// Reduced from DINO's execute-control wiring: read a forward-declared tuple
+// wire, then drive the whole tuple with one unpacking call. The helper and
+// wire deliberately have matching fields, so no nested-to-flat conversion
+// is required. This must compile and simulate without per-field assignments.
+comb unpack_control(bits:u3) -> (op:u2, valid:u1) {
+  op = bits#[0..=1]
+  valid = bits#[2]
+}
+
+pub mod tuple_wire_unpack(bits:u3) -> (op:u2@[0], valid:u1@[0]) {
+  wire control:(op:u2, valid:u1) = nil
+  op = control.op
+  valid = control.valid
+
+  control = unpack_control(bits=bits)
+}
+
+test tuple_wire_unpack.all_values {
+  mut dut = tuple_wire_unpack
+  tick 8 {
+    dut.bits = clock
+    step
+    assert(dut.op == (clock & 3), "unpacked two-bit field")
+    assert(dut.valid == ((clock >> 2) & 1), "unpacked one-bit field")
+  }
+}

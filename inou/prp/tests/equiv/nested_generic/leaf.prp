@@ -1,0 +1,5 @@
+// Innermost unit of ../nested_generic.prp's import chain: its generic is bound
+// from the PARENT's generic, not at the top call site.
+pub mod leaf<M=0>(a:u8) -> (y:u8@[0]) {
+  y = a & M
+}

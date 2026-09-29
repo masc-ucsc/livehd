@@ -1,0 +1,6 @@
+{
+  "source": "../equiv/mem_multidim_init.prp",
+  "top": "mdi",
+  "synth_set": "pass.abc.memory=true",
+  "lec_set": "formal.bound=2"
+}

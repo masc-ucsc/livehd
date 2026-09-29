@@ -1,0 +1,23 @@
+/*
+:name: wire_cond_match
+:type: equiv
+:verilog_top: wire_cond_match.wcm
+:pyrope_top: wcm
+*/
+
+// 2c-wire — the shape the Verilog reader emits for a packed 2-D `automatic`
+// declared INSIDE a procedural `if` (XiangShan's SSIT `_GEN_NNNN[idx]`): the
+// per-element leaves are module-scope `wire`s, each written once inside the
+// `if`, and read back by a `unique if` in the same block. One conditional
+// driver per leaf is legal, and the leaves lower to bare passthroughs (no
+// mux over a don't-care) — so `o` is exactly the selected element.
+pub comb wcm(a:u5, b:u5, sel:u2, upd:bool) -> (o:u5) {
+  wire w0:u5 = nil
+  wire w1:u5 = nil
+  o = 0
+  if upd {
+    w0 = a
+    w1 = b
+    o  = unique if sel == 0 { w0 } elif sel == 1 { w1 } else { 0 }
+  }
+}

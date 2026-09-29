@@ -20,53 +20,53 @@ module \flop_reset_matrix.matrix (
   output [7:0] q_ns
 );
 
-  reg [7:0] q_pp_r;
-  reg [7:0] q_pn_r;
-  reg [7:0] q_ps_r;
-  reg [7:0] q_np_r;
-  reg [7:0] q_nn_r;
-  reg [7:0] q_ns_r;
-  assign q_pp = q_pp_r;
-  assign q_pn = q_pn_r;
-  assign q_ps = q_ps_r;
-  assign q_np = q_np_r;
-  assign q_nn = q_nn_r;
-  assign q_ns = q_ns_r;
+  reg [7:0] r_pp;
+  reg [7:0] r_pn;
+  reg [7:0] r_ps;
+  reg [7:0] r_np;
+  reg [7:0] r_nn;
+  reg [7:0] r_ns;
+  assign q_pp = r_pp;
+  assign q_pn = r_pn;
+  assign q_ps = r_ps;
+  assign q_np = r_np;
+  assign q_nn = r_nn;
+  assign q_ns = r_ns;
 
   // posedge clk, async active-high reset (posedge reset), reset value = 1
   always @(posedge clock or posedge reset) begin
-    if (reset) q_pp_r <= 8'd1;
-    else if (en && q_pp_r < 8'd200) q_pp_r <= q_pp_r + 8'd1;
+    if (reset) r_pp <= 8'd1;
+    else if (en && r_pp < 8'd200) r_pp <= r_pp + 8'd1;
   end
 
   // posedge clk, async active-low reset (negedge reset_n), reset value = 2
   always @(posedge clock or negedge reset_n) begin
-    if (!reset_n) q_pn_r <= 8'd2;
-    else if (en && q_pn_r < 8'd200) q_pn_r <= q_pn_r + 8'd1;
+    if (!reset_n) r_pn <= 8'd2;
+    else if (en && r_pn < 8'd200) r_pn <= r_pn + 8'd1;
   end
 
   // posedge clk, synchronous active-high reset, reset value = 3
   always @(posedge clock) begin
-    if (reset) q_ps_r <= 8'd3;
-    else if (en && q_ps_r < 8'd200) q_ps_r <= q_ps_r + 8'd1;
+    if (reset) r_ps <= 8'd3;
+    else if (en && r_ps < 8'd200) r_ps <= r_ps + 8'd1;
   end
 
   // negedge clk, async active-high reset (posedge reset), reset value = 4
   always @(negedge clock or posedge reset) begin
-    if (reset) q_np_r <= 8'd4;
-    else if (en && q_np_r < 8'd200) q_np_r <= q_np_r + 8'd1;
+    if (reset) r_np <= 8'd4;
+    else if (en && r_np < 8'd200) r_np <= r_np + 8'd1;
   end
 
   // negedge clk, async active-low reset (negedge reset_n), reset value = 5
   always @(negedge clock or negedge reset_n) begin
-    if (!reset_n) q_nn_r <= 8'd5;
-    else if (en && q_nn_r < 8'd200) q_nn_r <= q_nn_r + 8'd1;
+    if (!reset_n) r_nn <= 8'd5;
+    else if (en && r_nn < 8'd200) r_nn <= r_nn + 8'd1;
   end
 
   // negedge clk, synchronous active-high reset, reset value = 6
   always @(negedge clock) begin
-    if (reset) q_ns_r <= 8'd6;
-    else if (en && q_ns_r < 8'd200) q_ns_r <= q_ns_r + 8'd1;
+    if (reset) r_ns <= 8'd6;
+    else if (en && r_ns < 8'd200) r_ns <= r_ns + 8'd1;
   end
 
 endmodule

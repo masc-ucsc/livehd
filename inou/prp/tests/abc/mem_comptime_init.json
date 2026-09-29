@@ -1,0 +1,6 @@
+{
+  "source": "../equiv/mem_comptime_init.prp",
+  "top": "mci",
+  "synth_set": "pass.abc.memory=true",
+  "lec_set": "formal.bound=2"
+}

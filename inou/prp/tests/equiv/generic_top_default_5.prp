@@ -1,0 +1,15 @@
+/*
+:name: generic_top_default
+:type: lec
+:lec_top: generic_top_default
+*/
+
+comb helper(a:u8) -> (y:u9) {
+  y = a + 1
+}
+
+// LEC must elaborate the selected generic even when the file also defines
+// another concrete function (auto-selecting the sole function is insufficient).
+pub mod generic_top_default<N=2>(a:u8) -> (y:u9@[0]) {
+  y = helper(a=a) + N
+}

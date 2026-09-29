@@ -60,8 +60,7 @@ int main(int argc, char** argv) {
     } else {
       g->get_input_pin("a").connect_sink(n.create_sink_pin(0));
       if (op != Ntype_op::Not && op != Ntype_op::Ror) {
-        constant(op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor || op == Ntype_op::Mult ? 0 : 1,
-                 op == Ntype_op::Get_mask ? -1 : 3);
+        constant(1, op == Ntype_op::Get_mask ? -1 : 3);
       }
       if (op == Ntype_op::Set_mask) {
         constant(2, 2);
@@ -153,9 +152,9 @@ int main(int argc, char** argv) {
     }
     if (immutable || kind == "ram_init") {
       if (kind == "dynamic_init") {
-        g->get_input_pin("addr").connect_sink(pin("init"));
+        g->get_input_pin("addr").connect_sink(pin("initial"));
       } else {
-        policy("init", 0x04030201);
+        policy("initial", 0x04030201);
       }
     }
     if (kind == "whole_array") {

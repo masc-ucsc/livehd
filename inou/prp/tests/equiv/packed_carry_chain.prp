@@ -1,0 +1,12 @@
+/*
+:name: packed_carry_chain
+:type: equiv
+:verilog_top: packed_carry_chain
+:pyrope_top: packed_carry_chain
+*/
+// The Verilog golden spells the same addition as four packed, mutually
+// connected carry slices. Its apparent cin/cout word-level loop must be split
+// without changing the arithmetic.
+pub comb packed_carry_chain(a:u16, b:u16) -> (result:u16) {
+  result = (a + b)#[0..=15]
+}

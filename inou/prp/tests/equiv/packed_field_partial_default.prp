@@ -1,0 +1,15 @@
+/*
+:name: packed_field_partial_default
+:type: equiv
+:set: formal.solver=lgyosys formal.lec.normalize_split_ports=true
+:verilog_top: packed_field_partial_default
+:pyrope_top: packed_field_partial_default
+*/
+// In-place RTL partial writes must retain their preceding whole-field value.
+// Wide zero and nonzero defaults expose lost bases and unwanted sign fill.
+pub comb packed_field_partial_default(sel:u1, x:u40, a:u2, b:u2) -> (out:(zero:u256, seeded:u256)) {
+  const low = if sel != 0 { x } else { (a << 5) | (b << 3) }
+  const seed = (1 << 200) | 0x123456789abcdef0
+  out.zero = low
+  out.seeded = if sel != 0 { (seed & ~0xffffffffff) | x } else { (seed & ~0x7f) | low }
+}

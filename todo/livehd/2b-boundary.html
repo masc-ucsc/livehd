@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2b-boundary — partition-boundary environment for pass.abc</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2b-boundary</strong> Partition-boundary environment for <code>pass.abc</code></h1>
+
+<p>A colored region is tech-mapped as its own module, so ABC's SCL sizing saw
+nothing beyond its ports: no load on an output, an ideal driver on an input, no
+buffering of an input's fanout, and the whole period for every region a path
+crosses. Fix it the way every hierarchical flow does (OpenROAD's hierarchically
+linked mode): annotate port loads and drivers, propagate arrival/required
+budgets across the hierarchy, buffer a crossing net as a whole net, and size the
+stitched netlist. Design and status: <code>pass/abc/README.md</code>, "Partition
+boundaries"; code: <code>pass/abc/abc_boundary.{hpp,cpp}</code>,
+<code>packages/abc.patch</code> (the <code>SC_Bnd</code> table the SCL timer
+honours).</p>
+
+<h2>Depends on</h2>
+<p>None.</p>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+  <li><strong>E — SDC at the top.</strong>
+    <ul><li>An arrival on a primary input / required time on a primary output of
+    <code>--top</code> (today: arrival 0, required = budget) from the same
+    <code>.sdc</code> <code>pass.opentimer</code> reads, so the outer boundary is
+    constrained like an inner one.</li></ul></li>
+  <li><strong>F — re-map, not just re-size.</strong>
+    <ul><li>A region whose propagated budget the exact re-size cannot meet keeps
+    its mapped logic depth (picorv32: 8.97 ns against a 5 ns target after the
+    refinement, every remaining ps is depth across regions). Feed the round's
+    arrivals/required times back into the region's own mapping (<code>&amp;nf</code>
+    reads per-CI arrivals and per-CO required times through <code>Scl_Con</code>,
+    in its unit-delay levels) and re-map the misses.</li></ul></li>
+  <li><strong>G — DFF drive rung from the whole net.</strong>
+    <ul><li>The read-back picks the register cell's drive rung from the Q net's
+    fanout INSIDE the region; the exact join knows the external sinks too.</li></ul></li>
+  <li><strong>H — partial-hit determinism.</strong>
+    <ul><li>A partial-hit incremental run re-sizes cached (already refined) bodies
+    next to fresh ones; the result can differ from a cold run by a drive step.
+    Either store the pre-refinement body too, or accept and document the ECO-style
+    convergence. Measure on the lhdsuite <code>*_synth_incremental</code> benches.</li></ul></li>
+  <li><strong>I — QoR sweep.</strong>
+    <ul><li>Re-run the lhdtrack corpus (sky130 + ASAP7) and the lhdsuite synth
+    benches with <code>boundary=true|false</code>; picorv32 measured -6.4% STA
+    delay at +0.6% area, xs renametable pending.</li></ul></li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<ul class="subtasks">
+  <li><strong>A — ABC patch.</strong> <span class="status landed">landed</span>
+    <code>SC_Bnd</code> per-PI/PO environment table (load, virtual downstream
+    delay, driving cell of any input count, arrival) read by the SCL timer only;
+    <code>Abc_FrameSetBnd</code>/<code>Abc_FrameReadBnd</code>.</li>
+  <li><strong>B — Phase A static estimate.</strong> <span class="status landed">landed</span>
+    consumer pins beyond the region × typical input pin, stand-in driver,
+    <code>buffer -N {F} -p</code>; part of the recipe.</li>
+  <li><strong>C — Phase B exact refinement.</strong> <span class="status landed">landed</span>
+    re-import every def, join port bits through the wrappers (loads, drivers),
+    propagate arrival/departure budgets in rounds, <code>upsize -D; dnsize -D</code>
+    in place, cell swaps written back; cache stores the refined bodies, all-hit
+    runs skip it.</li>
+  <li><strong>D — test + report.</strong> <span class="status landed">landed</span>
+    <code>//lhd/tests:lhd_abc_boundary_test</code> (NAND2x1 → NAND2x2 on the
+    crossing driver, LEC vs the partition twin, boundary=false control, all-hit
+    reuse); <code>qor.json</code> <code>total.boundary</code> and per-region
+    <code>boundary</code> rows.</li>
+</ul>
+</main>
+</body>
+</html>

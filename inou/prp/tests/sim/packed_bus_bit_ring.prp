@@ -1,0 +1,93 @@
+/*
+:name: packed_bus_bit_ring
+:type: simulation
+*/
+
+// minion's core<->dcache control ring in miniature: two instances exchange ONE
+// PACKED BUS each way, and each direction's bus mixes a STATE-driven field
+// with a field combinationally derived from the OTHER bus — on DIFFERENT bits.
+//
+//   devA: resp[0]   = req[1]    (comb "ready from valid")
+//         resp[7:1] = counter   (state)
+//   devB: req[1]    = go flop   (state "valid")
+//         req[0]    = resp[1]   (comb "ack from grant")
+//
+// At bit level the dependency graph is acyclic (resp[0] <- req[1] <- flop;
+// req[0] <- resp[1] <- counter). At PORT level each bus depends on the other:
+// the exact false cycle that refused minion_top / core_top
+// (`cache_op_valid -> cache_op_ready` one way, `tl_ready -> tensorload_start`
+// the other) once a struct fails leaf-flattening and rides as one pid.
+// The group machinery must SPLIT TO SLICES here — and only here: a def whose
+// slices share one support merges back to whole-port groups.
+//
+// VALUES (hand-derived, end-of-tick): cnt starts 1 and increments each tick;
+// vflop loads `go`. After tick c: cnt = c+2, v = go(c),
+//   req  = (go(c) << 1) | ((cnt(c) th bit... see below) )
+//   resp = ((c+2) << 1) | go(c)
+//   q_resp checks resp; q_req checks req = (go<<1) | bit1(resp) = (go<<1) | ((c+2)&1...
+// resp[1] = bit1 of ((cnt<<1)|req[1]) = cnt&1 = (c+2)&1.
+//   req(c) = (go(c) << 1) | ((c+2) & 1)
+
+mod deva::[timecheck=false](req:u8) -> (resp:u8@[]) {
+  reg cnt:u7 = 1
+  cnt  = cnt + 1
+  resp = (cnt << 1) | ((req >> 1) & 1)
+}
+
+mod devb::[timecheck=false](resp:u8, go:u1) -> (req:u8@[]) {
+  reg v:u1 = 0
+  v   = go
+  req = (v << 1) | ((resp >> 1) & 1)
+}
+
+pub mod bitring::[timecheck=false](go:u1, d:u8) -> (q_resp:u8@[], q_req:u8@[], ctl:u8@[]) {
+  wire req_w:u8  = nil
+  wire resp_w:u8 = nil
+  mut resp_v = deva(req=req_w)
+  mut req_v  = devb(resp=resp_w, go=go)
+  resp_w = resp_v
+  req_w  = req_v
+  q_resp = resp_v
+  q_req  = req_v
+
+  // CONTROL: a plain flop, so a failure above is specifically the bus ring.
+  reg c:u8 = 0
+  c   = d
+  ctl = c
+}
+
+test bitring.packed_buses_thread_at_bit_level {
+  mut acc  = bitring
+  mut seen = 0
+  mut bad_resp = 0
+  mut bad_req  = 0
+  mut bad_ctl  = 0
+  tick 6 {
+    mut gv:u1 = 0
+    if clock == 1 or clock == 2 or clock == 4 {
+      gv = 1
+    }
+    mut dv:u8 = 10 + clock
+    acc.go = gv
+    acc.d  = dv
+    step
+    seen = seen + 1
+    // end-of-tick: cnt has incremented to clock+2, v holds gv.
+    mut cntv:u8 = clock + 2
+    mut g_resp:u8 = ((cntv << 1) & 0xFF) | gv
+    mut g_req:u8  = (gv << 1) | (cntv & 1)
+    if acc.q_resp != g_resp {
+      bad_resp = bad_resp + 1
+    }
+    if acc.q_req != g_req {
+      bad_req = bad_req + 1
+    }
+    if acc.ctl != dv {
+      bad_ctl = bad_ctl + 1
+    }
+  }
+  assert(seen == 6, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_ctl == 0, "CONTROL: the plain flop loads every tick")
+  assert(bad_resp == 0, "devA's bus: counter field AND the ready-from-valid bit are both right")
+  assert(bad_req == 0, "devB's bus: valid flop AND the ack-from-grant bit are both right")
+}

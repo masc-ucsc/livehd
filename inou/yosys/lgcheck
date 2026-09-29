@@ -21,6 +21,10 @@ GOLD_TOP=""
 GATE_TOP=""
 GOLD=""
 GATE=""
+NORMALIZE_SPLIT_PORTS=0
+DESCEND_ON_INCONCLUSIVE=0
+GOLD_RTLIL_INPUT=""
+GATE_RTLIL_INPUT=""
 while true; do
   case "$1" in
   -r | --reference)
@@ -92,7 +96,7 @@ while true; do
     # reader for the GOLD side: verilog (default; read_verilog -sv) | slang
     # (load the yosys-slang plugin and read_slang — needed for SystemVerilog
     # packed-struct sources, e.g. CIRCT/firtool output, that read_verilog
-    # cannot parse). Needs --slang_plugin.
+    # cannot parse). --slang_plugin is optional for older external Yosys builds.
     case "$2" in
     "") shift 2 ;;
     *)
@@ -101,8 +105,20 @@ while true; do
       ;;
     esac
     ;;
+  --gate_reader | --implementation_reader)
+    # reader for the GATE side: verilog (default; read_verilog -sv) | slang.
+    # Generated cgen Verilog is legal input to either frontend, but read_slang
+    # scales much better on very large flattened expressions.
+    case "$2" in
+    "") shift 2 ;;
+    *)
+      GATE_READER=$2
+      shift 2
+      ;;
+    esac
+    ;;
   --slang_plugin)
-    # path to the yosys-slang plugin (slang.so) for --gold_reader slang
+    # path to the yosys-slang plugin (slang.so) for either slang reader
     case "$2" in
     "") shift 2 ;;
     *)
@@ -111,12 +127,34 @@ while true; do
       ;;
     esac
     ;;
+  --normalize_split_ports)
+    # The reference has packed aggregate ports while cgen exposes their leaves
+    # as escaped dotted ports. Build a wrapper from the two cached RTLIL port
+    # lists before starting the equivalence budget.
+    NORMALIZE_SPLIT_PORTS=1
+    shift 1
+    ;;
+  --descend_on_inconclusive)
+    # If this top exhausts the equivalence budget without a counterexample,
+    # retry its direct module children from the already-read RTLIL. A child
+    # that is also inconclusive recursively descends again.
+    DESCEND_ON_INCONCLUSIVE=1
+    shift 1
+    ;;
+  --gold_rtlil)
+    GOLD_RTLIL_INPUT=$2
+    shift 2
+    ;;
+  --gate_rtlil)
+    GATE_RTLIL_INPUT=$2
+    shift 2
+    ;;
   "") break ;;
   *)
     argument=$1
     if [ ${argument:0:1} == "-" ]; then
       echo "Option $1 not recognized!"
-      exit 1
+      exit 5  # setup failure, NOT a refutation (exit 1 is reserved for a real CEX)
     else
       if [ "${GOLD}" == "" ]; then
         GOLD=$1
@@ -130,14 +168,44 @@ while true; do
   esac
 done
 
+GOLD_READER=${GOLD_READER:-verilog}
+GATE_READER=${GATE_READER:-verilog}
+# Optional: only older external Yosys builds need a loadable read_slang.
+SLANG_PLUGIN=${SLANG_PLUGIN:-}
+for reader in "$GOLD_READER" "$GATE_READER"; do
+  if [ "$reader" != "verilog" ] && [ "$reader" != "slang" ]; then
+    echo "lgcheck: reader must be verilog|slang (got '$reader')"
+    exit 5
+  fi
+done
+
+# yosys-slang normally flattens during import. Keep occurrence-specialized
+# module boundaries only when recursive fallback may need them; every proof
+# strategy still explicitly flattens its selected top before comparison.
+GOLD_HIER_FLAG=""
+GATE_HIER_FLAG=""
+if [ "$DESCEND_ON_INCONCLUSIVE" -eq 1 ]; then
+  GOLD_HIER_FLAG="--best-effort-hierarchy"
+  GATE_HIER_FLAG="--best-effort-hierarchy"
+fi
+
+# Slang can parse compilation units in parallel. Keep this independently
+# tunable for constrained runners, while making large Minion/XiangShan inputs
+# finish in practical time by default. This affects parsing only, not RTLIL.
+LGCHECK_SLANG_THREADS=${LGCHECK_SLANG_THREADS:-8}
+if ! [[ "$LGCHECK_SLANG_THREADS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "lgcheck: LGCHECK_SLANG_THREADS must be a positive integer (got '$LGCHECK_SLANG_THREADS')"
+  exit 5
+fi
+
 if [ ! -f "${GATE}" ]; then
   echo "gate circuit ${GATE} not a valid file"
-  exit 1
+  exit 5
 fi
 
 if [ ! -f ${GOLD} ]; then
   echo "gold circuit ${GOLD} not a valid file"
-  exit 1
+  exit 5
 fi
 
 if [ ! -f "${YOSYS}" ]; then
@@ -177,8 +245,19 @@ resolve_top() {
   fi
   echo "${want}"
 }
-GOLD_TOP=$(resolve_top "${GOLD}" "${GOLD_TOP}")
-GATE_TOP=$(resolve_top "${GATE}" "${GATE_TOP}")
+# A descendant cache contains occurrence-specialized names such as
+# `ClockGate$ExuBlock.ClockGate` which deliberately do NOT exist in the source
+# text. Resolving that request against the source used to fall back to the last
+# dotted component (`ClockGate`) when it happened to be a real base module,
+# then fail because the selected parent cache had pruned that base. The cache is
+# authoritative on that side; source-name compatibility applies only when the
+# source will actually be read.
+if [ "$GOLD_RTLIL_INPUT" = "" ]; then
+  GOLD_TOP=$(resolve_top "${GOLD}" "${GOLD_TOP}")
+fi
+if [ "$GATE_RTLIL_INPUT" = "" ]; then
+  GATE_TOP=$(resolve_top "${GATE}" "${GATE_TOP}")
+fi
 
 fm_top=$OPT_TOP
 if [ "${fm_top}" == "" ]; then
@@ -232,7 +311,7 @@ echo "using yosys:"${YOSYS}
 
 if [ ! -f ${YOSYS} ]; then
   echo "Yosys binary not found"
-  exit 1
+  exit 5
 fi
 
 # Select each side's top independently so the reference and implementation may
@@ -247,21 +326,51 @@ if [ "${GATE_TOP}" != "" ]; then
 fi
 
 # GOLD-side read command, shared by every strategy below. --gold_reader slang
-# reads through the yosys-slang plugin (SystemVerilog packed structs / '{...}
+# reads through built-in read_slang (SystemVerilog packed structs / '{...}
 # patterns that read_verilog cannot parse); --no-proc leaves the RTLIL
 # processes for the strategies' own `proc`.
 gold_read_cmds() {
   # $1 = extra read_verilog flags position is unused; kept single-form
-  if [ "${GOLD_READER}" == "slang" ]; then
-    if [ ! -f "${SLANG_PLUGIN}" ]; then
+  if [ "${GOLD_RTLIL}" != "" ]; then
+    # A descendant may reuse its parent's hierarchy cache. Reassert THIS
+    # invocation's selected top before rename/flatten; otherwise Yosys keeps
+    # the parent's top attribute and the child proof compares the wrong module.
+    echo "read_rtlil ${GOLD_RTLIL}; hierarchy ${GOLD_TOP_STR}"
+  elif [ "${GOLD_READER}" == "slang" ]; then
+    if [ -n "${SLANG_PLUGIN}" ] && [ ! -f "${SLANG_PLUGIN}" ]; then
       echo "lgcheck: --gold_reader slang needs --slang_plugin <slang.so> (got '${SLANG_PLUGIN}')"
       exit 5
     fi
     GOLD_SLANG_TOP=""
     if [ "${GOLD_TOP}" != "" ]; then GOLD_SLANG_TOP="--top ${GOLD_TOP}"; fi
-    echo "plugin -i ${SLANG_PLUGIN}; read_slang ${GOLD_SLANG_TOP} --no-proc ${GOLD}; hierarchy ${GOLD_TOP_STR}"
+    # Match the permissive source-language settings used by the large RTL
+    # generation flows. They affect whether legal project idioms elaborate,
+    # not the resulting hardware: Minion needs both for forward declarations
+    # and plain-bit assignments to enum fields.
+    if [ -n "${SLANG_PLUGIN}" ]; then echo "plugin -i ${SLANG_PLUGIN}"; fi
+    echo "read_slang ${GOLD_SLANG_TOP} ${SLANG_INC} -j ${LGCHECK_SLANG_THREADS} --allow-use-before-declare --relax-enum-conversions ${GOLD_HIER_FLAG} --no-proc ${GOLD}; hierarchy ${GOLD_TOP_STR}"
   else
     echo "read_verilog -sv -icells ${VLG_INC} ${GOLD}; hierarchy ${GOLD_TOP_STR}"
+  fi
+}
+
+# GATE-side counterpart.  The first call reads the generated Verilog; after
+# the one-time preparation below every proof strategy reloads the cached RTLIL
+# instead of reparsing a large hierarchy.
+gate_read_cmds() {
+  if [ "${GATE_RTLIL}" != "" ]; then
+    echo "read_rtlil ${GATE_RTLIL}; hierarchy ${GATE_TOP_STR}"
+  elif [ "${GATE_READER}" == "slang" ]; then
+    if [ -n "${SLANG_PLUGIN}" ] && [ ! -f "${SLANG_PLUGIN}" ]; then
+      echo "lgcheck: --gate_reader slang needs --slang_plugin <slang.so> (got '${SLANG_PLUGIN}')"
+      exit 5
+    fi
+    GATE_SLANG_TOP=""
+    if [ "${GATE_TOP}" != "" ]; then GATE_SLANG_TOP="--top ${GATE_TOP}"; fi
+    if [ -n "${SLANG_PLUGIN}" ]; then echo "plugin -i ${SLANG_PLUGIN}"; fi
+    echo "read_slang ${GATE_SLANG_TOP} ${SLANG_INC} -j ${LGCHECK_SLANG_THREADS} --allow-use-before-declare --relax-enum-conversions ${GATE_HIER_FLAG} --no-proc ${GATE}; hierarchy ${GATE_TOP_STR}"
+  else
+    echo "read_verilog -sv -icells ${VLG_INC} ${GATE}; hierarchy ${GATE_TOP_STR}"
   fi
 }
 
@@ -272,9 +381,11 @@ echo "checking GATE:$GATE (top:${GATE_TOP}) vs GOLD:$GOLD (top:${GOLD_TOP}) dire
 # repo checkout and inside bazel runfiles) with a cwd-relative fallback.
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 VLG_INC=""
+SLANG_INC=""
 for d in "${SELF_DIR}/../../ware/rtl" "ware/rtl"; do
   if [ -d "$d" ]; then
     VLG_INC="-I$d"
+    SLANG_INC="-I $d"
     break
   fi
 done
@@ -284,6 +395,7 @@ if [ "${VLG_INC}" = "" ]; then
     while [ "$d" != "/" ] && [ "$d" != "" ]; do
       if [ -d "$d/ware/rtl" ]; then
         VLG_INC="-I$d/ware/rtl"
+        SLANG_INC="-I $d/ware/rtl"
         break
       fi
       d="$(dirname "$d")"
@@ -297,7 +409,7 @@ fi
 if [ "${CELLLIB}" != "" ]; then
   if [ ! -f ${CELLLIB} ]; then
     echo "cell library ${CELLLIB} not found"
-    exit 1
+    exit 5
   fi
   # lib="read_verilog -sv ${CELLLIB}"
   lib="read_liberty ${CELLLIB}"
@@ -305,9 +417,292 @@ fi
 
 #exit 2
 
+# Parse/elaborate each side exactly once, outside the equivalence budget.  This
+# is important for large designs (Minion/XiangShan): source reading can take a
+# long time and is not a solver timeout, while the historical flow reread both
+# hierarchies for every proof strategy.  RTLIL preserves processes, memories,
+# and hierarchy, so each strategy below can still run its own proc/memory/opt
+# sequence unchanged.
+GOLD_RTLIL=""
+GATE_RTLIL=""
+gold_rtlil="$PWD/lgcheck_gold.il"
+gate_rtlil="$PWD/lgcheck_gate.il"
+#
+# The cache is an OPTIMIZATION, so a failed pre-read is NOT a verdict: fall back
+# to the historical per-strategy source read and let the normal flow decide.
+# Hard-failing here would turn every frontend limitation (read_verilog cannot
+# parse a `'{…}` assignment pattern, for instance) into a `dependency` error on
+# designs whose only honest answer is INCONCLUSIVE — the source of truth for
+# "these two cannot be compared" stays the bounded miter's ERROR check below.
+echo "INFO: preparing reference RTLIL (source-read time is outside the equivalence budget)"
+if [ "$GOLD_RTLIL_INPUT" != "" ]; then
+  if [ ! -f "$GOLD_RTLIL_INPUT" ]; then
+    echo "lgcheck: cached reference RTLIL not found: $GOLD_RTLIL_INPUT"
+    exit 5
+  fi
+  gold_rtlil_input=$(cd "$(dirname "$GOLD_RTLIL_INPUT")" && pwd)/$(basename "$GOLD_RTLIL_INPUT")
+  # Select/prune the requested occurrence OUTSIDE the equivalence budget. The
+  # parent cache retains every occurrence-specialized module, but also retains
+  # the parent's top attribute; passing it through unchanged made a descendant
+  # proof rename/flatten the parent again. A small selected cache is both the
+  # correct design and dramatically cheaper for every proof strategy to load.
+  gold_selected_rtlil="$PWD/lgcheck_gold_selected.il"
+  if ! ${YOSYS} -p "read_rtlil ${gold_rtlil_input}; hierarchy ${GOLD_TOP_STR}; write_rtlil ${gold_selected_rtlil}" \
+      >lgcheck_select_gold.log 2>lgcheck_select_gold.err; then
+    echo "lgcheck: cached reference RTLIL does not contain/select top $GOLD_TOP"
+    tail -20 lgcheck_select_gold.err
+    exit 5
+  fi
+  GOLD_RTLIL="$gold_selected_rtlil"
+  echo "INFO: reused cached reference RTLIL and selected $GOLD_TOP"
+elif ${YOSYS} -p "$(gold_read_cmds); write_rtlil ${gold_rtlil}" >lgcheck_read_gold.log 2>lgcheck_read_gold.err; then
+  GOLD_RTLIL="$gold_rtlil"
+else
+  echo "WARN: could not pre-read the reference design; each strategy re-reads the source"
+  # Slang can print thousands of warnings after the actual error.
+  grep -m20 -E '(^ERROR|: error:)' lgcheck_read_gold.err || true
+  tail -20 lgcheck_read_gold.err
+fi
+echo "INFO: preparing implementation RTLIL (source-read time is outside the equivalence budget)"
+if [ "$GATE_RTLIL_INPUT" != "" ]; then
+  if [ ! -f "$GATE_RTLIL_INPUT" ]; then
+    echo "lgcheck: cached implementation RTLIL not found: $GATE_RTLIL_INPUT"
+    exit 5
+  fi
+  gate_rtlil_input=$(cd "$(dirname "$GATE_RTLIL_INPUT")" && pwd)/$(basename "$GATE_RTLIL_INPUT")
+  gate_selected_rtlil="$PWD/lgcheck_gate_selected.il"
+  if ! ${YOSYS} -p "read_rtlil ${gate_rtlil_input}; hierarchy ${GATE_TOP_STR}; write_rtlil ${gate_selected_rtlil}" \
+      >lgcheck_select_gate.log 2>lgcheck_select_gate.err; then
+    echo "lgcheck: cached implementation RTLIL does not contain/select top $GATE_TOP"
+    tail -20 lgcheck_select_gate.err
+    exit 5
+  fi
+  GATE_RTLIL="$gate_selected_rtlil"
+  echo "INFO: reused cached implementation RTLIL and selected $GATE_TOP"
+elif ${YOSYS} -p "$(gate_read_cmds); write_rtlil ${gate_rtlil}" >lgcheck_read_gate.log 2>lgcheck_read_gate.err; then
+  GATE_RTLIL="$gate_rtlil"
+else
+  echo "WARN: could not pre-read the implementation design; each strategy re-reads the source"
+  # Slang can print thousands of warnings after the actual error.
+  grep -m20 -E '(^ERROR|: error:)' lgcheck_read_gate.err || true
+  tail -20 lgcheck_read_gate.err
+fi
+BASE_GOLD_RTLIL="$GOLD_RTLIL"
+BASE_GATE_RTLIL="$GATE_RTLIL"
+BASE_GOLD_TOP="$GOLD_TOP"
+BASE_GATE_TOP="$GATE_TOP"
+
+# cgen deliberately makes aggregate ABI leaves explicit (for example
+# \io_req.bits.op), while yosys-slang represents the original packed SV top as
+# one vector port (io_req). Yosys' miter requires identical port lists. When
+# requested, construct a gold-shaped gate wrapper from the cached RTLIL port
+# declarations, then cache that combined hierarchy as the gate side. This work
+# is elaboration/interface preparation, so it remains outside the 600-second
+# equivalence budget below.
+if [ "$NORMALIZE_SPLIT_PORTS" -eq 1 ]; then
+  if [ "$GOLD_RTLIL" = "" ] || [ "$GATE_RTLIL" = "" ]; then
+    echo "lgcheck: split-port normalization requires successful RTLIL preparation on both sides"
+    exit 5
+  fi
+  adapter_tool="${SELF_DIR}/rtlil_split_port_adapter.py"
+  if [ ! -f "$adapter_tool" ]; then
+    echo "lgcheck: split-port adapter helper not found: $adapter_tool"
+    exit 5
+  fi
+  gate_impl_top="__lgcheck_gate_impl"
+  gate_adapter_top="__lgcheck_gate_adapter"
+  gate_adapter_v="$PWD/lgcheck_gate_adapter.v"
+  gate_adapted_rtlil="$PWD/lgcheck_gate_adapted.il"
+  if ! python3 "$adapter_tool" \
+      --gold "$GOLD_RTLIL" --gate "$GATE_RTLIL" \
+      --gold-top "$GOLD_TOP" --gate-top "$GATE_TOP" \
+      --impl-top "$gate_impl_top" --adapter-top "$gate_adapter_top" \
+      --output "$gate_adapter_v"; then
+    echo "lgcheck: unable to normalize split implementation ports"
+    exit 5
+  fi
+  if ! ${YOSYS} -p "read_rtlil ${GATE_RTLIL}; hierarchy -top ${GATE_TOP}; rename -top ${gate_impl_top}; read_verilog -sv ${gate_adapter_v}; hierarchy -top ${gate_adapter_top}; write_rtlil ${gate_adapted_rtlil}" \
+      >lgcheck_adapt_gate.log 2>lgcheck_adapt_gate.err; then
+    echo "lgcheck: unable to elaborate the split-port adapter"
+    tail -20 lgcheck_adapt_gate.err
+    exit 5
+  fi
+  GATE_RTLIL="$gate_adapted_rtlil"
+  GATE_TOP="$gate_adapter_top"
+  GATE_TOP_STR="-top $GATE_TOP"
+  echo "INFO: normalized split implementation ports through $gate_adapter_top"
+fi
+
+# One wall budget shared by all equivalence strategies, started only after both
+# Verilog sides have been read.  A killed strategy falls through to the normal
+# INCONCLUSIVE result (exit 2); a bounded-miter counterexample still exits 1.
+LGCHECK_EQUIV_TIMEOUT="${LGCHECK_EQUIV_TIMEOUT:-600}"
+if ! [[ "$LGCHECK_EQUIV_TIMEOUT" =~ ^[0-9]+$ ]]; then
+  echo "lgcheck: LGCHECK_EQUIV_TIMEOUT must be a non-negative integer (got '$LGCHECK_EQUIV_TIMEOUT')"
+  exit 5
+fi
+# A guessed internal correspondence can leave equiv_simple solving a very
+# expensive false cut. Give each matching attempt a bounded share so it cannot
+# consume the entire shared budget before temporal induction/BMC can run.
+# The overall equivalence budget is unchanged; zero still disables all limits.
+LGCHECK_HEURISTIC_TIMEOUT="${LGCHECK_HEURISTIC_TIMEOUT:-90}"
+if ! [[ "$LGCHECK_HEURISTIC_TIMEOUT" =~ ^[0-9]+$ ]]; then
+  echo "lgcheck: LGCHECK_HEURISTIC_TIMEOUT must be a non-negative integer (got '$LGCHECK_HEURISTIC_TIMEOUT')"
+  exit 5
+fi
+LGCHECK_BMC_STEPS="${LGCHECK_BMC_STEPS:-6}"
+# Failed correspondence guesses do not refute the public outputs. Reserve a
+# bounded share for the final counterexample search, including solver startup,
+# so a short shared budget cannot expire before that search even starts.
+bmc_reserve=0
+if [[ "$LGCHECK_BMC_STEPS" =~ ^[0-9]+$ ]] && [ "$LGCHECK_BMC_STEPS" -gt 0 ] \
+    && [ "$LGCHECK_EQUIV_TIMEOUT" -gt 1 ]; then
+  bmc_reserve=$(((LGCHECK_EQUIV_TIMEOUT + 3) / 4))
+  [ "$bmc_reserve" -le 30 ] || bmc_reserve=30
+fi
+equiv_start=$SECONDS
+# coreutils `timeout` is NOT guaranteed to exist: macOS ships none, and bazel's
+# test PATH (/bin:/usr/bin:/usr/local/bin) does not carry the homebrew prefix
+# where `timeout`/`gtimeout` live. Resolve it once; when it is absent fall back
+# to a pure-bash watchdog rather than letting every strategy die with 127
+# ("command not found"), which silently turned every equivalence check into an
+# INCONCLUSIVE verdict.
+TIMEOUT_BIN=""
+for _t in timeout gtimeout; do
+  if command -v "$_t" >/dev/null 2>&1; then
+    TIMEOUT_BIN="$_t"
+    break
+  fi
+done
+run_equiv_yosys() {
+  local heuristic=0
+  local bmc=0
+  if [ "$1" = --heuristic ]; then
+    heuristic=1
+    shift
+  elif [ "$1" = --bmc ]; then
+    bmc=1
+    shift
+  fi
+  if [ "$LGCHECK_EQUIV_TIMEOUT" -eq 0 ]; then
+    "$YOSYS" "$@"
+    return
+  fi
+  local elapsed=$((SECONDS - equiv_start))
+  local remaining=$((LGCHECK_EQUIV_TIMEOUT - elapsed))
+  if [ "$bmc" -eq 0 ]; then
+    remaining=$((remaining - bmc_reserve))
+  fi
+  if [ "$remaining" -le 0 ]; then
+    return 124
+  fi
+  if [ "$heuristic" -eq 1 ] && [ "$LGCHECK_HEURISTIC_TIMEOUT" -gt 0 ] \
+      && [ "$remaining" -gt "$LGCHECK_HEURISTIC_TIMEOUT" ]; then
+    remaining=$LGCHECK_HEURISTIC_TIMEOUT
+  fi
+  if [ "$TIMEOUT_BIN" != "" ]; then
+    "$TIMEOUT_BIN" --signal=TERM --kill-after=30s "$remaining" "$YOSYS" "$@"
+    return
+  fi
+  # Portable watchdog: TERM the solver when the shared budget runs out, KILL it
+  # if it ignores that, and report 124 so the caller sees a timeout (not a
+  # refutation) exactly as coreutils `timeout` would. The watchdog polls in 1s
+  # ticks, so it must be RETIRED explicitly once the solver returns -- simply
+  # `wait`ing for it blocks until its next tick and added a flat second to every
+  # yosys run (four per lgcheck, and lgcheck runs once per LEC: ~4s of pure sleep
+  # on every check that took milliseconds of real work).
+  local fired="$PWD/lgcheck_watchdog.$$"
+  rm -f "$fired"
+  "$YOSYS" "$@" &
+  local ypid=$!
+  (
+    left=$remaining
+    while [ "$left" -gt 0 ] && kill -0 "$ypid" 2>/dev/null; do
+      sleep 1
+      left=$((left - 1))
+    done
+    if kill -0 "$ypid" 2>/dev/null; then
+      : >"$fired"
+      kill -TERM "$ypid" 2>/dev/null
+      grace=30
+      while [ "$grace" -gt 0 ] && kill -0 "$ypid" 2>/dev/null; do
+        sleep 1
+        grace=$((grace - 1))
+      done
+      kill -KILL "$ypid" 2>/dev/null
+    fi
+  ) >/dev/null 2>&1 &
+  local wpid=$!
+  local rc=0
+  wait "$ypid" || rc=$?
+  # The solver is done; retire the watchdog instead of waiting out its tick. Its
+  # verdict is already recorded: `$fired` is created BEFORE the TERM, so a run
+  # the watchdog killed always leaves the marker behind.
+  kill -TERM "$wpid" 2>/dev/null
+  wait "$wpid" 2>/dev/null
+  if [ -e "$fired" ]; then
+    rc=124
+    rm -f "$fired"
+  fi
+  return $rc
+}
+echo "INFO: starting equivalence checks (shared budget ${LGCHECK_EQUIV_TIMEOUT}s)"
+
 yosys_read="$(gold_read_cmds); proc; bmuxmap; flatten; rename -top gold; design -stash gold;
-            read_verilog -sv -icells ${VLG_INC} ${GATE}; hierarchy ${GATE_TOP_STR}; proc; bmuxmap; flatten; rename -top gate; design -stash gate;
-            design -copy-from gold -as gold gold; design -copy-from gate -as gate gate; ${lib};"
+            $(gate_read_cmds); proc; bmuxmap; flatten; rename -top gate; design -stash gate;
+            design -copy-from gold -as gold gold; design -copy-from gate -as gate gate"
+# In Yosys, an empty command (;; or ;;;) requests cleanup. Do not accidentally
+# clean before memory lowering when no cell library was requested: that can
+# discard correspondence names differently on the two sides.
+if [ -n "${lib}" ]; then
+  yosys_read="${yosys_read}; ${lib}"
+fi
+
+# Clock-domain guard. Every engine below except 1c and the bounded miter is
+# CLOCK-BLIND: equiv_simple/equiv_induct/`sat -tempinduct` advance every
+# flip-flop once per solver step whatever clock or edge drives it, and do not
+# model latches. They PROVED posedge vs negedge registers, a register moved to
+# another clock, a gated clock vs the ungated one, and a mixed-edge pipeline vs
+# its edge-swapped twin. That abstraction is exact only when every state
+# element of BOTH designs is clocked by the SAME edge of the SAME primary input
+# (clock traced through buffers/inverters, the edge folded through each
+# inversion, so a negedge register and a posedge netlist flop on `~clk` agree).
+# Anything else (two clocks or edges, a derived/gated clock, a latch, an
+# asynchronous-write memory, a constant clock) may only be decided by the
+# clk2fflogic engines, stage 1c (proof) and the bounded miter (refutation).
+# A helper failure is treated as "not single-domain": never a verdict.
+CLOCK_BLIND_OK=0
+ASYNC_FF=1  # unknown until the helper says otherwise
+clock_domains_tool="${SELF_DIR}/clock_domains.py"
+if [ -f "$clock_domains_tool" ] && ${YOSYS} -p "${yosys_read}; flatten gold gate;
+    select -set lgc_state t:*ff* t:*FF* t:*latch* t:*LATCH* t:\$mem* t:\$_SR_* t:\$sr;
+    select -set lgc_clock t:\$not t:\$_NOT_ t:\$buf t:\$pos t:\$_BUF_;
+    setattr -set keep 1 @lgc_state; delete c:* @lgc_state %d @lgc_clock %d;
+    opt_clean -purge; write_json lgcheck_clock_domains.json" \
+    >lgcheck_clock_domains.log 2>&1 \
+    && clock_domains=$(python3 "$clock_domains_tool" --json lgcheck_clock_domains.json); then
+  echo "INFO: clock domains: ${clock_domains}"
+  case "$clock_domains" in
+  single*) CLOCK_BLIND_OK=1 ;;
+  esac
+  case "$clock_domains" in
+  single+async* | multi+async*) ;;
+  *) ASYNC_FF=0 ;;
+  esac
+else
+  echo "WARN: could not extract the clock domains (see lgcheck_clock_domains.log)"
+fi
+if [ "$CLOCK_BLIND_OK" -eq 0 ]; then
+  echo "INFO: state is not a single primary-input clock edge; clock-blind engines (1/1n/1r/1p/1m/2/4) skipped"
+fi
+# The guard is preparation, not an equivalence strategy: restart the budget.
+equiv_start=$SECONDS
+# Run a clock-blind strategy only when the guard allows it; a skipped strategy
+# produces no log line, so its "proven" grep fails and the flow falls through.
+run_clock_blind_yosys() {
+  [ "$CLOCK_BLIND_OK" -eq 1 ] || return 125
+  run_equiv_yosys "$@"
+}
 
 yosys_prep="proc; bmuxmap; memory -nomap; write_verilog trace0.v ; equiv_make gold gate equiv; write_verilog trace0b.v ; prep -flatten -top equiv; hierarchy -top equiv; hierarchy -check; flatten; proc; bmuxmap; opt_clean;"
 
@@ -315,11 +710,153 @@ yosys_equiv="equiv_simple;"
 #yosys_equiv_extra="${yosys_simple}; equiv_simple -seq 4; equiv_induct -seq 4;"
 yosys_equiv_extra="${yosys_simple}; equiv_induct -seq 4;"
 
-${YOSYS} -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; write_verilog trace1.v ; equiv_status -assert" \
+run_clock_blind_yosys --heuristic -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; write_verilog trace1.v ; equiv_status -assert" \
   2>/dev/null | tee lgcheck1.log | grep "Equivalence successfully proven!"
 
 if [ $? -eq 0 ]; then
   echo "1.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+  exit 0
+fi
+
+# Generated combinational names encode local node numbers, not correspondence.
+# The same mux_528 can denote different expressions after independent lowering.
+# Retry with only architectural ports and state outputs named; all remaining
+# output and state obligations must still be proven, without guessed cutpoints.
+# Track definedness too: cgen preserves don't-care padding and uninitialized
+# memory lanes; independent two-state guesses for those bits block valid proofs.
+# %co walks one edge from state cells to their output wires (including aliases).
+# Split internal packed state names to the mapper spelling (state[0],
+# state[1], ... -- LiveHD's bus-expansion standard, core/bus_name.hpp, which is
+# also splitnets' default). Ports stay intact. Every proposed state match is still an equiv proof
+# obligation; this gives induction the relation lost during register bitblasting.
+yosys_state_prep="${yosys_read}; memory; opt -full;
+    select -set state_outputs t:\$*ff* t:\$*latch* %u %co w:* %i;
+    rename -hide w:* @state_outputs %d; select -unset state_outputs;
+    splitnets"
+rm -f lgcheck1n.json lgcheck_memory_names.ys
+run_clock_blind_yosys --heuristic -p "${yosys_state_prep};
+    equiv_make gold gate equiv; hierarchy -top equiv;
+    equiv_simple -undef; equiv_induct -undef -seq 4;
+    write_json lgcheck1n.json; equiv_status -assert" \
+  2>lgcheck1n.err | tee lgcheck1n.log | grep "Equivalence successfully proven!"
+if [ $? -eq 0 ]; then
+  echo "1n.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+  exit 0
+fi
+
+# Mapping can also change the meaning of a retained state name (for example,
+# an inverted register encoding). An unproven internal name match must not
+# prevent proving the public outputs. Read the unresolved pairs from Yosys JSON,
+# hide their internal names, then rebuild and reprove the ENTIRE comparison.
+# No previously proved cut is assumed, and rename -hide never hides ports.
+# This is a new proof attempt, not deletion of failed obligations from a proof.
+state_retry_names=$(python3 - <<'PYSTATE_RETRY'
+import json
+import re
+from pathlib import Path
+try:
+    module = json.loads(Path("lgcheck1n.json").read_text())["modules"]["equiv"]
+except (OSError, ValueError, KeyError):
+    raise SystemExit(0)
+unproven = set()
+for cell in module.get("cells", {}).values():
+    if cell.get("type") != "$equiv":
+        continue
+    connections = cell["connections"]
+    for a, b in zip(connections["A"], connections["B"]):
+        if a != b:
+            unproven.add((a, b))
+nets = module.get("netnames", {})
+names = set()
+for name, net in nets.items():
+    if not name.endswith("_gold"):
+        continue
+    base = name[:-5]
+    other = nets.get(base + "_gate")
+    # Restrict to literal names; never interpolate Yosys selection wildcards.
+    # A bus-bit index (`state[3]`, core/bus_name.hpp) is the one exception: a
+    # select pattern would read `[3]` as a character class, so each bracket
+    # becomes the single-character wildcard `?`. Over-matching only hides MORE
+    # names, i.e. proposes fewer correspondences -- never an unproven one.
+    if other and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.$]*(\[[0-9]+\])*", base):
+        if any((a, b) in unproven for a, b in zip(net["bits"], other["bits"])):
+            names.add("w:" + base.replace("[", "?").replace("]", "?"))
+# Cgen encodes the source Memory name reversibly in its wrapper instance.
+# memory_module.cpp preserves <source>._mem[<word>][<bit>] after mapping.
+# Restore only existing pairs, without collisions or port changes. A fresh
+# comparison below must prove every proposed memory state and public output.
+memory_commands = []
+ports = module.get("ports", {})
+for name in nets:
+    match = re.fullmatch(
+        r"(.*?)__lhdmem_h([0-9a-f]+)_e\.data\[([0-9]+)\]\[([0-9]+)\]_(gold|gate)", name
+    )
+    if not match:
+        continue
+    prefix, encoded, word, bit, side = match.groups()
+    try:
+        decoded = bytes.fromhex(encoded).decode("utf-8")
+    except (ValueError, UnicodeError):
+        continue
+    old = name[:-(len(side) + 1)]
+    new = f"{prefix}{decoded}._mem[{word}][{bit}]"
+    other = "gate" if side == "gold" else "gold"
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.$]*(\[[0-9]+\])*", new):
+        continue
+    if new + "_" + other not in nets or new + "_" + side in nets:
+        continue
+    if old in ports or new in ports:
+        continue
+    memory_commands += [f"cd {side}", f"rename {old} {new}", "cd .."]
+Path("lgcheck_memory_names.ys").write_text(";\n".join(memory_commands))
+print(" ".join(sorted(names)))
+PYSTATE_RETRY
+)
+if [ -s lgcheck_memory_names.ys ]; then
+  run_clock_blind_yosys --heuristic -p "${yosys_state_prep}; script lgcheck_memory_names.ys;
+      equiv_make gold gate equiv; hierarchy -top equiv;
+      equiv_simple -undef; equiv_induct -undef -seq 4; equiv_status -assert" \
+    2>lgcheck1r.err | tee lgcheck1r.log | grep "Equivalence successfully proven!"
+  if [ $? -eq 0 ]; then
+    echo "1r.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+    exit 0
+  fi
+fi
+
+if [ -n "$state_retry_names" ]; then
+  run_clock_blind_yosys --heuristic -p "${yosys_state_prep}; rename -hide ${state_retry_names};
+      equiv_make gold gate equiv; hierarchy -top equiv;
+      equiv_simple -undef; equiv_induct -undef -seq 4; equiv_status -assert" \
+    2>lgcheck1p.err | tee lgcheck1p.log | grep "Equivalence successfully proven!"
+  if [ $? -eq 0 ]; then
+    echo "1p.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+    exit 0
+  fi
+fi
+
+# A cgen memory wrapper gives the same state a different hierarchical name.
+# Map memories and propose structural correspondence, then PROVE every added
+# $equiv obligation. Leaving $mem cells opaque makes equiv_simple inconclusive;
+# a monolithic temporal SAT query also misses this useful state correspondence.
+run_clock_blind_yosys --heuristic -p "${yosys_read}; memory; opt -full;
+    equiv_make gold gate equiv; hierarchy -top equiv;
+    equiv_struct -icells; equiv_simple; equiv_induct -seq 4; equiv_status -assert" \
+  2>lgcheck1m.err | tee lgcheck1m.log | grep "Equivalence successfully proven!"
+if [ $? -eq 0 ]; then
+  echo "1m.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+  exit 0
+fi
+
+# SAT/equiv_simple do not model $dlatch directly. Use Yosys's formal global-
+# clock model, including transparency/hold behavior, and prove the original
+# public comparison points. Structural guesses at a latch's D input are too
+# strong: D is deliberately don't-care while the latch is closed.
+run_equiv_yosys --heuristic -p "${yosys_read}; memory; opt -full; clk2fflogic; opt -full;
+    equiv_make gold gate equiv; hierarchy -top equiv;
+    equiv_simple; equiv_induct -seq 4; equiv_status -assert" \
+  2>lgcheck1c.err | tee lgcheck1c.log | grep "Equivalence successfully proven!"
+if [ $? -eq 0 ]; then
+  echo "1c.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
   exit 0
 fi
 
@@ -337,15 +874,66 @@ fi
 #  exit 0
 #fi
 
-# Word-match `reset` OUTSIDE comments: the miter's shared reset input is
-# `in_reset` only when a side has a port literally named `reset` — a design
-# whose reset is named differently (rst_ni, active-low) must NOT arm the
-# constraint (`sat -set-at ... in_reset` on a miter without that signal is a
-# hard yosys error → a false FAIL; the async_localdecl regression).
-if sed 's|//.*||' ${GOLD} | grep -qw reset; then
-  # Assert the miter's reset (the `in_`-prefixed gold/gate shared input) for
-  # the first two cycles, then release it from cycle 2 — a deterministic LEC
-  # start that brings both sides through their reset path to a known state.
+# Find a conventional reset input on the SELECTED gold module. This must be
+# derived from that module's prepared RTLIL, not from the concatenated source:
+# hierarchy descent checks one child at a time, and an unrelated parent/sibling
+# can have a reset even when the child does not (Dino's
+# DualIssueRegisterFile). Preserve the spelling because miter prefixes the
+# shared input with `in_`, and preserve polarity so active-low designs actually
+# traverse their reset path (Minion uses rst_ni).
+reset_name=""
+if [ "$GOLD_RTLIL" != "" ]; then
+  rtlil_tool="${SELF_DIR}/rtlil_children.py"
+  for candidate in reset reset_i rst rst_i reset_n reset_ni rst_n rst_ni resetn rstn; do
+    if ! has_candidate=$(python3 "$rtlil_tool" --rtlil "$GOLD_RTLIL" --top "$GOLD_TOP" --has-input "$candidate"); then
+      echo "lgcheck: could not inspect reset port of $GOLD_TOP"
+      exit 5
+    fi
+    if [ "$has_candidate" = yes ]; then
+      reset_name=$candidate
+      break
+    fi
+  done
+else
+  # Cache preparation is best-effort. Retain the conservative historical
+  # fallback only when no RTLIL is available to inspect.
+  for candidate in reset reset_i rst rst_i reset_n reset_ni rst_n rst_ni resetn rstn; do
+    if sed 's|//.*||' "${GOLD}" | grep -qw "$candidate"; then
+      reset_name=$candidate
+      break
+    fi
+  done
+fi
+if [ "$reset_name" != "" ]; then
+  reset_assert=1
+  reset_release=0
+  case "$reset_name" in
+  *_n | *_ni | resetn | rstn)
+    reset_assert=0
+    reset_release=1
+    ;;
+  esac
+  reset_signal="in_${reset_name}"
+
+  # Reset prologue of the temporal-induction stage: the miter's shared reset
+  # is asserted in the first TEMPINDUCT_RESET_STEPS sat steps and the proof
+  # starts AFTER them (`sat -tempinduct -seq N`: steps 1..N are a prefix whose
+  # property is not checked). From step N+1 on the reset is a FREE input in
+  # the base case, and the induction step never sees any reset constraint
+  # (yosys does not copy -set-at into its induction instance).
+  #
+  # Why a `-seq` prefix and not plain `-set-at` (a FALSE PROOF: f^d PROVED
+  # equal to f+d whenever the reset port was named rst): the tempinduct base
+  # case adds yosys' simple-path constraint (force_unique_state: every state
+  # of the checked window distinct). That is sound only when the inputs of
+  # the window are free, because then the shortest counterexample is loop
+  # free. With `-set-at 1 rst 1 -set-at 2 rst 0` inside the window, the
+  # zero-initialized state at step 1 and the reset state at step 2 are the
+  # SAME state, so every base case of length >=2 was UNSAT (vacuously
+  # "proven") and the induction step then closed by exhausting the small
+  # state space. With the prefix the unique-state window begins after the
+  # reset, where every input is free again. (`-set-at 0` was a no-op: sat
+  # timesteps are 1-based.)
   #
   # 2d-reg fix: the prior `-set in_reset 1` applied the constraint to EVERY
   # temporal-induction timestep (not just cycle 0/1), pinning reset high
@@ -354,20 +942,66 @@ if sed 's|//.*||' ${GOLD} | grep -qw reset; then
   # add-vs-sub "matched"). Use per-cycle `-set-at` so reset is high only at
   # cycles 0 and 1 and the induction step runs with reset free (normal
   # operation), where a real difference is actually observable.
-  RESET_STMT="-set-at 0 in_reset 1 -set-at 1 in_reset 1 -set-at 2 in_reset 0"
+  TEMPINDUCT_RESET_STEPS=2
+  RESET_STMT="-seq ${TEMPINDUCT_RESET_STEPS}"
+  for ((t = 1; t <= TEMPINDUCT_RESET_STEPS; t++)); do
+    RESET_STMT+=" -set-at ${t} ${reset_signal} ${reset_assert}"
+  done
 else
   RESET_STMT=""
 fi
 
-${YOSYS} -p " $(gold_read_cmds); proc; bmuxmap; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
-              read_verilog -sv -icells ${VLG_INC} ${GATE}; hierarchy ${GATE_TOP_STR}; proc; bmuxmap; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
+# Clock inputs of the SELECTED gold module (only needed to drive a reset). The
+# bounded check below runs under clk2fflogic, where a sat step is a global-
+# clock tick and the design clock is an ordinary free input: holding reset for
+# a few steps does NOT reset a synchronous-reset register unless the clock
+# actually rises while reset is asserted. picorv32 (sync resetn) false-refuted
+# because the solver kept in_clk low for the whole reset window, so the
+# "post-reset" comparison started from the power-on state. Trace the clock
+# pins of the gold state cells back to input ports; fall back to conventional
+# names when the RTLIL cache is unavailable or hierarchical.
+clock_names=()
+if [ "$reset_name" != "" ]; then
+  if [ "$GOLD_RTLIL" != "" ]; then
+    if ! clock_list=$(python3 "${SELF_DIR}/rtlil_children.py" --rtlil "$GOLD_RTLIL" --top "$GOLD_TOP" --clock-inputs); then
+      echo "lgcheck: could not inspect clock ports of $GOLD_TOP"
+      exit 5
+    fi
+    for clk_candidate in $clock_list; do
+      clock_names+=("$clk_candidate")
+    done
+    if [ "${#clock_names[@]}" -eq 0 ]; then
+      for clk_candidate in clk clock clk_i clock_i i_clk clk_in aclk; do
+        if [ "$(python3 "${SELF_DIR}/rtlil_children.py" --rtlil "$GOLD_RTLIL" --top "$GOLD_TOP" --has-input "$clk_candidate")" = yes ]; then
+          clock_names+=("$clk_candidate")
+          break
+        fi
+      done
+    fi
+  else
+    for clk_candidate in clk clock clk_i clock_i i_clk clk_in aclk; do
+      if sed 's|//.*||' "${GOLD}" | grep -qw "$clk_candidate"; then
+        clock_names+=("$clk_candidate")
+        break
+      fi
+    done
+  fi
+fi
+
+# Primary hardware inputs are defined bit vectors, as in cvc5 and the BMC
+# check below. Allowing X inputs makes equivalent mux/gate implementations
+# disagree only in undefined propagation and prematurely fails the base case.
+run_clock_blind_yosys -p " $(gold_read_cmds); proc; bmuxmap; opt -keepdc; flatten ; rename -top gold; prep -top gold ; design -stash gold;
+              $(gate_read_cmds); proc; bmuxmap; opt -keepdc; flatten ; rename -top gate; prep -top gate ; design -stash gate;
               design -copy-from gold -as gold gold
               design -copy-from gate -as gate gate
 
               miter -equiv -flatten -make_outputs -ignore_gold_x gold gate miter
               hierarchy -top miter
+              memory_map
+              opt_clean
               write_verilog trace2.v
-              sat -tempinduct-def -timeout 90 -prove trigger 0 ${RESET_STMT} -set-init-zero -ignore_unknown_cells -show-ports miter
+              sat -tempinduct-def -timeout 90 -prove trigger 0 ${RESET_STMT} -set-init-zero -set-def-inputs -show-ports miter
               " \
   2>lgcheck2.err | tee lgcheck2.log | grep "proven: SUCC"
 if [ $? -eq 0 ]; then
@@ -385,7 +1019,15 @@ fi
 #  exit 0
 #fi
 
-${YOSYS} -p "${yosys_read};
+# Stage 4 rewrites every $adff with +/adff2dff.v, i.e. as a SYNCHRONOUS reset
+# register: an async-reset design would prove equal to its sync-reset twin.
+# Run it only when neither design has an asynchronous set/reset/load register.
+if [ "$ASYNC_FF" -eq 0 ]; then
+  stage4_runner=run_clock_blind_yosys
+else
+  stage4_runner=false
+fi
+$stage4_runner -p "${yosys_read};
     memory -nomap; opt_expr -full; opt -purge; proc; opt -purge;
     opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge; techmap -map +/adff2dff.v;
     ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv_extra}; equiv_status -assert" \
@@ -396,7 +1038,6 @@ if [ $? -eq 0 ]; then
   exit 0
 fi
 
-LGCHECK_BMC_STEPS="${LGCHECK_BMC_STEPS:-5}"
 if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ]; then
   echo "INFO: running bounded miter check (LGCHECK_BMC_STEPS=${LGCHECK_BMC_STEPS})"
 
@@ -408,35 +1049,86 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
   # shallow depths are not masked by the deepest step.
   # Reset-bearing gold: hold the miter's shared reset for the first cycles and
   # only check AFTER the release (mirrors the tempinduct stage's RESET_STMT and
-  # cvc5's after_reset phase). Without it the miter compares un-reset zero-init
-  # states — unreachable in real hardware — and a state-encoding difference
-  # between two EQUIVALENT designs falsely refutes (XiangShan DcsrModule/Fence:
-  # cvc5 proves, the un-reset BMC "found a mismatch"). sat timesteps are
-  # 1-based: reset high at 1-2, released at 3, trigger checked from 4.
+  # cvc5's after_reset phase). Without it the miter compares un-reset
+  # power-on states — unreachable in real hardware — and a state-encoding
+  # difference between two EQUIVALENT designs falsely refutes (XiangShan
+  # DcsrModule/Fence: cvc5 proves, the un-reset BMC "found a mismatch").
+  #
+  # Under clk2fflogic a sat step is a global-clock tick, not a design cycle,
+  # so the reset window must also DRIVE the design clock(s): 0,1,0,1 gives two
+  # rising (and one falling) edges while reset is asserted. clk2fflogic's
+  # sampled clock starts at the inactive level, so step 1 can never be an
+  # edge that samples the power-on D. Reset is released at step 5 with the
+  # clock free again, and the trigger is checked from there. sat timesteps
+  # are 1-based. Without a known clock keep the historical 3-step window
+  # (reset at 1-2, release at 3); only an asynchronous reset is then assured.
   bmc_start=1
   BMC_RESET_STMT=""
   if [ "${RESET_STMT}" != "" ]; then
-    BMC_RESET_STMT="-set-at 1 in_reset 1 -set-at 2 in_reset 1 -set-at 3 in_reset 0"
-    bmc_start=4
+    if [ "${#clock_names[@]}" -gt 0 ]; then
+      echo "INFO: bounded check clocks the reset window (2 rising edges) on: ${clock_names[*]}"
+      BMC_RESET_STMT="-set-at 1 ${reset_signal} ${reset_assert} -set-at 2 ${reset_signal} ${reset_assert}"
+      BMC_RESET_STMT+=" -set-at 3 ${reset_signal} ${reset_assert} -set-at 4 ${reset_signal} ${reset_assert}"
+      BMC_RESET_STMT+=" -set-at 5 ${reset_signal} ${reset_release}"
+      for clk_name in "${clock_names[@]}"; do
+        BMC_RESET_STMT+=" -set-at 1 in_${clk_name} 0 -set-at 2 in_${clk_name} 1 -set-at 3 in_${clk_name} 0 -set-at 4 in_${clk_name} 1"
+      done
+      bmc_start=5
+      # Power-on state stays ZERO on both sides after the clocked reset (the
+      # init policy below). An all-X start (-set-init-undef) is unsound in
+      # the REFUTING direction: sat's X model is pessimistic, so a
+      # structurally different but equivalent gate (e.g. a mux whose select
+      # is un-reset X but whose arms agree) yields X where the gold side
+      # computes a defined bit, and the miter reports that X as a mismatch
+      # (br_fifo_shared_pop_ctrl pop_data: native cvc5 LEC proves, the
+      # all-X BMC "refuted"). Zero init is consistent across RTL and a
+      # QN-mapped netlist because the Liberty model's state IS the QN pin
+      # that pass.abc wires as the register (emit_dff_model: Flop(Not(D))),
+      # so zero state is Q=0 on both sides. The historical picorv32 refute
+      # blamed on QN init was the UNCLOCKED reset window: the first edge
+      # sampled un-reset (unreachable, synthesis don't-care) state.
+    else
+      echo "WARN: no clock input found on ${GOLD_TOP}; the bounded check cannot drive a synchronous reset"
+      BMC_RESET_STMT="-set-at 1 ${reset_signal} ${reset_assert} -set-at 2 ${reset_signal} ${reset_assert} -set-at 3 ${reset_signal} ${reset_release}"
+      bmc_start=4
+    fi
   fi
+  # Shared zero initialization: it assumes the two designs encode their
+  # power-on state identically (true for the Q-polarity register state of RTL
+  # and of lhd netlists; a netlist that stores a register inverted without
+  # reset can still false-refute -- the native cvc5 LEC pairs states instead).
+  # An all-X start is not an option: with a reset it manufactures X-pessimism
+  # refutes (above), without one it leaves e.g. a resetless LFSR undefined
+  # forever and the gold X mask hides every difference.
   bmc_sat_cmds=""
   for ((t = bmc_start; t < bmc_start + LGCHECK_BMC_STEPS; t++)); do
-    bmc_sat_cmds+="sat -ignore_unknown_cells -seq ${t} ${BMC_RESET_STMT} -set-at ${t} trigger 1 -prove trigger 0 -set-init-zero -set-def-inputs -show-ports miter; "
+    bmc_sat_cmds+="sat -seq ${t} ${BMC_RESET_STMT} -set-at ${t} trigger 1 -prove trigger 0 -set-init-zero -set-def-inputs -show-ports miter; "
   done
 
   # No -q: yosys -q suppresses the SAT report itself, so the log would always
   # be empty and the greps below would vacuously "pass" any pair of designs.
-  ${YOSYS} -p "$(gold_read_cmds); proc; bmuxmap; memory; opt; flatten ; rename -top gold; prep -top gold ; design -stash gold;
-               read_verilog -sv -icells ${VLG_INC} ${GATE}; hierarchy ${GATE_TOP_STR}; proc; bmuxmap; memory; opt; flatten ; rename -top gate; prep -top gate ; design -stash gate;
+  # Preserve don't-care state until both sides are in the miter.  Plain `opt`
+  # may replace a resetless DFFE whose written value is constant with that
+  # constant, including at time zero.  The structurally different mapped side
+  # can retain the flop until after flattening; the later `-set-init-zero` then
+  # compares constant-one GOLD against zero-initialized GATE and manufactures
+  # a counterexample (br_amba_axil_msi's pop_data[3:0]).  `-keepdc` keeps the
+  # two equivalent machines intact before the shared initialization policy is
+  # applied by SAT.
+  run_equiv_yosys --bmc -p "$(gold_read_cmds); proc; bmuxmap; memory; opt -keepdc; flatten ; rename -top gold; prep -top gold ; design -stash gold;
+               $(gate_read_cmds); proc; bmuxmap; memory; opt -keepdc; flatten ; rename -top gate; prep -top gate ; design -stash gate;
                design -copy-from gold -as gold gold
                design -copy-from gate -as gate gate
                miter -equiv -flatten -make_outputs -ignore_gold_x gold gate miter
+               clk2fflogic
+               opt_clean
                async2sync
                dffunmap; proc; opt_clean
                hierarchy -top miter
                ${bmc_sat_cmds}
                " \
     2>lgcheck_bmc.err >lgcheck_bmc.log
+  bmc_status=$?
 
   if grep -q "model found: FAIL" lgcheck_bmc.log; then
     echo "WARN: bounded check found a mismatch within ${LGCHECK_BMC_STEPS} steps (see lgcheck_bmc.log)."
@@ -445,21 +1137,25 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
   fi
 
   # A hard yosys error here (port-list mismatch in `miter`, parse error, bad
-  # top) means the designs cannot even be compared: report non-equivalent,
-  # never a silent pass (same policy as hagent/tool/equiv_check.py).
+  # top) means the designs cannot even be compared. Keep that setup failure
+  # distinct from the bounded counterexample above.
   if grep -q "^ERROR" lgcheck_bmc.err; then
     echo "WARN: bounded miter check failed: $(grep -m1 '^ERROR' lgcheck_bmc.err)"
-    echo "FAIL: circuits are not equivalent ${GATE} vs ${GOLD} with top:${fm_top}"
-    exit 1
+    echo "FAIL: unable to compare ${GATE} vs ${GOLD} with top:${fm_top}"
+    exit 5
   fi
 
-  # Sound pass requires the explicit SUCCESS marker from every bounded depth.
+  # Explicit SUCCESS at every depth means only "no counterexample within this
+  # bounded window". It is useful evidence, but it is NOT an equivalence proof:
+  # a divergence can first appear at N+1. Keep going to the common
+  # INCONCLUSIVE result; only the structural/inductive engines above may exit 0.
   if [ "$(grep -c 'no model found: SUCCESS' lgcheck_bmc.log)" -eq "${LGCHECK_BMC_STEPS}" ]; then
-    echo "BMC.Successfully matched ${GATE} with ${GOLD} within ${LGCHECK_BMC_STEPS} steps top:${fm_top}"
-    exit 0
+    echo "BMC: found no counterexample within ${LGCHECK_BMC_STEPS} steps top:${fm_top}; this bounded result is not a proof."
+  elif [ "$bmc_status" -eq 124 ]; then
+    echo "TIMEOUT: bounded miter exhausted the shared equivalence budget (${LGCHECK_EQUIV_TIMEOUT}s)."
+  else
+    echo "WARN: bounded miter check did not run to completion (see lgcheck_bmc.err); inconclusive."
   fi
-
-  echo "WARN: bounded miter check did not run to completion (see lgcheck_bmc.err); inconclusive."
 fi
 
 # Reached only when NO bounded-miter counterexample was found (the real-CEX
@@ -470,4 +1166,107 @@ fi
 # distinct code so the caller reports Unknown, never a false REFUTE.
 echo "WARN: Yosys could not prove equivalency and found NO counterexample."
 echo "INCONCLUSIVE: equivalence undetermined ${GATE} vs ${GOLD} with top:${fm_top}"
+
+if [ "$DESCEND_ON_INCONCLUSIVE" -eq 1 ]; then
+  children_tool="${SELF_DIR}/rtlil_children.py"
+  if [ ! -f "$children_tool" ]; then
+    echo "lgcheck: RTLIL hierarchy helper not found: $children_tool"
+    exit 5
+  fi
+  visited_file=${LGCHECK_DESCEND_VISITED_FILE:-$PWD/lgcheck_descend_visited.txt}
+  visited_file=$(cd "$(dirname "$visited_file")" && pwd)/$(basename "$visited_file")
+  touch "$visited_file"
+  if ! grep -Fxq "$BASE_GOLD_TOP" "$visited_file"; then
+    printf '%s\n' "$BASE_GOLD_TOP" >>"$visited_file"
+  fi
+  children_file="$PWD/lgcheck_direct_children.txt"
+  children_args=(--rtlil "$BASE_GATE_RTLIL" --top "$BASE_GATE_TOP" --with-base)
+  # yosys-slang's best-effort hierarchy gives both sides the same
+  # occurrence-specialized module name (`child$parent.instance`). Prefer that
+  # exact GOLD definition when present: rereading the unspecialized source base
+  # silently restores default parameters and can manufacture a port-width
+  # mismatch (Minion's prim_eco_ports is 4 bits by default, 10 bits in-top).
+  if [ "$BASE_GOLD_RTLIL" != "" ]; then
+    children_args+=(--map-against "$BASE_GOLD_RTLIL")
+  fi
+  if ! python3 "$children_tool" "${children_args[@]}" >"$children_file"; then
+    echo "lgcheck: could not inspect implementation children of $BASE_GATE_TOP"
+    exit 5
+  fi
+  # macOS /bin/bash is 3.2 and has no mapfile. Read every child with builtins
+  # available there too, or an inconclusive parent silently skips its children.
+  direct_children=()
+  while IFS= read -r child_pair || [ -n "$child_pair" ]; do
+    direct_children+=("$child_pair")
+  done <"$children_file"
+  if [ "${#direct_children[@]}" -eq 0 ]; then
+    echo "INFO: $GOLD_TOP is an inconclusive leaf; no lower module remains to check"
+  else
+    echo "INFO: descending from inconclusive $GOLD_TOP into ${#direct_children[@]} direct child definition(s)"
+  fi
+  for child_pair in "${direct_children[@]}"; do
+    child_gate=${child_pair%%$'\t'*}
+    child_gold=${child_pair#*$'\t'}
+    case "$child_gold" in
+    -)
+      echo "INFO: skip implementation-only generated child $child_gate (no compatible reference module counterpart)"
+      continue
+      ;;
+    cgen_memory_*)
+      echo "INFO: skip generated support module $child_gold (no original-Verilog module counterpart)"
+      continue
+      ;;
+    esac
+    if grep -Fxq "$child_gold" "$visited_file"; then
+      echo "INFO: skip already checked descendant $child_gold"
+      continue
+    fi
+    printf '%s\n' "$child_gold" >>"$visited_file"
+    safe_child=${child_gate//[^A-Za-z0-9_.-]/_}
+    child_dir="$PWD/lgcheck_descend/$safe_child"
+    mkdir -p "$child_dir"
+    echo "INFO: checking descendant $child_gold (gate occurrence $child_gate; separate ${LGCHECK_EQUIV_TIMEOUT}s equivalence budget)"
+    child_args=(
+      --reference "$GOLD" --implementation "$GATE" --yosys "$YOSYS"
+      --reference_top "$child_gold" --implementation_top "$child_gate"
+      --gold_reader "$GOLD_READER" --gate_reader "$GATE_READER"
+      --gate_rtlil "$BASE_GATE_RTLIL"
+      --descend_on_inconclusive
+    )
+    # Reuse the gold cache when it retained this exact definition. A
+    # parameter-specialized gate child may map to an unspecialized base name
+    # that the top-scoped gold import did not keep; in that case fall back to
+    # rereading the source for this child rather than turning an optimization
+    # miss into a setup failure.
+    if [ "$BASE_GOLD_RTLIL" != "" ] && grep -Fqx "module \\$child_gold" "$BASE_GOLD_RTLIL"; then
+      child_args+=(--gold_rtlil "$BASE_GOLD_RTLIL")
+    fi
+    if [ "$NORMALIZE_SPLIT_PORTS" -eq 1 ]; then
+      child_args+=(--normalize_split_ports)
+    fi
+    if [ "$SLANG_PLUGIN" != "" ]; then
+      child_args+=(--slang_plugin "$SLANG_PLUGIN")
+    fi
+    if [ "$CELLLIB" != "" ]; then
+      child_args+=(--cell_library "$CELLLIB")
+    fi
+    set +e
+    (cd "$child_dir" && LGCHECK_DESCEND_VISITED_FILE="$visited_file" \
+      LGCHECK_EQUIV_TIMEOUT="$LGCHECK_EQUIV_TIMEOUT" "$SELF_DIR/lgcheck" "${child_args[@]}")
+    child_rc=$?
+    set -e
+    case "$child_rc" in
+    0) echo "DESCEND PROVEN: $child_gold" ;;
+    2) echo "DESCEND INCONCLUSIVE: $child_gold (no counterexample; its unresolved children were checked)" ;;
+    1)
+      echo "DESCEND REFUTED: $child_gold"
+      exit 1
+      ;;
+    *)
+      echo "DESCEND SETUP FAILED: $child_gold (rc=$child_rc)"
+      exit 5
+      ;;
+    esac
+  done
+fi
 exit 2

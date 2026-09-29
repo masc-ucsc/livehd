@@ -1,0 +1,8 @@
+/*
+:name: array_oob_read_static
+:type: error
+:error: outside \[0, 2\)
+*/
+
+mut lanes:[2]u8 = 0
+const bad = lanes[2]  // locate_error_here

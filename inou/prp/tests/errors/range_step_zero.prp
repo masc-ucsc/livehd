@@ -1,0 +1,6 @@
+/*
+:name: range_step_zero
+:type: error
+:error: range step must be a positive integer
+*/
+const invalid_range = 0..<10 step 0

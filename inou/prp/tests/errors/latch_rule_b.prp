@@ -1,0 +1,15 @@
+/*
+:name: latch_rule_b
+:type: error
+:tolg: 1
+:error: rule B, transparent self-update
+*/
+
+// A real Q-to-D computation while transparent must still be rejected.
+// Plain hold arms are covered by equiv/latch_match_exhaustive.prp.
+pub mod latch_rule_b(en:bool) -> (q:u4@[]) {
+  reg q:u4:[latch=true]
+  if en {
+    wrap q = q + 1
+  }
+}

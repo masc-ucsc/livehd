@@ -1,0 +1,8 @@
+/*
+:name: string_bit_selection
+:type: error
+:error: strings are opaque and have no bit vector
+:help: ordered packed aggregate
+*/
+const text="ab"
+const packed=text#[..]

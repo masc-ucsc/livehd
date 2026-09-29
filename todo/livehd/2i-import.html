@@ -3,301 +3,50 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TODO 2i-import — Import &amp; library-link redesign (directory namespaces, structural-id merge, parallel build)</title>
+<title>TODO 2i-import — link multiple precompiled LGraph libraries</title>
 <link rel="stylesheet" href="../todo.css">
 </head>
 <body>
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
-<h1><strong class="item-id">2i-import</strong> Import &amp; library-link redesign — directory namespaces, structural-id merge, parallel build</h1>
+<h1><strong class="item-id">2i-import</strong> Link multiple precompiled
+<code>lg:</code> libraries</h1>
 
-<p>Rebuild the Pyrope <code>import</code> experience around three ideas, settled in a
-  design back-and-forth with the user. <strong>(1) A library is a directory</strong>; the
-  <code>pub</code> modules inside it have <strong>flat, short names</strong> (no
-  <code>file.entity</code> dotting). <strong>(2) A module's identity is its
-  <em>structure</em></strong> — the forward-canonical digest
-  (<code>semdiff::canonical_digest</code>, owned by
-  <a class="xref" href="3f-semdiff.html">3f-semdiff</a>, built on
-  <code>pass/semdiff</code>'s forward signature), not its name or its file path.
-  <strong>(3) Same-name modules coexist</strong>: internal names are unique
-  <code>file.entity</code> (the 2026-07-04 lg-drop), so at link two structurally-identical
-  modules <em>dedup</em> by digest while two different modules sharing a name simply keep
-  their distinct qualified names; only Verilog emission resolves the name — bare entity
-  when unique, qualified on collision (landed). The same <code>.prp</code> compiles unchanged
-  in the <strong>interactive single-file flow</strong> (imports resolve to sibling source)
-  and a <strong>hermetic parallel-<code>bazel</code> flow</strong> (imports resolve to
-  precompiled artifacts, discovered by <code>lhd scan</code>).</p>
+<p><strong>Goal.</strong> Complete the precompiled-artifact path for fast incremental
+compilation: one <code>lhd compile</code> invocation accepts several independent
+<code>lg:</code> inputs, links them deterministically, and continues through the normal
+compile/emit pipeline.</p>
 
-<p>This replaces the friction documented in two real Verilog→Pyrope porting logs (the DINO
-  pipelined RISC-V CPU translations): "you must list every dependency file", permanent
-  false LSP "unresolved import" squiggles, <code>\file.entity</code> module names, the
-  filename==modname instantiation failure, and the catch-all "no hardware lowering yet"
-  reject. The issue IDs each piece closes are tabulated under <em>What this closes</em>.</p>
+<h2>Already working</h2>
+<p>Source-relative Pyrope imports, sibling-module lowering, <code>lhd scan</code>, mixed
+<code>ln:</code>/<code>lg:</code> linking, canonical graph digests, structural matching,
+and single-library loading are landed. They are not pending work on this page.</p>
 
-<h2>Depends on / relates to</h2>
-<ul>
-<li><a class="xref" href="3f-semdiff.html">3f-semdiff</a> (canonical digest; the v1
-  <code>pass/semdiff</code> engine is landed) — <strong>export two entry points</strong>:
-  <code>semdiff::canonical_hash(graph)</code> (the forward signature folded to a digest —
-  the IO-by-name, commutative-within-port, <code>bits</code>-folded key it already builds)
-  as the dedup bucket key, and the existing <code>semdiff::structural_match</code> as the
-  <em>confirm</em> step run only within a bucket. Hash proposes, <code>structural_match</code>
-  disposes — so a digest collision can never cause a false merge.</li>
-<li><code>lhd scan</code> (depfile discovery, landed via 1f) — already parses a
-  <code>.prp</code> and reports its raw <code>import</code> strings as JSON, explicitly
-  "for depfile writers and BUILD generators (gazelle-style)". This is the discovery
-  primitive the <code>bazel</code> flow is built on; it removes the need for an
-  <code>-I</code> include-path in the common case.</li>
-<li>The existing artifact linker (<code>lhd compile</code> union: <code>--in lg:</code> /
-  <code>--in-dir ln:</code> / <code>--emit-dir</code>) and the <strong>ambiguity check
-  already in <code>upass/core/call_resolver.cpp</code></strong> — <em>"ambiguous import
-  'X': unit provided by more than one input"</em>. The "error, never silent first-hit"
-  rule the user asked for already exists for <code>ln:</code> inputs; this task extends the
-  same rule to filesystem / <code>-I</code> roots.</li>
-<li>Cross-file <code>mod</code> instantiation lowering — already landed in
-  <code>upass/tolg/upass_tolg.cpp</code> (<code>resolve_callee_lnast</code> + GraphIO
-  lookup by effective graph name). This task formalizes it as the hash-ref the link step
-  resolves, and removes the residual filename==modname shadowing.</li>
-<li>Feeds <a class="xref" href="3y-agent.html">3y-agent</a>'s deferred kernel items
-  ("multi-<code>lg:</code> linking residuals", "import-resolver feed"). The
-  multi-<code>lg:</code> link is the merge step specified here; today
-  <code>--in lg:</code> is capped at one input.</li>
-</ul>
-
-<h2>Mental model (one line)</h2>
-<p>A <strong>library is a directory</strong>; <code>pub</code> modules in it have flat short
-  names; a module's true identity is its <strong>forward-canonical structure digest</strong>,
-  so names are just labels — internal names are unique <code>file.entity</code>, same-name
-  modules coexist, and only Verilog emission disambiguates (bare entity when unique,
-  qualified on collision).</p>
-
-<h2>The user experience — interactive flow (the daily loop)</h2>
-<p>Imports are <strong>logical names</strong>, resolved <strong>relative to the importing
-  file's own directory</strong> (not cwd, not an ancestor crawl). One file on the command
-  line transitively pulls in its siblings.</p>
-<pre><code># cpu.prp:   const alu = import("alu")          # logical name
-#            const rf  = import("ip/regfile.regfile")
-#            const pll = import("lg:sky130_pll") # explicit external blackbox only
-
-lhd compile foo/cpu.prp                     # resolves alu -> foo/alu.prp,
-                                            # ip/regfile -> foo/ip/regfile.prp,
-                                            # transitively; no file list needed
-lhd compile foo/cpu.prp --emit verilog:soc.v
-
-# emitted module names are BARE:  module alu (...)   not  \foo.alu
-</code></pre>
-<ul>
-<li>The LSP uses the <em>same</em> resolver, so opening one file resolves its imports off
-  disk — the permanent false "unresolved import" squiggles disappear.</li>
-<li><code>lg:</code> / <code>ln:</code> never appear in project source — only as the
-  deliberate override for a fixed external netlist (vendor macro / blackbox IP) that must
-  always bind to a precompiled artifact and must never resolve to source.</li>
-</ul>
-
-<h2>The user experience — hermetic parallel-<code>bazel</code> flow</h2>
-<p>The same source, no edits. <code>lhd scan</code> drives BUILD generation; each library
-  compiles in parallel to a <code>lg:</code> artifact; a link target merges them.</p>
-<pre><code># gazelle runs `lhd scan *.prp`, reads the raw imports, emits BUILD:
-prp_library(name = "alu", srcs = ["alu.prp"])
-prp_library(name = "cpu", srcs = ["cpu.prp"], deps = [":alu"])   # alu artifact in
-                                                                 # the sandbox
-
-# each prp_library -> `lhd compile alu.prp --emit-dir lg:alu/`   (PARALLEL)
-#   the cpu artifact records its `alu` instance as a hash-ref (canonical digest),
-#   not a hard name binding.
-
-prp_link(name = "soc", deps = [":cpu", ":gpu"])
-#   -> `lhd compile --in lg:cpu/ --in lg:gpu/ --top cpu --emit verilog:soc.v`
-#      (no `lhd link` verb: `lhd compile` links when given lg: inputs, gcc-style)
-#      load all -> bottom-up digest -> bucket -> structural_match confirm
-#      -> dedup identical; distinct same-name modules coexist (unique file.entity)
-#      -> emit (bare entity name when unique, qualified on collision)
-</code></pre>
-<p>Hermetic: resolution sees only the sandbox-declared dep artifacts, no filesystem crawl.
-  Incremental: touching <code>alu.prp</code> changes <code>alu</code>'s digest and relinks
-  only its hash-affected dependents.</p>
-
-<h2>Design decisions (locked)</h2>
-<ul class="subtasks">
-<li><strong>Namespace = directory; names flat within.</strong> A graph library (a
-  directory / an <code>lg:</code> artifact) is the namespace boundary. <code>pub comb alu</code>
-  emits <code>module alu</code>. No <code>file.entity</code> dotting, no backslash-escaped
-  names in the common case.</li>
-<li><strong>Identity = forward-canonical structure digest, origin-ignored.</strong> Two
-  modules are "the same" iff their lowered graphs share the canonical digest — regardless
-  of file path or even module name. The digest is
-  <a class="xref" href="3f-semdiff.html">3f-semdiff</a>'s <code>canonical_digest</code>
-  over the <code>pass/semdiff</code> forward signature (deterministic,
-  order-independent), so it is <strong>stable across independent compile processes</strong>
-  — the property the parallel build needs.</li>
-<li><strong>The two failure modes are not symmetric, so dedup is <em>sound</em>, never
-  merely heuristic.</strong> A <em>false merge</em> (collapsing two different modules) is
-  silently-wrong hardware — forbidden. A <em>false split</em> (keeping two copies of the
-  same module) is still-correct hardware, just a duplicated module — tolerable. So the rule:
-  dedup <strong>only</strong> when sameness is proven (digest bucket → <code>structural_match</code>
-  confirm), otherwise the modules simply coexist.</li>
-<li><strong>Distinct same-name modules COEXIST — no merge-time rename (final, post lg-drop
-  2026-07-04).</strong> Internal names are unique <code>file.entity</code>, so two distinct
-  digests sharing a short name never clash inside the design: nothing is renamed at link and
-  no instance wiring is re-pointed. The name is resolved only at Verilog emission — each
-  module flattens to its bare entity name when that is unique across the design and keeps
-  the qualified name on collision (landed: <code>inou/cgen/inou_cgen.cpp:56-91</code>
-  <code>flat_names</code>).</li>
-<li><strong>The digest is bottom-up (Merkle).</strong> A parent's identity must include its
-  children's identities — else two parents with identical bodies but different child
-  <code>alu</code>s would false-merge. Inject each resolved child digest at its instance
-  boundary (treat it like a leaf constant) and the parent's forward-canonical digest
-  incorporates it for free; the existing <code>foo__u8</code> / <code>foo__u16</code>
-  specialization split already fits this. Consequence: a single differing leaf
-  re-distinguishes its whole instantiation cone — the big dedup win is shared <em>low-level</em>
-  libraries (common cells, a shared regfile/adder), not near-identical top-levels.</li>
-<li><strong>Resolution is importer-directory-relative; ambiguity is an error.</strong>
-  Interactive <code>import("x")</code> resolves against the importing file's own directory
-  (and paths under it), first and only. A name reachable from two roots / two inputs that
-  are not the same module ⇒ error listing the candidates (reuse the
-  <code>call_resolver</code> ambiguity check). <code>-I</code> is an optional escape hatch
-  for unusual layouts, ambiguity-checked the same way.</li>
-<li><strong>Source imports are logical; <code>lg:</code> is the explicit override.</strong>
-  Bare <code>import("alu")</code> binds to source (interactive) or artifact (bazel) by
-  resolution context — same <code>.prp</code>, both flows, zero edits. Explicit
-  <code>import("lg:vendor_pll")</code> always binds the precompiled netlist (external IP /
-  blackbox) and never resolves to source. <strong>Where each is found:</strong> a Pyrope
-  source import is searched only in the importing file's own directory or an explicit
-  <code>-I</code> root (no cwd, no ancestor crawl); an <code>lg:</code> import is searched at
-  the graph-library location. There is <strong>no default <code>lgdb/</code></strong> dumped
-  in the source tree (removed — dissolves 6b).</li>
-</ul>
-
-<h2>Merge / link algorithm (no separate verb — <code>lhd compile</code>, gcc-style)</h2>
-<p>There is <strong>no <code>lhd link</code></strong>. <code>lhd compile</code> compiles,
-  links, or both depending on its inputs — like <code>gcc</code> over <code>.c</code> /
-  <code>.o</code>. Given several <code>lg:</code> inputs and a <code>--top</code> it runs the
-  merge below; given source it compiles; given both it does each. <code>lhd scan</code> stays
-  a separate, build-system-facing tool — bazel/gazelle <em>or</em> makefiles read its
-  raw-import JSON to generate deps; it is not on the compile path.</p>
+<h2>Pending</h2>
 <ol>
-<li>Load every unit graph from the inputs (artifacts in the bazel flow; the transitively
-  parsed source closure in the interactive flow).</li>
-<li>Walk the instance DAG <strong>bottom-up</strong>; for each module compute
-  <code>semdiff::canonical_hash</code>, injecting each already-resolved child's digest at
-  its instance boundary (Merkle).</li>
-<li><strong>Dedup key = digest.</strong> Bucket all modules by digest; within a bucket run
-  <code>structural_match</code> to confirm, then collapse the bucket to one module and
-  rewire all instances of any member to it. (Distinct names, same digest ⇒ still one module
-  under a single canonical name — origin/name is ignored per the identity rule.)</li>
-<li><strong>Name coexistence — no rename.</strong> <em>Surviving</em> (distinct-digest)
-  modules that share a short name simply coexist under their unique <code>file.entity</code>
-  internal names; nothing is renamed and no instance is re-pointed. Report every dedup.</li>
-<li>Emit. Verilog emission flattens each module to its bare entity name when that is unique
-  across the design and keeps the qualified name on collision (landed:
-  <code>inou/cgen/inou_cgen.cpp:56-91</code> <code>flat_names</code>); instance references
-  match the emitted name.</li>
+<li><strong>Lift the raw-library cap.</strong> Remove the explicit rejection of
+multiple pure <code>lg:</code> inputs in <code>lhd compile</code> and merge each library
+without assuming gids are process-global.</li>
+<li><strong>Collision-safe identity.</strong> Use
+<code>semdiff::canonical_digest</code> to form candidate buckets, then confirm equality
+with <code>structural_match</code> before deduplicating. A digest match alone must never
+decide hardware identity.</li>
+<li><strong>Name policy.</strong> Deduplicate structurally identical modules; preserve
+distinct same-name modules under deterministic internal names; emit a bare Verilog name
+only when it is unambiguous.</li>
+<li><strong>Dependency and reachability handling.</strong> Resolve Sub dependencies
+across all inputs, diagnose missing/ambiguous providers, and retain only modules reachable
+from the requested top when a top is supplied.</li>
+<li><strong>Link report and regressions.</strong> Report loaded, deduplicated, renamed,
+and pruned modules. Test identical modules from independent libraries, distinct same-name
+modules, cross-library hierarchy, deterministic output, and a missing dependency.</li>
 </ol>
 
-<h2>Artifact format (forward-canonical hash-ref)</h2>
-<p>Extend the per-library <code>lg:</code> artifact (its <code>library.txt</code> /
-  <code>manifest.json</code>) so the link step can dedup and rebind without re-elaboration:</p>
-<ul class="subtasks">
-<li>Per module: its <strong>forward-canonical digest</strong> and its <strong>port
-  signature</strong> (names, widths, signedness, order).</li>
-<li>Per <code>Sub</code> instance: a <strong>by-digest reference</strong> to the instantiated
-  module (the child's digest) instead of a hard name binding — so a dedup at link is a pure
-  relabel, and a cross-library instance binds to whichever artifact carries the
-  matching digest.</li>
-<li>A per-library compile consumes its own <code>.prp</code> files plus the
-  <code>lg:</code> artifacts of the libraries it imports (to read dep interfaces and embed
-  dep digests). It emits only its own modules.</li>
-</ul>
-
-<h2>What this closes (from the porting logs)</h2>
-<ul>
-<li><strong>A7 / 6a</strong> — no on-disk import search → importer-dir-relative resolution
-  makes <code>lhd compile foo/bar.prp</code> (and the LSP) resolve siblings automatically;
-  no more "list every file".</li>
-<li><strong>6c</strong> — <code>\file.entity</code> escaped names → Verilog emission
-  flattens to bare module names by default, qualified only on a real collision (landed via
-  <code>flat_names</code>).</li>
-<li><strong>2f / A1</strong> — cross-file instantiation "no hardware lowering yet" and the
-  filename==modname shadow → identity is structural and library-scoped, so name==filename
-  is irrelevant; cross-file instances are first-class link hash-refs.</li>
-<li><strong>C1</strong> — the catch-all "no hardware lowering yet … wrap/sat pending" that
-  bundled callee-not-found, name collision, and missing file → cross-file instantiation is
-  a defined link step, and unresolved/ambiguous imports get their own named diagnostics.</li>
-<li><strong>The cross-project collision the user led with</strong> — two designs both
-  defining <code>alu</code> → dedup at merge if structurally identical; otherwise both
-  coexist under their unique <code>file.entity</code> names and Verilog emission keeps the
-  qualified name for the colliding one — never a silent clash.</li>
-</ul>
-
-<h2>Subtasks — pending (suggested slices)</h2>
-<ul class="subtasks">
-<li><strong>S3 — <code>canonical_hash</code> export.</strong>
-  <span class="status">partial — re-verified 2026-06-27</span> Add
-  <code>semdiff::canonical_hash(graph)</code> to <code>pass/semdiff</code> (the
-  <a class="xref" href="3f-semdiff.html">3f-semdiff</a> digest deliverable)
-  and the bottom-up Merkle driver over the instance DAG.
-  <em>Today:</em> only the confirm step <code>structural_match</code> is exported
-  (<code>pass/semdiff/semdiff.hpp:42</code>); there is no exported single-graph digest, and the
-  internal <code>fsig</code>/<code>bsig</code> node signatures are only run-deterministic (they
-  fold in library-scoped gids / debug nids), not the required process-independent digest.
-  <em>Remaining:</em> the exported process-independent <code>canonical_hash</code> plus the
-  bottom-up Merkle driver that injects each resolved child's digest at its instance boundary.</li>
-<li><strong>S4 — multi-<code>lg:</code> link inside <code>lhd compile</code>.</strong>
-  <span class="status">partial — re-verified 2026-06-27</span> Lift
-  the one-<code>lg:</code> cap (no separate <code>lhd link</code> verb); when given several
-  <code>lg:</code> inputs <code>lhd compile</code> runs the merge = load → digest → bucket →
-  <code>structural_match</code> confirm → dedup → emit, with a report (distinct same-name
-  modules coexist under their unique <code>file.entity</code> names — no rename step).
-  <em>Today:</em> the <code>ln:</code>+<code>lg:</code> linker (<code>compile_link_ir</code>) and
-  the source+<code>lg:</code> path already <code>load_merge</code> several <code>lg:</code> inputs,
-  but that merge is hhds <strong>name-hash</strong> dedup only (no per-module digest, no
-  <code>structural_match</code> confirm, no report), and the pure
-  <code>lg:</code>-only path is still capped (<code>lhd/lhd_kernel.cpp:2632</code>
-  <code>compile_ir</code>: <em>"multiple lg: inputs are not supported yet"</em>).
-  <em>Remaining:</em> lift the pure-<code>lg:</code> cap and replace the name-hash dedup with the
-  digest → bucket → <code>structural_match</code> confirm → dedup pipeline.</li>
-<li><strong>S5 — artifact format.</strong>
-  <span class="status">partial — re-verified 2026-06-27</span> Digest + port signature per module,
-  by-digest instance refs in the <code>lg:</code> manifest.
-  <em>Today:</em> the <code>lg:</code> <code>library.txt</code> already records the
-  <strong>port signature</strong> per module (names, port-id order, <code>bits</code>, sign); there
-  is no per-module digest, no <code>lg:</code> manifest, and <code>Sub</code> instances still bind
-  by name-hash gid (a hard name binding).
-  <em>Remaining:</em> the per-module forward-canonical digest and the by-digest <code>Sub</code>
-  instance refs.</li>
-<li><strong>S6 — <code>prp_library</code> / <code>prp_link</code> + gazelle.</strong> Bazel
-  rules driving parallel per-library <code>lhd compile</code> from <code>lhd scan</code>
-  output, then the link target.</li>
-</ul>
-
-<h2>Remaining items</h2>
-<ul>
-<li><strong>Still genuinely open:</strong> emitted ports are all <code>signed</code> even when
-  the source type is unsigned (6d — <code>cgen_verilog.cpp</code> hardcodes
-  <code>input signed</code> / <code>output reg signed</code> while the GraphIO carries the real
-  sign). Small and independent of this redesign.</li>
-<li><strong>Small details to settle while implementing:</strong> which name survives when two
-  differently-named modules share a digest (a deterministic canonical pick); and whether the
-  LSP parses the full transitive closure or resolves dependency interfaces only
-  (responsiveness).</li>
-</ul>
-
-<h2>Traps</h2>
-<ul class="subtasks">
-<li><strong>The digest MUST be process-independent.</strong> It cannot depend on node gids,
-  allocation order, or any per-run state — two libraries compiled in separate
-  <code>lhd</code> invocations must produce comparable digests. The
-  <code>pass/semdiff</code> forward signature is already
-  canonical (commutative-within-port, IO-by-name, <code>bits</code>-folded); a digest must
-  preserve exactly that and add nothing run-dependent.</li>
-<li><strong>Never bucket-and-dedup on the digest alone.</strong> A digest collision must be
-  confirmed by <code>structural_match</code> before merging, or a hash clash becomes wrong
-  hardware. Hash narrows candidates; the traversal decides truth.</li>
-<li><strong>Two libraries with same-named modules keep independent attr stores.</strong>
-  Same caution as <a class="xref" href="3f-semdiff.html">3f-semdiff</a>: hold the
-  <code>Graph*</code> per library; don't let one <code>Hhds_graph_library</code> alias gids
-  across the two.</li>
-</ul>
+<h2>Done when</h2>
+<p>A design split into independently compiled libraries links with multiple
+<code>lg:</code> inputs, produces the same result as a clean whole-design compile, and
+reuses unchanged artifacts after one source module changes.</p>
 </main>
+<footer><a href="../index.html">← All tasks</a> · LiveHD TODO · <code>livehd</code></footer>
 </body>
 </html>

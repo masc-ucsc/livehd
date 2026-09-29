@@ -1,0 +1,19 @@
+/*
+:name: wire_cond_double_drive
+:type: error
+:error: more than one driver
+:help: exactly one assignment
+*/
+
+// 2c-wire — a CONDITIONAL driver is legal (see equiv/wire_cond_driver), but it
+// is still a driver: pairing it with a second assignment is the same
+// double-drive as two unconditional writes. The whole `if`/`match` construct
+// counts as ONE driver, so this shape has two.
+comb t(a:u8, b:u8, c:bool) -> (o:u8) {
+  wire w:u8 = nil   // locate_error_here
+  if c {
+    w = a
+  }
+  w = b
+  o = w
+}

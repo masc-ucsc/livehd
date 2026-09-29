@@ -163,10 +163,10 @@ TEST(LnastPrpWriter, VerificationKindRoundTrips) {
     const char* expect;
   };
   const Case cases[] = {
-      {nullptr, "assert(cond)"},
-      {"__fkind__assume", "assume(cond)"},
+      {                 nullptr,        "assert(cond)"},
+      {       "__fkind__assume",        "assume(cond)"},
       {"__fkind__assert_always", "assert_always(cond)"},
-      {"__fkind__cassert", "cassert(cond)"},
+      {      "__fkind__cassert",       "cassert(cond)"},
   };
   for (const auto& c : cases) {
     auto ln = std::make_shared<Lnast>("kind_test");
@@ -397,11 +397,20 @@ static std::string write_prp(std::string_view name, std::string_view src) {
 }
 
 // Parse a .prp file → run uPass → emit Pyrope 3.0 text.
-static std::string round_trip(std::string_view name, std::string_view src,
-                              const std::vector<std::string>& passes = {"noop"}) {
+static std::string round_trip(std::string_view name, std::string_view src, const std::vector<std::string>& passes = {"noop"}) {
   auto      path = write_prp(name, src);
   Prp2lnast converter(path, std::string(name));
   auto      ln = converter.get_lnast();
+
+  // Prp2lnast streams each named lambda directly into its final per-function
+  // LNAST. Production publishes these siblings before pass.upass; mirror that
+  // handoff here instead of running the writer on the intentionally empty file
+  // wrapper. The round-trip cases below contain at most one named lambda.
+  auto streamed = ln->take_streamed_lambdas();
+  if (!streamed.empty()) {
+    EXPECT_EQ(streamed.size(), 1u);
+    ln = std::move(streamed.front());
+  }
 
   auto         lm = std::make_shared<upass::Lnast_manager>(ln);
   uPass_runner runner(lm, passes);
@@ -472,6 +481,127 @@ TEST(LnastPrpWriter, AttrSetTypeAnnotationSuppressed) {
   // Must not emit x.type = mut — that is not valid Pyrope.
   EXPECT_EQ(output.find("x.type"), std::string::npos) << "attr_set type annotation leaked into output:\n" << output;
   EXPECT_EQ(output.find("= mut"), std::string::npos) << "attr_set type annotation leaked into output:\n" << output;
+}
+
+// Register attributes annotate storage; they do not overwrite its next-state
+// value. In slang-origin LNAST the clock_pin attr can follow the constant din
+// store, as it does for an async-assert/sync-deassert reset synchronizer. The
+// dead-init scan must therefore keep `rst_q = 1` rather than mistake the later
+// attr_set for a second value definition.
+TEST(LnastPrpWriter, RegisterAttrDoesNotKillConstantStore) {
+  auto ln = std::make_shared<Lnast>("reg_attr_after_store");
+  ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
+
+  auto decl = ln->add_child(stmts, Lnast_ntype::create_declare());
+  ln->add_child(decl, Lnast_node::create_ref("rst_q"));
+  auto type = ln->add_child(decl, Lnast_ntype::create_prim_type_int());
+  ln->add_child(type, Lnast_node::create_const("1"));
+  ln->add_child(type, Lnast_node::create_const("0"));
+  ln->add_child(decl, Lnast_node::create_const("reg"));
+  ln->add_child(decl, Lnast_node::create_const("nil"));
+
+  auto store = ln->add_child(stmts, Lnast_ntype::create_store());
+  ln->add_child(store, Lnast_node::create_ref("rst_q"));
+  ln->add_child(store, Lnast_node::create_const("1"));
+
+  auto clock_attr = ln->add_child(stmts, Lnast_ntype::create_attr_set());
+  ln->add_child(clock_attr, Lnast_node::create_ref("rst_q"));
+  ln->add_child(clock_attr, Lnast_node::create_const("clock_pin"));
+  ln->add_child(clock_attr, Lnast_node::create_ref("clk_i"));
+
+  const auto output = run_and_emit(ln, {"noop"});
+  EXPECT_NE(output.find("rst_q = 1"), std::string::npos) << "register din store was dropped:\n" << output;
+}
+
+// A concat lane is a fixed-width bit window, even when its source is signed or
+// its selected top bit is one. The writer must make each re-emitted lane
+// unsigned before the shift/OR pack; otherwise Pyrope sign-extends the low lane
+// across the lanes above it (the Minion 33+32-bit sign-extension concat).
+TEST(LnastPrpWriter, ConcatPackMakesEveryLaneUnsigned) {
+  auto ln = std::make_shared<Lnast>("concat_unsigned_lanes");
+  ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
+
+  auto concat = ln->add_child(stmts, Lnast_ntype::create_concat());
+  ln->add_child(concat, Lnast_node::create_ref("z"));
+  ln->add_child(concat, Lnast_node::create_ref("hi"));
+  ln->add_child(concat, Lnast_node::create_const("33"));
+  ln->add_child(concat, Lnast_node::create_ref("lo"));
+  ln->add_child(concat, Lnast_node::create_const("32"));
+
+  const auto output = run_and_emit(ln, {"noop"});
+  EXPECT_NE(output.find("unsigned((hi)#[0..=32]) << 32"), std::string::npos) << output;
+  EXPECT_NE(output.find("unsigned((lo)#[0..=31])"), std::string::npos) << output;
+  EXPECT_EQ(output.find(" & 4294967295"), std::string::npos) << output;
+}
+
+// A replicated one-bit lane is a constant mask selected by that bit. Keeping
+// this compact avoids generating a long shift/OR chain for RTL `{N{enable}}`
+// masks while preserving the exact packed value.
+TEST(LnastPrpWriter, ConcatReplicationStaysCompact) {
+  auto ln = std::make_shared<Lnast>("concat_repeated_bit");
+  ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
+
+  auto concat = ln->add_child(stmts, Lnast_ntype::create_concat());
+  ln->add_child(concat, Lnast_node::create_ref("mask"));
+  for (int i = 0; i < 66; ++i) {
+    ln->add_child(concat, Lnast_node::create_ref("enable"));
+    ln->add_child(concat, Lnast_node::create_const("1"));
+  }
+
+  const auto output = run_and_emit(ln, {"noop"});
+  EXPECT_NE(output.find("if unsigned((enable)#[0]) != 0"), std::string::npos) << output;
+  EXPECT_NE(output.find("0x00000000000000003ffffffffffffffff"), std::string::npos) << output;
+  EXPECT_EQ(output.find("enable <<"), std::string::npos) << output;
+}
+
+// A lane whose value is already proven to sit in its window needs neither the
+// window mask nor the `unsigned()` reinterpret, and a lane that is a constant
+// ZERO contributes nothing to the pack at all — its window still rides in the
+// widths of the lanes below it. `{1'b0, x[31:0]}` is therefore just `x#[0..=31]`.
+TEST(LnastPrpWriter, ConcatDropsProvenLaneMaskAndZeroLane) {
+  auto ln = std::make_shared<Lnast>("concat_proven_lanes");
+  ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
+
+  auto gm = ln->add_child(stmts, Lnast_ntype::create_get_mask());  // lo = x#[0..=31]
+  ln->add_child(gm, Lnast_node::create_ref("lo"));
+  ln->add_child(gm, Lnast_node::create_ref("x"));
+  ln->add_child(gm, Lnast_node::create_const("0xffffffff"));
+
+  auto concat = ln->add_child(stmts, Lnast_ntype::create_concat());
+  ln->add_child(concat, Lnast_node::create_ref("z"));
+  ln->add_child(concat, Lnast_node::create_const("0"));  // 1-bit zero lane
+  ln->add_child(concat, Lnast_node::create_const("1"));
+  ln->add_child(concat, Lnast_node::create_ref("lo"));  // 32-bit lane, proven 32 bits
+  ln->add_child(concat, Lnast_node::create_const("32"));
+
+  const auto output = run_and_emit(ln, {"noop"});
+  EXPECT_NE(output.find("z = lo"), std::string::npos) << output;  // the whole pack IS the low lane
+  EXPECT_EQ(output.find("unsigned"), std::string::npos) << output;
+  EXPECT_EQ(output.find("<<"), std::string::npos) << output;
+}
+
+// A one-bit window is spelled `x#[N]`, never `x#[N..=N]`.
+TEST(LnastPrpWriter, SingleBitRangeIsSpelledWithoutRange) {
+  auto ln = std::make_shared<Lnast>("one_bit_select");
+  ln->set_root(Lnast_ntype::create_top());
+  auto stmts = ln->add_child(ln->get_root(), Lnast_ntype::create_stmts());
+
+  auto gm = ln->add_child(stmts, Lnast_ntype::create_get_mask());
+  ln->add_child(gm, Lnast_node::create_ref("b"));
+  ln->add_child(gm, Lnast_node::create_ref("x"));
+  ln->add_child(gm, Lnast_node::create_const("8"));  // bit 3 only
+
+  auto store = ln->add_child(stmts, Lnast_ntype::create_store());
+  ln->add_child(store, Lnast_node::create_ref("out"));
+  ln->add_child(store, Lnast_node::create_ref("b"));
+
+  const auto output = run_and_emit(ln, {"noop"});
+  EXPECT_NE(output.find("x#[3]"), std::string::npos) << output;
+  EXPECT_EQ(output.find("#[3..=3]"), std::string::npos) << output;
 }
 
 // ── Test 15: round-trip — if(true) branch is pruned by constprop ─────────────

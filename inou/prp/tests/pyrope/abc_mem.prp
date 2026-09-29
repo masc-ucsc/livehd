@@ -21,7 +21,7 @@
 mod abc_mem(waddr:u3, wdata:u8, we:u1, raddr:u3, mask:u8) -> (rdata:u8@[0]) {
   reg mem:[8]u8 = 0
   rdata = mem[raddr] & mask     // combinational logic on the read path
-  if we {
+  if we != 0 {
     mem[waddr] = wdata
   }
 }

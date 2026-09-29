@@ -1,0 +1,93 @@
+/*
+:name: latch_sim_nonref_clock_window
+:type: simulation
+*/
+
+// SILENT SIM MISCOMPILE, minimal mirror of minion's `prim_rf_1r1w_diff_preview`
+// (the frontend instruction buffer `u_inst_data`).
+//
+// THE SHAPE. A module declares TWO clock input ports. Its transparent-LOW latch
+// is gated on ONE of them (`preview_clk`) while its state sits on the OTHER
+// (`rf_clk`), and the parent ties both to the same net. That is minion verbatim:
+//     always_latch  if (!preview_clk_i) wr_data_en_1p_q = wr_data_en_1p_next_i;
+//     always_ff @(negedge rf_clk_i) if (wr_data_en_1p_q[j]) mem[..] <= ..
+//
+// THE BUG. cgen_sim models latch transparency by emitting the flop's next-state
+// TWICE — a "low window" with the reference clock forced to 0 and a "high
+// window" with it forced to 1 — and keeping the low result as the hold value.
+// But it forces only the pin `clock_input_of()` chose. Here that is `rf_clk`,
+// so `preview_clk` is never substituted and BOTH windows evaluate it at its live
+// level: they come out as literally the same expression, the hold leg is
+// unreachable, and the latch is transparent for the WHOLE period instead of one
+// phase. Emitted C++ from minion, verbatim:
+//     cg_59 = (__in.preview_clk_i == 0);   // "low" window
+//     cg_61 = (__in.preview_clk_i == 0);   // "high" window -- IDENTICAL
+//
+// WHAT IT COST. The enable rose a full period early, so the instruction buffer
+// was written before its fetch line arrived; minion decoded a stale word, took a
+// spurious illegal-instruction trap at pc=0x4 and replayed pc=0 forever -- 1,428
+// retired instructions in 20k cycles where Verilator retires 12,240 on the same
+// RTL. `lhd sim` reported 0 errors and 0 warnings.
+//
+// STATUS: THIS FILE CURRENTLY PASSES. It reproduces the defective EMISSION, not
+// yet a wrong value — the asserts below are satisfied because `clk` is the tick
+// and is never driven, so `preview_clk` folds to a constant and the collapsed
+// hold leg does not change what this particular stimulus observes. Minion needs
+// the gated `clock_gated`/`clk_i` pair for the collapse to become an observable
+// one-period-early write. Treat this as the SMALL REPRODUCER of the emission
+// bug (checked by grep, below) and tighten the asserts once the phase the
+// consumer should see is settled against an oracle; do not read a green run
+// here as evidence the bug is gone.
+//
+// HOW TO SEE IT WITHOUT AN ORACLE. Grep the generated child for its two window
+// guards; today they are the same expression:
+//     lhd sim inou/prp/tests/sim/latch_sim_nonref_clock_window.prp \
+//         --setup-only --workdir /tmp/w
+//     grep -n '_low\|_din' /tmp/w/sim/prevrf*.cpp
+// A correct emission gates the low window on a forced 0 and the high window on a
+// forced 1, so the hold leg is reachable and `en_q` survives one phase.
+//
+// NOT the sole-clock case: flop_sim_negedge_sole_clock.prp pins that one (a
+// design with NO register on the implicit reference clock gets no edge detection
+// at all). Here the parent supplies a proper reference clock and the child is an
+// ordinary instance -- only the latch's gating port is the odd one out.
+mod prevrf(preview_clk:bool, rf_clk:bool, wr_en_next:bool, d:u8) -> (q:u8@[0]) {
+  reg en_q:bool:[latch=true]                        // transparent while preview_clk is LOW
+  reg mem:u8:[clock_pin=ref rf_clk, posclk=false] = 0
+  q = mem
+  if !preview_clk {
+    en_q = wr_en_next
+  }
+  if en_q {
+    mem = d
+  }
+}
+
+// The parent ties BOTH child clock ports to its own clock, exactly as
+// minion_frontend_thread_buffer does (`preview_clk_i(clock_gated)`,
+// `rf_clk_i(clk_i)`, one net at every instantiation site). `clk` is the tick --
+// the testbench never drives it, just as minion's never drives clk_i.
+mod pvtop(clk:bool, wr_en_next:bool, d:u8) -> (q:u8@[0]) {
+  q = prevrf(preview_clk=clk, rf_clk=clk, wr_en_next=wr_en_next, d=d)
+}
+
+test pvtop.enable_survives_one_phase {
+  mut acc = pvtop
+  // wr_en_next is high for EXACTLY one tick (5). A latch that holds for a phase
+  // admits exactly one write; a latch that is transparent all period admits the
+  // write a period early, so the captured datum is d of the wrong tick.
+  tick 10 {
+    acc.wr_en_next = clock == 5
+    acc.d          = 100 + clock
+    step
+    // Nothing may be written before the enable is even asserted.
+    if clock <= 4 {
+      assert(acc.q == 0, "no write before wr_en_next is asserted")
+    }
+    // Exactly one datum is ever captured, and it is the one presented while the
+    // enable was high -- never an earlier tick's.
+    if clock >= 6 {
+      assert(acc.q == 105, "the single enabled write captured d of the enabled tick, and holds")
+    }
+  }
+}

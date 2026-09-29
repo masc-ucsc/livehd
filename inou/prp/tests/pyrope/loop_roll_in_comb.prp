@@ -1,0 +1,35 @@
+/*
+:name: loop_roll_in_comb
+:type: compile
+*/
+
+// A rollable comptime `for` inside a `comb`. lift_loop_body used to stamp the
+// lifted definition `mod` unconditionally, and tolg lets only a `mod` body
+// instantiate a mod -- so under the default `compile.unroll=false` EVERY
+// roll-eligible loop in a comb died with
+//   'x' (a comb) calls the mod 'x.__loop0' -- only `mod` bodies may
+//   instantiate pipe/mod
+// A comb body cannot hold a reg or instantiate a mod (tolg enforces that on the
+// enclosing comb), so the lifted slice is stateless and lifts as a `comb`.
+//
+// Eligibility needs a DECLARED type on the carry: `mut acc = 0` (untyped) has
+// no width contract, declines the roll and source-unrolls instead -- which is
+// why the untyped loop_accum.prp fixture never caught this.
+comb add4(x:u8) -> (y:u8) {
+  y = (x + 4)#[0..=7]
+}
+
+pub comb loop_roll_in_comb(x:u8) -> (y:u8, z:u8) {
+  mut value:u8 = x
+  for i in 0..<3 {
+    value = (value + 1)#[0..=7]
+  }
+  y = value
+
+  // Same shape, but the body calls a comb: the lifted body instantiates it.
+  mut chained:u8 = x
+  for j in 0..<3 {
+    chained = add4(x=chained)
+  }
+  z = chained
+}

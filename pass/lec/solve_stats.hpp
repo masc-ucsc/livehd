@@ -1,6 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
-// cvc5 solve-insight accounting for `lhd lec` / `lhd formal verify` (formal.stats,
+// cvc5 solve-insight accounting for `lhd lec` / `lhd formal verify` (lhd.stats,
 // a.k.a. the `--stats` CLI sugar). OFF by default and strictly zero-cost when off:
 // nothing here is constructed, no cvc5 option is set, and no plugin is registered.
 //
@@ -21,7 +21,7 @@
 //      Node->Term export on each notification (~50k notifications here, one per
 //      conflict), NOT the callback body, so no callback can be written fast enough.
 //      cvc5's `plugin-notify-sat-clause-in-solve` does not mitigate it (16704ms).
-//      Enabled together with the statistics tier by formal.stats; the report labels
+//      Enabled together with the statistics tier by lhd.stats; the report labels
 //      the affected timings as instrumented so they are not read as solve time.
 //
 // Statistics accumulate over a cvc5::Solver's LIFETIME, so exactly one snapshot per

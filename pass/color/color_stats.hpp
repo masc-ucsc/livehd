@@ -28,15 +28,9 @@ public:
   // makes the `flat` projection right: `pass.color flat` sets pass.abc's
   // flatten=auto, so ABC inlines the hierarchy and maps ONE region holding
   // every instance -- not one region per def.
-  void add(std::string_view def, const Def_color_sizes &sizes,
-           uint64_t instances);
+  void add(std::string_view def, const Def_color_sizes& sizes, uint64_t instances);
 
   [[nodiscard]] bool empty() const { return partitions_.empty(); }
-
-  // Defs the absorb pass inlined away (below-min defs folded into their
-  // parents). Reported alongside the window, since a def that vanished is why
-  // its partitions are missing from the table.
-  void set_absorbed_defs(uint64_t n) { absorbed_defs_ = n; }
 
   // Human report on STDERR. Not stdout: run_step dup2()s fd 1 into the pass log
   // for the whole pass body (lhd/lhd_kernel_common.cpp), so a stdout report is
@@ -44,14 +38,23 @@ public:
   // `per_def` also prints the per-def table (pass.color.verbose).
   // `min_ge`/`max_ge` are the requested size window (0 = that half disabled);
   // when either is set the report says how many regions still violate it.
-  void report(std::string_view alg, bool per_def, uint64_t min_ge = 0, uint64_t max_ge = 0) const;
+  // `max_gate` is cones mode's PREDICTED-AIG threshold (0 = not cones mode). It
+  // is reported next to -- never instead of -- the GE columns: the two are
+  // different units, and the gap between them IS the finding the A/B is after.
+  void report(std::string_view alg, bool per_def, uint64_t min_ge = 0, uint64_t max_ge = 0, uint64_t max_gate = 0) const;
 
 private:
   struct Partition {
     std::string def;
-    int         color = 0;
-    uint64_t    nodes = 0;
-    uint64_t    ge    = 0;
+    int         color         = 0;
+    uint64_t    nodes         = 0;
+    uint64_t    ge            = 0;
+    uint64_t    max_node_ge   = 0;
+    uint64_t    max_node_bits = 0;
+    uint64_t    max_node_id   = 0;
+    uint64_t    pred          = 0;  // predicted generic-AIG size (cones only; 0 elsewhere)
+    std::string max_node_op;
+    bool        max_node_const_shift = false;
   };
   struct Def_row {
     std::string def;
@@ -61,11 +64,10 @@ private:
 
   std::vector<Partition> partitions_;
   std::vector<Def_row>   defs_;
-  uint64_t               total_nodes_ = 0;
+  uint64_t               total_nodes_     = 0;
   uint64_t               total_uncolored_ = 0;
-  uint64_t               flat_nodes_ = 0;  // sum of nodes * instances
-  uint64_t               total_ge_ = 0;
-  uint64_t               absorbed_defs_ = 0;
+  uint64_t               flat_nodes_      = 0;  // sum of nodes * instances
+  uint64_t               total_ge_        = 0;
 
   // Partition sizes, largest first. Sorted by (size, def, color) so the report
   // does not inherit hash-iteration order. `by_ge` sorts on gate equivalents

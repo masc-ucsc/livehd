@@ -1,0 +1,14 @@
+/*
+:name: async_reset_concat
+:type: equiv
+:verilog_top: async_reset_concat
+:pyrope_top: async_reset_concat
+*/
+// Both stages reset asynchronously to zero when clr_ falls.
+// Read d0 before updating it so q captures the previous stage value.
+pub mod async_reset_concat(clk:u1, clr_:u1, d:u1) -> (q:u1@[]) {
+  reg q:u1:[clock_pin=ref clk, reset_pin=ref clr_, async=true, negreset=true] = 0
+  reg d0:u1:[clock_pin=ref clk, reset_pin=ref clr_, async=true, negreset=true] = 0
+  q = d0
+  d0 = d
+}

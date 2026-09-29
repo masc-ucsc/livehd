@@ -2,25 +2,32 @@
 
 #include "pass_prp_writer.hpp"
 
+#include <algorithm>
+#include <atomic>
+#include <exception>
 #include <format>
 #include <fstream>
+#include <map>
+#include <memory>
+#include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
+#include "file_name.hpp"  // livehd::unit_file_stem — the shared long-name policy
 #include "lnast_prp_writer.hpp"
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
+#include "worker_pool.hpp"   // livehd::run_workers (big-stack workers)
 
 static Pass_plugin sample("pass_prp_writer", Pass_prp_writer::setup);
 
 void Pass_prp_writer::setup() {
   Eprp_method m1("pass.prp_writer", "emit LNAST as Pyrope 3.0 source files", &Pass_prp_writer::work);
   m1.add_label_optional("odir", "output directory for .prp files", ".");
-  m1.add_label_optional("debug",
-                        "emit /* TODO */ for unimplemented constructs instead of failing the compile",
-                        "false");
+  m1.add_label_optional("debug", "emit /* TODO */ for unimplemented constructs instead of failing the compile", "false");
   register_pass(m1);
 }
 
@@ -67,40 +74,209 @@ void Pass_prp_writer::work(Eprp_var& var) {
   // correspondence).  Stateless `comb`s are included: with `upass.inline=false`
   // they stay Sub instances, and the annotation is inert when a comb is inlined.
   std::unordered_set<std::string> instantiated_modules;
+  std::unordered_set<std::string> sink_modules;
   for (const auto& ln : var.lnasts) {
     std::string_view full = ln->get_top_module_name();
     auto             dot  = full.rfind('.');
-    instantiated_modules.emplace(std::string(dot == std::string_view::npos ? full : full.substr(dot + 1)));
+    auto             tail = std::string(dot == std::string_view::npos ? full : full.substr(dot + 1));
+    instantiated_modules.emplace(tail);
+    if (ln->io_meta().outputs.empty()) {
+      sink_modules.emplace(std::move(tail));
+    }
   }
 
+  // One .prp per SOURCE FILE, not per unit. A Pyrope file contributes a
+  // file-level unit named `<file>` plus one `<file>.<entity>` unit per lambda
+  // the extractor lifted out; writing each to its own `<name>.prp` split the
+  // source in two and made the emission non-idempotent (`import("f.e")` became
+  // `import("f.e.e")`, and the next round trip `f.e.e.e`). Group by the file
+  // component so `<file>.prp` carries the imports plus every `pub mod` of that
+  // file, exactly like the source it came from. A slang-origin unit has no dot
+  // and is its own file — the historical 1:1 layout, unchanged.
+  // Names a CONCRETE (non-template) unit already owns. A fully-defaulted
+  // template whose name is in here has been realized under its own name by an
+  // IDENTITY specialization (maybe_specialize_template_call) — emitting both
+  // would write two same-named defs into one file, which no longer re-parses.
+  // The specialization is the one to keep: it carries the same `<N=default>`
+  // signature with the generics already folded.
+  absl::flat_hash_set<std::string> concrete_unit_names;
   for (const auto& ln : var.lnasts) {
-    auto module_name = ln->get_top_module_name();
-    TRACE_EVENT("pass", "prp_writer.module", "unit", std::string(module_name));
-    auto fname       = std::format("{}/{}.prp", out_dir, module_name);
-
-    std::ofstream out(fname);
-    if (!out.is_open()) {
-      livehd::diag::err("pass.prp_writer", "write-failed", "io").msg("could not open output file: {}", fname).fatal();
-      return;
+    if (!ln->is_template()) {
+      concrete_unit_names.insert(std::string(ln->get_top_module_name()));
     }
+  }
 
-    Lnast_prp_writer writer(out, ln);
-    writer.set_debug(debug_on);
-    writer.set_known_modules(&emitted_modules);
-    writer.set_instantiated_modules(&instantiated_modules);
-    writer.write_all();
-    out.close();
-
-    if (!debug_on && writer.has_unimplemented()) {
-      std::string feats;
-      for (const auto& f : writer.unimplemented()) {
-        feats += feats.empty() ? "" : "; ";
-        feats += f;
+  std::map<std::string, std::vector<std::shared_ptr<Lnast>>> by_file;
+  for (const auto& ln : var.lnasts) {
+    // A deferred TEMPLATE (`mod f(b)` with an untyped param, `...args`, an
+    // unbound `<T>`) is never elaborated — its body still holds the unresolved
+    // comptime temps the specialization consumed, so re-emitting it produces a
+    // lambda that does not re-parse ("read of undefined variable 't47…_0'").
+    // Its concrete twins ARE emitted and every call site names one of them, so
+    // dropping the template loses nothing the artifact can use.
+    if (ln->is_template()) {
+      if (concrete_unit_names.contains(std::string(ln->get_top_module_name()))) {
+        continue;  // its identity specialization is emitted under this same name
       }
+      // ... EXCEPT a template every one of whose generics carries a DECLARATION
+      // DEFAULT. That one is elaboration-COMPLETE as written: the writer renders
+      // it with its own `<NAME=default, …>` header and the result re-parses to the
+      // same unit. Dropping it silently truncated a v2prp artifact to a ZERO-BYTE
+      // .prp on re-emit (exit 0, 0 diagnostics, still listed in manifest.json) --
+      // and destroyed the input when the emit dir was the input dir.
+      const auto& gens = ln->get_generics();
+      const auto& defs = ln->get_generic_defaults();
+      const bool  fully_defaulted
+          = !gens.empty() && defs.size() >= gens.size()
+         && std::none_of(defs.begin(), defs.end(), [](const auto& d) { return d.empty(); });
+      if (!fully_defaulted) {
+        // Genuinely unelaborated (untyped param, `...args`, an unbound `<T>`).
+        // Say so: a skipped unit must never be reported as a successful emit.
+        livehd::diag::warn("pass.prp_writer", "template-not-emitted", "io")
+            .msg("unit `{}` is an unelaborated template — not written", ln->get_top_module_name())
+            .hint("its concrete specializations are emitted instead; give every generic a default to emit the template itself")
+            .emit();
+        continue;
+      }
+    }
+    std::string full(ln->get_top_module_name());
+    by_file[full.substr(0, full.find('.'))].push_back(ln);
+  }
+
+  struct File_job {
+    const std::string*                   file_name;
+    std::vector<std::shared_ptr<Lnast>>* units;
+  };
+  struct File_result {
+    std::string                                      write_error;
+    std::vector<std::pair<std::string, std::string>> unimplemented;
+    std::exception_ptr                               error;
+  };
+
+  std::vector<File_job> jobs;
+  jobs.reserve(by_file.size());
+  for (auto& [file_name, units] : by_file) {
+    // File-level unit (name == file) first, then the lambdas in name order, so
+    // the emission is deterministic and the file scope precedes its users.
+    std::sort(units.begin(), units.end(), [](const auto& a, const auto& b) {
+      return a->get_top_module_name() < b->get_top_module_name();
+    });
+    jobs.push_back(File_job{.file_name = &file_name, .units = &units});
+  }
+
+  std::vector<File_result> results(jobs.size());
+  auto                     emit_file = [&](size_t job_idx) {
+    const auto& file_name = *jobs[job_idx].file_name;
+    auto&       units     = *jobs[job_idx].units;
+    auto&       result    = results[job_idx];
+
+    try {
+      TRACE_EVENT("pass", "prp_writer.file", "unit", file_name);
+      // The shared long-name policy: a generated parameter specialization
+      // can name a module past NAME_MAX, and the emit must not die on it.
+      auto fname = std::format("{}/{}.prp", out_dir, livehd::unit_file_stem(file_name));
+
+      // Two phases: collect the (deduped) file-scope import header from every
+      // unit, then render the bodies below it.
+      std::vector<std::string>                       header;
+      std::vector<std::unique_ptr<Lnast_prp_writer>> writers;
+      std::vector<std::ostringstream>                bodies(units.size());
+      writers.reserve(units.size());
+      for (size_t i = 0; i < units.size(); ++i) {
+        auto w = std::make_unique<Lnast_prp_writer>(bodies[i], units[i]);
+        w->set_debug(debug_on);
+        w->set_known_modules(&emitted_modules);
+        w->set_instantiated_modules(&instantiated_modules);
+        w->set_sink_modules(&sink_modules);
+        w->set_header_sink(&header);
+        w->collect_header();
+        writers.emplace_back(std::move(w));
+      }
+      for (size_t i = 0; i < units.size(); ++i) {
+        writers[i]->write_all();
+      }
+
+      std::ofstream out(fname);
+      if (!out.is_open()) {
+        result.write_error = fname;
+        return;
+      }
+      for (const auto& l : header) {
+        out << l;
+      }
+      if (!header.empty()) {
+        out << "\n";
+      }
+      bool first = true;
+      for (auto& b : bodies) {
+        auto text = b.str();
+        if (text.empty()) {
+          continue;
+        }
+        if (!first) {
+          out << "\n";
+        }
+        first = false;
+        out << text;
+        if (text.back() != '\n') {
+          out << "\n";
+        }
+      }
+      out.close();
+
+      if (!debug_on) {
+        for (size_t i = 0; i < units.size(); ++i) {
+          if (!writers[i]->has_unimplemented()) {
+            continue;
+          }
+          std::string feats;
+          for (const auto& f : writers[i]->unimplemented()) {
+            feats += feats.empty() ? "" : "; ";
+            feats += f;
+          }
+          result.unimplemented.emplace_back(units[i]->get_top_module_name(), std::move(feats));
+        }
+      }
+    } catch (...) {
+      result.error = std::current_exception();
+    }
+  };
+
+  // Source-file groups share no writer state and target different output
+  // paths. Render a bounded batch concurrently; the cap avoids excessive
+  // transient analysis maps on machines with very high core counts.
+  //
+  // livehd::run_workers, not std::thread: render_def_rhs recurses once per
+  // folded single-use temp, and a default secondary-thread stack (512 KiB on
+  // macOS) held only ~34 such levels at -O0 -- CVA6's unrolled packed-array
+  // write chains died there with `Bus error: 10`.
+  std::atomic<size_t> next{0};
+  const size_t        hw = std::max<size_t>(1, std::thread::hardware_concurrency());
+  const size_t        nw = std::min({jobs.size(), hw, size_t{16}});
+  livehd::run_workers(nw, [&](size_t) {
+    while (true) {
+      const size_t i = next.fetch_add(1, std::memory_order_relaxed);
+      if (i >= jobs.size()) {
+        break;
+      }
+      emit_file(i);
+    }
+  });
+
+  // Publish failures in stable file order even though rendering was parallel.
+  for (const auto& result : results) {
+    if (result.error) {
+      std::rethrow_exception(result.error);
+    }
+    if (!result.write_error.empty()) {
+      livehd::diag::err("pass.prp_writer", "write-failed", "io").msg("could not open output file: {}", result.write_error).fatal();
+    }
+    for (const auto& [unit, feats] : result.unimplemented) {
       livehd::diag::err("pass.prp_writer", "unimplemented", "unsupported")
-          .msg("cannot emit Pyrope for '{}': unimplemented construct(s): {}", module_name, feats)
-          .hint("the .prp was written with /* TODO */ markers; pass --set prp_writer.debug=true to keep the partial "
-                "output and let the compile pass")
+          .msg("cannot emit Pyrope for '{}': unimplemented construct(s): {}", unit, feats)
+          .hint(
+              "the .prp was written with /* TODO */ markers; pass --set prp_writer.debug=true to keep the partial "
+              "output and let the compile pass")
           .emit();
     }
   }

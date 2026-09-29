@@ -211,9 +211,8 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     // implicit (sign-dropping) "force"; prefer the explicit bit-select
     // spelling `v:u8 = e#[0..=7]`.
     //   * `bit_test(bits)` true + `unknown_bit_test(bits)` false = the
-    //     sign-extension past width N is a known 1. An unknown sign bit
-    //     (`0sb?` → `v1:u32`) has `unknown_bit_test` true and is SKIPPED, so a
-    //     deliberate 1-bit unknown keeps its natural width (see valid_simple).
+    //     sign-extension past width N is a known 1. An UNKNOWN sign extension
+    //     is the separate width-taking rule below.
     //   * Uses and_op (NOT wrap_to_unsigned, which bails on any unknown) so the
     //     interior-unknown case coerces while the known sign bits clear.
     // Wrap/sat policy takes precedence (handled above).
@@ -234,6 +233,28 @@ void uPass_attributes::on_assign_like(bool is_assign_node) {
     // declared (max,min) range — are gone. The negative-bit-pattern → unsigned
     // reinterpret above STAYS (it rewrites the value to its unsigned form, which
     // then fits the envelope and is not an overflow).
+  } else if (lhs_unsigned && rhs_value && rhs_value->unknown_bit_test(static_cast<int>(lhs_ti_for_coerce->bits))) {
+    // An UNKNOWN sign extension is the WIDTH-TAKING wildcard: the `?` fills the
+    // destination and stops at its declared width, so `x:u48 = 0sb?` is exactly
+    // `x = 0ub` + 48 `?`, and `mut z = 0sb?` (no declared width, so no envelope
+    // to fill) stays the 1-bit signed unknown it is written as. Same for a
+    // partially unknown pattern: `v:u8 = 0sb?1` ⇒ `0ub??????_?1`.
+    //
+    // Unlike the known-negative coercion above this also fires on a
+    // REASSIGNMENT: an all-unknown value carries no magnitude for a wrap/sat
+    // policy to clamp, so nothing is taken out from under those.
+    //
+    // Without the fill the value keeps an unknown SIGN, which Dlop can only
+    // bound conservatively (Dlop::get_bits → 65 for any sign-unknown value) —
+    // every net carrying an x-poison then came out 65 bits wide, and any
+    // destination wider than that read 0 above bit 64 instead of `?`.
+    Dlop out = *rhs_value->and_op(*Dlop::get_mask_value(static_cast<int>(lhs_ti_for_coerce->bits)));
+    if (!out.is_invalid() && !out.same_repr(*rhs_value)) {
+      auto [iter, inserted] = tmp_fold.emplace(view.lhs, out);
+      if (!inserted && !iter->second.same_repr(out)) {
+        iter->second = out;
+      }
+    }
   }
   record_assign(view.lhs, rhs_is_nil);
 
@@ -414,6 +435,13 @@ void uPass_attributes::process_attr_set() {
   }
   move_to_parent();
 
+  // Internal Slang process markers select the clock for subsequent memory
+  // stores. They are ordered wiring statements, not immutable type facts:
+  // leave them in the IR for tolg without propagating them through aliases.
+  if (attr_name == "__store_clock_pin" || attr_name == "__store_posclk") {
+    return;
+  }
+
   // Phase 2 side-state writes — keep these BEFORE dispatch so handlers can
   // see the updated maps.
   if (!target.empty() && !attr_name.empty()) {
@@ -440,9 +468,9 @@ void uPass_attributes::process_attr_set() {
         if (runner_st != nullptr) {
           // Decl_kind IS upass::Mode (same enum); the outer guard already
           // excluded unknown.
-          upass::Mode m = kind;
-          const auto root  = Bundle::get_first_level(target);
-          const auto fpath = Bundle::get_all_but_first_level(target);
+          upass::Mode m     = kind;
+          const auto  root  = Bundle::get_first_level(target);
+          const auto  fpath = Bundle::get_all_but_first_level(target);
           if (auto wb = runner_st->get_bundle_for_write(root); wb && m != upass::Mode::unknown) {
             if (fpath.empty()) {
               if (wb->get_mode() == upass::Mode::unknown) {
@@ -561,8 +589,8 @@ void uPass_attributes::process_attr_get() {
     move_to_parent();
     return;
   }
-  std::string base_text{current_text()};
-  auto        base = normalize_name(base_text);
+  std::string base_text{lm->current_raw_text()};
+  auto        base = normalize_name(current_text());
   std::string attr_name;
   if (move_to_sibling()) {
     attr_name = std::string{current_text()};

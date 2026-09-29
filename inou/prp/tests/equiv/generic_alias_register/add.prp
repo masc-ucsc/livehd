@@ -1,0 +1,5 @@
+pub mod add<T>::[timecheck=false](a:T, b:T) -> (s:T@[0]) {
+  reg s_r:T = 0
+  s = s_r
+  wrap s_r = a + b
+}

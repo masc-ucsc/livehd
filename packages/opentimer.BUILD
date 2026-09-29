@@ -29,4 +29,3 @@ cc_library(
     includes = ["ot"],
     visibility = ["//visibility:public"],
 )
-

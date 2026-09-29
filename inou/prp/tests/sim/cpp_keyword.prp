@@ -1,0 +1,19 @@
+/*
+:name: cpp_keyword
+:type: simulation
+*/
+
+pub mod top(clk:u1, a:bool) -> (xor:bool@[]) {
+  reg xor:bool = nil
+  xor = a
+}
+test keyword.emit {
+  mut dut = top
+  mut expected:bool = false
+  tick 4 clocks=(clk=1) {
+    expected = not expected
+    dut.a = expected
+    step
+    assert(dut.xor == expected)
+  }
+}

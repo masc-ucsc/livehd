@@ -58,7 +58,7 @@ uPass_bitwidth::uPass_bitwidth(std::shared_ptr<upass::Lnast_manager>& _lm) : upa
 // ── Lnast_range ↔ bundle-Entry conversion ────────────────────────────────────
 
 std::optional<int64_t> uPass_bitwidth::const_to_i64(const Dlop& v) {
-  if (v.is_invalid() || !v.is_integer() || v.has_unknowns() || v.get_bits() > 62) {
+  if (v.is_invalid() || !v.is_integer() || v.has_unknowns() || v.get_signed_bits() > 62) {
     return std::nullopt;
   }
   return v.to_just_i64();
@@ -446,7 +446,7 @@ void uPass_bitwidth::check_shift_amount(const Lnast_range& amt) {
     return;
   }
   const bool         always_negative = amt.max < 0;
-  livehd::diag::Span span = lm->current_span();
+  livehd::diag::Span span            = lm->current_span();
   livehd::diag::sink().emit(livehd::diag::Diagnostic{
       .severity = always_negative ? livehd::diag::Severity::error : livehd::diag::Severity::warning,
       .code     = "negative-shift",
@@ -540,7 +540,18 @@ upass::Vote uPass_bitwidth::process_mult(std::string_view dst_name, Bundle& dst,
 upass::Vote uPass_bitwidth::process_div(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   // |a / d| <= |a| for any integer |d| >= 1.
   if (src.size() < 2) { return stamp(dst_name, dst, Lnast_range::make_unbounded()); }
-  return stamp(dst_name, dst, range_of_operand(src[0]).div(range_of_operand(src[1])));
+  // An input divisor has no derived range, only its declared envelope. That is
+  // enough to know its SIGN -- the one fact div() takes from the divisor when
+  // the dividend is non-negative -- exactly as the shift checks use it. It only
+  // TIGHTENS the stamp ([-|a|,|a|] -> [0,a.max]): a `u25 / u15` quotient
+  // otherwise failed its own declared unsigned range (fixme_hier_test's leaf2).
+  auto divisor = range_of_operand(src[1]);
+  if (divisor.is_unbounded()) {
+    if (const auto env = envelope_of_operand(src[1]); !env.is_unbounded() && env.min >= 0) {
+      divisor = env;
+    }
+  }
+  return stamp(dst_name, dst, range_of_operand(src[0]).div(divisor));
 }
 
 upass::Vote uPass_bitwidth::process_mod(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
@@ -595,9 +606,9 @@ upass::Vote uPass_bitwidth::process_bit_not(std::string_view dst_name, Bundle& d
 upass::Vote uPass_bitwidth::process_log_and(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
 upass::Vote uPass_bitwidth::process_log_or(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
 upass::Vote uPass_bitwidth::process_log_not(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
-upass::Vote uPass_bitwidth::process_red_or(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
-upass::Vote uPass_bitwidth::process_red_and(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
-upass::Vote uPass_bitwidth::process_red_xor(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
+upass::Vote uPass_bitwidth::process_red_or(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::unsigned_bit()); }
+upass::Vote uPass_bitwidth::process_red_and(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::unsigned_bit()); }
+upass::Vote uPass_bitwidth::process_red_xor(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::unsigned_bit()); }
 upass::Vote uPass_bitwidth::process_ne(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
 upass::Vote uPass_bitwidth::process_eq(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
 upass::Vote uPass_bitwidth::process_lt(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
@@ -672,8 +683,15 @@ upass::Vote uPass_bitwidth::process_get_mask(std::string_view dst_name, Bundle& 
 }
 
 upass::Vote uPass_bitwidth::process_set_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
-  // set_mask(base, mask, value) — writing bits outside the base's declared
-  // storage is an overflow at this node.
+  // set_mask(base, mask, value) has TWO independent fit requirements:
+  //   1. the selected destination bits must lie inside the base storage;
+  //   2. the inserted value must fit the selected lane width.
+  //
+  // The second check is the partial-write counterpart of an ordinary typed
+  // assignment.  LGraph cannot own it: by then set_mask has already made the
+  // hardware truncation explicit and the source-level omission of wrap/sat is
+  // no longer distinguishable.  An explicit RHS bit-select and the frontend's
+  // wrap/sat lowering both carry a selected-width type envelope, so they pass.
   if (src.size() >= 2 && !src[0].name.empty()) {
     const auto mask = range_of_operand(src[1]);
     if (mask.is_constant() && mask.min >= 0) {
@@ -685,7 +703,84 @@ upass::Vote uPass_bitwidth::process_set_mask(std::string_view dst_name, Bundle& 
       }
     }
   }
+
+  if (src.size() >= 3) {
+    std::optional<int64_t> lane_bits;
+    if (src[1].name.empty() && src[1].bundle) {
+      const auto mask = src[1].bundle->scalar();
+      if (mask && mask->is_integer() && !mask->has_unknowns() && !mask->is_negative()) {
+        lane_bits = mask->popcount();
+      }
+    }
+    if (!lane_bits) {
+      const auto mask = range_of_operand(src[1]);
+      if (mask.is_constant() && mask.min >= 0) {
+        lane_bits = std::popcount(static_cast<uint64_t>(mask.min));
+      }
+    }
+
+    if (lane_bits && *lane_bits > 0) {
+      // Prefer the declared envelope: `b:u8` remains an eight-bit source even
+      // if an earlier optimization happened to learn a narrower current value.
+      // Compiler temporaries (arithmetic, literals) fall back to their derived
+      // range when they have no declaration.
+      auto value_env = envelope_of_operand(src[2]);
+      if (value_env.is_unbounded()) {
+        value_env = range_of_operand(src[2]);
+      }
+      if (!value_env.is_unbounded()) {
+        const int64_t value_bits = storage_bits_for_env(value_env);
+        if (value_bits > *lane_bits) {
+          livehd::diag::sink().emit(livehd::diag::Diagnostic{
+              .severity = livehd::diag::Severity::error,
+              .code     = "bit-range-overflow",
+              .category = "bitwidth",
+              .pass     = "upass.bitwidth",
+              .message  = std::format("{}-bit value does not fit the {}-bit destination slice", value_bits, *lane_bits),
+              .span     = lm->current_span(),
+              .hint = std::format("select {} bits on the right-hand side, or apply an explicit wrap/saturate policy", *lane_bits),
+          });
+        }
+      }
+    }
+  }
   return stamp(dst_name, dst, Lnast_range::make_unbounded());
+}
+
+upass::Vote uPass_bitwidth::process_concat(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  // concat(dst, v_msb, w_msb, …, v_lsb, w_lsb) drops each lane into its OWN
+  // window, so the assembled value is always NON-NEGATIVE and exactly sum(w_i)
+  // bits wide: the range is [0, 2^sum − 1], whatever the lanes' own signs and
+  // values are (a negative lane lands as its two's-complement pattern inside
+  // its window).
+  //
+  // The widths are OPERANDS, not something this pass derives: a width that had
+  // to be inferred from a lane's range would shrink whenever the range did, and
+  // shrinking one lane shifts every lane ABOVE it -- a silent miscompile rather
+  // than a lost bound. An unbound (`nil`) width therefore does not get a guess
+  // here; the result is simply left unbounded, and upass.tolg owns the
+  // `concat-untyped-lane` diagnostic, which can point at the offending lane.
+  int64_t total = 0;
+  if ((src.size() % 2) != 0 || src.empty()) {
+    return stamp(dst_name, dst, Lnast_range::make_unbounded());  // malformed shape: fail closed
+  }
+  for (std::size_t i = 1; i < src.size(); i += 2) {  // the ODD operands are the widths
+    const auto r = range_of_operand(src[i]);
+    if (r.unbounded || r.min != r.max || r.min <= 0) {
+      return stamp(dst_name, dst, Lnast_range::make_unbounded());  // still `nil`, or not a positive comptime width
+    }
+    total += r.min;
+  }
+  // Lnast_range's bounds are int64, so a 63-bit-or-wider bus cannot be
+  // expressed (the same cutoff get_mask uses).
+  if (total <= 0 || total >= 63) {
+    return stamp(dst_name, dst, Lnast_range::make_unbounded());
+  }
+  Lnast_range r;
+  r.min       = 0;
+  r.max       = (int64_t{1} << total) - 1;
+  r.unbounded = false;
+  return stamp(dst_name, dst, r);
 }
 
 // ── Nullary hooks ────────────────────────────────────────────────────────────
@@ -695,7 +790,8 @@ void uPass_bitwidth::process_func_call() {
     return;
   }
 
-  clear_range(current_text());  // call result is unknown unless another pass proves it
+  const std::string call_dst(current_text());
+  clear_range(call_dst);  // call result is unknown unless another pass proves it
   if (!move_to_sibling()) {
     move_to_parent();
     return;
@@ -705,7 +801,19 @@ void uPass_bitwidth::process_func_call() {
   // var whose declared envelope is intentionally overflowed; exempt it from
   // the does-not-fit check at its next write.
   const auto callee      = current_text();
-  const bool is_wrap_sat = callee == "wrap" || callee == "sat" || callee == "saturate";
+  const bool is_wrap_sat = callee == "wrap" || callee == "sat";
+  if (is_wrap_sat && runner_st != nullptr) {
+    // Attributes/constprop already computed a constant narrowing result.
+    // Retain its precise range so the following assignment and .[bw_max]
+    // observe the narrowed value instead of an unbounded call result.
+    if (auto value = runner_st->comptime_scalar(call_dst); value) {
+      if (auto number = const_to_i64(*value); number) {
+        if (auto bundle = runner_st->get_bundle_for_write(call_dst); bundle) {
+          write_bw(call_dst, *bundle, Lnast_range::constant(*number), /*replace=*/true);
+        }
+      }
+    }
+  }
 
   while (move_to_sibling()) {
     if (!is_type(Lnast_ntype::Lnast_ntype_store)) {
@@ -773,7 +881,7 @@ void uPass_bitwidth::process_type_spec() {
   // 0ub????` is [0,15]; one if-arm writing `x = v#[0..=2]` would otherwise
   // restamp [0,7] and a sibling arm's legal wider write then fails the
   // declared-fit check.
-  const auto old = range_from_entry(e.decl_max, e.decl_min);
+  const auto old  = range_from_entry(e.decl_max, e.decl_min);
   if (!old.is_unbounded()) {
     if (auto nmax = const_to_i64(*dmax); nmax && old.max > *nmax) {
       dmax = *Dlop::from_pyrope(std::to_string(old.max));

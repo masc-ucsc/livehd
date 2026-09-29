@@ -9,8 +9,7 @@
 #   * `lhd sim --set sim.checkpoint_every=N --set sim.checkpoint_max=M` writes
 #     `<workdir>/ckpt/<test>/ckp<cycle>/` dirs, pruned to M and evenly spaced;
 #   * `--set sim.checkpoint=false` disables it (no dirs).
-# Structural checks run hermetically; the run checks need the sibling ../hlop +
-# ../iassert headers (a dev / repo-root run).
+# Structural and runtime checks use lhd's declared runtime dependencies.
 
 set -u
 
@@ -67,30 +66,52 @@ grep -q 'dump_state(_p + "' "$TOPCPP" || fail "dump_state does not recurse into 
 grep -q '#include "checkpoint.hpp"' "$TOPCPP" || fail "module source does not include checkpoint.hpp"
 
 grep -q 'fork_checkpoint'       "$DRV" || fail "driver lacks the fork-checkpoint cadence"
+grep -Fq '_cad.due())) [[unlikely]]' "$DRV" || fail "checkpoint body is not marked as an unlikely path"
 grep -q 'prune_checkpoints'     "$DRV" || fail "driver lacks checkpoint pruning"
 grep -q '"/tb.json"'            "$DRV" || fail "driver does not write the testbench frame"
 grep -q '_tb\["total"\]'        "$DRV" || fail "driver does not checkpoint the tb local 'total'"
 grep -q '"--ckpt-dir"'          "$DRV" || fail "driver does not accept --ckpt-dir"
 grep -q '"--no-checkpoint"'     "$DRV" || fail "driver does not accept --no-checkpoint"
 
+# An explicit checkpoint-off setup with no observation request is the lean
+# performance form: omit the large state-walk bodies and every driver call to
+# them. The generated marker lets --run-only reject a later invocation that
+# forgets the setup-time choice instead of failing at link time.
+"$LHD" sim "$W/ck.prp" --setup-only --set sim.checkpoint=false --workdir "$W/lean" -q >/dev/null 2>&1 \
+  || fail "lean setup-only failed"
+LEAN_TOPCPP="$W/lean/sim/ck.top.cpp"
+LEAN_DRV="$W/lean/sim/drv.cpp"
+grep -q 'runtime-control-support: false' "$LEAN_DRV" || fail "lean driver lacks its runtime-support marker"
+if grep -q '::dump_state' "$LEAN_TOPCPP"; then fail "lean cgen retained dump_state"; fi
+if grep -q 'fork_checkpoint' "$LEAN_DRV"; then fail "lean driver retained checkpoint calls"; fi
+
+RO="$("$LHD" sim "$W/ck.prp" --run-only --workdir "$W/lean" -q 2>&1)" \
+  && fail "run-only accepted a lean setup without repeating sim.checkpoint=false"
+echo "$RO" | grep -q 'without checkpoint/observation support' \
+  || fail "wrong stale lean-build message: $RO"
+
+# Observation requests override the lean checkpoint setting: the same setup
+# must retain both hierarchical mirrors and their state-walk support.
+"$LHD" sim "$W/ck.prp" --setup-only --set sim.checkpoint=false --probe acc.acc --workdir "$W/observed" -q >/dev/null 2>&1 \
+  || fail "checkpoint-off observed setup failed"
+OBS_TOPCPP="$W/observed/sim/ck.top.cpp"
+OBS_DRV="$W/observed/sim/drv.cpp"
+grep -q 'hierarchical-observation: true' "$OBS_DRV" || fail "probe setup lacks its observation marker"
+grep -q 'runtime-control-support: true' "$OBS_DRV" || fail "probe setup did not restore runtime support"
+grep -q '::dump_state' "$OBS_TOPCPP" || fail "probe setup omitted the shared state-walk methods"
+
 # ---- error: an unknown sim.* flag is rejected with the namespace hint ----------
 EO="$("$LHD" sim "$W/ck.prp" --set sim.checkpoint_bogus=1 --setup-only --workdir "$W/e" -q 2>&1)" \
   && fail "unknown sim flag was not rejected"
 echo "$EO" | grep -q "unknown sim flag 'sim.checkpoint_bogus'" || fail "wrong message for unknown sim flag: $EO"
 
-# ---- opportunistic real build + run (needs the sibling runtime headers) -------
-HLOP_INC=""
-IASSERT_INC=""
-for d in ../hlop/hlop ../hlop; do [ -f "$d/slop.hpp" ] && HLOP_INC="$d" && break; done
-for d in ../iassert/src ../iassert; do [ -f "$d/iassert.hpp" ] && IASSERT_INC="$d" && break; done
-if [ -z "$HLOP_INC" ] || [ -z "$IASSERT_INC" ]; then
-  echo "SKIP run checks: sibling hlop/iassert headers not found (structural checks passed)"
-  echo "PASS: lhd sim checkpoint creation (structural)"
-  exit 0
-fi
+# lhd locates its declared simulator runtime files; a failed build must fail.
 
 # checkpoint every 2 cycles, keep at most 3 -> evenly-spaced subset of {2,4,..,10}
-"$LHD" sim "$W/ck.prp" --set sim.checkpoint_every=2 --set sim.checkpoint_max=3 --workdir "$W/run" -q >/dev/null 2>&1 \
+# sim.tune.profile=off: a profiling run (the `auto` default with a fresh
+# --workdir) takes no checkpoints, and this run exists to take them.
+"$LHD" sim "$W/ck.prp" --set sim.checkpoint_every=2 --set sim.checkpoint_max=3 --set sim.tune.profile=off \
+  --workdir "$W/run" -q >/dev/null 2>&1 \
   || fail "checkpoint run failed"
 CKDIR="$W/run/ckpt/top_run"
 [ -d "$CKDIR" ] || fail "no checkpoint dir created under the workdir"

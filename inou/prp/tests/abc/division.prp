@@ -1,0 +1,9 @@
+/*
+*/
+comb division(a:u5, b:u3, c:s5, d:s3) -> (u:u5, s:s6, mixed:s7, narrow:u1, positive:u6) {
+  u = a / b
+  s = c / d
+  mixed = c / b
+  narrow = a / 17
+  positive = (-a - 1) / (-b - 1)
+}

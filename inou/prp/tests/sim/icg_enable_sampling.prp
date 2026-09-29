@@ -1,0 +1,111 @@
+/*
+:name: icg_enable_sampling
+:type: simulation
+*/
+
+// todo_sim_pipeline.md Phase 0 (step 1 + step 2 anchor) — THE REAL ICG:
+// a transparent-LOW enable latch feeding the AND gate, which is exactly
+// minion's `prim_clk_gate` (its `en_latch`, prim_clk_gate.sv:33-37) and the
+// shape flop_sim_gated_clock.prp deliberately sidesteps.
+//
+// WHY THE LATCH IS THE WHOLE POINT. `f` here has TWO gates in the design:
+// `q` goes through the latched enable, `qraw` through the raw one. They agree
+// on every schedule where the enable is stable across a period — which is the
+// only schedule a one-poke-per-tick testbench can express — and that agreement
+// is the property: the latch must be ABSORBED into the flop's commit guard, not
+// scheduled as a state element of its own. Today it is scheduled, which is why
+// minion reports four `negedge-operand-unresolved` errors that have nothing to
+// do with negedge state (minion has none): they are this latch's transparent
+// arm landing in the fall half of the tick.
+//
+// WHAT THE SCHEDULE PINS. The latch closes at the RISE, so it captures the
+// enable presented during THIS period, and `f` commits in the SAME period the
+// enable went high — not one period later. c4 is the discriminating cycle: an
+// implementation that sampled at the previous edge would still be holding 6
+// there. c5 then drops the enable again to prove the capture is not sticky.
+//
+// GOLDEN, from Icarus on the netlist LiveHD itself emits (an `always_latch`
+// enable feeding `posedge (clk & enl)`, enable changed while clk is low):
+//   q = qraw = 5, 6, 6, 6, 88, 88   and   ctl = d every cycle.
+//
+// STATUS: LIVE on arrival (2026-08-05). Worth recording, because the plan
+// expected minion's four `negedge-operand-unresolved` errors to be exactly this
+// latch. MEASURED, they are not: only ONE of the four is in `prim_clk_gate`
+// (compiled standalone, where the gate has no consumer to be absorbed into),
+// and the other three name operands that have nothing to do with a gate —
+// `memory_388:buffer_word_en` twice and `mux_13808` once. An inline ICG, as
+// written here, already schedules correctly.
+pub mod icgsamp(clk:bool, ein:bool, d:u8) -> (q:u8@[1], qraw:u8@[1], ctl:u8@[1]) {
+  // THE ICG: enable latch transparent while the clock is LOW, closing at the
+  // rise, then ANDed with the clock.
+  reg enl:bool:[latch=true]
+  if !clk {
+    enl = ein
+  }
+  wire g:bool = nil
+  g = clk and enl
+  reg f:u8:[clock_pin=ref g] = 0
+  f = d
+  q = f
+
+  // The SAME gate without the latch. Under this schedule the two must agree;
+  // they are what makes "the latch was absorbed" checkable rather than assumed.
+  wire graw:bool = nil
+  graw = clk and ein
+  reg fr:u8:[clock_pin=ref graw] = 0
+  fr   = d
+  qraw = fr
+
+  // CONTROL: a flop on the ungated reference clock.
+  reg c:u8:[clock_pin=ref clk] = 0
+  c   = d
+  ctl = c
+}
+
+test icgsamp.enable_is_sampled_at_the_closing_edge {
+  mut acc  = icgsamp
+  mut seen = 0
+  mut bad_q    = 0
+  mut bad_pair = 0
+  mut bad_ctl  = 0
+  tick 6 {
+    // c0,c1 enabled -> load; c2,c3 disabled -> HOLD; c4 enabled again -> load
+    // IN THIS PERIOD; c5 disabled -> hold what c4 loaded.
+    acc.ein = (clock <= 1) or (clock == 4)
+    mut dv:u8 = 5
+    if clock == 1 {
+      dv = 6
+    } elif clock == 2 {
+      dv = 99
+    } elif clock == 3 {
+      dv = 77
+    } elif clock == 4 {
+      dv = 88
+    } elif clock == 5 {
+      dv = 41
+    }
+    acc.d = dv
+    step
+    mut golden:u8 = 5
+    if clock >= 1 {
+      golden = 6
+    }
+    if clock >= 4 {
+      golden = 88
+    }
+    seen = seen + 1
+    if acc.q != golden {
+      bad_q = bad_q + 1
+    }
+    if acc.q != acc.qraw {
+      bad_pair = bad_pair + 1
+    }
+    if acc.ctl != dv {
+      bad_ctl = bad_ctl + 1
+    }
+  }
+  assert(seen == 6, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_ctl == 0, "CONTROL: the flop on the ungated reference clock loads every tick")
+  assert(bad_q == 0, "the ICG commits in the period whose enable the latch captured at the rise")
+  assert(bad_pair == 0, "the enable latch is absorbed into the guard: latched and raw gates agree")
+}

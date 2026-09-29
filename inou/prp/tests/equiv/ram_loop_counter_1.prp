@@ -1,0 +1,21 @@
+/*
+:name: ram_loop_counter_1
+:type: equiv
+:verilog_top: ram_loop_counter_1
+:pyrope_top: ram_loop_counter_1
+*/
+
+// Independent reference: retain the data latch and the observable counter.
+// The private RAM loop counter needs no state. Descending and zero-trip
+// loops in the Verilog also expose their terminal values in exit_values.
+pub mod ram_loop_counter_1(en:bool, sel:bool, d:u4) -> (q:u4@[0], seen:i32@[0], exit_values:u8@[0]) {
+  reg r0_dout_tmp:u4:[latch=true] = nil
+  reg b:i32:[latch=true] = nil
+  if en {
+    r0_dout_tmp = d
+    if sel { b = 3 } else { b = 5 }
+  }
+  q = r0_dout_tmp
+  seen = b
+  exit_values = 0ub11110101
+}

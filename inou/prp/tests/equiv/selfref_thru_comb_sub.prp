@@ -1,0 +1,30 @@
+/*
+:name: selfref_thru_comb_sub
+:type: equiv
+:verilog_top: selfref_thru_comb_sub
+:pyrope_top: selfref_thru_comb_sub
+*/
+//
+// A packed word-level FALSE loop whose feedback threads through a PURE-COMB
+// sub-instance. `w` is assembled from three disjoint lanes and one of them is
+// computed from a slice of `w` itself -- acyclic per BIT, cyclic per WORD.
+//
+// The per-wire splitter that lnast.tolg runs at bind time treats a `Sub` call
+// as a scheduling boundary, so it correctly finds NO cycle here. The cycle only
+// becomes ordinary word-level logic later, when a pass dissolves the instance
+// (flatten_false_loop_subs in the writers, pass.color absorb, sim.flatten).
+// Whoever dissolves the boundary owns the repair: without it cgen_verilog emits
+// one always_comb of ordered BLOCKING assignments that reads `w` before the
+// line that assigns it (verilator ALWCOMBORDER), which is not combinational at
+// all and was measured wrong on 256/256 input vectors.
+pub comb inner_x::[timecheck=false](x:u4) -> (y:u4) {
+  y = x ^ 9
+}
+
+pub comb selfref_thru_comb_sub::[timecheck=false](a:u4, b:u4) -> (z:u12) {
+  wire w:u12
+  wire hi:u4
+  hi = inner_x(x=(w#[2..=5] ^ b)).y
+  w  = a | (b << 4) | (hi << 8)
+  z  = w
+}

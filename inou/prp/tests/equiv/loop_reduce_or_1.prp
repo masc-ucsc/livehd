@@ -1,0 +1,23 @@
+/*
+:name: loop_reduce_or_1
+:set: compile.unroll=true
+*/
+// HEADER-ONLY variant: the source is loop_reduce_or.prp, and the ONLY
+// difference from the reference is this `:set:` -- rolling off, so the four
+// iterations become four INLINE occurrences with a comptime `i`, and each
+// slice folds to a constant Get_mask (`a[7:4]`, `a[11:8]`, ...) instead of the
+// dynamic one the rolled side builds.
+//
+// That is the whole claim: a loop index used as a SLICE BOUND must mean the
+// same thing whether or not the loop was rolled. The rolled side cannot
+// discharge its `descending bit-range select` bound check, so if the dynamic
+// Get_mask were ever lowered with the wrong endianness or an off-by-one, the
+// two sides would disagree here even though each still LECs against a golden
+// of its own shape.
+//
+// Recorded, deliberately NOT pinned with `:lec_grep:`: this pair is discharged
+// `1 via solver`, not by the compact-vs-unrolled semdiff normalization that
+// `loop_roll_mixed_1` demands with `0 via solver`. The dynamic Get_mask in the
+// rolled body is what blocks the structural fold. If semdiff ever learns to
+// normalize a runtime-indexed slice, this pair should flip to the no-solver
+// path -- an improvement, which a grep here would have reported as a failure.

@@ -3,6 +3,7 @@
 #include "upass_verifier.hpp"
 
 #include <charconv>
+#include <format>
 #include <print>
 #include <string>
 #include <string_view>
@@ -131,7 +132,13 @@ upass::Emit_decision uPass_verifier::classify_statement() {
   std::optional<Dlop> val;
   std::string         operand_text;
   std::string         assert_msg;  // user-supplied message (cassert's 2nd arg), if any
-  bool                got_child = move_to_child();
+  // A plain `assert` emits NO `__fkind__` sentinel (prp2lnast.cpp:2413,
+  // slang_stmt.cpp:333), so the sentinel branch below never runs for one --
+  // it must therefore DEFAULT to a design assert (kept as a runtime check),
+  // exactly like tolg's `std::string kind = "assert";`.  Defaulting to true
+  // made an unknown-valued plain assert a hard error AND dropped the node.
+  bool                elaboration_assert = false;
+  bool                got_child          = move_to_child();
   if (got_child) {
     operand_text = std::string{current_text()};
     if (is_type(Lnast_ntype::Lnast_ntype_const)) {
@@ -150,7 +157,8 @@ upass::Emit_decision uPass_verifier::classify_statement() {
     // skip must be guarded — walking off the end leaves the cursor invalid.
     bool have_msg_child = move_to_sibling();
     if (have_msg_child && current_text().rfind("__fkind__", 0) == 0) {
-      have_msg_child = move_to_sibling();
+      elaboration_assert = current_text() == "__fkind__cassert";
+      have_msg_child     = move_to_sibling();
     }
     if (have_msg_child) {
       std::optional<Dlop> mval;
@@ -165,6 +173,24 @@ upass::Emit_decision uPass_verifier::classify_statement() {
     }
   }
   move_to_parent();
+
+  // A constant unknown is already resolved, but it cannot establish an
+  // elaboration assertion. Report this even in comptime-only flows, where
+  // no graph-lowering pass will revisit the surviving assertion.
+  const auto comptime_value = runner_st != nullptr ? runner_st->comptime_scalar(operand_text) : val;
+  if (elaboration_assert && comptime_value && comptime_value->has_unknowns()) {
+    ++unknown_count;
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = "cassert-unknown",
+        .category = "type",
+        .pass     = "upass.verifier",
+        .message  = "cassert condition is unknown at compile time",
+        .span     = span_from_nid(lm, cassert_nid),
+        .hint     = "cassert must fold to true; inspect unknown bit patterns as text in comptime tests",
+    });
+    return upass::Emit_decision::drop();
+  }
 
   const bool known = val && !val->is_invalid() && !val->has_unknowns();
   if (!known) {
@@ -186,15 +212,11 @@ upass::Emit_decision uPass_verifier::classify_statement() {
     return upass::Emit_decision::emit_node();  // keep for runtime
   }
 
-  // Comptime-resolved nil discharges the cassert per attributes_spec §Phase 2.
-  // An unset attribute reads as nil (`b.[unset]`, `!b.[unset]`, or any
-  // expression that propagated a nil through log_not / log_and). The user's
-  // assertion is structurally "this attribute has the expected (un)set state";
-  // resolving to nil means the upass observed no contradiction at compile time,
-  // so we treat it as a pass rather than a failure. Must come before
-  // `is_known_false`, since Type::Nil's empty bit-pattern is also `known_false`.
+  // Nil is a value, not proof of an assertion. Only a comparison such as
+  // `attr == nil` can establish the intended unset-attribute predicate.
   if (val->is_nil()) {
-    ++pass_count;
+    ++fail_count;
+    emit_false_cassert_diag(cassert_nid, operand_text, "nil", assert_msg);
     return upass::Emit_decision::drop();
   }
 
@@ -300,11 +322,15 @@ upass::Emit_decision uPass_verifier::classify_func_call() {
     return upass::Emit_decision::drop();
   }
 
+  // comptime_scalar, not known_const_scalar: a bound Dlop is a comptime value
+  // even when it carries unknown bits, and cputs only renders it as text (the
+  // `?` digits included) — the LEC hazard that makes known_const_scalar refuse
+  // unknowns is about inlining them into hardware, which never happens here.
   std::optional<Dlop> val;
   if (is_type(Lnast_ntype::Lnast_ntype_const)) {
     val = *Dlop::from_pyrope(current_text());
   } else if (is_type(Lnast_ntype::Lnast_ntype_ref) && runner_st != nullptr) {
-    val = runner_st->known_const_scalar(current_text());
+    val = runner_st->comptime_scalar(current_text());
   }
 
   // Reject named or multi-argument forms in this slice. A trailing
@@ -319,7 +345,7 @@ upass::Emit_decision uPass_verifier::classify_func_call() {
                     "call cputs with a single comptime string operand");
     return upass::Emit_decision::drop();
   }
-  if (!val || val->is_invalid() || val->has_unknowns()) {
+  if (!val || val->is_invalid()) {
     emit_cputs_diag(fcall_nid,
                     "cputs-not-comptime",
                     "cputs operand is not comptime-known",
@@ -397,31 +423,40 @@ void uPass_verifier::finalize_aggregate() {
              aggregate_unknown_count,
              aggregate_cputs_count);
 
-  bool mismatch = false;
+  // Build the mismatch report as ONE string and hand it to upass::error, which
+  // is the diagnostics-sink path: the CLI renders it per --diag-fmt and lifts it
+  // into the result envelope. A loose stderr print of the same numbers obeys
+  // neither -q nor --diag-fmt json and never reaches an `--emit diagnostics:`
+  // consumer, so the reader is told the tally mismatched but not by how much.
+  std::string detail;
+  const auto  add_detail = [&detail](std::string_view d) {
+    if (!detail.empty()) {
+      detail += "; ";
+    }
+    detail += d;
+  };
   if (aggregate_expected_pass >= 0 && static_cast<int>(aggregate_pass_count) != aggregate_expected_pass) {
-    std::print(stderr,
-               "uPass - verifier expected verifier_pass:{} but saw pass:{}\n",
-               aggregate_expected_pass,
-               aggregate_pass_count);
-    mismatch = true;
+    add_detail(std::format("expected verifier_pass:{} but saw pass:{}", aggregate_expected_pass, aggregate_pass_count));
   }
   // When verifier_fail is set, treat it as the allowed count: mismatch is
   // an error. When unset, any fail is unexpected — match expected_fail==0
   // as the default so a naked run still catches false casserts.
   const int fail_allowed = aggregate_expected_fail >= 0 ? aggregate_expected_fail : 0;
   if (static_cast<int>(aggregate_fail_count) != fail_allowed) {
-    std::print(stderr, "uPass - verifier expected verifier_fail:{} but saw fail:{}\n", fail_allowed, aggregate_fail_count);
-    mismatch = true;
+    add_detail(std::format("expected verifier_fail:{} but saw fail:{}", fail_allowed, aggregate_fail_count));
   }
 
-  if (mismatch) {
+  if (!detail.empty()) {
     if (!aggregate_unknown_operands.empty()) {
-      std::print(stderr, "uPass - verifier unresolved cassert operand(s):");
+      std::string ops;
       for (const auto& s : aggregate_unknown_operands) {
-        std::print(stderr, " {}", s);
+        if (!ops.empty()) {
+          ops += ' ';
+        }
+        ops += s;
       }
-      std::print(stderr, "\n");
+      add_detail(std::format("unresolved cassert operand(s): {}", ops));
     }
-    upass::error("verifier cassert count mismatch\n");
+    upass::error("verifier cassert count mismatch ({})", detail);
   }
 }

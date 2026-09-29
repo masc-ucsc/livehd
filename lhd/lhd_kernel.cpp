@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <format>
+#include <vector>
 
 #include "diag.hpp"
 #include "lhd_kernel_internal.hpp"
@@ -22,6 +23,9 @@ namespace lhd {
 // check_known_set_passes still emits the standard unknown-pass error. Uses
 // only the constexpr kSetPasses table, so it is safe before init_engine().
 std::string canonical_set_key(std::string_view key, std::string_view ctx) {
+  if (key == "pass.satopt") {
+    return std::string{key};
+  }
   // `<channel>.log=<level>` is the developer-logging namespace (livehd::log),
   // orthogonal to the pass-flag registry — a channel name (e.g. `upass`,
   // `cprop`) is NOT a pass name, so it must never collect a command-path
@@ -31,11 +35,28 @@ std::string canonical_set_key(std::string_view key, std::string_view ctx) {
   }
   // The `sim.*` command namespace (sim_command + the cgen.sim codegen labels,
   // kSimSetOptions) is its own vocabulary. Like `.log`, it must never collect
-  // a command-path prefix under a `compile`/describe context.
+  // a command-path prefix under a `compile`/describe context -- and EVERY sim
+  // key stays verbatim, registered or not, so a renamed spelling
+  // (sim.color_dirty) reaches its directed rename error and a typo its
+  // unknown-sim-flag error instead of resolving somewhere else.
   if (key.size() > 4 && key.substr(0, 4) == "sim.") {
-    auto flag = key.substr(4);
-    for (const auto& s : kSimSetOptions) {
-      if (s.name == flag) {
+    return std::string{key};
+  }
+  // Same for the `synth.*` command namespace (synth_command, kSynthSetOptions).
+  if (key.size() > 6 && key.substr(0, 6) == "synth.") {
+    // An unknown synth.* command option must not be reinterpreted as a flag
+    // of some pass: pass flags take their explicit pass prefix.
+    return std::string{key};
+  }
+  // A REMOVED namespace (kRenamedSetPasses: `lec.*`, `compile.sim.*`, ...) is
+  // kept verbatim so check_known_set_passes raises its directed "was removed"
+  // error. Without this, `lec.solver` under a `formal.lec` command path would
+  // collect the prefix and resolve to `formal.lec.solver` -- the deliberate
+  // removal diagnostic would silently disappear.
+  if (auto pos = key.rfind('.'); pos != std::string_view::npos) {
+    auto ns = key.substr(0, pos);
+    for (const auto& rn : kRenamedSetPasses) {
+      if (rn.old_ns == ns) {
         return std::string{key};
       }
     }
@@ -87,14 +108,12 @@ void init_engine() {
 std::vector<Set_option> list_set_options() {
   init_engine();
   std::vector<Set_option> out;
-  const auto is_formal_common = [](std::string_view flag) {
-    for (const auto& f : kFormalCommonFlags) {
-      if (f == flag) {
-        return true;
-      }
-    }
-    return false;
-  };
+  out.push_back(Set_option{"pass.satopt",
+                           "pass.satopt",
+                           "false",
+                           "Enable proof-backed logic simplification in the compile step. Default false; on for `lhd synth` "
+                           "and `lhd lec` compiling a Pyrope/Verilog source (an lg:/ln: input is taken as compiled). An "
+                           "explicit true/false always wins. pass.satopt.stages narrows the searches (default: all)."});
   for (const auto& sp : kSetPasses) {
     if (sp.list == Set_pass::List::none) {
       continue;  // legacy alias spelling: accepted by --set, never listed
@@ -104,7 +123,7 @@ std::vector<Set_option> list_set_options() {
       continue;  // defensive: every kSetPasses method registers in init_engine
     }
     for (const auto& [flag, attr] : m->labels) {
-      if (is_kernel_label(flag)) {
+      if (is_kernel_label(flag) || !retired_set_hint(sp.method, flag).empty()) {
         continue;
       }
       // `top` on any pass is the shared --top / lhd.top (set_top_label plumbs
@@ -117,10 +136,14 @@ std::vector<Set_option> list_set_options() {
       if (attr.help.starts_with("DEPRECATED") || attr.help.starts_with("INTERNAL")) {
         continue;
       }
-      if (sp.list == Set_pass::List::common && !is_formal_common(flag)) {
+      // The common/specific split keys on (method, flag), so a pass.formal
+      // label that merely SHARES a name with a pass.lec one (timeout, reset)
+      // is not hidden by collision.
+      const bool is_common = set_flag_is_common(sp.method, flag);
+      if (sp.list == Set_pass::List::common && !is_common) {
         continue;
       }
-      if (sp.list == Set_pass::List::specific && is_formal_common(flag)) {
+      if (sp.list == Set_pass::List::specific && is_common) {
         continue;
       }
       out.push_back(Set_option{std::format("{}.{}", sp.set_name, flag), std::string{sp.method}, attr.default_value, attr.help});
@@ -143,11 +166,53 @@ std::vector<Set_option> list_set_options() {
                            "lhd",
                            "false",
                            "print the pass's aggregate statistics report; the canonical form of the --stats flag (either "
-                           "spelling works). Consumed by the passes that have one (pass.color, pass.semdiff, pass.lec). "
-                           "For `lhd lec` / `lhd formal verify` (canonical knob formal.stats) it prints a cvc5 "
+                           "spelling works). Consumed by the passes that have one (pass.color, pass.abc, pass.opentimer, "
+                           "pass.semdiff, pass.lec). ABC/OpenTimer add one structured row per mapped color, with "
+                           "resynth=1|0 carried through incremental ABC reuse. "
+                           "For `lhd lec` / `lhd formal verify` (canonical knob lhd.stats) it prints a cvc5 "
                            "solve-insight report (problem size, conflicts, decisions, propagations, restarts, theory "
                            "lemmas, resource units, timings) and registers a cvc5 plugin that makes the solve ~8x "
                            "SLOWER -- a diagnosis tool, not something to leave on or to time a run with"});
+  out.push_back(
+      Set_option{"lhd.incremental",
+                 "lhd",
+                 "true",
+                 "the ONE switch for every persistent reuse tier: the Pyrope compile cache (unchanged parse and lowered graph "
+                 "units), pass.abc's per-region cache (abc_cache/), pass.opentimer's STA result cache (sta_cache/), and the "
+                 "formal/lec verdict cache (formal_cache.json). Reuse "
+                 "needs a user-named --workdir to live under, so this only matters with one. false forces an honest cold run "
+                 "with byte-identical outputs (reuse is a speedup, never an oracle) while the --result-json telemetry keeps "
+                 "reporting enabled=false. There is no per-tier switch"});
+  out.push_back(Set_option{
+      "compile.unroll",
+      "compile",
+      "false",
+      "true|false: request per-iteration source expansion for benchmarking. Default "
+      "false: an eligible loop is KEPT as one replicated instance (its body lifted to a generated definition), which is "
+      "O(1) in the trip count for the front end and for hierarchical synthesis/LEC. Scalar and array carries use "
+      "the same policy, with no trip-count threshold. A loop the lifter declines (a "
+      "register written in the body, a carry without a declared type, a nested loop whose domain reads the index, …) "
+      "unrolls either way, with the reason in the pass.upass log. Backends that cannot consume the compact form expand it "
+      "themselves, so results are identical; only representation and speed differ"});
+  out.push_back(Set_option{
+      "compile.lnast_fmt",
+      "compile",
+#ifndef NDEBUG
+      "true",
+#else
+      "false",
+#endif
+      "run the pass.lnastfmt compiler self-check after parsing; defaults on in debug builds and off in optimized builds"});
+  out.push_back(
+      Set_option{"compile.verify_frozen",
+                 "compile",
+#ifndef NDEBUG
+                 "true",
+#else
+                 "false",
+#endif
+                 "freeze every legalized graph's structure and re-check it after the emits (pass.legalize); a full digest per "
+                 "graph, twice, so it defaults on in debug builds and off in optimized builds"});
   // The `sim.*` command namespace (consumed by sim_command, not an EPRP method):
   // keep `lhd list options` / `lhd describe` complete. Single source of truth =
   // kSimSetOptions, which also drives check_known_set_passes / the sim --help block.
@@ -157,9 +222,53 @@ std::vector<Set_option> list_set_options() {
     }
     out.push_back(Set_option{std::format("sim.{}", s.name), "sim", std::string{s.default_value}, std::string{s.help}});
   }
+  // The `synth.*` command namespace (synth_command), same single-source rule.
+  for (const auto& s : kSynthSetOptions) {
+    out.push_back(Set_option{std::format("synth.{}", s.name), "synth", std::string{s.default_value}, std::string{s.help}});
+  }
   std::sort(out.begin(), out.end(), [](const Set_option& a, const Set_option& b) { return a.name < b.name; });
   return out;
 }
+
+namespace {
+
+// A run that names nowhere to keep its result is legitimate -- a syntax check, a
+// `--stats` report -- but it is far more often a mistake, and the symptom (the
+// command "did nothing") looks identical either way. Say it ONCE, up front,
+// rather than after a long synthesis: the scratch workdir the kernel mints is
+// never named, so nothing the run builds is reachable afterwards.
+//
+// `compile` and `synth` only: they exist to BUILD something. Every other
+// command's output is its report (lec's verdict, sim's test results, tool's
+// stdout, a pass's --stats), which a run with no workdir still delivers in
+// full. `diagnostics:`/`results:` describe the run, not the design, so they do
+// not count as somewhere to keep it.
+void warn_no_artifacts(const Options& opts) {
+  if (opts.command != "compile" && opts.command != "synth") {
+    return;
+  }
+  // `workdir_scratch` because workdir() MUTATES opts.workdir: by the time this
+  // runs, a workdir-less command has already been handed an unnamed mkdtemp
+  // path, so a plain `workdir.empty()` test would never fire.
+  if ((!opts.workdir.empty() && !opts.workdir_scratch) || !opts.dumps.empty()) {
+    return;
+  }
+  const auto keeps_design = [](const std::vector<Typed_path>& v) {
+    return std::any_of(v.begin(), v.end(), [](const Typed_path& t) { return t.kind != "diagnostics" && t.kind != "results"; });
+  };
+  if (keeps_design(opts.emits) || keeps_design(opts.emit_dirs)) {
+    return;
+  }
+  livehd::diag::warn("lhd", "no-artifacts", "io")
+      .msg("`lhd {}` was given neither --workdir nor an --emit/--emit-dir output: it runs, but nothing it builds is kept",
+           opts.command)
+      .hint(
+          "--emit-dir lg:DIR (or verilog:DIR) keeps the result; --workdir DIR additionally keeps the intermediates and the "
+          "per-pass logs")
+      .emit();
+}
+
+}  // namespace
 
 void run_engine_command(Options& opts, Result& res) {
   validate_emits(opts);
@@ -187,9 +296,15 @@ void run_engine_command(Options& opts, Result& res) {
     pass_command(opts, res);
   } else if (opts.command == "sim") {
     sim_command(opts, res);
+  } else if (opts.command == "synth") {
+    synth_command(opts, res);
   } else {
     throw Lhd_error{"usage", std::format("unknown command '{}'", opts.command), ""};
   }
+  // AFTER the dispatch: each command opens with its own setup_diag, which
+  // clears the sink -- a record emitted before that would print but never be
+  // counted (the envelope would say "0 warnings" under its own warning line).
+  warn_no_artifacts(opts);
 }
 
 }  // namespace lhd

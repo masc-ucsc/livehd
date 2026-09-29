@@ -25,7 +25,7 @@ run() { "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json
 for ALG in acyclic cgen synth path mincut flat; do
   D="$W/$ALG"
   mkdir -p "$D"
-  run compile verilog "$V0" --top "$TOP" --reader yosys-verilog --recipe O1 --emit-dir lg:"$D/lg" --workdir "$D/w1"
+  run compile verilog "$V0" --top "$TOP" --emit-dir lg:"$D/lg" --workdir "$D/w1"
   run pass color "$ALG" --top "$TOP" lg:"$D/lg" --workdir "$D/w2"
   echo "PASS: color $ALG ran"
   # continuous mode (per-region split) must also run
@@ -36,11 +36,24 @@ done
 
 echo "PASS: all pass.color algorithms run through the lhd CLI"
 
+# `synth` has three boundary modes behind one --set. cones is the cone-seeded
+# one (todo/livehd/2c-color-synthcones.html); its own end-to-end coverage is
+# lhd_color_cones_test.sh, this only keeps the mode in the CLI smoke loop.
+for SALG in pipe synth cones; do
+  option_args=()
+  [ "$SALG" = "cones" ] || option_args=(--set "color.synth.mode=$SALG")
+  D="$W/synth_$SALG"
+  mkdir -p "$D"
+  run compile verilog "$V0" --top "$TOP" --emit-dir lg:"$D/lg" --workdir "$D/w1"
+  run pass color synth --top "$TOP" ${option_args[@]+"${option_args[@]}"} lg:"$D/lg" --workdir "$D/w2"
+  echo "PASS: color synth mode=$SALG ran"
+done
+
 # `flat` must yield exactly ONE color across the WHOLE hierarchy (the flatten
 # equivalent) -- both the top and every sub-def, even with continuous requested.
 FD="$W/flat_one"
 mkdir -p "$FD"
-run compile verilog "$V0" --top "$TOP" --reader yosys-verilog --recipe O1 --emit-dir lg:"$FD/lg" --workdir "$FD/w1"
+run compile verilog "$V0" --top "$TOP" --emit-dir lg:"$FD/lg" --workdir "$FD/w1"
 run pass color flat --top "$TOP" --set color.continuous=true lg:"$FD/lg" --workdir "$FD/w2"
 NCOL=$("$LHD" tool --diag-fmt pretty cat --top "$TOP" lg:"$FD/lg" 2>/dev/null | grep -o 'color=[0-9]*' | sort -u | wc -l | tr -d ' ')
 [ "$NCOL" = "1" ] || fail "flat must leave a single color across the hierarchy, got $NCOL distinct"

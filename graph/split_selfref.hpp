@@ -1,23 +1,38 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <string>
+#include <vector>
+
+#include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
 
 namespace livehd::graph_util {
 
-// Dissolve a WORD-level-false combinational cycle through a packed wire: a net
-// built as an Or/shift concat accumulator that is read back via constant
-// Get_mask slices or And(SRA(w,k),mask) readers looks cyclic at word level
-// while the bit-level DAG is acyclic (the Chisel arbiter grant-chain shape).
-// Each such slice-read is rebuilt from only the operands whose proven bit
-// footprints overlap it (including bounded EQ/Mux controls). Strictly
-// a NO-OP unless a genuine word-level comb cycle exists; a genuine bit-level
-// loop (e.g. w = w+1) is never split and still fails loudly downstream.
+// Resolve a packed self-reference exactly when a single-driver wire's defining
+// edge is attached. `driver` is already connected to `buffer`; `early_readers`
+// are the buffer consumers that existed before the defining write. Only the
+// dependency cone between those readers and `driver` is inspected -- there is
+// no whole-graph cycle scan. Returns the number of slice reads rewired.
 //
-// Runs in pass/cprop (every backend sees the acyclic DAG: lec encode, cgen,
-// sim scheduling) and again from inou/cgen/cgen_sim for O0 graphs that skip
-// cprop. Returns the number of rewired reads.
-int split_packed_selfref_wires(hhds::Graph* g);
+// This is a lowering operation, not an optimization or writer repair: after it
+// returns, every downstream pass sees the same valid LGraph.
+int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, const hhds::Pin_class& driver,
+                              const std::vector<hhds::Node_class>& early_readers);
+
+// Does `driver`'s backward cone still reach `target` COMBINATIONALLY? State and
+// memories are scheduling boundaries. A `Sub` is NOT: a pure-comb call is seen
+// THROUGH, per OUTPUT CONE -- the walk follows only the instance inputs that
+// output actually depends on. Cone precision is load-bearing, not an
+// optimization: this predicate backs lnast.tolg's `combinational loop through
+// wire` ERROR, and modelling the instance as a crossbar reports a cycle for the
+// tests/equiv/sim_sub_nested_comb_feedback shape, which has none.
+//
+// NOTE this is STRICTER than the crossbar model `split_packed_selfref_wire`
+// uses to decide whether to ATTEMPT a split (there an over-approximation only
+// widens the cone it hands the splitter). A wire can therefore be split and then
+// correctly report no residual self dependency here.
+[[nodiscard]] bool comb_pin_depends_on(const hhds::Pin_class& driver, const hhds::Node_class& target);
 
 // Break a false combinational loop that runs THROUGH a pure-comb sub-instance:
 // inline the offending instance into `g` so the cycle becomes ordinary logic
@@ -27,13 +42,61 @@ int split_packed_selfref_wires(hhds::Graph* g);
 // Flop/Latch/Memory would change state identity. A no-op unless a stateless
 // Sub's output actually feeds back into one of its own inputs.
 //
-// Same deal as split_packed_selfref_wires above, and it must run in the same
-// places: a WRITER cannot assume an optimization pass ran first. cgen_verilog
-// emits one always_comb of ordered BLOCKING assignments, so a residual cycle
-// makes it emit a read before the line that assigns it -- Verilog that is not
-// combinational at all (measured on tests/equiv/sim_sub_nested_comb_feedback:
-// 299/300 vectors wrong at O0, 0/300 at O1, from the SAME source).
-// Returns the number of instances inlined.
-int flatten_false_loop_subs(hhds::Graph* g);
+// Callers: pass.legalize (every compile, before the freeze) and the LEC prep
+// path for inputs that bypass the compile pipeline. cgen_verilog no longer
+// needs it -- it schedules across a Sub boundary read-only (comb_emit_order,
+// closing the always_comb at each cut instance); the older "299/300 vectors
+// wrong at O0" measurement on tests/equiv/sim_sub_nested_comb_feedback predates
+// that scheduler. Returns the number of instances inlined.
+int flatten_false_loop_subs(hhds::Graph* g, std::vector<std::string>* inlined_callees = nullptr);
+
+// Repair packed word-level cycles in a simulator-private graph. This may
+// inline pure-combinational instances that participate in a multi-instance
+// ring, then resolves only the bit slices still on the recomputed residual
+// cycle. It must not run on the shared synthesis/formal library because the
+// inlining intentionally removes hierarchy cutpoints.
+//
+// Returns the number of inlined instances plus rewired packed reads.
+int repair_simulator_packed_cycles(hhds::Graph* g);
+
+// The same repair for a private formal-query copy. Pure-combinational instance
+// boundaries may be inlined; state identity is preserved. Real bit-level
+// cycles remain unresolved. Never apply this to a shared proof library.
+int repair_private_packed_cycles(hhds::Graph* g);
+
+// The comb nodes of `g` that sit on a WORD-LEVEL cycle, non-mutating.
+//
+// `strict` picks the scheduling model. FALSE cuts a `Sub` call and a `Memory`
+// read (both are boundaries to an event-driven simulator, and to the splitter
+// above). TRUE treats them as ordinary nodes, which is what `inou.cgen.sim`'s
+// single-pass `forward_class` walk does — so a node reported under `strict` but
+// not otherwise is on a cycle the SCHEDULE manufactures rather than one the
+// design has. Registers always cut: a q is last period's value.
+void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhds::Node_class>& out,
+                            const absl::flat_hash_set<hhds::Class_index>* allowed = nullptr);
+
+// A deterministic topological EMISSION order for the comb nodes of `g`, under
+// the BACKEND's placement model rather than the splitter's: a `Sub` is an
+// ordinary node (an instance is one indivisible item in the emitted schedule),
+// while state, `Memory` and `Clock_cell` are sources.
+//
+// Strictly READ-ONLY. This exists so a writer never has to mutate the graph to
+// obtain an order -- `hhds::Node_order::forward` cannot supply one here, because
+// `Graph::set_subnode` re-stamps a pure-comb instance to a non-`loop_break`
+// type, so a false loop through it is a live cycle for that walk and its whole
+// SCC drops into the raw-index tail with no dependency check.
+//
+// `order` receives every placeable node, `Sub`s included, at their dataflow
+// position. `cut_subs` receives the instances the walk had to force through to
+// break a residual word-level cycle -- those are exactly the points where the
+// caller must close one `always_comb` and open the next, so the surviving
+// dependency crosses a process boundary the simulator schedules. `residual`
+// receives the nodes that could not be ordered at all, i.e. a genuine
+// combinational loop with no instance on it, in ascending storage order --
+// those nodes are ALSO appended to `order` (that same ascending tail), because
+// a writer must still emit them: omitting a statement is worse than emitting it
+// out of order. A caller that wants to refuse instead inspects `residual`.
+void comb_emit_order(hhds::Graph* g, std::vector<hhds::Node_class>& order,
+                     absl::flat_hash_set<hhds::Node_class>* cut_subs = nullptr, std::vector<hhds::Node_class>* residual = nullptr);
 
 }  // namespace livehd::graph_util

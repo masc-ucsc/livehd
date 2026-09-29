@@ -1,0 +1,50 @@
+/*
+:name: mux_chain_width
+:type: simulation
+*/
+
+// Each independent conditional merges the previous value with one new value.
+// The LGraph carrier for an unsigned value has one spare zero sign bit; that
+// slot must not become new magnitude at every merge. Before the fix this u4
+// chain grew one bit per `if` and eventually generated a narrowing mux.
+pub comb pick(sel:u4) -> (out:u4) {
+  out = 0
+  if sel == 0  { out = 1  }
+  if sel == 1  { out = 2  }
+  if sel == 2  { out = 3  }
+  if sel == 3  { out = 4  }
+  if sel == 4  { out = 5  }
+  if sel == 5  { out = 6  }
+  if sel == 6  { out = 7  }
+  if sel == 7  { out = 8  }
+  if sel == 8  { out = 9  }
+  if sel == 9  { out = 10 }
+  if sel == 10 { out = 11 }
+  if sel == 11 { out = 12 }
+  if sel == 12 { out = 13 }
+  if sel == 13 { out = 14 }
+  if sel == 14 { out = 15 }
+}
+
+test pick.every_arm_stays_lossless {
+  mut acc = pick
+  acc.sel = 14
+  step
+  assert(acc.out == 15, "a long mux chain must preserve its u4 value")
+}
+
+// A finite slice is one of the operations that may deliberately drop bits.
+// Its result capacity must follow the selected field, not the packed source;
+// otherwise putting the field back at its original offset creates an illegal
+// narrowing SHL even though the source program made the truncation explicit.
+pub comb repack_field(x:u64) -> (out:u64) {
+  const field = x#[0..=63]#[57..=62]
+  out = field << 57
+}
+
+test repack_field.explicit_slice_stays_narrow {
+  mut acc = repack_field
+  acc.x = 42 << 57
+  step
+  assert(acc.out == (42 << 57), "a packed field must round-trip without leaking adjacent bits")
+}

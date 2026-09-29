@@ -25,7 +25,7 @@ public:
     Scope_type                                                type;
     std::string                                               func_id;
     std::string                                               scope;  // 0.0.1 ...
-    std::vector<std::string>           declared;
+    std::vector<std::string>                                  declared;
     absl::flat_hash_map<std::string, std::shared_ptr<Bundle>> varmap;  // field, value, path_scope (case-sensitive)
     Scope*                                                    parent{nullptr};
     // Set by the caller (constprop's process_stmts) when this scope is the
@@ -34,7 +34,9 @@ public:
     // invalidated in its declaring scope so the unknown side-effects of the
     // arm don't leak out. See record_uncertain_modification().
     bool                                                      uncertain_cond{false};
-    // Vars modified inside this (uncertain) arm, invalidated on leave_scope.
+    // Variable or field paths modified inside this uncertain arm, invalidated
+    // on leave_scope. Field precision matters: a conditional write to `p.a`
+    // must not erase a definite value already established for sibling `p.b`.
     // A SET, not a vector: record_uncertain_modification dedups on every set()
     // inside the arm, and a linear vector scan there was O(writes^2) per arm
     // (string compares) on big always-blocks. Order does not matter (each entry
@@ -92,6 +94,22 @@ public:
     return false;
   }
 
+  // How many active scopes are uncertain. `in_uncertain_scope` alone cannot
+  // answer "is THIS statement's guard runtime", only "is anything enclosing it
+  // runtime" — a comptime `break` inside a comptime `if` nested in a runtime
+  // `if` reads as uncertain either way. A caller that snapshots this count at a
+  // known point (e.g. loop-iteration entry) and compares later sees only the
+  // scopes entered SINCE.
+  [[nodiscard]] std::size_t uncertain_scope_count() const {
+    std::size_t n = 0;
+    for (const auto* s : stack) {
+      if (s->uncertain_cond) {
+        ++n;
+      }
+    }
+    return n;
+  }
+
   // True when `var` is declared in an ENCLOSING scope (not the innermost
   // active one) — i.e. writing it here mutates an outer variable from inside a
   // nested block (`if true { acc = … }`, a loop iteration). Such a write is NOT
@@ -120,7 +138,7 @@ public:
     Dlop        decl_min;
     bool        comptime{false};
   };
-  absl::flat_hash_map<std::string, Pending_decl> pending_decl_facts;
+  absl::flat_hash_map<std::string, Pending_decl>             pending_decl_facts;
   // Reverse index: root var name → the full pending_decl_facts keys (root.field)
   // stashed under it. leave_scope() uses it to drop a scope's still-unapplied
   // field facts in O(scope vars) when their root goes out of write-scope —
@@ -166,6 +184,25 @@ public:
       return std::nullopt;
     }
     return get_trivial(name);
+  }
+
+  // The COMPTIME read: same trivial-scalar binding as known_const_scalar, but
+  // unknown-carrying values (`0sb?`) come through. Any bound Dlop IS a
+  // compile-time value — `0ub????` is as elaborated as `0xA`. The two readers
+  // differ only in what they are FOR: known_const_scalar feeds hardware
+  // inlining, where substituting x-bits is LEC-breaking; this one feeds
+  // comptime-only consumers (cputs) that merely render the value as text.
+  std::optional<Dlop> comptime_scalar(std::string_view name) const {
+    if (name.empty() || !has_trivial(name)) {
+      return std::nullopt;
+    }
+    if (auto b = get_bundle(name); b && !b->is_trivial_scalar()) {
+      return std::nullopt;
+    }
+    if (const auto& v = get_trivial(name); !v.is_invalid()) {
+      return v;
+    }
+    return std::nullopt;
   }
 
   // Runtime tuple-slot refs (loop-migration Step 1): dst tuple →

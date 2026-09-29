@@ -1,0 +1,22 @@
+/*
+:name: concat_removed
+:type: error
+:error: `concat` was removed
+:help: the argument order REVERSES
+*/
+
+// `concat(a, b, c)` was the positional bit-packing builtin, what SystemVerilog
+// spells `{a, b, c}`. It was removed (docs/pyrope/21-deprecated.md): it read
+// like `{a, b}` and was the only bit spelling in Pyrope that ran high-to-low,
+// while `#[0]` is the low bit, a bit range is written low-to-high, and the
+// string encoding puts the first characters in the low bits.
+//
+// The diagnostic is pinned HERE, not left to a generic "unknown call", because
+// the migration is not a rename: `#[..]` puts entry 0 at bit 0, so the argument
+// list REVERSES. Anything mechanical that keeps the old order miscompiles
+// silently instead of failing, which is exactly what an error message is for.
+comb concat_removed() -> (z:u12) {
+  const a:u4 = 5
+  const b:u8 = 1
+  z = concat(a, b)   // the replacement is `(b, a)#[..]`
+}

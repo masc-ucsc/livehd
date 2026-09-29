@@ -1,0 +1,24 @@
+// Native directed vectors for the Pyrope round trip of
+// async_reset_concat_shapes.sv (the roundtrip_sim tier of
+// tests/slang_compile.sh). Each `step` is one whole reference `clk` cycle, so
+// this checks the concatenated reset and data VALUES; that every register keeps
+// an asynchronous reset is pinned by the fixture's :verilog_re:/:verilog_not_re:
+// headers.
+const dut = import("lg:async_reset_concat_shapes")
+
+test concat_shapes.reset {
+  mut acc = dut
+  const wide_rst = 0x8123456789abcdef0123
+  const data     = 0xffffffffffffffffabcd
+  mut cycle:u32 = 0
+  tick 4 {
+    acc.rst  = cycle != 2
+    acc.data = if cycle == 1 or cycle == 2 { data } else { 0 }
+    step
+    assert((cycle != 2) implies (acc.wide == wide_rst and acc.signed_q == -3 and acc.tail == 5), "reset a")
+    assert((cycle != 2) implies (acc.ascending == 0x13 and acc.sliced == 0x42 and acc.extended == 0x1f and acc.truncated == 7), "reset b")
+    assert((cycle == 2) implies (acc.wide == data and acc.signed_q == -3 and acc.tail == 5), "data a")
+    assert((cycle == 2) implies (acc.ascending == 0xac and acc.sliced == 0xdb and acc.extended == 0x19 and acc.truncated == 5), "data b")
+    cycle += 1
+  }
+}

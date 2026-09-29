@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# `formal.stats` (CLI sugar `--stats`): the cvc5 solve-insight report on `lhd lec`
+# `lhd.stats` (CLI sugar `--stats`): the cvc5 solve-insight report on `lhd lec`
 # and `lhd formal verify`.
 #
 # THE CENTRAL GATE IS THE FORK BOUNDARY. Every default lec/verify path solves in a
@@ -25,9 +25,25 @@
 #                                 labels its own timing as INSTRUMENTED.
 #
 # COST MODEL: keep this test cheap. The equivalent-sequential pair below is proven in
-# ~25ms of solving (abc discharges the cones; cvc5 still runs and still reports), and
-# the verify case uses a 3-cycle bound. Everything here is seconds, not minutes -- do
-# NOT reach for a hard multiplier miter to make the numbers bigger.
+# ~25ms of solving, and the verify case uses a 3-cycle bound. Everything here is
+# seconds, not minutes -- do NOT reach for a hard multiplier miter to make the numbers
+# bigger.
+#
+# CHEAP IS NOT THE SAME AS SOLVED, and getting that wrong made this test flaky. TWO
+# structural short-circuits settle this pair with ZERO cvc5 calls, and either one turns
+# the stats cases into a vacuous run that FAILS with a message blaming the codec:
+#   1. the abc register-cone pass (formal.cones, default auto) bit-blasts each per-cut
+#      obligation and subtracts every cone it proves; on a miter this small it
+#      discharges ALL of them, and prove_equal then returns Proven from the
+#      `bad.isNull()` branch (query.cpp, "; every cut discharged by the cone pass")
+#      having never called solver.checkSat();
+#   2. the verdict cache (lhd.incremental, default true whenever --workdir is given)
+#      replays a stored PROVEN record -- so the SECOND run of this script against the
+#      same $W settles with no solver at all. That is every hand-run: TEST_TMPDIR is
+#      unset outside bazel and $W falls back to a persistent /tmp/lecstats.
+# (1) is what made it racy under bazel load; (2) is what makes a hand re-run fail
+# deterministically. Both are turned OFF for the stats cases below -- neither is what
+# this test is about, and with both off BOTH racers must call cvc5 on every run.
 
 set -u
 
@@ -75,7 +91,7 @@ run_lec() {  # $1=tag; $2.. = extra args -> sets OUT
 
 # 1) OFF BY DEFAULT, and silent. The plugin tier costs ~8x, so a run that did not
 #    ask for stats must not pay for it or print anything about it.
-run_lec off --set formal.engine=auto
+run_lec off
 if [ "$(grep -c 'stats\]:' "$OUT")" -eq 0 ]; then
   echo "ok: no --stats -> not one stats line"
 else
@@ -85,7 +101,7 @@ grep -q "PROVEN equivalent" "$OUT" || { echo "FAIL: the fixture stopped being PR
 
 # 2) *** THE FORK GATE *** engine=auto races ind|bmc in two FORKED children, so
 #    everything asserted here had to cross the wire codec to be visible at all.
-run_lec fork --set formal.engine=auto --stats
+run_lec fork  --set formal.cones=false --set lhd.incremental=false --stats
 if grep -q "raced ind|bmc" "$OUT"; then
   echo "ok: the fixture really did fork (raced ind|bmc)"
 else
@@ -118,12 +134,12 @@ if [ $disclosed -eq 0 ]; then
 fi
 
 # 3) The canonical per-pass spelling is equivalent to the CLI sugar. `--stats` is
-#    lhd-global; `formal.stats` is what `lhd describe`/`--set` list.
-run_lec canon --set formal.engine=auto --set formal.stats=true
+#    lhd-global; `lhd.stats` is what `lhd describe`/`--set` list.
+run_lec canon  --set formal.cones=false --set lhd.incremental=false --set lhd.stats=true
 if [ "$(grep -c 'stats\]:' "$OUT")" -ge 5 ]; then
-  echo "ok: --set formal.stats=true is equivalent to --stats"
+  echo "ok: --set lhd.stats=true is equivalent to --stats"
 else
-  echo "FAIL: --set formal.stats=true printed no report (option not registered / not threaded): $(tail -3 "$OUT")"; fail=1
+  echo "FAIL: --set lhd.stats=true printed no report (option not registered / not threaded): $(tail -3 "$OUT")"; fail=1
 fi
 
 # 4) NO cvc5 QUERY AT ALL is a normal outcome, not a bug: semdiff, the verdict cache

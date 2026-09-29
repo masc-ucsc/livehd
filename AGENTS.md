@@ -11,6 +11,17 @@
 
 - **Build**: `bazel build -c dbg //...`
 - **Test**: `bazel test //...`
+- **Test runtime**: Keep each test under 20 seconds with `-c opt` and under
+  60 seconds with `-c dbg`. Simplify oversized fixtures and avoid repeated
+  compilation; keep large design benchmarks in their own repositories.
+- **Independent tests**: LiveHD scripts and BUILD rules must not access sibling
+  benchmark repositories. Test inputs must be provided by this repository or
+  declared build dependencies.
+- **External simulators**: the default suite must not need iverilog, vvp,
+  verilator or ninja. Optional independent event-simulator legs are skipped
+  unless `LHD_EXTERNAL_SIM` is set:
+  `bazel test --test_env=LHD_EXTERNAL_SIM=1 --test_env=PATH=<dir-with-tools>:$PATH <target>`.
+  A requested leg whose tool is missing FAILS rather than skipping.
 - **lhd CLI**: `./bazel-bin/lhd/lhd` — the only driver, for all flows
   (`lhd help`, `lhd describe <cmd>`); `lhd pyrope lsp` serves the Pyrope LSP
   and `lhd pyrope fmt` formats Pyrope source. The old `lgshell` REPL was
@@ -38,6 +49,10 @@ LiveHD depends on several sibling repos. **Always look in these exact paths — 
 - `inou/yosys/`: Yosys integration (`lgyosys_tolg.cpp` = Yosys→LGraph, `inou_yosys_read.ys` = Yosys script)
 - `inou/cgen/`: Verilog code generation from LGraph
 - `pass/cprop/`: Constant propagation pass
+- `pass/synth/`: the shared, ABC-free synthesis pipeline (private copy, ware/memory modules, region driver, `Lnet` translation, region cache, read-back); see `pass/synth/README.md`
+- `pass/satopt/`: `pass.satopt`, bounded proof-backed simplification with selectable stages, run only by the compile step (`--set pass.satopt=true`; on by default for `lhd synth`/`lhd lec` compiling a source) and `lhd pass satopt`; see `pass/satopt/README.md`
+- `pass/abc/`: the ABC backend and `pass.abc` — the only synthesis code that includes or calls ABC
+- `pass/usyn/`: unate synthesis (`pass.usyn`, `synth.mapper=usyn`): a domino LUT cover as a region hook, mapped by the ABC backend
 - `ware/rtl/`: Memory RTL modules (`cgen_memory_*.v`, `cgen_memory_multiclock_*.v`)
 
 ## Tree library
@@ -56,13 +71,40 @@ One stateless invocation per flow; pass flags ride `--set pass.flag=value`
 (or a `--config lhd.toml`), outputs are typed `--emit`/`--emit-dir` slots,
 per-step logs land under `--workdir`. Examples:
 ```
-lhd compile foo.v --reader yosys-verilog --top foo --recipe O1 --emit verilog:out.v
+lhd compile foo.v --top foo --emit verilog:out.v
 lhd compile foo.prp --emit-dir lg:foo_lgs/ --emit-dir lnast-dump:dumps/
-lhd lec --impl verilog:out.v --ref verilog:foo.v --top foo --set lec.solver=lgyosys
+lhd lec --impl verilog:out.v --ref verilog:foo.v --top foo
+lhd synth foo.prp --top foo --workdir W --stats   # compile -> color synth -> abc -> opentimer, one shot
 ```
+Graph compilation always runs constant propagation followed by bitwidth
+inference. There is no optimization-level or `--recipe` selection. Comb
+inlining defaults on; use `--set compile.upass.inline=false` when preserving
+comb module boundaries is part of the flow.
+
+`lhd synth` is the fused synthesis flow (reports in `W/synth/`; `--emit-dir
+lg:` / `verilog:` for the mapped netlist, `report:` for the sidecars); the
+individual `lhd pass color|abc|opentimer` steps remain for any other
+coloring or for inspecting intermediates. Every persistent reuse tier (the
+compile cache, `abc_cache/`, `sta_cache/`, the formal verdict cache) lives under a
+user-named `--workdir` and follows the ONE switch `--set
+lhd.incremental=true|false` (default true) — there is no per-tier cache flag.
 Internally lhd drives the registered EPRP methods (conceptually the pipe
 `inou.yosys.tolg |> pass.cprop |> inou.cgen.verilog`); pass/inou names in
 `--set` and the step logs use that vocabulary.
+
+**Measuring reuse after a rebuild — read this before believing a cache miss.**
+Each tier is salted by a build-time content hash of the code that produces what
+it stores, so **the first run after you touch that code is a full miss, by
+design**: the synthesis salts are layered -- `//pass/synth:synth_salt` hashes
+`pass/synth` + the passes a mapped region depends on (graph, memory RTL,
+cprop, enableopt, bitwidth, color, the DFF pick, formal, `pass/partition`),
+`//pass/abc:abc_salt` hashes `pass/abc` + `synth_salt` + `MODULE.bazel` + the
+ABC patch, and `//pass/usyn:usyn_salt` hashes `pass/usyn` + `abc_salt` --
+`//pass/opentimer:sta_salt` hashes `pass/opentimer` + `pass/partition` +
+`MODULE.bazel`, `//lhd:formal_salt` and `//lhd:compile_salt` likewise. Even a `clang-format -i` counts. Always run the warm command **twice**
+after a rebuild and read the second number, and never rebuild in the middle of a
+measurement sweep — a cold pass stored under salt A and a warm pass loaded under
+salt B looks exactly like "the cache forgot everything".
 
 ## Compiler Warnings Policy
 
@@ -110,6 +152,7 @@ Enforced by `scripts/contracts/diff_no_compile_flags_touched.sh`.
   */
   comb foo( -> (z) { z = b#[1,4] }   // locate_error_here  (missing ')')
   ```
+- **Equivalence tests** (`inou/prp/tests/equiv/`): two axes, and a design can sit on both. `foo.prp` + a hand-written `foo.v` is the Pyrope↔Verilog pair (`:type: equiv`, target `prp-equiv-foo`). `foo.prp` + `foo_1.prp`, `foo_2.prp`, … is a Pyrope↔**Pyrope** group: every numbered sibling is LEC'd against the base by `inou/prp/tests/prplec.py` (target `prp-lec-foo_1`), wired by the file NAME alone — a new claim is one new file, no script and no BUILD edit. A HEADER-ONLY variant means "the base source with MY `:set:` flags" (that is how rolled-vs-unrolled is written without duplicating the design). Per-variant header tags `:lec_expect: proven|refuted`, `:lec_sweep:`, `:lec_grep:` / `:lec_grep_not:`; run one by hand with `./inou/prp/tests/prplec.py inou/prp/tests/equiv/foo.prp`. See `inou/prp/tests/equiv/README.md`.
 - **Expected-warning tests** (`:type: warning`, in `inou/prp/tests/warnings/`): the lint counterpart of `tests/errors/`. The program **must compile cleanly** (exit 0, no `error` diagnostic) yet emit at least one **warning** diagnostic. The header's `:warning:` and `:help:` values are matched (same `re.search` + literal fallback) against the warning's `message` / `hint`; a `locate_warning_here` comment pins the warning's `start_line`. Each `tests/warnings/*.prp` auto-generates a `prp-warn-<name>` `bazel test` target. See `inou/prp/tests/warnings/README.md`. Example: a pure expression used as a statement (`a + 1`) triggers `unused-expression`.
 
 ## Debugging Yosys-to-LGraph Flow
@@ -123,7 +166,7 @@ Enforced by `scripts/contracts/diff_no_compile_flags_touched.sh`.
 
 ### Inspecting intermediates
 - **Yosys RTLIL dump**: After running tolg, check `pp.il` for what Yosys produced (cell types, port connections, parameters).
-- **LGraph dump**: `./bazel-bin/lhd/lhd compile <file> --reader yosys-verilog --top <top> --recipe O1 --emit-dir verilog:out/ --workdir w` then read the per-step logs in `w/logs/` and grep the cgen output in `out/*.v` for cell types (e.g., `grep -i mem`). (The REPL-only `lgraph.dump` text dump has no lhd emit yet.)
+- **LGraph dump**: `./bazel-bin/lhd/lhd compile <file> --reader yosys-verilog --top <top> --emit-dir verilog:out/ --workdir w` then read the per-step logs in `w/logs/` and grep the cgen output in `out/*.v` for cell types (e.g., `grep -i mem`). (The REPL-only `lgraph.dump` text dump has no lhd emit yet.)
 - **Generated Verilog**: Check the `--emit-dir verilog:` per-module output; `tmp_yosys_mix/all_<top>.v` is the concatenated file used by LEC in `yosys_compile.sh`.
 
 ### Yosys memory pass

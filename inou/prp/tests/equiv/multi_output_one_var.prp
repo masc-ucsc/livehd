@@ -1,0 +1,13 @@
+/*
+:name: multi_output_one_var
+:type: equiv
+*/
+comb parts(x:u4) -> (next:u4, doubled:u4) {
+  next = (x + 1)#[0..+4]
+  doubled = (x * 2)#[0..+4]
+}
+pub comb p(x:u4) -> (a:u4, b:u4) {
+  const r = parts(x)
+  a = r.next
+  b = r.doubled
+}

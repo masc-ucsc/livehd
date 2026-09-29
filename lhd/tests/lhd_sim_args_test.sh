@@ -54,9 +54,11 @@ grep -q    'hlop_set_random_seed' "$DRV" || fail "driver does not seed the hlop 
 grep -q    '_tests_json' "$DRV" || fail "driver missing the embedded --list-tests JSON"
 
 # ---- reserved / unsafe parameter names are rejected at setup -----------------
-# $1 = parameter declaration text, $2 = a label for messages
+# $1 = parameter declaration text, $2 = a label for messages,
+# $3 = (optional) the expected message pattern, when the name is refused BEFORE
+#      the simulation-parameter check ever sees it.
 reject_param() {
-  local decl="$1" label="$2"
+  local decl="$1" label="$2" want="${3:-not a usable simulation parameter name}"
   cat > "$W/bad.prp" <<EOF
 /*
 :name: bad
@@ -76,13 +78,19 @@ EOF
   # The body is the ordinary instance/`step` form on purpose: it must set up
   # cleanly so the ONLY thing that can fail is the parameter name. A body that
   # errors on its own would make every case below pass vacuously.
-  echo "$out" | grep -q 'not a usable simulation parameter name' \
+  # Two rejection paths, both explanatory, and which one fires depends on the
+  # name: a Pyrope RESERVED WORD (`test`) is refused at parse time by the
+  # backtick rule ("`test` is a reserved word, so it cannot be a parameter
+  # name"), while every other unusable name reaches the simulation-parameter
+  # check. Each case names the layer it expects, so relaxing one does not
+  # silently accept the wrong diagnostic for the others.
+  echo "$out" | grep -qE "$want" \
     || fail "rejection of $label lacked the explanatory message: $out"
 }
 reject_param 'default:u8 = 2' 'C++ keyword'
 reject_param 'argc:u8 = 2'    'main argument argc'
 reject_param '_seed:u8 = 2'   'leading-underscore driver-local collision'
-reject_param 'test:u8 = 2'    'reserved --test selector flag'
+reject_param 'test:u8 = 2'    'reserved --test selector flag' 'is a reserved word'
 reject_param '`my param`:u8 = 2' 'backtick-escaped identifier'
 
 # ---- `--list-tests` emits the dotted name + params as JSON (no build) ---------

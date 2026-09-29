@@ -9,7 +9,10 @@
 // has no fields — `bits` is a built-in ATTRIBUTE, read with `x.[bits]`. The
 // dotted form used to silently return x's own value (so `res <<= x.bits`
 // quietly computed garbage); it must be a compile error.
-comb concat(...a)->(res:unsigned) {
+// The helper is named `pack`, not `concat`: `concat` is now a reserved
+// builtin (the bit-concatenation op), so a user lambda may not take that name.
+// What this test is about is unchanged -- `x.bits` vs `x.[bits]`.
+comb pack(...a)->(res:unsigned) {
   res = 0
   for x in a {
      res <<= x.bits   // NO `bits` field; meant `x.[bits]`
@@ -20,4 +23,4 @@ comb concat(...a)->(res:unsigned) {
 const b:u4 = 3
 const c:u8 = 0xAA
 
-const x = concat(b,c)
+const x = pack(b,c)

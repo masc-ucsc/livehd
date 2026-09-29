@@ -13,45 +13,112 @@
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "node_util.hpp"
-#include "pass_partition.hpp"
 
 namespace gu = livehd::graph_util;
 
+namespace livehd::partition {
+
+struct Flat_instance_path {
+  hhds::Gid                         root_gid;
+  std::vector<hhds::Hier_attr_step> steps;
+
+  hhds::AttrRef<attrs::hier_color_t> color_attr(const hhds::Node_class& node) const {
+    auto node_steps = steps;
+    // Hierarchy views put the Sub itself at its call path, even when its body
+    // is opaque. Match that convention for preserved loop/module boundaries.
+    if (gu::type_op_of(node) == Ntype_op::Sub && node.get_subnode_io()) {
+      auto site = node.get_definition_index();
+      node_steps.push_back({site.gid, site.value, std::nullopt});
+    }
+    return {node.get_graph(),
+            hhds::make_node_attr_key(static_cast<uint64_t>(node.get_debug_nid() & ~static_cast<hhds::Nid>(3))),
+            root_gid,
+            std::move(node_steps)};
+  }
+};
+
+int32_t Flat_origin::color() const {
+  if (instance && src_node.get_graph()->has_attr(attrs::hier_color)) {
+    if (auto a = instance->color_attr(src_node); a.has()) {
+      return a.get();
+    }
+  }
+  return gu::node_color_of(src_node);
+}
+
+void Flat_origin::set_color(int32_t color) const {
+  if (instance && !instance->steps.empty()) {
+    instance->color_attr(src_node).set(color);
+  } else {
+    gu::set_color(src_node, color);
+  }
+}
+
+}  // namespace livehd::partition
+
 namespace {
+
+struct Port_shape {
+  uint32_t bits   = 0;
+  bool     unsign = false;
+};
 
 // One inlined instance of a def: the top graph is the root context (no parent);
 // every design Sub gets its own context, so two instances of the same def are
 // cloned independently (their node/pin maps must not alias — hhds Node/Pin
 // identity is nid-only, shared across instances of one def).
 struct Ictx {
-  hhds::Graph*     src    = nullptr;  // the def body this context clones
-  Ictx*            parent = nullptr;  // enclosing context (nullptr for top)
-  hhds::Node_class inst;              // the Sub node in parent->src (invalid for top)
-  std::string      prefix;            // dotted instance path ("" for top)
+  hhds::Graph*                                                 src    = nullptr;  // the def body this context clones
+  Ictx*                                                        parent = nullptr;  // enclosing context (nullptr for top)
+  hhds::Node_class                                             inst;              // the Sub node in parent->src (invalid for top)
+  std::string                                                  prefix;            // dotted instance path ("" for top)
+  uint32_t                                                     synth_region_id = 0;
+  std::shared_ptr<const livehd::partition::Flat_instance_path> instance;
 
   absl::flat_hash_map<hhds::Node_class, hhds::Node_class> node_map;   // src node -> flat node (cloned nodes only)
   absl::flat_hash_map<hhds::Node_class, Ictx*>            child_ctx;  // src design-Sub node -> child context
   absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class>   pin_cache;  // src driver pin -> flat driver pin
   absl::flat_hash_set<hhds::Pin_class>                    resolving;  // cycle guard for resolve_driver
 
+  // Parent-side driver of each connected input port of `inst`, built ONCE on
+  // the first hop-up (empty and unused for the top context).
+  //
+  // `inp_edges()` is a MATERIALIZING hhds view: every call copies the node's
+  // whole edge set into a fresh vector. Re-scanning it per child input port
+  // made a hop-up cost O(ports^2) edge copies per instance, which is why
+  // `flatten_hierarchy` was 58% of whole-design `pass.opentimer` on the
+  // XiangShan blocks (hundreds of mapped regions, hundreds of ports each).
+  absl::flat_hash_map<uint32_t, hhds::Pin_class> inst_drivers;  // sink port id -> parent-side driver pin
+  bool                                           inst_drivers_built = false;
+
   // Child-decl port-id <-> name maps (lazy, per context; needed to hop a module
   // boundary: a Sub sink/driver port id pairs with the child GraphIO decl).
-  absl::flat_hash_map<std::string, uint32_t> in_name2pid;   // this def's INPUT decls
-  absl::flat_hash_map<uint32_t, std::string> out_pid2name;  // this def's OUTPUT decls
+  absl::flat_hash_map<std::string, uint32_t>   in_name2pid;   // this def's INPUT decls
+  absl::flat_hash_map<uint32_t, std::string>   out_pid2name;  // this def's OUTPUT decls
+  absl::flat_hash_map<std::string, Port_shape> in_name2shape;
+  absl::flat_hash_map<std::string, Port_shape> out_name2shape;
 };
 
 class Flattener {
 public:
-  Flattener(hhds::Graph* top, hhds::GraphLibrary* lib) : top_(top), lib_(lib) {}
+  Flattener(hhds::Graph* top, hhds::GraphLibrary* lib, livehd::partition::Flat_origin_map* origin, bool preserve_modules,
+            const std::unordered_set<hhds::Gid>& preserved_defs)
+      : top_(top), lib_(lib), preserve_modules_(preserve_modules), origin_(origin), preserved_defs_(preserved_defs) {}
 
   std::shared_ptr<hhds::Graph> run(std::string_view flat_name);
 
 private:
-  hhds::Graph*        top_;
-  hhds::GraphLibrary* lib_;
-  hhds::Graph*        flat_ = nullptr;
-  std::deque<Ictx>    arena_;  // stable pointers
-  bool                failed_ = false;
+  hhds::Graph*                        top_;
+  hhds::GraphLibrary*                 lib_;
+  hhds::Graph*                        flat_ = nullptr;
+  std::deque<Ictx>                    arena_;  // stable pointers
+  bool                                failed_           = false;
+  bool                                preserve_modules_ = false;
+  // Optional flat-node -> (def, source node) sink. Filled at the single site
+  // that mints a clone, so it cannot drift from node_map.
+  livehd::partition::Flat_origin_map* origin_           = nullptr;
+
+  const std::unordered_set<hhds::Gid>& preserved_defs_;
 
   // Defs on the current instantiation path — a def re-entered while still open
   // is a recursive hierarchy (would recurse forever / overflow the stack).
@@ -65,26 +132,81 @@ private:
 
   [[nodiscard]] hhds::Pin_class resolve_driver(Ictx* ctx, const hhds::Pin_class& d);
   [[nodiscard]] hhds::Pin_class resolve_output_of(Ictx* cctx, std::string_view oname);
+  [[nodiscard]] hhds::Pin_class apply_port_shape(const hhds::Pin_class& source, const Port_shape& shape);
 
   void carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const hhds::Node_class& neo);
   void carry_driver_attrs(Ictx* ctx, const hhds::Pin_class& orig, const hhds::Pin_class& neo);
 };
 
 Ictx* Flattener::make_ctx(hhds::Graph* src, Ictx* parent, const hhds::Node_class& inst, std::string prefix) {
-  auto& c  = arena_.emplace_back();
-  c.src    = src;
-  c.parent = parent;
-  c.inst   = inst;
-  c.prefix = std::move(prefix);
+  auto& c        = arena_.emplace_back();
+  c.src          = src;
+  c.parent       = parent;
+  c.inst         = inst;
+  c.prefix       = std::move(prefix);
+  auto path      = std::make_shared<livehd::partition::Flat_instance_path>();
+  path->root_gid = top_->get_gid();
+  if (parent != nullptr) {
+    path->steps = parent->instance->steps;
+    auto site   = inst.get_definition_index();
+    // Compact loops stay opaque; ordinary sites have no loop ordinal.
+    path->steps.push_back({site.gid, site.value, std::nullopt});
+  }
+  c.instance = std::move(path);
+  auto input = src->get_input_node();
+  if (auto id = input.attr(livehd::attrs::synth_region_id); id.has()) {
+    c.synth_region_id = id.get();
+  }
   if (auto gio = src->get_io()) {
     for (const auto& d : gio->get_input_pin_decls()) {
-      c.in_name2pid[d.name] = static_cast<uint32_t>(d.port_id);
+      c.in_name2pid[d.name]   = static_cast<uint32_t>(d.port_id);
+      c.in_name2shape[d.name] = Port_shape{.bits = d.bits, .unsign = d.unsign};
     }
     for (const auto& d : gio->get_output_pin_decls()) {
       c.out_pid2name[static_cast<uint32_t>(d.port_id)] = d.name;
+      c.out_name2shape[d.name]                         = Port_shape{.bits = d.bits, .unsign = d.unsign};
     }
   }
   return &c;
+}
+
+// Flattening dissolves the Sub/GraphIO pair that used to implement a module
+// port cast. Preserve that cast explicitly whenever the producer's structural
+// width or sign differs from the declaration. Never re-stamp `source` itself:
+// one producer can feed both a narrow port and an unrelated wide consumer.
+//
+// The adapter must match the port's DECLARED signedness, because an LGraph
+// value is an unlimited-precision signed integer and the `signed` attr is only
+// a realization hint -- it does not reinterpret the value:
+//   * UNSIGNED port: a constant Get_mask selects the low `bits` bits (reading
+//     the source's conceptual sign/zero extension above a narrow source), and
+//     the result is a non-negative `bits`-wide pattern.
+//   * SIGNED port: Sext is the sign-aware adapter (its `b` is the KEPT BIT
+//     COUNT, see inou/cgen and pass/lec/encode). Get_mask would instead turn a
+//     -1 into 2^bits-1, so a signed narrowing/widening cast through it changes
+//     the value every arithmetic consumer then reads.
+hhds::Pin_class Flattener::apply_port_shape(const hhds::Pin_class& source, const Port_shape& shape) {
+  if (source.is_invalid() || shape.bits == 0) {
+    return source;
+  }
+  if (gu::bits_of(source) == static_cast<int32_t>(shape.bits) && gu::is_unsign(source) == shape.unsign) {
+    return source;
+  }
+
+  if (!shape.unsign) {
+    auto adapter = gu::create_typed_node(*flat_, Ntype_op::Sext);
+    source.connect_sink(gu::setup_sink_by_name(adapter, "a"));
+    gu::create_const(*flat_, *Dlop::create_integer(static_cast<int64_t>(shape.bits)))
+        .connect_sink(gu::setup_sink_by_name(adapter, "b"));
+    auto result = adapter.create_driver_pin(0);
+    gu::set_sbits(result, static_cast<int32_t>(shape.bits));
+    return result;
+  }
+
+  auto adapter = gu::create_get_mask(*flat_, source, 0, static_cast<int>(shape.bits));
+  auto result  = adapter.create_driver_pin(0);
+  gu::set_ubits(result, static_cast<int32_t>(shape.bits));
+  return result;
 }
 
 void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const hhds::Node_class& neo) {
@@ -108,11 +230,20 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
     auto newid = lib_->source_map().import_from(ctx->src->source_locator(), a.get());
     neo.attr(hhds::attrs::srcid).set(newid);
   }
-  // The flat per-def color is what pass.partition consumes downstream — carry
-  // it verbatim so the flattened def partitions exactly like the hierarchy did
-  // (per-instance hier colors are a different storage; flatten works on the
-  // compact per-def coloring like the Partitioner itself).
-  if (auto c = gu::node_color_of(orig); c != 0) {
+  // pass.abc's report identity is graph-local in the mapped library. Carry its
+  // compact key through this transient physical flatten so OpenTimer can fold
+  // end-to-end arrivals back into (definition,color) rows without storing a
+  // duplicate region-name string on every mapped cell.
+  if (ctx->synth_region_id != 0) {
+    neo.attr(livehd::attrs::synth_region_id).set(ctx->synth_region_id);
+  }
+  if (auto a = orig.attr(livehd::attrs::native_comb_boundary); a.has()) {
+    neo.attr(livehd::attrs::native_comb_boundary).set(a.get());
+  }
+  // Virtual coloring writes occurrence overrides on shared definitions. The
+  // physical flat view must recover that exact membership for partitioning.
+  const livehd::partition::Flat_origin source{.def_gid = ctx->src->get_gid(), .src_node = orig, .instance = ctx->instance};
+  if (auto c = source.color(); c != 0) {
     neo.attr(livehd::attrs::color).set(c);
   }
   // Formal markers ride the node (pass.abc reads `proven` off fproperty Subs to
@@ -122,6 +253,17 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
   }
   if (auto a = orig.attr(livehd::attrs::runtime_check); a.has()) {
     neo.attr(livehd::attrs::runtime_check).set(a.get());
+  }
+  // Driver pin 0 rides with the NODE: a single-output cell with zero fanout
+  // never reaches resolve_driver (the only carry_driver_attrs site), so its
+  // width/sign would be dropped and the flat clone lands at bits==0 -- the same
+  // dead-output hole as the Partitioner's edge-driven carry (see
+  // pass_partition.cpp carry_node_attrs). Port 0 is the sole driver of every
+  // single-output op; live pins get the same values re-stamped by
+  // resolve_driver (idempotent). Multi-driver ops (Sub/Memory/IO) keep their
+  // decl-based completion.
+  if (!Ntype::has_multiple_driver_pins(gu::type_op_of(orig))) {
+    carry_driver_attrs(ctx, orig.create_driver_pin(0), neo.create_driver_pin(0));
   }
 }
 
@@ -143,7 +285,7 @@ void Flattener::carry_driver_attrs(Ictx* ctx, const hhds::Pin_class& orig, const
 }
 
 void Flattener::create_nodes(Ictx* ctx) {
-  for (auto n : ctx->src->forward_class()) {
+  for (auto n : ctx->src->body().nodes(hhds::Node_order::forward)) {
     if (failed_) {
       return;
     }
@@ -151,13 +293,31 @@ void Flattener::create_nodes(Ictx* ctx) {
       continue;
     }
     auto op = gu::type_op_of(n);
-    if (op == Ntype_op::IO || op == Ntype_op::Invalid || op == Ntype_op::Nconst) {
+    if (op == Ntype_op::IO || op == Ntype_op::Invalid) {
       continue;  // IO dissolves; constants are recreated per consuming edge
     }
     if (op == Ntype_op::Sub && ctx->child_ctx.contains(n)) {
       continue;
     }
-    if (op == Ntype_op::Sub && n.get_subnode_graph() != nullptr) {
+    if (op == Ntype_op::Sub && n.is_loop_subnode() && n.get_subnode_graph() != nullptr
+        && !preserved_defs_.contains(n.get_subnode_gid())) {
+      // A loop Sub stands for `count` occurrences in native HHDS structure.
+      // Recursing would splice ONE body copy and dissolve the node, silently
+      // dropping count-1 replicas (graph/inline_sub.cpp refuses for the same
+      // reason). Callers that must flatten a rolled design materialize the
+      // occurrences into their own scratch library first.
+      livehd::diag::err("pass.partition", "flatten-replicated-sub", "unsupported")
+          .msg("flatten: instance '{}' is a replicated Sub (it stands for several occurrences)",
+               ctx->prefix + gu::default_instance_name(n))
+          .hint("materialize occurrences into a pass-private scratch library before flattening")
+          .emit();
+      failed_ = true;
+      return;
+    }
+    if (op == Ntype_op::Sub && n.get_subnode_graph() != nullptr && !preserved_defs_.contains(n.get_subnode_gid())
+        && !(preserve_modules_
+             && (n.get_subnode_graph()->get_input_node().attr(livehd::attrs::memory_module).has()
+                 || n.get_subnode_graph()->get_input_node().attr(livehd::attrs::ware_module).has()))) {
       // Design instance: recurse — its internals become flat nodes with a
       // longer prefix; the Sub itself dissolves (edges hop through it in
       // resolve_driver). The child shared_ptr is owned by the source library
@@ -172,7 +332,7 @@ void Flattener::create_nodes(Ictx* ctx) {
         failed_ = true;
         return;
       }
-      auto* child = make_ctx(n.get_subnode_graph().get(), ctx, n, ctx->prefix + gu::default_instance_name(n) + ".");
+      auto* child       = make_ctx(n.get_subnode_graph().get(), ctx, n, ctx->prefix + gu::logical_instance_prefix(n));
       ctx->child_ctx[n] = child;
       create_nodes(child);
       inline_stack_.erase(cgid);
@@ -184,7 +344,15 @@ void Flattener::create_nodes(Ictx* ctx) {
       // stays an opaque instance; clone its IO decl into the flat graph's lib.
       auto io = livehd::partition::resolve_or_clone_subdef(lib_, n);
       if (io) {
-        neo.set_subnode(io);
+        // Keep the loop descriptor when there is one: dropping it would turn a
+        // replicated black box into a single occurrence (a body-less loop Sub
+        // survives the refusal above only because it has no body to recurse
+        // into, not because it denotes one instance).
+        if (auto loop = n.subnode_loop()) {
+          neo.set_subnode(io, *loop);
+        } else {
+          neo.set_subnode(io);
+        }
       } else if (n.get_subnode_io()) {
         livehd::diag::err("pass.partition", "flatten-subdef", "unsupported")
             .msg("flatten: cannot resolve black-box def '{}' for instance '{}'",
@@ -196,6 +364,10 @@ void Flattener::create_nodes(Ictx* ctx) {
       }
     }
     ctx->node_map[n] = neo;
+    if (origin_ != nullptr) {
+      origin_->emplace(neo,
+                       livehd::partition::Flat_origin{.def_gid = ctx->src->get_gid(), .src_node = n, .instance = ctx->instance});
+    }
     carry_node_attrs(ctx, n, neo);
   }
 }
@@ -229,21 +401,31 @@ hhds::Pin_class Flattener::resolve_driver(Ictx* ctx, const hhds::Pin_class& d) {
       // Hop UP: find the parent-side edge feeding this port of the instance.
       auto pit = ctx->in_name2pid.find(std::string{gu::pin_name_of(d)});
       if (pit != ctx->in_name2pid.end()) {
-        for (const auto& e : ctx->inst.inp_edges()) {
-          if (static_cast<uint32_t>(e.sink.get_port_id()) != pit->second) {
-            continue;
+        if (!ctx->inst_drivers_built) {
+          ctx->inst_drivers_built = true;
+          // One sink pin, one driver (graph/cell.hpp), and inp_sorted_pins()
+          // yields each sink pin exactly once, so try_emplace can no longer
+          // collide on a port -- it stays only because a Sub's port ids are
+          // sparse and this map is keyed by port, not by position.
+          for (const auto& in_pin : ctx->inst.inp_sorted_pins()) {
+            const auto in_drv = in_pin.get_driver_pin();
+            ctx->inst_drivers.try_emplace(static_cast<uint32_t>(in_pin.get_port_id()), in_drv);
           }
-          if (gu::is_const_pin(e.driver)) {
-            res = gu::create_const(*flat_, gu::hydrate_const(e.driver));
+        }
+        if (auto eit = ctx->inst_drivers.find(pit->second); eit != ctx->inst_drivers.end()) {
+          if (eit->second.is_const()) {
+            res = gu::create_const(*flat_, gu::const_of(eit->second));
           } else {
-            res = resolve_driver(ctx->parent, e.driver);
+            res = resolve_driver(ctx->parent, eit->second);
           }
-          break;
+          if (auto sit = ctx->in_name2shape.find(std::string{gu::pin_name_of(d)}); sit != ctx->in_name2shape.end()) {
+            res = apply_port_shape(res, sit->second);
+          }
         }
       }
       // No edge: the parent left the port unconnected — stay invalid.
     }
-  } else if (gu::type_op_of(dn) == Ntype_op::Sub && dn.get_subnode_graph() != nullptr) {
+  } else if (gu::type_op_of(dn) == Ntype_op::Sub && ctx->child_ctx.contains(dn)) {
     // Hop DOWN: the driver is a design instance's output — resolve to the
     // child-internal driver of that output port.
     if (auto cit = ctx->child_ctx.find(dn); cit != ctx->child_ctx.end()) {
@@ -273,17 +455,26 @@ hhds::Pin_class Flattener::resolve_output_of(Ictx* cctx, std::string_view oname)
   if (opin.is_invalid()) {
     return {};
   }
-  for (const auto& e : opin.inp_edges()) {
-    if (gu::is_const_pin(e.driver)) {
-      return gu::create_const(*flat_, gu::hydrate_const(e.driver));
-    }
-    return resolve_driver(cctx, e.driver);
+  // The child's output pin is a SINK with exactly one driver (graph/cell.hpp),
+  // which is why the old loop returned unconditionally on its first iteration.
+  auto drv = opin.get_driver_pin();
+  if (drv.is_invalid()) {
+    return {};  // declared but undriven
   }
-  return {};  // declared but undriven
+  hhds::Pin_class source;
+  if (drv.is_const()) {
+    source = gu::create_const(*flat_, gu::const_of(drv));
+  } else {
+    source = resolve_driver(cctx, drv);
+  }
+  if (auto sit = cctx->out_name2shape.find(std::string{oname}); sit != cctx->out_name2shape.end()) {
+    source = apply_port_shape(source, sit->second);
+  }
+  return source;
 }
 
 void Flattener::wire_edges(Ictx* ctx) {
-  for (auto n : ctx->src->forward_class()) {
+  for (auto n : ctx->src->body().nodes(hhds::Node_order::forward)) {
     if (failed_) {
       return;
     }
@@ -292,14 +483,24 @@ void Flattener::wire_edges(Ictx* ctx) {
       continue;  // design Subs, consts, builtins: not cloned
     }
     auto neo = it->second;
-    for (const auto& e : n.inp_edges()) {
-      auto sp = neo.create_sink_pin(e.sink.get_port_id());
-      if (gu::is_const_pin(e.driver)) {
-        gu::create_const(*flat_, gu::hydrate_const(e.driver)).connect_sink(sp);
-      } else {
-        auto dp = resolve_driver(ctx, e.driver);
-        if (!dp.is_invalid()) {
-          dp.connect_sink(sp);
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      auto sp = neo.create_sink_pin(in_pin.get_port_id());
+      // PLURAL, not get_driver_pin(): this CLONES every in-edge of `n`, and a
+      // PRESERVED compact-loop Sub reaches here (it is entered into node_map
+      // above, unlike an inlined one). Its carry-in sink is the one sanctioned
+      // two-driver pin -- the seed, plus a self edge from the same instance's
+      // carry-out meaning "the previous ordinal" (pass/legalize/legalize.cpp:307).
+      // Keeping only one driver silently drops the seed or the recurrence, and
+      // the flattened design then computes a different value for every carried
+      // output.
+      for (const auto& in_drv : in_pin.get_driver_pins()) {
+        if (in_drv.is_const()) {
+          gu::create_const(*flat_, gu::const_of(in_drv)).connect_sink(sp);
+        } else {
+          auto dp = resolve_driver(ctx, in_drv);
+          if (!dp.is_invalid()) {
+            dp.connect_sink(sp);
+          }
         }
       }
     }
@@ -316,15 +517,18 @@ void Flattener::wire_top_outputs(Ictx* top_ctx) {
     if (opin.is_invalid()) {
       continue;
     }
-    for (const auto& e : opin.inp_edges()) {
-      auto sink = flat_->get_output_pin(decl.name);
-      if (gu::is_const_pin(e.driver)) {
-        gu::create_const(*flat_, gu::hydrate_const(e.driver)).connect_sink(sink);
-      } else {
-        auto dp = resolve_driver(top_ctx, e.driver);
-        if (!dp.is_invalid()) {
-          dp.connect_sink(sink);
-        }
+    // One driver per sink pin, so a top output port is one driver, not a set.
+    auto drv = opin.get_driver_pin();
+    if (drv.is_invalid()) {
+      continue;  // declared but undriven
+    }
+    auto sink = flat_->get_output_pin(decl.name);
+    if (drv.is_const()) {
+      gu::create_const(*flat_, gu::const_of(drv)).connect_sink(sink);
+    } else {
+      auto dp = resolve_driver(top_ctx, drv);
+      if (!dp.is_invalid()) {
+        dp.connect_sink(sink);
       }
     }
   }
@@ -342,9 +546,11 @@ void Flattener::complete_bbox_outputs(Ictx* ctx) {
     if (!sio) {
       continue;
     }
+    // "which output ports already exist and are wired": the driver PINS, not
+    // the fan-out edges (which re-derive the same set once per consumer).
     absl::flat_hash_set<uint32_t> made;
-    for (const auto& e : neo.out_edges()) {
-      made.insert(static_cast<uint32_t>(e.driver.get_port_id()));
+    for (const auto& out_pin : neo.out_sorted_pins()) {
+      made.insert(static_cast<uint32_t>(out_pin.get_port_id()));
     }
     for (const auto& d : sio->get_output_pin_decls()) {
       if (made.contains(static_cast<uint32_t>(d.port_id))) {
@@ -430,8 +636,40 @@ std::shared_ptr<hhds::Graph> Flattener::run(std::string_view flat_name) {
 
 namespace livehd::partition {
 
-std::shared_ptr<hhds::Graph> flatten_hierarchy(hhds::Graph* top, hhds::GraphLibrary* lib, std::string_view flat_name) {
-  Flattener f(top, lib);
+std::shared_ptr<hhds::GraphIO> resolve_or_clone_subdef(hhds::GraphLibrary* outlib, const hhds::Node_class& inst) {
+  auto child = inst.get_subnode_io();
+  if (!child) {
+    return nullptr;
+  }
+  if (auto out_child = outlib->find_io(child->get_name())) {
+    return out_child;
+  }
+  if (inst.get_subnode_graph() != nullptr) {
+    return nullptr;  // has a body: children-first ordering should have partitioned it already
+  }
+  // Body-less black-box def: clone the IO decl so the instance stays opaque.
+  auto io = outlib->create_io(std::string{child->get_name()});
+  for (const auto& d : child->get_input_pin_decls()) {
+    io->add_input(d.name, d.port_id, d.loop_break);
+    if (d.bits != 0) {
+      io->set_bits(d.name, d.bits);
+    }
+    io->set_unsign(d.name, d.unsign);
+  }
+  for (const auto& d : child->get_output_pin_decls()) {
+    io->add_output(d.name, d.port_id, d.loop_break);
+    if (d.bits != 0) {
+      io->set_bits(d.name, d.bits);
+    }
+    io->set_unsign(d.name, d.unsign);
+  }
+  return io;
+}
+
+std::shared_ptr<hhds::Graph> flatten_hierarchy(hhds::Graph* top, hhds::GraphLibrary* lib, std::string_view flat_name,
+                                               Flat_origin_map* origin, bool preserve_modules,
+                                               const std::unordered_set<hhds::Gid>& preserved_defs) {
+  Flattener f(top, lib, origin, preserve_modules, preserved_defs);
   return f.run(flat_name);
 }
 

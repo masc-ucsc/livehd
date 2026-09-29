@@ -1,0 +1,20 @@
+/*
+:name: keyword_as_identifier
+:type: error
+:error: cannot be a variable name
+:help: wrap it in backticks
+*/
+// A reserved word is not a name on its own. `stage` (the `stage[N]` pipelining
+// modifier) is only a variable when written `` `stage` `` -- see
+// keyword_escaped_identifier for the form that compiles.
+//
+// Provenance: bedrock's br_delay_valid names its shift register `stage`, and a
+// Verilog signal named `in`/`reg` is just as ordinary, so this is what someone
+// hand-writing the Pyrope for an imported design reaches for first. The
+// diagnostic has to name the word and show the escape.
+pub mod repro(a:u8) -> (o:u8@[0]) {
+  reg stage:[2]u8 = 0
+
+  stage[0] = a
+  o = stage[1]
+}

@@ -9,6 +9,8 @@
 #include <print>
 #include <string>
 
+#include "json_util.hpp"
+
 namespace livehd::lec {
 
 namespace {
@@ -73,36 +75,11 @@ std::string top_hist(const std::map<std::string, uint64_t>& h, size_t n) {
   return out;
 }
 
-// cvc5 stat keys and Kind names are bare identifiers today, but they are cvc5's
-// strings and not ours -- one quote or backslash would silently produce a
-// formal_report.json that no longer parses, which is worse than a wrong number
-// because it breaks every consumer of the file.
-std::string json_escape(std::string_view s) {
-  std::string out;
-  out.reserve(s.size());
-  for (const char c : s) {
-    switch (c) {
-      case '"' : out += "\\\""; break;
-      case '\\': out += "\\\\"; break;
-      case '\n': out += "\\n"; break;
-      case '\r': out += "\\r"; break;
-      case '\t': out += "\\t"; break;
-      default:
-        if (static_cast<unsigned char>(c) < 0x20) {
-          out += std::format("\\u{:04x}", static_cast<unsigned char>(c));
-        } else {
-          out += c;
-        }
-    }
-  }
-  return out;
-}
-
 std::string json_hist(const std::map<std::string, uint64_t>& h) {
   std::string out   = "{";
   bool        first = true;
   for (const auto& [k, v] : h) {
-    out   += std::format("{}\"{}\": {}", first ? "" : ", ", json_escape(k), v);
+    out   += std::format("{}\"{}\": {}", first ? "" : ", ", json_util::escape(k), v);
     first  = false;
   }
   return out + "}";
@@ -521,7 +498,7 @@ std::string cvc5_stats_json(const Cvc5_stats& st) {
     const auto w  = st.widths();
     j            += std::format(
         ", \"deep\": {{\"clauses\": {}, \"width_p50\": {}, \"width_p90\": {}, \"width_max\": {}, "
-        "\"lemma_kinds\": {}}}",
+                   "\"lemma_kinds\": {}}}",
         st.deep_clauses,
         w.p50,
         w.p90,

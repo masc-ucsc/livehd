@@ -1,0 +1,25 @@
+/*
+:name: div_narrow_result
+:type: simulation
+*/
+// Operands need a wider arithmetic carrier than the inferred result. Both
+// division and remainder must land in their result carrier before Slop_u.
+mod div_narrow_result(x:u4) -> (quotient:u1@[0], remainder:u3@[0]) {
+  quotient = x / 8
+  remainder = x % 8
+}
+
+test div_narrow_result.narrow {
+  mut dut = div_narrow_result
+  tick 16 {
+    dut.x = clock
+    step
+    if clock < 8 {
+      assert(dut.quotient == 0)
+      assert(dut.remainder == clock)
+    } else {
+      assert(dut.quotient == 1)
+      assert(dut.remainder == clock - 8)
+    }
+  }
+}

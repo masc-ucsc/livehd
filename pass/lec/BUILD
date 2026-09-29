@@ -7,6 +7,25 @@ load("//tools:copt_default.bzl", "COPTS")
 # L0 encoder (LGraph -> cvc5 bit-vector terms) + L1 relational query
 # (prove_equal, a direct cvc5 combinational-miter checkSat). The reusable engine
 # core; the pass.lec plugin (L3) layers on top.
+# The encoder's sources, for the proof salts of the passes whose cached
+# verdicts it decides (//pass/satopt:satopt_salt).
+filegroup(
+    name = "lec_query_srcs",
+    srcs = [
+        "cone_abc.cpp",
+        "cone_abc.hpp",
+        "encode.cpp",
+        "encode.hpp",
+        "phase_sched.cpp",
+        "phase_sched.hpp",
+        "query.cpp",
+        "query.hpp",
+        "solve_stats.cpp",
+        "solve_stats.hpp",
+    ],
+    visibility = ["//visibility:public"],
+)
+
 cc_library(
     name = "lec_query",
     srcs = [
@@ -27,8 +46,10 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        "//core",
         "//graph",
         "//pass/cost:host_mem",  # fork_race: cap each racer at its share of the memory budget
+        "//pass/cprop:pass_cprop",
         "@abc",  # vendored berkeley-abc -- the AIG/CEC engine behind lec.cones
         "@cvc5",  # prebuilt cvc5 (combined+localized) -- the SMT backend
         "@hhds//hhds:graph",
@@ -71,12 +92,17 @@ cc_test(
 # graphs.
 cc_test(
     name = "query_test",
+    # Compact-loop certificates keep even the million-ordinal cases compact.
+    size = "small",
     srcs = ["tests/query_test.cpp"],
     copts = COPTS,
-    linkopts = ["-lz"],  # via :lec_query -> @abc (zlib-backed aiger/liberty readers)
     deps = [
         ":lec_query",
         "//graph",
+        "//pass/bitwidth:pass_bitwidth",
+        "//pass/enableopt:pass_enableopt",
+        "//pass/partition:flatten",  # transparent-hierarchy LecNames cases
+        "//pass/semdiff",
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",
     ],
@@ -89,7 +115,6 @@ cc_test(
     name = "cone_abc_test",
     srcs = ["tests/cone_abc_test.cpp"],
     copts = COPTS,
-    linkopts = ["-lz"],  # @abc's aiger/liberty readers pull in zlib (as //lhd does)
     deps = [
         ":lec_query",
         "@cvc5",
@@ -150,26 +175,19 @@ sh_test(
 )
 
 sh_test(
-    name = "lec_mem_diverge_test",
-    srcs = ["tests/lec_mem_diverge_test.sh"],
-    data = ["//lhd"],
-    tags = ["no-sandbox"],  # 2f-lec diverged-use memory collapse guard (no false PROVEN on crossed mems)
-)
-
-sh_test(
     name = "lec_budget_test",
-    args = ["budget"],
-    srcs = ["tests/lec_budget_test.sh"],
     size = "medium",  # runs a few short freezing miters under a wall-clock budget
+    srcs = ["tests/lec_budget_test.sh"],
+    args = ["budget"],
     data = ["//lhd"],
     tags = ["no-sandbox"],  # 2f-fcore §6 global budget scheduler: formal.timeout is a TOTAL, not per-def
 )
 
 sh_test(
     name = "lec_min_timeout_test",
-    args = ["floor"],
-    srcs = ["tests/lec_budget_test.sh"],
     size = "medium",
+    srcs = ["tests/lec_budget_test.sh"],
+    args = ["floor"],
     data = ["//lhd"],
     tags = ["no-sandbox"],  # floor A/B is intentionally solver-time based
 )
@@ -183,10 +201,18 @@ sh_test(
 
 sh_test(
     name = "lec_stats_test",
-    srcs = ["tests/lec_stats_test.sh"],
     size = "small",  # ~4s: the fixture is proven in ms; the report, not the solve, is under test
+    srcs = ["tests/lec_stats_test.sh"],
     data = ["//lhd"],
-    tags = ["no-sandbox"],  # formal.stats: the cvc5 solve-insight report must cross the fork/wire codec
+    tags = ["no-sandbox"],  # lhd.stats: the cvc5 solve-insight report must cross the fork/wire codec
+)
+
+sh_test(
+    name = "lec_sign_slot_test",
+    size = "small",
+    srcs = ["tests/lec_sign_slot_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # in-process cvc5 on both the inductive and BMC input-seeding paths
 )
 
 sh_test(
@@ -229,8 +255,8 @@ sh_test(
     tags = ["no-sandbox"],  # runs the in-process cvc5 solver under a time limit
 )
 
-# Verdict -> exit-code policy: PROVEN/UNKNOWN exit 0 (UNKNOWN with a loud
-# inconclusive warning), REFUTED and `--set lec.strict` UNKNOWN exit non-zero.
+# Verdict -> exit-code policy: PROVEN exits 0; UNKNOWN and REFUTED always
+# exit non-zero, with distinct error classes.
 sh_test(
     name = "lec_verdict_policy_test",
     srcs = ["tests/lec_verdict_policy_test.sh"],
@@ -259,6 +285,23 @@ sh_test(
     tags = ["no-sandbox"],  # in-process cvc5 BMC + shells `lhd compile` / `lhd sim --setup-only`
 )
 
+# The same flow taken all the way to the REPLAY: the generated testbench is re-run
+# standalone and its values are read back with `lhd sim --query`, so the trace is
+# asserted structurally instead of by diffing a waveform. The .prp generation above
+# stops at `--setup-only`, so the sim leg had no guard at all — it can go quiet
+# while `lhd lec` still exits REFUTED with the right verdict.
+sh_test(
+    name = "lec_witness_replay_test",
+    srcs = ["tests/lec_witness_replay_test.sh"],
+    data = ["//lhd"],
+    # no-sandbox: in-process cvc5 BMC + shells `lhd compile` / `lhd sim` (host-compiles the driver).
+    # cpu:4: the mini and struct chains overlap, so two replay host builds can run at once.
+    tags = [
+        "cpu:4",
+        "no-sandbox",
+    ],
+)
+
 # Agentic per-block progress: every resolved block emits one machine-parseable
 # `info`-severity diagnostic (lec-block-proven / -refuted / -inconclusive) with a
 # verdict, the winning engine, and duration_ms, without touching the exit code.
@@ -277,28 +320,6 @@ sh_test(
     srcs = ["tests/lec_auto_test.sh"],
     data = ["//lhd"],
     tags = ["no-sandbox"],  # forks the in-process cvc5 solver as race workers
-)
-
-# Proven-module black-box collapse (lhd lec --collapse <def>): force a same-library
-# submodule to the sound UF black-box (hide its internals) while still refuting on
-# diverging leaf inputs or out-of-leaf logic. Exercises the hhds forward_hier +
-# edge-resolver opacity (Hier_opaque_scope).
-sh_test(
-    name = "lec_collapse_test",
-    srcs = ["tests/lec_collapse_test.sh"],
-    data = ["//lhd"],
-    tags = ["no-sandbox"],  # runs the in-process cvc5 solver on compiled RTL
-)
-
-# Sequential black-box (stateful collapse): outputs = UF(inputs, state), next =
-# UF2(inputs, state) with a shared state cut threaded across BMC cycles, so a
-# collapsed stateful leaf's output varies per cycle and a timing difference is
-# refuted (a combinational box would force it constant and false-prove).
-sh_test(
-    name = "lec_seqbox_test",
-    srcs = ["tests/lec_seqbox_test.sh"],
-    data = ["//lhd"],
-    tags = ["no-sandbox"],  # runs the in-process cvc5 UF+BV solver on compiled RTL
 )
 
 # Trusted-module assume-equal (`lhd lec --trust <def>` / formal.lec.trust): a def
@@ -328,26 +349,16 @@ sh_test(
 # same pass's other entries. Case 2 is the whole point -- functionality moved
 # ACROSS the inner/mid boundary, so both defs refute standalone while the design
 # does not, and the refutation must be ABSORBED by the parent without re-solving
-# anything above it. Case 3 (a genuine difference still refutes) and case 4 (the
-# two orders agree on every fixture) are what keep "absorb" from becoming
-# "swallow".
+# anything above it. Case 8 makes the same targeted parent expansion discharge
+# an UNKNOWN child in context. Case 3 (a genuine difference still refutes) and
+# case 4 (the two orders agree on every fixture) are what keep "absorb" from
+# becoming "swallow".
 sh_test(
     name = "lec_hier_topdown_test",
     size = "large",
     srcs = ["tests/lec_hier_topdown_test.sh"],
     data = ["//lhd"],
     tags = ["no-sandbox"],  # forks the in-process cvc5 solver per def
-)
-
-# Structural def-diff reduction (lec.semdiff=structural, M3): a def whose ref/impl
-# are structurally identical (and whose children are proven) is dropped with no
-# solver call; only the changed def is solved, and a non-equivalent edit still
-# refutes (the skip is children-guarded).
-sh_test(
-    name = "lec_semdiff_test",
-    srcs = ["tests/lec_semdiff_test.sh"],
-    data = ["//lhd"],
-    tags = ["no-sandbox"],  # runs pass.semdiff + the in-process cvc5 solver
 )
 
 # Every formal-engine source, hashed at build time into the verdict-cache salt
@@ -385,4 +396,17 @@ sh_test(
         "//lhd",
     ],
     tags = ["no-sandbox"],  # runs pass.abc/gensim + the in-process cvc5+abc engines
+)
+
+sh_test(
+    name = "lec_struct_array_bank_test",
+    srcs = ["tests/lec_struct_array_bank_test.sh"],
+    data = ["//lhd"],
+)
+
+sh_test(
+    name = "lec_mem_diverge_test",
+    srcs = ["tests/lec_mem_diverge_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # 2f-lec diverged-use memory collapse guard (no false PROVEN on crossed mems)
 )

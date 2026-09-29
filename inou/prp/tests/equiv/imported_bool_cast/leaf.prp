@@ -1,0 +1,7 @@
+// Imported helper for ../imported_bool_cast.prp: a boolean passthrough whose
+// output is read back through an UNSIZED `unsigned(child.flag)` cast at the
+// call site (06-functions.md: the unsized form needs a fully-sized operand,
+// which a `bool` output supplies).
+pub comb leaf(a:bool) -> (flag:bool) {
+  flag = a
+}

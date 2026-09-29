@@ -11,10 +11,13 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        "//core",
         "//graph",
         "//lnast",
+        "//upass/core:array_dim_hdr",
         "//pass/common:pass",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/container:flat_hash_set",
+        "@abseil-cpp//absl/strings",
     ],
 )

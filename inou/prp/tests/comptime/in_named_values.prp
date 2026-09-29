@@ -1,0 +1,13 @@
+/*
+:name: in_named_values
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+cassert(2 in (const a=1, 2, const c=3))
+cassert(1 in (const a=1, 2, const c=3))
+cassert(not (4 in (const a=1, 2, const c=3)))
+cassert("hello" in (const a="hello", "world"))
+const enu = enum(a, b=(x, y), c)
+cassert(enu.b.x in enu.b)
+cassert(not (enu.c in enu.b))

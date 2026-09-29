@@ -1,0 +1,14 @@
+/*
+:name: reg_enable_attr_1
+*/
+
+// The `enable=` attribute is not a new semantic: the same flop written with
+// both guards spelled as plain `if`s must be the SAME design. LEC'd against
+// reg_enable_attr.prp by prp-lec-reg_enable_attr_1.
+pub mod gate(clk:u1, rst:u1, g:u1, s:u1, d:u8) -> (q:u8@[0]) {
+  reg r:u8:[clock_pin=ref clk, reset_pin=ref rst] = 0
+  if g != 0 and s != 0 {
+    r = d
+  }
+  q = r
+}

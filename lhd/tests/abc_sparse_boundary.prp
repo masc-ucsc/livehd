@@ -1,0 +1,17 @@
+/*
+:name: abc_sparse_boundary
+:type: lgraph compile
+*/
+
+// A wide native Set_mask boundary whose caller reads only two bits. pass.abc
+// must create PIs/selectors for those demanded bits, not for all 4096 bits.
+comb wide_update(base:u4096, bit:u1) -> (out:u4096) {
+  mut tmp:u4096 = base
+  tmp#[3072] = bit
+  out = tmp
+}
+
+pub comb top(base:u4096, bit:u1) -> (y:u1) {
+  const word = wide_update(base=base, bit=bit)
+  y = word#[3072] ^ word#[7]
+}

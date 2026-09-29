@@ -52,5 +52,19 @@ tmp_v2prp2v_*/
 # inou/cgen/tests/sim/diff_test.py writes here only if $LHD_DIFFTEST_DIR points back into the repo
 difftest_*/
 
+# Optimization-loop scoreboards (docs/opt_loop_incr.md H6b, docs/opt_loop_synth.md
+# M0.4b): pure renderings of ../lhdsuite/bench/ledger.jsonl, per-host by
+# construction. Regenerate with `bazel run //bench:ledger -- render`.
+#current_opt_loop_incr.html
+#current_opt_loop_synth.html
+/color_stats.json
+
+# ABC writes its interactive command history into the CWD whenever pass.abc runs
+# a script through the embedded shell.
+/abc.history
+
+# lhd --emit-dir lg: scratch output dirs (lg1, lg2, ...)
+/lg[0-9]*/
+
 # Local B1 refactor validation artifacts
 generated/b1_refactor/

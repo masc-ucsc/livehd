@@ -1,0 +1,60 @@
+/*
+:name: conditional_icg_sliced_guard
+:verilator: conditional_icg_sliced_guard_vtb.cpp
+:vtop: conditional_icg_top
+:type: simulation
+*/
+
+// The conditional clock drives both an ICG's low-transparent latch and the
+// child's state activation. Its enable is a slice of a wider input: resolving
+// the guard must preserve the slice instead of testing the whole input or
+// falling back to the transported clock level (low before the rising edge).
+mod conditional_icg_cell(clk:bool, en:bool) -> (g:bool@[]) {
+  reg held:bool:[latch=true]
+  if !clk {
+    held = en
+  }
+  g = clk and held
+}
+
+mod conditional_icg_leaf(gclk:bool, d:u8) -> (q:u8@[]) {
+  reg acc:u8:[clock_pin=ref gclk] = 0
+  acc = acc + d
+  q = acc
+}
+
+mod conditional_icg_wrapper(clk:bool, gate:bool, d:u8) -> (q:u8@[]) {
+  wire gclk:bool = nil
+  gclk = conditional_icg_cell(clk=clk, en=gate)
+  q = conditional_icg_leaf(gclk=gclk, d=d)
+}
+
+pub mod conditional_icg_top(clk:bool, active:u8, gate:bool, d:u8) -> (q:u8@[], ctl:u8@[]) {
+  q = 0
+  if active#[2] == 1 {
+    q = conditional_icg_wrapper(clk=clk, gate=gate, d=d)
+  }
+
+  reg every:u8:[clock_pin=ref clk] = 0
+  every = every + d
+  ctl = every
+}
+
+test conditional_icg_top.activation_crosses_an_internal_sibling_clock_gate {
+  mut dut = conditional_icg_top
+  mut ctl = 0
+  tick 5 {
+    dut.active = 0x80 | (u1((clock <= 1) or (clock == 4)) << 2)
+    dut.gate = true
+    dut.d = 1 << clock
+    ctl = ctl + (1 << clock)
+    step
+
+    assert(dut.ctl == ctl, "ungated control")
+    mut want:u8 = 0
+    if clock == 0 { want = 1 }
+    if clock == 1 { want = 3 }
+    if clock == 4 { want = 19 }
+    assert(dut.q == want, "sliced conditional clock: got {} expected {}", dut.q, want)
+  }
+}

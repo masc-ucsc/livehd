@@ -1,0 +1,8 @@
+/*
+:name: string_sign_cast
+:type: error
+:error: strings are opaque and cannot be reinterpreted
+:help: numeric bit vector
+*/
+const text='cad'
+const packed=signed(text)

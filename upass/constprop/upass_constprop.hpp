@@ -14,9 +14,9 @@
 #include "call_resolver.hpp"
 #include "decl_facts.hpp"
 #include "diag.hpp"
-#include "range_bits.hpp"
 #include "hlop/dlop.hpp"
 #include "lnast_ntype.hpp"
+#include "range_bits.hpp"
 #include "symbol_table.hpp"
 #include "upass_core.hpp"
 
@@ -28,7 +28,11 @@ public:
 
   // Per-run setup: drop the bit-select source-kind cache (tmp names are unique
   // within a lambda walk, but a fresh run must start clean).
-  void begin_iteration() override { non_int_bitsel_.clear(); }
+  void begin_iteration() override {
+    non_int_bitsel_.clear();
+    pending_illegal_.clear();
+    poison_of_.clear();
+  }
 
   // Store routes both arities; the cursor-walking assign/tuple_set
   // bodies stay as private helpers (subtree payloads don't ride the span).
@@ -66,6 +70,10 @@ public:
   upass::Vote process_sext(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_get_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
   upass::Vote process_set_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
+  // `concat(dst, v_msb, w_msb, …, v_lsb, w_lsb)` — INTERLEAVED (value, width)
+  // operand pairs, so the lanes are src[0], src[2], … and their window widths
+  // src[1], src[3], …. Never walk the span as a flat lane list.
+  upass::Vote process_concat(std::string_view dst_name, Bundle& dst, upass::Src_span src) override;
 
   void        process_stmts_post() override;
   // At file-scope completion, fold every `pub` value export into
@@ -130,13 +138,25 @@ public:
   // / tuple / array; push_reduction looks the tmp up and errors. Cleared per run
   // in begin_iteration (tmp names are unique within a lambda walk).
   absl::flat_hash_set<std::string> non_int_bitsel_;
-  bool report_reduction_nonint(upass::Src_span src);
-  // True when `o` may be bit-selected/reduced: an integer/boolean scalar, a
-  // range base, or a runtime value whose kind is not yet known. A string, enum
-  // value, tuple, or array returns false.
-  bool is_bitselectable_operand(const upass::Operand& o);
+  bool                             report_reduction_nonint(upass::Src_span src);
+  // True when `o` may be reduced as an integer/boolean scalar (or is a range /
+  // unresolved runtime value). Typed arrays return false even though their
+  // ordinary get/set-mask bit view is legal: array reductions are not.
+  bool                             is_bitselectable_operand(const upass::Operand& o);
+
+  // Typed positional arrays have a language-level packed bit view. Element 0
+  // occupies the least-significant lane; each lane uses the declared element
+  // width rather than the value's significant width. Named bundles remain
+  // unordered and deliberately do not pass through this conversion.
+  std::optional<Dlop> positional_array_bitview(const upass::Operand& o);
+
+  // Write a packed scalar back into an already-shaped typed positional array,
+  // one declared-width lane at a time. Returns false when `name` is not such an
+  // array or its concrete positional shape is unavailable.
+  bool scatter_positional_array(std::string_view name, const Dlop& packed);
 
   static void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
+  static void clear_function_registry() noexcept { function_registry.clear(); }
 
   // Unresolved live imports recorded during the walk: (unit that
   // hit the import, import string as written). pass.upass either surfaces
@@ -156,8 +176,8 @@ public:
   static void set_ambiguous_units(absl::flat_hash_set<std::string> s) { ambiguous_units_ = std::move(s); }
 
 protected:
-  static inline std::vector<Pending_import> pending_imports_;
-  static inline absl::flat_hash_set<std::string>                  ambiguous_units_;
+  static inline std::vector<Pending_import>      pending_imports_;
+  static inline absl::flat_hash_set<std::string> ambiguous_units_;
 
   // Resolve a live `import` call (the LiveHD docs):
   // cursor sits on the const "import" callee; binds `dst` (tuple form → pub
@@ -203,6 +223,40 @@ protected:
   // Stores the declared MAX as a Dlop (for uN this is the N-bit all-ones
   // mask); the first-write coercion is `v & max`. No width/to_i.
   std::optional<std::string> pending_unsigned_overflow_msg_;
+
+  // 2c-shortcircuit — `and`/`or` short-circuit (02-basics.md "Evaluation
+  // order": "in `a and b`, `b` is not evaluated if `a` is false"). Since Pyrope
+  // expressions have no side effects the ONLY observable consequence is at
+  // compile time: an illegal operation inside an operand the logical fold never
+  // needs must not be reported. `cassert(N == 0 or (N > 0 and (64 % N == 0)))`
+  // with N==0 is legal Pyrope.
+  //
+  // Why a side table and not a poisoned nil VALUE: prp2lnast flattens an
+  // expression tree into PEER SSA statements, so `%t = 64 % N` is walked long
+  // before the enclosing `or` exists, and constprop's 2f-nil_diag invariant (a
+  // nil reaching a constprop output must be REPORTED, never silently folded) is
+  // about the VALUE plane. Keeping div/mod storing nothing preserves that
+  // invariant verbatim; only the diagnostic's TIMING moves here.
+  //
+  // The tmp-vs-name split is the semantic line, not a heuristic: a `%` tmp IS
+  // an operand sub-expression (skippable, 02-basics.md "Evaluation order"), a
+  // NAMED dst IS a statement (`const z = 64 % N`), and "Statements are
+  // evaluated one after another in program order" — a statement is never
+  // skipped, so it still reports immediately.
+  std::vector<std::optional<livehd::diag::Diagnostic>>          pending_illegal_;
+  absl::flat_hash_map<std::string, absl::flat_hash_set<size_t>> poison_of_;
+
+  // Park `d` against tmp `dst`; emit it right away when `dst` is a real name.
+  void defer_or_emit_illegal(std::string_view dst, livehd::diag::Diagnostic d);
+  // Carry every operand's parked ids onto `dst` so a deferral survives the
+  // intervening ops (`mod` -> `eq` -> `log_and` in the fixture above).
+  void propagate_poison(std::string_view dst, upass::Src_span src);
+  // Drop the diagnostics parked against operands [from, src.size()) — the
+  // operands a decisive `and`/`or` operand made unreachable.
+  void discharge_poison(upass::Src_span src, size_t from);
+  // Left-to-right decisive-operand scan for `and`/`or`. Stores the decided
+  // result and returns true when an operand BEFORE the last one settles it.
+  bool short_circuit_logical(std::string_view dst_name, upass::Src_span src, bool is_and);
 
   // Named type per var, recorded by process_declare when the declare's
   // type slot is a `ref(NAMED)` (a named type, e.g. `mut c:v_type = …`). At the
@@ -253,8 +307,44 @@ protected:
   // Declared facts read from the BINDING (the runner bake writes
   // mode/type_name/decl ranges at the declare node, before any store):
   upass::Mode decl_mode_of(std::string_view var) {
-    const auto b = st().get_bundle(var);
-    return b ? b->get_mode() : upass::Mode::unknown;
+    // Detuple can declare a wire leaf without declaring its tuple root. Such
+    // a field has no symbol-table binding or pending facts to consult. Keep
+    // its driver even when it is constant: a preceding read still names the
+    // wire, and dropping the store leaves generated Pyrope undriven.
+    if (declared_wire_fields_.contains(var)) {
+      return upass::Mode::wire_kind;
+    }
+    // Untyped dotted mut leaves can lose their root binding too. Their
+    // constant defaults must survive for later conditional partial writes.
+    if (declared_mut_fields_.contains(var)) {
+      return upass::Mode::mut_kind;
+    }
+    if (bundle_key::is_single_level(var)) {
+      const auto b = st().get_bundle(var);
+      return b ? b->get_mode() : upass::Mode::unknown;
+    }
+    // A DOTTED field path -- a detupled `reg`/`wire` leaf (`flags.active`,
+    // `io.a`). Do not ask Symbol_table::get_bundle for it: that API clones the
+    // selected sub-bundle, while Bundle::get_bundle never lifts Entry.mode into
+    // the clone's mode_ anyway. Besides making the field's storage class
+    // invisible, that pointless clone sat on every dotted-store hot path.
+    //
+    // Before declared facts were consulted here,
+    // every reg/wire guard that consumes this (process_store's "never
+    // symbolically bind a reg/wire store", process_assign's twin, and
+    // classify_statement_impl's "always emit a reg/wire store") silently never
+    // fired for a tuple field. Two wrong things followed for a `reg` tuple: the
+    // unconditional default store was dropped as dead, and a later read folded
+    // to the value written THIS cycle instead of the flop's q.
+    //
+    // decl_facts is the single source of truth for "what was `name` declared
+    // as" -- it splits "<root>.<field>" and reads the field Entry / the pending
+    // dotted-decl stash, exactly as decl_unsigned_max_of already does for the
+    // field's declared range. is_single_level is backtick-aware, so a quoted
+    // identifier like `` `bht_d.valid` `` (slang's flattened struct fields
+    // re-read from emitted Pyrope) stays ONE name -- never use find('.').
+    const auto f = upass::decl_facts::lookup(st(), lm ? lm->get_lnast().get() : nullptr, var);
+    return f ? f->mode : upass::Mode::unknown;
   }
   std::string decl_type_name_of(std::string_view var) {
     const auto b = st().get_bundle(var);
@@ -287,7 +377,7 @@ protected:
   void check_field_store_kind(std::string_view field_key, const Dlop& value);
 
   // Dotted `wire` field declares seen this file walk (`declare(io.a,…,wire)`,
-  // the uPass_detuple split of `wire io:(a:…, o:…)`). The runner's declare
+  // the runner detupler's split of `wire io:(a:…, o:…)`). The runner's declare
   // bake DROPS their facts when the root was never declared (detuple removed
   // it), and constprop never binds their runtime stores — so these fields have
   // no bundle entry to inspect at the file-scope pop. This set is the
@@ -295,6 +385,8 @@ protected:
   // never in st().field_touched is declared but never set and never used.
   // Cleared at each file-scope pop (per-unit state).
   absl::flat_hash_set<std::string> declared_wire_fields_;
+  // Storage facts for untyped mutable leaves with no declared tuple root.
+  absl::flat_hash_set<std::string> declared_mut_fields_;
 
   // Record an explicit non-nil field store into st().field_touched (the
   // unset-unused-field warning's "was set" evidence). See the .cpp.
@@ -310,7 +402,7 @@ protected:
   // warning can look up the field path first and fall back to its enclosing var.
   absl::flat_hash_map<std::string, livehd::diag::Span> var_spans_;
   // Remember `var`'s span the first time it is seen with a resolvable location.
-  void note_var_span(std::string_view var);
+  void                                                 note_var_span(std::string_view var);
 
   // Local replacement for the deleted runner_type_query_fn seam:
   // inferred scalar KIND off the binding + declared integer ENVELOPE from
@@ -440,6 +532,7 @@ protected:
     if (dst.empty() || src.empty()) {
       return upass::Vote::keep;
     }
+    propagate_poison(dst, src);  // 2c-shortcircuit: a deferred illegal op rides the operand chain
     if (report_nil_operand(src)) {
       return classify_vote();
     }
@@ -472,6 +565,7 @@ protected:
     if (dst.empty() || src.size() < 2) {
       return upass::Vote::keep;
     }
+    propagate_poison(dst, src);  // 2c-shortcircuit
     if (nil_operand_error && report_nil_operand(src)) {
       return classify_vote();
     }
@@ -500,6 +594,7 @@ protected:
     if (dst.empty() || src.size() < 2) {
       return upass::Vote::keep;
     }
+    propagate_poison(dst, src);  // 2c-shortcircuit
     if (has_runtime_seed_operand(src)) {
       return keep_runtime_seed(dst);  // `and`/`or` over a runtime comb result → keep structural
     }
@@ -537,6 +632,7 @@ protected:
     if (dst.empty() || src.empty()) {
       return upass::Vote::keep;
     }
+    propagate_poison(dst, src);  // 2c-shortcircuit
     if (nil_operand_error && report_nil_operand(src)) {
       return classify_vote();
     }
@@ -558,6 +654,7 @@ protected:
     if (dst.empty() || src.empty()) {
       return upass::Vote::keep;
     }
+    propagate_poison(dst, src);  // 2c-shortcircuit
     if (report_reduction_nonint(src)) {  // foo must be an integer/boolean
       return classify_vote();
     }
@@ -758,7 +855,7 @@ protected:
   std::optional<Dlop>                     resolve_current_scalar() const;
   std::optional<std::vector<Call_actual>> collect_call_actuals();
 
-  // Direct-cell call dispatch: `__sum(a, b)`, `__hotmux(sel, a, b, …)`, etc.
+  // Direct-cell call dispatch: `__sum(a, b)`, `__hotmux(c0, v0, c1, v1, …)`, etc.
   // Maps cell names (without the `__` prefix) to Ntype_op kernels and folds
   // when all positional actuals are foldable constants. Returns true when
   // dst was assigned a result; false when the fname is not a recognized

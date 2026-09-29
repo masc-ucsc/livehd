@@ -1,0 +1,31 @@
+/*
+:name: array_vs_packed_dyn
+:type: lec
+*/
+// PYROPE-vs-PYROPE group (README "Pyrope ↔ Pyrope variants"): this file is the
+// REFERENCE, and every `array_vs_packed_dyn_<N>.prp` beside it is LEC'd
+// against it.
+//
+// THE CLAIM, in the RUNTIME-index domain: reading entry `raddr` of a `[4]u4`
+// register array is `(packed >> (4*raddr)) & 0xf` on the equivalent `u16`.
+// This is the read-port half of the array lowering (Ntype_op::Memory `addr`
+// pin) rather than the whole-array `read_all` bus the sibling
+// array_vs_packed_reg group exercises, so the two groups fail independently.
+//
+// Deliberately paired with a WHOLE-ARRAY update rather than a per-entry write:
+// mixing an `update` bus with per-entry write ports raises upass.tolg's
+// `memory-update-and-write` warning and makes a refutation ambiguous between
+// the read path and the write-priority ladder.
+//
+// `= nil` (no reset) ON PURPOSE, so this group states the READ claim and only
+// the read claim: it proves from an arbitrary state by flop-cut induction. The
+// identical design WITH `= 0` is array_vs_packed_reset, which refutes -- the
+// array's reset value is currently dropped. Keeping the two apart is what lets
+// this one stay green while that one stays red.
+pub mod top(we:u1, v:u16, raddr:u2) -> (rd:u4@[0]) {
+  reg foo:[4]u4:[ordering="old"] = nil
+  rd = foo[raddr]
+  if we != 0 {
+    foo = v
+  }
+}

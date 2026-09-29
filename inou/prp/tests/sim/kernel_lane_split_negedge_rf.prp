@@ -1,0 +1,91 @@
+/*
+:name: kernel_lane_split_negedge_rf
+:type: simulation
+:set: sim.tune.dirty=on sim.tune.fence=16
+*/
+// A shared canonical color kernel must bind each member's OWN boundary lane.
+//
+// Shape (lhdsuite minion's VPU lane register file, reduced): four fenced
+// `lane` occurrences each take a 64-bit slice of one wide top-level bus and
+// split it into two 32-bit write ports, `d#[0..=31]` and `d#[32..=63]`, that
+// feed negedge write-data registers (the `wr_data_*_del_q` flops of
+// prim_rf_3r2w_preview). The two Get_masks read the SAME definition pin
+// (`lane.d`) through two DIFFERENT preextracted boundary slots, and the
+// coarsener puts the pair in one pure-data color per lane, so the four colors
+// share one canonical kernel.
+//
+// The kernel emitter bound every ABI read ONCE, up front, keyed by that
+// definition driver pin: the last read won, and BOTH ports stored port A's
+// lane (`__k_out_0 = __k_in_1; __k_out_1 = __k_in_1`). minion's rf B port
+// then wrote the `?` half of `f8_rf_wdata`, so the end state differed
+// between tune vectors (dirty=on fence=16 emits the kernel, dirty=off fuses the
+// pair into a larger color and was right). `:set:` pins the kernel-emitting
+// vector; the asserts are the values every vector must agree on.
+//
+// `salt` feeds a filler cone that only makes `lane` big enough (>= 32 sites) to
+// keep its fence; it does not touch the checked outputs.
+pub mod rf_ports(ck:u1, ea:u1, eb:u1, a:u32, b:u32) -> (qa:u32@[], qb:u32@[]) {
+  reg ra:u32:[clock_pin=ref ck, posclk=false] = 0
+  reg rb:u32:[clock_pin=ref ck, posclk=false] = 0
+  if ea != 0 { ra = a }
+  if eb != 0 { rb = b }
+  qa = ra
+  qb = rb
+}
+
+pub mod lane(clk:u1, d:u64, en:u2, salt:u32) -> (qa:u32@[], qb:u32@[], k:u32@[]) {
+  mut rf = rf_ports::[name=rf](ck = clk, ea = en & 1, eb = (en >> 1) & 1, a = d#[0..=31], b = d#[32..=63])
+  qa = rf.qa
+  qb = rf.qb
+  mut j0:u32 = salt
+  wrap mut j1:u32 = (j0 ^ (j0 << 2)) + 4
+  wrap mut j2:u32 = (j1 ^ (j1 << 3)) + 7
+  wrap mut j3:u32 = (j2 ^ (j2 << 4)) + 10
+  wrap mut j4:u32 = (j3 ^ (j3 << 5)) + 13
+  wrap mut j5:u32 = (j4 ^ (j4 << 6)) + 16
+  wrap mut j6:u32 = (j5 ^ (j5 << 7)) + 19
+  wrap mut j7:u32 = (j6 ^ (j6 << 1)) + 22
+  wrap mut j8:u32 = (j7 ^ (j7 << 2)) + 25
+  wrap mut j9:u32 = (j8 ^ (j8 << 3)) + 28
+  wrap mut j10:u32 = (j9 ^ (j9 << 4)) + 31
+  wrap mut j11:u32 = (j10 ^ (j10 << 5)) + 34
+  wrap mut j12:u32 = (j11 ^ (j11 << 6)) + 37
+  reg kr:u32 = 0
+  kr = j12
+  k = kr
+}
+
+pub mod kernel_lane_split_negedge_rf(clk:u1, en:u2, din:u256, sel:u32) -> (s:u32@[], z:u32@[], k:u32@[]) {
+  reg wd:u256 = 0
+  wd = din
+  const wv:u256 = if sel#[0] == 0 { wd } else { din }  // one wide COMBINATIONAL bus, fanned out to every lane
+  mut l0 = lane::[name=l0](clk = clk, d = wv#[0..=63], en = en, salt = sel)
+  mut l1 = lane::[name=l1](clk = clk, d = wv#[64..=127], en = en, salt = sel + 1)
+  mut l2 = lane::[name=l2](clk = clk, d = wv#[128..=191], en = en, salt = sel + 2)
+  mut l3 = lane::[name=l3](clk = clk, d = wv#[192..=255], en = en, salt = sel + 3)
+  wrap s = l0.qb + l1.qb + l2.qb + l3.qb  // the B (high) ports
+  wrap z = l0.qa + l1.qa + l2.qa + l3.qa  // the A (low) ports
+  k = l0.k ^ l1.k ^ l2.k ^ l3.k
+}
+
+test kernel_lane_split_negedge_rf.ports_keep_their_lanes {
+  mut acc = kernel_lane_split_negedge_rf
+  tick 4 {
+    acc.en = 3
+    acc.sel = clock
+    // 32-bit word w of `din` is 0x100*(w+1) + clock: even words are A lanes,
+    // odd words B lanes.
+    mut v:u256 = 0x100 + clock
+    v = v | ((0x200 + clock) << 32)
+    v = v | ((0x300 + clock) << 64)
+    v = v | ((0x400 + clock) << 96)
+    v = v | ((0x500 + clock) << 128)
+    v = v | ((0x600 + clock) << 160)
+    v = v | ((0x700 + clock) << 192)
+    v = v | ((0x800 + clock) << 224)
+    acc.din = v
+    step
+    assert(acc.z == 0x1000 + 4 * clock, "A ports: 0x100+0x300+0x500+0x700 (+clock each)")
+    assert(acc.s == 0x1400 + 4 * clock, "B ports keep the HIGH lane, not port A's")
+  }
+}

@@ -12,7 +12,7 @@
 //   saturate(v, n)  — clamp to the [min, max] of an n-bit value
 //
 // `uPass_attributes` still records the wrap / saturate POLICY (i.e.
-// which variables carry the `[wrap]` / `[saturate]` attribute), but
+// which variables carry the `[wrap]` / `[sat]` attribute), but
 // delegates the actual value-math to these helpers via the public
 // API below. Both passes can include this header — it is inline-only
 // and has no link dependency, just <const.hpp>.

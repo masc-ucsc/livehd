@@ -1,0 +1,7 @@
+/*
+:name: removed_format
+:type: error
+:error: undefined function.*format
+:help: check the spelling
+*/
+const x = format("x") // locate_error_here

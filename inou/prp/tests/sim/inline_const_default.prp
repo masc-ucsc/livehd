@@ -1,0 +1,50 @@
+/*
+:name: inline_const_default
+:type: simulation
+*/
+// 1i-inline — a constant DEFAULT followed by a conditional override, inside a
+// `comb` that the compiler INLINES. 04-variables.md: "The last write in program
+// order wins, so an unconditional write is the default for the cycle and a
+// later conditional write overrides it."
+//
+// constprop votes to drop any store whose dst folds to a known constant
+// ("every consumer folds it"), and the only escape was the TOP unit's own io
+// ports. An inlined callee's `inl<N>_<port>` binding matched neither that set
+// nor the reg/mut/wire mode guard, so `sel = 0` was deleted -- and once the
+// `if` arm invalidates the constant, the post-if read is a runtime mux with no
+// node driving the else arm. tolg then synthesized the universal unknown, so
+// the emitted Verilog read `else sel = 65'sb1????...` with NO error and NO
+// warning. The same body kept as its own module emitted `else sel = 0`.
+//
+// A LEC fixture alone cannot catch this: pass.lec concretizes the unknown to 0,
+// which happens to be the right answer here. `lhd sim` draws random bits, so
+// this simulation is the check that actually sees it.
+
+comb inner(rs:u5) -> (sel:u3) {
+  sel = 0
+  if rs != 0 {
+    sel = 2
+  }
+}
+
+mod inline_const_default(rs:u5) -> (o:u3@[0]) {
+  o = inner(rs=rs).sel
+}
+
+test inline_const_default.default_survives_inlining {
+  mut dut = inline_const_default
+  mut seen_default:bool = false
+  mut seen_override:bool = false
+  tick 8 {
+    dut.rs = if clock % 2 == 0 { 0 } else { 7 }
+    step
+    if clock % 2 == 0 {
+      assert(dut.o == 0, "the inlined comb's `sel = 0` default must survive")
+      seen_default = true
+    } else {
+      assert(dut.o == 2, "the conditional override must still win")
+      seen_override = true
+    }
+  }
+  assert(seen_default and seen_override)
+}

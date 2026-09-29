@@ -2,15 +2,14 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # `lhd sim` RESTART + windowed VCD (sim_checkpoint_debug_plan, Stage C):
-#   * `--restart-at N` loads the nearest checkpoint <= N (DUT state + the testbench
+#   * `--restart-cycle N` loads the nearest checkpoint <= N (DUT state + the testbench
 #     frame) and resumes the tick loop there instead of cycle 0 — so an accumulating
 #     testbench local lands at EXACTLY the same final value as a full run
 #     (bit-exact replay), and only cycles >= the checkpoint are re-executed;
 #   * a target with no checkpoint <= it replays from cycle 0 (a clear note);
 #   * `--vcd-from Y --vcd-to Z` traces a VCD over just [Y, Z] (restarts near Y),
 #     timestamps aligned to the absolute cycle.
-# Structural checks run hermetically; the run checks need the sibling ../hlop +
-# ../iassert headers.
+# Structural and runtime checks use lhd's declared runtime dependencies.
 
 set -u
 
@@ -70,21 +69,15 @@ grep -q '_ckpt.restart_at'         "$DRV" || fail "driver lacks --restart-at han
 grep -q '"--restart-at"'           "$DRV" || fail "driver does not accept --restart-at"
 grep -q '"--vcd-from"'             "$DRV" || fail "driver does not accept --vcd-from"
 
-# ---- opportunistic real build + run (needs the sibling runtime headers) -------
-HLOP_INC=""
-IASSERT_INC=""
-for d in ../hlop/hlop ../hlop; do [ -f "$d/slop.hpp" ] && HLOP_INC="$d" && break; done
-for d in ../iassert/src ../iassert; do [ -f "$d/iassert.hpp" ] && IASSERT_INC="$d" && break; done
-if [ -z "$HLOP_INC" ] || [ -z "$IASSERT_INC" ]; then
-  echo "SKIP run checks: sibling hlop/iassert headers not found (structural checks passed)"
-  echo "PASS: lhd sim restart + windowed VCD (structural)"
-  exit 0
-fi
+# lhd locates its declared simulator runtime files; a failed build must fail.
 
 final_total() { grep -oE 'FINAL total [0-9]+' "$1" | grep -oE '[0-9]+'; }
 
 # full run (checkpoint every 3) -> baseline FINAL total
-"$LHD" sim "$W/cr.prp" --set sim.checkpoint_every=3 --workdir "$W/run" --diag-fmt pretty > "$W/full.out" 2>&1 \
+# sim.tune.profile=off: a profiling run (the `auto` default with a fresh
+# --workdir) takes no checkpoints, and the restarts below need them.
+"$LHD" sim "$W/cr.prp" --set sim.checkpoint_every=3 --set sim.tune.profile=off --workdir "$W/run" \
+  --diag-fmt pretty > "$W/full.out" 2>&1 \
   || fail "full run failed: $(cat "$W/full.out")"
 FULL="$(final_total "$W/full.out")"
 [ -n "$FULL" ] || fail "no FINAL total in the full run: $(cat "$W/full.out")"
@@ -92,7 +85,7 @@ grep -q 'cyc 0 ' "$W/full.out"  || fail "full run did not start at cycle 0"
 grep -q 'PASS cnt.run' "$W/full.out" || fail "full run did not pass"
 
 # restart-at 13 -> loads ckp12, resumes; FINAL total must MATCH (bit-exact frame)
-"$LHD" sim "$W/cr.prp" --run-only --restart-at 13 --workdir "$W/run" --diag-fmt pretty > "$W/r13.out" 2>&1 \
+"$LHD" sim "$W/cr.prp" --run-only --restart-cycle 13 --workdir "$W/run" --diag-fmt pretty > "$W/r13.out" 2>&1 \
   || fail "restart run failed: $(cat "$W/r13.out")"
 grep -q 'restarted from checkpoint cycle 12 (target 13)' "$W/r13.out" \
   || fail "restart did not load ckp12: $(grep -i restart "$W/r13.out")"
@@ -104,7 +97,7 @@ R13="$(final_total "$W/r13.out")"
 grep -q 'PASS cnt.run' "$W/r13.out" || fail "restart run did not pass"
 
 # a target before the first checkpoint replays from 0 (still correct)
-"$LHD" sim "$W/cr.prp" --run-only --restart-at 1 --workdir "$W/run" --diag-fmt pretty > "$W/r1.out" 2>&1 \
+"$LHD" sim "$W/cr.prp" --run-only --restart-cycle 1 --workdir "$W/run" --diag-fmt pretty > "$W/r1.out" 2>&1 \
   || fail "restart-at-1 run failed"
 grep -q 'no checkpoint <= 1; replaying from cycle 0' "$W/r1.out" || fail "missing the no-checkpoint replay note: $(cat "$W/r1.out")"
 grep -q 'cyc 0 ' "$W/r1.out" || fail "restart-at-1 should replay from cycle 0"

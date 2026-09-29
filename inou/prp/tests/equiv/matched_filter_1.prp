@@ -1,0 +1,9 @@
+/*
+:name: matched_filter_1
+:type: lec
+:set: compile.unroll=true
+:expect_instances: t__li*=8 *=15
+*/
+// Benchmark expansion of the base design. The default keeps array-carry
+// loops compact; this variant explicitly requests per-iteration instances.
+// Both representations must compute the same result.

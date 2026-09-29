@@ -1,0 +1,13 @@
+/*
+:name: ready_signal_slices
+:type: equiv
+:verilog_top: ready_signal_slices
+:pyrope_top: ready_signal_slices
+*/
+pub comb ready_signal_slices(d:u4, sel:u3) -> (q:u8, signed_q:i8, picked:u1) {
+  const low:u2 = d#[0..=1]
+  const high:u2 = d#[2..=3]
+  q = low | (low << 2) | (high << 4) | (high << 6)
+  wrap signed_q = q
+  picked = q#[sel]
+}

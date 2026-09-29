@@ -1,0 +1,132 @@
+/*
+:name: chained_clock_gates_mixed_phase
+:type: simulation
+:verilator: chained_clock_gates_mixed_phase_vtb.cpp
+:vtop: mixphase
+*/
+
+// todo_sim_pipeline.md Phase 0 (step 1 + step 2 anchor) — A GATE CHAIN THAT
+// MIXES FLAVOURS: an ordinary (active-high) cell feeding an ACTIVE-LOW cell.
+//
+// WHY MIXING MATTERS. `Icg_cone` records each gate's enable but not the phase at
+// which that enable is sampled, and `phase_sched`'s `Clock_chain` collapses a
+// whole chain to ONE `guard_before_fall` bit. Both are sound only while every
+// cell in a chain samples at the same phase. Here they do not: cell A's enable
+// latch is transparent while ITS clock input (`clk`) is low, so `e1` is captured
+// at the RISE; cell B sits on the INVERTED gated clock, so its latch is
+// transparent while `ga` is high and `e2` is captured at the FALL. One folded
+// conjunction cannot represent that, which is why step 1 keeps ONE GUARD RECORD
+// PER CELL, each with its own sample phase.
+//
+// THE DISCRIMINATING CYCLE IS c2. There `e1` is high and `e2` is low, so the
+// ordinary cell commits (`qp` takes 99) while the active-low cell does not
+// (`qn` holds 6). An implementation that folded both cells into a single
+// conjunction and applied it to both endpoints would hold `qp` at 6 as well —
+// wrong, and wrong silently.
+//
+// Cell B's active-low flavour is spelled as a gate on the INVERTED clock
+// (`not ga`, then AND) rather than as `ga or not e2`: upass.tolg accepts only
+// `and` gating and `not` inversion as clock operations, and the two forms are
+// the same cell by De Morgan.
+//
+// GOLDEN, from Icarus on the netlist LiveHD itself emits (enables changed while
+// clk is low; values read at END of period, which is what `step` settles):
+//   qp  = 5, 6, 99, 99, 88, 88
+//   qn  = 5, 6,  6,  6, 88, 88
+//   ctl = d every cycle.
+//
+// STATUS: still `gated-clock-unsupported` after step 1b (2026-08-05), and for
+// the RIGHT reason now. The chain resolves — `resolve_icg` walks it and returns
+// clock=clk with `clock_inverted`, guards=[e2l] — and `Cgen_sim::icg_guards`
+// then refuses it, because a per-tick fold commits at the RISE and this cell
+// gates the FALL. Accepting it would move the commit half a period silently.
+// The edge belongs to the phase plan (step 2); the c2 row is what step 2 must
+// not fold away afterwards.
+pub mod mixphase(clk:bool, e1:bool, e2:bool, d:u8) -> (qp:u8@[1], qn:u8@[1], ctl:u8@[1]) {
+  // CELL A — ORDINARY flavour. Enable latch transparent while `clk` is LOW, so
+  // it closes (samples e1) at the RISE; the gate is an AND with the clock.
+  reg e1l:bool:[latch=true]
+  if !clk {
+    e1l = e1
+  }
+  wire ga:bool = nil
+  ga = clk and e1l
+  reg fp:u8:[clock_pin=ref ga] = 0
+  fp = d
+  qp = fp
+
+  // CELL B — ACTIVE-LOW flavour, on the ALREADY GATED clock. Its clock input is
+  // `not ga`, so its enable latch is transparent while `ga` is HIGH and samples
+  // e2 at the FALL — a different phase from cell A, in the same chain.
+  reg e2l:bool:[latch=true]
+  if ga {
+    e2l = e2
+  }
+  wire nga:bool = nil
+  nga = not ga
+  wire gb:bool = nil
+  gb = nga and e2l
+  reg fn:u8:[clock_pin=ref gb] = 0
+  fn = d
+  qn = fn
+
+  // CONTROL: a flop on the ungated reference clock.
+  reg c:u8:[clock_pin=ref clk] = 0
+  c   = d
+  ctl = c
+}
+
+test mixphase.each_cell_samples_its_own_enable {
+  mut acc  = mixphase
+  mut seen = 0
+  mut bad_p   = 0
+  mut bad_n   = 0
+  mut bad_ctl = 0
+  tick 6 {
+    // c0,c1 both open. c2: ONLY the active-low cell closed (the discriminating
+    // row). c3: only the ordinary cell closed. c4: both reopen. c5: both closed.
+    acc.e1 = (clock != 3) and (clock != 5)
+    acc.e2 = (clock != 2) and (clock != 5)
+    mut dv:u8 = 5
+    if clock == 1 {
+      dv = 6
+    } elif clock == 2 {
+      dv = 99
+    } elif clock == 3 {
+      dv = 77
+    } elif clock == 4 {
+      dv = 88
+    } elif clock == 5 {
+      dv = 41
+    }
+    acc.d = dv
+    step
+    mut gp:u8 = 5
+    mut gn:u8 = 5
+    if clock >= 1 {
+      gp = 6
+      gn = 6
+    }
+    if clock >= 2 {
+      gp = 99
+    }
+    if clock >= 4 {
+      gp = 88
+      gn = 88
+    }
+    seen = seen + 1
+    if acc.qp != gp {
+      bad_p = bad_p + 1
+    }
+    if acc.qn != gn {
+      bad_n = bad_n + 1
+    }
+    if acc.ctl != dv {
+      bad_ctl = bad_ctl + 1
+    }
+  }
+  assert(seen == 6, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_ctl == 0, "CONTROL: the flop on the ungated reference clock loads every tick")
+  assert(bad_p == 0, "the ordinary cell commits on its OWN enable, sampled at the rise")
+  assert(bad_n == 0, "the active-low cell commits on its OWN enable, sampled at the fall")
+}

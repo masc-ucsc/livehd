@@ -1,0 +1,35 @@
+/*
+:name: width_extend_match_1
+:type: equiv
+:pyrope_top: top
+*/
+
+// Same design as width_extend_match.prp, with every INTERNAL net declared WIDER.
+// The two files must LEC equivalent: a width difference is not a mismatch, the
+// wider net is the narrower one's extension. Signed nets widen by sign
+// extension, unsigned by zero extension, so the extra bits carry no information
+// and the compiler can drop them — which is exactly what the equivalence rests
+// on. Only an extension that does NOT hold would be a difference, and `w4`
+// (negative, signed) and `w5` (bit 29 set, unsigned) are here so that picking
+// the wrong extension on either kind cannot slip through.
+pub mod top(a:s3, b:s8, c:u30, d:u50) -> (w0:s8@[], w1:s3@[], w2:u50@[], w3:u30@[], w4:s8@[], w5:u50@[]) {
+  mut sw:s16 = a          // s3 -> s16 here, s8 in the reference
+  w0 = sw
+
+  mut sn:s8 = b#sext[0..=2]  // s3-valued, but declared s8 here
+  w1 = sn
+
+  mut uw:u64 = c          // u30 -> u64 here, u50 in the reference
+  w2 = uw
+
+  mut un:u50 = d#[0..=29]  // u30-valued, but declared u50 here
+  w3 = un
+
+  const sneg:s3 = -3
+  mut   sx:s16  = sneg
+  w4 = sx
+
+  const uhigh:u30 = 0x20000000
+  mut   ux:u64    = uhigh
+  w5 = ux
+}

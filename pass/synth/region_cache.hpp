@@ -1,0 +1,209 @@
+// This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#pragma once
+
+// The incremental region cache (todo/livehd/2opt-incr.html subtasks A + C) --
+// lgraph compare edition. Backend neutral: the region driver consults it for
+// every mapper, keyed by the backend's recipe and salted by its engine.
+//
+// The decision-oracle loop is: edit a little RTL, resynthesize, compare QoR.
+// A full synthesis pays the mapper for every region on every iteration, but a
+// small edit changes a handful of regions -- the rest map to identical netlists.
+//
+// This engine keeps, per region (keyed by its module name <top>__c<color>), a
+// persistent cache of two bodies: the region's PRE-ABC logic and its mapped
+// netlist. On the next run it rebuilds the fresh pre-ABC region and asks
+// semdiff::structural_identical whether it matches the cached one (name-blind on
+// internal temporaries, name-anchored on the IO ports the partitioner now names
+// content-stably, and on state cells) AND whether the resolved ABC recipe is
+// byte-identical. If both hold, the cached mapped body REPLACES the fresh region
+// module in place (hhds copy_body_from -- no clone, no port stitch) and ABC
+// never runs.
+//
+// The cache is a SPEEDUP, never an oracle of record: a miss only costs an ABC
+// run. Soundness rests on (a) the partitioner's content-stable port names +
+// its reuse_eligible refusal of automorphic boundaries, and (b) the structural
+// compare -- a real node-set bijection with all compare-point obligations
+// discharged, not a hash whose collision would be a miscompile.
+
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <vector>
+
+#include "absl/container/flat_hash_map.h"
+#include "hhds/graph.hpp"
+#include "memory_module.hpp"   // livehd::synth::Memory_fold
+#include "pass_partition.hpp"  // livehd::partition::Region_body
+
+namespace livehd::synth {
+
+struct Region_qor;  // region_qor.hpp
+
+// The persistent cache: a directory holding
+//   * abc_cache.json -- {schema, salt, regions: {module_name: {module, pre,
+//     recipe, in[], out[], qor...}}}
+//   * an hhds GraphLibrary with, per cached region, the MAPPED body (name ==
+//     module_name) and its PRE-ABC body (name "p_"+module_name).
+class Region_cache {
+public:
+  struct Row {
+    std::string                        module;  // cache-lib name of the mapped body (== module_name)
+    std::string                        pre;     // cache-lib name of the pre-abc body ("p_"+module_name)
+    std::string                        recipe;   // verbatim resolved ABC recipe (the recipe gate)
+    std::vector<std::string>           in, out;  // cached module port names (existence-checked on reuse)
+    int                                gates       = 0;
+    double                             area        = 0.0;
+    int                                logic_depth = -1;
+    float                              delay       = -1.0f;
+    std::string                        crit_output;  // region output port with the worst arrival (a name)
+    std::string                        crit_src;
+    int                                div_blackbox = 0;
+    uint64_t                           digest0      = 0;
+    uint64_t                           digest1      = 0;
+    bool                               digest_valid = false;
+    // Stored by THIS run: the mapped body still lives only in the output
+    // library, because the copy into the cache library is deferred to save()
+    // (see store()). Never persisted -- a loaded row's body is in lib().
+    bool                               in_outlib    = false;
+    std::shared_ptr<const std::string> evidence;
+    std::string                        evidence_file;
+    uint64_t                           evidence_bytes = 0, evidence_hash = 0;
+  };
+
+  struct Compare_result {
+    bool        hit = false;
+    const Row*  row = nullptr;
+    std::string crit_output;
+  };
+
+  // Scoped libraries release their bodies with the cache object. Used for
+  // one ware candidate at a time so variants do not accumulate in memory.
+  Region_cache(std::string dir, uint64_t salt, bool scoped_libraries = false);
+
+  // Miss (default result) unless ALL hold: rb.reuse_eligible, a row keyed by
+  // rb.module_name exists, its recipe matches VERBATIM, the cached pre-abc body
+  // is structurally identical to `pre_body` (semdiff::structural_identical,
+  // matching_names), and named ports retain their numeric IDs for body copying.
+  // Cross-name candidates instead compare using numeric IO identities.
+  [[nodiscard]] Compare_result lookup_compare(const livehd::partition::Region_body& rb, hhds::Graph* pre_body,
+                                              std::string_view recipe);
+
+  // Snapshot a freshly mapped region: add the metadata row and copy `pre_body`
+  // (in `pre_lib`, under `pre_name`) into the cache's pre library -- `pre_lib`
+  // is a per-region throwaway the partitioner destroys as soon as this call
+  // returns, so that copy cannot wait.
+  //
+  // The MAPPED body is NOT copied here. It already lives in `outlib` under
+  // module_name and stays there for the rest of the run, so copying it now
+  // would hold a second full netlist per region across the whole mapping phase
+  // -- exactly the phase whose RSS the memory-admission guard is policing.
+  // save() flushes every deferred body from `outlib` into the cache library
+  // instead, and same-run reuse reads it straight out of `outlib` (see
+  // Row::in_outlib). Best-effort; returns false on failure.
+  bool store(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name, const Region_qor& q,
+             std::string_view recipe, hhds::GraphLibrary* outlib);
+
+  // Diagnostic (ABC_INCR_COMPARE_ONLY): snapshot ONLY the pre-abc body + a row
+  // (no mapped body, no ABC), so a second compare-only run can exercise the
+  // rebuild/copy/save/load/compare path without paying for ABC.
+  bool store_pre(const livehd::partition::Region_body& rb, hhds::GraphLibrary& pre_lib, std::string_view pre_name,
+                 std::string_view recipe);
+
+  // Fill rb.body (the freshly-partitioned region shell in `outlib`) IN PLACE from
+  // the cached mapped body -- no clone, no port stitch, name-hash gid preserved.
+  // Returns false if the cached body is missing.
+  [[nodiscard]] bool reuse_hit(const livehd::partition::Region_body& rb, const Compare_result& res, hhds::GraphLibrary* outlib);
+  // Lazy, bounded attachment loading. Missing/truncated/corrupt attachments are
+  // unavailable; a hook client must remap rather than invent provenance.
+  [[nodiscard]] std::shared_ptr<const std::string> read_evidence(const Row& row) const;
+  static constexpr uint64_t                        max_evidence_bytes = 64ULL << 20;
+
+  // Copy every deferred mapped body out of the output library, then persist
+  // abc_cache.json (atomic tmp+rename) and the cache libraries. No-op when
+  // nothing was stored. Must run while the output library is still alive.
+  void save();
+  // Capture deferred region bodies in memory without publishing any files.
+  // A whole-design proof can then approve them after contextual ware trials.
+  void freeze_pending();
+  // Write a complete private snapshot plus directory + "_pre". Returns false
+  // if no rows changed. Never writes the live cache; I/O errors propagate.
+  bool stage_snapshot(const std::string& directory);
+
+  // The boundary refinement (abc_boundary.cpp) re-sized a region's body in the
+  // output library AFTER store() snapshotted its QoR: bring the row's
+  // area/delay in line with the body save() is about to copy. No-op for a
+  // module this run did not store.
+  void refresh_qor(std::string_view module, const Region_qor& q);
+
+  [[nodiscard]] int hits() const { return hits_; }
+  [[nodiscard]] int misses() const { return misses_; }
+  void              note_miss() { ++misses_; }
+
+  [[nodiscard]] const std::string& dir() const { return dir_; }
+  [[nodiscard]] uint64_t           salt() const { return salt_; }
+
+  // Salt for the whole cache: the global inputs the per-region compare does not
+  // see. The caller's engine salt (its backend's generated source hash), library CONTENT, sequential-mapping mode, the RESOLVED DFF cell
+  // (liberty::dff_descriptor -- name:d:clk:q:inverted -- of the auto-pick, not
+  // the raw `dff_cell` option, which is empty by default: a cached mapped body
+  // names its DFF Sub decl and reads its QN pin as Q, so a different pick must
+  // be a different key), plus a schema tag bumped when the mapper's read-back
+  // or the cache shape changes.
+  [[nodiscard]] static uint64_t make_salt(uint64_t engine_salt, std::string_view library_path, bool map_register,
+                                          Memory_fold memory_fold, uint64_t memory_max_bits, std::string_view dff_desc);
+
+private:
+  void                save_to(const std::string& directory, bool strict);
+  std::string         dir_;
+  std::string         pre_dir_;  // dir_ + "_pre": the pre-body library (see cached_pre_lib)
+  // The output library the deferred mapped bodies live in until save(). Set by
+  // store(); null when this run mapped nothing.
+  hhds::GraphLibrary* outlib_ = nullptr;
+  uint64_t            salt_   = 0;
+  bool                dirty_  = false;
+  int                 hits_ = 0, misses_ = 0;
+
+  absl::flat_hash_map<std::string, Row>                      rows_;  // module_name -> row
+  // A semantic edit can give an old name to a new specialization before the
+  // unchanged specialization is visited under a new name. Keep a lazy,
+  // private view of the saved generation for exact cross-name comparison.
+  // It is never written and is discarded before mapped bodies are frozen.
+  std::unique_ptr<Region_cache>                                loaded_snapshot_;
+  bool                                                       saved_generation_readable_ = true;
+  // Canonical digest + recipe -> previously mapped region names. The digest is
+  // only a discovery index: every candidate still passes the exact structural
+  // comparison before its mapped body can be reused.
+  absl::flat_hash_map<std::string, std::vector<std::string>> digest_index_;
+
+  // The cache is TWO libraries, deliberately kept in separate namespaces:
+  //   lib()            -- the MAPPED region bodies (reuse_hit fills from here).
+  //   cached_pre_lib() -- the PRE-ABC bodies + their body-less Sub child decls
+  //                       (the structural compare reads from here).
+  // They must not share one library: a mapped child body and a parent pre-body's
+  // Sub child decl have the SAME module name but DIFFERENT port names (mapped =
+  // partition-boundary names, pre = original def names), so merging them makes the
+  // cached pre-body's Subs resolve to the wrong IO and the compare mismatches the
+  // fresh side. Separate libs => both compare sides resolve the body-less decls.
+  bool                                scoped_libraries_ = false;
+  std::unique_ptr<hhds::GraphLibrary> scoped_mapped_, scoped_pre_;
+  [[nodiscard]] hhds::GraphLibrary&   lib();
+  [[nodiscard]] hhds::GraphLibrary&   cached_pre_lib();
+
+  // Copy the pre-body's body-less Sub child decls into cached_pre_lib() next to the
+  // pre-body, so the cached copy is self-contained (its Subs resolve
+  // get_subnode_io()). Without it the structural compare's IO signature is
+  // asymmetric cached-vs-fresh -> spurious cut_violated. `src_pre_lib` is the
+  // partitioner's throwaway lib holding the fresh pre-body. No-op if rb.pre_body null.
+  void copy_pre_children(const livehd::partition::Region_body& rb, hhds::GraphLibrary& src_pre_lib);
+
+  // Copy the MAPPED body's leaf-cell Sub child decls (liberty/DFF cells, declared
+  // into `outlib` only lazily on a MISS by abc_map's blackbox_io) into lib() next
+  // to the mapped body, so the cached body is self-contained. Then reuse_hit can
+  // re-declare them into the fresh `outlib` on an all-HIT recompile that maps
+  // nothing -- without it the reused netlist drops the cells at emission / LEC.
+  // Runs from save(), next to the deferred body copy it belongs to.
+  void copy_mapped_children(std::string_view module_name, hhds::GraphLibrary& outlib);
+};
+
+}  // namespace livehd::synth

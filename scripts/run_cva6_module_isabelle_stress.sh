@@ -209,10 +209,7 @@ set +e
   --set yosys.filelist_file="$FILELIST" \
   --set yosys.setundef=zero \
   ${YOSYS_MEMORY_MODE:+--set yosys.memory_mode="$YOSYS_MEMORY_MODE"} \
-  --set formal.isabelle.strict=true \
-  --set formal.isabelle.normalize=true \
   --set formal.isabelle.max_width=1048576 \
-  --set formal.isabelle.cert_wf=skip \
   -- \
   "${SLANG_FLAGS[@]}" \
   > "$RUN_LOG" 2>&1

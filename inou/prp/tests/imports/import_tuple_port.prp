@@ -1,0 +1,31 @@
+/*
+:name: import_tuple_port
+:type: lgraph compile
+:files: inou/prp/tests/imports/lib_tuple_port.prp inou/prp/tests/imports/import_tuple_port.prp
+*/
+// Regression: INLINING an IMPORTED comb whose ports are TUPLES.
+//
+// A tuple port lives in io_meta as flattened leaves (`ctrl.legal`), but the
+// callee body still talks to the WHOLE port -- a field `store(ctrl,'legal',v)`
+// and a `tuple_get(t,cmd,'op')`. When the callee runs as its OWN unit the
+// streaming ABI rewrite (try_stream_tuple_port_{store,alias_store} /
+// try_resolve_tuple_get) turns those into the dotted leaf, and upass.ssa
+// therefore leaves them alone. Splicing the body at a call site has to do the
+// same; it did not, and the surviving multi-element store reached tolg as
+//   "tuple/field store to 'inl1_ctrl' has no hardware lowering".
+//
+// Only an IMPORT shows it: a SAME-FILE callee is staged by the same pass.upass
+// invocation, so the registry hands back a body that was already rewritten.
+// Reading the result inside a branch (below) pins the epilogue's shape choice
+// at the same time -- see tests/pyrope/inline_tuple_out_in_branch.prp.
+
+const m = import("lib_tuple_port")
+
+pub comb top(op:u4, arg:u4, s:u1) -> (o:u8) {
+  mut u = m.dec::[name=u](cmd = (op = op, arg = arg))
+  mut res:u8 = 0
+  if s != 0 {
+    res = (u.ctrl.legal << 6) | (u.ctrl.sel << 4) | u.ctrl.imm
+  }
+  o = res
+}

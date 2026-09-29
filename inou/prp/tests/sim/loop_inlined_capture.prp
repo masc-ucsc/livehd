@@ -1,0 +1,24 @@
+/*
+:name: loop_inlined_capture
+:type: simulation
+:expect_instances: u_loop_*=3 *=3
+*/
+comb accumulate(x:u8) -> (y:u16) {
+  comptime const OFFSET = 9
+  mut acc:u16 = x
+  for i in 0..<4 { acc = acc + x + OFFSET }
+  y = acc
+}
+mod loop_inlined_capture(x:u8) -> (y:u16@[0]) {
+  const a = accumulate(x=x)
+  const b = accumulate(x=x ^ 3)
+  y = a + b
+}
+test loop_inlined_capture.values {
+  mut dut = loop_inlined_capture
+  tick 2 {
+    dut.x = if clock == 0 { 5 } else { 17 }
+    step
+    assert(dut.y == (if clock == 0 { 127 } else { 247 }))
+  }
+}

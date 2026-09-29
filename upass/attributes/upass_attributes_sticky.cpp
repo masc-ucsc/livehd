@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "absl/container/inlined_vector.h"
+#include "str_tools.hpp"
 #include "upass_attributes.hpp"
 
 namespace upass {
@@ -48,15 +49,8 @@ bool value_is_truthy(std::string_view v) {
   if (v.empty()) {
     return true;
   }
-  std::string lower;
-  lower.reserve(v.size());
-  for (char c : v) {
-    lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-  }
-  if (lower == "false" || lower == "0") {
-    return false;
-  }
-  return true;
+  const auto lower = str_tools::ascii_fold(v);
+  return !(lower == "false" || lower == "0");
 }
 }  // namespace
 
@@ -194,7 +188,13 @@ void Sticky_handler::mark(std::string_view var, std::string_view bucket) {
   const auto field = Bundle::get_all_but_first_level(var);
   auto       b     = st_->get_bundle_for_write(root);
   if (!b) {
-    return;  // unbound name (e.g. a tmp before its producer): nothing to carry
+    // Attributes run before the value producer. Keep a binding for the
+    // metadata so folding the fresh temporary can preserve its sticky state.
+    (void)st_->set(std::string(root), std::make_shared<Bundle>(std::string(root)));
+    b = st_->get_bundle_for_write(root);
+    if (!b) {
+      return;
+    }
   }
   // Explicit attr VALUES share the canonical sticky key
   // (`debug="trace"` and the propagation marker are both "_debug"): marking

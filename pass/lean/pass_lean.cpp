@@ -18,7 +18,7 @@ void Pass_lean::setup() {
   m1.add_label_optional("path", "Output directory for emitted Lean files.");
   m1.add_label_optional("top", "Top module name override.");
   m1.add_label_optional("strict",
-                        "true|false. Abort on unsupported ops (formal.strict applies too; formal.lean.strict wins)",
+                        "true|false. Reject invalid dependency widths and undersized constants (formal.lean.strict; default true)",
                         "true");
   m1.add_label_optional("emit_cert", "true|false. Emit graph certificate and cert-model definitions.", "true");
   m1.add_label_optional("emit_fast_bridge", "true|false. Emit the fast-view bridge (_comb=_comb_cert, step 5).", "false");

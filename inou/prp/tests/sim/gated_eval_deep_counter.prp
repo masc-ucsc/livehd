@@ -1,0 +1,69 @@
+/*
+:name: gated_eval_deep_counter
+:type: simulation
+*/
+
+// CHANGE-GATED EVALUATION regression: autonomous state THREE instance levels
+// below the top, behind two STATELESS pass-through wrappers, with CONSTANT
+// inputs. This is the exact shape that froze under the first cut of the
+// generation-counter gate (2026-08-06): each method's skip guard compared
+// (own __gen, sum of DIRECT children's __gen) — but a wrapper commits no
+// state of its own, so once its inputs went quiet its __gen never moved
+// again, the TOP's guard saw a static pair, the wrapper was never re-entered,
+// and the counter two levels further down froze mid-flight while real
+// hardware counts on. Silent wrong values, no diagnostic. (Found twice
+// independently: the minion bring-up — retirement stopped, `retired >= 100`
+// refuted — and the adversarial review's synthetic twin of this fixture.)
+//
+// THE FIX this pins: transitive change propagation. Every gated method, at
+// exit, re-sums its children's __gen; if the subtree advanced during the run
+// it bumps its OWN __gen, so the wave bubbles one level per run and a parent
+// can never gate off a subtree whose interior is still moving. The depth
+// here is the load-bearing part: top + THREE levels, both intermediate
+// levels gen-static. A shallower version cannot fail (the mover's __gen sits
+// in the top-called instance's direct sum, and the top is never gated —
+// step() force-bumps it).
+//
+// GOLDEN is self-evident: a free-running counter read through the wrappers
+// must change EVERY cycle. The `seen` count guards against a vacuous pass.
+
+mod leaf::[timecheck=false](x:u8) -> (o:u16@[]) {
+  reg cnt:u16 = 0
+  cnt = cnt + 1
+  o = cnt
+}
+
+mod wb::[timecheck=false](x:u8) -> (o:u16@[]) {
+  mut r = leaf(x=x)
+  o = r
+}
+
+mod wa::[timecheck=false](x:u8) -> (o:u16@[]) {
+  mut r = wb(x=x)
+  o = r
+}
+
+pub mod gtop::[timecheck=false](x:u8) -> (o:u16@[]) {
+  mut r = wa(x=x)
+  o = r
+}
+
+test gtop.deep_counter_never_freezes {
+  mut acc = gtop
+  mut prev:u16 = 0
+  mut frozen = 0
+  mut seen = 0
+  tick 8 {
+    acc.x = 5  // CONSTANT input: both wrappers stay generation-quiet
+    step
+    if clock > 0 {
+      seen = seen + 1
+      if acc.o == prev {
+        frozen = frozen + 1
+      }
+    }
+    prev = acc.o
+  }
+  assert(seen == 7, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(frozen == 0, "a free-running counter under two stateless wrappers advances EVERY cycle")
+}

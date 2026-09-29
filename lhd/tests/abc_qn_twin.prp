@@ -1,0 +1,11 @@
+// A resetless register whose next state is one NAND. Under a QN-only DFF cell
+// the D pin must carry the complement, AND2: the built-in flow gets it from
+// ABC's own phase assignment (the latch crosses as ~f), a user flow -- which
+// may retime, so the AIG stays honest -- from the read-back swapping the mapped
+// NAND2 root for its inverting twin (test_qn.lib's AND2x1). Either way the
+// netlist holds one AND2x1 feeding the DFFNx1 and no inverter.
+pub mod abc_qn_twin(clk:u1, a:u1, b:u1) -> (q:u1@[1]) {
+  reg state:u1:[clock_pin=ref clk] = nil
+  q = state
+  state = if (a & b) != 0 { 0 } else { 1 }
+}

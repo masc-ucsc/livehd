@@ -1,0 +1,22 @@
+/*
+:name: stream_nested_capture
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// A nested lambda is streamed into its own LNAST while the parent is still
+// being built. Runtime captures become hidden named inputs; declaration-point
+// constants are copied into the nested body's prologue.
+const K = 3
+
+comb outer(a:u8) -> (r:u10) {
+  mut bias:u8 = 2
+  comb inner(x:u8) -> (y:u10) {
+    y = x + a + bias + K
+  }
+  r = inner(x = 1)
+}
+
+cassert(outer(a = 4) == 10)
+cassert(outer(a = 7) == 13)

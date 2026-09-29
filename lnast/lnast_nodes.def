@@ -25,6 +25,18 @@ LNAST_NODE( if, if )
 // Use Lnast_ntype::is_if_like() when if/unique_if are handled alike.
 LNAST_NODE( unique_if, uif )
 LNAST_NODE( for, for )
+// Surviving compact range loop. Unlike a normal `for` (which the runner must
+// unroll before hardware lowering), this compiler-internal node owns both the
+// source loop and a hidden lowered call payload:
+//   rolled_for(ref(index), const(first), const(step), const(count),
+//              const(activation-port-or-empty),
+//              const(next-active-port-or-empty),
+//              tuple_add(store(ref(carry-input), const(carry-output)), ...),
+//              stmts(source-body), stmts(lowering-payload))
+// prp_writer emits only the source loop. tolg consumes only the lowering
+// payload and attaches the native HHDS Subnode_loop descriptor from the
+// explicit fields above. No replication metadata rides reserved call actuals.
+LNAST_NODE( rolled_for, rolled_for )
 LNAST_NODE( while, while )
 // `tick [N] { … }` — the simulation cycle loop inside a `test` block. Unlike
 // `for`/`while` (comptime-only, always fully unrolled) a tick is a RUNTIME loop
@@ -117,6 +129,22 @@ LNAST_NODE( sra, sra )
 LNAST_NODE( sext, sext )
 LNAST_NODE( set_mask, set_mask )
 LNAST_NODE( get_mask, get_mask )
+// `c = concat(a, b, ...)` -- n-ary bit concatenation, MSB-FIRST (Verilog
+// `{a, b}`): concat( dst, lane_msb, ..., lane_lsb ).
+//
+// Every lane's window width comes from its DECLARED type, never from its value
+// or from an inferred range: dropping a lane's leading zeros would shift every
+// lane above it. So `concat(a, b+1)` and `concat(a, 5)` are compile errors
+// (upass.typecheck `concat-untyped-lane`) while `a:u4`, a sized literal
+// `0ub1010`, a typed field, and a nested `concat` (whose width is the sum, by
+// construction) are all fine. The result is the non-negative sum-of-widths
+// value, so it is always unsigned and needs no declared type of its own.
+//
+// An ordered positional tuple/array lane expands by position (field 0 = most
+// significant), and only when every field has a declared type. A multi-field
+// named bundle has field identity but no bit order, so source must select its
+// fields as separate lanes in the desired order.
+LNAST_NODE( concat, concat )
 // - Comparison
 LNAST_NODE( ne, ne )
 LNAST_NODE( eq, eq )

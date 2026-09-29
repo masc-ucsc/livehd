@@ -1,0 +1,34 @@
+/*
+:name: loop_roll_external_reg
+:type: simulation
+:expect_instances: u_loop_0=1 lane=1 *=2
+*/
+// Every iteration reads the same Q and rewrites the same D. The compact loop
+// carries D separately while the enclosing definition owns the flop.
+
+mod reg_lane(x:u8) -> (z:u8@[0]) {
+  z = x + 1
+}
+
+mod loop_roll_external_reg(reset:bool, clock:bool) -> (z:u8@[0]) {
+  reg acc:u8 = 0
+  for i in 0..<4 {
+    acc = reg_lane::[name=lane](x=acc)
+  }
+  z = acc
+}
+
+test loop_roll_external_reg.ref_disposition {
+  mut dut = loop_roll_external_reg
+  dut.reset = true
+  dut.clock = false
+  step
+  dut.clock = true
+  step
+  dut.reset = false
+
+  tick 3 {
+    step
+    assert(dut.z == clock + 1, "all four writes read one shared Q; the last D wins")
+  }
+}

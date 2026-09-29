@@ -1,0 +1,27 @@
+/*
+:name: reduce_wide
+:type: simulation
+*/
+pub comb wide_reduce_runtime(a:u129, b:s65) -> (parity:u1, population:u8, signed_parity:u1, signed_population:u7) {
+  parity = a#^[..]
+  population = a#+[..]
+  signed_parity = b#^[..]
+  signed_population = b#+[..]
+}
+
+test wide_reduce_runtime.boundaries {
+  mut dut = wide_reduce_runtime
+  mut position:u8 = 0
+  mut one:u129 = 1
+  mut signed_ones:s65 = -1
+  tick 129 {
+    dut.a = one << position
+    dut.b = signed_ones
+    step
+    assert(dut.parity == 1)
+    assert(dut.population == 1)
+    assert(dut.signed_parity == 1)
+    assert(dut.signed_population == 65)
+    position += 1
+  }
+}

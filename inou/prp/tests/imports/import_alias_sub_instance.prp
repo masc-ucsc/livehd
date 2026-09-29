@@ -1,11 +1,10 @@
 /*
 :name: import_alias_sub_instance
 :type: lgraph
+:set: compile.upass.inline=false
 :files: inou/prp/tests/imports/lib_pick3.prp inou/prp/tests/imports/import_alias_sub_instance.prp
 */
-// `:type: lgraph` (recipe O0) is deliberate: it keeps compile.upass.inline=false,
-// the tier this guards. `:type: compile` is recipe O2 (inline:true), where the
-// comb is flattened by design and the multi-output bind is a real error.
+// Disable comb inlining explicitly: this test guards the Sub-instance path.
 // compile.upass.inline=false must keep a multi-output `comb` as a Sub INSTANCE
 // when the call reaches it through an import bound to an ALIAS (`pick3_t`) rather
 // than by the module's own name. The sub-instance gate ran off the FIRST by-name

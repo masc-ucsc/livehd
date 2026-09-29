@@ -17,10 +17,11 @@
 #   * a refuting block is absorbed by re-proving its immediate PARENT with that
 #     block inlined -- and because every ancestor already proved with the parent
 #     BOXED, the chain closes there and nothing higher is re-solved (case 2);
-#   * a premise that never discharges leaves its ancestors CONDITIONAL, which is
-#     inconclusive, never a pass (case 3). That is the half of the rule that
-#     keeps it sound: assume-guarantee gives (all children equal => top equal)
-#     and nothing in the other direction.
+#   * a premise that neither proves on its own nor discharges after targeted
+#     parent expansion leaves its ancestors CONDITIONAL, which is inconclusive,
+#     never a pass (case 3). That is the half of the rule that keeps it sound:
+#     assume-guarantee gives (all children equal => top equal) and nothing in
+#     the other direction.
 #
 # Case 4 is the equivalence gate: both orders must agree on every verdict.
 
@@ -81,9 +82,11 @@ for m in A B D E; do C "$m"; done
 # verdict between cases and hide the behaviour being asserted.
 run() {  # <tag> <impl> <order> [extra...] -> RC/OUT
   local tag=$1 impl=$2 ord=$3; shift 3
+  order_args=()
+  [ "$ord" = "top_down" ] || order_args=(${order_args[@]+"${order_args[@]}"})
   rm -rf "$W/wd_$tag"
   OUT=$("$LHD" lec --ref "lg:$W/A" --impl "lg:$W/$impl" --top top \
-        --set formal.lec.hier=true --set "formal.lec.hier_order=$ord" \
+         --set "formal.lec.hier_order=$ord" \
         --workdir "$W/wd_$tag" "$@" 2>&1); RC=$?
 }
 
@@ -165,13 +168,300 @@ else echo "ok: hier_order rejects an unknown value"; fi
 
 rm -rf "$W/wd_ff"
 OUT=$("$LHD" lec --ref "lg:$W/A" --impl "lg:$W/B" --top top \
-      --set formal.lec.hier_order=top_down --set formal.lec.hier_refute=fail \
+       --set formal.lec.hier_refute=fail \
       --workdir "$W/wd_ff" 2>&1); RC=$?
 if ! echo "$OUT" | grep -q "forces the legacy bottom_up order"; then
   echo "FAIL: case 5 hier_refute=fail did not announce the fallback to bottom_up"; fail=1
 elif ! echo "$OUT" | grep -q "order:bottom_up"; then
   echo "FAIL: case 5 hier_refute=fail announced the fallback but still ran top_down"; fail=1
 else echo "ok: hier_refute=fail falls back to bottom_up, and says so"; fi
+
+# ---------------------------------------------------------------------------
+# 6. A hierarchy large enough to grow the DFS mark table must remain safe.
+#    The traversal used to retain an int& into absl::flat_hash_map across the
+#    recursive call. A descendant insertion could rehash the map; writing the
+#    parent's "done" mark then used freed storage and corrupted the allocator.
+# ---------------------------------------------------------------------------
+make_deep() {  # <file>
+  local file=$1 i next
+  : > "$file"
+  echo 'module leaf80(input a, output y); assign y = a; endmodule' >> "$file"
+  for ((i=79; i>=0; --i)); do
+    if [ "$i" -eq 79 ]; then next=leaf80; else next=m$((i+1)); fi
+    echo "module m$i(input a, output y); $next u(.a(a), .y(y)); endmodule" >> "$file"
+  done
+  echo 'module deep_top(input a, output y); m0 u(.a(a), .y(y)); endmodule' >> "$file"
+}
+make_deep "$W/deep_a.v"
+make_deep "$W/deep_b.v"
+for side in a b; do
+  "$LHD" compile "$W/deep_$side.v" --top deep_top --emit-dir "lg:$W/deep_$side" --workdir "$W/cdeep_$side" >/dev/null 2>&1 \
+    || { echo "FAIL: case 6 compile of deep_$side.v failed"; fail=1; }
+done
+if [ "$fail" -eq 0 ]; then
+  OUT=$("$LHD" lec --ref "lg:$W/deep_a" --impl "lg:$W/deep_b" --top deep_top \
+        --workdir "$W/wd_deep" 2>&1); RC=$?
+  if [ "$RC" -ne 0 ] || ! echo "$OUT" | grep -q '82/82 def(s) proven'; then
+    echo "FAIL: case 6 deep hierarchy traversal did not prove safely (rc=$RC)"; fail=1
+  else echo "ok: deep hierarchy DFS survives mark-table growth and proves all 82 defs"; fi
+fi
+
+# ---------------------------------------------------------------------------
+# 7. A non-top definition with no outputs is unobservable hardware. XiangShan
+#    keeps simulation-only DummyDPICWrapper_* instances under `ifdef DUMMY`; in
+#    synthesis they retain inputs but have no outputs. Such a child must
+#    discharge its parent's premise structurally, while selecting the empty
+#    module itself must still refuse a vacuous whole-design proof.
+# ---------------------------------------------------------------------------
+cat > "$W/empty_a.v" <<'EOF'
+module sink(input a); wire internal = a; endmodule
+module empty_parent(input a, output y); sink u(.a(a)); assign y = a; endmodule
+EOF
+cat > "$W/empty_b.v" <<'EOF'
+module sink(input a); wire internal = ~a; endmodule
+module empty_parent(input a, output y); sink u(.a(a)); assign y = ~~a; endmodule
+EOF
+for side in a b; do
+  "$LHD" compile "$W/empty_$side.v" --top empty_parent --emit-dir "lg:$W/empty_$side" \
+    --workdir "$W/cempty_$side" >/dev/null 2>&1 \
+    || { echo "FAIL: case 7 compile of empty_$side.v failed"; fail=1; }
+done
+if [ "$fail" -eq 0 ]; then
+  OUT=$("$LHD" lec --ref "lg:$W/empty_a" --impl "lg:$W/empty_b" --top empty_parent \
+        --workdir "$W/wd_empty_parent" 2>&1); RC=$?
+  # The compile pipeline may already erase a pure outputless instance. In that
+  # case the hierarchy contains only the parent; otherwise LEC discharges the
+  # retained child explicitly. Both are the same unobservable-hardware result.
+  if [ "$RC" -ne 0 ] || { ! echo "$OUT" | grep -q "'sink' PROVEN (no observable output ports)" \
+                          && ! echo "$OUT" | grep -q "1/1 def(s) proven"; }; then
+    echo "FAIL: case 7 an outputless child did not discharge the parent (rc=$RC)"; fail=1
+  else echo "ok: an outputless DPI-style child is structurally unobservable to its parent"; fi
+
+  OUT=$("$LHD" lec --ref "lg:$W/empty_a" --impl "lg:$W/empty_b" --top sink \
+        --workdir "$W/wd_empty_top" 2>&1); RC=$?
+  if [ "$RC" -ne 7 ] || ! echo "$OUT" | grep -q "selected top has no observable output ports"; then
+    echo "FAIL: case 7 selected outputless top was not an explicit setup refusal (rc=$RC)"; fail=1
+  else echo "ok: a selected outputless top still refuses a vacuous proof"; fi
+fi
+
+# ---------------------------------------------------------------------------
+# 8. An UNKNOWN child is contextualized exactly like a REFUTED boundary: inline
+#    it into its immediate parent and retry only that parent. The full 16-bit
+#    child equality is the deliberately hard UNKNOWN fixture from the verdict
+#    policy test, while its parent observes bit 0, which the mask makes constant
+#    zero on both sides. A permanently boxed Unknown would strand the proven
+#    parent as CONDITIONAL; expanding it must close the top proof.
+# ---------------------------------------------------------------------------
+cat > "$W/unknown_a.v" <<'EOF'
+module hard(input [15:0] a, input [15:0] b, input [15:0] c, output [15:0] z);
+  assign z = ((a*b)*c) & 16'hF0F0;
+endmodule
+module unknown_parent(input [15:0] a, input [15:0] b, input [15:0] c, output o);
+  wire [15:0] z;
+  hard u(.a(a), .b(b), .c(c), .z(z));
+  assign o = z[0];
+endmodule
+EOF
+cat > "$W/unknown_b.v" <<'EOF'
+module hard(input [15:0] a, input [15:0] b, input [15:0] c, output [15:0] z);
+  assign z = (a*(b*c)) & 16'hF0F0;
+endmodule
+module unknown_parent(input [15:0] a, input [15:0] b, input [15:0] c, output o);
+  wire [15:0] z;
+  hard u(.a(a), .b(b), .c(c), .z(z));
+  assign o = z[0];
+endmodule
+EOF
+for side in a b; do
+  "$LHD" compile "$W/unknown_$side.v" --top unknown_parent \
+    --emit-dir "lg:$W/unknown_$side" --workdir "$W/cunknown_$side" >/dev/null 2>&1 \
+    || { echo "FAIL: case 8 compile of unknown_$side.v failed"; fail=1; }
+done
+if [ "$fail" -eq 0 ]; then
+  OUT=$("$LHD" lec --ref "lg:$W/unknown_a" --impl "lg:$W/unknown_b" --top unknown_parent \
+        --set formal.timeout=1 --set formal.min_timeout=1 --workdir "$W/wd_unknown_child" 2>&1); RC=$?
+  if [ "$RC" -ne 0 ]; then
+    echo "FAIL: case 8 an inconclusive child stranded a contextually equivalent parent (rc=$RC)"; fail=1
+  elif ! echo "$OUT" | grep -q "'hard' UNKNOWN"; then
+    echo "FAIL: case 8 fixture no longer exercises an UNKNOWN child"; fail=1
+  elif ! echo "$OUT" | grep -q "ESCALATE 'unknown_parent'.*0 refuted, 1 inconclusive"; then
+    echo "FAIL: case 8 did not inline the UNKNOWN child into its immediate parent"; fail=1
+  else echo "ok: an UNKNOWN child is discharged by targeted parent expansion"; fi
+fi
+
+# ---------------------------------------------------------------------------
+# 9. A Sub output may feed an input of the same instance while a flop INSIDE
+#    the callee breaks the path.  The hierarchy boundary alone looks cyclic;
+#    escalation must privately inline that one instance so the state cut is
+#    visible.  The child output `y` differs at its own boundary, while the
+#    parent compensates it, forcing the contextual expansion path.
+# ---------------------------------------------------------------------------
+cat > "$W/feedback_a.v" <<'EOF'
+module feedback_grand(input a, output used, output unused);
+  assign used = a;
+  assign unused = ~a;
+endmodule
+module feedback_child(input clock, input a, input fb, output y, output loop_o);
+  reg q;
+  wire grand_used;
+  feedback_grand grand(.a(a), .used(grand_used));
+  always @(posedge clock) q <= fb;
+  assign loop_o = q;
+  assign y = grand_used;
+endmodule
+module feedback_top(input clock, input a, output z);
+  wire y, loop_o;
+  feedback_child u(.clock(clock), .a(a), .fb(loop_o), .y(y), .loop_o(loop_o));
+  assign z = y;
+endmodule
+EOF
+cat > "$W/feedback_b.v" <<'EOF'
+module feedback_grand(input a, output used, output unused);
+  assign used = a;
+  assign unused = ~a;
+endmodule
+module feedback_child(input clock, input a, input fb, output y, output loop_o);
+  reg q;
+  wire grand_used;
+  feedback_grand grand(.a(a), .used(grand_used));
+  always @(posedge clock) q <= fb;
+  assign loop_o = q;
+  assign y = ~grand_used;
+endmodule
+module feedback_top(input clock, input a, output z);
+  wire y, loop_o;
+  feedback_child u(.clock(clock), .a(a), .fb(loop_o), .y(y), .loop_o(loop_o));
+  assign z = ~y;
+endmodule
+EOF
+for side in a b; do
+  "$LHD" compile "$W/feedback_$side.v" --top feedback_top --emit-dir "lg:$W/feedback_$side" \
+    --workdir "$W/cfeedback_$side" >/dev/null 2>&1 \
+    || { echo "FAIL: case 9 compile of feedback_$side.v failed"; fail=1; }
+done
+if [ "$fail" -eq 0 ]; then
+  OUT=$("$LHD" lec --ref "lg:$W/feedback_a" --impl "lg:$W/feedback_b" --top feedback_top \
+        --set formal.lec.semdiff=none --workdir "$W/wd_feedback_boundary" 2>&1); RC=$?
+  if [ "$RC" -ne 0 ]; then
+    echo "FAIL: case 9 sequential Sub feedback boundary did not prove after contextual inline (rc=$RC)"
+    echo "$OUT" | grep -E "lec\[hier\]|operand of|feedback"; fail=1
+  elif ! echo "$OUT" | grep -q "ESCALATE 'feedback_top'"; then
+    echo "FAIL: case 9 fixture did not exercise contextual feedback-boundary expansion"; fail=1
+  else echo "ok: a sequential Sub feedback boundary is exposed by one private contextual inline"; fi
+fi
+
+# ---------------------------------------------------------------------------
+# 10. Hierarchy is representation, not specification. One side may retain a
+#     stateful helper while the other front-end has already flattened it into
+#     the top. Inline the one-sided helper before building the shared-def DAG,
+#     then let ordinary state pairing relate the exposed machine flops.
+# ---------------------------------------------------------------------------
+cat > "$W/asym_ref.v" <<'EOF'
+module asym_leaf(input clock, input reset, input d, output q);
+  reg state;
+  always @(posedge clock) begin
+    if (reset) state <= 1'b0;
+    else state <= d;
+  end
+  assign q = state;
+endmodule
+module asym_top(input clock, input reset, input d, output q);
+  asym_leaf u_leaf(.clock(clock), .reset(reset), .d(d), .q(q));
+endmodule
+EOF
+cat > "$W/asym_impl.v" <<'EOF'
+module asym_top(input clock, input reset, input d, output q);
+  reg state;
+  always @(posedge clock) begin
+    if (reset) state <= 1'b0;
+    else state <= d;
+  end
+  assign q = state;
+endmodule
+EOF
+OUT=$("$LHD" lec --ref "$W/asym_ref.v" --impl "$W/asym_impl.v" --top asym_top \
+      --set formal.lec.semdiff=none --set formal.simfail=false \
+      --workdir "$W/wd_asym_hierarchy" 2>&1); RC=$?
+if [ "$RC" -ne 0 ]; then
+  echo "FAIL: case 10 a one-sided hierarchy changed the equivalence verdict (rc=$RC)"
+  echo "$OUT" | grep -E "lec: inlined|lec\[hier\]"; fail=1
+elif ! echo "$OUT" | grep -q "inlined 1 ref and 0 impl instance(s) absent from the other hierarchy"; then
+  echo "FAIL: case 10 proved without exposing the one-sided helper's machine state"; fail=1
+elif ! echo "$OUT" | grep -q "tier-2 state pairing: 1 uncertain pair(s) injected"; then
+  echo "FAIL: case 10 flattened the helper but did not pair its state flop"; fail=1
+elif ! echo "$OUT" | grep -q "PROVEN equivalent"; then
+  echo "FAIL: case 10 did not reach PROVEN (rc=0 also covers UNKNOWN)"; echo "$OUT" | tail -3; fail=1
+else echo "ok: asymmetric hierarchy is flattened to paired machine state and proves"; fi
+
+# ---------------------------------------------------------------------------
+# 11. pass.partition's mapped-region wrappers are named `sub_<id>`. Inlining
+#     that synthetic hierarchy must expose its scalar DFFs (`state[i]`,
+#     core/bus_name.hpp) as the bits of the source packed register; no reset edge is available to establish a merely
+#     speculative suffix relation.
+# ---------------------------------------------------------------------------
+cat > "$W/partition_ref.v" <<'EOF'
+module partition_top(input clock, input d, output [1:0] q);
+  reg [1:0] state;
+  always @(posedge clock) state <= {state[0], d};
+  assign q = state;
+endmodule
+EOF
+cat > "$W/partition_impl.v" <<'EOF'
+module partition_top__c1(input clock, input d, output [1:0] q);
+  reg \state[0] ;
+  reg \state[1] ;
+  always @(posedge clock) begin
+    \state[0]  <= d;
+    \state[1]  <= \state[0] ;
+  end
+  assign q = {\state[1] , \state[0] };
+endmodule
+module partition_top(input clock, input d, output [1:0] q);
+  partition_top__c1 sub_16(.clock(clock), .d(d), .q(q));
+endmodule
+EOF
+OUT=$("$LHD" lec --ref "$W/partition_ref.v" --impl "$W/partition_impl.v" --top partition_top \
+      --set formal.lec.semdiff=none --set formal.simfail=false \
+      --workdir "$W/wd_partition_hierarchy" 2>&1); RC=$?
+if [ "$RC" -ne 0 ]; then
+  echo "FAIL: case 11 a synthetic partition wrapper blocked packed/scalar state correspondence (rc=$RC)"
+  echo "$OUT" | grep -E "lec: inlined|lec\[hier\]"; fail=1
+elif ! echo "$OUT" | grep -q "inlined 0 ref and 1 impl instance(s) absent from the other hierarchy"; then
+  echo "FAIL: case 11 did not inline the one-sided mapped partition"; fail=1
+elif echo "$OUT" | grep -q "tier-2 state pairing:"; then
+  echo "FAIL: case 11 speculatively paired one scalar bit to the packed register instead of using the exact bit split"
+  echo "$OUT" | grep -E "tier-2 state pairing|tier-2 unpaired state"; fail=1
+elif ! echo "$OUT" | grep -q "PROVEN equivalent"; then
+  # rc=0 also covers UNKNOWN, and the whole point of the `sub_<id>` bridge is
+  # that it turns this shape into a PROOF -- assert it rather than the exit code.
+  echo "FAIL: case 11 did not reach PROVEN (rc=0 also covers UNKNOWN)"; echo "$OUT" | tail -3; fail=1
+else echo "ok: synthetic partition hierarchy collapses to packed/scalar machine state and proves"; fi
+
+# An unconfirmed child CEX must not overwrite an inconclusive top verdict.
+# The child differs only when b=1, but its caller always supplies b=0. The
+# unmatched extra output keeps the top inconclusive without relying on timing.
+for side in ref impl; do
+  if [ "$side" = ref ]; then op='^'; else op='|'; fi
+  cat > "$W/unconfirmed_$side.v" <<EOF
+module child(input a,b, output y); assign y=a $op b; endmodule
+module top(input a,b,output y,output extra_$side);
+  child u(a,1'b0,y); assign extra_$side=a;
+endmodule
+EOF
+  C "unconfirmed_$side"
+done
+for order in top_down bottom_up; do
+  "$LHD" lec --ref "lg:$W/unconfirmed_ref" --impl "lg:$W/unconfirmed_impl" --top top \
+    --set "formal.lec.hier_order=$order" --workdir "$W/unconfirmed_$order" \
+    --result-json "$W/unconfirmed_$order.json" > "$W/unconfirmed_$order.log" 2>&1
+  python3 - "$W/unconfirmed_$order.json" <<'PYVERDICT'
+import json, sys
+with open(sys.argv[1]) as f:
+    result = json.load(f)
+assert result["lec"]["verdict"] == "unknown", result
+PYVERDICT
+  if [ "$?" -ne 0 ]; then echo "FAIL: unconfirmed child CEX changed the $order top verdict"; fail=1; fi
+done
 
 if [ "$fail" -ne 0 ]; then echo "lec_hier_topdown_test: FAILED"; exit 1; fi
 echo "PASS: lec_hier_topdown_test"

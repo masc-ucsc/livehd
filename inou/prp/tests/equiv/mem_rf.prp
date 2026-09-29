@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: mem_rf.rf
 :pyrope_top: rf
+:name_match_only: false
 */
 
 // 1a-mem — register-file shape: one conditional write port, two read ports

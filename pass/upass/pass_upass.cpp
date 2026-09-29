@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <charconv>
+#include <deque>
 #include <format>
 #include <memory>
 #include <print>
@@ -17,12 +18,12 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "diag.hpp"
-#include "log.hpp"                // LHD_LOG developer tracing on the "upass" channel
-#include "perf_tracing.hpp"       // TRACE_EVENT — no-op unless built with --define profiling=1
+#include "log.hpp"           // LHD_LOG developer tracing on the "upass" channel
+#include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
+#include "str_tools.hpp"
 #include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
 #include "upass_bitwidth.hpp"    // NOLINT: ensures plugin "bitwidth" is linked
 #include "upass_constprop.hpp"
-#include "upass_detuple.hpp"       // pre-split tuple-typed memory/var lowering
 #include "upass_func_extract.hpp"  // front-end lambda split (2g)
 #include "upass_pipe.hpp"
 #include "upass_runner.hpp"
@@ -60,10 +61,34 @@ std::vector<std::string> parse_order_csv(std::string_view txt_view) {
   return out;
 }
 
-[[noreturn]] void fail_upass_runtime(std::string_view msg) {
-  std::print("ERROR: {}\n", msg);
-  throw std::runtime_error(std::string(msg));
+// Abort pass.upass with a REPORTED reason. The diagnostics sink is the only
+// channel the CLI reads (it renders pretty or JSON per --diag-fmt, and
+// classify_engine_failure lifts the record into the result envelope); a bare
+// stdout print lands in the per-step log the kernel captures fd 1 into, where
+// the user never sees it.
+[[noreturn]] void fail_upass_runtime(std::string_view code, std::string_view category, std::string_view msg) {
+  livehd::diag::err("pass.upass", code, category).msg("{}", msg).fatal();
 }
+
+// Abort after the specific diagnostics have ALREADY been emitted: a summary
+// record here would double the error count and bury the per-item ones.
+[[noreturn]] void abort_upass_runtime(std::string_view msg) { throw std::runtime_error(std::string(msg)); }
+
+// uPass_constprop consults this registry only while pass.upass is running.
+// Keeping owning Lnast pointers in its static map until process teardown both
+// retains an imported forest unnecessarily and lets Lnast/Source_locator
+// destruction run after HHDS static infrastructure has started shutting down.
+// Scope it to the pass, including exceptional exits.
+class Constprop_registry_scope {
+public:
+  explicit Constprop_registry_scope(const std::vector<std::shared_ptr<Lnast>>& lnasts) {
+    uPass_constprop::set_function_registry(lnasts);
+  }
+  ~Constprop_registry_scope() { uPass_constprop::clear_function_registry(); }
+
+  Constprop_registry_scope(const Constprop_registry_scope&)            = delete;
+  Constprop_registry_scope& operator=(const Constprop_registry_scope&) = delete;
+};
 
 // Parse a non-negative integer option. Returns -1 on absent/empty/invalid
 // to match the "don't check" sentinel used by the verifier.
@@ -99,6 +124,10 @@ void Pass_upass::setup() {
                         "enable SSA normalisation: harvest I/O metadata into tree_io, expand I/O tuple nodes, "
                         "rename multi-assigned user variables to SSA-unique names",
                         "true");
+  m1.add_label_optional("ssa_stream",
+                        "fuse straight-line scalar SSA into the shared uPass runner for generated scalar LNASTs; "
+                        "false forces the legacy pre-runner SSA tree rebuild (useful for differential checking)",
+                        "true");
   m1.add_label_optional("assert", "enable assert test", "true");
   m1.add_label_optional("typecheck", "enable typecheck upass (kind/operator/nil checks; runs after attributes)", "true");
   m1.add_label_optional("semacheck",
@@ -122,6 +151,12 @@ void Pass_upass::setup() {
                         "the dead statements on the Lnast for lnast.tolg to skip — no rebuild copy. The kernel sets "
                         "mark for lg-only flows (nothing downstream keeps the LNAST).",
                         "rebuild");
+  m1.add_label_optional("preserve_param_provenance",
+                        "keep a folded `pkg.PARAM` read SYMBOLIC in the materialized LNAST so `--emit-dir pyrope:` "
+                        "re-emits the named constant instead of its value. lnast.tolg cannot wire a symbolic ref, so "
+                        "the kernel only enables it for a pyrope-emitting, no-graphs compile (the pyrope counterpart "
+                        "of the inou.slang flag of the same name). Default off.",
+                        "false");
   m1.add_label_optional("reset_style",
                         "elaboration flag: sync|async reset wiring for implicit-reset flops (default sync — "
                         "target-dependent, FPGA-typical). A per-reg `:[sync=…]` attr beats the flag.",
@@ -146,22 +181,21 @@ void Pass_upass::setup() {
                         "task 1m: surface unresolved live imports on the pass var (kernel iterate loop) instead of "
                         "hard-erroring (default false)",
                         "false");
+  m1.add_label_optional("default_top", "INTERNAL instantiate this generic entry point with its declaration defaults", "");
   m1.add_label_optional("inline",
                         "true|false: inline fully-defined `comb` calls. Default FALSE — a directly-named comb is "
                         "emitted as a sub-module instance, preserving the comb boundary for debug/optimization; the "
                         "O2 compile recipe sets it true to flatten. (stateful `mod`/`pipe`, recursive, `ref`/var-arg, "
                         "and template combs always stay as instances/inline regardless.)",
                         "false");
+  m1.add_label_optional("unroll",
+                        "INTERNAL true|false: benchmark source-loop expansion; seeded only by compile.unroll (default false)",
+                        "false");
   register_pass(m1);
 }
 
 Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
-  auto inherit_txt = std::string(var.get_stage("inherit", "true"));
-  std::transform(inherit_txt.begin(), inherit_txt.end(), inherit_txt.begin(), [](unsigned char c) {
-    return static_cast<char>(std::tolower(c));
-  });
-  inherit_labels
-      = !(inherit_txt.empty() || inherit_txt == "0" || inherit_txt == "false" || inherit_txt == "no" || inherit_txt == "off");
+  inherit_labels = str_tools::option_is_true(var.get_stage("inherit", "true"));
 
   const auto get_label = [&](std::string_view label, std::string_view default_value = "") -> std::string_view {
     if (inherit_labels) {
@@ -175,11 +209,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
     upass_order = parse_order_csv(order_txt);
   }
 
-  auto vif_txt = std::string(get_label("verifier_include_funcs", "false"));
-  std::transform(vif_txt.begin(), vif_txt.end(), vif_txt.begin(), [](unsigned char c) {
-    return static_cast<char>(std::tolower(c));
-  });
-  verifier_include_funcs = !(vif_txt.empty() || vif_txt == "0" || vif_txt == "false" || vif_txt == "no" || vif_txt == "off");
+  verifier_include_funcs = str_tools::option_is_true(get_label("verifier_include_funcs", "false"));
 
   // Per-pass config forwarded to the runner. Pick up labels whose meaning
   // is pass-specific (as opposed to runner/order labels above).
@@ -195,6 +225,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   capture_opt("import_defer");
   capture_opt("inline");  // compile.upass.inline=false -> runner emits comb instances instead of inlining
   capture_opt("dce");     // dce:mark -> runner skips the post-DCE staging rebuild (lg-only flows)
+  capture_opt("unroll");  // compile.unroll: one representation switch, false by default
 
   if (!upass_order.empty()) {
     return;
@@ -218,9 +249,11 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   auto bw_txt      = get_label("bitwidth");
   bool do_bitwidth = bw_txt != "false" && bw_txt != "0";
 
-  auto ssa_txt = get_label("ssa");
-  bool do_ssa  = ssa_txt != "false" && ssa_txt != "0";
-  run_ssa      = do_ssa;
+  auto ssa_txt        = get_label("ssa");
+  bool do_ssa         = ssa_txt != "false" && ssa_txt != "0";
+  run_ssa             = do_ssa;
+  auto ssa_stream_txt = get_label("ssa_stream", "true");
+  stream_ssa          = ssa_stream_txt != "false" && ssa_stream_txt != "0";
 
   // tolg is a terminal LNAST->LGraph step, not part of the runner
   // order. Default off; enabled with tolg:1. Runs after the main walk so
@@ -234,6 +267,19 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   // tree, so tolg:1 forces the swap regardless. Default on.
   auto toln_txt = get_label("toln");
   run_toln      = (toln_txt != "false" && toln_txt != "0") || run_tolg;
+
+  // Named-constant provenance: a folded `pkg.PARAM` materializes as the
+  // symbolic ref, for `--emit-dir pyrope:`. tolg cannot wire one, so refuse the
+  // combination loudly instead of silently nil-wiring the design.
+  auto prov_txt             = get_label("preserve_param_provenance");
+  preserve_param_provenance = prov_txt == "true" || prov_txt == "1";
+  if (preserve_param_provenance && run_tolg) {
+    livehd::diag::err("pass.upass", "provenance-needs-lnast", "config")
+        .msg("upass.preserve_param_provenance=true cannot be combined with tolg:1")
+        .hint("symbolic pkg.PARAM refs do not lower to hardware; emit pyrope in a separate invocation")
+        .emit();
+    preserve_param_provenance = false;
+  }
 
   // sync|async reset wiring for implicit-reset flops (tolg-only).
   reset_style = std::string(get_label("reset_style", "sync"));
@@ -350,7 +396,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   }
 
   if (upass_order.empty()) {
-    fail_upass_runtime("pass.upass has all the passed disabled??");
+    fail_upass_runtime("no-pass-enabled", "io", "pass.upass has every sub-pass disabled: nothing left to run");
   }
 }
 
@@ -380,6 +426,13 @@ void Pass_upass::work(Eprp_var& var) {
   {
     absl::flat_hash_map<std::string, int> name_count;  // case-sensitive: Module_Fo and MODULE_FO are distinct
     for (const auto& ln : var.lnasts) {
+      // A TEMPLATE does not count as a provider of its name: an IDENTITY
+      // specialization minted by the runner (every generic at its declared
+      // default) is named after the template and lives alongside it, and that
+      // pair is one unit, not an ambiguous import.
+      if (ln->is_template()) {
+        continue;
+      }
       ++name_count[std::string(ln->get_top_module_name())];
     }
     absl::flat_hash_set<std::string> ambiguous;
@@ -391,11 +444,24 @@ void Pass_upass::work(Eprp_var& var) {
     uPass_constprop::set_ambiguous_units(std::move(ambiguous));
   }
 
-  // Capture original entry-point count BEFORE the lambda split spawns helper
-  // lnasts. Anything appended past this index is a function-body spawn — used
-  // below to gate the verifier off for spawn lnasts (and to mark them
-  // is_function_body) unless verifier_include_funcs:true was passed.
-  const auto original_lnast_count = var.lnasts.size();
+  // Capture the entry-point count before lambda splitting so the extraction
+  // loop does not revisit trees it appends. Track those spawned trees by
+  // identity below: an incremental order restoration may move them away from
+  // the tail before the runner reaches them.
+  const auto                        original_lnast_count = var.lnasts.size();
+  absl::flat_hash_set<const Lnast*> function_bodies;
+
+  // prp2lnast already streams named lambdas into their final per-function
+  // trees.  Publish those siblings before the compatibility extractor scans
+  // the source wrappers.  The extractor remains for non-Pyrope producers and
+  // old/restored trees that still contain real func_def bodies.
+  for (std::size_t idx = 0; idx < original_lnast_count; ++idx) {
+    for (auto& fn : var.lnasts[idx]->take_streamed_lambdas()) {
+      function_bodies.insert(fn.get());
+      var.add(std::move(fn));
+    }
+  }
+  const auto split_lnast_count = var.lnasts.size();
 
   // ── Front-end lambda split (2g). Pull every comb/pipe/mod func_def out of
   // each entry-point tree into its own `top -> [io, stmts]` Lnast and drop it
@@ -406,22 +472,58 @@ void Pass_upass::work(Eprp_var& var) {
   // it never rebuilds a tree that dropped nothing. Iterate by index up to the
   // ORIGINAL count: the appended trees already arrive in extracted unit form
   // and carry no func_def to split. SSA below harvests io_meta from them.
-  for (std::size_t idx = 0; idx < original_lnast_count; ++idx) {
-    const auto                  ln = var.lnasts.at(idx);
-    if (ln->is_pre_elaborated() || ln->is_upass_converged()) {
+  for (std::size_t idx = 0; idx < split_lnast_count; ++idx) {
+    const auto ln = var.lnasts.at(idx);
+    if (ln->is_pre_elaborated() || ln->is_upass_converged() || function_bodies.contains(ln.get())) {
       continue;  // already detupled + lambda-split (loaded import / earlier round)
     }
-    TRACE_EVENT("pass", "upass.detuple_split", "unit", std::string(ln->get_top_module_name()));
+    TRACE_EVENT("pass", "upass.lambda_split", "unit", std::string(ln->get_top_module_name()));
     // Excerpt provider for any diagnostic emitted while this unit is split.
     livehd::diag::Locator_scope diag_scope(&ln->source_locator());
-    // Lower tuple-typed memory/var declarations into per-field scalar leaves
-    // BEFORE the lambda split, while a file-scope named type and the module
-    // using it are still one tree (so the type's field layout resolves locally,
-    // with no symbol table this early). Tolg has no tuples.
-    uPass_detuple::run(ln);
     for (const auto& new_ln : upass::extract_lambda_functions(ln)) {
+      function_bodies.insert(new_ln.get());
       var.add(new_ln);
     }
+  }
+
+  // A mixed incremental restore has cached function trees already present,
+  // while functions owned by dirty files are created by the loop above. Put
+  // the complete forest back in the recorded cold order only now, after every
+  // missing function has been extracted. Persisted LN directories sort by
+  // name, so their on-disk order is not an execution-order substitute.
+  if (!var.lnast_order_hint.empty()) {
+    // Name -> queue, not name -> tree: duplicate top-module names are tolerated
+    // upstream (non-imported collisions), and a single-slot map would silently
+    // drop every tree after the first per name from the forest.
+    absl::flat_hash_map<std::string, std::deque<std::shared_ptr<Lnast>>> by_name;
+    for (const auto& ln : var.lnasts) {
+      by_name[std::string(ln->get_top_module_name())].push_back(ln);
+    }
+    auto take = [&](const std::string& name) -> std::shared_ptr<Lnast> {
+      auto it = by_name.find(name);
+      if (it == by_name.end() || it->second.empty()) {
+        return {};
+      }
+      auto ln = std::move(it->second.front());
+      it->second.pop_front();
+      if (it->second.empty()) {
+        by_name.erase(it);
+      }
+      return ln;
+    };
+    std::vector<std::shared_ptr<Lnast>> ordered;
+    ordered.reserve(var.lnasts.size());
+    for (const auto& name : var.lnast_order_hint) {
+      if (auto ln = take(name)) {
+        ordered.push_back(std::move(ln));
+      }
+    }
+    for (const auto& ln : var.lnasts) {
+      if (auto rest = take(std::string(ln->get_top_module_name()))) {
+        ordered.push_back(std::move(rest));
+      }
+    }
+    var.lnasts = std::move(ordered);
   }
 
   if (up.upass_order.empty()) {
@@ -440,11 +542,11 @@ void Pass_upass::work(Eprp_var& var) {
         continue;  // body already SSA'd (ln: manifest io_meta / earlier round)
       }
       TRACE_EVENT("pass", "upass.ssa", "unit", std::string(ln->get_top_module_name()));
-      uPass_ssa::run(ln, &var.lnasts);
+      uPass_ssa::run(ln, &var.lnasts, up.stream_ssa);
     }
   }
 
-  uPass_constprop::set_function_registry(var.lnasts);
+  Constprop_registry_scope constprop_registry_scope(var.lnasts);
 
   // Shared comb-call-inliner registry, built ONCE and reused by every per-unit
   // runner below. ensure() walks each lnast body exactly once across the whole
@@ -453,14 +555,24 @@ void Pass_upass::work(Eprp_var& var) {
   // (The old code rebuilt this from scratch inside every runner, re-walking
   // every lnast's whole tree per unit — O(units^2 * tree), the XSCore "hang".)
   uPass_function_registry function_registry;
+  // Semantic tuple layouts are learned by the file-level runner and reused by
+  // the extracted function runners that follow it. This is deliberately a
+  // compact symbol-table side registry, never another LNAST/tree pass.
+  uPass_detuple_registry  detuple_registry;
 
   // Module names already in the queue, for O(1) dedup of runner-spawned
   // specializations below (was an O(lnasts) linear scan per spawn — O(M^2) on a
   // specialization-heavy design). Seeded from the current queue (entry points +
   // the pre-walk lambda split); kept in sync on every var.add inside the loop.
+  // A TEMPLATE's name is deliberately NOT seeded: a runner-minted IDENTITY
+  // specialization (every generic at its declaration default, no port type
+  // injected) is named after the template itself, so seeding it would make the
+  // dedup below DROP the only tree that can actually lower — the template mints
+  // no GraphIO (upass_tolg::register_io) and the call would then bind nothing.
+  // The top-specialization below re-inserts its own name for the same reason.
   absl::flat_hash_set<std::string> seen_module_names;
   for (const auto& ln : var.lnasts) {
-    if (ln) {
+    if (ln && !ln->is_template()) {
       seen_module_names.insert(std::string(ln->get_top_module_name()));
     }
   }
@@ -469,9 +581,30 @@ void Pass_upass::work(Eprp_var& var) {
   // comb functions), and those generated trees should run through the same
   // configured upass pipeline before downstream stages see them.
   for (std::size_t idx = 0; idx < var.lnasts.size(); ++idx) {
-    const auto ln = var.lnasts.at(idx);
+    auto ln = var.lnasts.at(idx);
     function_registry.ensure(var.lnasts);  // folds in any newly-appended lnasts
-
+    // Skip when an IDENTITY specialization of this template already sits in the
+    // queue under the template's own name: a call site minted it (typically in
+    // the kernel's EARLIER pass.upass round -- the default-top round runs last,
+    // after imports converge), and that unit IS the defaulted top. Specializing
+    // again mints a SECOND unit with the same name; tolg then lowers both into
+    // one GraphIO, the second lowering deletes the first graph, and every holder
+    // of the first handle (lowered / Eprp_var::graphs) walks released storage.
+    if (ln->is_template() && ln->get_top_module_name() == var.get("default_top")
+        && !seen_module_names.contains(std::string(ln->get_top_module_name()))) {
+      auto         manager = std::make_shared<upass::Lnast_manager>(ln);
+      uPass_runner specializer(manager, {}, up.pass_options);
+      specializer.set_function_registry(function_registry);
+      ln              = specializer.specialize_top_defaults();
+      var.lnasts[idx] = ln;
+      // The specialized top REPLACES the template in-place under the same name;
+      // record it so a call site that also identity-specializes this module does
+      // not append a second, duplicate unit with that name.
+      seen_module_names.insert(std::string(ln->get_top_module_name()));
+      if (up.run_ssa) {
+        uPass_ssa::run(ln, &var.lnasts, up.stream_ssa);
+      }
+    }
     // A pre-elaborated import is reused as-is: it stays REGISTERED above (so
     // callers resolve it through its restored io_meta) and is lowered by the
     // tolg step below, but its body is NOT re-walked — re-running constprop/
@@ -524,14 +657,29 @@ void Pass_upass::work(Eprp_var& var) {
     const bool is_template = ln->is_template();
     auto       lm          = std::make_shared<upass::Lnast_manager>(ln);
 
-    // For func_extract-spawned lnasts (idx beyond the original entry-point
-    // count), strip the verifier from the order unless the test opted in
+    // For func_extract-spawned lnasts, strip the verifier unless the test opted in
     // via verifier_include_funcs:true — dropping the verifier here avoids
     // double-walking unproven function bodies into the aggregate.
     auto       order            = up.upass_order;
-    const bool is_function_body = idx >= original_lnast_count;
+    const bool is_function_body = function_bodies.contains(ln.get()) || !ln->get_lambda_kind().empty();
     if (is_function_body && !up.verifier_include_funcs) {
       order.erase(std::remove(order.begin(), order.end(), "verifier"), order.end());
+    }
+    // In auto mode the coalescer disables itself for Verilog-origin SSA trees.
+    // Remove it before constructing the runner as well: leaving the disabled
+    // plugin in the dispatch vector still made every generated operation pay a
+    // virtual call (millions per large module). An explicit coalescer setting
+    // continues to win and keeps the plugin in the requested order.
+    // The "auto" test must match uPass_coalescer::set_options, which lowercases
+    // the value before comparing — otherwise `coalescer=AUTO` reads as explicit
+    // here and as auto there.
+    const auto coalescer_opt  = up.pass_options.find("coalescer");
+    bool       coalescer_auto = coalescer_opt == up.pass_options.end();
+    if (!coalescer_auto) {
+      coalescer_auto = str_tools::ascii_fold(coalescer_opt->second) == "auto";
+    }
+    if (ln->is_verilog_origin() && coalescer_auto) {
+      order.erase(std::remove(order.begin(), order.end(), "coalescer"), order.end());
     }
     auto runner = uPass_runner(lm, order, up.pass_options);
     // toln:0 && tolg:0: nothing consumes the rewritten LNAST, so skip building
@@ -540,10 +688,14 @@ void Pass_upass::work(Eprp_var& var) {
     // (io_meta/bw_meta) are unchanged. The func_extract pre-loop above keeps
     // materializing (the main walk consumes its rewrite).
     runner.set_materialize(up.run_toln && !is_template);  // never rewrite a template body
+    runner.set_preserve_param_provenance(up.preserve_param_provenance);
     runner.set_is_function_body(is_function_body);
     runner.set_function_registry(function_registry);  // 1i: comb bodies to inline from (shared, built once)
+    runner.set_detuple_registry(detuple_registry);
     if (runner.has_configuration_error()) {
-      fail_upass_runtime(std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
+      fail_upass_runtime("bad-configuration",
+                         "io",
+                         std::format("pass.upass invalid pass configuration: {}", runner.get_configuration_error()));
     }
     runner.run();
 
@@ -576,8 +728,9 @@ void Pass_upass::work(Eprp_var& var) {
         continue;
       }
       if (up.run_ssa) {
-        uPass_ssa::run(new_ln, &var.lnasts);
+        uPass_ssa::run(new_ln, &var.lnasts, up.stream_ssa);
       }
+      function_bodies.insert(new_ln.get());
       var.add(new_ln);
     }
   }
@@ -625,12 +778,22 @@ void Pass_upass::work(Eprp_var& var) {
     for (const auto& ln : var.lnasts) {
       uPass_tolg::register_io(ln, "lgdb_tolg", var.lnasts);
     }
+    std::vector<std::shared_ptr<hhds::Graph>> lowered;
     for (const auto& ln : var.lnasts) {
       auto g = uPass_tolg::run(ln, "lgdb_tolg", var.lnasts, up.reset_style);
       if (g) {
+        // Same rule as lhd's lower_lnasts: tolg replaces a same-named body and
+        // tombstones the older handle, which must not stay in either list.
+        const auto replaced = [&g](const std::shared_ptr<hhds::Graph>& old) {
+          return old && old != g && old->get_name() == g->get_name();
+        };
+        std::erase_if(var.graphs, replaced);
+        std::erase_if(lowered, replaced);
         var.add(g);
+        lowered.push_back(g);
       }
     }
+    uPass_tolg::gate_activation_clocks(lowered);
   }
 
   // ── Unresolved live imports. With import_defer:1 the kernel's
@@ -676,7 +839,7 @@ void Pass_upass::work(Eprp_var& var) {
                                      .message  = std::format("unit `{}`: unresolved import \"{}\"", p.unit, p.text),
                                      .hint     = std::format("searched inputs: {}", searched.empty() ? "(none)" : searched)});
       }
-      fail_upass_runtime(std::format("{} unresolved import(s)", seen.size()));
+      abort_upass_runtime(std::format("{} unresolved import(s)", seen.size()));
     }
   }
 

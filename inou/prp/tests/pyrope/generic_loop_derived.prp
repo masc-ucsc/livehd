@@ -1,0 +1,33 @@
+/*
+:name: generic_loop_derived
+:type: compile
+*/
+
+// A generic bound to a value DERIVED FROM THE LOOP INDEX. A generic is a
+// comptime parameter, but a ROLLED loop is one shared instance whose index is a
+// runtime input port -- so `SIZE >> (lvl + 1)` cannot fold inside the lifted
+// body and the callee reached tolg with an undriven `inl<n>_N`. plan_loop_roll
+// now declines a body whose generic bind reads the index / a carry / an
+// invariant, and the loop source-unrolls into one specialization per level
+// (N = 4, 2, 1).
+//
+// The `mut` chain (`x=value`) makes each level consume the previous one, the
+// matched-filter reduction-tree shape.
+comptime const SIZE      = 8
+comptime const LOG2_SIZE = 3
+
+comb add_n<N>(x:u8) -> (y:u8) {
+  mut value:u8 = x
+  for i in 0..<N {
+    value = (value + 1)#[0..=7]
+  }
+  y = value
+}
+
+pub comb generic_loop_derived(x:u8) -> (y:u8) {
+  mut value:u8 = x
+  for lvl in 0..<LOG2_SIZE {
+    value = add_n<N=(SIZE >> (lvl + 1))>(x=value)
+  }
+  y = value
+}

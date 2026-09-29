@@ -1,3 +1,6 @@
+`ifndef LIVEHD_CGEN_MEMORY_3RD_1WR_V
+`define LIVEHD_CGEN_MEMORY_3RD_1WR_V
+
 `define log2(n)   ((n) <= (1<<0) ? 0 : (n) <= (1<<1) ? 1 :\
                    (n) <= (1<<2) ? 2 : (n) <= (1<<3) ? 3 :\
                    (n) <= (1<<4) ? 4 : (n) <= (1<<5) ? 5 :\
@@ -46,7 +49,7 @@ localparam MASKSIZE = BITS/WENSIZE;
 
 (*ram_style = "block" *) reg [BITS-1:0] data[SIZE-1:0]; // synthesis syn_ramstyle = "block_ram"
 
-// Power-on contents (Memory cell `init` pin, entry 0 in the low BITS):
+// Power-on contents (Memory cell `initial` pin, entry 0 in the low BITS):
 // yosys lifts this into $meminit.
 generate
   if (INIT_EN) begin:BLOCK_INIT
@@ -210,3 +213,5 @@ generate
 endgenerate
 
 endmodule
+
+`endif // LIVEHD_CGEN_MEMORY_3RD_1WR_V

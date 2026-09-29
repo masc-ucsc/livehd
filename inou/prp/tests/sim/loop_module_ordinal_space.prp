@@ -1,0 +1,34 @@
+/*
+:name: loop_module_ordinal_space
+:type: simulation
+:expect_instances: u_loop_0=1 u_loop_1=1 head=1 tail=1 *=4
+*/
+// 2026-08-22: `compile.unroll` defaults to false, so this loop now ROLLS (one
+// replicated Sub per source loop; the `_li<n>` unrolled names only exist under
+// `--set compile.unroll=true`). The instance claim above is the rolled shape.
+// Sequential loops in one parent share one module-scoped occurrence ordinal
+// space. The second site continues after the first site's count.
+
+mod ordinal_step(idx:u2, x:u8, acc_in:u16) -> (acc_out:u16@[0]) {
+  acc_out = acc_in + x + idx
+}
+
+mod loop_module_ordinal_space(x:u8) -> (total:u16@[0]) {
+  mut acc:u16 = 0
+  for i in 0..<2 {
+    acc = ordinal_step::[name=head](idx=i, x=x, acc_in=acc)
+  }
+  for j in 0..<2 {
+    acc = ordinal_step::[name=tail](idx=j, x=x, acc_in=acc)
+  }
+  total = acc
+}
+
+test loop_module_ordinal_space.continues_ordinals {
+  mut dut = loop_module_ordinal_space
+  tick 1 {
+    dut.x = 3
+    step
+    assert(dut.total == 14, "four additions plus two 0+1 index sums")
+  }
+}

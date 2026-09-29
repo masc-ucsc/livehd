@@ -32,10 +32,6 @@ std::string Slang_context::int_max_str(int bits, bool is_signed) const {
     return std::string(Dlop::get_mask_value(bits)->to_pyrope());  // 2^bits - 1
   }
   // signed max = 2^(bits-1) - 1; a 1-bit signed maxes at 0 (range {-1,0}).
-  // get_mask_value(0) returns 1 (narrow-arg wart), so special-case bits<=1.
-  if (bits <= 1) {
-    return "0";
-  }
   return std::string(Dlop::get_mask_value(bits - 1)->to_pyrope());
 }
 
@@ -46,16 +42,7 @@ std::string Slang_context::int_min_str(int bits, bool is_signed) const {
   if (bits <= 0) {
     bits = 1;
   }
-  // signed min = -2^(bits-1). get_neg_mask_value(arg) returns the correct
-  // -2^arg for arg >= 2, but +1 for arg <= 1 (the narrow wart), so the two
-  // narrow widths are special-cased; bits >= 3 (arg >= 2) delegates and stays
-  // exact even past 64 bits.
-  if (bits == 1) {
-    return "-1";
-  }
-  if (bits == 2) {
-    return "-2";
-  }
+  // signed min = -2^(bits-1); exact even past 64 bits.
   return std::string(Dlop::get_neg_mask_value(bits - 1)->to_pyrope());
 }
 
@@ -67,8 +54,18 @@ void Slang_context::emit_prim_type_int(const Lnast_nid& parent, int bits, bool i
 }
 
 std::string Slang_context::trunc_to(const std::string& v, int bits) {
+  // A value already proven to sit in [0, 2^bits-1] cannot lose a bit here, and
+  // LNAST is infinite-precision integer semantics — so the mask is a pure no-op
+  // node. Dropping it at creation keeps the double `x#[0..=31]#[0..=31]` (a
+  // sized read feeding a same-width assignment/concat lane) out of every
+  // downstream pass, not just out of the emitted Pyrope.
+  if (builder_.fits_unsigned(v, bits)) {
+    return v;
+  }
   if (bits <= 1) {
-    return builder_.create_bit_and_stmts(v, "1");
+    auto r = builder_.create_bit_and_stmts(v, "1");
+    builder_.note_unsigned_bits(r, 1);
+    return r;
   }
   return builder_.create_get_mask_stmts(v, mask_text(bits));
 }
@@ -80,19 +77,38 @@ std::string Slang_context::extract_field(const std::string& v, int64_t lo, int b
   // get_mask both selects and shifts down, but its single-bit form is the
   // -1/0 boolean; shift+trunc keeps the verilog 0/1 value for any width.
   if (bits == 1) {
-    return builder_.create_bit_and_stmts(builder_.create_sra_stmts(v, std::to_string(lo)), "1");
+    auto r = builder_.create_bit_and_stmts(builder_.create_sra_stmts(v, std::to_string(lo)), "1");
+    builder_.note_unsigned_bits(r, 1);
+    return r;
   }
-  return builder_.create_get_mask_stmts(v, Dlop::get_mask_value(static_cast<int>(lo) + bits - 1, static_cast<int>(lo))->to_pyrope());
+  return builder_.create_get_mask_stmts(v,
+                                        Dlop::get_mask_value(static_cast<int>(lo) + bits - 1, static_cast<int>(lo))->to_pyrope());
 }
 
 std::string Slang_context::materialize_conversion(const std::string& v, int from_bits, bool from_signed, int to_bits,
-                                                  bool to_signed) {
+                                                  bool to_signed, std::optional<int> effective_bits) {
   I(!v.empty());
   if (to_bits <= 0) {
     return v;
   }
 
   if (to_bits < from_bits) {
+    // Slang proves the value already fits in the destination width for the
+    // width-trunc linter. LNAST carries that mathematical integer directly, so
+    // an unsigned value (or any value staying signed) needs no mask when no bit
+    // can actually be dropped. A signed -> unsigned conversion still needs its
+    // two's-complement pattern materialized, even when the signed value's
+    // effective width is small.
+    if (effective_bits) {
+      const bool fits_same_sign = from_signed == to_signed && *effective_bits <= to_bits;
+      // An N-bit unsigned value needs fewer than N effective bits to fit the
+      // positive half of an N-bit signed destination. Equality can set the new
+      // sign bit and therefore needs the normal truncate+reinterpret path.
+      const bool fits_unsigned_to_signed = !from_signed && to_signed && *effective_bits < to_bits;
+      if (fits_same_sign || fits_unsigned_to_signed) {
+        return v;
+      }
+    }
     // Truncate: keep the low to_bits of the two's-complement pattern...
     auto masked = trunc_to(v, to_bits);
     if (!to_signed) {
@@ -102,25 +118,8 @@ std::string Slang_context::materialize_conversion(const std::string& v, int from
     return builder_.create_sext_stmts(masked, std::to_string(to_bits - 1));
   }
 
-  // A width-CHANGING conversion of a bare VARIABLE ref must materialize an
-  // identity op rather than pass the name through: a whole-var `wide = narrow`
-  // ref-copy aliases the SOURCE's declared range onto the target in the upass
-  // symbol table (an io output has no decl bake of its own), and a later
-  // in-range write (`wren = 8'hff` after `wren = 8'(en4_q)`) then
-  // false-errors against the narrow source's [0,15]. A `%N` temp or a literal
-  // carries no declared facts — pass those through unchanged (materializing
-  // them just pads solver-visible logic: the psigned multiplier LEC).
-  const bool ref_alias_risk = !v.empty() && v.front() != '%' && v.front() != '-'
-                              && (std::isdigit(static_cast<unsigned char>(v.front())) == 0);
-
   if (from_signed == to_signed) {
-    if (to_bits == from_bits || !ref_alias_risk) {
-      return v;  // widening (or same width) preserves the value in integer semantics
-    }
-    if (!from_signed) {
-      return trunc_to(v, from_bits);  // identity mask at the source width
-    }
-    return builder_.create_sext_stmts(trunc_to(v, from_bits), std::to_string(from_bits - 1));
+    return v;  // widening (or same width) preserves the value in integer semantics
   }
 
   if (!from_signed && to_signed) {
@@ -128,7 +127,7 @@ std::string Slang_context::materialize_conversion(const std::string& v, int from
     if (to_bits == from_bits) {
       return builder_.create_sext_stmts(v, std::to_string(to_bits - 1));
     }
-    return ref_alias_risk ? trunc_to(v, from_bits) : v;  // widening: identity mask when a bare ref
+    return v;  // widening: a non-negative integer is already a signed integer
   }
 
   // signed -> unsigned (to_bits >= from_bits here; the narrowing case is handled

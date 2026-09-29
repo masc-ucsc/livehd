@@ -1,0 +1,24 @@
+/*
+:name: type_bound_not_comptime
+:type: error
+:error: is not a compile-time value
+:help: literal, a .comptime const., or a generic parameter
+*/
+
+// 2f-type_bound — an integer type bound must be a compile-time value. Here the
+// width depends on a RUNTIME input, so it can never resolve.
+//
+// The `bits=` arm used to be a silent no-op whenever the bound did not fold:
+// `max` stayed empty, the declare got `prim_type_int(nil, 0)`, and the register
+// was sized by whatever value reached it. That made the common GENERIC spelling
+// (`unsigned(bits=N)` inside `mod m<N=8>`) mis-size with exit 0 -- see
+// ../equiv/register_width.prp, which pins the working half. The illegal half
+// has to report, and report HERE rather than three passes downstream: with no
+// declared width the narrowing store below could not lower and the user saw
+// "call to undefined function 'wrap'" instead.
+
+pub mod top(a:u8, s:bool) -> (y:u8@[]) {
+  mut r:unsigned(bits=if s { 5 } else { 4 }) = 0 // locate_error_here
+  wrap r = a
+  y = r
+}

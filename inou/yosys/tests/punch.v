@@ -22,7 +22,7 @@ module top_down1(output logic [2:0] out);
   logic [1:0] x_foo;
 
   always_comb begin
-    top.x_top = 4;
+    punch.x_top = 4;
     out = x_foo + 1; // 1 + 1
   end
 
@@ -31,7 +31,7 @@ endmodule
 module top_down2(output logic [2:0] out);
 
   always_comb begin
-    out = top.tdown1.x_foo + 2; // out = 3
+    out = punch.tdown1.x_foo + 2; // out = 3
   end
 
 endmodule

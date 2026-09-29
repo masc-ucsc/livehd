@@ -1,0 +1,7 @@
+/*
+:name: unknown_not_equal_cassert
+:type: error
+:error: cassert.*not.*known|cassert.*unknown|cassert.*fold
+*/
+const x = 0sb?
+cassert(x != x)

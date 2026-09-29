@@ -1,0 +1,23 @@
+// Native directed vectors for the Pyrope round trip of async_reset_wide_slices.sv
+// (the roundtrip_sim tier of tests/slang_compile.sh). Each `step` is one whole
+// reference `clk` cycle, so this checks VALUES only: the reset constant sets
+// bits above 63, so a 64-bit truncation fails here. That the reset stays
+// ASYNCHRONOUS is pinned by the fixture's :verilog_re:/:verilog_not_re: headers.
+const dut = import("lg:async_reset_wide_slices")
+
+test wide_slices.reset {
+  mut acc = dut
+  const rst_val = (0xfffffffff << 36) | 0x123456789
+  const first   = (3 << 36) | 4
+  const second  = (5 << 36) | 6
+  mut cycle:u32 = 0
+  tick 4 {
+    acc.rst = cycle == 1 or cycle == 2
+    acc.d   = if cycle < 2 { first } else { second }
+    step
+    assert((cycle == 0) implies (acc.q == first), "clocked arm")
+    assert((cycle == 1 or cycle == 2) implies (acc.q == rst_val), "reset lost bits past 63 or did not hold")
+    assert((cycle == 3) implies (acc.q == second), "clocked arm after release")
+    cycle += 1
+  }
+}

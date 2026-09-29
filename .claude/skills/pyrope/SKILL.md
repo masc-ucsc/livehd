@@ -24,7 +24,8 @@ generated code with `lhd` (last section).
     - a concrete value (`0`, `false`, `""`, `(x=1)`) — the normal case
     - `nil` — invalid / "no value yet"; *reading* it is an error; the default
       for tuples; `reg x = nil` declares a register with **no reset**;
-      `wire x = nil` forward-declares an as-yet-undriven net (see Wire below)
+      `const x = nil` / `wire x = nil` forward-declare an as-yet-unbound net
+      (see Wire below)
     - `0sb?` / `0ub?` / `0ub10??01` — unknown bits (Verilog `x`); a valid
       integer value that x-propagates (`0sb? + 1 == 0sb??`, `0sb? | 1 == 1`)
     - There is **no bare `?`**, **no `_` default**, and **no `0b` prefix**
@@ -55,7 +56,7 @@ generated code with `lhd` (last section).
 | `pipe[N]` | Fixed latency `N > 0`: every output lands exactly N cycles after its inputs; **never** a comb input→output path. A feedback `reg` is state (adds no latency); an unconditionally-written feedforward `reg` is a pipeline stage counted in N. A conditional write ⇒ state register. |
 | `pipe[A..=B]` / bare `pipe` | Latency range / fully flexible; the **caller** picks via `stage[N]`. `pipe` calls are only legal inside `mod`. |
 | `mod` | No constraints (Mealy, Moore, orchestrator). **Every output declares its landing cycle at the interface**: `-> (x:u8@[2], y:u8@[0])`. `@[0]` = comb feedthrough (legal in `mod`, forbidden in `pipe`); `@[]` = unconstrained opt-out; omitting `@[...]` is a compile error. |
-| `fluid` | Transactional valid/retry handshakes. (TBD: parses only, no lowering.) |
+| `fluid` | Transactional valid/stop handshakes. (TBD: parses only, no lowering.) |
 
 ```pyrope
 comb add(a:u8, b:u8) -> (r:u9) { r = a + b }
@@ -135,11 +136,15 @@ mut arr = [1, 2, 3]                    // [] = array: all entries same type
   `cassert(x does T)`; convert with constructor calls: `u8(x)`, `int(s)`,
   `string(n)`. Type-shape operands write the bare type (`x does u8`).
 * Enums: `enum State = (Idle, Run, Done)` — one-hot encoding by default; any
-  explicit value (or an `:int` type) switches to sequential. **Always compare
+  explicit value (or a `:signed` type) switches to sequential. **Always compare
   against names** (`st == State.Idle`), never raw integers. Casts:
-  `string(E.a)`, `E("a")`. Hierarchical enums are documented but do NOT
-  compile yet — use flat enums.
-* Ranges: `0..=7`, `0..<8`, `2..+3`, optional `step 2`; ascending only. Open
+  `string(E.a)`, `E("a")`, and `E.a#[..]` for the bits. Hierarchical enums
+  (`Animal.bird.eagle`) work. A named constant or expression seeds the
+  subsequent automatic ordinals: `const c=1; enum(a=c, b)` gives b=2.
+  `signed(E.a)` and `unsigned(E.a)` also expose the integer encoding.
+* Ranges: `0..=7`, `0..<8`, `2..+3`, optional `step 2`; ascending only.
+  `step` applies both in loops and to range values: `(0..<30 step 10)` is
+  `(0,10,20)`. A step must be a positive integer. Open
   ends in selectors (`a[1..]`); negative = distance from the end
   (`b#[1..=-2]`).
 
@@ -151,11 +156,20 @@ v#sext[0..=2]    // sign-extended slice
 v#|[..]  v#&[..]  v#^[..]  v#+[..]   // or/and/xor-reduce, popcount (lower to int 0/1)
 trans#[0] = v#[1]   // LHS bit assign; every dest bit driven exactly once
 const onehot = 1 << (1, 4, 3)        // == 0ub01_1010
+const z:u9 = (a, b, c)#[..]         // a:u4, b:u3, c:u2 — `a` lands in [3..0]
 ```
 
 `#[]` is bits, `[]` is tuple/array elements, `@[N]` is a cycle typecheck —
-never mix them. Bit concatenation = explicit per-range LHS assigns into a typed
-destination (no `{a,b}` form). Runtime bit indices (`a#[i]`) work.
+never mix them. Runtime bit indices (`a#[i]`) work.
+
+Pack an ordered tuple or array with `p#[..]`: entry 0 occupies the least
+significant declared window. `#sext`, reductions, and subranges work over the
+same packed word, including a variable holding a tuple or array. Each window
+comes from the lane's declared type, never its current value. Multi-field named
+bundles have no bit order; spell an ordered tuple of their fields explicitly.
+A destination declared for a packing must match the sum of the lane widths.
+Whole reads of a register array require `:[ordering="old"]` because the
+simulator has no same-cycle forwarding model for them.
 
 ## Statements
 
@@ -167,8 +181,10 @@ destination (no `{a,b}` form). Runtime bit indices (`a#[i]`) work.
   to a don't-care (unreachable). Add an explicit `else` only for a real
   catch-all value or a `cassert(false)`. A bare value means `==`. Arms: `== v`,
   `in (2,3)`, `case (a=1)`, `< 5`, `else`. If two arms can match the same
-  value, the lowered `__hotmux` select is non-one-hot and the output is
-  **X** — for priority/overlapping conditions use `if/elif/else`. The selector
+  value, two `__hotmux` controls are active at once, which breaks the cell's
+  one-hot-or-zero obligation: `pass.formal` reports it, and every backend
+  resolves it to the FIRST active arm — for priority/overlapping conditions use
+  `if/elif/else`. The selector
   can declare locals: `match const t = f(); t { ... }`.
 * There are **no `when`/`unless` trailing gates** (removed from the
   language). All gating — comptime or runtime — uses an `if` block:
@@ -202,10 +218,16 @@ const old = past[2](counter)  // pipelined: inserts 2 flops, shifts landing cycl
 * No `@[-1]`/`@[1]` register indexing, no `.[defer]` — use a `wire` (below)
   for next-state reads and backward edges.
 * Register attributes at declaration:
-  `reg c:u8:[clock_pin=ref clk2, reset_pin=ref rst2, sync=false, posclk=false, retime] = 3`.
+  `reg c:u8:[clock_pin=ref clk2, reset_pin=ref rst2, async=true, posclk=false] = 3`.
   `_pin` attributes connect **wires** → they need `ref` (a comptime constant
-  like `reset_pin=false` doesn't). `sync` defaults true (async reset =
-  `sync=false`); `retime` lets synthesis move/merge the flop.
+  like `reset_pin=false` doesn't). `async` defaults false (async reset =
+  `async=true`).
+* `reg x:T:[latch=true]` declares a level-sensitive latch — the grammar has no
+  `latch` keyword, and the marker is consumed at declaration (not readable back
+  as `.[latch]`). `enable_high` is an alias of `posclk` accepted on ANY
+  register: on a flop it is the clock edge, on a latch it is the ENABLE
+  polarity. An active-low latch enable (`enable_high=false`/`posclk=false`) is
+  REFUSED — write the inverted condition instead (`if !g { ... }`).
 * Multi-cycle reset code: assign a lambda **by name** (no parens):
   `reg arr:[1024]Tag = my_reset_mod`.
 
@@ -226,10 +248,18 @@ const also = nx + 1    // same-cycle consumer reads the same net
 
 * **Exactly one driver.** A mux (an `if`/`match` *expression*, or mutually-
   exclusive conditional writes) counts as one driver. A second unconditional
-  assignment, a never-driven net, or a partially-driven net is a compile error.
+  assignment or a never-driven net is a compile error. The driver may be
+  CONDITIONAL and need not cover every path: a `wire` is defined by its one
+  assignment, so writing it inside an `if` with no `else` means the same as
+  writing it unconditionally (an un-taken path is a don't-care, not an `x`).
 * `wire` removes *textual* ordering only, **not cyclic dataflow**: a net that
   combinationally feeds itself is a real comb loop, rejected (SCC check). A
   ring is legal only when a `reg` breaks it.
+* `const x [:T] = nil` is the same forward declaration WITHOUT the ordering
+  exemption: bound exactly once (a rebind is an error), that bind defines the
+  value on every path exactly as a `wire`'s does, but it must precede every
+  read. Prefer it when the write already comes first — `wire` is for the case a
+  read genuinely comes before its driver.
 
 ## Pipelining inside `mod`
 
@@ -325,7 +355,7 @@ generated") — write `assume` for a precondition, `assert` for a postcondition.
 use `assume` (a proven assume is available to the optimizer as a don't-care).
 
 Prints: `puts("a={a} b={}", b)` (interpolation, queued to end of cycle, legal
-in `comb`), `print`, `format`. `cputs("msg")` prints at elaboration — file
+in `comb`), `print`. `cputs("msg")` prints at elaboration — file
 top-scope only for now (inside a lambda it is an undefined call).
 
 ## Tests (`lhd sim`)
@@ -415,9 +445,10 @@ formal cnt.bounded {
 * A file's top scope is setup code, run once. Only `pub` top-scope lambdas,
   types, and constants can be imported: `const lib = import("file")` /
   `import("file.pub_name")` / `import("proj/file")`. No glob patterns.
-  `pub mut` and `pub reg` are compile errors; cross-hierarchy register access
-  (`regref`) is TBD — verification code reaches registers through the
-  ordinary instance hierarchy instead.
+  `pub mut`, `pub reg` and `pub wire` are compile errors; the SYNTHESIZABLE
+  cross-hierarchy register attach (`regref` by string path, zero-or-many
+  matches) is TBD — design code reaches registers through the ordinary
+  instance hierarchy instead.
 * Pin the generated netlist/Verilog module name with the `lg` attribute:
   `pub comb my_top::[lg="chip_top"](...)` — pub-only, comptime string; the
   `import` key stays `my_top`; the artifact becomes importable as
@@ -478,7 +509,7 @@ pipe[1] dpram(we:bool, waddr:u8, raddr:u8, wdata:u32) -> (rdata:u32) {
 | `always @(posedge clk)` / `@(*)` | implicit — `reg` vs `mut` |
 | `case (x) ... endcase` | `match x { == v {...} else {...} }` |
 | `x[6:3]` | `x#[3..=6]` |
-| `{a, b}` concat | per-range LHS bit assigns into a typed dest |
+| `{a, b}` concat | `(b, a)#[..]` — entry 0 lands in the LOW bits, so the argument order REVERSES |
 | `4'b10x?` / `x` value | `0ub10??` / `0sb?` |
 | one-hot mux / tri-state bus | `unique if` (lowers to `__hotmux`) |
 | Verilog reg memory read semantics | `reg mem:[N]T:[ordering="old"]` |
@@ -512,7 +543,7 @@ pipe[1] dpram(we:bool, waddr:u8, raddr:u8, wdata:u32) -> (rdata:u32) {
 12. The comptime `[...]` slot is a syntax error — comptime parameters are
     constant generics: `comb g<N=1>(x)`, called `g<N=3>(x=a)`.
 13. `_pin` register attributes need `ref` (`clock_pin=ref clk`); reset value
-    is the `= expr` initializer; `sync=false` for async reset.
+    is the `= expr` initializer; `async=true` for async reset.
 14. Enum comparisons use names (`State.Idle`), never the underlying integer.
 15. `if c { assert(x) }` checks `assert(x)` UNCONDITIONALLY — write
     `assert(c implies x)`.
@@ -527,7 +558,7 @@ chapter is the authoritative list; status below re-verified against a fresh
 build
 2026-07-31). Do not generate these unless explicitly asked:
 
-* `fluid` lambdas / valid-retry handshakes (parses only).
+* `fluid` lambdas / valid-stop handshakes (parses only).
 * The verification **temporal library** — `past(x, n)`, `rose(x [, w])`,
   `fell`, `stable`, `changed`, `eventually(x, w)`, `always(x, w)`. Cycle
   arguments are **positional** (there is no `f[N](x)` bracket form in this
@@ -535,19 +566,33 @@ build
   `.[rising]`/`.[falling]`/`.[changed]` attributes. `lhd formal verify`
   rejects these with an explicit not-implemented diagnostic. (The *pipelining*
   `past[N](x)` DOES work — design body only.)
-* Testbench extras: `force`/`release`, string `sigref`, `cpp("model")`
-  external models, unbounded `tick`; `regref`; `assert.[failed]`.
+* Testbench extras: `force`/`release`, `cpp("model")` external models,
+  unbounded `tick`; the SYNTHESIZABLE string-path `regref`; `assert.[failed]`.
+  The `test`-block `regref` (dotted or single-cell string) WORKS and is the
+  only way to drive a cell; reads are bare dotted `dut.x` at any depth.
+  `sigref` was REMOVED 2026-09-06 — it was exactly a bare dotted read.
+  Nested registers can be driven with `regref(dut.child.count)` or
+  `regref("dut/child.count")`; child instance names follow their source bindings.
 * `cover`/`covercase`; in-language `lec()`; `.[rand]`/`.[crand]` (rejected in
   test blocks and design bodies; survive only where they constant-fold).
 * `macro=` memory-compiler binding; `import("prp")` stdlib.
 * **Registered-output interface form** `mod f(...) -> (reg count:u8@[0])` →
   `reg-output-cycle` error. Use a body register (`counter1` pattern above).
-* **Hierarchical enums** — nested member names error; use a flat enum.
+* `format(...)`, operator-overload hooks (`eq`/`lt`/`to_string`/`to_bool`),
+  strings as char tuples, `:Param_type(string)`, `u(W)`, recursive-enum ADTs
+  and the tuple-LHS `in` subset test were all REMOVED 2026-09-06 — see
+  `fixes_pyrope.md`. (Nested/hierarchical enums such as `Animal.bird.eagle`
+  DO work; the old "use a flat enum" note here was wrong.)
 
-Note: the `15-tbd` chapter still lists generic constant/lambda bindings, generic
-defaults, named `<T=…>` bindings, body references of a generic, and input
-default values as task `3g` — all of these **already work** in the current
-build (verified 2026-07-31); prefer trusting `lhd` over the TBD table there.
+Note: generic constant/lambda bindings, generic defaults, named `<T=…>`
+bindings, body references of a generic, and input default values **all work**
+(re-verified 2026-09-06 — every tracker compiles green); the stale `15-tbd`
+rows claiming otherwise were removed. Prefer trusting `lhd` over any TBD table.
+
+Checking a comptime-only `.prp` (no `pub mod`/`pub comb` hardware entity) needs
+`--set upass.tolg=false --set upass.verifier=true`. Bare `lhd compile` forces
+lowering and invents `tolg-error: unresolved reference '%self_0'` /
+`tuple-store-unsupported` on programs that contain no hardware.
 
 ## Checking code with `lhd`
 
@@ -573,7 +618,8 @@ is one JSON result object whose `error.class` says why it failed
 lhd compile foo.prp                   # parse + lower + diagnostics (quick check)
 lhd compile foo.prp --top NAME --emit verilog:foo.v --workdir tmp   # netlist
 lhd compile foo.prp --emit-dir ln:foo_lns/     # emit IR; ln:/lg: dirs are also
-lhd compile ln:foo_lns/ --emit net.v           #   valid INPUTS (compile/sim/lec)
+lhd compile ln:foo_lns/ --emit net.v           #   valid INPUTS (compile/sim/lec/synth)
+lhd synth foo.prp --top foo --workdir W --stats  # compile -> color synth -> abc -> opentimer
 lhd sim foo.prp                       # run every test block in the file
 lhd sim foo.prp add.basic --arg n=4   # one test (dotted selector), runtime args
 lhd formal verify foo.prp props.verify.prp --top foo --set formal.bound=12
@@ -583,6 +629,18 @@ lhd scan foo.prp                      # list the file's imports
 lhd tool cat|grep|diff|tree ...       # inspect ln:/lg: artifacts
 ```
 
+* **`lhd synth`** is the one-shot synthesis flow (compile -> `pass color synth`
+  -> `pass abc` tech-map -> `pass opentimer` STA) over one in-memory design.
+  `--top` takes the bare entity; one Liberty (`--set synth.liberty=…`, default
+  `$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib`) feeds abc and
+  opentimer. With `--workdir W` the compiled design, mapped netlist, `qor.json`
+  and `timing.json` land in `W/synth/` and a re-run reuses everything unchanged
+  (`--set lhd.incremental=false` = honest cold run, same netlist). Outputs:
+  `--emit-dir lg:` / `--emit verilog:` (mapped netlist), `--emit-dir report:`
+  (the two JSON reports); `--stats` adds per-color rows; pass knobs ride their
+  pass namespace (`--set abc.adder=cla`, `--set color.synth.max_gate=50000`). The
+  coloring is always `synth` — use the manual `lhd pass color <alg>` + `lhd pass
+  abc` steps for anything else.
 * **`lhd sim`** builds a C++ simulation of the `test` blocks. It needs the sim
   runtime headers — if a copied binary reports "could not locate the sim
   runtime headers (slop.hpp)", run the `bazel-bin/lhd/lhd` binary from a

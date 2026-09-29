@@ -1,0 +1,24 @@
+/*
+:name: memory_integer_initializers
+:type: compile
+*/
+
+// Memory constants may be wider than int64 and may contain unknown bits.
+// Exercise scalar broadcast, tuple initialization, and conditional whole-array
+// stores through real memories with dynamic addresses.
+pub mod arrays(clear:bool, write:bool, idx:u2, data:u80) -> (wide:u80@[0], unknown:u8@[0], tuple_value:u80@[0]) {
+  reg words:[4]u80 = 0x123456789abcdef01234
+  reg undef:[4]u8 = 0ub?
+  reg entries:[4]u80 = (0x123456789abcdef01234, 0, 0ub?, 0xffffffffffffffffffff)
+  if clear {
+    words = 0
+    undef = 0ub?
+  } elif write {
+    words[idx] = data
+    undef[idx] = 0
+    entries[idx] = data
+  }
+  wide = words[idx]
+  unknown = undef[idx]
+  tuple_value = entries[idx]
+}

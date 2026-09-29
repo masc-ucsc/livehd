@@ -10,8 +10,14 @@
 #include <stdexcept>
 
 #include "hhds/source_excerpt.hpp"
+#include "json_util.hpp"
 
 namespace livehd::diag {
+
+namespace {
+thread_local std::optional<Diagnostic>   tls_staged;
+thread_local const hhds::Source_locator* tls_locator = nullptr;
+}  // namespace
 
 std::string_view to_string(Severity s) {
   switch (s) {
@@ -25,31 +31,11 @@ std::string_view to_string(Severity s) {
 
 namespace {
 
-void json_escape(std::string& out, std::string_view s) {
-  for (char c : s) {
-    switch (c) {
-      case '"' : out += "\\\""; break;
-      case '\\': out += "\\\\"; break;
-      case '\n': out += "\\n"; break;
-      case '\r': out += "\\r"; break;
-      case '\t': out += "\\t"; break;
-      default:
-        if (static_cast<unsigned char>(c) < 0x20) {
-          char buf[8];
-          std::snprintf(buf, sizeof(buf), "\\u%04x", c);
-          out += buf;
-        } else {
-          out += c;
-        }
-    }
-  }
-}
-
 void append_kv_str(std::string& out, std::string_view key, std::string_view val) {
   out += '"';
   out += key;
   out += "\":\"";
-  json_escape(out, val);
+  json_util::escape_append(out, val);
   out += '"';
 }
 
@@ -152,7 +138,7 @@ std::string to_jsonl(const Diagnostic& d, uint64_t seq) {
         out += ',';
       }
       out += '"';
-      json_escape(out, d.see[i]);
+      json_util::escape_append(out, d.see[i]);
       out += '"';
     }
     out += ']';
@@ -262,9 +248,9 @@ std::string to_text(const Diagnostic& d, const hhds::Source_locator* sl) {
   out += d.message;
   // Compact human suffix for a progress/info record: ` [verdict=… engine=… …ms]`.
   if (!d.verdict.empty() || !d.engine.empty() || d.duration_ms >= 0) {
-    out += " [";
-    bool first = true;
-    auto sep   = [&] {
+    out        += " [";
+    bool first  = true;
+    auto sep    = [&] {
       if (!first) {
         out += ' ';
       }
@@ -380,6 +366,7 @@ void Sink::write_json(const std::string& line) {
 }
 
 void Sink::emit(Diagnostic d) {
+  const std::lock_guard lock(mutex_);
   // The category vocabulary is pinned (diag.hpp kCategories); a typo here
   // would silently fragment the machine-readable stream, so fail loudly in
   // debug builds at the first occurrence.
@@ -405,7 +392,7 @@ void Sink::emit(Diagnostic d) {
   }
   if (human_stderr_) {
     if (!stderr_jsonl_) {
-      std::fputs(to_text(d, locator_).c_str(), stderr);
+      std::fputs(to_text(d, tls_locator).c_str(), stderr);
       std::fputc('\n', stderr);
     } else if (json_out_ != Json::stderr_) {  // already written above when the JSONL channel targets stderr
       std::fputs(to_jsonl(d, seq_).c_str(), stderr);
@@ -414,6 +401,39 @@ void Sink::emit(Diagnostic d) {
   }
   ++seq_;
   records_.push_back(std::move(d));
+}
+
+void Sink::progress(std::string_view pass, std::string_view message,
+                    std::initializer_list<std::pair<std::string_view, std::string>> attrs) {
+  const std::lock_guard lock(mutex_);
+  init_output();
+  if (!human_stderr_) {
+    return;
+  }
+  const uint64_t progress_seq = progress_seq_++;
+  if (stderr_jsonl_) {
+    std::string out{"{\"schema_version\":1,\"kind\":\"progress\","};
+    append_kv_str(out, "pass", pass);
+    out += ",\"seq\":";
+    out += std::to_string(progress_seq);
+    out += ',';
+    append_kv_str(out, "message", message);
+    out        += ",\"attrs\":{";
+    bool first  = true;
+    for (const auto& [key, value] : attrs) {
+      if (!first) {
+        out += ',';
+      }
+      first = false;
+      append_kv_str(out, key, value);
+    }
+    out += "}}";
+    std::fputs(out.c_str(), stderr);
+  } else {
+    std::fwrite(message.data(), 1, message.size(), stderr);
+  }
+  std::fputc('\n', stderr);
+  std::fflush(stderr);
 }
 
 void Sink::fatal(Diagnostic d) {
@@ -434,16 +454,18 @@ size_t Sink::count(Severity s) const {
 }
 
 void Sink::clear() {
+  const std::lock_guard lock(mutex_);
   records_.clear();
   seen_.clear();
   step_.clear();
   seq_                  = 0;
+  progress_seq_         = 0;
   error_count_          = 0;
   deferred_error_count_ = 0;
   warn_count_           = 0;
   note_count_           = 0;
   info_count_           = 0;
-  staged_.reset();
+  tls_staged.reset();
   if (json_fp_ != nullptr) {
     std::fclose(json_fp_);
     json_fp_ = nullptr;
@@ -451,11 +473,13 @@ void Sink::clear() {
 }
 
 void Sink::set_step(std::string_view step) {
+  const std::lock_guard lock(mutex_);
   step_ = step;
   seen_.clear();
 }
 
 void Sink::set_jsonl_path(std::string_view path) {
+  const std::lock_guard lock(mutex_);
   configured_ = true;
   if (json_fp_ != nullptr) {
     std::fclose(json_fp_);
@@ -472,18 +496,22 @@ void Sink::set_jsonl_path(std::string_view path) {
 }
 
 void Sink::set_human_stderr(bool on) {
+  const std::lock_guard lock(mutex_);
   configured_   = true;
   human_stderr_ = on;
 }
 
-void Sink::set_stderr_jsonl(bool on) { stderr_jsonl_ = on; }
+void Sink::set_stderr_jsonl(bool on) {
+  const std::lock_guard lock(mutex_);
+  stderr_jsonl_ = on;
+}
 
-void Sink::stage(Diagnostic d) { staged_ = std::move(d); }
+void Sink::stage(Diagnostic d) { tls_staged = std::move(d); }
 
 void Sink::flush(Severity sev, std::string_view text) {
-  if (staged_) {
-    emit(std::move(*staged_));
-    staged_.reset();
+  if (tls_staged) {
+    emit(std::move(*tls_staged));
+    tls_staged.reset();
   } else {
     emit(Diagnostic{.severity = sev,
                     .code     = (sev == Severity::warning ? "warning" : "error"),
@@ -492,6 +520,10 @@ void Sink::flush(Severity sev, std::string_view text) {
                     .message  = std::string(text)});
   }
 }
+
+void Sink::set_locator(const hhds::Source_locator* sl) noexcept { tls_locator = sl; }
+
+const hhds::Source_locator* Sink::locator() const noexcept { return tls_locator; }
 
 Sink& sink() {
   static Sink s;

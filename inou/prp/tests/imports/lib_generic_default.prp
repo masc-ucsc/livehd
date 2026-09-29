@@ -1,0 +1,9 @@
+// Fixture for generic_default_import.prp: a generic `mod` whose EVERY generic
+// carries a declaration default (file name == lambda name, the shape the
+// prp_writer emits for a parameterized Verilog module, e.g. picorv32). Such a
+// unit is elaborate-able with no call site, so with no `--top` the kernel picks
+// it as the default-top candidate — while the importer's defaulted call site
+// identity-specializes it under the same name.
+pub mod lib_generic_default<W=8>(a:u8) -> (y:u8@[]) {
+  y = (a + W)#[0..=7]
+}

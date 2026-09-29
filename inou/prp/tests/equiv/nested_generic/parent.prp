@@ -1,0 +1,10 @@
+// Middle unit of ../nested_generic.prp's import chain. `top` imports `parent`,
+// `parent` imports `leaf`, and parent's own generic default is forwarded into
+// leaf's generic -- so the specialization has to resolve across TWO import
+// hops. With the default M=0 the mask folds the result to a constant zero,
+// which is what the golden asserts.
+const leaf = import("leaf.leaf")
+
+pub mod parent<N=0>(a:u8) -> (y:u8@[0]) {
+  y = leaf<M=N>(a=a)
+}

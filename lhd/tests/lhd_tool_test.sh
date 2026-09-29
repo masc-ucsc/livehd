@@ -20,7 +20,7 @@ fail() {
 }
 
 # Build an LGraph library, plus a pristine copy for the diff.
-"$LHD" compile verilog "$V0" --top "$TOP" --reader yosys-verilog --recipe O1 \
+"$LHD" compile verilog "$V0" --top "$TOP" \
   --emit-dir lg:"$W/lg" --workdir "$W/w" -q --result-json "$W/r.json" 2>/dev/null \
   || fail "compile -> lg failed: $(cat "$W/r.json")"
 cp -r "$W/lg" "$W/lg2"
@@ -51,9 +51,11 @@ grep -q "^lg/$TOP " "$W/g0.out" || fail "grep lines must be prefixed lib/module:
 "$LHD" tool grep lg:"$W/lg" --top "$TOP" -q >"$W/ge.json" 2>/dev/null
 grep -q '"class":"usage"' "$W/ge.json" || fail "grep without a filter must be a usage error: $(cat "$W/ge.json")"
 
-# 5. numeric filter: bits:>8 over pins finds the 9-bit signals.
-P grep 'bits:>8' --target pin lg:"$W/lg" --top "$TOP" >"$W/gb.out" || fail "grep bits:>8 nonzero"
-grep -q 'bits=9' "$W/gb.out" || fail "grep bits:>8 must surface bits=9 pins: $(head -1 "$W/gb.out")"
+# 5. numeric filter: bits:>7 over pins finds the fixture's real 8-bit
+# signals. Do not rely on a redundant unsigned-widening wrapper to manufacture
+# an otherwise unused 9-bit pin.
+P grep 'bits:>7' --target pin lg:"$W/lg" --top "$TOP" >"$W/gb.out" || fail "grep bits:>7 nonzero"
+grep -q 'bits=8' "$W/gb.out" || fail "grep bits:>7 must surface bits=8 pins: $(head -1 "$W/gb.out")"
 
 # 5b. '=' is equivalent to ':' as a separator (Pyrope reads ':' as a type, so
 #     '=' is the preferred filter spelling). color=nil must equal color:nil.
@@ -61,9 +63,9 @@ P grep color=nil lg:"$W/lg" --top "$TOP" --target node >"$W/geq.out" || fail "gr
 [ "$(wc -l <"$W/geq.out")" -eq "$n0" ] \
   || fail "grep color=nil must equal grep color:nil ($n0 vs $(wc -l <"$W/geq.out"))"
 
-# 5c. a relational op may lead directly: bits>8 must match the same as bits:>8.
-P grep 'bits>8' --target pin lg:"$W/lg" --top "$TOP" >"$W/gbd.out" || fail "grep bits>8 nonzero"
-cmp -s <(sort "$W/gb.out") <(sort "$W/gbd.out") || fail "bits>8 must match bits:>8"
+# 5c. a relational op may lead directly: bits>7 must match the same as bits:>7.
+P grep 'bits>7' --target pin lg:"$W/lg" --top "$TOP" >"$W/gbd.out" || fail "grep bits>7 nonzero"
+cmp -s <(sort "$W/gb.out") <(sort "$W/gbd.out") || fail "bits>7 must match bits:>7"
 
 # 5d. a bare term (no field) matches anywhere it appears: grepping a node kind
 #     finds those cells the way `cat` shows them (the get_mask scenario).
@@ -95,10 +97,10 @@ P tree lg:"$W/lg" --top "$TOP" >"$W/tree.out" || fail "tool tree nonzero"
 grep -qE "^$TOP  \[[0-9]+ nodes\]" "$W/tree.out" || fail "tree must print the top with a node count: $(cat "$W/tree.out")"
 
 # 8b. tree --target kind:register|memory: list the stateful cells that ride the
-#     instance hierarchy. The yosys-verilog path flattens, so this uses a
+#     instance hierarchy. Use an explicit hierarchy fixture rather than a
 #     hierarchical Pyrope design — `regs` (flops) and `ram` (a memory) each
 #     instanced under the top.
-"$LHD" compile lhd/tests/tree_hier.prp --top top --recipe O1 \
+"$LHD" compile lhd/tests/tree_hier.prp --top top \
   --emit-dir lg:"$W/hlg" --workdir "$W/hw" -q --result-json "$W/hr.json" 2>/dev/null \
   || fail "compile tree_hier.prp -> lg failed: $(cat "$W/hr.json")"
 HTOP=tree_hier.top

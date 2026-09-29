@@ -1,0 +1,44 @@
+/*
+:name: constant_lane_ring_through_sub
+:type: simulation
+*/
+
+// At port grain this is a loop: pick.o depends on bus, while bus depends on
+// pick.o. At bit grain it is an acyclic constant path: pick.o reads only bus[2],
+// which is tied to one. The occurrence scheduler must bind that constant lane
+// directly instead of retaining the assembled bus as its producer.
+mod pick::[timecheck=false](bus:u3) -> (o:u1@[]) {
+  o = bus#[2]
+}
+
+pub mod constant_lane_ring::[timecheck=false](d:u8) -> (o:u1@[], ctl:u8@[]) {
+  wire bus:u3 = nil
+  mut selected = pick(bus=bus)
+  bus#[0] = selected
+  bus#[1] = 0
+  bus#[2] = 1
+  o = selected
+
+  reg value:u8 = 0
+  value = d
+  ctl = value
+}
+
+test constant_lane_ring.constant_slice_breaks_false_port_cycle {
+  mut acc = constant_lane_ring
+  mut bad_o = 0
+  mut bad_ctl = 0
+  tick 6 {
+    mut dv:u8 = clock + 20
+    acc.d = dv
+    step
+    if acc.o != 1 {
+      bad_o = bad_o + 1
+    }
+    if acc.ctl != dv {
+      bad_ctl = bad_ctl + 1
+    }
+  }
+  assert(bad_o == 0, "the selected constant lane stays one")
+  assert(bad_ctl == 0, "the control flop advances every period")
+}

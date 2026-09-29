@@ -82,8 +82,8 @@ struct CallInfo {
   return N::is_bit_and(t) || N::is_bit_or(t) || N::is_bit_not(t) || N::is_bit_xor(t) || N::is_red_or(t) || N::is_red_and(t)
          || N::is_red_xor(t) || N::is_popcount(t) || N::is_log_and(t) || N::is_log_or(t) || N::is_log_not(t) || N::is_plus(t)
          || N::is_minus(t) || N::is_mult(t) || N::is_div(t) || N::is_mod(t) || N::is_shl(t) || N::is_sra(t) || N::is_sext(t)
-         || N::is_set_mask(t) || N::is_get_mask(t) || N::is_ne(t) || N::is_eq(t) || N::is_lt(t) || N::is_le(t) || N::is_gt(t)
-         || N::is_ge(t);
+         || N::is_set_mask(t) || N::is_get_mask(t) || N::is_concat(t) || N::is_ne(t) || N::is_eq(t) || N::is_lt(t) || N::is_le(t)
+         || N::is_gt(t) || N::is_ge(t);
 }
 
 class Discharger {
@@ -140,7 +140,14 @@ private:
         do_timecheck(c);
       } else if (is_meet_op(t)) {
         do_meet_op(c);
-      } else if (N::is_if_like(t) || N::is_while(t) || N::is_for(t) || N::is_tick(t)) {
+      } else if (N::is_if_like(t) || N::is_while(t) || N::is_for(t) || N::is_rolled_for(t) || N::is_tick(t)) {
+        // `rolled_for` belongs here, not in the generic else: it is a `for` that
+        // uPass kept compact, so it writes every carry/final in its source
+        // body and its lowering payload calls the lifted module. The generic
+        // branch forgets only the first ref child — the loop INDEX — leaving the
+        // carries with their PRE-loop cycle, so a landing check like `acc@[2]`
+        // would be validated against the wrong cycle (the unrolled build of the
+        // same source gets it right).
         // Branch-written values need the LG checker's classification; mark
         // every name written inside as unknown. Checks inside stay for LG.
         forget_written(c);

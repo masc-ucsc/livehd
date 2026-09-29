@@ -64,7 +64,7 @@ run() {  # $1=label ; $2..=lhd args ; sets RC/OUT
 # 1) auto on the equal COMBINATIONAL pair -> PROVEN. No state cell in either side,
 #    so the combinational fast-path fires: bmc is skipped and a single ind query
 #    proves it. exit 0.
-run eq --ref "$WORK/eq_ref.v" --impl "$WORK/eq_impl.v" --set formal.engine=auto
+run eq --ref "$WORK/eq_ref.v" --impl "$WORK/eq_impl.v"
 if [ "$RC" -ne 0 ]; then echo "FAIL: auto equal rc=$RC (want 0)"; fail=1
 elif ! echo "$OUT" | grep -q "PROVEN equivalent"; then echo "FAIL: auto equal: not PROVEN"; fail=1
 elif ! echo "$OUT" | grep -q "combinational.*bmc skipped"; then echo "FAIL: auto equal: combinational fast-path did not fire"; fail=1
@@ -73,7 +73,7 @@ else echo "ok: auto equal -> combinational single-ind Proven (PASS, bmc skipped)
 # 2) auto on a real COMBINATIONAL bug -> REFUTED, exit non-zero, with a witness.
 #    Stateless, so the combinational fast-path trusts ind's single-step CEX as a
 #    genuine reachable counterexample (bmc skipped) — no false-refute risk here.
-run bug --ref "$WORK/eq_ref.v" --impl "$WORK/bug_impl.v" --set formal.engine=auto
+run bug --ref "$WORK/eq_ref.v" --impl "$WORK/bug_impl.v"
 if [ "$RC" -eq 0 ]; then echo "FAIL: auto bug rc=0 (want non-zero)"; fail=1
 elif ! echo "$OUT" | grep -q "REFUTED"; then echo "FAIL: auto bug: not REFUTED"; fail=1
 elif ! echo "$OUT" | grep -q "combinational.*bmc skipped"; then echo "FAIL: auto bug: combinational fast-path did not fire"; fail=1
@@ -88,7 +88,7 @@ else echo "ok: ind-only unreachable -> REFUTED (the false refute auto must not t
 #     finds no REACHABLE CEX up to the bound, so under the bounded-Proven policy
 #     auto reports a BOUNDED PASS (exit 0), never a refute (the headline property:
 #     an unreachable single-step ind-Refuted is never trusted as a hard failure).
-run ur_auto --ref "$WORK/ur_ref.v" --impl "$WORK/ur_impl.v" --set formal.engine=auto
+run ur_auto --ref "$WORK/ur_ref.v" --impl "$WORK/ur_impl.v"
 if [ "$RC" -ne 0 ]; then echo "FAIL: auto unreachable rc=$RC (want 0 — ind-Refuted must not hard-fail)"; fail=1
 elif echo "$OUT" | grep -q "REFUTED"; then echo "FAIL: auto unreachable reported REFUTED (must not trust the ind CEX)"; fail=1
 elif ! echo "$OUT" | grep -qi "bounded-Proven\|PROVEN equivalent"; then echo "FAIL: auto unreachable: expected a bounded PASS"; fail=1

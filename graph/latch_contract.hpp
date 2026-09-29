@@ -3,10 +3,14 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "absl/container/node_hash_map.h"
 #include "hhds/graph.hpp"
 #include "node_util.hpp"
 
@@ -29,8 +33,8 @@ namespace livehd::latch_contract {
 //   transparent-HIGH latch (enable active high) -> (enable, FALL)
 //   transparent-LOW  latch (enable active low)  -> (enable, RISE)
 //
-// For a latch the "net" is the ENABLE net — a latch's gate IS its enable
-// (user ruling 2026-07-20); there is no separate clock identity.
+// For a latch the "net" is the ENABLE net — a latch's gate IS its enable;
+// there is no separate clock identity.
 //
 // `net` is the ROOT driver the enable/clock cone resolves to, walked back
 // through the identity and boolean-shaping nodes tolg inserts, so two latches
@@ -50,14 +54,14 @@ enum class Net_role : uint8_t {
 };
 
 struct Commit_class {
-  hhds::Pin_class net;             // root net; invalid iff `implicit_clock`
-  bool            rising = false;  // true = commits on the net's RISE
-  Net_role        role   = Net_role::Data;
+  hhds::Pin_class net;                     // root net; invalid iff `implicit_clock`
+  bool            rising         = false;  // true = commits on the net's RISE
+  Net_role        role           = Net_role::Data;
   // A `reg x = 0` with no `clock_pin` driver commits on the MODULE's implicit
   // clock. That is a real commit class, not an unresolvable cone — returning
   // nullopt for it (the pre-M8 behavior) hid the single most common state
   // element in the tree from every consumer of this analysis.
-  bool implicit_clock = false;
+  bool            implicit_clock = false;
 
   // Stable identity of the committing (net, edge) pair, for grouping elements
   // into slots. Derived STRUCTURALLY — never from a nid or traversal order —
@@ -84,9 +88,10 @@ public:
   // the formal phase schedule needs: the leaves-first driver proves a def with
   // its clock ports unbound, and minion's prim_rf_*_preview family declares two
   // clock ports that every instantiation site ties to ONE net.
-  explicit Design_clocks(hhds::Graph* g, bool hier = false);
+  explicit Design_clocks(hhds::Graph* g, bool hier = false, const ankerl::unordered_dense::set<hhds::Gid>* opaque = nullptr);
 
   [[nodiscard]] bool   is_clock(const hhds::Pin_class& root) const;
+  [[nodiscard]] bool   is_clock(const hhds::Occurrence_pin& root) const;
   [[nodiscard]] size_t n_clock_inputs() const { return input_names_.size(); }
   [[nodiscard]] bool   has_implicit_clock() const { return implicit_clock_; }
 
@@ -95,9 +100,22 @@ public:
   [[nodiscard]] static bool name_looks_like_clock(std::string_view name);
 
 private:
-  absl::flat_hash_set<hhds::Class_index> roots_;
-  absl::flat_hash_set<std::string>       input_names_;
-  bool                                   implicit_clock_ = false;
+  // A clock root, keyed by (owning body gid, class index). hhds::Class_index is
+  // unique only INSIDE one graph body, and the hier ctor fills this registry
+  // from EVERY body in the instance tree: with a bare Class_index key, an
+  // ordinary data net in a child whose pin index happens to equal a clock root
+  // recorded in another module answers `is_clock` — which picks the ENABLE of an
+  // `clk & en` ICG as the clock operand and schedules the wrong edges.
+  using Root_key = std::pair<hhds::Gid, uint64_t>;
+  template <typename Pin>
+  [[nodiscard]] static Root_key root_key(const Pin& p) {
+    auto* g = p.get_graph();
+    return {g == nullptr ? hhds::Gid_invalid : g->get_gid(), static_cast<uint64_t>(p.get_class_index().value)};
+  }
+
+  absl::flat_hash_set<Root_key>    roots_;
+  absl::flat_hash_set<std::string> input_names_;
+  bool                             implicit_clock_ = false;
 };
 
 // Root of a CONTROL cone (a `clock_pin` driver, or a latch's `enable`) plus the
@@ -117,15 +135,21 @@ struct Control_root {
   hhds::Pin_class net;
   bool            inverted = false;
 };
+struct Occurrence_control_root {
+  hhds::Occurrence_pin net;
+  bool                 inverted = false;
+};
 // `stop_at_clock_cell` leaves a `Clock_cell` as the root instead of
 // canonicalizing through it to the reference clock -- what a caller that must
 // visit every cell of a GATE CHAIN needs (each cell carries its own enable).
-[[nodiscard]] Control_root control_root(hhds::Pin_class p, bool stop_at_clock_cell = false);
+[[nodiscard]] Control_root            control_root(hhds::Pin_class p, bool stop_at_clock_cell = false);
+[[nodiscard]] Occurrence_control_root control_root(hhds::Occurrence_pin p, bool stop_at_clock_cell = false);
 
 // Hierarchy-aware driver of a named sink. `get_driver_of_sink_name` is
 // class-local and stops at a sub's GraphIO pin; `inp_edges()` resolves across
 // the instance boundary, which is what a flop deep in an instance needs.
-[[nodiscard]] hhds::Pin_class sink_driver_hier(const hhds::Node_class& n, std::string_view sink_name);
+[[nodiscard]] hhds::Pin_class      sink_driver_hier(const hhds::Node_class& n, std::string_view sink_name);
+[[nodiscard]] hhds::Occurrence_pin sink_driver_hier(const hhds::Occurrence_node& n, std::string_view sink_name);
 
 // A recognized INTEGRATED CLOCK GATE cone: `<clock> & <enables...>` driving a
 // state element's clock_pin.
@@ -138,15 +162,15 @@ struct Control_root {
 // So the right move is to recognize the pattern and rewrite it into the enable,
 // which is what the encoder already models natively.
 struct Icg_cone {
-  hhds::Pin_class              clock;    // the clock operand, resolved to its root
+  hhds::Pin_class              clock;                   // the clock operand, resolved to its root
   bool                         clock_inverted = false;  // `~clk & en` gates the FALLING edge
-  std::vector<hhds::Pin_class> enables;  // the remaining operands (constants excluded)
+  std::vector<hhds::Pin_class> enables;                 // the remaining operands (constants excluded)
   // 2^N clock division. v1 only ever produces 1; a `Clock_cell` carrying any
   // other value is refused BY NAME at every lowering rather than approximated,
   // because a divider's INITIAL PHASE has to become part of its identity or two
   // 180-degrees-apart div-by-2s compare equal -- the clock-blindness
   // false-PROVEN class these guards exist to stop.
-  int div = 1;
+  int                          div = 1;
 };
 
 // Decode `clock_pin`'s driver as an ICG cone, or nullopt when it is not one.
@@ -178,12 +202,23 @@ struct Icg_cone {
 
 // THE shared recognizer. Resolves `clock_pin`'s driver to a clock operation via
 // whichever entry point applies:
-//   1. a materialized `Clock_cell` node                (clock_cell_cone)
-//   2. an inline `<clock> & <enables>` cone in the body (resolve_icg)
-// A `Sub`-boundary instance is NOT resolved here -- it cannot be, because its
-// enable is a cone of the DEF's ports and has no meaning as a parent pin until
-// `materialize_clock_cells` re-roots it. That is the whole reason materializing
-// is a separate step rather than a pure query.
+//   1. a materialized `Clock_cell` node                 (clock_cell_cone)
+//   2. an INSTANTIATED gate cell, re-rooted read-only   (sub_icg_cone)
+//   3. an inline `<clock> & <enables>` cone in the body (resolve_icg)
+//
+// Entry 2 is a QUERY, never a rewrite: it only succeeds when the def's enable
+// reduces to one of the def's own INPUT PORTS, because only then does it name a
+// pin the PARENT already drives. A deeper in-def enable cone stays refused here
+// and remains `materialize_clock_cells`' job -- that one CLONES the cone into
+// the caller, manufacturing a parent pin that does not otherwise exist, which is
+// why materializing is still a separate mutating step.
+//
+// WHAT THE CONE DOES NOT CARRY: the enable's SAMPLE POINT. A real ICG holds its
+// enable in a latch transparent on the opposite phase, and the returned cone
+// abstracts that latch away -- a consumer that commits `enables` AT the
+// reference edge reads a value the cell sampled half a period earlier. Consumers
+// that need the sample point (inou.cgen.sim) still fold the cell structurally
+// first; the rest treat the enable as an edge-sampled qualifier.
 [[nodiscard]] std::optional<Icg_cone> clock_op_of(const hhds::Pin_class& clock_pin, const Design_clocks& clocks);
 
 // Is `def` an ICG cell -- i.e. does its body match `clk_o = clk_port & <enable
@@ -196,9 +231,9 @@ struct Icg_cone {
 // to offer inside the def and a name heuristic would be the only alternative --
 // which is exactly what M9 retires.
 struct Icg_def_match {
-  hhds::Pin_class clk_in;         // the def's clock INPUT pin
-  hhds::Pin_class out;            // the def's clock OUTPUT pin
-  hhds::Pin_class enable_cone;    // root of the latched enable cone, inside the def
+  hhds::Pin_class clk_in;       // the def's clock INPUT pin
+  hhds::Pin_class out;          // the def's clock OUTPUT pin
+  hhds::Pin_class enable_cone;  // root of the latched enable cone, inside the def
   // The ACTIVE-LOW GATE FLAVOUR: `clk | ~en_latch` (enable latched while the
   // clock is HIGH) rather than `clk & en_latch` (latched while it is LOW). Both
   // gate the SAME reference edges -- neither output moves while the enable is
@@ -234,11 +269,49 @@ struct Icg_def_match {
 [[nodiscard]] int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass,
                                           const std::function<bool(const hhds::Graph*)>& is_boxed = {});
 
-// The value a latch passes THROUGH while its window is open: the arm of tolg's
-// hold mux (`gate ? d : q`) that is not the latch's own Q. Invalid when `n` is
-// not a latch or carries no hold mux (the raw yosys D/EN shape, where `din` is
-// already the transparent value).
-[[nodiscard]] hhds::Pin_class latch_transparent_arm(const hhds::Node_class& n);
+// The value a latch passes THROUGH while its window is open. Peels tolg's hold
+// mux (`gate ? d : q`) when `din` still carries one; once
+// cprop::canonicalize_latch_holds has stripped it (the open condition moves to
+// `enable`), `din` -- a graph input, a const, or a residual value mux with no
+// Q arm -- IS the through-value and is returned as-is. Invalid only when `n`
+// is not a latch or a hold mux has no non-Q arm (fail closed).
+[[nodiscard]] hhds::Pin_class      latch_transparent_arm(const hhds::Node_class& n);
+[[nodiscard]] hhds::Occurrence_pin latch_transparent_arm(const hhds::Occurrence_node& n);
+
+// Is a CLOCK-GATED latch's window provably CLOSED for the whole clock phase in
+// which the commit-at-closing-edge model says it holds, whatever the gate's
+// enables are? `root` is the reference clock the window resolves to and
+// `closed_level` its level during that phase (1 for a latch that closes on the
+// rise, 0 for one that closes on the fall).
+//
+// Every consumer that folds a gated clock into a latch's commit condition
+// ("commit at the closing edge iff the enable held") assumes that a gated-OFF
+// clock keeps the window SHUT. That holds for `clk & en` driving an active-high
+// window, and for `!clk & en`, but NOT for a window that is open while the
+// gated clock is LOW -- `if (!(clk & en_l)) p = d`, minion's register-file
+// preview latch. Gated off, that clock stays low and the latch is transparent
+// for the whole period; modelling it as a hold both refuted it against its own
+// flattening and PROVED it equal to a latch that really holds. Answer false for
+// that shape (and for any cone the walk cannot bound), so callers fail closed.
+[[nodiscard]] bool gated_latch_closed_at(const hhds::Node_class& latch, const hhds::Pin_class& root, bool closed_level);
+[[nodiscard]] bool gated_latch_closed_at(const hhds::Occurrence_node& latch, const hhds::Occurrence_pin& root,
+                                         bool closed_level);
+
+// The exception to the rule above that IS modelled exactly: a latch whose
+// window is exactly `!G` for a gate output G (an ICG's own enable latch, or
+// minion's write-commit `en_1p`, clocked by an already-gated clock) and whose
+// every reader ANDs Q with that same G. Gated off, G stays low and every reader
+// is forced to 0, so what the latch holds or passes through then is
+// unobservable; once G fires again the latch has been transparent for the
+// whole low phase before the edge in both the real circuit and the hold model.
+[[nodiscard]] bool gated_latch_masked_off(const hhds::Node_class& latch);
+[[nodiscard]] bool gated_latch_masked_off(const hhds::Occurrence_node& latch);
+
+// The dual: is the latch's window provably OPEN whenever `root` is at `level`,
+// whatever every other input is? An ICG's enable latch may be bypassed to its
+// transparent arm only when it is open for the whole phase before the gated
+// edge and shut for the whole phase after it.
+[[nodiscard]] bool latch_open_at(const hhds::Node_class& latch, const hhds::Pin_class& root, bool level);
 
 // Inline every instance whose output drives a state element's `clock_pin` and
 // whose def contains a Latch — i.e. an INTEGRATED CLOCK GATE CELL.
@@ -269,6 +342,72 @@ struct Icg_def_match {
 [[nodiscard]] int inline_clock_gate_cells(hhds::Graph* g, std::string_view from_pass,
                                           const std::function<bool(const hhds::Graph*)>& is_boxed = {});
 
+// The structural clock/reset interface of a definition. A clock input is a
+// port from which state in the definition subtree takes an edge, directly or
+// through a recognized gate. A reset input is a port from which that state's
+// reset derives; active_low tells how the port must be interpreted at the call
+// site. Neither classification depends on the port spelling.
+//
+// The cache is caller-owned because graph preparation can inline gate cells or
+// materialize occurrences. Sharing a process-global answer across those
+// rewrites would make the result depend on which consumer queried first.
+struct Reset_input_port {
+  uint32_t port_id    = 0;
+  bool     active_low = false;
+
+  friend bool operator==(const Reset_input_port&, const Reset_input_port&) = default;
+};
+
+struct Reset_input_ports {
+  std::vector<Reset_input_port> ports;
+  // False means some reset-bearing state in the subtree is driven by a cone
+  // that cannot be reduced to one declared input. A caller may still use the
+  // listed ports for clock correctness, but must not use them to skip the
+  // instance during simulation.
+  bool                          complete = true;
+};
+
+struct Clock_input_ports {
+  absl::flat_hash_set<uint32_t> ports;
+  // Same discipline as Reset_input_ports::complete, and for the same reason:
+  // an empty port set means "nothing in the subtree takes an edge" ONLY when
+  // the walk got all the way down. A body-less callee, a mutually
+  // instantiating pair, or a clock cone that does not reduce to a declared
+  // input all produce an empty-looking answer that a caller must NOT read as
+  // "there is nothing to gate here".
+  bool                          complete = true;
+};
+
+struct Clock_port_cache {
+  // node_hash_map: both memos hand out references that outlive later queries
+  // (callers bind `const auto& ports = ...` and the walk itself recurses while
+  // an outer frame holds one). A flat map moves its values on rehash.
+  absl::node_hash_map<const hhds::Graph*, Clock_input_ports> clock_memo;
+  absl::flat_hash_set<const hhds::Graph*>                    clock_busy;
+  absl::node_hash_map<const hhds::Graph*, Reset_input_ports> reset_memo;
+  absl::flat_hash_set<const hhds::Graph*>                    reset_busy;
+};
+
+[[nodiscard]] const Clock_input_ports& clock_input_interface(const std::shared_ptr<hhds::Graph>& def, Clock_port_cache& cache);
+// The port set alone, for the consumers that only ask "does this port clock
+// state inside?" and have no gating decision riding on completeness.
+[[nodiscard]] const absl::flat_hash_set<uint32_t>& clock_input_ports(const std::shared_ptr<hhds::Graph>& def,
+                                                                     Clock_port_cache&                   cache);
+[[nodiscard]] const Reset_input_ports& reset_input_ports(const std::shared_ptr<hhds::Graph>& def, Clock_port_cache& cache);
+
+// Insert Clock_cell(en = __valid | reset_asserted) on the structural clock
+// inputs of conditionally activated Sub instances. This is a post-lowering
+// library phase: call lowering has the composed __valid value, but callee
+// bodies (which identify their clock/reset ports) are not all complete yet.
+//
+// An instance whose clock or reset interface came back INCOMPLETE is refused
+// with a `time` error rather than skipped: this phase replaced tolg's
+// name-based gate, so declining to gate one silently lets its state advance
+// while __valid is false. A resolved-but-stateless callee is skipped quietly.
+//
+// Idempotent; returns the number of cells inserted.
+[[nodiscard]] int gate_activation_clocks(hhds::Graph* g, std::string_view from_pass, Clock_port_cache& cache);
+
 // Commit class of `n`, or nullopt when `n` is not a state element (or its
 // controlling cone could not be resolved to a root). `clocks` supplies the
 // net-role context; passing nullptr builds a throwaway one from `n`'s graph
@@ -285,12 +424,12 @@ struct Icg_def_match {
 // This is the ONE scan; do not add a private copy (encode.cpp, cgen_sim.cpp and
 // semdiff.cpp already keep three, and that drift is the bug M3 meant to prevent).
 struct Single_edge_need {
-  bool needed = false;
-  int  n_latches       = 0;  // Latch cells
-  int  n_negedge_flops = 0;  // Flop/Fflop with posclk known-false
-  int  n_icg_flops     = 0;  // Flop/Fflop on a recognized `<clock> & <enables>` gate
-  int  n_clock_nets    = 0;  // distinct clock roots flops commit on (implicit counts as one)
-  std::string why;           // human-readable trigger reason ("" when not needed)
+  bool        needed          = false;
+  int         n_latches       = 0;  // Latch cells
+  int         n_negedge_flops = 0;  // Flop/Fflop with posclk known-false
+  int         n_icg_flops     = 0;  // Flop/Fflop on a recognized `<clock> & <enables>` gate
+  int         n_clock_nets    = 0;  // distinct clock roots flops commit on (implicit counts as one)
+  std::string why;                  // human-readable trigger reason ("" when not needed)
 };
 
 [[nodiscard]] Single_edge_need needs_single_edge(hhds::Graph* g, const Design_clocks* clocks = nullptr);

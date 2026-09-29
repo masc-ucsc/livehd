@@ -7,10 +7,9 @@
 # design with the failing check kept as a runtime check (never elided, never
 # used to optimize). The diagnostic carries the counterexample and a hint that a
 # different top-level instantiation may change the result. pass.formal runs as a
-# none|fast|normal mode step in `lhd compile` (default fast; none under -O0): fast
+# none|fast|normal mode step in `lhd compile` (default fast): fast
 # = induction (catches combinational refutations, defers stateful ones to runtime);
-# normal = BMC-intent (also trusts stateful refutations). Cases 1-4 use --recipe
-# O2 (which also runs cprop/bitwidth); cases 5-7 pin the mode behavior.
+# normal = BMC-intent (also trusts stateful refutations). Cases 1-4 exercise compilation; cases 5-7 pin the mode behavior.
 
 set -u
 
@@ -23,19 +22,19 @@ fail() {
   exit 1
 }
 
-# compile_o2 <name> : compile $W/<name>.prp through O2 + emit verilog/diag.
+# compile_graph <name> : compile $W/<name>.prp through the standard pipeline + emit verilog/diag.
 # Sets globals: RC, DIAG (jsonl path), VOUT (verilog path).
-compile_o2() {
+compile_graph() {
   local n="$1"
   DIAG="$W/$n.jsonl"
   VOUT="$W/$n.v"
-  "$LHD" compile "$W/$n.prp" --recipe O2 --workdir "$W/$n" \
+  "$LHD" compile "$W/$n.prp" --workdir "$W/$n" \
     --emit "verilog:$VOUT" --emit "diagnostics:$DIAG" >/dev/null 2>&1
   RC=$?
 }
 
 # compile_case <prp> <tag> <extra args...> : compile $W/<prp>.prp tagged <tag>
-# (no --recipe, so the default fast formal mode runs unless overridden).
+# (the default fast formal mode runs unless overridden).
 # Sets globals: RC, DIAG, VOUT.
 compile_case() {
   local prp="$1" tag="$2"
@@ -57,7 +56,7 @@ comb chk(a:u8, b:u8) -> (x:u8) {
   x = a + b
 }
 EOF
-compile_o2 assert_fail
+compile_graph assert_fail
 [ "$RC" -ne 0 ] || fail "refuted assert must fail the build (got rc=0)"
 grep -q '"code":"assert-refuted"' "$DIAG" || fail "missing assert-refuted diagnostic: $(cat "$DIAG")"
 grep -q 'counterexample:' "$DIAG" || fail "assert-refuted must include a counterexample: $(cat "$DIAG")"
@@ -68,17 +67,25 @@ grep -q 'assert (' "$VOUT" || fail "the failing assert must be KEPT as a runtime
 grep -q 'a and b must differ' "$VOUT" || fail "runtime assert must keep its \$error message: $(cat "$VOUT")"
 
 # ---------------------------------------------------------------------------
-# 2. A refuted `assume`: same FAIL policy. A refuted assume must NOT be turned
-#    into a synthesis hypothesis; it is kept as a runtime contract check.
+# 2. A child `assume` refuted at its real call-site binding: same FAIL policy.
+#    A selected-top IO assume is an unchecked environment constraint, so the
+#    checked negative case belongs at a hierarchy boundary where the parent can
+#    actually discharge (or refute) it.
 # ---------------------------------------------------------------------------
-cat >"$W/assume_fail.prp" <<'EOF'
-comb chk(a:u8, b:u8) -> (x:u8) {
+cat >"$W/assume_fail_sub.prp" <<'EOF'
+pub comb chk(a:u8, b:u8) -> (x:u8) {
   assume(a != b)
   x = a + b
 }
 EOF
-compile_o2 assume_fail
-[ "$RC" -ne 0 ] || fail "refuted assume must fail the build (got rc=0)"
+cat >"$W/assume_fail.prp" <<'EOF'
+const assume_fail_sub = import("assume_fail_sub")
+comb assume_fail(a:u8) -> (x:u8) {
+  x = assume_fail_sub.chk(a=0, b=0).x
+}
+EOF
+compile_graph assume_fail
+[ "$RC" -ne 0 ] || fail "a parent binding that refutes its child assume must fail the build (got rc=0)"
 grep -q '"code":"assume-refuted"' "$DIAG" || fail "missing assume-refuted diagnostic: $(cat "$DIAG")"
 [ -s "$VOUT" ] || fail "compile must CONTINUE and still emit the netlist on a refuted assume"
 grep -q 'assume (' "$VOUT" || fail "the failing assume must be KEPT as a runtime check in the netlist: $(cat "$VOUT")"
@@ -93,10 +100,39 @@ comb chk(p:bool, q:bool) -> (y:u8) {
   unique if p { y = 1 } elif q { y = 2 }
 }
 EOF
-compile_o2 hotmux_fail
+compile_graph hotmux_fail
 [ "$RC" -ne 0 ] || fail "refuted Hotmux one-hotness must fail the build (got rc=0)"
 grep -q '"code":"onehot-violated"' "$DIAG" || fail "missing onehot-violated diagnostic: $(cat "$DIAG")"
 [ -s "$VOUT" ] || fail "compile must CONTINUE (not fatal-abort) and still emit on a refuted Hotmux"
+
+# ---------------------------------------------------------------------------
+# 3b. pass.satopt keeps every observable check (todo/livehd/2s-satopt B): the
+#     overlapping `unique if` feeds only an arm satopt proves never selected,
+#     so its data becomes dead -- the exclusivity obligation still fails the
+#     build. A failing assert survives satopt the same way.
+# ---------------------------------------------------------------------------
+cat >"$W/hotmux_masked.prp" <<'EOF'
+comb chk(p:bool, q:bool, a:u8, x:u8) -> (y:u8) {
+  mut t = 0
+  unique if p { t = 1 } elif q { t = 2 }
+  y = if x == x + 1 { t } else { a }
+}
+EOF
+compile_case hotmux_masked hotmux_masked_satopt --set pass.satopt=true
+[ "$RC" -ne 0 ] || fail "satopt must not hide an overlapping unique-if whose data it proved dead (got rc=0)"
+grep -q '"code":"onehot-violated"' "$DIAG" || fail "missing onehot-violated diagnostic after satopt: $(cat "$DIAG")"
+grep -q 'proven constant' "$W/hotmux_masked_satopt"/logs/*pass_satopt*.log \
+  || fail "satopt did not see the masked arm, so this case tests nothing"
+grep -q ' 1 proven constant' "$W/hotmux_masked_satopt"/logs/*pass_satopt*.log \
+  || fail "satopt did not prove the masking select constant: $(cat "$W/hotmux_masked_satopt"/logs/*pass_satopt*.log)"
+cat >"$W/assert_satopt.prp" <<'EOF'
+comb chk(a:u8, x:u8) -> (y:u8) {
+  y = if x == x + 1 { a + 1 } else { a }
+  assert a != 7
+}
+EOF
+compile_case assert_satopt assert_satopt --set pass.satopt=true
+[ "$RC" -ne 0 ] || fail "satopt must not hide a failing assert (got rc=0)"
 
 # ---------------------------------------------------------------------------
 # 4. A provably one-hot `unique if` (distinct constant arms): PROVEN, so it
@@ -109,13 +145,13 @@ comb chk(x:u2, a:u8, b:u8) -> (y:u8) {
   unique if x == 0 { y = a } elif x == 1 { y = b }
 }
 EOF
-compile_o2 onehot_ok
+compile_graph onehot_ok
 [ "$RC" -eq 0 ] || fail "a provably one-hot unique-if must compile clean (got rc=$RC): $(cat "$DIAG")"
 grep -q '"severity":"error"' "$DIAG" && fail "proven one-hot must emit no error: $(cat "$DIAG")"
 [ -s "$VOUT" ] || fail "proven one-hot must still emit the netlist"
 
 # ---------------------------------------------------------------------------
-# 5. DEFAULT `lhd compile` (no --recipe) runs formal in `fast` mode: a purely
+# 5. DEFAULT `lhd compile` (default settings) runs formal in `fast` mode: a purely
 #    COMBINATIONAL refuted assert is caught (induction is exact for comb logic).
 # ---------------------------------------------------------------------------
 cat >"$W/comb_ref.prp" <<'EOF'
@@ -264,10 +300,9 @@ compile_case dead_guard dead_guard_off --set compile.formal.warn_vacuous=false
 grep -q 'formal-vacuous-guard' "$DIAG" \
   && fail "compile.formal.warn_vacuous=false must silence it: $(cat "$DIAG")"
 
-# 11b. A property inside an INSTANTIATED callee never sees the caller's guard
-#      (the path condition is body-local), so the obligation is checked
-#      unconditionally — a stricter claim than the source makes, and one that
-#      flips with compile.upass.inline. That must be LOUD, not silent.
+# 11b. A property inside an INSTANTIATED callee sees the caller's guard through
+#      the hidden activation ABI. The property must be implication-guarded in
+#      the callee, matching the inlined form, with no former limitation warning.
 cat >"$W/gunit.prp" <<'EOF'
 pub mod gunit(a:u8) -> (o:u8@[0]) {
   o = a
@@ -285,10 +320,14 @@ pub mod gcaller(valid:bool, a:u8) -> (r:u8@[0]) {
 }
 EOF
 compile_case gcaller gcaller
-grep -q '"code":"guarded-instance-property"' "$DIAG" \
-  || fail "instantiating a property-carrying callee under a guard must warn that the guard does not cross: $(cat "$DIAG")"
-# Control: no guard, no warning — otherwise the check is just noise on every
-# instance of every module that happens to contain an assert.
+grep -q 'guarded-instance-property' "$DIAG" \
+  && fail "the guarded-instance-property limitation should be gone: $(cat "$DIAG")"
+grep -q '__valid' "$VOUT" || fail "conditional callee lacks its activation ABI: $(cat "$VOUT")"
+grep -q 'assert (' "$VOUT" || fail "callee property disappeared: $(cat "$VOUT")"
+grep -Eq '= \(+__valid\)* ==' "$VOUT" \
+  || fail "callee property is not implication-guarded by activation: $(cat "$VOUT")"
+# Control: an unguarded call still compiles cleanly and binds activation true
+# when this same definition is activation-capable elsewhere in the registry.
 cat >"$W/gplain.prp" <<'EOF'
 const gunit = import("gunit.gunit")
 pub mod gplain(a:u8) -> (r:u8@[0]) {
@@ -319,12 +358,16 @@ pub mod memguard(c1:bool, c2:bool, a:u2, d:u8) -> (o:u8@[0]) {
 EOF
 compile_case memguard memguard
 [ "$RC" -eq 0 ] || fail "memguard must compile: $(cat "$DIAG")"
-grep -qE "wr_enable_0\((and_[0-9]+|[a-z_0-9]+)\)" "$VOUT" || fail "no memory write enable emitted: $(cat "$VOUT")"
+# The memory carries a reset value, so cgen emits it as an inline reg array
+# (`if (<en>) <mem>_data[a] <= d;`) rather than a cgen_memory_* wrapper
+# instance (`wr_enable_0(<en>)`); either spelling carries the write enable.
+grep -qE "wr_enable_0\((and_[0-9]+|[a-z_0-9]+)\)|if \((and_[0-9]+|[a-z_0-9]+)\) __lhdmem_h[0-9a-f]+_e_data\[" "$VOUT" \
+  || fail "no memory write enable emitted: $(cat "$VOUT")"
 python3 - "$VOUT" <<'PYEOF' || fail "the OUTER guard c1 was dropped from the memory write enable"
 import re, sys
 v = open(sys.argv[1]).read()
-m = re.search(r"wr_enable_0\((\w+)\)", v)
-assert m, "no wr_enable_0"
+m = re.search(r"wr_enable_0\((\w+)\)", v) or re.search(r"if \((\w+)\) __lhdmem_h[0-9a-f]+_e_data\[", v)
+assert m, "no memory write enable"
 sig = m.group(1)
 d = re.search(rf"{sig}\s*=\s*([^;]+);", v)
 assert d, f"no driver for {sig}: {v}"

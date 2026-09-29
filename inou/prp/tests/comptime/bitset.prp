@@ -16,13 +16,13 @@ r#[3..=6] = a#[0..=3]
 cputs("r:{r}")
 cassert(r == 0ub1010_01_1)
 
-mut x:u7 = nil
-x#[0..+1] = c
+mut x:u10 = nil
+x#[0..+2] = c
 x#[2..+3] = b
 x#[5..+5] = a
 cassert(x == 0ub01010_001_01)
 
-const as = 0sb1010   // 4 bits
+const `as` = 0sb1010 // 4 bits (`as` is a keyword: backticks make it a name)
 const bs = 0sb01     // 2 bits
 const cs = 0sb1      // 1 bit
 
@@ -30,5 +30,5 @@ cassert(cs == -1)
 r = nil
 r#[0]    = cs
 r#[1..=2] = bs
-r#[3..=6] = as
+r#[3..=6] = `as`
 cassert(r == 0ub1010_01_1)

@@ -1,0 +1,8 @@
+/*
+:name: string_spread
+:type: error
+:error: strings are opaque and cannot be spread
+:help: string concatenation
+*/
+const text = "hello"
+const parts = (...text, "!")

@@ -31,6 +31,18 @@ echo "$out" | grep -q '"name":"compile.upass.verifier"' || fail "compile.upass.v
 echo "$out" | grep -q '"name":"compile.upass.reset_style","method":"pass.upass","default":"sync"' \
   || fail "reset_style default/method missing: $out"
 echo "$out" | grep -q '"name":"compile.cgen.odir"' && fail "kernel-managed odir must not be listed: $out"
+# Loop representation has one public switch, defaulting to preservation.
+echo "$out" | grep -q '"name":"compile.unroll","method":"compile","default":"false"' \
+  || fail "compile.unroll must default false: $out"
+echo "$out" | grep -Eq '"name":"compile.upass.(roll|roll_arrays|roll_cap|unroll)"' \
+  && fail "internal or removed loop options must not be listed: $out"
+for obsolete in roll roll_arrays roll_cap unroll; do
+  "$LHD" compile "$PRP" --set "compile.upass.$obsolete=true" --workdir "$W/removed_$obsolete" -q \
+    >"$W/removed_$obsolete.json" 2>&1 && fail "compile.upass.$obsolete must be rejected"
+  grep -q 'compile.unroll' "$W/removed_$obsolete.json" || fail "missing canonical loop option hint for $obsolete"
+done
+echo "$out" | grep -q '"name":"pass.abc.unroll_carry","method":"pass.abc","default":"true"' \
+  || fail "ABC carry expansion default missing: $out"
 # Compile-only passes live under compile.*; lec/pass passes keep their own namespace.
 echo "$out" | grep -q '"name":"compile.bitwidth.max_iterations"' || fail "compile.bitwidth.* missing: $out"
 # hier standardization: the vestigial per-def toggles are deleted, the real
@@ -48,12 +60,61 @@ echo "$out" | grep -q '"name":"pass.opentimer.hier","method":"pass.opentimer","d
 echo "$out" | grep -q '"name":"pass.opentimer.top"' && fail "pass.opentimer.top must be hidden (use --top / lhd.top): $out"
 echo "$out" | grep -q '"name":"lhd.top"' || fail "lhd.top missing: $out"
 echo "$out" | grep -q '"name":"lhd.stats"' || fail "lhd.stats missing: $out"
+# Incremental partition defaults and the separate per-color memory target.
+for entry in 'pass.color.synth.min_ge:500' 'pass.color.synth.max_ge:5000' 'pass.color.synth.max_gate:30000' 'pass.abc.memory_budget_mb:16384'; do
+  flag=${entry%:*}
+  expected=${entry##*:}
+  description=$("$LHD" describe "$flag") || fail "cannot describe $flag"
+  echo "$description" | grep -q "\"default\":\"$expected\"" || fail "$flag default must be $expected: $description"
+done
+description=$("$LHD" describe synth.reduce) || fail "cannot describe synth.reduce"
+echo "$description" | grep -q '"default":"false"' || fail "synth.reduce must default false: $description"
+echo "$description" | grep -q 'experimental.*synthesis time.*QoR' || fail "synth.reduce tradeoff missing: $description"
+# ONE incremental switch (lhd.incremental); the per-tier cache flags are gone.
+echo "$out" | grep -q '"name":"lhd.incremental","method":"lhd","default":"true"' || fail "lhd.incremental missing/wrong: $out"
+echo "$out" | grep -q '"name":"compile.cache"' && fail "compile.cache must be gone (use lhd.incremental): $out"
+echo "$out" | grep -q '"name":"pass.abc.cache"' && fail "pass.abc.cache must be gone (use lhd.incremental): $out"
+echo "$out" | grep -q '"name":"formal.cache"' && fail "formal.cache must be gone (use lhd.incremental): $out"
+# The synth.* command namespace (kSynthSetOptions), like sim.*.
+echo "$out" | grep -q '"name":"synth.liberty","method":"synth","default":""' || fail "synth.liberty missing/wrong: $out"
+echo "$out" | grep -q '"name":"synth.opentimer","method":"synth","default":"true"' || fail "synth.opentimer missing/wrong: $out"
 echo "$out" | grep -q '"name":"compile.prp_writer.debug"' || fail "compile.prp_writer.debug missing: $out"
 echo "$out" | grep -q '"name":"formal.solver"' || fail "formal.solver (shared formal vocabulary) missing: $out"
-echo "$out" | grep -q '"name":"formal.strict","method":"pass.lec","default":"true"' || fail "formal.strict missing or no longer defaults to true: $out"
+echo "$out" | grep -q '"name":"formal.assume_check","method":"pass.lec","default":"true"' \
+  || fail "formal.assume_check canonical default-true option missing: $out"
+echo "$out" | grep -q '"name":"formal.lec.assume_check"' \
+  && fail "assume_check must be shared as formal.assume_check, not formal.lec.assume_check: $out"
+echo "$out" | grep -q '"name":"compile.formal.assume_check"' \
+  && fail "the internal compile mirror must not be listed as a second canonical option: $out"
+# pass.formal's OWN timeout/reset (compile.formal.*) share a NAME with pass.lec's
+# formal.timeout / formal.reset, not a meaning: the common/specific split keys on
+# (method, flag), so a name collision hides neither namespace's option.
+echo "$out" | grep -q '"name":"compile.formal.timeout","method":"pass.formal","default":"10"' \
+  || fail "compile.formal.timeout (pass.formal's own budget) must be listed: $out"
+echo "$out" | grep -q '"name":"compile.formal.reset","method":"pass.formal"' || fail "compile.formal.reset must be listed: $out"
+echo "$out" | grep -q '"name":"formal.timeout","method":"pass.lec","default":"120"' \
+  || fail "formal.timeout must still be pass.lec's (default 120): $out"
+"$LHD" describe compile.formal.timeout | grep -q '"method":"pass.formal","default":"10"' \
+  || fail "describe compile.formal.timeout must resolve to pass.formal"
+echo "$out" | grep -q '"name":"formal.strict"' && fail "removed formal.strict is still listed"
 echo "$out" | grep -q '"name":"formal.simfail","method":"pass.lec","default":"true"' || fail "formal.simfail missing or wrong: $out"
 echo "$out" | grep -q '"name":"formal.simfail_run","method":"pass.lec","default":"true"' || fail "formal.simfail_run missing or wrong: $out"
 echo "$out" | grep -q '"name":"formal.lec.simfail"' && fail "simfail must be shared as formal.simfail, not formal.lec.simfail: $out"
+# the verify engine reads ignore_memory / hard_timeout_mult too, so they are
+# COMMON (bare formal.*) -- the spelling every diagnostic already prints.
+echo "$out" | grep -q '"name":"formal.ignore_memory","method":"pass.lec"' || fail "formal.ignore_memory (common) missing: $out"
+echo "$out" | grep -q '"name":"formal.hard_timeout_mult","method":"pass.lec","default":"3"' \
+  || fail "formal.hard_timeout_mult (common) missing: $out"
+# the REVERSE of the guards above: every pass.lec label is listed under exactly
+# ONE of formal.<f> / formal.lec.<f> -- never both, and a pairing knob never bare.
+echo "$out" | grep -o '"name":"formal\.[a-z_]*","method":"pass.lec"' | sed 's/"name":"formal\.\([a-z_]*\)".*/\1/' | sort >"$W/common_leaves"
+echo "$out" | grep -o '"name":"formal\.lec\.[a-z_]*"' | sed 's/"name":"formal\.lec\.\([a-z_]*\)"/\1/' | sort >"$W/lec_leaves"
+[ -s "$W/common_leaves" ] && [ -s "$W/lec_leaves" ] || fail "formal.* / formal.lec.* leaves not found: $out"
+dup=$(comm -12 "$W/common_leaves" "$W/lec_leaves")
+[ -z "$dup" ] || fail "pass.lec label(s) listed under BOTH formal.* and formal.lec.*: $dup"
+for f in hier cones phase_sched match collapse gold_x; do
+  echo "$out" | grep -q "\"name\":\"formal.$f\"" && fail "lec-only $f must be formal.lec.$f, not formal.$f: $out"
+done
 echo "$out" | grep -q 'prpfail' && fail "removed prpfail vocabulary must not be listed: $out"
 echo "$out" | grep -q '"name":"formal.isabelle.strict"' || fail "formal.isabelle.strict missing: $out"
 echo "$out" | grep -q '"name":"formal.lean.strict"' || fail "formal.lean.strict missing: $out"
@@ -64,6 +125,31 @@ echo "$out" | grep -q '"name":"pass.color.seed"' && fail "per-pass pass.color.se
 echo "$out" | grep -q '"name":"pass.color.top"' && fail "per-pass pass.color.top must be gone (use --top): $out"
 echo "$out" | grep -q '"name":"pass.abc.top"' && fail "per-pass pass.abc.top must be gone (use --top): $out"
 echo "$out" | grep -q '"name":"pass.partition.top"' && fail "per-pass pass.partition.top must be gone (use --top): $out"
+# pass.color: options only the synth coloring reads are pass.color.synth.*; the
+# algorithm choice, generic post-processing and the ware_* policy pass.abc
+# honors under any coloring stay pass.color.*. The stop_*, ctrl_cones and ware_*
+# settings have NO fixed default: the mapper profile supplies it (abc cuts and
+# keeps wares, usyn runs reg-to-reg with wares inlined).
+echo "$out" | grep -q '"name":"pass.color.synth.mapper","method":"pass.color","default":"abc"' \
+  || fail "pass.color.synth.mapper default abc missing: $out"
+echo "$out" | grep -q '"name":"pass.color.synth.stop_mux","method":"pass.color","default":""' \
+  || fail "pass.color.synth.stop_mux must take its default from the mapper profile: $out"
+echo "$out" | grep -q '"name":"pass.color.ware_arith","method":"pass.color","default":""' \
+  || fail "pass.color.ware_arith must stay a common pass.color option with a mapper-profile default: $out"
+echo "$out" | grep -Eq '"name":"pass.color.(synth_alg|mode|max_gate|stop_mux|ctrl_cones)"' \
+  && fail "synth-only color options must be listed under pass.color.synth.*: $out"
+echo "$out" | grep -Eq '"name":"pass.color.synth.(alg|hier|ware_arith)"' \
+  && fail "common color options must not be listed under pass.color.synth.*: $out"
+for moved in 'color.max_gate:pass.color.synth.max_gate' 'pass.color.synth_alg:pass.color.synth.mode' \
+             'pass.color.synth.hier:pass.color.hier'; do
+  key=${moved%%:*}
+  want=${moved##*:}
+  "$LHD" pass color synth "$PRP" --set "$key=1" --workdir "$W/moved" -q >"$W/moved.json" 2>&1 \
+    && fail "$key must be rejected"
+  grep -q "$want" "$W/moved.json" || fail "$key must name its one spelling $want: $(cat "$W/moved.json")"
+done
+"$LHD" describe pass.color.max_gate 2>&1 | grep -q "pass.color.synth.max_gate" \
+  || fail "describe of a moved color option must name its new spelling"
 
 # 2. The options pattern is advertised.
 "$LHD" list | grep -q '"name":"options"' || fail "bare lhd list must advertise the options pattern"
@@ -122,9 +208,9 @@ EOF
 grep -q "unknown flag 'bogus' of pass 'compile.cgen'" "$W/r7.json" || fail "config typo message missing: $(cat "$W/r7.json")"
 
 # 8. Listed flags really are settable end-to-end.
-"$LHD" compile "$PRP" --set cgen.srcmap=1 --set upass.verifier=false --emit-dir verilog:"$W/v8" --workdir "$W/w8" -q \
+"$LHD" compile "$PRP" --set upass.verifier=false --emit-dir verilog:"$W/v8" --workdir "$W/w8" -q \
   >/dev/null 2>&1 || fail "valid --set flags must still compile"
-ls "$W"/v8/*.v.map >/dev/null 2>&1 || fail "cgen.srcmap=1 must still produce the .v.map sidecar"
+ls "$W"/v8/*.v.map >/dev/null 2>&1 || fail "default Verilog directory emission must produce the .v.map sidecar"
 
 # 9. Flag-order freedom: shared flags may come before the command word, with
 #    value-taking flags keeping their value; the run_id must not depend on
@@ -167,6 +253,8 @@ echo "$out" | grep -q '"name":"sim.checkpoint_min_secs","method":"sim","default"
 # in the code or as an alias, and the codegen reads the same sim.vcd knob.
 echo "$out" | grep -q '"name":"compile.sim.vcd"' && fail "compile.sim.* must not exist: $out"
 echo "$out" | grep -q '"name":"sim.vcd_fake_delay","method":"sim","default":"true"' || fail "sim.vcd_fake_delay missing: $out"
+echo "$out" | grep -q '"name":"sim.workers"' && fail "retired sim.workers still listed: $out"
+echo "$out" | grep -q 'sim.legacy_scheduler' && fail "retired sim.legacy_scheduler still listed: $out"
 # the old vcdfakedelay spelling is DELETED: setting it errors with the rename hint
 "$LHD" sim "$PRP" --set sim.vcdfakedelay=false --workdir "$W/w11c" -q >"$W/r11c.json" 2>/dev/null && fail "--set sim.vcdfakedelay must fail (renamed)"
 grep -q "use --set sim.vcd_fake_delay=false instead" "$W/r11c.json" || fail "vcdfakedelay rename hint missing: $(cat "$W/r11c.json")"
@@ -191,6 +279,16 @@ grep -q "use --set formal.solver=lgyosys instead" "$W/r11d.json" || fail "lec.so
 grep -q "use --set formal.lec.hier=false instead" "$W/r11e.json" || fail "lec.hier must point at formal.lec.hier: $(cat "$W/r11e.json")"
 "$LHD" compile "$PRP" --set lec.minetimeout=9 --workdir "$W/w11f" -q >"$W/r11f.json" 2>/dev/null && fail "--set lec.minetimeout must fail"
 grep -q "use --set formal.spec_mining_timeout=9 instead" "$W/r11f.json" || fail "lec.minetimeout must compose both renames: $(cat "$W/r11f.json")"
+# a leaf DELETED outright under a removed namespace names the deletion's own
+# reason, never a rewrite into a second rejected spelling (lec.cache ->
+# "use formal.lec.cache" -> "was removed" was a two-step dead end); the sim.*
+# namespace (no eprp method) consults the same removed-flag table.
+"$LHD" compile "$PRP" --set lec.cache=false --workdir "$W/w11k" -q >"$W/r11k.json" 2>/dev/null && fail "--set lec.cache must fail"
+grep -q "lhd.incremental=false" "$W/r11k.json" || fail "lec.cache must point at lhd.incremental: $(cat "$W/r11k.json")"
+grep -qF "formal.lec.cache" "$W/r11k.json" && fail "lec.cache must not be rewritten into the rejected formal.lec.cache: $(cat "$W/r11k.json")"
+"$LHD" compile "$PRP" --set sim.cache=false --workdir "$W/w11l" -q >"$W/r11l.json" 2>/dev/null && fail "--set sim.cache must fail"
+grep -q "'sim.cache' was removed" "$W/r11l.json" || fail "sim.cache must name the removal: $(cat "$W/r11l.json")"
+grep -q "lhd.incremental=false" "$W/r11l.json" || fail "sim.cache must point at lhd.incremental: $(cat "$W/r11l.json")"
 # `lhd sim --help` ends with the standardized options block (like lec/compile),
 # enumerating the sim.* flags instead of a hand-maintained list (pretty page;
 # jsonl help would emit the machine record instead — forced here since piped).
@@ -202,6 +300,37 @@ echo "$simhelp" | grep -q '^  sim.checkpoint=true ' || fail "sim --help: a regis
 "$LHD" sim "$PRP" --set sim.bogus=1 --workdir "$W/w11" -q >"$W/r11.json" 2>/dev/null && fail "--set sim.bogus must fail"
 grep -q "unknown sim flag 'sim.bogus'" "$W/r11.json" || fail "unknown sim-flag message missing: $(cat "$W/r11.json")"
 
+# 11b. ONE Liberty knob for the whole CLI: `synth.liberty`. Regression: pass.abc
+# had its own `library` spelling, so `lhd pass abc --set synth.liberty=asap7.lib`
+# named a real option that pass.abc never read -- it tech-mapped against the
+# DEFAULT sky130 library and still reported success. pass.abc now resolves
+# synth.liberty, and the duplicate spellings are refused with directed hints.
+# the only Liberty-FILE option left is synth.liberty (pass.liberty.* are the
+# gensim pass's own out/verbose flags, not a Liberty path)
+"$LHD" list options --diag-fmt pretty | grep -qE '^pass\.abc\.library=' && fail "pass.abc.library must be gone (synth.liberty is the one spelling)"
+"$LHD" list options --diag-fmt pretty | grep -qE '^compile\.yosys\.liberty=' && fail "compile.yosys.liberty must be gone (it was dead code)"
+"$LHD" list options --diag-fmt pretty | grep -qE '^synth\.liberty=' || fail "synth.liberty must be listed"
+# both spellings of the removed knob error with the DIRECTED replacement hint
+"$LHD" compile "$PRP" --set pass.abc.library=x.lib --workdir "$W/w11g" -q >"$W/r11g.json" 2>/dev/null \
+  && fail "--set pass.abc.library must fail"
+grep -q "use --set synth.liberty=x.lib instead" "$W/r11g.json" \
+  || fail "pass.abc.library must name synth.liberty: $(cat "$W/r11g.json")"
+# the abbreviation resolves to the same canonical key, so it errors the same way
+"$LHD" pass abc --top top lg:"$W/no_such_lg" --set abc.library=x.lib -q >"$W/r11h.json" 2>/dev/null \
+  && fail "--set abc.library must fail"
+grep -q "use --set synth.liberty=x.lib instead" "$W/r11h.json" \
+  || fail "abc.library must name synth.liberty: $(cat "$W/r11h.json")"
+"$LHD" compile "$PRP" --set yosys.liberty=x.lib --workdir "$W/w11i" -q >"$W/r11i.json" 2>/dev/null \
+  && fail "--set compile.yosys.liberty must fail (removed dead knob)"
+grep -q "synth.liberty=x.lib" "$W/r11i.json" \
+  || fail "compile.yosys.liberty must name synth.liberty: $(cat "$W/r11i.json")"
+# synth.liberty is readable from ANY command, so `lhd pass abc` picks up a
+# missing one as a directed missing_file (not a silent fall back to the default)
+"$LHD" pass abc --top top lg:"$W/no_such_lg" --set synth.liberty="$W/no_such.lib" -q >"$W/r11j.json" 2>/dev/null \
+  && fail "pass abc must reject a missing synth.liberty"
+grep -q '"class":"missing_file"' "$W/r11j.json" \
+  || fail "pass abc must resolve synth.liberty (missing_file expected): $(cat "$W/r11j.json")"
+
 # 12. Typo suggestions: an unknown option whose LEAF matches real options lists
 # them ("maybe you meant"), e.g. potato.vcd -> sim.vcd.
 "$LHD" compile "$PRP" --set potato.vcd=1 --workdir "$W/w12" -q >"$W/r12.json" 2>/dev/null && fail "--set potato.vcd must fail"
@@ -210,6 +339,79 @@ grep -q "maybe you meant:" "$W/r12.json" || fail "leaf-match suggestion missing:
 # so nobody has to run the second command themselves
 grep -q "sim.vcd=false" "$W/r12.json" || fail "inline sim.vcd=default line missing: $(cat "$W/r12.json")"
 "$LHD" compile "$PRP" --set cgen.strict=1 --workdir "$W/w12b" -q >"$W/r12b.json" 2>/dev/null && fail "--set cgen.strict must fail"
-grep -q "formal.strict=true" "$W/r12b.json" || fail "wrong-pass inline suggestion missing: $(cat "$W/r12b.json")"
+
+# 13. The REMOVED lec.* namespace names no lhd-printed surface: every help page
+# and describe record spells the knobs formal.* / formal.lec.* -- what --set
+# actually accepts (§11 above pins the rejection of lec.*).
+no_lec() {  # $@ = an lhd argv whose output must not advertise lec.*
+  "$LHD" "$@" 2>&1 | grep -qE '(^|[^.a-z_])lec\.flag|--set lec\.|legacy lec\.' \
+    && fail "lhd $* still advertises the removed lec.* namespace"
+  return 0
+}
+# The full command/format matrix is covered in-process by lhd_options_test.
+for m in pretty jsonl; do
+  no_lec help --diag-fmt "$m"
+done
+
+
+# Retired labels are not public even when the kernel still uses their EPRP
+# counterparts. Cover discovery, direct setting, and namespace aliases.
+public_options=$("$LHD" list options)
+# The exhaustive spelling matrix runs through parse_args and validation in
+# //lhd:lhd_options_test. Keep CLI envelope coverage for each namespace here.
+for retired in compile.cgen.verbose formal.stats pass.abc.stats sim.flatten; do
+  echo "$public_options" | grep -q "\"name\":\"$retired\"" && fail "$retired remains listed"
+  "$LHD" compile "$PRP" --set "$retired=1" -q >"$W/retired.json" 2>&1 && fail "$retired remains accepted"
+  grep -q 'no longer a public option' "$W/retired.json" || fail "$retired lacks a removal diagnostic: $(cat "$W/retired.json")"
+done
+for retired in upass.dce pass.formal.active cgen.verbose; do
+  "$LHD" compile "$PRP" --set "$retired=1" -q >"$W/retired_alias.json" 2>&1 && fail "$retired bypassed retirement"
+  grep -q 'no longer a public option' "$W/retired_alias.json" || fail "$retired lacks a removal diagnostic"
+done
+cat >"$W/internal.toml" <<'EOF'
+[upass]
+import_defer = true
+EOF
+"$LHD" compile "$PRP" --config "$W/internal.toml" -q >"$W/internal.json" 2>&1 && fail "config exposed an internal label"
+grep -q 'no longer a public option' "$W/internal.json" || fail "config lacks an internal-label diagnostic"
+
+# --stats uses the same canonical setting and duplicate-value rule as --set.
+for order in flag_first set_first; do
+  if [ "$order" = flag_first ]; then
+    set -- --stats --set lhd.stats=false
+  else
+    set -- --set lhd.stats=false --stats
+  fi
+  "$LHD" compile "$PRP" "$@" -q >"$W/stats_conflict.json" 2>&1 && fail "conflicting stats settings accepted ($order)"
+  grep -q 'given twice with different values' "$W/stats_conflict.json" || fail "stats conflict was not canonicalized"
+done
+"$LHD" compile "$PRP" --stats --set lhd.stats=true -q >"$W/stats_same.json" 2>&1 || fail "identical stats settings rejected"
+cat >"$W/stats.toml" <<'EOF'
+[lhd]
+stats = false
+EOF
+"$LHD" compile "$PRP" --config "$W/stats.toml" --stats --diag-fmt pretty --emit-dir lg:"$W/stats_lg" --workdir "$W/stats_w" \
+  >"$W/stats_override.json" 2>&1 || fail "--stats failed to override config"
+grep -q 'phases\[stats\]' "$W/stats_override.json" || fail "--stats did not override config false"
+
+
+# Preprocessor configuration uses the existing native reader argv interface.
+mkdir -p "$W/include dir"
+cat >"$W/include dir/option_header.svh" <<'EOF'
+`define HEADER_VALUE 1'b1
+EOF
+cat >"$W/reader_flags.sv" <<'EOF'
+`include "option_header.svh"
+module reader_flags(input a, output y);
+`ifdef MUST_UNDEFINE
+  nonexistent_module unexpected();
+`endif
+  assign y = a & `HEADER_VALUE & `EXTERNAL_VALUE;
+endmodule
+EOF
+"$LHD" compile "$W/reader_flags.sv" --reader slang --top reader_flags \
+  --emit-dir lg:"$W/reader_flags_lg" --workdir "$W/reader_flags_w" -q \
+  -- -I "$W/include dir" -DEXTERNAL_VALUE=1 -DMUST_UNDEFINE -UMUST_UNDEFINE \
+  >"$W/reader_flags.json" 2>&1 || fail "reader -I/-D/-U passthrough failed: $(cat "$W/reader_flags.json")"
 
 echo "PASS: lhd list options / describe pass.flag / --set validation / flag-order freedom / per-command --help options / sim namespace"

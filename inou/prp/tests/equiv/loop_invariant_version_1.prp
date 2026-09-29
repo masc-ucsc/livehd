@@ -1,0 +1,5 @@
+/*
+:name: loop_invariant_version_unrolled
+:type: equiv
+:set: compile.unroll=true
+*/

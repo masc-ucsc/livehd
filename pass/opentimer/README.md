@@ -9,8 +9,8 @@ read-back is the cheap per-region phase-1 estimate.
 ## Usage
 
 ```
-lhd compile design.prp --top m --recipe O1 --emit-dir lg:g
-lhd pass abc --top m lg:g --emit-dir lg:net --set abc.library=cells.lib
+lhd compile design.prp --top m --emit-dir lg:g
+lhd pass abc --top m lg:g --emit-dir lg:net --set synth.liberty=cells.lib
 lhd pass opentimer --top 'm__c0' lg:net cells.lib --workdir W
 ```
 
@@ -32,6 +32,62 @@ lhd pass opentimer --top 'm__c0' lg:net cells.lib --workdir W
 - Options: `--set pass.opentimer.margin=<0-100>` (criticality coloring
   threshold), `--set pass.opentimer.qor=FILE` (report path; `lhd pass
   opentimer` defaults it to `<workdir>/timing.json` under `--workdir`).
+  `--stats` adds one row per mapped `(definition,color)` while retaining the
+  whole-design critical-path report.
+
+## Incremental reuse (`<workdir>/sta_cache/`)
+
+Liberty macros retain their vector ports: every bus bit connects to its own
+timing pin, including upper bits consumed through slices. Bus-level attributes
+and timing arcs are inherited by member pins. Lookup tables can inherit their
+axes from a named template; malformed value counts are rejected before writing
+outside the allocated table. The OpenTimer dependency patch is included in the
+STA cache salt.
+
+With a user-named `--workdir` and `lhd.incremental` (default true) the pass
+keeps a **persistent STA result cache** — the third reuse tier next to the
+compile cache and `pass.abc`'s `abc_cache/`. It exists because
+`pass.opentimer` is 70–97% of a warm `lhd synth` on the large blocks: with
+`pass.abc` reusing every colored region and landing at a few seconds, re-timing
+the identical netlist from scratch was the whole remaining cost, which is why
+whole-flow synthesis reuse measured 1.2–1.4× while its dominant pass had no
+cache at all.
+
+The key is **the netlist itself** — `semdiff::canonical_digest` over the timed
+top, Merkle-folded through every region body — plus the timing environment: the
+Liberty/SDC/SPEF/VCD file *content*, `--top`, `hier`, `margin`, `--stats`, and
+`kStaSrcSalt` (a build-time content hash of `pass/opentimer` + `pass/partition`
++ the `@opentimer` pin, so a timing-engine change drops every record with no
+human in the loop). Keying on the netlist rather than on the upstream sources is
+what makes it sound: `pass.abc`'s intra-run cross-name reuse means a cold and a
+warm run can legitimately produce slightly different netlists, and only the
+graph about to be timed decides the timing.
+
+A hit replays the pass's **whole** observable output — the report block, the
+`slowest delay:` summary line, the per-color `--stats` rows and the
+`native-comb-boundary` warning — and never parses the Liberty or builds a timing
+graph (the same lazy-startup rule `pass.abc` applies to `Abc_Start`/`read_lib`).
+`resynth` is the one field NOT taken from the cache: it says what *this* run's
+`pass.abc` did, not what the netlist is, so the hit path re-stamps it from the
+graph. Only an error-free analysis is stored — an incomplete timing graph
+already failed the run, and caching its numbers would replay a failure as a
+pass. A netlist with an anonymous state cell has no reproducible identity
+(`digestable:false` in the telemetry) and always re-times.
+
+Counters ride the report's `incremental` member and the result envelope's
+`incremental.sta` (`enabled`, `hits`, `misses`, `digestable`, `lookup_ms`).
+At most 32 analyses are kept per workdir, oldest insertion dropped first, so an
+option sweep over one design cannot grow the cache without bound. Measured on
+`xs_renametable` (464 colors, 1.4 M gates): STA 50.2 s → 1.4 s, whole-flow
+`lhd synth` 65.7 s → 10.9 s and peak RSS 23.3 GB → 1.9 GB; on `minion` (545
+colors, 2.0 M gates) 86.4 s → 2.5 s and 31.6 GB → 1.1 GB.
+
+A cache hit is also where the pass's MEMORY goes: it never builds a timing
+graph, and the whole cost of a cold analysis is downstream of that. On minion,
+stage peaks are 1.0 GB entering the pass, 3.4 GB after the hierarchy flatten,
+12.8 GB after `build_circuit` and 29.7 GB after `compute_timing` — so the
+netlist and the design library are a rounding error next to `ot::Timer` and the
+per-bit net bookkeeping, and reuse is the only lever that removes them.
 
 ## The timing report (`timing.json`, envelope `"qor"` member)
 
@@ -39,7 +95,9 @@ lhd pass opentimer --top 'm__c0' lg:net cells.lib --workdir W
 {"schema_version":1,"kind":"sta","designs":[
   {"module":"m__c0","max_delay":0.6,"critical_pin":"g96_XOR2x1:Y",
    "critical_src":"design.prp:11",
-   "endpoints":[{"pin":"…","delay":…,"src":"file:line"},…]}]}
+   "endpoints":[{"pin":"…","delay":…,"src":"file:line"},…],
+   "colors":[{"module":"m__c0","color":0,"cells":42,
+               "max_arrival":0.6,"resynth":1},…]}]}
 ```
 
 `max_delay` is the worst MAX-corner arrival over all gate output pins (library
@@ -51,22 +109,74 @@ result envelope's `"qor"` member (same channel as pass.abc's `abc-map` QoR;
 discriminate by `"kind"`). Every annotated gate output also gets the
 `pin_delay` pin attribute in-graph.
 
+With `--stats`, `colors` contains every mapped color, including colors with no
+Liberty cells. `max_arrival` is the largest end-to-end arrival observed at a
+cell output belonging to that color (so it includes upstream-color delay);
+`cells` is occurrence-weighted in the selected timed top. `resynth` is carried
+from the ABC-produced netlist: a full/cold build is 1, while an incremental ABC
+cache hit is 0. Pretty mode renders each object on one `sta[stats]` line.
+
 ## Timing model
 
-- **Flops/memories are path boundaries**, not cells (pass.abc keeps them
-  native; the Liberty stays combinational). Each consumed flop Q / memory read
-  port becomes a virtual primary input arriving at 0, so flop-to-flop segments
-  are scored; din/en/addr cones end at their driving gate pins. Clock trees
-  are not modeled. `min period ≈ max_delay` up to setup/clock-skew terms.
+- **Flops/latches/memories are path boundaries**, not cells (pass.abc keeps
+  them native; the Liberty stays combinational). Each consumed flop/latch Q or
+  memory read port becomes a virtual primary input arriving at 0, so
+  state-to-state segments are scored; din/en/addr cones end at their driving
+  gate pins. A latch is a hard timing break: transparency and time borrowing
+  are intentionally not modeled. Clock trees are not modeled. `min period ≈
+  max_delay` up to setup/clock-skew terms.
 - ABC's builtin tie cells (`_const0_`/`_const1_`) contribute no arrival.
 - Primary inputs arrive at 0 with slew 0 unless an `.sdc` overrides them
   (`create_clock -period`, `set_input_delay/-transition`, `set_output_delay`;
-  `[get_ports X]` targeting only).
+  `[get_ports X]`, `[all_inputs]` and `[all_outputs]` targeting).
+- `pass.opentimer.io_load` sets primary-output load in fF; a negative value
+  preserves the timer default. The load participates in the STA cache key.
+  Outputs attach to resolved driver nets after wiring-node traversal, so output
+  aliases and internal readers all contribute load to their shared producer.
+- Timing JSON includes physical cell area/count, native-state and opaque-logic
+  counts, and cell-timing/constraint coverage flags. Missing Liberty area is
+  omitted rather than counted as zero. These flags support the whole-design
+  `pass.usyn` comparison; they do not certify physical signoff. A single ideal
+  virtual clock can certify combinational I/O constraints as described below.
+  Physical/multiple clocks, ignored commands/modifiers, unmatched ports and
+  SPEF coverage remain uncertified.
 - Multi-bit values traverse the netlist glue (`Get_mask`/`Set_mask`/... with
   constant masks) via the pin tracker, which rewires consumers to per-bit
   `port.N` nets. Tracker ids of trackable-node outputs are `n$`-prefixed
   internally so a region boundary port that pass.partition named after a
   source wire (e.g. a port literally called `get_mask_20`) cannot collide.
+
+## Single virtual-clock I/O timing
+
+For a completely mapped combinational design, the reader supports one
+`create_clock -name NAME -period T` with no physical source or custom waveform.
+Every primary input and output must have explicit `set_input_delay -clock NAME`
+and `set_output_delay -clock NAME` values covering both min/max corners and both
+rise/fall transitions. Omitting the selectors applies a value to both corners
+and transitions. Separate values and subsequent per-transition overrides work.
+Input transitions can still be specified independently.
+
+The virtual clock's launch edge is zero. Input delays are arrival times relative
+to it. An output's MAX required arrival is `T - output_max_delay`; its MIN required
+arrival is `-output_min_delay`. A negative minimum output delay therefore creates
+a positive hold requirement. The report's `clock_constraints` object includes
+the period, worst setup/hold slack and a completeness flag. These fields are
+retained on STA cache hits. The existing `max_delay` remains the raw maximum
+internal arrival; it does not include the external output delay.
+
+`pass.usyn` uses `period - setup_slack` (clamped at zero) for its clocked delay
+comparison, includes the clock period as a timing target, and respects any
+stricter explicit mapper delay target. It rejects introducing a hold violation
+when the baseline meets hold, or worsening a baseline hold violation. This
+retains the existing policy of preferring an improved delay when neither design
+meets setup; a published improvement is not a claim that timing is met.
+
+This certificate requires both corner libraries' cell timing coverage and no
+native state, physical clock pins, or sequential/non-combinational Liberty arcs.
+Missing corner/transition constraints, unknown references, physical or multiple
+clocks, waveforms, falling-clock modifiers and other unsupported semantics keep
+`constraints_complete=false`. Unclocked output delays retain their legacy raw
+required-arrival interpretation and cannot certify a QoR replacement.
 
 ## Known limitations
 
@@ -75,7 +185,12 @@ discriminate by `"kind"`). Every annotated gate output also gets the
 - The `margin` criticality coloring (`populate_table`/`backpath_set_color`)
   still has the TODO.txt bugs: it back-walks only the single worst edge and
   stops at flops, so it under-marks launch-to-capture paths. The JSON report
-  does not depend on it.
+  does not depend on it, and neither does an STA cache hit: a hit replays the
+  report but does not re-mark node colors. That marking is unobservable today
+  (with the default `hier=true` it lands on the scratch flattened def, which is
+  deleted, and this pass never saves its input library), so it is a limitation
+  of the marking rather than of the cache — but a future consumer of those
+  colors would have to be fed from the record.
 - SDC support is the small subset listed above; no SPEF-less wire-load model
   (zero wire delay without SPEF).
 

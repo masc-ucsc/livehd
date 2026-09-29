@@ -1,0 +1,6 @@
+{
+  "source": "../equiv/mem_init_tuple.prp",
+  "top": "regi2",
+  "synth_set": "pass.abc.memory=true",
+  "lec_set": "formal.bound=2"
+}

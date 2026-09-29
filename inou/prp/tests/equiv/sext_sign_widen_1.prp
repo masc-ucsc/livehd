@@ -1,0 +1,12 @@
+/*
+:name: sext_sign_widen_1
+:type: lec
+:lec_top: widen
+:set: compile.formal.mode=none
+*/
+// Sign extension must agree with explicit fill or native signed arithmetic.
+comb widen(x:u64) -> (r:u64) {
+  mut s:u64 = x#[0..=31]
+  if x#[31] != 0 { s#[32..=63] = 0xFFFFFFFF }
+  r = s
+}

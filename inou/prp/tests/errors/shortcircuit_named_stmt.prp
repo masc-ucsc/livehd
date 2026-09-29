@@ -1,0 +1,19 @@
+/*
+:name: shortcircuit_named_stmt
+:type: error
+:error: modulo by zero
+:help: guard the divisor
+*/
+
+// 2c-shortcircuit only skips an OPERAND sub-expression. A statement is always
+// evaluated -- 02-basics.md: "Statements are evaluated one after another in
+// program order." `z` is computed before the `or` runs, so hoisting the
+// illegal operation into its own statement must NOT buy the short-circuit
+// exemption, even though the `or` below would have skipped the operand.
+
+pub mod top(a:u8) -> (y:u8@[0]) {
+  const N = 0
+  const z = 64 % N // locate_error_here
+  cassert(N == 0 or (z == 0))
+  y = a
+}

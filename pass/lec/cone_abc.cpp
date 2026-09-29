@@ -21,6 +21,8 @@
 #include <utility>
 #include <vector>
 
+#include "hash_util.hpp"
+
 // clang-format off
 // ABC headers must stay in dependency order: abc.h defines Abc_Frame_t (used by
 // main.h) and the word/namespace macros. Do not sort. ABC's headers must never
@@ -615,21 +617,10 @@ private:
 // ---- canonical cone digest --------------------------------------------------
 namespace {
 
-uint64_t mix64(uint64_t x) {
-  x += 0x9e3779b97f4a7c15ULL;
-  x  = (x ^ (x >> 30U)) * 0xbf58476d1ce4e5b9ULL;
-  x  = (x ^ (x >> 27U)) * 0x94d049bb133111ebULL;
-  return x ^ (x >> 31U);
-}
+using livehd::hash_util::combine64;
+using livehd::hash_util::mix64;
 
-uint64_t hcomb(uint64_t h, uint64_t v) { return mix64(h ^ (v + 0x9e3779b97f4a7c15ULL + (h << 6U) + (h >> 2U))); }
-
-uint64_t hstr(uint64_t h, std::string_view s) {
-  for (const char c : s) {
-    h = (h ^ static_cast<unsigned char>(c)) * 0x100000001b3ULL;  // FNV-1a
-  }
-  return mix64(h);
-}
+uint64_t hstr(uint64_t h, std::string_view s) { return mix64(livehd::hash_util::fnv1a64(s, h)); }
 
 // The bits of a term that DEFINE it, as text. Kind + sort pin the shape; the
 // leaf payloads pin the identity (a symbol is its name -- two cones over the
@@ -719,15 +710,15 @@ std::string cone_digest(const cvc5::Term& t) {
     if (!node_payload(entry.first, pay, name_seq, sym_ix)) {
       return {};  // no stable identity anywhere in the DAG => never cache this cone
     }
-    uint64_t a = hstr(0xcbf29ce484222325ULL, pay);
+    uint64_t a = hstr(livehd::hash_util::kFnv1a64_offset, pay);
     uint64_t b = hstr(0x9ae16a3b2f90404fULL, pay);
     for (size_t i = 0; i < entry.first.getNumChildren(); ++i) {
       const auto it = memo.find(entry.first[i]);
       if (it == memo.end()) {
         return {};  // cannot happen (post-order), but never hash a partial DAG
       }
-      a = hcomb(a, it->second.first);
-      b = hcomb(b, it->second.second ^ 0x5851f42d4c957f2dULL);
+      a = combine64(a, it->second.first);
+      b = combine64(b, it->second.second ^ 0x5851f42d4c957f2dULL);
     }
     memo.emplace(entry.first, std::make_pair(a, b));
   }

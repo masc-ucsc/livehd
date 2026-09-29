@@ -1,0 +1,23 @@
+/*
+:name: cond_port_not_bool
+:type: error
+:error: condition must be boolean, got integer
+*/
+
+// The condition rule applies to a module PORT exactly as it does to a local.
+// It used not to: a port is never a table-backed value (its declared type
+// rides the Lnast io_meta side-channel), so typecheck's kind lookup came back
+// `unknown` and the check was skipped — `if en {` on a `u1` PORT compiled
+// while the identical `mut en:u1` local was refused. Eight fixtures in this
+// repo were written against that hole.
+//
+// The companion typecheck_cond_not_bool.prp pins the LOCAL spelling and
+// bad_if_expr_compr.prp the if-EXPRESSION one.
+
+pub mod cond_port_not_bool(en:u1, d:u8) -> (q:u8@[0]) {
+  mut o:u8 = 0
+  if en {  // locate_error_here
+    o = d
+  }
+  q = o
+}

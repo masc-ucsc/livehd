@@ -3,115 +3,58 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TODO 2p-piper — pass.piper: extract pipeline timing out of upass_tolg</title>
+<title>TODO 2p-piper — Pyrope clock and timing type checking</title>
 <link rel="stylesheet" href="../todo.css">
 </head>
 <body>
 <nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
-<h1><strong class="item-id">2p-piper</strong> pass.piper — move pipeline-timing resolution out of <code>upass_tolg</code> into an lgraph pass</h1>
+<h1><strong class="item-id">2p-piper</strong> Pyrope clock and timing type checking</h1>
 
-<p><strong>Goal (unchanged): consolidation.</strong> The pipeline-timing resolution — &sigma;
-interval propagation, <code>@[N]</code> discharge, depth narrowing — lives today as an
-<em>inline</em> class at the tolg seam. Extract it into a standalone, re-runnable lgraph pass
-<code>pass.piper</code> (no <code>pass/piper/</code> exists yet), leaving tolg to lowering +
-attr stamping only. <strong>The original design premise is dead:</strong> there is no
-<code>Ntype_op::Stage</code> cell and none is needed — the landed mechanism carries pipeline
-depth as comptime pins on plain <code>Flop</code> cells, and the resolution/narrowing/discharge
-already landed inside tolg. This page re-specs the extraction against that reality.</p>
+<p><strong>Goal.</strong> Extend Pyrope's type system so it captures clock and pipeline
+timing intent, then checks that the generated LGraph implements that intent. A clock,
+edge/domain relationship, or cycle constraint must not be lost silently while lowering
+source code into flops, latches, memories, submodules, and <code>Clock_cell</code>s.</p>
 
-<h2>Landed mechanism — the starting point</h2>
-<p>Pipeline depth is a <em>cell parameter</em>, never replicated cells: every <code>Flop</code>
-has comptime const <code>pipe_min</code>/<code>pipe_max</code> sink pins (pids 8/9,
-<a href="../../graph/cell.cpp"><code>graph/cell.cpp:248-257</code></a>; unset = depth 1;
-<code>min==max</code> = fixed; <code>min&lt;max</code> = tool's choice — cgen realizes
-<code>pipe_min</code> stages,
-<a href="../../inou/cgen/cgen_verilog.cpp"><code>cgen_verilog.cpp:2167-2180</code></a>).
-<a href="../../upass/timecheck/upass_timecheck.cpp"><code>upass.timecheck</code></a> gives LNAST-level
-best-effort early diagnostics (discharges trivially-fixed <code>@[N]</code> by stamping
-<code>const("checked")</code>, defers hard cases);
-<a href="../../upass/pipe/upass_pipe.cpp"><code>upass.pipe</code></a> appends the
-<code>%pipe_*</code> output flops for <code>pipe</code> lambdas. The real work is the inline
-<code>Time_checker</code>
-(<a href="../../upass/tolg/upass_tolg.cpp"><code>upass_tolg.cpp:5499-6258</code></a>, run at the
-tolg seam ~<code>6885</code> for <code>pipe</code>/<code>mod</code>/<code>comb</code>): (1) Tarjan
-SCC classifies flops STATE vs feedforward stage (comb-loop + register-feedback errors); (2) two-pass
-forward (min,max) &sigma; interval propagation (inputs (0,0), consts unify with anything, comb =
-equal-meet, stage <code>Flop</code> adds its depth, <code>Sub</code> adds its pinned
-<code>attrs::time_range</code>, state pins &sigma;(q)=&sigma;(din)); (3) narrows LN-inserted pipe
-output flops to the body deficit by rewriting their <code>pipe_min</code>/<code>pipe_max</code>
-const pins — (0,0) realizes as a wire, &sigma;&gt;min is the latency-exceeded error; (4) discharges
-every <code>pending_time</code> record
-(<a href="../../graph/attrs.hpp"><code>attrs.hpp:208-215</code></a>) — verified records get
-<code>.del()</code>, mismatches error. The <code>stage[N]</code>/<code>@[N]</code> LEC equiv suite
-(<code>prp-equiv-*</code>, <a href="../../inou/prp/tests/equiv/"><code>inou/prp/tests/equiv/</code></a>)
-and most error cases (<a href="../../inou/prp/tests/errors/"><code>inou/prp/tests/errors/</code></a>)
-already exist — they are the parity bed for the migration, not pending work.</p>
+<h2>Existing foundation</h2>
+<p><code>@[N]</code>, ranged pipeline depths, <code>pipe_min</code>/<code>pipe_max</code>,
+<code>attrs::time_range</code>, and <code>pending_time</code> already carry part of the
+timing contract. The current inline <code>Time_checker</code> in
+<code>upass/tolg/upass_tolg.cpp</code> propagates cycle intervals and checks many fixed
+pipeline constraints. Keep that behavior and its existing error/equivalence tests while
+turning it into a coherent type check.</p>
 
 <h2>Pending</h2>
 <ol>
-<li><strong>Extract <code>Time_checker</code> &rarr; <code>pass/piper/</code>.</strong> The blocker
-is that the checker consumes six <em>in-memory</em> maps handed over from the lowering builder
-(<code>take_pending_checks / flop_depths / sub_times / plain_reg_flops / inserted_flops /
-wire_cuts</code>, <a href="../../upass/tolg/upass_tolg.cpp"><code>upass_tolg.cpp:5450-5469</code></a>)
-— that coupling is what keeps it inside tolg. Three are already durable on the graph
-(<code>pending_time</code> attr, <code>pipe_min</code>/<code>pipe_max</code> pins, Sub
-<code>attrs::time_range</code>); the other three (<code>plain_regs_</code> state-eligibility,
-<code>inserted_</code> LN-pipe-flop marker, <code>wire_cuts_</code> comb-cycle markers) need small
-marker attrs or structural re-derivation. Standard plumbing:
-<code>pass/piper/{BUILD, pass_piper.{hpp,cpp}, piper_test.cpp}</code>, <code>Pass_plugin</code>
-registration (template <a href="../../pass/sample/pass_sample.cpp"><code>pass/sample</code></a>),
-pass order <code>tolg &rarr; piper &rarr; cprop</code>. Keep the <code>comb</code>-top
-acyclicity-only phase (2c-wire) working across the seam — either piper handles <code>comb</code>
-tops too, or tolg retains a minimal comb-loop check.</li>
-<li><strong>Real range narrowing.</strong> Today narrowing only fires on LN-inserted output flops
-with a <em>fixed</em> body &sigma; ("ranged body sigma — declared depth stands",
-<a href="../../upass/tolg/upass_tolg.cpp"><code>upass_tolg.cpp:5956</code></a>), and discharge
-demands <em>exact interval equality</em> (<code>upass_tolg.cpp:6038</code>) even though the attr
-contract documents "computed &sube; asserted" (<code>attrs.hpp:208-212</code>). piper should do the
-constraint intersection the original spec wanted — intersect ranged flop depths against
-<code>@[N]</code>/interface constraints, pick the minimum legal depth where a range stays free,
-error on empty intersection — and settle subset-vs-equality for discharge.</li>
-<li><strong>2 missing error tests</strong> (3 of the 5 originally listed exist:
-<code>cycle_check_mismatch</code>/<code>cycle_lhs_mismatch</code>, <code>pipe_bad_mix</code>/<code>call_operand_misaligned</code>,
-<code>reg_home_mismatch</code>). Re-specified: (a) <em>unsatisfiable depth range</em> — a ranged
-<code>stage[A..=B]</code> whose interval cannot meet a fixed <code>@[N]</code>/output cycle
-(the ranged-vs-fixed conflict path is untested; <code>mod_cycle_range</code> only covers
-fixed-vs-declared-range); (b) <em>leftover-obligation guard</em> — the residual-Stage-at-cgen guard
-is obsolete (ranged <code>pipe_min&lt;pipe_max</code> flops are <em>legal</em> at cgen), but its
-landed analogue is real: "records still present after the checker are a compile error"
-(<code>attrs.hpp:212</code>) has no enforcement point outside the checker's own run — piper should
-own a leftover-<code>pending_time</code> check, exercised by a gtest on a hand-built graph.</li>
-<li><strong>Decide where the global &sigma; timing lives.</strong> Today &sigma; is computed
-per-lambda at the tolg seam and thrown away; cross-module latency flows only through the pinned
-per-instance <code>time_range</code> on <code>Sub</code> nodes. Decide: v1 piper stays per-graph
-with Sub contributions (matching today), or persists &sigma;/per-module latency (an attr or library
-side table) so a later hierarchical run and LSP queries can read it without re-solving.</li>
+<li><strong>Define the clock/timing type contract.</strong> Specify the source-visible and
+inferred facts needed to distinguish clock domains and edges and to express fixed or ranged
+cycle offsets. Decide which facts belong to a value, state element, lambda interface, or
+module boundary.</li>
+<li><strong>Make the check reusable after lowering.</strong> Move the inline timing checker
+into a standalone <code>pass.piper</code> (or an equivalently clear type-checking boundary)
+so it can validate the generated graph. Persist or structurally recover the lowering facts
+that currently exist only in temporary maps.</li>
+<li><strong>Solve timing ranges as constraints.</strong> Intersect inferred ranges with
+<code>@[N]</code>, interface, and pipeline-depth constraints; choose the minimum legal depth
+when a range remains free; reject an empty intersection; and discharge a constraint when
+the computed range is a subset of the asserted range.</li>
+<li><strong>Check generated clock structure.</strong> Verify that each generated
+<code>Flop</code>, <code>Latch</code>, memory port, submodule boundary, and
+<code>Clock_cell</code> is driven by a clock/edge compatible with its Pyrope type and that
+its realized latency is within the declared range. Clock-domain crossings or lost clock
+metadata must produce a diagnostic rather than silently generating different hardware.</li>
+<li><strong>Keep hierarchy-visible results.</strong> Preserve the inferred clock/timing
+summary per module so callers and later checks can consume it without re-solving the
+lowered body.</li>
+<li><strong>Add focused positive and negative tests.</strong> Cover an unsatisfiable depth
+range, a leftover timing obligation, mismatched clock domains/edges, clock-gated state,
+memory-port clocks, and a hierarchical design whose generated graph agrees with the
+source-level contract.</li>
 </ol>
 
-<h2>Dropped from the old spec</h2>
-<ul>
-<li><code>Ntype_op::Stage</code> cell, <code>is_type_stage()</code>, tolg
-<code>create_stage_cell</code> emission — superseded: depth pins on plain <code>Flop</code>s landed
-instead.</li>
-<li>Residual-<code>Stage</code> guards in cgen/abc/lec/writers — nothing undecided survives; a
-ranged depth is a legal parameter (cgen realizes <code>pipe_min</code>).</li>
-<li>Stage-rewrite step + per-rewrite LEC — flop chains are realized directly by cgen from the depth
-parameter; equivalence is covered by the existing <code>prp-equiv-*</code> suite.</li>
-<li>Folding <code>upass.pipe</code> into piper — insertion is already unified on ranged
-<code>Flop</code> pins; <code>upass.pipe</code> stays as the one LNAST insertion site, piper owns
-only the narrowing.</li>
-<li>Still out of scope (as before): piper-side retiming/rebalancing and <code>.[valid]</code>
-bubble clock-gating — synth owns physical placement.</li>
-</ul>
-
-<h2>Tests</h2>
-<ul>
-<li><strong>Parity first</strong>: the existing <code>inou/prp</code> error + equiv suites must
-behave identically after the move (same diagnostics, same LEC verdicts).</li>
-<li>The 2 new error tests from Pending&nbsp;3, plus a small gtest over hand-built graphs
-(input&rarr;ranged-Flop&rarr;output) asserting &sigma;, chosen depth, and the leftover guard.</li>
-</ul>
+<h2>Scope</h2>
+<p>This task checks clock and timing intent; it does not perform physical retiming,
+pipeline rebalancing, or synthesis placement.</p>
 </main>
 <footer>LiveHD TODO · <a href="../index.html">index</a></footer>
 </body>

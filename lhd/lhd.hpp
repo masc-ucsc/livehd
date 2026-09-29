@@ -8,9 +8,12 @@
 // exit code). No @tag, no ~/.cache, no lock, no `latest` symlink. lhd drives
 // the registered EPRP methods programmatically (Eprp::run_method_now) plus
 // the direct C++ entry points (Lnast::dump, uPass_tolg::run,
-// livehd::Hhds_graph_library). The legacy lgshell REPL was removed
-// 2026-06-04 (lhd is the only driver; `lhd pyrope lsp` serves the LSP).
+// livehd::Hhds_graph_library). lhd is the only driver; `lhd pyrope lsp`
+// serves the LSP.
 
+#include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -37,8 +40,9 @@ enum class Diag_fmt { jsonl, pretty };
 Diag_fmt default_diag_fmt();
 
 struct Options {
-  std::string command;   // compile|lec|scan|pyrope|tool|pass|list|describe|version|help
-  std::string language;  // verilog|pyrope ("" for the IR/meta commands)
+  std::vector<std::string> invocation_argv;  // exact CLI tokens, before normalization/config expansion
+  std::string              command;          // compile|lec|scan|pyrope|tool|pass|list|describe|version|help
+  std::string              language;         // verilog|pyrope ("" for the IR/meta commands)
 
   std::vector<std::string> files;  // positional: source files / list pattern / describe name
 
@@ -64,7 +68,7 @@ struct Options {
   // front-end, so verilog joins the pyrope flow (ln:/lg: emits, in-process
   // lec). `--reader yosys-slang|yosys-verilog` overrides to the yosys path
   // (SV/Verilog -> LGraphs).
-  std::string reader = "slang";
+  std::string reader        = "slang";
   std::string depfile;
   // --unused-inputs PATH (compile): write the declared source-file positionals
   // whose contents did NOT reach the compiled closure (absent from every final
@@ -72,9 +76,7 @@ struct Options {
   // cwd(exec-root)-relative path per line, empty when everything was read; the
   // format Bazel's unused_inputs_list consumes for input pruning.
   std::string unused_inputs;
-  std::string recipe;       // resolved per-command default in the kernel
-  std::string recipe_file;  // deferred (unsupported)
-  std::string config;       // --config lhd.toml: pass-flag defaults (CLI --set/--recipe win)
+  std::string config;  // --config lhd.toml: pass-flag defaults (CLI --set wins)
 
   std::vector<std::pair<std::string, std::string>> sets;  // --set pass[.idx].flag=value
 
@@ -90,34 +92,50 @@ struct Options {
   // cap (0 = unlimited); hier = -1 unset (flat for cat/grep/diff, full for
   // tree), INT_MAX = bare --hier (all levels), else an explicit depth; hops =
   // focus radius around filter matches (reserved).
-  std::string tool_target;
+  std::string              tool_target;
   // `tool tree --target kind:<X>` (repeatable): node kinds to list inside each
   // module of the hierarchy — registers/memories that ride the same instance
   // tree. Empty => the bare instance tree (default). `kind:register` aliases
   // flop/fflop/latch, `kind:memory` aliases memory; any Ntype name (flop, mux,
   // sub, …) also matches exactly.
   std::vector<std::string> tool_kinds;
-  std::string tool_attr;
-  int         tool_max     = 200;
-  int         tool_hier    = -1;
-  int         tool_hops    = 0;
-  int         tool_context = 2;     // `tool diff -C n` text-line context
-  bool        tool_invert  = false; // `tool grep -v`: keep records that do NOT match
-  bool        tool_match   = false; // `tool diff --match`: visualize via the semdiff `match` attribute
+  std::string              tool_attr;
+  int                      tool_max        = 200;
+  int                      tool_hier       = -1;
+  int                      tool_context    = 2;      // `tool diff -C n` text-line context
+  bool                     tool_invert     = false;  // `tool grep -v`: keep records that do NOT match
+  bool                     tool_match      = false;  // `tool diff --match`: visualize via the semdiff `match` attribute
+  bool                     tool_structural = false;  // `tool diff --structural`: strict compile-cache H5 comparison
 
   // `--stats` (canonical `--set lhd.stats=true`): ask whichever pass runs for its
   // aggregate report. Meaning is per consumer: `pass semdiff` prints the
-  // node/register/memory match report, `pass color` the partition-size report, and
-  // `lhd lec` / `lhd formal verify` (canonical knob `formal.stats`) a cvc5
+  // node/register/memory match report, `pass color` the partition-size report,
+  // `pass abc` / `pass opentimer` one row per mapped color (including resynth), and
+  // `lhd lec` / `lhd formal verify` (canonical knob `lhd.stats`) a cvc5
   // solve-insight report (problem size, conflicts = learned clauses, decisions,
   // propagations, restarts, theory lemmas, resource units, timings). The formal
   // consumer also registers a cvc5 plugin that makes the solve ~8x SLOWER, so it is a
   // diagnosis tool — never leave it on, and never time a run with it.
-  bool        stats = false;
+  bool stats = false;
 
-  std::string impl_kind, impl_path, impl_top;  // lec --impl
-  std::string ref_kind, ref_path, ref_top;     // lec --ref
-  std::string formal_filter;                   // formal verify / lec: formal-block name glob
+  // Internal design-load policy: formal verify discharges hierarchy assumptions
+  // with its own engine instead of the compile-time preflight.
+  bool compile_formal_preflight = true;
+
+  // `--set lhd.incremental=true|false` (default true): the ONE switch for every
+  // persistent reuse tier -- the Pyrope compile cache, pass.abc's per-region
+  // cache, and the formal/lec verdict cache. Reuse also needs a user-named
+  // --workdir (the caches live under it; a scratch dir would start cold every
+  // run), so `incremental` means "reuse when there is somewhere to keep it".
+  // false forces an honest cold run with byte-identical outputs (reuse is a
+  // speedup, never an oracle of record) while the telemetry keeps reporting
+  // enabled=false, so a benchmark row can tell a disabled tier from an old
+  // binary. There is deliberately no per-tier switch.
+  bool incremental = true;
+
+  std::string              impl_kind, impl_path, impl_top;  // lec --impl
+  std::string              ref_kind, ref_path, ref_top;     // lec --ref
+  std::string              formal_filter;                   // formal verify / lec: formal-block name glob
   // lec --collapse <def> (repeatable): module-def names the driver has already
   // proven equivalent, forced to the sound black-box path even when --lib could
   // flatten them (proven-module collapse — the parent stops re-solving them).
@@ -133,16 +151,26 @@ struct Options {
   // pyrope command; harmless defaults elsewhere.
   bool        fmt_inplace = false;  // -i / --inplace: rewrite each input file
   std::string fmt_output;           // -o / --output FILE: write to FILE (one input)
-  int         fmt_indent  = 0;      // --indent N: spaces per level (0 => prpfmt default 4)
-  int         fmt_width   = 0;      // --width N: wrap column (0 => prpfmt default 80)
-  bool        fmt_verify  = false;  // --verify: re-parse the formatted output
+  int         fmt_indent = 2;       // --indent N: spaces per level
+  int         fmt_width  = 132;     // --width N: wrap column
+  bool        fmt_verify = false;   // --verify: re-parse the formatted output
+
+  // Source-only repetition analysis (`pyrope style`).
+  size_t style_min_repeats          = 7;
+  size_t style_max_block_statements = 128;
+  size_t style_max_findings         = 20;
 
   std::string result_json;
   std::string workdir;
+  // Set by workdir() when it MINTED an ephemeral scratch dir because the user
+  // named none. Every persistent-reuse gate (compile cache, abc_cache,
+  // formal verdict cache) keys on "user-named workdir", so a command that
+  // needs a scratch path BEFORE it runs a sub-flow (synth mints <scratch>/synth
+  // and then compiles into it) must not turn reuse on by accident.
+  bool        workdir_scratch = false;
 
   std::vector<std::string> raw_args;  // after `--` (elaborate verilog: raw slang args)
 
-  int  jobs    = 0;
   bool quiet   = false;
   bool verbose = false;
 
@@ -160,25 +188,40 @@ struct Options {
   std::vector<std::pair<std::string, std::string>> sim_args;
   // `sim` debug-replay flags (sim_checkpoint_debug_plan). The driver loads the
   // nearest checkpoint <= the target and resumes from there. -1 = not requested.
-  long sim_restart_at = -1;  // --restart-at/--restart-cycle N: jump to cycle N
-  long sim_vcd_from   = -1;  // --vcd-from Y: trace VCD starting at cycle Y
-  long sim_vcd_to     = -1;  // --vcd-to Z: trace VCD up to cycle Z (with --vcd-from)
-  bool sim_vcd_on_fail     = false;  // --vcd-on-fail: re-run a failed test with a VCD of the failure region
-  long sim_vcd_fail_window = 20;     // --vcd-fail-window N: cycles before the failure to trace
+  long                                             sim_restart_cycle = -1;  // --restart-cycle N: jump to cycle N
+  long                                             sim_vcd_from      = -1;  // --vcd-from Y: trace VCD starting at cycle Y
+  long                                             sim_vcd_to        = -1;  // --vcd-to Z: trace VCD up to cycle Z (with --vcd-from)
+  bool        sim_vcd_on_fail     = false;  // --vcd-on-fail: re-run a failed test with a VCD of the failure region
+  long        sim_vcd_fail_window = 20;     // --vcd-fail-window N: cycles before the failure to trace
   // `sim` observability: query signal values without re-instrumenting (the driver
   // snapshots scalar signals by hierarchical name). Results land in the result
   // envelope's "debug" member (and `--result-json`).
-  bool        sim_list_signals = false;  // --list-signals: enumerate observable signals, then exit
-  std::string sim_probe;                 // --probe SIG,...: per-cycle JSON trajectory of these signals
-  long        sim_probe_from = -1;       // --probe-from A
-  long        sim_probe_to   = -1;       // --probe-to B
-  std::string sim_break_when;            // --break-when 'SIG OP VALUE|SIG': first cycle the condition holds
+  bool        sim_list_signals    = false;  // --list-signals: enumerate observable signals, then exit
+  std::string sim_probe;                    // --probe SIG,...: per-cycle JSON trajectory of these signals
+  long        sim_probe_from = -1;          // --probe-from A
+  long        sim_probe_to   = -1;          // --probe-to B
+  std::string sim_break_when;               // --break-when 'SIG OP VALUE|SIG': first cycle the condition holds
   // `sim --query FILE|-|{inline}` (2f-sim): a BATCHED JSON request
   // ({schema_version:1, kind:"sim_query", queries:[...]}). Batching is what lets
   // the planner union every question's time range and answer them all from ONE
   // replay; the legacy flags above stay the low-ceremony spelling of the same
   // engine. Answers land in the envelope's "query" member.
   std::string sim_query;
+  bool        sim_observe         = false;  // setup-time hierarchical instrumentation needed by VCD/probe/query
+  bool        sim_runtime_support = true;   // generated checkpoint/probe/query methods; false only for a lean checkpoint-off setup
+  // The RESOLVED `sim.tune.*` vector (explicit --set > sim.tune.file > the
+  // workdir's tuned decision > default), set by `lhd sim` before it compiles
+  // and handed to inou.cgen.sim as concrete labels. Deliberately NOT mirrored
+  // into `sets`: those hash into the run_id and the compile-cache context, and
+  // a store-derived value must move neither. `lhd compile --emit-dir sim:`
+  // leaves it unresolved and resolves explicit + sim.tune.file itself.
+  struct Sim_tune {
+    bool     resolved   = false;
+    bool     dirty      = true;  // the built-in L1 vector (sim_tune_vector.hpp kTuneDefault*)
+    int64_t  fence      = 16;    // std::numeric_limits<int64_t>::max() = no fences ("none")
+    uint64_t live_words = 256;
+    bool     llvm       = false;
+  } sim_tune;
 
   Diag_fmt diag_fmt = default_diag_fmt();
 };
@@ -202,6 +245,138 @@ struct Result {
   std::vector<std::string> outputs;
   std::vector<std::string> recipe_steps;  // the expanded steps that actually ran
 
+  // Per-phase wall clock (steady_clock), milliseconds, in COMPLETION order —
+  // the result's "phases" member. A row is appended when its phase ENDS, so
+  // today (no Phase_timer nests inside another) the array reads as execution
+  // order; a future nested timer would land AFTER the phases it contains, and
+  // would also double-count under the "the consumer sums" rule below, so keep
+  // the timed regions disjoint. Deliberately SEPARATE from recipe_steps:
+  // recipe_steps is the human-readable expanded recipe, carrying the
+  // label-decorated step string ("pass.abc cache_dir:… recipe:…") plus purely
+  // informational lines that never ran as a timed phase. phase_ms holds only
+  // genuinely timed work, keyed by the BARE step name ("pass.abc"), so a
+  // performance consumer can key on it. A name may repeat when a step runs
+  // more than once in a pipeline (the array is ordered; the consumer sums).
+  // Never part of run_id — a wall-clock value in a content hash breaks caching.
+  std::vector<std::pair<std::string, double>> phase_ms;
+
+  // Synthesis CLI envelope observation, including handled failures. The wall
+  // interval starts at main entry and ends just before final result emission;
+  // it encloses all command phases and publication. RSS is this process only,
+  // never a claim about simultaneous memory across its child processes.
+  struct Synthesis_invocation {
+    bool     present               = false;
+    double   wall_ms               = 0;
+    uint64_t parent_peak_rss_bytes = 0;  // zero means unavailable
+  } synthesis_invocation;
+
+  // `lhd compile` incremental front-end accounting (docs/opt_loop_incr.md L8).
+  // Present for a Pyrope source compile with a user-named --workdir, including
+  // lhd.incremental=false (enabled=false + zero counters), so benchmark rows can
+  // distinguish an honestly disabled cache from an old binary that reports no
+  // cache telemetry. `redone_ms` is work on cache misses only; sync/lookup/store
+  // have disjoint Phase_timer rows and never ride this counter.
+  struct Compile_cache_stats {
+    bool     present{false};
+    bool     enabled{false};
+    uint64_t hits{0};
+    uint64_t misses{0};
+    double   redone_ms{0.0};
+    uint64_t store_failed{0};
+    uint64_t refused{0};
+  } compile_cache;
+
+  // pass.abc's incremental region reuse (`lhd synth` / `lhd pass abc`),
+  // harvested from the embedded qor report (harvest_abc_incremental) so the
+  // envelope's `incremental` member carries EVERY reuse tier in one place --
+  // what a stats report builder (../lhdsuite) reads, instead of digging the
+  // counters out of the pass's own qor object. `regions` is the mapped region
+  // count; `store_failed` the regions the cache could not snapshot (each one
+  // re-runs ABC forever -- a bug, not a property of the design).
+  struct Abc_incr_stats {
+    bool     present{false};
+    bool     enabled{false};  // the region cache ran (user --workdir + lhd.incremental); false = honest cold map
+    uint64_t hits{0};
+    uint64_t misses{0};
+    double   hit_ms{0.0};
+    double   miss_ms{0.0};
+    uint64_t regions{0};
+    uint64_t store_failed{0};
+  } abc_incr;
+
+  // pass.opentimer's incremental STA reuse (`lhd synth` / `lhd pass opentimer`),
+  // harvested from the embedded sta report exactly like abc_incr. ONE analysis
+  // per run, so `hits`/`misses` are 0/1 or 1/0; `digestable` is false when the
+  // netlist could not be given a reproducible identity (an anonymous state
+  // cell), which is the one way the tier is enabled and still never hits.
+  struct Sta_incr_stats {
+    bool     present{false};
+    bool     enabled{false};
+    uint64_t hits{0};
+    uint64_t misses{0};
+    bool     digestable{true};
+    double   lookup_ms{0.0};
+  } sta_incr;
+
+  // `lhd lec`'s VERDICT, as a machine-readable value.
+  //
+  // The envelope's `status` is the process outcome, not the proof: an
+  // INCONCLUSIVE lgyosys run and a real proof BOTH exit 0 with
+  // `"status":"pass"` (by design -- an inconclusive comparison must not fail a
+  // pair), so a consumer that reads only `status` records a non-proof AS a
+  // proof. That is the exact conflation lec's verdict discipline exists to
+  // prevent, and a tracker aggregating it silently promotes an unverified
+  // design into a headline comparison (lhdtrack flows/lib/lec.py). Emitted for
+  // every solver, alongside the human verdict line.
+  //
+  //   proven    equivalent (inductively, or exhaustively to `bound` cycles
+  //             when `bounded` -- both are real answers, see PASS(n))
+  //   refuted   a counterexample exists
+  //   unknown   the solver gave up / timed out / could not decide
+  struct Lec_verdict {
+    bool        present{false};
+    std::string verdict{};       // proven | refuted | unknown
+    std::string solver{};        // cvc5 | bitwuzla | lgyosys | …
+    bool        bounded{false};  // proven only to `bound` cycles from reset
+    int64_t     bound{0};        // the depth `bounded` refers to
+    // Independent oracle result; a native proof cannot stand in for this.
+    std::string crosscheck_verdict{};  // empty until invoked; proven | refuted | unknown
+    int         crosscheck_exit_code{-1};
+    bool        crosscheck_bounded{false};  // proven only by lgcheck's complete bounded miter
+    int64_t     crosscheck_bound{0};        // that window, in native design cycles (formal.bound)
+  } lec;
+
+  // Internal hand-off from Tier A (source/LNAST sync) to Tier B (final LGraph  // Internal hand-off from Tier A (source/LNAST sync)
+  // to Tier B (final LGraph restore/store). Not serialized; the public machine contract is the stats object above. A graph
+  // inventory independently records this closure key, so a compile that fails after updating the parse cache cannot authorize a
+  // stale pre-failure graph generation on the next run.
+  std::string                                      compile_cache_scope;
+  std::string                                      compile_cache_context;
+  std::string                                      compile_cache_closure_key;
+  std::vector<std::pair<std::string, std::string>> compile_cache_unit_keys;
+  std::vector<std::string>                         compile_cache_clean_units;
+  std::vector<std::string>                         compile_cache_restored_graphs;
+  // Clean final graph bodies to overlay after a diagnostic-carrying partial
+  // restore is refused and the complete pipeline runs live.
+  std::vector<std::string>                         compile_cache_overlay_graphs;
+  // Unit names of this scope's PRIOR generation (empty when none/incompatible).
+  // Ghost pruning may delete artifacts of a unit that left the closure only
+  // when that unit provably belonged to this same scope's previous compile.
+  std::vector<std::string>                         compile_cache_prior_units;
+  // [mark, end) is the half-open range of diag::sink().records() produced by the
+  // GRAPH PIPELINE — upass, tolg, cprop, pass.formal — which is exactly the set
+  // of stages a warm restore SKIPS, so it is what the generation must carry and
+  // replay to stay diagnostic-equal. Both ends matter: before the mark is the
+  // front end and the deferred-source materialization, and after the end are
+  // the emits; all of those run on a warm restore too, so a record from either
+  // side would be printed twice (or, since the cache key ignores the `--emit`
+  // slots, replayed onto a run that never requested that emit).
+  size_t                                           compile_cache_diag_mark = 0;
+  // Set by graph_pipeline_and_emits once the pipeline stages are done. SIZE_MAX
+  // ("not yet closed") keeps a path that stores without running the pipeline on
+  // the old carry-everything behavior rather than silently carrying nothing.
+  size_t                                           compile_cache_diag_end  = std::numeric_limits<size_t>::max();
+
   // `lhd scan` payload: a pre-serialized JSON array of per-file import lists,
   // embedded verbatim as the result's "scan" member.
   std::string scan_json;
@@ -222,10 +397,25 @@ struct Result {
   // kernel answered from the static catalog alone (`signals`), in REQUEST order.
   std::string sim_query_json;
 
+  // `lhd sim` profile-guided tuning (sim.tune.*): the envelope's "sim_tune"
+  // member, a pre-serialized JSON object built with a rapidjson Writer (applied
+  // vector + per-knob source, this run's activity stats, trial / verdict,
+  // pending step, convergence, the reproducing --set list). Present for every
+  // `lhd sim` that reaches setup or run, enabled or not. `sim_tune_note` is its
+  // one-line human summary for the pretty output.
+  std::string sim_tune_json;
+  std::string sim_tune_note;
+
   // `lhd pass abc` QoR payload (2opt-freq A): the qor.json sidecar content
   // (per-region + total mapped gates/area/critical delay, source-attributed),
   // embedded verbatim as the result's "qor" member.
   std::string qor_json;
+
+  // pass.satopt's stage report (satopt::Report::json: per-stage state, cost,
+  // candidates, proofs, rewrites and budget skips), embedded verbatim as the
+  // result's "satopt" member when compile or `lhd pass satopt` ran it (one
+  // merged report when a command runs it more than once, e.g. lec's sides).
+  std::string satopt_json;
 
   std::string error_class;  // empty when status == pass (future_cli.md taxonomy)
   std::string error_message;
@@ -269,53 +459,277 @@ int  run_meta_command(const Options& opts);
 // derive from it, so the three can never drift. `inline constexpr` so it is one
 // shared definition across translation units.
 struct Sim_set_option {
-  enum class Kind { boolean, non_neg_num, bool_or_file };  // value grammar enforced on --set
-  std::string_view name;                     // flag under sim.*, e.g. "checkpoint_min_secs"
-  std::string_view default_value;            // shown by `lhd list options`
+  // The value grammar enforced on --set:
+  //   boolean      true|false|1|0|on|off
+  //   non_neg_num  a non-negative number
+  //   bool_or_file false|true|FILE (text, not checked)
+  //   backend      auto|slop|llvm
+  //   tri          auto|on|off; true|false|1|0 are accepted aliases (TOML `dirty = true`)
+  //   tune_mode    auto|on|off exactly: a mode, not a boolean
+  //   fence        auto|none|N, N a whole number in [0, 2^20]
+  //   num_or_auto  auto|N, N a whole number in [1, 2^20] (0 is spelled `auto`)
+  //   path         FILE/DIR text; empty = unset; the consumer checks it
+  //   count        a whole number
+  enum class Kind { boolean, non_neg_num, bool_or_file, backend, tri, tune_mode, fence, num_or_auto, path, count };
+  // Where the value takes effect: lhd itself, the generated C++ (baked into
+  // drv.bin, so a --run-only value must match what setup baked -- drv.bin's
+  // `--set` parser checks it), the run (a drv.bin argument), or both.
+  enum class Stage { lhd, codegen, run, both };
+  // The sim_profile.md §3 trial-cost class of a TUNABLE knob (none = not one):
+  // R = a drv.bin argument, H = a host rebuild, G = regenerated C++.
+  enum class Tune { none, perf_r, perf_h, perf_g };
+  std::string_view name;           // flag under sim.*, e.g. "checkpoint_min_secs" or "tune.dirty"
+  std::string_view default_value;  // shown by `lhd list options`
   Kind             kind;
   std::string_view help;  // full help (also `lhd describe sim.flag`)
+  Stage            stage  = Stage::lhd;
+  Tune             tune   = Tune::none;
+  std::string_view tv_key = {};  // the knob's key in the canonical `tv1:` tune vector (d, f, lw, be)
 };
 
 inline constexpr Sim_set_option kSimSetOptions[] = {
-    {"vcd", "false", Sim_set_option::Kind::bool_or_file,
+    {"compile_only",
+     "false", Sim_set_option::Kind::boolean,
+     "compile and link the generated simulator, then stop before executing any testbench. With --run-only, this "
+     "builds an existing <workdir>/sim incrementally without regenerating its sources"},
+    {"vcd",
+     "false", Sim_set_option::Kind::bool_or_file,
      "false|true|FILE — VCD tracing, the ONE vcd knob for every flow. `lhd sim`: any non-false value dumps one VCD "
      "per test to <workdir>/<test.name>.vcd. Compiled sim binaries (--emit-dir sim:): true bakes <top>.vcd, "
-     "FILE bakes that explicit path, false bakes none"},
-    {"vcd_fake_delay", "true", Sim_set_option::Kind::boolean,
+     "FILE bakes that explicit path, false bakes none", Sim_set_option::Stage::codegen},
+    {"vcd_fake_delay",
+     "true", Sim_set_option::Kind::boolean,
      "VCD data settles a few ticks after each clock edge, with X during the settle window (edge->data causality); "
-     "false = plain edge-aligned updates (no X, no delay; smaller/faster trace)"},
-    {"hlop_dir", "", Sim_set_option::Kind::bool_or_file,
+     "false = plain edge-aligned updates (no X, no delay; smaller/faster trace)", Sim_set_option::Stage::codegen},
+    {"hlop_dir",
+     "", Sim_set_option::Kind::bool_or_file,
      "DIR — hlop checkout to build the sim driver against (resolves slop.hpp/blop.hpp/vcd_writer.hpp). Empty = "
      "auto: the bazel runfiles, else the sibling ../hlop of a source checkout. Set it to build the driver against "
      "a WIP hlop — testing new slop/vcd_writer code without reinstalling it is the reason this knob exists"},
-    {"iassert_dir", "", Sim_set_option::Kind::bool_or_file,
+    {"iassert_dir",
+     "", Sim_set_option::Kind::bool_or_file,
      "DIR — iassert checkout to build the sim driver against (resolves iassert.hpp, which slop.hpp pulls in). "
      "Empty = auto: the bazel runfiles, else the sibling ../iassert/src. Same purpose as sim.hlop_dir"},
-    {"cgen_color", "true", Sim_set_option::Kind::boolean,
-     "run pass.color (cgen per-output cones) before inou.cgen.sim so sim codegen can schedule a Sub by output "
-     "cone (breaks a false combinational loop through an instance); coloring is metadata only, NO_COLOR is just "
-     "another partition, so inou.cgen.verilog and an un-split sim are unaffected (default on)"},
-    {"ninja", "", Sim_set_option::Kind::bool_or_file,
+    {"ninja",
+     "", Sim_set_option::Kind::bool_or_file,
      "false|true|PATH — build the sim driver with ninja instead of the built-in parallel compile. Empty (the "
      "default) uses ninja when it is on PATH and the built-in build otherwise; true REQUIRES it; PATH names the "
      "binary. Ninja is what makes the host build incremental (depfile-accurate, so a header edit rebuilds exactly "
-     "its dependents); the built-in path always rebuilds every translation unit. A `build.ninja` reproducing the "
-     "exact build is written into the sim dir either way — `ninja -C <workdir>/sim`"},
-    {"jobs", "0", Sim_set_option::Kind::non_neg_num,
+     "its dependents); the built-in path reuses whatever its own depfiles and command stamps show unchanged. A "
+     "`build.ninja` reproducing the exact build is written into the sim dir either way — `ninja -C <workdir>/sim`"},
+    {"jobs",
+     "0", Sim_set_option::Kind::non_neg_num,
      "host C++ compiles to run concurrently when building the sim driver (0 = one per hardware thread). Each "
      "generated module body is its own translation unit sharing only headers, so the build parallelizes flat; "
      "pin this to reproduce a build-time measurement, or to leave the machine usable on a big design"},
-    {"checkpoint", "true", Sim_set_option::Kind::boolean,
-     "periodic editable state checkpoints of the DUT + testbench (default on; --restart-at needs them)"},
-    {"checkpoint_min_secs", "10", Sim_set_option::Kind::non_neg_num,
-     "wall-clock floor in seconds between checkpoints (a short run writes none)"},
-    {"checkpoint_max", "10", Sim_set_option::Kind::non_neg_num,
-     "max checkpoints kept per test, evenly spaced (older ones are pruned)"},
-    {"checkpoint_max_overhead", "0.10", Sim_set_option::Kind::non_neg_num,
-     "target checkpoint cost as a fraction of run time (caps how often they are taken)"},
-    {"checkpoint_every", "0", Sim_set_option::Kind::non_neg_num,
-     "deterministic cadence: checkpoint every N cycles (0 = time-based, the default)"},
+    {"slop_u",
+     "true", Sim_set_option::Kind::boolean,
+     "materialize LGraph-proven unsigned combinational values as the CANONICAL-unsigned Slop_u<n> instead of a "
+     "lazily-masked Slop<n+1>. Slop makes no promise about storage above bit n-1, so every READ of a stored value "
+     "re-masks; Slop_u pays ONE mask at the write and none at the reads. Reset-free state and other unknown-capable "
+     "boundaries remain Slop. Set false only for lowering comparisons", Sim_set_option::Stage::codegen},
+    {"debug",
+     "false", Sim_set_option::Kind::boolean,
+     "retain runtime validation landings for bitwidth-proven unsigned Slop_u values. The default trusts the proof "
+     "and emits only compile-time width checks, avoiding masks in production generated code", Sim_set_option::Stage::codegen},
+    {"init_zero",
+     "false", Sim_set_option::Kind::boolean,
+     "use zero as the power-on value only for flops and memories that have neither an initializer nor a reset. "
+     "Explicit initial values and runtime reset values are unchanged", Sim_set_option::Stage::run},
+    {"unknown_zero",
+     "false", Sim_set_option::Kind::boolean,
+     "fill every unknown (`?`) literal bit with 0 instead of a random 0/1. Slop carries no runtime X, so a `?` must "
+     "become some concrete bit; the default DRAWS it from the run's seeded PRNG (--seed / lhd.seed, reported as "
+     "run.seed + rng_draws) so an unspecified bit cannot be silently relied on, and the draw is once per literal "
+     "per run — the value is stable across cycles. true restores the deterministic-zero fill, which also lets the "
+     "literal fold at C++ compile time. Orthogonal to sim.init_zero, which covers the power-on value of state "
+     "having neither an initializer nor a reset", Sim_set_option::Stage::both},
+    {"checkpoint",
+     "true", Sim_set_option::Kind::boolean,
+     "periodic editable state checkpoints of the DUT + testbench (default on; --restart-cycle needs them)", Sim_set_option::Stage::run},
+    {"checkpoint_min_secs",
+     "10", Sim_set_option::Kind::non_neg_num,
+     "wall-clock floor in seconds between checkpoints (a short run writes none)", Sim_set_option::Stage::run},
+    {"checkpoint_max",
+     "10", Sim_set_option::Kind::non_neg_num,
+     "max checkpoints kept per test, evenly spaced (older ones are pruned)", Sim_set_option::Stage::run},
+    {"checkpoint_max_overhead",
+     "0.10", Sim_set_option::Kind::non_neg_num,
+     "target checkpoint cost as a fraction of run time (caps how often they are taken)", Sim_set_option::Stage::run},
+    {"checkpoint_every",
+     "0", Sim_set_option::Kind::non_neg_num,
+     "deterministic cadence: checkpoint every N cycles (0 = time-based, the default)", Sim_set_option::Stage::run},
+    // ---- sim.tune.*: the profile-guided tuner (sim_profile.md). Only knobs that
+    // change SPEED, never a simulated value, may live here (the registry check
+    // below enforces it), plus the tuner's own controls.
+    {"tune.profile",
+     "auto", Sim_set_option::Kind::tune_mode,
+     "auto|on|off — profile-guided tuning of the sim.tune.* speed knobs; needs a user --workdir and lhd.incremental. "
+     "auto: while the workdir holds no CONVERGED tune data, runs profile (drv.bin samples state activity; `?` "
+     "literals zero-fill unless sim.unknown_zero is set; checkpoints are skipped) and the next setup may trial ONE "
+     "better vector, kept only if >= 7% cheaper per simulated cycle with byte-identical results; converged data is "
+     "reused with no sampling. on: profile and learn even when converged. off: ignore the workdir's tune data. An "
+     "explicit sim.tune.X or sim.tune.file always wins. The envelope's `sim_tune` member reports what was applied", Sim_set_option::Stage::both},
+    {"tune.dirty",
+     "auto", Sim_set_option::Kind::tri,
+     "auto|on|off (was sim.color_dirty) — the cross-cycle color activation cache, for workloads with long "
+     "stable-input periods. off executes every color once per cycle in static phase order with direct boundary "
+     "assignments; on change-compares boundary writes, runs a color only when an input changed and ends a fully "
+     "quiescent period early. auto = the workdir's tuned decision, else on", Sim_set_option::Stage::codegen,
+     Sim_set_option::Tune::perf_g,
+     "d"},
+    {"tune.fence",
+     "auto", Sim_set_option::Kind::fence,
+     "auto|none|N (was sim.fence_ratio) — fence a module used ONCE into its own simulator colors only when it has "
+     "at least N sites per interface word. A fence lets dirty gating skip a mostly idle module (xs_alu's "
+     "AluDataModule: 2.4x), but every value crossing it is a stored, change-tested slot, which only costs when the "
+     "module toggles every cycle (an LFSR-driven DUT: up to 10x). 0 fences every such module, none fences nothing; "
+     "reused modules always keep their fence. auto = the tuned decision, else none with dirty off and 16 with it on", Sim_set_option::Stage::codegen,
+     Sim_set_option::Tune::perf_g,
+     "f"},
+    {"tune.live_words",
+     "auto", Sim_set_option::Kind::num_or_auto,
+     "auto|N (was sim.live_words) — machine words (64 bits) of live values one simulator color may keep across its "
+     "members. A color boundary costs a stored slot, a compare and a dirty mark per value, so a larger budget means "
+     "fewer, bigger colors (minion 20->256 words: 1.75x cycles/s); a smaller one keeps idle logic finer-grained. "
+     "auto = the tuned decision, else 256", Sim_set_option::Stage::codegen,
+     Sim_set_option::Tune::perf_g,
+     "lw"},
+    {"tune.backend",
+     "auto", Sim_set_option::Kind::backend,
+     "auto|slop|llvm (was sim.backend) — simulator color-kernel backend. llvm is experimental and emits native "
+     "object files directly; a color its lowering rejects is a setup error. auto = the tuned decision, else slop", Sim_set_option::Stage::codegen,
+     Sim_set_option::Tune::perf_g,
+     "be"},
+    {"tune.file",
+     "", Sim_set_option::Kind::path,
+     "FILE — pin the tune vector from a `sim.tune.export` file (how hermetic benchmarks use tuning: a fresh workdir "
+     "never converges in place). Its knobs apply below an explicit --set sim.tune.X and above the workdir's tuned "
+     "decision, in every mode, with or without a --workdir; a file recorded for another design is only a warning"},
+    {"tune.export",
+     "", Sim_set_option::Kind::path,
+     "FILE — write the current tune decision (explicit > sim.tune.file > tuned > default) as a sim.tune.file, with "
+     "its provenance (design structure, converged, activity stats)"},
+    {"tune.profile_dir",
+     "", Sim_set_option::Kind::path,
+     "DIR — where a profiling drv.bin writes its raw run file (default <drv.bin dir>/tune_runs, which the next "
+     "`lhd sim --workdir` ingests). `lhd sim` points its own runs at <workdir>/sim_tune/inbox", Sim_set_option::Stage::run},
+    {"tune.profile_stride",
+     "0", Sim_set_option::Kind::count,
+     "N in [0, 1048576] — TEST ONLY: a fixed profiling sample stride in cycles with no jitter (0 = the "
+     "self-calibrated <= 1% overhead stride)", Sim_set_option::Stage::run},
 };
+
+// Only speed knobs live under sim.tune.*: every entry there is either a tunable
+// knob (a trial-cost class and a tv1 key) or one of the tuner's controls, and
+// every tunable knob lives there. A semantic, observability or plumbing knob
+// placed under `tune` fails the BUILD, not a test.
+consteval bool sim_tune_registry_ok() {
+  for (const auto& s : kSimSetOptions) {
+    const bool in_tune = s.name.starts_with("tune.");
+    const bool control = s.name == "tune.profile" || s.name == "tune.file" || s.name == "tune.export"
+                         || s.name == "tune.profile_dir" || s.name == "tune.profile_stride";
+    const bool knob    = s.tune != Sim_set_option::Tune::none;
+    if (in_tune != (control || knob) || (control && knob) || knob == s.tv_key.empty()) {
+      return false;
+    }
+    if (knob && s.stage != Sim_set_option::Stage::codegen && s.tune == Sim_set_option::Tune::perf_g) {
+      return false;  // a G-class knob regenerates C++: it is a codegen knob by definition
+    }
+  }
+  return true;
+}
+static_assert(sim_tune_registry_ok(), "sim.tune.* holds only speed knobs (with a tv1 key) plus the tuner controls");
+
+// The `synth.*` command-namespace options (consumed by synth_command -- the
+// one-shot compile -> pass.color reduce -> pass.color synth -> pass.abc ->
+// pass.opentimer flow --
+// not pass labels). Same contract as kSimSetOptions: this array is the single
+// source of truth for --set validation, `lhd list options`, and the
+// `lhd synth --help` options block. Pass-level tuning still rides the pass
+// namespaces (`--set abc.adder=cla`, `--set color.hier=false`, ...).
+struct Synth_set_option {
+  enum class Kind { boolean, file, integer, mapper };
+  std::string_view name;
+  std::string_view default_value;
+  Kind             kind;
+  std::string_view help;
+};
+
+// The Liberty file `synth.liberty` resolves to under $HAGENT_TECH_DIR when the
+// knob is empty. ONE default, reached through resolve_liberty by every Liberty
+// reader (`lhd synth`, `lhd pass abc`, `lhd pass opentimer`).
+inline constexpr std::string_view kSynthDefaultLiberty = "sky130_fd_sc_hd__tt_025C_1v80.lib";
+
+// The technology mappers (abc_cleanup.md section 6): `synth.mapper=<name>` in
+// `lhd synth`, `lhd pass <name>` standalone. Every mapper-specific decision of
+// the kernel reads this table.
+struct Mapper {
+  std::string_view name;           // the synth.mapper value and the `lhd pass` subcommand
+  std::string_view method;         // its EPRP pass
+  std::string_view cache_dir;      // <workdir>/<cache_dir>: its incremental region cache
+  std::string_view color_profile;  // pass.color.synth.mapper: the default coloring it wants
+  bool             inherits_abc;   // also reads the pass.abc.* vocabulary (its own namespace wins)
+  bool             timing_files;   // receives the synth.liberty/sdc/spef timing environment
+  // Its own report: `<qor>.<report>.json` (with a `<qor>.provenance` archive)
+  // and the fused envelope's `qor.<report>` member. Empty: none.
+  std::string_view report;
+};
+inline constexpr Mapper kMappers[] = {
+    { "abc",  "pass.abc",  "abc_cache",  "abc", false, false,     ""},
+    {"usyn", "pass.usyn", "usyn_cache", "usyn",  true,  true, "usyn"},
+};
+[[nodiscard]] constexpr const Mapper* find_mapper(std::string_view name) {
+  for (const auto& m : kMappers) {
+    if (m.name == name) {
+      return &m;
+    }
+  }
+  return nullptr;
+}
+[[nodiscard]] constexpr const Mapper* mapper_of_method(std::string_view method) {
+  for (const auto& m : kMappers) {
+    if (m.method == method) {
+      return &m;
+    }
+  }
+  return nullptr;
+}
+
+inline constexpr Synth_set_option kSynthSetOptions[] = {
+    {   "mapper",
+     "abc",  Synth_set_option::Kind::mapper,
+     "abc|usyn: ABC synthesis (pass.abc), or unate synthesis (pass.usyn: a domino-gate LUT cover of every region, "
+     "technology-mapped by ABC, with the ABC flow as the fallback)"                                                             },
+    {  "threads",
+     "0", Synth_set_option::Kind::integer,
+     "shared maximum concurrent ABC workers for synth and pass abc: 0 selects the machine's available CPUs; 1 maps serially. "
+     "IGNORED by synth.mapper=usyn, which pins one synthesis tree at a time. "
+     "New workers require actual process memory plus outstanding and new projections below half of physical RAM"                },
+    {  "liberty",
+     "",    Synth_set_option::Kind::file,
+     "PATH -- THE Liberty .lib, for every command that reads one: `lhd synth`, `lhd pass abc` (maps to its cells) "
+     "and `lhd pass opentimer` (times with it, when no .lib positional is given). Empty = "
+     "$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib (install a PDK with `ciel`). It is the ONE spelling -- a "
+     "`pass.abc.library` --set is refused -- so no two readers in a flow can land on different cells"                           },
+    {"opentimer",
+     "true", Synth_set_option::Kind::boolean,
+     "run OpenTimer STA on the mapped netlist (timing.json under --workdir/synth, the critical path in the "
+     "report). false stops after the ABC map"                                                                                   },
+    {   "reduce",
+     "false", Synth_set_option::Kind::boolean,
+     "experimental: can reduce synthesis time but degrade QoR (area and depth). Extract repeated one- and two-node "
+     "combinational cones into shared definitions before coloring; disabled by default"                                         },
+    {      "sdc", "",    Synth_set_option::Kind::file,       "PATH -- optional .sdc timing constraints handed to pass.opentimer"},
+    {     "spef", "",    Synth_set_option::Kind::file,              "PATH -- optional .spef parasitics handed to pass.opentimer"},
+};
+
+// The `lhd pass` subcommand vocabulary (pass_command dispatches exactly these).
+// ONE spelling for every surface that lists it -- the bare-`pass` usage error,
+// the unknown-subcommand hints, the general help and the machine records --
+// so the lists can never disagree again.
+inline constexpr std::string_view kPassSubcommands
+    = "color <alg> | partition | single_edge | satopt | abc | usyn | opentimer | formal | liberty gensim | semdiff | analyze";
 
 // One --set/--config option in the `pass.flag` vocabulary: an EPRP label of
 // the method that consumes it. Enumerated from the live registry, so
@@ -343,6 +757,14 @@ Lhd_error classify_engine_failure(std::string_view fallback_msg);
 // Initialize the pass/inou registry: every static Pass_plugin plus
 // setup_inou_yosys() (no REPL-style Top/Meta command surface).
 void init_engine();
+
+// Name the crash. A pass that dies on SIGSEGV (ABC and the solvers do not
+// null-check their allocations) unwinds nothing, so no diagnostic, no result
+// envelope and no exit-code class ever reach the user -- and off glibc the
+// installed handler prints not even a backtrace, leaving a bare exit 1 with no
+// output at all. install_crash_reporter() reports which step died and where its
+// log is, from data run_step parks in fixed buffers for the handler to read.
+void install_crash_reporter();
 
 // Deterministic content-hash run_id over (tool version + command + resolved
 // config + input bytes). A lec --impl/--ref side of kind lg: hashes only its

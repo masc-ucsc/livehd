@@ -1,0 +1,57 @@
+/*
+:name: tune_lfsr
+:type: simulation
+*/
+// sim.tune fixture: the always-toggling regime. Four Galois LFSRs step every
+// cycle, so no state and no color is ever idle; the tuner must profile it,
+// find the activity high and converge on the default vector with ZERO trials
+// (lhd/tests/sim_tune_profile_test.sh runs it for millions of cycles through
+// `--arg cycles=N`; the default keeps the prp-sim target short).
+
+mod tune_lfsr(salt:u32) -> (out:u32@[0]) {
+  reg a:u32 = 1
+  reg b:u32 = 0x1234_5678
+  reg c:u32 = 0xDEAD_BEEF
+  reg d:u32 = 0x0BAD_F00D
+
+  out = a ^ b ^ c ^ (d ^ salt)
+
+  a = (a >> 1) ^ (if a#[0] == 1 { 0xD000_0001 } else { 0 })
+  b = (b >> 1) ^ (if b#[0] == 1 { 0x8020_0003 } else { 0 })
+  c = (c >> 1) ^ (if c#[0] == 1 { 0xA300_0001 } else { 0 })
+  d = (d >> 1) ^ (if d#[0] == 1 { 0xE000_0005 } else { 0 })
+}
+
+test tune_lfsr.run(cycles:u32 = 1000) {
+  mut dut   = tune_lfsr
+  mut fold  = 0
+  mut first = nil
+  mut x:u32 = 1
+  tick cycles {
+    dut.salt = 0
+    step
+    if clock == 0 { first = dut.out }
+    fold = fold ^ dut.out
+    // the testbench's own per-cycle work, so a few million cycles pass the
+    // tuner's 0.2 s quality gate
+    wrap x = ((x ^ (x >> 7)) * 0x2545_F491) + 1
+    wrap x = ((x ^ (x >> 9)) * 0x0100_0193) + 3
+    wrap x = ((x ^ (x >> 5)) * 0x2545_F491) + 5
+    wrap x = ((x ^ (x >> 11)) * 0x0100_0193) + 7
+    wrap x = ((x ^ (x >> 13)) * 0x2545_F491) + 9
+    wrap x = ((x ^ (x >> 3)) * 0x0100_0193) + 11
+    wrap x = ((x ^ (x >> 7)) * 0x2545_F491) + 13
+    wrap x = ((x ^ (x >> 9)) * 0x0100_0193) + 15
+    wrap x = ((x ^ (x >> 5)) * 0x2545_F491) + 17
+    wrap x = ((x ^ (x >> 11)) * 0x0100_0193) + 19
+    wrap x = ((x ^ (x >> 13)) * 0x2545_F491) + 21
+    wrap x = ((x ^ (x >> 3)) * 0x0100_0193) + 23
+    wrap x = ((x ^ (x >> 7)) * 0x2545_F491) + 25
+    wrap x = ((x ^ (x >> 9)) * 0x0100_0193) + 27
+    wrap x = ((x ^ (x >> 5)) * 0x2545_F491) + 29
+    wrap x = ((x ^ (x >> 11)) * 0x0100_0193) + 31
+  }
+  puts("tune_lfsr fold={fold}")
+  assert(first != 0, "an LFSR never reaches zero")
+  assert(x != 0 or cycles == 0, "the testbench work stays live")
+}

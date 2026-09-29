@@ -1,0 +1,7 @@
+/*
+:name: nil_condition_cassert
+:type: error
+:error: comptime cassert is false .*evaluated to nil
+*/
+const z = nil
+cassert(z) // locate_error_here

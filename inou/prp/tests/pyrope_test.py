@@ -9,11 +9,23 @@ from prplib import PrpTest, PrpRunner
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-i', '--input', help='pyrope file to test', required=True)
+# `--mode` OVERRIDES the fixture's `:type:` header. One fixture can then be run
+# two ways from two targets — which is the whole point of the verilator
+# differential: `prp-sim-<x>` runs it under `lhd sim` (and may be a known
+# failure) while `prp-vsim-<x>` runs the SAME source under verilator and must
+# pass. The two disagreeing IS the test result.
+parser.add_argument('--mode', help='override the fixture\'s :type: (e.g. vsim)', default=None)
+
+parser.add_argument('--bitfuzz', action='store_true', help='strip internal width/sign annotations before cprop in equivalence flows')
 
 args = parser.parse_args()
 
-runner = PrpRunner()
-rc = runner.run(os.getcwd(), PrpTest(args.input))
+test = PrpTest(args.input)
+if args.mode:
+    test.params['type'] = [args.mode]
+
+runner = PrpRunner(bitfuzz=args.bitfuzz)
+rc = runner.run(os.getcwd(), test)
 
 if rc:
     sys.exit(1)

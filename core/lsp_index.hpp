@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-// Process-global semantic index for the Pyrope LSP (task 2n Phase B).
+// Process-global semantic index for the Pyrope LSP.
 //
 // The upass runner records one Entry per user-variable definition site DURING
 // its single traversal (while the symbol table + live bw_meta are in scope),

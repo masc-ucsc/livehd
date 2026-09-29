@@ -1,0 +1,17 @@
+/*
+:name: multi_output_one_var
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+comb divmod(n, d) -> (q, r) {
+  q = n / d
+  r = n % d
+}
+
+const dm = divmod(n=17, d=5)
+cassert(dm.q == 3)
+cassert(dm.r == 2)
+const (q, r) = divmod(n=17, d=5)
+cassert(q == dm.q)
+cassert(r == dm.r)

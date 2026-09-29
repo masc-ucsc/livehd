@@ -2,11 +2,14 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cctype>
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <limits>
 #include <string>
 #include <string_view>
 
@@ -96,9 +99,7 @@ namespace str_tools {
 // name lookup. Only 'A'..'Z' fold; all other bytes pass through unchanged.
 // ---------------------------------------------------------------------------
 
-[[nodiscard]] inline char ascii_tolower(char c) {
-  return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c;
-}
+[[nodiscard]] inline char ascii_tolower(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
 
 // ASCII-lowercased copy of `s`, for case-collision detection only.
 [[nodiscard]] inline std::string ascii_fold(std::string_view s) {
@@ -107,6 +108,129 @@ namespace str_tools {
     c = ascii_tolower(c);
   }
   return out;
+}
+
+// Truthy/falsy pass-option text: empty, "0", "false", "no" and "off" (any
+// letter case) read as false; anything else is true. This is the eprp option
+// contract, NOT Pyrope boolean-literal semantics (which accept only false/0 —
+// see upass_attributes_sticky).
+[[nodiscard]] inline bool option_is_true(std::string_view value) {
+  const auto lower = ascii_fold(value);
+  return !(lower.empty() || lower == "0" || lower == "false" || lower == "no" || lower == "off");
+}
+
+// Parse the max_width knob. "0"/"unlimited"/"inf"/"none" (case-insensitive) mean
+// no cap -> SIZE_MAX (every `w > max_width` guard is then always-false, so the
+// upper bound is disabled while the separate `w == 0` unsized-node check stays).
+// A positive integer sets that cap; empty/garbage falls back to the default.
+[[nodiscard]] inline size_t parse_max_width(std::string_view s, size_t dflt = 1024) {
+  if (s.empty()) {
+    return dflt;
+  }
+  const auto l = ascii_fold(s);
+  if (l == "unlimited" || l == "inf" || l == "none" || l == "0") {
+    return std::numeric_limits<size_t>::max();
+  }
+  try {
+    size_t v = std::stoul(l);
+    return v == 0 ? std::numeric_limits<size_t>::max() : v;
+  } catch (...) {
+    return dflt;
+  }
+}
+
+// Canonical reset-name test, token-aware so "first"/"burst" don't match.
+// negreset (active-low) is inferred from an _n / _ni / n-suffix spelling.
+// Shared by the LEC reset harness and the slang reset demotion so the token
+// set cannot drift between them.
+[[nodiscard]] inline bool reset_name_polarity(std::string_view name, bool& negreset) {
+  const auto lc        = ascii_fold(name);
+  bool       tok_match = false;
+  size_t     start     = 0;
+  for (size_t i = 0; i <= lc.size(); ++i) {
+    if (i == lc.size() || lc[i] == '_') {
+      std::string_view tok = std::string_view(lc).substr(start, i - start);
+      if (tok == "rst" || tok == "reset" || tok == "rstn" || tok == "resetn" || tok == "arst" || tok == "areset" || tok == "nrst"
+          || tok == "nreset" || tok == "por") {
+        tok_match = true;
+      }
+      start = i + 1;
+    }
+  }
+  if (!tok_match) {
+    return false;
+  }
+  const auto ends = [&lc](std::string_view s) { return ends_with(lc, s); };
+  negreset        = ends("_n") || ends("_ni") || ends("_n_i") || ends("_ni_i") || lc == "rstn" || lc == "resetn" || ends("nrst")
+             || ends("nreset");
+  return true;
+}
+
+[[nodiscard]] inline bool is_reset_like_name(std::string_view name) {
+  bool negreset = false;
+  return reset_name_polarity(name, negreset);
+}
+
+// Canonical cross-frontend module identity. Pyrope graph names include a file
+// prefix and primitive template widths (`file.foo__u8_bool`), while an
+// elaborated Verilog frontend exposes the same definition as `foo`.
+// The result is always a subview of `name`, so the scan runs on string_views
+// and allocates exactly once, on return (callers key maps with std::string).
+// The uPass mangling this parses is minted in upass_runner (`<base>__uN_sN_bool`
+// primitive specializations); named/generic-value specializations stay distinct.
+[[nodiscard]] inline std::string canonical_entity_name(std::string_view name) {
+  const auto dot    = name.rfind('.');
+  const auto entity = dot == std::string_view::npos ? name : name.substr(dot + 1);
+  const auto specialization = entity.find("__");
+  if (specialization == std::string_view::npos || specialization == 0 || specialization + 2 >= entity.size()) {
+    return std::string(entity);
+  }
+
+  size_t pos = specialization + 2;
+  while (pos < entity.size()) {
+    const auto end   = entity.find('_', pos);
+    const auto token = entity.substr(pos, end == std::string_view::npos ? std::string_view::npos : end - pos);
+    bool       width = token == "bool";
+    if (!width && token.size() >= 2 && (token.front() == 'u' || token.front() == 's')) {
+      width = std::all_of(token.begin() + 1, token.end(), [](unsigned char ch) { return std::isdigit(ch); });
+    }
+    if (!width) {
+      return std::string(entity);
+    }
+    if (end == std::string_view::npos) {
+      return std::string(entity.substr(0, specialization));
+    }
+    pos = end + 1;
+  }
+  return std::string(entity);
+}
+
+// Canonical spelling of a Pyrope escaped identifier: `` `name` `` -> `name`
+// when the inner text is a plain alnum/underscore word that does not start with
+// a digit; anything else (a name that genuinely needs the quotes, e.g.
+// `` `a.b` ``) is returned untouched. The result is a subview of `name`.
+//
+// This is the ONE definition. It is shared because producer and consumer must
+// agree exactly: prp2lnast stamps declarations, refs and `pub` entries with the
+// canonical spelling, so every lookup keyed by a source-spelled name -- the
+// symbol table (uPass_constprop::harvest_pub_values), and the `import("unit.member")`
+// member match in upass/core/call_resolver -- has to canonicalize too, or an
+// escaped pure-alnum name silently fails to resolve.
+[[nodiscard]] inline std::string_view canonical_escaped_ident(std::string_view name) {
+  if (name.size() >= 2 && name.front() == '`' && name.back() == '`') {
+    auto inner = name.substr(1, name.size() - 2);
+    bool ok    = !inner.empty();
+    for (char ch : inner) {
+      if (!(ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9'))) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok && !(inner[0] >= '0' && inner[0] <= '9')) {
+      return inner;  // substring view of `name` (same backing buffer)
+    }
+  }
+  return name;
 }
 
 }  // namespace str_tools

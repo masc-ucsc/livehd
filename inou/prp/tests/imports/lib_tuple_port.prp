@@ -1,0 +1,9 @@
+// Fixture for import_tuple_port: a comb whose ONE output is a TUPLE, and whose
+// input is one too. Its body writes/reads the whole port by FIELD
+// (`store(ctrl,'legal',v)` / `tuple_get(t,cmd,'op')`), which is what the
+// streaming tuple-port ABI rewrite turns into the flattened `ctrl.legal` leaf.
+pub comb dec::[timecheck=false](cmd:(op:u4, arg:u4)) -> (ctrl:(legal:u1, sel:u2, imm:u4)) {
+  ctrl.legal = cmd.op#[3]
+  ctrl.sel   = cmd.op#[0..=1]
+  ctrl.imm   = cmd.arg
+}

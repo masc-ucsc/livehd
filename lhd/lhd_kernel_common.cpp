@@ -1,14 +1,16 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 // Common kernel plumbing: diagnostics, pass execution, typed I/O, and emits.
 
-#include "lhd_kernel_internal.hpp"
-
 #include <fcntl.h>
+#include <signal.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <exception>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -17,12 +19,19 @@
 #include <set>
 #include <sstream>
 
+#include "absl/container/flat_hash_set.h"
+#include "cgen_verilog.hpp"
 #include "color_common.hpp"
 #include "diag.hpp"
+#include "file_name.hpp"  // livehd::unit_file_stem — the shared long-name policy
+#include "file_output.hpp"
 #include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
 #include "hhds/tree.hpp"
+#include "lhd_kernel_internal.hpp"
+#include "satopt_stages.hpp"
+#include "lhd_sim_tune_session.hpp"
 #include "lnast.hpp"
 #include "log.hpp"
 #include "node_util.hpp"
@@ -33,6 +42,23 @@
 #include "woothash.hpp"
 
 namespace lhd {
+
+Entity_canonicalizer::Entity_canonicalizer(const Eprp_var& var) {
+  for (const auto& graph : var.graphs) {
+    if (graph) {
+      ++counts_[str_tools::canonical_entity_name(graph->get_name())];
+    }
+  }
+}
+
+std::string Entity_canonicalizer::operator()(std::string_view full_name) const {
+  auto entity = str_tools::canonical_entity_name(full_name);
+  auto it     = counts_.find(entity);
+  if (it != counts_.end() && it->second == 1) {
+    return entity;  // NRVO/move — the ternary form copied on the common path
+  }
+  return std::string{full_name};
+}
 
 int step_counter = 0;  // per-process step sequence for log naming
 
@@ -73,9 +99,8 @@ std::string resolve_top_name(const std::vector<std::string>& names, std::string_
   // header's `:pyrope_top:` — calls it `s\m`. Backticks are escape SYNTAX, not
   // part of the name, so `--top s\m` must find it without the caller having to
   // know LiveHD's internal spelling.
-  auto peel = [](std::string_view s) {
-    return (s.size() >= 2 && s.front() == '`' && s.back() == '`') ? s.substr(1, s.size() - 2) : s;
-  };
+  auto peel
+      = [](std::string_view s) { return (s.size() >= 2 && s.front() == '`' && s.back() == '`') ? s.substr(1, s.size() - 2) : s; };
   const std::string_view want_entity = peel(top_entity_of(want));
   std::string            hit;
   int                    n_hits = 0;
@@ -88,11 +113,71 @@ std::string resolve_top_name(const std::vector<std::string>& names, std::string_
   if (n_hits != 1) {
     return {};
   }
-  livehd::diag::warn(diag_pass, "top-entity-fallback", "name")
-      .msg("top '{}' not found; using '{}' (the unique entity-name match)", want, hit)
-      .emit();
+  if (!diag_pass.empty()) {
+    // An EMPTY diag_pass means "resolve quietly": the caller is asking an
+    // internal "which unit would the top be" question, not selecting the top on
+    // the user's behalf, so the fallback must not be announced. Routing such a
+    // probe through this warning reported a false "top 'X' not found" for every
+    // design that merely contained a generic template.
+    livehd::diag::warn(diag_pass, "top-entity-fallback", "name")
+        .msg("top '{}' not found; using '{}' (the unique entity-name match)", want, hit)
+        .emit();
+  }
   return hit;
 }
+
+// "pass --top" is only actionable if the reader is told WHICH name to pass, and
+// on a real design the answer is almost always unique: the module no other
+// module instantiates. Walk the Sub instances once and name the roots (capped,
+// so a flat 172-module library cannot turn one error line into a wall of text).
+// Best effort by construction -- this builds an error message, so a graph that
+// refuses to load must not replace the real error with a second one.
+namespace {
+std::string top_candidates_hint(const Eprp_var& v, std::string_view flag) {
+  absl::flat_hash_set<std::string> instantiated;
+  std::vector<std::string>         names;
+  try {
+    for (const auto& g : v.graphs) {
+      if (!g) {
+        continue;
+      }
+      names.emplace_back(g->get_name());
+      for (auto n : g->body().nodes()) {
+        if (livehd::graph_util::type_op_of(n) != Ntype_op::Sub) {
+          continue;
+        }
+        if (auto cio = n.get_subnode_io(); cio != nullptr) {
+          instantiated.emplace(cio->get_name());
+        } else if (auto child = n.get_subnode_graph(); child != nullptr) {
+          instantiated.emplace(child->get_name());
+        }
+      }
+    }
+  } catch (...) {
+    return std::format("{} NAME names the design's root module", flag);
+  }
+  std::vector<std::string> roots;
+  for (auto& n : names) {
+    if (!instantiated.contains(n)) {
+      roots.emplace_back(n);
+    }
+  }
+  std::sort(roots.begin(), roots.end());
+  if (roots.empty()) {
+    return std::format("{} NAME names the design's root module", flag);
+  }
+  constexpr size_t kMaxShown = 8;
+  const size_t     shown     = std::min(roots.size(), kMaxShown);
+  std::string      list      = join_csv(std::vector<std::string>(roots.begin(), roots.begin() + static_cast<ptrdiff_t>(shown)));
+  if (roots.size() > shown) {
+    list += std::format(", ... ({} more)", roots.size() - shown);
+  }
+  if (roots.size() == 1) {
+    return std::format("nothing instantiates '{}' -- that is the root: {} {}", roots.front(), flag, roots.front());
+  }
+  return std::format("{} module(s) are instantiated by nothing: {}", roots.size(), list);
+}
+}  // namespace
 
 std::shared_ptr<hhds::Graph> pick_top_graph(const Eprp_var& v, const std::string& side_top, const std::string& shared_top,
                                             std::string_view side, std::string_view cmd, std::string_view diag_pass) {
@@ -121,9 +206,13 @@ std::shared_ptr<hhds::Graph> pick_top_graph(const Eprp_var& v, const std::string
     return v.graphs.front();
   }
   if (side.empty()) {
-    throw Lhd_error{"usage", std::format("{}: design has {} modules; pass --top", cmd, v.graphs.size()), ""};
+    throw Lhd_error{"usage",
+                    std::format("{}: design has {} modules; pass --top", cmd, v.graphs.size()),
+                    top_candidates_hint(v, "--top")};
   }
-  throw Lhd_error{"usage", std::format("{}: {} has {} modules; pass --{}-top or --top", cmd, side, v.graphs.size(), side), ""};
+  throw Lhd_error{"usage",
+                  std::format("{}: {} has {} modules; pass --{}-top or --top", cmd, side, v.graphs.size(), side),
+                  top_candidates_hint(v, std::format("--{}-top", side))};
 }
 
 void ensure_dir(const std::string& path) {
@@ -247,11 +336,16 @@ void dump_graph_text(std::ostream& os, hhds::Graph* g) {
   auto edge_line = [&](const auto& e) {
     os << std::format("    {} -> {}  ({}b)\n", end_name(e.driver), end_name(e.sink), gu::bits_of(e.driver));
   };
-  auto const_edge_line = [&](const auto& inp) {
-    os << std::format("    const {} -> {}  ({}b)\n",
-                      gu::hydrate_const(inp.driver).to_pyrope(),
-                      end_name(inp.sink),
-                      gu::bits_of(inp.driver));
+  // Takes the SINK PIN. PLURAL driver read so the dump stays one line per
+  // EDGE: a compact loop's carry-in sink holds two drivers
+  // (pass/legalize/legalize.cpp:301).
+  auto const_edge_line = [&](const auto& sink) {
+    for (const auto& drv : sink.get_driver_pins()) {
+      if (!drv.is_const()) {
+        continue;
+      }
+      os << std::format("    const {} -> {}  ({}b)\n", gu::const_of(drv).to_pyrope(), end_name(sink), gu::bits_of(drv));
+    }
   };
 
   os << std::format("module {}\n", g->get_name());
@@ -270,29 +364,21 @@ void dump_graph_text(std::ostream& os, hhds::Graph* g) {
       for (const auto& out : pin.out_edges()) {  // outputs reread as drivers
         edge_line(out);
       }
-      for (const auto& inp : pin.inp_edges()) {
-        if (gu::is_const_pin(inp.driver)) {
-          const_edge_line(inp);
-        }
-      }
+      const_edge_line(pin);  // a graph output pin is a sink; the lambda filters
     }
   }
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     if (!node.has_inp_edges() && !node.has_out_edges()) {  // fast: don't materialize the edge vectors
       continue;
     }
-    if (gu::type_op_of(node) == Ntype_op::Nconst) {
-      os << std::format("  {} = {}\n", gu::debug_name(node), gu::hydrate_const(node).to_pyrope());
-    } else {
-      os << std::format("  {}\n", gu::debug_name(node));
-    }
-    for (const auto& out : node.out_edges()) {
-      edge_line(out);
-    }
-    for (const auto& inp : node.inp_edges()) {
-      if (gu::is_const_pin(inp.driver)) {
-        const_edge_line(inp);
+    os << std::format("  {}\n", gu::debug_name(node));
+    for (const auto& dpin : node.out_sorted_pins()) {
+      for (const auto& out : dpin.out_edges()) {
+        edge_line(out);
       }
+    }
+    for (auto inp : node.inp_sorted_pins()) {
+      const_edge_line(inp);  // the lambda filters to const drivers
     }
   }
 }
@@ -344,7 +430,8 @@ std::string& workdir(Options& opts) {
     if (::mkdtemp(buf.data()) == nullptr) {
       throw Lhd_error{"config", std::format("could not create scratch workdir under {}", tmpl), "pass --workdir DIR"};
     }
-    opts.workdir = buf;
+    opts.workdir         = buf;
+    opts.workdir_scratch = true;
   }
   ensure_dir(opts.workdir + "/logs");
   return opts.workdir;
@@ -403,27 +490,181 @@ void setup_diag(const Options& opts, std::string_view step) {
   sink.set_step(step);
 }
 
+// ── Crash reporting ───────────────────────────────────────────────────────────
+//
+// ABC, yosys and the solvers do not null-check their allocations, so a bad
+// library or an oversized design can take the process down with SIGSEGV. Nothing
+// unwinds: no diagnostic, no result envelope, no exit-code class. Worse, the
+// installed handler (iassert's) renders its backtrace only under glibc -- on
+// macOS it prints NOTHING and exits 1, so a crashed `lhd synth` looked exactly
+// like a run that quietly produced no output.
+//
+// Say which step died and where its log is. A signal handler may only touch
+// async-signal-safe machinery, so the strings live in fixed buffers filled ahead
+// of time by run_step and are pushed out with write(2) -- no allocation, no
+// std::format, no locking. The exit status stays EXIT_FAILURE, matching what the
+// handler this replaces produced.
+namespace {
+
+constexpr size_t kCrashCtxMax = 1024;
+
+char crash_step_[kCrashCtxMax] = {0};
+char crash_log_[kCrashCtxMax]  = {0};
+
+void copy_crash_ctx(char (&dst)[kCrashCtxMax], std::string_view src) {
+  const size_t n = std::min(src.size(), kCrashCtxMax - 1);
+  std::memcpy(dst, src.data(), n);
+  dst[n] = '\0';
+}
+
+#if !defined(__GLIBC__)
+void crash_write(const char* s) {
+  if (s == nullptr || *s == '\0') {
+    return;
+  }
+  const size_t n = std::strlen(s);
+  ssize_t      w = ::write(STDERR_FILENO, s, n);
+  (void)w;  // a failed report cannot itself be reported
+}
+
+// C language linkage (what sigaction wants) with internal linkage (the symbol is
+// this file's business).
+extern "C" {
+static void crash_handler(int /*sig*/) {
+  crash_write("lhd: FATAL signal SIGSEGV -- this is a livehd bug, not a bad input\n");
+  if (crash_step_[0] != '\0') {
+    crash_write("lhd: crashed while running ");
+    crash_write(crash_step_);
+    crash_write("\n");
+  }
+  if (crash_log_[0] != '\0') {
+    crash_write("lhd: that step's output up to the crash is in ");
+    crash_write(crash_log_);
+    crash_write("\n");
+  } else {
+    crash_write("lhd: re-run with --workdir DIR to keep the per-pass logs\n");
+  }
+  ::_exit(EXIT_FAILURE);
+}
+}  // extern "C"
+#endif
+
+// A failing step's own output -- ABC's `Error:` lines, yosys's log, a solver's
+// trace -- is captured to its per-step log, and the CLI error is the only place
+// a user looks. Point the error at that log so the reason is one `cat` away.
+//
+// Only when the log actually has content (most steps write nothing, and naming
+// an empty file is worse than saying nothing), and only when the user named a
+// --workdir: without one the workdir is an unpredictable mkdtemp scratch, and
+// its path must not leak into `error.hint`, which is part of the result envelope
+// (the kernel's determinism invariant is over output bytes). Name the flag that
+// would have kept the log instead.
+void point_error_at_step_log(Lhd_error& e, const Options& opts, const std::string& log) {
+  std::error_code ec;
+  const auto      sz = fs::file_size(log, ec);
+  if (ec || sz == 0) {
+    return;
+  }
+  const std::string where
+      = opts.workdir_scratch
+            ? std::string{"re-run with --workdir DIR to keep the per-pass logs; this step's own output explains the failure"}
+            : std::format("this step's own output is in {}", log);
+  if (e.hint.empty()) {
+    e.hint = where;
+  } else {
+    e.hint += " (";
+    e.hint += where;
+    e.hint += ')';
+  }
+}
+
+// The exception a step threw, as the kernel's error type. Mirrors what main()
+// does for an escaping exception, hoisted here so the step's log can be named
+// in the hint while we still know which step it was.
+Lhd_error step_failure(const std::exception_ptr& ep, std::string_view method) {
+  try {
+    std::rethrow_exception(ep);
+  } catch (const Lhd_error& e) {
+    return e;
+  } catch (const std::exception& e) {
+    // A diag `.fatal()` throws AFTER emitting: classify_engine_failure recovers
+    // that record's own message and hint, which beats the exception text.
+    return classify_engine_failure(e.what());
+  } catch (...) {
+    return Lhd_error{"internal", std::format("{} aborted with an unknown exception", method), ""};
+  }
+}
+
+}  // namespace
+
 // Run one registered EPRP method synchronously, stdout captured to a log.
 void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict& labels, Options& opts, Result& res) {
   // One perfetto slice per pipeline step (`--define profiling=1` builds; a
   // plain build compiles this away), so the trace timeline reads as the recipe.
   TRACE_EVENT("pass", perfetto::DynamicString{std::string(method)});
-  auto log = next_log_path(opts, method);
+  auto               log = next_log_path(opts, method);
+  std::exception_ptr failure;
+  // Named BEFORE the step runs: if it dies on a signal there is no later
+  // opportunity, and the log is where its own output already is.
+  set_crash_context(method, opts.workdir_scratch ? std::string_view{} : std::string_view{log});
   {
+    // The phase time is the pass body alone, under the BARE method name (the
+    // recipe line below adds the label decorations; "phases" stays keyable).
+    Phase_timer   phase(res, method);
     Stdout_to_log redirect(log);
-    Pass::eprp.run_method_now(method, var, labels);
+    // Caught, not left to unwind: everything below (mirroring the log, naming
+    // it in the hint) has to happen with fd 1 already restored, and the
+    // redirect only lifts when this scope ends.
+    try {
+      if (const auto* mapper = mapper_of_method(method); mapper != nullptr && !mapper->report.empty()) {
+        // A mapper with its own report archives its provenance: the lhd invocation record.
+        auto contextual                  = labels;
+        contextual["invocation_context"] = synth_invocation_context(opts, res, labels);
+        Pass::eprp.run_method_now(method, var, contextual);
+      } else {
+        Pass::eprp.run_method_now(method, var, labels);
+      }
+    } catch (...) {
+      failure = std::current_exception();
+    }
+  }
+  if (opts.verbose) {
+    mirror_log_to_stderr(log);  // a failing step's log is the one most worth mirroring
+  }
+  if (failure) {
+    auto e = step_failure(failure, method);
+    point_error_at_step_log(e, opts, log);
+    throw e;
   }
   res.recipe_steps.emplace_back(step_desc(method, labels));
-  if (opts.verbose) {
-    mirror_log_to_stderr(log);
-  }
   // Halting errors abort the pipeline here; deferred errors (e.g. a refuted
   // formal property) are recorded and fail the build at the end, but let the
   // remaining passes / emits run so the design still compiles with its failing
   // check kept as a runtime check.
   if (livehd::diag::sink().has_halting_errors()) {
-    throw classify_engine_failure(std::format("{} reported errors", method));
+    auto e = classify_engine_failure(std::format("{} reported errors", method));
+    point_error_at_step_log(e, opts, log);
+    throw e;
   }
+  set_crash_context({}, {});
+}
+
+void set_crash_context(std::string_view step, std::string_view log) {
+  copy_crash_ctx(crash_step_, step);
+  copy_crash_ctx(crash_log_, log);
+}
+
+void install_crash_reporter() {
+#if !defined(__GLIBC__)
+  // glibc keeps iassert's handler: it renders a demangled backtrace there, which
+  // is strictly more than this reports. Everywhere else that handler is silent,
+  // and this is the only thing that names the failure.
+  struct sigaction sa{};
+  sa.sa_handler = crash_handler;
+  sa.sa_flags   = SA_RESTART;
+  sigemptyset(&sa.sa_mask);
+  (void)::sigaction(SIGSEGV, &sa, nullptr);
+#endif
 }
 
 // The --set/--config pass-name vocabulary -> the EPRP method that consumes
@@ -433,7 +674,8 @@ void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict&
 // labels — add_label_optional/required is the single registration point).
 // The set-name is the command-path namespace the option is reached under
 // (2h-set_path): standalone `lhd pass <sub>` commands take `pass.<sub>.*`,
-// `lhd lec` is a top-level command so it keeps `lec.*`, and the passes that
+// `lhd lec` (= `lhd formal lec`) roots at `formal.lec` (the shared knobs are
+// `formal.*`; the old `lec.*` namespace is REMOVED, see kRenamedSetPasses), and the passes that
 // only run inside `lhd compile` (upass/cprop/bitwidth/cgen/prp_writer — no
 // bare command word of their own) live under the `compile.*` namespace so the
 // option's owning command is always its leading segment. canonical_set_key()
@@ -479,6 +721,24 @@ void merge_sets(const Options& opts, std::string_view pass_name, Eprp_var::Eprp_
   }
 }
 
+void merge_color_sets(const Options& opts, Eprp_var::Eprp_dict& labels) {
+  // Disjoint by construction (check_known_set_passes gives every pass.color
+  // option one spelling), so the order is immaterial.
+  merge_sets(opts, "pass.color", labels);
+  merge_sets(opts, "pass.color.synth", labels);
+}
+
+void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::Eprp_dict& labels) {
+  if (const auto* mapper = mapper_of_method(method); mapper != nullptr && mapper->inherits_abc) {
+    // The mapper exposes ABC's whole mapping vocabulary, so the ABC namespace is
+    // the shared spelling; the pass's own namespace is merged last and wins.
+    merge_sets(opts, "pass.abc", labels);
+  }
+  merge_sets(opts, method, labels);
+  // No satopt labels: satopt runs only in the compile graph pipeline, and a
+  // mapper maps what compile produced.
+}
+
 // Validate every --set/--config entry against the live registry: a typo'd
 // pass OR flag must error, never silently no-op (merge_sets copies labels
 // blind). Requires init_engine().
@@ -502,9 +762,9 @@ std::string leaf_match_hint(std::string_view flag) {
     // Render the candidates the way `lhd list options` would, INLINE -- the
     // reader should not have to run a second command we could have run for
     // them (one `name=default  # first-sentence` line per match).
-    auto        cut   = o.help.find(". ");
-    std::string brief = cut == std::string::npos ? o.help : o.help.substr(0, cut);
-    constexpr size_t kMax = 96;
+    auto             cut   = o.help.find(". ");
+    std::string      brief = cut == std::string::npos ? o.help : o.help.substr(0, cut);
+    constexpr size_t kMax  = 96;
     if (brief.size() > kMax) {
       brief.resize(kMax);
       while (!brief.empty() && (static_cast<unsigned char>(brief.back()) & 0xC0) == 0x80) {
@@ -522,6 +782,30 @@ std::string leaf_match_hint(std::string_view flag) {
 
 void check_known_set_passes(const Options& opts) {
   for (const auto& [key, value] : opts.sets) {
+    if (key == "pass.satopt") {
+      if (value != "true" && value != "false" && value != "1" && value != "0" && value != "on" && value != "off") {
+        throw Lhd_error{"usage", "--set pass.satopt expects true|false", ""};
+      }
+      continue;
+    }
+    if (key == "pass.satopt.stages") {
+      // Validated eagerly: a typo must not wait for the pass to run (it may not).
+      std::string error;
+      if (!livehd::satopt::parse_stages(value, livehd::satopt::Profile::shared, &error)) {
+        throw Lhd_error{"usage", std::format("--set pass.satopt.stages: {}", error), ""};
+      }
+    }
+    if (key.starts_with("pass.satopt.")) {
+      const auto knob = std::string_view{key}.substr(std::string_view{"pass.satopt."}.size());
+      if (std::find(livehd::satopt::kBudgetKeys.begin(), livehd::satopt::kBudgetKeys.end(), knob)
+          != livehd::satopt::kBudgetKeys.end()) {
+        livehd::satopt::Budget budget;
+        std::string            error;
+        if (!livehd::satopt::set_budget(budget, knob, value, &error)) {
+          throw Lhd_error{"usage", std::format("--set {}", error), ""};
+        }
+      }
+    }
     auto pos = key.rfind('.');
     if (pos == std::string::npos) {
       throw Lhd_error{"usage", std::format("--set expects pass.flag=value, got '{}={}'", key, value), ""};
@@ -546,24 +830,135 @@ void check_known_set_passes(const Options& opts) {
       }
       continue;
     }
+    // The sim.* command namespace owns DOTTED flags (sim.tune.dirty): route every
+    // `sim.`-prefixed key whole, never split at its last dot into a pass
+    // `sim.tune` that does not exist.
+    if (key.starts_with("sim.")) {
+      pass = "sim";
+      flag = key.substr(4);
+    }
+    const auto option_method = pass == "sim" ? std::string_view{"sim"} : set_pass_method(pass);
+    if (const auto hint = retired_set_hint(option_method, flag); !hint.empty()) {
+      throw Lhd_error{"usage", std::format("--set/--config '{}' is no longer a public option", key), std::string{hint}};
+    }
     if (pass == "lhd") {
       // The `lhd.*` kernel namespace: shared, cross-pass settings folded into
       // Options by apply_lhd_settings (not consumed by any single pass). Keep
       // this list in sync with apply_lhd_settings / list_set_options.
-      if (flag != "seed" && flag != "top" && flag != "stats") {
+      if (flag != "seed" && flag != "top" && flag != "stats" && flag != "incremental") {
         throw Lhd_error{"usage",
                         std::format("--set/--config references unknown kernel flag 'lhd.{}'", flag),
-                        "the lhd.* namespace takes: seed, top, stats (`lhd list options lhd`)"};
+                        "the lhd.* namespace takes: seed, top, stats, incremental (`lhd list options lhd`)"};
+      }
+      if ((flag == "stats" || flag == "incremental") && value != "true" && value != "false" && value != "1" && value != "0"
+          && value != "on" && value != "off") {
+        throw Lhd_error{"usage", std::format("--set/--config lhd.{} expects true|false, got '{}'", flag, value), ""};
       }
       continue;
     }
-    if (pass == "compile" && flag == "lnast_fmt") {
-      // Kernel gate (not a pass option): whether the pass.lnastfmt LNAST
-      // self-check runs. Default is build-mode (on in dbg, off in opt); this
-      // overrides it. Folded into the run decision by lnastfmt_enabled(), and
-      // merge_sets never copies it into a pass (its `pass` matches none).
+    if (mapper_of_method(pass) != nullptr && flag == "library") {
+      // ONE Liberty spelling for the whole CLI: `synth.liberty`. Two knobs for
+      // the same file is how `lhd pass abc --set synth.liberty=asap7.lib`
+      // tech-mapped against the DEFAULT sky130 library and still reported
+      // success -- the typed flag named a real option, just not the one
+      // pass.abc read. pass.abc now resolves synth.liberty like everyone else.
+      throw Lhd_error{"usage",
+                      std::format("--set/--config '{}.library' was removed", pass),
+                      std::format("use --set synth.liberty={0} instead (the one Liberty every reader shares: pass.abc, "
+                                  "pass.usyn, pass.opentimer and `lhd synth`)",
+                                  value)};
+    }
+    if (pass == "pass.usyn" && (flag == "timing_files" || flag == "invocation_context")) {
+      // INTERNAL kernel-plumbed labels (synth.liberty/sdc/spef and the lhd
+      // invocation record). synth_command overwrites them after merge_sets, so a
+      // user --set silently did nothing; refuse it and name the real spelling.
+      throw Lhd_error{"usage",
+                      std::format("--set/--config 'pass.usyn.{}' is INTERNAL", flag),
+                      flag == "timing_files"
+                          ? "the timing environment comes from --set synth.liberty / synth.sdc / synth.spef"
+                          : "the invocation record is captured by the lhd kernel, not by a --set"};
+    }
+    if (pass == "compile.yosys" && flag == "liberty") {
+      // The yosys front-end's Liberty tech-map knob was dead code (the label was
+      // read into a commented-out variable, so setting it changed nothing) and a
+      // second `*.liberty` spelling on top of that. Deleted: synth.liberty is
+      // the one Liberty knob, and pass.abc is what maps to cells.
+      throw Lhd_error{"usage",
+                      "--set/--config 'compile.yosys.liberty' was removed",
+                      std::format("it never reached yosys; tech-map with `lhd pass abc` / `lhd synth` and pick the cells "
+                                  "with --set synth.liberty={}",
+                                  value)};
+    }
+    if (pass == "compile" && flag == "cache") {
+      // The per-tier switch was folded into the one kernel knob: a directed
+      // answer, not the generic unknown-flag guess.
+      throw Lhd_error{
+          "usage",
+          "--set/--config 'compile.cache' was removed",
+          std::format("use --set lhd.incremental={} instead (one switch for the compile, pass.abc and formal caches)", value)};
+    }
+    if (pass == "compile.upass" && (flag == "roll" || flag == "roll_arrays" || flag == "roll_cap" || flag == "unroll")) {
+      throw Lhd_error{"usage",
+                      std::format("--set/--config '{}' was removed", key),
+                      "use --set compile.unroll=false (the default) to preserve loops, or compile.unroll=true for benchmarking; "
+                      "there are no per-array or trip-count controls"};
+    }
+    if (pass == "compile" && flag == "unroll") {
+      // Kernel gate seeded into pass.upass as `unroll` (compile_sources).
       if (value != "true" && value != "false" && value != "1" && value != "0" && value != "on" && value != "off") {
-        throw Lhd_error{"usage", std::format("--set/--config compile.lnast_fmt expects true|false, got '{}'", value), ""};
+        throw Lhd_error{"usage", std::format("--set/--config compile.{} expects true|false, got '{}'", flag, value), ""};
+      }
+      continue;
+    }
+    if (pass == "compile" && (flag == "lnast_fmt" || flag == "verify_frozen")) {
+      // Kernel gates (not pass options): whether the pass.lnastfmt LNAST
+      // self-check runs / whether pass.legalize freezes and re-checks the graphs.
+      // Folded into a kernel decision; merge_sets never copies them into a pass
+      // (their `pass` matches none).
+      if (value != "true" && value != "false" && value != "1" && value != "0" && value != "on" && value != "off") {
+        throw Lhd_error{"usage", std::format("--set/--config compile.{} expects true|false, got '{}'", flag, value), ""};
+      }
+      continue;
+    }
+    if (pass == "synth") {
+      // `synth.*` is the synth-command namespace (consumed by synth_command, not
+      // a pass). Single source of truth = kSynthSetOptions.
+      const Synth_set_option* opt = nullptr;
+      for (const auto& s : kSynthSetOptions) {
+        if (s.name == flag) {
+          opt = &s;
+          break;
+        }
+      }
+      if (opt == nullptr) {
+        std::string known;
+        for (const auto& s : kSynthSetOptions) {
+          known += known.empty() ? "" : ", ";
+          known += s.name;
+        }
+        throw Lhd_error{"usage",
+                        std::format("--set/--config references unknown synth flag 'synth.{}'", flag),
+                        std::format("the synth.* namespace takes: {}; pass tuning rides the pass namespaces (abc.*, color.*, "
+                                    "opentimer.*)",
+                                    known)};
+      }
+      if (opt->kind == Synth_set_option::Kind::mapper && find_mapper(value) == nullptr) {
+        throw Lhd_error{"usage",
+                        std::format("synth.mapper expects abc|usyn, got '{}'", value),
+                        value == "synth" ? "the unate-synthesis mapper was renamed: use --set synth.mapper=usyn" : ""};
+      }
+      if (opt->kind == Synth_set_option::Kind::integer) {
+        unsigned parsed      = 0;
+        const auto [end, ec] = std::from_chars(value.data(), value.data() + value.size(), parsed);
+        if (ec != std::errc{} || end != value.data() + value.size()) {
+          throw Lhd_error{"usage",
+                          std::format("--set/--config synth.{} expects a non-negative integer, got '{}'", flag, value),
+                          ""};
+        }
+      }
+      if (opt->kind == Synth_set_option::Kind::boolean && value != "true" && value != "false" && value != "1" && value != "0"
+          && value != "on" && value != "off") {
+        throw Lhd_error{"usage", std::format("--set/--config synth.{} expects true|false, got '{}'", flag, value), ""};
       }
       continue;
     }
@@ -587,30 +982,29 @@ void check_known_set_passes(const Options& opts) {
           known += known.empty() ? "" : ", ";
           known += s.name;
         }
-        if (flag == "vcdfakedelay") {
-          throw Lhd_error{"usage",
-                          "--set/--config 'sim.vcdfakedelay' was renamed",
-                          std::format("use --set sim.vcd_fake_delay={} instead", value)};
+        // A flag DELETED outright gets its own reason (same table as the pass
+        // namespaces below), not the generic near-miss list.
+        for (const auto& [oldf, why] : kRemovedFlags) {
+          if (oldf == flag) {
+            throw Lhd_error{"usage", std::format("--set/--config 'sim.{}' was removed", flag), std::string{why}};
+          }
         }
-        auto near = leaf_match_hint(flag);
+        // An old spelling (sim.color_dirty, sim.fence_ratio, sim.live_words,
+        // sim.backend, sim.vcdfakedelay): a directed, copy-pasteable rename.
+        if (const auto rn = renamed_sim_set(flag, value)) {
+          throw Lhd_error{"usage",
+                          std::format("--set/--config 'sim.{}' was renamed", flag),
+                          std::format("use --set {}={} instead", rn->first, rn->second)};
+        }
+        auto near = leaf_match_hint(std::string_view{flag}.substr(flag.rfind('.') + 1));
         throw Lhd_error{"usage",
                         std::format("--set/--config references unknown sim flag 'sim.{}'", flag),
                         near.empty() ? std::format("the sim.* namespace takes: {}", known)
                                      : std::format("{}\nthe sim.* namespace takes: {}", near, known)};
       }
-      if (opt->kind == Sim_set_option::Kind::boolean && value != "true" && value != "false" && value != "1" && value != "0"
-          && value != "on" && value != "off") {
-        throw Lhd_error{"usage", std::format("--set/--config sim.{} expects true|false, got '{}'", flag, value), ""};
-      }
-      // The numeric checkpoint knobs must be non-negative numbers, else a typo would
-      // silently reach the driver as 0 (checkpoint every cycle / divide-by-zero cadence).
-      if (opt->kind == Sim_set_option::Kind::non_neg_num) {
-        errno         = 0;
-        char*  endp   = nullptr;
-        double parsed = std::strtod(value.c_str(), &endp);
-        if (value.empty() || endp == value.c_str() || *endp != '\0' || parsed < 0.0 || errno == ERANGE) {
-          throw Lhd_error{"usage", std::format("--set/--config sim.{} expects a non-negative number, got '{}'", flag, value), ""};
-        }
+      // The value grammar of every Sim_set_option::Kind (lhd_sim_tune_session.cpp).
+      if (auto [msg, hint] = sim_set_value_error(*opt, value); !msg.empty()) {
+        throw Lhd_error{"usage", std::move(msg), std::move(hint)};
       }
       continue;
     }
@@ -627,11 +1021,29 @@ void check_known_set_passes(const Options& opts) {
       // A REMOVED namespace gets a directed answer, not a guessing game: name
       // the exact canonical spelling for THIS flag.
       for (const auto& rn : kRenamedSetPasses) {
+        // `compile.sim.tune.dirty` splits as pass `compile.sim.tune`: the sim
+        // namespace owns dotted flags, so a prefix match carries the rest over.
+        std::string flag_full{flag};
         if (rn.old_ns != pass) {
-          continue;
+          if (rn.new_ns != "sim" || !pass.starts_with(std::string{rn.old_ns} + ".")) {
+            continue;
+          }
+          flag_full = std::format("{}.{}", pass.substr(rn.old_ns.size() + 1), flag);
         }
-        std::string_view f2  = renamed_flag(flag);
+        std::string_view f2  = renamed_flag(flag_full);
         std::string      ns2 = std::string{rn.new_ns};
+        std::string      v2  = value;
+        // An old sim.* spelling reached through the removed namespace goes
+        // straight to its CURRENT name: `compile.sim.color_dirty=1` -> use
+        // sim.tune.dirty=on, never the rejected sim.color_dirty (a two-step dead end).
+        std::string      renamed_sim_flag;
+        if (ns2 == "sim") {
+          if (const auto r = renamed_sim_set(f2, value)) {
+            renamed_sim_flag = r->first.substr(4);
+            v2               = r->second;
+            f2               = renamed_sim_flag;
+          }
+        }
         if (rn.formal_split) {
           bool common = false;
           for (const auto& cf : kFormalCommonFlags) {
@@ -644,9 +1056,34 @@ void check_known_set_passes(const Options& opts) {
             ns2 = "formal.lec";
           }
         }
-        throw Lhd_error{"usage",
-                        std::format("--set/--config '{}.{}' was removed (the {}.* spelling no longer exists)", pass, flag, pass),
-                        std::format("use --set {}.{}={} instead", ns2, f2, value)};
+        // A leaf the new namespace does not register either gets the DELETED
+        // flag's own reason, not a rewrite into a second rejected spelling
+        // (`lec.cache` -> "use formal.lec.cache" -> "was removed": a two-step
+        // dead end). Only a leaf positively ABSENT from the target counts;
+        // `sim` has no eprp method, its vocabulary is kSimSetOptions.
+        bool known = true;
+        if (ns2 == "sim") {
+          known = false;
+          for (const auto& s : kSimSetOptions) {
+            if (s.name == f2) {
+              known = true;
+              break;
+            }
+          }
+        } else if (const auto* m2 = Pass::eprp.get_method(set_pass_method(ns2)); m2 != nullptr) {
+          known = m2->has_label(f2);
+        }
+        if (!known) {
+          for (const auto& [oldf, why] : kRemovedFlags) {
+            if (oldf == f2) {
+              throw Lhd_error{"usage", std::format("--set/--config '{}.{}' was removed", pass, flag), std::string{why}};
+            }
+          }
+        }
+        throw Lhd_error{
+            "usage",
+            std::format("--set/--config '{}.{}' was removed (the {}.* spelling no longer exists)", pass, flag, rn.old_ns),
+            std::format("use --set {}.{}={} instead", ns2, f2, v2)};
       }
       std::string known;
       for (const auto& sp : kSetPasses) {
@@ -661,6 +1098,37 @@ void check_known_set_passes(const Options& opts) {
                       std::format("--set/--config references unknown pass '{}'", pass),
                       near.empty() ? std::format("known passes: {} (`lhd list options`)", known)
                                    : std::format("{}\nknown passes: {}", near, known)};
+    }
+    if (method == "pass.color") {
+      // The synth coloring's own options live under pass.color.synth.* (and
+      // `synth_alg` became `mode`, which that namespace already says). Both
+      // namespaces reach the one pass.color method, so the split is enforced
+      // here: every option has exactly ONE spelling, and any other one answers
+      // with the copy-pasteable replacement instead of silently applying.
+      std::string_view leaf = flag == "synth_alg" ? std::string_view{"mode"} : std::string_view{flag};
+      for (const auto& [oldf, newf] : kRenamedFlags) {
+        if (oldf == leaf) {
+          leaf = newf;  // e.g. `min` -> `min_ge`, now also under pass.color.synth
+          break;
+        }
+      }
+      if (const auto* cm = Pass::eprp.get_method(method); cm != nullptr && cm->has_label(leaf)) {
+        const std::string_view want = set_flag_is_common(method, leaf) ? "pass.color" : "pass.color.synth";
+        if (pass != want || leaf != flag) {
+          throw Lhd_error{"usage",
+                          std::format("--set/--config '{}.{}' is {}spelled '{}.{}'",
+                                      pass,
+                                      flag,
+                                      want == "pass.color" && leaf == flag ? "" : "now ",  // never lived there
+                                      want,
+                                      leaf),
+                          std::format("use --set {}.{}={} instead (options only the synth coloring reads live under "
+                                      "pass.color.synth.*; everything else stays pass.color.*)",
+                                      want,
+                                      leaf,
+                                      value)};
+        }
+      }
     }
     if (is_kernel_label(flag)) {
       throw Lhd_error{"usage",
@@ -715,6 +1183,105 @@ void check_known_set_passes(const Options& opts) {
 // build it is pure overhead, so default it ON in debug builds (catch producer
 // bugs early) and OFF in release. `--set compile.lnast_fmt=true|false` (or the
 // bare `lnast_fmt`) overrides either default; validated by check_known_set_passes.
+// `compile.unroll` (default false): whether a comptime range loop is UNROLLED
+// into one instance per iteration on the way to the LGraph. Off, an eligible
+// loop is kept as ONE replicated instance (pass.upass `unroll=false`); the backends
+// that cannot consume the compact form expand it themselves. Validated by
+// check_known_set_passes; seeded into pass.upass by compile_sources.
+void run_satopt_step(Eprp_var& var, Eprp_var::Eprp_dict labels, Options& opts, Result& res) {
+  merge_sets(opts, "pass.satopt", labels);
+  if (opts.incremental && !opts.workdir.empty() && !opts.workdir_scratch) {
+    labels["cache_dir"] = opts.workdir + "/satopt_cache";
+  }
+  // Always harvested: workdir() makes the scratch one when none was named,
+  // and only the report's content reaches the result.
+  const auto      report = (fs::path(workdir(opts)) / "satopt_report.json").string();
+  std::error_code ec;
+  fs::remove(report, ec);  // never harvest a previous run's report
+  labels["report"] = report;
+  run_step("pass.satopt", var, labels, opts, res);
+  std::ifstream in(report, std::ios::binary);
+  std::string   text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  auto          current = livehd::satopt::Report::parse(text);
+  if (!current) {
+    return;
+  }
+  // Several runs in one command (`lhd lec` optimizes both sides): one report.
+  if (auto previous = livehd::satopt::Report::parse(res.satopt_json)) {
+    previous->merge(*current);
+    current = previous;
+  }
+  res.satopt_json = current->json();
+}
+
+std::optional<bool> satopt_setting(const Options& opts) {
+  std::optional<bool> value;
+  for (const auto& [key, v] : opts.sets) {
+    if (key == "pass.satopt") {
+      value = v == "true" || v == "1" || v == "on";
+    }
+  }
+  return value;
+}
+
+Options library_model_opts(const Options& opts) {
+  auto model_opts = opts;
+  model_opts.libs.clear();
+  model_opts.top.clear();
+  model_opts.impl_top.clear();
+  model_opts.ref_top.clear();
+  // Appended last, so it wins over a user pass.satopt (satopt_setting keeps the
+  // LAST entry): with every top cleared, satopt's pick_top_graph would reject
+  // the multi-cell library.
+  model_opts.sets.emplace_back("pass.satopt", "false");
+  return model_opts;
+}
+
+bool satopt_during_compile(const Options& opts, bool from_source) {
+  // satopt is part of the compile graph pipeline only. `lhd synth` and `lhd
+  // lec` compiling a Pyrope/Verilog SOURCE default it on, so `lhd synth
+  // foo.prp` is `lhd compile --set pass.satopt=true foo.prp` then mapping; an
+  // lg:/ln: input is taken as compiled. An explicit setting always wins.
+  if (const auto value = satopt_setting(opts)) {
+    return *value;
+  }
+  return from_source && (opts.command == "synth" || opts.command == "lec");
+}
+
+bool compile_unroll_requested(const Options& opts) {
+  bool unroll = false;
+  for (const auto& [key, value] : opts.sets) {
+    if (key == "compile.unroll") {
+      unroll = (value == "true" || value == "1" || value == "on");
+    }
+  }
+  return unroll;
+}
+
+namespace {
+// A `compile.<flag>` boolean gate that defaults ON in debug builds and OFF in
+// release; `--set compile.<flag>=...` (or the bare `<flag>`) overrides either.
+bool debug_default_gate(const Options& opts, std::string_view wanted) {
+#ifdef NDEBUG
+  bool enabled = false;
+#else
+  bool enabled = true;
+#endif
+  for (const auto& [key, value] : opts.sets) {
+    std::string_view k{key};
+    auto             pos  = k.rfind('.');
+    auto             flag = pos == std::string_view::npos ? k : k.substr(pos + 1);
+    auto             pass = pos == std::string_view::npos ? std::string_view{} : k.substr(0, pos);
+    if (flag == wanted && (pass.empty() || pass == "compile")) {
+      enabled = (value == "true" || value == "1" || value == "on");
+    }
+  }
+  return enabled;
+}
+}  // namespace
+
+bool verify_frozen_enabled(const Options& opts) { return debug_default_gate(opts, "verify_frozen"); }
+
 bool lnastfmt_enabled(const Options& opts) {
 #ifdef NDEBUG
   bool enabled = false;
@@ -732,6 +1299,10 @@ bool lnastfmt_enabled(const Options& opts) {
   }
   return enabled;
 }
+
+// The Pyrope compile cache follows the one shared `lhd.incremental` switch
+// (apply_lhd_settings folds it into Options before any command runs).
+bool compile_cache_enabled(const Options& opts) { return opts.incremental; }
 
 // Apply every `--set <channel>.log=<level>` to the livehd::log registry (the
 // channel and level were already validated by check_known_set_passes). In a
@@ -766,23 +1337,18 @@ void apply_lhd_settings(Options& opts) {
       opts.top = value;
     } else if (key == "lhd.stats") {
       // canonical form of --stats; the flag and the set spelling both turn it on
-      opts.stats = opts.stats || (value != "false" && value != "0" && value != "off");
+      opts.stats = value != "false" && value != "0" && value != "off";
+    } else if (key == "lhd.incremental") {
+      opts.incremental = value != "false" && value != "0" && value != "off";
     }
   }
 }
 
-// Recipe name -> ordered (set-name, EPRP method) graph passes.
-std::vector<std::pair<std::string, std::string>> recipe_graph_passes(const Options& opts, std::string_view def) {
-  std::string r = opts.recipe.empty() ? std::string{def} : opts.recipe;
-
-  // pass.bitfuzz is a VERIFICATION CANARY, not an optimization: it strips the
-  // per-pin width/sign annotations and makes bitwidth reconstruct them, so any
-  // stage that gave those attributes semantic meaning shows up as a width
-  // disagreement (or, downstream, a LEC refutation). It is off unless the user
-  // asks for it, and it must run AFTER cprop and BEFORE bitwidth --
-  // debug_assert_cells_sized (node_util.hpp) enforces the OPPOSITE contract at
-  // cprop's entry in dbg builds, so an earlier insertion point would trip that
-  // assert by construction.
+// The standard compile pipeline, in (set-name, EPRP method) order.
+std::vector<std::pair<std::string, std::string>> compile_graph_passes(const Options& opts) {
+  // Strip derived annotations immediately after graph lowering. Cprop must
+  // preserve integer semantics without them; the normal bitwidth pass recovers
+  // widths afterward. Bitfuzz itself performs no inference or repair.
   std::vector<std::pair<std::string, std::string>> fuzz;
   for (const auto& [key, value] : opts.sets) {
     if (key == "compile.bitfuzz.mode" && value != "off") {
@@ -791,31 +1357,18 @@ std::vector<std::pair<std::string, std::string>> recipe_graph_passes(const Optio
     }
   }
 
-  if (r == "O0") {
-    return {};
-  }
-  if (r == "O1") {
-    std::vector<std::pair<std::string, std::string>> steps{
-        {"compile.cprop", "pass.cprop"}
-    };
-    // Under O1 there is no bitwidth step to recover the widths, so bitfuzz
-    // brings its own (it runs the inference in-process) and the graph still
-    // leaves the recipe fully sized.
-    steps.insert(steps.end(), fuzz.begin(), fuzz.end());
-    return steps;
-  }
-  if (r == "O2") {
-    // pass.formal is NOT a recipe pass: it runs as a dedicated none|fast|normal
-    // mode step in graph_pipeline_and_emits (default fast, none under O0), so it
-    // is independent of the O-level optimization recipe below.
-    std::vector<std::pair<std::string, std::string>> steps{
-        {"compile.cprop", "pass.cprop"}
-    };
-    steps.insert(steps.end(), fuzz.begin(), fuzz.end());
-    steps.emplace_back("compile.bitwidth", "pass.bitwidth");
-    return steps;
-  }
-  throw Lhd_error{"usage", std::format("unknown recipe '{}'", r), "built-in recipes: O0, O1, O2 (`lhd list recipes`)"};
+  std::vector<std::pair<std::string, std::string>> steps{
+      {"compile.cprop", "pass.cprop"}
+  };
+  steps.insert(steps.begin(), fuzz.begin(), fuzz.end());
+  steps.emplace_back("compile.bitwidth", "pass.bitwidth");
+  steps.emplace_back("compile.enableopt", "pass.enableopt");
+  // Inference can resolve values that cprop could not know yet (notably
+  // reads of procedurally built constant tables). Fold their consumers and
+  // infer widths on the resulting graph before coloring or emission.
+  steps.emplace_back("compile.cprop", "pass.cprop");
+  steps.emplace_back("compile.bitwidth", "pass.bitwidth");
+  return steps;
 }
 
 uint64_t hash_bytes(const std::string& bytes) { return lh::woothash64(bytes.data(), bytes.size(), 1021); }
@@ -825,8 +1378,9 @@ uint64_t hash_bytes(const std::string& bytes) { return lh::woothash64(bytes.data
 std::string json_escape_min(std::string_view s);  // defined with the scan command below
 
 // One `pub` export in a unit's manifest entry. `url` only for
-// lambda exports (`ln:<unit>.<name>`); values live in the `<unit>.__pub`
-// wrapper tree.
+// lambda exports (`ln:<unit>.<name>`). Published constant leaves also ride in
+// unit metadata so a compile-cache partial restore can register them without
+// synthesizing a separate `<unit>.__pub` wrapper.
 struct Manifest_pub {
   std::string name;
   std::string kind;  // value|comb|mod|pipe|fluid
@@ -842,7 +1396,7 @@ struct Manifest_unit {
   uint64_t                  hash{0};
   std::string               unit_kind;
   bool                      verilog_origin{false};  // durable: a Verilog-read tree (open ports legal, etc.)
-  std::vector<Manifest_pub> pubs;                    // file units only (the pub index)
+  std::vector<Manifest_pub> pubs;                   // file units only (the pub index)
   // For `ln:` units: the live Lnast, so write_manifest can persist the
   // post-upass io_meta/bw_meta side-channels (otherwise empty on adopt, see
   // lnast.hpp). A loaded import restores them and skips re-elaboration.
@@ -855,10 +1409,35 @@ void write_io_entry(std::ofstream& ofs, const Lnast_io_entry& e) {
   ofs << "{\"n\":\"" << json_escape_min(e.name) << "\",\"b\":" << e.bits << ",\"s\":" << (e.is_signed ? 1 : 0)
       << ",\"r\":" << (e.is_ref ? 1 : 0) << ",\"v\":" << (e.is_varargs ? 1 : 0) << ",\"k\":" << static_cast<int>(e.kind)
       << ",\"smin\":" << e.stages_min << ",\"smax\":" << e.stages_max << ",\"t\":\"" << json_escape_min(e.type_name)
-      << "\",\"hr\":" << (e.has_range ? 1 : 0) << ",\"rmin\":" << e.range_min << ",\"rmax\":" << e.range_max << "}";
+      << "\",\"hr\":" << (e.has_range ? 1 : 0) << ",\"rmin\":" << e.range_min << ",\"rmax\":"
+      << e.range_max
+      // has_default and the array-port view (`a:[N]T`) are as load-bearing as
+      // the width: lnast.tolg builds its element view from array_size alone, so
+      // dropping these three here silently re-lowers `a[i]` against the raw
+      // packed bus on any unit restored from an ln: manifest.
+      << ",\"hd\":" << (e.has_default ? 1 : 0) << ",\"as\":" << e.array_size << ",\"eb\":" << e.elem_bits
+      << ",\"es\":" << (e.elem_signed ? 1 : 0) << "}";
 }
 
 void write_unit_meta(std::ofstream& ofs, const Lnast& ln) {
+  // Deferred templates are still source bodies. Their generic signature and
+  // template flag must survive independently of the tree, just as they do in
+  // the compile cache; otherwise reload lowers an unspecialized body as hardware.
+  ofs << ",\"template\":" << (ln.is_template() ? "true" : "false")
+      << ",\"skip_timecheck\":" << (ln.get_skip_timecheck() ? "true" : "false") << ",\"lg_name\":\""
+      << json_escape_min(ln.get_lg_name()) << "\"";
+  const auto write_strings = [&](std::string_view key, const std::vector<std::string>& values) {
+    ofs << ",\"" << key << "\":[";
+    for (size_t i = 0; i < values.size(); ++i) {
+      if (i) {
+        ofs << ',';
+      }
+      ofs << '\"' << json_escape_min(values[i]) << '\"';
+    }
+    ofs << ']';
+  };
+  write_strings("generics", ln.get_generics());
+  write_strings("generic_defaults", ln.get_generic_defaults());
   const auto& io = ln.io_meta();
   if (!io.empty()) {
     ofs << ",\"io_meta\":{\"in\":[";
@@ -891,6 +1470,17 @@ void write_unit_meta(std::ofstream& ofs, const Lnast& ln) {
     }
     ofs << "]";
   }
+  const auto& pub_values = ln.get_pub_values();
+  if (!pub_values.empty()) {
+    ofs << ",\"pub_values\":[";
+    for (size_t i = 0; i < pub_values.size(); ++i) {
+      if (i) {
+        ofs << ',';
+      }
+      ofs << "{\"n\":\"" << json_escape_min(pub_values[i].first) << "\",\"v\":\"" << json_escape_min(pub_values[i].second) << "\"}";
+    }
+    ofs << "]";
+  }
 }
 
 void write_manifest(const std::string& dir, std::string_view kind, const std::vector<Manifest_unit>& units) {
@@ -910,7 +1500,13 @@ void write_manifest(const std::string& dir, std::string_view kind, const std::ve
     first = false;
     ofs << "{\"name\":\"" << json_escape_min(u.name) << "\"";
     if (!ext.empty()) {
-      ofs << ",\"file\":\"" << json_escape_min(u.name) << ext << "\"";
+      // Every per-unit writer runs the unit name through the ONE long-name
+      // policy (livehd::unit_file_stem): directory separators are collapsed (a
+      // path-qualified Pyrope import spells its graph `../lib/core.core`) and a
+      // name past NAME_MAX is shortened to a readable prefix plus a SHA-256.
+      // The manifest must name the file that actually landed on disk.
+      const std::string fname = livehd::unit_file_stem(u.name);
+      ofs << ",\"file\":\"" << json_escape_min(fname) << ext << "\"";
     }
     ofs << ",\"content_hash\":\"" << std::format("{:016x}", u.hash) << "\"";
     if (!u.unit_kind.empty()) {
@@ -1018,24 +1614,54 @@ void save_ln_dir(Options& opts, Result& res, const std::vector<std::shared_ptr<L
 // (written by write_unit_meta). adopt() loads them empty; restoring them lets a
 // pre-elaborated import skip re-elaboration (it already holds its final body).
 void restore_unit_meta(const rapidjson::Value& u, Lnast& ln) {
+  if (u.HasMember("template") && u["template"].IsBool()) {
+    ln.set_template(u["template"].GetBool());
+  }
+  if (u.HasMember("skip_timecheck") && u["skip_timecheck"].IsBool()) {
+    ln.set_skip_timecheck(u["skip_timecheck"].GetBool());
+  }
+  if (u.HasMember("lg_name") && u["lg_name"].IsString()) {
+    ln.set_lg_name(u["lg_name"].GetString());
+  }
+  // Only OVERWRITE what the file actually carries: an `ln:` dir written before
+  // these keys existed has no "generics"/"generic_defaults", and setting them
+  // unconditionally would CLEAR whatever the loaded tree already established.
+  const auto read_strings = [&](const char* key, auto&& setter) {
+    if (!u.HasMember(key) || !u[key].IsArray()) {
+      return;
+    }
+    std::vector<std::string> values;
+    for (const auto& value : u[key].GetArray()) {
+      if (value.IsString()) {
+        values.emplace_back(value.GetString());
+      }
+    }
+    setter(std::move(values));
+  };
+  read_strings("generics", [&](std::vector<std::string> v) { ln.set_generics(std::move(v)); });
+  read_strings("generic_defaults", [&](std::vector<std::string> v) { ln.set_generic_defaults(std::move(v)); });
   auto read_entries = [](const rapidjson::Value& arr, std::vector<Lnast_io_entry>& out) {
     for (const auto& e : arr.GetArray()) {
       if (!e.IsObject() || !e.HasMember("n")) {
         continue;
       }
       Lnast_io_entry x;
-      x.name       = e["n"].GetString();
-      x.bits       = e.HasMember("b") ? e["b"].GetInt() : 0;
-      x.is_signed  = !e.HasMember("s") || e["s"].GetInt() != 0;
-      x.is_ref     = e.HasMember("r") && e["r"].GetInt() != 0;
-      x.is_varargs = e.HasMember("v") && e["v"].GetInt() != 0;
-      x.kind       = e.HasMember("k") ? static_cast<Io_kind>(e["k"].GetInt()) : Io_kind::none;
-      x.stages_min = e.HasMember("smin") ? e["smin"].GetInt() : 0;
-      x.stages_max = e.HasMember("smax") ? e["smax"].GetInt() : 0;
-      x.type_name  = e.HasMember("t") ? e["t"].GetString() : "";
-      x.has_range  = e.HasMember("hr") && e["hr"].GetInt() != 0;
-      x.range_min  = e.HasMember("rmin") ? e["rmin"].GetInt64() : 0;
-      x.range_max  = e.HasMember("rmax") ? e["rmax"].GetInt64() : 0;
+      x.name        = e["n"].GetString();
+      x.bits        = e.HasMember("b") ? e["b"].GetInt() : 0;
+      x.is_signed   = !e.HasMember("s") || e["s"].GetInt() != 0;
+      x.is_ref      = e.HasMember("r") && e["r"].GetInt() != 0;
+      x.is_varargs  = e.HasMember("v") && e["v"].GetInt() != 0;
+      x.kind        = e.HasMember("k") ? static_cast<Io_kind>(e["k"].GetInt()) : Io_kind::none;
+      x.stages_min  = e.HasMember("smin") ? e["smin"].GetInt() : 0;
+      x.stages_max  = e.HasMember("smax") ? e["smax"].GetInt() : 0;
+      x.type_name   = e.HasMember("t") ? e["t"].GetString() : "";
+      x.has_range   = e.HasMember("hr") && e["hr"].GetInt() != 0;
+      x.range_min   = e.HasMember("rmin") ? e["rmin"].GetInt64() : 0;
+      x.range_max   = e.HasMember("rmax") ? e["rmax"].GetInt64() : 0;
+      x.has_default = e.HasMember("hd") && e["hd"].GetInt() != 0;
+      x.array_size  = e.HasMember("as") ? e["as"].GetInt64() : 0;
+      x.elem_bits   = e.HasMember("eb") ? e["eb"].GetInt() : 0;
+      x.elem_signed = e.HasMember("es") && e["es"].GetInt() != 0;
       out.push_back(std::move(x));
     }
   };
@@ -1047,6 +1673,9 @@ void restore_unit_meta(const rapidjson::Value& u, Lnast& ln) {
     if (m.HasMember("out") && m["out"].IsArray()) {
       read_entries(m["out"], ln.io_meta().outputs);
     }
+    // Lnast_tree_io::find() memoizes a name -> position index; every mutation of
+    // the port vectors must retire it or later lookups miss the loaded ports.
+    ln.io_meta().invalidate_index();
   }
   if (u.HasMember("bw_meta") && u["bw_meta"].IsArray()) {
     for (const auto& e : u["bw_meta"].GetArray()) {
@@ -1060,6 +1689,15 @@ void restore_unit_meta(const rapidjson::Value& u, Lnast& ln) {
       ln.bw_meta().ranges.emplace(e["n"].GetString(), be);
     }
   }
+  if (u.HasMember("pub_values") && u["pub_values"].IsArray()) {
+    std::vector<std::pair<std::string, std::string>> values;
+    for (const auto& e : u["pub_values"].GetArray()) {
+      if (e.IsObject() && e.HasMember("n") && e["n"].IsString() && e.HasMember("v") && e["v"].IsString()) {
+        values.emplace_back(e["n"].GetString(), e["v"].GetString());
+      }
+    }
+    ln.set_pub_values(std::move(values));
+  }
 }
 
 // Load every unit of an `ln:` directory. The units share the loaded forest.
@@ -1069,14 +1707,12 @@ std::vector<std::shared_ptr<Lnast>> load_ln_dir(const std::string& dir) {
                     std::format("ln: input is not a forest directory: {}", dir),
                     "expected a directory produced by --emit-dir ln:DIR/ (forest.txt + manifest.json)"};
   }
-  std::ifstream mifs(dir + "/manifest.json");
-  if (!mifs.is_open()) {
+  const auto manifest_json = livehd::file_utils::read_file(dir + "/manifest.json");
+  if (!manifest_json) {
     throw Lhd_error{"missing_file", std::format("missing {}/manifest.json", dir), ""};
   }
-  std::ostringstream moss;
-  moss << mifs.rdbuf();
   rapidjson::Document doc;
-  doc.Parse(moss.str().c_str());
+  doc.Parse(manifest_json->c_str());
   if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("units") || !doc["units"].IsArray()) {
     throw Lhd_error{"config", std::format("malformed manifest.json in {}", dir), ""};
   }
@@ -1116,6 +1752,13 @@ std::vector<std::shared_ptr<Lnast>> load_ln_dir(const std::string& dir) {
       }
     }
     restore_unit_meta(u, *ln);  // io_meta/bw_meta (empty on adopt) for import reuse
+    // Concrete stateful bodies are already elaborated, including SSA and
+    // width narrowing. Rewalking them on the ln:-only path can reinterpret
+    // their private temporaries. Templates still need call-site elaboration.
+    const auto kind = ln->get_lambda_kind();
+    if (!ln->is_template() && !ln->io_meta().empty() && (kind == "mod" || kind == "pipe")) {
+      ln->set_pre_elaborated(true);
+    }
     out.push_back(std::move(ln));
   }
   if (out.empty()) {
@@ -1158,9 +1801,10 @@ void emit_lnast_dump_outputs(const std::vector<std::shared_ptr<Lnast>>& units, O
       }
       std::ostringstream oss;
       ln->dump(oss);
-      std::ofstream ofs(std::format("{}/{}.lnast", e.path, name));
+      const auto    stem = livehd::unit_file_stem(name);
+      std::ofstream ofs(std::format("{}/{}.lnast", e.path, stem));
       if (!ofs.is_open()) {
-        throw Lhd_error{"config", std::format("could not write {}/{}.lnast", e.path, name), ""};
+        throw Lhd_error{"config", std::format("could not write {}/{}.lnast", e.path, stem), ""};
       }
       ofs << oss.str();
       manifest.emplace_back(name, hash_bytes(oss.str()));
@@ -1175,8 +1819,67 @@ void emit_lnast_dump_outputs(const std::vector<std::shared_ptr<Lnast>>& units, O
 // --set is merged, so the directory emit path (where each `.map` lands adjacent
 // to its `.v`) ships the source map by default while `--set cgen.srcmap=0` can
 // still turn it off.
-std::vector<std::string> cgen_into(Options& opts, Result& res, Eprp_var& var, const std::string& odir,
-                                   bool default_srcmap) {
+std::vector<std::string> cgen_into(Options& opts, Result& res, Eprp_var& input, const std::string& odir, bool default_srcmap,
+                                   std::string_view top) {
+  Eprp_var selected;
+  if (!top.empty()) {
+    const auto root = pick_top_graph(input, "", std::string(top), "", "compile", "inou.cgen.verilog");
+    std::vector<std::shared_ptr<hhds::Graph>> pending{root};
+    absl::flat_hash_set<const hhds::Graph*>   seen;
+    while (!pending.empty()) {
+      auto graph = std::move(pending.back());
+      pending.pop_back();
+      if (!graph || !seen.insert(graph.get()).second) {
+        continue;
+      }
+      selected.add(graph);
+      for (auto node : graph->body().nodes()) {
+        if (livehd::graph_util::type_op_of(node) == Ntype_op::Sub) {
+          if (auto child = node.get_subnode_graph()) {
+            pending.push_back(std::move(child));
+          }
+        }
+      }
+    }
+    // Reachability alone is not the design. A module this compile ELABORATED
+    // FROM SOURCE belongs in the emit even when no Sub instance survives to
+    // point at it: an empty sink module (`module obs(input d); endmodule`) has
+    // its instance removed as dead once lowered, and pruning on reachability
+    // then dropped a module the source declared -- silently, on a round trip
+    // (//lhd/tests:slang_struct_net_wire_test section 8; the real case is a DPI
+    // wrapper that is only empty under SYNTHESIS). An entry that arrived purely
+    // as a pre-compiled `lg:` library input has no unit here, so it is still
+    // pruned, which is what the --top filter is for.
+    absl::flat_hash_set<std::string> own_units;
+    for (const auto& ln : input.lnasts) {
+      if (!ln) {
+        continue;
+      }
+      const std::string name{ln->get_top_module_name()};
+      own_units.insert(name);
+      // A graph is named `<unit>.<entity>`; a unit-level lnast carries just the
+      // file, so accept a graph whose file half matches too.
+      if (const auto dot = name.rfind('.'); dot != std::string::npos) {
+        own_units.insert(name.substr(0, dot));
+      }
+    }
+    if (!own_units.empty()) {
+      for (const auto& graph : input.graphs) {
+        if (!graph || seen.contains(graph.get())) {
+          continue;
+        }
+        const std::string gname{graph->get_name()};
+        const auto        dot = gname.rfind('.');
+        if (own_units.contains(gname) || (dot != std::string::npos && own_units.contains(gname.substr(0, dot)))) {
+          seen.insert(graph.get());
+          selected.add(graph);
+        }
+      }
+    }
+  }
+  // --top selects the design and its callees, not unrelated library entries.
+  // A library emission (no top) deliberately retains every supplied graph.
+  auto& var = top.empty() ? input : selected;
   ensure_dir(odir);
   Eprp_var::Eprp_dict labels{
       {"odir", odir}
@@ -1194,7 +1897,7 @@ std::vector<std::string> cgen_into(Options& opts, Result& res, Eprp_var& var, co
   }
   std::sort(names.begin(), names.end());
   for (const auto& n : names) {
-    auto f = std::format("{}/{}.v", odir, n);
+    auto f = std::format("{}/{}.v", odir, livehd::unit_file_stem(n));
     if (::access(f.c_str(), R_OK) != 0) {
       throw Lhd_error{"internal", std::format("inou.cgen.verilog did not produce {}", f), "check the step log in --workdir"};
     }
@@ -1217,13 +1920,11 @@ void emit_verilog_outputs(Options& opts, Result& res, Eprp_var& var) {
     if (e.kind != "verilog") {
       continue;
     }
-    auto                                          names = cgen_into(opts, res, var, e.path, /*default_srcmap=*/true);
+    auto                                          names = cgen_into(opts, res, var, e.path, /*default_srcmap=*/true, opts.top);
     std::vector<std::pair<std::string, uint64_t>> manifest;
     for (const auto& n : names) {
-      std::ifstream      ifs(std::format("{}/{}.v", e.path, n));
-      std::ostringstream oss;
-      oss << ifs.rdbuf();
-      manifest.emplace_back(n, hash_bytes(oss.str()));
+      const auto content = livehd::file_utils::read_file(std::format("{}/{}.v", e.path, livehd::unit_file_stem(n)));
+      manifest.emplace_back(n, hash_bytes(content.value_or("")));
     }
     write_manifest(e.path, "verilog", manifest);
     res.outputs.push_back(e.path);
@@ -1236,39 +1937,27 @@ void emit_verilog_outputs(Options& opts, Result& res, Eprp_var& var) {
     // One declared file: per-module cgen into scratch, then a deterministic
     // (name-sorted) concatenation.
     auto          scratch = std::format("{}/cgen_{:03d}", workdir(opts), ++step_counter);
-    auto          names   = cgen_into(opts, res, var, scratch);
+    auto          names   = cgen_into(opts, res, var, scratch, /*default_srcmap=*/false, opts.top);
     std::ofstream ofs(e.path);
     if (!ofs.is_open()) {
       throw Lhd_error{"config", std::format("could not write {}", e.path), ""};
     }
     for (const auto& n : names) {
-      std::ifstream ifs(std::format("{}/{}.v", scratch, n));
+      std::ifstream ifs(std::format("{}/{}.v", scratch, livehd::unit_file_stem(n)));
       ofs << ifs.rdbuf();
     }
     res.outputs.push_back(e.path);
   }
 }
 
-// Run inou.cgen.sim (TODO 3d): a <module>.hpp interface + <module>.cpp body per
+// Run inou.cgen.sim: a <module>.hpp interface + <module>.cpp body per
 // graph into `odir`. Mirrors cgen_into — seed odir, run the step, then assert
 // each pair exists.
-// sim.cgen_color (default true): run the per-output-cone coloring before
-// inou.cgen.sim. Honors `sim.cgen_color`
-// (the compile --emit-dir sim: path); absent => on.
-static bool sim_cgen_color_enabled(const Options& opts) {
-  for (const auto& [k, v] : opts.sets) {
-    if (k == "sim.cgen_color") {
-      return v != "false" && v != "0" && !v.empty();
-    }
-  }
-  return true;
-}
-
 std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, const std::string& odir) {
   ensure_dir(odir);
 
-  // Resolve --top once against the loaded graphs: both pass.color and
-  // inou.cgen.sim accept the FULL internal name (file.entity) — the only
+  // Resolve --top once against the loaded graphs. inou.cgen.sim accepts the
+  // FULL internal name (file.entity) — the only
   // spelling that disambiguates two same-entity modules. An unresolvable name
   // passes through unchanged (with a warning: the VCD would not self-root).
   std::string top_full;
@@ -1289,36 +1978,36 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
     }
   }
 
-  // Color each module by its per-output cones (pass.color cgen) BEFORE emitting,
-  // so inou.cgen.sim can schedule a Sub at output-cone granularity and break a
-  // false combinational loop through an instance. The coloring is metadata on the
-  // live graphs only: inou.cgen.verilog ignores it and an un-split sim is
-  // identical, and NO_COLOR is treated as just another partition, so generation
-  // is always safe whether or not a node was colored.
-  if (sim_cgen_color_enabled(opts)) {
-    Eprp_var::Eprp_dict clabels{
-        {"alg", "cgen"}
-    };
-    if (!top_full.empty()) {
-      clabels["top"] = top_full;
-    }
-    run_step("pass.color", var, clabels, opts, res);
-  }
-
   Eprp_var::Eprp_dict labels{
       {"odir", odir}
   };
+  if (opts.sim_observe) {
+    labels["observe"] = "true";
+  }
+  labels["runtime_support"] = opts.sim_runtime_support ? "true" : "false";
   merge_sets(opts, "compile.cgen", labels);
-  // sim.* is the ONE sim vocabulary (user ruling 2026-07-17): the codegen
+  // sim.* is the ONE sim vocabulary: the codegen
   // options ride the same names as the runtime `lhd sim` command, and the
   // compile.sim.* spelling does not exist (a --set of it errors with the
   // inline sim.* suggestion).
   for (const auto& [k, v] : opts.sets) {
     if (k == "sim.vcd") {
       labels["vcd"] = v;
-    } else if (k == "sim.vcd_fake_delay" || k == "sim.vcdfakedelay") {
+    } else if (k == "sim.vcd_fake_delay") {
       labels["vcd_fake_delay"] = v;
+    } else if (k == "sim.slop_u") {
+      labels["slop_u"] = v;
+    } else if (k == "sim.debug") {
+      labels["debug"] = v;
+    } else if (k == "sim.unknown_zero") {
+      labels["unknown_zero"] = v;
     }
+  }
+  // The tune vector always reaches cgen RESOLVED and concrete (explicit --set >
+  // sim.tune.file > the workdir's tuned decision > default), never through
+  // opts.sets: see Options::sim_tune.
+  for (auto& [label, value] : sim_tune_codegen_labels(opts, res)) {
+    labels[label] = std::move(value);
   }
   // One knob, three shapes: false = no VCD, FILE = that path, true = a path
   // derived from the top ("<entity>.vcd" next to wherever the binary runs).
@@ -1345,16 +2034,12 @@ std::vector<std::string> sim_into(Options& opts, Result& res, Eprp_var& var, con
     if (!entity.empty() && entity.front() == '%') {
       continue;
     }
-    // Mirror inou.cgen.sim's file-name sanitization: a '/' from a path-qualified
-    // import (`../pp.Foo`) is a directory separator that cgen collapses to '_'
-    // for the emitted .hpp/.cpp — the existence check and the BUILD srcs list
-    // must reference the SAME sanitized basename.
-    for (char& c : gn) {
-      if (c == '/' || c == '\\') {
-        c = '_';
-      }
-    }
-    names.emplace_back(std::move(gn));
+    // Mirror inou.cgen.sim's file-name mapping — the ONE long-name policy: a
+    // '/' from a path-qualified import (`../pp.Foo`) is a directory separator
+    // that collapses to '_', and a generated name past NAME_MAX is shortened.
+    // The existence check and the BUILD srcs list must reference the SAME
+    // basename cgen actually wrote.
+    names.emplace_back(livehd::unit_file_stem(gn));
   }
   std::sort(names.begin(), names.end());
   for (const auto& n : names) {
@@ -1405,16 +2090,46 @@ std::string find_header_in_runfiles(std::string_view header) {
         break;
       }
     }
+    // Direct `./bazel-bin/lhd/lhd` execution has no RUNFILES_DIR and the
+    // resolved executable path points into the output base, outside the
+    // sibling `.runfiles` tree. The repository-root invocation is the normal
+    // developer path, so probe its stable Bazel symlink explicitly.
+    const auto direct = fs::current_path(cec) / "bazel-bin" / "lhd" / "lhd.runfiles";
+    if (!cec && fs::is_directory(direct, cec)) {
+      roots.push_back(direct);
+    }
   }
   for (const char* env : {"RUNFILES_DIR", "TEST_SRCDIR"}) {
     if (const char* v = std::getenv(env); v != nullptr && *v != 0) {
       roots.emplace_back(v);
     }
   }
-  for (fs::path p = file_utils::get_exe_path(); !p.empty() && p != p.root_path(); p = p.parent_path()) {
+  for (fs::path p = livehd::file_utils::get_exe_path(); !p.empty() && p != p.root_path(); p = p.parent_path()) {
     if (p.filename().string().find(".runfiles") != std::string::npos) {
       roots.push_back(p);
       break;
+    }
+  }
+  // A bazel-BUILT (not `bazel run`) lhd invoked BY PATH from another repo's cwd —
+  // `../livehd/bazel-bin/lhd/lhd sim ... --workdir w` run from the lhdsuite
+  // checkout — sets no RUNFILES_DIR, has no `.runfiles` ancestor, and the
+  // cwd-anchored `bazel-bin/lhd/lhd.runfiles` probe above looks under the WRONG
+  // repository. What it does have is the sibling `<exe>.runfiles` directory bazel
+  // writes next to every binary; get_exe_path() is symlink-resolved, so this lands
+  // in bazel-out where that sibling also exists. Without it the sim runtime probes
+  // silently miss (slop.hpp/iassert.hpp still resolve from the ../hlop dev layout).
+  {
+    std::error_code   rec;
+    const std::string exe_dir = livehd::file_utils::get_exe_path();  // the DIRECTORY holding the binary
+    for (fs::directory_iterator it(exe_dir, fs::directory_options::skip_permission_denied, rec), end; !exe_dir.empty() && it != end;
+         it.increment(rec)) {
+      if (rec) {
+        rec.clear();
+        continue;
+      }
+      if (it->path().filename().string().ends_with(".runfiles")) {
+        roots.push_back(it->path());
+      }
     }
   }
   // Runfiles stage each external repo as a direct child; the sim headers live at
@@ -1430,7 +2145,7 @@ std::string find_header_in_runfiles(std::string_view header) {
         ec.clear();
         continue;
       }
-      for (const char* sub : {"", "hlop", "src"}) {
+      for (const char* sub : {"", "hlop", "src", "ot", "inou/cgen"}) {
         fs::path cand = (*sub != 0) ? it->path() / sub / header : it->path() / header;
         if (::access(cand.c_str(), R_OK) == 0) {
           result = cand.parent_path().string();
@@ -1470,17 +2185,36 @@ std::string sim_hlop_path(const Options& opts) {
 }
 
 // The `-I` directory that resolves `#include "slop.hpp"` (and blop.hpp /
-// vcd_writer.hpp): the `hlop/` subdir of the hlop module root. Falls back to the
-// module root itself in case `--set sim.hlop_dir=` already points at the
-// header dir. Empty result -> slop.hpp not located (the caller reports it).
+// vcd_writer.hpp): the `hlop/` subdir of the hlop module root, falling back to
+// the module root itself in case the root already points at the header dir.
+//
+// PRECEDENCE: an explicit `--set sim.hlop_dir=DIR` is the ONLY authority when
+// it is given -- it must not silently resolve against bazel runfiles instead,
+// or a deliberate override would be ignored, so an explicit root that has no
+// slop.hpp returns empty and the caller reports it. Without an override the
+// runfiles copy wins over the `../hlop` guess: inside a bazel test the sibling
+// checkout may not exist at all, and if it does it is not the tree the test
+// was built against.
 std::string sim_hlop_include_dir(const Options& opts) {
+  bool explicit_root = false;
+  for (const auto& [key, value] : opts.sets) {
+    if (key == "sim.hlop_dir" && !value.empty()) {
+      explicit_root = true;
+      break;
+    }
+  }
+  if (!explicit_root) {
+    if (const auto runfiles = find_header_in_runfiles("slop.hpp"); !runfiles.empty()) {
+      return runfiles;
+    }
+  }
   const auto root = sim_hlop_path(opts);
   for (const auto& cand : {root + "/hlop", root}) {
     if (::access((cand + "/slop.hpp").c_str(), R_OK) == 0) {
       return cand;
     }
   }
-  return find_header_in_runfiles("slop.hpp");  // bazel runfiles fallback
+  return {};  // the runfiles probe above already ran for the non-explicit case
 }
 
 // The `-I` directory that resolves `#include "iassert.hpp"` (slop.hpp pulls it
@@ -1537,7 +2271,22 @@ std::string sim_host_cxx() {
   return "c++";  // last resort (POSIX): let exec resolve it
 }
 
-// `--emit-dir sim:DIR/` — inou.cgen.sim (TODO 3d). Writes a standalone Bazel
+// The LLVM simulator emits bitcode with the LLVM linked into lhd. A host
+// compiler may use a different LLVM version, so its linker cannot safely read
+// those files. This companion binary uses lhd's exact LLVM to inline the color
+// kernels into a host-compiler bitcode TU and emits one ordinary native object.
+std::string sim_llvm_link_tool() {
+  const auto dir = find_header_in_runfiles("llvm_sim_link");
+  if (!dir.empty()) {
+    const auto path = dir + "/llvm_sim_link";
+    if (::access(path.c_str(), X_OK) == 0) {
+      return path;
+    }
+  }
+  return {};
+}
+
+// `--emit-dir sim:DIR/` — inou.cgen.sim. Writes a standalone Bazel
 // module of per-module Slop<N> structs over ../hlop: the pass writes a
 // <name>.hpp interface + a <name>.cpp body per module, here we add the build
 // scaffold (MODULE.bazel / BUILD) + manifest so `cd DIR && bazel build //:sim`
@@ -1552,9 +2301,39 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
                     "no synthesizable modules to emit as sim:",
                     "the design produced no LGraphs (a pure-comptime program has no module IO)"};
   }
-  const auto& dir   = sim_out->path;
-  auto        names = sim_into(opts, res, var, dir);  // writes <name>.hpp + <name>.cpp + checks
-  const auto  hlop  = sim_hlop_path(opts);
+  const auto&              dir   = sim_out->path;
+  auto                     names = sim_into(opts, res, var, dir);  // writes <name>.hpp + <name>.cpp + checks
+  const auto               hlop  = sim_hlop_path(opts);
+  std::vector<std::string> color_aux_sources;
+  std::vector<std::string> color_objects;
+  {
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(dir, ec)) {
+      const auto filename = entry.path().filename().string();
+      if (!entry.is_regular_file()) {
+        continue;
+      }
+      // `.color-commit-` belongs here with the other two: a design large enough
+      // to shard its state commit (>512 members) emits those TUs exactly like
+      // the evaluator shards, and omitting them left the generated BUILD and
+      // manifest.json describing a tree that cannot link. `lhd sim`'s own build
+      // globs the directory, so only the hand-buildable bazel/manifest path was
+      // affected — which is precisely the path nothing in CI exercises.
+      // The root-only sim.tune TUs (`.tune-id.cpp`: the baked vector/structure
+      // identity; `.tune.cpp`: the profiler's support tables) and the
+      // `.color-bind-` shards link into the same library.
+      if ((filename.find(".color-kernel-") != std::string::npos || filename.find(".color-eval-") != std::string::npos
+           || filename.find(".color-commit-") != std::string::npos || filename.find(".color-bind-") != std::string::npos
+           || filename.ends_with(".tune-id.cpp") || filename.ends_with(".tune.cpp"))
+          && filename.ends_with(".cpp")) {
+        color_aux_sources.push_back(filename);
+      } else if (filename.find(".color-kernel-") != std::string::npos && filename.ends_with(".llvm.o")) {
+        color_objects.push_back(filename);
+      }
+    }
+    std::ranges::sort(color_aux_sources);
+    std::ranges::sort(color_objects);
+  }
 
   // MODULE.bazel — standalone root. bzlmod honors only ROOT overrides, so we
   // re-declare hlop (local_path_override to the dev checkout) AND iassert
@@ -1574,42 +2353,85 @@ void emit_sim_outputs(Options& opts, Result& res, Eprp_var& var) {
            ")\n";
   }
 
+  // The standalone root does not inherit LiveHD's .bazelrc. Match its macOS
+  // deployment target: Slop uses libc++ APIs unavailable at Bazel's older
+  // default target. Apply this to dependencies and the driver as well.
+  {
+    std::ofstream ofs(std::format("{}/.bazelrc", dir));
+    ofs << "# Match the C++ library requirements of LiveHD and Slop.\n"
+           "build --enable_platform_specific_config\n"
+           "build:macos --copt=-mmacosx-version-min=26.0\n"
+           "build:macos --linkopt=-mmacosx-version-min=26.0\n"
+           "build:macos --host_copt=-mmacosx-version-min=26.0\n"
+           "build:macos --host_linkopt=-mmacosx-version-min=26.0\n";
+  }
+
   // BUILD — one cc_library compiling every module's <name>.cpp against
   // @hlop//hlop (C++23). Each .cpp is its own compile action, so editing one
   // module's body recompiles only that .o (the per-module bodies no longer live
   // in headers). srcs is an explicit generated list (not glob) so a stray .cpp
   // dropped in the dir — e.g. a hand-written test driver — is not swept into the
-  // library. ThinLTO is gated to `-c opt`: it restores the cross-module inlining
-  // the old header-only form got for release builds, while dev/incremental
-  // builds (fastbuild/dbg) skip LTO and stay fast.
+  // library. Do not request Bazel's `thin_lto` feature here: its implementation
+  // is toolchain-specific (and expands to Clang-only flags in some GCC-selected
+  // toolchains). The caller's compilation mode still supplies the usual
+  // optimization flags.
+  //
+  // `.llvm.o` is NOT in srcs, and must not be: under `sim.tune.backend=llvm` those
+  // files hold lhd-version LLVM BITCODE (Cgen_llvm::write_object writes it with
+  // WriteBitcodeToFile), not relocatable objects, and bazel would hand a `.o`
+  // in srcs straight to the system linker. Lowering them needs `llvm_sim_link`,
+  // lhd's version-matched companion, which a standalone bazel module cannot
+  // reach -- so this scaffold describes the SLOP backend only, and says so in
+  // the file it writes. `lhd sim` runs its own build.ninja (the `llvm_inline`
+  // rule) and never reads this BUILD, so it is unaffected either way.
   {
     std::ofstream ofs(std::format("{}/BUILD", dir));
     ofs << "load(\"@rules_cc//cc:defs.bzl\", \"cc_library\")\n\n";
-    ofs << "config_setting(\n    name = \"opt\",\n    values = {\"compilation_mode\": \"opt\"},\n)\n\n";
+    if (!color_objects.empty()) {
+      ofs << "# INCOMPLETE: this design was generated with --set sim.tune.backend=llvm, whose color\n"
+             "# kernels are LLVM bitcode (*.llvm.o) that only lhd's version-matched llvm_sim_link\n"
+             "# can lower to a native object. They are deliberately NOT in srcs -- bazel would pass\n"
+             "# bitcode to the system linker -- so this target is missing every\n"
+             "# __lhd_color_kernel_*_llvm definition the evaluator calls and will not link.\n"
+             "# Re-run with --set sim.tune.backend=slop for a standalone bazel module, or use `lhd sim`,\n"
+             "# which links the bitcode itself.\n\n";
+    }
     ofs << "cc_library(\n    name = \"sim\",\n    srcs = [\n";
     for (const auto& n : names) {
       ofs << std::format("        \"{}.cpp\",\n", n);
     }
-    ofs << "    ],\n"
-           "    hdrs = glob([\"*.hpp\"]),\n"
-           "    copts = [\"-std=c++23\"],\n"
-           "    features = select({\n"
-           "        \":opt\": [\"thin_lto\"],\n"
-           "        \"//conditions:default\": [],\n"
-           "    }),\n"
-           "    deps = [\"@hlop//hlop\"],\n"
+    for (const auto& source : color_aux_sources) {
+      ofs << std::format("        \"{}\",\n", source);
+    }
+    ofs << "    ],\n";
+    ofs << "    hdrs = glob([\"*.hpp\"]),\n";
+    ofs << "    copts = [\"-std=c++23\", \"-pthread\"],\n"
+           "    linkopts = [\"-pthread\"],\n";
+    // alwayslink: nothing references a `<stem>.tune-id.cpp` object by name --
+    // the driver DEFINES weak fallbacks of its identity functions -- so a
+    // static-archive link would never pull that member in, and drv.bin would
+    // silently lose its baked vector/structure/codegen identity (and with it
+    // the run-time `--set` codegen checks). Force every member in.
+    ofs << "    alwayslink = True,\n";
+    ofs << "    deps = [\"@hlop//hlop\"],\n"
            "    visibility = [\"//visibility:public\"],\n"
            ")\n";
   }
 
+  // A missing file hashes as empty bytes.
   std::vector<std::pair<std::string, uint64_t>> manifest;
   for (const auto& n : names) {
-    std::ostringstream oss;
+    std::string bytes;
     for (const char* ext : {"hpp", "cpp"}) {
-      std::ifstream ifs(std::format("{}/{}.{}", dir, n, ext));
-      oss << ifs.rdbuf();
+      bytes += livehd::file_utils::read_file(std::format("{}/{}.{}", dir, n, ext)).value_or("");
     }
-    manifest.emplace_back(n, hash_bytes(oss.str()));
+    manifest.emplace_back(n, hash_bytes(bytes));
+  }
+  for (const auto& source : color_aux_sources) {
+    manifest.emplace_back(source, hash_bytes(livehd::file_utils::read_file(std::format("{}/{}", dir, source)).value_or("")));
+  }
+  for (const auto& object : color_objects) {
+    manifest.emplace_back(object, hash_bytes(livehd::file_utils::read_file(std::format("{}/{}", dir, object)).value_or("")));
   }
   write_manifest(dir, "sim", manifest);
   res.outputs.push_back(dir);
@@ -1630,13 +2452,11 @@ void emit_isabelle_outputs(Options& opts, Result& res, Eprp_var& var) {
     if (!opts.top.empty()) {
       labels["top"] = opts.top;
     }
-    // The formal tools share the `formal.` root (user ruling 2026-07-17):
-    // formal.strict applies to both emitters; formal.normalize applies to
-    // Isabelle. The tool-specific formal.isabelle.* overrides these defaults.
+    // The formal tools share the `formal.` root:
+    // formal.normalize applies to Isabelle, and the
+    // tool-specific formal.isabelle.* overrides them.
     for (const auto& [k, v] : opts.sets) {
-      if (k == "formal.strict") {
-        labels["strict"] = v;
-      } else if (k == "formal.normalize") {
+      if (k == "formal.normalize") {
         labels["normalize"] = v;
       }
     }
@@ -1660,11 +2480,6 @@ void emit_lean_outputs(Options& opts, Result& res, Eprp_var& var) {
     };
     if (!opts.top.empty()) {
       labels["top"] = opts.top;
-    }
-    for (const auto& [k, v] : opts.sets) {
-      if (k == "formal.strict") {
-        labels["strict"] = v;
-      }
     }
     merge_sets(opts, "formal.lean", labels);
     run_step("pass.lean", var, labels, opts, res);
@@ -1691,22 +2506,28 @@ void emit_pyrope_outputs(Options& opts, Result& res, Eprp_var& var) {
     merge_sets(opts, "compile.prp_writer", labels);  // e.g. --set compile.prp_writer.debug=true
     run_step("pass.prp_writer", var, labels, opts, res);
 
+    // pass.prp_writer emits one .prp per SOURCE FILE (a file-level unit plus
+    // every `<file>.<entity>` lambda lifted out of it share `<file>.prp`), so
+    // the manifest is keyed on the file, not on each unit.
     std::vector<std::string> names;
     names.reserve(var.lnasts.size());
     for (const auto& ln : var.lnasts) {
-      names.emplace_back(ln->get_top_module_name());
+      if (ln->is_template()) {
+        continue;  // never emitted (see pass.prp_writer)
+      }
+      std::string full(ln->get_top_module_name());
+      names.emplace_back(full.substr(0, full.find('.')));
     }
     std::sort(names.begin(), names.end());
+    names.erase(std::unique(names.begin(), names.end()), names.end());
     std::vector<std::pair<std::string, uint64_t>> manifest;
     for (const auto& n : names) {
-      auto          f = std::format("{}/{}.prp", e.path, n);
-      std::ifstream ifs(f);
-      if (!ifs.is_open()) {
+      auto       f       = std::format("{}/{}.prp", e.path, livehd::unit_file_stem(n));
+      const auto content = livehd::file_utils::read_file(f);
+      if (!content) {
         throw Lhd_error{"internal", std::format("pass.prp_writer did not produce {}", f), "check the step log in --workdir"};
       }
-      std::ostringstream oss;
-      oss << ifs.rdbuf();
-      manifest.emplace_back(n, hash_bytes(oss.str()));
+      manifest.emplace_back(n, hash_bytes(*content));
     }
     write_manifest(e.path, "pyrope", manifest);
     res.outputs.push_back(e.path);
@@ -1727,10 +2548,13 @@ void emit_pyrope_single_file(Options& opts, Result& res, Eprp_var& var) {
                     "no LNAST units to emit as pyrope",
                     "pyrope output needs source/ln: inputs (there is no LGraph -> LNAST decompiler)"};
   }
+  // One .prp per source FILE (see emit_pyrope_outputs): a one-file design is
+  // the single-file case even when the file holds several lambdas.
   std::vector<std::string> names;
   names.reserve(var.lnasts.size());
   for (const auto& ln : var.lnasts) {
-    names.emplace_back(ln->get_top_module_name());
+    std::string full(ln->get_top_module_name());
+    names.emplace_back(full.substr(0, full.find('.')));
   }
   std::sort(names.begin(), names.end());
   names.erase(std::unique(names.begin(), names.end()), names.end());
@@ -1745,7 +2569,7 @@ void emit_pyrope_single_file(Options& opts, Result& res, Eprp_var& var) {
   labels["odir"] = scratch;
   merge_sets(opts, "compile.prp_writer", labels);  // e.g. --set compile.prp_writer.debug=true
   run_step("pass.prp_writer", var, labels, opts, res);
-  auto          src = std::format("{}/{}.prp", scratch, names.front());
+  auto          src = std::format("{}/{}.prp", scratch, livehd::unit_file_stem(names.front()));
   std::ifstream ifs(src);
   if (!ifs.is_open()) {
     throw Lhd_error{"internal", std::format("pass.prp_writer did not produce {}", src), "check the step log in --workdir"};

@@ -1,0 +1,22 @@
+/*
+:name: loop_lec_index_1
+:lec_expect: refuted
+:lec_sweep: formal.lec.semdiff=none,structural
+:lec_grep_not: 'top' MATCHED \(semdiff
+*/
+// Same lifted loop body and trip count as loop_lec_index.prp, but the
+// descriptor starts at ONE: 4*x + (1+2+3+4) = 4*x + 10. The mismatch lives
+// ONLY in the index domain, which is exactly the obligation a descriptor-blind
+// LEC used to drop, so this must REFUTE:
+//
+//   semdiff=none        the ordinary solver path
+//   semdiff=structural  the no-solver shortcut — which must NOT match the
+//                       lifted body (`:lec_grep_not:`), since the bodies differ
+//                       only in a value semdiff cannot see structurally
+pub mod top(x:u8) -> (z:u16@[0]) {
+  mut acc:u16 = 0
+  for i in 1..<5 {
+    acc = acc + x + i
+  }
+  z = acc
+}

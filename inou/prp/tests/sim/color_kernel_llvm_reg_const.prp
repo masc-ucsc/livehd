@@ -1,0 +1,32 @@
+/*
+:name: color_kernel_llvm_reg_const
+:type: simulation
+*/
+mod llvm_reg_inner(en:bool, d:u130) -> (q:u130@[0]) {
+  reg state:u130 = (1 << 129) | (1 << 65) | 3
+  q = state
+  if en {
+    state = ((d << 17) ^ (d >> 7) ^ (1 << 125))#[0..=129]
+  }
+}
+
+// The constant enable is resolved at this occurrence. Since LLVM emits one
+// object per color, it can materialize the value directly instead of requiring
+// an ABI slot for the definition-level `en` input.
+pub mod llvm_reg_const_enable(d:u130) -> (q:u130@[0]) {
+  q = llvm_reg_inner(en=true, d=d)
+}
+
+test llvm_reg_const_enable.resolved_parameter {
+  const initial = (1 << 129) | (1 << 65) | 3
+  const d       = (1 << 124) | (1 << 68) | 0x55
+  const next    = ((d << 17) ^ (d >> 7) ^ (1 << 125))#[0..=129]
+  mut acc = llvm_reg_const_enable
+  tick 3 {
+    acc.reset = clock == 0
+    acc.d = d
+    step
+    assert((clock == 0) implies (acc.q == initial), "resolved-constant register reset")
+    assert((clock >= 1) implies (acc.q == next), "resolved-constant register capture")
+  }
+}

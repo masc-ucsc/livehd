@@ -3,7 +3,7 @@
 // Category-A LNAST/upass attribute consumption.
 //
 // Implements:
-//   * `wrap` / `saturate` / `sat` (alias) — declaration-site assignment
+//   * `wrap` / `sat` — declaration-site assignment
 //     policy vs. statement-level prefix. The declaration form persists so
 //     every assignment to the variable narrows; the statement form narrows
 //     just the in-flight value and leaves no sticky attribute.
@@ -91,7 +91,7 @@ void uPass_attributes::process_func_call() {
   // method/init body folded to the un-narrowed value. (See inliner_func_name_raw_read.)
   const auto callee  = lm->current_raw_text();
   const bool is_wrap = callee == "wrap";
-  const bool is_sat  = callee == "sat" || callee == "saturate";
+  const bool is_sat  = callee == "sat";
   if (!is_wrap && !is_sat) {
     move_to_parent();
     return;
@@ -198,7 +198,7 @@ void uPass_attributes::record_assign(std::string_view lhs, bool rhs_is_nil) {
   // Dlop single-bind enforcement. Skipped inside an init-construction
   // window: the runner's synthesized constructor stores (defaults bind +
   // ref-self write-back) are one logical binding, not user re-binds.
-  if (ti->decl == Decl_kind::const_kind && init_construction_depth_ == 0 && was_bound) {
+  if (ti->decl == Decl_kind::const_kind && init_construction_depth_ == 0 && uncertain_arm_depth_ == 0 && was_bound) {
     upass::error(lm->current_span(),
                  "uPass_attributes: const `{}` rebind (assigned {} times)\n",
                  lhs,

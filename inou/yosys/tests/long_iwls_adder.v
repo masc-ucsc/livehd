@@ -1,3 +1,5 @@
+// :lec_timeout: 20
+// Debug frontend processing exceeds the default ten-second outer watchdog.
 module iwls_adder ( 
     \a[0] , \a[1] , \a[2] , \a[3] , \a[4] , \a[5] , \a[6] , \a[7] , \a[8] ,
     \a[9] , \a[10] , \a[11] , \a[12] , \a[13] , \a[14] , \a[15] , \a[16] ,
@@ -1201,5 +1203,4 @@ module iwls_adder (
   assign n1404 = ~n1397 & ~n1398;
   assign cOut = n1399 | n1404;
 endmodule
-
 

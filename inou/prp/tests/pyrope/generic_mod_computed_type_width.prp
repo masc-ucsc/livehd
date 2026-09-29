@@ -1,0 +1,21 @@
+/*
+:name: generic_mod_computed_type_width
+:type: compile
+*/
+
+// A computed comptime constant used in an explicit generic type binding must
+// retain its concrete width in the specialized module body. In particular,
+// `a.[bits]` must see five here rather than nil.
+comptime const W = 4
+comptime const LOG = 1
+comptime const SW = W + LOG
+
+mod add<T>::[timecheck=false](a:T, b:T) -> (s:T@[0]) {
+  reg r:T = 0
+  s = r
+  r = (a + b)#[0..=(a.[bits] - 1)]
+}
+
+pub mod top(x:s5, y:s5) -> (z:s5@[0]) {
+  z = add<signed(bits=SW)>(a=x, b=y)
+}

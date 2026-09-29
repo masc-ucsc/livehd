@@ -1,0 +1,134 @@
+/*
+:name: neg_flop_in_callee_ring
+:type: simulation
+*/
+
+// When a callee that OWNS NEGEDGE STATE sits on a false combinational ring, the
+// parent's fall pass never re-settles that instance -- so every negedge value
+// that depends on the ring reads one full period stale. Found by differential
+// fuzzing against Icarus, 2026-08-06. Silent: no diagnostic, just old numbers.
+//
+//     x -> ncell.n1 -> fb -> ncell.b -> (negedge flop) -> ncell.n2
+//
+// `n1` reads only {a} and the flop's din only {b}, so the bit-level DAG is
+// acyclic and the ring is FALSE -- verilator reports no circular logic on the
+// equivalent Verilog. What makes it hard is the ORDER: `fb` is knowable only
+// after the callee's `n1` cone has run, and the callee's negedge state must
+// sample it at THIS period's falling edge.
+//
+// TWO VALUES ARE WRONG, and they share one cause -- the fall does not re-settle
+// the instance:
+//
+//     c     : 0   1   2   3   4   5
+//     x     : 10  15  20  25  30  35
+//     o2    : 14  19  24  29  34  39    <- Icarus     |  the callee's OWN
+//     o2    : 4   14  19  24  29  34    <- `lhd sim`  |  negedge flop
+//     psub  : 11  16  21  26  31  36    <- Icarus     |  a PARENT negedge flop
+//     psub  : 1   11  16  21  26  31    <- `lhd sim`  |  reading the instance
+//
+// The c=0 values (4 and 1) are the give-away: both are computed from the
+// power-on input rather than from period 0's, i.e. the fall read a binding from
+// before the first period.
+//
+// THREE CONTROLS, IN THE DESIGN RATHER THAN IN THIS COMMENT. Each is a variant
+// that MATCHES Icarus today, so together they pin the defect to one edge of the
+// design space instead of leaving "negedge is broken":
+//
+//   * `o1` -- the callee's comb cone that FEEDS the ring. Correct, so the ring
+//     itself is scheduled and the stimulus is live.
+//   * `c2` -- the SAME definition instantiated again with `b` driven by an
+//     identical value computed WITHOUT the callee (`nb == fb == x+4` by
+//     construction). No ring, and correct -- so callee-side negedge state is
+//     fine per se, and `o2 == c2` is the sharpest one-line statement of the
+//     bug: two instances of one definition, fed the same value, disagreeing.
+//   * `pin` -- a parent-side negedge flop whose din is a PRIMARY INPUT.
+//     Correct, so the fall pass runs; what it will not do is re-settle the
+//     instance, which is exactly what separates it from `psub`.
+//
+// Measured neighbours, for whoever fixes this (all four differentials run):
+// the same callee with NO ring is correct; the same ring with the negedge flop
+// in the PARENT and a callee holding no negedge state is correct; and pushing
+// the negedge flop one level deeper (a grandchild) reproduces IDENTICALLY. So
+// the trigger is "callee on a ring owns negedge state", not depth.
+//
+// GOLDENS: hand-written Icarus twin (design retyped from this source, never
+// LiveHD's emitter), end-of-period sampling after both edges.
+
+mod ncell::[timecheck=false](a:u8, b:u8) -> (n1:u16@[], n2:u16@[]) {
+  n1 = a + 1                    // cone {a}
+  reg nf:u8:[posclk=false] = 0  // NEGEDGE state, cone {b}
+  nf = b
+  n2 = nf
+}
+
+pub mod negring::[timecheck=false](x:u8) -> (o1:u16@[], o2:u16@[], c2:u16@[],
+                                             pin:u16@[], psub:u16@[]) {
+  // THE RING INSTANCE: the callee's negedge din is the caller's back edge.
+  wire fb:u8 = nil
+  mut ir = ncell(a=x, b=fb)
+  fb = (ir.n1 + 3) & 0xFF
+  o1 = ir.n1
+  o2 = ir.n2
+
+  // CONTROL -- same definition, same value on `b`, NO ring. `nb` is `fb`
+  // recomputed from `x` directly, so `c2` must equal `o2` on every cycle.
+  wire nb:u8 = nil
+  nb = (x + 4) & 0xFF
+  mut ic = ncell(a=x, b=nb)
+  c2 = ic.n2
+
+  // CONTROL -- a parent-side negedge flop fed by a PRIMARY INPUT.
+  reg pf1:u16:[posclk=false] = 0
+  pf1 = x + 1
+  pin = pf1
+
+  // BUG -- the same parent-side negedge flop fed by the INSTANCE instead.
+  reg pf2:u16:[posclk=false] = 0
+  pf2  = ir.n1
+  psub = pf2
+}
+
+test negring.callee_negedge_samples_the_ring_this_period {
+  mut acc  = negring
+  mut seen = 0
+  mut bad_o1    = 0
+  mut bad_c2    = 0
+  mut bad_pin   = 0
+  mut bad_o2    = 0
+  mut bad_psub  = 0
+  mut bad_agree = 0
+  tick 6 {
+    mut xv:u8 = 10 + (clock * 5)
+    acc.x = xv
+    step
+    mut g_n1:u16 = xv + 1
+    mut g_fb:u16 = (g_n1 + 3) & 0xFF
+
+    seen = seen + 1
+    if acc.o1 != g_n1 {
+      bad_o1 = bad_o1 + 1
+    }
+    if acc.c2 != g_fb {
+      bad_c2 = bad_c2 + 1
+    }
+    if acc.pin != g_n1 {
+      bad_pin = bad_pin + 1
+    }
+    if acc.o2 != g_fb {
+      bad_o2 = bad_o2 + 1
+    }
+    if acc.psub != g_n1 {
+      bad_psub = bad_psub + 1
+    }
+    if acc.o2 != acc.c2 {
+      bad_agree = bad_agree + 1
+    }
+  }
+  assert(seen == 6, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_o1 == 0, "CONTROL: the callee cone that FEEDS the ring is correct")
+  assert(bad_c2 == 0, "CONTROL: the same callee with no ring samples this period's din")
+  assert(bad_pin == 0, "CONTROL: a parent negedge flop fed by a primary input is correct")
+  assert(bad_agree == 0, "two instances of one definition, fed the same value, must agree")
+  assert(bad_o2 == 0, "the callee's negedge flop samples the ring value from THIS period")
+  assert(bad_psub == 0, "a parent negedge flop reading the ring instance sees THIS period")
+}

@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: latch_hold_basic.lhold8
 :pyrope_top: lhold8
+:name_match_only: false
 */
 
 // LIVE equiv test (promoted 2026-07-20, todo/livehd/2f-latch). A plain

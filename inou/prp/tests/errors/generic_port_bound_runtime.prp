@@ -1,0 +1,16 @@
+/*
+:name: generic_port_bound_runtime
+:type: error
+:error: type bound .max. of port .a. of .* is not a compile-time value
+*/
+// A port bound of a GENERIC lambda may read the lambda's own generics (they
+// are comptime inputs), never a runtime port: `bits=sel` cannot fold once the
+// generics are bound, so specialization must refuse instead of sizing `a` by
+// whatever reaches it.
+mod lane<N=2>(sel:u3, a:unsigned(bits=sel)) -> (y:u8@[0]) {
+  y = a
+}
+pub mod top(sel:u3, a:u8) -> (y:u8@[0]) {
+  mut l = lane<N=2>(sel=sel, a=a)  // locate_error_here
+  y = l.y
+}

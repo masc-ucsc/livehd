@@ -2,13 +2,14 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <format>
 #include <iostream>
 #include <memory>
-#include <print>
 #include <optional>
+#include <print>
 #include <stack>
 #include <stdexcept>
 #include <string>
@@ -17,8 +18,8 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-#include "absl/strings/str_cat.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/strings/str_cat.h"
 #include "diag.hpp"
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
@@ -27,6 +28,23 @@
 #include "hlop/dlop.hpp"
 #include "lnast_attrs.hpp"
 #include "lnast_ntype.hpp"
+
+// Shared positional schema for Lnast_ntype::rolled_for. Every producer and
+// consumer uses these names instead of duplicating magic child indices.
+namespace lnast_rolled_for {
+enum Child : std::size_t {
+  index = 0,
+  first,
+  step,
+  count,
+  activation,
+  next_active,
+  carries,
+  source_body,
+  lowering_payload,
+  arity,
+};
+}  // namespace lnast_rolled_for
 
 // Local replacements for the legacy `(level, pos)` accessors. `level_of`
 // walks the parent chain, so it's diagnostic-only — algorithmic users
@@ -121,8 +139,8 @@ public:
   }
 
 private:
-  std::deque<std::string>                  strings_;  // index 0 = ""; element addresses stable (deque)
-  absl::flat_hash_map<std::string_view, int32_t> map_;  // keys view into strings_ (one copy per unique name)
+  std::deque<std::string>                        strings_;  // index 0 = ""; element addresses stable (deque)
+  absl::flat_hash_map<std::string_view, int32_t> map_;      // keys view into strings_ (one copy per unique name)
 };
 
 // ── Bitwidth metadata side-channel (populated by upass/bitwidth) ─────────────
@@ -140,7 +158,7 @@ struct BitwidthEntry {
 
 struct Lnast_bitwidth_meta {
   absl::flat_hash_map<std::string, BitwidthEntry> ranges;  // keyed by signal name (case-sensitive)
-  bool                      empty() const noexcept { return ranges.empty(); }
+  bool                                            empty() const noexcept { return ranges.empty(); }
 };
 
 // ── I/O metadata side-channel (populated by upass/ssa when ssa:1 is set) ────
@@ -152,36 +170,36 @@ struct Lnast_bitwidth_meta {
 enum class Io_kind : uint8_t { none, integer, boolean, string };
 
 struct Lnast_io_entry {
-  std::string name       = {};  // field name, no $ / % prefix
-  int32_t     bits       = 0;   // 0 = unknown / infer from context
-  bool        is_signed  = true;
-  bool        is_ref     = false;  // input declared with `ref` → write-back on inline
+  std::string name        = {};  // field name, no $ / % prefix
+  int32_t     bits        = 0;   // 0 = unknown / infer from context
+  bool        is_signed   = true;
+  bool        is_ref      = false;  // input declared with `ref` → write-back on inline
   // Input declared with `...` (var-args, `comb foo(...rest)`). The
   // marker rides the io store's default-value slot as `const "..."` (mirroring
   // the `ref` sentinel) and is harvested here by the SSA upass. A var-arg
   // param gathers every actual not consumed by a fixed leading param into one
   // synthesized tuple at the call site (the comb inliner) and flags the lambda
   // as a not-fully-typed template (func_extract).
-  bool        is_varargs = false;
-  Io_kind     kind       = Io_kind::none;  // scalar kind from the param's prim_type
+  bool        is_varargs  = false;
+  Io_kind     kind        = Io_kind::none;  // scalar kind from the param's prim_type
   // Pipe stages annotation (outputs of a `pipe` func_def only).
   // From the trailing `stages(min,max)` io node: min 0 = absent (comb/mod),
   // max 0 with min>0 = unconstrained (bare `pipe`). The LN pipe upass keys
   // its output-flop insertion off these; the declared range rides verbatim
   // (LG pass1 narrows by sigma later, never here).
-  int32_t     stages_min = 0;
-  int32_t     stages_max = 0;
+  int32_t     stages_min  = 0;
+  int32_t     stages_max  = 0;
   // Declared NAMED type of the param (`self:t1` → "t1"); empty when
   // untyped or annotated with a primitive type. The inliner's typed-self
   // `does`-check keys off inputs[0].type_name.
-  std::string type_name  = {};
+  std::string type_name   = {};
   // Declared `int(min,max)` range when the param's type pins explicit bounds
   // (`a:int(min=0,max=99)`). Drives overload dispatch: the candidate whose range
   // CONTAINS the argument is selected (a `does`-style range containment), which a
   // power-of-two `bits` window cannot express. has_range=false → use `bits`.
-  bool        has_range  = false;
-  int64_t     range_min  = 0;
-  int64_t     range_max  = 0;
+  bool        has_range   = false;
+  int64_t     range_min   = 0;
+  int64_t     range_max   = 0;
   // Input declared with a DEFAULT value (`comb f(in1:u4, in2=3)`, todo 3g E).
   // The default expression is lowered as a body-prologue `store(name, expr)`
   // (self-contained, so it survives func_extract and evaluates in param-tuple
@@ -189,11 +207,61 @@ struct Lnast_io_entry {
   // comb inliner (a) not error when the arg is omitted and (b) skip the
   // prologue store when the arg IS provided so the actual wins. Comb-only.
   bool        has_default = false;
+  // Array-typed port (`a:[N]T`): the port is the PACKED bus of N lanes
+  // (`bits` = N*elem_bits, unsigned); lnast.tolg registers an element view for
+  // it so `a[i]` reads/writes lower like a body `mut` array. 0 = not an array.
+  int64_t     array_size  = 0;
+  int32_t     elem_bits   = 0;
+  bool        elem_signed = false;
+  // 2f-generic_port_width — an integer port bound prp2lnast could not fold
+  // (`a:unsigned(bits=N * 4)` on a GENERIC lambda): the RAW TEXT of each
+  // prim_type_int bound leaf (a `%tmp` ref defined by the body prologue, a
+  // generic name, or a literal such as `0`/`nil`), set only when at least one
+  // side is a ref. `bits`/`has_range` stay 0/false (never a silent 1-bit port);
+  // the specializer folds these once the generics are bound.
+  std::string bound_max_text = {};
+  std::string bound_min_text = {};
+  [[nodiscard]] bool has_deferred_bound() const noexcept { return !bound_max_text.empty() || !bound_min_text.empty(); }
 };
 struct Lnast_tree_io {
   std::vector<Lnast_io_entry> inputs;
   std::vector<Lnast_io_entry> outputs;
-  bool                        empty() const noexcept { return inputs.empty() && outputs.empty(); }
+
+  // Declaration queries are frequent in the runner. Keep the ordered vectors
+  // as the signature contract, but index names lazily instead of scanning all
+  // ports for each lookup. Encoded indices avoid pointers invalidated by vector
+  // growth; callers that mutate either vector invalidate the cache explicitly.
+  mutable absl::flat_hash_map<std::string, size_t> name_index_;
+  mutable bool                                     name_index_valid_ = false;
+
+  [[nodiscard]] const Lnast_io_entry* find(std::string_view name) const {
+    if (!name_index_valid_) {
+      name_index_.clear();
+      name_index_.reserve(inputs.size() + outputs.size());
+      for (size_t i = 0; i < inputs.size(); ++i) {
+        name_index_.try_emplace(inputs[i].name, i);
+      }
+      for (size_t i = 0; i < outputs.size(); ++i) {
+        name_index_.try_emplace(outputs[i].name, inputs.size() + i);
+      }
+      name_index_valid_ = true;
+    }
+    const auto it = name_index_.find(name);
+    if (it == name_index_.end()) {
+      return nullptr;
+    }
+    if (it->second < inputs.size()) {
+      return &inputs[it->second];
+    }
+    return &outputs[it->second - inputs.size()];
+  }
+
+  void invalidate_index() noexcept {
+    name_index_valid_ = false;
+    name_index_.clear();
+  }
+
+  bool empty() const noexcept { return inputs.empty() && outputs.empty(); }
 };
 
 // One `pub` export of a file unit (the LiveHD docs).
@@ -212,7 +280,7 @@ struct Lnast_pub_entry {
   // it onto the extracted Lnast's lg_name_ (see todo/pyrope/2f-lg). Default
   // member initializer so existing `{name, kind}` / `{name, kind, srcid}`
   // aggregate initializers stay valid (no -Wmissing-field-initializers).
-  std::string    lg = {};
+  std::string    lg    = {};
 };
 
 class Lnast {
@@ -221,10 +289,12 @@ private:
   struct Tolg_scan_cache {
     std::optional<bool>                     declares_reg;
     std::optional<bool>                     declares_reset_reg;
-    std::optional<bool>                     declares_init_reg_array;
+    std::optional<bool>                     needs_clock;
+    std::optional<bool>                     needs_reset;
+    std::optional<bool>                     activation_capable;
     std::optional<std::vector<std::string>> callee_names;
   };
-  mutable Tolg_scan_cache                          tolg_scan_cache_;
+  mutable Tolg_scan_cache tolg_scan_cache_;
 
   // Forest must outlive the tree — HHDS Tree::forest_ptr is a raw pointer
   // and TreeIO::forest_owner_ is weak, so dropping our shared_ptr would
@@ -241,6 +311,15 @@ private:
   // stages(nil,nil) and a mod tree must not be mistaken for a pipe.
   std::string                                      lambda_kind_;
   bool                                             verilog_origin_ = false;  // set by the native slang reader
+  // Transient handoff from uPass_ssa to the shared runner. The source body is
+  // structurally reusable, but it contains straight-line scalar redefinitions
+  // whose output names must be versioned while streaming. This is deliberately
+  // not serialized: restored compile-cache LNASTs are already post-upass.
+  bool                                             stream_ssa_     = false;
+  // Names selected by uPass_ssa's conservative straight-line scan. This is
+  // transient runner state (like stream_ssa_): serialized LNASTs already
+  // contain the emitted SSA names and must not stream-version again.
+  absl::flat_hash_set<std::string>                 stream_ssa_names_;
   // Explicit lgraph/module name (`pub comb f::[lg="name"]`). Empty ⇒ the
   // artifact keeps the mangled `<file>.<entity>` (top_module_name). Stamped by
   // func_extract from the file-level pub entry's `lg`. tolg uses this as the
@@ -255,14 +334,14 @@ private:
   // `fluid` specialize into a Sub). Stamped by func_extract when the extracted
   // signature is not fully typed; cleared on a specialized clone. tolg + the
   // no-LGraph gate read it. In-memory only (sibling to lambda_kind_).
-  bool                                             template_       = false;
+  bool                                             template_        = false;
   // Pre-elaborated import: a unit LOADED from an `ln:` directory as an import
   // (its io_meta/bw_meta were restored from the manifest, its body is already
   // the post-upass form). pass.upass SKIPS re-elaborating it (no SSA / runner /
   // bitwidth re-walk — that would both waste time and re-version its private
   // `___ssa_` names) but still registers it for call resolution and lowers it
   // via tolg. In-memory only; set by the kernel ln: import loader.
-  bool                                             pre_elaborated_ = false;
+  bool                                             pre_elaborated_  = false;
   // Converged in an earlier round of the kernel's import_defer iterate loop:
   // this unit's walk completed with every import resolved, so its body is
   // already the final post-upass form. A later round (run because some OTHER
@@ -273,6 +352,11 @@ private:
   // unit blocked this round may still need to inline a converged `comb`).
   // In-memory only; set by the kernel iterate loop, never serialized.
   bool                                             upass_converged_ = false;
+  // Compile-cache restore marker. This is deliberately distinct from
+  // upass_converged_: import-defer also marks successfully elaborated units
+  // converged, but those units still need their first tolg lowering. Cached
+  // units already have their final graph in the library and skip tolg.
+  bool                                             graph_restored_  = false;
   // todo/ 1s subtask E — when set, uPass_timecheck skips this tree. Stamped on
   // by inou.slang on every tree it produces (the direct SV reader lowers
   // sequential `always` as comb and predates the timing conventions, so a
@@ -280,7 +364,7 @@ private:
   // unit-shape inference). In-memory only (sibling to lambda_kind_); the ln:
   // reload re-derives lambda_kind, and slang output is comb, so the reload path
   // is naturally timecheck-free without serializing this flag.
-  bool                                             skip_timecheck_ = false;
+  bool                                             skip_timecheck_  = false;
   // DCE mark-only mode: dead statement class-indices for the CURRENT body
   // (see is_dce_dead above). In-memory only — lg-only flows drop the LNAST
   // after tolg, and any body swap invalidates the ids.
@@ -291,11 +375,11 @@ private:
   // is supplied externally at recompile time). In-memory only (sibling to
   // lambda_kind_).
   std::vector<std::string>                         external_modules_;
-  std::vector<std::string>                         imported_packages_;  // `pkg.PARAM` provenance imports
+  std::vector<std::string>                         imported_packages_;        // `pkg.PARAM` provenance imports
   bool                                             is_package_unit_ = false;  // pub-comptime-const namespace unit
-  absl::flat_hash_map<std::string, std::string>    package_const_exprs_;  // const name → defining-expr pyrope text
-  absl::flat_hash_map<std::string, std::string>    package_const_types_;  // const name → type text (u5/s10)
-  absl::flat_hash_map<std::string, std::string>    io_type_names_;        // port name → imported alias text
+  absl::flat_hash_map<std::string, std::string>    package_const_exprs_;      // const name → defining-expr pyrope text
+  absl::flat_hash_map<std::string, std::string>    package_const_types_;      // const name → type text (u5/s10)
+  absl::flat_hash_map<std::string, std::string>    io_type_names_;            // port name → imported alias text
   // Generic type parameters (`<T, U>`) recorded by func_extract from
   // the func_def generics child (a seam: the per-`T` body substitution lands
   // in a follow-up goal; this only preserves the names so a template carrying
@@ -313,6 +397,13 @@ private:
   // exported definitions. In-memory only (like lambda_kind_): the durable
   // forms are the `<unit>.__pub` wrapper tree and the manifest pub index.
   std::vector<Lnast_pub_entry>                     pub_list_;
+  // Pyrope's parser emits named comb/pipe/mod bodies directly as sibling
+  // `top -> [io, stmts]` trees. They travel with their source-unit wrapper
+  // until pass.upass takes ownership. The raw compile cache serializes this
+  // sidecar forest recursively because a mixed restored+fresh rebuild still
+  // needs every clean function body; post-upass artifacts remain ordinary
+  // independent units.
+  std::vector<std::shared_ptr<Lnast>>              streamed_lambda_lnasts_;
   // Folded comptime leaves of the pub VALUE exports, stamped by
   // uPass_constprop when the file-scope walk completes: (flat dotted path,
   // pyrope const text) pairs — a scalar contributes ("name", "12"), a bundle
@@ -411,10 +502,8 @@ public:
   // children(parent): visit each direct child of parent.
   auto children(const Lnast_nid& parent) const { return tree_->sibling_order(parent.first_child()); }
   // depth_preorder(start): walk subtree in pre-order. Yields Node_class.
-  auto depth_preorder(const Lnast_nid& start) const { return tree_->pre_order(start); }
-  auto depth_preorder() const { return tree_->pre_order(); }
-  // depth_postorder uses HHDS's non-const post_order range; callers needing
-  // post-order traversal should reach into the Node_class API directly.
+  auto depth_preorder(const Lnast_nid& start) const { return start.body().nodes(hhds::Tree_order::preorder); }
+  auto depth_preorder() const { return tree_->body().nodes(hhds::Tree_order::preorder); }
 
   // ── mutation ────────────────────────────────────────────────────────────
   // Structural nodes are inserted with an explicit type. Detached
@@ -428,21 +517,31 @@ public:
   void                         set_type(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int t);
   std::string_view             get_name(const Lnast_nid& nid) const;
   void                         set_name(const Lnast_nid& nid, std::string_view name);
+  // Copy an already-interned name between Lnasts in the same compile. All
+  // Lnasts on the active thread share active_name_pool(), so this avoids a
+  // resolve + hash/intern round trip in staging-tree rebuilds.
+  void                         set_name_id(const Lnast_nid& nid, int32_t id);
 
   // Interned int32 name id of a node (0 when unnamed). This is the value passes
   // should compare / use as a map key instead of the resolved string: negative
   // ⇒ SSA temp, positive ⇒ ordinary name, and equality of ids ⇔ equality of
   // names (intern dedups). get_name(nid) resolves the same id back to a string.
-  int32_t                      get_name_id(const Lnast_nid& nid) const;
+  int32_t                                        get_name_id(const Lnast_nid& nid) const;
   // Intern a bare string to its id (for building int-keyed lookups off names
   // that are not yet on a node). Same dedup/sign rules as set_name.
-  int32_t                      intern_name(std::string_view name) const { return name_pool_->intern(name); }
+  int32_t                                        intern_name(std::string_view name) const { return name_pool_->intern(name); }
   // Resolve an id back to its string (edge use: tolg lowering, diagnostics).
-  std::string_view             resolve_name(int32_t id) const { return name_pool_->resolve(id); }
+  std::string_view                               resolve_name(int32_t id) const { return name_pool_->resolve(id); }
   // The interner shared by every Lnast on the current thread (= one per
   // single-threaded compile). New Lnasts default their name pool to this so
   // node-name ids stay valid as trees move between Lnasts within a compile.
   static const std::shared_ptr<Lnast_name_pool>& active_name_pool();
+
+  // Move a tree built on another thread into `pool`. Name ids are
+  // pool-relative, so rewrite each distinct old id once and then retarget the
+  // Lnast. This is used when parallel source parsing publishes units into the
+  // single-threaded compile closure.
+  void rehome_name_pool(const std::shared_ptr<Lnast_name_pool>& pool);
 
   // Parsed value of a `const` node's literal text, parsed ONCE per distinct
   // literal and memoized on this Lnast (const_value_cache_). Constants live in
@@ -475,8 +574,8 @@ public:
 
   // Resolved diagnostic span / secondary anchors for a node, at emit time.
   // Null span / empty notes when the node carries no (resolvable) srcid.
-  livehd::diag::Span                   span_of(const Lnast_nid& nid) const;
-  std::vector<livehd::diag::Note>      notes_of(const Lnast_nid& nid, std::string_view message = "related source") const;
+  livehd::diag::Span              span_of(const Lnast_nid& nid) const;
+  std::vector<livehd::diag::Note> notes_of(const Lnast_nid& nid, std::string_view message = "related source") const;
 
   // Like span_of, but when `nid` carries no resolvable SourceId (a ref/const
   // operand, a stmts/type node, or a node the parser minted no location for)
@@ -484,7 +583,7 @@ public:
   // operand child thus reports the enclosing statement's line instead of
   // nothing — the closest real source location beats a null span. Still null
   // only when neither the node nor any ancestor carries a location.
-  livehd::diag::Span                   span_of_nearest(const Lnast_nid& nid) const;
+  livehd::diag::Span span_of_nearest(const Lnast_nid& nid) const;
 
   // set_data: write-side helpers used by add_child / set_root. On the
   // read side, callers go through get_type/get_name.
@@ -505,8 +604,12 @@ public:
   // would falsely flag a concat/OR of a registered field with a comb field as
   // "mixes values at different cycles"). In-memory only (sibling to
   // lambda_kind_); propagated on clone.
-  bool is_verilog_origin() const noexcept { return verilog_origin_; }
-  void set_verilog_origin(bool v) { verilog_origin_ = v; }
+  bool                                    is_verilog_origin() const noexcept { return verilog_origin_; }
+  void                                    set_verilog_origin(bool v) { verilog_origin_ = v; }
+  bool                                    needs_stream_ssa() const noexcept { return stream_ssa_; }
+  void                                    set_stream_ssa(bool v) noexcept { stream_ssa_ = v; }
+  const absl::flat_hash_set<std::string>& stream_ssa_names() const noexcept { return stream_ssa_names_; }
+  void set_stream_ssa_names(absl::flat_hash_set<std::string> names) { stream_ssa_names_ = std::move(names); }
 
   // ── explicit lgraph/module name override (`::[lg="name"]`; see 2f-lg) ──────
   std::string_view get_lg_name() const noexcept { return lg_name_; }
@@ -528,9 +631,22 @@ public:
   // Each is a deterministic function of this (immutable-during-tolg) tree, yet
   // the analyses are otherwise re-walked once per phase (register_io + run) and
   // once per ancestor that reaches this module as a clock/reset callee. The
-  // cache collapses all of that to a single walk. In-memory only; not cloned
-  // (a fresh clone re-derives lazily — the scans are cheap on first touch).
-  Tolg_scan_cache& tolg_scan_cache() const noexcept { return tolg_scan_cache_; }
+  // cache collapses all of that to a single walk. Fresh clones re-derive the
+  // facts lazily. The compact compile cache preserves both the direct
+  // declaration facts and the registry-derived transitive ABI facts because a
+  // graph-restored mod/pipe intentionally has a metadata-only body. Re-scanning
+  // that stub cannot rediscover state/activation in its restored descendants.
+  Tolg_scan_cache&    tolg_scan_cache() const noexcept { return tolg_scan_cache_; }
+  std::optional<bool> tolg_declares_reg() const noexcept { return tolg_scan_cache_.declares_reg; }
+  std::optional<bool> tolg_declares_reset_reg() const noexcept { return tolg_scan_cache_.declares_reset_reg; }
+  void                set_tolg_declares_reg(bool value) const noexcept { tolg_scan_cache_.declares_reg = value; }
+  void                set_tolg_declares_reset_reg(bool value) const noexcept { tolg_scan_cache_.declares_reset_reg = value; }
+  std::optional<bool> tolg_needs_clock() const noexcept { return tolg_scan_cache_.needs_clock; }
+  std::optional<bool> tolg_needs_reset() const noexcept { return tolg_scan_cache_.needs_reset; }
+  std::optional<bool> tolg_activation_capable() const noexcept { return tolg_scan_cache_.activation_capable; }
+  void                set_tolg_needs_clock(bool value) const noexcept { tolg_scan_cache_.needs_clock = value; }
+  void                set_tolg_needs_reset(bool value) const noexcept { tolg_scan_cache_.needs_reset = value; }
+  void                set_tolg_activation_capable(bool value) const noexcept { tolg_scan_cache_.activation_capable = value; }
 
   // ── deferred template (stamped by func_extract; cleared on a
   //     specialized clone). True ⇒ no LGraph at definition time. ───────────
@@ -544,6 +660,9 @@ public:
   // ── converged in an earlier import_defer round (skip the re-walk) ──────────
   bool is_upass_converged() const noexcept { return upass_converged_; }
   void set_upass_converged(bool v) noexcept { upass_converged_ = v; }
+
+  bool is_graph_restored() const noexcept { return graph_restored_; }
+  void set_graph_restored(bool v) noexcept { graph_restored_ = v; }
 
   // ── timecheck suppression (todo/ 1s subtask E; stamped by inou.slang) ─────
   bool get_skip_timecheck() const noexcept { return skip_timecheck_; }
@@ -589,13 +708,9 @@ public:
   // - a const's TYPE as pyrope text (`u5`, `s10`) when the SV source declared
   //   an explicit width — the writer prints `pub comptime const X:u5 = …`.
   void set_package_const_exprs(absl::flat_hash_map<std::string, std::string> m) { package_const_exprs_ = std::move(m); }
-  const absl::flat_hash_map<std::string, std::string>& get_package_const_exprs() const noexcept {
-    return package_const_exprs_;
-  }
+  const absl::flat_hash_map<std::string, std::string>& get_package_const_exprs() const noexcept { return package_const_exprs_; }
   void set_package_const_types(absl::flat_hash_map<std::string, std::string> m) { package_const_types_ = std::move(m); }
-  const absl::flat_hash_map<std::string, std::string>& get_package_const_types() const noexcept {
-    return package_const_types_;
-  }
+  const absl::flat_hash_map<std::string, std::string>& get_package_const_types() const noexcept { return package_const_types_; }
 
   // IO ports whose SV dim named a package param (`input [VPU_FCMD_SZ-1:0] cmd`):
   // port name → the imported alias text (`vpu_defs_pkg.VPU_FCMD_SZ_T`) the
@@ -668,10 +783,10 @@ public:
   }
   // Generic type-parameter names (`<T, U>`), bound per call site (comb
   // splice re-types `a:T` params; mod/pipe specialization injects them).
-  void set_generics(std::vector<std::string> g) { generics_ = std::move(g); }
-  bool has_generics() const noexcept { return !generics_.empty(); }
+  void                            set_generics(std::vector<std::string> g) { generics_ = std::move(g); }
+  bool                            has_generics() const noexcept { return !generics_.empty(); }
   const std::vector<std::string>& get_generics() const noexcept { return generics_; }
-  void set_generic_defaults(std::vector<std::string> g) { generic_defaults_ = std::move(g); }
+  void                            set_generic_defaults(std::vector<std::string> g) { generic_defaults_ = std::move(g); }
   const std::vector<std::string>& get_generic_defaults() const noexcept { return generic_defaults_; }
 
   // ── pub export list (recorded by prp2lnast on file-level trees) ─
@@ -679,6 +794,9 @@ public:
   void add_pub(std::string_view name, std::string_view kind, hhds::SourceId srcid = 0, std::string_view lg = {}) {
     pub_list_.push_back({std::string(name), std::string(kind), srcid, std::string(lg)});
   }
+  void add_streamed_lambda(std::shared_ptr<Lnast> ln) { streamed_lambda_lnasts_.emplace_back(std::move(ln)); }
+  const std::vector<std::shared_ptr<Lnast>>&              streamed_lambdas() const noexcept { return streamed_lambda_lnasts_; }
+  std::vector<std::shared_ptr<Lnast>>                     take_streamed_lambdas() { return std::move(streamed_lambda_lnasts_); }
   // Folded pub-value leaves (set by uPass_constprop at file-walk completion).
   const std::vector<std::pair<std::string, std::string>>& get_pub_values() const noexcept { return pub_values_; }
   void set_pub_values(std::vector<std::pair<std::string, std::string>> v) { pub_values_ = std::move(v); }
@@ -715,8 +833,7 @@ public:
   // never uniqueness. `remap` (optional) translates sibling texts that are
   // themselves being renamed, so a hash never inherits another tmp's
   // unstable old name.
-  uint32_t tmp_site_hash(const Lnast_nid&                                     ref_nid,
-                         const absl::flat_hash_map<std::string, std::string>* remap = nullptr) const;
+  uint32_t tmp_site_hash(const Lnast_nid& ref_nid, const absl::flat_hash_map<std::string, std::string>* remap = nullptr) const;
 
   // ── print / dump ────────────────────────────────────────────────────────
   // print: pretty box-drawing tree for humans (hhds Tree::print).

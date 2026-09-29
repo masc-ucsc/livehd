@@ -2,7 +2,7 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # Init-contents tie for the cvc5 array encoder. A type==2 array (a runtime-indexed
-# comb array / ROM) carries its comptime contents on the Memory `init` pin. The
+# comb array / ROM) carries its comptime contents on the Memory `initial` pin. The
 # encoder must rebuild the array base from that init (PER DESIGN) so:
 #   - a ROM / mut-array PROVES equivalent to a combinational reference, and
 #   - a reference with WRONG init data REFUTES.
@@ -70,7 +70,7 @@ mod srom(raddr:u2) -> (q:u4@[1]) {
   mut mem = (
     const addr=(raddr), const bits=4, const size=4, const din=(0),
     const enable=(1), const fwd=false, const type=1, const wensize=1,
-    const rdport=(1), const init=$2,
+    const rdport=(1), const initial=$2,
   )
   mut res = __memory(mem)
   q = res[0]

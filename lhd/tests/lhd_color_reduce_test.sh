@@ -37,25 +37,25 @@ TOP=red3.top
 
 D="$W/main"
 mkdir -p "$D"
-run compile "$W/red3.prp" --top "$TOP" --recipe O1 --emit-dir lg:"$D/lg" --workdir "$D/w1"
-run compile lg:"$D/lg" --top "$TOP" --recipe O0 --emit verilog:"$D/ref.v" --workdir "$D/w2"
+run compile "$W/red3.prp" --top "$TOP" --emit-dir lg:"$D/lg" --workdir "$D/w1"
+run compile lg:"$D/lg" --top "$TOP" --emit verilog:"$D/ref.v" --workdir "$D/w2"
 
 grep -q "^module pat_" "$D/ref.v" && fail "reference Verilog already holds a pat_ module"
 
 run pass color reduce --top "$TOP" --stats lg:"$D/lg" --workdir "$D/w3"
-run compile lg:"$D/lg" --top "$TOP" --recipe O0 --emit verilog:"$D/post.v" --workdir "$D/w4"
+run compile lg:"$D/lg" --top "$TOP" --emit verilog:"$D/post.v" --workdir "$D/w4"
 
 # One shared module, instantiated at all three sites.
 [ "$(grep -c '^module pat_' "$D/post.v")" = "1" ] || fail "expected exactly one pat_ module"
 [ "$(grep -c '^pat_' "$D/post.v")" = "3" ] || fail "expected the pattern instantiated 3x"
 
 # ... and the design still computes the same function. This is the whole point.
-run lec --set formal.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top top --workdir "$D/c"
+run lec --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top top --workdir "$D/c"
 echo "PASS: repeated cones extracted to one shared def, LEC-equivalent"
 
 # A second run is a no-op: everything extractable is already an instance.
 run pass color reduce --top "$TOP" --stats lg:"$D/lg" --workdir "$D/w5"
-run compile lg:"$D/lg" --top "$TOP" --recipe O0 --emit verilog:"$D/post2.v" --workdir "$D/w6"
+run compile lg:"$D/lg" --top "$TOP" --emit verilog:"$D/post2.v" --workdir "$D/w6"
 cmp -s "$D/post.v" "$D/post2.v" || fail "second reduce run changed the design"
 echo "PASS: reduce is idempotent"
 
@@ -71,29 +71,29 @@ mod top(a:u8, b:u8, c:u8, d:u8, e:u8, f:u8) -> (x:u8@[0], y:u8@[0], z:u8@[0]) {
 EOF
 D="$W/constparam"
 mkdir -p "$D"
-run compile "$W/redc.prp" --top redc.top --recipe O1 --emit-dir lg:"$D/lg" --workdir "$D/w1"
-run compile lg:"$D/lg" --top redc.top --recipe O0 --emit verilog:"$D/ref.v" --workdir "$D/w2"
+run compile "$W/redc.prp" --top redc.top --emit-dir lg:"$D/lg" --workdir "$D/w1"
+run compile lg:"$D/lg" --top redc.top --emit verilog:"$D/ref.v" --workdir "$D/w2"
 run pass color reduce --top redc.top --stats lg:"$D/lg" --workdir "$D/w3"
-run compile lg:"$D/lg" --top redc.top --recipe O0 --emit verilog:"$D/post.v" --workdir "$D/w4"
+run compile lg:"$D/lg" --top redc.top --emit verilog:"$D/post.v" --workdir "$D/w4"
 [ "$(grep -c '^module pat_' "$D/post.v")" = "1" ] || fail "const-divergent cones must share ONE def"
 [ "$(grep -c '^pat_' "$D/post.v")" = "3" ] || fail "expected the const pattern instantiated 3x"
 grep -q '\.c0(' "$D/post.v" || fail "expected a promoted const port (.c0) on the instances"
-run lec --set formal.solver=lgyosys --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top top --workdir "$D/c"
+run lec --impl verilog:"$D/post.v" --ref verilog:"$D/ref.v" --top top --workdir "$D/c"
 echo "PASS: const-parameterized pattern extracted and LEC-equivalent"
 
 # min_count above the occurrence count leaves the library untouched.
 D="$W/under"
 mkdir -p "$D"
-run compile "$W/red3.prp" --top "$TOP" --recipe O1 --emit-dir lg:"$D/lg" --workdir "$D/w1"
+run compile "$W/red3.prp" --top "$TOP" --emit-dir lg:"$D/lg" --workdir "$D/w1"
 run pass color reduce --top "$TOP" --set color.min_count=4 lg:"$D/lg" --workdir "$D/w2"
-run compile lg:"$D/lg" --top "$TOP" --recipe O0 --emit verilog:"$D/off.v" --workdir "$D/w3"
+run compile lg:"$D/lg" --top "$TOP" --emit verilog:"$D/off.v" --workdir "$D/w3"
 grep -q "^module pat_" "$D/off.v" && fail "min_count=4 still extracted a 3-site pattern"
 echo "PASS: min_count gates extraction"
 
 # reduce rewrites in place: --emit-dir lg: must be refused, not half-obeyed.
 D="$W/emitdir"
 mkdir -p "$D"
-run compile "$W/red3.prp" --top "$TOP" --recipe O1 --emit-dir lg:"$D/lg" --workdir "$D/w1"
+run compile "$W/red3.prp" --top "$TOP" --emit-dir lg:"$D/lg" --workdir "$D/w1"
 if "$LHD" pass color reduce --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/out" --workdir "$D/w2" -q --result-json "$W/r.json" 2>/dev/null; then
   fail "reduce with --emit-dir lg: must be a usage error"
 fi

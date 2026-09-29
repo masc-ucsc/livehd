@@ -1,0 +1,21 @@
+/*
+:name: attr_enable_no_value
+:type: error
+:error: needs a value
+:help: enable=<condition>
+*/
+// The pin-attribute family (`enable`, `clock_pin`, `reset_pin`) NAMES A SIGNAL,
+// so a flag-only spelling says nothing. The attribute grammar defaults a
+// value-less attribute to the text `true`, so `:[enable]` used to sail through
+// the frontend and surface much later as tolg's
+//   reg 'r' names enable 'true' but 'top' has no such input/wire
+// — a message about a signal the user never wrote. Reject it at the source,
+// where the span still points at the attribute.
+//
+// The inverse rule (`clock`/`reset` are flag-ONLY and reject a value) is in the
+// same check; attribute_clk_renamed.prp covers that direction.
+pub mod ennoval(clk:u1, rst:u1, d:u8) -> (q:u8@[]) {
+  reg r:u8:[clock_pin=ref clk, reset_pin=ref rst, enable] = 0 // locate_error_here
+  r = d
+  q = r
+}

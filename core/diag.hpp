@@ -11,9 +11,12 @@
 // inou/prp can all route their errors through it without a dependency cycle.
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <format>
+#include <initializer_list>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -107,18 +110,21 @@ struct Diagnostic {
   // completion (e.g. cgen still emits) instead of aborting after the step. Used
   // for a refuted formal property — see pass/formal (the FAIL is reported and
   // the design still compiles, with the failing check kept as a runtime check).
-  bool deferred = false;
+  bool                     deferred = false;
 
-  // Optional structured payload for machine-parseable progress/info records (a
-  // long-running pass emits one per resolved unit; pass.lec emits one per block).
-  // Each is omitted from to_jsonl when unset (empty string / -1 / empty vector),
-  // so an ordinary error/warning serializes exactly as before.
+  // Optional structured payload for machine-readable records. A long-running
+  // pass can emit progress fields here, and an error can keep verbose context
+  // (such as a large candidate list) out of the compact human hint while still
+  // exposing it under --diag-fmt json. Each field is omitted from to_jsonl when
+  // unset (empty string / -1 / empty vector), so an ordinary error/warning
+  // serializes exactly as before.
   //   verdict     - "pass" | "fail" | "inconclusive" (the block outcome)
   //   engine      - the engine that REACHED the verdict (the portfolio winner);
   //                 for an inconclusive block, the attempted engines
   //   duration_ms - elapsed wall-clock to reach the verdict (-1 = unset)
-  //   attrs       - any extra key/value (bound, witness path, node count, the
-  //                 per-engine times) so the struct need not grow per consumer
+  //   attrs       - any extra key/value (bound, witness path, candidate list,
+  //                 node count, per-engine times) so the struct need not grow
+  //                 per consumer
   std::string                                      verdict{};
   std::string                                      engine{};
   int64_t                                          duration_ms = -1;
@@ -165,7 +171,7 @@ public:
   void flush(Severity sev, std::string_view text);
 
   // Any recorded error (halting or deferred) -> the build is a failure.
-  [[nodiscard]] bool has_errors() const { return error_count_ > 0; }
+  [[nodiscard]] bool   has_errors() const { return error_count_ > 0; }
   // Errors that abort the pass pipeline (excludes deferred errors, which are
   // recorded + fail the build but let the pipeline run to completion). The
   // per-step pipeline gate uses this so a refuted formal property does not
@@ -191,12 +197,20 @@ public:
   // CLI's --diag-fmt jsonl). set_human_stderr still gates the channel on/off.
   void set_stderr_jsonl(bool on);
 
+  // Ephemeral, non-diagnostic progress. Unlike an info Diagnostic this is not
+  // retained, deduplicated, counted, or written to diagnostics.jsonl: a large
+  // synthesis can complete thousands of colors. It follows the stderr policy
+  // (`-q` suppresses it; jsonl mode gets a structured object) and flushes every
+  // record so wrappers can provide a live heartbeat.
+  void progress(std::string_view pass, std::string_view message,
+                std::initializer_list<std::pair<std::string_view, std::string>> attrs = {});
+
   // Source-excerpt provider for the human channel. The pointed-to locator must
   // outlive its registration — prefer the RAII Locator_scope below, which the
   // emitting stages (parse, upass, tolg) wrap around their per-artifact
   // locator. Null = no excerpts (locations still print).
-  void                                      set_locator(const hhds::Source_locator* sl) noexcept { locator_ = sl; }
-  [[nodiscard]] const hhds::Source_locator* locator() const noexcept { return locator_; }
+  void                                      set_locator(const hhds::Source_locator* sl) noexcept;
+  [[nodiscard]] const hhds::Source_locator* locator() const noexcept;
 
 private:
   void init_output();  // lazily read env (once) unless overridden
@@ -205,14 +219,17 @@ private:
 
   std::vector<Diagnostic>     records_;
   absl::flat_hash_set<size_t> seen_;  // per-step dedup keys
-  std::optional<Diagnostic>   staged_;
   std::string                 step_;
   uint64_t                    seq_                  = 0;
-  size_t                      error_count_          = 0;  // all errors (halting + deferred); drives has_errors / count
-  size_t                      deferred_error_count_ = 0;  // subset of error_count_ that does NOT halt the pipeline
-  size_t                      warn_count_           = 0;
-  size_t                      note_count_           = 0;
-  size_t                      info_count_           = 0;  // progress/info records (never an error)
+  uint64_t                    progress_seq_         = 0;
+  // Counters are written under mutex_ but READ by has_errors()/count() without
+  // it (those are on hot per-node paths). Atomics keep such a read well-defined
+  // while a bounded parallel step (parse / cprop / prp_writer) is emitting.
+  std::atomic<size_t>         error_count_          = 0;  // all errors (halting + deferred); drives has_errors / count
+  std::atomic<size_t>         deferred_error_count_ = 0;  // subset of error_count_ that does NOT halt the pipeline
+  std::atomic<size_t>         warn_count_           = 0;
+  std::atomic<size_t>         note_count_           = 0;
+  std::atomic<size_t>         info_count_           = 0;  // progress/info records (never an error)
 
   enum class Json { uninit, none, stderr_, file };
   Json        json_out_ = Json::uninit;
@@ -222,7 +239,10 @@ private:
   bool        stderr_jsonl_ = false;  // stderr channel renders JSONL, not text
   bool        configured_   = false;  // env read or setter called
 
-  const hhds::Source_locator* locator_ = nullptr;  // excerpt provider (not owned)
+  // emit() is shared by the bounded parallel source parser.  Parse-local
+  // staged diagnostics and excerpt locators are thread_local (diag.cpp); this
+  // mutex protects the accumulated records, counters, dedup set and streams.
+  mutable std::mutex mutex_;
 };
 
 // The active process-global sink.

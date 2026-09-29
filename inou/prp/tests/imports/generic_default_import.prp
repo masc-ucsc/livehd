@@ -1,0 +1,20 @@
+/*
+:name: generic_default_import
+:type: lgraph
+:files: inou/prp/tests/imports/generic_default_import.prp
+*/
+// A non-generic top instantiating an IMPORTED generic `mod` with every generic
+// left at its declaration default, compiled with no `--top` (lhdsuite's
+// picorv32_top over `pub mod picorv32<...defaults...>`). The call site mints an
+// IDENTITY specialization named after the template; the kernel's default-top
+// round then specialized the same template AGAIN under the same name. Two LNAST
+// units named `lib_generic_default.lib_generic_default` reached tolg, the second
+// lowering deleted the first graph, and gate_activation_clocks walked the stale
+// handle: SIGBUS in opt, "graph is no longer valid" in dbg. It must lower to
+// exactly one graph per module.
+const Gen = import("lib_generic_default.lib_generic_default")
+
+pub mod generic_default_import(a:u8) -> (y:u8@[]) {
+  mut i = Gen::[name=i](a = a)
+  y = i.y
+}

@@ -11,16 +11,6 @@ module mem_reset
 );
 
 
-  always @(posedge clk) begin
-    if (reset) begin
-      to2_a <= 'bx;
-      to2_aValid <= 0;
-    end else begin
-      to2_a    <= to1_a + to1_b + 2;
-      to2_aValid <= to1_aValid;
-    end
-  end
-
   logic [2-1:0] wr_addr;
   logic [2-1:0] wr_addr_next;
 

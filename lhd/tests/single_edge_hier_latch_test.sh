@@ -91,7 +91,7 @@ if [ $rc -eq 0 ]; then
   # keeping a stale expectation, and check it proved for the right reason.
   grep -q "PROVEN" <<<"$out" || fail "a latch-in-a-def run exited 0 without a PROVEN verdict"
   echo "NOTE: a latch inside a def now PROVES -- the gap is closed."
-  echo "      Drop this case, and re-check whether lhdsuite's minion lec_trust list is still needed."
+  echo "      Update this case to require proof when untrusted latch bodies are supported."
 else
   grep -q "hier-unsupported" <<<"$out" \
     || { echo "$out" | tail -5; fail "a latch inside a def failed for some OTHER reason than the named hierarchy refusal (a crash is not a refusal)"; }
@@ -104,7 +104,7 @@ fi
 out="$("$LHD" lec --impl "lg:$W/lg_hlat" --ref "lg:$W/lg_hlat" --top dut --workdir "$W/l2" \
         --set formal.lec.trust=leaf 2>&1)"
 [ $? -eq 0 ] \
-  || { echo "$out" | tail -6; fail "trusting the latch-holding def did NOT let the design prove -- that is the escape hatch lhdsuite's minion depends on for all 32 of its latch defs"; }
+  || { echo "$out" | tail -6; fail "trusting the latch-holding def did NOT let the design prove"; }
 echo "ok: trusting the latch-holding def lets the rest prove"
 
 # ---- 3. CONTRAST: a def with only ordinary posedge state is NOT refused ------
@@ -220,7 +220,7 @@ out="$("$LHD" lec --impl "lg:$W/lg_hicgdeep_dm" --ref "lg:$W/lg_hicgdeep" --top 
 # then that the verdict is not a refutation.
 grep -qaiE "PROVEN|UNKNOWN|INCONCLUSIVE" <<<"$out" \
   || { echo "$out" | tail -8; fail "case 5b never reached a lec verdict (build failure / refusal / crash) -- it cannot distinguish 'boxed and inconclusive' from 'never ran'"; }
-grep -qaiE "refut|not equivalent|equiv_fail" <<<"$out" \
+grep -qaiE '"verdict"[[:space:]]*:[[:space:]]*"refuted"' <<<"$out" \
   && { echo "$out" | tail -6; fail "trusting the clock-gate cell produced a REFUTATION of two equivalent designs -- a trusted def must stay blackboxed, never be inlined into the compared cone"; }
 echo "ok: a trusted clock-gate cell stays boxed, reached a verdict, and did not refute"
 

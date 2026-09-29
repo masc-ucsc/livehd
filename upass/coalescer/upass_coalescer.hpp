@@ -214,6 +214,19 @@ public:
     handle_op();
     return consume_park_vote();
   }
+  // `concat(dst, v_msb, w_msb, …, v_lsb, w_lsb)`. handle_op reads the node off
+  // the cursor, so the INTERLEAVED (value, width) operand pairs need no
+  // decoding here — but the hook itself is not optional: without it a lane's
+  // read is invisible to the coalescer, and a parked producer would drain
+  // AFTER the concat that consumes it (the forward reference tolg cannot
+  // resolve).
+  upass::Vote process_concat(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
+    (void)dst_name;
+    (void)dst;
+    (void)src;
+    handle_op();
+    return consume_park_vote();
+  }
   upass::Vote process_ne(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
     (void)dst_name;
     (void)dst;
@@ -294,7 +307,7 @@ public:
 
   // Verbatim ops that touch tuple state — flush as a barrier for the same
   // reason. Bundle aliasing is hard to reason about across deferred writes.
-  void process_tuple_set() override { flush_all(); }
+  void        process_tuple_set() override { flush_all(); }
   upass::Vote process_tuple_add(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
     (void)dst_name;
     (void)dst;
@@ -302,7 +315,7 @@ public:
     flush_all();
     return upass::Vote::keep;
   }
-  void process_tuple_get() override { flush_all(); }
+  void        process_tuple_get() override { flush_all(); }
   upass::Vote process_tuple_concat(std::string_view dst_name, Bundle& dst, upass::Src_span src) override {
     (void)dst_name;
     (void)dst;
@@ -358,6 +371,7 @@ private:
   // (SSA/firtool-shaped) name never pays the park/flush cost. Empty => enabled
   // but nothing parks (the SSA-shaped-unit fast path, no origin check needed).
   absl::flat_hash_set<std::string> repeat_names_;
+  absl::flat_hash_set<std::string> boundary_names_;
   void                             prescan_repeat_writes();
 
   std::size_t stat_parked{0};
@@ -391,10 +405,7 @@ private:
   bool is_comptime(std::string_view name) const;
 
   // Boundary metadata is structural; textual ref prefixes are not recognized.
-  static bool is_boundary(std::string_view name) {
-    (void)name;
-    return false;
-  }
+  bool is_boundary(std::string_view name) const { return boundary_names_.contains(name); }
 
   static std::string_view strip_io_prefix(std::string_view name) { return name; }
 };

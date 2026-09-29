@@ -1,0 +1,16 @@
+/*
+:name: keyword_as_identifier_use
+:type: error
+:error: a name must follow it
+:help: wrap it in backticks
+*/
+// The declaration is escaped correctly, but the USE is not. `stage[0] = a` reads
+// as a `stage[N]` pipelining declaration with no name after it, and the caret
+// lands on the `=` -- so the message must name `stage` and show the escape
+// rather than complain about the expression.
+pub mod repro(a:u8) -> (o:u8@[0]) {
+  reg `stage`:[2]u8 = 0
+
+  stage[0] = a
+  o = `stage`[1]
+}

@@ -1,0 +1,13 @@
+/*
+:name: generic_top_default
+:type: equiv
+:verilog_top: generic_top_default
+:pyrope_top: generic_top_default
+:lec_top: generic_top_default
+*/
+
+// The top uses its declared N=3 default, including when compared to a
+// concrete design with no parameter list.
+pub mod generic_top_default<N=3>(a:u8) -> (y:u9@[0]) {
+  y = a + N
+}

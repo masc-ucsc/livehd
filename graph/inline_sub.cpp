@@ -7,6 +7,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "attr_carry.hpp"
 #include "cell.hpp"
 #include "diag.hpp"
 #include "hhds/attrs/name.hpp"
@@ -19,8 +20,15 @@ namespace {
 
 class Sub_inliner {
 public:
-  Sub_inliner(hhds::Graph* parent, const hhds::Node_class& inst, std::string_view from_pass)
-      : parent_(parent), inst_(inst), from_pass_(from_pass) {}
+  Sub_inliner(hhds::Graph* parent, const hhds::Node_class& inst, std::string_view from_pass, hhds::Graph* def = nullptr,
+              bool name_state = false, bool prefix_instance = true, bool inherit_color = false)
+      : parent_(parent)
+      , inst_(inst)
+      , from_pass_(from_pass)
+      , def_(def)
+      , name_state_(name_state)
+      , prefix_instance_(prefix_instance)
+      , inherit_color_(inherit_color) {}
 
   bool run();
 
@@ -28,24 +36,35 @@ private:
   hhds::Graph*     parent_;
   hhds::Node_class inst_;
   std::string_view from_pass_;
-  hhds::Graph*     child_ = nullptr;
+  // Explicit body, for an instance whose def is NOT in the parent's own graph
+  // library (a `lec --lib` cell model lives in a side library, so
+  // get_subnode_graph() is null for it). nullptr = resolve the ordinary way.
+  hhds::Graph*     def_             = nullptr;
+  // Name an UNNAMED spliced state node after the instance (see the header): a
+  // cell model's internal flop carries no name attr, so the cut would otherwise
+  // be keyed on a synthesized net name that corresponds to nothing.
+  bool             name_state_      = false;
+  // False drops a NAMED instance's component too; an unnamed or `__flat___*`
+  // instance adds none either way (logical_instance_prefix).
+  bool             prefix_instance_ = true;
+  bool             inherit_color_   = false;
+  hhds::Graph*     child_           = nullptr;
   std::string      prefix_;
 
   absl::flat_hash_map<hhds::Node_class, hhds::Node_class> node_map_;   // child node -> parent clone
   absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class>   pin_cache_;  // child driver -> parent driver
-  absl::flat_hash_set<hhds::Pin_class>                    resolving_;  // feed-through cycle guard
   absl::flat_hash_map<std::string, uint32_t>              in_name2pid_;
   absl::flat_hash_map<uint32_t, std::string>              out_pid2name_;
   bool                                                    failed_ = false;
 
-  void                            create_nodes();
-  void                            wire_edges();
-  void                            rewire_instance_outputs();
-  [[nodiscard]] hhds::Pin_class   resolve_driver(const hhds::Pin_class& d);
-  [[nodiscard]] hhds::Pin_class   resolve_output_of(std::string_view oname);
-  [[nodiscard]] hhds::Pin_class   driver_feeding_inst_port(uint32_t pid);
-  void                            carry_node_attrs(const hhds::Node_class& orig, const hhds::Node_class& neo);
-  void                            carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pin_class& neo);
+  void                          create_nodes();
+  void                          wire_edges();
+  void                          rewire_instance_outputs();
+  [[nodiscard]] hhds::Pin_class resolve_driver(const hhds::Pin_class& d);
+  [[nodiscard]] hhds::Pin_class resolve_output_of(std::string_view oname);
+  [[nodiscard]] hhds::Pin_class driver_feeding_inst_port(uint32_t pid);
+  void                          carry_node_attrs(const hhds::Node_class& orig, const hhds::Node_class& neo);
+  void                          carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pin_class& neo);
 };
 
 void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Node_class& neo) {
@@ -56,6 +75,11 @@ void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
     // the first \x1f -- an assume would re-emit as an assert). The payload is
     // parsed, never used as an identifier: copy it verbatim.
     neo.attr(hhds::attrs::name).set(nm.find('\x1f') == std::string::npos ? prefix_ + nm : nm);
+  } else if (name_state_ && is_type_flop(neo) && !prefix_.empty()) {
+    // Unnamed spliced STATE: take the instance's own name (prefix_ minus its
+    // trailing '.'). Done here, once per spliced node, instead of re-walking the
+    // parent body after every inline.
+    neo.attr(hhds::attrs::name).set(prefix_.substr(0, prefix_.size() - 1));
   }
   if (auto a = orig.attr(livehd::attrs::lut); a.has()) {
     neo.attr(livehd::attrs::lut).set(std::string{a.get()});
@@ -63,6 +87,9 @@ void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
   if (auto a = orig.attr(hhds::attrs::srcid); a.has() && a.get() != 0) {
     auto newid = parent_->source_locator().import_from(child_->source_locator(), a.get());
     neo.attr(hhds::attrs::srcid).set(newid);
+  }
+  if (inherit_color_ && has_color(inst_)) {
+    set_color(neo, color_of(inst_));
   }
   // A color on an absorbed node is meaningless in the parent's id space (colors
   // are per-def), and pass.color recolors the parent right after. Dropping it is
@@ -74,6 +101,31 @@ void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
   if (auto a = orig.attr(livehd::attrs::runtime_check); a.has()) {
     neo.attr(livehd::attrs::runtime_check).set(a.get());
   }
+  if (auto a = orig.attr(livehd::attrs::memory_async_reset); a.has()) {
+    neo.attr(livehd::attrs::memory_async_reset).set(a.get());
+  }
+  // Scalar-replacement provenance, or the spliced bits of a blasted register
+  // stop being recognizable as ONE register. pass.semdiff reassembles a mapped
+  // `q_0..q_15` into the ref's single wide `q` from exactly these five, and the
+  // LEC inlines the netlist's region defs into the top before it pairs state --
+  // so dropping them here is what left br_arb_weighted_rr with 96 unpaired impl
+  // flops, a flop-cut inductive miter built from the 18 that did pair, and a
+  // PROVEN that disagreed with a real lgyosys counterexample.
+  //
+  // `aggregate_origin` is a hierarchical NAME and follows the same prefixing
+  // rule the `name` attr does above; the ordinals are positions inside the
+  // register and are position-invariant, so they copy verbatim.
+  if (auto a = orig.attr(livehd::attrs::aggregate_origin); a.has() && !a.get().empty()) {
+    neo.attr(livehd::attrs::aggregate_origin).set(prefix_ + std::string{a.get()});
+  }
+  // The ordinals carry no policy, so they go through the ONE table-driven copy
+  // (graph/attr_carry.hpp) rather than yet another hand-kept if-chain -- that
+  // header exists because these chains drift.
+  carry_attr<livehd::attrs::aggregate_source_index_t>(orig, neo);
+  carry_attr<livehd::attrs::aggregate_lane_ordinal_t>(orig, neo);
+  carry_attr<livehd::attrs::aggregate_bit_offset_t>(orig, neo);
+  carry_attr<livehd::attrs::aggregate_bit_width_t>(orig, neo);
+  carry_attr<livehd::attrs::aggregate_extent_t>(orig, neo);
 }
 
 void Sub_inliner::carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pin_class& neo) {
@@ -92,12 +144,12 @@ void Sub_inliner::carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pi
 }
 
 void Sub_inliner::create_nodes() {
-  for (auto n : child_->forward_class()) {
+  for (auto n : child_->body().nodes(hhds::Node_order::forward)) {
     if (n.is_invalid() || is_builtin_node(n) || node_map_.contains(n)) {
       continue;
     }
     auto op = type_op_of(n);
-    if (op == Ntype_op::IO || op == Ntype_op::Invalid || op == Ntype_op::Nconst) {
+    if (op == Ntype_op::IO || op == Ntype_op::Invalid) {
       continue;  // IO dissolves into the boundary; constants are recreated per consuming edge
     }
     auto neo = create_typed_node(*parent_, op);
@@ -106,61 +158,130 @@ void Sub_inliner::create_nodes() {
       // the target def already lives in the same library the parent resolves
       // through, so the gid binds without cloning anything.
       if (auto io = n.get_subnode_io()) {
-        neo.set_subnode(io);
+        if (auto loop = n.subnode_loop()) {
+          neo.set_subnode(io, *loop);
+        } else {
+          neo.set_subnode(io);
+        }
+
+        // Preserve the complete call boundary, including declared ports with
+        // no parent-side edge.  HHDS hierarchy resolution crosses a child's
+        // output node through the corresponding instance driver pin even when
+        // that output is otherwise dead.  Edge-driven cloning alone therefore
+        // leaves a nested Sub structurally incomplete: walking an internally
+        // driven but unused output asks for a pin that was never created.  The
+        // same applies to an internally read, unconnected input.
+        for (const auto& d : io->get_input_pin_decls()) {
+          (void)neo.create_sink_pin(d.port_id);
+        }
+        for (const auto& d : io->get_output_pin_decls()) {
+          (void)neo.create_driver_pin(d.port_id);
+        }
       }
     }
     node_map_[n] = neo;
     carry_node_attrs(n, neo);
+    // Driver pin 0 rides with the NODE, not with the edge tables: a
+    // single-output cell whose output has zero fanout (a dead hold-mux cprop
+    // bypassed but did not delete) never appears as an edge driver, so the
+    // edge-driven carry in resolve_driver() would clone it at bits==0 -- an
+    // unsized cell that trips debug_assert_cells_sized at the next cprop
+    // entry (same bug class as pass_partition carry_node_attrs). Port 0 is
+    // THE driver of every single-output op and create_driver_pin(0) is the
+    // non-allocating node-as-pin handle on both sides; live pins get the same
+    // values re-stamped by resolve_driver (idempotent). Multi-driver ops
+    // (Sub/Memory/Flop) are excluded: their outputs carry per-port decls.
+    if (!Ntype::has_multiple_driver_pins(op)) {
+      carry_driver_attrs(n.create_driver_pin(0), neo.create_driver_pin(0));
+    }
   }
 }
 
 // The parent-side driver feeding instance port `pid`, or an invalid pin when the
 // parent left that port unconnected.
 hhds::Pin_class Sub_inliner::driver_feeding_inst_port(uint32_t pid) {
-  for (const auto& e : inst_.inp_edges()) {
-    if (static_cast<uint32_t>(e.sink.get_port_id()) != pid) {
+  // Read-only pin walk. The const clone below is deliberately OUTSIDE the loop:
+  // it creates a node in the parent graph, which is the graph being walked.
+  hhds::Pin_class drv;
+  for (auto sink : inst_.inp_sorted_pins()) {
+    if (static_cast<uint32_t>(sink.get_port_id()) != pid) {
       continue;
     }
-    if (is_const_pin(e.driver)) {
-      return create_const(*parent_, hydrate_const(e.driver));
-    }
-    return e.driver;  // already a parent pin -- single-level inline needs no hop
+    drv = sink.get_driver_pin();  // exactly one driver per sink pin
+    break;
   }
-  return {};
+  if (drv.is_invalid()) {
+    return {};
+  }
+  if (drv.is_const()) {
+    return create_const(*parent_, const_of(drv));
+  }
+  return drv;  // already a parent pin -- single-level inline needs no hop
 }
 
 // Parent driver pin for the child-local driver pin `d`. A child graph input pops
 // out to whatever the parent wired into the instance port; anything else is the
 // clone's own driver.
 hhds::Pin_class Sub_inliner::resolve_driver(const hhds::Pin_class& d) {
-  if (auto it = pin_cache_.find(d); it != pin_cache_.end()) {
-    return it->second;
-  }
-  if (!resolving_.insert(d).second) {
-    livehd::diag::err(from_pass_, "inline-cycle", "unsupported")
-        .msg("inline: combinational feed-through cycle through instance '{}' at '{}{}'",
-             default_instance_name(inst_),
-             prefix_,
-             wire_name(d))
-        .fatal();
-    failed_ = true;
-    return {};
-  }
-
-  hhds::Pin_class res;
-  auto            dn = d.get_master_node();
-  if (is_graph_input_pin(d)) {
-    if (auto pit = in_name2pid_.find(std::string{pin_name_of(d)}); pit != in_name2pid_.end()) {
-      res = driver_feeding_inst_port(pit->second);
+  // Inlining a neighboring pass-through can turn a pin-level acyclic path
+  // into a self-edge on this instance. Follow those IO aliases before deleting
+  // the instance; retaining one of its own output pins would disconnect the
+  // reader when del_node() removes that pin. This walk is per pin, so an
+  // apparent cycle between independent lanes is resolved without recursion.
+  std::vector<hhds::Pin_class>         path;
+  absl::flat_hash_set<hhds::Pin_class> seen;
+  hhds::Pin_class                      cur = d;
+  hhds::Pin_class                      res;
+  while (!cur.is_invalid()) {
+    if (auto it = pin_cache_.find(cur); it != pin_cache_.end()) {
+      res = it->second;
+      break;
     }
-  } else if (auto it = node_map_.find(dn); it != node_map_.end()) {
-    res = it->second.create_driver_pin(d.get_port_id());
-    carry_driver_attrs(d, res);
+    if (!seen.insert(cur).second) {
+      livehd::diag::err(from_pass_, "inline-cycle", "unsupported")
+          .msg("inline: combinational feed-through cycle through instance '{}' at '{}{}'",
+               default_instance_name(inst_),
+               prefix_,
+               wire_name(cur))
+          .fatal();
+      failed_ = true;
+      return {};
+    }
+    path.push_back(cur);
+    if (cur.is_const()) {
+      res = create_const(*parent_, const_of(cur));
+      break;
+    }
+    if (!is_graph_input_pin(cur)) {
+      if (auto it = node_map_.find(cur.get_master_node()); it != node_map_.end()) {
+        res = it->second.create_driver_pin(cur.get_port_id());
+        carry_driver_attrs(cur, res);
+      }
+      break;
+    }
+    const auto pit = in_name2pid_.find(std::string{pin_name_of(cur)});
+    if (pit == in_name2pid_.end()) {
+      break;
+    }
+    auto parent_driver = driver_feeding_inst_port(pit->second);
+    if (parent_driver.is_invalid() || parent_driver.is_const() || parent_driver.get_master_node() != inst_) {
+      res = parent_driver;
+      break;
+    }
+    const auto oit = out_pid2name_.find(static_cast<uint32_t>(parent_driver.get_port_id()));
+    if (oit == out_pid2name_.end()) {
+      break;
+    }
+    auto output = child_->get_output_pin(oit->second);
+    cur         = {};
+    if (!output.is_invalid()) {
+      cur = output.get_driver_pin();  // a graph output pin is a sink: one driver
+    }
   }
-
-  resolving_.erase(d);
   if (!res.is_invalid()) {
-    pin_cache_[d] = res;
+    for (const auto& pin : path) {
+      pin_cache_[pin] = res;
+    }
   }
   return res;
 }
@@ -173,17 +294,18 @@ hhds::Pin_class Sub_inliner::resolve_output_of(std::string_view oname) {
   if (opin.is_invalid()) {
     return {};
   }
-  for (const auto& e : opin.inp_edges()) {
-    if (is_const_pin(e.driver)) {
-      return create_const(*parent_, hydrate_const(e.driver));
-    }
-    return resolve_driver(e.driver);
+  auto drv = opin.get_driver_pin();  // output pin is a sink: at most one driver
+  if (drv.is_invalid()) {
+    return {};  // declared but undriven
   }
-  return {};  // declared but undriven
+  if (drv.is_const()) {
+    return create_const(*parent_, const_of(drv));
+  }
+  return resolve_driver(drv);
 }
 
 void Sub_inliner::wire_edges() {
-  for (auto n : child_->forward_class()) {
+  for (auto n : child_->body().nodes(hhds::Node_order::forward)) {
     if (failed_) {
       return;
     }
@@ -192,12 +314,19 @@ void Sub_inliner::wire_edges() {
       continue;  // consts and builtins: not cloned
     }
     auto neo = it->second;
-    for (const auto& e : n.inp_edges()) {
-      auto sp = neo.create_sink_pin(e.sink.get_port_id());
-      if (is_const_pin(e.driver)) {
-        create_const(*parent_, hydrate_const(e.driver)).connect_sink(sp);
-      } else if (auto dp = resolve_driver(e.driver); !dp.is_invalid()) {
-        dp.connect_sink(sp);
+    // SNAPSHOT: the body below creates pins/nodes and adds edges, and
+    // resolve_driver() can clone a child constant into the parent. The walk is
+    // over the CHILD body, but keeping a snapshot makes it immune to any
+    // mutation either graph sees mid-loop -- the old inp_edges() materialized
+    // for exactly this reason.
+    for (auto sink : n.inp_pins_snapshot()) {
+      auto sp = neo.create_sink_pin(sink.get_port_id());
+      for (auto driver : sink.get_driver_pins()) {
+        if (driver.is_const()) {
+          create_const(*parent_, const_of(driver)).connect_sink(sp);
+        } else if (auto dp = resolve_driver(driver); !dp.is_invalid()) {
+          dp.connect_sink(sp);
+        }
       }
     }
   }
@@ -205,12 +334,20 @@ void Sub_inliner::wire_edges() {
 
 // Everything the instance drove now reads the child-internal driver directly.
 void Sub_inliner::rewire_instance_outputs() {
-  // Snapshot: out_edges() is a LAZY view over live edge storage, and the loop
-  // below both adds edges and (via the caller) deletes the node it is walking.
+  // SNAPSHOT: the loop below both adds edges and (via the caller) deletes the
+  // node it is walking, so the whole fanout is collected first. A driver's
+  // fanout is a SET, so the inner read stays edge-shaped; out_sorted_pins()
+  // only saves decoding the instance's SINK-pin edges on the way there.
   std::vector<std::pair<uint32_t, hhds::Pin_class>> readers;
-  for (const auto& e : inst_.out_edges()) {
-    readers.emplace_back(static_cast<uint32_t>(e.driver.get_port_id()), e.sink);
+  for (auto drv : inst_.out_sorted_pins()) {
+    const auto pid = static_cast<uint32_t>(drv.get_port_id());
+    for (const auto& e : drv.out_edges()) {
+      readers.emplace_back(pid, e.sink);
+    }
   }
+  // Resolve every output before rewiring: a feed-through can read another
+  // instance input, which must still have its original, single driver.
+  std::vector<std::pair<hhds::Pin_class, hhds::Pin_class>> rewires;
   for (const auto& [pid, sink] : readers) {
     if (failed_) {
       return;
@@ -220,15 +357,31 @@ void Sub_inliner::rewire_instance_outputs() {
       continue;  // a driver port with no decl: nothing on the child side to bind
     }
     if (auto src = resolve_output_of(oit->second); !src.is_invalid()) {
-      src.connect_sink(sink);
+      rewires.emplace_back(src, sink);
     }
     // An undriven child output leaves the reader unconnected -- exactly what the
     // instance did.
   }
+  for (const auto& [src, sink] : rewires) {
+    src.connect_sink(sink);
+  }
 }
 
 bool Sub_inliner::run() {
-  auto cg = inst_.get_subnode_graph();
+  // A loop Sub denotes `count` occurrences in native HHDS structure.
+  // Inlining it would splice ONE body copy and delete the node, silently
+  // dropping count-1 replicas. Refuse — WITH a diagnostic: every caller treats
+  // a false return as a hard failure whose message came from here (pass.color
+  // bails out of coloring entirely), so a silent false aborts the run with no
+  // output at all.
+  if (inst_.is_loop_subnode()) {
+    livehd::diag::err(from_pass_, "inline-replicated-sub", "unsupported")
+        .msg("inline: instance '{}' is a replicated Sub (it stands for several occurrences)", default_instance_name(inst_))
+        .hint("consume occurrences() directly, or materialize into a backend-private output graph")
+        .emit();
+    return false;
+  }
+  auto cg = def_ != nullptr ? std::shared_ptr<hhds::Graph>(def_, [](hhds::Graph*) {}) : inst_.get_subnode_graph();
   if (!cg) {
     livehd::diag::err(from_pass_, "inline-no-body", "internal")
         .msg("inline: instance '{}' has no body to inline", default_instance_name(inst_))
@@ -236,7 +389,7 @@ bool Sub_inliner::run() {
     return false;
   }
   child_  = cg.get();
-  prefix_ = default_instance_name(inst_) + ".";
+  prefix_ = prefix_instance_ ? logical_instance_prefix(inst_) : std::string{};
 
   auto gio = child_->get_io();
   if (!gio) {
@@ -268,8 +421,9 @@ bool Sub_inliner::run() {
 
 }  // namespace
 
-bool inline_sub_instance(hhds::Graph* parent, const hhds::Node_class& inst, std::string_view from_pass) {
-  Sub_inliner s(parent, inst, from_pass);
+bool inline_sub_instance(hhds::Graph* parent, const hhds::Node_class& inst, std::string_view from_pass, hhds::Graph* def,
+                         bool name_state, bool prefix_instance, bool inherit_color) {
+  Sub_inliner s(parent, inst, from_pass, def, name_state, prefix_instance, inherit_color);
   return s.run();
 }
 

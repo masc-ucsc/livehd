@@ -18,13 +18,33 @@ config_setting(
     values = {"compilation_mode": "opt"},
 )
 
+# The generated-file long-name policy (livehd::shorten_file_name /
+# unit_file_stem). Its OWN target, not part of `:core`: it needs llvm's SHA-256
+# and `:core` is linked by nearly everything, so the dependency stays with the
+# three emitters that name files after a graph or LNAST unit.
+cc_library(
+    name = "file_name",
+    srcs = ["file_name.cpp"],
+    hdrs = ["file_name.hpp"],
+    copts = ["-std=c++23"] + COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = ["@llvm-project//llvm:Support"],
+)
+
 cc_library(
     name = "core",
     srcs = glob(
         ["*.cpp"],
-        exclude = ["*test*.cpp"],
+        exclude = [
+            "*test*.cpp",
+            "file_name.cpp",
+        ],
     ),
-    hdrs = glob(["*.hpp"]),
+    hdrs = glob(
+        ["*.hpp"],
+        exclude = ["file_name.hpp"],
+    ),
     copts = ["-std=c++23"] + COPTS,
     defines = select({
         ":use_profiling": [
@@ -45,6 +65,7 @@ cc_library(
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/container:flat_hash_set",
         "@abseil-cpp//absl/container:node_hash_map",
+        "@abseil-cpp//absl/container:node_hash_set",
         "@abseil-cpp//absl/strings",
         "@abseil-cpp//absl/types:span",
         "@iassert",
@@ -55,6 +76,35 @@ cc_library(
         ],
         "//conditions:default": [],
     }),
+)
+
+# Core headers whose semantics feed the formal verdict cache without changing
+# the design digests (canonical_entity_name decides box PAIRING, and
+# reset_name_polarity decides which inputs the reset harness drives). Hashed
+# into //lhd:formal_salt so a future edit here invalidates cached verdicts —
+# the same rule that keeps pass/lec + pass/semdiff inside the salt.
+# hash_util.hpp rides along for free (its edits change digest values and thus
+# keys anyway, but keeping it salted removes the need to re-audit that).
+filegroup(
+    name = "formal_srcs",
+    srcs = [
+        ":bus_name_srcs",
+        "hash_util.hpp",
+        "str_tools.hpp",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# The bus-expansion naming standard: synthesis mints per-bit register names
+# with it and state pairing parses them back, so both the synthesis salt
+# (//pass/synth:synth_salt) and the formal salt hash it.
+filegroup(
+    name = "bus_name_srcs",
+    srcs = [
+        "bus_name.cpp",
+        "bus_name.hpp",
+    ],
+    visibility = ["//visibility:public"],
 )
 
 cc_binary(
@@ -85,9 +135,42 @@ sh_test(
 # directions are pinned, including payloads that straddle the 64 KiB compare
 # buffer.
 cc_test(
+    name = "file_name_test",
+    srcs = [
+        "tests/file_name_test.cpp",
+    ],
+    deps = [
+        ":file_name",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "file_output_test",
     srcs = [
         "tests/file_output_test.cpp",
+    ],
+    deps = [
+        ":core",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "worker_pool_test",
+    srcs = [
+        "tests/worker_pool_test.cpp",
+    ],
+    deps = [
+        ":core",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "pin_tracker_smoke",
+    srcs = [
+        "tests/pin_tracker_smoke.cpp",
     ],
     deps = [
         ":core",
@@ -111,6 +194,26 @@ cc_test(
     srcs = [
         "tests/log_test.cpp",
     ],
+    deps = [
+        ":core",
+        "@googletest//:gtest_main",
+    ],
+)
+
+# The bus-expansion naming standard (`x[i]`, `m[i][j]`) and its parser, which
+# semdiff / LEC state pairing use to regroup per-bit cells into a bus.
+cc_test(
+    name = "bus_name_test",
+    srcs = ["tests/bus_name_test.cpp"],
+    deps = [
+        ":core",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "util_smoke",
+    srcs = ["tests/util_smoke.cpp"],
     deps = [
         ":core",
         "@googletest//:gtest_main",

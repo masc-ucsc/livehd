@@ -94,11 +94,16 @@ pub mod top(d:u32) -> (q:u32@[0]) {
   q = (s3 << 24) | (s2 << 16) | (s1 << 8) | s0
 }
 EOF
-# Anonymous variant: names cannot pair (.v ua0..ua3 vs .prp dst-vars s0..s3),
-# so occurrence pairing MISPAIRS the reversed declarations -> the collapsed
+# Anonymous variant: names cannot pair (.v ua* vs .prp dst-vars s0..s3), so the
+# occurrence fallback decides. That fallback orders the unnamed remainder by a
+# NATURAL sort of the canonical names on each side (query.cpp
+# natural_cname_less), so a mere declaration-order reversal now pairs the lanes
+# correctly and proves directly. To keep the flat-confirmation backstop under
+# test, the .v names are DELIBERATELY crossed against the lanes: lane k is
+# spelled ua(3-k), so ua0 (lane 3) sorts against s0 (lane 0) -> the collapsed
 # parent spuriously refutes -> the flat confirmation must rescue it.
 sed -e 's/::\[name=u[0-3]\]//' "$W/state.prp" > "$W/state_anon.prp"
-sed -e 's/ u\([0-3]\)(/ ua\1(/' "$W/state.v" > "$W/state_anon.v"
+sed -e 's/ u0(/ ua3(/' -e 's/ u1(/ ua2(/' -e 's/ u2(/ ua1(/' -e 's/ u3(/ ua0(/' "$W/state.v" > "$W/state_anon.v"
 # Anonymous variant with a REAL bug (lane 0 input inverted).
 sed 's/(a = d & 0xff)/(a = (d \& 0xff) ^ 1)/' "$W/state_anon.prp" > "$W/state_anon_bug.prp"
 
@@ -164,5 +169,46 @@ if run state_anon_bug "$W/state_anon.v" "$W/state_anon_bug.prp"; then
 fi
 grep -q "REFUTED" "$W/state_anon_bug.out" || { cat "$W/state_anon_bug.out" >&2; fail "stateful REAL bug did not report REFUTED"; }
 echo "PASS(state_anon_bug): real stateful bug still REFUTED through the flat confirmation"
+
+# An inlined child definition still exists in the library. It must not become
+# a one-sided box merely because its definition name matches on both sides.
+cat > "$W/inline_box.prp" <<'EOF'
+pub comb helper(a:u8) -> (y:u8) {
+  y = a ^ 0x5a
+}
+pub mod inline_box(a:u8) -> (y:u8@[1]) {
+  reg q:u8 = 0
+  q = helper(a)
+  y = q
+}
+EOF
+for inline in false true; do
+  inline_args=()
+  [ "$inline" = "true" ] || inline_args=(${inline_args[@]+"${inline_args[@]}"})
+  "$LHD" compile "$W/inline_box.prp" --top inline_box --set "compile.upass.inline=$inline" \
+    --emit-dir "lg:$W/inline-$inline" --workdir "$W/inline-compile-$inline" > "$W/inline-$inline.log" 2>&1 \
+    || fail "inline fixture compile failed ($inline): $(cat "$W/inline-$inline.log")"
+done
+for order in top_down bottom_up; do
+  order_args=()
+  [ "$order" = "top_down" ] || order_args=(${order_args[@]+"${order_args[@]}"})
+  "$LHD" lec --ref "lg:$W/inline-false" --impl "lg:$W/inline-true" --top inline_box \
+    --set formal.engine=ind --set "formal.lec.hier_order=$order" --workdir "$W/inline-lec-$order" \
+    > "$W/inline-$order.out" 2>&1 || fail "asymmetric inlining failed ($order): $(cat "$W/inline-$order.out")"
+  grep -q "'inline_box' PROVEN (0 child collapses)" "$W/inline-$order.out" \
+    || fail "inlined child was still boxed ($order): $(cat "$W/inline-$order.out")"
+  grep -q 'under collapse\|ref-only cut point' "$W/inline-$order.out" \
+    && fail "asymmetric inlining needed a box fallback ($order)"
+done
+echo "PASS(inline): asymmetric inlining descends directly under both hierarchy orders"
+sed 's/q = helper(a)/q = helper(a ^ 1)/' "$W/inline_box.prp" > "$W/inline_box_bug.prp"
+"$LHD" compile "$W/inline_box_bug.prp" --top inline_box  \
+  --emit-dir "lg:$W/inline-bug" --workdir "$W/inline-compile-bug" > "$W/inline-bug.log" 2>&1 \
+  || fail "inlined negative control did not compile: $(cat "$W/inline-bug.log")"
+if "$LHD" lec --ref "lg:$W/inline-false" --impl "lg:$W/inline-bug" --top inline_box \
+  --workdir "$W/inline-lec-bug" > "$W/inline-bug.out" 2>&1; then
+  fail "asymmetric inlining hid a real output difference"
+fi
+grep -q 'REFUTED' "$W/inline-bug.out" || fail "asymmetric inlining negative control did not refute"
 
 echo "lec_box_pairing_test: all sections PASS"

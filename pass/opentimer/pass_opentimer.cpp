@@ -2,11 +2,16 @@
 
 #include "pass_opentimer.hpp"
 
+#include <cmath>
+#include <cstdlib>
 #include <format>
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <vector>
 
+#include "absl/container/flat_hash_set.h"
+#include "absl/strings/str_split.h"
 #include "str_tools.hpp"
 
 static Pass_plugin sample("pass_opentimer", Pass_opentimer::setup);
@@ -15,6 +20,7 @@ void Pass_opentimer::setup() {
   Eprp_method m1("pass.opentimer", "timing analysis on lgraph", &Pass_opentimer::time_work);
   m1.add_label_required("files", "Liberty, spef, sdc file[s] for timing");
   m1.add_label_optional("margin", "% arrival time marging (0-100)", "0");
+  m1.add_label_optional("io_load", "Primary-output load in fF; negative preserves the default", "-1");
   m1.add_label_optional("top", "analyze only this module (required when the library holds several defs)", "");
   m1.add_label_optional("hier",
                         "whole-design timing across the instance hierarchy (true|false|stitch, default true): true "
@@ -28,6 +34,14 @@ void Pass_opentimer::setup() {
                         "write the timing JSON (max delay, critical pin, endpoint arrivals, source-attributed) to this file "
                         "(`lhd pass opentimer` defaults it to <workdir>/timing.json when --workdir is set)",
                         "");
+  m1.add_label_optional("stats", "report one timing row per pass.abc (definition, color), including resynth=1|0", "false");
+  m1.add_label_optional("cache_dir",
+                        "INTERNAL kernel plumbing: the INCREMENTAL STA result cache directory, always <workdir>/sta_cache "
+                        "(set after user --set merging, so it is not customizable). An analysis whose NETLIST digest, "
+                        "timing-file content and options are unchanged since a prior run replays the stored report "
+                        "instead of re-timing; salted by a content hash of this pass plus the @opentimer pin. "
+                        "Empty = no user --workdir, or `lhd.incremental=false` = no cache",
+                        "");
 
   register_pass(m1);
 
@@ -40,16 +54,22 @@ void Pass_opentimer::setup() {
 }
 
 Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var) {
+  const auto load_text = std::string(var.get("io_load", "-1"));
+  char*      load_end  = nullptr;
+  io_load_ff_          = std::strtof(load_text.c_str(), &load_end);
+  if (load_end == load_text.c_str() || *load_end != '\0' || !std::isfinite(io_load_ff_)) {
+    livehd::diag::err("pass.opentimer", "bad-option", "io").msg("io_load must be a finite capacitance in fF").fatal();
+  }
   auto n_lib_read = 0;
 
   for (const auto f : absl::StrSplit(files, ',')) {
+    if (!f.empty()) {
+      timing_file_list.emplace_back(f);
+    }
     if (str_tools::ends_with(f, ".lib")) {
-      std::print("opentimer using liberty file '{}'\n", f);
-      if (n_lib_read == 0) {
-        timer.read_celllib(f);
-      } else {
-        timer.read_celllib(f, ot::MIN);
-      }
+      // DEFERRED to ensure_libs(): parsing sky130 is ~0.7 s and a STA cache hit
+      // needs neither the library nor the timer.
+      lib_file_list.emplace_back(f);
       n_lib_read++;
     } else if (str_tools::ends_with(f, ".spef")) {
       spef_file_list.emplace_back(f);
@@ -90,26 +110,135 @@ Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var
   }
   margin_delay = 0;
 
-  qor_path      = var.get("qor", "");
-  top_filter    = var.get("top", "");
-  hier_setting_ = var.get("hier", "true");
+  qor_path               = var.get("qor", "");
+  cache_dir_             = var.get("cache_dir", "");
+  top_filter             = var.get("top", "");
+  hier_setting_          = var.get("hier", "true");
+  const auto stats_label = std::string{var.get("stats", "false")};
+  stats_                 = stats_label != "false" && stats_label != "0" && !stats_label.empty();
   if (hier_setting_ == "1") {
     hier_setting_ = "true";
   } else if (hier_setting_ == "0") {
     hier_setting_ = "false";
   } else if (hier_setting_ != "true" && hier_setting_ != "false" && hier_setting_ != "stitch") {
-    livehd::diag::err("pass.opentimer", "bad-option", "io")
-        .msg("hier expects true|false|stitch, got '{}'", hier_setting_)
-        .fatal();
+    livehd::diag::err("pass.opentimer", "bad-option", "io").msg("hier expects true|false|stitch, got '{}'", hier_setting_).fatal();
   }
+}
 
+void Pass_opentimer::ensure_libs() {
+  if (libs_loaded_) {
+    return;
+  }
+  libs_loaded_ = true;
+  for (size_t i = 0; i < lib_file_list.size(); ++i) {
+    std::print("opentimer using liberty file '{}'\n", lib_file_list[i]);
+    if (i == 0) {
+      timer.read_celllib(lib_file_list[i]);
+    } else {
+      timer.read_celllib(lib_file_list[i], ot::MIN);
+    }
+  }
   // Flush the (lineage-queued) read_celllib so build_circuit can validate cell
   // names against the loaded library at queue time. The design is still empty,
   // so this is a no-op timing update.
   timer.update_timing();
+  // A transparent LATCH cell (pass.abc maps level-sensitive latches onto the
+  // Liberty's own: ASAP7 DHLx1/DLLx1, sky130 dlxtp/dlxtn) carries a
+  // combinational data->Q arc beside its enable->Q edge arc. OpenTimer times
+  // that arc like a gate's, chaining every latch pipeline end to end through
+  // the transparent windows (minion: a 50 ns path through ~600 latch cells,
+  // Q->D hold loops included). The native Latch these cells replace is a hard
+  // path boundary here (transparency and time borrowing are not modeled; see
+  // the 4th phase in opentimer.cpp), so keep that convention for the cell:
+  // drop the data->Q arc, and a latch cell ends a path at its D setup check
+  // and launches one from its enable edge, exactly like a flop cell. The cells
+  // are recognized by that arc shape (an output with an edge-triggered arc AND
+  // a combinational arc from a different pin), before any gate is inserted.
+  for (const auto corner : {ot::MIN, ot::MAX}) {
+    const auto& lib = timer.celllib(corner);
+    if (!lib) {
+      continue;
+    }
+    for (auto& [cell_name, cell] : const_cast<ot::Celllib&>(*lib).cells) {
+      (void)cell_name;
+      for (auto& [pin_name, pin] : cell.cellpins) {
+        (void)pin_name;
+        if (pin.direction != ot::CellpinDirection::OUTPUT) {
+          continue;
+        }
+        absl::flat_hash_set<std::string> edge_pins;
+        for (const auto& t : pin.timings) {
+          if (t.is_rising_edge_triggered() || t.is_falling_edge_triggered()) {
+            edge_pins.insert(t.related_pin);
+          }
+        }
+        if (edge_pins.empty()) {
+          continue;
+        }
+        std::erase_if(pin.timings, [&](const ot::Timing& t) {
+          const auto type = t.type.value_or(ot::TimingType::COMBINATIONAL);  // the Liberty default
+          return (type == ot::TimingType::COMBINATIONAL || type == ot::TimingType::COMBINATIONAL_RISE
+                  || type == ot::TimingType::COMBINATIONAL_FALL)
+                 && !edge_pins.contains(t.related_pin);
+        });
+      }
+    }
+  }
 }
 
+// SDC is Tcl: its options are ORDER-FREE, so every directive below is parsed by
+// SCANNING its tokens, never by indexing them. The previous version indexed
+// (`line_vec[0]`, `std::stof(line_vec[1])`), which meant a blank line -- the
+// split yields NO tokens for one -- read past the end of the vector and took the
+// whole process down with SIGSEGV, and any file writing the delay after its
+// flags (`set_input_delay -clock clk 0.0 …`, the spelling OpenSTA and every SDC
+// generator emit) threw out of std::stof. Both are ordinary constraint files.
+//
+// What is modelled: create_clock, and the three port constraints
+// (set_input_delay / set_input_transition / set_output_delay) over
+// [get_ports …], [all_inputs] and [all_outputs]. Every other SDC command is
+// REPORTED as ignored (once per command name) rather than dropped in silence --
+// an ignored `set_false_path` or `set_load` changes the reported delay, so the
+// reader has to be told. Malformed input (a flag with no value, a delay that is
+// not a number) is an error: it means the file says something we are not
+// reading, which is never safe to guess at.
+namespace {
+
+// Tcl bracket/brace wrappers around one token: `[get_ports` -> `get_ports`,
+// `clk]` -> `clk`, `[all_outputs]` -> `all_outputs`, `{a` -> `a`.
+std::string sdc_strip(std::string_view t) {
+  while (!t.empty() && (t.front() == '[' || t.front() == '{')) {
+    t.remove_prefix(1);
+  }
+  while (!t.empty() && (t.back() == ']' || t.back() == '}')) {
+    t.remove_suffix(1);
+  }
+  return std::string{t};
+}
+
+bool sdc_closes(std::string_view t) { return !t.empty() && t.back() == ']'; }
+
+// A token is the constraint's VALUE only if it parses as a complete number.
+// `-min` must not be read as one, and neither must a port called `1a`.
+bool sdc_number(const std::string& t, float& out) {
+  if (t.empty()) {
+    return false;
+  }
+  char*       endp = nullptr;
+  const float v    = std::strtof(t.c_str(), &endp);
+  if (endp == t.c_str() || *endp != '\0' || !std::isfinite(v)) {
+    return false;
+  }
+  out = v;
+  return true;
+}
+
+}  // namespace
+
 void Pass_opentimer::read_sdc(std::string_view sdc_file) {
+  // Circuit construction is queued in OpenTimer. Materialize the ports before
+  // expanding all_inputs/all_outputs; otherwise those collections are empty.
+  timer.update_timing();
   std::ifstream file(std::string{sdc_file});
   if (!file.is_open()) {
     livehd::diag::err("pass.opentimer", "missing-file", "io").msg("could not open sdc:{}", sdc_file).fatal();
@@ -117,76 +246,212 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
   }
 
   std::string line;
+  size_t      lineno = 0;
 
-  // Shared parse+dispatch for the port-constraint directives (set_input_delay,
-  // set_input_transition, set_output_delay): pull the [get_ports XX] name, then
-  // apply `value` across the min/max × rise/fall corners selected by the
-  // -min/-max/-rise/-fall flags. A bare -min/-max covers both edges; no flag
-  // covers all four corners. `set(pname, split, tran, value)` is the ot::Timer
-  // setter (set_at / set_slew / set_rat). Keeping this in one place avoids the
-  // copy-paste corner mistakes the three inlined ladders had accumulated.
-  auto apply_port_corners = [&](const std::vector<std::string>& line_vec, std::string_view directive, float value,
-                                const auto& set) {
-    std::string pname;
-    for (std::size_t i = 2; i < line_vec.size(); i++) {
-      if (line_vec[i] == "[get_ports") {
-        pname = line_vec[++i];
-        pname.pop_back();
-      }
-    }
-    if (pname.empty()) {
-      livehd::diag::err("pass.opentimer", "sdc-unsupported", "unsupported")
-          .msg("SDC file {} {} only supports [get_ports XX] syntax not {}", sdc_file, directive, line)
-          .fatal();
-    }
-    const std::string& lo = line_vec[2];
-    const std::string  hi = line_vec.size() > 3 ? line_vec[3] : std::string();
-    if (lo == "-min" && hi == "-rise") {
-      set(pname, ot::MIN, ot::RISE, value);
-    } else if (lo == "-min" && hi == "-fall") {
-      set(pname, ot::MIN, ot::FALL, value);
-    } else if (lo == "-max" && hi == "-rise") {
-      set(pname, ot::MAX, ot::RISE, value);
-    } else if (lo == "-max" && hi == "-fall") {
-      set(pname, ot::MAX, ot::FALL, value);
-    } else if (lo == "-max") {
-      set(pname, ot::MAX, ot::FALL, value);
-      set(pname, ot::MAX, ot::RISE, value);
-    } else if (lo == "-min") {
-      set(pname, ot::MIN, ot::FALL, value);
-      set(pname, ot::MIN, ot::RISE, value);
-    } else {
-      set(pname, ot::MIN, ot::FALL, value);
-      set(pname, ot::MIN, ot::RISE, value);
-      set(pname, ot::MAX, ot::FALL, value);
-      set(pname, ot::MAX, ot::RISE, value);
-    }
+  // Ports named by a create_clock, so `[all_inputs -no_clocks]` can exclude
+  // them. Both spellings are recorded: the clock's -name and its [get_ports].
+  absl::flat_hash_set<std::string> clock_ports;
+  // One report per ignored SDC command, however many times it appears.
+  absl::flat_hash_set<std::string> reported_ignored;
+
+  const auto fail = [&](std::string_view code, const std::string& what) {
+    livehd::diag::err("pass.opentimer", code, "io").msg("{}:{}: {}", sdc_file, lineno, what).hint(std::string{line}).fatal();
   };
 
   while (std::getline(file, line)) {
-    std::vector<std::string> line_vec = absl::StrSplit(line, ' ', absl::SkipWhitespace());
+    ++lineno;
+    const std::vector<std::string> tok = absl::StrSplit(line, absl::ByAnyChar(" \t\r"), absl::SkipWhitespace());
+    if (tok.empty() || tok[0].front() == '#') {
+      continue;  // blank line or Tcl comment
+    }
+    const std::string& directive = tok[0];
 
-    if (line_vec[0] == "create_clock") {
+    if (directive == "create_clock") {
+      ++sdc_clocks_;
+      bool        supported = true, have_period = false, have_name = false;
       float       period = 1000;
       std::string pname  = "clock";
-      for (std::size_t i = 1; i < line_vec.size(); i++) {
-        if (line_vec[i] == "-period") {
-          period = std::stof(line_vec[++i], nullptr);
-        } else if (line_vec[i] == "-name") {
-          pname = line_vec[++i];
+      for (std::size_t i = 1; i < tok.size(); i++) {
+        if (tok[i] == "-period" || tok[i] == "-name") {
+          if (i + 1 >= tok.size()) {
+            fail("sdc-syntax", std::format("create_clock {} needs a value", tok[i]));
+          }
+          if (tok[i] == "-name") {
+            if (have_name) {
+              supported = false;
+            }
+            have_name = true;
+            pname     = sdc_strip(tok[i + 1]);
+          } else if (float v = 0; sdc_number(tok[i + 1], v)) {
+            if (have_period || v <= 0) {
+              supported = false;
+            }
+            have_period = true;
+            period      = v;
+          } else {
+            fail("sdc-syntax", std::format("create_clock -period expects a number, got '{}'", tok[i + 1]));
+          }
+          ++i;
+        } else if (sdc_strip(tok[i]) == "get_ports") {
+          supported = false;  // Physical clock binding/state timing needs a separate model.
+          for (std::size_t j = i + 1; j < tok.size(); ++j) {
+            clock_ports.insert(sdc_strip(tok[j]));
+            if (sdc_closes(tok[j])) {
+              i = j;
+              break;
+            }
+          }
+        } else {
+          supported = false;  // Waveforms, generated clocks and Tcl expressions are not guessed.
         }
       }
+      if (supported && have_period && have_name && !pname.empty() && sdc_clocks_ == 1) {
+        virtual_clock_name_   = pname;
+        virtual_clock_period_ = period;
+      } else {
+        constraints_complete_ = false;
+      }
       timer.create_clock(pname, period);
+      continue;
+    }
 
-    } else if (line_vec[0] == "set_input_delay") {
-      apply_port_corners(line_vec, "set_input_delay", std::stof(line_vec[1], nullptr),
-                         [&](const std::string& p, auto split, auto tran, float v) { timer.set_at(p, split, tran, v); });
-    } else if (line_vec[0] == "set_input_transition") {
-      apply_port_corners(line_vec, "set_input_transition", std::stof(line_vec[1], nullptr),
-                         [&](const std::string& p, auto split, auto tran, float v) { timer.set_slew(p, split, tran, v); });
-    } else if (line_vec[0] == "set_output_delay") {
-      apply_port_corners(line_vec, "set_output_delay", std::stof(line_vec[1], nullptr),
-                         [&](const std::string& p, auto split, auto tran, float v) { timer.set_rat(p, split, tran, v); });
+    const bool is_at   = directive == "set_input_delay";
+    const bool is_slew = directive == "set_input_transition";
+    const bool is_rat  = directive == "set_output_delay";
+    if (!is_at && !is_slew && !is_rat) {
+      constraints_complete_ = false;
+      // Recognized SDC, not modelled here. Say so once: a dropped exception or
+      // load changes the number this pass reports.
+      if (reported_ignored.insert(directive).second) {
+        livehd::diag::warn("pass.opentimer", "sdc-ignored", "unsupported")
+            .msg("{}:{}: SDC command '{}' is not modelled by pass.opentimer and was ignored", sdc_file, lineno, directive)
+            .emit();
+      }
+      continue;
+    }
+
+    float                    value      = 0;
+    bool                     have_value = false;
+    bool                     want_min = false, want_max = false, want_rise = false, want_fall = false;
+    bool                     all_inputs = false, all_outputs = false, no_clocks = false;
+    std::vector<std::string> ports;
+    std::string              reference_clock;
+
+    for (std::size_t i = 1; i < tok.size(); i++) {
+      const std::string& t = tok[i];
+      if (t == "-min") {
+        want_min = true;
+      } else if (t == "-max") {
+        want_max = true;
+      } else if (t == "-rise") {
+        want_rise = true;
+      } else if (t == "-fall") {
+        want_fall = true;
+      } else if (t == "-clock" || t == "-reference_pin") {
+        if (i + 1 >= tok.size()) {
+          fail("sdc-syntax", std::format("{} {} needs a value", directive, t));
+        }
+        if (t == "-reference_pin" || !reference_clock.empty() || is_slew) {
+          constraints_complete_ = false;
+        }
+        reference_clock = sdc_strip(tok[++i]);
+      } else if (t == "-add_delay" || t == "-clock_fall" || t == "-level_sensitive" || t == "-network_latency_included"
+                 || t == "-source_latency_included") {
+        // no argument, no effect on what this pass computes
+        constraints_complete_ = false;
+      } else if (const std::string bare = sdc_strip(t); bare == "get_ports" || bare == "all_inputs" || bare == "all_outputs") {
+        if (bare == "all_inputs") {
+          all_inputs = true;
+        } else if (bare == "all_outputs") {
+          all_outputs = true;
+        }
+        if (sdc_closes(t)) {
+          continue;  // `[all_outputs]` is self-closing
+        }
+        bool closed = false;
+        for (std::size_t j = i + 1; j < tok.size(); ++j) {
+          const std::string arg = sdc_strip(tok[j]);
+          if (arg == "-no_clocks" && bare == "all_inputs") {
+            no_clocks = true;
+          } else if (bare == "get_ports" && !arg.empty()) {
+            ports.push_back(arg);
+          } else if (!arg.empty()) {
+            constraints_complete_ = false;
+          }
+          if (sdc_closes(tok[j])) {
+            i      = j;
+            closed = true;
+            break;
+          }
+          i = j;
+        }
+        constraints_complete_ &= closed;
+      } else if (!have_value && sdc_number(t, value)) {
+        have_value = true;
+      } else {
+        fail("sdc-unsupported", std::format("{} does not understand '{}'", directive, t));
+      }
+    }
+
+    if (!have_value) {
+      fail("sdc-syntax", std::format("{} has no delay/transition value", directive));
+    }
+    if (ports.empty() && !all_inputs && !all_outputs) {
+      fail("sdc-unsupported", std::format("{} needs [get_ports X], [all_inputs] or [all_outputs]", directive));
+    }
+    if (all_inputs) {
+      for (const auto& [pname, _] : timer.primary_inputs()) {
+        if (!no_clocks || !clock_ports.contains(pname)) {
+          ports.push_back(pname);
+        }
+      }
+    }
+    if (all_outputs) {
+      for (const auto& [pname, _] : timer.primary_outputs()) {
+        ports.push_back(pname);
+      }
+    }
+
+    const bool clocked
+        = !reference_clock.empty() && reference_clock == virtual_clock_name_ && virtual_clock_period_ > 0 && sdc_clocks_ == 1;
+    if ((!reference_clock.empty() && !clocked) || (is_rat && !clocked) || (is_at && virtual_clock_period_ > 0 && !clocked)) {
+      constraints_complete_ = false;
+    }
+
+    // No -min/-max selects both splits, no -rise/-fall both transitions --
+    // the SDC default, and what the three inlined ladders this replaces did.
+    const bool do_min  = want_min || !want_max;
+    const bool do_max  = want_max || !want_min;
+    const bool do_rise = want_rise || !want_fall;
+    const bool do_fall = want_fall || !want_rise;
+    for (const auto& pname : ports) {
+      if ((is_at || is_slew) ? !timer.primary_inputs().contains(pname) : !timer.primary_outputs().contains(pname)) {
+        constraints_complete_ = false;
+      }
+      for (const auto split : {ot::MIN, ot::MAX}) {
+        if ((split == ot::MIN && !do_min) || (split == ot::MAX && !do_max)) {
+          continue;
+        }
+        for (const auto tran : {ot::RISE, ot::FALL}) {
+          if ((tran == ot::RISE && !do_rise) || (tran == ot::FALL && !do_fall)) {
+            continue;
+          }
+          const auto bit = static_cast<uint8_t>(1U << (2 * static_cast<unsigned>(split) + static_cast<unsigned>(tran)));
+          if (clocked && (is_at || is_rat)) {
+            (is_at ? clock_inputs_ : clock_outputs_)[pname] |= bit;
+          }
+          if (is_at) {
+            timer.set_at(pname, split, tran, value);
+          } else if (is_slew) {
+            timer.set_slew(pname, split, tran, value);
+          } else {
+            // Setup captures at the next rising edge; hold captures at this
+            // edge. SDC output delay subtracts from the required arrival.
+            const float required = clocked ? (split == ot::MAX ? virtual_clock_period_ - value : -value) : value;
+            timer.set_rat(pname, split, tran, required);
+          }
+        }
+      }
     }
   }
   file.close();

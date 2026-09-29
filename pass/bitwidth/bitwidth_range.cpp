@@ -2,6 +2,7 @@
 
 #include "bitwidth_range.hpp"
 
+#include <algorithm>
 #include <format>
 #include <iostream>
 #include <limits>
@@ -22,7 +23,7 @@ Dlop Bitwidth_range::to_lconst(bool overflow, int64_t val) {
     return *Dlop::get_mask_value(val);
   }
 
-  return *Dlop::get_neg_mask_value(-(val + 1));
+  return *Dlop::create_integer(-1)->shl_op(*Dlop::create_integer(-(val + 1)));
 }
 
 Bitwidth_range::Bitwidth_range(const Dlop& val) {
@@ -32,15 +33,16 @@ Bitwidth_range::Bitwidth_range(const Dlop& val) {
     min      = val.to_just_i64();
   } else {
     // val.dump();
-    overflow  = true;
-    auto bits = val.get_bits();
-
     if (val.is_negative()) {
-      max = 0;
-      min = -bits;
+      overflow = true;
+      max      = 0;
+      min      = -val.get_signed_bits();
     } else {
-      max = bits;
-      min = 0;
+      // A finite non-negative value (an unsigned unknown such as 0ub? included)
+      // contributes its PAYLOAD width, never the signed carrier: storing the
+      // carrier in overflow form made get_max() materialize an extra data bit
+      // on a later union.
+      set_ubits_range(std::max<int32_t>(1, val.get_payload_bits()));
     }
     I(min == 0 || min <= max || max == 0);
   }
@@ -59,10 +61,10 @@ void Bitwidth_range::set_range(const Dlop& min_val, const Dlop& max_val) {
     min      = 0;
     max      = 0;
     if (min_val.is_negative()) {
-      min = -(min_val.get_bits());
+      min = -(min_val.get_signed_bits());
     }
     if (max_val.is_positive()) {
-      max = max_val.get_bits();
+      max = max_val.get_payload_bits();
     }
 
     // std::print("min:{} max:{} min_val:{} max_val:{}\n", (int)min, (int)max, min_val.to_pyrope(), max_val.to_pyrope());
@@ -106,11 +108,11 @@ void Bitwidth_range::set_sbits_range(int32_t size) {
   if (size > 63) {
     overflow = true;
     max      = size - 1;                     // Use bits in overflow mode
-    min      = -static_cast<int>(size - 1);  // Use bits
+    min      = -static_cast<int64_t>(size);  // Signed width of the lower bound
   } else {
     overflow = false;
     max      = (1ULL << (size - 1)) - 1;
-    min      = -static_cast<int>(max + 1);
+    min      = -(max + 1);
   }
   I(max >= min);
 }
@@ -128,7 +130,7 @@ void Bitwidth_range::set_ubits_range(int32_t size) {
 
   if (size >= 62) {
     overflow = true;
-    max      = size + 1;  // Use bits in overflow mode
+    max      = size;  // Payload width: get_max() reconstructs 2^max - 1
   } else {
     overflow = false;
     max      = (1ULL << size) - 1;
@@ -138,22 +140,35 @@ void Bitwidth_range::set_ubits_range(int32_t size) {
 // we get sbits from the max/min since every thing in lgraph should be initially signed
 int32_t Bitwidth_range::get_sbits() const {
   if (overflow) {
-    int64_t bits = std::max(max, -min);
+    int64_t bits = std::max(max + 1, -min);
     I(min == 0 || min <= max || max == 0);
-    if (min != 0 && max != 0) {
-      bits++;
-    }
     if (bits >= std::numeric_limits<int32_t>::max()) {
       return 0;  // To indicate overflow (unable to compute)
     }
     return static_cast<int32_t>(bits);
   }
 
-  auto a    = Dlop::create_integer(max)->get_bits();  // 15 -> 5sbits
-  auto b    = Dlop::create_integer(min)->get_bits();
+  auto a    = Dlop::create_integer(max)->get_signed_bits();  // 15 -> 5sbits
+  auto b    = Dlop::create_integer(min)->get_signed_bits();
   auto bits = std::max(a, b);
 
   return bits;
+}
+
+int32_t Bitwidth_range::get_ubits() const {
+  I(is_always_positive());
+  if (overflow) {
+    // The positive overflow bound stores payload bits, just as to_lconst
+    // reconstructs them. The signed reader adds its own leading zero bit.
+    if (min == 0 && max > 0) {
+      return static_cast<int32_t>(max);
+    }
+    return get_sbits();
+  }
+  if (max == 0) {
+    return 1;
+  }
+  return static_cast<int32_t>(Dlop::create_integer(max)->get_last_bit_set() + 1);
 }
 
 void Bitwidth_range::dump() const {

@@ -19,26 +19,51 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/strings/numbers.h"
+#include "absl/strings/str_split.h"
+#include "array_dim.hpp"
 #include "cell.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "hlop/dlop.hpp"
+#include "json_util.hpp"
+#include "latch_contract.hpp"
 #include "lnast_ntype.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
+#include "split_selfref.hpp"
 
 namespace {
 
 using livehd::graph_util::create_const;
 using livehd::graph_util::is_unsign;
 using livehd::graph_util::set_bits;
+using livehd::graph_util::set_sbits;
 using livehd::graph_util::set_sign;
+using livehd::graph_util::set_ubits;
 using livehd::graph_util::set_unsign;
 using livehd::graph_util::setup_sink_by_name;
 
 using Pin      = hhds::Pin_class;
 using WriteMap = absl::flat_hash_map<std::string, Pin>;
+
+// The DRIVEN sink pin of `node` at port `pid`, or an invalid pin when that port
+// carries no driver.
+//
+// ONE DRIVER PER SINK PIN, so "the edge into pid" and "the pin at pid" are the
+// same thing and the answer is a pin, not an edge. inp_sorted_pins() is a
+// read-only view over live storage, so every mutating caller below re-drives
+// AFTER the walk has ended (the old shape -- del_edge() then break -- relied on
+// inp_edges() materializing a snapshot).
+[[nodiscard]] inline Pin driven_sink_at(const hhds::Node_class& node, uint64_t pid) {
+  for (auto sink : node.inp_sorted_pins()) {
+    if (static_cast<uint64_t>(sink.get_port_id()) == pid) {
+      return sink;
+    }
+  }
+  return Pin{};
+}
 
 // Reserved clock/reset port-name recognition. Pyrope matches names
 // case-sensitively, so these conventional signal names must match exactly (clk,
@@ -48,18 +73,16 @@ using WriteMap = absl::flat_hash_map<std::string, Pin>;
   return (n == "reset") || (n == "rst") || (n == "reset_n") || (n == "rst_n");
 }
 
-// One lowered value: its driver pin + meaningful (unsigned) bit width `mw`.
-// LGraph stores values signed; an unsigned N-bit value occupies N+1 pin bits
-// (a leading 0 sign bit), which is what cgen's add_to_pin2var expects (it does
-// `--bits` for unsigned dpins). We track `mw` (the N) and stamp `mw+1` bits.
+// One lowered value: its driver pin plus the literal container width `mw`.
+// Despite the historical name, this is now the same unit as attrs::bits for
+// both signed and unsigned values.
 struct Val {
   Pin     pin;
   int32_t mw{0};
 };
 
 // Bits to represent a non-negative value as unsigned (>=1).
-// Magnitude width of a constant, in the LiveHD `bits = magnitude + 1` convention
-// (the +1 sign bit is added by the caller).
+// Minimal literal width needed by a constant used in an inferred expression.
 //
 // A NEGATIVE value used to collapse to 1 here, whatever its magnitude, so every
 // width computed from it was too small: `(-3) << ua` sized its result from
@@ -70,12 +93,14 @@ struct Val {
   if (v == 0) {
     return 1;
   }
-  // |v| without overflowing at INT64_MIN (~v == |v|-1 for every v < 0).
-  const uint64_t mag = v < 0 ? static_cast<uint64_t>(~v) + 1U : static_cast<uint64_t>(v);
-  return std::max<int32_t>(1, static_cast<int32_t>(std::bit_width(mag)));
+  if (v < 0) {
+    // Two's-complement signed width: -1 needs one bit, -3 needs three.
+    return static_cast<int32_t>(std::bit_width(static_cast<uint64_t>(~v)) + 1U);
+  }
+  return std::max<int32_t>(1, static_cast<int32_t>(std::bit_width(static_cast<uint64_t>(v))));
 }
 
-// Magnitude width of a driver pin: its stamped bits, or — for a const pin
+// Literal width of a driver pin: its stamped bits, or — for a const pin
 // (which carries no bits stamp) — the bits needed for its value. Used to size
 // a merged mux/hotmux to the WIDEST arm so a narrow (e.g. const) arm does not
 // truncate the wider ones. Returns 0 for an unstamped non-const pin.
@@ -83,57 +108,73 @@ struct Val {
   if (auto bb = livehd::graph_util::bits_of(p); bb > 0) {
     return bb;
   }
-  if (livehd::graph_util::is_const_pin(p)) {
-    auto v = livehd::graph_util::hydrate_const(p);
+  if (livehd::graph_util::is_graph_input_pin(p) && p.get_graph() != nullptr) {
+    if (const auto gio = p.get_graph()->get_io(); gio) {
+      if (const auto bb = livehd::graph_util::bits_of(p, *gio, p.get_pin_name()); bb > 0) {
+        return bb;
+      }
+    }
+  }
+  if (p.is_const()) {
+    const auto& v = livehd::graph_util::const_of(p);
     if (v.is_just_i64()) {
       return mw_of_val(v.to_just_i64());
     }
-    return std::max<int32_t>(1, static_cast<int32_t>(v.get_bits()));
+    // The literal PAYLOAD width, not Dlop's signed carrier: a non-negative
+    // constant (an unsigned unknown such as `0ub?` included) carries one
+    // leading zero beyond its payload, and that headroom must not widen a
+    // Mux/Hotmux arm or an enclosing Concat lane.
+    return std::max<int32_t>(1, v.get_payload_bits());
   }
   return 0;
 }
 
 // Can the value on this pin be NEGATIVE?
 //
-// An UNSIGNED pin spends its top stored bit on an always-0 sign slot (`bits ==
-// mw + 1`), so by construction it cannot; a SIGNED pin is two's complement over
-// all its bits and can. A CONSTANT pin carries no signed hint at all -- the same
+// An UNSIGNED hint proves non-negativity; a SIGNED pin may be negative. A
+// CONSTANT pin carries no signed hint at all -- the same
 // trap Cgen_verilog::operand_reads_signed documents -- so ask its VALUE instead
 // of its stamp, or a literal `-2` arm reads as non-negative.
 [[nodiscard]] bool pin_can_be_negative(const Pin& p) {
   if (p.is_invalid()) {
     return false;
   }
-  if (livehd::graph_util::is_const_pin(p)) {
-    auto v = livehd::graph_util::hydrate_const(p);
+  if (p.is_const()) {
+    const auto& v = livehd::graph_util::const_of(p);
     return !v.has_unknowns() && v.is_negative();
   }
   return !is_unsign(p);
 }
 
-// Does this LNAST subtree hold an assert/assume/assert_always/cassert? (All four
-// share the `cassert` node type.) Used to warn when a callee carrying properties
-// is INSTANTIATED under a guard those properties will never see.
-[[nodiscard]] bool lnast_subtree_has_cassert(const Lnast& ln, const Lnast_nid& root) {
-  for (auto c = ln.get_first_child(root); !c.is_invalid(); c = ln.get_sibling_next(c)) {
-    if (Lnast_ntype::is_cassert(ln.get_type(c)) || lnast_subtree_has_cassert(ln, c)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 // Resolve a func_call callee name against the lnast registry the
-// same way the runner's lookup_callee does: exact top-module-name match, else
-// a UNIQUE "<module>.<name>" suffix match.
+// same way the runner's lookup_callee does: exact top-module-name match, then
+// a lexical match on the CALLER's own unit-name prefix chain (streamed nested
+// helpers register as "<file>.<outer>.<name>", and two same-named helpers in
+// sibling scopes otherwise make the suffix scan ambiguous), else a UNIQUE
+// "<module>.<name>" suffix match.
 [[nodiscard]] std::shared_ptr<Lnast> resolve_callee_lnast(std::string_view                           name,
-                                                          const std::vector<std::shared_ptr<Lnast>>& registry) {
+                                                          const std::vector<std::shared_ptr<Lnast>>& registry,
+                                                          std::string_view                           caller_unit = {}) {
+  // Escaped Verilog module references retain LNAST backticks until tolg;
+  // registry keys carry the literal module name.
+  if (name.size() >= 2 && name.front() == '`' && name.back() == '`') {
+    name = name.substr(1, name.size() - 2);
+  }
   std::shared_ptr<Lnast> exact;
   std::shared_ptr<Lnast> suffix_hit;
   int                    suffix_matches = 0;
   const std::string      suffix         = "." + std::string(name);
   for (const auto& ln : registry) {
     if (!ln) {
+      continue;
+    }
+    // A TEMPLATE is never the answer here: it mints no GraphIO (register_io)
+    // and lowers to nothing (run), so any call that survived to tolg is served
+    // by a specialization. It also SHARES its name with an IDENTITY
+    // specialization (maybe_specialize_template_call), which would otherwise
+    // make that name look ambiguous to the suffix scan below and resolve to
+    // nothing at all.
+    if (ln->is_template()) {
       continue;
     }
     auto n = ln->get_top_module_name();
@@ -146,6 +187,24 @@ struct Val {
   }
   if (exact) {
     return exact;
+  }
+  if (!caller_unit.empty()) {
+    std::string scoped;
+    for (std::string_view unit = caller_unit;;) {
+      scoped.assign(unit);
+      scoped.push_back('.');
+      scoped.append(name);
+      for (const auto& ln : registry) {
+        if (ln && ln->get_top_module_name() == scoped) {
+          return ln;
+        }
+      }
+      const auto dot = unit.rfind('.');
+      if (dot == std::string_view::npos) {
+        break;
+      }
+      unit = unit.substr(0, dot);
+    }
   }
   if (suffix_matches == 1) {
     return suffix_hit;
@@ -183,24 +242,26 @@ struct Pending_rec {
 // corpus re-baselined first.
 std::string_view illegal_clock_op(hhds::Pin_class d) {
   for (int hops = 0; hops < 8 && !d.is_invalid(); ++hops) {
-    if (livehd::graph_util::is_graph_input_pin(d) || livehd::graph_util::is_const_pin(d)) {
+    if (livehd::graph_util::is_graph_input_pin(d) || d.is_const()) {
       return {};
     }
     auto       n  = d.get_master_node();
     const auto op = livehd::graph_util::type_op_of(n);
     switch (op) {
       // Data merged into a clock, or arithmetic on one: never a clock operator.
-      case Ntype_op::Or:
-      case Ntype_op::Xor:
-      case Ntype_op::Ror:
-      case Ntype_op::Sum:
-      case Ntype_op::Mult:
-      case Ntype_op::Div:
-      case Ntype_op::SHL:
-      case Ntype_op::SRA:
-      case Ntype_op::LT:
-      case Ntype_op::GT:
-      case Ntype_op::LUT:
+      case Ntype_op::Or      :
+      case Ntype_op::Xor     :
+      case Ntype_op::Rxor    :
+      case Ntype_op::Popcount:
+      case Ntype_op::Ror     :
+      case Ntype_op::Sum     :
+      case Ntype_op::Mult    :
+      case Ntype_op::Div     :
+      case Ntype_op::SHL     :
+      case Ntype_op::SRA     :
+      case Ntype_op::LT      :
+      case Ntype_op::GT      :
+      case Ntype_op::LUT     :
       case Ntype_op::Hotmux  : return Ntype::get_name(op);
       // Identity / shaping wrappers a typed 1-bit read picks up: keep walking.
       case Ntype_op::Get_mask:
@@ -210,13 +271,7 @@ std::string_view illegal_clock_op(hhds::Pin_class d) {
       // shaping), a state element (a divider): all legal or handled later.
       default                : return {};
     }
-    hhds::Pin_class a;
-    for (const auto& e : n.inp_edges()) {
-      if (a.is_invalid() || e.sink.get_port_id() < a.get_port_id()) {
-        a = e.driver;
-      }
-    }
-    d = a;
+    d = livehd::graph_util::first_value_driver(n);
   }
   return {};
 }
@@ -233,6 +288,9 @@ struct Io_setup {
   std::string reset_name;
   bool        reset_minted = false;
   bool        reset_neg    = false;
+  std::string valid_name;
+  bool        valid_minted = false;
+  bool        valid_active = false;
 };
 
 // Builds one hhds::Graph from one post-upass / post-SSA function-tree Lnast.
@@ -252,7 +310,10 @@ public:
       , reset_name_(std::move(io_setup.reset_name))
       , reset_minted_(io_setup.reset_minted)
       , reset_neg_(io_setup.reset_neg)
-      , reset_async_default_(async_default) {}
+      , reset_async_default_(async_default)
+      , valid_name_(std::move(io_setup.valid_name))
+      , valid_minted_(io_setup.valid_minted)
+      , valid_active_(io_setup.valid_active) {}
 
 private:
   // Deferred stage-reg creation: a declare(reg)+stages does NOT
@@ -280,17 +341,17 @@ private:
 public:
   void build() {
     index_mem_write_sites();
-    // Module anchor: io-time cells (the to-positive port masks below)
-    // are minted outside any statement — anchor them, and the graph io nodes
+    // Module anchor: graph io nodes
     // cgen reads for the module header, at the unit's `mod`/`comb` declaration
     // (stamped on the LNAST root by func_extract / the specialize clone).
     if (const auto id = lnast_->get_srcid(lnast_->get_root()); id != hhds::SourceId_invalid) {
       cur_srcid_ = g_->source_locator().import_from(lnast_->source_locator(), id);
     }
 
-    // Inputs: from io_meta(). Unsigned inputs are wrapped in a to-positive
-    // Get_mask so signed-declared ports read with their unsigned value (e.g.
-    // a 3-bit `a` = 0b111 reads as 7, not -1) — mirrors lgyosys tposs.
+    // Inputs: from io_meta(). LGraph values are signed, unbounded integers;
+    // `unsign` records the non-negative range of an unsigned source port. The
+    // physical W-bit -> non-negative boundary conversion belongs in each
+    // backend, not in the graph as a Get_mask operation.
     for (const auto& e : lnast_->io_meta().inputs) {
       const std::string ename{canon_io_name(e.name)};    // strip slang's `` `ar.x` `` marker
       auto              raw = g_->get_input_pin(ename);  // body driver pin for the port
@@ -298,9 +359,13 @@ public:
         raw.get_master_node().attr(hhds::attrs::srcid).set(cur_srcid_);
       }
       int32_t mw = io_mw(e);
+      // A port's declared width is a real declared type (io_meta carries it
+      // straight from the signature), so it can size a Concat lane. An
+      // UNBOUNDED `int`/`unsigned` port has io_mw 0 and records nothing, which
+      // is what makes `concat(unbounded_port, b)` the intended hard error.
+      record_decl_type(e.name, e.kind == Io_kind::boolean ? int32_t{1} : mw, e.kind == Io_kind::boolean ? false : e.is_signed);
       if (e.kind == Io_kind::boolean) {
-        set_bits(raw, 1);
-        set_unsign(raw);
+        set_ubits(raw, 1);
         record(e.name, raw, 1);
       } else if (mw <= 1) {
         set_bits(raw, 1);
@@ -308,29 +373,47 @@ public:
           set_sign(raw);
           record(e.name, raw, 1);
         } else {
-          // 1-bit unsigned: same to-positive contract as the wide branch
-          // below, else `x + y` on 1-bit ports reads -1 (port decls are
-          // signed).
-          set_sign(raw);
-          record(e.name, to_positive(raw, 1), 1);
+          set_unsign(raw);
+          record(e.name, raw, 1);
         }
       } else if (e.is_signed) {
         set_bits(raw, mw);
         set_sign(raw);
         record(e.name, raw, mw);
       } else {
-        // Stamp width AND sign on the raw pin too: passes may reconnect
-        // consumers straight to the port (cprop mask folds), and a bits-less
-        // pin miscompiles in cgen (b[-1] sign-replicate). The raw port reads
-        // SIGNED (cgen declares every port signed) — only the to-positive
-        // wrapper provides the unsigned view, so mark raw signed to keep
-        // sign-sensitive folds (cprop get_mask rule 4) away from it.
-        set_bits(raw, mw);
-        set_sign(raw);
-        record(e.name, to_positive(raw, mw), mw);  // unsigned -> positive
+        // Stamp width and the non-negative range directly on the input pin.
+        // Backends still know the GraphIO declaration is physically W bits.
+        set_ubits(raw, mw);
+        record(e.name, raw, mw);
+      }
+      if (e.array_size > 0) {
+        // `a:[N]T` port: the packed bus above, plus the lane view that makes
+        // `a[i]` lower exactly like a body `mut` array (a rolled loop's array
+        // carry crosses the lifted boundary this way).
+        array_scalar_views_[e.name] = Array_scalar_view{
+            .size        = e.array_size,
+            .dims        = {e.array_size},
+            .elem_mw     = e.elem_bits,
+            .elem_signed = e.elem_signed,
+        };
       }
     }
     for (const auto& e : lnast_->io_meta().outputs) {
+      if (e.array_size > 0 && !array_scalar_views_.contains(e.name)) {
+        array_scalar_views_[e.name] = Array_scalar_view{
+            .size        = e.array_size,
+            .dims        = {e.array_size},
+            .elem_mw     = e.elem_bits,
+            .elem_signed = e.elem_signed,
+        };
+      }
+      // An OUTPUT port's declared width is a declared type just like an
+      // input's, and it is the common destination of a concat (`z:u6 = ...`).
+      // Recording it here rather than only at a `declare` is what lets
+      // check_concat_dest_width see a signature-declared port at all.
+      record_decl_type(e.name,
+                       e.kind == Io_kind::boolean ? int32_t{1} : io_mw(e),
+                       e.kind == Io_kind::boolean ? false : e.is_signed);
       if (cur_srcid_ != hhds::SourceId_invalid) {
         if (auto sink = g_->get_output_pin(canon_io_name(e.name)); !sink.is_invalid()) {
           sink.get_master_node().attr(hhds::attrs::srcid).set(cur_srcid_);
@@ -340,6 +423,8 @@ public:
 
     // Body: lower the `stmts` child of `top`.
     auto top = lnast_->get_root();
+    decl_reset_pin_.clear();  // one unit per walk; never carry a name across modules
+    collect_decl_reset_pins(top);
     for (auto c = lnast_->get_first_child(top); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       if (Lnast_ntype::is_stmts(lnast_->get_type(c))) {
         lower_stmts(c);
@@ -362,10 +447,10 @@ public:
     resolve_pending_tgets();
     // 2c-wire — wire each `wire` net's buffer input to its single accumulated
     // driver (position-independent reads already bind to the buffer output),
-    // and enforce the single-driver / undriven / incomplete-driver rules. Runs
-    // after finalize_regs so a `reset_pin = <wire>` resolves the wire's buffer
-    // pin, and after resolve_pending_tgets so a driver that reads a forward
-    // call result is bound first.
+    // and enforce the single-driver / undriven rules. Runs after finalize_regs
+    // so a `reset_pin = <wire>` resolves the wire's buffer pin, and after
+    // resolve_pending_tgets so a driver that reads a forward call result is
+    // bound first.
     finalize_wires();
     cur_color_ = 0;  // the last wire's region must not leak into output glue
 
@@ -411,10 +496,10 @@ public:
           // A const driver carries no `bits` attr; size from the constant's own
           // width (the width cgen emits for the literal) so `out:int = 300` is
           // not squeezed into a single bit.
-          if (livehd::graph_util::is_const_pin(it->second)) {
-            dbits = livehd::graph_util::hydrate_const(it->second).get_bits();
+          if (it->second.is_const()) {
+            dbits = livehd::graph_util::const_of(it->second).get_signed_bits();
           } else {
-            dbits = mw_lookup(e.name) + (uns ? 0 : 1);
+            dbits = mw_lookup(e.name);
           }
         }
         if (dbits > 0) {
@@ -461,19 +546,6 @@ private:
 
   [[nodiscard]] Pin nil_pin() { return create_const(*g_, *Dlop::from_pyrope("0sb?")); }
 
-  // To-positive-signed: Get_mask(x, -1) -> same bits, guaranteed non-negative,
-  // marked unsigned with one extra (sign) bit. Lets unsigned values flow
-  // through signed LGraph arithmetic correctly.
-  [[nodiscard]] Pin to_positive(const Pin& src, int32_t mw) {
-    auto node = make_node(Ntype_op::Get_mask);
-    setup_sink_by_name(node, "a").connect_driver(src);
-    setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *Dlop::create_integer(-1)));
-    auto drv = node.create_driver_pin(0);
-    set_bits(drv, mw + 1);
-    set_unsign(drv);
-    return drv;
-  }
-
   // Backtick is LiveHD's general quoted-string IDENTIFIER syntax: `` `id` `` is
   // a literal id whose content is any character (a literal backtick rides as
   // `\`). It is the LNAST analogue of a Verilog escaped id `\id ` — slang emits
@@ -513,7 +585,10 @@ private:
       // if/elif-heavy designs (e.g. firtool mux chains) -- a deep hang.
       if (auto [it, inserted] = branch_writes_.back().try_emplace(key, pin); inserted) {
         auto pit = pin_map_.find(key);
-        branch_restore_.back().emplace(key, pit != pin_map_.end() ? std::optional<Pin>{pit->second} : std::nullopt);
+        auto mit = mw_map_.find(key);
+        branch_restore_.back().emplace(key,
+                                       Branch_restore{pit != pin_map_.end() ? std::optional<Pin>{pit->second} : std::nullopt,
+                                                      mit != mw_map_.end() ? std::optional<int32_t>{mit->second} : std::nullopt});
       } else {
         it->second = pin;  // keep the branch's latest value for the merge
       }
@@ -534,6 +609,40 @@ private:
     return it != mw_map_.end() ? it->second : int32_t{1};
   }
 
+  // The LOGICAL variable behind a (possibly SSA-versioned, possibly
+  // backtick-marked) LNAST name -- the key decl_type_ uses, because a type is
+  // declared once on the base name while every read is a fresh SSA version.
+  [[nodiscard]] static std::string logical_key(std::string_view name) {
+    std::string k{canon_io_name(name)};
+    if (auto p = k.find("___ssa_"); p != std::string::npos) {
+      k.resize(p);
+    }
+    return k;
+  }
+
+  // Declared width + signedness of one name (see decl_type_ below). Defined
+  // here, not with the member, because a nested type must be declared before
+  // the member functions whose SIGNATURE names it.
+  struct Decl_type {
+    int32_t mw{0};
+    bool    is_signed{false};
+  };
+
+  void record_decl_type(std::string_view name, int32_t mw, bool is_signed) {
+    if (mw <= 0) {
+      return;  // untyped / unbounded: nothing declared to remember
+    }
+    decl_type_[logical_key(name)] = Decl_type{mw, is_signed};
+  }
+
+  [[nodiscard]] std::optional<Decl_type> decl_type_lookup(std::string_view name) const {
+    auto it = decl_type_.find(logical_key(name));
+    if (it == decl_type_.end()) {
+      return std::nullopt;
+    }
+    return it->second;
+  }
+
   [[nodiscard]] Pin resolve(std::string_view name_in) {
     std::string_view name = canon_io_name(name_in);
     std::string      key{name};
@@ -542,9 +651,23 @@ private:
       return it->second;
     }
     // Whole-array read (`x = mem`): materialize the cell's async read_all
-    // output.
-    if (auto mit = mem_map_.find(key); mit != mem_map_.end()) {
-      return get_or_make_read_all(mit->second);
+    // output. Publish its packed width under the memory name as well: leaf()
+    // resolves the pin first and then asks mw_lookup(name), so omitting this
+    // left every whole-array read with the default width 1 even though the pin
+    // itself carries size*elem_mw bits. A following partial write then sized
+    // its first set_mask only to the mask reach and discarded the untouched
+    // high lanes.
+    auto mit = mem_map_.find(key);
+    if (mit == mem_map_.end() && name != name_in) {
+      // Array declarations retain escaped flat names (e.g. `btb_q.valid`).
+      // Scalar pin lookup canonicalizes those names; whole-memory reads must
+      // still find the same declaration as indexed reads and writes.
+      mit = mem_map_.find(std::string(name_in));
+    }
+    if (mit != mem_map_.end()) {
+      auto pin     = get_or_make_read_all(mit->second);
+      mw_map_[key] = static_cast<int32_t>(mit->second.size * mit->second.elem_mw);
+      return pin;
     }
     // A name that resolves to neither a driver nor a memory would be wired to
     // nil (0sb?). For Pyrope that drops whatever the reference carried — a
@@ -568,19 +691,28 @@ private:
 
   [[nodiscard]] Val leaf(const Lnast_nid& nid) {
     if (Lnast_ntype::is_const(lnast_->get_type(nid))) {
-      auto    c  = Dlop::from_pyrope(lnast_->get_name(nid));
-      int32_t mw = c->is_just_i64() ? mw_of_val(c->to_just_i64()) : std::max<int32_t>(1, static_cast<int32_t>(c->get_bits()));
+      auto c = Dlop::from_pyrope(lnast_->get_name(nid));
+      if (c->is_invalid()) {
+        error_at(nid, "upass.tolg: malformed constant literal '{}'", lnast_->get_name(nid));
+      }
+      if (c->is_nil()) {
+        // A bare `nil` literal that reaches a graph leaf has always lowered to
+        // the integer 0 (the structural nil paths are handled by their own
+        // rules); say so here -- the constant pool refuses Nil as a value.
+        c = Dlop::create_integer(0);
+      }
+      int32_t mw
+          = c->is_just_i64() ? mw_of_val(c->to_just_i64()) : std::max<int32_t>(1, static_cast<int32_t>(c->get_signed_bits()));
       return {create_const(*g_, *c), mw};
     }
     auto name = lnast_->get_name(nid);
     return {resolve(name), mw_lookup(name)};
   }
 
-  // Bind a computed result: stamp mw+1 unsigned bits and record name->(pin,mw).
+  // Bind a computed result using the literal unsigned-width contract.
   void bind_result(std::string_view name, const Pin& drv, int32_t mw) {
     int32_t m = mw > 0 ? mw : int32_t{1};
-    set_bits(drv, m + 1);
-    set_unsign(drv);
+    set_ubits(drv, m);
     record(name, drv, m);
   }
 
@@ -613,10 +745,11 @@ private:
   // non-zero gets livehd::attrs::color, which pass.partition/pass.abc turn
   // into a per-region mapping unit. region_abc_ collects the per-color ABC
   // flow payloads for the coloring_info "region_opts" member.
-  int32_t                        cur_color_ = 0;
-  std::map<int32_t, std::string> region_abc_;
-  absl::flat_hash_set<int32_t>   region_colors_marked_;
-  absl::flat_hash_set<int32_t>   region_colors_stamped_;
+  int32_t                                               cur_color_ = 0;
+  std::map<int32_t, std::string>                        region_abc_;
+  std::map<int32_t, std::map<std::string, std::string>> region_options_;
+  absl::flat_hash_set<int32_t>                          region_colors_marked_;
+  absl::flat_hash_set<int32_t>                          region_colors_stamped_;
 
   // Anchor priority shared by error_at/warn_at: the given nid's SourceId,
   // falling back to the current statement's (re-minted into the graph).
@@ -721,7 +854,7 @@ private:
     } else if (N::is_mult(t)) {
       lower_op(nid, Ntype_op::Mult, true, OpW::mul);
     } else if (N::is_bit_and(t) || N::is_log_and(t)) {
-      lower_op(nid, Ntype_op::And, true, OpW::maxw);
+      lower_op(nid, Ntype_op::And, true, OpW::andw);
     } else if (N::is_bit_or(t) || N::is_log_or(t)) {
       lower_op(nid, Ntype_op::Or, true, OpW::maxw);
     } else if (N::is_bit_xor(t)) {
@@ -736,6 +869,8 @@ private:
       lower_op(nid, Ntype_op::SHL, false, OpW::shlw);
     } else if (N::is_sra(t)) {
       lower_op(nid, Ntype_op::SRA, false, OpW::firstw);
+    } else if (N::is_concat(t)) {
+      lower_concat(nid);
     } else if (N::is_sext(t)) {
       lower_sext(nid);
     } else if (N::is_red_or(t)) {
@@ -774,6 +909,8 @@ private:
       // anything unresolvable (runtime wrap/sat, comb recursion) stays a
       // HARD error inside lower_func_call.
       lower_func_call(nid);
+    } else if (N::is_rolled_for(t)) {
+      lower_rolled_for(nid);
     } else if (N::is_attr_get(t)) {
       // Every attribute read folds in upass.attributes before tolg; one that
       // survives has no hardware lowering — a hard error inside.
@@ -858,22 +995,24 @@ private:
   // ────────────────────────────── A `wire` declares a passthrough buffer (Or)
   // whose OUTPUT every read binds to (record() at declare →
   // position-independent: a read before the driver appears textually still sees
-  // the buffer), and whose INPUT finalize_wires() connects to the single
-  // accumulated driver (the din shadow the branch-mux machinery merges, exactly
+  // the buffer), and whose INPUT is connected as soon as the single accumulated
+  // driver is complete (the din shadow the branch-mux machinery merges, exactly
   // like a reg's din — but with no flop). The buffer is a transparent net, so
   // the time-checker's SCC sees through it: a real comb loop is an error; a
   // ring is legal only when a register breaks it.
 
-  // The single-driver / undriven / incomplete-driver rules are enforced in the
-  // FRONTEND (prp2lnast check_wire_drivers) on the pre-elaborate tree, before
-  // lnastfmt drops a dead first write (which would hide a double-drive). tolg
-  // only wires the net and lets the time-checker flag a real comb loop.
+  // The single-driver rule is enforced in the FRONTEND (prp2lnast
+  // check_wire_drivers) on the pre-elaborate tree, before lnastfmt drops a dead
+  // first write (which would hide a double-drive). COVERAGE is NOT a rule: one
+  // driver may be conditional, and the merges below fill the unwritten paths
+  // with the written value (see is_wire_din). tolg only wires the net and lets
+  // the time-checker flag a real comb loop.
 
   // Wire every declared wire's buffer input to its single accumulated driver
-  // (the din shadow the branch-mux machinery merged). The single-driver /
-  // undriven / incomplete-driver rules are enforced in the frontend; here a
-  // missing driver only survives for a Verilog net (legal X) or a loop-built
-  // Pyrope wire the frontend skipped — wire it to nil rather than miscompile.
+  // (the din shadow the branch-mux machinery merged). The single-driver rule is
+  // enforced in the frontend; here a missing driver only survives for a Verilog
+  // net (legal X) or a loop-built Pyrope wire the frontend skipped — wire it to
+  // nil rather than miscompile.
   void finalize_wires() {
     const bool verilog = lnast_->is_verilog_origin();
     for (const auto& name : wire_order_) {
@@ -911,44 +1050,158 @@ private:
           mw = 1;
         }
       }
-      // A TYPED wire narrows its driver to the declared width/sign with a REAL
-      // Get_mask (Verilog continuous-assign net truncation). cprop collapses
-      // the single-input Or buffer, forwarding the driver UNCHANGED, so a
-      // width/sign stamp on the buffer output alone is dropped at O2 (an O0/O2
-      // LEC divergence + miscompile). Get_mask is a real width-changing node
-      // cprop preserves, so the declared constraint reaches every consumer.
-      if (driven && info.decl_mw > 0) {
-        auto gm = make_node(Ntype_op::Get_mask);
-        setup_sink_by_name(gm, "a").connect_driver(din);
-        setup_sink_by_name(gm, "mask").connect_driver(create_const(*g_, *Dlop::get_mask_value(info.decl_mw)));
-        auto gm_out = gm.create_driver_pin(0);
-        if (info.is_signed) {
-          set_bits(gm_out, info.decl_mw);
-          set_sign(gm_out);
-        } else {
-          set_bits(gm_out, info.decl_mw + 1);
-          set_unsign(gm_out);
-        }
-        din = gm_out;
+      // An UNDRIVEN net still has to be wired and sized: leaving the passthrough
+      // Or with no `as` input ships a dangling cell (a Verilog net legally
+      // defaults to X, so `verilog` above only suppresses the diagnostic, not
+      // the lowering). There is no driver to truncate in that case, so skip the
+      // typed Get_mask -- `nil` is already the declared width's don't-care.
+      if (!info.bound) {
+        bind_wire_driver(name, din, mw, /*narrow_typed=*/driven);
       }
-      setup_sink_by_name(info.buf, "as").connect_driver(din);
-      if (info.decl_mw <= 0) {
-        // Untyped wire: take the driver's width/sign so the passthrough is
-        // exact.
-        const int32_t dbits = livehd::graph_util::bits_of(din);
-        if (dbits > 0) {
-          set_bits(info.out, dbits);
-          if (livehd::graph_util::is_unsign(din)) {
-            set_unsign(info.out);
-          } else {
-            set_sign(info.out);
-          }
-          mw = livehd::graph_util::is_unsign(din) ? dbits - 1 : dbits;
-        } else {
-          set_bits(info.out, mw + 1);
+      resolve_wire_selfref(name);
+    }
+  }
+
+  // Resolve a packed self-reference once the wire's driver is COMPLETE. Every
+  // write has landed by now (finalize_wires runs after finalize_regs/_mems and
+  // resolve_pending_tgets), so the splitter sees the whole accumulator instead
+  // of a partial one, and a residual dependency is a genuine loop.
+  void resolve_wire_selfref(std::string_view name) {
+    auto it = wire_info_.find(std::string{name});
+    if (it == wire_info_.end()) {
+      return;
+    }
+    auto& info = it->second;
+    if (info.bound_din.is_invalid() || info.early_readers.empty()) {
+      return;
+    }
+    livehd::graph_util::split_packed_selfref_wire(g_, info.buf, info.bound_din, info.early_readers);
+    if (!lnast_->is_verilog_origin() && livehd::graph_util::comb_pin_depends_on(info.bound_din, info.buf)) {
+      // Lead with the established `combinational loop` vocabulary -- the same
+      // words the time-checker's SCC uses at the end of this file. This IS
+      // one; it is simply caught earlier and with a better source anchor.
+      // //inou/prp:prp-wire_comb_loop matches the diagnostic on that phrase,
+      // and the wire-only wording silently stopped matching it.
+      error_here(
+          "upass.tolg: combinational loop through wire '{}' in '{}' — its driver depends on itself and no disjoint "
+          "packed-slice split can break it",
+          name,
+          lnast_->get_top_module_name());
+    }
+  }
+
+  // Attach one wire's effective driver as soon as it is known. This must not
+  // wait for end-of-module finalization: a later wire write may read this net,
+  // and that later edge is the one that closes a multi-wire dependency.
+  //
+  // REBINDS. A wire assembled from several partial writes (`w#[3:0] = a;
+  // w#[7:4] = b`) reaches here once per write, and lower_set_mask chains each
+  // write onto the din accumulator -- so the LATEST driver is the complete one
+  // and every earlier bind must be undone. Keeping the first bind (an early
+  // `bound` return) silently dropped every write after the first.
+  void bind_wire_driver(std::string_view name, Pin din, int32_t mw, bool narrow_typed = true) {
+    auto it = wire_info_.find(std::string{name});
+    if (it == wire_info_.end()) {
+      return;
+    }
+    auto& info = it->second;
+
+    if (info.bound) {
+      // Drop the previous buffer input first: a second connect_driver on the
+      // same `as` sink would make the passthrough Or a two-input OR of the
+      // partial and the complete value.
+      auto as_sink = livehd::graph_util::find_sink_pin(info.buf, "as");
+      if (!as_sink.is_invalid()) {
+        as_sink.del_sink();
+      }
+      if (!info.narrow.is_invalid() && !info.narrow.has_out_edges()) {
+        info.narrow.del_node();  // the superseded typed-wire truncation cell
+      }
+      info.narrow = hhds::Node_class{};
+    }
+
+    // The consumers that exist NOW are the ones that can participate in this
+    // net's definition: a genuine position-independent read, or a read taken
+    // inside the branch bodies whose merge produced `din`. Captured here rather
+    // than at each store so EVERY bind path (plain store, set_mask chain,
+    // if/match merge, finalize) is covered by the self-reference resolution
+    // below -- a merge-bound wire used to skip it entirely.
+    capture_wire_readers(name);
+
+    // A TYPED wire narrows its driver with a real precision-changing cell.
+    if (narrow_typed && info.decl_mw > 0) {
+      // Get_mask always returns an unsigned pattern. A signed wire instead
+      // uses Sext, whose bit-count operand explicitly selects the sign bit.
+      auto narrow = make_node(info.is_signed ? Ntype_op::Sext : Ntype_op::Get_mask);
+      auto out    = narrow.create_driver_pin(0);
+      if (info.is_signed) {
+        setup_sink_by_name(narrow, "a").connect_driver(din);
+        setup_sink_by_name(narrow, "b").connect_driver(create_const(*g_, *Dlop::create_integer(info.decl_mw)));
+        set_sbits(out, info.decl_mw);
+      } else {
+        livehd::graph_util::connect_mask_operands(narrow, din, create_const(*g_, *Dlop::get_mask_value(info.decl_mw)));
+        set_ubits(out, info.decl_mw);
+      }
+      din         = out;
+      info.narrow = narrow;
+    }
+
+    setup_sink_by_name(info.buf, "as").connect_driver(din);
+    // Record the driver; do NOT split here. A wire assembled from several
+    // partial writes rebinds once per write, and splitting against a PARTIAL
+    // accumulator resolves an early slice read onto the `0sb?` seed instead of
+    // the lane's real driver -- permanently, because the split rewires the
+    // reader off the buffer and the next bind then sees no early reader at all
+    // (`w#[0..=3] = a ^ hi` before `w#[4..=7] = b` froze `hi` at don't-care,
+    // while the same two writes in the opposite order were correct -- a `wire`
+    // is a net, so write order must not change its value). resolve_wire_selfref
+    // runs the split once, from finalize_wires, against the COMPLETE driver.
+    info.bound_din = din;
+
+    if (info.decl_mw <= 0) {
+      const int32_t dbits = livehd::graph_util::bits_of(din);
+      if (dbits > 0) {
+        set_bits(info.out, dbits);
+        if (livehd::graph_util::is_unsign(din)) {
           set_unsign(info.out);
+        } else {
+          set_sign(info.out);
         }
-        mw_map_[name] = mw;
+        mw = dbits;
+      } else {
+        set_ubits(info.out, mw);
+      }
+      mw_map_[std::string{name}] = mw;
+    }
+    info.bound = true;
+  }
+
+  void maybe_bind_wire_shadow(std::string_view shadow, const Pin& driver, int32_t mw) {
+    if (!branch_writes_.empty() || !is_wire_din(shadow)) {
+      return;  // inside a branch the merge is not complete yet
+    }
+    bind_wire_driver(shadow.substr(kDinPrefix.size()), driver, mw);
+  }
+
+  // Accumulate the consumers that exist at this wire's binds. There is no
+  // reason to track reads taken after the LAST write: they are downstream of
+  // the completed net and cannot participate in its definition. Called from
+  // bind_wire_driver ONLY, right before the buffer input is attached, and it
+  // UNIONS rather than rebuilds -- a partial-write rebind must not forget a
+  // reader that the earlier write already saw.
+  void capture_wire_readers(std::string_view name) {
+    auto it = wire_info_.find(std::string{name});
+    if (it == wire_info_.end()) {
+      return;
+    }
+    auto& readers = it->second.early_readers;
+    for (const auto& e : it->second.out.out_edges()) {
+      auto reader = e.sink.get_master_node();
+      if (reader.is_invalid() || reader == it->second.buf) {
+        continue;
+      }
+      if (std::ranges::find(readers, reader) == readers.end()) {
+        readers.push_back(reader);
       }
     }
   }
@@ -967,7 +1220,8 @@ private:
     if (key_n.is_invalid()) {
       return;
     }
-    if (lnast_->get_name(key_n) == "__region") {
+    if (lnast_->get_name(key_n) == "__region" || lnast_->get_name(key_n) == "__region_ware"
+        || lnast_->get_name(key_n) == "__region_delay") {
       // Synthesis-region marker (2opt-freq B): attr_set(%__region_<id>,
       // "__region", <abc-string | true>) — first statement of an annotated
       // `{ ::[…] … }` block. The region id rides the target name; a quoted
@@ -988,6 +1242,15 @@ private:
       region_colors_marked_.insert(id);
       if (auto val_n = lnast_->get_sibling_next(key_n); !val_n.is_invalid()) {
         std::string_view val = lnast_->get_name(val_n);
+        const auto       key = lnast_->get_name(key_n);
+        if (key != "__region") {
+          const std::string opt{key.substr(std::string_view{"__region_"}.size())};
+          const auto [it, inserted] = region_options_[id].try_emplace(opt, val);
+          if (!inserted && it->second != val) {
+            error_at(tgt, {"region-option-conflict", "syntax"}, "region color {} carries conflicting {}= options", id, opt);
+          }
+          return;
+        }
         if (val.size() >= 2 && ((val.front() == '\'' && val.back() == '\'') || (val.front() == '"' && val.back() == '"'))) {
           val                  = val.substr(1, val.size() - 2);
           auto [ait, inserted] = region_abc_.try_emplace(id, std::string(val));
@@ -1020,6 +1283,21 @@ private:
       info.reset_pin_name = std::string(val);
     } else if ((key == "clock_pin")) {
       info.clock_pin_name = std::string(val);
+    } else if ((key == "enable")) {
+      // Explicit write-enable (`reg q:[enable=(wen!=0)]`): the state element
+      // updates (a latch: is transparent) only while it holds. It is ANDed onto
+      // the OR-of-write-conditions the branch machinery already derives, so an
+      // `if`-guarded write inside an `enable=`-qualified reg keeps BOTH guards.
+      // The value is a plain ref (prp2lnast hoists the expression into a temp
+      // ahead of the declare), so it is resolved in finalize_regs, once every
+      // producer has been walked.
+      info.enable_name     = std::string(val);
+      // …UNLESS the value is a CONSTANT: the flag-only spelling `:[enable]`
+      // (val defaults to "true" above), `enable=true/false`, `enable=1/0`. A
+      // const names no signal, so resolve_attr_signal would fail it with a
+      // nonsense "has no such input/wire". Remember which it is here — the
+      // node type is only visible at the attr_set.
+      info.enable_is_const = val_n.is_invalid() || Lnast_ntype::is_const(lnast_->get_type(val_n));
     } else if ((key == "posclk") || (key == "enable_high")) {
       // `enable_high` is the LATCH-facing spelling of the same pin (2f-latch
       // M2): on a latch, pid 6 is the ENABLE POLARITY, not a clock edge, so
@@ -1039,10 +1317,13 @@ private:
       info.sync_val = val == "false" || val == "0";
     } else if ((key == "negreset")) {
       info.negreset = val != "false" && val != "0";
-    } else if ((key == "initial") || (key == "init")) {
-      // `init` is the Pyrope-source spelling; `initial` the importer's.  Both
-      // override the declare's reset value.
-      info.initial_txt = std::string(val);
+    } else if ((key == "initial")) {
+      // `initial` is the ONE spelling: the LGraph Flop/Latch/Memory reset-value
+      // pin (graph/cell.cpp) and the Pyrope declaration attribute are the same
+      // name.  (`init` was the old Pyrope-only spelling; prp2lnast now reports
+      // it with a "use `initial`" hint.)  Overrides the declare's reset value.
+      info.initial_txt    = std::string(val);
+      info.initial_is_ref = !val_n.is_invalid() && Lnast_ntype::is_ref(lnast_->get_type(val_n));
     } else if ((key == "name")) {
       // Explicit local flop name (`reg x:[name="reg_x"]`) — overrides the
       // declared variable name; finalize_regs combines it with any hier prefix.
@@ -1058,6 +1339,21 @@ private:
       info.hier_prefix = std::string(val);
     } else if ((key == "type") || (key == "comptime")) {
       // storage-class markers — already consumed by the declare
+    } else if ((key == "__store_clock_pin") || (key == "__store_posclk")) {
+      // Memory-only markers: inou.slang emits them for the STORES of an
+      // unpacked array, and only lower_mem_update_store / lower_mem_store read
+      // them. Landing on a Flop means the array was lowered as a scalar
+      // register instead, and the generic warning below would let the clock
+      // evaporate -- finalize_regs then binds the flop to the lazily-minted
+      // implicit `clock` input, on the WRONG edge. That is the vpu_trans
+      // `id_trans_scoreboard_o` / intpipe_csr_msgs failure; a dropped clock is
+      // not a warning.
+      error_at(tgt,
+               {"store-attr-on-flop", "unsupported"},
+               "reg '{}' carries the memory-only marker '{}': its clock would "
+               "be silently dropped",
+               lnast_->get_name(tgt),
+               key);
     } else {
       warn_at(tgt,
               {"reg-attr-not-lowered", "unsupported"},
@@ -1088,32 +1384,43 @@ private:
     bool changed = true;
     while (changed) {
       changed = false;
-      for (auto n : g_->forward_class()) {
+      for (auto n : g_->body().nodes(hhds::Node_order::forward)) {
         if (n.is_invalid() || livehd::graph_util::is_builtin_node(n)) {
           continue;
         }
         auto op = livehd::graph_util::type_op_of(n);
-        if (op == Ntype_op::Nconst || op == Ntype_op::IO) {
+        if (op == Ntype_op::IO) {
           continue;
         }
         if (livehd::graph_util::node_color_of(n) != 0) {
           continue;
         }
-        int32_t c  = 0;
-        bool    ok = false;
-        for (const auto& e : n.out_edges()) {
-          auto sn = e.sink.get_master_node();
-          if (sn.is_invalid() || livehd::graph_util::is_builtin_node(sn)) {
-            ok = false;  // drives an output/builtin: boundary glue, keep it out
+        int32_t c    = 0;
+        bool    ok   = false;
+        bool    stop = false;
+        // Pin-centric walk: out_sorted_pins() yields this node's CONNECTED
+        // driver pins; a driver's fanout is a SET, so the sinks still come from
+        // the pin's own out_edges(). Read-only, so the lazy views are safe.
+        for (auto dpin : n.out_sorted_pins()) {
+          for (const auto& e : dpin.out_edges()) {
+            auto sn = e.sink.get_master_node();
+            if (sn.is_invalid() || livehd::graph_util::is_builtin_node(sn)) {
+              ok   = false;  // drives an output/builtin: boundary glue, keep it out
+              stop = true;
+              break;
+            }
+            auto sc = livehd::graph_util::node_color_of(sn);
+            if (sc == 0 || (c != 0 && sc != c)) {
+              ok   = false;  // uncolored or multi-region fanout: stays background
+              stop = true;
+              break;
+            }
+            c  = sc;
+            ok = true;
+          }
+          if (stop) {
             break;
           }
-          auto sc = livehd::graph_util::node_color_of(sn);
-          if (sc == 0 || (c != 0 && sc != c)) {
-            ok = false;  // uncolored or multi-region fanout: stays background
-            break;
-          }
-          c  = sc;
-          ok = true;
         }
         if (ok && c != 0) {
           livehd::graph_util::set_color(n, c);
@@ -1131,34 +1438,107 @@ private:
                 lnast_->get_top_module_name());
       }
     }
-    auto jesc = [](std::string_view sv) {
-      std::string out;
-      out.reserve(sv.size());
-      for (char ch : sv) {
-        switch (ch) {
-          case '"' : out += "\\\""; break;
-          case '\\': out += "\\\\"; break;
-          case '\n': out += "\\n"; break;
-          case '\t': out += "\\t"; break;
-          default  : out.push_back(ch);
-        }
-      }
-      return out;
-    };
     std::string j  = "{\"schema_version\":1,";
-    j             += std::format("\"top\":\"{}\",", jesc(lnast_->get_graph_name()));
+    j             += std::format("\"top\":\"{}\",", livehd::json_util::escape(lnast_->get_graph_name()));
     j             += "\"algorithm\":\"block-attr\",\"params\":{},\"colors\":{},"
                      "\"region_opts\":{";
-    bool first     = true;
-    for (const auto& [color, abc] : region_abc_) {
+    // Use ordered maps for stable metadata and cache recipes.
+    auto options   = region_options_;
+    for (const auto& [color, flow] : region_abc_) {
+      options[color]["flow"] = flow;
+    }
+    bool first = true;
+    for (const auto& [color, values] : options) {
       if (!first) {
         j += ",";
       }
-      first  = false;
-      j     += std::format("\"{}\":{{\"flow\":\"{}\"}}", color, jesc(abc));
+      first              = false;
+      j                 += std::format("\"{}\":{{", color);
+      bool first_option  = true;
+      for (const auto& [key, value] : values) {
+        if (!first_option) {
+          j += ",";
+        }
+        first_option  = false;
+        j            += std::format("\"{}\":", key);
+        if (key == "ware") {
+          j += value == "true" ? "true" : "false";
+        } else {
+          // Region_opts uses strings for delay; zero clears inherited timing.
+          j += std::format("\"{}\"", livehd::json_util::escape(key == "delay" && value == "0" ? "" : value));
+        }
+      }
+      j += "}";
     }
     j += "}}";
     g_->get_input_node().attr(livehd::attrs::coloring_info).set(j);
+  }
+
+  // Remove hold arms that branch lowering bakes into a latch's D before
+  // cprop. This narrow structural proof matters for hierarchical LEC, where a
+  // child definition can be inspected before a graph-pass sweep reaches it.
+  // At every peeled layer, D's Q arm must correspond to a known-false arm of
+  // the enable mux under the exact same selector.
+  [[nodiscard]] Pin canonical_latch_din(Pin din, const Pin& q, Pin en) {
+    const auto driver_at = [](const hhds::Node_class& n, hhds::Port_id pid) -> Pin {
+      // Read-only pin walk: inp_sorted_pins() yields CONNECTED sink pins in
+      // ascending port order, and each carries exactly one driver.
+      for (auto sink : n.inp_sorted_pins()) {
+        if (sink.get_port_id() == pid) {
+          return sink.get_driver_pin();
+        }
+      }
+      return Pin{};
+    };
+    const auto same = [](const Pin& a, const Pin& b) {
+      return !a.is_invalid() && !b.is_invalid() && a.get_class_index() == b.get_class_index();
+    };
+    for (int depth = 0; depth < 64 && !din.is_invalid() && !en.is_invalid(); ++depth) {
+      auto dm = din.get_master_node();
+      auto em = en.get_master_node();
+      if (livehd::graph_util::type_op_of(dm) != Ntype_op::Mux || livehd::graph_util::type_op_of(em) != Ntype_op::Mux) {
+        break;
+      }
+      auto ds = driver_at(dm, 0);
+      auto es = driver_at(em, 0);
+      if (!same(ds, es)) {
+        break;
+      }
+      auto d0    = driver_at(dm, 1);
+      auto d1    = driver_at(dm, 2);
+      int  q_arm = same(d0, q) ? 0 : (same(d1, q) ? 1 : -1);
+      if (q_arm < 0) {
+        break;
+      }
+      auto e_hold = driver_at(em, static_cast<hhds::Port_id>(q_arm + 1));
+      if (e_hold.is_invalid() || !e_hold.is_const() || !livehd::graph_util::const_of(e_hold).is_known_false()) {
+        break;
+      }
+      din = q_arm == 0 ? d1 : d0;
+      en  = driver_at(em, static_cast<hhds::Port_id>((1 - q_arm) + 1));
+    }
+    return din;
+  }
+
+  // Resolve a reg-attribute signal NAME (`clock_pin=`, `enable=`) to its
+  // driver pin. IO inputs FIRST (a port is not in pin_map_, while an unrelated
+  // same-named value might be, which is why a pin_map_-first lookup is wrong);
+  // then a 2c-wire's DRIVER rather than its passthrough buffer (cgen drops a
+  // buffer whose only consumer is a flop control pin); then any ordinary
+  // value/temp. Invalid = the module has no such input/wire/value.
+  [[nodiscard]] Pin resolve_attr_signal(const std::string& nm) {
+    if (g_->get_io()->has_input(nm)) {
+      return g_->get_input_pin(nm);
+    }
+    if (wire_names_.contains(nm)) {
+      if (auto dit = pin_map_.find(din_key(nm)); dit != pin_map_.end()) {
+        return dit->second;
+      }
+    }
+    if (auto it = pin_map_.find(nm); it != pin_map_.end()) {
+      return it->second;
+    }
+    return Pin{};
   }
 
   // Wire each declared reg's din / enable / reset_pin / initial /
@@ -1223,13 +1603,18 @@ private:
       } else {
         din = q;
       }
+      if (info.is_latch) {
+        if (auto eit = pin_map_.find(en_key(name)); eit != pin_map_.end()) {
+          din = canonical_latch_din(din, q, eit->second);
+        }
+      }
       setup_sink_by_name(flop, "din").connect_driver(din);
 
       if (info.is_latch) {
         // FAIL CLOSED on an attr this branch cannot honor (2f-latch M0), now
         // narrowed to the ones M2 did NOT wire. Before M0 every one of these
         // was silently DISCARDED: a
-        // `reg l:u8:[latch=true, clock_pin=ck2, posclk=false, init=3]`
+        // `reg l:u8:[latch=true, clock_pin=ck2, posclk=false, initial=3]`
         // compiled exit 0, zero warnings, and emitted Verilog byte-identical to
         // a plain transparent-high latch. Authoring an attr that vanishes is
         // worse than not having it.
@@ -1252,7 +1637,7 @@ private:
           } else if (info.has_posclk && !info.posclk_val) {
             // ACTIVE-LOW ENABLE IS NOT EXPRESSIBLE IN THE PYROPE SHAPE, and
             // wiring it as a bare pin flip is a SILENT MISCOMPILE (measured
-            // 2026-07-20 — this is exactly the "posclk double-negation" a
+            // — this is exactly the "posclk double-negation" a
             // symmetric before/after gate cannot see; it was caught only by
             // LEC-ing against an independent golden).
             //
@@ -1307,19 +1692,13 @@ private:
       // which is why pin_map_-first is wrong), then fall back to pin_map_ for
       // the internal-wire case. get_input_pin would assert on a non-input.
       if (info.is_latch) {
-        // no clock identity: the gate IS the enable (user ruling, 2f-latch M2)
+        // no clock identity: the gate IS the enable
       } else if (!info.clock_pin_name.empty()) {
         // 2c-wire — a wire clock signal (a gated/derived clock): use its DRIVER
         // (din) directly, not the passthrough buffer (cgen drops a buffer whose
         // only consumer is a flop control pin).
-        std::string cn = info.clock_pin_name;
-        if (g_->get_io()->has_input(cn)) {
-          setup_sink_by_name(flop, "clock_pin").connect_driver(g_->get_input_pin(cn));
-        } else if (auto dit = wire_names_.contains(cn) ? pin_map_.find(din_key(cn)) : pin_map_.end(); dit != pin_map_.end()) {
-          setup_sink_by_name(flop, "clock_pin").connect_driver(dit->second);
-        } else if (pin_map_.contains(cn)) {
-          setup_sink_by_name(flop, "clock_pin").connect_driver(pin_map_.at(cn));
-        } else {
+        const auto cp = resolve_attr_signal(info.clock_pin_name);
+        if (cp.is_invalid()) {
           error_here(
               "upass.tolg: reg '{}' names clock_pin '{}' but '{}' has "
               "no such input/wire",
@@ -1328,6 +1707,7 @@ private:
               lnast_->get_top_module_name());
           continue;
         }
+        setup_sink_by_name(flop, "clock_pin").connect_driver(cp);
       } else if (!clock_name_.empty()) {
         setup_sink_by_name(flop, "clock_pin").connect_driver(clock_pin());
       } else {
@@ -1344,7 +1724,7 @@ private:
       // still exists to point at.
       if (const auto bad = illegal_clock_op(livehd::graph_util::get_driver_of_sink_name(flop, "clock_pin")); !bad.empty()) {
         error_at(info.decl_nid,
-                 {"clock-op-unsupported", "time"},
+                 {"gated-clock-unsupported", "time"},
                  "reg '{}' takes its clock from a `{}` operation, which is not a clock operation -- a clock may only "
                  "be gated (`clk and en`) or inverted (`not clk`)",
                  name,
@@ -1358,30 +1738,120 @@ private:
       if (info.decl_mw == 0) {
         auto    dit = mw_map_.find(din_key(name));
         int32_t mw  = dit != mw_map_.end() ? dit->second : int32_t{1};
-        set_bits(q, mw + 1);
-        set_unsign(q);
+        set_ubits(q, mw);
         mw_map_[name] = mw;
       }
 
+      // Explicit `:[enable=<ref>]`. Resolved HERE, not at the attr_set: prp2lnast
+      // hoists the attribute ahead of the declare, so the temp holding
+      // `(wen_i != 0)` is still undefined when lower_attr_set runs.
+      Pin attr_en;
+      if (!info.enable_name.empty()) {
+        if (info.enable_is_const) {
+          // A CONSTANT enable names no signal: `enable=true` is the
+          // constant-true CONDITION — "always update", no extra gate at all
+          // (an invalid attr_en), which is already the Flop default. Not a
+          // curiosity: a generic-parameterised `enable=(EN!=0)` folds to
+          // exactly this. Without this arm it fell into the resolve arm below
+          // and died with "names enable 'true' but … has no such input/wire".
+          // (The value-less `:[enable]`, which the attribute grammar also
+          // defaults to the text "true", is refused at the SOURCE by
+          // prp2lnast's attr-needs-value rule — a pin attribute names a
+          // signal, so a flag-only spelling says nothing. This arm still
+          // covers it for any other LNAST producer.)
+          const auto cv = Dlop::from_pyrope(info.enable_name);
+          if (!cv || cv->is_invalid()) {
+            error_here(
+                "upass.tolg: reg '{}' enable value '{}' is neither a signal "
+                "nor a compile-time constant",
+                name,
+                info.enable_name);
+            continue;
+          }
+          if (cv->is_known_false()) {
+            // A constant-0 enable CANNOT be emitted: cgen skips a const enable
+            // pin outright (cgen_verilog `!enable_dpin.is_const()`), so wiring
+            // one would compile to a register that updates every edge — the
+            // same silent-drop failure the `enable_high=false` arm refuses.
+            error_here(
+                "upass.tolg: reg '{}' has `enable=false`, a register that can "
+                "never update — drop the reg (use a const) or the attribute",
+                name);
+            continue;
+          }
+        } else {
+          attr_en = resolve_attr_signal(info.enable_name);
+          if (attr_en.is_invalid()) {
+            error_here(
+                "upass.tolg: reg '{}' names enable '{}' but '{}' has "
+                "no such input/wire",
+                name,
+                info.enable_name,
+                lnast_->get_top_module_name());
+            continue;
+          }
+          attr_en = nonzero1(attr_en);
+        }
+      }
+
       // enable: still the seeded false const => never written. For a Flop, the
-      // true const needs no pin (unconditional edge update is the default).
-      // For a Latch it MUST remain explicit: enable=true means always
-      // transparent, which lets cprop recognize that the cell stores nothing
-      // and replace it with its combinational din. Any other pin is the
-      // OR-of-conditions mux chain.
+      // true const needs no pin (unconditional edge update is the default)
+      // unless `enable=` adds one. For a Latch it MUST remain explicit:
+      // enable=true means always transparent, which lets cprop recognize that
+      // the cell stores nothing and replace it with its combinational din. Any
+      // other pin is the OR-of-conditions mux chain.
       if (auto eit = pin_map_.find(en_key(name)); eit != pin_map_.end()) {
         const auto en       = eit->second;
-        const auto en_nid   = en.get_master_node().get_debug_nid();
-        const bool is_true  = en_true_valid_ && en_nid == en_true_pin_.get_master_node().get_debug_nid();
-        const bool is_false = en_false_valid_ && en_nid == en_false_pin_.get_master_node().get_debug_nid();
-        if ((info.is_latch && is_true) || (!is_true && !is_false)) {
-          setup_sink_by_name(flop, "enable").connect_driver(en);
+        // Identity by VALUE, not by node. Every const pin shares ONE pooled
+        // master node (graph const pool), so comparing get_debug_nid() against
+        // the memoized en_const() pins answered TRUE for both questions at
+        // once: an unconditionally-written reg read as `is_false` (never
+        // written) as well. On a FLOP both answers happened to land on the same
+        // "wire no enable pin" outcome, which is why it hid; on a LATCH they do
+        // not — an always-written latch lost the explicit enable=true that
+        // cprop needs to collapse the always-open cell (latch_always_transparent),
+        // and an explicit `:[enable=…]` needs them apart on either cell.
+        const bool is_const = en.is_const();
+        const bool is_true  = is_const && livehd::graph_util::const_of(en).is_known_true();
+        const bool is_false = is_const && livehd::graph_util::const_of(en).is_known_false();
+        if (!is_false) {
+          if (info.is_latch) {
+            // A latch has no clock to gate, so the transported instance
+            // activation participates directly in its transparency enable.
+            // Reset remains a separate, higher-priority control in cgen.
+            const auto active = !valid_active_ ? Pin{} : valid_pin();
+            // Dynamic enables come from lower_if's merged branch selectors,
+            // which already include activation so din's hold mux and enable
+            // remain structurally identical (the latch-contract proof relies
+            // on that identity). Only an unconditional true needs gating here.
+            Pin        lat_en = is_true ? active : (valid_minted_ ? en : and2(en, active));
+            // `:[enable=…]` ANDs on top, exactly as it does for a Flop. Sound
+            // because it only NARROWS the transparency window and never
+            // inverts it: din is `cond ? d : q` built from the SAME cond, so
+            // wherever the narrowed enable is high, cond is high and din is
+            // still `d`. (Contrast `enable_high=false` below, which is REFUSED
+            // precisely because inverting makes the latch write itself.) Rule
+            // B's hold-mux exemption is structural on the DIN side — an
+            // operand that is directly this latch's q — so widening the enable
+            // cone leaves it intact.
+            lat_en            = and2(lat_en, attr_en);
+            if (lat_en.is_invalid()) {
+              lat_en = en;  // unconditionally transparent: keep the explicit true
+            }
+            setup_sink_by_name(flop, "enable").connect_driver(lat_en);
+          } else if (const Pin fin = is_true ? attr_en : and2(en, attr_en); !fin.is_invalid()) {
+            // `enable=` ANDs onto the OR-of-write-conditions shadow, so a reg
+            // that carries BOTH an attribute enable and a conditional write
+            // keeps both guards. An unconditionally-written reg with no
+            // attribute leaves the pin unwired (the Flop default already is
+            // "update every edge").
+            setup_sink_by_name(flop, "enable").connect_driver(fin);
+          }
         }
       }
 
       // Reset wiring. Effective init: an explicit `initial=N` attr overrides
-      // the declare's [value]; "nil" (or absent) = NO reset (confirmed
-      // 2026-06-07 ruling).
+      // the declare's [value]; "nil" (or absent) = NO reset.
       const std::string init     = !info.initial_txt.empty() ? info.initial_txt : info.init_txt;
       const bool        has_init = !init.empty() && init != "nil";
       const bool        rp_false = info.reset_pin_name == "false";
@@ -1402,29 +1872,10 @@ private:
       if (!info.reset_pin_name.empty()) {
         // Usually a graph input, but a reset synchronizer drives it from a
         // DERIVED module-level signal — wire from that signal's driver instead.
-        // (get_input_pin ASSERTS on a non-input name; gate on has_input first.)
-        if (g_->get_io()->has_input(info.reset_pin_name)) {
-          rpin = g_->get_input_pin(info.reset_pin_name);
-        } else {
-          // Derived reset signal: its FINAL combinational driver lives in
-          // logical_last_ (the last SSA version), NOT pin_map_[name] that
-          // resolve() checks (which holds the read-site version, or nothing).
-          std::string base = info.reset_pin_name;
-          if (auto p = base.find("___ssa_"); p != std::string::npos) {
-            base.resize(p);
-          }
-          // 2c-wire — a wire reset signal: use its DRIVER (din) directly, not
-          // the passthrough buffer output. A buffer whose only consumer is a
-          // flop control pin is dropped by cgen (the reset would reference an
-          // undriven net); the din is the real combinational value.
-          if (auto dit = wire_names_.contains(base) ? pin_map_.find(din_key(base)) : pin_map_.end(); dit != pin_map_.end()) {
-            rpin = dit->second;
-          } else if (auto lit = logical_last_.find(base); lit != logical_last_.end()) {
-            rpin = lit->second.first;
-          } else {
-            rpin = resolve(info.reset_pin_name);
-          }
-        }
+        // THE ladder lives in resolve_reset_signal so finalize_mems resolves a
+        // register array's `reset_pin=ref <wire>` identically; the two used to
+        // differ and an array silently lost its reset.
+        rpin = resolve_reset_signal(info.reset_pin_name);
         if (str_tools::ends_with(info.reset_pin_name, "_n")) {
           neg = true;
         }
@@ -1442,20 +1893,30 @@ private:
         return;
       }
       setup_sink_by_name(flop, "reset_pin").connect_driver(rpin);
-      if (has_init) {
+      if (has_init && info.initial_is_ref) {
+        auto initial_pin = resolve_attr_signal(init);
+        if (initial_pin.is_invalid()) {
+          error_here("upass.tolg: reg '{}' names unknown asynchronous load value '{}'", name, init);
+          return;
+        }
+        setup_sink_by_name(flop, "initial").connect_driver(initial_pin);
+      } else if (has_init) {
         // The reset value must be a compile-time constant. A body-`reg`'s
         // non-literal init is caught at the declare (lower_declare errors on
         // a ref init); an output-reg `-> (reg q = expr)` stringifies its
         // initializer, so a malformed parse can still arrive here — reject it
         // rather than deref a null Dlop.
         auto iv = Dlop::from_pyrope(init);
-        if (!iv) {
+        if (iv->is_invalid()) {
           error_here(
               "upass.tolg: reg '{}' reset/initial value '{}' is not a "
               "compile-time constant",
               name,
               init);
           return;
+        }
+        if (iv->is_nil()) {
+          iv = Dlop::create_integer(0);  // as always: a nil initial value is 0
         }
         setup_sink_by_name(flop, "initial").connect_driver(create_const(*g_, *iv));
       }
@@ -1482,6 +1943,152 @@ private:
     if (rhs.is_invalid()) {
       return;
     }
+    const std::string lhs_text{lnast_->get_name(lhs)};
+
+    // Comptime arrays have already been evaluated and every runtime use is
+    // materialized by the runner (for example as a tuple-literal reg init).
+    // Their original initializer stores remain in the marked LNAST for source
+    // fidelity, but they must not mint hardware.
+    if (comptime_array_names_.contains(lhs_text)) {
+      return;
+    }
+
+    // Combinational typed positional array. A two-child store is a whole-value
+    // initializer/replacement; additional children are indices followed by the
+    // element value. The live representation is a packed bus with element 0 in
+    // the least-significant lane.
+    if (auto ait = array_scalar_views_.find(lhs_text); ait != array_scalar_views_.end()) {
+      auto& view = ait->second;
+      auto  next = lnast_->get_sibling_next(rhs);
+      if (next.is_invalid()) {
+        Pin value_pin;
+        if (Lnast_ntype::is_const(lnast_->get_type(rhs))) {
+          auto txt = lnast_->get_name(rhs);
+          auto v   = (txt == "nil" || txt == "0sb?") ? Dlop::create_integer(0) : Dlop::from_pyrope(txt);
+          if (!v || !v->is_integer()) {
+            error_here("upass.tolg: whole-array value '{}' for '{}' is not an integer", txt, lhs_text);
+            return;
+          }
+          auto lane   = v->and_op(*Dlop::get_mask_value(view.elem_mw));
+          auto packed = Dlop::create_integer(0);
+          for (int64_t i = 0; i < view.size; ++i) {
+            packed = packed->or_op(*lane->shl_op(*Dlop::create_integer(i * view.elem_mw)));
+          }
+          value_pin = create_const(*g_, *packed);
+        } else if (Lnast_ntype::is_ref(lnast_->get_type(rhs))) {
+          const std::string rhs_name{lnast_->get_name(rhs)};
+          if (auto tit = tuple_recs_.find(rhs_name); tit != tuple_recs_.end() && tit->second.named.empty()
+                                                     && static_cast<int64_t>(tit->second.elems.size()) == view.size) {
+            auto packed = Dlop::create_integer(0);
+            for (int64_t i = 0; i < view.size; ++i) {
+              const auto e = tit->second.elems[static_cast<size_t>(i)];
+              if (!Lnast_ntype::is_const(lnast_->get_type(e))) {
+                error_here("upass.tolg: runtime tuple whole-array value for '{}' is not supported", lhs_text);
+                return;
+              }
+              auto ev = Dlop::from_pyrope(lnast_->get_name(e));
+              if (!ev || !ev->is_integer()) {
+                error_here("upass.tolg: array '{}' initializer element is not an integer", lhs_text);
+                return;
+              }
+              auto lane = ev->and_op(*Dlop::get_mask_value(view.elem_mw));
+              packed    = packed->or_op(*lane->shl_op(*Dlop::create_integer(i * view.elem_mw)));
+            }
+            value_pin = create_const(*g_, *packed);
+          } else {
+            value_pin = leaf(rhs).pin;
+          }
+        } else {
+          value_pin = leaf(rhs).pin;
+        }
+        record(lhs_text, value_pin, static_cast<int32_t>(view.size * view.elem_mw));
+        return;
+      }
+
+      // One-dimensional element store for now; nested dimensions stay on the
+      // existing memory path until their row-major flattening is generalized.
+      auto value_nid = next;
+      if (!lnast_->get_sibling_next(next).is_invalid()) {
+        error_here("upass.tolg: scalar-replaced array '{}' currently supports one element index", lhs_text);
+        return;
+      }
+      // CANONICAL key: record() strips the backtick quoting, so a flattened
+      // struct-field array (`` `bht_d.valid` `` out of inou/slang) is keyed
+      // `bht_d.valid` -- the raw spelling missed here and every such array
+      // read "written before it has an initializer" at its first element store.
+      auto base_it = pin_map_.find(std::string(canon_io_name(lhs_text)));
+      if (base_it == pin_map_.end()) {
+        error_here("upass.tolg: array '{}' is written before it has an initializer", lhs_text);
+        return;
+      }
+      Val  base{base_it->second, static_cast<int32_t>(view.size * view.elem_mw)};
+      auto iv = leaf(value_nid);
+
+      if (Lnast_ntype::is_const(lnast_->get_type(rhs))) {
+        auto ci = Dlop::from_pyrope(lnast_->get_name(rhs));
+        if (!ci || !ci->is_just_i64() || ci->to_just_i64() < 0 || ci->to_just_i64() >= view.size) {
+          error_at(nid,
+                   {"array-index-out-of-range", "type"},
+                   "Pyrope array index {} is outside [0, {}) for '{}'",
+                   lnast_->get_name(rhs),
+                   view.size,
+                   lhs_text);
+          return;
+        }
+        const int64_t off  = ci->to_just_i64() * view.elem_mw;
+        auto          mask = Dlop::get_mask_value(static_cast<int>(off + view.elem_mw - 1), static_cast<int>(off));
+        auto          sm   = make_node(Ntype_op::Set_mask);
+        livehd::graph_util::connect_mask_operands(sm, base.pin, create_const(*g_, *mask), iv.pin);
+        auto out = sm.create_driver_pin(0);
+        set_ubits(out, base.mw);
+        record(lhs_text, out, base.mw);
+        return;
+      }
+
+      auto index = leaf(rhs);
+      auto mult  = make_node(Ntype_op::Mult);
+      setup_sink_by_name(mult, "as").connect_driver(index.pin);
+      setup_sink_by_name(mult, "as").connect_driver(create_const(*g_, *Dlop::create_integer(view.elem_mw)));
+      auto offset = mult.create_driver_pin(0);
+      set_ubits(offset, std::max<int32_t>(index.mw + std::bit_width(static_cast<uint32_t>(view.elem_mw)), 1));
+
+      auto maskn = make_node(Ntype_op::SHL);
+      setup_sink_by_name(maskn, "a").connect_driver(create_const(*g_, *Dlop::get_mask_value(view.elem_mw)));
+      setup_sink_by_name(maskn, "b").connect_driver(offset);
+      auto mask = maskn.create_driver_pin(0);
+      set_ubits(mask, base.mw);
+
+      // The value must enter the lane as its elem_mw-bit TWO'S-COMPLEMENT
+      // pattern. Shifting the raw (narrower, signed) value zero-extended it:
+      // MEASURED on the rolled matched filter, every negative s8 product
+      // written into an s12 lane through a runtime index came out +256 (the
+      // comptime-index store goes through Set_mask, which extends correctly).
+      // Sext to the lane width (wrap semantics for a wider value, exactly what
+      // `wrap` would do), then take the lane-wide unsigned pattern.
+      Pin lane_value = iv.pin;
+      if (view.elem_signed) {
+        auto sx = make_node(Ntype_op::Sext);
+        setup_sink_by_name(sx, "a").connect_driver(iv.pin);
+        setup_sink_by_name(sx, "b").connect_driver(create_const(*g_, *Dlop::create_integer(view.elem_mw)));
+        auto sout = sx.create_driver_pin(0);
+        set_bits(sout, view.elem_mw);
+        set_sign(sout);
+        auto gm = make_node(Ntype_op::Get_mask);
+        livehd::graph_util::connect_mask_operands(gm, sout, create_const(*g_, *Dlop::get_mask_value(view.elem_mw)));
+        lane_value = gm.create_driver_pin(0);
+        set_ubits(lane_value, view.elem_mw);
+      }
+      auto shifted = make_node(Ntype_op::SHL);
+      setup_sink_by_name(shifted, "a").connect_driver(lane_value);
+      setup_sink_by_name(shifted, "b").connect_driver(offset);
+      auto placed = shifted.create_driver_pin(0);
+      set_ubits(placed, base.mw);
+
+      auto out = lower_dynamic_mask_rmw(base, mask, placed);
+      record(lhs_text, out, base.mw);
+      lower_array_index_assert(index, view.size, nid);
+      return;
+    }
     // 1a-mem — an indexed store to a declared memory becomes a write port;
     // the 2-child whole-array form is the mut/const array initializer.
     if (auto mit = mem_map_.find(std::string(lnast_->get_name(lhs))); mit != mem_map_.end()) {
@@ -1492,6 +2099,33 @@ private:
       }
       return;
     }
+    // A bit-view or whole-value update of a combinational typed array is
+    // SSA-versioned (`r___ssa_N = packed_bus`). Keep that version as a scalar
+    // packed alias with the original array layout. Subsequent bit reads use the
+    // bus directly and element reads extract one declared-width lane.
+    if (lnast_->get_sibling_next(rhs).is_invalid()) {
+      const std::string base = logical_key(lhs_text);
+      if (base != lhs_text) {
+        if (auto ait = array_scalar_views_.find(base); ait != array_scalar_views_.end()) {
+          auto v = leaf(rhs);
+          record(lhs_text, v.pin, v.mw);
+          auto view_copy                = ait->second;
+          array_scalar_views_[lhs_text] = std::move(view_copy);
+          return;
+        }
+        if (auto mit = mem_map_.find(base); mit != mem_map_.end() && mit->second.is_array) {
+          auto v = leaf(rhs);
+          record(lhs_text, v.pin, v.mw);
+          array_scalar_views_[lhs_text] = Array_scalar_view{
+              .size        = mit->second.size,
+              .dims        = mit->second.dims,
+              .elem_mw     = mit->second.elem_mw,
+              .elem_signed = mit->second.elem_signed,
+          };
+          return;
+        }
+      }
+    }
     if (!lnast_->get_sibling_next(rhs).is_invalid()) {
       error_at(lhs,
                {"tuple-store-unsupported", "unsupported"},
@@ -1501,6 +2135,11 @@ private:
                lnast_->get_name(lhs));
     }
     auto lhs_name = lnast_->get_name(lhs);
+    // `c = concat(...)` — the destination's declared width must equal the lane
+    // sum exactly. Checked at the STORE (and at the declare below) because the
+    // concat node's own dst is always a compiler temp, so this is the first
+    // point where a user-declared name and a concat result meet.
+    check_concat_dest_width(nid, lhs_name, rhs);
     // Deferred stage-reg creation: the din store knows the
     // effective depth (deficit narrowing against a Sub callee; 0 = wire).
     if (auto pit = pending_stage_.find(lhs_name); pit != pending_stage_.end()) {
@@ -1530,13 +2169,14 @@ private:
       // 2c-wire — a store to a wire is (part of) its single combinational
       // driver, recorded on the SHADOW din key (reads keep seeing the buffer
       // output, so they stay position-independent). The branch-mux machinery
-      // merges conditional writes; finalize_wires() wires the buffer input. A
+      // merges conditional writes before the buffer input is bound. A
       // `= nil` forward-declare is not a driver — skip it.
       if (Lnast_ntype::is_const(lnast_->get_type(rhs)) && lnast_->get_name(rhs) == "nil") {
         return;
       }
       auto v = leaf(rhs);
       record(din_key(lhs_name), v.pin, v.mw);
+      maybe_bind_wire_shadow(din_key(lhs_name), v.pin, v.mw);
       return;
     }
     // 1a-mem — a plain `name = <tuple-literal-ref>` / `name = <__memory
@@ -1562,6 +2202,10 @@ private:
         auto rec_copy                      = tit->second;
         tuple_recs_[std::string(lhs_name)] = std::move(rec_copy);
         return;
+      }
+      if (auto ait = array_scalar_views_.find(rhs_name); ait != array_scalar_views_.end()) {
+        auto view_copy                             = ait->second;
+        array_scalar_views_[std::string(lhs_name)] = std::move(view_copy);
       }
       if (auto mrt = mem_results_.find(rhs_name); mrt != mem_results_.end()) {
         auto rec_copy                       = mrt->second;
@@ -1594,9 +2238,9 @@ private:
   // (2c-wire). Create the passthrough buffer (Or) and bind the name to its
   // OUTPUT so every read — including one before the driver appears textually —
   // resolves to the net (position-independent). Stores record the din shadow;
-  // finalize_wires() wires the buffer input to the single accumulated driver
-  // and enforces the single-driver / undriven / incomplete-driver rules. No
-  // flop.
+  // the completed write binds the buffer input; finalize_wires() only enforces
+  // the undriven rule (the single-driver rule is a frontend
+  // check). No flop.
   void lower_wire_declare(const Lnast_nid& name_nid, const Lnast_nid& type_nid, const Lnast_nid& decl_nid) {
     auto name = lnast_->get_name(name_nid);
     if (!type_nid.is_invalid() && Lnast_ntype::is_comp_type_array(lnast_->get_type(type_nid))) {
@@ -1614,11 +2258,9 @@ private:
     }
     if (info.decl_mw > 0) {
       if (info.is_signed) {
-        set_bits(info.out, info.decl_mw);
-        set_sign(info.out);
+        set_sbits(info.out, info.decl_mw);
       } else {
-        set_bits(info.out, info.decl_mw + 1);
-        set_unsign(info.out);
+        set_ubits(info.out, info.decl_mw);
       }
       record(name, info.out, info.decl_mw);
     } else {
@@ -1669,21 +2311,57 @@ private:
     auto mode     = mode_nid.is_invalid() || !Lnast_ntype::is_const(lnast_->get_type(mode_nid))
                         ? std::string_view{}
                         : std::string_view(lnast_->get_name(mode_nid));
+    // Remember the DECLARED width for every flavour of declare (mut/const/wire/
+    // reg/latch alike) before the per-mode branches return. Concat lanes read
+    // this; nothing else does, so an unrecognised/absent type simply records
+    // nothing and a lane on that name errors instead of silently mis-sizing.
+    if (!type_nid.is_invalid()) {
+      const auto [dmw, dsigned] = declared_width(type_nid);
+      record_decl_type(lnast_->get_name(name_nid), dmw, dsigned);
+    }
+    // A declare's optional trailing [value] child carries the initializer, so
+    // `const c:u12 = concat(a,b)` is checked here rather than at a store.
+    for (auto c = mode_nid.is_invalid() ? mode_nid : lnast_->get_sibling_next(mode_nid); !c.is_invalid();
+         c      = lnast_->get_sibling_next(c)) {
+      if (Lnast_ntype::is_ref(lnast_->get_type(c))) {
+        check_concat_dest_width(nid, lnast_->get_name(name_nid), c);
+        break;
+      }
+    }
     // 2c-wire — a single-driver combinational net: declare its passthrough
     // buffer now so position-independent reads (a read before the driver) bind
-    // to it; finalize_wires() wires the buffer input to the single driver.
+    // to it; the completed write wires the buffer input to the single driver.
     if (mode == "wire" || mode.starts_with("wire ")) {
       lower_wire_declare(name_nid, type_nid, nid);
       return;
     }
-    // 1a-mem — an array-typed declare is a Memory cell: reg → clocked async
-    // memory; a mut/const array that survived to tolg (runtime-indexed) → a
-    // comb type=2 array / ROM. Never a Flop, never a plain binding.
+    // Storage intent precedes representation: a `reg` array is persistent and
+    // remains a Memory cell; a mut/const array is a combinational aggregate and
+    // receives a packed scalar view that indexed operations can scalar-replace.
     const bool is_reg   = mode == "reg" || mode.starts_with("reg ");
     const bool is_latch = mode == "latch";  // level-sensitive latch (din+enable, no clock)
     if (!type_nid.is_invalid() && Lnast_ntype::is_comp_type_array(lnast_->get_type(type_nid))
         && (is_reg || mode == "mut" || mode == "const" || mode.starts_with("mut ") || mode.starts_with("const "))) {
-      lower_mem_declare(name_nid, type_nid, mode_nid, /*is_array=*/!is_reg);
+      if (mode.find("comptime") != std::string_view::npos) {
+        comptime_array_names_.insert(std::string(lnast_->get_name(name_nid)));
+        return;
+      }
+      if (is_reg) {
+        lower_mem_declare(name_nid, type_nid, mode_nid, /*is_array=*/false);
+      } else {
+        const auto elem_nid         = lnast_->get_first_child(type_nid);
+        const bool multidimensional = !elem_nid.is_invalid() && Lnast_ntype::is_comp_type_array(lnast_->get_type(elem_nid));
+        const bool has_inline_init  = !lnast_->get_sibling_next(mode_nid).is_invalid();
+        if (multidimensional || has_inline_init) {
+          // Slang ROM/array initializers are children of the declaration, and
+          // nested arrays retain row-major address semantics. Keep those as a
+          // Memory cell; the scalar view is for one-dimensional, store-driven
+          // combinational arrays only.
+          lower_mem_declare(name_nid, type_nid, mode_nid, /*is_array=*/true);
+        } else {
+          lower_comb_array_declare(name_nid, type_nid);
+        }
+      }
       return;
     }
 
@@ -1696,6 +2374,9 @@ private:
         // CANONICAL key: set_mask_base tests it against pin_map_, which
         // record()/resolve() key on the backtick-stripped name.
         scalar_decl_.insert(std::string(canon_io_name(lnast_->get_name(name_nid))));
+      }
+      if (mode == "const" || mode.starts_with("const ")) {
+        const_decl_.insert(std::string(canon_io_name(lnast_->get_name(name_nid))));
       }
       return;
     }
@@ -1782,11 +2463,9 @@ private:
 
     if (info.decl_mw > 0) {
       if (info.is_signed) {
-        set_bits(q, info.decl_mw);
-        set_sign(q);
+        set_sbits(q, info.decl_mw);
       } else {
-        set_bits(q, info.decl_mw + 1);
-        set_unsign(q);
+        set_ubits(q, info.decl_mw);
       }
       record(name, q, info.decl_mw);
     } else {
@@ -1813,13 +2492,16 @@ private:
     bool             is_signed = false;
     // Per-reg flop-attr overrides (04b-attributes.md): a per-reg `sync` beats
     // the upass.reset_style flag; `reset_pin=false` opts out of reset.
-    std::string      reset_pin_name;  // explicit reset_pin=NAME / "false"
-    std::string      clock_pin_name;  // explicit clock_pin=NAME (beats implicit clock)
-    bool             has_posclk = false;
-    bool             posclk_val = true;  // false = negedge clock
-    bool             has_sync   = false;
-    bool             sync_val   = true;
-    bool             negreset   = false;
+    std::string      reset_pin_name;           // explicit reset_pin=NAME / "false"
+    std::string      clock_pin_name;           // explicit clock_pin=NAME (beats implicit clock)
+    std::string      enable_name;              // explicit enable=REF (ANDed onto the write-condition shadow)
+    bool             enable_is_const = false;  // …and that REF is a const (`:[enable]`, `enable=false`), not a signal
+    bool             has_posclk      = false;
+    bool             posclk_val      = true;  // false = negedge clock
+    bool             has_sync        = false;
+    bool             sync_val        = true;
+    bool             negreset        = false;
+    bool             initial_is_ref  = false;
     std::string      initial_txt;       // explicit initial=N (overrides init_txt)
     bool             is_latch = false;  // mode "latch": Ntype_op::Latch, wire din+enable only
     // Hierarchical naming (call-site `name=` on an inlined comb / `reg
@@ -1831,12 +2513,10 @@ private:
 
   // Shadow pin_map_ keys for a reg's next-state value and write-enable. The
   // \x01 prefix cannot collide with user identifiers or `___N` temps.
-  [[nodiscard]] static std::string din_key(std::string_view n) {
-    return std::string(
-               "\x01"
-               "din:")
-        .append(n);
-  }
+  static constexpr std::string_view kDinPrefix{
+      "\x01"
+      "din:"};
+  [[nodiscard]] static std::string din_key(std::string_view n) { return std::string(kDinPrefix).append(n); }
   [[nodiscard]] static std::string en_key(std::string_view n) {
     return std::string(
                "\x01"
@@ -1867,8 +2547,41 @@ private:
     return std::nullopt;
   }
 
-  // Cached 1/0 const pins for the enable shadow (node identity doubles as the
-  // "still unconditionally true/false" test in finalize_regs).
+  // 2c-wire — is `var` the din shadow key of a declared `wire`? Unlike a reg, a
+  // wire has NO hold value on a branch path that does not write it: the net is
+  // defined by its ONE driver, so an unwritten path is a DON'T-CARE, not an X.
+  // A conditionally written wire therefore carries the driver's value on EVERY
+  // path — exactly as if the assignment had been written unconditionally (the
+  // frontend allows the conditional form for that reason). The branch merges
+  // below fill the unwritten paths with a WRITTEN value instead of nil, so a
+  // single writing arm needs no mux at all.
+  [[nodiscard]] bool is_wire_din(std::string_view var) const {
+    // Heterogeneous lookup: this runs per merge variable, so do not mint a
+    // std::string just to probe the set.
+    return var.starts_with(kDinPrefix) && wire_names_.contains(var.substr(kDinPrefix.size()));
+  }
+
+  // The same don't-care rule for a `const` still carrying no value at this
+  // point. `const` is SINGLE-ASSIGNMENT: the one bind defines it, so — exactly
+  // like a `wire` — a branch path that does not write it is a don't-care, and
+  // `const x:T = nil; if c { x = v }` means `x == v`, not `c ? v : x`.
+  // `mut` is deliberately NOT included: it is last-write-wins, so an unwritten
+  // path legitimately keeps the pre-if value, and slang's poison-init
+  // accumulators DEPEND on that value staying the `0sb?`/nil seed.
+  // Only reached with no pre-if value in pin_map_, i.e. genuinely unbound.
+  [[nodiscard]] bool is_unbound_const(std::string_view var) const {
+    return !const_decl_.empty() && !var.empty() && var.front() != '\x01' && const_decl_.contains(logical_key(var));
+  }
+
+  // Either single-driver net shape: a `wire` din shadow, or a still-unbound
+  // `const`. Both fill an unwritten branch path with a WRITTEN value instead
+  // of nil, so a single writing arm needs no mux at all.
+  [[nodiscard]] bool is_single_bind_net(std::string_view var) const { return is_wire_din(var) || is_unbound_const(var); }
+
+  // Cached 1/0 const pins for the enable shadow. The cache is a minting
+  // shortcut ONLY: every constant pin in the graph shares the CONST_NODE
+  // master, so node identity says nothing about a value — finalize_regs tests
+  // `pin.is_const()` + `const_of(pin)` instead.
   [[nodiscard]] Pin en_const(bool v) {
     auto& pin   = v ? en_true_pin_ : en_false_pin_;
     auto& valid = v ? en_true_valid_ : en_false_valid_;
@@ -1884,21 +2597,31 @@ private:
   // name:[N]T`; one write port per store site and one read port per tuple_get
   // site (no port merging here — that is a future LG pass). Per-port sink pids
   // stride by 12 (graph/cell.cpp); the r-th read port's data comes out on
-  // driver pid (n_wr_total + r), so the write-site count is pre-scanned at the
+  // driver pid (n_user_wr + r), so the write-site count is pre-scanned at the
   // declare.
   struct Mem_info {
     hhds::Node_class     node;
-    int64_t              size = 0;         // total entries (∏dims)
-    std::vector<int64_t> dims;             // outer dim first; size 1 for a flat array
-    int32_t              elem_mw     = 0;  // element max-value width
-    bool                 elem_signed = false;
-    bool                 is_array    = false;  // type=2: mut/const array (no clock, no persistence)
-    bool                 is_pub      = false;  // pub reg: a remote regref may attach accesses — no diagnostics
-    bool                 init_wired  = false;
-    int                  n_wr_total  = 0;  // user sites + restore ports (fixes dout pids)
-    int                  n_user_wr   = 0;  // pre-scanned program write sites
-    int                  wr_next     = 0;
-    int                  rd_next     = 0;
+    int64_t              size = 0;                // total entries (∏dims)
+    std::vector<int64_t> dims;                    // outer dim first; size 1 for a flat array
+    int32_t              elem_mw            = 0;  // element max-value width
+    bool                 elem_signed        = false;
+    bool                 is_array           = false;  // type=2: mut/const array (no clock, no persistence)
+    bool                 is_pub             = false;  // pub reg: a remote regref may attach accesses — no diagnostics
+    bool                 init_wired         = false;
+    int                  n_user_wr          = 0;  // pre-scanned program write sites
+    int                  wr_next            = 0;
+    bool                 has_store_clock    = false;
+    bool                 first_store_posclk = true;
+    bool                 mixed_store_edges  = false;
+    Pin                  update_clock;
+    bool                 update_posclk = true;
+    int                  rd_next       = 0;
+    // Write-port ordinals whose store carried NO chunk index. Their enable is
+    // one bit, which a wensize > 1 memory reads as "chunk 0 only" — so on a
+    // memory that ALSO takes chunked writes, finalize_mems has to replicate
+    // that bit across every chunk or the write silently loses all but its
+    // bottom chunk.
+    std::vector<int>     plain_wr_ports;
     // Same-cycle ordering (Pyrope `ordering` attr): "program" (default) needs
     // each read port's POSITION in program order, so record `wr_next` as each
     // read port is minted — the number of program writes that textually
@@ -1910,23 +2633,24 @@ private:
     // single `fwd` bit cannot make; the Verilog readers need "old" because a
     // nonblocking write is never visible to a same-timestep read.
     enum class Mem_order { program, fwd, old, none };
-    int64_t                      legacy_fwd_mask = 0;  // set when the deprecated `fwd=` attr is used
-    bool                         has_legacy_fwd  = false;
-    std::vector<int>             rd_wr_before;  // per read port: writes minted before it
-    // 1a-mem reset-restore — per-entry init values: when a concrete-init reg
-    // array coexists with a bound reset, finalize_mems() adds one restore
-    // write port per entry (addr=k, din=init[k], enable=reset) and gates the
-    // user ports' enables with !reset. Restore ports stay OUT of the fwd
-    // mask: a read during reset returns the committed (old) contents.
-    std::vector<spool_ptr<Dlop>> restore_vals;
+    int64_t             legacy_fwd_mask = 0;  // set when the deprecated `fwd=` attr is used
+    bool                has_legacy_fwd  = false;
+    std::vector<int>    rd_wr_before;  // per read port: writes minted before it
+    // Declared reset value (`reg m:[N]T = <const|tuple>`), packed entry 0 in
+    // the low elem_mw bits — the SAME value the `initial` pin carries. Non-null
+    // => finalize_mems wires the cell's whole-array `reset` (pin 14): the reset
+    // restores every entry in ONE cycle, exactly like a scalar reg. nil => none.
+    // (A value, not a spool_ptr: Mem_info is copied into mem_map_, and a null
+    // spool_ptr cannot be copied -- its copy bumps the pointee's refcount.)
+    std::optional<Dlop> reset_init;
     // Whole-array support: a runtime `mem = <bus>` store drives the cell's
     // `update` sink (size*elem_mw bus) instead of minting per-entry write
     // ports. A whole `x = mem` read materializes the async `read_all` driver
     // pin (cached so repeated reads share one output). For a registered array
-    // the reset value bus rides the (now runtime-capable) `init` sink + the
+    // the reset value bus rides the (now runtime-capable) `initial` sink + the
     // `reset` cond pin.
-    bool                         has_update = false;  // an update bus is wired (whole-array memory)
-    Pin                          read_all_pin{};      // cached async read_all driver pin
+    bool                has_update = false;  // an update bus is wired (whole-array memory)
+    Pin                 read_all_pin{};      // cached async read_all driver pin
     // Accumulator for MULTIPLE conditional whole-array stores (e.g. a reset arm
     // and a flush arm). Each later store folds into one
     // `update`/`update_enable` pair via a priority mux: `update_val = en ? this
@@ -1934,8 +2658,18 @@ private:
     // = update_en | en`. The if/else-if path conditions already encode source
     // priority (later arms negate earlier conditions), so "later wins" matches
     // Verilog nonblocking semantics.
-    Pin                          update_val{};  // current accumulated update bus value
-    Pin                          update_en{};   // current accumulated update enable (invalid => always-on)
+    Pin                 update_val{};  // current accumulated update bus value
+    Pin                 update_en{};   // current accumulated update enable (invalid => always-on)
+  };
+
+  // Packed scalar SSA version of a combinational typed positional array.
+  // The value itself lives in pin_map_; this side record preserves the array
+  // extent and lane type so tuple_get can recover element semantics.
+  struct Array_scalar_view {
+    int64_t              size = 0;
+    std::vector<int64_t> dims;
+    int32_t              elem_mw     = 0;
+    bool                 elem_signed = false;
   };
 
   static constexpr int kMemPortStride = static_cast<int>(Ntype::Memory_port_stride);
@@ -1949,8 +2683,7 @@ private:
       return mi.read_all_pin;
     }
     auto d = mi.node.create_driver_pin(static_cast<hhds::Port_id>(Ntype::Memory_readall_pid));
-    set_bits(d, static_cast<int>(mi.size * mi.elem_mw));
-    set_unsign(d);
+    set_ubits(d, static_cast<int>(mi.size * mi.elem_mw));
     mi.read_all_pin = d;
     return d;
   }  // Memory per-port sink stride, graph/cell.hpp
@@ -1997,6 +2730,14 @@ private:
     return acc;
   }
 
+  // Full execution context for state, calls and source-visible effects. A
+  // definition's transported activation composes with its local branch path;
+  // an invalid term denotes constant true and therefore mints no glue.
+  [[nodiscard]] Pin effect_path_cond() {
+    const auto local = current_path_cond();
+    return !valid_active_ ? local : and2(valid_pin(), local);
+  }
+
   // Push one term (a branch condition, or its negation for a later arm/else).
   void push_path_term(const Pin& cond, bool negated) {
     path_terms_.push_back({cond, negated});
@@ -2016,15 +2757,14 @@ private:
       return a;
     }
     auto node = make_node(Ntype_op::And);
-    node.create_sink_pin(0).connect_driver(a);
-    node.create_sink_pin(0).connect_driver(b);
+    livehd::graph_util::setup_sink_pid(node, 0).connect_driver(a);
+    livehd::graph_util::setup_sink_pid(node, 0).connect_driver(b);
     auto d = node.create_driver_pin(0);
-    set_bits(d, 1);
-    set_unsign(d);
+    set_ubits(d, 1);
     return d;
   }
 
-  // a OR b as a 1-bit unsigned pin; an invalid operand is the identity (returns
+  // a OR b as an unsigned Boolean value; an invalid operand is the identity (returns
   // the other), so an unguarded caller mints no cell at all.
   [[nodiscard]] Pin or2(const Pin& a, const Pin& b) {
     if (a.is_invalid()) {
@@ -2033,22 +2773,39 @@ private:
     if (b.is_invalid()) {
       return a;
     }
-    auto node = make_node(Ntype_op::Or);
-    node.create_sink_pin(0).connect_driver(a);
-    node.create_sink_pin(0).connect_driver(b);
+    const auto lhs  = nonzero1(a);
+    const auto rhs  = nonzero1(b);
+    auto       node = make_node(Ntype_op::Or);
+    livehd::graph_util::setup_sink_pid(node, 0).connect_driver(lhs);
+    livehd::graph_util::setup_sink_pid(node, 0).connect_driver(rhs);
     auto d = node.create_driver_pin(0);
-    set_bits(d, 1);
-    set_unsign(d);
+    set_ubits(d, 1);
     return d;
+  }
+
+  // A glitch-free clock gate. `en` is sampled by the backend on the inactive
+  // clock phase; div=1/invert=false are explicit so every consumer sees the
+  // same v1 contract rather than relying on implicit pin defaults.
+  [[nodiscard]] Pin clock_gate(const Pin& clk, const Pin& en) {
+    if (clk.is_invalid() || en.is_invalid()) {
+      return clk;
+    }
+    auto cell = make_node(Ntype_op::Clock_cell);
+    setup_sink_by_name(cell, "clk_ref").connect_driver(clk);
+    setup_sink_by_name(cell, "div").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    setup_sink_by_name(cell, "en").connect_driver(nonzero1(en));
+    setup_sink_by_name(cell, "invert").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+    auto out = cell.create_driver_pin(0);
+    set_ubits(out, 1);
+    return out;
   }
 
   // "a != 0" as a 1-bit unsigned pin: an OR-reduction over every bit, which is
   // exactly the nonzero test regardless of width or signedness (a two's
   // complement value is nonzero iff some bit is set).
   //
-  // Needed because and2/or2/not1 all stamp their driver `bits=1, unsigned`, and
-  // the encoder reads that as real_width 0 -> W=1 -> it FITS each operand to
-  // [0:0]. Feeding a multi-bit value straight into one of them therefore keeps
+  // Needed because and2/or2/not1 all stamp their driver `bits=1, unsigned`.
+  // Feeding a multi-bit value straight into one of them therefore keeps
   // only its LSB. That is harmless for a comparison result (already 1 bit) and a
   // silent miscompile for anything wider, so a wide operand must be reduced
   // BEFORE it reaches them. A 1-bit input makes this a no-op the folder removes.
@@ -2070,47 +2827,28 @@ private:
     // with "cell 'ror' ... has no combinational bit-blast yet". eq and not are
     // both in abc's supported set.
     auto eq = make_node(Ntype_op::EQ);
-    eq.create_sink_pin(0).connect_driver(a);
-    eq.create_sink_pin(0).connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+    livehd::graph_util::setup_sink_pid(eq, 0).connect_driver(a);
+    livehd::graph_util::setup_sink_pid(eq, 0).connect_driver(create_const(*g_, *Dlop::create_integer(0)));
     auto z = eq.create_driver_pin(0);
-    set_bits(z, 1);
-    set_unsign(z);
+    set_ubits(z, 1);
     return not1(z);
   }
 
-  // Logical negation of a 1-bit condition, spelled EQ-against-0 -- NOT a
-  // bitwise Not (the same landed rule lower_none_eq applies to `!=`).
-  //
-  // The old bitwise spelling only worked by ANNOTATION TRUNCATION. The Not
-  // cell's contract is ~x == -x-1 (Bitwidth::process_not), so Not(bool) has
-  // the value envelope {-1,-2} -- never zero -- and the hand-stamped 1-bit
-  // unsigned attr was what made cgen's declared-width clip leave the LSB
-  // carrying the logical value. That is exactly the "bits attribute doing
-  // semantic work" contract violation pass.bitfuzz exists to catch, and catch
-  // it it did: stripping the stamp let bitwidth re-infer the honest 2-bit
-  // signed [-2,-1] envelope, cgen emitted the un-clipped net, and a memory
-  // update_enable driven by this helper (`if (en_i) q <= d`) became
-  // always-true -- the array wrote on every cycle regardless of enable
-  // (tests/equiv/comb_array_const_index_read, 35/1024 vectors, all en=0).
-  //
-  // EQ(x, 0) is the exact logical negation for any integer value with the
-  // honest {0,1} envelope, so no attribute is load-bearing; the emitted
-  // baseline text is unchanged (same 1-bit unsigned reg) and re-inference
-  // recovers the identical range. EQ is in abc's supported bit-blast set
-  // (see nonzero1 above -- same reason it avoids Ror).
+  // Truth-value negation. Keep this robust at transported GraphIO/Sub
+  // boundaries where the base pin may not carry the declaration's width attr:
+  // EQ-to-zero is exact for both an honest u1 and any wider condition.
   [[nodiscard]] Pin not1(const Pin& a) {
     auto node = make_node(Ntype_op::EQ);
-    node.create_sink_pin(0).connect_driver(a);
-    node.create_sink_pin(0).connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+    livehd::graph_util::setup_sink_pid(node, 0).connect_driver(a);
+    livehd::graph_util::setup_sink_pid(node, 0).connect_driver(create_const(*g_, *Dlop::create_integer(0)));
     auto d = node.create_driver_pin(0);
-    set_bits(d, 2);  // boolean: mw=1 magnitude + the always-0 sign slot
-    set_unsign(d);
+    set_ubits(d, 1);
     return d;
   }
 
   // A 1-bit condition shifted to one-hot position `amount` (unique-if
   // selector packing). The value reaches 1<<amount (amount+1 magnitude
-  // bits); LiveHD `bits` includes the sign bit, hence amount+2.
+  // bits), hence an unsigned literal width of amount+1.
   [[nodiscard]] Pin shl1_by(const Pin& a, int amount) {
     if (amount == 0) {
       return a;
@@ -2119,8 +2857,7 @@ private:
     setup_sink_by_name(node, "a").connect_driver(a);
     setup_sink_by_name(node, "b").connect_driver(create_const(*g_, *Dlop::create_integer(amount)));
     auto d = node.create_driver_pin(0);
-    set_bits(d, amount + 2);
-    set_unsign(d);
+    set_ubits(d, amount + 1);
     return d;
   }
 
@@ -2191,8 +2928,7 @@ private:
         setup_sink_by_name(mul, "as").connect_driver(create_const(*g_, *Dlop::create_integer(d)));
         auto md  = mul.create_driver_pin(0);
         acc_mw  += mw_of_val(d);
-        set_bits(md, acc_mw + 1);
-        set_unsign(md);
+        set_ubits(md, acc_mw);
         acc_p = md;
       }
       Pin     ip{};
@@ -2213,8 +2949,7 @@ private:
       setup_sink_by_name(add, "as").connect_driver(ip);
       auto ad = add.create_driver_pin(0);
       acc_mw  = std::max(acc_mw, imw) + 1;
-      set_bits(ad, acc_mw + 1);
-      set_unsign(ad);
+      set_ubits(ad, acc_mw);
       acc_p = ad;
     }
     if (acc_c) {
@@ -2264,6 +2999,47 @@ private:
     return 0;
   }
 
+  // A mut/const positional array is combinational aggregate storage, not a
+  // persistent Memory. Preserve its declared shape while representing the live
+  // value as one packed scalar bus; indexed reads/writes below recover lanes.
+  // This keeps the logical LNAST array intact and leaves any physical
+  // per-lane expansion to downstream transformations.
+  //
+  // ONE-DIMENSIONAL by construction: lower_declare sends a nested
+  // `comp_type_array` element (and any inline initializer) to lower_mem_declare
+  // instead, so the element type reaching here is always a scalar. A nested
+  // element that ever did reach here would take the "sized scalar element type"
+  // error below (declared_width of an array type is 0), never a silent
+  // mis-lowering — so there is no multi-dimension walk to maintain here.
+  void lower_comb_array_declare(const Lnast_nid& name_nid, const Lnast_nid& type_nid) {
+    auto    elem_nid = lnast_->get_first_child(type_nid);
+    auto    len_nid  = elem_nid.is_invalid() ? elem_nid : lnast_->get_sibling_next(elem_nid);
+    int64_t size     = 0;
+    if (!elem_nid.is_invalid() && !len_nid.is_invalid()) {
+      std::string len_txt{lnast_->get_name(len_nid)};
+      const auto  lanes = Lnast_ntype::is_const(lnast_->get_type(len_nid)) ? upass::array_dim_lanes(len_txt) : std::nullopt;
+      if (!lanes) {
+        error_here(
+            "upass.tolg: array '{}' size '{}' is not a positive comptime constant (a named constant must fold before lowering)",
+            lnast_->get_name(name_nid),
+            lnast_->get_name(len_nid));
+        return;
+      }
+      size = *lanes;
+    }
+    const auto [elem_mw, elem_signed] = declared_width(elem_nid);
+    if (size <= 0 || elem_mw <= 0) {
+      error_here("upass.tolg: array '{}' requires a sized scalar element type", lnast_->get_name(name_nid));
+      return;
+    }
+    array_scalar_views_[std::string(lnast_->get_name(name_nid))] = Array_scalar_view{
+        .size        = size,
+        .dims        = {size},
+        .elem_mw     = elem_mw,
+        .elem_signed = elem_signed,
+    };
+  }
+
   // declare(ref name, comp_type_array(elem_type, const '[N]'), const mode
   // [, init]) — two flavors sharing one lowering:
   //  * reg  → async memory (type=0, fwd=1, 0-cycle read): writes commit at
@@ -2272,7 +3048,7 @@ private:
   //    the reset-sweep FSM is a later slice).
   //  * mut/const → comb array (type=2, no clock, no cross-cycle
   //    persistence): the per-cycle default is the init contents (the
-  //    whole-array store wires the `init` pin); a const array with runtime
+  //    whole-array store wires the `initial` pin); a const array with runtime
   //    reads is a ROM (init + read ports only).
   void lower_mem_declare(const Lnast_nid& name_nid, const Lnast_nid& type_nid, const Lnast_nid& mode_nid, bool is_array) {
     auto name     = lnast_->get_name(name_nid);
@@ -2292,15 +3068,12 @@ private:
     // flat address i*D1 + j.
     std::vector<int64_t> dims;
     while (true) {
-      // The size const's text is the raw '[N]' annotation — strip the brackets.
-      auto len_txt = std::string(lnast_->get_name(len_nid));
-      if (len_txt.size() >= 2 && len_txt.front() == '[' && len_txt.back() == ']') {
-        len_txt = len_txt.substr(1, len_txt.size() - 2);
-      }
-      int64_t d = 0;
-      if (auto c = Dlop::from_pyrope(len_txt); c && c->is_just_i64()) {
-        d = c->to_just_i64();
-      }
+      // The size const's text is the raw '[N]' annotation (array_dim_lanes
+      // strips the brackets). Going through the shared reader is what keeps a
+      // still-unfolded `[N]` from lowering as 78 entries here, the way it used
+      // to when this site called Dlop::from_pyrope directly.
+      const auto len_txt = std::string(lnast_->get_name(len_nid));
+      const auto d       = upass::array_dim_lanes(len_txt).value_or(0);
       if (d <= 0) {
         error_here(
             "upass.tolg: memory '{}' size '{}' is not a positive "
@@ -2339,12 +3112,12 @@ private:
     }
     // reg initializer — same treatment as a mut array (reg and not-reg
     // initialize alike): a concrete value becomes POWER-ON contents on the
-    // `init` pin (a scalar broadcasts to every entry; a tuple literal packs
-    // per entry). nil / 0sb? = uninitialized. When the module also carries a
-    // bound reset, the per-entry values become restore write ports (a reset
-    // re-loads the init in one cycle — finalize_mems()); with no reset the
-    // init stays power-on-only. mut/const arrays get theirs via the
-    // whole-array store instead.
+    // `initial` pin (a scalar broadcasts to every entry; a tuple literal packs
+    // per entry). nil / 0sb? = uninitialized. It is ALSO the RESET value of
+    // every entry (the same statement `= <const>` makes on a scalar reg), so
+    // the module has a reset by construction and finalize_mems() wires the
+    // cell's whole-array `reset` pin, which reloads the `initial` contents in
+    // ONE cycle. mut/const arrays get theirs via the whole-array store instead.
     spool_ptr<Dlop>                       reg_init;
     std::vector<spool_ptr<Dlop>>          init_entries;
     // Read an INLINE init child on the declare. The Pyrope frontend gives
@@ -2353,10 +3126,11 @@ private:
     // slang reader instead emits the `initial` contents INLINE as a scalar
     // const or a tuple_add literal on the declare — for BOTH regs and arrays.
     // Reading it here for arrays too lands the contents on the type==2 `init`
-    // pin with NO reset-restore (wants_restore is gated on !is_array below),
-    // i.e. pure power-on init — a memory carries no ASIC-unimplementable reset
-    // value. Flatten an inline tuple literal's constant leaves row-major into
-    // entries.
+    // pin with NO reset (reset_init is gated on !is_array below), i.e. pure
+    // power-on init: a `mut`/`const` array has no clock, so there is nothing
+    // for a reset to re-load. A reg array DOES restore its init through the
+    // cell's whole-array `reset` pin (finalize_mems). Flatten an inline tuple
+    // literal's constant leaves row-major into entries.
     std::function<bool(const Lnast_nid&)> flatten_lit = [&](const Lnast_nid& tnid) -> bool {
       for (auto ch = lnast_->get_first_child(tnid); !ch.is_invalid(); ch = lnast_->get_sibling_next(ch)) {
         const auto cht = lnast_->get_type(ch);
@@ -2366,7 +3140,7 @@ private:
           }
         } else if (Lnast_ntype::is_const(cht)) {
           auto v = Dlop::from_pyrope(lnast_->get_name(ch));
-          if (!v || !v->is_just_i64()) {
+          if (!v || !v->is_integer()) {
             error_here(
                 "upass.tolg: memory '{}' initializer '{}' is not an "
                 "integer constant",
@@ -2397,7 +3171,7 @@ private:
           break;
         }
         auto v = Dlop::from_pyrope(txt);
-        if (!v || !v->is_just_i64()) {
+        if (!v || !v->is_integer()) {
           error_here(
               "upass.tolg: memory '{}' initializer '{}' is not an "
               "integer constant",
@@ -2445,8 +3219,7 @@ private:
       return;
     }
 
-    const int  user_sites      = count_mem_write_sites(name_nid);
-    const bool wants_restore   = !is_array && reg_init && !reset_name_.empty();
+    const int user_sites      = count_mem_write_sites(name_nid);
     // Same-cycle ordering: the `fwd` sink is a per-(read,write) MATRIX that
     // finalize_mems() builds once every port is minted and each read port's
     // program position is known (`rd_wr_before`). The `ordering` attr is read
@@ -2455,8 +3228,8 @@ private:
     // same reason the clock wiring is deferred). The value driven below is
     // provisional, and is the final one only for the two cases finalize_mems
     // leaves alone: a `mut`/`const` array and a legacy `fwd=` escape hatch.
-    int64_t    legacy_fwd_mask = 0;
-    bool       has_legacy_fwd  = false;
+    int64_t   legacy_fwd_mask = 0;
+    bool      has_legacy_fwd  = false;
     if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
       // Deprecated numeric `fwd=`: an explicit matrix, taken verbatim (a
       // per-WRITE-port mask still reads correctly on a 1-read memory, which is
@@ -2501,7 +3274,7 @@ private:
     setup_sink_by_name(mem, "fwd").connect_driver(create_const(*g_, *Dlop::create_integer(fwd_mask)));
     setup_sink_by_name(mem, "wensize").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
     if (reg_init) {
-      setup_sink_by_name(mem, "init").connect_driver(create_const(*g_, *reg_init));
+      setup_sink_by_name(mem, "initial").connect_driver(create_const(*g_, *reg_init));
     }
     // Clock wiring (posclk + clock_pin) for a clocked (non-array) memory is
     // deferred to finalize_mems: the slang reader emits the clock_pin/posclk
@@ -2520,11 +3293,16 @@ private:
     // to file scope), but the gate is mode-keyed so it activates with regref.
     info.is_pub          = std::string_view(lnast_->get_name(mode_nid)).find("pub") != std::string_view::npos;
     info.n_user_wr       = user_sites;
-    info.n_wr_total      = user_sites + (wants_restore ? static_cast<int>(size) : 0);
     info.legacy_fwd_mask = legacy_fwd_mask;
     info.has_legacy_fwd  = has_legacy_fwd;
-    if (wants_restore) {
-      info.restore_vals = std::move(init_entries);
+    // `!init_entries.empty()` is not redundant with `reg_init`: a zero-entry
+    // array leaves `reg_init` set (the broadcast loop simply never runs) with
+    // nothing to reset. Whether a reset SIGNAL exists is decided in
+    // finalize_mems (mem_reset_source): `reg arr:[N]u8:[reset_pin=ref rst] = 0`
+    // names its own, and tree_declares_reset_reg deliberately does NOT mint the
+    // implicit `reset` then.
+    if (!is_array && reg_init && !init_entries.empty()) {
+      info.reset_init = *reg_init;
     }
     mem_map_.emplace(std::string(name), info);
     mem_order_.emplace_back(name);
@@ -2644,7 +3422,7 @@ private:
         return create_const(*g_, *Dlop::create_integer(0));  // zero-filled
       }
       auto v = Dlop::from_pyrope(txt);
-      if (!v || !v->is_just_i64()) {
+      if (!v || !v->is_integer()) {
         error_here(
             "upass.tolg: whole-array value '{}' for memory '{}' is not "
             "supported — use an integer, a tuple literal or nil",
@@ -2677,11 +3455,8 @@ private:
   // Delete the single existing edge to the memory cell's sink `pid` (if any),
   // then drive it with `d` when `d` is valid (invalid => leave it unconnected).
   void redrive_mem_sink(Mem_info& mi, int pid, const Pin& d) {
-    for (const auto& e : mi.node.inp_edges()) {
-      if (!e.sink.is_invalid() && static_cast<int>(e.sink.get_port_id()) == pid) {
-        e.del_edge();
-        break;
-      }
+    if (auto sink = driven_sink_at(mi.node, static_cast<uint64_t>(pid)); !sink.is_invalid()) {
+      sink.del_sink();  // mutates only after driven_sink_at's walk has ended
     }
     if (!d.is_invalid()) {
       mi.node.create_sink_pin(static_cast<hhds::Port_id>(pid)).connect_driver(d);
@@ -2690,7 +3465,7 @@ private:
 
   // store(ref mem, rhs) — the whole-array form. For a mut/const array this
   // is its initializer: pack the recorded tuple consts into one wide const
-  // (entry 0 in the low `bits`, row-major) on the `init` sink. `= nil` means
+  // (entry 0 in the low `bits`, row-major) on the `initial` sink. `= nil` means
   // zero-filled (cgen's default).
   // store(mem, <value>) — the whole-array `update` write (runtime bus, const
   // broadcast, or comptime tuple literal). The size*elem_mw bus (entry 0 in the
@@ -2704,6 +3479,27 @@ private:
   // reset > per-port write > (update_enable? update : hold) is realized by
   // cgen/cgen_sim/lec.
   void lower_mem_update_store(const Lnast_nid& rhs, std::string_view name, Mem_info& mi) {
+    // Bulk writes have no ordinary write-port site. Capture their process
+    // clock here too, before a later process changes the ordered attributes.
+    if (!mi.is_array) {
+      if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
+        if (auto cit = pit->second.find("__store_clock_pin"); cit != pit->second.end()) {
+          const auto cp       = resolve_attr_signal(cit->second);
+          const auto pos      = pit->second.find("__store_posclk");
+          const bool positive = pos == pit->second.end() || (pos->second != "false" && pos->second != "0");
+          if (cp.is_invalid()) {
+            error_here("upass.tolg: memory '{}' names unknown bulk-write clock '{}'", name, cit->second);
+            return;
+          }
+          if (!mi.update_clock.is_invalid() && (mi.update_clock != cp || mi.update_posclk != positive)) {
+            error_here("upass.tolg: memory '{}' bulk writes require one shared clock and edge", name);
+            return;
+          }
+          mi.update_clock  = cp;
+          mi.update_posclk = positive;
+        }
+      }
+    }
     auto v = mem_whole_value_pin(rhs, name, mi);
     if (v.is_invalid()) {
       return;  // reported, or an empty driver
@@ -2722,11 +3518,8 @@ private:
       // to a registered array is likewise not forwarded (cgen emits `assign
       // dout = data[addr]`). Force fwd=0 so the cvc5 encoder reads a_cur,
       // matching cgen.
-      for (const auto& e2 : mi.node.inp_edges()) {
-        if (!e2.sink.is_invalid() && static_cast<int>(e2.sink.get_port_id()) == 5) {  // fwd (pid 5)
-          e2.del_edge();
-          break;
-        }
+      if (auto fwd_sink = driven_sink_at(mi.node, 5); !fwd_sink.is_invalid()) {  // fwd (pid 5)
+        fwd_sink.del_sink();
       }
       setup_sink_by_name(mi.node, "fwd").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
       return;
@@ -2740,12 +3533,16 @@ private:
       merged_val = v;
     } else {
       auto mux = make_node(Ntype_op::Mux);
-      mux.create_sink_pin(0).connect_driver(en);             // selector
-      mux.create_sink_pin(1).connect_driver(mi.update_val);  // false / else = previous value
-      mux.create_sink_pin(2).connect_driver(v);              // true / then = this store
+      livehd::graph_util::setup_sink_pid(mux, 0).connect_driver(en);             // selector
+      livehd::graph_util::setup_sink_pid(mux, 1).connect_driver(mi.update_val);  // false / else = previous value
+      livehd::graph_util::setup_sink_pid(mux, 2).connect_driver(v);              // true / then = this store
       merged_val = mux.create_driver_pin(0);
-      set_bits(merged_val, static_cast<int>(mi.size * mi.elem_mw));
-      set_unsign(merged_val);
+      // The Memory sink is the declared-width storage boundary; the Mux is an
+      // ordinary unbounded operation and must first preserve the widest arm.
+      // Stamp the widest literal width, exactly as bind_result does. Constants
+      // have no pin-width attribute, so sizing
+      // from bits_of alone collapsed an 80-bit fill value to a one-bit Mux.
+      set_ubits(merged_val, std::max({1, pin_mw_of(mi.update_val), pin_mw_of(v)}));
     }
     // Combined enable: always-on (invalid) if either contributor is always-on.
     Pin merged_en = (mi.update_en.is_invalid() || en.is_invalid()) ? Pin{} : or2(mi.update_en, en);
@@ -2796,7 +3593,7 @@ private:
       // Scalar broadcast: every entry = value (masked to the element) — the
       // same treatment the reg declare-initializer path applies.
       auto v = Dlop::from_pyrope(txt);
-      if (!v || !v->is_just_i64()) {
+      if (!v || !v->is_integer()) {
         error_here(
             "upass.tolg: array '{}' initializer '{}' is not supported — "
             "use an integer, a tuple literal or nil",
@@ -2809,7 +3606,7 @@ private:
       for (int64_t i = 0; i < mi.size; ++i) {
         init = init->or_op(*entry->shl_op(*Dlop::create_integer(i * mi.elem_mw)));
       }
-      setup_sink_by_name(mi.node, "init").connect_driver(create_const(*g_, *init));
+      setup_sink_by_name(mi.node, "initial").connect_driver(create_const(*g_, *init));
       mi.init_wired = true;
       return;
     }
@@ -2822,7 +3619,7 @@ private:
     if (!flatten_init_values(tit->second, mi.dims, 0, name, mi.elem_mw, entries)) {
       return;  // flatten_init_values reported
     }
-    setup_sink_by_name(mi.node, "init").connect_driver(create_const(*g_, *pack_entries(entries, mi.elem_mw)));
+    setup_sink_by_name(mi.node, "initial").connect_driver(create_const(*g_, *pack_entries(entries, mi.elem_mw)));
     mi.init_wired = true;
   }
 
@@ -2879,7 +3676,7 @@ private:
         return false;
       }
       auto v = Dlop::from_pyrope(lnast_->get_name(e));
-      if (!v || !v->is_just_i64()) {
+      if (!v || !v->is_integer()) {
         error_here("upass.tolg: '{}' initializer entry {} is not an integer constant", name, i);
         return false;
       }
@@ -2908,8 +3705,8 @@ private:
   };
 
   // fcall(ref dst, ref __memory, ref cfg) — direct Memory-cell instantiation
-  // (08-memories.md RTL form). The cfg vocabulary is the cell pins VERBATIM
-  // (decision 2026-06-09): addr/bits/clock_pin/din/enable/fwd/posclk/type/
+  // (08-memories.md RTL form). The cfg vocabulary is the cell pins VERBATIM:
+  // addr/bits/clock_pin/din/enable/fwd/posclk/type/
   // wensize/size/rdport + init — no `latency`, type picks 0 async / 1 sync /
   // 2 array, rdport entries are strictly 0/1, dout comes back as a tuple
   // indexed by read-port order. Returns false when the call is not __memory.
@@ -2937,14 +3734,14 @@ private:
 
     // Guardrail: cell pins verbatim — diagnose the old doc vocabulary.
     static constexpr std::string_view known[]
-        = {"addr", "bits", "clock_pin", "din", "enable", "fwd", "undef", "posclk", "type", "wensize", "size", "rdport", "init"};
+        = {"addr", "bits", "clock_pin", "din", "enable", "fwd", "undef", "posclk", "type", "wensize", "size", "rdport", "initial"};
     for (const auto& [k, v] : cfg.named) {
       if (std::find(std::begin(known), std::end(known), k) == std::end(known)) {
         error_here(
             "upass.tolg: unknown __memory config field '{}' — the "
             "vocabulary is the Memory cell pins verbatim "
             "(addr/bits/clock_pin/din/enable/fwd/undef/posclk/type/"
-            "wensize/size/rdport/init; no `latency`, no `clock`)",
+            "wensize/size/rdport/initial; no `latency`, no `clock`)",
             k);
         return true;
       }
@@ -3098,12 +3895,22 @@ private:
     }
 
     auto mem = make_node(Ntype_op::Memory);
-    // Stamp the RESULT name on the Memory node (same rationale as the
+    // Stamp the USER BINDING on the Memory node (same rationale as the
     // array-declare site: a null name degrades pass/lec memory pairing to
-    // anonymous shape+ordinal). The __memory builtin's dst ref names the
-    // instance (`const m = __memory(cfg)`); strip any SSA suffix.
+    // anonymous shape+ordinal). Calls lower through a compiler temporary:
+    //
+    //   fcall(%res_0, __memory, cfg)
+    //   store(res, %res_0)
+    //
+    // so naming the cell directly from `dst` leaks `%res_0` into the state
+    // correspondence key. Recover the adjacent source binding exactly as the
+    // ordinary Sub path does; fall back to dst only when the result is consumed
+    // directly by an expression.
     {
       std::string mem_base{lnast_->get_name(dst)};
+      if (auto bound = lhs_var_of_temp_dst(nid, mem_base); !bound.empty()) {
+        mem_base = std::move(bound);
+      }
       if (auto p = mem_base.find("___ssa_"); p != std::string::npos) {
         mem_base.resize(p);
       }
@@ -3132,24 +3939,24 @@ private:
       // known. Materializing every sink (rather than one shared pid 2) lets
       // cgen select the multiclock wrapper and retain each read/write clock.
     }
-    if (auto it = cfg.named.find("init"); it != cfg.named.end()) {
+    if (auto it = cfg.named.find("initial"); it != cfg.named.end()) {
       spool_ptr<Dlop> init;
       if (Lnast_ntype::is_const(lnast_->get_type(it->second))) {
         init = Dlop::from_pyrope(lnast_->get_name(it->second));
       } else if (auto lit = tuple_recs_.find(std::string(lnast_->get_name(it->second))); lit != tuple_recs_.end()) {
         const std::vector<int64_t>   flat_dims{size};  // __memory is always flat
         std::vector<spool_ptr<Dlop>> entries;
-        if (flatten_init_values(lit->second, flat_dims, 0, "__memory init", static_cast<int32_t>(bits), entries)) {
+        if (flatten_init_values(lit->second, flat_dims, 0, "__memory initial", static_cast<int32_t>(bits), entries)) {
           init = pack_entries(entries, static_cast<int32_t>(bits));
         }
       }
       if (!init) {
         error_here(
-            "upass.tolg: __memory 'init' must be a comptime constant or "
+            "upass.tolg: __memory 'initial' must be a comptime constant or "
             "tuple literal");
         return true;
       }
-      setup_sink_by_name(mem, "init").connect_driver(create_const(*g_, *init));
+      setup_sink_by_name(mem, "initial").connect_driver(create_const(*g_, *init));
     }
 
     int n_wr = 0;
@@ -3172,20 +3979,21 @@ private:
       const auto base  = i * kMemPortStride;
       auto       rdv   = Dlop::from_pyrope(lnast_->get_name(rdports[i]));
       const bool is_rd = rdv && !rdv->is_known_false();
-      mem.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(leaf(addrs[i]).pin);
-      mem.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
+      livehd::graph_util::setup_sink_pid(mem, static_cast<hhds::Port_id>(base + 0)).connect_driver(leaf(addrs[i]).pin);
+      livehd::graph_util::setup_sink_pid(mem, static_cast<hhds::Port_id>(base + 10))
           .connect_driver(create_const(*g_, *Dlop::create_integer(is_rd ? 1 : 0)));
       if (type != 2 && clocks.size() > 1) {
-        mem.create_sink_pin(static_cast<hhds::Port_id>(base + 2)).connect_driver(leaf(clocks[static_cast<size_t>(i)]).pin);
+        livehd::graph_util::setup_sink_pid(mem, static_cast<hhds::Port_id>(base + 2))
+            .connect_driver(leaf(clocks[static_cast<size_t>(i)]).pin);
       }
       Pin en = i < static_cast<int>(ens.size()) ? leaf(ens[i]).pin : en_const(true);
-      mem.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(en);
+      livehd::graph_util::setup_sink_pid(mem, static_cast<hhds::Port_id>(base + 4)).connect_driver(en);
       if (!is_rd) {
         if (i >= static_cast<int>(dins.size())) {
           error_here("upass.tolg: __memory write port {} has no 'din' entry", i);
           return true;
         }
-        mem.create_sink_pin(static_cast<hhds::Port_id>(base + 3)).connect_driver(leaf(dins[i]).pin);
+        livehd::graph_util::setup_sink_pid(mem, static_cast<hhds::Port_id>(base + 3)).connect_driver(leaf(dins[i]).pin);
       }
     }
 
@@ -3243,9 +4051,39 @@ private:
       return;
     }
     const auto base = mi.wr_next * kMemPortStride;
+    if (chunk < 0) {
+      mi.plain_wr_ports.emplace_back(mi.wr_next);
+    }
+    if (!mi.is_array) {
+      if (auto pit = pending_attrs_.find(std::string(lhs_name)); pit != pending_attrs_.end()) {
+        if (auto cit = pit->second.find("__store_clock_pin"); cit != pit->second.end()) {
+          const auto cp = resolve_attr_signal(cit->second);
+          if (cp.is_invalid()) {
+            error_here("upass.tolg: memory '{}' names unknown store clock '{}'", lhs_name, cit->second);
+            return;
+          }
+          livehd::graph_util::setup_sink_pid(mi.node, static_cast<hhds::Port_id>(base + 2)).connect_driver(cp);
+          const auto pos      = pit->second.find("__store_posclk");
+          const bool positive = pos == pit->second.end() || (pos->second != "false" && pos->second != "0");
+          if (mi.has_store_clock && positive != mi.first_store_posclk && !mi.mixed_store_edges) {
+            mi.mixed_store_edges = true;
+            warn_at(lhs,
+                    {"mixed-memory-clock-edges", "unsupported"},
+                    "memory '{}' mixes clock edges: write port {} differs from write port 0; formal checking requires per-port "
+                    "edge support",
+                    lhs_name,
+                    mi.wr_next);
+          }
+          if (!mi.has_store_clock) {
+            mi.first_store_posclk = positive;
+          }
+          mi.has_store_clock = true;
+        }
+      }
+    }
     ++mi.wr_next;
-    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(addr);           // addr
-    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 3)).connect_driver(leaf(val).pin);  // din
+    livehd::graph_util::setup_sink_pid(mi.node, static_cast<hhds::Port_id>(base + 0)).connect_driver(addr);           // addr
+    livehd::graph_util::setup_sink_pid(mi.node, static_cast<hhds::Port_id>(base + 3)).connect_driver(leaf(val).pin);  // din
     auto en = current_path_cond();
     if (en.is_invalid()) {
       en = en_const(true);
@@ -3253,13 +4091,13 @@ private:
     if (chunk >= 0) {
       en = shl1_by(en, chunk);  // per-chunk write enable: bit `chunk` = path_cond
     }
-    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(en);  // enable
-    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
+    livehd::graph_util::setup_sink_pid(mi.node, static_cast<hhds::Port_id>(base + 4)).connect_driver(en);  // enable
+    livehd::graph_util::setup_sink_pid(mi.node, static_cast<hhds::Port_id>(base + 10))
         .connect_driver(create_const(*g_, *Dlop::create_integer(0)));  // rdport = 0 (write)
   }
 
   // tuple_get(ref dst, ref mem, idx) — one read port per site, always
-  // enabled; dst binds to the port's dout driver (pid n_wr_total + r).
+  // enabled; dst binds to the port's dout driver (pid n_user_wr + r).
   void lower_tuple_get(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     auto src = dst.is_invalid() ? dst : lnast_->get_sibling_next(dst);
@@ -3271,7 +4109,71 @@ private:
                "be lowered to a netlist",
                src.is_invalid() ? std::string_view{"?"} : lnast_->get_name(src));
     }
-    auto it = mem_map_.find(std::string(lnast_->get_name(src)));
+    const std::string src_name{lnast_->get_name(src)};
+    if (auto ait = array_scalar_views_.find(src_name); ait != array_scalar_views_.end()) {
+      if (!lnast_->get_sibling_next(idx).is_invalid()) {
+        error_here("upass.tolg: scalar-replaced array '{}' currently supports one element index", src_name);
+        return;
+      }
+      auto packed = leaf(src);
+      auto iv     = leaf(idx);
+      Pin  offset;
+      bool dynamic_index = false;
+      if (Lnast_ntype::is_const(lnast_->get_type(idx))) {
+        auto ci = Dlop::from_pyrope(lnast_->get_name(idx));
+        if (!ci || !ci->is_just_i64() || ci->to_just_i64() < 0 || ci->to_just_i64() >= ait->second.size) {
+          error_at(nid,
+                   {"array-index-out-of-range", "type"},
+                   "Pyrope array index {} is outside [0, {}) for '{}'",
+                   lnast_->get_name(idx),
+                   ait->second.size,
+                   src_name);
+          return;
+        }
+        offset = create_const(*g_, *Dlop::create_integer(ci->to_just_i64() * ait->second.elem_mw));
+      } else {
+        dynamic_index = true;
+        auto mult     = make_node(Ntype_op::Mult);
+        setup_sink_by_name(mult, "as").connect_driver(iv.pin);
+        setup_sink_by_name(mult, "as").connect_driver(create_const(*g_, *Dlop::create_integer(ait->second.elem_mw)));
+        offset = mult.create_driver_pin(0);
+        set_ubits(offset, std::max<int32_t>(iv.mw + std::bit_width(static_cast<uint32_t>(ait->second.elem_mw)), 1));
+      }
+
+      auto sra = make_node(Ntype_op::SRA);
+      setup_sink_by_name(sra, "a").connect_driver(packed.pin);
+      setup_sink_by_name(sra, "b").connect_driver(offset);
+      auto shifted = sra.create_driver_pin(0);
+      set_ubits(shifted, packed.mw);
+
+      auto gm = make_node(Ntype_op::Get_mask);
+      livehd::graph_util::connect_mask_operands(gm, shifted, create_const(*g_, *Dlop::get_mask_value(ait->second.elem_mw)));
+      auto out = gm.create_driver_pin(0);
+      if (ait->second.elem_signed) {
+        // A Get_mask is UNSIGNED by construction: stamping the sign on its
+        // driver does not survive cprop's constant-slice fold (the read of a
+        // comptime index folds straight onto the packed lane and came back
+        // zero-extended — MEASURED `mut a:[2]s8; a[0] = -3; y:s12 = a[0]` read
+        // 253, while a runtime index, a `reg` array and a same-width consumer
+        // were all fine). Ride a same-width Sext, the abc read-back idiom: its
+        // `b` is the kept bit COUNT, the result is a signed elem_mw-bit value.
+        set_ubits(out, ait->second.elem_mw);  // the lane itself: an unsigned elem_mw-bit pattern (an unsized pin emits as ONE bit)
+        auto sx = make_node(Ntype_op::Sext);
+        setup_sink_by_name(sx, "a").connect_driver(out);
+        setup_sink_by_name(sx, "b").connect_driver(create_const(*g_, *Dlop::create_integer(ait->second.elem_mw)));
+        auto sout = sx.create_driver_pin(0);
+        set_bits(sout, ait->second.elem_mw);
+        set_sign(sout);
+        record(lnast_->get_name(dst), sout, ait->second.elem_mw);
+      } else {
+        bind_result(lnast_->get_name(dst), out, ait->second.elem_mw);
+      }
+      if (dynamic_index) {
+        lower_array_index_assert(iv, ait->second.size, nid);
+      }
+      return;
+    }
+    auto it = mem_map_.find(src_name);
     if (it == mem_map_.end()) {
       // Multi-output Sub result: tuple_get(dst, result, 'port') binds that
       // output port's driver pin with the io-entry width/sign contract.
@@ -3303,10 +4205,15 @@ private:
           }
           joined += comp;
         }
-        std::string_view      pname = joined;
+        // BOTH sides go through canon_io_name: the io entry may carry slang's
+        // `` `p.q` `` marker, and so may the READ (`inst.`p.q``, which arrives
+        // as a const index with the backticks still on). Canonicalizing only
+        // the declaration turned a legal quoted-port read into a hard
+        // "instance result has no output named" error.
+        std::string_view      pname = canon_io_name(joined);
         const Lnast_io_entry* oe    = nullptr;
         for (const auto& e : srt->second.outputs) {
-          if ((e.name == pname)) {
+          if (canon_io_name(e.name) == pname) {
             oe = &e;
             break;
           }
@@ -3315,9 +4222,13 @@ private:
           error_here("upass.tolg: instance result has no output named '{}'", pname);
           return;
         }
-        auto    out_dpin = srt->second.sub.create_driver_pin(oe->name);
-        int32_t mw       = io_mw(*oe);
-        if (oe->kind == Io_kind::boolean || mw <= 1) {
+        const std::string output_name{canon_io_name(oe->name)};
+        auto              out_dpin = srt->second.sub.create_driver_pin(output_name);
+        int32_t           mw       = io_mw(*oe);
+        if (oe->kind == Io_kind::boolean) {
+          set_ubits(out_dpin, 1);
+          record(lnast_->get_name(dst), out_dpin, 1);
+        } else if (mw <= 1) {
           set_bits(out_dpin, 1);
           if (oe->is_signed) {
             set_sign(out_dpin);
@@ -3330,9 +4241,8 @@ private:
           set_sign(out_dpin);
           record(lnast_->get_name(dst), out_dpin, mw);
         } else {
-          set_bits(out_dpin, mw);
-          set_sign(out_dpin);
-          record(lnast_->get_name(dst), to_positive(out_dpin, mw), mw);
+          set_ubits(out_dpin, mw);
+          record(lnast_->get_name(dst), out_dpin, mw);
         }
         return;
       }
@@ -3356,9 +4266,8 @@ private:
           return;
         }
         auto dout = mr.node.create_driver_pin(static_cast<hhds::Port_id>(mr.n_wr + k));
-        set_bits(dout, mr.bits);
-        set_unsign(dout);  // __memory data is raw bits — unsigned
-        record(lnast_->get_name(dst), to_positive(dout, mr.bits), mr.bits);
+        set_ubits(dout, mr.bits);  // __memory data is raw bits — unsigned
+        record(lnast_->get_name(dst), dout, mr.bits);
         return;
       }
       // A single-field read (`src.field`) of a name that is not yet a known
@@ -3390,16 +4299,16 @@ private:
     if (addr.is_invalid()) {
       return;  // flatten_mem_addr reported
     }
-    const int  slot = mi.n_wr_total + mi.rd_next;
+    const int  slot = mi.n_user_wr + mi.rd_next;
     const auto base = slot * kMemPortStride;
     // Program-order position: the writes minted so far are exactly those that
     // textually precede this read, i.e. the ones it may forward from.
     mi.rd_wr_before.emplace_back(mi.wr_next);
-    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(addr);  // addr
-    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(en_const(true));
-    mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
+    livehd::graph_util::setup_sink_pid(mi.node, static_cast<hhds::Port_id>(base + 0)).connect_driver(addr);  // addr
+    livehd::graph_util::setup_sink_pid(mi.node, static_cast<hhds::Port_id>(base + 4)).connect_driver(en_const(true));
+    livehd::graph_util::setup_sink_pid(mi.node, static_cast<hhds::Port_id>(base + 10))
         .connect_driver(create_const(*g_, *Dlop::create_integer(1)));  // rdport = 1 (read)
-    auto dout = mi.node.create_driver_pin(static_cast<hhds::Port_id>(mi.n_wr_total + mi.rd_next));
+    auto dout = mi.node.create_driver_pin(static_cast<hhds::Port_id>(mi.n_user_wr + mi.rd_next));
     ++mi.rd_next;
     auto dst_name = lnast_->get_name(dst);
     if (mi.elem_signed) {
@@ -3407,10 +4316,8 @@ private:
       set_sign(dout);
       record(dst_name, dout, mi.elem_mw);
     } else {
-      set_bits(dout, mi.elem_mw);
-      set_unsign(dout);
-      record(dst_name, to_positive(dout, mi.elem_mw),
-             mi.elem_mw);  // unsigned -> positive
+      set_ubits(dout, mi.elem_mw);
+      record(dst_name, dout, mi.elem_mw);
     }
   }
 
@@ -3420,7 +4327,7 @@ private:
       if (it == mem_map_.end()) {
         continue;
       }
-      const auto& mi = it->second;
+      auto& mi = it->second;
       if (mi.wr_next != mi.n_user_wr) {
         error_here(
             "upass.tolg: internal — memory '{}' lowered {} write sites "
@@ -3429,45 +4336,11 @@ private:
             mi.wr_next,
             mi.n_user_wr);
       }
-      // 1a-mem reset-restore — a concrete-init reg array with a bound reset
-      // restores its init on reset: one write port per entry (addr=k,
-      // din=init[k], enable=reset) on the slots after the user sites, and
-      // every USER port's enable gated with !reset (during reset the program
-      // writes are suppressed, exactly like a scalar reg's din). The restore
-      // ports are excluded from the fwd mask, so a same-cycle read during
-      // reset still returns the committed (old) contents.
-      if (!mi.restore_vals.empty()) {
-        Pin rst = reset_pin();
-        if (reset_neg_) {
-          rst = not1(rst);
-        }
-        const auto en_pid_off = 4;
-        Pin        not_rst    = not1(rst);
-        for (int u = 0; u < mi.n_user_wr; ++u) {
-          const auto pid = static_cast<uint64_t>(u * kMemPortStride + en_pid_off);
-          for (const auto& e : mi.node.inp_edges()) {
-            if (!e.sink.is_invalid() && static_cast<uint64_t>(e.sink.get_port_id()) == pid) {
-              auto old_en = e.driver;
-              e.del_edge();
-              mi.node.create_sink_pin(static_cast<hhds::Port_id>(pid)).connect_driver(and2(old_en, not_rst));
-              break;
-            }
-          }
-        }
-        for (int64_t k = 0; k < static_cast<int64_t>(mi.restore_vals.size()); ++k) {
-          const auto base = (mi.n_user_wr + k) * kMemPortStride;
-          mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 0)).connect_driver(create_const(*g_, *Dlop::create_integer(k)));
-          mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 3))
-              .connect_driver(create_const(*g_, *mi.restore_vals[static_cast<size_t>(k)]));
-          mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 4)).connect_driver(rst);
-          mi.node.create_sink_pin(static_cast<hhds::Port_id>(base + 10))
-              .connect_driver(create_const(*g_, *Dlop::create_integer(0)));  // rdport = 0 (write)
-        }
-      }
       // Same-cycle ordering: build the per-(read,write) `fwd` matrix now that
       // every port is minted. Bit (r*n_wr + w) => read port r forwards write
-      // port w. Only the USER write ports can forward; the restore ports
-      // (reset) never do, so a read during reset sees the committed contents.
+      // port w. A write suppressed by reset (finalize_mems gates every user
+      // enable with !reset) never lands, so a read during reset sees the
+      // committed contents.
       //   "program" (default): row r = the writes that textually precede read r
       //                        (a PREFIX, recorded in rd_wr_before)
       //   "fwd":               every read forwards every user write
@@ -3511,19 +4384,28 @@ private:
           }
         }
       }
+      // Per-ELEMENT read ports only. A read_all is not one of them (it has no
+      // port block and forwards nothing), so a memory read ONLY as a whole has
+      // n_rd == 0 -- and that case must STILL reach the redrive below, or the
+      // cell keeps the declare-time PROVISIONAL all-ones `fwd`
+      // (`(1<<user_sites)-1`), which is a same-cycle collision matrix nobody
+      // asked for. cgen then refuses the design outright ("read WHOLE
+      // (read_all) and also carries a non-zero same-cycle collision matrix"),
+      // which is what stopped the lgyosys LEC backend on lhdtrack's
+      // br_tracker_linked_list_ctrl. With no rows the packed matrix is exactly
+      // zero, which is also what the inline reg-array emission implements.
       const int n_rd = static_cast<int>(mi.rd_wr_before.size());
-      if (!mi.is_array && !mi.has_legacy_fwd && !mi.has_update && mi.n_wr_total > 0 && n_rd > 0) {
+      if (!mi.is_array && !mi.has_legacy_fwd && !mi.has_update && mi.n_user_wr > 0) {
         // Row-major bit string, MSB first: bit (r*n_wr + w) sits at index
         // n_bits-1-(r*n_wr+w). Built as TEXT so a wide matrix stays exact — a
         // whole-array expansion easily reaches 9rd x 8wr = 72 bits, and every
         // consumer reads it with Dlop::bit_test (arbitrary precision).
-        const int   n_bits = n_rd * mi.n_wr_total;
+        const int   n_bits = n_rd * mi.n_user_wr;
         std::string bits(static_cast<size_t>(n_bits), '0');
         // ordering="none": the SAME layout, but the bits mean "undefined on a
         // collision" rather than "forward". A zero `fwd` row alone cannot say
         // whether the read is defined-OLD or undefined, so "none" needs its own
-        // matrix (graph/cell.cpp pid 15). Only the USER write ports go in it —
-        // a restore (reset) port is deterministic, exactly as for `fwd`.
+        // matrix (graph/cell.cpp pid 15).
         std::string ubits(static_cast<size_t>(n_bits), '0');
         for (int r = 0; r < n_rd; ++r) {
           int fwd_upto   = 0;
@@ -3535,15 +4417,24 @@ private:
             case Mem_info::Mem_order::none   : undef_upto = mi.n_user_wr; break;
           }
           for (int w = 0; w < fwd_upto; ++w) {
-            bits[static_cast<size_t>(n_bits - 1 - (r * mi.n_wr_total + w))] = '1';
+            bits[static_cast<size_t>(n_bits - 1 - (r * mi.n_user_wr + w))] = '1';
           }
           for (int w = 0; w < undef_upto; ++w) {
-            ubits[static_cast<size_t>(n_bits - 1 - (r * mi.n_wr_total + w))] = '1';
+            ubits[static_cast<size_t>(n_bits - 1 - (r * mi.n_user_wr + w))] = '1';
           }
         }
         // Same encoding for both: compact int64 while it fits (so the emitted
         // Verilog stays a plain decimal), exact `0ub…` text beyond that.
         auto pack = [&](const std::string& b) -> spool_ptr<Dlop> {
+          // Width is carried independently by the memory's read/write port
+          // counts; a zero mask therefore needs no leading-zero payload.  In
+          // particular, ordering="old" on a large restored memory can make
+          // this matrix several million zero bits wide.  Keeping those zeros
+          // in a Dlop is unnecessary and exceeds Dlop's current word-count
+          // representation even though the value itself is simply zero.
+          if (b.find('1') == std::string::npos) {
+            return Dlop::create_integer(0);
+          }
           if (n_bits <= 62) {
             int64_t v = 0;
             for (int i = 0; i < n_bits; ++i) {
@@ -3553,17 +4444,23 @@ private:
             }
             return Dlop::create_integer(v);
           }
-          return Dlop::from_pyrope("0ub" + b);
+          // `b` is already the payload of an unsigned binary literal.  Going
+          // through from_pyrope("0ub" + b) makes Dlop provision storage once
+          // for the generic parser and then again in init_from_binary().  For
+          // very large memories (XiangShan has forwarding matrices above
+          // 512K bits), that provisional word count overflows Dlop's int16_t
+          // size field before the binary parser releases it, corrupting the
+          // pool free.  Parse the known binary payload directly: this is both
+          // the exact intended representation and avoids the redundant wide
+          // allocation altogether.
+          return Dlop::from_binary(b, true);
         };
         auto redrive = [&](int pid, std::string_view pin_name, const spool_ptr<Dlop>& matrix) {
           if (!matrix) {
             return;
           }
-          for (const auto& e : mi.node.inp_edges()) {
-            if (!e.sink.is_invalid() && static_cast<int>(e.sink.get_port_id()) == pid) {
-              e.del_edge();
-              break;
-            }
+          if (auto sink = driven_sink_at(mi.node, static_cast<uint64_t>(pid)); !sink.is_invalid()) {
+            sink.del_sink();
           }
           setup_sink_by_name(mi.node, pin_name).connect_driver(create_const(*g_, *matrix));
         };
@@ -3580,13 +4477,34 @@ private:
       if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
         if (auto wit = pit->second.find("wensize"); wit != pit->second.end()) {
           if (auto wv = Dlop::from_pyrope(wit->second); wv && wv->is_just_i64() && wv->to_just_i64() > 1) {
-            for (const auto& e : mi.node.inp_edges()) {
-              if (!e.sink.is_invalid() && static_cast<int>(e.sink.get_port_id()) == 8) {
-                e.del_edge();
-                break;
-              }
+            const int64_t wensize = wv->to_just_i64();
+            if (auto ws_sink = driven_sink_at(mi.node, 8); !ws_sink.is_invalid()) {
+              ws_sink.del_sink();
             }
-            setup_sink_by_name(mi.node, "wensize").connect_driver(create_const(*g_, *Dlop::create_integer(wv->to_just_i64())));
+            setup_sink_by_name(mi.node, "wensize").connect_driver(create_const(*g_, *Dlop::create_integer(wensize)));
+            // Every WHOLE-word write port on this memory (`mem[i] <= v`, or a
+            // reader read-modify-write for a slice the chunk model could not
+            // express) still drives a ONE-BIT enable, and the wensize wrapper
+            // reads bit k as "write chunk k" — so chunks 1..wensize-1 of that
+            // write were dropped. Replicate the bit across every chunk: a 0/1
+            // path condition times the all-ones mask is all-ones or zero.
+            for (const int port : mi.plain_wr_ports) {
+              const auto pid = static_cast<hhds::Port_id>(port * kMemPortStride + 4);
+              Pin        cur;
+              if (auto en_sink = driven_sink_at(mi.node, static_cast<uint64_t>(pid)); !en_sink.is_invalid()) {
+                cur = en_sink.get_driver_pin();
+                en_sink.del_sink();
+              }
+              if (cur.is_invalid()) {
+                continue;
+              }
+              auto rep = make_node(Ntype_op::Mult);
+              setup_sink_by_name(rep, "as").connect_driver(cur);
+              setup_sink_by_name(rep, "as").connect_driver(create_const(*g_, *Dlop::get_mask_value(static_cast<int>(wensize))));
+              auto out = rep.create_driver_pin(0);
+              set_ubits(out, static_cast<int32_t>(wensize));
+              mi.node.create_sink_pin(pid).connect_driver(out);
+            }
           }
         }
         // Re-drive the forwarding mask (fwd, port 5).  lower_mem_declare reads
@@ -3600,14 +4518,29 @@ private:
         // observes, and cgen emits `dout = data[addr]` for it regardless.
         if (auto fit = pit->second.find("fwd"); fit != pit->second.end() && !mi.has_update) {
           if (auto fv = Dlop::from_pyrope(fit->second); fv && fv->is_just_i64()) {
-            for (const auto& e : mi.node.inp_edges()) {
-              if (!e.sink.is_invalid() && static_cast<int>(e.sink.get_port_id()) == 5) {
-                e.del_edge();
-                break;
-              }
+            if (auto fwd_sink = driven_sink_at(mi.node, 5); !fwd_sink.is_invalid()) {
+              fwd_sink.del_sink();
             }
             setup_sink_by_name(mi.node, "fwd").connect_driver(create_const(*g_, *Dlop::create_integer(fv->to_just_i64())));
           }
+        }
+      }
+
+      // FAIL CLOSED on `:[enable=…]`, which finalize_regs lowers on a plain
+      // flop/latch but which NOTHING wires on an array/memory: the write
+      // enables come from the per-store conditions, so the attribute vanished
+      // without a word and the array was written on every cycle. Same rule as
+      // the latch refusal in finalize_regs — an attribute that silently
+      // evaporates is worse than not having it.
+      if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
+        if (pit->second.contains("enable")) {
+          error_here(
+              "upass.tolg: array/memory '{}' carries an `enable` attribute, "
+              "which the Memory cell path does not lower — the attribute would "
+              "be SILENTLY DROPPED. Guard the store with an `if` instead: a "
+              "memory write enable comes from the condition of the write, not "
+              "from an attribute",
+              name);
         }
       }
 
@@ -3617,30 +4550,53 @@ private:
       // clock_pin=<input> (the slang reader emits it for a non-`clk`/`clock`
       // write clock) beats the implicit shared clock; posclk=false marks a
       // negedge write clock.
-      if (!mi.is_array) {
+      if (!mi.update_clock.is_invalid()) {
+        // The bulk-update bus has one clock. Combining it with entry writes
+        // on another clock/edge cannot be represented by this memory cell.
+        bool clock_wired = false;
+        for (auto sink : mi.node.inp_sorted_pins()) {  // read-only walk
+          if (static_cast<int>(sink.get_port_id()) % kMemPortStride != 2) {
+            continue;
+          }
+          if (sink.get_driver_pin() != mi.update_clock) {
+            error_here("upass.tolg: memory '{}' bulk and entry writes require one shared clock", name);
+          }
+          clock_wired = true;
+        }
+        if (mi.has_store_clock && (mi.mixed_store_edges || mi.first_store_posclk != mi.update_posclk)) {
+          error_here("upass.tolg: memory '{}' bulk and entry writes require one shared clock edge", name);
+        }
+        if (!clock_wired) {
+          setup_sink_by_name(mi.node, "clock_pin").connect_driver(mi.update_clock);
+        }
+        setup_sink_by_name(mi.node, "posclk").connect_driver(create_const(*g_, *Dlop::create_integer(mi.update_posclk ? 1 : 0)));
+      } else if (mi.has_store_clock) {
+        const int polarity = mi.mixed_store_edges ? Ntype::Memory_posclk_mixed : (mi.first_store_posclk ? 1 : 0);
+        setup_sink_by_name(mi.node, "posclk").connect_driver(create_const(*g_, *Dlop::create_integer(polarity)));
+      } else if (!mi.is_array) {
         bool        posclk_val = true;
         std::string clock_pin_name;
         if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
           if (auto cit = pit->second.find("clock_pin"); cit != pit->second.end()) {
             clock_pin_name = cit->second;
+          } else if (auto scit = pit->second.find("__store_clock_pin"); scit != pit->second.end()) {
+            // An unwritten SROA field still belongs to its declaring process.
+            clock_pin_name = scit->second;
           }
           if (auto pcit = pit->second.find("posclk"); pcit != pit->second.end()) {
             posclk_val = pcit->second != "false" && pcit->second != "0";
+          } else if (auto spit = pit->second.find("__store_posclk"); spit != pit->second.end()) {
+            posclk_val = spit->second != "false" && spit->second != "0";
           }
         }
         setup_sink_by_name(mi.node, "posclk").connect_driver(create_const(*g_, *Dlop::create_integer(posclk_val ? 1 : 0)));
         if (!clock_pin_name.empty()) {
-          // Same resolution as the per-reg wiring above: a module input first,
-          // then an internal/derived wire (a gated clock — clock-gate cell
-          // output — clocking a reg array; use its DRIVER, not the
-          // passthrough buffer), then any plain named pin.
-          if (g_->get_io()->has_input(clock_pin_name)) {
-            setup_sink_by_name(mi.node, "clock_pin").connect_driver(g_->get_input_pin(clock_pin_name));
-          } else if (auto dit = wire_names_.contains(clock_pin_name) ? pin_map_.find(din_key(clock_pin_name)) : pin_map_.end();
-                     dit != pin_map_.end()) {
-            setup_sink_by_name(mi.node, "clock_pin").connect_driver(dit->second);
-          } else if (pin_map_.contains(clock_pin_name)) {
-            setup_sink_by_name(mi.node, "clock_pin").connect_driver(pin_map_.at(clock_pin_name));
+          // Same resolution as the per-reg wiring: a module input first, then an
+          // internal/derived wire (a gated clock — clock-gate cell output —
+          // clocking a reg array; use its DRIVER, not the passthrough buffer),
+          // then any plain named pin.
+          if (const auto cp = resolve_attr_signal(clock_pin_name); !cp.is_invalid()) {
+            setup_sink_by_name(mi.node, "clock_pin").connect_driver(cp);
           } else {
             error_here(
                 "upass.tolg: memory '{}' names clock_pin '{}' but '{}' "
@@ -3656,43 +4612,139 @@ private:
         }
       }
 
-      // Whole-array reset: a registered whole-array (`update` driven) loads its
-      // reset value on reset via the cell's `reset` + runtime `init` pins (cgen
-      // / cgen_sim / lec emit `if(reset) data[i] <= init[i]`). The slang reader
-      // harvested the reset into `initial` (the reset-value bus const) +
-      // `reset_pin`
-      // (+ `negreset`) attrs; consume them here (the per-entry restore-port
-      // path is for non-whole-array regs only).
-      if (mi.has_update) {
+      // ── Memory reset: ONE cycle, every entry, through the cell's whole-array
+      // `reset` pin (14) + the `initial` bus — the same contract a scalar reg
+      // has. Two sources, ONE wiring:
+      //   (a) the declaration's `= <const|tuple>` (mi.reset_init, already on the
+      //       `initial` pin); its reset signal is the declaration's reset_pin=
+      //       or the module's implicit reset (mem_reset_source);
+      //   (b) the importer's `initial=<packed bus> reset_pin=<sig>` attr pair on
+      //       a whole-array (`update`) cell — the slang reader's form.
+      // `initial=` (04b-attributes.md: the PACKED contents, entry 0 in the low
+      // bits) next to a declared reset value must AGREE with it: both ride the
+      // one `initial` pin (power-on contents == reset value), so two different
+      // values is a contradiction, not an override. Next to `= nil` it is
+      // power-on-only contents and NO reset is wired.
+      if (!mi.is_array) {
+        const absl::flat_hash_map<std::string, std::string>* attrs = nullptr;
         if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
-          auto&            attrs = pit->second;
-          std::string_view rpn;
-          if (auto rit = attrs.find("reset_pin"); rit != attrs.end()) {
-            rpn = rit->second;
+          attrs = &pit->second;
+        }
+        auto attr_of = [&](std::string_view k) -> std::string_view {
+          if (attrs == nullptr) {
+            return {};
           }
-          if (!rpn.empty() && rpn != "false") {
-            // Reset value bus -> init sink (overrides any declare-time const
-            // init).
-            if (auto iit = attrs.find("initial"); iit != attrs.end() && iit->second != "false") {
-              if (auto iv = Dlop::from_pyrope(iit->second)) {
-                for (const auto& e : mi.node.inp_edges()) {
-                  if (!e.sink.is_invalid() && static_cast<int>(e.sink.get_port_id()) == 11) {  // init (pid 11)
-                    e.del_edge();
-                    break;
-                  }
-                }
-                setup_sink_by_name(mi.node, "init").connect_driver(create_const(*g_, *iv));
-              }
+          auto ait = attrs->find(std::string(k));
+          return ait == attrs->end() ? std::string_view{} : std::string_view(ait->second);
+        };
+        spool_ptr<Dlop> attr_init;
+        if (auto itxt = attr_of("initial"); !itxt.empty() && itxt != "false") {
+          attr_init = Dlop::from_pyrope(itxt);
+          if (!attr_init || attr_init->is_invalid()) {
+            error_here(
+                "upass.tolg: memory '{}' `initial={}` is not a comptime constant "
+                "(the packed contents, entry 0 in the low bits)",
+                name,
+                itxt);
+            continue;
+          }
+          if (attr_init->is_nil()) {
+            attr_init = Dlop::create_integer(0);  // as always: a nil initial is 0
+          }
+        }
+        if (attr_init && mi.reset_init) {
+          if (!attr_init->eq_op(*mi.reset_init)->is_known_true()) {
+            error_here(
+                "upass.tolg: memory '{}' declares the reset value {} (`= …`) but also carries `initial={}`: a "
+                "register array's initializer IS both its power-on contents and its reset value (one `initial` "
+                "pin), so the two must agree — drop one of them, or spell `= nil` to keep `initial=` as "
+                "power-on-only contents with no reset",
+                name,
+                mi.reset_init->to_pyrope(),
+                attr_of("initial"));
+            continue;
+          }
+        } else if (attr_init) {
+          // Power-on contents (`= nil` + `initial=`), or the importer's
+          // reset-value bus on a whole-array cell: replaces any declare-time
+          // `initial` (pid 11).
+          if (auto init_sink = driven_sink_at(mi.node, 11); !init_sink.is_invalid()) {
+            init_sink.del_sink();
+          }
+          setup_sink_by_name(mi.node, "initial").connect_driver(create_const(*g_, *attr_init));
+        }
+        const auto rpn         = attr_of("reset_pin");
+        const bool wants_reset = mi.reset_init ? !mem_reset_source(name).empty()
+                                               : (mi.has_update && !rpn.empty() && rpn != "false" && static_cast<bool>(attr_init));
+        // A DECLARED RESET VALUE WITH NOTHING TO APPLY IT IS AN ERROR, not a
+        // silent drop. `wants_reset` above goes false when mem_reset_source() is
+        // empty, which happens two ways: the module has no reset input at all,
+        // or this declare says `reset_pin=false`. Either way the `= <value>`
+        // the source asked for would never be applied and the array would come
+        // up holding whatever the power-on fill gives it -- the memory analogue
+        // of the reg case finalize_regs already diagnoses ("reg '{}' has a reset
+        // value but '{}' has no reset input"). Say so, and name the spelling
+        // that DOES mean "power-on contents, no reset": `= nil` plus `initial=`.
+        // Power-on-only contents are legitimate and are NOT caught here --
+        // mi.reset_init is unset for them.
+        if (wants_reset) {
+          const auto rst_name = mem_reset_source(name);
+          // A memory's reset signal resolves exactly like a scalar reg's (see
+          // finalize_regs): usually a graph input, but a reset synchronizer
+          // drives it from a DERIVED module-level signal. This used to be a
+          // bare `has_input(rst_name) ? get_input_pin(...) : reset_pin()`, so a
+          // `reset_pin=ref <internal wire>` on an array reg silently fell back
+          // to the module's implicit reset — and in a module that has none,
+          // to an INVALID pin, which then reached not1()/and2() and left the
+          // array's write-enable ANDed with a dangling node that cgen folds to
+          // constant 0. The array could never be written (lhdsuite minion:
+          // `prv`, `reg_fcc_counter`, `id_ctrl_stall_trans_cnt`) and the
+          // emitted Verilog carried a nameless `reg signed ;` for the dangling
+          // node.
+          Pin        rst      = rst_name.empty() ? reset_pin() : resolve_reset_signal(rst_name);
+          bool       neg      = reset_neg_;
+          if (rst.is_invalid()) {
+            error_here("upass.tolg: memory '{}' names unknown reset signal '{}'", name, rst_name);
+            continue;
+          }
+          if (auto nv = attr_of("negreset"); !nv.empty() && nv != "false") {
+            neg = true;
+          }
+          if (neg) {
+            rst = not1(rst);
+          }
+          // Program writes are suppressed while reset is high, exactly like a
+          // scalar reg's din. The reset arm already has PRIORITY in every
+          // consumer (cgen inline, cgen_sim, pass/lec encode, pass/abc
+          // mem_lower); the gate is what keeps a same-cycle read from
+          // FORWARDING a write that never lands (a read during reset returns
+          // the committed contents), and it keeps a consumer that commits
+          // per-port writes after the whole-array apply correct regardless.
+          const Pin not_rst = not1(rst);
+          for (int u = 0; u < mi.n_user_wr; ++u) {
+            const auto pid = static_cast<uint64_t>(u * kMemPortStride + 4);
+            if (auto en_sink = driven_sink_at(mi.node, pid); !en_sink.is_invalid()) {
+              auto old_en = en_sink.get_driver_pin();
+              en_sink.del_sink();
+              mi.node.create_sink_pin(static_cast<hhds::Port_id>(pid)).connect_driver(and2(old_en, not_rst));
             }
-            // Reset condition -> reset sink (active-high; pre-invert negreset).
-            Pin rp = g_->get_io()->has_input(std::string(rpn)) ? g_->get_input_pin(std::string(rpn)) : reset_pin();
-            if (!rp.is_invalid()) {
-              const bool neg = (attrs.count("negreset") && attrs.at("negreset") != "false") || reset_neg_;
-              if (neg) {
-                rp = not1(rp);
-              }
-              setup_sink_by_name(mi.node, "reset").connect_driver(rp);
-            }
+          }
+          if (mi.has_update) {
+            mi.update_en = and2(mi.update_en, not_rst);
+            redrive_mem_sink(mi, 13, mi.update_en);
+          }
+          setup_sink_by_name(mi.node, "reset").connect_driver(rst);
+          // Preserve reset EDGE semantics as well as its value. The
+          // whole-array Memory pin block is full, so cgen consumes this
+          // node marker when it builds the event control.
+          bool async = reset_async_default_;
+          if (auto av = attr_of("async"); !av.empty()) {
+            async = av != "false" && av != "0";
+          } else if (auto sv = attr_of("sync"); !sv.empty()) {
+            async = sv == "false" || sv == "0";
+          }
+          if (async) {
+            mi.node.attr(livehd::attrs::memory_async_reset).set(1);
           }
         }
       }
@@ -3712,7 +4764,7 @@ private:
       // A read-less (or access-less) memory is a WARNING at most — its state
       // can be observed by a scan chain, and a future remote regref may
       // attach reads/writes. `pub` (regref potential) silences it entirely.
-      if (!mi.is_pub && mi.rd_next == 0) {
+      if (!mi.is_pub && mi.rd_next == 0 && mi.read_all_pin.is_invalid()) {
         warn_at(Lnast_nid{},
                 {"memory-never-read", "type"},
                 "memory '{}' is never read — contents are only observable via "
@@ -3723,7 +4775,7 @@ private:
   }
 
   // Declared (mw, is_signed) from a declare's type child. prim_type_int(max,
-  // min): unsigned iff min ≥ 0, mw mirrors the ssa io harvest (get_bits()-1
+  // min): unsigned iff min ≥ 0, mw mirrors the ssa io harvest (get_signed_bits()-1
   // drops the sign bit when unsigned). prim_type_bool → 1. Unknown → (0,_).
   [[nodiscard]] std::pair<int32_t, bool> declared_width(const Lnast_nid& type_nid) {
     using N      = Lnast_ntype;
@@ -3750,17 +4802,17 @@ private:
       if (auto mn_v = Dlop::from_pyrope(lnast_->get_name(mn)); mn_v && mn_v->is_integer()) {
         min_known = true;
         min_neg   = mn_v->is_negative();
-        min_bits  = static_cast<int32_t>(mn_v->get_bits());
+        min_bits  = static_cast<int32_t>(mn_v->get_signed_bits());
       }
     }
     const bool is_signed = !(min_known && !min_neg);
     if (!is_signed) {
-      auto bits = max_v->is_known_zero() ? int32_t{1} : static_cast<int32_t>(max_v->get_bits() - 1);
+      auto bits = std::max<int32_t>(1, static_cast<int32_t>(max_v->get_payload_bits()));
       return {bits, false};
     }
     // Signed: the WIDER of the two bounds' signed widths (mirrors the ssa io
     // harvest + io_mw — a min like -100 needs more bits than a max of 3).
-    auto bits = static_cast<int32_t>(max_v->get_bits());
+    auto bits = static_cast<int32_t>(max_v->get_signed_bits());
     if (min_known) {
       bits = std::max(bits, min_bits);
     }
@@ -3888,8 +4940,7 @@ private:
     }
     setup_sink_by_name(flop, "din").connect_driver(v.pin);
     auto q = flop.create_driver_pin(0);
-    set_bits(q, v.mw + 1);
-    set_unsign(q);
+    set_ubits(q, v.mw);
     // Keep the stage register's RTL name on q, exactly like finalize_regs does
     // for a `reg`. Without it cgen synthesizes `flop_<nid>`, and pass/lec's
     // tier-1 state pairing (which is BY NAME) then matches nothing: every flop
@@ -3897,11 +4948,16 @@ private:
     // uncertain pairs suppress a bounded-bmc PASS. A `stage[N]` design would
     // report UNKNOWN even though it is provably equivalent.
     //
-    // `%pipe_*` (the LN-inserted pipe output flop) is a compiler temp with no
-    // counterpart name on the other front-end, so naming it buys no pairing —
-    // it would only push an escaped `\%pipe_0` identifier into the Verilog.
+    // `%pipe_<output>` is an LN-inserted pipe-output flop. The prefix is
+    // lowering-only, but the suffix is the stable source/output state name and
+    // is exactly the tier-1 correspondence anchor used by another front end.
+    // Keeping the whole temp anonymous turns a fixed-latency pipe into an
+    // unpairable `f:<nid>` frontier and cuts every downstream semdiff region.
     {
       std::string base{name};
+      if (base.starts_with("%pipe_")) {
+        base.erase(0, std::string_view{"%pipe_"}.size());
+      }
       if (auto ssa = base.find("___ssa_"); ssa != std::string::npos) {
         base.resize(ssa);
       }
@@ -3914,6 +4970,207 @@ private:
     }
     reg_map_.emplace(std::string(name), flop);
     record(name, q, v.mw);
+  }
+
+  // True when `nid`'s subtree names `ref`. Used to bound the LHS search below:
+  // once the call's result temp has been consumed by anything else, a later
+  // store of that temp is no longer "the variable this call binds to".
+  bool subtree_reads_ref(const Lnast_nid& nid, std::string_view ref) const {
+    if (nid.is_invalid()) {
+      return false;
+    }
+    if (Lnast_ntype::is_ref(lnast_->get_type(nid)) && lnast_->get_name(nid) == ref) {
+      return true;
+    }
+    for (auto c : lnast_->children(nid)) {
+      if (subtree_reads_ref(c, ref)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // The source variable a temp-dst call result is copied into, or "" when the
+  // result is consumed by an expression instead (a multi-output instance read
+  // through `tuple_get`, an inline `f(g(x))`, ...). A declared binding
+  // (`const lane_q = lane(…)`, `var q = Mod(…)`) lowers to a temp dst plus a
+  // following `store(lane_q, %t)`, so without this the instance loses the name
+  // the source gave it and falls back to `u_<callee>_<temp>` — while the very
+  // same call written `lane_q = lane(…)` keeps it. Scanning stops at the first
+  // statement that reads the temp for any other purpose.
+  std::string lhs_var_of_temp_dst(const Lnast_nid& call, std::string_view dst_txt) const {
+    // The copy-out is emitted right behind the call (at most a `declare` in
+    // between), so a handful of statements is all this ever needs to look at.
+    // The bound also keeps a call whose result is UNUSED — nothing ever reads
+    // the temp, so the scan has no natural stop — from walking the rest of the
+    // module once per such call.
+    int budget = 8;
+    for (auto s = lnast_->get_sibling_next(call); !s.is_invalid() && budget-- > 0; s = lnast_->get_sibling_next(s)) {
+      if (Lnast_ntype::is_store(lnast_->get_type(s))) {
+        auto tgt = lnast_->get_first_child(s);
+        auto src = tgt.is_invalid() ? Lnast_nid{} : lnast_->get_sibling_next(tgt);
+        if (!src.is_invalid() && Lnast_ntype::is_ref(lnast_->get_type(src)) && lnast_->get_name(src) == dst_txt
+            && lnast_->get_sibling_next(src).is_invalid()) {
+          std::string v(lnast_->get_name(tgt));
+          if (auto p = v.find("___ssa_"); p != std::string::npos) {
+            v.resize(p);
+          }
+          // A dotted store (`t.f = %tmp`) names a tuple field, not an instance.
+          if (v.empty() || v.front() == '%' || v.find('.') != std::string::npos) {
+            return {};
+          }
+          // A PORT of the enclosing module is not an instance binding. `y =
+          // add1(…)` says where the result goes, not what to call the box, and
+          // taking it would give the instance the port's own spelling — which
+          // both backends must then rename anyway (Verilog: an instance beside
+          // `output reg y`; sim: a struct member beside the `Out` field). Fall
+          // through to the synthesized name.
+          for (const auto& e : lnast_->io_meta().inputs) {
+            if (e.name == v) {
+              return {};
+            }
+          }
+          for (const auto& e : lnast_->io_meta().outputs) {
+            if (e.name == v) {
+              return {};
+            }
+          }
+          return v;
+        }
+      }
+      if (subtree_reads_ref(s, dst_txt)) {
+        return {};
+      }
+    }
+    return {};
+  }
+
+  // rolled_for owns an ordinary call payload but transports replication in an
+  // explicit node, never in reserved actuals. Lower the hidden payload first,
+  // then attach the native HHDS descriptor and literal carry self-edges to the
+  // Sub that payload created.
+  void lower_rolled_for(const Lnast_nid& nid) {
+    std::vector<Lnast_nid> kids;
+    for (auto c : lnast_->children(nid)) {
+      kids.emplace_back(c);
+    }
+    if (kids.size() != lnast_rolled_for::arity || !Lnast_ntype::is_ref(lnast_->get_type(kids[lnast_rolled_for::index]))
+        || !Lnast_ntype::is_tuple_add(lnast_->get_type(kids[lnast_rolled_for::carries]))
+        || !Lnast_ntype::is_stmts(lnast_->get_type(kids[lnast_rolled_for::lowering_payload]))) {
+      error_here("upass.tolg: malformed rolled_for transport in '{}'", lnast_->get_top_module_name());
+      return;
+    }
+
+    int64_t  domain_first = 0;
+    int64_t  domain_step  = 0;
+    uint64_t domain_count = 0;
+    if (!absl::SimpleAtoi(lnast_->get_name(kids[lnast_rolled_for::first]), &domain_first)
+        || !absl::SimpleAtoi(lnast_->get_name(kids[lnast_rolled_for::step]), &domain_step)
+        || !absl::SimpleAtoi(lnast_->get_name(kids[lnast_rolled_for::count]), &domain_count) || domain_step == 0) {
+      error_here("upass.tolg: malformed rolled_for domain in '{}'", lnast_->get_top_module_name());
+      return;
+    }
+
+    // A register carry has two additional fields: the enclosing register and
+    // a temporary bound to its pending D before the call. Q remains available
+    // under the ordinary register name throughout payload lowering.
+    for (auto map : lnast_->children(kids[lnast_rolled_for::carries])) {
+      auto in  = lnast_->get_first_child(map);
+      auto out = in.is_invalid() ? in : lnast_->get_sibling_next(in);
+      auto reg = out.is_invalid() ? out : lnast_->get_sibling_next(out);
+      if (!reg.is_invalid()) {
+        auto seed = lnast_->get_sibling_next(reg);
+        if (seed.is_invalid()) {
+          error_here("upass.tolg: malformed rolled_for register carry");
+          return;
+        }
+        auto value = set_mask_base(reg);
+        record(lnast_->get_name(seed), value.pin, value.mw);
+      }
+    }
+
+    const std::string saved_index = std::exchange(rolled_index_port_, std::string(lnast_->get_name(kids[lnast_rolled_for::index])));
+    last_lowered_sub_             = {};
+    lower_stmts(kids[lnast_rolled_for::lowering_payload]);
+    rolled_index_port_ = saved_index;
+    auto sub           = last_lowered_sub_;
+    last_lowered_sub_  = {};
+    if (sub.is_invalid()) {
+      error_here("upass.tolg: rolled_for payload did not create an instance in '{}'", lnast_->get_top_module_name());
+      return;
+    }
+    auto gio = sub.get_subnode_io();
+    if (!gio) {
+      error_here("upass.tolg: rolled_for instance has no callee interface in '{}'", lnast_->get_top_module_name());
+      return;
+    }
+    const auto input_pid = [&](std::string_view name) -> std::optional<hhds::Port_id> {
+      for (const auto& d : gio->get_input_pin_decls()) {
+        if (d.name == name) {
+          return d.port_id;
+        }
+      }
+      return std::nullopt;
+    };
+    const auto output_pid = [&](std::string_view name) -> std::optional<hhds::Port_id> {
+      for (const auto& d : gio->get_output_pin_decls()) {
+        if (d.name == name) {
+          return d.port_id;
+        }
+      }
+      return std::nullopt;
+    };
+
+    hhds::Subnode_loop desc;
+    desc.first       = domain_first;
+    desc.step        = domain_step;
+    desc.count       = domain_count;
+    desc.index_input = input_pid(lnast_->get_name(kids[lnast_rolled_for::index]));
+    if (!desc.index_input) {
+      error_here("upass.tolg: rolled_for index port '{}' is not a callee input", lnast_->get_name(kids[lnast_rolled_for::index]));
+      return;
+    }
+    const auto activation_name = lnast_->get_name(kids[lnast_rolled_for::activation]);
+    const auto next_name       = lnast_->get_name(kids[lnast_rolled_for::next_active]);
+    if (!activation_name.empty()) {
+      desc.activation_input = input_pid(activation_name);
+      if (!desc.activation_input) {
+        error_here("upass.tolg: rolled_for activation port '{}' is not a callee input", activation_name);
+        return;
+      }
+    }
+    if (!next_name.empty()) {
+      desc.next_active_output = output_pid(next_name);
+      if (!desc.next_active_output || !desc.activation_input) {
+        error_here("upass.tolg: rolled_for next-active port '{}' is invalid", next_name);
+        return;
+      }
+    }
+    // hhds enforces distinct role inputs by THROWING (std::invalid_argument,
+    // "set_subnode(loop): role inputs must be distinct"). plan_loop_roll declines
+    // any loop whose source names collide with the reserved port names, so this
+    // is unreachable from source — but reaching hhds with two roles on one pid
+    // would abort the compiler instead of pointing at the offending loop.
+    if (desc.activation_input && desc.index_input && *desc.activation_input == *desc.index_input) {
+      error_here("upass.tolg: rolled_for index and activation resolve to the same callee input port '{}'", activation_name);
+      return;
+    }
+    sub.set_subnode(gio, desc);
+    for (auto map : lnast_->children(kids[lnast_rolled_for::carries])) {
+      if (!Lnast_ntype::is_store(lnast_->get_type(map))) {
+        error_here("upass.tolg: malformed rolled_for carry entry");
+        return;
+      }
+      auto in_n  = lnast_->get_first_child(map);
+      auto out_n = in_n.is_invalid() ? in_n : lnast_->get_sibling_next(in_n);
+      auto ip    = in_n.is_invalid() ? std::optional<hhds::Port_id>{} : input_pid(lnast_->get_name(in_n));
+      auto op    = out_n.is_invalid() ? std::optional<hhds::Port_id>{} : output_pid(lnast_->get_name(out_n));
+      if (!ip || !op) {
+        error_here("upass.tolg: rolled_for carry ports do not exist on the callee");
+        return;
+      }
+      sub.create_driver_pin(*op).connect_sink(sub.create_sink_pin(*ip));
+    }
   }
 
   // func_call(dst_tmp, callee_name, args...) → an Ntype_op::Sub
@@ -4007,7 +5264,7 @@ private:
       callee_name = lg_name;  // Sub instance name + diagnostics
     } else {
       if (registry_ != nullptr) {
-        callee = resolve_callee_lnast(callee_name, *registry_);
+        callee = resolve_callee_lnast(callee_name, *registry_, lnast_->get_top_module_name());
       }
       kind = callee ? callee->get_lambda_kind() : std::string_view{};
       // A `comb` callee normally inlines in the runner, but with
@@ -4079,45 +5336,42 @@ private:
     // NOTE: set_subnode RE-STAMPS the raw hhds type to its own 2/3 loop-hint
     // encoding — type_op_of() recognizes Subs by the subnode LINK, never by
     // the stored type (see node_util.hpp).
-    // R1 limit, made LOUD instead of silent: the path condition is BODY-LOCAL.
-    // A property inside an INSTANTIATED callee lives in the callee's graph, so
-    // the caller's guard never reaches it and the obligation stays the bare
-    // condition — strictly stronger than what the source says. The same `comb`
-    // INLINED (the default) does get the guard, so without this warning the
-    // identical source proves or refutes depending on compile.upass.inline.
-    // Propagating a guard across the boundary is the caller-context discharge
-    // R2 owns; until then, say so at the call site.
-    if (callee != nullptr && !current_path_cond().is_invalid() && lnast_subtree_has_cassert(*callee, callee->get_root())) {
-      warn_at(nid,
-              {"guarded-instance-property", "unsupported"},
-              "upass.tolg: '{}' is instantiated inside an `if`/`match` arm and its body holds an assert/assume — the "
-              "guard does NOT cross the instance boundary, so those properties are checked UNCONDITIONALLY (a stricter "
-              "obligation than the source states)",
-              callee_name);
-    }
-    auto sub = make_node(Ntype_op::Sub);
+    // Transport the complete caller execution context. Conditional callees
+    // expose __valid in their GraphIO, so latch enables, properties, and any
+    // descendants see the same guard that clocked state already receives.
+    const Pin call_guard = effect_path_cond();
+    auto      sub        = make_node(Ntype_op::Sub);
     sub.set_subnode(gio);
+    last_lowered_sub_ = sub;
     {
       // Name the Sub by its RTL INSTANCE name so hhds get_hier_name() yields
-      // the Verilog-style hierarchy (foo.bar.xx). A real (non-temp) dst is the
-      // instance name (Pyrope `id_ex = Mod(...)`; slang now passes inst.name as
-      // the dst). Strip an SSA suffix. Only an anonymous/temp dst falls back to
-      // the synthesized unique `u_<module>_<id>` name.
-      // A call-site `name=` (reserved `__inst_name` actual) takes precedence
-      // over the dst-derived name — the explicit instance/hierarchy name.
+      // the Verilog-style hierarchy (foo.bar.xx). The name is the LHS VARIABLE
+      // the call result binds to (Pyrope `id_ex = Mod(...)`; slang passes
+      // inst.name as the dst) — either the dst itself, or, when the dst is a
+      // compiler temp, the variable the very next statement copies it into
+      // (`const lane_q = lane(…)` lowers to `fcall(%t, lane, …)` +
+      // `store(lane_q, %t)`). Strip an SSA suffix. Only a call whose result
+      // never lands in a source variable falls back to the synthesized unique
+      // `u_<module>_<id>` name. A call-site `name=` (reserved `__inst_name`
+      // actual) takes precedence over both — it IS the explicit instance name,
+      // so spelling `Mod::[name=x]` on `x = Mod(…)` is redundant, not required.
       std::string callsite_inst;
+      std::string callsite_suffix;
       for (auto a = lnast_->get_sibling_next(callee_n); !a.is_invalid(); a = lnast_->get_sibling_next(a)) {
         if (!Lnast_ntype::is_store(lnast_->get_type(a))) {
           continue;
         }
         auto an = lnast_->get_first_child(a);
-        if (an.is_invalid() || lnast_->get_name(an) != "__inst_name") {
+        if (an.is_invalid()) {
+          continue;
+        }
+        const auto key = lnast_->get_name(an);
+        if (key != "__inst_name" && key != "__inst_suffix") {
           continue;
         }
         if (auto v = lnast_->get_sibling_next(an); !v.is_invalid()) {
-          callsite_inst = std::string(lnast_->get_name(v));
+          (key == "__inst_name" ? callsite_inst : callsite_suffix) = std::string(lnast_->get_name(v));
         }
-        break;
       }
       std::string dst_txt(lnast_->get_name(dst));
       // A `%`-prefixed compiler temp (1-char prefix); strip the `%` when
@@ -4128,15 +5382,22 @@ private:
       if (auto p = inst_name.find("___ssa_"); p != std::string::npos) {
         inst_name = inst_name.substr(0, p);
       }
+      if (is_tmp) {
+        inst_name = lhs_var_of_temp_dst(nid, dst_txt);
+      }
       if (!callsite_inst.empty()) {
-        sub.set_name(callsite_inst);
-      } else if (!is_tmp && !inst_name.empty()) {
-        sub.set_name(inst_name);
+        sub.set_name(callsite_inst + callsite_suffix);
+      } else if (!inst_name.empty()) {
+        sub.set_name(inst_name + callsite_suffix);
       } else {
         std::string suffix = is_tmp ? dst_txt.substr(1) : dst_txt;
-        sub.set_name("u_" + callee_name + "_" + suffix);
+        sub.set_name("u_" + callee_name + "_" + suffix + callsite_suffix);
       }
     }
+
+    // An explicit rolled_for supplies its index per occurrence, so that one
+    // input is intentionally absent from the hidden ordinary call.
+    const std::string supplied_index_port = rolled_index_port_;
 
     // Actuals → callee input sink pins. Named actuals (`port=value`, a `store`)
     // bind by port name; a bare positional actual binds the next declared input
@@ -4145,6 +5406,8 @@ private:
     // net out equal when one port was bound twice and another left undriven.
     std::size_t                      pos = 0;
     absl::flat_hash_set<std::string> bound_ports;
+    std::vector<std::pair<Pin, Pin>> deferred_clocks;  // (Sub sink, ungated parent clock)
+    std::vector<Pin>                 active_resets;    // normalized active-high callee resets
     for (auto a = lnast_->get_sibling_next(callee_n); !a.is_invalid(); a = lnast_->get_sibling_next(a)) {
       std::string pname;
       Lnast_nid   val;
@@ -4169,9 +5432,10 @@ private:
         if (pname == "__ufcs_arg" && (cio.inputs.empty() || cio.inputs[0].name != "self")) {
           continue;
         }
-        // Reserved call-site instance name — already consumed for sub.set_name
-        // above; never a callee port (don't bind, don't count toward arity).
-        if (pname == "__inst_name") {
+        // Reserved call-site instance name / loop-iteration suffix — already
+        // consumed for sub.set_name above; never a callee port (don't bind,
+        // don't count toward arity).
+        if (pname == "__inst_name" || pname == "__inst_suffix") {
           continue;
         }
       } else {
@@ -4183,11 +5447,18 @@ private:
               cio.inputs.size());
           return;
         }
-        pname = cio.inputs[pos].name;
+        pname = std::string(canon_io_name(cio.inputs[pos].name));
         ++pos;
         val = a;
       }
       auto v = leaf(val);
+      // Generated activation-capable definitions expose `__valid` for
+      // source-visible side effects. An unconditional call passes true; a call
+      // under if/match conjoins the caller path so nested activation composes.
+      if (pname == "__valid" && !call_guard.is_invalid()) {
+        v.pin = and2(nonzero1(v.pin), call_guard);
+        v.mw  = 1;
+      }
       // 2f-lgimport — validate the port name BEFORE create_sink_pin: an unknown
       // port (e.g. a typo, or a call shaped for a different module) otherwise
       // asserts inside resolve_sink_port (graph.cpp). The compiler must never
@@ -4209,14 +5480,44 @@ private:
         error_here("upass.tolg: callee '{}' has no input named '{}'", callee_full, pname);
         return;
       }
-      spin.connect_driver(v.pin);
+      if (is_clock_port_name(pname) && !call_guard.is_invalid()) {
+        // Reset is not known until all actuals have been visited. Defer clock
+        // wiring so the gate can use `guard | reset_asserted` and a synchronous
+        // reset still reaches state while the source call is inactive.
+        deferred_clocks.emplace_back(spin, v.pin);
+      } else {
+        spin.connect_driver(v.pin);
+      }
+      if (is_reset_port_name(pname)) {
+        auto r = nonzero1(v.pin);
+        if (str_tools::ends_with(pname, "_n")) {
+          r = not1(r);
+        }
+        active_resets.push_back(r);
+      }
+    }
+    // A compiler-minted activation port is deliberately absent from io_meta,
+    // so source arity does not change. Missing explicit generated __valid is
+    // also safe to fill here: unconditional context means true; otherwise the
+    // complete caller guard is forwarded.
+    if (gio->has_input("__valid") && !bound_ports.contains("__valid")) {
+      auto active = call_guard.is_invalid() ? create_const(*g_, *Dlop::create_integer(1)) : call_guard;
+      sub.create_sink_pin("__valid").connect_driver(active);
+      bound_ports.insert("__valid");
     }
     // Every declared input must be driven — checked per-port so an omitted input
     // is caught even when another was bound twice (a bare provided==declared
     // count would miss that).
     for (const auto& ie : cio.inputs) {
-      if (bound_ports.count(ie.name) == 0) {
-        error_here("upass.tolg: call to '{}' does not bind declared input '{}'", callee_full, ie.name);
+      const std::string pname{canon_io_name(ie.name)};
+      if (bound_ports.count(pname) == 0) {
+        // A replicated instance's index input carries a different value per
+        // ordinal, so realization (not the parent graph) drives it. That is the
+        // ONLY input a call may leave unconnected.
+        if (!supplied_index_port.empty() && pname == supplied_index_port) {
+          continue;
+        }
+        error_here("upass.tolg: call to '{}' does not bind declared input '{}'", callee_full, pname);
         return;
       }
     }
@@ -4240,7 +5541,12 @@ private:
             lnast_->get_top_module_name());
         return;
       }
-      sub.create_sink_pin("clock").connect_driver(clock_pin());
+      auto sink = sub.create_sink_pin("clock");
+      if (call_guard.is_invalid()) {
+        sink.connect_driver(clock_pin());
+      } else {
+        deferred_clocks.emplace_back(sink, clock_pin());
+      }
     }
 
     // Minted-reset forwarding, same pattern: the callee's implicit
@@ -4265,13 +5571,47 @@ private:
       }
       Pin r = reset_pin();
       if (reset_neg_) {
-        auto inv = make_node(Ntype_op::Not);
-        setup_sink_by_name(inv, "a").connect_driver(r);
-        r = inv.create_driver_pin(0);
-        set_bits(r, 1);
-        set_unsign(r);
+        // NOT the bitwise `Not` cell: an LGraph Not is unlimited precision
+        // (`~x == -x-1`), so `Not(u1)` holds {-1,-2} and stamping its driver u1
+        // is a lie -- and cprop's is_bool01 now trusts the u1 hint alone, so a
+        // consumer that widens this pin would zero-fill -1. not1() is the same
+        // EQ-against-0 spelling every other truth-value negation here uses, and
+        // it is exact for any width.
+        r = not1(r);
       }
       sub.create_sink_pin("reset").connect_driver(r);
+      active_resets.push_back(nonzero1(r));
+    }
+
+    // Conditional state activation: each clock domain gets its own glitch-free
+    // gate. Pyrope's generated defs have one canonical reset; accepting several
+    // reset ports would require a per-state clock/reset-domain map, and OR-ing
+    // unrelated resets could advance non-reset state while the call is absent.
+    // Fail closed rather than guess that mapping.
+    // Generated activation-capable callees are gated structurally after every
+    // body has been built. A port name is neither necessary (`clk_i`) nor
+    // sufficient (a minted but unused `clock`) evidence that it clocks state.
+    // Keep the legacy spelling path only for imported callees without the
+    // generated __valid ABI, where no post-lowering guard is available.
+    if (gio->has_input("__valid")) {
+      for (const auto& [sink, raw_clock] : deferred_clocks) {
+        sink.connect_driver(raw_clock);
+      }
+      deferred_clocks.clear();
+    }
+    if (!call_guard.is_invalid() && !deferred_clocks.empty()) {
+      if (active_resets.size() > 1) {
+        error_here("upass.tolg: conditional call to '{}' has multiple reset inputs; clock/reset domain mapping is ambiguous",
+                   callee_full);
+        return;
+      }
+      Pin gate_en = call_guard;
+      if (!active_resets.empty()) {
+        gate_en = or2(gate_en, active_resets.front());
+      }
+      for (const auto& [sink, raw_clock] : deferred_clocks) {
+        sink.connect_driver(clock_gate(raw_clock, gate_en));
+      }
     }
 
     std::string dst_name(lnast_->get_name(dst));
@@ -4290,7 +5630,12 @@ private:
       // callee GraphIO and expect the pins to exist even when a port is
       // left unread (`.e()` unconnected-output style).
       for (const auto& oe2 : cio.outputs) {
-        (void)sub.create_driver_pin(oe2.name);
+        const std::string output_name{canon_io_name(oe2.name)};
+        if (!gio->has_output(output_name)) {
+          error_here("upass.tolg: callee '{}' has no output named '{}'", callee_full, output_name);
+          return;
+        }
+        (void)sub.create_driver_pin(output_name);
       }
       sub_results_[dst_name] = Sub_result{
           sub,
@@ -4300,10 +5645,18 @@ private:
     }
 
     // Single output: bind dst like a graph input (external value entering).
-    const auto& oe       = cio.outputs.front();
-    auto        out_dpin = sub.create_driver_pin(oe.name);
-    int32_t     mw       = io_mw(oe);
-    if (oe.kind == Io_kind::boolean || mw <= 1) {
+    const auto&       oe          = cio.outputs.front();
+    const std::string output_name = std::string(canon_io_name(oe.name));
+    if (!gio->has_output(output_name)) {
+      error_here("upass.tolg: callee '{}' has no output named '{}'", callee_full, output_name);
+      return;
+    }
+    auto    out_dpin = sub.create_driver_pin(output_name);
+    int32_t mw       = io_mw(oe);
+    if (oe.kind == Io_kind::boolean) {
+      set_ubits(out_dpin, 1);
+      record(dst_name, out_dpin, 1);
+    } else if (mw <= 1) {
       set_bits(out_dpin, 1);
       if (oe.is_signed) {
         set_sign(out_dpin);
@@ -4316,9 +5669,8 @@ private:
       set_sign(out_dpin);
       record(dst_name, out_dpin, mw);
     } else {
-      set_bits(out_dpin, mw);
-      set_sign(out_dpin);
-      record(dst_name, to_positive(out_dpin, mw), mw);
+      set_ubits(out_dpin, mw);
+      record(dst_name, out_dpin, mw);
     }
     // Also expose the single output by name so an explicit field read of the
     // result (`f(...).out`) resolves through lower_tuple_get, exactly like the
@@ -4388,13 +5740,72 @@ private:
     if (!clock_pin_valid_) {
       auto p = g_->get_input_pin(clock_name_);
       if (clock_minted_) {
-        set_bits(p, 1);
-        set_unsign(p);
+        set_ubits(p, 1);
       }
       clock_pin_       = p;
       clock_pin_valid_ = true;
     }
     return clock_pin_;
+  }
+
+  // Pre-scan: record every `attr_set(<var>, "reset_pin", <val>)` in the tree.
+  // See decl_reset_pin_ for why a memory declare cannot wait for
+  // pending_attrs_.
+  void collect_decl_reset_pins(const Lnast_nid& nid) {
+    if (Lnast_ntype::is_attr_set(lnast_->get_type(nid))) {
+      auto tgt = lnast_->get_first_child(nid);
+      if (!tgt.is_invalid()) {
+        auto key = lnast_->get_sibling_next(tgt);
+        if (!key.is_invalid() && Lnast_ntype::is_const(lnast_->get_type(key)) && lnast_->get_name(key) == "reset_pin") {
+          auto val = lnast_->get_sibling_next(key);
+          decl_reset_pin_[std::string(lnast_->get_name(tgt))]
+              = val.is_invalid() ? std::string{"true"} : std::string(lnast_->get_name(val));
+        }
+      }
+    }
+    for (auto c = lnast_->get_first_child(nid); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
+      collect_decl_reset_pins(c);
+    }
+  }
+
+  // The reset SIGNAL a memory's whole-array `reset` pin is driven from: a
+  // source-spelled `reset_pin` when the declaration carries one, otherwise the
+  // module's implicit reset. Empty means "no reset at all" (`reset_pin=false`,
+  // or no implicit reset either).
+  [[nodiscard]] std::string mem_reset_source(std::string_view name) const {
+    if (auto it = decl_reset_pin_.find(std::string(name)); it != decl_reset_pin_.end()) {
+      return it->second == "false" ? std::string{} : it->second;
+    }
+    return reset_name_;
+  }
+
+  // THE shared resolution for a source-spelled reset signal name, used by both
+  // finalize_regs (scalar flops) and finalize_mems (register arrays). Usually
+  // a graph input, but a reset synchronizer drives it from a DERIVED
+  // module-level signal, so fall through the same ladder in both places: a
+  // `wire`'s own din (the passthrough buffer is dropped by cgen), then the
+  // last SSA version in logical_last_, then a plain resolve(). An invalid Pin
+  // back means "nothing in this module drives that name" and the caller must
+  // diagnose it -- the two paths drifted once and a memory silently lost its
+  // reset.
+  [[nodiscard]] Pin resolve_reset_signal(std::string_view rst_name) {
+    if (rst_name.empty()) {
+      return Pin{};
+    }
+    if (g_->get_io()->has_input(rst_name)) {
+      return g_->get_input_pin(rst_name);
+    }
+    std::string base(rst_name);
+    if (auto p = base.find("___ssa_"); p != std::string::npos) {
+      base.resize(p);
+    }
+    if (auto dit = wire_names_.contains(base) ? pin_map_.find(din_key(base)) : pin_map_.end(); dit != pin_map_.end()) {
+      return dit->second;
+    }
+    if (auto lit = logical_last_.find(base); lit != logical_last_.end()) {
+      return lit->second.first;
+    }
+    return resolve(rst_name);
   }
 
   // The module reset graph-input pin (same lazy stamping contract
@@ -4403,13 +5814,26 @@ private:
     if (!reset_pin_valid_) {
       auto p = g_->get_input_pin(reset_name_);
       if (reset_minted_) {
-        set_bits(p, 1);
-        set_unsign(p);
+        set_ubits(p, 1);
       }
       reset_pin_       = p;
       reset_pin_valid_ = true;
     }
     return reset_pin_;
+  }
+
+  // The activation graph-input pin. Minted pins are stamped lazily like the
+  // implicit clock/reset; an explicit generated __valid keeps its IO stamp.
+  [[nodiscard]] Pin valid_pin() {
+    if (!valid_pin_valid_) {
+      auto p = g_->get_input_pin(valid_name_);
+      if (valid_minted_) {
+        set_ubits(p, 1);
+      }
+      valid_pin_       = p;
+      valid_pin_valid_ = true;
+    }
+    return valid_pin_;
   }
 
   // range(ref(dst), lo, hi) — record [lo,hi] for a later get_mask; no node.
@@ -4502,8 +5926,7 @@ private:
 
     auto a_val = leaf(val);
     auto node  = make_node(Ntype_op::Get_mask);
-    setup_sink_by_name(node, "a").connect_driver(a_val.pin);
-    setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *mask));
+    livehd::graph_util::connect_mask_operands(node, a_val.pin, create_const(*g_, *mask));
     auto    drv = node.create_driver_pin(0);
     // An all-ones mask (-1) is the open `#[..]` form: it selects EVERY bit of
     // `a`, so the result width is `a`'s width. popcount(-1) is NOT a finite bit
@@ -4529,8 +5952,7 @@ private:
     setup_sink_by_name(andn, "as").connect_driver(m.pin);
     const int32_t and_mw = std::max(a_val.mw, m.mw);
     auto          and_dp = andn.create_driver_pin(0);
-    set_bits(and_dp, and_mw + 1);
-    set_unsign(and_dp);
+    set_ubits(and_dp, and_mw);
 
     auto ror = make_node(Ntype_op::Ror);  // |(a & (1<<i)) -> the selected bit
     setup_sink_by_name(ror, "as").connect_driver(and_dp);
@@ -4562,10 +5984,13 @@ private:
     auto    lo_c = Dlop::from_pyrope(lnast_->get_name(lo));
     int64_t lo_i = lo_c->is_just_i64() ? lo_c->to_just_i64() : 0;
     auto    mask = closed_open_mask(lo_i, msb);
+    if (mask->is_known_zero()) {
+      bind_result(lnast_->get_name(dst), create_const(*g_, *Dlop::create_integer(0)), 1);
+      return;
+    }
 
     auto node = make_node(Ntype_op::Get_mask);
-    setup_sink_by_name(node, "a").connect_driver(a_val.pin);
-    setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *mask));
+    livehd::graph_util::connect_mask_operands(node, a_val.pin, create_const(*g_, *mask));
     bind_result(lnast_->get_name(dst), node.create_driver_pin(0), mask_popcount(*mask));
   }
 
@@ -4585,8 +6010,11 @@ private:
     setup_sink_by_name(sra, "a").connect_driver(a_val.pin);
     setup_sink_by_name(sra, "b").connect_driver(n.pin);
     auto sra_dp = sra.create_driver_pin(0);
-    set_bits(sra_dp, a_val.mw + 1);
-    set_unsign(sra_dp);
+    if (pin_can_be_negative(a_val.pin)) {
+      set_sbits(sra_dp, a_val.mw);
+    } else {
+      set_ubits(sra_dp, a_val.mw);
+    }
 
     if (Lnast_ntype::is_const(lnast_->get_type(hi)) && lnast_->get_name(hi) == "nil") {
       // Open range `a#[n..]`: bits n..msb are exactly `a>>n`; no mask, no
@@ -4595,42 +6023,94 @@ private:
       return;
     }
 
-    auto m = leaf(hi);
+    auto m  = leaf(hi);
+    auto rw = lower_range_width(n, m);
 
-    // width = m - n + 1   (Sum sums sink "a", subtracts sink "b").
-    auto width = make_node(Ntype_op::Sum);
-    setup_sink_by_name(width, "as").connect_driver(m.pin);
-    setup_sink_by_name(width, "as").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
-    setup_sink_by_name(width, "bs").connect_driver(n.pin);
-    const int32_t w_mw = std::max(n.mw, m.mw) + 1;
-    auto          w_dp = width.create_driver_pin(0);
-    set_bits(w_dp, w_mw + 1);
-    set_unsign(w_dp);
-
-    // pow = 1 << width  (sized to cover every bit of `a` plus the +1 of `-1`).
+    // pow = 1 << width. One headroom bit represents 2^a_width before -1.
     auto pow = make_node(Ntype_op::SHL);
     setup_sink_by_name(pow, "a").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
-    setup_sink_by_name(pow, "b").connect_driver(w_dp);
-    const int32_t pow_mw = a_val.mw + 2;
+    setup_sink_by_name(pow, "b").connect_driver(rw.clamped);
+    const int32_t pow_mw = a_val.mw + 1;
     auto          pow_dp = pow.create_driver_pin(0);
-    set_bits(pow_dp, pow_mw + 1);
-    set_unsign(pow_dp);
+    set_ubits(pow_dp, pow_mw);
 
     // mask = pow - 1   (the low (m-n+1) bits set).
     auto maskn = make_node(Ntype_op::Sum);
     setup_sink_by_name(maskn, "as").connect_driver(pow_dp);
     setup_sink_by_name(maskn, "bs").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
     auto mask_dp = maskn.create_driver_pin(0);
-    set_bits(mask_dp, pow_mw + 1);
-    set_unsign(mask_dp);
+    set_ubits(mask_dp, pow_mw);
 
     // result = shifted & mask
     auto andn = make_node(Ntype_op::And);  // commutative: both operands feed sink "a"
     setup_sink_by_name(andn, "as").connect_driver(sra_dp);
     setup_sink_by_name(andn, "as").connect_driver(mask_dp);
-    bind_result(lnast_->get_name(dst), andn.create_driver_pin(0), a_val.mw + 1);
+    bind_result(lnast_->get_name(dst), andn.create_driver_pin(0), a_val.mw);
 
-    lower_range_assert(n, m, loc_nid);
+    lower_range_assert(rw.reversed, loc_nid);
+  }
+
+  // `hi + 1 - lo`, plus the one-bit "this range is REVERSED" flag that both the
+  // data path and the runtime assert need. Shared by the range READ and the
+  // range WRITE: the two halves of one bit view have to agree on the geometry.
+  //
+  // The difference is genuinely SIGNED. Nothing orders two runtime endpoints
+  // (`lo`/`hi` are plain lowered values, and the `hi >= lo` obligation is a
+  // runtime lgassert that no width/range inference consumes), which is the same
+  // rule lower_op applies to every other subtraction -- "a subtraction can go
+  // negative regardless of operand signs". Stamping it unsigned was a lie the
+  // shifts below then read as a huge count: `1 << width` wrapped to 0, the low
+  // mask to all-ones, and a WRITE clobbered every bit of its destination --
+  // outside the requested range, and decided before the assert ever fires.
+  //
+  // The flag tests the SIGN OF THE WIDTH, not `hi < lo`. An LT node carries the
+  // structural u1 hint on its output pin and cgen.verilog derives the
+  // comparison's signedness from exactly that pin, so `hi < lo` emits a bare
+  // `hi < lo` -- and Verilog makes a relational UNSIGNED as soon as one operand
+  // is unsigned, so a negative `hi` (`a#[j..=(i-1)]`, i == 0) read as a huge
+  // value and the guard silently never fired. cgen.sim instead takes the
+  // comparison's signedness from the OPERAND pins, so the same node also
+  // disagreed between the two backends. Both operands of `width < 0` are
+  // signed, so every backend agrees, and it is the exact condition wanted:
+  // `width == 0` (the empty `hi == lo - 1`) already yields a zero mask.
+  struct Range_width {
+    Pin     clamped;   // unsigned: the width, or 0 when the range is reversed
+    Pin     reversed;  // u1: 1 when hi < lo
+    int32_t mw;
+  };
+
+  Range_width lower_range_width(const Val& lo, const Val& hi) {
+    // One bit WIDER than the endpoints' own carrier: the widest legal width,
+    // `hi_max + 1`, needs the full unsigned `w_mw`, so a SIGNED carrier of the
+    // same size would wrap it.
+    const int32_t w_mw  = std::max(lo.mw, hi.mw) + 1;
+    auto          width = make_node(Ntype_op::Sum);
+    setup_sink_by_name(width, "as").connect_driver(hi.pin);
+    setup_sink_by_name(width, "as").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    setup_sink_by_name(width, "bs").connect_driver(lo.pin);
+    auto width_dp = width.create_driver_pin(0);
+    set_sbits(width_dp, w_mw + 1);
+
+    auto rev = make_node(Ntype_op::LT);  // positional: width < 0
+    setup_sink_by_name(rev, "as").connect_driver(width_dp);
+    setup_sink_by_name(rev, "bs").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+    auto rev_dp = rev.create_driver_pin(0);
+    set_ubits(rev_dp, 1);
+
+    // A reversed range selects NO bits, so clamp its width to 0: the mask comes
+    // out 0, so a read is 0 and a write leaves its destination untouched -- the
+    // only sane data path for an empty range (the lgassert still reports it).
+    auto sel = make_node(Ntype_op::Mux);
+    livehd::graph_util::setup_sink_pid(sel, 0).connect_driver(rev_dp);                                       // selector
+    livehd::graph_util::setup_sink_pid(sel, 1).connect_driver(width_dp);                                     // false: hi >= lo
+    livehd::graph_util::setup_sink_pid(sel, 2).connect_driver(create_const(*g_, *Dlop::create_integer(0)));  // true: reversed
+    auto clamped = sel.create_driver_pin(0);
+    // Unsigned (the clamp proves it) and never NARROWER than the widest arm:
+    // cgen.sim rejects a Mux whose result carrier truncates an arm
+    // ("mux-width-loss").
+    set_ubits(clamped, w_mw + 1);
+
+    return Range_width{.clamped = clamped, .reversed = rev_dp, .mw = w_mw + 1};
   }
 
   // Emit a runtime `lgassert(hi >= lo)` guarding a dynamic range select against
@@ -4640,22 +6120,26 @@ private:
   // carries the `a#[lo..=hi]` source span for the assert message. Skipped when
   // there is no GraphLibrary to register the primitive in (the data-path
   // lowering is already complete and correct without the guard).
-  void lower_range_assert(const Val& lo, const Val& hi, const Lnast_nid& loc_nid) {
+  // `reversed` is the flag lower_range_width already built for the data path.
+  // Recomputing it here as `LT(hi, lo)` is what the guard used to do, and that
+  // spelling could not fire for a signed `hi` -- see lower_range_width.
+  void lower_range_assert(const Pin& reversed, const Lnast_nid& loc_nid) {
     if (lib_ == nullptr) {
       return;
     }
-    // cond = (hi >= lo) = Not(LT(hi, lo))   [LT computes hi < lo].
-    auto lt = make_node(Ntype_op::LT);  // positional: "a" < "b"
-    setup_sink_by_name(lt, "as").connect_driver(hi.pin);
-    setup_sink_by_name(lt, "bs").connect_driver(lo.pin);
-    auto lt_dp = lt.create_driver_pin(0);
-    set_bits(lt_dp, 2);
-    set_unsign(lt_dp);
-    auto notn = make_node(Ntype_op::Not);
-    setup_sink_by_name(notn, "a").connect_driver(lt_dp);
+    // cond = (hi >= lo) = reversed XOR 1.
+    auto notn = make_node(Ntype_op::Xor);
+    setup_sink_by_name(notn, "as").connect_driver(reversed);
+    setup_sink_by_name(notn, "as").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
     auto cond = notn.create_driver_pin(0);
-    set_bits(cond, 2);
-    set_unsign(cond);
+    set_ubits(cond, 1);
+
+    // A dynamic range check is a source-visible effect just like an assert:
+    // while this definition/branch is inactive, the obligation is vacuous.
+    const auto guard = effect_path_cond();
+    if (!guard.is_invalid()) {
+      cond = or2(not1(nonzero1(guard)), nonzero1(cond));
+    }
 
     auto gio = lib_->find_io(livehd::graph_util::lgassert_module_name);
     if (!gio) {
@@ -4673,6 +6157,56 @@ private:
     std::string loc = sp.file.empty() ? std::string{"?"} : sp.file;
     if (sp.start_line) {
       loc += ":" + std::to_string(*sp.start_line);
+    }
+    sub.attr(hhds::attrs::name).set(loc);
+  }
+
+  // Pyrope requires a dynamic out-of-range array access to fail at runtime.
+  // Materialize `0 <= index < size` as the same lgassert primitive used for
+  // dynamic range preconditions. Verilog-origin accesses are handled by slang
+  // and retain SystemVerilog's X/ignored-write behavior instead.
+  void lower_array_index_assert(const Val& index, int64_t size, const Lnast_nid& loc_nid) {
+    if (lib_ == nullptr || lnast_->is_verilog_origin()) {
+      return;
+    }
+
+    auto lt_size = make_node(Ntype_op::LT);
+    setup_sink_by_name(lt_size, "as").connect_driver(index.pin);
+    setup_sink_by_name(lt_size, "bs").connect_driver(create_const(*g_, *Dlop::create_integer(size)));
+    auto cond = lt_size.create_driver_pin(0);
+    set_ubits(cond, 1);
+
+    if (pin_can_be_negative(index.pin)) {
+      auto lt_zero = make_node(Ntype_op::LT);
+      setup_sink_by_name(lt_zero, "as").connect_driver(index.pin);
+      setup_sink_by_name(lt_zero, "bs").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+      auto neg = lt_zero.create_driver_pin(0);
+      set_ubits(neg, 1);
+      cond = and2(cond, not1(neg));
+    }
+
+    const auto guard = effect_path_cond();
+    if (!guard.is_invalid()) {
+      cond = or2(not1(nonzero1(guard)), nonzero1(cond));
+    }
+
+    auto gio = lib_->find_io(livehd::graph_util::lgassert_module_name);
+    if (!gio) {
+      gio = lib_->create_io(livehd::graph_util::lgassert_module_name);
+      gio->add_input("cond", 1);
+      gio->set_bits("cond", 1);
+      gio->set_unsign("cond", true);
+    }
+    auto sub = make_node(Ntype_op::Sub);
+    sub.set_subnode(gio);
+    sub.create_sink_pin("cond").connect_driver(cond);
+    const auto  sp  = lnast_->span_of(loc_nid);
+    std::string loc = "array index out of range";
+    if (!sp.file.empty()) {
+      loc += " at " + sp.file;
+      if (sp.start_line) {
+        loc += ":" + std::to_string(*sp.start_line);
+      }
     }
     sub.attr(hhds::attrs::name).set(loc);
   }
@@ -4713,17 +6247,20 @@ private:
       } else if (s == "__fkind__assume") {
         kind = "assume";
         nxt  = lnast_->get_sibling_next(nxt);
+      } else if (s == "__fkind__assume_nocheck") {
+        kind = "assume_nocheck";
+        nxt  = lnast_->get_sibling_next(nxt);
       } else if (s == "__fkind__cassert") {
         kind = "cassert";
         nxt  = lnast_->get_sibling_next(nxt);
       }
     }
-    // `cassert` is an ELABORATION check (user ruling, 2026-07-25): the upass
-    // must fold it here, or it fails. It never becomes an fproperty, so it
+    // `cassert` is an ELABORATION check: the upass must fold it here, or it
+    // fails. It never becomes an fproperty, so it
     // never reaches pass.formal and never survives into the netlist as a
     // runtime check — that is exactly what distinguishes it from `assert`.
     if (kind == "cassert") {
-      if (!livehd::graph_util::is_const_pin(cond.pin)) {
+      if (!cond.pin.is_const()) {
         error_at(nid,
                  {"cassert-not-comptime", "unsupported"},
                  "upass.tolg: cassert condition did not fold to a compile-time "
@@ -4735,7 +6272,7 @@ private:
       // same predicate: an X/unknown constant pin is const and not known-false,
       // so it would slip through as "proven" and emit a full netlist. A cassert
       // the compiler cannot decide is exactly the case that must fail.
-      if (!livehd::graph_util::hydrate_const(cond.pin).is_known_true()) {
+      if (!livehd::graph_util::const_of(cond.pin).is_known_true()) {
         error_at(nid, {"cassert-false", "unsupported"}, "upass.tolg: cassert condition is not true at compile time");
       }
       return;  // folded true: discharged here, nothing to materialize
@@ -4798,7 +6335,7 @@ private:
     // operands go through it: `cond` because the user may assert any integer,
     // and `guard` because it is only 1-bit by convention (prp2lnast gives an
     // if-condition a synthetic `:bool`), not by construction.
-    const auto guard    = current_path_cond();
+    const auto guard    = effect_path_cond();
     const auto eff_cond = guard.is_invalid() ? cond.pin : or2(not1(nonzero1(guard)), nonzero1(cond.pin));
     auto       sub      = make_node(Ntype_op::Sub);
     sub.set_subnode(gio);
@@ -4820,7 +6357,20 @@ private:
   // parses correctly is kept as-is.
   [[nodiscard]] spool_ptr<Dlop> mask_from_operand(const Lnast_nid& mask_op) {
     if (Lnast_ntype::is_const(lnast_->get_type(mask_op))) {
-      return Dlop::from_pyrope(lnast_->get_name(mask_op));
+      auto value = Dlop::from_pyrope(lnast_->get_name(mask_op));
+      // graph/cell.hpp: a Get_mask/Set_mask mask is ONE contiguous window, or
+      // the -1 "whole value" spelling. This is the only producer that passes a
+      // literal through unchecked, so a sparse mask has to be refused HERE --
+      // every consumer downstream reads a window and would otherwise take the
+      // bounding one, selecting bits the source never asked for.
+      if (!value || !livehd::graph_util::is_legal_mask(*value)) {
+        error_at(mask_op,
+                 {"mask-not-contiguous", "unsupported"},
+                 "upass.tolg: get_mask/set_mask mask '{}' is not a contiguous bit range "
+                 "(a sparse mask has no lowering; write one mask per range)",
+                 lnast_->get_name(mask_op));
+      }
+      return value;
     }
     auto it = range_map_.find(std::string{lnast_->get_name(mask_op)});
     if (it != range_map_.end()) {
@@ -4849,10 +6399,7 @@ private:
   }
 
   // Highest set bit + 1 of a (non-negative) mask = the set_mask reach.
-  static int32_t mask_high_bit(const Dlop& m) {
-    int gb = m.is_positive() ? m.get_bits() : 0;  // get_bits() counts the sign bit too
-    return gb > 0 ? static_cast<int32_t>(gb - 1) : int32_t{0};
-  }
+  static int32_t mask_high_bit(const Dlop& m) { return m.is_positive() ? static_cast<int32_t>(m.get_payload_bits()) : int32_t{0}; }
 
   // The base (`value`) operand of a set_mask. Normally `leaf(val)`, but a
   // `mut b:uN = nil` emits no init store, so the first `b#[lo..=hi] = …`
@@ -4872,14 +6419,169 @@ private:
   // the branch. It refuted `minion_dcache_replay_queue`; the shape is a
   // conditional partial write, which is why the unconditional form and a plain
   // identifier both looked fine.
+  //
+  // 2c-wire — a `wire` needs the SAME 0sb? seed, but the test above can never
+  // fire for one: lower_wire_declare records the passthrough-Or OUTPUT under
+  // the wire's name (so reads are position independent), so a wire is ALWAYS
+  // in pin_map_. Taking leaf(val) there seeded the chain with the wire's own
+  // buffer output while the completed write connects the chain's result back to
+  // that buffer's INPUT — a manufactured combinational RING (`upass.tolg:
+  // combinational loop`), the one class of self-referential set_mask chain the
+  // frontends still produced. The uncovered bits of a wire assembled from
+  // bit-range writes are undriven exactly like the mut case, so seed 0sb? at
+  // the wire's DECLARED width and let the covered lanes overwrite it. Only the
+  // FIRST partial write reaches here: lower_set_mask prefers the din
+  // accumulator once one exists, so a chain still accumulates, and a wire with
+  // a whole-value driver already recorded keeps that value as its base.
   [[nodiscard]] Val set_mask_base(const Lnast_nid& val) {
     if (Lnast_ntype::is_ref(lnast_->get_type(val))) {
-      const std::string name{canon_io_name(lnast_->get_name(val))};
+      const std::string raw{lnast_->get_name(val)};
+      const std::string name{canon_io_name(raw)};
+      // Every partial write accumulates on the pending input, including
+      // runtime ranges. Ordinary expression reads still resolve to committed Q.
+      if (reg_map_.contains(raw) || wire_names_.contains(raw)) {
+        if (auto dit = pin_map_.find(din_key(raw)); dit != pin_map_.end()) {
+          return {dit->second, mw_lookup(din_key(raw))};
+        }
+      }
+      // A packed bit-view write after a whole-memory assignment must splice
+      // into the pending bulk value, just as a scalar register uses its din.
+      // Ordinary reads still use the memory's committed read_all value.
+      auto mit = mem_map_.find(raw);
+      if (mit == mem_map_.end()) {
+        mit = mem_map_.find(name);
+      }
+      if (mit != mem_map_.end() && !mit->second.is_array && mit->second.has_update) {
+        auto&      mi    = mit->second;
+        const auto width = static_cast<int32_t>(mi.size * mi.elem_mw);
+        if (mi.update_en.is_invalid()) {
+          return {mi.update_val, width};
+        }
+        auto mux = make_node(Ntype_op::Mux);
+        livehd::graph_util::setup_sink_pid(mux, 0).connect_driver(mi.update_en);
+        livehd::graph_util::setup_sink_pid(mux, 1).connect_driver(get_or_make_read_all(mi));
+        livehd::graph_util::setup_sink_pid(mux, 2).connect_driver(mi.update_val);
+        auto value = mux.create_driver_pin(0);
+        set_ubits(value, width);
+        return {value, width};
+      }
       if (!pin_map_.contains(name) && scalar_decl_.contains(name)) {
         return {nil_pin(), 1};
       }
+      if (auto wit = wire_info_.find(raw); wit != wire_info_.end() && !pin_map_.contains(din_key(raw))) {
+        return {nil_pin(), wit->second.decl_mw > 0 ? wit->second.decl_mw : 1};
+      }
     }
     return leaf(val);
+  }
+
+  void record_set_mask_result(std::string_view dst_name, const Pin& drv, int32_t mw) {
+    const bool is_reg  = reg_map_.contains(std::string(dst_name)) && reg_info_.contains(std::string(dst_name));
+    const bool is_wire = !is_reg && wire_names_.contains(std::string(dst_name));
+    if (is_reg) {
+      record(din_key(dst_name), drv, mw);
+      record(en_key(dst_name), en_const(true), 1);
+    } else if (is_wire) {
+      record(din_key(dst_name), drv, mw);
+      maybe_bind_wire_shadow(din_key(dst_name), drv, mw);
+    } else {
+      record(dst_name, drv, mw);
+    }
+  }
+
+  // Build `(base & ~mask) | (shifted_value & mask)` using an explicitly
+  // width-bounded inverse mask. This is the common full-value RMW used by
+  // runtime bit and range writes; no dynamic Set_mask cell is required.
+  [[nodiscard]] Pin lower_dynamic_mask_rmw(const Val& base, const Pin& mask, const Pin& shifted_value) {
+    const int32_t out_mw = std::max<int32_t>(base.mw, 1);
+
+    auto inv = make_node(Ntype_op::Xor);
+    setup_sink_by_name(inv, "as").connect_driver(mask);
+    setup_sink_by_name(inv, "as").connect_driver(create_const(*g_, *Dlop::get_mask_value(out_mw)));
+    auto inv_dp = inv.create_driver_pin(0);
+    set_ubits(inv_dp, out_mw);
+
+    auto kept = make_node(Ntype_op::And);
+    setup_sink_by_name(kept, "as").connect_driver(base.pin);
+    setup_sink_by_name(kept, "as").connect_driver(inv_dp);
+    auto kept_dp = kept.create_driver_pin(0);
+    set_ubits(kept_dp, out_mw);
+
+    auto inserted = make_node(Ntype_op::And);
+    setup_sink_by_name(inserted, "as").connect_driver(shifted_value);
+    setup_sink_by_name(inserted, "as").connect_driver(mask);
+    auto inserted_dp = inserted.create_driver_pin(0);
+    set_ubits(inserted_dp, out_mw);
+
+    auto merged = make_node(Ntype_op::Or);
+    setup_sink_by_name(merged, "as").connect_driver(kept_dp);
+    setup_sink_by_name(merged, "as").connect_driver(inserted_dp);
+    auto merged_dp = merged.create_driver_pin(0);
+    set_ubits(merged_dp, out_mw);
+    return merged_dp;
+  }
+
+  // `dst#[lo..=hi] = value` with runtime endpoints. The language operation
+  // stays a range write through LNAST; tolg materializes its hardware as one
+  // packed RMW. Later SROA can distribute the resulting value over leaves.
+  void lower_dynamic_range_update(const Lnast_nid& dst, const Lnast_nid& val, const Lnast_nid& ins, const Lnast_nid& lo,
+                                  const Lnast_nid& hi, const Lnast_nid& loc_nid) {
+    auto base = set_mask_base(val);
+    auto n    = leaf(lo);
+    auto m    = leaf(hi);
+    auto iv   = leaf(ins);
+
+    // width = hi + 1 - lo, clamped to 0 on a reversed range so the mask comes
+    // out 0 and the RMW leaves `dst` untouched. The clamped value is
+    // non-negative by construction, so the shift amounts below never see a
+    // negative-as-unsigned count.
+    auto rw = lower_range_width(n, m);
+
+    auto pow = make_node(Ntype_op::SHL);
+    setup_sink_by_name(pow, "a").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    setup_sink_by_name(pow, "b").connect_driver(rw.clamped);
+    auto pow_dp = pow.create_driver_pin(0);
+    set_ubits(pow_dp, std::max<int32_t>(base.mw + 1, 2));
+
+    auto low_mask = make_node(Ntype_op::Sum);
+    setup_sink_by_name(low_mask, "as").connect_driver(pow_dp);
+    setup_sink_by_name(low_mask, "bs").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    auto low_mask_dp = low_mask.create_driver_pin(0);
+    set_ubits(low_mask_dp, std::max<int32_t>(base.mw + 1, 2));
+
+    auto maskn = make_node(Ntype_op::SHL);
+    setup_sink_by_name(maskn, "a").connect_driver(low_mask_dp);
+    setup_sink_by_name(maskn, "b").connect_driver(n.pin);
+    auto mask_dp = maskn.create_driver_pin(0);
+    set_ubits(mask_dp, std::max<int32_t>(base.mw, 1));
+
+    auto shifted = make_node(Ntype_op::SHL);
+    setup_sink_by_name(shifted, "a").connect_driver(iv.pin);
+    setup_sink_by_name(shifted, "b").connect_driver(n.pin);
+    auto shifted_dp = shifted.create_driver_pin(0);
+    set_ubits(shifted_dp, std::max<int32_t>(base.mw, 1));
+
+    auto merged = lower_dynamic_mask_rmw(base, mask_dp, shifted_dp);
+    record_set_mask_result(lnast_->get_name(dst), merged, std::max<int32_t>(base.mw, 1));
+    lower_range_assert(rw.reversed, loc_nid);
+  }
+
+  // `dst#[idx] = value`: prp2lnast has already built the one-hot mask `1<<idx`.
+  // Multiplying that mask by the checked one-bit value places the insertion at
+  // the selected position without recovering the original index expression.
+  void lower_dynamic_bit_update(const Lnast_nid& dst, const Lnast_nid& val, const Lnast_nid& mask_op, const Lnast_nid& ins) {
+    auto base = set_mask_base(val);
+    auto mask = leaf(mask_op);
+    auto iv   = leaf(ins);
+
+    auto placed = make_node(Ntype_op::Mult);
+    setup_sink_by_name(placed, "as").connect_driver(mask.pin);
+    setup_sink_by_name(placed, "as").connect_driver(iv.pin);
+    auto placed_dp = placed.create_driver_pin(0);
+    set_ubits(placed_dp, std::max<int32_t>(base.mw, 1));
+
+    auto merged = lower_dynamic_mask_rmw(base, mask.pin, placed_dp);
+    record_set_mask_result(lnast_->get_name(dst), merged, std::max<int32_t>(base.mw, 1));
   }
 
   // set_mask(ref(dst), value, mask, ins).
@@ -4916,6 +6618,21 @@ private:
                lnast_->get_name(it->second),
                lnast_->get_name(it->second));
     }
+    const std::string mask_name{lnast_->get_name(mask_op)};
+    if (auto it = range_dyn_map_.find(mask_name); it != range_dyn_map_.end()) {
+      if (Lnast_ntype::is_const(lnast_->get_type(it->second.second)) && lnast_->get_name(it->second.second) == "nil") {
+        error_at(nid,
+                 {"open-range-write", "unsupported"},
+                 "upass.tolg: open-ended runtime bit-range write is not supported — give the upper bound explicitly");
+      }
+      lower_dynamic_range_update(dst, val, ins, it->second.first, it->second.second, nid);
+      return;
+    }
+    const bool runtime_mask = !Lnast_ntype::is_const(lnast_->get_type(mask_op)) && !range_map_.contains(mask_name);
+    if (runtime_mask) {
+      lower_dynamic_bit_update(dst, val, mask_op, ins);
+      return;
+    }
     auto mask = mask_from_operand(mask_op);
 
     // A partial bit-range WRITE of a declared reg/wire is a next-state
@@ -4930,8 +6647,6 @@ private:
     // result, not q — so when the base operand is the destination itself, read
     // the current din accumulator (if any) instead of resolving the name to q.
     const std::string dst_name{lnast_->get_name(dst)};
-    const bool        is_reg  = reg_map_.contains(dst_name) && reg_info_.contains(dst_name);
-    const bool        is_wire = !is_reg && wire_names_.contains(dst_name);
     // RMW base = current din accumulator if a prior partial write set it, else
     // the committed value (q / buffer output) via the name. This must key off
     // the BASE OPERAND's name, not just dst: prp2lnast lowers `r#[lo..=hi] = x`
@@ -4941,45 +6656,261 @@ private:
     // image from stale q and silently drop the first write when both enables
     // fired (the DataModule__64entry per-entry register file: entry 63's write
     // vanished under a same-cycle entry-62 write).
-    Val               vv;
-    bool              base_from_accum = false;
-    if (Lnast_ntype::is_ref(lnast_->get_type(val))) {
-      const std::string val_name{lnast_->get_name(val)};
-      const bool        vreg  = reg_map_.contains(val_name) && reg_info_.contains(val_name);
-      const bool        vwire = !vreg && wire_names_.contains(val_name);
-      if (vreg || vwire) {
-        if (auto dit = pin_map_.find(din_key(val_name)); dit != pin_map_.end()) {
-          vv              = Val{dit->second, mw_lookup(din_key(val_name))};
-          base_from_accum = true;
-        }
-      }
-    }
-    if (!base_from_accum) {
-      vv = set_mask_base(val);
-    }
+    auto              vv = set_mask_base(val);
 
     auto node = make_node(Ntype_op::Set_mask);
-    setup_sink_by_name(node, "a").connect_driver(vv.pin);
-    setup_sink_by_name(node, "mask").connect_driver(create_const(*g_, *mask));
-    setup_sink_by_name(node, "value").connect_driver(leaf(ins).pin);
+    livehd::graph_util::connect_mask_operands(node, vv.pin, create_const(*g_, *mask), leaf(ins).pin);
     int32_t mask_mw = mask_high_bit(*mask);
     auto    drv     = node.create_driver_pin(0);
     int32_t res_mw  = std::max(vv.mw, mask_mw);
-    set_bits(drv, res_mw + 1);
-    set_unsign(drv);
-    if (is_reg) {
-      record(din_key(dst_name), drv, res_mw);
-      record(en_key(dst_name), en_const(true), 1);
-      return;
-    }
-    if (is_wire) {
-      record(din_key(dst_name), drv, res_mw);
-      return;
-    }
-    record(dst_name, drv, res_mw);
+    set_ubits(drv, res_mw);
+    record_set_mask_result(dst_name, drv, res_mw);
   }
 
-  enum class OpW { add, mul, maxw, firstw, boolw, shlw };
+  // ── concat ───────────────────────────────────────────────────────────────
+  //
+  // `concat( dst, v_msb, w_msb, …, v_lsb, w_lsb )` lowers 1:1 to one
+  // Ntype_op::Concat: the LNAST node ALREADY carries the interleaved
+  // (value, width) shape, and the cell's sinks are the same pairs at pids
+  // 2i / 2i+1, MSB-first.
+  //
+  // A width operand may still be the `nil` sentinel here, meaning no upass pass
+  // could bind it from the lane's declared type. That is a HARD ERROR, never a
+  // guess: mw_lookup() would happily hand back the live value's width (or its
+  // default of 1), and the value's width is precisely what a concat may not be
+  // sized by -- narrowing one lane shifts every lane above it.
+  //
+  // This is also the LAST place the destination's declared width is checked.
+  // The concat's own dst is a compiler temp, so the user-facing `c:u12 = …`
+  // check rides where that temp is BOUND to a declared name; see
+  // check_concat_dest_width, called from the declare/store paths.
+
+  // The bound width of one lane's width operand, or nullopt when it is `nil`
+  // (or otherwise not a positive comptime integer).
+  [[nodiscard]] std::optional<int32_t> concat_bound_width(const Lnast_nid& nid) const {
+    if (nid.is_invalid() || !Lnast_ntype::is_const(lnast_->get_type(nid))) {
+      return std::nullopt;
+    }
+    const auto txt = lnast_->get_name(nid);
+    if (txt.empty() || txt == "nil") {
+      return std::nullopt;
+    }
+    auto v = Dlop::from_pyrope(txt);
+    if (!v || !v->is_integer() || !v->is_just_i64()) {
+      return std::nullopt;
+    }
+    const auto w = v->to_just_i64();
+    if (w <= 0 || w > std::numeric_limits<int32_t>::max()) {
+      return std::nullopt;
+    }
+    return static_cast<int32_t>(w);
+  }
+
+  // A concat lane that names a DECLARED ARRAY: its (entry count, element
+  // width), or nullopt when the lane is not one. Both array storage classes
+  // answer here — a `mut`/`const` comb array is an Array_scalar_view and a
+  // `reg` array is a Memory — because both carry the declared extent and a
+  // single scalar element width.
+  //
+  // The entry count is the FLAT one (`[4][8]u8` splices 32 windows), which is
+  // what both records already hold.
+  [[nodiscard]] std::optional<std::pair<int64_t, int32_t>> concat_array_extent(const Lnast_nid& v) const {
+    if (v.is_invalid() || !Lnast_ntype::is_ref(lnast_->get_type(v))) {
+      return std::nullopt;
+    }
+    // The packed bus is size*elem_mw bits and every downstream width here is
+    // int32, so an extent whose product does not fit is declined rather than
+    // truncated -- a wrapped packed_mw would silently mis-slice every entry.
+    auto extent = [](int64_t size, int32_t elem_mw) -> std::optional<std::pair<int64_t, int32_t>> {
+      if (size <= 0 || elem_mw <= 0 || size > std::numeric_limits<int32_t>::max() / elem_mw) {
+        return std::nullopt;
+      }
+      return std::pair<int64_t, int32_t>{size, elem_mw};
+    };
+    const std::string name{lnast_->get_name(v)};
+    if (auto it = array_scalar_views_.find(name); it != array_scalar_views_.end()) {
+      if (auto e = extent(it->second.size, it->second.elem_mw)) {
+        return e;
+      }
+    }
+    if (auto it = mem_map_.find(name); it != mem_map_.end()) {
+      if (auto e = extent(it->second.size, it->second.elem_mw)) {
+        return e;
+      }
+    }
+    return std::nullopt;
+  }
+
+  // Entry `index` of a packed array bus: the elem_mw-bit window at
+  // index*elem_mw. The raw UNSIGNED bit pattern is what a concat lane wants —
+  // a signed element still occupies exactly its own elem_mw bits, the same rule
+  // that makes a Verilog concat operand self-determined — so no sign extension
+  // rides along (unlike the element READ in lower_tuple_get, whose result feeds
+  // an arithmetic consumer).
+  [[nodiscard]] Pin array_entry_slice(const Pin& packed, int32_t packed_mw, int64_t index, int32_t elem_mw) {
+    Pin src = packed;
+    if (index > 0) {
+      auto sra = make_node(Ntype_op::SRA);
+      setup_sink_by_name(sra, "a").connect_driver(packed);
+      setup_sink_by_name(sra, "b").connect_driver(create_const(*g_, *Dlop::create_integer(index * elem_mw)));
+      src = sra.create_driver_pin(0);
+      set_ubits(src, packed_mw);
+    }
+    auto gm = make_node(Ntype_op::Get_mask);
+    livehd::graph_util::connect_mask_operands(gm, src, create_const(*g_, *Dlop::get_mask_value(elem_mw)));
+    auto out = gm.create_driver_pin(0);
+    set_ubits(out, elem_mw);  // an unsized pin emits as ONE bit
+    return out;
+  }
+
+  void lower_concat(const Lnast_nid& nid) {
+    auto dst = lnast_->get_first_child(nid);
+    if (dst.is_invalid()) {
+      return;
+    }
+
+    // Resolve every lane FIRST: a bad lane must abort before any cell is
+    // minted, so a rejected concat leaves no half-wired node behind.
+    struct Lane {
+      Lnast_nid nid;
+      int32_t   width;    // one window
+      int64_t   entries;  // 0 = a scalar lane; >0 = SPLICE that many windows of an array
+    };
+    std::vector<Lane> lanes;
+    size_t            n_windows = 0;
+    for (auto v = lnast_->get_sibling_next(dst); !v.is_invalid();) {
+      auto w = lnast_->get_sibling_next(v);
+      if (w.is_invalid()) {
+        error_at(nid,
+                 {"concat-malformed", "internal"},
+                 "upass.tolg: concat lane '{}' has no width operand — every lane is a (value, width) PAIR",
+                 lnast_->get_name(v));
+      }
+      if (const auto bound = concat_bound_width(w)) {
+        lanes.push_back(Lane{v, *bound, 0});
+        n_windows += 1;
+      } else if (const auto ext = concat_array_extent(v)) {
+        // An ARRAY lane splices its entries, entry 0 LEAST significant — the
+        // positional-tuple rule (docs/pyrope/10-internals.md, "Bit selection
+        // and packing"). It occupies no SINGLE window, which is why its own
+        // width operand is still the `nil` sentinel and why this arm sits
+        // ahead of the untyped-lane error rather than after it.
+        //
+        // Only a Pyrope array reaches here: concat_array_extent matches a
+        // DECLARED array ref, and an unpacked array is not a legal Verilog
+        // concatenation operand — so flipping this order cannot disturb a
+        // Verilog-origin concat.
+        lanes.push_back(Lane{v, ext->second, ext->first});
+        n_windows += static_cast<size_t>(ext->first);
+      } else {
+        error_at(nid,
+                 {"concat-untyped-lane", "type"},
+                 "upass.tolg: concat lane '{}' has no declared bit width — a concat window is sized by the lane's "
+                 "DECLARED type, never by its value or an inferred range, because narrowing one lane would shift "
+                 "every lane above it (bind it to a typed name first: `const w:u4 = <expr>`)",
+                 lnast_->get_name(v));
+      }
+      v = lnast_->get_sibling_next(w);
+    }
+    if (lanes.empty() || n_windows == 0) {
+      error_at(nid, {"concat-empty", "type"}, "upass.tolg: concat needs at least one lane");
+    }
+
+    auto          node   = make_node(Ntype_op::Concat);
+    int32_t       sum_mw = 0;
+    hhds::Port_id pid    = 0;
+    for (const auto& l : lanes) {
+      if (l.entries == 0) {
+        auto v = leaf(l.nid);
+        node.create_sink_pin(pid++).connect_driver(v.pin);
+        node.create_sink_pin(pid++).connect_driver(create_const(*g_, *Dlop::create_integer(l.width)));
+        sum_mw += l.width;
+        continue;
+      }
+      // The packed bus already holds entry 0 in the LOW element window
+      // (graph/cell.cpp pid 12, and the layout Array_scalar_view's indexed read
+      // assumes), and a spliced array keeps exactly that order, so walking the
+      // entries DOWN the bus emits them MSB-first into this MSB-first lane
+      // list. The splice is a COPY of the packed word, not a per-entry
+      // reversal of it.
+      auto          packed    = leaf(l.nid);
+      const int32_t packed_mw = static_cast<int32_t>(l.entries * l.width);
+      for (int64_t e = l.entries - 1; e >= 0; --e) {
+        node.create_sink_pin(pid++).connect_driver(array_entry_slice(packed.pin, packed_mw, e, l.width));
+        node.create_sink_pin(pid++).connect_driver(create_const(*g_, *Dlop::create_integer(l.width)));
+        sum_mw += l.width;
+      }
+    }
+
+    auto out = node.create_driver_pin(0);
+    // The assembled value is always NON-NEGATIVE, so bind_result stamps the
+    // exact literal sum(w_i) width as unsigned.
+    bind_result(lnast_->get_name(dst), out, sum_mw);
+    // The result has a declared width BY CONSTRUCTION, which is what makes
+    // `concat(concat(a,b), c)` legal and what the destination check compares
+    // a declared `c:u12` against.
+    record_decl_type(lnast_->get_name(dst), sum_mw, /*is_signed=*/false);
+    concat_result_mw_[logical_key(lnast_->get_name(dst))] = sum_mw;
+  }
+
+  // `const c:u12 = concat(a:u4, b:u8)` — the destination's declared width must
+  // equal the lane sum EXACTLY. Not `>=`: a concat states a bit layout, and a
+  // destination that quietly zero-extends it is a layout the source does not
+  // say. Signedness is free (`u12` and `s12` are both 12-bit fields), so only
+  // the width is compared.
+  //
+  // Checked where the concat's TEMP is bound to a declared name, because the
+  // concat node's own dst is always a compiler temp.
+  void check_concat_dest_width(const Lnast_nid& anchor, std::string_view dest_name, const Lnast_nid& value_nid) {
+    // Pyrope only -- see the twin guard in upass.runner. Verilog declares its
+    // widths its own way and its assignment rules pad/truncate rather than
+    // reject, so the Pyrope "destination states the layout" rule would refuse
+    // ordinary imported RTL.
+    if (lnast_->is_verilog_origin()) {
+      return;
+    }
+    if (value_nid.is_invalid() || !Lnast_ntype::is_ref(lnast_->get_type(value_nid))) {
+      return;
+    }
+    auto cit = concat_result_mw_.find(logical_key(lnast_->get_name(value_nid)));
+    if (cit == concat_result_mw_.end()) {
+      return;  // not a concat result
+    }
+    // Only a SOURCE-level destination is checked -- the same exemption
+    // upass.runner's twin (check_concat_dest) documents. A store into a
+    // COMPILER TEMP (`___N`, an SSA staging name a frontend minted) is an
+    // internal move, not a declaration the user wrote: demanding a declared
+    // type of it would turn a frontend's own staging store into a hard
+    // `concat-untyped-dest` error on legal source.
+    if (const auto dkey = logical_key(dest_name); dkey.empty() || dkey.starts_with("___")) {
+      return;
+    }
+    auto dt = decl_type_lookup(dest_name);
+    if (!dt) {
+      error_at(anchor,
+               {"concat-untyped-dest", "type"},
+               "upass.tolg: '{}' is assigned a concat but has no declared type — a concat's destination must declare "
+               "the {}-bit width the lanes add up to (e.g. `{}:u{}` or `{}:s{}`)",
+               dest_name,
+               cit->second,
+               dest_name,
+               cit->second,
+               dest_name,
+               cit->second);
+    }
+    if (dt->mw != cit->second) {
+      error_at(anchor,
+               {"concat-width-mismatch", "type"},
+               "upass.tolg: '{}' is declared {} bits but the concat assigned to it is {} bits — a concat's "
+               "destination must match the lane sum EXACTLY, so that the bit layout the source states is the layout "
+               "the destination has",
+               dest_name,
+               dt->mw,
+               cit->second);
+    }
+  }
+
+  enum class OpW { add, mul, maxw, andw, firstw, boolw, shlw };
 
   // n-ary op: child0 = dst, children 1..N = operands. Commutative ops feed all
   // operands into sink "a"; positional binary ops use "a" then "b".
@@ -4988,26 +6919,70 @@ private:
     if (dst.is_invalid()) {
       return;
     }
-    auto    node      = make_node(op);
-    int32_t max_mw    = 0;
-    int32_t sum_mw    = 0;
-    int32_t first_mw  = 0;
-    int32_t second_mw = 0;   // shift-amount magnitude width (shlw)
-    int64_t shl_amt   = -1;  // shift-amount value when constant (shlw); <0 = dynamic
-    bool    first     = true;
-    int     opnd_idx  = 0;
+    auto    node           = make_node(op);
+    int32_t max_mw         = 0;
+    int32_t sum_mw         = 0;
+    int32_t min_nonneg_mw  = 0;      // andw: narrowest NON-NEGATIVE operand...
+    bool    any_nonneg     = false;  // ...which is only meaningful once this is set (mw 0 is legal)
+    bool    any_negative   = false;  // at least one operand may carry a negative value
+    int32_t signed_mw      = 0;      // width needed if the result must use a signed carrier
+    bool    first_negative = false;  // shifts take their result sign from the value operand
+    int32_t first_mw       = 0;
+    int32_t second_mw      = 0;   // shift-amount magnitude width (shlw)
+    int64_t shl_amt        = -1;  // shift-amount value when constant (shlw); <0 = dynamic
+    bool    first          = true;
+    int     opnd_idx       = 0;
     for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
-      auto v  = leaf(c);
-      max_mw  = std::max(max_mw, v.mw);
-      sum_mw += v.mw;
+      auto v        = leaf(c);
+      max_mw        = std::max(max_mw, v.mw);
+      sum_mw       += v.mw;
+      any_negative  = any_negative || pin_can_be_negative(v.pin);
+      // A literal uW operand needs W+1 bits when represented in a signed
+      // carrier; an sW operand already includes its sign bit.  Bitwise ops
+      // become signed when any operand may be negative, so remember the
+      // widest lossless signed representation while walking the inputs.
+      signed_mw     = std::max(signed_mw, v.mw + (pin_can_be_negative(v.pin) ? 0 : 1));
+      if (wmode == OpW::andw && v.pin.is_const()) {
+        // A bitwise AND is bounded by its NARROWEST NON-NEGATIVE operand: `x & m`
+        // can only keep bits that `m` has set, so the result never exceeds m --
+        // whatever x is, and however wide.
+        //
+        // Only a NON-NEGATIVE operand bounds it. A negative one is an infinite
+        // run of leading ones (`x & -2` keeps every bit of x but bit 0), so its
+        // magnitude width bounds nothing and `min` there would truncate.
+        //
+        // CONSTANTS ONLY, deliberately. A non-const operand's `is_unsign` stamp
+        // is NOT a proof of non-negativity: bind_result stamps every computed op
+        // unsigned, and the OPEN note at the end of this function records that a
+        // BITWISE op over signed operands is stamped unsigned while its value is
+        // negative (`sa ^ sb` can be -1). Narrowing an AND to such an operand's
+        // magnitude width truncates the OTHER operand -- `(-1) & w` must be w,
+        // but a 5-bit stamp keeps only w's low 5 bits, a silent miscompile that
+        // OpW::maxw did not have. Trusting the stamp measured just 1.1 points
+        // better on minion (-16.2% vs -15.1% of op words); the win is dominated
+        // by the constant masks, which are exact.
+        //
+        // Test the lowered PIN rather than the LNAST leaf kind: cprop can prove
+        // a reference temporary constant before tolg, and that constant is just
+        // as valid a mask. The value comes from that pin, so there is no second
+        // Dlop parse.
+        const auto& cv = livehd::graph_util::const_of(v.pin);
+        if (cv.is_numeric() && !cv.is_negative() && (!any_nonneg || v.mw < min_nonneg_mw)) {
+          min_nonneg_mw = v.mw;
+          any_nonneg    = true;
+        }
+      }
       if (first) {
-        first_mw = v.mw;
+        first_mw       = v.mw;
+        first_negative = pin_can_be_negative(v.pin);
       } else if (second_mw == 0) {
         second_mw = v.mw;
         if (Lnast_ntype::is_const(lnast_->get_type(c))) {
-          auto cv = Dlop::from_pyrope(lnast_->get_name(c));
-          if (cv->is_just_i64()) {
-            shl_amt = cv->to_just_i64();
+          // Read back the const pin leaf() built, rather than re-parsing the
+          // same literal text a second time.
+          const auto& cv = livehd::graph_util::const_of(v.pin);
+          if (cv.is_just_i64()) {
+            shl_amt = cv.to_just_i64();
           }
         }
       }
@@ -5024,7 +6999,7 @@ private:
       }
       // op varies (Sum/Mult/And/.../Div/SHL/SRA): address by pid so the right
       // sink name resolves per op (pid 0 = a/as, pid 1 = b) without hardcoding.
-      node.create_sink_pin((commutative || first) ? 0 : 1).connect_driver(v.pin);
+      livehd::graph_util::setup_sink_pid(node, (commutative || first) ? 0 : 1).connect_driver(v.pin);
       first = false;
       ++opnd_idx;
     }
@@ -5033,6 +7008,9 @@ private:
       case OpW::add   : mw = static_cast<int32_t>(max_mw + 1); break;
       case OpW::mul   : mw = sum_mw > 0 ? sum_mw : int32_t{1}; break;
       case OpW::maxw  : mw = max_mw; break;
+      // AND narrows: bounded by the narrowest non-negative operand when there is
+      // one, else (no operand proven non-negative) it keeps the widest.
+      case OpW::andw  : mw = any_nonneg ? min_nonneg_mw : max_mw; break;
       case OpW::firstw: mw = first_mw; break;
       case OpW::boolw : mw = 1; break;
       case OpW::shlw  : {
@@ -5047,43 +7025,26 @@ private:
     }
     auto out = node.create_driver_pin(0);
     bind_result(lnast_->get_name(dst), out, mw);
-    // A SUBTRACTION can go negative, so the result must be stamped SIGNED —
-    // same reasoning (and same bug) as lower_unary's `~x`: bind_result stamps
-    // UNSIGNED, and an unsigned pin is defined to carry an always-0 spare sign
-    // bit. `0 - x` violates that invariant outright, and every consumer that
-    // widens the pin then zero-fills a value that had to sign-extend.
-    //
-    // cgen happened to paper over this: its Get_mask path re-declares an
-    // undeclared operand as signed, so `(0 - x)#[0..=15]` came out right —
-    // but ONLY when the Get_mask was visited before the Sum. Put the same Sum
-    // behind a mux and the Sum got declared (unsigned) first, the re-declare
-    // was skipped, and `-1` widened to `+15`. That order-dependence is the
-    // symptom; the wrong sign stamp is the cause.
-    //
-    // `first` is still true when the loop bound only ONE operand, i.e. a lone
-    // `-x`-shaped Sum with nothing on the subtract sink — that cannot go
-    // negative from the subtract side, so it keeps the unsigned stamp.
-    if (op == Ntype_op::Sum && !commutative && !first && opnd_idx >= 2) {
-      set_sign(out);
+    // A subtraction can go negative regardless of operand signs. An addition
+    // can go negative whenever at least one operand can. In either case the
+    // arithmetic carrier is signed; only an explicit mask/cast may turn its
+    // finite low-bit projection into an unsigned value.
+    if (op == Ntype_op::Sum && ((!commutative && opnd_idx >= 2) || any_negative)) {
+      set_sbits(out, std::max<int32_t>(1, mw));
     }
-    // OPEN (measured, NOT fixed): a BITWISE op drops its operands' sign the same
-    // way the Sum above did. `sa | 2'sb11` is -1, but bind_result stamps it
-    // unsigned -- an unsigned pin promises an always-0 top bit -- so widening to
-    // a 16-bit output ZERO-fills and the result reads 7 instead of 0xffff. cgen
-    // hides it for a BARE `sa | b` (its Get_mask path re-declares an undeclared
-    // operand signed); only the visit order behind a mux exposes it, exactly the
-    // order-dependence the Sum re-sign was fixed for. Minimal repro:
-    //     y16 = c ? (sa | 2'sb11) : (c ? sa : sb)      // sa,sb signed
-    //
-    // The obvious patch -- `set_sign(out)` when ANY operand can be negative --
-    // was tried here and REVERTED: it fixes that repro but MISCOMPILES 128 of
-    // 2048 vectors on tmp/chigen_fuzz/opfuzz.py's seed-7 depth-6 nest, because
-    // Verilog resolves a bitwise op UNSIGNED as soon as ONE operand is unsigned
-    // (a CONCAT is always unsigned, so `signed_expr ^ {a,b}` is unsigned) --
-    // the opposite of the ANY rule, and the reader does not always pre-insert
-    // the widening node that would make the stamp irrelevant. A correct fix has
-    // to carry the reader's resolved signedness down to the op, not re-derive it
-    // from the operand pins. Tracked by tests/equiv/signed_bitwise_mux_arm.
+    if ((op == Ntype_op::Mult || op == Ntype_op::Div) && any_negative) {
+      set_sbits(out, std::max<int32_t>(1, mw));
+    }
+    if ((op == Ntype_op::SHL || op == Ntype_op::SRA) && first_negative) {
+      set_sbits(out, std::max<int32_t>(1, mw));
+    }
+    // Or/Xor preserve the infinite leading ones of a negative operand. And does
+    // too only when every operand may be negative: one proven non-negative
+    // operand is a finite mask and bounds the result to its own unsigned width.
+    // Keep the unbounded cases signed at the widest lossless signed width.
+    if ((op == Ntype_op::Or || op == Ntype_op::Xor || (op == Ntype_op::And && !any_nonneg)) && any_negative) {
+      set_sbits(out, std::max<int32_t>(1, signed_mw));
+    }
   }
 
   // LNAST sext(dst, a, b): reinterpret bit POSITION b of `a` as the sign
@@ -5125,15 +7086,13 @@ private:
 
   // `~x` — bitwise NOT (the only unary lowered through here).
   //
-  // The operand is carried in the unsigned convention: `mw` magnitude bits plus
-  // a leading 0 sign bit, so mw+1 stored bits. Flipping every bit necessarily
-  // SETS that sign bit, so the result is always negative — range
+  // An unsigned `mw`-bit operand ranges through 2^mw-1. Flipping its unlimited
+  // leading zeros makes the result negative — range
   // [-(2^mw), -1] — and has to be stamped SIGNED across all mw+1 bits, the same
   // shape lower_sext() uses for its signed result.
   //
-  // Binding it through bind_result() stamped it UNSIGNED instead, and an
-  // unsigned pin is defined to drop its spare sign bit. Consumers then
-  // disagreed about that top bit: the LEC read one bit too few, and abc
+  // Binding it through bind_result() stamped it UNSIGNED instead. Consumers
+  // then disagreed about the required sign extension: the LEC read one bit too few, and abc
   // zero-filled a widening that had to sign-extend — `(~ec)#[0..=9]` mapped to
   // 511 where the RTL says 1023, i.e. a genuinely wrong netlist. (cgen emits an
   // explicitly signed net and so stayed correct, which is what made this look
@@ -5150,22 +7109,16 @@ private:
     auto v    = leaf(a);
     auto node = make_node(op);
     setup_sink_by_name(node, "a").connect_driver(v.pin);
-    const int32_t m   = v.mw > 0 ? v.mw : 1;
-    auto          drv = node.create_driver_pin(0);
-    set_bits(drv, m + 1);
-    set_sign(drv);
-    record(lnast_->get_name(dst), drv, m + 1);
+    const int32_t m     = v.mw > 0 ? v.mw : 1;
+    const int32_t out_m = pin_can_be_negative(v.pin) ? m : m + 1;
+    auto          drv   = node.create_driver_pin(0);
+    set_sbits(drv, out_m);
+    record(lnast_->get_name(dst), drv, out_m);
   }
 
-  // `!x` is a LOGICAL (boolean) not: a clean 1-bit boolean, lowered as `x == 0`
-  // — NOT a bitwise Not (that is `~x`, handled by lower_unary). The operand is
-  // a boolean carried in 2-bit sign-magnitude form (mw=1 + an always-0 sign
-  // bit); a bitwise `~` would flip the sign bit too, yielding {2,3} instead of
-  // {0,1}, so any downstream nonzero-test (an `if`/mux/flop-enable select)
-  // reads it as always-true. EQ-against-0 sidesteps that, exactly like
-  // lower_negated. (The
-  // `!x`-on-a-non-boolean type error is a front-end/typecheck concern; by tolg
-  // only a legal boolean operand reaches here.)
+  // `!x` is a truth-value negation, not the signed bitwise `~x` operation.
+  // Pyrope conditions may carry a wider integer, so compare against zero;
+  // XOR-with-one is equivalent only after a separate u1 proof.
   void lower_log_not(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
@@ -5193,27 +7146,19 @@ private:
     for (auto c = lnast_->get_sibling_next(dst); !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
       // inner_op is EQ/GT/LT; address by pid (0 = a/as, 1 = bs) so the right
       // multi-driver sink name resolves per op without hardcoding.
-      inner.create_sink_pin((commutative || first) ? 0 : 1).connect_driver(leaf(c).pin);
+      livehd::graph_util::setup_sink_pid(inner, (commutative || first) ? 0 : 1).connect_driver(leaf(c).pin);
       first = false;
     }
-    // The inner comparator (EQ/GT/LT) is a 1-bit boolean. Stamp it the same way
-    // lower_op() stamps a non-negated comparator result (mw=1 -> bits = mw+1
-    // under the sign-magnitude convention, unsigned). Without this the inner
+    // The inner comparator (EQ/GT/LT) is a literal one-bit unsigned boolean.
+    // Without this the inner
     // driver pin is left at bits==0 and leaks an unbounded cell past tolg into
     // cprop/cgen (e.g. slang `!=` lowering to ~(a==b)).
     auto inner_dp = inner.create_driver_pin(0);
-    set_bits(inner_dp, 2);
-    set_unsign(inner_dp);
-    // Logically negate the comparator with EQ-against-0 — NOT a bitwise Not.
-    // The inner result is a boolean in 2-bit sign-magnitude form (mw=1 + an
-    // always-0 sign bit). A bitwise `~` flips the sign bit too, so the result
-    // becomes {2,3} instead of {0,1}; any downstream nonzero-test (an `if`/mux
-    // select, e.g. `if a != b`) then reads it as always-true. EQ against 0
-    // yields a clean 1-bit boolean, stamped like any comparator (matches
-    // lower_none_eq).
-    auto neg = make_node(Ntype_op::EQ);  // commutative: both operands feed sink "a"
+    set_ubits(inner_dp, 1);
+    // Logical negation of a u1 is XOR with one.
+    auto neg = make_node(Ntype_op::Xor);  // commutative: both operands feed sink "a"
     setup_sink_by_name(neg, "as").connect_driver(inner_dp);
-    setup_sink_by_name(neg, "as").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
+    setup_sink_by_name(neg, "as").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
     bind_result(lnast_->get_name(dst), neg.create_driver_pin(0), 1);
   }
 
@@ -5229,25 +7174,6 @@ private:
   // (`av.mw`) is the selected-bit count `k`. An open `#[..]` masks every bit,
   // so `k` is then `foo`'s full width — the "use the type's number of bits"
   // rule.
-
-  // Explode the low `mw` bits of `src` into individual 1-bit driver pins (bit i
-  // packed to position 0 via Get_mask). Shared by the parity (XOR) and popcount
-  // (adder) trees.
-  [[nodiscard]] std::vector<Pin> explode_bits(const Pin& src, int32_t mw) {
-    const int32_t    n = mw > 0 ? mw : 1;
-    std::vector<Pin> bits;
-    bits.reserve(static_cast<size_t>(n));
-    for (int32_t i = 0; i < n; ++i) {
-      auto gm = make_node(Ntype_op::Get_mask);
-      setup_sink_by_name(gm, "a").connect_driver(src);
-      setup_sink_by_name(gm, "mask").connect_driver(create_const(*g_, *Dlop::get_mask_value(i, i)));  // bit i only
-      auto b = gm.create_driver_pin(0);
-      set_bits(b, 2);  // 1 magnitude bit + sign bit
-      set_unsign(b);
-      bits.push_back(b);
-    }
-    return bits;
-  }
 
   // `foo#|[range]`: OR-reduce the selected bits → int 0/1. The graph Ror cell
   // reduces every bit of its operand (cgen emits `|expr`).
@@ -5295,10 +7221,7 @@ private:
     bind_result(lnast_->get_name(dst), eq.create_driver_pin(0), 1);
   }
 
-  // `foo#^[range]`: XOR-reduce (parity) → int 0/1, via a balanced binary tree
-  // of 2-input Xor cells over the exploded bits (an odd leaf carries up a
-  // level).
-  void lower_red_xor(const Lnast_nid& nid) {
+  void lower_counted_reduction(const Lnast_nid& nid, Ntype_op op) {
     auto dst = lnast_->get_first_child(nid);
     if (dst.is_invalid()) {
       return;
@@ -5307,67 +7230,17 @@ private:
     if (a.is_invalid()) {
       return;
     }
-    auto av   = leaf(a);
-    auto bits = explode_bits(av.pin, av.mw);
-    while (bits.size() > 1) {
-      std::vector<Pin> next;
-      next.reserve((bits.size() + 1) / 2);
-      for (size_t i = 0; i + 1 < bits.size(); i += 2) {
-        auto x = make_node(Ntype_op::Xor);  // commutative: both into "a"
-        setup_sink_by_name(x, "as").connect_driver(bits[i]);
-        setup_sink_by_name(x, "as").connect_driver(bits[i + 1]);
-        auto d = x.create_driver_pin(0);
-        set_bits(d, 2);
-        set_unsign(d);
-        next.push_back(d);
-      }
-      if (bits.size() & 1) {
-        next.push_back(bits.back());  // odd leaf rides to the next level
-      }
-      bits = std::move(next);
-    }
-    bind_result(lnast_->get_name(dst), bits.front(), 1);
+    const auto av    = leaf(a);
+    const int  count = std::max<int32_t>(av.mw, 1);
+    auto       node  = make_node(op);
+    setup_sink_by_name(node, "a").connect_driver(av.pin);
+    setup_sink_by_name(node, "b").connect_driver(create_const(*g_, *Dlop::create_integer(count)));
+    const int width = op == Ntype_op::Rxor ? 1 : std::bit_width(static_cast<unsigned>(count));
+    bind_result(lnast_->get_name(dst), node.create_driver_pin(0), width);
   }
 
-  // `foo#+[range]`: popcount (number of set bits) → integer, via a balanced
-  // binary adder tree over the exploded bits. Each Sum grows the width by one;
-  // the final result holds 0..k.
-  void lower_popcount(const Lnast_nid& nid) {
-    auto dst = lnast_->get_first_child(nid);
-    if (dst.is_invalid()) {
-      return;
-    }
-    auto a = lnast_->get_sibling_next(dst);
-    if (a.is_invalid()) {
-      return;
-    }
-    auto             av   = leaf(a);
-    auto             bits = explode_bits(av.pin, av.mw);
-    std::vector<Val> terms;
-    terms.reserve(bits.size());
-    for (const auto& b : bits) {
-      terms.push_back({b, 1});
-    }
-    while (terms.size() > 1) {
-      std::vector<Val> next;
-      next.reserve((terms.size() + 1) / 2);
-      for (size_t i = 0; i + 1 < terms.size(); i += 2) {
-        auto s = make_node(Ntype_op::Sum);  // both operands ADD on sink "a"
-        setup_sink_by_name(s, "as").connect_driver(terms[i].pin);
-        setup_sink_by_name(s, "as").connect_driver(terms[i + 1].pin);
-        const int32_t mw = std::max(terms[i].mw, terms[i + 1].mw) + 1;
-        auto          d  = s.create_driver_pin(0);
-        set_bits(d, mw + 1);
-        set_unsign(d);
-        next.push_back({d, mw});
-      }
-      if (terms.size() & 1) {
-        next.push_back(terms.back());
-      }
-      terms = std::move(next);
-    }
-    bind_result(lnast_->get_name(dst), terms.front().pin, terms.front().mw);
-  }
+  void lower_red_xor(const Lnast_nid& nid) { lower_counted_reduction(nid, Ntype_op::Rxor); }
+  void lower_popcount(const Lnast_nid& nid) { lower_counted_reduction(nid, Ntype_op::Popcount); }
 
   // ── `a % b` (modulo) — the easy, unambiguous cases only
   // ───────────────────── Pyrope has no general hardware modulo: the signed
@@ -5380,15 +7253,18 @@ private:
   //   (low bits) (3) |b| == 3 (comptime),       a non-negative   → base-4
   //   digit-sum reduce
   // Build the general `a % b` cell. |a % b| <= |a| under truncated semantics, so
-  // the dividend's width is always a sound result width; the sign slot rides
-  // along because every LGraph value is signed (unsigned is the non-negative
-  // subset), which is also why there is exactly ONE remainder op and nothing
-  // downstream switches on a sign flag.
+  // the dividend's width is always a sound result width. The result sign follows
+  // the dividend, which is also why there is exactly ONE remainder op.
   void emit_rem(const std::string& dst_name, const Val& av, const Lnast_nid& b) {
     auto remn = make_node(Ntype_op::Rem);
     setup_sink_by_name(remn, "a").connect_driver(av.pin);
     setup_sink_by_name(remn, "b").connect_driver(leaf(b).pin);
-    bind_result(dst_name, remn.create_driver_pin(0), av.mw > 0 ? av.mw : 1);
+    const int32_t bits = av.mw > 0 ? av.mw : 1;
+    auto          out  = remn.create_driver_pin(0);
+    bind_result(dst_name, out, bits);
+    if (pin_can_be_negative(av.pin)) {
+      set_sbits(out, bits);
+    }
   }
 
   void lower_mod(const Lnast_nid& nid) {
@@ -5520,12 +7396,10 @@ private:
       for (int32_t lo = 0; lo < cur_mw; lo += 2) {
         const int32_t hi = std::min(lo + 1, cur_mw - 1);
         auto          gm = make_node(Ntype_op::Get_mask);
-        setup_sink_by_name(gm, "a").connect_driver(cur);
-        setup_sink_by_name(gm, "mask").connect_driver(create_const(*g_, *Dlop::get_mask_value(hi, lo)));
+        livehd::graph_util::connect_mask_operands(gm, cur, create_const(*g_, *Dlop::get_mask_value(hi, lo)));
         auto          d   = gm.create_driver_pin(0);
         const int32_t dmw = hi - lo + 1;  // 1 or 2 bits per base-4 digit
-        set_bits(d, dmw + 1);
-        set_unsign(d);
+        set_ubits(d, dmw);
         digits.push_back({d, dmw});
       }
       cur     = adder_tree(std::move(digits)).pin;
@@ -5537,20 +7411,17 @@ private:
     setup_sink_by_name(eq, "as").connect_driver(cur);
     setup_sink_by_name(eq, "as").connect_driver(create_const(*g_, *Dlop::create_integer(3)));
     auto eqp = eq.create_driver_pin(0);
-    set_bits(eqp, 2);
-    set_unsign(eqp);
+    set_ubits(eqp, 1);
     auto mul = make_node(Ntype_op::Mult);  // 3 * (cur == 3) ∈ {0, 3}
     setup_sink_by_name(mul, "as").connect_driver(eqp);
     setup_sink_by_name(mul, "as").connect_driver(create_const(*g_, *Dlop::create_integer(3)));
     auto mulp = mul.create_driver_pin(0);
-    set_bits(mulp, 3);
-    set_unsign(mulp);
+    set_ubits(mulp, 2);
     auto sub = make_node(Ntype_op::Sum);  // cur - 3*(cur == 3)
     setup_sink_by_name(sub, "as").connect_driver(cur);
     setup_sink_by_name(sub, "bs").connect_driver(mulp);
     auto subp = sub.create_driver_pin(0);
-    set_bits(subp, 3);
-    set_unsign(subp);
+    set_ubits(subp, 2);
     return subp;
   }
 
@@ -5567,8 +7438,7 @@ private:
         setup_sink_by_name(s, "as").connect_driver(terms[i + 1].pin);
         const int32_t mw = std::max(terms[i].mw, terms[i + 1].mw) + 1;
         auto          d  = s.create_driver_pin(0);
-        set_bits(d, mw + 1);
-        set_unsign(d);
+        set_ubits(d, mw);
         next.push_back({d, mw});
       }
       if (terms.size() & 1) {
@@ -5609,19 +7479,9 @@ private:
     return v < 0 ? -v : v;
   }
 
-  // Published value range of an operand: exact for a comptime const, else the
-  // bitwidth pass' derived [min, max] (bw_meta), else — for a never-written
-  // input port — its declared envelope from io_meta. nullopt = unbounded.
-  [[nodiscard]] std::optional<std::pair<int64_t, int64_t>> range_of_operand(const Lnast_nid& nid) {
-    if (Lnast_ntype::is_const(lnast_->get_type(nid))) {
-      auto c = Dlop::from_pyrope(lnast_->get_name(nid));
-      if (c->is_just_i64()) {
-        const int64_t v = c->to_just_i64();
-        return std::make_pair(v, v);
-      }
-      return std::nullopt;
-    }
-    const std::string nm{lnast_->get_name(nid)};
+  // Published bounded range by LNAST name. nullopt = unbounded / unavailable.
+  [[nodiscard]] std::optional<std::pair<int64_t, int64_t>> range_of_name(std::string_view name) const {
+    const std::string nm{name};
     const auto&       meta = lnast_->bw_meta();
     auto              it   = meta.ranges.find(nm);
     if (it == meta.ranges.end()) {
@@ -5633,7 +7493,7 @@ private:
     // A read-only input param has no derived bw_meta entry — fall back to its
     // declared envelope (io_meta), mirroring
     // uPass_bitwidth::envelope_of_operand.
-    std::string_view base = canon_io_name(nm);
+    std::string_view base = canon_io_name(name);
     if (const auto pos = base.find("___ssa_"); pos != std::string_view::npos) {
       base = base.substr(0, pos);
     }
@@ -5656,6 +7516,21 @@ private:
     return std::nullopt;
   }
 
+  // Published value range of an operand: exact for a comptime const, else the
+  // bitwidth pass' derived [min, max] (bw_meta), else — for a never-written
+  // input port — its declared envelope from io_meta. nullopt = unbounded.
+  [[nodiscard]] std::optional<std::pair<int64_t, int64_t>> range_of_operand(const Lnast_nid& nid) const {
+    if (Lnast_ntype::is_const(lnast_->get_type(nid))) {
+      auto c = Dlop::from_pyrope(lnast_->get_name(nid));
+      if (c->is_just_i64()) {
+        const int64_t v = c->to_just_i64();
+        return std::make_pair(v, v);
+      }
+      return std::nullopt;
+    }
+    return range_of_name(lnast_->get_name(nid));
+  }
+
   // Lower an if-branch body into a fresh write scope; rolls pin_map_ back so
   // branch-local writes don't leak. Returns the names the branch bound. The
   // rollback restores only the names this branch wrote (recorded lazily in
@@ -5672,11 +7547,16 @@ private:
     branch_writes_.pop_back();
     auto restore = std::move(branch_restore_.back());
     branch_restore_.pop_back();
-    for (const auto& [name, old_val] : restore) {
-      if (old_val.has_value()) {
-        pin_map_[name] = *old_val;
+    for (const auto& [name, old] : restore) {
+      if (old.pin.has_value()) {
+        pin_map_[name] = *old.pin;
       } else {
         pin_map_.erase(name);
+      }
+      if (old.mw.has_value()) {
+        mw_map_[name] = *old.mw;
+      } else {
+        mw_map_.erase(name);
       }
     }
     return writes;
@@ -5687,11 +7567,9 @@ private:
   //
   // unique_if (the `unique if` / `match` chain) declares the conditions
   // mutually exclusive, so the per-variable merge is ONE Hotmux instead: a
-  // shared one-hot selector packs bit i = cond_i plus a final
-  // none-of-the-conds bit (the else / fall-through slot), and values ride
-  // p1..pN. The selector is one-hot by construction exactly when the
-  // uniqueness assume holds; a violation makes it multi-hot, which the
-  // Hotmux contract flags at runtime (cgen's case default).
+  // sequence of control/value pairs plus a default carrying the else or
+  // pre-if value. pass.formal checks exclusivity of the controls; simulation
+  // checks deferred obligations at runtime.
   struct Branch {
     bool     is_else{false};
     Pin      cond;
@@ -5721,7 +7599,8 @@ private:
     // Arm k is taken when every earlier condition is false and c_k is true, so
     // its terms are ¬c_0 … ¬c_{k-1}, c_k; the bare else drops the final c_k.
     std::vector<Pin> prior_conds;
-    auto             lower_arm = [&](const Lnast_nid& stmts, const Pin& cond, bool is_else) {
+    auto             merge_cond = [&](const Pin& raw) { return !valid_minted_ ? raw : and2(valid_pin(), nonzero1(raw)); };
+    auto             lower_arm  = [&](const Lnast_nid& stmts, const Pin& cond, bool is_else) {
       for (const auto& pc : prior_conds) {
         push_path_term(pc, /*negated=*/true);
       }
@@ -5738,14 +7617,25 @@ private:
     if (child.is_invalid()) {
       return;
     }
-    branches.push_back({false, first_cond, lower_arm(child, first_cond, /*is_else=*/false)});
+    branches.push_back({false, merge_cond(first_cond), lower_arm(child, first_cond, /*is_else=*/false)});
     prior_conds.push_back(first_cond);
 
     child = lnast_->get_sibling_next(child);
     while (!child.is_invalid()) {
       bool last = lnast_->is_last_child(child);
       if (last && Lnast_ntype::is_stmts(lnast_->get_type(child))) {
-        branches.push_back({true, Pin{}, lower_arm(child, Pin{}, /*is_else=*/true)});
+        if (!valid_minted_) {
+          branches.push_back({true, Pin{}, lower_arm(child, Pin{}, /*is_else=*/true)});
+        } else {
+          // Inactive means NO arm, including else. Spell the else as an
+          // explicit `active & !c0 & ...` arm so its writes fall through to
+          // the pre-if value while inactive and unique-if stays one-hot.
+          Pin else_cond = valid_pin();
+          for (const auto& pc : prior_conds) {
+            else_cond = and2(else_cond, not1(nonzero1(pc)));
+          }
+          branches.push_back({false, else_cond, lower_arm(child, Pin{}, /*is_else=*/true)});
+        }
         break;
       }
       Pin elif_cond = leaf(child).pin;
@@ -5753,7 +7643,7 @@ private:
       if (child.is_invalid()) {
         break;
       }
-      branches.push_back({false, elif_cond, lower_arm(child, elif_cond, /*is_else=*/false)});
+      branches.push_back({false, merge_cond(elif_cond), lower_arm(child, elif_cond, /*is_else=*/false)});
       prior_conds.push_back(elif_cond);
       child = lnast_->get_sibling_next(child);
     }
@@ -5790,20 +7680,47 @@ private:
       // the else value up into the then/elif arms, clobbering `pre`. For a
       // reg's enable shadow this collapsed a conditional enable into constant
       // true (write-every-cycle); for its din it forced the else value.
-      auto base = pin_map_.find(var);
+      auto      base      = pin_map_.find(var);
+      auto      ew        = else_writes.find(var);
+      const int n         = static_cast<int>(branches.size());
+      const int last_cond = has_else ? n - 2 : n - 1;
+      // 2c-wire — a wire's din shadow has no pre-if value to hold and no X to
+      // fall back to (see is_wire_din): the unwritten paths are don't-cares, so
+      // fill them with a value the wire IS written with. `wire_seed` is the
+      // lowest-priority writing arm, which becomes the chain's base — with a
+      // single writing arm that leaves the driver bare, no mux at all.
+      Pin       wire_fill;
+      int       wire_seed = -1;
+      if (base == pin_map_.end() && is_single_bind_net(var)) {
+        if (ew != else_writes.end()) {
+          wire_fill = ew->second;
+        } else {
+          for (int i = last_cond; i >= 0; --i) {
+            if (auto wr = branches[i].writes.find(var); wr != branches[i].writes.end()) {
+              wire_fill = wr->second;
+              wire_seed = i;
+              break;
+            }
+          }
+        }
+      }
       // A non-writing branch falls back to `pre`. For a reg's din shadow with
       // no recorded pre-value (a pure conditional write, no prior write and no
       // read), `pre` is the reg's q (hold) — NOT a don't-care.
-      Pin  pre;
+      Pin pre;
       if (base != pin_map_.end()) {
         pre = base->second;
       } else if (auto hold = reg_hold_pin(var)) {
         pre = *hold;
+      } else if (!wire_fill.is_invalid()) {
+        pre = wire_fill;
       } else {
         pre = nil_pin();
       }
-      auto ew  = else_writes.find(var);
-      Pin  cur = (ew != else_writes.end()) ? ew->second : pre;
+      // A wire arm that writes nothing selects nothing: skip it (and the seed
+      // arm, already the chain's base) instead of muxing in a don't-care.
+      auto skip_arm = [&](int i, bool writes) { return !wire_fill.is_invalid() && (i == wire_seed || !writes); };
+      Pin  cur      = (ew != else_writes.end()) ? ew->second : pre;
 
       // The merged value's width is the widest among the branch sources;
       // mw_lookup alone holds whatever the LAST write recorded (or 1 for a
@@ -5811,19 +7728,35 @@ private:
       // wider arms. Take the max over every contributing pin's stamped bits
       // (bits >= mw by construction, so this only ever widens). pin_mw_of
       // shares this with the Hotmux path (lower_unique_merge).
-      int32_t mw        = std::max({mw_lookup(var), pin_mw_of(cur), pin_mw_of(pre)});
-      int     n         = static_cast<int>(branches.size());
-      int     last_cond = has_else ? n - 2 : n - 1;
+      // Size from VALUES, not the destination variable's declared envelope.
+      // In unbounded LNAST/LGraph semantics a declaration is a boundary
+      // contract, not a request to inflate every internal mux. The eventual
+      // store/GraphIO/register landing performs a lossless widen; a real wide
+      // pre-value or arm is already represented by its pin below.
+      int32_t signed_mw   = 0;
+      int32_t unsigned_mw = 0;
+      // Tracked SEPARATELY from `signed_mw`: an arm that can be negative but
+      // carries no width stamp leaves pin_mw_of() at 0, and deriving
+      // "any signed" from `signed_mw > 0` would then stamp the merge UNSIGNED
+      // -- the exact zero-fill miscompile described below.
+      bool    any_signed  = false;
+      auto    note_arm    = [&](const Pin& arm) {
+        if (pin_can_be_negative(arm)) {
+          any_signed = true;
+          signed_mw  = std::max(signed_mw, pin_mw_of(arm));
+        } else {
+          unsigned_mw = std::max(unsigned_mw, pin_mw_of(arm));
+        }
+      };
+      note_arm(cur);
       // A merge is only as unsigned as its ARMS. bind_result stamps UNSIGNED
-      // unconditionally, which is a lie the moment one arm can go negative, and
-      // an unsigned pin is DEFINED to carry an always-0 spare sign bit -- so
+      // unconditionally, which is a lie the moment one arm can go negative, so
       // every consumer that widens the merge zero-fills a value that had to
       // sign-extend. `c ? -2 : s7` came back as an unsigned net, cgen declared
       // it `reg [65:0]`, and that turned the whole enclosing Verilog expression
       // unsigned: `(-s1) + (c ? -2 : s7)` evaluated to 2 where the golden says
       // 6 (vloghammer wideexpr_00093, confirmed against iverilog). Collect the
       // sign over the same sources the width is collected over.
-      bool any_signed = pin_can_be_negative(cur) || pin_can_be_negative(pre);
       // Finalize the merged width BEFORE building the chain so every mux in it
       // (not only the outermost one bind_result stamps) carries it. An if/elif
       // with >=2 conditions builds a chain of muxes; leaving the inner muxes at
@@ -5832,103 +7765,176 @@ private:
       // assert_ifelse2.pick_max).
       for (int i = last_cond; i >= 0; --i) {
         auto wr = branches[i].writes.find(var);
+        if (skip_arm(i, wr != branches[i].writes.end())) {
+          continue;
+        }
         if (wr != branches[i].writes.end()) {
-          mw         = std::max(mw, pin_mw_of(wr->second));
-          any_signed = any_signed || pin_can_be_negative(wr->second);
+          note_arm(wr->second);
+        } else {
+          // Only a NON-WRITING conditional arm can select the pre-if value.
+          // When every condition and the explicit else write `var`, `pre` is
+          // not connected to this mux at all and must not inflate its carrier
+          // (a u64 declaration around `c ? 1 : 0` used to make Slop<66>).
+          note_arm(pre);
         }
       }
+      const auto mw = std::max<int32_t>(1, any_signed ? std::max(signed_mw, unsigned_mw > 0 ? unsigned_mw + 1 : 0) : unsigned_mw);
+      bool       minted = false;
       for (int i = last_cond; i >= 0; --i) {
-        auto& br       = branches[i];
-        auto  wr       = br.writes.find(var);
-        Pin   true_val = (wr != br.writes.end()) ? wr->second : pre;
+        auto& br = branches[i];
+        auto  wr = br.writes.find(var);
+        if (skip_arm(i, wr != br.writes.end())) {
+          continue;
+        }
+        Pin true_val = (wr != br.writes.end()) ? wr->second : pre;
 
         auto mux = make_node(Ntype_op::Mux);
-        mux.create_sink_pin(0).connect_driver(br.cond);   // selector
-        mux.create_sink_pin(1).connect_driver(cur);       // false / else
-        mux.create_sink_pin(2).connect_driver(true_val);  // true / then
-        cur = mux.create_driver_pin(0);
+        livehd::graph_util::setup_sink_pid(mux, 0).connect_driver(br.cond);   // selector
+        livehd::graph_util::setup_sink_pid(mux, 1).connect_driver(cur);       // false / else
+        livehd::graph_util::setup_sink_pid(mux, 2).connect_driver(true_val);  // true / then
+        cur    = mux.create_driver_pin(0);
+        minted = true;
         if (i != 0) {  // inner mux; bind_result stamps the outermost (i==0) below
-          set_bits(cur, mw + 1);
           if (any_signed) {
-            set_sign(cur);
+            set_sbits(cur, mw);
           } else {
-            set_unsign(cur);
+            set_ubits(cur, mw);
           }
         }
       }
+      if (!minted) {
+        // 2c-wire with a single writing arm: `cur` IS that arm's driver pin,
+        // owned by the node that produced it. record() it (bind_result would
+        // re-stamp a pin this merge did not mint).
+        record(var, cur, mw);
+        maybe_bind_wire_shadow(var, cur, mw);
+        continue;
+      }
       bind_result(var, cur, mw);
       if (any_signed) {
-        // Keep bind_result's mw+1 bits (the widest arm already fits, and a
-        // signed arm spends its own top bit on the sign) and only flip the
-        // stamp -- the same shape lower_op uses to re-sign a subtracting Sum.
-        set_sign(cur);
+        set_sbits(cur, mw);
       }
+      // AFTER the final stamp: bind_result stamps `cur` UNSIGNED, and a wire
+      // bind copies the driver's width/sign onto the passthrough output, so
+      // binding first left a signed driver behind an unsigned buffer.
+      maybe_bind_wire_shadow(var, cur, mw);
     }
   }
 
-  // unique_if merge: one Hotmux per variable over a shared one-hot selector.
-  // Selector bit i (i < n_conds) is branches[i].cond; the top bit is
-  // "none of the conds" — the else / fall-through slot. Hotmux pins:
-  // 0 = one-hot selector, p(i+1) = arm i's value, p(n_conds+1) = else value
-  // (the variable's pre-if value when the arm / else doesn't write it).
+  // Prove coverage from the SOURCE input declaration, never from inferred pin
+  // widths. In particular, an exhaustive match with an empty else must not
+  // retain a register's Q on an unreachable none-of path. That artificial hold
+  // otherwise leaves an always-transparent latch looking like real state.
+  bool covers_input_domain(const std::vector<Branch>& branches, int n_conds) const {
+    Pin                          selector;
+    absl::flat_hash_set<int64_t> values;
+    for (int i = 0; i < n_conds; ++i) {
+      const auto cond = branches[i].cond;
+      if (cond.is_invalid() || cond.is_const()) {
+        return false;
+      }
+      const auto node = cond.get_master_node();
+      if (livehd::graph_util::type_op_of(node) != Ntype_op::EQ) {
+        return false;
+      }
+      // Read-only, but INDEXED: snapshot for the [] access, not for mutation.
+      // EQ is a single-bank op, so its two operands are two consecutive sink
+      // pins (pid 0 and 1), one driver each.
+      const auto sinks = node.inp_pins_snapshot();
+      if (sinks.size() != 2) {
+        return false;
+      }
+      auto input = sinks[0].get_driver_pin();
+      auto value = sinks[1].get_driver_pin();
+      if (input.is_const()) {
+        std::swap(input, value);
+      }
+      if (!livehd::graph_util::is_graph_input_pin(input) || !value.is_const() || (!selector.is_invalid() && selector != input)) {
+        return false;
+      }
+      const auto& literal = livehd::graph_util::const_of(value);
+      if (literal.has_unknowns() || !literal.is_just_i64() || !values.insert(literal.to_just_i64()).second) {
+        return false;
+      }
+      selector = input;
+    }
+    for (const auto& input : lnast_->io_meta().inputs) {
+      if (g_->get_input_pin(canon_io_name(input.name)) != selector) {
+        continue;
+      }
+      const auto bits = input.kind == Io_kind::boolean ? 1 : input.bits;
+      if (bits <= 0 || bits >= 63 || (uint64_t{1} << bits) != values.size()) {
+        return false;
+      }
+      const int64_t low  = input.is_signed ? -(int64_t{1} << (bits - 1)) : 0;
+      const int64_t high = input.is_signed ? (int64_t{1} << (bits - 1)) - 1 : (int64_t{1} << bits) - 1;
+      return std::all_of(values.begin(), values.end(), [&](int64_t v) { return low <= v && v <= high; });
+    }
+    return false;
+  }
+
+  // unique_if merge: direct control/value pairs plus a fall-through value.
   void lower_unique_merge(const std::vector<Branch>& branches, const std::vector<std::string>& all_vars, bool has_else,
                           const WriteMap& else_writes) {
     const int n_conds = static_cast<int>(branches.size()) - (has_else ? 1 : 0);
     I(n_conds >= 1);
-
-    // none = (OR of all conds) == 0: exactly one of {cond_0..cond_k, none}
-    // is set when the uniqueness assume holds. EQ (not Not) on purpose: a
-    // bitwise Not of a 1-bit bool carries infinite high bits (LSB-only by
-    // convention, safe under And but NOT under the SHL/Or packing below).
-    Pin or_all = branches[0].cond;
-    if (n_conds > 1) {
-      auto or_node = make_node(Ntype_op::Or);
-      for (int i = 0; i < n_conds; ++i) {
-        or_node.create_sink_pin(0).connect_driver(branches[i].cond);
-      }
-      or_all = or_node.create_driver_pin(0);
-      set_bits(or_all, 1);
-      set_unsign(or_all);
-    }
-    auto none_node = make_node(Ntype_op::EQ);
-    none_node.create_sink_pin(0).connect_driver(or_all);
-    none_node.create_sink_pin(0).connect_driver(create_const(*g_, *Dlop::create_integer(0)));
-    const Pin none = none_node.create_driver_pin(0);
-    set_bits(none, 1);
-    set_unsign(none);
-
-    auto sel_node = make_node(Ntype_op::Or);
-    for (int i = 0; i < n_conds; ++i) {
-      sel_node.create_sink_pin(0).connect_driver(shl1_by(branches[i].cond, i));
-    }
-    sel_node.create_sink_pin(0).connect_driver(shl1_by(none, n_conds));
-    auto sel = sel_node.create_driver_pin(0);
-    // n_conds+1 one-hot positions -> magnitude n_conds+1 bits, +1 sign bit
-    // (LiveHD `bits` is the signed width; cgen declares unsigned as bits-1).
-    set_bits(sel, n_conds + 2);
-    set_unsign(sel);
+    const bool exhaustive = covers_input_domain(branches, n_conds);
 
     for (const auto& var : all_vars) {
-      auto base    = pin_map_.find(var);
-      bool has_pre = base != pin_map_.end();
+      auto       base    = pin_map_.find(var);
+      bool       has_pre = base != pin_map_.end();
       // A reg's din shadow with no recorded pre-value still HOLDS on an
       // unwritten / none-of arm: fall back to the reg's q (current value), not
       // a don't-care. Treat that q as a real pre-value so the none-of slot
       // below drives the hold instead of `Dlop::unknown`. A non-reg var
       // (combinational match-expression result) keeps has_pre=false →
       // don't-care none-of slot.
-      Pin  pre;
+      auto       ew      = else_writes.find(var);
+      const bool has_ev  = ew != else_writes.end();
+      // 2c-wire — a wire's din shadow has no hold and no X fallback (see
+      // is_wire_din): every unwritten arm and the none-of slot are don't-cares,
+      // so fill them with a value the wire IS written with instead of an
+      // unknown. When that is the ONLY value written, the wire's driver needs no
+      // Hotmux at all.
+      Pin        wire_fill;
+      if (!has_pre && is_single_bind_net(var)) {
+        if (has_ev) {
+          wire_fill = ew->second;
+        } else {
+          for (int i = n_conds - 1; i >= 0; --i) {
+            if (auto wr = branches[i].writes.find(var); wr != branches[i].writes.end()) {
+              wire_fill = wr->second;
+              break;
+            }
+          }
+        }
+        if (!wire_fill.is_invalid()) {
+          bool uniform = true;
+          for (const auto& br : branches) {
+            if (auto wr = br.writes.find(var); wr != br.writes.end() && !(wr->second == wire_fill)) {
+              uniform = false;
+              break;
+            }
+          }
+          if (uniform) {  // one distinct driver over all arms: that IS the net
+            record(var, wire_fill, std::max<int32_t>(1, pin_mw_of(wire_fill)));
+            continue;
+          }
+        }
+      }
+      Pin pre;
       if (has_pre) {
         pre = base->second;
       } else if (auto hold = reg_hold_pin(var)) {
         pre     = *hold;
         has_pre = true;
+      } else if (!wire_fill.is_invalid()) {
+        pre     = wire_fill;
+        has_pre = true;
       } else {
         pre = nil_pin();
       }
-      auto       ew       = else_writes.find(var);
-      const bool has_ev   = ew != else_writes.end();
-      Pin        else_val = has_ev ? ew->second : pre;
+      Pin else_val = has_ev ? ew->second : pre;
 
       // The Hotmux result width is the WIDEST among its REAL arm sources,
       // exactly as the Mux chain above sizes itself. mw_lookup alone holds
@@ -5944,42 +7950,74 @@ private:
       // Hotmux to 65 bits and truncate the real arms back down. Size from real
       // sources only, then drive the none-of slot with a width-correct
       // don't-care.
-      int32_t mw = mw_lookup(var);
-      // Same arm-signedness rule as the Mux chain in lower_if_merge: an
-      // unsigned stamp promises an always-0 top bit, so a negative arm has to
-      // re-sign the merge or every widening consumer zero-fills it.
-      bool any_signed = false;
-      if (has_pre) {
-        mw         = std::max(mw, pin_mw_of(pre));
-        any_signed = any_signed || pin_can_be_negative(pre);
-      }
+      // As in the ordinary Mux path, derive the Hotmux carrier from its real
+      // values. A wide declaration around narrow arms is not an arithmetic
+      // operand and must not widen the internal selection tree.
+      int32_t signed_mw   = 0;
+      int32_t unsigned_mw = 0;
+      // Tracked SEPARATELY from `signed_mw`: an arm that can be negative but
+      // carries no width stamp leaves pin_mw_of() at 0, and deriving
+      // "any signed" from `signed_mw > 0` would then stamp the merge UNSIGNED
+      // -- the exact zero-fill miscompile described below.
+      bool    any_signed  = false;
+      auto    note_arm    = [&](const Pin& arm) {
+        if (pin_can_be_negative(arm)) {
+          any_signed = true;
+          signed_mw  = std::max(signed_mw, pin_mw_of(arm));
+        } else {
+          unsigned_mw = std::max(unsigned_mw, pin_mw_of(arm));
+        }
+      };
       if (has_ev) {
-        mw         = std::max(mw, pin_mw_of(else_val));
-        any_signed = any_signed || pin_can_be_negative(else_val);
+        note_arm(else_val);
+      } else if (has_pre) {
+        // No explicit else: none-of selects the pre-if value.
+        note_arm(pre);
       }
 
-      auto hot = make_node(Ntype_op::Hotmux);
-      hot.create_sink_pin(0).connect_driver(sel);
+      // Collect first, connect second: a non-writing arm of a fresh match
+      // result has no pre-value.  Its placeholder is a don't-care and must be
+      // minted only AFTER the real arms establish `mw`; using nil_pin() here
+      // leaked the typeless signed unknown into cgen, where deterministic-X=0
+      // materialized it as a 65-bit negative sentinel in an otherwise 1-bit
+      // Hotmux.
+      std::vector<Pin> arm_values;
+      arm_values.reserve(n_conds);
       for (int i = 0; i < n_conds; ++i) {
         auto wr  = branches[i].writes.find(var);
         // A non-writing arm keeps the pre-match value; only real writes size.
-        Pin  val = wr != branches[i].writes.end() ? wr->second : pre;
+        Pin  val = wr != branches[i].writes.end() ? wr->second : (has_pre ? pre : Pin{});
         if (wr != branches[i].writes.end()) {
-          mw         = std::max(mw, pin_mw_of(val));
-          any_signed = any_signed || pin_can_be_negative(val);
+          note_arm(val);
+        } else if (has_pre) {
+          // This condition does not write `var`, so its real value arm is the
+          // pre-if value even when a separate explicit else exists.
+          note_arm(pre);
         }
-        hot.create_sink_pin(static_cast<hhds::Port_id>(i + 1)).connect_driver(val);
+        arm_values.push_back(val);
+      }
+
+      const auto mw = std::max<int32_t>(1, any_signed ? std::max(signed_mw, unsigned_mw > 0 ? unsigned_mw + 1 : 0) : unsigned_mw);
+
+      auto hot = make_node(Ntype_op::Hotmux);
+      for (int i = 0; i < n_conds; ++i) {
+        const Pin val = arm_values[i].is_invalid() ? create_const(*g_, *Dlop::unknown(mw)) : arm_values[i];
+        livehd::graph_util::setup_sink_pid(hot, static_cast<hhds::Port_id>(2 * i)).connect_driver(branches[i].cond);
+        livehd::graph_util::setup_sink_pid(hot, static_cast<hhds::Port_id>(2 * i + 1)).connect_driver(val);
       }
       // none-of slot: explicit else / pre value when present; otherwise an
       // exhaustive else-less match — drive the unreachable slot with a
       // width-matched don't-care (`mw`-bit 0sb?) so it adds no width pressure.
-      const Pin none_val = (has_ev || has_pre) ? else_val : create_const(*g_, *Dlop::unknown(mw));
-      hot.create_sink_pin(static_cast<hhds::Port_id>(n_conds + 1)).connect_driver(none_val);
+      const Pin none_val = exhaustive && !arm_values.front().is_invalid() ? arm_values.front()
+                           : (has_ev || has_pre)                          ? else_val
+                                                                          : create_const(*g_, *Dlop::unknown(mw));
+      livehd::graph_util::setup_sink_pid(hot, static_cast<hhds::Port_id>(2 * n_conds)).connect_driver(none_val);
       auto hot_out = hot.create_driver_pin(0);
       bind_result(var, hot_out, mw);
       if (any_signed) {
-        set_sign(hot_out);
+        set_sbits(hot_out, mw);
       }
+      maybe_bind_wire_shadow(var, hot_out, mw);  // AFTER the final stamp (see lower_if_merge)
     }
   }
 
@@ -6013,22 +8051,32 @@ private:
   // range_dyn_map_ with a const "nil" hi.)
   absl::flat_hash_map<std::string, Lnast_nid>                       range_open_map_;
   std::vector<WriteMap>                                             branch_writes_;
+  struct Branch_restore {
+    std::optional<Pin>     pin;
+    std::optional<int32_t> mw;
+  };
   // Parallel to branch_writes_: per active branch, the pre-branch value of each
-  // name it wrote (nullopt = absent before the branch). lower_branch replays
-  // this to roll pin_map_ back, avoiding a full per-branch copy of pin_map_.
-  std::vector<absl::flat_hash_map<std::string, std::optional<Pin>>> branch_restore_;
-  WriteMap                                                          empty_writes_;
+  // name it wrote (nullopt = absent before the branch). Both the driver and its
+  // width are transactional: restoring only pin_map_ lets a narrow then-arm
+  // poison the width used while lowering the else-arm. lower_branch replays
+  // this to roll both maps back, avoiding full per-branch copies.
+  std::vector<absl::flat_hash_map<std::string, Branch_restore>> branch_restore_;
+  WriteMap                                                      empty_writes_;
 
-  // 2c-wire — per-wire lowering state recorded at the declare; finalize_wires()
-  // wires the buffer input to the single accumulated driver (din shadow) and
-  // restamps the buffer output from the driver width when untyped.
+  // 2c-wire — per-wire lowering state recorded at the declare. Binding connects
+  // the buffer input to the accumulated driver and restamps untyped outputs;
+  // finalize_wires() handles only still-unbound/undriven declarations.
   struct Wire_info {
-    hhds::Node_class buf;             // the passthrough Or (cgen `out = a`)
-    Pin              out;             // the buffer output (what reads bind to)
-    Lnast_nid        decl_nid;        // diag anchor (the `wire x` site)
-    int32_t          decl_color = 0;  // block region at the declare (2opt-freq B)
-    int32_t          decl_mw    = 0;  // declared width; 0 = untyped (restamp from driver)
-    bool             is_signed  = false;
+    hhds::Node_class              buf;             // the passthrough Or (cgen `out = a`)
+    hhds::Node_class              narrow;          // typed-wire Get_mask/Sext of the CURRENT bind (dropped on rebind)
+    Pin                           out;             // the buffer output (what reads bind to)
+    Lnast_nid                     decl_nid;        // diag anchor (the `wire x` site)
+    int32_t                       decl_color = 0;  // block region at the declare (2opt-freq B)
+    int32_t                       decl_mw    = 0;  // declared width; 0 = untyped (restamp from driver)
+    bool                          is_signed  = false;
+    bool                          bound      = false;
+    Pin                           bound_din;      // driver of the LATEST bind (what finalize splits against)
+    std::vector<hhds::Node_class> early_readers;  // consumers present at any bind
   };
   absl::flat_hash_set<std::string>            wire_names_;  // gates lower_store
   std::vector<std::string>                    wire_order_;  // declaration order
@@ -6039,23 +8087,43 @@ private:
   // din/enable keys). clock_*/reset_* lazily bind the clock/reset graph
   // inputs. reg_info_/reg_order_ carry the finalize metadata for
   // PLAIN regs (stage regs live only in reg_map_/flop_depth_).
-  absl::flat_hash_map<std::string, hhds::Node_class> reg_map_;
-  absl::flat_hash_map<std::string, Reg_info>         reg_info_;
-  std::vector<std::string>                           reg_order_;
+  absl::flat_hash_map<std::string, hhds::Node_class>  reg_map_;
+  absl::flat_hash_map<std::string, Reg_info>          reg_info_;
+  std::vector<std::string>                            reg_order_;
   // Scalar `mut`/`const` declares (NOT reg/latch/array). A `mut b:uN = nil`
   // emits no init store, so its name never gets a driver — but using it as a
   // `b#[lo..=hi] = …` bit-assembly base is legal (the covered bits are
   // overwritten). lower_set_mask substitutes a 0sb? base for such a name; the
   // set guards that only a DECLARED scalar gets the treatment (a genuine typo
   // still errors). `= 0` never hits this — its base already folds to const 0.
-  absl::flat_hash_set<std::string>                   scalar_decl_;
+  absl::flat_hash_set<std::string>                    scalar_decl_;
+  // Scalar names declared `const` (see is_unbound_const).
+  absl::flat_hash_set<std::string>                    const_decl_;
+  // Declared TYPE width per LOGICAL name (canonical, SSA suffix stripped), for
+  // the one op whose semantics depend on the DECLARED width rather than on
+  // whatever value currently drives the name: Concat.
+  //
+  // Deliberately NOT mw_map_. That map tracks the live value's magnitude width,
+  // so `var a:u4 = 3` leaves 2 there — and a `concat(a, b)` lane must still be
+  // 4 bits wide, because narrowing it would shift every lane above it. Filled
+  // from io_meta and from every `declare` that carries a type child; a nested
+  // `concat`'s own result registers here too (its width is the lane sum, by
+  // construction).
+  absl::flat_hash_map<std::string, Decl_type>         decl_type_;
+  // Names whose value is a `concat` result, with the lane sum. Read only by
+  // check_concat_dest_width: the concat node's own dst is a compiler temp, so
+  // the user-facing `c:u12 = concat(...)` width check has to happen where that
+  // temp is bound to a declared name.
+  absl::flat_hash_map<std::string, int32_t>           concat_result_mw_;
   // Declared memories (array-typed regs + mut/const arrays), the
   // branch-path stack lower_if maintains for their write enables, the
   // recorded tuple literals (array initializers / __memory configs), and the
   // bound __memory results.
-  absl::flat_hash_map<std::string, Mem_info>         mem_map_;
-  absl::flat_hash_map<int32_t, int>                  mem_write_site_counts_;
-  std::vector<std::string>                           mem_order_;
+  absl::flat_hash_map<std::string, Mem_info>          mem_map_;
+  absl::flat_hash_map<std::string, Array_scalar_view> array_scalar_views_;
+  absl::flat_hash_set<std::string>                    comptime_array_names_;
+  absl::flat_hash_map<int32_t, int>                   mem_write_site_counts_;
+  std::vector<std::string>                            mem_order_;
   // Path-condition stack: one entry per enclosing branch arm, UNMATERIALIZED
   // (see current_path_cond). `path_folded_[i]` caches the fold of terms[0..i]
   // once some consumer asks for it; an invalid entry is "not built yet".
@@ -6069,6 +8137,12 @@ private:
   absl::flat_hash_map<std::string, Mem_result>                                    mem_results_;
   // attr_set seen before its target's declare (memory fwd overrides etc).
   absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, std::string>> pending_attrs_;
+  // Every `attr_set(<var>, "reset_pin", <val>)` in the tree, collected BEFORE
+  // the body walk. A source-spelled reset_pin normally reaches pending_attrs_
+  // only AFTER the declare it belongs to (both the hand-written Pyrope form and
+  // the slang reader emit it later); mem_reset_source reads this table so a
+  // memory's reset signal resolves the same way at every point of the walk.
+  absl::flat_hash_map<std::string, std::string>                                   decl_reset_pin_;
   std::string                                                                     clock_name_;
   bool                                                                            clock_minted_ = false;
   Pin                                                                             clock_pin_;
@@ -6079,6 +8153,11 @@ private:
   bool                                                                            reset_async_default_ = false;
   Pin                                                                             reset_pin_;
   bool                                                                            reset_pin_valid_ = false;
+  std::string                                                                     valid_name_;
+  bool                                                                            valid_minted_ = false;
+  bool                                                                            valid_active_ = false;
+  Pin                                                                             valid_pin_;
+  bool                                                                            valid_pin_valid_ = false;
   Pin                                                                             en_true_pin_;
   Pin                                                                             en_false_pin_;
   bool                                                                            en_true_valid_  = false;
@@ -6093,6 +8172,11 @@ private:
     std::vector<Lnast_io_entry> outputs;
   };
   absl::flat_hash_map<std::string, Sub_result> sub_results_;
+  // Explicit rolled_for lowering hand-off. The index port is allowed to be
+  // absent from the hidden ordinary call; lower_rolled_for then attaches the
+  // descriptor to exactly the Sub created by that payload.
+  std::string                                  rolled_index_port_;
+  hhds::Node_class                             last_lowered_sub_;
 
   // Checker inputs gathered while building: pending records,
   // per-Flop effective crossing depth, per-Sub pinned latency interval.
@@ -6173,10 +8257,15 @@ public:
         a_max = a_min;  // bare-pipe (1,0) sentinel realizes at min
       }
       const std::string name(lnast_->get_name(name_nid));
-      auto              sink = g_->get_output_pin(name);
-      if (sink.is_invalid()) {
+      const auto        io = g_->get_io();
+      if (!io || !io->has_output(name)) {
+        // A tuple-typed output store names the aggregate here, while the graph
+        // boundary contains only its flattened dotted leaves. There is no
+        // aggregate pin to stamp; each leaf carries the stage annotation from
+        // the normal tuple flattening path.
         continue;
       }
+      auto sink = g_->get_output_pin(name);
       sink.attr(livehd::attrs::pending_time).set({a_min, a_max});
       pending_checks_.push_back({sink, name, a_min, a_max, /*is_sink=*/true});
     }
@@ -6256,8 +8345,10 @@ public:
         }
       };
       if (rec.is_sink) {
-        if (auto e = rec.pin.inp_edges(); !e.empty()) {
-          consider(e.front().driver.get_master_node());
+        // ONE DRIVER PER SINK PIN: the old "first in-edge" is the driver.
+        // Invalid when the sink is undriven, which get_master_node() tolerates.
+        if (auto drv = rec.pin.get_driver_pin(); !drv.is_invalid()) {
+          consider(drv.get_master_node());
         }
       } else if (!rec.pin.is_invalid()) {
         consider(rec.pin.get_master_node());
@@ -6306,8 +8397,8 @@ public:
   // undriven -- error_at_node degrades to an unlocated record).
   [[nodiscard]] static hhds::Node_class pending_anchor(const auto& rec) {
     if (rec.is_sink) {
-      auto edges = rec.pin.inp_edges();
-      return edges.empty() ? hhds::Node_class{} : edges.front().driver.get_master_node();
+      auto drv = rec.pin.get_driver_pin();  // one driver per sink pin
+      return drv.is_invalid() ? hhds::Node_class{} : drv.get_master_node();
     }
     return rec.pin.get_master_node();
   }
@@ -6321,7 +8412,7 @@ public:
     // 1. Collect nodes + node-level digraph (consts/graph-inputs excluded).
     std::vector<hhds::Node_class>         nodes;
     absl::flat_hash_map<uint64_t, size_t> idx;
-    for (auto n : g_->fast_class()) {
+    for (auto n : g_->body().nodes()) {
       if (is_type_const(n)) {
         continue;
       }
@@ -6336,7 +8427,7 @@ public:
         return -1;
       }
       auto mn = dpin.get_master_node();
-      if (mn.is_invalid() || is_type_const(mn) || type_op_of(mn) == Ntype_op::Nconst) {
+      if (mn.is_invalid() || is_type_const(mn)) {
         return -1;
       }
       auto it = idx.find(mn.get_debug_nid());
@@ -6351,11 +8442,24 @@ public:
       if (wire_cuts_.contains(nodes[i].get_debug_nid())) {
         continue;
       }
-      for (const auto& e : nodes[i].inp_edges()) {
-        const int p = node_idx_of_pin(e.driver);
-        if (p >= 0) {
-          pred[i].push_back(p);
-          succ[static_cast<size_t>(p)].push_back(static_cast<int>(i));
+      for (auto sink : nodes[i].inp_sorted_pins()) {  // read-only walk
+        // get_driver_pinS, PLURAL. A compact loop's carry-in sink is the one
+        // sanctioned multi-driver pin (pass/legalize/legalize.cpp:301 -- the
+        // SEED plus a self edge meaning "the previous ordinal"). Reading it
+        // with get_driver_pin() keeps one of the two and silently drops the
+        // other, which is a dropped dependency in this classifier.
+        for (const auto& drv : sink.get_driver_pins()) {
+          // A compact loop carry is a literal Sub self-edge for edge/binding
+          // visibility, but HHDS orders the group as if unrolled. Mirror that
+          // dependency rule in this domain-specific SCC classifier.
+          if (nodes[i].is_loop_subnode() && drv.get_master_node() == nodes[i]) {
+            continue;
+          }
+          const int p = node_idx_of_pin(drv);
+          if (p >= 0) {
+            pred[i].push_back(p);
+            succ[static_cast<size_t>(p)].push_back(static_cast<int>(i));
+          }
         }
       }
     }
@@ -6460,13 +8564,9 @@ public:
         const auto nid      = nodes[i].get_debug_nid();
         const bool eligible = plain_regs_.contains(nid);
         if (eligible) {
-          bool en_driven = false;
-          for (const auto& e : nodes[i].inp_edges()) {
-            if (!e.sink.is_invalid() && static_cast<uint64_t>(e.sink.get_port_id()) == en_pid && !e.driver.is_invalid()) {
-              en_driven = true;
-              break;
-            }
-          }
+          // inp_sorted_pins() yields CONNECTED sink pins only, so reaching the
+          // `en` pid at all IS the "driven" answer.
+          const bool en_driven     = !driven_sink_at(nodes[i], en_pid).is_invalid();
           // A mod's plain regs default to cycle-0 state — UNLESS the reg
           // carries an explicit @[N]/interface cycle (then it is a declared
           // feedforward stage).
@@ -6589,12 +8689,8 @@ public:
     // would home at `any` and silently pass its `@[N]` check.
     const auto din_pid    = static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Flop, "din"));
     auto       din_driver = [&](const hhds::Node_class& flop) -> hhds::Pin_class {
-      for (const auto& e : flop.inp_edges()) {
-        if (!e.sink.is_invalid() && static_cast<uint64_t>(e.sink.get_port_id()) == din_pid) {
-          return e.driver;
-        }
-      }
-      return {};
+      auto sink = driven_sink_at(flop, din_pid);
+      return sink.is_invalid() ? hhds::Pin_class{} : sink.get_driver_pin();
     };
     for (const size_t i : order) {
       eval_node(nodes[i]);
@@ -6605,7 +8701,7 @@ public:
     // cycles) and inserted_ (LN-minted `%pipe_` flops), so with both empty
     // nothing reads the fixpoint's result. The fixpoint is also the only thing
     // that pins a STATE flop's σ from `any` to a concrete cycle (re-walking
-    // every node's inp_edges() once per pass, O(state_count * nn)); skipping it
+    // every node's in-pins once per pass, O(state_count * nn)); skipping it
     // can only hide a "mixes values at different cycles" error if some node
     // actually carries a non-zero σ. Non-zero σ requires a feedforward path: an
     // explicit stage depth (flop_depth_ non-empty) or a `pipe`'s plain regs
@@ -6647,11 +8743,11 @@ public:
       if (!rec.is_sink) {
         continue;
       }
-      auto edges = rec.pin.inp_edges();
-      if (edges.empty()) {
+      auto drv = rec.pin.get_driver_pin();  // one driver per sink pin
+      if (drv.is_invalid()) {
         continue;
       }
-      auto mn = edges.front().driver.get_master_node();
+      auto mn = drv.get_master_node();
       if (mn.is_invalid() || !inserted_.contains(mn.get_debug_nid())) {
         continue;
       }
@@ -6677,7 +8773,7 @@ public:
       if (nmin == 0 && nmax == 0) {
         // (0,0) realizes as a wire: bypass and delete the flop.
         auto din = din_driver(mn);
-        edges.front().del_edge();
+        rec.pin.del_sink();  // drop the single in-edge (the flop's q)
         rec.pin.connect_driver(din);
         mn.del_node();
       } else {
@@ -6738,12 +8834,12 @@ public:
       TR               cur;
       hhds::Node_class anchor_node;  // the value's driver cell, for the diag span
       if (rec.is_sink) {
-        auto edges = rec.pin.inp_edges();
-        if (edges.empty()) {
+        auto drv = rec.pin.get_driver_pin();  // one driver per sink pin
+        if (drv.is_invalid()) {
           continue;  // undriven output already warned/nil-wired
         }
-        cur         = pin_tr(edges.front().driver);
-        anchor_node = edges.front().driver.get_master_node();
+        cur         = pin_tr(drv);
+        anchor_node = drv.get_master_node();
       } else {
         cur         = pin_tr(rec.pin);
         anchor_node = rec.pin.get_master_node();
@@ -6777,7 +8873,7 @@ private:
       return {0, 0, false};
     }
     auto mn = dpin.get_master_node();
-    if (mn.is_invalid() || is_type_const(mn) || type_op_of(mn) == Ntype_op::Nconst) {
+    if (mn.is_invalid() || is_type_const(mn)) {
       return {0, 0, true};
     }
     auto it = tr_.find(mn.get_debug_nid());
@@ -6790,11 +8886,8 @@ private:
   // Replace a comptime const sink (pipe_min/pipe_max) with a new value.
   void replace_const_sink(const hhds::Node_class& node, std::string_view pin_name, int64_t value) {
     const auto pid = static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Flop, pin_name));
-    for (const auto& e : node.inp_edges()) {
-      if (!e.sink.is_invalid() && static_cast<uint64_t>(e.sink.get_port_id()) == pid) {
-        e.del_edge();
-        break;
-      }
+    if (auto sink = driven_sink_at(node, pid); !sink.is_invalid()) {
+      sink.del_sink();
     }
     setup_sink_by_name(const_cast<hhds::Node_class&>(node), pin_name)
         .connect_driver(create_const(*g_, *Dlop::create_integer(value)));
@@ -6832,11 +8925,15 @@ private:
     const bool                    is_mux      = type_op_of(node) == Ntype_op::Mux || type_op_of(node) == Ntype_op::Hotmux;
     TR                            mux_sel{0, 0, true};
     if (is_mux) {
-      skip_pids.insert(0);  // pid 0 = "s" — the select never adds path depth
-      for (const auto& e : node.inp_edges()) {
-        if (!e.sink.is_invalid() && e.sink.get_port_id() == 0) {
-          mux_sel = pin_tr(e.driver);
-          break;
+      const auto control_end = livehd::graph_util::hotmux_control_end(node);
+      for (auto sink : node.inp_sorted_pins()) {  // read-only walk
+        if (type_op_of(node) == Ntype_op::Mux ? sink.get_port_id() == 0
+                                              : livehd::graph_util::is_hotmux_control(sink.get_port_id(), control_end)) {
+          skip_pids.insert(sink.get_port_id());
+          const auto t = pin_tr(sink.get_driver_pin());
+          if (!t.any) {
+            mux_sel = mux_sel.any ? t : TR{std::min(mux_sel.min, t.min), std::max(mux_sel.max, t.max), false};
+          }
         }
       }
     }
@@ -6850,17 +8947,14 @@ private:
       // clock sinks are excluded from the meet either way.
       constexpr int kStride = static_cast<int>(Ntype::Memory_port_stride);  // Memory per-port sink
                                                                             // stride, graph/cell.hpp
-      for (const auto& e : node.inp_edges()) {
-        if (e.sink.is_invalid()) {
-          continue;
-        }
-        const auto raw_pid   = static_cast<int>(e.sink.get_port_id());
+      for (auto sink : node.inp_sorted_pins()) {                            // read-only walk
+        const auto raw_pid   = static_cast<int>(sink.get_port_id());
         const auto sink_name = Ntype::get_sink_name(Ntype_op::Memory, raw_pid % kStride);
         if (sink_name == "clock_pin") {
           skip_pids.insert(static_cast<uint64_t>(raw_pid));
         } else if (sink_name == "type" && raw_pid < kStride) {
           skip_pids.insert(static_cast<uint64_t>(raw_pid));
-          if (auto v = livehd::graph_util::hydrate_const(e.driver); v.is_just_i64() && v.to_just_i64() == 1) {
+          if (const auto& v = livehd::graph_util::const_of(sink.get_driver_pin()); v.is_just_i64() && v.to_just_i64() == 1) {
             mem_clocked = true;  // sync read: dout is registered
           }
         }
@@ -6877,41 +8971,42 @@ private:
     }
     const auto din_pid = static_cast<uint64_t>(Ntype::get_sink_pid(Ntype_op::Flop, "din"));
 
-    for (const auto& e : node.inp_edges()) {
-      if (e.sink.is_invalid()) {
-        continue;
-      }
-      const auto spid = static_cast<uint64_t>(e.sink.get_port_id());
+    for (auto sink : node.inp_sorted_pins()) {  // read-only walk
+      const auto spid = static_cast<uint64_t>(sink.get_port_id());
       if (din_only && spid != din_pid) {
         continue;
       }
       if (!din_only && !skip_pids.empty() && skip_pids.contains(spid)) {
         continue;
       }
-      TR t = pin_tr(e.driver);
-      if (t.any) {
-        continue;
-      }
-      if (meet.any) {
-        meet = t;
-        continue;
-      }
-      if (meet.min != t.min || meet.max != t.max) {
-        if (is_mux) {
-          meet = {std::min(meet.min, t.min), std::max(meet.max, t.max), false};
+      // PLURAL: a compact loop's carry-in sink legitimately holds two drivers
+      // (see the SCC classifier above); the meet must see both.
+      for (const auto& drv : sink.get_driver_pins()) {
+        TR t = pin_tr(drv);
+        if (t.any) {
           continue;
         }
-        error_at_node(node,
-                      "upass.tolg: '{}' mixes values at different cycles "
-                      "(({},{}) vs ({},{})) at a {} cell (sink pid {}) "
-                      "— align them with `stage[N]` first",
-                      ln_->get_top_module_name(),
-                      meet.min,
-                      meet.max,
-                      t.min,
-                      t.max,
-                      Ntype::get_name(type_op_of(node)),
-                      spid);
+        if (meet.any) {
+          meet = t;
+          continue;
+        }
+        if (meet.min != t.min || meet.max != t.max) {
+          if (is_mux) {
+            meet = {std::min(meet.min, t.min), std::max(meet.max, t.max), false};
+            continue;
+          }
+          error_at_node(node,
+                        "upass.tolg: '{}' mixes values at different cycles "
+                        "(({},{}) vs ({},{})) at a {} cell (sink pid {}) "
+                        "— align them with `stage[N]` first",
+                        ln_->get_top_module_name(),
+                        meet.min,
+                        meet.max,
+                        t.min,
+                        t.max,
+                        Ntype::get_name(type_op_of(node)),
+                        spid);
+        }
       }
     }
 
@@ -6985,7 +9080,7 @@ private:
     if (Lnast_ntype::is_attr_set(lnast->get_type(nid))) {
       auto tgt = lnast->get_first_child(nid);
       auto key = tgt.is_invalid() ? tgt : lnast->get_sibling_next(tgt);
-      if (!key.is_invalid() && lnast->get_name(key) == "clock_pin") {
+      if (!key.is_invalid() && (lnast->get_name(key) == "clock_pin" || lnast->get_name(key) == "__store_clock_pin")) {
         clocked_elsewhere.emplace(lnast->get_name(tgt));
       }
     }
@@ -7077,6 +9172,24 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
   return *cache_slot;
 }
 
+// Registry-wide ABI facts are immutable during one tolg invocation. Keep the
+// linear call-graph analysis outside Lnast: the cache owns no units and is
+// replaced when a different registry is presented, so it cannot extend Lnast
+// lifetime or alter the object's layout/destructor state.
+struct Registry_abi_cache {
+  const uPass_tolg::Registry*             registry = nullptr;
+  absl::flat_hash_map<const Lnast*, bool> needs_clock;
+  absl::flat_hash_map<const Lnast*, bool> needs_reset;
+  absl::flat_hash_map<const Lnast*, bool> activation_capable;
+};
+
+Registry_abi_cache& registry_abi_cache() {
+  static thread_local Registry_abi_cache cache;
+  return cache;
+}
+
+void prepare_registry_abi(const uPass_tolg::Registry& registry);
+
 // Memoized, cycle-guarded transitive "does this module (or any pipe/mod callee)
 // satisfy `declares`" walk. `declares` is the per-tree leaf predicate — a plain
 // reg declare (needs a clock) or a reset-carrying reg declare (needs a reset).
@@ -7093,7 +9206,7 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
   bool needs = declares(lnast);
   if (!needs) {
     for (const auto& cn : collect_callee_names(lnast)) {
-      auto callee = resolve_callee_lnast(cn, registry);
+      auto callee = resolve_callee_lnast(cn, registry, lnast->get_top_module_name());
       if (!callee) {
         continue;
       }
@@ -7101,7 +9214,23 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
       if (kind != "pipe" && kind != "mod") {
         continue;
       }
-      if (needs_transitive(callee, registry, memo, visiting, declares)) {
+      // A clocked callee whose public ABI already carries `clk`/`clock` is
+      // wired by the ordinary named actual at the call site.  It does NOT need
+      // the caller's compiler-minted implicit clock forwarded as a second,
+      // hidden input.  Propagating the raw "contains state" fact through such
+      // a boundary gave parents like prim_rf_1r1w_preview an unused `clock`
+      // GraphIO pin in addition to their explicit `rf_clk_i`; hierarchical LEC
+      // then quite correctly reported an implementation-only box input.
+      //
+      // Keep the leaf result true: setup_io_impl still needs it to select the
+      // callee's own declared clk/clock as clock_name.  Suppress only the
+      // TRANSITIVE request seen by its caller.
+      const bool callee_has_public_clock
+          = declares == &tree_declares_reg
+            && std::any_of(callee->io_meta().inputs.begin(), callee->io_meta().inputs.end(), [](const auto& e) {
+                 return is_clock_port_name(e.name) && (e.kind == Io_kind::boolean || e.bits <= 1);
+               });
+      if (!callee_has_public_clock && needs_transitive(callee, registry, memo, visiting, declares)) {
         needs = true;
         break;
       }
@@ -7114,6 +9243,10 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
 
 [[nodiscard]] bool needs_clock_rec(const std::shared_ptr<Lnast>& lnast, const uPass_tolg::Registry& registry,
                                    absl::flat_hash_map<std::string, bool>& memo, absl::flat_hash_set<std::string>& visiting) {
+  prepare_registry_abi(registry);
+  if (const auto it = registry_abi_cache().needs_clock.find(lnast.get()); it != registry_abi_cache().needs_clock.end()) {
+    return it->second;
+  }
   return needs_transitive(lnast, registry, memo, visiting, &tree_declares_reg);
 }
 
@@ -7147,23 +9280,28 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
         auto c2 = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
         if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))) {
           auto       mode     = lnast->get_name(c2);
-          // 1a-mem — array regs are memories: no reset hardware in this
-          // slice (only nil/0sb? init is accepted), so they never need the
-          // implicit reset input.
+          // 1a-mem — an array reg is a memory, and `reg arr:[N]T = <const>`
+          // means exactly what it means on a scalar: that const is the RESET
+          // value of every entry, so an init'd array
+          // needs the implicit reset input just like a flop does (finalize_mems
+          // wires the cell's whole-array `reset` pin, which reloads every entry
+          // in one cycle). `0sb?` is the array spelling of "no reset
+          // value" (lower_mem_declare stops on it exactly like `nil`).
           const bool is_array = !c1.is_invalid() && Lnast_ntype::is_comp_type_array(lnast->get_type(c1));
           // "latch" counts too (2f-latch M7): a latch with a reset value needs
           // the module's reset input created just as a flop does. Keying this
           // on "reg" alone is why `reg l:u8:[latch=true] = 3` used to die with
           // "has a reset value but <mod> has no reset input (setup_io bug)" —
           // the reg was real, the PORT was never made.
-          if (!is_array && (mode == "reg" || mode.starts_with("reg ") || mode == "latch")) {
+          if (mode == "reg" || mode.starts_with("reg ") || (!is_array && mode == "latch")) {
             for (auto c = lnast->get_sibling_next(c2); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
               const auto ct = lnast->get_type(c);
               if (Lnast_ntype::is_stages(ct)) {
                 break;  // stage reg — no init slot
               }
               if (Lnast_ntype::is_const(ct) || Lnast_ntype::is_ref(ct)) {
-                const bool nil_init = Lnast_ntype::is_const(ct) && lnast->get_name(c) == "nil";
+                const auto txt      = lnast->get_name(c);
+                const bool nil_init = Lnast_ntype::is_const(ct) && (txt == "nil" || (is_array && txt == "0sb?"));
                 if (!nil_init && !explicit_rp.contains(std::string(lnast->get_name(c0)))) {
                   return true;
                 }
@@ -7184,11 +9322,11 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
   return walk(lnast->get_root());
 }
 
-// 1a-mem reset-restore — true when any ARRAY-typed reg declare carries a
-// concrete (non-nil) initializer. Such an array never mints an implicit
-// reset, but if the module already has a reset-candidate input it binds it:
-// the memory lowering adds per-entry restore write ports (reset re-loads the
-// init contents in one cycle).
+// True when any reg (or latch) declare carries a reset value — including an
+// ARRAY-typed one, whose concrete (non-nil, non-`0sb?`) initializer is the
+// reset value of every entry. The module binds a reset-candidate input, or
+// mints the implicit `reset`; the memory lowering then builds a
+// one-entry-per-cycle restore sweep.
 [[nodiscard]] bool tree_declares_reset_reg(const std::shared_ptr<Lnast>& lnast) {
   auto& slot = lnast->tolg_scan_cache().declares_reset_reg;
   if (!slot.has_value()) {
@@ -7197,58 +9335,256 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
   return *slot;
 }
 
-[[nodiscard]] bool tree_declares_init_reg_array_impl(const std::shared_ptr<Lnast>& lnast) {
-  std::function<bool(const Lnast_nid&)> walk = [&](const Lnast_nid& nid) -> bool {
-    if (Lnast_ntype::is_declare(lnast->get_type(nid))) {
-      auto c0 = lnast->get_first_child(nid);
-      if (!c0.is_invalid()) {
-        auto c1 = lnast->get_sibling_next(c0);
-        auto c2 = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
-        if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))) {
-          auto       mode     = lnast->get_name(c2);
-          const bool is_array = !c1.is_invalid() && Lnast_ntype::is_comp_type_array(lnast->get_type(c1));
-          if (is_array && (mode == "reg" || mode.starts_with("reg "))) {
-            for (auto c = lnast->get_sibling_next(c2); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
-              const auto ct = lnast->get_type(c);
-              if (Lnast_ntype::is_const(ct)) {
-                auto txt = lnast->get_name(c);
-                if (txt != "nil" && txt != "0sb?") {
-                  return true;
-                }
-                break;
-              }
-              if (Lnast_ntype::is_ref(ct)) {
-                return true;  // tuple-literal init
-              }
-            }
-          }
-        }
-      }
-    }
-    for (auto c = lnast->get_first_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
-      if (walk(c)) {
-        return true;
-      }
-    }
-    return false;
-  };
-  return walk(lnast->get_root());
-}
-
-[[nodiscard]] bool tree_declares_init_reg_array(const std::shared_ptr<Lnast>& lnast) {
-  auto& slot = lnast->tolg_scan_cache().declares_init_reg_array;
-  if (!slot.has_value()) {
-    slot = tree_declares_init_reg_array_impl(lnast);
-  }
-  return *slot;
-}
-
 [[nodiscard]] bool needs_reset_rec(const std::shared_ptr<Lnast>& lnast, const uPass_tolg::Registry& registry,
                                    absl::flat_hash_map<std::string, bool>& memo, absl::flat_hash_set<std::string>& visiting) {
+  prepare_registry_abi(registry);
+  if (const auto it = registry_abi_cache().needs_reset.find(lnast.get()); it != registry_abi_cache().needs_reset.end()) {
+    return it->second;
+  }
   return needs_transitive(lnast, registry, memo, visiting, &tree_declares_reset_reg);
 }
 
-// Shared phase-1 io+clock+reset GraphIO registration. Idempotent (the GraphIO
+// Activation is an ABI property of the CALLEE, but it is discovered at call
+// sites: a definition reached below a runtime if/match arm must be able to hold
+// every kind of state and suppress every property/side effect while that arm is
+// inactive. Include transitive descendants because an activated A may call B
+// unconditionally; B still runs in A's activation context.
+[[nodiscard]] std::vector<std::string> collect_guarded_callee_names(const std::shared_ptr<Lnast>& lnast) {
+  std::vector<std::string>                    out;
+  std::function<void(const Lnast_nid&, bool)> walk = [&](const Lnast_nid& nid, bool guarded) {
+    if (lnast->is_dce_dead(nid)) {
+      return;
+    }
+    const auto type = lnast->get_type(nid);
+    if (guarded && Lnast_ntype::is_func_call(type)) {
+      auto dst = lnast->get_first_child(nid);
+      auto cal = dst.is_invalid() ? dst : lnast->get_sibling_next(dst);
+      if (!cal.is_invalid() && (Lnast_ntype::is_ref(lnast->get_type(cal)) || Lnast_ntype::is_const(lnast->get_type(cal)))) {
+        std::string name(lnast->get_name(cal));
+        if (name.size() >= 2 && name.front() == '\'' && name.back() == '\'') {
+          name = name.substr(1, name.size() - 2);
+        }
+        out.emplace_back(std::move(name));
+      }
+    }
+    const bool branches = Lnast_ntype::is_if(type) || Lnast_ntype::is_unique_if(type);
+    size_t     ordinal  = 0;
+    for (auto c = lnast->get_first_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c), ++ordinal) {
+      // child 0 is the first condition, evaluated in the surrounding context.
+      // Every later child is an arm or a later condition, hence conditionally
+      // reached. The runner has already removed compile-time-dead arms.
+      walk(c, guarded || (branches && ordinal != 0));
+    }
+  };
+  walk(lnast->get_root(), false);
+  return out;
+}
+
+void prepare_registry_abi(const uPass_tolg::Registry& registry) {
+  auto& cache = registry_abi_cache();
+  if (cache.registry == &registry) {
+    return;
+  }
+  cache.registry = nullptr;
+  cache.needs_clock.clear();
+  cache.needs_reset.clear();
+  cache.activation_capable.clear();
+
+  std::vector<std::shared_ptr<Lnast>> units;
+  units.reserve(registry.size());
+  absl::flat_hash_map<const Lnast*, size_t> by_ptr;
+  absl::flat_hash_map<std::string, size_t>  by_exact_name;
+  for (const auto& ln : registry) {
+    if (!ln) {
+      continue;
+    }
+    const size_t idx = units.size();
+    units.push_back(ln);
+    by_ptr.emplace(ln.get(), idx);
+    by_exact_name[std::string(ln->get_top_module_name())] = idx;
+  }
+
+  auto resolve_index = [&](std::string_view name, std::string_view caller_unit) -> std::optional<size_t> {
+    if (const auto it = by_exact_name.find(name); it != by_exact_name.end()) {
+      return it->second;
+    }
+    auto ln = resolve_callee_lnast(name, registry, caller_unit);
+    if (!ln) {
+      return std::nullopt;
+    }
+    const auto it = by_ptr.find(ln.get());
+    return it == by_ptr.end() ? std::nullopt : std::optional<size_t>{it->second};
+  };
+
+  std::vector<std::vector<size_t>> edges(units.size());
+  std::vector<std::vector<size_t>> clock_reverse(units.size());
+  std::vector<std::vector<size_t>> reset_reverse(units.size());
+  std::vector<uint8_t>             activation(units.size(), 0);
+  std::vector<uint8_t>             clock(units.size(), 0);
+  std::vector<uint8_t>             reset(units.size(), 0);
+
+  std::vector<uint8_t> control_root(units.size(), 0);
+  for (size_t i = 0; i < units.size(); ++i) {
+    clock[i]         = units[i]->tolg_needs_clock().value_or(tree_declares_reg(units[i]));
+    reset[i]         = units[i]->tolg_needs_reset().value_or(tree_declares_reset_reg(units[i]));
+    control_root[i]  = std::any_of(units[i]->io_meta().outputs.begin(), units[i]->io_meta().outputs.end(), [](const auto& e) {
+      return e.name == "__next_active";
+    });
+    // Only a NON-template unit is a caller the activation flood may start
+    // from (the pre-index scan skipped templates on the caller side); a
+    // template's own `__next_active` output still makes it capable, but that
+    // is added after the flood so it never spreads to its callees.
+    // OR, never assign: an EARLIER unit's guarded-callee loop below may already
+    // have marked this one, and overwriting that mark loses the whole reason it
+    // is activation capable (the caller precedes the callee in registry order
+    // whenever the callee is imported, which is the common case).
+    activation[i]   |= units[i]->tolg_activation_capable().value_or(false);
+    if (!units[i]->is_template()) {
+      activation[i] |= control_root[i];
+    }
+
+    for (const auto& name : collect_callee_names(units[i])) {
+      const auto child = resolve_index(name, units[i]->get_top_module_name());
+      if (!child.has_value()) {
+        continue;
+      }
+      edges[i].push_back(*child);
+      const auto kind = units[*child]->get_lambda_kind();
+      if (kind == "pipe" || kind == "mod") {
+        // A child's declared clk/clock is an ordinary actual at this call site;
+        // only a compiler-MINTED clock must be transported through the caller's
+        // hidden ABI. Keep reset's existing propagation independent -- clock
+        // and reset need not share the same public boundary.
+        const bool child_has_public_clock
+            = std::any_of(units[*child]->io_meta().inputs.begin(), units[*child]->io_meta().inputs.end(), [](const auto& e) {
+                return is_clock_port_name(e.name) && (e.kind == Io_kind::boolean || e.bits <= 1);
+              });
+        if (!child_has_public_clock) {
+          clock_reverse[*child].push_back(i);
+        }
+        reset_reverse[*child].push_back(i);
+      }
+    }
+    if (units[i]->is_template()) {
+      continue;
+    }
+    for (const auto& name : collect_guarded_callee_names(units[i])) {
+      if (const auto child = resolve_index(name, units[i]->get_top_module_name()); child.has_value()) {
+        activation[*child] = 1;
+      }
+    }
+  }
+
+  auto flood = [](std::vector<uint8_t>& marked, const std::vector<std::vector<size_t>>& adjacency) {
+    std::vector<size_t> queue;
+    queue.reserve(marked.size());
+    for (size_t i = 0; i < marked.size(); ++i) {
+      if (marked[i]) {
+        queue.push_back(i);
+      }
+    }
+    for (size_t head = 0; head < queue.size(); ++head) {
+      for (const auto next : adjacency[queue[head]]) {
+        if (!marked[next]) {
+          marked[next] = 1;
+          queue.push_back(next);
+        }
+      }
+    }
+  };
+  flood(activation, edges);
+  flood(clock, clock_reverse);
+  flood(reset, reset_reverse);
+  // A unit that itself publishes `__next_active` is activation capable no
+  // matter who reaches it — including a template, which is never a flood root.
+  for (size_t i = 0; i < units.size(); ++i) {
+    activation[i] |= control_root[i];
+  }
+
+  cache.needs_clock.reserve(units.size());
+  cache.needs_reset.reserve(units.size());
+  cache.activation_capable.reserve(units.size());
+  for (size_t i = 0; i < units.size(); ++i) {
+    cache.needs_clock.emplace(units[i].get(), clock[i] != 0);
+    cache.needs_reset.emplace(units[i].get(), reset[i] != 0);
+    cache.activation_capable.emplace(units[i].get(), activation[i] != 0);
+    units[i]->set_tolg_needs_clock(clock[i] != 0);
+    units[i]->set_tolg_needs_reset(reset[i] != 0);
+    units[i]->set_tolg_activation_capable(activation[i] != 0);
+  }
+  cache.registry = &registry;
+}
+
+void reset_registry_abi(const uPass_tolg::Registry& registry) {
+  auto& cache    = registry_abi_cache();
+  cache.registry = nullptr;
+  cache.needs_clock.clear();
+  cache.needs_reset.clear();
+  cache.activation_capable.clear();
+  prepare_registry_abi(registry);
+}
+
+[[nodiscard]] bool activation_reaches(const std::shared_ptr<Lnast>& from, const std::shared_ptr<Lnast>& target,
+                                      const uPass_tolg::Registry& registry, absl::flat_hash_set<std::string>& visiting) {
+  if (from == target || from->get_top_module_name() == target->get_top_module_name()) {
+    return true;
+  }
+  const std::string key(from->get_top_module_name());
+  if (!visiting.insert(key).second) {
+    return false;
+  }
+  for (const auto& name : collect_callee_names(from)) {
+    auto child = resolve_callee_lnast(name, registry, from->get_top_module_name());
+    if (child && activation_reaches(child, target, registry, visiting)) {
+      visiting.erase(key);
+      return true;
+    }
+  }
+  visiting.erase(key);
+  return false;
+}
+
+[[nodiscard]] bool is_activation_capable(const std::shared_ptr<Lnast>& target, const uPass_tolg::Registry& registry) {
+  prepare_registry_abi(registry);
+  if (const auto it = registry_abi_cache().activation_capable.find(target.get());
+      it != registry_abi_cache().activation_capable.end()) {
+    return it->second;
+  }
+  // Runtime-control loops can deactivate later occurrences through
+  // __next_active even when their compact call is not inside a source if.
+  for (const auto& e : target->io_meta().outputs) {
+    if (e.name == "__next_active") {
+      return true;
+    }
+  }
+  for (const auto& caller : registry) {
+    if (!caller || caller->is_template()) {
+      continue;
+    }
+    const bool runtime_control_root = std::any_of(caller->io_meta().outputs.begin(),
+                                                  caller->io_meta().outputs.end(),
+                                                  [](const auto& e) { return e.name == "__next_active"; });
+    if (runtime_control_root) {
+      absl::flat_hash_set<std::string> visiting;
+      if (activation_reaches(caller, target, registry, visiting)) {
+        return true;
+      }
+    }
+    for (const auto& name : collect_guarded_callee_names(caller)) {
+      auto root = resolve_callee_lnast(name, registry, caller->get_top_module_name());
+      if (!root) {
+        continue;
+      }
+      absl::flat_hash_set<std::string> visiting;
+      if (activation_reaches(root, target, registry, visiting)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Shared phase-1 io+clock+reset/activation GraphIO registration. Idempotent (the GraphIO
 // add calls are has_-guarded). Returns the clock/reset binding for the body
 // build; empty names = the module needs none.
 [[nodiscard]] Io_setup setup_io_impl(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path,
@@ -7261,9 +9597,9 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
     gio = lib.create_io(mod_name);
   }
 
-  // Declare I/O on the GraphIO: positional pin ids + meaningful bits + sign.
-  // Port widths cgen emits come from these decls (meaningful width, not the +1
-  // internal convention).
+  // Declare I/O on the GraphIO: positional pin ids + literal bits + sign.
+  // Boolean ports are always the unsigned one-bit realization, independently
+  // of the legacy io_meta signed flag used by the distinct Pyrope bool kind.
   hhds::Port_id pid     = 1;
   auto          declare = [&](const Lnast_io_entry& e, bool is_input) {
     // Canonical external port name: unquote a slang-read escaped id's backtick
@@ -7289,7 +9625,7 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
       }
     }
     gio->set_bits(nm, bits);
-    gio->set_unsign(nm, !e.is_signed);
+    gio->set_unsign(nm, e.kind == Io_kind::boolean || !e.is_signed);
     ++pid;
   };
   for (const auto& e : lnast->io_meta().inputs) {
@@ -7297,6 +9633,28 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
   }
   for (const auto& e : lnast->io_meta().outputs) {
     declare(e, /*is_input=*/false);
+  }
+
+  // Append-only hidden activation ABI. Do not perturb ordinary public tops:
+  // only a definition reached from a runtime-conditional call receives the
+  // compiler-minted port. Lifted loop bodies already declare __valid, but only
+  // runtime-control or conditionally called bodies consume it as execution
+  // context; ordinary always-active loops keep their pre-activation netlist.
+  std::string valid_name;
+  bool        valid_minted   = false;
+  bool        valid_active   = is_activation_capable(lnast, registry);
+  const bool  explicit_valid = std::any_of(lnast->io_meta().inputs.begin(), lnast->io_meta().inputs.end(), [](const auto& e) {
+    return e.name == "__valid";
+  });
+  if (valid_active || explicit_valid) {
+    valid_name = "__valid";
+    if (!gio->has_input(valid_name) && !gio->has_output(valid_name)) {
+      gio->add_input(valid_name, pid);
+      ++pid;
+      valid_minted = true;
+    }
+    gio->set_bits(valid_name, 1);
+    gio->set_unsign(valid_name, true);
   }
 
   // Implicit clock: when the tree holds state (own regs OR,
@@ -7426,16 +9784,10 @@ const std::vector<std::string>& collect_callee_names(const std::shared_ptr<Lnast
         gio->set_unsign(reset_name, true);
         reset_minted = true;
       }
-    } else if (tree_declares_init_reg_array(lnast)) {
-      // 1a-mem reset-restore — a reg ARRAY with a concrete initializer never
-      // MINTS a reset (memories stay power-on-only by default), but when the
-      // module already carries a reset-candidate input, bind it: tolg then
-      // adds per-entry restore write ports so a reset re-loads the init.
-      bind_reset_candidate();
     }
   }
 
-  return {clock_name, clock_minted, reset_name, reset_minted, reset_neg};
+  return {clock_name, clock_minted, reset_name, reset_minted, reset_neg, valid_name, valid_minted, valid_active};
 }
 
 }  // namespace
@@ -7464,10 +9816,15 @@ void uPass_tolg::detect_lg_collisions(const Registry& registry) {
     }
     seen.emplace_back(std::move(gname), std::move(unit));
   }
+
+  // A Registry is normally stack-owned, so a later invocation may reuse the
+  // same address with different Lnast objects. Refresh the non-owning ABI
+  // analysis once per lowering pass rather than trusting pointer identity.
+  reset_registry_abi(registry);
 }
 
 // A compiler-minted (`%`-named entity) unit — the comb a `test` block lowers
-// to, or a `spawn` block — is simulation-only: its body holds
+// to — is simulation-only: its body holds
 // `tick`/`step`/`assert` that the `lhd sim` driver (prp_sim) runs, never
 // synthesizable hardware. The front-end even drops the `tick` body (an
 // unhandled statement), so a value written only inside the loop stays nil and
@@ -7537,8 +9894,8 @@ static void decide_unlowered_cassert(const std::shared_ptr<Lnast>& lnast, const 
       .fatal();
 }
 
-// `cassert` is an ELABORATION check (user ruling, 2026-07-25): the compiler
-// folds it to true, or it is a diagnostic error. It never becomes an LGraph
+// `cassert` is an ELABORATION check: the compiler folds it to true, or it
+// is a diagnostic error. It never becomes an LGraph
 // node, a netlist check, a simulation check or a formal obligation — that is
 // exactly what separates it from `assert`. `lower_cassert` enforces that for
 // every lambda BODY the builder walks, but two trees are handed to tolg and
@@ -7546,10 +9903,10 @@ static void decide_unlowered_cassert(const std::shared_ptr<Lnast>& lnast, const 
 //
 //   * the FILE-SCOPE statement tree (empty io_meta — the top-level
 //     `mut`/`const`/`cassert` statements of the source file), and
-//   * a `%`-named SIM-ONLY unit (the comb a `test` / `spawn` block lowers to),
+//   * a `%`-named SIM-ONLY unit (the comb a `test` block lowers to),
 //     whose casserts inou.prp (prp_sim) would otherwise code-generate as
 //     RUNTIME checks that fail during `lhd sim` instead of at build time. The
-//     verifier is stripped for those spawned units, so even a comptime-FALSE
+//     verifier is stripped for those minted units, so even a comptime-FALSE
 //     one survives here undiagnosed.
 //
 // Both are CLOSED scopes: no call site is left that could bind a value and fold
@@ -7583,12 +9940,58 @@ static void check_unlowered_casserts(const std::shared_ptr<Lnast>& lnast) {
   walk(lnast->get_root());
 }
 
+void uPass_tolg::gate_activation_clocks(const std::vector<std::shared_ptr<hhds::Graph>>& graphs) {
+  // Calls may be lowered before their callee body. In that case HHDS can only
+  // classify the Sub from its boundary declarations, so a stateful callee with
+  // no loop-break port is provisionally stamped combinational. Refresh every
+  // instance bottom-up now that all bodies exist; otherwise a legal feedback
+  // path through a child flop remains a local combinational cycle and cgen's
+  // cycle tail emits blocking assignments in storage order (a consumer can
+  // appear before its producer).
+  absl::flat_hash_set<hhds::Graph*> refreshed;
+  absl::flat_hash_set<hhds::Graph*> refreshing;
+  std::function<void(hhds::Graph*)> refresh_subs = [&](hhds::Graph* graph) {
+    if (graph == nullptr || refreshed.contains(graph) || !refreshing.insert(graph).second) {
+      return;
+    }
+    for (auto node : graph->body().nodes()) {
+      if (!livehd::graph_util::is_type_sub(node)) {
+        continue;
+      }
+      auto gio = node.get_subnode_io();
+      if (gio == nullptr) {
+        continue;
+      }
+      if (gio->has_graph()) {
+        refresh_subs(gio->get_graph().get());
+      }
+      if (auto loop = node.subnode_loop()) {
+        node.set_subnode(gio, *loop);
+      } else {
+        node.set_subnode(gio);
+      }
+    }
+    refreshing.erase(graph);
+    refreshed.insert(graph);
+  };
+  for (const auto& graph : graphs) {
+    refresh_subs(graph.get());
+  }
+
+  livehd::latch_contract::Clock_port_cache cache;
+  for (const auto& graph : graphs) {
+    if (graph) {
+      (void)livehd::latch_contract::gate_activation_clocks(graph.get(), "upass.tolg", cache);
+    }
+  }
+}
+
 void uPass_tolg::register_io(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path, const Registry& registry) {
   if (!lnast || lnast->io_meta().empty()) {
     return;  // not a lowerable module (e.g. the empty file-root tree)
   }
   if (is_sim_only_unit(lnast)) {
-    return;  // testbench / spawn comb — never reserve a GraphIO for it
+    return;  // testbench comb — never reserve a GraphIO for it
   }
   // A deferred template (untyped/var-args/generic signature) emits no
   // LGraph: it is realized per call site (comb inlines, pipe/mod/fluid
@@ -7614,7 +10017,7 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
   // whole LNAST->LGraph phase was a blank stretch in the trace.
   TRACE_EVENT("pass", "lnast.tolg", "unit", std::string(lnast->get_top_module_name()));
   if (is_sim_only_unit(lnast)) {
-    // Testbench / spawn comb — checked by `lhd sim`, not lowered to hardware.
+    // Testbench comb — checked by `lhd sim`, not lowered to hardware.
     // Its `assert`s stay for prp_sim; its `cassert`s are elaboration checks
     // that must be discharged here (nothing downstream can).
     check_unlowered_casserts(lnast);
@@ -7671,8 +10074,8 @@ std::shared_ptr<hhds::Graph> uPass_tolg::run(const std::shared_ptr<Lnast>& lnast
 
 #ifndef NDEBUG
   // tolg output invariant (-c dbg): every value-producing cell must be sized.
-  // Self-check here (not only at cprop entry) so the guarantee holds even under
-  // --recipe O0, where no graph pass runs after tolg.
+  // Self-check here (not only at cprop entry) so the guarantee holds for every
+  // direct caller of tolg as well as the standard compile pipeline.
   livehd::graph_util::debug_assert_cells_sized(*g_shared, "upass.tolg");
 #endif
 

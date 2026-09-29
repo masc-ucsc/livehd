@@ -7,23 +7,44 @@
 // in the integer range of its slang type; conversions go through the single
 // materialize_conversion seam (slang_types.cpp).
 
+#include <functional>
+
+#include "absl/strings/str_cat.h"
+#include "slang/ast/ASTVisitor.h"
 #include "slang/ast/expressions/AssignmentExpressions.h"
 #include "slang/ast/expressions/CallExpression.h"
 #include "slang/ast/expressions/ConversionExpression.h"
 #include "slang/ast/expressions/LiteralExpressions.h"
-#include "slang/ast/ASTVisitor.h"
 #include "slang/ast/symbols/CompilationUnitSymbols.h"
 #include "slang/ast/symbols/ParameterSymbols.h"
 #include "slang/ast/symbols/SubroutineSymbols.h"
 #include "slang/ast/symbols/VariableSymbols.h"
 #include "slang/ast/types/AllTypes.h"
-
-#include "absl/strings/str_cat.h"
 #include "slang_context.hpp"
 
 using slang::ast::BinaryOperator;
 using slang::ast::ExpressionKind;
 using slang::ast::UnaryOperator;
+
+namespace {
+// A user-function call is eligible for Slang's compile-time evaluator only
+// when every referenced value is inherently static (parameter/enum/genvar) or
+// a loop variable currently bound as an EvalContext local. Slang evaluates an
+// ordinary runtime variable with no known value as X; a function whose final
+// fallback return is concrete can then appear spuriously constant.
+struct Static_call_arg_scan : public slang::ast::ASTVisitor<Static_call_arg_scan, slang::ast::VisitFlags::AllGood> {
+  slang::ast::EvalContext* ctx        = nullptr;
+  bool                     all_static = true;
+
+  void handle(const slang::ast::ValueExpressionBase& e) {
+    const auto kind = e.symbol.kind;
+    if (kind != slang::ast::SymbolKind::Parameter && kind != slang::ast::SymbolKind::EnumValue
+        && kind != slang::ast::SymbolKind::Genvar && (ctx == nullptr || ctx->findLocal(&e.symbol) == nullptr)) {
+      all_static = false;
+    }
+  }
+};
+}  // namespace
 
 const slang::ast::PackageSymbol* Slang_context::owning_package(const slang::ast::Symbol& sym) {
   // Walk out to the owning PACKAGE (a package localparam/parameter/enum member).
@@ -64,7 +85,7 @@ std::optional<std::pair<std::string, int64_t>> Slang_context::render_const_expr(
       }
       return std::make_pair(const_text(cv->integer()), *v);
     }
-    case ExpressionKind::NamedValue:
+    case ExpressionKind::NamedValue       :
     case ExpressionKind::HierarchicalValue: {
       const auto& sym = e.as<slang::ast::ValueExpressionBase>().symbol;
       const auto* cv  = package_const_value(sym);
@@ -113,9 +134,18 @@ std::optional<std::pair<std::string, int64_t>> Slang_context::render_const_expr(
       __int128    wide = 0;
       const char* op   = nullptr;
       switch (b.op) {
-        case BinaryOperator::Add: op = "+"; wide = static_cast<__int128>(l->second) + r->second; break;
-        case BinaryOperator::Subtract: op = "-"; wide = static_cast<__int128>(l->second) - r->second; break;
-        case BinaryOperator::Multiply: op = "*"; wide = static_cast<__int128>(l->second) * r->second; break;
+        case BinaryOperator::Add:
+          op   = "+";
+          wide = static_cast<__int128>(l->second) + r->second;
+          break;
+        case BinaryOperator::Subtract:
+          op   = "-";
+          wide = static_cast<__int128>(l->second) - r->second;
+          break;
+        case BinaryOperator::Multiply:
+          op   = "*";
+          wide = static_cast<__int128>(l->second) * r->second;
+          break;
         case BinaryOperator::LogicalShiftLeft:
           if (r->second < 0 || r->second > 62) {
             return std::nullopt;
@@ -127,8 +157,7 @@ std::optional<std::pair<std::string, int64_t>> Slang_context::render_const_expr(
         case BinaryOperator::ArithmeticShiftRight:
           // pyrope >> is arithmetic; a logical shift of a NEGATIVE fixed-width
           // value differs, so only pass non-negative lhs through as logical.
-          if (r->second < 0 || r->second > 62
-              || (b.op == BinaryOperator::LogicalShiftRight && l->second < 0)) {
+          if (r->second < 0 || r->second > 62 || (b.op == BinaryOperator::LogicalShiftRight && l->second < 0)) {
             return std::nullopt;
           }
           op   = ">>";
@@ -139,8 +168,7 @@ std::optional<std::pair<std::string, int64_t>> Slang_context::render_const_expr(
       if (wide < INT64_MIN || wide > INT64_MAX) {
         return std::nullopt;
       }
-      return std::make_pair(absl::StrCat("(", l->first, " ", op, " ", r->first, ")"),
-                            static_cast<int64_t>(wide));
+      return std::make_pair(absl::StrCat("(", l->first, " ", op, " ", r->first, ")"), static_cast<int64_t>(wide));
     }
     case ExpressionKind::Conversion: {
       auto inner = render_const_expr(e.as<slang::ast::ConversionExpression>().operand(), home, imports_out, refs_out);
@@ -229,37 +257,36 @@ std::optional<std::string> Slang_context::package_param_ref(const slang::ast::Ex
 
 bool Slang_context::contains_package_param(const slang::ast::Expression& expr) {
   bool found = false;
-  auto check = [&found](const slang::ast::Symbol& sym) {
+  auto check = [this, &found](const slang::ast::Symbol& sym) {
     if (!found && (sym.kind == slang::ast::SymbolKind::Parameter || sym.kind == slang::ast::SymbolKind::EnumValue)
-        && owning_package(sym) != nullptr) {
+        && (owning_package(sym) != nullptr || local_param_lname_.contains(&sym))) {
       found = true;
     }
   };
-  auto v = slang::ast::makeVisitor(
-      [&](auto&, const slang::ast::NamedValueExpression& e) { check(e.symbol); },
-      [&](auto&, const slang::ast::HierarchicalValueExpression& e) { check(e.symbol); });
+  auto v = slang::ast::makeVisitor([&](auto&, const slang::ast::NamedValueExpression& e) { check(e.symbol); },
+                                   [&](auto&, const slang::ast::HierarchicalValueExpression& e) { check(e.symbol); });
   expr.visit(v);
   return found;
 }
 
 bool Slang_context::structural_preserve_ok(const slang::ast::Expression& expr) {
   switch (expr.kind) {
-    case ExpressionKind::NamedValue:
+    case ExpressionKind::NamedValue       :
     case ExpressionKind::HierarchicalValue: return true;  // read_symbol preserves (or folds cleanly)
-    case ExpressionKind::UnaryOp: {
+    case ExpressionKind::UnaryOp          : {
       using slang::ast::UnaryOperator;
       switch (expr.as<slang::ast::UnaryExpression>().op) {
-        case UnaryOperator::Plus:
-        case UnaryOperator::Minus:
-        case UnaryOperator::BitwiseNot:
-        case UnaryOperator::BitwiseAnd:
-        case UnaryOperator::BitwiseOr:
-        case UnaryOperator::BitwiseXor:
+        case UnaryOperator::Plus       :
+        case UnaryOperator::Minus      :
+        case UnaryOperator::BitwiseNot :
+        case UnaryOperator::BitwiseAnd :
+        case UnaryOperator::BitwiseOr  :
+        case UnaryOperator::BitwiseXor :
         case UnaryOperator::BitwiseNand:
-        case UnaryOperator::BitwiseNor:
+        case UnaryOperator::BitwiseNor :
         case UnaryOperator::BitwiseXnor:
-        case UnaryOperator::LogicalNot: return true;
-        default: return false;  // ++/-- cannot be const anyway
+        case UnaryOperator::LogicalNot : return true;
+        default                        : return false;  // ++/-- cannot be const anyway
       }
     }
     case ExpressionKind::BinaryOp:
@@ -267,16 +294,14 @@ bool Slang_context::structural_preserve_ok(const slang::ast::Expression& expr) {
       // via the tier-1 fold).
       return expr.as<slang::ast::BinaryExpression>().op != BinaryOperator::Power;
     case ExpressionKind::ConditionalOp: return true;
-    case ExpressionKind::Conversion: {
+    case ExpressionKind::Conversion   : {
       const auto& conv = expr.as<slang::ast::ConversionExpression>();
       return conv.type->isIntegral() && conv.operand().type->isIntegral();
     }
     case ExpressionKind::Concatenation:
-    case ExpressionKind::Replication: return true;  // a const replication has a const count
-    case ExpressionKind::ElementSelect:
-      return expr.as<slang::ast::ElementSelectExpression>().value().type->isIntegral();
-    case ExpressionKind::RangeSelect:
-      return expr.as<slang::ast::RangeSelectExpression>().value().type->isIntegral();
+    case ExpressionKind::Replication  : return true;  // a const replication has a const count
+    case ExpressionKind::ElementSelect: return expr.as<slang::ast::ElementSelectExpression>().value().type->isIntegral();
+    case ExpressionKind::RangeSelect  : return expr.as<slang::ast::RangeSelectExpression>().value().type->isIntegral();
     case ExpressionKind::MemberAccess:
       // only packed-struct member access lowers; packed structs are integral
       return expr.as<slang::ast::MemberAccessExpression>().value().type->isIntegral();
@@ -300,7 +325,30 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
   }
   // Tier 1: compile-time constant (parameters, localparams, genvars, unrolled
   // loop variables, sized literals, $clog2/$bits/... system calls).
-  if (expr.kind != ExpressionKind::Assignment && expr.kind != ExpressionKind::LValueReference) {
+  bool may_fold = expr.kind != ExpressionKind::Assignment && expr.kind != ExpressionKind::LValueReference;
+  if (may_fold && expr.kind == ExpressionKind::Call) {
+    const auto& call = expr.as<slang::ast::CallExpression>();
+    if (!call.isSystemCall()) {
+      // Slang can produce a KNOWN result for a user function whose runtime
+      // argument is X: every `if (X)` is untaken, so a trailing fallback
+      // return wins. That is simulation evaluation, not a proof that the call
+      // is constant. Minion's unreset scp_entry_q therefore folded
+      // get_way_from_scp_dest(scp_entry_q) to 1. Only accept a user-call fold
+      // when every actual is itself a fully known compile-time value; runtime
+      // calls take the synthesizable inliner below.
+      for (const auto* arg : call.arguments()) {
+        Static_call_arg_scan scan;
+        scan.ctx = &*eval_ctx_;
+        arg->visit(scan);
+        auto av = try_eval(*arg);
+        if (!scan.all_static || !av || !av->isInteger() || av->integer().hasUnknown()) {
+          may_fold = false;
+          break;
+        }
+      }
+    }
+  }
+  if (may_fold) {
     if (auto cv = try_eval(expr); cv && cv->isInteger()) {
       // Provenance: a CONST composite containing a package-param leaf (e.g.
       // `PKG_A + PKG_B`, `{5'b0, $unsigned(PKG_P)}`) skips the fold and lowers
@@ -315,8 +363,38 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
     }
   }
 
+  // Static packed reads bind directly to their single-assignment bit wires.
+  // Whole/dynamic reads use the one assembled vector, never an RMW snapshot.
+  // A `.field` of a packed-ARRAY-of-struct net is such a static read too
+  // (is_plain_scalar_net only rules out a struct ROOT), and it must not fall
+  // back to the assembled vector: reassembling every bit is exactly the
+  // whole-net self-dependency this representation exists to break.
+  //
+  // The pointer-spine test comes first on purpose: resolve_packed_lvalue
+  // constant-EVALUATES every selector, and in a module that has one packed net
+  // nearly every other select in the body would pay for that and then miss.
+  if (!packed_wire_bits_.empty()
+      && (expr.kind == ExpressionKind::ElementSelect || expr.kind == ExpressionKind::RangeSelect
+          || expr.kind == ExpressionKind::MemberAccess)) {
+    const auto* base = lhs_base_symbol(expr);
+    auto        it   = base == nullptr ? packed_wire_bits_.end() : packed_wire_bits_.find(base);
+    Packed_lv   lv;
+    // `dyn_off` cannot survive a static_only resolve today; assert it by
+    // falling back rather than silently binding the wrong constant bits if
+    // some future selector shape ever does reach here with one.
+    if (it != packed_wire_bits_.end() && resolve_packed_lvalue(expr, lv, true) && lv.base == base && lv.dyn_off.empty()
+        && lv.width > 0 && lv.const_off >= 0 && lv.const_off + lv.width <= static_cast<int64_t>(it->second.size())) {
+      std::vector<Lnast_builder::Concat_lane> lanes;
+      for (int64_t bit = lv.width; bit-- > 0;) {
+        lanes.push_back({it->second[lv.const_off + bit], 1});
+      }
+      auto value = lanes.size() == 1 ? lanes[0].value : builder_.create_concat_stmts(lanes);
+      return fit_wrap(value, static_cast<int>(lv.width), lv.is_signed);
+    }
+  }
+
   switch (expr.kind) {
-    case ExpressionKind::NamedValue:
+    case ExpressionKind::NamedValue       :
     case ExpressionKind::HierarchicalValue: {
       // A HierarchicalValue (e.g. `stage[i-1].acc` into a named generate block)
       // is, after unrolling/const-folding, just a ValueExpressionBase whose
@@ -327,13 +405,22 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
       const auto& nv = expr.as<slang::ast::ValueExpressionBase>();
       return read_symbol(nv.symbol, expr.sourceRange);
     }
-    case ExpressionKind::UnaryOp: return lower_unary(expr.as<slang::ast::UnaryExpression>());
-    case ExpressionKind::BinaryOp: return lower_binary(expr.as<slang::ast::BinaryExpression>());
+    case ExpressionKind::UnaryOp      : return lower_unary(expr.as<slang::ast::UnaryExpression>());
+    case ExpressionKind::BinaryOp     : return lower_binary(expr.as<slang::ast::BinaryExpression>());
     case ExpressionKind::ConditionalOp: return lower_conditional_expr(expr.as<slang::ast::ConditionalExpression>());
-    case ExpressionKind::Conversion: {
+    case ExpressionKind::Conversion   : {
       const auto& conv = expr.as<slang::ast::ConversionExpression>();
       const auto& from = *conv.operand().type;
       const auto& to   = *conv.type;
+      // A streaming concatenation is not an integral TYPE in slang's model, but
+      // it lowers to a plain integral value here (`{<<8{x}}` is a byte swap of
+      // x), so it must not be refused as a non-integral conversion.
+      if (conv.operand().kind == ExpressionKind::Streaming) {
+        const auto& sc = conv.operand().as<slang::ast::StreamingConcatenationExpression>();
+        auto        sv = lower_streaming(sc);
+        auto        ti = tinfo(to);
+        return materialize_conversion(sv, static_cast<int>(sc.getBitstreamWidth()), false, ti.bits, ti.is_signed);
+      }
       if (!to.isIntegral() || !from.isIntegral()) {
         emit_unsupported(expr.sourceRange, "unsupported-conversion", "only integral conversions are supported by --reader slang");
         return "0";
@@ -341,10 +428,10 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
       auto v  = to_int_value(lower_rvalue(conv.operand()));
       auto fi = tinfo(from);
       auto ti = tinfo(to);
-      return materialize_conversion(v, fi.bits, fi.is_signed, ti.bits, ti.is_signed);
+      return materialize_conversion(v, fi.bits, fi.is_signed, ti.bits, ti.is_signed, value_width(conv.operand()));
     }
     case ExpressionKind::Concatenation: return lower_concat(expr.as<slang::ast::ConcatenationExpression>());
-    case ExpressionKind::Replication: {
+    case ExpressionKind::Replication  : {
       const auto& rep   = expr.as<slang::ast::ReplicationExpression>();
       auto        count = try_eval_int(rep.count());
       if (!count || *count < 0) {
@@ -356,6 +443,25 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
       if (*count == 0) {
         return "0";
       }
+      // `{N{bit}}` is a ubiquitous mask idiom. Keep it as one constant-select
+      // mux instead of N shifted copies joined by an OR tower. Besides being a
+      // much smaller LNAST, this preserves the simple control/data split that
+      // cprop and formal cone solvers exploit (Minion's divider uses several
+      // 65/66-bit masks in one accumulator transition).
+      if (oi.bits == 1 && *count > 1) {
+        const int  bits = static_cast<int>(*count);
+        const auto out  = fresh_local("rep");
+        const auto cond = booleanize(v);  // materialize before the if node so it is in scope in the condition
+        builder_.create_declare_stmts(out, "mut", int_max_str(bits, false), int_min_str(bits, false));
+        builder_.create_assign_stmts(out, "0");
+        auto if_nid = builder_.create_if_stmt(false);
+        builder_.add_if_cond(if_nid, cond);
+        auto then_stmts = builder_.add_if_stmts(if_nid);
+        builder_.push_stmts(then_stmts);
+        builder_.create_assign_stmts(out, Dlop::get_mask_value(bits)->to_pyrope());
+        builder_.pop_stmts();
+        return out;
+      }
       std::vector<std::string> parts;
       for (int64_t i = 0; i < *count; ++i) {
         auto off = static_cast<int64_t>(oi.bits) * i;
@@ -364,13 +470,36 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
       return builder_.create_bit_or_stmts(parts);
     }
     case ExpressionKind::ElementSelect:
-    case ExpressionKind::RangeSelect:
-    case ExpressionKind::MemberAccess: return lower_select(expr);
-    case ExpressionKind::Call: return lower_call(expr.as<slang::ast::CallExpression>());
+    case ExpressionKind::RangeSelect  :
+    case ExpressionKind::MemberAccess : return lower_select(expr);
+    case ExpressionKind::Call         : return lower_call(expr.as<slang::ast::CallExpression>());
     case ExpressionKind::SimpleAssignmentPattern:
       return lower_assignment_pattern(expr, expr.as<slang::ast::SimpleAssignmentPatternExpression>().elements());
-    case ExpressionKind::StructuredAssignmentPattern:
-      return lower_assignment_pattern(expr, expr.as<slang::ast::StructuredAssignmentPatternExpression>().elements());
+    case ExpressionKind::StructuredAssignmentPattern: {
+      const auto& sap = expr.as<slang::ast::StructuredAssignmentPatternExpression>();
+      // slang's forFixedArray fills elements() ASCENDING (range.lower() ->
+      // range.upper()) while everything that consumes them — its own evalImpl's
+      // SVInt::concat, and lower_assignment_pattern below — reads elements()[0]
+      // as the MSB. The two only disagree when the elements DIFFER, i.e. when an
+      // `index:` key is present on a descending array: slang folds
+      // `logic [3:0][7:0] p = '{2: 8'hAA, default: '0}` to 0x0000_aa00, where
+      // verilator and the LRM (p[2] is bits [23:16]) say 0x00aa_0000. Refuse that
+      // shape instead of emitting the plausible-looking wrong bus — and refuse it
+      // here rather than "correcting" the order, since slang const-folds the same
+      // pattern in a localparam and the two spellings would then disagree.
+      // `default:`/`type:`-only patterns make every element identical, so their
+      // order cannot matter and they lower fine.
+      if (!sap.indexSetters.empty()) {
+        const auto& ct = expr.type->getCanonicalType();
+        if (ct.hasFixedRange() && ct.getFixedRange().isDescending() && sap.elements().size() > 1) {
+          emit_unsupported(expr.sourceRange,
+                           "unsupported-assignment-pattern",
+                           "`index:` keys in a '{...} pattern over a descending packed array are not supported by --reader slang");
+          return "0";
+        }
+      }
+      return lower_assignment_pattern(expr, sap.elements());
+    }
     case ExpressionKind::ReplicatedAssignmentPattern:
       return lower_assignment_pattern(expr, expr.as<slang::ast::ReplicatedAssignmentPatternExpression>().elements());
     case ExpressionKind::Inside: {
@@ -433,24 +562,26 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
       return "0";
     }
     case ExpressionKind::Assignment:
-      emit_unsupported(expr.sourceRange, "expression-assignment",
+      emit_unsupported(expr.sourceRange,
+                       "expression-assignment",
                        "assignments inside expressions are not supported by --reader slang");
       return "0";
-    case ExpressionKind::Streaming:
-      emit_unsupported(expr.sourceRange, "unsupported-streaming",
-                       "streaming concatenation is not supported by --reader slang yet");
-      return "0";
-    default: break;
+    case ExpressionKind::Streaming: return lower_streaming(expr.as<slang::ast::StreamingConcatenationExpression>());
+    default                       : break;
   }
 
   // CIRCT-style default fallback: nothing slips through silently.
-  emit_unsupported(expr.sourceRange, "unsupported-expression",
-                   std::string("expression kind '") + std::string(slang::ast::toString(expr.kind))
-                       + "' is not supported by --reader slang yet");
+  emit_unsupported(
+      expr.sourceRange,
+      "unsupported-expression",
+      std::string("expression kind '") + std::string(slang::ast::toString(expr.kind)) + "' is not supported by --reader slang yet");
   return "0";
 }
 
 std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang::SourceRange range) {
+  if (auto it = blocking_values_.find(&sym); it != blocking_values_.end()) {
+    return it->second;
+  }
   // Parameters / enum values / genvars should have folded in tier 1; if eval
   // failed (e.g. inside an uninstantiated context) report cleanly.
   if (sym.kind == slang::ast::SymbolKind::Parameter) {
@@ -460,6 +591,31 @@ std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang
     const auto& cv = sym.as<slang::ast::ParameterSymbol>().getValue(range);
     if (cv.isInteger()) {
       return const_text(cv.integer());
+    }
+    // A flattened fixed array uses a packed bus in declaration order (the
+    // rightmost element is the LSB). Parameter elements are compile-time
+    // constants, including signed and unknown bits; runtime selection then
+    // follows exactly the same path as any other flattened array read.
+    if (cv.isUnpacked()) {
+      std::vector<Lnast_builder::Concat_lane>          lanes;
+      std::function<bool(const slang::ConstantValue&)> append = [&](const auto& value) {
+        if (value.isInteger()) {
+          lanes.push_back({const_text(value.integer()), static_cast<int>(value.integer().getBitWidth())});
+          return true;
+        }
+        if (!value.isUnpacked()) {
+          return false;
+        }
+        for (const auto& element : value.elements()) {
+          if (!append(element)) {
+            return false;
+          }
+        }
+        return true;
+      };
+      if (append(cv) && !lanes.empty()) {
+        return builder_.create_concat_stmts(lanes);
+      }
     }
     emit_error(range, "non-integer-parameter", "type", std::string("parameter '") + std::string(sym.name) + "' is not integral");
     return "0";
@@ -477,7 +633,7 @@ std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang
   // A whole read of a per-field bundle struct OR a per-element bundle array:
   // reconstruct the packed value from its leaves (field/element accesses are
   // intercepted before reaching here).
-  if (is_scalar_struct_var(sym) || is_packed_array_bundle_var(sym)) {
+  if (is_scalar_struct_var(sym)) {
     return read_struct_whole(sym);
   }
 
@@ -494,15 +650,14 @@ std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang
   // reassemble element-by-element, field-by-field (element k at bit k*elem_bits,
   // matching the unpacked flat-port convention). Bounded so a whole-read of a
   // genuinely large memory does not explode into thousands of nodes.
-  if (auto mit = mem_info_.find(&sym);
-      mit != mem_info_.end() && mit->second.is_tuple && !mit->second.fields.empty() && mit->second.size > 0
-      && mit->second.size <= 64) {
+  if (auto mit = mem_info_.find(&sym); mit != mem_info_.end() && mit->second.is_tuple && !mit->second.fields.empty()
+                                       && mit->second.size > 0 && mit->second.size <= 64) {
     const auto               mi   = mit->second;  // copy: builder calls below can rehash mem_info_
     auto                     base = lname_of(sym);
     std::vector<std::string> parts;
     for (int64_t e = 0; e < mi.size; ++e) {
       for (const auto& f : mi.fields) {
-        auto d = to_pattern(to_int_value(emit_field_read_chain(base, std::to_string(e), f.name)), f.bits, false);
+        auto          d   = to_pattern(to_int_value(emit_field_read_chain(base, std::to_string(e), f.name)), f.bits, false);
         const int64_t off = e * mi.elem_bits + f.off;
         parts.push_back(off == 0 ? d : builder_.create_shl_stmts(d, std::to_string(off)));
       }
@@ -550,7 +705,7 @@ std::string Slang_context::lower_unary(const slang::ast::UnaryExpression& expr) 
   auto        ti      = tinfo(*expr.type);
 
   switch (expr.op) {
-    case UnaryOperator::Plus: return lower_rvalue(operand);
+    case UnaryOperator::Plus : return lower_rvalue(operand);
     case UnaryOperator::Minus: {
       auto v   = to_int_value(lower_rvalue(operand));
       auto neg = builder_.create_minus_stmts("0", v);
@@ -576,49 +731,43 @@ std::string Slang_context::lower_unary(const slang::ast::UnaryExpression& expr) 
       }
       return mark_bool(builder_.create_eq_stmts(v, "0"));
     }
-    // Reductions: expanded here (operand width is known) instead of relying
-    // on tolg lowering for red_* nodes.
-    case UnaryOperator::BitwiseOr:  // |v
+    // Preserve the operand's declared width for bit reductions.
+    case UnaryOperator::BitwiseOr :  // |v
     case UnaryOperator::BitwiseNor: {
       auto v = to_int_value(lower_rvalue(operand));
-      return mark_bool(expr.op == UnaryOperator::BitwiseOr ? builder_.create_ne_stmts(v, "0")
-                                                           : builder_.create_eq_stmts(v, "0"));
+      return mark_bool(expr.op == UnaryOperator::BitwiseOr ? builder_.create_ne_stmts(v, "0") : builder_.create_eq_stmts(v, "0"));
     }
-    case UnaryOperator::BitwiseAnd:  // &v
+    case UnaryOperator::BitwiseAnd :  // &v
     case UnaryOperator::BitwiseNand: {
       auto v   = to_pattern(to_int_value(lower_rvalue(operand)), oi.bits, oi.is_signed);
       auto all = mask_text(oi.bits);
-      return mark_bool(expr.op == UnaryOperator::BitwiseAnd ? builder_.create_eq_stmts(v, all)
-                                                            : builder_.create_ne_stmts(v, all));
+      return mark_bool(expr.op == UnaryOperator::BitwiseAnd ? builder_.create_eq_stmts(v, all) : builder_.create_ne_stmts(v, all));
     }
-    case UnaryOperator::BitwiseXor:  // ^v - parity via shift-halving
+    case UnaryOperator::BitwiseXor :
     case UnaryOperator::BitwiseXnor: {
-      auto v = to_pattern(to_int_value(lower_rvalue(operand)), oi.bits, oi.is_signed);
-      for (int k = 32; k >= 1; k /= 2) {
-        if (k < oi.bits) {
-          v = builder_.create_bit_xor_stmts(v, builder_.create_sra_stmts(v, std::to_string(k)));
-        }
-      }
-      auto parity = builder_.create_bit_and_stmts(v, "1");
+      // An explicit window fixes the count even if the operand's range later
+      // narrows. It also converts signed inputs to their finite bit pattern.
+      auto v      = builder_.create_get_mask_stmts(to_int_value(lower_rvalue(operand)), mask_text(oi.bits));
+      auto parity = builder_.create_red_xor_stmts(v);
       if (expr.op == UnaryOperator::BitwiseXnor) {
         return mark_bool(builder_.create_eq_stmts(parity, "0"));
       }
       return parity;
     }
-    case UnaryOperator::Preincrement:
-    case UnaryOperator::Predecrement:
+    case UnaryOperator::Preincrement :
+    case UnaryOperator::Predecrement :
     case UnaryOperator::Postincrement:
     case UnaryOperator::Postdecrement: {
       // `x++`/`++x`/`x--`/`--x`: read-modify-write the target. Pre returns the
       // new value, post returns the snapshot of the old value (blocking semantics).
-      const bool is_inc = expr.op == UnaryOperator::Preincrement || expr.op == UnaryOperator::Postincrement;
-      const bool is_pre = expr.op == UnaryOperator::Preincrement || expr.op == UnaryOperator::Predecrement;
-      auto       cur    = to_pattern(to_int_value(lower_rvalue(operand)), oi.bits, oi.is_signed);
+      const bool  is_inc   = expr.op == UnaryOperator::Preincrement || expr.op == UnaryOperator::Postincrement;
+      const bool  is_pre   = expr.op == UnaryOperator::Preincrement || expr.op == UnaryOperator::Predecrement;
+      auto        cur      = to_pattern(to_int_value(lower_rvalue(operand)), oi.bits, oi.is_signed);
       // post-inc/dec returns the OLD value, but the write below re-versions the
       // operand, so snapshot it into a fresh temp first (cprop folds the +0).
-      std::string old_snap = is_pre ? std::string{} : builder_.create_plus_stmts(cur, "0");
-      auto        nv       = trunc_to(is_inc ? builder_.create_plus_stmts(cur, "1") : builder_.create_minus_stmts(cur, "1"),
-                                      oi.bits);
+      std::string old_snap = is_pre ? std::string{} : builder_.create_plus_stmts(fit_wrap(cur, oi.bits, oi.is_signed), "0");
+      auto        nv
+          = fit_wrap(is_inc ? builder_.create_plus_stmts(cur, "1") : builder_.create_minus_stmts(cur, "1"), oi.bits, oi.is_signed);
       // `x++`/`x--` is a BLOCKING write (LRM); set the flag so note_write does
       // not inherit a stale nonblocking style from a preceding `<=` and then
       // false-flag the variable as mixing assignment styles.
@@ -627,13 +776,47 @@ std::string Slang_context::lower_unary(const slang::ast::UnaryExpression& expr) 
       return is_pre ? nv : old_snap;
     }
     default:
-      emit_unsupported(expr.sourceRange, "unsupported-unary-op",
-                       std::string("unary operator '") + std::string(slang::ast::toString(expr.op)) + "' is not supported");
+      emit_unsupported(expr.sourceRange,
+                       "unsupported-unary-op",
+                       std::format("unary operator #{} is not supported", static_cast<int>(expr.op)));
       return "0";
   }
 }
 
+// An upper bound on the magnitude of `e`, used to skip a truncation that cannot
+// drop a bit.
+//
+// slang's getEffectiveWidth() is the WIDTH-TRUNCATION LINT's heuristic, NOT a
+// value bound: BinaryExpression returns max(left, right) for Add/Subtract/
+// Multiply, deliberately ignoring carry and product growth — and, for unsigned
+// subtraction, the wrap that LNAST represents as a NEGATIVE unbounded integer.
+// Trusting it to skip a mask silently keeps those bits: `logic [7:0] r = w + 1`
+// with w == 8'hff must give 0, and slang answers max(8, 1) == 8 so the 32->8
+// conversion looked lossless. The heuristic is unsound transitively too (an
+// `(a+1) | b` reports max of its operands' equally-optimistic widths), so ask
+// slang only about expressions whose effective width IS a bound: literals,
+// whole-variable reads, selects/concatenations, and conversions of those.
 std::optional<int> Slang_context::value_width(const slang::ast::Expression& e) const {
+  using slang::ast::ExpressionKind;
+  switch (e.kind) {
+    case ExpressionKind::IntegerLiteral   :
+    case ExpressionKind::NamedValue       :
+    case ExpressionKind::HierarchicalValue:
+    case ExpressionKind::ElementSelect    :
+    case ExpressionKind::RangeSelect      :
+    case ExpressionKind::MemberAccess     :
+    case ExpressionKind::Concatenation    :
+    case ExpressionKind::Replication      : break;
+    case ExpressionKind::Conversion:
+      // slang bounds a conversion by its destination type, but the operand
+      // underneath is folded in with the same heuristic — recurse so an
+      // arithmetic source is still rejected.
+      if (!value_width(e.as<slang::ast::ConversionExpression>().operand())) {
+        return std::nullopt;
+      }
+      break;
+    default: return std::nullopt;
+  }
   if (auto w = e.getEffectiveWidth()) {
     return static_cast<int>(*w);
   }
@@ -671,8 +854,8 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
 
   // Comparisons accept same-kind operands; everything else is integer-only.
   switch (expr.op) {
-    case BinaryOperator::Equality:
-    case BinaryOperator::Inequality:
+    case BinaryOperator::Equality    :
+    case BinaryOperator::Inequality  :
     case BinaryOperator::CaseEquality:
     case BinaryOperator::CaseInequality:
       if (is_bool_value(lhs) != is_bool_value(rhs)) {
@@ -680,9 +863,7 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
         rhs = to_int_value(rhs);
       }
       break;
-    default:
-      lhs = to_int_value(lhs);
-      rhs = to_int_value(rhs);
+    default: lhs = to_int_value(lhs); rhs = to_int_value(rhs);
   }
 
   switch (expr.op) {
@@ -729,14 +910,19 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
       // negative_array_index). Lnast_range::mod() gives the exact range
       // directly. No fit_wrap: |a%b| < |b|, so the result always fits.
       return builder_.create_mod_stmts(lhs, rhs);
-    case BinaryOperator::BinaryAnd: return builder_.create_bit_and_stmts(lhs, rhs);
-    case BinaryOperator::BinaryOr: return builder_.create_bit_or_stmts({lhs, rhs});
-    case BinaryOperator::BinaryXor: return builder_.create_bit_xor_stmts(lhs, rhs);
+    // Bitwise results have slang's exact self-determined width. LNAST integers
+    // are otherwise unbounded, so a mask such as `{66{en}} & x` can retain the
+    // unsigned sign slot as a 67th value bit and later violate a Concat lane's
+    // declared 66-bit window. Materialize the language precision boundary here,
+    // just as arithmetic overflow paths do above.
+    case BinaryOperator::BinaryAnd : return fit_wrap(builder_.create_bit_and_stmts(lhs, rhs), ti.bits, ti.is_signed);
+    case BinaryOperator::BinaryOr  : return fit_wrap(builder_.create_bit_or_stmts({lhs, rhs}), ti.bits, ti.is_signed);
+    case BinaryOperator::BinaryXor : return fit_wrap(builder_.create_bit_xor_stmts(lhs, rhs), ti.bits, ti.is_signed);
     case BinaryOperator::BinaryXnor: {
       auto x = builder_.create_bit_not_stmts(builder_.create_bit_xor_stmts(lhs, rhs));
       return ti.is_signed ? x : trunc_to(x, ti.bits);
     }
-    case BinaryOperator::Equality: return mark_bool(builder_.create_eq_stmts(lhs, rhs));
+    case BinaryOperator::Equality  : return mark_bool(builder_.create_eq_stmts(lhs, rhs));
     case BinaryOperator::Inequality: return mark_bool(builder_.create_ne_stmts(lhs, rhs));
     case BinaryOperator::CaseEquality:
       emit_warning(expr.sourceRange, "case-eq-two-state", "unsupported", "=== is lowered as == (two-state)");
@@ -744,11 +930,11 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
     case BinaryOperator::CaseInequality:
       emit_warning(expr.sourceRange, "case-eq-two-state", "unsupported", "!== is lowered as != (two-state)");
       return mark_bool(builder_.create_ne_stmts(lhs, rhs));
-    case BinaryOperator::GreaterThan: return mark_bool(builder_.create_gt_stmts(lhs, rhs));
-    case BinaryOperator::GreaterThanEqual: return mark_bool(builder_.create_ge_stmts(lhs, rhs));
-    case BinaryOperator::LessThan: return mark_bool(builder_.create_lt_stmts(lhs, rhs));
-    case BinaryOperator::LessThanEqual: return mark_bool(builder_.create_le_stmts(lhs, rhs));
-    case BinaryOperator::LogicalShiftLeft:
+    case BinaryOperator::GreaterThan        : return mark_bool(builder_.create_gt_stmts(lhs, rhs));
+    case BinaryOperator::GreaterThanEqual   : return mark_bool(builder_.create_ge_stmts(lhs, rhs));
+    case BinaryOperator::LessThan           : return mark_bool(builder_.create_lt_stmts(lhs, rhs));
+    case BinaryOperator::LessThanEqual      : return mark_bool(builder_.create_le_stmts(lhs, rhs));
+    case BinaryOperator::LogicalShiftLeft   :
     case BinaryOperator::ArithmeticShiftLeft: {
       auto amount  = to_pattern(rhs, ri.bits, ri.is_signed);  // shift amounts are unsigned
       auto shifted = builder_.create_shl_stmts(lhs, amount);
@@ -777,9 +963,21 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
       return builder_.create_sra_stmts(lhs, amount);  // unsigned >>> == >>
     }
     case BinaryOperator::Power:
-      emit_unsupported(expr.sourceRange, "unsupported-power", "non-constant ** is not supported by --reader slang");
+      // CVA6 uses `2 ** cfg_field` inside functions whose config-struct
+      // argument is bound to a constant only after the function is inlined.
+      // Preserve that dependency for uPass instead of demanding that slang
+      // fold it locally. For a power-of-two base this is exactly a shift; the
+      // ordinary width/sign materialization below keeps SystemVerilog's result
+      // type. Other non-constant bases still need a real exponentiation op.
+      if (auto base = try_eval_int(le); base && *base == 2) {
+        auto amount = to_pattern(rhs, ri.bits, ri.is_signed);
+        return fit_wrap(builder_.create_shl_stmts("1", amount), ti.bits, ti.is_signed);
+      }
+      emit_unsupported(expr.sourceRange,
+                       "unsupported-power",
+                       "only constant powers or deferred `2 ** n` are supported by --reader slang");
       return "0";
-    case BinaryOperator::WildcardEquality:
+    case BinaryOperator::WildcardEquality  :
     case BinaryOperator::WildcardInequality: {
       auto cv = try_eval(re);
       if (cv && cv->isInteger()) {
@@ -799,7 +997,7 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
           }
           auto lp     = to_pattern(lhs, li.bits, li.is_signed);
           auto masked = builder_.create_bit_and_stmts(lp, std::to_string(mask));
-          auto m = mark_bool(builder_.create_eq_stmts(masked, std::to_string(val)));
+          auto m      = mark_bool(builder_.create_eq_stmts(masked, std::to_string(val)));
           return mark_bool(expr.op == BinaryOperator::WildcardEquality ? m : builder_.create_log_not_stmts(m));
         }
       }
@@ -807,7 +1005,8 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
       return "0";
     }
     default:
-      emit_unsupported(expr.sourceRange, "unsupported-binary-op",
+      emit_unsupported(expr.sourceRange,
+                       "unsupported-binary-op",
                        std::string("binary operator '") + std::string(slang::ast::toString(expr.op)) + "' is not supported");
       return "0";
   }
@@ -857,14 +1056,26 @@ std::string Slang_context::lower_conditional_expr(const slang::ast::ConditionalE
   return tmp;
 }
 
-std::string Slang_context::lower_assignment_pattern(const slang::ast::Expression&                     expr,
+std::string Slang_context::lower_assignment_pattern(const slang::ast::Expression&                  expr,
                                                     std::span<const slang::ast::Expression* const> elems) {
   // `T'{...}` for a packed (integral) struct/array: slang resolves `elements()`
   // positionally MSB-first, so the value is just the fields concatenated — same
   // bit layout as a `{...}` concat of those fields. Unpacked targets (memories /
   // unpacked-array vars) are a different lowering and stay unsupported here.
+  //
+  // Do NOT re-derive `elements()` from a structured pattern's member/type/default
+  // setters: slang's forStruct/forFixedArray already walk the fields (declaration
+  // order) or the indices and call matchElementValue for every one that no
+  // `name:`/`index:` key covered, which (a) applies the LAST matching `type:` key,
+  // per the LRM, and (b) re-BINDS the `default:` SYNTAX at the field type. That
+  // re-bind is the whole point: substituting the raw default expression makes each
+  // unset field contribute the default's self-determined width instead of its own
+  // (`cause_t'{cause: c, interrupt_x: i, default: '0}` then advances the offset by
+  // 1, not 58, and lands interrupt_x at bit 6 instead of 63 — silently wrong), and
+  // it drops packed-array patterns, which have no fields at all.
   if (!expr.type->isIntegral()) {
-    emit_unsupported(expr.sourceRange, "unsupported-assignment-pattern",
+    emit_unsupported(expr.sourceRange,
+                     "unsupported-assignment-pattern",
                      "only packed (integral) '{...} assignment patterns are supported by --reader slang yet");
     return "0";
   }
@@ -883,26 +1094,298 @@ std::string Slang_context::lower_assignment_pattern(const slang::ast::Expression
   return builder_.create_bit_or_stmts(parts);
 }
 
-std::string Slang_context::lower_concat(const slang::ast::ConcatenationExpression& expr) {
-  // {a, b, c}: the FIRST operand is the MSB block.
-  auto                     ops = expr.operands();
-  std::vector<std::string> parts;
-  int64_t                  offset = 0;
-  for (auto it = ops.rbegin(); it != ops.rend(); ++it) {
-    const auto& e  = **it;
-    auto        oi = tinfo(*e.type);
-    auto        v  = to_pattern(to_int_value(lower_rvalue(e)), oi.bits, oi.is_signed);
-    // A zero part contributes nothing to the OR — dropping it kills the
-    // `x | (0 << k)` noise every zero-extension concat ({2'b0, x}) produced.
-    if (v != "0") {
-      parts.emplace_back(offset == 0 ? v : builder_.create_shl_stmts(v, std::to_string(offset)));
-    }
-    offset += oi.bits;
-  }
-  if (parts.empty()) {
+// `{<<N{x}}` / `{>>N{x}}` — the streaming (bit/byte reversal) operator.
+//
+// The value is sliced into N-bit blocks and, for `<<`, the block ORDER is
+// reversed: `{<<8{x[31:0]}}` is a byte swap, which is how CVA6's load_unit /
+// store_unit implement big-endian access. `>>` (and a slice size of 0, which is
+// slang's spelling for a plain left-to-right stream) keeps the order, so the
+// value passes through unchanged.
+//
+// Only the FIXED-SIZE, whole-block case is lowered. A width that is not a
+// multiple of the slice size leaves a short block whose placement is easy to
+// get subtly wrong, and a dynamically sized stream has no static width at all:
+// both are refused rather than lowered into a plausible-looking swap.
+std::string Slang_context::lower_streaming(const slang::ast::StreamingConcatenationExpression& expr) {
+  if (!expr.isFixedSize()) {
+    emit_unsupported(expr.sourceRange,
+                     "unsupported-streaming",
+                     "dynamically sized streaming concatenation is not supported by --reader slang");
     return "0";
   }
+  const auto streams = expr.streams();
+  if (streams.size() != 1 || streams[0].withExpr != nullptr) {
+    emit_unsupported(expr.sourceRange,
+                     "unsupported-streaming",
+                     "only a single-operand streaming concatenation without `with` is supported by --reader slang");
+    return "0";
+  }
+
+  const auto  width = static_cast<int>(expr.getBitstreamWidth());
+  const auto  slice = static_cast<int>(expr.getSliceSize());
+  const auto& oper  = *streams[0].operand;
+  auto        val   = to_int_value(lower_rvalue(oper));
+
+  // slice 0 == left-to-right: the bits keep their order, so this is the value.
+  if (slice <= 0 || slice >= width) {
+    return val;
+  }
+  if (width % slice != 0) {
+    emit_unsupported(expr.sourceRange,
+                     "unsupported-streaming",
+                     std::format("streaming width {} is not a multiple of the slice size {} — the short block's "
+                                 "placement is not supported by --reader slang",
+                                 width,
+                                 slice));
+    return "0";
+  }
+
+  // Reverse the blocks: block i of the source lands at position (n-1-i).
+  const int                nblocks = width / slice;
+  std::vector<std::string> parts;
+  parts.reserve(static_cast<size_t>(nblocks));
+  for (int i = 0; i < nblocks; ++i) {
+    // shift-then-mask rather than get_mask: `#[...]` right-aligns what it
+    // extracts, so masking in place and shifting down would shift twice.
+    const int lo   = i * slice;
+    auto      down = lo == 0 ? val : builder_.create_sra_stmts(val, std::to_string(lo));
+    auto      blk  = builder_.create_bit_and_stmts(down, std::format("0x{:x}", (1ULL << slice) - 1));
+    const int dest = (nblocks - 1 - i) * slice;
+    parts.emplace_back(dest == 0 ? blk : builder_.create_shl_stmts(blk, std::to_string(dest)));
+  }
   return builder_.create_bit_or_stmts(parts);
+}
+
+// `{a, b, c}` — the FIRST operand is the MSB lane, which is exactly the LNAST
+// `concat` node's own order, so the operands pass straight through in source
+// order and the node carries the whole bus as ONE n-ary statement.
+//
+// This used to be a shift+or tower whose per-lane offset was accumulated here.
+// One habit of that spelling does NOT survive the move: a zero lane may not be
+// DROPPED. The tower computed every offset independently, so skipping
+// `{2'b0, x}`'s zero cost nothing; the concat node derives each lane's offset
+// from the widths of the lanes BELOW it, so a dropped lane slides every lane
+// above it down two bits.
+//
+// The widths themselves are the easy half here — `tinfo(*e.type).bits` is the
+// operand's self-determined width, which IS the window — so slang binds every
+// lane width at creation and nothing downstream has to infer one. That is also
+// why a constant lane needs no special handling: the width rides in its own
+// operand, so `2'b0` may stay the plain value `0` without the literal's
+// spelling having to encode a width.
+// A constant bit WINDOW of a named root, normalized to (identity key, 0-based
+// low bit from the root's LSB, width). The select math mirrors lower_select's
+// `normalize` exactly — a declared range may be ascending or descending and
+// need not start at 0, and a packed-array element carries a stride.
+//
+// The KEY is a semantic identity, not an AST identity: the `x` inside `{32{x[31]}}`
+// and the `x` in the lane below it are distinct AST nodes reading the same
+// storage, and only the resolved symbol (plus, for a packed struct, the field
+// path) can say so. A field path re-bases the window on the FIELD, which is how
+// the reader lowers it (an independent leaf net) — so `io.x[31]` and `io.x`
+// share a key while `io[63]` and `io.x` deliberately do not.
+//
+// nullopt for anything not pinned to a constant offset over integral
+// fixed-range storage: a dynamic index, an unpacked/memory-ized base, an
+// arithmetic or literal root, a select-under-field. Callers treat that as "the
+// two windows may or may not overlap", i.e. refuse.
+std::optional<Slang_context::Bit_window> Slang_context::const_bit_window(const slang::ast::Expression& e) {
+  const auto ti = tinfo(*e.type);
+  if (ti.bits <= 0) {
+    return std::nullopt;
+  }
+  Bit_window w;
+  w.bits = ti.bits;
+
+  const slang::ast::Expression* cur = &e;
+  while (cur->kind == ExpressionKind::ElementSelect || cur->kind == ExpressionKind::RangeSelect) {
+    const auto& base    = cur->kind == ExpressionKind::ElementSelect ? cur->as<slang::ast::ElementSelectExpression>().value()
+                                                                     : cur->as<slang::ast::RangeSelectExpression>().value();
+    const auto& base_ty = base.type->getCanonicalType();
+    if (!base_ty.isIntegral() || !base_ty.hasFixedRange()) {
+      return std::nullopt;  // unpacked / memory-ized base: a different read path
+    }
+    const auto range   = base_ty.getFixedRange();
+    const auto stride  = base_ty.isPackedArray() ? static_cast<int64_t>(base_ty.getArrayElementType()->getBitWidth()) : 1;
+    int64_t    elem_lo = 0;  // bottom of the window, 0-based in ELEMENTS from the LSB end
+    if (stride <= 0) {
+      return std::nullopt;
+    }
+    // (width_down, width_up): elements the index is above / below, so one
+    // formula covers `[i]`, `[hi:lo]`, `[i +: W]` and `[i -: W]`.
+    int64_t                       width_down = 1;
+    int64_t                       width_up   = 1;
+    const slang::ast::Expression* idx        = nullptr;
+    if (cur->kind == ExpressionKind::ElementSelect) {
+      idx = &cur->as<slang::ast::ElementSelectExpression>().selector();
+    } else {
+      const auto& rs    = cur->as<slang::ast::RangeSelectExpression>();
+      const auto  kind  = rs.getSelectionKind();
+      // Element count of THIS slice — `tinfo(*cur->type)`, not the accumulated
+      // `w.bits` (the outermost expression's width, which only coincides on the
+      // first peel). SV forbids selecting after a range select, so today the
+      // two are always equal here; do not make this depend on that.
+      const auto  elems = static_cast<int64_t>(tinfo(*cur->type).bits) / stride;
+      if (kind == slang::ast::RangeSelectionKind::Simple) {
+        auto l = try_eval_int(rs.left());
+        auto r = try_eval_int(rs.right());
+        if (!l || !r) {
+          return std::nullopt;
+        }
+        elem_lo = range.isDescending() ? std::min(*l, *r) - range.lower() : range.upper() - std::max(*l, *r);
+      } else if (kind == slang::ast::RangeSelectionKind::IndexedUp) {
+        idx      = &rs.left();
+        width_up = elems;
+      } else {
+        idx        = &rs.left();
+        width_down = elems;
+      }
+    }
+    if (idx != nullptr) {
+      auto ci = try_eval_int(*idx);
+      if (!ci) {
+        return std::nullopt;  // dynamic select: no constant window
+      }
+      elem_lo = range.isDescending() ? (*ci - range.lower() - (width_down - 1)) : (range.upper() - *ci - (width_up - 1));
+    }
+    if (elem_lo < 0) {
+      return std::nullopt;
+    }
+    w.lo += elem_lo * stride;
+    cur   = &base;
+  }
+
+  const auto& root = *cur;
+  const auto  ri   = tinfo(*root.type);
+  if (ri.bits <= 0 || w.lo + w.bits > ri.bits) {
+    return std::nullopt;  // an out-of-range select is diagnosed on the normal path
+  }
+
+  std::vector<std::string_view> fields;  // innermost-last; reversed into the key
+  while (cur->kind == ExpressionKind::MemberAccess) {
+    const auto& ma = cur->as<slang::ast::MemberAccessExpression>();
+    if (ma.member.kind != slang::ast::SymbolKind::Field || !ma.value().type->isIntegral()) {
+      return std::nullopt;
+    }
+    fields.push_back(ma.member.name);
+    cur = &ma.value();
+  }
+  // NamedValue only. A HIERARCHICAL reference resolves to a ValueSymbol in an
+  // InstanceBodySymbol, and slang shares one body across instances with the
+  // same parameterization — so two refs down DIFFERENT instance paths could
+  // share a symbol pointer, i.e. a key that lies. The whole soundness argument
+  // is "same key ⇒ same storage"; nothing may weaken it. Measured cost of
+  // refusing: zero (dino, cva6 and minion have no hierarchical-ref sign
+  // extension), and a miss only means the generic concat path runs.
+  if (cur->kind != ExpressionKind::NamedValue) {
+    return std::nullopt;
+  }
+  const auto& sym = cur->as<slang::ast::NamedValueExpression>().symbol;
+  w.key           = absl::StrCat("#", absl::Hex(reinterpret_cast<uintptr_t>(&sym)));  // NOLINT(performance-no-int-to-ptr)
+  for (auto it = fields.rbegin(); it != fields.rend(); ++it) {
+    absl::StrAppend(&w.key, ".", *it);
+  }
+  return w;
+}
+
+// `{{N{v[msb]}}, v}` / `{{N{v[msb]}}, v[msb:lo]}` / `{{N{v[msb]}}, v[msb:lo], w}`
+// is how firtool (and hand-written RTL) spells a sign extension: replicate the
+// top bit of the lanes below, N times, above them. That is exactly LNAST's
+// `sext`, so emit one instead of lowering the replication — which would
+// otherwise cost a bit-extract plus an N-bit broadcast (a select mux, or an
+// OR tower of N shifted copies) plus a shift and an OR, all to recompute a bit
+// the value below already carries.
+//
+// Soundness: the replicated bit has to be the MSB of the lane DIRECTLY below the
+// replication, which (lanes being packed MSB-first) is the MSB of all the lanes
+// below it taken together. Both sides are resolved to constant windows over the
+// same storage, so a replicated bit of some OTHER net — `{{32{ready}}, data}`,
+// a mask idiom, not a sign extension — can never match. Returns "" (having
+// emitted nothing) for every shape it does not recognize.
+std::string Slang_context::lower_concat_sext(const slang::ast::ConcatenationExpression& expr) {
+  auto ops = expr.operands();
+  if (ops.size() < 2 || ops[0]->kind != ExpressionKind::Replication) {
+    return "";
+  }
+  const auto& rep   = ops[0]->as<slang::ast::ReplicationExpression>();
+  auto        count = try_eval_int(rep.count());
+  if (!count || *count < 1) {
+    return "";
+  }
+  // `{N{b}}` models its operand as a one-element concatenation; unwrap it so the
+  // window below sees the bit expression itself.
+  const slang::ast::Expression* bit = &rep.concat();
+  if (bit->kind == ExpressionKind::Concatenation) {
+    auto inner = bit->as<slang::ast::ConcatenationExpression>().operands();
+    if (inner.size() != 1) {
+      return "";
+    }
+    bit = inner[0];
+  }
+  if (tinfo(*bit->type).bits != 1) {
+    return "";  // a multi-bit replication is not a sign extension
+  }
+
+  auto sign_w = const_bit_window(*bit);
+  auto top_w  = const_bit_window(*ops[1]);
+  if (!sign_w || !top_w || sign_w->key != top_w->key || sign_w->lo != top_w->lo + top_w->bits - 1) {
+    return "";
+  }
+
+  int64_t low_bits = 0;
+  for (size_t i = 1; i < ops.size(); ++i) {
+    auto oi = tinfo(*ops[i]->type);
+    if (oi.bits <= 0) {
+      return "";
+    }
+    low_bits += oi.bits;
+  }
+  const auto total_bits = *count + low_bits;
+  if (total_bits != tinfo(*expr.type).bits) {
+    return "";  // the concat's own width disagrees: leave the generic path alone
+  }
+
+  // Committed: from here on nothing may fail, because lowering emits.
+  std::vector<Lnast_builder::Concat_lane> lanes;
+  lanes.reserve(ops.size() - 1);
+  for (size_t i = 1; i < ops.size(); ++i) {
+    const auto& e  = *ops[i];
+    auto        oi = tinfo(*e.type);
+    lanes.push_back({fit_wrap(to_int_value(lower_rvalue(e)), oi.bits, oi.is_signed), oi.bits});
+  }
+  // A single SIGNED lane needs no sext node: fit_wrap already restored its
+  // top-bit interpretation, which IS the sign extension.
+  std::string low = lanes.size() == 1 ? lanes[0].value : builder_.create_concat_stmts(lanes);
+  if (lanes.size() != 1 || !tinfo(*ops[1]->type).is_signed) {
+    low = builder_.create_sext_stmts(low, std::to_string(low_bits - 1));
+  }
+  return trunc_to(low, static_cast<int>(total_bits));
+}
+
+std::string Slang_context::lower_concat(const slang::ast::ConcatenationExpression& expr) {
+  auto ops = expr.operands();
+
+  if (auto sx = lower_concat_sext(expr); !sx.empty()) {
+    return sx;
+  }
+
+  std::vector<Lnast_builder::Concat_lane> lanes;
+  lanes.reserve(ops.size());
+
+  for (const auto* op : ops) {
+    const auto& e  = *op;
+    auto        oi = tinfo(*e.type);
+    // A Concat lane is an IR precision boundary: its driver must already fit
+    // the source operand's self-determined window. `fit_wrap` both truncates an
+    // unsigned/unbounded expression and restores a signed operand's top-bit
+    // interpretation, yielding exactly the two's-complement window SV packs.
+    lanes.push_back({fit_wrap(to_int_value(lower_rvalue(e)), oi.bits, oi.is_signed), oi.bits});
+  }
+
+  if (lanes.empty()) {
+    return "0";  // `{}` is not legal SV; keep the old empty-concat guard
+  }
+  return builder_.create_concat_stmts(lanes);
 }
 
 // Shared base+offset math for packed element/range selects and member access.
@@ -973,7 +1456,7 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
           // recurses here through the generic select path below, so its offset
           // math is already field-relative.
           if (const auto* f = find_struct_field(*bsi, dotted)) {
-            return read_leaf(absl::StrCat(bundle_port_body_base(bsym), ".", f->name));
+            return read_leaf(absl::StrCat(bundle_port_read_base(bsym), ".", f->name));
           }
           // A WHOLE SUB-STRUCT read (`ctrl.req`) is deliberately NOT special-cased.
           // An interior level is a name PREFIX, never a leaf entry, so it falls
@@ -1013,8 +1496,8 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
     const auto& field = ma.member.as<slang::ast::FieldSymbol>();
     auto        bi    = tinfo(*ma.value().type);
     auto        p     = to_pattern(to_int_value(lower_rvalue(ma.value())), bi.bits, bi.is_signed);
-    auto lo = static_cast<int64_t>(field.bitOffset);
-    auto r  = extract_field(p, lo, ti.bits);
+    auto        lo    = static_cast<int64_t>(field.bitOffset);
+    auto        r     = extract_field(p, lo, ti.bits);
     return ti.is_signed ? builder_.create_sext_stmts(r, std::to_string(ti.bits - 1)) : r;
   }
 
@@ -1051,23 +1534,91 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
     stride = static_cast<int>(base_ty.getArrayElementType()->getBitWidth());
   }
 
-  // A whole-element select `vec[const]` of a per-element bundle array routes to
-  // the element's independent leaf net (breaks the Type C false self-loop). A
-  // sub-element / dynamic / range select falls through to the generic path, which
-  // reconstructs the whole value from the leaves via lower_rvalue(base) below.
+  // A whole-element select `vec[const]` of a BUNDLE PORT array routes to the
+  // element's independent leaf net. A sub-element / dynamic / range select falls
+  // through to the generic path, which reconstructs the whole value from the
+  // leaves via lower_rvalue(base) below.
   if (expr.kind == ExpressionKind::ElementSelect && base.kind == ExpressionKind::NamedValue) {
     const auto& bsym = base.as<slang::ast::NamedValueExpression>().symbol;
-    if (is_packed_array_bundle_var(bsym) && ti.bits == stride) {
-      const auto& es = expr.as<slang::ast::ElementSelectExpression>();
+    if (const Struct_info* array_info = bundle_port_of(bsym);
+        array_info != nullptr && base_ty.isPackedArray() && ti.bits == stride) {
+      const auto& es        = expr.as<slang::ast::ElementSelectExpression>();
+      const auto  leaf_base = bundle_port_read_base(bsym);
+      // A reference, not a copy: a dynamic select below asks for every lane, so
+      // copying the field table per access is O(lanes * fields) of churn on the
+      // arrays this path exists for.
+      const auto& fields    = array_info->fields;
+      auto        read_lane = [&](int64_t idx) {
+        const auto  prefix     = absl::StrCat("e", idx);
+        const auto  dot_prefix = absl::StrCat(prefix, ".");  // hoisted: the loop below asks per field
+        std::string value;
+        for (const auto& f : fields) {
+          if (f.name != prefix && !std::string_view(f.name).starts_with(dot_prefix)) {
+            continue;
+          }
+          auto       part = to_pattern(read_leaf(absl::StrCat(leaf_base, ".", f.name)), f.bits, f.is_signed);
+          const auto rel  = f.off - idx * stride;
+          if (rel != 0) {
+            part = builder_.create_shl_stmts(part, std::to_string(rel));
+          }
+          value = value.empty() ? part : builder_.create_bit_or_stmts({value, part});
+        }
+        return value;
+      };
       if (auto ci = try_eval_int(es.selector())) {
         int64_t idx = range.isDescending() ? (*ci - range.lower()) : (range.upper() - *ci);
-        if (!declared_.contains(&bsym)) {
-          declare_value_symbol(bsym, /*force_reg=*/false);
+        if (auto value = read_lane(idx); !value.empty()) {
+          return ti.is_signed ? builder_.create_sext_stmts(value, std::to_string(stride - 1)) : value;
         }
-        if (auto it = struct_var_info_.find(&bsym); it != struct_var_info_.end()) {
-          if (const auto* f = find_struct_field(it->second, absl::StrCat("e", idx))) {
-            auto v = read_leaf(absl::StrCat(lname_of(bsym), ".", f->name));
-            return f->is_signed ? builder_.create_sext_stmts(v, std::to_string(f->bits - 1)) : v;
+      } else {
+        // Preserve the aggregate as positional element refs at this access
+        // boundary. uPass recognizes a runtime tuple_get over those refs and
+        // lowers it to Hotmux, avoiding a permanent concat+shift cone. Append
+        // an explicit unknown lane so the Hotmux's mandatory else arm matches
+        // SystemVerilog out-of-range selection instead of aliasing the final
+        // valid element.
+        {
+          // Build every lane value before the tuple node. read_lane can emit
+          // masks/shifts/ors (and constant-folded temporaries); creating the
+          // tuple first would make its children forward-reference those
+          // producers, so uPass sees unresolved slots while lowering the
+          // runtime tuple_get.
+          // A lane with no matching leaf yields "" — an empty ref child would
+          // be a malformed tuple, so fall through to the generic flat-value
+          // path instead (same guard the constant-index branch above has).
+          std::vector<std::string> lanes;
+          lanes.reserve(range.width());
+          bool every_lane_read = true;
+          for (int64_t lane_idx = 0; lane_idx < static_cast<int64_t>(range.width()); ++lane_idx) {
+            lanes.push_back(read_lane(lane_idx));
+            every_lane_read = every_lane_read && !lanes.back().empty();
+          }
+          if (every_lane_read && !lanes.empty()) {
+            auto index = to_int_value(lower_rvalue(es.selector()));
+            if (range.isDescending()) {
+              if (range.lower() != 0) {
+                index = builder_.create_minus_stmts(index, std::to_string(range.lower()));
+              }
+            } else {
+              index = builder_.create_minus_stmts(std::to_string(range.upper()), index);
+            }
+
+            auto& ln       = *builder_.lnast;
+            auto  tuple    = builder_.create_lnast_tmp();
+            auto  tuple_op = builder_.add_child(Lnast_ntype::create_tuple_add());
+            ln.add_child(tuple_op, Lnast_node::create_ref(tuple));
+            for (const auto& lane : lanes) {
+              ln.add_child(tuple_op, Lnast_node::create_ref(lane));
+            }
+            std::string xbits(static_cast<size_t>(stride), '?');
+            ln.add_child(tuple_op, Lnast_node::create_const(absl::StrCat("0ub", xbits)));
+
+            auto result = builder_.create_lnast_tmp();
+            auto get    = builder_.add_child(Lnast_ntype::create_tuple_get());
+            ln.add_child(get, Lnast_node::create_ref(result));
+            ln.add_child(get, Lnast_node::create_ref(tuple));
+            builder_.add_value_child_pub(get, index);
+            return ti.is_signed ? builder_.create_sext_stmts(result, std::to_string(stride - 1)) : result;
           }
         }
       }
@@ -1079,11 +1630,12 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
   // (selected width in bits, low element index normalized to 0-based)
   int                    sel_bits = ti.bits;
   std::optional<int64_t> const_low;
-  std::string            dyn_low;       // 0-based element index expression
+  std::string            dyn_low;               // 0-based element index expression
   bool                   comptime_dyn = false;  // dyn_low is a COMPTIME pkg-param expression
 
-  auto normalize = [&](const slang::ast::Expression& idx, int64_t width_down,
-                       int64_t width_up) -> std::pair<std::optional<int64_t>, std::string> {
+  auto normalize = [&](const slang::ast::Expression& idx,
+                       int64_t                       width_down,
+                       int64_t                       width_up) -> std::pair<std::optional<int64_t>, std::string> {
     // bottom element of the selection, 0-based from the LSB end
     if (auto ci = try_eval_int(idx)) {
       // Provenance: a comptime index NAMING a package param (`sigs[PKG_BIT]`,
@@ -1091,8 +1643,7 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
       // via the dynamic route; comptime_dyn skips its runtime wrap-guards (the
       // amount folds back to this very constant on recompile).
       if (!(options_.preserve_param_provenance && contains_package_param(idx))) {
-        int64_t bottom = range.isDescending() ? (*ci - range.lower() - (width_down - 1))
-                                                : (range.upper() - *ci - (width_up - 1));
+        int64_t bottom = range.isDescending() ? (*ci - range.lower() - (width_down - 1)) : (range.upper() - *ci - (width_up - 1));
         return {bottom, {}};
       }
       comptime_dyn = true;
@@ -1107,7 +1658,7 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
   };
 
   if (expr.kind == ExpressionKind::ElementSelect) {
-    const auto& es           = expr.as<slang::ast::ElementSelectExpression>();
+    const auto& es               = expr.as<slang::ast::ElementSelectExpression>();
     std::tie(const_low, dyn_low) = normalize(es.selector(), 1, 1);
   } else {
     const auto& rs = expr.as<slang::ast::RangeSelectExpression>();
@@ -1192,6 +1743,54 @@ std::string Slang_context::lower_call(const slang::ast::CallExpression& expr) {
       }
       return to_pattern(v, ai.bits, ai.is_signed);
     }
+    // `$past(x, n)` and the edge functions built on it. The history comes from
+    // a REAL flop chain in the design (declare_past_chains / the epilogue
+    // update), not from a monitor-side trick: a flop inside a combinational
+    // monitor would be a fresh free symbol every step and would silently refute
+    // tautologies, which is why the Pyrope formal-block path resolves history by
+    // indexing the unroll instead. Here the state belongs to the design, so the
+    // BMC/induction engine models it correctly.
+    if ((name == "$past" || name == "$rose" || name == "$fell" || name == "$stable" || name == "$changed") && !args.empty()) {
+      if (args[0]->kind != slang::ast::ExpressionKind::NamedValue) {
+        emit_unsupported(expr.sourceRange,
+                         "unsupported-past",
+                         std::string(name) + " takes one signal; an expression argument is not supported");
+        return "0";
+      }
+      const auto& sym = args[0]->as<slang::ast::NamedValueExpression>().symbol;
+      int         n   = 1;
+      if (name == "$past" && args.size() >= 2) {
+        auto d = try_eval_int(*args[1]);
+        if (!d || *d < 0) {
+          emit_unsupported(expr.sourceRange, "unsupported-past", "$past() depth must be a literal cycle count");
+          return "0";
+        }
+        n = static_cast<int>(*d);
+      }
+      const auto cur  = to_int_value(lower_rvalue(*args[0]));
+      const auto prev = to_int_value(past_ref(sym, name == "$past" ? n : 1, expr.sourceRange));
+      if (name == "$past") {
+        return prev;
+      }
+      // rose/fell/stable/changed are sugar over one cycle of history. Each is
+      // a 1-bit result, so compare rather than mask: the operand may be wider.
+      // The comparisons yield pyrope BOOLs, but a SystemVerilog expression is
+      // integer-valued (SV has no bool type), so each is converted back on the
+      // way out -- otherwise `$rose(a) == (a && !$past(a))` fails typecheck
+      // with "`==` requires both operands to be the same type".
+      const auto cur_nz  = mark_bool(builder_.create_ne_stmts(cur, "0"));
+      const auto prev_nz = mark_bool(builder_.create_ne_stmts(prev, "0"));
+      if (name == "$rose") {
+        return to_int_value(mark_bool(builder_.create_log_and_stmts(cur_nz, mark_bool(builder_.create_log_not_stmts(prev_nz)))));
+      }
+      if (name == "$fell") {
+        return to_int_value(mark_bool(builder_.create_log_and_stmts(prev_nz, mark_bool(builder_.create_log_not_stmts(cur_nz)))));
+      }
+      if (name == "$stable") {
+        return to_int_value(mark_bool(builder_.create_eq_stmts(cur, prev)));
+      }
+      return to_int_value(mark_bool(builder_.create_ne_stmts(cur, prev)));  // $changed
+    }
     if (name == "$countones" && args.size() == 1) {
       const auto& a  = *args[0];
       auto        ai = tinfo(*a.type);
@@ -1209,7 +1808,8 @@ std::string Slang_context::lower_call(const slang::ast::CallExpression& expr) {
       return acc;
     }
     // constant system calls ($clog2, $bits, ...) fold in tier 1
-    emit_unsupported(expr.sourceRange, "unsupported-system-call",
+    emit_unsupported(expr.sourceRange,
+                     "unsupported-system-call",
                      std::string("system call '") + std::string(name) + "' is not supported by --reader slang");
     return "0";
   }
@@ -1221,7 +1821,8 @@ std::string Slang_context::lower_call(const slang::ast::CallExpression& expr) {
     return inline_call(expr, *sub);
   }
 
-  emit_unsupported(expr.sourceRange, "unsupported-function-call",
+  emit_unsupported(expr.sourceRange,
+                   "unsupported-function-call",
                    std::string("call to '") + std::string(expr.getSubroutineName())
                        + "' is not supported by --reader slang yet (only compile-time evaluable functions fold)");
   return "0";
@@ -1229,7 +1830,8 @@ std::string Slang_context::lower_call(const slang::ast::CallExpression& expr) {
 
 std::string Slang_context::inline_call(const slang::ast::CallExpression& expr, const slang::ast::SubroutineSymbol& sub) {
   if (inline_depth_ > 32) {
-    emit_unsupported(expr.sourceRange, "unsupported-function-call",
+    emit_unsupported(expr.sourceRange,
+                     "unsupported-function-call",
                      std::string("call to '") + std::string(sub.name) + "' exceeds the inline-recursion limit");
     return "0";
   }
@@ -1250,7 +1852,8 @@ std::string Slang_context::inline_call(const slang::ast::CallExpression& expr, c
   for (size_t i = 0; i < formals.size(); ++i) {
     const auto& fa = *formals[i];
     if (fa.direction != slang::ast::ArgumentDirection::In) {
-      emit_unsupported(expr.sourceRange, "unsupported-function-call",
+      emit_unsupported(expr.sourceRange,
+                       "unsupported-function-call",
                        "only pure input-argument functions can be inlined by --reader slang");
       return "0";
     }
@@ -1270,18 +1873,31 @@ std::string Slang_context::inline_call(const slang::ast::CallExpression& expr, c
   const auto& rv = *sub.returnValVar;
   declare_value_symbol(rv, /*force_reg=*/false);
 
-  // Lower the body with a function-return context active (Return assigns `rv`).
-  // Returns that are terminal per branch merge correctly through the existing
-  // branch machinery; mid-block early returns are not modeled.
-  bool        saved_in  = in_function_call_;
-  const auto* saved_ret = func_ret_sym_;
-  in_function_call_     = true;
-  func_ret_sym_         = &rv;
+  // Lower the body with a function-return context active (Return assigns `rv`
+  // and raises a per-call flag; statement lists guard everything after a
+  // possible return). The flag is a normal mutable local so branch merging
+  // preserves SystemVerilog early-return control flow.
+  bool        saved_in       = in_function_call_;
+  const auto* saved_ret      = func_ret_sym_;
+  auto        saved_returned = std::move(func_returned_flag_);
+  in_function_call_          = true;
+  func_ret_sym_              = &rv;
+  func_returned_flag_        = fresh_local("function_returned");
+  builder_.create_assign_stmts(func_returned_flag_, "0");
   ++inline_depth_;
   lower_statement(sub.getBody());
   --inline_depth_;
-  in_function_call_ = saved_in;
-  func_ret_sym_     = saved_ret;
+  in_function_call_   = saved_in;
+  func_ret_sym_       = saved_ret;
+  func_returned_flag_ = std::move(saved_returned);
 
-  return read_symbol(rv, expr.sourceRange);
+  // The SubroutineSymbol (including its formal and return symbols) is shared by
+  // every call site.  Returning the mutable return variable by name aliases two
+  // calls in one expression: `f(a) < f(b)` lowers both operands to the second
+  // call's `f` variable and becomes `f < f`.  Snapshot the completed call into
+  // a fresh SSA temp before another call can rebind the formals / overwrite the
+  // return slot.
+  auto result = builder_.create_lnast_tmp();
+  builder_.create_assign_stmts(result, read_symbol(rv, expr.sourceRange));
+  return result;
 }

@@ -1,0 +1,22 @@
+/*
+:name: format_bool_argument
+:type: comptime
+:verifier_pass: 8
+:verifier_fail: 0
+*/
+
+// Check all inputs before and after formatting. Token boundaries in the
+// named argument must preserve both parsing and boolean semantics.
+comb pass_flag(flag:bool) -> (result:bool) { result = flag }
+comb select_flag(a:bool, b:bool, c:bool) -> (result:bool) {
+  result = pass_flag(flag=not a and (b or c))
+}
+
+cassert(select_flag(a=false, b=false, c=false) == false)
+cassert(select_flag(a=false, b=false, c=true) == true)
+cassert(select_flag(a=false, b=true, c=false) == true)
+cassert(select_flag(a=false, b=true, c=true) == true)
+cassert(select_flag(a=true, b=false, c=false) == false)
+cassert(select_flag(a=true, b=false, c=true) == false)
+cassert(select_flag(a=true, b=true, c=false) == false)
+cassert(select_flag(a=true, b=true, c=true) == false)

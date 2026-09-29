@@ -2,9 +2,8 @@
 // details.
 #pragma once
 
-// Host memory facts for ABC memory admission (todo/livehd/2opt-incr.html
-// subtask 0): how much RAM this machine really has, and how much this process
-// is really using, right now.
+// Host memory facts for ABC memory admission: how much RAM this machine really
+// has, and how much this process is really using, right now.
 //
 // PHYSICAL memory only -- never swap, never "available including compressed".
 // The failure this guards against is the one that already happened: a
@@ -33,15 +32,14 @@
 //    the translated netlist (measured 2.5x-29.6x; read_lib's fixed cost dominates
 //    small regions), so bytes-per-gate cannot be calibrated externally.
 //
-// CORRECTION (2026-07-15): an earlier version of this comment claimed
-// setrlimit(RLIMIT_AS/RLIMIT_DATA/RLIMIT_RSS) "returns EINVAL on Darwin ... the
-// only mechanism available is sampling our own RSS." That was wrong. RLIMIT_AS's
-// floor on Darwin is the task's *current* virtual_size -- an arm64 process
+// setrlimit(RLIMIT_AS/RLIMIT_DATA/RLIMIT_RSS) is NOT unsupported on Darwin,
+// despite the EINVAL an absolute small limit gets. RLIMIT_AS's floor on
+// Darwin is the task's *current* virtual_size -- an arm64 process
 // reserves ~415 GiB of PROT_NONE VA at startup, so an absolute small limit
 // EINVALs for being BELOW the floor, not for being unsupported. Set it to
-// (virtual_size + budget) and it enforces to the byte (verified: malloc->NULL,
-// mmap->MAP_FAILED, new->bad_alloc, an incremental loop stops at exactly the
-// headroom). See arm_address_space_limit().
+// (virtual_size + a bounded allocation allowance) and it enforces to the byte
+// (verified: malloc->NULL, mmap->MAP_FAILED, new->bad_alloc). The allowance now
+// includes explicit VA-only allocator headroom; see arm_address_space_limit().
 
 #include <cstdint>
 
@@ -56,6 +54,12 @@ namespace livehd::cost {
 
 // This process's CURRENT resident set size (not the peak).
 [[nodiscard]] uint64_t process_rss_bytes();
+
+// Peak resident set reached by this process, normalized to bytes on every
+// platform. Unlike process_rss_bytes(), this intentionally never decreases;
+// pass.abc samples it at each completed color so its QoR report can separate
+// the ABC high-water mark from later one-shot synthesis phases such as STA.
+[[nodiscard]] uint64_t process_peak_rss_bytes();
 
 // This process's CURRENT physical footprint -- the metric the OS actually acts
 // on when it decides to kill a process (macOS jetsam charges phys_footprint; the
@@ -79,15 +83,16 @@ namespace livehd::cost {
 // bounds every child (yosys, a re-invoked `lhd sim`, a forked prover).
 //
 // Darwin: RLIMIT_AS's floor is the task's current virtual_size, so the installed
-// value is (virtual_size + budget) read at call time -- never hardcode the
-// ~415 GiB baseline, it is arm64- and OS-version-specific. Real allocations grow
-// VA ~1:1, so this bounds real memory to ~budget. Linux: the value is `budget`
-// absolute (baseline VA is a few MB). This is the HARD BACKSTOP described in the
-// file header: it protects the host, it does not produce a clean error.
+// value is (virtual_size + 1.25*budget) read at call time -- never hardcode the
+// ~415 GiB baseline, it is arm64- and OS-version-specific. The 25% VA-only
+// allowance covers allocator reservations/holes; sampled admission still gates
+// PHYSICAL footprint at `budget`. Linux: the value is `budget` absolute
+// (baseline VA is a few MB). This is the HARD BACKSTOP described in the file
+// header: it protects the host, it does not produce a clean error.
 [[nodiscard]] uint64_t arm_address_space_limit(uint64_t budget);
 
 // The budget this process is configured for: env LIVEHD_MEMORY_BUDGET_MB when
-// set, else budget_bytes(0) = physical - reserve. 0 means "unenforceable -- do
+// set (clamped to physical - reserve), else budget_bytes(0) = physical - reserve. 0 means "unenforceable -- do
 // not gate". Reads only the environment and syscalls.
 [[nodiscard]] uint64_t configured_budget_bytes();
 
@@ -119,12 +124,16 @@ namespace livehd::cost {
 // Proven). Host survival is worth a lost verdict; the reverse is not.
 [[nodiscard]] uint64_t arm_child_share(int nsiblings);
 
-// Headroom left to the OS and the rest of the machine: max(2 GiB, 20% of
+// Headroom left to the OS and the rest of the machine: max(2 GiB, 25% of
 // physical), capped at half of physical so a small host still gets a usable
 // budget. Not tunable -- `budget_mb` below is the tunable.
 [[nodiscard]] uint64_t reserve_bytes();
 
-// The ceiling a single ABC region may reach, as TOTAL process RSS.
+// The memory ceiling pass.abc admits against. ONE number, applied to two
+// readings (Mapper::over_budget): a single region's GROWTH over its entry RSS,
+// and the process's TOTAL footprint -- either crossing it is a refusal, because
+// growth alone cannot bound a long multi-color run whose footprint is sticky
+// after free, and total alone cannot tell one oversize region from a large run.
 // `budget_mb > 0` pins it explicitly (reproducible hosts and CI); otherwise it
 // is physical - reserve. Returns 0 when physical RAM is unknown and no explicit
 // budget was given, meaning "unenforceable -- do not gate".

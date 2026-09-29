@@ -1,0 +1,33 @@
+/*
+:name: local_shadow_comptime_arm
+:type: equiv
+:verilog_top: local_shadow_comptime_arm
+:pyrope_top: local_shadow_comptime_arm
+*/
+//
+// Golden pair for a Verilog local whose first write sits inside a
+// COMPTIME-DECIDED `if` arm, declared twice: once at module scope and once in a
+// generate block that shadows it (see the `.v` header for the whole story).
+//
+// The claim this pair carries is really about the OTHER direction:
+// `prp-v2prp2v-local_shadow_comptime_arm` reads the golden through slang,
+// emits Pyrope, recompiles it and LECs the result against the original
+// Verilog. That leg failed outright -- the emitted Pyrope declared neither
+// `lanes`, because the arm that carried each lazy declaration was dead and got
+// eliminated along with it. Pyrope has no shadowing, so the two nets are spelled
+// apart here; the Verilog names them the same on purpose.
+pub comb local_shadow_comptime_arm::[timecheck=false](operands_i:u24, sh_i:u3) -> (outer_o:u24, inner_o:u24) {
+  mut outer:u24 = 0
+  mut inner:u24 = 0
+
+  outer#[0..=7]   = (operands_i#[0..=7]   >> sh_i)#[0..=7]
+  outer#[8..=15]  = (operands_i#[8..=15]  >> sh_i)#[0..=7]
+  outer#[16..=23] = (operands_i#[16..=23] << sh_i)#[0..=7]
+
+  inner#[0..=7]   = (operands_i#[0..=7]   << sh_i)#[0..=7]
+  inner#[8..=15]  = (operands_i#[8..=15]  << sh_i)#[0..=7]
+  inner#[16..=23] = (operands_i#[16..=23] >> sh_i)#[0..=7]
+
+  outer_o = outer
+  inner_o = inner
+}

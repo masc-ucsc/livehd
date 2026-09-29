@@ -4,9 +4,62 @@ The direct `--reader slang` front-end: slang v11 elaborates SystemVerilog and
 `Slang_context` lowers the AST straight to LNAST, one Lnast per module in the
 extracted unit form (`top -> [io, stmts]`, `lambda_kind="mod"`, exact Verilog
 module names) so the standard upass pipeline (SSA → io_meta → tolg) compiles
-it like any Pyrope unit. It is NOT a replacement for the `yosys-verilog` /
-`yosys-slang` production readers; it exists so `ln:`/`lnast-dump:` flows can
-ingest SystemVerilog directly (todo/ 2s).
+it like any Pyrope unit. This is the default SystemVerilog reader and supports
+compilation and synthesis as well as `ln:`/`lnast-dump:` inspection. Use
+an explicit `lhd compile --reader yosys ... --emit-dir lg:comparison/`
+for importer debugging. Compare those graphs against a native Slang `lhd lec`
+run; Yosys is an additional cross-check, not a substitute for native coverage.
+
+Clocked blocking assignments keep a process-local current value: later
+statements see earlier writes, and the process commits the final value to its
+registers. Integral-element unpacked arrays use a current array snapshot while
+their persistent storage retains its identity and old-value reads in other
+processes. Blocking arrays require a single writer; struct-element arrays still
+diagnose. Loop counters used only inside canonical `for` loops remain mutable
+elaboration controls, including module-scope integers beneath runtime enables.
+The unroller writes back their terminal value; counters observed outside their
+loops retain normal state analysis. Actual conditional data writes still infer
+latches. Memory write ports retain
+the clock of their owning process. Mixed write-edge polarities are represented
+with the Memory IR's mixed-edge marker and diagnosed; formal refuses that
+unsupported schedule by name rather than silently collapsing its edges.
+
+Pyrope-only emission preserves integer and string module parameters as generic
+defaults (`pub mod core<N=8, MODE="fast">...`). Each Slang-elaborated
+specialization carries its bound values, including instance overrides; localparams
+remain body constants. These are parameters of the emitted, elaborated body:
+port widths, generate branches, and other structural choices have already been
+resolved by Slang. To change those choices, re-elaborate the Verilog configuration.
+
+Two limitations of that header are real and currently unchecked:
+
+* **Only a parameter that still appears SYMBOLICALLY in the emitted body is
+  honoured on override.** A parameter that reached an elaboration-time decision
+  is baked in: `assign y = (N == 2) ? a + 1 : a + 2` emits the taken arm
+  unconditionally, yet the header still advertises `<N=2>`, so a Pyrope-side
+  `core<N=3>(...)` compiles and produces DIFFERENT hardware than the Verilog with
+  the same override (it LECs REFUTED, with no diagnostic). Every string parameter
+  is in this class — Slang consumes string expressions during elaboration.
+  A parameter used only in arithmetic (`assign y = a + N`) does round-trip
+  correctly, and that is what `lhd/tests/slang_param_provenance_test.sh` covers.
+* **Recompiling the emitted Pyrope renames every parameterized module.** A
+  generic header makes the re-read unit a deferred TEMPLATE, so each call site
+  mints a specialization clone named `subm__u1_u8_N_3_h007714d1`. Direct
+  `verilog:` -> `lg:` is unaffected, but on the `verilog:` -> `pyrope:` -> `lg:`
+  leg `canonical_entity_name` cannot undo the mangling, so cross-frontend def
+  pairing dies (measured on a two-instance hierarchy: `2 ref-only def(s)`,
+  `registers ref 0/2 paired`, verdict `DIFFERENCES present` on an equivalent
+  design) and hierarchical LEC degrades to one flat whole-design proof.
+  The fix is to give an IDENTITY specialization — every generic bound to its own
+  declaration default, no injected port type, no var-arg — the module's own name,
+  which is the rule `specialize_top_defaults` already applies to a generic top:
+  one parameter value-set means one LGraph, and it is the module. Doing that at
+  a call site additionally requires the emitted instance call to resolve to the
+  CONCRETE twin rather than the template; naming the clone after the template
+  without that makes `lookup_callee` return the template again, which
+  re-specializes the same statement forever (observed as a stack overflow in
+  `hhds::Source_locator::find_file`, via the scratch-locator `base_` chain the
+  loop grows).
 
 ## Passing raw slang driver args (`-- ...`)
 
@@ -53,10 +106,67 @@ Key invariants the lowering maintains:
 - registers are `declare(…,'reg')` hoisted to module start (an `output reg`'s
   q pin IS the output); non-`clk/clock` or negedge clocks ride per-reg
   `clock_pin`/`posclk` attrs; extracted async-reset rungs become
-  `initial`/`reset_pin`/`sync`/`negreset` attrs;
+  `initial`/`reset_pin`/`sync`/`negreset` attrs. Constant reset assignments to
+  concatenations split recursively by destination width and signedness;
+  packed slices use the same offsets as ordinary writes. A constant scalar declaration
+  initializer or simple `initial q = CONST` on a register without such a reset
+  becomes the implicit-module-reset value and emits `initial-without-reset`,
+  because formal equivalence can differ from reset-less hardware;
 - unpacked arrays lower to the `comp_type_array` declare + `store(mem,idx,v)`
   / `tuple_get(d,mem,idx)` memory vocabulary with `fwd=0` (Verilog
   nonblocking reads see old contents).
+
+Constant packed bit-selected clocks become named one-bit clock wires. Packed
+vectors written by these processes lower to scalar register bits, each with
+its own clock edge and reset attributes; a packed view preserves whole reads
+and output ports. Their writes currently require constant nonblocking
+destinations. Dynamic clock selectors, blocking writes to the split vectors,
+and overlapping writes from different clocks are diagnosed.
+
+Concurrent constant packed-bit/slice assignments and instance outputs lower to
+one single-assignment wire per bit. Constant reads use those wires directly;
+whole-vector and runtime-indexed reads use one assembled vector wire. This
+preserves generated ready chains regardless of source order, including ascending
+ranges and mixed slice/instance drivers. Overlapping static drivers warn and keep
+the legacy source-ordered lowering (an arrayed instantiation broadcasting one
+output onto one net bit is that shape); procedural, state, and dynamic
+destinations retain their existing lowering too.
+
+Counted `while` scans support runtime early exit when an adjacent constant
+initializer, a conjunctive `counter < constant` bound, and a unique unconditional
+unit increment prove termination without overflow. They lower to guarded
+iterations within the normal unroll budget; arbitrary runtime loops still
+diagnose. The counter's terminal value and all body side effects are preserved.
+
+Constant unpacked parameter arrays can be passed to runtime functions. Partial
+multidimensional array selects can supply subarray ports: remaining elements
+are packed in declaration order, independently of native memory index order.
+
+## Fixture discovery
+
+A new ordinary regression is a `.v` or `.sv` file in `tests/sv/`; Bazel creates
+`slang_<stem>` automatically. Name the top module after the file, or select it with `// :top: entity`. The shared
+`tests/slang_compile.sh auto FILE` runner compiles it through native Slang and
+compares the emitted Verilog with the source using default `lhd lec`.
+
+Optional leading comments select additional expectations:
+
+- `// :test: roundtrip` also emits Pyrope, recompiles it, and compares that result.
+- `// :test: lec_no_x` also rejects introduced X/Z literals.
+- `// :test: error` requires a clean compiler error with a structured diagnostic;
+  optional `// :error: REGEX` matches the diagnostic message.
+- `// :test: roundtrip_sim` value-checks the Pyrope round trip instead of
+  running LEC (see below).
+- `// :lec_timeout: N` raises the per-fixture LEC budget (watchdog 2N).
+- `// :lec_solver: NAME` runs `lhd lec --set formal.solver=NAME`. With
+  `lgyosys`, the native proof is cross-checked by lgcheck under
+  `LGCHECK_EQUIV_TIMEOUT=<lec_timeout>`, and the fixture requires lgcheck's
+  unbounded proof (crosscheck `exit_code` 0), not a bounded-clean window. Add
+  the fixture to `_SV_LGYOSYS` in `BUILD` so it stages `//inou/yosys:scripts`.
+
+These tests share the five-second internal LEC budget and ten-second watchdog
+below. Dedicated tests remain for warning details, generated storage complexity,
+file lists, determinism, and other behavior a value comparison cannot check.
 
 ## The coverage ladder (todo/ 2s subtask E)
 
@@ -65,8 +175,12 @@ strongest passing tier; `tests/slang_compile.sh <tier> <file>` enforces it
 both ways (a regression fails, and an outgrown `error` entry fails until the
 ladder is promoted). Tiers:
 
-- `lec` — slang→LNAST→tolg→cgen Verilog, LEC-checked (`lhd lec --set lec.solver=lgyosys`) against
-  the source. The strongest tier.
+- `lec` — slang→LNAST→tolg→cgen Verilog, LEC-checked (`lhd lec`, default solver) against
+  the source. The strongest tier. Slang tests leave the solver at its default;
+  `lgyosys` is reserved for explicit cross-checks of the native LEC engine.
+  The ladder uses `formal.timeout=5` with a ten-second outer watchdog. An explicit internal
+  timeout reports `LEC check: inconclusive`; equivalence remains unproven.
+  Refutations, unsupported encodings, setup errors and watchdog overruns fail.
 - `verilog` — compiles to Verilog; a known LEC gap is tracked in the ladder
   comment next to the entry.
 - `lnast` — LNAST + `ln:` save/reload round-trip only.
@@ -86,31 +200,33 @@ genuine gaps: four big-memory / wide-arith tests (`long_mem`, `long_mem3`,
 reduction are deliberately capped because LEC is slow there (the small-array
 coverage simple_rf1/rf2, tuplish, fixme_array carries the memory guarantee);
 `mem_sync_init` and `nocheck_slang_foreach` are real memory-lowering gaps.
+`long_nocheck_iwls_square` now attempts LEC with the five-second budget and
+accepts an explicit timeout as described above.
 Correct mixed signed/unsigned arithmetic and narrow (1- and 2-bit) signed
 port/temp ranges (`add1`, `issue_047`, …) are now LEC-verified — a signed
 operand in an unsigned expression zero-extends, and `materialize_conversion`
 plus `int_min_str`/`int_max_str` carry the 1800 §11.8.2 sign rules.
 
-The `tests/verilog/` sky130 cell samples run at the `lnast` tier through the
+The `tests/verilog/` sky130 cell samples run at the `error` tier through the
 legacy no-argument `slang_compile.sh` mode (`slang_compile_sky130` target).
 
 ## Which Verilog constructs to support (triage rule)
 
 When a SystemVerilog construct fails to lower, decide whether it is a bug to fix
 or a test to drop using three reference points — the standalone slang frontend,
-the yosys-slang plugin, and our native reader:
+the integrated Yosys Slang frontend, and our native reader:
 
 1. **slang native frontend rejects it → out of scope, for sure.** slang v11 is
    the strictest valid-SV gate; if its frontend cannot elaborate the construct it
    is either illegal SV or non-elaboratable, so `--reader slang` has nothing
    well-formed to lower. Drop it (or keep it as an `error`-tier test when slang
    rejects it *cleanly*).
-2. **yosys-slang handles it → we must support it too.** A construct the
-   yosys-slang plugin lowers is a real, synthesizable RTL idiom; both
-   `--reader slang` and `--reader yosys-slang` should match it. A failure here is
+2. **`read_slang` handles it → we must support it too.** A construct yosys's
+   built-in `read_slang` lowers is a real, synthesizable RTL idiom; both
+   `--reader slang` and `--reader yosys` should match it. A failure here is
    a genuine bug to fix.
-3. **yosys-slang fails but slang native succeeds → it depends.** The construct is
-   valid SV (the frontend accepts it) but the yosys-slang plugin's RTLIL
+3. **`read_slang` fails but slang native succeeds → it depends.** The construct is
+   valid SV (the frontend accepts it) but the integrated Yosys Slang frontend's RTLIL
    conversion cannot handle it. Try to support it in our native lowering —
    unless it is a non-synthesizable construct (`$foo` system tasks,
    simulation-only strangeness), in which case dropping the test is fine.
@@ -121,16 +237,13 @@ the yosys-slang plugin, and our native reader:
 # 1. standalone slang frontend  (valid-SV gate; NOT always installed locally)
 slang foo.sv
 
-# 2. yosys + the yosys-slang plugin, no LiveHD  (plugin path is bazel-mangled;
-#    `find bazel-bin/external -name slang.so` if the +http_archive+ form moves)
-./bazel-bin/inou/yosys/yosys2 \
-  -m ./bazel-bin/external/+http_archive+yosys_slang/slang.so \
-  -p "read_slang foo.sv"
+# 2. bundled Yosys with integrated Slang, no separately loaded plugin
+./bazel-bin/inou/yosys/yosys2 -p "read_slang foo.sv"
 
 # 3a. LiveHD native reader (slang-library based)
 lhd compile --reader slang       foo.v --emit-dir pyrope:out/
-# 3b. LiveHD yosys-slang reader
-lhd compile --reader yosys-slang foo.v --emit-dir verilog:out/
+# 3b. LiveHD Yosys reader
+lhd compile --reader yosys foo.v --emit-dir verilog:out/
 ```
 
 **When standalone `slang` is not installed**, use `--reader slang` as a proxy for
@@ -170,3 +283,33 @@ header's `:type:` selects how the readers are exercised:
 The `:pyrope_top:`/`:verilog_top:` header tags pin the (differently-named) top on
 each side. Pick `equiv` when both readers can read the `.v`; `equiv_slang` when
 only the native slang reader can.
+
+Run the automatically discovered SV corpus with
+`bazel test -c opt //inou/slang:integration`. Each fixture remains an individual
+Bazel test, so failures identify the source and runtimes stay bounded.
+
+`// :test: roundtrip_sim` emits and recompiles Pyrope, then checks the
+re-emitted Verilog without LEC. This profile covers behavior the formal encoder
+cannot represent, such as flop-driven clocks; it does not claim a proof or
+accept an unsupported LEC verdict. Ordinary roundtrips still use LEC.
+
+1. Every `// :verilog_re: ERE` header must match the re-emitted Verilog and no
+   `// :verilog_not_re: ERE` may (for example, an asynchronous reset must keep
+   its sensitivity list in every block).
+2. The sibling `<stem>_tb.prp` Pyrope testbench (`import("lg:<top>")`, `tick`
+   directed vectors, `assert`) runs under `lhd sim lg:` with
+   `sim.unknown_zero=true`. Native simulation is cycle-based: each `step` is
+   one reference-clock cycle, so edge polarity, a reset asserted between edges,
+   and sub-cycle toggles are not observable there. Pin those with step 1.
+3. A design native simulation refuses declares `// :sim_unsupported: TEXT`
+   instead of a `_tb.prp`; the refusal (exit 7, class `unsupported`, `TEXT` in
+   the message) is required, so a newly supported schedule fails until it gets
+   a testbench.
+4. An optional `<stem>_tb.v` event-level bench (it must `$fatal` on mismatch)
+   runs under Icarus only with `LHD_EXTERNAL_SIM=1`, for example
+   `bazel test --test_env=LHD_EXTERNAL_SIM=1 //inou/slang:slang_writer_divclk`
+   with iverilog/vvp on `PATH`. The default suite needs no external simulator.
+
+The discovered integration cases reserve four Bazel CPUs each so concurrent
+frontend/solver jobs do not exhaust the fixed LEC watchdog through resource
+contention. Synthesis integration cases in `//inou/prp:integration` run exclusively.

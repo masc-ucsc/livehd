@@ -7,8 +7,8 @@
 
 // 2f-overload — dispatch resolves the WHOLE `c = f(args)`, return side included.
 // The gathered set lists the multi-output `mk_two` FIRST, and it accepts the
-// call on its inputs (u8 → u8). But the result is bound to a single output `s`,
-// and binding two outputs to one variable is illegal — so `mk_two` cannot
+// call on its inputs (u8 → u8). But the result is bound to the scalar output
+// `s:u9`, which cannot hold the named output tuple — so `mk_two` cannot
 // handle this call and dispatch SKIPS it for the single-output `mk_one`
 // (s = x+1). Selection is by the binding, not tuple order; the chosen body
 // inlines and lowers, so this LECs to a plain `s = x + 1`.

@@ -8,6 +8,7 @@
 
 // #include <ext/stdio_filebuf.h>
 #include <algorithm>
+#include <cstdlib>
 #include <format>
 #include <fstream>
 #include <iostream>
@@ -28,10 +29,15 @@
 static void log_error_atexit() { throw std::runtime_error("yosys finished"); }
 
 void setup_inou_yosys() {
-  Yosys::log_error_stderr    = true;
-  Yosys::log_cmd_error_throw = true;
-  Yosys::log_errfile         = stderr;
-  Yosys::log_error_atexit    = log_error_atexit;
+  // stdout is redirected to the per-step log while a pass runs (run_step's
+  // Stdout_to_log), so a stdout-only sink hides every yosys warning/error from
+  // the caller. The stderr sink is what the pre-Logger `log_error_stderr` /
+  // `log_errfile = stderr` pair used to provide: warnings and errors stay
+  // visible (and greppable) on the terminal, the full transcript in the log.
+  Yosys::logger().add_sink<Yosys::ConsoleLogSink>();
+  Yosys::logger().add_sink<Yosys::StderrLogSink>(/*quiet_warnings=*/false);
+  Yosys::logger().set_cmd_error_throw(true);
+  Yosys::log_error_atexit = log_error_atexit;
   Inou_yosys_api::setup();
 }
 
@@ -40,7 +46,7 @@ Inou_yosys_api::Inou_yosys_api(Eprp_var& var, bool do_read) : Pass("inou.yosys",
 void Inou_yosys_api::set_script_yosys(const Eprp_var& var, bool do_read) {
   auto script = var.get("script");
 
-  auto main_path = file_utils::get_exe_path();
+  auto main_path = livehd::file_utils::get_exe_path();
 
   std::vector<std::string> alt_paths{"/../pass/mockturtle/mt_test.sh.runfiles/livehd/inou/yosys/",
                                      "/../pass/sample/sample_test1.sh.runfiles/livehd/inou/yosys/",
@@ -61,11 +67,29 @@ void Inou_yosys_api::set_script_yosys(const Eprp_var& var, bool do_read) {
       do_read_str = "inou_yosys_write.ys";
     }
 
-    for (const auto& e : alt_paths) {
-      auto test = main_path + e + do_read_str;
-      if (access(test.c_str(), R_OK) != -1) {
-        script_file = test;
-        break;
+    // A staged binary can live outside its runfiles tree (notably when
+    // LiveHD is a dependency of lhdtrack). Honor that tree before probing
+    // executable-relative installation layouts. Explicit scripts still win.
+    for (const char* env : {"RUNFILES_DIR", "TEST_SRCDIR"}) {
+      const char* root = std::getenv(env);
+      if (!root || !*root || !script_file.empty()) {
+        continue;
+      }
+      for (const char* workspace : {"livehd+", "livehd", "_main", ""}) {
+        auto test = std::string(root) + "/" + workspace + "/inou/yosys/" + do_read_str;
+        if (access(test.c_str(), R_OK) == 0) {
+          script_file = std::move(test);
+          break;
+        }
+      }
+    }
+    if (script_file.empty()) {
+      for (const auto& e : alt_paths) {
+        auto test = main_path + e + do_read_str;
+        if (access(test.c_str(), R_OK) != -1) {
+          script_file = test;
+          break;
+        }
       }
     }
   } else {
@@ -272,7 +296,7 @@ void Inou_yosys_api::tolg(Eprp_var& var) {
 void Inou_yosys_api::do_tolg(Eprp_var& var) {
   const auto filelist_file{var.get("filelist_file")};
 
-  const bool has_files = !files.empty() && files != "/INVALID";
+  const bool has_files              = !files.empty() && files != "/INVALID";
   // Sources can also ride in slang_flags (e.g. `lhd ... --reader yosys-slang --
   // -F filelist.f`, where lhd forwards the raw `--` args as slang_flags into
   // read_slang). Accept that as a valid source spec too.
@@ -284,35 +308,37 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
     return;
   }
 
-  const auto techmap{var.get("techmap")};
-  const auto abc{var.get("abc")};
   const auto top{var.get("top")};
   const auto frontend{var.get("frontend")};
   const auto setundef{var.get("setundef")};
   const auto memory_mode{var.get("memory_mode")};
-  // const auto lib{var.get("liberty")};
 
   mustache::data vars;
   vars.set("path", path);
 
-  // Set slang plugin path (assume users always install slang.so in LiveHD using Bazel)
-  auto        exe_path = file_utils::get_exe_path();
-  std::string slang_plugin_path;
-  for (const auto& candidate : {absl::StrCat(exe_path, "/../external/+_repo_rules+yosys_slang/slang.so"),
-                                absl::StrCat(exe_path, "/../external/+http_archive+yosys_slang/slang.so"),
-                                absl::StrCat(exe_path, "/lhd.runfiles/+http_archive+yosys_slang/slang.so")}) {
-    if (access(candidate.c_str(), R_OK) != -1) {
-      slang_plugin_path = candidate;
-      break;
+  // Hard macros are declarations for elaboration, never mapping candidates.
+  // Quote each path independently so spaces cannot become Yosys arguments.
+  for (const auto* key : {"macrolib", "blackbox"}) {
+    mustache::data declarations{mustache::data::type::list};
+    const auto     paths = var.get(key);
+    const char     sep   = paths.find('\x1f') != std::string_view::npos ? '\x1f' : ',';
+    for (const auto path : absl::StrSplit(paths, sep, absl::SkipEmpty())) {
+      // Yosys has NO escape inside a quoted argument: next_token() (kernel/io.cc)
+      // returns the token WITH its quotes and rewrite_filename() (kernel/yosys.cc)
+      // only strips the outer pair -- a `\"` would be opened as a literal part of
+      // the path, and a bare `"` would end the token early. Quoting is therefore
+      // only safe for spaces; reject the characters it cannot express.
+      if (path.find_first_of("\r\n\"\\") != std::string_view::npos) {
+        livehd::diag::err("inou.yosys", "bad-option", "io")
+            .msg("{} path contains a newline, quote or backslash, which yosys cannot quote: {}", key, path)
+            .hint("rename the file (or symlink it) so the path has none of \\r \\n \" \\")
+            .fatal();
+        return;
+      }
+      declarations << mustache::data{"input", absl::StrCat("\"", path, "\"")};
     }
+    vars.set(key, declarations);
   }
-  if (slang_plugin_path.empty()) {
-    livehd::diag::err("inou.yosys", "missing-file", "io")
-        .msg("internal error: slang.so could not be found (tried paths relative to exe_path:{})", exe_path)
-        .fatal();
-    return;
-  }
-  vars.set("slang_plugin_path", slang_plugin_path);
 
   // For verilog frontend
   mustache::data filelist{mustache::data::type::list};
@@ -380,8 +406,6 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
     return;
   }
 
-  const auto elab_top{var.get("elab_top")};
-
   if (!top.empty()) {
     vars.set("hierarchy", mustache::data::type::bool_true);
     if (top != "-auto-top") {
@@ -393,24 +417,8 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
     vars.set("hierarchy", mustache::data::type::bool_false);
   }
 
-  // Set slang_top for read_slang: use elab_top if provided, otherwise use top
-  if (!elab_top.empty()) {
-    vars.set("slang_top", absl::StrCat("--top ", elab_top));
-  } else if (!top.empty() && top != "-auto-top") {
+  if (!top.empty() && top != "-auto-top") {
     vars.set("slang_top", absl::StrCat("--top ", top));
-  }
-
-  if (!techmap.empty()) {
-    if (techmap == "alumacc") {
-      vars.set("techmap_alumacc", mustache::data::type::bool_true);
-    } else if (techmap == "full") {
-      vars.set("techmap_full", mustache::data::type::bool_true);
-    } else {
-      livehd::diag::err("inou.yosys", "bad-option", "io")
-          .msg("unrecognized techmap {} option. Either full or alumacc", techmap)
-          .fatal();
-      return;
-    }
   }
 
   if (!setundef.empty()) {
@@ -435,22 +443,6 @@ void Inou_yosys_api::do_tolg(Eprp_var& var) {
           .fatal();
       return;
     }
-  }
-
-  const auto rename_top{var.get("rename_top")};
-  if (!rename_top.empty()) {
-    vars.set("rename_top", std::string(rename_top));
-    if (!top.empty() && top != "-auto-top") {
-      vars.set("rename_from", std::string(top));
-    }
-  }
-
-  if (abc == "true" || abc == "1") {
-    vars.set("abc_in_yosys", mustache::data::type::bool_true);
-  } else if (abc == "false" || abc == "0") {
-    // Nothing to do
-  } else {
-    livehd::diag::err("inou.yosys", "bad-option", "io").msg("unrecognized abc {} option. Either true or false", techmap).fatal();
   }
 
   auto& lib = livehd::Hhds_graph_library::instance(path);
@@ -483,7 +475,7 @@ void Inou_yosys_api::fromlg(Eprp_var& var) {
     if (!g) {
       continue;
     }
-    Cgen_verilog cgen(false, p.odir);
+    Cgen_verilog cgen(p.odir);
     cgen.do_from_graph(g);
   }
 }
@@ -497,14 +489,11 @@ void Inou_yosys_api::setup() {
   m1.add_label_optional("slang_flags", "comma- (or \\x1f-) separated flags for read_slang command", "");
   m1.add_label_optional("setundef", "replace undef/don't-care values before graph import: zero|true", "");
   m1.add_label_optional("memory_mode", "memory lowering mode before graph import: default|nomap|collect|preserve", "");
-  m1.add_label_optional("techmap", "Either full or alumac techmap or none from yosys. Cannot be used with liberty", "");
-  m1.add_label_optional("liberty", "Liberty file for technology mapping. Cannot be used with techmap, will call abc for tmap", "");
-  m1.add_label_optional("abc", "run ABC inside yosys before loading lgraph", "false");
+  m1.add_label_optional("macrolib", "comma-separated Liberty files read as hard-macro declarations before elaboration", "");
+  m1.add_label_optional("blackbox", "comma-separated Verilog files read as blackbox declarations before elaboration", "");
+
   m1.add_label_optional("script", "alternative custom inou_yosys_read.ys command");
-  m1.add_label_optional("yosys", "path for yosys command", "");
   m1.add_label_required("top", "define top module for synthesis, will call yosys hierarchy pass (-auto-top allowed)");
-  m1.add_label_optional("elab_top", "define top module for elaboration (read_slang). If not provided, uses 'top' value");
-  m1.add_label_optional("rename_top", "rename the top module to the given name after synthesis");
 
   register_inou("yosys", m1);
 
@@ -512,7 +501,6 @@ void Inou_yosys_api::setup() {
   m2.add_label_optional("path", "path to read the lgraph[s]", "");  // empty: avoids a stray lgdb/ from get_path
   m2.add_label_optional("odir", "output directory for generated verilog files", ".");
   m2.add_label_optional("script", "alternative custom inou_yosys_write.ys command");
-  m2.add_label_optional("yosys", "path for yosys command", "");
 
   register_inou("yosys", m2);
 }

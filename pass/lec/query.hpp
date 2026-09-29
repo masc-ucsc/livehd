@@ -1,6 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <algorithm>
+
 #include <functional>
 #include <string>
 #include <string_view>
@@ -47,10 +49,10 @@ struct Witness_trace {
   // inherits), for the machine-readable simfail JSON and the source-mapped root
   // clause. `root_src` is "file:line" of the flop's declaration (empty if the
   // node carried no source id). All empty when the trace has no state cut.
-  std::string                root_key;            // canonical flop key (display-stripped in the clause)
-  int                        root_cycle = -1;     // checked step of the diverging cut
-  std::string                root_ref, root_impl; // paired current values (unsigned-magnitude decimal)
-  std::string                root_src;            // "file:line" of the flop decl, or ""
+  std::string                root_key;             // canonical flop key (display-stripped in the clause)
+  int                        root_cycle = -1;      // checked step of the diverging cut
+  std::string                root_ref, root_impl;  // paired current values (unsigned-magnitude decimal)
+  std::string                root_src;             // "file:line" of the flop decl, or ""
   bool                       empty() const { return cycles.empty(); }
 };
 
@@ -62,13 +64,13 @@ struct Query_result {
   // The design-size gate refused this design (too large to encode as one unit,
   // lec.allow_oversize unset). Distinct from a solver-inconclusive UNKNOWN: it is
   // a hard admission failure, so a driver must exit non-zero regardless of
-  // lec.strict, exactly as pass.abc does. See Lec_options::allow_oversize.
+  // any solver outcome, exactly as pass.abc does. See Lec_options::allow_oversize.
   bool oversize_refused = false;
 
   // The ENCODER refused a cell/shape it does not model (Encoded::unsupported) —
   // e.g. a Latch, an unknown op. Like oversize_refused (and unlike a solver
   // give-up) this decided NOTHING and no extra budget can change it, so a driver
-  // must exit non-zero regardless of formal.strict: an exit-0 "inconclusive"
+  // must exit non-zero unconditionally: an exit-0 "inconclusive"
   // here is read downstream as "verified", which makes every gate built on this
   // run vacuous (2f-latch M0).
   bool unsupported = false;
@@ -77,7 +79,7 @@ struct Query_result {
   // either side has no outputs/state at all, or no output could be paired across
   // the two sides. Like `unsupported` (and unlike a solver give-up) this decided
   // NOTHING, and no extra budget can change it, so a driver must exit non-zero
-  // regardless of formal.strict. Before this flag existed the empty miter was
+  // unconditionally. Before this flag existed the empty miter was
   // reported as `Proven` with detail "no comparable outputs": `lhd lec` on an
   // empty module printed "PROVEN equivalent", status "pass", exit 0, with ZERO
   // warnings. A check that compares nothing is not a proof of anything.
@@ -87,14 +89,18 @@ struct Query_result {
   // `formal.bound`, which says nothing about deeper cycles. An INDUCTIVE proof
   // leaves this false -- that one is unbounded.
   //
-  // It is a verdict QUALIFIER, not a verdict: the CLI reports a bounded proof
-  // as INCONCLUSIVE (exit 7 -- "could not decide", NEVER exit 10, since no
-  // counterexample was found), and `formal.strict=false` is the single escape.
-  // It also propagates through hierarchical composition: a bounded
-  // child must NOT discharge a parent's box premise, because the box contract
-  // (see box_model=seq) is explicitly "from reset, identical input sequences
-  // produce identical output sequences" -- unbounded.
+  // A bounded success reports its depth rather than claiming an unbounded
+  // inductive proof. This qualifier must survive cache replay and hierarchical
+  // composition: a bounded child makes the composed result bounded too.
   bool bounded = false;
+
+  // A name-independent packed-register <-> scalar-replica relation can prove
+  // the inductive STEP, but it is not a complete proof until BMC from reset
+  // establishes that relation on a reachable state. These two wire-visible
+  // flags let the auto portfolio combine the independently checked obligations;
+  // an explicit ind-only run remains Unknown.
+  bool packed_scalar_step_proven = false;
+  bool packed_scalar_base_proven = false;
 
   // Structured, uncapped counterexample trace for witness reproduction (empty
   // unless a BMC REFUTE built one). See Witness_trace.
@@ -107,6 +113,11 @@ struct Query_result {
   // the attempted engines. `elapsed_ms` is that engine's wall-clock (-1 = unset).
   std::string engine;
   long long   elapsed_ms = -1;
+
+  // Time spent inside formal solver calls only. Unlike elapsed_ms, this excludes
+  // parsing, graph transforms, encoding, and CVC5 term construction. Hierarchical
+  // scheduling uses this value to draw down formal.timeout.
+  long long solve_ms = 0;
 
   // The case-split selector that produced this verdict ("" = no split). The
   // structured twin of the "case-split <name>[Nb]" detail text: the verdict
@@ -121,6 +132,11 @@ struct Query_result {
   // deeper-than-bound cycles are out of scope by design.
   int checked_steps = 0;
   int output_checks = 0;
+  // The reset/flush prologue the BMC ran before its checked window = the
+  // deepest pipeline's latency (pipeline_flush_latency). A collapsed-box
+  // counterexample can surface flat up to this many cycles later than it did
+  // under the boxes, which is how the kernel sizes a deepened confirmation.
+  int reset_hold    = 0;
 
   // Structural-correspondence report (so `lhd lec` can ITERATE instead of bailing
   // on the first unmatched cut point). When the two designs don't expose the same
@@ -145,7 +161,13 @@ struct Query_result {
   // Lec_options::_cone_cache for the read direction.
   std::vector<std::string> cone_proven;
 
-  // cvc5 solve-insight accounting (formal.stats / --stats). Empty (solvers == 0)
+  // M6 compact-loop certificates consumed by this result. Each entry is a
+  // machine-readable premise summary (instance/body plus P0..P5 discharge),
+  // also emitted on the per-block progress diagnostic. Empty means no compact
+  // recurrence was summarized.
+  std::vector<std::string> loop_certificates;
+
+  // cvc5 solve-insight accounting (lhd.stats / --stats). Empty (solvers == 0)
   // when stats are off or no cvc5 query ran. Summed, never assigned, at every
   // point that merges two results (the auto portfolio, the case split, the
   // `full` phase pair) — a losing racer really did burn that CPU.
@@ -158,10 +180,43 @@ struct Query_result {
   Cvc5_stats cvc5;
 };
 
+// A register/memory that exists on only one side is not itself part of the
+// module's observable interface. It is safe to omit that cut only when every
+// COMMON output/state obligation is nevertheless proved for arbitrary values
+// of the one-sided state: then the state is unobservable by construction. This
+// must stay narrower than generic incomplete correspondence; a missing primary
+// output or black-box obligation is never excused by this rule.
+//
+// Exported because it is also the acceptance rule for CLIENTS of a Proven
+// verdict (pass.synth's publication gate): a Proven carrying unmatched cut
+// points is sound exactly when this holds, and nowhere else.
+template <typename Ref_range, typename Impl_range>
+bool internal_state_only(const Ref_range& unmatched_ref, const Impl_range& unmatched_impl) {
+  if (unmatched_ref.empty() && unmatched_impl.empty()) {
+    return false;
+  }
+  auto is_state = [](const std::string& name) { return name.starts_with("nxt:") || name.starts_with("mem:"); };
+  return std::all_of(unmatched_ref.begin(), unmatched_ref.end(), is_state)
+         && std::all_of(unmatched_impl.begin(), unmatched_impl.end(), is_state);
+}
+
 struct Monitor;
 
 // Discharge / engine knobs (filled from the lec.* set-options).
 struct Lec_options {
+  // Canonical assumption policy shared by compile, verify, and LEC.
+  // true: checked assumptions are proof obligations before use. A checked
+  // assumption over the selected top's primary IO is necessarily uncheckable
+  // and is treated as an explicitly disclosed assume_nocheck. false: every
+  // assume remains active but is trusted like assume_nocheck.
+  bool assume_check = true;
+
+  // Equivalence-only internal switch: include design-tier fproperty assumptions
+  // in each cvc5 frame. The CLI enables it only after the selected tops have
+  // passed the occurrence-aware assumption-discharge preflight (or when
+  // assume_check=false explicitly trusts them).
+  bool design_assumes = false;
+
   // Reference-side X semantics — the cvc5 analogue of yosys `miter
   // -ignore_gold_x`. "ignore" (default): a ref constant's '?' bits source an
   // undef bit-plane; the miters exclude ref-unknown output/next-state bits from
@@ -170,10 +225,10 @@ struct Lec_options {
   // "zero": legacy behavior — '?' bits silently concretized to 0 on BOTH sides.
   std::string gold_x = "ignore";
 
-  std::string engine  = "bmc";   // bmc | ind (k-induction) | ic3 | auto (portfolio). This is
-                                 // the programmatic-API fallback (a single, fork-free engine for
-                                 // in-pass design-queries); the `lhd lec` CLI defaults to `auto`.
-  std::string solver  = "cvc5";  // cvc5 | bitwuzla (not yet built)
+  std::string engine              = "bmc";   // bmc | ind (k-induction) | ic3 | auto (portfolio). This is
+                                             // the programmatic-API fallback (a single, fork-free engine for
+                                             // in-pass design-queries); the `lhd lec` CLI defaults to `auto`.
+  std::string solver              = "cvc5";  // cvc5 | bitwuzla (not yet built)
   // cvc5 int-blasting (solve-bv-as-int): translate the BV encoding to unbounded
   // integer arithmetic inside cvc5 (VMCAI'22 "iand" lazy refinement). Measured
   // split: arithmetic-rewrite miters (reassociated / distributed / commuted
@@ -188,8 +243,8 @@ struct Lec_options {
   //   iand | sum | bitwise | bv — force that cvc5 mode from the first solve.
   // Verdicts stay sound either way (the translation is equisatisfiable).
   // Main lec solve path only (the verify engine never int-blasts).
-  std::string int_blast = "auto";
-  int         bound   = 6;       // BMC / induction depth
+  std::string int_blast           = "auto";
+  int         bound               = 6;  // BMC / induction depth
   // `timeout` is a SOFT TOTAL budget, not a per-query cap: overshooting it is
   // fine, silently checking nothing is not. The hier driver spends it as total
   // WALL clock over the proof DAG (defs run concurrently under `jobs`, so a
@@ -199,7 +254,7 @@ struct Lec_options {
   // D×T hazard). 0 = unbounded. Accounting is ON iff `timeout > 0 && rlimit == 0`
   // — `rlimit` is the deterministic CI path and owns the bound by itself, which
   // is why there is no separate mode knob.
-  int         timeout = 0;
+  int         timeout             = 0;
   // FLOOR, in seconds, under the soft total: once `timeout` is spent, a unit
   // that has NO verdict yet still gets at least this much solver time so it
   // earns a real Unknown/CEX instead of a silent "not checked". A "unit" is one
@@ -213,9 +268,9 @@ struct Lec_options {
   // attempt and then latches `unknown_at`, which the cycle loop skips. Removing
   // that freeze turns this into units x cycles x floor.
   //
-  // Default 20s (user ruling 2026-07-28). It was 1s — the value both floors
-  // were hardcoded to before it became a knob — and 1s is far too small for a
-  // unit to earn a real verdict on anything but a trivial def.
+  // Default 20s. 1s (the value both floors were hardcoded to before this
+  // became a knob) is far too small for a unit to earn a real verdict on
+  // anything but a trivial def.
   //
   // The measured symptom on a wide design: minion_lec took
   // `minion_dcache_miss_handler` to REFUTED in 2253ms on one run and to UNKNOWN
@@ -228,9 +283,9 @@ struct Lec_options {
   // Lower it to trade Unknowns back for a tighter overrun; the bound is still
   // `timeout + (unsettled units x min_timeout)` and the run always reports
   // target/actual/units/floored, so the overrun is never silent.
-  int         min_timeout = 20;
+  int         min_timeout         = 20;
   // HARD wall backstop on a forked proof worker, as a multiple of `timeout`
-  // (0 = off, the pre-2026-08-03 behavior). `timeout` is armed as cvc5
+  // (0 = off). `timeout` is armed as cvc5
   // `tlimit-per`, which the ResourceManager can only check at a spendResource
   // point — so it cannot preempt ONE long call. A flat (box-free) miter takes
   // the eager bit-blaster path, where the whole query IS one CaDiCaL solve
@@ -249,7 +304,7 @@ struct Lec_options {
   // the only place a runaway can actually be stopped. Killing a worker can only
   // LOSE information, so the degrade is a witness-free Unknown, never a
   // verdict: sound by construction, and it SAYS the backstop fired.
-  int         hard_timeout_mult = 3;
+  int         hard_timeout_mult   = 3;
   // Independent budget (seconds, 0 = off) for the SPECULATIVE post-run phase:
   // the hier straggler list, the cvc5 timeout-CORE diagnosis (which subset of
   // still-Unknown obligations is jointly toxic), and P3 invariant MINING. All
@@ -264,63 +319,55 @@ struct Lec_options {
   // this (with timeout=0) so a verdict that ELIDES a runtime check is
   // reproducible across `-c dbg`/`-c opt` binaries; the verify/lec CLIs default
   // to wall-clock `timeout`. 0 = off. Both may be set (each bounds a checkSat).
-  int         rlimit  = 0;
-  bool        witness = true;    // print counterexample on Refuted
-  std::string decompose = "auto"; // prove each cut/output diff as a separate UNSAT query
-                                 // instead of one monolithic OR-miter. Same proof (an OR
-                                 // is UNSAT iff every disjunct is), but each query is a
-                                 // small focused cone, so the easy cuts discharge instantly
-                                 // and only the genuinely-hard one is the bottleneck.
-                                 //   auto  (default): run the per-cut sweep AND fall back
-                                 //          to the monolithic solve on any cut that does not
-                                 //          discharge — fast when it proves, definitive (+a
-                                 //          witness on a real diff) otherwise. The intended
-                                 //          everyday mode: same verdict as monolithic, but it
-                                 //          turns a 60s monolithic miter into ~1s when the cuts
-                                 //          are easy (a name-matched register-correspondence
-                                 //          proof of two large front-end netlists is the case).
-                                 //   true  : decompose ONLY — report "N/M cuts PROVEN" + the
-                                 //          unresolved residue as Unknown, NEVER run the
-                                 //          monolithic solve (the diagnostic mode to isolate the
-                                 //          hard cone fast, e.g. a wide ALU/barrel-shift cone
-                                 //          that needs SAT-sweeping). LEC_DECOMP_LOG=1 logs each
-                                 //          cut's PROVEN/DIFF/unknown verdict.
-                                 //   false : monolithic OR-miter only (one big checkSat).
-                                 // on/1 == true, off/0 == false.
-  std::string cones = "auto";    // register-cone decomposition: before cvc5 sees the induction
-                                 // step, try to discharge each per-cut obligation by bit-blasting
-                                 // it into an AIG and proving it with ABC (see cone_abc.hpp). Every
-                                 // cut ABC proves is SUBTRACTED from the cvc5 obligation, so only
-                                 // the cones ABC could not settle are ever handed to the SMT
-                                 // solver. This is the classic compare-point decomposition: cutting
-                                 // at name-matched registers makes each next-state cone an
-                                 // independent combinational miter, which is what a bit-level
-                                 // engine is good at (cvc5 chokes on the monolithic OR of a
-                                 // tech-mapped pipeline). ABC NEVER decides a verdict on its own:
-                                 // only Proven subtracts; a refuted/unknown/unsupported cone stays
-                                 // with cvc5, which owns every verdict and witness exactly as
-                                 // before.
-                                 //   auto (default): subtract what ABC proves, cvc5 does the rest.
-                                 //   true : same, and report each cone's outcome (diagnostic).
-                                 //   false: skip the ABC pass entirely.
-  int         conelimit = 10000;   // per-cone ABC SAT conflict budget (0 = ABC's own default).
-                                   // Bounds a hard cone so it falls back to cvc5 instead of hanging.
-  bool        strict = true;     // treat an inconclusive UNKNOWN (no counterexample, the
-                                 // solver merely could not complete the proof) as a hard
-                                 // failure. DEFAULT TRUE: an inconclusive run PROVED
-                                 // NOTHING, and exiting 0 makes it indistinguishable from
-                                 // a real proof to any gate built on top of it. Opting out
-                                 // (`--set formal.strict=false`) downgrades it to a
-                                 // deferred warning that exits cleanly -- a deliberate
-                                 // choice the caller makes, never the default.
+  int         rlimit              = 0;
+  bool        witness             = true;    // print counterexample on Refuted
+  std::string decompose           = "auto";  // prove each cut/output diff as a separate UNSAT query
+                                             // instead of one monolithic OR-miter. Same proof (an OR
+                                             // is UNSAT iff every disjunct is), but each query is a
+                                             // small focused cone, so the easy cuts discharge instantly
+                                             // and only the genuinely-hard one is the bottleneck.
+                                             //   auto  (default): run the per-cut sweep AND fall back
+                                             //          to the monolithic solve on any cut that does not
+                                             //          discharge — fast when it proves, definitive (+a
+                                             //          witness on a real diff) otherwise. The intended
+                                             //          everyday mode: same verdict as monolithic, but it
+                                             //          turns a 60s monolithic miter into ~1s when the cuts
+                                             //          are easy (a name-matched register-correspondence
+                                             //          proof of two large front-end netlists is the case).
+                                             //   true  : decompose ONLY — report "N/M cuts PROVEN" + the
+                                             //          unresolved residue as Unknown, NEVER run the
+                                             //          monolithic solve (the diagnostic mode to isolate the
+                                             //          hard cone fast, e.g. a wide ALU/barrel-shift cone
+                                             //          that needs SAT-sweeping). LEC_DECOMP_LOG=1 logs each
+                                             //          cut's PROVEN/DIFF/unknown verdict.
+                                             //   false : monolithic OR-miter only (one big checkSat).
+                                             // on/1 == true, off/0 == false.
+  std::string cones               = "auto";  // register-cone decomposition: before cvc5 sees the induction
+                                             // step, try to discharge each per-cut obligation by bit-blasting
+                                             // it into an AIG and proving it with ABC (see cone_abc.hpp). Every
+                                             // cut ABC proves is SUBTRACTED from the cvc5 obligation, so only
+                                             // the cones ABC could not settle are ever handed to the SMT
+                                             // solver. This is the classic compare-point decomposition: cutting
+                                             // at name-matched registers makes each next-state cone an
+                                             // independent combinational miter, which is what a bit-level
+                                             // engine is good at (cvc5 chokes on the monolithic OR of a
+                                             // tech-mapped pipeline). ABC NEVER decides a verdict on its own:
+                                             // only Proven subtracts; a refuted/unknown/unsupported cone stays
+                                             // with cvc5, which owns every verdict and witness exactly as
+                                             // before.
+                                             //   auto (default): subtract what ABC proves, cvc5 does the rest.
+                                             //   true : same, and report each cone's outcome (diagnostic).
+                                             //   false: skip the ABC pass entirely.
+  int         conelimit           = 10000;   // per-cone ABC SAT conflict budget (0 = ABC's own default).
+                                             // Bounds a hard cone so it falls back to cvc5 instead of hanging.
 
-  bool        allow_oversize = false;  // skip the design-size gate (lec.allow_oversize). The
-                                       // encoder materializes the whole flattened design (minus
-                                       // opaque/collapsed subs) into one forward_hier vector; above
-                                       // ~1M nodes that alone can exhaust memory, so a design that
-                                       // large is refused as Unknown unless this is set. The
-                                       // per-design size is opacity-aware, so a design checked in
-                                       // small decomposed pieces is not falsely refused.
+  bool allow_oversize = false;  // skip the design-size gate (lec.allow_oversize). The
+                                // encoder materializes the whole flattened design (minus
+                                // opaque/collapsed subs) into one forward_hier vector; above
+                                // ~1M nodes that alone can exhaust memory, so a design that
+                                // large is refused as Unknown unless this is set. The
+                                // per-design size is opacity-aware, so a design checked in
+                                // small decomposed pieces is not falsely refused.
 
   // Reset-phase separation for the BMC engine (lec.phase). The reset-asserted
   // and the free-running behaviors are best checked SEPARATELY:
@@ -335,7 +382,7 @@ struct Lec_options {
   // A primary reset input is one that drives some flop's reset_pin directly;
   // its asserted level follows the flop's negreset attribute (active-low -> 0).
   std::string phase        = "after_reset";  // after_reset | just_reset | free_toreset | full
-  int         reset_cycles = 2;               // after_reset phase: reset-hold prologue length
+  int         reset_cycles = 2;              // after_reset phase: reset-hold prologue length
 
   // Optional explicit reset-input spec (lec.reset), comma-separated, each
   // `name` (polarity inferred from a _n/_ni suffix) or `name:lo` / `name:hi`.
@@ -528,21 +575,27 @@ struct Lec_options {
   // by-value Lec_options copy into every fork, so a worker never touches the
   // cache file -- it just checks membership. A hit skips abc for that cone.
   absl::flat_hash_set<std::string> _cone_cache;
-  bool                             _isolated_worker = false;  // one global-pool child: no nested forks
+  bool                             _isolated_worker            = false;  // one global-pool child: no nested forks
+  // Internal recursion guard: prove_equal() has already copied the design into
+  // private scratch, summarized every admissible matched compact loop, and
+  // materialized the remaining loop occurrences. Portfolio/tier retries must
+  // reuse that prepared graph rather than copying and expanding it again.
+  bool                             _loop_prepared              = false;
+  bool                             _boundary_feedback_prepared = false;
   // Internal-only mode for the speculative-pair recovery leg. With a detected
   // reset it is inert. Without one, otherwise-uninitialized reference flop state
   // gets a full '?' plane under gold_x=ignore (implementation power-on remains
   // arbitrary); gold_x=zero instead gives both sides canonical zero. This avoids
   // an adversarial independent-state CEX while keeping the chosen no-reset/X
   // contract explicit in the verdict detail.
-  bool                             _init_no_reset   = false;
+  bool                             _init_no_reset              = false;
 
-  // formal.stats / --stats: capture + report cvc5 solve statistics (also
+  // lhd.stats / --stats: capture + report cvc5 solve statistics (also
   // registers the cvc5::Plugin -- makes the solve ~8x slower). OFF by default
   // and strictly zero-cost when off: with stats false the engines pass a NULL
   // accumulator, so no Solve_probe impl is built, no plugin is registered and
   // no statistics snapshot is taken. A plain bool -- the expensive plugin tier
-  // rides this same flag (user ruling); there is deliberately no "deep" value.
+  // rides this same flag; there is deliberately no "deep" value.
   bool stats = false;
 
   // Heuristic-only strategy replay from the persistent cache. `auto` tries a
@@ -569,8 +622,10 @@ struct Lec_options {
   // never prune an assert's proof (only proven assumes are hypotheses — that
   // discipline lives in the pass.formal driver, which proves assumes separately
   // and recovers assume-dependent elisions with the single-frame Prover). The
-  // verify CLI leaves this false: there, an assume is a proof obligation
-  // (prove-then-use), and only assume_nocheck is a free env constraint.
+  // verify CLI leaves this false: there, child/local assumes are proof
+  // obligations (prove-then-use); an explicit assume_nocheck, a selected-top IO
+  // assume, or every assume under formal.assume_check=false is a disclosed free
+  // environment constraint.
   bool ignore_assumes = false;
 
   // Verify-obligation cache hooks. The engine computes a rule-F key downstream
@@ -621,34 +676,37 @@ inline constexpr int kLecMaxUnroll = 100000;
 // "" if bound/reset_cycles are in [0, kLecMaxUnroll], else a human message.
 inline std::string lec_options_range_error(const Lec_options& o) {
   if (o.bound < 0 || o.bound > kLecMaxUnroll) {
-    return "lec.bound out of range (0.." + std::to_string(kLecMaxUnroll) + "), got " + std::to_string(o.bound);
+    return "formal.bound out of range (0.." + std::to_string(kLecMaxUnroll) + "), got " + std::to_string(o.bound);
   }
   if (o.reset_cycles < 0 || o.reset_cycles > kLecMaxUnroll) {
-    return "lec.reset_cycles out of range (0.." + std::to_string(kLecMaxUnroll) + "), got " + std::to_string(o.reset_cycles);
+    return "formal.reset_cycles out of range (0.." + std::to_string(kLecMaxUnroll) + "), got " + std::to_string(o.reset_cycles);
   }
   if (o.phase != "after_reset" && o.phase != "just_reset" && o.phase != "free_toreset" && o.phase != "full") {
-    return "lec.phase unknown '" + o.phase + "' (after_reset | just_reset | free_toreset | full)";
+    return "formal.phase unknown '" + o.phase + "' (after_reset | just_reset | free_toreset | full)";
   }
   if (o.engine != "bmc" && o.engine != "ind" && o.engine != "ic3" && o.engine != "auto") {
-    return "lec.engine unknown '" + o.engine + "' (bmc | ind | ic3 | auto)";
+    return "formal.engine unknown '" + o.engine + "' (bmc | ind | ic3 | auto)";
   }
   if (o.semdiff != "none" && o.semdiff != "structural") {
-    return "lec.semdiff unknown '" + o.semdiff + "' (none | structural)";
+    return "formal.lec.semdiff unknown '" + o.semdiff + "' (none | structural)";
   }
   if (o.decompose != "auto" && o.decompose != "true" && o.decompose != "false" && o.decompose != "on" && o.decompose != "off"
       && o.decompose != "1" && o.decompose != "0") {
-    return "lec.decompose unknown '" + o.decompose + "' (auto | true | false)";
+    return "formal.lec.decompose unknown '" + o.decompose + "' (auto | true | false)";
   }
   if (o.cones != "auto" && o.cones != "true" && o.cones != "false" && o.cones != "on" && o.cones != "off" && o.cones != "1"
       && o.cones != "0") {
-    return "lec.cones unknown '" + o.cones + "' (auto | true | false)";
+    return "formal.lec.cones unknown '" + o.cones + "' (auto | true | false)";
   }
   if (o.conelimit < 0) {
-    return "lec.conelimit must be >= 0 (0 = ABC default), got " + std::to_string(o.conelimit);
+    return "formal.lec.conelimit must be >= 0 (0 = ABC default), got " + std::to_string(o.conelimit);
   }
-  if (o.int_blast != "auto" && o.int_blast != "off" && o.int_blast != "iand" && o.int_blast != "sum"
-      && o.int_blast != "bitwise" && o.int_blast != "bv") {
-    return "lec.int_blast unknown '" + o.int_blast + "' (auto | off | iand | sum | bitwise | bv)";
+  if (o.hard_timeout_mult < 0) {
+    return "formal.hard_timeout_mult must be >= 0 (0 = disabled), got " + std::to_string(o.hard_timeout_mult);
+  }
+  if (o.int_blast != "auto" && o.int_blast != "off" && o.int_blast != "iand" && o.int_blast != "sum" && o.int_blast != "bitwise"
+      && o.int_blast != "bv") {
+    return "formal.lec.int_blast unknown '" + o.int_blast + "' (auto | off | iand | sum | bitwise | bv)";
   }
   return {};
 }
@@ -675,6 +733,25 @@ Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options&
 // collapse set so it is descended (flattened into the parent) instead.
 bool io_bundle_split(hhds::Graph* ref, hhds::Graph* impl);
 
+// Worker-pipe framing for a forked solver's serialized result.
+//
+// The result codecs are deliberately TAIL-TOLERANT (a short blob stops the
+// parse and keeps the trailing fields at their defaults) so a build can add a
+// field without breaking an older reader. That rule is wrong for a blob the
+// pipe TRUNCATED, because the trailing fields are the soundness qualifiers
+// (`bounded`, `unsupported`, `nothing_compared`) and every default reads as
+// "nothing to worry about" -- a child SIGKILLed by the wall backstop or its
+// RLIMIT_AS share, mid-write, would otherwise hand the parent an UNBOUNDED
+// Proven for a bounded claim. Framing makes truncation a parse failure, which
+// every caller already routes to "worker produced no result" -> Unknown.
+//
+// Exposed (rather than file-local) so the seam has a direct regression test.
+std::string frame_blob(std::string_view payload);
+
+// False for a short header, a short payload, or trailing garbage: any frame
+// that is not byte-exact is no result at all.
+bool unframe_blob(std::string_view b, std::string_view& payload);
+
 // Run one proof in a fork-isolated worker. Used by the Taskflow hierarchy DAG:
 // one task owns one child process, so the solver-process count is bounded by
 // formal.jobs and cvc5 instances never execute concurrently in threads.
@@ -693,8 +770,7 @@ Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec
 // prove_equal_isolated for the re-solve (match how `first` was produced).
 // No-op unless opts.int_blast == "auto".
 Query_result int_blast_retry(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts, Query_result first,
-                             const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib = nullptr,
-                             bool isolated = false);
+                             const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib = nullptr, bool isolated = false);
 
 // Parse a lec.match correspondence spec into {ref_name, impl_name} pairs. Pure (no
 // file IO — a caller resolves any leading "@FILE" to its text first). Pairs are
@@ -713,8 +789,8 @@ std::vector<std::pair<std::string, std::string>> parse_match_pairs(std::string_v
 // both-init-less pair qualifies; init is never paired with init-less). Each
 // dropped pair contributes one "ref<->impl: reason" line to `reasons`.
 std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
-    hhds::Graph* ref, hhds::Graph* impl, const Lec_options& base,
-    const std::vector<std::pair<std::string, std::string>>& pairs, std::vector<std::string>* reasons = nullptr);
+    hhds::Graph* ref, hhds::Graph* impl, const Lec_options& base, const std::vector<std::pair<std::string, std::string>>& pairs,
+    std::vector<std::string>* reasons = nullptr);
 
 // ── 2f-verify: single-design property BMC (`lhd formal verify`) ─────────────
 //
@@ -723,25 +799,35 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
 // are ABSOLUTE unroll indices (the after_reset reset-hold prologue occupies
 // 0..reset_hold-1; plain `assert` is checked only in the run window,
 // `assert_always` at every cycle, and in just_reset every cycle is checked).
+[[nodiscard]] inline bool is_assume_kind(std::string_view kind) { return kind == "assume" || kind == "assume_nocheck"; }
+
+[[nodiscard]] inline bool is_unchecked_assume_class(std::string_view aclass) {
+  return aclass == "unchecked" || aclass == "top_input" || aclass == "check_disabled";
+}
+
 struct Prop_result {
-  std::string kind;   // assert | assert_always | assume
-  std::string loc;    // source location ("" when tolg carried none)
-  std::string msg;    // user message ("")
-  std::string block;  // formal-block dotted name + "@instance" ("" = an fproperty in the design itself)
+  std::string   kind;   // assert | assert_always | assume
+  std::string   loc;    // source location ("" when tolg carried none)
+  std::string   msg;    // user message ("")
+  std::string   block;  // formal-block dotted name + "@instance" ("" = an fproperty in the design itself)
+  // Design-body property occurrence path. Empty for a statement authored in
+  // the selected top and for sidecar monitors (whose `block` already carries
+  // @instance). This makes repeated child contracts independently attributable
+  // now and is the identity seam a future hierarchical-verify driver can reuse.
+  std::string   instance;
   // The obligation's ASSUME SCOPE: the formal block's dotted name WITHOUT the
   // "@instance" suffix, so every instance context of one authored block shares
-  // it ("" = the design tier). Blocks are independent tests (user ruling,
-  // 2026-07-25): an obligation is discharged under exactly its own scope's
+  // it ("" = the design tier). Blocks are independent tests: an obligation
+  // is discharged under exactly its own scope's
   // assumes plus the always-in-force design-tier ones, never under a sibling
   // block's. See prove_properties' per-scope activation literals.
-  std::string scope;
+  std::string   scope;
   // kind==assume classification (P1 assume discipline; "" for asserts and under
-  // ignore_assumes). EVERY assume except "unchecked" is a PROOF OBLIGATION,
+  // ignore_assumes). Every assume except an unchecked class is a PROOF OBLIGATION,
   // prove-then-use: checked per cycle like a plain assert; only a just-PROVEN
   // cycle's fact constrains later obligations (rule A), and only an inductive
   // survivor constrains the step frame (rule E). REFUTED = a hard error;
-  // Unknown = NOT used, disclosed as unproven. The input/internal split is
-  // DIAGNOSTIC only (same discipline, different hint on failure):
+  // Unknown = NOT used, disclosed as unproven. Classes:
   //   "input"     — the cond's cone reaches primary inputs (or free blackbox
   //                 outputs) only. Over free inputs such a constraint can
   //                 never be proven unless it is a tautology, so a refute
@@ -751,21 +837,24 @@ struct Prop_result {
   //   "unchecked" — assume_nocheck (and the fcore spelling
   //                 assume_nocheck_formal): a free constraint by explicit user
   //                 fiat; never checked, disclosed distinctly.
-  std::string aclass;
-  Verdict verdict = Verdict::Unknown;
+  //   "top_input" — design-body input constraint authored in the selected top;
+  //                 no parent can discharge it, so it is active and unchecked.
+  //   "check_disabled" — formal.assume_check=false; active and unchecked.
+  std::string   aclass;
+  Verdict       verdict       = Verdict::Unknown;
   // V3 verdict ladder: a bounded-proven assert that also survives the
   // simultaneous-induction step is PROVEN UNBOUNDED — true at every cycle of
   // every bound (the conjunction of survivors is inductive; the BMC run is its
   // base case), eligible as an unconditional helper everywhere.
-  bool unbounded = false;
-  int proven_to  = -1;  // deepest checked cycle proven (every checked cycle <= it is UNSAT)
-  int refuted_at = -1;  // first cycle with a reachable violation (SAT)
-  int unknown_at = -1;  // first cycle where the solver gave up (timeout/unknown);
-                        // later cycles were not attempted for this property
+  bool          unbounded     = false;
+  int           proven_to     = -1;  // deepest checked cycle proven (every checked cycle <= it is UNSAT)
+  int           refuted_at    = -1;  // first cycle with a reachable violation (SAT)
+  int           unknown_at    = -1;  // first cycle where the solver gave up (timeout/unknown);
+                                     // later cycles were not attempted for this property
   // Cumulative cvc5 time spent on THIS obligation's checks (BMC per-cycle checks
   // + its induction-rung candidate checks; cache hits cost ~0). P2 agent-report
   // signal — the report ranks stragglers by it. Serialized by the wire codec.
-  long long solve_ms = 0;
+  long long     solve_ms      = 0;
   // R1 Phase 2 — antecedent (guard) diagnostics. `guarded` = the property was
   // written inside an `if`/`match` arm, so the obligation is `guard implies
   // cond`, not `cond`. `vacuous_guard` = that antecedent is UNSAT over every
@@ -777,9 +866,9 @@ struct Prop_result {
   // nothing. So an inconclusive vacuity query leaves `vacuous_guard` false
   // rather than accusing (the opposite of the conservative direction the
   // per-scope check takes, and deliberately so).
-  bool guarded       = false;
-  bool vacuous_guard = false;
-  std::string witness;  // per-cycle input assignment reaching the violation (Refuted)
+  bool          guarded       = false;
+  bool          vacuous_guard = false;
+  std::string   witness;  // per-cycle input assignment reaching the violation (Refuted)
   // Structured, uncapped input trace for witness reproduction (Refuted only):
   // the same shape the lec engine fills, so `lhd formal verify --workdir` can
   // emit a simfail_<formal-test>.prp testbench + VCD exactly like LEC.
@@ -791,40 +880,40 @@ struct Prop_result {
 // per-property timeout, a contradictory assume set, an encode failure); else
 // Proven — a BOUNDED verdict (no violation within `checked_steps` cycles).
 struct Verify_result {
-  Verdict     verdict = Verdict::Unknown;
-  std::string detail;
-  bool        oversize_refused = false;  // design-size gate refused (see Query_result::oversize_refused)
-  bool        unsupported      = false;  // encoder REFUSED a cell/shape (see Query_result::unsupported)
-  int         checked_steps = 0;   // bound actually run
-  int         reset_hold    = 0;   // after_reset prologue length (incl. pipeline flush)
-  bool        reset_detected = false;  // a reset prologue actually pinned state[0] (a primary reset input
-                                       // was found/applied). When false, the BMC starts from FREE flop
-                                       // state, so a refute may rest on an unreachable initial state — the
-                                       // compile tier must NOT treat it as reachable-from-reset (no hard error).
-  int         n_assumes     = 0;   // user assumes in force (verdicts are conditional on them)
+  Verdict                  verdict = Verdict::Unknown;
+  std::string              detail;
+  bool                     oversize_refused = false;  // design-size gate refused (see Query_result::oversize_refused)
+  bool                     unsupported      = false;  // encoder REFUSED a cell/shape (see Query_result::unsupported)
+  int                      checked_steps    = 0;      // bound actually run
+  int                      reset_hold       = 0;      // after_reset prologue length (incl. pipeline flush)
+  bool                     reset_detected   = false;  // a reset prologue actually pinned state[0] (a primary reset input
+                                                      // was found/applied). When false, the BMC starts from FREE flop
+                                                      // state, so a refute may rest on an unreachable initial state — the
+                                                      // compile tier must NOT treat it as reachable-from-reset (no hard error).
+  int                      n_assumes        = 0;      // user assumes in force (verdicts are conditional on them)
   // An assume set was contradictory, so the proofs it governed were vacuous.
   // With per-scope assume scoping this is now a PER-SCOPE property: `vacuous`
   // is the roll-up (true if ANY scope was contradictory) and `vacuous_scopes`
   // names them — "" for the design tier, else the formal block's dotted name.
   // A contradictory BLOCK voids only that block's obligations; a contradictory
   // DESIGN tier voids everything (every scope sits on the design frame).
-  bool                     vacuous = false;
+  bool                     vacuous          = false;
   std::vector<std::string> vacuous_scopes;
   // Soft-budget accounting (formal.timeout is a TARGET, not a cap). What was
   // actually spent against it, over how many units, and how many of those ran on
   // the formal.min_timeout floor — the floored ones ARE the overrun, so the two
   // numbers together say whether to raise the target or lower the floor.
   // budget_target_s == 0 means no budget was in force (unbounded / rlimit tier).
-  int       budget_target_s = 0;
-  long long budget_spent_ms = 0;
-  int       budget_units    = 0;  // obligations (verify) actually put to the solver
-  int       budget_floored  = 0;  // of those, how many ran on the floor
-  int       budget_floor_s  = 0;
+  int                      budget_target_s = 0;
+  long long                budget_spent_ms = 0;
+  int                      budget_units    = 0;  // obligations (verify) actually put to the solver
+  int                      budget_floored  = 0;  // of those, how many ran on the floor
+  int                      budget_floor_s  = 0;
   std::vector<Prop_result> props;  // one entry per fproperty, walk order
   // STRUCTURED timeout core (formal.spec_mining_timeout): indices into `props` of the
   // obligations cvc5 named as the toxic subset (the same set res.detail spells
   // in prose). Empty when the diagnosis is off / unavailable / found nothing.
-  std::vector<int> timeout_core;
+  std::vector<int>         timeout_core;
   // P3 mining output. Every entry passed the BASE proof (holds at every checked
   // BMC cycle, under the env assumes); `inductive` entries also survived the
   // joint Houdini induction step, so they are GENUINE invariants — safe to
@@ -834,17 +923,17 @@ struct Verify_result {
   // over state symbols, and range/equality templates over the registers in the
   // still-Unknown obligations' cones, seeded from a reachable model sample.
   struct Mined_invariant {
-    std::string      pyrope;      // ready-to-paste block expression ("" = shape not expressible)
-    std::string      smt2;        // solver-term rendering (debug / non-expressible shapes)
-    std::string      provenance;  // "learned-literal@cyc N" | "template:range(key)" | ...
-    std::vector<std::string> keys;     // state keys mentioned
-    std::vector<int>         targets;  // indices of still-Unknown props whose cone overlaps
+    std::string              pyrope;      // ready-to-paste block expression ("" = shape not expressible)
+    std::string              smt2;        // solver-term rendering (debug / non-expressible shapes)
+    std::string              provenance;  // "learned-literal@cyc N" | "template:range(key)" | ...
+    std::vector<std::string> keys;        // state keys mentioned
+    std::vector<int>         targets;     // indices of still-Unknown props whose cone overlaps
     bool                     inductive = false;
   };
   std::vector<Mined_invariant> mined;
   long long                    elapsed_ms = -1;
 
-  // cvc5 solve-insight accounting (formal.stats / --stats) — the verify twin of
+  // cvc5 solve-insight accounting (lhd.stats / --stats) — the verify twin of
   // Query_result::cvc5, with the same TAIL-of-the-wire-codec discipline: the F3
   // verify strategy race FORKS, so a field the serialize_verify /
   // deserialize_verify pair does not carry comes back ALL ZEROS in the parent
@@ -869,15 +958,26 @@ struct Monitor {
   // binds to N instances still has ONE assume set (all N in force together —
   // that is one test), while a DIFFERENT block never sees it. Leave empty only
   // for a monitor that should share the design tier's always-in-force assumes.
-  std::string scope;
+  std::string  scope;
   // One input binding: the monitor's input port name <- a design signal.
   struct Bind {
     enum class Src { input, output, state };
     std::string ident;  // monitor input port
     Src         src = Src::state;
-    std::string key;    // input/output port name, or the canon flop-state key
+    std::string key;  // input/output port name, or the canon flop-state key
+    // HISTORY sample: bind to the signal's value `delay` cycles EARLIER
+    // (`past(x, delay)`), not this cycle's. 0 = the current cycle, the ordinary
+    // case. The monitor itself stays COMBINATIONAL — a flop inside it would be
+    // a fresh free symbol per step and silently refute tautologies, which is
+    // why the CLI refuses a stateful property. History is resolved by the
+    // ENGINE instead: prove_properties keeps each cycle's inputs/outputs/state
+    // and indexes the unroll, so the term is the very one asserted at cycle
+    // `cyc - delay`. An obligation is SKIPPED for cycles with cyc < delay
+    // (there is no such history yet) rather than binding a free symbol, which
+    // would manufacture counterexamples out of unconstrained history.
+    int         delay = 0;
   };
-  std::vector<Bind> binds;
+  std::vector<Bind>                     binds;
   // Generated-source line -> original "file:line" (fproperty locs point into
   // the generated monitor file; the report shows the user's formal block).
   absl::flat_hash_map<int, std::string> line2loc;
@@ -886,7 +986,7 @@ struct Monitor {
   // so the monitor compiles): the engine classifies these props "unchecked" —
   // a free constraint by user fiat, never a proof obligation, disclosed
   // distinctly. Every other `assume` is a proof obligation (prove-then-use).
-  absl::flat_hash_set<int> nocheck_lines;
+  absl::flat_hash_set<int>              nocheck_lines;
 };
 
 // Prove the fproperty obligations of ONE design (plus any formal-block
@@ -898,7 +998,7 @@ struct Monitor {
 // must be "bmc" (the only property engine). `sub_lib` resolves Sub instances
 // exactly as in prove_equal.
 Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts = {},
-                               const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib = nullptr,
-                               const std::vector<Monitor>* monitors = nullptr);
+                               const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib  = nullptr,
+                               const std::vector<Monitor>*                         monitors = nullptr);
 
 }  // namespace livehd::lec

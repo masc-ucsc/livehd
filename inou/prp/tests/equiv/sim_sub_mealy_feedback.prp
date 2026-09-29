@@ -1,7 +1,7 @@
 /*
 :name: sim_sub_mealy_feedback
 :type: equiv
-:verilog_top: sim_sub_mealy_feedback_top
+:verilog_top: sim_sub_mealy_feedback.top
 :pyrope_top: top
 */
 

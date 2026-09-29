@@ -26,11 +26,11 @@
 #include <utility>
 
 #include "absl/strings/str_cat.h"
-#include "hlop/dlop.hpp"
-#include "range_bits.hpp"
 #include "decl_facts.hpp"
+#include "hlop/dlop.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
+#include "range_bits.hpp"
 #include "upass_attributes.hpp"
 #include "upass_attributes_sticky.hpp"
 
@@ -146,7 +146,7 @@ std::optional<Dlop> uPass_attributes::derive_bw(std::string_view base, bool want
   // stamps ride the binding's "0" entry (upass/bitwidth write_bw, replace-on-
   // stamp, SSA-versioned names verbatim) and are scalar-only: a dotted base
   // has no per-field range and reads nil.
-  if (runner_st != nullptr && base.find('.') == std::string_view::npos) {
+  if (runner_st != nullptr && bundle_key::is_single_level(base)) {
     if (const auto b = runner_st->get_bundle(base); b) {
       const auto& e = b->get_entry(bundle_path::of_string("0"));
       const auto& v = want_max ? e.bw_max : e.bw_min;
@@ -183,9 +183,9 @@ std::optional<Dlop> uPass_attributes::derive_max(std::string_view base) const {
     // source of truth: `:u8` lowers to `int(0,255)` so a width type already
     // carries it; reconstructing a max FROM `bits` here would be the inverted
     // dependency the review (cat 1) calls out (bits is derived from max/min,
-    // not the other way round). bool keeps its own {-1,0} envelope.
+    // not the other way round). bool is the hardware u1: envelope {0,1}.
     if (ti->kind == Numeric_kind::boolean) {
-      return *Dlop::create_integer(0);
+      return *Dlop::create_integer(1);
     }
   }
   return std::nullopt;
@@ -202,10 +202,10 @@ std::optional<Dlop> uPass_attributes::derive_min(std::string_view base) const {
     }
     // No range_min pinned ⇒ min is unbounded (nil). range_min is the single
     // source of truth (`:u8` lowers to `int(0,255)`); reconstructing a min FROM
-    // `bits` is the inverted dependency the review (cat 1) calls out. bool keeps
-    // its own {-1,0} envelope.
+    // `bits` is the inverted dependency the review (cat 1) calls out. bool is
+    // the hardware u1: envelope {0,1}, so it is never signed.
     if (ti->kind == Numeric_kind::boolean) {
-      return *Dlop::create_integer(-1);
+      return *Dlop::create_integer(0);
     }
   }
   return std::nullopt;
@@ -232,13 +232,13 @@ std::optional<Dlop> uPass_attributes::derive_bits(std::string_view base, std::st
   std::optional<Dlop> min_v = lookup_attr_value(base, "min");
   if (max_v && min_v && max_v->is_integer() && min_v->is_integer()) {
     // Derive bits from the bound Consts directly (handles >64-bit, no to_i).
-    // get_bits() is the SIGNED width; for an unsigned range (min ≥ 0) drop the
+    // get_signed_bits() is the SIGNED width; for an unsigned range (min ≥ 0) drop the
     // sign bit, for a signed range take the widest signed bound.
     int64_t bits;
     if (!min_v->is_negative()) {
-      bits = max_v->is_known_zero() ? 0 : static_cast<int64_t>(max_v->get_bits() - 1);
+      bits = static_cast<int64_t>(max_v->get_payload_bits());
     } else {
-      bits = std::max<int64_t>(max_v->get_bits(), min_v->get_bits());
+      bits = std::max<int64_t>(max_v->get_signed_bits(), min_v->get_signed_bits());
     }
     return *Dlop::create_integer(bits);
   }
@@ -284,14 +284,14 @@ std::optional<Dlop> uPass_attributes::derive_comptime(std::string_view base, std
   // `cassert(t.[comptime])` resolve when `t` itself has no scalar, but each
   // field does. The field set comes from the live BUNDLE (the
   // legacy tuple_shapes/shape_source side-maps are gone).
-  if (runner_st != nullptr && base.find('.') == std::string_view::npos) {
+  if (runner_st != nullptr && bundle_key::is_single_level(base)) {
     if (const auto b = runner_st->get_bundle(base); b && (b->has_named_top() || b->unnamed_top_count() > 0)) {
       bool any          = false;
       bool all_comptime = true;
       for (const auto& tl : b->top_levels()) {
-        any = true;
+        any                   = true;
         const std::string seg = tl.name.empty() ? std::to_string(tl.pos) : std::string(tl.name);
-        std::string field_path;
+        std::string       field_path;
         field_path.reserve(base.size() + 1 + seg.size());
         field_path.assign(base);
         field_path.push_back('.');
@@ -312,6 +312,20 @@ std::optional<Dlop> uPass_attributes::derive_comptime(std::string_view base, std
 
 void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view base_text, std::string_view base,
                                          std::string_view attr) {
+  if (attr == "fields" && runner_st != nullptr) {
+    if (const auto b = runner_st->get_bundle(base); b) {
+      auto fields = std::make_shared<Bundle>(std::string(dst));
+      fields->set_value_kind(upass::Kind::tuple);
+      int pos = 0;
+      for (const auto& level : b->top_levels()) {
+        if (!level.name.empty()) {
+          fields->set(bundle_path::of_string(std::to_string(pos++)), *Dlop::from_string(level.name));
+        }
+      }
+      (void)runner_st->set(std::string(dst), fields);
+    }
+    return;
+  }
   std::optional<Dlop> result;
 
   // Sticky bucket presence — `_*` and `debug` reads return *Dlop::create_integer(1) when
@@ -388,7 +402,7 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
       result = derive_comptime(base, base_text);
     } else if (attr == "typename") {
       result = derive_aggregate_typename(base, base_text);
-    } else if (attr == "key") {
+    } else if (attr == "key" || attr == "id") {
       // `.[key]` on a tuple_get tmp returns the source field's name; on a
       // bare aggregate it returns the aggregate's own name. The
       // extraction origin comes from Symbol_table::tget_origin.
@@ -405,7 +419,7 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
       if (!field_seg.empty()) {
         result = *Dlop::from_pyrope(std::string{"\'"} + field_seg + "\'");
       } else {
-        result = derive_aggregate_key(base, base_text);
+        result = attr == "id" ? std::optional<Dlop>{*Dlop::from_string(base_text)} : derive_aggregate_key(base, base_text);
       }
     } else if (auto v_inh = lookup_attr_with_inheritance(base, attr); v_inh) {
       // Phase 3 — cat-D aggregate→field inheritance: a tuple_get tmp's
@@ -441,7 +455,7 @@ void uPass_attributes::evaluate_attr_get(std::string_view dst, std::string_view 
   // The derived value is the attr_get dst's VALUE: write it to the
   // binding too, so push-form operand resolution (table-only) sees it
   // directly off the table (tmp_fold stays attributes-internal).
-  if (runner_st != nullptr && dst.find('.') == std::string_view::npos) {
+  if (runner_st != nullptr && bundle_key::is_single_level(dst)) {
     (void)runner_st->set(std::string(dst), *result);
   }
 }
@@ -467,11 +481,11 @@ void uPass_attributes::process_type_spec() {
     move_to_parent();
     return;
   }
-  Numeric_kind         kind = Numeric_kind::none;
-  uint32_t             bits = 0;
+  Numeric_kind        kind = Numeric_kind::none;
+  uint32_t            bits = 0;
   std::optional<Dlop> range_max;
   std::optional<Dlop> range_min;
-  bool                 is_real_type = false;
+  bool                is_real_type = false;
   if (move_to_sibling()) {
     read_scalar_type_at_cursor(kind, bits, range_max, range_min, is_real_type);
   }
@@ -514,16 +528,16 @@ void uPass_attributes::read_scalar_type_at_cursor(Numeric_kind& kind, uint32_t& 
     }
     // Recover the legacy kind/bits view from the range so wrap/sat narrowing
     // (which reads `kind`+`bits`) keeps working. Signedness from min<0; bits
-    // derived from the bound Consts via get_bits() (signed width; drop the sign
+    // derived from the bound Consts via get_signed_bits() (signed width; drop the sign
     // bit for unsigned) — no to_i, handles >64-bit bounds.
     if (range_min) {
       kind = range_min->is_negative() ? Numeric_kind::signed_int : Numeric_kind::unsigned_int;
     }
     if (range_max && range_min && range_max->is_integer() && range_min->is_integer()) {
       if (!range_min->is_negative()) {
-        bits = range_max->is_known_zero() ? 0 : static_cast<uint32_t>(range_max->get_bits() - 1);
+        bits = static_cast<uint32_t>(range_max->get_payload_bits());
       } else {
-        bits = static_cast<uint32_t>(std::max<int64_t>(range_max->get_bits(), range_min->get_bits()));
+        bits = static_cast<uint32_t>(std::max<int64_t>(range_max->get_signed_bits(), range_min->get_signed_bits()));
       }
     }
   } else if (Lnast_ntype::is_prim_type_bool(t)) {
@@ -552,13 +566,13 @@ void uPass_attributes::process_declare() {
     move_to_parent();
     return;
   }
-  Numeric_kind         kind = Numeric_kind::none;
-  uint32_t             bits = 0;
+  Numeric_kind        kind = Numeric_kind::none;
+  uint32_t            bits = 0;
   std::optional<Dlop> range_max;
   std::optional<Dlop> range_min;
-  bool                 is_real_type = false;
-  Decl_kind            decl         = Decl_kind::unknown;
-  bool                 comptime     = false;
+  bool                is_real_type = false;
+  Decl_kind           decl         = Decl_kind::unknown;
+  bool                comptime     = false;
   if (move_to_sibling()) {  // TYPE
     read_scalar_type_at_cursor(kind, bits, range_max, range_min, is_real_type);
     if (move_to_sibling() && Lnast_ntype::is_const(get_raw_ntype())) {  // mode

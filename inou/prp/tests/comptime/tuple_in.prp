@@ -5,7 +5,7 @@
 :verifier_fail: 0
 */
 
-// `a in b` requires b to be an UNNAMED tuple/array whose elements share a's
+// `a in b` requires a scalar left operand and a tuple/array on the right whose elements share a's
 // type (integer width/signedness may differ). It expands to
 // `a == b[0] or a == b[1] or …`; constprop folds the constant comparisons.
 cassert(2 in (1, 2, 3))
@@ -19,4 +19,4 @@ cassert(not (7 in ()))             // empty array ⇒ always false
 const a:u4 = 3
 cassert(a in (1, 300, 3))          // mixed integer widths are allowed
 
-cassert((1, 2) in ((3, 4), (1, 2)))  // tuples compare structurally
+cassert(2 in (const first=1, const second=2)) // names do not affect membership

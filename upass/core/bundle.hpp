@@ -11,6 +11,7 @@
 #include <string_view>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_cat.h"
 #include "battr.hpp"
 #include "bundle_key.hpp"
@@ -25,7 +26,7 @@
 //   - a nested bundle keeps a small `fields_` vector (counts are tiny — <~20
 //     total, 1-10 per level, 1-3 deep), each field NAMED (a positive LNAST
 //     name-id reused as the field id) or UNNAMED (a positional index), holding a
-//     leaf value or a sub-Bundle. Linear scan beats a map/binary-search here.
+//     leaf value or a sub-Bundle. Larger array bundles add a field index.
 // Data keys are int32 segment-id PATHS (bundle_path::Seg): a caller splits a
 // dotted LNAST name once via bundle_path::of_name and navigates by ids — no
 // dotted string touches data storage. The dotted-string data methods remain as
@@ -81,7 +82,7 @@ public:
     int              pos        = -1;  // top-level unnamed index when unnamed (>= 0)
     size_t           leaf_count = 0;
     bool             has_leafs  = false;  // top-level is a sub-bundle, not a bare scalar
-    Dlop             scalar;            // collapsed value when leaf_count == 1
+    Dlop             scalar;              // collapsed value when leaf_count == 1
   };
 
   // Materialized sorted-iteration views. Data keys are dotted strings
@@ -116,7 +117,11 @@ protected:
   Entry scalar_;
   bool  has_scalar_ = false;  // has_scalar_ ⇒ fields_.empty()
 
-  std::vector<Field> fields_;  // nested fields; named (+id) and unnamed (−pos) mixed, insertion order
+  std::vector<Field>               fields_;  // nested fields; named (+id) and unnamed (−pos) mixed, insertion order
+  // Empty for small bundles. Fields are append-only; all insertion paths use
+  // append_field so the large-bundle index also stays valid across copies.
+  static constexpr size_t          field_index_threshold = 64;
+  absl::flat_hash_map<Seg, size_t> field_index_;
 
   // ── rare residual attributes (battr) — string-keyed ───────────────────────
   // Whole-bundle attr keys on the bare name ("bits"); per-field on "a.b.bits".
@@ -133,17 +138,17 @@ protected:
   mutable bool immutable;
   mutable bool correct;
 
-  // ── navigation primitives (linear scan; counts are tiny) ──────────────────
-  [[nodiscard]] const Field* find_field(Seg s) const;
-  [[nodiscard]] Field*       find_field(Seg s);
-  void                       spill_scalar();  // scalar_ → fields_[0] (seg -1) when has_scalar_
-  [[nodiscard]] std::shared_ptr<Bundle> clone() const;  // deep copy (subs cloned recursively)
+  // ── navigation primitives (linear for small bundles, indexed for arrays) ──
+  void                                  append_field(Field field);
+  [[nodiscard]] const Field*            find_field(Seg s) const;
+  [[nodiscard]] Field*                  find_field(Seg s);
+  void                                  spill_scalar();  // scalar_ → fields_[0] (seg -1) when has_scalar_
+  [[nodiscard]] std::shared_ptr<Bundle> clone() const;   // deep copy (subs cloned recursively)
 
 public:
   static std::string seg_text(Seg s);  // a single seg back to its source text ("a" / "0")
 
 protected:
-
   // Descend `path[0..n-1]` into sub-bundles; create when asked. Returns the
   // innermost Bundle and writes the last seg to *last; nullptr when a non-create
   // walk hits a missing/leaf node (or path empty).

@@ -13,7 +13,7 @@ test hier_value.sig {
   mut sig = 0
   tick 1000 {
     s = s * 6364136223846793005 + 1442695040888963407
-    acc.in = s & 0xf
+    acc.`in` = s & 0xf
     step
     sig = sig * 1099511628211 + (acc.cnt & 0x7)
   }

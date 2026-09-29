@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include "flatten.hpp"
 #include "hhds/graph.hpp"
 #include "pass.hpp"
 
@@ -17,9 +18,10 @@ namespace livehd::partition {
 // `src` is the original (pre-partition) graph, kept alive so the hook can read
 // node types, attributes and constant values, and walk the region connectivity.
 struct Region_body {
-  hhds::Graph* body = nullptr;  // fresh body to populate (IO pins materialized)
-  hhds::Graph* src  = nullptr;  // original graph (read-only)
+  hhds::Graph* body  = nullptr;  // fresh body to populate (IO pins materialized)
+  hhds::Graph* src   = nullptr;  // original graph (read-only)
   int          color = 0;
+  bool         ctrl  = false;
   std::string  module_name;
   // Incremental synth: false when this region's boundary cannot be given
   // reproducible-across-recompiles port names (a crossing-input automorphism),
@@ -37,7 +39,7 @@ struct Region_body {
   // "automorphism" means), so it is not a substitute for this refusal; a sound
   // reuse of these regions needs canonical (reproducible) boundary naming
   // (fixme_incremental Proposal 2), not a looser gate.
-  bool reuse_eligible = true;
+  bool         reuse_eligible = true;
 
   struct Port {
     std::string     name;        // body IO pin name
@@ -46,8 +48,8 @@ struct Region_body {
     int             bits = 0;
     bool            sign = false;
   };
-  std::vector<Port> inputs;
-  std::vector<Port> outputs;
+  std::vector<Port>                 inputs;
+  std::vector<Port>                 outputs;
   // Incremental synth: the region's PRE-hook logic (the ORIGINAL, un-mapped
   // netlist), rebuilt by the SAME build_module construction the classic no-hook
   // path uses -- so the abc cache's structural compare sees a byte-stable
@@ -56,11 +58,13 @@ struct Region_body {
   // lives in `pre_lib` (a throwaway library the partitioner owns for the
   // duration of the synchronous hook call) under name `pre_name`. All null/empty
   // unless the partitioner was asked to build it (build_decomposition
-  // want_pre_bodies) AND this is a per-def region (never the flatten as-top
-  // region). Do NOT stash past the hook's return.
-  hhds::Graph*        pre_body = nullptr;
-  hhds::GraphLibrary* pre_lib  = nullptr;
-  std::string         pre_name;
+  // want_pre_bodies) AND this region is eligible for reuse. Virtual-flat colors
+  // are reusable even when only one color remains; explicit whole-design
+  // flattening skips the potentially huge pre-body unless it is a ware.
+  // Do NOT stash past the hook's return.
+  hhds::Graph*                      pre_body = nullptr;
+  hhds::GraphLibrary*               pre_lib  = nullptr;
+  std::string                       pre_name;
   // Region nodes (handles into `src`). A non-owning view into a buffer the
   // partitioner keeps alive for the duration of the synchronous hook call (and
   // frees right after) -- so a whole-design flatten does not copy an O(nodes)
@@ -70,7 +74,11 @@ struct Region_body {
 };
 
 // Called once per region. If unset, partition recreates the original logic.
-using Body_builder = std::function<void(const Region_body&)>;
+using Body_builder       = std::function<void(const Region_body&)>;
+// A synchronous batch of independent regions from one definition. All source,
+// body, node-span and pre-body storage remains alive until the callback returns.
+// Graph-library mutations still require serialization inside a parallel builder.
+using Body_batch_builder = std::function<void(std::span<const Region_body>)>;
 
 // Whole-design flatten policy for build_decomposition. `automatic` flattens
 // exactly when the top's active coloring was produced by `pass.color flat`
@@ -84,12 +92,18 @@ enum class Flatten_mode { off, on, automatic };
 // anything else is a fatal diag under `pass` and returns off.
 [[nodiscard]] Flatten_mode parse_flatten_mode(std::string_view v, std::string_view pass);
 
-// Whether build_decomposition will inline `g`'s whole hierarchy into a single
-// flat def (vs. the per-def decomposition). `on`/`off` are literal; `automatic`
-// resolves against g's active coloring (flat coloring => whole-design). Lets a
-// caller (e.g. pass.abc's size gate) tell, before running, whether it is about
-// to bit-blast the entire flattened design as one unit.
-[[nodiscard]] bool flatten_is_whole_design(hhds::Graph* g, Flatten_mode mode);
+// Whether build_decomposition will inline `g`'s whole hierarchy and emit it as a
+// SINGLE module. `on`/`off` are literal; `automatic` resolves against g's active
+// coloring. Lets a caller (e.g. pass.abc's size gate) tell, before running,
+// whether it is about to bit-blast the entire flattened design as one unit.
+//
+// True only for a flatten whose result is ONE module (a `pass.color flat`
+// coloring, or none at all). pass.color synth's VIRTUAL flattening also makes
+// pass.partition flatten, but into many `max_gate`-bounded regions -- callers
+// that specialize on "the design is one region" must ask this, not "did we
+// flatten". (It replaces flatten_is_whole_design, whose name promised the
+// former while returning the latter.)
+[[nodiscard]] bool flatten_is_single_module(hhds::Graph* g, Flatten_mode mode);
 
 // Resolve a sub-instance's child def inside `outlib`: an already-partitioned
 // def resolves by name; a BODY-LESS def (a black box — a liberty cell or tie
@@ -98,7 +112,9 @@ enum class Flatten_mode { off, on, automatic };
 // re-partitioned / re-synthesized like any other lg. Returns nullptr when the
 // def has a body but is missing from `outlib` (a children-first ordering bug —
 // the caller reports it).
-std::shared_ptr<hhds::GraphIO> resolve_or_clone_subdef(hhds::GraphLibrary* outlib, const hhds::Node_class& inst);
+// resolve_or_clone_subdef now lives in flatten.hpp (included above) so the
+// flattener can be a leaf library; re-exported here because every historical
+// caller reaches it through this header.
 
 }  // namespace livehd::partition
 
@@ -122,14 +138,21 @@ public:
   // structurally inlined first and ONE Partitioner runs on the flat def; a
   // single resulting region is emitted directly under the top's own name (no
   // wrapper), so a flat coloring yields exactly one output module. Returns
-  // false on a fatal collect/flatten error.
+  // false on a fatal collect/flatten error. preserved_defs adds pass-local
+  // boundaries whose bodies are mapped once before their callers are rebuilt.
   // `want_pre_bodies` (incremental synth): also rebuild each per-def region's
   // original logic into a throwaway lib and hand it to the hook via
   // Region_body::pre_body -- the abc cache's stable structural-compare artifact.
   // Off by default (the per-region edge tables it needs are dead weight on the
   // classic/flatten paths); the flatten as-top region never gets one.
+  // `prepare_src` rewrites each graph the Partitioner is about to cut (the flat
+  // source, or every def) right before it is cut, with its final colors: the
+  // one place a color-aware LGraph rewrite (satopt's mux facts) sees exactly
+  // the regions every mapper will map.
   static bool build_decomposition(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, hhds::GraphLibrary* outlib,
                                   std::string_view top, bool debug_color, const livehd::partition::Body_builder& hook = {},
                                   livehd::partition::Flatten_mode flatten = livehd::partition::Flatten_mode::off,
-                                  bool want_pre_bodies = false);
+                                  bool want_pre_bodies = false, const livehd::partition::Body_batch_builder& batch_hook = {},
+                                  size_t batch_size = 64, const std::unordered_set<hhds::Gid>& preserved_defs = {},
+                                  const std::function<void(hhds::Graph*)>& prepare_src = {});
 };

@@ -47,14 +47,14 @@ Occ make_cone(hhds::Graph* g, const hhds::Pin_class& xor_in, const hhds::Pin_cla
   xor_in.connect_sink(x.create_sink_pin(0));
   auto a = create_typed_node(*g, Ntype_op::And);
   x.create_driver_pin(0).connect_sink(a.create_sink_pin(0));
-  and_in.connect_sink(a.create_sink_pin(0));
+  and_in.connect_sink(a.create_sink_pin(1));
   a.create_driver_pin(0).connect_sink(sink);
   return {x, a};
 }
 
 std::vector<hhds::Node_class> subs_of(hhds::Graph* g) {
   std::vector<hhds::Node_class> subs;
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     if (n.is_invalid() || gu::is_builtin_node(n)) {
       continue;
     }
@@ -67,7 +67,7 @@ std::vector<hhds::Node_class> subs_of(hhds::Graph* g) {
 
 uint64_t count_ops(hhds::Graph* g, Ntype_op op) {
   uint64_t c = 0;
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     if (!n.is_invalid() && !gu::is_builtin_node(n) && gu::type_op_of(n) == op) {
       ++c;
     }
@@ -99,9 +99,11 @@ hhds::Pin_class driver_into(const hhds::Node_class& sub, const std::shared_ptr<h
       pid = static_cast<uint32_t>(d.port_id);
     }
   }
-  for (const auto& e : sub.inp_edges()) {
-    if (static_cast<uint32_t>(e.sink.get_port_id()) == pid) {
-      return e.driver;
+  for (auto e_sink : sub.inp_sorted_pins()) {
+    for (auto e_drv : e_sink.get_driver_pins()) {
+      if (static_cast<uint32_t>(e_sink.get_port_id()) == pid) {
+        return e_drv;
+      }
     }
   }
   return {};
@@ -129,7 +131,12 @@ TEST(ColorReduce, ExtractsThreeIdenticalCones) {
   // binding must not care.
   {
     auto a = create_typed_node(*g, Ntype_op::And);
-    g->get_input_pin("in5").connect_sink(a.create_sink_pin(0));
+    // "Backwards" is the CONNECT ORDER (and-leaf before xor-leaf), not the pid
+    // roles: under ONE DRIVER PER SINK PIN each operand owns a pid, so putting
+    // the xor on a different pid here would make this a genuinely different
+    // cone, and color_reduce keys its rebuild on the raw pid on purpose
+    // (color_reduce.cpp:743). Same roles, opposite wiring order.
+    g->get_input_pin("in5").connect_sink(a.create_sink_pin(1));
     auto x = create_typed_node(*g, Ntype_op::Xor);
     g->get_input_pin("in4").connect_sink(x.create_sink_pin(0));
     x.create_driver_pin(0).connect_sink(a.create_sink_pin(0));
@@ -176,10 +183,10 @@ TEST(ColorReduce, ExtractsThreeIdenticalCones) {
 
   // Every output is still driven -- by an instance pin.
   for (const char* out : {"y0", "y1", "y2"}) {
-    auto op   = g->get_output_pin(out);
+    auto op    = g->get_output_pin(out);
     bool wired = false;
-    for (const auto& e : op.inp_edges()) {
-      wired = gu::type_op_of(e.driver.get_master_node()) == Ntype_op::Sub;
+    for (auto e_drv : op.get_driver_pins()) {
+      wired = gu::type_op_of(e_drv.get_master_node()) == Ntype_op::Sub;
     }
     EXPECT_TRUE(wired) << out;
   }
@@ -232,7 +239,7 @@ TEST(ColorReduce, DivergentConstIsPromotedToPort) {
     g->get_input_pin(std::string{"in"} + std::to_string(i)).connect_sink(x.create_sink_pin(0));
     auto a = create_typed_node(*g, Ntype_op::And);
     x.create_driver_pin(0).connect_sink(a.create_sink_pin(0));
-    k.connect_sink(a.create_sink_pin(0));
+    k.connect_sink(a.create_sink_pin(1));
     a.create_driver_pin(0).connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
   };
   make(0, k5);
@@ -254,9 +261,11 @@ TEST(ColorReduce, DivergentConstIsPromotedToPort) {
   // Every site feeds its OWN value into the const port: {5,5,5,7}.
   std::vector<std::string> fed;
   for (const auto& s : subs) {
-    for (const auto& e : s.inp_edges()) {
-      if (gu::is_const_pin(e.driver)) {
-        fed.push_back(gu::hydrate_const(e.driver).serialize());
+    for (auto e_sink : s.inp_sorted_pins()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        if (e_drv.is_const()) {
+          fed.push_back(gu::const_of(e_drv).serialize());
+        }
       }
     }
   }
@@ -268,14 +277,59 @@ TEST(ColorReduce, DivergentConstIsPromotedToPort) {
   // The shared body reads the port, not a baked-in constant.
   auto body = subs[0].get_subnode_graph();
   ASSERT_TRUE(body != nullptr);
-  for (auto n : body->fast_class()) {
+  for (auto n : body->body().nodes()) {
     if (n.is_invalid() || gu::is_builtin_node(n)) {
       continue;
     }
-    for (const auto& e : n.inp_edges()) {
-      EXPECT_FALSE(gu::is_const_pin(e.driver)) << "the divergent const must live at the call sites";
+    for (auto e_sink : n.inp_sorted_pins()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        EXPECT_FALSE(e_drv.is_const()) << "the divergent const must live at the call sites";
+      }
     }
   }
+}
+
+// A Get_mask mask determines wiring identity, not runtime data. Differing
+// masks must split the pattern bucket instead of becoming a const input port:
+// pass.abc deliberately requires this operand to remain constant.
+TEST(ColorReduce, DivergentGetMaskStaysStructural) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_reduce_test");
+  auto  gio = lib.create_io("red_structural_mask");
+  for (int i = 0; i < 4; ++i) {
+    gio->add_input(std::string{"in"} + std::to_string(i), i + 1);
+    gio->add_output(std::string{"y"} + std::to_string(i), i + 5);
+  }
+  auto g = gio->create_graph();
+
+  auto k5   = gu::create_const(*g, *Dlop::create_integer(5));
+  auto k6   = gu::create_const(*g, *Dlop::create_integer(6));
+  auto make = [&](int i, const hhds::Pin_class& mask) {
+    auto x = create_typed_node(*g, Ntype_op::Xor);
+    g->get_input_pin(std::string{"in"} + std::to_string(i)).connect_sink(x.create_sink_pin(0));
+    auto xp = x.create_driver_pin(0);
+    gu::set_bits(xp, 3);
+    auto slice = create_typed_node(*g, Ntype_op::Get_mask);
+    xp.connect_sink(gu::setup_sink_by_name(slice, "a"));
+    mask.connect_sink(gu::setup_sink_by_name(slice, "mask"));
+    auto out = slice.create_driver_pin(0);
+    gu::set_bits(out, 2);
+    out.connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
+  };
+  make(0, k5);
+  make(1, k5);
+  make(2, k5);
+  make(3, k6);
+
+  Reduce_stats st;
+  hhds::Graph* defs[] = {g.get()};
+  ASSERT_TRUE(color_reduce(defs, small_opts(), &st));
+
+  EXPECT_EQ(1u, st.patterns);
+  EXPECT_EQ(3u, st.occurrences);
+  EXPECT_EQ(0u, st.promoted_consts);
+  EXPECT_EQ(1u, count_ops(g.get(), Ntype_op::Xor));
+  EXPECT_EQ(1u, count_ops(g.get(), Ntype_op::Get_mask));
+  EXPECT_EQ(3u, subs_of(g.get()).size());
 }
 
 // A constant every site agrees on stays INSIDE the body: no const port, no
@@ -297,7 +351,7 @@ TEST(ColorReduce, AgreedConstStaysInternal) {
     g->get_input_pin(std::string{"in"} + std::to_string(i)).connect_sink(x.create_sink_pin(0));
     auto a = create_typed_node(*g, Ntype_op::And);
     x.create_driver_pin(0).connect_sink(a.create_sink_pin(0));
-    k5.connect_sink(a.create_sink_pin(0));
+    k5.connect_sink(a.create_sink_pin(1));
     a.create_driver_pin(0).connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
   }
 
@@ -311,19 +365,23 @@ TEST(ColorReduce, AgreedConstStaysInternal) {
   auto subs = subs_of(g.get());
   ASSERT_EQ(3u, subs.size());
   for (const auto& s : subs) {
-    for (const auto& e : s.inp_edges()) {
-      EXPECT_FALSE(gu::is_const_pin(e.driver)) << "an agreed const is body-internal";
+    for (auto e_sink : s.inp_sorted_pins()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        EXPECT_FALSE(e_drv.is_const()) << "an agreed const is body-internal";
+      }
     }
   }
   auto body = subs[0].get_subnode_graph();
   ASSERT_TRUE(body != nullptr);
   bool body_has_const = false;
-  for (auto n : body->fast_class()) {
+  for (auto n : body->body().nodes()) {
     if (n.is_invalid() || gu::is_builtin_node(n)) {
       continue;
     }
-    for (const auto& e : n.inp_edges()) {
-      body_has_const = body_has_const || gu::is_const_pin(e.driver);
+    for (auto e_sink : n.inp_sorted_pins()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        body_has_const = body_has_const || e_drv.is_const();
+      }
     }
   }
   EXPECT_TRUE(body_has_const);
@@ -392,14 +450,16 @@ TEST(ColorReduce, ConeFeedingFlopExtracts) {
   EXPECT_EQ(1u, st.patterns);
   EXPECT_EQ(3u, st.occurrences);
   EXPECT_EQ(3u, count_ops(g.get(), Ntype_op::Flop)) << "flops are never extracted";
-  for (auto n : g->fast_class()) {
+  for (auto n : g->body().nodes()) {
     if (n.is_invalid() || gu::is_builtin_node(n) || gu::type_op_of(n) != Ntype_op::Flop) {
       continue;
     }
     bool din_from_sub = false;
-    for (const auto& e : n.inp_edges()) {
-      if (static_cast<uint32_t>(e.sink.get_port_id()) == 3) {
-        din_from_sub = gu::type_op_of(e.driver.get_master_node()) == Ntype_op::Sub;
+    for (auto e_sink : n.inp_sorted_pins()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        if (static_cast<uint32_t>(e_sink.get_port_id()) == 3) {
+          din_from_sub = gu::type_op_of(e_drv.get_master_node()) == Ntype_op::Sub;
+        }
       }
     }
     EXPECT_TRUE(din_from_sub);
@@ -477,9 +537,11 @@ TEST(ColorReduce, ChainedPatternsRewireThroughForwarding) {
   // Every C2 instance reads some C1 instance directly.
   uint64_t sub_to_sub = 0;
   for (const auto& s : subs) {
-    for (const auto& e : s.inp_edges()) {
-      if (gu::type_op_of(e.driver.get_master_node()) == Ntype_op::Sub) {
-        ++sub_to_sub;
+    for (auto e_sink : s.inp_sorted_pins()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        if (gu::type_op_of(e_drv.get_master_node()) == Ntype_op::Sub) {
+          ++sub_to_sub;
+        }
       }
     }
   }
@@ -503,9 +565,13 @@ TEST(ColorReduce, DupEdgeConeRefused) {
   for (int i = 0; i < 3; ++i) {
     auto x = create_typed_node(*g, Ntype_op::Xor);
     g->get_input_pin(std::string{"in"} + std::to_string(i)).connect_sink(x.create_sink_pin(0));
-    auto s = create_typed_node(*g, Ntype_op::Sum);
+    auto s  = create_typed_node(*g, Ntype_op::Sum);
     auto xd = x.create_driver_pin(0);
     xd.connect_sink(s.create_sink_pin(0));
+    // DELIBERATE duplicate parallel edge -- do NOT "fix" this to two pids. The
+    // test below asserts `dup_edge_skipped >= 3`: this fixture exists to prove
+    // color_reduce REFUSES a cone carrying one, so removing the duplicate
+    // removes the only thing the test checks.
     xd.connect_sink(s.create_sink_pin(0));  // x + x: parallel duplicate edge
     s.create_driver_pin(0).connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
   }
@@ -595,17 +661,20 @@ TEST(ColorReduce, PortHeavyBucketSkipped) {
     // 2 members, 5 distinct leaves: 5 + 1 > 2 * 2.
     auto a = create_typed_node(*g, Ntype_op::And);
     for (int j = 0; j < 4; ++j) {
-      g->get_input_pin(std::string{"in"} + std::to_string(5 * i + j)).connect_sink(a.create_sink_pin(0));
+      // One operand per pid: an And is a single BANK, so its four operands take
+      // four consecutive slots rather than piling onto pid 0.
+      g->get_input_pin(std::string{"in"} + std::to_string(5 * i + j))
+          .connect_sink(a.create_sink_pin(static_cast<hhds::Port_id>(j)));
     }
     auto o = create_typed_node(*g, Ntype_op::Or);
     a.create_driver_pin(0).connect_sink(o.create_sink_pin(0));
-    g->get_input_pin(std::string{"in"} + std::to_string(5 * i + 4)).connect_sink(o.create_sink_pin(0));
+    g->get_input_pin(std::string{"in"} + std::to_string(5 * i + 4)).connect_sink(o.create_sink_pin(1));
     o.create_driver_pin(0).connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
   }
 
   Reduce_stats st;
-  auto         o = small_opts();
-  o.min_win      = 1;  // the guard under test; small_opts leaves it inert
+  auto         o      = small_opts();
+  o.min_win           = 1;  // the guard under test; small_opts leaves it inert
   hhds::Graph* defs[] = {g.get()};
   ASSERT_TRUE(color_reduce(defs, o, &st));
 
@@ -613,4 +682,242 @@ TEST(ColorReduce, PortHeavyBucketSkipped) {
   EXPECT_GE(st.port_heavy_skipped, 1u);
   EXPECT_TRUE(subs_of(g.get()).empty());
   EXPECT_EQ(3u, count_ops(g.get(), Ntype_op::And));
+}
+
+// A node bound does not constrain bit-level synthesis cost. The GE ceiling
+// rejects a repeated wide arithmetic body before it becomes one shared module
+// that is still too expensive for ABC to map within the optimization budget.
+TEST(ColorReduce, OversizePatternSkipped) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_reduce_test");
+  auto  gio = lib.create_io("red_oversize");
+  for (int i = 0; i < 6; ++i) {
+    gio->add_input(std::string{"in"} + std::to_string(i), i + 1);
+  }
+  for (int i = 0; i < 3; ++i) {
+    gio->add_output(std::string{"y"} + std::to_string(i), i + 7);
+  }
+  auto g = gio->create_graph();
+
+  for (int i = 0; i < 3; ++i) {
+    auto a = g->get_input_pin(std::string{"in"} + std::to_string(2 * i));
+    auto b = g->get_input_pin(std::string{"in"} + std::to_string(2 * i + 1));
+    gu::set_bits(a, 64);
+    gu::set_bits(b, 64);
+    auto mult = create_typed_node(*g, Ntype_op::Mult);
+    a.connect_sink(mult.create_sink_pin(0));
+    b.connect_sink(mult.create_sink_pin(1));  // Mult is ONE bank: consecutive pids
+    auto out = mult.create_driver_pin(0);
+    gu::set_bits(out, 64);
+    out.connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
+  }
+
+  auto o           = small_opts();
+  o.min_nodes      = 1;
+  o.max_nodes      = 1;
+  o.max_pattern_ge = 1;
+  Reduce_stats st;
+  hhds::Graph* defs[] = {g.get()};
+  ASSERT_TRUE(color_reduce(defs, o, &st));
+
+  EXPECT_EQ(0u, st.patterns);
+  EXPECT_EQ(1u, st.oversize_skipped);
+  EXPECT_EQ(3u, count_ops(g.get(), Ntype_op::Mult));
+}
+
+// A packed-array word select commonly lowers to a very wide dynamic right
+// shift followed by a narrow constant slice.  The two-node body is text-neutral
+// after accounting for its ports, but synthesizing hundreds of copies is very
+// expensive.  Bounded mining deliberately cuts before the widening SHL and
+// admits this one shape through the text-profit guard.
+TEST(ColorReduce, WideShiftSliceBypassesTextProfitGuard) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_reduce_test");
+  auto  gio = lib.create_io("red_wide_shift_slice");
+  for (int i = 0; i < 6; ++i) {
+    gio->add_input(std::string{"in"} + std::to_string(i), i + 1);
+  }
+  for (int i = 0; i < 3; ++i) {
+    gio->add_output(std::string{"y"} + std::to_string(i), i + 7);
+  }
+  auto g = gio->create_graph();
+
+  auto mask = gu::create_const(*g, *Dlop::create_integer((int64_t{1} << 20) - 1));
+  auto zero = gu::create_const(*g, *Dlop::create_integer(0));
+  for (int i = 0; i < 3; ++i) {
+    auto data = g->get_input_pin(std::string{"in"} + std::to_string(2 * i));
+    auto amt  = g->get_input_pin(std::string{"in"} + std::to_string(2 * i + 1));
+    gu::set_bits(data, 1024);
+    gu::set_bits(amt, 7);
+
+    auto shift = create_typed_node(*g, Ntype_op::SRA);
+    data.connect_sink(shift.create_sink_pin(0));
+    amt.connect_sink(shift.create_sink_pin(1));
+    auto shifted = shift.create_driver_pin(0);
+    gu::set_bits(shifted, 1024);
+
+    auto slice = create_typed_node(*g, Ntype_op::Get_mask);
+    shifted.connect_sink(slice.create_sink_pin(0));
+    mask.connect_sink(slice.create_sink_pin(1));
+    auto word = slice.create_driver_pin(0);
+    gu::set_bits(word, 20);
+
+    auto widen = create_typed_node(*g, Ntype_op::SHL);
+    word.connect_sink(widen.create_sink_pin(0));
+    zero.connect_sink(widen.create_sink_pin(1));
+    auto packed = widen.create_driver_pin(0);
+    gu::set_bits(packed, 1024);
+    packed.connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
+  }
+
+  auto o      = small_opts();
+  o.max_nodes = 2;
+  o.min_win   = 1;
+  Reduce_stats st;
+  hhds::Graph* defs[] = {g.get()};
+  ASSERT_TRUE(color_reduce(defs, o, &st));
+
+  EXPECT_EQ(1u, st.patterns);
+  EXPECT_EQ(3u, st.occurrences);
+  EXPECT_EQ(0u, count_ops(g.get(), Ntype_op::SRA));
+  EXPECT_EQ(0u, count_ops(g.get(), Ntype_op::Get_mask));
+  EXPECT_EQ(3u, count_ops(g.get(), Ntype_op::SHL));
+  EXPECT_EQ(3u, subs_of(g.get()).size());
+}
+
+// One very wide dynamic shift is already an expensive synthesis cone. Three
+// structurally identical placements therefore share one body even though a
+// one-node pattern cannot satisfy the source-text profitability estimate.
+TEST(ColorReduce, WideDynamicShiftBypassesTextProfitGuard) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_reduce_test");
+  auto  gio = lib.create_io("red_wide_dynamic_shift");
+  for (int i = 0; i < 6; ++i) {
+    gio->add_input(std::string{"in"} + std::to_string(i), i + 1);
+  }
+  for (int i = 0; i < 3; ++i) {
+    gio->add_output(std::string{"y"} + std::to_string(i), i + 7);
+  }
+  auto g = gio->create_graph();
+
+  for (int i = 0; i < 3; ++i) {
+    auto value = g->get_input_pin(std::string{"in"} + std::to_string(2 * i));
+    auto amt   = g->get_input_pin(std::string{"in"} + std::to_string(2 * i + 1));
+    gu::set_bits(value, 20);
+    gu::set_bits(amt, 9);
+    auto shift = create_typed_node(*g, Ntype_op::SHL);
+    value.connect_sink(shift.create_sink_pin(0));
+    amt.connect_sink(shift.create_sink_pin(1));
+    auto out = shift.create_driver_pin(0);
+    gu::set_bits(out, 1024);
+    out.connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
+  }
+
+  auto o      = small_opts();
+  o.max_nodes = 2;
+  o.min_win   = 1;
+  Reduce_stats st;
+  hhds::Graph* defs[] = {g.get()};
+  ASSERT_TRUE(color_reduce(defs, o, &st));
+
+  EXPECT_EQ(1u, st.patterns);
+  EXPECT_EQ(3u, st.occurrences);
+  EXPECT_EQ(0u, count_ops(g.get(), Ntype_op::SHL));
+  EXPECT_EQ(3u, subs_of(g.get()).size());
+}
+
+// Bounded mining pulls one address-arithmetic producer into a wide shift's
+// cone.  This is the shape emitted for packed-array reads in Rob; sharing only
+// singleton shifts leaves each 30k+-bit barrel network to expand separately.
+TEST(ColorReduce, WideDynamicShiftWithAddressProducerBypassesTextProfitGuard) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_reduce_test");
+  auto  gio = lib.create_io("red_wide_dynamic_shift_address");
+  for (int i = 0; i < 6; ++i) {
+    gio->add_input(std::string{"in"} + std::to_string(i), i + 1);
+  }
+  for (int i = 0; i < 3; ++i) {
+    gio->add_output(std::string{"y"} + std::to_string(i), i + 7);
+  }
+  auto g   = gio->create_graph();
+  auto one = gu::create_const(*g, *Dlop::create_integer(1));
+
+  for (int i = 0; i < 3; ++i) {
+    auto value = g->get_input_pin(std::string{"in"} + std::to_string(2 * i));
+    auto index = g->get_input_pin(std::string{"in"} + std::to_string(2 * i + 1));
+    gu::set_bits(value, 32768);
+    gu::set_bits(index, 9);
+
+    auto address = create_typed_node(*g, Ntype_op::Sum);
+    index.connect_sink(address.create_sink_pin(0));
+    one.connect_sink(address.create_sink_pin(2));  // Sum "as" bank = even pids
+    auto amount = address.create_driver_pin(0);
+    gu::set_bits(amount, 9);
+
+    auto shift = create_typed_node(*g, Ntype_op::SRA);
+    value.connect_sink(shift.create_sink_pin(0));
+    amount.connect_sink(shift.create_sink_pin(1));
+    auto out = shift.create_driver_pin(0);
+    gu::set_bits(out, 32768);
+    out.connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
+  }
+
+  auto o      = small_opts();
+  o.max_nodes = 2;
+  o.min_win   = 1;
+  Reduce_stats st;
+  hhds::Graph* defs[] = {g.get()};
+  ASSERT_TRUE(color_reduce(defs, o, &st));
+
+  EXPECT_EQ(1u, st.patterns);
+  EXPECT_EQ(3u, st.occurrences);
+  EXPECT_EQ(0u, count_ops(g.get(), Ntype_op::Sum));
+  EXPECT_EQ(0u, count_ops(g.get(), Ntype_op::SRA));
+  EXPECT_EQ(3u, subs_of(g.get()).size());
+}
+
+// The two-member wide-shift exception is for an ADDRESS-ARITHMETIC producer.
+// A companion that carries real mapping cost of its own (here a 256-bit Mult,
+// 65536 GE against the shift's ~12k) must still face the GE ceiling: the root
+// shift does not license an arbitrarily expensive shared body.
+TEST(ColorReduce, WideDynamicShiftWithExpensiveProducerKeepsGeGuard) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_reduce_test");
+  auto  gio = lib.create_io("red_wide_dynamic_shift_expensive");
+  for (int i = 0; i < 9; ++i) {
+    gio->add_input(std::string{"in"} + std::to_string(i), i + 1);
+  }
+  for (int i = 0; i < 3; ++i) {
+    gio->add_output(std::string{"y"} + std::to_string(i), i + 10);
+  }
+  auto g = gio->create_graph();
+
+  for (int i = 0; i < 3; ++i) {
+    auto a     = g->get_input_pin(std::string{"in"} + std::to_string(3 * i));
+    auto b     = g->get_input_pin(std::string{"in"} + std::to_string(3 * i + 1));
+    auto index = g->get_input_pin(std::string{"in"} + std::to_string(3 * i + 2));
+    gu::set_bits(a, 256);
+    gu::set_bits(b, 256);
+    gu::set_bits(index, 8);
+
+    auto mult = create_typed_node(*g, Ntype_op::Mult);
+    a.connect_sink(mult.create_sink_pin(0));
+    b.connect_sink(mult.create_sink_pin(1));  // Mult is ONE bank: consecutive pids
+    auto value = mult.create_driver_pin(0);
+    gu::set_bits(value, 256);
+
+    auto shift = create_typed_node(*g, Ntype_op::SRA);
+    value.connect_sink(shift.create_sink_pin(0));
+    index.connect_sink(shift.create_sink_pin(1));
+    auto out = shift.create_driver_pin(0);
+    gu::set_bits(out, 256);
+    out.connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
+  }
+
+  auto o           = small_opts();
+  o.max_nodes      = 2;
+  o.max_pattern_ge = 20000;  // the shipped pass.color default
+  Reduce_stats st;
+  hhds::Graph* defs[] = {g.get()};
+  ASSERT_TRUE(color_reduce(defs, o, &st));
+
+  EXPECT_EQ(0u, st.patterns);
+  EXPECT_EQ(1u, st.oversize_skipped);
+  EXPECT_EQ(3u, count_ops(g.get(), Ntype_op::Mult));
+  EXPECT_EQ(3u, count_ops(g.get(), Ntype_op::SRA));
 }

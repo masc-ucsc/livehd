@@ -11,7 +11,7 @@
 #      already-computed leaf expansion even when the call has no unnamed
 #      actual (the re-emit gate was `becomes_sub && any_unnamed`), and the
 #      same re-emit fires for a COMB callee kept as a Sub under the default
-#      inline:false (slang-generated Pyrope declares everything `pub comb`,
+#      explicit inline:false (slang-generated Pyrope declares everything `pub comb`,
 #      so comb-Sub calls are the hierarchy-recompile path).
 #  (2) upass.tolg: a dot-form read of a multi-output instance result
 #      (`r.rsp.sum` — a flat all-const tuple_get index chain) joins the
@@ -36,7 +36,8 @@ endmodule
 EOF
 
 lec_proven() { # <name> <prp>
-  "$LHD" lec --impl "$2" --ref "$W/gold.v" --top parent --set formal.solver=cvc5 \
+  "$LHD" lec --impl "$2" --ref "$W/gold.v" --top parent \
+    --set compile.upass.inline=false \
     --workdir "$W/lec_$1" -q --result-json "$W/lec_$1.json" \
     || fail "$1: lec run failed: $(cat "$W/lec_$1.json" 2>/dev/null)"
   grep -q '"status":"pass"' "$W/lec_$1.json" || fail "$1: lec not PROVEN: $(cat "$W/lec_$1.json")"
@@ -60,7 +61,7 @@ EOF
 lec_proven mod_named "$W/mod_named.prp"
 echo "PASS: mod callee + named tuple actual (req=t) compiles and is cvc5-PROVEN"
 
-# ── (b) COMB callee (default inline:false → Sub): named AND positional ────────
+# ── (b) COMB callee (explicit inline:false → Sub): named AND positional ───────
 cat >"$W/comb_named.prp" <<'EOF'
 pub comb leaf(req:(a:u4, b:u8)) -> (rsp:(sum:u9, lo:u4)) {
   rsp.sum = req.a + req.b
@@ -73,7 +74,7 @@ pub comb parent(x:u4, y:u8) -> (out:u9, out2:u4) {
   out2 = r["rsp.lo"]
 }
 EOF
-"$LHD" compile "$W/comb_named.prp" --top parent --workdir "$W/wb1" -q \
+"$LHD" compile "$W/comb_named.prp" --top parent --set compile.upass.inline=false --workdir "$W/wb1" -q \
   || fail "comb + NAMED tuple actual did not compile"
 lec_proven comb_named "$W/comb_named.prp"
 cat >"$W/comb_pos.prp" <<'EOF'
@@ -88,7 +89,7 @@ pub comb parent(x:u4, y:u8) -> (out:u9, out2:u4) {
   out2 = r["rsp.lo"]
 }
 EOF
-"$LHD" compile "$W/comb_pos.prp" --top parent --workdir "$W/wb2" -q \
+"$LHD" compile "$W/comb_pos.prp" --top parent --set compile.upass.inline=false --workdir "$W/wb2" -q \
   || fail "comb + POSITIONAL tuple actual did not compile"
 lec_proven comb_pos "$W/comb_pos.prp"
 echo "PASS: comb callee kept as a Sub takes named and positional tuple actuals (cvc5-PROVEN)"
@@ -155,7 +156,7 @@ pub comb p2(fi:u8) -> (oo:u8) {
 EOF
 "$LHD" compile "$W/local_fields.prp" --top p2 --workdir "$W/we1" -q \
   || fail "comb + tuple literal with LOCAL-computed field values did not compile"
-"$LHD" lec --impl "$W/local_fields.prp" --ref "$W/gold_local.v" --top p2 --set formal.solver=cvc5 \
+"$LHD" lec --impl "$W/local_fields.prp" --ref "$W/gold_local.v" --top p2 \
   --workdir "$W/lec_local" -q --result-json "$W/lec_local.json" \
   || fail "local-fields lec run failed: $(cat "$W/lec_local.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/lec_local.json" || fail "local-fields lec not PROVEN: $(cat "$W/lec_local.json")"
@@ -172,23 +173,108 @@ pub comb p2(fi:u8) -> (oo:u8) {
 EOF
 "$LHD" compile "$W/local_fields2.prp" --top p2 --workdir "$W/we2" -q \
   || fail "comb + tuple literal with LOCAL const field values did not compile"
-"$LHD" lec --impl "$W/local_fields2.prp" --ref "$W/gold_local.v" --top p2 --set formal.solver=cvc5 \
+"$LHD" lec --impl "$W/local_fields2.prp" --ref "$W/gold_local.v" --top p2 \
   --workdir "$W/lec_local2" -q --result-json "$W/lec_local2.json" \
   || fail "local-const-fields lec run failed: $(cat "$W/lec_local2.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/lec_local2.json" || fail "local-const-fields lec not PROVEN: $(cat "$W/lec_local2.json")"
 echo "PASS: tuple literal with local-computed field values expands (comb callee, cvc5-PROVEN)"
 
 # ── (d) cgen: dotted instance-connection port names are escaped ───────────────
-"$LHD" compile "$W/comb_named.prp" --top parent --emit-dir verilog:"$W/ev" --workdir "$W/wd" -q \
+"$LHD" compile "$W/comb_named.prp" --top parent --set compile.upass.inline=false --emit-dir verilog:"$W/ev" --workdir "$W/wd" -q \
   || fail "verilog emit of the comb hierarchy failed"
 PARENT_V=$(grep -l "^module" "$W/ev"/*.v | xargs grep -l '\.\\req\.a ' | head -1)
 [ -n "$PARENT_V" ] || fail "no emitted .v carries an escaped instance connection .\\req.a : $(ls "$W/ev")"
 grep -q '\.req\.a(' "$W/ev"/*.v && fail "raw (unescaped) .req.a( connection still emitted"
-if command -v iverilog >/dev/null 2>&1; then
-  iverilog -g2012 -o /dev/null "$W/ev"/*.v || fail "iverilog -g2012 rejects the emitted hierarchy"
-  echo "PASS: emitted hierarchy verilog parses (iverilog -g2012, escaped dotted ports)"
-else
-  echo "PASS: instance connections escape dotted ports (iverilog not present, grep-checked)"
-fi
+
+
+# The native slang reader must also preserve each escaped dotted connection as
+# one literal port name.  Treating `\\req.a` as the bundle path `req.a` makes
+# the parent call fail with fcall-unknown-arg even though the emitted Verilog is
+# legal and external tools accept it.
+printf '%s\n' "$W/ev"/*.v | sort | while IFS= read -r file; do
+  sed -n '1,$p' "$file"
+done >"$W/emitted_all.v"
+"$LHD" compile "$W/emitted_all.v" --top parent --workdir "$W/wev_readback" -q \
+  || fail "native slang reader rejects cgen's escaped dotted instance ports"
+echo "PASS: emitted hierarchy reads back through native slang"
+
+# A path-qualified import keeps its relative spelling in the internal graph
+# identity.  That identity is valid for module resolution, but its `../` must
+# never become part of cgen's output path: previously File_output tried to open
+# `<odir>/../lib/core.core.v`, failed, and the compile process segfaulted.
+mkdir -p "$W/relative/lib" "$W/relative/app"
+cat >"$W/relative/lib/core.prp" <<'EOF'
+pub comb core(a:u8) -> (y:u8) { y = a + 1 }
+EOF
+cat >"$W/relative/app/top.prp" <<'EOF'
+const core_t = import("../lib/core.core")
+pub comb relative_top(a:u8) -> (y:u8) {
+  const r = core_t(a=a)
+  y = r.y
+}
+EOF
+"$LHD" compile "$W/relative/app/top.prp" --top relative_top \
+  --emit-dir verilog:"$W/relative/out" --workdir "$W/relative/wdir" -q \
+  || fail "relative import escaped cgen's emit directory"
+test -r "$W/relative/out/.._lib_core.core.v" \
+  || fail "relative import did not receive its safe cgen basename: $(ls "$W/relative/out")"
+"$LHD" compile "$W/relative/app/top.prp" --top relative_top \
+  --emit verilog:"$W/relative/all.v" --workdir "$W/relative/wfile" -q \
+  || fail "relative import failed single-file Verilog concatenation"
+grep -q '^module core' "$W/relative/all.v" \
+  || fail "single-file cgen output omitted the relative-import module"
+grep -q '^module relative_top' "$W/relative/all.v" \
+  || fail "single-file cgen output omitted the relative-import top"
+"$LHD" lec --impl "$W/relative/app/top.prp" --ref "$W/relative/all.v" \
+  --top relative_top \
+  --workdir "$W/relative/lec" --result-json "$W/relative/lec.json" -q \
+  || fail "default LEC could not materialize the relative-import hierarchy"
+grep -q '"verdict":"proven"' "$W/relative/lec.json" \
+  || fail "relative-import hierarchy was not default LEC-PROVEN: $(cat "$W/relative/lec.json")"
+echo "PASS: relative import graph identities receive safe cgen filenames"
+
+# A generated helper name derived from an escaped scalar must stay escaped as
+# well.  The wire split below mints `<net>__wtmp`; dropping the quotes from that
+# name turns its literal dot into a tuple_get and breaks LNAST-to-LGraph.
+cat >"$W/escaped_split.v" <<'EOF'
+module escaped_split(input logic a, input logic b, output logic y);
+  wire \foo.bar ;
+  assign \foo.bar  = a;
+  assign \foo.bar  = b;
+  always_ff @(posedge \foo.bar )
+    y <= a;
+endmodule
+EOF
+"$LHD" compile "$W/escaped_split.v" --top escaped_split --emit-dir verilog:"$W/escaped_split_out" \
+  --workdir "$W/wescaped_split" -q \
+  || fail "derived helper for an escaped dotted scalar lost its literal-name quoting"
+echo "PASS: derived escaped-scalar helper names read through LNAST-to-LGraph"
+
+# A Verilog escape introducer is lexical syntax, not part of the identifier.
+# Keeping the leading '\\' in slang's internal name made a v2prp2v reread call
+# the same dotted register `\\state.lane` instead of `state.lane`; the logic was
+# equal but the inductive state cuts no longer paired.
+cat >"$W/escaped_state.v" <<'EOF'
+module escaped_state(input logic clk, input logic en, input logic [4:0] d, output logic [4:0] q);
+  logic [4:0] \state.lane ;
+  always_ff @(posedge clk) if (en) \state.lane  <= d;
+  assign q = \state.lane ;
+endmodule
+EOF
+"$LHD" compile "$W/escaped_state.v" --reader slang --top escaped_state \
+  --emit-dir pyrope:"$W/escaped_state_prp" --workdir "$W/wescaped_state_prp" -q \
+  || fail "escaped dotted state did not generate Pyrope"
+grep -q '`state\.lane`' "$W/escaped_state_prp/escaped_state.prp" \
+  || fail "Verilog escape introducer leaked into generated Pyrope state name"
+"$LHD" compile "$W/escaped_state_prp/escaped_state.prp" --top escaped_state \
+  --emit verilog:"$W/escaped_state_roundtrip.v" --workdir "$W/wescaped_state_v" -q \
+  || fail "escaped dotted state Pyrope did not regenerate Verilog"
+"$LHD" lec --impl verilog:"$W/escaped_state_roundtrip.v" --ref verilog:"$W/escaped_state.v" \
+  --top escaped_state --set formal.engine=ind --workdir "$W/lec_escaped_state" -q \
+  --result-json "$W/lec_escaped_state.json" \
+  || fail "escaped dotted state v2prp2v LEC failed: $(cat "$W/lec_escaped_state.json" 2>/dev/null)"
+grep -q '"status":"pass"' "$W/lec_escaped_state.json" \
+  || fail "escaped dotted state v2prp2v is not inductively PROVEN"
+echo "PASS: escaped dotted state keeps one identity through Verilog -> Pyrope -> Verilog"
 
 echo "PASS: all tuple-port call-site regressions"

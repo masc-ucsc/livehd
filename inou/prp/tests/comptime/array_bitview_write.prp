@@ -1,0 +1,16 @@
+/*
+:name: array_bitview_write
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+mut r:[2]u8 = 0
+r[0] = 0x11
+r[1] = 0x22
+r#[4..=12] = 0xAB
+const packed = r#[0..=15]
+cputs("packed:{packed:h}")
+cassert(r[0] == 0xB1)
+cassert(r[1] == 0x2A)
+cassert(packed == 0x2AB1)

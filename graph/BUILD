@@ -3,6 +3,8 @@
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
+exports_files(["node_util.hpp", "split_selfref.cpp", "split_selfref.hpp"])
+
 # LiveHD-side graph helpers that ride on top of hhds::Graph:
 #   - cell.{hpp,cpp}  → Ntype_op enum + cell-type metadata (sink/driver names,
 #     loop_first/loop_last classification, multi-driver/sink predicates).
@@ -18,21 +20,31 @@ cc_library(
     name = "graph",
     srcs = [
         "cell.cpp",
-        "const_pin.cpp",
         "latch_contract.cpp",
         "graph_library_singleton.cpp",
         "inline_sub.cpp",
+        "port_reach.cpp",
+        "reduce_lower.cpp",
+        "occurrence_materialize.cpp",
         "split_selfref.cpp",
+        "loop_split.cpp",
     ],
     hdrs = [
         "ann_place.hpp",
+        "attr_carry.hpp",
         "attrs.hpp",
         "cell.hpp",
         "graph_library_singleton.hpp",
         "latch_contract.hpp",
         "inline_sub.hpp",
+        "loop_split.hpp",
         "node_util.hpp",
+        "port_reach.hpp",
+        "reduce_lower.hpp",
+        "predict_abc_size.hpp",
+        "occurrence_materialize.hpp",
         "split_selfref.hpp",
+        "synthesis_cost.hpp",
     ],
     copts = COPTS,
     includes = ["."],
@@ -54,7 +66,16 @@ cc_library(
         "@hhds//hhds:graph",
     ],
 ) for test_name in [
+    "attr_carry_test",
+    "graph_library_singleton_test",
+    "inline_sub_test",
+    "cell_test",
+    "loop_split_test",
     "node_count_test",
+    "node_util_smoke",
     "ge_weight_smoke",
+    "predict_abc_size_smoke",
+    "const_pool_smoke",
     "latch_contract_test",
+    "occurrence_materialize_test",
 ]]

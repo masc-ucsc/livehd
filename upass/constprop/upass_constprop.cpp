@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <charconv>
 #include <format>
+#include <limits>
 #include <map>
 #include <optional>
 #include <print>
@@ -14,17 +15,47 @@
 
 #include "battr.hpp"  // is_builtin_attr_name (reject `x.bits` for `x.[bits]`)
 #include "cell.hpp"
+#include "decl_facts.hpp"  // lookup() recovers the reinterpret input's declared width
 #include "diag.hpp"
 #include "lnast_ntype.hpp"
+#include "mask_eval.hpp"
+#include "range_bits.hpp"  // classify_typecast + max/min_from_bits for uN()/sN() casts
 #include "str_tools.hpp"
 #include "upass_verifier.hpp"
-#include "range_bits.hpp"  // classify_typecast + max/min_from_bits for uN()/sN() casts
-#include "wrap_sat.hpp"    // wrap_to_signed/unsigned for signed()/unsigned() reinterpret
-#include "decl_facts.hpp"  // lookup() recovers the reinterpret input's declared width
+#include "wrap_sat.hpp"  // wrap_to_signed/unsigned for signed()/unsigned() reinterpret
 
 // Registered once here (not in the header) to avoid duplicate-registration
 // errors when multiple TUs include upass_constprop.hpp.
 static upass::uPass_plugin cprop("constprop", upass::uPass_wrapper<uPass_constprop>::get_upass, {"attributes", "typecheck"});
+
+// Range metadata and the materialized tuple must describe the same sequence.
+// Large ranges retain metadata for loop consumers without allocating a tuple.
+static std::shared_ptr<Bundle> make_range_bundle(std::string_view name, const Dlop& start, const Dlop& end, const Dlop& step) {
+  auto bundle = std::make_shared<Bundle>(std::string(name));
+  bundle->set_attr("rng_s", start);
+  bundle->set_attr("rng_e", end);
+  bundle->set_attr("rng_step", step);
+  if (!start.is_integer() || !end.is_integer() || !step.is_integer() || start.has_unknowns() || end.has_unknowns()
+      || step.has_unknowns() || step.is_negative() || step.is_known_zero()) {
+    return bundle;
+  }
+  const Dlop span = *end.sub_op(start);
+  if (span.is_negative()) {
+    bundle->set_value_kind(upass::Kind::tuple);
+    return bundle;
+  }
+  const Dlop count = *span.div_op(step)->add_op(*Dlop::create_integer(1));
+  if (!count.is_just_i64() || count.to_just_i64() > 4096) {
+    return bundle;
+  }
+  bundle->set_value_kind(upass::Kind::tuple);
+  Dlop value = start;
+  for (int64_t pos = 0; pos < count.to_just_i64(); ++pos) {
+    bundle->set(bundle_path::of_string(std::to_string(pos)), value);
+    value = *value.add_op(step);
+  }
+  return bundle;
+}
 
 // Coerce one value to its text-form Dlop. Mirrors Pyrope's `string()` cast:
 //   nil    → "nil"
@@ -43,8 +74,13 @@ static Dlop stringify_one(const Dlop& v) {
     return v;
   }
   // `string(bool)` renders the literal word, not the bool's signed all-ones
-  // decimal ("-1"/"0"). (2f-string_cast ruling.)
-  if (v.is_bool() && !v.has_unknowns()) {
+  // decimal ("-1"/"0"). (2f-string_cast ruling.) A bool whose bit is UNKNOWN
+  // (a compare over an `0sb?` operand) is neither word — spell it `0ub?` rather
+  // than letting to_pyrope's Boolean branch claim "false".
+  if (v.is_bool()) {
+    if (v.has_unknowns()) {
+      return *Dlop::from_string("0ub?");
+    }
     return *Dlop::from_string(v.is_known_true() ? "true" : "false");
   }
   // Render the value to a string Dlop (the result feeds a TEXT concat in
@@ -55,8 +91,11 @@ static Dlop stringify_one(const Dlop& v) {
 }
 
 // Stringify each entry in `vals` and text-concat them. Returns nullopt if any
-// entry is invalid or has unknown bits (caller should bail and retry later);
-// returns an empty string Dlop for an empty input.
+// entry is invalid (caller should bail and retry later); returns an empty string
+// Dlop for an empty input. An entry with UNKNOWN bits is NOT a bail: `0sb?` is a
+// concrete comptime value, it just renders as its Pyrope spelling (`0ub????`) —
+// unlike `known_const_scalar`, which refuses unknowns because inlining them into
+// hardware is LEC-breaking; text has no such hazard.
 static std::optional<Dlop> stringify_concat_trivials(const std::vector<Dlop>& vals) {
   if (vals.empty()) {
     return *Dlop::from_string("");
@@ -64,7 +103,7 @@ static std::optional<Dlop> stringify_concat_trivials(const std::vector<Dlop>& va
   Dlop acc;
   bool first = true;
   for (const auto& v : vals) {
-    if (v.is_invalid() || v.has_unknowns()) {
+    if (v.is_invalid()) {
       return std::nullopt;
     }
     auto s = stringify_one(v);
@@ -100,8 +139,9 @@ static std::optional<Dlop> stringify_bundle(const std::shared_ptr<Bundle const>&
       acc = *acc.concat_op(*Dlop::from_string("="));
     }
     if (tl.leaf_count == 1 && !tl.has_leafs) {  // a bare scalar leaf
-      if (tl.scalar.is_invalid() || tl.scalar.has_unknowns()) {
-        return std::nullopt;  // a runtime / x-carrying field cannot be stringified
+      if (tl.scalar.is_invalid()) {
+        return std::nullopt;  // a runtime field cannot be stringified (an
+                              // x-carrying one can: it spells as `0ub????`)
       }
       acc = *acc.concat_op(stringify_one(tl.scalar));
     } else {  // a sub-bundle: recurse into it
@@ -119,7 +159,10 @@ static std::optional<Dlop> stringify_bundle(const std::shared_ptr<Bundle const>&
 
 // Group an MSB-first binary string (from Dlop::to_binary) into a power-of-two
 // base, `bpd` bits per digit, dropping leading zeros. Used by the `:b`/`:o`/
-// `:x`/`:X` interpolation specs so they share one two's-complement bit view.
+// `:h`/`:x`/`:X` interpolation specs so they share one two's-complement bit view.
+// An unknown bit (`?`, from an `0sb?`-carrying value) poisons its whole digit —
+// a nibble with any unknown bit has no hex digit, so it renders `?` (Verilog's
+// `%h` convention, spelled with Pyrope's `?`).
 static std::string bits_to_grouped(std::string_view bits, int bpd, bool upper) {
   static constexpr std::string_view lo     = "0123456789abcdef";
   static constexpr std::string_view hi     = "0123456789ABCDEF";
@@ -131,18 +174,23 @@ static std::string bits_to_grouped(std::string_view bits, int bpd, bool upper) {
   padded.append(bits);
   std::string out;
   for (size_t i = 0; i < padded.size(); i += static_cast<size_t>(bpd)) {
-    unsigned v = 0;
+    unsigned v   = 0;
+    bool     unk = false;
     for (int k = 0; k < bpd; ++k) {
-      v = (v << 1) | (padded[i + static_cast<size_t>(k)] == '1' ? 1U : 0U);
+      const char c  = padded[i + static_cast<size_t>(k)];
+      unk          |= (c == '?');
+      v             = (v << 1) | (c == '1' ? 1U : 0U);
     }
-    out.push_back(digits[v]);
+    out.push_back(unk ? '?' : digits[v]);
   }
+  // Leading-zero drop stops at the first `?` too (find_first_not_of('0')), so an
+  // all-unknown value keeps every digit rather than collapsing to "0".
   auto first = out.find_first_not_of('0');
   return first == std::string::npos ? std::string("0") : out.substr(first);
 }
 
 // Render `v` per a std::format-style presentation spec for `"{expr:spec}"`
-// interpolation (the `__fmt(value, 'spec')` cast emitted by prp2lnast). b/o/x/X
+// interpolation (the `__fmt(value, 'spec')` cast emitted by prp2lnast). b/o/h/x/X
 // share the two's-complement bit view (no prefix; matches std::format for
 // non-negative values, e.g. 16 → "10000"/"20"/"10"); d (or empty) is signed
 // decimal. Strings/nil keep their stringify_one rendering. Unsupported specs
@@ -211,7 +259,7 @@ static std::string format_interp_value(const Dlop& v, std::string_view spec, con
   if (v.is_string()) {
     upass::error(span, "string-interpolation format spec ':{}' cannot apply to a string value\n", spec);
   }
-  // Grammar: `[width][b|o|x|X|d][s]` — rendered through the SHARED Dlop
+  // Grammar: `[width][b|o|h|x|X|d][s]` — rendered through the SHARED Dlop
   // formatting API (Slop-parity: to_decimal/to_hex/to_binary with digits+sep),
   // so comptime interpolation and the sim driver's runtime interpolation are
   // the same algorithm over the two value classes. `width` zero-pads (after
@@ -233,46 +281,79 @@ static std::string format_interp_value(const Dlop& v, std::string_view spec, con
     sep = true;
     ++i;
   }
-  const int   w   = static_cast<int>(width);
+  const int   w = static_cast<int>(width);
   std::string out;
   bool        bad = i != spec.size();
+  // An `0sb?`-carrying value is a comptime value like any other, it just has no
+  // digit for the unknown bits. `:b` renders them straight through (Dlop's
+  // to_binary already emits `?`); `:o`/`:h`/`:x`/`:X` poison the enclosing digit
+  // via bits_to_grouped; `:d` has no positional rendering at all, so it falls
+  // back to the value's Pyrope spelling (`0ub????`) — the same text a bare
+  // `"{v}"` produces — and skips the pad/group cosmetics.
+  const bool  unk = v.has_unknowns();
   if (!bad) {
     switch (base) {
-      case 'd': out = v.to_decimal(w, sep); break;
+      case 'd': out = unk ? v.to_pyrope() : v.to_decimal(w, sep); break;
       case 'b': out = v.to_binary(w, sep); break;
-      case 'x': out = v.to_hex(w, sep, false); break;
-      case 'X': out = v.to_hex(w, sep, true); break;
+      case 'h':
+      case 'x': out = unk ? bits_to_grouped(v.to_binary(), 4, false) : v.to_hex(w, sep, false); break;
+      case 'X': out = unk ? bits_to_grouped(v.to_binary(), 4, true) : v.to_hex(w, sep, true); break;
       case 'o':  // octal has no Slop/Dlop renderer; regroup the bit string
-        out = Dlop::pad_digits(bits_to_grouped(v.to_binary(), 3, false), w);
-        if (sep) {
-          out = Dlop::group_digits(std::move(out), 4);
-        }
+        out = bits_to_grouped(v.to_binary(), 3, false);
         break;
-      default : bad = true;
+      default: bad = true;
+    }
+    // Shared width/separator cosmetics for the bit-regrouped bases (`:o` always,
+    // `:h`/`:x`/`:X` on the unknown path); the Dlop renderers do their own.
+    if (!bad && (base == 'o' || (unk && base != 'd' && base != 'b'))) {
+      out = Dlop::pad_digits(std::move(out), w);
+      if (sep) {
+        out = Dlop::group_digits(std::move(out), 4);
+      }
     }
   }
   if (bad) {
-    upass::error(span, "unsupported string-interpolation format spec ':{}' (grammar: [width][b/o/x/X/d][s])\n", spec);
+    upass::error(span, "unsupported string-interpolation format spec ':{}' (grammar: [width][b/o/h/x/X/d][s])\n", spec);
   }
   return out;
 }
 
 // get_mask is Pyrope's default-zext bit-select (the "force" operator): with a
 // non-negative mask the extracted bits are packed LSB-first as an UNSIGNED
-// value, so the fold is never negative. Dlop::get_mask_op carries a single-bit
-// quirk that returns the signed 1-bit -1 for a lone selected SET bit; per the
-// spec `#[N]` (and `#[n..=n]`, `#zext[n]`) zero-extends — a set bit reads as the
-// unsigned 1 — and only the explicit `#sext` form may be negative. Restore the
-// unsigned value here so the comptime fold matches the RTL (cgen emits a plain
-// `a[N]` part-select) and the [0,1] bitwidth. A positive mask can only fold
-// negative via this quirk (the lone bit's zext value is 1); unknown and
-// negative-mask (carve-out) results pass through untouched.
-static Dlop get_mask_zext(const Dlop& value, const Dlop& mask) {
-  Dlop r = *value.get_mask_op(mask);
-  if (!mask.is_negative() && r.is_integer() && !r.has_unknowns() && r.is_negative()) {
-    return *Dlop::create_integer(1);
+// value, so the fold is never negative (only the explicit `#sext` form may be).
+// The range-based mask evaluator produces that; this wrapper exists only for the
+// X-plane rebuild below.
+static Dlop get_mask_x_plane(const Dlop& value, const Dlop& mask) {
+  // Dlop's multiword get_mask path historically lost the extra (unknown) plane
+  // for a wide positive mask: selecting bits 361..721 from a u1008 all-X value
+  // returned 361 known ones.  Besides being a needlessly hostile X refinement,
+  // that makes a Verilog -> Pyrope round trip disagree with the source under
+  // Yosys/lgcheck (the source keeps `?`, the folded Pyrope commits to ones).
+  //
+  // Rebuild positive-mask selections containing X bit-by-bit.  This is the
+  // exact get_mask contract (selected source positions packed LSB-first), and
+  // it uses Dlop's sign-extending bit accessors, so an unknown sign bit remains
+  // unknown above the stored words while a known 0/1 sign extends normally.
+  // Known-only values stay on Dlop's faster path; negative-mask carve-outs keep
+  // their existing specialized semantics.
+  if (value.has_unknowns() && !mask.has_unknowns() && !mask.is_negative()) {
+    std::string low_to_high;
+    const int   mask_bits = mask.get_signed_bits();
+    low_to_high.reserve(static_cast<size_t>(std::max(mask_bits, 0)));
+    for (int pos = 0; pos < mask_bits; ++pos) {
+      if (!mask.bit_test(pos)) {
+        continue;
+      }
+      low_to_high.push_back(value.unknown_bit_test(pos) ? '?' : (value.bit_test(pos) ? '1' : '0'));
+    }
+    if (low_to_high.empty()) {
+      return *Dlop::create_integer(0);
+    }
+    std::reverse(low_to_high.begin(), low_to_high.end());
+    return *Dlop::from_pyrope(std::string{"0ub"} + low_to_high);
   }
-  return r;
+
+  return livehd::eval_get_mask(value, mask);
 }
 
 Dlop uPass_constprop::apply_range_mask(const Dlop& value, const Dlop& start, const Dlop& end) {
@@ -325,7 +406,7 @@ Dlop uPass_constprop::apply_range_mask(const Dlop& value, const Dlop& start, con
     return *Dlop::create_integer(0);  // negative-width (empty) slice — degenerate
   }
   auto mask = one->shl_op(*width)->sub_op(*one)->shl_op(start);
-  return get_mask_zext(value, *mask);
+  return get_mask_x_plane(value, *mask);
 }
 
 uPass_constprop::uPass_constprop(std::shared_ptr<upass::Lnast_manager>& _lm) : uPass(_lm) {
@@ -334,13 +415,124 @@ uPass_constprop::uPass_constprop(std::shared_ptr<upass::Lnast_manager>& _lm) : u
 }
 
 void uPass_constprop::end_run() {
+  // 2c-shortcircuit — a parked illegal-operation diagnostic that no `and`/`or`
+  // ever discharged belongs to an operand that WAS evaluated. Report it now,
+  // with the span captured at the illegal op, so the message/severity/location
+  // are byte-identical to the old eager emit.
+  for (auto& d : pending_illegal_) {
+    if (d) {
+      livehd::diag::sink().emit(std::move(*d));
+    }
+  }
+  pending_illegal_.clear();
+  poison_of_.clear();
   if (pending_unsigned_overflow_msg_) {
     throw std::runtime_error(*pending_unsigned_overflow_msg_);
   }
 }
 
+void uPass_constprop::defer_or_emit_illegal(std::string_view dst, livehd::diag::Diagnostic d) {
+  // A NAMED destination is a statement, and statements are always evaluated
+  // (02-basics.md, "Evaluation order") — report immediately, exactly as before.
+  // Only a `%` tmp is an operand sub-expression an `and`/`or` may skip.
+  if (dst.empty() || !Lnast::is_tmp(dst)) {
+    livehd::diag::sink().emit(std::move(d));
+    return;
+  }
+  pending_illegal_.emplace_back(std::move(d));
+  poison_of_[std::string(dst)].insert(pending_illegal_.size() - 1);
+}
+
+void uPass_constprop::propagate_poison(std::string_view dst, upass::Src_span src) {
+  if (poison_of_.empty() || dst.empty() || !Lnast::is_tmp(dst)) {
+    return;  // nothing parked, or the result is a statement-level name
+  }
+  // Gather first, insert after: inserting `dst` can rehash the map and
+  // invalidate an iterator held over the operand lookups.
+  absl::flat_hash_set<size_t> ids;
+  for (const auto& o : src) {
+    if (o.name.empty()) {
+      continue;
+    }
+    if (const auto it = poison_of_.find(std::string(o.name)); it != poison_of_.end()) {
+      ids.insert(it->second.begin(), it->second.end());
+    }
+  }
+  if (!ids.empty()) {
+    auto& into = poison_of_[std::string(dst)];
+    into.insert(ids.begin(), ids.end());
+  }
+}
+
+void uPass_constprop::discharge_poison(upass::Src_span src, size_t from) {
+  for (size_t j = from; j < src.size(); ++j) {
+    if (src[j].name.empty()) {
+      continue;
+    }
+    const auto it = poison_of_.find(std::string(src[j].name));
+    if (it == poison_of_.end()) {
+      continue;
+    }
+    // Retire the diagnostic outright; do NOT try to keep it alive for "some
+    // other reader of this tmp".
+    //
+    // The poison propagates FORWARD (mod -> eq -> log_and -> log_or), so by the
+    // time a short-circuit discharges, every tmp along the chain holds the id —
+    // a "does anyone else still hold it?" refcount is therefore ALWAYS true and
+    // would defeat the discharge entirely (measured: it re-reported all six
+    // truth-table cases).
+    //
+    // One discharge is definitive because a parked id only ever rides a `%`
+    // tmp, and those are single-use by construction: prp2lnast mints a fresh
+    // tmp per expression node. A value a user can read twice has a NAME, and
+    // defer_or_emit_illegal reports a named dst immediately rather than parking
+    // it (errors/shortcircuit_named_stmt.prp pins that).
+    for (const auto id : it->second) {
+      if (id < pending_illegal_.size()) {
+        pending_illegal_[id].reset();
+      }
+    }
+  }
+}
+
+bool uPass_constprop::short_circuit_logical(std::string_view dst_name, upass::Src_span src, bool is_and) {
+  if (dst_name.empty() || src.size() < 2) {
+    return false;
+  }
+  for (size_t i = 0; i < src.size(); ++i) {
+    const Dlop v = operand_value(src[i]);
+    // HARD CONSTRAINT: stop at the first operand with no comptime value and
+    // never look past it. That is real short-circuit semantics (an operand
+    // after an evaluated one is itself evaluated), and it is also what keeps
+    // clock gating intact: in `clk and enable` operand 0 is a runtime port, so
+    // the scan breaks at i==0 and the node keeps exactly as before. Scanning
+    // the whole list for a decisive operand instead would fold
+    // `clk and <comptime false>` to a constant 0 and silently delete every ICG
+    // (equiv/latch_icg.prp, sim/chained_clock_gates.prp, …).
+    if (!is_numeric(v) || v.is_nil() || v.has_unknowns()) {
+      return false;
+    }
+    const bool decisive = is_and ? v.is_known_false() : v.is_known_true();
+    if (!decisive) {
+      continue;
+    }
+    if (i + 1 >= src.size()) {
+      return false;  // last operand: the plain left-fold already gives this answer
+    }
+    discharge_poison(src, i + 1);  // the skipped operands are not evaluated
+    store_trivial(dst_name, *Dlop::from_pyrope(is_and ? "false" : "true"));
+    return true;
+  }
+  return false;
+}
+
 void uPass_constprop::check_unsigned_positive_overflow(std::string_view lhs, const Dlop& value) {
-  if (value.is_invalid() || value.is_nil() || value.is_string() || value.has_unknowns() || value.is_negative()) {
+  // Compiler temporaries can inherit an operand's declared facts while an
+  // if-expression is being lowered.  Those facts are not a declaration on
+  // the temporary: sibling arms may legally be wider, and the typed user
+  // destination is checked after the arms merge.
+  if (Lnast::is_tmp(lhs) || value.is_invalid() || value.is_nil() || value.is_string() || value.has_unknowns()
+      || value.is_negative()) {
     return;
   }
   const auto umax = decl_unsigned_max_of(lhs);
@@ -526,6 +718,18 @@ void uPass_constprop::record_field_write(std::string_view dst_name, upass::Src_s
   st().field_touched.insert(Symbol_table::field_touch_key(lm->get_top_module_name(), path));
 }
 
+// HLOP reductions return Boolean values. Pyrope bit operations expose an
+// unsigned integer bit, including an unsigned unknown when it cannot fold.
+static Dlop reduction_integer(const Dlop& value) {
+  if (!value.is_bool()) {
+    return value;
+  }
+  if (value.has_unknowns()) {
+    return *Dlop::from_pyrope("0ub?");
+  }
+  return *Dlop::create_integer(value.is_known_true() ? 1 : 0);
+}
+
 upass::Vote uPass_constprop::process_store(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   // Route by src arity; the bodies walk the node
   // under the cursor (store payloads include subtree initializers that the
@@ -538,7 +742,7 @@ upass::Vote uPass_constprop::process_store(std::string_view dst_name, Bundle& ds
   if (!dst_name.empty()) {
     st().uninitialized.erase(std::string(dst_name));
   }
-  note_var_span(dst_name);  // store target, at its write line (covers the tuple_set path)
+  note_var_span(dst_name);            // store target, at its write line (covers the tuple_set path)
   record_field_write(dst_name, src);  // BEFORE the wire/reg skip: those stores are the ones constprop never binds
   // A store to a reg-declared name (scalar reg OR a `reg` memory/array) is a
   // next-state write consumed by tolg; constprop must not symbolically bind it
@@ -552,7 +756,8 @@ upass::Vote uPass_constprop::process_store(std::string_view dst_name, Bundle& ds
   // 2c-wire — a store to a wire is its single combinational driver, consumed by
   // tolg as the net's value; never symbolically bind it (reads are
   // position-independent runtime, resolved to the buffered net by tolg).
-  if (decl_mode_of(dst_name) == upass::Mode::reg_kind || decl_mode_of(dst_name) == upass::Mode::wire_kind) {
+  const auto dst_mode = decl_mode_of(dst_name);
+  if (dst_mode == upass::Mode::reg_kind || dst_mode == upass::Mode::wire_kind) {
     return classify_vote();
   }
   if (src.size() <= 1) {
@@ -576,7 +781,8 @@ void uPass_constprop::process_assign() {
   //
   // 2c-wire — a store to a wire is its single combinational driver: tolg owns it
   // and reads are position-independent, so never bind it here (same as reg).
-  if (decl_mode_of(lhs_text) == upass::Mode::reg_kind || decl_mode_of(lhs_text) == upass::Mode::wire_kind) {
+  const auto lhs_mode = decl_mode_of(lhs_text);
+  if (lhs_mode == upass::Mode::reg_kind || lhs_mode == upass::Mode::wire_kind) {
     move_to_parent();
     return;
   }
@@ -599,6 +805,15 @@ void uPass_constprop::process_assign() {
     }
     auto rhs_bundle = current_bundle();
     if (rhs_bundle) {
+      // A set_mask over an array's packed bit view produces a scalar SSA temp,
+      // followed by `store(array, temp)`. Preserve the destination's typed
+      // positional shape and scatter that packed scalar back into its lanes;
+      // aliasing the scalar bundle wholesale would erase the array after the
+      // first bit-view write.
+      if (const auto scalar = rhs_bundle->scalar(); scalar && scatter_positional_array(lhs_text, *scalar)) {
+        move_to_parent();
+        return;
+      }
       // Type-shape preservation: when LHS is a *purely-named* bundle
       // (the shape declared by `mut foo:(x=…, y=…) = …` — no unnamed
       // slots) and RHS is a pure positional tuple, bind RHS unnamed
@@ -641,6 +856,25 @@ void uPass_constprop::process_assign() {
                 base_named.emplace_back(tl.name);
               }
             }
+            auto overlay = [&](const std::string& key, const Bundle::Entry& value) {
+              const auto  path     = bundle_path::of_string(key);
+              const auto& declared = merged->get_entry(path);
+              auto        entry    = value;
+              if (declared.kind != upass::Kind::unknown) {
+                entry.kind = declared.kind;
+              }
+              if (!declared.decl_max.is_invalid()) {
+                entry.decl_max = declared.decl_max;
+              }
+              if (!declared.decl_min.is_invalid()) {
+                entry.decl_min = declared.decl_min;
+              }
+              if (declared.mode != upass::Mode::unknown) {
+                entry.mode = declared.mode;
+              }
+              entry.comptime = entry.comptime || declared.comptime;
+              merged->set(path, std::move(entry));
+            };
             size_t pidx = 0;
             for (const auto& [rk, rep] : rhs_bundle->non_attr_entries()) {
               bool numeric = !rk.empty();
@@ -652,13 +886,13 @@ void uPass_constprop::process_assign() {
               }
               if (numeric) {  // positional init entry → bind to next named slot
                 if (pidx < base_named.size()) {
-                  merged->set(bundle_path::of_string(base_named[pidx]), rep);
+                  overlay(base_named[pidx], rep);
                   ++pidx;
                 } else {
-                  merged->set(bundle_path::of_string(rk), rep);
+                  overlay(rk, rep);
                 }
               } else {  // named init field → overlay by name
-                merged->set(bundle_path::of_string(rk), rep);
+                overlay(rk, rep);
               }
             }
             st().set(lhs_text, merged);
@@ -789,7 +1023,7 @@ void uPass_constprop::process_assign() {
     // here we handle the nil/default case. First write only (no value yet), bare
     // var, never over an enum-type base (an enum value is one entry, not the
     // table of entries).
-    if (v.is_nil() && lhs_text.find('.') == std::string_view::npos && st().get_trivial(lhs_text).is_invalid()) {
+    if (v.is_nil() && bundle_key::is_single_level(lhs_text) && st().get_trivial(lhs_text).is_invalid()) {
       if (const auto nt = decl_type_name_of(lhs_text); !nt.empty()) {
         auto existing = st().get_bundle(lhs_text);
         if (!existing || existing->non_attr_entries().empty()) {
@@ -810,17 +1044,36 @@ void uPass_constprop::process_assign() {
     // on the var's FIRST scalar write (the declaration's initializer), so
     // constprop's own folding of later reads sees the unsigned value. The
     // gate mirrors the attributes side: the value must sign-extend a KNOWN 1
-    // past the declared width (`bit_test`+!`unknown_bit_test` — `0sb?` keeps
-    // its natural width), and `!st().has_trivial` restricts it to the first
-    // write so per-statement wrap/sat reassignments stay in control.
+    // past the declared width, and `!st().has_trivial` restricts it to the
+    // first write so per-statement wrap/sat reassignments stay in control. An
+    // UNKNOWN sign extension is the separate width-taking rule below.
     // Reinterpret a known-negative first-write literal to its
     // unsigned pattern via `v & max` (for uN, max is the N-bit all-ones mask).
     // No width/to_i. `is_negative()` is false for an unknown sign bit (`0sb?`),
-    // so that case keeps its natural width (see valid_simple); a known-1 sign
-    // bit (incl. interior-unknown patterns like `0sb1?01_?000`) is reinterpreted.
+    // which the width-taking fill below handles instead; a known-1 sign bit
+    // (incl. interior-unknown patterns like `0sb1?01_?000`) is reinterpreted.
     if (const auto umax = decl_unsigned_max_of(lhs_text);
         !umax.is_invalid() && st().get_trivial(lhs_text).is_invalid() && v.is_negative()) {
       v = *v.and_op(umax);
+    }
+    // An UNKNOWN sign extension (`0sb?`, `0sb?1`) is the WIDTH-TAKING wildcard:
+    // the `?` fills the destination's DECLARED width and stops there, so
+    // `x:u48 = 0sb?` is exactly `x = 0ub` + 48 `?`. A variable with no declared
+    // width (`mut z = 0sb?`) has no envelope to fill and stays the 1-bit signed
+    // unknown it is written as. Unlike the known-negative reinterpret above this
+    // fires on EVERY write, not just the first: an all-unknown value carries no
+    // magnitude for a wrap/sat policy to clamp, so nothing is taken out from
+    // under those.
+    //
+    // Without the fill the value keeps an unknown SIGN, which Dlop can only
+    // bound conservatively (get_signed_bits() -> 65 for ANY sign-unknown value): every
+    // net carrying an x-poison came out 65 bits wide, and a destination wider
+    // than that read 0 above bit 64 instead of `?`.
+    if (const auto umax = decl_unsigned_max_of(lhs_text); !umax.is_invalid() && !umax.has_unknowns() && v.is_integer()) {
+      const int w = umax.get_payload_bits();  // uN's max is 2^N-1
+      if (w > 0 && v.unknown_bit_test(w)) {
+        v = *v.and_op(umax);
+      }
     }
     if (st().get_trivial(lhs_text).is_invalid()) {
       check_unsigned_positive_overflow(lhs_text, v);
@@ -832,7 +1085,7 @@ void uPass_constprop::process_assign() {
     // `t` keeps reading as a tuple. Replace the bundle wholesale (st().set with a
     // bare-var key swaps the whole bundle) so `t == nil` sees nil. Bare-var LHS
     // only (no '.') — a field write like `t.0 = …` must keep the surrounding shape.
-    if (lhs_text.find('.') == std::string_view::npos) {
+    if (bundle_key::is_single_level(lhs_text)) {  // backtick-aware: `` `a.b` `` is a bare var
       if (auto b = st().get_bundle(lhs_text); b && !b->is_empty() && !b->is_scalar()) {
         auto fresh = std::make_shared<Bundle>(std::string(lhs_text));
         fresh->set(v);
@@ -875,15 +1128,18 @@ void uPass_constprop::process_declare() {
   note_var_span(current_text());  // the declared var, at its declaration line
   // The runner's declare bake already wrote mode/type_name/decl
   // ranges onto the binding (declare_bare created it) — EXCEPT for a dotted
-  // wire leaf (`declare(io.a,…,wire)`, the uPass_detuple split of a bundle
-  // wire): its root was never declared, so the bake drops the facts and no
-  // binding ever answers for the field. Record those here — they are the
-  // declared-field enumeration for the unset-unused-field warning (a leaf
-  // never read or written has no other trace in the symbol table).
-  if (const auto var = current_text(); var.find('.') != std::string_view::npos && var[0] != '%') {
+  // wire or mut leaf: its root may never have been declared, so the bake
+  // drops the facts and no binding answers for the field. Retain these modes
+  // so wire drivers and mutable defaults survive constant folding. The wire
+  // fields also enumerate declarations for the unset-unused-field warning.
+  if (const auto var = current_text(); !bundle_key::is_single_level(var) && var[0] != '%') {
     std::string path(var);
-    if (move_to_sibling() && move_to_sibling() && is_type(Lnast_ntype::Lnast_ntype_const) && current_text() == "wire") {
-      declared_wire_fields_.insert(std::move(path));
+    if (move_to_sibling() && move_to_sibling() && is_type(Lnast_ntype::Lnast_ntype_const)) {
+      if (current_text() == "wire") {
+        declared_wire_fields_.insert(std::move(path));
+      } else if (current_text() == "mut") {
+        declared_mut_fields_.insert(std::move(path));
+      }
     }
   }
   move_to_parent();
@@ -999,7 +1255,7 @@ upass::Vote uPass_constprop::process_mult(std::string_view dst_name, Bundle& dst
         if (r.is_invalid()) {
           return;
         }
-        if (static_cast<long long>(r.get_bits()) + n.get_bits() > kMaxFoldBits) {
+        if (static_cast<long long>(r.get_signed_bits()) + n.get_signed_bits() > kMaxFoldBits) {
           r = Dlop{};  // invalid -> store skipped, Mult kept structural
           return;
         }
@@ -1052,8 +1308,7 @@ bool uPass_constprop::report_nil_operand(upass::Src_span src) {
     // tolg wires the real producer. A user's `const a = nil` is not seeded here.
     // EXCEPTION: a still-`uninitialized` scalar output seed (read in an op before
     // its first write) IS a genuine read-before-write — do not skip it.
-    if (!o.name.empty() && st().nil_seeded.contains(std::string(o.name))
-        && !st().uninitialized.contains(std::string(o.name))) {
+    if (!o.name.empty() && st().nil_seeded.contains(std::string(o.name)) && !st().uninitialized.contains(std::string(o.name))) {
       continue;
     }
     if (operand_value(o).is_nil()) {
@@ -1064,7 +1319,8 @@ bool uPass_constprop::report_nil_operand(upass::Src_span src) {
           .pass     = "upass.constprop",
           .message  = "nil used as an operand of a non-equality operation",
           .span     = lm->current_span(),
-          .hint = "nil is only valid in `==`/`!=` or a direct assignment; it cannot feed an arithmetic/logic/shift/compare/reduce operator",
+          .hint = "nil is only valid in `==`/`!=` or a direct assignment; it cannot feed an arithmetic/logic/shift/compare/reduce "
+                  "operator",
       });
       return true;
     }
@@ -1081,15 +1337,19 @@ upass::Vote uPass_constprop::process_div(std::string_view dst_name, Bundle& dst,
   for (size_t i = 1; i < src.size(); ++i) {
     const Dlop d = operand_value(src[i]);
     if (d.is_integer() && !d.has_unknowns() && d.is_known_zero()) {
-      livehd::diag::sink().emit(livehd::diag::Diagnostic{
-          .severity = livehd::diag::Severity::error,
-          .code     = "div-by-zero",
-          .category = "type",
-          .pass     = "upass.constprop",
-          .message  = "division by zero is an illegal operation (the result is nil)",
-          .span     = lm->current_span(),
-          .hint     = "guard the divisor so it is non-zero at compile time",
-      });
+      // 2c-shortcircuit: park it when this is an operand sub-expression — an
+      // enclosing `and`/`or` may prove it is never evaluated. end_run reports
+      // whatever is left.
+      defer_or_emit_illegal(dst_name,
+                            livehd::diag::Diagnostic{
+                                .severity = livehd::diag::Severity::error,
+                                .code     = "div-by-zero",
+                                .category = "type",
+                                .pass     = "upass.constprop",
+                                .message  = "division by zero is an illegal operation (the result is nil)",
+                                .span     = lm->current_span(),
+                                .hint     = "guard the divisor so it is non-zero at compile time",
+                            });
       return classify_vote();  // do not fold/store the nil
     }
   }
@@ -1124,23 +1384,24 @@ upass::Vote uPass_constprop::process_mod(std::string_view dst_name, Bundle& dst,
   for (size_t i = 1; i < src.size(); ++i) {
     const Dlop d = operand_value(src[i]);
     if (d.is_integer() && !d.has_unknowns() && d.is_known_zero()) {
-      livehd::diag::sink().emit(livehd::diag::Diagnostic{
-          .severity = livehd::diag::Severity::error,
-          .code     = "mod-by-zero",
-          .category = "type",
-          .pass     = "upass.constprop",
-          .message  = "modulo by zero is an illegal operation (the result is nil)",
-          .span     = lm->current_span(),
-          .hint     = "guard the divisor so it is non-zero at compile time",
-      });
+      defer_or_emit_illegal(dst_name,
+                            livehd::diag::Diagnostic{
+                                .severity = livehd::diag::Severity::error,
+                                .code     = "mod-by-zero",
+                                .category = "type",
+                                .pass     = "upass.constprop",
+                                .message  = "modulo by zero is an illegal operation (the result is nil)",
+                                .span     = lm->current_span(),
+                                .hint     = "guard the divisor so it is non-zero at compile time",
+                            });
       return classify_vote();  // do not fold/store the nil
     }
   }
-  return push_binary_passthrough(
-      dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return *n1.rem_op(n2); }, /*report_nil=*/true);
+  return push_binary_passthrough(dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return *n1.rem_op(n2); }, /*report_nil=*/true);
 }
 
 upass::Vote uPass_constprop::process_shl(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  propagate_poison(dst_name, src);  // 2c-shortcircuit: this hook bypasses the push_* templates
   // A negative shift amount would hard-assert in Dlop::shln (src2 >= 0), so
   // leave the shl unresolved instead of folding. The diagnostic lives in
   // upass.bitwidth (negative-shift), which sees the amount's derived range —
@@ -1199,6 +1460,7 @@ upass::Vote uPass_constprop::process_shl(std::string_view dst_name, Bundle& dst,
 }
 
 upass::Vote uPass_constprop::process_sra(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  propagate_poison(dst_name, src);  // 2c-shortcircuit: this hook bypasses the push_* templates
   // Same negative-amount rule as process_shl: leave the sra unresolved
   // instead of folding (Dlop::shrn hard-asserts on src2 < 0); the
   // negative-shift diagnostic lives in upass.bitwidth. A nil operand
@@ -1229,17 +1491,6 @@ upass::Vote uPass_constprop::process_sra(std::string_view dst_name, Bundle& dst,
   return classify_vote();
 }
 
-// log_* results are bool-TYPED in Pyrope; Dlop's bitwise ops return integer
-// payloads (true == ~0 == -1). Re-type a known result so downstream
-// bool-sensitive folds (`int(true) == 1`, bool-typed bundle fields) see a
-// real bool instead of `-1`. Unknown/invalid/nil results pass through.
-static Dlop log_result_as_bool(const Dlop& r) {
-  if (r.is_invalid() || r.is_nil() || r.has_unknowns()) {
-    return r;
-  }
-  return *Dlop::from_pyrope(r.is_known_true() ? "true" : "false");
-}
-
 upass::Vote uPass_constprop::process_log_and(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   // Pyrope's type rule: `and` operands must already be bool — with bool
   // operands, bitwise AND equals logical AND; Dlop handles unknowns. A nil
@@ -1247,28 +1498,38 @@ upass::Vote uPass_constprop::process_log_and(std::string_view dst_name, Bundle& 
   // cassert/attribute-discharge combinators (`cassert(x.[debug] and …)` over an
   // unset/deferred attr), so nil propagates (keeps) for the verifier to resolve.
   (void)dst;
-  return push_nary_passthrough(dst_name, src,
-                               [](Dlop n1, Dlop n2) -> Dlop { return log_result_as_bool(*n1.and_op(n2)); });
+  // 2c-shortcircuit (02-basics.md, "Evaluation order"): a decisive operand
+  // settles the result and the operands after it are NOT evaluated, so an
+  // illegal comptime op parked in them is discharged rather than reported.
+  if (short_circuit_logical(dst_name, src, /*is_and=*/true)) {
+    return classify_vote();
+  }
+  // Bool operands keep the Boolean tag through Dlop::and_op (0/1 bitwise == logical).
+  return push_nary_passthrough(dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return *n1.and_op(n2); });
 }
 
 upass::Vote uPass_constprop::process_log_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
-  return push_nary_passthrough(dst_name, src,
-                               [](Dlop n1, Dlop n2) -> Dlop { return log_result_as_bool(*n1.or_op(n2)); });
+  if (short_circuit_logical(dst_name, src, /*is_and=*/false)) {  // 2c-shortcircuit, see process_log_and
+    return classify_vote();
+  }
+  return push_nary_passthrough(dst_name, src, [](Dlop n1, Dlop n2) -> Dlop { return *n1.or_op(n2); });
 }
 
 upass::Vote uPass_constprop::process_log_not(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
-  // `not` operand must be bool; bitwise NOT over a 1-bit bool flips it.
-  // nil stays nil (the cassert escape hatch for unset attrs), so a nil operand
-  // is NOT an error (nil_operand_error=false) — it propagates for the verifier.
+  // `not` operand must be bool: Dlop::lnot_op is the LOGICAL not (`x == false`,
+  // the same EQ(x, 0) tolg lowers it to), never the bitwise not_op. nil stays
+  // nil (the cassert escape hatch for unset attrs), so a nil operand is NOT an
+  // error (nil_operand_error=false) — it propagates for the verifier.
   (void)dst;
   return push_unary(
-      dst_name, src,
+      dst_name,
+      src,
       [](Dlop& r) {
         if (r.is_nil()) {
           return;
         }
-        r = log_result_as_bool(*r.not_op());
+        r = *r.lnot_op();
       },
       /*nil_operand_error=*/false);
 }
@@ -1449,22 +1710,20 @@ static bool structural_does(const std::shared_ptr<Bundle const>& a, const std::s
 // short-circuit.
 template <bool Negate>
 upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass::Src_span srcs) {
-  // Resolve an operand to one of three states:
+  // Resolve an operand to a bundle, a known scalar, or an invalid scalar:
   //   - bundle: a tracked tuple (multi-entry or non-scalar wrapper)
   //   - scalar: a known Dlop (default is invalid; never zero)
-  //   - is_const_nil: literal `nil` const
   // (Reading an undeclared/out-of-scope name is a prp2lnast compile error —
   // check_undefined_reads — so no undeclared-reads-as-nil folding here.)
   struct Operand {
     std::shared_ptr<Bundle const> bundle;
     Dlop                          scalar;
-    bool                          is_const_nil = false;
   };
   // True when THIS unit still has an unresolved import this round: an empty
   // bundle is then ambiguous (genuine empty tuple vs deferred import-dependent
   // value), so resolve() leaves it an invalid scalar (compare stays unknown,
   // deferred) instead of folding it as `()`. Mirrors harvest_pub_values' skip.
-  const auto current_unit       = std::string(lm->get_top_module_name());
+  const auto current_unit        = std::string(lm->get_top_module_name());
   bool       unit_import_pending = false;
   for (const auto& p : pending_imports_) {
     if (p.unit == current_unit) {
@@ -1536,8 +1795,7 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
       }
       // else: no concrete value yet — leave scalar invalid.
     } else {
-      o.scalar       = in.bundle ? in.bundle->lone_trivial() : Dlop();
-      o.is_const_nil = !o.scalar.is_invalid() && o.scalar.is_nil();
+      o.scalar = in.bundle ? in.bundle->lone_trivial() : Dlop();
     }
     return o;
   };
@@ -1549,10 +1807,7 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
   // `!=` has no comptime value — keep the compare structural so tolg lowers it
   // to hardware, instead of folding it to a nil result (which then surfaces as a
   // nil-condition error in `if one(a) == 5 { … }`). Mark the result a runtime
-  // placeholder too so the verifier discharges a `cassert(one(a) == k)` as pass
-  // (it cannot be checked at compile time — same as the nil it used to fold to).
-  // A genuine `x == nil` literal (name-less is_const_nil operand) is NOT seeded,
-  // so it still folds below.
+  // placeholder too. A genuine nil value is not seeded and still folds below.
   if (has_runtime_seed_operand(srcs)) {
     return keep_runtime_seed(dst_name);
   }
@@ -1585,27 +1840,33 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
   Operand a = resolve(srcs[0]);
   Operand b = resolve(srcs[1]);
 
-  // Mixed nil propagation: exactly one operand is a known-nil scalar. The
-  // result is nil (indeterminate) — typically because the var was
-  // mutated under an uncertain arm and Symbol_table::leave_scope
-  // re-pinned it to nil. Both-sides-nil falls through to the regular eq
-  // path (same_repr → known-true). nil-vs-bundle is handled here too
-  // (a bundle never compares equal to nil concretely).
-  const bool a_nil            = (!a.bundle && !a.scalar.is_invalid() && a.scalar.is_nil());
-  const bool b_nil            = (!b.bundle && !b.scalar.is_invalid() && b.scalar.is_nil());
-  const bool a_concrete_other = (a.bundle != nullptr) || (!a.scalar.is_invalid() && !a.scalar.is_nil());
-  const bool b_concrete_other = (b.bundle != nullptr) || (!b.scalar.is_invalid() && !b.scalar.is_nil());
-  if ((a_nil && b_concrete_other) || (b_nil && a_concrete_other)) {
-    // A *literal* `nil` compared against a concrete value is decidable, not
-    // indeterminate: a real value (int, string, or bundle) is never the nil
-    // literal, so `x == nil` folds to known-false and `x != nil` to known-true
-    // — there is nothing special about `nil` on the RHS of an `==`. Only an
-    // *indeterminate* nil (a var re-pinned to nil by Symbol_table::leave_scope
-    // under an uncertain arm, which carries no is_const_nil flag) stays nil so
-    // the cassert discharges as pass (see the verifier nil branch /
-    // attributes_spec §Phase 2).
-    const bool literal_nil_cmp = (a_nil && a.is_const_nil) || (b_nil && b.is_const_nil);
-    store_trivial(var, literal_nil_cmp ? *Dlop::create_bool(Negate) : *Dlop::nil());
+  // Equality is a value comparison, not representation identity. Even two
+  // aliases of the same unknown pattern produce an unknown boolean.
+  auto has_unknown = [](const Operand& value) {
+    if (!value.bundle) {
+      return !value.scalar.is_invalid() && value.scalar.has_unknowns();
+    }
+    for (const auto& [key, entry] : value.bundle->non_attr_entries()) {
+      (void)key;
+      if (!entry.trivial.is_invalid() && entry.trivial.has_unknowns()) {
+        return true;
+      }
+    }
+    return false;
+  };
+  if (has_unknown(a) || has_unknown(b)) {
+    store_trivial(var, *Dlop::unknown_bool());
+    return classify_vote();
+  }
+
+  // A known nil has the same equality semantics whether it came from a
+  // literal, a variable, or an unset attribute. Runtime placeholders were
+  // handled above; treating a named nil as indeterminate silently discharged
+  // contradictory assertions such as `z == 5` and `z == 6`.
+  const bool a_nil = !a.bundle && !a.scalar.is_invalid() && a.scalar.is_nil();
+  const bool b_nil = !b.bundle && !b.scalar.is_invalid() && b.scalar.is_nil();
+  if ((a_nil && (b.bundle || !b.scalar.is_invalid())) || (b_nil && (a.bundle || !a.scalar.is_invalid()))) {
+    store_trivial(var, *Dlop::create_bool(Negate ? a_nil != b_nil : a_nil == b_nil));
     return classify_vote();
   }
 
@@ -1666,11 +1927,8 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
           .hint     = std::format("compare the integer side to zero to get a bool, e.g. `expr {} 0`", suggest)});
       throw std::runtime_error("comparison mixes a bool with an int/string");
     }
-    // same_repr gives bit-identity including unknown positions (so
-    // `0sb? == 0sb?` is known-true). eq_op only reduces to known-false
-    // when neither side carries unknowns; otherwise it returns a 1-bit
-    // unknown which we propagate. `ne` is bitwise-not of `eq`; a 1-bit
-    // unknown inverted is still a 1-bit unknown.
+    // Unknowns were handled above. Identical known representations compare
+    // equal; other known values use the numeric/string equality operation.
     if (a.scalar.same_repr(b.scalar)) {
       result = *Dlop::create_bool(!Negate);
     } else if (same_bits_ignore_type(a.scalar, b.scalar)) {
@@ -1702,10 +1960,12 @@ upass::Vote uPass_constprop::process_eq_ne_impl(std::string_view dst_name, upass
 }
 
 upass::Vote uPass_constprop::process_ne(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  propagate_poison(dst_name, src);  // 2c-shortcircuit: this hook bypasses the push_* templates
   (void)dst;
   return process_eq_ne_impl<true>(dst_name, src);
 }
 upass::Vote uPass_constprop::process_eq(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  propagate_poison(dst_name, src);  // 2c-shortcircuit: this hook bypasses the push_* templates
   (void)dst;
   return process_eq_ne_impl<false>(dst_name, src);
 }
@@ -1790,8 +2050,9 @@ void uPass_constprop::process_stmts_post() {
     // store/tuple_get hooks) — because the bundle entries cannot answer alone:
     // a runtime store leaves an invalid trivial behind, and the derived bw
     // range (kept below as an extra suppressor) bails out past 62 bits.
-    const auto unit    = std::string(lm->get_top_module_name());
-    const auto touched = [&](const std::string& path) { return st().field_touched.contains(Symbol_table::field_touch_key(unit, path)); };
+    const auto unit = std::string(lm->get_top_module_name());
+    const auto touched
+        = [&](const std::string& path) { return st().field_touched.contains(Symbol_table::field_touch_key(unit, path)); };
     const auto emit_unset_unused = [&](const std::string& path, const std::string& var) {
       // Point at the field's declaration/first-touch line: current_span()
       // here has walked off the end of the block and would name the closing
@@ -1871,6 +2132,7 @@ void uPass_constprop::process_stmts_post() {
       }
     }
     declared_wire_fields_.clear();  // per-unit state: the next file walk starts fresh
+    declared_mut_fields_.clear();
   }
   if (st().stack.size() == 2 && !lm->get_lnast()->get_pub_list().empty()) {
     const auto unit = std::string(lm->get_top_module_name());
@@ -2014,7 +2276,7 @@ upass::Vote uPass_constprop::process_tuple_add(std::string_view dst_name, Bundle
     // StrCat below tries a multi-terabyte allocation → std::bad_alloc (seen on
     // Linux; macOS's allocator/layout happened to hide it).
     const std::map<std::string, std::string> entries = it->second;
-    auto&                                     dst_map = st().tuple_slot_ref[dvar];  // may rehash; safe now
+    auto&                                    dst_map = st().tuple_slot_ref[dvar];  // may rehash; safe now
     for (const auto& [sub_key, ref] : entries) {
       dst_map[absl::StrCat(field, ".", sub_key)] = ref;
     }
@@ -2328,16 +2590,16 @@ static bool has_first_level_shape(const std::shared_ptr<Bundle const>& b) {
   return b->has_named_top() || b->has_unnamed_top();
 }
 
-// Decode a primitive type token (`u32`/`s8`/`i4`/`int`/`integer`/
-// `uint`/`unsigned`/`bool`/`string`) in `does`/`equals`/`case` operand
+// Decode a primitive type token (`u32`/`s8`/`i4`/`signed`/`unsigned`/
+// `bool`/`string`) in `does`/`equals`/`case` operand
 // position to its kind+envelope. prp2lnast leaves these as a bare ref (no read
 // site) precisely so this decode can run. Returns nullopt for any other name.
 std::optional<uPass_constprop::Does_operand> uPass_constprop::decode_prim_type_token(std::string_view name) {
   Does_operand op;
   if (name == "bool") {
     op.kind = Does_operand::Kind::boolean;
-    op.min  = *Dlop::create_integer(-1);
-    op.max  = *Dlop::create_integer(0);
+    op.min  = *Dlop::create_integer(0);
+    op.max  = *Dlop::create_integer(1);
     return op;
   }
   if (name == "string") {
@@ -2345,7 +2607,7 @@ std::optional<uPass_constprop::Does_operand> uPass_constprop::decode_prim_type_t
     return op;
   }
   const bool is_u = (name == "uint" || name == "unsigned");
-  const bool is_s = (name == "int" || name == "integer");
+  const bool is_s = (name == "signed" || name == "int" || name == "integer");
   if (is_u || is_s) {
     op.kind    = Does_operand::Kind::integer;
     op.max_inf = true;  // unsized → unbounded above
@@ -2359,7 +2621,7 @@ std::optional<uPass_constprop::Does_operand> uPass_constprop::decode_prim_type_t
   // Width sugar `u<N>` / `s<N>` / `i<N>`: bounds from the bit count.
   if (name.size() >= 2 && (name[0] == 'u' || name[0] == 's' || name[0] == 'i')
       && std::all_of(name.begin() + 1, name.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
-    const int n = std::stoi(std::string(name.substr(1)));
+    const int n        = std::stoi(std::string(name.substr(1)));
     op.kind            = Does_operand::Kind::integer;
     const bool sugar_s = (name[0] != 'u');
     op.max             = upass::max_from_bits(static_cast<uint32_t>(n), sugar_s);
@@ -2387,8 +2649,8 @@ std::optional<uPass_constprop::Does_operand> uPass_constprop::resolve_does_opera
     }
     if (txt == "true" || txt == "false") {
       op.kind      = Does_operand::Kind::boolean;
-      op.min       = *Dlop::create_integer(-1);
-      op.max       = *Dlop::create_integer(0);
+      op.min       = *Dlop::create_integer(0);
+      op.max       = *Dlop::create_integer(1);
       op.value     = *Dlop::create_bool(txt == "true");
       op.has_value = true;
       return op;
@@ -2406,8 +2668,8 @@ std::optional<uPass_constprop::Does_operand> uPass_constprop::resolve_does_opera
     }
     if (v->is_bool()) {
       op.kind      = Does_operand::Kind::boolean;
-      op.min       = *Dlop::create_integer(-1);
-      op.max       = *Dlop::create_integer(0);
+      op.min       = *Dlop::create_integer(0);
+      op.max       = *Dlop::create_integer(1);
       op.value     = *v;
       op.has_value = true;
       return op;
@@ -2476,8 +2738,8 @@ uPass_constprop::Does_operand uPass_constprop::build_scalar_operand(const upass:
   switch (q.kind) {
     case Io_kind::boolean:
       op.kind = Does_operand::Kind::boolean;
-      op.min  = *Dlop::create_integer(-1);
-      op.max  = *Dlop::create_integer(0);
+      op.min  = *Dlop::create_integer(0);
+      op.max  = *Dlop::create_integer(1);
       return op;
     case Io_kind::string: op.kind = Does_operand::Kind::string; return op;
     case Io_kind::integer:
@@ -2509,8 +2771,8 @@ uPass_constprop::Does_operand uPass_constprop::build_scalar_operand(const upass:
       op.kind = Does_operand::Kind::string;
     } else if (folded.is_bool()) {
       op.kind = Does_operand::Kind::boolean;
-      op.min  = *Dlop::create_integer(-1);
-      op.max  = *Dlop::create_integer(0);
+      op.min  = *Dlop::create_integer(0);
+      op.max  = *Dlop::create_integer(1);
     } else if (folded.is_integer()) {
       op.kind    = Does_operand::Kind::integer;
       op.max_inf = true;  // untyped → unbounded
@@ -2723,7 +2985,7 @@ static int match_case_value(const std::shared_ptr<Bundle const>& subj, const std
         return 0;  // a concrete scalar subject can never match a tuple pattern
       }
       const std::string key = re.name.empty() ? std::to_string(re.pos) : std::string(re.name);
-      const int         r   = match_case_value(subj->get_bundle(bundle_path::of_string(key)), pat->get_bundle(bundle_path::of_string(key)));
+      const int r = match_case_value(subj->get_bundle(bundle_path::of_string(key)), pat->get_bundle(bundle_path::of_string(key)));
       if (r == 0) {
         return 0;
       }
@@ -3083,7 +3345,6 @@ upass::Vote uPass_constprop::process_func_equals(std::string_view dst_name, Bund
   return classify_vote();
 }
 
-
 upass::Vote uPass_constprop::process_func_has(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   // Push-form wrapper: the body still walks the node under the cursor
   // (subtree operands — named-field stores / does-operands — don't ride the
@@ -3175,11 +3436,11 @@ bool uPass_constprop::try_eval_sum_cell_call(std::string_view dst, const std::ve
 
 bool uPass_constprop::try_eval_mux_cell_call(std::string_view dst, std::string_view op, const std::vector<Call_actual>& actuals) {
   // Unlimited-sink multiplexer / LUT cells. Pins are named (`s` = selector for
-  // mux/hotmux, `p1`..`pN` = ordered values; `p0`/`p1` = table/addr for lut)
-  // or positional. Map every actual onto its pid, then delegate to the
-  // matching Dlop kernel — which itself handles unknown selector/address bits
-  // (three-valued ternary merge), so unknowns are passed through rather than
-  // pre-filtered.
+  // mux, `p1`..`pN` = ordered values; `p0`/`p1` = table/addr for lut; `p0`..`pN`
+  // = the interleaved (control, value) pairs of a hotmux) or positional. Map
+  // every actual onto its pid, then delegate to the matching Dlop kernel —
+  // which itself handles unknown selector/control/address bits (three-valued
+  // ternary merge), so unknowns are passed through rather than pre-filtered.
   const Ntype_op nop = Ntype::get_op(op);
 
   std::vector<const Dlop*> by_pid;  // indexed by sink pid (pid 0 = sel/table)
@@ -3191,7 +3452,7 @@ bool uPass_constprop::try_eval_mux_cell_call(std::string_view dst, std::string_v
     hhds::Port_id pid;
     if (a.is_named) {
       pid = Ntype::get_sink_pid(nop, a.name);
-      if (pid == livehd::Port_invalid) {
+      if (pid == hhds::Port_invalid) {
         return false;
       }
     } else {
@@ -3216,8 +3477,21 @@ bool uPass_constprop::try_eval_mux_cell_call(std::string_view dst, std::string_v
       return false;
     }
     folded = Dlop::lut_op(*by_pid[0], *by_pid[1]);
+  } else if (op == "hotmux") {
+    // hotmux: EVERY pid is a cell pin — interleaved (control, value) pairs with
+    // an optional trailing default. The builtin therefore spells the cell it
+    // names, rather than the packed one-hot selector it used to take.
+    if (by_pid.size() < 2) {
+      return false;
+    }
+    std::vector<spool_ptr<Dlop>> pins;
+    pins.reserve(by_pid.size());
+    for (const auto* p : by_pid) {
+      pins.emplace_back(Dlop::clone(*p));
+    }
+    folded = Dlop::hotmux_op(std::span<const spool_ptr<Dlop>>(pins));
   } else {
-    // mux / hotmux: pid 0 is the selector, pid 1..N the ordered values.
+    // mux: pid 0 is the selector, pid 1..N the ordered values.
     if (by_pid.size() < 2) {
       return false;
     }
@@ -3226,8 +3500,7 @@ bool uPass_constprop::try_eval_mux_cell_call(std::string_view dst, std::string_v
     for (std::size_t i = 1; i < by_pid.size(); ++i) {
       values.emplace_back(Dlop::clone(*by_pid[i]));
     }
-    std::span<const spool_ptr<Dlop>> vspan(values);
-    folded = (op == "hotmux") ? Dlop::hotmux_op(*by_pid[0], vspan) : Dlop::mux_op(*by_pid[0], vspan);
+    folded = Dlop::mux_op(*by_pid[0], std::span<const spool_ptr<Dlop>>(values));
   }
 
   if (!folded || folded->is_invalid()) {
@@ -3236,6 +3509,17 @@ bool uPass_constprop::try_eval_mux_cell_call(std::string_view dst, std::string_v
   store_trivial(dst, folded);
   return true;
 }
+
+// A concat lane must FIT its declared window: Dlop::concat_op debug-asserts it
+// ("concat_op lane does not fit its declared width"), so an over-wide lane
+// would ABORT a -c dbg build instead of leaving the node unfolded. The kernel
+// measures the BASE plane's signed width; Dlop::get_payload_bits() is that
+// count minus the zero sign slot of a non-negative lane, only ever rounded UP
+// for unknowns, so this test is always at least as strict as the assert — it
+// may decline a fold the kernel would have accepted, never the reverse. A
+// negative lane spends its top bit on the sign (that is how -1 lands as 0b111
+// in a 3-bit window).
+static bool concat_lane_fits(const Dlop& v, int bits) { return v.get_payload_bits() <= bits; }
 
 bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view fname, const std::vector<Call_actual>& actuals) {
   // `__name(...)` direct cell-op call. Strip the `__` prefix and dispatch
@@ -3290,7 +3574,7 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
           return false;
         }
         pid = Ntype::get_sink_pid(nop, a.name);
-        if (pid == livehd::Port_invalid) {
+        if (pid == hhds::Port_invalid) {
           return false;
         }
       } else {
@@ -3367,17 +3651,17 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
     }
   } else if (op == "ror") {
     if (need_n(1)) {
-      result  = *args[0].ror_op();
+      result  = reduction_integer(*args[0].ror_op());
       matched = true;
     }
   } else if (op == "rand") {
     if (need_n(1)) {
-      result  = *args[0].rand_op();
+      result  = reduction_integer(*args[0].rand_op());
       matched = true;
     }
   } else if (op == "rxor") {
     if (need_n(1)) {
-      result  = *args[0].rxor_op();
+      result  = reduction_integer(*args[0].rxor_op());
       matched = true;
     }
   } else if (op == "sext") {
@@ -3388,12 +3672,12 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
     }
   } else if (op == "get_mask") {
     if (need_n(2)) {
-      result  = get_mask_zext(args[0], args[1]);
+      result  = get_mask_x_plane(args[0], args[1]);
       matched = true;
     }
   } else if (op == "set_mask") {
     if (need_n(3)) {
-      result  = *args[0].set_mask_op(args[1], args[2]);
+      result  = livehd::eval_set_mask(args[0], args[1], args[2]);
       matched = true;
     }
   } else if (op == "lt") {
@@ -3436,6 +3720,40 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
     if (need_n(2)) {
       result  = *args[0].sra_op(args[1]);
       matched = true;
+    }
+  } else if (op == "concat") {
+    // The Concat cell's sinks are INTERLEAVED (value, width) pairs at pids
+    // 2i / 2i+1, and `args` is already packed in pid order — so args[2i] is a
+    // lane and args[2i+1] its DECLARED window width. A left-fold like `and`/
+    // `or` above would assemble every width as if it were a lane, and the
+    // binary Dlop::concat_op sizes by SIGNIFICANT bits, which is exactly what a
+    // concat window may not be sized by. Hence the n-ary kernel.
+    //
+    // A width that is not a positive comptime integer leaves the call
+    // unfolded rather than guessing: narrowing one window shifts every lane
+    // above it.
+    if (need_min(2) && (args.size() % 2) == 0) {
+      std::vector<Dlop::Concat_lane> lanes;
+      lanes.reserve(args.size() / 2);
+      for (std::size_t i = 0; i + 1 < args.size(); i += 2) {
+        const Dlop& w = args[i + 1];
+        if (!w.is_integer() || !w.is_just_i64()) {
+          lanes.clear();
+          break;
+        }
+        const auto n = w.to_just_i64();
+        if (n <= 0 || n > std::numeric_limits<int>::max() || !concat_lane_fits(args[i], static_cast<int>(n))) {
+          lanes.clear();
+          break;
+        }
+        lanes.push_back(Dlop::Concat_lane{&args[i], static_cast<int>(n)});
+      }
+      if (!lanes.empty()) {
+        if (auto r = Dlop::concat_op(std::span<const Dlop::Concat_lane>(lanes.data(), lanes.size())); r && !r->is_invalid()) {
+          result  = *r;
+          matched = true;
+        }
+      }
     }
   } else {
     // mux / hotmux / lut handled earlier in try_eval_mux_cell_call.
@@ -3508,11 +3826,11 @@ void uPass_constprop::process_func_call() {
     }
     // `a..=b step s`: the step amount must be a positive integer (ranges only
     // ascend — see the descending-range check in process_range). It overrides
-    // the range's baseline `rng_step` (1, stamped in process_range) — the stride
-    // is a per-range attribute so nested loops are independent — and `dst` is
-    // aliased to the (now-stepped) range so the for-loop / value forms read it.
+    // range's baseline `rng_step` (1, stamped in process_range). Build a new
+    // value so both iteration and tuple consumers see the stride, and the
+    // original range remains unchanged.
     // Layout: ref(dst), const("step"), (const|ref)(range), (const|ref)(amount).
-    if (lm->current_raw_text() == "step" && !in_template_body()) {
+    if (lm->current_raw_text() == "step") {
       if (move_to_sibling()) {  // child2: the range ref
         std::string range_src(current_text());
         if (move_to_sibling()) {  // child3: the step amount
@@ -3529,13 +3847,9 @@ void uPass_constprop::process_func_call() {
                 .span     = lm->current_span(),
                 .hint     = "ranges only ascend; use a positive step, e.g. `0..=10 step 2`",
             });
-          } else if (amount.is_just_i64()) {
-            if (auto rb = st().get_bundle_for_write(range_src); rb && !rb->get_attr("rng_s").is_invalid()) {
-              rb->set_attr("rng_step", amount);  // override the baseline stride of 1
-            }
-            // Re-fetch post-write (COW un-shares the slot) and alias dst to it.
-            if (auto rb2 = st().get_bundle(range_src); rb2 && !rb2->get_attr("rng_s").is_invalid()) {
-              st().set(dst, rb2);
+          } else if (amount.is_integer() && !amount.has_unknowns()) {
+            if (auto rb = st().get_bundle(range_src); rb && !rb->get_attr("rng_s").is_invalid()) {
+              st().set(dst, make_range_bundle(dst, rb->get_attr("rng_s"), rb->get_attr("rng_e"), amount));
             }
           }
         }
@@ -3552,22 +3866,13 @@ void uPass_constprop::process_func_call() {
   // the result tmp unfolded (e.g. an inlined `cputs("…{x}")`'s string() arg).
   std::string fname(lm->current_raw_text());
 
-  // `optimize(<bool>)` — synthesis hint, parse-and-discard for now. Drop
-  // the call by binding dst to a constant true so the statement can be
-  // eliminated (no downstream consumers expect a meaningful value).
-  if (fname == "optimize") {
-    store_trivial(dst, Dlop::create_bool(true));
-    move_to_parent();
-    return;
-  }
-
   // `wrap`/`sat` narrowing call: copy the `v=` arg value through to
   // the dst tmp. The following `store(lhs, dst)` then carries it to lhs. When
   // narrowing actually changes the value, attributes publishes the narrowed
   // result via runner_fold_fn (which current_prim_value consults first), so
   // this copy-through only matters for the no-op-narrowing case. bitwidth
   // exempts lhs from the overflow check. Codegen (T6) emits get_mask / mux.
-  if (fname == "wrap" || fname == "sat" || fname == "saturate") {
+  if (fname == "wrap" || fname == "sat") {
     // Attributes dispatches FIRST and binds the NARROWED value on the
     // dst tmp's table slot; never clobber it with the raw `v=` copy-through
     // (the copy only matters for the no-op-narrowing case, where the dst is
@@ -3601,17 +3906,17 @@ void uPass_constprop::process_func_call() {
       // `test` block reaches here as a string placeholder — the sim driver
       // renders it (Slop::to_hex/...), and tolg skips %-test combs, so
       // leaving the call is harmless (vs erroring on a formattable value).
-      if (!val.is_invalid() && !val.has_unknowns() && !val.is_string() && spec.is_string()) {
-        store_trivial(
-            dst,
-            *Dlop::from_string(format_interp_value(val, spec.to_string(), lm->current_span())));
+      // A value with UNKNOWN bits DOES fold: `0sb?` is comptime-known, and
+      // format_interp_value renders its unknown digits as `?`.
+      if (!val.is_invalid() && !val.is_string() && spec.is_string()) {
+        store_trivial(dst, *Dlop::from_string(format_interp_value(val, spec.to_string(), lm->current_span())));
       }
     }
     move_to_parent();
     return;
   }
 
-  // Direct cell-op call: `__sum(a, b)`, `__hotmux(sel, a, b, …)`, … —
+  // Direct cell-op call: `__sum(a, b)`, `__hotmux(c0, v0, c1, v1, …)`, … —
   // every Ntype_op cell can surface in Pyrope as `__name(...)` and gets
   // folded here when all actuals are comptime-known. See cell.hpp for the
   // canonical names.
@@ -3629,9 +3934,9 @@ void uPass_constprop::process_func_call() {
   if (auto tc = upass::classify_typecast(fname)) {
     switch (tc->kind) {
       case upass::Typecast_kind::to_signed: kind = Cast::to_signed; break;
-      case upass::Typecast_kind::to_uint: kind = Cast::to_uint; break;
+      case upass::Typecast_kind::to_uint  : kind = Cast::to_uint; break;
       case upass::Typecast_kind::to_string: kind = Cast::to_string; break;
-      case upass::Typecast_kind::to_bool: kind = Cast::to_bool; break;
+      case upass::Typecast_kind::to_bool  : kind = Cast::to_bool; break;
       case upass::Typecast_kind::to_sized:
         kind       = Cast::to_sized;
         sized_sig  = tc->sized_signed;
@@ -3710,8 +4015,7 @@ void uPass_constprop::process_func_call() {
   // A `signed`/`unsigned` REINTERPRET needs the originating variable's declared
   // width (it operates only on a fully-typed input); capture its name now (the
   // value-only `args` pipeline below drops it).
-  const std::string cast_arg_var
-      = (actuals->size() == 1 && !(*actuals)[0].is_named) ? (*actuals)[0].var_name : std::string{};
+  const std::string cast_arg_var = (actuals->size() == 1 && !(*actuals)[0].is_named) ? (*actuals)[0].var_name : std::string{};
   move_to_parent();
 
   // Parse a scalar from either a string (re-parse its textual content) or an
@@ -3775,13 +4079,20 @@ void uPass_constprop::process_func_call() {
             W = f->bits;
           }
         }
+        if (W == 0 && !cast_arg_var.empty() && enum_identity_of(st().get_bundle(cast_arg_var)) != nullptr) {
+          // Enum values have a concrete integer encoding even when no sized
+          // annotation was written. Include its sign bit so signed(Enum.x)
+          // preserves a positive encoding; explicitly sized entries use the
+          // declared width above.
+          W = static_cast<uint32_t>(std::max<int64_t>(1, v.get_signed_bits()));
+        }
         if (W == 0 && v.has_unknowns()) {
           // A value with unknown bits (a compare/expression over a poison/X
           // init — e.g. a relocated cone statement reading a net whose driver
           // emits later): its ?-pattern already has a definite width, so
           // reinterpret within it instead of erroring — the unknowns stay
           // unknowns either way.
-          W = static_cast<uint32_t>(std::max<int64_t>(1, v.get_bits() - 1));
+          W = static_cast<uint32_t>(std::max<int64_t>(1, v.get_payload_bits()));
         }
         if (W == 0) {
           livehd::diag::sink().emit(livehd::diag::Diagnostic{
@@ -3795,7 +4106,7 @@ void uPass_constprop::process_func_call() {
           });
           return;
         }
-        result = want_signed ? upass::bitwidth::wrap_to_signed(v, W) : upass::bitwidth::wrap_to_unsigned(v, W);
+        result           = want_signed ? upass::bitwidth::wrap_to_signed(v, W) : upass::bitwidth::wrap_to_unsigned(v, W);
         reinterpret_bits = static_cast<int>(W);
         reinterpret_sign = want_signed;
       }
@@ -3956,35 +4267,7 @@ void uPass_constprop::process_range() {
     return;  // do not register the bounds — downstream folds would be nonsense
   }
 
-  // The folded bounds ride the dst binding ("rng_s"/"rng_e" attrs;
-  // an open end stores the nil Dlop). provide_range/tuple_get read back.
-  if (!st().has_bundle(dst) && !st().has_trivial(dst)) {
-    (void)st().set(dst, std::make_shared<Bundle>(dst));
-  }
-  if (auto rb = st().get_bundle_for_write(dst); rb) {
-    rb->set_attr("rng_s", start);
-    rb->set_attr("rng_e", end);
-    // Baseline stride is 1; `a..=b step n` overrides it via process_func_call's
-    // `step` handler. Stamping it always (per-range, so nested loops are
-    // independent) keeps the unroll uniform: it always does `v += rng_step`.
-    rb->set_attr("rng_step", *Dlop::create_integer(1));
-  }
-
-  // Materialize a tuple bundle for closed integer ranges so eq/tuple_get can
-  // operate on the concrete sequence. Skip for open-ended (nil) or negative
-  // spans, and bound the size so a pathological span can't blow up memory.
-  if (start.is_just_i64() && end.is_just_i64()) {
-    const auto lo = start.to_just_i64();
-    const auto hi = end.to_just_i64();
-    if (hi >= lo && (hi - lo) < 4096) {
-      auto bundle = std::make_shared<Bundle>(dst);
-      int  pos    = 0;
-      for (int64_t v = lo; v <= hi; ++v, ++pos) {
-        bundle->set(bundle_path::of_string(std::to_string(pos)), *Dlop::create_integer(v));
-      }
-      st().set(dst, bundle);
-    }
-  }
+  st().set(dst, make_range_bundle(dst, start, end, *Dlop::create_integer(1)));
 }
 
 void uPass_constprop::process_tuple_get() {
@@ -3996,7 +4279,7 @@ void uPass_constprop::process_tuple_get() {
   move_to_sibling();
   auto src     = std::string(current_text());          // source tuple variable
   auto src_raw = std::string(lm->current_raw_text());  // un-renamed source (inline-frame free vars)
-  note_var_span(src);  // read source var, at this access line
+  note_var_span(src);                                  // read source var, at this access line
 
   if (!move_to_sibling()) {
     move_to_parent();
@@ -4133,10 +4416,33 @@ void uPass_constprop::process_tuple_get() {
     // mirroring construction's wholesale entry copies, so a bundle-backed
     // lookup_type_info answers for `t.a`-style reads (`.[bits]` derivation).
     if (auto sb = st().get_bundle(src); sb && key.size() > src.size() + 1) {
-      const auto           fpath = std::string_view(key).substr(src.size() + 1);
-      const Bundle::Entry& fe    = sb->get_entry(bundle_path::of_string(fpath));
-      const bool           facts = fe.kind != upass::Kind::unknown || fe.mode != upass::Mode::unknown || !fe.decl_max.is_invalid()
-                                   || !fe.decl_min.is_invalid() || fe.comptime;
+      const auto fpath = std::string_view(key).substr(src.size() + 1);
+      // An extracted scalar keeps resolved field attributes when it is later
+      // aliased. Copy inherited user metadata first, then field overrides.
+      if (auto db = st().get_bundle_for_write(dst); db) {
+        for (const auto& [attr, entry] : sb->get_attrs()) {
+          const auto prefix = Bundle::get_all_but_last_level(attr);
+          const auto name   = Bundle::get_last_level(attr);
+          if (prefix.empty() && (!battr::is_builtin_attr_name(name) || battr::is_sticky(name))) {
+            if (db->get_attr(name).is_invalid()) {
+              db->set_attr(name, entry.trivial);
+            }
+          }
+        }
+        for (const auto& [attr, entry] : sb->get_attrs()) {
+          if (Bundle::get_all_but_last_level(attr) == fpath) {
+            db->set_attr(Bundle::get_last_level(attr), entry.trivial);
+          }
+        }
+      }
+      Bundle::Entry fe = sb->get_entry(bundle_path::of_string(fpath));
+      if (first_is_index && fe.decl_max.is_invalid() && !sb->get_attr("__elem_max").is_invalid()) {
+        fe.kind     = upass::Kind::integer;
+        fe.decl_max = sb->get_attr("__elem_max");
+        fe.decl_min = sb->get_attr("__elem_min");
+      }
+      const bool facts = fe.kind != upass::Kind::unknown || fe.mode != upass::Mode::unknown || !fe.decl_max.is_invalid()
+                         || !fe.decl_min.is_invalid() || fe.comptime;
       if (facts) {
         if (auto db = st().get_bundle_for_write(dst); db && db->has_trivial(bundle_path::of_string("0"))) {
           Bundle::Entry e = db->get_entry(bundle_path::of_string("0"));
@@ -4253,6 +4559,22 @@ void uPass_constprop::check_tuple_access(const std::string& base, const std::str
   auto [p, ec] = std::from_chars(seg.data(), seg.data() + seg.size(), idx);
   if (ec != std::errc{}) {
     return;  // unparseable index — skip
+  }
+  const auto& declared_size = base_b->get_attr("__array_size");
+  if (!base_b->get_attr("__elem_max").is_invalid() && declared_size.is_just_i64() && declared_size.to_just_i64() > 0) {
+    const int64_t size = declared_size.to_just_i64();
+    if (idx < 0 || idx >= size) {
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "array-index-out-of-range",
+          .category = "type",
+          .pass     = "upass.constprop",
+          .message  = std::format("Pyrope array index {} is outside [0, {}) for `{}`", idx, size, base),
+          .span     = lm->current_span(),
+          .hint     = "use an index within the array's declared extent",
+      });
+    }
+    return;
   }
   // Positional access is valid ONLY for unnamed entries: a named tuple is
   // name-access only (`(b=1, c=2)[0]` is an error — use `.b`).
@@ -4413,7 +4735,7 @@ void uPass_constprop::process_tuple_set() {
   // enum-aware `in` / `string()` / interpolation read it back. All OTHER
   // `__attr` writes stay skipped below (they belong to the attributes pass).
   if (path_and_val.size() == 2 && path_and_val[0].text == "__enumentry" && !path_and_val[1].is_ref) {
-    auto bundle = tuple_var.find('.') == std::string::npos ? st().get_bundle_for_write(tuple_var) : st().get_bundle(tuple_var);
+    auto bundle = bundle_key::is_single_level(tuple_var) ? st().get_bundle_for_write(tuple_var) : st().get_bundle(tuple_var);
     if (!bundle) {
       bundle = std::make_shared<Bundle>(tuple_var);
       st().set(tuple_var, bundle);
@@ -4428,7 +4750,7 @@ void uPass_constprop::process_tuple_set() {
   // be ambiguous). Land it as an attr so enum_scalar_of reads it for
   // int()/==/in (03-bundle.md "Hierarchical enumerates").
   if (path_and_val.size() == 2 && path_and_val[0].text == "__enumval" && !path_and_val[1].is_ref) {
-    auto bundle = tuple_var.find('.') == std::string::npos ? st().get_bundle_for_write(tuple_var) : st().get_bundle(tuple_var);
+    auto bundle = bundle_key::is_single_level(tuple_var) ? st().get_bundle_for_write(tuple_var) : st().get_bundle(tuple_var);
     if (!bundle) {
       bundle = std::make_shared<Bundle>(tuple_var);
       st().set(tuple_var, bundle);
@@ -4466,6 +4788,26 @@ void uPass_constprop::process_tuple_set() {
         // renders an int trivial as its decimal text — exactly the field-name
         // shape we want for `tuple[ref] = …`.
         elem = st().get_trivial(elem).to_field();
+      } else {
+        // A runtime selector can overwrite ANY leaf. Treating its ref name as
+        // a named field leaves stale positional constants behind: after
+        // `a[0]=0; a[index]=value`, a later `a[0]` must not fold to zero.
+        // Invalidate values, retaining the declared shape and type attributes;
+        // Symbol_table::set also records conditional writes and performs COW
+        // so snapshots aliased before this store retain their old contents.
+        std::vector<std::string> leaves;
+        if (auto root = st().get_bundle(tuple_var)) {
+          for (const auto& [leaf, entry] : root->non_attr_entries()) {
+            (void)entry;
+            leaves.emplace_back(leaf);
+          }
+        }
+        for (const auto& leaf : leaves) {
+          st().set(tuple_var + "." + leaf, Symbol_table::invalid_lconst);
+        }
+        st().tuple_slot_ref.erase(tuple_var);
+        move_to_parent();
+        return;
       }
     } else {
       // const field selector: the LNAST const text is the pyrope-syntactic
@@ -4525,7 +4867,7 @@ void uPass_constprop::process_tuple_set() {
     // refactor — no position prefix to compute or reuse. Mutated in place
     // below, so take the COW (un-shared) slot — a plain get_bundle would
     // leak the write into whole-bundle-assignment aliases (`p2 = p1`).
-    auto bundle = tuple_var.find('.') == std::string::npos ? st().get_bundle_for_write(tuple_var) : st().get_bundle(tuple_var);
+    auto bundle = bundle_key::is_single_level(tuple_var) ? st().get_bundle_for_write(tuple_var) : st().get_bundle(tuple_var);
     if (!bundle) {
       bundle = std::make_shared<Bundle>(tuple_var);
       st().set(tuple_var, bundle);
@@ -4534,8 +4876,8 @@ void uPass_constprop::process_tuple_set() {
 
     auto v = resolve_value();
     if (v) {
-      check_field_store_kind(tuple_var + "." + name, *v);             // field write must keep its kind (cat 3)
-      check_unsigned_positive_overflow(tuple_var + "." + name, *v);   // ... and fit its declared range (cat 3)
+      check_field_store_kind(tuple_var + "." + name, *v);            // field write must keep its kind (cat 3)
+      check_unsigned_positive_overflow(tuple_var + "." + name, *v);  // ... and fit its declared range (cat 3)
       // Update bundle in place; scalar values are propagated by tuple_get.
       bundle->set(bundle_path::of_string(name), *v);
     }
@@ -4555,6 +4897,40 @@ void uPass_constprop::process_tuple_set() {
   for (const auto& p : path) {
     field += '.';
     field += p;
+  }
+
+  // Pyrope arrays are bounds checked. Catch a statically known bad element
+  // store in constprop because error-only compilation intentionally stops
+  // before tolg; the runtime counterpart is emitted by tolg for a dynamic
+  // selector. Plain tuples and named bundles remain outside this rule.
+  if (path.size() == 1) {
+    auto root = st().get_bundle(tuple_var);
+    auto idx  = Dlop::from_pyrope(path.front());
+    if (root && !root->has_named_top() && !root->get_attr("__elem_max").is_invalid() && idx && idx->is_just_i64()) {
+      const int64_t pos           = idx->to_just_i64();
+      const auto&   declared_size = root->get_attr("__array_size");
+      // `[]T` is an inferred/growable array declaration. Its baked size is
+      // zero until stores or an initializer establish the shape, so zero is
+      // not a valid upper bound. Only an explicit positive extent is a static
+      // bounds contract here.
+      const int64_t size          = declared_size.is_just_i64() ? declared_size.to_just_i64() : -1;
+      if (size <= 0) {
+        // The ordinary tuple-set path below grows the inferred positional
+        // shape and still applies the element type checks.
+      } else if (pos < 0 || pos >= size) {
+        livehd::diag::sink().emit(livehd::diag::Diagnostic{
+            .severity = livehd::diag::Severity::error,
+            .code     = "array-index-out-of-range",
+            .category = "type",
+            .pass     = "upass.constprop",
+            .message  = std::format("Pyrope array index {} is outside [0, {}) for `{}`", pos, size, tuple_var),
+            .span     = lm->current_span(),
+            .hint     = "use an index within the array's declared extent",
+        });
+        move_to_parent();
+        return;
+      }
+    }
   }
   auto key = tuple_var + field;
 
@@ -4577,8 +4953,8 @@ void uPass_constprop::process_tuple_set() {
   if (val_child.is_ref) {
     if (st().has_trivial(val_child.text)) {
       const auto rv = st().get_trivial(val_child.text);
-      check_field_store_kind(key, rv);             // field/array write must keep its kind (cat 3)
-      check_unsigned_positive_overflow(key, rv);   // ... and fit its declared range (cat 3)
+      check_field_store_kind(key, rv);            // field/array write must keep its kind (cat 3)
+      check_unsigned_positive_overflow(key, rv);  // ... and fit its declared range (cat 3)
       store_trivial(key, rv);
     } else if (st().has_bundle(val_child.text)) {
       auto b = st().get_bundle(val_child.text);
@@ -4626,19 +5002,40 @@ void uPass_constprop::process_reduction(F op) {
   }
 }
 
+// Reductions intrinsically produce u1, so signed()/unsigned() can reinterpret
+// the result even after it folds to an ordinary integer constant.
+static void stamp_reduction_type(Symbol_table& table, std::string_view dst) {
+  if (table.in_uncertain_scope()) {
+    return;
+  }
+  if (auto b = table.get_bundle_for_write(dst); b && (b->is_empty() || b->has_trivial(bundle_path::of_string("0")))) {
+    auto e     = b->get_entry(bundle_path::of_string("0"));
+    e.kind     = upass::Kind::integer;
+    e.decl_min = *Dlop::create_integer(0);
+    e.decl_max = *Dlop::create_integer(1);
+    b->set(bundle_path::of_string("0"), std::move(e));
+  }
+}
+
 upass::Vote uPass_constprop::process_red_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
-  return push_reduction(dst_name, src, [](const Dlop& v) -> Dlop { return *v.ror_op(); });
+  auto vote = push_reduction(dst_name, src, [](const Dlop& v) -> Dlop { return reduction_integer(*v.ror_op()); });
+  stamp_reduction_type(st(), dst_name);
+  return vote;
 }
 
 upass::Vote uPass_constprop::process_red_and(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
-  return push_reduction(dst_name, src, [](const Dlop& v) -> Dlop { return *v.rand_op(); });
+  auto vote = push_reduction(dst_name, src, [](const Dlop& v) -> Dlop { return reduction_integer(*v.rand_op()); });
+  stamp_reduction_type(st(), dst_name);
+  return vote;
 }
 
 upass::Vote uPass_constprop::process_red_xor(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
-  return push_reduction(dst_name, src, [](const Dlop& v) -> Dlop { return *v.rxor_op(); });
+  auto vote = push_reduction(dst_name, src, [](const Dlop& v) -> Dlop { return reduction_integer(*v.rxor_op()); });
+  stamp_reduction_type(st(), dst_name);
+  return vote;
 }
 
 // popcount (`a#+[..]`): number of set bits, returned as an integer Dlop.
@@ -4682,7 +5079,8 @@ upass::Emit_decision uPass_constprop::classify_statement_impl() {
   // can't hold a value — this guard is belt-and-braces against stale state).
   // 2c-wire — a wire's store is its single combinational driver: always keep it
   // (tolg wires the net from it); never drop as a "known const".
-  if (decl_mode_of(lhs_text) == upass::Mode::reg_kind || decl_mode_of(lhs_text) == upass::Mode::wire_kind) {
+  const auto lhs_mode = decl_mode_of(lhs_text);
+  if (lhs_mode == upass::Mode::reg_kind || lhs_mode == upass::Mode::wire_kind) {
     return upass::Emit_decision::emit_node();
   }
 
@@ -4785,13 +5183,21 @@ upass::Emit_decision uPass_constprop::classify_statement_impl() {
 // fold_ref deleted — the runner reads Symbol_table::known_const_scalar directly.
 
 upass::Vote uPass_constprop::process_sext(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
-  // Sign-extend: [sext: ref(dst), ref_or_const(src), const(nbits)]
-  // sext_op(ebits) interprets bit (ebits-1) of src as the sign bit.
-  // Delegate to Dlop: src may carry unknown bits (sext_op sign-extends the
-  // unknown sign too); skip only non-values. nbits must be concrete.
+  propagate_poison(dst_name, src);  // 2c-shortcircuit: this hook bypasses the push_* templates
+  // Sign-extend: [sext: ref(dst), ref_or_const(src), const(sign_bit_pos)]
+  // The third operand is the sign bit's INDEX, not a width: `sext_op(from_bit)`
+  // reads bit `from_bit` of src and replaces every bit above it with that bit
+  // (Blop::sext64, `(src >> from_bit) & 1`), so the result lies in
+  // [-2^from_bit, 2^from_bit-1]. A producer sign-extending an N-bit value
+  // therefore passes N-1. Delegate to Dlop: src may carry unknown bits
+  // (sext_op sign-extends the unknown sign too); skip only non-values. The
+  // position must be concrete.
   (void)dst;
   if (dst_name.empty() || src.size() < 2) {
     return classify_vote();
+  }
+  if (has_runtime_seed_operand(src)) {
+    return keep_runtime_seed(dst_name);  // same guard as process_get_mask: a nil-seed has no comptime value
   }
   const auto val      = operand_value(src[0]);
   const auto nbits_lc = operand_value(src[1]);
@@ -4815,13 +5221,124 @@ bool uPass_constprop::is_bitselectable_operand(const upass::Operand& o) {
       return false;  // enum value
     }
     if (b->has_named_top() || b->unnamed_top_count() > 1) {
-      return false;  // tuple / array
+      // A typed positional array has a packed bit-view for get/set-mask, but
+      // Pyrope reductions still require an integer/bool operand. Returning
+      // false here records the get-mask temporary for that later reduction
+      // diagnostic; process_get_mask independently packs a legal array slice.
+      return false;
     }
     if (b->get_value_kind() == upass::Kind::string) {
       return false;
     }
   }
   return true;  // integer / boolean / runtime (kind unknown) → ok
+}
+
+// The DECLARED lane width of a typed positional array bundle, or nullopt when
+// `b` is not one (named top, empty, untyped) or its element envelope does not
+// yield a usable width. ONE derivation shared by the read (bitview) and the
+// write (scatter) side, which must agree on the lane geometry bit for bit.
+static std::optional<int> positional_array_elem_bits(const Bundle* b) {
+  if (b == nullptr || b->has_named_top() || b->unnamed_top_count() == 0 || b->get_attr("__elem_max").is_invalid()) {
+    return std::nullopt;
+  }
+  const auto& elem_max = b->get_attr("__elem_max");
+  const auto& elem_min = b->get_attr("__elem_min");
+  if (!elem_max.is_integer() || !elem_min.is_integer()) {
+    return std::nullopt;
+  }
+  // `get_signed_bits()` counts the sign slot, so a non-negative envelope states one
+  // bit more than the lane holds. A signed envelope needs the wider of the two.
+  const int64_t elem_bits = elem_min.is_negative()     ? std::max<int64_t>(elem_max.get_signed_bits(), elem_min.get_signed_bits())
+                            : elem_max.is_known_zero() ? 0
+                                                       : static_cast<int64_t>(elem_max.get_payload_bits());
+  if (elem_bits <= 0 || elem_bits > std::numeric_limits<int>::max()) {
+    return std::nullopt;
+  }
+  return static_cast<int>(elem_bits);
+}
+
+std::optional<Dlop> uPass_constprop::positional_array_bitview(const upass::Operand& o) {
+  std::shared_ptr<const Bundle> b     = o.name.empty() ? o.bundle : st().get_bundle(o.name);
+  const auto                    ebits = positional_array_elem_bits(b.get());
+  if (!ebits) {
+    return std::nullopt;
+  }
+  const int elem_bits = *ebits;
+
+  struct Lane {
+    Dlop value;
+    int  bits;
+  };
+  std::vector<Lane> lanes;
+  lanes.reserve(b->unnamed_top_count());
+  const Dlop lane_mask = *Dlop::get_mask_value(elem_bits);
+  for (size_t pos = 0; pos < b->unnamed_top_count(); ++pos) {
+    const auto key  = std::to_string(pos);
+    const auto path = bundle_path::of_string(key);
+    if (!b->has_trivial(path)) {
+      return std::nullopt;
+    }
+    const Dlop& raw = b->get_trivial(path);
+    if (!is_numeric(raw)) {
+      return std::nullopt;
+    }
+    // Masking is essential for positive values: Dlop keeps a spare sign bit,
+    // but an array lane occupies exactly its declared width.
+    lanes.push_back(Lane{*raw.and_op(lane_mask), elem_bits});
+  }
+
+  // concat_op is MSB-first while positional array element 0 is the LSB lane.
+  std::vector<Dlop::Concat_lane> dl;
+  dl.reserve(lanes.size());
+  for (auto it = lanes.rbegin(); it != lanes.rend(); ++it) {
+    dl.push_back(Dlop::Concat_lane{&it->value, it->bits});
+  }
+  auto packed = Dlop::concat_op(std::span<const Dlop::Concat_lane>(dl.data(), dl.size()));
+  if (!packed || packed->is_invalid()) {
+    return std::nullopt;
+  }
+  return *packed;
+}
+
+bool uPass_constprop::scatter_positional_array(std::string_view name, const Dlop& packed) {
+  // This helper rewrites a whole symbol-table bundle. A dotted leaf is already
+  // a scalar subobject; asking get_bundle_for_write for it violates that API's
+  // bare-variable contract and, more importantly, cannot be an array-shaped
+  // destination itself.
+  if (!bundle_key::is_single_level(name)) {  // backtick-aware: `` `a.b` `` is a bare var
+    return false;
+  }
+  auto       b     = st().get_bundle_for_write(name);
+  const auto ebits = positional_array_elem_bits(b.get());
+  if (!ebits) {
+    return false;
+  }
+  // This IS a whole-variable write, but it reaches the bundle directly instead
+  // of through Symbol_table::set -- so nothing else records it, and the
+  // arm-exit invalidation (Symbol_table::leave_scope) never fires for it. Under
+  // an uncertain if-arm that is a MISCOMPILE, not a missed optimization: the
+  // lanes written here keep the arm's constants after the arm closes, and the
+  // next whole read of the array folds to them as if the arm had certainly run.
+  // Minion's `if (tenb_flush) v = '0;` followed by a later `v[i][j] = 1'b0;`
+  // lowered that read-modify-write's BASE operand to the constant 0 -- wiping
+  // every bit the arm had not written (lhdsuite vpu_tensorfma, LEC-REFUTED
+  // against its own Verilog). Only a CONSTANT rhs reaches here (a runtime rhs
+  // has no scalar() and takes the plain st().set path, which records), so this
+  // is exactly the case Symbol_table::set would otherwise have covered.
+  // No-op when no enclosing scope is uncertain.
+  st().note_uncertain_write(name);
+  const int  elem_bits = *ebits;
+  const Dlop lane_mask = *Dlop::get_mask_value(elem_bits);
+  for (size_t pos = 0; pos < b->unnamed_top_count(); ++pos) {
+    const auto    key     = std::to_string(pos);
+    const auto    path    = bundle_path::of_string(key);
+    Dlop          shifted = pos == 0 ? packed : *packed.sra_op(*Dlop::create_integer(static_cast<int64_t>(pos) * elem_bits));
+    Dlop          lane    = *shifted.and_op(lane_mask);
+    Bundle::Entry e       = b->value_entry(path, false, lane);
+    b->set(path, std::move(e));
+  }
+  return true;
 }
 
 // A reduction (`foo#|/&/^/+`) requires an integer/boolean foo. process_get_mask
@@ -4849,6 +5366,7 @@ bool uPass_constprop::report_reduction_nonint(upass::Src_span src) {
 }
 
 upass::Vote uPass_constprop::process_get_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  propagate_poison(dst_name, src);  // 2c-shortcircuit: this hook bypasses the push_* templates
   // Layout: ref(dst), ref(value), (const|ref)(mask)
   // The mask operand may be:
   //   - a constant integer / known scalar (treated as a bitmask),
@@ -4862,6 +5380,26 @@ upass::Vote uPass_constprop::process_get_mask(std::string_view dst_name, Bundle&
     return classify_vote();
   }
   const std::string var{dst_name};
+  if (operand_value(src[0]).is_string()) {
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = "string-bit-selection",
+        .category = "type",
+        .pass     = "upass.constprop",
+        .message  = "strings are opaque and have no bit vector",
+        .span     = lm->current_span(),
+        .hint     = "bit selection and reductions require a numeric value or an ordered packed aggregate",
+    });
+    return classify_vote();
+  }
+  // This hook bypasses the push_* templates, so it repeats their runtime-
+  // placeholder guard: an inliner nil-seed (or an alias of one) has NO comptime
+  // value. Folding it made the select itself nil -- the statement was dropped
+  // and its consumer kept a dangling temp, or a compare over it folded to a
+  // constant with no diagnostic. Keep the select structural instead.
+  if (has_runtime_seed_operand(src)) {
+    return keep_runtime_seed(dst_name);
+  }
   // A bit selection / reduction needs an integer or boolean `foo`. Record a
   // string / enum / tuple / array source so a reduction over this result can
   // emit a clean type error (the reduction node only sees this tmp, not foo).
@@ -4878,8 +5416,7 @@ upass::Vote uPass_constprop::process_get_mask(std::string_view dst_name, Bundle&
   if (src[0].bundle && !src[0].bundle->get_attr("rng_s").is_invalid()) {
     const Dlop rs = src[0].bundle->get_attr("rng_s");
     const Dlop re = src[0].bundle->get_attr("rng_e");
-    if (rs.is_integer() && !rs.has_unknowns() && !rs.is_negative() && re.is_integer() && !re.has_unknowns()
-        && !re.is_negative()) {
+    if (rs.is_integer() && !rs.has_unknowns() && !rs.is_negative() && re.is_integer() && !re.has_unknowns() && !re.is_negative()) {
       auto one   = Dlop::create_integer(1);
       auto width = re.sub_op(rs)->add_op(*one);  // hi - lo + 1
       if (!width->is_negative()) {
@@ -4888,7 +5425,11 @@ upass::Vote uPass_constprop::process_get_mask(std::string_view dst_name, Bundle&
     }
   }
   if (value.is_invalid()) {
-    value = operand_value(src[0]);
+    if (auto packed = positional_array_bitview(src[0])) {
+      value = *packed;
+    } else {
+      value = operand_value(src[0]);
+    }
   }
 
   bool is_range = false;
@@ -4923,15 +5464,15 @@ upass::Vote uPass_constprop::process_get_mask(std::string_view dst_name, Bundle&
     return classify_vote();
   }
   // get_mask is the default zext select, so a single set bit reads as the
-  // unsigned 1 (never -1; `#sext` sign-extends via a separate sext node) —
-  // get_mask_zext restores that for Dlop::get_mask_op's single-bit quirk. We
+  // unsigned 1 (never -1; `#sext` sign-extends via a separate sext node). We
   // store whatever it returns (invalid included): the fold is real and
   // downstream code shouldn't silently drop it.
-  store_trivial(var, get_mask_zext(value, mask));
+  store_trivial(var, get_mask_x_plane(value, mask));
   return classify_vote();
 }
 
 upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  propagate_poison(dst_name, src);  // 2c-shortcircuit: this hook bypasses the push_* templates
   // Layout: ref(dst), ref(input), (const|ref)(mask), (const|ref)(value)
   // Mirrors process_get_mask but writes back via set_mask_op. The mask
   // operand can be a constant integer (treated as a bitmask) or a `range`
@@ -4941,7 +5482,21 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
     return classify_vote();
   }
   const std::string var{dst_name};
-  Dlop              input_val = operand_value(src[0]);
+  Dlop              input_val;
+  if (auto packed = positional_array_bitview(src[0])) {
+    input_val = *packed;
+  } else {
+    input_val = operand_value(src[0]);
+  }
+
+  // A declared vector initialized with nil can be built by partial writes.
+  // Start with unknown bits, never zero-fill unwritten lanes. Once all lanes
+  // are written the value becomes a concrete constant for subsequent casserts.
+  const auto base_type = upass::decl_facts::lookup(st(), lm->get_lnast().get(), src[0].name);
+  if (input_val.is_nil() && base_type && base_type->bits > 0
+      && base_type->bits <= static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+    input_val = *Dlop::unknown_positive(static_cast<int>(base_type->bits));
+  }
 
   // A set_mask whose fold cannot complete still REDEFINES dst with a RUNTIME
   // value: clear any stale trivial on the way out, or the NEXT foldable
@@ -4975,7 +5530,7 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
   Dlop new_val = operand_value(src[2]);
 
   // Delegate to Dlop: both the input being written into and the value being
-  // written may carry unknown bits — set_mask_op tracks them bit-precisely.
+  // written may carry unknown bits — set_mask_op_opt tracks them bit-precisely.
   // Only the *mask* (which bits to write) must be concrete (see below).
   if (!is_numeric(input_val) || !is_numeric(new_val)) {
     return decline_runtime_redefine();
@@ -4995,9 +5550,9 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
     auto width = range_end.sub_op(range_start)->add_op(*one);
     final_mask = *one->shl_op(*width)->sub_op(*one)->shl_op(range_start);
   } else {
-    // The mask selects *which* bits to overwrite; Dlop::set_mask_op requires
-    // it concrete (asserts on an unknown mask, unlike get_mask_op). This is a
-    // Dlop precondition on the bit-selection, not a value pre-filter — the
+    // The mask selects *which* bits to overwrite and must be concrete before
+    // converting it to a contiguous range. This is a precondition on the
+    // bit-selection, not a value pre-filter — the
     // data operands (input_val/new_val) above already pass unknowns through.
     if (!foldable(mask)) {
       return decline_runtime_redefine();
@@ -5005,6 +5560,186 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
     final_mask = mask;
   }
 
-  store_trivial(var, *input_val.set_mask_op(final_mask, new_val));
+  Dlop result = livehd::eval_set_mask(input_val, final_mask, new_val);
+  if (base_type && base_type->kind == upass::decl_facts::Num::signed_int && base_type->bits > 0) {
+    result = upass::bitwidth::wrap_to_signed(result, base_type->bits);
+  }
+  if (!scatter_positional_array(var, result)) {
+    store_trivial(var, result);
+  }
+  return classify_vote();
+}
+
+// ── concat ───────────────────────────────────────────────────────────────────
+//
+// Layout: ref(dst), then INTERLEAVED (value, width) pairs, MSB-first — so the
+// LANES are src[0], src[2], … and their window WIDTHS src[1], src[3], ….
+// Reading the span as a flat lane list is the trap: every width would be
+// assembled as if it were a lane.
+//
+// The width rides as a sibling operand instead of being read off the value
+// because it is not recoverable from one: `0ub0010` and `0ub10` are the same
+// Dlop at two declared widths, and narrowing one lane shifts every lane ABOVE
+// it. So this fold never sizes a window — it folds only once every width is
+// already BOUND to a positive comptime integer, and otherwise leaves the node
+// alone (the runner binds the `nil`s at emit time from the lane's declared
+// type; upass.tolg owns the `concat-untyped-lane` error when nothing could).
+//
+// An ORDERED POSITIONAL tuple/array lane splices its fields into the layout
+// (field 0 LEAST significant — `X#[..]` puts entry 0 at bit 0, so the fields go
+// into this MSB-first lane list reversed), each field carrying its own window —
+// that is what makes `(..., my_array)#[..]` legal. A multi-field named bundle
+// has no bit order and is rejected by the runner; callers spell its fields as
+// separate entries.
+// Here the positional splice is a FOLD-TIME expansion only: it feeds Dlop's n-ary
+// concat_op, it does not re-shape the LNAST node. Re-shaping would need to
+// insert operands in the MIDDLE of the node's child list, and the pinned HHDS
+// has no such primitive — `Tree::insert_next_sibling` appends at the end
+// regardless of the anchor (measured on this tree: inserting after child 2 of
+// 5 lands the new node last). A RUNTIME tuple lane therefore still reaches
+// upass.tolg un-expanded and is reported there; widening the operand list
+// belongs at the runner's emit-time concat seam, which already rewrites the
+// width operands in place.
+upass::Vote uPass_constprop::process_concat(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  propagate_poison(dst_name, src);  // 2c-shortcircuit: this hook bypasses the push_* templates
+  (void)dst;
+  if (dst_name.empty() || src.empty() || (src.size() % 2) != 0) {
+    return classify_vote();  // no dst, or a lane with no width operand: fail closed
+  }
+  // Deliberately NOT report_nil_operand: an unbound width IS the `nil`
+  // sentinel, so the generic check would report every not-yet-typed lane as an
+  // illegal nil. A nil LANE is upass.typecheck's require_concat, which walks
+  // only the even operands and so can tell the two apart.
+  if (has_runtime_seed_operand(src)) {
+    return keep_runtime_seed(dst_name);  // a lane is a runtime comb result → stay structural
+  }
+
+  struct Fold_lane {
+    Dlop value;
+    int  bits{0};
+  };
+  std::vector<Fold_lane> lanes;
+  lanes.reserve(src.size() / 2);
+
+  // A BOUND width: a positive comptime integer. The `nil` sentinel, a
+  // non-positive width, and an X-carrying width all read as "not bound yet" —
+  // never as a guess, because a wrong window silently relocates every lane
+  // above it.
+  auto bound_width = [&](const upass::Operand& o) -> std::optional<int> {
+    const Dlop w = operand_value(o);
+    if (!foldable(w) || !w.is_integer() || !w.is_just_i64()) {
+      return std::nullopt;
+    }
+    const auto n = w.to_just_i64();
+    if (n <= 0 || n > std::numeric_limits<int>::max()) {
+      return std::nullopt;
+    }
+    return static_cast<int>(n);
+  };
+
+  for (std::size_t i = 0; i < src.size(); i += 2) {
+    const auto& vo = src[i];      // lane value
+    const auto& wo = src[i + 1];  // that lane's window width
+
+    std::shared_ptr<const Bundle> b        = vo.name.empty() ? vo.bundle : st().get_bundle(vo.name);
+    const bool                    is_tuple = b && (b->has_named_top() || b->unnamed_top_count() > 1);
+    if (is_tuple) {
+      // A tuple occupies no single window, so its own width operand must still
+      // be the unbound `nil`; a bound one would state a layout the fields do
+      // not have.
+      if (bound_width(wo) || vo.name.empty()) {
+        return classify_vote();
+      }
+      // Bundle iteration is CANONICAL (named alphabetically, then unnamed by
+      // position) — only the positional order coincides with the source's
+      // explicit order. Splicing a MULTI-FIELD named tuple would turn its
+      // alphabetical key order into layout, so the runner rejects it. A
+      // one-field named tuple is unambiguous and may fold here.
+      if (b->has_named_top() && b->named_top_count() + b->unnamed_top_count() > 1) {
+        return classify_vote();
+      }
+      uint32_t    array_elem_bits = 0;
+      const auto& elem_max        = b->get_attr("__elem_max");
+      const auto& elem_min        = b->get_attr("__elem_min");
+      if (elem_max.is_integer() && elem_min.is_integer()) {
+        array_elem_bits = elem_min.is_negative()
+                              ? static_cast<uint32_t>(std::max<int64_t>(elem_max.get_signed_bits(), elem_min.get_signed_bits()))
+                              : (static_cast<uint32_t>(elem_max.get_payload_bits()));
+      }
+      // Collected separately so the whole lane can be appended REVERSED: the
+      // enclosing lane list is MSB-first (Verilog `{a,b}` order, which is what
+      // inou.slang also produces), while a spliced tuple/array puts its field 0
+      // at the BOTTOM of its own window (docs/pyrope/10-internals.md, "Bit
+      // selection and packing"). Same flip upass.tolg's array expansion does.
+      std::vector<Fold_lane> tuple_lanes;
+      for (const auto& tl : b->top_levels()) {
+        if (tl.has_leafs || tl.leaf_count != 1 || (tl.pos < 0 && tl.name.empty())) {
+          return classify_vote();  // nested or malformed field: no single window
+        }
+        // Same rule as a scalar lane: the window is the field's DECLARED
+        // width, never its value's magnitude.
+        const std::string key        = tl.pos >= 0 ? std::to_string(tl.pos) : std::string(tl.name);
+        const auto        f          = upass::decl_facts::lookup(st(), lm->get_lnast().get(), absl::StrCat(vo.name, ".", key));
+        const uint32_t    field_bits = f ? f->bits : array_elem_bits;
+        if (field_bits == 0 || field_bits > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+          return classify_vote();  // undeclared field: nothing here may guess a width
+        }
+        if (!is_numeric(tl.scalar) || !concat_lane_fits(tl.scalar, static_cast<int>(field_bits))) {
+          return classify_vote();  // over-wide field: decline rather than trip concat_op's fit assert
+        }
+        tuple_lanes.push_back(Fold_lane{tl.scalar, static_cast<int>(field_bits)});
+      }
+      lanes.insert(lanes.end(), tuple_lanes.rbegin(), tuple_lanes.rend());
+      continue;
+    }
+
+    auto w = bound_width(wo);
+    if (!w) {
+      // The width operand is still the `nil` sentinel: prp2lnast emits every
+      // window unbound because it has no type information, and upass.tolg is
+      // what normally binds them from the lane's declared type. Fold anyway
+      // when the lane NAMES something declared — same rule, same declared
+      // facts, just applied early — so a comptime packing such as
+      // `cassert((a, b)#[..] == 0ub0000_0001_0101)` resolves during
+      // elaboration instead of surviving as a graph node no `cassert` can
+      // read. A lane with no declared width is still left alone: guessing one
+      // would silently relocate every lane above it.
+      if (!vo.name.empty()) {
+        if (const auto f = upass::decl_facts::lookup(st(), lm->get_lnast().get(), vo.name);
+            f && f->bits > 0 && f->bits <= static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+          w = static_cast<int>(f->bits);
+        }
+      }
+      if (!w) {
+        return classify_vote();  // width still `nil` — leave the node for tolg
+      }
+    }
+    // is_numeric, not foldable: unknowns are per-lane and POSITIONAL in
+    // concat_op (a lane's x-bits land in that lane's window and nowhere else),
+    // so an X-carrying lane still folds precisely.
+    const Dlop v = operand_value(vo);
+    if (!is_numeric(v) || !concat_lane_fits(v, *w)) {
+      return classify_vote();  // over-wide lane: decline rather than trip concat_op's fit assert
+    }
+    lanes.push_back(Fold_lane{v, *w});
+  }
+
+  if (lanes.empty()) {
+    return classify_vote();
+  }
+  // The N-ARY form, never the binary `a.concat_op(b)` member: that one sizes
+  // each operand by its SIGNIFICANT bits, so it cannot express `{a:u4, b:u2}`
+  // when `a` happens to hold 1. `lanes` is complete and never touched again,
+  // so the borrowed value pointers stay valid for the call.
+  std::vector<Dlop::Concat_lane> dl;
+  dl.reserve(lanes.size());
+  for (const auto& l : lanes) {
+    dl.push_back(Dlop::Concat_lane{&l.value, l.bits});
+  }
+  auto r = Dlop::concat_op(std::span<const Dlop::Concat_lane>(dl.data(), dl.size()));
+  if (!r || r->is_invalid()) {
+    return classify_vote();
+  }
+  store_trivial(dst_name, *r);
   return classify_vote();
 }

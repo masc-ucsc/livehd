@@ -22,7 +22,7 @@
 // exists to consume the published ranges.
 //
 // Invariant: when `unbounded` is false, `min <= max`.
-// Boolean / comparison results use the signed-1-bit lattice point {-1, 0}.
+// Boolean / comparison results use the hardware u1 lattice point {0, 1}.
 struct Lnast_range {
   int64_t min{0};
   int64_t max{0};
@@ -44,8 +44,12 @@ struct Lnast_range {
     return r;
   }
 
-  // Signed 1-bit: range [-1, 0].  Used for boolean and comparison results.
-  static constexpr Lnast_range boolean() noexcept { return bounded(-1, 0); }
+  // The hardware u1: range [0, 1]. Used for boolean and comparison results
+  // (true == 1, never the signed all-ones).
+  static constexpr Lnast_range boolean() noexcept { return bounded(0, 1); }
+
+  // Bit selection and reduction produce integer 0/1, distinct from bool.
+  static constexpr Lnast_range unsigned_bit() noexcept { return bounded(0, 1); }
 
   // ── Predicates ────────────────────────────────────────────────────────────
 
@@ -256,7 +260,12 @@ struct Lnast_range {
     if (!magnitude(m)) {
       return make_unbounded();  // INT64_MIN — can't take |.|
     }
-    if (min >= 0 && !b.unbounded && b.min >= 1) {
+    // A divisor range that includes 0 changes nothing here: x / 0 has no value
+    // (Dlop yields invalid) and is not modeled, and every defined quotient of a
+    // non-negative dividend by a non-negative divisor is in [0, a.max]. Keying
+    // this on b.min >= 1 put a u25 / u15 quotient at [-2^25+1, ...] and failed
+    // its own declared unsigned range (fixme_hier_test's leaf2).
+    if (min >= 0 && !b.unbounded && b.min >= 0) {
       return bounded(0, max);
     }
     return bounded(-m, m);

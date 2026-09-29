@@ -1,0 +1,43 @@
+/*
+:name: loop_break_leftover_1
+:type: equiv
+:pyrope_top: top
+*/
+
+// The SAME design as loop_break_leftover.prp, written out BY HAND with no loops
+// at all — the independent statement of what those two nested comptime loops
+// must compute. LEC'd against the base by `prp-lec-loop_break_leftover_1`.
+//
+// Every constant below is a claim the loop lowering has to reproduce:
+//
+//   the accepted cells   (r, c) with r in 0..2, c in 0..2, r + c even
+//                        -> data bits 0, 2, 5, 8, 10
+//   `r_o`      3   the outer counter the outer break froze (NOT 4: the loop
+//                  never completed its last step; NOT unknown, which is what a
+//                  dropped induction write-back would leave behind)
+//   `rows_o`   3   the outer break skipped the bump for row 3
+//   `c_seen_o` 2   the inner index of the last accepted cell
+//   `c_o`      9   never written — on the Verilog side the inner counter
+//                  shadows it, on the Pyrope side nothing assigns it
+//   `pick_o`   data#[12]  = data#[r_o * 4]
+//   `sel_o`    data#[9]   = data#[c_o]
+//
+// Note what is NOT here: data#[7]. Cell (1, 3) has even parity, so it would be
+// accumulated if the inner `break` failed to stop the rest of its iteration.
+pub mod top(data:u16) -> (acc_o:u8@[0], r_o:u4@[0], rows_o:u4@[0], c_seen_o:u4@[0], c_o:u4@[0], pick_o:u1@[0],
+                          sel_o:u1@[0]) {
+  mut acc:u8 = 0
+  acc = acc + data#[0]   // (0, 0)
+  acc = acc + data#[2]   // (0, 2)
+  acc = acc + data#[5]   // (1, 1)
+  acc = acc + data#[8]   // (2, 0)
+  acc = acc + data#[10]  // (2, 2)
+
+  acc_o    = acc
+  r_o      = 3
+  rows_o   = 3
+  c_seen_o = 2
+  c_o      = 9
+  pick_o   = data#[12]
+  sel_o    = data#[9]
+}

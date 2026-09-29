@@ -210,3 +210,7 @@ The corrected full DINO WF+bridge proofs pass for all three variants with no
 export and fixture coverage. The [semantic audit](LEGACY_SEMANTIC_AUDIT.md)
 distinguishes historical fixes, newly enabled legacy support, and fast-renderer
 changes. Current bridge success is not a claim of general old/new equivalence.
+
+## Integration with master
+
+[MASTER_INTEGRATION.md](MASTER_INTEGRATION.md) records the upstream graph API port, preservation boundary, strict-option migration, and validation against the pre-merge refactor.

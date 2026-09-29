@@ -1,0 +1,8 @@
+/*
+:name: array_oob_static
+:type: error
+:error: outside \[0, 2\)
+*/
+
+mut lanes:[2]u8 = 0
+lanes[2] = 1  // locate_error_here

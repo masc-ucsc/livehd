@@ -1,0 +1,13 @@
+/*
+:name: generic_top_default
+:type: lec
+:lec_top: generic_top_default
+*/
+
+pub mod generic_top_default<MODE="add", N=3>(a:u8) -> (y:u9@[0]) {
+  if MODE == "add" {
+    y = a + N
+  } else {
+    y = a
+  }
+}

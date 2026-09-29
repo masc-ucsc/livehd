@@ -2,6 +2,8 @@
 
 #include "prp_sim.hpp"
 
+#include "cpp_ident.hpp"  // livehd::cpp_ident — the SAME rule cgen_sim declares members with
+
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
@@ -9,9 +11,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <limits>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <map>
 #include <set>
 #include <sstream>
@@ -21,16 +23,18 @@
 #include <vector>
 
 #include "file_output.hpp"
+#include "hash_util.hpp"  // fnv1a64: the once-per-program key of a testbench `?` literal
 #include "prp_ast_facade.hpp"
-#include "rapidjson/document.h"  // 2f-sim B0: read cgen_sim's <stem>.iface.json manifests
+#include "prp_sim_rt.hpp"  // the emitted sim.tune driver runtime + `--set` parser
 #include "prpparse/lexer.hpp"
 #include "prpparse/parser.hpp"
 #include "prpparse/source_buffer.hpp"
+#include "rapidjson/document.h"  // 2f-sim B0: read cgen_sim's <stem>.iface.json manifests
+#include "sim_tune_rt.hpp"       // `?`-literal + tune-hash helper text, shared verbatim with inou.cgen.sim
 
 namespace prp_sim {
 
 namespace {
-
 std::string slurp(const std::string& path) {
   std::ifstream      ifs(path, std::ios::binary);
   std::ostringstream ss;
@@ -44,38 +48,44 @@ std::string slurp(const std::string& path) {
 // Value model in Driver_gen), so a read is exact at the port's own width
 // instead of being narrowed to a C++ scalar.
 struct Dut {
-  std::string              hpp;      // header filename, e.g. "counter.counter.hpp"
-  std::string              cls;      // struct name, e.g. "counter_counter"
-  std::vector<std::string> inputs;   // In field names
+  struct Sub {
+    std::string inst;
+    std::string cls;
+    uint64_t    count   = 1;      // compact occurrence count
+    bool        is_loop = false;  // compact loop wrapper (lane state lives under `inst[ordinal].`)
+  };
+  std::string              hpp;        // header filename, e.g. "counter.counter.hpp"
+  std::string              cls;        // struct name, e.g. "counter_counter"
+  std::vector<std::string> inputs;     // In field names
   std::vector<int>         inputs_w;   // ...and their Slop<N> widths (parallel)
-  std::vector<std::string> outputs;  // Out field names
+  std::vector<std::string> outputs;    // Out field names
   std::vector<int>         outputs_w;  // ...and their Slop<N> widths (parallel)
-  std::vector<std::string> regs;     // struct-scope `Slop<N> name{}` members (flops/pipe stages/regs)
+  std::vector<std::string> regs;       // struct-scope `Slop<N> name{}` members (flops/pipe stages/regs)
   std::vector<int>         regs_w;     // ...and their Slop<N> widths (parallel)
-  std::vector<std::string> arrays;   // memory members (hlop::Memory_*<...>)
+  std::vector<std::string> arrays;     // memory members (hlop::Memory_*<...>)
   std::vector<int>         arrays_w;   // ...and their ELEMENT Slop<N> widths (parallel)
-  std::vector<std::pair<std::string, std::string>> subs;  // sub-instance member -> struct class
-  bool                     is_child = false;  // this unit is instantiated by another unit (a sub-instance)
+  std::vector<Sub>         subs;
+  bool                     is_child   = false;  // this unit is instantiated by another unit (a sub-instance)
+  // Does this class have step()/cycle()? Only a Color_plan ROOT does; an
+  // ordinary hierarchy definition is a storage-only record driven by its
+  // root's occurrence-wide DAG. A `test` naming one cannot be driven directly.
+  bool                     executable = true;
 
   // ---- 2f-sim B0/B: the rest of the manifest, for the query catalog ----------
   // Parallel to the vectors above (same index = same signal), so the existing
   // name/width lookups are untouched while the catalog gets what it needs.
-  std::vector<bool>        inputs_s, outputs_s, regs_s;    // signed?
-  std::vector<int>         inputs_dw, outputs_dw, regs_dw;  // source-DECLARED width
-  std::vector<std::string> regs_kind;                       // "flop" | "pipe"
-  std::vector<bool>        arrays_s;
-  std::vector<int>         arrays_dw, arrays_size;          // element declared width, entry count
-  std::vector<std::string> arrays_ordering;                 // old | fwd | program | none
+  std::vector<bool>                     inputs_s, outputs_s, regs_s;     // signed?
+  std::vector<int>                      inputs_dw, outputs_dw, regs_dw;  // source-DECLARED width
+  std::vector<std::string>              regs_kind;                       // "flop" | "pipe"
+  std::vector<bool>                     arrays_s;
+  std::vector<int>                      arrays_dw, arrays_size;  // element declared width, entry count
+  std::vector<std::string>              arrays_ordering;         // old | fwd | program | none
   // Sync-read output registers per memory (kind "memrd" in the catalog); the
   // outer index is parallel to `arrays`.
   std::vector<std::vector<std::string>> arrays_rd_regs;
 
-  bool has_input(const std::string& f) const {
-    return std::find(inputs.begin(), inputs.end(), f) != inputs.end();
-  }
-  bool has_output(const std::string& f) const {
-    return std::find(outputs.begin(), outputs.end(), f) != outputs.end();
-  }
+  bool has_input(const std::string& f) const { return std::find(inputs.begin(), inputs.end(), f) != inputs.end(); }
+  bool has_output(const std::string& f) const { return std::find(outputs.begin(), outputs.end(), f) != outputs.end(); }
   bool has_reg(const std::string& f) const { return std::find(regs.begin(), regs.end(), f) != regs.end(); }
 
   // Declared width of a member, by name. 0 = not found (the caller then knows
@@ -89,10 +99,22 @@ struct Dut {
     const size_t i = static_cast<size_t>(it - names.begin());
     return i < widths.size() ? widths[i] : 0;
   }
-  int input_width(const std::string& f) const { return width_in(inputs, inputs_w, f); }
-  int output_width(const std::string& f) const { return width_in(outputs, outputs_w, f); }
-  int reg_width(const std::string& f) const { return width_in(regs, regs_w, f); }
-  int array_width(const std::string& f) const { return width_in(arrays, arrays_w, f); }
+  static bool signed_in(const std::vector<std::string>& names, const std::vector<bool>& signs, const std::string& f) {
+    auto it = std::find(names.begin(), names.end(), f);
+    if (it == names.end()) {
+      return false;
+    }
+    const size_t i = static_cast<size_t>(it - names.begin());
+    return i < signs.size() ? static_cast<bool>(signs[i]) : false;
+  }
+  int  input_width(const std::string& f) const { return width_in(inputs, inputs_w, f); }
+  int  output_width(const std::string& f) const { return width_in(outputs, outputs_w, f); }
+  int  reg_width(const std::string& f) const { return width_in(regs, regs_w, f); }
+  int  array_width(const std::string& f) const { return width_in(arrays, arrays_w, f); }
+  bool input_signed(const std::string& f) const { return signed_in(inputs, inputs_s, f); }
+  bool output_signed(const std::string& f) const { return signed_in(outputs, outputs_s, f); }
+  bool reg_signed(const std::string& f) const { return signed_in(regs, regs_s, f); }
+  bool array_signed(const std::string& f) const { return signed_in(arrays, arrays_s, f); }
 };
 
 // Read one cgen_sim <stem>.iface.json manifest into a Dut (2f-sim B0).
@@ -126,12 +148,15 @@ bool parse_iface(const std::string& path, Dut& d, std::string& err) {
     err = path + ": iface manifest has no module name";
     return false;
   }
-  d.cls = doc["module"].GetString();
+  d.cls        = doc["module"].GetString();
+  // Absent in a manifest written before this field existed: assume executable
+  // there, so an older emit dir keeps working exactly as it did.
+  d.executable = !doc.HasMember("executable") || !doc["executable"].IsBool() || doc["executable"].GetBool();
 
-  const auto str  = [](const rapidjson::Value& v, const char* k, const char* dflt = "") {
+  const auto str = [](const rapidjson::Value& v, const char* k, const char* dflt = "") {
     return v.HasMember(k) && v[k].IsString() ? v[k].GetString() : dflt;
   };
-  const auto num  = [](const rapidjson::Value& v, const char* k, int dflt = 0) {
+  const auto num = [](const rapidjson::Value& v, const char* k, int dflt = 0) {
     return v.HasMember(k) && v[k].IsInt() ? v[k].GetInt() : dflt;
   };
   const auto flag = [](const rapidjson::Value& v, const char* k, bool dflt = false) {
@@ -196,13 +221,14 @@ bool parse_iface(const std::string& path, Dut& d, std::string& err) {
   if (doc.HasMember("subs") && doc["subs"].IsArray()) {
     for (const auto& e : doc["subs"].GetArray()) {
       if (e.IsObject()) {
-        d.subs.emplace_back(str(e, "inst"), str(e, "module"));
+        const uint64_t count   = e.HasMember("count") && e["count"].IsUint64() ? e["count"].GetUint64() : 1;
+        const bool     is_loop = e.HasMember("loop") && e["loop"].IsBool() && e["loop"].GetBool();
+        d.subs.push_back({str(e, "inst"), str(e, "module"), count, is_loop});
       }
     }
   }
   return !d.cls.empty();
 }
-
 
 // ---- 2f-sim B: the query CATALOG -------------------------------------------
 // One record per queryable signal. The catalog is STATIC — every name, kind,
@@ -266,10 +292,19 @@ void expand_catalog(const Dut& d, const std::string& prefix, const std::map<std:
                    i < d.arrays_size.size() ? d.arrays_size[i] : 0,
                    i < d.arrays_ordering.size() ? d.arrays_ordering[i] : std::string{"old"}});
   }
-  for (const auto& [inst, cls] : d.subs) {
-    auto it = by_cls.find(cls);
+  for (const auto& sub : d.subs) {
+    auto it = by_cls.find(sub.cls);
     if (it != by_cls.end()) {
-      expand_catalog(*it->second, prefix + inst + ".", by_cls, out);
+      for (uint64_t ordinal = 0; ordinal < sub.count; ++ordinal) {
+        // Key off the LOOP flag, never off count==1: a compact loop publishes its
+        // lane state as `<inst>[<ordinal>].<sig>` for EVERY count (cgen_sim's
+        // lane_prefix_expr is unconditional, and its observe_mem dispatch matches
+        // on the `<inst>[` prefix), so a single-trip rolled loop catalogued as
+        // `<inst>.<sig>` names a signal the simulator never publishes. An
+        // ordinary Sub has no lane dimension and keeps the bare instance name.
+        const std::string inst = sub.is_loop ? sub.inst + "[" + std::to_string(ordinal) + "]" : sub.inst;
+        expand_catalog(*it->second, prefix + inst + ".", by_cls, out);
+      }
     }
   }
 }
@@ -280,8 +315,8 @@ void dump_node(const std::string& src, TSNode n, int depth) {
     return;
   }
   std::string ind(static_cast<size_t>(depth) * 2, ' ');
-  auto        s = ts_node_start_byte(n);
-  auto        e = ts_node_end_byte(n);
+  auto        s   = ts_node_start_byte(n);
+  auto        e   = ts_node_end_byte(n);
   std::string txt = (e <= src.size() && s <= e) ? src.substr(s, e - s) : std::string{};
   auto        nl  = txt.find('\n');
   if (nl != std::string::npos) {
@@ -304,9 +339,7 @@ std::string mod_of_hpp(const std::string& fname) {
 }
 
 // ---- AST helpers ------------------------------------------------------------
-TSNode field(TSNode n, const char* name) {
-  return ts_node_child_by_field_name(n, name, std::char_traits<char>::length(name));
-}
+TSNode field(TSNode n, const char* name) { return ts_node_child_by_field_name(n, name, std::char_traits<char>::length(name)); }
 std::string_view ntype(TSNode n) { return ts_node_type(n); }
 
 std::string text_of(const std::string& src, TSNode n) {
@@ -423,6 +456,47 @@ int int_literal_bits(const std::string& lit) {
   return bits;
 }
 
+// Integer value of a literal `int_literal_bits` already measured, when it fits
+// an int64 and is unambiguously non-negative. `bits` is that measurement, so
+// the literal is scanned once by the caller and once here.
+//
+// Deliberately NOT `strtoll(…, 0)`: Pyrope's `_decimal_number` grammar makes a
+// leading zero DECIMAL (`010` is ten, and from_pyrope agrees), while base 0
+// reads it as octal 8 and stops `0789` at the invalid '8'. `0sb…` is excluded
+// because a signed binary literal can be negative (`0sb11` is -1), and a `?`
+// unknown bit has no integer value at all.
+bool int_literal_value(const std::string& lit, int bits, long long* out) {
+  if (bits < 0 || bits >= 63) {
+    return false;
+  }
+  unsigned long long v = 0;
+  if (lit.size() > 2 && lit[0] == '0' && lit[1] == 'u' && lit[2] == 'b') {
+    for (size_t k = 3; k < lit.size(); ++k) {
+      if (lit[k] != '0' && lit[k] != '1') {
+        return false;  // a `?` unknown bit
+      }
+      v = (v << 1) | static_cast<unsigned long long>(lit[k] - '0');
+    }
+  } else if (lit.size() > 2 && lit[0] == '0' && (lit[1] == 'x' || lit[1] == 'X')) {
+    for (size_t k = 2; k < lit.size(); ++k) {
+      const char* dig = std::strchr("0123456789abcdef", std::tolower(static_cast<unsigned char>(lit[k])));
+      if (dig == nullptr) {
+        return false;
+      }
+      v = (v << 4) | static_cast<unsigned long long>(dig - "0123456789abcdef");
+    }
+  } else {
+    for (char c : lit) {
+      if (std::isdigit(static_cast<unsigned char>(c)) == 0) {
+        return false;
+      }
+      v = v * 10 + static_cast<unsigned long long>(c - '0');  // DECIMAL: `010` is ten
+    }
+  }
+  *out = static_cast<long long>(v);
+  return true;
+}
+
 // Signed Slop width for an integer literal: its value bits plus a sign bit, so
 // a positive constant stays positive in the signed testbench plane. 0 when the
 // literal cannot be measured (caller falls back).
@@ -502,7 +576,7 @@ std::vector<Param_raw> read_params_raw(const std::string& src, TSNode test) {
   // arg_list named children are: typed_identifier [, default-expr], repeated.
   // A parameter with no default is immediately followed by the next param.
   Param_raw cur;
-  bool      have = false;
+  bool      have  = false;
   auto      flush = [&]() {
     if (!have) {
       return;
@@ -535,11 +609,11 @@ std::string cpp_str_lit(std::string_view s) {
   for (char c : s) {
     switch (c) {
       case '\\': o += "\\\\"; break;
-      case '"': o += "\\\""; break;
+      case '"' : o += "\\\""; break;
       case '\n': o += "\\n"; break;
       case '\r': o += "\\r"; break;
       case '\t': o += "\\t"; break;
-      default: o += c;
+      default  : o += c;
     }
   }
   return o;
@@ -551,20 +625,20 @@ std::string cpp_str_lit(std::string_view s) {
 // (Defined as the public prp_sim::tests_to_json below; declared here so the
 // in-namespace generate() can use it.)
 std::string tests_to_json_impl(const std::string& file, const std::vector<Test_info>& tests) {
-  std::string j = "{\"file\":\"";
-  j += cpp_str_lit(file);
-  j += "\",\"tests\":[";
+  std::string j  = "{\"file\":\"";
+  j             += cpp_str_lit(file);
+  j             += "\",\"tests\":[";
   for (size_t ti = 0; ti < tests.size(); ++ti) {
-    const auto& t = tests[ti];
-    j += (ti != 0 ? ",{\"name\":\"" : "{\"name\":\"");
-    j += cpp_str_lit(t.name);
-    j += "\",\"params\":[";
+    const auto& t  = tests[ti];
+    j             += (ti != 0 ? ",{\"name\":\"" : "{\"name\":\"");
+    j             += cpp_str_lit(t.name);
+    j             += "\",\"params\":[";
     for (size_t pi = 0; pi < t.params.size(); ++pi) {
-      const auto& p = t.params[pi];
-      j += (pi != 0 ? ",{\"name\":\"" : "{\"name\":\"");
-      j += cpp_str_lit(p.name);
-      j += "\",\"required\":";
-      j += (p.required ? "true" : "false");
+      const auto& p  = t.params[pi];
+      j             += (pi != 0 ? ",{\"name\":\"" : "{\"name\":\"");
+      j             += cpp_str_lit(p.name);
+      j             += "\",\"required\":";
+      j             += (p.required ? "true" : "false");
       if (!p.required) {
         j += ",\"default\":\"";
         j += cpp_str_lit(p.default_text);
@@ -598,29 +672,41 @@ constexpr const char* kDefaultSeedShown = "0xC0FFEE";
 bool is_reserved_param_name(std::string_view n) {
   // C++ keywords (C++23) — emitting `long <kw>` is a hard compile error.
   static const std::set<std::string_view> cpp_keywords = {
-      "alignas",   "alignof",  "and",        "and_eq",    "asm",       "auto",      "bitand",    "bitor",
-      "bool",      "break",    "case",       "catch",     "char",      "char8_t",   "char16_t",  "char32_t",
-      "class",     "compl",    "concept",    "const",     "consteval", "constexpr", "constinit", "const_cast",
-      "continue",  "co_await", "co_return",  "co_yield",  "decltype",  "default",   "delete",    "do",
-      "double",    "dynamic_cast", "else",   "enum",      "explicit",  "export",    "extern",    "false",
-      "float",     "for",      "friend",     "goto",      "if",        "inline",    "int",       "long",
-      "mutable",   "namespace", "new",       "noexcept",  "not",       "not_eq",    "nullptr",   "operator",
-      "or",        "or_eq",    "private",     "protected", "public",    "register",  "reinterpret_cast",
-      "requires",  "return",   "short",      "signed",    "sizeof",    "static",    "static_assert",
-      "static_cast", "struct", "switch",     "template",  "this",      "thread_local", "throw",  "true",
-      "try",       "typedef",  "typeid",     "typename",  "union",     "unsigned",  "using",     "virtual",
-      "void",      "volatile", "wchar_t",    "while",     "xor",       "xor_eq",
+      "alignas",     "alignof",   "and",        "and_eq",    "asm",      "auto",         "bitand",
+      "bitor",       "bool",      "break",      "case",      "catch",    "char",         "char8_t",
+      "char16_t",    "char32_t",  "class",      "compl",     "concept",  "const",        "consteval",
+      "constexpr",   "constinit", "const_cast", "continue",  "co_await", "co_return",    "co_yield",
+      "decltype",    "default",   "delete",     "do",        "double",   "dynamic_cast", "else",
+      "enum",        "explicit",  "export",     "extern",    "false",    "float",        "for",
+      "friend",      "goto",      "if",         "inline",    "int",      "long",         "mutable",
+      "namespace",   "new",       "noexcept",   "not",       "not_eq",   "nullptr",      "operator",
+      "or",          "or_eq",     "private",    "protected", "public",   "register",     "reinterpret_cast",
+      "requires",    "return",    "short",      "signed",    "sizeof",   "static",       "static_assert",
+      "static_cast", "struct",    "switch",     "template",  "this",     "thread_local", "throw",
+      "true",        "try",       "typedef",    "typeid",    "typename", "union",        "unsigned",
+      "using",       "virtual",   "void",       "volatile",  "wchar_t",  "while",        "xor",
+      "xor_eq",
   };
   // Other identifiers the driver references at the same (function) scope but that
   // are NOT `_`-prefixed (so the leading-underscore bar in is_valid_param_name
   // does not catch them): `main`'s parameters, the reserved CLI flags
-  // (`--test NAME`, `--seed`, `--help`/`-h` — a param named like one would be
-  // swallowed by that flag instead of binding), the libc macros from <cerrno> (a
+  // (`--test NAME`, `--seed`, `--set k=v`, `--help`/`-h` — a param named like one
+  // would be swallowed by that flag instead of binding), the libc macros from <cerrno> (a
   // param named `errno` would expand `long errno = …` to `long (*__error()) = …`
   // — a hard error), and the free functions the driver calls unqualified. The
   // driver's own `_`-prefixed locals need no entry.
   static const std::set<std::string_view> driver_reserved = {
-      "argc", "argv", "main", "seed", "help", "h", "test", "errno", "ERANGE", "hlop_set_random_seed",
+      "argc",
+      "argv",
+      "main",
+      "seed",
+      "set",
+      "help",
+      "h",
+      "test",
+      "errno",
+      "ERANGE",
+      "hlop_set_random_seed",
   };
   return cpp_keywords.count(n) != 0 || driver_reserved.count(n) != 0;
 }
@@ -645,10 +731,19 @@ public:
   // 2f-sim B: the DUT instances this test bound (`mut acc = M` -> var -> module
   // key), read after emit_run_fn to expand the per-test query catalog.
   const std::map<std::string, std::string>& instances() const { return inst_of_var; }
+  // The distinct testbench `?` literals this test emitted, as (Slop width,
+  // helper key): each is ONE draw per program (see literal_val), so generate()
+  // unions them over every test and bakes the count into the driver.
+  const std::set<std::pair<int, uint64_t>>& tb_unknown_keys() const { return tb_unknown_keys_; }
 
-  Driver_gen(const std::string& src, const std::map<std::string, Dut>& duts, const std::string& vcd_dir,
-             const std::string& file)
-      : src_(src), duts_(duts), vcd_dir_(vcd_dir), file_(file) {
+  Driver_gen(const std::string& src, const std::map<std::string, Dut>& duts, const std::string& vcd_dir, const std::string& file,
+             bool runtime_support_on, bool unknown_zero)
+      : src_(src)
+      , duts_(duts)
+      , vcd_dir_(vcd_dir)
+      , file_(file)
+      , runtime_support_on_(runtime_support_on)
+      , unknown_zero_(unknown_zero) {
     auto slash  = file_.find_last_of("/\\");
     file_short_ = (slash == std::string::npos) ? file_ : file_.substr(slash + 1);
     // Pre-scan file-scope import bindings (`const my_top = import("unit.lam")`):
@@ -703,14 +798,14 @@ public:
         if (qb != std::string::npos) {
           size_t qe = src_.find('"', qb + 1);
           if (qe != std::string::npos) {
-            std::string path = src_.substr(qb + 1, qe - qb - 1);
+            std::string path     = src_.substr(qb + 1, qe - qb - 1);
             // `lg:NAME` / `ln:NAME` name a compiled artifact: the rest of the
             // string IS the module's name, so it is the first thing to try as a
             // dut key (an lg: graph name is commonly dotless — `PipelinedDualIssueCPU`
             // — which the unit/entry split below cannot even see), and the one
             // form where failing to find it is an ERROR rather than a cue to
             // guess (see rvalue_module).
-            const bool artifact = path.starts_with("lg:") || path.starts_with("ln:");
+            const bool  artifact = path.starts_with("lg:") || path.starts_with("ln:");
             if (artifact) {
               path = path.substr(3);
               import_artifact_.insert(bound);
@@ -738,8 +833,8 @@ public:
   // parameter list (for the registry JSON + the kernel's `--arg` forwarding);
   // `includes_out` collects the DUT header(s) this test drives. Throws Gen_error
   // on an unsupported form.
-  std::string emit_run_fn(TSNode test, const std::string& name, const std::string& fn_id,
-                          std::vector<Param_info>& params_out, std::set<std::string>& includes_out) {
+  std::string emit_run_fn(TSNode test, const std::string& name, const std::string& fn_id, std::vector<Param_info>& params_out,
+                          std::set<std::string>& includes_out) {
     TSNode code = field(test, "code");
     if (ts_node_is_null(code)) {
       fail("test '" + name + "' has no body");
@@ -768,7 +863,7 @@ public:
         fail("test parameter '" + r.name
              + "' is not a usable simulation parameter name: it must be a plain identifier "
                "(a letter followed by letters/digits/underscores), not a leading-underscore name, "
-               "a C++ keyword, or a reserved driver flag (seed/help/h/argc/argv) — rename it");
+               "a C++ keyword, or a reserved driver flag (seed/set/help/h/argc/argv) — rename it");
       }
       param_names_.insert(r.name);  // for the tick clock-name collision check
       Param p;
@@ -821,9 +916,13 @@ public:
 
     // ---- DUT instances. One persistent instance per `mut acc = Module`
     // declaration (the seed is set once by main() before any test runs).
+    // Hierarchical designs can make the generated class tens of megabytes, so
+    // keep its storage off the thread stack. The reference preserves the plain
+    // `acc.member` surface used by the rest of the generated test function.
     for (const auto& [var, m] : inst_of_var) {
       includes_out.insert(duts_.at(m).hpp);
-      o << "  " << duts_.at(m).cls << " " << var << "; " << var << ".reset_cycle();\n";
+      o << "  auto _dut_storage_" << var << " = std::make_unique<" << duts_.at(m).cls << ">(); auto& " << var << " = *_dut_storage_"
+        << var << "; " << var << ".reset_cycle(_init_zero);\n";
       if (!vcd_dir_.empty()) {
         // one VCD per test: <vcd_dir>/<test>.vcd (suffixed by instance when >1).
         // Stash the path; set it immediately for a whole-run trace, but for a
@@ -840,6 +939,27 @@ public:
         o << "  else " << var << ".__vcd_path.clear();\n";
       }
     }
+    // sim.tune: every instance, type-erased for the cold sampler + the end digest
+    // (prp_sim_rt.hpp), and the step countdown. The countdown is ONE local so it
+    // stays in a register across the out-of-line step(): with profiling off the
+    // hook is one decrement-and-branch per step (see the step_statement arm).
+    if (inst_of_var.empty()) {
+      o << "  [[maybe_unused]] const _TpDut _tp_d{};\n";
+    } else {
+      o << "  const _TpVar _tp_v[] = {";
+      bool first = true;
+      for (const auto& [var, m] : inst_of_var) {
+        o << (first ? "" : ", ") << "_tp_var(\"" << var << "\", \"" << duts_.at(m).cls << "\", " << var << ")";
+        first = false;
+      }
+      o << "};\n";
+      o << "  [[maybe_unused]] const _TpDut _tp_d{_tp_v, " << inst_of_var.size() << "};\n";
+    }
+    o << "  [[maybe_unused]] std::uint64_t _tp_left = 1;\n";
+    // Hoisted `regref` bindings land here, after every instance exists
+    // and before anything that could use one. Filled in at the end of this
+    // function (see the splice below kRefMark).
+    o << kRefMark;
     // Every testbench value is a Slop of a fixed, generation-time width (see the
     // value plane below): zero-initialized, and wide enough for the widest thing
     // ever assigned to it. There is no separate "wide constant" plane any more —
@@ -862,15 +982,24 @@ public:
     // body run) — the agent learns the --probe/--break-when vocabulary. Hoisted out
     // of the instance guard so a test with no DUT instance also short-circuits
     // (describing nothing) instead of running the whole testbench.
-    o << "  if (_dbg.list_signals) {\n";
-    for (const auto& [var, m] : inst_of_var) {
-      o << "    " << var << ".describe_signals(\"" << var << ".\", _dbg.sigs);\n";
+    if (runtime_support_on_) {
+      o << "  if (_dbg.list_signals) {\n";
+      for (const auto& [var, m] : inst_of_var) {
+        o << "    " << var << ".describe_signals(\"" << var << ".\", _dbg.sigs);\n";
+      }
+      o << "    return _fails;\n  }\n";
+    } else {
+      // The state-walk methods were not generated, so there is nothing to
+      // enumerate. Say so loudly: silently running the testbench and reporting
+      // an EMPTY signal list (exit 0) would read as "this design has no state".
+      o << "  if (_dbg.list_signals) {\n";
+      o << "    std::fprintf(stderr, \"lhd sim: this simulator was built without the signal state walk "
+           "(--set sim.checkpoint=false); re-run --setup-only with checkpointing or an observation flag\\n\");\n";
+      o << "    std::exit(2);\n  }\n";
     }
-    o << "    return _fails;\n  }\n";
-    if (!inst_of_var.empty()) {
+    if (runtime_support_on_ && !inst_of_var.empty()) {
       o << "  hlop::ckpt::Cadence _cad; _cad.init(_ckpt.enabled, _ckpt.min_secs, _ckpt.max_overhead);\n";
-      o << "  std::string _ckpt_base = _ckpt.dir.empty() ? std::string() : (_ckpt.dir + \"/" << sanitize(name)
-        << "\");\n";
+      o << "  std::string _ckpt_base = _ckpt.dir.empty() ? std::string() : (_ckpt.dir + \"/" << sanitize(name) << "\");\n";
       // No upfront mkdir: the first due checkpoint's make_dirs(_cdir) creates the
       // base recursively, so a short run that never checkpoints leaves no dirs.
       // Validate the requested --probe / --break-when signal names against the real
@@ -892,10 +1021,33 @@ public:
     for (auto s : stmts) {
       gen_stmt(o, s, 1);
     }
+    // End of the body, while the instances still live: the sampler's body_end
+    // stops the clock, then folds end_digest over the DUT state walk and this
+    // testbench frame (every local's final value, the same set a checkpoint's
+    // tb.json saves).
+    o << "  { std::uint64_t _tp_tb = _tp_fnv0;\n";
+    for (const auto& v : locals_) {
+      o << "    _tp_tb = _tp_fnv_local(_tp_tb, \"" << v << "\", " << v << ".to_pyrope());\n";
+    }
+    o << "    _tp.body_end(_tp_left, _tp_d, _tp_tb); }\n";
     // The function's stdout is the test's runtime output (puts + any ASSERT
     // FAILED lines); the returned count is the verdict main() renders.
     o << "  return _fails;\n}\n";
-    return o.str();
+    // Splice the hoisted ref bindings in at the marker. They are collected as a
+    // side effect of emitting the body (and of the width pre-pass), so they can
+    // only be written once the body is done -- but they must APPEAR before it,
+    // and outside the tick loop: binding a ref is the one-time act, reading it
+    // is the per-cycle one. The whole test body is one scope, so a ref bound
+    // here also serves reads placed after the loop closes.
+    std::string body = o.str();
+    if (auto mark = body.find(kRefMark); mark != std::string::npos) {
+      std::string binds;
+      for (const auto& b : ref_binds_) {
+        binds += b;
+      }
+      body.replace(mark, kRefMark.size(), binds);
+    }
+    return body;
   }
 
 private:
@@ -921,35 +1073,38 @@ private:
     for (char c : s) {
       switch (c) {
         case '\\': o += "\\\\"; break;
-        case '"': o += "\\\""; break;
-        case '%': o += "%%"; break;
+        case '"' : o += "\\\""; break;
+        case '%' : o += "%%"; break;
         case '\n': o += "\\n"; break;
         case '\t': o += "\\t"; break;
-        default: o += c;
+        default  : o += c;
       }
     }
     return o;
   }
 
-  const std::string&                src_;
-  const std::map<std::string, Dut>& duts_;
-  std::string                       vcd_dir_;     // empty = no VCD; else <vcd_dir>/<test>.vcd per test
-  std::string                       file_;        // source .prp path (for failing_assert file:line)
-  std::string                       file_short_;  // basename of file_ (the inline located message)
-  bool                              in_tick_ = false;  // inside a tick body (reject nested ticks)
-  bool                              restart_block_emitted_ = false;  // --restart-at handled by the first tick
-  std::set<std::string>                           locals_;      // scalar driver vars
-  std::map<std::string, int>                      local_w_;     // ...and the Slop width each is declared at
-  std::map<std::string, int>                      local_decl_w_;  // `mut x:u97 = …` annotation (0 = infer)
-  std::set<std::string>                           param_names_; // test parameter names
-  std::map<std::string, std::string>              inst_of_var;  // instance var -> module name (`mut acc = M`)
-  std::map<std::string, std::vector<TSNode>>      arrays_;      // array name -> element nodes
-  std::map<std::string, int>                      array_w_;     // array name -> element Slop width
-  std::vector<std::pair<std::string, TSNode>>     assigns_;     // (local, rhs) pairs, for width inference
-  std::set<std::string>                           import_bound_;  // names bound by `= import(...)` (module refs)
-  std::map<std::string, std::pair<std::string, std::string>> import_path_;  // bound name -> {unit, entry}
-  std::map<std::string, std::string>              import_ref_;       // bound name -> import string, `lg:`/`ln:` stripped
-  std::set<std::string>                           import_artifact_;  // ...of those, the ones that named lg:/ln: explicitly
+  const std::string&                          src_;
+  const std::map<std::string, Dut>&           duts_;
+  std::string                                 vcd_dir_;                     // empty = no VCD; else <vcd_dir>/<test>.vcd per test
+  std::string                                 file_;                        // source .prp path (for failing_assert file:line)
+  std::string                                 file_short_;                  // basename of file_ (the inline located message)
+  bool                                        runtime_support_on_ = true;   // checkpoint/probe/query generated control plane
+  bool                                        unknown_zero_       = false;  // sim.unknown_zero: `?` literal bits are 0, not random
+  bool                                        in_tick_            = false;  // inside a tick body (reject nested ticks)
+  bool                                        restart_block_emitted_ = false;  // --restart-cycle handled by the first tick
+  std::set<std::string>                       locals_;                         // scalar driver vars
+  std::map<std::string, int>                  local_w_;                        // ...and the Slop width each is declared at
+  std::map<std::string, int>                  local_decl_w_;                   // `mut x:u97 = …` annotation (0 = infer)
+  std::set<std::string>                       param_names_;                    // test parameter names
+  std::set<std::pair<int, uint64_t>>          tb_unknown_keys_;                // distinct runtime `?` literals: (width, key)
+  std::map<std::string, std::string>          inst_of_var;                     // instance var -> module name (`mut acc = M`)
+  std::map<std::string, std::vector<TSNode>>  arrays_;                         // array name -> element nodes
+  std::map<std::string, int>                  array_w_;                        // array name -> element Slop width
+  std::vector<std::pair<std::string, TSNode>> assigns_;                        // (local, rhs) pairs, for width inference
+  std::set<std::string>                       import_bound_;                   // names bound by `= import(...)` (module refs)
+  std::map<std::string, std::pair<std::string, std::string>> import_path_;     // bound name -> {unit, entry}
+  std::map<std::string, std::string>                         import_ref_;      // bound name -> import string, `lg:`/`ln:` stripped
+  std::set<std::string> import_artifact_;  // ...of those, the ones that named lg:/ln: explicitly
 
   // `mut acc = Module` -- the rvalue is a bare module name. Unwrap single-child
   // expression wrappers and return the module name iff it is a known DUT.
@@ -975,8 +1130,7 @@ private:
             if (duts_.count(ref) != 0) {
               return ref;
             }
-            if (const auto dot = ref.find_last_of('.');
-                dot != std::string::npos && duts_.count(ref.substr(dot + 1)) != 0) {
+            if (const auto dot = ref.find_last_of('.'); dot != std::string::npos && duts_.count(ref.substr(dot + 1)) != 0) {
               return ref.substr(dot + 1);
             }
             // An `import("lg:X")`/`import("ln:X")` is EXACT by construction — X
@@ -1064,16 +1218,208 @@ private:
     return inst_of_var.count(base) != 0;
   }
 
-  // C++ accessor for `acc.fld`: __in.fld (input), __out.fld (output), or fld
+  // Marker line replaced by the accumulated ref bindings at the end of
+  // emit_run_fn. A comment so that a test with no DUT access still compiles.
+  static constexpr std::string_view kRefMark = "  // (no hoisted refs)\n";
+
+  // One `auto& __ref<k> = <storage>;` line per DISTINCT storage cell the test
+  // touches, in first-use order, plus the memo that makes the second use of a
+  // cell reuse the first binding.
+  std::vector<std::string>           ref_binds_;
+  std::map<std::string, std::string> ref_of_storage_;
+
+  // Bind `storage` to a hoisted reference and return the reference's name --
+  // this is what makes bare dotted access cost the same as an explicit
+  // `regref` bound outside the loop, which is the whole point of the
+  // ref model: resolve the hierarchy ONCE, then read or write the cell directly
+  // for the rest of the run.
+  //
+  // A storage path carrying a NON-CONSTANT subscript (`acc.sub.regs[i]`) is not
+  // hoistable -- the element it names changes per iteration -- so it is returned
+  // verbatim and re-evaluated at each use. A constant subscript is fine.
+  std::string hoist_ref(const std::string& storage) {
+    if (auto lb = storage.find('['); lb != std::string::npos) {
+      const auto rb = storage.rfind(']');
+      if (rb == std::string::npos || rb <= lb + 1) {
+        return storage;
+      }
+      const auto idx = storage.substr(lb + 1, rb - lb - 1);
+      if (!std::all_of(idx.begin(), idx.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
+        return storage;
+      }
+    }
+    auto it = ref_of_storage_.find(storage);
+    if (it != ref_of_storage_.end()) {
+      return it->second;
+    }
+    auto nm = "__ref" + std::to_string(ref_binds_.size());
+    // `auto&`, not `Slop<N>&`: the declared width is already exactly the
+    // member's, and spelling it again would silently bind a temporary (through a
+    // converting constructor) the moment the two disagreed -- a dangling
+    // reference instead of a compile error.
+    ref_binds_.push_back("  auto& " + nm + " = " + storage + ";\n");
+    ref_of_storage_.emplace(storage, nm);
+    return nm;
+  }
+
+  // `mut pc = regref(acc.io_imem_address)` binds a test local as an ALIAS of a
+  // storage cell: name -> (hoisted C++ ref, declared width). Such a name is not
+  // a driver local (no `Slop<W> pc{}` is emitted for it) -- every read goes to
+  // the design, and, for a `regref`, every write does too.
+  struct Ref_alias {
+    std::string storage;
+    int         width     = 64;
+    bool        is_signed = false;
+  };
+  std::map<std::string, Ref_alias> ref_alias_;
+  std::set<std::string>            ref_writable_;  // bound with regref
+
+  // Is this rvalue a `regref(...)` call?
+  bool is_ref_call(TSNode n) const {
+    if (ts_node_is_null(n) || ntype(n) != "function_call_expression") {
+      return false;
+    }
+    TSNode fn = field(n, "function");
+    if (ts_node_is_null(fn)) {
+      return false;
+    }
+    return text_of(src_, fn) == "regref";
+  }
+
+  // Resolve the operand of a `regref` call to a hoisted, WRITABLE reference.
+  // Two spellings are accepted, and they mean the same cell:
+  //   regref(acc.io_imem_address)    dotted -- names exactly one cell, and a
+  //                                  typo is a setup error against the manifest
+  //   regref("acc/io_imem_address")  string path -- "unit/field", where unit is
+  //                                  an instance variable or a module name
+  // Reading needs no call at all: a bare dotted `acc.field` already reads any
+  // cell, which is why the old read-only `sigref` was removed -- it was
+  // exactly a bare dotted read.
+  // (The spec's multi-match string `regref` that resolves to zero-or-many cells
+  // is the SYNTHESIZABLE construct and is still TBD; a testbench ref is one
+  // cell, because a C++ reference is one cell.)
+  std::string ref_call_target(TSNode call, int* w_out = nullptr, bool* signed_out = nullptr) {
+    TSNode args = field(call, "argument");
+    if (ts_node_is_null(args) || ts_node_named_child_count(args) < 1) {
+      fail("regref needs a signal: a dotted `acc.field` or a \"unit/field\" path");
+    }
+    const bool  writable = true;
+    TSNode      a0       = ts_node_named_child(args, 0);
+    std::string base, fld;
+    if (inst_dot(a0, base, fld)) {
+      return field_access(base, fld, writable, w_out, signed_out);
+    }
+    return path_target(call, writable, w_out, signed_out);
+  }
+
+  // C++ accessor for `acc.fld`, as a HOISTED reference to the storage cell.
+  // See field_storage for the storage paths themselves.
+  std::string field_access(const std::string& var, const std::string& fld, bool write, int* w_out = nullptr,
+                           bool* signed_out = nullptr) {
+    return hoist_ref(field_storage(var, fld, write, w_out, signed_out));
+  }
+
+  // C++ storage path for `acc.fld`: __in.fld (input), __out.fld (output), or fld
   // (struct-scope reg). `write` rejects read-only targets. `w_out` (when given)
   // receives the member's DECLARED Slop width, so a read can be re-expressed at
   // the port's own width instead of through a scalar.
-  std::string field_access(const std::string& var, const std::string& fld, bool write, int* w_out = nullptr) {
-    auto width = [&](int w) {
+  // A name whose text collides with a Pyrope keyword is spelled `` `in` `` in the
+  // source, but every consumer downstream of the lexer sees the bare `in` -- the
+  // generated header member, the port manifest, the lg net. A test that drives
+  // such a port (`acc.`in` = s & 0xf`, the natural spelling for a Verilog design
+  // whose port really is named `in`) arrives here with the quotes still on, so
+  // strip them per DOT SEGMENT before any lookup. A normal name is untouched.
+  //
+  // A dot INSIDE backticks is part of the identifier, not a separator (`` `a.b` ``
+  // is ONE name), so the scan tracks the quote state rather than splitting on
+  // every '.'.
+  static std::string unquote_field_path(std::string_view path) {
+    std::string out;
+    out.reserve(path.size());
+    size_t pos = 0;
+    while (pos <= path.size()) {
+      // End of this segment: the next '.' that is NOT inside a backtick pair.
+      size_t end    = pos;
+      bool   quoted = false;
+      while (end < path.size() && (quoted || path[end] != '.')) {
+        if (path[end] == '`') {
+          quoted = !quoted;
+        }
+        ++end;
+      }
+      std::string_view seg = path.substr(pos, end - pos);
+      if (seg.size() >= 2 && seg.front() == '`' && seg.back() == '`') {
+        seg.remove_prefix(1);
+        seg.remove_suffix(1);
+      }
+      out.append(seg);
+      if (end >= path.size()) {
+        break;
+      }
+      out.push_back('.');
+      pos = end + 1;
+    }
+    return out;
+  }
+
+  // The C++ spelling of a field path. cgen_sim DECLARES every member through
+  // livehd::cpp_ident (core/cpp_ident.hpp) and publishes that spelling as the
+  // port `"name"` in <stem>.iface.json, so a lookup here has to apply the SAME
+  // rule or the two drift: a Pyrope field named for a C++ reserved word or
+  // alternative token (`xor`, `not`, `class`) is declared `xor_` and would never
+  // be found under `xor`.
+  //
+  // Per DOT SEGMENT, and only up to a '[': a memory leaf's index (`regs[3]`) is
+  // emitted as C++ verbatim and must not be mangled.
+  //
+  // Note the quote handling: unquote_field_path is quote-AWARE when it strips the
+  // backticks, but it joins the bare segments with plain '.', so a quoted name
+  // that CONTAINS a dot (`` `a.b` ``) is indistinguishable afterwards and splits
+  // into two members here. cgen_sim::cpp_port_path splits on the first raw '.'
+  // and has the same blind spot, so the two sides still agree -- do not "fix"
+  // one without the other.
+  static std::string cxx_field_path(std::string_view path) {
+    const std::string bare = unquote_field_path(path);
+    std::string       out;
+    std::size_t       seg = 0;
+    for (std::size_t i = 0; i <= bare.size(); ++i) {
+      if (i != bare.size() && bare[i] != '.') {
+        continue;
+      }
+      std::string_view s(bare.data() + seg, i - seg);
+      const auto       br = s.find('[');
+      out += livehd::cpp_ident(br == std::string_view::npos ? s : s.substr(0, br));
+      if (br != std::string_view::npos) {
+        out.append(s.substr(br));  // `[idx]` is C++ already
+      }
+      if (i != bare.size()) {
+        out.push_back('.');
+      }
+      seg = i + 1;
+    }
+    return out;
+  }
+
+  std::string field_storage(const std::string& var_raw, const std::string& fld_raw, bool write, int* w_out = nullptr,
+                            bool* signed_out = nullptr) {
+    // Both sides need the strip: the INSTANCE may be named for a keyword too
+    // (`` `reg`.din ``), and every consumer below the lexer sees the bare name.
+    const std::string var   = unquote_field_path(var_raw);
+    // `var` stays the PYROPE spelling: it is a prp_sim-minted testbench local and
+    // the key of inst_of_var, not a name from the generated header. `fld` is
+    // matched against the manifest / emitted member, so it takes the C++ rule.
+    const std::string fld   = cxx_field_path(fld_raw);
+    auto              width = [&](int w) {
       if (w_out != nullptr) {
         *w_out = w;
       }
     };
+    auto sign = [&](bool s) {
+      if (signed_out != nullptr) {
+        *signed_out = s;
+      }
+    };
+    sign(false);
     // A tuple/struct-packed port is a nested struct in the generated header, so
     // its leaf path IS the C++ path (`acc.io_in.pc` -> `__in.io_in.pc`). Check
     // the port lists before the hierarchical-state walk below, which would
@@ -1082,27 +1428,26 @@ private:
       const Dut& td = duts_.at(inst_of_var.at(var));
       if (td.has_input(fld)) {
         width(td.input_width(fld));
+        sign(td.input_signed(fld));
         return var + ".__in." + fld;
       }
       if (td.has_output(fld)) {
         if (write) {
-          fail("cannot poke output '" + var + "." + fld + "' (outputs are read-only)");
+          fail("cannot drive output '" + var + "." + fld + "' (an output is read-only -- drive the inputs that produce it)");
         }
         width(td.output_width(fld));
-        return var + ".peek(" + var + ".__in)." + fld;
+        sign(td.output_signed(fld));
+        return var + ".__out." + fld;
       }
     }
     if (fld.find('.') != std::string::npos) {
-      // Hierarchical state path `acc.sub[.sub...].leaf[idx]` (READ-only):
+      // Hierarchical state path `acc.sub[.sub...].leaf[idx]`:
       // each intermediate segment names a sub-instance member of the current
       // module; the leaf resolves to a flop member or a memory array (its
       // optional [index] is emitted verbatim as C++). The generated memory
       // member often loses its RTL name (`reg regs:[32]u64` -> `memory_60`),
       // so with exactly ONE array in the leaf module any indexed name
       // aliases to it.
-      if (write) {
-        fail("cannot poke hierarchical path '" + var + "." + fld + "' (read-only)");
-      }
       const Dut*  hd   = &duts_.at(inst_of_var.at(var));
       std::string cxx  = var;
       std::string rest = fld;
@@ -1118,59 +1463,103 @@ private:
           }
           if (idx.empty() && hd->has_reg(name)) {
             width(hd->reg_width(name));
+            sign(hd->reg_signed(name));
             return cxx + "." + name;
           }
           if (std::find(hd->arrays.begin(), hd->arrays.end(), name) != hd->arrays.end()) {
             width(hd->array_width(name));
+            sign(hd->array_signed(name));
             return cxx + "." + name + "[" + idx + "]";
           }
           if (!idx.empty() && hd->arrays.size() == 1) {
             width(hd->array_width(hd->arrays.front()));
+            sign(hd->array_signed(hd->arrays.front()));
             return cxx + "." + hd->arrays.front() + "[" + idx + "]";  // RTL-name alias
           }
           fail("unknown state '" + name + "' in hierarchical path '" + var + "." + fld + "'");
         }
-        const std::string* cls = nullptr;
-        for (const auto& [m, c] : hd->subs) {
-          if (m == seg) {
-            cls = &c;
+        std::string sub_name = seg;
+        std::string ordinal;
+        if (const auto lb = seg.find('['); lb != std::string::npos && !seg.empty() && seg.back() == ']') {
+          sub_name = seg.substr(0, lb);
+          ordinal  = seg.substr(lb + 1, seg.size() - lb - 2);
+        }
+        const Dut::Sub* sub = nullptr;
+        for (const auto& candidate : hd->subs) {
+          if (candidate.inst == sub_name) {
+            sub = &candidate;
             break;
           }
         }
-        if (cls == nullptr) {
+        if (sub == nullptr) {
           fail("unknown sub-instance '" + seg + "' in hierarchical path '" + var + "." + fld + "'");
+        }
+        if (sub->is_loop) {
+          uint64_t oi = 0;
+          if (ordinal.empty()) {
+            if (sub->count != 1) {
+              fail("compact sub-instance '" + sub_name + "' needs an occurrence index in hierarchical path '" + var + "." + fld
+                   + "'");
+            }
+            // A single-lane compact loop has exactly one occurrence: name it.
+          } else {
+            // std::stoull validates only a numeric PREFIX — it accepts "0x2",
+            // "1_0" and "2junk" without throwing. Reject anything that is not
+            // pure decimal HERE, because the value that gets range-checked must
+            // be the value that reaches the generated `.lanes[...]` subscript.
+            if (ordinal.find_first_not_of("0123456789") != std::string::npos) {
+              fail("invalid occurrence index '" + ordinal + "' in hierarchical path '" + var + "." + fld + "'");
+            }
+            try {
+              oi = std::stoull(ordinal);
+            } catch (...) {  // out_of_range: more digits than uint64_t can hold
+              fail("invalid occurrence index '" + ordinal + "' in hierarchical path '" + var + "." + fld + "'");
+            }
+            if (oi >= sub->count) {
+              fail("occurrence index '" + ordinal + "' is out of range for '" + sub_name + "'");
+            }
+          }
+          ordinal = std::to_string(oi);  // emit the CHECKED value, never the raw text
+        } else if (!ordinal.empty()) {
+          fail("ordinary sub-instance '" + sub_name + "' has no occurrence index");
         }
         const Dut* nd = nullptr;
         for (const auto& [u, dd] : duts_) {
-          if (dd.cls == *cls) {
+          if (dd.cls == sub->cls) {
             nd = &dd;
             break;
           }
         }
         if (nd == nullptr) {
-          fail("no generated unit for sub-instance '" + seg + "' (class " + *cls + ")");
+          fail("no generated unit for sub-instance '" + seg + "' (class " + sub->cls + ")");
         }
-        cxx += "." + seg;
-        hd   = nd;
-        rest = rest.substr(dot + 1);
+        cxx  += "." + sub_name + (sub->is_loop ? ".lanes[" + ordinal + "]" : std::string{});
+        hd    = nd;
+        rest  = rest.substr(dot + 1);
       }
     }
     const Dut& d = duts_.at(inst_of_var.at(var));
     if (d.has_input(fld)) {
       width(d.input_width(fld));
+      sign(d.input_signed(fld));
       return var + ".__in." + fld;
     }
     if (d.has_output(fld)) {
       if (write) {
-        fail("cannot poke output '" + var + "." + fld + "' (outputs are read-only)");
+        fail("cannot drive output '" + var + "." + fld + "' (an output is read-only -- drive the inputs that produce it)");
       }
-      // recompute the output from the current committed state (correct before the
-      // first step, and after a poke without a step, too -- peek has no net effect)
+      // The settled outputs of the CURRENT committed state. cycle() refreshes
+      // __out on its way out, and reset_cycle() settles it too, so this is
+      // correct after a step, before the first step, and between drives -- and
+      // it is a plain member, so the read is free where the old peek(__in) cost
+      // a whole cycle() plus a snapshot/restore of the entire design state.
       width(d.output_width(fld));
-      return var + ".peek(" + var + ".__in)." + fld;
+      sign(d.output_signed(fld));
+      return var + ".__out." + fld;
     }
     if (d.has_reg(fld)) {
       width(d.reg_width(fld));
+      sign(d.reg_signed(fld));
       return var + "." + fld;
     }
     // NOTE (2f-sim B0): a memory WORD is NOT readable here. `d.arrays` is now
@@ -1187,14 +1576,14 @@ private:
     return {};
   }
 
-  // Resolve a peek()/poke() hierarchical string path `"<unit>/<field>"` to a
+  // Resolve a regref() hierarchical string path `"<unit>/<field>"` to a
   // field_access on the matching DUT instance (09-verification.md). `<unit>`
   // matches an instance-variable name (`mut dut = cnt` -> "dut") or a module name
-  // ("cnt"); one "unit/field" level is supported -- the common testbench probe.
-  std::string path_target(TSNode call, bool write, int* w_out = nullptr) {
+  // ("cnt"); field may include a dotted path through nested instances.
+  std::string path_target(TSNode call, bool write, int* w_out = nullptr, bool* signed_out = nullptr) {
     TSNode args = field(call, "argument");
     if (ts_node_is_null(args) || ts_node_named_child_count(args) < 1) {
-      fail("peek/poke needs a \"unit/field\" path");
+      fail("a string-path ref needs a \"unit/field\" path");
     }
     std::string path = text_of(src_, ts_node_named_child(args, 0));
     if (path.size() >= 2 && path.front() == '"') {
@@ -1202,7 +1591,7 @@ private:
     }
     auto slash = path.find('/');
     if (slash == std::string::npos) {
-      fail("peek/poke path '" + path + "' must be \"unit/field\"");
+      fail("ref path '" + path + "' must be \"unit/field\"");
     }
     std::string unit = path.substr(0, slash);
     std::string fld  = path.substr(slash + 1);
@@ -1218,16 +1607,17 @@ private:
       }
     }
     if (var.empty()) {
-      fail("peek/poke: no DUT instance for path '" + path + "'");
+      fail("no DUT instance for ref path '" + path + "'");
     }
-    return field_access(var, fld, write, w_out);
+    return field_access(var, fld, write, w_out, signed_out);
   }
 
   // Value for a `{name}` puts/print interpolation. A dotted `acc.field` (or a
-  // hierarchical `acc.sub.state[i]`) resolves to the instance-field peek at the
-  // field's OWN width; anything else is a plain in-scope value (a local, a test
-  // parameter, or the `clock` loop var). Every kind renders exactly — the Slop
-  // formatters are width-agnostic, so nothing goes through a 64-bit narrowing.
+  // hierarchical `acc.sub.state[i]`) resolves to the instance-field read at the
+  // field's OWN width; a `regref` name reads through its binding;
+  // anything else is a plain in-scope value (a local, a test parameter, or the
+  // `clock` loop var). Every kind renders exactly — the Slop formatters are
+  // width-agnostic, so nothing goes through a 64-bit narrowing.
   Val interp_expr(const std::string& name) {
     auto dot = name.find('.');
     if (dot != std::string::npos) {
@@ -1235,6 +1625,9 @@ private:
       if (inst_of_var.count(base) != 0) {
         return port_read(base, fld);
       }
+    }
+    if (auto it = ref_alias_.find(name); it != ref_alias_.end()) {
+      return member_read(it->second.storage, it->second.width, it->second.is_signed);
     }
     if (auto it = local_w_.find(name); it != local_w_.end()) {
       return slop_val(name, it->second);
@@ -1336,13 +1729,32 @@ private:
           }
           arrays_[ln] = elems;
         } else if (!m.empty()) {
+          // Only a Color_plan ROOT gets an executable class. A definition that
+          // some other module instantiates is emitted as a storage-only record
+          // whose logic belongs to that root's occurrence-wide DAG, so driving
+          // it here would reach the host compiler as `no member named 'step'`.
+          if (auto dit = duts_.find(m); dit != duts_.end() && !dit->second.executable) {
+            fail("module '" + m + "' is instantiated by another module, so `lhd sim` emitted it as storage only (no step()); "
+                 "re-run with `--top " + m + "` to build it as a simulator root");
+          }
           inst_of_var[ln] = m;  // `mut acc = Module` -> a persistent instance
+        } else if (!ts_node_is_null(rv) && is_ref_call(rv)) {
+          // `mut pc = regref(acc.x)` -> an alias of a storage cell, bound once.
+          // Deliberately NOT a driver local: it holds no value of its own, so
+          // there is nothing to zero-init and nothing to width-infer.
+          int  w         = 0;
+          bool is_signed = false;
+          auto r         = ref_call_target(rv, &w, &is_signed);
+          ref_alias_[ln] = {r, w > 0 ? w : 64, is_signed};
+          ref_writable_.insert(ln);  // every surviving ref spelling is `regref`
         } else {
           locals_.insert(ln);
           if (const int dw = declared_slop_width(src_, lv); dw > 0) {
             local_decl_w_[ln] = std::max(local_decl_w_[ln], dw);
           }
-          if (!ts_node_is_null(rv)) {
+          // A compound write (`s += e`) reads its own target exactly as
+          // `s = s + e` does, so it must not size the local from `e` alone.
+          if (!ts_node_is_null(rv) && compound_binop(n).empty()) {
             assigns_.emplace_back(ln, rv);
           }
         }
@@ -1436,41 +1848,92 @@ private:
     return "(" + to_slop(v).cpp + ").to_decimal()";
   }
 
-  // Read a DUT port / reg / memory element as a testbench value. An RTL member
-  // is a bit vector, so it is read UNSIGNED (zero-extended into one spare sign
-  // bit): the value stays non-negative in the signed plane and every later
-  // widening preserves it. This is also what the old `to_just_i64()` read did
-  // for anything under 64 bits — now it holds at every width.
+  // Read a DUT port / reg / memory element into the testbench's signed Slop
+  // plane. The interface manifest is authoritative: unsigned values get one
+  // zero sign slot, while signed values are sign-extended into that slot. The
+  // distinction became observable once LGraph signed widths became literal:
+  // an s8 output no longer carries a hidden ninth sign bit for the testbench.
+  static Val member_read(const std::string& storage, int width, bool is_signed) {
+    const int tw = width + 1;
+    if (is_signed) {
+      return slop_val("Slop<" + std::to_string(tw) + ">{" + storage + "}", tw);
+    }
+    return slop_val(storage + ".zext_to<" + std::to_string(tw) + ">()", tw);
+  }
+
   Val port_read(const std::string& base, const std::string& fld) {
-    int         w = 0;
-    std::string a = field_access(base, fld, /*write=*/false, &w);
+    int         w         = 0;
+    bool        is_signed = false;
+    std::string a         = field_access(base, fld, /*write=*/false, &w, &is_signed);
     if (w <= 0) {
       w = 64;  // a member the header parse could not size: keep the old plane
     }
-    return slop_val(a + ".zext_to<" + std::to_string(w + 1) + ">()", w + 1);
+    return member_read(a, w, is_signed);
   }
 
-  static bool is_unary_op(std::string_view t) {
-    return t == "op_log_not" || t == "op_bit_not" || t == "op_unary_minus";
-  }
+  static bool is_unary_op(std::string_view t) { return t == "op_log_not" || t == "op_bit_not" || t == "op_unary_minus"; }
   static bool is_binary_op(std::string_view t) {
     return t == "binary_compare_op" || t == "binary_other_op" || t == "binary_times_op" || t == "binary_logical_op"
            || t == "binary_step_op";
   }
 
-  // A Pyrope integer literal -> a Slop of its measured width (+ a sign bit), via
-  // the constexpr pyrope codec, so it folds at compile time and is exact at any
-  // width. An unmeasurable spelling falls back to the raw text on the long plane.
+  // A Pyrope integer literal -> a Slop of its measured width (+ a sign bit),
+  // folded at compile time or parsed once at runtime for wide/unknown values.
+  // An unmeasurable spelling falls back to the raw text on the long plane.
   Val literal_val(const std::string& raw) {
-    const std::string lit = strip_sep(raw);
-    const int         w   = literal_slop_width(lit);
+    std::string lit = strip_sep(raw);
+    // sim.unknown_zero: concretize `?` here, so the literal takes one of the
+    // FOLDED arms below instead of the runtime-parse arm (which is what draws
+    // the random bits). Mirrors cgen_sim's sim_const_text for the DUT side.
+    if (unknown_zero_) {
+      std::replace(lit.begin(), lit.end(), '?', '0');
+    }
+    const int w = literal_slop_width(lit);
     if (w == 0) {
       return long_val(lit);
     }
-    Val v = slop_val("Slop<" + std::to_string(w) + ">::from_pyrope(\"" + lit + "\")", w);
-    if (const int b = int_literal_bits(lit); b >= 0 && b < 63) {
+    // A bare `from_pyrope("...")` sub-expression is NOT folded at compile
+    // time just because the codec is constexpr — the tb loop re-parsed "1"
+    // digit-by-digit EVERY CYCLE (Slop<1>/<2>::from_pyrope measured 2.5% of
+    // dino simulation, the same lesson cgen_sim's operand() learned at
+    // 27.8%). So: create_integer (always folded) for every spelling
+    // int_literal_value decodes to a non-negative int64 — plain decimal, 0x
+    // hex, 0ub binary. Other single-word known values go through a constexpr
+    // local, which FORCES the fold; wide and `?`-carrying literals go through
+    // the once-per-program helper the DUT
+    // uses (sim_tune_rt.hpp's __lhd_unknown_literal): drawn on FIRST USE, so
+    // it is one constant per run -- a bare `from_pyrope("..?..")` here used to
+    // draw a FRESH value at every evaluation, i.e. every cycle, and an assert's
+    // message could even print a different value than its condition tested.
+    // It also honours drv.bin's run-time `--set sim.unknown_zero=true`. The key
+    // is salted with "tb:" so a testbench literal never shares a draw with a
+    // DUT literal of the same width and spelling.
+    //
+    // Only the create_integer arm claims `has_lit`: const_of would otherwise
+    // fold a bit-select bound to a value the literal does not have.
+    //
+    // `w` is int_literal_bits + 1 (the w == 0 case returned above), so the
+    // measurement is reused rather than re-scanned.
+    long long n = 0;
+    Val       v;
+    if (int_literal_value(lit, w - 1, &n)) {
+      v         = slop_val("Slop<" + std::to_string(w) + ">::create_integer(" + std::to_string(n) + ")", w);
       v.has_lit = true;
-      v.lit     = std::strtoll(lit.c_str(), nullptr, 0);  // measured to fit: a shift amount
+      v.lit     = n;  // measured to fit: a shift amount
+    } else if (w <= 64 && lit.find('?') == std::string::npos) {
+      v = slop_val("([]{ constexpr auto _k = Slop<" + std::to_string(w) + ">::from_pyrope(\"" + lit + "\"); return _k; }())", w);
+    } else {
+      const uint64_t key = livehd::hash_util::fnv1a64(lit, livehd::hash_util::fnv1a64("tb:"));
+      // `Slop::from_pyrope` IS constexpr at any width (cgen_sim folds up to
+      // kMaxConstexprBits = 2048 on the DUT plane). The testbench plane stops
+      // at one word on purpose: its literals are re-evaluated per vector and a
+      // multiword fold burns constexpr step budget in a TU that already carries
+      // the whole stimulus, so a 65+-bit literal is parsed once at runtime via
+      // the shared helper instead. Values are identical either way.
+      if (lit.find('?') != std::string::npos) {
+        tb_unknown_keys_.insert({w, key});
+      }
+      v = slop_val("__lhd_unknown_literal<" + std::to_string(w) + ", " + std::to_string(key) + "ull>(\"" + lit + "\")", w);
     }
     return v;
   }
@@ -1481,6 +1944,12 @@ private:
       std::string nm = text_of(src_, n);
       if (nm == "nil") {
         return long_val("0");
+      }
+      // A `regref` binding is an ALIAS, not a value: reading it reads
+      // the design's storage at this instant, so it re-reads on every use rather
+      // than holding whatever the cell contained when it was bound.
+      if (auto it = ref_alias_.find(nm); it != ref_alias_.end()) {
+        return member_read(it->second.storage, it->second.width, it->second.is_signed);
       }
       if (auto it = local_w_.find(nm); it != local_w_.end()) {
         return slop_val(nm, it->second);
@@ -1526,19 +1995,54 @@ private:
       return apply_unary(op, eval(opnd));
     }
     if (t == "function_call_expression") {
-      TSNode fn = field(n, "function");
-      if (!ts_node_is_null(fn) && text_of(src_, fn) == "peek") {  // peek("unit/field")
-        int         w = 0;
-        std::string a = path_target(n, /*write=*/false, &w);
+      // A bare `regref(x)` used as a value (rather than bound to a
+      // name) still reads the cell -- it is just an unnamed binding.
+      if (is_ref_call(n)) {
+        int         w         = 0;
+        bool        is_signed = false;
+        std::string a         = ref_call_target(n, &w, &is_signed);
         if (w <= 0) {
           w = 64;
         }
-        return slop_val(a + ".zext_to<" + std::to_string(w + 1) + ">()", w + 1);
+        return member_read(a, w, is_signed);
+      }
+      // A WIDTH CAST used as a value: `u1(clock >= 4)`, `u8(x + 1)`. Without
+      // this arm the call fell through to the flat operand/operator walker,
+      // which saw [identifier, tuple] and reported the useless "unsupported
+      // expression form in test: (clock >= 4)" — the exact spelling minion's
+      // and vpu's own testbenches use to derive a reset from the tick counter.
+      // Test values are built non-negative (see compare()), so the cast is a
+      // zext/truncation to the named width; a SIGNED cast keeps failing loudly
+      // rather than silently zero-extending.
+      {
+        TSNode      fn   = field(n, "function");
+        std::string fnnm = ts_node_is_null(fn) ? "" : text_of(src_, fn);
+        if (fnnm.size() >= 2 && (fnnm[0] == 'u' || fnnm[0] == 's')
+            && std::all_of(fnnm.begin() + 1, fnnm.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
+          if (fnnm[0] == 's') {
+            fail("signed width-cast '" + fnnm + "' in a test expression: test values are unsigned; cast in the DUT instead");
+          }
+          TSNode args = field(n, "argument");
+          if (ts_node_is_null(args) || ts_node_named_child_count(args) != 1) {
+            fail("width-cast '" + fnnm + "' needs exactly one argument");
+          }
+          const int w = std::stoi(fnnm.substr(1));
+          if (w <= 0 || w > 512) {
+            fail("width-cast '" + fnnm + "' is outside the supported 1..512 range");
+          }
+          const Val a = eval(ts_node_named_child(args, 0));
+          const Val s = to_slop(a);
+          // First wrap to W bits, then retain a zero sign bit in the value
+          // plane. Slop<W> alone interprets an unsigned cast's top bit as a
+          // sign: u1(true) compared unequal to a DUT output containing 1,
+          // and u8(255) became -1 in comparisons and arithmetic.
+          return slop_val("(" + at_width(s, w) + ").zext_to<" + std::to_string(w + 1) + ">()", w + 1);
+        }
       }
     }
     if (t == "dot_expression") {
       std::string base, fld;
-      if (inst_dot(n, base, fld)) {  // peek `acc.field` (output / reg / input)
+      if (inst_dot(n, base, fld)) {  // read `acc.field` (output / reg / input)
         return port_read(base, fld);
       }
       fail("unsupported dot expression: " + text_of(src_, n).substr(0, 40));
@@ -1621,8 +2125,7 @@ private:
           in_else = true;
         }
       } else if (f == "init") {
-        fail("an `if` used as a value in a test may not declare variables in its header: "
-             + text_of(src_, n).substr(0, 40));
+        fail("an `if` used as a value in a test may not declare variables in its header: " + text_of(src_, n).substr(0, 40));
       }
     }
     if (arms.empty()) {
@@ -1639,8 +2142,7 @@ private:
         stmts.push_back(c);
       }
       if (stmts.size() != 1) {
-        fail("an `if` arm used as a value in a test must hold exactly one expression: "
-             + text_of(src_, block).substr(0, 40));
+        fail("an `if` arm used as a value in a test must hold exactly one expression: " + text_of(src_, block).substr(0, 40));
       }
       return eval(stmts[0]);
     };
@@ -1653,7 +2155,7 @@ private:
       // arm never silently truncates against its sibling.
       const Val a = to_slop(arm), b = to_slop(out);
       const int w = std::max(a.w, b.w);
-      out = slop_val("(" + as_bool_of(cond) + " ? " + at_width(a, w) + " : " + at_width(b, w) + ")", w);
+      out         = slop_val("(" + as_bool_of(cond) + " ? " + at_width(a, w) + " : " + at_width(b, w) + ")", w);
     }
     return out;
   }
@@ -1692,8 +2194,7 @@ private:
     auto const_of = [&](TSNode k) {
       const Val v = eval(k);
       if (!v.has_lit) {
-        fail("bit select bounds must be compile-time constants in a test: "
-             + text_of(src_, n).substr(0, 40));
+        fail("bit select bounds must be compile-time constants in a test: " + text_of(src_, n).substr(0, 40));
       }
       return static_cast<int>(v.lit);
     };
@@ -1712,15 +2213,14 @@ private:
     if (hi < lo || lo < 0) {
       fail("bit select range must be ascending and non-negative: " + text_of(src_, n).substr(0, 40));
     }
-    const Val   s = to_slop(eval(base));
-    const int   w = hi - lo + 1;
+    const Val   s       = to_slop(eval(base));
+    const int   w       = hi - lo + 1;
     std::string shifted = lo == 0 ? s.cpp : ("(" + s.cpp + ").sra_op(" + std::to_string(lo) + ")");
     // Mask to exactly the selected bits, then widen into one spare sign bit, so
     // the field reads as the non-negative number the source means. Both steps
     // are zext (the signed conversion would take a bit ABOVE the field as the
     // sign, and the second would sign-extend the field's own top bit).
-    return slop_val("(" + shifted + ").zext_to<" + std::to_string(w) + ">().zext_to<" + std::to_string(w + 1) + ">()",
-                    w + 1);
+    return slop_val("(" + shifted + ").zext_to<" + std::to_string(w) + ">().zext_to<" + std::to_string(w + 1) + ">()", w + 1);
   }
 
   Val apply_unary(const std::string& op, const Val& v) {
@@ -1791,8 +2291,7 @@ private:
     // loosest of all, so it is matched before the class scan.
     for (size_t i = b; i < e; ++i) {
       if (is_binary_op(ntype(kids[i])) && text_of(src_, kids[i]) == "implies") {
-        return bool_val("(!(" + as_bool_of(eval_kids(kids, b, i)) + ") || ("
-                        + as_bool_of(eval_kids(kids, i + 1, e)) + "))");
+        return bool_val("(!(" + as_bool_of(eval_kids(kids, b, i)) + ") || (" + as_bool_of(eval_kids(kids, i + 1, e)) + "))");
       }
     }
     int    loosest = 99;
@@ -1848,14 +2347,14 @@ private:
   Val compare(const std::string& op, const Val& a, const Val& b) {
     // Both sides are built non-negative (or explicitly signed), so one common
     // width is enough and the signed compare agrees with the unsigned reading.
-    const Val as = to_slop(a), bs = to_slop(b);
-    const int w    = std::max(as.w, bs.w);
+    const Val         as = to_slop(a), bs = to_slop(b);
+    const int         w = std::max(as.w, bs.w);
     const std::string l = at_width(as, w), r = at_width(bs, w);
     if (op == "==") {
       return bool_val("(" + l + ").eq_op(" + r + ").is_known_true()");
     }
     if (op == "!=") {
-      return bool_val("!(" + l + ").eq_op(" + r + ").is_known_true()");  // Slop has no ne_op
+      return bool_val("(" + l + ").ne_op(" + r + ").is_known_true()");
     }
     if (op == "<") {
       return bool_val("(" + l + ").lt_op(" + r + ").is_known_true()");
@@ -1878,7 +2377,7 @@ private:
   // sum, a shift the shifted-in bits.
   Val fold_binary(const std::string& op, const Val& a, const Val& b) {
     const Val as = to_slop(a), bs = to_slop(b);
-    const int mx = std::max(as.w, bs.w);
+    const int mx  = std::max(as.w, bs.w);
     auto      bin = [&](const char* method, int w) {
       return slop_val("(" + at_width(as, w) + ")." + method + "(" + at_width(bs, w) + ")", w);
     };
@@ -1910,9 +2409,9 @@ private:
       // A literal shift grows the result exactly; a runtime amount cannot be
       // sized at generation, so it gets 64 bits of headroom (a testbench that
       // shifts by more than that is shifting by a runaway value anyway).
-      const int  grow = bs.has_lit ? static_cast<int>(bs.lit) : 64;
-      const int  w    = as.w + grow;
-      const std::string amt = bs.has_lit ? std::to_string(bs.lit) : ("(" + bs.cpp + ").to_just_i64()");
+      const int         grow = bs.has_lit ? static_cast<int>(bs.lit) : 64;
+      const int         w    = as.w + grow;
+      const std::string amt  = bs.has_lit ? std::to_string(bs.lit) : ("(" + bs.cpp + ").to_just_i64()");
       return slop_val("(" + at_width(as, w) + ").shl_op(" + amt + ")", w);
     }
     if (op == ">>") {
@@ -2018,8 +2517,7 @@ private:
   // assert can print both operand values. Returns false for a bare boolean, a
   // logical-combined condition (`a and b`), or a chained compare — those fall
   // back to printing the whole condition source.
-  bool decompose_compare(TSNode cond, Val& lhs_cpp, std::string& lhs_src, std::string& op, Val& rhs_cpp,
-                         std::string& rhs_src) {
+  bool decompose_compare(TSNode cond, Val& lhs_cpp, std::string& lhs_src, std::string& op, Val& rhs_cpp, std::string& rhs_src) {
     TSNode   u  = unwrap(cond);
     uint32_t nc = ts_node_named_child_count(u);
     if (nc < 3) {
@@ -2065,16 +2563,25 @@ private:
       if (inst_of_var.empty()) {
         fail("`step` with no instance declared (use `mut acc = Module` first)");
       }
-      TSNode cnt = field(n, "value");
+      // The sim.tune step hook follows every group of steps -- this arm is the
+      // ONLY place a DUT cycle advances (a tick iteration may step 0..N times,
+      // and steps also happen outside any tick), so the countdown sees exactly
+      // the test's DUT cycles. The first step always takes the cold path (it
+      // starts the sim_ns window); with profiling off no other one does.
+      // Cold path: prp_sim_rt.hpp's _TuneProf::hit.
+      static constexpr std::string_view kHook = "if (--_tp_left == 0) [[unlikely]] _tp_left = _tp.hit(_tp_d);\n";
+      TSNode                            cnt   = field(n, "value");
       if (ts_node_is_null(cnt)) {
         for (const auto& [var, m] : inst_of_var) {
           o << ind << var << ".step();\n";
         }
+        o << ind << kHook;
       } else {
         o << ind << "for (long _s = 0; _s < (long)(" << as_long(cnt) << "); ++_s) {\n";
         for (const auto& [var, m] : inst_of_var) {
           o << ind << "  " << var << ".step();\n";
         }
+        o << ind << "  " << kHook;
         o << ind << "}\n";
       }
       return;
@@ -2101,7 +2608,7 @@ private:
       TSNode      fn   = field(n, "function");
       std::string fnnm = ts_node_is_null(fn) ? "" : text_of(src_, fn);
       if (fnnm == "cassert") {
-        // `cassert` is an ELABORATION check (user ruling, 2026-07-25), not a
+        // `cassert` is an ELABORATION check, not a
         // simulation one: it must fold to true at build time or it is a diag
         // error. upass.tolg (check_unlowered_casserts) already decided every
         // cassert of this `test` block's `%`-named unit — so by the time this
@@ -2121,24 +2628,63 @@ private:
         gen_puts(o, n, depth, /*newline=*/fnnm == "puts");
         return;
       }
-      if (fnnm == "poke") {  // poke("unit/field", value) -> force an internal reg/input
-        TSNode args = field(n, "argument");
-        if (ts_node_is_null(args) || ts_node_named_child_count(args) < 2) {
-          fail("poke needs a \"unit/field\" path and a value");
-        }
-        o << ind << "__prp_poke(" << path_target(n, /*write=*/true) << ", "
-          << to_slop(eval(ts_node_named_child(args, 1))).cpp << ");\n";
-        return;
+      if (fnnm == "peek" || fnnm == "poke") {
+        fail(std::string("`") + fnnm
+             + "` was removed: read a cell with bare dotted access (`dut.c`), and to DRIVE one bind it once "
+               "with `regref` outside the loop -- e.g. `mut c = regref(\"cnt/c\")` then `c = 42`");
+      }
+      if (fnnm == "regref") {
+        fail(std::string("`") + fnnm + "` is a binding, not a statement: assign it to a name (`mut r = " + fnnm + "(...)`)");
       }
     }
-    fail(std::string("unsupported statement in test: `") + std::string(t) + "` -> "
-         + text_of(src_, n).substr(0, 40));
+    fail(std::string("unsupported statement in test: `") + std::string(t) + "` -> " + text_of(src_, n).substr(0, 40));
+  }
+
+  // The binary operator a compound assignment folds (`+=` -> "+"), or "" for a
+  // plain `=`. The assignment node carries it as an aliased child of its
+  // `operator` field (`assign_add`, `assign_sub`, ...), the same shape
+  // prp2lnast's compound_factory decodes. The emitter used to take the rvalue
+  // alone, so `sum += v` in a test silently became `sum = v` (measured: a
+  // four-term accumulator ended holding only its last term).
+  std::string compound_binop(TSNode assign) {
+    TSNode op = field(assign, "operator");
+    if (ts_node_is_null(op)) {
+      return "";
+    }
+    TSNode           inner = ts_node_named_child(op, 0);
+    std::string_view kind  = ts_node_is_null(inner) ? std::string_view{} : ntype(inner);
+    if (kind.empty() || kind == "assign") {
+      return "";
+    }
+    static const std::map<std::string_view, std::string> table = {
+        {    "assign_add",  "+"},
+        {    "assign_sub",  "-"},
+        {    "assign_mul",  "*"},
+        {    "assign_div",  "/"},
+        { "assign_bit_or",  "|"},
+        {"assign_bit_and",  "&"},
+        {"assign_bit_xor",  "^"},
+        {    "assign_shl", "<<"},
+        {    "assign_sra", ">>"},
+    };
+    auto it = table.find(kind);
+    if (it == table.end()) {
+      fail("unsupported compound assignment `" + std::string(kind) + "` in test");
+    }
+    return it->second;
   }
 
   void gen_assignment(std::ostringstream& o, TSNode n, int depth) {
-    std::string ind(depth * 2, ' ');
-    TSNode      lv = field(n, "lvalue");
-    TSNode      rv = field(n, "rvalue");
+    std::string       ind(depth * 2, ' ');
+    TSNode            lv      = field(n, "lvalue");
+    TSNode            rv      = field(n, "rvalue");
+    // `x op= e` is `x = x op e` on every lvalue kind below (a poke, a write
+    // through a ref, a test local).
+    const std::string bop     = compound_binop(n);
+    auto              rhs_val = [&]() {
+      Val r = eval(rv);
+      return bop.empty() ? r : fold_binary(bop, eval(lv), r);
+    };
 
     // poke `acc.field = v` -> set an input latch (or force an internal reg).
     // The value is a Slop of its own width and __prp_poke re-expresses it at the
@@ -2146,13 +2692,25 @@ private:
     // 64-bit staging).
     std::string base, fld;
     if (inst_dot(lv, base, fld)) {
-      o << ind << "__prp_poke(" << field_access(base, fld, /*write=*/true) << ", " << to_slop(eval(rv)).cpp << ");\n";
+      o << ind << "__prp_poke(" << field_access(base, fld, /*write=*/true) << ", " << to_slop(rhs_val()).cpp << ");\n";
       return;
     }
 
     std::string lname = lvalue_name(src_, lv);
     if (lname.empty()) {
       fail("unsupported assignment lvalue: " + text_of(src_, n).substr(0, 40));
+    }
+    // Writing through a bound ref. Rebinding is NOT a thing: `r = v` where `r`
+    // is a ref drives the cell, exactly as `acc.field = v` does.
+    if (auto it = ref_alias_.find(lname); it != ref_alias_.end()) {
+      // The BINDING (`mut r = regref(...)`) emits nothing here -- the hoisted
+      // `auto& __refN = ...` was already placed at function scope. Only a later
+      // assignment to the same name is a write through the ref.
+      if (!ts_node_is_null(rv) && is_ref_call(rv)) {
+        return;
+      }
+      o << ind << "__prp_poke(" << it->second.storage << ", " << to_slop(rhs_val()).cpp << ");\n";
+      return;
     }
     if (!ts_node_is_null(rv) && ntype(rv) == "tuple_sq") {
       return;  // array literal: declared once at function scope (see discover)
@@ -2165,7 +2723,7 @@ private:
     }
     // The local's declared width is >= every value assigned to it (see
     // infer_local_widths), so this conversion never loses anything.
-    o << ind << lname << " = " << at_width(eval(rv), local_w_.at(lname)) << ";\n";
+    o << ind << lname << " = " << at_width(rhs_val(), local_w_.at(lname)) << ";\n";
   }
 
   void gen_if(std::ostringstream& o, TSNode n, int depth) {
@@ -2279,13 +2837,13 @@ private:
   // Emit the periodic-checkpoint block at the top of a tick body: when the
   // cadence is due (or every N cycles, `--checkpoint-every`), fork a child that
   // writes ckp<cycle>/{regs.json, <mem>.hex, tb.json, meta.json}; the parent
-  // creates the dir first (so prune sees this cycle) and prunes to max after.
+  // prunes completed checkpoints after each fork and again after the final drain.
   void emit_checkpoint_block(std::ostringstream& o, const std::string& ind, const std::string& clk) {
-    if (inst_of_var.empty()) {
+    if (!runtime_support_on_ || inst_of_var.empty()) {
       return;
     }
     o << ind << "if (_ckpt.enabled && !_ckpt_base.empty() && " << clk << " > 0 && (_ckpt.every > 0 ? (" << clk
-      << " % _ckpt.every == 0) : _cad.due())) {\n";
+      << " % _ckpt.every == 0) : _cad.due())) [[unlikely]] {\n";
     o << ind << "  std::string _cdir = hlop::ckpt::ckpt_path(_ckpt_base, " << clk << ");\n";
     o << ind << "  auto _t0 = std::chrono::steady_clock::now();\n";
     o << ind << "  hlop::ckpt::fork_checkpoint([&]() {\n";
@@ -2315,22 +2873,24 @@ private:
     o << ind << "    hlop::ckpt::write_str_map(_cdir + \"/meta.json\", _meta);\n";
     o << ind << "    hlop::ckpt::mark_complete(_cdir);  // LAST: makes the checkpoint visible to prune/restart\n";
     o << ind << "  });\n";
+    o << ind << "  _ckpt_written.insert(_ckpt_base);\n";
     o << ind << "  hlop::ckpt::prune_checkpoints(_ckpt_base, _ckpt.max);\n";
     o << ind << "  _cad.taken(std::chrono::duration<double>(std::chrono::steady_clock::now() - _t0).count());\n";
+    o << ind << "  _tp.ckpt();  // ckpt_taken: a forked checkpoint's copy-on-write faults land on this run's counters\n";
     o << ind << "}\n";
   }
 
-  // Emit the restart prologue before the FIRST tick loop: if `--restart-at X`,
+  // Emit the restart prologue before the FIRST tick loop: if `--restart-cycle X`,
   // load the nearest checkpoint <= X (DUT state + this testbench frame), warn on a
   // design_hash mismatch (cross-version reload), and resume the loop at that cycle
   // instead of 0. Only the first tick restarts (the single-clock model has one
   // primary loop); later ticks run normally. No-op when no checkpoint is <= X.
   void emit_restart_block(std::ostringstream& o, const std::string& ind, const std::string& clk) {
-    if (inst_of_var.empty() || restart_block_emitted_) {
+    if (!runtime_support_on_ || inst_of_var.empty() || restart_block_emitted_) {
       return;
     }
     restart_block_emitted_ = true;
-    // Effective restart target: --restart-at, else the --vcd-from window start.
+    // Effective restart target: --restart-cycle, else the --vcd-from window start.
     o << ind << "long _rt = _ckpt.restart_at >= 0 ? _ckpt.restart_at : _ckpt.vcd_from;\n";
     o << ind << "if (_rt >= 0 && !_ckpt_base.empty()) {\n";
     o << ind << "  long _nc = hlop::ckpt::nearest_checkpoint_cycle(_ckpt_base, _rt);\n";
@@ -2342,8 +2902,8 @@ private:
     }
     o << ind << "    auto _rtb = hlop::ckpt::read_str_map(_cdir + \"/tb.json\");\n";
     for (const auto& v : locals_) {
-      o << ind << "    if (auto _it = _rtb.find(\"" << v << "\"); _it != _rtb.end()) " << v << " = Slop<"
-        << local_w_.at(v) << ">::from_pyrope(_it->second);\n";
+      o << ind << "    if (auto _it = _rtb.find(\"" << v << "\"); _it != _rtb.end()) " << v << " = Slop<" << local_w_.at(v)
+        << ">::from_pyrope(_it->second);\n";
     }
     o << ind << "    { unsigned long long _dh = hlop::ckpt::kFnvOffset;\n";
     for (const auto& [var, m] : inst_of_var) {
@@ -2351,16 +2911,18 @@ private:
     }
     o << ind << "      auto _rmeta = hlop::ckpt::read_str_map(_cdir + \"/meta.json\");\n";
     o << ind << "      auto _mh = _rmeta.find(\"design_hash\");\n";
-    o << ind << "      if (_mh != _rmeta.end() && _mh->second != std::to_string(_dh)) std::fprintf(stderr, \"lhd sim: "
-                "warning: checkpoint design_hash mismatch at cycle %ld (cross-version reload; missing regs keep their "
-                "reset value)\\n\", _nc);\n";
+    o << ind
+      << "      if (_mh != _rmeta.end() && _mh->second != std::to_string(_dh)) std::fprintf(stderr, \"lhd sim: "
+         "warning: checkpoint design_hash mismatch at cycle %ld (cross-version reload; missing regs keep their "
+         "reset value)\\n\", _nc);\n";
     // The PRNG stream position is NOT checkpointed (the thread_local engine resumes
     // at position 0). If the checkpointed run used randomness, warn that randomized
     // stimulus will diverge after restart (deterministic runs are unaffected).
     o << ind << "      auto _rd = _rmeta.find(\"rng_draws\");\n";
-    o << ind << "      if (_rd != _rmeta.end() && _rd->second != \"0\" && !_rd->second.empty()) std::fprintf(stderr, "
-                "\"lhd sim: warning: checkpoint used randomness (%s draws); PRNG stream is not restored, so randomized "
-                "stimulus will diverge after restart\\n\", _rd->second.c_str()); }\n";
+    o << ind
+      << "      if (_rd != _rmeta.end() && _rd->second != \"0\" && !_rd->second.empty()) std::fprintf(stderr, "
+         "\"lhd sim: warning: checkpoint used randomness (%s draws); PRNG stream is not restored, so randomized "
+         "stimulus will diverge after restart\\n\", _rd->second.c_str()); }\n";
     o << ind << "    " << clk << " = _nc;\n";
     if (!vcd_dir_.empty()) {
       // Align the VCD time axis with the absolute cycle (the period counter is not
@@ -2398,7 +2960,7 @@ private:
   // every scalar signal once, then record a --probe trajectory row (within the
   // window) and/or test the --break-when condition (first hit only).
   void emit_debug_block(std::ostringstream& o, const std::string& ind, const std::string& clk) {
-    if (inst_of_var.empty()) {
+    if (!runtime_support_on_ || inst_of_var.empty()) {
       return;
     }
     // `window_only` marks the verdict-discarded --vcd-on-fail re-run — skip probing
@@ -2408,16 +2970,19 @@ private:
     for (const auto& [var, m] : inst_of_var) {
       o << ind << "  " << var << ".probe_signals(\"" << var << ".\", _sn);\n";
     }
-    o << ind << "  if (!_dbg.probe.empty() && " << clk << " >= (_dbg.probe_from < 0 ? 0 : _dbg.probe_from) && "
-                "(_dbg.probe_to < 0 || " << clk << " <= _dbg.probe_to)) {\n";
+    o << ind << "  if (!_dbg.probe.empty() && " << clk
+      << " >= (_dbg.probe_from < 0 ? 0 : _dbg.probe_from) && "
+         "(_dbg.probe_to < 0 || "
+      << clk << " <= _dbg.probe_to)) {\n";
     o << ind << "    _DbgRow _r; _r.cycle = " << clk
       << "; for (const auto& _s : _dbg.probe) { auto _it = _sn.find(_s); if (_it != _sn.end()) _r.vals[_s] = "
          "_it->second; } _dbg.rows.push_back(std::move(_r));\n";
     o << ind << "  }\n";
     // Only evaluate the break when BOTH operands resolve to real signals — a
     // missing name must NOT default to 0 (that would fire a spurious cycle-0 hit).
-    o << ind << "  if (_dbg.has_break && !_dbg.break_hit && _sn.count(_dbg.b_lhs) && (!_dbg.b_rhs_is_sig || "
-                "_sn.count(_dbg.b_rhs))) {\n";
+    o << ind
+      << "  if (_dbg.has_break && !_dbg.break_hit && _sn.count(_dbg.b_lhs) && (!_dbg.b_rhs_is_sig || "
+         "_sn.count(_dbg.b_rhs))) {\n";
     o << ind << "    long _lv = _sn[_dbg.b_lhs];\n";
     o << ind << "    long _rv = _dbg.b_rhs_is_sig ? _sn[_dbg.b_rhs] : _dbg.b_rhs_val;\n";
     o << ind << "    if (_dbg_cmp(_lv, _dbg.b_op, _rv)) { _dbg.break_hit = true; _dbg.break_cycle = " << clk
@@ -2445,7 +3010,8 @@ private:
     // build per sampled cycle and is freed immediately; the STORED stream is
     // what grows as signals x cycles, so that is what gets bounded.
     o << ind << "  std::map<std::string, std::string> _qk;\n";
-    o << ind << "  for (const auto& _n : _q.need) { auto _it = _qs.find(_n); if (_it != _qs.end()) _qk.emplace(_n, _it->second); }\n";
+    o << ind
+      << "  for (const auto& _n : _q.need) { auto _it = _qs.find(_n); if (_it != _qs.end()) _qk.emplace(_n, _it->second); }\n";
     o << ind << "  _q.cyc.push_back(" << clk << "); _q.snap.push_back(std::move(_qk));\n";
     // A memory WORD is read on demand at the cycle that asked for it: memories
     // are excluded from the per-cycle snapshot on purpose (a whole-array dump
@@ -2480,7 +3046,7 @@ private:
     if (in_tick_) {
       fail("a `tick` cannot be nested inside another `tick` (single-clock model) -- flatten into one tick loop");
     }
-    in_tick_ = true;
+    in_tick_             = true;
     // Optional clocks=(name=ratio): name the clock + set its VCD time ratio on
     // each instance. (Multiclock is parsed but not lowered here; reset is no
     // longer a tick clause -- it is poked as an ordinary input.) The clock's name
@@ -2488,9 +3054,11 @@ private:
     // `puts("clock={clock}")`); it defaults to `clock`.
     std::string clk_name = "clock", clk_ratio;
     if (tick_one_entry(field(n, "clocks"), "clock", clk_name, clk_ratio)) {
-      for (const auto& [var, m] : inst_of_var) {
-        o << ind << var << ".__clk_ratio = (unsigned)(" << clk_ratio << ");\n";
-        o << ind << var << ".__clk_name = \"" << clk_name << "\";\n";
+      if (!vcd_dir_.empty()) {
+        for (const auto& [var, m] : inst_of_var) {
+          o << ind << var << ".__clk_ratio = (unsigned)(" << clk_ratio << ");\n";
+          o << ind << var << ".__clk_name = \"" << clk_name << "\";\n";
+        }
       }
     }
     // The clock name is emitted as the C++ loop variable, so it must be a usable
@@ -2498,7 +3066,8 @@ private:
     // (it would silently shadow it -> wrong value, 0 iterations, or a confusing
     // C++ error). Mirrors the parameter-name guard.
     if (!is_valid_param_name(clk_name)) {
-      fail("tick clock name '" + clk_name + "' is not a usable identifier (C++ keyword / reserved / not a plain name) -- rename it");
+      fail("tick clock name '" + clk_name
+           + "' is not a usable identifier (C++ keyword / reserved / not a plain name) -- rename it");
     }
     if (param_names_.count(clk_name) != 0 || locals_.count(clk_name) != 0 || inst_of_var.count(clk_name) != 0
         || arrays_.count(clk_name) != 0) {
@@ -2515,9 +3084,9 @@ private:
     // their own `clock` (it is declared outside the for now, for the restart jump).
     o << ind << "{\n";
     o << ind << "long " << clk_name << " = 0;\n";
-    emit_restart_block(o, ind, clk_name);  // --restart-at: load nearest ckpt, resume at its cycle
+    emit_restart_block(o, ind, clk_name);  // --restart-cycle: load nearest ckpt, resume at its cycle
     o << ind << "for (; " << clk_name << " < (long)(" << count << "); ++" << clk_name << ") {\n";
-    o << ind << "  _clk = " << clk_name << ";\n";  // current cycle, for located asserts (survives the loop)
+    o << ind << "  _clk = " << clk_name << ";\n";    // current cycle, for located asserts (survives the loop)
     emit_vcd_window_block(o, ind + "  ", clk_name);  // --vcd-from/--vcd-to: enable/disable trace
     emit_checkpoint_block(o, ind + "  ", clk_name);  // periodic DUT+tb checkpoint
     std::vector<TSNode> body;
@@ -2570,13 +3139,12 @@ private:
       // compare on a wide value shows the whole value, not its low 64 bits.
       bool        lhs_lit = is_literal_operand(lhs_src);
       bool        rhs_lit = is_literal_operand(rhs_src);
-      std::string fmt     = c_str_lit(loc) + ":assert fail: clock=%ld: " + c_str_lit(lhs_src)
-                        + (lhs_lit ? "" : "=%s") + " " + c_str_lit(op) + " " + c_str_lit(rhs_src)
-                        + (rhs_lit ? "" : "=%s");
+      std::string fmt     = c_str_lit(loc) + ":assert fail: clock=%ld: " + c_str_lit(lhs_src) + (lhs_lit ? "" : "=%s") + " "
+                            + c_str_lit(op) + " " + c_str_lit(rhs_src) + (rhs_lit ? "" : "=%s");
       if (!msg.empty()) {
         fmt += "  [" + c_str_lit(msg) + "]";
       }
-      o << ind << "  std::printf(\"" << fmt << "\\n\", _clk";
+      o << ind << "  _tp_out(\"" << fmt << "\\n\", _clk";
       if (!lhs_lit) {
         o << ", " << decimal_of(lhs_cpp) << ".c_str()";
       }
@@ -2585,12 +3153,11 @@ private:
       }
       o << ");\n";
     } else {
-      std::string fmt = c_str_lit(loc) + ":assert fail: clock=%ld: condition `" + c_str_lit(cond_src)
-                        + "` is false";
+      std::string fmt = c_str_lit(loc) + ":assert fail: clock=%ld: condition `" + c_str_lit(cond_src) + "` is false";
       if (!msg.empty()) {
         fmt += "  [" + c_str_lit(msg) + "]";
       }
-      o << ind << "  std::printf(\"" << fmt << "\\n\", _clk);\n";
+      o << ind << "  _tp_out(\"" << fmt << "\\n\", _clk);\n";
     }
     // First failing assert -> structured result (--result-json {test,status,cycle,failing_assert,prp_file,line,msg}).
     o << ind << "  if (!_ff.has) { _ff.has = true; _ff.cycle = _clk; _ff.assertion = \"" << cpp_str_lit(cond_src)
@@ -2610,7 +3177,7 @@ private:
     std::string prefix = c_str_lit(file_short_ + ":" + std::to_string(line_of(n)) + ":" + (newline ? "puts" : "print") + ":");
     TSNode      args   = field(n, "argument");
     if (ts_node_is_null(args) || ts_node_named_child_count(args) < 1) {
-      o << ind << "std::printf(\"" << prefix << (newline ? "\\n" : "") << "\");\n";
+      o << ind << "_tp_out(\"" << prefix << (newline ? "\\n" : "") << "\");\n";
       return;
     }
     // format string = first arg (a constant wrapping a [interpolated_]string_literal)
@@ -2671,7 +3238,7 @@ private:
             case 'b': call = "(" + ve + ").to_binary(" + dg + ", " + sp + ")"; break;
             case 'x': call = "(" + ve + ").to_hex(" + dg + ", " + sp + ", false)"; break;
             case 'X': call = "(" + ve + ").to_hex(" + dg + ", " + sp + ", true)"; break;
-            default: call = "__fmt_i64((" + ve + ").to_just_i64(), \"" + spec + "\")"; break;
+            default : call = "__fmt_i64((" + ve + ").to_just_i64(), \"" + spec + "\")"; break;
           }
           fmt += "%s";
           argv.push_back(call + ".c_str()");
@@ -2692,7 +3259,7 @@ private:
         fmt += c;
       }
     }
-    o << ind << "std::printf(\"" << prefix << fmt << (newline ? "\\n" : "") << "\"";
+    o << ind << "_tp_out(\"" << prefix << fmt << (newline ? "\\n" : "") << "\"";
     for (const auto& a : argv) {
       o << ", " << a;
     }
@@ -2747,7 +3314,7 @@ int for_each_test(const std::string& file, const std::string& test_sel, std::str
 }  // namespace
 
 int generate(const std::string& file, const std::string& simdir, const std::string& test_sel, const std::string& vcd_dir,
-             std::vector<Test_info>& tests, std::string& err) {
+             bool observation_on, bool runtime_support_on, bool unknown_zero, std::vector<Test_info>& tests, std::string& err) {
   // 1. read DUT interfaces from the cgen_sim manifests in simdir (2f-sim B0).
   // One <stem>.iface.json per emitted module; the matching <stem>.hpp is still
   // the header the driver #includes, so the two names are kept side by side.
@@ -2766,7 +3333,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
     if (stem == std::string(kDriverBasename)) {
       continue;  // the generated driver is not a DUT unit
     }
-    Dut         d;
+    Dut d;
     d.hpp = stem + ".hpp";
     std::string perr;
     if (parse_iface(de.path().string(), d, perr)) {
@@ -2779,8 +3346,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
     }
   }
   if (duts.empty()) {
-    err = "no DUT modules found in " + simdir
-          + " (no <module>.iface.json manifests; regenerate the sim dir with a current lhd)";
+    err = "no DUT modules found in " + simdir + " (no <module>.iface.json manifests; regenerate the sim dir with a current lhd)";
     return 1;
   }
   // Mark CHILD units (this module is instantiated by another one). Taken
@@ -2791,8 +3357,8 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   {
     std::set<std::string> child_cls;
     for (auto& [k, d] : duts) {
-      for (auto& [inst, cls] : d.subs) {
-        child_cls.insert(cls);
+      for (const auto& sub : d.subs) {
+        child_cls.insert(sub.cls);
       }
     }
     for (auto& [k, d] : duts) {
@@ -2814,13 +3380,18 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   }
   std::vector<std::pair<std::string, std::vector<Cat_sig>>> catalogs;  // per test, registry order
 
-  std::ostringstream       fns;          // run-function bodies, registry order
-  std::vector<std::string> fn_ids;       // run-function names, registry order
-  std::set<std::string>    includes;     // DUT headers any test drives
-  std::set<std::string>    used_ids;     // for fn_id uniqueness
-  std::string              src;          // owns the text the TSNodes reference
-  bool                     gen_failed = false;
-  std::string              gen_err;
+  std::ostringstream                 fns;       // run-function bodies, registry order
+  std::vector<std::string>           fn_ids;    // run-function names, registry order
+  std::set<std::string>              includes;  // DUT headers any test drives
+  std::set<std::string>              used_ids;  // for fn_id uniqueness
+  std::string                        src;       // owns the text the TSNodes reference
+  bool                               gen_failed = false;
+  std::string                        gen_err;
+  // sim.tune: the DUT classes any test instantiates (each gets weak identity
+  // defaults) and the distinct testbench `?` literals (the raw run file reports
+  // them: surviving `?` bits randomize outputs, which the tuner's oracle must know).
+  std::set<std::string>              dut_classes;
+  std::set<std::pair<int, uint64_t>> tb_unknown_keys;
 
   int matched = for_each_test(file, test_sel, src, err, [&](TSNode test, const std::string& name) {
     if (gen_failed) {
@@ -2833,7 +3404,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
     }
     used_ids.insert(fn_id);
 
-    Driver_gen              gen(src, duts, vcd_dir, file);  // fresh per-test state
+    Driver_gen              gen(src, duts, vcd_dir, file, runtime_support_on, unknown_zero);  // fresh per-test state
     std::vector<Param_info> pinfo;
     try {
       fns << gen.emit_run_fn(test, name, fn_id, pinfo, includes) << "\n";
@@ -2843,6 +3414,10 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
       return;
     }
     fn_ids.push_back(fn_id);
+    for (const auto& [var, m] : gen.instances()) {
+      dut_classes.insert(duts.at(m).cls);
+    }
+    tb_unknown_keys.insert(gen.tb_unknown_keys().begin(), gen.tb_unknown_keys().end());
     // 2f-sim B: this test's query catalog, expanded through its instance tree.
     {
       std::vector<Cat_sig> cat;
@@ -2877,10 +3452,18 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   // run-functions -> the registry + embedded `--list-tests` JSON -> main().
   std::ostringstream o;
   o << "// Generated by lhd sim (prp_sim). Do not edit.\n";
+  o << "// hierarchical-observation: " << (observation_on ? "true" : "false") << "\n";
+  o << "// runtime-control-support: " << (runtime_support_on ? "true" : "false") << "\n";
+  // sim.tune markers (lhd greps them before forwarding a `--set`: an older driver
+  // swallows `--set` as a test parameter and only warns).
+  o << "// driver-set-parser: 1\n";
+  o << "// tune-sampler: 1\n";
   o << "// One driver for every `test` block of " << file << ":\n";
   o << "//   --list-tests          print the tests + parameters as JSON, then exit\n";
   o << "//   --test NAME           run only test NAME (repeatable; default = all)\n";
   o << "//   --seed N              hlop PRNG seed for random / unknown bits\n";
+  o << "//   --set KEY=VALUE       a run-time lhd key (lhd.seed, sim.init_zero, sim.unknown_zero=true,\n";
+  o << "//                         sim.checkpoint*, sim.tune.profile*); a codegen key must restate the baked value\n";
   o << "//   --<param> N           bind a `test name(params)` parameter\n";
   o << "//   --help, -h            usage\n";
   for (const auto& h : includes) {
@@ -2890,21 +3473,35 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   // (it is transitively included by every DUT header otherwise).
   o << "#include \"slop.hpp\"\n";
   o << "#include \"checkpoint.hpp\"  // periodic DUT-state checkpoint cadence/fork/prune\n";
+  // The `?`-literal and tune-hash helpers, VERBATIM the text inou.cgen.sim puts in
+  // every module header: include-guarded, so after a DUT header this is a no-op,
+  // and it is the only copy for a driver whose tests include no DUT header.
+  o << livehd::sim::kUnknownLiteralHelper;
+  o << livehd::sim::kTuneHashHelper;
   // Width-adapting input poke: a testbench value is a Slop of its OWN width, so
   // driving it into a Slop<N> port is a width change with Verilog `port = val`
-  // semantics — the RAW low bits, ZERO-filled above. Staging through
+  // semantics — retain the RAW low bits, then restore Slop<N>'s signed-carrier
+  // invariant above bit N-1. Staging through
   // max(M,64) is what keeps both readings right: a NEGATIVE value fills the
   // port (`poke(p, -1)` drives all ones, not the 0b11 of a 2-bit -1), while a
   // value whose top bit is DATA rather than sign (a 64-bit LCG word into an
   // 80-bit port) still zero-fills. Past 64 bits the value's own width governs,
   // so a constant of ANY width drives exactly — the 64-bit staging that used to
   // clip a wide poke is gone.
+  // zext_to<N,N+1>() performs the truncation without making bit N-1 a sign;
+  // the cross-width Slop<N> constructor then sign-extends that exact N-bit
+  // pattern. A same-width zext_to<N>() assignment left signed inputs such as
+  // s8 0xff stored as +255, so every signed operation consumed a noncanonical
+  // carrier after the literal-width migration.
   o << "template<int N, int M> static inline void __prp_poke(Slop<N>& d, const Slop<M>& v){ "
-       "constexpr int S = (M > 64 ? M : 64); d = Slop<S>(v).template zext_to<N>(); }\n";
+       "constexpr int S = (M > 64 ? M : 64); d = Slop<N>{Slop<S>(v).template zext_to<N,N+1>()}; }\n";
+  o << "template<int N, int M> static inline void __prp_poke(Slop_u<N>& d, const Slop<M>& v){ "
+       "constexpr int S = (M > 64 ? M : 64); d = Slop_u<N>{Slop<S>(v).template zext_to<N,N+1>()}; }\n";
+  o << "template<int N, int M> static inline void __prp_poke(Slop_u<N>& d, const Slop_u<M>& v){ d = Slop_u<N>{v}; }\n";
   // `{val:spec}` puts interpolation for PLAIN locals: grammar
   // `[width][b/o/x/X/d][s]` — width zero-pads, `s` groups digits `_`-separated
   // every 4 (mirrors the comptime __fmt fold in upass/constprop).
-  o << "static std::string __fmt_i64(long long v, const char* spec){\n"
+  o << "[[maybe_unused]] static std::string __fmt_i64(long long v, const char* spec){\n"
        "  size_t w=0; const char* p=spec; while(*p>='0'&&*p<='9') w=w*10+(size_t)(*p++-'0');\n"
        "  char base = (*p && *p!='s') ? *p++ : 'd';\n"
        "  bool sep = (*p=='s'); unsigned long long m = v<0 ? -(unsigned long long)v : (unsigned long long)v;\n"
@@ -2914,7 +3511,8 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "  if (b==0u){ s = std::to_string(m); } else { do { s.push_back(dig[m&((1u<<b)-1u)]); m >>= b; } while(m); }\n"
        "  if (b!=0u) std::reverse(s.begin(), s.end());\n"
        "  if (w>s.size()) s.insert(0, w-s.size(), '0');\n"
-       "  if (sep){ std::string g; size_t c=0; for(size_t k=s.size(); k>0; --k){ if(c&&c%4==0) g.push_back('_'); g.push_back(s[k-1]); ++c; } std::reverse(g.begin(), g.end()); s=std::move(g); }\n"
+       "  if (sep){ std::string g; size_t c=0; for(size_t k=s.size(); k>0; --k){ if(c&&c%4==0) g.push_back('_'); "
+       "g.push_back(s[k-1]); ++c; } std::reverse(g.begin(), g.end()); s=std::move(g); }\n"
        "  if (v<0) s.insert(0,1,'-');\n"
        "  return s;\n"
        "}\n";
@@ -2923,8 +3521,10 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
     // For vcd::global_timestamp — reset between tests (see main()).
     o << "#include \"vcd_writer.hpp\"\n";
   }
-  o << "#include <cstdio>\n#include <cstdint>\n#include <cstdlib>\n#include <cerrno>\n#include <cctype>\n"
-       "#include <string>\n#include <string_view>\n#include <map>\n#include <set>\n#include <vector>\n#include <fstream>\n#include <chrono>\n\n";
+  o << "#include <cstdio>\n#include <cstdint>\n#include <cstdlib>\n#include <cstring>\n#include <cerrno>\n#include <cctype>\n"
+       "#include <string>\n#include <string_view>\n#include <map>\n#include <set>\n#include <vector>\n#include <memory>\n#include "
+       "<fstream>\n#include "
+       "<chrono>\n\n";
 
   // Checkpoint configuration (sim.checkpoint*): periodic fork-checkpoints of the
   // DUT state + testbench frame, written under <dir>/<test>/ckp<cycle>/, pruned to
@@ -2934,6 +3534,11 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "long every = 0; std::string dir; long restart_at = -1; long vcd_from = -1; long vcd_to = -1; "
        "bool vcd_on_fail = false; long vcd_fail_window = 20; bool window_only = false; };\n";
   o << "static _CkptCfg _ckpt;\n";
+  // Checkpoint bases THIS run actually forked into. The end-of-run prune below
+  // must not clamp a directory this run never wrote: a later invocation with a
+  // smaller `max` would otherwise delete checkpoints an earlier long run saved.
+  o << "static std::set<std::string> _ckpt_written;\n";
+  o << "static bool _init_zero = false;\n";
   o << "static unsigned long long _seed_used = " << kDefaultSeed << ";\n";
 
   // ---- observability (--list-signals / --probe / --break-when) ----
@@ -2962,168 +3567,278 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   // already-resolved questions against it. Values travel as full-width canonical
   // hex; the kernel re-attaches width/signedness from the catalog.
   o << R"cpp(
-struct _QNode { std::string op, a, b, c; };  // one expression node, post-order
-struct _QQuery {
-  std::string id, op, sig;
-  long idx = -1, c0 = -1, c1 = -1;
-  // A cycle may be FAILURE-RELATIVE: `c0` then holds an offset from the cycle
-  // the test's first assert fired, resolved after the run (the kernel cannot
-  // know that cycle at plan time). This is what makes "the test failed, show me
-  // the state" one invocation instead of two.
-  bool c0_rel = false, c1_rel = false;
-  bool count_only = false, backward = false;
-  std::vector<std::string> sigs;    // resolved signal list (values/snapshot/diff)
-  std::vector<std::string> sample;  // extra signals to report at a find's hit
-  std::vector<_QNode>      expr;    // find predicate, post-order
-};
-struct _QState {
-  bool on = false;
-  long from = -1, to = -1, maxres = 1000;
-  std::string plan, out;
-  std::vector<_QQuery> qs;
-  // The recorded sample stream over [from,to]: one settled post-step snapshot
-  // per tick-body iteration, exactly the point --probe has always sampled.
-  std::vector<long>                                 cyc;
-  std::vector<std::map<std::string, std::string>>   snap;
-  // Only the signals some query actually references are STORED. The stream is
-  // the one thing here that grows as signals x cycles, and a batch usually asks
-  // about a handful of signals on a design that has thousands.
-  std::set<std::string>                             need;
-  // qid -> (cycle -> hex). A memory WORD is read inline during the run, so a
-  // failure-relative one has to be recorded at every sampled cycle (one word per
-  // cycle) and picked afterwards; an absolute one is recorded at its cycle only.
-  std::map<std::string, std::map<long, std::string>> memval;
-  std::map<std::string, bool>                        memok;
-  long ckpt_used = -1, replayed = 0, fail_cycle = -1;
-  bool multi_step = false;
-};
-static _QState _q;
+    struct _QNode {
+      std::string op, a, b, c;
+    };  // one expression node, post-order
+    struct _QQuery {
+      std::string              id, op, sig;
+      long                     idx = -1, c0 = -1, c1 = -1;
+      // A cycle may be FAILURE-RELATIVE: `c0` then holds an offset from the cycle
+      // the test's first assert fired, resolved after the run (the kernel cannot
+      // know that cycle at plan time). This is what makes "the test failed, show me
+      // the state" one invocation instead of two.
+      bool                     c0_rel = false, c1_rel = false;
+      bool                     count_only = false, backward = false;
+      std::vector<std::string> sigs;    // resolved signal list (values/snapshot/diff)
+      std::vector<std::string> sample;  // extra signals to report at a find's hit
+      std::vector<_QNode>      expr;    // find predicate, post-order
+    };
+    struct _QState {
+      bool                                               on   = false;
+      long                                               from = -1, to = -1, maxres = 1000;
+      std::string                                        plan, out;
+      std::vector<_QQuery>                               qs;
+      // The recorded sample stream over [from,to]: one settled post-step snapshot
+      // per tick-body iteration, exactly the point --probe has always sampled.
+      std::vector<long>                                  cyc;
+      std::vector<std::map<std::string, std::string>>    snap;
+      // Only the signals some query actually references are STORED. The stream is
+      // the one thing here that grows as signals x cycles, and a batch usually asks
+      // about a handful of signals on a design that has thousands.
+      std::set<std::string>                              need;
+      // qid -> (cycle -> hex). A memory WORD is read inline during the run, so a
+      // failure-relative one has to be recorded at every sampled cycle (one word per
+      // cycle) and picked afterwards; an absolute one is recorded at its cycle only.
+      std::map<std::string, std::map<long, std::string>> memval;
+      std::map<std::string, bool>                        memok;
+      long                                               ckpt_used = -1, replayed = 0, fail_cycle = -1;
+      bool                                               multi_step = false;
+    };
+    static _QState _q;
 
-// Split on single spaces (no field ever contains one: names are identifiers
-// plus '.', values are hex, cycles are integers).
-static std::vector<std::string> _q_split(const std::string& _s) {
-  std::vector<std::string> _v; std::string _c;
-  for (char _ch : _s) { if (_ch == ' ') { if (!_c.empty()) { _v.push_back(_c); _c.clear(); } } else _c += _ch; }
-  if (!_c.empty()) _v.push_back(_c);
-  return _v;
-}
-// Compare two canonical hex strings as UNSIGNED magnitudes of arbitrary width.
-// Signed comparison is not attempted here: the kernel knows each operand's
-// signedness from the catalog and rejects a signed ordered compare it cannot
-// lower, rather than this driver guessing (the --break-when strtoull hole).
-static int _q_hexcmp(const std::string& _a, const std::string& _b) {
-  auto _trim = [](const std::string& _s) { size_t _i = 0; while (_i + 1 < _s.size() && _s[_i] == '0') ++_i; return _s.substr(_i); };
-  const std::string _x = _trim(_a), _y = _trim(_b);
-  if (_x.size() != _y.size()) return _x.size() < _y.size() ? -1 : 1;
-  return _x == _y ? 0 : (_x < _y ? -1 : 1);
-}
-// A plan cycle token is a plain integer, or `F<signed offset>` meaning "relative
-// to the cycle the first assert failed" (F+0 is the failing cycle itself).
-static long _q_cycle_tok(const std::string& _t, bool& _rel) {
-  if (!_t.empty() && _t[0] == 'F') {
-    _rel = true;
-    return std::strtol(_t.c_str() + 1, nullptr, 10);
-  }
-  _rel = false;
-  return std::strtol(_t.c_str(), nullptr, 10);
-}
-static bool _q_read_plan() {
-  std::ifstream _f(_q.plan);
-  if (!_f) { std::fprintf(stderr, "lhd sim: cannot read query plan %s\n", _q.plan.c_str()); return false; }
-  std::string _line;
-  while (std::getline(_f, _line)) {
-    auto _t = _q_split(_line);
-    if (_t.empty()) continue;
-    if (_t[0] == "V") { if (_t.size() < 2 || _t[1] != "1") { std::fprintf(stderr, "lhd sim: unsupported query plan version\n"); return false; } }
-    else if (_t[0] == "FROM" && _t.size() > 1) _q.from = std::strtol(_t[1].c_str(), nullptr, 10);
-    else if (_t[0] == "TO" && _t.size() > 1) _q.to = std::strtol(_t[1].c_str(), nullptr, 10);
-    else if (_t[0] == "MAXRES" && _t.size() > 1) _q.maxres = std::strtol(_t[1].c_str(), nullptr, 10);
-    else if (_t[0] == "Q" && _t.size() >= 3) {
-      _QQuery _qq; _qq.id = _t[1]; _qq.op = _t[2];
-      if (_qq.op == "value" && _t.size() >= 5) { _qq.sig = _t[3]; _qq.c0 = _q_cycle_tok(_t[4], _qq.c0_rel); }
-      else if (_qq.op == "memvalue" && _t.size() >= 6) { _qq.sig = _t[3]; _qq.idx = std::strtol(_t[4].c_str(), nullptr, 10); _qq.c0 = _q_cycle_tok(_t[5], _qq.c0_rel); }
-      else if (_qq.op == "values" && _t.size() >= 4) { _qq.c0 = _q_cycle_tok(_t[3], _qq.c0_rel); }
-      else if (_qq.op == "changes" && _t.size() >= 7) { _qq.sig = _t[3]; _qq.c0 = _q_cycle_tok(_t[4], _qq.c0_rel); _qq.c1 = _q_cycle_tok(_t[5], _qq.c1_rel); _qq.count_only = _t[6] == "1"; }
-      else if (_qq.op == "next_change" && _t.size() >= 6) { _qq.sig = _t[3]; _qq.c0 = _q_cycle_tok(_t[4], _qq.c0_rel); _qq.c1 = _q_cycle_tok(_t[5], _qq.c1_rel); }
-      else if (_qq.op == "find" && _t.size() >= 6) { _qq.backward = _t[3] == "bwd"; _qq.c0 = _q_cycle_tok(_t[4], _qq.c0_rel); _qq.c1 = _q_cycle_tok(_t[5], _qq.c1_rel); }
-      else if (_qq.op == "snapshot" && _t.size() >= 4) { _qq.c0 = _q_cycle_tok(_t[3], _qq.c0_rel); }
-      else if (_qq.op == "diff" && _t.size() >= 5) { _qq.c0 = _q_cycle_tok(_t[3], _qq.c0_rel); _qq.c1 = _q_cycle_tok(_t[4], _qq.c1_rel); }
-      if (!_qq.sig.empty()) _q.need.insert(_qq.sig);
-      _q.qs.push_back(std::move(_qq));
+    // Split on single spaces (no field ever contains one: names are identifiers
+    // plus '.', values are hex, cycles are integers).
+    static std::vector<std::string> _q_split(const std::string& _s) {
+      std::vector<std::string> _v;
+      std::string              _c;
+      for (char _ch : _s) {
+        if (_ch == ' ') {
+          if (!_c.empty()) {
+            _v.push_back(_c);
+            _c.clear();
+          }
+        } else {
+          _c += _ch;
+        }
+      }
+      if (!_c.empty()) {
+        _v.push_back(_c);
+      }
+      return _v;
     }
-    else if (_t[0] == "N" && _t.size() > 1) _q.need.insert(_t[1]);
-    else if (_t[0] == "G" && _t.size() > 1 && !_q.qs.empty()) { _q.qs.back().sigs.push_back(_t[1]); _q.need.insert(_t[1]); }
-    else if (_t[0] == "S" && _t.size() > 1 && !_q.qs.empty()) { _q.qs.back().sample.push_back(_t[1]); _q.need.insert(_t[1]); }
-    else if (_t[0] == "X" && _t.size() > 1 && !_q.qs.empty()) {
-      _QNode _n; _n.op = _t[1];
-      if (_t.size() > 2) _n.a = _t[2];
-      if (_t.size() > 3) _n.b = _t[3];
-      if (_t.size() > 4) _n.c = _t[4];
-      // Leaf nodes name signals: cmp/edge in `a`, cmp2's second operand in `c`.
-      if (_n.op == "cmp" || _n.op == "cmp2" || _n.op == "edge") _q.need.insert(_n.a);
-      if (_n.op == "cmp2") _q.need.insert(_n.c);
-      _q.qs.back().expr.push_back(_n);
+    // Compare two canonical hex strings as UNSIGNED magnitudes of arbitrary width.
+    // Signed comparison is not attempted here: the kernel knows each operand's
+    // signedness from the catalog and rejects a signed ordered compare it cannot
+    // lower, rather than this driver guessing (the --break-when strtoull hole).
+    static int _q_hexcmp(const std::string& _a, const std::string& _b) {
+      auto _trim = [](const std::string& _s) {
+        size_t _i = 0;
+        while (_i + 1 < _s.size() && _s[_i] == '0') {
+          ++_i;
+        }
+        return _s.substr(_i);
+      };
+      const std::string _x = _trim(_a), _y = _trim(_b);
+      if (_x.size() != _y.size()) {
+        return _x.size() < _y.size() ? -1 : 1;
+      }
+      return _x == _y ? 0 : (_x < _y ? -1 : 1);
     }
-  }
-  return true;
-}
-// Resolve a query's cycle bounds, turning failure-relative offsets into absolute
-// cycles. False = the query asked about a failure that never happened.
-static bool _q_bounds(const _QQuery& _qq, long& _a, long& _b) {
-  _a = _qq.c0;
-  _b = _qq.c1;
-  if (!_qq.c0_rel && !_qq.c1_rel) {
-    return true;
-  }
-  if (_q.fail_cycle < 0) {
-    return false;
-  }
-  if (_qq.c0_rel) _a = _q.fail_cycle + _qq.c0;
-  if (_qq.c1_rel) _b = _q.fail_cycle + _qq.c1;
-  return true;
-}
-// Index of the recorded sample AT cycle c (-1 = that cycle was not sampled).
-static long _q_at(long _c) {
-  for (size_t _i = 0; _i < _q.cyc.size(); ++_i) if (_q.cyc[_i] == _c) return static_cast<long>(_i);
-  return -1;
-}
-static const std::string* _q_val(long _si, const std::string& _sig) {
-  if (_si < 0 || static_cast<size_t>(_si) >= _q.snap.size()) return nullptr;
-  auto _it = _q.snap[static_cast<size_t>(_si)].find(_sig);
-  return _it == _q.snap[static_cast<size_t>(_si)].end() ? nullptr : &_it->second;
-}
-// Evaluate a post-order predicate at sample index _si (a tiny stack machine).
-static bool _q_eval(const std::vector<_QNode>& _e, long _si) {
-  std::vector<bool> _st;
-  for (const auto& _n : _e) {
-    if (_n.op == "cmp" || _n.op == "cmp2") {
-      const std::string* _a = _q_val(_si, _n.a);
-      std::string _bv;
-      if (_n.op == "cmp") _bv = _n.c;
-      else { const std::string* _b = _q_val(_si, _n.c); if (!_b) { _st.push_back(false); continue; } _bv = *_b; }
-      if (!_a) { _st.push_back(false); continue; }
-      const int _r = _q_hexcmp(*_a, _bv);
-      const std::string& _op = _n.b;
-      _st.push_back(_op == "==" ? _r == 0 : _op == "!=" ? _r != 0 : _op == "<" ? _r < 0
-                  : _op == "<=" ? _r <= 0 : _op == ">" ? _r > 0 : _op == ">=" ? _r >= 0 : false);
-    } else if (_n.op == "edge") {
-      const std::string* _cur = _q_val(_si, _n.a);
-      const std::string* _prv = _q_val(_si - 1, _n.a);
-      if (!_cur || !_prv) { _st.push_back(false); continue; }
-      const bool _c1 = _q_hexcmp(*_cur, "0") != 0, _p1 = _q_hexcmp(*_prv, "0") != 0;
-      _st.push_back(_n.b == "rising" ? (!_p1 && _c1) : _n.b == "falling" ? (_p1 && !_c1) : (*_cur != *_prv));
-    } else if (_n.op == "not") {
-      const bool _v = _st.empty() ? false : _st.back(); if (!_st.empty()) _st.pop_back(); _st.push_back(!_v);
-    } else if (_n.op == "all" || _n.op == "any") {
-      const long _cnt = std::strtol(_n.a.c_str(), nullptr, 10);
-      bool _acc = _n.op == "all";
-      for (long _k = 0; _k < _cnt && !_st.empty(); ++_k) { const bool _v = _st.back(); _st.pop_back(); _acc = _n.op == "all" ? (_acc && _v) : (_acc || _v); }
-      _st.push_back(_acc);
+    // A plan cycle token is a plain integer, or `F<signed offset>` meaning "relative
+    // to the cycle the first assert failed" (F+0 is the failing cycle itself).
+    static long _q_cycle_tok(const std::string& _t, bool& _rel) {
+      if (!_t.empty() && _t[0] == 'F') {
+        _rel = true;
+        return std::strtol(_t.c_str() + 1, nullptr, 10);
+      }
+      _rel = false;
+      return std::strtol(_t.c_str(), nullptr, 10);
     }
-  }
-  return _st.empty() ? false : _st.back();
-}
-)cpp";
+    static bool _q_read_plan() {
+      std::ifstream _f(_q.plan);
+      if (!_f) {
+        std::fprintf(stderr, "lhd sim: cannot read query plan %s\n", _q.plan.c_str());
+        return false;
+      }
+      std::string _line;
+      while (std::getline(_f, _line)) {
+        auto _t = _q_split(_line);
+        if (_t.empty()) {
+          continue;
+        }
+        if (_t[0] == "V") {
+          if (_t.size() < 2 || _t[1] != "1") {
+            std::fprintf(stderr, "lhd sim: unsupported query plan version\n");
+            return false;
+          }
+        } else if (_t[0] == "FROM" && _t.size() > 1) {
+          _q.from = std::strtol(_t[1].c_str(), nullptr, 10);
+        } else if (_t[0] == "TO" && _t.size() > 1) {
+          _q.to = std::strtol(_t[1].c_str(), nullptr, 10);
+        } else if (_t[0] == "MAXRES" && _t.size() > 1) {
+          _q.maxres = std::strtol(_t[1].c_str(), nullptr, 10);
+        } else if (_t[0] == "Q" && _t.size() >= 3) {
+          _QQuery _qq;
+          _qq.id = _t[1];
+          _qq.op = _t[2];
+          if (_qq.op == "value" && _t.size() >= 5) {
+            _qq.sig = _t[3];
+            _qq.c0  = _q_cycle_tok(_t[4], _qq.c0_rel);
+          } else if (_qq.op == "memvalue" && _t.size() >= 6) {
+            _qq.sig = _t[3];
+            _qq.idx = std::strtol(_t[4].c_str(), nullptr, 10);
+            _qq.c0  = _q_cycle_tok(_t[5], _qq.c0_rel);
+          } else if (_qq.op == "values" && _t.size() >= 4) {
+            _qq.c0 = _q_cycle_tok(_t[3], _qq.c0_rel);
+          } else if (_qq.op == "changes" && _t.size() >= 7) {
+            _qq.sig        = _t[3];
+            _qq.c0         = _q_cycle_tok(_t[4], _qq.c0_rel);
+            _qq.c1         = _q_cycle_tok(_t[5], _qq.c1_rel);
+            _qq.count_only = _t[6] == "1";
+          } else if (_qq.op == "next_change" && _t.size() >= 6) {
+            _qq.sig = _t[3];
+            _qq.c0  = _q_cycle_tok(_t[4], _qq.c0_rel);
+            _qq.c1  = _q_cycle_tok(_t[5], _qq.c1_rel);
+          } else if (_qq.op == "find" && _t.size() >= 6) {
+            _qq.backward = _t[3] == "bwd";
+            _qq.c0       = _q_cycle_tok(_t[4], _qq.c0_rel);
+            _qq.c1       = _q_cycle_tok(_t[5], _qq.c1_rel);
+          } else if (_qq.op == "snapshot" && _t.size() >= 4) {
+            _qq.c0 = _q_cycle_tok(_t[3], _qq.c0_rel);
+          } else if (_qq.op == "diff" && _t.size() >= 5) {
+            _qq.c0 = _q_cycle_tok(_t[3], _qq.c0_rel);
+            _qq.c1 = _q_cycle_tok(_t[4], _qq.c1_rel);
+          }
+          if (!_qq.sig.empty()) {
+            _q.need.insert(_qq.sig);
+          }
+          _q.qs.push_back(std::move(_qq));
+        } else if (_t[0] == "N" && _t.size() > 1) {
+          _q.need.insert(_t[1]);
+        } else if (_t[0] == "G" && _t.size() > 1 && !_q.qs.empty()) {
+          _q.qs.back().sigs.push_back(_t[1]);
+          _q.need.insert(_t[1]);
+        } else if (_t[0] == "S" && _t.size() > 1 && !_q.qs.empty()) {
+          _q.qs.back().sample.push_back(_t[1]);
+          _q.need.insert(_t[1]);
+        } else if (_t[0] == "X" && _t.size() > 1 && !_q.qs.empty()) {
+          _QNode _n;
+          _n.op = _t[1];
+          if (_t.size() > 2) {
+            _n.a = _t[2];
+          }
+          if (_t.size() > 3) {
+            _n.b = _t[3];
+          }
+          if (_t.size() > 4) {
+            _n.c = _t[4];
+          }
+          // Leaf nodes name signals: cmp/edge in `a`, cmp2's second operand in `c`.
+          if (_n.op == "cmp" || _n.op == "cmp2" || _n.op == "edge") {
+            _q.need.insert(_n.a);
+          }
+          if (_n.op == "cmp2") {
+            _q.need.insert(_n.c);
+          }
+          _q.qs.back().expr.push_back(_n);
+        }
+      }
+      return true;
+    }
+    // Resolve a query's cycle bounds, turning failure-relative offsets into absolute
+    // cycles. False = the query asked about a failure that never happened.
+    static bool _q_bounds(const _QQuery& _qq, long& _a, long& _b) {
+      _a = _qq.c0;
+      _b = _qq.c1;
+      if (!_qq.c0_rel && !_qq.c1_rel) {
+        return true;
+      }
+      if (_q.fail_cycle < 0) {
+        return false;
+      }
+      if (_qq.c0_rel) {
+        _a = _q.fail_cycle + _qq.c0;
+      }
+      if (_qq.c1_rel) {
+        _b = _q.fail_cycle + _qq.c1;
+      }
+      return true;
+    }
+    // Index of the recorded sample AT cycle c (-1 = that cycle was not sampled).
+    static long _q_at(long _c) {
+      for (size_t _i = 0; _i < _q.cyc.size(); ++_i) {
+        if (_q.cyc[_i] == _c) {
+          return static_cast<long>(_i);
+        }
+      }
+      return -1;
+    }
+    static const std::string* _q_val(long _si, const std::string& _sig) {
+      if (_si < 0 || static_cast<size_t>(_si) >= _q.snap.size()) {
+        return nullptr;
+      }
+      auto _it = _q.snap[static_cast<size_t>(_si)].find(_sig);
+      return _it == _q.snap[static_cast<size_t>(_si)].end() ? nullptr : &_it->second;
+    }
+    // Evaluate a post-order predicate at sample index _si (a tiny stack machine).
+    static bool _q_eval(const std::vector<_QNode>& _e, long _si) {
+      std::vector<bool> _st;
+      for (const auto& _n : _e) {
+        if (_n.op == "cmp" || _n.op == "cmp2") {
+          const std::string* _a = _q_val(_si, _n.a);
+          std::string        _bv;
+          if (_n.op == "cmp") {
+            _bv = _n.c;
+          } else {
+            const std::string* _b = _q_val(_si, _n.c);
+            if (!_b) {
+              _st.push_back(false);
+              continue;
+            }
+            _bv = *_b;
+          }
+          if (!_a) {
+            _st.push_back(false);
+            continue;
+          }
+          const int          _r  = _q_hexcmp(*_a, _bv);
+          const std::string& _op = _n.b;
+          _st.push_back(_op == "=="   ? _r == 0
+                        : _op == "!=" ? _r != 0
+                        : _op == "<"  ? _r < 0
+                        : _op == "<=" ? _r <= 0
+                        : _op == ">"  ? _r > 0
+                        : _op == ">=" ? _r >= 0
+                                      : false);
+        } else if (_n.op == "edge") {
+          const std::string* _cur = _q_val(_si, _n.a);
+          const std::string* _prv = _q_val(_si - 1, _n.a);
+          if (!_cur || !_prv) {
+            _st.push_back(false);
+            continue;
+          }
+          const bool _c1 = _q_hexcmp(*_cur, "0") != 0, _p1 = _q_hexcmp(*_prv, "0") != 0;
+          _st.push_back(_n.b == "rising" ? (!_p1 && _c1) : _n.b == "falling" ? (_p1 && !_c1) : (*_cur != *_prv));
+        } else if (_n.op == "not") {
+          const bool _v = _st.empty() ? false : _st.back();
+          if (!_st.empty()) {
+            _st.pop_back();
+          }
+          _st.push_back(!_v);
+        } else if (_n.op == "all" || _n.op == "any") {
+          const long _cnt = std::strtol(_n.a.c_str(), nullptr, 10);
+          bool       _acc = _n.op == "all";
+          for (long _k = 0; _k < _cnt && !_st.empty(); ++_k) {
+            const bool _v = _st.back();
+            _st.pop_back();
+            _acc = _n.op == "all" ? (_acc && _v) : (_acc || _v);
+          }
+          _st.push_back(_acc);
+        }
+      }
+      return _st.empty() ? false : _st.back();
+    }
+  )cpp";
   o << "static bool _dbg_cmp(long _a, const std::string& _op, long _b) {\n"
        "  if (_op == \">\") return _a > _b; if (_op == \"<\") return _a < _b;\n"
        "  if (_op == \">=\") return _a >= _b; if (_op == \"<=\") return _a <= _b;\n"
@@ -3188,15 +3903,41 @@ static bool _q_eval(const std::vector<_QNode>& _e, long _si) {
        "    std::fprintf(stderr, \"lhd sim: --%s expects a non-negative integer, got '%s'\\n\", _key.c_str(), "
        "_s.c_str());\n    std::exit(2);\n  }\n  return _r;\n}\n\n";
 
+  // ---- sim.tune (sim_profile.md §6): what this binary was generated with, the
+  // per-root identity, then the runtime + the `--set` parser (prp_sim_rt.hpp).
+  const auto cbool = [](bool b) { return b ? "true" : "false"; };
+  o << "[[maybe_unused]] static constexpr bool _baked_unknown_zero = " << cbool(unknown_zero) << ";\n";
+  o << "[[maybe_unused]] static constexpr bool _baked_runtime_support = " << cbool(runtime_support_on) << ";\n";
+  o << "[[maybe_unused]] static constexpr bool _baked_vcd = " << cbool(vcd_on) << ";\n";
+  o << "[[maybe_unused]] static constexpr bool _baked_observation = " << cbool(observation_on) << ";\n";
+  o << "[[maybe_unused]] static constexpr int _tb_unknown_literals = " << tb_unknown_keys.size() << ";\n";
+  // Identity: cgen's `<stem>.tune-id.cpp` defines these STRONG for every
+  // executable root; the WEAK defaults keep a build without it (or an older
+  // emit dir) linking, and a null answer reads as "unknown".
+  o << "struct _TpRoot { const char* cls; const char* (*vector)(); const char* (*structure)(); const char* (*codegen)(); };\n";
+  for (const auto& cls : dut_classes) {
+    for (const char* what : {"vector", "structure", "codegen"}) {
+      o << "extern \"C\" [[gnu::weak]] const char* __lhd_tune_" << what << "_" << cls << "() { return nullptr; }\n";
+    }
+  }
+  o << "static const _TpRoot _tp_roots[] = {";
+  for (const auto& cls : dut_classes) {
+    o << "{\"" << cls << "\", &__lhd_tune_vector_" << cls << ", &__lhd_tune_structure_" << cls << ", &__lhd_tune_codegen_" << cls
+      << "}, ";
+  }
+  o << "{nullptr, nullptr, nullptr, nullptr}};\n";
+  o << kTuneRuntime;
+  o << kSetParser << "\n";
+
   o << fns.str();
 
   // Registry + the canonical `--list-tests` JSON (identical to what
   // `lhd sim --list-tests` prints, since both render tests_to_json()).
-  o << "\nstruct _Test { const char* name; long (*run)(const std::map<std::string, std::string>&, "
+  o << "\nstruct _Test { const char* name; const char* checkpoint_name; long (*run)(const std::map<std::string, std::string>&, "
        "std::set<std::string>&, std::string&, _Fail&); };\n";
   o << "static const _Test _tests[] = {\n";
   for (size_t i = 0; i < fn_ids.size(); ++i) {
-    o << "  {\"" << cpp_str_lit(tests[i].name) << "\", &" << fn_ids[i] << "},\n";
+    o << "  {\"" << cpp_str_lit(tests[i].name) << "\", \"" << sanitize(tests[i].name) << "\", &" << fn_ids[i] << "},\n";
   }
   o << "};\n";
   // Every test parameter declared in this binary (union over all tests). The
@@ -3221,8 +3962,8 @@ static bool _q_eval(const std::vector<_QNode>& _e, long _si) {
   o << "static const char* _tests_json = \"" << cpp_str_lit(tests_to_json_impl(file, tests)) << "\";\n\n";
 
   o << "static void _usage(const char* _argv0) {\n"
-       "  std::printf(\"usage: %s [--list-tests] [--test NAME]... [--seed N] [--result-json PATH] [--<param> "
-       "N]...\\n\", _argv0);\n"
+       "  std::printf(\"usage: %s [--list-tests] [--test NAME]... [--seed N] [--result-json PATH] [--set KEY=VALUE]... "
+       "[--<param> N]...\\n\", _argv0);\n"
        "  std::printf(\"  Runs the lhd-sim test(s) compiled into this binary (default: all).\\n\");\n"
        "  std::printf(\"options:\\n\");\n"
        "  std::printf(\"  --list-tests       print the tests + parameters as JSON and exit\\n\");\n"
@@ -3230,7 +3971,12 @@ static bool _q_eval(const std::vector<_QNode>& _e, long _si) {
        "  std::printf(\"  --seed N           hlop PRNG seed for random/unknown bits (default "
     << kDefaultSeedShown
     << ")\\n\");\n"
-       "  std::printf(\"  --result-json PATH write a JSON {test,status,cycle,failing_assert,prp_file,line} report\\n\");\n"
+       "  std::printf(\"  --init-zero        zero-initialize DUT state with no initializer or reset\\n\");\n"
+       "  std::printf(\"  --result-json PATH write a JSON {test,status,cycle,failing_assert,prp_file,line,sim_cycles,...} "
+       "report\\n\");\n"
+       "  std::printf(\"  --set KEY=VALUE    a run-time lhd key: lhd.seed, sim.init_zero, sim.unknown_zero=true, "
+       "sim.checkpoint*,\\n\");\n"
+       "  std::printf(\"                     sim.tune.profile=auto|on|off, sim.tune.profile_dir=DIR (repeatable)\\n\");\n"
        "  std::printf(\"  --<param> N        bind a test parameter (see --list-tests)\\n\");\n"
        "  std::printf(\"  --help, -h         show this message and exit\\n\");\n"
        "  std::printf(\"tests:\\n\");\n"
@@ -3260,6 +4006,7 @@ static bool _q_eval(const std::vector<_QNode>& _e, long _si) {
        "    if (_key == \"--help\" || _key == \"-h\") { _usage(argv[0]); return 0; }\n"
        "    else if (_key == \"--list-tests\") { _list = true; }\n"
        "    else if (_key == \"--seed\") { _seed = _to_u64(\"seed\", _need()); }\n"
+       "    else if (_key == \"--init-zero\") { _init_zero = true; }\n"
        "    else if (_key == \"--result-json\") { _result_json = _need(); }\n"
        "    else if (_key == \"--ckpt-dir\") { _ckpt.dir = _need(); }\n"
        "    else if (_key == \"--no-checkpoint\") { _ckpt.enabled = false; }\n"
@@ -3267,7 +4014,11 @@ static bool _q_eval(const std::vector<_QNode>& _e, long _si) {
        "    else if (_key == \"--checkpoint-max\") { _ckpt.max = _to_i64(\"checkpoint-max\", _need()); }\n"
        "    else if (_key == \"--checkpoint-max-overhead\") { _ckpt.max_overhead = std::strtod(_need().c_str(), nullptr); }\n"
        "    else if (_key == \"--checkpoint-every\") { _ckpt.every = _to_i64(\"checkpoint-every\", _need()); }\n"
-       "    else if (_key == \"--restart-at\" || _key == \"--restart-cycle\") { _ckpt.restart_at = _to_i64(\"restart-at\", _need()); }\n"
+       // The driver keeps BOTH spellings forever: `lhd sim --run-only` re-runs a
+       // driver built by an EARLIER lhd, and the user-facing flag is now
+       // --restart-cycle (--restart-at was retired from the lhd CLI).
+       "    else if (_key == \"--restart-at\" || _key == \"--restart-cycle\") { _ckpt.restart_at = _to_i64(\"restart-at\", "
+       "_need()); }\n"
        "    else if (_key == \"--vcd-from\") { _ckpt.vcd_from = _to_i64(\"vcd-from\", _need()); }\n"
        "    else if (_key == \"--vcd-to\") { _ckpt.vcd_to = _to_i64(\"vcd-to\", _need()); }\n"
        "    else if (_key == \"--vcd-on-fail\") { _ckpt.vcd_on_fail = true; }\n"
@@ -3285,6 +4036,9 @@ static bool _q_eval(const std::vector<_QNode>& _e, long _si) {
        "    else if (_key == \"--query-plan\") { _q.plan = _need(); _q.on = true; }\n"
        "    else if (_key == \"--query-json\") { _q.out = _need(); }\n"
        "    else if (_key == \"--test\") { _selected.push_back(_need()); }\n"
+       // BEFORE the generic `--<param>` arm, which would bind it as a test
+       // parameter named `set` (a reserved name for exactly that reason).
+       "    else if (_key == \"--set\") { _apply_set(_need(), _seed); }\n"
        "    else if (_key.size() > 2 && _key[0] == '-' && _key[1] == '-') { _args[_key.substr(2)] = _need(); }\n"
        "    else { std::fprintf(stderr, \"lhd sim: unknown argument '%s'\\n\", _key.c_str()); _usage(argv[0]); return "
        "2; }\n"
@@ -3292,6 +4046,17 @@ static bool _q_eval(const std::vector<_QNode>& _e, long _si) {
        "  if (_list) { std::printf(\"%s\\n\", _tests_json); return 0; }\n"
        "  hlop_set_random_seed(_seed);\n"
        "  _seed_used = _seed;  // mirrored into checkpoint meta.json\n"
+       // Before any test: every `?` literal draws on FIRST USE, so this makes all
+       // of them zero -- the same values a sim.unknown_zero=true build folds.
+       "  if (_set_unknown_zero) __lhd_unknown_zero = true;\n"
+       // Profiling measures the plain run: never an observation / replay run.
+       "  if (_tp.on) {\n"
+       "    const char* _why = _baked_vcd ? \"a VCD build\" : _baked_observation ? \"an observation build\" : _dbg.list_signals ? "
+       "\"--list-signals\" : _dbg.active() ? \"--probe/--break-when\" : _q.on ? \"--query\" : _ckpt.restart_at >= 0 ? "
+       "\"--restart-cycle\" : _ckpt.vcd_from >= 0 ? \"--vcd-from\" : _ckpt.vcd_on_fail ? \"--vcd-on-fail\" : nullptr;\n"
+       "    if (_why != nullptr) { std::fprintf(stderr, \"lhd sim: note: sim.tune.profile=on ignored: %s is never profiled\\n\", "
+       "_why); _tp.on = false; }\n"
+       "  }\n"
        "  std::vector<const _Test*> _torun;\n"
        "  if (_selected.empty()) { for (const auto& _t : _tests) _torun.push_back(&_t); }\n"
        "  else { for (const auto& _nm : _selected) { const _Test* _f = nullptr; for (const auto& _t : _tests) if (_nm "
@@ -3321,7 +4086,10 @@ static bool _q_eval(const std::vector<_QNode>& _e, long _si) {
        "  for (const auto* _t : _torun) {\n"
        "    std::string _err; _Fail _ff;\n"
     << (vcd_on ? "    vcd::global_timestamp = 0;  // each test gets an independent VCD timeline (#0..)\n" : "")
-    << "    long _f = _t->run(_args, _consumed, _err, _ff);\n"
+    << "    _tp.begin_test(_t->name);\n"
+       "    long _f = _t->run(_args, _consumed, _err, _ff);\n"
+       // Freeze the test's accounting BEFORE anything else prints or re-runs it.
+       "    _tp.finish_test(_f, _ff);\n"
        // 2f-sim: the anchor a failure-relative query resolves against.
        "    if (_ff.has) _q.fail_cycle = _ff.cycle;\n"
        "    const char* _status = (_f < 0) ? \"error\" : (_f > 0 ? \"fail\" : \"pass\");\n"
@@ -3335,27 +4103,26 @@ static bool _q_eval(const std::vector<_QNode>& _e, long _si) {
     // --vcd-on-fail: re-run a failed test with a VCD window around the failure
     // cycle (the restart prologue jumps to ~vcd_from, the early break stops at
     // vcd_to), suppressing the re-run's stdout. Only emitted when VCD is on.
-    << (vcd_on
-            ? "    if (_ckpt.vcd_on_fail && _f > 0 && _ff.has) {\n"
-              "      long _vf = _ff.cycle > _ckpt.vcd_fail_window ? _ff.cycle - _ckpt.vcd_fail_window : 0;\n"
-              // Save/override the relevant config: trace [_vf, fail_cycle], discard the
-              // verdict (window_only -> early break), and DO NOT checkpoint during the
-              // re-run (it would pollute/prune the checkpoint set).
-              "      long _of = _ckpt.vcd_from, _ot = _ckpt.vcd_to; bool _oe = _ckpt.enabled, _ow = _ckpt.window_only;\n"
-              "      _ckpt.vcd_from = _vf; _ckpt.vcd_to = _ff.cycle; _ckpt.enabled = false; _ckpt.window_only = true;\n"
-              // Suppress the re-run's stdout (the located assert already printed once).
-              // If the redirect can't be set up, run WITHOUT suppression rather than lose output.
-              "      std::fflush(stdout); int _sfd = dup(fileno(stdout)); FILE* _nul = std::fopen(\"/dev/null\", \"w\");\n"
-              "      bool _red = (_sfd >= 0 && _nul != nullptr && dup2(fileno(_nul), fileno(stdout)) >= 0);\n"
-              "      std::string _e2; _Fail _f2; _t->run(_args, _consumed, _e2, _f2);\n"
-              "      std::fflush(stdout);\n"
-              "      if (_red) dup2(_sfd, fileno(stdout));\n"
-              "      if (_nul != nullptr) std::fclose(_nul); if (_sfd >= 0) close(_sfd);\n"
-              "      _ckpt.vcd_from = _of; _ckpt.vcd_to = _ot; _ckpt.enabled = _oe; _ckpt.window_only = _ow;\n"
-              "      std::fprintf(stderr, \"lhd sim: %s failed at clock %ld -> wrote failure VCD (cycles %ld..%ld)\\n\", "
-              "_t->name, _ff.cycle, _vf, _ff.cycle);\n"
-              "    }\n"
-            : "")
+    << (vcd_on ? "    if (_ckpt.vcd_on_fail && _f > 0 && _ff.has) {\n"
+                 "      long _vf = _ff.cycle > _ckpt.vcd_fail_window ? _ff.cycle - _ckpt.vcd_fail_window : 0;\n"
+                 // Save/override the relevant config: trace [_vf, fail_cycle], discard the
+                 // verdict (window_only -> early break), and DO NOT checkpoint during the
+                 // re-run (it would pollute/prune the checkpoint set).
+                 "      long _of = _ckpt.vcd_from, _ot = _ckpt.vcd_to; bool _oe = _ckpt.enabled, _ow = _ckpt.window_only;\n"
+                 "      _ckpt.vcd_from = _vf; _ckpt.vcd_to = _ff.cycle; _ckpt.enabled = false; _ckpt.window_only = true;\n"
+                 // Suppress the re-run's stdout (the located assert already printed once).
+                 // If the redirect can't be set up, run WITHOUT suppression rather than lose output.
+                 "      std::fflush(stdout); int _sfd = dup(fileno(stdout)); FILE* _nul = std::fopen(\"/dev/null\", \"w\");\n"
+                 "      bool _red = (_sfd >= 0 && _nul != nullptr && dup2(fileno(_nul), fileno(stdout)) >= 0);\n"
+                 "      std::string _e2; _Fail _f2; _t->run(_args, _consumed, _e2, _f2);\n"
+                 "      std::fflush(stdout);\n"
+                 "      if (_red) dup2(_sfd, fileno(stdout));\n"
+                 "      if (_nul != nullptr) std::fclose(_nul); if (_sfd >= 0) close(_sfd);\n"
+                 "      _ckpt.vcd_from = _of; _ckpt.vcd_to = _ot; _ckpt.enabled = _oe; _ckpt.window_only = _ow;\n"
+                 "      std::fprintf(stderr, \"lhd sim: %s failed at clock %ld -> wrote failure VCD (cycles %ld..%ld)\\n\", "
+                 "_t->name, _ff.cycle, _vf, _ff.cycle);\n"
+                 "    }\n"
+               : "")
     << "    if (!_result_json.empty()) {\n"
        "      _rj += _rj_first ? \"\" : \",\"; _rj_first = false;\n"
        "      _rj += \"{\\\"test\\\":\\\"\"; _rj += _json_esc(_t->name); _rj += \"\\\",\\\"status\\\":\\\"\"; _rj += "
@@ -3368,6 +4135,8 @@ static bool _q_eval(const std::vector<_QNode>& _e, long _si) {
        "        _rj += \",\\\"line\\\":\"; _rj += std::to_string(_ff.line);\n"
        "        if (!_ff.msg.empty()) { _rj += \",\\\"msg\\\":\\\"\"; _rj += _json_esc(_ff.msg); _rj += \"\\\"\"; }\n"
        "      }\n"
+       // sim.tune P0.5: sim_cycles, time/counter split, digests (+ profile when on).
+       "      if (_f >= 0) _rj += _tp.row_json(_tp.done.back());\n"
        "      _rj += \"}\";\n"
        "    }\n"
        "  }\n"
@@ -3428,148 +4197,235 @@ static bool _q_eval(const std::vector<_QNode>& _e, long _si) {
   // answering a query can never shorten a run, so the tests[] verdict and the
   // process exit code are exactly what an unqueried invocation would produce.
   o << R"cpp(
-  if (_q.on && !_q.out.empty()) {
-    auto _qhex = [](const std::string& _h) { std::string _s = "{\"hex\":\""; _s += _h; _s += "\"}"; return _s; };
-    std::string _j = "{\"schema_version\":1,\"kind\":\"sim_query_result\",\"run\":{";
-    _j += "\"samples\":" + std::to_string(_q.cyc.size());
-    _j += ",\"first_cycle\":" + std::to_string(_q.cyc.empty() ? -1 : _q.cyc.front());
-    _j += ",\"last_cycle\":" + std::to_string(_q.cyc.empty() ? -1 : _q.cyc.back());
-    _j += ",\"cycles_replayed\":" + std::to_string(_q.replayed);
-    _j += ",\"checkpoint_used\":" + (_q.ckpt_used < 0 ? std::string("null") : std::to_string(_q.ckpt_used));
-    _j += ",\"fail_cycle\":" + std::to_string(_q.fail_cycle);
-    _j += ",\"seed\":" + std::to_string(static_cast<long long>(_seed_used));
-    _j += ",\"rng_draws\":" + std::to_string(static_cast<long long>(hlop_random_draws()));
-    _j += ",\"phase\":\"post\"}";
-    _j += ",\"results\":[";
-    bool _qf = true;
-    for (const auto& _qq : _q.qs) {
-      if (!_qf) _j += ",\n  ";
-      _qf = false;
-      _j += "{\"id\":\"" + _json_esc(_qq.id) + "\"";
-      auto _fail = [&](const char* _cls, const std::string& _msg) {
-        _j += ",\"ok\":false,\"error\":{\"class\":\"" + std::string(_cls) + "\",\"message\":\"" + _json_esc(_msg) + "\"}}";
+    if (_q.on && !_q.out.empty()) {
+      auto _qhex = [](const std::string& _h) {
+        std::string _s  = "{\"hex\":\"";
+        _s             += _h;
+        _s             += "\"}";
+        return _s;
       };
-      // Failure-relative bounds resolve here, where the failing cycle is known.
-      long _c0 = 0, _c1 = 0;
-      if (!_q_bounds(_qq, _c0, _c1)) {
-        _fail("invalid_range", "this query is relative to the first failing assert, but the test did not fail");
-        continue;
-      }
-      if (_qq.op == "value") {
-        const long _si = _q_at(_c0);
-        const std::string* _v = _q_val(_si, _qq.sig);
-        if (!_v) _fail("invalid_range", "cycle " + std::to_string(_c0) + " was not sampled, or the signal is not observable");
-        else { _j += ",\"ok\":true,\"at\":{\"cycle\":" + std::to_string(_c0) + ",\"phase\":\"post\"},\"signal\":\"" + _json_esc(_qq.sig) + "\",\"value\":" + _qhex(*_v) + "}"; }
-      } else if (_qq.op == "memvalue") {
-        auto _ok = _q.memok.find(_qq.id);
-        auto _mw = _q.memval.find(_qq.id);
-        const std::string* _wv = nullptr;
-        if (_mw != _q.memval.end()) { auto _at = _mw->second.find(_c0); if (_at != _mw->second.end()) _wv = &_at->second; }
-        if (_ok == _q.memok.end()) _fail("invalid_range", "cycle " + std::to_string(_c0) + " was not sampled");
-        else if (!_ok->second) _fail("invalid_range", "memory index " + std::to_string(_qq.idx) + " is out of range");
-        else if (_wv == nullptr) _fail("invalid_range", "cycle " + std::to_string(_c0) + " was not sampled");
-        else { _j += ",\"ok\":true,\"at\":{\"cycle\":" + std::to_string(_c0) + ",\"phase\":\"post\"},\"signal\":\"" + _json_esc(_qq.sig) + "\",\"index\":" + std::to_string(_qq.idx) + ",\"value\":" + _qhex(*_wv) + "}"; }
-      } else if (_qq.op == "values" || _qq.op == "snapshot") {
-        const long _si = _q_at(_c0);
-        if (_si < 0) _fail("invalid_range", "cycle " + std::to_string(_c0) + " was not sampled");
-        else {
-          _j += ",\"ok\":true,\"at\":{\"cycle\":" + std::to_string(_c0) + ",\"phase\":\"post\"},\"values\":[";
-          long _n = 0; bool _f2 = true;
-          for (const auto& _s : _qq.sigs) {
-            if (_n >= _q.maxres) break;
-            const std::string* _v = _q_val(_si, _s);
-            if (!_v) continue;
-            if (!_f2) _j += ","; _f2 = false;
-            _j += "{\"signal\":\"" + _json_esc(_s) + "\",\"value\":" + _qhex(*_v) + "}"; ++_n;
+      std::string _j  = "{\"schema_version\":1,\"kind\":\"sim_query_result\",\"run\":{";
+      _j             += "\"samples\":" + std::to_string(_q.cyc.size());
+      _j             += ",\"first_cycle\":" + std::to_string(_q.cyc.empty() ? -1 : _q.cyc.front());
+      _j             += ",\"last_cycle\":" + std::to_string(_q.cyc.empty() ? -1 : _q.cyc.back());
+      _j             += ",\"cycles_replayed\":" + std::to_string(_q.replayed);
+      _j             += ",\"checkpoint_used\":" + (_q.ckpt_used < 0 ? std::string("null") : std::to_string(_q.ckpt_used));
+      _j             += ",\"fail_cycle\":" + std::to_string(_q.fail_cycle);
+      _j             += ",\"seed\":" + std::to_string(static_cast<long long>(_seed_used));
+      _j             += ",\"rng_draws\":" + std::to_string(static_cast<long long>(hlop_random_draws()));
+      _j             += ",\"phase\":\"post\"}";
+      _j             += ",\"results\":[";
+      bool _qf        = true;
+      for (const auto& _qq : _q.qs) {
+        if (!_qf) {
+          _j += ",\n  ";
+        }
+        _qf         = false;
+        _j         += "{\"id\":\"" + _json_esc(_qq.id) + "\"";
+        auto _fail  = [&](const char* _cls, const std::string& _msg) {
+          _j += ",\"ok\":false,\"error\":{\"class\":\"" + std::string(_cls) + "\",\"message\":\"" + _json_esc(_msg) + "\"}}";
+        };
+        // Failure-relative bounds resolve here, where the failing cycle is known.
+        long _c0 = 0, _c1 = 0;
+        if (!_q_bounds(_qq, _c0, _c1)) {
+          _fail("invalid_range", "this query is relative to the first failing assert, but the test did not fail");
+          continue;
+        }
+        if (_qq.op == "value") {
+          const long         _si = _q_at(_c0);
+          const std::string* _v  = _q_val(_si, _qq.sig);
+          if (!_v) {
+            _fail("invalid_range", "cycle " + std::to_string(_c0) + " was not sampled, or the signal is not observable");
+          } else {
+            _j += ",\"ok\":true,\"at\":{\"cycle\":" + std::to_string(_c0) + ",\"phase\":\"post\"},\"signal\":\""
+                  + _json_esc(_qq.sig) + "\",\"value\":" + _qhex(*_v) + "}";
           }
-          _j += "],\"complete\":" + std::string(_n >= _q.maxres ? "false" : "true");
-          _j += ",\"truncated\":" + std::string(_n >= _q.maxres ? "true" : "false") + "}";
-        }
-      } else if (_qq.op == "diff") {
-        const long _a = _q_at(_c0), _b = _q_at(_c1);
-        if (_a < 0 || _b < 0) _fail("invalid_range", "one endpoint cycle was not sampled");
-        else {
-          _j += ",\"ok\":true,\"from\":{\"cycle\":" + std::to_string(_c0) + ",\"phase\":\"post\"},\"to\":{\"cycle\":" + std::to_string(_c1) + ",\"phase\":\"post\"},\"diff\":[";
-          long _n = 0; bool _f2 = true;
-          for (const auto& _s : _qq.sigs) {
-            const std::string* _va = _q_val(_a, _s); const std::string* _vb = _q_val(_b, _s);
-            if (!_va || !_vb || *_va == *_vb) continue;
-            if (_n >= _q.maxres) break;
-            if (!_f2) _j += ","; _f2 = false;
-            _j += "{\"signal\":\"" + _json_esc(_s) + "\",\"from_value\":" + _qhex(*_va) + ",\"to_value\":" + _qhex(*_vb) + "}"; ++_n;
-          }
-          _j += "],\"complete\":" + std::string(_n >= _q.maxres ? "false" : "true");
-          _j += ",\"truncated\":" + std::string(_n >= _q.maxres ? "true" : "false") + "}";
-        }
-      } else if (_qq.op == "changes" || _qq.op == "next_change") {
-        // A change at sample c means sample(c) != sample(c-1): c is the FIRST
-        // observation of the new value, never a subcycle edge time.
-        const bool _next = _qq.op == "next_change";
-        long _lo = _c0, _hi = _c1, _count = 0;
-        // Name the signal at the RESULT level: the kernel enriches every value
-        // object from the catalog, and it can only do that if something on the
-        // record says which signal the hex belongs to. Without this the rows
-        // came back as bare {"hex":...} while every other op was enriched.
-        _j += ",\"ok\":true,\"signal\":\"" + _json_esc(_qq.sig) + "\",\"changes\":[";
-        bool _f2 = true; long _n = 0;
-        for (size_t _i = 1; _i < _q.cyc.size(); ++_i) {
-          const long _c = _q.cyc[_i];
-          if (_next ? (_c <= _lo) : (_lo >= 0 && _c < _lo)) continue;   // `after` is strictly exclusive
-          if (_hi >= 0 && _c > _hi) break;
-          auto _cur = _q.snap[_i].find(_qq.sig); auto _prv = _q.snap[_i - 1].find(_qq.sig);
-          if (_cur == _q.snap[_i].end() || _prv == _q.snap[_i - 1].end() || _cur->second == _prv->second) continue;
-          ++_count;
-          if (!_qq.count_only && _n < _q.maxres) {
-            if (!_f2) _j += ","; _f2 = false;
-            _j += "{\"cycle\":" + std::to_string(_c) + ",\"old\":" + _qhex(_prv->second) + ",\"new\":" + _qhex(_cur->second) + "}";
-            ++_n;
-          }
-          if (_next) break;
-        }
-        // The COUNT is reported even when the rows were capped: a truncated row
-        // list must never leave the caller unable to state how many there were.
-        _j += "],\"count\":" + std::to_string(_count);
-        _j += ",\"complete\":" + std::string(_n >= _q.maxres && !_qq.count_only ? "false" : "true");
-        _j += ",\"truncated\":" + std::string(_n >= _q.maxres && !_qq.count_only ? "true" : "false");
-        _j += ",\"searched\":{\"from\":" + std::to_string(_lo) + ",\"to\":" + std::to_string(_hi) + "}}";
-      } else if (_qq.op == "find") {
-        long _hit = -1;
-        for (size_t _i = 0; _i < _q.cyc.size(); ++_i) {
-          const long _c = _q.cyc[_i];
-          if (_c0 >= 0 && _c < _c0) continue;
-          if (_c1 >= 0 && _c > _c1) break;
-          if (!_q_eval(_qq.expr, static_cast<long>(_i))) continue;
-          _hit = _c;
-          if (!_qq.backward) break;   // backward = forward traversal keeping the LAST match
-        }
-        _j += ",\"ok\":true,\"found\":" + std::string(_hit < 0 ? "false" : "true");
-        if (_hit >= 0) {
-          _j += ",\"at\":{\"cycle\":" + std::to_string(_hit) + ",\"phase\":\"post\"}";
-          if (!_qq.sample.empty()) {
-            _j += ",\"sample\":["; bool _f3 = true;
-            const long _si = _q_at(_hit);
-            for (const auto& _s : _qq.sample) {
-              const std::string* _v = _q_val(_si, _s);
-              if (!_v) continue;
-              if (!_f3) _j += ","; _f3 = false;
-              _j += "{\"signal\":\"" + _json_esc(_s) + "\",\"value\":" + _qhex(*_v) + "}";
+        } else if (_qq.op == "memvalue") {
+          auto               _ok = _q.memok.find(_qq.id);
+          auto               _mw = _q.memval.find(_qq.id);
+          const std::string* _wv = nullptr;
+          if (_mw != _q.memval.end()) {
+            auto _at = _mw->second.find(_c0);
+            if (_at != _mw->second.end()) {
+              _wv = &_at->second;
             }
-            _j += "]";
           }
+          if (_ok == _q.memok.end()) {
+            _fail("invalid_range", "cycle " + std::to_string(_c0) + " was not sampled");
+          } else if (!_ok->second) {
+            _fail("invalid_range", "memory index " + std::to_string(_qq.idx) + " is out of range");
+          } else if (_wv == nullptr) {
+            _fail("invalid_range", "cycle " + std::to_string(_c0) + " was not sampled");
+          } else {
+            _j += ",\"ok\":true,\"at\":{\"cycle\":" + std::to_string(_c0) + ",\"phase\":\"post\"},\"signal\":\""
+                  + _json_esc(_qq.sig) + "\",\"index\":" + std::to_string(_qq.idx) + ",\"value\":" + _qhex(*_wv) + "}";
+          }
+        } else if (_qq.op == "values" || _qq.op == "snapshot") {
+          const long _si = _q_at(_c0);
+          if (_si < 0) {
+            _fail("invalid_range", "cycle " + std::to_string(_c0) + " was not sampled");
+          } else {
+            _j       += ",\"ok\":true,\"at\":{\"cycle\":" + std::to_string(_c0) + ",\"phase\":\"post\"},\"values\":[";
+            long _n   = 0;
+            bool _f2  = true;
+            for (const auto& _s : _qq.sigs) {
+              if (_n >= _q.maxres) {
+                break;
+              }
+              const std::string* _v = _q_val(_si, _s);
+              if (!_v) {
+                continue;
+              }
+              if (!_f2) {
+                _j += ",";
+              }
+              _f2  = false;
+              _j  += "{\"signal\":\"" + _json_esc(_s) + "\",\"value\":" + _qhex(*_v) + "}";
+              ++_n;
+            }
+            _j += "],\"complete\":" + std::string(_n >= _q.maxres ? "false" : "true");
+            _j += ",\"truncated\":" + std::string(_n >= _q.maxres ? "true" : "false") + "}";
+          }
+        } else if (_qq.op == "diff") {
+          const long _a = _q_at(_c0), _b = _q_at(_c1);
+          if (_a < 0 || _b < 0) {
+            _fail("invalid_range", "one endpoint cycle was not sampled");
+          } else {
+            _j       += ",\"ok\":true,\"from\":{\"cycle\":" + std::to_string(_c0)
+                        + ",\"phase\":\"post\"},\"to\":{\"cycle\":" + std::to_string(_c1) + ",\"phase\":\"post\"},\"diff\":[";
+            long _n   = 0;
+            bool _f2  = true;
+            for (const auto& _s : _qq.sigs) {
+              const std::string* _va = _q_val(_a, _s);
+              const std::string* _vb = _q_val(_b, _s);
+              if (!_va || !_vb || *_va == *_vb) {
+                continue;
+              }
+              if (_n >= _q.maxres) {
+                break;
+              }
+              if (!_f2) {
+                _j += ",";
+              }
+              _f2  = false;
+              _j  += "{\"signal\":\"" + _json_esc(_s) + "\",\"from_value\":" + _qhex(*_va) + ",\"to_value\":" + _qhex(*_vb) + "}";
+              ++_n;
+            }
+            _j += "],\"complete\":" + std::string(_n >= _q.maxres ? "false" : "true");
+            _j += ",\"truncated\":" + std::string(_n >= _q.maxres ? "true" : "false") + "}";
+          }
+        } else if (_qq.op == "changes" || _qq.op == "next_change") {
+          // A change at sample c means sample(c) != sample(c-1): c is the FIRST
+          // observation of the new value, never a subcycle edge time.
+          const bool _next = _qq.op == "next_change";
+          long       _lo = _c0, _hi = _c1, _count = 0;
+          // Name the signal at the RESULT level: the kernel enriches every value
+          // object from the catalog, and it can only do that if something on the
+          // record says which signal the hex belongs to. Without this the rows
+          // came back as bare {"hex":...} while every other op was enriched.
+          _j       += ",\"ok\":true,\"signal\":\"" + _json_esc(_qq.sig) + "\",\"changes\":[";
+          bool _f2  = true;
+          long _n   = 0;
+          for (size_t _i = 1; _i < _q.cyc.size(); ++_i) {
+            const long _c = _q.cyc[_i];
+            if (_next ? (_c <= _lo) : (_lo >= 0 && _c < _lo)) {
+              continue;  // `after` is strictly exclusive
+            }
+            if (_hi >= 0 && _c > _hi) {
+              break;
+            }
+            auto _cur = _q.snap[_i].find(_qq.sig);
+            auto _prv = _q.snap[_i - 1].find(_qq.sig);
+            if (_cur == _q.snap[_i].end() || _prv == _q.snap[_i - 1].end() || _cur->second == _prv->second) {
+              continue;
+            }
+            ++_count;
+            if (!_qq.count_only && _n < _q.maxres) {
+              if (!_f2) {
+                _j += ",";
+              }
+              _f2 = false;
+              _j += "{\"cycle\":" + std::to_string(_c) + ",\"old\":" + _qhex(_prv->second) + ",\"new\":" + _qhex(_cur->second) + "}";
+              ++_n;
+            }
+            if (_next) {
+              break;
+            }
+          }
+          // The COUNT is reported even when the rows were capped: a truncated row
+          // list must never leave the caller unable to state how many there were.
+          _j += "],\"count\":" + std::to_string(_count);
+          _j += ",\"complete\":" + std::string(_n >= _q.maxres && !_qq.count_only ? "false" : "true");
+          _j += ",\"truncated\":" + std::string(_n >= _q.maxres && !_qq.count_only ? "true" : "false");
+          _j += ",\"searched\":{\"from\":" + std::to_string(_lo) + ",\"to\":" + std::to_string(_hi) + "}}";
+        } else if (_qq.op == "find") {
+          long _hit = -1;
+          for (size_t _i = 0; _i < _q.cyc.size(); ++_i) {
+            const long _c = _q.cyc[_i];
+            if (_c0 >= 0 && _c < _c0) {
+              continue;
+            }
+            if (_c1 >= 0 && _c > _c1) {
+              break;
+            }
+            if (!_q_eval(_qq.expr, static_cast<long>(_i))) {
+              continue;
+            }
+            _hit = _c;
+            if (!_qq.backward) {
+              break;  // backward = forward traversal keeping the LAST match
+            }
+          }
+          _j += ",\"ok\":true,\"found\":" + std::string(_hit < 0 ? "false" : "true");
+          if (_hit >= 0) {
+            _j += ",\"at\":{\"cycle\":" + std::to_string(_hit) + ",\"phase\":\"post\"}";
+            if (!_qq.sample.empty()) {
+              _j             += ",\"sample\":[";
+              bool       _f3  = true;
+              const long _si  = _q_at(_hit);
+              for (const auto& _s : _qq.sample) {
+                const std::string* _v = _q_val(_si, _s);
+                if (!_v) {
+                  continue;
+                }
+                if (!_f3) {
+                  _j += ",";
+                }
+                _f3  = false;
+                _j  += "{\"signal\":\"" + _json_esc(_s) + "\",\"value\":" + _qhex(*_v) + "}";
+              }
+              _j += "]";
+            }
+          }
+          _j += ",\"complete\":true,\"searched\":{\"from\":" + std::to_string(_c0) + ",\"to\":" + std::to_string(_c1) + "}}";
+        } else {
+          _fail("unsupported", "unknown query op '" + _qq.op + "'");
         }
-        _j += ",\"complete\":true,\"searched\":{\"from\":" + std::to_string(_c0) + ",\"to\":" + std::to_string(_c1) + "}}";
+      }
+      _j += "]}";
+      std::ofstream _qofs(_q.out);
+      if (!_qofs) {
+        std::fprintf(stderr, "lhd sim: warning: cannot write --query-json '%s'\n", _q.out.c_str());
       } else {
-        _fail("unsupported", "unknown query op '" + _qq.op + "'");
+        _qofs << _j << "\n";
       }
     }
-    _j += "]}";
-    std::ofstream _qofs(_q.out);
-    if (!_qofs) std::fprintf(stderr, "lhd sim: warning: cannot write --query-json '%s'\n", _q.out.c_str());
-    else _qofs << _j << "\n";
-  }
-)cpp";
+  )cpp";
 
+  // The raw sim.tune run file: profiling runs only, written HERE (never atexit)
+  // so a forked checkpoint child can never write one.
+  o << "  if (_tp.on) {\n"
+       "    std::vector<std::string> _sel;\n"
+       "    for (const auto* _t : _torun) _sel.emplace_back(_t->name);\n"
+       "    _tp.write_raw(argv[0], _seed, _args, _sel);\n"
+       "  }\n";
   o << "  hlop::ckpt::drain_checkpoints();  // block until in-flight checkpoint children finish (write _done)\n"
+       "  if (_ckpt.enabled && !_ckpt.dir.empty()) {\n"
+       "    for (const auto* _t : _torun) {\n"
+       "      std::string _cb = _ckpt.dir + \"/\" + _t->checkpoint_name;\n"
+       "      if (_ckpt_written.count(_cb)) hlop::ckpt::prune_checkpoints(_cb, _ckpt.max);\n"
+       "    }\n"
+       "  }\n"
        "  return _fail_tests ? 1 : 0;\n}\n";
 
   // File_output, not a raw ofstream: it skips the write when the bytes are
@@ -3588,19 +4444,18 @@ static bool _q_eval(const std::vector<_QNode>& _e, long _si) {
   // Written next to the driver so a --run-only invocation against a prebuilt
   // workdir finds it too.
   {
-    std::string j = "{\"schema_version\":1,\"kind\":\"sim_catalog\",\"tests\":{";
+    std::string j          = "{\"schema_version\":1,\"kind\":\"sim_catalog\",\"tests\":{";
     bool        first_test = true;
     for (const auto& [tname, cat] : catalogs) {
-      j += first_test ? "" : ",";
+      j          += first_test ? "" : ",";
       first_test  = false;
-      j += "\n \"" + cpp_str_lit(tname) + "\":{\"signals\":[";
-      bool first = true;
+      j          += "\n \"" + cpp_str_lit(tname) + "\":{\"signals\":[";
+      bool first  = true;
       for (const auto& s : cat) {
-        j += first ? "" : ",\n   ";
-        first = false;
-        j += "{\"name\":\"" + s.name + "\",\"kind\":\"" + s.kind + "\",\"bits\":" + std::to_string(s.bits)
-             + ",\"declared_bits\":" + std::to_string(s.declared_bits)
-             + ",\"signed\":" + (s.is_signed ? "true" : "false");
+        j     += first ? "" : ",\n   ";
+        first  = false;
+        j     += "{\"name\":\"" + s.name + "\",\"kind\":\"" + s.kind + "\",\"bits\":" + std::to_string(s.bits)
+                 + ",\"declared_bits\":" + std::to_string(s.declared_bits) + ",\"signed\":" + (s.is_signed ? "true" : "false");
         if (!s.alias.empty()) {
           j += ",\"alias\":\"" + s.alias + "\"";
         }
@@ -3618,9 +4473,7 @@ static bool _q_eval(const std::vector<_QNode>& _e, long _si) {
   return 0;
 }
 
-std::string tests_to_json(const std::string& file, const std::vector<Test_info>& tests) {
-  return tests_to_json_impl(file, tests);
-}
+std::string tests_to_json(const std::string& file, const std::vector<Test_info>& tests) { return tests_to_json_impl(file, tests); }
 
 int list_tests(const std::string& file, const std::string& test_sel, std::vector<Test_info>& tests, std::string& err) {
   std::string src;

@@ -7,17 +7,30 @@
 # no __c<color> region modules — and that single flat module must stay
 # LEC-equivalent to the original hierarchical logic.
 #
-#   prp -> lg (O1)                            hier_seq: 3-level pipeline
+#   prp -> lg                            hier_seq: 3-level pipeline
 #   pass color flat                           (one color across the hierarchy)
-#   pass abc                                  (flatten=auto fires on the flat coloring)
+#   pass <mapper>                                  (flatten=auto fires on the flat coloring)
 #   pass partition                            (flatten=auto twin: original logic, flat)
 #   pass liberty gensim test.lib              (behavioral model per comb cell)
-#   lec netlist+models vs twin                (sequential equivalence, lgyosys)
-#   pass abc --set pass.abc.flatten=false     (escape hatch: classic per-def shape)
+#   lec netlist+models vs twin                (sequential equivalence, default LEC)
+#   pass <mapper> --set pass.<mapper>.flatten=false     (escape hatch: classic per-def shape)
 #
 # Hermetic: small vendored Liberty (inou/prp/tests/abc/test.lib), not the PDK.
 
 set -u
+
+# One script, both technology mappers: MAPPER=abc (default) runs `lhd pass abc`
+# and MAPPER=usyn runs `lhd pass usyn`. Every claim below is mapper-agnostic
+# (equivalence, netlist shape, option handling); lhd/tests/BUILD generates the
+# `_usyn` twin from this same file.
+MAPPER="${MAPPER:-abc}"
+case "$MAPPER" in
+  abc | usyn) ;;
+  *)
+    echo "FAIL: bad MAPPER=$MAPPER (expected abc|usyn)" >&2
+    exit 1
+    ;;
+esac
 
 LHD=lhd/lhd
 LIB=inou/prp/tests/abc/test.lib
@@ -46,11 +59,12 @@ live_defs() {
   grep -E "^graph_io " "$1/library.txt" | awk '{print $3}' | grep -v "^_const" | grep -v "x1$" | sort
 }
 
-run compile "$FIX" --top "$TOP" --recipe O1 --emit-dir lg:"$D/lg" --workdir "$D/w1"
-run pass color flat --top "$TOP" lg:"$D/lg" --workdir "$D/w2"
+run compile "$FIX" --top "$TOP" --emit-dir lg:"$D/lg" --workdir "$D/w1"
+run pass color flat --set color.ware_arith=false --set color.ware_cmp=false --set color.ware_shift=false --top "$TOP" lg:"$D/lg" --workdir "$D/w2"
 
+# Ware preservation is disabled above to request a truly single-module netlist.
 # pass.abc: flatten=auto must fire on the flat coloring -> one netlist module.
-run pass abc --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/net" --set abc.library="$LIB" --workdir "$D/w3"
+run pass "$MAPPER" --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/net" --set synth.liberty="$LIB" --workdir "$D/w3"
 NET_DEFS=$(live_defs "$D/net")
 [ "$NET_DEFS" = "$TOP" ] || fail "flat abc netlist must hold exactly '$TOP', got: $(echo $NET_DEFS)"
 echo "PASS: pass.abc + flat coloring emits a single flat netlist module"
@@ -62,46 +76,73 @@ RE_DEFS=$(live_defs "$D/re")
 echo "PASS: pass.partition + flat coloring emits a single flat twin module"
 
 run pass liberty gensim "$LIB" --emit-dir lg:"$D/models" --workdir "$D/w5"
-run compile lg:"$D/net" --top "$TOP" --recipe O0 --emit-dir verilog:"$D/netv" --workdir "$D/w6"
-run compile lg:"$D/models" --recipe O0 --emit-dir verilog:"$D/modelsv" --workdir "$D/w7"
-run compile lg:"$D/re" --top "$TOP" --recipe O0 --emit-dir verilog:"$D/rev" --workdir "$D/w8"
+run compile lg:"$D/net" --top "$TOP" --emit-dir verilog:"$D/netv" --workdir "$D/w6"
+run compile lg:"$D/models" --emit-dir verilog:"$D/modelsv" --workdir "$D/w7"
+run compile lg:"$D/re" --top "$TOP" --emit-dir verilog:"$D/rev" --workdir "$D/w8"
 
 # One emitted netlist .v, real standard cells, flops mapped, hierarchy gone.
 NV=$(ls "$D/netv/"*.v | wc -l | tr -d ' ')
 [ "$NV" = "1" ] || fail "expected exactly one netlist .v, got $NV"
 grep -hq "NAND2x1\|NOR2x1\|INVx1\|XOR2x1\|BUFx1" "$D/netv/"*.v || fail "no standard cells in the flat netlist"
-grep -hq "DFFx1 " "$D/netv/"*.v || fail "flops were not mapped to DFF cells in the flat netlist"
+# hier_seq's `reg r:u8 = 0` requests Pyrope's implicit SYNCHRONOUS reset. That
+# reset is a D-cone mux (reset has priority over the enable), so pass.abc folds
+# it into the latch and every one of the six 8-bit registers (delayer.r x4,
+# stage_unit.r x2) maps to plain DFFx1 cells named after the register under
+# its flattened hierarchical name (`\a.d1.r[<bit>] `, core/bus_name.hpp); no native `always` block
+# survives (same contract lhd_abc_seq_test pins on abc_seq/abc_async_reset).
+! grep -hq "posedge" "$D/netv/"*.v || fail "a synchronous-reset register stayed a native flop in the flat netlist"
+N_DFF=$(grep -h "^DFFx1 " "$D/netv/"*.v | wc -l | tr -d ' ')
+[ "$N_DFF" = 48 ] || fail "expected 48 DFFx1 cells (6 registers x 8 bits) in the flat netlist, got $N_DFF"
+for inst in a.d1 a.d2 a b.d1 b.d2 b; do
+  n=$(grep -hE "^DFFx1 \\\\${inst}\\.r\\[[0-7]\\] " "$D/netv/"*.v | wc -l | tr -d ' ')
+  [ "$n" = 8 ] || fail "register '${inst}.r' did not map to 8 DFFx1 cells under its hierarchical name (got $n): $(grep -h '^DFFx1 ' "$D/netv/"*.v | head -12)"
+done
 ! grep -hq "__c[0-9]" "$D/netv/"*.v || fail "a __c<color> region module leaked into the flat netlist"
 ! grep -hq "stage_unit\b" "$D/netv/"*.v || fail "a child module instance survived the flatten"
 
 cat "$D/netv/"*.v "$D/modelsv/"*.v > "$D/impl.v"
 cat "$D/rev/"*.v > "$D/ref.v"
-run lec --set formal.solver=lgyosys --impl verilog:"$D/impl.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/wc"
+run lec --impl verilog:"$D/impl.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/wc"
 echo "PASS: flat netlist LEC-equivalent to the flat original-logic twin"
 
-# Flop-name preservation on the native read-back: abc_flat_names' registers
-# carry an implicit power-on init and NO reset, so register=true (default)
-# cannot map them to plain DFF cells — each must be rebuilt as ONE multi-bit
-# native flop under its ORIGINAL hierarchical name (never anonymous per-bit
-# __rinit/__r flops; the LEC's tier-1 state pairing leans on those names).
+# Flop-name preservation through the flatten: abc_flat_names' registers are
+# declared without an initializer (no init, no reset), so register=true maps
+# them to per-bit DFF cells — each under its ORIGINAL hierarchical name (never
+# anonymous per-bit __rinit/__r/g<id> flops; the LEC's tier-1 state pairing
+# leans on those names).
 FIX2=inou/prp/tests/pyrope/abc_flat_names.prp
 TOP2=abc_flat_names.top
 [ -f "$FIX2" ] || fail "missing fixture $FIX2"
 D2="$W/flatnames"
 mkdir -p "$D2"
-run compile "$FIX2" --top "$TOP2" --recipe O1 --emit-dir lg:"$D2/lg" --workdir "$D2/w1"
-run pass color flat --top "$TOP2" lg:"$D2/lg" --workdir "$D2/w2"
-run pass abc --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/net" --set abc.library="$LIB" --workdir "$D2/w3"
+run compile "$FIX2" --top "$TOP2" --emit-dir lg:"$D2/lg" --workdir "$D2/w1"
+run pass color flat --set color.ware_arith=false --set color.ware_cmp=false --set color.ware_shift=false --top "$TOP2" lg:"$D2/lg" --workdir "$D2/w2"
+run pass "$MAPPER" --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/net" --set synth.liberty="$LIB" --workdir "$D2/w3"
 run pass partition --top "$TOP2" lg:"$D2/lg" --emit-dir lg:"$D2/re" --workdir "$D2/w4"
-run compile lg:"$D2/net" --top "$TOP2" --recipe O0 --emit-dir verilog:"$D2/netv" --workdir "$D2/w5"
-run compile lg:"$D2/re" --top "$TOP2" --recipe O0 --emit-dir verilog:"$D2/rev" --workdir "$D2/w6"
-grep -hq "holder.*\.r " "$D2/netv/"*.v || fail "hierarchical flop name lost in the flat netlist (expected a '<inst>.r' register)"
+run compile lg:"$D2/net" --top "$TOP2" --emit-dir verilog:"$D2/netv" --workdir "$D2/w5"
+run compile lg:"$D2/re" --top "$TOP2" --emit-dir verilog:"$D2/rev" --workdir "$D2/w6"
+# `a`/`b` are the INSTANCE names (the LHS variable of each `holder(...)` call),
+# so the preserved hierarchical flop is `a.r` / `b.r`. These registers carry NO
+# `initial` value in the IR, so pass.abc maps them to per-bit DFF cells — the
+# name has to survive as `\a.r[<bit>] ` on the cell instances. (It must NOT be
+# asserted as one multi-bit native `reg \a.r`: that only happened because ABC
+# picked a concrete value for the DON'T-CARE latch init, and materializing that
+# optimization witness as a hardware power-on value is exactly what pass.abc
+# refuses. What this fixture pins is the NAME correspondence the LEC's tier-1
+# state pairing needs — `canon_flop_name` folds the per-bit spelling. The
+# multi-bit `reg` alternative is kept for a Liberty without a DFF cell, where
+# the read-back rebuilds native flops.)
+for inst in a b; do
+  grep -hqE "^reg \\[[0-9]+:0\\] \\\\${inst}\\.r " "$D2/netv/"*.v \
+    || grep -hqE "DFFx1 \\\\${inst}\\.r\\[[0-9]+\\] " "$D2/netv/"*.v \
+    || fail "hierarchical flop name lost in the flat netlist (expected '${inst}.r' as a multi-bit reg or per-bit DFF cells): $(grep -hE '^reg |DFFx1 ' "$D2/netv/"*.v | head -40)"
+done
 ! grep -hq "__rinit\|__r[0-9]" "$D2/netv/"*.v || fail "anonymous __rinit/__r flop leaked (original register names must survive)"
-! grep -hq "DFFx1 " "$D2/netv/"*.v || fail "an init-carrying register was mapped to a DFF cell (power-on init would be lost)"
+! grep -hqE "DFFx1 \\\\?g[0-9]+_" "$D2/netv/"*.v || fail "anonymous g<id>_<cell> flop leaked (original register names must survive)"
 cat "$D2/netv/"*.v "$D/modelsv/"*.v > "$D2/impl.v"
 cat "$D2/rev/"*.v > "$D2/ref.v"
-run lec --set formal.solver=lgyosys --impl verilog:"$D2/impl.v" --ref verilog:"$D2/ref.v" --top "$TOP2" --workdir "$D2/wc"
-echo "PASS: init-carrying registers keep their hierarchical names as native flops (LEC-proven)"
+run lec --impl verilog:"$D2/impl.v" --ref verilog:"$D2/ref.v" --top "$TOP2" --workdir "$D2/wc"
+echo "PASS: registers keep their hierarchical names through the flat tech-map (LEC-proven)"
 
 # A CONSTANT actual on a child's input port must survive the flatten.
 #
@@ -136,23 +177,23 @@ EOF
 TOP3=abc_flat_const_port.top
 D3="$W/flatconst"
 mkdir -p "$D3"
-run compile "$FIX3" --top "$TOP3" --recipe O1 --emit-dir lg:"$D3/lg" --workdir "$D3/w1"
-run pass color flat --top "$TOP3" lg:"$D3/lg" --workdir "$D3/w2"
-run pass abc --top "$TOP3" lg:"$D3/lg" --emit-dir lg:"$D3/net" --set abc.library="$LIB" --workdir "$D3/w3"
+run compile "$FIX3" --top "$TOP3" --emit-dir lg:"$D3/lg" --workdir "$D3/w1"
+run pass color flat --set color.ware_arith=false --set color.ware_cmp=false --set color.ware_shift=false --top "$TOP3" lg:"$D3/lg" --workdir "$D3/w2"
+run pass "$MAPPER" --top "$TOP3" lg:"$D3/lg" --emit-dir lg:"$D3/net" --set synth.liberty="$LIB" --workdir "$D3/w3"
 run pass partition --top "$TOP3" lg:"$D3/lg" --emit-dir lg:"$D3/re" --workdir "$D3/w4"
-run compile lg:"$D3/net" --top "$TOP3" --recipe O0 --emit-dir verilog:"$D3/netv" --workdir "$D3/w5"
-run compile lg:"$D3/re" --top "$TOP3" --recipe O0 --emit-dir verilog:"$D3/rev" --workdir "$D3/w6"
+run compile lg:"$D3/net" --top "$TOP3" --emit-dir verilog:"$D3/netv" --workdir "$D3/w5"
+run compile lg:"$D3/re" --top "$TOP3" --emit-dir verilog:"$D3/rev" --workdir "$D3/w6"
 cat "$D3/netv/"*.v "$D/modelsv/"*.v > "$D3/impl.v"
 cat "$D3/rev/"*.v > "$D3/ref.v"
-run lec --set formal.solver=lgyosys --impl verilog:"$D3/impl.v" --ref verilog:"$D3/ref.v" --top "$TOP3" \
+run lec --impl verilog:"$D3/impl.v" --ref verilog:"$D3/ref.v" --top "$TOP3" \
     --workdir "$D3/wc"
 echo "PASS: a constant instance-port actual survives the whole-design flatten (LEC-proven)"
 
 # Escape hatch: flatten=false keeps the per-def hierarchy instead of collapsing
 # it into one flat module. Each def is one region here, so it is emitted under
 # its own name (delayer, stage_unit, top) -- no pointless __c wrapper.
-run pass abc --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/net_hier" --set abc.library="$LIB" \
-    --set pass.abc.flatten=false --workdir "$D/w9"
+run pass "$MAPPER" --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/net_hier" --set synth.liberty="$LIB" \
+    --set pass.$MAPPER.flatten=false --workdir "$D/w9"
 HIER_DEFS=$(live_defs "$D/net_hier")
 echo "$HIER_DEFS" | grep -q "stage_unit" || fail "flatten=false must keep the per-def hierarchy (child defs), got: $(echo $HIER_DEFS)"
 N_HIER=$(echo "$HIER_DEFS" | wc -l | tr -d ' ')

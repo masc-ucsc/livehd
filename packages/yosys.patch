@@ -1,7 +1,106 @@
---- passes/equiv/equiv_make.cc.orig	2026-01-10 13:34:54.088647611 -0800
-+++ passes/equiv/equiv_make.cc	2026-01-10 13:36:13.284717966 -0800
-@@ -148,6 +148,18 @@
-
+diff --git a/backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi.cc b/backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi.cc
+index 34801c2d1..46e112989 100644
+--- backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi.cc
++++ backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi.cc
+@@ -18,8 +18,8 @@
+ 
+ // This file is a part of the CXXRTL C API. It should be used together with `cxxrtl/capi/cxxrtl_capi.h`.
+ 
+-#include <cxxrtl/capi/cxxrtl_capi.h>
+-#include <cxxrtl/cxxrtl.h>
++#include "backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi.h"
++#include "backends/cxxrtl/runtime/cxxrtl/cxxrtl.h"
+ 
+ struct _cxxrtl_handle {
+ 	std::unique_ptr<cxxrtl::module> module;
+diff --git a/backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi_vcd.cc b/backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi_vcd.cc
+index 0949a9363..37df39441 100644
+--- backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi_vcd.cc
++++ backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi_vcd.cc
+@@ -18,8 +18,8 @@
+ 
+ // This file is a part of the CXXRTL C API. It should be used together with `cxxrtl/capi/cxxrtl_capi_vcd.h`.
+ 
+-#include <cxxrtl/capi/cxxrtl_capi_vcd.h>
+-#include <cxxrtl/cxxrtl_vcd.h>
++#include "backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi_vcd.h"
++#include "backends/cxxrtl/runtime/cxxrtl/cxxrtl_vcd.h"
+ 
+ extern const cxxrtl::debug_items &cxxrtl_debug_items_from_handle(cxxrtl_handle handle);
+ 
+diff --git a/backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi_vcd.h b/backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi_vcd.h
+index 844f3cb8c..9963b8eda 100644
+--- backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi_vcd.h
++++ backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi_vcd.h
+@@ -27,7 +27,7 @@
+ #include <stddef.h>
+ #include <stdint.h>
+ 
+-#include <cxxrtl/capi/cxxrtl_capi.h>
++#include "backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi.h"
+ 
+ #ifdef __cplusplus
+ extern "C" {
+diff --git a/backends/cxxrtl/runtime/cxxrtl/cxxrtl.h b/backends/cxxrtl/runtime/cxxrtl/cxxrtl.h
+index 511648cca..93f00a465 100644
+--- backends/cxxrtl/runtime/cxxrtl/cxxrtl.h
++++ backends/cxxrtl/runtime/cxxrtl/cxxrtl.h
+@@ -42,7 +42,7 @@
+ #include <iostream>
+ 
+ // `cxxrtl::debug_item` has to inherit from `cxxrtl_object` to satisfy strict aliasing requirements.
+-#include <cxxrtl/capi/cxxrtl_capi.h>
++#include "backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi.h"
+ 
+ #ifndef __has_attribute
+ #	define __has_attribute(x) 0
+diff --git a/backends/cxxrtl/runtime/cxxrtl/cxxrtl_replay.h b/backends/cxxrtl/runtime/cxxrtl/cxxrtl_replay.h
+index 9aa3e105d..d4d41e437 100644
+--- backends/cxxrtl/runtime/cxxrtl/cxxrtl_replay.h
++++ backends/cxxrtl/runtime/cxxrtl/cxxrtl_replay.h
+@@ -32,8 +32,8 @@
+ #include <atomic>
+ #include <unordered_map>
+ 
+-#include <cxxrtl/cxxrtl.h>
+-#include <cxxrtl/cxxrtl_time.h>
++#include "backends/cxxrtl/runtime/cxxrtl/cxxrtl.h"
++#include "backends/cxxrtl/runtime/cxxrtl/cxxrtl_time.h"
+ 
+ // Theory of operation
+ // ===================
+diff --git a/backends/cxxrtl/runtime/cxxrtl/cxxrtl_time.h b/backends/cxxrtl/runtime/cxxrtl/cxxrtl_time.h
+index f37c2b656..b94e6a318 100644
+--- backends/cxxrtl/runtime/cxxrtl/cxxrtl_time.h
++++ backends/cxxrtl/runtime/cxxrtl/cxxrtl_time.h
+@@ -22,7 +22,7 @@
+ #include <cinttypes>
+ #include <string>
+ 
+-#include <cxxrtl/cxxrtl.h>
++#include "backends/cxxrtl/runtime/cxxrtl/cxxrtl.h"
+ 
+ namespace cxxrtl {
+ 
+diff --git a/backends/cxxrtl/runtime/cxxrtl/cxxrtl_vcd.h b/backends/cxxrtl/runtime/cxxrtl/cxxrtl_vcd.h
+index e8be70028..d0a663e34 100644
+--- backends/cxxrtl/runtime/cxxrtl/cxxrtl_vcd.h
++++ backends/cxxrtl/runtime/cxxrtl/cxxrtl_vcd.h
+@@ -19,7 +19,7 @@
+ #ifndef CXXRTL_VCD_H
+ #define CXXRTL_VCD_H
+ 
+-#include <cxxrtl/cxxrtl.h>
++#include "backends/cxxrtl/runtime/cxxrtl/cxxrtl.h"
+ 
+ namespace cxxrtl {
+ 
+diff --git a/passes/equiv/equiv_make.cc b/passes/equiv/equiv_make.cc
+index 602ad776d..3a5b2e61b 100644
+--- passes/equiv/equiv_make.cc
++++ passes/equiv/equiv_make.cc
+@@ -149,6 +149,18 @@ struct EquivMakeWorker
+ 
  		// list of cells without added $equiv cells
  		auto cells_list = equiv_mod->cells().to_vector();
 +		std::set<const RTLIL::Wire *> signed_wire;
@@ -16,22 +115,22 @@
 +				}
 +			}
 +		}
-
+ 
  		for (auto id : wire_names)
  		{
-@@ -224,7 +236,7 @@
+@@ -225,7 +237,7 @@ struct EquivMakeWorker
  				gate_wire = dec_wire;
  			}
-
+ 
 -			if (gold_wire == nullptr || gate_wire == nullptr || gold_wire->width != gate_wire->width) {
 +			if (gold_wire == nullptr || gate_wire == nullptr) {
  				if (gold_wire && gold_wire->port_id)
- 					log_error("Can't match gold port `%s' to a gate port.\n", log_id(gold_wire));
+ 					log_error("Can't match gold port `%s' to a gate port.\n", gold_wire);
  				if (gate_wire && gate_wire->port_id)
-@@ -236,6 +248,42 @@
- 					log_id(gold_wire), log_signal(assign_map(gold_wire)),
- 					log_id(gate_wire), log_signal(assign_map(gate_wire)), log_id(id));
-
+@@ -237,6 +249,42 @@ struct EquivMakeWorker
+ 					gold_wire, log_signal(assign_map(gold_wire)),
+ 					gate_wire, log_signal(assign_map(gate_wire)), id.unescape());
+ 
 + 			if (gold_wire->width > gate_wire->width) {
 + 				char name[gate_wire->name.str().size()+32];
 +
@@ -71,10 +170,11 @@
  			if (gold_wire->port_output || gate_wire->port_output)
  			{
  				gold_wire->port_input = false;
-
---- passes/sat/miter.cc.orig	2026-01-10 13:24:09.784050546 -0800
-+++ passes/sat/miter.cc	2026-01-10 13:24:16.240056761 -0800
-@@ -85,15 +85,14 @@
+diff --git a/passes/sat/miter.cc b/passes/sat/miter.cc
+index 5dd1b07b4..21ec0b005 100644
+--- passes/sat/miter.cc
++++ passes/sat/miter.cc
+@@ -85,15 +85,14 @@ void create_miter_equiv(struct Pass *that, std::vector<std::string> args, RTLIL:
  	RTLIL::Module *gold_module = design->module(gold_name);
  	RTLIL::Module *gate_module = design->module(gate_name);
  	pool<Wire*> gold_cross_ports;
@@ -92,7 +192,7 @@
  		if (flag_cross && !gold_wire->port_input && gold_wire->port_output &&
  				gate_wire->port_input && !gate_wire->port_output) {
  			gold_cross_ports.insert(gold_wire);
-@@ -103,6 +102,11 @@
+@@ -103,6 +102,11 @@ void create_miter_equiv(struct Pass *that, std::vector<std::string> args, RTLIL:
  			goto match_gold_port_error;
  		if (gold_wire->port_output != gate_wire->port_output)
  			goto match_gold_port_error;
@@ -104,7 +204,7 @@
  		continue;
  	match_gold_port_error:
  		log_cmd_error("No matching port in gate module was found for %s!\n", gold_wire->name);
-@@ -114,8 +118,6 @@
+@@ -114,8 +118,6 @@ void create_miter_equiv(struct Pass *that, std::vector<std::string> args, RTLIL:
  		RTLIL::Wire *gold_wire = gold_module->wire(gate_wire->name);
  		if (gold_wire == nullptr)
  			goto match_gate_port_error;
@@ -113,15 +213,15 @@
  		if (flag_cross && !gold_wire->port_input && gold_wire->port_output &&
  				gate_wire->port_input && !gate_wire->port_output)
  			continue;
-@@ -165,18 +167,58 @@
+@@ -165,18 +167,58 @@ void create_miter_equiv(struct Pass *that, std::vector<std::string> args, RTLIL:
  			gold_cell->setPort(gold_wire->name, w);
  			gate_cell->setPort(gold_wire->name, w);
  		}
 +		RTLIL::Wire *w_gold = nullptr;
-
+ 
  		if (gold_wire->port_output)
  		{
--			RTLIL::Wire *w_gold = miter_module->addWire("\\gold_" + RTLIL::unescape_id(gold_wire->name), gold_wire->width);
+-			RTLIL::Wire *w_gold = miter_module->addWire("\\gold_" + gold_wire->name.unescape(), gold_wire->width);
 -			w_gold->port_output = flag_make_outputs;
 +			RTLIL::Wire *w_gold = nullptr;
 +      		RTLIL::Wire *w_gate = nullptr;
@@ -137,7 +237,7 @@
 +
 +       		if (delta<0) {
 +        		// gold is smaller than gate
-+				w_gold = miter_module->addWire("\\gold_tmp" + RTLIL::unescape_id(gold_wire->name), gold_wire->width);
++				w_gold = miter_module->addWire("\\gold_tmp" + gold_wire->name.unescape(), gold_wire->width);
 +           		gold_cell->setPort(gold_wire->name, w_gold);
 +
 +           		auto w2 = RTLIL::SigSpec(w_gold);
@@ -147,123 +247,47 @@
 +
 +           		// to keep X at the upper bits w2.extend_u0(new_width, is_signed);
 +
-+           		RTLIL::Wire *new_wire = miter_module->addWire("\\gold_" + RTLIL::unescape_id(gold_wire->name), new_width);
++           		RTLIL::Wire *new_wire = miter_module->addWire("\\gold_" + gold_wire->name.unescape(), new_width);
 +
 +           		miter_module->connect(new_wire, w2);
 +           		w_gold = new_wire;
 +				w_gold->port_output = flag_make_outputs;
-+				w_gate = miter_module->addWire("\\gate_" + RTLIL::unescape_id(gold_wire->name), gold_wire->width-delta);
++				w_gate = miter_module->addWire("\\gate_" + gold_wire->name.unescape(), gold_wire->width-delta);
 +				w_gate->port_output = flag_make_outputs;
 +				gate_cell->setPort(gold_wire->name, w_gate);
 +			}
 +		}
 +		#endif
-
--			RTLIL::Wire *w_gate = miter_module->addWire("\\gate_" + RTLIL::unescape_id(gold_wire->name), gold_wire->width);
+ 
+-			RTLIL::Wire *w_gate = miter_module->addWire("\\gate_" + gold_wire->name.unescape(), gold_wire->width);
 -			w_gate->port_output = flag_make_outputs;
 +      	if (w_gold==nullptr) {
-+        	w_gold = miter_module->addWire("\\gold_" + RTLIL::unescape_id(gold_wire->name), gold_wire->width);
++        	w_gold = miter_module->addWire("\\gold_" + gold_wire->name.unescape(), gold_wire->width);
 +        	w_gold->port_output = flag_make_outputs;
-
+ 
  			gold_cell->setPort(gold_wire->name, w_gold);
 -			gate_cell->setPort(gold_wire->name, w_gate);
 +		}
 +		if (w_gate==nullptr) {
-+        	w_gate = miter_module->addWire("\\gate_" + RTLIL::unescape_id(gold_wire->name), gold_wire->width);
++        	w_gate = miter_module->addWire("\\gate_" + gold_wire->name.unescape(), gold_wire->width);
 +        	w_gate->port_output = flag_make_outputs;
-
+ 
 +			gate_cell->setPort(gold_wire->name, w_gate);
 +		}
  			RTLIL::SigSpec this_condition;
-
+ 
  			if (flag_ignore_gold_x)
-
---- backends/cxxrtl/runtime/cxxrtl/cxxrtl_replay.h.orig	2026-01-10 13:23:53.256034616 -0800
-+++ backends/cxxrtl/runtime/cxxrtl/cxxrtl_replay.h	2026-01-10 13:26:21.940176773 -0800
-@@ -32,8 +32,8 @@
- #include <atomic>
- #include <unordered_map>
-
--#include <cxxrtl/cxxrtl.h>
--#include <cxxrtl/cxxrtl_time.h>
-+#include "backends/cxxrtl/runtime/cxxrtl/cxxrtl.h"
-+#include "backends/cxxrtl/runtime/cxxrtl/cxxrtl_time.h"
-
- // Theory of operation
- // ===================
-
---- backends/cxxrtl/runtime/cxxrtl/cxxrtl_time.h.orig	2026-01-10 13:26:38.212192174 -0800
-+++ backends/cxxrtl/runtime/cxxrtl/cxxrtl_time.h	2026-01-10 13:27:13.680225643 -0800
-@@ -22,7 +22,7 @@
- #include <cinttypes>
- #include <string>
-
--#include <cxxrtl/cxxrtl.h>
-+#include "backends/cxxrtl/runtime/cxxrtl/cxxrtl.h"
-
- namespace cxxrtl {
-
-
---- backends/cxxrtl/runtime/cxxrtl/cxxrtl.h.orig	2026-01-10 13:27:27.836238960 -0800
-+++ backends/cxxrtl/runtime/cxxrtl/cxxrtl.h	2026-01-10 13:27:47.772257678 -0800
-@@ -42,7 +42,7 @@
- #include <iostream>
-
- // `cxxrtl::debug_item` has to inherit from `cxxrtl_object` to satisfy strict aliasing requirements.
--#include <cxxrtl/capi/cxxrtl_capi.h>
-+#include "backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi.h"
-
- #ifndef __has_attribute
- #	define __has_attribute(x) 0
-
---- backends/cxxrtl/runtime/cxxrtl/cxxrtl_vcd.h.orig	2026-01-10 13:28:20.572288376 -0800
-+++ backends/cxxrtl/runtime/cxxrtl/cxxrtl_vcd.h	2026-01-10 13:28:39.032305601 -0800
-@@ -19,7 +19,7 @@
- #ifndef CXXRTL_VCD_H
- #define CXXRTL_VCD_H
-
--#include <cxxrtl/cxxrtl.h>
-+#include "backends/cxxrtl/runtime/cxxrtl/cxxrtl.h"
-
- namespace cxxrtl {
-
-
---- backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi_vcd.h.orig	2026-01-10 13:30:28.600407064 -0800
-+++ backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi_vcd.h	2026-01-10 13:30:58.004434071 -0800
-@@ -27,7 +27,7 @@
- #include <stddef.h>
- #include <stdint.h>
-
--#include <cxxrtl/capi/cxxrtl_capi.h>
-+#include "backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi.h"
-
- #ifdef __cplusplus
- extern "C" {
-
---- backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi.cc.orig	2026-01-10 13:31:13.488448256 -0800
-+++ backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi.cc	2026-01-10 13:31:41.840474162 -0800
-@@ -18,8 +18,8 @@
-
- // This file is a part of the CXXRTL C API. It should be used together with `cxxrtl/capi/cxxrtl_capi.h`.
-
--#include <cxxrtl/capi/cxxrtl_capi.h>
--#include <cxxrtl/cxxrtl.h>
-+#include "backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi.h"
-+#include "backends/cxxrtl/runtime/cxxrtl/cxxrtl.h"
-
- struct _cxxrtl_handle {
- 	std::unique_ptr<cxxrtl::module> module;
-
---- backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi_vcd.cc.orig	2026-01-10 13:32:10.264500049 -0800
-+++ backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi_vcd.cc	2026-01-10 13:32:31.376519221 -0800
-@@ -18,8 +18,8 @@
-
- // This file is a part of the CXXRTL C API. It should be used together with `cxxrtl/capi/cxxrtl_capi_vcd.h`.
-
--#include <cxxrtl/capi/cxxrtl_capi_vcd.h>
--#include <cxxrtl/cxxrtl_vcd.h>
-+#include "backends/cxxrtl/runtime/cxxrtl/capi/cxxrtl_capi_vcd.h"
-+#include "backends/cxxrtl/runtime/cxxrtl/cxxrtl_vcd.h"
-
- extern const cxxrtl::debug_items &cxxrtl_debug_items_from_handle(cxxrtl_handle handle);
-
+diff --git passes/sat/async2sync.cc passes/sat/async2sync.cc
+index be2355e00..808fdef3f 100644
+--- passes/sat/async2sync.cc
++++ passes/sat/async2sync.cc
+@@ -345,7 +345,8 @@ struct Async2syncPass : public Pass {
+ 						module->connect(ff.sig_q, new_d);
+ 					}
+ 
+-					ff.sig_d = new_d;
++					// Store the visible latch output, including asynchronous reset/set.
++					ff.sig_d = ff.sig_q;
+ 					ff.sig_q = new_q;
+ 					ff.has_aload = false;
+ 					ff.has_arst = false;

@@ -1,0 +1,12 @@
+/*
+:name: split_assign_bits_width
+:type: equiv
+:verilog_top: split_assign_bits_width
+:pyrope_top: split_assign_bits_width
+*/
+// The Verilog golden deliberately assembles the output with two partial
+// continuous assignments and queries one destination slice through `$bits`.
+// Outside a generate loop this is an ordinary concurrent net definition.
+pub comb split_assign_bits_width(hi_i:u9, lo_i:u7) -> (result_o:u16) {
+  result_o = (hi_i << 7) | lo_i
+}

@@ -1,25 +1,28 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 // Unified LNAST/LGraph inspection tools: cat, grep, diff, and tree.
 
-#include "lhd_kernel_internal.hpp"
-
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <format>
+#include <iterator>
 #include <limits>
 #include <regex>
 #include <set>
 #include <sstream>
+#include <tuple>
+#include <utility>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "color_common.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
+#include "lhd_kernel_internal.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
 #include "node_util.hpp"
+#include "semdiff.hpp"
 
 namespace lhd {
 
@@ -97,7 +100,7 @@ Tool_filter parse_tool_filter(const std::string& tok) {
   // `x.prp:5`) — is a bare match-everything term: a substring tested against
   // every column and the node/pin identity, so `lhd tool grep get_mask lg:dir`
   // lights up the get_mask cells exactly as `cat` shows them.
-  auto sep = tok.find_first_of(":=<>~");
+  auto        sep = tok.find_first_of(":=<>~");
   if (sep == std::string::npos || !tool_is_known_field(std::string_view{tok}.substr(0, sep))) {
     f.kind = Tool_filter::Kind::any_sub;
     f.sval = tok;
@@ -195,19 +198,19 @@ bool tool_match(const Tool_record& r, const Tool_filter& f) {
   }
   switch (f.kind) {
     case Tool_filter::Kind::sub: return v->find(f.sval) != std::string::npos;
-    case Tool_filter::Kind::re: return std::regex_search(*v, f.re);
-    case Tool_filter::Kind::eq: return *v == f.sval;
-    default: break;
+    case Tool_filter::Kind::re : return std::regex_search(*v, f.re);
+    case Tool_filter::Kind::eq : return *v == f.sval;
+    default                    : break;
   }
   long n = tool_parse_long(*v, f.field);
   switch (f.kind) {
-    case Tool_filter::Kind::num_eq: return n == f.n1;
-    case Tool_filter::Kind::num_gt: return n > f.n1;
-    case Tool_filter::Kind::num_lt: return n < f.n1;
-    case Tool_filter::Kind::num_ge: return n >= f.n1;
-    case Tool_filter::Kind::num_le: return n <= f.n1;
+    case Tool_filter::Kind::num_eq   : return n == f.n1;
+    case Tool_filter::Kind::num_gt   : return n > f.n1;
+    case Tool_filter::Kind::num_lt   : return n < f.n1;
+    case Tool_filter::Kind::num_ge   : return n >= f.n1;
+    case Tool_filter::Kind::num_le   : return n <= f.n1;
     case Tool_filter::Kind::num_range: return n >= f.n1 && n <= f.n2;
-    default: return false;
+    default                          : return false;
   }
 }
 
@@ -222,6 +225,9 @@ bool tool_match_all(const Tool_record& r, const std::vector<Tool_filter>& filter
 
 std::string tool_endpoint_name(const hhds::Pin_class& pin) {
   namespace gu = livehd::graph_util;
+  if (pin.is_const()) {
+    return gu::const_of(pin).to_pyrope();
+  }
   if (gu::is_graph_input_pin(pin) || gu::is_graph_output_pin(pin)) {
     return std::format("${}", pin.get_pin_name());
   }
@@ -286,10 +292,12 @@ Tool_record tool_node_record(hhds::Graph* g, const hhds::Node_class& node) {
 // view. An input pin is some other node's output, so it is not lost.
 void tool_pin_records(const hhds::Node_class& node, std::vector<Tool_record>& out) {
   namespace gu = livehd::graph_util;
+  // out_sorted_pins() yields each CONNECTED driver pin once, so the walk is
+  // already deduped by pin; `seen` still guards the (pid, name) key the record
+  // is identified by.
   std::set<std::pair<int, std::string>> seen;
-  for (const auto& e : node.out_edges()) {
-    const auto& pin = e.driver;
-    auto        pn  = gu::pin_name_of(pin);
+  for (const auto& pin : node.out_sorted_pins()) {
+    auto pn = gu::pin_name_of(pin);
     if (!seen.insert({pin.get_port_id(), std::string{pn}}).second) {
       continue;
     }
@@ -308,22 +316,24 @@ void tool_pin_records(const hhds::Node_class& node, std::vector<Tool_record>& ou
 
 void tool_edge_records(const hhds::Node_class& node, std::vector<Tool_record>& out) {
   namespace gu = livehd::graph_util;
-  for (const auto& e : node.out_edges()) {
-    std::string from = tool_endpoint_name(e.driver);
-    std::string to   = tool_endpoint_name(e.sink);
-    int32_t     b    = gu::bits_of(e.driver);
-    Tool_record r;
-    r.type  = 'e';
-    r.ident = std::format("{} -> {}  ({}b)", from, to, b);
-    r.cols.emplace_back("from", from);
-    r.cols.emplace_back("to", to);
-    r.cols.emplace_back("bits", b != 0 ? std::to_string(b) : std::string{"nil"});
-    out.push_back(std::move(r));
+  for (const auto& dpin : node.out_sorted_pins()) {
+    for (const auto& e : dpin.out_edges()) {
+      std::string from = tool_endpoint_name(e.driver);
+      std::string to   = tool_endpoint_name(e.sink);
+      int32_t     b    = gu::bits_of(e.driver);
+      Tool_record r;
+      r.type  = 'e';
+      r.ident = std::format("{} -> {}  ({}b)", from, to, b);
+      r.cols.emplace_back("from", from);
+      r.cols.emplace_back("to", to);
+      r.cols.emplace_back("bits", b != 0 ? std::to_string(b) : std::string{"nil"});
+      out.push_back(std::move(r));
+    }
   }
 }
 
 void tool_flat_records(hhds::Graph* g, Tool_target tgt, std::vector<Tool_record>& recs) {
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     if (tgt == Tool_target::node || tgt == Tool_target::all) {
       recs.push_back(tool_node_record(g, node));
     }
@@ -356,9 +366,9 @@ std::vector<std::string> tool_display_cols(const Options& opts, Tool_target tgt)
   }
   switch (tgt) {
     case Tool_target::node: return {"color", "match", "src"};
-    case Tool_target::pin: return {"bits", "signed", "match"};
+    case Tool_target::pin : return {"bits", "signed", "match"};
     case Tool_target::edge: return {"bits"};
-    default: return {"color", "match", "src", "bits", "signed"};  // target=all flat (grep)
+    default               : return {"color", "match", "src", "bits", "signed"};  // target=all flat (grep)
   }
 }
 
@@ -384,9 +394,9 @@ std::string tool_render_pretty(const Tool_record& r, const std::vector<std::stri
 }
 
 std::string tool_render_jsonl(const Tool_record& r, std::string_view mod) {
-  std::string out = "{";
-  out += std::format("\"t\":\"{}\"", r.type == 'n' ? "node" : (r.type == 'p' ? "pin" : "edge"));
-  out += std::format(",\"mod\":\"{}\"", json_escape_min(mod));
+  std::string out  = "{";
+  out             += std::format("\"t\":\"{}\"", r.type == 'n' ? "node" : (r.type == 'p' ? "pin" : "edge"));
+  out             += std::format(",\"mod\":\"{}\"", json_escape_min(mod));
   for (const auto& [k, v] : r.cols) {
     if (v == "nil") {
       out += std::format(",\"{}\":null", k);
@@ -415,7 +425,7 @@ std::vector<std::shared_ptr<hhds::Graph>> tool_select_graphs(const std::string& 
   // whole library via load_lg_into_var would instead materialize every graph — on
   // a large design (XiangShan: 1630 graphs, top needs ~79) that is the difference
   // between reading a handful of bodies and reading all of them.
-  auto& lib = livehd::Hhds_graph_library::instance(dir);
+  auto&                                     lib = livehd::Hhds_graph_library::instance(dir);
   std::vector<std::shared_ptr<hhds::Graph>> sel;
   if (!opts.top.empty()) {
     auto gio = lib.find_io(opts.top);
@@ -466,7 +476,7 @@ void tool_cat_all_pretty(hhds::Graph* g, const std::vector<Tool_filter>& filters
     --budget;
     return true;
   };
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     auto nr = tool_node_record(g, node);
     if (!filters.empty() && !tool_match_all(nr, filters)) {
       continue;
@@ -474,26 +484,32 @@ void tool_cat_all_pretty(hhds::Graph* g, const std::vector<Tool_filter>& filters
     if (!take(std::format("  {}", tool_render_pretty(nr, {"color", "src"})))) {
       return;
     }
-    for (const auto& e : node.inp_edges()) {
-      // A sink pin has no width of its own — its width is the DRIVER's (`bits` is a
-      // driver-pin property; see graph/node_util.hpp set_bits). Read the driver.
-      int32_t b = gu::bits_of(e.driver);
-      if (!take(std::format("    .{}  bits={}{}  <- {}",
-                            tool_pin_label(e.sink),
-                            b != 0 ? std::to_string(b) : std::string{"nil"},
-                            gu::is_unsign(e.driver) ? "" : " signed",
-                            tool_endpoint_name(e.driver)))) {
-        return;
+    for (auto sink : node.inp_sorted_pins()) {
+      // PLURAL, so the dump stays one line per EDGE: a compact loop's carry-in
+      // sink holds two drivers (pass/legalize/legalize.cpp:301).
+      for (const auto& drv : sink.get_driver_pins()) {
+        // A sink pin has no width of its own — its width is the DRIVER's (`bits` is a
+        // driver-pin property; see graph/node_util.hpp set_bits). Read the driver.
+        int32_t b = gu::bits_of(drv);
+        if (!take(std::format("    .{}  bits={}{}  <- {}",
+                              tool_pin_label(sink),
+                              b != 0 ? std::to_string(b) : std::string{"nil"},
+                              gu::is_unsign(drv) ? "" : " signed",
+                              tool_endpoint_name(drv)))) {
+          return;
+        }
       }
     }
-    for (const auto& e : node.out_edges()) {
-      int32_t b = gu::bits_of(e.driver);
-      if (!take(std::format("    .{}  bits={}{}  -> {}",
-                            tool_pin_label(e.driver),
-                            b != 0 ? std::to_string(b) : std::string{"nil"},
-                            gu::is_unsign(e.driver) ? "" : " signed",
-                            tool_endpoint_name(e.sink)))) {
-        return;
+    for (const auto& dpin : node.out_sorted_pins()) {
+      for (const auto& e : dpin.out_edges()) {
+        int32_t b = gu::bits_of(e.driver);
+        if (!take(std::format("    .{}  bits={}{}  -> {}",
+                              tool_pin_label(e.driver),
+                              b != 0 ? std::to_string(b) : std::string{"nil"},
+                              gu::is_unsign(e.driver) ? "" : " signed",
+                              tool_endpoint_name(e.sink)))) {
+          return;
+        }
       }
     }
   }
@@ -508,9 +524,9 @@ void tool_cat_lg(Options& opts, const std::vector<std::string>& lg_dirs, const s
   if (lg_dirs.size() > 1) {
     throw Lhd_error{"usage", "tool cat takes one lg: input (use tool grep for multi-library search)", ""};
   }
-  Tool_target tgt   = parse_tool_target(opts.tool_target);
-  auto        dcols = tool_display_cols(opts, tgt);
-  bool        jsonl = opts.diag_fmt == Diag_fmt::jsonl;
+  Tool_target tgt    = parse_tool_target(opts.tool_target);
+  auto        dcols  = tool_display_cols(opts, tgt);
+  bool        jsonl  = opts.diag_fmt == Diag_fmt::jsonl;
   auto        graphs = tool_select_graphs(lg_dirs.front(), opts);
   if (graphs.empty()) {
     throw Lhd_error{"config", std::format("lg: input {} holds no matching graphs", lg_dirs.front()), "check --top"};
@@ -559,9 +575,9 @@ void tool_grep_lg(Options& opts, const std::vector<std::string>& lg_dirs, const 
   if (filters.empty()) {
     throw Lhd_error{"usage", "tool grep requires at least one filter (e.g. color:nil, name:Mult, bits:>8)", ""};
   }
-  Tool_target tgt    = parse_tool_target(opts.tool_target);
-  auto        dcols  = tool_display_cols(opts, tgt);
-  bool        jsonl  = opts.diag_fmt == Diag_fmt::jsonl;
+  Tool_target tgt   = parse_tool_target(opts.tool_target);
+  auto        dcols = tool_display_cols(opts, tgt);
+  bool        jsonl = opts.diag_fmt == Diag_fmt::jsonl;
   std::string out;
   size_t      budget    = tool_budget(opts);
   bool        truncated = false;
@@ -626,6 +642,446 @@ std::vector<std::string> tool_diff_lines(const std::string& dir, Options& opts, 
   return lines;
 }
 
+bool tool_same_io(const hhds::GraphIO& a, const hhds::GraphIO& b) {
+  auto same_pins = [](const auto& ap, const auto& bp) {
+    if (ap.size() != bp.size()) {
+      return false;
+    }
+    for (size_t i = 0; i < ap.size(); ++i) {
+      if (ap[i].name != bp[i].name || ap[i].port_id != bp[i].port_id || ap[i].loop_break != bp[i].loop_break
+          || ap[i].bits != bp[i].bits || ap[i].unsign != bp[i].unsign) {
+        return false;
+      }
+    }
+    return true;
+  };
+  return a.get_name() == b.get_name() && same_pins(a.get_input_pin_decls(), b.get_input_pin_decls())
+         && same_pins(a.get_output_pin_decls(), b.get_output_pin_decls());
+}
+
+// H5 is deliberately stricter than semdiff alone. semdiff proves the graph
+// bodies structurally identical; these records additionally require persisted
+// names, color/partitionability, widths, signs, and edge presentation to agree.
+// SourceId/srcmap and match annotations are intentionally absent: locations may
+// move on a comment-only edit, and match is a diagnostic artifact.
+// `why` (optional) receives the FIRST mismatch, naming the check and the node.
+// A bare bool is unactionable on a large design: H5 compares two whole compiles
+// of a 500k-LoC core, the line diff refuses such trees as too large, and the
+// bodies here are already known structurally identical -- so without this the
+// only report is "semantic attributes differ" with nothing to look at.
+// The H5 key must not carry a DEBUG NID. `nid` is deliberately absent from the
+// compared columns below -- a debug nid is allocation order, not design data,
+// and a warm compile numbers the same design differently because it allocated
+// its ids after loading the cached bodies. But `ident` is built from
+// `graph_util::debug_name`, which splices that same nid in as `<celltype>_<nid>`,
+// so the key carried it anyway. On xiangshan's Rob that made 135,095 edge
+// records differ between the warm and the cold compile of an IDENTICAL design:
+// stripping the numeric suffixes made the two difference lists equal, and
+// semdiff's isomorphism check (run just before this, with matching_names) had
+// already agreed. Only a `<celltype>_<digits>` at a token start is rewritten --
+// the cell-type set is exactly what debug_name uses -- so a user name that
+// happens to end in digits is left alone, and every user name is still compared
+// exactly through the `name` column and the per-node `attrs::name` check.
+std::string tool_ident_without_nids(std::string_view ident) {
+  static const auto* kCellNames = [] {
+    auto* v = new std::vector<std::string>;
+    for (auto op = static_cast<int>(Ntype_op::Invalid); op < static_cast<int>(Ntype_op::Last_invalid); ++op) {
+      auto nm = Ntype::get_name(static_cast<Ntype_op>(op));
+      if (!nm.empty()) {
+        v->emplace_back(nm);
+      }
+    }
+    return v;
+  }();
+  const auto token_start = [&](size_t i) {
+    if (i == 0) {
+      return true;
+    }
+    const char p = ident[i - 1];
+    return (std::isalnum(static_cast<unsigned char>(p)) == 0) && p != '_';
+  };
+  std::string out;
+  out.reserve(ident.size());
+  for (size_t i = 0; i < ident.size();) {
+    bool rewrote = false;
+    if (token_start(i)) {
+      for (const auto& cell : *kCellNames) {
+        if (ident.compare(i, cell.size(), cell) != 0 || i + cell.size() >= ident.size() || ident[i + cell.size()] != '_') {
+          continue;
+        }
+        size_t d = i + cell.size() + 1;
+        while (d < ident.size() && (std::isdigit(static_cast<unsigned char>(ident[d])) != 0)) {
+          ++d;
+        }
+        if (d == i + cell.size() + 1) {
+          continue;  // `<cell>_` with no digits: not a debug_name
+        }
+        out.append(cell).append("_#");
+        i       = d;
+        rewrote = true;
+        break;
+      }
+    }
+    if (!rewrote) {
+      out.push_back(ident[i]);
+      ++i;
+    }
+  }
+  return out;
+}
+
+bool tool_same_semantic_attrs(hhds::Graph* a, hhds::Graph* b, std::string* why) {
+  const auto no = [&](std::string reason) {
+    if (why != nullptr) {
+      *why = std::move(reason);
+    }
+    return false;
+  };
+  const auto node_id = [](const hhds::Node_class& n) {
+    auto nm = n.attr(hhds::attrs::name);
+    // The match id says HOW the two sides were paired; without it a report on a
+    // design whose two runs number nodes differently is unreadable (and, before
+    // the correspondence pairing below, was not even about the same node).
+    return std::format(
+        "n{}{} [{}]",
+        n.get_debug_nid(),
+        nm.has() ? std::format(" '{}'", nm.get()) : std::string{},
+        livehd::graph_util::has_match(n) ? std::format("match={}", livehd::graph_util::match_of(n)) : std::string{"no-match"});
+  };
+  std::vector<Tool_record> ar;
+  std::vector<Tool_record> br;
+  tool_flat_records(a, Tool_target::all, ar);
+  tool_flat_records(b, Tool_target::all, br);
+  if (ar.size() != br.size()) {
+    return no(std::format("record count {} vs {}", ar.size(), br.size()));
+  }
+  const std::vector<std::string> cols{"kind", "name", "color", "partitionable", "bits", "signed"};
+  const auto                     record_key = [&](const Tool_record& r) {
+    return std::format("{}|{}|{}", r.type, tool_ident_without_nids(r.ident), tool_ident_without_nids(tool_render_pretty(r, cols)));
+  };
+  // Materialize each key once: computing format+render inside the sort
+  // comparator costs O(n log n) renders per side for no benefit.
+  const auto sorted_keys = [&](const std::vector<Tool_record>& records) {
+    std::vector<std::string> keys;
+    keys.reserve(records.size());
+    for (const auto& r : records) {
+      keys.push_back(record_key(r));
+    }
+    std::sort(keys.begin(), keys.end());
+    return keys;
+  };
+  {
+    const auto ak = sorted_keys(ar);
+    const auto bk = sorted_keys(br);
+    if (ak != bk) {
+      // The MULTISET difference, not the first positional mismatch: these are
+      // two sorted lists of tens of thousands of records, so one extra record
+      // early on shifts every later position and the first mismatch then names
+      // two unrelated records. Report what is actually present on one side
+      // only, which is the whole answer.
+      std::vector<std::string> only_a;
+      std::vector<std::string> only_b;
+      std::set_difference(ak.begin(), ak.end(), bk.begin(), bk.end(), std::back_inserter(only_a));
+      std::set_difference(bk.begin(), bk.end(), ak.begin(), ak.end(), std::back_inserter(only_b));
+      const auto brief = [](const std::vector<std::string>& v) {
+        constexpr size_t kShow = 3;
+        std::string      out;
+        for (size_t i = 0; i < v.size() && i < kShow; ++i) {
+          out += std::format("{}'{}'", out.empty() ? "" : ", ", v[i]);
+        }
+        if (v.size() > kShow) {
+          out += std::format(", +{} more", v.size() - kShow);
+        }
+        return out.empty() ? std::string{"(none)"} : out;
+      };
+      // LHD_H5_DUMP=<prefix>: write the two difference lists in full, for
+      // deciding whether a large difference is semantic or just renaming.
+      if (const char* dump = std::getenv("LHD_H5_DUMP"); dump != nullptr && *dump != '\0') {
+        const auto spill = [&](const char* side, const std::vector<std::string>& v) {
+          std::ofstream ofs(std::format("{}.{}.txt", dump, side));
+          for (const auto& line : v) {
+            ofs << line << '\n';
+          }
+        };
+        spill("first_only", only_a);
+        spill("second_only", only_b);
+      }
+      return no(std::format("{} record(s) only in the first, {} only in the second; first-only {}; second-only {}",
+                            only_a.size(),
+                            only_b.size(),
+                            brief(only_a),
+                            brief(only_b)));
+    }
+  }
+
+  // Each helper reports the attribute NAME of the first mismatch through
+  // `detail`, so the caller can prefix it with whatever host it was checking.
+  std::string detail;
+  auto        same_attr = [&detail](auto ahost, auto bhost, auto tag, std::string_view label) {
+    auto aa = ahost.attr(tag);
+    auto ba = bhost.attr(tag);
+    if (aa.has() != ba.has()) {
+      detail = std::format("{} present on {} side only", label, aa.has() ? "first" : "second");
+      return false;
+    }
+    if (aa.has() && !(aa.get() == ba.get())) {
+      detail = std::format("{} differs", label);
+      return false;
+    }
+    return true;
+  };
+  auto same_range_attr = [&detail](auto ahost, auto bhost, auto tag, std::string_view label) {
+    auto aa = ahost.attr(tag);
+    auto ba = bhost.attr(tag);
+    if (aa.has() != ba.has()) {
+      detail = std::format("{} present on {} side only", label, aa.has() ? "first" : "second");
+      return false;
+    }
+    if (aa.has() && (aa.get().min != ba.get().min || aa.get().max != ba.get().max)) {
+      detail = std::format("{} differs ([{}..{}] vs [{}..{}])", label, aa.get().min, aa.get().max, ba.get().min, ba.get().max);
+      return false;
+    }
+    return true;
+  };
+  auto same_pin_attrs = [&](auto ap, auto bp) {
+    if (!same_attr(ap, bp, livehd::attrs::bits, "pin bits") || !same_attr(ap, bp, livehd::attrs::pin_offset, "pin_offset")
+        || !same_attr(ap, bp, livehd::attrs::pin_name, "pin_name") || !same_attr(ap, bp, livehd::attrs::pin_delay, "pin_delay")
+        || !same_range_attr(ap, bp, livehd::attrs::time_range, "pin time_range")
+        || !same_range_attr(ap, bp, livehd::attrs::pending_time, "pin pending_time")) {
+      return false;
+    }
+    if (ap.attr(livehd::attrs::pin_signed).has() != bp.attr(livehd::attrs::pin_signed).has()) {
+      detail = "pin_signed present on one side only";
+      return false;
+    }
+    if (ap.is_const() != bp.is_const()) {
+      detail = "constness differs";
+      return false;
+    }
+    if (ap.is_const() && !ap.const_value()->same_repr(*bp.const_value())) {
+      detail = std::format("const {} vs {}", ap.const_value()->serialize(), bp.const_value()->serialize());
+      return false;
+    }
+    return true;
+  };
+
+  std::vector<hhds::Node_class> anodes;
+  std::vector<hhds::Node_class> bnodes;
+  for (auto node : a->body().nodes(hhds::Node_order::forward)) {
+    anodes.push_back(node);
+  }
+  for (auto node : b->body().nodes(hhds::Node_order::forward)) {
+    bnodes.push_back(node);
+  }
+  if (anodes.size() != bnodes.size()) {
+    return no(std::format("node count {} vs {}", anodes.size(), bnodes.size()));
+  }
+  // PAIR BY THE SEMDIFF CORRESPONDENCE, not by debug nid. `structural_identical`
+  // ran immediately before this (and stamps `attrs::match` on every node by
+  // default), so the two graphs come with a real correspondence. Sorting both
+  // sides by debug nid instead -- allocation order -- silently paired UNRELATED
+  // nodes whenever the two runs numbered the design differently, which is
+  // exactly what a warm compile does: it allocates its ids after loading the
+  // cached bodies. Every attribute verdict below was then meaningless.
+  // Fall back to the nid order only when the correspondence is absent (match id
+  // 0 means "no counterpart" and is a real value, so require a non-zero id on
+  // every node before trusting it).
+  const auto match_usable = [](const std::vector<hhds::Node_class>& v) {
+    std::set<uint32_t> ids;
+    for (const auto& n : v) {
+      if (!livehd::graph_util::has_match(n)) {
+        return false;
+      }
+      const uint32_t id = livehd::graph_util::match_of(n);
+      if (id == 0 || !ids.insert(id).second) {
+        return false;  // unmatched, or not a bijection -- do not trust it
+      }
+    }
+    return true;
+  };
+  if (match_usable(anodes) && match_usable(bnodes)) {
+    const auto by_match = [](const hhds::Node_class& lhs, const hhds::Node_class& rhs) {
+      return livehd::graph_util::match_of(lhs) < livehd::graph_util::match_of(rhs);
+    };
+    std::sort(anodes.begin(), anodes.end(), by_match);
+    std::sort(bnodes.begin(), bnodes.end(), by_match);
+    for (size_t i = 0; i < anodes.size(); ++i) {
+      if (livehd::graph_util::match_of(anodes[i]) != livehd::graph_util::match_of(bnodes[i])) {
+        return no(std::format("correspondence ids differ ({} vs {})",
+                              livehd::graph_util::match_of(anodes[i]),
+                              livehd::graph_util::match_of(bnodes[i])));
+      }
+    }
+  } else {
+    const auto node_less
+        = [](const hhds::Node_class& lhs, const hhds::Node_class& rhs) { return lhs.get_debug_nid() < rhs.get_debug_nid(); };
+    std::sort(anodes.begin(), anodes.end(), node_less);
+    std::sort(bnodes.begin(), bnodes.end(), node_less);
+  }
+  for (size_t i = 0; i < anodes.size(); ++i) {
+    auto an = anodes[i];
+    auto bn = bnodes[i];
+    if (!same_attr(an, bn, hhds::attrs::name, "name") || !same_attr(an, bn, livehd::attrs::color, "color")
+        || !same_attr(an, bn, livehd::attrs::place, "place") || !same_attr(an, bn, livehd::attrs::proven, "proven")
+        || !same_attr(an, bn, livehd::attrs::runtime_check, "runtime_check") || !same_attr(an, bn, livehd::attrs::lut, "lut")
+        || !same_range_attr(an, bn, livehd::attrs::time_range, "time_range")
+        || !same_range_attr(an, bn, livehd::attrs::pending_time, "pending_time")) {
+      return no(std::format("{}: {}", node_id(an), detail));
+    }
+    // CONSTANT operands, compared from the SINK side. Constants are pool pins
+    // on the CONST_NODE singleton, which body().nodes() skips, so a const ->
+    // node edge is never an out_edge of anything walked here: without this,
+    // `x + 1` and `x + 2` compared identical.
+    const auto const_operands = [](const hhds::Node_class& n) {
+      std::vector<std::pair<uint32_t, std::string>> v;
+      for (auto sink : n.inp_sorted_pins()) {
+        for (const auto& drv : sink.get_driver_pins()) {  // PLURAL: loop carry
+          if (drv.is_const()) {
+            v.emplace_back(static_cast<uint32_t>(sink.get_port_id()), drv.const_value()->serialize());
+          }
+        }
+      }
+      std::sort(v.begin(), v.end());
+      return v;
+    };
+    if (const_operands(an) != const_operands(bn)) {
+      const auto av  = const_operands(an);
+      const auto bv  = const_operands(bn);
+      // A serialized Dlop can hold unknown bits and padding that render as blanks
+      // (or as control bytes), so "[0:    ] vs [0:    ]" is a useless report.
+      // Escape anything not printable-ASCII.
+      const auto esc = [](const std::string& v) {
+        std::string o;
+        for (const unsigned char c : v) {
+          if (c >= 0x20 && c < 0x7f) {
+            o.push_back(static_cast<char>(c));
+          } else {
+            o += std::format("\\x{:02x}", c);
+          }
+        }
+        return o;
+      };
+      std::string as;
+      std::string bs;
+      for (const auto& [pid, v] : av) {
+        as += std::format("{}{}:{}", as.empty() ? "" : " ", pid, esc(v));
+      }
+      for (const auto& [pid, v] : bv) {
+        bs += std::format("{}{}:{}", bs.empty() ? "" : " ", pid, esc(v));
+      }
+      return no(std::format("{}: const operands [{}] vs [{}]", node_id(an), as, bs));
+    }
+    std::vector<hhds::Edge_class> ae;
+    std::vector<hhds::Edge_class> be;
+    for (const auto& dpin : an.out_sorted_pins()) {
+      for (const auto& edge : dpin.out_edges()) {
+        ae.push_back(edge);
+      }
+    }
+    for (const auto& dpin : bn.out_sorted_pins()) {
+      for (const auto& edge : dpin.out_edges()) {
+        be.push_back(edge);
+      }
+    }
+    const auto edge_less = [](const hhds::Edge_class& lhs, const hhds::Edge_class& rhs) {
+      const auto key = [](const hhds::Edge_class& edge) {
+        return std::tuple{edge.driver.get_master_node().get_debug_nid(),
+                          edge.driver.get_port_id(),
+                          edge.sink.get_master_node().get_debug_nid(),
+                          edge.sink.get_port_id()};
+      };
+      return key(lhs) < key(rhs);
+    };
+    std::sort(ae.begin(), ae.end(), edge_less);
+    std::sort(be.begin(), be.end(), edge_less);
+    if (ae.size() != be.size()) {
+      return no(std::format("{}: out-edge count {} vs {}", node_id(an), ae.size(), be.size()));
+    }
+    for (size_t e = 0; e < ae.size(); ++e) {
+      const auto aedge = ae[e];
+      const auto bedge = be[e];
+      if (!same_pin_attrs(aedge.driver, bedge.driver)) {
+        return no(std::format("{}: out-edge {} driver: {}", node_id(an), e, detail));
+      }
+      if (!same_pin_attrs(aedge.sink, bedge.sink)) {
+        return no(std::format("{}: out-edge {} sink {}: {}", node_id(an), e, node_id(aedge.sink.get_master_node()), detail));
+      }
+    }
+  }
+  if (!same_attr(a->get_input_node(), b->get_input_node(), livehd::attrs::coloring_info, "coloring_info")) {
+    return no(detail);
+  }
+  return true;
+}
+
+bool tool_structural_h5(const std::vector<std::string>& lg_dirs, const Options& opts, std::string& why) {
+  auto& alib          = livehd::Hhds_graph_library::instance(lg_dirs[0]);
+  auto& blib          = livehd::Hhds_graph_library::instance(lg_dirs[1]);
+  auto  collect_names = [&](auto& lib) {
+    std::vector<std::string> all;
+    for (const auto gid : lib.all_io_gids()) {
+      if (auto io = lib.find_io(gid)) {
+        all.emplace_back(io->get_name());
+      }
+    }
+    std::sort(all.begin(), all.end());
+    if (opts.top.empty() || std::binary_search(all.begin(), all.end(), opts.top)) {
+      return opts.top.empty() ? all : std::vector<std::string>{opts.top};
+    }
+    const auto resolved = resolve_top_name(all, opts.top, "lhd.tool.diff");
+    return resolved.empty() ? std::vector<std::string>{} : std::vector<std::string>{resolved};
+  };
+  const auto names  = collect_names(alib);
+  const auto bnames = collect_names(blib);
+  if (names != bnames || names.empty()) {
+    why = names.empty() && bnames.empty() ? "no matching graph definitions" : "definition inventories differ";
+    return false;
+  }
+  for (const auto& name : names) {
+    auto aio = alib.find_io(name);
+    auto bio = blib.find_io(name);
+    if (!aio || !bio || !tool_same_io(*aio, *bio)) {
+      why = std::format("{}: GraphIO differs", name);
+      return false;
+    }
+    if (aio->has_graph() != bio->has_graph()) {
+      why = std::format("{}: body presence differs", name);
+      return false;
+    }
+    if (!aio->has_graph()) {
+      continue;
+    }
+    auto                             ag = aio->get_graph();
+    auto                             bg = bio->get_graph();
+    livehd::semdiff::Semdiff_options semopts;
+    semopts.matching_names = true;  // persisted state identity is part of H5
+    semopts.exact_fallback = true;  // H5 needs a complete exact decision for cyclic/ambiguous signatures
+    // Every definition is compared independently below. Treating Subs as
+    // boundaries prevents a parent compare from depending on which library's
+    // child body happened to materialize first while still checking the exact
+    // Sub interface/wiring; the child body receives its own identity check.
+    semopts.blackbox_subs  = true;
+    if (!livehd::semdiff::structural_identical(ag.get(), bg.get(), semopts)) {
+      const bool traversal_identical = livehd::semdiff::structural_equivalent_traversal(ag.get(), bg.get(), semopts);
+      if (!traversal_identical) {
+        auto diagnostic    = semopts;
+        diagnostic.verbose = true;
+        (void)livehd::semdiff::structural_equivalent_traversal(ag.get(), bg.get(), diagnostic);
+      }
+      why = std::format("{}: semdiff structural identity failed (exact traversal {})",
+                        name,
+                        traversal_identical ? "agrees" : "also differs");
+      return false;
+    }
+    std::string attr_why;
+    if (!tool_same_semantic_attrs(ag.get(), bg.get(), &attr_why)) {
+      why = std::format("{}: semantic attributes differ ({})", name, attr_why);
+      return false;
+    }
+  }
+  return true;
+}
+
 // One node as seen by the match-aware diff: its correspondence id + a label.
 struct Match_node {
   uint32_t    id;
@@ -635,7 +1091,7 @@ struct Match_node {
 std::vector<Match_node> tool_match_nodes(hhds::Graph* g) {
   namespace gu = livehd::graph_util;
   std::vector<Match_node> v;
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     std::string src  = tool_node_src(g, node);
     std::string line = std::format("{:<10}  {}", Ntype::get_name(gu::type_op_of(node)), gu::debug_name(node));
     if (src != "nil") {
@@ -672,7 +1128,7 @@ void tool_diff_match_lg(Options& opts, const std::vector<std::string>& lg_dirs) 
   if (!saw_match) {
     std::string hint
         = "-- no `match` attribute found; run `lhd pass semdiff --ref lg:… --impl lg:…` first to mark correspondences, "
-        "then `lhd tool diff … --match`\n";
+          "then `lhd tool diff … --match`\n";
     std::fwrite(hint.data(), 1, hint.size(), stdout);
     std::fflush(stdout);
     return;
@@ -680,8 +1136,8 @@ void tool_diff_match_lg(Options& opts, const std::vector<std::string>& lg_dirs) 
 
   std::string out;
   for (size_t i = 0; i < pairs; ++i) {
-    hhds::Graph* a = ga[i].get();
-    hhds::Graph* b = gb[i].get();
+    hhds::Graph* a  = ga[i].get();
+    hhds::Graph* b  = gb[i].get();
     auto         ra = tool_match_nodes(a);
     auto         rb = tool_match_nodes(b);
 
@@ -721,11 +1177,11 @@ void tool_diff_match_lg(Options& opts, const std::vector<std::string>& lg_dirs) 
         out += std::format("  + {}\n", r.line);
       }
     }
-    uint32_t ta = static_cast<uint32_t>(ra.size());
-    uint32_t tb = static_cast<uint32_t>(rb.size());
-    uint32_t tot = ta + tb;
-    double   sim = tot == 0 ? 1.0 : static_cast<double>(ma + mb) / static_cast<double>(tot);
-    out += std::format("  {}/{} ref matched, {}/{} impl matched, similarity {:.3f}\n", ma, ta, mb, tb, sim);
+    uint32_t ta   = static_cast<uint32_t>(ra.size());
+    uint32_t tb   = static_cast<uint32_t>(rb.size());
+    uint32_t tot  = ta + tb;
+    double   sim  = tot == 0 ? 1.0 : static_cast<double>(ma + mb) / static_cast<double>(tot);
+    out          += std::format("  {}/{} ref matched, {}/{} impl matched, similarity {:.3f}\n", ma, ta, mb, tb, sim);
   }
   std::fwrite(out.data(), 1, out.size(), stdout);
   std::fflush(stdout);
@@ -735,8 +1191,23 @@ void tool_diff_lg(Options& opts, const std::vector<std::string>& lg_dirs, const 
   if (lg_dirs.size() != 2) {
     throw Lhd_error{"usage", "tool diff takes exactly two lg: inputs", "e.g. `lhd tool diff lg:before lg:after --attr color`"};
   }
+  if (opts.tool_match && opts.tool_structural) {
+    // The two modes print incompatible outputs; silently running one would
+    // make a scripted `= identical` H5 gate fail (or pass) for the wrong reason.
+    throw Lhd_error{"usage", "tool diff --structural and --match are mutually exclusive", "pick one mode"};
+  }
   if (opts.tool_match) {  // semdiff `match`-attribute visualization
     tool_diff_match_lg(opts, lg_dirs);
+    return;
+  }
+  if (opts.tool_structural) {
+    if (!filters.empty() || !opts.tool_attr.empty() || !opts.tool_target.empty()) {
+      throw Lhd_error{"usage", "tool diff --structural compares complete graphs and does not accept filters/--attr/--target", ""};
+    }
+    std::string why;
+    std::string out = tool_structural_h5(lg_dirs, opts, why) ? "identical\n" : std::format("not identical: {}\n", why);
+    std::fwrite(out.data(), 1, out.size(), stdout);
+    std::fflush(stdout);
     return;
   }
   Tool_target tgt   = parse_tool_target(opts.tool_target);
@@ -748,8 +1219,8 @@ void tool_diff_lg(Options& opts, const std::vector<std::string>& lg_dirs, const 
   if (!opts.top.empty() && tool_select_graphs(lg_dirs[0], opts).empty() && tool_select_graphs(lg_dirs[1], opts).empty()) {
     throw Lhd_error{"config", std::format("lg: inputs hold no graphs matching --top {}", opts.top), "check --top"};
   }
-  auto a = tool_diff_lines(lg_dirs[0], opts, tgt, filters, dcols);
-  auto b = tool_diff_lines(lg_dirs[1], opts, tgt, filters, dcols);
+  auto        a = tool_diff_lines(lg_dirs[0], opts, tgt, filters, dcols);
+  auto        b = tool_diff_lines(lg_dirs[1], opts, tgt, filters, dcols);
   std::string out;
   if (a == b) {
     out += "identical\n";
@@ -767,7 +1238,7 @@ size_t tool_node_count(hhds::Graph* g) {
   // (edge-adjacency) sets to be loaded. fast_class touches only node_table, so a
   // pure node/instance tree never pays to read edges it will not print.
   size_t n = 0;
-  for ([[maybe_unused]] auto node : g->fast_class()) {
+  for ([[maybe_unused]] auto node : g->body().nodes()) {
     ++n;
   }
   return n;
@@ -799,8 +1270,9 @@ bool tool_tree_kind_match(Ntype_op op, const std::vector<std::string>& kinds) {
 // bits" view). 0 = unknown (no sized driver pin, e.g. a dead flop).
 int32_t tool_tree_node_bits(const hhds::Node_class& node) {
   namespace gu = livehd::graph_util;
-  for (const auto& e : node.out_edges()) {
-    if (auto b = gu::bits_of(e.driver); b != 0) {
+  // Driver-pin walk: this only ever read the driver side.
+  for (const auto& dpin : node.out_sorted_pins()) {
+    if (auto b = gu::bits_of(dpin); b != 0) {
       return b;
     }
   }
@@ -816,7 +1288,7 @@ void tool_tree_kind_nodes(hhds::Graph* g, const std::vector<std::string>& kinds,
   if (kinds.empty()) {
     return;
   }
-  for (auto node : g->forward_class()) {  // topological => deterministic order
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {  // topological => deterministic order
     auto op = gu::type_op_of(node);
     if (op == Ntype_op::Sub || !tool_tree_kind_match(op, kinds)) {
       continue;  // Sub instances are the call tree itself (printed elsewhere)
@@ -825,12 +1297,12 @@ void tool_tree_kind_nodes(hhds::Graph* g, const std::vector<std::string>& kinds,
       truncated = true;
       return;
     }
-    auto bits = tool_tree_node_bits(node);
-    out += std::format("{}{}  : {}{}\n",
-                       std::string(static_cast<size_t>(indent), ' '),
-                       gu::default_instance_name(node),
-                       Ntype::get_name(op),
-                       bits != 0 ? std::format("  ({}b)", bits) : std::string{});
+    auto bits  = tool_tree_node_bits(node);
+    out       += std::format("{}{}  : {}{}\n",
+                             std::string(static_cast<size_t>(indent), ' '),
+                             gu::default_instance_name(node),
+                             Ntype::get_name(op),
+                             bits != 0 ? std::format("  ({}b)", bits) : std::string{});
     --budget;
   }
 }
@@ -841,7 +1313,7 @@ void tool_tree_children(hhds::Graph* g, const std::vector<std::string>& kinds, i
   if (depth >= maxdepth) {
     return;
   }
-  for (auto node : g->fast_class()) {
+  for (auto node : g->body().nodes()) {
     if (node.get_subnode_gid() == hhds::Gid_invalid) {
       continue;
     }
@@ -880,7 +1352,7 @@ void tool_tree_lg(Options& opts, const std::vector<std::string>& lg_dirs) {
   if (lg_dirs.size() != 1) {
     throw Lhd_error{"usage", "tool tree takes one lg: input", ""};
   }
-  int maxdepth = opts.tool_hier < 0 ? std::numeric_limits<int>::max() : opts.tool_hier;  // tree: full by default
+  int  maxdepth = opts.tool_hier < 0 ? std::numeric_limits<int>::max() : opts.tool_hier;  // tree: full by default
   auto graphs   = tool_select_graphs(lg_dirs.front(), opts);
   if (graphs.empty()) {
     throw Lhd_error{"config", std::format("lg: input {} holds no matching graphs", lg_dirs.front()), "check --top"};
@@ -889,8 +1361,8 @@ void tool_tree_lg(Options& opts, const std::vector<std::string>& lg_dirs) {
   size_t      budget    = tool_budget(opts);
   bool        truncated = false;
   for (const auto& gp : graphs) {
-    hhds::Graph* g = gp.get();
-    out += std::format("{}  [{} nodes]\n", g->get_name(), tool_node_count(g));
+    hhds::Graph* g  = gp.get();
+    out            += std::format("{}  [{} nodes]\n", g->get_name(), tool_node_count(g));
     tool_tree_kind_nodes(g, opts.tool_kinds, 2, out, budget, truncated);  // top module's own regs/mems
     if (truncated) {
       break;
@@ -922,8 +1394,8 @@ struct Ln_tree_row {
 
 bool tool_tree_ln_skeleton(Lnast_ntype::Lnast_ntype_int t) {
   using L = Lnast_ntype;
-  return L::is_top(t) || L::is_stmts(t) || L::is_if(t) || L::is_unique_if(t) || L::is_for(t) || L::is_while(t)
-         || L::is_tick(t) || L::is_func_def(t) || L::is_func_call(t) || L::is_io(t);
+  return L::is_top(t) || L::is_stmts(t) || L::is_if(t) || L::is_unique_if(t) || L::is_for(t) || L::is_while(t) || L::is_tick(t)
+         || L::is_func_def(t) || L::is_func_call(t) || L::is_io(t);
 }
 
 // `--target kind:<X>` for the ln tree: X names an Lnast verbal (store, declare,
@@ -1019,7 +1491,7 @@ void tool_tree_ln_print(const Ln_tree_row& row, const std::string& prefix, bool 
 }
 
 void tool_tree_ln(Options& opts, Result& res, const std::vector<std::string>& ln_tokens) {
-  auto in = classify_ln_inputs(ln_tokens, "tool tree");
+  auto in    = classify_ln_inputs(ln_tokens, "tool tree");
   auto units = sorted_by_name(filter_top(ln_tool_units(opts, res, in), opts.top));
   if (units.empty()) {
     throw Lhd_error{"config", "ln: input holds no matching units", "check --top"};
@@ -1163,6 +1635,11 @@ void tool_command(Options& opts, Result& res) {
   if (have_ln) {
     if (!filters.empty()) {
       throw Lhd_error{"usage", "tool diff ln: does not take filters", ""};
+    }
+    if (opts.tool_structural) {
+      // Never silently degrade an H5 gate to a text/ln diff: a script keying
+      // on the strict verdict must get either the verdict or a usage error.
+      throw Lhd_error{"usage", "tool diff --structural compares lg: libraries", "pass two lg:DIR inputs"};
     }
     tool_diff_ln(opts, res, ln_tokens);
   } else if (have_lg) {

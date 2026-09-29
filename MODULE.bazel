@@ -4,7 +4,7 @@ module(
     version = "0.2.0",
 )
 
-bazel_dep(name = "rules_python", version = "2.2.0")
+bazel_dep(name = "rules_python", version = "2.3.4")
 
 #python = use_extension("@rules_python//python/extensions:python.bzl", "python")
 #python.toolchain(python_version = "3.11")
@@ -13,47 +13,59 @@ bazel_dep(name = "bazel_skylib", version = "1.9.2")
 http_archive = use_repo_rule("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 new_git_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
+# The two local_repository rules are currently UNUSED on purpose: every sibling
+# is on its pinned archive so a fresh clone builds with no checkout next to it.
+# They stay declared because each pin's comment documents a one-line swap to a
+# local path for co-development, and that swap should not also need this line.
 local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "local_repository")
 new_local_repository = use_repo_rule("@bazel_tools//tools/build_defs/repo:local.bzl", "new_local_repository")
 
-bazel_dep(name = "rules_cc", version = "0.2.22")
+bazel_dep(name = "rules_cc", version = "0.2.25")
 bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "platforms", version = "1.1.0")
-bazel_dep(name = "rules_foreign_cc", version = "0.15.1")
+bazel_dep(name = "rules_foreign_cc", version = "0.16.0")
+bazel_dep(name = "apple_support", version = "2.9.1", repo_name = "build_bazel_apple_support")
+bazel_dep(name = "zlib-ng", version = "2.3.3.bcr.2", repo_name = "llvm_zlib")
+bazel_dep(name = "zstd", version = "1.5.7.bcr.2", repo_name = "llvm_zstd")
+
+# LLVM is linked into lhd for the opt-in direct simulator backend. LLVM's
+# official source archive carries its Bazel overlay under utils/bazel; expose
+# the raw tree and instantiate that overlay as @llvm-project. This remains
+# hermetic when LiveHD is consumed as a Bazel dependency and tracks the current
+# LLVM 22.1 patch release without relying on the system toolchain's libraries.
+http_archive(
+    name = "llvm-raw",
+    build_file_content = "exports_files([\"WORKSPACE\"])",
+    patch_args = ["-p1"],
+    patches = ["//packages:llvm22-bazel-root.patch"],
+    sha256 = "922f1817a0df7b1489272d18134ee0087a8b068828f87ac63b9861b1a9965888",
+    strip_prefix = "llvm-project-22.1.8.src",
+    urls = ["https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/llvm-project-22.1.8.src.tar.xz"],
+)
+
+llvm_configure = use_repo_rule("@llvm-raw//utils/bazel:configure.bzl", "llvm_configure")
+llvm_configure(name = "llvm-project", targets = ["AArch64", "X86"])
 
 bazel_dep(name = "abseil-cpp", version = "20250814.2") # version = "20240722.1")
 bazel_dep(name = "google_benchmark", version = "1.9.5")
-bazel_dep(name = "googletest", version = "1.17.0.bcr.2")
+bazel_dep(name = "googletest", version = "1.18.0.bcr.1")
 
-# Taskflow (the shared formal proof DAG, 2f-fcore F1) is consumed via
+# Taskflow (the formal proof DAG and OpenTimer) is consumed via
 # @opentimer//:taskflow — the copy OpenTimer bundles under ot/taskflow — NOT a
 # second upstream archive. lhd links pass/opentimer (2opt-freq D), and two
 # taskflow versions in one binary are an ODR violation that corrupts
 # tf::Executor at runtime (different tf:: layouts behind one set of weak inline
-# symbols). Do not re-add a standalone taskflow archive while OpenTimer is
-# linked in; see packages/opentimer.BUILD.
-# http_archive(
-#     name = "taskflow",
-#     build_file = "//packages:taskflow.BUILD",
-#     integrity = "sha256-IQf5DjFeSKZ2kiAQsDY1f/KwxrkWDOF/qTluWGCx1xU=",
-#     strip_prefix = "taskflow-4.1.0",
-#     urls = ["https://github.com/taskflow/taskflow/archive/refs/tags/v4.1.0.tar.gz"],
-# )
+# symbols). Do not add a standalone Taskflow archive while OpenTimer is linked
+# in; see packages/opentimer.BUILD.
 
-# slang v11.0 (@slang, the direct inou/slang reader) vendors boost_unordered as a
-# single header (SLANG_BOOST_SINGLE_HEADER). These boost.* BCR deps are kept only
-# for the pinned slang v10.0 (@slang_v10) that @yosys_slang still builds against
-# (todo/ 1s, subtask A).
-bazel_dep(name = "boost.multiprecision", version = "1.90.0.bcr.1")
-bazel_dep(name = "boost.unordered", version = "1.90.0.bcr.1")
 #### Flex/Bison
-bazel_dep(name = "bison", version = "3.8.2.bcr.7")
-bazel_dep(name = "flex", version = "2.6.4.bcr.5")
+bazel_dep(name = "bison", version = "3.8.2.bcr.9")
+bazel_dep(name = "flex", version = "2.6.4.bcr.7")
 
 bazel_dep(name = "rapidjson", version = "1.1.0.bcr.20250205")
 bazel_dep(name = "mimalloc", version = "2.2.4.bcr.2")
 
-bazel_dep(name = "libffi", version = "3.4.7.bcr.4")
+bazel_dep(name = "libffi", version = "3.4.7.bcr.5")
 
 # GMP -- cvc5's bignum backend. cvc5's non-GPL prebuilt static libs leave the
 # GMP symbols undefined (they are not bundled, to avoid the LGPL libgmp.a); they
@@ -89,7 +101,7 @@ git_repository(
 # hlop (Dlop value type + slop/dlop execution layer)
 git_repository(
     name = "hlop",
-    commit = "41255557ce4531fe6af21ec0a58423b3d7bd7797",  # top of tree
+    commit = "2e4e41297f996c789a21198569fd356b1a9eab67",
     remote = "https://github.com/masc-ucsc/hlop.git",
 )
 # For local co-development swap the git_repository above for:
@@ -117,57 +129,10 @@ http_archive(
     ],
 )
 
-# fmt 11.1.4 + slang 10.0 pinned for @yosys_slang only (todo/ 1s). yosys-slang
-# upstream is written against the v10 slang API; the direct inou/slang reader
-# (@slang above) is the one on v11.0.
-http_archive(
-    name = "fmt_v10",
-    build_file = "//packages:fmt.BUILD",
-    sha256 = "7e85cbf6125a76daa0f83cd9240eff863d988aca68cd5f66c01ff7b59fa886b6",
-    strip_prefix = "fmt-11.1.4",
-    urls = [
-        "https://github.com/fmtlib/fmt/archive/refs/tags/11.1.4.zip",
-    ],
-)
-
-http_archive(
-    name = "slang_v10",
-    build_file = "//packages:slang_v10.BUILD",
-    patches = ["//packages:slang_v10.patch"],
-    sha256 = "f04fa094e421d7306f817d5411f4de78017e594615e2fb9666b63d22df4188ff",
-    strip_prefix = "slang-10.0",
-    urls = [
-        "https://github.com/MikePopoloski/slang/archive/refs/tags/v10.0.zip",
-    ],
-)
-
-#### Mockturtle packages
-
-http_archive(
-    name = "mockturtle",
-    url = "https://github.com/lsils/mockturtle/archive/refs/heads/master.zip",
-    strip_prefix = "mockturtle-master",
-    build_file = "//packages:mockturtle.BUILD",
-)
-
-http_archive(
-    name = "kitty",
-    url = "https://github.com/msoeken/kitty/archive/refs/heads/master.zip",
-    strip_prefix = "kitty-master",
-    build_file = "//packages:kitty.BUILD",
-)
-
-http_archive(
-    name = "parallel_hashmap",
-    url = "https://github.com/greg7mdp/parallel-hashmap/archive/refs/heads/master.zip",
-    strip_prefix = "parallel-hashmap-master",
-    build_file = "//packages:parallel_hashmap.BUILD",
-)
-
 # HHDS (plain git repo — see the iassert/hlop note above)
 git_repository(
     name = "hhds",
-    commit = "11b58a75fba9ed2605f5cbde93bb4fc984fede87",
+    commit = "83cb51175803943ed3273f049deb41152d85ecab",
     remote = "https://github.com/masc-ucsc/hhds.git",
 )
 # For local co-development swap the git_repository above for:
@@ -193,18 +158,26 @@ http_archive(
 # LiveHD's core diag.hpp / parser.hpp); see //packages:prpparse.BUILD.
 # To bump the pin, recompute integrity via:
 #   curl -sL https://github.com/masc-ucsc/tree-sitter-pyrope/archive/<commit>.zip | openssl dgst -sha256 -binary | base64
-# Pinned to ace9553 (top of tree; adds the 2opt-freq B `{ ::[abc=…, color=…] … }`
-# scope-attribute grammar — "block attributes" — on top of the 2f-verify
-# `formal name.dotted {}` block grammar and the 3g generics grammar).
+# Pinned to 3609d517 ("fx prp fmt"); parser and formatter share this archive.
+#
+# The co-development swap to the local ../tree-sitter-pyrope checkout is OVER:
+# the grammar work is pushed, so this is the pinned archive again and livehd is
+# self-contained (a fresh clone builds with no sibling checkout). To swap back
+# for parser co-development, replace the http_archive with:
+#   new_local_repository(
+#       name = "prpparse",
+#       build_file = "//packages:prpparse.BUILD",
+#       path = "../tree-sitter-pyrope/prpparse",
+#   )
+# ...and remember the build then depends on that working tree. @tree_sitter_pyrope
+# below unzips the SAME archive, so both blocks move together.
 http_archive(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    integrity = "sha256-PV4CvLc7fw7bx0JgUGlAu9jy1XLveVo1QX1uVbUFU50=",  # ace9553 (same archive as @tree_sitter_pyrope below)
-    strip_prefix = "tree-sitter-pyrope-ace9553099006b5e301cbae7ec741a90baad1911/prpparse",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/ace9553099006b5e301cbae7ec741a90baad1911.zip"],
+    integrity = "sha256-QPqRtnx/TCV10urgDdgOHBym4FS2Ke8AxLEDwhvzeZ0=",  # 3609d517 (same archive as @tree_sitter_pyrope below)
+    strip_prefix = "tree-sitter-pyrope-3609d5173d55e82432dd37ffffec5f422f7898eb/prpparse",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/3609d5173d55e82432dd37ffffec5f422f7898eb.zip"],
 )
-# For local co-development swap the http_archive above for:
-# new_local_repository(name = "prpparse", build_file = "//packages:prpparse.BUILD", path = "../tree-sitter-pyrope/prpparse")
 
 # tree-sitter runtime — the incremental-parsing C library (libtree-sitter).
 # Only the Pyrope *formatter* (`lhd pyrope fmt`, @tree_sitter_pyrope//:prpfmt)
@@ -236,9 +209,9 @@ http_archive(
 http_archive(
     name = "tree_sitter_pyrope",
     build_file = "//packages:prpfmt.BUILD",
-    integrity = "sha256-PV4CvLc7fw7bx0JgUGlAu9jy1XLveVo1QX1uVbUFU50=",  # ace9553
-    strip_prefix = "tree-sitter-pyrope-ace9553099006b5e301cbae7ec741a90baad1911",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/ace9553099006b5e301cbae7ec741a90baad1911.zip"],
+    integrity = "sha256-QPqRtnx/TCV10urgDdgOHBym4FS2Ke8AxLEDwhvzeZ0=",
+    strip_prefix = "tree-sitter-pyrope-3609d5173d55e82432dd37ffffec5f422f7898eb",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/3609d5173d55e82432dd37ffffec5f422f7898eb.zip"],
 )
 # LOCAL OVERRIDE for prpfmt co-development — swap the http_archive above for:
 # new_local_repository(
@@ -271,33 +244,52 @@ http_archive(
 new_git_repository(
     name = "abc",
     build_file = "//packages:abc.BUILD",  # relative to external path
-    commit = "bcfdf592289a408cd67ec19260f8a60a37b085b6",
+    commit = "fbaae01487b05982739a5636df30687f41a10a2d",
     patches = ["//packages:abc.patch"],
     remote = "https://github.com/berkeley-abc/abc.git",
-    shallow_since = "1554534526 -1000",
+    shallow_since = "1788673176 -0700",
 )
 
-# Upstream renamed yosys-slang to sv-elab; keep the same source commit.
+# Yosys main, including its built-in read_slang frontend. sv-elab and
+# SymFPU are library submodules pinned to exactly this Yosys revision;
+# there is no separately built or dynamically loaded Slang plugin.
 http_archive(
-   name = "yosys_slang",
-   urls = [
-     "https://github.com/povik/sv-elab/archive/7cdd147a6dd14e8f57cd321df8be377c04c9b31f.zip"
-   ],
-   sha256 = "5759fda34036d3644683c55912b556533a5f24d4b3e0c2c85c7dc5b9552a79a9",
-   strip_prefix = "sv-elab-7cdd147a6dd14e8f57cd321df8be377c04c9b31f",
-   build_file = "//packages:yosys_slang.BUILD",
-   patches = ["//packages:yosys_slang.patch"],
+    name = "sv_elab",
+    urls = ["https://github.com/povik/sv-elab/archive/b6e440d6a2586b93c2a43da676c207c8c2a15778.zip"],
+    sha256 = "7331848d30690661822759c265a5543571be6e74a21eee660e92a4dc634a81d3",
+    strip_prefix = "sv-elab-b6e440d6a2586b93c2a43da676c207c8c2a15778",
+    build_file = "//packages:sv_elab.BUILD",
+    patches = ["//packages:sv_elab.patch"],
+    patch_cmds = ["rm src/yosys_plugin/BUILD.bazel .bazelignore"],
 )
 
 http_archive(
-   name = "at_clifford_yosys2",
-   urls = [
-     "https://github.com/YosysHQ/yosys/archive/refs/tags/v0.60.zip",
-   ],
-   sha256 = "cd2b29bbd3c92e0cdc4df37af3c7b17b965b6ebdb9079377d7e32fdefb4dcd3b",
-   strip_prefix = "yosys-0.60",
-   build_file = "//packages:yosys.BUILD",
-   patches = ["//packages:yosys.patch", "//packages:yosys_lexer.patch"],
+    name = "yosys_symfpu",
+    urls = ["https://github.com/YosysHQ/symfpu/archive/5d5e50867437fe5cabd6ab5aad3b3808ec86701f.zip"],
+    sha256 = "8f16e768c9075692a2509803247b06a12bf1f6fb98deb647fce0c1e90835b0e6",
+    strip_prefix = "symfpu-5d5e50867437fe5cabd6ab5aad3b3808ec86701f",
+    build_file_content = """load("@rules_cc//cc:defs.bzl", "cc_library")
+cc_library(name = "headers", hdrs = glob(["**/*.h"]), include_prefix = "symfpu", visibility = ["//visibility:public"])
+""",
+)
+
+http_archive(
+    name = "yosys_cxxopts",
+    urls = ["https://github.com/jarro2783/cxxopts/archive/4bf61f08697b110d9e3991864650a405b3dd515d.zip"],
+    sha256 = "706ef0fdef7e26f36d5d1cbe24f72afb816abe345c7852eb87b8097971506270",
+    strip_prefix = "cxxopts-4bf61f08697b110d9e3991864650a405b3dd515d",
+    build_file_content = """load("@rules_cc//cc:defs.bzl", "cc_library")
+cc_library(name = "headers", hdrs = ["include/cxxopts.hpp"], include_prefix = "libs/cxxopts", visibility = ["//visibility:public"])
+""",
+)
+
+http_archive(
+    name = "at_clifford_yosys2",
+    urls = ["https://github.com/YosysHQ/yosys/archive/435977e97008578a4532da60e70f75b5e88d076d.zip"],
+    sha256 = "69fbe16a8bc5032d55b5f1ddc8437b73e083c538043999a137add530e697a789",
+    strip_prefix = "yosys-435977e97008578a4532da60e70f75b5e88d076d",
+    build_file = "//packages:yosys.BUILD",
+    patches = ["//packages:yosys.patch", "//packages:yosys_lexer.patch"],
 )
 
 # cvc5 -- SMT backend for pass/lec, used directly via its native C++ API. We use the

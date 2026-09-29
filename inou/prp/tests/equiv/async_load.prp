@@ -1,0 +1,15 @@
+/*
+:name: async_load
+:type: equiv
+:verilog_top: async_load
+:pyrope_top: async_load
+*/
+
+// The asynchronous value is a live expression, independent of the clocked D.
+pub mod async_load(clk:u1, aload:u1, din_load:u8, din:u8) -> (q:u8@[]) {
+  wire load_value:u8
+  reg state:u8:[clock_pin=ref clk, posclk=false, reset_pin=ref aload, async=true, initial=ref load_value]
+  load_value = din_load ^ 0x5a
+  state = din
+  q = state
+}

@@ -24,15 +24,15 @@
 namespace prpparse {
 class Parser;
 struct Diag;
-}
+}  // namespace prpparse
 
 class Prp2lnast {
 protected:
   // Parsing (prpparse: a hand-written recursive-descent Pyrope parser whose Ast
   // is walked through the tree-sitter-shaped facade in prp_ast_facade.hpp).
-  std::string prp_file;
-  std::string src_filename;  // source path, for diagnostic spans
-  std::string src_relpath;   // workspace-relative form for SourceId minting
+  std::string                              prp_file;
+  std::string                              src_filename;  // source path, for diagnostic spans
+  std::string                              src_relpath;   // workspace-relative form for SourceId minting
   // Own the buffer + parser so the arena-allocated Ast (and the source bytes the
   // facade reads spans from) outlive the whole lowering.
   std::unique_ptr<prpparse::Source_buffer> prp_buf;
@@ -104,7 +104,7 @@ protected:
 
   // True when `n` (the CST subtree of a statement-position expression) can have
   // an observable side effect — a function call, an assignment, an attribute
-  // write (`::[attr=…]`), a spawn, a lambda, or an embedded scope / control /
+  // write (`::[attr=…]`), a lambda, or an embedded scope / control /
   // if / match. A pure expression (arithmetic, reads, tuples, constants) has
   // none, so discarding its value at statement position is useless.
   [[nodiscard]] bool expr_has_side_effects(TSNode n) const;
@@ -130,11 +130,11 @@ protected:
   // when they differ it reports and aborts (does not return).
   void check_decl_init_kind(std::string_view name, const Lnast_node& value, TSNode inner_type, const TSNode& anchor) const;
 
-  // Primitive type token (`u32`/`s8`/`i4`/`int`/`integer`/`uint`/
-  // `unsigned`/`bool`/`string`) as it appears in does/equals/case operand
+  // Primitive type token (`u32`/`s8`/`i4`/`signed`/`unsigned`/`bool`/`string`)
+  // as it appears in does/equals/case operand
   // position (plain `identifier` there — the grammar's *_type nodes only
   // exist in type contexts).
-  static bool is_prim_type_token(std::string_view txt);
+  static bool         is_prim_type_token(std::string_view txt);
   // Lower one `does`/`equals`/`case` operand. An integer type-call
   // (`int(max=…,min=…)` / `u8(min=…)`) lowers to a
   // `declare(tmp, prim_type_int(max,min), 'type')` and returns the tmp ref; a
@@ -142,12 +142,26 @@ protected:
   // (constprop decodes the name to kind+envelope; a real variable of that
   // name — e.g. `i2` — still wins because the fold consults the symbol
   // table / type-info first). Anything else falls through to expr_to_node.
-  Lnast_node  does_operand_to_node(TSNode n);
+  Lnast_node          does_operand_to_node(TSNode n);
+  // Fold the integer-only expression subset admitted by integer type bounds.
+  // Names resolve through the already-seen comptime-const bindings, so a type
+  // such as `signed(bits=W)` or `signed(max=(1 << W)-1)` is canonicalized
+  // before uPass consumes its prim_type_int(max,min) node.
+  std::optional<Dlop> resolve_type_int_value(TSNode n) const;
   // Shared by emit_type_expr (declare side) and does_operand_to_node
   // (operand side): classify an integer type keyword and refine its (max,min)
   // bounds from a `(max=…, min=…, bits=…)` constraint/argument tuple. Returns
   // false when `kw` is not an integer type keyword.
-  bool        int_type_call_bounds(std::string_view kw, TSNode tup, std::string& max_txt, std::string& min_txt);
+  bool                int_type_call_bounds(std::string_view kw, TSNode tup, std::string& max_txt, std::string& min_txt);
+  // 2f-type_bound — lower any integer type bound in `type_cast_node` that
+  // resolve_type_int_value cannot fold, into statements emitted AT THE CURRENT
+  // STATEMENT POSITION, and stash the resulting refs in prelowered_int_bounds_.
+  // Must run BEFORE the declaration's `attr_set` cluster head: the emitted
+  // statements have to precede the `declare` that consumes them, and
+  // rewrite_decls_to_declare merges a CONTIGUOUS attr_set/type_spec run.
+  void                prelower_type_bounds(TSNode type_cast_node);
+  // One `<head>(%tmp, l, r)` statement; returns the fresh %tmp ref.
+  Lnast_node          emit_bound_binop(Lnast_ntype::Lnast_ntype_int head, const Lnast_node& l, const Lnast_node& r);
 
   // Reject `a = 3` with no prior `mut`/`const`/declare (or param/output) visible
   // in scope. Runs on the producer tree (pre-upass), so it sees only source-level
@@ -193,6 +207,7 @@ protected:
   // the current `idx_stmts` cursor, tmp-ref minting, and frontend-agnostic
   // stmt emitters (cleanup_todo §3.4).
   std::shared_ptr<Lnast> lnast;
+  std::shared_ptr<Lnast> root_lnast_;
   Lnast_builder          builder;
 
   // Pending overflow kind ("wrap"/"sat") to apply to the next assignment.
@@ -218,7 +233,7 @@ protected:
   // `return` there becomes `<flag> = true; break`. `synth_return_flag_count_`
   // uniquifies the flag name across (possibly nested) functions.
   std::string return_flag_name_;
-  bool        in_return_loop_         = false;
+  bool        in_return_loop_          = false;
   int         synth_return_flag_count_ = 0;
 
   // Counter for file-unique hoisted in-tuple method names (`call` →
@@ -260,7 +275,7 @@ protected:
     // the wording differs (undefined-call).
     bool        is_call = false;
   };
-  std::vector<Read_site> read_sites_;
+  std::vector<Read_site>                                                        read_sites_;
   // Per-scope (stmts node) declaration index: name -> EARLIEST child position that
   // declares it (the same declarations read_is_visible's stmt_declares matches).
   // Built once in check_undefined_reads so read_is_visible resolves a frame in
@@ -276,7 +291,28 @@ protected:
   // source line wrote them, so "rename the inner/loop variable" is unactionable
   // advice for the one shape that trips it — a test parameter named like the
   // loop var, which `lhd sim` reports as "collides with a test parameter".
-  absl::flat_hash_set<Lnast_nid>                                               tick_loop_var_decls_;
+  absl::flat_hash_set<Lnast_nid>                                                tick_loop_var_decls_;
+  // Names that behave as declarations at the root stmts of a directly
+  // streamed lambda: its io/generic names plus closure values inserted in the
+  // body prologue.  A file wrapper leaves this empty.
+  absl::flat_hash_set<std::string>                                              streamed_scope_names_;
+  absl::flat_hash_set<std::string>                                              streamed_lexical_names_;
+
+  struct Destination_state {
+    std::shared_ptr<Lnast>                                                lnast;
+    Lnast_builder                                                         builder;
+    std::vector<Read_site>                                                read_sites;
+    absl::flat_hash_map<Lnast_nid, absl::flat_hash_map<std::string, int>> read_scope_decls;
+    absl::flat_hash_map<Lnast_nid, int>                                   read_child_index;
+    absl::flat_hash_set<Lnast_nid>                                        tick_loop_var_decls;
+    absl::flat_hash_set<std::string>                                      streamed_scope_names;
+    absl::flat_hash_set<std::string>                                      streamed_lexical_names;
+  };
+  std::vector<Destination_state> destination_stack_;
+
+  void push_streamed_destination(std::string_view name, std::string_view kind, bool verilog_origin, std::string_view lg_name);
+  std::shared_ptr<Lnast> pop_streamed_destination();
+  void                   finalize_current_lnast();
   // True iff `rs.name` is visible at the recorded site (see Read_site).
   bool                   read_is_visible(const Read_site& rs) const;
 
@@ -294,7 +330,7 @@ protected:
   // Record a named-type reference (`x:T`, array base `x:[N]T`) as a type
   // Read_site so check_undefined_reads validates that the type symbol exists
   // (an undefined `:potato` errors; hoisted/forward/generic/import names pass).
-  void                                  record_type_name_read(const TSNode& type_node);
+  void record_type_name_read(const TSNode& type_node);
 
   // Stack of "formal parameter widths in scope" — pushed by process_lambda_statement
   // before emitting the body, popped after. Each frame maps a typed argument
@@ -316,67 +352,68 @@ protected:
   void rewrite_decls_to_declare();
 
   // Statements
-  void process_statement(TSNode n);
-  void process_scope_statement(TSNode n, Lnast_nid target_stmts);
+  void                                  process_statement(TSNode n);
+  void                                  process_scope_statement(TSNode n, Lnast_nid target_stmts);
   // Scope attributes `{ ::[abc="…", color=…] … }` (2opt-freq B): strict parse
   // of the block's attribute_sq into a region id (+ optional abc string
   // literal node). Region-id bookkeeping: string labels intern per file, auto
   // ids skip explicitly used ones.
-  bool                                  parse_scope_attributes(TSNode attr_list_node, int& region_id, TSNode& abc_rv);
+  bool                                  parse_scope_attributes(TSNode attr_list_node, int& region_id, TSNode& abc_rv,
+                                                               std::vector<std::pair<std::string, TSNode>>& options);
   int                                   alloc_region_id();
   absl::flat_hash_map<std::string, int> region_label_ids_;
   absl::flat_hash_set<int>              region_ids_used_;
-  int                                   next_region_id_   = 1;
+  int                                   next_region_id_    = 1;
   int                                   region_marker_seq_ = 0;  // unique marker target per block
   // Shared body for process_description / process_scope_statement: walks ALL
   // children of `parent` (named + anonymous) so the grammar's hidden `wrap`/
   // `sat` overflow tokens are visible.
-  void walk_statement_block(TSNode parent);
+  void                                  walk_statement_block(TSNode parent);
   // Lower a scope's children from index `from`, desugaring early `return`
   // (2f-return_leak): a guarded `if cond { … return }` pushes the rest of the
   // scope into a synthesized `else`; a bare `return` drops the rest.
-  void lower_children_range(TSNode parent, uint32_t from);
+  void                                  lower_children_range(TSNode parent, uint32_t from);
   // Recover the hidden `wrap`/`sat` overflow keyword from the raw source gap
   // `[prev_end, gap_end)` before a statement (the prpparse CST does not
   // materialize it). Returns "wrap"/"sat"/"" (last identifier run in the gap,
   // comments stripped). Shared by lower_children_range and the streaming
   // top-level driver (2f-stream).
-  std::string_view scan_overflow_in_gap(uint32_t prev_end, uint32_t gap_end) const;
+  std::string_view                      scan_overflow_in_gap(uint32_t prev_end, uint32_t gap_end) const;
   // 2f-stream top-level driver: lower one construct pulled from the parse stream,
   // tracking the overflow-prefix gap scan + prev_end across calls.
-  void lower_streamed_top_level(TSNode c, std::string_view& pending_overflow, uint32_t& prev_end);
-  bool is_guarded_return_if(TSNode s, TSNode& cond_out, TSNode& then_out);
-  void process_assignment(TSNode n);
-  void process_declaration_statement(TSNode n);
-  void process_while_statement(TSNode n);
-  void process_for_statement(TSNode n);
-  void process_loop_statement(TSNode n);
+  void                                  lower_streamed_top_level(TSNode c, std::string_view& pending_overflow, uint32_t& prev_end);
+  bool                                  is_guarded_return_if(TSNode s, TSNode& cond_out, TSNode& then_out);
+  void                                  process_assignment(TSNode n);
+  void                                  process_declaration_statement(TSNode n);
+  void                                  process_while_statement(TSNode n);
+  void                                  process_for_statement(TSNode n);
+  void                                  process_loop_statement(TSNode n);
   // `tick`/`step` — the simulation cycle loop of a `test` block and its cycle
   // advance. A tick is NOT a comptime loop: its iteration count is assumed
   // unknown (see lnast_nodes.def), so it gets its own node rather than reusing
   // the always-unrolled `while`/`for` lowering.
-  void process_tick_statement(TSNode n);
-  void process_step_statement(TSNode n);
+  void                                  process_tick_statement(TSNode n);
+  void                                  process_step_statement(TSNode n);
   // Name of the implicit tick loop variable (the 0-based cycle index): the
   // `clocks=(name=ratio)` lvalue if present, else `clock`. Must agree with
   // prp_sim.cpp's tick_one_entry.
-  std::string tick_loop_var_name(TSNode tick);
+  std::string                           tick_loop_var_name(TSNode tick);
   // An always-true RECOMPUTED ref (`1 == 1`) for `loop`/`while true` conditions
   // (a literal `const 'true'` cond makes the runner skip the in-loop body fold,
   // so the break-guard never resolves). `lower_infinite_loop` builds the shared
   // `while (1==1) { if (1==1) {body} else {break} }` shape from the body node.
-  Lnast_node emit_always_true_ref();
-  void       lower_infinite_loop(TSNode code, TSNode loc);
-  void process_control_statement(TSNode n);
+  Lnast_node                            emit_always_true_ref();
+  void                                  lower_infinite_loop(TSNode code, TSNode loc);
+  void                                  process_control_statement(TSNode n);
   // Statement-table entry point (the table needs the plain `void(TSNode)`
   // member signature); forwards to the named variant with no override.
-  void process_lambda_statement(TSNode n);
+  void                                  process_lambda_statement(TSNode n);
   // `hoist_name` (when non-empty) overrides the func_def's emitted name —
   // used by tuple_to_node to hoist an in-tuple method (`comb call(ref
   // self,…){…}` inside a bundle literal) under a file-unique name while the
   // bundle field keeps the source method name.
-  void process_lambda_statement_named(TSNode n, std::string_view hoist_name);
-  void process_enum_assignment(TSNode n);
+  void                                  process_lambda_statement_named(TSNode n, std::string_view hoist_name);
+  void                                  process_enum_assignment(TSNode n);
   // One parsed entry of an enum definition (either source form).
   struct Enum_entry {
     std::string name;
@@ -450,7 +487,7 @@ protected:
   Lnast_node dot_expression_to_node(TSNode n);
   Lnast_node function_call_expr_to_node(TSNode n);
   Lnast_node interpolated_string_to_node(TSNode n);
-  Lnast_node tuple_to_node(TSNode n, bool is_square);
+  Lnast_node tuple_to_node(TSNode n, bool is_square, bool field_types_on_target = false);
   Lnast_node identifier_to_node(TSNode n, bool for_lvalue);
   Lnast_node constant_text_to_node(std::string_view text);
   // `expr::[attr=…]` write-side attribute bracket in expression position.
@@ -458,6 +495,11 @@ protected:
 
   // Type handling
   void                 emit_type_spec(const Lnast_node& target, TSNode type_cast_node);
+  // 2f-nested_type — stamp `path.<field>` type_specs for a tuple-shaped type,
+  // descending into nested tuple fields (leaves only). See the definition.
+  void                 emit_tuple_type_field_specs(std::string_view path, TSNode tuple_node);
+  // The inner `tuple` node when `type_cast_node`'s type is a tuple SHAPE.
+  TSNode               tuple_type_inner(TSNode type_cast_node) const;
   void                 emit_attribute_list(const Lnast_node& target, TSNode attribute_list_node);
   // Catch typical attribute-name mistakes (`initial`→`init`, `clk`→`clock_pin`,
   // `bit`→`bits`, …) at parse time with a targeted hint. `has_value` is true
@@ -516,21 +558,88 @@ protected:
   // ranges, descending ranges and non-literal depths are compile errors.
   std::pair<int64_t, int64_t> parse_pipe_depth(TSNode pipe_lambda_node);
 
-  // File-/body-scope `const NAME = <int literal>` bindings,
+  // File-/body-scope `const NAME = <compile-time integer expression>` bindings,
   // recorded as the declaration is lowered (process_lvalue_for_assign scalar
-  // branch). Lets `@[NAME]`, `stage[NAME]`, and `pipe[NAME]` timing slots
-  // accept a compile-time-resolvable const in place of a bare literal.
+  // branch). Lets integer type bounds and `@[NAME]`/`stage[NAME]`/`pipe[NAME]`
+  // timing slots accept a compile-time-resolvable const in place of a literal.
   // No-shadowing is already enforced, so a name is unambiguous along the
   // visible chain; a later binding may overwrite an earlier same-name one.
   //
-  // ALSO tracks `mut NAME = <int literal>` with declaration-time-capture
-  // semantics: record on the `mut` decl, UPDATE on
-  // a later statement-level plain `NAME = <int literal>`, and ERASE on any
-  // other write (non-literal rhs, compound op, or any write inside an if/for/
-  // while/match/lambda body — see conditional_depth_). A timing slot then
+  // ALSO tracks `mut NAME = <compile-time integer expression>` with
+  // declaration-time-capture semantics: record on the `mut` decl, UPDATE on a
+  // later statement-level plain write of another resolvable expression, and
+  // ERASE on any other write (runtime rhs, compound op, or any write inside an
+  // if/for/while/match/lambda body — see conditional_depth_). A timing slot then
   // resolves the value that was statically known AT THE LAMBDA DECLARATION
   // POINT; a mut that has since gone runtime is erased and the slot errors.
-  absl::flat_hash_map<std::string, int64_t> const_int_bindings_;
+  absl::flat_hash_map<std::string, int64_t>                  const_int_bindings_;
+  // 2f-type_bound — max/min for an integer type bound this front end cannot
+  // fold to a constant, most importantly a GENERIC width:
+  //   mod m<N=5>(…) { reg r:unsigned(bits=N) = nil … }
+  // `N` only has a value at SPECIALIZATION, long after prp2lnast, so no
+  // front-end folder can ever see it. The bound has to reach LNAST as a REF
+  // that the runner folds once the generic is bound (bake_decl_pre_step does
+  // exactly this for an array `[N]` dimension already). Until this existed the
+  // `bits=` arm simply did nothing on a fold miss: the declared width was
+  // dropped with NO diagnostic and the register was silently mis-sized.
+  //
+  // Keyed by the constraint tuple's start byte. Filled by
+  // prelower_type_bounds at the DECLARATION — the only site with a statement
+  // position to emit the desugar into — and consumed by int_type_call_bounds.
+  struct Prelowered_bounds {
+    Lnast_node max{Lnast_node::create_invalid()};
+    Lnast_node min{Lnast_node::create_invalid()};
+  };
+  absl::flat_hash_map<uint32_t, Prelowered_bounds>           prelowered_int_bounds_;
+  // Constraint tuples prelower_type_bounds actually examined. A PORT/return
+  // type, a tuple field type and a `f<signed(bits=N)>` generic argument have no
+  // statement position to desugar an unfoldable bound into, so prelowering
+  // never runs there. Without this the "not a compile-time value" error fired
+  // at those sites too and turned `mod m<N=8>(a:unsigned(bits=N))` -- which
+  // used to compile -- into a hard error.
+  absl::flat_hash_set<uint32_t>                              prelower_visited_;
+  // 2f-generic_port_width — PORT/return types of a GENERIC lambda whose integer
+  // bound does not fold (`mod m<N=1>(a:unsigned(bits=N * 4))`). The signature
+  // is lowered before the body stmts frame exists, so the desugar cannot be
+  // emitted at the declaration like prelower_type_bounds does for a body `mut`.
+  // The io store gets a placeholder `nil` bound now; flush_deferred_port_bounds
+  // (run once the body frame opens) emits the desugar into the BODY PROLOGUE and
+  // rewrites the io leaves IN PLACE to the resulting refs. The runner folds them
+  // at specialization (uPass_runner::deferred_port_type), never this front end.
+  struct Pending_port_bound {
+    TSNode    type_cast;
+    Lnast_nid store;  // io `store(ref name, default, prim_type_int(max,min)[, stages])`
+  };
+  std::vector<Pending_port_bound>                            pending_port_bounds_;
+  bool                                                       lambda_has_generics_ = false;  // lowering a generic lambda's signature
+  bool                                                       int_type_has_unfoldable_bound(TSNode type_node) const;
+  void                                                       flush_deferred_port_bounds();
+  // 2c-wire — declarations whose INLINE TUPLE type made emit_type_spec emit a
+  // shape-seeding `store(<name>, %tuple_tmp)`. That store carries the TYPE's
+  // field layout, not a user assignment, but it is structurally identical to
+  // one, so the single-driver counter booked it as driver #1 and
+  //     wire value:(data:u8) = nil
+  //     value = source            // the ONLY user assignment
+  // was rejected as `wire-multiple-drivers` -- with the span on the DECLARATION.
+  // It also MASKED the opposite check: such a wire never driven at all looked
+  // driven once, so `wire-undriven` could not fire for a tuple-typed wire.
+  // Names are discounted by exactly ONE seed; two real assignments still count 2.
+  absl::flat_hash_set<std::string>                           decl_shape_seed_targets_;
+  // Compact declaration-point closure environment.  These maps are updated
+  // only by unconditional outer-scope writes (the same rule as
+  // const_int_bindings_) and let a streamed lambda write its capture prologue
+  // before its body without first materializing/copying a func_def tree.
+  absl::flat_hash_map<std::string, std::string>              capture_const_bindings_;
+  absl::flat_hash_map<std::string, std::string>              capture_import_bindings_;
+  absl::flat_hash_set<std::string>                           streamed_function_names_;
+  // Keyed "<defining scope unit>\n<entity>" (see streamed_actuals_key):
+  // sibling scopes may each define a same-named helper with different capture
+  // lists, and a bare-name key let one scope's actuals ride the other's calls.
+  absl::flat_hash_map<std::string, std::vector<std::string>> streamed_capture_actuals_;
+  static std::string streamed_actuals_key(std::string_view scope_unit, std::string_view callee);
+  void               append_streamed_capture_actuals(const Lnast_nid& fcall, std::string_view callee);
+  void               patch_streamed_capture_calls(const std::shared_ptr<Lnast>& target, std::string_view callee,
+                                                  const std::vector<std::string>& captures);
 
   // `const NAME = <string | tuple literal>` → the RHS CST node, kept so an
   // `enum(...NAME, …)` spread can splice NAME (a string becomes a field name; a
@@ -541,12 +650,29 @@ protected:
   // (below) so it survives the streaming arena reset between constructs — the
   // spread can be in a LATER top-level statement than the const.
   absl::flat_hash_map<std::string, TSNode> const_rvalue_nodes_;
+  // Declaration-point capture environment for streamed lambdas, in SOURCE
+  // ORDER.  Enum values are bundles (not scalar capture_const_bindings_), so
+  // the compact source declaration is retained and re-lowered into each
+  // streamed destination's prologue; const tuple/string rvalues replay through
+  // const_rvalue_nodes_ (keyed by `name`).  One ordered list for both kinds:
+  // a const tuple may read an earlier enum entry (and an enum spread an
+  // earlier const), so the prologue must reproduce declaration order — an
+  // absl-map iteration emitted reads before their producers.  The CST clones
+  // live in retained_arena_ for the same parse_next lifetime reason as
+  // const_rvalue_nodes_.
+  struct Capture_stmt {
+    bool        is_enum{false};
+    std::string name;    // const rvalue name (empty for an enum)
+    TSNode      node{};  // retained enum declaration (unused for a const)
+  };
+  std::vector<Capture_stmt> capture_stmt_order_;
+  bool                      replaying_capture_enum_{false};
   // Persistent arena holding the cloned `const_rvalue_nodes_` RHS subtrees. The
   // streaming parser recycles its own arena per construct (2f-stream), so any
   // CST node a later statement still needs is cloned here instead, keyed off the
   // same `prp_buf` bytes (which outlive the parse). Small: only const string /
   // tuple rvalues that an `enum(...)` spread might reference.
-  prpparse::Ast_arena retained_arena_;
+  prpparse::Ast_arena       retained_arena_;
 
   // Functions (comb/mod/pipe) declared with a `ref` parameter (e.g. `ref self`).
   // Such a call mutates the caller, so using its RESULT in a right-hand-side
@@ -556,7 +682,7 @@ protected:
   // process_assignment (2f-ufcs).
   absl::flat_hash_set<std::string> ref_param_funcs_;
   // First call (anywhere in `n`) to a `ref`-param function, else a null node.
-  TSNode find_ref_param_call(TSNode n) const;
+  TSNode                           find_ref_param_call(TSNode n) const;
 
   // Nesting depth of conditional / loop / nested-lambda bodies currently being
   // lowered. >0 means writes are not unconditional statement-level writes, so
@@ -606,11 +732,11 @@ protected:
   // of the actuals. `name` is set for a NAMED bind (`f<T=u8>`, todo 3g C) and
   // empty for a positional one.
   struct Generic_call_arg {
-    Lnast_node  value;         // the bound type/constant/lambda (a ref or const)
-    std::string name;          // generic parameter name, or empty (positional)
+    Lnast_node  value;  // the bound type/constant/lambda (a ref or const)
+    std::string name;   // generic parameter name, or empty (positional)
   };
   std::vector<Generic_call_arg> collect_generic_args(TSNode call_node);
-  void                          add_generic_args_to_fcall(const Lnast_nid& fcall_idx, const std::vector<Generic_call_arg>& generic_args);
+  void add_generic_args_to_fcall(const Lnast_nid& fcall_idx, const std::vector<Generic_call_arg>& generic_args);
 
   // Lvalue helpers. `rhs_is_fcall` tells the lvalue_list path to bind by
   // name (return-field name) rather than position; otherwise positional
@@ -625,7 +751,8 @@ protected:
   // call before the store (replaces the old attr_set(wrap) tag).
   Lnast_node process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node,
                                        bool rhs_is_fcall = false, std::string_view rhs_fcall_name = {},
-                                       std::string_view overflow_kind = {}, bool rhs_name_bindable = false);
+                                       std::string_view overflow_kind = {}, bool rhs_name_bindable = false,
+                                       std::optional<int64_t> resolved_rvalue_int = std::nullopt);
 
   // Helpers
   std::string_view        get_text(const TSNode& n) const;
@@ -671,4 +798,9 @@ public:
   // Comments and string bodies are correctly ignored (they are not keyword
   // tokens). Throws Parse_error only on an unterminated string/backtick.
   static std::vector<std::string> scan_imports(const std::string& path);
+  // Same lexer-only scan over already-captured bytes. `path` is the virtual
+  // user-tree path used for diagnostics; no disk read occurs. Incremental
+  // compile uses this after its one-shot source snapshot so dependency
+  // discovery and the later parse observe exactly the same file contents.
+  static std::vector<std::string> scan_imports(std::string_view path, std::string_view source);
 };

@@ -1,0 +1,24 @@
+/*
+:name: enum_expression_ordinals
+:type: parsing lnast comptime
+:verifier_pass: 13
+:verifier_fail: 0
+*/
+const c = 1
+const test1 = enum(a=c, b, c, d=10+c, e)
+cassert(test1.a == 1)
+cassert(test1.b == 2)
+cassert(test1.c == 3)
+cassert(test1.d == 11)
+cassert(test1.e == 12)
+cassert(c == 1)
+cassert(string(c) == "1")
+const negative = -3
+enum Signed:signed = (a=negative, b, c, d)
+cassert(Signed.a == -3)
+cassert(Signed.b == -2)
+cassert(Signed.c == -1)
+cassert(Signed.d == 0)
+const hex = enum(a=0xf, b)
+cassert(hex.a == 15)
+cassert(hex.b == 16)

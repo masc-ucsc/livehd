@@ -203,6 +203,24 @@ int main() {
     check_eq(n1, n0.substr(0, n0.rfind('_')) + "_1", "second repeat is hash_1");
   }
 
+  // ── 9. Dense name storage must follow cross-tree node handles ────────────
+  // Lnasts in one compile share a name pool, and a few resolution paths
+  // intentionally ask lnastA to decode a node owned by lnastB. Both trees use
+  // the same small position numbers, so the dense attribute lookup must use
+  // the node handle's owning tree rather than lnastA's body.
+  {
+    Lnast_builder a;
+    Lnast_builder b;
+    a.new_lnast("a");
+    b.new_lnast("b");
+    auto a_stmt = a.add_child(Lnast_ntype::create_plus());
+    auto b_stmt = b.add_child(Lnast_ntype::create_plus());
+    auto a_ref  = a.add_child(a_stmt, Lnast_node::create_ref("from_a"));
+    auto b_ref  = b.add_child(b_stmt, Lnast_node::create_ref("from_b"));
+    check_eq(a.lnast->get_name(a_ref), "from_a", "same-tree indexed name lookup");
+    check_eq(a.lnast->get_name(b_ref), "from_b", "cross-tree dense name lookup uses the owning tree");
+  }
+
   if (failures) {
     std::print(stderr, "{} check(s) failed\n", failures);
     return 1;

@@ -1,0 +1,2277 @@
+// This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+//
+// A region body -> its RAW Lnet (region_blast.hpp). Lifted from pass.abc's
+// map_region: every choice here is backend-neutral, so any mapper replays or
+// reads the same translation.
+#include "region_blast.hpp"
+
+#include <algorithm>
+#include <format>
+#include <map>
+#include <print>
+#include <string>
+
+#include "absl/container/btree_map.h"
+#include "absl/container/node_hash_map.h"
+#include "cell.hpp"
+#include "hhds/attrs/srcid.hpp"
+#include "host_mem.hpp"
+#include "latch_contract.hpp"
+#include "lnet_ops.hpp"
+#include "node_util.hpp"
+#include "synthesis_cost.hpp"
+
+namespace livehd::synth {
+namespace gu = livehd::graph_util;
+
+// A pipeline Flop stores one word at every declared cycle of delay.
+[[nodiscard]] int pipeline_depth(const hhds::Node_class& node) {
+  if (auto pm = gu::get_driver_of_sink_name(node, "pipe_min"); pm.is_const()) {
+    return static_cast<int>(std::max<int64_t>(1, gu::const_of(pm).to_just_i64()));
+  }
+  return 1;
+}
+
+// Source span of a region node. Best-effort: a node with no srcid -- or a
+// library whose srcmap was not loaded -- yields a null span, which renders
+// location-less rather than wrong (diag::to_text never fabricates a location).
+[[nodiscard]] livehd::diag::Span node_span(const livehd::partition::Region_body& rb, const hhds::Node_class& n) {
+  if (rb.src == nullptr || n.is_invalid()) {
+    return {};
+  }
+  auto a = n.attr(hhds::attrs::srcid);
+  if (!a.has() || a.get() == 0) {
+    return {};
+  }
+  return rb.src->source_locator().resolve_span(a.get());
+}
+
+namespace {
+// Nearest user-visible signal name for `n`. Synthesis-stage nodes are mostly
+// UNNAMED (only what the source named keeps a name attr), so `debug_name`
+// alone -- "shl_10620" -- tells a user nothing. Anchor on a real signal
+// instead: this node's own named driver pin, else a bounded breadth-first walk
+// of the fan-out (the named value it feeds, or the module port it reaches),
+// else of the fan-in (the named operand it reads). `relation` comes back as
+// "" / "feeds" / "reads" so the caller can say which way it had to look.
+std::string nearest_named_signal(const hhds::Node_class& n, std::string_view& relation) {
+  // Two independent budgets, because two different things can blow up here: the
+  // NODE budget bounds how far the search spreads, and the EDGE budget bounds
+  // one step of it -- out_edges() is a lazy view over live storage and a
+  // clock/reset-like pin fans out to 100k+ sinks, so bounding dequeues alone
+  // would still let a single node enqueue the whole fan-out.
+  constexpr size_t kMaxNodes = 256;
+  constexpr size_t kMaxEdges = 4096;
+  relation                   = {};
+  if (n.is_invalid()) {
+    return {};
+  }
+  // The value a node produces, named. out_pins() is the node's driver pins
+  // directly -- walking out_edges() instead would re-visit one pin once per
+  // consumer.
+  const auto named_of = [](const hhds::Node_class& node) -> std::string {
+    for (const auto& p : node.out_pins()) {
+      if (auto nm = gu::pin_name_of(p); !nm.empty()) {
+        return std::string{nm};
+      }
+    }
+    auto nn = gu::node_name_of(node);
+    return nn.empty() ? std::string{} : std::string{nn};
+  };
+  if (auto own = named_of(n); !own.empty()) {
+    relation = "is";
+    return own;
+  }
+  const auto walk = [&](bool downstream) -> std::string {
+    absl::flat_hash_set<hhds::Node_class> seen{n};
+    std::vector<hhds::Node_class>         frontier{n};
+    size_t                                nodes = 0;
+    size_t                                edges = 0;
+    while (!frontier.empty() && nodes < kMaxNodes && edges < kMaxEdges) {
+      std::vector<hhds::Node_class> next;
+      for (const auto& cur : frontier) {
+        if (++nodes > kMaxNodes || edges >= kMaxEdges) {
+          break;
+        }
+        if (downstream) {
+          for (const auto& e : cur.out_edges()) {
+            if (++edges > kMaxEdges) {
+              break;
+            }
+            // A module port is the best anchor of all: it is the name the
+            // instantiating design uses for this value.
+            if (gu::is_graph_output_pin(e.sink)) {
+              if (auto nm = gu::pin_name_of(e.sink); !nm.empty()) {
+                return std::string{nm};
+              }
+            }
+            auto sn = e.sink.get_master_node();
+            if (sn.is_invalid() || !seen.insert(sn).second) {
+              continue;
+            }
+            if (auto nm = named_of(sn); !nm.empty()) {
+              return nm;
+            }
+            next.push_back(sn);
+          }
+        } else {
+          for (const auto& in_pin : cur.inp_sorted_pins()) {
+            const auto in_drv = in_pin.get_driver_pin();
+            if (++edges > kMaxEdges) {
+              break;
+            }
+            if (auto nm = gu::pin_name_of(in_drv); !nm.empty()) {  // also resolves a module INPUT port
+              return std::string{nm};
+            }
+            auto dn = in_drv.get_master_node();
+            if (dn.is_invalid() || !seen.insert(dn).second) {
+              continue;
+            }
+            if (auto nm = named_of(dn); !nm.empty()) {
+              return nm;
+            }
+            next.push_back(dn);
+          }
+        }
+      }
+      frontier.swap(next);
+    }
+    return {};
+  };
+  if (auto down = walk(true); !down.empty()) {
+    relation = "feeds";
+    return down;
+  }
+  if (auto up = walk(false); !up.empty()) {
+    relation = "reads";
+    return up;
+  }
+  return {};
+}
+
+}  // namespace
+
+// A constant rendered for a ONE-LINE diagnostic: the literal, its PAYLOAD width,
+// and how many of those bits are unknown.
+//
+// The width and the unknown count are not decoration. Dlop's carrier is SIGNED,
+// so a non-negative value always renders with one leading `0` beyond its payload
+// (`Dlop::get_payload_bits`): a u6 whose every bit is unknown prints as
+// `0ub0??????`, and that leading digit reads as a seventh value bit -- or, worse,
+// as a sign -- to anyone who did not write the renderer. Spelling out
+// "(6 bits, 6 unknown)" says plainly that this is a six-bit value, entirely
+// unknown, and not a negative one.
+//
+// An all-unknown 4096-bit literal would otherwise take the whole message
+// hostage, so a long spelling is elided in the middle.
+[[nodiscard]] std::string const_brief(const Dlop& v) {
+  auto       s   = std::format("{}", v);  // Dlop's formatter renders to_pyrope()
+  const auto bin = v.to_binary();
+  const auto unk = static_cast<size_t>(std::count(bin.begin(), bin.end(), '?'));
+  if (s.size() > 44) {
+    s = std::format("{}...{}", s.substr(0, 28), s.substr(s.size() - 6));
+  }
+  return std::format("{} ({} bits, {} unknown)", s, std::max(1, v.get_payload_bits()), unk);
+}
+
+// "<cell>_<nid>" plus the nearest named signal: `shl_10620 (feeds 'mshr_d')`.
+[[nodiscard]] std::string node_identity(const hhds::Node_class& n) {
+  std::string_view rel;
+  const auto       nm = nearest_named_signal(n, rel);
+  if (nm.empty()) {
+    return gu::debug_name(n);
+  }
+  if (rel == "is") {
+    return std::format("{} '{}'", gu::debug_name(n), nm);
+  }
+  return std::format("{} ({} '{}')", gu::debug_name(n), rel, nm);
+}
+
+// Rewrite the TRIVIALLY convertible remainders in a region into a mask, in
+// place, and report whether any survived.
+//
+// `a % 2^k` is `a & (2^k - 1)` -- but ONLY for a non-negative dividend. The op
+// is truncated remainder (the sign follows the dividend), so `-9 % 8` is -1,
+// not 7, and masking a negative value is simply a different function.
+//
+// upass/tolg's lower_mod already folds this shape when it lowers Pyrope, so a
+// Rem arriving from THAT path is non-trivial by construction. This pass exists
+// for the readers that build the cell directly -- inou/yosys turns `$mod` into
+// a Rem with whatever divisor the Verilog had, so a perfectly ordinary
+// `x % 8` read from Verilog would otherwise hit the error below despite being
+// one AND gate.
+void rewrite_trivial_rems(hhds::Graph* g) {
+  std::vector<hhds::Node_class> to_fix;
+  for (auto n : g->body().nodes()) {
+    if (gu::type_op_of(n) != Ntype_op::Rem) {
+      continue;
+    }
+    auto b = gu::get_driver_of_sink_name(n, "b");
+    auto a = gu::get_driver_of_sink_name(n, "a");
+    if (b.is_invalid() || a.is_invalid() || !b.is_const()) {
+      continue;
+    }
+    const auto& bc = gu::const_of(b);
+    if (bc.has_unknowns() || !bc.is_just_i64()) {
+      continue;
+    }
+    const int64_t bv = bc.to_just_i64();
+    const int64_t ba = bv < 0 ? -bv : bv;
+    // A negative-capable dividend cannot use the mask (see above). `is_unsign`
+    // is the same non-negativity test lower_mod uses.
+    if (ba < 2 || (ba & (ba - 1)) != 0 || !gu::is_unsign(a)) {
+      continue;
+    }
+    to_fix.push_back(n);
+  }
+  for (auto n : to_fix) {
+    auto          a  = gu::get_driver_of_sink_name(n, "a");
+    auto          b  = gu::get_driver_of_sink_name(n, "b");  // named: gcc -Wdangling-reference on const_of(temporary)
+    const auto&   bc = gu::const_of(b);
+    const int64_t bv = bc.to_just_i64();
+    const int64_t ba = bv < 0 ? -bv : bv;
+
+    auto andn = gu::create_typed_node(*g, Ntype_op::And, gu::bits_of(n.get_driver_pin(0)));
+    gu::setup_sink_by_name(andn, "as").connect_driver(a);
+    gu::setup_sink_by_name(andn, "as").connect_driver(gu::create_const(*g, *Dlop::create_integer(ba - 1)));
+    auto                         newd = andn.create_driver_pin(0);
+    // SNAPSHOT the fan-out: connect_driver() below adds an edge, which
+    // invalidates the lazy out_edges() view this used to rewire from.
+    std::vector<hhds::Pin_class> readers;
+    for (const auto& e : n.get_driver_pin(0).out_edges()) {
+      readers.push_back(e.sink);
+    }
+    for (const auto& reader : readers) {
+      reader.connect_driver(newd);
+    }
+    n.del_node();
+  }
+}
+
+
+// A region consisting solely of a constant shift is pure bus wiring (plus
+// sign extension for SRA). ABC turns its padding into one mapped object per
+// output bit (Rob has hundreds of these regions, growing to 10k bits each).
+// Rebuild the typed wiring node directly; OpenTimer tracks constant shift bit
+// identity and no Liberty delay is being skipped because there is no Boolean
+// gate here.
+bool rewrite_single_shift(const livehd::partition::Region_body& rb) {
+  absl::flat_hash_map<hhds::Pin_class, std::string> region_in_name;
+  for (const auto& port : rb.inputs) {
+    region_in_name.emplace(port.src_driver, port.name);
+  }
+  const auto single_shift_op = rb.nodes.size() == 1 ? gu::type_op_of(rb.nodes.front()) : Ntype_op::Invalid;
+  if (single_shift_op == Ntype_op::SHL || single_shift_op == Ntype_op::SRA) {
+    const auto src_node = rb.nodes.front();
+    const auto a        = gu::get_driver_of_sink_name(src_node, "a");
+    const auto b        = gu::get_driver_of_sink_name(src_node, "b");
+    auto       ait      = region_in_name.find(a);
+    if (!a.is_invalid() && b.is_const() && (a.is_const() || ait != region_in_name.end())) {
+      auto node = gu::create_typed_node(*rb.body, single_shift_op);
+      if (a.is_const()) {
+        gu::create_const(*rb.body, gu::const_of(a)).connect_sink(gu::setup_sink_by_name(node, "a"));
+      } else {
+        rb.body->get_input_pin(ait->second).connect_sink(gu::setup_sink_by_name(node, "a"));
+      }
+      gu::create_const(*rb.body, gu::const_of(b)).connect_sink(gu::setup_sink_by_name(node, "b"));
+      auto out  = node.create_driver_pin(0);
+      int  bits = 1;
+      for (const auto& port : rb.outputs) {
+        bits = std::max(bits, port.bits);
+      }
+      gu::set_bits(out, bits);
+      if (!gu::is_unsign(src_node.create_driver_pin(0))) {
+        gu::set_sign(out);
+      }
+      if (auto pn = gu::pin_name_of(src_node.create_driver_pin(0)); !pn.empty()) {
+        gu::set_pin_name(out, pn);
+      }
+      for (const auto& port : rb.outputs) {
+        out.connect_sink(rb.body->get_output_pin(port.name));
+      }
+      return true;
+    }
+  }
+  return false;
+
+}
+
+Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_options& options, const Blast_hooks& hooks) {
+  Region_blast result;
+  auto&        lnet                 = result.lnet;
+  auto&        flops                = result.flops;
+  auto&        bboxes               = result.bboxes;
+  auto&        region               = result.region;
+  auto&        native_comb_logic    = result.native_comb_logic;
+  auto&        region_in_name       = result.region_in_name;
+  auto&        pi_order             = result.pi_order;
+  auto&        all_pi_order         = result.all_pi_order;
+  auto&        bbox_pi              = result.bbox_pi;
+  auto&        po_order             = result.po_order;
+  auto&        bbox_po              = result.bbox_po;
+  auto&        direct_native_output = result.direct_native_output;
+  auto&        has_dummy_po         = result.has_dummy_po;
+  const auto   trace_stage          = [&](std::string_view name) {
+    if (hooks.stage) {
+      hooks.stage(name);
+    }
+  };
+  const auto   since                = [&] { return hooks.elapsed_ms ? hooks.elapsed_ms() : 0.0; };
+
+  // The region's logic is recorded on a RAW Lnet (lnet_ops.hpp); a backend
+  // replays it once translation succeeds.
+  Lnet_ops ops(lnet);
+
+  // bit i of an original driver pin -> the ABC net carrying it. The OUTER map is
+  // a node_hash_map (pointer-stable values): several sites bind `auto& slots =
+  // bitnet[pin]` and then keep writing through it while `abc_bit` inserts *new*
+  // outer keys (input/const drivers). A flat_hash_map would rehash on those
+  // inserts and leave `slots` dangling — harmless for a small colored region but
+  // a use-after-free once an uncolored design folds the whole graph into one
+  // large region. node_hash_map keeps each inner map's address fixed across
+  // outer rehashes, so every held `slots` reference stays valid.
+  absl::node_hash_map<hhds::Pin_class, absl::flat_hash_map<int, Lid>> bitnet;
+  // Region node membership (handles into rb.src).
+  for (const auto& n : rb.nodes) {
+    region.insert(n);
+  }
+
+  // Set when a region node cannot be mapped (unsupported cell / mask); the
+  // region is abandoned after the blast loop. Declared here so abc_bit can
+  // suppress its per-bit unmaterialized-driver diagnostics once the ONE real
+  // unsupported-cell error has fired (the producer wrote no slots, so every
+  // downstream read would otherwise flood the log).
+  bool unsupported = false;
+
+  // Per-node refusal, with provenance. Unlike the region-level message it
+  // replaces, every record now carries the offending node's identity and its
+  // original source location -- so two of these no longer collapse into one
+  // line by the sink's (code, span, message) dedup. That is the point (a
+  // 12k-node region can hold dozens of independently broken cells), but it
+  // also means a systematically broken region would print one line per node:
+  // report the first kMaxRefusals in full and summarize the rest.
+  constexpr size_t kMaxRefusals = 10;
+  size_t           refusals     = 0;
+  const auto       refuse       = [&](const hhds::Node_class& bad,
+                                      std::string_view        code,
+                                      std::string_view        category,
+                                      std::string_view        what,
+                                      std::string_view        hint     = {},
+                                      const hhds::Pin_class&  note_pin = {},
+                                      std::string_view        note_msg = {}) {
+    unsupported = true;
+    if (refusals++ >= kMaxRefusals) {
+      return;  // counted; the post-loop summary reports the total
+    }
+    auto b = livehd::diag::err("pass.abc", code, category);
+    b.at(node_span(rb, bad));
+    b.msg("pass.abc: {} in region '{}': {}", node_identity(bad), rb.module_name, what);
+    if (!hint.empty()) {
+      b.hint(hint);
+    }
+    if (!note_pin.is_invalid() && !note_msg.empty()) {
+      if (auto sp = node_span(rb, note_pin.get_master_node()); !sp.is_null()) {
+        b.note(note_msg, sp);
+      }
+    }
+    b.emit();
+  };
+
+  // SHL / SRA share this: the amount is a constant the mapper cannot use.
+  const auto refuse_shift_amount
+      = [&](const hhds::Node_class& bad, std::string_view op_name, const Dlop& amt, const hhds::Pin_class& amt_pin) {
+          // UNKNOWN is tested FIRST, and that order is load-bearing: Dlop::unknown()
+          // fills the base plane with -1 (hlop init_unknown) and Dlop::is_negative()
+          // reads only that plane, so EVERY x-carrying value answers "negative".
+          // `!has_unknowns() && is_negative()` is the idiom upass/tolg already uses
+          // (pin_can_be_negative); with the tests the other way round every unknown
+          // amount is misreported as a livehd internal bug.
+          if (!amt.has_unknowns() && amt.is_negative()) {
+            refuse(
+                bad,
+                "negative-shift-amount",
+                "internal",
+                std::format("{} shift amount is the NEGATIVE constant {} -- a shift count must be >= 0", op_name, const_brief(amt)),
+                "no pass should have produced this: upass.bitwidth rejects a negative shift count, so a negative "
+                "constant reaching synthesis is a folding/lowering bug in livehd, not a design error",
+                amt_pin,
+                "shift amount defined here");
+            return;
+          }
+          refuse(bad,
+                 "unknown-shift-amount",
+                 "unsupported",
+                 std::format("{} shift amount is the constant {}, which carries unknown (?) bits -- ABC has no X value, so "
+                             "the shift cannot be technology-mapped",
+                             op_name,
+                             const_brief(amt)),
+                 "a RUNTIME (non-constant) shift amount is supported and becomes a barrel shifter; only an UNKNOWN constant "
+                 "is not. Trace the amount back to the value that was never given a definite assignment",
+                 amt_pin,
+                 "shift amount defined here");
+        };
+
+  Wiring_blaster<Lid> wiring_blaster;
+
+  // Region inputs are bit-demanded, not eagerly exploded. Wide packed-state
+  // ports often expose tens of thousands of bits while this region reads only
+  // a small slice; creating every unused PI also forces readback to build an
+  // equally large selector forest. `pi_order` records the exact lazy creation
+  // order, so the mapped PI readback remains positional and deterministic.
+  absl::flat_hash_map<hhds::Pin_class, size_t> region_input_index;
+  // Native boundary outputs follow the same demand-driven rule as region
+  // inputs.  Wide packed-wiring boundaries can expose tens of thousands of
+  // bits while the mapped cone reads only a handful; eagerly creating every PI
+  // made those unused bits survive through ABC readback as an equally large
+  // selector forest.  The origin table is populated by the boundary scan below
+  // before any combinational node is bit-blasted.
+  using Bbox_output_origin = std::pair<int, int>;  // (bbox index, output index)
+  absl::flat_hash_map<hhds::Pin_class, Bbox_output_origin> bbox_output_index;
+  // Recognized integrated clock gates (see "integrated clock gates" below):
+  // the latch/AND nodes they absorb, gate output -> Region_blast::icgs index
+  // (the gated clock is a PI of the mapped logic, read back from the cell),
+  // and gate output -> why it stays native.
+  absl::flat_hash_set<hhds::Node_class>             icg_absorbed;
+  absl::flat_hash_map<hhds::Pin_class, int32_t>     icg_of_gclk;
+  absl::flat_hash_map<hhds::Pin_class, std::string> icg_rejected;
+  for (size_t pi = 0; pi < rb.inputs.size(); ++pi) {
+    region_input_index.emplace(rb.inputs[pi].src_driver, pi);
+  }
+
+  // --- bit i of an original driver pin, with sign/zero extension past width ---
+  std::function<Lid(const hhds::Pin_class&, int)> abc_bit = [&](const hhds::Pin_class& drv, int i) -> Lid {
+    if (drv.is_invalid()) {
+      return ops.konst(false);
+    }
+    int  w    = gu::bits_of(drv);
+    bool sign = !gu::is_unsign(drv);
+    int  eff  = i;
+    if (w != 0 && i >= w) {
+      eff = sign ? w - 1 : -1;  // -1 => constant 0 above an unsigned width
+    }
+    if (eff < 0) {
+      return ops.konst(false);
+    }
+    auto& slots = bitnet[drv];
+    if (auto it = slots.find(eff); it != slots.end()) {
+      return it->second;
+    }
+    if (drv.is_const()) {
+      const auto& val = gu::const_of(drv);
+      const auto  net = ops.konst(val.bit_test(eff));
+      slots[eff]      = net;
+      return net;
+    }
+    if (auto it = region_input_index.find(drv); it != region_input_index.end()) {
+      const size_t pi = it->second;
+      const auto   net = lnet.add_input(std::format("{}_b{}", rb.inputs[pi].name, eff));
+      slots[eff]     = net;
+      all_pi_order.push_back({Pi_kind::region_input, pi_order.size()});
+      pi_order.emplace_back(pi, eff);
+      return net;
+    }
+    if (auto it = bbox_output_index.find(drv); it != bbox_output_index.end()) {
+      const auto net = lnet.add_input({});  // unnamed
+      slots[eff]     = net;
+      all_pi_order.push_back({Pi_kind::bbox_output, bbox_pi.size()});
+      bbox_pi.emplace_back(it->second.first, it->second.second, eff);
+      return net;
+    }
+    if (auto it = icg_of_gclk.find(drv); it != icg_of_gclk.end()) {
+      // A recognized clock gate's output: the ICG cell drives it on read-back.
+      I(eff == 0);  // a gate output is one bit (wider reads sign/zero-extend above)
+      const auto net = lnet.add_input(std::format("__icg{}_gclk", it->second));
+      slots[eff]     = net;
+      all_pi_order.push_back({Pi_kind::icg_output, static_cast<size_t>(it->second)});
+      return net;
+    }
+    auto master = drv.get_master_node();
+    if (gu::type_op_of(master) == Ntype_op::Set_mask || gu::type_op_of(master) == Ntype_op::Concat) {
+      const auto net = wiring_blaster.bit(drv, eff, abc_bit, [&] { return ops.zero(); }, [&](std::string_view why) {
+        if (!unsupported) {
+          refuse(master, "unsupported-cell", "unsupported", why);
+        }
+      });
+      slots[eff] = net;
+      return net;
+    }
+    // A region-internal node not yet materialized (a genuine node-level cycle
+    // the fixpoint scheduler could not resolve) or an unexpected boundary:
+    // use a temporary constant only to let translation unwind, but reject the
+    // region. Accepting that placeholder would silently miscompile the whole
+    // downstream cone. Suppress follow-on diagnostics once the first missing
+    // producer has identified the region-level failure.
+    if (!unsupported) {
+      refuse(drv.get_master_node(),
+             "unmaterialized-driver",
+             "internal",
+             std::format("bit {} of this driver could not be materialized", eff),
+             "the colored region contains a combinational cycle or an invalid boundary; refusing to emit a wrong netlist");
+    }
+    const auto net = ops.konst(false);
+    slots[eff]     = net;
+    return net;
+  };
+
+  auto real_width = [&](const hhds::Pin_class& p) -> int { return std::max(1, gu::real_width(p)); };
+
+
+  // Region-input driver -> port name. Used twice: to reconnect a flop
+  // boundary's control pins natively (see the boundary scan below), and to
+  // decide whether a register's clock even HAS a native source on read-back.
+  for (const auto& port : rb.inputs) {
+    region_in_name.emplace(port.src_driver, port.name);
+  }
+
+  // Registers that cannot be represented by the selected plain Liberty DFF
+  // stay native boundaries. A derived clock has no native source after latch
+  // read-back. An ASYNCHRONOUS reset is an event, not data: folding it into D
+  // would make the reset land only on a clock edge (and pass/lec's encode.cpp
+  // models async and sync resets differently under the phase schedule), so it
+  // needs a Liberty clear/preset cell (async_reset_blocker below). A
+  // SYNCHRONOUS reset is exactly a D-cone mux with priority over the enable
+  // (`if (rst) q <= rval; else if (en) q <= din;` is what cgen emits and what
+  // the LEC encodes, ITE(rst, init, ITE(en, din, q))), so it crosses ABC like
+  // any other next-state logic and maps to a plain DFF cell; its `initial` is
+  // the reset value, realized on D, never a power-on value (cvc5 + lgyosys both
+  // prove the folded netlist against the reset_pin+initial source). Keeping
+  // sync-reset registers native cost br_delay's Pyrope flow 32 native flops
+  // that yosys's normalize then mapped to DFFHQNx1 + 64 INVx1 + 24 extra HB1
+  // (18.196 vs 17.729 um^2, 114.5 vs 102.8 ps on ASAP7), and left every
+  // reset-cone node native with fanout 77-113 (br_amba_axi_demux 2045 ps).
+  absl::flat_hash_set<hhds::Node_class> clk_demoted;
+  // Derived-clock registers kept native, keyed by the precise reason.
+  std::map<std::string, absl::flat_hash_set<hhds::Node_class>> clk_demoted_by;
+  const std::string_view icg_unavailable
+      = options.icg ? "register(s) clocked by region-internal logic (a gated/derived clock) kept as native flops — a DFF "
+                      "cell cannot take its clock from mapped logic; the clock cone is still mapped and reconnected"
+        : options.icg_flow_ok
+            ? "register(s) clocked by region-internal logic (a gated/derived clock) kept as native flops — the Liberty "
+              "has no usable integrated clock-gate cell (latch_posedge, not dont_use) for a latch-based clock gate; the "
+              "clock cone is still mapped and reconnected"
+            : "register(s) clocked by region-internal logic (a gated/derived clock) kept as native flops — the synthesis "
+              "flow is a user command list that may reshape latches, so a clock-gate cell could not be attributed to "
+              "its registers; the clock cone is still mapped and reconnected";
+  // Async-reset registers kept native, keyed by the precise reason (std::map:
+  // a stable report order).
+  std::map<std::string, absl::flat_hash_set<hhds::Node_class>> reset_demoted_by;
+  absl::flat_hash_set<hhds::Node_class>                        reset_demoted;
+  // Why an asynchronous-reset register cannot map to a clear/preset flop cell
+  // (empty: it can, and `f` is filled in). The cell's reset pin is wired
+  // straight from a region input (like the clock pin), so the reset must trace
+  // to one through wire identities and inverters; the reset value must be a
+  // constant the library has a cell for, bit by bit.
+  auto async_reset_blocker = [&](const hhds::Node_class& n, Seq_flop& f) -> std::string {
+    if (!options.areset_flow_ok) {
+      return "asynchronous-reset register(s) kept as native flops — the synthesis flow is a user command list that may "
+             "reshape latches, so a clear/preset cell's reset pin could not be attributed to its register; their "
+             "surrounding data cones are still mapped";
+    }
+    if (options.areset_cell[0] < 0 && options.areset_cell[1] < 0) {
+      return "asynchronous-reset register(s) kept as native flops — the Liberty has no usable asynchronous clear/preset "
+             "flop cell (posedge, a bare-pin clear/preset, not dont_use); a synchronous reset is folded into D and "
+             "mapped; their surrounding data cones are still mapped";
+    }
+    const bool has_rval = f.rval_drv.is_const();
+    if (!f.rval_drv.is_invalid() && !has_rval) {
+      return "asynchronous-reset register(s) kept as native flops — the reset value is not a constant, which no "
+             "clear/preset flop cell can load; their surrounding data cones are still mapped";
+    }
+    const Dlop rval = has_rval ? gu::const_of(f.rval_drv) : Dlop{};
+    f.arst_val.assign(static_cast<size_t>(f.bits), false);
+    for (int b = 0; b < f.bits; ++b) {
+      bool v = false;
+      if (has_rval && rval.unknown_bit_test(b)) {
+        v = options.areset_cell[0] < 0;  // either value is the source's; take a cell the library has
+      } else if (has_rval) {
+        v = rval.bit_test(b);
+      }
+      if (options.areset_cell[v ? 1 : 0] < 0) {
+        return v ? "asynchronous-reset register(s) kept as native flops — a bit resets to 1 and the Liberty has no "
+                   "asynchronous PRESET flop cell (only a clear); their surrounding data cones are still mapped"
+                 : "asynchronous-reset register(s) kept as native flops — a bit resets to 0 and the Liberty has no "
+                   "asynchronous CLEAR flop cell (only a preset); their surrounding data cones are still mapped";
+      }
+      f.arst_val[static_cast<size_t>(b)] = v;
+    }
+    bool low = false;
+    if (auto nr = gu::get_driver_of_sink_name(n, "negreset"); nr.is_const()) {
+      low = gu::const_of(nr).bit_test(0);
+    }
+    f.neg_reset_hint = low;
+    // A 1-bit reset asserts on its bit 0, and every step below preserves bit 0
+    // (Not complements it, Sext and a bit-0 Get_mask keep it) whatever the
+    // intermediate widths are: slang spells `~rst_n` as a signed 2-bit Not
+    // under a Get_mask. Only the traced region input itself must be one bit.
+    const auto multi_bit = "asynchronous-reset register(s) kept as native flops — the reset is a multi-bit value "
+                           "(asserted when non-zero), not one wire a cell's reset pin can take; their surrounding data "
+                           "cones are still mapped";
+    auto       src       = f.rst_drv;
+    if (real_width(src) != 1) {
+      return multi_bit;
+    }
+    for (int guard = 0; guard < 64; ++guard) {  // guard: a cycle through wiring, > any sane chain
+      if (region_in_name.contains(src)) {
+        break;
+      }
+      if (src.is_const()) {
+        return "asynchronous-reset register(s) kept as native flops — the reset is a constant; their surrounding data "
+               "cones are still mapped";
+      }
+      auto       m  = src.get_master_node();
+      const auto op = gu::type_op_of(m);
+      if (op == Ntype_op::Not || op == Ntype_op::Sext) {
+        auto a = gu::get_driver_of_sink_name(m, "a");
+        if (a.is_invalid()) {
+          break;
+        }
+        low ^= op == Ntype_op::Not;
+        src = a;
+        continue;
+      }
+      if (op == Ntype_op::Get_mask) {
+        auto a    = gu::get_driver_of_sink_name(m, "a");
+        auto mask = gu::get_driver_of_sink_name(m, "mask");
+        if (a.is_invalid() || mask.is_invalid() || !mask.is_const() || !gu::const_of(mask).bit_test(0)) {
+          break;
+        }
+        src = a;
+        continue;
+      }
+      break;
+    }
+    if (region_in_name.contains(src) && real_width(src) != 1) {
+      return multi_bit;
+    }
+    if (!region_in_name.contains(src)) {
+      // Computed inside the region: it crosses as a PO (Seq_flop::arst_po,
+      // created after the black-box POs) and the mapped logic drives the pin.
+      f.arst_src = {};
+      f.arst_low = f.neg_reset_hint;
+      return {};
+    }
+    f.arst_src = src;
+    f.arst_low = low;
+    return {};
+  };
+
+  // tolg may wrap a call-site clock in 1-bit Get_mask coercions (`x:u1`
+  // casts survive cprop when the source is signed), and yosys' signed
+  // clock-pin carrier is a 1-bit Sext. On a 1-bit operand they are wire
+  // identities regardless of the declared output width -- trace to the root so
+  // a register's clock is recognized as region-input-driven and the DFF clock
+  // pin connects DIRECTLY to it (never through mapped logic). Whole-design
+  // flatten can stack one such coercion per hierarchy level.
+  //
+  // Stop AT the partition boundary. A region input IS the structural clock
+  // source as far as this region is concerned (its port is what the read-back
+  // wires the DFF clk pin from), and peeling past it lands on a pin the region
+  // never sees -- which then fails the region_in_name test and demoted every
+  // such register to a native flop. The shipped `cones` coloring routinely
+  // leaves a clock-carrying Sext in a neighbour region, so this is the common
+  // case, not a corner: without the stop, a yosys-read design's only register
+  // stays native (lhd_macro_declarations_test).
+  auto peel_clock = [&](hhds::Pin_class p) -> hhds::Pin_class {
+    for (int guard = 0; guard < 64 && !p.is_invalid(); ++guard) {  // guard: cycle net, > any sane hierarchy depth
+      if (region_in_name.contains(p) || p.is_const()) {
+        break;
+      }
+      auto m = p.get_master_node();
+      if (gu::type_op_of(m) == Ntype_op::Sext && real_width(p) == 1) {
+        auto a = gu::get_driver_of_sink_name(m, "a");
+        if (a.is_invalid() || real_width(a) != 1) {
+          break;
+        }
+        p = a;
+        continue;
+      }
+      if (gu::type_op_of(m) != Ntype_op::Get_mask) {
+        break;
+      }
+      auto a    = gu::get_driver_of_sink_name(m, "a");
+      auto mask = gu::get_driver_of_sink_name(m, "mask");
+      if (a.is_invalid() || real_width(a) != 1 || mask.is_invalid() || !mask.is_const() || !gu::const_of(mask).bit_test(0)) {
+        break;
+      }
+      p = a;  // get_mask(bit0) of a 1-bit wire == the wire
+    }
+    return p;
+  };
+
+  // --- integrated clock gates ---
+  // A latch-based clock gate,
+  //   always_latch if (!clk) en_l = en;   assign gclk = clk & en_l;
+  // (minion's prim_clk_gate, lowRISC's, every "generic behavioral ICG") IS the
+  // Liberty's integrated clock-gate cell: a latch transparent while CLK is low,
+  // ANDed with CLK. Without that cell the registers it clocks have no DFF clock
+  // source on read-back and stay native. So the gate maps onto the cell:
+  //   - its latch and AND (plus the 1-bit identities between them) are
+  //     ABSORBED: neither bit-blasted nor kept as a native boundary;
+  //   - the latch's D (`en`) crosses ABC as a PO (Icg_gate::en_po), so mapped
+  //     logic drives the cell's enable pin;
+  //   - the gated clock is a PI of the mapped logic (Pi_kind::icg_output), read
+  //     back from the cell's output -- so ANY consumer keeps working (another
+  //     gate's clock, a data latch's enable, a memory clock, a region output);
+  //   - a register whose clock resolves to it crosses as a latch like any other
+  //     and its DFF cell takes the cell output as clock (Seq_flop::icg).
+  // Recognition is strict; anything else falls back to the native path with
+  // the precise reason (derived-clock-native):
+  //   - the AND has exactly two live operands (constant operands must keep bit
+  //     0): one the reference clock -- a region input or another recognized
+  //     gate's output (a gate chain), through 1-bit identities and never
+  //     inverted -- the other the Q of a 1-bit latch (through 1-bit identities);
+  //   - that latch is transparent exactly while the same reference clock is
+  //     low (latch_contract::control_root of its enable against the clock
+  //     operand's, with the latch's own enable polarity), carries no reset or
+  //     power-on value, and its Q feeds nothing but this AND.
+  if (options.map_register) {  // without options.icg: recognition only, for the icg-native report
+    // `root`'s consumers, through 1-bit identities (collected into `idents`),
+    // are all `only`; false on anything else.
+    auto consumers_only = [&](const hhds::Pin_class& root, const hhds::Node_class& only, std::vector<hhds::Node_class>& idents) {
+      std::vector<hhds::Pin_class> work{root};
+      for (size_t i = 0; i < work.size(); ++i) {
+        if (work.size() > 64) {
+          return false;  // guard: an enable latch's Q does not fan through dozens of identities
+        }
+        for (const auto& e : work[i].out_edges()) {
+          const auto sn = e.sink.get_master_node();
+          if (sn == only) {
+            continue;
+          }
+          const auto op = gu::type_op_of(sn);
+          if (region.contains(sn) && (op == Ntype_op::Get_mask || op == Ntype_op::Sext)) {
+            auto out = sn.get_driver_pin(0);
+            if (!out.is_invalid() && peel_clock(out) == root) {
+              idents.push_back(sn);
+              for (const auto& o : sn.out_sorted_pins()) {
+                work.push_back(o);
+              }
+              continue;
+            }
+          }
+          return false;
+        }
+      }
+      return true;
+    };
+    // gate output -> 1: being recognized (a cycle), 2: done (see icg_of_gclk /
+    // icg_rejected for the answer).
+    absl::flat_hash_map<hhds::Pin_class, int> visiting;
+    std::function<std::string(const hhds::Pin_class&)> recognize = [&](const hhds::Pin_class& gclk) -> std::string {
+      if (icg_of_gclk.contains(gclk)) {
+        return {};
+      }
+      if (auto it = icg_rejected.find(gclk); it != icg_rejected.end()) {
+        return it->second;
+      }
+      if (visiting[gclk] == 1) {
+        return "the clock gate is part of a gate cycle";
+      }
+      visiting[gclk] = 1;
+      auto why = [&]() -> std::string {
+        auto g = gclk.get_master_node();
+        if (gu::type_op_of(g) == Ntype_op::Or) {
+          return "the clock is an OR (`clk | ~latch`, the active-low gate flavour, or other OR logic), which no "
+                 "latch_posedge integrated clock-gate cell implements";
+        }
+        if (gu::type_op_of(g) != Ntype_op::And || real_width(gclk) != 1) {
+          return "the clock is computed by logic that is not a latch-based clock gate (`clk & latch`)";
+        }
+        std::vector<hhds::Pin_class> live;
+        for (const auto& in_pin : g.inp_sorted_pins()) {
+          for (auto drv : in_pin.get_driver_pins()) {
+            if (drv.is_const()) {
+              if (!gu::const_of(drv).bit_test(0)) {
+                return "the clock gate is tied off by a constant operand";
+              }
+              continue;
+            }
+            live.push_back(drv);
+          }
+        }
+        if (live.size() != 2) {
+          return "the clock gate AND does not have exactly two operands (a clock and one latched enable)";
+        }
+        hhds::Pin_class clk_op, clk_src, latch_q;
+        for (const auto& op : live) {
+          const auto root = peel_clock(op);
+          if (!root.is_invalid() && !root.is_const() && !region_in_name.contains(root)
+              && gu::type_op_of(root.get_master_node()) == Ntype_op::Latch && root.get_port_id() == 0 && latch_q.is_invalid()) {
+            latch_q = root;
+          } else {
+            clk_op  = op;
+            clk_src = root;
+          }
+        }
+        if (latch_q.is_invalid() || clk_src.is_invalid() || clk_src.is_const()) {
+          return "the clock gate is not `<clock> & <latch>`";
+        }
+        int32_t parent = -1;
+        if (!region_in_name.contains(clk_src)) {
+          // A gate chain: the reference clock must itself be a recognized gate.
+          if (auto pwhy = recognize(clk_src); !pwhy.empty()) {
+            return std::format("the clock gate's reference clock is neither a region input nor a mappable clock gate ({})",
+                               pwhy);
+          }
+          parent = icg_of_gclk.at(clk_src);
+        } else if (real_width(clk_src) != 1) {
+          return "the clock gate's reference clock is wider than one bit";
+        }
+        const auto latch = latch_q.get_master_node();
+        if (real_width(latch_q) != 1) {
+          return "the clock gate's enable latch is wider than one bit";
+        }
+        for (std::string_view pin : {"reset_pin", "initial"}) {
+          if (auto d = gu::get_driver_of_sink_name(latch, pin); !d.is_invalid()) {
+            return "the clock gate's enable latch has a reset or power-on value an ICG cell does not have";
+          }
+        }
+        const auto en  = gu::get_driver_of_sink_name(latch, "enable");
+        const auto din = gu::get_driver_of_sink_name(latch, "din");
+        if (en.is_invalid() || din.is_invalid()) {
+          return "the clock gate's enable latch has no enable or data input";
+        }
+        bool active_low = false;
+        if (auto pc = gu::get_driver_of_sink_name(latch, "posclk"); pc.is_const()) {
+          active_low = gu::const_of(pc).is_known_false();
+        } else if (!pc.is_invalid()) {
+          return "the clock gate's enable latch has a non-constant enable polarity";
+        }
+        const auto er = livehd::latch_contract::control_root(en, /*stop_at_clock_cell=*/true);
+        const auto cr = livehd::latch_contract::control_root(clk_op, /*stop_at_clock_cell=*/true);
+        if (cr.net.is_invalid() || er.net.is_invalid() || !(er.net == cr.net)) {
+          return "the clock gate's latch is not enabled by the gate's own clock";
+        }
+        if (cr.inverted) {
+          return "the clock gate ANDs the INVERTED clock (a falling-edge gate)";
+        }
+        if (er.inverted == active_low) {
+          return "the clock gate's latch is transparent while the clock is HIGH (an AND gate needs it transparent while "
+                 "LOW)";
+        }
+        // The latch Q feeds only this AND (through identities): no feedback
+        // into its own D, no data use of the held enable.
+        std::vector<hhds::Node_class> q_idents;
+        if (!consumers_only(latch_q, g, q_idents)) {
+          return "the clock gate's enable latch is also read by other logic";
+        }
+        icg_absorbed.insert(latch);
+        icg_absorbed.insert(g);
+        icg_absorbed.insert(q_idents.begin(), q_idents.end());
+        Icg_gate gate;
+        gate.gclk    = gclk;
+        gate.clk_src = clk_src;
+        gate.parent  = parent;
+        gate.en_drv  = din;
+        gate.name    = gu::wire_name(latch_q);
+        if (gate.name.empty()) {
+          gate.name = std::format("icg{}", latch.get_debug_nid());
+        }
+        icg_of_gclk.emplace(gclk, static_cast<int32_t>(result.icgs.size()));
+        result.icgs.push_back(std::move(gate));
+        return {};
+      }();
+      visiting[gclk] = 2;
+      if (!why.empty()) {
+        icg_rejected.emplace(gclk, why);
+      }
+      return why;
+    };
+    for (const auto& n : rb.nodes) {
+      if (gu::type_op_of(n) == Ntype_op::Flop) {
+        // Every register on a derived clock asks, so its rejection reason is
+        // on record for the derived-clock-native report.
+        const auto c = peel_clock(gu::get_driver_of_sink_name(n, "clock_pin"));
+        if (!c.is_invalid() && !c.is_const() && !region_in_name.contains(c)) {
+          (void)recognize(c);
+        }
+        continue;
+      }
+      // A gate clocking only memories, data latches or other gates maps too.
+      if (gu::type_op_of(n) == Ntype_op::And && !icg_absorbed.contains(n)) {
+        auto out = n.get_driver_pin(0);
+        if (!out.is_invalid() && real_width(out) == 1) {
+          bool latch_operand = false;
+          for (const auto& in_pin : n.inp_sorted_pins()) {
+            for (const auto& drv : in_pin.get_driver_pins()) {
+              const auto r = peel_clock(drv);
+              latch_operand = latch_operand
+                              || (!r.is_invalid() && !r.is_const() && !region_in_name.contains(r)
+                                  && gu::type_op_of(r.get_master_node()) == Ntype_op::Latch);
+            }
+          }
+          if (latch_operand) {
+            (void)recognize(out);
+          }
+        }
+      }
+    }
+    if (!options.icg && !result.icgs.empty()) {
+      // Recognition only, to say what stays native and why: without a cell
+      // (or under a latch-reshaping flow) the gates keep their native latch and
+      // mapped AND, and their registers take the derived-clock path.
+      const auto& first = result.icgs.front();
+      livehd::diag::warn("pass.abc", "icg-native", "unsupported")
+          .at(node_span(rb, first.gclk.get_master_node()))
+          .msg("pass.abc region '{}': {} latch-based clock gate(s) kept as a native latch + mapped gate — {}",
+               rb.module_name,
+               result.icgs.size(),
+               options.icg_flow_ok ? "the Liberty has no usable integrated clock-gate cell (latch_posedge, a `CLK & state` "
+                                     "output, not dont_use)"
+                                   : "the synthesis flow is a user command list that may reshape latches")
+          .note(std::format("first: the gate latching `{}`", first.name))
+          .emit();
+      // icg_rejected stays: a register on a clock that is not a gate at all
+      // keeps its structural reason; one on a recognized gate reports the
+      // missing cell (icg_unavailable).
+      icg_absorbed.clear();
+      icg_of_gclk.clear();
+      result.icgs.clear();
+    }
+  }
+
+  if (options.map_register) {
+    for (const auto& n : rb.nodes) {
+      if (!gu::is_type_flop(n)) {
+        continue;
+      }
+      Seq_flop f;
+      f.node  = n;
+      f.q_pin = n.create_driver_pin(0);
+      f.bits  = gu::bits_of(f.q_pin);
+      if (f.bits == 0) {
+        f.bits = 1;
+      }
+      f.root = gu::wire_name(f.q_pin);  // the register's signal name (e.g. "r")
+      if (f.root.empty()) {
+        f.root = std::format("{}__flop{}", rb.module_name, n.get_debug_nid());
+      }
+      f.din_drv  = gu::get_driver_of_sink_name(n, "din");
+      f.en_drv   = gu::get_driver_of_sink_name(n, "enable");
+      f.rst_drv  = gu::get_driver_of_sink_name(n, "reset_pin");
+      f.rval_drv = gu::get_driver_of_sink_name(n, "initial");
+      f.clk_drv  = gu::get_driver_of_sink_name(n, "clock_pin");
+      if (auto edge = gu::get_driver_of_sink_name(n, "posclk"); edge.is_const()) {
+        f.neg_clock = gu::const_of(edge).is_known_false();
+      }
+      // ABC latches and the selected plain Liberty DFF have no reset pin. Only
+      // an ASYNCHRONOUS reset needs one (see the set's comment above): keep
+      // that flop native so cgen retains the `or posedge rst` event and its
+      // reset value; its data cone still crosses the boundary and is mapped.
+      // The `async` sink is a comptime flavour pin set by tolg (`async=true` /
+      // `sync=false`, upass.reset_style=async) and the slang reader for an
+      // `always_ff @(posedge clk or posedge rst)`; cgen and pass/lec read it
+      // the same way -- const and not known-false => asynchronous, anything
+      // else (absent, or a malformed non-const driver) => synchronous -- so
+      // the fold agrees with both the emitted Verilog and the LEC model.
+      if (!f.rst_drv.is_invalid()) {
+        auto async = gu::get_driver_of_sink_name(n, "async");
+        if (async.is_const() && !gu::const_of(async).is_known_false()) {
+          // An asynchronous reset maps only onto a clear/preset flop cell whose
+          // pin takes the reset straight from a region input.
+          if (auto why = async_reset_blocker(n, f); !why.empty()) {
+            reset_demoted_by[why].insert(n);
+            reset_demoted.insert(n);
+            continue;
+          }
+          f.async_reset = true;
+        }
+        f.has_reset = true;
+      }
+      // The clock through its 1-bit identities (peel_clock above).
+      f.clk_drv = peel_clock(f.clk_drv);
+      // A clock driven by region-INTERNAL logic (a genuinely gated/derived
+      // clock -- a shape whole-design flatten makes reachable, since everything
+      // is one region) cannot cross as a latch unless it is a recognized
+      // clock gate (icg_of_gclk): the read-back has no native source for the
+      // DFF/flop clock pin and used to silently drop the connection. Demote the
+      // register to a boundary box (the register=false machinery): it stays a
+      // native flop and its clock cone is technology-mapped and reconnected
+      // like any comb-driven boundary input.
+      if (!f.clk_drv.is_invalid() && !f.clk_drv.is_const() && !region_in_name.contains(f.clk_drv)) {
+        if (auto it = icg_of_gclk.find(f.clk_drv); it != icg_of_gclk.end()) {
+          f.icg = it->second;
+        } else {
+          auto why = icg_rejected.find(f.clk_drv);
+          clk_demoted_by[why != icg_rejected.end() ? why->second : std::string{icg_unavailable}].insert(n);
+          clk_demoted.insert(n);
+          continue;
+        }
+      }
+      if (auto nr = gu::get_driver_of_sink_name(n, "negreset"); nr.is_const()) {
+        f.neg_reset = gu::const_of(nr).bit_test(0);
+      }
+      bool has_rval                     = f.rval_drv.is_const();
+      auto rval                         = has_rval ? gu::const_of(f.rval_drv) : Dlop{};
+      f.has_init                        = has_rval;
+      f.init_val                        = rval;  // read-back cannot re-resolve the source pin (see Seq_flop::has_init)
+      // A resetless init is a TRUE power-on value: that bit is rebuilt native
+      // on read-back and must keep the honest encoding (its latch init would
+      // be complemented too). With a reset the init is the reset value, folded
+      // into D below, and the bit maps to a cell like an init-less one.
+      const bool power_on_init          = has_rval && !f.has_reset;
+      f.d_inverted                      = options.qn_encode && !power_on_init;
+      if (f.async_reset) {
+        // The AIG-side QN encoding holds for an async register only when every
+        // bit's clear/preset cell is itself a QN cell; otherwise the read-back
+        // absorbs or inverts per bit (region_writer: cell.q_inverted vs this).
+        for (int b = 0; b < f.bits && f.d_inverted; ++b) {
+          f.d_inverted = options.areset_cell[f.arst_val[static_cast<size_t>(b)] ? 1 : 0] == 1;
+        }
+      }
+      // pipe_min encodes real clocked storage, not an optimization hint.
+      // Cross every stage into ABC and expose only the final Q to graph users.
+      const int               depth     = pipeline_depth(n);
+      const auto              prototype = f;
+      std::vector<Lid>       previous;
+      for (int stage = 0; stage < depth; ++stage) {
+        f = prototype;
+        if (stage + 1 < depth) {
+          // Match Cgen_verilog's stage spelling (get_append_to_name(name,
+          // "___pipe<i>_"), a PREFIX, stage 0 closest to D -- same order as
+          // here) so the post-synthesis LEC still pairs the hidden stages by
+          // name instead of dropping them into a flat SAT solve.
+          f.root = std::format("___pipe{}_{}", stage, prototype.root);
+        }
+        f.previous = previous;
+        for (int b = 0; b < f.bits; ++b) {
+          char init = 'x';
+          // Only a power-on init is told to ABC. A reset-backed register powers
+          // on X exactly like the DFF cell it maps to (the reset value arrives
+          // through D on the first asserted edge); declaring its reset value as
+          // the latch init would let a sequential user flow (`dretime`, `scorr`)
+          // assume a start state the cell never provides. The built-in flows
+          // contain no sequential optimization, so this is about honesty, not QoR.
+          if (power_on_init && !rval.unknown_bit_test(b)) {
+            init = rval.bit_test(b) ? '1' : '0';
+          }
+          // Source signal names need not be unique (a generated reset counter
+          // can share a spelling with a user register). ABC's netlist converter
+          // merges CI nets by name, so distinguish every crossed register.
+          // Readback recovers source identities from the ordered snapshot.
+          f.latch.push_back(lnet.add_latch(std::format("{}_%r{}_{}", f.root, flops.size(), b), init));
+          const auto qnet = lnet.latch(f.latch.back()).q;
+          f.qbits.push_back(qnet);  // stage-local Q
+          if (stage + 1 == depth) {
+            bitnet[f.q_pin][b] = qnet;
+          }
+        }
+        previous = f.qbits;
+        flops.push_back(std::move(f));
+      }
+    }
+    // Name the registers, not just their count: "3 register(s)" in a 12k-node
+    // region is unactionable. First few by identity + declaration site; the set
+    // is unordered, so sort by nid to keep the report reproducible.
+    auto report_demoted = [&](const absl::flat_hash_set<hhds::Node_class>& set, std::string_view diag_id, const std::string& why) {
+      if (set.empty()) {
+        return;
+      }
+      std::vector<hhds::Node_class> demoted(set.begin(), set.end());
+      std::sort(demoted.begin(), demoted.end(), [](const auto& a, const auto& b) { return a.get_debug_nid() < b.get_debug_nid(); });
+      auto w = livehd::diag::warn("pass.abc", diag_id, "unsupported");
+      w.at(node_span(rb, demoted.front())).msg("pass.abc region '{}': {} {}", rb.module_name, demoted.size(), why);
+      constexpr size_t kMaxNamed = 5;
+      for (size_t k = 0; k < std::min(kMaxNamed, demoted.size()); ++k) {
+        w.note(std::format("kept native: {}", node_identity(demoted[k])), node_span(rb, demoted[k]));
+      }
+      if (demoted.size() > kMaxNamed) {
+        w.note(std::format("... and {} more register(s)", demoted.size() - kMaxNamed));
+      }
+      w.emit();
+    };
+    for (const auto& [why, set] : clk_demoted_by) {
+      report_demoted(set,
+                     "derived-clock-native",
+                     why.starts_with("register(s)")
+                         ? why
+                         : std::format("register(s) on a gated/derived clock kept as native flops — {}; the clock cone is "
+                                       "still mapped and reconnected",
+                                       why));
+    }
+    for (const auto& [why, set] : reset_demoted_by) {
+      report_demoted(set, "reset-native", why);
+    }
+  }
+
+  // A very wide OR of non-overlapping, constant-position shifts is a packed-bus
+  // assembly, not Boolean logic. Sending its thousands of identity bits through
+  // ABC is pathological (Rob's 24x511 -> 10911 pack spent minutes in &nf).
+  // Keep the SHLs and their OR as native zero-delay wiring, just like
+  // Get_mask/Set_mask at the mapper boundary. pass.opentimer's pin tracker
+  // understands both operations, so timing identity is preserved bit-for-bit.
+  // Width at or above which a pure-wiring cell (Concat / constant-control
+  // slice, pack, shift, sext) is kept as a NATIVE boundary instead of being
+  // bit-blasted. Below it the bit-level cone is both cheaper and better
+  // (constant lanes reach ABC, and a one-bit boundary net does not acquire
+  // hundreds of dead mapped-cell loads); above it, materializing one ABC
+  // PI/PO per bit is pathological (Backend carries megabit-scale slice/pack
+  // colors). Native reconstruction is the scalability escape hatch for
+  // genuinely wide buses, not the default representation for ordinary structs.
+  constexpr int kNativeWiringBits = 4096;
+
+  // Native boundary nodes. Most are zero-delay packed wiring discovered below;
+  // a structurally cyclic combinational remainder is added after the wiring
+  // scan because ABC itself only accepts acyclic Boolean networks.
+  absl::flat_hash_set<hhds::Node_class> native_wiring;
+  auto                                  node_output_width = [](const hhds::Node_class& n) {
+    int width = 0;
+    for (const auto& out_pin : n.out_sorted_pins()) {  // widest driver pin; consumers do not matter
+      width = std::max(width, gu::bits_of(out_pin));
+    }
+    return width != 0 ? width : gu::bits_of(n.create_driver_pin(0));
+  };
+
+  // These cells only rearrange or select bits when their control operand is a
+  // constant. Rebuilding them as exact typed nodes is both more faithful to
+  // their zero-delay wiring role and dramatically smaller than materializing
+  // one Liberty buffer/inverter per bit (Backend contains hundreds of
+  // megabit-scale slice/pack colors). Variable shifts remain real logic and
+  // still cross ABC. And/Or are deliberately excluded: only the proven
+  // disjoint wide-OR shape below is wiring rather than Boolean logic.
+  const auto const_operand = [](const hhds::Node_class& n, std::string_view sink) {
+    const auto d = gu::get_driver_of_sink_name(n, sink);
+    return d.is_const();
+  };
+  // A Concat lane whose driver is WIDER than its declared window is a width
+  // boundary only the native reconstruction path can spell (see fit_native_ins,
+  // which recreates the missing low-bit cast). Bit-blasting such a cell instead
+  // trips abc_bit's lane-table invariant, so keep it native regardless of width.
+  const auto concat_has_overwide_lane = [](const hhds::Node_class& n) {
+    const auto lanes = gu::concat_lanes(n);
+    return !lanes.empty() && !gu::concat_lane_violation(lanes).empty();
+  };
+  for (const auto& n : rb.nodes) {
+    const auto op     = gu::type_op_of(n);
+    const int  width  = node_output_width(n);
+    // Below kNativeWiringBits a wiring cell stays inside the bit-level cone.
+    bool       wiring = op == Ntype_op::Concat && (width >= kNativeWiringBits || concat_has_overwide_lane(n));
+    // The control operand must be CONSTANT for the cell to be a bit rename.
+    // A non-constant mask/position is real logic -- and, crucially, one the
+    // bit-blast loop below REFUSES with a precise per-node diagnostic. Marking
+    // it native here would skip that refusal and silently hand pass.opentimer a
+    // node its pin tracker also cannot model, turning a clean ABC refusal into a
+    // fatal in a later pass.
+    if (op == Ntype_op::Get_mask || op == Ntype_op::Set_mask) {
+      wiring = width >= kNativeWiringBits && const_operand(n, "mask");
+    } else if (op == Ntype_op::Sext || op == Ntype_op::SRA || op == Ntype_op::SHL) {
+      wiring = width >= kNativeWiringBits && const_operand(n, "b");
+    }
+    if (wiring) {
+      native_wiring.insert(n);
+    }
+  }
+  for (const auto& n : rb.nodes) {
+    if (gu::type_op_of(n) != Ntype_op::Or || node_output_width(n) < kNativeWiringBits) {
+      continue;
+    }
+    struct Span {
+      int lo;
+      int hi;
+    };
+    std::vector<Span>             spans;
+    std::vector<hhds::Node_class> shifts;
+    bool                          packing         = true;
+    int                           unshifted_lanes = 0;
+    std::string                   reject;
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      const auto in_drv = in_pin.get_driver_pin();
+      if (in_drv.is_const()) {
+        // A constant lane is already synthesized: zero is padding and one
+        // fixes the corresponding output bit. It needs no Liberty cell and
+        // does not participate in variable-lane overlap.
+        continue;
+      }
+      const auto shl = in_drv.get_master_node();
+      if (gu::type_op_of(shl) != Ntype_op::SHL) {
+        // Packed assemblies commonly leave the low lane unshifted (Rob's low
+        // 20 bits arrive from an extracted Sub) and shift every higher lane.
+        // One such lane is safe: interval overlap below proves it is disjoint.
+        const int width = gu::bits_of(in_drv);
+        if (++unshifted_lanes > 1 || width <= 0) {
+          packing = false;
+          reject  = "multiple or widthless unshifted inputs";
+          break;
+        }
+        spans.push_back({0, width});
+        continue;
+      }
+      const auto a = gu::get_driver_of_sink_name(shl, "a");
+      const auto b = gu::get_driver_of_sink_name(shl, "b");
+      if (a.is_invalid() || !b.is_const()) {
+        packing = false;
+        reject  = "shift lacks data or constant amount";
+        break;
+      }
+      const int width     = gu::bits_of(a);
+      const int shl_width = node_output_width(shl);
+      if (width <= 0 || shl_width < width) {
+        packing = false;
+        reject  = "invalid shift width stamps";
+        break;
+      }
+      const int out_width = node_output_width(n);
+      // For a non-negative constant SHL, bitwidth stamps exactly
+      // input-width+amount on the result. Recover the occupied interval from
+      // those stamps, avoiding a lossy int64 conversion of an arbitrary-size
+      // Dlop constant.
+      const int lo        = std::min(shl_width - width, out_width);
+      const int hi        = std::min(shl_width, out_width);
+      if (lo < hi) {
+        spans.push_back({lo, hi});
+      }
+      shifts.push_back(shl);
+    }
+    if (!packing || shifts.empty()) {
+      if (options.verbose) {
+        std::print("[pass.abc] region '{}': rejected {}-bit shift/OR pack after {} shift(s): {}\n",
+                   rb.module_name,
+                   node_output_width(n),
+                   shifts.size(),
+                   reject.empty() ? "no shifted lane" : reject);
+      }
+      continue;
+    }
+    std::ranges::sort(spans, {}, &Span::lo);
+    for (size_t i = 1; i < spans.size(); ++i) {
+      if (spans[i].lo < spans[i - 1].hi) {
+        packing = false;
+        reject  = std::format("overlap {}..{} with {}..{}", spans[i - 1].lo, spans[i - 1].hi, spans[i].lo, spans[i].hi);
+        break;
+      }
+    }
+    if (!packing) {
+      if (options.verbose) {
+        std::print("[pass.abc] region '{}': rejected {}-bit shift/OR pack after {} shift(s): {}\n",
+                   rb.module_name,
+                   node_output_width(n),
+                   shifts.size(),
+                   reject);
+      }
+      continue;
+    }
+    native_wiring.insert(n);
+    for (const auto& shl : shifts) {
+      if (region.contains(shl)) {
+        native_wiring.insert(shl);
+      }
+    }
+    if (options.verbose) {
+      std::print("[pass.abc] region '{}': keeping {}-bit disjoint shift/OR pack as native wiring ({} shifts)\n",
+                 rb.module_name,
+                 node_output_width(n),
+                 shifts.size());
+    }
+  }
+  // A wide packed-bus assembler exported directly by the region is also
+  // wiring, not a Boolean cone. Keeping it as a native boundary avoids an ABC
+  // PO for every bit of every exported packed bus (Rob c33: 27.7M interface
+  // bits for only 19.8k GE). Its narrow computed lane inputs still become ABC
+  // POs, while wide base/region-input lanes reconnect natively below.
+  std::vector<hhds::Node_class> exported_wiring;
+  for (const auto& port : rb.outputs) {
+    const auto n            = port.src_driver.get_master_node();
+    const auto op           = gu::type_op_of(n);
+    const bool constant_shl = op == Ntype_op::SHL && gu::get_driver_of_sink_name(n, "b").is_const();
+    const bool wide_pack    = node_output_width(n) >= kNativeWiringBits && (op == Ntype_op::Concat || op == Ntype_op::Set_mask);
+    if (!region.contains(n) || (!constant_shl && !wide_pack)) {
+      continue;
+    }
+    if (native_wiring.insert(n).second) {
+      exported_wiring.push_back(n);
+    }
+  }
+  for (size_t head = 0; head < exported_wiring.size(); ++head) {
+    for (const auto& in_pin : exported_wiring[head].inp_sorted_pins()) {
+      const auto in_drv = in_pin.get_driver_pin();
+      if (in_drv.is_invalid() || in_drv.is_const()) {
+        continue;
+      }
+      const auto parent = in_drv.get_master_node();
+      const auto op     = gu::type_op_of(parent);
+      if (!region.contains(parent) || node_output_width(parent) < kNativeWiringBits
+          || (op != Ntype_op::Concat && op != Ntype_op::Set_mask)) {
+        continue;
+      }
+      if (native_wiring.insert(parent).second) {
+        exported_wiring.push_back(parent);
+      }
+    }
+  }
+  if (options.verbose && !exported_wiring.empty()) {
+    std::print("[pass.abc] region '{}': kept {} exported packed-wiring node(s) native including ancestors\n",
+               rb.module_name,
+               exported_wiring.size());
+  }
+
+  // ABC cannot ingest a combinational SCC. Preserve such logic exactly as
+  // native typed nodes and map every acyclic cone around it. This is a boundary
+  // cut, not an approximation: native->mapped edges become ABC PIs,
+  // mapped->native edges become POs, and read-back reconnects the original
+  // feedback. Kahn's unpeeled remainder includes the SCC plus any nodes whose
+  // only schedule predecessor is that SCC; keeping the whole remainder native
+  // is conservative and prevents an arbitrary edge choice from changing with
+  // traversal order.
+  {
+    std::vector<hhds::Node_class>         comb;
+    absl::flat_hash_set<hhds::Node_class> comb_set;
+    for (const auto& n : rb.nodes) {
+      const auto op = gu::type_op_of(n);
+      if (gu::is_type_register(n) || op == Ntype_op::Sub || op == Ntype_op::Clock_cell || op == Ntype_op::Rem) {
+        continue;
+      }
+      comb.push_back(n);
+      comb_set.insert(n);
+    }
+    absl::flat_hash_map<hhds::Node_class, size_t>                        indegree;
+    absl::flat_hash_map<hhds::Node_class, std::vector<hhds::Node_class>> consumers;
+    std::vector<hhds::Node_class>                                        queue;
+    indegree.reserve(comb.size());
+    consumers.reserve(comb.size());
+    queue.reserve(comb.size());
+    for (const auto& n : comb) {
+      size_t degree = 0;
+      for (const auto& in_pin : n.inp_sorted_pins()) {
+        const auto in_drv   = in_pin.get_driver_pin();
+        const auto producer = in_drv.get_master_node();
+        if (!producer.is_invalid() && comb_set.contains(producer)) {
+          ++degree;
+          consumers[producer].push_back(n);
+        }
+      }
+      indegree.emplace(n, degree);
+      if (degree == 0) {
+        queue.push_back(n);
+      }
+    }
+    size_t peeled = 0;
+    for (size_t head = 0; head < queue.size(); ++head) {
+      const auto n = queue[head];
+      ++peeled;
+      if (auto it = consumers.find(n); it != consumers.end()) {
+        for (const auto& consumer : it->second) {
+          auto& degree = indegree.at(consumer);
+          if (--degree == 0) {
+            queue.push_back(consumer);
+          }
+        }
+      }
+    }
+    if (peeled != comb.size()) {
+      std::vector<hhds::Node_class> cyclic_remainder;
+      cyclic_remainder.reserve(comb.size() - peeled);
+      for (const auto& n : comb) {
+        if (indegree.at(n) != 0) {
+          cyclic_remainder.push_back(n);
+          native_wiring.insert(n);
+          native_comb_logic.insert(n);
+        }
+      }
+      auto w = livehd::diag::warn("pass.abc", "comb-loop-native", "unsupported");
+      w.at(node_span(rb, cyclic_remainder.front()))
+          .msg(
+              "pass.abc region '{}': preserved {} node(s) in a combinational-cycle remainder as native logic; acyclic cones "
+              "around it are still technology-mapped",
+              rb.module_name,
+              cyclic_remainder.size())
+          .hint("remove the combinational feedback to obtain an all-standard-cell region and a complete timing score");
+      constexpr size_t kMaxNamed = 5;
+      for (size_t k = 0; k < std::min(kMaxNamed, cyclic_remainder.size()); ++k) {
+        w.note(std::format("kept native: {}", node_identity(cyclic_remainder[k])), node_span(rb, cyclic_remainder[k]));
+      }
+      if (cyclic_remainder.size() > kMaxNamed) {
+        w.note(std::format("... and {} more node(s)", cyclic_remainder.size() - kMaxNamed));
+      }
+      w.emit();
+    }
+  }
+
+  if (options.verbose) {
+    std::fflush(stdout);
+  }
+
+  // --- blackbox boundary nodes (Sub instances + memories): never bit-blasted.
+  // Each consumed output driver pin becomes fresh ABC PIs (a source for the
+  // surrounding logic, seeded into bitnet); each combinationally-driven input
+  // becomes ABC POs (the cone feeding it, created after the comb loop); constant
+  // inputs are recreated directly on read-back. The node itself is rebuilt
+  // natively and reconnected. Boundary PIs/POs are appended AFTER the region
+  // ports so the region-port read-back stays index-aligned (region first). ---
+  // region_in_name (built above the register scan) reconnects a flop
+  // boundary's control pins (clock/reset/enable that come straight from a
+  // region input) NATIVELY on read-back. Routing such a clock through the
+  // combinational AIG would map it to a logic buffer and make the rebuilt flop
+  // clock on `posedge <data-wire>` -- logically correct but unusable as a real
+  // netlist (breaks clock-tree synthesis and timing). Only the flop's din cone
+  // (genuine comb logic) crosses into ABC. A demoted register's derived-clock
+  // or reset data cone, by contrast, IS genuine logic and crosses as a PO.
+  // Convert the trivially-mappable remainders BEFORE the boundary scan, so the
+  // refusal below only fires for a shape that genuinely has no gate translation.
+  if (hooks.rewrite_rems) {
+    hooks.rewrite_rems();
+  }
+
+  // --- data latches onto Liberty latch cells (Latch_map) ---
+  bool any_latch_cell = false;
+  for (const auto& pol : options.latch_cell) {
+    for (const auto k : pol) {
+      any_latch_cell = any_latch_cell || k >= 0;
+    }
+  }
+  const bool latch_mapping = options.map_register && any_latch_cell;
+  // Latches kept native, keyed by the precise reason (std::map: stable report).
+  std::map<std::string, absl::flat_hash_set<hhds::Node_class>> latch_native_by;
+  // A 1-bit control through its wire identities (1-bit Get_mask/Sext), Nots
+  // and `x == 0` / `x == 1` tests, stopping at a region input or a recognized
+  // clock gate's output; `inv` accumulates the complement parity. Only bit 0
+  // of the start matters (the caller checks it is one bit wide), and every
+  // step keeps bit 0: slang spells `!clk` as `clk == 0`.
+  auto peel_control = [&](hhds::Pin_class p, bool& inv) -> hhds::Pin_class {
+    for (int guard = 0; guard < 64 && !p.is_invalid(); ++guard) {  // guard: a wiring cycle, > any sane chain
+      if (p.is_const() || region_in_name.contains(p) || icg_of_gclk.contains(p)) {
+        break;
+      }
+      const auto m  = p.get_master_node();
+      const auto op = gu::type_op_of(m);
+      if (op == Ntype_op::Not || op == Ntype_op::Sext) {
+        auto a = gu::get_driver_of_sink_name(m, "a");
+        if (a.is_invalid()) {
+          break;
+        }
+        inv ^= op == Ntype_op::Not;
+        p = a;
+        continue;
+      }
+      if (op == Ntype_op::Get_mask) {
+        auto a    = gu::get_driver_of_sink_name(m, "a");
+        auto mask = gu::get_driver_of_sink_name(m, "mask");
+        if (a.is_invalid() || mask.is_invalid() || !mask.is_const() || !gu::const_of(mask).bit_test(0)) {
+          break;
+        }
+        p = a;
+        continue;
+      }
+      if (op == Ntype_op::EQ) {
+        std::vector<hhds::Pin_class> ops_in;
+        for (const auto& in_pin : m.inp_sorted_pins()) {
+          for (auto d : in_pin.get_driver_pins()) {
+            ops_in.push_back(d);
+          }
+        }
+        if (ops_in.size() != 2 || ops_in[0].is_const() == ops_in[1].is_const()) {
+          break;
+        }
+        const auto& k = ops_in[0].is_const() ? ops_in[0] : ops_in[1];
+        const auto& x = ops_in[0].is_const() ? ops_in[1] : ops_in[0];
+        const auto& c = gu::const_of(k);
+        // `x == 0` / `x == 1` of a 1-bit x only (a signed x's `== -1`, a wider
+        // constant: not a plain test).
+        if (real_width(x) != 1 || c.has_unknowns() || !c.is_just_i64() || (c.to_just_i64() != 0 && c.to_just_i64() != 1)
+            || (c.to_just_i64() == 1 && !gu::is_unsign(x))) {
+          break;
+        }
+        inv ^= c.to_just_i64() == 0;
+        p = x;
+        continue;
+      }
+      break;
+    }
+    return p;
+  };
+  // Why a latch cannot map onto a cell (empty: it can, and `lm` is filled).
+  auto plan_latch = [&](const hhds::Node_class& n, Latch_map& lm) -> std::string {
+    const auto q = n.get_driver_pin(0);
+    lm.bits      = std::max(1, gu::bits_of(q));
+    lm.name      = gu::wire_name(q);
+    if (lm.name.empty()) {
+      lm.name = std::format("{}__latch{}", rb.module_name, n.get_debug_nid());
+    }
+    const auto din = gu::get_driver_of_sink_name(n, "din");
+    lm.en_drv      = gu::get_driver_of_sink_name(n, "enable");
+    lm.rst_drv     = gu::get_driver_of_sink_name(n, "reset_pin");
+    const auto ini = gu::get_driver_of_sink_name(n, "initial");
+    if (din.is_invalid()) {
+      return "latch(es) kept native — the latch has no data input";
+    }
+    if (lm.en_drv.is_invalid() || lm.en_drv.is_const()) {
+      return "latch(es) kept native — the enable is absent or constant (an always-transparent latch is a buffer, a "
+             "never-open one a constant; neither is a latch cell)";
+    }
+    if (auto pc = gu::get_driver_of_sink_name(n, "posclk"); pc.is_const()) {
+      lm.en_neg = gu::const_of(pc).is_known_false();
+    } else if (!pc.is_invalid()) {
+      return "latch(es) kept native — the enable polarity (`posclk`) is not a constant";
+    }
+    if (!gu::get_driver_of_sink_name(n, "clock_pin").is_invalid()) {
+      return "latch(es) kept native — the latch carries a `clock_pin`, which no latch cell has";
+    }
+    if (lm.rst_drv.is_invalid()) {
+      // Without a reset an `initial` is a POWER-ON value no latch cell holds.
+      bool power_on = !ini.is_invalid() && !ini.is_const();
+      for (int b = 0; !power_on && !ini.is_invalid() && b < lm.bits; ++b) {
+        power_on = !gu::const_of(ini).unknown_bit_test(b);
+      }
+      if (power_on) {
+        return "latch(es) kept native — the latch carries a power-on value (`initial` without a reset), which no "
+               "latch cell has";
+      }
+    } else {
+      if (lm.rst_drv.is_const()) {
+        return "latch(es) kept native — the reset is a constant";
+      }
+      if (real_width(lm.rst_drv) != 1) {
+        return "latch(es) kept native — the reset is a multi-bit value (asserted when non-zero), not one wire a cell's "
+               "reset pin can take";
+      }
+      if (!ini.is_invalid() && !ini.is_const()) {
+        return "latch(es) kept native — the reset value is not a constant, which no latch cell can load";
+      }
+      lm.init = ini.is_invalid() ? *Dlop::create_integer(0) : gu::const_of(ini);
+      if (auto nr = gu::get_driver_of_sink_name(n, "negreset"); nr.is_const()) {
+        lm.rst_neg = gu::const_of(nr).bit_test(0);
+      } else if (!nr.is_invalid()) {
+        return "latch(es) kept native — the reset polarity (`negreset`) is not a constant";
+      }
+    }
+    // The enable's natural cell polarity: the level of the traced source that
+    // opens the latch (no inverter), or the latch's own spelling for a
+    // computed enable (ABC absorbs either level for free).
+    bool en_inv_parity = false;
+    auto en_root       = real_width(lm.en_drv) == 1 ? peel_control(lm.en_drv, en_inv_parity) : hhds::Pin_class{};
+    const bool native_en = !en_root.is_invalid() && (region_in_name.contains(en_root) || icg_of_gclk.contains(en_root));
+    const bool root_low  = lm.en_neg != en_inv_parity;  // en_root opens the latch at 0
+    const bool natural   = native_en ? root_low : lm.en_neg;
+    // Which ladders the bits need: plain (no reset), else per bit reset value.
+    std::vector<int> kinds;
+    if (!lm.rst_drv.is_invalid()) {
+      lm.rst_val.assign(static_cast<size_t>(lm.bits), false);
+    }
+    auto covers = [&](bool low) {
+      if (lm.rst_drv.is_invalid()) {
+        return options.latch_cell[low ? 1 : 0][0] >= 0;
+      }
+      for (int b = 0; b < lm.bits; ++b) {
+        bool v = false;
+        if (lm.init.unknown_bit_test(b)) {
+          v = options.latch_cell[low ? 1 : 0][1] < 0;  // either value is the source's; take a cell the library has
+        } else {
+          v = lm.init.bit_test(b);
+        }
+        if (options.latch_cell[low ? 1 : 0][v ? 2 : 1] < 0) {
+          return false;
+        }
+      }
+      return true;
+    };
+    if (covers(natural)) {
+      lm.cell_low = natural;
+    } else if (covers(!natural)) {
+      lm.cell_low = !natural;
+    } else if (!lm.rst_drv.is_invalid() && (options.latch_cell[natural ? 1 : 0][0] >= 0 || options.latch_cell[natural ? 0 : 1][0] >= 0)) {
+      // No reset cell for some bit: fold the reset into D and the enable (a
+      // plain latch cell), exact for a level-sensitive latch.
+      lm.fold     = true;
+      lm.cell_low = options.latch_cell[natural ? 1 : 0][0] >= 0 ? natural : !natural;
+    } else {
+      return lm.rst_drv.is_invalid()
+                 ? "latch(es) kept native — the Liberty has no usable transparent latch cell (a `latch` group with a bare "
+                   "data_in/enable, not dont_use, isolation or clock-gate)"
+                 : "latch(es) kept native — the Liberty has no usable transparent latch cell for a latch with a reset";
+    }
+    if (!lm.rst_drv.is_invalid() && !lm.fold) {
+      lm.reset_cells = true;
+      for (int b = 0; b < lm.bits; ++b) {
+        bool v = lm.init.unknown_bit_test(b) ? options.latch_cell[lm.cell_low ? 1 : 0][1] < 0 : lm.init.bit_test(b);
+        lm.rst_val[static_cast<size_t>(b)] = v;
+      }
+      bool rinv  = false;
+      auto rroot = peel_control(lm.rst_drv, rinv);
+      if (!rroot.is_invalid() && region_in_name.contains(rroot) && real_width(rroot) == 1) {
+        lm.rst_src     = rroot;
+        lm.rst_src_low = lm.rst_neg != rinv;
+      }
+    }
+    // The enable source: native (region input / gate output) unless the reset
+    // folds into it.
+    if (native_en && !lm.fold) {
+      if (auto it = icg_of_gclk.find(en_root); it != icg_of_gclk.end()) {
+        lm.en_icg = it->second;
+      } else {
+        lm.en_src = en_root;
+      }
+      lm.en_inv = root_low != lm.cell_low;
+    }
+    lm.map = true;
+    return {};
+  };
+  // The Latch sink pins a mapped latch owns (everything but `din`, which
+  // crosses like any black-box input unless the reset folds into it).
+  auto latch_owned_pin = [](const Latch_map& lm, hhds::Port_id pid) {
+    return pid != Ntype::get_sink_pid(Ntype_op::Latch, "din") || lm.fold;
+  };
+
+  for (const auto& n : rb.nodes) {
+    auto op = gu::type_op_of(n);
+    // A materialized PROPERTY marker (`fproperty` from a user assert/assume,
+    // `lgassert` from a runtime `a#[lo..=hi]` guard) is not hardware: it has no
+    // Liberty cell and no body, and the mapped netlist is a synthesis artifact
+    // that cannot represent it. Dropping it here is what makes the netlist
+    // WELL-FORMED. Carrying it as a blackbox boundary instead left a Sub whose
+    // module was never declared in the output library, so `get_subnode_io()`
+    // came back null downstream: cgen silently emitted nothing for it (the
+    // runtime check was already lost), and `pass.opentimer` refused the WHOLE
+    // design over a black box with an empty type name -- which is what took out
+    // every cva6 synthesis run, and any design containing one runtime bit-range
+    // select. The check lives on in the pre-ABC design, which is what pass.formal
+    // and the source-level flows read.
+    if (gu::is_property_marker(n)) {
+      continue;
+    }
+    if (icg_absorbed.contains(n)) {
+      continue;  // a recognized clock gate's latch/AND: rebuilt as an ICG cell, not a boundary
+    }
+    // A flop in a !seq (combinational-only) map is kept as a native boundary,
+    // exactly like a Sub/Memory: its Q feeds the mapped logic as a fresh PI, its
+    // din/enable/clock/reset are cut as POs (or recreated when const), and the
+    // Flop node is rebuilt unchanged on read-back (never bit-blasted). In seq
+    // mode flops instead cross into ABC as 1-bit latches (handled above), so they
+    // are excluded from the boundary set there — EXCEPT registers demoted for a
+    // region-internal clock or an asynchronous reset, which take this boundary
+    // path.
+    bool       flop_boundary = gu::is_type_flop(n) && (!options.map_register || clk_demoted.contains(n) || reset_demoted.contains(n));
+    // A LATCH is a boundary in BOTH modes, unconditionally (2f-latch M2).
+    // TERMINOLOGY TRAP: an ABC/AIGER "latch" is an edge-triggered unit-delay
+    // register on an implicit global clock, NOT a level-sensitive latch — and
+    // ABC's BLIF reader silently DISCARDS the `.latch` control tokens. So
+    // letting a real latch cross into ABC in seq mode (the way a flop does)
+    // would not be an error, it would be a silent MISMODEL. Keeping it native
+    // means q feeds the mapped logic as a fresh PI and din/enable are cut as
+    // POs, exactly like a Sub/Memory. Before this, a Latch matched none of the
+    // cases below and fell into the bit-blast loop, aborting the whole region.
+    const bool latch_boundary = op == Ntype_op::Latch;
+    if (op != Ntype_op::Sub && op != Ntype_op::Memory && op != Ntype_op::Clock_cell && op != Ntype_op::Rem && !flop_boundary
+        && !latch_boundary && !native_wiring.contains(n)) {
+      continue;
+    }
+    if (op == Ntype_op::Rem) {
+      // REMAINDER is where the synthesis constraint lives, and it is an ERROR
+      // rather than a warning. The rest of LiveHD handles `%` as an ordinary
+      // op -- bitwidth ranges it, constprop folds it, the LEC encoder proves it
+      // (SREM), the simulator runs it -- because none of those need it to become
+      // gates. Only the netlist mapper does. Raising it HERE, rather than at
+      // lowering time, is what lets a design that merely CONTAINS `%` compile,
+      // simulate and verify.
+      //
+      // Anything trivially convertible was already rewritten to a mask by
+      // rewrite_trivial_rems() above, so reaching this point means the shape
+      // genuinely has no easy gate-level translation.
+      livehd::diag::err("pass.abc", "rem-unsupported", "unsupported")
+          .at(node_span(rb, n))
+          .msg("pass.abc: {} in region '{}': remainder (`%`) has no gate-level translation", node_identity(n), rb.module_name)
+          .hint(
+              "only a power-of-two divisor over a non-negative dividend converts trivially (to a mask); keep other "
+              "remainders out of the synthesized region")
+          .emit();
+    }
+    Bbox bb;
+    bb.node                              = n;
+    bb.op                                = op;
+    if (latch_boundary && options.map_register) {
+      if (!latch_mapping) {
+        latch_native_by["latch(es) kept native — the Liberty has no usable transparent latch cell (a `latch` group with a "
+                        "bare data_in/enable, not dont_use, isolation or clock-gate)"]
+            .insert(n);
+      } else if (auto why = plan_latch(n, bb.latch); !why.empty()) {
+        bb.latch = Latch_map{};
+        latch_native_by[why].insert(n);
+      }
+    }
+    int                           bb_idx = static_cast<int>(bboxes.size());
+    absl::flat_hash_map<int, int> concat_lane_width;
+    if (op == Ntype_op::Concat) {
+      const auto lanes = gu::concat_lanes(n);
+      for (size_t lane = 0; lane < lanes.size(); ++lane) {
+        concat_lane_width.emplace(static_cast<int>(2 * lane), lanes[lane].width);
+      }
+    }
+    // outputs: distinct driver pins that feed region logic -> fresh PI sources.
+    // btree_map (ascending port_id) so the fresh-PI creation order — hence ABC
+    // ObjId assignment and the read-back `g<id>_<cell>` gate names — is
+    // deterministic; a flat_hash_map iterates in run-to-run-varying order.
+    absl::btree_map<int, hhds::Pin_class> out_pins;
+    for (const auto& out_pin : n.out_sorted_pins()) {  // the node's driver pins, once each
+      out_pins.emplace(static_cast<int>(out_pin.get_port_id()), out_pin);
+    }
+    for (auto& [pid, op_pin] : out_pins) {
+      int w = gu::bits_of(op_pin);
+      if (w == 0) {
+        w = 1;
+      }
+      // A one-node native boundary has no combinational consumer inside this
+      // region. Its output can reconnect straight to the region output; making
+      // one ABC PI/PO buffer per bit is pure overhead (Rob has 20k--42k-bit
+      // register-only regions).
+      bool needs_abc = rb.nodes.size() != 1 && !native_wiring.contains(n);
+      if (!needs_abc) {
+        for (const auto& e : op_pin.out_edges()) {
+          const auto sink_node = e.sink.get_master_node();
+          if (region.contains(sink_node) && !native_wiring.contains(sink_node)) {
+            needs_abc = true;
+            break;
+          }
+        }
+      }
+      int oi = static_cast<int>(bb.outs.size());
+      bb.outs.push_back({op_pin, pid, w, !gu::is_unsign(op_pin), needs_abc});
+      if (!needs_abc) {
+        continue;  // boundary-to-boundary bus reconnects natively on read-back
+      }
+      bbox_output_index.emplace(op_pin, Bbox_output_origin{bb_idx, oi});
+    }
+    // inputs: const-driven recreated directly; comb-driven cut as POs. Any pin
+    // driven straight by a region input is reconnected natively instead: there
+    // is no Boolean logic for ABC to optimize. This is essential for wide
+    // shared-Sub inputs (Rob carries a 10,260-bit source bus into hundreds of
+    // instances); routing a direct wire through ABC otherwise materializes one
+    // output buffer per bit. It also subsumes the clock/reset/enable treatment
+    // for native flop/latch boundaries.
+    for (const auto& in_pin : n.inp_sorted_pins()) {
+      if (bb.latch.map && latch_owned_pin(bb.latch, in_pin.get_port_id())) {
+        continue;  // a latch cell's control pin (or its folded D): wired from Latch_map
+      }
+      for (auto in_drv : in_pin.get_driver_pins()) {
+        // The compact carry edge means previous ordinal, not same-instance
+        // Boolean feedback. Keep it out of ABC and restore it with the descriptor.
+        if (n.is_loop_subnode() && in_drv.get_master_node() == n) {
+          continue;
+        }
+
+        int pid = static_cast<int>(in_pin.get_port_id());
+        if (in_drv.is_const()) {
+          bb.const_ins.emplace_back(pid, in_drv);
+        } else {
+          const auto lane_fit      = concat_lane_width.find(pid);
+          const bool needs_fit     = lane_fit != concat_lane_width.end() && gu::bits_of(in_drv) > lane_fit->second;
+          const bool native_driver = region_in_name.contains(in_drv) || native_wiring.contains(in_drv.get_master_node());
+          if (native_driver) {
+            if (needs_fit) {
+              // A Concat lane is an explicit width boundary. The source normally
+              // has a Get_mask in front of an over-wide packed-array carrier, but
+              // that zero-delay wrapper can disappear while native boundaries
+              // are cut and reconstructed. Recreate it natively below rather
+              // than mapping W identity buffers through ABC.
+              bb.fit_native_ins.emplace_back(pid, in_drv, lane_fit->second, !gu::is_unsign(in_drv));
+            } else {
+              bb.native_ins.emplace_back(pid, in_drv);
+            }
+            continue;
+          }
+          int w = gu::bits_of(in_drv);
+          if (w == 0) {
+            w = 1;
+          }
+          if (lane_fit != concat_lane_width.end()) {
+            w = std::min(w, lane_fit->second);
+          }
+          bb.ins.push_back({pid, in_drv, w, !gu::is_unsign(in_drv)});
+        }
+      }
+    }
+    bboxes.push_back(std::move(bb));
+  }
+  for (const auto& [why, set] : latch_native_by) {
+    std::vector<hhds::Node_class> kept(set.begin(), set.end());
+    std::sort(kept.begin(), kept.end(), [](const auto& a, const auto& b) { return a.get_debug_nid() < b.get_debug_nid(); });
+    auto w = livehd::diag::warn("pass.abc", "latch-native", "unsupported");
+    w.at(node_span(rb, kept.front())).msg("pass.abc region '{}': {} {}", rb.module_name, kept.size(), why);
+    constexpr size_t kMaxNamed = 5;
+    for (size_t k = 0; k < std::min(kMaxNamed, kept.size()); ++k) {
+      w.note(std::format("kept native: {}", node_identity(kept[k])), node_span(rb, kept[k]));
+    }
+    if (kept.size() > kMaxNamed) {
+      w.note(std::format("... and {} more latch(es)", kept.size() - kMaxNamed));
+    }
+    w.emit();
+  }
+
+  // --- bit-blast each region node in dependency order. `rb.nodes` (the order
+  // the partitioner collected the region in) is
+  // *mostly* topological, but it can emit a reader before its producer (the
+  // same phenomenon the LEC encoder fixpoints around for forward_hier — seen
+  // on the DINO top, where a wide packed-bus Get_mask was read by an Sra a
+  // thousand nodes before the Get_mask was visited). A single pass would then
+  // read the unmaterialized operand as const0 and silently miscompile the
+  // whole cone. Schedule with a dependency queue: a node is ready when every
+  // comb operand is a constant, a region input, a seeded boundary, or an
+  // earlier-blasted node. A repeated whole-pending-list fixpoint is quadratic
+  // on reverse-ordered cones (Rob has 12k-node regions); the queue visits every
+  // dependency once. A stuck remainder (a genuine node-level cycle or broken
+  // boundary) is appended in traversal order so abc_bit's unmaterialized-driver
+  // diagnostic pinpoints the const0 reads.
+  std::vector<hhds::Node_class> blast_order;
+  {
+    std::vector<hhds::Node_class> pending;
+    for (const auto& n : rb.nodes) {
+      auto op = gu::type_op_of(n);
+      if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::Clock_cell || op == Ntype_op::Rem
+          || native_wiring.contains(n)) {
+        continue;  // native boundary -- never eagerly bit-blasted
+      }
+      if (gu::is_type_flop(n)) {
+        continue;  // flop: a 1-bit latch in seq mode, a native boundary in !seq mode -- never bit-blasted
+      }
+      if (op == Ntype_op::Latch) {
+        continue;  // level-sensitive latch: always a native boundary (2f-latch M2), never bit-blasted
+      }
+      if (icg_absorbed.contains(n)) {
+        continue;  // a recognized clock gate's AND / 1-bit identities: the ICG cell computes the gated clock
+      }
+      pending.push_back(n);
+    }
+    absl::flat_hash_set<hhds::Pin_class> ready;  // driver pins with materialized (or scheduled) bit slots
+    ready.reserve(bitnet.size() + pending.size());
+    for (const auto& kv : bitnet) {
+      ready.insert(kv.first);
+    }
+    // Native boundary outputs are demand-created PIs, so they need not have
+    // any entry in bitnet yet. They are nevertheless available immediately.
+    // Otherwise their consumers enter the stuck remainder in arbitrary order
+    // and a later slice can be read before it has been bit-blasted.
+    for (const auto& kv : bbox_output_index) {
+      ready.insert(kv.first);
+    }
+    for (const auto& kv : icg_of_gclk) {
+      ready.insert(kv.first);  // a clock gate's output: a demand-created PI too
+    }
+    absl::flat_hash_map<hhds::Node_class, size_t>                       unresolved;
+    absl::flat_hash_map<hhds::Pin_class, std::vector<hhds::Node_class>> waiters;
+    std::vector<hhds::Node_class>                                       queue;
+    unresolved.reserve(pending.size());
+    waiters.reserve(pending.size());
+    queue.reserve(pending.size());
+    for (const auto& n : pending) {
+      size_t count = 0;
+      for (const auto& in_pin : n.inp_sorted_pins()) {
+        const auto  in_drv = in_pin.get_driver_pin();
+        const auto& d      = in_drv;
+        if (d.is_invalid() || d.is_const() || ready.contains(d) || region_input_index.contains(d)) {
+          continue;
+        }
+        ++count;
+        waiters[d].push_back(n);
+      }
+      unresolved.emplace(n, count);
+      if (count == 0) {
+        queue.push_back(n);
+      }
+    }
+    blast_order.reserve(pending.size());
+    size_t scheduled_count = 0;
+    for (size_t head = 0; head < queue.size(); ++head) {
+      const auto n = queue[head];
+      ++scheduled_count;
+      // Concat has no Boolean logic. Keep it in this dependency queue so all
+      // lane producers precede its consumers, but resolve only demanded bits
+      // through abc_bit instead of eagerly copying every bit of every lane.
+      if (gu::type_op_of(n) != Ntype_op::Concat) {
+        blast_order.push_back(n);
+      }
+      absl::flat_hash_set<hhds::Pin_class> produced;
+      for (const auto& out_pin : n.out_sorted_pins()) {  // what this node PRODUCES: its driver pins
+        produced.insert(out_pin);
+      }
+      if (produced.empty()) {
+        produced.insert(n.create_driver_pin(0));
+      }
+      for (const auto& d : produced) {
+        ready.insert(d);
+        auto wit = waiters.find(d);
+        if (wit == waiters.end()) {
+          continue;
+        }
+        for (const auto& consumer : wit->second) {
+          auto& count = unresolved.at(consumer);
+          if (--count == 0) {
+            queue.push_back(consumer);
+          }
+        }
+      }
+    }
+    if (scheduled_count != pending.size()) {
+      std::vector<hhds::Node_class> stuck;
+      stuck.reserve(pending.size() - scheduled_count);
+      for (const auto& n : pending) {
+        if (unresolved.at(n) != 0) {
+          stuck.push_back(n);
+        }
+      }
+      if (options.verbose) {
+        std::print("[pass.abc] region '{}': scheduler stuck with {} node(s); unresolved dependencies:\n",
+                   rb.module_name,
+                   stuck.size());
+        size_t shown = 0;
+        for (const auto& n : stuck) {
+          for (const auto& in_pin : n.inp_sorted_pins()) {
+            const auto  in_drv = in_pin.get_driver_pin();
+            const auto& d      = in_drv;
+            if (d.is_invalid() || d.is_const() || ready.contains(d) || region_input_index.contains(d)) {
+              continue;
+            }
+            const auto dn = d.get_master_node();
+            std::print("  {} ({}) <- {} ({}) p{} region={} seeded={}\n",
+                       gu::debug_name(n),
+                       Ntype::get_name(gu::type_op_of(n)),
+                       gu::debug_name(dn),
+                       Ntype::get_name(gu::type_op_of(dn)),
+                       d.get_port_id(),
+                       region.contains(dn),
+                       bitnet.contains(d));
+            if (++shown == 32) {
+              break;
+            }
+          }
+          if (shown == 32) {
+            break;
+          }
+        }
+        std::fflush(stdout);
+      }
+      for (const auto& n : stuck) {
+        if (gu::type_op_of(n) != Ntype_op::Concat) {
+          blast_order.push_back(n);
+        }
+      }
+    }
+  }
+  trace_stage("scheduled");
+  // Memory admission: sample our own RSS as the region is bit-blasted, and stop
+  // before the ABC flow if this region will not fit. The first sample is at ~5%
+  // of the work (early enough that a hopeless region dies cheaply), then every
+  // 2% so a region that grows non-linearly is still caught. RSS is a syscall, so
+  // it is sampled -- never read per node.
+  const uint64_t rss_before  = !hooks.over_budget ? 0 : cost::process_footprint_bytes();
+  const size_t   blast_total = blast_order.size();
+  result.rss_before          = rss_before;
+  result.blast_total         = blast_total;
+  const size_t   sample_step = std::max<size_t>(1, blast_total / 50);
+  size_t         blasted     = 0;
+
+  for (const auto& n : blast_order) {
+    if (options.verbose && blasted != 0 && blasted % 1000 == 0) {
+      std::print("[pass.abc] region '{}': blast {}/{} before {} at {:.0f} ms\n",
+                 rb.module_name,
+                 blasted,
+                 blast_total,
+                 Ntype::get_name(gu::type_op_of(n)),
+                 since());
+      std::fflush(stdout);
+    }
+    if (hooks.over_budget && ++blasted % sample_step == 0 && blasted >= blast_total / 20) {
+      if (hooks.over_budget(rss_before, blasted, blast_total, lnet.size() - 1 + lnet.outputs().size())) {
+        result.status = Region_blast::Status::over_budget;
+        return result;  // no partial result; the caller reports the refusal
+      }
+    }
+    auto op       = gu::type_op_of(n);
+    auto out_pin  = n.create_driver_pin(0);
+    int  out_bits = gu::bits_of(out_pin);
+    if (out_bits == 0) {
+      out_bits = 1;
+    }
+    if (op == Ntype_op::Sum) {
+      // All Sum outputs are realizations of the same integer expression.
+      // Build one adder at the largest requested width and share its prefixes.
+      for (const auto& op_pin : n.out_sorted_pins()) {  // widest driver pin; consumers do not matter
+        out_bits = std::max(out_bits, gu::bits_of(op_pin));
+      }
+    }
+    if (op == Ntype_op::SHL || op == Ntype_op::Not) {
+      const auto demand = gu::masked_output_width(n, [&](const auto& consumer) { return region.contains(consumer); });
+      if (demand > 0) {
+        out_bits = std::min(out_bits, static_cast<int>(demand));
+      }
+    }
+    auto& slots = bitnet[out_pin];
+
+    blast_comb(n, out_bits, slots, ops, abc_bit, options, rb, region, refuse, refuse_shift_amount);
+    if (op == Ntype_op::Sum) {
+      absl::flat_hash_set<hhds::Pin_class> outputs;
+      for (const auto& op_pin : n.out_sorted_pins()) {  // the node's driver pins, once each
+        outputs.insert(op_pin);
+      }
+      for (const auto& output : outputs) {
+        if (output == out_pin) {
+          continue;
+        }
+        auto& target = bitnet[output];
+        for (int bit = 0; bit < std::max(1, gu::bits_of(output)); ++bit) {
+          target[bit] = slots.at(bit);
+        }
+      }
+    }
+  }
+  if (unsupported) {
+    result.status = Region_blast::Status::refused;
+    if (refusals > kMaxRefusals) {
+      livehd::diag::err("pass.abc", "unsupported-cell", "unsupported")
+          .msg("pass.abc: region '{}': {} further node(s) were refused; only the first {} are reported above",
+               rb.module_name,
+               refusals - kMaxRefusals,
+               kMaxRefusals)
+          .emit();
+    }
+    return result;
+  }
+  trace_stage("blast-complete");
+
+  // --- sequential: wire each latch's data-in (D) to the folded next-state ---
+  // An asynchronous reset never enters D (Seq_flop::async_reset: its register
+  // maps onto a clear/preset cell whose pin takes the reset; one no cell can
+  // represent stayed a native boundary above), so such a latch's next state is
+  // `en ? din : Q`. Every other crossed flop's
+  // next state is `rst ? rval : (en ? din : Q)` -- a synchronous
+  // reset has priority over the enable, exactly cgen's
+  // `if (rst) q <= rval; else if (en) q <= din;` and pass/lec's
+  // ITE(rst, init, ITE(en, din, q)) -- and a missing `initial` resets to 0
+  // like tolg's nil init. Folding enable and reset into the AIG means the
+  // reconstructed flop is a plain D-flop (only clock + a resetless power-on
+  // init reattached), and ABC sees the true next-state function so
+  // retiming/sweeping stays sound.
+  // enable/reset are single control signals: an N-bit pin asserts on (pin != 0),
+  // i.e. the OR-reduction of its bits (matches cgen/yosys reg semantics and the
+  // LEC's `rst != 0`). Reduce once per flop, not per data bit.
+  auto reduce_or = [&](const hhds::Pin_class& p) -> Lid {
+    int w = gu::bits_of(p);
+    if (w <= 0) {
+      w = 1;
+    }
+    Lid acc = abc_bit(p, 0);
+    for (int k = 1; k < w; ++k) {
+      acc = ops.or_(acc, abc_bit(p, k));
+    }
+    return acc;
+  };
+  for (auto& f : flops) {
+    std::optional<Lid> en_active;
+    std::optional<Lid> rst_active;
+    if (!f.en_drv.is_invalid()) {
+      en_active = reduce_or(f.en_drv);
+    }
+    if (!f.rst_drv.is_invalid() && !f.async_reset) {  // an async reset drives the cell's pin, not D
+      rst_active = reduce_or(f.rst_drv);
+      if (f.neg_reset) {
+        rst_active = ops.inv(*rst_active);
+      }
+    }
+    for (int b = 0; b < f.bits; ++b) {
+      Lid d = f.previous.empty() ? abc_bit(f.din_drv, b) : f.previous[b];
+      if (en_active) {
+        d = ops.mux(*en_active, d, f.qbits[b]);  // (en != 0)? din : Q
+      }
+      if (rst_active) {
+        const Lid rval = f.rval_drv.is_invalid() ? ops.konst(false) : abc_bit(f.rval_drv, b);
+        d               = ops.mux(*rst_active, rval, d);  // reset? rval : (en? din : Q)
+      }
+      // QN cell under the built-in flow: the latch stores ~next_state (abc_not
+      // folds constants; strash turns it into a complemented edge), so `&nf`
+      // maps ~f as part of its own phase assignment and mints an INV only where
+      // nothing absorbs it (a D fed straight by a port). It does perturb the
+      // mapping either way -- same binary, br_arb_rr comb 205 gates / 14.70
+      // um^2 -> 244 / 17.96, br_credit_sender 67.0 -> 60.2 -- but the aggregate
+      // is far cheaper than the read-back absorption (Seq_flop::d_inverted),
+      // which the other latches take.
+      lnet.set_latch_input(f.latch[b], f.d_inverted ? ops.inv(d) : d);
+    }
+  }
+
+  // --- region outputs -> per-bit ABC POs ---
+  direct_native_output.assign(rb.outputs.size(), false);
+  absl::flat_hash_set<hhds::Pin_class> direct_boundary_outputs;
+  for (const auto& bb : bboxes) {
+    for (const auto& out : bb.outs) {
+      if (!out.abc_bits) {
+        direct_boundary_outputs.insert(out.src_pin);
+      }
+    }
+  }
+  for (size_t po = 0; po < rb.outputs.size(); ++po) {
+    const auto& port = rb.outputs[po];
+    if (native_wiring.contains(port.src_driver.get_master_node()) || direct_boundary_outputs.contains(port.src_driver)) {
+      direct_native_output[po] = true;
+      continue;
+    }
+    int w = port.bits == 0 ? 1 : port.bits;
+    for (int b = 0; b < w; ++b) {
+      const auto value = abc_bit(port.src_driver, b);
+      lnet.add_output(value, std::format("__po{}_{}_b{}", po, port.name, b));
+      // A PO is already a connectivity boundary, so the source node gets a
+      // uniquely named NET alias rather than an explicit identity node (ABC's
+      // netlist checker requires unique CO net names; an explicit node would
+      // cost wide shared-Sub inputs one cell per boundary bit, Rob: 523 x
+      // 10,260). The alias alone does NOT avoid a cell, though: `&put`
+      // re-decouples every CO driver (Abc_NtkLogicMakeSimpleCos), so a PO fed
+      // straight by a PI, a latch Q or a blackbox output comes back as a
+      // Liberty buffer anyway -- 512 of br_demux_onehot's 528 cells were
+      // exactly that. What removes them is the identity-buffer bypass in the
+      // read-back (is_identity_gate / only_co_fanouts, pass 1b), which aliases
+      // the buffer's output net to its input net and mints no Sub. Read-back
+      // pairs POs by creation order.
+      po_order.emplace_back(po, b);
+    }
+  }
+  trace_stage("region-pos");
+
+  // --- blackbox combinational inputs -> per-bit ABC POs (appended after the
+  // region outputs so the region-output read-back stays index-aligned) ---
+  // One ABC PO per UNIQUE (source driver, bit), with every blackbox input that
+  // consumes it. Repeated shared instances often read the same very wide bus;
+  // emitting a PO per consumer duplicates pure interface work quadratically.
+  absl::flat_hash_map<hhds::Pin_class, std::vector<int32_t>> bbox_po_index;
+  for (size_t bi = 0; bi < bboxes.size(); ++bi) {
+    auto& bb = bboxes[bi];
+    for (size_t ii = 0; ii < bb.ins.size(); ++ii) {
+      const auto& in    = bb.ins[ii];
+      auto&       index = bbox_po_index[in.drv];
+      if (static_cast<int>(index.size()) < in.bits) {
+        index.resize(in.bits, -1);
+      }
+      for (int b = 0; b < in.bits; ++b) {
+        if (index[b] < 0) {
+          const auto value = abc_bit(in.drv, b);
+          lnet.add_output(value, std::format("__bb{}_i{}_b{}", bi, ii, b));
+          index[b] = static_cast<int32_t>(bbox_po.size());
+          bbox_po.emplace_back();
+        }
+        bbox_po[static_cast<size_t>(index[b])].push_back({static_cast<int>(bi), static_cast<int>(ii), b});
+      }
+    }
+  }
+  trace_stage("bbox-pos");
+
+  // --- asynchronous resets computed inside the region -> ABC POs ---
+  // (after the black-box POs, so both read-backs above stay index-aligned) One
+  // PO per (reset driver, level): the cell pin asserting at `pin_low` reads
+  // the raw reset bit complemented exactly when that disagrees with the
+  // register's own polarity (negreset). ABC maps the inversion with the rest.
+  {
+    absl::flat_hash_map<std::pair<hhds::Pin_class, bool>, int32_t> arst_index;
+    const size_t                                                    first = lnet.outputs().size();
+    for (auto& f : flops) {
+      if (!f.async_reset || !f.arst_src.is_invalid()) {
+        continue;
+      }
+      for (int b = 0; b < f.bits; ++b) {
+        const bool pin_low = options.areset_low[f.arst_val[static_cast<size_t>(b)] ? 1 : 0];
+        auto&      slot    = f.arst_po[pin_low ? 1 : 0];
+        if (slot >= 0) {
+          continue;
+        }
+        const bool invert = pin_low != f.arst_low;
+        auto [it, fresh]  = arst_index.try_emplace({f.rst_drv, invert}, static_cast<int32_t>(lnet.outputs().size()));
+        if (fresh) {
+          const Lid raw = abc_bit(f.rst_drv, 0);
+          lnet.add_output(invert ? ops.inv(raw) : raw, std::format("__arst{}_{}", it->second, pin_low ? "n" : "p"));
+        }
+        slot = it->second;
+      }
+    }
+    result.arst_pos = lnet.outputs().size() - first;
+  }
+  trace_stage("arst-pos");
+
+  // --- integrated clock gates -> one ABC PO per gate: the latched enable ---
+  // (after the async-reset POs) The mapped logic drives the ICG cell's enable
+  // pin; the read-back wires it in pass 2b like an internal async reset.
+  {
+    const size_t first = lnet.outputs().size();
+    for (size_t i = 0; i < result.icgs.size(); ++i) {
+      auto& gate = result.icgs[i];
+      gate.en_po = static_cast<int32_t>(lnet.outputs().size());
+      lnet.add_output(abc_bit(gate.en_drv, 0), std::format("__icg{}_en", i));
+    }
+    result.icg_pos = lnet.outputs().size() - first;
+    for (const auto& f : flops) {
+      if (f.icg >= 0) {
+        result.icgs[static_cast<size_t>(f.icg)].fanout += f.bits;
+      }
+    }
+    for (const auto& bb : bboxes) {
+      if (bb.latch.map && bb.latch.en_icg >= 0) {
+        result.icgs[static_cast<size_t>(bb.latch.en_icg)].fanout += bb.latch.bits;
+      }
+    }
+  }
+  trace_stage("icg-pos");
+
+  // --- latch cells: computed enables, resets and folded D -> ABC POs ---
+  // (after the ICG POs) Each is created at the level its cell pin wants, so
+  // ABC maps any inversion with the rest of the logic; the read-back wires
+  // them in pass 2b like an internal async reset.
+  {
+    const size_t first = lnet.outputs().size();
+    for (size_t bi = 0; bi < bboxes.size(); ++bi) {
+      auto& lm = bboxes[bi].latch;
+      if (!lm.map) {
+        continue;
+      }
+      // The latch's control levels as ABC nets: `open` is 1 while the source
+      // latch is transparent, `rst` while its reset is asserted.
+      std::optional<Lid> rst;
+      if (!lm.rst_drv.is_invalid()) {
+        rst = abc_bit(lm.rst_drv, 0);
+        if (lm.rst_neg) {
+          rst = ops.inv(*rst);
+        }
+      }
+      if (lm.en_src.is_invalid() && lm.en_icg < 0) {
+        Lid open = reduce_or(lm.en_drv);  // a multi-bit enable opens on (en != 0)
+        if (lm.en_neg) {
+          open = ops.inv(open);
+        }
+        if (lm.fold) {
+          open = ops.or_(open, *rst);  // the folded reset opens the latch too
+        }
+        lm.en_po = static_cast<int32_t>(lnet.outputs().size());
+        lnet.add_output(lm.cell_low ? ops.inv(open) : open, std::format("__lat{}_en", bi));
+      }
+      if (lm.reset_cells && lm.rst_src.is_invalid()) {
+        for (int b = 0; b < lm.bits; ++b) {
+          const int  kind    = lm.rst_val[static_cast<size_t>(b)] ? 2 : 1;
+          const bool pin_low = options.latch_reset_low[lm.cell_low ? 1 : 0][kind];
+          auto&      slot    = lm.rst_po[pin_low ? 1 : 0];
+          if (slot < 0) {
+            slot = static_cast<int32_t>(lnet.outputs().size());
+            lnet.add_output(pin_low ? ops.inv(*rst) : *rst, std::format("__lat{}_rst{}", bi, pin_low ? "n" : "p"));
+          }
+        }
+      }
+      if (lm.fold) {
+        const auto din   = gu::get_driver_of_sink_name(bboxes[bi].node, "din");
+        const bool q_inv = options.latch_cell[lm.cell_low ? 1 : 0][0] == 1;
+        lm.d_po.assign(static_cast<size_t>(lm.bits), -1);
+        for (int b = 0; b < lm.bits; ++b) {
+          const Lid init = lm.init.unknown_bit_test(b) ? ops.konst(false) : ops.konst(lm.init.bit_test(b));
+          const Lid d    = ops.mux(*rst, init, abc_bit(din, b));  // rst ? init : din
+          lm.d_po[static_cast<size_t>(b)] = static_cast<int32_t>(lnet.outputs().size());
+          lnet.add_output(q_inv ? ops.inv(d) : d, std::format("__lat{}_d{}", bi, b));
+        }
+      }
+    }
+    result.latch_pos = lnet.outputs().size() - first;
+  }
+  trace_stage("latch-pos");
+
+  // A region made entirely of direct native boundaries has no real ABC
+  // outputs. ABC's dch implementation crashes on that empty network; retain a
+  // single unobserved constant PO as a mapper sentinel. Readback intentionally
+  // ignores it because it is absent from both po_order and bbox_po.
+  if (lnet.outputs().empty()) {
+    has_dummy_po     = true;
+    const auto value = ops.konst(false);
+    lnet.add_output(value, "__livehd_dummy_po");
+  }
+
+  return result;
+}
+
+}  // namespace livehd::synth

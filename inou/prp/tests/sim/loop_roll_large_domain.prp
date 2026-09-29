@@ -1,0 +1,18 @@
+/*
+:name: loop_roll_large_domain
+:type: simulation
+:expect_instances: u_loop_0=1 *=1
+*/
+// A trip count above the old 1024 limit must still use one compact instance.
+pub mod loop_roll_large_domain(x:u16) -> (value:u16@[0]) {
+  mut acc:u16 = x
+  for i in 0..<1025 { acc = acc ^ i }
+  value = acc
+}
+
+test loop_roll_large_domain.compact {
+  mut dut = loop_roll_large_domain
+  dut.x = 37
+  step
+  assert(dut.value == (37 ^ 1024))
+}

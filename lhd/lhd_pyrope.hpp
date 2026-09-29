@@ -5,6 +5,7 @@
 // language rather than the compile/lec/synth flows:
 //   lhd pyrope lsp        the Pyrope LSP server (JSON-RPC over stdio)
 //   lhd pyrope fmt FILE…  the Pyrope source formatter (prpfmt), clang-format-like
+//   lhd pyrope style FILE… source-tree repetition and style suggestions
 //
 // These run before the pass/inou engine is initialized: the LSP owns stdio for
 // the JSON-RPC protocol, and `fmt` is a pure source->source transform that

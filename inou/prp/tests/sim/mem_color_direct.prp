@@ -1,0 +1,30 @@
+/*
+:name: mem_color_direct
+:type: simulation
+*/
+
+// Live 3d-sim-color memory gate: the occurrence-wide scheduler must preserve
+// committed old-value reads and same-cycle forwarding without treating the
+// array object as a scalar state-Q boundary. The existing mem_ordering_sim
+// fixture retains the harder program-order read-modify-write fallback until
+// read ports become independent plan sites.
+pub mod memcolor(wa:u2, wd:u8) -> (qo:u8@[0], qf:u8@[0]) {
+  reg oldm:[4]u8:[ordering="old"] = 0
+  qo = oldm[wa]
+  oldm[wa] = wd
+
+  reg fwdm:[4]u8:[ordering="fwd"] = 0
+  fwdm[wa] = wd
+  qf = fwdm[wa]
+}
+
+test memcolor.direct_memory_protocol {
+  mut acc = memcolor
+  tick 6 {
+    acc.wa = 1
+    acc.wd = clock + 10
+    step
+  }
+  assert(acc.qo == 15, "old-order memory commits the last write")
+  assert(acc.qf == 15, "forwarding memory commits the last write")
+}

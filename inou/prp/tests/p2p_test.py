@@ -3,7 +3,7 @@
 must recompile and stay logically equivalent to its golden `.v`.
 
     lhd compile foo.prp --emit-dir pyrope:DIR/                          # prp -> upass -> prp
-    lhd lec --set formal.solver=lgyosys --impl pyrope:DIR/foo.<top>.prp --ref verilog:foo.v
+    lhd lec --impl pyrope:DIR/foo.<top>.prp --ref verilog:foo.v
 
 This is the FORWARD-direction companion of v2prp2v_test.py (which round-trips a
 `.v`). It exists to lock in the constructs the writer fully supports — notably
@@ -12,8 +12,8 @@ The prp_writer safety net makes the first step fail the compile if it hits an
 unimplemented construct (rather than silently emitting a /* TODO */ stub), so a
 construct gap surfaces here as a hard failure, not a false pass.
 
-`lhd lec --set formal.solver=lgyosys` (yosys/lgcheck) is the authoritative gate:
-equivalent => pass, not-equivalent => fail, TIMEOUT => inconclusive (exit 0).
+`lhd lec` (default solver) is the equivalence gate:
+The fixture must prove equivalent; timeouts and refusals fail.
 
   python3 inou/prp/tests/p2p_test.py -i inou/prp/tests/equiv/mod_call_pipe.prp
 """
@@ -26,12 +26,16 @@ import shutil
 import subprocess
 import sys
 
-CHECK_TIMEOUT = 20  # seconds; a timeout is inconclusive, not a failure
+from lec import run_lec, verdict
+
+CHECK_TIMEOUT = 20  # internal seconds; the external watchdog allows twice this
 
 
 def _v_top(vpath):
     with open(vpath) as f:
-        m = re.search(r"\bmodule\s+\\?([^\s(]+)", f.read())
+        # Anchored at the START OF A LINE: an unanchored `\bmodule\s+` also matches the
+        # word inside a golden's own prose comment. See prplib.PrpRunner._verilog_modules.
+        m = re.search(r"^\s*module\s+\\?([^\s(]+)", f.read(), re.M)
     return m.group(1) if m else None
 
 
@@ -60,21 +64,20 @@ def main():
 
     # 1. Pyrope -> upass -> Pyrope via pass.prp_writer (safety net fails on any
     #    unimplemented construct).
-    #    Pin compile.upass.inline=true: this gate recompiles only the single
-    #    emitted `<top>.prp`, so it needs a self-contained (flat) re-emission.
-    #    With the default (inline=false) a `comb` called with runtime args is
-    #    emitted as a separate Sub module, and the single-file recompile cannot
-    #    resolve it (the hierarchical multi-file roundtrip is a separate flow).
+    #    Default comb inlining produces the self-contained source this
+    #    single-file round trip recompiles.
     comp = subprocess.run(
-        [lhd, "compile", prp, "--set", "compile.upass.inline=true",
-         "--emit-dir", "pyrope:" + out_dir + "/", "--workdir", os.path.join(work, "w_emit")],
+        [lhd, "compile", prp, "--emit-dir", "pyrope:" + out_dir + "/", "--workdir", os.path.join(work, "w_emit")],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if comp.returncode != 0:
         print("{} - p2p - FAILED: prp->prp emission rc={}".format(name, comp.returncode))
         print(comp.stdout.decode("utf-8", "ignore"))
         return 1
 
-    emitted = os.path.join(out_dir, top + ".prp")
+    # pass.prp_writer emits one .prp per SOURCE FILE — `<file>.prp` holds the
+    # file scope plus every `pub mod` lifted out of it — so a top named
+    # `<file>.<entity>` lives in `<file>.prp`, not in a per-lambda file.
+    emitted = os.path.join(out_dir, top.split(".", 1)[0] + ".prp")
     if not os.path.exists(emitted):
         cands = glob.glob(os.path.join(out_dir, "*.prp"))
         print("{} - p2p - FAILED: no emitted unit for top '{}' (have: {})".format(name, top, cands))
@@ -86,22 +89,14 @@ def main():
         return 1
 
     # 2. Recompile the emitted Pyrope and LEC it against the golden .v.
-    try:
-        # Per-side tops: the golden .v carries the historical dotted module name
-        # (`pipe1_pass.passthru`), but the Pyrope side now emits the FLAT Verilog
-        # module name (`passthru`) — internal graph names stay hierarchical while
-        # Verilog flattens. Pass each side its own module name.
-        ref_top  = top
-        impl_top = top.rsplit(".", 1)[-1]
-        chk = subprocess.run(
-            [lhd, "lec", "--set", "formal.solver=lgyosys", "--impl", "pyrope:" + emitted, "--ref", "verilog:" + v,
-             "--impl-top", impl_top, "--ref-top", ref_top, "--workdir", os.path.join(work, "w_check")],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=CHECK_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        print("{} - p2p - inconclusive (lhd lec timeout >{}s, NOT a fail)".format(name, CHECK_TIMEOUT))
-        return 0
+    ref_top = top
+    impl_top = top.rsplit(".", 1)[-1]
+    chk = run_lec(
+        [lhd, "lec", "--impl", "pyrope:" + emitted, "--ref", "verilog:" + v,
+         "--impl-top", impl_top, "--ref-top", ref_top, "--workdir", os.path.join(work, "w_check")],
+        timeout=CHECK_TIMEOUT)
 
-    if chk.returncode == 0:
+    if verdict(chk) == "proven":
         print("{} - p2p - success (top:{})".format(name, top))
         return 0
     print("{} - p2p - FAILED: not equivalent (top:{})".format(name, top))

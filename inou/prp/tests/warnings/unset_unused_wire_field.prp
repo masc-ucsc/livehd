@@ -6,7 +6,7 @@
 */
 // A detupled wire bundle (`wire io:(…)` splits into per-leaf dotted nets):
 // fields a/o are driven and consumed through plain dotted refs (no tuple_get
-// survives uPass_detuple), and their u64 width exceeds the bitwidth pass's
+// survives the streaming detupler), and their u64 width exceeds the bitwidth pass's
 // 62-bit derived-range cap — neither may warn (they are read and written; the
 // runner/constprop field-touched record is what proves it). The never-touched
 // `dead` leaf is the true positive: declared, never set, never used.

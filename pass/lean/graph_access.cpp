@@ -54,8 +54,6 @@ uint32_t raw_pin_width(const Node_pin& pin) { return static_cast<uint32_t>(liveh
 
 uint32_t raw_node_width(const Node& node) { return raw_pin_width(node.create_driver_pin(0)); }
 
-Dlop node_const_value(const Node& node) { return livehd::graph_util::hydrate_const(node); }
-
 bool node_output_is_signed(const Node& node) {
   auto n    = node;
   auto dpin = n.create_driver_pin(0);
@@ -77,12 +75,12 @@ void check_width(const LeanCtx& ctx, const Node& node, uint32_t w, std::string_v
 
 uint32_t intrinsic_const_width(const Dlop& v) {
   if (!v.is_just_i64()) {
-    return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_bits()));
+    return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_signed_bits()));
   }
   const int64_t iv = v.to_just_i64();
   if (iv < 0) {
-    // A negative literal needs its sign bit; get_bits() already counts it.
-    return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_bits()));
+    // A negative literal needs its sign bit; get_signed_bits() already counts it.
+    return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_signed_bits()));
   }
   return minimal_unsigned_const_width(v);
 }
@@ -265,7 +263,7 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
       mi.ports[port_id].enable = e.driver;
     } else if (pname == "clock_pin") {
       mi.ports[port_id].clock = e.driver;
-    } else if (pname == "init") {
+    } else if (pname == "initial") {
       mi.init_pin = e.driver;
     } else if (pname == "update") {
       mi.update_pin = e.driver;
@@ -472,7 +470,7 @@ const Memory_info& memory_info_for(const LeanCtx& ctx, const Node& node) {
 
 uint32_t minimal_unsigned_const_width(const Dlop& v) {
   if (!v.is_just_i64()) {
-    return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_bits()));
+    return std::max<uint32_t>(1, static_cast<uint32_t>(v.get_signed_bits()));
   }
   const int64_t iv = v.to_just_i64();
   if (iv <= 0) {

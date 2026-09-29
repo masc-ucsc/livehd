@@ -1,0 +1,35 @@
+/*
+:name: regref_deep
+:type: simulation
+*/
+mod counter(en:bool) -> (o:u8@[0]) {
+  reg c:u8 = 0
+  if en { wrap c += 1 }
+  o = c
+}
+mod middle(en:bool) -> (o:u8@[0]) {
+  const child = counter(en)
+  o = child
+}
+mod outer(en:bool) -> (o:u8@[0]) {
+  const branch = middle(en)
+  o = branch
+}
+test deep.check {
+  mut dut = outer
+  mut c = regref(dut.branch.child.c)
+  mut same = regref("dut/branch.child.c")
+  dut.en = true
+  step
+  assert(c == 1)
+  c = 42
+  assert(same == 42)
+  assert(dut.branch.child.c == 42)
+  step
+  assert(c == 43)
+  assert(dut.o == 43)
+  same = 7
+  step
+  assert(c == 8)
+  assert(dut.o == 8)
+}

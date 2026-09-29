@@ -44,8 +44,12 @@ compile_sim() {  # <file> <top>
 expect_loop_error() {  # <file> <top> <label>
   local rc; rc=$(compile_sim "$1" "$2")
   [ "$rc" -ne 0 ] || fail "$3: expected non-zero exit (silent wrong-sim not blocked)"
-  grep -qE '"code":"(comb-loop-through-instance|combinational-loop)"' "$W/out" \
+  grep -qE '"code":"(comb-loop-through-instance|combinational-loop|color-plan-not-lowerable)"' "$W/out" \
     || fail "$3: expected a comb-loop diagnostic; got: $(cat "$W/out")"
+  if grep -q '"code":"color-plan-not-lowerable"' "$W/out"; then
+    grep -q 'dependency cycle remains' "$W/out" \
+      || fail "$3: color-plan refusal did not identify the surviving dependency cycle: $(cat "$W/out")"
+  fi
   echo "ok: $3 blocked with a comb-loop diagnostic"
 }
 
@@ -92,7 +96,13 @@ module top(input [7:0] a1, input [7:0] b1, input [7:0] d1,
   subadd u2(.a(a2), .b(b2), .c(x1[7:0]), .d(d2), .x(x2), .y(o2));
 endmodule
 EOF
-expect_loop_error "$W/cross.v" top "cross-coupled false loop"
+# Stage 2: the mutual false loop is now RESOLVED too. `subadd` computes
+# x = a + b, so neither instance's `x` depends on its own `c` -- the cycle is an
+# artifact of simulating each Sub atomically, not a real path. cgen_sim's
+# false-loop breaker iterates to a fixpoint, so inlining u1 exposes u2 and both
+# go, leaving a flat DAG forward_class can order. (The detector used to stop at
+# the sibling instance, which is why this was an error.)
+expect_clean "$W/cross.v" top "cross-coupled mutual false loop (flattened)"
 
 # --- bug: GENUINE comb loop through a sub (must stay an error) ---
 cat > "$W/genuine.v" <<'EOF'
@@ -126,9 +136,9 @@ expect_clean "$W/ok.v" top "no-feedback hierarchy"
 # The mem-operand prefetch walker (ensure_ready_impl, cgen_sim.cpp) used to
 # self-recurse with no visited guard: a word-level false cycle in the address
 # cone stack-overflowed (SIGSEGV rc=139, NO diagnostic) instead of any orderly
-# outcome (BusyTable_1/Dispatch; equiv/sim_loop_mem_prefetch). Since the
-# generalized split_packed_selfref_wires the FALSE word-level cycle is also
-# RESOLVED, so the correct outcome today is a clean compile; the crash guard
+# outcome (BusyTable_1/Dispatch; equiv/sim_loop_mem_prefetch). Since the local
+# wire-binding rewrite in lnast.tolg resolves the FALSE word-level cycle, the
+# correct outcome today is a clean compile; the crash guard
 # is the rc<128 check (a regression may legitimately re-error with the loud
 # comb-loop diagnostic, but must never die by signal).
 cat > "$W/memp.prp" <<'EOF'

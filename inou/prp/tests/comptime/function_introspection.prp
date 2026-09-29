@@ -1,0 +1,16 @@
+/*
+:name: function_introspection
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+comb fu(a,b=2) -> (c) { c = a + b }
+cassert(fu.[inp] == ('a','b'))
+cassert(fu.[out] == ('c',))
+const alias = fu
+cassert(alias.[inp] == fu.[inp])
+comb parts(x:u4)->(a:u4,b:u4) { a=x; b=x }
+cassert(parts.[out] == ('a','b'))
+comb nothing() -> () { }
+cassert(nothing.[inp] == ())
+cassert(nothing.[out] == ())

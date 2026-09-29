@@ -1,0 +1,6 @@
+pub mod cell<T>(clock:u1, reset:u1, data:T, flush:u1, enable:u1) -> (out:T@[]) {
+  const clear:u1 = reset | flush
+  reg reg_0:T:[reset_pin=ref clear] = 0
+  out = reg_0
+  if enable != 0 { reg_0 = data }
+}

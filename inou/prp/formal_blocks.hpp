@@ -35,6 +35,12 @@ namespace livehd::formal_blocks {
 struct Input {
   std::string ident;  // generated monitor input identifier (__p_<sanitized path>)
   std::string path;   // dotted signal path INSIDE the design (alias stripped)
+  // HISTORY sample: this port carries `path`'s value `delay` cycles EARLIER
+  // (`past(x, delay)`), synthesized by the verify CLI from the property text.
+  // 0 = this cycle, the ordinary case. The monitor itself stays combinational —
+  // a flop in it would be a fresh free symbol per step — so the ENGINE resolves
+  // history by indexing the unroll (livehd::lec::Monitor::Bind::delay).
+  int delay = 0;
 };
 
 struct Stmt {

@@ -1,0 +1,75 @@
+/*
+:name: gate_through_wrapper
+:type: simulation
+*/
+
+// A clock gate whose output crosses a PASS-THROUGH WRAPPER before reaching the
+// state it withholds — minion's txfma chain in miniature (vpu_lane's
+// cgate_txfma -> vpu_txfma_trans_top -> txfma_top -> the stage flops, three
+// boundaries with NO state at the intermediate levels).
+//
+// WHY THIS IS THE LOAD-BEARING SHAPE for the no-inlining architecture: the
+// child (`leafst`) declares a `gclk__tick` guard because its state commits on
+// the port; the WRAPPER has no state of its own, so before the guard-port
+// analysis went recursive it declared NO tick field — the parent's gate had
+// nowhere to write, the wrapper forwarded nothing, and the leaf committed
+// every tick with the gate as dead code. A SILENT wrong-number bug: the
+// false-loop inliner never fires here (nothing is on a loop), so no amount of
+// inlining machinery covers it.
+//
+// VALUES (hand-derived, end-of-tick observation): the leaf flop loads only in
+// periods where the enable was high at the rise: en open c0,c1 and c4 with
+// d = 10+clock: q = 10, 11, 11, 11, 14, 14. ctl = d every cycle.
+
+mod leafst(gclk:bool, d:u8) -> (q:u8@[1]) {
+  reg f:u8:[clock_pin=ref gclk] = 0
+  f = d
+  q = f
+}
+
+// The pass-through wrapper: NO state, NO gate — just a port-to-port wire.
+mod wrap(wclk:bool, d:u8) -> (q:u8@[1]) {
+  wire g:bool = nil
+  g = wclk
+  mut inner = leafst(gclk=g, d=d)
+  q = inner
+}
+
+pub mod gtw(clk:bool, en:bool, d:u8) -> (q:u8@[1], ctl:u8@[1]) {
+  wire gp:bool = nil
+  gp = clk and en
+  mut w = wrap(wclk=gp, d=d)
+  q = w
+
+  // CONTROL: a flop on the ungated reference clock.
+  reg c:u8:[clock_pin=ref clk] = 0
+  c   = d
+  ctl = c
+}
+
+test gtw.gate_survives_a_stateless_wrapper {
+  mut acc  = gtw
+  mut seen = 0
+  mut bad_q   = 0
+  mut bad_ctl = 0
+  mut golden:u8 = 0
+  tick 6 {
+    acc.en = (clock <= 1) or (clock == 4)
+    mut dv:u8 = 10 + clock
+    acc.d = dv
+    step
+    if (clock <= 1) or (clock == 4) {
+      golden = dv
+    }
+    seen = seen + 1
+    if acc.q != golden {
+      bad_q = bad_q + 1
+    }
+    if acc.ctl != dv {
+      bad_ctl = bad_ctl + 1
+    }
+  }
+  assert(seen == 6, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_ctl == 0, "CONTROL: the flop on the ungated reference clock loads every tick")
+  assert(bad_q == 0, "the gate's word crossed the stateless wrapper and withheld the leaf's commits")
+}

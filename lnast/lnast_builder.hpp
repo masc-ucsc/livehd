@@ -1,6 +1,7 @@
 
 #pragma once
 
+#include <optional>
 #include <stack>
 
 #include "hlop/dlop.hpp"
@@ -114,6 +115,7 @@ public:
   std::string create_bit_and_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_bit_or_stmts(const std::vector<std::string>& var);
   std::string create_bit_xor_stmts(std::string_view a_var, std::string_view b_var);
+  std::string create_red_xor_stmts(std::string_view var_name);
   std::string create_shl_stmts(std::string_view a_var, std::string_view b_var);
   void        create_assign_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_tuple_get(std::string_view fields);
@@ -125,6 +127,35 @@ public:
   std::string create_mod_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_get_mask_stmts(std::string_view sel_var, std::string_view bitmask);
   void        create_set_mask_stmts(std::string_view sel_var, std::string_view bitmask, std::string_view value);
+
+  // One `concat` lane: a value and the width of the window it occupies.
+  // `bits <= 0` means UNDECIDED — the builder emits a `nil` width operand and
+  // an upass pass binds it from the value's declared type.
+  struct Concat_lane {
+    std::string value;
+    int         bits = 0;
+  };
+
+  // concat( tmp, v_msb, w_msb, …, v_lsb, w_lsb ) — n-ary bit concatenation,
+  // MSB-FIRST (Verilog `{a, b, c}`, so `lanes[0]` is the most significant).
+  // Returns the result tmp.
+  //
+  // The width operands are INTERLEAVED from the moment the node is created,
+  // even when the frontend cannot fill them: the slot exists so nothing has to
+  // re-shape the node later, and so a `nil` is a representable, checkable state
+  // rather than an implicit one.
+  //
+  // Why a lane cannot be sized later from its value: constant propagation may
+  // fold a comptime lane to a literal, and a literal's magnitude is NOT its
+  // window (`0ub0010` and `0ub10` are the same value at different widths).
+  // Narrowing one lane shifts every lane above it, so the width must be pinned
+  // before any folding can reach the operand — which is what this slot does.
+  //
+  // A frontend that KNOWS a lane's width (slang reads it off the operand type)
+  // passes it here. One that does not (prp2lnast has no types yet) passes 0 and
+  // the `nil` is resolved from the lane's DECLARED type during upass; a `nil`
+  // still unresolved at lnast2lgraph is a hard error, never a guess.
+  std::string create_concat_stmts(const std::vector<Concat_lane>& lanes);
 
   std::string create_sra_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_eq_stmts(std::string_view a_var, std::string_view b_var);
@@ -160,6 +191,29 @@ public:
   // ref when the text reads as an identifier, const otherwise.
   void add_value_child_pub(const Lnast_nid& parent, std::string_view value);
 
+  // ── minted-temp value ranges ─────────────────────────────────────────────
+  // "This temp's value is a NON-NEGATIVE integer that fits in `bits` bits"
+  // ([0, 2^bits-1]). Recorded by the emitters that guarantee it (get_mask, a
+  // fully-sized concat) and by frontends that know the window they just built.
+  // A frontend uses it to skip re-truncating a value that provably already
+  // fits, which is the difference between `unsigned((x#[0..=31])#[0..=31])` and
+  // plain `x` in every consumer downstream (LNAST is infinite-precision integer
+  // semantics, so a mask that cannot drop a bit is a pure no-op node).
+  //
+  // Only an EXACT claim may be recorded: a wrong width here silently deletes a
+  // truncation the value actually needed. Nothing is recorded for a value that
+  // can be negative or that carries unknown bits past `bits`.
+  void               note_unsigned_bits(std::string_view name, int bits);
+  // The recorded width of a temp, or the literal's own width when `name` is a
+  // non-negative integer constant (a literal needs no truncation either). Empty
+  // when nothing is known.
+  std::optional<int> unsigned_bits(std::string_view name) const;
+  // True when `name`'s value provably fits unsigned in `bits` bits.
+  bool               fits_unsigned(std::string_view name, int bits) const {
+    auto w = unsigned_bits(name);
+    return w && *w <= bits;
+  }
+
 private:
   Lnast_nid   add_ref_child(const Lnast_nid& parent, std::string_view name);
   Lnast_nid   add_const_child(const Lnast_nid& parent, std::string_view value);
@@ -174,4 +228,6 @@ private:
   // where the counter is per-label and monotonic for the whole lnast.
   std::string                              tmp_scope_;
   absl::flat_hash_map<std::string, int>    tmp_label_cnt_;
+  // note_unsigned_bits() bookkeeping, per lnast (cleared by new_lnast).
+  absl::flat_hash_map<std::string, int>    tmp_ubits_;
 };

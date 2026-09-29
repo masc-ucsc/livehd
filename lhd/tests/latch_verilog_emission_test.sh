@@ -49,9 +49,6 @@ fail() {
   exit 1
 }
 
-HAVE_IVERILOG=0
-command -v iverilog >/dev/null 2>&1 && HAVE_IVERILOG=1
-
 # ---- bug 1: the yosys-importer round-trip (fanout-1 enable) ------------------
 cat > "$W/raw.v" <<'EOF'
 module raw(input d, input c, output logic q);
@@ -63,21 +60,15 @@ end
 endmodule
 EOF
 
-"$LHD" compile "$W/raw.v" --reader yosys-verilog --top raw --recipe O1 \
-  --emit verilog:"$W/raw_out.v" --workdir "$W/w_raw" -q >"$W/raw.log" 2>&1 \
+"$LHD" compile "$W/raw.v" --reader yosys-verilog --top raw \
+  --emit-dir "lg:$W/raw_lg" --emit verilog:"$W/raw_out.v" --workdir "$W/w_raw" -q >"$W/raw.log" 2>&1 \
   || { tail -5 "$W/raw.log"; fail "yosys-importer latch round-trip failed to compile"; }
 [ -s "$W/raw_out.v" ] || fail "yosys-importer round-trip emitted no verilog"
-
-if [ $HAVE_IVERILOG -eq 1 ]; then
-  iverilog -g2012 -o /dev/null "$W/raw_out.v" 2>"$W/raw.iv" \
-    || { cat "$W/raw.iv"; fail "iverilog REJECTS the yosys-importer latch emission (undeclared inlined enable — M1 bug 1)"; }
-  echo "ok: yosys-importer latch emission passes iverilog -g2012"
-fi
 
 # The independent oracle. Pre-fix this REFUTED: yosys accepts the undeclared
 # name as an implicit wire reading X, so the miter genuinely sees two different
 # circuits. That makes lgcheck able to catch bug 1 even without iverilog.
-"$LHD" lec --set formal.solver=lgyosys --impl verilog:"$W/raw_out.v" --ref verilog:"$W/raw.v" \
+"$LHD" lec --impl verilog:"$W/raw_out.v" --ref verilog:"$W/raw.v" \
   --top raw --workdir "$W/w_rawchk" -q >"$W/rawchk.log" 2>&1 \
   || { tail -3 "$W/rawchk.log"; fail "yosys-importer latch round-trip is NOT equivalent to its source"; }
 echo "ok: yosys-importer latch round-trip LEC-proves against its source"
@@ -123,20 +114,19 @@ for shape in high low; do
   # a second boolean mux on enable. Re-reading that RTL nested another hold mux
   # around it and the latch-contract checker rejected ordinary latches as
   # transparent self-updates.
-  grep -Eq 'if \([^)]*\) l <= get_mask_[[:alnum:]_]+;' "$out" \
+  # An unsigned boundary used to retain a one-use get_mask wrapper here. With
+  # LGraph's unlimited signed value semantics, cprop may remove that redundant
+  # wrapper and emit `d` directly; either spelling is the same canonical raw D.
+  grep -Eq 'if \(.*\) l <= (d|get_mask_[[:alnum:]_]+);' "$out" \
     || { cat "$out"; fail "$shape: cprop did not canonicalize latch D to raw data + enable"; }
   grep -Eq 'mux_[[:alnum:]_]+[[:space:]]*=[[:space:]]*l;' "$out" \
     && { cat "$out"; fail "$shape: emitted a redundant Q hold arm before the latch D input"; }
   echo "ok: $shape uses canonical raw D + enable (no redundant hold mux)"
 
   # The canonical Pyrope shape now has the same fanout-1 enable pressure as the
-  # raw importer, and must still elaborate.
-  if [ $HAVE_IVERILOG -eq 1 ]; then
-    iverilog -g2012 -o /dev/null "$out" 2>"$W/$shape.iv" \
-      || { cat "$W/$shape.iv"; fail "$shape: iverilog -g2012 REJECTS the emitted verilog (undeclared inlined driver?)"; }
-    echo "ok: $shape passes iverilog -g2012"
-  fi
-
+  # raw importer, and must still elaborate: the slang re-read below rejects an
+  # undeclared (inlined) identifier.
+  #
   # Round-trip: re-read our own emission with slang and confirm the Latch cell
   # survived. The prp writer spells it `[latch=true]`; a lost latch comes back
   # as plain combinational logic with no such attribute.
@@ -167,9 +157,5 @@ grep -q "always_comb" "$W/transparent.v" \
 grep -q "always_latch" "$W/transparent.v" \
   && { cat "$W/transparent.v"; fail "transparent: cprop retained a stateful latch for enable=true"; }
 echo "ok: enable=true Pyrope latch canonicalizes to combinational logic"
-
-if [ $HAVE_IVERILOG -eq 0 ]; then
-  echo "note: iverilog not present — the undeclared-identifier check was SKIPPED (yosys cannot see that bug)"
-fi
 
 echo "PASS: latch_verilog_emission_test"

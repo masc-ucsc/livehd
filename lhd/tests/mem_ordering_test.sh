@@ -18,6 +18,10 @@
 #   o4 = mem[a4]     read AFTER  the write -> row 1
 #
 # Expected FWD (1 write port, so row r is bit r):
+# The array carries NO initializer on purpose: an array init is a reset value,
+# which binds a reset and gates every write enable with !reset — extra logic
+# that has nothing to do with the matrix under test.
+#
 #   program (default) -> 0b10 = 2   only the later read forwards
 #   fwd               -> 0b11 = 3   position-blind: both forward
 #   old               -> 0b00 = 0   nothing forwards; the read is defined OLD
@@ -51,7 +55,7 @@ rc=0
 gen() { # $1 = attribute text (may be empty)
   cat >"${TMP}/m.prp" <<EOF
 pub mod m$1(clk:u1, a1:u2, a2:u2, d2:u2, a4:u2) -> (o1:u2@[], o4:u2@[]) {
-  reg mem:[4]u2$2 = 0
+  reg mem:[4]u2$2
   o1 = mem[a1]
   mem[a2] = d2
   o4 = mem[a4]
@@ -132,7 +136,7 @@ LIB=inou/prp/tests/abc/test.lib
 if [ -f "${LIB}" ]; then
   cat >"${TMP}/w.prp" <<'EOF'
 pub mod w(clk:u1, a:u2, d2:u2, d3:u2, ra:u2) -> (o:u2@[]) {
-  reg mem:[4]u2:[ordering="fwd"] = 0
+  reg mem:[4]u2:[ordering="fwd"]
   mem[a] = d2
   mem[a] = d3
   o = mem[ra]
@@ -141,21 +145,21 @@ EOF
   D="${TMP}/abc"
   mkdir -p "${D}"
   ok=1
-  "${LHD}" compile "${TMP}/w.prp" --top w.w --recipe O1 --emit-dir "lg:${D}/lg" --workdir "${D}/w1" -q >/dev/null 2>&1 || ok=0
+  "${LHD}" compile "${TMP}/w.prp" --top w.w --emit-dir "lg:${D}/lg" --workdir "${D}/w1" -q >/dev/null 2>&1 || ok=0
   "${LHD}" pass color synth --top w.w "lg:${D}/lg" --workdir "${D}/w2" -q >/dev/null 2>&1 || ok=0
-  "${LHD}" pass abc --top w.w "lg:${D}/lg" --emit-dir "lg:${D}/net" --set abc.library="${LIB}" \
+  "${LHD}" pass abc --top w.w "lg:${D}/lg" --emit-dir "lg:${D}/net" --set synth.liberty="${LIB}" \
       --set pass.abc.memory=true --workdir "${D}/w3" -q >/dev/null 2>&1 || ok=0
   "${LHD}" pass partition --top w.w "lg:${D}/lg" --emit-dir "lg:${D}/re" --workdir "${D}/w4" -q >/dev/null 2>&1 || ok=0
   "${LHD}" pass liberty gensim "${LIB}" --emit-dir "lg:${D}/models" --workdir "${D}/w5" -q >/dev/null 2>&1 || ok=0
   for x in net models re; do
-    "${LHD}" compile "lg:${D}/${x}" --recipe O0 --emit-dir "verilog:${D}/${x}v" --workdir "${D}/w_${x}" -q >/dev/null 2>&1 || ok=0
+    "${LHD}" compile "lg:${D}/${x}" --emit-dir "verilog:${D}/${x}v" --workdir "${D}/w_${x}" -q >/dev/null 2>&1 || ok=0
   done
   cat "${D}"/netv/*.v "${D}"/modelsv/*.v >"${D}/impl.v" 2>/dev/null
   cat "${D}"/rev/*.v >"${D}/ref.v" 2>/dev/null
   if [ "${ok}" != "1" ] || [ ! -s "${D}/impl.v" ] || [ ! -s "${D}/ref.v" ]; then
     echo "FAIL: abc write-priority: could not build the netlist/reference pair"
     rc=1
-  elif "${LHD}" lec --set formal.solver=lgyosys --impl "verilog:${D}/impl.v" \
+  elif "${LHD}" lec --impl "verilog:${D}/impl.v" \
          --ref "verilog:${D}/ref.v" --top w --workdir "${D}/wc" >"${D}/lec.log" 2>&1; then
     echo "ok: abc same-address multi-write forwards the LAST write"
   else

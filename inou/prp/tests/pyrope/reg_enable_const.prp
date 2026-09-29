@@ -1,0 +1,21 @@
+/*
+:name: reg_enable_const
+:type: lgraph compile
+*/
+
+// A CONSTANT `enable=` names no signal. tolg used to push every `enable=` value
+// through resolve_attr_signal, so `enable=true` died with the nonsense
+// "reg 'r' names enable 'true' but ... has no such input/wire". `true` is the
+// constant-true CONDITION — "update every edge", already the Flop default — so
+// it must compile to a plain unconditional flop. This is not a curiosity: a
+// generic-parameterised `enable=(EN!=0)` folds to exactly this.
+//
+// The two refused spellings are in tests/errors/: `enable=false` (a reg that
+// can never update, reg_enable_false) and the flag-only `:[enable]` (names no
+// signal at all, attr_enable_no_value). The signal-valued form is
+// tests/equiv/reg_enable_attr.prp.
+pub mod reg_enable_const(clk:u1, rst:u1, d:u8) -> (q:u8@[]) {
+  reg r:u8:[clock_pin=ref clk, reset_pin=ref rst, enable=true] = 0
+  r = d
+  q = r
+}

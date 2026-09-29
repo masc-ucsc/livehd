@@ -1,0 +1,66 @@
+/*
+:name: cond_call_always_consumer
+:type: simulation
+*/
+// todo/livehd/3d-sim-color: a conditional stateful call whose merged output
+// feeds an ALWAYS-ACTIVE accumulator. conditional_state_call.prp pins hold-
+// and-mask on the region's own output; this fixture adds the shape that
+// stresses subtask G's condition tasks: a consumer OUTSIDE the region reads
+// the caller-side merge every cycle, including cycles where the region is
+// inactive and (under the plan) none of its compute colors are scheduled.
+//
+// WHAT CAN GO WRONG UNDER THE NEW PLAN. The caller output mux is the boundary
+// between "skippable region" and "always-active consumer". If coloring places
+// that mux (or the constant else-leg) INSIDE the control region, an inactive
+// cycle leaves the consumer reading a stale boundary slot — the accumulator
+// silently absorbs the LAST ACTIVE value on every inactive cycle instead of 0.
+// If the condition task's join is mis-validated, the skipped branch leaves a
+// dependency counter unsatisfied and the accumulator color never fires (sum
+// freezes). The 2-on/2-off enable pattern makes either failure a different
+// exact final sum than the golden mirror.
+mod cond_inner(a:u8) -> (out:u8@[0]) {
+  reg q:u8 = 0
+  q = q ^ a
+  out = q
+}
+
+pub mod cond_accum_top(en:bool, a:u8) -> (sum:u8@[0], cur:u8@[0]) {
+  mut v:u8 = 0
+  if en {
+    v = cond_inner(a)
+  }
+  cur = v
+  reg acc:u8 = 0
+  wrap acc = acc + v
+  sum = acc
+}
+
+// GOLDEN-MODEL NOTE (state versions, plan subtasks B/E). The inner's `out = q`
+// is a comb read of the register, so it has TWO versions per period: the
+// accumulator reg samples the merge at the rise — built from the PRE-edge q —
+// while the post-step read of `cur` sees the POST-edge q. One consumer of the
+// same boundary value needs the old version and one needs the new: precisely
+// the read-version proof a direct-update color must honor. The golden tracks
+// both versions explicitly.
+test cond_accum_top.skip_and_consume {
+  mut dut = cond_accum_top
+  mut qold = 0
+  mut accg = 0
+  tick 12 {
+    const en = clock#[1] == 0        // 2 active, 2 inactive, repeating
+    const av = 1 + (clock & 7)       // nonzero data every cycle
+    dut.en = en
+    dut.a  = av
+    mut vpre = 0                     // the merge as sampled AT the rise (old q)
+    if en { vpre = qold }
+    accg = (accg + vpre) & 0xFF
+    mut qnew = qold
+    if en { qnew = qold ^ av }
+    qold = qnew
+    mut vpost = 0                    // the merge as settled AFTER the edge (new q)
+    if en { vpost = qnew }
+    step
+    assert(dut.cur == vpost, "the caller-side merge masks the region output on inactive cycles (post-edge version)")
+    assert(dut.sum == accg, "the always-active accumulator consumed the PRE-edge merge every cycle, active or not")
+  }
+}

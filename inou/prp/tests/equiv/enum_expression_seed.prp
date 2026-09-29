@@ -1,0 +1,11 @@
+/*
+:name: enum_expression_seed
+:type: equiv
+:verilog_top: enum_expression_seed.p
+:pyrope_top: p
+*/
+pub comb p(x:u4) -> (y:u4) {
+  comptime const seed = 3
+  comptime const State = enum(first=seed, second, third)
+  if x == State.second { y = State.third } else { y = State.first }
+}

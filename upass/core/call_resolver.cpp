@@ -11,6 +11,7 @@
 #include "absl/strings/str_cat.h"
 #include "diag.hpp"
 #include "lnast_ntype.hpp"
+#include "str_tools.hpp"
 
 namespace upass::call_resolver {
 
@@ -209,8 +210,12 @@ void process_import_call(Lnast_manager& lm, Symbol_table& st,
         uit != function_registry.end() && uit->second->get_lambda_kind().empty()) {
       const auto&            src   = uit->second;
       const Lnast_pub_entry* found = nullptr;
+      // prp2lnast stamps every `pub` entry with the CANONICAL spelling, so a
+      // source-spelled `import("unit.`name`")` must be canonicalized before the
+      // match or an escaped pure-alnum export never resolves.
+      const auto canon_member = str_tools::canonical_escaped_ident(member);
       for (const auto& p : src->get_pub_list()) {
-        if ((p.name == member)) {
+        if (p.name == member || str_tools::canonical_escaped_ident(p.name) == canon_member) {
           found = &p;
           break;
         }

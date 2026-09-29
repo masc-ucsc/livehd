@@ -1,0 +1,39 @@
+diff --git a/src/yosys_plugin/driver.cc b/src/yosys_plugin/driver.cc
+index 712e2ef..4d9baf3 100644
+--- src/yosys_plugin/driver.cc
++++ src/yosys_plugin/driver.cc
+@@ -300,11 +300,7 @@ struct SlangFrontend : Frontend
+ 		log("Read SystemVerilog sources and elaborate a design hierarchy into word-level\n");
+ 		log("netlist form.\n");
+ 		log("\n");
+-		for (auto &opt : driver.cmdLine.getHelpOptions()) {
+-			log("    %s\n", opt.first.c_str());
+-			log("        %s\n", wrap_text(opt.second).c_str());
+-			log("\n");
+-		}
++		log("%s", driver.cmdLine.getHelpText("").c_str());
+ 		log("\n");
+ 	}
+ 
+@@ -380,8 +376,8 @@ struct SlangFrontend : Frontend
+ 		(void)filename;
+ 		log_header(design, "Executing SLANG frontend.\n");
+ 
+-		auto guard = slang::OS::captureOutput(
+-				[&](std::string_view text, bool) { log("%s", std::string(text).c_str()); });
++		// LiveHD captures the step's stdout/stderr. Keep diagnostics streaming:
++		// Yosys can exit on an error without unwinding a capture scope guard.
+ 		// names of RTLIL modules added in this invocation; does not include blackboxes
+ 		std::vector<RTLIL::IdString> emitted_module_names;
+ 		slang::driver::Driver driver;
+@@ -658,8 +654,8 @@ struct TestSlangExprPass : Pass
+ 	{
+ 		log_header(d, "Executing TEST_SLANGEXPR pass.\n");
+ 
+-		auto guard = slang::OS::captureOutput(
+-				[&](std::string_view text, bool) { log("%s", std::string(text).c_str()); });
++		// LiveHD captures the step's stdout/stderr. Keep diagnostics streaming:
++		// Yosys can exit on an error without unwinding a capture scope guard.
+ 		slang::driver::Driver driver;
+ 		driver.addStandardArgs();
+ 		SynthesisSettings settings;

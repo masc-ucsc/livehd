@@ -35,6 +35,7 @@ cc_library(
         ":formal",
         "//core",
         "//graph",
+        "//pass/lec:lec_query",
         "//pass/common:pass",
         "@hhds//hhds:graph",
     ],
@@ -47,7 +48,6 @@ cc_test(
     name = "prove_test",
     srcs = ["tests/prove_test.cpp"],
     copts = COPTS,
-    linkopts = ["-lz"],  # via //pass/lec:lec_query -> @abc (zlib-backed aiger/liberty readers)
     deps = [
         ":formal",
         "//graph",

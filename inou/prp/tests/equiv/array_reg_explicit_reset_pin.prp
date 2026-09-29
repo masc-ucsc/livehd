@@ -1,0 +1,36 @@
+/*
+:name: array_reg_explicit_reset_pin
+:type: equiv
+:verilog_top: array_reg_explicit_reset_pin
+:pyrope_top: array_reg_explicit_reset_pin
+*/
+// A register ARRAY whose reset is a SOURCE-SPELLED pin, not the module's
+// implicit `reset`.
+//
+// An array's reset is realized as a restore write port (a one-entry-per-cycle
+// sweep for a multi-entry array), and tolg minted that port only when the
+// module had an implicit `reset` INPUT -- which a declaration naming its own
+// reset deliberately never gets (tree_declares_reset_reg skips a reg carrying
+// an explicit `reset_pin`). So `= 0` here was silently demoted to a power-on
+// `INIT` on the cgen_memory instance, the user write was never gated with
+// `!rst`, and the array kept whatever was written DURING reset. This is
+// bedrock-rtl br_delay's Pyrope side, which LEC-refuted at the first
+// post-reset step (lhdtrack tests/br_delay).
+//
+// ONE entry on purpose. A multi-entry array restores one entry per clock, so a
+// full reset takes N cycles by construction (the documented Pyrope semantics)
+// and cannot be equivalent to a golden that clears the whole array on one
+// edge -- lgcheck's bounded miter finds exactly that with a single-cycle reset
+// pulse. At N=1 the sweep degenerates to a constant address, so the reset is
+// one cycle on both sides and the ONLY thing under test is whether the reset
+// exists at all. The second half of the fix -- the sweep counter's own clock,
+// which came out as `always @(posedge 'hx /*cgen-miss*/)` when the memory named
+// its clock too -- is covered because `clock_pin=ref clk` is spelled here and
+// any unclocked flop in the emission would refute.
+pub mod array_reg_explicit_reset_pin::[timecheck=false](clk:u1, rst:u1, we:u1, d:u8) -> (q:u8@[]) {
+  reg mem:[1]u8:[clock_pin=ref clk, reset_pin=ref rst, ordering="old"] = 0
+  q = mem[0]
+  if we != 0 {
+    mem[0] = d
+  }
+}

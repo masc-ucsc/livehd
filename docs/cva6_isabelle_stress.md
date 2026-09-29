@@ -478,7 +478,8 @@ netlist:
    add a proven array-reconstruction pass that folds scalarized memories back
    into function-valued state.
 3. Extend `pass.isabelle` Memory-node emission:
-   - decode port stride 11;
+   - decode the port stride via `Ntype::Memory_port_stride` (16, was 11/12;
+     `pass_isabelle.cpp` already decodes with the constant);
    - classify read/write ports from `rdport`;
    - decode `bits`, `size`, `wensize`, `type`, `fwd`, and clock policy;
    - emit one memory state selector per memory node;

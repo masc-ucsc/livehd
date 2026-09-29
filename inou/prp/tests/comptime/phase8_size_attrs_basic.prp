@@ -22,8 +22,8 @@ cassert(b.[max]  == 15)
 
 const c:bool = true
 cassert(c.[bits] == 1)
-cassert(c.[min]  == -1)         // bool is a 1-bit signed envelope
-cassert(c.[max]  == 0)
+cassert(c.[min]  == 0)          // bool is the hardware u1 envelope {0,1}
+cassert(c.[max]  == 1)
 
 mut   d:s5   = 3
 cassert(d.[bits] == 5)

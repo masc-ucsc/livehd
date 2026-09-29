@@ -1,0 +1,19 @@
+/*
+:name: tuple_introspection
+:type: comptime
+:verifier_pass: 10
+:verifier_fail: 0
+*/
+const a = (const b=1, const c:u32=2)
+cassert(a.[size] == 0)
+cassert(a.[fields] == ('b', 'c'))
+cassert(a.[id] == 'a')
+cassert(a.b.[id] == 'b')
+cassert(a['c'].[id] == 'c')
+const mixed = (const z=3, 7, 9, const a=1)
+cassert(mixed.[size] == 2)
+cassert(mixed.[fields] == ('a', 'z'))
+const empty = ()
+cassert(empty.[size] == 0)
+cassert(empty.[fields] == ())
+cassert((0..<10000 step 3).[size] == 3334)

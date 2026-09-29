@@ -8,7 +8,11 @@
 // info, so future provenance changes touch this one function.
 
 #include <cstdint>
+#include <memory>
 #include <string>
+#include <vector>
+
+#include "absl/container/flat_hash_map.h"
 
 #include "diag.hpp"
 #include "hhds/source_locator.hpp"
@@ -80,16 +84,49 @@ inline livehd::diag::Span span_of(const slang::SourceManager& sm, slang::SourceL
 // file's content the first time the path is seen so the ln: save/load round
 // trip keeps full line:col and a reload-time diagnostic still points at the
 // original .v span. Returns SourceId_invalid when the range cannot be resolved.
-inline hhds::SourceId mint(hhds::Source_locator& loc, const slang::SourceManager& sm, slang::SourceRange range) {
+// One file already ingested in THIS compilation: the bytes plus everything
+// derived from them, so a later locator adopts all three by pointer.
+struct Ingested {
+  std::shared_ptr<const std::string>           content;
+  uint64_t                                     hash = 0;
+  std::shared_ptr<const std::vector<uint64_t>> offsets;
+};
+using Ingest_cache = absl::flat_hash_map<std::string, Ingested>;
+
+// `cache` (optional, but ALWAYS pass it from a multi-module read) is what keeps
+// this linear. `getSourceText(buffer)` returns the WHOLE slang buffer, not the
+// range, and the `file_content(path) == nullptr` guard below only dedups within
+// ONE locator -- while the reader builds one Lnast, and so one locator, PER
+// MODULE (slang_structure.cpp, `make_shared<Lnast>` in lower_module). Without
+// the cache every module re-copied, re-hashed and re-line-scanned the entire
+// source: O(modules x file_bytes). Measured on the lhdsuite v2v_xs_backend
+// gate, which hands `lhd lec` its 1040 emitted modules CONCATENATED into one
+// 190.5 MB file -- 1040 x 190.5 MB is ~198 GB, and the read died of
+// std::bad_alloc on a 64 GB machine after 88 s. A/B on 20 vs 40 of those
+// modules showed the gap growing 4.2x for a 2x module count, confirming it is
+// the module count and not the design size.
+inline hhds::SourceId mint(hhds::Source_locator& loc, const slang::SourceManager& sm, slang::SourceRange range,
+                           Ingest_cache* cache = nullptr) {
   const auto li = extract(sm, range);
   if (!li.valid) {
     return hhds::SourceId_invalid;
   }
   if (loc.file_content(li.path) == nullptr) {
+    if (cache != nullptr) {
+      if (const auto it = cache->find(li.path); it != cache->end()) {
+        loc.adopt_file_content(li.path, it->second.content, it->second.hash, it->second.offsets);
+        return loc.mint(li.path, li.start_byte, li.end_byte, li.start_line);
+      }
+    }
     const auto start = sm.getFullyOriginalLoc(range.start());
     const auto text  = sm.getSourceText(start.buffer());
     if (!text.empty()) {
-      loc.set_file_content(li.path, std::string(text));
+      loc.set_file_content(li.path, std::string(text));  // derives hash + line table
+      if (cache != nullptr) {
+        cache->emplace(li.path,
+                       Ingested{loc.file_content(li.path), loc.file_content_hash(li.path),
+                                loc.file_line_offsets_shared(li.path)});
+      }
     }
   }
   return loc.mint(li.path, li.start_byte, li.end_byte, li.start_line);

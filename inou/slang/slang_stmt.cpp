@@ -10,20 +10,98 @@
 #include <format>
 #include <functional>
 
+#include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Statement.h"
 #include "slang/ast/expressions/CallExpression.h"
+#include "slang/ast/symbols/AttributeSymbol.h"
+#include "slang/ast/symbols/SubroutineSymbols.h"
 #include "slang_context.hpp"
 
 using slang::ast::StatementKind;
 
+namespace {
+// Defined below, next to the other loop helpers; declared here because the
+// statement-list lowering needs it. (Two anonymous namespaces in one TU are
+// the same namespace, so this is a plain forward declaration.)
+bool subtree_has_break(const slang::ast::Statement& stmt);
+bool subtree_has_return(const slang::ast::Statement& stmt);
+
+// Synthesis assertion macros commonly call an empty, zero-argument task.
+// Only structural no-ops qualify: declarations, expressions, timing controls,
+// and calls must still go through normal lowering and diagnostics.
+bool empty_task_body(const slang::ast::Statement& stmt) {
+  if (stmt.kind == StatementKind::Empty) {
+    return true;
+  }
+  if (stmt.kind == StatementKind::Block) {
+    const auto& block = stmt.as<slang::ast::BlockStatement>();
+    return block.blockKind == slang::ast::StatementBlockKind::Sequential && empty_task_body(block.body);
+  }
+  if (stmt.kind == StatementKind::List) {
+    for (const auto* child : stmt.as<slang::ast::StatementList>().list) {
+      if (!empty_task_body(*child)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+}  // namespace
+
 void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
   switch (stmt.kind) {
     case StatementKind::Empty: return;
-    case StatementKind::List:
-      for (const auto* s : stmt.as<slang::ast::StatementList>().list) {
-        lower_statement(*s);
+    case StatementKind::List : {
+      // A `break` ends the CURRENT ITERATION as well as the loop, so everything
+      // after it in this list must not run when the break was taken.
+      // lower_for_loop's `broken` flag only guards LATER iterations; guard the
+      // REMAINDER of this list on the same flag. Without it,
+      //   for (i = 0; i < 4; i++) begin  if (stop[i]) break;  acc += d[i];  end
+      // still accumulates d[i] in the breaking iteration.
+      //
+      // `break_flags_.back()` is exactly the flag the Break statement raises
+      // (see StatementKind::Break below), and subtree_has_break deliberately
+      // does not look inside a nested loop, so the flag and the break always
+      // belong to the same loop -- PROVIDED the nearest enclosing loop is the
+      // one that owns that flag. It is not when the nearest loop is ROLLED (an
+      // LNAST `for`: uPass's func_break already ends the iteration, and the
+      // flag on the stack belongs to some OUTER unrolled loop) or when it
+      // pushed the "no flag of my own" sentinel (while/repeat/foreach). Guard
+      // on neither: `own_brk_flag()` returns the flag only when it is ours.
+      const auto& list = stmt.as<slang::ast::StatementList>().list;
+      size_t      arms = 0;
+      for (size_t i = 0; i < list.size(); ++i) {
+        if (!(i > 0 && list[i]->kind == StatementKind::WhileLoop
+              && lower_bounded_while(list[i]->as<slang::ast::WhileLoopStatement>(), *list[i - 1]))) {
+          lower_statement(*list[i]);
+        }
+        const auto* flag = own_brk_flag();
+        if (flag != nullptr && i + 1 < list.size() && subtree_has_break(*list[i])) {
+          auto guard = builder_.create_eq_stmts(*flag, "0");
+          auto if_id = builder_.create_if_stmt(false);
+          builder_.add_if_cond(if_id, guard);
+          builder_.push_stmts(builder_.add_if_stmts(if_id));
+          ++arms;
+        }
+        // A SystemVerilog `return` ends the inlined function, not merely its
+        // current branch. Keep the remainder of every enclosing sequential
+        // list behind the per-call returned flag. This models the common
+        // package-helper shape `if (...) return A; ...; return Z;`; previously
+        // the final return always overwrote the earlier one.
+        if (in_function_call_ && !func_returned_flag_.empty() && i + 1 < list.size() && subtree_has_return(*list[i])) {
+          auto guard = builder_.create_eq_stmts(func_returned_flag_, "0");
+          auto if_id = builder_.create_if_stmt(false);
+          builder_.add_if_cond(if_id, guard);
+          builder_.push_stmts(builder_.add_if_stmts(if_id));
+          ++arms;
+        }
+      }
+      while (arms-- > 0) {
+        builder_.pop_stmts();
       }
       return;
+    }
     case StatementKind::Block: {
       const auto& block = stmt.as<slang::ast::BlockStatement>();
       if (block.blockKind != slang::ast::StatementBlockKind::Sequential) {
@@ -45,15 +123,32 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
         const auto& call = expr.as<slang::ast::CallExpression>();
         if (call.isSystemCall()) {
           auto name = call.getSubroutineName();
-          // Simulation-side tasks are no-ops for synthesis; keep quiet for the
-          // common printers, diagnose the rest.
-          if (name == "$display" || name == "$write" || name == "$monitor" || name == "$strobe" || name == "$time"
-              || name == "$displayb" || name == "$displayh" || name == "$displayo" || name == "$dumpfile"
-              || name == "$dumpvars" || name == "$finish" || name == "$stop") {
+          // File I/O is simulation-only. Synthesis can drop it, but make the
+          // missing side effects visible until simulation lowering supports it.
+          if (name == "$fwrite" || name == "$fwriteb" || name == "$fwriteh" || name == "$fwriteo" || name == "$fdisplay"
+              || name == "$fdisplayb" || name == "$fdisplayh" || name == "$fdisplayo" || name == "$fflush" || name == "$fclose") {
+            emit_warning(stmt.sourceRange,
+                         "file-io-ignored",
+                         "unsupported",
+                         std::string("simulation-only task '") + std::string(name)
+                             + "' is ignored (synthesis semantics); simulation side effects are not implemented");
             return;
           }
-          emit_unsupported(stmt.sourceRange, "unsupported-system-task",
+          // Keep the existing quiet synthesis behavior for common printers.
+          if (name == "$display" || name == "$write" || name == "$monitor" || name == "$strobe" || name == "$time"
+              || name == "$displayb" || name == "$displayh" || name == "$displayo" || name == "$dumpfile" || name == "$dumpvars"
+              || name == "$finish" || name == "$stop" || name == "$fatal") {
+            return;
+          }
+          emit_unsupported(stmt.sourceRange,
+                           "unsupported-system-task",
                            std::string("system task '") + std::string(name) + "' is not supported by --reader slang");
+          return;
+        }
+        const auto* sub = std::get<const slang::ast::SubroutineSymbol*>(call.subroutine);
+        if (sub && sub->subroutineKind == slang::ast::SubroutineKind::Task && call.arguments().empty()
+            && sub->getArguments().empty() && !sub->flags.has(slang::ast::MethodFlags::DPIImport)
+            && empty_task_body(sub->getBody())) {
           return;
         }
       }
@@ -91,28 +186,36 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
       return;
     }
     case StatementKind::Conditional: lower_conditional(stmt.as<slang::ast::ConditionalStatement>()); return;
-    case StatementKind::Case: lower_case(stmt.as<slang::ast::CaseStatement>()); return;
-    case StatementKind::ForLoop: lower_for_loop(stmt.as<slang::ast::ForLoopStatement>()); return;
-    case StatementKind::WhileLoop:
+    case StatementKind::Case       : lower_case(stmt.as<slang::ast::CaseStatement>()); return;
+    case StatementKind::ForLoop    : lower_for_loop(stmt.as<slang::ast::ForLoopStatement>()); return;
+    case StatementKind::WhileLoop  :
     case StatementKind::DoWhileLoop:
-    case StatementKind::RepeatLoop: lower_while_loop(stmt); return;
+    case StatementKind::RepeatLoop : lower_while_loop(stmt); return;
     case StatementKind::ForeachLoop: lower_foreach(stmt.as<slang::ast::ForeachLoopStatement>()); return;
-    case StatementKind::Timed: {
+    case StatementKind::Timed      : {
       const auto& timed = stmt.as<slang::ast::TimedStatement>();
       if (timed.timing.kind == slang::ast::TimingControlKind::Delay) {
         emit_warning(stmt.sourceRange, "delay-ignored", "unsupported", "#delay is ignored (synthesis semantics)");
         lower_statement(timed.stmt);
         return;
       }
-      emit_unsupported(stmt.sourceRange, "unsupported-timing",
+      emit_unsupported(stmt.sourceRange,
+                       "unsupported-timing",
                        "event controls inside a process body are not supported by --reader slang");
       return;
     }
-    case StatementKind::ImmediateAssertion:
-      // synthesis ignores immediate assertions (a cassert lowering can come later)
-      return;
+    case StatementKind::ImmediateAssertion: lower_immediate_assertion(stmt.as<slang::ast::ImmediateAssertionStatement>()); return;
     case StatementKind::ConcurrentAssertion:
-      emit_warning(stmt.sourceRange, "assertion-ignored", "unsupported", "concurrent assertion ignored (synthesis semantics)");
+      // Same contract as the module-level form (slang_structure.cpp): lower the
+      // per-cycle boolean case, refuse the temporal one LOUDLY. Never drop it —
+      // a dropped assume/restrict invents a counterexample, a dropped assert
+      // proves nothing at exit 0.
+      if (!lower_concurrent_assertion(stmt.as<slang::ast::ConcurrentAssertionStatement>())) {
+        emit_unsupported(stmt.sourceRange,
+                         "unsupported-property",
+                         "a temporal SVA property (|->, |=>, ##N, [*n], sequences) is not supported by "
+                         "--reader slang yet");
+      }
       return;
     case StatementKind::Return: {
       // Inside an inlined function body, `return expr` assigns the result var.
@@ -124,13 +227,13 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
           // a distinct bool: coerce a boolean result (e.g. `return a == b;`) to
           // an integer so the result var is integer-kind. Otherwise a caller's
           // `f(x) != 0` later trips the bool-vs-int comparison type check.
-          auto v = to_int_value(lower_rvalue(*re));
+          auto       v                = to_int_value(lower_rvalue(*re));
           // A struct-typed return var is declared as a per-field bundle
           // (inline_call -> declare_value_symbol), so a flat whole store would
           // be dead: every read of the result routes through the leaves. Split
           // the value onto the leaves (same as assign_to's NamedValue path);
           // only a non-bundle result var takes the flat assign.
-          const bool saved_nb     = current_assign_nonblocking_;
+          const bool saved_nb         = current_assign_nonblocking_;
           current_assign_nonblocking_ = false;  // a function-body return is a blocking write
           if (!assign_struct_whole_value(*func_ret_sym_, v, stmt.sourceRange.start())) {
             note_write(*func_ret_sym_, /*nonblocking=*/false, stmt.sourceRange.start());
@@ -139,33 +242,243 @@ void Slang_context::lower_statement(const slang::ast::Statement& stmt) {
           current_assign_nonblocking_ = saved_nb;
           clear_pending_loc();
         }
+        if (!func_returned_flag_.empty()) {
+          builder_.create_assign_stmts(func_returned_flag_, "1");
+        }
         return;
       }
-      emit_unsupported(stmt.sourceRange, "unsupported-jump",
+      emit_unsupported(stmt.sourceRange,
+                       "unsupported-jump",
                        std::string(slang::ast::toString(stmt.kind)) + " is not supported in this context by --reader slang");
       return;
     }
     case StatementKind::Break:
+      // A ROLLED loop (an LNAST `for`) carries the break as a marker node and
+      // uPass lowers it to `loop_exec = false; loop_next_active = false` — the
+      // real semantics, including "the rest of THIS iteration does not run",
+      // which the unrolled `broken`-flag form below can only approximate.
+      if (!loop_rolled_.empty() && loop_rolled_.back()) {
+        emit_loop_marker(Lnast_ntype::create_func_break());
+        return;
+      }
+      // Inside an unrolled loop whose body contains a break, the loop set up a
+      // `broken` flag and guards every iteration on it (see lower_for_loop);
+      // the break itself just raises the flag. It sits wherever it was written
+      // — typically an `if` arm — so the raise inherits that condition, which
+      // is exactly the priority-select semantics ("first match wins").
+      //
+      // own_brk_flag() is null when the NEAREST loop is not the flag's owner (a
+      // while/repeat/foreach pushed the sentinel): raising an OUTER loop's flag
+      // there would terminate the wrong loop, so refuse instead.
+      if (const auto* flag = own_brk_flag(); flag != nullptr) {
+        builder_.create_assign_stmts(*flag, "1");
+        return;
+      }
+      emit_unsupported(stmt.sourceRange,
+                       "unsupported-jump",
+                       std::string(slang::ast::toString(stmt.kind)) + " is not supported in this context by --reader slang");
+      return;
     case StatementKind::Continue:
-      // Only reachable outside an unrolled-loop/function context here.
-      emit_unsupported(stmt.sourceRange, "unsupported-jump",
+      // A ROLLED loop gets it for free: uPass lowers the marker to
+      // `loop_exec = false` WITHOUT clearing loop_next_active, so this
+      // iteration stops and every later one still runs.
+      if (!loop_rolled_.empty() && loop_rolled_.back()) {
+        emit_loop_marker(Lnast_ntype::create_func_continue());
+        return;
+      }
+      // Unrolled, `continue` skips the REST of one iteration, which needs a
+      // per-iteration flag rather than the loop-wide one break uses. Not
+      // implemented — refuse rather than lower it as a break, which would
+      // silently drop every later iteration.
+      emit_unsupported(stmt.sourceRange,
+                       "unsupported-jump",
                        std::string(slang::ast::toString(stmt.kind)) + " is not supported in this context by --reader slang");
       return;
     default:
-      emit_unsupported(stmt.sourceRange, "unsupported-statement",
+      emit_unsupported(stmt.sourceRange,
+                       "unsupported-statement",
                        std::string("statement kind '") + std::string(slang::ast::toString(stmt.kind))
                            + "' is not supported by --reader slang yet");
   }
 }
 
+// A SystemVerilog IMMEDIATE assertion becomes a design obligation, the same
+// LNAST `cassert` node a Pyrope `assert` produces — tolg materializes it as an
+// `fproperty` Sub, pass.formal proves what it can and cgen emits a runtime
+// check for the rest.
+//
+// This used to be dropped on the floor ("synthesis ignores immediate
+// assertions"), silently: a design whose every property was an immediate assert
+// verified as `no assert/assert_always obligations found` — a run that proves
+// nothing while exiting 0. riscv-formal's generated checks are exactly that
+// shape (48 immediate asserts in one testbench), so the drop was the difference
+// between checking a RISC-V core and checking nothing.
+//
+// `assume` is a hypothesis (prove-then-use, per the fcore contract), so it
+// carries the `__fkind__assume` sentinel the Pyrope front-end uses. `cover` is
+// a coverage COUNT, not an obligation, and there is nothing to prove — it stays
+// ignored, but says so.
+void Slang_context::lower_immediate_assertion(const slang::ast::ImmediateAssertionStatement& stmt) {
+  using slang::ast::AssertionKind;
+
+  if (stmt.assertionKind == AssertionKind::CoverProperty || stmt.assertionKind == AssertionKind::CoverSequence) {
+    emit_warning(stmt.sourceRange, "cover-ignored", "unsupported", "immediate cover is a count, not an obligation — ignored");
+    return;
+  }
+  // A DEFERRED assertion (`assert #0` / `assert final`) fires in the observed/
+  // final simulation region, after glitches settle. That is a simulation-time
+  // semantics this static obligation cannot reproduce, so refuse it rather than
+  // prove something subtly different.
+  if (stmt.isDeferred) {
+    emit_warning(stmt.sourceRange,
+                 "deferred-assertion-ignored",
+                 "unsupported",
+                 "deferred assertion (#0 / final) has simulation-region semantics — ignored");
+    return;
+  }
+
+  set_pending_loc(stmt.sourceRange);
+  // `booleanize`: pyrope keeps bool and int apart and a cassert condition is a
+  // bool, but `assert(flag)` over a 1-bit net lowers to an integer.
+  auto cond = booleanize(lower_rvalue(stmt.cond));
+  auto idx  = builder_.add_child(Lnast_ntype::create_cassert());
+  builder_.add_value_child_pub(idx, cond);
+  if (stmt.assertionKind == AssertionKind::Assume) {
+    // UNQUOTED sentinel, matching prp2lnast: a user message is always a string
+    // const, so this can never collide with one.
+    builder_.add_child(idx, Lnast_node::create_const("__fkind__assume"));
+  }
+  clear_pending_loc();
+}
+
+// A CONCURRENT assertion — `assert/assume/restrict/cover property (...)`, either
+// at module level or inside a process. slang models the module-level form as an
+// implicit `always` block whose body is this statement.
+//
+// These used to be dropped with a warning and nothing else, and for `assume` /
+// `restrict` that is not merely incomplete, it is ACTIVELY MISLEADING: the
+// hypothesis vanishes, the environment stays unconstrained, and a property that
+// is true under the restriction gets a COUNTEREXAMPLE that cannot happen. A
+// user then debugs a trace the design can never produce. `assert property` had
+// the mirror-image problem the immediate form used to have — the run proves
+// nothing and exits 0.
+//
+// What is lowered here is the per-cycle BOOLEAN case: a property that unwraps,
+// through its clocking event and an optional `disable iff`, to a plain
+// expression with no sequence repetition. That is exactly an immediate
+// assert/assume evaluated every clock, so it reuses that path. `disable iff (d)`
+// becomes an implication — the claim is only made when d is low.
+//
+// Anything with real temporal structure (`|->`, `|=>`, `##N`, `[*n]`,
+// sequences) returns false so the caller REFUSES it. The engine does have the
+// machinery for those (past/rose/eventually/always over a bounded window, see
+// lhd_kernel_formal.cpp), but it is not wired to SVA property operators yet,
+// and a silent drop is the one outcome that must not happen.
+bool Slang_context::lower_concurrent_assertion(const slang::ast::ConcurrentAssertionStatement& stmt) {
+  using slang::ast::AssertionExprKind;
+  using slang::ast::AssertionKind;
+
+  if (stmt.assertionKind == AssertionKind::CoverProperty || stmt.assertionKind == AssertionKind::CoverSequence) {
+    emit_warning(stmt.sourceRange, "cover-ignored", "unsupported", "concurrent cover is a count, not an obligation — ignored");
+    return true;
+  }
+
+  // Unwrap the clocking event and any `disable iff`, collecting the disable
+  // conditions on the way down.
+  const slang::ast::AssertionExpr*              spec = &stmt.propertySpec;
+  std::vector<const slang::ast::Expression*>    disables;
+  for (bool peeled = true; peeled;) {
+    peeled = false;
+    if (spec->kind == AssertionExprKind::Clocking) {
+      spec   = &spec->as<slang::ast::ClockingAssertionExpr>().expr;
+      peeled = true;
+    } else if (spec->kind == AssertionExprKind::DisableIff) {
+      const auto& d = spec->as<slang::ast::DisableIffAssertionExpr>();
+      disables.push_back(&d.condition);
+      spec   = &d.expr;
+      peeled = true;
+    }
+  }
+  if (spec->kind != AssertionExprKind::Simple) {
+    return false;  // sequence / implication / delay — caller refuses
+  }
+  const auto& simple = spec->as<slang::ast::SimpleAssertionExpr>();
+  if (simple.repetition.has_value()) {
+    return false;  // `[*n]` is temporal
+  }
+
+  set_pending_loc(stmt.sourceRange);
+  auto cond = booleanize(lower_rvalue(simple.expr));
+  // `disable iff (d)` : the obligation is `!d implies cond`, spelled as the
+  // disjunction so it reuses the ordinary boolean path.
+  for (const auto* d : disables) {
+    auto dis    = booleanize(lower_rvalue(*d));
+    // Both results are BOOLs and must be registered as such: pyrope keeps bool
+    // and int apart, and an unmarked temp would be re-booleanized as an integer.
+    auto not_d = mark_bool(builder_.create_log_not_stmts(dis));
+    cond       = mark_bool(builder_.create_log_or_stmts(not_d, cond));
+  }
+  auto idx = builder_.add_child(Lnast_ntype::create_cassert());
+  builder_.add_value_child_pub(idx, cond);
+  if (stmt.assertionKind == AssertionKind::Assume || stmt.assertionKind == AssertionKind::Restrict) {
+    // `restrict` is an assume that only constrains formal (simulation ignores
+    // it). Both are hypotheses here, so both carry the assume sentinel.
+    builder_.add_child(idx, Lnast_node::create_const("__fkind__assume"));
+  }
+  clear_pending_loc();
+  return true;
+}
+
+// Every `&&&` condition folds to a known constant with no x/z: true when they all
+// hold (the list is a conjunction), false when any is false, nullopt when any is
+// undecidable. An x/z guard deliberately stays runtime-lowered so the poison
+// propagates instead of an arm being silently deleted.
+std::optional<bool> Slang_context::const_cond_value(const slang::ast::ConditionalStatement& stmt) {
+  bool all_true = true;
+  for (const auto& c : stmt.conditions) {
+    auto cv = try_eval(*c.expr);
+    if (!cv || !cv->isInteger() || cv->integer().hasUnknown()) {
+      return std::nullopt;
+    }
+    if (!cv->isTrue()) {
+      all_true = false;
+    }
+  }
+  return all_true;
+}
+
 void Slang_context::lower_conditional(const slang::ast::ConditionalStatement& stmt) {
-  // Fold the &&& conditions; patterns are unsupported.
-  std::string cond;
+  // Patterns are unsupported — check before anything else has side effects.
   for (const auto& c : stmt.conditions) {
     if (c.pattern != nullptr) {
       emit_unsupported(stmt.sourceRange, "unsupported-pattern", "if-statement match patterns are not supported");
       return;
     }
+  }
+
+  // A guard that is already DECIDED at elaboration time: lower only the live
+  // arm, inline, with no `if` node and no dead arm. IEEE 1800 12.4 — a false
+  // `if` never executes its then-branch, so elaborating that branch into
+  // hardware is wrong no matter what it contains. This mirrors what LiveHD
+  // already does for dead GENERATE branches (`gen.isUninstantiated`).
+  //
+  // It also has to happen BEFORE the lower_rvalue() below, which has side
+  // effects (emits LNAST, declares symbols, records dependency reads).
+  //
+  // The motivating shape: `localparam STEP = 0; if (STEP != 0) for (i=0;i<8;i=i+STEP) ...`
+  // The loop can never run, but the unroller does not know that and a ZERO step
+  // never terminates, so it burned the whole per-process unroll budget and
+  // reported a misleading "loop unroll limit exhausted" on legal code.
+  if (const auto known = const_cond_value(stmt); known.has_value()) {
+    if (const slang::ast::Statement* live = *known ? &stmt.ifTrue : stmt.ifFalse; live != nullptr) {
+      lower_statement(*live);
+    }
+    return;
+  }
+
+  // Fold the &&& conditions.
+  std::string cond;
+  for (const auto& c : stmt.conditions) {
     auto v = booleanize(lower_rvalue(*c.expr));
     cond   = cond.empty() ? v : builder_.create_log_and_stmts(cond, v);
   }
@@ -220,7 +533,8 @@ std::string Slang_context::case_item_match(const std::string& sel, const Tinfo& 
   if (item.kind == slang::ast::ExpressionKind::ValueRange) {
     const auto& vr = item.as<slang::ast::ValueRangeExpression>();
     if (vr.rangeKind != slang::ast::ValueRangeKind::Simple) {
-      emit_unsupported(item.sourceRange, "unsupported-case-inside",
+      emit_unsupported(item.sourceRange,
+                       "unsupported-case-inside",
                        "tolerance ranges ([a +/- b]) in case-inside are not supported by --reader slang");
       return "0";
     }
@@ -277,7 +591,51 @@ std::string Slang_context::case_item_match(const std::string& sel, const Tinfo& 
     }
   }
 
-  return builder_.create_eq_stmts(sel, lower_rvalue(item));
+  // to_int_value: a case ITEM may lower to a boolean (`case (1'b1) a || b:` --
+  // the one-hot idiom every Verilog CPU uses), while the selector is an integer.
+  // Verilog compares 1-bit values here; Pyrope's `==` has no implicit bool/int
+  // conversion, so without this the arm dies as `type-mismatch-eq` ("<const>:
+  // integer vs %N:boolean"). Integers pass through unchanged, so this is a no-op
+  // for the ordinary `case (x) 3:` shape. Same idiom as the `inside` operator
+  // (slang_expr.cpp).
+  return builder_.create_eq_stmts(sel, to_int_value(lower_rvalue(item)));
+}
+
+bool Slang_context::case_is_exhaustive(const slang::ast::CaseStatement& stmt) {
+  if (stmt.condition != slang::ast::CaseStatementCondition::Normal) {
+    return false;
+  }
+  // Unsized case items can widen a small unsigned selector to 32 bits.
+  // Its value domain still comes from the original selector, not that width.
+  const auto* selector = &stmt.expr;
+  while (selector->kind == slang::ast::ExpressionKind::Conversion) {
+    const auto& conv = selector->as<slang::ast::ConversionExpression>();
+    if (!conv.isImplicit() || !conv.operand().type->isIntegral() || conv.operand().type->isSigned()
+        || conv.operand().type->getBitWidth() > selector->type->getBitWidth()) {
+      break;
+    }
+    selector = &conv.operand();
+  }
+  auto bits = selector->type->getBitWidth();
+  if (!selector->type->isIntegral() || selector->type->isSigned() || bits == 0 || bits >= 20) {
+    return false;
+  }
+  const uint64_t                count = 1ULL << bits;
+  absl::flat_hash_set<uint64_t> values;
+  for (const auto& group : stmt.items) {
+    for (const auto* item : group.expressions) {
+      auto cv = try_eval(*item);
+      if (!cv || !cv->isInteger() || cv->integer().hasUnknown()) {
+        return false;
+      }
+      auto value = cv->integer().as<uint64_t>();
+      if (!value || *value >= count) {
+        return false;
+      }
+      values.insert(*value);
+    }
+  }
+  return values.size() == count;
 }
 
 void Slang_context::lower_case(const slang::ast::CaseStatement& stmt) {
@@ -285,14 +643,24 @@ void Slang_context::lower_case(const slang::ast::CaseStatement& stmt) {
   using slang::ast::UniquePriorityCheck;
 
   auto si  = tinfo(*stmt.expr.type);
-  auto sel = lower_rvalue(stmt.expr);
+  // to_int_value for the mirror shape `case (a || b) 1'b1:` — a boolean selector
+  // against integer items. No-op when the selector is already an integer.
+  auto sel = to_int_value(lower_rvalue(stmt.expr));
 
   // Decide if/unique_if. unique/unique0 declare the arms disjoint; plain
   // `case` with all-constant pairwise-disjoint items is provably disjoint and
   // also lowers to unique_if (-> one Hotmux). Anything else keeps priority
   // (first-match) semantics as a flat if/elif chain.
-  bool unique = stmt.check == UniquePriorityCheck::Unique || stmt.check == UniquePriorityCheck::Unique0;
-  if (!unique) {
+  //
+  // Coverage ("do the arms span every selector value") is a SEPARATE question,
+  // answered by case_is_exhaustive — which the latch analysis in
+  // slang_structure.cpp shares. A missing `default` is then unreachable, so an
+  // else assigning don't-care is behavior-preserving and stops an `always @*`
+  // from inferring a latch.
+  const bool unique_declared = stmt.check == UniquePriorityCheck::Unique || stmt.check == UniquePriorityCheck::Unique0;
+  bool       unique          = unique_declared;
+  const bool exhaustive      = case_is_exhaustive(stmt);
+  {
     std::vector<std::pair<uint64_t, uint64_t>> seen;  // (mask, value-under-mask)
     bool                                       all_const = true;
     bool                                       disjoint  = true;
@@ -338,7 +706,7 @@ void Slang_context::lower_case(const slang::ast::CaseStatement& stmt) {
         break;
       }
     }
-    unique = all_const && disjoint;
+    unique = unique_declared || (all_const && disjoint);
   }
 
   // Pre-compute every arm's match condition BEFORE the if node. A `uif`
@@ -379,10 +747,91 @@ void Slang_context::lower_case(const slang::ast::CaseStatement& stmt) {
     builder_.push_stmts(else_stmts);
     lower_statement(*stmt.defaultCase);
     builder_.pop_stmts();
+  } else if (has_full_case_attr(stmt) || exhaustive) {
+    emit_full_case_else(stmt, if_nid);
   } else if (unique) {
     // unique_if requires the else arm; an empty one keeps prior values.
     builder_.add_if_stmts(if_nid);
   }
+}
+
+bool Slang_context::has_full_case_attr(const slang::ast::Statement& stmt) const {
+  if (body_ == nullptr) {
+    return false;
+  }
+  for (const auto* attr : body_->getCompilation().getAttributes(stmt)) {
+    // `(* full_case *)` is the bare-name form (value 1); `(* full_case = 0 *)`
+    // explicitly opts out, so honor the value when one is given.
+    if (attr->name == "full_case") {
+      auto cv = attr->getValue();
+      return !cv.isInteger() || cv.isTrue();
+    }
+  }
+  return false;
+}
+
+namespace {
+// The variables a case arm writes. Same shape as slang_structure.cpp's
+// Write_collector (file-local there); only the write SET matters here, so
+// blocking/nonblocking are not split. Insertion ORDER is kept: the emitted
+// else arm must be deterministic (//inou/slang:slang_emit_determinism).
+struct Fullcase_write_collector : public slang::ast::ASTVisitor<Fullcase_write_collector, slang::ast::VisitFlags::AllGood> {
+  std::vector<const slang::ast::ValueSymbol*>         order;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*> seen;
+
+  void note(const slang::ast::Expression& lhs) {
+    if (lhs.kind == slang::ast::ExpressionKind::Concatenation) {
+      for (const auto* op : lhs.as<slang::ast::ConcatenationExpression>().operands()) {
+        note(*op);
+      }
+      return;
+    }
+    const auto* e = &lhs;
+    while (true) {
+      if (e->kind == slang::ast::ExpressionKind::ElementSelect) {
+        e = &e->as<slang::ast::ElementSelectExpression>().value();
+      } else if (e->kind == slang::ast::ExpressionKind::RangeSelect) {
+        e = &e->as<slang::ast::RangeSelectExpression>().value();
+      } else if (e->kind == slang::ast::ExpressionKind::MemberAccess) {
+        e = &e->as<slang::ast::MemberAccessExpression>().value();
+      } else {
+        break;
+      }
+    }
+    if (e->kind != slang::ast::ExpressionKind::NamedValue) {
+      return;
+    }
+    const auto* sym = &e->as<slang::ast::NamedValueExpression>().symbol;
+    if (seen.insert(sym).second) {
+      order.emplace_back(sym);
+    }
+  }
+
+  void handle(const slang::ast::AssignmentExpression& expr) {
+    note(expr.left());
+    visitDefault(expr);
+  }
+};
+}  // namespace
+
+void Slang_context::emit_full_case_else(const slang::ast::CaseStatement& stmt, const Lnast_nid& if_nid) {
+  Fullcase_write_collector wc;
+  for (const auto& group : stmt.items) {
+    group.stmt->visit(wc);
+  }
+
+  auto else_stmts = builder_.add_if_stmts(if_nid);
+  builder_.push_stmts(else_stmts);
+  for (const auto* sym : wc.order) {
+    // Width-matched unknown: `0ub????`. A bare `0ub?` would be one bit wide and
+    // the assignment would narrow the variable.
+    auto ti = tinfo(sym->getType());
+    if (ti.bits <= 0) {
+      continue;  // non-integral (real/string/...): nothing sensible to don't-care
+    }
+    builder_.create_assign_stmts(lname_of(*sym), absl::StrCat("0ub", std::string(static_cast<size_t>(ti.bits), '?')));
+  }
+  builder_.pop_stmts();
 }
 
 bool Slang_context::unroll_tick(const slang::ast::Statement& stmt) {
@@ -393,8 +842,151 @@ bool Slang_context::unroll_tick(const slang::ast::Statement& stmt) {
              "unroll-limit",
              "comptime",
              std::format("loop unroll limit of {} exhausted", options_.unroll_limit),
-             "make the loop bounds compile-time constants, or raise --set inou.verilog.unroll_limit");
+             "make the loop bounds compile-time constants, or raise --set compile.slang.unroll_limit");
   return false;
+}
+
+namespace {
+// Does this statement subtree contain a `break` that binds to THIS loop? A
+// nested loop's body is skipped: a break in there belongs to the inner loop.
+bool subtree_has_break(const slang::ast::Statement& stmt) {
+  bool found = false;
+  auto v     = slang::ast::makeVisitor(
+      [&](auto& visitor, const slang::ast::BreakStatement&) {
+        found = true;
+        (void)visitor;
+      },
+      [&](auto&, const slang::ast::ForLoopStatement&) {},  // inner loop owns its breaks
+      [&](auto&, const slang::ast::WhileLoopStatement&) {},
+      [&](auto&, const slang::ast::RepeatLoopStatement&) {},
+      [&](auto&, const slang::ast::ForeachLoopStatement&) {});
+  stmt.visit(v);
+  return found;
+}
+
+bool subtree_has_return(const slang::ast::Statement& stmt) {
+  bool found = false;
+  auto v     = slang::ast::makeVisitor([&](auto& visitor, const slang::ast::ReturnStatement&) {
+    found = true;
+    (void)visitor;
+  });
+  stmt.visit(v);
+  return found;
+}
+
+const slang::ast::Expression* peel_loop_expr(const slang::ast::Expression& raw) {
+  const auto* e = &raw;
+  while (e->kind == slang::ast::ExpressionKind::Conversion) {
+    e = &e->as<slang::ast::ConversionExpression>().operand();
+  }
+  return e;
+}
+}  // namespace
+
+// A bare loop-control marker (`break` / `continue`), in the shape prp2lnast
+// emits: the node plus one fresh tmp ref, no argument.
+void Slang_context::emit_loop_marker(Lnast_ntype::Lnast_ntype_int head) {
+  auto  idx = builder_.add_child(head);
+  auto& ln  = *builder_.lnast;
+  ln.add_child(idx, builder_.mint_tmp_ref());
+}
+
+bool Slang_context::lower_deferred_for(const slang::ast::ForLoopStatement& stmt) {
+  using slang::ast::BinaryOperator;
+  using slang::ast::ExpressionKind;
+  using slang::ast::UnaryOperator;
+
+  // A body containing `break` used to be refused here and sent to the unroller.
+  // It no longer needs to be: the loop is emitted as an LNAST `for`, and uPass
+  // owns break/continue (func_break/func_continue -> loop_exec/loop_next_active).
+  if (stmt.loopVars.size() != 1 || stmt.stopExpr == nullptr || stmt.steps.size() != 1) {
+    return false;
+  }
+  const auto* ivar = stmt.loopVars[0];
+  const auto* init = ivar->getInitializer();
+  if (init == nullptr) {
+    return false;
+  }
+
+  const auto* stop = peel_loop_expr(*stmt.stopExpr);
+  if (stop->kind != ExpressionKind::BinaryOp) {
+    return false;
+  }
+  const auto& cmp = stop->as<slang::ast::BinaryExpression>();
+  if (cmp.op != BinaryOperator::LessThan && cmp.op != BinaryOperator::LessThanEqual) {
+    return false;
+  }
+  const auto* cmp_lhs = peel_loop_expr(cmp.left());
+  if (cmp_lhs->kind != ExpressionKind::NamedValue || &cmp_lhs->as<slang::ast::NamedValueExpression>().symbol != ivar) {
+    return false;
+  }
+
+  const auto* step = peel_loop_expr(*stmt.steps[0]);
+  if (step->kind != ExpressionKind::UnaryOp) {
+    return false;
+  }
+  const auto& inc = step->as<slang::ast::UnaryExpression>();
+  if (inc.op != UnaryOperator::Preincrement && inc.op != UnaryOperator::Postincrement) {
+    return false;
+  }
+  const auto* inc_arg = peel_loop_expr(inc.operand());
+  if (inc_arg->kind != ExpressionKind::NamedValue || &inc_arg->as<slang::ast::NamedValueExpression>().symbol != ivar) {
+    return false;
+  }
+
+  auto start = to_int_value(lower_rvalue(*init));
+  auto end   = to_int_value(lower_rvalue(cmp.right()));
+  if (cmp.op == BinaryOperator::LessThan) {
+    end = builder_.create_minus_stmts(end, "1");  // LNAST ranges are inclusive
+  }
+
+  auto& ln       = *builder_.lnast;
+  auto  range    = builder_.add_child(Lnast_ntype::create_range());
+  auto  range_id = builder_.create_lnast_tmp();
+  ln.add_child(range, Lnast_node::create_ref(range_id));
+  builder_.add_value_child_pub(range, start);
+  builder_.add_value_child_pub(range, end);
+
+  // PYROPE HAS NO SHADOWING, and the `for` node BINDS its index. By the time we
+  // get here the process has usually already emitted this symbol's lazy
+  // `mut <name> = 0sb?` declare, so binding the loop to that same name nests the
+  // `for`'s binding inside the declare's scope. Written as Pyrope that is a hard
+  // error --
+  //     variable shadowing: 'i' is already declared in an enclosing scope
+  // -- but slang builds LNAST directly and never meets the parser check, so it
+  // used to sail through and be mis-lowered instead: uPass moved the statements
+  // that PRECEDED the loop after it, which silently dropped a pre-loop
+  // initialization (`o = 8'd7; for (…) o = o + d[i];` lost the 7). Bind a FRESH
+  // name the process cannot have declared, and point every body read of the
+  // symbol at it for as long as we are inside the body.
+  auto        loop_name = fresh_local("idx");
+  const auto  prev_it   = sym_lname_.find(ivar);
+  const bool  had_prev  = prev_it != sym_lname_.end();
+  std::string prev_name = had_prev ? prev_it->second : std::string{};
+  sym_lname_[ivar]      = loop_name;
+
+  auto loop = builder_.add_child(Lnast_ntype::create_for());
+  ln.add_child(loop, Lnast_node::create_ref(loop_name));
+  ln.add_child(loop, Lnast_node::create_ref(range_id));
+  auto body = ln.add_child(loop, Lnast_ntype::create_stmts());
+
+  const bool was_declared = declared_.contains(ivar);
+  declared_.insert(ivar);  // the for node, rather than a declare, binds it
+  builder_.push_stmts(body);
+  loop_rolled_.push_back(true);  // break/continue in here become LNAST markers
+  lower_statement(stmt.body);
+  loop_rolled_.pop_back();
+  builder_.pop_stmts();
+  if (!was_declared) {
+    declared_.erase(ivar);
+  }
+  if (had_prev) {
+    sym_lname_[ivar] = prev_name;
+  } else {
+    sym_lname_.erase(ivar);
+  }
+  ln.add_child(loop, Lnast_node::create_const("val"));
+  return true;
 }
 
 void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
@@ -403,9 +995,32 @@ void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
     return;
   }
 
+  // `--set compile.slang.roll_loops=true`: hand a canonical loop to LNAST intact
+  // rather than unrolling it here. A non-canonical shape falls through to the
+  // unroller below.
+  if (options_.roll_loops && lower_deferred_for(stmt)) {
+    return;
+  }
+
   // Bind the loop variables as EvalContext locals so the stop/step
   // expressions and body reads of them constant-fold (tier 1).
-  std::vector<const slang::ast::ValueSymbol*> locals;
+  std::vector<const slang::ast::ValueSymbol*>                                           locals;
+  // A counter declared OUTSIDE the for-header OUTLIVES the loop: SystemVerilog
+  // leaves it at the value that failed the stop test (or, with a `break`, at
+  // the breaking iteration's value), and real code READS it afterwards --
+  // cva6's miss_handler indexes the AMO bypass port with it
+  // (`bypass_ports_req[id] = amo_bypass_req` after `for (id = 0; id < NR_PORTS;
+  // id++)`), and pmp's `if (i == NrPMPEntries)` no-match fallback tests it. The
+  // unroll steps the counter COMPTIME only, so without an explicit write-back
+  // every such read binds to the declare-time `0sb?` poison and the whole cone
+  // folds to x -- silently, with a clean exit 0.
+  //
+  // Keep the assignment TARGET EXPRESSION, not just the symbol, so the
+  // write-back rides the normal lvalue path (lazy declare + note_write +
+  // struct/bundle-port split). A counter declared IN the header
+  // (`for (int i = 0; ...)`) goes out of scope with the loop in SV too, so it
+  // is deliberately NOT recorded here.
+  std::vector<std::pair<const slang::ast::ValueSymbol*, const slang::ast::Expression*>> outlives;
   for (const auto* lv : stmt.loopVars) {
     slang::ConstantValue init;
     if (const auto* ie = lv->getInitializer()) {
@@ -434,6 +1049,7 @@ void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
           if (auto cv = try_eval(assign.right())) {
             eval_ctx_->createLocal(&sym, *cv);
             locals.push_back(&sym);
+            outlives.emplace_back(&sym, &assign.left());
             continue;
           }
         }
@@ -445,6 +1061,61 @@ void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
     }
   }
 
+  // slang sometimes cannot evaluate a bound that is semantically constant
+  // only after function/config bindings reach uPass (CVA6's Cfg.Nr*Rules).
+  // Preserve the canonical loop instead of rejecting it at this frontend.
+  if (stmt.stopExpr != nullptr && !try_eval(*stmt.stopExpr)) {
+    for (const auto* lv : locals) {
+      eval_ctx_->deleteLocal(lv);
+    }
+    if (lower_deferred_for(stmt)) {
+      return;
+    }
+    emit_error(stmt.stopExpr->sourceRange,
+               "non-const-loop-bound",
+               "comptime",
+               "for-loop condition must be compile-time constant to unroll",
+               "only canonical increasing loops can defer their bound to uPass");
+    return;
+  }
+
+  // A `break` in the body (the priority-select idiom: `if (req[i]) break;`)
+  // needs a runtime flag, since which iteration wins is not comptime. Only set
+  // one up when the body actually has a break, so every other loop keeps its
+  // previous emission byte for byte.
+  std::string brk_flag;
+  if (subtree_has_break(stmt.body)) {
+    brk_flag = fresh_local("brk");
+    builder_.create_declare_stmts(brk_flag, "mut", "", "");
+    builder_.create_assign_stmts(brk_flag, "0");
+  }
+  // Push UNCONDITIONALLY (the empty sentinel when this loop owns no flag) so a
+  // `break` that reaches this frame can never raise an OUTER loop's flag.
+  break_flags_.push_back(brk_flag);
+
+  // `<counter> = <its comptime value right now>`, emitted into whatever stmts
+  // block is on top. Must run while the EvalContext local is still alive.
+  const auto emit_counter_writeback = [&] {
+    const bool saved_nb         = current_assign_nonblocking_;
+    current_assign_nonblocking_ = false;  // a loop counter is a BLOCKING write
+    for (const auto& [sym, lhs] : outlives) {
+      const auto* cv = eval_ctx_->findLocal(sym);
+      if (cv == nullptr || !cv->isInteger()) {
+        continue;
+      }
+      set_pending_loc(stmt.sourceRange);
+      assign_to(*lhs, const_text(cv->integer()));
+      clear_pending_loc();
+    }
+    current_assign_nonblocking_ = saved_nb;
+  };
+
+  // An unroll that ABORTED (budget exhausted, non-const stop/step) leaves the
+  // counter at a partial value; writing that back would ship a wrong constant
+  // on top of an already-reported error.
+  bool unroll_ok = true;
+
+  loop_rolled_.push_back(false);  // this body is UNROLLED: break uses brk_flag
   while (true) {
     if (stmt.stopExpr != nullptr) {
       auto cv = try_eval(*stmt.stopExpr);
@@ -454,6 +1125,7 @@ void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
                    "comptime",
                    "for-loop condition must be compile-time constant to unroll",
                    "only constant-bounded loops are synthesizable by --reader slang");
+        unroll_ok = false;
         break;
       }
       if (!cv->isTrue()) {
@@ -461,10 +1133,30 @@ void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
       }
     }
     if (!unroll_tick(stmt)) {
+      unroll_ok = false;  // budget exhausted; unroll_tick already reported it
       break;
     }
 
-    lower_statement(stmt.body);
+    if (brk_flag.empty()) {
+      lower_statement(stmt.body);
+    } else {
+      // `if (not broken) { <body> }` — an iteration after the break is taken
+      // must not write anything. Assignments are last-wins in program order, so
+      // without the guard every later iteration would overwrite the winner.
+      auto guard = builder_.create_eq_stmts(brk_flag, "0");
+      auto if_id = builder_.create_if_stmt(false);
+      builder_.add_if_cond(if_id, guard);
+      auto arm = builder_.add_if_stmts(if_id);
+      builder_.push_stmts(arm);
+      // The counter holds THIS iteration's value for the whole iteration, and a
+      // taken break freezes it there. So the write goes at the TOP of the
+      // guarded arm: last-wins plus the guard make the SURVIVING write the
+      // breaking iteration's. (Without a break the terminal write below is the
+      // last one anyway, so no per-iteration store is emitted in that case.)
+      emit_counter_writeback();
+      lower_statement(stmt.body);
+      builder_.pop_stmts();
+    }
 
     bool stepped = true;
     for (const auto* se : stmt.steps) {
@@ -475,17 +1167,210 @@ void Slang_context::lower_for_loop(const slang::ast::ForLoopStatement& stmt) {
       }
     }
     if (!stepped) {
+      unroll_ok = false;
       break;
     }
     if (stmt.stopExpr == nullptr && stmt.steps.empty()) {
       emit_error(stmt.sourceRange, "loop-no-progress", "comptime", "for loop without condition or step cannot unroll");
+      unroll_ok = false;
       break;
     }
   }
 
+  // Loop exit: the counter holds the first value that FAILED the stop test.
+  // With a runtime break it only reaches that value when no break fired, so the
+  // terminal write is guarded the same way the iterations are.
+  if (unroll_ok && !outlives.empty()) {
+    if (brk_flag.empty()) {
+      emit_counter_writeback();
+    } else {
+      auto guard = builder_.create_eq_stmts(brk_flag, "0");
+      auto if_id = builder_.create_if_stmt(false);
+      builder_.add_if_cond(if_id, guard);
+      auto arm = builder_.add_if_stmts(if_id);
+      builder_.push_stmts(arm);
+      emit_counter_writeback();
+      builder_.pop_stmts();
+    }
+  }
+
+  loop_rolled_.pop_back();
+  break_flags_.pop_back();
+
   for (const auto* lv : locals) {
     eval_ctx_->deleteLocal(lv);
   }
+}
+
+// Recognize a counted scan with a runtime early-stop predicate. The adjacent
+// initializer and the unconditional, unique counter update prove a finite bound;
+// arbitrary runtime while loops still diagnose rather than silently truncating.
+bool Slang_context::lower_bounded_while(const slang::ast::WhileLoopStatement& stmt, const slang::ast::Statement& initializer) {
+  using slang::ast::BinaryOperator;
+  using slang::ast::ExpressionKind;
+  using slang::ast::UnaryOperator;
+  const slang::ast::ValueSymbol* counter = nullptr;
+  const slang::ast::Expression*  initial = nullptr;
+  if (initializer.kind == StatementKind::ExpressionStatement) {
+    const auto& expr = initializer.as<slang::ast::ExpressionStatement>().expr;
+    if (expr.kind != ExpressionKind::Assignment) {
+      return false;
+    }
+    const auto& a = expr.as<slang::ast::AssignmentExpression>();
+    if (a.isNonBlocking() || a.isCompound() || a.left().kind != ExpressionKind::NamedValue) {
+      return false;
+    }
+    counter = &a.left().as<slang::ast::NamedValueExpression>().symbol;
+    initial = &a.right();
+  } else if (initializer.kind == StatementKind::VariableDeclaration) {
+    counter = &initializer.as<slang::ast::VariableDeclStatement>().symbol;
+    initial = counter->getInitializer();
+  }
+  if (!counter || !initial) {
+    return false;
+  }
+  auto first = try_eval_int(*initial);
+  if (!first || *first < 0) {
+    return false;
+  }
+  auto preserving_expr = [&](const slang::ast::Expression& e) {
+    const auto* p = &e;
+    while (p->kind == ExpressionKind::Conversion) {
+      if (!p->type->isIntegral() || p->type->getBitWidth() < counter->getType().getBitWidth()) {
+        return p;
+      }
+      p = &p->as<slang::ast::ConversionExpression>().operand();
+    }
+    return p;
+  };
+  auto is_counter = [&](const slang::ast::Expression& e) {
+    const auto* p = preserving_expr(e);
+    return p->kind == ExpressionKind::NamedValue && &p->as<slang::ast::NamedValueExpression>().symbol == counter;
+  };
+
+  // Only conjunctions imply that every executed iteration satisfies the bound.
+  // Bitwise AND qualifies when both operands are single-bit predicates (Wally).
+  std::optional<int64_t>                             bound;
+  std::function<void(const slang::ast::Expression&)> find_bound = [&](const auto& raw) {
+    const auto* e = peel_loop_expr(raw);
+    if (e->kind != ExpressionKind::BinaryOp) {
+      return;
+    }
+    const auto& b = e->template as<slang::ast::BinaryExpression>();
+    if (b.op == BinaryOperator::LogicalAnd
+        || (b.op == BinaryOperator::BinaryAnd && b.left().type->getBitWidth() == 1 && b.right().type->getBitWidth() == 1)) {
+      find_bound(b.left());
+      find_bound(b.right());
+    } else if (b.op == BinaryOperator::LessThan && is_counter(b.left())) {
+      if (auto limit = try_eval_int(b.right()); limit && *limit >= 0) {
+        bound = bound ? std::min(*bound, *limit) : *limit;
+      }
+    }
+  };
+  find_bound(stmt.cond);
+  if (!bound) {
+    return false;
+  }
+
+  const auto* tail = &stmt.body;
+  while (true) {
+    if (tail->kind == StatementKind::Block) {
+      tail = &tail->as<slang::ast::BlockStatement>().body;
+    } else if (tail->kind == StatementKind::List && !tail->as<slang::ast::StatementList>().list.empty()) {
+      tail = tail->as<slang::ast::StatementList>().list.back();
+    } else {
+      break;
+    }
+  }
+  if (tail->kind != StatementKind::ExpressionStatement) {
+    return false;
+  }
+  const auto& step      = tail->as<slang::ast::ExpressionStatement>().expr;
+  bool        unit_step = false;
+  if (step.kind == ExpressionKind::Assignment) {
+    const auto& a   = step.as<slang::ast::AssignmentExpression>();
+    const auto* rhs = preserving_expr(a.right());
+    if (!a.isNonBlocking() && !a.isCompound() && is_counter(a.left()) && rhs->kind == ExpressionKind::BinaryOp) {
+      const auto& sum = rhs->as<slang::ast::BinaryExpression>();
+      unit_step       = sum.op == BinaryOperator::Add && is_counter(sum.left()) && try_eval_int(sum.right()) == 1;
+    }
+  } else if (step.kind == ExpressionKind::UnaryOp) {
+    const auto& u = step.as<slang::ast::UnaryExpression>();
+    unit_step     = (u.op == UnaryOperator::Preincrement || u.op == UnaryOperator::Postincrement) && is_counter(u.operand());
+  }
+  if (!unit_step) {
+    return false;
+  }
+
+  int  writes = 0;
+  bool unsafe = false;
+  auto scan   = slang::ast::makeVisitor(
+      [&](auto& visitor, const slang::ast::AssignmentExpression& a) {
+        if (is_counter(a.left())) {
+          ++writes;
+        } else {
+          Fullcase_write_collector wc;
+          wc.note(a.left());
+          if (wc.seen.contains(counter)) {
+            unsafe = true;
+          }
+        }
+        visitor.visitDefault(a);
+      },
+      [&](auto& visitor, const slang::ast::UnaryExpression& u) {
+        if (u.op == UnaryOperator::Preincrement || u.op == UnaryOperator::Postincrement || u.op == UnaryOperator::Predecrement
+            || u.op == UnaryOperator::Postdecrement) {
+          if (is_counter(u.operand())) {
+            ++writes;
+          } else {
+            unsafe = true;
+          }
+        }
+        visitor.visitDefault(u);
+      },
+      [&](auto&, const slang::ast::CallExpression&) { unsafe = true; },
+      [&](auto&, const slang::ast::BreakStatement&) { unsafe = true; },
+      [&](auto&, const slang::ast::ContinueStatement&) { unsafe = true; },
+      [&](auto&, const slang::ast::ReturnStatement&) { unsafe = true; });
+  stmt.cond.visit(scan);
+  if (writes != 0 || unsafe) {
+    return false;
+  }
+  stmt.body.visit(scan);
+  if (writes != 1 || unsafe) {
+    return false;
+  }
+  const auto ti        = tinfo(counter->getType());
+  const int  magnitude = ti.bits - (ti.is_signed ? 1 : 0);
+  if (magnitude <= 0 || (magnitude < 63 && *bound >= (int64_t{1} << magnitude))) {
+    return false;
+  }
+
+  const int64_t trips = std::max(int64_t{0}, *bound - *first);
+  if (trips >= unroll_budget_) {
+    emit_error(stmt.sourceRange, "unroll-limit", "comptime", "bounded while loop exceeds the remaining unroll budget");
+    return true;
+  }
+  Unflagged_loop_scope loop_scope(this);
+  // Nest each successor in the preceding iteration's taken arm. A false
+  // condition exits the entire scan, and the intermediate counter values stay
+  // constant within those arms (avoiding a dynamic selector / phi per trip).
+  int64_t              arms = 0;
+  for (int64_t k = 0; k < trips; ++k) {
+    if (!unroll_tick(stmt)) {
+      break;
+    }
+    auto condition = booleanize(lower_rvalue(stmt.cond));
+    auto arm       = builder_.create_if_stmt(false);
+    builder_.add_if_cond(arm, condition);
+    builder_.push_stmts(builder_.add_if_stmts(arm));
+    ++arms;
+    lower_statement(stmt.body);
+  }
+  while (arms-- > 0) {
+    builder_.pop_stmts();
+  }
+  return true;
 }
 
 void Slang_context::lower_while_loop(const slang::ast::Statement& stmt) {
@@ -514,6 +1399,13 @@ void Slang_context::lower_while_loop(const slang::ast::Statement& stmt) {
     body  = &r.body;
   }
 
+  // while/do-while/repeat unroll here WITHOUT a `broken` flag, so a `break` in
+  // the body has nothing of its own to raise. Mark the stacks accordingly: the
+  // Break arm then refuses instead of raising an OUTER for-loop's flag (which
+  // would terminate the wrong loop), and it never mistakes an outer ROLLED
+  // loop's marker semantics for its own.
+  Unflagged_loop_scope loop_scope(this);
+
   if (count >= 0) {
     for (int64_t i = 0; i < count; ++i) {
       if (!unroll_tick(stmt)) {
@@ -531,7 +1423,8 @@ void Slang_context::lower_while_loop(const slang::ast::Statement& stmt) {
     if (!first || !at_least) {
       auto cv = try_eval(*cond);
       if (!cv) {
-        emit_unsupported(cond->sourceRange, "non-const-while",
+        emit_unsupported(cond->sourceRange,
+                         "non-const-while",
                          "while loops with non-constant conditions are not supported by --reader slang");
         return;
       }
@@ -583,5 +1476,8 @@ void Slang_context::lower_foreach(const slang::ast::ForeachLoopStatement& stmt) 
     }
     eval_ctx_->deleteLocal(dim.loopVar);
   };
+  // Same as lower_while_loop: unrolled here, owns no `broken` flag (see
+  // Unflagged_loop_scope).
+  Unflagged_loop_scope loop_scope(this);
   recurse(0);
 }

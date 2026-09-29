@@ -2,19 +2,21 @@
 #include <unistd.h>
 
 #include <algorithm>
-#include <ctime>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <print>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
 #include "lhd.hpp"
@@ -31,13 +33,11 @@ namespace fs = std::filesystem;
 namespace {
 
 void append_file_content(std::string& buf, const std::string& path) {
-  std::ifstream ifs(path, std::ios::binary);
-  if (!ifs.is_open()) {
-    return;  // the run itself reports missing_file with a proper diagnostic
+  // A missing file appends nothing: the run itself reports missing_file with a
+  // proper diagnostic.
+  if (auto content = livehd::file_utils::read_file(path)) {
+    buf += *content;
   }
-  std::ostringstream oss;
-  oss << ifs.rdbuf();
-  buf += oss.str();
 }
 
 // Hash a directory input (a design blob) deterministically: sorted relative
@@ -121,7 +121,7 @@ bool append_lg_slice_content(std::string& buf, const std::string& dir, const std
         continue;
       }
       namespace gu = livehd::graph_util;
-      for (auto node : g->fast_class()) {
+      for (auto node : g->body().nodes()) {
         if (gu::type_op_of(node) != Ntype_op::Sub) {
           continue;
         }
@@ -211,7 +211,7 @@ bool json_num(const rapidjson::Value& v, const char* key, double& out) {
 // kind:"sta" (pass.opentimer timing.json): an OpenSTA-style report per design
 // — max-delay summary, the critical-path Delay/Time/Description table, and
 // the worst-endpoint arrivals, each source-attributed when a src is present.
-bool write_pretty_sta(const rapidjson::Value& d) {
+bool write_pretty_sta(const rapidjson::Value& d, bool stats) {
   auto dit = d.FindMember("designs");
   if (dit == d.MemberEnd() || !dit->value.IsArray()) {
     return false;
@@ -277,6 +277,36 @@ bool write_pretty_sta(const rapidjson::Value& d) {
         std::print("    {:>8.3f}  {}{}\n", delay, json_str(e, "pin"), src.empty() ? std::string{} : std::format("  ({})", src));
       }
     }
+    if (stats) {
+      if (auto cit = des.FindMember("colors"); cit != des.MemberEnd() && cit->value.IsArray()) {
+        for (const auto& c : cit->value.GetArray()) {
+          if (!c.IsObject()) {
+            continue;
+          }
+          double color   = 0;
+          double cells   = 0;
+          double resynth = 0;
+          json_num(c, "color", color);
+          json_num(c, "cells", cells);
+          json_num(c, "resynth", resynth);
+          std::string line
+              = std::format("  sta[stats]: module='{}' color={:.0f} cells={:.0f}", json_str(c, "module"), color, cells);
+          if (double arrival = 0; json_num(c, "max_arrival", arrival)) {
+            line += std::format(" max_arrival={:.3f}{}{}", arrival, unit.empty() ? "" : " ", unit);
+            if (auto pin = json_str(c, "critical_pin"); !pin.empty()) {
+              line += std::format(" critical_pin='{}'", pin);
+            }
+            if (auto src = json_str(c, "critical_src"); !src.empty()) {
+              line += std::format(" @ {}", src);
+            }
+          } else {
+            line += " max_arrival=n/a";
+          }
+          line += std::format(" resynth={:.0f}", resynth);
+          std::print("{}\n", line);
+        }
+      }
+    }
   }
   return true;
 }
@@ -284,7 +314,7 @@ bool write_pretty_sta(const rapidjson::Value& d) {
 // kind:"abc-map" (pass.abc qor.json): the compact one-line summary (the same
 // shape as the pass's own step-log line, which fd redirection keeps off the
 // terminal).
-bool write_pretty_abc_map(const rapidjson::Value& d) {
+bool write_pretty_abc_map(const rapidjson::Value& d, bool stats) {
   auto tit = d.FindMember("total");
   if (tit == d.MemberEnd() || !tit->value.IsObject()) {
     return false;
@@ -314,23 +344,78 @@ bool write_pretty_abc_map(const rapidjson::Value& d) {
       line += std::format(" ({})", crit);
     }
   }
+  if (double depth = 0; json_num(t, "max_region_depth", depth)) {
+    line += std::format(", max region depth {:.0f}", depth);
+  }
   if (double bb = 0; json_num(t, "div_blackbox", bb) && bb > 0) {
     line += std::format("  [PARTIAL: {:.0f} blackboxed div/mod cone(s) unscored]", bb);
   }
   std::print("{}\n", line);
+  if (stats) {
+    if (auto rit = d.FindMember("regions"); rit != d.MemberEnd() && rit->value.IsArray()) {
+      for (const auto& r : rit->value.GetArray()) {
+        if (!r.IsObject()) {
+          continue;
+        }
+        double color        = 0;
+        double input_nodes  = 0;
+        double input_ge     = 0;
+        double region_gates = 0;
+        double region_area  = 0;
+        double ms           = 0;
+        double resynth      = 0;
+        json_num(r, "color", color);
+        json_num(r, "input_nodes", input_nodes);
+        json_num(r, "input_ge", input_ge);
+        json_num(r, "gates", region_gates);
+        json_num(r, "area", region_area);
+        json_num(r, "ms", ms);
+        json_num(r, "resynth", resynth);
+        std::string row
+            = std::format("  abc[stats]: module='{}' color={:.0f} input_nodes={:.0f} input_ge={:.0f} gates={:.0f} area={:.2f}",
+                          json_str(r, "module"),
+                          color,
+                          input_nodes,
+                          input_ge,
+                          region_gates,
+                          region_area);
+        if (double depth = 0; json_num(r, "logic_depth", depth)) {
+          row += std::format(" logic_depth={:.0f}", depth);
+        }
+        if (double delay = 0; json_num(r, "delay", delay)) {
+          row += std::format(" delay={:.3f}", delay);
+        } else {
+          row += " delay=n/a";
+        }
+        row += std::format(" ms={:.1f} resynth={:.0f}", ms, resynth);
+        std::print("{}\n", row);
+      }
+    }
+  }
   return true;
 }
 
-void write_pretty_qor(const std::string& qor_json) {
+void write_pretty_qor(const std::string& qor_json, bool stats) {
   rapidjson::Document d;
   d.Parse(qor_json.data(), qor_json.size());
   bool rendered = false;
   if (!d.HasParseError() && d.IsObject()) {
     const auto kind = json_str(d, "kind");
     if (kind == "sta") {
-      rendered = write_pretty_sta(d);
+      rendered = write_pretty_sta(d, stats);
     } else if (kind == "abc-map") {
-      rendered = write_pretty_abc_map(d);
+      rendered = write_pretty_abc_map(d, stats);
+    } else if (kind == "synth") {
+      // `lhd synth`: the abc-map summary, then the STA report (absent when
+      // synth.opentimer=false). Each sub-report renders exactly as its pass's
+      // own envelope would, so the one-shot and the manual steps read alike.
+      rendered = true;
+      if (auto a = d.FindMember("abc"); a != d.MemberEnd() && a->value.IsObject()) {
+        rendered = write_pretty_abc_map(a->value, stats) && rendered;
+      }
+      if (auto s = d.FindMember("sta"); s != d.MemberEnd() && s->value.IsObject()) {
+        rendered = write_pretty_sta(s->value, stats) && rendered;
+      }
     }
   }
   if (!rendered) {
@@ -364,8 +449,43 @@ void write_pretty(const Options& opts, const Result& res) {
   std::print("{}\n", head);
 
   if (opts.verbose) {
+    // Show the timings next to the steps they belong to. A phase name is the
+    // BARE step name and both lists are in execution order, so walk them
+    // together: for each step, take the next not-yet-shown phase of that name.
+    // Phases with no recipe step of their own (lg.save, sim.hostbuild,
+    // inou.prp.imports, lec.load, …) print after, so the rows always add up to
+    // the same total the JSON "phases" carries — a partial view would be worse
+    // than none.
+    std::vector<bool> shown(res.phase_ms.size(), false);
+    size_t            next  = 0;
+    double            total = 0;
+    for (const auto& [name, ms] : res.phase_ms) {
+      total += ms;
+    }
     for (const auto& step : res.recipe_steps) {
-      std::print("  step: {}\n", step);
+      const std::string_view bare{step.data(), std::min(step.find(' '), step.size())};
+      size_t                 hit = res.phase_ms.size();
+      for (size_t i = next; i < res.phase_ms.size(); ++i) {
+        if (!shown[i] && res.phase_ms[i].first == bare) {
+          hit = i;
+          break;
+        }
+      }
+      if (hit == res.phase_ms.size()) {
+        std::print("  step: {}\n", step);
+      } else {
+        shown[hit] = true;
+        next       = hit + 1;
+        std::print("  step: {}  ({:.3f} ms)\n", step, res.phase_ms[hit].second);
+      }
+    }
+    for (size_t i = 0; i < res.phase_ms.size(); ++i) {
+      if (!shown[i]) {
+        std::print("  phase: {}  ({:.3f} ms)\n", res.phase_ms[i].first, res.phase_ms[i].second);
+      }
+    }
+    if (!res.phase_ms.empty()) {
+      std::print("  phases: {} timed, {:.3f} ms total\n", res.phase_ms.size(), total);
     }
   }
   for (const auto& out : res.outputs) {
@@ -383,8 +503,91 @@ void write_pretty(const Options& opts, const Result& res) {
   if (!res.sim_query_json.empty()) {  // --query: same always-shown policy — the answers ARE the output
     std::print("  query: {}\n", res.sim_query_json);
   }
+  if (!res.sim_tune_note.empty()) {  // `lhd sim`: the applied tune vector, what was learned, what is next
+    std::print("  sim.tune: {}\n", res.sim_tune_note);
+  }
   if (!res.qor_json.empty()) {
-    write_pretty_qor(res.qor_json);
+    write_pretty_qor(res.qor_json, opts.stats);
+  }
+  if (opts.stats && !res.satopt_json.empty()) {
+    // One row per stage that ran: state, cost, proofs and rewrites.
+    rapidjson::Document d;
+    d.Parse(res.satopt_json.data(), res.satopt_json.size());
+    if (!d.HasParseError() && d.IsObject() && d.HasMember("stages") && d["stages"].IsObject()) {
+      std::string row;
+      for (const auto& st : d["stages"].GetObject()) {
+        const auto& v     = st.value;
+        const auto  state = v.HasMember("state") && v["state"].IsString() ? std::string_view{v["state"].GetString()} : "";
+        if (state == "disabled" || state == "inapplicable") {
+          continue;
+        }
+        const auto num = [&](const char* k) { return v.HasMember(k) && v[k].IsNumber() ? v[k].GetDouble() : 0.0; };
+        row += std::format(" {}={}({:.1f}ms work={:.0f} queries={:.0f} proven={:.0f} applied={:.0f} skips={:.0f})",
+                           st.name.GetString(),
+                           state,
+                           num("ms"),
+                           num("work"),
+                           num("queries"),
+                           num("proven"),
+                           num("applied"),
+                           num("budget_skips"));
+      }
+      std::print("  satopt[stats]:{}\n", row.empty() ? " nothing ran" : row);
+    }
+  }
+  if (opts.stats) {
+    // The reuse tiers and where the time went -- the rows a stats report
+    // builder wants, printed in the same `<what>[stats]:` shape as the
+    // per-color rows above (the JSON twin is the envelope's `incremental` and
+    // `phases` members).
+    if (res.compile_cache.present) {
+      std::print("  incremental[stats]: compile enabled={} hits={} misses={} redone={:.1f}ms refused={} store_failed={}\n",
+                 res.compile_cache.enabled,
+                 res.compile_cache.hits,
+                 res.compile_cache.misses,
+                 res.compile_cache.redone_ms,
+                 res.compile_cache.refused,
+                 res.compile_cache.store_failed);
+    }
+    if (res.abc_incr.present) {
+      std::print("  incremental[stats]: abc enabled={} regions={} hits={} misses={} hit={:.1f}ms miss={:.1f}ms store_failed={}\n",
+                 res.abc_incr.enabled,
+                 res.abc_incr.regions,
+                 res.abc_incr.hits,
+                 res.abc_incr.misses,
+                 res.abc_incr.hit_ms,
+                 res.abc_incr.miss_ms,
+                 res.abc_incr.store_failed);
+    }
+    if (res.sta_incr.present) {
+      std::print("  incremental[stats]: sta enabled={} hits={} misses={} digestable={} lookup={:.1f}ms\n",
+                 res.sta_incr.enabled,
+                 res.sta_incr.hits,
+                 res.sta_incr.misses,
+                 res.sta_incr.digestable,
+                 res.sta_incr.lookup_ms);
+    }
+    if (!res.phase_ms.empty()) {
+      // One row, execution order, duplicates summed (a step that ran twice
+      // is one number here, as the JSON consumer is told to sum it).
+      std::vector<std::pair<std::string, double>> rows;
+      double                                      total = 0;
+      for (const auto& [name, ms] : res.phase_ms) {
+        total   += ms;
+        auto it  = std::find_if(rows.begin(), rows.end(), [&](const auto& r) { return r.first == name; });
+        if (it == rows.end()) {
+          rows.emplace_back(name, ms);
+        } else {
+          it->second += ms;
+        }
+      }
+      std::string line = "  phases[stats]:";
+      for (const auto& [name, ms] : rows) {
+        line += std::format(" {}={:.1f}ms", name, ms);
+      }
+      line += std::format(" total={:.1f}ms", total);
+      std::print("{}\n", line);
+    }
   }
   if (res.status != "pass") {
     std::print("  {}error[{}]{}: {}\n", bad, res.error_class, off, res.error_message);
@@ -405,13 +608,7 @@ std::string compute_run_id(const Options& opts) {
   buf += opts.command;
   buf += ' ';
   buf += opts.language;
-  // Hash the RESOLVED config: the implicit default recipe must hash the same
-  // as the equivalent explicit --recipe.
-  std::string recipe = opts.recipe;
-  if (recipe.empty() && opts.command == "compile") {
-    recipe = "O1";
-  }
-  buf += std::format("|top={}|reader={}|recipe={}", opts.top, opts.reader, recipe);
+  buf += std::format("|top={}|reader={}|pipeline=cprop,bitwidth", opts.top, opts.reader);
 
   auto sets = opts.sets;
   std::sort(sets.begin(), sets.end());
@@ -465,12 +662,12 @@ std::string compute_run_id(const Options& opts) {
   // Each row is ordinal + per-side top + a mode tag (lgslice/dir/file), so
   // slice, whole-dir and file byte streams can never alias each other.
   for (size_t idx = 0; idx < inputs.size(); ++idx) {
-    const auto& [f, kind, eff_top] = inputs[idx];
-    buf += '|';
-    buf += std::format("{}", idx);
-    buf += '\0';
-    buf += std::format("top={}", eff_top);
-    buf += '\0';
+    const auto& [f, kind, eff_top]  = inputs[idx];
+    buf                            += '|';
+    buf                            += std::format("{}", idx);
+    buf                            += '\0';
+    buf                            += std::format("top={}", eff_top);
+    buf                            += '\0';
     if (fs::is_directory(f)) {
       // Slice only a true lg: side: an ln:/pyrope: DIRECTORY side may share
       // its db dir with a (stale) graph library, but lec reads the sources.
@@ -519,6 +716,27 @@ void write_result(const Options& opts, const Result& res) {
   w.Key("exit_code");
   w.Int(res.exit_code);
 
+  if (res.synthesis_invocation.present) {
+    const auto& observation = res.synthesis_invocation;
+    w.Key("synthesis_invocation");
+    w.StartObject();
+    w.Key("scope");
+    w.String("main_entry_to_result_emission");
+    w.Key("wall_ms");
+    w.Double(observation.wall_ms);
+    w.Key("parent_peak_rss_bytes");
+    if (observation.parent_peak_rss_bytes) {
+      w.Uint64(observation.parent_peak_rss_bytes);
+    } else {
+      w.Null();
+    }
+    w.Key("memory_scope");
+    w.String("parent_process_peak_rss");
+    w.Key("process_tree_peak_bytes");
+    w.Null();  // Do not add independent parent/child high-water marks.
+    w.EndObject();
+  }
+
   if (auto iso = source_date_epoch_iso(); !iso.empty()) {
     w.Key("started_at");
     w.String(iso.c_str());
@@ -532,6 +750,132 @@ void write_result(const Options& opts, const Result& res) {
     w.String(s.c_str());
   }
   w.EndArray();
+
+  // Per-phase wall clock, in execution order. ABSENT (not []) when nothing was
+  // timed, so a command that records no phase keeps its old envelope byte for
+  // byte. A name repeats when the step ran twice — the consumer sums.
+  if (!res.phase_ms.empty()) {
+    w.Key("phases");
+    w.StartArray();
+    for (const auto& [name, ms] : res.phase_ms) {
+      w.StartObject();
+      w.Key("name");
+      w.String(name.c_str());
+      w.Key("ms");
+      // Fixed 3 decimals: rapidjson's shortest round-trip would print raw
+      // steady_clock noise (41234.512000000002) into a schema that says ms.
+      const auto ms_txt = std::format("{:.3f}", ms);
+      w.RawValue(ms_txt.data(), ms_txt.size(), rapidjson::kNumberType);
+      w.EndObject();
+    }
+    w.EndArray();
+  }
+
+  // Incremental-reuse telemetry, one object per tier (`lhd.incremental`). The
+  // compile tier is the kernel's own; pass.abc's counters ride the embedded
+  // "qor" member (its `incremental` object) and the formal verdict cache its
+  // own report lines.
+  if (res.compile_cache.present || res.abc_incr.present || res.sta_incr.present) {
+    w.Key("incremental");
+    w.StartObject();
+    if (res.compile_cache.present) {
+      w.Key("compile");
+      w.StartObject();
+      w.Key("enabled");
+      w.Bool(res.compile_cache.enabled);
+      w.Key("hits");
+      w.Uint64(res.compile_cache.hits);
+      w.Key("misses");
+      w.Uint64(res.compile_cache.misses);
+      w.Key("redone_ms");
+      const auto redone_txt = std::format("{:.3f}", res.compile_cache.redone_ms);
+      w.RawValue(redone_txt.data(), redone_txt.size(), rapidjson::kNumberType);
+      w.Key("store_failed");
+      w.Uint64(res.compile_cache.store_failed);
+      w.Key("refused");
+      w.Uint64(res.compile_cache.refused);
+      w.EndObject();
+    }
+    if (res.abc_incr.present) {
+      // Mirrors the abc-map report's own `incremental` object (qor.abc),
+      // so a report builder keys on ONE member for every tier.
+      w.Key("abc");
+      w.StartObject();
+      w.Key("enabled");
+      w.Bool(res.abc_incr.enabled);
+      w.Key("hits");
+      w.Uint64(res.abc_incr.hits);
+      w.Key("misses");
+      w.Uint64(res.abc_incr.misses);
+      w.Key("hit_ms");
+      const auto hit_txt = std::format("{:.3f}", res.abc_incr.hit_ms);
+      w.RawValue(hit_txt.data(), hit_txt.size(), rapidjson::kNumberType);
+      w.Key("miss_ms");
+      const auto miss_txt = std::format("{:.3f}", res.abc_incr.miss_ms);
+      w.RawValue(miss_txt.data(), miss_txt.size(), rapidjson::kNumberType);
+      w.Key("regions");
+      w.Uint64(res.abc_incr.regions);
+      w.Key("store_failed");
+      w.Uint64(res.abc_incr.store_failed);
+      w.EndObject();
+    }
+    if (res.sta_incr.present) {
+      // Mirrors the sta report's own `incremental` object (qor.sta).
+      w.Key("sta");
+      w.StartObject();
+      w.Key("enabled");
+      w.Bool(res.sta_incr.enabled);
+      w.Key("hits");
+      w.Uint64(res.sta_incr.hits);
+      w.Key("misses");
+      w.Uint64(res.sta_incr.misses);
+      w.Key("digestable");
+      w.Bool(res.sta_incr.digestable);
+      w.Key("lookup_ms");
+      const auto look_txt = std::format("{:.3f}", res.sta_incr.lookup_ms);
+      w.RawValue(look_txt.data(), look_txt.size(), rapidjson::kNumberType);
+      w.EndObject();
+    }
+    w.EndObject();
+  }
+
+  if (res.lec.present) {
+    // The PROOF, separate from the process `status`: an inconclusive comparison
+    // exits 0 too, so a consumer that reads only `status` would record it as a
+    // proof (see Result::Lec_verdict).
+    w.Key("lec");
+    w.StartObject();
+    w.Key("verdict");
+    w.String(res.lec.verdict.c_str());
+    if (!res.lec.solver.empty()) {
+      w.Key("solver");
+      w.String(res.lec.solver.c_str());
+    }
+    if (!res.lec.crosscheck_verdict.empty()) {
+      w.Key("crosscheck");
+      w.StartObject();
+      w.Key("solver");
+      w.String("lgyosys");
+      w.Key("verdict");
+      w.String(res.lec.crosscheck_verdict.c_str());
+      w.Key("exit_code");
+      w.Int(res.lec.crosscheck_exit_code);
+      if (res.lec.crosscheck_bounded) {
+        w.Key("bounded");
+        w.Bool(true);
+        w.Key("bound");
+        w.Int64(res.lec.crosscheck_bound);
+      }
+      w.EndObject();
+    }
+    w.Key("bounded");
+    w.Bool(res.lec.bounded);
+    if (res.lec.bounded) {
+      w.Key("bound");
+      w.Int64(res.lec.bound);
+    }
+    w.EndObject();
+  }
 
   w.Key("inputs");
   w.StartArray();
@@ -575,9 +919,21 @@ void write_result(const Options& opts, const Result& res) {
     w.RawValue(res.sim_query_json.data(), res.sim_query_json.size(), rapidjson::kObjectType);
   }
 
+  // Built with a rapidjson Writer (lhd_sim_tune.cpp), never string glue: RawValue
+  // does not validate, and it carries user paths and vectors.
+  if (!res.sim_tune_json.empty()) {
+    w.Key("sim_tune");
+    w.RawValue(res.sim_tune_json.data(), res.sim_tune_json.size(), rapidjson::kObjectType);
+  }
+
   if (!res.qor_json.empty()) {
     w.Key("qor");
     w.RawValue(res.qor_json.data(), res.qor_json.size(), rapidjson::kObjectType);
+  }
+
+  if (!res.satopt_json.empty()) {  // written by satopt::Report::json (run_satopt_step)
+    w.Key("satopt");
+    w.RawValue(res.satopt_json.data(), res.satopt_json.size(), rapidjson::kObjectType);
   }
 
   if (res.status != "pass") {

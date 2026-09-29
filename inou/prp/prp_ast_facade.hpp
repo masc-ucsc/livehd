@@ -19,6 +19,12 @@
 #include "prpparse/node_kind.hpp"
 #include "prpparse/source_buffer.hpp"
 
+// The formatter links the real tree-sitter API into the same executable. These
+// adapter handles need distinct C++ identities: a global struct TSNode would
+// collide with tree-sitter's TSNode in template symbols such as std::vector,
+// even though the two handles have different sizes and layouts.
+namespace prp_ast {
+
 // tree-sitter value types reproduced 1:1 (so prp2lnast's by-value usage holds).
 struct TSPoint {
   uint32_t row;
@@ -63,10 +69,8 @@ inline TSPoint ts_node_end_point(TSNode n) {
 }
 
 // ---- children (all, incl. anonymous markers) -------------------------------
-inline uint32_t ts_node_child_count(TSNode n) {
-  return n.a != nullptr ? static_cast<uint32_t>(n.a->kids.size()) : 0;
-}
-inline TSNode ts_node_child(TSNode n, uint32_t i) {
+inline uint32_t ts_node_child_count(TSNode n) { return n.a != nullptr ? static_cast<uint32_t>(n.a->kids.size()) : 0; }
+inline TSNode   ts_node_child(TSNode n, uint32_t i) {
   if (n.a == nullptr || i >= n.a->kids.size()) {
     return TSNode{};
   }
@@ -115,7 +119,7 @@ struct TSNamedChildren {
     const prpparse::Ast* const*    it;
     const prpparse::Ast* const*    end;
     const prpparse::Source_buffer* buf;
-    void      skip_unnamed() {
+    void                           skip_unnamed() {
       while (it != end && !(*it)->named) {
         ++it;
       }
@@ -197,3 +201,11 @@ inline TSNode ts_node_next_named_sibling(TSNode n) {
   }
   return TSNode{};
 }
+
+}  // namespace prp_ast
+
+// Preserve the adapter's source API; argument-dependent lookup finds its node
+// functions in prp_ast, and template instantiations use the namespaced types.
+using prp_ast::TSNamedChildren;
+using prp_ast::TSNode;
+using prp_ast::TSPoint;

@@ -1,0 +1,43 @@
+/*
+:name: string_format_unknown
+:type: comptime
+:verifier_pass: 16
+:verifier_fail: 0
+*/
+
+// An `0sb?` value is a comptime constant like any other — it just has no digit
+// for its unknown bits. Interpolating it is legal at elaboration time; the
+// unknown bits render as `?`.
+
+mut foo:u4 = 0
+foo = 0sb?
+
+cassert("{foo:b}" == "????")
+cputs("foo:{foo:b}")
+
+// `:h`/`:x`/`:X` group four bits per digit, `:o` three: a digit covering ANY
+// unknown bit has no value, so it renders `?` (Verilog's `%h` convention).
+mut m:u8 = 0ub1010??01
+
+cassert("{m:b}" == "1010??01")
+cassert("{m:x}" == "a?")
+cassert("{m:X}" == "A?")
+cassert("{m:o}" == "2??")
+
+// Width/separator cosmetics still apply on the unknown path.
+cassert("{m:4x}" == "00a?")
+cassert("{m:bs}" == "1010_??01")
+
+// `:d` has no positional rendering for unknown bits, so it (and a bare `{v}`)
+// falls back to the value's Pyrope spelling.
+cassert("{m:d}" == "0ub01010??01")
+cassert("{m}" == "0ub01010??01")
+
+// Fully-known values are unaffected by the `?` handling.
+cassert("{16:b}" == "10000")
+cassert("{16:x}" == "10")
+cassert("{16:o}" == "20")
+cassert("{16:d}" == "16")
+cassert("{255:4x}" == "00ff")
+cassert("{255:bs}" == "1111_1111")
+cassert("{1234567:ds}" == "1_234_567")

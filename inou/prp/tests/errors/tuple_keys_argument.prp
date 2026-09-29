@@ -1,0 +1,8 @@
+/*
+:name: tuple_keys_argument
+:type: error
+:error: `keys\(\)` takes no arguments
+:help: use `tuple.keys\(\)` to list the named keys
+*/
+const a = (const b=1, const c=2)
+const bad = a.keys(0) // locate_error_here

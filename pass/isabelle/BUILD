@@ -15,6 +15,7 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        "//core",
         "//graph",
         "//pass/common:pass",
         "@abseil-cpp//absl/container:flat_hash_map",

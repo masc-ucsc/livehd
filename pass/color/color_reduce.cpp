@@ -16,141 +16,13 @@
 #include "cell.hpp"
 #include "color_common.hpp"
 #include "diag.hpp"
+#include "hash_util.hpp"
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
+#include "hhds/hash_mix.hpp"
 #include "node_util.hpp"
 
 namespace livehd::color {
-
-namespace {
-
-namespace gu = livehd::graph_util;
-
-using Node = hhds::Node_class;
-using Pin  = hhds::Pin_class;
-
-// ---------------------------------------------------------------------------
-// Hash toolkit -- the semdiff/abc_incr canonical-digest primitives. Kept
-// file-private like theirs (each digest must be free to evolve with its own
-// consumer's invalidation needs), and two-lane for the same reason abc_incr is:
-// a splice on a colliding digest is a MISCOMPILE, so the verify walk below is
-// the gate and the digest only proposes -- but a weak digest would still flood
-// the walk with false buckets.
-// ---------------------------------------------------------------------------
-constexpr uint64_t mix64(uint64_t x) {
-  x ^= x >> 33U;
-  x *= 0xff51afd7ed558ccdULL;
-  x ^= x >> 33U;
-  x *= 0xc4ceb9fe1a85ec53ULL;
-  x ^= x >> 33U;
-  return x;
-}
-constexpr uint64_t hcombine(uint64_t h, uint64_t v) { return mix64(h ^ (v + 0x9e3779b97f4a7c15ULL + (h << 6U) + (h >> 2U))); }
-uint64_t           hstr(std::string_view s) {
-  uint64_t h = 1469598103934665603ULL;  // FNV-1a
-  for (char c : s) {
-    h ^= static_cast<unsigned char>(c);
-    h *= 1099511628211ULL;
-  }
-  return h;
-}
-
-struct Sig {
-  uint64_t a = 0, b = 0;
-  friend bool operator==(const Sig& x, const Sig& y) = default;
-  friend auto operator<=>(const Sig& x, const Sig& y) = default;
-};
-constexpr uint64_t kLaneB = 0x9ae16a3b2f90404fULL;
-
-Sig sig_seed(uint64_t tag) { return {mix64(tag), mix64(tag ^ kLaneB)}; }
-Sig sig_comb(Sig h, Sig v) { return {hcombine(h.a, v.a), hcombine(h.b, mix64(v.b ^ kLaneB))}; }
-Sig sig_u64(Sig h, uint64_t v) { return sig_comb(h, {v, v}); }
-Sig sig_str(Sig h, std::string_view s) { return sig_comb(h, {hstr(s), mix64(hstr(s) ^ kLaneB)}); }
-
-// Fold a port-grouped operand list, commutative-normalizing WITHIN each
-// sink-port class (the semdiff/abc_incr fold_operands rule: `a+b == b+a` on
-// one port class, but operands never trade places across ports).
-Sig fold_operands(Sig base, absl::flat_hash_map<int, std::vector<Sig>>& by_port) {
-  std::vector<int> ports;
-  ports.reserve(by_port.size());
-  for (auto& [p, vs] : by_port) {
-    (void)vs;
-    ports.emplace_back(p);
-  }
-  std::sort(ports.begin(), ports.end());
-  for (int p : ports) {
-    auto& vs = by_port[p];
-    std::sort(vs.begin(), vs.end());
-    base = sig_u64(base, static_cast<uint64_t>(static_cast<uint32_t>(p)));
-    for (const auto& v : vs) {
-      base = sig_comb(base, v);
-    }
-  }
-  return base;
-}
-
-// ---------------------------------------------------------------------------
-// Cone model
-// ---------------------------------------------------------------------------
-
-// A driver pin's emission-relevant shape. `off` is the packed-slice pin_offset:
-// it changes what cgen emits for the pin, so two cones differing only in it are
-// NOT the same pattern.
-struct Pin_shape {
-  uint32_t pid  = 0;
-  int32_t  bits = 0;
-  bool     sign = false;
-  int64_t  off  = 0;
-  friend bool operator==(const Pin_shape& x, const Pin_shape& y) = default;
-  friend auto operator<=>(const Pin_shape& x, const Pin_shape& y) = default;
-};
-
-Pin_shape shape_of(const Pin& p) {
-  Pin_shape s;
-  s.pid  = static_cast<uint32_t>(p.get_port_id());
-  s.bits = gu::bits_of(p);
-  s.sign = !gu::is_unsign(p);
-  if (auto o = p.attr(livehd::attrs::pin_offset); o.has()) {
-    s.off = static_cast<int64_t>(o.get());
-  }
-  return s;
-}
-
-Sig fold_shape(Sig h, const Pin_shape& s) {
-  h = sig_u64(h, (static_cast<uint64_t>(s.pid) << 33U) | (static_cast<uint64_t>(static_cast<uint32_t>(s.bits)) << 1U)
-                     | static_cast<uint64_t>(s.sign));
-  return sig_u64(h, static_cast<uint64_t>(s.off));
-}
-
-struct Cone {
-  hhds::Graph* g = nullptr;
-  Node         root;
-  // Members in forward_class (topological) order; the root is the last member.
-  std::vector<Node> members;
-  // Distinct non-const external driver pins, in deterministic first-use order.
-  std::vector<Pin> leaves;
-  std::vector<Sig> leaf_tok;  // final WL token per leaf (parallel to `leaves`)
-  // Final per-member signatures (the verify walk's pairing key).
-  absl::flat_hash_map<Node, Sig> sig;
-  // The root's driven pins (deduped by pid, ascending) -- the pattern outputs.
-  std::vector<Pin_shape> out_ports;
-  Sig                    digest{};
-  bool                   valid = false;
-};
-
-// A node may join a shared body only if it is a pure combinational PRIMITIVE
-// and not woven into the per-site assert/assume machinery. Sub is excluded
-// EXPLICITLY, not via is_loop_break: hhds re-stamps an instance of a fully
-// combinational module as non-loop-break, and a Sub member would be a
-// miscompile three ways -- the digest and the verify walk ignore the target
-// module (two different comb modules with identical port shapes would bucket
-// and pair), and the body clone would drop the subnode link entirely.
-bool is_eligible(const Node& n) {
-  if (!is_partitionable(n) || n.is_loop_break() || livehd::graph_util::type_op_of(n) == Ntype_op::Sub) {
-    return false;
-  }
-  return !n.attr(livehd::attrs::runtime_check).has();
-}
 
 // Our own output defs. A rerun must never mine them: a pattern body re-digests
 // to exactly the digest that names it, so with new sites elsewhere the bucket
@@ -166,6 +38,119 @@ bool is_pattern_def_name(std::string_view name) {
     }
   }
   return true;
+}
+
+namespace {
+
+namespace gu = livehd::graph_util;
+
+using Node = hhds::Node_class;
+using Pin  = hhds::Pin_class;
+
+// Two-lane signatures use the shared deterministic hash primitives. A splice
+// on a colliding digest is a MISCOMPILE, so the verify walk below is
+// the gate and the digest only proposes -- but a weak digest would still flood
+// the walk with false buckets.
+using hash_util::combine64;
+using hash_util::fnv1a64;
+using hash_util::mix64;
+
+struct Sig {
+  uint64_t    a = 0, b = 0;
+  friend bool operator==(const Sig& x, const Sig& y)  = default;
+  friend auto operator<=>(const Sig& x, const Sig& y) = default;
+};
+constexpr uint64_t kLaneB = 0x9ae16a3b2f90404fULL;
+
+Sig sig_seed(uint64_t tag) { return {mix64(tag), mix64(tag ^ kLaneB)}; }
+Sig sig_comb(Sig h, Sig v) { return {combine64(h.a, v.a), combine64(h.b, mix64(v.b ^ kLaneB))}; }
+Sig sig_u64(Sig h, uint64_t v) { return sig_comb(h, {v, v}); }
+Sig sig_str(Sig h, std::string_view s) {
+  const auto f = fnv1a64(s);  // hash once; this runs per node per digest round
+  return sig_comb(h, {f, mix64(f ^ kLaneB)});
+}
+
+// Fold a port-grouped operand list, commutative-normalizing WITHIN each
+// sink-port class (the semdiff/abc_incr fold_operands rule: `a+b == b+a` on
+// one port class, but operands never trade places across ports).
+//
+// hhds::Commutative_combiner128 removes both sorts: each term carries its own
+// sink pid, so no term can migrate across ports and the map's iteration order
+// stops mattering.
+Sig fold_operands(Sig base, absl::flat_hash_map<int, std::vector<Sig>>& by_port) {
+  hhds::Commutative_combiner128 c;
+  for (const auto& [p, vs] : by_port) {
+    const auto port_term = hhds::hash_mix128(static_cast<uint64_t>(static_cast<uint32_t>(p)));
+    for (const auto& v : vs) {
+      c.add(hhds::hash_combine128({v.a, v.b}, port_term));
+    }
+  }
+  const auto folded = c.value();
+  return sig_comb(base, Sig{folded.a, folded.b});
+}
+
+// ---------------------------------------------------------------------------
+// Cone model
+// ---------------------------------------------------------------------------
+
+// A driver pin's emission-relevant shape. `off` is the packed-slice pin_offset:
+// it changes what cgen emits for the pin, so two cones differing only in it are
+// NOT the same pattern.
+struct Pin_shape {
+  uint32_t    pid                                                 = 0;
+  int32_t     bits                                                = 0;
+  bool        sign                                                = false;
+  int64_t     off                                                 = 0;
+  friend bool operator==(const Pin_shape& x, const Pin_shape& y)  = default;
+  friend auto operator<=>(const Pin_shape& x, const Pin_shape& y) = default;
+};
+
+Pin_shape shape_of(const Pin& p) {
+  Pin_shape s;
+  s.pid  = static_cast<uint32_t>(p.get_port_id());
+  s.bits = gu::bits_of(p);
+  s.sign = !gu::is_unsign(p);
+  if (auto o = p.attr(livehd::attrs::pin_offset); o.has()) {
+    s.off = static_cast<int64_t>(o.get());
+  }
+  return s;
+}
+
+Sig fold_shape(Sig h, const Pin_shape& s) {
+  h = sig_u64(h,
+              (static_cast<uint64_t>(s.pid) << 33U) | (static_cast<uint64_t>(static_cast<uint32_t>(s.bits)) << 1U)
+                  | static_cast<uint64_t>(s.sign));
+  return sig_u64(h, static_cast<uint64_t>(s.off));
+}
+
+struct Cone {
+  hhds::Graph*                   g = nullptr;
+  Node                           root;
+  // Members in forward_class (topological) order; the root is the last member.
+  std::vector<Node>              members;
+  // Distinct non-const external driver pins, in deterministic first-use order.
+  std::vector<Pin>               leaves;
+  std::vector<Sig>               leaf_tok;  // final WL token per leaf (parallel to `leaves`)
+  // Final per-member signatures (the verify walk's pairing key).
+  absl::flat_hash_map<Node, Sig> sig;
+  // The root's driven pins (deduped by pid, ascending) -- the pattern outputs.
+  std::vector<Pin_shape>         out_ports;
+  Sig                            digest{};
+  bool                           valid = false;
+};
+
+// A node may join a shared body only if it is a pure combinational PRIMITIVE
+// and not woven into the per-site assert/assume machinery. Sub is excluded
+// EXPLICITLY, not via is_loop_break: hhds re-stamps an instance of a fully
+// combinational module as non-loop-break, and a Sub member would be a
+// miscompile three ways -- the digest and the verify walk ignore the target
+// module (two different comb modules with identical port shapes would bucket
+// and pair), and the body clone would drop the subnode link entirely.
+bool is_eligible(const Node& n) {
+  if (!is_partitionable(n) || n.is_loop_break() || livehd::graph_util::type_op_of(n) == Ntype_op::Sub) {
+    return false;
+  }
+  return !n.attr(livehd::attrs::runtime_check).has();
 }
 
 // The stable part of a member's identity: op, LUT function (when the node IS a
@@ -197,7 +182,7 @@ Sig node_anchor(const Node& n) {
   return h;
 }
 
-// Const operand token: VALUE-BLIND on purpose. Loop unrolling produces cone
+// Const operand token: normally VALUE-BLIND on purpose. Loop unrolling produces cone
 // after cone identical except for an index constant (`== 10'sh15c`, `15d`,
 // ...); folding the value would split every iteration into its own bucket and
 // hide exactly the repetition reduce exists to find. The value's storage SHAPE
@@ -206,11 +191,31 @@ Sig node_anchor(const Node& n) {
 // that port's width/sign well-defined. Which values a slot actually held is
 // folded into the pattern's NAME later (pattern_identity), so content
 // addressing still holds.
-Sig const_token(const Pin& d) {
-  const auto v = gu::hydrate_const(d);
-  Sig        h = sig_seed(0xc0157e2ULL);
-  h            = sig_u64(h, static_cast<uint64_t>(v.get_bits()));
-  h            = sig_u64(h, (v.is_negative() ? 2ULL : 0ULL) | (v.has_unknowns() ? 1ULL : 0ULL));
+//
+// Get_mask/Set_mask are different: their mask is structural wiring metadata,
+// not a runtime data operand. pass.abc can map them only while that mask stays
+// constant. Include its value in the token so reduce creates separate pattern
+// bodies instead of promoting differing masks into an un-mappable input port.
+bool const_value_is_structural(const Node& n, const Pin& sink) {
+  const auto op = gu::type_op_of(n);
+  if (op != Ntype_op::Get_mask && op != Ntype_op::Set_mask) {
+    return false;
+  }
+  // Ask for the mask's pid, never for the pid's NAME: get_sink_name ASSERTS on
+  // any pid the cell does not declare (Get_mask/Set_mask carry `mask` on pid 2,
+  // so a graph that parked it elsewhere aborts the whole pass), while
+  // get_sink_pid answers a known name without a string build.
+  return sink.get_port_id() == Ntype::get_sink_pid(op, "mask");
+}
+
+Sig const_token(const Pin& d, bool value_sensitive) {
+  const auto& v = gu::const_of(d);
+  Sig         h = sig_seed(0xc0157e2ULL);
+  h             = sig_u64(h, static_cast<uint64_t>(v.get_signed_bits()));
+  h             = sig_u64(h, (v.is_negative() ? 2ULL : 0ULL) | (v.has_unknowns() ? 1ULL : 0ULL));
+  if (value_sensitive) {
+    h = sig_str(h, v.serialize());
+  }
   return h;
 }
 
@@ -249,28 +254,33 @@ void compute_signatures(Cone& k, const absl::flat_hash_map<Node, int32_t>& cone_
     for (const auto& n : k.members) {
       Sig                                        h = node_anchor(n);
       absl::flat_hash_map<int, std::vector<Sig>> by_port;
-      for (const auto& e : n.inp_edges()) {
-        const auto& d = e.driver;
-        if (d.is_invalid()) {
-          continue;
-        }
-        Sig t;
-        if (gu::is_const_pin(d)) {
-          t = const_token(d);
-        } else if (auto m = d.get_master_node(); is_member(m)) {
-          auto ms = sig.find(m);
-          if (ms == sig.end()) {
-            // Members are walked in forward_class order, which is topological
-            // for combinational logic -- an unsigned in-cone driver means the
-            // order is broken. Refuse rather than hash garbage.
-            k.valid = false;
-            return;
+      for (auto e_sink : n.inp_sorted_pins()) {
+        for (auto e_drv : e_sink.get_driver_pins()) {
+          const auto& d = e_drv;
+          if (d.is_invalid()) {
+            continue;
           }
-          t = sig_u64(ms->second, static_cast<uint64_t>(static_cast<uint32_t>(d.get_port_id())));
-        } else {
-          t = tok[leaf_ix.at(d)];
+          Sig t;
+          if (d.is_const()) {
+            t = const_token(d, const_value_is_structural(n, e_sink));
+          } else if (auto m = d.get_master_node(); is_member(m)) {
+            auto ms = sig.find(m);
+            if (ms == sig.end()) {
+              // Members are walked in forward_class order, which is topological
+              // for combinational logic -- an unsigned in-cone driver means the
+              // order is broken. Refuse rather than hash garbage.
+              k.valid = false;
+              return;
+            }
+            t = sig_u64(ms->second, static_cast<uint64_t>(static_cast<uint32_t>(d.get_port_id())));
+          } else {
+            t = tok[leaf_ix.at(d)];
+          }
+          // BANK, not raw pid: a commutative cell spends one pid per operand
+          // (graph/cell.hpp), so keying the fold on the raw pid would make two
+          // cones that differ only in operand ORDER hash differently.
+          by_port[static_cast<int>(Ntype::sink_bank(gu::type_op_of(n), e_sink.get_port_id()))].push_back(t);
         }
-        by_port[static_cast<int>(e.sink.get_port_id())].push_back(t);
       }
       sig[n] = fold_operands(h, by_port);
     }
@@ -280,9 +290,11 @@ void compute_signatures(Cone& k, const absl::flat_hash_map<Node, int32_t>& cone_
     // Refine leaves from their consumers' fresh signatures.
     std::vector<std::vector<std::pair<Sig, uint32_t>>> uses(k.leaves.size());
     for (const auto& n : k.members) {
-      for (const auto& e : n.inp_edges()) {
-        if (auto it = leaf_ix.find(e.driver); it != leaf_ix.end()) {
-          uses[it->second].emplace_back(sig.at(n), static_cast<uint32_t>(e.sink.get_port_id()));
+      for (auto e_sink : n.inp_sorted_pins()) {
+        for (auto e_drv : e_sink.get_driver_pins()) {
+          if (auto it = leaf_ix.find(e_drv); it != leaf_ix.end()) {
+            uses[it->second].emplace_back(sig.at(n), static_cast<uint32_t>(Ntype::sink_bank(gu::type_op_of(n), e_sink.get_port_id())));
+          }
         }
       }
     }
@@ -343,6 +355,115 @@ uint64_t est_verilog_lines(const Cone& k) {
   return l;
 }
 
+uint64_t est_mappable_ge(const Cone& k) {
+  uint64_t ge = 0;
+  for (const auto& n : k.members) {
+    ge += synthesis_ge_weight(n);
+  }
+  return ge;
+}
+
+// A two-node wide shift followed by a narrow constant slice can be expensive
+// to synthesize at every occurrence even though replacing it with an instance
+// is text-neutral. Sharing wins in mapped gates and peak memory, so allow this
+// one shape through the text-profit guard. Keep the test deliberately strict;
+// other port-heavy two-node cones retain the normal guard.
+bool is_wide_shift_slice(const Cone& k) {
+  if (k.members.size() != 2 || gu::type_op_of(k.root) != Ntype_op::Get_mask) {
+    return false;
+  }
+  const Node* shift = nullptr;
+  for (const auto& n : k.members) {
+    if (gu::type_op_of(n) == Ntype_op::SRA) {
+      shift = &n;
+    }
+  }
+  if (shift == nullptr) {
+    return false;
+  }
+  const int shift_w = gu::bits_of(shift->create_driver_pin(0));
+  const int slice_w = gu::bits_of(k.root.create_driver_pin(0));
+  return slice_w > 0 && shift_w >= 4 * slice_w;
+}
+
+// A generated packed-bus placement can be one enormous dynamic SHL (for
+// example, a 20-bit lane placed into a 10k-bit aggregate). One such primitive
+// expands to a full barrel network, so repeated occurrences are worth sharing
+// even though a one-node pattern cannot win the source-text estimate. Constants
+// are excluded: the mapper implements those as wiring already.
+bool is_wide_dynamic_shift_node(const Node& n) {
+  const auto op = gu::type_op_of(n);
+  if (op != Ntype_op::SHL && op != Ntype_op::SRA) {
+    return false;
+  }
+  // Do not assume port 0: imported/lowered cells can carry the live output on
+  // another driver port. The width attribute lives on the edge's driver pin,
+  // which is also what the mapper consumes.
+  int width = 0;
+  for (const auto& e : n.out_edges()) {
+    width = std::max(width, gu::bits_of(e.driver));
+  }
+  if (width < 256) {
+    return false;
+  }
+  const auto amount = gu::get_driver_of_sink_name(n, "b");
+  return !amount.is_invalid() && !amount.is_const();
+}
+
+// The ONE producer the two-member exception below may absorb: ADDRESS
+// ARITHMETIC. graph_util weighs Concat/Get_mask/Set_mask as pure wiring
+// (ge_weight == 0: they rename bit positions and mint no gate) and a Sum/Sext
+// index adder as its own narrow output width -- the packed-array shape's
+// producer is a 9-bit `index + 1`. None of them changes the order of magnitude
+// of the body the singleton exception already admits. A Mux, a Mult, a Div, a
+// wide bitwise op or a SECOND shift does, so those keep the normal guards.
+// A constant is absent on purpose: constants are CONST_NODE pool pins, not body
+// nodes, so a const is a cone LEAF, never a member.
+bool is_address_arith_node(const Node& n) {
+  switch (gu::type_op_of(n)) {
+    case Ntype_op::Sum     :
+    case Ntype_op::Sext    :
+    case Ntype_op::Concat  :
+    case Ntype_op::Get_mask:
+    case Ntype_op::Set_mask: return true;
+    default                : return false;
+  }
+}
+
+bool is_synthesis_expensive_pattern(const Cone& k) {
+  if (is_wide_shift_slice(k)) {
+    return true;
+  }
+  if (!is_wide_dynamic_shift_node(k.root)) {
+    return false;
+  }
+  if (k.members.size() == 1) {
+    return true;
+  }
+  // With bounded mining, a multi-fanout wide shift roots its cone and normally
+  // pulls in one address-arithmetic producer before max_nodes cuts it.  That
+  // two-node form is just as expensive as a singleton shift (Rob's repeated
+  // 32k/52k-bit selects); treating only the singleton as special leaves every
+  // copy to expand independently.  Bound the exception HARD, because it turns
+  // OFF both the text-profit and the max_pattern_ge guards: exactly one extra
+  // member, it must be address arithmetic, and it may not outweigh the shift
+  // that justifies the exception.  The body admitted here is therefore never
+  // more than twice the body the singleton case already admits; a cone whose
+  // real cost lives in a companion Mux/Mult/Div/second shift keeps the normal
+  // text/GE profitability guards, as does any larger cone that merely ends in
+  // a shift.
+  if (k.members.size() != 2) {
+    return false;
+  }
+  for (const auto& n : k.members) {
+    if (n == k.root) {
+      continue;
+    }
+    return is_address_arith_node(n) && synthesis_ge_weight(n) <= synthesis_ge_weight(k.root);
+  }
+  return false;
+}
+
 // True when the cone touches a parallel duplicate edge (same driver pin AND
 // same sink pin twice, e.g. `r+r` as two edges into one variadic port). The
 // splice and the body build recreate such wiring edge-by-edge, and hhds's
@@ -351,9 +472,11 @@ uint64_t est_verilog_lines(const Cone& k) {
 bool has_dup_edge(const Cone& k) {
   absl::flat_hash_set<std::pair<Pin, Pin>> seen;
   for (const auto& n : k.members) {
-    for (const auto& e : n.inp_edges()) {
-      if (!e.driver.is_invalid() && !seen.insert({e.driver, e.sink}).second) {
-        return true;
+    for (auto e_sink : n.inp_sorted_pins()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        if (!e_drv.is_invalid() && !seen.insert({e_drv, e_sink}).second) {
+          return true;
+        }
       }
     }
   }
@@ -370,7 +493,7 @@ void mine_def(hhds::Graph* g, const Reduce_opts& opts, std::vector<Cone>& out, R
   // forward_class position for every eligible node (also the membership set).
   absl::flat_hash_map<Node, uint32_t> pos;
   std::vector<Node>                   order;
-  for (auto n : g->forward_class()) {
+  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
     if (is_eligible(n)) {
       pos.emplace(n, static_cast<uint32_t>(order.size()));
       order.push_back(n);
@@ -410,24 +533,70 @@ void mine_def(hhds::Graph* g, const Reduce_opts& opts, std::vector<Cone>& out, R
     if (!any) {
       continue;  // dead node: nothing to extract, other passes clean it up
     }
+
+    // A wide dynamic shift is normally cut into a singleton so bounded mining
+    // can share it without consuming an entire cone.  Keep a wide SRA with its
+    // sole narrow Get_mask consumer, though: that pair exposes only the used
+    // word at the pattern boundary.  Cutting between them forces ABC to build
+    // the full wide shift (Rob has hundreds of 10260 -> 20 bit selects) and
+    // defeats the mapper's demand-width reduction.
+    const bool wide_sra_to_narrow_slice = !root && !single.is_invalid() && gu::type_op_of(n) == Ntype_op::SRA
+                                          && gu::type_op_of(single) == Ntype_op::Get_mask
+                                          && gu::bits_of(single.create_driver_pin(0)) > 0
+                                          && gu::bits_of(n.create_driver_pin(0)) >= 4 * gu::bits_of(single.create_driver_pin(0));
+    if (opts.max_nodes != 0 && is_wide_dynamic_shift_node(n) && !wide_sra_to_narrow_slice) {
+      root = true;
+    }
     int32_t cid;
     if (root) {
       cid = static_cast<int32_t>(roots.size());
       roots.push_back(n);
       members.emplace_back();
     } else {
+      // A slice followed by a widening left shift is the common packed-array
+      // repack shape. Keep the slice with its upstream producer rather than
+      // consuming the bounded cone slot with the downstream width expansion;
+      // repeated `wide SRA -> narrow Get_mask` blocks can then become one
+      // shared definition and are synthesized once. This preference is only
+      // active for explicitly bounded mining; the default maximal-cone
+      // decomposition is unchanged.
+      const bool slice_before_expand
+          = opts.max_nodes != 0 && gu::type_op_of(n) == Ntype_op::Get_mask && gu::type_op_of(single) == Ntype_op::SHL;
+      if (slice_before_expand) {
+        cid = static_cast<int32_t>(roots.size());
+        roots.push_back(n);
+        members.emplace_back();
+        cone_of.emplace(n, cid);
+        members[cid].push_back(n);
+        continue;
+      }
       auto it = cone_of.find(single);
       if (it == cone_of.end()) {
         continue;  // its only reader was dead -- so is this chain
       }
       cid = it->second;
+      // A maximal fanout-free cone can be globally unique while containing
+      // hundreds of identical unrolled blocks. Since this walk is sinks before
+      // drivers, opening a new cone here cuts exactly one driver->sink boundary:
+      // the old cone remains single-output, and the new cone grows backward
+      // with the same invariant. The pieces are disjoint, so extraction order
+      // and overlap handling are unchanged.
+      if (opts.max_nodes != 0 && members[static_cast<size_t>(cid)].size() >= opts.max_nodes) {
+        cid = static_cast<int32_t>(roots.size());
+        roots.push_back(n);
+        members.emplace_back();
+      }
     }
     cone_of.emplace(n, cid);
     members[cid].push_back(n);
   }
 
   for (size_t c = 0; c < roots.size(); ++c) {
-    if (members[c].size() < opts.min_nodes) {
+    // Do not lower min_nodes globally just to discover expensive singleton
+    // shifts: building signatures for every ordinary one-node cone dominates
+    // reduction time on large designs. The narrow exception is classified from
+    // the node itself before any Cone allocation/signature work.
+    if (members[c].size() < opts.min_nodes && !(members[c].size() == 1 && is_wide_dynamic_shift_node(members[c].front()))) {
       continue;
     }
     Cone k;
@@ -439,16 +608,18 @@ void mine_def(hhds::Graph* g, const Reduce_opts& opts, std::vector<Cone>& out, R
     // Leaves: distinct non-const external driver pins, first-use order.
     absl::flat_hash_set<Pin> seen;
     for (const auto& n : k.members) {
-      for (const auto& e : n.inp_edges()) {
-        const auto& d = e.driver;
-        if (d.is_invalid() || gu::is_const_pin(d)) {
-          continue;
-        }
-        if (auto it = cone_of.find(d.get_master_node()); it != cone_of.end() && it->second == static_cast<int32_t>(c)) {
-          continue;
-        }
-        if (seen.insert(d).second) {
-          k.leaves.push_back(d);
+      for (auto e_sink : n.inp_sorted_pins()) {
+        for (auto e_drv : e_sink.get_driver_pins()) {
+          const auto& d = e_drv;
+          if (d.is_invalid() || d.is_const()) {
+            continue;
+          }
+          if (auto it = cone_of.find(d.get_master_node()); it != cone_of.end() && it->second == static_cast<int32_t>(c)) {
+            continue;
+          }
+          if (seen.insert(d).second) {
+            k.leaves.push_back(d);
+          }
         }
       }
     }
@@ -489,14 +660,22 @@ void mine_def(hhds::Graph* g, const Reduce_opts& opts, std::vector<Cone>& out, R
 
 // Operand of one member, classified for pairing.
 struct Opnd {
-  int         kind = 0;  // 0 = const, 1 = leaf, 2 = member
-  Sig         key{};     // pairing class: const shape token / leaf token / member sig
-  std::string cval;      // kind 0: serialized value (exact compare + tie order)
+  int         kind = 0;      // 0 = const, 1 = leaf, 2 = member
+  Sig         key{};         // pairing class: const shape token / leaf token / member sig
+  std::string cval;          // kind 0: serialized value (exact compare + tie order)
   bool        cunk = false;  // kind 0: value carries unknown (x) bits
-  Pin         pin;       // any kind: the driver pin
-  Node        node;      // kind 2: the member
-  Pin_shape   shape{};   // kinds 1,2: driver-pin shape (bits/sign/offset; pid for 2)
-  uint64_t    tie = 0;   // deterministic tie-break inside equal keys (nid-based)
+  // kind 0, the const's REAL facts. `key` is a HASH of these, and match_cones is
+  // the walk that DECIDES a splice, so it must compare the facts themselves --
+  // otherwise a 64-bit collision accepts two operands of different width or sign.
+  // Worse, `key` is also what the bucket digest folds in (const_token at the
+  // digest site), so filter and confirmation could not fail independently.
+  int32_t     cbits = 0;      // kind 0: get_signed_bits()
+  bool        cneg  = false;  // kind 0: is_negative()
+  bool        cvsen = false;  // kind 0: the value is STRUCTURAL here (Get_mask/Set_mask mask)
+  Pin         pin;           // any kind: the driver pin
+  Node        node;          // kind 2: the member
+  Pin_shape   shape{};       // kinds 1,2: driver-pin shape (bits/sign/offset; pid for 2)
+  uint64_t    tie = 0;       // deterministic tie-break inside equal keys (nid-based)
 };
 
 bool opnd_less(const Opnd& x, const Opnd& y) {
@@ -535,40 +714,54 @@ struct Match {
 // slot enumeration see one deterministic sequence.
 bool operands_of(const Cone& K, const absl::flat_hash_map<Pin, Sig>& tok, const Node& n,
                  absl::flat_hash_map<int, std::vector<Opnd>>& by_port, std::vector<int>& ports) {
-  for (const auto& e : n.inp_edges()) {
-    const auto& d = e.driver;
-    if (d.is_invalid()) {
-      continue;
-    }
-    Opnd o;
-    if (gu::is_const_pin(d)) {
-      const auto v = gu::hydrate_const(d);
-      o.kind       = 0;
-      o.cval       = v.serialize();
-      o.cunk       = v.has_unknowns();
-      o.key        = const_token(d);
-      o.pin        = d;
-    } else if (auto mn = d.get_master_node(); K.sig.contains(mn)) {
-      o.kind  = 2;
-      o.key   = K.sig.at(mn);
-      o.node  = mn;
-      o.pin   = d;
-      o.shape = shape_of(d);
-      o.tie   = static_cast<uint64_t>(mn.get_debug_nid());
-    } else {
-      auto it = tok.find(d);
-      if (it == tok.end()) {
-        return false;  // an operand the miner never saw: bail out
+  for (auto e_sink : n.inp_sorted_pins()) {
+    for (auto e_drv : e_sink.get_driver_pins()) {
+      const auto& d = e_drv;
+      if (d.is_invalid()) {
+        continue;
       }
-      o.kind      = 1;
-      o.key       = it->second;
-      o.pin       = d;
-      o.shape     = shape_of(d);
-      o.shape.pid = 0;  // a leaf's source pid is not part of the pattern
-      o.tie       = (static_cast<uint64_t>(d.get_master_node().get_debug_nid()) << 16U)
-            ^ static_cast<uint64_t>(static_cast<uint32_t>(d.get_port_id()));
+      Opnd o;
+      if (d.is_const()) {
+        const auto& v = gu::const_of(d);
+        const bool  vs = const_value_is_structural(n, e_sink);
+        o.kind         = 0;
+        o.cval         = v.serialize();
+        o.cunk         = v.has_unknowns();
+        o.cbits        = static_cast<int32_t>(v.get_signed_bits());
+        o.cneg         = v.is_negative();
+        o.cvsen        = vs;
+        o.key          = const_token(d, vs);
+        o.pin          = d;
+      } else if (auto mn = d.get_master_node(); K.sig.contains(mn)) {
+        o.kind  = 2;
+        o.key   = K.sig.at(mn);
+        o.node  = mn;
+        o.pin   = d;
+        o.shape = shape_of(d);
+        o.tie   = static_cast<uint64_t>(mn.get_debug_nid());
+      } else {
+        auto it = tok.find(d);
+        if (it == tok.end()) {
+          return false;  // an operand the miner never saw: bail out
+        }
+        o.kind      = 1;
+        o.key       = it->second;
+        o.pin       = d;
+        o.shape     = shape_of(d);
+        o.shape.pid = 0;  // a leaf's source pid is not part of the pattern
+        o.tie       = (static_cast<uint64_t>(d.get_master_node().get_debug_nid()) << 16U)
+                      ^ static_cast<uint64_t>(static_cast<uint32_t>(d.get_port_id()));
+      }
+      // RAW sink pid, NOT the operand bank. This map's key is not just a match
+      // key: enumerate_const_slots stores it in Const_slot::port and the pattern
+      // rebuild wires the slot with `create_sink_pin(port)`. Under ONE DRIVER PER
+      // SINK PIN each operand owns a pid, so folding two of them into one bank
+      // made the rebuild connect BOTH to that bank's first pin -- two drivers on
+      // one sink, and one operand lost. The cost of keying on the pid is that two
+      // cones differing only in commutative operand ORDER no longer match, which
+      // is a missed reduction, not a wrong one.
+      by_port[static_cast<int>(e_sink.get_port_id())].push_back(std::move(o));
     }
-    by_port[static_cast<int>(e.sink.get_port_id())].push_back(std::move(o));
   }
   ports.clear();
   ports.reserve(by_port.size());
@@ -672,8 +865,8 @@ Match match_cones(const Cone& A, const Cone& B, const Slot_index& slot_ix, size_
       return m;
     }
     {
-      auto  la = na.attr(livehd::attrs::lut);
-      auto  lb = nb.attr(livehd::attrs::lut);
+      auto la = na.attr(livehd::attrs::lut);
+      auto lb = nb.attr(livehd::attrs::lut);
       if (la.has() != lb.has() || (la.has() && std::string_view{la.get()} != std::string_view{lb.get()})) {
         return m;
       }
@@ -701,8 +894,22 @@ Match match_cones(const Cone& A, const Cone& B, const Slot_index& slot_ix, size_
         }
         switch (oa.kind) {
           case 0: {
-            if (!(oa.key == ob.key)) {
+            // STRUCTURAL, not `oa.key == ob.key`. This walk DECIDES a splice, so
+            // a 64-bit collision here would accept two constants of different
+            // width or sign -- and `key` is the same token the bucket digest
+            // folds in, so the filter and this confirmation could not fail
+            // independently. Compare the facts the token stood for.
+            if (oa.cbits != ob.cbits || oa.cneg != ob.cneg || oa.cunk != ob.cunk) {
               return m;  // shape mismatch (bits/sign/unknowns)
+            }
+            if (oa.cvsen != ob.cvsen) {
+              return m;  // one side treats the value as structural, the other does not
+            }
+            if (oa.cvsen && oa.cval != ob.cval) {
+              // A Get_mask/Set_mask mask is wiring metadata: pass.abc can map it
+              // only while it stays constant, so differing masks must build
+              // SEPARATE pattern bodies rather than be promoted to a port.
+              return m;
             }
             if (oa.cval != ob.cval && (oa.cunk || ob.cunk)) {
               return m;  // x-carrying values only match verbatim
@@ -800,8 +1007,7 @@ void carry_driver_attrs(const Pin& orig, const Pin& neo) {
 // Build the shared pattern def from the representative cone. Returns the
 // GraphIO, or nullptr after a fatal diag.
 std::shared_ptr<hhds::GraphIO> build_pattern_def(hhds::GraphLibrary* lib, const std::string& name, const Cone& rep,
-                                                 const Port_plan& plan, const std::vector<Const_slot>& slots,
-                                                 Reduce_stats& st) {
+                                                 const Port_plan& plan, const std::vector<Const_slot>& slots, Reduce_stats& st) {
   auto gio = lib->create_io(name);
 
   hhds::Port_id pid = 1;
@@ -819,9 +1025,9 @@ std::shared_ptr<hhds::GraphIO> build_pattern_def(hhds::GraphLibrary* lib, const 
   // that can never truncate; sign follows the value.
   std::vector<std::pair<uint32_t, bool>> cshape(plan.const_ports.size());
   for (size_t c = 0; c < plan.const_ports.size(); ++c) {
-    const auto v = gu::hydrate_const(slots[plan.const_ports[c]].rep_pin);
-    cshape[c]    = {static_cast<uint32_t>(v.get_bits()) + 1U, !v.is_negative()};
-    auto nm      = std::format("c{}", c);
+    const auto& v = gu::const_of(slots[plan.const_ports[c]].rep_pin);
+    cshape[c]     = {static_cast<uint32_t>(v.get_signed_bits()) + 1U, !v.is_negative()};
+    auto nm       = std::format("c{}", c);
     gio->add_input(nm, pid++);
     gio->set_bits(nm, cshape[c].first);
     gio->set_unsign(nm, cshape[c].second);
@@ -883,18 +1089,20 @@ std::shared_ptr<hhds::GraphIO> build_pattern_def(hhds::GraphLibrary* lib, const 
   // authority.
   for (const auto& n : rep.members) {
     auto neo = node_map.at(n);
-    for (const auto& e : n.inp_edges()) {
-      const auto& d = e.driver;
-      if (d.is_invalid() || gu::is_const_pin(d)) {
-        continue;
-      }
-      auto sp = neo.create_sink_pin(e.sink.get_port_id());
-      if (auto mit = node_map.find(d.get_master_node()); mit != node_map.end()) {
-        auto dp = mit->second.create_driver_pin(d.get_port_id());
-        carry_driver_attrs(d, dp);
-        dp.connect_sink(sp);
-      } else {
-        body->get_input_pin(leaf_port.at(d)).connect_sink(sp);
+    for (auto e_sink : n.inp_sorted_pins()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        const auto& d = e_drv;
+        if (d.is_invalid() || d.is_const()) {
+          continue;
+        }
+        auto sp = neo.create_sink_pin(e_sink.get_port_id());
+        if (auto mit = node_map.find(d.get_master_node()); mit != node_map.end()) {
+          auto dp = mit->second.create_driver_pin(d.get_port_id());
+          carry_driver_attrs(d, dp);
+          dp.connect_sink(sp);
+        } else {
+          body->get_input_pin(leaf_port.at(d)).connect_sink(sp);
+        }
       }
     }
   }
@@ -914,7 +1122,7 @@ std::shared_ptr<hhds::GraphIO> build_pattern_def(hhds::GraphLibrary* lib, const 
       } else {
         auto cit = const_map.find(slots[s].rep_pin);
         if (cit == const_map.end()) {
-          cit = const_map.emplace(slots[s].rep_pin, gu::create_const(*body, gu::hydrate_const(slots[s].rep_pin))).first;
+          cit = const_map.emplace(slots[s].rep_pin, gu::create_const(*body, gu::const_of(slots[s].rep_pin))).first;
         }
         cit->second.connect_sink(sp);
       }
@@ -954,9 +1162,8 @@ Pin follow(const Fwd& fwd, Pin p) {
 
 // Replace one occurrence with an instance of the pattern def. `match` is
 // nullptr for the representative (identity correspondence).
-void splice(const Cone& rep, const Cone& occ, const Match* match, const Port_plan& plan,
-            const std::vector<Const_slot>& slots, const std::shared_ptr<hhds::GraphIO>& gio, Fwd& fwd,
-            Reduce_stats& st) {
+void splice(const Cone& rep, const Cone& occ, const Match* match, const Port_plan& plan, const std::vector<Const_slot>& slots,
+            const std::shared_ptr<hhds::GraphIO>& gio, Fwd& fwd, Reduce_stats& st) {
   auto* g = occ.g;
 
   // Snapshot the root's readers (and its driver pins) before any mutation:
@@ -971,20 +1178,8 @@ void splice(const Cone& rep, const Cone& occ, const Match* match, const Port_pla
     readers.push_back({static_cast<uint32_t>(e.driver.get_port_id()), e.driver, e.sink});
   }
 
-  // Const nodes the cone consumes: candidates for the dangling sweep below.
-  absl::flat_hash_set<Node> const_masters;
-  for (const auto& n : occ.members) {
-    for (const auto& e : n.inp_edges()) {
-      if (gu::is_const_pin(e.driver)) {
-        if (auto cm = e.driver.get_master_node(); gu::type_op_of(cm) == Ntype_op::Nconst && !gu::is_builtin_node(cm)) {
-          const_masters.insert(cm);
-        }
-      }
-    }
-  }
-
   // The instance. Anonymous on purpose (partition's hier-name transparency
-  // convention -- cgen synthesizes a stable u_<module> at emit), and NOT
+  // convention -- cgen emits it as the transparent `__flat___<module>`), and NOT
   // colored: color ids are per-def region ids that pass.partition consumes,
   // and a fresh 1..P stamp would collide with whatever coloring the graphs
   // already carry. Pattern identity is the instance's target def name (pat_*).
@@ -1012,9 +1207,8 @@ void splice(const Cone& rep, const Cone& occ, const Match* match, const Port_pla
   // Outputs: rewire every reader of the old root to the instance, carrying the
   // occurrence's own wire name/shape so downstream naming does not shift.
   for (size_t j = 0; j < rep.out_ports.size(); ++j) {
-    const auto pid = rep.out_ports[j].pid;
-    auto       dp =
-        sub.create_driver_pin(static_cast<hhds::Port_id>(plan.leaf_rank.size() + plan.const_ports.size() + 1 + j));
+    const auto pid   = rep.out_ports[j].pid;
+    auto       dp    = sub.create_driver_pin(static_cast<hhds::Port_id>(plan.leaf_rank.size() + plan.const_ports.size() + 1 + j));
     bool       first = true;
     for (const auto& rd : readers) {
       if (rd.pid != pid) {
@@ -1032,19 +1226,6 @@ void splice(const Cone& rep, const Cone& occ, const Match* match, const Port_pla
   for (const auto& n : occ.members) {
     n.del_node();
     ++st.nodes_deleted;
-  }
-  // Consts whose only readers were the cone are dangling now.
-  for (const auto& cm : const_masters) {
-    bool used = false;
-    for (const auto& e : cm.out_edges()) {
-      (void)e;
-      used = true;
-      break;
-    }
-    if (!used) {
-      cm.del_node();
-      ++st.nodes_deleted;
-    }
   }
 }
 
@@ -1103,10 +1284,10 @@ bool color_reduce(std::span<hhds::Graph* const> defs, const Reduce_opts& opts, R
 
   // -------- verify + extract --------
   struct Job {
-    std::vector<Cone>       occs;     // [0] = representative
-    std::vector<Match>      matches;  // per non-rep occurrence
-    std::vector<Const_slot> slots;    // representative const slots, canonical order
-    std::vector<bool>       promoted; // per slot: values diverge -> input port
+    std::vector<Cone>       occs;        // [0] = representative
+    std::vector<Match>      matches;     // per non-rep occurrence
+    std::vector<Const_slot> slots;       // representative const slots, canonical order
+    std::vector<bool>       promoted;    // per slot: values diverge -> input port
     Sig                     identity{};  // structural digest + slot decisions/values
   };
   std::vector<Job> jobs;
@@ -1124,10 +1305,14 @@ bool color_reduce(std::span<hhds::Graph* const> defs, const Reduce_opts& opts, R
     // Text-profit guard, conservative half: the instance costs at least
     // leaves+outs+2 lines (promoted consts only add). Not enough per-site win
     // => not worth a shared module. Re-checked after the const decision below.
-    if (opts.min_win != 0
-        && est_verilog_lines(occs.front())
-               < occs.front().leaves.size() + occs.front().out_ports.size() + 2 + opts.min_win) {
+    if (opts.min_win != 0 && !is_synthesis_expensive_pattern(occs.front())
+        && est_verilog_lines(occs.front()) < occs.front().leaves.size() + occs.front().out_ports.size() + 2 + opts.min_win) {
       ++st.port_heavy_skipped;
+      continue;
+    }
+    if (opts.max_pattern_ge != 0 && !is_synthesis_expensive_pattern(occs.front())
+        && est_mappable_ge(occs.front()) > opts.max_pattern_ge) {
+      ++st.oversize_skipped;
       continue;
     }
 
@@ -1156,7 +1341,7 @@ bool color_reduce(std::span<hhds::Graph* const> defs, const Reduce_opts& opts, R
     job.promoted.assign(job.slots.size(), false);
     for (size_t s = 0; s < job.slots.size(); ++s) {
       for (const auto& m : job.matches) {
-        if (gu::hydrate_const(m.occ_slot_pins[s]).serialize() != job.slots[s].rep_val) {
+        if (gu::const_of(m.occ_slot_pins[s]).serialize() != job.slots[s].rep_val) {
           job.promoted[s] = true;
           break;
         }
@@ -1166,8 +1351,8 @@ bool color_reduce(std::span<hhds::Graph* const> defs, const Reduce_opts& opts, R
     // The pattern's identity refines the value-blind digest with the slot
     // decisions and the internal values, so the content-addressed name still
     // uniquely determines body AND interface.
-    Sig id = sig_comb(sig_seed(0x9a77e51d), rep.digest);
-    id     = sig_u64(id, job.slots.size());
+    Sig    id         = sig_comb(sig_seed(0x9a77e51d), rep.digest);
+    id                = sig_u64(id, job.slots.size());
     for (size_t s = 0; s < job.slots.size(); ++s) {
       if (job.promoted[s]) {
         id = sig_u64(id, 1);
@@ -1178,7 +1363,7 @@ bool color_reduce(std::span<hhds::Graph* const> defs, const Reduce_opts& opts, R
     }
     job.identity = id;
 
-    if (opts.min_win != 0
+    if (opts.min_win != 0 && !is_synthesis_expensive_pattern(rep)
         && est_verilog_lines(rep) < rep.leaves.size() + n_promoted + rep.out_ports.size() + 2 + opts.min_win) {
       ++st.port_heavy_skipped;
       continue;

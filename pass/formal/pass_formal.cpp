@@ -3,16 +3,23 @@
 #include "pass_formal.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstdlib>
+#include <limits>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cell.hpp"
 #include "diag.hpp"
 #include "hhds/graph.hpp"
 #include "node_util.hpp"
 #include "prove.hpp"
+#include "query.hpp"
 
 using namespace livehd;
 namespace gu = livehd::graph_util;
@@ -34,6 +41,34 @@ int  to_int(std::string_view v, int dflt) {
     return dflt;
   }
 }
+
+// The pass's TOTAL wall-clock budget (pass.formal.timeout). `lhd compile` runs
+// this pass on every definition of the design, and a property whose cone the
+// prover cannot discharge burns its whole deterministic rlimit before answering
+// Unknown -- on a large design that is minutes of compile spent to learn nothing
+// (measured on minion: 52.5 s of a 55 s compile). The budget bounds that: each
+// query is handed only what is LEFT of it, and once it is gone the remaining
+// obligations are not solved at all.
+//
+// Degrading is sound in one direction only, which is the direction taken: an
+// unsolved obligation stays a RUNTIME CHECK (never elided, never a build error).
+// The cost is reproducibility -- a slower machine proves fewer properties, so
+// which checks get elided is no longer machine-independent. `timeout=0` restores
+// the fully deterministic rlimit-only behavior.
+struct Budget {
+  std::chrono::steady_clock::time_point start    = std::chrono::steady_clock::now();
+  long long                             total_ms = 0;  // 0 = unbounded
+  int                                   skipped  = 0;  // obligations left unsolved once it ran out
+
+  bool      bounded() const { return total_ms > 0; }
+  long long left_ms() const {
+    const auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+    return total_ms - spent;
+  }
+  bool spent() const { return bounded() && left_ms() <= 0; }
+  // What one query may take: everything still unspent, capped to `int`.
+  int  query_ms() const { return static_cast<int>(std::clamp<long long>(left_ms(), 1, std::numeric_limits<int>::max())); }
+};
 // The decoded fproperty instance-name attr ("<kind>\x1f<loc>\x1f<msg>"): the
 // kind ("assert" | "assert_always" | "assume") plus the optional source
 // location and user message carried for diagnostics.
@@ -83,26 +118,17 @@ void report_refuted(std::string_view code, const std::string& what, std::string_
   }
   std::string cex = out.witness.empty() ? std::string{} : (" (counterexample: " + out.witness + ")");
   std::string hint
-      = out.stateful
-            ? "checked over free module inputs and free (cut) register state in isolation; a different top-level "
-              "instantiation, or an unreachable register state, may explain it — re-check at the intended top, or "
-              "report a compiler bug if it should already hold"
-            : "checked over free module inputs in isolation; a different top-level instantiation may constrain them so "
-              "it holds — re-check at the intended top, or report a compiler bug if it should already hold";
+      = out.stateful ? "checked over free module inputs and free (cut) register state in isolation; a different top-level "
+                       "instantiation, or an unreachable register state, may explain it — re-check at the intended top, or "
+                       "report a compiler bug if it should already hold"
+                     : "checked over free module inputs in isolation; a different top-level instantiation may constrain them so "
+                       "it holds — re-check at the intended top, or report a compiler bug if it should already hold";
   if (code == "assume-refuted") {
-    // An input `assume` at a root module is BY NATURE refutable here (inputs are
-    // free) — the gate is telling the user the constraint is not self-evident,
-    // not that the design is broken. Name both real escapes explicitly.
-    hint += "; for an intentional environment constraint, move the assume into a `formal name { }` block "
-            "(adjudicated by `lhd formal verify`, not this gate) or pass --set compile.formal.on_refute=warn";
+    hint += "; fix the binding, rewrite the contract as assume_nocheck, or set formal.assume_check=false";
   }
   // Deferred: record + fail the build, but let the pipeline finish so cgen still
   // emits the design with the failing property kept as a runtime check.
-  livehd::diag::err("pass.formal", code, "comptime")
-      .msg("{} in '{}'{}{}", what, module, detail, cex)
-      .hint(hint)
-      .deferred()
-      .emit();
+  livehd::diag::err("pass.formal", code, "comptime").msg("{} in '{}'{}{}", what, module, detail, cex).hint(hint).deferred().emit();
 }
 
 // A REACHABLE-from-reset refutation found by the shared BMC engine (mode=normal,
@@ -123,8 +149,9 @@ void report_refuted_reachable(std::string_view code, const std::string& what, st
       = witness.empty() ? std::string{} : (" (counterexample from reset @ cycle " + std::to_string(cycle) + ": " + witness + ")");
   livehd::diag::err("pass.formal", code, "comptime")
       .msg("{} in '{}'{}{}", what, module, detail, cex)
-      .hint("reachable from reset within the compile budget (BMC), so this is a genuine violation — fix the design, narrow "
-            "it with a proven assume, or intend it as a runtime check; a deeper/unreachable case would not error")
+      .hint(
+          "reachable from reset within the compile budget (BMC), so this is a genuine violation — fix the design, narrow "
+          "it with a proven assume, or intend it as a runtime check; a deeper/unreachable case would not error")
       .deferred()
       .emit();
 }
@@ -143,25 +170,35 @@ void warn_deferred(bool enabled, std::string_view code, std::string_view subject
   std::string m{module};
   if (out.verdict == formal::Verdict::Refuted && downgraded) {
     livehd::diag::warn("pass.formal", code, "comptime")
-        .msg("DEFERRED: {} in '{}' is refuted but downgraded to a warning by --set compile.formal.on_refute=warn; "
-             "kept as a runtime check",
-             subject, m)
+        .msg(
+            "DEFERRED: {} in '{}' is refuted but downgraded to a warning by --set compile.formal.on_refute=warn; "
+            "kept as a runtime check",
+            subject,
+            m)
+        .attr("graph", m)
         .emit();
   } else if (out.verdict == formal::Verdict::Refuted && !is_top) {
     livehd::diag::warn("pass.formal", code, "comptime")
-        .msg("DEFERRED: {} in '{}' refuted only in module-isolation — its inputs are constrained by a parent "
-             "instantiation (not enough top); kept as a runtime check",
-             subject, m)
+        .msg(
+            "DEFERRED: {} in '{}' refuted only in module-isolation — its inputs are constrained by a parent "
+            "instantiation (not enough top); kept as a runtime check",
+            subject,
+            m)
+        .attr("graph", m)
         .emit();
   } else if (out.verdict == formal::Verdict::Refuted) {
     livehd::diag::warn("pass.formal", code, "comptime")
-        .msg("DEFERRED: {} in '{}' refuted only under a possibly-unreachable register state — kept as a runtime check "
-             "(use --set compile.formal.mode=normal for a BMC check)",
-             subject, m)
+        .msg(
+            "DEFERRED: {} in '{}' refuted only under a possibly-unreachable register state — kept as a runtime check "
+            "(use --set compile.formal.mode=normal for a BMC check)",
+            subject,
+            m)
+        .attr("graph", m)
         .emit();
   } else {
     livehd::diag::warn("pass.formal", code, "comptime")
         .msg("DEFERRED: {} in '{}' could not be proven — kept as a runtime check", subject, m)
+        .attr("graph", m)
         .emit();
   }
 }
@@ -171,16 +208,15 @@ void Pass_formal::setup() {
   Eprp_method m("pass.formal",
                 "Single-design formal property checks (assert / assume / Hotmux one-hotness) on the cvc5 prover",
                 &Pass_formal::work);
-  m.add_label_optional(
-      "mode",
-      "none|fast|normal — none skips; fast=induction (trusts combinational refutations, defers stateful ones); "
-      "normal=BMC-intent (also trusts stateful refutations)",
-      "normal");
+  m.add_label_optional("mode",
+                       "none|fast|normal — none skips; fast=induction (trusts combinational refutations, defers stateful ones); "
+                       "normal=BMC-intent (also trusts stateful refutations)",
+                       "normal");
   m.add_label_optional("on_refute",
                        "error|warn — a refutation at the top boundary fails the build (error, default) or is downgraded "
                        "to a warning (warn). A proven/passing property is always sound; only a 'fail' can be spurious.",
                        "error");
-  m.add_label_optional("enabled", "true|false run the pass (opt out with false, same as mode=none)", "true");
+
   m.add_label_optional("budget_k", "deterministic per-query cvc5 rlimit = budget_k * cone-node-count (0 = default 256)", "0");
   m.add_label_optional("bmc_bound",
                        "mode=normal BMC-from-reset unroll depth (default 4, tiny): caps how deep a REACHABLE refute is "
@@ -191,6 +227,16 @@ void Pass_formal::setup() {
                        "When no reset is detected the BMC starts from free state, so a refute is NOT treated as reachable",
                        "");
   m.add_label_optional("cone_max", "skip (defer to runtime) cones larger than this many nodes (0 = default 50000)", "0");
+  m.add_label_optional(
+      "timeout",
+      "TOTAL wall-clock seconds this pass may spend in the solver, across every definition and every "
+      "obligation; fractional accepted (0 = unbounded). Its OWN budget, unrelated to formal.timeout (which belongs to `lhd "
+      "formal verify` / `lhd lec`): this one bounds how much of a COMPILE property checking may cost. "
+      "Each query is armed with what is left of it; once it is gone the remaining obligations are not "
+      "solved and stay runtime checks (sound -- nothing is elided on an unsolved property). Note a "
+      "non-zero budget makes WHICH properties get proven machine-dependent; 0 keeps the run fully "
+      "deterministic (the budget_k rlimit alone)",
+      "10");
   m.add_label_optional("warn_deferred", "true|false warn whenever any obligation is deferred to runtime", "true");
   m.add_label_optional("warn_onehot", "true|false warn on a deferred Hotmux one-hot check", "true");
   m.add_label_optional("warn_assert", "true|false warn on a deferred assert", "true");
@@ -200,16 +246,28 @@ void Pass_formal::setup() {
                        "silence 'could not prove' NOISE, while this reports DEAD CODE — a project that quiets the "
                        "former still wants the latter. `lhd formal verify` sets it false for its own design load, "
                        "because the verify tier re-derives the same fact per obligation with a richer report and "
-                       "under formal.strict; without that both tiers would emit the same diagnostic code twice",
+                       "fails vacuous obligations; without that both tiers would emit the same diagnostic code twice",
                        "true");
   m.add_label_optional("warn_assume", "true|false warn on a deferred assume", "true");
+  m.add_label_optional("assume_check",
+                       "INTERNAL compile mirror of canonical formal.assume_check: false keeps assumptions active but "
+                       "treats all of them as assume_nocheck",
+                       "true");
+  m.add_label_optional("hier_preflight",
+                       "internal load gate: top-rooted child-assumption discharge (formal verify disables it because "
+                       "its deeper property engine is authoritative)",
+                       "true");
+  m.add_label_optional("active",
+                       "internal compile-cache filter: comma-separated graph names to check while the complete design remains "
+                       "visible for hierarchy/root classification",
+                       "");
   register_pass(m);
 }
 
 void Pass_formal::work(Eprp_var& var) {
   const std::string_view mode = var.get("mode", "normal");
-  if (mode == "none" || !truthy(var.get("enabled", "true"))) {
-    return;  // opt-out: --set compile.formal.mode=none (or pass.formal.enabled=false)
+  if (mode == "none") {
+    return;  // opt-out: --set compile.formal.mode=none
   }
   if (mode != "fast" && mode != "normal") {
     livehd::diag::err("pass.formal", "bad-mode", "comptime")
@@ -242,17 +300,57 @@ void Pass_formal::work(Eprp_var& var) {
         .emit();
     return;
   }
-  const bool downgrade_refute = (on_refute == "warn");
+  const bool                       downgrade_refute = (on_refute == "warn");
+  absl::flat_hash_set<std::string> active_graphs;
+  {
+    std::string_view text = var.get("active", "");
+    while (!text.empty()) {
+      const auto comma = text.find(',');
+      auto       name  = text.substr(0, comma);
+      if (!name.empty()) {
+        active_graphs.emplace(name);
+      }
+      if (comma == std::string_view::npos) {
+        break;
+      }
+      text.remove_prefix(comma + 1);
+    }
+  }
   // An explicit --top names the committed design boundary, so that graph is always
   // treated as a root for the FAIL decision (even if a parent that happens to be
   // in the same compilation instantiates it).
   const std::string_view designated_top = var.get("top", "");
 
   formal::Prove_options opts;
-  const int budget_k = to_int(var.get("budget_k", "0"), 0);
-  const int cone_max = to_int(var.get("cone_max", "0"), 0);
-  opts.budget_k = budget_k > 0 ? budget_k : 256;
-  opts.cone_max = cone_max > 0 ? cone_max : 50000;
+  const int             budget_k = to_int(var.get("budget_k", "0"), 0);
+  const int             cone_max = to_int(var.get("cone_max", "0"), 0);
+  opts.budget_k                  = budget_k > 0 ? budget_k : 256;
+  opts.cone_max                  = cone_max > 0 ? cone_max : 50000;
+
+  // The pass's TOTAL solver budget (see `struct Budget`). It starts ticking here,
+  // so the graph walks that find the obligations are inside it too -- they are
+  // part of what a compile pays for property checking.
+  Budget budget;
+  {
+    // Seconds, FRACTIONAL: `10` is the default and `0.25` is a legal quarter of a
+    // second. A sub-millisecond positive value still buys 1 ms, so only a literal
+    // `0` means unbounded.
+    const std::string text = std::string{var.get("timeout", "10")};
+    char*             end  = nullptr;
+    const double      secs = std::strtod(text.c_str(), &end);
+    const bool        ok   = !text.empty() && end != nullptr && *end == '\0' && std::isfinite(secs) && secs >= 0.0;
+    if (!ok) {
+      livehd::diag::err("pass.formal", "bad-timeout", "io")
+          .msg("pass.formal timeout must be a non-negative number of seconds, got '{}'", text)
+          .emit();
+      return;
+    }
+    const auto ms   = static_cast<long long>(secs * 1000.0);
+    budget.total_ms = (secs > 0.0) ? std::max<long long>(1, ms) : 0;
+  }
+  if (budget.bounded()) {
+    opts.timeout_ms = budget.query_ms();
+  }
 
   // mode=normal BMC-from-reset unroll depth (2f-formal): a TINY bound — the
   // single-frame base case plus enough free cycles that shallow reachable
@@ -276,7 +374,7 @@ void Pass_formal::work(Eprp_var& var) {
     if (g2 == nullptr) {
       continue;
     }
-    for (auto node : g2->forward_class()) {
+    for (auto node : g2->body().nodes(hhds::Node_order::forward)) {
       if (gu::type_op_of(node) == Ntype_op::Sub) {
         if (auto gid = node.get_subnode_gid(); gid != hhds::Gid_invalid) {
           instantiated_gids.insert(gid);
@@ -285,58 +383,348 @@ void Pass_formal::work(Eprp_var& var) {
     }
   }
 
+  // R2 hierarchy contract preflight. The semantic view is the selected top
+  // virtually flattened: every descendant fproperty occurrence is encoded with
+  // its REAL call-site bindings, so `leaf.assume(a==3)` may be discharged by a
+  // grandparent that eventually binds 3. This is assumptions/assertions only,
+  // not a modular hierarchical-verify scheduler; LEC owns that scheduler. The
+  // occurrence-aware result is nevertheless the same representation that the
+  // future verify scheduler can consume.
+  //
+  // A property lives once in its definition but can occur many times. Mark
+  // the definition-level fproperty `proven` only when EVERY reached occurrence
+  // is proven unbounded. An unchecked occurrence stays a live constraint; one
+  // refuted/unknown checked assumption is a build error.
+  //
+  // Definition-level assumes the preflight discharged. The flat pass below
+  // leaves them alone (see the MARK note): they are proven for the design, and
+  // module-alone re-proof cannot see the binding that proved them.
+  using Prop_key = std::pair<hhds::Gid, hhds::Nid>;
+  auto prop_key  = [](const hhds::Node_class& n) { return Prop_key{n.get_graph()->get_gid(), n.get_debug_nid()}; };
+  absl::flat_hash_set<Prop_key> hier_discharged;
+  if (truthy(var.get("hier_preflight", "true"))) {
+    struct Hier_prop_state {
+      hhds::Node_class node;  // the definition-level fproperty to discharge
+      int              total     = 0;
+      int              proven    = 0;
+      bool             unchecked = false;
+      bool             failed    = false;
+    };
+    // hhds::Node_class hashes and compares on raw_nid ALONE (nids are per-body
+    // and start small, so two module bodies collide routinely). Every other user
+    // keys within one graph; this is the one map filled from a CROSS-GRAPH
+    // occurrence walk, so key on (gid, nid) or unrelated properties alias into a
+    // single entry and only one of them is ever discharged.
+    absl::flat_hash_map<Prop_key, Hier_prop_state> hier_props;
+    absl::flat_hash_map<hhds::Gid, hhds::Graph*>   sub_lib;
+    for (auto& gp2 : var.graphs) {
+      if (gp2) {
+        sub_lib[gp2->get_gid()] = gp2.get();
+      }
+    }
+    auto is_designated_top = [&](hhds::Graph* g) {
+      std::string_view gname = g->get_name();
+      auto             dot   = gname.rfind('.');
+      std::string_view gmod  = dot == std::string_view::npos ? gname : gname.substr(dot + 1);
+      return (!designated_top.empty() && (gname == designated_top || gmod == designated_top))
+             || (designated_top.empty() && !instantiated_gids.contains(g->get_gid()));
+    };
+    // Every fproperty occurrence of `g` whose `cond` is actually driven, in the
+    // encoder's own occ walk order (what prove_properties correlates against).
+    auto prop_occurrences = [](hhds::Graph* g) {
+      std::vector<hhds::Occurrence_node> out;
+      for (auto pn : g->occurrences(nullptr).nodes(hhds::Node_order::forward)) {
+        if (gu::type_op_of(pn) != Ntype_op::Sub) {
+          continue;
+        }
+        auto sio = pn.get_subnode_io();
+        if (sio == nullptr || sio->get_name() != gu::fproperty_module_name) {
+          continue;
+        }
+        const auto cond_pid  = sio->get_input_port_id("cond");
+        bool       connected = false;
+        // "cond is actually driven" is an EXISTENCE test over the sink's drivers,
+        // and BOTH readers here are load-bearing. inp_sorted_pins() is the walk
+        // the retired inp_edges() presented: node-as-pin (port 0) FIRST, then
+        // ascending port id. The RAW inp_pins() is NOT a substitute — hhds keeps
+        // port 0 as the node itself, so that list omits it outright and is
+        // unordered. And the PLURAL get_driver_pins() is what answers the
+        // question: a `cond` sink pin that exists but contributes no driver must
+        // not count as connected, while any number of drivers counts once.
+        // Stopping at the cond pin matches the edge walk's `break`, since port
+        // ids are unique per node and no later pin can be `cond` either.
+        for (auto sink : pn.inp_sorted_pins()) {
+          if (sink.get_port_id() != cond_pid) {
+            continue;
+          }
+          connected = !sink.get_driver_pins().empty();
+          break;
+        }
+        if (connected) {
+          out.push_back(pn);
+        }
+      }
+      return out;
+    };
+
+    // Design-wide occurrence census. The preflight below only SOLVES under the
+    // designated top, but a definition-level fproperty can also be reached
+    // through a DIFFERENT root; discharging it after proving one root's bindings
+    // would silently drop the constraint from the other (and from the module's
+    // own flat pass). The census walk is structural — no solver — so count every
+    // root and discharge only a definition whose every occurrence was proven.
+    absl::flat_hash_map<Prop_key, int> design_occ;
+    for (auto& root_sp : var.graphs) {
+      auto* root = root_sp.get();
+      if (root == nullptr || (instantiated_gids.contains(root->get_gid()) && !is_designated_top(root))) {
+        continue;
+      }
+      for (const auto& occ : prop_occurrences(root)) {
+        ++design_occ[prop_key(occ.base_node())];
+      }
+    }
+
+    for (auto& root_sp : var.graphs) {
+      auto* root = root_sp.get();
+      if (root == nullptr || !is_designated_top(root)) {
+        continue;
+      }
+      // Collect FIRST: a design with no contract ASSUMPTION must not pay for a
+      // whole-design SMT encode + solve, and an assert-only design is the common
+      // compile. The verdict correlation below is POSITIONAL over the encoder's
+      // own occ walk, so the vector itself must keep every occurrence (asserts
+      // included) — only the decision to solve at all is filtered here. The two
+      // filters agree by construction: lec reports kind=="assume" for exactly
+      // the occurrences is_assume_kind() accepts.
+      auto occurrences = prop_occurrences(root);
+      int  assumes     = 0;
+      for (const auto& occ : occurrences) {
+        assumes += livehd::lec::is_assume_kind(fprop_parts(occ.base_node()).kind) ? 1 : 0;
+      }
+      if (assumes == 0) {
+        continue;
+      }
+      if (budget.spent()) {
+        // No budget left to encode + solve a whole-design contract preflight.
+        // Nothing is discharged, so every contract stays a live runtime check --
+        // the same conservative outcome as the correlation-mismatch path below.
+        // Only the assumes count: they are the obligations this preflight owns
+        // (the asserts in the vector are there for positional correlation).
+        budget.skipped += assumes;
+        continue;
+      }
+      livehd::lec::Lec_options ho;
+      ho.engine  = "bmc";
+      ho.solver  = "cvc5";
+      ho.bound   = bmc_bound;
+      // Seconds, and a per-checkSat cap in this engine (the soft-total accounting
+      // is off whenever rlimit is set). One second is the floor, mirroring lec's
+      // own min_timeout: a straggler still earns a real attempt, so a call with
+      // many obligations may overrun the pass budget by up to one second each.
+      ho.timeout = budget.bounded() ? std::max(1, static_cast<int>(budget.left_ms() / 1000)) : 0;
+      ho.rlimit  = static_cast<int>(std::min<long long>(static_cast<long long>(std::max(1, opts.budget_k)) * 4096, 1'000'000'000));
+      ho.partitions     = 1;
+      ho.split          = "none";
+      ho.state_pairing  = false;
+      ho.assume_check   = truthy(var.get("assume_check", "true"));
+      ho.ignore_assumes = false;
+      // Same reset spec as the assert path below: without it the preflight cuts
+      // the state free from cycle 0 and refutes true constraints (e.g. `cnt < 8`
+      // on a reset-to-zero counter) at an unreachable initial state — exactly
+      // what the `reset` knob exists to prevent.
+      ho.reset_cycles   = 1;
+      ho.phase          = "after_reset";
+      ho.reset          = std::string{var.get("reset", "")};
+      auto hr           = livehd::lec::prove_properties(root, ho, &sub_lib);
+
+      if (occurrences.size() != hr.props.size()) {
+        // The encoder refused (oversize design, unorderable cone) or returned a
+        // partial result. The correlation is POSITIONAL, so a mismatch means we
+        // cannot say which verdict belongs to which property. Skipping the root
+        // is conservative — nothing is discharged, every contract stays live as
+        // a runtime check — so it must not fail an otherwise valid compile.
+        livehd::diag::warn("pass.formal", "hier-property-correlation", "internal")
+            .msg("hierarchy contract preflight skipped for '{}': {} occurrence(s), {} result(s)",
+                 root->get_name(),
+                 occurrences.size(),
+                 hr.props.size())
+            .hint("contracts stay active; `lhd formal verify` / `lhd lec` still adjudicate them")
+            .emit();
+        continue;
+      }
+      for (size_t i = 0; i < occurrences.size(); ++i) {
+        const auto& pr = hr.props[i];
+        if (pr.kind != "assume") {
+          continue;  // hierarchy preflight owns contract assumptions only
+        }
+        auto& st = hier_props[prop_key(occurrences[i].base_node())];
+        st.node  = occurrences[i].base_node();
+        ++st.total;
+        if (livehd::lec::is_unchecked_assume_class(pr.aclass)) {
+          st.unchecked = true;
+          continue;
+        }
+        if (pr.verdict == livehd::lec::Verdict::Proven && pr.unbounded) {
+          ++st.proven;
+          continue;
+        }
+        st.failed              = true;
+        const std::string path = pr.instance.empty() ? std::string{root->get_name()} : pr.instance;
+        if (pr.verdict == livehd::lec::Verdict::Refuted) {
+          livehd::diag::err("pass.formal", "assume-refuted", "comptime")
+              .msg("child assume{} is refuted at hierarchy occurrence '{}'", pr.loc.empty() ? std::string{} : " at " + pr.loc, path)
+              .hint("fix the binding, rewrite the contract as assume_nocheck, or set formal.assume_check=false")
+              .deferred()
+              .emit();
+        } else {
+          livehd::diag::err("pass.formal", "assume-unproven", "comptime")
+              .msg("child assume{} could not be proven at hierarchy occurrence '{}'",
+                   pr.loc.empty() ? std::string{} : " at " + pr.loc,
+                   path)
+              .hint("make the parent establish it, rewrite it as assume_nocheck, or set formal.assume_check=false")
+              .deferred()
+              .emit();
+        }
+      }
+    }
+    std::vector<hhds::Node_class> discharged;
+    for (const auto& [key, st] : hier_props) {
+      const auto it           = design_occ.find(key);
+      const int  design_total = (it == design_occ.end()) ? st.total : it->second;
+      // st.total == design_total: every occurrence the design has was reached and
+      // proven here. Fewer means some parent outside the preflight roots still
+      // binds this contract, so the obligation is NOT discharged for the design.
+      if (st.total > 0 && st.proven == st.total && st.total == design_total && !st.unchecked && !st.failed) {
+        discharged.push_back(st.node);
+      }
+    }
+    // MARK, do not delete. The discharged contract is recorded on the node as
+    // `proven`, which is the channel consumers already read: cgen elides the
+    // runtime check off it (inou/cgen/cgen_verilog.cpp) and verify/LEC
+    // re-adjudicate off it. Deleting the node destroyed that -- an attribute a
+    // downstream consumer wants, thrown away to save a handful of nodes -- and
+    // made a read-only pass a structural one.
+    //
+    // The kind is kFormalAssumeHier, not kFormalAssume: the proof holds under
+    // the parents' bindings in THIS design, so LEC of the child on its own must
+    // not turn it into a hypothesis (pass/lec/encode.cpp). And the flat pass
+    // below must skip these nodes: proving them again in module isolation --
+    // where the parent's binding is absent -- would stamp a runtime_check on
+    // top of the proof and un-elide the check it just discharged.
+    for (auto& node : discharged) {
+      gu::set_proven(node, gu::kFormalAssumeHier);
+      hier_discharged.insert(prop_key(node));
+    }
+  }
+
   for (auto& gp : var.graphs) {
     auto* g = gp.get();
     if (g == nullptr) {
       continue;
     }
+    if (!active_graphs.empty() && !active_graphs.contains(std::string(g->get_name()))) {
+      continue;
+    }
     // is_top: the graph is the design boundary — the explicit --top (by module
     // name, tolerating a "unit." prefix) or, absent that, a root no Sub instantiates.
-    std::string_view gname = g->get_name();
-    auto             dot   = gname.rfind('.');
-    std::string_view gmod  = (dot == std::string_view::npos) ? gname : gname.substr(dot + 1);
-    const bool matches_top = !designated_top.empty() && (gname == designated_top || gmod == designated_top);
-    const bool is_top      = matches_top || !instantiated_gids.contains(g->get_gid());
-    formal::Prover prover(g, opts);
+    std::string_view gname       = g->get_name();
+    auto             dot         = gname.rfind('.');
+    std::string_view gmod        = (dot == std::string_view::npos) ? gname : gname.substr(dot + 1);
+    const bool       matches_top = !designated_top.empty() && (gname == designated_top || gmod == designated_top);
+    const bool       is_top      = matches_top || !instantiated_gids.contains(g->get_gid());
+    formal::Prover   prover(g, opts);
 
-    // Built-in obligation: every Hotmux selector must be one-hot-or-zero. Collect
+    // Every solver question of this graph goes through `ask`: it re-arms the
+    // prover with what is LEFT of the pass budget, and once that is gone it stops
+    // asking at all and returns the default Query_out (Unknown) -- so the walks
+    // below still run and still stamp each obligation as a kept runtime check,
+    // they just stop paying cvc5 for an answer.
+    // `obligation` says whether a skip costs the design a kept runtime check
+    // (an assert / assume / one-hot question) or is merely a diagnostic probe
+    // (the vacuity sweep); only the former is counted in the summary.
+    // `skipped` (optional) tells the caller the query never ran, so it can tell
+    // that default from a real Unknown when the difference matters.
+    auto ask = [&](auto&& query, bool obligation = true, bool* skipped = nullptr) -> formal::Query_out {
+      if (budget.spent()) {
+        budget.skipped += obligation ? 1 : 0;
+        if (skipped) {
+          *skipped = true;
+        }
+        return {};
+      }
+      if (budget.bounded()) {
+        prover.set_timeout_ms(budget.query_ms());
+      }
+      return query();
+    };
+    // A deferred obligation is normally worth one warning each ("could not be
+    // proven"). Out of budget it is not: the pass stopped asking, and the ONE
+    // summary at the end of the pass says so. Silence the per-obligation noise.
+    auto say_deferred = [&](bool enabled) { return enabled && !budget.spent(); };
+
+    // Built-in obligation: a Hotmux's controls must be mutually exclusive. Collect
     // first so attribute writes never perturb the forward_class walk.
     std::vector<hhds::Node_class> hotmuxes;
-    for (auto node : g->forward_class()) {
+    for (auto node : g->body().nodes(hhds::Node_order::forward)) {
       if (gu::type_op_of(node) == Ntype_op::Hotmux) {
         hotmuxes.push_back(node);
       }
     }
+    // MEMO on the control vector. The one-hotness question depends ONLY on the
+    // controls, so two Hotmuxes over the same control set are the same SMT
+    // query. `unique if` lowering makes that the common case rather than a
+    // coincidence: upass.tolg's lower_unique_merge builds one merge Hotmux per
+    // written variable, all sharing the branch's control list, so minion's
+    // intpipe_decode carries 8848 Hotmuxes over ONE identical 320-control list.
+    // Unmemoized that is 8848 byte-identical cvc5 solves at ~72 ms each:
+    // measured 10.16 s of a 14.0 s compile, with 8710 obligations then
+    // ABANDONED when the 10 s budget ran out and demoted to runtime checks.
+    // Memoized it is one solve, and every Hotmux gets a real verdict.
+    //
+    // Keyed on the control pins' Class_index in pid order -- identity, not a
+    // structural hash, so a hit means the SAME pins and needs no confirmation.
+    absl::flat_hash_map<std::vector<uint64_t>, formal::Query_out> onehot_memo;
     for (auto& node : hotmuxes) {
-      hhds::Pin_class sel;
-      for (const auto& e : node.inp_edges()) {
-        if (e.sink.get_port_id() == 0) {  // pid 0 = selector
-          sel = e.driver;
-          break;
-        }
+      std::vector<hhds::Pin_class> controls;
+      std::vector<uint64_t>        memo_key;
+      for (const auto& [control, value] : gu::hotmux_inputs(node).arms) {
+        controls.push_back(control);
+        memo_key.push_back(static_cast<uint64_t>(control.get_class_index().value));
       }
-      if (sel.is_invalid()) {
-        continue;
+      formal::Query_out out;
+      if (auto it = onehot_memo.find(memo_key); it != onehot_memo.end()) {
+        out = it->second;
+      } else {
+        out = ask([&] { return prover.are_exclusive(controls); });
+        onehot_memo.emplace(std::move(memo_key), out);
       }
-      auto out = prover.is_onehot0(sel);
       if (out.verdict == formal::Verdict::Proven) {
         gu::set_proven(node, gu::kFormalOnehot);  // one-hotness obligation discharged
       } else if (out.verdict == formal::Verdict::Refuted && is_top && (trust_stateful_refute || !out.stateful)
                  && !downgrade_refute) {
-        // FAIL: a concrete assignment sets two or more selector bits at once, in
+        // FAIL: a concrete assignment activates two or more controls at once, in
         // a ROOT module (no missing top context). Record a (non-fatal) compile
         // error and continue; keep the runtime check and never elide it or expose
-        // the selector as a don't-care to pass.abc (a refuted property is unsound
+        // the controls as don't-cares to pass.abc (a refuted property is unsound
         // to optimize with).
         report_refuted("onehot-violated",
-                       "Hotmux selector can have two or more bits set at once (overlapping `unique if`/`match`)",
-                       g->get_name(), "", "", out);
+                       "two or more Hotmux controls can be active at once (overlapping `unique if`/`match`)",
+                       g->get_name(),
+                       "",
+                       "",
+                       out);
         gu::set_runtime_check(node, gu::kFormalOnehot);
       } else {
         // Undecided, a non-top module ("not enough top"), or (fast) a stateful
         // refutation -> keep the runtime check + a loud DEFERRED warning.
         gu::set_runtime_check(node, gu::kFormalOnehot);
-        warn_deferred(warn_onehot, "onehot-deferred", "Hotmux selector one-hotness", g->get_name(), out, is_top, downgrade_refute);
+        warn_deferred(say_deferred(warn_onehot),
+                      "onehot-deferred",
+                      "Hotmux control exclusivity",
+                      g->get_name(),
+                      out,
+                      is_top,
+                      downgrade_refute);
       }
     }
 
@@ -344,7 +732,7 @@ void Pass_formal::work(Eprp_var& var) {
     // (assert / assert_always / assume). Collect first so attr writes don't
     // perturb the forward_class walk.
     std::vector<hhds::Node_class> props;
-    for (auto node : g->forward_class()) {
+    for (auto node : g->body().nodes(hhds::Node_order::forward)) {
       if (gu::type_op_of(node) != Ntype_op::Sub) {
         continue;
       }
@@ -353,24 +741,115 @@ void Pass_formal::work(Eprp_var& var) {
         props.push_back(node);
       }
     }
-    const bool warn_assume = warn_def && truthy(var.get("warn_assume", "true"));
+    const bool warn_assume  = warn_def && truthy(var.get("warn_assume", "true"));
+    const bool assume_check = truthy(var.get("assume_check", "true"));
     const bool warn_vacuous = truthy(var.get("warn_vacuous", "true"));
-    const bool warn_assert = warn_def && truthy(var.get("warn_assert", "true"));
+    const bool warn_assert  = warn_def && truthy(var.get("warn_assert", "true"));
 
     // Pass 1: prove each assume INDEPENDENTLY (no hypotheses, so no circular
     // self-proof). Only PROVEN assumes become hypotheses for the asserts below
     // (sound: proven facts) and are exposed to pass.abc as don't-cares.
-    std::vector<hhds::Pin_class> proven_assumes;
+    std::vector<hhds::Pin_class>  proven_assumes;
+    // Set when a hypothesis was ACCEPTED WITHOUT PROOF (assume_nocheck, an
+    // unreachable top IO assume, or formal.assume_check=false). Such a hypothesis
+    // can be false — or jointly contradictory — so the elisions it enables are
+    // conditional and the obligations must stay in the persisted graph for
+    // `lhd formal verify` / `lhd lec` to re-adjudicate.
+    bool                          unchecked_hypotheses = false;
+    // The assume NODES stamped proven WITHOUT proof: assume_nocheck /
+    // assume_check=false, plus the selected-top IO assume (that one also carries a
+    // runtime_check, so only its `proven` stamp is a retraction concern).
+    // Individually-proven assumes are all true in the design simultaneously, so a
+    // joint contradiction can only come from this set — and only this set has to
+    // be retracted below.
+    std::vector<hhds::Node_class> unchecked_assume_nodes;
     for (auto& node : props) {
       auto parts = fprop_parts(node);
-      if (parts.kind != "assume") {
+      if (!livehd::lec::is_assume_kind(parts.kind)) {
         continue;
       }
       auto cond = gu::get_driver_of_sink_name(node, "cond");
       if (cond.is_invalid()) {
         continue;
       }
-      auto out = prover.is_true(cond);
+      if (hier_discharged.contains(prop_key(node))) {
+        // Discharged top-rooted, at every occurrence, by the preflight above.
+        // Neither re-proved here (the binding that proved it is in the parent,
+        // not in this module) nor used as a hypothesis for this module's own
+        // asserts: the old code deleted the node before this loop ever saw it,
+        // and that is the behavior to preserve.
+        continue;
+      }
+      const bool explicit_nocheck = parts.kind == "assume_nocheck";
+      if (!assume_check || explicit_nocheck) {
+        gu::set_proven(node, gu::kFormalAssume);
+        proven_assumes.push_back(cond);
+        unchecked_assume_nodes.push_back(node);
+        unchecked_hypotheses = true;
+        if (warn_assume) {
+          livehd::diag::warn("pass.formal", "formal-unchecked-assume", "comptime")
+              .msg("assume in '{}'{} is active but UNCHECKED ({})",
+                   g->get_name(),
+                   parts.loc.empty() ? std::string{} : " at " + parts.loc,
+                   assume_check ? "assume_nocheck" : "formal.assume_check=false")
+              .hint("verification and LEC verdicts are conditional on this unchecked constraint")
+              .emit();
+        }
+        continue;
+      }
+      bool skipped = false;
+      auto out     = ask([&] { return prover.is_true(cond); }, /*obligation=*/true, &skipped);
+      if (skipped) {
+        // Out of budget the query never ran, so `out.stateful` is the default
+        // (false) -- NOT a classification. The branch below promotes a top assume
+        // to an active hypothesis (persisted as `proven`, consumed by LEC) on
+        // that flag alone, so classify it here from the solver-free cone walk:
+        // a state-dependent assume must stay a runtime check, never a hypothesis
+        // nothing checked. An unsupported cone counts as stateful (conservative).
+        out.stateful = prover.stateful_cone(cond);
+      }
+      if (is_top && !out.stateful && !cond.is_const()) {
+        // A selected top has no parent that can discharge a precondition over
+        // its primary IO. It is therefore an environment constraint by
+        // construction: keep it active as a hypothesis here instead of failing
+        // the build. Descendant input assumes do NOT take this path; their
+        // actual call-site bindings are checked top-rooted by verify/LEC and by
+        // the hierarchy-aware compile preflight below.
+        //
+        // Stamp BOTH, because the two attributes answer two different questions
+        // and this hypothesis needs both answers:
+        //   * `proven` is the ONLY channel that tells the persisted-graph
+        //     consumers the hypothesis is active — pass/lec/encode.cpp seeds
+        //     prop_active_assume from it, and lhd_kernel_formal counts it for the
+        //     "unchecked assume(s)" disclosure. Without it `lhd lec` compares the
+        //     FULL input space and REFUTES a design that is equivalent only under
+        //     the constraint (LEC's `assume_nocheck` spelling rule is an
+        //     ADDITIONAL entry point, not a substitute).
+        //   * `runtime_check` keeps the obligation in the emitted netlist: the
+        //     verdict was never Proven, so eliding the `assume(...)` would leave a
+        //     violating environment caught NOWHERE at compile time (unprovable
+        //     here is not an error). cgen_verilog honors the pair — a deferred
+        //     runtime check beats the `proven` stamp. Note only a VERILOG
+        //     simulation of that netlist executes it (it is emitted inside
+        //     `synthesis translate_off`); LiveHD's own simulator skips every
+        //     fproperty Sub, proven or not (inou/cgen/cgen_sim.cpp).
+        // `lhd formal verify` needs neither stamp: it re-derives this top_input
+        // class structurally (pass/lec/query occ_aclass).
+        gu::set_proven(node, gu::kFormalAssume);
+        gu::set_runtime_check(node, gu::kFormalAssume);
+        proven_assumes.push_back(cond);
+        unchecked_assume_nodes.push_back(node);  // proven WITHOUT proof -> retract on a joint contradiction
+        unchecked_hypotheses = true;
+        if (warn_assume) {
+          livehd::diag::warn("pass.formal", "formal-top-assume", "comptime")
+              .msg("top-level IO assume in '{}'{} cannot be checked; treating it as an unchecked environment constraint",
+                   g->get_name(),
+                   parts.loc.empty() ? std::string{} : " at " + parts.loc)
+              .hint("it stays active as a hypothesis for assertion verification and LEC, and as a runtime check in the netlist")
+              .emit();
+        }
+        continue;
+      }
       if (out.verdict == formal::Verdict::Proven) {
         gu::set_proven(node, gu::kFormalAssume);
         proven_assumes.push_back(cond);  // only PROVEN assumes become hypotheses (sound)
@@ -380,19 +859,69 @@ void Pass_formal::work(Eprp_var& var) {
         // continue; keep the runtime check and do NOT add it as a hypothesis (a
         // refuted assume must never optimize, or every assert/abc query built on
         // it is unsound).
-        report_refuted("assume-refuted", "assume is refuted (a concrete input makes it false)", g->get_name(),
-                       parts.loc, parts.msg, out);
+        report_refuted("assume-refuted",
+                       "assume is refuted (a concrete input makes it false)",
+                       g->get_name(),
+                       parts.loc,
+                       parts.msg,
+                       out);
         gu::set_runtime_check(node, gu::kFormalAssume);
       } else {
         // Undecided, a non-top module ("not enough top"), or (fast) a stateful
         // refutation: the declared contract is kept as a runtime check (never a
         // hypothesis) + a loud DEFERRED warning.
         gu::set_runtime_check(node, gu::kFormalAssume);
-        warn_deferred(warn_assume, "assume-deferred", "assume", g->get_name(), out, is_top, downgrade_refute);
+        warn_deferred(say_deferred(warn_assume), "assume-deferred", "assume", g->get_name(), out, is_top, downgrade_refute);
       }
     }
     for (auto& c : proven_assumes) {
       prover.assume(c);  // sound hypotheses for the assert queries
+    }
+    // A CONTRADICTORY hypothesis set proves EVERYTHING: `assume_nocheck(a < 4)`
+    // plus `assume_nocheck(a >= 4)` would discharge a knowingly-false assert and
+    // elide its runtime check. Proven assumes are consistent by construction (the
+    // design realizes them), but nothing establishes that for the unchecked ones,
+    // so probe once — the same guard pass/lec applies before trusting an
+    // assumption-conditioned verdict — and drop them all on a confirmed
+    // contradiction so every assert below stays a runtime check.
+    //
+    // WARNING severity, deliberately: this tier fully degrades (the hypotheses
+    // are dropped and every stamp retracted below), so nothing unsound persists,
+    // and an error here would poison the diag sink and abort the recipe BEFORE
+    // the tier that must adjudicate — `lhd lec` compiles both sides through this
+    // very pass, and its second side's tolg gate trips on any recorded error, so
+    // pass.lec never got to reject the pair as CONTRADICTORY
+    // (lec_design_assume_test). The flows that consume the assumptions re-probe
+    // and hard-fail on their own: pass/lec/encode.cpp re-activates the
+    // assume_nocheck pair BY SPELLING (surviving the retraction), lec's queries
+    // reject the UNSAT set as CONTRADICTORY, and `lhd formal verify` turns the
+    // vacuous verdict into a usage error (lhd_kernel_formal.cpp).
+    // Out of budget this probe is skipped, which is safe HERE and only here: it
+    // exists to stop a contradictory hypothesis set from proving an assert
+    // vacuously, and past this line every assert query is short-circuited to
+    // Unknown, so no proof can happen for it to poison. The `proven` stamp on the
+    // unchecked assumes does survive into the persisted graph, and `lhd lec` /
+    // `lhd formal verify` re-probe the set and reject it themselves.
+    if (budget.bounded() && !budget.spent()) {
+      prover.set_timeout_ms(budget.query_ms());  // the consistency probe is a solve too
+    }
+    if (unchecked_hypotheses && !budget.spent() && !prover.assumes_consistent()) {
+      livehd::diag::warn("pass.formal", "assume-contradiction", "comptime")
+          .msg("the active assumptions of '{}' are jointly unsatisfiable: every assertion would prove vacuously", g->get_name())
+          .hint("fix the contradicting assume(s); until then the assumptions are ignored and assertions stay runtime checks")
+          .emit();
+      prover.clear_assumes();
+      // Dropping the solver hypotheses is not enough: the unchecked assumes were
+      // already stamped `proven`, and EVERY downstream consumer reads that
+      // attribute off the persisted graph — cgen elides their runtime check
+      // (cgen_verilog.cpp), and pass/lec/encode.cpp seeds prop_active_assume from
+      // it, so a later `lhd lec` would assert this known-UNSAT pair. Retract the
+      // stamp so the promise made by the hint above ("the assumptions are ignored
+      // and assertions stay runtime checks") holds outside pass.formal too.
+      for (auto& an : unchecked_assume_nodes) {
+        gu::clear_proven(an);
+        gu::set_runtime_check(an, gu::kFormalAssume);
+      }
     }
 
     // R1 Phase 2 — ANTECEDENT vacuity at the COMPILE tier. A property written
@@ -418,7 +947,7 @@ void Pass_formal::work(Eprp_var& var) {
       if (!warn_vacuous) {
         return;
       }
-      // Resolve the guard driver by WALKING the in-edges, never via
+      // Resolve the guard driver by WALKING the node's sink PINS, never via
       // get_driver_of_sink_name: an UNGUARDED fproperty has no `guard` sink pin
       // at all, and asking for a pin that was never created aborts in a dbg
       // build ("get_pin: requested pin was not created"). Since most properties
@@ -429,25 +958,40 @@ void Pass_formal::work(Eprp_var& var) {
       }
       const auto      guard_pid = sio->get_input_port_id("guard");
       hhds::Pin_class guard;
-      for (const auto& e : node.inp_edges()) {
-        if (e.sink.get_port_id() == guard_pid) {
-          guard = e.driver;
+      // inp_sorted_pins() is the SORTED reader that replaced inp_edges(): it
+      // yields the node-as-pin (port 0) FIRST and then ascending port id, and it
+      // yields only CONNECTED pins. The raw inp_pins() would not do — it drops
+      // port 0 and has no order. The PLURAL get_driver_pins() is the other
+      // load-bearing half: the singular get_driver_pin() quietly returns
+      // drivers.front() with its multi-driver assert compiled out under NDEBUG,
+      // so it hides rather than reports a `guard` sink that somehow gained a
+      // second driver. Taking the first driver is what the edge walk's `break`
+      // took, and leaving the whole walk at the guard pin is what that same
+      // `break` did (port ids are unique per node, so nothing later matches).
+      for (const auto& in_pin : node.inp_sorted_pins()) {
+        if (in_pin.get_port_id() != guard_pid) {
+          continue;
+        }
+        for (const auto& in_drv : in_pin.get_driver_pins()) {
+          guard = in_drv;
           break;
         }
+        break;
       }
       if (guard.is_invalid()) {
         return;  // unguarded property: nothing to ask, nothing to pay
       }
-      if (prover.is_false(guard).verdict != formal::Verdict::Proven) {
+      if (ask([&] { return prover.is_false(guard); }, /*obligation=*/false).verdict != formal::Verdict::Proven) {
         return;
       }
       livehd::diag::warn("pass.formal", "formal-vacuous-guard", "comptime")
-          .msg("VACUOUS: {} in '{}'{}{} sits in an `if`/`match` arm whose guard can NEVER be true, so it is never "
-               "exercised — the branch is dead. Fix the guard condition or drop the branch.",
-               parts.kind,
-               g->get_name(),
-               parts.loc.empty() ? std::string{} : " at " + parts.loc,
-               parts.msg.empty() ? std::string{} : " \"" + parts.msg + "\"")
+          .msg(
+              "VACUOUS: {} in '{}'{}{} sits in an `if`/`match` arm whose guard can NEVER be true, so it is never "
+              "exercised — the branch is dead. Fix the guard condition or drop the branch.",
+              parts.kind,
+              g->get_name(),
+              parts.loc.empty() ? std::string{} : " at " + parts.loc,
+              parts.msg.empty() ? std::string{} : " \"" + parts.msg + "\"")
           .emit();
     };
 
@@ -467,17 +1011,21 @@ void Pass_formal::work(Eprp_var& var) {
         return;
       }
       uint32_t code = (parts.kind == "assert_always") ? gu::kFormalAssertAlways : gu::kFormalAssert;
-      auto     out  = prover.is_true(cond);
+      auto     out  = ask([&] { return prover.is_true(cond); });
       if (out.verdict == formal::Verdict::Proven) {
         gu::set_proven(node, code);  // cgen elides the runtime check
-      } else if (allow_refute_error && out.verdict == formal::Verdict::Refuted && is_top
-                 && (trust_stateful_refute || !out.stateful) && !downgrade_refute) {
-        report_refuted("assert-refuted", parts.kind + " is refuted (a concrete input makes it false)", g->get_name(),
-                       parts.loc, parts.msg, out);
+      } else if (allow_refute_error && out.verdict == formal::Verdict::Refuted && is_top && (trust_stateful_refute || !out.stateful)
+                 && !downgrade_refute) {
+        report_refuted("assert-refuted",
+                       parts.kind + " is refuted (a concrete input makes it false)",
+                       g->get_name(),
+                       parts.loc,
+                       parts.msg,
+                       out);
         gu::set_runtime_check(node, code);  // keep: never elide a failing assert
       } else {
         gu::set_runtime_check(node, code);
-        warn_deferred(warn_assert, "assert-deferred", parts.kind, g->get_name(), out, is_top, downgrade_refute);
+        warn_deferred(say_deferred(warn_assert), "assert-deferred", parts.kind, g->get_name(), out, is_top, downgrade_refute);
       }
     };
 
@@ -485,7 +1033,19 @@ void Pass_formal::work(Eprp_var& var) {
       // mode=fast: single-frame induction over free (cut) state (unchanged).
       for (auto& node : props) {
         auto parts = fprop_parts(node);
-        if (parts.kind != "assume") {
+        if (!livehd::lec::is_assume_kind(parts.kind)) {
+          prove_assert_prover(node, parts, /*allow_refute_error=*/true);
+        }
+      }
+    } else if (budget.spent()) {
+      // mode=normal, but the budget is gone: encoding the whole design for the BMC
+      // engine is the expensive half and it would buy nothing. Take the same
+      // degrade the correlation-mismatch path takes -- the single-frame Prover,
+      // which `ask` short-circuits to Unknown, so every obligation is stamped a
+      // kept runtime check.
+      for (auto& node : props) {
+        auto parts = fprop_parts(node);
+        if (!livehd::lec::is_assume_kind(parts.kind)) {
           prove_assert_prover(node, parts, /*allow_refute_error=*/true);
         }
       }
@@ -503,19 +1063,22 @@ void Pass_formal::work(Eprp_var& var) {
       //       -> recover a free-state proof under the proven assumes with the
       //       single-frame Prover (never lose a pre-rebase elision), else keep + defer.
       livehd::lec::Lec_options po;
-      po.engine        = "bmc";  // single strategy, in-process (never fork in compile)
-      po.solver        = "cvc5";
-      po.bound         = bmc_bound;  // tiny BMC depth + the 1-induction step
-      po.reset_cycles  = 1;
-      po.phase         = "after_reset";
-      po.timeout       = 0;  // deterministic budget only
-      po.rlimit        = static_cast<int>(std::min<long long>(
-          static_cast<long long>(std::max(1, opts.budget_k)) * 4096, 1'000'000'000));
-      po.witness       = true;
-      po.partitions    = 1;      // no case-split forks
-      po.split         = "none";
-      po.state_pairing = false;
-      po.ignore_assumes = true;  // proven assumes recovered by the Prover fallback below
+      po.engine       = "bmc";  // single strategy, in-process (never fork in compile)
+      po.solver       = "cvc5";
+      po.bound        = bmc_bound;  // tiny BMC depth + the 1-induction step
+      po.reset_cycles = 1;
+      po.phase        = "after_reset";
+      // Seconds, and a per-checkSat cap here (the soft-total accounting is off
+      // whenever rlimit is set). 0 keeps the fully deterministic, wall-free
+      // behavior; a non-zero pass budget hands over what is left of it, with the
+      // same one-second floor as the preflight above.
+      po.timeout      = budget.bounded() ? std::max(1, static_cast<int>(budget.left_ms() / 1000)) : 0;
+      po.rlimit  = static_cast<int>(std::min<long long>(static_cast<long long>(std::max(1, opts.budget_k)) * 4096, 1'000'000'000));
+      po.witness = true;
+      po.partitions     = 1;  // no case-split forks
+      po.split          = "none";
+      po.state_pairing  = false;
+      po.ignore_assumes = true;                               // proven assumes recovered by the Prover fallback below
       po.reset          = std::string{var.get("reset", "")};  // authoritative reset spec (else auto-detect)
 
       auto pres = livehd::lec::prove_properties(g, po);
@@ -525,8 +1088,8 @@ void Pass_formal::work(Eprp_var& var) {
       // opaque free boxes (not descended), so only g's own top-level fproperties
       // are emitted -> 1:1 by index. A size mismatch (unexpected hierarchy) leaves
       // the map unused and falls back to the pre-rebase Prover engine.
-      std::vector<hhds::Node_class> occ_nodes;
-      for (auto pn : g->forward_hier(true, false, nullptr)) {
+      std::vector<hhds::Occurrence_node> occ_nodes;
+      for (auto pn : g->occurrences(nullptr).nodes(hhds::Node_order::forward)) {
         if (gu::type_op_of(pn) != Ntype_op::Sub) {
           continue;
         }
@@ -536,11 +1099,20 @@ void Pass_formal::work(Eprp_var& var) {
         }
         auto cond_pid  = sio->get_input_port_id("cond");
         bool connected = false;
-        for (const auto& e : pn.inp_edges()) {
-          if (e.sink.get_port_id() == cond_pid) {
-            connected = true;
-            break;
+        // Same "cond is actually driven" existence test as prop_occurrences
+        // above, spelled the SAME way on purpose — the two filters must agree or
+        // the positional correlation slips. Both halves are load-bearing:
+        // inp_sorted_pins() reproduces the retired inp_edges() walk (node-as-pin
+        // port 0 first, then ascending port id) where the raw inp_pins() would
+        // omit port 0 and lose the order, and the PLURAL get_driver_pins() is
+        // what decides the question, since a `cond` sink pin can exist while
+        // contributing no driver.
+        for (auto sink : pn.inp_sorted_pins()) {
+          if (sink.get_port_id() != cond_pid) {
+            continue;
           }
+          connected = !sink.get_driver_pins().empty();
+          break;
         }
         if (connected) {
           occ_nodes.push_back(pn);
@@ -552,7 +1124,7 @@ void Pass_formal::work(Eprp_var& var) {
         // to the pre-rebase Prover engine rather than risk mis-marking a node.
         for (auto& node : props) {
           auto parts = fprop_parts(node);
-          if (parts.kind != "assume") {
+          if (!livehd::lec::is_assume_kind(parts.kind)) {
             prove_assert_prover(node, parts, /*allow_refute_error=*/true);
           }
         }
@@ -572,7 +1144,7 @@ void Pass_formal::work(Eprp_var& var) {
           parts.msg     = pr.msg;
           uint32_t code = (pr.kind == "assert_always") ? gu::kFormalAssertAlways : gu::kFormalAssert;
           if (pr.verdict == livehd::lec::Verdict::Proven && pr.unbounded) {
-            gu::set_proven(node, code);  // inductive -> holds forever -> elide
+            gu::set_proven(node.base_node(), code);  // inductive -> holds forever -> elide
           } else if (pr.verdict == livehd::lec::Verdict::Refuted && pr.refuted_at >= pres.reset_hold && pres.reset_detected
                      && is_top && !downgrade_refute) {
             // A reset prologue actually pinned the initial state, so the BMC CEX
@@ -580,11 +1152,16 @@ void Pass_formal::work(Eprp_var& var) {
             // detected reset (pres.reset_detected == false) the flops start FREE,
             // so the witness may be an unreachable initial state: fall through to
             // the deferred path rather than fail a possibly-correct build.
-            report_refuted_reachable("assert-refuted", pr.kind + " is refuted (a reachable state makes it false)",
-                                     g->get_name(), pr.loc, pr.msg, pr.witness, pr.refuted_at);
-            gu::set_runtime_check(node, code);
+            report_refuted_reachable("assert-refuted",
+                                     pr.kind + " is refuted (a reachable state makes it false)",
+                                     g->get_name(),
+                                     pr.loc,
+                                     pr.msg,
+                                     pr.witness,
+                                     pr.refuted_at);
+            gu::set_runtime_check(node.base_node(), code);
           } else {
-            prove_assert_prover(node, parts, /*allow_refute_error=*/false);
+            prove_assert_prover(node.base_node(), parts, /*allow_refute_error=*/false);
           }
         }
       }
@@ -598,9 +1175,35 @@ void Pass_formal::work(Eprp_var& var) {
     // the user wrote a check that can never run.
     for (auto& node : props) {
       auto parts = fprop_parts(node);
-      if (parts.kind != "assume") {
+      if (!livehd::lec::is_assume_kind(parts.kind)) {
         warn_vacuous_guard(node, parts);
       }
     }
+
+    // A proved assert has no remaining obligation, and the `proven` attribute is
+    // how that is recorded: cgen elides the runtime check off it, and verify/LEC
+    // re-adjudicate it against their own assumptions. That attribute is stamped
+    // where the proof happens; nothing is removed from the graph here.
+    //
+    // This used to delete the inert fproperty node as well. It was the one place
+    // pass.formal edited the design rather than annotating it, and it threw away
+    // a marker downstream passes consume -- the reason the `proven` channel
+    // exists in the first place.
+  }
+
+  // ONE line for the whole pass, not one per obligation: the per-obligation
+  // "could not be proven" warnings are silenced once the budget is gone (they
+  // would all say the same thing), so this is the only place that reports it.
+  // A warning, not an error -- nothing unsound happened, the design just kept
+  // runtime checks a longer budget might have discharged.
+  if (budget.skipped > 0) {
+    livehd::diag::warn("pass.formal", "budget-exhausted", "comptime")
+        .msg("the {}s property-checking budget ran out: {} obligation(s) were not solved and stay runtime checks",
+             static_cast<double>(budget.total_ms) / 1000.0,
+             budget.skipped)
+        .hint(
+            "raise it with --set compile.formal.timeout=<seconds> (0 = unbounded), or skip the pass with --set "
+            "compile.formal.mode=none")
+        .emit();
   }
 }

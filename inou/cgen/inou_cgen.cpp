@@ -2,32 +2,61 @@
 
 #include "inou_cgen.hpp"
 
+#include <map>
+#include <string>
+#include <string_view>
+#include <utility>
+
 #include "cgen_sim.hpp"
 #include "cgen_verilog.hpp"
 #include "diag.hpp"  // livehd::diag::err — flag-value validation
+#include "file_name.hpp"
 #include "file_utils.hpp"
+#include "node_util.hpp"
 #include "perf_tracing.hpp"
+#include "sim_color_plan.hpp"
+#include "sim_loop_fusion.hpp"
+#include "sim_tune_vector.hpp"  // the shared sim.tune.* knob grammar and defaults
+#include "split_selfref.hpp"
 
 static Pass_plugin sample("inou_cgen", Inou_cgen::setup);
 
+namespace {
+// Internal graph names are the hierarchical, always-unique `file.entity` (two
+// files may define the same simple module name). Both generators below split
+// one off the other, and the DUT/root verdict is decided from the pair -- so
+// the separator set and the no-separator fallback live here, once: a name that
+// splits one way for `is_selected_root` and another way for the emission loop
+// is a silently mis-selected top, not a compile error.
+std::pair<std::string, std::string> split_entity(std::string_view name) {
+  std::string full(name);
+  const auto  pos    = full.find_last_of("./");
+  std::string entity = pos == std::string::npos ? full : full.substr(pos + 1);
+  return {std::move(full), std::move(entity)};
+}
+}  // namespace
+
 Inou_cgen::Inou_cgen(const Eprp_var& var) : Pass("inou.cgen", var) {
-  auto v  = var.get("verbose");
-  verbose = v != "false" && v != "0";
-  auto m  = var.get("srcmap");
-  srcmap  = m == "true" || m == "1";
+  auto m = var.get("srcmap");
+  srcmap = m == "true" || m == "1";
 }
 
 void Inou_cgen::setup() {
   Eprp_method m1("inou.cgen.verilog", "export verilog from an Lgraph", &Inou_cgen::to_cgen_verilog);
 
-  m1.add_label_optional("verbose", "dump bits and wirename (true/false)", "false");
   m1.add_label_optional("srcmap", "emit an ECMA-426 source-map sidecar (.v.map + sourceMappingURL comment)", "false");
   register_inou("cgen", m1);
 
-  // inou.cgen.sim — executable Slop C++ from an Lgraph (TODO 3d). Per-module
+  // inou.cgen.sim — executable simulator code from an Lgraph. Per-module
   // <name>.hpp written into `odir`; the standalone Bazel module scaffold around
   // them is written by the kernel's emit_sim_outputs.
-  Eprp_method m2("inou.cgen.sim", "export executable slop C++ from an Lgraph", &Inou_cgen::to_cgen_sim);
+  Eprp_method m2("inou.cgen.sim", "export executable simulator code from an Lgraph", &Inou_cgen::to_cgen_sim);
+  // The four sim.tune codegen knobs (sim.tune.dirty / fence / live_words /
+  // backend) keep their historical label names: lhd resolves the `--set
+  // sim.tune.*` spellings and hands this pass CONCRETE values.
+  m2.add_label_optional("backend",
+                        "sim.tune.backend: slop (reference C++) or llvm (direct native color objects); auto or empty = slop",
+                        "slop");
   m2.add_label_optional("vcd",
                         "baked-in VCD trace path (the sim.vcd knob: the kernel maps false->none, true-><top>.vcd, "
                         "FILE->that path); empty = no VCD",
@@ -37,6 +66,35 @@ void Inou_cgen::setup() {
                         "VCD data settles a few ticks after each clock edge, with X during the settle window "
                         "(sim.vcd_fake_delay); false = plain edge-aligned updates (no X, no delay)",
                         "true");
+  m2.add_label_optional("observe", "emit hierarchical value instrumentation for VCD/probe/query", "false");
+  m2.add_label_optional("runtime_support", "emit checkpoint/probe/query state-walk methods", "true");
+  m2.add_label_optional("slop_u",
+                        "materialize every LGraph-proven unsigned value as canonical-unsigned Slop_u<n> "
+                        "(one mask at the write) instead of a lazily-masked Slop<n> (one mask at every read). "
+                        "Uniform across combinational temps, IO ports, memories, registers and color boundary "
+                        "slots -- no exemption for state or module boundaries",
+                        "true");
+  m2.add_label_optional("color_dirty",
+                        "sim.tune.dirty: cross-cycle color activation cache for workloads with long stable-input periods "
+                        "(true/false; auto or empty = the built-in default, on); false emits one unconditional "
+                        "evaluation per color in the existing static phase order, with direct boundary assignments",
+                        "");
+  m2.add_label_optional("debug",
+                        "retain runtime Slop_u landing masks for checking bitwidth-proven unsigned values (true/false)",
+                        "false");
+  m2.add_label_optional("unknown_zero",
+                        "sim.unknown_zero: fill every unknown (`?`) literal bit with 0 instead of a 0/1 drawn once "
+                        "per literal from the run's seeded PRNG. true also lets the literal fold at C++ compile time",
+                        "false");
+  m2.add_label_optional("live_words",
+                        "sim.tune.live_words: live 64-bit words one color may keep across its members, N in [1, 2^20] "
+                        "(auto, empty or 0 = built-in default)",
+                        "0");
+  m2.add_label_optional("fence_ratio",
+                        "sim.tune.fence: sites per interface word a single-use module needs to keep its own colors, N in "
+                        "[0, 2^20] (0 = always); none = no module fences; auto or empty = none with color_dirty off, the "
+                        "built-in ratio with it on",
+                        "");
   register_inou("cgen", m2);
 }
 
@@ -45,17 +103,15 @@ void Inou_cgen::to_cgen_verilog(Eprp_var& var) {
 
   Inou_cgen pp(var);
 
-  auto dir     = pp.get_odir(var);
-  auto verbose = pp.verbose;
-  auto srcmap  = pp.srcmap;
+  auto dir    = pp.get_odir(var);
+  auto srcmap = pp.srcmap;
 
   // Consume var.graphs (HHDS handle): Eprp_var::add(Lgraph*) pushes the paired
   // shadow into var.graphs, so legacy producers (yosys.tolg, lgraph.match)
   // automatically feed this path. One .v per module, generated inline.
   // (Per-module Verilog cgen used to be dispatched onto a custom thread pool,
   // but that was an unused performance optimization; build-level parallelism
-  // comes from independent lhd invocations. If sim/cgen ever needs
-  // intra-process parallelism it will be reintroduced via taskflow.)
+  // comes from independent lhd invocations.)
   // Internal graph names are the hierarchical, always-unique `file.entity`
   // (two files may define the same simple module name). Verilog module names are
   // flat, so pre-compute one flat name per co-emitted graph, shared by every
@@ -69,9 +125,8 @@ void Inou_cgen::to_cgen_verilog(Eprp_var& var) {
       if (!g) {
         continue;
       }
-      std::string full(g->get_name());
-      auto        pos = full.find_last_of("./");
-      by_entity[pos == std::string::npos ? full : full.substr(pos + 1)].push_back(std::move(full));
+      auto [full, entity] = split_entity(g->get_name());
+      by_entity[std::move(entity)].push_back(std::move(full));
     }
     auto sanitize = [](std::string s) {
       for (auto& c : s) {
@@ -97,7 +152,7 @@ void Inou_cgen::to_cgen_verilog(Eprp_var& var) {
     if (!g) {
       continue;
     }
-    Cgen_verilog p(verbose, dir, srcmap, &flat_names);
+    Cgen_verilog p(dir, srcmap, &flat_names);
     p.do_from_graph(g);
   }
 }
@@ -106,28 +161,341 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   TRACE_EVENT("inou", "sim_gen");
 
   Inou_cgen pp(var);
-  auto      dir       = pp.get_odir(var);
-  auto      vcd_out   = var.get("vcd");
-  auto      top       = var.get("top");
-  auto      fakedelay = var.get("vcd_fake_delay");
+  auto      dir               = pp.get_odir(var);
+  auto      vcd_out           = var.get("vcd");
+  auto      top               = var.get("top");
+  auto      fakedelay         = var.get("vcd_fake_delay");
+  auto      observe_s         = var.get("observe");
+  auto      runtime_support_s = var.get("runtime_support");
+  auto      slop_u_s          = var.get("slop_u");
+  auto      color_dirty_s     = var.get("color_dirty");
+  auto      debug_s           = var.get("debug");
+  auto      unknown_zero_s    = var.get("unknown_zero");
+  auto      live_words_s      = var.get("live_words");
+  auto      fence_ratio_s     = var.get("fence_ratio");
+  auto       backend_s         = var.get("backend");
   // Boolean grammar, validated loudly: anything outside the canonical set would
   // otherwise silently mean "true" (the sim.* namespace validates its own copy,
-  // but the sim.vcd_fake_delay knob reaches this label directly).
-  if (!fakedelay.empty() && fakedelay != "true" && fakedelay != "1" && fakedelay != "on" && fakedelay != "false"
-      && fakedelay != "0" && fakedelay != "off") {
-    livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage")
-        .msg("sim.vcd_fake_delay expects true|false, got '{}'", fakedelay)
+  // but these labels are also reachable directly).
+  bool       bad_flag = false;
+  const auto flag_on  = [&bad_flag](std::string_view label, std::string_view v) {
+    if (!v.empty() && v != "true" && v != "1" && v != "on" && v != "false" && v != "0" && v != "off") {
+      livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage").msg("{} expects true|false, got '{}'", label, v).emit();
+      bad_flag = true;
+    }
+    return v == "true" || v == "1" || v == "on";
+  };
+  const bool observe_on         = flag_on("observe", observe_s);
+  const bool runtime_support_on = flag_on("runtime_support", runtime_support_s);
+  const bool slop_u_on          = flag_on("sim.slop_u", slop_u_s);
+  const bool debug_on           = flag_on("sim.debug", debug_s);
+  const bool unknown_zero_on    = flag_on("sim.unknown_zero", unknown_zero_s);
+  flag_on("sim.vcd_fake_delay", fakedelay);  // validated only: passed on as text
+  // The numeric/enum knobs share sim_tune_vector.hpp's grammar with lhd, so the
+  // two cannot disagree on what a spelling means. Same loud policy as the
+  // booleans: a typo must not silently mean "the default". The label keeps its
+  // historical `0` = default for live_words (the shared parser starts at 1).
+  const auto knob = [&bad_flag](std::string_view label, const auto& parsed) {
+    if (!parsed.ok) {
+      livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage").msg("{} {}", label, parsed.err).emit();
+      bad_flag = true;
+    }
+    return parsed.value;
+  };
+  // Unset (or auto) takes the built-in default, like the other tune knobs:
+  // parsed as a tri-state, not as a flag whose absence would mean off.
+  const auto dirty_knob = knob("sim.tune.dirty", livehd::sim::parse_tune_dirty(color_dirty_s));
+  const auto fence_knob = knob("sim.tune.fence", livehd::sim::parse_tune_fence(fence_ratio_s));
+  const auto live_words_knob
+      = knob("sim.tune.live_words", livehd::sim::parse_tune_live_words(live_words_s == "0" ? std::string_view{} : live_words_s));
+  const auto backend_knob = knob("sim.tune.backend", livehd::sim::parse_tune_backend(backend_s));
+  if (bad_flag) {
+    return;
+  }
+  // Whatever was left `auto` takes the built-in default. The fence default
+  // FOLLOWS dirty (none with it off -- fences only serve dirty-bit gating, and
+  // without it they are pure boundary cost -- the built-in ratio with it on).
+  const auto tune = livehd::sim::resolve_tune_defaults(dirty_knob, fence_knob, live_words_knob, backend_knob);
+  const bool llvm = tune.llvm;
+  // Simulator lowering still performs backend-specific structural rewrites
+  // (the clock-gate-cell fold and compact-loop realization -- `sim.flatten` is
+  // gone). Build those into a private output library: the EPRP input
+  // graphs remain native and read-only, and every pre-scan/emission handle
+  // below belongs to the same scratch bodies it measures.
+  hhds::GraphLibrary                        sim_library;
+  std::vector<std::shared_ptr<hhds::Graph>> sim_graphs;
+  sim_graphs.reserve(var.graphs.size());
+  for (const auto& source : var.graphs) {
+    if (!source) {
+      continue;
+    }
+    auto  source_io      = source->get_io();
+    auto* source_library = source_io ? source_io->get_library() : nullptr;
+    if (source_library == nullptr) {
+      livehd::diag::err("inou.cgen.sim", "scratch-copy", "internal")
+          .msg("could not copy '{}' into the simulator's private output library", source->get_name())
+          .emit();
+      return;
+    }
+    // copy_from is DEFINITION-LOCAL and a copied parent resolves
+    // get_subnode_graph() through the DESTINATION library only, so copy the
+    // whole callee closure — a child def missing from `var.graphs` would
+    // otherwise resolve to null here and its instances would silently become
+    // body-less blackboxes that compute nothing at simulation time.
+    for (const auto& graph : source->definitions().graphs()) {
+      if (sim_library.find_io(graph->get_name())) {
+        continue;  // shared callee already copied for an earlier source
+      }
+      if (!sim_library.copy_from(*source_library, graph->get_name())) {
+        livehd::diag::err("inou.cgen.sim", "scratch-copy", "internal")
+            .msg("could not copy '{}' into the simulator's private output library", graph->get_name())
+            .emit();
+        return;
+      }
+    }
+  }
+  // Drive preparation, planning, and emission from the LIBRARY, not from `var.graphs`:
+  // the closure copy above makes a callee definition VISIBLE to the emitter
+  // (get_subnode_io() resolves where it used to return null), so a parent now
+  // writes `#include "<callee>.hpp"` and directly binds its storage. A list
+  // built from `var.graphs` alone would never emit that header/struct and the
+  // sim host-compile would die on the missing include. In the normal `lhd` flow
+  // `var.graphs` IS the whole library, so this is the same set — and the emit
+  // dir's BUILD srcs/manifest, which sim_into() derives from `var.graphs`, keeps
+  // listing every .cpp written here.
+  for (const auto gid : sim_library.all_gids()) {
+    if (auto g = sim_library.get_graph(gid)) {
+      sim_graphs.push_back(std::move(g));
+    }
+  }
+
+  // Run every STRUCTURAL rewrite the emitter makes, over the WHOLE library,
+  // BEFORE Color_plan retains occurrence handles. The rewrites delete nodes
+  // and rewire edges, so planning first would retain stale class indices.
+  {
+    Cgen_sim prep(dir, vcd_out, top, fakedelay);
+    for (const auto& g : sim_graphs) {
+      // A body that cannot be prepared cannot be emitted correctly (the
+      // diagnostic came from prepare_graph): stop the whole emission rather
+      // than write a partial design whose remaining modules look fine.
+      if (g && !prep.prepare_graph(g)) {
+        return;
+      }
+    }
+    // The color planner treats each operation occurrence as one word-valued
+    // item. Packed records can therefore appear cyclic even when every field's
+    // real bit-level cone is acyclic, especially when different pure-comb
+    // children consume and produce disjoint fields. This is the simulator's
+    // private library, so expose those cones and split only the residual reads
+    // here without disturbing synthesis hierarchy or formal cutpoints.
+    for (const auto& g : sim_graphs) {
+      livehd::graph_util::repair_simulator_packed_cycles(g.get());
+    }
+  }
+
+  // Fuse only in the private simulator library, before discovery retains any
+  // occurrence handles. The fused body keeps ordinary child calls and native
+  // ordinal state; synthesis and LEC continue to see their original loops.
+  std::vector<std::shared_ptr<hhds::Graph>> fused_bodies;
+  for (const auto& graph : sim_graphs) {
+    if (!graph) {
+      continue;
+    }
+    auto bodies = livehd::sim::fuse_parallel_loops(graph.get());
+    fused_bodies.insert(fused_bodies.end(), bodies.begin(), bodies.end());
+  }
+  sim_graphs.insert(sim_graphs.end(), fused_bodies.begin(), fused_bodies.end());
+
+  // The replacement scheduler starts with a read-only occurrence-wide plan.
+  // Build it only after ALL simulator-private structural preparation above:
+  // retained HHDS occurrence handles assert if a later rewrite advances the
+  // library epoch.  Select roots rather than every definition, otherwise a
+  // large hierarchy would be rediscovered once per callee.
+  std::map<const hhds::Graph*, livehd::sim::Color_plan> root_color_plans;
+  absl::flat_hash_set<std::string>                      instantiated;
+  for (const auto& g : sim_graphs) {
+    if (!g) {
+      continue;
+    }
+    for (const auto node : g->body().nodes()) {
+      if (livehd::graph_util::type_op_of(node) == Ntype_op::Sub) {
+        if (auto child = node.get_subnode_graph()) {
+          instantiated.insert(std::string(child->get_name()));
+        }
+      }
+    }
+  }
+  // A compact loop is one outer color whose native ordinal walk currently calls
+  // a definition-local body kernel. Marked BEFORE the plan loop because it is a
+  // constructor argument of every Cgen_sim, including the cheap probes below —
+  // a probe built with the wrong flag would compute a key for a different
+  // generation than the one that emits. It depends only on `subnode_loop()`, so
+  // hoisting it past the plan changes nothing else.
+  absl::flat_hash_set<const hhds::Graph*>   compact_kernel_defs;
+  std::vector<std::shared_ptr<hhds::Graph>> compact_work;
+  for (const auto& g : sim_graphs) {
+    if (!g) {
+      continue;
+    }
+    for (const auto node : g->body().nodes()) {
+      if (node.subnode_loop()) {
+        if (auto child = node.get_subnode_graph()) {
+          compact_work.push_back(std::move(child));
+        }
+      }
+    }
+  }
+  while (!compact_work.empty()) {
+    auto definition = std::move(compact_work.back());
+    compact_work.pop_back();
+    if (!definition || !compact_kernel_defs.insert(definition.get()).second) {
+      continue;
+    }
+    for (const auto node : definition->body().nodes()) {
+      if (livehd::graph_util::type_op_of(node) == Ntype_op::Sub) {
+        if (auto child = node.get_subnode_graph()) {
+          compact_work.push_back(std::move(child));
+        }
+      }
+    }
+  }
+
+  // ONE hierarchical-digest memo for the whole run. Every module's key folds its
+  // callees' keys, so without sharing, a hierarchy re-walks the same subtrees
+  // once per ancestor AND once more in the emitter — O(modules x cone) node
+  // visits instead of O(nodes), which on XiangShan `Rob` is seconds of pure
+  // repetition. Safe because prepare_graph() has already run over the whole
+  // library, so no body changes shape while the memo is alive.
+  absl::flat_hash_map<hhds::Gid, uint64_t> digest_memo;
+  const auto                               is_selected_root = [&](std::string_view full, std::string_view entity) {
+    return !top.empty() ? (top == full || top == entity) : !instantiated.contains(std::string(full));
+  };
+  // The DUT is the module the driver pokes directly; see Cgen_sim::dut_.
+  // Resolved ONCE, here, next to `is_selected_root`: the verdict depends only
+  // on `top` and `instantiated`, three loops below ask for it, and two of them
+  // have already split the same name for their own use. One answer built where
+  // the rule lives cannot drift away from the rule.
+  absl::flat_hash_set<const hhds::Graph*> dut_graphs;
+  for (const auto& g : sim_graphs) {
+    if (!g) {
+      continue;
+    }
+    const auto [full, entity] = split_entity(g->get_name());
+    if (is_selected_root(full, entity)) {
+      dut_graphs.insert(g.get());
+    }
+  }
+  const auto is_dut   = [&](const std::shared_ptr<hhds::Graph>& g) { return dut_graphs.contains(g.get()); };
+  // THE one constructor call, shared by the pre-plan probe (plan = nullptr) and
+  // the emitter: the key is computed from these arguments, so the two must see
+  // identical values or the probe keys a different generation than the one
+  // that emits (a permanent miss, or a stale hit).
+  const auto cgen_for = [&](const std::shared_ptr<hhds::Graph>& g, const livehd::sim::Color_plan* plan) {
+    return Cgen_sim(dir,
+                    vcd_out,
+                    top,
+                    fakedelay,
+                    plan,
+                    compact_kernel_defs.contains(g.get()),
+                    observe_on,
+                    runtime_support_on,
+                    slop_u_on,
+                    tune.dirty,
+                    debug_on,
+                    unknown_zero_on,
+                    tune.llvm,
+                    is_dut(g),
+                    static_cast<uint32_t>(tune.live_words),
+                    tune.fence);
+  };
+  const auto probe_for = [&](const std::shared_ptr<hhds::Graph>& g) { return cgen_for(g, /*plan=*/nullptr); };
+  // Which modules are already generated. Asked BEFORE the color plan, because
+  // on a large design discovery dominates the emitter — measured on XiangShan
+  // `Rob`, ~25 s of a ~32 s warm codegen against ~4 s of actual C++ emission.
+  // Nothing about the plan enters the key (the plan is DERIVED from the same
+  // cone and options), so a module whose key and complete artifact set are
+  // already on disk needs neither the plan nor the emission.
+  absl::flat_hash_set<const hhds::Graph*> already_generated;
+  for (const auto& g : sim_graphs) {
+    if (!g) {
+      continue;
+    }
+    const auto [full, entity] = split_entity(g->get_name());
+    if (!entity.empty() && entity.front() == '%') {
+      continue;  // a `test` block's minted comb is never emitted at all
+    }
+    // Who gets a plan (the plan loop below) -- and so who is a color root in
+    // do_from_graph. The key folds the tune vector for a root only, so this
+    // verdict and the plan loop's must stay the same rule.
+    const bool root  = is_selected_root(full, entity) || (llvm && compact_kernel_defs.contains(g.get()));
+    auto       probe = probe_for(g);
+    probe.share_digest_memo(&digest_memo);
+    if (!probe.generation_current(g.get(), root)) {
+      continue;
+    }
+    // A root additionally owns its plan report. It is documentation rather than
+    // a build input, but regenerating it is exactly what the skip avoids, so a
+    // missing one has to count as a miss or `lhd sim` would silently stop
+    // producing it.
+    if (root && !dir.empty() && !std::filesystem::exists(absl::StrCat(dir, "/", livehd::unit_file_stem(full), ".color-plan.txt"))) {
+      continue;
+    }
+    already_generated.insert(g.get());
+  }
+
+  bool wrote_plan = false;
+  for (const auto& g : sim_graphs) {
+    if (!g) {
+      continue;
+    }
+    const auto [full, entity] = split_entity(g->get_name());
+    const bool selected       = is_selected_root(full, entity);
+    // A compact body is a separate executable definition. Give LLVM the same
+    // versioned schedule used by the root instead of emitting a Slop body.
+    const bool compact_root   = llvm && compact_kernel_defs.contains(g.get());
+    if ((!selected && !compact_root) || (!entity.empty() && entity.front() == '%')) {
+      continue;
+    }
+    if (already_generated.contains(g.get())) {
+      wrote_plan = true;  // the previous run's plan is still the current one
+      continue;
+    }
+    auto plan = livehd::sim::Color_plan::discover(g.get(), observe_on || !vcd_out.empty(), llvm, tune.live_words, tune.fence);
+    plan.write_report(absl::StrCat(dir, "/", livehd::unit_file_stem(full), ".color-plan.txt"));
+    if (!plan.complete()) {
+      livehd::diag::err("inou.cgen.sim", "color-plan-incomplete", "unsupported")
+          .msg("occurrence-wide simulator discovery is incomplete for '{}'", full)
+          .hint(plan.errors().empty() ? "inspect the generated .color-plan.txt report" : plan.errors().front())
+          .emit();
+      return;
+    }
+    root_color_plans.emplace(g.get(), std::move(plan));
+    wrote_plan = true;
+  }
+  if (!wrote_plan && !sim_graphs.empty()) {
+    livehd::diag::err("inou.cgen.sim", "color-plan-root", "usage")
+        .msg("could not select top '{}' for occurrence-wide simulator discovery", top)
         .emit();
     return;
   }
 
   // Synchronous (one .hpp per module): the designs are small and the kernel's
   // sim_into() checks each <module>.hpp exists right after this returns.
-  for (const auto& g : var.graphs) {
+  for (const auto& g : sim_graphs) {
     if (!g) {
       continue;
     }
-    Cgen_sim p(dir, vcd_out, top, fakedelay);
+    // Already current. do_from_graph() would reach the same verdict on its own,
+    // but only after being handed a plan — and for a skipped ROOT there is now
+    // no plan to hand it, so a null one would key as a non-root and re-emit the
+    // whole module against the wrong generation.
+    if (already_generated.contains(g.get())) {
+      continue;
+    }
+    const auto  plan_it = root_color_plans.find(g.get());
+    const auto* plan    = plan_it == root_color_plans.end() ? nullptr : &plan_it->second;
+    auto        p       = cgen_for(g, plan);
+    p.share_digest_memo(&digest_memo);
     p.do_from_graph(g);
   }
 }

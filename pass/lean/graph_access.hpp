@@ -23,7 +23,7 @@ namespace lean_pass {
 
 using Node     = hhds::Node_class;
 using Node_pin = hhds::Pin_class;
-using Edge     = hhds::Edge_class;
+using Edge     = livehd::graph_util::Sink_driver<Node_pin>;
 
 struct Emit_error : std::runtime_error {
   using std::runtime_error::runtime_error;
@@ -36,22 +36,26 @@ inline Ntype_op node_op(const Node& node) { return livehd::graph_util::type_op_o
 inline bool     node_is_flop(const Node& node) { return livehd::graph_util::is_type_flop(node); }
 inline bool     node_is_memory(const Node& node) { return node_op(node) == Ntype_op::Memory; }
 inline bool     pin_is_input(const Node_pin& pin) { return livehd::graph_util::is_graph_input_pin(pin); }
-inline bool     pin_is_const(const Node_pin& pin) { return livehd::graph_util::is_const_pin(pin); }
+inline bool     pin_is_const(const Node_pin& pin) { return pin.is_const(); }
 
-inline Dlop pin_const_value(const Node_pin& pin) { return livehd::graph_util::hydrate_const(pin); }
+inline Dlop pin_const_value(const Node_pin& pin) { return livehd::graph_util::const_of(pin); }
 
-// Input edges in a deterministic order: by sink port id, then driver index.
-// Both emitters depend on this order -- a node's operand positions ARE its
-// certificate dependency order.
-inline livehd::graph_util::Edge_vec inp_edges_ordered(const Node& node) {
-  auto edges = node.inp_edges();
-  std::sort(edges.begin(), edges.end(), [](const Edge& a, const Edge& b) {
-    const auto ap = a.sink.get_port_id();
-    const auto bp = b.sink.get_port_id();
+// Translate master's per-operand sink slots into the historical bank order.
+// The owned IR uses semantic ports (Sum: 0=add, 1=subtract), not slot numbers.
+// Sort drivers within each bank as before, keeping duplicate operands on their
+// distinct slots. Fixed-port cells retain their port order.
+inline auto inp_edges_ordered(const Node& node) {
+  auto       edges = livehd::graph_util::inp_sink_drivers(node);
+  const auto op    = node_op(node);
+  std::sort(edges.begin(), edges.end(), [op](const Edge& a, const Edge& b) {
+    const auto ap = Ntype::sink_bank(op, a.sink.get_port_id());
+    const auto bp = Ntype::sink_bank(op, b.sink.get_port_id());
     if (ap != bp) {
       return ap < bp;
     }
-    return a.driver.get_class_index().value < b.driver.get_class_index().value;
+    const auto ad = a.driver.get_class_index().value;
+    const auto bd = b.driver.get_class_index().value;
+    return ad != bd ? ad < bd : a.sink.get_port_id() < b.sink.get_port_id();
   });
   return edges;
 }
@@ -128,7 +132,6 @@ Node_pin           resolve_resize_chain(const Node_pin& start);
 std::string        sink_pin_name(const Edge& edge);
 uint32_t           raw_pin_width(const Node_pin& pin);
 uint32_t           raw_node_width(const Node& node);
-Dlop               node_const_value(const Node& node);
 bool               node_output_is_signed(const Node& node);
 void               check_width(const LeanCtx& ctx, const Node& node, uint32_t w, std::string_view what);
 uint32_t           intrinsic_const_width(const Dlop& v);

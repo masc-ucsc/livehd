@@ -1,0 +1,16 @@
+/*
+:name: shortcircuit_and_rhs_evaluated
+:type: error
+:error: division by zero
+:help: guard the divisor
+*/
+
+// 2c-shortcircuit, the NEGATIVE side for `and`: the right operand is skipped
+// only when the LEFT one is FALSE. Here it is comptime TRUE, so the `/ 0` IS
+// evaluated and must still be reported.
+
+const N = 0
+pub mod top(a:u8) -> (y:u8@[0]) {
+  cassert((N == 0 and (64 / N == 0)) == false) // locate_error_here
+  y = a
+}

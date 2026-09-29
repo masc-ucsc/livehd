@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 
 import argparse
+import copy
 import glob
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+
+from lec import run_lec, verdict as lec_verdict
 
 class PrpTest:
     """
@@ -16,6 +20,11 @@ class PrpTest:
     def __init__(self, prp_file):
         # Set default values
         self.params = {}
+        # Every occurrence of every tag, in file order. `params` keeps the LAST
+        # value (as it always has); tags that are naturally a LIST — an
+        # expectation stated once per line, e.g. `:lec_grep:` — read `multi`
+        # instead, so they need no in-value separator to hide spaces from.
+        self.multi  = {}
         self.params['name']       = os.path.basename(prp_file)
         self.params['files']      = prp_file
         self.params['incdirs']    = os.path.dirname(prp_file)
@@ -35,6 +44,7 @@ class PrpTest:
                     param_value = param[2]
 
                     self.params[param_name] = param_value
+                    self.multi.setdefault(param_name, []).append(param_value)
         except Exception as e:
             print('Failed to process "{}"'.format(prp_file))
             sys.exit(1)
@@ -49,7 +59,8 @@ class PrpRunner:
     LiveHD Pyrope Compilation Runner
     """
 
-    def __init__(self):
+    def __init__(self, bitfuzz=False):
+        self.equiv_sets = ["compile.bitfuzz.mode=wires"] if bitfuzz else []
         # Tests drive the lhd kernel (one stateless invocation per mode); the
         # lgshell REPL is no longer involved.
         if os.path.exists("./bazel-bin/lhd/lhd"):
@@ -64,10 +75,13 @@ class PrpRunner:
     def _safe_name(test):
         return re.sub(r'\W+', '_', test.params['name'])
 
-    def _scratch(self, test, mode, suffix=''):
+    def _scratch_path(self, test, mode, suffix=''):
         # `tmp*` prefix so the dirs are .gitignore-covered when the harness is
         # run manually from the repo root (they are created under cwd).
-        path = 'tmp_lhd_{}_{}{}'.format(self._safe_name(test), mode, suffix)
+        return 'tmp_lhd_{}_{}{}'.format(self._safe_name(test), mode, suffix)
+
+    def _scratch(self, test, mode, suffix=''):
+        path = self._scratch_path(test, mode, suffix)
         shutil.rmtree(path, ignore_errors=True)
         return path
 
@@ -101,18 +115,29 @@ class PrpRunner:
         cmd += test.params['files']
         cmd += ['--workdir', self._scratch(test, mode), '-q']
         cmd += ['--set', 'upass.verifier=false', '--set', 'upass.tolg=false']
+        cmd += self._extra_sets(test)
+        cmd += self.equiv_set_args()
         return cmd
 
     @staticmethod
-    def _set_override(cmd, key, value):
-        """Set `--set key=value`, REPLACING any earlier value for the same key.
+    def _extra_sets(test):
+        """`:set: a.b=c d.e=f` — per-fixture pass flags, appended to every mode.
 
-        Composing on top of a base builder (lhd_upass) used to just append the
-        override, leaving one argv holding both `upass.verifier=false` and
-        `=true` and relying on last-wins. That is ambiguous to anyone reading
-        the command, so lhd now rejects a repeated key with a different value;
-        collapse it here instead.
+        Used by fixtures that must exercise a non-default lowering (e.g.
+        `:set: compile.unroll=true` to unroll a source loop instead of keeping it rolled, or
+        unrolling it).
         """
+        spec = test.params.get('set')
+        if not spec:
+            return []
+        out = []
+        for tok in spec.split():
+            out += ['--set', tok]
+        return out
+
+    @staticmethod
+    def _without_setting(cmd, key):
+        """Remove a builder override so this stage uses the CLI default."""
         out, i = [], 0
         while i < len(cmd):
             if cmd[i] == '--set' and i + 1 < len(cmd) and cmd[i + 1].split('=')[0] == key:
@@ -120,12 +145,12 @@ class PrpRunner:
                 continue
             out.append(cmd[i])
             i += 1
-        return out + ['--set', '{}={}'.format(key, value)]
+        return out
 
     def lhd_comptime(self, test, mode):
         # Pure compile-time program: every cassert must resolve. The verifier
-        # (lhd default: off) is turned ON, mirroring the old bare pass.upass
-        # default; it hard-errors on known-false cassert and discharges
+        # uses its enabled CLI default after removing the smoke tier disable;
+        # it hard-errors on known-false cassert and discharges
         # known-true. To opt out for a specific case, drop `:type: comptime`
         # back to `:type: upass`.
         #
@@ -134,7 +159,7 @@ class PrpRunner:
         #   :verifier_fail: N   — expected count of known-false casserts
         # When set, the verifier end_run compares its tally and fails the
         # test if they don't match. -1 or absent disables the check.
-        cmd = self._set_override(self.lhd_upass(test, mode), 'upass.verifier', 'true')
+        cmd = self._without_setting(self.lhd_upass(test, mode), 'upass.verifier')
         for tag in ('verifier_pass', 'verifier_fail', 'verifier_include_funcs'):
             if tag in test.params:
                 cmd += ['--set', 'upass.{}={}'.format(tag, test.params[tag])]
@@ -149,13 +174,22 @@ class PrpRunner:
         # the --emit diagnostics: slot itself.
         #
         # Optional `:tolg: 1` header tag (task 1r): extend the pipeline with
-        # the LNAST->LGraph lowering (recipe O0 + lg: emit) so errors that
+        # the LNAST->LGraph compilation (lg: emit) so errors that
         # only fire at tolg (e.g. a func_call with no hardware lowering) are
         # exercisable as error tests.
-        cmd = self._set_override(self.lhd_upass(test, mode), 'upass.verifier', 'true')
+        cmd = self._without_setting(self.lhd_upass(test, mode), 'upass.verifier')
         if test.params.get('tolg'):
-            cmd += ['--recipe', 'O0', '--emit-dir',
+            cmd += ['--emit-dir',
                     'lg:{}/'.format(self._scratch(test, mode, '_lg'))]
+        # Optional `:error_top: <name>` — pass an explicit `--top`. Some
+        # diagnostics only fire for a top the USER named (a generic entry point
+        # with no declaration default is a real error when it was requested as
+        # the top, and a library template waiting for its caller when it was
+        # merely the only unit in the file), so the fixture has to be able to
+        # say which of the two it is pinning. A distinct tag, not `:top_module:`,
+        # because that one defaults to 'top' for every test.
+        if test.params.get('error_top'):
+            cmd += ['--top', test.params['error_top'].strip()]
         return cmd
 
     def lhd_warning(self, test, mode):
@@ -168,33 +202,47 @@ class PrpRunner:
 
     def lhd_lgraph(self, test, mode):
         # LNAST->LGraph: the lg: emit gates the kernel's standalone tolg
-        # lowering (the CLI-level tolg:1); --recipe O0 keeps the graph passes
-        # out, matching the old `pass.upass ... tolg:1` pipeline tail.
+        # lowering followed by the standard graph optimization passes
+        # (tolg + pass.cprop + pass.bitwidth). With the optimization-level
+        # selection gone there is only ONE lowering command, so the two mode
+        # names below resolve to it rather than drifting apart.
         cmd = self.lhd_upass(test, mode)
-        cmd += ['--recipe', 'O0', '--emit-dir',
+        cmd += ['--emit-dir',
                 'lg:{}/'.format(self._scratch(test, mode, '_lg'))]
         return cmd
 
     def lhd_lg_compile(self, test, mode):
-        # tolg + pass.cprop + pass.bitwidth == recipe O2 over the lg: emit.
-        cmd = self.lhd_upass(test, mode)
-        cmd += ['--recipe', 'O2', '--emit-dir',
-                'lg:{}/'.format(self._scratch(test, mode, '_lg'))]
-        return cmd
+        return self.lhd_lgraph(test, mode)
 
     def lhd_equiv(self, test, odir):
-        # Equivalence test: lower to LGraph (tolg, no graph passes) and emit
+        # Equivalence test: compile to optimized LGraph and emit
         # per-module Verilog into `odir`. run_equiv() then LECs the generated
-        # Verilog against the sibling golden `.v` via inou/yosys/lgcheck.
+        # Verilog against the sibling golden `.v` via default lhd lec.
         #
         # Optional `:reset_style: async` header tag (task 2d-reg): set the
         # upass.reset_style elaboration flag so the implicit-reset flops wire
         # an async reset and the golden can assert the async always-block.
         cmd = self.lhd_upass(test, 'equiv')
-        if 'reset_style' in test.params:
+        # The emitted side is never satopt-optimized (the compile default,
+        # pinned): the LEC below runs every satopt stage, so each pair also
+        # checks satopt's rewrites against an unoptimized design.
+        cmd += ['--set', 'pass.satopt=false']
+        if test.params.get('reset_style', 'sync') != 'sync':
             cmd += ['--set', 'upass.reset_style={}'.format(test.params['reset_style'])]
-        cmd += ['--recipe', 'O0', '--emit-dir', 'verilog:{}/'.format(odir)]
+        if test.params.get('compile_top'):
+            cmd += ['--top', test.params['compile_top'].strip()]
+        cmd += ['--emit-dir', 'verilog:{}/'.format(odir)]
         return cmd
+
+    def equiv_set_args(self):
+        return [arg for setting in self.equiv_sets for arg in ('--set', setting)]
+
+    @staticmethod
+    def lec_satopt_args():
+        # LEC re-reads both Verilog sides with every satopt stage on (shared
+        # profile): a wrong rewrite on either side refutes the pair. A fixture's
+        # `:set:` comes after and may override it.
+        return ['--set', 'pass.satopt=true', '--set', 'pass.satopt.stages=all']
 
     def gen_lhd_cmd(self, test, mode):
         gen_cmd = {
@@ -400,7 +448,11 @@ class PrpRunner:
                 text = f.read()
         except OSError:
             return []
-        return re.findall(r'\bmodule\s+\\?([^\s(]+)', text)
+        # Anchored at the START OF A LINE, deliberately: an unanchored `\bmodule\s+`
+        # matches the word inside a golden's own PROSE COMMENT ("the module carries"
+        # -> top 'carries'), which is a header comment away from silently picking the
+        # wrong top. Every Verilog module declaration begins its line.
+        return re.findall(r'^\s*module\s+\\?([^\s(]+)', text, re.M)
 
     @staticmethod
     def _verilog_top_module(vpath):
@@ -408,28 +460,12 @@ class PrpRunner:
         mods = PrpRunner._verilog_modules(vpath)
         return mods[0] if mods else None
 
-    @staticmethod
-    def _yosys_slang_plugin(tmp_dir):
-        # The yosys-slang plugin (slang.so) for lgcheck's `--gold_reader slang`
-        # (goldens with SystemVerilog packed structs / '{...} patterns that
-        # read_verilog cannot parse). Probes the bazel runfiles layout (cwd is
-        # <runfiles>/_main, the external repo sits beside it) and the repo-root
-        # bazel-bin layout (manual runs). Returns an absolute path or None.
-        for cand in ('../+http_archive+yosys_slang/slang.so',
-                     '../+_repo_rules+yosys_slang/slang.so',
-                     'bazel-bin/external/+http_archive+yosys_slang/slang.so',
-                     'bazel-bin/external/+_repo_rules+yosys_slang/slang.so'):
-            path = os.path.normpath(os.path.join(tmp_dir, cand))
-            if os.path.exists(path):
-                return path
-        return None
-
     def run_equiv(self, tmp_dir, test: PrpTest):
         # Lower each .prp function to Verilog (inou.prp -> pass.upass tolg:1 ->
         # inou.cgen.verilog) and prove it equivalent to its sibling golden .v
-        # via inou/yosys/lgcheck (formal LEC). The generated module names are
+        # via default lhd lec (formal LEC). The generated module names are
         # the function-tree names (e.g. trivial_if.fun3); the golden must
-        # declare the same module name so lgcheck --top matches.
+        # declare the same module name so LEC selects the same top.
         name = test.params['name']
         prp  = test.params['files'][0]
         gold = os.path.splitext(prp)[0] + '.v'
@@ -495,103 +531,154 @@ class PrpRunner:
                 print('{} - equiv - FAILED: {} generated modules {}; set :pyrope_top:'.format(name, len(gen_mods), gen_mods))
                 return 1
 
-        # OUR ENGINE ALWAYS RUNS. This corpus is a test of `lhd lec` as much as
-        # it is of the front end, so every pair is discharged by our own encoder
-        # and must PROVE. The two legs have DIFFERENT contracts on purpose:
-        #
-        #   lhd lec  OURS. Must PROVE (PASS(n) counts -- a complete BMC is a real
-        #            result). UNKNOWN, a timeout or an encoder refusal is a gap in
-        #            the tool that this corpus exists to surface, so it FAILS.
-        #
-        #   lgcheck  an INDEPENDENT oracle (yosys). A definitive FAIL is always an
-        #            error -- it found a real difference, and if we PROVED the same
-        #            pair then one of the two engines is wrong and that is exactly
-        #            what we want to hear about. Its INCONCLUSIVE is NOT an error:
-        #            lgcheck simply could not decide, which says nothing about us.
-        #
-        # `:equiv_engine: cvc5` keeps its meaning: SKIP lgcheck for pairs whose two
-        # sides differ in LATCH / CLOCK-EDGE structure. lgcheck's cascade ends in a
-        # bounded miter that steps ONE posedge per step, so it cannot represent a
-        # latch closing before an edge or a negedge endpoint committing inside the
-        # period, and it calls equivalent designs different. For those the
-        # independent oracle is the v2prp2v original-Verilog leg plus
-        # lhd/tests/single_edge_four_classes_test.sh (Icarus on source vs
-        # normalized netlists).
+        # Every equivalence pair uses native Slang and the default LEC solver.
         lec_cmd = [self.lhd, 'lec', '--impl', 'verilog:' + impl, '--ref', 'verilog:' + gold,
-                   '--impl-top', pyrope_top, '--ref-top', verilog_top, '--reader', 'slang',
-                   '--workdir', os.path.join(odir, 'w_lec')]
-        lec = subprocess.Popen(lec_cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        try:
-            llog, _ = lec.communicate()
-            lrc = lec.returncode
-        except Exception:
-            lec.kill()
-            lrc, llog = 1, b''
-        ltxt = llog.decode('utf-8', 'ignore')
-        # PASS(n) is a real pass (exit 0); only a genuine UNKNOWN (solver timeout,
-        # encoder refusal, unattributable divergence) is a failure here.
-        lec_ok = lrc == 0 and 'UNKNOWN' not in ltxt and 'INCONCLUSIVE' not in ltxt
+                   '--impl-top', pyrope_top, '--ref-top', verilog_top,
+                   '--workdir', os.path.join(odir, 'w_lec')] + self.lec_satopt_args() + self._extra_sets(test) + self.equiv_set_args()
+        lec = run_lec(lec_cmd, cwd=tmp_dir, timeout=20)
+        ltxt = lec.stdout.decode('utf-8', 'ignore')
+        # Hierarchical LEC may retain an intermediate collapsed-box UNKNOWN in
+        # the successful flat retry's detail. Judge the final top-level line;
+        # PASS(n) is a real bounded pass, not an inconclusive result.
+        lec_ok = lec_verdict(lec) == 'proven'
         if not lec_ok:
             print('{} - equiv - FAILED: lhd lec did not PROVE (our own corpus must be decidable by '
                   'our own engine; verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
             print(ltxt)
 
-        if (test.params.get('equiv_engine') or '').strip() == 'cvc5':
-            if lec_ok:
-                print('{} - equiv - success via lhd lec (lgcheck skipped: latch/edge structure; '
-                      'verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
-            return 0 if lec_ok else 1
+        if not lec_ok:
+            return 1
 
-        lgcheck_cmd = ['./inou/yosys/lgcheck', '--reference', gold, '--implementation', impl,
-                       '--reference_top', verilog_top, '--implementation_top', pyrope_top]
-        # Optional `:gold_reader: slang` header: read the golden through the
-        # yosys-slang plugin instead of read_verilog (goldens using
-        # SystemVerilog packed structs / '{...} patterns). The golden's top
-        # module must be a PLAIN identifier (no escaped `\a.b ` names — those
-        # break yosys-slang's --top/RTLIL naming), hence the `<name>_top`
-        # convention on such goldens.
-        if (test.params.get('gold_reader') or '').strip() == 'slang':
-            plugin = self._yosys_slang_plugin(tmp_dir)
-            if not plugin:
-                print('{} - equiv - FAILED: :gold_reader: slang but yosys-slang plugin (slang.so) not found'.format(name))
-                return 1
-            lgcheck_cmd += ['--gold_reader', 'slang', '--slang_plugin', plugin]
-        check = subprocess.Popen(
-            lgcheck_cmd,
-            cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        # The SECOND, independent opinion on the same pair (`:yosys_lec: false`
+        # opts a pair out). See run_yosys_lec.
+        if self.run_yosys_lec(test, impl, pyrope_top, gold_abs, verilog_top, odir):
+            return 1
+
+        print('{} - equiv - success (lhd lec; verilog_top:{} pyrope_top:{})'.format(
+            name, verilog_top, pyrope_top))
+        return 0
+
+    # ── the yosys/lgcheck cross-oracle (`lgyosys`) ───────────────────────────
+    #
+    # `lhd lec` above and `inou/yosys/lgcheck` here answer the SAME question
+    # with no shared code: cvc5 over the LGraph the front end built, versus
+    # yosys `equiv_simple`/`equiv_induct` + a bounded miter over the two Verilog
+    # TEXTS. That independence is the whole point — a native path that ever
+    # degenerates into proving nothing (an obligation quietly dropped, a vacuous
+    # miter, a top that resolves to an empty def) keeps reporting PROVEN over
+    # this entire corpus, and only a second engine can notice.
+    #
+    # yosys' SAT does not scale past small combinational logic (it is the
+    # backend LiveHD is replacing, not a gate), so the oracle is deliberately
+    # ONE-SIDED: exit 1 — a real counterexample — is the only verdict that fails
+    # a pair. An inconclusive result, a spent budget, or a read the yosys
+    # front end cannot do is reported and tolerated; it never claims a proof.
+    @staticmethod
+    def _lgcheck_tools():
+        """(lgcheck, yosys2) absolute paths, or (None, None) if unavailable.
+
+        One relative spelling covers both cwds this harness runs in: the repo
+        root and a bazel sh_test's runfiles root (`//inou/yosys:scripts` is a
+        `deps` of every prp-equiv-* target, so both files are staged there).
+        lgcheck resolves its own yosys and ware/rtl include RELATIVE TO CWD, and
+        it is run from the pair's scratch dir, so pass the binary explicitly.
+        """
+        lgcheck = os.environ.get('LHD_LGCHECK') or 'inou/yosys/lgcheck'
+        if not os.access(lgcheck, os.X_OK):
+            return None, None
+        for cand in ('inou/yosys/yosys2', 'bazel-bin/inou/yosys/yosys2'):
+            if os.access(cand, os.X_OK):
+                return os.path.abspath(lgcheck), os.path.abspath(cand)
+        return os.path.abspath(lgcheck), None
+
+    def run_yosys_lec(self, test, impl, impl_top, gold, gold_top, odir):
+        """yosys `equiv` on (generated verilog, golden verilog). 1 only on REFUTED."""
+        name = test.params['name']
+        if str(test.params.get('yosys_lec', 'true')).strip().lower() in ('false', 'off', '0', 'no'):
+            # An opted-out pair states WHY in its header (X-semantics the yosys
+            # miter reads differently, a construct read_verilog rejects, ...).
+            print('{} - lgyosys - skipped (:yosys_lec: false)'.format(name))
+            return 0
+
+        lgcheck, yosys = self._lgcheck_tools()
+        if lgcheck is None:
+            # Not a silent pass: say it, so a missing oracle is visible in the
+            # log of every pair rather than looking like a clean cross-check.
+            print('{} - lgyosys - unavailable (no inou/yosys/lgcheck; cross-check NOT run)'.format(name))
+            return 0
+
+        # `:yosys_lec_timeout: N` — yosys' own shared equivalence budget. Small
+        # by default: a pair this oracle cannot decide quickly it will not decide
+        # at all, and the native proof above is the gate that must hold.
         try:
-            clog, _ = check.communicate()
-            crc = check.returncode
-        except Exception:
-            check.kill()
-            crc, clog = 1, b''
+            budget = max(1, int(str(test.params.get('yosys_lec_timeout', 10)).strip()))
+        except ValueError:
+            print('{} - lgyosys - FAILED: :yosys_lec_timeout: must be an integer'.format(name))
+            return 1
 
-        # lgcheck rc: 0 pass | 2 INCONCLUSIVE (no proof, no counterexample) | else FAIL.
-        # Only a definitive FAIL is an error; an inconclusive independent oracle
-        # says nothing about this pair. Combine with our own leg above -- BOTH
-        # must be satisfied.
-        if crc == 0:
-            if lec_ok:
-                print('{} - equiv - success (lhd lec + lgcheck; verilog_top:{} pyrope_top:{})'.format(
-                    name, verilog_top, pyrope_top))
-            return 0 if lec_ok else 1
-        if crc == 2:
-            print('{} - equiv - lgcheck inconclusive (no proof, no counterexample; NOT a fail) '
-                  '{}(verilog_top:{} pyrope_top:{})'.format(
-                      name, 'but lhd lec PROVED it ' if lec_ok else '', verilog_top, pyrope_top))
-            return 0 if lec_ok else 1
-        # lgcheck says DIFFERENT. Always an error -- and if our engine PROVED the
-        # same pair, say so loudly: two engines disagreeing means one of them is
-        # wrong, which is the single most valuable signal this corpus produces.
-        print('{} - equiv - FAILED: lgcheck not equivalent{} (verilog_top:{} pyrope_top:{})'.format(
-            name, ' WHILE lhd lec PROVED it -- the two engines DISAGREE' if lec_ok else '',
-            verilog_top, pyrope_top))
-        print(clog.decode('utf-8', 'ignore'))
-        return 1
+        rundir = os.path.join(odir, 'w_lgyosys')
+        shutil.rmtree(rundir, ignore_errors=True)
+        os.makedirs(rundir, exist_ok=True)
+        cmd = [lgcheck, '--implementation', os.path.abspath(impl), '--reference', os.path.abspath(gold),
+               '--implementation_top', impl_top, '--reference_top', gold_top]
+        if yosys:
+            cmd += ['--yosys', yosys]
+        env = dict(os.environ, LGCHECK_EQUIV_TIMEOUT=str(budget))
+        # lgcheck's own budget covers the yosys strategies only (reading the two
+        # sources is outside it, and its portable watchdog adds a 30s kill
+        # grace), so keep an outer wall too. Own the process GROUP: the killed
+        # lgcheck otherwise leaves its yosys child running.
+        proc = subprocess.Popen(cmd, cwd=rundir, env=env, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            out, _ = proc.communicate(timeout=3 * budget)
+            rc = proc.returncode
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            out, _ = proc.communicate()
+            rc = 124
+        text = out.decode('utf-8', 'ignore')
+
+        # lgcheck's exit classes: 0 equivalent, 1 REAL counterexample (its
+        # comment: "exit 1 is reserved for a real CEX"), 2 inconclusive (a
+        # strategy ran out of budget or the bounded miter found nothing),
+        # 5 setup failure (a side yosys could not read, no yosys, ...), 124 a
+        # killed run. Only 1 is a disproof.
+        if rc == 1:
+            print('{} - lgyosys - FAILED: yosys REFUTED the pair the native lec PROVED '
+                  '(impl_top:{} ref_top:{}); one of the two engines is wrong'.format(name, impl_top, gold_top))
+            print(text)
+            # The counterexample itself is in lgcheck's own bounded-miter log.
+            bmc = os.path.join(rundir, 'lgcheck_bmc.log')
+            if os.path.exists(bmc):
+                print('--- {} (tail) ---'.format(bmc))
+                with open(bmc) as f:
+                    print(''.join(f.readlines()[-40:]))
+            return 1
+
+        if rc == 0:
+            print('{} - lgyosys - proven (yosys equiv agrees)'.format(name))
+            return 0
+
+        # Tolerated, never a proof. `bounded-clean` is the useful middle: the
+        # miter WAS built and solved, just only to LGCHECK_BMC_STEPS depth.
+        verdict = {2: 'inconclusive', 5: 'setup-failed', 124: 'timeout'}.get(rc, 'exit {}'.format(rc))
+        if rc == 2 and 'BMC: found no counterexample' in text:
+            verdict = 'inconclusive (bounded-clean)'
+        print('{} - lgyosys - {} - TOLERATED: yosys did not decide, and a non-decision is '
+              'not a refutation (budget {}s)'.format(name, verdict, budget))
+        # Why it did not decide, without the whole yosys transcript.
+        for line in text.splitlines():
+            if re.match(r'^(WARN|ERROR|FAIL|INCONCLUSIVE|BMC|error|lgcheck):', line):
+                print('  ' + line)
+        return 0
 
     def _emit_combined_verilog(self, tmp_dir, cmd, odir, safe_name, side):
         # Run a compile cmd that emits per-module Verilog into odir, then
-        # concatenate the generated .v into one file (so lgcheck sees every
+        # concatenate the generated .v into one file (so LEC sees every
         # submodule of a hierarchical design). Returns (combined_path, log) or
         # (None, log) on failure.
         shutil.rmtree(odir, ignore_errors=True)
@@ -617,13 +704,7 @@ class PrpRunner:
         return combined, log
 
     def run_equiv_slang(self, tmp_dir, test: PrpTest):
-        # equiv variant for a golden .v that yosys-slang's read_slang cannot
-        # ingest (e.g. `'{...}` assignment-pattern lvalues on output ports). The
-        # standard `equiv` mode has lgcheck read the golden .v directly, which
-        # yosys cannot do here. Instead the .v is read by the NATIVE --reader
-        # slang into clean cgen Verilog (implementation) and LEC'd against the
-        # .prp-generated Verilog (reference). Only --reader slang is exercised
-        # (hence the `_slang` suffix); comparison is top-only via lgcheck.
+        # Check the two emitted Verilog sides through native Slang and default LEC.
         name = test.params['name']
         prp  = test.params['files'][0]
         vfile = os.path.splitext(prp)[0] + '.v'
@@ -643,9 +724,8 @@ class PrpRunner:
 
         # implementation: golden .v read by the native slang reader -> Verilog
         impl_odir = os.path.join(tmp_dir, 'tmp_eqs_impl_' + safe)
-        impl_cmd = [self.lhd, 'compile', '--reader', 'slang', vfile, '--recipe', 'O0',
-                    '--emit-dir', 'verilog:{}/'.format(impl_odir),
-                    '--workdir', self._scratch(test, 'equiv_slang')]
+        impl_cmd = [self.lhd, 'compile', '--reader', 'slang', vfile, '--emit-dir', 'verilog:{}/'.format(impl_odir),
+                    '--workdir', self._scratch(test, 'equiv_slang')] + self.equiv_set_args()
         impl, ilog = self._emit_combined_verilog(tmp_dir, impl_cmd, impl_odir, safe, 'impl')
         if impl is None:
             print('{} - equiv_slang - FAILED: --reader slang could not lower {}'.format(name, vfile))
@@ -666,20 +746,16 @@ class PrpRunner:
         verilog_top = flat(verilog_top)
         pyrope_top  = flat(pyrope_top)
 
-        check = subprocess.Popen(
-            ['./inou/yosys/lgcheck', '--reference', ref, '--implementation', impl,
-             '--reference_top', pyrope_top, '--implementation_top', verilog_top],
-            cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        try:
-            clog, _ = check.communicate()
-            crc = check.returncode
-        except Exception:
-            check.kill()
-            crc, clog = 1, b''
-        if crc == 0:
+        check = run_lec(
+            [self.lhd, 'lec', '--ref', ref, '--impl', impl,
+             '--ref-top', pyrope_top, '--impl-top', verilog_top,
+             '--workdir', self._scratch(test, 'equiv_slang_lec')] + self.lec_satopt_args() + self.equiv_set_args(),
+            cwd=tmp_dir, timeout=20)
+        crc, clog = check.returncode, check.stdout
+        if lec_verdict(check) == "proven":
             print('{} - equiv_slang - success (verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
             return 0
-        print('{} - equiv_slang - FAILED: lgcheck not equivalent (verilog_top:{} pyrope_top:{})'.format(
+        print('{} - equiv_slang - FAILED: lhd lec did not prove equivalence (verilog_top:{} pyrope_top:{})'.format(
             name, verilog_top, pyrope_top))
         print(clog.decode('utf-8', 'ignore'))
         return 1
@@ -745,11 +821,16 @@ class PrpRunner:
         cmd = [self.lhd, 'formal', 'verify']
         cmd += test.params['files']
         cmd += ['--top', test.params['top_module'], '--workdir', wd]
-        cmd += ['--set', 'formal.bound={}'.format(test.params.get('verify_bound', '6'))]
+        if str(test.params.get('verify_bound', '6')) != '6':
+            cmd += ['--set', 'formal.bound={}'.format(test.params['verify_bound'])]
         # The replay is run by the HARNESS below, VCD-less: the built-in
         # simfail_run compiles the VCD writer source, which bazel runfiles do
         # not stage (cc_library data deps carry headers/libs, not .cpp).
         cmd += ['--set', 'formal.simfail_run=false']
+        # `:set:` rides here too: without it a `:set: compile.unroll=true` fixture
+        # silently verifies the DEFAULT lowering, so a rolled-only regression
+        # passes green while its name and header claim the rolled netlist.
+        cmd += self._extra_sets(test)
 
         proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         try:
@@ -806,11 +887,21 @@ class PrpRunner:
             except:
                 rproc.kill()
                 rlog_b, rrc = b'', -1
-            if replay == 'fired' and rrc == 0:
-                problems.append('the counterexample replay did not re-fire the assert')
+            fired = False
+            passed = False
+            try:
+                with open(os.path.join(tmp_dir, wd + '_sim', 'sim', 'sim_tests.json')) as stream:
+                    replay_tests = json.load(stream)
+                fired = rrc == 11 and any(t.get('status') == 'fail' and t.get('failing_assert')
+                                         for t in replay_tests)
+                passed = rrc == 0 and bool(replay_tests) and all(t.get('status') == 'pass' for t in replay_tests)
+            except (OSError, ValueError, TypeError):
+                pass
+            if replay == 'fired' and not fired:
+                problems.append('the counterexample replay did not report a runtime assertion failure')
                 log += '\n---- replay ----\n' + rlog_b.decode('utf-8', 'ignore')
-            if replay == 'no-refire' and rrc != 0:
-                problems.append('the free-initial-state witness unexpectedly reproduced (rc={})'.format(rrc))
+            if replay == 'no-refire' and not passed:
+                problems.append('the free-initial-state replay did not complete with passing tests (rc={})'.format(rrc))
                 log += '\n---- replay ----\n' + rlog_b.decode('utf-8', 'ignore')
 
         if problems:
@@ -822,10 +913,432 @@ class PrpRunner:
         print('{} - verify - success'.format(test.params['name']))
         return 0
 
+    @staticmethod
+    def _expect_found(got, key):
+        """How many instances `key` matches. A trailing `*` is a prefix glob.
+
+        A loop's replicas are named `<base>__li<ordinal>`, so `rca__li*=8` says
+        "eight replicas of one source call site" without pinning eight literal
+        names — which is the property under test, not the spelling of each one.
+        `*` alone stays the whole-design total.
+        """
+        if key == '*':
+            return got.get('*', 0)
+        if key.endswith('*'):
+            prefix = key[:-1]
+            return sum(n for k, n in got.items() if k != '*' and k.startswith(prefix))
+        return got.get(key, 0)
+
+    @staticmethod
+    def _parse_expect_instances(spec):
+        """`:expect_instances: lane=1 rca__li*=8 *=2` -> ({name: count}, err).
+
+        `*` is the total number of Sub (instance) nodes in the design; a name
+        ending in `*` is a prefix glob (see `_expect_found`).
+        """
+        want = {}
+        for tok in spec.split():
+            if '=' not in tok:
+                return None, 'bad :expect_instances: token {!r} (want name=count)'.format(tok)
+            k, v = tok.rsplit('=', 1)
+            try:
+                want[k] = int(v)
+            except ValueError:
+                return None, 'bad :expect_instances: count in {!r}'.format(tok)
+        return want, None
+
+    def _sub_instance_counts(self, tmp_dir, lgdir):
+        """Counts Sub nodes per instance name in an emitted `lg:` directory.
+
+        Counted on the LGRAPH, not on emitted Verilog/C++: the code generators
+        de-collide repeated instance names differently (`_cgen2` vs `__i2`), so
+        a source-level assertion written against either one would encode a
+        naming convention instead of the structure under test.
+
+        Returns `(counts, error_text)`; `counts` is None when the query itself
+        failed.
+        """
+        proc = subprocess.Popen([self.lhd, 'tool', 'grep', 'kind=sub', 'lg:' + lgdir],
+                                cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        out, _ = proc.communicate()
+        # A failed query returns no JSONL records, which would otherwise read as
+        # "zero instances" and be reported as a structural mismatch ("the loop
+        # unrolled") — a message that actively misdirects, since the loop did
+        # not unroll and the query never ran.
+        if proc.returncode != 0:
+            return None, '`lhd tool grep` returned {}:\n{}'.format(proc.returncode, out.decode('utf-8', 'ignore'))
+        counts = {'*': 0}
+        for line in out.decode('utf-8', 'ignore').splitlines():
+            line = line.strip()
+            if not line.startswith('{'):
+                continue  # diagnostics interleave with the JSONL records
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            if rec.get('t') != 'node':
+                continue
+            inst = rec.get('name') or 'nil'
+            counts[inst] = counts.get(inst, 0) + 1
+            counts['*'] += 1
+        return counts, None
+
+    def check_expect_instances(self, tmp_dir, test):
+        """`:expect_instances:` — assert the design's instance COUNT.
+
+        The point is to catch a source `for` loop that silently unrolled: eight
+        iterations calling one callee produce eight Sub nodes unrolled and one
+        (replicated) Sub node rolled, so a count is the cheapest structural
+        witness of which representation the compiler chose.
+        """
+        spec = test.params.get('expect_instances')
+        if spec is None:
+            return 0
+        name = test.params['name']
+        # An `error` fixture passes precisely BECAUSE its compile fails, and a
+        # `warning` fixture is a front-end-only tier; lowering either to an lg:
+        # would fail by construction and report a structural mismatch that is
+        # not one.
+        skip = {'error', 'warning'} & set(test.params['type'])
+        if skip:
+            print('{} - expect_instances - skipped (:type: {})'.format(name, ' '.join(sorted(skip))))
+            return 0
+        want, err = self._parse_expect_instances(spec)
+        if want is None:
+            print('{} - expect_instances - failed: {}'.format(name, err))
+            return 1
+
+        # A header-only `_<N>` variant means "the base source, my flags" (see
+        # prplec.py): lower the BASE sibling under this variant's `:set:`, or
+        # the count is taken over an empty file and every name is "found 0".
+        src = test.params['files'][0]
+        base_src = None
+        try:
+            import prplec
+            if prplec.is_header_only(src if os.path.isabs(src) else os.path.join(tmp_dir, src)):
+                stem, _, tail = src[:-len('.prp')].rpartition('_')
+                if stem and tail.isdigit():
+                    base_src = stem + '.prp'
+        except Exception:
+            base_src = None
+        if base_src is not None:
+            saved = test.params['files']
+            test.params['files'] = [base_src] + saved[1:]
+            cmd = self.lhd_lgraph(test, 'expect')
+            test.params['files'] = saved
+        else:
+            cmd = self.lhd_lgraph(test, 'expect')
+        proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        log, _ = proc.communicate()
+        if proc.returncode != 0:
+            print('{} - expect_instances - failed: lg: lowering returned {}'.format(name, proc.returncode))
+            print(log.decode('utf-8', 'ignore'))
+            return 1
+
+        got, gerr = self._sub_instance_counts(tmp_dir, self._scratch_path(test, 'expect', '_lg'))
+        if got is None:
+            print('{} - expect_instances - failed: {}'.format(name, gerr))
+            return 1
+        bad = [(k, n, self._expect_found(got, k)) for k, n in want.items() if self._expect_found(got, k) != n]
+        if bad:
+            print('{} - expect_instances - failed (the loop unrolled, or an instance name changed):'.format(name))
+            for k, n, g in bad:
+                print('    {}: expected {}, found {}'.format(k, n, g))
+            print('    all instances found: {}'.format(
+                ' '.join('{}={}'.format(k, v) for k, v in sorted(got.items()))))
+            return 1
+        print('{} - expect_instances - success ({})'.format(name, spec))
+        return 0
+
+    # ── state-name correspondence (`pass semdiff --stats`) ────────────────────
+    #
+    # An equiv pair proves the two designs COMPUTE the same thing. It says
+    # nothing about whether they SPELL their state the same way, and that
+    # spelling is load-bearing: hierarchical LEC pairs boxes by name, VCD diffs
+    # and checkpoints are name-keyed, and a structural pairing degrades to
+    # Unknown the moment two flops look alike. So the pair is also diffed
+    # structurally and every register/memory must find a counterpart — by NAME,
+    # or by STRUCTURE when the fixture sets `:name_match_only: false`.
+    #
+    # There is NO header tag for "this one does not match". A pair whose state
+    # finds no counterpart at all FAILS, and the known-broken ones are carried by
+    # the bazel `fixme` tag on their own `prp-statematch-*` target (BUILD's
+    # _STATEMATCH_FIXME) — the repo's one convention for "red, and we know it".
+    # A per-fixture header tag would have made them green, which is exactly the
+    # silence this check exists to break.
+
+    _SEMDIFF_STAT_RE = re.compile(
+        r'ref (\d+)/(\d+) paired .*?impl (\d+)/(\d+).*?by name (\d+), by structure (\d+)')
+
+    @staticmethod
+    def _resolve_lg_entity(lgdir, want, stem):
+        """`want` as this library spells it, or '' when it has no such entity.
+
+        A library.txt lists `graph_io <hash> <entity>`; the entity is normally
+        `<file-stem>.<module>` while the header tag carries the bare module name.
+        """
+        if not want:
+            return ''
+        want = want.strip()
+        names = []
+        try:
+            with open(os.path.join(lgdir, 'library.txt')) as f:
+                for line in f:
+                    tok = line.split()
+                    if len(tok) >= 3 and tok[0] == 'graph_io':
+                        names.append(tok[2])
+        except OSError:
+            return ''
+        for cand in (want, '{}.{}'.format(stem, want)):
+            if cand in names:
+                return cand
+        return ''
+
+    @staticmethod
+    def _first_error_message(log):
+        """The first `severity=error` message in an lhd JSONL log, or ''."""
+        for line in log.decode('utf-8', 'ignore').splitlines():
+            line = line.strip()
+            if not line.startswith('{'):
+                continue
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            if rec.get('severity') == 'error':
+                return '{} — {}'.format(rec.get('code', '?'), rec.get('message', ''))
+        return ''
+
+    def _semdiff_state_stats(self, tmp_dir, test, workdir):
+        """Compile both sides of an equiv pair to lg: and diff them.
+
+        Returns ({kind: {...}}, err). `err` non-None means the pair could not be
+        measured at all — a side the reader will not lower. That is a FAILURE,
+        not a skip: the equiv proof and this state comparison have separate obligations and can
+        stay green while `lhd compile` refuses the very same file, which is
+        precisely the kind of hole this check exists to expose.
+        """
+        prp  = test.params['files'][0]
+        gold = os.path.splitext(prp)[0] + '.v'
+        lg_ref  = os.path.join(workdir, 'ref_lg')
+        lg_impl = os.path.join(workdir, 'impl_lg')
+
+        # The Pyrope side is `--ref`: it is the design whose state names this
+        # repo controls, so it is the side whose elements must all find a home.
+        # No `-q`: the log is captured and only printed on failure, and the
+        # quiet flag suppresses the very JSONL diagnostics that say WHY a side
+        # would not lower.
+        base = [self.lhd, 'compile']
+        runs = [(base + [prp] + self._extra_sets(test)
+                 + (['--top', test.params['compile_top'].strip()] if test.params.get('compile_top') else [])
+                 + (['--set', 'upass.reset_style=' + test.params['reset_style']]
+                    if test.params.get('reset_style', 'sync') != 'sync' else [])
+                 + ['--emit-dir', 'lg:' + lg_ref, '--workdir', os.path.join(workdir, 'w_ref')]),
+                (base + [gold]
+                 + ['--emit-dir', 'lg:' + lg_impl, '--workdir', os.path.join(workdir, 'w_impl')])]
+        for cmd in runs:
+            proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            log, _ = proc.communicate()
+            if proc.returncode != 0:
+                src = next((a for a in cmd if a.endswith('.prp') or a.endswith('.v')), '?')
+                why = self._first_error_message(log)
+                return None, '`lhd compile {}` failed (rc={}){}'.format(
+                    os.path.basename(src), proc.returncode, ': ' + why if why else '')
+
+        # A flat golden can describe state held in generic child instances.
+        # Compare occurrence names after flattening both selected tops when the
+        # fixture requests it; every state element must still match by name.
+        if test.params.get('state_match_flatten', '').strip().lower() in ('true', '1', 'yes', 'on'):
+            flat_dirs = []
+            stem = os.path.splitext(os.path.basename(prp))[0]
+            for side, lgdir, tag in (('ref', lg_ref, 'pyrope_top'), ('impl', lg_impl, 'verilog_top')):
+                top = self._resolve_lg_entity(
+                    lgdir if os.path.isabs(lgdir) else os.path.join(tmp_dir, lgdir), test.params.get(tag), stem)
+                if not top:
+                    return None, ':state_match_flatten: requires a resolvable :{}:'.format(tag)
+                flat_dir = lgdir + '_flat'
+                cmd = [self.lhd, 'pass', 'color', 'flat', 'lg:' + lgdir, '--top', top,
+                       '--emit-dir', 'lg:' + flat_dir, '--workdir', os.path.join(workdir, 'w_flat_' + side)]
+                proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                log, _ = proc.communicate()
+                if proc.returncode != 0:
+                    return None, 'flatten {} failed (rc={}): {}'.format(side, proc.returncode, self._first_error_message(log))
+                flat_dirs.append(flat_dir)
+            lg_ref, lg_impl = flat_dirs
+
+        # Tops are resolved against each library's OWN entity list before being
+        # passed. `:pyrope_top:`/`:verilog_top:` name the MODULES LEC
+        # compares, which is not always how the lg: entity is spelled (`top` vs
+        # the entity `mod_varargs_csa.top`), and handing semdiff a name it has to
+        # guess at lands in its `top-entity-fallback` path — which ABORTS on some
+        # libraries (`raw_hash_set.h: operator-> called on end() iterator`, seen
+        # on generic_mod). An unresolvable top is simply omitted; semdiff's hier
+        # sweep then pairs the defs by name on its own.
+        cmd = [self.lhd, 'pass', 'semdiff', '--stats', '--ref', 'lg:' + lg_ref, '--impl', 'lg:' + lg_impl,
+               '--workdir', os.path.join(workdir, 'w_diff')]
+        stem = os.path.splitext(os.path.basename(prp))[0]
+        for flag, lgdir, want in (('--ref-top', lg_ref, test.params.get('pyrope_top')),
+                                  ('--impl-top', lg_impl, test.params.get('verilog_top'))):
+            top = self._resolve_lg_entity(os.path.join(tmp_dir, lgdir) if not os.path.isabs(lgdir) else lgdir,
+                                          want, stem)
+            if top:
+                cmd += [flag, top]
+        proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        log, _ = proc.communicate()
+        if proc.returncode != 0:
+            return None, 'pass semdiff returned {}'.format(proc.returncode)
+
+        got = {}
+        for line in log.decode('utf-8', 'ignore').splitlines():
+            for kind, tag in (('regs', 'registers'), ('mems', 'memories')):
+                if 'semdiff[stats]: ' + tag not in line:
+                    continue
+                m = self._SEMDIFF_STAT_RE.search(line)
+                if m:
+                    got[kind] = {'paired': int(m[1]), 'total': int(m[2]),
+                                 'impl_paired': int(m[3]), 'impl_total': int(m[4]),
+                                 'by_name': int(m[5]), 'by_struct': int(m[6])}
+        if not got:
+            return None, 'pass semdiff printed no --stats report'
+        return got, None
+
+    def check_state_match(self, tmp_dir, test):
+        """`:name_match_only:` — state-name correspondence for an equiv pair.
+
+        Every ref-side register and memory must find a counterpart: by NAME, or
+        by STRUCTURE when the fixture sets `:name_match_only: false`. Anything
+        less FAILS — including a side `lhd compile` will not lower. A design with
+        no registers and no memories has nothing to correspond and passes
+        without saying anything.
+        """
+        name = test.params['name']
+        prp  = test.params['files'][0]
+        gold = os.path.splitext(prp)[0] + '.v'
+        if not os.path.exists(gold if os.path.isabs(gold) else os.path.join(tmp_dir, gold)):
+            print('{} - state_match - failed: no golden {}'.format(name, gold))
+            return 1
+
+        # Default TRUE: name correspondence is the goal, so a pair that only
+        # matches structurally has to say so in its header rather than drift
+        # there silently.
+        name_only = (test.params.get('name_match_only', 'true').strip().lower()
+                     not in ('false', '0', 'no', 'off'))
+
+        workdir = os.path.join(tmp_dir, self._scratch(test, 'statematch'))
+        os.makedirs(workdir, exist_ok=True)
+        got, err = self._semdiff_state_stats(tmp_dir, test, workdir)
+        if got is None:
+            print('{} - state_match - failed: {}'.format(name, err))
+            return 1
+
+        if all(got.get(k, {}).get('total', 0) == 0 for k in ('regs', 'mems')):
+            return 0  # combinational both sides — nothing to correspond
+
+        bad = []
+        for kind in ('regs', 'mems'):
+            st = got.get(kind)
+            if st is None or st['total'] == 0:
+                continue
+            if st['paired'] != st['total']:
+                bad.append('{}: only {}/{} ref element(s) found a counterpart in the golden '
+                           '(golden has {})'.format(kind, st['paired'], st['total'], st['impl_total']))
+            elif name_only and st['by_struct'] != 0:
+                bad.append('{}: {} of {} pair(s) matched by STRUCTURE, not by name (set '
+                           ':name_match_only: false to accept that)'.format(kind, st['by_struct'], st['total']))
+        if bad:
+            print('{} - state_match - failed:'.format(name))
+            for b in bad:
+                print('    ' + b)
+            for kind in ('regs', 'mems'):
+                if kind in got:
+                    print('    measured {}: ref {}/{}, impl {}/{}, by name {}, by structure {}'.format(
+                        kind, got[kind]['paired'], got[kind]['total'], got[kind]['impl_paired'],
+                        got[kind]['impl_total'], got[kind]['by_name'], got[kind]['by_struct']))
+            return 1
+        print('{} - state_match - success ({})'.format(
+            name, ' '.join('{} {}/{}{}'.format(k, got[k]['paired'], got[k]['total'],
+                                               '' if got[k]['by_struct'] == 0 else ' (struct)')
+                           for k in ('regs', 'mems') if k in got and got[k]['total'])))
+        return 0
+
+    def _run_compile(self, tmp_dir, test, mode, cmd=None, label=None):
+        cmd = self.gen_lhd_cmd(test, mode) if cmd is None else cmd
+        proc = subprocess.Popen(cmd, cwd=tmp_dir, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT)
+        log, mode_rc = b'', 1
+        try:
+            log, _ = proc.communicate()
+            mode_rc = proc.returncode
+        except BaseException as e:
+            proc.kill()
+            proc.wait()
+            log = 'exception while running {}: {!r}\n'.format(cmd[0], e).encode('utf-8')
+        if mode == 'comptime' and mode_rc != 0:
+            mode_rc = self._comptime_expected_fail_ok(test, log, mode_rc)
+        print('{} - {} - {}'.format(test.params['name'], label or mode,
+                                   'success' if mode_rc == 0 else 'failed'))
+        if mode_rc != 0:
+            print(log.decode('utf-8', 'ignore'))
+        return mode_rc
+
+    def run_comptime(self, tmp_dir, test):
+        # Check both sources with the SAME verifier counts and pass flags.
+        # A formatter success alone says nothing about constant evaluation.
+        rc = self._run_compile(tmp_dir, test, 'comptime')
+        formatted = copy.deepcopy(test)
+        formatted.params['files'] = []
+        # abspath: the scandir skip below compares against os.path.abspath(entry.path),
+        # so a relative tmp_dir would never match and the scratch dir would be
+        # symlinked into itself.
+        sources = os.path.abspath(os.path.join(tmp_dir, self._scratch(test, 'fmt_sources')))
+        os.makedirs(sources, exist_ok=True)
+        parents = {}
+        for source in test.params['files']:
+            original = os.path.abspath(os.path.join(tmp_dir, source))
+            parent = os.path.dirname(original)
+            if parent not in parents:
+                directory = os.path.join(sources, str(len(parents)))
+                os.makedirs(directory)
+                parents[parent] = directory
+                # Retain sibling imports/resources without modifying them.
+                # Selected source links are replaced by formatted files below.
+                for entry in os.scandir(parent):
+                    if os.path.abspath(entry.path) != sources:
+                        os.symlink(entry.path, os.path.join(directory, entry.name))
+            output = os.path.join(parents[parent], os.path.basename(original))
+            if os.path.lexists(output):
+                os.unlink(output)
+            cmd = [self.lhd, 'pyrope', 'fmt', original, '--output', output]
+            proc = subprocess.run(cmd, cwd=tmp_dir, stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT)
+            if proc.returncode != 0 or not os.path.isfile(output):
+                print('{} - comptime format - failed'.format(test.params['name']))
+                print(proc.stdout.decode('utf-8', 'ignore'))
+                return 1
+            formatted.params['files'].append(output)
+        cmd = self.lhd_comptime(formatted, 'comptime_formatted')
+        rc |= self._run_compile(tmp_dir, formatted, 'comptime', cmd=cmd,
+                                label='comptime after format')
+        return rc
+
     def run(self, tmp_dir, test: PrpTest):
 
+        # KNOWN GAP (deliberately left as-is): with a multi-mode `:type:` (e.g.
+        # `:type: parsing lnast comptime`) each mode ASSIGNS rc, so an earlier
+        # mode's failure is overwritten by a later mode's success and the test
+        # reports green. Changing these to `rc |=` is a one-line fix, but it
+        # currently turns eight pre-existing product failures red — every one of
+        # them a multi-mode fixture failing in `parsing`/`lnast`:
+        #   assert_ifelse, assert_ifelse2, attributes, enum_types, expressions,
+        #   stmt_kinds, string_format_spec, string_integer
+        # Fix those first, then switch this to `rc |=`.
         rc = 0
         for mode in test.params['type']:
+            if mode == 'comptime':
+                rc = self.run_comptime(tmp_dir, test)
+                if rc != 0:
+                    return rc  # Neither pass may be hidden by a later mode.
+                continue
             if mode == 'error':
                 rc = self.run_error(tmp_dir, test)
                 continue
@@ -834,6 +1347,24 @@ class PrpRunner:
                 continue
             if mode == 'equiv':
                 rc = self.run_equiv(tmp_dir, test)
+                if rc:
+                    return rc
+                continue
+            if mode == 'statematch':
+                # Its own `--mode`, driven by its own `prp-statematch-*` target,
+                # deliberately NOT a post-check of `equiv`: a pair can be
+                # PROVEN equivalent and still spell its state differently, and
+                # folding the two together would mean tagging the whole pair
+                # `fixme` — dropping a live equivalence proof — every time the
+                # naming is the only thing wrong.
+                rc = self.check_state_match(tmp_dir, test)
+                continue
+            if mode == 'lec':
+                # PYROPE-vs-PYROPE equivalence: `foo.prp` against its `foo_<N>.prp`
+                # variants, discovered from the file name (prplec.py). Lazy import
+                # so only the `prp-lec-*` targets stage that module.
+                from prplec import run_prplec
+                rc = run_prplec(self, tmp_dir, test)
                 continue
             if mode == 'equiv_slang':
                 rc = self.run_equiv_slang(tmp_dir, test)
@@ -844,32 +1375,24 @@ class PrpRunner:
                 from prpsim import run_simulation
                 rc = run_simulation(self, tmp_dir, test)
                 continue
+            if mode == 'vsim':
+                # The VERILATOR DIFFERENTIAL for a `tests/sim/` fixture: emit the
+                # design's Verilog and run its hand-written C++ twin under
+                # verilator. Deliberately a separate mode rather than a step of
+                # `simulation`, because the fixtures worth running it on are the
+                # ones `lhd sim` REFUSES — the two must be able to disagree.
+                from prpvsim import run_verilator_diff
+                rc = run_verilator_diff(self, tmp_dir, test)
+                continue
             if mode == 'verify':
                 rc = self.run_verify(tmp_dir, test)
                 continue
 
-            cmd = self.gen_lhd_cmd(test, mode)
+            rc = self._run_compile(tmp_dir, test, mode)
 
-            proc = subprocess.Popen(
-                cmd,
-                cwd=tmp_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT
-            )
-
-            try:
-                log, _ = proc.communicate()
-                rc = proc.returncode
-            except:
-                proc.kill()
-
-            if mode == 'comptime' and rc != 0:
-                rc = self._comptime_expected_fail_ok(test, log, rc)
-
-            if rc == 0:
-                print('{} - {} - success'.format(test.params['name'], mode))
-            else:
-                print('{} - {} - failed'.format(test.params['name'], mode))
-                print(log.decode('utf-8', 'ignore'))
+        # Structural post-checks, independent of `:type:` so one implementation
+        # serves the sim and equiv fixtures alike.
+        if rc == 0:
+            rc = self.check_expect_instances(tmp_dir, test)
 
         return rc

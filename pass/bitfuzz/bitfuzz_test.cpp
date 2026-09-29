@@ -6,7 +6,9 @@
 #include <memory>
 #include <string>
 
+#include "bitwidth.hpp"
 #include "cell.hpp"
+#include "cprop.hpp"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
@@ -29,6 +31,57 @@ livehd::bitfuzz::Options wires_opts() {
   livehd::bitfuzz::Options o;
   o.mode = livehd::bitfuzz::Mode::Wires;
   return o;
+}
+
+TEST(Bitfuzz, PipelineLeavesRecoveryToNormalPasses) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitfuzz_test");
+  auto  io  = lib.create_io("bf_pipeline");
+  io->add_input("a", 1);
+  io->set_bits("a", 8);
+  io->add_input("b", 2);
+  io->set_bits("b", 8);
+  io->add_output("out", 3);
+  io->set_bits("out", 8);
+  auto g  = io->create_graph();
+  auto op = gu::create_typed_node(*g, Ntype_op::And, 8);
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
+  auto out = op.create_driver_pin(0);
+  gu::set_sign(out);
+  out.connect_sink(g->get_output_pin("out"));
+  const auto stripped = livehd::bitfuzz::strip_annotations(g, wires_opts());
+  ASSERT_EQ(stripped.cleared, 1);
+  EXPECT_EQ(stripped.repaired, 0);
+  EXPECT_EQ(gu::bits_of(out), 0);
+  EXPECT_FALSE(out.attr(livehd::attrs::pin_signed).has());
+  Cprop{}.do_trans(g);
+  EXPECT_EQ(gu::bits_of(out), 0);
+  Bitwidth{10}.do_trans(g);
+  EXPECT_EQ(gu::bits_of(out), 8);
+  EXPECT_EQ(io->get_bits("a"), 8);
+  EXPECT_EQ(io->get_bits("out"), 8);
+}
+
+TEST(Bitfuzz, PipelinePreservesStateMemoryAndInstanceBoundaries) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitfuzz_test");
+  auto  io  = lib.create_io("bf_pipeline_boundaries");
+  io->add_input("in", 1);
+  io->set_bits("in", 8);
+  auto                         g = io->create_graph();
+  std::vector<hhds::Pin_class> boundaries{g->get_input_pin("in")};
+  for (auto op : {Ntype_op::Flop, Ntype_op::Fflop, Ntype_op::Latch, Ntype_op::Memory, Ntype_op::Sub}) {
+    auto node = gu::create_typed_node(*g, op);
+    boundaries.push_back(node.create_driver_pin(0));
+  }
+  for (auto pin : boundaries) {
+    gu::set_sbits(pin, 8);
+  }
+  const auto st = livehd::bitfuzz::strip_annotations(g, wires_opts());
+  EXPECT_EQ(st.cleared, 0);
+  for (auto pin : boundaries) {
+    EXPECT_EQ(gu::bits_of(pin), 8);
+    EXPECT_FALSE(gu::is_unsign(pin));
+  }
 }
 
 // Every finding on one line, so a failing expectation says WHICH pin misbehaved
@@ -56,8 +109,8 @@ TEST(Bitfuzz, RecoversHonestCombinational) {
   auto g = gio->create_graph();
 
   auto op = gu::create_typed_node(*g, Ntype_op::And, 8);
-  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(op.create_sink_pin(1));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(op, 1));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   quiet_diag();
@@ -82,7 +135,7 @@ TEST(Bitfuzz, KeepsGraphIoWidths) {
   auto g = gio->create_graph();
 
   auto op = gu::create_typed_node(*g, Ntype_op::Not, 8);
-  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   quiet_diag();
@@ -115,8 +168,8 @@ TEST(Bitfuzz, FlagsImplicitTruncationAsWider) {
   // Both operands on `as` (pid 0, a multi-driver sink) so this is a+b, which
   // over [0..127] spans [0..254] and genuinely needs 9 bits.
   auto op = gu::create_typed_node(*g, Ntype_op::Sum, 8);  // declared narrower than a+b needs
-  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(op.create_sink_pin(0));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   quiet_diag();
@@ -144,8 +197,8 @@ TEST(Bitfuzz, ExplicitGetMaskIsClean) {
   auto g = gio->create_graph();
 
   auto sum = gu::create_typed_node(*g, Ntype_op::Sum, 9);
-  g->get_input_pin("a").connect_sink(sum.create_sink_pin(0));
-  g->get_input_pin("b").connect_sink(sum.create_sink_pin(0));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
+  g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
 
   // 9, not 8: every LGraph value is SIGNED and unsigned is just the
   // non-negative subset, so a mask of 0xff yields the range [0..255], whose
@@ -158,8 +211,7 @@ TEST(Bitfuzz, ExplicitGetMaskIsClean) {
   quiet_diag();
   auto st = livehd::bitfuzz::fuzz(g, wires_opts());
 
-  EXPECT_EQ(st.wider, 0) << "an explicitly masked cone must recover exactly; nothing is doing hidden truncation:"
-                         << describe(st);
+  EXPECT_EQ(st.wider, 0) << "an explicitly masked cone must recover exactly; nothing is doing hidden truncation:" << describe(st);
   EXPECT_EQ(st.unrecovered, 0) << describe(st);
   livehd::diag::sink().clear();
 }
@@ -234,10 +286,10 @@ TEST(Bitfuzz, RepairLeavesNoUnsizedPin) {
   gio->set_bits("o", 8);
   auto g = gio->create_graph();
 
-  // Div has NO bitwidth inference rule (bitwidth.cpp has no Ntype_op::Div
+  // Rem has NO bitwidth inference rule (bitwidth.cpp has no Ntype_op::Rem
   // branch), so its width is unrecoverable by construction -- exactly the case
   // repair exists for.
-  auto op = gu::create_typed_node(*g, Ntype_op::Div, 8);
+  auto op = gu::create_typed_node(*g, Ntype_op::Rem, 8);
   g->get_input_pin("a").connect_sink(gu::setup_sink_by_name(op, "a"));
   g->get_input_pin("b").connect_sink(gu::setup_sink_by_name(op, "b"));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
@@ -246,7 +298,7 @@ TEST(Bitfuzz, RepairLeavesNoUnsizedPin) {
   auto st = livehd::bitfuzz::fuzz(g, wires_opts());
 
   EXPECT_EQ(st.repaired, 1) << "an unbounded pin must be repaired";
-  EXPECT_EQ(st.no_rule, 1) << "Div must be reported as a missing inference rule, not a translation bug";
+  EXPECT_EQ(st.no_rule, 1) << "Rem must be reported as a missing inference rule, not a translation bug";
   EXPECT_EQ(gu::bits_of(op.create_driver_pin(0)), 8) << "repair must restore the original width";
   livehd::diag::sink().clear();
 }
@@ -262,7 +314,7 @@ TEST(Bitfuzz, OffModeIsNoOp) {
   auto g = gio->create_graph();
 
   auto op = gu::create_typed_node(*g, Ntype_op::Not, 8);
-  g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));
   op.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   quiet_diag();
@@ -289,7 +341,7 @@ TEST(Bitfuzz, SeededSelectionIsReproducible) {
     auto g = gio->create_graph();
     for (int i = 0; i < 8; ++i) {
       auto ff = gu::create_typed_node(*g, Ntype_op::Flop);
-      gu::set_bits(ff.create_driver_pin(0), 8);
+      gu::set_sbits(ff.create_driver_pin(0), 8);
       g->get_input_pin("d").connect_sink(gu::setup_sink_by_name(ff, "din"));
       g->get_input_pin("clk").connect_sink(gu::setup_sink_by_name(ff, "clock_pin"));
       if (i == 0) {

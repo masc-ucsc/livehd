@@ -4,8 +4,9 @@
 // API. VieCut runs file-based (METIS in, partition out), so this only asserts
 // the coloring invariants, not a specific cut.
 
-#include "color_common.hpp"
 #include "color_mincut.hpp"
+
+#include "color_common.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "hhds/graph.hpp"
@@ -21,8 +22,7 @@ namespace {
 
 Color_opts flat_opts() {
   Color_opts o;
-  o.hier    = false;
-  o.compact = true;
+  o.hier = false;
   return o;
 }
 
@@ -61,7 +61,7 @@ TEST(ColorMincut, AllNodesColored) {
 
   int total   = 0;
   int colored = 0;
-  for (auto n : g->forward_class()) {
+  for (auto n : g->body().nodes(hhds::Node_order::forward)) {
     if (!is_partitionable(n)) {
       continue;
     }

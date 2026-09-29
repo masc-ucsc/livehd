@@ -5,12 +5,12 @@
 
 // Whole-design-flatten flop-name preservation fixture for `pass abc`.
 //
-// Every register is declared WITHOUT an initializer, so it carries the
-// implicit power-on init 0 and NO reset. Under register=true a plain DFF
-// cell has no init pin, so these registers must stay native flops — and the
-// read-back must rebuild each one as a single multi-bit flop under its
-// ORIGINAL hierarchical name (e.g. `s1.r`), not anonymous per-bit
-// __rinit/__r flops. The LEC leans on that name correspondence.
+// Every register is declared WITHOUT an initializer, so it carries neither an
+// init nor a reset. Under register=true each maps to per-bit plain DFF cells
+// that must keep the ORIGINAL hierarchical name (`\a.r_<bit>`); a Liberty
+// without a DFF cell rebuilds one multi-bit native flop `a.r` instead. Never
+// anonymous per-bit __rinit/__r/g<id> flops: the LEC leans on that name
+// correspondence.
 
 mod holder(din:u8) -> (q:u8@[1]) {
   reg r:u8

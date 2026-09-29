@@ -9,6 +9,8 @@ cassert((...(a=1,c=3), ...(b=2,d=4)) == (a=1, c=3, b=2, d=4))
 cassert((...(1,2), ...(a=2,nil,5)) == (1,2,a=2,nil,5))
 cassert((...(x=1), ...(a=2,nil,5)) == (x=1,a=2,nil,5))
 
-cassert((...(x=1,b=2), ...(y=0sb?,3)) == (x=1,b=2,y=0sb?,3))
+const unknown_concat = (...(x=1,b=2), ...(y=0sb?,3))
+cassert(unknown_concat.x == 1 and unknown_concat.b == 2 and unknown_concat[0] == 3
+        and "{unknown_concat.y:b}" == "{0sb?:b}")
 
 cassert((1,b=2,...(3,c=3),6) == (1,b=2,3,c=3,6))

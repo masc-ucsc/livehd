@@ -2,8 +2,9 @@
 //
 // Ported from the old pass/label synth test (2c-color) onto the current hhds::Graph API.
 
-#include "color_common.hpp"
 #include "color_synth.hpp"
+
+#include "color_common.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "hhds/graph.hpp"
@@ -25,10 +26,9 @@ namespace {
 // window instead of the cut rules.
 Color_opts flat_opts() {
   Color_opts o;
-  o.hier    = false;
-  o.compact = true;
-  o.min_ge  = 0;
-  o.max_ge  = 0;
+  o.hier   = false;
+  o.min_ge = 0;
+  o.max_ge = 0;
   return o;
 }
 
@@ -241,11 +241,8 @@ TEST(ColorSynth, WideSumOpensBoundary) {
   EXPECT_NE(node_color_of(head), node_color_of(wide)) << "a wide Sum opens a fresh synthesis boundary";
 }
 
-// With the window on, the cut rules still decide the SHAPE but no longer the
-// SIZE: the per-node regions `synth` opens for a chain of wide Sums (each its own
-// boundary) get merged up to min. This is the XSCore singleton story in
-// miniature.
-TEST(ColorSynth, SizeWindowMergesTheBoundarySingletons) {
+// Wide arithmetic remains replaceable independently, even below min_ge.
+TEST(ColorSynth, SizeWindowPreservesArithmeticBoundaries) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_synth_window");
   auto  gio = lib.create_io("synth_window");
   gio->add_input("a", 0);
@@ -270,7 +267,7 @@ TEST(ColorSynth, SizeWindowMergesTheBoundarySingletons) {
 
   auto count_regions = [&]() {
     absl::flat_hash_set<int> ids;
-    for (auto n : g->forward_class()) {
+    for (auto n : g->body().nodes(hhds::Node_order::forward)) {
       if (is_partitionable(n)) {
         ids.insert(node_color_of(n));
       }
@@ -288,7 +285,7 @@ TEST(ColorSynth, SizeWindowMergesTheBoundarySingletons) {
   Color_synth windowed(o, "synth");
   windowed.label(g.get());
 
-  EXPECT_LT(count_regions(), raw_regions) << "the window must merge the boundary singletons";
+  EXPECT_EQ(count_regions(), raw_regions) << "wide adders must remain independently replaceable";
 }
 
 // Source-seeded regions (the 2opt-freq block-attribute channel) are the user's,

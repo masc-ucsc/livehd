@@ -429,59 +429,7 @@ proof -
   then show ?thesis by (simp add: bv_bitwise_def)
 qed
 
-text \<open>
-  \<^bold>\<open>STALE with respect to the emitter -- do not use in a per-node
-  proof until re-proved.\<close>  \<open>emit_node_expr\<close>'s SRA arm now
-  emits \<open>scast (sem_sra ...) :: w word\<close>, not \<open>ucast\<close>:
-  \<open>sem_sra\<close> returns a word of the \<^emph>\<open>operand's\<close>
-  width, so widening to the node width must propagate the sign.  \<open>ucast\<close>
-  fills zeros, disagreeing with the certificate (@{term "mk_bv w"} of a negative
-  integer is its two's complement) and with the RTL (\<open>cgen_sim.cpp\<close>
-  reads the shifted operand as signed).
-
-  The lemma below still speaks about \<open>ucast\<close> and therefore no longer
-  matches what is emitted.  Re-proving it for \<open>scast\<close> needs
-  \<open>sint (word_of_int (sint x div 2 ^ k) :: 'v word) = sint x div 2 ^ k\<close>
-  --- lossless because @{term "sint x"} lies in the signed range and dividing by a
-  power of two keeps it there.  With that, \<^emph>\<open>no\<close> width side
-  condition is needed at all, unlike the version below.
-\<close>
-
-lemma sint_word_of_int_fits:
-  fixes k :: int
-  assumes lo: "- (2 ^ (LENGTH('v::len) - 1)) \<le> k" and hi: "k < 2 ^ (LENGTH('v) - 1)"
-  shows "sint (word_of_int k :: 'v word) = k"
-proof -
-  obtain m where vm: "LENGTH('v) = Suc m" by (cases "LENGTH('v)") auto
-  have "sint (word_of_int k :: 'v word) = signed_take_bit m (take_bit (Suc m) k)"
-    by (simp add: sint_uint uint_word_of_int take_bit_eq_mod vm)
-  also have "\<dots> = signed_take_bit m k"
-    by (simp add: signed_take_bit_take_bit)
-  also have "\<dots> = k"
-    using lo hi vm by (simp add: signed_take_bit_int_eq_self)
-  finally show ?thesis .
-qed
-
-text \<open>
-  \<^bold>\<open>STALE with respect to the emitter -- do not use in a per-node
-  proof.\<close>  The emitter now emits \<open>scast\<close> (see Bug 5 in
-  \<open>pass/isabelle/BRIDGE_BUGS.md\<close>); this lemma still speaks about
-  \<open>ucast\<close>.
-
-  The \<open>scast\<close> version is nearly done and needs \<^emph>\<open>no\<close>
-  width side condition.  Proved already: \<open>sint_word_of_int_fits\<close>
-  above, and the upper bound
-  \<open>sint x div 2 ^ k < 2 ^ (LENGTH('v) - 1)\<close> (from
-  \<open>sint_less\<close>).  The one remaining obligation is the lower bound
-  \<open>- (2 ^ (LENGTH('v) - 1)) \<le> sint x div 2 ^ k\<close>, which reduces
-  to \<open>a \<le> a div c\<close> for \<open>a \<le> 0 < c\<close> --- true of
-  floor division, but \<open>div_le_dividend\<close> is stated only for
-  \<open>0 \<le> a\<close> and the negative dual was not located.  Chain
-  \<open>zdiv_mono1\<close> from \<open>sint_greater_eq\<close> and supply that
-  step.
-\<close>
-
-lemma sra_bridge_ucast_STALE:
+lemma sra_bridge:
   fixes x :: "'v::len word" and n :: "'n::len word"
   assumes wle: "LENGTH('w::len) \<le> LENGTH('v)"
   shows "eval_op Op_SRA LENGTH('w) [bvenc x, bvenc n]

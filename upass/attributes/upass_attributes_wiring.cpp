@@ -71,7 +71,7 @@ void uPass_attributes_register_wiring(uPass_attributes& self) {
   }
   // Mode / structural attributes (must be comptime-known; LGraph generation
   // bakes them into the node mode / pin shape).
-  for (const char* name : {"posclk", "async", "init", "negreset", "valid", "stop", "defer"}) {
+  for (const char* name : {"posclk", "async", "initial", "negreset", "valid", "stop"}) {
     reg.register_exact(name, mode);
   }
 }

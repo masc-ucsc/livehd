@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Synthesis Partitioning and Mapping</title>
+<meta name="description" content="Methodology of LiveHD synthesis: cone partitioning (pass.color synth), the shared region pipeline (pass/synth) and the ABC mapping and sizing backend (pass/abc).">
+<style>
+:root {
+  --bg: #fdfdfb;
+  --fg: #1d1d1f;
+  --muted: #5c5c63;
+  --rule: #b9b9bf;
+  --soft: #eeeeea;
+  --accent: #1f4e8c;
+  --code-bg: #f1f1ee;
+  --fig-fill: #f3f5f9;
+  --fig-fill-2: #e3eaf5;
+  --fig-fill-3: #f7ecdf;
+  --fig-stroke: #3a3a40;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #17181b;
+    --fg: #e6e6e3;
+    --muted: #a3a3aa;
+    --rule: #4a4b52;
+    --soft: #24252a;
+    --accent: #8fb4ec;
+    --code-bg: #25262b;
+    --fig-fill: #22252c;
+    --fig-fill-2: #26324a;
+    --fig-fill-3: #3a2f22;
+    --fig-stroke: #c9c9cf;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #17181b;
+  --fg: #e6e6e3;
+  --muted: #a3a3aa;
+  --rule: #4a4b52;
+  --soft: #24252a;
+  --accent: #8fb4ec;
+  --code-bg: #25262b;
+  --fig-fill: #22252c;
+  --fig-fill-2: #26324a;
+  --fig-fill-3: #3a2f22;
+  --fig-stroke: #c9c9cf;
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.58 "Charter", "Iowan Old Style", "Palatino Linotype", Georgia, "Times New Roman", serif;
+  max-width: 50rem;
+  margin: 0 auto;
+  padding: 2.5rem 16px 4rem;
+  overflow-x: hidden;
+}
+p, li { hyphens: auto; }
+@media (min-width: 640px) { p { text-align: justify; } }
+h1 {
+  font-size: 1.65rem;
+  line-height: 1.25;
+  text-align: center;
+  margin: 0 0 .4rem;
+  font-weight: 600;
+}
+.subtitle { text-align: center; color: var(--muted); font-style: italic; margin: 0 0 2.2rem; }
+h2 {
+  font: 600 1.02rem/1.3 -apple-system, "Segoe UI", Roboto, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin: 2.6rem 0 .8rem;
+  padding-top: .6rem;
+  border-top: 1px solid var(--rule);
+}
+h3 {
+  font: 600 1rem/1.3 -apple-system, "Segoe UI", Roboto, sans-serif;
+  margin: 1.8rem 0 .5rem;
+}
+h4 { font-size: 1rem; font-style: italic; font-weight: 600; margin: 1.2rem 0 .3rem; }
+.secnum { color: var(--accent); margin-right: .45em; }
+code, .mono {
+  font-family: "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  font-size: .86em;
+  background: var(--code-bg);
+  padding: .05em .28em;
+  border-radius: 3px;
+  overflow-wrap: anywhere;
+}
+var { font-style: italic; }
+.def, .prop {
+  margin: 1rem 0;
+  padding: .1rem 0 .1rem .9rem;
+  border-left: 3px solid var(--accent);
+}
+.def p, .prop p { margin: .35rem 0; }
+.def .lead, .prop .lead { font-weight: 600; font-style: normal; }
+.def em.b, .prop em.b { font-style: italic; }
+.eq {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: .9rem 0;
+  overflow-x: auto;
+}
+.eq-body { flex: 1; text-align: center; white-space: nowrap; font-size: 1.02em; }
+.eq-num { color: var(--muted); }
+.cap { font-size: .9em; color: var(--fg); margin: .5rem 0 0; text-align: left; }
+.cap b { font-variant: small-caps; letter-spacing: .02em; }
+figure { margin: 1.6rem 0; }
+figure svg { width: 100%; height: auto; display: block; }
+.scroll { overflow-x: auto; margin: 1rem 0; }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: .9em;
+  line-height: 1.4;
+}
+caption {
+  caption-side: top;
+  font-variant: small-caps;
+  letter-spacing: .03em;
+  padding-bottom: .45rem;
+  text-align: center;
+}
+caption .tcap { display: block; font-variant: normal; letter-spacing: 0; font-style: italic; margin-top: .1rem; }
+thead th { border-top: 1.5px solid var(--fg); border-bottom: 1px solid var(--fg); font-weight: 600; }
+tbody tr:last-child td { border-bottom: 1.5px solid var(--fg); }
+th, td { padding: .32rem .55rem; text-align: left; vertical-align: top; }
+td.num, th.num { text-align: right; white-space: nowrap; }
+.algo {
+  margin: 1.3rem 0;
+  border-top: 1.5px solid var(--fg);
+  border-bottom: 1.5px solid var(--fg);
+  font-size: .92em;
+}
+.algo-title { padding: .35rem 0; border-bottom: 1px solid var(--fg); }
+.algo-title b { margin-right: .4em; }
+.algo-body {
+  margin: 0;
+  padding: .4rem 0 .5rem 2.4rem;
+  counter-reset: line;
+  overflow-x: auto;
+}
+.algo-body li {
+  list-style: none;
+  counter-increment: line;
+  position: relative;
+  white-space: pre-wrap;
+  text-align: left;
+  hyphens: none;
+}
+.algo-body li::before {
+  content: counter(line);
+  position: absolute;
+  left: -2.1rem;
+  width: 1.6rem;
+  text-align: right;
+  color: var(--muted);
+  font-size: .85em;
+}
+.algo-body .in1 { padding-left: 1.4em; }
+.algo-body .in2 { padding-left: 2.8em; }
+.algo-body .in3 { padding-left: 4.2em; }
+.kw { font-weight: 700; }
+.cm { color: var(--muted); font-style: italic; }
+.io { font-size: .92em; padding: .25rem 0; border-bottom: 1px solid var(--rule); }
+ul.tight, ol.tight { margin: .4rem 0; padding-left: 1.4rem; }
+ul.tight li, ol.tight li { margin: .15rem 0; }
+.note { color: var(--muted); font-size: .92em; }
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>Cone Partitioning and<br>Region-Based Technology Mapping</h1>
+<p class="subtitle">Methodology of LiveHD synthesis: <code>pass.color synth</code>, the shared region pipeline of <code>pass/synth</code>, and the ABC backend of <code>pass.abc</code></p>
+
+<!-- ===================================================================== -->
+<h2><span class="secnum">1</span>Flow and Organization</h2>
+
+<p>The input is a hierarchical word-level netlist graph (<em>LGraph</em>). Each definition <var>d</var> is a directed graph <var>G<sub>d</sub></var> = (<var>V</var>, <var>E</var>) of typed operations &mdash; logic, arithmetic, comparisons, shifts, multiplexers (<code>Mux</code>, and the one-hot <code>Hotmux</code>), wiring, state and instances &mdash; whose edges carry a width and a signedness.</p>
+
+<div class="def">
+<p><span class="lead">Definition 1 (Coloring, region).</span> Let <var>V<sub>p</sub></var> &sube; <var>V</var> be the partitionable nodes (all but graph IO and constants). A coloring <var>c</var> : <var>V<sub>p</sub></var> &rarr; &#8469; assigns a color to every partitionable node; the <em>region</em> of color <var>k</var> is <var>R<sub>k</sub></var> = { <var>v</var> : <var>c</var>(<var>v</var>) = <var>k</var> }. Every region becomes a module <code>&lt;d&gt;__c&lt;k&gt;</code> that is optimized and technology-mapped on its own.</p>
+</div>
+
+<p>A good coloring bounds every region's time and memory, keeps logic that benefits from joint optimization together, cuts where cones share little, and is deterministic and stable under edits so mapped regions can be reused. <code>pass.color</code> computes it (Section 2). Everything between the colored graph and a mapped region is shared, backend-independent infrastructure in <code>pass/synth</code> (Section 3): a private copy of the design, simplification, extraction of arithmetic and memory modules, the cut into regions, the translation of each region into a flat LUT network (the <em>Lnet</em>), and the read-back of a mapped cell netlist. A <em>backend</em> maps one Lnet to cells and owns whatever whole-design sizing it offers; <code>pass/abc</code> is the ABC backend (Section 4) and is the only code that calls ABC. Unate synthesis (<code>pass.usyn</code>) is a region hook on the same pipeline that covers each region with domino gates before handing it to the ABC backend.</p>
+
+<figure>
+<svg viewBox="0 0 800 300" role="img" aria-label="Flow: compile, pass.color cone coloring, then pass/synth: private copy, simplification, ware and memory extraction, partition, per-region Lnet translation, then the pass/abc backend: replay, flow and sizing, cell netlist, then the pass/synth writer, boundary refinement and trials.">
+  <defs>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--fig-stroke)"/>
+    </marker>
+  </defs>
+  <g font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="13" fill="var(--fg)">
+    <rect x="10" y="20" width="118" height="54" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="69" y="43" text-anchor="middle">Compile</text>
+    <text x="69" y="61" text-anchor="middle" font-size="11" fill="var(--muted)">word-level LGraph</text>
+    <rect x="160" y="20" width="160" height="54" rx="6" fill="var(--fig-fill-2)" stroke="var(--fig-stroke)"/>
+    <text x="240" y="43" text-anchor="middle">Cone coloring (&#167;2)</text>
+    <text x="240" y="61" text-anchor="middle" font-size="11" fill="var(--muted)">pass.color: regions = colors</text>
+    <rect x="352" y="12" width="438" height="70" rx="8" fill="none" stroke="var(--fig-stroke)" stroke-dasharray="5 4"/>
+    <text x="362" y="27" font-size="11" fill="var(--muted)">pass/synth (&#167;3)</text>
+    <rect x="364" y="33" width="200" height="42" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="464" y="50" text-anchor="middle">Private copy, dead logic,</text>
+    <text x="464" y="66" text-anchor="middle">SAT simplification</text>
+    <rect x="584" y="33" width="196" height="42" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="682" y="50" text-anchor="middle">Ware / memory modules,</text>
+    <text x="682" y="66" text-anchor="middle">cut into regions</text>
+    <line x1="128" y1="47" x2="158" y2="47" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <line x1="320" y1="54" x2="362" y2="54" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <line x1="564" y1="54" x2="582" y2="54" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <path d="M682,75 L682,100 L110,100 L110,130" fill="none" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <rect x="10" y="112" width="780" height="92" rx="8" fill="none" stroke="var(--fig-stroke)" stroke-dasharray="5 4"/>
+    <text x="210" y="127" font-size="11" fill="var(--muted)">for every region: parallel lanes, incremental reuse (&#167;3.5)</text>
+    <rect x="30" y="134" width="160" height="56" rx="6" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
+    <text x="110" y="156" text-anchor="middle">Translate to Lnet</text>
+    <text x="110" y="173" text-anchor="middle" font-size="11" fill="var(--muted)">pass/synth (&#167;3.3)</text>
+    <rect x="222" y="134" width="150" height="56" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="297" y="156" text-anchor="middle">Region hook</text>
+    <text x="297" y="173" text-anchor="middle" font-size="11" fill="var(--muted)">optional (pass.usyn)</text>
+    <rect x="404" y="134" width="190" height="56" rx="6" fill="var(--fig-fill-2)" stroke="var(--fig-stroke)"/>
+    <text x="499" y="156" text-anchor="middle">ABC map and size</text>
+    <text x="499" y="173" text-anchor="middle" font-size="11" fill="var(--muted)">pass/abc backend (&#167;4)</text>
+    <rect x="626" y="134" width="150" height="56" rx="6" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
+    <text x="701" y="156" text-anchor="middle">Write cells</text>
+    <text x="701" y="173" text-anchor="middle" font-size="11" fill="var(--muted)">pass/synth (&#167;3.4)</text>
+    <line x1="190" y1="162" x2="220" y2="162" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <line x1="372" y1="162" x2="402" y2="162" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <line x1="594" y1="162" x2="624" y2="162" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <path d="M701,204 L701,226 L430,226 L430,240" fill="none" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+    <rect x="290" y="242" width="280" height="46" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="430" y="262" text-anchor="middle">Boundary refinement (&#167;4.3),</text>
+    <text x="430" y="279" text-anchor="middle">architecture trials (&#167;4.5)</text>
+    <rect x="610" y="242" width="180" height="46" rx="6" fill="var(--fig-fill-2)" stroke="var(--fig-stroke)"/>
+    <text x="700" y="262" text-anchor="middle">Mapped hierarchical</text>
+    <text x="700" y="279" text-anchor="middle">cell netlist</text>
+    <line x1="570" y1="265" x2="608" y2="265" stroke="var(--fig-stroke)" marker-end="url(#ar)"/>
+  </g>
+</svg>
+<figcaption class="cap"><b>Fig. 1.</b> Synthesis flow and where each step lives.</figcaption>
+</figure>
+
+<!-- ===================================================================== -->
+<h2><span class="secnum">2</span>Cone Partitioning</h2>
+
+<p>A forward partitioning that propagates a region id along fan-out fixes the region shape by connectivity alone: inheriting an id from every fan-in welds a register's data cone to the cone of its enable, and following fan-out re-merges cones where they reconverge. On a flattened processor either rule put more than 99% of the nodes into one region. The cones algorithm grows one <em>backward</em> cone per state input, decides size while it decides shape, and merges cones by the amount of logic they share (Algorithm 1), so boundaries fall where register cones share little logic.</p>
+
+<h3><span class="secnum">2.1</span>Cost Model</h3>
+
+<p>Every size decision uses one unit: &pi;(<var>v</var>), the predicted number of two-input AIG nodes the bit-blaster (Section 3.3) creates for a node, calibrated per operator (Table I); &pi;(<var>S</var>) sums over a set and saturates. Gate equivalents mispredict mapped cells by a median factor of 1.8 in both directions; &pi; over-counts by a stable factor and tracks ABC's runtime. A color's soft size target is &Gamma; = 30,000 predicted nodes.</p>
+
+<div class="scroll">
+<table>
+<caption>Table I<span class="tcap">Predicted AIG size &pi;(<var>v</var>); <var>w</var> = output width, <var>t</var> = operands, <var>W</var>* = widest operand</span></caption>
+<thead><tr><th>Operation</th><th>&pi;(<var>v</var>)</th></tr></thead>
+<tbody>
+<tr><td>Wiring, <code>Not</code>, constant shift; memory, instance, latch</td><td>0 (wiring, or a native boundary)</td></tr>
+<tr><td><code>And</code>, <code>Or</code> / <code>Xor</code></td><td><var>w</var>(<var>t</var>&minus;1) / 3<var>w</var>(<var>t</var>&minus;1)</td></tr>
+<tr><td><code>Mux</code> (<var>n</var> arms) / <code>Hotmux</code></td><td>3<var>w</var>(<var>n</var>&minus;1) / 2<var>wn</var></td></tr>
+<tr><td><code>Sum</code> / <code>LT</code>, <code>GT</code> / <code>EQ</code></td><td>8<var>w</var>(<var>t</var>&minus;1) / 5<var>W</var>* / 4<var>W</var>*(<var>t</var>&minus;1)</td></tr>
+<tr><td><code>Mult</code> / <code>Div</code></td><td>array over the running product width / 16<var>W</var>(<var>W</var>+1)</td></tr>
+<tr><td><code>SHL</code>, <code>SRA</code> (runtime amount)</td><td>3 &times; the 2:1 muxes of the demanded barrel</td></tr>
+<tr><td>Flop</td><td>3<var>b</var> per enable and per reset (<var>b</var> bits &times; stages)</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3><span class="secnum">2.2</span>Control and Data Cones</h3>
+
+<p>Logic no output or state reads is dead; it never roots or shapes a cone and finally joins the color of a colored fan-in. The control pins &mdash; a multiplexer select or <code>Hotmux</code> control, a register enable, a memory port enable &mdash; are grown first into <em>control groups</em> by union-find over their closures, split Kruskal-style when larger than &Gamma;, and given colors 1..<var>K</var>. Data walks never enter them, because merging a stage's data cone with the cone that gates it is what collapses a forward partitioning.</p>
+
+<p>Data roots are register data inputs, memory ports, stateful instances, primary outputs and arithmetic cuts. Each walks backward within a budget (Algorithm 1, line 5): the first cone to reach a node owns it, a later cone walks through it and records the shared size as <em>overlap</em> &omega;(<var>a</var>, <var>b</var>), and a walk stops before exceeding &Gamma;. Primary inputs are zero-weight shared leaves, so cones sharing only inputs can still merge. A register joins its data-input color unless another boundary feeds it.</p>
+
+<div class="algo">
+<div class="algo-title"><b>Algorithm 1</b> Cone coloring of one (flattened) definition</div>
+<div class="io"><b>Input:</b> <var>G</var>, &Gamma;, <var>N</var><sub>min</sub>, profile &sigma; &nbsp; <b>Output:</b> coloring <var>c</var></div>
+<ol class="algo-body">
+<li>Build flags, &pi;(<var>v</var>), fan-in and fan-out arrays in one pass <span class="cm">&#9655; no later phase reads graph edges</span></li>
+<li>Mark dead nodes: <var>V<sub>p</sub></var> minus the backward closure of outputs and state</li>
+<li>Grow control groups over select and enable closures; colors 1..<var>K</var></li>
+<li><span class="kw">for</span> each data root <var>r</var> <span class="kw">in</span> node order <span class="kw">do</span></li>
+<li class="in1">walk back from <var>r</var>: claim unowned nodes, add shared ones to &omega;(own(<var>n</var>), <var>r</var>), stop past &Gamma;</li>
+<li>Place registers into their data-input color; root and walk leftovers <span class="cm">&#9655; totality</span></li>
+<li>Overlap merge (Algorithm 2); forward merge across registers with the budget left</li>
+<li>Absorb colors with |<var>C</var>| &lt; <var>N</var><sub>min</sub> and &pi;(<var>C</var>) &le; &Gamma;/64 into their largest-overlap neighbor</li>
+<li>Renumber deterministically; isolate every arithmetic boundary no control group claims <span class="cm">&#9655; &sigma;</span></li>
+</ol>
+</div>
+
+<figure>
+<svg viewBox="0 0 800 270" role="img" aria-label="Three backward cones grown from registers r1, r2 and r3; r1 and r2 share a sub-cone whose size is their overlap; a control group feeds the select of a multiplexer; merged colors are outlined.">
+  <defs>
+    <pattern id="hatch" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="7" stroke="var(--fig-stroke)" stroke-width="1.1" opacity=".55"/>
+    </pattern>
+    <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--fig-stroke)"/>
+    </marker>
+  </defs>
+  <g font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="12" fill="var(--fg)">
+    <text x="18" y="22" fill="var(--muted)">inputs / Q of other registers</text>
+    <text x="640" y="22" fill="var(--muted)">registers (roots)</text>
+    <!-- cone r1 -->
+    <polygon points="660,70 330,20 330,150" fill="var(--fig-fill-2)" stroke="var(--fig-stroke)"/>
+    <!-- cone r2 -->
+    <polygon points="660,160 300,95 300,235" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <!-- overlap -->
+    <polygon points="440,112 330,95 330,150 440,132" fill="url(#hatch)" stroke="none"/>
+    <text x="352" y="129" font-size="11">&#969;(r1,r2)</text>
+    <!-- registers -->
+    <rect x="662" y="55" width="36" height="30" rx="4" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
+    <text x="680" y="75" text-anchor="middle">r1</text>
+    <rect x="662" y="145" width="36" height="30" rx="4" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
+    <text x="680" y="165" text-anchor="middle">r2</text>
+    <rect x="662" y="210" width="36" height="30" rx="4" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
+    <text x="680" y="230" text-anchor="middle">r3</text>
+    <!-- mux for r3 with control group -->
+    <polygon points="600,212 626,220 626,236 600,244" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <line x1="626" y1="228" x2="660" y2="226" stroke="var(--fig-stroke)" marker-end="url(#ar2)"/>
+    <rect x="470" y="238" width="96" height="24" rx="4" fill="none" stroke="var(--accent)" stroke-dasharray="4 3"/>
+    <text x="518" y="254" text-anchor="middle" font-size="11" fill="var(--accent)">control group</text>
+    <line x1="566" y1="250" x2="608" y2="242" stroke="var(--accent)" marker-end="url(#ar2)"/>
+    <!-- labels -->
+    <text x="520" y="72" font-size="11">cone(r1)</text>
+    <text x="500" y="178" font-size="11">cone(r2)</text>
+    <!-- primary input star -->
+    <circle cx="160" cy="130" r="5" fill="var(--fig-stroke)"/>
+    <text x="95" y="120" font-size="11">input pin p</text>
+    <line x1="165" y1="128" x2="328" y2="60" stroke="var(--fig-stroke)" stroke-dasharray="3 3"/>
+    <line x1="165" y1="132" x2="298" y2="200" stroke="var(--fig-stroke)" stroke-dasharray="3 3"/>
+    <text x="96" y="160" font-size="11" fill="var(--muted)">zero-weight contact</text>
+    <!-- merged outline -->
+    <path d="M296,16 L716,16 L716,188 L296,248 Z" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="8 4" opacity=".85"/>
+    <text x="722" y="110" font-size="11" fill="var(--accent)">merged if</text>
+    <text x="722" y="125" font-size="11" fill="var(--accent)">&#960;(r1)+&#960;(r2) &#8804; &#915;</text>
+  </g>
+</svg>
+<figcaption class="cap"><b>Fig. 2.</b> Backward cones, their overlap &omega;, a zero-weight input contact and a separate control group. Colors merge by decreasing overlap while the union fits &Gamma;.</figcaption>
+</figure>
+
+<h3><span class="secnum">2.3</span>Overlap Merging</h3>
+
+<p>The colors and their overlaps form a region graph whose vertices weigh &pi;(<var>C</var>) and whose edges weigh &omega;. The merge repeatedly unites the pair of largest overlap whose union fits:</p>
+
+<div class="eq"><span class="eq-body">(<var>a</var>*, <var>b</var>*) = arg max<sub>(<var>a</var>,<var>b</var>)</sub> &omega;(<var>a</var>, <var>b</var>) &nbsp; subject to &nbsp; &pi;(<var>a</var>) + &pi;(<var>b</var>) &le; &Gamma;</span><span class="eq-num">(1)</span></div>
+
+<div class="prop">
+<p><span class="lead">Proposition 1.</span> Because ownership is disjoint, &pi;(<var>A</var>&cup;<var>B</var>) = &pi;(<var>A</var>) + &pi;(<var>B</var>) and &omega;(<var>A</var>&cup;<var>B</var>, <var>C</var>) = &omega;(<var>A</var>, <var>C</var>) + &omega;(<var>B</var>, <var>C</var>). Weights only grow, so a pair refused once never fits later, and one pass over a priority queue with lazy invalidation computes the greedy fixpoint of (1) exactly.</p>
+</div>
+
+<div class="algo">
+<div class="algo-title"><b>Algorithm 2</b> Overlap merge with lazy invalidation</div>
+<ol class="algo-body">
+<li>push every recorded pair (&omega;, <var>a</var>, <var>b</var>, version 0) into a max-heap ordered by (&omega;&darr;, <var>a</var>&uarr;, <var>b</var>&uarr;)</li>
+<li><span class="kw">while</span> heap &ne; &empty; <span class="kw">do</span></li>
+<li class="in1">(&omega;, <var>a</var>, <var>b</var>, <var>v</var>) &larr; pop; skip if <var>a</var> or <var>b</var> is merged away or <var>v</var> is stale</li>
+<li class="in1"><span class="kw">if</span> &pi;(<var>a</var>) + &pi;(<var>b</var>) &gt; &Gamma; <span class="kw">then</span> discard <span class="cm">&#9655; refused forever (Prop. 1)</span></li>
+<li class="in1"><var>s</var> &larr; merge(<var>a</var>, <var>b</var>), folding the smaller adjacency into the larger</li>
+<li class="in1"><span class="kw">for</span> each neighbor <var>n</var> of the dissolved side <span class="kw">do</span> bump version(<var>s</var>, <var>n</var>); push (&omega;(<var>s</var>, <var>n</var>), <var>s</var>, <var>n</var>)</li>
+</ol>
+</div>
+
+<p>The heap order is total, so the result never depends on hash iteration, and folding the smaller adjacency keeps merges into hubs such as a reset cone from turning quadratic (O(<var>P</var> log <var>P</var>) for <var>P</var> pairs). A second, forward phase merges a register's color with the colors that read its output through their data inputs, smallest union first, using only the budget the backward merge left.</p>
+
+<h3><span class="secnum">2.4</span>Boundary Profiles: ABC Regions and Flop-to-Flop Regions</h3>
+
+<p>An <em>arithmetic boundary</em> is a multiplier, divider, adder over 8 bits, magnitude comparison over 8 bits or runtime shift over 8 bits. Two default profiles, chosen by the mapper, differ in how they treat boundaries and control. The <strong>ABC profile</strong> keeps ABC's regions small: every boundary operator is isolated into its own color (the merges fuse its operand cone with its consumers, and the operator becomes a width-specialized module, Section 3.2), multiplexers group with control, and control groups stay separate. The <strong>flop-to-flop profile</strong> (the unate mapper's) turns boundaries, control groups and arithmetic modules off and walks every cone to the register boundary, merging all overlapping cones whatever &Gamma; says, so every combinational path lies inside one color and &Gamma; only bounds the forward merge. Any explicit setting overrides either profile.</p>
+
+<p>A non-recursive hierarchy is colored as a virtual flat view, so module boundaries are not forced region boundaries: the design is flattened into a scratch definition, colored, and the colors are written back per instance path; the partitioner flattens again before cutting. Every phase except the control split is linear in |<var>V</var>| + |<var>E</var>|.</p>
+
+<!-- ===================================================================== -->
+<h2><span class="secnum">3</span>The Shared Region Pipeline</h2>
+
+<p><code>pass/synth</code> never modifies the input library: it copies the design's callee closure into a private library and transforms only the copy. The steps are ordered so each prepares the next.</p>
+
+<h3><span class="secnum">3.1</span>Simplification</h3>
+
+<p>Combinational nodes without consumers are deleted transitively, then the satopt engine (<code>pass/satopt</code>) runs its synthesis profile. Every proof is combinational: inputs, register outputs and memory read data are free symbols, so a proven fact holds in every state; an unsupported or out-of-budget proof yields no fact. Word-level simulation (corner and seeded random patterns, plus every solver counterexample) only nominates candidates. cvc5 decides <em>constant selectors</em> (a <code>Mux</code> select, a <code>Hotmux</code> control, a one-bit flop enable), <em>constant values</em> and <em>memory port relations</em>, each rewritten exactly. <em>Per-bit multiplexer facts</em> recover correlations a partition hides when a select and its arms land in different colors:</p>
+
+<div class="eq"><span class="eq-body">&forall;<var>x</var> : sel<sub><var>i</var></sub>(<var>x</var>) &rArr; <var>a<sub>i</sub></var>[<var>b</var>](<var>x</var>) = &kappa;(<var>x</var>), &nbsp;&nbsp; &kappa; &isin; { 0, 1, <var>a<sub>j</sub></var>[<var>b</var>], &not;<var>a<sub>j</sub></var>[<var>b</var>] }</span><span class="eq-num">(2)</span></div>
+
+<p>Each candidate becomes one output sel<sub><var>i</var></sub> &and; (<var>a<sub>i</sub></var>[<var>b</var>] &oplus; &kappa;) of a single proof Lnet, which the backend sweeps (ABC: <code>&amp;fraig</code>); a proven fact rewrites only that arm's input. Proofs are cached per definition under an exact source descriptor, the code identity and the proof options, and one deterministic budget bounds the whole engine. Its optional stages (equivalence, complement, observability, resubstitution) and the compile-time profile are described in <code>pass/satopt/README.md</code>.</p>
+
+<h3><span class="secnum">3.2</span>Modules, Memories and the Cut</h3>
+
+<p>Under the ABC profile every arithmetic-boundary operator is enclosed in its own definition keyed by its kind, port widths, signedness, constants and color, so equal realizations share one module. A memory stays a native instance unless it has at most 1024 bits or more than three ports, in which case it is lowered to flops in isolation. Loop bodies without carried state are mapped once and replicated.</p>
+
+<p>The colored source is then cut: one region per color (or per connected component of a color when the colors are local). Every crossing driver becomes an output port of its region and an input port of each reader, deduplicated per driver. Ports are named and ordered by structural signatures from a Kahn traversal (the producer shape with operands grouped by role, and the multiset of uses), so cold and warm runs produce the same network; a region whose input keys tie is not reusable, since a genuine automorphism could stitch a cached body onto permuted ports. A multi-region definition becomes a wrapper of unnamed region instances, which keeps hierarchical names transparent to equivalence checking and timing.</p>
+
+<h3><span class="secnum">3.3</span>Translation to the Lnet</h3>
+
+<p>Each region is translated into an <em>Lnet</em>: a flat network of k-input LUTs numbered densely in topological order, node 0 the constant, with no complemented edges (inversion lives in the tables) and boundary tables of inputs, latches and outputs. The blaster writes a <em>RAW</em> Lnet exactly as it creates logic &mdash; lazily created constants, explicit inverters and 2-input AND, OR and XOR, folding only constants and <var>x</var> op <var>x</var> &mdash; and records where every output was created, so a backend can replay it object for object. A <em>STRASH</em> rebuild hashes it structurally, folds complemented edges into the tables and drops logic no output reaches.</p>
+
+<p>Inputs are created on demand: a bit of a region port or of a native boundary becomes an input only when an operator reads it, so a region reading a slice of a wide packed port does not create thousands of unused inputs. Operators are blasted from a dependency queue; n-ary operators use balanced trees, adders are ripple-carry, carry-skip or carry-lookahead and multipliers arrays or trees (the architecture only seeds the logic). A register crosses as a latch with its next state folded as</p>
+
+<div class="eq"><span class="eq-body"><var>D</var> = rst&prime; ? rval : ( en&prime; ? din : <var>Q</var> ), &nbsp;&nbsp; en&prime; = &or;<sub><var>i</var></sub> en[<var>i</var>], &nbsp; rst&prime; = &or;<sub><var>i</var></sub> rst[<var>i</var>] &oplus; neg</span><span class="eq-num">(3)</span></div>
+
+<p>so a synchronous reset has priority over the enable and the result maps to a plain D flip-flop. A flop with an asynchronous reset or a derived clock, every level-sensitive latch, every instance and memory, and wide or cyclic wiring stay <em>native boundaries</em>, reconnected around the mapped logic. Only a true power-on value becomes a latch initial state.</p>
+
+<h3><span class="secnum">3.4</span>The Driver and Backend Seam</h3>
+
+<p>The <em>region driver</em> owns everything around a mapping (Algorithm 3, Fig. 3): per-region options, the region cache, the translation, the optional region hook, parallel lanes, the read-back and the architecture trials. A backend implements one interface: start and stop a session per lane, contribute its recipe to the cache key, map an Lnet (or the hook's rewrite of it) into a <em>cell netlist</em> &mdash; library cells in topological order over the Lnet's boundary, one signal per output, latches with their initial values &mdash; and refine and score the stitched design. The region writer turns the cell netlist into the region body, keeping every name equivalence checking relies on (register roots, pipeline stages, aggregate attributes); an identity buffer that only feeds outputs is aliased away, and every gate is attributed to the source location of the first output whose cone reaches it.</p>
+
+<div class="algo">
+<div class="algo-title"><b>Algorithm 3</b> M<small>AP</small>R<small>EGION</small>(<var>R</var>) in the region driver</div>
+<ol class="algo-body">
+<li>resolve per-region options; recipe &larr; backend.plan(<var>R</var>) (+ the hook's recipe)</li>
+<li><span class="kw">if</span> <var>R</var> is reusable <span class="kw">and</span> the cache holds a structurally identical body with an identical recipe <span class="kw">then</span> reuse it; <span class="kw">return</span></li>
+<li><var>L</var> &larr; blast(<var>R</var>) as a RAW Lnet, with native boundaries <span class="cm">&#9655; &sect;3.3, memory-admitted</span></li>
+<li>rewrite &larr; hook(<var>L</var>) <span class="kw">if</span> a hook is set <span class="kw">else</span> none <span class="cm">&#9655; unate synthesis</span></li>
+<li>cells &larr; backend.map(<var>L</var>, rewrite) <span class="cm">&#9655; &sect;4</span></li>
+<li>write cells into the region body; store pre- and post-mapping bodies in the cache</li>
+</ol>
+</div>
+
+<figure>
+<svg viewBox="0 0 800 190" role="img" aria-label="The region driver passes a RAW Lnet to an optional hook and to the backend; the backend returns a cell netlist that the region writer turns into the region body; the region cache stores both bodies.">
+  <defs>
+    <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="var(--fig-stroke)"/>
+    </marker>
+  </defs>
+  <g font-family="-apple-system, Segoe UI, Roboto, sans-serif" font-size="13" fill="var(--fg)">
+    <rect x="10" y="10" width="520" height="170" rx="8" fill="none" stroke="var(--fig-stroke)" stroke-dasharray="5 4"/>
+    <text x="20" y="26" font-size="11" fill="var(--muted)">pass/synth: region driver</text>
+    <rect x="24" y="40" width="130" height="50" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="89" y="61" text-anchor="middle">Region body</text>
+    <text x="89" y="78" text-anchor="middle" font-size="11" fill="var(--muted)">LGraph, ports</text>
+    <rect x="194" y="40" width="130" height="50" rx="6" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
+    <text x="259" y="61" text-anchor="middle">Blaster</text>
+    <text x="259" y="78" text-anchor="middle" font-size="11" fill="var(--muted)">RAW Lnet</text>
+    <rect x="364" y="40" width="150" height="50" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="439" y="61" text-anchor="middle">Region hook</text>
+    <text x="439" y="78" text-anchor="middle" font-size="11" fill="var(--muted)">rewrite (optional)</text>
+    <rect x="194" y="118" width="130" height="50" rx="6" fill="var(--fig-fill-3)" stroke="var(--fig-stroke)"/>
+    <text x="259" y="139" text-anchor="middle">Region writer</text>
+    <text x="259" y="156" text-anchor="middle" font-size="11" fill="var(--muted)">cells &#8594; body</text>
+    <rect x="24" y="118" width="130" height="50" rx="6" fill="var(--fig-fill)" stroke="var(--fig-stroke)"/>
+    <text x="89" y="139" text-anchor="middle">Region cache</text>
+    <text x="89" y="156" text-anchor="middle" font-size="11" fill="var(--muted)">bodies, evidence</text>
+    <line x1="154" y1="65" x2="192" y2="65" stroke="var(--fig-stroke)" marker-end="url(#ar3)"/>
+    <line x1="324" y1="65" x2="362" y2="65" stroke="var(--fig-stroke)" marker-end="url(#ar3)"/>
+    <line x1="194" y1="143" x2="156" y2="143" stroke="var(--fig-stroke)" marker-end="url(#ar3)"/>
+    <rect x="570" y="40" width="210" height="128" rx="8" fill="var(--fig-fill-2)" stroke="var(--fig-stroke)"/>
+    <text x="675" y="62" text-anchor="middle">Backend (pass/abc)</text>
+    <text x="675" y="84" text-anchor="middle" font-size="11" fill="var(--muted)">replay Lnet into ABC</text>
+    <text x="675" y="102" text-anchor="middle" font-size="11" fill="var(--muted)">flow, budget ladder, sizing</text>
+    <text x="675" y="120" text-anchor="middle" font-size="11" fill="var(--muted)">ABC network &#8594; cell netlist</text>
+    <text x="675" y="138" text-anchor="middle" font-size="11" fill="var(--muted)">refine and score the design</text>
+    <line x1="514" y1="65" x2="568" y2="65" stroke="var(--fig-stroke)" marker-end="url(#ar3)"/>
+    <text x="550" y="58" text-anchor="middle" font-size="11" fill="var(--muted)">Lnet</text>
+    <path d="M570,150 L420,150 L420,143 L326,143" fill="none" stroke="var(--fig-stroke)" marker-end="url(#ar3)"/>
+    <text x="470" y="166" text-anchor="middle" font-size="11" fill="var(--muted)">cell netlist</text>
+  </g>
+</svg>
+<figcaption class="cap"><b>Fig. 3.</b> The seam between the shared region driver and a backend. Only the Lnet goes in and only a cell netlist comes out; no backend object crosses it. Unate synthesis is a region hook: it covers the Lnet with domino gates and hands the cover network to the same backend.</figcaption>
+</figure>
+
+<h3><span class="secnum">3.5</span>Reuse and Parallel Lanes</h3>
+
+<p>A mapped body is reused in place when the new pre-mapping body is structurally identical to the stored one, by an exact node bijection, and the resolved recipe (flow, options, per-region budget and hook settings) is byte-identical. Hashes only find candidates; the cache is never an oracle. Code salts in three layers &mdash; <code>pass/synth</code> with the passes it builds on, then each backend, then the hook &mdash; invalidate rows when the code that produced them changes. Regions are mapped by parallel lanes, each with its own backend session, and published in partition order, so the output does not depend on the number of lanes. A lane is admitted only if its projected memory fits below half of physical memory, and a region whose measured growth would exhaust the host is refused.</p>
+
+<!-- ===================================================================== -->
+<h2><span class="secnum">4</span>ABC as the Mapping and Sizing Backend</h2>
+
+<p>The ABC backend replays the RAW Lnet into an ABC netlist in creation order, so the network is object-for-object the one the blaster would have built directly and its size is known before any ABC object exists. Region inputs and outputs are paired with the Lnet's creation order, which ABC preserves through its flows.</p>
+
+<h3><span class="secnum">4.1</span>Flows</h3>
+
+<p>The delay and area flows (Table II) end in <code>&amp;nf</code> on a unit-delay gate library, so the mapper minimizes depth on the smallest cells and every physical decision is left to gate sizing with the Liberty timing model. No flow retimes: moving registers would break the register-name correspondence of equivalence checking and could change latency. <code>&amp;put -o</code> shares a gate that drives several outputs through output-only buffers, which the read-back removes again.</p>
+
+<div class="scroll">
+<table>
+<caption>Table II<span class="tcap">Built-in ABC flows</span></caption>
+<thead><tr><th>Flow</th><th>Commands</th><th>Used when</th></tr></thead>
+<tbody>
+<tr><td>Area</td><td><code>strash; &amp;get -n; &amp;fraig -x -C 500; &amp;put; dc2; strash; &amp;get -n; &amp;dch -f -C 500; &amp;nf {D}; &amp;put -o</code></td><td>No delay target; the area candidate</td></tr>
+<tr><td>Delay</td><td>two rounds of <code>&amp;synch2 -K 6</code>, <code>&amp;if -K 6</code>, <code>&amp;mfs</code>, <code>&amp;dch</code>, <code>&amp;sopb</code>; then <code>&amp;st; &amp;nf {D}; &amp;put -o</code></td><td>A delay target is set</td></tr>
+<tr><td>Large</td><td><code>strash; &amp;get -n; &amp;nf {D}; &amp;put</code></td><td>Region of at least 200,000 GE (ABC mapper only)</td></tr>
+<tr><td>Tail</td><td><code>buffer -N 16; dnsize {B}</code></td><td>After every built-in flow, when the library has NLDM tables</td></tr>
+</tbody>
+</table>
+</div>
+
+<h3><span class="secnum">4.2</span>Per-Region Budget</h3>
+
+<p>With a delay target <var>T</var>, a region with registers must also absorb the launch clock-to-output delay and the capture setup time, which ABC's combinational timer does not see. The region budget is</p>
+
+<div class="eq"><span class="eq-body"><var>B</var> = &lfloor;<var>T</var> &minus; <var>m</var>&rfloor; if <var>R</var> has registers, &nbsp; &lfloor;<var>T</var>&rfloor; otherwise, &nbsp;&nbsp; <var>m</var> = <var>t</var><sub>clk&rarr;Q</sub> + <var>t</var><sub>setup</sub> of the flip-flop cell</span><span class="eq-num">(4)</span></div>
+
+<p>A budget is not "as fast as possible": after the flow, a budget ladder spends measured slack on area (Algorithm 4), with an area-recovery remap only when the slack <var>s</var> = 100(<var>B</var>/<var>d</var> &minus; 1) is at least 25% (relaxation min(<var>s</var>, 200)). Every flow option can be overridden per color from source annotations or the command line; an unknown key is an error.</p>
+
+<div class="algo">
+<div class="algo-title"><b>Algorithm 4</b> Budget ladder and area candidate; <var>d</var>(<var>N</var>), <var>a</var>(<var>N</var>) = timed delay and area</div>
+<ol class="algo-body">
+<li><span class="kw">if</span> the area candidate applies <span class="kw">then</span> <var>N</var><sub>0</sub> &larr; copy of the unmapped network</li>
+<li><var>N</var> &larr; flow(network); <span class="kw">if</span> no budget <span class="kw">then return</span> <var>N</var></li>
+<li><span class="kw">if</span> <var>d</var>(<var>N</var>) &gt; <var>B</var> <span class="kw">then</span> size up and down within <var>B</var>; if still late, size without a bound</li>
+<li><span class="kw">else if</span> the flow is remappable <span class="kw">and</span> <var>s</var> &ge; 25 <span class="kw">then</span> undo the map; remap with relaxation; buffer; size down within <var>B</var></li>
+<li><span class="kw">if</span> <var>N</var><sub>0</sub> exists <span class="kw">and</span> <var>d</var>(<var>N</var>) &le; <var>B</var> <span class="kw">then</span> <var>N<sub>A</sub></var> &larr; area flow(<var>N</var><sub>0</sub>); keep it iff <var>d</var>(<var>N<sub>A</sub></var>) &le; <var>B</var> and <var>a</var>(<var>N<sub>A</sub></var>) &lt; <var>a</var>(<var>N</var>)</li>
+</ol>
+</div>
+
+<h3><span class="secnum">4.3</span>Partition-Boundary Environment</h3>
+
+<p>Mapped in isolation, a region's outputs drive no load and its inputs come from ideal drivers, so regions report paths far shorter than a whole-design timer finds. Every region therefore gets a boundary environment in two phases. <em>Phase A</em>, before mapping, is a pure function of the source graph and the library: an output port <var>p</var> sees</p>
+
+<div class="eq"><span class="eq-body">load(<var>p</var>) = ext(<var>p</var>) &middot; <span style="text-decoration:overline">C</span> + [<var>p</var> drives a primary output] &middot; <var>C</var><sub>io</sub></span><span class="eq-num">(5)</span></div>
+
+<p>where ext(<var>p</var>) counts sinks outside the region and <span style="text-decoration:overline">C</span> is the mean input capacitance of small cells, and every input is driven by a stand-in small buffer that also drives the fanout trees built for inputs. <em>Phase B</em> runs once every region is mapped, when a delay target exists and the library has NLDM tables: the exact load of every crossing net (the sum of the pin capacitances it drives, followed across instance ports) and its real driving cell replace the estimates, and each region is re-sized in place within its budget. Further rounds propagate arrivals across the hierarchy; one round makes the loads and drivers exact.</p>
+
+<h3><span class="secnum">4.4</span>Read-Back</h3>
+
+<p>ABC's mapped network is converted into the backend-neutral cell netlist: every gate is a cell instance with its fanins in pin order, an unreadable gate is a hard error, and a flop cell with only an inverted output absorbs the inversion (the latch stores &not;<var>D</var> under the built-in flows, or the root gate is swapped for its inverting twin). Each crossing latch becomes a flip-flop sized from its output fanout, because fanout buffering never buffers a register output. The region writer (Section 3.4) does the rest.</p>
+
+<h3><span class="secnum">4.5</span>Architecture Trials</h3>
+
+<p>After the whole design is mapped, regions with automatic adders, multipliers or shifters re-map their pre-mapping body under the alternative lowerings (at most eleven trials) and re-score the design: area over every instance and, under a delay target, the endpoint delays of a network stitched across region boundaries. A candidate is kept if its sorted endpoint delays are lexicographically better, or if they tie and its area is smaller.</p>
+
+</body>
+</html>

@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include "hash_util.hpp"
+
 namespace {
 // Pre-register every Lnast attribute tag at static-init time. The HHDS
 // attribute registry is not thread-safe on first-touch — two threads racing
@@ -83,6 +85,7 @@ void Lnast::replace_body(std::shared_ptr<hhds::Tree> new_body) {
   // recorded dead-statement marks (the Lnast overload below re-transfers the
   // staging's own marks after this).
   dce_dead_stmts_.clear();
+  tolg_scan_cache_ = {};
 }
 
 void Lnast::replace_body(const std::shared_ptr<Lnast>& staging) {
@@ -114,7 +117,7 @@ void Lnast::export_into(hhds::Forest& forest) const {
   // what LGraph consumers expect) and drop the int ids. The live tree keeps the
   // ints. Attr-store mutation does not move tree nodes, so the pre-order walk is
   // safe to mutate during.
-  for (auto nid : body->pre_order()) {
+  for (auto nid : body->body().nodes(hhds::Tree_order::preorder)) {
     auto       ref = nid.attr(lnast_attrs::lnast_name);
     const auto id  = ref.get_or(int32_t{0});
     if (id == 0) {
@@ -162,7 +165,7 @@ std::shared_ptr<Lnast> Lnast::adopt(std::shared_ptr<hhds::Forest> forest, std::s
   // drop the strings, so the in-memory representation matches a freshly-built
   // Lnast (int ids, lean per-node storage).
   if (lnast->tree_) {
-    for (auto nid : lnast->tree_->pre_order()) {
+    for (auto nid : lnast->tree_->body().nodes(hhds::Tree_order::preorder)) {
       auto        ref = nid.attr(hhds::attrs::name);
       const auto* p   = ref.try_get();
       if (p == nullptr || p->empty()) {
@@ -213,16 +216,13 @@ Lnast_ntype::Lnast_ntype_int Lnast::get_type(const Lnast_nid& nid) const {
 void Lnast::set_type(const Lnast_nid& nid, Lnast_ntype::Lnast_ntype_int t) { nid.set_type(static_cast<hhds::Type>(t)); }
 
 std::string_view Lnast::get_name(const Lnast_nid& nid) const {
-  // One store+map lookup for the id, then a pool index. get_name is one of the
-  // hottest lnast calls; the int id keeps the hot probe a 4-byte fetch and the
-  // resolve a deque index (no per-node std::string).
+  // lnast_name uses HHDS dense_layout: the authoritative attribute is a direct
+  // vector lookup, while the interned id keeps each node payload to int32_t.
   const auto id = nid.attr(lnast_attrs::lnast_name).get_or(int32_t{0});
   return id == 0 ? std::string_view{} : name_pool_->resolve(id);
 }
 
-int32_t Lnast::get_name_id(const Lnast_nid& nid) const {
-  return nid.attr(lnast_attrs::lnast_name).get_or(int32_t{0});
-}
+int32_t Lnast::get_name_id(const Lnast_nid& nid) const { return nid.attr(lnast_attrs::lnast_name).get_or(int32_t{0}); }
 
 const Dlop& Lnast::get_const_value(std::string_view const_text) const {
   // The parse memo lives in hlop (Dlop::from_pyrope_cached) so EVERY Dlop client
@@ -244,18 +244,55 @@ void Lnast::set_name(const Lnast_nid& nid, std::string_view name) {
   nid.attr(lnast_attrs::lnast_name).set(name_pool_->intern(name));
 }
 
-uint32_t Lnast::tmp_site_hash(const Lnast_nid& ref_nid, const absl::flat_hash_map<std::string, std::string>* remap) const {
-  constexpr uint64_t kFnvOffset = 0xcbf29ce484222325ULL;
-  constexpr uint64_t kFnvPrime  = 0x100000001b3ULL;
-
-  uint64_t h   = kFnvOffset;
-  auto     mix = [&h](std::string_view s) {
-    for (const unsigned char c : s) {
-      h ^= c;
-      h *= kFnvPrime;
+void Lnast::set_name_id(const Lnast_nid& nid, int32_t id) {
+  auto ref = nid.attr(lnast_attrs::lnast_name);
+  if (id == 0) {
+    if (ref.has()) {
+      ref.del();
     }
+    return;
+  }
+  ref.set(id);
+}
+
+void Lnast::rehome_name_pool(const std::shared_ptr<Lnast_name_pool>& pool) {
+  I(pool, "rehome_name_pool: null target pool");
+  // Parser-streamed lambda siblings are built on the same worker thread and
+  // therefore share this wrapper's old pool. Rehome the whole transient unit
+  // family before publishing it to the single-threaded compile closure.
+  for (auto& child : streamed_lambda_lnasts_) {
+    if (child) {
+      child->rehome_name_pool(pool);
+    }
+  }
+  if (pool == name_pool_) {
+    return;
+  }
+
+  absl::flat_hash_map<int32_t, int32_t> remap;
+  for (auto nid : tree_->body().nodes(hhds::Tree_order::preorder)) {
+    auto       ref = nid.attr(lnast_attrs::lnast_name);
+    const auto old = ref.get_or(int32_t{0});
+    if (old == 0) {
+      continue;
+    }
+    auto [it, inserted] = remap.try_emplace(old, 0);
+    if (inserted) {
+      it->second = pool->intern(name_pool_->resolve(old));
+    }
+    ref.set(it->second);
+  }
+  name_pool_ = pool;
+}
+
+uint32_t Lnast::tmp_site_hash(const Lnast_nid& ref_nid, const absl::flat_hash_map<std::string, std::string>* remap) const {
+  namespace hu = livehd::hash_util;
+
+  uint64_t h   = hu::kFnv1a64_offset;
+  auto     mix = [&h](std::string_view s) {
+    h  = hu::fnv1a64(s, h);
     h ^= 0xffu;  // field separator so ("ab","c") and ("a","bc") differ
-    h *= kFnvPrime;
+    h *= hu::kFnv1a64_prime;
   };
 
   const auto parent = get_parent(ref_nid);

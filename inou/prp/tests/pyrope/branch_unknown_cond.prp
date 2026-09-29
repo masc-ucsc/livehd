@@ -1,0 +1,35 @@
+/*
+:name: branch_unknown_cond
+:type: compile
+*/
+
+// An `if`/`match` whose condition carries UNKNOWN bits must NOT be decided at
+// compile time — the arms have to survive as a real mux/hotmux over an x-valued
+// selector.
+//
+// cprop's EQ fold used to collapse the three-valued `Dlop::eq_op` result with
+// `!is_known_false()`, so an UNDECIDABLE compare (`0ub0? == 0`) folded to a
+// definite 1. Two consequences, both here:
+//   * `if c != 0` picked the else arm and `r` came out the constant 2;
+//   * `match c` had BOTH arm conditions fold to 1, building a non-one-hot
+//     Hotmux selector — which `pass.formal` then reported as an overlapping
+//     `unique if`/`match`, failing this compile outright.
+
+pub comb branch_unknown_cond(a:u4) -> (r:u4, s:u4) {
+  mut c:u1 = 0sb?
+
+  mut x:u4 = 0
+  if c != 0 {
+    x = a
+  } else {
+    x = 2
+  }
+  r = x
+
+  mut y:u4 = 0
+  match c {
+    == 0 { y = 5 }
+    == 1 { y = 6 }
+  }
+  s = y
+}

@@ -1,0 +1,26 @@
+/*
+:name: loop_roll_invariant_domain
+:type: simulation
+:expect_instances: u_loop_0=2 *=2
+*/
+// The domain constant is captured by value in the outer body. Both loops
+// remain compact, with the inner subloop called from the outer definition.
+
+pub mod top(a:u8) -> (o:u12@[0]) {
+  const n:u8  = 4
+  mut acc:u12 = a
+  for i in 0..<2 {
+    for j in 0..<n { acc = acc + j }
+  }
+  o = acc
+}
+
+test invariant_domain.preserves_hierarchy {
+  mut dut = top
+  tick 1 {
+    dut.a = 5
+    step
+    // two outer iterations x (0+1+2+3) = 12, plus the seed
+    assert(dut.o == 17, "5 + 2*(0+1+2+3)")
+  }
+}

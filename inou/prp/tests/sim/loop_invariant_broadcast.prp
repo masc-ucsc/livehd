@@ -1,0 +1,40 @@
+/*
+:name: loop_invariant_broadcast
+:type: simulation
+*/
+// Repeated and changing wide inputs cross two compact-loop boundaries. Lane
+// zero is sometimes inactive while later lanes consume the changed input.
+mod broadcast_lane(a:u8, reset:bool) -> (q:u16@[0]) {
+  reg acc:u16:[reset_pin = ref reset, async = true] = 0
+  acc = acc + a
+  q = acc
+}
+pub mod loop_invariant_broadcast(bus:u512, enable:bool, reset:bool) -> (total:u16@[0]) {
+  mut sum:u16 = 0
+  for group in 0..<4 {
+    for lane in 0..<16 {
+      if enable or lane != 0 {
+        const value = bus#[((group*16 + lane)*8) ..+ 8]
+        const q = broadcast_lane(a=value, reset=reset)
+        sum = sum + q
+      }
+    }
+  }
+  total = sum
+}
+test loop_invariant_broadcast.changes_and_holds {
+  mut dut = loop_invariant_broadcast
+  tick 7 {
+    dut.bus = if clock < 2 {
+      0x01010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101
+    } else {
+      0x02020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202
+    }
+    dut.enable = clock == 0 or clock == 3 or clock >= 5
+    dut.reset = clock == 4
+    step
+    const expected = if clock == 0 { 64 } elif clock == 1 { 120 } elif clock == 2 { 240 } elif clock == 3 { 372 }
+      elif clock == 4 { 0 } elif clock == 5 { 128 } else { 256 }
+    assert(dut.total == expected)
+  }
+}

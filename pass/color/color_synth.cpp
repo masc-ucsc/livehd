@@ -13,8 +13,14 @@ using livehd::graph_util::type_op_of;
 
 Color_synth::Color_synth(Color_opts opts_, std::string_view alg) : opts(opts_) {
   // The driver (Pass_color::color) validates the name, so anything reaching
-  // here is one of the two.
-  synth = alg != "pipe";
+  // here is one of the three.
+  if (alg == "pipe") {
+    mode = Mode::pipe;
+  } else if (alg == "cones") {
+    mode = Mode::cones;
+  } else {
+    mode = Mode::synth;
+  }
 }
 
 void Color_synth::set_id(const hhds::Node_class& node, int id) {
@@ -38,30 +44,78 @@ void Color_synth::force_id(const hhds::Node_class& node, int id) {
 // whose region does not matter) or pass.color ran before pass.bitwidth. An
 // unknown width simply is not a boundary, which makes the region larger, never
 // wrong.
-static int driver_bits(const hhds::Node_class& n) {
-  for (const auto& e : n.out_edges()) {
-    if (auto b = bits_of(e.driver); b != 0) {
+int Color_synth::driver_bits(const hhds::Node_class& n) {
+  // Driver-pin walk: this only ever read the driver side.
+  for (const auto& dpin : n.out_sorted_pins()) {
+    if (auto b = bits_of(dpin); b != 0) {
       return b;
     }
   }
   return 0;
 }
 
-bool Color_synth::is_cut(const hhds::Node_class& node) const {
-  if (node.is_loop_break()) {
-    return true;  // flop/mem/latch/stateful sub: the pipeline-stage boundary
-  }
-  if (!synth) {
-    return false;  // "pipe": stages are cut at state only
-  }
+bool Color_synth::is_arith_cut(const hhds::Node_class& node) {
   auto op = type_op_of(node);
   if (op == Ntype_op::Mult || op == Ntype_op::Div) {
     return true;
   }
-  // A wide adder is its own synthesis boundary. driver_bits is 0 when bitwidth
-  // has not run, and an unknown width is not a boundary -- the region is merely
-  // larger, never wrong.
+  // Comparisons lower to subtraction later in ABC, so their operand width
+  // (not their one-bit result) decides the arithmetic boundary here.
+  if (op == Ntype_op::LT || op == Ntype_op::GT) {
+    for (auto sink : node.inp_sorted_pins()) {  // read-only pin walk
+      if (bits_of(sink.get_driver_pin()) > 8) {
+        return true;
+      }
+    }
+  }
+  if (op == Ntype_op::SHL || op == Ntype_op::SRA) {
+    // Constant shifts remain wiring, not a ware module.
+    auto amount = graph_util::get_driver_of_sink_name(node, "b");
+    auto value  = graph_util::get_driver_of_sink_name(node, "a");
+    // Shifting a constant is a decoder/mask cone. Keep its consumers visible:
+    // extracting only the shift can expose an enormous unobserved mask bus.
+    return !value.is_const() && !amount.is_invalid() && !amount.is_const() && driver_bits(node) > 8;
+  }
   return op == Ntype_op::Sum && driver_bits(node) > 8;
+}
+
+// The three stop_* knobs are ORTHOGONAL to each other and to `ctrl_cones`.
+// Orthogonality is the contract: `ctrl_cones=false` asks for LESS structure
+// (no separate control colors, no stopping at muxes), so it must never be the
+// thing that turns a node INTO a boundary. Tying the runtime-shifter exemption
+// to it did exactly that -- disabling control grouping silently re-armed the
+// barrel-shifter cut and produced MORE colors than leaving it on.
+bool Color_synth::is_arith_boundary(const hhds::Node_class& node) const {
+  const auto op = type_op_of(node);
+  if (!opts.stop_arith && (op == Ntype_op::Sum || op == Ntype_op::Mult || op == Ntype_op::Div)) {
+    return false;
+  }
+  // Wide comparisons: is_arith_cut isolates them because they lower to a
+  // subtraction, which is the same ware-module argument `stop_arith` makes for
+  // Sum -- but a comparator is a one-bit result feeding control, so a design
+  // routinely wants it merged while real adders stay split.
+  if (!opts.stop_cmp && (op == Ntype_op::LT || op == Ntype_op::GT)) {
+    return false;
+  }
+  // Runtime shifters (barrels). NOT tied to ctrl_cones: when control grouping is
+  // on it already claims the shifters it wants -- collect_control_roots clears
+  // kArithCut on every node its closure mints, and label_cones re-stamps those
+  // members after preserve_arith_cuts -- so the ownership question is settled
+  // downstream and this only has to answer the policy question.
+  if (!opts.stop_shift && (op == Ntype_op::SHL || op == Ntype_op::SRA)) {
+    return false;
+  }
+  return is_arith_cut(node);
+}
+
+bool Color_synth::is_cut(const hhds::Node_class& node) const {
+  if (node.is_loop_break()) {
+    return true;  // flop/mem/latch/stateful sub: the pipeline-stage boundary
+  }
+  if (mode == Mode::pipe) {
+    return false;  // "pipe": stages are cut at state only
+  }
+  return is_arith_boundary(node);
 }
 
 // The id a cut node joins: the region of the data it registers, if it has a
@@ -101,7 +155,7 @@ void Color_synth::mark_ids(hhds::Graph* g) {
   // receive an id here nor hand one out, which is what keeps a register from
   // welding its din cone to its enable/stall cone, and its fan-out cones to
   // each other. Seeded nodes are excluded for the same structural reason.
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     if (!is_partitionable(node) || is_cut(node) || is_seeded(node)) {
       continue;
     }
@@ -110,12 +164,14 @@ void Color_synth::mark_ids(hhds::Graph* g) {
     const int id = it == flat_node2id.end() ? get_free_id() : it->second;
     set_id(node, id);  // the node records its OWN id, not just its sinks'
 
-    for (const auto& e : node.out_edges()) {
-      auto snode = e.sink.get_master_node();
-      if (!is_partitionable(snode) || is_cut(snode) || is_seeded(snode)) {
-        continue;  // a cut owns its region; it never inherits this one
+    for (const auto& dpin : node.out_sorted_pins()) {  // fanout is a SET
+      for (const auto& e : dpin.out_edges()) {
+        auto snode = e.sink.get_master_node();
+        if (!is_partitionable(snode) || is_cut(snode) || is_seeded(snode)) {
+          continue;  // a cut owns its region; it never inherits this one
+        }
+        set_id(snode, id);
       }
-      set_id(snode, id);
     }
   }
 
@@ -123,7 +179,7 @@ void Color_synth::mark_ids(hhds::Graph* g) {
   // come after pass 1: forward_class emits loop breaks first (they are the cut
   // points that make the walk acyclic), so during pass 1 a flop's din cone has
   // no id yet and every cut would fall back to a region of its own.
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     if (is_partitionable(node) && is_cut(node) && !is_seeded(node)) {
       force_id(node, data_cone_id(node));
     }
@@ -136,11 +192,94 @@ void Color_synth::merge_ids() {
   }
 }
 
+void Color_synth::preserve_arith_cuts() {
+  int id = 0;
+  for (const auto& [node, color] : flat_node2id) {
+    id = std::max(id, color);
+  }
+  // Iterate deterministically: hash-table order must not rename the modules.
+  std::vector<hhds::Node_class> cuts;
+  for (const auto& [node, color] : flat_node2id) {
+    if (is_arith_boundary(node) && !is_seeded(node)) {
+      cuts.push_back(node);
+    }
+  }
+  std::sort(cuts.begin(), cuts.end(), [](const auto& a, const auto& b) {
+    return a.get_class_index().value < b.get_class_index().value;
+  });
+  for (auto n : cuts) {
+    const int cut_id = ++id;
+    flat_node2id[n]  = cut_id;
+    // Keep constant output slicing with its producer so ABC can see the
+    // demanded width when lowering a wide barrel shifter.
+    for (const auto& dpin : n.out_sorted_pins()) {
+      for (const auto& e : dpin.out_edges()) {
+        auto sink = e.sink.get_master_node();
+        if (type_op_of(sink) == Ntype_op::Get_mask && !is_seeded(sink)) {
+          auto mask = graph_util::get_driver_of_sink_name(sink, "mask");
+          if (mask.is_const()) {
+            flat_node2id[sink] = cut_id;
+          }
+        }
+      }
+    }
+  }
+}
+
+void Color_synth::keep_clock_gates_whole(hhds::Graph* g) {
+  // A latch-based CLOCK GATE (`clk & en_l`, en_l a latch whose Q feeds only
+  // that AND) is one cell to pass.abc -- the Liberty integrated clock-gate --
+  // and is recognized only when its latch and AND share a region. A register
+  // joins the color of its din cone (place_state_and_sweep), which puts the
+  // latch with its enable logic and the AND with whatever the clock tree
+  // landed in: minion's eight txfma multype_f1 gates came out split that way
+  // and stayed a native latch + mapped AND. Move such a latch (and the 1-bit
+  // Get_mask/Sext identities between it and the AND) into the AND's color.
+  for (auto node : g->body().nodes()) {
+    if (type_op_of(node) != Ntype_op::Latch) {
+      continue;
+    }
+    std::vector<hhds::Node_class> path{node};
+    hhds::Node_class              gate;
+    bool                          ok = true;
+    for (size_t k = 0; k < path.size() && ok && path.size() < 8; ++k) {
+      for (const auto& e : path[k].out_edges()) {
+        const auto sn = e.sink.get_master_node();
+        const auto so = type_op_of(sn);
+        if (so == Ntype_op::And && (gate.is_invalid() || sn == gate)) {
+          gate = sn;
+        } else if ((so == Ntype_op::Get_mask || so == Ntype_op::Sext) && k + 1 == path.size()) {
+          path.push_back(sn);
+        } else {
+          ok = false;
+          break;
+        }
+      }
+    }
+    if (!ok || gate.is_invalid()) {
+      continue;
+    }
+    auto git = flat_node2id.find(gate);
+    if (git == flat_node2id.end()) {
+      continue;
+    }
+    const int c = git->second;
+    for (const auto& p : path) {
+      flat_node2id[p] = c;
+    }
+  }
+}
+
 void Color_synth::label(hhds::Graph* g) {
   last_free_id = 1;
   flat_node2id.clear();
   uf     = Int_union_find{};
   seeded = has_seeded_coloring(g);
+
+  if (mode == Mode::cones) {
+    label_cones(g);  // owns its own merge, renumber and apply_coloring
+    return;
+  }
 
   mark_ids(g);
   merge_ids();
@@ -168,6 +307,10 @@ void Color_synth::label(hhds::Graph* g) {
     }
   }
 
+  if (mode != Mode::pipe) {
+    preserve_arith_cuts();
+  }
+  keep_clock_gates_whole(g);
   int n_colors = apply_coloring(g, flat_node2id, o, o.sizes);
   if (opts.verbose) {
     std::print(stderr, "[color.synth] {} -> {} clusters\n", g->get_name(), n_colors);

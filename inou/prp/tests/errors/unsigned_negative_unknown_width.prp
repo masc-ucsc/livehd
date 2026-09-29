@@ -1,0 +1,14 @@
+/*
+:name: unsigned_negative_unknown_width
+:type: error
+:error: reinterpret needs a fully-typed input
+:help: give the operand a sized type
+*/
+
+// `unsigned(x)` keeps x's BITS and re-tags the sign. That is only defined
+// when the bit width is known: -1 is 0b111 at 3 bits but 0b11111 at 5, so a
+// negative value with no sized type cannot be reinterpreted at all.
+comb neg_literal(a:u3) -> (y:u8) {
+  const b = unsigned(-1)  // locate_error_here
+  y = b
+}

@@ -1,10 +1,19 @@
 /*
 :name: store_unknown_field
 :type: error
-:error: not part of the destination's shape
-:help: only re-binds existing fields
+:error: names unknown field .z.
 */
+
+// A whole-tuple assignment may only re-bind fields the destination already
+// has. `z` is not part of `Point`, so the store is a compile error.
+//
+// The diagnostic comes from the detuple front end, which owns the shape once a
+// named tuple type is split into per-field leaves. It used to come from
+// upass.typecheck here and ONLY here, because a type whose fields carry
+// DEFAULTS failed to split at all (2f-defaulted_tuple) -- the byte-equivalent
+// `type Point = (x:u8, y:u8)` already reported the message below. Now that
+// defaulted and plain types split alike, both spellings report identically.
 
 type Point = (x:u8 = nil, y:u8 = nil)
 mut t:Point = (x=1, y=2)
-t = (y=5, z=9)
+t = (y=5, z=9) // locate_error_here

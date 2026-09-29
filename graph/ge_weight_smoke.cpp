@@ -66,10 +66,12 @@ TEST(GeWeight, WidthIsTheWeightForBitwiseAndArith) {
   EXPECT_EQ(ge_weight(one_node("lgdb_ge_sext", "sext8", Ntype_op::Sext, 8).n), 8u);
 }
 
-// Get_mask/Set_mask are bit-select/insert: a gate per output bit, like the rest.
-TEST(GeWeight, MaskOpsWeighTheirWidth) {
-  EXPECT_EQ(ge_weight(one_node("lgdb_ge_gm", "gm12", Ntype_op::Get_mask, 12).n), 12u);
-  EXPECT_EQ(ge_weight(one_node("lgdb_ge_sm", "sm12", Ntype_op::Set_mask, 12).n), 12u);
+// Constant-mask selects/inserts are wiring aliases in the mapper. In
+// particular, charging a sparse Set_mask by its assembled bus width made wide
+// packed-state updates look like millions of gates.
+TEST(GeWeight, MaskOpsAreWiring) {
+  EXPECT_EQ(ge_weight(one_node("lgdb_ge_gm", "gm12", Ntype_op::Get_mask, 12).n), 0u);
+  EXPECT_EQ(ge_weight(one_node("lgdb_ge_sm", "sm12", Ntype_op::Set_mask, 12).n), 0u);
 }
 
 // A register costs a flop per bit -- the same shape as combinational logic, and
@@ -156,8 +158,8 @@ TEST(GeWeight, SubWeighsDeclaredPortBits) {
   auto pio = lib.create_io("parent");
   pio->add_input("a", 0);
   pio->add_output("z", 1);
-  auto pg   = pio->create_graph();
-  auto sub  = create_typed_node(*pg, Ntype_op::Sub);
+  auto pg  = pio->create_graph();
+  auto sub = create_typed_node(*pg, Ntype_op::Sub);
   sub.set_subnode(cio);
   pg->get_input_pin("a").connect_sink(sub.create_sink_pin(0));
 
@@ -253,8 +255,8 @@ TEST(GeWeight, ConstantsAndIoWeighNothing) {
   gio->add_output("y", 1);
   auto g = gio->create_graph();
 
-  auto k = create_typed_node(*g, Ntype_op::Nconst, 32);
-  EXPECT_EQ(ge_weight(k), 0u);
+  auto k = create_const(*g, *Dlop::create_integer(7)).get_master_node();
+  EXPECT_EQ(ge_weight(k), 0u) << "constants live on the builtin CONST_NODE";
 
   EXPECT_EQ(ge_weight(g->get_input_pin("a").get_master_node()), 0u) << "graph IO is a builtin node";
   EXPECT_EQ(ge_weight(hhds::Node_class{}), 0u) << "an invalid handle weighs nothing";

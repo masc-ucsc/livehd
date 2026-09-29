@@ -1,0 +1,7 @@
+/*
+:name: tuple_member_size
+:type: error
+:error: unknown field `size`
+*/
+const a = (const b=1, const c=2)
+cassert(a.size == 2)

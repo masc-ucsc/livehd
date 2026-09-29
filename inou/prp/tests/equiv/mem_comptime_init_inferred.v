@@ -6,18 +6,20 @@ module \mem_comptime_init_inferred.mcii (
   output     [3:0] z
 );
 
-  reg [3:0] data [0:3];
+  reg [3:0] t [0:3];
 
   initial begin
-    data[0] = 4'd1; data[1] = 4'd2; data[2] = 4'd3; data[3] = 4'd4;
+    t[0] = 4'd1; t[1] = 4'd2; t[2] = 4'd3; t[3] = 4'd4;
   end
 
+  // The per-entry reset values are restored in ONE cycle of reset, exactly
+  // like a scalar reg (the memory's whole-array reset).
   always @(posedge clock) begin
     if (reset) begin
-      data[0] <= 4'd1; data[1] <= 4'd2; data[2] <= 4'd3; data[3] <= 4'd4;
+      t[0] <= 4'd1; t[1] <= 4'd2; t[2] <= 4'd3; t[3] <= 4'd4;
     end
   end
 
-  assign z = data[{i, j}];
+  assign z = t[{i, j}];
 
 endmodule

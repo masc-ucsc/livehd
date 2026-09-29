@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "design_scan.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
@@ -34,7 +35,7 @@ TEST(DesignScan, OwnsPinsAndPreservesPortDeclarationRoots) {
     set_bits(first.create_driver_pin(0), 8);
     set_bits(second.create_driver_pin(0), 8);
     g->get_input_pin("a").connect_sink(first.create_sink_pin(0));
-    g->get_input_pin("b").connect_sink(first.create_sink_pin(0));
+    g->get_input_pin("b").connect_sink(first.create_sink_pin(1));
     first.create_driver_pin(0).connect_sink(g->get_output_pin("z"));
     first.create_driver_pin(0).connect_sink(second.create_sink_pin(0));
     second.create_driver_pin(0).connect_sink(g->get_output_pin("y"));
@@ -53,6 +54,75 @@ TEST(DesignScan, OwnsPinsAndPreservesPortDeclarationRoots) {
   std::ostringstream text;
   emit_design_cert(design, cert, text);
   EXPECT_NE(text.str().find("owned_designCert"), std::string::npos);
+}
+TEST(DesignScan, BankedSumPreservesEveryOperandIncludingDuplicates) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_banked_sum");
+  auto  io  = lib.create_io("banked_sum");
+  io->add_output("y", 1);
+  io->set_bits("y", 8);
+  auto g   = io->create_graph();
+  auto sum = create_typed_node(*g, Ntype_op::Sum);
+  set_bits(sum.create_driver_pin(0), 8);
+  // Non-dense, deliberately interleaved slots: 10 + 10 + 30 - 7 - 2 = 41.
+  // Both tens share a constant-pool pin but must remain two dependencies.
+  for (const auto& [port, value] : std::vector<std::pair<int, int>>{
+           {4, 30},
+           {3,  2},
+           {0, 10},
+           {7,  7},
+           {2, 10}
+  }) {
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(value)).connect_sink(sum.create_sink_pin(port));
+  }
+  sum.create_driver_pin(0).connect_sink(g->get_output_pin("y"));
+  const auto design = scan_design(*g, {});
+  const auto cert   = build_certificate(design, {});
+  ASSERT_EQ(cert.nodes.size(), 1);
+  const auto& n = cert.nodes[0];
+  EXPECT_EQ(n.op.kind, Operation::Sum);
+  ASSERT_EQ(n.op.parameter, 3);
+  ASSERT_EQ(n.deps.size(), 5);
+  int result = 0;
+  for (size_t i = 0; i < n.deps.size(); ++i) {
+    const auto it
+        = std::find_if(cert.sources.begin(), cert.sources.end(), [&](const Source& source) { return source.id == n.deps[i]; });
+    ASSERT_NE(it, cert.sources.end());
+    result += (i < n.op.parameter ? 1 : -1) * std::stoi(it->const_int);
+  }
+  EXPECT_EQ(result, 41);
+  if (const char* path = std::getenv("LEAN_BANKED_SUM_FIXTURE")) {
+    std::ofstream out(path);
+    emit_design_cert(design, cert, out);
+    out << R"(
+example : bv_uint ((banked_sum_step #[] ⟨#[], #[]⟩).outputs[0]!) = 41 := by native_decide
+)";
+    ASSERT_TRUE(out.good());
+  }
+}
+TEST(DesignScan, ConstantPoolPreservesUnsizedValuesAndSignedWidths) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_const_pool");
+  auto  io  = lib.create_io("constant_pool");
+  io->add_output("positive", 1);
+  io->set_bits("positive", 32);
+  io->add_output("negative", 2);
+  io->set_bits("negative", 8);
+  auto g = io->create_graph();
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(0x6000000)).connect_sink(g->get_output_pin("positive"));
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(-64)).connect_sink(g->get_output_pin("negative"));
+  const auto design = scan_design(*g, {});
+  ASSERT_EQ(design.outputs.size(), 2);
+  ASSERT_TRUE(design.outputs[0].driver.has_value());
+  ASSERT_TRUE(design.outputs[1].driver.has_value());
+  EXPECT_EQ(design.outputs[0].driver->value, "-64");
+  EXPECT_EQ(design.outputs[0].driver->intrinsic_width, 7);
+  EXPECT_EQ(design.outputs[1].driver->value, "100663296");
+  EXPECT_EQ(design.outputs[1].driver->intrinsic_width, 27);
+  const auto cert = build_certificate(design, {});
+  ASSERT_EQ(cert.sources.size(), 2);
+  EXPECT_EQ(cert.sources[0].const_int, "-64");
+  EXPECT_EQ(cert.sources[0].width, 8);
+  EXPECT_EQ(cert.sources[1].const_int, "100663296");
+  EXPECT_EQ(cert.sources[1].width, 32);
 }
 TEST(DesignScan, SynchronousRomRetainsContentsAndEnable) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_rom");
@@ -74,7 +144,7 @@ TEST(DesignScan, SynchronousRomRetainsContentsAndEnable) {
   policy("size", 3);
   policy("type", 1);
   policy("rdport", 1);
-  policy("init", 0x030201);
+  policy("initial", 0x030201);
   g->get_input_pin("address").connect_sink(memory.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, "addr")));
   g->get_input_pin("enable").connect_sink(memory.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, "enable")));
   memory.create_driver_pin(0).connect_sink(g->get_output_pin("data"));

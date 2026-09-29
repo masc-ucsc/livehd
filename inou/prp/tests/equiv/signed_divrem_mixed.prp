@@ -1,0 +1,12 @@
+/*
+:name: signed_divrem_mixed
+:type: equiv
+:pyrope_top: foo
+:verilog_top: signed_divrem_mixed.foo
+*/
+comb foo(a:s5, b:u3, c:u5, d:s3) -> (q:s6, r:s5, qr:s7, rr:s6) {
+  q = a / b
+  r = a % b
+  qr = c / d
+  rr = c % d
+}

@@ -3,7 +3,7 @@
 #
 # unset-unused-field must track detupled wire-bundle leaves by their explicit
 # reads/writes, not by comptime side effects: a `wire io:(…)` field is read and
-# written through plain dotted refs (uPass_detuple removes every tuple_get),
+# written through plain dotted refs (the streaming detupler removes every tuple_get),
 # and past 62 bits the bitwidth pass's derived range bails out — so a u64
 # field that IS driven and consumed used to false-positive, while a field
 # never touched at all (no bundle entry materializes) was never reported.

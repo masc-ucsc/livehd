@@ -1,0 +1,38 @@
+/*
+:name: loop_mixed_carry
+:type: simulation
+*/
+// One source loop contains both a recurrence and independent per-lane writes.
+// Simulation must retain one ordinal loop for the two kinds of work.
+mod loop_mixed_carry(x:u4) -> (sum:u16@[0], lane:u4@[0]) {
+  mut recurrence:u16 = 1
+  mut independent:u4 = 0
+  for i in 0..<4 {
+    independent#[i] = x#[i]
+    recurrence = recurrence * 3 + x#[i]
+  }
+  sum = recurrence
+  lane = independent
+}
+
+test loop_mixed_carry.mixed {
+  mut dut = loop_mixed_carry
+  tick 3 {
+    if clock == 0 {
+      dut.x = 0
+    } elif clock == 1 {
+      dut.x = 5
+    } else {
+      dut.x = 15
+    }
+    step
+    assert(dut.lane == dut.x, "independent lane writes")
+    if clock == 0 {
+      assert(dut.sum == 81, "zero recurrence")
+    } elif clock == 1 {
+      assert(dut.sum == 111, "mixed recurrence")
+    } else {
+      assert(dut.sum == 121, "full recurrence")
+    }
+  }
+}

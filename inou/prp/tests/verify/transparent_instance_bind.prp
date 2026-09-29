@@ -1,0 +1,30 @@
+/*
+:name: transparent_instance_bind
+:type: verify
+:top_module: top
+:verify_proven: 0
+:verify_refuted: 1
+*/
+// A formal block bound to a module whose ONLY instance is transparent
+// (`__flat___*`, a name the logical hierarchy drops) must still bind to that
+// instance's ports. Its logical path is empty -- the same "" the verify driver
+// uses for the verified top itself -- so binding by logical name read the TOP's
+// `q` (= lane.q + 1, never equal to acc) and reported the false assertion below
+// as PROVEN. Bound by the physical occurrence path, `x.q` is the lane's own
+// port, which always equals `acc`: REFUTED at cycle 2, reported as
+// [lane.qacc@__flat___a].
+pub mod lane(d0:u8) -> (q:u8@[1]) {
+  reg acc:u8 = 0
+  q = acc
+  acc = d0
+}
+
+pub mod top(d0:u8) -> (q:u8@[1]) {
+  const __flat___a = lane(d0 = d0 ^ 0x55)
+  wrap q = __flat___a + 1
+}
+
+formal lane.qacc {
+  mut x = lane
+  assert(x.q != x.acc, "lane q never tracks acc")  // REFUTED: q is acc inside lane
+}

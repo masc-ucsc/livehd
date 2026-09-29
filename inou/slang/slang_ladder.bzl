@@ -11,20 +11,26 @@ SLANG_LADDER = {
     "add": "lec",
     "add1": "lec",  # mixed signed+unsigned add (signed->unsigned widening = zero-extend, not sign-extend)
     "add2": "lec",
-    "aldff": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
+    "aldff": "lec",
     "arith": "lec",
-    "arraycells": "error",  # instance arrays / paramod shapes not lowered yet
+    # PROMOTED: `aoi12 p [31:0] (a, b, c, y)` — slang expands an arrayed
+    # instantiation into one nameless element per index inside an InstanceArray
+    # scope, each with its own already-sliced (or broadcast) port connections,
+    # so collect() walks into that scope and every element lowers as an
+    # ordinary instance.
+    "arraycells": "lec",
     "assigns": "lec",
     "async_localdecl": "lec",  # async-reset always_ff w/ a block-local temp before the if/else
     "common_sub": "lec",
     "compare": "lec",
     "compare2": "lec",
     "consts": "lec",
-    "cprop": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
+    "cprop": "lec",
     "cse_basic": "lec",
     "dce1": "lec",
     "dce2": "lec",
-    "dce3": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
+    "dce3": "lec",
+    "empty_task": "lec",  # structural no-op task used by synthesis assertion macros
     "expression_00002": "lec",
     "fflop": "lec",
     "fixme_array": "lec",
@@ -45,15 +51,25 @@ SLANG_LADDER = {
     "latch_sr": "lec",
     "fixme_nocheck_implicit_en": "lnast",  # byte-enable mem write (mem[a][chunk]<=…) now lowers (wensize); tolg comb-loops on the en?d:self self-read idiom
     "fixme_noloop": "lec",
-    "fixme_paramods": "error",  # instance arrays / paramod shapes not lowered yet
+    # PROMOTED error -> verilog (2026-09-21): the paramod shapes DO lower now, so the
+    # `error` tier failed the acceptance gate ("expected a clean compile error, got exit 0").
+    # It is capped at `verilog`, not `lec`, because `lhd lec` reads the ORIGINAL .v with
+    # slang too, and slang rejects this file's `pm_test3` defparam block:
+    #   "module member '' (kind DefParam) is not supported by --reader slang".
+    # Promote to `lec` once slang lowers DefParam.
+    "fixme_paramods": "verilog",
     "fixme_sha256": "verilog",  # compiles to verilog (1-bit-cond + bool-net fixes); LEC gap on the wide reduction
     "fn_ret_bool": "lec",  # logic-returning fn whose body returns a bool, then compared to a literal
     "fixme_with_tuples": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
     "flop": "lec",
     "gates": "lec",
     "graphtest": "lec",
-    "grid_hier_test": "error",  # instance arrays / paramod shapes not lowered yet
+    # PROMOTED with arraycells: a 33-wide instance array whose 1-bit port
+    # connections are all BROADCAST (`lg[32:0](.x(testi[5]), .y(testo[0]))`).
+    "grid_hier_test": "lec",
     "hierarchy": "lec",
+    "generate_reverse_tree": "lec",  # array dependencies, root-first generated tree
+    "hier_generate_slice": "lec",  # packed writes through sibling generate scopes
     "inc_after_nb": "lec",  # x++ is blocking even after a nonblocking <= in the same process
     "issue_047": "lec",  # narrow signed port range: signed[1:0] is {-2..1}, signed[0:0] is {-1,0}
     "issue_057": "lec",
@@ -65,34 +81,51 @@ SLANG_LADDER = {
     "long_kogg_stone_64": "lec",
     "long_mem": "verilog",  # LEC-capable but memory LEC is slow on big arrays; small-array coverage rides simple_rf1/rf2/tuplish
     "long_mem3": "verilog",  # capped: slow memory LEC (see long_mem)
-    "long_nocheck_iwls_square": "verilog",  # compiles; LEC gap tracked
+    "long_nocheck_iwls_square": "lec",  # attempt LEC; explicit timeout is accepted, equivalence remains unproven
     "long_regfile1r1w": "lec",  # `output reg` port: procedural <= is a legal NBA-to-variable
     "long_regfile2r1w": "lec",  # ports are `output reg` (variables), so the procedural <= is a legal NBA-to-variable (unlike long_regfile1r1w's net `output`)
-    "long_shared_ports": "error",  # nested dynamic lvalue (mem element part-select)
+    # PROMOTED (was "error", "nested dynamic lvalue (mem element part-select)"):
+    # a constant `mem[addr][hi:lo] <= …` the chunk model cannot express is now a
+    # read-modify-write of the addressed word, and a whole-word write port on a
+    # wensize>1 memory replicates its enable across every chunk instead of
+    # writing only chunk 0.
+    "long_shared_ports": "lec",
     "loop_in_lg": "lec",
     "loop_in_lg2": "lec",
-    "mem_reset": "error",  # non-LRM: undeclared identifiers (yosys-only laxness)
+    "mem_reset": "lec",
     "mem_sync_init": "verilog",  # initial-block ROM contents lower correctly in LNAST (init tuple) but the read-only `mut` array zero-fills in tolg instead of becoming a Memory with INIT
     "mismatch": "lec",
     "mt_basic_test": "lec",
-    "multiassign": "lec",
+    "multiassign": "lec",  # ordinary concurrent slice assigns are resolved together; only generated-loop cross-iteration drivers are refused
     "mux": "lec",
     "nshift": "lec",  # Verilog shift count is unsigned; negative-constant count masks to unsigned (no nil/error)
+    # Per-BIT dependency tracking through an unpacked array of packed wires: a
+    # word-granular reader sees each generate level depend on itself and reports
+    # a false combinational loop (a hard error, not a wrong answer).
+    "packed_wire_tree": "lec",
     "mux2": "lec",
     # async-reset-as-sync demotion soundness gates (each is a confirmed silent
     # miscompile the reader must instead hard-error; see slang_structure.cpp
     # demote_reset_edges). The clean async_reset_enable / async_negreset_compound
     # demotions are the positive coverage (inou/prp equiv_slang pairs).
-    "nocheck_async_reset_clock_demote": "error",  # gate 3: reset-named CLOCK not read in body → refuse
+    "nocheck_async_reset_clock_demote": "lec",  # nonconstant async load keeps the actual clock
     "nocheck_async_reset_peel": "error",  # gate 1: no demote after a rung already peeled
     "nocheck_async_reset_unreadable": "error",  # gate 2: demoted reset must be readable
     "nocheck_blackboxing2": "error",  # fail-unknown-module
-    "nocheck_chunk_FetchTargetQueue": "error",  # fail-unsupported-system-task
+    "nocheck_chunk_FetchTargetQueue": "verilog",  # printing tasks ignored; large sequential LEC remains unverified
     "nocheck_cpp_api": "error",  # fail-unknown-module
     "nocheck_gcd_large": "error",  # duplicate definition; slang rejects per 1800
     "nocheck_join_fadd": "error",  # non-LRM: procedural write to a net (yosys-only laxness); slang rejects per 1800
     "nocheck_slang_foreach": "verilog",  # foreach lowers to an async-read memory; memory LEC inconclusive
+    # A constant-bound `for` inside a `function automatic` called from a
+    # continuous assign / net initializer: those never enter lower_process, so
+    # the unroll budget armed only there was still 0 and the first tick failed.
+    "nocheck_slang_func_loop": "lec",
     "nocheck_slang_loops": "lec",
+    # A var whose bits are split between a continuous `assign` and an edge
+    # process (`assign stages[0] = in;` + `always_ff stages[i] <= stages[i-1]`).
+    # Lowering it as one register silently registered the continuous bits.
+    "nocheck_slang_partial_reg": "lec",
     "not_vslogicnot": "lec",
     "null_port": "lec",
     "offset": "lec",
@@ -101,8 +134,8 @@ SLANG_LADDER = {
     "params": "lec",
     "params_submodule": "lec",
     "pick": "lec",
-    "punch": "error",  # non-LRM: undeclared identifiers (yosys-only laxness)
-    "punch.gld": "error",  # illegal identifier in the auto-generated golden (unescaped dot)
+    "punch": "lec",
+    "punch.gld": "lec",
     "punching": "lec",
     "punching_3": "lec",
     "random_delay": "lec",

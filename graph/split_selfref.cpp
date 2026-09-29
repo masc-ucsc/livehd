@@ -2,52 +2,34 @@
 
 #include "split_selfref.hpp"
 
+#include <pthread.h>
+
 #include <algorithm>
 #include <cstdlib>
+#include <exception>
+#include <functional>  // std::greater<> (comb_emit_order's stable min-heap)
 #include <print>
+#include <queue>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cell.hpp"       // Ntype / Ntype_op
-#include "diag.hpp"       // livehd::diag::warn (non-silent cap diagnostic)
+#include "diag.hpp"       // livehd::diag::warn / err (cap diagnostic, retired-entry trip-wire)
 #include "node_util.hpp"  // livehd::graph_util::* helpers
 
 namespace livehd::graph_util {
 
-namespace {
-// Debug-print helper (mirrors the cgen_sim local; only used by split[dbg] lines).
-const char* op_name(Ntype_op op) {
-  switch (op) {
-    case Ntype_op::Sum: return "Sum";
-    case Ntype_op::Mult: return "Mult";
-    case Ntype_op::Div: return "Div";
-    case Ntype_op::And: return "And";
-    case Ntype_op::Or: return "Or";
-    case Ntype_op::Xor: return "Xor";
-    case Ntype_op::Not: return "Not";
-    case Ntype_op::LT: return "LT";
-    case Ntype_op::GT: return "GT";
-    case Ntype_op::EQ: return "EQ";
-    case Ntype_op::SHL: return "SHL";
-    case Ntype_op::SRA: return "SRA";
-    case Ntype_op::Mux: return "Mux";
-    case Ntype_op::Hotmux: return "Hotmux";
-    case Ntype_op::Get_mask: return "Get_mask";
-    case Ntype_op::Set_mask: return "Set_mask";
-    case Ntype_op::Sext: return "Sext";
-    case Ntype_op::Nconst: return "Nconst";
-    default: return "op?";
-  }
-}
-}  // namespace
-
 // Break a FALSE word-level combinational loop through a PACKED wire. A single net
 // `W` driven by an `Or` (a bit-field pack) whose operands occupy DISJOINT constant
 // bit ranges is really a concat: a constant Get_mask slice of `W` reads only ONE
-// operand. inou.cgen.sim schedules `W` as one atomic object, so a slice-read of
+// operand. A `Concat` cell is that same pack spelled EXPLICITLY -- its lanes are
+// disjoint by construction, so the footprint/disjointness proof the Or spelling
+// needs is replaced by a direct lane lookup (see the Concat arms below).
+// inou.cgen.sim schedules `W` as one atomic object, so a slice-read of
 // `W` that (through parent logic) drives a DIFFERENT slice of that same `W` looks
 // like a cycle even though the bit-level DAG is acyclic -- e.g.
 //   hi = io#[2..=3];  low = hi & 3;  io = low | (a << 2);  z = io#[0..=1]
@@ -62,93 +44,59 @@ const char* op_name(Ntype_op op) {
 // graph, before emission. Returns #rewired reads.
 // One dissolve pass. Rewrites are DEFERRED to the end, so a reader cannot see
 // another reader's rewrite until the next pass -- the wrapper below iterates.
-// `unresolved_out`/`cap_out` report on-cycle reads this pass could not dissolve
-// (and whether the node budget was the cause) for the wrapper's final diagnostic.
-static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out) {
+// Why a slice descent gave up. These used to be one bool named `cap_hit`, and
+// the warning it fed said "node-creation budget exhausted" for every one of
+// them — which is how an investigation came to raise a budget that, measured,
+// changed nothing at all on the design that triggered the message. Naming the
+// real limit is the difference between "give it more nodes" (budget), "the
+// expression nests deeper than the walker goes" (depth) and "this operand shape
+// is not one the pass can descend into" (shape).
+enum Stop_reason : unsigned {
+  kStopBudget = 1u,  // per-reader or global node-creation allowance
+  kStopDepth  = 2u,  // deeper than the `max_depth` recursion guard
+  kStopShape  = 4u,  // invalid pin or a degenerate slice range
+};
+
+// The recursion guard is a STACK budget, so the numbers below have to be read
+// together -- keeping them apart is how a guard comes to be sized for a stack
+// the pass does not actually run on.
+//
+// MEASURED on XiangShan `Rob`: the walk crashed at depth 1024 on an
+// 8 MB stack, i.e. ~8 KB per frame for this 470-line lambda.
+inline constexpr size_t kSplitFrameBytes  = 8u * 1024;
+// The stack the ESCALATED local wire walk gets. Reserved
+// address space only: pages commit as deep as the walk actually goes.
+inline constexpr size_t kSplitStackBytes  = 512UL * 1024 * 1024;
+// Depth guard for the escalated walk, backstopping a runaway well inside the
+// stack above.
+inline constexpr int    kSplitWorkerDepth = 16384;
+// Depth guard when the walk runs on the CALLER's stack. Keep the inline attempt
+// conservative; deep packed structures escalate to the private stack above.
+inline constexpr int    kSplitInlineDepth = 64;
+static_assert(static_cast<size_t>(kSplitWorkerDepth) * kSplitFrameBytes <= kSplitStackBytes,
+              "the escalated depth guard must fit inside the escalated stack");
+static_assert(kSplitInlineDepth < kSplitWorkerDepth, "the inline guard is the conservative one");
+
+// `unresolved_out` reports the on-cycle reads this pass could not dissolve;
+// `stop_reasons_out` is the OR of the `kStop*` bits saying which limit stopped
+// them, for the wrapper's final diagnostic. `max_depth` is the recursion guard,
+// a property of the STACK THIS CALL RUNS ON -- see the constants above.
+static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& stop_reasons_out, int max_depth,
+                              const absl::flat_hash_set<hhds::Node_class>* scoped_cycle) {
   namespace gu = livehd::graph_util;
 
-  unresolved_out = 0;
-  cap_out        = false;
+  unresolved_out   = 0;
+  stop_reasons_out = 0;
 
-  auto is_comb = [](const hhds::Node_class& n) {
-    auto op = gu::type_op_of(n);
-    return !(op == Ntype_op::IO || op == Ntype_op::Nconst || op == Ntype_op::Sub || op == Ntype_op::Memory
-             || gu::is_type_register(n));
-  };
-
-  // --- gate: which comb nodes sit on a word-level cycle (Kahn peel of sources) ---
-  std::vector<hhds::Node_class>                                       comb_nodes;
-  absl::flat_hash_map<hhds::Node_class, int>                          indeg;
-  absl::flat_hash_map<hhds::Node_class, std::vector<hhds::Node_class>> succ;
-  for (auto n : g->fast_class()) {
-    if (is_comb(n)) {
-      comb_nodes.push_back(n);
-      indeg.try_emplace(n, 0);
-    }
-  }
-  for (auto& n : comb_nodes) {
-    for (auto e : n.inp_edges()) {
-      auto d = e.driver;
-      if (d.is_invalid() || gu::is_const_pin(d)) {
-        continue;
-      }
-      auto m = d.get_master_node();
-      if (!is_comb(m) || !indeg.contains(m)) {
-        // state element / Sub / IO / const -> not a comb edge. The contains()
-        // guard also drops BOUNDARY masters fast_class never enumerates (a
-        // graph-input pin's master reports a non-IO "invalid" type): counting
-        // those left every input-fed node at indeg>0, so the peel removed
-        // NOTHING and the whole module looked on-cycle.
-        continue;
-      }
-      ++indeg[n];
-      succ[m].push_back(n);
-    }
-  }
-  std::vector<hhds::Node_class> q;
-  for (auto& [n, d] : indeg) {
-    if (d == 0) {
-      q.push_back(n);
-    }
-  }
-  if (std::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr) {
-    std::print("split[dbg]: peel seeds={} of {}\n", q.size(), indeg.size());
-    int shown = 0;
-    for (auto& [n, d] : indeg) {
-      if (shown++ >= 200) {
-        break;
-      }
-      std::string drvs;
-      for (auto e : n.inp_edges()) {
-        drvs += e.driver.is_invalid()             ? " inv"
-                : gu::is_const_pin(e.driver)      ? " const"
-                : !is_comb(e.driver.get_master_node()) ? " noncomb"
-                                                       : (" " + std::string(gu::debug_name(e.driver.get_master_node())));
-      }
-      std::print("split[dbg]:   indeg {} = {} <-{}\n", gu::debug_name(n), d, drvs);
-    }
-  }
-  absl::flat_hash_set<hhds::Node_class> removed;
-  while (!q.empty()) {
-    auto n = q.back();
-    q.pop_back();
-    removed.insert(n);
-    auto it = succ.find(n);
-    if (it == succ.end()) {
-      continue;
-    }
-    for (auto& s : it->second) {
-      if (--indeg[s] == 0) {
-        q.push_back(s);
-      }
-    }
-  }
-  absl::flat_hash_set<hhds::Node_class> in_cycle;
-  for (auto& n : comb_nodes) {
-    if (!removed.contains(n)) {
-      in_cycle.insert(n);
-    }
-  }
+  I(scoped_cycle != nullptr);
+  // A REFERENCE, not a copy: this set is read-only here, it can hold every comb
+  // node of a large module, and the body's fixpoint re-enters this function
+  // once per round.
+  const auto&                   in_cycle = *scoped_cycle;
+  std::vector<hhds::Node_class> comb_nodes(in_cycle.begin(), in_cycle.end());
+  std::sort(comb_nodes.begin(), comb_nodes.end(), [](const auto& a, const auto& b) {
+    return a.get_debug_nid() < b.get_debug_nid();
+  });
   if (std::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr) {
     std::print("split[dbg]: {} comb node(s), {} on a word-level cycle\n", comb_nodes.size(), in_cycle.size());
     for (auto& n : in_cycle) {
@@ -160,9 +108,9 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
   }
 
   auto drv_at = [](const hhds::Node_class& n, uint32_t pid) -> hhds::Pin_class {
-    for (auto e : n.inp_edges()) {
-      if (static_cast<uint32_t>(e.sink.get_port_id()) == pid) {
-        return e.driver;
+    for (auto sink : n.inp_sorted_pins()) {
+      if (static_cast<uint32_t>(sink.get_port_id()) == pid) {
+        return sink.get_driver_pin();
       }
     }
     return {};
@@ -176,15 +124,15 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
     if (depth > 8 || p.is_invalid()) {
       return kBail;
     }
-    if (gu::is_const_pin(p)) {
-      auto c = gu::hydrate_const(p);
+    if (p.is_const()) {
+      const auto& c = gu::const_of(p);
       if (c.is_negative()) {
         return kBail;
       }
       if (c.has_unknowns()) {
         // a '?'-const (the slang->prp X-seed idiom) still occupies FIXED bit
         // positions: its declared width is a sound upper bound
-        return {0, static_cast<int>(c.get_bits())};
+        return {0, static_cast<int>(c.get_signed_bits())};
       }
       int lo = c.get_first_bit_set();
       int hi = c.get_last_bit_set();
@@ -197,10 +145,10 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
     auto op = gu::type_op_of(m);
     if (op == Ntype_op::SHL) {
       auto kd = drv_at(m, 1);
-      if (kd.is_invalid() || !gu::is_const_pin(kd)) {
+      if (kd.is_invalid() || !kd.is_const()) {
         return kBail;
       }
-      auto kc = gu::hydrate_const(kd);
+      const auto& kc = gu::const_of(kd);
       if (kc.has_unknowns() || kc.is_negative() || !kc.is_just_i64()) {
         return kBail;
       }
@@ -214,17 +162,28 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       }
       return {fx.first + k, fx.second + k};
     }
+    if (op == Ntype_op::Concat) {
+      // A Concat is always NON-NEGATIVE and strictly below 2^sum(lane widths),
+      // so the lane table alone gives the bound -- no recursion into the lanes
+      // (each is masked into its own window, so a wide or negative lane cannot
+      // spill above the total). Asking the generic arm below instead would tie
+      // this to the driver's stamped bits/sign and bail on an O0 graph that has
+      // not run bitwidth yet.
+      const int total = static_cast<int>(gu::concat_total_width(m));
+      return total > 0 ? std::pair<int, int>{0, total} : kBail;
+    }
     if (op == Ntype_op::And) {
       // And with a NON-NEGATIVE constant bounds the result to the constant's
       // set-bit range regardless of the other operands' signs (bitwise and
       // clears everything above the mask's top set bit) -- covers the `x & 1`
       // valid-bit clamps the slang->prp regeneration emits.
       std::pair<int, int> best = kBail;
-      for (auto e : m.inp_edges()) {
-        if (!gu::is_const_pin(e.driver)) {
+      for (auto sink : m.inp_sorted_pins()) {
+        auto drv = sink.get_driver_pin();
+        if (!drv.is_const()) {
           continue;
         }
-        auto c = gu::hydrate_const(e.driver);
+        const auto& c = gu::const_of(drv);
         if (c.has_unknowns() || c.is_negative()) {
           continue;
         }
@@ -245,13 +204,15 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
     if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
       // the result is always one of the DATA operands (port 0 is the
       // selector; an out-of-range selector yields 0) -> union of their bounds
+      const auto          control_end = op == Ntype_op::Hotmux ? gu::hotmux_control_end(m) : 0;
       std::pair<int, int> u{0, 0};
       bool                any = false;
-      for (auto e : m.inp_edges()) {
-        if (static_cast<uint32_t>(e.sink.get_port_id()) == 0) {
+      for (auto sink : m.inp_sorted_pins()) {
+        if ((op == Ntype_op::Mux && sink.get_port_id() == 0)
+            || (op == Ntype_op::Hotmux && gu::is_hotmux_control(sink.get_port_id(), control_end))) {
           continue;  // selector
         }
-        auto f = self(self, e.driver, depth + 1);
+        auto f = self(self, sink.get_driver_pin(), depth + 1);
         if (f.first < 0) {
           return kBail;
         }
@@ -265,21 +226,22 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
     if (op == Ntype_op::Get_mask) {
       auto md = drv_at(m, 2);
       if (!md.is_invalid()) {
-        if (!gu::is_const_pin(md)) {
+        if (!md.is_const()) {
           return kBail;
         }
-        auto mc = gu::hydrate_const(md);
+        const auto& mc = gu::const_of(md);
         if (mc.has_unknowns()) {
           return kBail;
         }
         // mask == -1 is the "to-unsigned" idiom: the RESULT is the non-negative
         // low sig bits of the output pin (fall through to the unsigned bound).
-        if (!(mc.is_just_i64() && mc.to_just_i64() == -1)) {
-          auto [a, b] = mc.get_mask_range();
-          if (a < 0 || b < 0 || b > (1 << 28)) {
-            return kBail;  // noncontiguous / open / negative mask
+        if (!gu::is_whole_value_mask(mc)) {
+          auto window = gu::mask_window_of(mc);
+          if (!window || window->second > (1 << 28)) {
+            return kBail;
           }
-          int w = b - a;
+          const auto [a, b] = *window;
+          int        w      = b - a;
           if (w <= 1) {
             // The EMITTED single-bit Get_mask clamps to a 0/1 magnitude
             // (node_expr appends .zext_to<1>() for a popcount-1 mask), so at
@@ -294,14 +256,13 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       // unary width-adjust (zext) OR to-unsigned: result is the non-negative low
       // sig bits of THIS node's (unsigned) output pin.
       int b = gu::bits_of(p);
-      return b > 1 ? std::pair<int, int>{0, b - 1} : (b == 1 ? std::pair<int, int>{0, 1} : kBail);
+      return b > 0 ? std::pair<int, int>{0, b} : kBail;
     }
-    // generic value: an over-approximation is sound only when UNSIGNED (its top
-    // sign bit is always 0, so the significant width is bits-1; a 1-bit
-    // unsigned pin is {0,1}).
+    // generic value: an over-approximation is sound only when UNSIGNED; its
+    // literal width bounds every possibly-set bit.
     int b = gu::bits_of(p);
     if (gu::is_unsign(p)) {
-      return b > 1 ? std::pair<int, int>{0, b - 1} : std::pair<int, int>{0, 1};
+      return b > 0 ? std::pair<int, int>{0, b} : kBail;
     }
     return kBail;
   };
@@ -321,11 +282,14 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
   //  * Get_mask const [a,b) extraction -> descend at positions [a+lo, a+hi)
   //  * to-unsigned / unary-zext Get_mask -> position-preserving descent
   //  * Sum with no subtrahend and pairwise-DISJOINT operand footprints == Or
+  //  * a real Sum slice [lo,hi) -> add the independently resolved LOW hi bits,
+  //    then slice the result (low result bits never depend on higher inputs)
   //  * Or operands with footprints outside the requested slice -> exact zero
   //  * EQ control bit -> rebuild only from complete bounded operands
-  auto mask_const = [&](int lo, int hi) -> hhds::Pin_class {
-    return livehd::graph_util::create_const(*g, *Dlop::get_mask_value(hi - 1, lo));
-  };
+  //  * Concat -> re-based descent into the lane(s) the slice lands in (the
+  //    disjointness the Or spelling must PROVE is a cell invariant here)
+  auto mask_const
+      = [&](int lo, int hi) -> hhds::Pin_class { return livehd::graph_util::create_const(*g, gu::mask_window_const(lo, hi)); };
   // Node-creation budget, split into a PER-READER cap (reset at the reader-loop
   // head below) and a GLOBAL ceiling proportional to the design. The old code
   // had ONE global counter that was never reset: a big def's early readers burnt
@@ -335,13 +299,21 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
   // library). Per-reader budgeting makes each read pay only for its own subtree;
   // the global ceiling is the real anti-blowup net and is loose because distinct
   // sub-slices are memoized and shared across readers.
+  //
+  // MEASURED: raising this does NOT help the design that motivated asking. XiangShan `Rob` leaves 914 on-cycle reads
+  // undissolved with the node budget reported as exhausted; growing the
+  // allowance 8x ran three extra fixpoint rounds, rewired exactly the same
+  // 315,791 reads, and cost +5.5% wall and 10.4 GB peak RSS for nothing. The
+  // hint that says "raise the split budget" was believed because `cap_hit`
+  // conflated every refusal into one bit -- see `Stop_reason` below, which now
+  // says which of the three actually fired.
   constexpr int per_reader_cap = 16384;
   const int     global_cap     = 16384 + 8 * static_cast<int>(comb_nodes.size());
   int           created        = 0;  // per-reader (reset at each reader below)
   int           total_created  = 0;  // global (never reset)
   // LIVEHD_SIM_SPLIT_DEBUG=1 traces every reader attempt + the deepest resolve
   // refusal (op, slice) -- the fast way to see WHY a pack did not split.
-  const bool split_dbg = std::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr;
+  const bool    split_dbg      = std::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr;
   absl::flat_hash_map<std::tuple<hhds::Class_index, int, int>, hhds::Pin_class> memo;
   // A (pin,slice) already on the RESOLUTION STACK means this slice depends on
   // itself -- a GENUINE bit-level cycle: fail it permanently. That makes the
@@ -349,29 +321,56 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
   // and a failure caused ONLY by the caps must NOT be memoized -- an earlier
   // capped frame would otherwise poison every later resolution through that
   // slice (the BlockCipherModule 21-bit sbox hit exactly this).
-  absl::flat_hash_set<std::tuple<hhds::Class_index, int, int>> on_stack;
-  bool cap_hit = false;
+  absl::flat_hash_set<std::tuple<hhds::Class_index, int, int>>                  on_stack;
+  // The recursion guard arrives as `max_depth`. `on_stack` above already catches
+  // a genuine bit-level self-dependency EXACTLY, so this is purely a
+  // stack-exhaustion net and never a semantic limit — which means the right
+  // value is "as deep as the stack THIS CALL runs on safely allows", and that is
+  // the caller's to decide (kSplitInlineDepth on its own stack,
+  // kSplitWorkerDepth on the escalated one), not a constant here.
+  //
+  // MEASURED on XiangShan `Rob`: at 64 this was the ONLY limit that
+  // fired (the node budget took the blame for years because both set the same
+  // flag; raising the budget 8x dissolved zero reads). 256 changed nothing —
+  // the failing descents go far deeper — and 1024 died with a stack overflow on
+  // an 8 MB stack. Making `resolve` ITERATIVE would remove the guard entirely
+  // and is still the eventual answer.
+  bool                                                                          cap_hit      = false;
+  // WHICH limit stopped a descent, not merely THAT one did. These were a single
+  // bool, and the resulting diagnostic blamed the node budget for every one of
+  // the six refusal conditions -- which sent an investigation into raising a
+  // budget that turned out to change nothing (see the comment on per_reader_cap
+  // above). Depth and an unhandled operand shape are entirely different problems
+  // with different fixes.
+  unsigned                                                                      stop_reasons = 0;
   auto resolve = [&](auto&& self, const hhds::Pin_class& v, int lo, int hi, int depth) -> hhds::Pin_class {
-    if (depth > 64 || v.is_invalid() || lo < 0 || hi <= lo || created > per_reader_cap || total_created > global_cap) {
+    const bool over_budget = created > per_reader_cap || total_created > global_cap;
+    const bool too_deep    = depth > max_depth;
+    const bool bad_shape   = v.is_invalid() || lo < 0 || hi <= lo;
+    if (too_deep || bad_shape || over_budget) {
       if (split_dbg) {
-        std::print("split[dbg]: refuse depth={} lo={} hi={} created={} total={} invalid={}\n", depth, lo, hi, created,
-                   total_created, v.is_invalid());
+        std::print("split[dbg]: refuse depth={} lo={} hi={} created={} total={} invalid={}\n",
+                   depth,
+                   lo,
+                   hi,
+                   created,
+                   total_created,
+                   v.is_invalid());
       }
-      cap_hit = true;
+      stop_reasons |= (over_budget ? kStopBudget : 0u) | (too_deep ? kStopDepth : 0u) | (bad_shape ? kStopShape : 0u);
+      cap_hit       = true;
       return {};
     }
     const int w          = hi - lo;
     auto      slice_node = [&](const hhds::Pin_class& val) -> hhds::Pin_class {
-      auto n = gu::create_typed_node(*g, Ntype_op::Get_mask);
+      auto n = gu::create_get_mask(*g, val, lo, hi);
       ++created;
       ++total_created;
-      val.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
-      mask_const(lo, hi).connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(2)));
       auto dp = n.create_driver_pin(0);
-      gu::set_bits(dp, w + 1);
+      gu::set_ubits(dp, w);
       return dp;
     };
-    if (gu::is_const_pin(v)) {
+    if (v.is_const()) {
       return slice_node(v);  // node_expr folds const operands at emission
     }
     std::tuple<hhds::Class_index, int, int> key{v.get_class_index(), lo, hi};
@@ -398,18 +397,29 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       memo.emplace(key, r);
       return r;
     }
-    const bool cap_before = cap_hit;
-    auto            op = gu::type_op_of(m);
+    const bool      cap_before = cap_hit;
+    auto            op         = gu::type_op_of(m);
     hhds::Pin_class res{};
     if (op == Ntype_op::Or || op == Ntype_op::And || op == Ntype_op::Xor || op == Ntype_op::Sum) {
       std::vector<hhds::Pin_class> operands;
       bool                         has_sub = false;
-      for (auto e : m.inp_edges()) {
-        if (static_cast<uint32_t>(e.sink.get_port_id()) != 0) {
+      for (auto sink : m.inp_sorted_pins()) {  // read-only walk
+        // BANK, not the raw sink pid. All four of these ops are BANKED
+        // (graph/cell.hpp's ONE DRIVER PER SINK PIN block), so each operand of
+        // the ADD bank owns its own pid -- 0, 2, 4, ... for a Sum, and 0, 1,
+        // 2, ... for the single-bank Or/And/Xor. Testing `pid != 0` therefore
+        // declared the SECOND operand of every pack a "subtrahend", set
+        // has_sub and left `usable` false, so split_selfref silently refused
+        // every commutative pack and the false word-level cycle it exists to
+        // cut survived to the back end (selfref_wire regenerated with a
+        // self-referential `or_64`, and lec REFUSED to encode it).
+        // Ntype::sink_bank folds the per-operand pids back to the role, so
+        // bank 1 means the Sum's `bs` side and nothing else.
+        if (Ntype::sink_bank(op, sink.get_port_id()) != 0) {
           has_sub = true;  // Sum subtrahend (or unexpected port) -> not a pack
           break;
         }
-        operands.push_back(e.driver);
+        operands.push_back(sink.get_driver_pin());
       }
       bool usable = !has_sub && !operands.empty();
       // A Sum is only a pack when NO carry can occur: every operand bounded
@@ -437,7 +447,52 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
           }
         }
         if (op == Ntype_op::Sum && !disjoint) {
-          usable = false;  // a real adder -> cannot slice
+          // A real adder cannot distribute [lo,hi) operand-by-operand because
+          // carries cross `lo`. It can still be resolved exactly from each
+          // operand's LOW `hi` bits: modulo 2^hi arithmetic is independent of
+          // every higher input bit. Rebuild that truncated sum and select its
+          // [lo,hi) result. This is the packed carry-chain shape used by
+          // Reduction.sv (`cin[k]` depends on an earlier `cout[j]`).
+          //
+          // A narrower signed operand would be sign-extended before addition;
+          // resolving it as a packed low slice would instead zero-extend it, so
+          // retain the conservative refusal for that case.
+          bool                         low_ok = true;
+          std::vector<hhds::Pin_class> lows;
+          lows.reserve(operands.size());
+          for (auto& d : operands) {
+            const int dbits = gu::bits_of(d);
+            if (!gu::is_unsign(d) && (dbits <= 0 || dbits < hi)) {
+              // A narrower/unbounded SIGNED addend: an operand-shape refusal,
+              // not a budget or depth one. Say which, or the `Stop_reason`
+              // report blames whichever limit fired last (the conflation the
+              // enum exists to remove).
+              if (split_dbg) {
+                std::print("split[dbg]:   Sum low-slice refused: signed addend bits={} < hi={}\n", dbits, hi);
+              }
+              stop_reasons |= kStopShape;  // diagnostic only: this refusal is PERMANENT,
+              low_ok        = false;       // so it must stay memoizable (cap_hit untouched)
+              break;
+            }
+            auto low = self(self, d, 0, hi, depth + 1);
+            if (low.is_invalid()) {
+              low_ok = false;
+              break;
+            }
+            lows.push_back(low);
+          }
+          if (low_ok) {
+            auto n = gu::create_typed_node(*g, Ntype_op::Sum);
+            ++created;
+            ++total_created;
+            for (auto& low : lows) {
+              low.connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(0)));
+            }
+            auto dp = n.create_driver_pin(0);
+            gu::set_ubits(dp, hi);
+            res = slice_node(dp);
+          }
+          usable = false;  // handled above, or conservatively refused
         }
         if (usable && bounded && disjoint) {
           hhds::Pin_class cover;
@@ -491,17 +546,17 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
           auto n = gu::create_typed_node(*g, op == Ntype_op::Sum ? Ntype_op::Or : op);
           ++created;
           for (auto& pp : parts) {
-            pp.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
+            pp.connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(0)));
           }
           auto dp = n.create_driver_pin(0);
-          gu::set_bits(dp, w + 1);
+          gu::set_ubits(dp, w);
           res = dp;
         }
       }
     } else if (op == Ntype_op::SHL) {
       auto kd = drv_at(m, 1);
-      if (!kd.is_invalid() && gu::is_const_pin(kd)) {
-        auto kc = gu::hydrate_const(kd);
+      if (kd.is_const()) {
+        const auto& kc = gu::const_of(kd);
         if (!kc.has_unknowns() && !kc.is_negative() && kc.is_just_i64()) {
           int k = static_cast<int>(kc.to_just_i64());
           if (hi <= k) {
@@ -514,11 +569,11 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
             if (!low.is_invalid()) {
               auto n = gu::create_typed_node(*g, Ntype_op::SHL);
               ++created;
-              low.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
+              low.connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(0)));
               livehd::graph_util::create_const(*g, *Dlop::create_integer(k - lo))
-                  .connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(1)));
+                  .connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(1)));
               auto dp = n.create_driver_pin(0);
-              gu::set_bits(dp, w + 1);
+              gu::set_ubits(dp, w);
               res = dp;
             }
           }
@@ -526,8 +581,8 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       }
     } else if (op == Ntype_op::SRA) {
       auto kd = drv_at(m, 1);
-      if (!kd.is_invalid() && gu::is_const_pin(kd)) {
-        auto kc = gu::hydrate_const(kd);
+      if (kd.is_const()) {
+        const auto& kc = gu::const_of(kd);
         if (!kc.has_unknowns() && !kc.is_negative() && kc.is_just_i64()) {
           // bits [lo,hi) of an arithmetic right shift are bits [lo+k,hi+k) of
           // the operand -- exact for ANY sign (Get_mask reads the conceptual
@@ -552,61 +607,90 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       auto            sel = drv_at(m, 0);
       hhds::Pin_class rsel;
       if (!sel.is_invalid()) {
-        if (gu::is_const_pin(sel) || !in_cycle.contains(sel.get_master_node())) {
+        if (sel.is_const() || !in_cycle.contains(sel.get_master_node())) {
           rsel = sel;
         } else if (gu::is_unsign(sel)) {
           int sb = gu::bits_of(sel);
-          rsel   = self(self, sel, 0, std::max(1, sb - 1), depth + 1);
+          rsel   = self(self, sel, 0, std::max(1, sb), depth + 1);
         }
       }
       if (!rsel.is_invalid()) {
         std::vector<std::pair<hhds::Port_id, hhds::Pin_class>> arms;
         bool                                                   ok = true;
-        for (auto e : m.inp_edges()) {
-          if (static_cast<uint32_t>(e.sink.get_port_id()) == 0) {
-            continue;  // selector
+        // SNAPSHOT: `self` RECURSES and creates nodes/edges in `g` -- the very
+        // graph `m` lives in -- so a lazy view over live pin storage would be
+        // invalidated mid-walk. inp_edges() materialized, and this must too.
+        for (auto sink : m.inp_pins_snapshot()) {
+          if (static_cast<uint32_t>(sink.get_port_id()) == 0) {
+            continue;  // selector (Mux is NOT banked: pid 0 is the role)
           }
-          auto r = self(self, e.driver, lo, hi, depth + 1);
+          auto r = self(self, sink.get_driver_pin(), lo, hi, depth + 1);
           if (r.is_invalid()) {
             ok = false;
             break;
           }
-          arms.emplace_back(e.sink.get_port_id(), r);
+          arms.emplace_back(sink.get_port_id(), r);
         }
         if (ok && !arms.empty()) {
           auto n = gu::create_typed_node(*g, Ntype_op::Mux);
           ++created;
-          rsel.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
+          rsel.connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(0)));
           for (auto& [pid, ap] : arms) {
             ap.connect_sink(n.create_sink_pin(pid));
           }
           auto dp = n.create_driver_pin(0);
-          gu::set_bits(dp, w + 1);
+          gu::set_ubits(dp, w);
           res = dp;
         }
       }
-    } else if (op == Ntype_op::EQ) {
-      // Equality is a one-bit control result, but unlike bit-parallel ops its
-      // bit depends on every operand bit. Rebuild it only when each on-cycle
-      // operand can be resolved as its COMPLETE unsigned value. This covers
+    } else if (op == Ntype_op::Rxor || op == Ntype_op::Popcount) {
+      const int count = gu::reduction_count(m);
+      const int width = op == Ntype_op::Rxor ? 1 : std::max(1, static_cast<int>(std::bit_width(static_cast<unsigned>(count))));
+      if (count == 0 || lo >= width) {
+        res = gu::create_const(*g, *Dlop::create_integer(0));
+      } else {
+        // Every result bit depends only on the explicit selected window.
+        auto source = self(self, drv_at(m, 0), 0, count, depth + 1);
+        if (!source.is_invalid()) {
+          auto reduced = gu::create_typed_node(*g, op);
+          ++created;
+          source.connect_sink(livehd::graph_util::setup_sink_pid(reduced, 0));
+          drv_at(m, 1).connect_sink(livehd::graph_util::setup_sink_pid(reduced, 1));
+          auto output = reduced.create_driver_pin(0);
+          gu::set_ubits(output, width);
+          res = lo == 0 && hi >= width ? output : slice_node(output);
+        }
+      }
+    } else if (op == Ntype_op::EQ || op == Ntype_op::Ror) {
+      // Equality and reduce-OR have a one-bit control result, but unlike
+      // bit-parallel ops that bit depends on every operand bit. Rebuild only
+      // when each on-cycle operand resolves as its COMPLETE unsigned value.
+      // This covers
       // packed-slice predicates used as Mux selectors (the XSCore Btb/PreDecode
-      // tail) without pretending that a partial comparator cone is local.
+      // tail) and packed reduction trees without treating a partial operand
+      // as the complete value.
       if (lo >= 1) {
         res = livehd::graph_util::create_const(*g, *Dlop::create_integer(0));
       } else {
         std::vector<hhds::Pin_class> operands;
         bool                         ok = true;
-        for (auto e : m.inp_edges()) {
-          if (static_cast<uint32_t>(e.sink.get_port_id()) != 0) {
+        // SNAPSHOT: `self` recurses and creates nodes in `g` below.
+        for (auto sink : m.inp_pins_snapshot()) {
+          // BANK, not the raw sink pid -- the same defect this file already
+          // carries a note about at the Or/And/Xor/Sum pack above. EQ and Ror
+          // are SINGLE-bank commutative ops, so operand k now owns pid k; the
+          // old `pid != 0` test was unsatisfiable past the first operand and
+          // silently killed every EQ/Ror rebuild.
+          if (Ntype::sink_bank(op, sink.get_port_id()) != 0) {
             ok = false;
             break;
           }
-          auto d = e.driver;
-          if (!gu::is_const_pin(d) && in_cycle.contains(d.get_master_node())) {
-            const int db = gu::bits_of(d);
+          auto d = sink.get_driver_pin();
+          if (!d.is_const() && in_cycle.contains(d.get_master_node())) {
+            const int db      = gu::bits_of(d);
             int       whole_w = 0;
             if (gu::is_unsign(d) && db > 0) {
-              whole_w = std::max(1, db - 1);
+              whole_w = std::max(1, db);
             } else {
               // A signed-typed masked value is still exactly reconstructible
               // when footprint proves it nonnegative and zero above hi.
@@ -617,15 +701,17 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
             }
             if (whole_w == 0) {
               if (split_dbg) {
-                std::print("split[dbg]:   EQ operand {} bits={} unsigned={} has no complete bound\n",
-                           op_name(gu::type_op_of(d.get_master_node())), db, gu::is_unsign(d));
+                std::print("split[dbg]:   control operand {} bits={} unsigned={} has no complete bound\n",
+                           Ntype::get_name(gu::type_op_of(d.get_master_node())),
+                           db,
+                           gu::is_unsign(d));
               }
               ok = false;
               break;
             }
             d = self(self, d, 0, whole_w, depth + 1);
             if (split_dbg) {
-              std::print("split[dbg]:   EQ operand complete width={} -> {}\n", whole_w, d.is_invalid() ? "FAIL" : "ok");
+              std::print("split[dbg]:   control operand complete width={} -> {}\n", whole_w, d.is_invalid() ? "FAIL" : "ok");
             }
           }
           if (d.is_invalid()) {
@@ -635,13 +721,13 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
           operands.push_back(d);
         }
         if (ok && !operands.empty()) {
-          auto n = gu::create_typed_node(*g, Ntype_op::EQ);
+          auto n = gu::create_typed_node(*g, op);
           ++created;
           for (auto& d : operands) {
-            d.connect_sink(n.create_sink_pin(static_cast<hhds::Port_id>(0)));
+            d.connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(0)));
           }
           auto dp = n.create_driver_pin(0);
-          gu::set_bits(dp, 2);  // unsigned boolean: one magnitude bit + spare sign
+          gu::set_ubits(dp, 1);  // unsigned boolean
           res = dp;
         }
       }
@@ -651,16 +737,16 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       if (!r.is_invalid()) {
         auto n1 = gu::create_typed_node(*g, Ntype_op::Not);
         ++created;
-        r.connect_sink(n1.create_sink_pin(static_cast<hhds::Port_id>(0)));
+        r.connect_sink(livehd::graph_util::setup_sink_pid(n1, static_cast<hhds::Port_id>(0)));
         auto np = n1.create_driver_pin(0);
-        gu::set_bits(np, w + 1);
+        gu::set_sbits(np, w + 1);
         auto n2 = gu::create_typed_node(*g, Ntype_op::And);
         ++created;
-        np.connect_sink(n2.create_sink_pin(static_cast<hhds::Port_id>(0)));
-        livehd::graph_util::create_const(*g, *Dlop::get_mask_value(w - 1, 0))
-            .connect_sink(n2.create_sink_pin(static_cast<hhds::Port_id>(0)));
+        np.connect_sink(livehd::graph_util::setup_sink_pid(n2, static_cast<hhds::Port_id>(0)));
+        livehd::graph_util::create_const(*g, gu::mask_window_const(0, w))
+            .connect_sink(livehd::graph_util::setup_sink_pid(n2, static_cast<hhds::Port_id>(0)));
         auto dp = n2.create_driver_pin(0);
-        gu::set_bits(dp, w + 1);
+        gu::set_ubits(dp, w);
         res = dp;
       }
     } else if (op == Ntype_op::Get_mask) {
@@ -672,7 +758,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       if (md.is_invalid()) {
         // unary zext: positions [0, sig) preserved; above sig -> zeros
         int b   = gu::bits_of(v);
-        int sig = b > 1 ? b - 1 : b;
+        int sig = b;
         if (sig > 0) {
           if (lo >= sig) {
             res = livehd::graph_util::create_const(*g, *Dlop::create_integer(0));
@@ -680,13 +766,13 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
             res = self(self, drv_at(m, 0), lo, std::min(hi, sig), depth + 1);
           }
         }
-      } else if (gu::is_const_pin(md)) {
-        auto mc = gu::hydrate_const(md);
+      } else if (md.is_const()) {
+        const auto& mc = gu::const_of(md);
         if (!mc.has_unknowns()) {
           if (mc.is_just_i64() && mc.to_just_i64() == -1) {
             // to-unsigned keeps positions; above the sig width -> zeros
             int b   = gu::bits_of(v);
-            int sig = b > 1 ? b - 1 : b;
+            int sig = b;
             if (sig > 0 && lo >= sig) {
               res = livehd::graph_util::create_const(*g, *Dlop::create_integer(0));
             } else if (sig > 0) {
@@ -694,22 +780,113 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
             } else {
               res = self(self, drv_at(m, 0), lo, hi, depth + 1);
             }
-          } else {
-            auto [a, b] = mc.get_mask_range();
-            if (a >= 0 && b > a) {
-              const int width = b - a;  // packed extraction width
-              if (lo >= width) {
-                res = livehd::graph_util::create_const(*g, *Dlop::create_integer(0));
-              } else {
-                res = self(self, drv_at(m, 0), a + lo, a + std::min(hi, width), depth + 1);  // re-base + cap
-              }
+          } else if (auto window = gu::mask_window_of(mc); window) {
+            const auto [a, b] = *window;
+            const int  width  = b - a;  // packed extraction width
+            if (lo >= width) {
+              res = livehd::graph_util::create_const(*g, *Dlop::create_integer(0));
+            } else {
+              res = self(self, drv_at(m, 0), a + lo, a + std::min(hi, width), depth + 1);  // re-base + cap
             }
           }
         }
       }
+    } else if (op == Ntype_op::Set_mask) {
+      // A Set_mask rewrites ONLY the bits inside its own constant lane, so a
+      // slice resolves to exactly ONE source: the base `a` when disjoint from
+      // the lane, the written `value` when contained in it. This is the same
+      // pair of rules cprop applies while walking a Set_mask `a`-chain
+      // (pass/cprop/cprop.cpp) — ported here so an O0 graph, which never runs
+      // cprop, can dissolve the packed field-write chain too.
+      //
+      // The chain is what manufactures the false loop: `c.f0 = …; c.f1 = …`
+      // on one packed net lowers to Set_mask(Set_mask(base,…),…), and a read
+      // of f0 binds to the LAST version — so if f1's value depends on that
+      // read the word-level graph closes a cycle the bit-level DAG does not
+      // have. Walking the slice down to the version that wrote its own lane is
+      // what the per-leaf (flattened) form would have given for free.
+      auto md = drv_at(m, 2);
+      if (md.is_const()) {
+        if (auto window = gu::mask_window_of(gu::const_of(md)); window) {
+          const auto [a, b] = *window;
+          if (hi <= a || lo >= b) {
+            res = self(self, drv_at(m, 0), lo, hi, depth + 1);  // disjoint lane: `a` is untouched here
+          } else if (lo >= a && hi <= b) {
+            // Contained in the lane: the slice reads back exactly what `value`
+            // put there, LSB-aligned to the lane's low bit. Guard on a bounded
+            // NON-NEGATIVE footprint — that is what makes the two forms agree
+            // ABOVE `value`'s significant width (Get_mask reads 0 there, and a
+            // zero-extended `value` is what the lane holds).
+            auto vd = drv_at(m, 4);
+            if (!vd.is_invalid() && footprint(footprint, vd, 0).first >= 0) {
+              res = self(self, vd, lo - a, hi - a, depth + 1);
+            }
+          }
+          // A slice STRADDLING the lane boundary would need a concat of two
+          // sources; leave it unresolved rather than grow the graph here.
+        }
+      }
+    } else if (op == Ntype_op::Concat) {
+      // The cheapest pack to dissolve, because the cell CARRIES its lane table:
+      // bits [lo,hi) come only from the lanes whose windows they land in, at a
+      // known re-based position. None of the footprint/disjointness proof the
+      // Or-of-SHL spelling needs applies -- lane i owning exactly
+      // [offset_i, offset_i + width_i) is a cell invariant.
+      //
+      // Unlike the Set_mask arm above there is NO "value must be non-negative"
+      // guard: a lane holds `value mod 2^w`, i.e. value's low w bits as spelled
+      // in two's complement, and Get_mask reads those same conceptual
+      // two's-complement bits, so the two forms already agree for a negative or
+      // over-wide lane. A straddling read is handled (not refused) so that a
+      // frontend emitting Concat is never WEAKER than the hand-spelled Or/SHL
+      // pack, whose straddles the SHL arm already splits.
+      auto                         lanes = gu::concat_lanes(m);
+      std::vector<hhds::Pin_class> parts;                // resolved pieces, each already shifted into [lo,hi)
+      bool                         ok = !lanes.empty();  // empty == malformed cell: fail closed
+      for (const auto& l : lanes) {
+        const int l_lo = static_cast<int>(l.offset);
+        const int l_hi = l_lo + static_cast<int>(l.width);
+        if (hi <= l_lo || lo >= l_hi) {
+          continue;  // this lane's window does not intersect the slice
+        }
+        const int a = std::max(lo, l_lo);
+        const int b = std::min(hi, l_hi);
+        auto      r = self(self, l.value, a - l_lo, b - l_lo, depth + 1);
+        if (r.is_invalid()) {
+          ok = false;
+          break;
+        }
+        if (a > lo) {
+          auto n = gu::create_typed_node(*g, Ntype_op::SHL);
+          ++created;
+          r.connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(0)));
+          livehd::graph_util::create_const(*g, *Dlop::create_integer(a - lo))
+              .connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(1)));
+          auto dp = n.create_driver_pin(0);
+          gu::set_ubits(dp, w);
+          r = dp;
+        }
+        parts.push_back(r);
+      }
+      if (ok && parts.empty()) {
+        // entirely above the top lane: the result is non-negative and bounded
+        // by the lane sum, so those bits read as exact zeros
+        res = livehd::graph_util::create_const(*g, *Dlop::create_integer(0));
+      } else if (ok && parts.size() == 1) {
+        res = parts.front();  // one lane covers the read: the descent IS the answer
+      } else if (ok) {
+        auto n = gu::create_typed_node(*g, Ntype_op::Or);
+        ++created;
+        for (auto& pp : parts) {
+          pp.connect_sink(livehd::graph_util::setup_sink_pid(n, static_cast<hhds::Port_id>(0)));
+        }
+        auto dp = n.create_driver_pin(0);
+        gu::set_ubits(dp, w);
+        res = dp;
+      }
     }
     if (split_dbg && res.is_invalid()) {
-      std::print("split[dbg]: unresolved {} [{},{}) depth={}\n", op_name(op), lo, hi, depth);
+      std::print("split[dbg]: unresolved {} [{},{}) depth={}\n", Ntype::get_name(op), lo, hi, depth);
     }
     if (!res.is_invalid() || cap_hit == cap_before) {
       // memoize successes always; memoize failures only when NOT tainted by a
@@ -726,36 +903,37 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
   // graph (created helper nodes are new and never on the cycle).
   std::vector<std::tuple<hhds::Node_class, hhds::Pin_class, hhds::Pin_class>> gm_rewires;   // (reader, resolved, new mask)
   std::vector<std::tuple<hhds::Node_class, hhds::Pin_class, hhds::Pin_class>> and_rewires;  // (And, old SRA driver, resolved)
-  int  unresolved_on_cycle = 0;      // on-cycle bit-field reads we could not dissolve (diagnostic)
-  bool any_cap_hit         = false;  // ... and whether the budget (vs a genuine loop) was the cause
-  for (auto& R : comb_nodes) {
-    if (!in_cycle.contains(R)) {
-      continue;
-    }
-    created = 0;      // per-reader budget: this read pays only for its own subtree
-    cap_hit = false;  // per-reader cap-taint detection (the memoization guard in resolve)
-    auto rop = gu::type_op_of(R);
+  int      unresolved_on_cycle = 0;  // on-cycle bit-field reads we could not dissolve (diagnostic)
+  unsigned any_stop_reasons    = 0;  // ... and WHICH limit stopped them (kStop* bits)
+  for (auto& R : comb_nodes) {       // == in_cycle, sorted for a deterministic visit order
+    created      = 0;                // per-reader budget: this read pays only for its own subtree
+    cap_hit      = false;            // per-reader cap-taint detection (the memoization guard in resolve)
+    // Per-reader too, and for the same reason `cap_hit` is: a descent that was
+    // refused once and then succeeded from a shallower frame still set its bit,
+    // so carrying the bits across readers would attribute an EARLIER read's
+    // recovered refusal to whichever later read actually failed -- reintroducing
+    // by accumulation exactly the conflation this enum exists to remove.
+    stop_reasons = 0;
+    auto rop     = gu::type_op_of(R);
     if (rop == Ntype_op::Get_mask) {
       auto md = drv_at(R, 2);
-      if (md.is_invalid() || !gu::is_const_pin(md)) {
+      if (md.is_invalid() || !md.is_const()) {
         continue;  // needs a constant slice mask
       }
-      auto mc = gu::hydrate_const(md);
-      if (mc.has_unknowns() || (mc.is_just_i64() && mc.to_just_i64() == -1)) {
-        continue;  // a full read, not a bit-field slice
+      const auto& mc     = gu::const_of(md);
+      auto        window = gu::mask_window_of(mc);  // empty for the -1 full read
+      if (!window || window->second > (1 << 28)) {
+        continue;  // not a bit-field slice
       }
-      auto [rlo, rhi] = mc.get_mask_range();
-      if (rlo < 0 || rhi <= rlo || rhi > (1 << 28)) {
-        continue;  // noncontiguous / open slice
-      }
+      const auto [rlo, rhi] = *window;
       auto vd = drv_at(R, 0);
-      if (vd.is_invalid() || gu::is_const_pin(vd)) {
+      if (vd.is_invalid() || vd.is_const()) {
         continue;
       }
       auto res = resolve(resolve, vd, rlo, rhi, 0);
       if (res.is_invalid()) {
         ++unresolved_on_cycle;
-        any_cap_hit |= cap_hit;
+        any_stop_reasons |= stop_reasons;
         continue;
       }
       gm_rewires.emplace_back(R, res, mask_const(0, rhi - rlo));
@@ -764,16 +942,17 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       hhds::Pin_class cpin, other;
       int             nins = 0;
       bool            bad  = false;
-      for (auto e : R.inp_edges()) {
+      for (auto sink : R.inp_sorted_pins()) {  // read-only walk
+        auto drv = sink.get_driver_pin();
         ++nins;
-        if (gu::is_const_pin(e.driver)) {
+        if (drv.is_const()) {
           if (cpin.is_invalid()) {
-            cpin = e.driver;
+            cpin = drv;
           } else {
             bad = true;
           }
         } else if (other.is_invalid()) {
-          other = e.driver;
+          other = drv;
         } else {
           bad = true;
         }
@@ -781,7 +960,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       if (bad || nins != 2 || cpin.is_invalid() || other.is_invalid()) {
         continue;
       }
-      auto cc = gu::hydrate_const(cpin);
+      const auto& cc = gu::const_of(cpin);
       if (cc.has_unknowns() || cc.is_negative()) {
         continue;
       }
@@ -796,10 +975,10 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       auto wd = other;  // direct `w & m` read of the packed word (no shift)
       if (gu::type_op_of(sm) == Ntype_op::SRA) {
         auto kd = drv_at(sm, 1);
-        if (kd.is_invalid() || !gu::is_const_pin(kd)) {
+        if (kd.is_invalid() || !kd.is_const()) {
           continue;
         }
-        auto kc = gu::hydrate_const(kd);
+        const auto& kc = gu::const_of(kd);
         if (kc.has_unknowns() || kc.is_negative() || !kc.is_just_i64()) {
           continue;
         }
@@ -811,12 +990,15 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       }
       auto res = resolve(resolve, wd, k, k + j, 0);
       if (split_dbg) {
-        std::print("split[dbg]: And-reader j={} k={} sra={} -> {}\n", j, k, gu::type_op_of(sm) == Ntype_op::SRA,
+        std::print("split[dbg]: And-reader j={} k={} sra={} -> {}\n",
+                   j,
+                   k,
+                   gu::type_op_of(sm) == Ntype_op::SRA,
                    res.is_invalid() ? "FAIL" : "ok");
       }
       if (res.is_invalid()) {
         ++unresolved_on_cycle;
-        any_cap_hit |= cap_hit;
+        any_stop_reasons |= stop_reasons;
         continue;
       }
       and_rewires.emplace_back(R, other, res);
@@ -824,35 +1006,35 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
   }
 
   for (auto& [R, res, nm] : gm_rewires) {
-    auto edges = R.inp_edges();  // snapshot before mutating
-    for (auto e : edges) {
-      auto pid = static_cast<uint32_t>(e.sink.get_port_id());
+    // SNAPSHOT before mutating: the body deletes the edge it stands on.
+    for (auto sink : R.inp_pins_snapshot()) {
+      auto pid = static_cast<uint32_t>(sink.get_port_id());
       if (pid == 0 || pid == 2) {
-        e.del_edge();
+        sink.del_sink(sink.get_driver_pin());  // drop this sink pin's one driver
       }
     }
     // resolve() returned the packed-down [0,w) slice, so the reader becomes a
     // low-w identity read: same value, same single-bit clamp semantics.
-    res.connect_sink(R.create_sink_pin(static_cast<hhds::Port_id>(0)));
-    nm.connect_sink(R.create_sink_pin(static_cast<hhds::Port_id>(2)));
+    res.connect_sink(livehd::graph_util::setup_sink_pid(R, static_cast<hhds::Port_id>(0)));
+    nm.connect_sink(livehd::graph_util::setup_sink_pid(R, static_cast<hhds::Port_id>(2)));
   }
   for (auto& [A, oldd, res] : and_rewires) {
-    auto edges = A.inp_edges();  // snapshot before mutating
-    for (auto e : edges) {
-      if (e.driver == oldd) {
-        e.del_edge();
+    // SNAPSHOT before mutating: the body deletes the edge it stands on.
+    for (auto sink : A.inp_pins_snapshot()) {
+      if (auto drv = sink.get_driver_pin(); drv == oldd) {
+        sink.del_sink(drv);
       }
     }
     // And(res, 2^j-1) == res: the const mask stays, other SRA consumers keep
     // their (possibly still cyclic) reads and fail loudly if unresolvable.
-    res.connect_sink(A.create_sink_pin(static_cast<hhds::Port_id>(0)));
+    res.connect_sink(livehd::graph_util::setup_sink_pid(A, static_cast<hhds::Port_id>(0)));
   }
-  const int nrew = static_cast<int>(gm_rewires.size() + and_rewires.size());
+  const int nrew   = static_cast<int>(gm_rewires.size() + and_rewires.size());
   // Report the survivors to the caller (the iterating wrapper decides whether to
   // warn -- an intermediate round leaves nested reads unresolved only because the
   // next round's rewrites are not applied yet, so warning per pass would spam).
-  unresolved_out = unresolved_on_cycle;
-  cap_out        = any_cap_hit;
+  unresolved_out   = unresolved_on_cycle;
+  stop_reasons_out = any_stop_reasons;
   if (nrew > 0) {
     // The edge rewires above only INCREMENTALLY patch forward_class's in-edge
     // counts; its cached Pass-2 deferral order was built while the graph still had
@@ -867,86 +1049,494 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
   return nrew;
 }
 
-int split_packed_selfref_wires(hhds::Graph* g) {
+// What one fixpoint run of the splitter ended up with. RETURNED rather than
+// reported on the spot: the wrapper may run the walk twice (a shallow attempt on
+// the caller's stack, then a deep one on a big-stack worker), and one call must
+// not turn into two contradictory warnings.
+struct Split_result {
+  int      total        = 0;  // reads rewired
+  int      unresolved   = 0;  // on-cycle reads the last pass could not dissolve
+  unsigned stop_reasons = 0;  // OR of the kStop* bits
+  int      rounds       = 0;  // fixpoint rounds ACTUALLY run
+  bool     fixpoint     = false;
+};
+
+// Is this `Sub` instance a PURE-COMB call -- is its whole callee CLOSURE
+// state-free? Such an instance is NOT a scheduling boundary: it is ordinary
+// combinational logic that merely happens to be spelled as a hierarchy edge,
+// and a cycle running through it is a cycle NOW, not one that appears later
+// when somebody dissolves the instance.
+//
+// Cutting a pure-comb Sub is what used to make lnast.tolg's per-wire splitter
+// report NO self-dependency for a packed wire whose feedback threads through an
+// instance (tests/equiv/selfref_thru_comb_sub): the backward cone stopped at the
+// callee and never reached the wire's own buffer. The cycle then surfaced only
+// once a writer flattened the instance, which is why the repair used to be
+// re-derived over the whole graph. Seeing through the instance here resolves it
+// at bind time instead, where the wire's driver is in hand.
+//
+// Both cycle questions in this file share this predicate on purpose -- the
+// caller asking "did the split finish?" and the one asking "is a genuine self
+// dependency left?" must not disagree about what a cycle is (see the header).
+//
+// A LOOP sub is never transparent: its body is a rolled occurrence standing for
+// `count` replicas, not ordinary comb logic in the caller's schedule. A
+// body-less black box (liberty cell, external IP) is likewise opaque.
+using Sub_comb_cache = absl::flat_hash_map<hhds::Gid, bool>;
+
+static bool sub_closure_is_comb(const std::shared_ptr<hhds::Graph>& cg, Sub_comb_cache& cache);
+
+static bool sub_is_pure_comb(const hhds::Node_class& n, Sub_comb_cache& cache) {
+  if (n.is_invalid() || n.is_loop_subnode()) {
+    return false;
+  }
+  const auto gid = n.get_subnode_gid();
+  if (auto it = cache.find(gid); it != cache.end()) {
+    return it->second;
+  }
+  // Seed FALSE before recursing: a hierarchy that reaches itself is not a
+  // transparent comb call, and the seed doubles as the recursion guard.
+  cache.emplace(gid, false);
+  const bool ok = sub_closure_is_comb(n.get_subnode_graph(), cache);
+  cache[gid]    = ok;
+  return ok;
+}
+
+static bool sub_closure_is_comb(const std::shared_ptr<hhds::Graph>& cg, Sub_comb_cache& cache) {
+  if (!cg) {
+    return false;  // body-less black box: nothing to see through
+  }
+  for (auto n : cg->body().nodes()) {
+    const auto op = type_op_of(n);
+    if (op == Ntype_op::Memory || op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Fflop) {
+      return false;
+    }
+    if (op == Ntype_op::Sub && !sub_is_pure_comb(n, cache)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Which INPUT port ids of this `Sub` instance does its OUTPUT port `out_pid`
+// depend on COMBINATIONALLY? Answered by walking backward inside the callee
+// from that output's IO pin, cutting at state and recursing pin-accurately
+// through nested instances.
+//
+// This is the PRECISE version of "see through a comb Sub". Modelling the
+// instance as a crossbar (every output depends on every input) is safe when the
+// answer only decides whether to ATTEMPT a split -- an over-approximation just
+// widens the cone. It is NOT safe for comb_pin_depends_on below, which backs
+// lnast.tolg's `combinational loop through wire` ERROR: the
+// tests/equiv/sim_sub_nested_comb_feedback shape (`x = leaf(a,b)` independent of
+// input `c`, parent feeds `x` back into `c`) has no bit-level cycle at all, and
+// a crossbar reports one. Per-output-cone precision reports it correctly as
+// acyclic.
+//
+// A LOOP sub stays opaque: its body is a rolled occurrence standing for `count`
+// replicas, so its internal cones do not describe the caller's schedule. A
+// body-less black box yields an empty set, i.e. a boundary -- which is exactly
+// how every Sub used to be treated.
+using Sub_dep_key   = std::pair<hhds::Gid, uint32_t>;
+using Sub_dep_cache = absl::flat_hash_map<Sub_dep_key, absl::flat_hash_set<uint32_t>>;
+
+static absl::flat_hash_set<uint32_t> sub_output_deps(const hhds::Node_class& inst, uint32_t out_pid, Sub_dep_cache& cache) {
+  absl::flat_hash_set<uint32_t> res;
+  if (inst.is_invalid() || inst.is_loop_subnode()) {
+    return res;
+  }
+  const Sub_dep_key key{inst.get_subnode_gid(), out_pid};
+  if (auto it = cache.find(key); it != cache.end()) {
+    return it->second;
+  }
+  // Seed EMPTY before recursing: a hierarchy that reaches itself contributes no
+  // new comb dependency, and the seed doubles as the recursion guard.
+  cache.emplace(key, absl::flat_hash_set<uint32_t>{});
+
+  auto cg = inst.get_subnode_graph();
+  if (!cg) {
+    return res;  // body-less black box: opaque, exactly as before
+  }
+  auto gio = cg->get_io();
+  if (!gio) {
+    return res;
+  }
+  absl::flat_hash_map<std::string, uint32_t> in_name2pid;
+  for (const auto& d : gio->get_input_pin_decls()) {
+    in_name2pid[d.name] = static_cast<uint32_t>(d.port_id);
+  }
+  std::string oname;
+  for (const auto& d : gio->get_output_pin_decls()) {
+    if (static_cast<uint32_t>(d.port_id) == out_pid) {
+      oname = d.name;
+      break;
+    }
+  }
+  if (oname.empty()) {
+    // An output the callee does not declare: fall back to the conservative
+    // crossbar rather than silently reporting independence.
+    for (const auto& [nm, pid] : in_name2pid) {
+      res.insert(pid);
+    }
+    cache[key] = res;
+    return res;
+  }
+  auto opin = cg->get_output_pin(oname);
+  if (opin.is_invalid()) {
+    cache[key] = res;
+    return res;
+  }
+
+  absl::flat_hash_set<hhds::Pin_class> seen;
+  std::vector<hhds::Pin_class>         work;
+  if (auto seed = opin.get_driver_pin(); !seed.is_invalid()) {
+    work.push_back(seed);  // a graph output pin is a sink: at most one driver
+  }
+  while (!work.empty()) {
+    auto d = work.back();
+    work.pop_back();
+    if (d.is_invalid() || d.is_const() || !seen.insert(d).second) {
+      continue;
+    }
+    if (is_graph_input_pin(d)) {
+      if (auto it = in_name2pid.find(std::string{pin_name_of(d)}); it != in_name2pid.end()) {
+        res.insert(it->second);
+      }
+      continue;
+    }
+    auto dn = d.get_master_node();
+    if (dn.is_invalid()) {
+      continue;
+    }
+    const auto op = type_op_of(dn);
+    if (op == Ntype_op::Memory || op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Fflop) {
+      continue;  // state cuts the cone, so it contributes no comb dependency
+    }
+    if (op == Ntype_op::Sub) {
+      const auto inner = sub_output_deps(dn, static_cast<uint32_t>(d.get_port_id()), cache);
+      for (auto sink : dn.inp_sorted_pins()) {
+        if (inner.contains(static_cast<uint32_t>(sink.get_port_id()))) {
+          work.push_back(sink.get_driver_pin());
+        }
+      }
+      continue;
+    }
+    for (auto sink : dn.inp_sorted_pins()) {
+      work.push_back(sink.get_driver_pin());
+    }
+  }
+  cache[key] = res;
+  return res;
+}
+
+bool comb_pin_depends_on(const hhds::Pin_class& driver, const hhds::Node_class& target) {
+  if (driver.is_invalid() || target.is_invalid() || driver.is_const() || is_graph_input_pin(driver)) {
+    return false;
+  }
+  // A PIN worklist, not a node one: crossing a Sub depends on WHICH output pin
+  // the walk arrived through, and dedup must therefore be per pin.
+  absl::flat_hash_set<hhds::Pin_class> seen;
+  Sub_dep_cache                        dep_cache;
+  std::vector<hhds::Pin_class>         work{driver};
+  while (!work.empty()) {
+    auto d = work.back();
+    work.pop_back();
+    if (d.is_invalid() || d.is_const() || is_graph_input_pin(d) || !seen.insert(d).second) {
+      continue;
+    }
+    auto n = d.get_master_node();
+    if (n.is_invalid()) {
+      continue;
+    }
+    if (n == target) {
+      return true;
+    }
+    const auto op = type_op_of(n);
+    if (is_type_register(n)) {  // Flop/Latch/Fflop/Memory all cut the cone
+      continue;
+    }
+    if (op == Ntype_op::Sub) {
+      // Follow only the inputs this particular output actually depends on. An
+      // empty set (loop sub, black box, state-fed output) leaves the instance a
+      // boundary, which is how every Sub used to be treated.
+      const auto deps = sub_output_deps(n, static_cast<uint32_t>(d.get_port_id()), dep_cache);
+      for (auto sink : n.inp_sorted_pins()) {
+        if (deps.contains(static_cast<uint32_t>(sink.get_port_id()))) {
+          work.push_back(sink.get_driver_pin());
+        }
+      }
+      continue;
+    }
+    for (auto sink : n.inp_sorted_pins()) {
+      work.push_back(sink.get_driver_pin());
+    }
+  }
+  return false;
+}
+
+// `max_rounds` is the caller's round budget. The per-wire entry point can afford
+// the full 16 because it hands over a scoped buffer/driver pair and stops the
+// moment `comb_pin_depends_on` goes false. A caller with NO such stop condition
+// must ask for ONE round instead: running the fixpoint blind keeps splitting
+// long after the cycle is gone and leaves a chain of identity Get_masks behind.
+// Every caller today is scoped (the whole-graph entry point that needed the
+// one-round budget was deleted), so this only pins the contract.
+static Split_result split_packed_selfref_wires_body(hhds::Graph* g, int max_depth,
+                                                    const absl::flat_hash_set<hhds::Node_class>* scoped_cycle,
+                                                    const hhds::Node_class* scoped_buffer, const hhds::Pin_class* scoped_driver,
+                                                    int max_rounds = 16) {
   // Iterate to a fixpoint. Each pass defers its rewrites to the end, so a reader
   // whose value depends on ANOTHER reader (nested slice-of-slice packing, e.g.
   // Phr's io bundle read as `io#[..]#[..]`) can only resolve one nesting level per
   // pass. Loop until a pass rewrites nothing; a hard round cap is the safety net.
-  constexpr int max_rounds  = 16;
-  int           total       = 0;
-  int           unresolved  = 0;
-  bool          cap_hit     = false;
-  for (int round = 0; round < max_rounds; ++round) {
-    const int n = split_selfref_pass(g, unresolved, cap_hit);
-    total += n;
+  Split_result r;
+  for (; r.rounds < max_rounds; ++r.rounds) {
+    const int n  = split_selfref_pass(g, r.unresolved, r.stop_reasons, max_depth, scoped_cycle);
+    r.total     += n;
+    if (scoped_buffer != nullptr && scoped_driver != nullptr && n > 0 && !comb_pin_depends_on(*scoped_driver, *scoped_buffer)) {
+      ++r.rounds;
+      r.fixpoint = true;
+      break;
+    }
     if (n == 0) {
-      break;  // fixpoint: nothing left to rewrite (cycle gone, or genuinely stuck)
+      ++r.rounds;         // count the fixpoint round that proved there was nothing left
+      r.fixpoint = true;  // ... and record WHY the loop ended
+      break;              // cycle gone, or genuinely stuck
     }
   }
-  // Never fail silently: a surviving word-level cycle makes downstream encode /
-  // cgen / sim scheduling reject the graph, and the caller (cprop) discards this
-  // count. `unresolved` is the final pass's remaining on-cycle reads.
-  if (unresolved > 0) {
-    livehd::diag::warn("split-selfref", "unresolved-cycle", "internal")
-        .msg("{} on-cycle bit-field read(s) could not be dissolved ({} rewired over {} pass(es)); a "
-             "word-level combinational cycle may remain",
-             unresolved,
-             total,
-             max_rounds)
-        .hint(cap_hit ? "node-creation budget exhausted on a read -- raise the split budget if this is not a real loop"
-                      : "likely a genuine bit-level self-dependency (e.g. w = w + 1)")
-        .emit();
-  }
-  return total;
+  return r;
 }
 
-int flatten_false_loop_subs(hhds::Graph* g) {
+void word_level_cycle_nodes(hhds::Graph* g, bool strict, absl::flat_hash_set<hhds::Node_class>& out,
+                            const absl::flat_hash_set<hhds::Class_index>* allowed) {
+  namespace gu = livehd::graph_util;
+  auto comb    = [strict](const hhds::Node_class& n) {
+    const auto op = gu::type_op_of(n);
+    if (op == Ntype_op::IO) {
+      return false;
+    }
+    if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
+      return false;  // true state cuts in both models
+    }
+    if (op == Ntype_op::Memory || op == Ntype_op::Sub) {
+      return strict;
+    }
+    return true;
+  };
+  std::vector<hhds::Node_class>                                        nodes;
+  absl::flat_hash_map<hhds::Node_class, int>                           indeg;
+  absl::flat_hash_map<hhds::Node_class, std::vector<hhds::Node_class>> succ;
+  for (auto n : g->body().nodes()) {
+    if ((allowed == nullptr || allowed->contains(n.get_class_index())) && comb(n)) {
+      nodes.push_back(n);
+      indeg.try_emplace(n, 0);
+    }
+  }
+  for (auto& n : nodes) {
+    for (auto sink : n.inp_sorted_pins()) {  // read-only walk
+      for (auto d : sink.get_driver_pins()) {
+        if (d.is_invalid() || d.is_const()) {
+          continue;
+        }
+        auto m = d.get_master_node();
+        if (!indeg.contains(m)) {
+          continue;  // the `contains` guard also drops boundary masters fast_class never lists
+        }
+        ++indeg[n];
+        succ[m].push_back(n);
+      }
+    }
+  }
+  std::vector<hhds::Node_class> q;
+  for (auto& [n, d] : indeg) {
+    if (d == 0) {
+      q.push_back(n);
+    }
+  }
+  absl::flat_hash_set<hhds::Node_class> removed;
+  while (!q.empty()) {
+    auto n = q.back();
+    q.pop_back();
+    removed.insert(n);
+    auto it = succ.find(n);
+    if (it == succ.end()) {
+      continue;
+    }
+    for (auto& sx : it->second) {
+      if (--indeg[sx] == 0) {
+        q.push_back(sx);
+      }
+    }
+  }
+  for (auto& n : nodes) {
+    if (!removed.contains(n)) {
+      out.insert(n);
+    }
+  }
+}
+
+void comb_emit_order(hhds::Graph* g, std::vector<hhds::Node_class>& order, absl::flat_hash_set<hhds::Node_class>* cut_subs,
+                     std::vector<hhds::Node_class>* residual) {
+  order.clear();
+  if (cut_subs != nullptr) {
+    cut_subs->clear();
+  }
+  if (residual != nullptr) {
+    residual->clear();
+  }
+  if (g == nullptr) {
+    return;
+  }
+
+  // The BACKEND's placement model, which is not the splitter's: a `Sub` is an
+  // ordinary node here because an instance is one indivisible item in the
+  // emitted schedule, and state/Memory/Clock_cell are sources because something
+  // else drives their outputs.
+  const auto placeable = [](const hhds::Node_class& n) {
+    const auto op = type_op_of(n);  // is_type_register covers Memory too
+    return op != Ntype_op::IO && op != Ntype_op::Clock_cell && !is_type_register(n);
+  };
+
+  std::vector<hhds::Node_class>              nodes;
+  absl::flat_hash_map<hhds::Node_class, int> idx;
+  for (auto n : g->body().nodes()) {
+    if (placeable(n)) {
+      idx.emplace(n, static_cast<int>(nodes.size()));
+      nodes.push_back(n);
+    }
+  }
+  const int total = static_cast<int>(nodes.size());
+  if (total == 0) {
+    return;
+  }
+
+  std::vector<int>              indeg(total, 0);
+  std::vector<std::vector<int>> succ(total);
+  for (int i = 0; i < total; ++i) {
+    for (auto sink : nodes[i].inp_sorted_pins()) {  // read-only walk
+      for (auto drv : sink.get_driver_pins()) {
+        if (drv.is_invalid() || drv.is_const()) {
+          continue;
+        }
+        auto d = drv.get_master_node();
+        if (auto it = idx.find(d); it != idx.end() && it->second != i) {
+          ++indeg[i];
+          succ[it->second].push_back(i);
+        }
+      }
+    }
+  }
+
+  // STABLE Kahn with a min-heap keyed by storage index, the same tie-break hhds
+  // uses, so an already-topological input comes back verbatim.
+  std::priority_queue<int, std::vector<int>, std::greater<>> ready;
+  for (int i = 0; i < total; ++i) {
+    if (indeg[i] == 0) {
+      ready.push(i);
+    }
+  }
+  std::vector<char> emitted(total, 0);
+  int               done = 0;
+  while (done < total) {
+    if (ready.empty()) {
+      // Stalled on a word-level cycle. Force the lowest-index unemitted `Sub`
+      // through: an instance boundary is where the emitter can legally break
+      // the block, because the module item is a concurrent construct that the
+      // simulator schedules for us. Nothing else in the cycle can be cut
+      // without changing what the emitted RTL means.
+      int cut = -1;
+      for (int i = 0; i < total; ++i) {
+        if (!emitted[i] && type_op_of(nodes[i]) == Ntype_op::Sub) {
+          cut = i;
+          break;
+        }
+      }
+      if (cut < 0) {
+        break;  // a genuine comb loop with no instance on it: report below
+      }
+      if (cut_subs != nullptr) {
+        cut_subs->insert(nodes[cut]);
+      }
+      ready.push(cut);
+    }
+    const int i = ready.top();
+    ready.pop();
+    if (emitted[i]) {
+      continue;
+    }
+    emitted[i] = 1;
+    ++done;
+    order.push_back(nodes[i]);
+    for (const int sx : succ[i]) {
+      if (--indeg[sx] == 0 && emitted[sx] == 0) {
+        ready.push(sx);
+      }
+    }
+  }
+  if (done < total) {
+    // A genuine comb loop with no instance on it. The nodes still have to be
+    // EMITTED -- dropping them turns a mis-ordered always_comb into one that
+    // never assigns those variables at all (an inferred latch / a constant X),
+    // which is strictly worse than what `Node_order::forward` used to do: its
+    // raw-index tail emitted the whole SCC, just without a dependency check.
+    // Append them in ascending storage order, exactly that tail, and report
+    // them through `residual` so the caller can still diagnose.
+    for (int i = 0; i < total; ++i) {
+      if (!emitted[i]) {
+        order.push_back(nodes[i]);
+        if (residual != nullptr) {
+          residual->push_back(nodes[i]);
+        }
+      }
+    }
+  }
+}
+
+static int flatten_false_loop_subs_body(hhds::Graph* g, std::vector<std::string>* inlined_callees,
+                                        bool include_multiinstance_cycles) {
+  // A replicated Sub is never a false-loop target: dissolving one keeps a
+  // single body copy and drops count-1 replicas (see graph/replica_desc.hpp).
+  // Physical backends materialize it only in their private output state.
   namespace gu = livehd::graph_util;  // the lambdas below qualify with it
 
   // The whole CLOSURE must be state-free: nested comb Subs are fine (the clone
   // below re-instantiates them in `g` as ordinary pure-comb leaf instances --
   // the ExeUnitImp_4/Alu/AluDataModule shape), but any Flop/Latch/Fflop/Memory
   // anywhere makes inlining change state identity, so those are never touched.
-  auto callee_closure_is_comb = [](auto&& self, const std::shared_ptr<hhds::Graph>& cg) -> bool {
-    if (!cg) {
-      return false;
-    }
-    for (auto n : cg->fast_class()) {
-      auto op = gu::type_op_of(n);
-      if (op == Ntype_op::Memory || op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Fflop) {
-        return false;
-      }
-      if (op == Ntype_op::Sub && !self(self, n.get_subnode_graph())) {
-        return false;
-      }
-    }
-    return true;
-  };
+  // Same predicate the cycle walks above use, so "can I dissolve this?" and
+  // "should I have seen through this?" cannot drift apart.
+  Sub_comb_cache sub_cache;
 
   auto driver_of = [](const hhds::Pin_class& sink) -> hhds::Pin_class {
     if (sink.is_invalid()) {
       return {};
     }
-    for (auto e : sink.get_master_node().inp_edges()) {
-      if (e.sink.get_port_id() == sink.get_port_id()) {
-        return e.driver;
-      }
-    }
-    return {};
+    return sink.get_driver_pin();  // exactly one driver per sink pin
   };
 
   // A Sub S is on a false loop iff a backward COMB walk from one of its input
   // drivers reaches S's own output (stopping at any other state/loop_last).
+  //
+  // The walk STOPS at every other Sub, deliberately. A ring that closes only
+  // through two or three DIFFERENT instances is unschedulable for a consumer
+  // whose model makes a comb callee ONE ATOMIC node — but no caller has that
+  // model any more. `inou.cgen.sim` dissolves those rings by CALLEE
+  // PARTITIONING (per-output-group `__settle_g<k>` methods) and `inou.cgen.verilog` schedules across the boundary read-only
+  // (comb_emit_order); the callers left are pass.legalize (every compile) and
+  // the LEC prep path. Traversing through instances would inline whole
+  // multi-instance rings out of the emitted netlist AND — since this rewrites
+  // in place — out of the shared library graph, which silently breaks the
+  // hierarchical boundaries hier-LEC pairing and semdiff's sub-cutpoints key on.
   auto on_false_loop = [&](const hhds::Node_class& s) {
     absl::flat_hash_set<hhds::Node_class> seen;
     std::vector<hhds::Pin_class>          stk;
-    for (auto e : s.inp_edges()) {
-      stk.push_back(e.driver);
+    for (auto sink : s.inp_sorted_pins()) {  // read-only walk
+      stk.push_back(sink.get_driver_pin());
     }
     while (!stk.empty()) {
       auto d = stk.back();
       stk.pop_back();
-      if (d.is_invalid() || gu::is_const_pin(d)) {
+      if (d.is_invalid() || d.is_const()) {
         continue;
       }
       auto m = d.get_master_node();
@@ -960,8 +1550,8 @@ int flatten_false_loop_subs(hhds::Graph* g) {
       if (!seen.insert(m).second) {
         continue;
       }
-      for (auto e : m.inp_edges()) {
-        stk.push_back(e.driver);
+      for (auto sink : m.inp_sorted_pins()) {
+        stk.push_back(sink.get_driver_pin());
       }
     }
     return false;
@@ -972,12 +1562,30 @@ int flatten_false_loop_subs(hhds::Graph* g) {
   // until no on-false-loop comb-closure Sub remains (bounded).
   int flattened = 0;
   for (int round = 0; round < 8; ++round) {
-    std::vector<hhds::Node_class> targets;
-    for (auto node : g->fast_class()) {
+    // Collect the eligible instances FIRST: a body with no ordinary Sub can
+    // never have a target, and the strict cycle walk below is a full-graph
+    // topological sort that would otherwise run once per round per definition.
+    std::vector<hhds::Node_class> candidates;
+    for (auto node : g->body().nodes()) {
       if (gu::type_op_of(node) != Ntype_op::Sub) {
         continue;
       }
-      if (!callee_closure_is_comb(callee_closure_is_comb, node.get_subnode_graph()) || !on_false_loop(node)) {
+      if (node.is_loop_subnode()) {
+        continue;  // count occurrences, not one — inlining here drops count-1 replicas
+      }
+      candidates.push_back(node);
+    }
+    if (candidates.empty()) {
+      break;
+    }
+    absl::flat_hash_set<hhds::Node_class> strict_cycle;
+    if (include_multiinstance_cycles) {
+      word_level_cycle_nodes(g, /*strict=*/true, strict_cycle);
+    }
+    std::vector<hhds::Node_class> targets;
+    for (const auto& node : candidates) {
+      const bool selected = include_multiinstance_cycles ? strict_cycle.contains(node) : on_false_loop(node);
+      if (!sub_closure_is_comb(node.get_subnode_graph(), sub_cache) || !selected) {
         continue;
       }
       targets.push_back(node);
@@ -985,32 +1593,39 @@ int flatten_false_loop_subs(hhds::Graph* g) {
     if (targets.empty()) {
       break;
     }
-    flattened += static_cast<int>(targets.size());
 
     for (auto& sub : targets) {
       auto cg  = sub.get_subnode_graph();
       auto sio = sub.get_subnode_io();
       if (!cg || !sio) {
-        continue;
+        continue;  // malformed instance: nothing was inlined, so it does not count
+      }
+      ++flattened;
+      if (inlined_callees != nullptr) {
+        inlined_callees->emplace_back(sio->get_name());
       }
       // The Sub's driver for each input port (by port id) -- feeds a callee input.
       absl::flat_hash_map<uint32_t, hhds::Pin_class> sub_in_drv;
-      for (auto e : sub.inp_edges()) {
-        sub_in_drv[static_cast<uint32_t>(e.sink.get_port_id())] = e.driver;
+      for (auto sink : sub.inp_sorted_pins()) {  // read-only walk
+        sub_in_drv[static_cast<uint32_t>(sink.get_port_id())] = sink.get_driver_pin();
       }
 
       // (a) copy every callee comb node into g (consts/IO ports handled on demand).
       absl::flat_hash_map<hhds::Node_class, hhds::Node_class> nmap;
-      for (auto cn : cg->fast_class()) {
+      for (auto cn : cg->body().nodes()) {
         auto op = gu::type_op_of(cn);
-        if (op == Ntype_op::IO || op == Ntype_op::Nconst) {
+        if (op == Ntype_op::IO) {
           continue;
         }
         auto neo = gu::create_typed_node(*g, op);
         if (op == Ntype_op::Sub) {
           // a nested comb Sub is re-instantiated in g as an ordinary child
           // instance (the closure check above guarantees it is state-free)
-          neo.set_subnode(cn.get_subnode_io());
+          if (auto loop = cn.subnode_loop()) {
+            neo.set_subnode(cn.get_subnode_io(), *loop);
+          } else {
+            neo.set_subnode(cn.get_subnode_io());
+          }
         }
         if (gu::has_name(cn)) {
           neo.attr(hhds::attrs::name).set(std::string{gu::node_name_of(cn)});
@@ -1025,8 +1640,8 @@ int flatten_false_loop_subs(hhds::Graph* g) {
           auto it = sub_in_drv.find(static_cast<uint32_t>(cdrv.get_port_id()));
           return it == sub_in_drv.end() ? hhds::Pin_class{} : it->second;
         }
-        if (gu::is_const_pin(cdrv)) {
-          return gu::create_const(*g, gu::hydrate_const(cdrv));  // recreate the const in g
+        if (cdrv.is_const()) {
+          return gu::create_const(*g, gu::const_of(cdrv));  // recreate the const in g
         }
         auto mit = nmap.find(cdrv.get_master_node());
         if (mit == nmap.end()) {
@@ -1047,27 +1662,36 @@ int flatten_false_loop_subs(hhds::Graph* g) {
       };
 
       // (b) rewire the callee's internal edges onto the copies.
-      for (auto cn : cg->fast_class()) {
+      for (auto cn : cg->body().nodes()) {
         auto it = nmap.find(cn);
         if (it == nmap.end()) {
           continue;
         }
-        for (auto e : cn.inp_edges()) {
-          auto gdrv = map_driver(e.driver);
+        // SNAPSHOT: the walk is over the CALLEE body but map_driver() creates
+        // nodes and pins in `g`. Keeping the snapshot the old inp_edges() gave
+        // us makes the loop immune to whichever body the epoch counter belongs
+        // to; the cost is one small vector per callee node.
+        for (auto sink : cn.inp_pins_snapshot()) {
+          auto gdrv = map_driver(sink.get_driver_pin());
           if (gdrv.is_invalid()) {
             continue;
           }
-          gdrv.connect_sink(it->second.create_sink_pin(e.sink.get_port_id()));
+          gdrv.connect_sink(it->second.create_sink_pin(sink.get_port_id()));
         }
       }
 
       // (c) resolve each callee OUTPUT port to its g-driver and the Sub-output's
       // consumer sinks (computed BEFORE deleting the Sub, which still owns them).
-      // Walk out_edges instead of probing get_driver_pin per decl: a declared
-      // output with no consumer has no materialized pin and hhds asserts.
+      // Walk the DRIVEN output pins instead of probing get_driver_pin per
+      // decl: a declared output with no consumer has no materialized pin and
+      // hhds asserts. The per-pin fanout stays edge-shaped because it is a SET;
+      // out_sorted_pins() just skips the instance's sink pins on the way.
       absl::flat_hash_map<uint32_t, std::vector<hhds::Pin_class>> out_sinks;
-      for (const auto& oe : sub.out_edges()) {
-        out_sinks[static_cast<uint32_t>(oe.driver.get_port_id())].push_back(oe.sink);
+      for (auto drv : sub.out_sorted_pins()) {
+        auto& sinks = out_sinks[static_cast<uint32_t>(drv.get_port_id())];
+        for (const auto& oe : drv.out_edges()) {
+          sinks.push_back(oe.sink);
+        }
       }
       std::vector<std::pair<hhds::Pin_class, std::vector<hhds::Pin_class>>> reconnect;
       for (const auto& od : sio->get_output_pin_decls()) {
@@ -1097,6 +1721,279 @@ int flatten_false_loop_subs(hhds::Graph* g) {
     }
   }  // fixpoint rounds
   return flattened;
+}
+
+int flatten_false_loop_subs(hhds::Graph* g, std::vector<std::string>* inlined_callees) {
+  return flatten_false_loop_subs_body(g, inlined_callees, /*include_multiinstance_cycles=*/false);
+}
+
+// The pass walks packed bit-slices RECURSIVELY, one frame per nesting level, at
+// roughly kSplitFrameBytes a frame. A stack that only reaches ~1000 frames is
+// not deep enough for XiangShan's packed structs, and the residual "word-level
+// combinational cycle" it leaves behind makes the occurrence color scheduler
+// refuse the module, taking the whole design's simulation with it.
+//
+// Depth is therefore a STACK budget. Rather than cap the design, ESCALATE: run
+// the walk on the caller's own stack first under the conservative
+// kSplitInlineDepth guard, and only when a descent actually reports
+// `recursion-depth` re-run it on a private kSplitStackBytes worker under
+// kSplitWorkerDepth. The common shallow wire bind then costs neither a thread
+// nor a 512 MB mapping.
+//
+// Running it twice is safe: the walk is a fixpoint over the graph it is handed,
+// so the deep run simply continues from what the shallow one left.
+//
+// pthreads directly, not std::thread, because the stack size is the whole point
+// and std::thread cannot set it.
+namespace {
+struct Split_job {
+  hhds::Graph*                                 g             = nullptr;
+  const absl::flat_hash_set<hhds::Node_class>* scoped_cycle  = nullptr;
+  const hhds::Node_class*                      scoped_buffer = nullptr;
+  const hhds::Pin_class*                       scoped_driver = nullptr;
+  int                                          max_rounds    = 16;
+  Split_result                                 result;
+  std::exception_ptr                           error;  // rethrown on the CALLER's thread after the join
+};
+
+void* split_worker(void* arg) {
+  auto* job = static_cast<Split_job*>(arg);
+  // An exception must never escape a pthread start routine: that would call
+  // std::terminate instead of returning the lowering error on the caller.
+  try {
+    job->result = split_packed_selfref_wires_body(job->g,
+                                                  kSplitWorkerDepth,
+                                                  job->scoped_cycle,
+                                                  job->scoped_buffer,
+                                                  job->scoped_driver,
+                                                  job->max_rounds);
+  } catch (...) {
+    job->error = std::current_exception();
+  }
+  return nullptr;
+}
+
+// Run the deep walk on a private big stack. Returns false when no such stack
+// could be had (an unusual rlimit, thread exhaustion); the caller then keeps the
+// shallow result rather than running the deep guard on a stack too small to hold
+// it.
+bool run_deep_on_big_stack(hhds::Graph* g, Split_result& out, const absl::flat_hash_set<hhds::Node_class>* scoped_cycle,
+                           const hhds::Node_class* scoped_buffer, const hhds::Pin_class* scoped_driver, int max_rounds = 16) {
+  pthread_attr_t attr;
+  if (pthread_attr_init(&attr) != 0) {
+    return false;
+  }
+  Split_job job{.g             = g,
+                .scoped_cycle  = scoped_cycle,
+                .scoped_buffer = scoped_buffer,
+                .scoped_driver = scoped_driver,
+                .max_rounds    = max_rounds,
+                .result        = {},
+                .error         = {}};
+  pthread_t tid{};
+  int       rc = pthread_attr_setstacksize(&attr, kSplitStackBytes);
+  if (rc == 0) {
+    rc = pthread_create(&tid, &attr, split_worker, &job);
+  }
+  pthread_attr_destroy(&attr);
+  if (rc != 0) {
+    return false;
+  }
+  pthread_join(tid, nullptr);
+  if (job.error) {
+    std::rethrow_exception(job.error);
+  }
+  out = job.result;
+  return true;
+}
+}  // namespace
+
+static int split_packed_cycle_slices(hhds::Graph* g);
+
+int repair_simulator_packed_cycles(hhds::Graph* g) { return repair_private_packed_cycles(g); }
+
+int repair_private_packed_cycles(hhds::Graph* g) {
+  if (g == nullptr) {
+    return 0;
+  }
+
+  // One probe for the whole repair. The non-strict walk below scores an INDUCED
+  // subgraph of this one (Memory/Sub and their edges are simply dropped), so an
+  // empty strict cycle means there is nothing for either stage to do -- and this
+  // runs over every definition of the library on every `inou.cgen.sim`.
+  {
+    absl::flat_hash_set<hhds::Node_class> any_cycle;
+    word_level_cycle_nodes(g, /*strict=*/true, any_cycle);
+    if (any_cycle.empty()) {
+      return 0;
+    }
+  }
+
+  // The caller owns a private library, so combinational hierarchy is expendable
+  // here. Expose a cross-instance false loop as ordinary logic first; stateful
+  // callees remain boundaries because their closure fails the comb predicate.
+  int repaired = flatten_false_loop_subs_body(g, nullptr, /*include_multiinstance_cycles=*/true);
+
+  return repaired + split_packed_cycle_slices(g);
+}
+
+static int split_packed_cycle_slices(hhds::Graph* g) {
+  if (g == nullptr) {
+    return 0;
+  }
+  int repaired = 0;
+
+  // One splitter round at a time, always against a freshly computed residual
+  // cycle. A blind whole-graph fixpoint keeps producing identity slices after
+  // the scheduling obstruction has disappeared.
+  for (int round = 0; round < 16; ++round) {
+    absl::flat_hash_set<hhds::Node_class> cycle;
+    word_level_cycle_nodes(g, /*strict=*/false, cycle);
+    if (cycle.empty()) {
+      break;
+    }
+
+    auto result  = split_packed_selfref_wires_body(g,
+                                                  kSplitInlineDepth,
+                                                  &cycle,
+                                                  /*scoped_buffer=*/nullptr,
+                                                  /*scoped_driver=*/nullptr,
+                                                  /*max_rounds=*/1);
+    repaired    += result.total;
+
+    if ((result.stop_reasons & kStopDepth) != 0) {
+      cycle.clear();
+      word_level_cycle_nodes(g, /*strict=*/false, cycle);
+      if (!cycle.empty()) {
+        Split_result deep;
+        if (run_deep_on_big_stack(g, deep, &cycle, nullptr, nullptr, /*max_rounds=*/1)) {
+          repaired     += deep.total;
+          result.total += deep.total;
+        }
+      }
+    }
+    if (result.total == 0) {
+      break;
+    }
+  }
+  return repaired;
+}
+
+int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, const hhds::Pin_class& driver,
+                              const std::vector<hhds::Node_class>& early_readers) {
+  // Guard BEFORE the trace: debug_name() dereferences the handle, so tracing an
+  // invalid buffer/driver would crash exactly the runs that turned tracing on.
+  if (g == nullptr || buffer.is_invalid() || driver.is_invalid() || early_readers.empty()) {
+    return 0;
+  }
+  const bool debug = std::getenv("LIVEHD_SIM_SPLIT_DEBUG") != nullptr;
+  if (debug) {
+    std::print("split[wire]: buffer={} driver={} early={}\n",
+               debug_name(buffer),
+               debug_name(driver.get_master_node()),
+               early_readers.size());
+  }
+
+  // The defining edge is already present. Find only nodes in the driver's
+  // backward cone, then retain the portion reachable from a read that existed
+  // before the wire write. Their intersection is precisely the local cycle
+  // candidate closed by this one edge. Later readers never enter the seed set.
+  absl::flat_hash_set<hhds::Node_class> ancestors;
+  std::vector<hhds::Node_class>         work;
+  Sub_comb_cache                        sub_cache;
+  // A pure-comb Sub joins the walk. Note WHICH model that is: `inp_edges()` /
+  // `out_edges()` on an instance are the PARENT-level connections and never
+  // enter the callee, so admitting the node models it as a CROSSBAR (every
+  // output depends on every input), not per output cone. That is deliberate and
+  // safe HERE, where the answer only decides whether to ATTEMPT a split -- an
+  // over-approximation just widens the candidate set the splitter is handed. It
+  // would NOT be safe in comb_pin_depends_on, which backs an ERROR and therefore
+  // pays for the pin-accurate `sub_output_deps` walk instead.
+  const auto                            is_comb = [&sub_cache](const hhds::Node_class& n) {
+    const auto op = livehd::graph_util::type_op_of(n);
+    if (op == Ntype_op::IO || op == Ntype_op::Memory || livehd::graph_util::is_type_register(n)) {
+      return false;
+    }
+    if (op == Ntype_op::Sub) {
+      return sub_is_pure_comb(n, sub_cache);
+    }
+    return true;
+  };
+  auto root = driver.get_master_node();
+  if (root.is_invalid() || !is_comb(root)) {
+    return 0;
+  }
+  work.push_back(root);
+  while (!work.empty()) {
+    auto n = work.back();
+    work.pop_back();
+    if (n.is_invalid() || !ancestors.insert(n).second) {
+      continue;
+    }
+    for (auto sink : n.inp_sorted_pins()) {  // read-only walk
+      auto drv = sink.get_driver_pin();
+      if (drv.is_invalid() || drv.is_const() || livehd::graph_util::is_graph_input_pin(drv)) {
+        continue;
+      }
+      auto pred = drv.get_master_node();
+      if (!pred.is_invalid() && is_comb(pred)) {
+        work.push_back(pred);
+      }
+    }
+  }
+  if (!ancestors.contains(buffer)) {
+    if (debug) {
+      std::print("split[wire]: no dependency (ancestors={})\n", ancestors.size());
+    }
+    return 0;  // attaching the driver did not close a self dependency
+  }
+
+  absl::flat_hash_set<hhds::Node_class> scoped_cycle;
+  for (const auto& reader : early_readers) {
+    if (!reader.is_invalid() && ancestors.contains(reader)) {
+      work.push_back(reader);
+    }
+  }
+  while (!work.empty()) {
+    auto n = work.back();
+    work.pop_back();
+    if (n.is_invalid() || !ancestors.contains(n) || !scoped_cycle.insert(n).second) {
+      continue;
+    }
+    // A driver's fanout is a SET, so the inner walk stays edge-shaped -- but
+    // out_sorted_pins() gets there through the node's pin list, so the node's
+    // SINK pins are skipped by a direction-bit test instead of having their
+    // in-edges decoded and thrown away.
+    for (auto drv : n.out_sorted_pins()) {
+      for (const auto& e : drv.out_edges()) {
+        auto succ = e.sink.get_master_node();
+        if (!succ.is_invalid() && ancestors.contains(succ)) {
+          work.push_back(succ);
+        }
+      }
+    }
+  }
+  scoped_cycle.insert(buffer);
+  scoped_cycle.insert(root);
+  if (debug) {
+    std::print("split[wire]: ancestors={} scoped={}\n", ancestors.size(), scoped_cycle.size());
+  }
+
+  Split_result r = split_packed_selfref_wires_body(g, kSplitInlineDepth, &scoped_cycle, &buffer, &driver);
+  if ((r.stop_reasons & kStopDepth) != 0) {
+    Split_result deep;
+    if (run_deep_on_big_stack(g, deep, &scoped_cycle, &buffer, &driver)) {
+      deep.total  += r.total;
+      deep.rounds += r.rounds;
+      r            = deep;
+    }
+  }
+  // The TolG caller owns the source-located diagnostic when a genuine cycle
+  // remains; do not emit the legacy global splitter warning here.
+  if (debug) {
+    std::print("split[wire]: rewired={} unresolved={} rounds={}\n", r.total, r.unresolved, r.rounds);
+  }
+  return r.total;
 }
 
 }  // namespace livehd::graph_util

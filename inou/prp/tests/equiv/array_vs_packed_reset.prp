@@ -1,0 +1,25 @@
+/*
+:name: array_vs_packed_reset
+:type: lec
+*/
+// PYROPE-vs-PYROPE group (README "Pyrope ↔ Pyrope variants"): this file is the
+// REFERENCE, and every `array_vs_packed_reset_<N>.prp` beside it is LEC'd
+// against it.
+//
+// THE CLAIM: `= 0` on a register ARRAY means the same thing it means on a
+// scalar register -- the reset value. This is array_vs_packed_dyn with the
+// `= nil` turned into `= 0` and nothing else changed, so a refutation here is
+// about the RESET and cannot be about the read path (that group proves).
+//
+// It refutes today: on the whole-array `update` path, cgen emits the reset bus
+// (`foo_data_rst`) and then never uses it -- the Memory cell's `reset` sink
+// (graph/cell.cpp pid 14) is left unconnected, so the `always @(posedge)` block
+// has no reset branch at all and the array holds whatever was written during
+// reset. The packed spelling resets normally, which is the divergence.
+pub mod top(we:u1, v:u16, raddr:u2) -> (rd:u4@[0]) {
+  reg foo:[4]u4:[ordering="old"] = 0
+  rd = foo[raddr]
+  if we != 0 {
+    foo = v
+  }
+}

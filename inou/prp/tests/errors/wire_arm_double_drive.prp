@@ -1,0 +1,17 @@
+/*
+:name: wire_arm_double_drive
+:type: error
+:error: more than one driver
+*/
+
+// 2c-wire — the same max-over-arms rule for a `wire`: two whole-value writes in
+// ONE arm both run, so the net has two drivers. Writing it once in each of two
+// mutually exclusive arms stays legal (that is one driver, a mux).
+comb t(a:u8, b:u8, c:bool) -> (o:u8) {
+  wire w:u8 = nil   // locate_error_here
+  if c {
+    w = a
+    w = b
+  }
+  o = w
+}

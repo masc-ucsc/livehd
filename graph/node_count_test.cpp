@@ -61,7 +61,7 @@ TEST(NodeCount, HierarchyMultipliesByInstanceCount) {
   auto cg = cio->create_graph();
   auto ca = create_typed_node(*cg, Ntype_op::And);
   cg->get_input_pin("x").connect_sink(ca.create_sink_pin(0));
-  cg->get_input_pin("y").connect_sink(ca.create_sink_pin(0));
+  cg->get_input_pin("y").connect_sink(ca.create_sink_pin(1));
   ca.create_driver_pin(0).connect_sink(cg->get_output_pin("o"));
   const uint64_t child_nodes = body_node_count(cg.get());  // 1 (And)
 

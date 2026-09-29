@@ -8,9 +8,8 @@
 #     operand prints only its source (`v=10 == 30`, not `30=30`);
 #   * `lhd sim --result-json PATH` enriches the result envelope with a per-test
 #     `tests` array: {test,status,cycle,failing_assert,prp_file,line,msg}.
-# The structural checks run hermetically (`--setup-only`, no compiler). When the
-# sibling ../hlop + ../iassert headers are present (a dev / repo-root run), it ALSO
-# host-compiles + runs `lhd sim --result-json` and checks the located stdout + the
+# Structural checks use `--setup-only`; runtime checks use declared
+# dependencies to run `lhd sim --result-json` and check the located stdout + the
 # envelope's tests array.
 
 set -u
@@ -99,28 +98,19 @@ EOF
 NOUT="$("$LHD" sim "$W/nest.prp" --setup-only --workdir "$W/nest" -q 2>&1)" && fail "nested tick was NOT rejected"
 echo "$NOUT" | grep -q 'cannot be nested' || fail "nested-tick rejection message missing: $NOUT"
 
-# ---- opportunistic real build + run (needs the sibling runtime headers) -------
-HLOP_INC=""
-IASSERT_INC=""
-for d in ../hlop/hlop ../hlop; do [ -f "$d/slop.hpp" ] && HLOP_INC="$d" && break; done
-for d in ../iassert/src ../iassert; do [ -f "$d/iassert.hpp" ] && IASSERT_INC="$d" && break; done
-if [ -z "$HLOP_INC" ] || [ -z "$IASSERT_INC" ]; then
-  echo "SKIP run checks: sibling hlop/iassert headers not found (structural checks passed)"
-  echo "PASS: lhd sim located asserts + --result-json (structural)"
-  exit 0
-fi
+# lhd locates its declared simulator runtime files; a failed build must fail.
 
 # the run exits non-zero (asserts fired) but still produces the located stdout + the
 # enriched result envelope.
 "$LHD" sim "$W/la.prp" --result-json "$W/r.json" --workdir "$W/run" --diag-fmt pretty > "$W/run.out" 2>&1
 RC=$?
-[ "$RC" = "1" ] || fail "expected exit 1 (asserts fired), got $RC: $(cat "$W/run.out")"
+[ "$RC" = "11" ] || fail "expected exit 11 (asserts fired), got $RC: $(cat "$W/run.out")"
 
 # located stdout: prp:line, cycle (post-loop clock = 11), both operands, the message
 grep -Eq 'la\.prp:[0-9]+:assert fail: clock=11: v=10 == 30  \[must reach 30\]' "$W/run.out" \
-  || fail "literal-operand located message wrong: $(grep 'ASSERT FAILED' "$W/run.out")"
-grep -Eq 'ASSERT FAILED \(la\.prp:[0-9]+\) clock=11: v=10 == expect=99' "$W/run.out" \
-  || fail "two-operand located message wrong: $(grep 'ASSERT FAILED' "$W/run.out")"
+  || fail "literal-operand located message wrong: $(grep 'assert fail:' "$W/run.out")"
+grep -Eq 'la\.prp:[0-9]+:assert fail: clock=11: v=10 == expect=99' "$W/run.out" \
+  || fail "two-operand located message wrong: $(grep 'assert fail:' "$W/run.out")"
 grep -q 'first at la.prp:' "$W/run.out" || fail "FAIL summary lacks the first-assert location"
 grep -q 'PASS cnt.good'    "$W/run.out" || fail "cnt.good did not pass: $(cat "$W/run.out")"
 
@@ -171,7 +161,7 @@ test cnt.sep {
 EOF
 "$LHD" sim "$W/un.prp" --result-json "$W/un.json" --workdir "$W/unrun" --diag-fmt pretty > "$W/un.out" 2>&1
 URC=$?
-[ "$URC" = "1" ] || fail "unary test: expected exit 1 (cnt.neg must fail), got $URC: $(cat "$W/un.out")"
+[ "$URC" = "11" ] || fail "unary test: expected exit 11 (cnt.neg must fail), got $URC: $(cat "$W/un.out")"
 grep -q 'FAIL cnt.neg'                "$W/un.out" || fail "cnt.neg did NOT fail -> unary '-' was dropped (silent false-PASS!): $(cat "$W/un.out")"
 grep -Eq 'clock=11: -v=-10 == 10'     "$W/un.out" || fail "negation operator/value missing from located message: $(grep 'ASSERT' "$W/un.out")"
 grep -q 'PASS cnt.sep'                "$W/un.out" || fail "cnt.sep (with '_' separators) failed to compile/run: $(cat "$W/un.out")"

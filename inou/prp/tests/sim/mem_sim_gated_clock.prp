@@ -1,0 +1,102 @@
+/*
+:name: mem_sim_gated_clock
+:type: simulation
+*/
+
+// todo_sim_pipeline.md Phase 0 (step 1 anchor) — A MEMORY WHOSE CLOCK IS A GATE
+// OUTPUT. This is the SILENT half of the gated-clock gap: a gated FLOP is
+// refused with `gated-clock-unsupported`, but the refusal probe iterates
+// `is_type_flop` over `clock_pin`, and a Memory cell is not a flop. So a
+// clock-gated memory compiles clean and writes EVERY tick, gate or no gate,
+// with no diagnostic at all — the same failure shape latch_sim_clockgate_high.prp
+// records for latches.
+//
+// `inou.cgen.verilog` gets it right on the same graph (the emitted
+// `cgen_memory_1rd_1wr` instance takes `.clk(clk & en)`), so this is a sim-only
+// divergence from LiveHD's own netlist.
+//
+// READING A MEMORY IS SUBTLER THAN IT LOOKS: the emitted read port carries
+// same-address write FORWARDING, so on a writing tick `rd` shows the write data
+// whether or not the array was written. c1 below is exactly that case, which is
+// why it is NOT the check — the checks are the NON-writing ticks c2/c4/c5,
+// where only the stored contents can answer. (mem_sim_negedge_write.prp records
+// the same trap for a different bug.)
+//
+// GOLDEN, from Icarus on the netlist LiveHD itself emits, driving `en` while the
+// clock is low: rd = 11, 22(forwarded), 11, 33(forwarded), 11, 33.
+// The c2 row is the whole test: the c1 write was presented with the gate CLOSED
+// and must not have landed.
+//
+// STATUS: LIVE since 2026-08-05. It failed SILENTLY when written — wrong
+// numbers, zero diagnostics. The refusal probe now covers Memory cells, and a
+// foldable gate lands on the write enable (gating the enable rather than
+// skipping the staged write, so the read port's same-address forwarding stays
+// consistent with what actually lands).
+pub mod memg(clk:bool, en:bool, a:u2, d:u8, we:bool) -> (rd:u8@[0], ctl:u8@[1]) {
+  wire g:bool = nil
+  g = clk and en
+  reg m:[4]u8:[clock_pin=ref g] = nil
+  if we {
+    m[a] = d
+  }
+  rd = m[a]
+
+  // CONTROL: a flop on the UNGATED reference clock, so a failure on `rd` is
+  // specifically the memory's clock and not a dead testbench.
+  reg c:u8:[clock_pin=ref clk] = 0
+  c   = d
+  ctl = c
+}
+
+test memg.gated_memory_holds_while_the_gate_is_closed {
+  mut acc  = memg
+  mut seen = 0
+  mut bad_rd  = 0
+  mut bad_ctl = 0
+  tick 6 {
+    // c0 write 11 @0 with the gate OPEN; c1 present 22 @0 with the gate CLOSED
+    // (must not land); c2 read @0; c3 write 33 @1 open; c4 read @0; c5 read @1.
+    mut av:u2   = 0
+    mut dv:u8   = 0
+    mut wev     = false
+    mut env     = true
+    if clock == 0 {
+      dv = 11
+      wev = true
+    } elif clock == 1 {
+      dv = 22
+      wev = true
+      env = false
+    } elif clock == 3 {
+      av = 1
+      dv = 33
+      wev = true
+    } elif clock == 5 {
+      av = 1
+    }
+    acc.a  = av
+    acc.d  = dv
+    acc.we = wev
+    acc.en = env
+    step
+    seen = seen + 1
+    if acc.ctl != dv {
+      bad_ctl = bad_ctl + 1
+    }
+    // Only the NON-writing ticks say anything about the array: a writing tick's
+    // read is forwarded and would pass even if nothing was ever stored.
+    if clock == 2 or clock == 4 {
+      if acc.rd != 11 {
+        bad_rd = bad_rd + 1
+      }
+    }
+    if clock == 5 {
+      if acc.rd != 33 {
+        bad_rd = bad_rd + 1
+      }
+    }
+  }
+  assert(seen == 6, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_ctl == 0, "CONTROL: the flop on the ungated reference clock loads every tick")
+  assert(bad_rd == 0, "a memory on a GATED clock does not store while the gate is closed")
+}

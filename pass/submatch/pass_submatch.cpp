@@ -12,6 +12,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
+#include "hhds/hash_mix.hpp"
 #include "node_util.hpp"
 #include "str_tools.hpp"
 #include "waterhash.hpp"
@@ -61,10 +62,9 @@ uint64_t pass_submatch::hash_mffc_node(hhds::Node_class n_driver, uint64_t h_sin
 uint64_t pass_submatch::hash_node(hhds::Node_class n) {
   uint64_t              h;
   std::vector<uint16_t> i_hash;
-  auto                  edges = n.inp_edges();
-  i_hash.reserve(edges.size());
-  for (const auto& e : edges) {
-    i_hash.push_back(static_cast<uint16_t>(e.sink.get_port_id()));
+  // Read-only pin walk: the hash only ever wanted the sink PORT IDs.
+  for (auto sink : n.inp_sorted_pins()) {
+    i_hash.push_back(static_cast<uint16_t>(sink.get_port_id()));
   }
   h = lh::woothash64(i_hash.data(), i_hash.size() * 2);
   h = lh::woothash64(&h, 8, static_cast<uint64_t>(type_op_of(n)) & 0xFFFF);
@@ -86,11 +86,11 @@ void each_graph_output_driver(hhds::Graph* g, F&& fn) {
     if (out_pin.is_invalid()) {
       continue;
     }
-    auto edges = out_pin.inp_edges();
-    if (edges.empty()) {
+    auto drv = out_pin.get_driver_pin();  // one driver per sink pin
+    if (drv.is_invalid()) {
       continue;
     }
-    fn(edges.front().driver);
+    fn(drv);
   }
 }
 
@@ -135,30 +135,36 @@ void pass_submatch::find_mffc_group(hhds::Graph* g) {
   absl::flat_hash_map<hhds::Class_index, MFFCNode> mffc;
 
   each_graph_output_driver(g, [&](const hhds::Pin_class& driver) {
-    auto node                       = driver.get_master_node();
-    auto ci                         = node.get_class_index();
-    auto h_root                     = hash_mffc_root(node);
-    mffc[ci]                        = {mffc_id++, h_root, 0};
+    auto node   = driver.get_master_node();
+    auto ci     = node.get_class_index();
+    auto h_root = hash_mffc_root(node);
+    mffc[ci]    = {mffc_id++, h_root, 0};
     mffc_root.push_back({ci, h_root});
     mffc_root_set.insert(ci);
   });
 
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     // Skip a single-fanout node. Cap the walk at 2 instead of size()-ing the
     // lazy out_edges view (only the "exactly one out edge" distinction matters).
     size_t fanout = 0;
-    for (const auto& e : node.out_edges()) {
-      (void)e;
-      if (++fanout >= 2) {
+    for (const auto& dpin : node.out_sorted_pins()) {
+      for (const auto& e : dpin.out_edges()) {
+        (void)e;
+        ++fanout;
+        if (fanout >= 2) {
+          break;
+        }
+      }
+      if (fanout >= 2) {
         break;
       }
     }
     if (fanout == 1) {
       continue;
     }
-    auto ci                         = node.get_class_index();
-    auto h_root                     = hash_mffc_root(node);
-    mffc[ci]                        = {mffc_id++, h_root, 0};
+    auto ci     = node.get_class_index();
+    auto h_root = hash_mffc_root(node);
+    mffc[ci]    = {mffc_id++, h_root, 0};
     mffc_root.push_back({ci, h_root});
     mffc_root_set.insert(ci);
   }
@@ -167,7 +173,9 @@ void pass_submatch::find_mffc_group(hhds::Graph* g) {
     uint32_t               mffc_size = 1;
     std::queue<FringeNode> fringe;
     fringe.push({mffc_root[id].ci, mffc_root[id].h, 0});
-    mffc_depth_tree.push_back({{mffc_root[id].h, 1}});
+    mffc_depth_tree.push_back({
+        {mffc_root[id].h, 1}
+    });
     for (uint32_t mffc_depth = 1; fringe.size() > 0; ++mffc_depth) {
       std::vector<uint64_t> i_hash;
       while (fringe.size()) {
@@ -178,24 +186,29 @@ void pass_submatch::find_mffc_group(hhds::Graph* g) {
           break;
         }
         fringe.pop();
-        for (auto e : g->get_node(ci_sink).inp_edges()) {
-          auto ci_driver = e.driver.get_master_node().get_class_index();
-          if (mffc_root_set.contains(ci_driver) || mffc.contains(ci_driver)) {
-            continue;
+        for (auto sink : g->get_node(ci_sink).inp_sorted_pins()) {
+          // PLURAL: a compact loop's carry-in sink holds two drivers
+          // (pass/legalize/legalize.cpp:301).
+          for (const auto& drv : sink.get_driver_pins()) {
+            auto ci_driver = drv.get_master_node().get_class_index();
+            if (mffc_root_set.contains(ci_driver) || mffc.contains(ci_driver)) {
+              continue;
+            }
+            auto h_driver   = hash_mffc_node(drv.get_master_node(), h_sink, sink.get_port_id());
+            mffc[ci_driver] = {mffc[ci_sink].id, h_driver, depth + 1};
+            fringe.push({ci_driver, h_driver, depth + 1});
+            i_hash.push_back(h_driver);
           }
-          auto h_driver   = hash_mffc_node(e.driver.get_master_node(), h_sink, e.sink.get_port_id());
-          mffc[ci_driver] = {mffc[ci_sink].id, h_driver, depth + 1};
-          fringe.push({ci_driver, h_driver, depth + 1});
-          i_hash.push_back(h_driver);
         }
         mffc_size++;
       }
       if (i_hash.empty()) {
         break;
       }
-      std::sort(i_hash.begin(), i_hash.end());
-      uint64_t h_mffc = lh::woothash64(i_hash.data(), i_hash.size() * 8);
-      h_mffc ^= mffc_depth_tree[id].back().h;
+      // The operand hashes are a MULTISET: order-independent by construction,
+      // with no sort (each term already carries its own sink pid).
+      uint64_t h_mffc  = hhds::field_combine(i_hash);
+      h_mffc          ^= mffc_depth_tree[id].back().h;
       mffc_depth_tree[id].push_back({h_mffc, mffc_size});
       max_mffc_depth = std::max(max_mffc_depth, mffc_depth);
     }
@@ -251,8 +264,10 @@ void pass_submatch::find_subs(hhds::Graph* g) {
       }
       sorted_class_nodes.emplace_back(ci);
       visited.insert(ci);
-      for (auto e : g->get_node(ci).inp_edges()) {
-        node_queue.push(e.driver.get_master_node().get_class_index());
+      for (auto sink : g->get_node(ci).inp_sorted_pins()) {
+        for (const auto& drv : sink.get_driver_pins()) {  // PLURAL: loop carry
+          node_queue.push(drv.get_master_node().get_class_index());
+        }
       }
     }
   });
@@ -271,22 +286,23 @@ void pass_submatch::find_subs(hhds::Graph* g) {
     for (size_t depth = 0; depth < submatch_depth; ++depth) {
       size_t                max_depth = 0;
       std::vector<uint64_t> i_hash;
-      for (auto e : node.inp_edges()) {
-        auto drv_ci = e.driver.get_master_node().get_class_index();
-        auto it     = node2depth_hash.find(drv_ci);
-        if (it == node2depth_hash.end() || depth == 0) {
-          i_hash.emplace_back(e.sink.get_port_id());
-        } else {
-          auto subtree_depth = std::min(it->second.size(), depth);
-          i_hash.emplace_back(it->second[subtree_depth - 1] ^ e.sink.get_port_id());
-          max_depth = std::max(subtree_depth, max_depth);
+      for (auto sink : node.inp_sorted_pins()) {
+        for (const auto& drv : sink.get_driver_pins()) {  // PLURAL: loop carry
+          auto drv_ci = drv.get_master_node().get_class_index();
+          auto it     = node2depth_hash.find(drv_ci);
+          if (it == node2depth_hash.end() || depth == 0) {
+            i_hash.emplace_back(sink.get_port_id());
+          } else {
+            auto subtree_depth = std::min(it->second.size(), depth);
+            i_hash.emplace_back(it->second[subtree_depth - 1] ^ sink.get_port_id());
+            max_depth = std::max(subtree_depth, max_depth);
+          }
         }
       }
       if (depth != max_depth) {
         break;
       }
-      std::sort(i_hash.begin(), i_hash.end());
-      uint64_t h = lh::woothash64(i_hash.data(), i_hash.size() * 8);
+      uint64_t h = hhds::field_combine(i_hash);
       uint64_t n = static_cast<uint64_t>(type_op_of(node));
       h          = lh::waterhash(&n, 4, h & 0xFFFF);
       if (depth == 0) {
@@ -327,11 +343,16 @@ void pass_submatch::find_subs(hhds::Graph* g) {
     for (uint64_t height = 1; has_output; ++height) {
       has_output = false;
       // Only trace one output edge: take the first (front() re-walks to begin()).
-      if (node.has_out_edges()) {
-        auto e     = node.out_edges().front();
-        node       = e.sink.get_master_node();
-        pid        = e.sink.get_port_id();
-        has_output = true;
+      // First fanout sink of the node's first CONNECTED driver pin.
+      for (const auto& dpin : node.out_sorted_pins()) {
+        auto r = dpin.out_edges();
+        if (auto it = r.begin(); it != r.end()) {
+          const auto snk = (*it).sink;
+          node           = snk.get_master_node();
+          pid            = snk.get_port_id();
+          has_output     = true;
+          break;
+        }
       }
       if (!has_output) {
         break;
@@ -341,7 +362,7 @@ void pass_submatch::find_subs(hhds::Graph* g) {
         break;
       }
       h ^= node2depth_hash[node_ci][height - 1];
-      h = lh::waterhash(&h, 4, pid & 0xFFFF);
+      h  = lh::waterhash(&h, 4, pid & 0xFFFF);
       node2height_hash[ci].emplace_back(Root_hash(node_ci, h));
 
       if (height_hash2node.size() < height) {
@@ -369,8 +390,7 @@ void pass_submatch::find_subs(hhds::Graph* g) {
         // tied entry in (run-to-run-varying) iteration order. Require a strict
         // improvement, breaking ties by largest depth then smallest hash so the
         // chosen candidate is reproducible regardless of map iteration order.
-        if (score > best_score
-            || (score == best_score && score > 0 && (depth > d_best || (depth == d_best && hash < h_best)))) {
+        if (score > best_score || (score == best_score && score > 0 && (depth > d_best || (depth == d_best && hash < h_best)))) {
           h_best     = hash;
           d_best     = static_cast<uint8_t>(depth);
           best_score = score;
@@ -403,8 +423,10 @@ void pass_submatch::find_subs(hhds::Graph* g) {
         if (global_node_set.count(ci)) {
           shared_node_set.insert(ci);
         }
-        for (auto e : g->get_node(ci).inp_edges()) {
-          traverse_tree(e.driver.get_master_node().get_class_index(), depth + 1);
+        for (auto sink : g->get_node(ci).inp_sorted_pins()) {
+          for (const auto& drv : sink.get_driver_pins()) {  // PLURAL: loop carry
+            traverse_tree(drv.get_master_node().get_class_index(), depth + 1);
+          }
         }
       };
       traverse_tree(root, 0);
@@ -417,8 +439,8 @@ void pass_submatch::find_subs(hhds::Graph* g) {
     std::print("#Nodes covered: {}\n", global_node_set.size());
     std::print("#Nodes shared:  {}\n", shared_node_set.size());
 
-    absl::flat_hash_map<hhds::Class_index, hhds::Class_index>                 leaf2root;
-    absl::flat_hash_map<uint64_t, absl::flat_hash_set<hhds::Class_index>>     hash2leaf;
+    absl::flat_hash_map<hhds::Class_index, hhds::Class_index>             leaf2root;
+    absl::flat_hash_map<uint64_t, absl::flat_hash_set<hhds::Class_index>> hash2leaf;
     for (const auto& [ci, vec] : node2height_hash) {
       for (size_t d = 0; d < d_best && d < vec.size(); ++d) {
         if (shared_node_set.count(ci)) {

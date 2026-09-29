@@ -1,0 +1,9 @@
+/*
+:name: generic_top_default
+:type: lec
+:lec_top: generic_top_default
+*/
+
+pub mod generic_top_default<T=u8, N=3>(a:T) -> (y:u9@[0]) {
+  y = a + N
+}

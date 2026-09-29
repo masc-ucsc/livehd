@@ -6,9 +6,47 @@ load("//tools:cc_headers.bzl", "cc_direct_headers")
 load("//tools:copt_default.bzl", "COPTS")
 
 exports_files([
+    "tests/equiv/ready_signal_chain.v",
+    "tests/equiv/ready_signal_chain_1.v",
+    "tests/equiv/ready_signal_slices.v",
+    "tests/equiv/ready_signal_masked.v",
+    "tests/lec.py",
     "tests/pyrope/proc_lambda.prp",
     "tests/pyrope/simple.prp",
     "tests/comptime/trivial_if.prp",
+    "tests/sim/flop_feeds_transparent_high_latch.prp",
+    "tests/sim/flop_sim_negedge_sole_clock.prp",
+    "tests/sim/mem_color_direct.prp",
+    "tests/sim/mem_whole.prp",
+    "tests/sim/mem_none_color_random.prp",
+    "tests/sim/packed_update_chain.prp",
+    "tests/sim/cond_call_always_consumer.prp",
+    "tests/sim/color_kernel_multiwrite.prp",
+    "tests/sim/color_kernel_unsigned_msb.prp",
+    "tests/sim/color_kernel_llvm_scalar.prp",
+    "tests/sim/color_kernel_llvm_reg.prp",
+    "tests/sim/color_kernel_llvm_reg_const.prp",
+    "tests/sim/color_kernel_llvm_wide.prp",
+    "tests/sim/reduce_wide.prp",
+    "tests/sim/color_kernel_llvm_mem_whole.prp",
+    "tests/sim/mem_sim_gated_clock.prp",
+    "tests/sim/loop_roll_conditional_state_call.prp",
+    "tests/sim/loop_state_multi_carry.prp",
+    "tests/sim/loop_mixed_carry.prp",
+    "tests/sim/div_narrow_result.prp",
+    "tests/sim/loop_inlined_capture.prp",
+    "tests/sim/loop_inlined_array.prp",
+    "tests/sim/mem_wensize_lanes.prp",
+    "tests/sim/loop_fused_state.prp",
+    "tests/sim/loop_carry_kinds_sim.prp",
+    "tests/sim/loop_roll_carry.prp",
+    "tests/sim/loop_hierarchy.prp",
+    "tests/sim/loop_invariant_broadcast.prp",
+    "tests/sim/tune_idle_tables.prp",
+    "tests/sim/tune_lfsr.prp",
+    "tests/sim/loop_carry_split_reset_domains.prp",
+    "tests/sim/kernel_lane_split_negedge_rf.prp",
+    "tests/sim/icg_secondary_clock_dirty.prp",
 ])
 
 # The pyrope/verilog golden pairs (used by the lhd flow-matrix tests).
@@ -35,15 +73,22 @@ filegroup(
 filegroup(
     name = "abc_tests",
     srcs = [
+        "tests/abc/clock_gate_latch.v",  # lhd_unate_smoke pins its full-design proof
         "tests/abc/test.lib",
+        "tests/abc/test_qn.lib",
+        "tests/abc/timing.lib",
         "tests/pyrope/abc_arith.prp",
         "tests/pyrope/abc_block_attr.prp",
+        "tests/pyrope/abc_boundary.prp",
         "tests/pyrope/abc_comb.prp",
+        "tests/pyrope/abc_comb_loop.prp",
         "tests/pyrope/abc_constmul.prp",
         "tests/pyrope/abc_flat_names.prp",
         "tests/pyrope/abc_mathops.prp",
         "tests/pyrope/abc_mem.prp",
+        "tests/pyrope/abc_pi_fanout.prp",
         "tests/pyrope/abc_seq.prp",
+        "tests/pyrope/abc_ware_attr.prp",
         "tests/pyrope/hier_seq.prp",
     ],
     visibility = ["//visibility:public"],
@@ -66,9 +111,20 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core",
+        # The generated-C++ helper text (`?` literals, tune hashing) prp_sim emits
+        # into drv.cpp VERBATIM, shared with inou.cgen.sim. Header-only.
+        "//inou/cgen:sim_tune_hdrs",
         "//lnast",
         "//pass/common:pass",
-        "@prpparse//:prpparse",
+        # THE attribute-name vocabulary (battr.hpp). Header-only, so this does
+        # NOT link the upass/core plugin -- it just stops prp2lnast from
+        # hand-copying the list, which had already drifted both ways.
+        "//upass/core:battr_hdr",
+        # The integer-type width ceiling (kMaxIntTypeWidth). Header-only for the
+        # same reason as battr_hdr: one ceiling, no hand-copied constant that can
+        # drift from the one the uPass generic binder enforces.
+        "//upass/core:range_bits_hdr",
+        "@prpparse",
         # 2f-sim B0: prp_sim reads cgen_sim's per-module <stem>.iface.json
         # manifest instead of text-scraping the generated headers.
         "@rapidjson",
@@ -85,7 +141,7 @@ cc_test(
     copts = COPTS,
     deps = [
         "@googletest//:gtest_main",
-        "@prpparse//:prpparse",
+        "@prpparse",
     ],
 )
 
@@ -98,6 +154,7 @@ cc_test(
             "$(location //inou/prp:%s)" % prp_file,
         ],
         data = [
+            "//inou/prp:tests/lec.py",
             "//inou/prp:tests/prplib.py",
             "//inou/prp:tests/pyrope_test.py",
             "//inou/prp:%s" % prp_file,
@@ -112,19 +169,58 @@ cc_test(
     ])
 ]
 
-# Fast multi-module prp_writer regression: emit sibling files, then compile
-# only the emitted top and require importer-directory-relative discovery to
-# pull in its emitted callee. This intentionally does not invoke LEC.
+# sim.tune DRIVER contract (prp_sim_rt.hpp, sim_profile.md §6): run-time
+# `--set sim.unknown_zero=true` == a generated sim.unknown_zero=true build, the
+# per-test metrics + digests of every --result-json row, profiling changes no
+# simulated value and reproduces its counts under a fixed stride, the `--set`
+# key classes, and `set` as a reserved test-parameter name. Hermetic like the
+# prp-sim targets (runfiles hlop/iassert headers + the host C++ compiler).
 sh_test(
-    name = "prp-p2p-sibling-recompile",
-    srcs = ["tests/p2p_recompile_test.py"],
+    name = "prp-sim-tune-driver",
+    srcs = ["tests/sim_tune_driver_test.py"],
     args = [
         "-i",
-        "$(location //inou/prp:tests/pyrope/sibling_recompile.prp)",
+        "$(location //inou/prp:tests/sim/unknown_tb_literal_once.prp)",
     ],
     data = [
-        "//inou/prp:tests/p2p_recompile_test.py",
-        "//inou/prp:tests/pyrope/sibling_recompile.prp",
+        "//inou/prp:sim_runtime_hdrs",
+        "//inou/prp:tests/prpsim.py",
+        "//inou/prp:tests/sim/unknown_tb_literal_once.prp",
+        "//inou/prp:tests/sim_tune_driver_test.py",
+        "//lhd",
+    ],
+)
+
+# Pyrope rejects a statically out-of-range array index in uPass. A dynamic
+# index cannot be decided until execution, so the emitted Verilog keeps a bounds
+# assertion on the index; native simulation checks the in-range values. The
+# native simulator does not evaluate lgassert yet, so the diagnostic FIRING is
+# checked only by the event-simulator leg: --test_env=LHD_EXTERNAL_SIM=1 plus a
+# --test_env=PATH=... that reaches iverilog/vvp (add --strategy=TestRunner=local
+# when they live under /tmp, which the sandbox hides). Missing tools then FAIL.
+sh_test(
+    name = "prp-array-oob-runtime",
+    srcs = ["tests/array_oob_runtime_test.sh"],
+    args = ["$(location //inou/prp:tests/lgraph/array_oob_runtime.prp)"],
+    data = [
+        "//inou/prp:tests/lgraph/array_oob_runtime.prp",
+        "//tools:native_sim.py",
+        "//lhd",
+    ],
+)
+
+# A runtime bit-range write whose endpoints arrive REVERSED (upper endpoint
+# `i-1` can even go negative). Two obligations, neither statically decidable:
+# the destination comes back untouched (native simulation), and the
+# descending-range diagnostic fires (a signed guard on both endpoints is
+# checked statically; firing only under LHD_EXTERNAL_SIM, as above).
+sh_test(
+    name = "prp-range-reversed-runtime",
+    srcs = ["tests/range_reversed_runtime_test.sh"],
+    args = ["$(location //inou/prp:tests/lgraph/range_reversed_runtime.prp)"],
+    data = [
+        "//inou/prp:tests/lgraph/range_reversed_runtime.prp",
+        "//tools:native_sim.py",
         "//lhd",
     ],
 )
@@ -160,6 +256,7 @@ sh_test(
             "$(location //inou/prp:%s)" % prp_file,
         ],
         data = [
+            "//inou/prp:tests/lec.py",
             "//inou/prp:tests/prplib.py",
             "//inou/prp:tests/pyrope_test.py",
             "//inou/prp:%s" % prp_file,
@@ -170,30 +267,20 @@ sh_test(
 ]
 
 # TBD-feature trackers (tests/fixme/): each `.prp` exercises a documented but
-# NOT-yet-implemented Pyrope feature (marked "TBD" in the docs / 15-tbd.md). Most
-# are `:type: compile` (the feature has no lowering, so the compile FAILS by
-# design); `testbench_step` is `:type: simulation` (the instance/`step`/field-poke
-# model runs, but the string-path `peek("a/b")`/`poke("a/b",v)` accessors are
-# still unimplemented). Each flips green once the feature lands — at which point
-# drop the `fixme` tag and move the file into the
-# normal glob above. Tagged `fixme` so `.bazelrc` (`-fixme`) keeps `bazel test
-# //...` green; run one with the tag filter cleared to see the failure:
-#   bazel test //inou/prp:prp-tbd-temporal_past --test_tag_filters=
-# Covered: temporal library (past[n]), standard library (import("prp")),
-# verification extras (requires/ensures), testbench extras (step/peek/poke),
-# and the finish-generics gaps from todo/livehd/3g.html (generic_* = body
-# references of a generic name / declaration defaults <T, N=4> / named <T=…>
-# bindings / generic-valued input default, input_default = input defaults with
-# no generics involved; each header records today's exact diagnostic; the
-# `T(a)` constructor form is tracked by the prp-equiv-gen_type_cast pair
-# below instead, which also LEC-checks the lowering once it lands).
-# (The `lg` attribute used to be on this list but is now implemented — its TBD
-# markers were removed from the docs.) The `macro=` memory-compiler binding is
-# also still TBD but is silently accepted-and-ignored — it compiles clean today
-# (no diagnostic), so it needs an emitted-Verilog grep harness, not a compile
-# test, and is tracked in todo/pyrope/3f-macro.html instead.
-# One entry (wire_field_const_store) is a known-BUG tracker rather than a TBD
-# feature: valid code that miscompile-errors today (see its fixture header).
+# NOT-yet-implemented Pyrope feature, or a known BUG on valid code. The compile
+# FAILS by design, so each is tagged `fixme` and `.bazelrc` (`-fixme`) keeps
+# `bazel test //...` green; run one with the tag filter cleared to see it:
+#   bazel test //inou/prp:prp-tbd-vector_io_ports --test_tag_filters=
+# When one flips green, drop it from this list and move the file into the
+# normal glob above (tests/pyrope/, or tests/sim/ for `:type: simulation`).
+#
+# PROMOTED 2026-09-06 (docs<->impl consistency audit, see fixes_pyrope.md):
+# temporal_past, testbench_step, input_default and the six generic_* trackers
+# all pass, so the 15-tbd.md rows claiming generics / input defaults are TBD
+# were stale. The three 2f-latch verify twins (latch_verify_{hold,low},
+# flop_verify_posneg) had already lost their `fixme` tag at M8 and moved too.
+# testbench_step was additionally rewritten for the sigref removal: reads are
+# bare dotted access, `regref` is the one way to DRIVE a cell.
 [
     sh_test(
         name = "prp-tbd-%s" % base,
@@ -203,78 +290,32 @@ sh_test(
             "$(location //inou/prp:tests/fixme/%s.prp)" % base,
         ],
         data = [
+            "//inou/prp:tests/lec.py",
             "//inou/prp:tests/prplib.py",
-            "//inou/prp:tests/prpsim.py",  # testbench_step is :type: simulation
             "//inou/prp:tests/pyrope_test.py",
             "//inou/prp:tests/fixme/%s.prp" % base,
-            "//inou/prp:sim_runtime_hdrs",
             "//lhd",
         ],
-        # testbench_step + temporal_past now lower/run, as do the
-        # 3g subtask-A body-binding trackers (generic_{body_type,const_value,
-        # lambda_param} — a generic name is now visible+substituted in the body);
-        # the rest are still TBD. (temporal_past: `past[N](x)` lowers to a depth-N
-        # `stage` shift register — see prp2lnast function_call_expr_to_node.)
-        # verif_requires is GONE: requires/ensures were removed from the language
-        # (user ruling, 2026-07-25) — write assume for a pre, assert for a post.
-        tags = [] if base in (
-            # 2f-latch M8 (edge normalization): the two latch twins and the
-            # posedge/negedge twin all carry REAL verdicts now — the encoder no
-            # longer sees a Latch or a same-clock edge difference, because
-            # pass.single_edge rewrote them away before it ran. Promoted out of
-            # the fixme arm 2026-07-24.
-            "latch_verify_hold",
-            "latch_verify_low",
-            "flop_verify_posneg",
-            "testbench_step",
-            "temporal_past",
-            "generic_body_type",
-            "generic_const_value",
-            "generic_lambda_param",
-            "generic_default_arg",
-            "input_default",
-            # B/C land via the prpparse grammar (generic decl-defaults + named
-            # binds); they need the @prpparse local override / re-pinned commit.
-            "generic_decl_default",
-            "generic_named_bind",
-        ) else ["fixme"],
+        tags = ["fixme"],
     )
     for base in [
-        "temporal_past",
+        # Standard library `import("prp")` — the 13-stdlib.md wish-list chapter.
         "stdlib_import",
-        "testbench_step",
-        "generic_body_type",
-        "generic_const_value",
-        "generic_lambda_param",
-        "generic_decl_default",
-        "generic_named_bind",
-        "generic_default_arg",
-        "input_default",
         # A VECTOR port (unnamed/positional tuple, or an array) has no lowering
         # in either direction. Counterpart of tests/sim/tuple_io_ports.prp,
         # which covers the NAMED tuple and passes: a named tuple's field order
         # is not guaranteed so its leaves may only be addressed by name, while
         # an unnamed entry is the one aggregate with a defined order and so the
-        # only one that could be indexed/packed as a vector.
+        # only one that could be indexed/packed as a vector. NOT listed in
+        # 15-tbd.md — add a row (fixes_pyrope_future.md F3).
         "vector_io_ports",
-        # Known BUG tracker (not TBD): const store to a wire-BUNDLE field is
-        # folded+dropped (detupled dotted declare loses its wire mode), then
-        # tolg errors "wire 'io.a' is never driven" on valid code. See the
-        # fixture header for the root-cause chain and fix direction.
-        "wire_field_const_store",
-        # todo/livehd/2f-latch BMC twins (:type: verify) of the sim trackers
-        # above — the SAME self-checking properties as design-body asserts for
-        # `lhd formal verify` (stated twice because test-block asserts are
-        # invisible to verify and body asserts are not executed by sim; see
-        # each header for the dual-fixture conventions). GREEN since M8
-        # (untagged above): pass.single_edge retypes the Latch into a
-        # flop-with-enable and slots a negedge flop into its own sub-step, so
-        # the ordinary Flop encoding decides all three. They stay in tests/fixme/
-        # only because moving them would renumber every prp-tbd-* target; the
-        # `fixme` TAG is what mattered and it is gone.
-        "latch_verify_hold",
-        "latch_verify_low",
-        "flop_verify_posneg",
+        # Known BUG tracker (not TBD): a tuple type MIXING a defaulted field
+        # with a plain one cannot be register state, though both UNIFORM
+        # spellings work (equiv/defaulted_tuple.prp, equiv/reg_named_tuple_type.prp).
+        # prp2lnast under-describes the mixed form -- the plain field's type
+        # never reaches LNAST -- so the detupler declines rather than publish a
+        # layout that would silently drop a flop. See the fixture header.
+        "mixed_defaulted_tuple_type",
     ]
 ]
 
@@ -292,6 +333,7 @@ sh_test(
             "$(location //inou/prp:%s)" % prp_file,
         ],
         data = [
+            "//inou/prp:tests/lec.py",
             "//inou/prp:tests/prplib.py",
             "//inou/prp:tests/pyrope_test.py",
             "//lhd",
@@ -304,7 +346,7 @@ sh_test(
 # 2f-lgimport: the lg: import (compiled lgraph) two-step flow + LEC, plus the
 # not-found / port-mismatch diagnostics, exercised from a self-contained script
 # (it generates its own .v / .prp fixtures and drives `lhd compile` + `lhd
-# check`). Needs the yosys scripts (lgcheck) on top of the lhd binary.
+# check`) through native Slang and the default LEC solver.
 sh_test(
     name = "prp-import-lg",
     srcs = ["tests/imports/lg_import_test.sh"],
@@ -356,24 +398,47 @@ sh_test(
 # `sim_runtime_hdrs` data dep below), discovered by name at runtime.
 cc_direct_headers(
     name = "sim_runtime_hdrs",
+    visibility = ["//visibility:private"],
     deps = [
         "@hlop//hlop",
         "@iassert",
     ],
-    visibility = ["//visibility:private"],
 )
 
-# SILENT-SIM-BUG regressions (fixed 2026-08-02). Each fixture is a
-# 4-tick run whose asserts capture the CORRECT end-of-tick values (taken from
-# Icarus on the netlist LiveHD itself emits), and each fails TODAY on a shape
-# `lhd sim` gets wrong with NO diagnostic -- reports 0 errors and hands back
-# wrong numbers. Every one also carries CONTROL asserts that pass, so a failure
-# is always attributable to the named bug rather than to a dead testbench.
+# KNOWN-FAILING sim fixtures (tagged `fixme`, which .bazelrc's
+# `--test_tag_filters -fixme` excludes from `bazel test`).
 #
-# They are live tests now. Keep the list for the target-generating expression
-# below and for future independently diagnosed trackers; an entry here is a
-# known failure and must be removed as part of its fix.
-_SIM_FIXME = []
+# Each is a real design whose asserts capture the CORRECT end-of-tick values --
+# taken from Icarus on the netlist LiveHD itself emits, so a fixture going green
+# means the sim agrees with LiveHD's own Verilog rather than with a
+# hand-derivation -- and each carries CONTROL asserts that pass today, so a
+# failure is always attributable to the named bug rather than to a dead
+# testbench. An entry here is a known failure and must be removed as part of its
+# fix.
+#
+# The current occupants are todo_sim_pipeline.md's Phase-0 anchors, each written
+# WITH its algorithm step so the step has a value-checking regression to land
+# against.
+# 2026-08-06: emptied. The five occupants all went green in one session —
+# slice_ring_through_sub / shift_or_pack_ring (try_slice_read grew the
+# And/SRA/identity-wrapper consumer idioms + slice_operand's Set_mask arm),
+# whole_array_in_split_callee (port_reach joins write cones of an UNCLOCKED
+# memory), neg_flop_in_callee_ring (negedge-only callees on a ring take the
+# group path, atomic advance in the parent's fall), and
+# chained_clock_gates_mixed_phase (icg_guards' fall_commit flavour + the latch
+# high window reading earlier latches' `_din`). Kept as an empty list so the
+# next known-failing fixture has a place to land.
+_SIM_FIXME = [
+    # REFUSAL, found 2026-08-06 by differential fuzzing against Icarus. A clock
+    # gate folds or is refused according to the NAME of the port carrying the
+    # clock: `clk`/`clock`/`clk_i`/`clk2` fold, `gclk`/`gin`/`myclk`/`ck`/`clkin`
+    # are refused. The fixture instantiates two children with BYTE-IDENTICAL
+    # bodies, both handed the parent's own reference clock, differing only in
+    # port spelling. In-design controls prove a non-blessed name is fine when
+    # used DIRECTLY as a clock (only gating one is refused) and that the same
+    # gate body on a `clk`-named port folds.
+    "gate_on_named_clock_port",
+]
 
 [
     sh_test(
@@ -384,6 +449,7 @@ _SIM_FIXME = []
             "$(location //inou/prp:%s)" % prp_file,
         ],
         data = [
+            "//inou/prp:tests/lec.py",
             "//inou/prp:tests/prplib.py",
             "//inou/prp:tests/prpsim.py",
             "//inou/prp:tests/pyrope_test.py",
@@ -394,6 +460,41 @@ _SIM_FIXME = []
         tags = ["fixme"] if prp_file.split("/")[-1].split(".")[0] in _SIM_FIXME else [],
     )
     for prp_file in glob(["tests/sim/*.prp"])
+]
+
+# VERILATOR DIFFERENTIALS. A `tests/sim/` fixture that also carries
+# `:verilator: <name>_vtb.cpp` gets a second target that emits its Verilog
+# (`inou.cgen.verilog`, NOT `inou.cgen.sim`) and runs the hand-written C++ twin
+# under Verilator. The pairing is BY FILE NAME: `tests/sim/verilator/<x>_vtb.cpp`
+# pairs with `tests/sim/<x>.prp`, which is what lets bazel find them at load time.
+#
+# These are the tests that say "`lhd sim` refuses this and the design is fine" —
+# so they are NOT in _SIM_FIXME even when their `prp-sim-` twin is. They are
+# tagged manual (external simulator): run them explicitly, with
+# --test_env=VERILATOR when verilator is not in a standard prefix. A machine
+# without verilator SKIPS (prpvsim.py), it does not fail.
+[
+    sh_test(
+        name = "prp-vsim-%s" % twin.split("/")[-1][:-len("_vtb.cpp")],
+        srcs = ["tests/pyrope_test.py"],
+        args = [
+            "-i",
+            "$(location //inou/prp:tests/sim/%s.prp)" % twin.split("/")[-1][:-len("_vtb.cpp")],
+            "--mode",
+            "vsim",
+        ],
+        data = [
+            "//inou/prp:tests/lec.py",
+            "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/prpvsim.py",
+            "//inou/prp:tests/pyrope_test.py",
+            "//inou/prp:tests/sim/%s.prp" % twin.split("/")[-1][:-len("_vtb.cpp")],
+            "//inou/prp:%s" % twin,
+            "//lhd",
+        ],
+        tags = ["manual", "external-simulator"],
+    )
+    for twin in glob(["tests/sim/verilator/*_vtb.cpp"])
 ]
 
 # `:type: verify` fixtures (tests/verify/): the harness drives `lhd formal
@@ -413,6 +514,7 @@ _SIM_FIXME = []
             "$(location //inou/prp:%s)" % prp_file,
         ],
         data = [
+            "//inou/prp:tests/lec.py",
             "//inou/prp:tests/prplib.py",
             "//inou/prp:tests/pyrope_test.py",
             "//inou/prp:%s" % prp_file,
@@ -423,26 +525,110 @@ _SIM_FIXME = []
     for prp_file in glob(["tests/verify/*.prp"])
 ]
 
-# Equivalence pairs (tests/equiv/<name>.prp + golden <name>.v): the harness
-# lowers the .prp to Verilog (tolg path) and formally LECs it against the
-# golden via inou/yosys/lgcheck, so these need the yosys scripts/binary on
-# top of the plain-prp data. Distinct `prp-equiv-` prefix: equiv/trivial_if
-# would otherwise collide with the comptime/trivial_if target name.
+# ── Pyrope ↔ Pyrope LEC groups (`prp-lec-*`) ─────────────────────────────────
+#
+# `tests/equiv/foo.prp` plus any sibling `foo_<N>.prp` is a GROUP: each numbered
+# variant is LEC'd against the base by tests/prplec.py (`--mode lec`). The NAME
+# is the whole wiring — no per-test script, no hand-written rule — so a new
+# claim about `foo` is one new file. See tests/equiv/README.md for the header
+# tags (`:lec_expect:`, `:lec_sweep:`, `:lec_grep:`, …).
+_EQUIV_PRP_STEMS = [f.split("/")[-1][:-len(".prp")] for f in glob(["tests/equiv/*.prp"])]
+
+_EQUIV_V_STEMS = [f.split("/")[-1][:-len(".v")] for f in glob(["tests/equiv/*.v"])]
+
+# A numbered sibling with its OWN golden `.v` is an ordinary Pyrope↔Verilog pair
+# that merely happens to be named `foo_2`, not a LEC variant of `foo`: claiming
+# it here would delete its `prp-equiv-*`/`prp-statematch-*` targets (silently --
+# bazel just emits no target) and replace them with a `prp-lec-foo_2` claim the
+# author never wrote. Having no golden of its own is exactly what makes a file a
+# variant, so that is the test.
+_PRPLEC_VARIANTS = [
+    s
+    for s in _EQUIV_PRP_STEMS
+    if "_" in s and s.rsplit("_", 1)[1].isdigit() and s.rsplit("_", 1)[0] in _EQUIV_PRP_STEMS and s not in _EQUIV_V_STEMS
+]
+
+# What the Pyrope↔Verilog tiers below must skip: every variant (a variant states
+# its claim against the base, and has no golden of its own), plus any base with
+# no golden `.v`. A base that DOES have one keeps its ordinary `prp-equiv-*` /
+# `prp-statematch-*` targets — the two axes are independent claims.
+_PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
+    "tests/equiv/%s.prp" % s.rsplit("_", 1)[0]
+    for s in _PRPLEC_VARIANTS
+    if s.rsplit("_", 1)[0] not in _EQUIV_V_STEMS
+]
+
 [
     sh_test(
-        name = "prp-equiv-%s" % prp_file.split("/")[-1].split(".")[0],
+        name = "prp-lec-%s%s" % (variant, suffix),
+        srcs = ["tests/pyrope_test.py"],
+        args = [
+            "-i",
+            "$(location //inou/prp:tests/equiv/%s.prp)" % variant,
+            "--mode",
+            "lec",
+        ] + (["--bitfuzz"] if suffix else []),
+        data = [
+            "//inou/prp:tests/lec.py",
+            "//inou/prp:tests/prplec.py",
+            "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/pyrope_test.py",
+            "//inou/prp:tests/equiv/%s.prp" % variant,
+            "//inou/prp:tests/equiv/%s.prp" % variant.rsplit("_", 1)[0],
+            "//lhd",
+        ],
+        # Reserve frontend/solver capacity for wall-clock-bounded formal checks.
+        tags = ["cpu:4"],
+    )
+    for variant in _PRPLEC_VARIANTS
+    for suffix in [
+        "",
+        "-bitfuzz",
+    ]
+]
+
+# Equivalence pairs (tests/equiv/<name>.prp + golden <name>.v): the harness
+# lowers the .prp to Verilog (tolg path) and formally LECs it against the
+# golden with default lhd lec and native Slang. Distinct `prp-equiv-` prefix: equiv/trivial_if
+# would otherwise collide with the comptime/trivial_if target name.
+#
+# This tier — and ONLY this tier — then asks a SECOND engine the same question:
+# `inou/yosys/lgcheck` (yosys equiv) on the two Verilog TEXTS, which is what the
+# `//inou/yosys:scripts` dep below stages (lgcheck + yosys2 + ware/rtl). It
+# catches the one failure mode no native-side test can: a native LEC that
+# reports PROVEN while checking nothing. A yosys REFUTATION fails the target;
+# an inconclusive or spent-budget result is tolerated (yosys' SAT does not
+# scale past small combinational logic). See tests/equiv/README.md,
+# "Two engines, one pair", and `:yosys_lec:` / `:yosys_lec_timeout:`.
+[
+    sh_test(
+        name = "prp-equiv-%s%s" % (
+            prp_file.split("/")[-1].split(".")[0],
+            suffix,
+        ),
         srcs = ["tests/pyrope_test.py"],
         args = [
             "-i",
             "$(location //inou/prp:%s)" % prp_file,
-        ],
+        ] + (["--bitfuzz"] if suffix else []),
         data = [
             "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/lec.py",
+            # An equiv fixture may also carry `simulation` in its `:type:`
+            # (matched_filter does), and prplib then imports prpsim. Without it
+            # here the module is only found by leaking through the runfiles
+            # symlink into the source tree -- it is outside the action key, so
+            # editing prpsim.py leaves these targets falsely (cached) PASSED,
+            # and it is simply absent under a stricter sandbox.
+            "//inou/prp:tests/prpsim.py",
             "//inou/prp:tests/pyrope_test.py",
             "//inou/prp:%s" % prp_file,
             "//inou/prp:%s" % (prp_file[:-len(".prp")] + ".v"),
             "//lhd",
-        ],
+        ] + glob(
+            [prp_file[:-len(".prp")] + "/*.prp"],
+            allow_empty = True,
+        ),
         deps = ["//inou/yosys:scripts"],
     )
     for prp_file in glob(
@@ -495,29 +681,17 @@ _SIM_FIXME = []
             # lowers to a negative shift -- so there is no forward direction to
             # run until inou/slang resolves the select to X.
             "tests/equiv/partsel_oob_ascending.prp",
-            # signed_bitwise_mux_arm (2026-08-02): a bitwise op's result loses
-            # its operands' sign, so the forward direction refutes too.
-            "tests/equiv/signed_bitwise_mux_arm.prp",
-            "tests/equiv/latch_rule_a.prp",
-            "tests/equiv/latch_rule_b.prp",
+            # latch_rule_a / latch_rule_b / reg_clock_from_logic MOVED to
+            # tests/errors/ (2026-08-08): all three are COMPILE REFUSALS (latch
+            # contract rules A and B; the tolg clock whitelist), so there is no
+            # equivalence to check and an equiv target could only ever be a
+            # fixme placeholder. The errors tier asserts the refusal itself.
             "tests/equiv/dual_async_set_reset.prp",
-            "tests/equiv/reg_clock_from_logic.prp",
             "tests/equiv/mem_write_during_reset.prp",
             "tests/equiv/async_mem_reset_demoted.prp",
             "tests/equiv/reg_decl_init_dropped.prp",
-            "tests/equiv/selfref_slice_assign.prp",
             "tests/equiv/selfref_concat_assign.prp",
-            # NOTE: the three phase_* pairs (phase_latch_flop_edges,
-            # phase_hier_latch_neg, phase_clock_gate_chain) were PROMOTED out of
-            # this exclude list (2f-lec / 2f-latch M10). They compare normalized
-            # Pyrope state against Verilog that RETAINS latch-close or
-            # Clock_cell timing, and lgcheck's bounded miter -- which steps one
-            # posedge per step -- cannot represent either, so it reported a
-            # mismatch between equivalent designs. Each now carries
-            # `:equiv_engine: cvc5` in its header and is discharged by the
-            # phase-aware `lhd lec` instead; the INDEPENDENT oracle for the pair
-            # is the v2prp2v original-Verilog leg (still lgcheck) plus
-            # lhd/tests/single_edge_four_classes_test.sh under Icarus.
+            # Phase-aware default LEC handles the promoted phase_* pairs.
             # ...and the five LEC-REFUTED trackers: these round-trip fine, so
             # the failure is a SILENT MISCOMPILE the miter catches.
             # divided_clock_decl_order has TWO clock domains (a register clocked
@@ -542,26 +716,302 @@ _SIM_FIXME = []
             # its VALUE operand on the stale base name after the def had been
             # renamed; see upass_ssa.cpp's is_store arm. All three prove now and
             # run as ordinary prp-equiv-* pairs.
-            # NOTE: the six latch_* pairs (latch_enable_hold, latch_hold_basic,
-            # latch_active_low, latch_master_slave, latch_icg, latch_mixed_flop)
-            # used to be excluded here as todo/livehd/2f-latch trackers. They
-            # were PROMOTED into the glob (2026-07-20): lgcheck's cascade ends
-            # in a bounded miter that DECIDES latch designs (equiv_simple alone
-            # cannot discharge $dlatch), so the forward equivalence proves
-            # today. The still-broken latch surfaces (sim, native cvc5 LEC,
-            # Verilog round-trip through slang) are tracked by the sim/verify
-            # fixtures and lhd/tests scripts named in todo/livehd/2f-latch.html,
-            # NOT by these equiv pairs.
-            # NOTE: struct_init_whole_read / instance_conn_struct_ident /
-            # struct_selfref_pattern / instance_out_struct_ident used to be
-            # excluded here (their SystemVerilog '{...} / struct-typed-wire
-            # goldens exceed yosys read_verilog, so the forward miter was
-            # INCONCLUSIVE). They now run in the glob (2026-07-03): the header
-            # `:gold_reader: slang` has lgcheck read the golden through the
-            # yosys-slang plugin, and each golden's top is an UNDOTTED plain
-            # identifier (dotted escaped `\a.b ` names break yosys-slang's
-            # --top/RTLIL naming).
+            # The promoted latch and packed-struct pairs run through the
+            # same default native Slang LEC path as every other pair.
+        ] + _PRPLEC_SKIP,
+    )
+    for suffix in [
+        "",
+        "-bitfuzz",
+    ]
+]
+
+# The guard on that guard: the yosys oracle TOLERATES every verdict but a
+# counterexample, so a refactor that quietly unhooks it would leave every pair
+# above green forever. This drives run_yosys_lec directly over two hand-written
+# .v files (no lhd compile, no Pyrope) and requires that it still PROVES an
+# equivalent pair, REFUTES an off-by-one one, and honors `:yosys_lec: false`.
+sh_test(
+    name = "prp-yosys-lec-oracle",
+    srcs = ["tests/yosys_lec_oracle_test.py"],
+    data = [
+        "//inou/prp:tests/lec.py",
+        "//inou/prp:tests/prplib.py",
+        "//inou/prp:tests/yosys_lec_oracle_test.py",
+        # PrpRunner resolves the lhd binary in its constructor, even though this
+        # test only exercises the lgcheck subprocess.
+        "//lhd",
+    ],
+    deps = ["//inou/yosys:scripts"],
+)
+
+# The two M6 compact-loop LEC regressions that used to live here as hand-written
+# sh_tests (`prp-equiv-loop_lec_index_mismatch`, `prp-equiv-loop_lec_mixed_semdiff`)
+# are now ORDINARY fixtures of the `prp-lec-*` tier above: loop_lec_index{,_1,_2}
+# (descriptor-domain refutation + the P0-P5 certificate) and loop_roll_mixed{,_1}
+# (rolled vs unrolled, discharged with no solver call).
+
+# ── state-name correspondence (`prp-statematch-*`) ───────────────────────────
+#
+# `pass semdiff --stats` over each equiv pair's two lg: libraries: every ref-side
+# register and memory must find a counterpart, BY NAME unless the fixture header
+# says `:name_match_only: false`. Equivalence and naming are separate claims — a
+# pair can be PROVEN equivalent and still spell its state differently — so this
+# is its OWN target rather than a post-check of `prp-equiv-*`. Folding them
+# together would mean `fixme`-ing a live equivalence proof every time only the
+# naming is wrong.
+#
+# See tests/equiv/README.md for the four gap classes and how to read the output.
+# Equiv pairs measured COMBINATIONAL on both sides: `pass semdiff --stats` reports
+# `registers ref 0/0` and `memories ref 0/0`, so check_state_match returns early
+# (prplib.py: `if all(got.get(k, {}).get("total", 0) == 0 ...)`) and the target
+# asserts nothing beyond two compiles that prp-equiv-* and prp-v2prp2v-* already
+# make. Measured 2026-09-21 by running --mode statematch over all 319 fixtures:
+# 190 printed nothing and exited 0. An EXCLUDE list (not a keep list) on purpose:
+# a new equiv fixture then defaults to COVERED rather than silently uncovered.
+# A pair whose claim IS that no state appears stays OUT of this list.
+_STATEMATCH_COMB = [
+    "and_zero_annihilator",
+    "arr2d_dyn_sel",
+    "arr_comb_mux_const",
+    "arr_comb_tmp",
+    "array_bitview_runtime",
+    "array_dynamic_overwrite",
+    "array_selfref",
+    "array_selfref_netinit",
+    "array_store_stale_rhs",
+    "assign_pattern",
+    "backtick_cond_lane_write",
+    "bit_sel_sext",
+    "bitrange_dyn",
+    "bitrange_dyn_narrow",
+    "bitrange_open",
+    "bitsel_dyn",
+    "bitsel_idx",
+    "bitset_gap",
+    "bitset_imm",
+    "bitset_mut",
+    "bitset_nil",
+    "bounded_while",
+    "bounded_while_guard",
+    "clz_nest",
+    "codeblock_expr",
+    "comb_print",
+    "comb_single_out_op",
+    "comptime_signed_array",
+    "concat_tuple_lanes",
+    "cond_modified_read",
+    "condout_const_arms",
+    "condout_mixed_arms",
+    "condout_seed_uncertain",
+    "const_array_arg",
+    "const_bit_select",
+    "const_nil_cond_bind",
+    "disabled_loop",
+    "dyn_tuple_idxexpr",
+    "dyn_tuple_mixed",
+    "dyn_tuple_mut_ro",
+    "dyn_tuple_pair",
+    "dyn_tuple_sel",
+    "enum_expression_seed",
+    "folded_rotate",
+    "func_ret_reused_in_loop",
+    "gen_type_cast",
+    "generic_input_bundle",
+    "generic_interface_width",
+    "generic_mod",
+    "generic_top_default",
+    "hier_value",
+    "hotmux_match",
+    "hotmux_match_partial",
+    "hotmux_unique",
+    "if_expr_rhs",
+    "implies_cond",
+    "implies_ops",
+    "imported_bool_cast",
+    "in_named_values",
+    "inline_const_default",
+    "inline_tuple_scope",
+    "inline_wire_output_bitsel",
+    "instance_collapse_order",
+    "instance_conn_struct_ident",
+    "instance_out_struct_ident",
+    "io_bundle_nested",
+    "io_bundle_selfref",
+    "lead_or_chain",
+    "lg_rename",
+    "local_shadow_comptime_arm",
+    "loop_accum",
+    "loop_break_leftover",
+    "loop_helper_priority",
+    "loop_invariant_version",
+    "loop_rca_flat",
+    "loop_reduce_or",
+    "loop_runtime_break",
+    "loop_runtime_break_nested",
+    "loop_runtime_continue",
+    "match_const_else",
+    "match_no_else",
+    "mem_mut_array",
+    "mem_whole_comb",
+    "mod_comp",
+    "mod_general",
+    "mod_lower",
+    "mod_passthru",
+    "mod_three",
+    "mod_varargs_csa",
+    "multi_out_comb",
+    "multi_output_one_var",
+    "neg_const_fold_sum",
+    "nested_generic",
+    "nested_generic_width",
+    "overload_dispatch",
+    "overload_return_dispatch",
+    "packed_assign",
+    "packed_carry_chain",
+    "packed_field_partial_default",
+    "packed_variable_modifiers",
+    "partsel_oob_ascending",
+    "range_step_value",
+    "ready_signal_chain",
+    "ready_signal_chain_1",
+    "ready_signal_masked",
+    "ready_signal_slices",
+    "reduce_and",
+    "reduce_array",
+    "reduce_or",
+    "reduce_popcount",
+    "reduce_tuple",
+    "reduce_wide",
+    "reduce_xor",
+    "reduction_integer_arithmetic",
+    "reserved_word_signal",
+    "rt_bool_cast",
+    "rt_int_output",
+    "rt_sat_s",
+    "rt_sat_u",
+    "rt_typecast",
+    "rt_wrap_noop",
+    "rt_wrap_reassign",
+    "rt_wrap_s",
+    "rt_wrap_sub",
+    "rt_wrap_sum",
+    "rt_wrap_u",
+    "selfref_slice_assign",
+    "selfref_thru_comb_sub",
+    "selfref_wire",
+    "shift_combo_i8",
+    "shift_combo_i8b",
+    "shift_nested_sra",
+    "shift_sra_unsigned",
+    "short_circuit",
+    "signed_bitwise_mux_arm",
+    "signed_divrem_mixed",
+    "signed_inline_arithmetic",
+    "signed_neg_mux",
+    "signed_shift_widen",
+    "sim_lg_atomic_feedback",
+    "sim_loop_mem_prefetch",
+    "sim_loop_mux1h_selfslice",
+    "sim_loop_mux_arm",
+    "sim_loop_pack_shiftand",
+    "sim_loop_packed_bus_group",
+    "sim_loop_sbox_bit_selfref",
+    "sim_loop_sticky_ripple",
+    "sim_packed_selfref_1bit",
+    "sim_prp_packed_selfref",
+    "sim_sub_nested_comb_feedback",
+    "single_bit_arith",
+    "splice_merge",
+    "split_assign_bits_width",
+    "sra_const_range",
+    "stream_ssa_tuple_slot",
+    "struct_field_chain_disjoint",
+    "struct_field_chain_own_lane",
+    "struct_init_whole_read",
+    "struct_selfref_pattern",
+    "subarray_port",
+    "subarray_port_1",
+    "tolg_field_read_zero",
+    "trivial_if",
+    "tup_in_match",
+    "tup_in_port",
+    "tup_out_cond_whole",
+    "tup_out_field_arms",
+    "tup_out_nested_whole",
+    "tup_out_port",
+    "tup_port_comb",
+    "tup_port_mod",
+    "tup_port_nested",
+    "tuple_field_instance_collision",
+    "tuple_in_port",
+    "tuple_out_port",
+    "type_alias_array",
+    "type_bound_generic_port",
+    "unsigned_slice_zext",
+    "untyped_mux_cond",
+    "varargs_add",
+    "width_extend_match",
+    "wire_comb",
+    "wire_cond_driver",
+    "wire_cond_match",
+    "wire_field_const_forward",
+    "wire_lane_written_later",
+    "wire_typed",
+    "writer_bad_char",
+    "writer_undefined_mux",
+]
+
+_STATEMATCH_FIXME = [
+    "dual_async_set_reset",  # `lhd compile` refuses the .v (attr-conflict: two async rungs on one Q slot)
+    "mem_const_idx",  # mems: only 0/1 paired
+    "mem_fwd_selfwrite",  # ref memory vs golden two-flop representation
+    "mem_pending_sync_init",  # ref memory vs golden output flop representation
+    "phase_hier_latch_neg",  # regs: only 0/1 paired
+    "phase_two_clock_ports",  # regs: only 0/2 paired
+    "struct_top_port",  # regs: only 0/1 paired
+    "type_alias_generic_attr",  # regs: only 0/1 paired -- the reg lives in the GENERIC CHILD instance
+    # (`add<Elem_T>`), the hand-written golden is flat, and the harness
+    # compares TOP-level state only, so a hierarchical golden reports
+    # "golden has 0" instead. prp-equiv + prp-v2prp2v both PROVE, which is
+    # the fixture's actual claim (a named alias through a generic keeps its
+    # width on the specialized ports and for `a.[bits]`).
+    "wire_reg",  # regs: only 0/1 paired
+]
+
+[
+    sh_test(
+        name = "prp-statematch-%s" % prp_file.split("/")[-1].split(".")[0],
+        srcs = ["tests/pyrope_test.py"],
+        args = [
+            "-i",
+            "$(location //inou/prp:%s)" % prp_file,
+            "--mode",
+            "statematch",
         ],
+        data = [
+            "//inou/prp:tests/lec.py",
+            "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/pyrope_test.py",
+            "//inou/prp:%s" % prp_file,
+            "//inou/prp:%s" % (prp_file[:-len(".prp")] + ".v"),
+            "//lhd",
+        ] + glob(
+            [prp_file[:-len(".prp")] + "/*.prp"],
+            allow_empty = True,
+        ),
+        tags = ["fixme"] if (
+            prp_file.split("/")[-1].split(".")[0] in _STATEMATCH_FIXME
+        ) else [],
+    )
+    for prp_file in glob(
+        ["tests/equiv/*.prp"],
+        exclude = [
+            # generated differential-sim testbenches, not equiv pairs
+            "tests/equiv/*_tb.prp",
+            # no header, no golden .v
+            "tests/equiv/accum.prp",
+        ] + _PRPLEC_SKIP + ["tests/equiv/%s.prp" % s for s in _STATEMATCH_COMB],
     )
 ]
 
@@ -574,16 +1024,20 @@ _SIM_FIXME = []
     sh_test(
         name = "prp-equiv-%s" % base,
         srcs = ["tests/pyrope_test.py"],
-        args = ["-i", "$(location //inou/prp:tests/equiv/%s.prp)" % base],
+        args = [
+            "-i",
+            "$(location //inou/prp:tests/equiv/%s.prp)" % base,
+        ],
         data = [
+            "//inou/prp:tests/lec.py",
             "//inou/prp:tests/prplib.py",
             "//inou/prp:tests/pyrope_test.py",
             "//inou/prp:tests/equiv/%s.prp" % base,
             "//inou/prp:tests/equiv/%s.v" % base,
             "//lhd",
         ],
-        deps = ["//inou/yosys:scripts"],
         tags = ["fixme"],
+        deps = ["//inou/yosys:scripts"],
     )
     for base in [
         # async_reset_enable was PROMOTED out of this list (2026-07-03): the
@@ -594,13 +1048,11 @@ _SIM_FIXME = []
         # compound `if (reset || arst)` guard (proc_dff multi-edge).
         # The six latch_* pairs were PROMOTED out of this list (2026-07-20):
         # rewritten to `pub mod` + the shipped `reg NAME:TYPE:[latch=true]`
-        # spelling (latch_enable_hold included), and the lgcheck bounded-miter
-        # stage proves every pair today — see the equiv-glob note above.
+        # spelling (latch_enable_hold included); they use default native LEC.
         # struct_init_whole_read / instance_conn_struct_ident /
         # struct_selfref_pattern / instance_out_struct_ident were PROMOTED out
-        # of this list (2026-07-03): `:gold_reader: slang` reads their goldens
-        # through the yosys-slang plugin (see the equiv-glob note above), so
-        # the forward direction proves; they run as ordinary prp-equiv-* now.
+        # of this list (2026-07-03); native Slang reads their goldens in
+        # ordinary prp-equiv-* tests.
         #
         # The three comb-array store-loss trackers (array_store_stale_rhs,
         # arr_comb_mux_const, arr_comb_tmp) were PROMOTED out of this list
@@ -623,8 +1075,9 @@ _SIM_FIXME = []
         # set costs well under a second. Every one FAILS today -- run them with
         #   bazel test //inou/prp:prp-equiv-latch_rule_b --test_tag_filters=
         # The root cause is written at the top of each .v/.prp pair.
-        "latch_rule_a",          # self-timed gate: enable reads its own Q
-        "latch_rule_b",          # exhaustive `case` mis-inferred as a latch (21 corpus files)
+        # latch_rule_a / latch_rule_b MOVED to tests/errors/ (2026-08-08) — a
+        # compile REFUSAL has no equivalence to check, so the errors tier
+        # asserts the diagnostic instead of a fixme equiv placeholder.
         "dual_async_set_reset",  # a flop needs TWO async rungs; the cell has one slot
         # The three pure prp_writer trackers were all PROMOTED out (2026-07-29) --
         # writer_undefined_mux (undeclared `_mux_N`), tolg_field_read_zero (the
@@ -632,22 +1085,20 @@ _SIM_FIXME = []
         # writer_bad_char (module names were not backtick-escaped). Each proves in
         # all three directions now; the writer half of the last two is pinned as a
         # TEXT gate by //pass/prp_writer:prp_writer_decl_emit_test.sh.
-        "reg_clock_from_logic",  # `clk ^ inv` clock rejected by tolg's whitelist
+        # reg_clock_from_logic MOVED to tests/errors/ (2026-08-08), same reason.
         # LEC-REFUTED categories (these COMPILE clean -- the miscompile is silent):
-        "mem_write_during_reset",   # memory write not gated by the async reset
+        "mem_write_during_reset",  # memory write not gated by the async reset
         "async_mem_reset_demoted",  # async reset OF a memory demoted to sync
-        "reg_decl_init_dropped",    # `reg x = 1'b1;` power-on value dropped
-        "selfref_slice_assign",     # concurrent slice assigns solved in source order
-        "selfref_concat_assign",    # self-referential whole-vector assign never driven
+        "reg_decl_init_dropped",  # `reg x = 1'b1;` power-on value dropped
+        "selfref_concat_assign",  # self-referential whole-vector assign never driven
         # ── corpus-mined category tracker (2026-08-02 chimera sweep) ─────────
-        "partsel_oob_ascending",    # out-of-range select on a `[0:N]` vector: negative shift, not X
-        "signed_bitwise_mux_arm",   # `sa | 2'sb11` behind a mux zero-extends (bitwise drops sign)
+        "partsel_oob_ascending",  # out-of-range select on a `[0:N]` vector: negative shift, not X
         # The three formal phase-scheduler trackers (phase_latch_flop_edges,
         # phase_hier_latch_neg, phase_clock_gate_chain) were PROMOTED out of
         # this list (2f-lec / 2f-latch M10): the encoder now schedules latches
         # and negedge endpoints over four microsteps per source period, so all
         # three PROVE. See the equiv-glob note above for why they run under
-        # `:equiv_engine: cvc5`.
+        # the default native LEC solver.
     ]
 ]
 
@@ -659,9 +1110,8 @@ _SIM_FIXME = []
 # gaps on the reference side (e.g. the `'{...}` assignment pattern that blocked
 # packed_assign/bitrange_dyn under the old lgyosys/.v gate, both of which now
 # pass). Per-side tops come from the reference's :verilog_top: (the emitted
-# module) and :pyrope_top: (the original lambda) headers; a timeout is
-# inconclusive (not a fail). Driven off the .v files (every pair ships one).
-# 129/138 prove today.
+# module) and :pyrope_top: (the original lambda) headers. Each comparison
+# requires proof; an internal timeout or outer watchdog failure fails the test.
 #
 # The remaining gaps still REFUTE for reasons OUTSIDE the prp_writer (the emitted
 # Pyrope is correct — lgyosys proves every one of them equivalent). They are
@@ -682,8 +1132,7 @@ _V2PRP2V_NATIVE_FIXME = [
     # latch_enable_hold was PROMOTED out of this list (2026-07-20): the shipped
     # `reg NAME:TYPE:[latch=true]` spelling IS the Pyrope source equivalent of
     # an inferred latch, the fixture was rewritten to it, and the reverse
-    # direction passes (the lec leg is honest-inconclusive under cvc5 until the
-    # native encoder learns latches — 2f-latch M4).
+    # direction passes with native latch encoding.
     # async_reset_enable was PROMOTED out of this list (2026-07-03): the slang
     # reader now demotes an edge-triggered reset with no extractable async rung
     # to a synchronous one (async-reset-as-sync warning), so the .v round-trips.
@@ -729,16 +1178,16 @@ _V2PRP2V_NATIVE_FIXME = [
     # (writer_undefined_mux), no longer drops a hoisted nested `mut`'s type and
     # comptime init (tolg_field_read_zero), and backtick-escapes module names
     # (writer_bad_char). All three re-parse and this direction proves for each.
-    "latch_rule_a",
-    "latch_rule_b",
+    # latch_rule_a / latch_rule_b / reg_clock_from_logic dropped 2026-08-08:
+    # both halves moved to tests/errors/, so `tests/equiv/*.v` no longer globs a
+    # target for them.
     "dual_async_set_reset",
-    "reg_clock_from_logic",
-    "negative_array_index",
+    # negative_array_index PROMOTED out (2026-08-06): prp-v2prp2v-negative_array_index
+    # passes — the round trip proves against the golden.
     "blocking_ff_state",
     # 2026-08-02 chimera sweep: the golden does not READ (out-of-range select on
     # an ascending vector lowers to a negative shift), so neither leg can run.
     "partsel_oob_ascending",
-    "signed_bitwise_mux_arm",
 ]
 
 # Two goldens cannot be checked against their original Verilog: both available
@@ -748,13 +1197,15 @@ _V2PRP2V_NATIVE_FIXME = [
 [
     sh_test(
         name = "prp-v2prp-%s" % base,
-        srcs = ["tests/v2prp_test.py"],
+        srcs = ["tests/v2prp2v_test.py"],
         args = [
+            "--native-only",
             "-i",
             "$(location //inou/prp:tests/equiv/%s.v)" % base,
         ],
         data = [
-            "//inou/prp:tests/v2prp_test.py",
+            "//inou/prp:tests/lec.py",
+            "//inou/prp:tests/v2prp2v_test.py",
             "//inou/prp:tests/equiv/%s.v" % base,
             "//inou/prp:tests/equiv/%s.prp" % base,
             "//lhd",
@@ -770,19 +1221,14 @@ _V2PRP2V_NATIVE_FIXME = [
 # v2prp2v: the Verilog ROUND TRIP over the same equiv corpus. Each golden <name>.v
 # goes all the way THROUGH Pyrope and back --
 #   v -> (slang) -> lg -> prp_writer -> .prp -> (inou.prp) -> tolg -> cgen -> v
-# -- and inou/yosys/lgcheck proves the result equivalent to the ORIGINAL .v.
+# -- and default lhd lec compares the result against the ORIGINAL .v.
 # The Pyrope legs were added 2026-07-29: the harness used to go slang -> lg ->
 # cgen DIRECTLY, skipping upass/prp_writer and the Pyrope re-read, so a writer
 # that emitted lossy or un-re-parseable Pyrope passed here while failing
 # everywhere else (three such trackers had to be left untagged for exactly that
-# reason; they refute now). One run therefore covers the whole path the corpus
-# fuzzing exercises. This is the only harness whose reference side is read
-# INDEPENDENTLY of LiveHD (yosys read_verilog, or yosys-slang via the sibling
-# .prp's `:gold_reader: slang` header). The harness also runs the former
-# v2prp native LEC check against the hand-written .prp, reusing the emitted
-# Pyrope rather than repeating the conversion. lgcheck INCONCLUSIVE (exit 2)
-# and timeouts pass with an honest note; only a counterexample or a hard yosys
-# error fails.
+# reason; they refute now). One run covers the whole corpus round trip.
+# Both the emitted-Pyrope check and the original-Verilog check use default
+# LEC. Native Slang reads Verilog; unknown results and timeouts fail.
 #
 # Census 2026-07-27 (lhdsuite array_problem.md): 169 of 179 pairs prove, 5 are
 # honest-inconclusive (array_selfref, assign_pattern, io_bundle_nested,
@@ -824,11 +1270,11 @@ _V2PRP2V_VERILOG_FIXME = [
     # signal names always did. Each pair's header states the root cause; the
     # writer half of the last two is pinned as a TEXT gate by
     # //pass/prp_writer:prp_writer_decl_emit_test.sh.
-    "latch_rule_a",
-    "latch_rule_b",
+    # latch_rule_a / latch_rule_b / reg_clock_from_logic dropped 2026-08-08:
+    # both halves moved to tests/errors/, so `tests/equiv/*.v` no longer globs a
+    # target for them.
     "dual_async_set_reset",
-    "reg_clock_from_logic",
-    "negative_array_index",
+    # negative_array_index PROMOTED out (2026-08-06): the round trip proves.
     "blocking_ff_state",
     # The five LEC-REFUTED trackers. This is the only direction that catches
     # them: they COMPILE clean both ways, so the native Pyrope check trivially
@@ -837,11 +1283,9 @@ _V2PRP2V_VERILOG_FIXME = [
     "async_mem_reset_demoted",
     "async_reset_pin_wire",
     "reg_decl_init_dropped",
-    "selfref_slice_assign",
     "selfref_concat_assign",
     # 2026-08-02 chimera sweep (see _V2PRP2V_NATIVE_FIXME for the root cause).
     "partsel_oob_ascending",
-    "signed_bitwise_mux_arm",
 ]
 
 [
@@ -854,11 +1298,15 @@ _V2PRP2V_VERILOG_FIXME = [
         ],
         # The sibling .prp supplies the headers and is the native LEC reference.
         data = [
+            "//inou/prp:tests/lec.py",
             "//inou/prp:tests/v2prp2v_test.py",
             "//inou/prp:tests/equiv/%s.v" % base,
             "//inou/prp:tests/equiv/%s.prp" % base,
             "//lhd",
-        ],
+        ] + glob(
+            ["tests/equiv/%s/*.prp" % base],
+            allow_empty = True,
+        ),
         tags = ["fixme"] if (
             base in _V2PRP2V_NATIVE_FIXME or
             base in _V2PRP2V_VERILOG_FIXME
@@ -905,12 +1353,13 @@ _V2PRP2V_VERILOG_FIXME = [
             "//inou/prp:sim_runtime_hdrs",
             "//lhd",
         ],
-        deps = ["//inou/yosys:scripts"],
         # sim_lg_atomic_feedback now compiles: cgen_sim flattens the false-loop
         # pure-comb sub-instance (flatten_false_loop_subs). sim_prp_packed_selfref
         # now compiles too: cgen_sim splits the false WORD-level packed-wire cycle
         # (split_packed_selfref_wires). The rest are still gaps.
-        tags = [] if name in (
+        # cpu:4 -- the v2prp-sim mode builds its two simulator sides (and their
+        # comparison drivers) concurrently; the others build one side at a time.
+        tags = (["cpu:4"] if mode == "v2prp-sim" else []) if name in (
             "sim_lg_atomic_feedback",
             "sim_prp_packed_selfref",
             # 2026-07-03: the generalized slice-resolution engine in
@@ -945,6 +1394,7 @@ _V2PRP2V_VERILOG_FIXME = [
             # orders normally with its input cone emitted on demand.
             "sim_sub_mealy_feedback",
         ) else ["fixme"],
+        deps = ["//inou/yosys:scripts"],
     )
     for name, mode in {
         "sim_prp_packed_selfref": "prp-emit",
@@ -1063,6 +1513,7 @@ _V2PRP2V_VERILOG_FIXME = [
             "$(location //inou/prp:tests/equiv/%s.prp)" % base,
         ],
         data = [
+            "//inou/prp:tests/lec.py",
             "//inou/prp:tests/p2p_test.py",
             "//inou/prp:tests/equiv/%s.prp" % base,
             "//inou/prp:tests/equiv/%s.v" % base,
@@ -1071,19 +1522,20 @@ _V2PRP2V_VERILOG_FIXME = [
         deps = ["//inou/yosys:scripts"],
     )
     for base in [
-        "mod_mul_add",         # top discovers its two emitted sibling pipes
-        "mod_twopaths",        # registered-output timing regression (R8 A)
-        "mod_varargs_add",     # monomorphized sibling uses a bare import alias
-        "mod_varargs_csa",     # nested monomorphized sibling callees
-        "pipe_varargs_add",    # pipe form of the monomorphized sibling path
-        "mod_call_pipe",       # pipe inlined into a mod: stage[N] + @[N]
-        "pipe1_pass",          # bare pipe passthrough
-        "pipe2_two_out",       # multi-output pipe
-        "pipe3_mul",           # multi-stage arithmetic pipe
-        "pipe_range",          # pipe[A..=B] range depth
-        "pipe_state_acc",      # pipe with feedback state
-        "mod_delay3",          # @[N] landing-cycle on a mod output
+        "mod_mul_add",  # top discovers its two emitted sibling pipes
+        "mod_twopaths",  # registered-output timing regression (R8 A)
+        "mod_varargs_add",  # monomorphized sibling uses a bare import alias
+        "mod_varargs_csa",  # nested monomorphized sibling callees
+        "pipe_varargs_add",  # pipe form of the monomorphized sibling path
+        "mod_call_pipe",  # pipe inlined into a mod: stage[N] + @[N]
+        "pipe1_pass",  # bare pipe passthrough
+        "pipe2_two_out",  # multi-output pipe
+        "pipe3_mul",  # multi-stage arithmetic pipe
+        "pipe_range",  # pipe[A..=B] range depth
+        "pipe_state_acc",  # pipe with feedback state
+        "mod_delay3",  # @[N] landing-cycle on a mod output
         "reg_out_feedforward",  # feedforward reg output
+        "concat_array_lane",  # runtime array `concat` lane -> per-entry shift/or
     ]
 ]
 
@@ -1099,41 +1551,149 @@ _V2PRP2V_VERILOG_FIXME = [
 # files + the baked golden via `inou/prp/tests/gen_equiv_tb.py --setup` (needs
 # iverilog; only when a pair is added or its logic/interface changes). The
 # regression below is phase RUN -- it recompiles the DUT to C++ and checks the
-# baked golden, no Verilog needed. Same hermetic host-compile as prp-sim (the
-# `sim_runtime_hdrs` headers; NO nested bazel). The `_tb.prp` imports its sibling
+# baked golden, no Verilog needed. Like prp-sim, it uses lhd sim with declared
+# runtime dependencies and no nested Bazel. The `_tb.prp` imports its sibling
 # `<name>.prp`, so BOTH are runfiles.
 _SIMEQ = [
-    "arr2d_dyn_sel", "array_selfref", "async_reset_enable", "bit_sel_sext", "bitrange_dyn", "bitrange_open",
-    "bitsel_dyn", "bitsel_idx", "bitset_gap", "bitset_imm", "bitset_mut", "bitset_nil",
-    "bitset_reg", "clz_nest", "codeblock_expr", "comb_single_out_op", "cond_modified_read",
-    "condout_const_arms", "condout_mixed_arms", "condout_seed_uncertain", "dyn_tuple_const",
-    "dyn_tuple_idxexpr", "dyn_tuple_mixed", "dyn_tuple_mut_ro", "dyn_tuple_pair",
-    "dyn_tuple_sel", "flop_reset_matrix", "gen_type_cast", "generic_mod", "hier_value", "hotmux_match", "hotmux_match_partial",
-    "hotmux_unique", "if_expr_rhs", "implies_cond", "implies_ops", "lead_or_chain", "lg_rename", "loop_accum",
-    "match_const_else", "match_no_else", "mem_const_idx", "mem_init", "mem_init_scalar",
-    "mem_init_tuple", "mem_pending_sync_init", "mem_rom", "mem_whole_cond_const",
-    "mem_write_only", "mod_acc_state", "mod_call_mod", "mod_call_pipe", "mod_call_pipe2",
-    "mod_comp", "mod_counter", "mod_delay3", "mod_lower", "mod_mixed_out", "mod_mul_add",
-    "mod_mut_delay", "mod_mux_aligned", "mod_passthru", "mod_template", "mod_three",
-    "mod_twopaths", "mod_varargs_add", "mod_varargs_csa", "multi_out_comb", "overload_dispatch",
-    "overload_return_dispatch", "packed_assign", "pipe1_pass", "pipe2_two_out", "pipe3_mul",
-    "pipe_bare", "pipe_range", "pipe_stage_reg", "pipe_state_acc", "pipe_varargs_add",
+    "arr2d_dyn_sel",
+    "array_selfref",
+    "async_reset_enable",
+    "bit_sel_sext",
+    "bitrange_dyn",
+    "bitrange_open",
+    "bitsel_dyn",
+    "bitsel_idx",
+    "bitset_gap",
+    "bitset_imm",
+    "bitset_mut",
+    "bitset_nil",
+    "bitset_reg",
+    "clz_nest",
+    "codeblock_expr",
+    "comb_single_out_op",
+    "cond_modified_read",
+    "condout_const_arms",
+    "condout_mixed_arms",
+    "condout_seed_uncertain",
+    "dyn_tuple_const",
+    "dyn_tuple_idxexpr",
+    "dyn_tuple_mixed",
+    "dyn_tuple_mut_ro",
+    "dyn_tuple_pair",
+    "dyn_tuple_sel",
+    "flop_reset_matrix",
+    "gen_type_cast",
+    "generic_mod",
+    "hier_value",
+    "hotmux_match",
+    "hotmux_match_partial",
+    "hotmux_unique",
+    "if_expr_rhs",
+    "implies_cond",
+    "implies_ops",
+    "lead_or_chain",
+    "lg_rename",
+    "loop_accum",
+    "matched_filter",
+    "match_const_else",
+    "match_no_else",
+    "mem_const_idx",
+    "mem_init",
+    "mem_init_scalar",
+    "mem_init_tuple",
+    "mem_pending_sync_init",
+    "mem_rom",
+    "mem_whole_cond_const",
+    "mem_write_only",
+    "mod_acc_state",
+    "mod_call_mod",
+    "mod_call_pipe",
+    "mod_call_pipe2",
+    "mod_comp",
+    "mod_counter",
+    "mod_delay3",
+    "mod_lower",
+    "mod_mixed_out",
+    "mod_mul_add",
+    "mod_mut_delay",
+    "mod_mux_aligned",
+    "mod_passthru",
+    "mod_template",
+    "mod_three",
+    "mod_twopaths",
+    "mod_varargs_add",
+    "mod_varargs_csa",
+    "multi_out_comb",
+    "overload_dispatch",
+    "overload_return_dispatch",
+    "packed_assign",
+    "pipe1_pass",
+    "pipe2_two_out",
+    "pipe3_mul",
+    "pipe_bare",
+    "pipe_range",
+    "pipe_stage_reg",
+    "pipe_state_acc",
+    "pipe_varargs_add",
     "const_bit_select",
-    "mem_comptime_init", "mem_comptime_init_inferred", "mem_multidim_init", "mem_multidim_rw",
-    "mem_mut_array", "mem_pending_reset_restore", "mem_whole_coexist", "mem_whole_comb",
+    "mem_comptime_init",
+    "mem_comptime_init_inferred",
+    "mem_multidim_init",
+    "mem_multidim_rw",
+    "mem_mut_array",
+    "mem_pending_reset_restore",
+    "mem_whole_coexist",
+    "mem_whole_comb",
     "mem_whole_reg",
-    "reduce_and", "reduce_or", "reduce_popcount", "reduce_xor", "reg_async_flag",
-    "reg_attr_override", "reg_delay_init", "reg_hold_empty_elif", "reg_hold_match",
-    "reg_hold_no_else", "reg_out_feedforward", "reg_tuple_reset", "rt_bool_cast",
-    "rt_int_output", "rt_sat_s", "rt_sat_u", "rt_typecast", "rt_wrap_noop", "rt_wrap_reassign",
-    "rt_wrap_s", "rt_wrap_sub", "rt_wrap_sum", "rt_wrap_u", "shift_combo_i8", "shift_combo_i8b",
-    "sim_lg_atomic_feedback", "sim_prp_packed_selfref",
-    "sim_packed_selfref_1bit", "sim_loop_sticky_ripple", "sim_loop_pack_shiftand",
-    "sim_loop_packed_bus_group", "sim_loop_mux1h_selfslice", "sim_loop_sbox_bit_selfref",
-    "sim_loop_mem_prefetch", "sim_sub_stateful_feedback", "sim_sub_nested_comb_feedback",
-    "sim_loop_mux_arm", "sim_sub_mealy_feedback",
-    "shift_nested_sra", "shift_sra_unsigned", "signed_one_bit_cmp", "splice_merge", "trivial_if",
-    "varargs_add", "wire_comb", "wire_reg", "wire_reset", "wire_ring", "wire_typed",
+    "reduce_and",
+    "reduce_or",
+    "reduce_popcount",
+    "reduce_xor",
+    "reg_async_flag",
+    "reg_attr_override",
+    "reg_delay_init",
+    "reg_hold_empty_elif",
+    "reg_hold_match",
+    "reg_hold_no_else",
+    "reg_out_feedforward",
+    "reg_tuple_reset",
+    "rt_bool_cast",
+    "rt_int_output",
+    "rt_sat_s",
+    "rt_sat_u",
+    "rt_typecast",
+    "rt_wrap_noop",
+    "rt_wrap_reassign",
+    "rt_wrap_s",
+    "rt_wrap_sub",
+    "rt_wrap_sum",
+    "rt_wrap_u",
+    "shift_combo_i8",
+    "shift_combo_i8b",
+    "sim_lg_atomic_feedback",
+    "sim_prp_packed_selfref",
+    "sim_packed_selfref_1bit",
+    "sim_loop_sticky_ripple",
+    "sim_loop_pack_shiftand",
+    "sim_loop_packed_bus_group",
+    "sim_loop_mux1h_selfslice",
+    "sim_loop_sbox_bit_selfref",
+    "sim_loop_mem_prefetch",
+    "sim_sub_stateful_feedback",
+    "sim_sub_nested_comb_feedback",
+    "sim_loop_mux_arm",
+    "sim_sub_mealy_feedback",
+    "shift_nested_sra",
+    "shift_sra_unsigned",
+    "signed_one_bit_cmp",
+    "splice_merge",
+    "trivial_if",
+    "varargs_add",
+    "wire_comb",
+    "wire_reg",
+    "wire_reset",
+    "wire_ring",
+    "wire_typed",
 ]
 
 # Known-failing differential-sim trackers (tagged `fixme` so `bazel test //...`
@@ -1162,8 +1722,12 @@ _SIMEQ_FIXME = []
     sh_test(
         name = "prp-simeq-%s" % base,
         srcs = ["tests/pyrope_test.py"],
-        args = ["-i", "$(location //inou/prp:tests/equiv/%s_tb.prp)" % base],
+        args = [
+            "-i",
+            "$(location //inou/prp:tests/equiv/%s_tb.prp)" % base,
+        ],
         data = [
+            "//inou/prp:tests/lec.py",
             "//inou/prp:tests/prplib.py",
             "//inou/prp:tests/prpsim.py",
             "//inou/prp:tests/pyrope_test.py",
@@ -1176,3 +1740,117 @@ _SIMEQ_FIXME = []
     )
     for base in _SIMEQ + _SIMEQ_FIXME
 ]
+
+filegroup(
+    name = "generic_tuple_register_fixture",
+    srcs = [
+        "tests/equiv/generic_tuple_register.prp",
+        "tests/equiv/generic_tuple_register.v",
+        "tests/equiv/generic_tuple_register/cell.prp",
+        "tests/equiv/generic_tuple_register/packed.v",
+    ],
+    visibility = ["//lhd/tests:__pkg__"],
+)
+
+sh_test(
+    name = "lec_harness",
+    srcs = ["tests/lec_test.py"],
+    data = ["tests/lec.py"],
+)
+
+# Fixture lists are shared by per-case targets and the broad integration suite.
+_ROUNDTRIP_SOURCES = glob(["tests/equiv/roundtrip/*.prp"])
+
+_SYNTH_SOURCES = glob(
+    [
+        "tests/abc/*.prp",
+        "tests/abc/*.v",
+        "tests/abc/*.sv",
+        "tests/abc/*.json",
+    ],
+    allow_empty = True,
+    exclude = ["tests/abc/*_ref.v"],
+)
+
+_LEC_SOURCES = [
+    src
+    for src in glob(
+        [
+            "tests/equiv/lec/*.v",
+            "tests/equiv/lec/*.sv",
+            "tests/equiv/lec/*.prp",
+        ],
+        allow_empty = True,
+    )
+    if "_" in src.rsplit(".", 1)[0] and src.rsplit(".", 1)[0].rsplit("_", 1)[1].isdigit()
+]
+
+# Integration fixtures, not one-off scripts. Each new source adds a target.
+[sh_test(
+    name = "prp-roundtrip-%s" % src.split("/")[-1][:-4],
+    srcs = ["tests/integration.py"],
+    args = [
+        "roundtrip",
+        "$(location %s)" % src,
+    ],
+    data = [
+        src,
+        "tests/lec.py",
+        "//lhd",
+    ],
+    tags = ["cpu:4"],
+) for src in _ROUNDTRIP_SOURCES]
+
+# One fixture list x both technology mappers: `prp-synth-<stem>` maps with ABC
+# and `prp-synth-<stem>-usyn` with pass.usyn (`--set synth.mapper=usyn`).
+# Adding a design still needs no runner or BUILD edit, and a new mapper is one
+# entry in _SYNTH_MAPPERS -- the equivalence claim is the mapper-agnostic part.
+_SYNTH_MAPPERS = [
+    ("", "abc"),
+    ("-usyn", "usyn"),
+]
+
+[sh_test(
+    name = "prp-synth-%s%s" % (src.split("/")[-1].rsplit(".", 1)[0], suffix),
+    srcs = ["tests/integration.py"],
+    args = [
+        "synth",
+        "$(location %s)" % src,
+        mapper,
+    ],
+    data = [
+        "tests/lec.py",
+        ":equiv_tests",
+        "//lhd",
+    ] + glob(["tests/abc/*"]),
+    env_inherit = ["PATH"],
+    tags = ["exclusive"],  # Serialize synthesis-bearing process trees.
+) for src in _SYNTH_SOURCES for suffix, mapper in _SYNTH_MAPPERS]
+
+# Verilog/Pyrope LEC soundness cases use the same numbered-variant harness.
+[
+    sh_test(
+        name = "lec-%s" % src.split("/")[-1].rsplit(".", 1)[0],
+        srcs = ["tests/prplec.py"],
+        args = ["$(location %s)" % src],
+        data = [
+            "tests/lec.py",
+            "tests/prplib.py",
+            "//lhd",
+        ] + glob(["tests/equiv/lec/*"]),
+        tags = ["cpu:4"],
+    )
+    for src in _LEC_SOURCES
+]
+
+# The suite expands automatically as new fixtures arrive. Synthesis cases run
+# exclusively; ordinary proof and writer targets retain per-fixture isolation.
+test_suite(
+    name = "integration",
+    tests = [":prp-roundtrip-" + src.split("/")[-1][:-4] for src in _ROUNDTRIP_SOURCES] +
+            [":prp-synth-" + src.split("/")[-1].rsplit(".", 1)[0] + suffix
+             for src in _SYNTH_SOURCES
+             for suffix, _ in _SYNTH_MAPPERS] +
+            [":lec-" + src.split("/")[-1].rsplit(".", 1)[0] for src in _LEC_SOURCES] +
+            [":prp-lec-" + variant for variant in _PRPLEC_VARIANTS] + [":lec_harness"],
+)

@@ -1,0 +1,13 @@
+/*
+:name: array_vs_packed_reset_1
+*/
+// array_vs_packed_reset.prp with the array EXPANDED into one packed bitvector
+// register (entry k at bits [4k..4k+3]). Both registers declare the SAME reset
+// value, so this must prove.
+pub mod top(we:u1, v:u16, raddr:u2) -> (rd:u4@[0]) {
+  reg foo:u16 = 0
+  rd = (foo >> (raddr * 4)) & 0xf
+  if we != 0 {
+    foo = v
+  }
+}

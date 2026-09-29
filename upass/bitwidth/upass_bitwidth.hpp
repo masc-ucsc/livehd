@@ -77,6 +77,9 @@ public:
   Vote process_sext(std::string_view, Bundle&, upass::Src_span) override;
   Vote process_get_mask(std::string_view, Bundle&, upass::Src_span) override;
   Vote process_set_mask(std::string_view, Bundle&, upass::Src_span) override;
+  // concat(msb, …, lsb) — the packed lanes: always [0, 2^sum(w_i) − 1], where
+  // each w_i is the lane's DECLARED width (never its inferred range).
+  Vote process_concat(std::string_view, Bundle&, upass::Src_span) override;
 
   // Nullary hooks (these nodes are not push-dispatched):
   // func_call — clear ranges through opaque `ref` actuals; note a wrap/sat

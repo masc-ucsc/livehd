@@ -7,7 +7,7 @@
 //
 // FIXME tracker -- a declaration-time register initializer is DROPPED.
 // `reg internal_full_n = 1'b1;` gives the flop a power-on value of 1; the Pyrope
-// below declares a bare `reg internal_full_n:u1` with no `init=`, so the emitted
+// below declares a bare `reg internal_full_n:u1` with no `initial=`, so the emitted
 // netlist powers up at 0. yosys' miter starts both sides from their declared
 // initial values, so this refutes. 3 corpus files (HLS-generated FIFOs, where the
 // `full_n` handshake bit is exactly this idiom).

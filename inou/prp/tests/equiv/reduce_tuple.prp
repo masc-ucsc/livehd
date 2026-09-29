@@ -1,0 +1,11 @@
+/*
+:name: reduce_tuple
+:type: equiv
+*/
+comb reduce_tuple(a:u8) -> (z:u1) {
+  comptime const lo:u4 = 7
+  comptime const hi:u4 = 1
+  comptime const t = (lo, hi)
+  comptime const reduction = t#&[0..=2]
+  z = a#[0] ^ reduction
+}

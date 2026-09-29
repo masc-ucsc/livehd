@@ -1,0 +1,15 @@
+/*
+:name: method_file_scope
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+comb f1() -> (r) { r = 1 }
+const tup = (
+ comb f1(self) -> (r) { r = 2 },
+ comb code(self) -> () {
+   cassert(self.f1() == 2)
+   cassert(f1() == 1)
+ }
+)
+tup.code()

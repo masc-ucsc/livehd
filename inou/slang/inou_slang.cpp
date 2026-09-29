@@ -38,10 +38,14 @@ std::optional<std::string> find_ware_rtl_dir() {
     std::error_code ec;
     return fs::is_regular_file(p / "cgen_memory_1rd_1wr.v", ec);
   };
-  // A runfiles/exec root nests the workspace under `_main` (bzlmod) or `livehd`
-  // (legacy), but a plain source/exec root holds `ware/rtl` directly.
+  // A runfiles/exec root nests the workspace under its REPO directory: `_main`
+  // when livehd is the ROOT module, but `livehd+` (bzlmod canonical name) or
+  // `livehd` when livehd is a DEPENDENCY -- which is how lhdsuite/lhdtrack
+  // consume it, and the layout this used to miss silently. A plain source/exec
+  // root holds `ware/rtl` directly. Same probe list as inou.yosys's bundled
+  // script resolver and pass.abc's memory_rtl_dir, for the same reason.
   auto under = [&](const fs::path& base) -> std::optional<std::string> {
-    for (const char* ws : {"_main", "livehd"}) {
+    for (const char* ws : {"livehd+", "_main", "livehd"}) {
       if (fs::path cand = base / ws / "ware" / "rtl"; is_ware_rtl(cand)) {
         return cand.string();
       }
@@ -62,7 +66,7 @@ std::optional<std::string> find_ware_rtl_dir() {
   }
 
   // 2. `<exe>.runfiles/...` sitting next to the binary (direct ./bazel-bin run).
-  const fs::path  exe_dir = file_utils::get_exe_path();
+  const fs::path  exe_dir = livehd::file_utils::get_exe_path();
   std::error_code ec;
   for (const auto& e : fs::directory_iterator(exe_dir, ec)) {
     if (e.path().extension() == ".runfiles") {
@@ -88,17 +92,21 @@ void Inou_slang::setup() {
 
   m1.add_label_optional("files", "input verilog files (optional when slang_flags supplies the sources, e.g. -F filelist.f)");
   m1.add_label_optional("top", "elaborate only this top module's hierarchy (forwarded to slang as --top)");
-  m1.add_label_optional("includes", "extra comma separated include paths (the input file dirs and the built-in ware/rtl library are always searched too)");
-  m1.add_label_optional("defines", "comma separated defines. E.g: defines:foo=1,XXX,LALA=1");
-  m1.add_label_optional("undefines", "comma separated undefines");
+
   m1.add_label_optional("timecheck", "true to keep timechecks on generated mods (default: suppressed for slang input)");
   m1.add_label_optional("unroll_limit", "slang-side loop unroll budget per process (default: 4000)");
-  m1.add_label_optional("preserve_param_provenance",
-                        "true to keep package params as `pkg.PARAM` refs + emit `pub comptime const` package units (readable Pyrope emission)");
+  m1.add_label_optional("roll_loops",
+                        "true to hand a canonical procedural `for` to LNAST as a LOOP (break/continue supported) instead of "
+                        "unrolling it in the reader");
+  m1.add_label_optional(
+      "preserve_param_provenance",
+      "true to keep package params as `pkg.PARAM` refs + emit `pub comptime const` package units (readable Pyrope emission)");
   m1.add_label_optional("struct_port_bundles",
-                        "false to flatten qualifying packed-struct ports into one bus (default true: LiveHD's representation of a struct is a bundle)");
+                        "false to flatten qualifying packed-struct ports into one bus (default true: LiveHD's representation of a "
+                        "struct is a bundle)");
   m1.add_label_optional("flat_top_io",
-                        "true to keep ONLY the top module's struct ports packed (for generated-vs-original Verilog equivalence, where the top interface must match)");
+                        "true to keep ONLY the top module's struct ports packed (for generated-vs-original Verilog equivalence, "
+                        "where the top interface must match)");
   m1.add_label_optional("slang_flags",
                         "raw slang driver args ('\\x1f'-separated, e.g. -F filelist.f); supplied by `lhd --reader slang -- ...`");
 
@@ -107,17 +115,21 @@ void Inou_slang::setup() {
   Eprp_method m2("inou.slang", "alias for inou.verilog (System verilog to LNAST using slang)", &Inou_slang::work);
   m2.add_label_optional("files", "input verilog files (optional when slang_flags supplies the sources, e.g. -F filelist.f)");
   m2.add_label_optional("top", "elaborate only this top module's hierarchy (forwarded to slang as --top)");
-  m2.add_label_optional("includes", "extra comma separated include paths (the input file dirs and the built-in ware/rtl library are always searched too)");
-  m2.add_label_optional("defines", "comma separated defines. E.g: defines:foo=1,XXX,LALA=1");
-  m2.add_label_optional("undefines", "comma separated undefines");
+
   m2.add_label_optional("timecheck", "true to keep timechecks on generated mods (default: suppressed for slang input)");
   m2.add_label_optional("unroll_limit", "slang-side loop unroll budget per process (default: 4000)");
-  m2.add_label_optional("preserve_param_provenance",
-                        "true to keep package params as `pkg.PARAM` refs + emit `pub comptime const` package units (readable Pyrope emission)");
+  m2.add_label_optional("roll_loops",
+                        "true to hand a canonical procedural `for` to LNAST as a LOOP (break/continue supported) instead of "
+                        "unrolling it in the reader");
+  m2.add_label_optional(
+      "preserve_param_provenance",
+      "true to keep package params as `pkg.PARAM` refs + emit `pub comptime const` package units (readable Pyrope emission)");
   m2.add_label_optional("struct_port_bundles",
-                        "false to flatten qualifying packed-struct ports into one bus (default true: LiveHD's representation of a struct is a bundle)");
+                        "false to flatten qualifying packed-struct ports into one bus (default true: LiveHD's representation of a "
+                        "struct is a bundle)");
   m2.add_label_optional("flat_top_io",
-                        "true to keep ONLY the top module's struct ports packed (for generated-vs-original Verilog equivalence, where the top interface must match)");
+                        "true to keep ONLY the top module's struct ports packed (for generated-vs-original Verilog equivalence, "
+                        "where the top interface must match)");
   m2.add_label_optional("slang_flags",
                         "raw slang driver args ('\\x1f'-separated, e.g. -F filelist.f); supplied by `lhd --reader slang -- ...`");
 
@@ -149,9 +161,8 @@ void Inou_slang::work(Eprp_var& var) {
       }
     }
   }
-  const auto user_has = [&](std::string_view flag) {
-    return std::find(user_flags.begin(), user_flags.end(), flag) != user_flags.end();
-  };
+  const auto user_has
+      = [&](std::string_view flag) { return std::find(user_flags.begin(), user_flags.end(), flag) != user_flags.end(); };
 
   if (!user_has("-q") && !user_has("--quiet")) {
     argv.push_back(strdup("--quiet"));
@@ -179,7 +190,7 @@ void Inou_slang::work(Eprp_var& var) {
   if (!user_has("--top") && var.has_label("top")) {
     auto top = var.get("top");
     if (!top.empty() && top != "-auto-top") {
-      argv.push_back(strdup("--top"));
+      argv.push_back(strdup("--lhd-top"));
       argv.push_back(strdup(std::string(top).c_str()));
     }
   }
@@ -197,7 +208,7 @@ void Inou_slang::work(Eprp_var& var) {
     }
   }
 
-  // Include search path, in priority order: explicit `includes`, then the
+  // Default include search path: the
   // directory of every input source file (the documented "verilog paths"
   // default — lets a source ``\`include`` a header sitting next to a sibling
   // input), then LiveHD's built-in `ware/rtl` library (so cgen-generated
@@ -215,11 +226,6 @@ void Inou_slang::work(Eprp_var& var) {
     }
   };
 
-  if (var.has_label("includes")) {
-    for (const auto f : absl::StrSplit(var.get("includes"), ',')) {
-      add_inc(std::string(f));
-    }
-  }
   for (const auto& f : file_list) {
     add_inc(fs::path(f).parent_path().string());
   }
@@ -231,22 +237,6 @@ void Inou_slang::work(Eprp_var& var) {
     argv.push_back(strdup(dir.c_str()));
   }
 
-  if (var.has_label("defines")) {
-    auto txt = var.get("defines");
-    for (const auto f : absl::StrSplit(txt, ',')) {
-      argv.push_back(strdup("-D"));
-      argv.push_back(strdup(std::string(f).c_str()));
-    }
-  }
-
-  if (var.has_label("undefines")) {
-    auto txt = var.get("undefines");
-    for (const auto f : absl::StrSplit(txt, ',')) {
-      argv.push_back(strdup("-U"));
-      argv.push_back(strdup(std::string(f).c_str()));
-    }
-  }
-
   // Raw slang driver args (e.g. `-F filelist.f`) passed through verbatim from
   // `lhd --reader slang -- <args>` (already split into `user_flags` above).
   for (const auto& f : user_flags) {
@@ -255,30 +245,42 @@ void Inou_slang::work(Eprp_var& var) {
 
   // Timechecks on generated `mod`s are suppressed by default for slang input
   // (the direct reader predates the io/timing conventions, todo/ 1s subtask E),
-  // overridable via --set inou.verilog.timecheck=true.
+  // overridable via --set compile.slang.timecheck=true.
   const bool keep_timecheck = var.has_label("timecheck") && var.get("timecheck") == "true";
 
   Slang_context::Options opts;
-  opts.keep_timecheck = keep_timecheck;
+  opts.keep_timecheck            = keep_timecheck;
   // Only a USER-supplied --ignore-unknown-modules turns unknown modules into
   // blackbox sub-instances; the copy injected above (so slang itself never
   // hard-errors and the reader owns the diagnostic) does not.
-  opts.blackbox_unknown = user_has("--ignore-unknown-modules");
+  opts.blackbox_unknown          = user_has("--ignore-unknown-modules");
   // Keep package-parameter references symbolic (`pkg.PARAM` + `pub comptime
   // const` package units) for provenance-preserving Pyrope emission.
-  opts.preserve_param_provenance
-      = var.has_label("preserve_param_provenance") && var.get("preserve_param_provenance") == "true";
+  opts.preserve_param_provenance = var.has_label("preserve_param_provenance") && var.get("preserve_param_provenance") == "true";
   // Emit qualifying packed-struct ports as tuple/bundle ports (per-leaf dotted
   // io after SSA). Defaulted ON by the CLI for pyrope-emitting no-graphs
   // compiles, mirroring preserve_param_provenance.
-  opts.struct_port_bundles = !var.has_label("struct_port_bundles") || var.get("struct_port_bundles") == "true";
+  opts.struct_port_bundles       = !var.has_label("struct_port_bundles") || var.get("struct_port_bundles") == "true";
   // flat_top_io: keep ONLY the top module's ports packed (Verilog-vs-Verilog
   // equivalence needs the emitted top interface to match the source module's).
-  opts.flat_top_io = var.has_label("flat_top_io") && var.get("flat_top_io") == "true";
+  opts.flat_top_io               = var.has_label("flat_top_io") && var.get("flat_top_io") == "true";
   if (var.has_label("unroll_limit")) {
     if (int v = atoi(std::string(var.get("unroll_limit")).c_str()); v > 0) {
       opts.unroll_limit = v;
     }
+  }
+  opts.roll_loops = var.has_label("roll_loops") && var.get("roll_loops") == "true";
+  if (opts.roll_loops) {
+    // Still opt-in while it earns mileage, but no longer known-broken: the
+    // statement-ordering miscompile it used to hit was an SSA bug (a loop is a
+    // rename barrier, so a name written before the loop kept its pre-loop
+    // version across it) and is fixed in upass/ssa. A rolled nested loop with
+    // break + continue + a shadowed counter now LEC-PROVES against a
+    // hand-written reference, and rolled-vs-unrolled is structurally identical.
+    livehd::diag::warn("inou.slang", "roll-loops-experimental", "unsupported")
+        .msg("inou.slang: roll_loops hands canonical `for` loops to LNAST instead of unrolling them here (opt-in, still settling)")
+        .hint("a non-canonical loop shape still unrolls in the reader; report any rolled-vs-unrolled difference")
+        .emit();
   }
 
   // Run ONE slang Driver/Compilation over `argv` plus every positional source
@@ -305,7 +307,20 @@ void Inou_slang::work(Eprp_var& var) {
     }
     argv_final.emplace_back(nullptr);
 
-    slang_main(argv_final.size() - 1, argv_final.data(), tree);  // compile to lnasts
+    const auto errors_before = livehd::diag::sink().count(livehd::diag::Severity::error);
+    const int  rc            = slang_main(argv_final.size() - 1, argv_final.data(), tree);  // compile to lnasts
+    // slang reports command-line / -F filelist failures (e.g. a missing source)
+    // straight to stderr, not through the diag sink. Never let such a failure
+    // continue as an empty design that exits 0.
+    if (rc != 0 && livehd::diag::sink().count(livehd::diag::Severity::error) == errors_before) {
+      livehd::diag::err("inou.slang", "slang-frontend-failed", "io")
+          .msg("the slang front end failed ({}) before elaboration",
+               rc == 1   ? "invalid command line or -F filelist"
+               : rc == 2 ? "invalid options, or a missing or unreadable source file"
+                         : std::format("exit code {}", rc))
+          .hint("slang's own message is on stderr above")
+          .emit();
+    }
 
     for (auto& ln : tree.pick_lnast()) {
       ln->set_skip_timecheck(!keep_timecheck);

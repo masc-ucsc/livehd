@@ -11,7 +11,6 @@ cc_library(
         ["*.cpp"],
         exclude = [
             "*test*.cpp",
-            "yosys_driver.cpp",
         ],
     ),
     hdrs = glob(["*.hpp"]),
@@ -24,7 +23,6 @@ cc_library(
         "@at_clifford_yosys2//:kernel",
         "@at_clifford_yosys2//:version",
         "@mustache//:headers",
-        "@yosys_slang//:slang.so",
     ],
     alwayslink = True,
 )
@@ -37,6 +35,9 @@ sh_library(
         ":yosys2",
     ],
     data = [
+        "clock_domains.py",
+        "rtlil_children.py",
+        "rtlil_split_port_adapter.py",
         "//ware:cgen_memory_rtl",
     ],
     visibility = ["//visibility:public"],
@@ -52,15 +53,16 @@ filegroup(
 
 cc_binary(
     name = "yosys2",
-    srcs = [
-        "yosys_driver.cpp",
-    ],
+    srcs = [],
     copts = COPTS + ["-Wno-shadow"],
     features = ["-use_header_modules"],
+    linkopts = [
+        "-rdynamic",
+    ],
     visibility = ["//visibility:public"],
-    linkopts = ["-lz", "-rdynamic"],
     deps = [
         ":lgyosys",
+        "@at_clifford_yosys2//:driver",
     ],
 )
 
@@ -84,10 +86,14 @@ filegroup(
 )
 
 _YOSYS_TEST_PREFIX = "tests/"
+
 _YOSYS_TEST_SUFFIX = ".v"
 
 YOSYS_COMPILE_TESTS = [
-    (t[len(_YOSYS_TEST_PREFIX):-len(_YOSYS_TEST_SUFFIX)], t)
+    (
+        t[len(_YOSYS_TEST_PREFIX):-len(_YOSYS_TEST_SUFFIX)],
+        t,
+    )
     for t in VERILOG_TESTS
 ]
 
@@ -97,6 +103,7 @@ YOSYS_COMPILE_TESTS = [
     args = ["$(location %s)" % t[1]],
     data = [
         t[1],
+        "//inou/prp:tests/lec.py",
         "//lhd",
     ],
     tags = [
@@ -107,3 +114,50 @@ YOSYS_COMPILE_TESTS = [
 ) for t in YOSYS_COMPILE_TESTS]
 
 exports_files(ALL_VERILOG_TESTS)
+
+filegroup(
+    name = "memory_import_srcs",
+    srcs = [
+        "inou_yosys_api.cpp",
+        "lgyosys_tolg.cpp",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+# State-name recovery and budget scheduling belong to the external solver;
+# the lhd CLI equivalence test covers the default CVC5 driver separately.
+sh_test(
+    name = "lgcheck_state_test",
+    srcs = ["tests/yosys_state_match_test.sh"],
+    data = [":scripts"],
+)
+
+# Bounded-check reset protocol: the reset window must clock the design and
+# un-reset power-on state is X (a don't-care on gold), so a QN-flop netlist of
+# a synchronous-reset design is not falsely refuted while real post-reset
+# divergences still are.
+sh_test(
+    name = "lgcheck_qn_reset_test",
+    srcs = ["tests/yosys_qn_reset_test.sh"],
+    data = [":scripts"],
+)
+
+# The temporal-induction stage must not constrain a conventionally named reset
+# inside its checked window (a vacuous base case PROVED f^d == f+d when the
+# port was named rst). Non-equivalent pairs refute with and without the name.
+sh_test(
+    name = "yosys_reset_soundness_test",
+    srcs = ["tests/yosys_reset_soundness_test.sh"],
+    data = [":scripts"],
+)
+
+# The structural/induction engines ignore which clock and edge drive a
+# register; lgcheck runs them only on single-clock-edge designs. Clock/edge
+# mismatches (edge flip, another clock, gated clock, mixed edges, latch
+# polarity, memory port edge) must never be proven; mapped netlists with
+# inverted/buffered clocks, QN state and an ICG vs an enable must still prove.
+sh_test(
+    name = "yosys_clock_domain_test",
+    srcs = ["tests/yosys_clock_domain_test.sh"],
+    data = [":scripts"],
+)

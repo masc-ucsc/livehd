@@ -1,0 +1,38 @@
+/*
+:name: loop_hier_state_match
+:type: equiv
+:verilog_top: loop_hier_state_match.top
+:pyrope_top: top
+:expect_instances: u_loop_0=1 lane_q=1 *=2
+*/
+// Two source-loop calls create two physical stateful lane instances.  Each
+// lane owns both a flop and a two-entry memory.  The golden spells the names
+// the UNROLLED lowering produces — `lane_q__li0` and `lane_q__li1`, the LHS
+// variable plus the loop-iteration tag — so that flow pairs
+// instance-for-instance in hierarchical LEC.  This fixture compiles ROLLED
+// (the default), whose hierarchy is one `__loop0` per ordinal
+// (`u_loop_0__li0.lane_q`), so the flat miter pairs its replica state through
+// `canon_flop_name`'s wrapper fold; the shared naming is what keeps the two
+// comparable.
+
+mod lane(x:u4, addr:u1, we:bool) -> (q:u4@[0]) {
+  reg acc:u4 = 0
+  reg mem:[2]u4 = 0
+
+  if we { mem[addr] = x }
+  q = acc ^ mem[addr]
+  wrap acc = acc + x
+}
+
+pub mod top(d:u8, addr:u1, write_mask:u2) -> (q:u8@[0]) {
+  mut packed:u8 = 0
+  for ordinal in 0..<2 {
+    const lane_q = lane(  // lane::[name=lane_q] is redundant (defailts to lhs variable)
+      x=(d >> (ordinal * 4)) & 0xf,
+      addr=addr,
+      we=write_mask#[ordinal],
+    )
+    packed = packed | (lane_q << (ordinal * 4))
+  }
+  q = packed
+}

@@ -5,13 +5,16 @@
 module \latch_reset.lrst8 (
   input            en,
   input      [7:0] d,
-  output reg [7:0] q,
+  output     [7:0] q,
   input            reset
 );
+  reg [7:0] l;
+
   always_latch begin
     if (reset)
-      q <= 8'd3;
+      l <= 8'd3;
     else if (en)
-      q <= d;
+      l <= d;
   end
+  assign q = l;
 endmodule

@@ -1,31 +1,118 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
+#include <print>
+#include <utility>
+#include <vector>
 
 #include "absl/container/node_hash_map.h"
+#include "absl/container/node_hash_set.h"
 #include "hlop/dlop.hpp"
 
 template <typename Pin>
 class Pin_tracker {
 public:
+  // Which bit of which pin drives one bit of a tracked value: `id()` is the
+  // driving pin, `pos` its bit index (-1 = ambiguous/unset).
+  //
+  // The pin is BORROWED from the tracker's own intern table, never owned. It
+  // used to be a `Pin` copy, which duplicated a net name once per BIT: on
+  // minion's flattened netlist that is 145 M bit slots, and the copies came to
+  // 15.8 GB of std::string against 0.26 GB of distinct names -- essentially the
+  // whole footprint of pass.opentimer's netlist build. A Pin_pos is now 16
+  // bytes regardless of how long the hierarchical net name is.
+  //
+  // The pointer is valid for the lifetime of the tracker that produced it (see
+  // `names_`); a Pin_vector must not outlive its Pin_tracker.
   struct Pin_pos {
-    Pin id;
-    int pos = -1;
+    const Pin* id_ptr = nullptr;
+    int        pos    = -1;
+
+    [[nodiscard]] const Pin& id() const {
+      I(id_ptr != nullptr);  // every slot any add_* writes is interned
+      return *id_ptr;
+    }
   };
 
   using Pin_vector = std::vector<Pin_pos>;
 
-  Pin_tracker(Pin zero_pin) : Zero_pin(zero_pin) {}
+  Pin_tracker(Pin zero_pin) : Zero_pin(std::move(zero_pin)) { zero_ = intern(Zero_pin); }
 
   void add_input(Pin wname, int32_t bits) {
     auto& pv = full_map[wname];
     I(pv.empty());  // Why to double insert inputs??
 
-    pv.resize(bits, {Zero_pin, -1});
+    pv.resize(bits, {zero_, -1});
+    const Pin* self = intern(wname);  // ONE intern for the whole bus
     for (auto i = 0; i < bits; ++i) {
-      pv[i].id  = wname;
-      pv[i].pos = i;
+      pv[i].id_ptr = self;
+      pv[i].pos    = i;
     }
+  }
+
+  // Replace any prior wiring interpretation with a fresh timing boundary.
+  // OpenTimer uses this only for exact native combinational logic that cannot
+  // be represented as a bit rename (for example a deliberately preserved
+  // feedback SCC). The logic remains in the LGraph; the timing path is cut at
+  // its output instead of silently treating the logic as zero-delay wiring.
+  void add_opaque(Pin wname, int32_t bits) {
+    auto& pv = full_map[wname];
+    pv.resize(static_cast<size_t>(std::max(bits, 0)));
+    const Pin* self = intern(wname);
+    for (int32_t i = 0; i < bits; ++i) {
+      pv[static_cast<size_t>(i)] = {self, i};
+    }
+  }
+
+  // A constant has no transition/arrival regardless of its logic value. Map
+  // every bit to the one real zero-arrival net instead of minting a synthetic
+  // bus name that no timing netlist can drive.
+  void add_constant(Pin wname, int32_t bits) {
+    auto& pv = full_map[wname];
+    pv.assign(static_cast<size_t>(std::max(bits, 0)), {zero_, 0});
+  }
+
+  // PRECONDITION: `wname` is the output of a LIBERTY TECHNOLOGY CELL, and the
+  // CALLER must have proven it (pass/opentimer/opentimer.cpp: is_liberty_cell,
+  // the same predicate that decides whether a Sub becomes an ot::Timer gate).
+  // Such an output is one Boolean pin even when a stale or carrier-width
+  // annotation says the LGraph value is wider: bit 0 is the physical timing
+  // net; any requested upper bit is zero extension, not an independent bus net.
+  //
+  // NOT for a genuinely wide opaque boundary -- a black-box instance, a design
+  // module, an unmapped operator. Every bit above 0 would be retired to the
+  // zero-arrival net and its timing arcs dropped without a diagnostic. Model
+  // such a boundary as add_opaque() PLUS one real timer net per bit (the shape
+  // Pass_opentimer uses for a flop/latch/memory output); add_opaque alone, or
+  // no entry at all, leaves consumers pointing at `<net>.k` names that nobody
+  // inserted, and OpenTimer log-and-skips those connects into unconnected
+  // Liberty input pins.
+  //
+  // Replaces (does not merge with) a provisional add_input entry, because a
+  // hierarchy walk may encounter a sibling consumer before this producer.
+  void add_scalar(Pin wname, int32_t bits) {
+    auto& pv = full_map[wname];
+    pv.assign(static_cast<size_t>(std::max(bits, 1)), {zero_, 0});
+    pv[0] = {intern(wname), 0};
+  }
+
+  // add_scalar that never rewrites an existing entry, for use by a CONSUMER
+  // that reached a cell output before the walk reached the cell. Forward order
+  // does not guarantee the producer comes first (hhds treats a loop_break Sub
+  // as a forward SOURCE -- its out-edges add no in-degree to its sinks -- and a
+  // comb-cycle tail is emitted in raw storage order), and once a consumer has
+  // COPIED the add_input fallback's provisional {net.0 .. net.N-1} bus into its
+  // own pin vector, the producer's later add_scalar can no longer undo it: the
+  // consumer keeps resolving bit k>0 onto net.k, a net no timing graph ever
+  // inserts. Seeding writes exactly what the producer writes, so whichever
+  // order the two arrive in, the result is the same.
+  bool add_scalar_if_absent(Pin wname, int32_t bits) {
+    if (full_map.contains(wname)) {
+      return false;
+    }
+    add_scalar(wname, bits);
+    return true;
   }
 
   void add_get_mask(Pin dst_pin, Pin a_pin, int32_t a_sbits, Dlop mask) {
@@ -38,49 +125,50 @@ public:
       it = full_map.find(a_pin);
     }
 
-    auto pairs = mask.get_mask_range_pairs();
-    for (const auto& p : pairs) {
-      auto start = static_cast<size_t>(p.first);
-      auto end   = static_cast<size_t>(p.first + p.second);  // [start,end)
-      auto pos   = start;
-      if (end > it->second.size()) {
-        end = it->second.size();
-      }
-
-      while (pos < end) {
-        pv.emplace_back(it->second[pos]);
-        ++pos;
-      }
+    // ONE window (graph/cell.hpp: a mask pin is [lo,hi) or the -1 whole-value
+    // spelling). The -1 form carries no window, and the tracker models bit
+    // IDENTITY -- to-unsigned clears the sign bit, so the result's top bit is
+    // not the source's -- so it contributes no tracked bits, as before.
+    if (mask.is_negative()) {
+      return;
+    }
+    const auto [lo, hi] = mask.get_mask_range();  // half-open
+    if (lo < 0 || hi <= lo) {
+      return;
+    }
+    const auto end = std::min(static_cast<size_t>(hi), it->second.size());
+    for (auto pos = static_cast<size_t>(lo); pos < end; ++pos) {
+      pv.emplace_back(it->second[pos]);
     }
   }
 
   void add_set_mask(Pin dst_pin, Pin a_pin, int32_t a_sbits, Dlop mask, Pin v_pin) {
     Pin_vector pv   = get_or_create_pv(a_pin, a_sbits);
-    Pin_vector v_pv = get_or_create_pv(v_pin, mask.get_bits());
+    Pin_vector v_pv = get_or_create_pv(v_pin, mask.get_signed_bits());
 
     if (pv.size() < v_pv.size()) {
-      pv.resize(v_pv.size(), {Zero_pin, -1});
+      pv.resize(v_pv.size(), {zero_, -1});
     }
 
-    size_t pick_v_pos = 0;
-    auto   pairs      = mask.get_mask_range_pairs();
-    for (const auto& p : pairs) {
-      auto start = static_cast<size_t>(p.first);
-      auto end   = static_cast<size_t>(p.first + p.second);  // [start,end)
-      auto pos   = start;
-
-      if (pv.size() <= end) {
-        pv.resize(end, {Zero_pin, -1});
-      }
-
-      while (pos < end) {
-        if (v_pv.size() <= pick_v_pos) {
-          pv[pos] = v_pv.back();
-        } else {
-          pv[pos] = v_pv[pick_v_pos];
+    // ONE window, same contract as add_get_mask above; the -1 whole-value
+    // spelling writes no tracked bit.
+    if (!mask.is_negative()) {
+      const auto [lo, hi] = mask.get_mask_range();  // half-open
+      if (lo >= 0 && hi > lo) {
+        const auto end = static_cast<size_t>(hi);
+        if (pv.size() <= end) {
+          pv.resize(end, {zero_, -1});
         }
-        ++pos;
-        ++pick_v_pos;
+        size_t pick_v_pos = 0;
+        for (auto pos = static_cast<size_t>(lo); pos < end; ++pos, ++pick_v_pos) {
+          if (v_pv.empty()) {
+            pv[pos] = {zero_, 0};
+          } else if (v_pv.size() <= pick_v_pos) {
+            pv[pos] = v_pv.back();
+          } else {
+            pv[pos] = v_pv[pick_v_pos];
+          }
+        }
       }
     }
 
@@ -97,11 +185,11 @@ public:
     const auto a_sbits_u = static_cast<size_t>(a_sbits);
 
     auto& pv = full_map[dst_pin];
-    pv.resize(a_sbits_u + amount_u, {Zero_pin, -1});
+    pv.resize(a_sbits_u + amount_u, {zero_, -1});
 
     for (size_t i = 0; i < amount_u; ++i) {
-      pv[i].id  = Zero_pin;
-      pv[i].pos = 0;
+      pv[i].id_ptr = zero_;
+      pv[i].pos    = 0;
     }
 
     auto it = full_map.find(a_pin);
@@ -109,14 +197,18 @@ public:
       add_input(a_pin, a_sbits);
       it = full_map.find(a_pin);
     }
+    if (it->second.empty()) {
+      pv.assign(a_sbits_u + amount_u, {zero_, 0});
+      return;
+    }
 
     for (size_t i = 0; i < a_sbits_u; ++i) {
       if (i >= it->second.size()) {
-        pv[amount_u + i].id  = it->second.back().id;
-        pv[amount_u + i].pos = it->second.back().pos;
+        pv[amount_u + i].id_ptr = it->second.back().id_ptr;
+        pv[amount_u + i].pos    = it->second.back().pos;
       } else {
-        pv[amount_u + i].id  = it->second[i].id;
-        pv[amount_u + i].pos = it->second[i].pos;
+        pv[amount_u + i].id_ptr = it->second[i].id_ptr;
+        pv[amount_u + i].pos    = it->second[i].pos;
       }
     }
   }
@@ -129,26 +221,30 @@ public:
 
     const auto amount_u  = static_cast<size_t>(amount_i);
     const auto a_sbits_u = static_cast<size_t>(a_sbits);
-    I(a_sbits_u >= amount_u);
-
-    auto&      pv       = full_map[dst_pin];
-    const auto out_bits = a_sbits_u - amount_u;
-    pv.resize(out_bits, {Zero_pin, -1});
 
     auto it = full_map.find(a_pin);
     if (it == full_map.end()) {
       add_input(a_pin, a_sbits);
       it = full_map.find(a_pin);
     }
+    const Pin_vector source = it->second;
+
+    auto&      pv       = full_map[dst_pin];
+    const auto out_bits = amount_u < a_sbits_u ? a_sbits_u - amount_u : size_t{1};
+    pv.resize(out_bits, {zero_, -1});
+    if (source.empty()) {
+      pv.assign(out_bits, {zero_, 0});
+      return;
+    }
 
     for (size_t i = 0; i < out_bits; ++i) {
-      if (i >= it->second.size()) {
-        pv[i].id  = it->second.back().id;
-        pv[i].pos = it->second.back().pos;
-      } else {
-        pv[i].id  = it->second[i].id;
-        pv[i].pos = it->second[i].pos;
-      }
+      // Arithmetic right shift is wiring: output bit i comes from input bit
+      // i+amount.  An overshift repeats the sign bit.  Keeping one bit in that
+      // case is important for the one-bit SRA nodes emitted by ABC read-back;
+      // unsigned/logical overshifts are represented by zero-fill wiring, not
+      // by an SRA node.
+      const auto src = std::min(amount_u + i, source.size() - 1);
+      pv[i]          = source[src];
     }
   }
 
@@ -161,23 +257,77 @@ public:
     const auto amount_u = static_cast<size_t>(amount_i);
 
     auto& pv = full_map[dst_pin];
-    pv.resize(amount_u, {Zero_pin, -1});
+    pv.resize(amount_u, {zero_, -1});
 
     auto it = full_map.find(a_pin);
     if (it == full_map.end()) {
       add_input(a_pin, a_sbits);
       it = full_map.find(a_pin);
     }
+    if (it->second.empty()) {
+      pv.assign(amount_u, {zero_, 0});
+      return;
+    }
 
     for (size_t i = 0; i < amount_u; ++i) {
       if (i >= it->second.size()) {
-        pv[i].id  = it->second.back().id;
-        pv[i].pos = it->second.back().pos;
+        pv[i].id_ptr = it->second.back().id_ptr;
+        pv[i].pos    = it->second.back().pos;
       } else {
-        pv[i].id  = it->second[i].id;
-        pv[i].pos = it->second[i].pos;
+        pv[i].id_ptr = it->second[i].id_ptr;
+        pv[i].pos    = it->second[i].pos;
       }
     }
+  }
+
+  // One lane of an add_concat: `pin` drives the window [offset, offset+width)
+  // of the result. `sbits` is the driver's own stamped width, used only to
+  // synthesize a fresh pin vector when the lane has not been tracked yet.
+  struct Concat_src {
+    Pin     pin;
+    int32_t sbits  = 0;
+    int32_t width  = 0;  // DECLARED window width
+    int32_t offset = 0;  // LSB position of the window in the result
+  };
+
+  // Concat is pure WIRING: result bit (offset_i + k) IS lane i's bit k. Every
+  // bit keeps its (pin, pos) identity, so the cell contributes NO delay -- it
+  // mints no gate, it renames bit positions (the same reasoning that makes
+  // graph_util::ge_weight charge a Concat zero gates).
+  //
+  // `out_bits` is the CELL CONTRACT width, sum(lane widths) + 1: bits at and
+  // above sum(w) are the always-zero sign slot of a never-negative result, and
+  // are left as known zero. It is never the driver pin's stamp -- the const
+  // sinks carry the intended bit spacing, and a narrowed stamp must not move a
+  // lane.
+  void add_concat(Pin dst_pin, const std::vector<Concat_src>& lanes, int32_t out_bits) {
+    I(out_bits >= 0);
+
+    // Build into a LOCAL vector: a lane may read dst_pin's own previous entry,
+    // and full_map[dst_pin] would rehash the map out from under get_or_create_pv.
+    Pin_vector pv;
+    pv.resize(static_cast<size_t>(out_bits), {zero_, 0});
+
+    for (const auto& l : lanes) {
+      const Pin_vector src = get_or_create_pv(l.pin, l.sbits);
+      if (src.empty()) {
+        continue;  // untracked and unsized: leave the window known-zero
+      }
+      for (int32_t k = 0; k < l.width; ++k) {
+        const auto dst = static_cast<size_t>(l.offset) + static_cast<size_t>(k);
+        if (dst >= pv.size()) {
+          break;  // window above the contract width; cannot happen for a well-formed cell
+        }
+        // A lane driver NARROWER than its window SIGN-EXTENDS into it: the top
+        // source bit replicates, exactly as add_shl/add_sra/add_sext do. A
+        // driver WIDER than its window cannot reach here (the caller rejects it
+        // via graph_util::concat_lane_violation).
+        const auto si = static_cast<size_t>(k) < src.size() ? static_cast<size_t>(k) : src.size() - 1;
+        pv[dst]       = src[si];
+      }
+    }
+
+    full_map.insert_or_assign(dst_pin, pv);
   }
 
   void add_or(Pin dst_pin, Pin a_pin) {
@@ -189,14 +339,14 @@ public:
     it       = full_map.find(a_pin);  // WARNING: insert could destroy iterator
 
     if (pv.size() < it->second.size()) {
-      pv.resize(it->second.size(), {Zero_pin, 0});
+      pv.resize(it->second.size(), {zero_, 0});
     }
 
     for (size_t i = 0; i < it->second.size(); ++i) {
-      if (it->second[i].id == Zero_pin && it->second[i].pos == 0) {
+      if (it->second[i].id_ptr == zero_ && it->second[i].pos == 0) {
         continue;  // Nothing to do in this bit
       }
-      if (pv[i].id == Zero_pin && pv[i].pos == 0) {
+      if (pv[i].id_ptr == zero_ && pv[i].pos == 0) {
         pv[i] = it->second[i];
       } else {
         pv[i].pos = -1;
@@ -219,17 +369,17 @@ public:
     }
 
     if (pv.size() < max_bits) {
-      pv.resize(max_bits, {Zero_pin, 0});
+      pv.resize(max_bits, {zero_, 0});
     }
 
     for (size_t i = 0; i < max_bits; ++i) {
-      if (it->second[i].id == Zero_pin && it->second[i].pos == 0) {
+      if (it->second[i].id_ptr == zero_ && it->second[i].pos == 0) {
         continue;  // Nothing to do in this bit
       }
       if (!a_mask.bit_test(static_cast<int32_t>(i))) {
         continue;
       }
-      if (pv[i].id == Zero_pin && pv[i].pos == 0) {
+      if (pv[i].id_ptr == zero_ && pv[i].pos == 0) {
         pv[i] = it->second[i];
       } else {
         pv[i].pos = -1;
@@ -246,19 +396,26 @@ public:
     return it->second;
   }
 
+  bool has_pin(Pin dst_pin) const { return full_map.contains(dst_pin); }
+
+  bool has_ambiguous(Pin dst_pin) const {
+    const auto it = full_map.find(dst_pin);
+    return it != full_map.end() && std::ranges::any_of(it->second, [](const auto& p) { return p.pos < 0; });
+  }
+
   /* LCOV_EXCL_START */
   void dump() {
     for (const auto e : full_map) {
       std::print("name:{}\n", e.first);
       for (const auto& s : e.second) {
-        std::print(" id:{} pos:{}\n", s.id, s.pos);
+        std::print(" id:{} pos:{}\n", s.id(), s.pos);
       }
     }
   }
   /* LCOV_EXCL_STOP */
 
 protected:
-  Pin_vector get_or_create_pv(Pin a_name, int32_t a_sbits) const {
+  Pin_vector get_or_create_pv(Pin a_name, int32_t a_sbits) {
     auto it = full_map.find(a_name);
     if (it != full_map.end()) {
       return it->second;
@@ -266,11 +423,12 @@ protected:
 
     Pin_vector a_pv;
 
-    a_pv.resize(a_sbits, {Zero_pin, -1});
-    int32_t pos = 0;
+    a_pv.resize(a_sbits, {zero_, -1});
+    const Pin* self = intern(a_name);
+    int32_t    pos  = 0;
     for (auto& e : a_pv) {
-      e.id  = a_name;
-      e.pos = pos;
+      e.id_ptr = self;
+      e.pos    = pos;
       ++pos;
     }
 
@@ -293,9 +451,19 @@ protected:
     }
   }
 
-  Pin Zero_pin;
+  Pin                                  Zero_pin;
   // WARNING: Pin_vector MUST have pointer stability on resize of full_map
   absl::node_hash_map<Pin, Pin_vector> full_map;
+
+  // ONE stable copy per DISTINCT pin, shared by every bit slot naming it (see
+  // Pin_pos). node_hash_set is the point: it guarantees element pointer
+  // stability, so a borrowed `const Pin*` stays valid across later inserts.
+  // Interning touches only this set, so it can never invalidate a `full_map`
+  // iterator or reference a caller is holding.
+  absl::node_hash_set<Pin> names_;
+  const Pin*               zero_ = nullptr;
+
+  const Pin* intern(const Pin& p) { return &*names_.insert(p).first; }
 
 private:
 };

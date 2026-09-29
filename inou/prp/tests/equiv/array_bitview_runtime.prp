@@ -1,0 +1,18 @@
+/*
+:name: array_bitview_runtime
+:type: equiv
+:verilog_top: array_bitview_runtime.array_bitview_runtime
+:pyrope_top: array_bitview_runtime
+*/
+
+pub comb array_bitview_runtime(idx:u2, off:u4, v:u8) -> (before_o:u8, after_o:u32, pick_o:u8) {
+  mut r:[4]u8 = 0
+  r[0] = 0x11
+  r[1] = 0x22
+  r[2] = 0x33
+  r[3] = 0x44
+  before_o = r#[off..+8]
+  r#[off..+8] = v
+  after_o = r#[0..=31]
+  pick_o = r[idx]
+}

@@ -1,0 +1,13 @@
+/*
+:name: bounded_while
+:type: equiv
+:verilog_top: bounded_while
+:pyrope_top: bounded_while
+*/
+// Priority encoder reference; each set bit overrides the lower-priority ones.
+pub comb bounded_while(num:u8) -> (count:u4) {
+  count = 8
+  for i in 0..<8 {
+    if num#[i] != 0 { count = 7 - i }
+  }
+}

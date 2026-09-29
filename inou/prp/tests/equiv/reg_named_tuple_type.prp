@@ -1,0 +1,22 @@
+/*
+:name: reg_named_tuple_type
+:type: equiv
+:verilog_top: reg_named_tuple_type
+:pyrope_top: reg_named_tuple_type
+*/
+
+// A NAMED tuple type used as SCALAR register state. upass.detuple resolved a
+// named type's layout only for the array/memory spelling (`reg mem:[N]T`), so
+// `reg instr:Decode` stayed a whole-tuple aggregate and its field writes reached
+// tolg as multi-element stores ("tuple/field store to 'instr' has no hardware
+// lowering") -- even though the byte-equivalent ANONYMOUS spelling
+// `reg instr:(add:bool, rd:u5)` split into per-field flops just fine.
+type Decode = (add:bool, rd:u5)
+
+pub mod reg_named_tuple_type(clk:u1, resetn:bool, opcode:u2, rd:u5) -> (add:bool@[], dest:u5@[]) {
+  reg instr:Decode = nil
+  instr.add = resetn and (opcode == 0)
+  instr.rd  = rd
+  add  = instr.add
+  dest = instr.rd
+}

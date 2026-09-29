@@ -1,0 +1,24 @@
+/*
+:name: testbench_unsigned_cast
+:type: simulation
+*/
+
+mod cast_source(d:u8) -> (q:u8@[0]) {
+  q = d
+}
+
+test cast_source.width_casts_keep_unsigned_values {
+  mut dut = cast_source
+  tick 4 {
+    dut.d = 128 + clock
+    step
+    assert(dut.q == u8(128 + clock))
+    assert(u1(clock < 2) == if clock < 2 { 1 } else { 0 })
+    assert(u8(255) == 255)
+    assert(u8(0x180) == 128)
+    assert(u8(-1) == 255)
+    assert(u8(255) + 1 == 256)
+    assert(u97(1 << 96) == 1 << 96)
+    assert(u97(-1) == (1 << 97) - 1)
+  }
+}

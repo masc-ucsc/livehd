@@ -11,22 +11,39 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <charconv>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <format>
+#include <fstream>
 #include <functional>
+#include <limits>
+#include <map>
+#include <optional>
+#include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "bus_name.hpp"
 #include "cone_abc.hpp"
+#include "cprop.hpp"
 #include "encode.hpp"
+#include "hash_util.hpp"
 #include "host_mem.hpp"
+#include "inline_sub.hpp"
 #include "node_util.hpp"
+#include "occurrence_materialize.hpp"
+#include "split_selfref.hpp"
+#include "str_tools.hpp"
 
 namespace livehd::lec {
+
+namespace gu = livehd::graph_util;
 
 namespace {
 // Design-size gate (memory admission). The encoder materializes the whole
@@ -83,6 +100,70 @@ std::string display_name(std::string_view name) {
   return std::string(name);
 }
 
+// cgen emits a stateful Memory through a `cgen_memory_*` wrapper whose internal
+// storage is named `data`. Its plain-identifier-safe instance name carries the
+// original Memory name as hex in `__lhdmem_h<hex>_e`, so the round trip's
+// wrapper state is an exact, reversible correspondence claim rather than a
+// structural guess. A uniqueness suffix may follow `_e`; it does not alter the
+// encoded storage provenance.
+constexpr std::string_view cgen_memory_state_marker = "__lhdmem_h";
+constexpr std::string_view cgen_memory_state_end    = "_e";
+
+std::optional<std::string> decode_cgen_memory_correspondence(std::string_view name) {
+  const auto canon = canon_flop_name(name);
+  const auto pos   = canon.find(cgen_memory_state_marker);
+  if (pos == std::string::npos || !canon.ends_with("_data")) {
+    return std::nullopt;
+  }
+  const size_t hex_begin = pos + cgen_memory_state_marker.size();
+  const size_t hex_end   = canon.find(cgen_memory_state_end, hex_begin);
+  if (hex_end == std::string::npos || hex_end == hex_begin || ((hex_end - hex_begin) & 1U) != 0
+      || hex_end + cgen_memory_state_end.size() > canon.size() - 5) {
+    return std::nullopt;
+  }
+  const auto suffix = std::string_view(canon).substr(hex_end + cgen_memory_state_end.size(),
+                                                     canon.size() - 5 - hex_end - cgen_memory_state_end.size());
+  if (!suffix.empty()) {
+    if (suffix.front() != '_' || suffix.size() == 1
+        || !std::all_of(suffix.begin() + 1, suffix.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
+      return std::nullopt;
+    }
+  }
+
+  auto nibble = [](unsigned char ch) -> int {
+    if (ch >= '0' && ch <= '9') {
+      return ch - '0';
+    }
+    if (ch >= 'a' && ch <= 'f') {
+      return ch - 'a' + 10;
+    }
+    if (ch >= 'A' && ch <= 'F') {
+      return ch - 'A' + 10;
+    }
+    return -1;
+  };
+  std::string decoded;
+  decoded.reserve((hex_end - hex_begin) / 2);
+  for (size_t i = hex_begin; i < hex_end; i += 2) {
+    const int hi = nibble(static_cast<unsigned char>(canon[i]));
+    const int lo = nibble(static_cast<unsigned char>(canon[i + 1]));
+    if (hi < 0 || lo < 0) {
+      return std::nullopt;
+    }
+    decoded.push_back(static_cast<char>((hi << 4) | lo));
+  }
+  return canon.substr(0, pos) + canon_flop_name(decoded);
+}
+
+bool is_cgen_memory_storage_name(std::string_view name) { return decode_cgen_memory_correspondence(name).has_value(); }
+
+std::string memory_correspondence_name(std::string_view name) {
+  if (auto decoded = decode_cgen_memory_correspondence(name)) {
+    return *decoded;
+  }
+  return canon_flop_name(name);
+}
+
 // Join a (sorted) token list, capping the count so a 1000-flop bank doesn't bury
 // the message; appends "(+N more)" when truncated.
 std::string join_capped(std::vector<std::string> toks, size_t cap = 24) {
@@ -115,6 +196,83 @@ std::string bbin_models_hint(const std::vector<std::string>& unmatched_impl) {
   }
   return "; hint: the impl instantiates library cells with no definition (a tech-mapped netlist without its cell models) — "
          "generate models with `lhd pass liberty gensim <file.lib> --emit-dir lg:models` and re-run with `--lib lg:models`";
+}
+
+// Regroup one-bit state keys named by the bus-expansion standard
+// (core/bus_name.hpp): bit i of register `r` is `r[i]`. A standard-cell
+// netlist read back as Verilog with its cell models inlined carries each
+// cell's state one hierarchy level down (`r[i].flop_16`, `r[i].IQ`); a
+// one-bit register keeps its plain name and so reads back as `r.flop_16`
+// (bus_name::cell_state_owner, which also undoes cgen's `_cgen<N>` instance
+// uniquifier).
+// `raw` maps a key to the hierarchical name it was made from (canon_flop_name
+// flattens '.' to '_', which would make the model segment ambiguous); a key
+// without one is parsed in its canonical spelling.
+//
+// Returns base key -> member keys, LSB first, for every base whose members are
+// width 1, absent from `other`, and cover EXACTLY the indices 0..n-1 with one
+// key each (a lone `r.<state>` is the one-member group of `r`). A base with a
+// duplicated index (two state elements inside one bit's cell), a gap, or a
+// mix of the two shapes is dropped whole: an ambiguous regroup is no
+// correspondence. The caller still requires the reference's `base` to be
+// exactly n bits wide, and every relation built from these groups is
+// re-verified by the miter.
+absl::flat_hash_map<std::string, std::vector<std::string>> bus_bit_groups(const Io_name_map<int>&         side,
+                                                                          const Io_name_map<int>&         other,
+                                                                          const Io_name_map<std::string>& raw = {}) {
+  struct Group {
+    std::map<int64_t, std::string> bits;
+    int                            model_only = 0;  // members of the lone `r.<state>` shape
+    bool                           broken     = false;
+  };
+  absl::flat_hash_map<std::string, Group> indexed;
+  for (const auto& [key, width] : side) {
+    if (width != 1 || other.contains(key)) {
+      continue;
+    }
+    std::string base;
+    int64_t     index = 0;
+    bool        lone  = false;
+    if (auto rit = raw.find(key); rit != raw.end()) {
+      const auto logical = gu::logical_hier_name(rit->second);
+      if (auto p = livehd::bus_name::parse_bus_piece(logical, /*allow_model_suffix=*/true)) {
+        base  = canon_flop_name(p->base);
+        index = p->index;
+      } else if (auto owner = livehd::bus_name::cell_state_owner(logical)) {
+        base = canon_flop_name(*owner);
+        lone = true;
+      } else {
+        continue;
+      }
+    } else if (auto p = livehd::bus_name::parse_bus_piece(key, /*allow_model_suffix=*/true, '_')) {
+      base  = std::string{p->base};
+      index = p->index;
+    } else {
+      continue;
+    }
+    if (base.empty()) {
+      continue;
+    }
+    auto& g = indexed[base];
+    g.model_only += lone ? 1 : 0;
+    if (!g.bits.emplace(index, key).second) {
+      g.broken = true;
+    }
+  }
+  absl::flat_hash_map<std::string, std::vector<std::string>> out;
+  for (auto& [base, g] : indexed) {
+    const auto n = static_cast<int64_t>(g.bits.size());
+    if (g.broken || g.bits.rbegin()->first + 1 != n || (g.model_only != 0 && n != 1)) {
+      continue;  // duplicated or non-contiguous index set, or mixed shapes
+    }
+    std::vector<std::string> bits;
+    bits.reserve(g.bits.size());
+    for (auto& [index, key] : g.bits) {
+      bits.push_back(std::move(key));
+    }
+    out.emplace(base, std::move(bits));
+  }
+  return out;
 }
 }  // namespace
 
@@ -183,24 +341,29 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
   // flops; hierarchy matters here purely for collision detection.
   struct Vflop {
     int         count    = 0;
+    int         width    = 0;
     bool        has_init = false;
     std::string init;  // serialized reset/init const ("" when none)
   };
   auto collect = [](hhds::Graph* g) {
     absl::flat_hash_map<std::string, Vflop> m;
-    // fast_hier: builds a name-keyed map, no topological order needed. (`init`
+    // occurrences: builds a name-keyed map, no topological order needed. (`init`
     // is last-wins under an ambiguous name, but the reader below drops any pair
-    // whose count != 1, so an ambiguous entry is never read.)
-    for (auto node : g->fast_hier()) {
+    // whose count != 1, so an ambiguous entry is never read.) It must be the
+    // LOOP-EXPANDING view (grouped_hierarchy is expand_loops=false) so the
+    // census is a superset of the encoder's cut keys, which come from
+    // occurrences(opaque) and include every `__li<r>` replica flop.
+    for (auto node : g->occurrences().nodes()) {
       auto op = graph_util::type_op_of(node);
       if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Latch) {
         continue;
       }
       auto& f = m[canon_flop_name(node.get_hier_name())];
       ++f.count;
-      if (auto d = graph_util::get_driver_of_sink_name(node, "initial"); !d.is_invalid() && graph_util::is_const_pin(d)) {
+      f.width = graph_util::bits_of(node.get_driver_pin(0));
+      if (auto d = graph_util::get_driver_of_sink_name(node, "initial"); d.is_const()) {
         f.has_init = true;
-        f.init     = graph_util::hydrate_const(d).serialize();
+        f.init     = graph_util::const_of(d).serialize();
       }
     }
     return m;
@@ -218,6 +381,32 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
       reasons->push_back(rn + "<->" + in + ": " + std::string(why));
     }
   };
+  // An exact same-base packed/scalar split is stronger evidence than semdiff's
+  // speculative one-to-one signature match.  In particular, a mapped N-bit
+  // register named `state` becomes `state[0] .. state[N-1]` (core/bus_name.hpp).
+  // Pairing just one of those scalar cells (often `state[1]`) to the packed
+  // `state` aliases a 1-bit term onto an N-bit cut and also hides that member
+  // from the exact packed-to-bits bridge used by both proof engines.  Reject
+  // only the complete, lossless shape here; unrelated width-changing tier-2
+  // pairs remain legal and retain their ordinary self-certifying/reset-backed
+  // discipline.
+  Io_name_map<int> rwidth, iwidth;
+  for (const auto& [k, f] : rmap) {
+    rwidth[k] = f.count == 1 ? f.width : 0;
+  }
+  for (const auto& [k, f] : imap) {
+    iwidth[k] = f.count == 1 ? f.width : 0;
+  }
+  const auto impl_groups                = bus_bit_groups(iwidth, rwidth);
+  auto       exact_packed_scalar_member = [&](const std::string& rc, const std::string& ic) {
+    auto ri = rmap.find(rc);
+    if (ri == rmap.end() || ri->second.width <= 1 || imap.contains(rc)) {
+      return false;
+    }
+    auto grp = impl_groups.find(rc);
+    return grp != impl_groups.end() && static_cast<int>(grp->second.size()) == ri->second.width
+           && std::find(grp->second.begin(), grp->second.end(), ic) != grp->second.end();
+  };
   for (const auto& [rn, in] : pairs) {
     std::string rc = canon_flop_name(rn);
     std::string ic = canon_flop_name(in);
@@ -232,6 +421,10 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
     }
     if (ri->second.count != 1 || ii->second.count != 1) {
       drop(rn, in, "canonical name is ambiguous on its side");
+      continue;
+    }
+    if (exact_packed_scalar_member(rc, ic)) {
+      drop(rn, in, "member of exact packed/scalar state split");
       continue;
     }
     // The alias (canon(impl) -> canon(ref)) is applied to BOTH designs' walks:
@@ -313,7 +506,7 @@ void put_trace(std::string& b, const Witness_trace& tr) {
   put_str(b, tr.root_src);
 }
 
-// ── Cvc5_stats codec (formal.stats) ─────────────────────────────────────────
+// ── Cvc5_stats codec (lhd.stats) ─────────────────────────────────────────
 // Shared by BOTH result codecs, for the reason spelled out at serialize_result's
 // tail: the solve runs in a FORKED CHILD that _exit(0)s, so a field that is not
 // on the wire comes back all-zeros in the parent with no warning. The stats
@@ -366,7 +559,8 @@ void put_cvc5_stats(std::string& b, const Cvc5_stats& st) {
 
 // Serialize a Query_result over the worker pipe (same binary on both ends, so
 // native-endian POD is fine). Layout: verdict byte, witness, detail, engine,
-// elapsed_ms (i64), then the two unmatched-cut-point lists.
+// elapsed_ms (i64), then the two unmatched-cut-point lists. Solver-only time is
+// a best-effort tail so older/truncated worker blobs retain their old meaning.
 std::string serialize_result(const Query_result& r) {
   std::string b;
   b.push_back(static_cast<char>(static_cast<uint8_t>(r.verdict)));
@@ -385,6 +579,7 @@ std::string serialize_result(const Query_result& r) {
   }
   put_u32(b, static_cast<uint32_t>(r.checked_steps));
   put_u32(b, static_cast<uint32_t>(r.output_checks));
+  put_u32(b, static_cast<uint32_t>(r.reset_hold));
   put_trace(b, r.trace);     // structured witness (the simfail reproduction sequence)
   put_str(b, r.split_used);  // strategy-hint selector (same binary both ends)
   put_u32(b, static_cast<uint32_t>(r.uncertain_pairs_used.size()));
@@ -412,11 +607,18 @@ std::string serialize_result(const Query_result& r) {
   // trap: lose it in the fork and the parent sees an UNBOUNDED Proven for a
   // 6-cycle claim -- and hierarchically discharges a parent's premise with it.
   b.push_back(static_cast<char>(r.bounded ? 1 : 0));
-  // cvc5 solve statistics (formal.stats). Same tail discipline, and the same
+  // cvc5 solve statistics (lhd.stats). Same tail discipline, and the same
   // silent-loss trap: the whole solve happens in the child, so WITHOUT this the
   // parent's `--stats` report is all zeros on every forked path. Strict tail,
   // no version byte: an older/truncated blob just leaves Cvc5_stats{}.
   put_cvc5_stats(b, r.cvc5);
+  put_u32(b, static_cast<uint32_t>(r.loop_certificates.size()));
+  for (const auto& certificate : r.loop_certificates) {
+    put_str(b, certificate);
+  }
+  put_i64(b, r.solve_ms);  // best-effort tail: solver-only budget accounting
+  b.push_back(static_cast<char>(r.packed_scalar_step_proven ? 1 : 0));
+  b.push_back(static_cast<char>(r.packed_scalar_base_proven ? 1 : 0));
   return b;
 }
 
@@ -615,12 +817,15 @@ bool deserialize_result(std::string_view b, Query_result& r) {
     }
     r.unmatched_impl.push_back(std::move(s));
   }
-  uint32_t cs = 0, oc = 0;
+  uint32_t cs = 0, oc = 0, rh = 0;
   if (get_u32(b, cs)) {
     r.checked_steps = static_cast<int>(cs);
   }
   if (get_u32(b, oc)) {
     r.output_checks = static_cast<int>(oc);
+  }
+  if (get_u32(b, rh)) {
+    r.reset_hold = static_cast<int>(rh);
   }
   // Structured witness trace (mirror serialize_result). Best-effort: an older /
   // truncated blob simply leaves the trace empty (the fields are optional), so a
@@ -671,7 +876,33 @@ bool deserialize_result(std::string_view b, Query_result& r) {
   // cvc5 statistics tail (mirror serialize_result). All-or-nothing inside
   // get_cvc5_stats: a truncated tail leaves Cvc5_stats{}, which reads as "no
   // cvc5 query ran" rather than as a half-filled report.
-  (void)get_cvc5_stats(b, r.cvc5);
+  if (!get_cvc5_stats(b, r.cvc5)) {
+    return true;
+  }
+  uint32_t ncert = 0;
+  if (!get_u32(b, ncert)) {
+    return true;
+  }
+  r.loop_certificates.clear();
+  for (uint32_t i = 0; i < ncert; ++i) {
+    std::string certificate;
+    if (!get_str(b, certificate)) {
+      return true;
+    }
+    r.loop_certificates.push_back(std::move(certificate));
+  }
+  int64_t solve_ms = 0;
+  if (get_i64(b, solve_ms)) {
+    r.solve_ms = solve_ms;
+  }
+  if (!b.empty()) {
+    r.packed_scalar_step_proven = b.front() != 0;
+    b.remove_prefix(1);
+  }
+  if (!b.empty()) {
+    r.packed_scalar_base_proven = b.front() != 0;
+    b.remove_prefix(1);
+  }
   return true;
 }
 
@@ -696,6 +927,7 @@ std::string serialize_verify(const Verify_result& v) {
     put_str(b, p.loc);
     put_str(b, p.msg);
     put_str(b, p.block);
+    put_str(b, p.instance);
     put_str(b, p.aclass);
     // `scope` was missing since per-block assume scoping landed: without it the
     // parent of a forked run saw scope=="" for every obligation, so a block's
@@ -744,7 +976,7 @@ std::string serialize_verify(const Verify_result& v) {
   // so a field missing from this codec is SILENTLY LOST and the parent sees
   // unsupported=false. Reproduced: `lhd formal verify latch_verify_hold.prp`
   // exited 0 "pass" on a design whose encoder REFUSED the Latch cell, and only
-  // the non-forking paths (--workdir, formal.cache=false) told the truth.
+  // the non-forking paths (--workdir, lhd.incremental=false) told the truth.
   // Best-effort TAIL: an older/truncated blob leaves both false (prior behavior).
   b.push_back(static_cast<char>(v.unsupported ? 1 : 0));
   b.push_back(static_cast<char>(v.oversize_refused ? 1 : 0));
@@ -769,7 +1001,7 @@ std::string serialize_verify(const Verify_result& v) {
   for (const auto& sc : v.vacuous_scopes) {
     put_str(b, sc);
   }
-  // cvc5 solve statistics (formal.stats) — TAIL, same trap as every field above:
+  // cvc5 solve statistics (lhd.stats) — TAIL, same trap as every field above:
   // the F3 verify strategy race forks, so a stats struct missing here comes back
   // ALL ZEROS in the parent and `--stats` silently prints a wall of zeros on the
   // default (forking) path while being correct under --workdir.
@@ -821,8 +1053,8 @@ bool deserialize_verify(std::string_view b, Verify_result& v) {
   v.props.clear();
   for (uint32_t i = 0; i < np; ++i) {
     Prop_result p;
-    if (!get_str(b, p.kind) || !get_str(b, p.loc) || !get_str(b, p.msg) || !get_str(b, p.block) || !get_str(b, p.aclass)
-        || !get_str(b, p.scope)) {
+    if (!get_str(b, p.kind) || !get_str(b, p.loc) || !get_str(b, p.msg) || !get_str(b, p.block) || !get_str(b, p.instance)
+        || !get_str(b, p.aclass) || !get_str(b, p.scope)) {
       return false;
     }
     if (b.empty()) {
@@ -977,6 +1209,47 @@ void write_all(int fd, const char* p, size_t n) {
   }
 }
 
+// Length-framing for a worker's serialized result.
+//
+// Both result codecs below are deliberately TAIL-TOLERANT: a short blob stops
+// the parse and returns success, so trailing fields keep their defaults.  That
+// is the right rule for a field this build simply never wrote -- but it is the
+// WRONG rule for a blob the pipe truncated, because the trailing fields are
+// exactly the soundness qualifiers (`bounded`, `unsupported`,
+// `nothing_compared`), and their defaults all read as "nothing to worry about".
+// A child SIGKILLed by the wall backstop or the RLIMIT_AS share, or a
+// `write_all` that gave up on a short write, could therefore hand the parent an
+// UNBOUNDED Proven for a bounded claim.
+//
+// Frame the payload with its byte length so truncation is a parse FAILURE, which
+// every caller already routes to "worker produced no result" -> Unknown.
+}  // namespace
+
+std::string frame_blob(std::string_view payload) {
+  const uint64_t n = payload.size();
+  std::string    b(reinterpret_cast<const char*>(&n), sizeof n);
+  b.append(payload);
+  return b;
+}
+
+// Returns false for a short header, a short payload, or trailing garbage -- any
+// frame that is not byte-exact is no result at all.
+bool unframe_blob(std::string_view b, std::string_view& payload) {
+  uint64_t n = 0;
+  if (b.size() < sizeof n) {
+    return false;
+  }
+  std::memcpy(&n, b.data(), sizeof n);
+  b.remove_prefix(sizeof n);
+  if (b.size() != n) {
+    return false;
+  }
+  payload = b;
+  return true;
+}
+
+namespace {
+
 long long now_ms(std::chrono::steady_clock::time_point t0) {
   return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
 }
@@ -1065,7 +1338,7 @@ Race_result<R> fork_race(int nmethods, const std::function<R(int)>& run_method, 
                      static_cast<unsigned long long>(share >> 20));
       }
       R           r    = run_method(i);
-      std::string blob = ser(r);
+      std::string blob = frame_blob(ser(r));
       write_all(wfd[i], blob.data(), blob.size());
       ::close(wfd[i]);
       ::_exit(0);
@@ -1128,8 +1401,9 @@ Race_result<R> fork_race(int nmethods, const std::function<R(int)>& run_method, 
       }
       out.done[i] = true;
       --remaining;
-      if (!deser(bufs[i], out.results[i])) {
-        out.results[i] = R{};
+      std::string_view payload;
+      if (!unframe_blob(bufs[i], payload) || !deser(payload, out.results[i])) {
+        out.results[i] = R{};  // truncated/absent frame: no result, never a partial verdict
       }
       if (trust(i, out.results[i])) {
         out.winner = i;
@@ -1173,7 +1447,7 @@ Race_result<R> fork_race(int nmethods, const std::function<R(int)>& run_method, 
 // run), and it does NOT trigger the lecfail testbench (gated on Refuted) — which is
 // right, since a single-step CEX may not replay from reset.
 //
-// Cost of this choice (accepted, user ruling 2026-07-16): an equivalent design whose
+// Cost of this choice (accepted): an equivalent design whose
 // ind refutes from an UNREACHABLE state and whose bmc times out now exits 1 rather
 // than 0. Prefer a false alarm you can investigate over a silent false PASS; the
 // detail spells out that the CEX may be an unreachable step-case.
@@ -1182,6 +1456,7 @@ Query_result make_inconclusive(const Query_result& ind, const Query_result& bmc,
   r.verdict          = Verdict::Unknown;
   r.engine           = "auto(ind|bmc)";
   r.elapsed_ms       = total_ms;
+  r.solve_ms         = ind.solve_ms + bmc.solve_ms;
   // Both engines share ONE encoder, so a refusal on either leg means the design
   // was never encoded — carry it so the CLI hard-fails instead of warning (M0).
   r.unsupported      = ind.unsupported || bmc.unsupported;
@@ -1196,9 +1471,7 @@ Query_result make_inconclusive(const Query_result& ind, const Query_result& bmc,
   // timing, or a fast inconclusive looks identical to (and is easily mistaken
   // for) a hard query the solver actually spent its budget on.
   auto reason        = [](const Query_result& e) -> std::string {
-    if (e.detail.find("encode failed") != std::string::npos || e.detail.find("ENGINE CRASH") != std::string::npos
-        || e.detail.find("worker also died") != std::string::npos
-        || e.detail.find("terminated without a result") != std::string::npos) {
+    if (e.verdict == Verdict::Unknown && !e.detail.empty()) {
       return " [" + e.detail + "]";
     }
     return "";
@@ -1255,6 +1528,23 @@ bool try_bounded_proven(const Query_result& bmc, Query_result& out) {
   return true;
 }
 
+bool try_packed_scalar_proven(const Query_result& ind, const Query_result& bmc, Query_result& out) {
+  if (!ind.packed_scalar_step_proven || !bmc.packed_scalar_base_proven || bmc.verdict != Verdict::Proven
+      || bmc.output_checks <= 0) {
+    return false;
+  }
+  out                           = ind;
+  out.verdict                   = Verdict::Proven;
+  out.bounded                   = false;
+  out.engine                    = "ind+bmc-base";
+  out.packed_scalar_base_proven = true;
+  out.detail
+      = "auto: PROVEN by packed/scalar relation (BMC from reset establishes the base; induction preserves the relation and "
+        "all outputs); "
+        + ind.detail + "; base: " + bmc.detail;
+  return true;
+}
+
 // Run one engine, converting any escaping C++ exception (e.g. a cvc5 API
 // exception from a malformed term — see the seed_state width-fit fix above)
 // into a clearly-tagged Unknown result instead of letting it propagate and
@@ -1278,6 +1568,28 @@ Query_result safe_prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_opt
   }
 }
 
+// Once the transition relation is inductive, one reset-reachable state is
+// sufficient for its base. Try a short independent BMC base before spending
+// the user's full exploration window. Only the combined proof is unbounded;
+// a short bounded result by itself never changes the verdict policy.
+Query_result finish_packed_base(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts, Query_result ind,
+                                const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  if (!ind.packed_scalar_step_proven || opts.bound <= 1) {
+    return ind;
+  }
+  Lec_options base = opts;
+  base.engine      = "bmc";
+  base.bound       = 1;
+  auto         bmc = safe_prove_equal(ref, impl, base, sub_lib);
+  Query_result proof;
+  if (try_packed_scalar_proven(ind, bmc, proof)) {
+    ind = std::move(proof);
+  }
+  ind.cvc5     += bmc.cvc5;
+  ind.solve_ms += bmc.solve_ms;
+  return ind;
+}
+
 // Sequential fallback when fork/pipe is unavailable: run ind, then bmc, applying
 // the same trust asymmetry. Used only on a (rare) fork failure.
 Query_result run_auto_sequential(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
@@ -1286,7 +1598,7 @@ Query_result run_auto_sequential(hhds::Graph* ref, hhds::Graph* impl, const Lec_
   Lec_options oi  = opts;
   oi.engine       = "ind";
   auto         ti = std::chrono::steady_clock::now();
-  Query_result ri = safe_prove_equal(ref, impl, oi, sub_lib);
+  Query_result ri = finish_packed_base(ref, impl, opts, safe_prove_equal(ref, impl, oi, sub_lib), sub_lib);
   ri.engine       = "ind";
   ri.elapsed_ms   = now_ms(ti);
   if (ri.verdict == Verdict::Proven) {
@@ -1300,14 +1612,23 @@ Query_result run_auto_sequential(hhds::Graph* ref, hhds::Graph* impl, const Lec_
   rb.engine       = "bmc";
   rb.elapsed_ms   = now_ms(tb);
   if (rb.verdict == Verdict::Refuted) {
-    rb.detail  = "auto(seq): bmc Refuted (reachable CEX); " + rb.detail;
-    rb.cvc5   += ri.cvc5;  // the ind leg ran too: merge, or its solve stops being counted
+    rb.detail    = "auto(seq): bmc Refuted (reachable CEX); " + rb.detail;
+    rb.cvc5     += ri.cvc5;  // the ind leg ran too: merge, or its solve stops being counted
+    rb.solve_ms += ri.solve_ms;
     return rb;
+  }
+  Query_result ps;
+  if (try_packed_scalar_proven(ri, rb, ps)) {
+    ps.elapsed_ms  = now_ms(t0);
+    ps.cvc5       += rb.cvc5;
+    ps.solve_ms   += rb.solve_ms;
+    return ps;
   }
   Query_result bp;
   if (try_bounded_proven(rb, bp)) {  // bp is a copy of rb, so it already carries rb.cvc5
     bp.elapsed_ms  = now_ms(t0);
     bp.cvc5       += ri.cvc5;
+    bp.solve_ms   += ri.solve_ms;
     return bp;
   }
   return make_inconclusive(ri, rb, opts, now_ms(t0));  // merges both legs itself
@@ -1326,7 +1647,7 @@ bool graph_is_combinational(hhds::Graph* g, const absl::flat_hash_map<hhds::Gid,
   if (g == nullptr || !seen.insert(g).second) {
     return true;  // null / already-verified body (a real hw hierarchy is a finite DAG)
   }
-  for (auto node : g->forward_class()) {  // single level; Sub bodies are descended explicitly below
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {  // single level; Sub bodies are descended explicitly below
     auto op = graph_util::type_op_of(node);
     if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Memory) {
       return false;
@@ -1365,7 +1686,7 @@ Split_pick pick_split_signal(hhds::Graph* g, const std::string& requested, int e
   auto                                  gio = g->get_io();
   absl::flat_hash_map<std::string, int> in_w;  // enumerable primary inputs -> width
   for (const auto& d : gio->get_input_pin_decls()) {
-    int w = real_width_io(g->get_input_pin(d.name), *gio, d.name);
+    int w = gu::real_width(g->get_input_pin(d.name), *gio, d.name);
     if (w >= 1 && w <= enum_cap_bits) {
       in_w[std::string(d.name)] = w;
     }
@@ -1386,9 +1707,10 @@ Split_pick pick_split_signal(hhds::Graph* g, const std::string& requested, int e
   // graph-input drivers with their own candidate bit. This single topological
   // sweep is O(N): each node's cone is memoized in `cone` by nid and a driver's
   // source node is looked up there, never re-walked. (Historically this shape was
-  // also FORCED because inp_edges() on a get_master_node()-derived node returned
-  // an empty range; hhds fixed that — see graph_test test_get_master_node_edges —
-  // so a backward walk would now be correct, just less efficient than this pass.)
+  // also FORCED because the in-edge reader on a get_master_node()-derived node
+  // returned an empty range; hhds fixed that — see graph_test
+  // test_get_master_node_edges — so a backward walk would now be correct, just
+  // less efficient than this pass.)
   const bool                                  dbg = std::getenv("LEC_SPLIT_LOG") != nullptr;
   absl::flat_hash_map<std::string, long long> score;
   std::vector<std::string>                    cand;  // candidate index (bitmask, cap 64)
@@ -1424,7 +1746,7 @@ Split_pick pick_split_signal(hhds::Graph* g, const std::string& requested, int e
   absl::flat_hash_map<uint64_t, uint64_t> cone;  // node nid -> candidate bitmask of its input cone
   long long                               dbg_nodes = 0, dbg_sra = 0, dbg_shl = 0, dbg_mux = 0, dbg_varctrl = 0;
   auto                                    score_ctrl = [&](const hhds::Pin& ctrl, long long weight) {
-    if (ctrl.is_invalid() || graph_util::is_const_pin(ctrl)) {
+    if (ctrl.is_invalid() || ctrl.is_const()) {
       return;
     }
     ++dbg_varctrl;
@@ -1435,11 +1757,26 @@ Split_pick pick_split_signal(hhds::Graph* g, const std::string& requested, int e
       }
     }
   };
-  for (auto node : g->forward_class()) {
+  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
     ++dbg_nodes;
     uint64_t m = 0;
-    for (auto e : node.inp_edges()) {
-      m |= cone_of(cone, e.driver);
+    // Both branches walk inp_sorted_pins() -- SORTED because hhds keeps port 0
+    // as the node itself, so the raw inp_pins() list would drop a banked cell's
+    // first operand and lose port order. They differ in the driver reader: the
+    // singular one is enough for an ordinary cell (one driver per sink pin),
+    // while a COMPACT LOOP Sub needs the PLURAL get_driver_pins() because its
+    // carry-in sink legitimately carries TWO drivers (the seed and its own
+    // carry-out, meaning "the previous ordinal" -- pass/legalize.cpp's one
+    // sanctioned exception), and get_driver_pin() would keep only one, silently
+    // shrinking this cone.
+    // ONE canonical form for every node. The plural reader costs nothing and
+    // needs no invariant, whereas a `node.is_loop_subnode()` special case has to
+    // be RIGHT about which nodes can carry two drivers -- and the singular arm
+    // silently shrinks this cone whenever it is not.
+    for (auto e_sink : node.inp_sorted_pins()) {
+      for (auto e_drv : e_sink.get_driver_pins()) {
+        m |= cone_of(cone, e_drv);
+      }
     }
     cone[static_cast<uint64_t>(node.get_debug_nid())] = m;
     // The control driver's source node precedes `node` in topo order, so its cone
@@ -1447,10 +1784,16 @@ Split_pick pick_split_signal(hhds::Graph* g, const std::string& requested, int e
     auto op                                           = graph_util::type_op_of(node);
     if (op == Ntype_op::SRA || op == Ntype_op::SHL) {
       (op == Ntype_op::SRA) ? ++dbg_sra : ++dbg_shl;
-      score_ctrl(graph_util::get_driver_of_sink_name(node, "b"), std::max(1, real_width(node.get_driver_pin(0))));
+      score_ctrl(graph_util::get_driver_of_sink_name(node, "b"), std::max(1, gu::real_width(node.get_driver_pin(0))));
     } else if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
       ++dbg_mux;
-      score_ctrl(graph_util::get_driver_of_sink_name(node, "s"), std::max(1, real_width(node.get_driver_pin(0))) / 2 + 1);
+      if (op == Ntype_op::Hotmux) {
+        for (const auto& [control, value] : gu::hotmux_inputs(node).arms) {
+          score_ctrl(control, std::max(1, gu::real_width(node.get_driver_pin(0))) / 2 + 1);
+        }
+      } else {
+        score_ctrl(graph_util::get_driver_of_sink_name(node, "s"), std::max(1, gu::real_width(node.get_driver_pin(0))) / 2 + 1);
+      }
     }
   }
   if (dbg) {
@@ -1589,7 +1932,7 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
       o._split_name     = pick.name;
       o._split_values   = slices[i];
       Query_result r    = safe_prove_equal(ref, impl, o, sub_lib);
-      std::string  blob = serialize_result(r);
+      std::string  blob = frame_blob(serialize_result(r));
       write_all(wfd[i], blob.data(), blob.size());
       ::close(wfd[i]);
       ::_exit(0);
@@ -1655,7 +1998,8 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
       }
       done[i] = true;
       --remaining;
-      if (!deserialize_result(buf[i], got[i])) {
+      std::string_view payload;
+      if (!unframe_blob(buf[i], payload) || !deserialize_result(payload, got[i])) {
         got[i]         = Query_result{};
         got[i].verdict = Verdict::Unknown;
       }
@@ -1686,9 +2030,11 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
   // first-REFUTED cube's numbers would hide the whole sweep's cost. A worker
   // that was killed (or never deserialized) contributes an empty struct.
   Cvc5_stats  cubes;
+  long long   cubes_solve_ms = 0;
   for (int i = 0; i < nworkers; ++i) {
     if (done[i]) {
-      cubes += got[i].cvc5;
+      cubes          += got[i].cvc5;
+      cubes_solve_ms += got[i].solve_ms;
     }
   }
   if (refuter >= 0) {
@@ -1698,6 +2044,7 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
     out.elapsed_ms   = now_ms(t0);
     out.detail       = "auto: case-split " + tag + " REFUTED; " + out.detail;
     out.cvc5         = cubes;  // assign: got[refuter].cvc5 is already one of the summands
+    out.solve_ms     = cubes_solve_ms;
     return out;
   }
   int proven = 0, unknown = 0;
@@ -1713,9 +2060,21 @@ Query_result run_case_split(hhds::Graph* ref, hhds::Graph* impl, const Lec_optio
   out.split_used = pick.name;
   out.elapsed_ms = now_ms(t0);
   out.cvc5       = cubes;
+  out.solve_ms   = cubes_solve_ms;
   if (unknown == 0) {
     out.verdict = Verdict::Proven;
-    out.detail  = "auto: case-split " + tag + " PROVEN (every cube UNSAT)";
+    // PREPEND onto a worker's detail rather than replacing it. Assigning here
+    // discarded every cube's deserialized detail -- including any width/sign
+    // reconciliation disclosure the worker emitted -- on what is the DEFAULT
+    // path for a combinational miter (formal.partitions defaults to 4). The
+    // REFUTED branch above already seeds from the refuting worker.
+    for (size_t i = 0; i < got.size(); ++i) {
+      if (done[i] && got[i].verdict == Verdict::Proven && !got[i].detail.empty()) {
+        out.detail = got[i].detail;
+        break;
+      }
+    }
+    out.detail = "auto: case-split " + tag + " PROVEN (every cube UNSAT)" + (out.detail.empty() ? "" : "; " + out.detail);
   } else {
     out.verdict = Verdict::Unknown;  // inconclusive: caller falls back to monolithic ind
     out.detail  = "auto: case-split " + tag + " inconclusive (" + std::to_string(proven) + " workers proven, "
@@ -1731,6 +2090,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
   // rides along on whatever verdict this function ends up returning; without
   // this a `--stats` report silently under-counts a hinted run.
   Cvc5_stats carried;
+  long long  carried_solve_ms = 0;
   // Cache hints are ordering only. Try the previous winner once; if an edit
   // made it inconclusive, continue through the unchanged auto portfolio below.
   if (opts._preferred_engine == "ind" || opts._preferred_engine == "bmc") {
@@ -1746,7 +2106,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     if (hr.engine == "bmc" && hr.verdict == Verdict::Refuted) {
       trusted = true;
     }
-    if (hr.engine == "bmc" && !trusted) {
+    if (hr.engine == "bmc" && !trusted && !hr.packed_scalar_base_proven) {
       Query_result bounded;
       if (try_bounded_proven(hr, bounded)) {
         hr      = std::move(bounded);
@@ -1754,11 +2114,13 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
       }
     }
     if (trusted) {
-      hr.detail  = "auto: strategy hint tried " + hr.engine + " first and settled; " + hr.detail;
-      hr.cvc5   += carried;
+      hr.detail    = "auto: strategy hint tried " + hr.engine + " first and settled; " + hr.detail;
+      hr.cvc5     += carried;
+      hr.solve_ms += carried_solve_ms;
       return hr;
     }
-    carried += hr.cvc5;  // hint did not settle: its solve is discarded, its cost is not
+    carried          += hr.cvc5;  // hint did not settle: its solve is discarded, its cost is not
+    carried_solve_ms += hr.solve_ms;
   }
   if (opts._isolated_worker) {
     // The hierarchy Taskflow already supplies parallelism and process
@@ -1768,13 +2130,14 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     oi.engine      = "ind";
     oi.partitions  = 1;
     auto ti        = std::chrono::steady_clock::now();
-    auto ri        = safe_prove_equal(ref, impl, oi, sub_lib);
+    auto ri        = finish_packed_base(ref, impl, opts, safe_prove_equal(ref, impl, oi, sub_lib), sub_lib);
     ri.engine      = "ind";
     ri.elapsed_ms  = now_ms(ti);  // real per-engine timing (was -1 in the ladder's diagnostics)
     absl::flat_hash_set<hhds::Graph*> seen;
     const bool combinational = graph_is_combinational(ref, sub_lib, seen) && graph_is_combinational(impl, sub_lib, seen);
     if (ri.verdict == Verdict::Proven || (combinational && ri.verdict == Verdict::Refuted)) {
-      ri.cvc5 += carried;
+      ri.cvc5     += carried;
+      ri.solve_ms += carried_solve_ms;
       return ri;
     }
     Lec_options ob = opts;
@@ -1785,19 +2148,33 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     rb.engine      = "bmc";
     rb.elapsed_ms  = now_ms(tb);
     if (rb.verdict == Verdict::Refuted) {
-      rb.cvc5 += ri.cvc5;  // the ind leg of this ladder ran too
-      rb.cvc5 += carried;
+      rb.cvc5     += ri.cvc5;  // the ind leg of this ladder ran too
+      rb.cvc5     += carried;
+      rb.solve_ms += ri.solve_ms;
+      rb.solve_ms += carried_solve_ms;
       return rb;
+    }
+    Query_result ps;
+    if (try_packed_scalar_proven(ri, rb, ps)) {
+      ps.elapsed_ms  = ri.elapsed_ms + rb.elapsed_ms;
+      ps.cvc5       += rb.cvc5;
+      ps.cvc5       += carried;
+      ps.solve_ms   += rb.solve_ms;
+      ps.solve_ms   += carried_solve_ms;
+      return ps;
     }
     Query_result bp;
     if (try_bounded_proven(rb, bp)) {  // bp copies rb, so rb.cvc5 is already in it
       bp.elapsed_ms  = ri.elapsed_ms + rb.elapsed_ms;
       bp.cvc5       += ri.cvc5;
       bp.cvc5       += carried;
+      bp.solve_ms   += ri.solve_ms;
+      bp.solve_ms   += carried_solve_ms;
       return bp;
     }
     Query_result inc  = make_inconclusive(ri, rb, opts, ri.elapsed_ms + rb.elapsed_ms);  // merges both legs
     inc.cvc5         += carried;
+    inc.solve_ms     += carried_solve_ms;
     return inc;
   }
   // Purely combinational pair: skip the bmc racer (and the fork). Run one ind
@@ -1813,10 +2190,12 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
       if (opts.partitions >= 2 && opts.split != "none" && !opts.split.empty()) {
         Query_result cs = run_case_split(ref, impl, opts, sub_lib);
         if (cs.engine == "casesplit" && (cs.verdict == Verdict::Proven || cs.verdict == Verdict::Refuted)) {
-          cs.cvc5 += carried;
+          cs.cvc5     += carried;
+          cs.solve_ms += carried_solve_ms;
           return cs;
         }
-        carried += cs.cvc5;  // inconclusive split: discarded verdict, real cvc5 effort
+        carried          += cs.cvc5;  // inconclusive split: discarded verdict, real cvc5 effort
+        carried_solve_ms += cs.solve_ms;
       }
       Lec_options o    = opts;
       o.engine         = "ind";
@@ -1826,6 +2205,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
       r.elapsed_ms     = now_ms(tc);
       r.detail         = "auto: combinational (no flop/latch/mem) -> single ind query, bmc skipped; " + r.detail;
       r.cvc5          += carried;
+      r.solve_ms      += carried_solve_ms;
       return r;
     }
   }
@@ -1841,12 +2221,16 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     o.engine        = engines[i];
     auto         ci = std::chrono::steady_clock::now();
     Query_result r  = safe_prove_equal(ref, impl, o, sub_lib);
-    r.engine        = engines[i];
-    r.elapsed_ms    = now_ms(ci);
+    if (i == 0) {
+      r = finish_packed_base(ref, impl, opts, std::move(r), sub_lib);
+    }
+    r.engine     = engines[i];
+    r.elapsed_ms = now_ms(ci);
     return r;
   };
   auto trust = [](int i, const Query_result& r) -> bool {
-    return (i == 0 && r.verdict == Verdict::Proven) || (i == 1 && r.verdict == Verdict::Refuted);
+    return (i == 0 && r.verdict == Verdict::Proven && (!r.packed_scalar_step_proven || r.packed_scalar_base_proven))
+           || (i == 1 && r.verdict == Verdict::Refuted);
   };
   auto race = fork_race<Query_result>(2, run_engine, serialize_result, deserialize_result, trust);
   if (!race.forked) {
@@ -1870,11 +2254,13 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
   // discloses to the reader that two solvers ran. Every return below is stamped
   // with it (assignment, not +=: the winner's own stats are already inside
   // `both`, so merging again would double-count them).
-  Cvc5_stats both  = race.results[0].cvc5;
-  both            += race.results[1].cvc5;
-  both            += carried;
-  auto with        = [&both](Query_result r) {
-    r.cvc5 = both;
+  Cvc5_stats both                = race.results[0].cvc5;
+  both                          += race.results[1].cvc5;
+  both                          += carried;
+  const long long both_solve_ms  = race.results[0].solve_ms + race.results[1].solve_ms + carried_solve_ms;
+  auto            with           = [&both, both_solve_ms](Query_result r) {
+    r.cvc5     = both;
+    r.solve_ms = both_solve_ms;
     return r;
   };
   if (race.winner >= 0) {
@@ -1883,6 +2269,11 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     r.detail       = "auto: " + std::string(engines[race.winner]) + " reached " + vname(r.verdict) + " first in "
                      + std::to_string(r.elapsed_ms) + "ms (raced ind|bmc); " + r.detail;
     return with(std::move(r));
+  }
+  Query_result ps;
+  if (try_packed_scalar_proven(race.results[0], race.results[1], ps)) {
+    ps.elapsed_ms = now_ms(t0);
+    return with(std::move(ps));
   }
   Query_result bp;
   if (try_bounded_proven(race.results[1], bp)) {
@@ -1958,6 +2349,72 @@ bool assert_monitor_assumptions(cvc5::TermManager& tm, cvc5::Solver& solver, Enc
   return true;
 }
 
+// "\x04prop:<occ>\x1f<kind>\x1f<loc>\x1f<msg>" (encoder set_emit_props contract;
+// msg is last so it may contain anything).
+struct Prop_key {
+  int         occ = -1;
+  std::string kind{"assert"};
+  std::string loc, msg;
+};
+std::optional<Prop_key> parse_prop_key(std::string_view name) {
+  constexpr std::string_view pfx{"\x04prop:", 6};
+  if (name.substr(0, pfx.size()) != pfx) {
+    return std::nullopt;
+  }
+  Prop_key         k;
+  std::string_view rest = name.substr(pfx.size());
+  auto             take = [&rest]() -> std::string_view {
+    auto p = rest.find('\x1f');
+    auto f = rest.substr(0, p);
+    rest   = p == std::string_view::npos ? std::string_view{} : rest.substr(p + 1);
+    return f;
+  };
+  auto occ_s = take();
+  k.occ      = 0;
+  for (char c : occ_s) {
+    if (c < '0' || c > '9') {
+      return std::nullopt;
+    }
+    k.occ = k.occ * 10 + (c - '0');
+  }
+  if (auto f = take(); !f.empty()) {
+    k.kind = std::string(f);
+  }
+  k.loc = std::string(take());
+  k.msg = std::string(rest);  // remainder: the user message, verbatim
+  return k;
+}
+
+// Assert the design-authored assumes that pass.formal accepted as ACTIVE
+// hypotheses (Encoded::prop_active_assume): an explicit assume_nocheck, a
+// selected-top IO assume, or any assume when formal.assume_check=false. A
+// checked assume is either discharged and deleted by the formal preflight or
+// left as a runtime check — never a hypothesis here.
+bool assert_design_assumptions(cvc5::TermManager& tm, cvc5::Solver& solver, const Encoded& encoded) {
+  for (const auto& [name, cond] : encoded.outputs) {
+    auto k = parse_prop_key(name);
+    if (!k || !is_assume_kind(k->kind)) {
+      continue;
+    }
+    // Assert ONLY the assumes the encoder marked active (see the rule at
+    // encode.cpp: `assume_nocheck` by spelling, a plain `assume` only once
+    // pass.formal proved it). The spelling of a CHECKED assume does not say that:
+    // one that was never discharged (a `lg:` library loaded straight into `lhd
+    // lec`, or a side compiled at O0 where pass.formal does not run) reads
+    // identically, and asserting it would silently restrict the compared input
+    // space — two designs that differ everywhere the assume is false would come
+    // back PROVEN.
+    // The final contradiction checkSat catches only a fully UNSAT hypothesis
+    // set, never a merely over-restrictive one.
+    if (!encoded.prop_active_assume.contains(k->occ)) {
+      continue;
+    }
+    const int w = cond.width > 0 ? cond.width : 1;
+    solver.assertFormula(tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, cond, w), tm.mkBitVector(static_cast<uint32_t>(w), 0)}));
+  }
+  return true;
+}
+
 // ── Tuple-leaf <-> flat-bus port bundles ────────────────────────────────────
 // A Pyrope tuple-typed port compiles to PER-LEAF graph ports named
 // `base.field` (any nesting depth: `req.hdr.a`), while the same design read
@@ -1984,7 +2441,7 @@ struct Port_bundle {
 
 struct Io_decl_view {
   std::string name;
-  int         width = 0;  // real declared width (real_width_io); 0 = unknown
+  int         width = 0;  // literal declared width; 0 = unknown
   bool        sgn   = false;
 };
 
@@ -1995,7 +2452,7 @@ std::vector<Io_decl_view> io_decl_views(hhds::Graph* g, bool inputs) {
   v.reserve(decls.size());
   for (const auto& d : decls) {
     auto pin = inputs ? g->get_input_pin(d.name) : g->get_output_pin(d.name);
-    v.push_back({d.name, real_width_io(pin, *gio, d.name), !gio->is_unsign(d.name)});
+    v.push_back({d.name, gu::real_width(pin, *gio, d.name), !gio->is_unsign(d.name)});
   }
   return v;
 }
@@ -2085,47 +2542,55 @@ std::vector<Port_bundle> detect_port_bundles(hhds::Graph* ref, hhds::Graph* impl
 
 // Longest flop-weighted path from a primary input/constant to any node. State
 // nodes are loop breakers in HHDS and are deliberately yielded before the
-// combinational body, so a single forward_hier() sweep cannot accumulate a
+// combinational body, so a single occurrences().nodes(hhds::Node_order::forward) sweep cannot accumulate a
 // chain such as p0 -> p1 -> out: its state-node order is not a next-state
 // dependency order. Use an explicit DFS stack (the old recursive definition,
 // without its large-design stack overflow) and cut feedback back-edges at an
 // active node. Parallel paths take MAX; serial flops add their pipeline depth.
 int pipeline_flush_latency(hhds::Graph* g) {
   struct Frame {
-    hhds::Node_class              node;
-    std::string                   id;
-    std::vector<hhds::Node_class> deps;
-    size_t                        next = 0;
-    int                           base = 0;
+    hhds::Occurrence_node              node;
+    std::string                        id;
+    std::vector<hhds::Occurrence_node> deps;
+    size_t                             next = 0;
+    int                                base = 0;
   };
 
   absl::flat_hash_map<std::string, int> memo;
   absl::flat_hash_set<std::string>      active;
 
-  auto depth_of = [](const hhds::Node_class& node) {
+  auto depth_of = [](const hhds::Occurrence_node& node) {
     if (graph_util::type_op_of(node) != Ntype_op::Flop) {
       return 0;
     }
     auto pm = graph_util::get_driver_of_sink_name(node, "pipe_min");
-    if (!pm.is_invalid() && graph_util::is_const_pin(pm)) {
-      int d = static_cast<int>(graph_util::hydrate_const(pm).to_just_i64());
+    if (pm.is_const()) {
+      int d = static_cast<int>(graph_util::const_of(pm).to_just_i64());
       if (d > 1) {
         return d;
       }
     }
     return 1;
   };
-  auto make_frame = [](const hhds::Node_class& node) {
+  auto make_frame = [](const hhds::Occurrence_node& node) {
     Frame frame{node, std::string(node.get_hier_name()), {}};
-    for (const auto& e : node.inp_edges()) {
-      if (graph_util::is_graph_input_pin(e.driver) || graph_util::is_const_pin(e.driver)) {
-        continue;
+    // Occurrence_node::inp_sorted_pins() is the hier-resolving pin walk, and
+    // both halves are load-bearing: SORTED yields the node-as-pin (port 0)
+    // first and then ascending port order (raw inp_pins() omits port 0, where a
+    // banked cell's first operand lives), and the PLURAL get_driver_pins()
+    // keeps BOTH drivers of a compact-loop carry-in. One dep per DRIVER is the
+    // faithful count -- a two-driver sink used to contribute two in-edges here.
+    for (auto sink : node.inp_sorted_pins()) {
+      for (auto drv : sink.get_driver_pins()) {
+        if (graph_util::is_graph_input_pin(drv) || drv.is_const()) {
+          continue;  // skips this DRIVER, which is what skipping its edge did
+        }
+        frame.deps.push_back(drv.get_master_node());
       }
-      frame.deps.push_back(e.driver.get_master_node());
     }
     return frame;
   };
-  auto evaluate = [&](const hhds::Node_class& root) {
+  auto evaluate = [&](const hhds::Occurrence_node& root) {
     const std::string root_id{root.get_hier_name()};
     if (auto it = memo.find(root_id); it != memo.end()) {
       return it->second;
@@ -2160,10 +2625,475 @@ int pipeline_flush_latency(hhds::Graph* g) {
   };
 
   int result = 0;
-  for (auto node : g->forward_hier()) {
+  for (auto node : g->occurrences().nodes(hhds::Node_order::forward)) {
     result = std::max(result, evaluate(node));
   }
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Top-level primary-input carrier, shared by both designs and by BOTH engines
+// (BMC's collect_ins and the inductive scan_inputs).
+//
+// RULE: a width/sign disagreement between the two sides'
+// declaration of the same port is reconciled by ENLARGING the smaller view to
+// match the larger, never by refusing and never by truncating.
+//
+//   u8 vs u4  -> the u4 is ZERO-padded to u8
+//   u3 vs s5  -> the u3 is ZERO-padded to s5
+//   s4 vs s8  -> the s4 is SIGN-extended to s8
+//   s3 vs u8  -> BOTH go to s9: the s3 sign-extends, the u8 zero-pads
+//
+// Two facts fall out of that, and they are different widths:
+//
+//   `w`      -- the CARRIER. The common type both sides enlarge into, so no
+//               side is ever truncated. Both unsigned -> unsigned max(wa,wb);
+//               both signed -> signed max(wa,wb); MIXED -> signed
+//               max(w_signed, w_unsigned + 1), because representing a uN as
+//               signed needs the extra slot (that is the s9 in the last row).
+//   `core_w` -- the FREE SYMBOL. One symbol drives the port on BOTH sides, so
+//               it may only range over values BOTH declarations can hold: the
+//               INTERSECTION of the two domains, not the union. u8 n u4 =
+//               [0,15]; s3 n u8 = [0,3]; u3 n s5 = [0,7]. The symbol is minted
+//               at core_w and extended up to w by `core_unsign`.
+//
+// Without the intersection the solver picks a value the narrower port cannot
+// hold and the two designs read the same bit pattern differently -- a FALSE
+// REFUTED with an unreachable witness (`input signed [1:0] a` vs `input a`
+// refuted at a=2, which a 1-bit port cannot produce).
+//
+// Reconciliation is an ASSUMPTION where the domains genuinely differ: a port
+// the impl narrowed by mistake is spelled exactly like one the two front ends
+// merely declare differently, so a real dropped-bit bug reports PROVEN. The
+// verdict DISCLOSES every port it fired on.
+//
+// The constraint lives in the TERM, never in an assertFormula: cone_digest()
+// hashes only the term, so a solver-level assumption would be invisible to the
+// abc cone cache and a cached PROVEN could later be replayed without it.
+struct Top_in {
+  int  w           = 0;      // carrier: the common type both sides enlarge into
+  int  core_w      = 0;      // free symbol: the INTERSECTION of the two domains
+  bool core_unsign = true;   // how the core extends up to the carrier
+  bool sgn         = false;  // carrier read as signed (either side signed)
+  bool seen        = false;  // at least one decl merged in
+
+  // True once the two decls actually disagreed, i.e. the shared symbol is
+  // narrower than the carrier and the reconciliation is load-bearing.
+  [[nodiscard]] bool reconciled() const { return core_w > 0 && core_w < w; }
+};
+
+// Fold one design's declaration into the shared view. Written as a running
+// INTERSECTION so it stays correct for a third decl (a name can legitimately be
+// visited more than twice); each of the three cases below is the exact domain
+// intersection, not an approximation:
+//   u_a n u_b = u_min(a,b)          s_a n s_b = s_min(a,b)
+//   u_a n s_b = u_min(a, b-1)       (the signed side's magnitude bits)
+inline void merge_top_in(Top_in& slot, int w, bool sgn) {
+  if (!slot.seen) {
+    slot = Top_in{w, w, !sgn, sgn, true};
+    return;
+  }
+  const int  cw = slot.core_w;
+  const bool cu = slot.core_unsign;
+  slot.w        = std::max(slot.w, w);
+  slot.sgn      = slot.sgn || sgn;
+  if (cu && !sgn) {
+    slot.core_w = std::min(cw, w);
+  } else if (!cu && sgn) {
+    slot.core_w = std::min(cw, w);
+  } else if (cu) {  // held core unsigned, incoming signed
+    slot.core_w = std::min(cw, w - 1);
+  } else {  // held core signed, incoming unsigned
+    slot.core_w      = std::min(cw - 1, w);
+    slot.core_unsign = true;
+  }
+  if (slot.core_w < 1) {
+    // The intersection collapsed to {0} (or is empty) -- an s1 port facing a
+    // wide unsigned one, say. Do not pretend: fall back to the historical
+    // free-symbol-at-the-carrier behavior rather than pinning the port to a
+    // constant, which would be a far stronger and wholly unjustified
+    // restriction of the compared input space.
+    slot.core_w      = slot.w;
+    slot.core_unsign = !slot.sgn;
+  }
+}
+
+// The shared symbol: a free core at the intersection width, enlarged to the
+// carrier. Equal declarations give core_w == w and this is an ordinary symbol.
+[[nodiscard]] inline cvc5::Term mint_top_in(cvc5::TermManager& tm, const Top_in& in, const std::string& name) {
+  const int  core = std::max(1, in.core_w);
+  cvc5::Term t    = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(core)), name);
+  if (core >= in.w) {
+    return t;
+  }
+  const auto kind = in.core_unsign ? cvc5::Kind::BITVECTOR_ZERO_EXTEND : cvc5::Kind::BITVECTOR_SIGN_EXTEND;
+  return tm.mkTerm(tm.mkOp(kind, {static_cast<uint32_t>(in.w - core)}), {t});
+}
+
+// The all-ones level of a port, at its REAL width. For a reconciled port that
+// is all-ones of the CORE, enlarged -- NOT all-ones of the carrier, which the
+// enlarged symbol can never equal (an unsatisfiable assumption makes the whole
+// solve vacuously unsat, i.e. a silent PROVEN).
+[[nodiscard]] inline cvc5::Term top_in_ones(cvc5::TermManager& tm, const Top_in& in) {
+  const int  core = std::max(1, in.core_w);
+  cvc5::Term ones = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(core), 0)});
+  if (core >= in.w) {
+    return ones;
+  }
+  const auto kind = in.core_unsign ? cvc5::Kind::BITVECTOR_ZERO_EXTEND : cvc5::Kind::BITVECTOR_SIGN_EXTEND;
+  return tm.mkTerm(tm.mkOp(kind, {static_cast<uint32_t>(in.w - core)}), {ones});
+}
+
+// A Liberty cell model read back inline leaves its own state one segment below
+// the entry (bit) cell: `_mem[i][b]_flop_16` (core/bus_name.hpp). Drop that
+// segment so the alias is the storage cell's own bus name.
+std::string strip_bank_model_suffix(std::string key) {
+  if (const auto piece = livehd::bus_name::parse_bus_piece(key, /*allow_model_suffix=*/true, '_');
+      piece && !piece->suffix.empty()) {
+    key.resize(key.size() - piece->suffix.size() - 1);
+  }
+  return key;
+}
+
+// ── pass.abc memory=true storage-flop bank of a Memory ─────────────────────
+// pass/synth/memory_module.cpp bit-blasts a Memory `<mem>` (size x bits) into
+// one bits-wide storage flop per entry named `<mem>._mem[i]` (canonical key
+// `<mem>__mem[i]`), and the DFF-cell read-back (region_writer.cpp
+// map_dff_cell) then splits each into one-bit library cells `<mem>._mem[i][b]`
+// (b = 0..bits-1, LSB first) -- the bus-expansion standard, core/bus_name.hpp.
+// The mapped design thus carries EITHER shape per entry -- the whole flop when the register stayed
+// native (a Liberty without a DFF cell, register_max_bits), the bit cells
+// otherwise -- while the source design carries the Memory. Both LEC engines
+// need that correspondence: without it the entry cuts and the Memory's array
+// are unrelated free symbols, and a read of a never-written entry (a resetless
+// register file right after reset: br_ram_flops_tile 16x32, EnableReset=0)
+// refutes at the first checked step on a difference the hardware cannot show.
+//
+// Resolve, for one Memory whose canonical name is `mem_name`, the flop-side key
+// of every storage cut. Name-directed and TOTAL: every entry 0..size-1 must be
+// covered at the exact width, so a bank that merely shares the prefix, an entry
+// mapped at another width, or a cut that also exists on the memory side (then
+// it is a matched cut in its own right) yields no bank at all -- the caller
+// then falls back to today's independent symbols, never to a partial tie.
+// The emitted-Verilog path adds cgen's reversible memory instance encoding,
+// a generated region wrapper, and sometimes a single anonymous model flop.
+// Recover a candidate key while retaining the actual key for solver lookups.
+// Ambiguous aliases are rejected by find_mem_entry_bank below.
+std::string memory_bank_correspondence_name(std::string_view name, bool strip_region = true) {
+  const auto key    = canon_flop_name(name);
+  const auto marker = key.find(cgen_memory_state_marker);
+  const auto entry  = key.find("_e__mem", marker);
+  if (marker == std::string::npos || entry == std::string::npos) {
+    // A memory instance that kept its SOURCE name -- the synth netlist's
+    // `<mem>` instance of a `cgen_memory_*_blasted` module, not cgen's
+    // hex-encoded wrapper -- still carries the inlined cell model's state
+    // segment. Without this strip no such bank ever matched its Memory, so
+    // every never-written entry was two unrelated free symbols (lhdtrack
+    // br_ram_flops 64x64 on ASAP7 DFFHQNx1 cells, --impl verilog: netlist +
+    // models: a false REFUTE of an unwritten read, rd_data ref=all-ones
+    // impl=0).
+    return strip_bank_model_suffix(key);
+  }
+  const auto decoded = decode_cgen_memory_correspondence(key.substr(0, entry + 2) + "_data");
+  if (!decoded) {
+    return key;
+  }
+  auto       prefix = key.substr(0, marker);
+  // cgen names a partition instance u_<definition>__c<color>. It is not
+  // source hierarchy; a real parent before that component must still survive.
+  const auto region = prefix.rfind("__c");
+  auto       digits = [](std::string_view text) {
+    return !text.empty() && std::ranges::all_of(text, [](char c) { return c >= '0' && c <= '9'; });
+  };
+  if (strip_region && region != std::string::npos && prefix.ends_with('_')
+      && digits(std::string_view(prefix).substr(region + 3, prefix.size() - region - 4))) {
+    auto start = prefix.rfind("_u_", region);
+    if (start != std::string::npos) {
+      prefix.resize(start + 1);
+    } else if (prefix.starts_with("u_")) {
+      prefix.clear();
+    }
+  }
+  return prefix + decoded->substr(marker) + strip_bank_model_suffix(key.substr(entry + 2));
+}
+
+struct Mem_entry_bank {
+  std::vector<std::string>              entry_keys;  // per entry: the bits-wide flop key, "" when bit-blasted
+  std::vector<std::vector<std::string>> bit_keys;    // per entry: the one-bit cell keys LSB first, empty when whole
+};
+struct Mem_bank_index {
+  Io_name_map<std::pair<std::string, int>> candidates;
+  absl::flat_hash_set<std::string>         matched;
+  Mem_bank_index(const Io_name_map<int>& bank_flops, const Io_name_map<int>& mem_side_flops) {
+    // Build once per side, rather than rescanning every flop for every memory.
+    // Several actual states with the same alias cannot direct a total tie.
+    for (const auto& [key, width] : bank_flops) {
+      // Preserve the complete hierarchy when both sides passed through the
+      // same partition wrapper. Also index the region-free alias for a raw
+      // Memory compared with a newly partitioned/mapped implementation.
+      for (bool strip_region : {false, true}) {
+        auto alias       = memory_bank_correspondence_name(key, strip_region);
+        auto [it, fresh] = candidates.emplace(alias, std::pair{key, width});
+        if (!fresh && it->second.first != key) {
+          it->second.second = -1;  // two actual states: no unique correspondence
+        }
+      }
+    }
+    for (const auto& [key, width] : mem_side_flops) {
+      (void)width;
+      matched.insert(memory_bank_correspondence_name(key, false));
+      matched.insert(memory_bank_correspondence_name(key, true));
+    }
+  }
+};
+std::optional<Mem_entry_bank> find_mem_entry_bank(const std::string& mem_name, const Mem_sig& sig, const Mem_bank_index& index) {
+  if (mem_name.empty() || sig.size <= 0 || sig.bits <= 0) {
+    return std::nullopt;
+  }
+  const auto     name       = memory_correspondence_name(mem_name);
+  const auto&    candidates = index.candidates;
+  const auto&    matched    = index.matched;
+  Mem_entry_bank out;
+  out.entry_keys.assign(static_cast<size_t>(sig.size), std::string{});
+  out.bit_keys.assign(static_cast<size_t>(sig.size), {});
+  for (int i = 0; i < sig.size; ++i) {
+    const std::string ek = livehd::bus_name::entry(name + "__mem", i);
+    if (auto it = candidates.find(ek); it != candidates.end()) {
+      if (it->second.second != sig.bits || matched.contains(ek)) {
+        return std::nullopt;
+      }
+      out.entry_keys[static_cast<size_t>(i)] = it->second.first;
+      continue;
+    }
+    std::vector<std::string> bits;
+    bits.reserve(static_cast<size_t>(sig.bits));
+    for (int b = 0; b < sig.bits; ++b) {
+      std::string bk  = livehd::bus_name::bit(ek, b);
+      auto        bit = candidates.find(bk);
+      if (bit == candidates.end() || bit->second.second != 1 || matched.contains(bk)) {
+        return std::nullopt;
+      }
+      bits.push_back(bit->second.first);
+    }
+    out.bit_keys[static_cast<size_t>(i)] = std::move(bits);
+  }
+  return out;
+}
+
+struct Packed_scalar_bridge {
+  std::string              wide_key;
+  std::vector<std::string> bit_keys;  // LSB first
+  // A mapped region's partition wrapper prefix is representation-only: once
+  // the LEC hierarchy driver inlines that one-sided wrapper, the embedded
+  // source register name is exact. Other suffix matches remain speculative and
+  // require a reachable base.
+  bool                     structural_partition = false;
+  std::vector<int>         widths;  // empty for one-bit cells; otherwise one width per field
+  int                      width_at(size_t i) const { return widths.empty() ? 1 : widths[i]; }
+  int                      total_width() const {
+    int sum = 0;
+    for (size_t i = 0; i < bit_keys.size(); ++i) {
+      sum += width_at(i);
+    }
+    return sum;
+  }
+};
+
+// Legacy spelling only. pass.partition now leaves its region wrappers
+// anonymous: inline/flatten give them an empty prefix and cgen emits them as
+// `__flat___<module>`, which logical_hier_name already treats as transparent.
+// The `sub_<digits>` match remains for netlists emitted before that naming.
+bool is_synthetic_partition_prefix(std::string_view prefix) {
+  constexpr std::string_view marker = "sub_";
+  if (!prefix.starts_with(marker) || prefix.size() == marker.size()) {
+    return false;
+  }
+  return std::all_of(prefix.begin() + static_cast<std::ptrdiff_t>(marker.size()), prefix.end(), [](unsigned char c) {
+    return std::isdigit(c);
+  });
+}
+
+// Parse the stable loop-replica spelling produced by uPass, e.g.
+// `tree_valid__li64_valid_r`. The numeric occurrence is deliberately removed
+// from the group key; its value supplies the bit/stage order.
+bool split_loop_replica_key(std::string_view key, std::string& group, int& replica) {
+  const auto mark = key.rfind("__li");
+  if (mark == std::string_view::npos) {
+    return false;
+  }
+  size_t end = mark + 4;
+  while (end < key.size() && std::isdigit(static_cast<unsigned char>(key[end]))) {
+    ++end;
+  }
+  if (end == mark + 4) {
+    return false;
+  }
+  int value = 0;
+  for (size_t i = mark + 4; i < end; ++i) {
+    value = value * 10 + (key[i] - '0');
+  }
+  group   = std::string(key.substr(0, mark)) + "\x1f" + std::string(key.substr(end));
+  replica = value;
+  return true;
+}
+
+// Conservative one-to-many candidate mining. A candidate exists only when a
+// unique one-sided N-bit reference flop faces a unique, contiguous group of N
+// one-bit implementation loop replicas. The spelling proposes a relation; it
+// does NOT justify it. The inductive step and reset-reachable BMC base are both
+// proved before the portfolio may turn it into a full equivalence result.
+std::vector<Packed_scalar_bridge> infer_packed_scalar_bridges(const Io_name_map<int>& ref_side, const Io_name_map<int>& impl_side,
+                                                              const Io_name_map<uint64_t>&    impl_order,
+                                                              const Io_name_map<std::string>& impl_raw) {
+  std::map<std::string, std::map<int, std::string>> groups;
+  for (const auto& [key, width] : impl_side) {
+    if (width != 1 || ref_side.contains(key)) {
+      continue;
+    }
+    std::string group;
+    int         replica = 0;
+    if (split_loop_replica_key(key, group, replica)) {
+      groups[group].emplace(replica, key);
+    }
+  }
+
+  std::map<int, std::vector<std::vector<std::string>>> groups_by_width;
+  for (const auto& [group, members] : groups) {
+    if (members.size() < 2) {
+      continue;
+    }
+    int                      expected = members.begin()->first;
+    std::vector<std::string> bits;
+    for (const auto& [replica, key] : members) {
+      if (replica != expected++) {
+        bits.clear();
+        break;
+      }
+      bits.push_back(key);
+    }
+    if (!bits.empty()) {
+      groups_by_width[static_cast<int>(bits.size())].push_back(std::move(bits));
+    }
+  }
+
+  std::map<int, std::vector<std::string>> wide_by_width;
+  for (const auto& [key, width] : ref_side) {
+    if (width > 1 && !impl_side.contains(key)) {
+      wide_by_width[width].push_back(key);
+    }
+  }
+
+  std::vector<Packed_scalar_bridge> out;
+  for (auto& [width, scalar_groups] : groups_by_width) {
+    auto wit = wide_by_width.find(width);
+    if (scalar_groups.size() != 1 || wit == wide_by_width.end() || wit->second.size() != 1) {
+      continue;  // an arbitrary choice among same-shaped groups is not a correspondence
+    }
+    out.push_back(Packed_scalar_bridge{wit->second.front(), std::move(scalar_groups.front()), false, {}});
+  }
+
+  // Standard-cell mapping names bit i of a register `<source-register>[i]`
+  // (core/bus_name.hpp) rather than the loop-replica spelling above. The
+  // EXACT-base form (`data[0]..data[N-1]` against a ref `data`) is already
+  // related by the ordinary bit-blast bridge and is not re-proposed here, but a
+  // flattened implementation may retain a hierarchy prefix that the source
+  // front-end did not (`child_data[0]` versus packed `data`). Admit that
+  // suffix relation only when it selects one complete, contiguous group of
+  // exactly N bits (bus_bit_groups) AND that group could serve no OTHER
+  // reference key. This remains an UNCERTAIN bridge: the caller requires both an
+  // inductive transition proof and a reset-reachable base proof before it can
+  // contribute to PROVEN.
+  std::map<std::string, std::vector<std::string>> indexed;
+  for (auto& [base, bits] : bus_bit_groups(impl_side, ref_side, impl_raw)) {
+    indexed.emplace(base, std::move(bits));
+  }
+  // A wide key the loop-replica pass above already bridged is spoken for: a
+  // second relation would map the same reference bits onto two scalar groups.
+  std::set<std::string> bridged_wides;
+  for (const auto& b : out) {
+    bridged_wides.insert(b.wide_key);
+  }
+  // Walk the GROUPS and enumerate each base's own `_`-delimited suffixes (a
+  // handful per name) rather than testing every reference key against every
+  // group: the latter is quadratic in the state-key count and allocated a
+  // `"_" + wide` temporary per pair. BOTH directions must be unique -- a group
+  // that could serve two reference keys (`u_w_data[0..7]` fits `data` and
+  // `w_data`), or a reference key with two candidate groups, is an arbitrary
+  // choice and not a correspondence. `std::map` keeps the emitted bridge order
+  // independent of hash iteration order.
+  std::map<std::string, std::vector<std::string>> wide_to_bases;  // ref wide -> candidate group bases
+  std::map<std::string, int>                      base_claims;    // group base -> ref wides it could serve
+  for (const auto& [base, members] : indexed) {
+    const auto n = static_cast<int>(members.size());
+    if (n <= 1) {
+      continue;
+    }
+    for (size_t p = base.find('_'); p != std::string::npos; p = base.find('_', p + 1)) {
+      std::string wide = base.substr(p + 1);
+      auto        wit  = ref_side.find(wide);
+      if (wit == ref_side.end() || wit->second != n || impl_side.contains(wide) || bridged_wides.contains(wide)) {
+        continue;
+      }
+      ++base_claims[base];
+      wide_to_bases[wide].push_back(base);
+    }
+  }
+  for (const auto& [wide, bases] : wide_to_bases) {
+    if (bases.size() != 1 || base_claims.at(bases.front()) != 1) {
+      continue;  // ambiguous in one direction or the other
+    }
+    const auto&              base = bases.front();
+    std::vector<std::string> bits = indexed.at(base);
+    const auto prefix = std::string_view(base).substr(0, base.size() - wide.size() - 1);
+    out.push_back(Packed_scalar_bridge{wide, std::move(bits), is_synthetic_partition_prefix(prefix), {}});
+  }
+  // Tuple scalarization retains the aggregate name as each field's prefix.
+  // Declaration order proposes an MSB-first field layout; it is NOT an
+  // assumption about named-tuple bit ordering. Like loop-replica guesses,
+  // this relation must pass both induction and a reset-reachable base check.
+  std::set<std::string> used_fields;
+  for (const auto& bridge : out) {
+    used_fields.insert(bridge.bit_keys.begin(), bridge.bit_keys.end());
+    bridged_wides.insert(bridge.wide_key);
+  }
+  std::map<std::string, std::vector<std::string>> field_groups;
+  for (const auto& [field, width] : impl_side) {
+    if (width < 1 || ref_side.contains(field) || used_fields.contains(field)) {
+      continue;
+    }
+    std::vector<std::string> owners;
+    for (size_t pos = field.find('_'); pos != std::string::npos; pos = field.find('_', pos + 1)) {
+      const auto base = field.substr(0, pos);
+      if (const auto it = ref_side.find(base);
+          it != ref_side.end() && it->second > width && !impl_side.contains(base) && !bridged_wides.contains(base)) {
+        owners.push_back(base);
+      }
+    }
+    if (owners.size() == 1) {
+      field_groups[owners.front()].push_back(field);
+    }
+  }
+  for (auto& [wide, fields] : field_groups) {
+    int64_t total    = 0;
+    bool    complete = fields.size() > 1;
+    for (const auto& field : fields) {
+      total    += impl_side.at(field);
+      complete  = complete && impl_order.contains(field);
+    }
+    if (!complete || total != ref_side.at(wide)) {
+      continue;
+    }
+    std::sort(fields.begin(), fields.end(), [&](const auto& x, const auto& y) {
+      return impl_order.at(x) != impl_order.at(y) ? impl_order.at(x) > impl_order.at(y) : x < y;
+    });
+    Packed_scalar_bridge bridge{wide, fields, false, {}};
+    for (const auto& field : fields) {
+      bridge.widths.push_back(impl_side.at(field));
+    }
+    out.push_back(std::move(bridge));
+  }
+
+  return out;
 }
 
 }  // namespace
@@ -2171,7 +3101,7 @@ int pipeline_flush_latency(hhds::Graph* g) {
 bool io_bundle_split(hhds::Graph* ref, hhds::Graph* impl) { return !detect_port_bundles(ref, impl).empty(); }
 
 // The real engine. `acc` is the caller-owned cvc5 statistics accumulator
-// (formal.stats): NULL when stats are off, which makes every Solve_probe /
+// (lhd.stats): NULL when stats are off, which makes every Solve_probe /
 // Stats_guard / capture_cvc5_stats call below a no-op, so no call site needs an
 // `if (stats)` guard and the off path costs nothing. The public prove_equal()
 // wrapper below owns the accumulator and merges it into the result -- it must
@@ -2182,6 +3112,31 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   Query_result res;
   res.detail = "solver=" + opts.solver + " (cvc5 direct, flop-cut inductive miter)";
   res.engine = opts.engine;  // the auto portfolio overrides this with the winning engine
+
+  // Top-level ports where the two sides differ by exactly a sign slot, so the
+  // shared symbol's spare bit was forced to 0 (see Top_in). The verdict has to
+  // say so: a PROVEN that rests on this holds only where that bit really is 0.
+  // Disclosure is unconditional; it qualifies the proof without changing its verdict.
+  absl::flat_hash_set<std::string> reconciled_ports;
+  // Idempotent by INSPECTING res.detail rather than by a latch: THREE engine
+  // arms ASSIGN res.detail rather than appending to it -- bmc, phase-step
+  // induction, and phase-inductive -- and an assignment would silently drop a
+  // latched disclosure. Re-call this after any such assignment. (Inspection
+  // also cannot rescue itself: the assignment wipes the substring it looks
+  // for, which is exactly why each arm needs its own call.)
+  auto                             disclose_reconciled = [&]() {
+    if (reconciled_ports.empty() || res.detail.find("width/sign reconciled") != std::string::npos) {
+      return;
+    }
+    std::vector<std::string> names(reconciled_ports.begin(), reconciled_ports.end());
+    std::sort(names.begin(), names.end());
+    res.detail += "; width/sign reconciled on top port(s) ";
+    for (size_t i = 0; i < names.size(); ++i) {
+      res.detail += (i != 0 ? "," : "") + names[i];
+    }
+    res.detail += " (the two sides declare them differently; the shared input ranges over the domain BOTH "
+                  "declarations can hold), so a verdict here does not cover values only the wider side admits";
+  };
 
   if (opts.solver != "cvc5") {
     res.verdict  = Verdict::Unknown;
@@ -2358,15 +3313,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // mispaired box is a false-PROVEN hazard. An ambiguous entity keeps the
   // full name; its pairing degrades to one-sided obligations, which the
   // miters already gate to inconclusive (never a Proven/Refuted).
-  auto entity_of = [](std::string_view n) -> std::string {
-    auto d = n.rfind('.');
-    return std::string(d == std::string_view::npos ? n : n.substr(d + 1));
-  };
+  auto entity_of = [](std::string_view name) { return str_tools::canonical_entity_name(name); };
   // Per design: entity -> the unique full callee name, or "" when ambiguous.
   absl::flat_hash_map<std::string, std::string> ref_ent_uniq, impl_ent_uniq;
   for (auto* g : {ref, impl}) {
     absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> ents;
-    for (auto node : g->fast_hier()) {  // set-valued map build: order-free
+    for (auto node : g->grouped_hierarchy().nodes()) {  // set-valued map build: order-free
       if (graph_util::type_op_of(node) != Ntype_op::Sub) {
         continue;
       }
@@ -2423,8 +3375,26 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
   }
   const Io_name_map<bool>* collapse_ptr = collapse_defs.empty() ? nullptr : &collapse_defs;
+  if (std::getenv("LEC_DUMP_COLLAPSE") != nullptr) {
+    // Debug-only: the expanded collapse set and each side's entity resolution
+    // for it, then (scan_boxes below) every Sub instance's box decision.
+    for (const auto& d : opts.collapse) {
+      const std::string e = entity_of(d);
+      auto              r = ref_ent_uniq.find(e);
+      auto              i = impl_ent_uniq.find(e);
+      std::fprintf(stderr,
+                   "[LEC_COLLAPSE] requested '%s' entity '%s' ref_uniq='%s' impl_uniq='%s'\n",
+                   d.c_str(),
+                   e.c_str(),
+                   r == ref_ent_uniq.end() ? "<absent>" : r->second.c_str(),
+                   i == impl_ent_uniq.end() ? "<absent>" : i->second.c_str());
+    }
+    for (const auto& [k, v] : collapse_defs) {
+      std::fprintf(stderr, "[LEC_COLLAPSE] set '%s'\n", k.c_str());
+    }
+  }
 
-  // cvc5 solve-insight instrumentation (formal.stats). The DECLARATION ORDER of
+  // cvc5 solve-insight instrumentation (lhd.stats). The DECLARATION ORDER of
   // these four lines is mandatory and load-bearing (verified empirically; none
   // of it is documented in cvc5.h):
   //   * Solve_probe BEFORE the Solver -- the plugin must OUTLIVE it, or the
@@ -2453,7 +3423,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // fast_hier: a gid set build. Like the encoder's own scan, this DISCOVERS
       // the opaque set, so it must descend everywhere (the scope below is armed
       // from its result).
-      for (auto node : g->fast_hier()) {
+      for (auto node : g->grouped_hierarchy().nodes()) {
         if (graph_util::type_op_of(node) != Ntype_op::Sub) {
           continue;
         }
@@ -2465,6 +3435,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
   }
   const ankerl::unordered_dense::set<hhds::Gid>* collapse_gids_ptr = collapse_gids.empty() ? nullptr : &collapse_gids;
+
+  // State ordering only ranks visible flop cuts; proven boxes own their state.
+  Io_name_map<uint64_t> impl_state_order;
+  for (auto node : impl->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
+    if (graph_util::type_op_of(node) == Ntype_op::Flop) {
+      impl_state_order.emplace(eff(node.get_hier_name()), static_cast<uint64_t>(node.get_debug_nid()));
+    }
+  }
 
   // ── Box correspondence (collapsed / blackbox Sub instances) ────────────────
   // ONE hierarchical walk per design enumerates every Sub the encoder will treat
@@ -2489,10 +3467,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // nested boxes silently degraded a stateful box to a stateless constant one —
   // a false-PASS hazard. The encoder now hard-errors on a key it cannot find.
   struct Box_inst {
-    std::string      nk;     // box_node_key (per-design structural identity)
-    std::string      cname;  // canonicalized instance hier-name
-    hhds::Node_class node;
-    bool             in_ref;
+    std::string           nk;     // box_node_key (per-design structural identity)
+    std::string           cname;  // canonicalized instance hier-name
+    hhds::Occurrence_node node;
+    bool                  in_ref;
   };
   absl::flat_hash_map<std::string, std::vector<Box_inst>> boxes_by_def;
   std::vector<std::string>                                box_defnames;    // insertion order (walk-deterministic)
@@ -2507,8 +3485,16 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   absl::flat_hash_set<std::string>                        seen_ref_nk, seen_impl_nk;
   bool                                                    nk_collision = false;
   auto                                                    scan_boxes   = [&](hhds::Graph* g, bool in_ref) {
-    hhds::Hier_opaque_scope sc(collapse_gids_ptr);  // mirror the encoder's ambient opacity
-    for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
+    for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
+      if (graph_util::type_op_of(node) == Ntype_op::Sub && std::getenv("LEC_DUMP_COLLAPSE") != nullptr) {
+        auto dsio = node.get_subnode_io();
+        std::fprintf(stderr,
+                     "[LEC_COLLAPSE] %s occ-walk sub '%s' def '%s' has_out_edges=%d\n",
+                     in_ref ? "ref " : "impl",
+                     std::string(node.get_hier_name()).c_str(),
+                     dsio == nullptr ? "?" : std::string(dsio->get_name()).c_str(),
+                     node.has_out_edges() ? 1 : 0);
+      }
       if (graph_util::type_op_of(node) != Ntype_op::Sub || !node.has_out_edges()) {
         continue;  // the encoder skips consumer-less nodes before its box path
       }
@@ -2522,16 +3508,45 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // their boxes to correspond), else the full per-side name.
       const std::string defkey         = canon_def(in_ref, defname);
       const bool        force_collapse = collapse_ptr != nullptr && collapse_ptr->count(defname) > 0;
-      // Mirror encode.cpp exactly: a sub with a body is DESCENDED (not a box)
-      // unless force-collapsed; a sub_lib-resolvable combinational def is
-      // flattened inline (not a box); everything else is a box.
+      if (std::getenv("LEC_DUMP_COLLAPSE") != nullptr) {
+        std::fprintf(stderr,
+                     "[LEC_COLLAPSE] %s sub '%s' def '%s' key '%s' body=%d force_collapse=%d lib=%d\n",
+                     in_ref ? "ref " : "impl",
+                     std::string(node.get_hier_name()).c_str(),
+                     defname.c_str(),
+                     defkey.c_str(),
+                     node.get_subnode_graph() != nullptr ? 1 : 0,
+                     force_collapse ? 1 : 0,
+                     sub_lib != nullptr && sub_lib->find(node.get_subnode_gid()) != sub_lib->end() ? 1 : 0);
+      }
+      // Mirrors encode.cpp's Sub classification for every node THIS walk reaches:
+      // a sub with a body is DESCENDED (not a box) unless force-collapsed; a
+      // sub_lib-resolvable combinational def is flattened inline (not a box);
+      // everything else is a box. Two deliberate non-mirrors, both sound:
+      //   * The encoder's `sub_depth_ <= 32` flatten cap is NOT replicated, and
+      //     cannot differ here: occurrences() descends only get_subnode_graph()
+      //     (the design's OWN library), which is exactly the encoder's depth-0
+      //     walk — sub_depth_ is 0 for every node reachable from here, so the cap
+      //     always holds. It binds only inside the recursive sub_lib encode,
+      //     whose nodes this walk cannot reach at all (next bullet).
+      //   * This walk does NOT enter a sub_lib def the encoder flattens inline
+      //     (that def lives in a different library, so get_subnode_graph() is
+      //     null and occurrences() stops), so a blackbox NESTED inside one gets
+      //     no correspondence key. It could not be given a usable one: the
+      //     recursive encode() re-roots box_node_key at the DEF's gid, so two
+      //     instances of that def would hand their nested box ONE key and alias
+      //     two distinct instances — a false-PASS worse than the miss. The
+      //     encoder instead hard-errors on the absent key ("builder/encoder walk
+      //     drift"), which the engine reports as INCONCLUSIVE: a refusal, never
+      //     a verdict. Widening this walk means instance-qualifying the nested
+      //     key space in encode.cpp first.
       if (node.get_subnode_graph() != nullptr && !force_collapse) {
         continue;
       }
       if (!force_collapse && sub_lib != nullptr) {
         if (auto git = sub_lib->find(node.get_subnode_gid()); git != sub_lib->end() && git->second != nullptr) {
           bool lib_stateful = false;
-          for (auto dn : git->second->forward_class()) {
+          for (auto dn : git->second->body().nodes(hhds::Node_order::forward)) {
             auto dop = graph_util::type_op_of(dn);
             if (dop == Ntype_op::Flop || dop == Ntype_op::Fflop || dop == Ntype_op::Latch || dop == Ntype_op::Memory) {
               lib_stateful = true;
@@ -2552,7 +3567,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         if (auto def = node.get_subnode_graph(); def != nullptr) {
           def_has_body[defkey] = true;
           if (scanned_bodies.insert(def.get()).second) {
-            for (auto dn : def->forward_class()) {
+            for (auto dn : def->body().nodes(hhds::Node_order::forward)) {
               auto dop = graph_util::type_op_of(dn);
               if (dop == Ntype_op::Flop || dop == Ntype_op::Fflop || dop == Ntype_op::Latch || dop == Ntype_op::Memory) {
                 def_stateful[defkey] = true;
@@ -2569,7 +3584,24 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       if (!(in_ref ? seen_ref_nk : seen_impl_nk).insert(nk).second) {
         nk_collision = true;
       }
-      boxes_by_def[defkey].push_back(Box_inst{std::move(nk), canon_flop_name(node.get_hier_name()), node, in_ref});
+      if (std::getenv("LEC_DUMP_COLLAPSE") != nullptr) {
+        std::fprintf(stderr,
+                     "[LEC_COLLAPSE] box %s def '%s' inst '%s' (walk order %zu)\n",
+                     in_ref ? "ref " : "impl",
+                     defkey.c_str(),
+                     canon_flop_name(node.get_hier_name()).c_str(),
+                     boxes_by_def[defkey].size());
+      }
+      // Logical names let a box under a transparent wrapper pair by name with
+      // the same instance spelled flat on the other side. A transparent box
+      // instance ITSELF has an empty logical name, so its siblings of one def
+      // would all tie at "" and pair by walk order; name it by its unique
+      // physical path instead. (Keys stay per-node either way: nothing merges.)
+      std::string cname = canon_flop_name(graph_util::logical_hier_name(node.get_hier_name(), true));
+      if (cname.empty()) {
+        cname = std::string(node.get_hier_name());
+      }
+      boxes_by_def[defkey].push_back(Box_inst{std::move(nk), std::move(cname), node, in_ref});
     }
   };
   scan_boxes(ref, true);
@@ -2603,7 +3635,52 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   }
 
   // Name-first pairing per def: a canon instance name unique on BOTH sides is
-  // the tag; the remainder pairs by walk-order occurrence.
+  // the tag; the remainder pairs by occurrence ORDINAL. That ordinal is
+  // assigned in a NATURAL (numeric-aware) sort of the canonical instance
+  // names, not in the hhds occurrence walk order: the walk enumerates a rolled
+  // loop's replicas by definition (`u_loop_3` before `u_loop_1`, so
+  // `..__li14, __li12, __li13, __li8, ..`) while the other side lists its
+  // explicit instances in source order (`levels_0_nodes_0_n, ..`), and the
+  // per-ordinal pairing then tied every box to the wrong partner (a refute
+  // under collapse and a slow flat confirmation on an equivalent pair). Both
+  // spellings sort by their iteration numbers, which is the source order on
+  // either side. It is only a correspondence hypothesis: a wrong pairing
+  // refutes under collapse and is re-checked flat, never trusted.
+  const auto natural_cname_less = [](const std::string& a, const std::string& b) {
+    size_t i = 0, j = 0;
+    while (i < a.size() && j < b.size()) {
+      const bool da = std::isdigit(static_cast<unsigned char>(a[i])) != 0;
+      const bool db = std::isdigit(static_cast<unsigned char>(b[j])) != 0;
+      if (da && db) {
+        size_t ie = i, je = j;
+        while (ie < a.size() && std::isdigit(static_cast<unsigned char>(a[ie])) != 0) {
+          ++ie;
+        }
+        while (je < b.size() && std::isdigit(static_cast<unsigned char>(b[je])) != 0) {
+          ++je;
+        }
+        const std::string_view na(a.data() + i, ie - i), nb(b.data() + j, je - j);
+        // Compare numerically: strip leading zeros, then by length, then lexically.
+        const auto sa = na.substr(std::min(na.find_first_not_of('0'), na.size() - 1));
+        const auto sb = nb.substr(std::min(nb.find_first_not_of('0'), nb.size() - 1));
+        if (sa.size() != sb.size()) {
+          return sa.size() < sb.size();
+        }
+        if (sa != sb) {
+          return sa < sb;
+        }
+        i = ie;
+        j = je;
+        continue;
+      }
+      if (a[i] != b[j]) {
+        return a[i] < b[j];
+      }
+      ++i;
+      ++j;
+    }
+    return a.size() - i < b.size() - j;
+  };
   Io_name_map<std::string> ref_box_keys, impl_box_keys;
   for (const auto& defname : box_defnames) {
     const auto&      insts = boxes_by_def[defname];
@@ -2611,11 +3688,23 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     for (const auto& bi : insts) {
       (bi.in_ref ? ref_cnt : impl_cnt)[bi.cname]++;
     }
-    int ref_res = 0, impl_res = 0;
+    std::vector<const Box_inst*> ref_rest, impl_rest;
     for (const auto& bi : insts) {
-      const bool  named = ref_cnt[bi.cname] == 1 && impl_cnt[bi.cname] == 1;
-      std::string tag   = named ? ("n:" + bi.cname) : ("o" + std::to_string(bi.in_ref ? ref_res++ : impl_res++));
-      (bi.in_ref ? ref_box_keys : impl_box_keys)[bi.nk] = defname + "#" + tag;
+      const bool named = ref_cnt[bi.cname] == 1 && impl_cnt[bi.cname] == 1;
+      if (named) {
+        (bi.in_ref ? ref_box_keys : impl_box_keys)[bi.nk] = defname + "#n:" + bi.cname;
+      } else {
+        (bi.in_ref ? ref_rest : impl_rest).push_back(&bi);
+      }
+    }
+    for (auto* rest : {&ref_rest, &impl_rest}) {
+      std::stable_sort(rest->begin(), rest->end(), [&](const Box_inst* x, const Box_inst* y) {
+        return natural_cname_less(x->cname, y->cname);
+      });
+      int ordinal = 0;
+      for (const auto* unnamed : *rest) {
+        (unnamed->in_ref ? ref_box_keys : impl_box_keys)[unnamed->nk] = defname + "#o" + std::to_string(ordinal++);
+      }
     }
   }
 
@@ -2625,7 +3714,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   {
     Io_name_map<int>  bw;   // true-blackbox "key:port" -> max real width across designs
     Io_name_map<bool> bsg;  // "key:port" -> signedness of the widest side
-    auto              out_port_name = [](const std::shared_ptr<hhds::GraphIO>& sio, const hhds::Pin_class& dp) -> std::string {
+    auto              out_port_name = [](const std::shared_ptr<hhds::GraphIO>& sio, const auto& dp) -> std::string {
       for (const auto& d : sio->get_output_pin_decls()) {
         if (sio->get_output_port_id(d.name) == dp.get_port_id()) {
           return d.name;
@@ -2654,13 +3743,20 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
             in_pw[d.name] = w;
           }
         }
-        for (const auto& e : bi.node.inp_edges()) {
-          auto        pid  = e.sink.get_port_id();
+        // Occurrence_node: hier-resolving pin walk (see make_frame). SORTED so
+        // port 0 -- a banked cell's first operand -- keeps its slot, and PLURAL
+        // get_driver_pins() so a two-driver carry-in still widens the port by
+        // the widest of BOTH drivers, exactly as the per-edge max did. The port
+        // name depends only on the sink, so it is resolved once per pin.
+        for (auto sink : bi.node.inp_sorted_pins()) {
+          auto        pid  = sink.get_port_id();
           auto        nit  = in_name.find(pid);
           std::string port = nit != in_name.end() ? nit->second : std::to_string(pid);
-          int         w    = real_width(e.driver);
-          if (auto it = in_pw.find(port); it == in_pw.end() || w > it->second) {
-            in_pw[port] = w;
+          for (auto drv : sink.get_driver_pins()) {
+            int w = gu::real_width(drv);
+            if (auto it = in_pw.find(port); it == in_pw.end() || w > it->second) {
+              in_pw[port] = w;
+            }
           }
         }
       }
@@ -2700,7 +3796,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           for (const auto& e : bi.node.out_edges()) {
             auto        dp   = e.driver;
             std::string port = out_port_name(sio, dp);
-            int         w    = real_width(dp);
+            int         w    = gu::real_width(dp);
             if (w == 0) {
               w = 1;
             }
@@ -2766,7 +3862,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           for (const auto& e : bi.node.out_edges()) {
             auto        dp   = e.driver;
             std::string port = out_port_name(sio, dp);
-            int         w    = std::max(1, real_width(dp));
+            int         w    = std::max(1, gu::real_width(dp));
             if (auto it = out_pw.find(port); it == out_pw.end() || w > it->second) {
               out_pw[port] = w;
             }
@@ -2807,7 +3903,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           auto        dp   = e.driver;
           std::string port = out_port_name(sio, dp);
           std::string key  = bk + ":" + port;
-          int         w    = real_width(dp);
+          int         w    = gu::real_width(dp);
           if (w == 0) {
             w = 1;
           }
@@ -2851,7 +3947,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // other or the shared symbol is one-sided.
     for (auto* g : {ref, impl}) {
       Io_name_map<int> occ;
-      for (auto node : g->forward_class()) {
+      for (auto node : g->body().nodes(hhds::Node_order::forward)) {
         if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
           continue;
         }
@@ -2894,6 +3990,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     solver.setLogic(state_boxes_ptr != nullptr || comb_boxes_ptr != nullptr ? "QF_AUFBV" : "QF_ABV");  // BV + arrays (+UF)
   }
 
+  // cvc5 1.3.4's full array propagation recursively preregisters fresh
+  // select(store(...), i) terms. Wide hardware arrays can exhaust a worker's
+  // stack (RenameBuffer: propagateRowLemma -> preRegisterTermInternal).
+  // Propagate existing reads only; lazy array lemmas retain the same theory.
+  solver.setOption("arrays-prop", "1");
+  // The BMC reference's memory knowledge plane starts as a constant array.
+  solver.setOption("arrays-exp", "true");
+
   // Per-checkSat wall-clock bound (formal.timeout seconds; 0 = unbounded). Hard
   // nonlinear miters (a chain of two multiplies — associativity, distributivity,
   // 3-way commutativity at >=16 bits) make cvc5's bit-blast never return. Without
@@ -2912,15 +4016,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     solver.setOption("rlimit-per", std::to_string(opts.rlimit));
   }
 
-  // ── One shared wall-clock allowance for this query (encode + solve) ─────────
-  // `formal.timeout` is ONE budget for the whole query, not one per phase. It used to
-  // be handed out twice at full value — once to each Encoder (set_encode_budget)
-  // and again to every checkSat (tlimit-per above) — so `formal.timeout=120` licensed
-  // ~120s of encoding PLUS ~120s of solving and a "120s" cap really cost ~250s of
-  // wall clock (measured on a whole-CPU BMC miter: 13s fixed + 2xT, T in {15,30,120}
-  // -> 43s/67s/251s). Encoding is not free on a big unroll, so it must draw from the
-  // same purse: the encoders now take what is LEFT, and each checkSat is re-armed to
-  // what is left after that (arm_solve_budget, called at every checkSat site).
+  // ── One shared solver allowance for this query ──────────────────────────────
+  // `formal.timeout` covers formal solving only. Parsing, graph transforms, and
+  // construction of the CVC5 representation are deliberately outside it. Each
+  // checkSat is capped by the allowance left after earlier solver calls.
   //
   // SOUND: shrinking a bound only ever turns a checkSat into `unknown` (-> Unknown),
   // never a false Proven/Refuted — the same degrade the fixed tlimit-per already had.
@@ -2928,40 +4027,42 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // instead of a 0 that would read as UNBOUNDED to cvc5.
   // OFF (byte-identical to the old per-phase behavior) for the deterministic
   // rlimit/compile tier and for timeout==0 (unbounded), so CI stays reproducible.
-  const auto      budget_t0       = std::chrono::steady_clock::now();
-  const bool      budget_on       = opts.timeout > 0 && opts.rlimit == 0;
-  const long long budget_ms       = static_cast<long long>(opts.timeout) * 1000;
+  const bool                          budget_on       = opts.timeout > 0 && opts.rlimit == 0;
+  const long long                     budget_ms       = static_cast<long long>(opts.timeout) * 1000;
   // formal.min_timeout: the floor this query never drops below once the shared
   // allowance is spent (>=1ms — 0 reads as UNBOUNDED to cvc5).
-  const long long budget_floor_ms = std::max<long long>(1, static_cast<long long>(opts.min_timeout) * 1000);
-  auto            budget_left_ms  = [&]() -> long long {
-    const auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - budget_t0).count();
+  const long long                     budget_floor_ms = std::max<long long>(1, static_cast<long long>(opts.min_timeout) * 1000);
+  std::chrono::steady_clock::duration solve_spent{};
+  auto                                budget_left_ms = [&]() -> long long {
+    const auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(solve_spent).count();
     return std::max<long long>(budget_floor_ms, budget_ms - spent);
   };
-  // Encoder budget in SECONDS (its unit), rounded up so a sub-second remainder is
-  // still a positive bound rather than 0 == unbounded.
-  auto encode_budget_s  = [&]() -> int { return budget_on ? static_cast<int>((budget_left_ms() + 999) / 1000) : opts.timeout; };
-  // Re-arm the per-checkSat cap to the budget remaining. Must be called immediately
-  // before each decisive checkSat; a no-op when the budget is off.
+  // Run one solver query against the remaining allowance and accumulate only
+  // time spent inside cvc5. The counter includes every check even when the wall
+  // budget is disabled so lhd.stats remains accurate.
   //
   // INVARIANT (verified by grep, and the reason the counter lives here): every
-  // solver.checkSat() in this function is immediately preceded by exactly one
-  // arm_solve_budget() call -- 1:1, no exceptions. cvc5 exposes NO checkSat
+  // solver.checkSat() in this function goes through solve_check. cvc5 exposes NO checkSat
   // counter under bv-solver=bitblast-internal (the whole
   // theory::bv::BVSolverBitblast::cadical::* family is absent), so LiveHD counts
-  // them itself here. Adding a checkSat WITHOUT an arm_solve_budget() in front
-  // both leaves it unbounded and makes `--stats` undercount.
+  // them itself here. Adding a raw checkSat both bypasses the shared budget and
+  // makes `--stats` undercount.
   //
   // The increment is deliberately OUTSIDE the `if (budget_on)` body: budget_on is
   // false whenever formal.timeout=0 or formal.rlimit>0, so counting inside would
   // report 0 checks on the common configurations.
-  auto arm_solve_budget = [&]() {
+  auto solve_check = [&]() -> cvc5::Result {
     if (acc != nullptr) {
       ++acc->checks;
     }
     if (budget_on) {
       solver.setOption("tlimit-per", std::to_string(budget_left_ms()));
     }
+    const auto t0  = std::chrono::steady_clock::now();
+    auto       r   = solver.checkSat();
+    solve_spent   += std::chrono::steady_clock::now() - t0;
+    res.solve_ms   = std::chrono::duration_cast<std::chrono::milliseconds>(solve_spent).count();
+    return r;
   };
 
   // Bit-blasting BV sub-solver. cvc5's default LAZY bitblast solver can return a
@@ -2976,8 +4077,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   for (auto* g : {ref, impl}) {
     // Hierarchical: a memory one level down still introduces ARRAY symbols, and
     // the eager bit-blaster this gates has no array theory.
-    hhds::Hier_opaque_scope sc(collapse_gids_ptr);
-    for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
+    for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
       if (graph_util::type_op_of(node) == Ntype_op::Memory) {
         has_mem = true;
         break;
@@ -3018,8 +4118,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // shape_collapse_ok's `rn <= 1 && in <= 1` fast path then declares that
     // shape UNAMBIGUOUS from an EMPTY census -- silently disabling the
     // crossed-occurrence guard it exists to enforce.
-    hhds::Hier_opaque_scope                                    sc(collapse_gids_ptr);
-    for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
+    for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
       if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
         continue;
       }
@@ -3031,8 +4130,26 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
     return by;
   };
-  const auto                       ref_mem_shapes  = mem_names_by_shape(ref);
-  const auto                       impl_mem_shapes = mem_names_by_shape(impl);
+  const auto ref_mem_shapes  = mem_names_by_shape(ref);
+  const auto impl_mem_shapes = mem_names_by_shape(impl);
+  if (std::getenv("LEC_DUMP_MEMS") != nullptr) {
+    auto dump = [](const auto& shapes, const char* side) {
+      for (const auto& [shape, names] : shapes) {
+        for (size_t i = 0; i < names.size(); ++i) {
+          std::fprintf(stderr,
+                       "[LEC_MEM %s] %s#%zu %s => %s%s\n",
+                       side,
+                       shape.c_str(),
+                       i,
+                       names[i].c_str(),
+                       memory_correspondence_name(names[i]).c_str(),
+                       is_cgen_memory_storage_name(names[i]) ? " [cgen]" : "");
+        }
+      }
+    };
+    dump(ref_mem_shapes, "REF");
+    dump(impl_mem_shapes, "IMPL");
+  }
   absl::flat_hash_set<std::string> mem_confirmed;  // canon(ref)\x01canon(impl) confident semdiff mem pairs
   absl::flat_hash_set<std::string> mem_opined;     // canon name of any memory semdiff paired (either side)
   for (const auto& [rn, in] : opts.mem_match) {
@@ -3072,6 +4189,32 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // outputs (the encoder builds each side's next-state per design).
     if (rn <= 1 && in <= 1) {
       return true;
+    }
+    // Name-anchored occurrence check: when every occurrence index present on
+    // BOTH sides carries the SAME canonical hier name, the positional pairing
+    // IS the tier-1 name pairing (lec's correspondence basis), so it is
+    // trustworthy regardless of extra TAIL memories on the longer side — the
+    // tail's occurrence keys are never generated by the short side, so its
+    // 'shared' symbol is minted but never shared (a free per-design array,
+    // sound). This is the flatten-asymmetry case: slang (9d8ff5a92) lowers a
+    // runtime-indexed COMB array to packed shift/mask logic, so the impl loses
+    // a memory the Pyrope ref keeps (bucket {q,d} vs {q}), semdiff flags the
+    // survivor-less `d` "no counterpart", and refusing the WHOLE bucket would
+    // strip `q` of its shared initial-contents symbol and false-REFUTE every
+    // uninitialized read (prp-v2prp2v-comb_array_const_index_read). A diverged
+    // memory at a COMMON position still falls through to the refusal below.
+    {
+      const size_t common  = std::min(rn, in);
+      bool         aligned = common > 0;
+      for (size_t i = 0; i < common && aligned; ++i) {
+        const std::string rcn        = memory_correspondence_name(ri->second[i]);
+        const std::string icn        = memory_correspondence_name(ii->second[i]);
+        const bool        cgen_exact = is_cgen_memory_storage_name(ri->second[i]) != is_cgen_memory_storage_name(ii->second[i]);
+        aligned                      = !rcn.empty() && rcn == icn && (cgen_exact || mem_diverged.count(rcn) == 0);
+      }
+      if (aligned) {
+        return true;
+      }
     }
     // A GENUINELY diverged memory (semdiff kind/init mismatch or no counterpart)
     // in an AMBIGUOUS (>1 per side) shape must never be force-collapsed — the
@@ -3123,8 +4266,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // array -- and the miter REFUTED two BYTE-IDENTICAL designs. Measured with
       // formal.lec.hier=false (the config that puts a submodule memory in the
       // top miter); see lhd/tests/mem_hier_census_test.sh.
-      hhds::Hier_opaque_scope sc(collapse_gids_ptr);
-      for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
+      for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
         if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
           continue;
         }
@@ -3134,7 +4276,22 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
         std::string sg = std::to_string(sig.size) + "x" + std::to_string(sig.bits);  // shape only; occ matches by RTL order
         if (!shape_collapse_ok(sg)) {
-          continue;  // ambiguous bucket semdiff flagged as diverged: leave every memory of this shape uncollapsed
+          // A one-sided Memory bucket is not a correspondence claim at all:
+          // give each source Memory its own array so the exact name-directed
+          // Memory<->ABC-flop-bank bridge below can relate it to the mapped
+          // storage cells.  This is still conservative when no complete bank
+          // exists -- the array remains private to that side and an observable
+          // uninitialized read can only refute.  Suppress only the genuinely
+          // ambiguous case where BOTH designs still contain memories of this
+          // shape; minting the same positional key there would assert the very
+          // pairing that shape_collapse_ok rejected.
+          const auto rit      = ref_mem_shapes.find(sg);
+          const auto iit      = impl_mem_shapes.find(sg);
+          const bool ref_has  = rit != ref_mem_shapes.end() && !rit->second.empty();
+          const bool impl_has = iit != impl_mem_shapes.end() && !iit->second.empty();
+          if (ref_has && impl_has) {
+            continue;
+          }
         }
         std::string key = mem_state_key(sig, occ[sg]++);
         if (sm.count(key)) {
@@ -3243,7 +4400,6 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   if (opts.engine == "bmc") {
     const int N = opts.bound > 0 ? opts.bound : 6;
     Encoder   enc(tm);
-    enc.set_encode_budget(encode_budget_s());  // shared query budget: take what is LEFT, not a fresh opts.timeout
     enc.set_sub_lib(sub_lib);
     enc.set_name_alias(&name_alias);
     enc.set_collapse_defs(collapse_ptr);
@@ -3326,28 +4482,31 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           += "; phase schedule P=" + std::to_string(P) + " ref[" + ref_plan.describe() + "] impl[" + impl_plan.describe() + "]";
     }
 
-    struct In {
-      int  w;
-      bool sgn;
-    };
+    // Both sides' decls are MERGED (see Top_in): the old "keep the wider, skip
+    // the rest" rule discarded the narrower side's sign, which is exactly the
+    // fact the sign-slot reconciliation needs.
+    using In = Top_in;
     Io_name_map<In> ins;
     auto            collect_ins = [&](hhds::Graph* g) {
       auto gio = g->get_io();
       for (const auto& d : gio->get_input_pin_decls()) {
         auto pin = g->get_input_pin(d.name);
-        int  w   = real_width_io(pin, *gio, d.name);
+        int  w   = gu::real_width(pin, *gio, d.name);
         if (w == 0) {
           w = 1;
         }
-        if (auto it = ins.find(d.name); it != ins.end() && it->second.w >= w) {
-          continue;  // keep the max-width view across both designs (bit-width trap)
-        }
-        bool sgn    = pin.is_invalid() ? !gio->is_unsign(d.name) : !graph_util::is_unsign(pin);
-        ins[d.name] = In{w, sgn};
+        const bool sgn = pin.is_invalid() ? !gio->is_unsign(d.name) : !graph_util::is_unsign(pin);
+        merge_top_in(ins[d.name], w, sgn);
       }
     };
     collect_ins(ref);
     collect_ins(impl);
+    for (const auto& [name, info] : ins) {
+      if (info.reconciled()) {
+        reconciled_ports.insert(std::string(name));
+      }
+    }
+    disclose_reconciled();
 
     // Reset-phase setup. A PRIMARY reset input is a TOP-level input name that
     // drives some flop's reset_pin directly; its asserted level is 0 when that
@@ -3360,7 +4519,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // free; the canonical-name fallback below still covers pass-through resets.
     Io_name_map<bool> reset_negset;  // name -> negreset
     auto              collect_resets = [&](hhds::Graph* g) {
-      for (auto node : g->forward_hier()) {  // descend hierarchy: flops at every level
+      for (auto node : g->occurrences().nodes(hhds::Node_order::forward)) {  // descend hierarchy: flops at every level
         if (graph_util::type_op_of(node) != Ntype_op::Flop) {
           continue;
         }
@@ -3373,40 +4532,16 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           continue;
         }
         bool negreset = false;
-        if (auto neg_d = graph_util::get_driver_of_sink_name(node, "negreset");
-            !neg_d.is_invalid() && graph_util::is_const_pin(neg_d)) {
-          negreset = !graph_util::hydrate_const(neg_d).is_known_false();
+        if (auto neg_d = graph_util::get_driver_of_sink_name(node, "negreset"); neg_d.is_const()) {
+          negreset = !graph_util::const_of(neg_d).is_known_false();
         }
         reset_negset[nm] = negreset;
       }
     };
-    // Canonical reset-name test (token-aware to avoid matching "first"/"burst").
-    // negreset (active-low) inferred from an _n / _ni / n suffix.
-    auto reset_name_polarity = [](const std::string& nm, bool& negreset) -> bool {
-      std::string lc = nm;
-      for (auto& c : lc) {
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-      }
-      bool   tok_match = false;
-      size_t start     = 0;
-      for (size_t i = 0; i <= lc.size(); ++i) {
-        if (i == lc.size() || lc[i] == '_') {
-          std::string tok = lc.substr(start, i - start);
-          if (tok == "rst" || tok == "reset" || tok == "rstn" || tok == "resetn" || tok == "arst" || tok == "areset"
-              || tok == "nrst" || tok == "nreset" || tok == "por") {
-            tok_match = true;
-          }
-          start = i + 1;
-        }
-      }
-      if (!tok_match) {
-        return false;
-      }
-      auto ends = [&](std::string_view s) { return lc.size() >= s.size() && lc.compare(lc.size() - s.size(), s.size(), s) == 0; };
-      negreset  = ends("_n") || ends("_ni") || ends("_n_i") || ends("_ni_i") || lc == "rstn" || lc == "resetn" || ends("nrst")
-                  || ends("nreset");
-      return true;
-    };
+    // Canonical reset-name test + active-low inference: str_tools shares it
+    // with the slang reset demotion so the token set cannot drift.
+    const auto reset_name_polarity
+        = [](std::string_view nm, bool& negreset) -> bool { return str_tools::reset_name_polarity(nm, negreset); };
 
     const bool phase_reset = opts.phase == "just_reset";
     const bool phase_run   = opts.phase == "after_reset";
@@ -3452,9 +4587,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
     }
     auto collect_state_keys = [&](hhds::Graph* g) {
-      std::set<std::string>   keys;
-      hhds::Hier_opaque_scope sc(collapse_gids_ptr);
-      for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
+      std::set<std::string> keys;
+      for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
         auto op = graph_util::type_op_of(node);
         if (op == Ntype_op::Flop || (use_plan && op == Ntype_op::Latch)) {
           keys.insert(eff(node.get_hier_name()));
@@ -3492,13 +4626,27 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // phase we instead start from a FRESH arbitrary equal state and let the
     // reset-hold prologue drive both designs into their reset state — so the
     // checked window genuinely exercises free-running behavior from reset.
-    Io_name_map<Val>                 ref_state, impl_state;
-    absl::flat_hash_set<std::string> bank_hold_keys;  // reset-less bank flops: hold across the reset prologue
+    Io_name_map<Val>                  ref_state, impl_state;
+    std::vector<Packed_scalar_bridge> bmc_packed_scalar;
+    absl::flat_hash_set<std::string>  bank_hold_keys;        // reset-less bank flops: hold across the reset prologue
+    absl::flat_hash_set<std::string>  ref_power_init_keys;   // ref keys with an explicit power-on value
+    size_t                            unpaired_state_n = 0;  // state cuts with no counterpart (disclosed in the verdict)
     {
       Io_name_map<int>  fw;
       Io_name_map<bool> fsgn;  // sign of the NARROWEST decl (the value semantics of the shared init)
       Io_name_map<Val>  init;
-      auto              collect_flops = [&](hhds::Graph* g) {
+      Io_name_map<Val>  power_init[2];
+      // Per-side key sets, for the bit-blast pairing below. `fw` is a UNION, so it
+      // cannot tell "this key exists on both sides" from "only one side has it".
+      Io_name_map<int>  fw_side[2];
+      // key -> the hierarchical name it came from (first wins), so the
+      // bus-bit bridge below can tell a cell model's state segment apart.
+      Io_name_map<std::string> fw_raw[2];
+      // Keys with a reset pin on either side: the reset-prologue power-on
+      // policy below.
+      absl::flat_hash_set<std::string> reset_state_keys;
+      int                              side_ix       = 0;
+      auto                             collect_flops = [&](hhds::Graph* g) {
         // NOT fast_hier, despite the opaque scope now being honored by both: `fw` is
         // an explicit min-compare (order-free), but `init` below is FIRST-wins, and
         // eff() = canon_flop_name + alias is NOT injective (see the "canonical name
@@ -3508,7 +4656,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         // power-on state of a soundness-critical miter -- do not trade it for memory
         // without first making the collision explicit (detect + drop, like the
         // uncertain-pair path does).
-        for (auto node : g->forward_hier()) {  // descend hierarchy: cut flops at every level
+        // Opaque at the collapse set: a collapsed leaf's state is the box's ONE
+        // cut, not a set of internal flop cuts (the encoder agrees -- encode.cpp
+        // passes the same opaque set explicitly).
+        for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {  // descend: cut flops at every level
           const auto nop = graph_util::type_op_of(node);
           // A LATCH is a state cut exactly like a flop under a phase schedule
           // (the encoder seeds and threads it the same way), so its power-on
@@ -3522,7 +4673,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
             continue;
           }
           auto key = eff(node.get_hier_name());  // hier correspondence key (matches encode())
-          int  w   = real_width(q);
+          int  w   = gu::real_width(q);
           if (w == 0) {
             w = 1;
           }
@@ -3535,6 +4686,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           // — see tests/equiv/flop_init_headroom). Widths written by the
           // transition still use each side's full local width, so a REAL
           // wide-vs-narrow divergence is still caught from the first write on.
+          if (auto sit = fw_side[side_ix].find(key); sit == fw_side[side_ix].end() || w < sit->second) {
+            fw_side[side_ix][key] = w;  // min-wins, exactly like `fw` below
+          }
+          fw_raw[side_ix].try_emplace(key, node.get_hier_name());
           if (auto it = fw.find(key); it == fw.end() || w < it->second) {
             fw[key]   = w;
             fsgn[key] = !graph_util::is_unsign(q);
@@ -3544,17 +4699,114 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
               init[key] = *iv;
             }
           }
+          // Without a reset pin, a constant initial value is a power-on
+          // guarantee (including storage lowered from initialized memories).
+          // Keep it per side: mapping may complement state or change its names.
+          // Its '?' bits become the gold_x=ignore don't-care plane, which is
+          // what LecState.PowerOnInitialIsPerDesignWithOrWithoutOtherReset
+          // pins -- note this is strictly WEAKER than the shared free symbol
+          // the run phase would otherwise give those bits.
+          //
+          // FIRST-wins, like the shared `init` map above and for the same
+          // reason: eff() is NOT injective, so plain assignment would make the
+          // pinned power-on state of a soundness-critical miter depend on the
+          // occurrence walk order.
+          const bool has_reset_pin = !gu::get_driver_of_sink_name(node, "reset_pin").is_invalid();
+          if (nop == Ntype_op::Flop && !has_reset_pin && !power_init[side_ix].count(key)) {
+            if (auto iv = flop_initial(tm, node, w, opts.gold_x != "zero")) {
+              power_init[side_ix][key] = *iv;
+            }
+          }
+          if (nop == Ntype_op::Flop && has_reset_pin) {
+            reset_state_keys.insert(key);
+          }
         }
       };
+      side_ix = 0;
+      collect_flops(ref);
+      side_ix = 1;
+      collect_flops(impl);
+      bmc_packed_scalar = infer_packed_scalar_bridges(fw_side[0], fw_side[1], impl_state_order, fw_raw[1]);
+
+      // ── bit-blasted state correspondence ──────────────────────────────────
+      // Synthesis can implement ONE N-bit register as N one-bit library DFF
+      // cells; pass/abc names each mapped instance after its source register bit,
+      // so the impl ends up with cuts `<reg>[0] .. <reg>[N-1]` of width 1 where
+      // the ref has a single `<reg>` of width N. The two key sets are then
+      // DISJOINT: nothing corresponds, every cone reading the register compares
+      // unrelated free symbols, and the def can only come back inconclusive.
+      // Pair them here — impl bit i shares bit i of the ref's one symbol — so the
+      // rest of the machinery (seeding, threading, the next-state compare below)
+      // sees an ordinary correspondence. Deliberately conservative: the ref key
+      // must be absent from the impl side, EVERY bit must be present at width 1,
+      // and no bit key may also exist on the ref (which would make the pairing
+      // ambiguous).
+      absl::flat_hash_map<std::string, std::vector<std::string>> bitblast;  // ref key -> impl bit keys, LSB first
+      absl::flat_hash_set<std::string>                           bitblast_bits;
       {
-        hhds::Hier_opaque_scope sc(collapse_gids_ptr);  // a collapsed leaf's state is the box's, not its flops'
-        collect_flops(ref);
-        collect_flops(impl);
+        const auto groups = bus_bit_groups(fw_side[1], fw_side[0], fw_raw[1]);
+        for (const auto& [key, w] : fw_side[0]) {
+          if (w < 1 || fw_side[1].count(key) != 0) {
+            continue;
+          }
+          // The implementation has one cell per literal state bit, named
+          // `<key>[i]` (core/bus_name.hpp). Same exact-width bound as the
+          // inductive twin.
+          auto grp = groups.find(key);
+          if (grp == groups.end() || static_cast<int>(grp->second.size()) != w) {
+            continue;
+          }
+          for (const auto& b : grp->second) {
+            bitblast_bits.insert(b);
+          }
+          bitblast.emplace(key, grp->second);
+        }
       }
+      // A mapped region's synthetic `sub_<partition-id>` boundary was already
+      // inlined by the hierarchy driver. Relate its per-bit cells immediately:
+      // unlike an arbitrary suffix guess, this prefix is generated by
+      // pass.partition and carries no hardware state or behavioral meaning.
+      for (const auto& bridge : bmc_packed_scalar) {
+        if (!bridge.structural_partition || bitblast.contains(bridge.wide_key)) {
+          continue;
+        }
+        for (const auto& bit : bridge.bit_keys) {
+          bitblast_bits.insert(bit);
+        }
+        bitblast.emplace(bridge.wide_key, bridge.bit_keys);
+      }
+      // A state key with NO counterpart on the other side (and not bridged
+      // above) gets an INDEPENDENT free `s0_` symbol per side, so the two
+      // designs start it at different values and the checked window can
+      // "find" a divergence the hardware cannot have. Splitting one N-bit
+      // register/latch into N one-bit cells is a legal, purely structural
+      // choice -- and cgen's `_cgenN` is a name-COLLISION uniquifier, not a
+      // bit-index contract, so the suffix bridge above cannot relate them.
+      // The reset prologue does not repair it either: a latch whose reset
+      // polarity the prologue never asserts simply HOLDS its arbitrary
+      // power-on value (inou/yosys/tests/latch_async.v, `qn` vs
+      // `qn_cgen1..3`, refuted at checked step 1 on state neither side ever
+      // wrote). Seed such state exactly as a reset-less design's power-on
+      // state is seeded -- tracked '?' (or a shared canonical zero under
+      // gold_x=zero) -- so an unmatched state shape can come back PROVEN or
+      // inconclusive, never falsely REFUTED. Strictly narrower than
+      // `init_no_reset`: keys that DO correspond keep their exact shared
+      // symbol and full proof strength.
+      absl::flat_hash_set<std::string> unpaired_state;
+      for (int side = 0; side < 2; ++side) {
+        for (const auto& kv : fw_side[side]) {
+          const auto& key = kv.first;
+          if (fw_side[1 - side].count(key) != 0 || bitblast.count(key) != 0 || bitblast_bits.count(key) != 0) {
+            continue;
+          }
+          unpaired_state.insert(key);
+        }
+      }
+      unpaired_state_n = unpaired_state.size();
       if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
         auto dump_keys = [&](hhds::Graph* g, const char* tag) {
           std::set<std::string> keys;
-          for (auto node : g->fast_hier()) {  // sorted std::set + debug-only: order-free
+          for (auto node : g->grouped_hierarchy().nodes()) {  // sorted std::set + debug-only: order-free
             if (graph_util::type_op_of(node) != Ntype_op::Flop) {
               continue;
             }
@@ -3562,9 +4814,15 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
             if (q.is_invalid()) {
               continue;
             }
-            int  w   = real_width(q);
-            bool rst = flop_initial(tm, node, w > 0 ? w : 1).has_value();
-            keys.insert(std::string(rst ? "[reset] " : "[UNRST] ") + eff(node.get_hier_name()) + "  <=  " + node.get_hier_name());
+            auto        init_d    = graph_util::get_driver_of_sink_name(node, "initial");
+            std::string init_text = init_d.is_invalid() ? "absent"
+                                    : init_d.is_const() ? graph_util::const_of(init_d).to_binary()
+                                                        : "nonconst";
+            keys.insert(std::format("[{} init={}] {}  <=  {}",
+                                    Ntype::get_name(graph_util::type_op_of(node)),
+                                    init_text,
+                                    eff(node.get_hier_name()),
+                                    node.get_hier_name()));
           }
           for (const auto& k : keys) {
             std::fprintf(stderr, "[LEC_FLOP %s] %s\n", tag, k.c_str());
@@ -3573,9 +4831,32 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         dump_keys(ref, "REF");
         dump_keys(impl, "IMPL");
       }
+      // A reset prologue starts BEFORE reset has reached the registers, and
+      // equal names do not justify equal power-on bits: mapping can invert a
+      // reset flop's state while preserving its name (a sync reset folded into
+      // a complemented next-state). Whatever samples that arbitrary pre-reset
+      // value during the prologue can retain it past reset: a synchronizer in
+      // another clock domain, but equally an UNRESET register of the same
+      // domain whose load enable reads a reset-bearing flop on the first reset
+      // cycle (bedrock br_flow_reg_fwd `pop_data`, BR_REGLN under
+      // `!pop_valid && push_valid`; inou/prp/tests/equiv/lec/reset_capture*.v).
+      // Sharing s0 there pairs the ref's state with the impl's COMPLEMENT and
+      // refutes on a value the hardware leaves undefined. So under a detected
+      // reset every reset-bearing key's power-on value is tracked unknown on
+      // the reference: the plane clears when the reset lands, and only what
+      // was captured from it pre-reset stays masked until its next known
+      // write. State no reset ever writes keeps the shared s0 relation: an
+      // uncorrelated per-bit unknown plane on it would never clear and would
+      // mask every output it reaches.
+      const bool reset_prologue = phase_run && !reset_negset.empty();
       for (const auto& [key, w] : fw) {
-        Val v;
-        if (init_no_reset && opts.gold_x == "zero") {
+        if (bitblast_bits.count(key) != 0) {
+          continue;  // seeded below as a bit-slice of its N-bit ref counterpart
+        }
+        Val        v;
+        const bool synth_init  = init_no_reset || unpaired_state.count(key) != 0;
+        const bool pre_reset_x = reset_prologue && reset_state_keys.contains(key);
+        if (synth_init && opts.gold_x == "zero") {
           v = Val{tm.mkBitVector(static_cast<uint32_t>(w), 0), w, fsgn.at(key)};
         } else if ((!phase_run || livehd::graph_util::is_single_edge_phase_key(key)) && init.count(key)) {
           v = init.at(key);
@@ -3583,7 +4864,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           v = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), "s0_" + key), w, fsgn.at(key)};
         }
         ref_state[key] = v;
-        if (init_no_reset && opts.gold_x != "zero") {
+        if ((synth_init || pre_reset_x) && opts.gold_x != "zero") {
+          // Explicit per-side initial values are restored below.
           // No-reset power-on is hardware '?': preserve an arbitrary value term
           // for dataflow, but mark every REF bit unknown so gold_x=ignore masks
           // only observations still depending on unwritten state. A real write
@@ -3591,6 +4873,58 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           ref_state[key].x_mask = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(w), 0)});
         }
         impl_state[key] = v;
+      }
+      // Explicit power-on values take precedence over speculative shared-state
+      // correspondence and over the unknown-state policy for uninitialized
+      // registers. They also apply during a reset prologue elsewhere in the
+      // design; unrelated reset logic cannot erase initialized memory contents.
+      //
+      // BEFORE the bit-blast slicing below, not after: those slices are derived
+      // from `ref_state[parent]` as it stands, so overriding the parent
+      // afterwards leaves the impl's one-bit cuts on the OLD (free) symbol
+      // while the ref starts at the constant -- a cycle-0 mismatch that refutes
+      // a correct pair.
+      for (const auto& [key, value] : power_init[0]) {
+        ref_state[key] = value;
+        ref_power_init_keys.insert(key);
+      }
+      for (const auto& [key, value] : power_init[1]) {
+        impl_state[key] = value;
+      }
+      // Bit slices of a bit-blasted register (see the pairing above): the impl's
+      // one-bit cut for bit i IS bit i of the ref's N-bit symbol, so the two
+      // designs start the register in one shared power-on state and every read
+      // of it lines up. Done after the main loop because the parent key must
+      // already be seeded (`fw` iteration order is unspecified).
+      for (const auto& [pkey, bits] : bitblast) {
+        auto pit = ref_state.find(pkey);
+        if (pit == ref_state.end()) {
+          continue;
+        }
+        // COPY: the loop below inserts into ref_state, which may rehash and
+        // invalidate `pit` — every later bit would then read a dangling Val.
+        const Val  parent  = pit->second;
+        const int  pw      = parent.width;
+        const auto sign_op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(pw - 1), static_cast<uint32_t>(pw - 1)});
+        for (size_t i = 0; i < bits.size(); ++i) {
+          Val bv{cvc5::Term{}, 1, false};
+          if (static_cast<int>(i) < pw) {
+            const auto b  = static_cast<uint32_t>(i);
+            auto       op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {b, b});
+            bv.term       = tm.mkTerm(op, {parent.term});
+            if (!parent.x_mask.isNull()) {
+              bv.x_mask = tm.mkTerm(op, {parent.x_mask});
+            }
+          } else {
+            // headroom bit: the ref value's sign/zero extension
+            bv.term = parent.is_signed ? tm.mkTerm(sign_op, {parent.term}) : tm.mkBitVector(1, 0);
+            if (!parent.x_mask.isNull()) {
+              bv.x_mask = parent.is_signed ? tm.mkTerm(sign_op, {parent.x_mask}) : tm.mkBitVector(1, 0);
+            }
+          }
+          ref_state[bits[i]]  = bv;
+          impl_state[bits[i]] = bv;
+        }
       }
       // Matched-reset shared init for each STATEFUL collapsed leaf: both designs
       // start the box's state cut at the SAME symbol (so the box doesn't lose the
@@ -3647,7 +4981,18 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
               }
             }
           }
-          if (n > 1) {
+          // A bit-blasted register's cuts look exactly like a bank (`<reg>[0]..`,
+          // no constant init once abc folds the reset into D) but they are NOT
+          // one. The ordinary bitblast bridge excludes same-base splits above.
+          // A differently named split (e.g. Pyrope `stage0` against mapped
+          // Verilog `stages___q_8..15`) cannot be recognized from the suffix
+          // alone. Never apply the bank approximation to a ONE-SIDED key: that
+          // holds only one implementation through the reset prologue, defeats
+          // its real reset-data cone, and manufactures a reachable CEX. A true
+          // same-named bank is present on both sides and starts from the shared
+          // symbol, so holding it remains symmetric and sound.
+          const bool on_both_sides = fw_side[0].contains(key) && fw_side[1].contains(key);
+          if (n > 1 && bitblast_bits.count(key) == 0 && on_both_sides) {
             bank_hold_keys.insert(key);
           }
         }
@@ -3671,6 +5016,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // collapse to the same initial contents); threaded forward like flop state.
     Io_name_map<cvc5::Term> ref_mem  = build_shared_mems("m0_");
     Io_name_map<cvc5::Term> impl_mem = ref_mem;
+    Io_name_map<cvc5::Term> ref_mem_x;
 
     // ── Memory <-> single-wide-flop init bridge ───────────────────────────────
     // A behavioral memory (one SMT array) on one design can appear on the OTHER
@@ -3688,12 +5034,16 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // of the flop's free init symbol (never a constant), so equal designs prove
     // and a divergent written value still refutes on the write path.
     {
-      // Per-design memory cut keys (shape-only occ, matching build_shared_mems).
+      // Per-design memory cut keys (shape-only occ, matching build_shared_mems)
+      // plus the canonical hier name the storage-flop bank bridge below keys on.
+      struct Mem_cut {
+        Mem_sig     sig;
+        std::string name;
+      };
       auto collect_mem_keys = [&](hhds::Graph* g) {
-        Io_name_map<Mem_sig>    out;
-        Io_name_map<int>        occ;
-        hhds::Hier_opaque_scope sc(collapse_gids_ptr);
-        for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
+        Io_name_map<Mem_cut> out;
+        Io_name_map<int>     occ;
+        for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
           if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
             continue;
           }
@@ -3703,17 +5053,17 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           }
           std::string sg  = std::to_string(sig.size) + "x" + std::to_string(sig.bits);
           std::string key = mem_state_key(sig, occ[sg]++);
-          out.emplace(key, sig);  // first occurrence wins (matches build_shared_mems)
+          out.emplace(key, Mem_cut{sig, eff(node.get_hier_name())});  // first occurrence wins (matches build_shared_mems)
         }
         return out;
       };
       // Per-design flop cut key -> width (hier-canon key, matching ref_state above).
       auto collect_flop_w = [&](hhds::Graph* g) {
-        Io_name_map<int>        out;
-        hhds::Hier_opaque_scope sc(collapse_gids_ptr);
-        // fast_hier: a max-per-key map build; order-free. fast_hier honors the
-        // ambient opaque scope just installed above.
-        for (auto node : g->fast_hier()) {
+        Io_name_map<int> out;
+        // grouped_hierarchy: a max-per-key map build; order-free. Opaque at the
+        // collapse set so a collapsed leaf contributes its ONE box cut and not
+        // its internal flops -- try_bridge's uniqueness test below counts these.
+        for (auto node : g->grouped_hierarchy(collapse_gids_ptr).nodes()) {
           if (graph_util::type_op_of(node) != Ntype_op::Flop) {
             continue;
           }
@@ -3721,7 +5071,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           if (q.is_invalid()) {
             continue;
           }
-          int w = real_width(q);
+          int w = gu::real_width(q);
           if (w == 0) {
             w = 1;
           }
@@ -3741,11 +5091,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // other (require uniqueness so an arbitrary width collision does not mis-pair
       // — sound either way, but a mis-pair would leave the block REFUTED, no worse
       // than today's independent-init behavior).
-      auto try_bridge = [&](const Io_name_map<Mem_sig>& mem_side,
-                            const Io_name_map<Mem_sig>& other_mem_side,
+      auto try_bridge = [&](const Io_name_map<Mem_cut>& mem_side,
+                            const Io_name_map<Mem_cut>& other_mem_side,
                             const Io_name_map<int>&     mem_side_flops,
                             const Io_name_map<int>&     other_side_flops) {
-        for (const auto& [mkey, sig] : mem_side) {
+        for (const auto& [mkey, mc] : mem_side) {
+          const Mem_sig& sig = mc.sig;
           if (other_mem_side.count(mkey)) {
             continue;  // memory corresponds to a memory -> already shared, no bridge
           }
@@ -3785,6 +5136,89 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       };
       try_bridge(ref_mem_keys, impl_mem_keys, ref_flop_w, impl_flop_w);  // ref memory <-> impl wide flop
       try_bridge(impl_mem_keys, ref_mem_keys, impl_flop_w, ref_flop_w);  // impl memory <-> ref wide flop
+
+      // ── Memory <-> storage-flop bank init bridge ────────────────────────
+      // The pass.abc memory=true shape (find_mem_entry_bank): the other design
+      // holds the Memory `<mem>` as per-entry flops `<mem>._mem[i]` or their
+      // one-bit DFF cells `<mem>._mem[i][b]`. Same construction as the wide-flop
+      // bridge above -- entry i of the shared initial array := that entry's
+      // power-on symbol (the bit cells concatenated MSB first), so the array is
+      // a deterministic FUNCTION of the bank's free init, never a constant:
+      // equal designs prove and a divergent written value still refutes on the
+      // write path. SOUND only as a total tie, which the finder guarantees.
+      // Measured on the lhdtrack lec_netlist flow with memory=true
+      // (register_max_bits=0, ASAP7): br_ram_flops_tile refuted both cvc5
+      // obligations at checked step 1 (rd_data ref=0xFFFFFFFF impl=0xFFFFFFFE
+      // on a read of never-written entry 0 right after reset) and proves with
+      // this tie. The inductive engine has its own twin below (the flop-cut
+      // miter needs the next-state side as well).
+      auto try_bank_bridge = [&](const Io_name_map<Mem_cut>& mem_side,
+                                 const Io_name_map<Mem_cut>& other_mem_side,
+                                 const Io_name_map<int>&     mem_side_flops,
+                                 const Io_name_map<int>&     bank_side_flops) {
+        const Mem_bank_index                  bank_index(bank_side_flops, mem_side_flops);
+        // A name shared by two memories on the memory side cannot direct a tie.
+        absl::flat_hash_map<std::string, int> name_count;
+        for (const auto& [mkey, mc] : mem_side) {
+          ++name_count[memory_correspondence_name(mc.name)];
+        }
+        for (const auto& [mkey, mc] : mem_side) {
+          if (other_mem_side.count(mkey) || mc.name.empty() || name_count[memory_correspondence_name(mc.name)] != 1) {
+            continue;
+          }
+          auto sit = ref_mem.find(mkey);
+          if (sit == ref_mem.end()) {
+            continue;  // no shared array was built for this key
+          }
+          auto bank = find_mem_entry_bank(mc.name, mc.sig, bank_index);
+          if (!bank) {
+            continue;
+          }
+          cvc5::Term arr = sit->second;  // base = shared free array; every entry overwritten below
+          bool       ok  = true;
+          for (int i = 0; i < mc.sig.size && ok; ++i) {
+            const auto ix = static_cast<size_t>(i);
+            cvc5::Term entry;
+            if (!bank->entry_keys[ix].empty()) {
+              auto fv = ref_state.find(bank->entry_keys[ix]);
+              if (fv == ref_state.end() || fv->second.width != mc.sig.bits) {
+                ok = false;
+                break;
+              }
+              entry = fv->second.term;
+            } else {
+              for (int b = mc.sig.bits - 1; b >= 0; --b) {  // MSB first, as CONCAT expects
+                auto fv = ref_state.find(bank->bit_keys[ix][static_cast<size_t>(b)]);
+                if (fv == ref_state.end() || fv->second.width != 1) {
+                  ok = false;
+                  break;
+                }
+                entry = entry.isNull() ? fv->second.term : tm.mkTerm(cvc5::Kind::BITVECTOR_CONCAT, {entry, fv->second.term});
+              }
+            }
+            if (!ok) {
+              break;
+            }
+            arr = tm.mkTerm(cvc5::Kind::STORE,
+                            {arr, tm.mkBitVector(static_cast<uint32_t>(mc.sig.addr_w), static_cast<uint64_t>(i)), entry});
+          }
+          if (!ok) {
+            continue;
+          }
+          ref_mem[mkey]  = arr;
+          impl_mem[mkey] = arr;
+          if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
+            std::fprintf(stderr,
+                         "[LEC_MEMBANK bmc] memory '%s' (%dx%d) initial array tied to its storage-flop bank (%s)\n",
+                         mc.name.c_str(),
+                         mc.sig.size,
+                         mc.sig.bits,
+                         bank->entry_keys[0].empty() ? "one-bit cells" : "whole entries");
+          }
+        }
+      };
+      try_bank_bridge(ref_mem_keys, impl_mem_keys, ref_flop_w, impl_flop_w);  // ref memory <-> impl bank
+      try_bank_bridge(impl_mem_keys, ref_mem_keys, impl_flop_w, ref_flop_w);  // impl memory <-> ref bank
     }
 
     // A persistent WRITABLE memory may still have comptime power-on contents.
@@ -3797,8 +5231,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     auto collect_memory_inits = [&](hhds::Graph* g) {
       Io_name_map<std::string> out;
       Io_name_map<int>         occ;
-      hhds::Hier_opaque_scope  sc(collapse_gids_ptr);
-      for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
+      for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
         if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
           continue;
         }
@@ -3808,13 +5241,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
         std::string sg   = std::to_string(sig.size) + "x" + std::to_string(sig.bits);
         std::string key  = mem_state_key(sig, occ[sg]++);
-        auto        init = graph_util::get_driver_of_sink_name(node, "init");
-        if (init.is_invalid() || !graph_util::is_const_pin(init)) {
+        auto        init = graph_util::get_driver_of_sink_name(node, "initial");
+        if (init.is_invalid() || !init.is_const()) {
           continue;
         }
 
         const int   width = sig.size * sig.bits;
-        std::string bin   = graph_util::hydrate_const(init).to_binary();
+        std::string bin   = graph_util::const_of(init).to_binary();
         for (auto& ch : bin) {
           if (ch != '0' && ch != '1') {
             ch = '0';
@@ -3841,10 +5274,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       return arr;
     };
     auto collect_memory_sigs = [&](hhds::Graph* g) {
-      Io_name_map<Mem_sig>    out;
-      Io_name_map<int>        occ;
-      hhds::Hier_opaque_scope sc(collapse_gids_ptr);
-      for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
+      Io_name_map<Mem_sig> out;
+      Io_name_map<int>     occ;
+      for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
         if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
           continue;
         }
@@ -3859,10 +5291,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       return out;
     };
     auto collect_memory_types = [&](hhds::Graph* g) {
-      Io_name_map<int>        out;
-      Io_name_map<int>        occ;
-      hhds::Hier_opaque_scope sc(collapse_gids_ptr);
-      for (auto node : g->forward_hier(true, false, collapse_gids_ptr)) {
+      Io_name_map<int> out;
+      Io_name_map<int> occ;
+      for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
         if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
           continue;
         }
@@ -3874,8 +5305,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         std::string key  = mem_state_key(sig, occ[sg]++);
         int         type = -1;
         auto        tpin = graph_util::get_driver_of_sink_name(node, "type");
-        if (!tpin.is_invalid() && graph_util::is_const_pin(tpin)) {
-          type = static_cast<int>(graph_util::hydrate_const(tpin).to_just_i64());
+        if (tpin.is_const()) {
+          type = static_cast<int>(graph_util::const_of(tpin).to_just_i64());
         }
         out.emplace(key, type);
       }
@@ -3984,6 +5415,84 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // Unknown below whenever these are non-empty (the inductive engine's rule).
     std::set<std::string>    bmc_unmatched_ref, bmc_unmatched_impl;  // ordered: deterministic detail text
 
+    // Reset-written state without a reset pin. A synchronous reset is usually
+    // folded into the next-state logic (`busy <= !rst & start`), so the
+    // reset_pin census above (reset_state_keys) misses exactly the flops a
+    // netlist is most likely to store complemented. Encode the reference's
+    // FIRST prologue cycle once more, off the miter, with every reset input
+    // bound to its asserted CONSTANT level: a key whose next-state rewrites to
+    // a constant is overwritten by that first reset cycle whatever its power-on
+    // value was. Its pre-reset value gets the same tracked-unknown reference
+    // plane as a reset-pin key (see pre_reset_x above): anything captured from
+    // it on that first cycle is hardware-undefined. Detection is a pure rewrite
+    // (no solver query, nothing asserted), and a constant next-state IS a total
+    // write, so a miss only keeps the shared s0 relation.
+    if (phase_run && !reset_negset.empty() && P == 1 && opts.gold_x != "zero") {
+      Io_name_map<Val> dry;
+      for (const auto& [name, info] : ins) {
+        if (bundle_in_leaves.count(name) > 0) {
+          continue;
+        }
+        cvc5::Term t;
+        if (auto rit = reset_negset.find(name); rit != reset_negset.end()) {
+          t = rit->second ? tm.mkBitVector(static_cast<uint32_t>(info.w), 0) : top_in_ones(tm, info);
+        } else {
+          t = mint_top_in(tm, info, "rdry_" + std::string(name));
+        }
+        dry[name] = Val{t, info.w, info.sgn};
+      }
+      for (const auto* b : in_bundles) {
+        cvc5::Term flat;
+        if (auto bit = dry.find(b->base); bit != dry.end() && bit->second.width == b->width) {
+          flat = bit->second.term;
+        } else {
+          flat         = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(b->width)), "rdry_" + b->base);
+          dry[b->base] = Val{flat, b->width, b->flat_signed};
+        }
+        for (auto& [ln, lv] : bundle_leaf_vals(*b, flat)) {
+          dry[ln] = lv;
+        }
+      }
+      for (const auto& [k, v] : ref_state) {
+        dry[k] = Val{v.term, v.width, v.is_signed};  // value only: the probe asks what reset writes
+      }
+      Io_name_map<Val> dry_bbox;
+      for (const auto& [bk, bv] : shared_bbox) {
+        dry_bbox[bk] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(bv.width)), "rdry_bb:" + bk), bv.width, bv.is_signed};
+      }
+      enc.set_shared_bbox(&dry_bbox);
+      enc.set_emit_props(false);
+      enc.set_x_dontcare(false);
+      enc.set_box_keys(&ref_box_keys);
+      const bool dry_use_plan = use_plan && (use_phase || ref_plan.needs_plan());
+      enc.set_phase_plan(dry_use_plan ? &ref_plan : nullptr, steps[0]);
+      enc.set_memory_x_state(nullptr);
+      Encoded dre = enc.encode(ref, &dry, "rdry_", &ref_mem, &ref_reads);
+      enc.set_shared_bbox(&shared_bbox);
+      if (dre.ok) {
+        for (const auto& [name, nv] : dre.outputs) {
+          if (name.rfind("\x01nxt:", 0) != 0) {
+            continue;
+          }
+          const std::string key = name.substr(5);
+          if (key.empty() || key[0] == '\x01' || ref_power_init_keys.contains(key)) {
+            continue;  // box state cut, or an explicit power-on value (already known)
+          }
+          auto it = ref_state.find(key);
+          if (it == ref_state.end() || !it->second.x_mask.isNull()) {
+            continue;
+          }
+          if (!solver.simplify(nv.term).isBitVectorValue()) {
+            continue;
+          }
+          it->second.x_mask = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(it->second.width), 0)});
+          if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
+            std::fprintf(stderr, "[LEC_RESET_WRITTEN] %s: pre-reset value tracked unknown on the reference\n", key.c_str());
+          }
+        }
+      }
+    }
+
     // Input snapshot for the current HALF period, shared between REF and IMPL.
     // Hoisted out of the loop because a latch-close microstep and the edge batch
     // it precedes share ONE snapshot (rise and fall get independent ones, which
@@ -4053,7 +5562,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           if (bundle_in_leaves.count(name) > 0) {
             continue;  // bound to extracts of its flat base's symbol below, never an independent free
           }
-          cvc5::Term t = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(info.w)), in_tag + name);
+          cvc5::Term t = mint_top_in(tm, info, in_tag + std::string(name));
           // Phase control: pin a primary reset input to its asserted level during
           // the reset phase / run-prologue, and to its deasserted level in the
           // run-checked window. (active-low reset -> asserted=0, deasserted=all-1.)
@@ -4062,8 +5571,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
             const bool negreset     = rit->second;
             // asserted level: 0 if active-low else all-ones; deasserted is the dual.
             const bool drive_zero   = assert_reset ? negreset : !negreset;
-            cvc5::Term lvl = drive_zero ? tm.mkBitVector(static_cast<uint32_t>(info.w), 0)
-                                        : tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(info.w), 0)});
+            // all-ones at the port's REAL width, not at the carrier's. When the
+            // two sides differ by a sign slot the carrier is a zero-extended
+            // narrow core, so all-ones-of-the-carrier is a value the symbol can
+            // never take -- and pinning a reset to an impossible level makes the
+            // whole solve vacuously unsat, which reads out as a silent PROVEN.
+            // (It was already wrong without the sign slot: a 1-bit reset facing a
+            // 2-bit declaration got pinned to 2'b11 rather than 1.)
+            cvc5::Term lvl          = drive_zero ? tm.mkBitVector(static_cast<uint32_t>(info.w), 0) : top_in_ones(tm, info);
             solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {t, lvl}));
           }
           snap_ins[name] = Val{t, info.w, info.sgn};
@@ -4122,12 +5637,25 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                             bv.is_signed};
       }
       enc.set_shared_bbox(&step_bbox);
-      enc.set_emit_props(false);                  // helper encoding below enables it temporarily
+      enc.set_emit_props(opts.design_assumes);    // helpers temporarily enable it too
       enc.set_x_dontcare(opts.gold_x != "zero");  // ref X = don't-care (formal.lec.gold_x)
       enc.set_box_keys(&ref_box_keys);            // per-design box correspondence
-      enc.set_phase_plan(use_plan ? &ref_plan : nullptr, ms);
+      // At P == 1 the plan only canonicalizes this design's own gate chain.
+      // Do not install the other side's need as an empty plan here: an empty
+      // plan would take ownership of ordinary inline-gated flops and suppress
+      // their legacy clock folding, making them commit unconditionally.  A
+      // true multi-phase run still installs both plans because both designs
+      // must advance on the shared microstep time base.
+      // `use_plan` carries the `formal.phase_sched` gate AND the plan-refusal
+      // hard-fail above: without it `phase_sched=false` would still hand the
+      // encoder a plan (a REFUSED one, even) while collect_flops/add_flops kept
+      // skipping Latch, so the two sides would mint independent latch symbols.
+      const bool ref_use_plan = use_plan && (use_phase || ref_plan.needs_plan());
+      enc.set_phase_plan(ref_use_plan ? &ref_plan : nullptr, ms);
+      enc.set_memory_x_state(&ref_mem_x);
       Encoded re = enc.encode(ref, &sh_ref, "r" + std::to_string(step) + "_", &ref_mem, &ref_reads);
       enc.set_x_dontcare(false);
+      enc.set_memory_x_state(nullptr);
       if (!re.ok) {
         res.verdict      = Verdict::Unknown;
         res.unsupported  = re.unsupported;
@@ -4135,7 +5663,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         return res;
       }
       enc.set_box_keys(&impl_box_keys);
-      enc.set_phase_plan(use_plan ? &impl_plan : nullptr, ms);
+      const bool impl_use_plan = use_plan && (use_phase || impl_plan.needs_plan());
+      enc.set_phase_plan(impl_use_plan ? &impl_plan : nullptr, ms);
       Encoded ie = enc.encode(impl, &sh_impl, "i" + std::to_string(step) + "_", &impl_mem, &impl_reads);
       if (!ie.ok) {
         res.verdict      = Verdict::Unknown;
@@ -4155,6 +5684,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
       for (const auto& [l, r] : ie.equalities) {
         solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
+      }
+      if (opts.design_assumes) {
+        assert_design_assumptions(tm, solver, re);
+        assert_design_assumptions(tm, solver, ie);
       }
       if (opts.assumptions != nullptr) {
         std::string helper_error;
@@ -4180,8 +5713,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       auto              obligation_only = [&](const std::string& nm) { return !observe && !(nm.rfind("\x02", 0) == 0); };
       if (checking) {
         for (const auto& [name, rv] : re.outputs) {
-          if (!name.empty() && (name[0] == '\x01' || name[0] == '\x03')) {
-            continue;  // next-state / env-gated debug tap, not a primary output
+          if (!name.empty() && (name[0] == '\x01' || name[0] == '\x03' || name[0] == '\x04')) {
+            continue;  // next-state / env-gated debug tap / property, not a primary output
           }
           if (obligation_only(name)) {
             continue;
@@ -4217,7 +5750,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           }
         }
         for (const auto& [name, iv] : ie.outputs) {
-          if (!name.empty() && (name[0] == '\x01' || name[0] == '\x03')) {
+          if (!name.empty() && (name[0] == '\x01' || name[0] == '\x03' || name[0] == '\x04')) {
             continue;
           }
           if (obligation_only(name)) {
@@ -4321,6 +5854,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       ref_state  = std::move(rn);
       impl_state = std::move(in);
       ref_mem    = std::move(re.next_mem);
+      ref_mem_x  = std::move(re.next_mem_x);
       impl_mem   = std::move(ie.next_mem);
       ref_reads  = std::move(re.next_read);
       impl_reads = std::move(ie.next_read);
@@ -4345,18 +5879,71 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                  + (init_no_reset ? (opts.gold_x == "zero" ? "; synthetic zero initialization (no reset)"
                                                            : "; synthetic ? initialization (no reset)")
                                   : "")
+                 + (!init_no_reset && unpaired_state_n > 0
+                        ? "; " + std::to_string(unpaired_state_n) + " unmatched state cut(s) synthetically initialized"
+                        : "")
                  + (reset_negset.empty() && opts.phase != "free_toreset" ? "; WARNING no primary reset input found" : "") + ")"
                  + bundle_note;
+    disclose_reconciled();  // this arm ASSIGNS res.detail, so re-append the note
     // Bound bookkeeping for the auto bounded-Proven policy: N checked cycles and
     // the count of (output,cycle) comparisons actually run (0 => vacuous, no PASS).
     res.checked_steps = N;
     res.output_checks = static_cast<int>(decomp_diffs.size());
+    res.reset_hold    = reset_hold;
     // Incomplete correspondence gates BOTH verdict directions (see the set's
     // declaration): no Proven with unchecked obligations, no Refuted through an
     // unjustified shared-box assumption — only Unknown, with the sets surfaced.
     res.unmatched_ref.assign(bmc_unmatched_ref.begin(), bmc_unmatched_ref.end());
     res.unmatched_impl.assign(bmc_unmatched_impl.begin(), bmc_unmatched_impl.end());
-    const bool incomplete = !res.unmatched_ref.empty() || !res.unmatched_impl.empty();
+    const bool incomplete               = !res.unmatched_ref.empty() || !res.unmatched_impl.empty();
+    const bool dead_state_only          = internal_state_only(res.unmatched_ref, res.unmatched_impl);
+    const bool blocking_incomplete      = incomplete && !dead_state_only;
+    auto       prove_packed_scalar_base = [&]() {
+      if (bmc_packed_scalar.empty()) {
+        return;
+      }
+      cvc5::Term relation_bad;
+      for (const auto& bridge : bmc_packed_scalar) {
+        if (bridge.structural_partition) {
+          continue;
+        }
+        auto wide = ref_state.find(bridge.wide_key);
+        if (wide == ref_state.end() || wide->second.width != bridge.total_width()) {
+          res.detail += "; packed/scalar base unavailable (wide state missing)";
+          return;
+        }
+        std::vector<cvc5::Term> bits;
+        bits.reserve(bridge.bit_keys.size());
+        for (size_t i = bridge.bit_keys.size(); i-- > 0;) {
+          auto bit = impl_state.find(bridge.bit_keys[i]);
+          if (bit == impl_state.end() || bit->second.width != bridge.width_at(i)) {
+            res.detail += "; packed/scalar base unavailable (replica state missing)";
+            return;
+          }
+          bits.push_back(bit->second.term);
+        }
+        cvc5::Term packed = bits.front();
+        for (size_t i = 1; i < bits.size(); ++i) {
+          packed = tm.mkTerm(cvc5::Kind::BITVECTOR_CONCAT, {packed, bits[i]});
+        }
+        cvc5::Term diff = tm.mkTerm(cvc5::Kind::DISTINCT, {wide->second.term, packed});
+        relation_bad    = relation_bad.isNull() ? diff : tm.mkTerm(cvc5::Kind::OR, {relation_bad, diff});
+      }
+      if (relation_bad.isNull()) {
+        return;  // every bridge was a structural (representation-only) one: nothing speculative to justify
+      }
+      solver.push();
+      solver.assertFormula(relation_bad);
+      const auto br = solve_check();
+      solver.pop();
+      if (br.isUnsat()) {
+        res.packed_scalar_base_proven  = true;
+        res.detail                    += "; packed/scalar relation reached from reset";
+      } else {
+        res.detail += br.isSat() ? "; packed/scalar relation not reached at the checked base"
+                                 : "; packed/scalar base check returned unknown";
+      }
+    };
     if (!res.unmatched_ref.empty()) {
       res.detail
           += "; " + std::to_string(res.unmatched_ref.size()) + " ref-only cut point(s) {" + join_capped(res.unmatched_ref) + "}";
@@ -4366,13 +5953,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           += "; " + std::to_string(res.unmatched_impl.size()) + " impl-only cut point(s) {" + join_capped(res.unmatched_impl) + "}";
       res.detail += bbin_models_hint(res.unmatched_impl);
     }
-    if (opts.assumptions != nullptr) {
-      arm_solve_budget();
-      cvc5::Result ar = solver.checkSat();
+    if (opts.assumptions != nullptr || opts.design_assumes) {
+      cvc5::Result ar = solve_check();
       if (!ar.isSat()) {
         res.verdict  = Verdict::Unknown;
-        res.detail  += ar.isUnsat() ? "; formal helper set is CONTRADICTORY (vacuous proof rejected)"
-                                    : "; formal helper consistency check returned unknown";
+        res.detail  += ar.isUnsat() ? "; active assumption set is CONTRADICTORY (vacuous proof rejected)"
+                                    : "; active assumption consistency check returned unknown";
         return res;
       }
     }
@@ -4398,8 +5984,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       for (const auto& [dn, dt] : decomp_diffs) {
         solver.push();
         solver.assertFormula(dt);
-        arm_solve_budget();
-        cvc5::Result dr = solver.checkSat();
+        cvc5::Result dr = solve_check();
         solver.pop();
         if (!dr.isUnsat()) {
           all_unsat = false;  // SAT or unknown -> let the monolithic solve decide + build the witness
@@ -4407,11 +5992,17 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
       }
       if (all_unsat) {
-        if (incomplete) {
+        if (blocking_incomplete) {
           res.verdict  = Verdict::Unknown;
           res.detail  += "; matched portion EQUIVALENT (only the unmatched cut points above remain)";
         } else {
           res.verdict = Verdict::Proven;
+          if (dead_state_only) {
+            res.detail += "; one-sided internal state is unobservable from every common obligation";
+          }
+        }
+        if (res.verdict == Verdict::Proven) {
+          prove_packed_scalar_base();
         }
         return res;
       }
@@ -4424,15 +6015,20 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
       // auto: fall through to the monolithic solve for a definitive verdict + witness.
     }
+    solver.push();
     solver.assertFormula(bad);
-    arm_solve_budget();
-    cvc5::Result r = solver.checkSat();
+    cvc5::Result r = solve_check();
     if (r.isUnsat()) {
-      if (incomplete) {
+      solver.pop();
+      if (blocking_incomplete) {
         res.verdict  = Verdict::Unknown;
         res.detail  += "; matched portion EQUIVALENT (only the unmatched cut points above remain)";
       } else {
         res.verdict = Verdict::Proven;
+        if (dead_state_only) {
+          res.detail += "; one-sided internal state is unobservable from every common obligation";
+        }
+        prove_packed_scalar_base();
       }
     } else if (r.isSat()) {
       // A concrete reachable divergence is a genuine refutation only when the
@@ -4666,11 +6262,16 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // would constrain it (false PROVE), truncating it in the encoder drops it
   // (false REFUTE, e.g. an input 0x80 -> 0).
   Io_name_map<Val> shared;
+  // Per-side key/width sets, for the bit-blast pairing after add_flops runs:
+  // `shared` alone cannot tell "both sides have this key" from "only one does".
+  Io_name_map<int> ind_side[2];
+  Io_name_map<std::string> ind_raw[2];  // key -> hierarchical name (see fw_raw)
+  int              ind_side_ix = 0;
   // Input bundles FIRST: one flat symbol per base; the leaves are bound to its
   // extracts, so both sides range over the SAME input space (no extra freedom,
   // no lost bits). add_inputs below keeps any name already present at an
   // equal-or-wider width, so these entries survive the union build (detection
-  // and add_inputs read widths through the same real_width_io).
+  // and add_inputs read widths through the same graph utility).
   for (const auto* b : in_bundles) {
     cvc5::Term flat = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(b->width)), b->base);
     shared[b->base] = Val{flat, b->width, b->flat_signed};
@@ -4678,24 +6279,36 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       shared[ln] = lv;
     }
   }
-  auto add_inputs = [&](hhds::Graph* g) {
+  // SCAN both designs before minting anything. The old shape minted inside the
+  // per-design loop and `continue`d on the wider entry, which threw away the
+  // narrower side's declared SIGN -- the one fact the sign-slot reconciliation
+  // needs (see Top_in). Bundle bases pre-seeded above still win via the
+  // equal-or-wider guard at mint time.
+  Io_name_map<Top_in> top_ins;
+  auto                scan_inputs = [&](hhds::Graph* g) {
     auto gio = g->get_io();
     for (const auto& d : gio->get_input_pin_decls()) {
       auto pin = g->get_input_pin(d.name);
-      int  w   = real_width_io(pin, *gio, d.name);
+      int  w   = gu::real_width(pin, *gio, d.name);
       if (w == 0) {
         w = 1;
       }
-      if (auto it = shared.find(d.name); it != shared.end() && it->second.width >= w) {
-        continue;  // already have an equal-or-wider shared symbol
-      }
-      bool       sgn = pin.is_invalid() ? !gio->is_unsign(d.name) : !graph_util::is_unsign(pin);
-      cvc5::Term t   = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(w)), d.name);
-      shared[d.name] = Val{t, w, sgn};
+      const bool sgn = pin.is_invalid() ? !gio->is_unsign(d.name) : !graph_util::is_unsign(pin);
+      merge_top_in(top_ins[d.name], w, sgn);
     }
   };
-  add_inputs(ref);
-  add_inputs(impl);
+  scan_inputs(ref);
+  scan_inputs(impl);
+  for (const auto& [name, info] : top_ins) {
+    if (auto it = shared.find(name); it != shared.end() && it->second.width >= info.w) {
+      continue;  // already have an equal-or-wider shared symbol (bundle base)
+    }
+    if (info.reconciled()) {
+      reconciled_ports.insert(std::string(name));
+    }
+    shared[name] = Val{mint_top_in(tm, info, std::string(name)), info.w, info.sgn};
+  }
+  disclose_reconciled();
 
   Phase_plan ind_ref_plan, ind_impl_plan;
   bool       ind_use_plan = false;
@@ -4703,10 +6316,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     const auto* ind_forest = opts.clock_forest.empty() ? nullptr : &opts.clock_forest;
     ind_ref_plan           = plan_phases(ref, collapse_ptr, ind_forest);
     ind_impl_plan          = plan_phases(impl, collapse_ptr, ind_forest);
+    if (std::getenv("LEC_PHASE_LOG") != nullptr) {
+      std::fprintf(stderr, "[LEC_PHASE] ref plan:  %s\n", ind_ref_plan.describe().c_str());
+      std::fprintf(stderr, "[LEC_PHASE] impl plan: %s\n", ind_impl_plan.describe().c_str());
+    }
     // `multi` designs take the PHASE-COMPOSED inductive step further down (one
     // assumed-equal state, four chained microsteps); everything else uses the
     // plan only for its canonicalized gate chains at P == 1 (microstep < 0).
-    ind_use_plan           = ind_ref_plan.needs_plan() || ind_impl_plan.needs_plan();
+    ind_use_plan = ind_ref_plan.needs_plan() || ind_impl_plan.needs_plan();
     if (ind_use_plan && (!ind_ref_plan.ok || !ind_impl_plan.ok)) {
       res.verdict      = Verdict::Unknown;
       res.unsupported  = true;
@@ -4720,9 +6337,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // these, so the miter assumes equal current state and proves equal next state
   // + outputs (the M2 register-correspondence inductive step).
   auto add_flops = [&](hhds::Graph* g) {
-    // fast_hier: a key->width map build (min-width wins by explicit compare, not by
-    // visit order). Honors the ambient opaque scope its caller installs.
-    for (auto node : g->fast_hier()) {  // descend hierarchy: cut flops at every level
+    // grouped_hierarchy: a key->width map build (min-width wins by explicit
+    // compare, not by visit order). Opaque at the collapse set — a collapsed
+    // leaf's state is the box's one cut, not a set of internal flop cuts.
+    for (auto node : g->grouped_hierarchy(collapse_gids_ptr).nodes()) {  // descend: cut flops at every level
       const auto nop = graph_util::type_op_of(node);
       // Under a phase schedule a LATCH is a state cut exactly like a flop, so it
       // needs its shared current-state symbol here too. Without it each side
@@ -4736,7 +6354,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         continue;
       }
       std::string key = eff(node.get_hier_name());  // hier correspondence key (matches encode())
-      int         w   = real_width(q);
+      int         w   = gu::real_width(q);
       if (w == 0) {
         w = 1;
       }
@@ -4750,6 +6368,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // tests/equiv/flop_init_headroom). The step's next-state comparison
       // fits both sides to the max width, so the proven invariant is exactly
       // wide' == extend(narrow') — a REAL width divergence still refutes.
+      if (auto sit = ind_side[ind_side_ix].find(key); sit == ind_side[ind_side_ix].end() || w < sit->second) {
+        ind_side[ind_side_ix][key] = w;  // min-wins, exactly like `shared` below
+      }
+      ind_raw[ind_side_ix].try_emplace(key, node.get_hier_name());
       if (auto it = shared.find(key); it != shared.end() && it->second.width <= w) {
         continue;
       }
@@ -4758,13 +6380,100 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       shared[key]    = Val{t, w, sgn};
     }
   };
-  {
-    // Skip the flops INSIDE a collapsed leaf — its state is the box's one cut,
-    // not a set of internal flop cuts.
-    hhds::Hier_opaque_scope sc(collapse_gids_ptr);
-    add_flops(ref);
-    add_flops(impl);
+  ind_side_ix = 0;
+  add_flops(ref);
+  ind_side_ix = 1;
+  add_flops(impl);
+  const auto ind_packed_scalar = infer_packed_scalar_bridges(ind_side[0], ind_side[1], impl_state_order, ind_raw[1]);
+
+  // ── bit-blasted state correspondence (see the twin in the BMC seeding) ─────
+  // Synthesis can implement ONE N-bit register as N one-bit library DFF cells;
+  // pass/abc names each mapped instance after its source register bit, so the
+  // impl carries cuts `<reg>[0] .. <reg>[N-1]` of width 1 where the ref has a
+  // single `<reg>` of width N. Disjoint key sets mean NOTHING corresponds: each
+  // side mints its own free symbols and every cone reading the register diverges,
+  // which is exactly the "inconclusive in milliseconds" post-synthesis LEC. Bind
+  // the impl's bit i to bit i of the ref's one symbol.
+  absl::flat_hash_map<std::string, std::vector<std::string>> ind_bitblast;  // ref key -> impl bit keys, LSB first
+  const auto ind_bus_groups = bus_bit_groups(ind_side[1], ind_side[0], ind_raw[1]);
+  for (const auto& [key, w] : ind_side[0]) {
+    if (w < 1 || ind_side[1].count(key) != 0) {
+      continue;
+    }
+    // The complete `<key>[0..n-1]` group (core/bus_name.hpp), if any.
+    auto grp = ind_bus_groups.find(key);
+    if (grp == ind_bus_groups.end()) {
+      continue;
+    }
+    const auto& bits = grp->second;
+    auto        pit  = shared.find(key);
+    if (pit == shared.end()) {
+      continue;
+    }
+    // The bit-blasted implementation has one cell per literal state bit. A
+    // longer run is a different register that merely shares a prefix. Without
+    // the exact bound, a ref `flag` (w=1) beside
+    // unrelated impl flops `flag[0]`/`flag[1]` pairs, and `flag[1]` gets PINNED to a
+    // constant in the induction hypothesis — narrowing it over states the design
+    // really reaches, i.e. a false PROVEN.
+    const int m = static_cast<int>(bits.size());
+    if (m != w) {
+      continue;
+    }
+    const auto sign_op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(w - 1), static_cast<uint32_t>(w - 1)});
+    for (size_t i = 0; i < bits.size(); ++i) {
+      cvc5::Term t;
+      if (static_cast<int>(i) < w) {
+        const auto b = static_cast<uint32_t>(i);
+        t            = tm.mkTerm(tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {b, b}), {pit->second.term});
+      } else {
+        t = pit->second.is_signed ? tm.mkTerm(sign_op, {pit->second.term}) : tm.mkBitVector(1, 0);
+      }
+      shared[bits[i]] = Val{t, 1, false};
+    }
+    ind_bitblast.emplace(key, bits);
   }
+  int ind_packed_scalar_applied = 0;
+  for (const auto& bridge : ind_packed_scalar) {
+    if (ind_bitblast.contains(bridge.wide_key)) {
+      continue;
+    }
+    auto pit = shared.find(bridge.wide_key);
+    if (pit == shared.end() || pit->second.width != bridge.total_width()) {
+      continue;
+    }
+    bool available = true;
+    for (const auto& bit : bridge.bit_keys) {
+      if (ind_side[0].contains(bit)) {
+        available = false;
+        break;
+      }
+    }
+    if (!available) {
+      continue;
+    }
+    int offset = 0;
+    for (size_t i = 0; i < bridge.bit_keys.size(); ++i) {
+      const int  width = bridge.width_at(i);
+      cvc5::Term t     = tm.mkTerm(
+          tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(offset + width - 1), static_cast<uint32_t>(offset)}),
+          {pit->second.term});
+      shared[bridge.bit_keys[i]]  = Val{t, width, false};
+      offset                     += width;
+    }
+    ind_bitblast.emplace(bridge.wide_key, bridge.bit_keys);
+    if (!bridge.structural_partition) {
+      ++ind_packed_scalar_applied;
+    }
+  }
+  auto gate_packed_scalar_step = [&]() {
+    if (res.verdict != Verdict::Proven || ind_packed_scalar_applied == 0) {
+      return;
+    }
+    res.verdict                    = Verdict::Unknown;
+    res.packed_scalar_step_proven  = true;
+    res.detail                    += "; packed/scalar transition relation is inductive; awaiting a reset-reachable base proof";
+  };
   // One shared current-state symbol per STATEFUL collapsed leaf (the box's state
   // cut), corresponding on both designs: the inductive miter assumes it equal and
   // proves the box's next-state (UF) equal alongside the parent's.
@@ -4789,13 +6498,18 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // miter compares flop_i's next state against select(A_next, i). `bridges` is
   // resolved here (current-state wiring) and consumed after encode (next-state).
   struct Bridge {
-    std::string              mem_key;             // shared-array cut key
-    int                      addr_w      = 1;     // index width
-    int                      bits        = 0;     // array element width
-    bool                     mem_in_impl = true;  // which design owns the Memory
-    std::vector<std::string> flop_keys;           // canon flop key per index 0..N-1
-    std::vector<int>         flop_w;              // real width per index
-    std::vector<bool>        flop_sgn;
+    std::string                           mem_key;             // shared-array cut key
+    int                                   addr_w      = 1;     // index width
+    int                                   size        = 0;     // number of array entries
+    int                                   bits        = 0;     // array element width
+    bool                                  mem_in_impl = true;  // which design owns the Memory
+    std::string                           wide_flop_key;       // nonempty: one packed size*bits flop instead of a bank
+    std::vector<std::string>              flop_keys;           // canon flop key per index 0..N-1 ("" for a bit-blasted entry)
+    std::vector<int>                      flop_w;              // real width per index
+    std::vector<bool>                     flop_sgn;
+    // pass.abc memory=true bank (find_mem_entry_bank): per index, the one-bit
+    // DFF-cell keys LSB first when that entry is bit-blasted; empty otherwise.
+    std::vector<std::vector<std::string>> bit_keys;
   };
   std::vector<Bridge> bridges;
   {
@@ -4805,7 +6519,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     };
     auto collect_flops = [&](hhds::Graph* g) {
       Io_name_map<FlopRec> out;
-      for (auto node : g->forward_hier()) {
+      // Use the same visible state as collect_mems and the encoder. Descending
+      // into a proven box needlessly expands compact loops inside that box and
+      // exposes flops that cannot participate in this obligation's bridge.
+      for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
         if (graph_util::type_op_of(node) != Ntype_op::Flop) {
           continue;
         }
@@ -4813,7 +6530,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         if (q.is_invalid()) {
           continue;
         }
-        int w = real_width(q);
+        int w = gu::real_width(q);
         if (w == 0) {
           w = 1;
         }
@@ -4822,12 +6539,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       return out;
     };
     struct MemRec {
-      Mem_sig sig;
+      Mem_sig     sig;
+      std::string name;
     };
     auto collect_mems = [&](hhds::Graph* g) {
       Io_name_map<MemRec> out;
       Io_name_map<int>    occ;
-      for (auto node : g->forward_class()) {
+      for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
         if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
           continue;
         }
@@ -4840,7 +6558,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                                                                                       // build_shared_mems / collect_mem_keys
                                                                                       // sites — port counts must NOT key occ)
         std::string key = mem_state_key(sig, occ[sg]++);
-        out[key]        = MemRec{sig};
+        out[key]        = MemRec{sig, eff(node.get_hier_name())};
       }
       return out;
     };
@@ -4848,6 +6566,122 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     auto impl_flops = collect_flops(impl);
     auto ref_mems   = collect_mems(ref);
     auto impl_mems  = collect_mems(impl);
+
+    // A packed SystemVerilog array may be one size*bits flop while the Pyrope
+    // spelling is a Memory. Pair those by their exact canonical state name and
+    // exact packed width. Width alone is not enough: a block commonly contains
+    // several unrelated fields with the same aggregate width.
+    absl::flat_hash_set<std::string> used_ref_mem, used_impl_mem;
+    auto                             pair_wide_side = [&](const Io_name_map<FlopRec>& flop_side,
+                                                          const Io_name_map<FlopRec>& mem_side_flops,
+                                                          const Io_name_map<MemRec>&  flop_side_mems,
+                                                          const Io_name_map<MemRec>&  mem_side_mems,
+                                                          bool                        mem_in_impl) {
+      absl::flat_hash_map<std::string, int> flop_mem_name_count;
+      for (const auto& [key, rec] : flop_side_mems) {
+        if (!rec.name.empty()) {
+          ++flop_mem_name_count[rec.name];
+        }
+      }
+      absl::flat_hash_map<std::string, int> mem_name_count;
+      for (const auto& [key, rec] : mem_side_mems) {
+        if (!rec.name.empty()) {
+          ++mem_name_count[rec.name];
+        }
+      }
+      for (const auto& [mkey, mrec] : mem_side_mems) {
+        if (mrec.name.empty() || mem_name_count[mrec.name] != 1 || flop_mem_name_count[mrec.name] != 0
+            || mem_side_flops.count(mrec.name) != 0) {
+          continue;
+        }
+        auto fit = flop_side.find(mrec.name);
+        if (fit == flop_side.end() || fit->second.w != mrec.sig.size * mrec.sig.bits || !shared_mems.count(mkey)) {
+          continue;
+        }
+        Bridge br;
+        br.mem_key       = mkey;
+        br.addr_w        = mrec.sig.addr_w;
+        br.size          = mrec.sig.size;
+        br.bits          = mrec.sig.bits;
+        br.mem_in_impl   = mem_in_impl;
+        br.wide_flop_key = mrec.name;
+        bridges.push_back(std::move(br));
+        (mem_in_impl ? used_impl_mem : used_ref_mem).insert(mkey);
+      }
+    };
+    pair_wide_side(ref_flops, impl_flops, ref_mems, impl_mems, /*mem_in_impl=*/true);   // ref wide flop <-> impl memory
+    pair_wide_side(impl_flops, ref_flops, impl_mems, ref_mems, /*mem_in_impl=*/false);  // impl wide flop <-> ref memory
+
+    // The pass.abc memory=true storage bank (find_mem_entry_bank): the Memory
+    // `<mem>` on one side, per-entry flops `<mem>._mem[i]` or their one-bit DFF
+    // cells `<mem>._mem[i][b]` on the other. Name-directed, so it claims the
+    // memory BEFORE the suffix-shape detector below, whose `<base>_<idx>` split
+    // sees each bit-blasted entry as its own N-bit "bank" and would pair a
+    // 16x16 memory with the 16 cells of ONE entry (a wrong relation is only an
+    // unprovable step, never a false proof, but it is the shape that matters
+    // for every mapped netlist). Current state: flop_i / cell (i,b) := entry i
+    // of the shared array (its bit b); next state: the per-cell twin in the
+    // bridge miter below.
+    auto pair_entry_bank_side = [&](const Io_name_map<FlopRec>& bank_flops,
+                                    const Io_name_map<FlopRec>& mem_side_flops,
+                                    const Io_name_map<MemRec>&  bank_side_mems,
+                                    const Io_name_map<MemRec>&  mem_side_mems,
+                                    bool                        mem_in_impl) {
+      if (mem_side_mems.empty()) {
+        return;
+      }
+      Io_name_map<int> bank_w, mem_w;
+      for (const auto& [key, rec] : bank_flops) {
+        bank_w.emplace(key, rec.w);
+      }
+      for (const auto& [key, rec] : mem_side_flops) {
+        mem_w.emplace(key, rec.w);
+      }
+      const Mem_bank_index                  bank_index(bank_w, mem_w);
+      absl::flat_hash_map<std::string, int> name_count;
+      for (const auto& [mkey, mrec] : mem_side_mems) {
+        ++name_count[memory_correspondence_name(mrec.name)];
+      }
+      for (const auto& [mkey, mrec] : mem_side_mems) {
+        auto& used = mem_in_impl ? used_impl_mem : used_ref_mem;
+        if (used.count(mkey) || bank_side_mems.count(mkey) || !shared_mems.count(mkey) || mrec.name.empty()
+            || name_count[memory_correspondence_name(mrec.name)] != 1) {
+          continue;
+        }
+        auto bank = find_mem_entry_bank(mrec.name, mrec.sig, bank_index);
+        if (!bank) {
+          continue;
+        }
+        Bridge br;
+        br.mem_key     = mkey;
+        br.addr_w      = mrec.sig.addr_w;
+        br.size        = mrec.sig.size;
+        br.bits        = mrec.sig.bits;
+        br.mem_in_impl = mem_in_impl;
+        br.flop_keys   = bank->entry_keys;
+        br.bit_keys    = bank->bit_keys;
+        br.flop_w.assign(br.flop_keys.size(), mrec.sig.bits);
+        br.flop_sgn.assign(br.flop_keys.size(), false);
+        for (size_t i = 0; i < br.flop_keys.size(); ++i) {
+          if (auto fit = bank_flops.find(br.flop_keys[i]); fit != bank_flops.end()) {
+            br.flop_w[i]   = fit->second.w;
+            br.flop_sgn[i] = fit->second.sgn;
+          }
+        }
+        bridges.push_back(std::move(br));
+        used.insert(mkey);
+        if (std::getenv("LEC_DUMP_FLOPS") != nullptr) {
+          std::fprintf(stderr,
+                       "[LEC_MEMBANK ind] memory '%s' (%dx%d) paired with its storage-flop bank (%s)\n",
+                       mrec.name.c_str(),
+                       mrec.sig.size,
+                       mrec.sig.bits,
+                       bank->entry_keys[0].empty() ? "one-bit cells" : "whole entries");
+        }
+      }
+    };
+    pair_entry_bank_side(ref_flops, impl_flops, ref_mems, impl_mems, /*mem_in_impl=*/true);   // ref bank <-> impl memory
+    pair_entry_bank_side(impl_flops, ref_flops, impl_mems, ref_mems, /*mem_in_impl=*/false);  // impl bank <-> ref memory
 
     // Banks among the flops that have NO counterpart on the other side: group keys
     // by stripping a trailing "_<idx>"; a base with a contiguous 0..N-1 of uniform
@@ -4859,21 +6693,35 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         bool        sgn;
       };
       absl::flat_hash_map<std::string, absl::flat_hash_map<int, Elt>> by_base;
+      // A base whose (base, lane) slot was claimed by two DIFFERENT flops is
+      // not a bank at all: `q_1_x` and `q_x_1` both strip to base "q_x" lane 1,
+      // and letting the second overwrite the first conflates two unrelated
+      // flops into one lane. Drop such a base outright rather than guess.
+      absl::flat_hash_set<std::string>                                ambiguous_base;
       for (const auto& [key, rec] : flops) {
         if (other.count(key)) {
           continue;  // already matches a flop on the other side -> not a bridge bank
         }
-        auto us = key.rfind('_');
-        if (us == std::string::npos || us + 1 >= key.size()) {
-          continue;
+        // Generated array-of-struct flops place the lane before the field:
+        // bank_0_bits_value_REG. Keep the field in the bank name, so separate
+        // valid/data banks cannot be confused merely because their sizes match.
+        for (size_t us = key.find('_'); us != std::string::npos; us = key.find('_', us + 1)) {
+          const auto end    = key.find('_', us + 1);
+          const auto idx    = key.substr(us + 1, end == std::string::npos ? end : end - us - 1);
+          int        lane   = 0;
+          const auto parsed = std::from_chars(idx.data(), idx.data() + idx.size(), lane);
+          if (idx.empty() || parsed.ec != std::errc{} || parsed.ptr != idx.data() + idx.size() || lane < 0) {
+            continue;
+          }
+          const auto base = key.substr(0, us) + (end == std::string::npos ? "" : key.substr(end));
+          auto [it, ins]  = by_base[base].try_emplace(lane, Elt{key, rec.w, rec.sgn});
+          if (!ins && it->second.key != key) {
+            ambiguous_base.insert(base);
+          }
         }
-        std::string idx = key.substr(us + 1);
-        if (idx.empty() || !std::all_of(idx.begin(), idx.end(), [](unsigned char c) { return std::isdigit(c); })) {
-          continue;
-        }
-        by_base[key.substr(0, us)][std::stoi(idx)] = Elt{key, rec.w, rec.sgn};
       }
       struct Bank {
+        std::string              name;
         int                      n;
         int                      w;
         bool                     sgn;
@@ -4881,6 +6729,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       };
       std::vector<Bank> banks;
       for (auto& [base, elts] : by_base) {
+        if (ambiguous_base.count(base)) {
+          continue;
+        }
         int  n        = static_cast<int>(elts.size());
         bool complete = n > 1;
         int  w        = elts.begin()->second.w;
@@ -4895,7 +6746,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         if (!complete) {
           continue;
         }
-        Bank b{n, w, sgn, {}};
+        Bank b{base, n, w, sgn, {}};
         for (int i = 0; i < n; ++i) {
           b.keys.push_back(elts.at(i).key);
         }
@@ -4910,12 +6761,32 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                          const Io_name_map<MemRec>&  bank_mems,
                          const Io_name_map<MemRec>&  mem_mems,
                          bool                        mem_in_impl) {
+      // Since a key is registered under EVERY numeric segment it carries, two
+      // detected banks can share a flop (`bank_0_bits_1` is lane 0 of base
+      // "bank_bits_1" and lane 1 of base "bank_0_bits"). Bridging the same flop
+      // to two different arrays asserts contradictory state equalities, and an
+      // over-constrained miter is vacuously UNSAT -- a FALSE PROVEN. One bridge
+      // per flop.
+      absl::flat_hash_set<std::string> bridged_flops;
       for (auto& b : detect_banks(bank_flops, other_flops)) {
+        if (std::any_of(b.keys.begin(), b.keys.end(), [&](const auto& k) { return bridged_flops.count(k) != 0; })) {
+          continue;
+        }
         for (const auto& [mkey, mrec] : mem_mems) {
+          if ((mem_in_impl ? used_impl_mem : used_ref_mem).count(mkey)) {
+            continue;  // exact-name packed-flop bridge above owns this memory
+          }
           if (bank_mems.count(mkey)) {
             continue;  // memory matches a memory on the bank side -> not a bridge
           }
-          if (mrec.sig.size != b.n) {
+          if (mrec.sig.size != b.n || mrec.sig.bits != b.w) {
+            continue;
+          }
+          // An interior-index bank must identify its actual field. Preserve
+          // the legacy suffix-index detector for ordinary scalar arrays.
+          const bool interior_index
+              = std::any_of(b.keys.begin(), b.keys.end(), [&](const auto& key) { return !key.starts_with(b.name + "_"); });
+          if (interior_index && memory_correspondence_name(mrec.name) != memory_correspondence_name(b.name)) {
             continue;
           }
           if (!shared_mems.count(mkey)) {
@@ -4924,12 +6795,15 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           Bridge br;
           br.mem_key     = mkey;
           br.addr_w      = mrec.sig.addr_w;
+          br.size        = mrec.sig.size;
           br.bits        = mrec.sig.bits;
           br.mem_in_impl = mem_in_impl;
           br.flop_keys   = b.keys;
           br.flop_w.assign(b.keys.size(), b.w);
           br.flop_sgn.assign(b.keys.size(), b.sgn);
           bridges.push_back(std::move(br));
+          (mem_in_impl ? used_impl_mem : used_ref_mem).insert(mkey);
+          bridged_flops.insert(b.keys.begin(), b.keys.end());
           break;  // one bank -> one memory
         }
       }
@@ -4941,9 +6815,33 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // the step from the same register-file contents.
     for (auto& br : bridges) {
       cvc5::Term A = shared_mems.at(br.mem_key);
+      if (!br.wide_flop_key.empty()) {
+        auto fit = shared.find(br.wide_flop_key);
+        if (fit == shared.end() || fit->second.width != br.size * br.bits) {
+          continue;
+        }
+        cvc5::Term arr = A;
+        for (int i = 0; i < br.size; ++i) {
+          auto op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT,
+                            {static_cast<uint32_t>((i + 1) * br.bits - 1), static_cast<uint32_t>(i * br.bits)});
+          arr     = tm.mkTerm(
+              cvc5::Kind::STORE,
+              {arr, tm.mkBitVector(static_cast<uint32_t>(br.addr_w), static_cast<uint64_t>(i)), tm.mkTerm(op, {fit->second.term})});
+        }
+        shared_mems[br.mem_key] = arr;
+        continue;
+      }
       for (size_t i = 0; i < br.flop_keys.size(); ++i) {
         cvc5::Term sel
             = tm.mkTerm(cvc5::Kind::SELECT, {A, tm.mkBitVector(static_cast<uint32_t>(br.addr_w), static_cast<uint64_t>(i))});
+        if (i < br.bit_keys.size() && !br.bit_keys[i].empty()) {
+          // bit-blasted entry: cell b holds bit b of the entry
+          for (size_t b = 0; b < br.bit_keys[i].size(); ++b) {
+            auto op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(b), static_cast<uint32_t>(b)});
+            shared[br.bit_keys[i][b]] = Val{tm.mkTerm(op, {sel}), 1, false};
+          }
+          continue;
+        }
         Val cur                 = Val{fit_to(tm, Val{sel, br.bits, false}, br.flop_w[i]), br.flop_w[i], br.flop_sgn[i]};
         shared[br.flop_keys[i]] = cur;
       }
@@ -4972,7 +6870,6 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // reports Unknown and leaves the refutation to BMC-from-reset.
   if (ind_use_plan && (ind_ref_plan.multi || ind_impl_plan.multi)) {
     Encoder penc(tm);
-    penc.set_encode_budget(encode_budget_s());
     penc.set_sub_lib(sub_lib);
     penc.set_name_alias(&name_alias);
     penc.set_collapse_defs(collapse_ptr);
@@ -4980,6 +6877,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     penc.set_state_boxes(state_boxes_ptr);
     penc.set_comb_boxes(comb_boxes_ptr);
     penc.set_shared_bbox(&shared_bbox);
+    penc.set_emit_props(opts.design_assumes);
 
     // Two independent input snapshots per period (microsteps 0-1 share the
     // first, 2-3 the second), shared between REF and IMPL so the miter never
@@ -5008,6 +6906,158 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         break;
       }
     }
+
+    // Strong, compositional accelerator: prove that EACH scheduled microstep
+    // preserves equal state from an arbitrary equal phase-boundary state. This
+    // implies the composed-period theorem below by induction, while keeping a
+    // wide datapath out of a four-deep transition expression. It is deliberately
+    // best-effort: any SAT/UNKNOWN step falls back to the ordinary composed
+    // proof, because a per-phase invariant can be stronger than necessary.
+    if (!opts.design_assumes && shared_mems.empty()) {
+      bool step_proven = true;
+      int  step_checks = 0;
+      for (size_t si = 0; si < psteps.size() && step_proven; ++si) {
+        solver.push();
+        const int ms = psteps[si];
+
+        penc.set_x_dontcare(opts.gold_x != "zero");
+        penc.set_box_keys(&ref_box_keys);
+        penc.set_phase_plan(&ind_ref_plan, ms);
+        Encoded sre = penc.encode(ref, &shared, "psr" + std::to_string(si) + "_", &shared_mems);
+        penc.set_x_dontcare(false);
+        penc.set_box_keys(&impl_box_keys);
+        penc.set_phase_plan(&ind_impl_plan, ms);
+        Encoded sie = penc.encode(impl, &shared, "psi" + std::to_string(si) + "_", &shared_mems);
+        if (!sre.ok || !sie.ok) {
+          solver.pop();
+          step_proven = false;
+          break;
+        }
+        for (const auto& [l, r] : sre.equalities) {
+          solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
+        }
+        for (const auto& [l, r] : sie.equalities) {
+          solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
+        }
+
+        Io_name_map<Val> rnxt, inxt, robs, iobs;
+        auto             split_outputs = [&](const Encoded& e, Io_name_map<Val>& nxt, Io_name_map<Val>& obs) {
+          for (const auto& [nm, v] : e.outputs) {
+            if (nm.rfind("\x01nxt:", 0) == 0) {
+              nxt[nm.substr(5)] = v;
+            } else if ((si == 0 || si == pobs_b) && (nm.empty() || (nm[0] != '\x03' && nm[0] != '\x04'))) {
+              obs[nm] = v;
+            }
+          }
+        };
+        split_outputs(sre, rnxt, robs);
+        split_outputs(sie, inxt, iobs);
+
+        struct Step_diff {
+          std::string label;
+          cvc5::Term  term;
+        };
+        std::vector<Step_diff> step_diffs;
+        bool                   complete = rnxt.size() == inxt.size() && robs.size() == iobs.size();
+        auto add_step_map = [&](std::string_view kind, const Io_name_map<Val>& a, const Io_name_map<Val>& b, bool skip_bbox) {
+          for (const auto& [nm, av] : a) {
+            auto bi = b.find(nm);
+            if (bi == b.end()) {
+              complete = false;
+              continue;
+            }
+            if (skip_bbox
+                && nm.find("\x02"
+                           "bbox:")
+                       != std::string::npos) {
+              continue;
+            }
+            const int  w  = std::max(av.width, bi->second.width);
+            cvc5::Term at = fit_to(tm, av, w);
+            cvc5::Term bt = fit_to(tm, bi->second, w);
+            if (cvc5::Term u = fit_x_mask_to(tm, av, w); !u.isNull()) {
+              const auto keep = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {u});
+              at              = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {at, keep});
+              bt              = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {bt, keep});
+            }
+            // Holds and already-paired box wiring commonly share the exact
+            // term. Do not spend one solver call per bit proving a syntactic
+            // identity; wide idle state dominated the Minion divider budget.
+            if (at == bt) {
+              continue;
+            }
+            for (int bit = 0; bit < w; ++bit) {
+              const std::string label = std::string(kind) + ":" + nm + (w == 1 ? "" : ("[" + std::to_string(bit) + "]"));
+              if (w == 1) {
+                step_diffs.push_back({label, tm.mkTerm(cvc5::Kind::DISTINCT, {at, bt})});
+              } else {
+                const auto op = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(bit), static_cast<uint32_t>(bit)});
+                step_diffs.push_back({label, tm.mkTerm(cvc5::Kind::DISTINCT, {tm.mkTerm(op, {at}), tm.mkTerm(op, {bt})})});
+              }
+            }
+          }
+        };
+        add_step_map("state", rnxt, inxt, false);
+        add_step_map("output", robs, iobs, true);
+        if (!complete || step_diffs.empty()) {
+          solver.pop();
+          step_proven = false;
+          break;
+        }
+        // Most phase-local obligations are pure bit-vector cones. Let ABC
+        // discharge those in one batch before asking cvc5 one bit at a time;
+        // a SAT/unsupported ABC result is only a failure to subtract and is
+        // still checked with all encoder equalities active in cvc5 below.
+        std::vector<cvc5::Term> step_terms;
+        step_terms.reserve(step_diffs.size());
+        for (const auto& d : step_diffs) {
+          step_terms.push_back(d.term);
+        }
+        std::vector<Cone_stats>   step_stats;
+        std::vector<Cone_verdict> step_verdicts(step_diffs.size(), Cone_verdict::Unknown);
+        if (lec_cones_try(opts.cones)) {
+          const int64_t abc_ms = budget_on ? std::max<int64_t>(1, budget_left_ms() / 4) : 15000;
+          step_verdicts        = abc_prove_unsat_batch(step_terms, opts.conelimit, abc_ms, &step_stats);
+        }
+        for (size_t di = 0; di < step_diffs.size(); ++di) {
+          const auto& d = step_diffs[di];
+          if (step_verdicts[di] == Cone_verdict::Proven) {
+            ++step_checks;
+            continue;
+          }
+          solver.push();
+          solver.assertFormula(d.term);
+          const auto sr = solve_check();
+          solver.pop();
+          if (!sr.isUnsat() && std::getenv("LEC_PHASE_STEP_LOG") != nullptr) {
+            std::fprintf(stderr,
+                         "[LEC_PHASE_STEP] ms=%d cut=%d/%zu %s %s\n",
+                         ms,
+                         step_checks + 1,
+                         step_diffs.size(),
+                         d.label.c_str(),
+                         sr.isUnsat() ? "equal" : (sr.isSat() ? "DIFF" : "unknown"));
+          }
+          if (!sr.isUnsat()) {
+            step_proven = false;
+            break;
+          }
+          ++step_checks;
+        }
+        solver.pop();
+      }
+      if (step_proven && step_checks > 0) {
+        res.verdict = Verdict::Proven;
+        res.engine  = "ind";
+        res.detail  = "solver=cvc5 (phase-step induction: " + std::to_string(psteps.size()) + " microsteps, "
+                      + std::to_string(step_checks) + " compare points; each scheduled transition preserves equal state); ref["
+                      + ind_ref_plan.describe() + "]";
+        disclose_reconciled();  // this arm ASSIGNS res.detail, so re-append the note
+        gate_packed_scalar_step();
+        return res;
+      }
+    }
+
     std::array<Io_name_map<Val>, 2> half_ins;
     half_ins[0] = shared;  // inputs + the assumed-equal current state
     half_ins[1] = shared;
@@ -5021,8 +7071,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // Rebuild half 1's primary-input symbols (state keys are left alone).
       absl::flat_hash_set<std::string> state_keys;
       for (auto* g : {ref, impl}) {
-        hhds::Hier_opaque_scope sc(collapse_gids_ptr);
-        for (auto node : g->fast_hier()) {
+        // Opaque at the collapse set, exactly like add_flops above: a key that
+        // only exists inside a collapsed box is not a state key here either.
+        for (auto node : g->grouped_hierarchy(collapse_gids_ptr).nodes()) {
           const auto nop = graph_util::type_op_of(node);
           if (nop != Ntype_op::Flop && nop != Ntype_op::Latch) {
             continue;
@@ -5032,6 +7083,15 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
       for (auto& [nm, v] : half_ins[1]) {
         if (state_keys.count(nm) > 0 || (!nm.empty() && nm[0] == '\x01')) {
+          continue;
+        }
+        // Re-mint through the SAME carrier shape the port was seeded with. A
+        // flat mkConst here would hand half 1 a free symbol whose spare sign
+        // bit is unconstrained, reinstating the false REFUTED for exactly the
+        // ports Top_in reconciled -- in the half a reader is least likely to
+        // look at.
+        if (auto it = top_ins.find(nm); it != top_ins.end() && it->second.w == v.width) {
+          v = Val{mint_top_in(tm, it->second, "h1_" + nm), v.width, v.is_signed};
           continue;
         }
         v = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(v.width)), "h1_" + nm), v.width, v.is_signed};
@@ -5078,14 +7138,17 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         for (const auto& [l, r] : e.equalities) {
           solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
         }
+        if (opts.design_assumes) {
+          assert_design_assumptions(tm, solver, e);
+        }
         Io_name_map<Val> nxt;
         for (const auto& [nm, v] : e.outputs) {
           if (nm.rfind("\x01nxt:", 0) == 0) {
             nxt[nm.substr(5)] = v;
             continue;
           }
-          if (!nm.empty() && nm[0] == '\x03') {
-            continue;  // env-gated debug tap
+          if (!nm.empty() && (nm[0] == '\x03' || nm[0] == '\x04')) {
+            continue;  // env-gated debug tap / property
           }
           if (si == 0 || si == pobs_b) {
             out.obs[std::to_string(si) + "\x1f" + nm] = v;
@@ -5196,6 +7259,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     res.engine = "ind";
     res.detail = "solver=cvc5 (phase-inductive: one composed source period, " + std::to_string(psteps.size()) + " microsteps; "
                  + std::to_string(pchecks) + " compare points); ref[" + ind_ref_plan.describe() + "]";
+    disclose_reconciled();  // this arm ASSIGNS res.detail, so re-append the note
     // `checked_steps` / `output_checks` stay 0 exactly as the ordinary inductive
     // engine leaves them: they are the BOUNDED-BMC accounting, and a nonzero
     // `output_checks` on a Proven verdict is what the tier-2 discipline reads as
@@ -5209,10 +7273,20 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       res.detail           += "; no compare points";
       return res;
     }
-    if (!only_ref.empty() || !only_impl.empty()) {
+    const bool phase_dead_state_only = internal_state_only(only_ref, only_impl);
+    if ((!only_ref.empty() || !only_impl.empty()) && !phase_dead_state_only) {
       res.verdict  = Verdict::Unknown;
       res.detail  += "; incomplete correspondence";
       return res;
+    }
+    if (opts.design_assumes) {
+      const auto ar = solve_check();
+      if (!ar.isSat()) {
+        res.verdict  = Verdict::Unknown;
+        res.detail  += ar.isUnsat() ? "; active assumption set is CONTRADICTORY (vacuous proof rejected)"
+                                    : "; active assumption consistency check returned unknown";
+        return res;
+      }
     }
     // LEC_PHASE_LOG=1: report which compare point survives, one query each. The
     // composed period has no cone pass behind it, so without this a SAT verdict
@@ -5221,15 +7295,19 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       for (const auto& [lbl, d] : pdiffs) {
         solver.push();
         solver.assertFormula(d);
-        const auto one = solver.checkSat();
+        const auto one = solve_check();
         std::fprintf(stderr, "[LEC_PHASE] %-52s %s\n", lbl.c_str(), one.isUnsat() ? "equal" : (one.isSat() ? "DIFF" : "unknown"));
         solver.pop();
       }
     }
     solver.assertFormula(pbad);
-    const auto pr = solver.checkSat();
+    const auto pr = solve_check();
     if (pr.isUnsat()) {
       res.verdict = Verdict::Proven;
+      if (phase_dead_state_only) {
+        res.detail += "; one-sided internal state is unobservable from every common obligation";
+      }
+      gate_packed_scalar_step();
       return res;
     }
     // SAT here is NOT a disproof: the assumed-equal current state may be
@@ -5241,7 +7319,6 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   }
 
   Encoder enc(tm);
-  enc.set_encode_budget(encode_budget_s());  // shared query budget: take what is LEFT, not a fresh opts.timeout
   enc.set_sub_lib(sub_lib);
   enc.set_name_alias(&name_alias);
   enc.set_collapse_defs(collapse_ptr);
@@ -5249,9 +7326,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   enc.set_state_boxes(state_boxes_ptr);
   enc.set_comb_boxes(comb_boxes_ptr);
   enc.set_shared_bbox(&shared_bbox);
+  enc.set_emit_props(opts.design_assumes);
   enc.set_x_dontcare(opts.gold_x != "zero");  // ref X = don't-care (formal.lec.gold_x)
   enc.set_box_keys(&ref_box_keys);            // per-design box correspondence
-  enc.set_phase_plan(ind_use_plan ? &ind_ref_plan : nullptr, -1);
+  enc.set_phase_plan(ind_ref_plan.needs_plan() ? &ind_ref_plan : nullptr, -1);
   Encoded re = enc.encode(ref, &shared, "", &shared_mems);
   enc.set_x_dontcare(false);
   if (!re.ok) {
@@ -5261,7 +7339,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     return res;
   }
   enc.set_box_keys(&impl_box_keys);
-  enc.set_phase_plan(ind_use_plan ? &ind_impl_plan : nullptr, -1);
+  enc.set_phase_plan(ind_impl_plan.needs_plan() ? &ind_impl_plan : nullptr, -1);
   Encoded ie = enc.encode(impl, &shared, "", &shared_mems);
   if (!ie.ok) {
     res.verdict      = Verdict::Unknown;
@@ -5275,6 +7353,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   }
   for (const auto& [l, r] : ie.equalities) {
     solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {l, r}));
+  }
+  if (opts.design_assumes) {
+    assert_design_assumptions(tm, solver, re);
+    assert_design_assumptions(tm, solver, ie);
   }
   if (opts.assumptions != nullptr) {
     std::string helper_error;
@@ -5302,15 +7384,54 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       continue;  // memory had no next-state (shouldn't happen) -> leave unmatched
     }
     mem_set.insert(br.mem_key);
+    if (!br.wide_flop_key.empty()) {
+      std::string nxt_key = std::string("\x01nxt:") + br.wide_flop_key;
+      bank_out_set.insert(nxt_key);
+      auto fit_it = bank_enc.outputs.find(nxt_key);
+      if (fit_it == bank_enc.outputs.end()) {
+        continue;
+      }
+      std::vector<cvc5::Term> entries;
+      entries.reserve(static_cast<size_t>(br.size));
+      for (int i = br.size - 1; i >= 0; --i) {
+        entries.push_back(tm.mkTerm(cvc5::Kind::SELECT,
+                                    {mem_it->second, tm.mkBitVector(static_cast<uint32_t>(br.addr_w), static_cast<uint64_t>(i))}));
+      }
+      if (entries.empty()) {
+        continue;
+      }
+      cvc5::Term bus = entries.front();
+      for (size_t i = 1; i < entries.size(); ++i) {
+        bus = tm.mkTerm(cvc5::Kind::BITVECTOR_CONCAT, {bus, entries[i]});
+      }
+      const int w = br.size * br.bits;
+      bridge_diffs.push_back(tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, fit_it->second, w), fit_to(tm, Val{bus, w, false}, w)}));
+      continue;
+    }
     for (size_t i = 0; i < br.flop_keys.size(); ++i) {
+      cvc5::Term sel = tm.mkTerm(cvc5::Kind::SELECT,
+                                 {mem_it->second, tm.mkBitVector(static_cast<uint32_t>(br.addr_w), static_cast<uint64_t>(i))});
+      if (i < br.bit_keys.size() && !br.bit_keys[i].empty()) {
+        // bit-blasted entry: cell b's next state vs bit b of the entry's next value
+        for (size_t b = 0; b < br.bit_keys[i].size(); ++b) {
+          std::string bkey = std::string("\x01nxt:") + br.bit_keys[i][b];
+          bank_out_set.insert(bkey);
+          auto bit_it = bank_enc.outputs.find(bkey);
+          if (bit_it == bank_enc.outputs.end()) {
+            continue;
+          }
+          auto       op   = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(b), static_cast<uint32_t>(b)});
+          cvc5::Term mbit = tm.mkTerm(op, {sel});
+          bridge_diffs.push_back(tm.mkTerm(cvc5::Kind::DISTINCT, {fit_to(tm, bit_it->second, 1), mbit}));
+        }
+        continue;
+      }
       std::string nxt_key = std::string("\x01nxt:") + br.flop_keys[i];
       bank_out_set.insert(nxt_key);
       auto fit_it = bank_enc.outputs.find(nxt_key);
       if (fit_it == bank_enc.outputs.end()) {
         continue;
       }
-      cvc5::Term sel = tm.mkTerm(cvc5::Kind::SELECT,
-                                 {mem_it->second, tm.mkBitVector(static_cast<uint32_t>(br.addr_w), static_cast<uint64_t>(i))});
       int        w   = std::max(br.flop_w[i], br.bits);
       cvc5::Term bnk = fit_to(tm, fit_it->second, w);
       cvc5::Term mem = fit_to(tm, Val{sel, br.bits, false}, w);
@@ -5336,9 +7457,44 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     bad = bad.isNull() ? t : tm.mkTerm(cvc5::Kind::OR, {bad, t});
     ind_diffs.push_back({"bridge", t});
   }
+  // Bit-blasted register: the ref emits ONE `nxt:<reg>` of width N, the impl one
+  // `nxt:<reg>_i` per bit. Fold the impl's bits back into a single N-bit output
+  // under the ref's name so the ordinary by-name compare pairs them — otherwise
+  // both land in unmatched_* and gate the verdict, which is the same disjoint-key
+  // failure the shared-symbol pairing above fixes for the CURRENT state.
+  for (const auto& [pkey, bits] : ind_bitblast) {
+    const std::string rkey = std::string("\x01nxt:") + pkey;
+    if (re.outputs.find(rkey) == re.outputs.end() || ie.outputs.find(rkey) != ie.outputs.end()) {
+      continue;
+    }
+    std::vector<cvc5::Term> bt;  // MSB first, as cvc5 CONCAT expects
+    bool                    all         = true;
+    int                     total_width = 0;
+    for (auto it = bits.rbegin(); it != bits.rend(); ++it) {
+      auto bit = ie.outputs.find(std::string("\x01nxt:") + *it);
+      if (bit == ie.outputs.end() || !shared.contains(*it) || bit->second.width != shared.at(*it).width) {
+        all = false;
+        break;
+      }
+      bt.push_back(bit->second.term);
+      total_width += bit->second.width;
+    }
+    if (!all || bt.empty() || total_width != re.outputs.at(rkey).width) {
+      continue;
+    }
+    cvc5::Term cat = bt.front();
+    for (size_t i = 1; i < bt.size(); ++i) {
+      cat = tm.mkTerm(cvc5::Kind::BITVECTOR_CONCAT, {cat, bt[i]});
+    }
+    for (const auto& b : bits) {
+      ie.outputs.erase(std::string("\x01nxt:") + b);
+    }
+    ie.outputs[rkey] = Val{cat, total_width, false};
+  }
+
   for (const auto& [name, rv] : re.outputs) {
-    if (!name.empty() && name[0] == '\x03') {
-      continue;  // env-gated debug tap, never a compare point
+    if (!name.empty() && (name[0] == '\x03' || name[0] == '\x04')) {
+      continue;  // env-gated debug tap / property, never a compare point
     }
     if (bridged_ref_out.count(name)) {
       continue;  // bank-flop next state -> compared via the memory bridge above
@@ -5373,7 +7529,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     ind_diffs.push_back({display_name(name), diff});
   }
   for (const auto& [name, iv] : ie.outputs) {
-    if (!name.empty() && name[0] == '\x03') {
+    if (!name.empty() && (name[0] == '\x03' || name[0] == '\x04')) {
       continue;  // env-gated debug tap, never a compare point
     }
     if (bridged_impl_out.count(name)) {
@@ -5496,7 +7652,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
     const auto& a = rh->second;
     const auto& b = ih->second;
-    if (!a.exact || !b.exact || a.bus.getSort() != b.bus.getSort() || a.reset.isNull() != b.reset.isNull()) {
+    // A per-port memory with a reset arm carries a record with NO bus (the
+    // reset is the only whole-array arm); both sides must agree on which arms
+    // exist before any of them is compared.
+    if (!a.exact || !b.exact || a.bus.isNull() != b.bus.isNull() || a.reset.isNull() != b.reset.isNull()) {
+      return false;
+    }
+    if (!a.bus.isNull() && a.bus.getSort() != b.bus.getSort()) {
       return false;
     }
     auto add_arm
@@ -5510,7 +7672,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                            key + ":" + std::string(tag) + ".bus",
                            false});
           };
-    add_arm(a.cond, b.cond, a.bus, b.bus, "whole");
+    if (!a.bus.isNull()) {
+      add_arm(a.cond, b.cond, a.bus, b.bus, "whole");
+    }
     if (!a.reset.isNull()) {
       if (a.init.getSort() != b.init.getSort()) {
         return false;
@@ -5538,9 +7702,40 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     auto rw = re.mem_wr.find(key);
     auto iw = ie.mem_wr.find(key);
     if (rw != re.mem_wr.end() && iw != ie.mem_wr.end() && rw->second.size() != iw->second.size()) {
-      cone_log(key,
-               "write-port COUNT differs (" + std::to_string(rw->second.size()) + " ref vs " + std::to_string(iw->second.size())
-                   + " impl)");
+      // SAT optimization can merge exclusive writes. Compare the ordered write
+      // chains at an arbitrary address instead of requiring positional ports.
+      // Equality for every probe address and initial word implies array equality;
+      // the shared free word is an overapproximation of either bulk-update base.
+      const auto& rp = rw->second;
+      const auto& ip = iw->second;
+      if (!rp.empty() && !ip.empty() && rp.size() + ip.size() <= 64) {
+        const auto address_sort = rp.front().addr.getSort();
+        const auto word_sort    = rp.front().din.getSort();
+        auto       compatible   = [&](const auto& ports) {
+          return std::ranges::all_of(ports, [&](const auto& p) {
+            return p.addr.getSort() == address_sort && p.din.getSort() == word_sort && p.wmask.getSort() == word_sort;
+          });
+        };
+        if (compatible(rp) && compatible(ip)) {
+          const auto address = tm.mkConst(address_sort, "lec_mem_probe_addr:" + key);
+          const auto initial = tm.mkConst(word_sort, "lec_mem_probe_word:" + key);
+          auto       fold    = [&](const auto& ports) {
+            auto word = initial;
+            for (const auto& p : ports) {
+              const auto keep = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {word, tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {p.wmask})});
+              const auto data = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {p.din, p.wmask});
+              word            = tm.mkTerm(
+                  cvc5::Kind::ITE,
+                  {tm.mkTerm(cvc5::Kind::EQUAL, {address, p.addr}), tm.mkTerm(cvc5::Kind::BITVECTOR_OR, {keep, data}), word});
+            }
+            return word;
+          };
+          out.insert(out.end(), pre.begin(), pre.end());
+          out.push_back({parent, tm.mkTerm(cvc5::Kind::DISTINCT, {fold(rp), fold(ip)}), key + ":write_chain", false});
+          return true;
+        }
+      }
+      cone_log(key, "write-port counts differ and chains exceed the probe budget or have incompatible sorts");
     }
     if (rw == re.mem_wr.end() || iw == ie.mem_wr.end() || rw->second.size() != iw->second.size() || rw->second.empty()) {
       // The bulk-update obligations discharge the cut ONLY when they are the
@@ -5610,9 +7805,29 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         return false;
       }
       const std::string tag = key + ":wr" + std::to_string(k);
-      subs.push_back({parent, tm.mkTerm(cvc5::Kind::DISTINCT, {a.addr, b.addr}), tag + ".addr"});
-      subs.push_back({parent, tm.mkTerm(cvc5::Kind::DISTINCT, {a.wmask, b.wmask}), tag + ".wmask"});
-      subs.push_back({parent, tm.mkTerm(cvc5::Kind::DISTINCT, {a.din, b.din}), tag + ".din"});
+      // Hash-consed identical terms are already a proof.  Do not send thousands
+      // of trivially-false port miters through ABC: a flattened whole-array
+      // assignment can expose one constant-address write per element (352 in
+      // XiangShan RenameBuffer), and those no-op obligations can consume the
+      // complete cone deadline before the differing data cones are attempted.
+      if (a.addr != b.addr) {
+        subs.push_back({parent, tm.mkTerm(cvc5::Kind::DISTINCT, {a.addr, b.addr}), tag + ".addr"});
+      }
+      if (a.wmask != b.wmask) {
+        subs.push_back({parent, tm.mkTerm(cvc5::Kind::DISTINCT, {a.wmask, b.wmask}), tag + ".wmask"});
+      }
+      // Data under a disabled mask bit is a don't-care: STORE keeps the old
+      // array bit there. Front ends routinely produce different disabled data
+      // cones (one preserves the source expression, another fills/extends it),
+      // so comparing raw din makes an equivalent memory look different and
+      // sends the whole ARRAY equality to cvc5. Together with the separately
+      // proven wmask equality, equality of the masked data is exactly the
+      // condition needed for both STORE updates to match.
+      const auto a_data = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {a.wmask, a.din});
+      const auto b_data = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {b.wmask, b.din});
+      if (a_data != b_data) {
+        subs.push_back({parent, tm.mkTerm(cvc5::Kind::DISTINCT, {a_data, b_data}), tag + ".din"});
+      }
     }
     if (permuted) {
       // Reordering write ports only preserves the chain when no two enabled
@@ -5639,6 +7854,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                           false});
         }
       }
+    }
+    if (pre.empty() && subs.empty()) {
+      // Keep the parent in `subs_of`: an empty obligation set means the port
+      // chains are identical, but omitting the parent would send its ARRAY cut
+      // down the unsupported direct-cone path instead of discharging it.
+      subs.push_back({parent, tm.mkFalse(), key + ":identical"});
     }
     out.insert(out.end(), pre.begin(), pre.end());  // the bulk-update base, when this is a whole-array
     out.insert(out.end(), subs.begin(), subs.end());
@@ -5675,7 +7896,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // merge-assisted cut retry) the full `cone_deadline_ms` would let the
     // pre-pass spend 75% of formal.timeout before cvc5 is asked anything --
     // enough to turn a PROVEN run into an inconclusive (and, with
-    // formal.strict, nonzero-exit) one.
+    // nonzero-exit) one.
     auto          cone_budget_left = [&]() -> int64_t {
       const auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
       return std::max<int64_t>(1, cone_deadline_ms - spent);
@@ -5722,69 +7943,823 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // pair equal DISCHARGES the merge; only then may the two symbols share
     // inputs (speculative reduction).
     struct Merge_cand {
-      cvc5::Term  ref_dout, impl_dout;
-      size_t      obligation;   // index into `merge_obl`
+      cvc5::Term  to_dout, from_dout;
+      size_t      obligation;   // index into `merge_obl`, or max() when the address Terms are identical
       bool        needs_array;  // a forwarding read: also needs the arrays proven equal
       std::string mem_key;
+      bool        conditional = true;  // retain read-coherence premises for the targeted matching routes
     };
     std::vector<cvc5::Term> merge_obl;
     std::vector<Merge_cand> merge_cands;
     for (const auto& [key, rrd] : re.mem_rd) {
       auto it = ie.mem_rd.find(key);
-      if (it == ie.mem_rd.end() || it->second.size() != rrd.size()) {
+      if (it == ie.mem_rd.end()) {
         continue;
       }
-      for (size_t k = 0; k < rrd.size(); ++k) {
-        const auto& a = rrd[k];
-        const auto& b = it->second[k];
-        if (a.dout == b.dout || a.addr.getSort() != b.addr.getSort() || a.dout.getSort() != b.dout.getSort()) {
+      const auto&       ird = it->second;
+      // Front ends need not materialize the same NUMBER of async read ports.
+      // Re-reading generated Pyrope commonly duplicates a constant-index read
+      // that the direct Verilog path shared (TraceBuffer: 59 vs 62). All reads
+      // of the same array at the same address nevertheless return one value.
+      // First coalesce every exactly-equal address group onto one REF symbol;
+      // this also joins duplicate ports within either side. No solver premise
+      // is needed because equal cvc5 Terms are the same address expression.
+      std::vector<bool> ref_grouped(rrd.size(), false);
+      for (size_t r = 0; r < rrd.size(); ++r) {
+        if (ref_grouped[r]) {
           continue;
         }
-        // Two ways the douts are justified equal, both needing equal addresses:
-        //   - both read the SHARED committed contents (fwd==0): immediate; or
-        //   - both read their OWN next-state array, but those arrays were just
-        //     proven equal by the port decomposition (a forwarding read).
-        // `needs_array` records which, and is checked after round 1.
-        merge_cands.push_back({a.dout, b.dout, merge_obl.size(), !(a.from_shared_cur && b.from_shared_cur), key});
-        merge_obl.push_back(tm.mkTerm(cvc5::Kind::DISTINCT, {a.addr, b.addr}));
+        const auto&         canonical = rrd[r];
+        // ONE scan of `ird`: `crosses` (any same-address partner on the impl
+        // side is what makes this group worth forming) and the mergeable
+        // partners come from the same walk.
+        bool                crosses   = false;
+        std::vector<size_t> cross;  // indices into `ird`
+        for (size_t bi = 0; bi < ird.size(); ++bi) {
+          const auto& b = ird[bi];
+          if (canonical.addr != b.addr || canonical.dout.getSort() != b.dout.getSort()) {
+            continue;
+          }
+          crosses = true;
+          if (canonical.dout != b.dout && canonical.from_shared_cur == b.from_shared_cur) {
+            cross.push_back(bi);
+          }
+        }
+        if (!crosses) {
+          continue;
+        }
+        for (size_t j = r + 1; j < rrd.size(); ++j) {
+          const auto& a = rrd[j];
+          if (canonical.addr == a.addr && canonical.dout.getSort() == a.dout.getSort() && canonical.from_shared_cur
+              && a.from_shared_cur) {
+            ref_grouped[j] = true;
+            if (a.dout != canonical.dout) {
+              merge_cands.push_back({canonical.dout, a.dout, std::numeric_limits<size_t>::max(), false, key});
+            }
+          }
+        }
+        for (size_t bi : cross) {
+          const auto& b = ird[bi];
+          merge_cands.push_back(
+              {canonical.dout, b.dout, std::numeric_limits<size_t>::max(), !(canonical.from_shared_cur && b.from_shared_cur), key});
+        }
+      }
+
+      // Port positions need not correspond, even when counts agree. Group
+      // duplicate addresses first, then prove the modest cross-product of
+      // distinct addresses. Large generated memories often repeat the same
+      // few reads thousands of times; counting ports would miss this route.
+      constexpr size_t kMaxCrossAddressProofs = 4096;
+      auto             address_groups         = [](const std::vector<Encoded::Mem_rd_port>& ports) {
+        std::vector<std::vector<size_t>>       groups;
+        std::unordered_map<cvc5::Term, size_t> from_shared, from_forwarded;
+        for (size_t k = 0; k < ports.size(); ++k) {
+          auto& index               = ports[k].from_shared_cur ? from_shared : from_forwarded;
+          auto [group_it, inserted] = index.emplace(ports[k].addr, groups.size());
+          if (inserted) {
+            groups.emplace_back();
+          }
+          groups[group_it->second].push_back(k);
+        }
+        return groups;
+      };
+      const auto ref_addr_groups  = address_groups(rrd);
+      const auto impl_addr_groups = address_groups(ird);
+      if (std::getenv("LEC_CONE_LOG") != nullptr) {
+        std::fprintf(stderr,
+                     "[LEC_CONE] %s read addresses: %zu/%zu groups from %zu/%zu ports\n",
+                     key.c_str(),
+                     ref_addr_groups.size(),
+                     impl_addr_groups.size(),
+                     rrd.size(),
+                     ird.size());
+      }
+      // Exhaustive address probes are only candidates for an unconditional
+      // merge. Unproved cross-pairs otherwise add irrelevant array relations to
+      // every wide output slice. Loop-invariant — it reads only the port COUNTS.
+      const bool was_small_unequal = rrd.size() != ird.size() && rrd.size() * ird.size() <= kMaxCrossAddressProofs;
+      if (ref_addr_groups.size() * impl_addr_groups.size() <= kMaxCrossAddressProofs) {
+        for (const auto& ag : ref_addr_groups) {
+          const auto& a = rrd[ag.front()];
+          for (const auto& bg : impl_addr_groups) {
+            const auto& b = ird[bg.front()];
+            if (a.addr == b.addr || a.dout == b.dout || a.addr.getSort() != b.addr.getSort() || a.dout.getSort() != b.dout.getSort()
+                || a.from_shared_cur != b.from_shared_cur) {
+              continue;
+            }
+            const size_t obligation = merge_obl.size();
+            merge_obl.push_back(tm.mkTerm(cvc5::Kind::DISTINCT, {a.addr, b.addr}));
+            auto add_group_merge = [&](const Encoded::Mem_rd_port& port) {
+              if (a.dout != port.dout && a.dout.getSort() == port.dout.getSort()) {
+                merge_cands.push_back({a.dout, port.dout, obligation, !a.from_shared_cur, key, was_small_unequal});
+              }
+            };
+            for (size_t k = 1; k < ag.size(); ++k) {
+              add_group_merge(rrd[ag[k]]);
+            }
+            for (size_t k : bg) {
+              add_group_merge(ird[k]);
+            }
+          }
+        }
+      } else if (rrd.size() != ird.size()) {
+        // Large unequal sets use structural address digests to keep candidate
+        // generation linear. The digest is only an index, never a premise: a
+        // collision creates an address obligation that simply will not prove.
+        struct Digest_group {
+          std::vector<size_t> ref;
+          std::vector<size_t> impl;
+        };
+        absl::flat_hash_map<std::string, Digest_group> by_addr_digest;
+        auto add_digest_port = [&](const Encoded::Mem_rd_port& p, size_t ix, bool is_ref) {
+          const std::string digest = cone_digest(p.addr);
+          if (digest.empty()) {
+            return;
+          }
+          const std::string group_key = digest + (p.from_shared_cur ? ":shared" : ":forwarded");
+          auto&             group     = by_addr_digest[group_key];
+          (is_ref ? group.ref : group.impl).push_back(ix);
+        };
+        for (size_t k = 0; k < rrd.size(); ++k) {
+          add_digest_port(rrd[k], k, true);
+        }
+        for (size_t k = 0; k < ird.size(); ++k) {
+          add_digest_port(ird[k], k, false);
+        }
+        for (const auto& item : by_addr_digest) {
+          const auto& group = item.second;
+          if (group.ref.empty() || group.impl.empty()) {
+            continue;
+          }
+          const auto& canonical             = rrd[group.ref.front()];
+          auto        add_proven_addr_merge = [&](const Encoded::Mem_rd_port& p) {
+            if (canonical.dout == p.dout || canonical.addr == p.addr || canonical.addr.getSort() != p.addr.getSort()
+                || canonical.dout.getSort() != p.dout.getSort() || canonical.from_shared_cur != p.from_shared_cur) {
+              return;
+            }
+            merge_cands.push_back(
+                {canonical.dout, p.dout, merge_obl.size(), !(canonical.from_shared_cur && p.from_shared_cur), key});
+            merge_obl.push_back(tm.mkTerm(cvc5::Kind::DISTINCT, {canonical.addr, p.addr}));
+          };
+          for (size_t k = 1; k < group.ref.size(); ++k) {
+            add_proven_addr_merge(rrd[group.ref[k]]);
+          }
+          for (size_t k : group.impl) {
+            add_proven_addr_merge(ird[k]);
+          }
+        }
+      }
+
+      // When counts agree, retain the positional proof route for equivalent
+      // but non-identical address cones. Exact groups above already cover the
+      // common case and are deliberately allowed when counts differ.
+      if (ird.size() == rrd.size()) {
+        for (size_t k = 0; k < rrd.size(); ++k) {
+          const auto& a = rrd[k];
+          const auto& b = ird[k];
+          if (a.addr == b.addr || a.dout == b.dout || a.addr.getSort() != b.addr.getSort() || a.dout.getSort() != b.dout.getSort()
+              || a.from_shared_cur != b.from_shared_cur) {
+            continue;
+          }
+          // Two ways the douts are justified equal, both needing equal addresses:
+          //   - both read the SHARED committed contents (fwd==0): immediate; or
+          //   - both read their OWN next-state array, but those arrays were just
+          //     proven equal by the port decomposition (a forwarding read).
+          // `needs_array` records which, and is checked after round 1.
+          merge_cands.push_back({a.dout, b.dout, merge_obl.size(), !(a.from_shared_cur && b.from_shared_cur), key});
+          merge_obl.push_back(tm.mkTerm(cvc5::Kind::DISTINCT, {a.addr, b.addr}));
+        }
       }
     }
 
-    // ---- round 1: no merge, so every proof here is cacheable ----------------
-    std::vector<size_t>     try_ix;  // indices into ind_diffs
-    std::vector<cvc5::Term> terms;
+    // Address equalities are prerequisites for memory-data induction, so prove
+    // them before either memory or ordinary output cones.  They are small and
+    // independent; a hard output must not starve them.
+    std::vector<Cone_stats>   addr_stats;
+    std::vector<Cone_verdict> addr_v = abc_prove_unsat_batch(merge_obl, opts.conelimit, cone_budget_left(), &addr_stats);
+
+    // Exact-address reads of the shared current array need no proof premise:
+    // both encoders read the same matched-state symbol with the same address
+    // term.  Make those correspondences available to the FIRST memory-port
+    // solve.  Large whole-array updates (RenameBuffer has 352 writes) otherwise
+    // spend the entire cone budget proving write data while treating thousands
+    // of already-corresponding douts as unrelated inputs, and the useful retry
+    // never gets a turn.  Forwarding reads and non-identical addresses remain
+    // excluded until their array/address obligations discharge below.
+    Cone_merge_map initial_shared_merge;
+    for (const auto& c : merge_cands) {
+      const bool addr_ok = c.obligation == std::numeric_limits<size_t>::max() || addr_v[c.obligation] == Cone_verdict::Proven;
+      if (addr_ok && !c.needs_array) {
+        initial_shared_merge.emplace(c.from_dout, c.to_dout);
+      }
+    }
+
+    // Rebuild a term DAG after replacing discharged read symbols with their
+    // representatives.  cvc5 hash-conses the rebuilt terms, so equality after
+    // this rewrite is an exact structural proof (unlike a digest comparison).
+    // Keep one memo across every port: the 352 RenameBuffer data slices share a
+    // very large producer DAG, and walking that DAG once is the entire win.
+    std::unordered_map<cvc5::Term, cvc5::Term> exact_rewrite_memo;
+    size_t                                     exact_slice_rewrites = 0;
+    auto                                       bitvector_constant   = [](cvc5::Term t) -> std::optional<uint64_t> {
+      while (t.getKind() == cvc5::Kind::BITVECTOR_ZERO_EXTEND && t.getNumChildren() == 1) {
+        t = t[0];
+      }
+      if (t.getKind() != cvc5::Kind::CONST_BITVECTOR) {
+        return std::nullopt;
+      }
+      const std::string bits  = t.getBitVectorValue(2);
+      uint64_t          value = 0;
+      for (const char bit : bits) {
+        if (bit != '0' && bit != '1') {
+          return std::nullopt;
+        }
+        if (value > (std::numeric_limits<uint64_t>::max() >> 1U)) {
+          return std::nullopt;
+        }
+        value = (value << 1U) | static_cast<uint64_t>(bit - '0');
+      }
+      return value;
+    };
+    struct Slice_key {
+      cvc5::Term term;
+      uint32_t   hi;
+      uint32_t   lo;
+      bool       operator==(const Slice_key&) const = default;
+    };
+    struct Slice_hash {
+      size_t operator()(const Slice_key& key) const {
+        size_t h  = std::hash<cvc5::Term>{}(key.term);
+        h        ^= static_cast<size_t>(key.hi) + 0x9e3779b9U + (h << 6U) + (h >> 2U);
+        h        ^= static_cast<size_t>(key.lo) + 0x85ebca6bU + (h << 6U) + (h >> 2U);
+        return h;
+      }
+    };
+    std::unordered_map<Slice_key, cvc5::Term, Slice_hash>     slice_memo;
+    std::function<cvc5::Term(cvc5::Term, uint32_t, uint32_t)> slice_term;
+    slice_term = [&](cvc5::Term base, uint32_t hi, uint32_t lo) -> cvc5::Term {
+      const Slice_key key{base, hi, lo};
+      if (auto it = slice_memo.find(key); it != slice_memo.end()) {
+        return it->second;
+      }
+      const uint32_t width = base.getSort().getBitVectorSize();
+      if (lo > hi || hi >= width) {
+        return {};
+      }
+      auto remember = [&](cvc5::Term value) {
+        slice_memo.emplace(key, value);
+        return value;
+      };
+      if (lo == 0 && hi + 1 == width) {
+        return remember(base);
+      }
+      if (base.getKind() == cvc5::Kind::BITVECTOR_CONCAT) {
+        uint32_t lsb = 0;
+        for (size_t n = base.getNumChildren(); n-- > 0;) {
+          const uint32_t child_width = base[n].getSort().getBitVectorSize();
+          if (lo >= lsb && hi < lsb + child_width) {
+            return remember(slice_term(base[n], hi - lsb, lo - lsb));
+          }
+          lsb += child_width;
+        }
+      }
+      if (base.getKind() == cvc5::Kind::BITVECTOR_ZERO_EXTEND && base.getNumChildren() == 1) {
+        const uint32_t child_width = base[0].getSort().getBitVectorSize();
+        if (hi < child_width) {
+          return remember(slice_term(base[0], hi, lo));
+        }
+        if (lo >= child_width) {
+          return remember(tm.mkBitVector(hi - lo + 1, 0));
+        }
+      }
+      if (base.getKind() == cvc5::Kind::BITVECTOR_LSHR && base.getNumChildren() == 2) {
+        if (const auto shift = bitvector_constant(base[1])) {
+          if (*shift < width && hi < width - *shift) {
+            return remember(slice_term(base[0], hi + static_cast<uint32_t>(*shift), lo + static_cast<uint32_t>(*shift)));
+          }
+          if (*shift >= width || lo >= width - *shift) {
+            return remember(tm.mkBitVector(hi - lo + 1, 0));
+          }
+        }
+      }
+      if ((base.getKind() == cvc5::Kind::BITVECTOR_AND || base.getKind() == cvc5::Kind::BITVECTOR_OR
+           || base.getKind() == cvc5::Kind::BITVECTOR_XOR)
+          && base.getNumChildren() >= 2) {
+        std::vector<cvc5::Term> sliced;
+        sliced.reserve(base.getNumChildren());
+        for (size_t i = 0; i < base.getNumChildren(); ++i) {
+          sliced.push_back(slice_term(base[i], hi, lo));
+        }
+        return remember(tm.mkTerm(base.getKind(), sliced));
+      }
+      if (base.getKind() == cvc5::Kind::BITVECTOR_NOT && base.getNumChildren() == 1) {
+        return remember(tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {slice_term(base[0], hi, lo)}));
+      }
+      if (base.getKind() == cvc5::Kind::ITE && base.getNumChildren() == 3 && base[1].getSort().isBitVector()) {
+        return remember(tm.mkTerm(cvc5::Kind::ITE, {base[0], slice_term(base[1], hi, lo), slice_term(base[2], hi, lo)}));
+      }
+      if (base.getKind() == cvc5::Kind::BITVECTOR_EXTRACT && base.getNumChildren() == 1) {
+        const auto op = base.getOp();
+        if (op.getNumIndices() == 2) {
+          const uint32_t inner_lo = static_cast<uint32_t>(std::stoul(cvc5::Op(op)[1].toString()));
+          return remember(slice_term(base[0], inner_lo + hi, inner_lo + lo));
+        }
+      }
+      return remember(tm.mkTerm(tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {hi, lo}), {base}));
+    };
+    auto rewrite_exact_reads = [&](const cvc5::Term& root) {
+      std::vector<std::pair<cvc5::Term, bool>> work;
+      work.emplace_back(root, false);
+      while (!work.empty()) {
+        const cvc5::Term t = work.back().first;
+        if (exact_rewrite_memo.contains(t)) {
+          work.pop_back();
+          continue;
+        }
+        if (auto it = initial_shared_merge.find(t); it != initial_shared_merge.end()) {
+          exact_rewrite_memo.emplace(t, it->second);
+          work.pop_back();
+          continue;
+        }
+        if (!work.back().second) {
+          work.back().second = true;
+          for (size_t i = 0; i < t.getNumChildren(); ++i) {
+            if (!exact_rewrite_memo.contains(t[i])) {
+              work.emplace_back(t[i], false);
+            }
+          }
+          continue;
+        }
+        work.pop_back();
+        if (t.getNumChildren() == 0) {
+          exact_rewrite_memo.emplace(t, t);
+          continue;
+        }
+        std::vector<cvc5::Term> children;
+        children.reserve(t.getNumChildren());
+        bool changed = false;
+        for (size_t i = 0; i < t.getNumChildren(); ++i) {
+          const auto& child = exact_rewrite_memo.at(t[i]);
+          children.push_back(child);
+          changed = changed || child != t[i];
+        }
+        cvc5::Term rebuilt;
+        if (!changed) {
+          rebuilt = t;
+        } else if (t.hasOp()) {
+          rebuilt = tm.mkTerm(t.getOp(), children);
+        } else {
+          rebuilt = tm.mkTerm(t.getKind(), children);
+        }
+
+        // Generated Pyrope reconstructs a packed input and then accesses a
+        // field as EXTRACT(LSHR(CONCAT(all ports), constant)).  Select the one
+        // contributing CONCAT child here; otherwise a one-bit field forces ABC
+        // to materialize the entire top-level input bundle.  Only wholly
+        // contained constant slices are rewritten.
+        if (rebuilt.getKind() == cvc5::Kind::BITVECTOR_EXTRACT && rebuilt.getNumChildren() == 1) {
+          const auto op = rebuilt.getOp();
+          if (op.getNumIndices() == 2) {
+            const uint64_t hi = std::stoull(cvc5::Op(op)[0].toString());
+            const uint64_t lo = std::stoull(cvc5::Op(op)[1].toString());
+            if (auto sliced = slice_term(rebuilt[0], static_cast<uint32_t>(hi), static_cast<uint32_t>(lo)); !sliced.isNull()) {
+              exact_slice_rewrites += sliced != rebuilt ? 1 : 0;
+              rebuilt               = sliced;
+            }
+          }
+        }
+        exact_rewrite_memo.emplace(t, rebuilt);
+      }
+      return exact_rewrite_memo.at(root);
+    };
+
+    // Prepare the direct cuts/address equalities, but run the memory induction
+    // first below.  A single hard output cone can consume the whole deadline;
+    // prioritizing it would leave no time to prove the array correspondence
+    // that unlocks thousands of read merges for those same outputs.
+    const size_t n_sub = subs.size();
+
+    // ---- round 1a: memory ports, with unconditional exact-read merges --------
+    std::vector<Cone_verdict> sub_v(n_sub, Cone_verdict::Unknown);
+    if (n_sub > 0) {
+      std::vector<cvc5::Term> sub_terms;
+      std::vector<size_t>     sub_pending;
+      sub_terms.reserve(n_sub);
+      sub_pending.reserve(n_sub);
+      size_t exact_term_proven = 0;
+      size_t simplify_proven   = 0;
+      for (size_t k = 0; k < n_sub; ++k) {
+        const auto& term = subs[k].term;
+        // Port obligations are normally DISTINCT(lhs,rhs).  If the two sides
+        // become the same hash-consed term after applying unconditional exact
+        // read merges, no AIG or SAT call is needed.
+        if (!initial_shared_merge.empty() && term.getKind() == cvc5::Kind::DISTINCT && term.getNumChildren() == 2
+            && rewrite_exact_reads(term[0]) == rewrite_exact_reads(term[1])) {
+          sub_v[k] = Cone_verdict::Proven;
+          ++exact_term_proven;
+          continue;
+        }
+        // cvc5's rewriter is particularly valuable for generated Pyrope port
+        // accesses: a field may arrive as EXTRACT(LSHR(CONCAT(all inputs), C)),
+        // whereas the direct Verilog side has the field symbol itself.  Sending
+        // the unreduced CONCAT to ABC makes a 20-bit write cone materialize the
+        // entire multi-kilobit top input bundle.  `simplify` is a semantics-
+        // preserving term rewrite (it does not use asserted assumptions here).
+        const cvc5::Term merged_term = initial_shared_merge.empty() ? term : rewrite_exact_reads(term);
+        const cvc5::Term simplified  = solver.simplify(merged_term);
+        if (simplified == tm.mkFalse()) {
+          sub_v[k] = Cone_verdict::Proven;
+          ++simplify_proven;
+          continue;
+        }
+        sub_pending.push_back(k);
+        sub_terms.push_back(simplified);
+      }
+      if (std::getenv("LEC_CONE_LOG") != nullptr && !initial_shared_merge.empty()) {
+        std::fprintf(stderr,
+                     "[LEC_CONE] -- exact-read rewrite: %zu packed slice(s), %zu structural + %zu simplified port proof(s), "
+                     "%zu pending\n",
+                     exact_slice_rewrites,
+                     exact_term_proven,
+                     simplify_proven,
+                     sub_pending.size());
+      }
+      std::vector<Cone_stats> sub_stats;
+      const Cone_merge_map*   initial_merge = initial_shared_merge.empty() ? nullptr : &initial_shared_merge;
+      const auto pending_v = abc_prove_unsat_batch(sub_terms, opts.conelimit, cone_budget_left(), &sub_stats, initial_merge);
+      for (size_t k = 0; k < sub_pending.size(); ++k) {
+        sub_v[sub_pending[k]] = pending_v[k];
+      }
+    }
+
+    // ---- round 1b: direct cuts with discharged shared-current reads ----------
+    // Address and memory-port obligations already ran first.  Make every read
+    // correspondence unlocked by those memory proofs available to the FIRST
+    // direct-output solve.  Trying a multi-kilobit output with forwarding douts
+    // still independent can consume the entire deadline before the historical
+    // merge-assisted retry gets a turn (RenameBuffer's 10,400-bit commit bus is
+    // the canonical example).
+    absl::flat_hash_set<std::string> direct_mem_proven = mem_equal_terms;
+    for (const auto& [parent, ix] : subs_of) {
+      bool all = true;
+      for (const size_t k : ix) {
+        all = all && sub_v[k] == Cone_verdict::Proven;
+      }
+      if (all) {
+        direct_mem_proven.insert(mem_key_of[parent]);
+      }
+    }
+    Cone_merge_map first_direct_merge;
+    for (const auto& c : merge_cands) {
+      const bool addr_ok  = c.obligation == std::numeric_limits<size_t>::max() || addr_v[c.obligation] == Cone_verdict::Proven;
+      const bool array_ok = !c.needs_array || direct_mem_proven.contains(c.mem_key);
+      if (addr_ok && array_ok) {
+        first_direct_merge.emplace(c.from_dout, c.to_dout);
+      }
+    }
+
+    // All entries in first_direct_merge are now discharged premises.  Apply
+    // them as exact DAG substitutions as well as supplying them to ABC.  The
+    // latter alone still makes ABC materialize both large producer cones before
+    // recognizing their leaves as the same inputs; direct substitution lets
+    // hash-consing and cvc5's rewriter erase equal packed-output fields first.
+    for (const auto& [from, to] : first_direct_merge) {
+      initial_shared_merge.emplace(from, to);
+    }
+    // The memo caches rewrites AGAINST THE ROUND-1a MERGE MAP; the map just
+    // grew (first_direct_merge) and grows further inside install below, so a
+    // stale memo would return round-1a results and silently skip the new
+    // substitutions — with WHICH ones skipped depending on what round 1a
+    // happened to walk. Reset it here (sound either way, but deterministic).
+    exact_rewrite_memo.clear();
+    size_t exact_read_values   = 0;
+    auto   install_exact_reads = [&](const Encoded& side) {
+      // side.mem_rd is an absl hash map: iterate its keys SORTED so the
+      // install order (each insert_or_assign feeds later rewrites) — and
+      // therefore the exact terms handed to cvc5/ABC — is process-stable.
+      std::vector<std::string_view> keys;
+      keys.reserve(side.mem_rd.size());
+      for (const auto& [key, ports] : side.mem_rd) {
+        (void)ports;
+        keys.emplace_back(key);
+      }
+      std::sort(keys.begin(), keys.end());
+      for (const auto& key : keys) {
+        for (const auto& port : side.mem_rd.at(std::string(key))) {
+          if (port.from_shared_cur && !port.value.isNull()) {
+            // NOTE: entries installed here are invisible to sub-DAGs the memo
+            // already walked this loop (per-insert invalidation would re-walk
+            // the shared producer DAG per port — the memo's whole win). That
+            // bounded staleness is sound and, with the sorted order above,
+            // now deterministic.
+            initial_shared_merge.insert_or_assign(port.dout, solver.simplify(rewrite_exact_reads(port.value)));
+            ++exact_read_values;
+          }
+        }
+      }
+    };
+    install_exact_reads(re);
+    install_exact_reads(ie);
+    exact_rewrite_memo.clear();
+
+    // Preserve the part of array semantics that an ABC cone otherwise loses:
+    // two reads of the same (or already-proven-equal next) array return equal
+    // data whenever their addresses are equal.  Globally equal addresses were
+    // substituted above.  Keep the remaining relation conditional, as
+    //   (addr_a != addr_b) || (dout_a == dout_b).
+    // These are sound premises, not guessed correspondences.  A candidate is
+    // admitted only after its backing arrays are known equal; an incomplete
+    // candidate set can only miss a proof, never create a false one.
+    std::vector<cvc5::Term> direct_coherence;
+    for (const auto& c : merge_cands) {
+      if (!c.conditional || c.obligation == std::numeric_limits<size_t>::max() || addr_v[c.obligation] == Cone_verdict::Proven) {
+        continue;
+      }
+      const bool array_ok = !c.needs_array || direct_mem_proven.contains(c.mem_key);
+      if (!array_ok) {
+        continue;
+      }
+      const cvc5::Term dout_equal
+          = tm.mkTerm(cvc5::Kind::EQUAL, {rewrite_exact_reads(c.from_dout), rewrite_exact_reads(c.to_dout)});
+      const cvc5::Term coherence
+          = solver.simplify(tm.mkTerm(cvc5::Kind::OR, {rewrite_exact_reads(merge_obl[c.obligation]), dout_equal}));
+      if (coherence != tm.mkTrue()) {
+        direct_coherence.push_back(coherence);
+      }
+    }
+    cvc5::Term coherence_all;
+    for (const auto& c : direct_coherence) {
+      coherence_all = coherence_all.isNull() ? c : tm.mkTerm(cvc5::Kind::AND, {coherence_all, c});
+    }
+
+    // Merge-assisted direct proofs are deliberately kept out of the persistent
+    // standalone-cone cache: their digest does not include the address/array
+    // obligations which justify the read substitution.
+    std::vector<size_t>                              try_ix;  // unique parent indices into ind_diffs
+    std::vector<cvc5::Term>                          terms;
+    absl::flat_hash_map<size_t, std::vector<size_t>> direct_jobs_of;  // parent -> indices into terms
+    std::vector<bool>                                direct_merge_touched(ind_diffs.size(), false);
     for (size_t i = 0; i < ind_diffs.size(); ++i) {
       if (!cached[i] && subs_of.find(i) == subs_of.end()) {
         try_ix.push_back(i);
-        terms.push_back(ind_diffs[i].second);
+        cvc5::Term direct = ind_diffs[i].second;
+        if (!initial_shared_merge.empty()) {
+          const auto rewritten    = rewrite_exact_reads(direct);
+          direct_merge_touched[i] = rewritten != direct;
+          direct                  = rewritten;
+        }
+        const bool wide_external = !ind_diffs[i].first.starts_with("nxt:") && direct.getKind() == cvc5::Kind::DISTINCT
+                                   && direct.getNumChildren() == 2 && direct[0].getSort().isBitVector()
+                                   && direct[0].getSort() == direct[1].getSort() && direct[0].getSort().getBitVectorSize() >= 16;
+        if (wide_external) {
+          const uint32_t width = direct[0].getSort().getBitVectorSize();
+          for (uint32_t lo = 0; lo < width; lo += 8) {
+            const uint32_t hi  = std::min<uint32_t>(width - 1, lo + 7);
+            const auto     op  = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {hi, lo});
+            const auto     lhs = solver.simplify(rewrite_exact_reads(tm.mkTerm(op, {direct[0]})));
+            const auto     rhs = solver.simplify(rewrite_exact_reads(tm.mkTerm(op, {direct[1]})));
+            direct_jobs_of[i].push_back(terms.size());
+            cvc5::Term job = tm.mkTerm(cvc5::Kind::DISTINCT, {lhs, rhs});
+            if (!coherence_all.isNull()) {
+              job                     = tm.mkTerm(cvc5::Kind::AND, {job, coherence_all});
+              direct_merge_touched[i] = true;
+            }
+            terms.push_back(job);
+          }
+        } else {
+          direct_jobs_of[i].push_back(terms.size());
+          cvc5::Term job = solver.simplify(direct);
+          if (!coherence_all.isNull()) {
+            job                     = tm.mkTerm(cvc5::Kind::AND, {job, coherence_all});
+            direct_merge_touched[i] = true;
+          }
+          terms.push_back(job);
+        }
       }
     }
-    const size_t n_direct = terms.size();
-    for (const auto& s : subs) {
-      terms.push_back(s.term);
+    const size_t                           n_direct = try_ix.size();
+    std::vector<Cone_stats>                stats;
+    const Cone_merge_map*                  direct_merge        = first_direct_merge.empty() ? nullptr : &first_direct_merge;
+    size_t                                 fresh_slice_proven  = 0;
+    size_t                                 fresh_slice_sat     = 0;
+    size_t                                 fresh_slice_unknown = 0;
+    // Equal operands imply equal results. Prove small differences underneath
+    // a common operation before bit-blasting its entire result: two reads of
+    // the same packed memory often differ only in their address arithmetic.
+    // These are sufficient lemmas, never assumptions. If any lemma does not
+    // prove, retain the original output obligation unchanged.
+    std::vector<cvc5::Term>                congruence_terms;
+    std::unordered_map<cvc5::Term, size_t> congruence_index;
+    std::vector<std::vector<size_t>>       congruence_jobs(terms.size());
+    for (size_t job = 0; job < terms.size(); ++job) {
+      auto equality = terms[job];
+      if (equality.getKind() == cvc5::Kind::AND && equality.getNumChildren() == 2) {
+        equality = equality[0];
+      }
+      if (equality.getKind() != cvc5::Kind::DISTINCT || equality.getNumChildren() != 2) {
+        continue;
+      }
+      std::vector<std::pair<cvc5::Term, cvc5::Term>> work{
+          {equality[0], equality[1]}
+      };
+      std::vector<cvc5::Term> leaves;
+      size_t                  visited = 0;
+      while (!work.empty() && leaves.size() <= 64 && ++visited <= 4096) {
+        const auto [a, b] = work.back();
+        work.pop_back();
+        if (a == b) {
+          continue;
+        }
+        bool same_operator = a.getKind() == b.getKind() && a.getNumChildren() == b.getNumChildren() && a.getNumChildren() > 0
+                             && a.hasOp() == b.hasOp();
+        if (same_operator && a.hasOp()) {
+          same_operator = a.getOp() == b.getOp();
+        }
+        for (size_t k = 0; same_operator && k < a.getNumChildren(); ++k) {
+          same_operator
+              = a[k].getSort() == b[k].getSort() && (a[k] == b[k] || a[k].getSort().isBitVector() || a[k].getSort().isBoolean());
+        }
+        if (same_operator) {
+          for (size_t k = 0; k < a.getNumChildren(); ++k) {
+            work.emplace_back(a[k], b[k]);
+          }
+        } else {
+          leaves.push_back(tm.mkTerm(cvc5::Kind::DISTINCT, {a, b}));
+        }
+      }
+      if (!work.empty() || leaves.size() > 64 || (leaves.size() == 1 && leaves.front() == equality)) {
+        continue;
+      }
+      if (leaves.empty()) {
+        terms[job] = tm.mkFalse();
+        continue;
+      }
+      for (const auto& leaf : leaves) {
+        auto [lemma_it, inserted] = congruence_index.emplace(leaf, congruence_terms.size());
+        if (inserted) {
+          congruence_terms.push_back(leaf);
+        }
+        congruence_jobs[job].push_back(lemma_it->second);
+      }
     }
-    const size_t n_sub = subs.size();
-    for (const auto& m : merge_obl) {
-      terms.push_back(m);
+    size_t congruence_proven = 0;
+    if (!congruence_terms.empty()) {
+      const auto lemmas = abc_prove_unsat_batch(congruence_terms, opts.conelimit, cone_budget_left());
+      for (size_t job = 0; job < terms.size(); ++job) {
+        if (!congruence_jobs[job].empty()
+            && std::ranges::all_of(congruence_jobs[job], [&](size_t ix) { return lemmas[ix] == Cone_verdict::Proven; })) {
+          terms[job] = tm.mkFalse();
+          ++congruence_proven;
+        }
+      }
     }
-
-    std::vector<Cone_stats>         stats;
-    const std::vector<Cone_verdict> r1 = abc_prove_unsat_batch(terms, opts.conelimit, cone_budget_left(), &stats);
+    if (std::getenv("LEC_CONE_LOG") != nullptr && !congruence_terms.empty()) {
+      std::fprintf(stderr,
+                   "[LEC_CONE] congruence: %zu/%zu output jobs discharged from %zu operand lemmas\n",
+                   congruence_proven,
+                   terms.size(),
+                   congruence_terms.size());
+    }
+    {
+      // Leave room for the original ABC obligations after the speculative
+      // slice proofs. A few hard slices must not consume the entire pass.
+      const auto fresh_deadline
+          = std::chrono::steady_clock::now() + std::chrono::milliseconds(std::max<int64_t>(1, cone_budget_left() / 2));
+      bool fresh_budget_spent = false;
+      for (const size_t parent : try_ix) {
+        if (direct_jobs_of.at(parent).size() <= 1 || fresh_budget_spent) {
+          continue;
+        }
+        const auto&                            jobs             = direct_jobs_of.at(parent);
+        constexpr size_t                       fresh_group_size = 32;
+        std::vector<std::pair<size_t, size_t>> ranges;
+        for (size_t first = 0; first < jobs.size(); first += fresh_group_size) {
+          ranges.emplace_back(first, std::min(jobs.size(), first + fresh_group_size));
+        }
+        while (!ranges.empty() && !fresh_budget_spent) {
+          const auto [first, last] = ranges.back();
+          ranges.pop_back();
+          cvc5::Term group;
+          for (size_t k = first; k < last; ++k) {
+            group = group.isNull() ? terms[jobs[k]] : tm.mkTerm(cvc5::Kind::OR, {group, terms[jobs[k]]});
+          }
+          if (group == tm.mkFalse()) {
+            continue;  // already discharged by congruence
+          }
+          cvc5::Solver slice_solver(tm);
+          slice_solver.setLogic("QF_AUFBV");
+          // Use the same bounded read propagation as the parent solver.
+          // Fresh output slices can still contain large symbolic arrays.
+          slice_solver.setOption("arrays-prop", "1");
+          slice_solver.setOption("tlimit-per", "500");
+          slice_solver.assertFormula(group);
+          if (std::getenv("LEC_CONE_LOG") != nullptr) {
+            std::fprintf(stderr, "[LEC_CONE] fresh slice %s jobs %zu..%zu\n", ind_diffs[parent].first.c_str(), first, last);
+          }
+          if (acc != nullptr) {
+            ++acc->checks;
+          }
+          const auto check_t0  = std::chrono::steady_clock::now();
+          const auto sr        = slice_solver.checkSat();
+          solve_spent         += std::chrono::steady_clock::now() - check_t0;
+          res.solve_ms         = std::chrono::duration_cast<std::chrono::milliseconds>(solve_spent).count();
+          if (sr.isUnsat()) {
+            // Keep the existing result/stats plumbing: ABC receives a literal
+            // false for an already-discharged job and returns Proven instantly.
+            for (size_t k = first; k < last; ++k) {
+              terms[jobs[k]] = tm.mkFalse();
+            }
+            fresh_slice_proven += last - first;
+          } else if (last - first > 1) {
+            const size_t middle = first + (last - first) / 2;
+            ranges.emplace_back(middle, last);
+            ranges.emplace_back(first, middle);
+          } else if (sr.isSat()) {
+            ++fresh_slice_sat;
+          } else {
+            ++fresh_slice_unknown;
+          }
+          if (std::chrono::steady_clock::now() >= fresh_deadline || (budget_on && budget_left_ms() <= budget_floor_ms)) {
+            fresh_budget_spent = true;
+          }
+        }
+      }
+    }
+    std::vector<Cone_verdict> r1 = abc_prove_unsat_batch(terms, opts.conelimit, cone_budget_left(), &stats, direct_merge);
+    // The isolated ABC batch may expire before reporting even a constant
+    // false. A later timeout cannot invalidate an already-discharged proof.
+    for (size_t job = 0; job < terms.size(); ++job) {
+      if (terms[job] == tm.mkFalse()) {
+        r1[job] = Cone_verdict::Proven;
+      }
+    }
     if (std::getenv("LEC_CONE_LOG") != nullptr) {
       int addr_ok = 0;
       for (size_t k = 0; k < merge_obl.size(); ++k) {
-        addr_ok += r1[n_direct + n_sub + k] == Cone_verdict::Proven ? 1 : 0;
+        addr_ok += addr_v[k] == Cone_verdict::Proven ? 1 : 0;
+      }
+      // Most merges are now EXACT-address groups that need no solver premise,
+      // so `merge_obl` is no longer the merge population: reporting `addr_ok /
+      // merge_obl.size()` alone reads as "0/0 read-port merges" on a run with
+      // dozens of live merges.
+      size_t exact = 0;
+      for (const auto& c : merge_cands) {
+        exact += c.obligation == std::numeric_limits<size_t>::max() ? 1 : 0;
       }
       std::fprintf(stderr,
-                   "[LEC_CONE] -- %zu direct cut(s), %zu memory port obligation(s), %d/%zu read-port merges\n",
+                   "[LEC_CONE] -- %zu direct cut(s)/%zu ABC job(s), %zu memory port obligation(s), %zu read-port merge(s) "
+                   "(%zu exact-address, %d/%zu address-proved)\n",
                    n_direct,
+                   terms.size(),
                    subs.size(),
+                   merge_cands.size(),
+                   exact,
                    addr_ok,
                    merge_obl.size());
+      if (!direct_coherence.empty()) {
+        std::fprintf(stderr, "[LEC_CONE] -- %zu conditional read-coherence premise(s)\n", direct_coherence.size());
+      }
+      if (exact_read_values > 0) {
+        std::fprintf(stderr, "[LEC_CONE] -- substituted %zu exact latency-0 read value(s)\n", exact_read_values);
+      }
+      if (fresh_slice_proven > 0 || fresh_slice_sat > 0 || fresh_slice_unknown > 0) {
+        std::fprintf(stderr,
+                     "[LEC_CONE] -- fresh slice solver: %zu proven, %zu sat, %zu unknown\n",
+                     fresh_slice_proven,
+                     fresh_slice_sat,
+                     fresh_slice_unknown);
+      }
     }
-    for (size_t k = 0; k < n_direct; ++k) {
-      verdicts[try_ix[k]] = r1[k];
-      per_cut[try_ix[k]]  = stats[k];
+    for (const size_t parent : try_ix) {
+      bool   all_proven      = true;
+      bool   any_refuted     = false;
+      bool   any_unsupported = false;
+      size_t proven_jobs     = 0;
+      size_t unknown_jobs    = 0;
+      for (const size_t job : direct_jobs_of.at(parent)) {
+        all_proven            = all_proven && r1[job] == Cone_verdict::Proven;
+        any_refuted           = any_refuted || r1[job] == Cone_verdict::Refuted;
+        any_unsupported       = any_unsupported || r1[job] == Cone_verdict::Unsupported;
+        proven_jobs          += r1[job] == Cone_verdict::Proven ? 1 : 0;
+        unknown_jobs         += r1[job] == Cone_verdict::Unknown ? 1 : 0;
+        per_cut[parent].pis   = std::max(per_cut[parent].pis, stats[job].pis);
+        per_cut[parent].ands += stats[job].ands;
+        if (per_cut[parent].why.empty() && !stats[job].why.empty()) {
+          per_cut[parent].why = stats[job].why;
+        }
+      }
+      verdicts[parent] = all_proven        ? Cone_verdict::Proven
+                         : any_refuted     ? Cone_verdict::Refuted
+                         : any_unsupported ? Cone_verdict::Unsupported
+                                           : Cone_verdict::Unknown;
+      if (std::getenv("LEC_CONE_LOG") != nullptr && direct_jobs_of.at(parent).size() > 1) {
+        std::fprintf(stderr,
+                     "[LEC_CONE] -- split %-40s %zu/%zu proven, %zu unknown\n",
+                     ind_diffs[parent].first.c_str(),
+                     proven_jobs,
+                     direct_jobs_of.at(parent).size(),
+                     unknown_jobs);
+      }
     }
     // A memory cut is discharged exactly when EVERY one of its port obligations
     // is. A port obligation that is definitively SAT means the write logic really
@@ -5793,11 +8768,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // equality may do that (`can_refute`): a bulk-update obligation is merely
     // sufficient, so a SAT one leaves the parent Unknown for cvc5 to settle.
     absl::flat_hash_set<std::string> mem_proven;  // mem keys whose next-state arrays are proven equal
-    std::vector<Cone_verdict>        sub_v(n_sub, Cone_verdict::Unknown);
-    for (size_t k = 0; k < n_sub; ++k) {
-      sub_v[k] = r1[n_direct + k];
-    }
-    auto aggregate_mem = [&]() {
+    auto                             aggregate_mem = [&]() {
       mem_proven = mem_equal_terms;  // no cut was built for these: equal by construction
       for (const auto& [parent, ix] : subs_of) {
         bool all = true, any_sat = false;
@@ -5813,7 +8784,29 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     };
     aggregate_mem();
 
-    // ---- round 2: retry the residue with the DISCHARGED dout merges ---------
+    // A memory proof made under exact dout correspondence is sound, but its
+    // standalone cone digest does not include the surrounding address/read-port
+    // relation.  Keep it out of the persistent cone cache, just like the later
+    // merge-assisted retries.
+    std::vector<bool> merge_assisted(ind_diffs.size(), false);
+    int               merged_proven = 0;
+    if (!initial_shared_merge.empty()) {
+      for (const auto& [parent, ix] : subs_of) {
+        if (verdicts[parent] == Cone_verdict::Proven) {
+          merge_assisted[parent] = true;
+        }
+      }
+    }
+    if (!first_direct_merge.empty() || !direct_coherence.empty()) {
+      for (size_t k = 0; k < n_direct; ++k) {
+        if (verdicts[try_ix[k]] == Cone_verdict::Proven && direct_merge_touched[try_ix[k]]) {
+          merge_assisted[try_ix[k]] = true;
+          ++merged_proven;
+        }
+      }
+    }
+
+    // ---- round 2: retry the residue with all DISCHARGED dout merges ----------
     // NOT cacheable: a merge-assisted proof is a weaker claim than the cone's
     // digest stands for (it assumes the two douts equal), and the digest does not
     // cover the address cones that justify it — a later run with the same cone but
@@ -5821,18 +8814,19 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     auto build_merge = [&]() {
       Cone_merge_map m;
       for (const auto& c : merge_cands) {
-        const bool addr_ok  = r1[n_direct + n_sub + c.obligation] == Cone_verdict::Proven;
+        const bool addr_ok  = c.obligation == std::numeric_limits<size_t>::max() || addr_v[c.obligation] == Cone_verdict::Proven;
         const bool array_ok = !c.needs_array || mem_proven.contains(c.mem_key);
         if (addr_ok && array_ok) {
-          m.emplace(c.impl_dout, c.ref_dout);
+          m.emplace(c.from_dout, c.to_dout);
         }
       }
       return m;
     };
-    Cone_merge_map    merge         = build_merge();
-    int               merged_proven = 0;
-    std::vector<bool> merge_assisted(ind_diffs.size(), false);
-    // ---- round 1b: the memory sub-obligations get the merges too -------------
+    Cone_merge_map merge = build_merge();
+    if (std::getenv("LEC_CONE_LOG") != nullptr && !merge_cands.empty()) {
+      std::fprintf(stderr, "[LEC_CONE] -- enabled %zu/%zu discharged read-port merge(s)\n", merge.size(), merge_cands.size());
+    }
+    // ---- round 2a: unresolved memory obligations get the wider merge set ------
     // A whole-array register file is routinely written from a function of
     // ITSELF (`ex_mask_rf_q <= f8_mask_rf_wdata_d`, which starts life as a copy
     // of `ex_mask_rf_q`), so its bulk-update bus reads the array's own douts.
@@ -6037,7 +9031,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     res.detail += cones_note;
   }
 
-  const bool incomplete = !res.unmatched_ref.empty() || !res.unmatched_impl.empty();
+  const bool incomplete          = !res.unmatched_ref.empty() || !res.unmatched_impl.empty();
+  const bool dead_state_only     = internal_state_only(res.unmatched_ref, res.unmatched_impl);
+  const bool blocking_incomplete = incomplete && !dead_state_only;
   if (!res.unmatched_ref.empty()) {
     res.detail
         += "; " + std::to_string(res.unmatched_ref.size()) + " ref-only cut point(s) {" + join_capped(res.unmatched_ref) + "}";
@@ -6048,13 +9044,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     res.detail += bbin_models_hint(res.unmatched_impl);
   }
 
-  if (opts.assumptions != nullptr) {
-    arm_solve_budget();
-    cvc5::Result ar = solver.checkSat();
+  if (opts.assumptions != nullptr || opts.design_assumes) {
+    cvc5::Result ar = solve_check();
     if (!ar.isSat()) {
       res.verdict  = Verdict::Unknown;
-      res.detail  += ar.isUnsat() ? "; formal helper set is CONTRADICTORY (vacuous proof rejected)"
-                                  : "; formal helper consistency check returned unknown";
+      res.detail  += ar.isUnsat() ? "; active assumption set is CONTRADICTORY (vacuous proof rejected)"
+                                  : "; active assumption consistency check returned unknown";
       return res;
     }
   }
@@ -6067,9 +9062,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     //     established nothing. That is not equivalence, and reporting it as
     //     Proven made `lhd lec` on an empty module print "PROVEN equivalent" and
     //     exit 0 with no warning. Flag it so the driver hard-fails instead.
-    if (!incomplete && cones_proven > 0) {
+    if (!blocking_incomplete && cones_proven > 0) {
       res.verdict  = Verdict::Proven;
       res.detail  += "; every cut discharged by the cone pass";
+      if (dead_state_only) {
+        res.detail += "; one-sided internal state is unobservable from every common obligation";
+      }
+      gate_packed_scalar_step();
       return res;
     }
     res.nothing_compared  = true;
@@ -6145,8 +9144,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         solver.push();
         solver.assertFormula(bad.substitute(sel, vc));                  // folded miter
         solver.assertFormula(tm.mkTerm(cvc5::Kind::EQUAL, {sel, vc}));  // pin sel so the witness reads it
-        arm_solve_budget();
-        cvc5::Result cr = solver.checkSat();
+        cvc5::Result cr = solve_check();
         if (cr.isSat()) {
           res.witness = build_witness();
           solver.pop();
@@ -6168,7 +9166,11 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         res.verdict = Verdict::Unknown;
         return res;
       }
-      res.verdict = incomplete ? Verdict::Unknown : Verdict::Proven;
+      res.verdict = blocking_incomplete ? Verdict::Unknown : Verdict::Proven;
+      if (res.verdict == Verdict::Proven && dead_state_only) {
+        res.detail += "; one-sided internal state is unobservable from every common obligation";
+      }
+      gate_packed_scalar_step();
       return res;
     }
     // sel symbol absent (should not happen): fall through to the monolithic solve.
@@ -6191,8 +9193,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       const auto cut_t0 = std::chrono::steady_clock::now();
       solver.push();
       solver.assertFormula(dt);
-      arm_solve_budget();
-      cvc5::Result dr = solver.checkSat();
+      cvc5::Result dr = solve_check();
       solver.pop();
       const auto cut_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - cut_t0).count();
       if (dr.isUnsat()) {
@@ -6211,9 +9212,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                      static_cast<long long>(cut_ms));
       }
     }
-    if (hard.empty() && !incomplete) {
+    if (hard.empty() && !blocking_incomplete) {
       res.verdict  = Verdict::Proven;
       res.detail  += "; decomposed (" + std::to_string(proven) + " cuts each UNSAT)";
+      if (dead_state_only) {
+        res.detail += "; one-sided internal state is unobservable from every common obligation";
+      }
+      gate_packed_scalar_step();
       return res;
     }
     res.detail += "; decomposed: " + std::to_string(proven) + "/" + std::to_string(ind_diffs.size()) + " cuts PROVEN"
@@ -6237,16 +9242,18 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // through to the monolithic solve for the definitive verdict + witness.
   }
   solver.assertFormula(bad);
-  arm_solve_budget();
-  cvc5::Result r = solver.checkSat();
+  cvc5::Result r = solve_check();
 
   if (r.isUnsat()) {
     // COMMON outputs agree. Proven only if the correspondence is also complete.
-    if (incomplete) {
+    if (blocking_incomplete) {
       res.verdict  = Verdict::Unknown;
       res.detail  += "; matched portion EQUIVALENT (only the unmatched cut points above remain)";
     } else {
       res.verdict = Verdict::Proven;
+      if (dead_state_only) {
+        res.detail += "; one-sided internal state is unobservable from every common obligation";
+      }
     }
   } else if (r.isSat()) {
     res.witness        = build_witness();
@@ -6268,7 +9275,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       res.verdict  = Verdict::Unknown;
       res.detail  += "; matched portion DIFFERS (witness below; may be an artifact of the unmatched cut points)";
     } else if (has_state_cut) {
-      // ONLY A SURE COUNTEREXAMPLE IS A FAILURE (user ruling 2026-08-02).
+      // ONLY A SURE COUNTEREXAMPLE IS A FAILURE.
       //
       // The inductive step starts from an ARBITRARY equal state, so a
       // single-step CEX may sit on a state the design can never reach -- and
@@ -6296,17 +9303,753 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       res.detail += " (hit formal.timeout=" + std::to_string(opts.timeout) + "s; raise --set formal.timeout)";
     }
   }
+  gate_packed_scalar_step();
   return res;
 }
 
+namespace {
+
+// True when any node matching `pred` exists in the SAME universe
+// copy_loop_scratch() copies: the design's own definition closure plus the
+// `sub_lib` externals. The gate must never be narrower than the thing it gates
+// -- a `--lib` body lives in ANOTHER library, so neither root's closure nor its
+// library-level has_loop_subnodes() flag can see it, and a compact loop missed
+// here is never materialized: the query then compares count-1 replicas that are
+// not there (a false PROVEN).
+//
+// Only CROSS-library sub_lib entries need that extra scan, though. Not every
+// caller passes a `--lib` external set: pass.formal fills sub_lib with EVERY
+// graph of the compile unit, so scanning same-library members would let one
+// loop anywhere in the design route every loop-free root through the scratch
+// copy+materialize path (and one copy failure there returns unsupported, which
+// pass.formal reads as a correlation mismatch and silently discharges NO
+// hierarchy contract). A same-library graph instantiated under root is already
+// in scan(root)'s definition closure; one that is not instantiated under root
+// cannot change this comparison either way.
+template <class Pred>
+bool any_loop_subnode(hhds::Graph* root, const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib, Pred pred) {
+  const auto scan = [&pred](hhds::Graph* def_root) {
+    if (def_root == nullptr) {
+      return false;
+    }
+    if (const auto io = def_root->get_io(); io && io->get_library() != nullptr && !io->get_library()->has_loop_subnodes()) {
+      return false;
+    }
+    for (const auto& graph : def_root->definitions().graphs()) {
+      for (const auto node : graph->body().nodes()) {
+        if (pred(node)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  if (scan(root)) {
+    return true;
+  }
+  if (sub_lib != nullptr) {
+    // get_io() hands back a TEMPORARY shared_ptr (weak_ptr::lock) that can be
+    // empty, so bind it before dereferencing.
+    hhds::GraphLibrary* root_lib = nullptr;
+    if (root != nullptr) {
+      if (const auto root_io = root->get_io(); root_io) {
+        root_lib = root_io->get_library();
+      }
+    }
+    for (const auto& [gid, external] : *sub_lib) {
+      if (root_lib != nullptr && external != nullptr) {
+        if (const auto external_io = external->get_io(); external_io && external_io->get_library() == root_lib) {
+          continue;  // same library => already covered by scan(root)'s closure
+        }
+      }
+      if (scan(external)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool has_native_loops(hhds::Graph* root, const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  return any_loop_subnode(root, sub_lib, [](const auto& node) { return node.is_loop_subnode(); });
+}
+
+bool has_activation_loops(hhds::Graph* root, const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  return any_loop_subnode(root, sub_lib, [](const auto& node) {
+    const auto loop = node.subnode_loop();
+    return loop && loop->activation_input;
+  });
+}
+
+// A module may legally feed one of its outputs back into one of its inputs when
+// the callee cuts that path with state.  HHDS's occurrence resolver must stop a
+// direct Sub-output -> Sub-input self edge to avoid recursing forever when the
+// callee is combinational; consequently it leaves the boundary pin unresolved
+// even when a flop immediately breaks the path inside the callee.  During a
+// hierarchy escalation that looks like a combinational encoder stall at the
+// Sub, although the flattened RTL is acyclic between state cuts.
+//
+// Detect only the direct call-boundary shape: walk backwards from every Sub
+// input, through ordinary combinational nodes, and stop at all state or OTHER
+// Sub boundaries.  Reaching the same Sub's output means one private inline is
+// needed so the encoder can see the internal state cut.
+bool has_direct_boundary_feedback(const hhds::Node_class& sub) {
+  if (gu::type_op_of(sub) != Ntype_op::Sub || sub.get_subnode_graph() == nullptr || sub.is_loop_subnode()) {
+    return false;
+  }
+  absl::flat_hash_set<hhds::Node_class> seen;
+  std::vector<hhds::Pin_class>          pending;
+  // Pin walk, PLURAL driver read. Not-a-loop-subnode does NOT imply one driver
+  // per sink: any banked combinational cell reached here can carry several, and
+  // a dropped driver silently hides a feedback path this predicate exists to
+  // find. The walk also no longer decodes the Sub's whole output fanout just to
+  // throw it away.
+  for (const auto& sink : sub.inp_sorted_pins()) {
+    for (const auto& drv : sink.get_driver_pins()) {
+      pending.push_back(drv);
+    }
+  }
+  while (!pending.empty()) {
+    auto driver = pending.back();
+    pending.pop_back();
+    if (driver.is_invalid() || driver.is_const() || gu::is_graph_input_pin(driver)) {
+      continue;
+    }
+    auto node = driver.get_master_node();
+    if (node == sub) {
+      return true;
+    }
+    const auto op = gu::type_op_of(node);
+    if (op == Ntype_op::Sub || op == Ntype_op::Memory || op == Ntype_op::IO || gu::is_type_register(node)
+        || !seen.insert(node).second) {
+      continue;
+    }
+    // Ordinary combinational logic reaches here (every Sub was `continue`d
+    // above) -- which does NOT bound the driver count per sink, so read plural.
+    for (const auto& sink : node.inp_sorted_pins()) {
+      for (const auto& drv : sink.get_driver_pins()) {
+        pending.push_back(drv);
+      }
+    }
+  }
+  return false;
+}
+
+// The collapse set as the hierarchical driver hands it over is spelled by
+// ENTITY (`StageReg_6`), while a Sub instance names its def in full
+// (`StageReg_6.StageReg_6`); a user --collapse may use either. Match both, and
+// an entity-vs-entity agreement too. Erring towards "collapsed" is safe here: a
+// collapsed instance is a sequence-transducer box whose outputs are per-cycle
+// symbols, so no combinational loop can close through it and there is nothing
+// to inline -- whereas inlining it on ONE side (the ref's feedback path is
+// native logic, the impl's runs through Liberty-cell Subs where the detector
+// stops) leaves the boxes one-sided and every cut through them refutable.
+// dino's netlist LEC lost its whole collapsed top proof to exactly that.
+bool collapse_names_def(const absl::flat_hash_set<std::string>& collapsed, std::string_view full) {
+  auto entity = [](std::string_view n) -> std::string_view {
+    auto d = n.rfind('.');
+    return d == std::string_view::npos ? n : n.substr(d + 1);
+  };
+  if (collapsed.contains(std::string{full}) || collapsed.contains(std::string{entity(full)})) {
+    return true;
+  }
+  for (const auto& c : collapsed) {
+    if (entity(c) == entity(full)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool has_boundary_feedback(hhds::Graph* root, const Lec_options& opts) {
+  if (root == nullptr) {
+    return false;
+  }
+  const absl::flat_hash_set<std::string> collapsed(opts.collapse.begin(), opts.collapse.end());
+  for (const auto node : root->body().nodes()) {
+    auto io = node.get_subnode_io();
+    if (io != nullptr && !collapse_names_def(collapsed, io->get_name()) && has_direct_boundary_feedback(node)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Inline only the direct feedback-boundary instances identified above.  This is
+// deliberately not a whole-design flatten: proven siblings remain Sub boxes and
+// the hierarchy decomposition still bounds the query.  A fixpoint is needed
+// because one inline can expose a nested instance as a new direct child.
+bool inline_boundary_feedback(hhds::Graph* root, const Lec_options& opts) {
+  const absl::flat_hash_set<std::string> collapsed(opts.collapse.begin(), opts.collapse.end());
+  for (int round = 0; round < 16; ++round) {
+    std::vector<hhds::Node_class> targets;
+    for (const auto node : root->body().nodes()) {
+      auto io = node.get_subnode_io();
+      if (io != nullptr && !collapse_names_def(collapsed, io->get_name()) && has_direct_boundary_feedback(node)) {
+        targets.push_back(node);
+      }
+    }
+    if (targets.empty()) {
+      return true;
+    }
+    for (const auto& target : targets) {
+      if (!gu::inline_sub_instance(root, target, "pass.lec")) {
+        return false;
+      }
+    }
+  }
+  return !has_boundary_feedback(root, opts);
+}
+
+bool copy_loop_scratch(hhds::Graph* source, const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
+                       hhds::GraphLibrary& scratch, std::shared_ptr<hhds::Graph>& scratch_top,
+                       std::vector<std::shared_ptr<hhds::Graph>>& scratch_graphs) {
+  if (source == nullptr) {
+    return false;
+  }
+  const auto source_io  = source->get_io();
+  auto*      source_lib = source_io ? source_io->get_library() : nullptr;
+  if (source_lib == nullptr) {
+    return false;
+  }
+
+  // copy_from is definition-local, so copy the closure callee-first. The
+  // scratch library owns every body and occurrence materialization can never
+  // mutate the shared source design.
+  for (const auto& graph : source->definitions().graphs()) {
+    if (!scratch.copy_from(*source_lib, graph->get_name())) {
+      return false;
+    }
+  }
+  if (sub_lib != nullptr) {
+    for (const auto& [gid, external] : *sub_lib) {
+      if (external == nullptr || scratch.find_io(external->get_name())) {
+        continue;
+      }
+      const auto external_io  = external->get_io();
+      auto*      external_lib = external_io ? external_io->get_library() : nullptr;
+      if (external_lib == nullptr) {
+        return false;
+      }
+      for (const auto& graph : external->definitions().graphs()) {
+        if (!scratch.find_io(graph->get_name()) && !scratch.copy_from(*external_lib, graph->get_name())) {
+          return false;
+        }
+      }
+    }
+  }
+
+  for (const auto gid : scratch.all_gids()) {
+    if (auto graph = scratch.get_graph(gid)) {
+      scratch_graphs.push_back(std::move(graph));
+    }
+  }
+  auto top_io = scratch.find_io(source->get_name());
+  scratch_top = top_io ? top_io->get_graph() : std::shared_ptr<hhds::Graph>{};
+  return scratch_top != nullptr;
+}
+
+bool build_activation_scratch(hhds::Graph* source, const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
+                              hhds::GraphLibrary& scratch, std::shared_ptr<hhds::Graph>& scratch_top,
+                              std::vector<std::shared_ptr<hhds::Graph>>& scratch_graphs) {
+  return copy_loop_scratch(source, sub_lib, scratch, scratch_top, scratch_graphs)
+         && graph_util::materialize_occurrences_all(scratch_graphs, "pass.lec");
+}
+
+std::string def_entity(std::string_view name) {
+  const auto dot = name.rfind('.');
+  return std::string(dot == std::string_view::npos ? name : name.substr(dot + 1));
+}
+
+bool collapse_names_def(hhds::Graph* root, std::string_view full_name, const Lec_options& opts) {
+  if (root == nullptr) {
+    return false;
+  }
+  const std::string entity       = def_entity(full_name);
+  int               entity_count = 0;
+  for (const auto& graph : root->definitions().graphs()) {
+    if (def_entity(graph->get_name()) == entity) {
+      ++entity_count;
+    }
+  }
+  for (const auto& name : opts.collapse) {
+    if (name == full_name || (entity_count == 1 && name == entity)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Only unresolved hierarchy belongs to the current obligation. A discharged
+// child is a sequence box; expanding loops inside its implementation repeats a
+// proof already completed below us (and can exceed the expansion limit).
+std::vector<std::shared_ptr<hhds::Graph>> unresolved_loop_graphs(const std::shared_ptr<hhds::Graph>& root,
+                                                                 const Lec_options&                  opts) {
+  std::vector<std::shared_ptr<hhds::Graph>> graphs;
+  absl::flat_hash_set<hhds::Gid>            seen;
+  std::vector<std::shared_ptr<hhds::Graph>> work{root};
+  while (!work.empty()) {
+    auto graph = std::move(work.back());
+    work.pop_back();
+    if (!graph || !seen.insert(graph->get_gid()).second) {
+      continue;
+    }
+    graphs.push_back(graph);
+    for (auto node : graph->body().nodes()) {
+      if (graph_util::type_op_of(node) != Ntype_op::Sub) {
+        continue;
+      }
+      auto io = node.get_subnode_io();
+      if (io && !collapse_names_def(root.get(), io->get_name(), opts)) {
+        work.push_back(node.get_subnode_graph());
+      }
+    }
+  }
+  return graphs;
+}
+
+struct Loop_port_contract {
+  std::string name;
+  uint32_t    bits                                        = 0;
+  bool        unsign                                      = false;
+  bool        operator==(const Loop_port_contract&) const = default;
+};
+
+struct Loop_contract {
+  int64_t                                                        first = 0;
+  int64_t                                                        step  = 0;
+  uint64_t                                                       count = 0;
+  std::optional<Loop_port_contract>                              index;
+  std::optional<Loop_port_contract>                              activation;
+  std::optional<Loop_port_contract>                              next_active;
+  std::vector<Loop_port_contract>                                inputs;
+  std::vector<Loop_port_contract>                                outputs;
+  std::vector<std::pair<Loop_port_contract, Loop_port_contract>> carries;
+  bool                                                           valid                                  = false;
+  bool                                                           operator==(const Loop_contract&) const = default;
+};
+
+std::optional<Loop_port_contract> loop_port(const hhds::GraphIO& io, hhds::Port_id pid, bool input) {
+  const auto& decls = input ? io.get_input_pin_decls() : io.get_output_pin_decls();
+  for (const auto& decl : decls) {
+    if (decl.port_id == pid) {
+      return Loop_port_contract{std::string(decl.name), static_cast<uint32_t>(decl.bits), decl.unsign};
+    }
+  }
+  return std::nullopt;
+}
+
+Loop_contract loop_contract(const hhds::Node_class& node) {
+  Loop_contract out;
+  const auto    loop = node.subnode_loop();
+  const auto    io   = node.get_subnode_io();
+  if (!loop || !io) {
+    return out;
+  }
+  try {
+    node.subnode_group().validate();
+  } catch (const std::exception&) {
+    return out;
+  }
+  out.first = loop->first;
+  out.step  = loop->step;
+  out.count = loop->count;
+  for (const auto& decl : io->get_input_pin_decls()) {
+    out.inputs.push_back(Loop_port_contract{std::string(decl.name), static_cast<uint32_t>(decl.bits), decl.unsign});
+  }
+  for (const auto& decl : io->get_output_pin_decls()) {
+    out.outputs.push_back(Loop_port_contract{std::string(decl.name), static_cast<uint32_t>(decl.bits), decl.unsign});
+  }
+  auto sort_ports = [](auto& ports) {
+    std::sort(ports.begin(), ports.end(), [](const auto& a, const auto& b) {
+      return std::tie(a.name, a.bits, a.unsign) < std::tie(b.name, b.bits, b.unsign);
+    });
+  };
+  sort_ports(out.inputs);
+  sort_ports(out.outputs);
+  if (loop->index_input) {
+    out.index = loop_port(*io, *loop->index_input, true);
+    if (!out.index) {
+      return out;
+    }
+  }
+  if (loop->activation_input) {
+    out.activation = loop_port(*io, *loop->activation_input, true);
+    if (!out.activation) {
+      return out;
+    }
+  }
+  if (loop->next_active_output) {
+    out.next_active = loop_port(*io, *loop->next_active_output, false);
+    if (!out.next_active) {
+      return out;
+    }
+  }
+  for (const auto& carry : node.subnode_group().carries()) {
+    auto input  = loop_port(*io, carry.input_port(), true);
+    auto output = loop_port(*io, carry.output_port(), false);
+    if (!input || !output) {
+      return out;
+    }
+    out.carries.emplace_back(std::move(*input), std::move(*output));
+  }
+  if (out.count == 0) {
+    absl::flat_hash_set<uint32_t> carry_outputs;
+    for (const auto& carry : node.subnode_group().carries()) {
+      carry_outputs.insert(static_cast<uint32_t>(carry.output_port()));
+    }
+    // With no ordinal there is no value for an observed ordinary body output.
+    // Only carried outputs have defined pass-through semantics. Sharing a free
+    // sequence-box symbol here would turn two undefined outputs into a false
+    // proof, so leave this shape to materialization/refusal.
+    for (const auto& edge : node.out_edges()) {
+      if (edge.sink.get_master_node() != node && !carry_outputs.contains(static_cast<uint32_t>(edge.driver.get_port_id()))) {
+        return out;
+      }
+    }
+  }
+  std::sort(out.carries.begin(), out.carries.end(), [](const auto& a, const auto& b) {
+    return std::tie(a.first.name, a.second.name, a.first.bits, a.second.bits, a.first.unsign, a.second.unsign)
+           < std::tie(b.first.name, b.second.name, b.first.bits, b.second.bits, b.first.unsign, b.second.unsign);
+  });
+  out.valid = true;
+  return out;
+}
+
+// Replace one certified compact recurrence by ONE ordinary collapsed call in
+// private scratch. The body theorem plus Loop_contract equality justifies this
+// sequence-box summary; its external inputs remain bbin obligations and its
+// outputs use the existing shared sequence-box symbols. No source graph is
+// mutated, and a failed certificate leaves the compact node for the ordinary
+// occurrence-materialization fallback below.
+bool summarize_certified_loop(const hhds::Node_class& old) {
+  auto* graph = old.get_graph();
+  auto  io    = old.get_subnode_io();
+  if (graph == nullptr || !io) {
+    return false;
+  }
+
+  struct Input_edge {
+    hhds::Port_id   pid;
+    hhds::Pin_class driver;
+  };
+  struct Output_edge {
+    hhds::Port_id   pid;
+    hhds::Pin_class old_driver;
+    hhds::Pin_class sink;
+  };
+  std::vector<Input_edge>  inputs;
+  std::vector<Output_edge> outputs;
+  // `old` is a COMPACT LOOP node, so its carry-in sink is the one pin in the
+  // design that legitimately carries TWO drivers -- the seed, and a self edge
+  // from its own carry-out meaning "the previous ordinal" (pass/legalize.cpp's
+  // sanctioned exception). The `!= old` filter below is exactly what separates
+  // them, so this walk must use the PLURAL reader: get_driver_pin() would hand
+  // back one of the two with no way to say which, and on the wrong pick the
+  // summary Sub loses its carry-in SEED.
+  for (auto edge_sink : old.inp_sorted_pins()) {
+    for (auto edge_drv : edge_sink.get_driver_pins()) {
+      if (edge_drv.get_master_node() != old) {
+        inputs.push_back(Input_edge{edge_sink.get_port_id(), edge_drv});
+      }
+    }
+  }
+  for (const auto& edge : old.out_edges()) {
+    if (edge.sink.get_master_node() != old) {
+      outputs.push_back(Output_edge{edge.driver.get_port_id(), edge.driver, edge.sink});
+    }
+  }
+
+  auto summary = graph_util::create_typed_node(*graph, Ntype_op::Sub);
+  summary.set_subnode(io);
+  if (graph_util::has_name(old)) {
+    summary.set_name(std::string(graph_util::node_name_of(old)));
+  }
+  if (auto src = old.attr(hhds::attrs::srcid); src.has()) {
+    summary.attr(hhds::attrs::srcid).set(src.get());
+  }
+  absl::flat_hash_set<uint32_t> input_pids;
+  for (const auto& input : inputs) {
+    input.driver.connect_sink(summary.create_sink_pin(input.pid));
+    input_pids.insert(static_cast<uint32_t>(input.pid));
+  }
+  // Descriptor-provided roles (most importantly the loop index) deliberately
+  // have no stored external edge, but an ordinary Sub still must materialize
+  // every declared pin: HHDS boundary resolution asks for the pin before it can
+  // decide that it is unconnected. The certificate accounts for these roles in
+  // Loop_contract, so leaving the summary pin un-driven is intentional.
+  for (const auto& decl : io->get_input_pin_decls()) {
+    if (input_pids.insert(static_cast<uint32_t>(decl.port_id)).second) {
+      (void)summary.create_sink_pin(decl.port_id);
+    }
+  }
+  absl::flat_hash_map<uint32_t, hhds::Pin_class> drivers;
+  for (const auto& decl : io->get_output_pin_decls()) {
+    auto driver = summary.create_driver_pin(decl.port_id);
+    if (decl.bits != 0) {
+      graph_util::set_bits(driver, static_cast<int32_t>(decl.bits));
+    }
+    if (decl.unsign) {
+      graph_util::set_unsign(driver);
+    } else {
+      graph_util::set_sign(driver);
+    }
+    drivers.emplace(static_cast<uint32_t>(decl.port_id), driver);
+  }
+  for (const auto& output : outputs) {
+    const uint32_t pid  = static_cast<uint32_t>(output.pid);
+    auto [it, inserted] = drivers.try_emplace(pid);
+    if (inserted) {
+      it->second = summary.create_driver_pin(output.pid);
+      if (const auto bits = graph_util::bits_of(output.old_driver); bits != 0) {
+        graph_util::set_bits(it->second, bits);
+      }
+      if (graph_util::is_unsign(output.old_driver)) {
+        graph_util::set_unsign(it->second);
+      } else {
+        graph_util::set_sign(it->second);
+      }
+      if (const auto name = graph_util::pin_name_of(output.old_driver); !name.empty()) {
+        graph_util::set_pin_name(it->second, std::string(name));
+      }
+    }
+    it->second.connect_sink(output.sink);
+  }
+  old.del_node();
+  return true;
+}
+
+struct Loop_candidate {
+  hhds::Node_class node;
+  Loop_contract    contract;
+  std::string      callee;
+  std::string      instance;
+  bool             used = false;
+};
+
+std::vector<Loop_candidate> direct_loop_candidates(hhds::Graph* graph) {
+  std::vector<Loop_candidate> out;
+  if (graph == nullptr) {
+    return out;
+  }
+  for (const auto node : graph->body().nodes()) {
+    if (!node.is_loop_subnode()) {
+      continue;
+    }
+    const auto io = node.get_subnode_io();
+    out.push_back(Loop_candidate{node,
+                                 loop_contract(node),
+                                 io ? def_entity(io->get_name()) : std::string{},
+                                 graph_util::default_instance_name(node),
+                                 false});
+  }
+  return out;
+}
+
+std::vector<std::string> summarize_loop_pairs(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts) {
+  auto                     refs  = direct_loop_candidates(ref);
+  auto                     impls = direct_loop_candidates(impl);
+  std::vector<std::string> summarized;
+  for (auto& r : refs) {
+    if (!r.contract.valid) {
+      continue;
+    }
+    std::vector<size_t> exact;
+    std::vector<size_t> compatible;
+    for (size_t i = 0; i < impls.size(); ++i) {
+      const auto& m = impls[i];
+      if (m.used || !m.contract.valid || r.callee != m.callee || !(r.contract == m.contract)) {
+        continue;
+      }
+      compatible.push_back(i);
+      if (r.instance == m.instance) {
+        exact.push_back(i);
+      }
+    }
+    std::optional<size_t> choice;
+    if (exact.size() == 1) {
+      choice = exact.front();
+    } else if (exact.empty() && compatible.size() == 1) {
+      choice = compatible.front();
+    }
+    if (!choice) {
+      continue;
+    }
+    auto&      m   = impls[*choice];
+    const auto rio = r.node.get_subnode_io();
+    const auto mio = m.node.get_subnode_io();
+    if (!rio || !mio || !collapse_names_def(ref, rio->get_name(), opts) || !collapse_names_def(impl, mio->get_name(), opts)) {
+      continue;  // no discharged/pending body theorem: expansion is mandatory
+    }
+    if (!summarize_certified_loop(r.node) || !summarize_certified_loop(m.node)) {
+      continue;
+    }
+    r.used = true;
+    m.used = true;
+    summarized.push_back(
+        std::format("instance={} body={} P0=descriptor-exact P1=boundary-sequence P2=initial-state P3={}-body-theorem "
+                    "P4/P5=ordinal-recurrence count={}",
+                    r.instance,
+                    r.callee,
+                    r.contract.activation ? "activation-guarded" : "unconditional",
+                    r.contract.count));
+  }
+  return summarized;
+}
+
+}  // namespace
+
 Query_result prove_equal(hhds::Graph* ref, hhds::Graph* impl, const Lec_options& opts,
                          const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib) {
+  // A direct Sub-output -> same-Sub-input feedback can be sequential inside the
+  // callee even though the hierarchy boundary alone looks cyclic.  Work on a
+  // private closure copy and inline only those boundary instances, exposing the
+  // real flop/memory cut without mutating the shared design or flattening its
+  // proven siblings.
+  if (!opts._boundary_feedback_prepared && (has_boundary_feedback(ref, opts) || has_boundary_feedback(impl, opts))) {
+    hhds::GraphLibrary                        ref_scratch;
+    hhds::GraphLibrary                        impl_scratch;
+    std::shared_ptr<hhds::Graph>              ref_top;
+    std::shared_ptr<hhds::Graph>              impl_top;
+    std::vector<std::shared_ptr<hhds::Graph>> ref_graphs;
+    std::vector<std::shared_ptr<hhds::Graph>> impl_graphs;
+    if (!copy_loop_scratch(ref, sub_lib, ref_scratch, ref_top, ref_graphs)
+        || !copy_loop_scratch(impl, sub_lib, impl_scratch, impl_top, impl_graphs)) {
+      Query_result failure;
+      failure.unsupported = true;
+      failure.detail      = "could not copy feedback-boundary definitions into private LEC scratch state";
+      return failure;
+    }
+    if (!inline_boundary_feedback(ref_top.get(), opts) || !inline_boundary_feedback(impl_top.get(), opts)) {
+      Query_result failure;
+      failure.unsupported = true;
+      failure.detail      = "could not inline a sequential feedback-boundary instance in private LEC scratch state";
+      return failure;
+    }
+
+    // The source graphs were cprop-clean before the contextual inline, but the
+    // splice reconnects a callee's word-wide output directly to its former
+    // parent-side packed reads.  Re-run the semantics-preserving normalization
+    // on the two private roots so constant slices recover their bit-precise
+    // producer.  Without this, unrelated lanes of a packed feedback word form
+    // a false word-level cycle even though the internal flop already cuts the
+    // real dependency (XiangShan CSR is the large instance of this shape).
+    Cprop ref_cprop;
+    Cprop impl_cprop;
+    ref_cprop.do_trans(ref_top);
+    impl_cprop.do_trans(impl_top);
+
+    Lec_options prepared                 = opts;
+    prepared._boundary_feedback_prepared = true;
+    return prove_equal(ref_top.get(), impl_top.get(), prepared, sub_lib);
+  }
+
+  // M6 compact-loop certificate. A matched descriptor whose body def is in the
+  // hierarchical collapse set becomes one sequence-box summary; all unmatched
+  // or unproved-body loops retain the correctness fallback and are materialized
+  // in this same private scratch. This also handles activation exactly (the
+  // native connectivity view is dependency-only for inactive carry bypasses).
+  if (!opts._loop_prepared && (has_native_loops(ref, sub_lib) || has_native_loops(impl, sub_lib))) {
+    hhds::GraphLibrary                        ref_scratch;
+    hhds::GraphLibrary                        impl_scratch;
+    std::shared_ptr<hhds::Graph>              ref_top;
+    std::shared_ptr<hhds::Graph>              impl_top;
+    std::vector<std::shared_ptr<hhds::Graph>> ref_graphs;
+    std::vector<std::shared_ptr<hhds::Graph>> impl_graphs;
+    if (!copy_loop_scratch(ref, sub_lib, ref_scratch, ref_top, ref_graphs)
+        || !copy_loop_scratch(impl, sub_lib, impl_scratch, impl_top, impl_graphs)) {
+      Query_result failure;
+      failure.unsupported = true;
+      failure.detail      = "could not copy compact-loop definitions into private LEC scratch state";
+      return failure;
+    }
+    ref_graphs        = unresolved_loop_graphs(ref_top, opts);
+    impl_graphs       = unresolved_loop_graphs(impl_top, opts);
+    auto certificates = summarize_loop_pairs(ref_top.get(), impl_top.get(), opts);
+    // A failed parent theorem does not discard discharged grandchildren. Find
+    // the corresponding unresolved definitions and retain their local loop
+    // certificates while the remaining parent logic propagates upward.
+    // Index the impl side by entity once: the pairing is by unique entity name,
+    // so a per-ref linear rescan re-derived the same table for every definition.
+    absl::flat_hash_map<std::string, std::pair<std::shared_ptr<hhds::Graph>, size_t>> impl_by_entity;
+    for (const auto& mg : impl_graphs) {
+      if (mg == impl_top) {
+        continue;
+      }
+      auto& slot = impl_by_entity[def_entity(mg->get_name())];
+      slot.first = mg;
+      ++slot.second;
+    }
+    for (const auto& rg : ref_graphs) {
+      if (rg == ref_top) {
+        continue;
+      }
+      const auto it = impl_by_entity.find(def_entity(rg->get_name()));
+      if (it != impl_by_entity.end() && it->second.second == 1) {
+        auto nested = summarize_loop_pairs(rg.get(), it->second.first.get(), opts);
+        certificates.insert(certificates.end(), nested.begin(), nested.end());
+      }
+    }
+    if (!graph_util::materialize_occurrences_all(ref_graphs, "pass.lec")
+        || !graph_util::materialize_occurrences_all(impl_graphs, "pass.lec")) {
+      Query_result failure;
+      failure.unsupported = true;
+      failure.detail      = "could not realize uncertified compact-loop occurrences in private LEC scratch state";
+      return failure;
+    }
+    Lec_options prepared    = opts;
+    prepared._loop_prepared = true;
+    Cvc5_stats   acc;
+    Query_result res       = prove_equal_impl(ref_top.get(), impl_top.get(), prepared, sub_lib, opts.stats ? &acc : nullptr);
+    res.cvc5              += acc;
+    res.loop_certificates  = std::move(certificates);
+    if (!res.loop_certificates.empty()) {
+      res.detail += std::format("; loop certificate: {} matched compact recurrence(s) summarized without ordinal expansion",
+                                res.loop_certificates.size());
+    }
+    return res;
+  }
+
   Cvc5_stats   acc;
   Query_result res  = prove_equal_impl(ref, impl, opts, sub_lib, opts.stats ? &acc : nullptr);
   // MERGE, never assign. Under engine=auto `res` already carries the forked
   // CHILD's deserialized stats while THIS process constructed no Solver at all,
   // so `res.cvc5 = acc` would erase the entire run's numbers.
   res.cvc5         += acc;
+  // A packed feedback word can be acyclic per bit: its control slice chooses
+  // the data written into another slice of that same word. Retry only a named
+  // structural refusal, on private copies, using the existing exact slice
+  // rewrites. Pure-combinational boundaries may be inlined; state identity is
+  // unchanged and the resulting comparison is proved again in full.
+  if (res.unsupported && res.detail.find("WORD-LEVEL CYCLE") != std::string::npos) {
+    const auto                                start = std::chrono::steady_clock::now();
+    hhds::GraphLibrary                        ref_scratch, impl_scratch;
+    std::shared_ptr<hhds::Graph>              ref_top, impl_top;
+    std::vector<std::shared_ptr<hhds::Graph>> ref_graphs, impl_graphs;
+    if (copy_loop_scratch(ref, sub_lib, ref_scratch, ref_top, ref_graphs)
+        && copy_loop_scratch(impl, sub_lib, impl_scratch, impl_top, impl_graphs)) {
+      int rewired = 0;
+      for (const auto& graph : ref_graphs) {
+        rewired += gu::repair_private_packed_cycles(graph.get());
+      }
+      for (const auto& graph : impl_graphs) {
+        rewired += gu::repair_private_packed_cycles(graph.get());
+      }
+      if (rewired > 0) {
+        Cvc5_stats retry_stats;
+        auto       retry  = prove_equal_impl(ref_top.get(), impl_top.get(), opts, sub_lib, opts.stats ? &retry_stats : nullptr);
+        retry.cvc5       += retry_stats;
+        retry.cvc5       += res.cvc5;
+        retry.solve_ms   += res.solve_ms;
+        retry.elapsed_ms
+            = res.elapsed_ms
+              + std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+        retry.detail = std::format("packed-cycle slice repair ({} rewrites, private graphs); {}", rewired, retry.detail);
+        return retry;
+      }
+    }
+  }
   return res;
 }
 
@@ -6348,7 +10091,7 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
     worker._isolated_worker = true;
     worker.partitions       = 1;
     Query_result r          = safe_prove_equal(ref, impl, worker, sub_lib);
-    std::string  blob       = serialize_result(r);
+    std::string  blob       = frame_blob(serialize_result(r));
     write_all(p[1], blob.data(), blob.size());
     ::close(p[1]);
     ::_exit(0);
@@ -6362,10 +10105,9 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
   // on read(), and SIGKILL the worker if it passes. A killed worker sends no
   // serialized result, so it falls into the `died` path below and reports as an
   // Unknown naming the backstop — never a verdict.
-  const long long hard_ms = (opts.timeout > 0 && opts.hard_timeout_mult > 0)
-                              ? static_cast<long long>(opts.timeout) * 1000 * opts.hard_timeout_mult
-                              : 0;
-  bool            killed  = false;
+  const long long hard_ms
+      = (opts.timeout > 0 && opts.hard_timeout_mult > 0) ? static_cast<long long>(opts.timeout) * 1000 * opts.hard_timeout_mult : 0;
+  bool        killed = false;
   std::string blob;
   char        buf[8192];
   while (true) {
@@ -6383,10 +10125,8 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
         killed = true;
         continue;
       }
-      struct pollfd pfd {
-        p[0], POLLIN, 0
-      };
-      const int pr = ::poll(&pfd, 1, static_cast<int>(std::min<long long>(left, 1000)));
+      struct pollfd pfd{p[0], POLLIN, 0};
+      const int     pr = ::poll(&pfd, 1, static_cast<int>(std::min<long long>(left, 1000)));
       if (pr == 0) {
         continue;  // nothing yet; re-check the deadline
       }
@@ -6407,8 +10147,9 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
   ::close(p[0]);
   int status = 0;
   ::waitpid(c, &status, 0);
-  Query_result out;
-  if (!deserialize_result(blob, out)) {
+  Query_result     out;
+  std::string_view payload;
+  if (!unframe_blob(blob, payload) || !deserialize_result(payload, out)) {
     died = true;
     if (WIFSIGNALED(status)) {
       const int sig = WTERMSIG(status);
@@ -6422,12 +10163,13 @@ Query_result spawn_isolated_worker(hhds::Graph* ref, hhds::Graph* impl, const Le
         // exactly, and name the knob — this is the ONE overrun cvc5's tlimit-per
         // cannot report itself, so a vague "worker died" here would read as a
         // host problem and send the reader hunting for memory.
-        why = std::format("exceeded the {}s hard wall backstop (formal.timeout={}s x formal.hard_timeout_mult={}); "
-                          "cvc5's tlimit-per cannot preempt a single CaDiCaL solve, which is what a flat box-free "
-                          "miter compiles to — raise either knob, or 0 disables the backstop",
-                          static_cast<long long>(opts.timeout) * opts.hard_timeout_mult,
-                          opts.timeout,
-                          opts.hard_timeout_mult);
+        why         = std::format(
+            "exceeded the {}s hard wall backstop (formal.timeout={}s x formal.hard_timeout_mult={}); "
+            "cvc5's tlimit-per cannot preempt a single CaDiCaL solve, which is what a flat box-free "
+            "miter compiles to — raise either knob, or 0 disables the backstop",
+            static_cast<long long>(opts.timeout) * opts.hard_timeout_mult,
+            opts.timeout,
+            opts.hard_timeout_mult);
       } else if (sig == SIGKILL || sig == SIGABRT || sig == SIGBUS || sig == SIGSEGV) {
         // The usual causes at these signals on a big flat def: the RLIMIT_AS
         // memory backstop (malloc fails -> abort / the OS kills), or a genuine
@@ -6493,7 +10235,7 @@ Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec
   std::string  ind_why;
   bool         ind_killed = false;
   Query_result ri         = spawn_isolated_worker(ref, impl, oi, sub_lib, ind_died, ind_why, ind_killed);
-  ri.engine       = "ind";
+  ri.engine               = "ind";
   if (ind_died) {
     ri.detail = "ind retry worker also died: " + ind_why;
   }
@@ -6509,13 +10251,14 @@ Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec
   std::string  bmc_why;
   bool         bmc_killed = false;
   Query_result rb         = spawn_isolated_worker(ref, impl, ob, sub_lib, bmc_died, bmc_why, bmc_killed);
-  rb.engine       = "bmc";
+  rb.engine               = "bmc";
   if (bmc_died) {
     rb.detail = "bmc retry worker also died: " + bmc_why;
   }
   if (rb.verdict == Verdict::Refuted) {
-    rb.detail  = died_note + rb.detail;
-    rb.cvc5   += ri.cvc5;  // the ind retry worker ran too
+    rb.detail    = died_note + rb.detail;
+    rb.cvc5     += ri.cvc5;  // the ind retry worker ran too
+    rb.solve_ms += ri.solve_ms;
     return rb;
   }
   Query_result bp;
@@ -6523,6 +10266,7 @@ Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec
     bp.detail      = died_note + bp.detail;
     bp.elapsed_ms  = ri.elapsed_ms + rb.elapsed_ms;
     bp.cvc5       += ri.cvc5;
+    bp.solve_ms   += ri.solve_ms;
     return bp;
   }
   Query_result out = make_inconclusive(ri, rb, opts, ri.elapsed_ms + rb.elapsed_ms);  // merges both legs
@@ -6554,12 +10298,14 @@ Query_result int_blast_retry(hhds::Graph* ref, hhds::Graph* impl, const Lec_opti
     // Keep the BV result: its detail names the real bottleneck, and the retry's
     // Unknown adds nothing (int-blast lands in undecidable nonlinear arithmetic
     // on mask/extract/memory-heavy cones, so its give-up is the EXPECTED case).
-    first.detail += "; int-blast retry (iand, " + std::to_string(o2.timeout) + "s) also inconclusive";
-    first.cvc5   += r2.cvc5;  // the retry really ran (formal.stats)
+    first.detail   += "; int-blast retry (iand, " + std::to_string(o2.timeout) + "s) also inconclusive";
+    first.cvc5     += r2.cvc5;  // the retry really ran (lhd.stats)
+    first.solve_ms += r2.solve_ms;
     return first;
   }
   r2.detail  = "int-blast retry (BV gave up; re-solved as unbounded integers at " + std::to_string(o2.timeout) + "s): " + r2.detail;
   r2.cvc5   += first.cvc5;  // the BV leg's effort was still spent
+  r2.solve_ms += first.solve_ms;
   return r2;
 }
 
@@ -6576,42 +10322,6 @@ Query_result int_blast_retry(hhds::Graph* ref, hhds::Graph* impl, const Lec_opti
 // lambdas (no cross-design width unification / correspondence); sharing them
 // is a follow-up refactor, not worth destabilizing prove_equal for.
 namespace {
-
-// "\x04prop:<occ>\x1f<kind>\x1f<loc>\x1f<msg>" (encoder set_emit_props contract;
-// msg is last so it may contain anything).
-struct Prop_key {
-  int         occ = -1;
-  std::string kind{"assert"};
-  std::string loc, msg;
-};
-std::optional<Prop_key> parse_prop_key(std::string_view name) {
-  constexpr std::string_view pfx{"\x04prop:", 6};
-  if (name.substr(0, pfx.size()) != pfx) {
-    return std::nullopt;
-  }
-  Prop_key         k;
-  std::string_view rest = name.substr(pfx.size());
-  auto             take = [&rest]() -> std::string_view {
-    auto p = rest.find('\x1f');
-    auto f = rest.substr(0, p);
-    rest   = p == std::string_view::npos ? std::string_view{} : rest.substr(p + 1);
-    return f;
-  };
-  auto occ_s = take();
-  k.occ      = 0;
-  for (char c : occ_s) {
-    if (c < '0' || c > '9') {
-      return std::nullopt;
-    }
-    k.occ = k.occ * 10 + (c - '0');
-  }
-  if (auto f = take(); !f.empty()) {
-    k.kind = std::string(f);
-  }
-  k.loc = std::string(take());
-  k.msg = std::string(rest);  // remainder: the user message, verbatim
-  return k;
-}
 
 // "\x04guard:<occ>" — R1 Phase 2. The RAW antecedent of a property written
 // inside an `if`/`match` arm, emitted alongside its "\x04prop:<occ>" so the
@@ -6642,14 +10352,12 @@ std::optional<int> parse_guard_key(std::string_view name) {
 // cache-wide formal source salt handles changes that preserve their spelling.
 std::string verify_obligation_key(const std::vector<cvc5::Term>& assertions, const cvc5::Term& bad, const Lec_options& opts,
                                   const std::string& scope) {
-  uint64_t h0  = 1469598103934665603ULL;
-  uint64_t h1  = 1099511628211ULL ^ 0x9e3779b97f4a7c15ULL;
+  namespace hu = livehd::hash_util;
+  uint64_t h0  = hu::kFnv1a64_offset;
+  uint64_t h1  = hu::kFnv1a64_prime ^ 0x9e3779b97f4a7c15ULL;
   auto     mix = [&](std::string_view s) {
-    for (unsigned char c : s) {
-      h0  = (h0 ^ c) * 1099511628211ULL;
-      h1 ^= c + 0x9e3779b97f4a7c15ULL + (h1 << 6) + (h1 >> 2);
-    }
-    h0 = (h0 ^ 0xffU) * 1099511628211ULL;  // term boundary
+    h0 = (hu::fnv1a64(s, h0) ^ 0xffU) * hu::kFnv1a64_prime;  // 0xff = term boundary
+    h1 = hu::combine64(h1, hu::fnv1a64(s) ^ s.size());       // independent second lane
   };
   // v3: per-scope assume scoping — a block's assumes are now asserted as
   // `act => holds`, so the serialized assertion set changed shape AND the same
@@ -6662,17 +10370,40 @@ std::string verify_obligation_key(const std::vector<cvc5::Term>& assertions, con
   mix(opts.phase);
   mix(opts.reset);
   mix(std::to_string(opts.reset_cycles));
+  // The assertion SET, not its sequence: the terms arrive in the order the
+  // encoder walked the design's state, and that order comes from per-process
+  // randomized hash containers — MEASURED on a two-register sidecar, three
+  // identical warm runs hit 0, 2 and 1 of its 2 obligations. An obligation
+  // does not depend on the order its hypotheses were stated in.
+  std::vector<std::string> hyps;
+  hyps.reserve(assertions.size());
   for (const auto& a : assertions) {
-    mix(a.toString());
+    hyps.push_back(a.toString());
+  }
+  std::sort(hyps.begin(), hyps.end());
+  for (const auto& h : hyps) {
+    mix(h);
   }
   mix(bad.toString());
-  return std::format("verify:{:016x}{:016x}", h0, h1);
+  auto key = std::format("verify:{:016x}{:016x}", h0, h1);
+  // LHD_FORMAL_KEY_DUMP=<file>: append the serialized obligation behind each
+  // key, so two runs that should have hit can be diffed term by term.
+  if (const char* dump = std::getenv("LHD_FORMAL_KEY_DUMP"); dump != nullptr && *dump != '\0') {
+    if (std::ofstream f(dump, std::ios::app); f) {
+      f << "== " << key << " scope=" << scope << "\n";
+      for (const auto& h : hyps) {
+        f << "  H " << h << "\n";
+      }
+      f << "  BAD " << bad.toString() << "\n";
+    }
+  }
+  return key;
 }
 
 }  // namespace
 
 // The real property engine. `acc` is the caller-owned cvc5 statistics
-// accumulator (formal.stats), NULL when stats are off -- see prove_equal_impl's
+// accumulator (lhd.stats), NULL when stats are off -- see prove_equal_impl's
 // note; the public prove_properties() wrapper below owns it and merges.
 static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_options& opts,
                                            const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib,
@@ -6871,7 +10602,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     for (const auto& pr : m.props) {
       if (pr.kind == "assume") {
         ++m.n_assumes;
-        if (pr.aclass != "unchecked" && pr.verdict == Verdict::Refuted) {
+        if (!is_unchecked_assume_class(pr.aclass) && pr.verdict == Verdict::Refuted) {
           any_refuted = true;  // a refuted checked assume is a hard error (P1)
         }
         continue;
@@ -6928,7 +10659,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         if (b.verdict == Verdict::Refuted && a.verdict != Verdict::Refuted) {
           a = b;  // a during-reset violation dominates
         } else if (b.verdict == Verdict::Unknown && a.verdict == Verdict::Proven
-                   && (a.kind != "assume" || a.aclass != "unchecked")) {
+                   && (a.kind != "assume" || !is_unchecked_assume_class(a.aclass))) {
           a.verdict    = Verdict::Unknown;
           a.unknown_at = b.unknown_at;
         }
@@ -6945,7 +10676,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     return m;
   }
 
-  // cvc5 solve-insight instrumentation (formal.stats). The DECLARATION ORDER is
+  // cvc5 solve-insight instrumentation (lhd.stats). The DECLARATION ORDER is
   // mandatory and load-bearing -- probe BEFORE the Solver (the plugin must
   // outlive it), attach() BEFORE any assertFormula/push (cvc5 throws otherwise),
   // Stats_guard AFTER the Solver (its dtor snapshots getStatistics() and must run
@@ -6970,7 +10701,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // the trustworthy config (the lazy default has a spurious-SAT history) but has
   // no array theory, so memory designs keep the default solver.
   bool has_mem = false;
-  for (auto node : design->forward_class()) {
+  for (auto node : design->body().nodes(hhds::Node_order::forward)) {
     if (graph_util::type_op_of(node) == Ntype_op::Memory) {
       has_mem = true;
       break;
@@ -7028,8 +10759,8 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // silent skip. The FREEZE of already-bounded obligations (below) is what bounds
   // the total — this only ensures no single obligation-check runs unbounded.
   // No-op accounting when the budget is off.
-  // Per-scope assume ACTIVATION literals (formal blocks are independent tests —
-  // user ruling, 2026-07-25). Each formal block gets one fresh Boolean constant;
+  // Per-scope assume ACTIVATION literals (formal blocks are independent
+  // tests). Each formal block gets one fresh Boolean constant;
   // the block's free assumes are asserted as `act => holds` instead of `holds`,
   // and an obligation belonging to that block is checked with its own `act`
   // added to the checkSatAssuming set. A sibling block's `act` stays FREE, so
@@ -7097,7 +10828,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // so it is downgraded to Unknown below (the single-design analog of
   // prove_equal's incomplete-correspondence gate).
   bool has_bbox = false;
-  for (auto node : design->fast_hier()) {  // OR-reduction into has_bbox: order-free
+  for (auto node : design->grouped_hierarchy().nodes()) {  // OR-reduction into has_bbox: order-free
     if (graph_util::type_op_of(node) != Ntype_op::Sub || node.get_subnode_graph() != nullptr) {
       continue;
     }
@@ -7110,7 +10841,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     if (sub_lib != nullptr) {
       if (auto git = sub_lib->find(node.get_subnode_gid()); git != sub_lib->end() && git->second != nullptr) {
         flattenable = true;
-        for (auto dn : git->second->forward_class()) {
+        for (auto dn : git->second->body().nodes(hhds::Node_order::forward)) {
           auto dop = graph_util::type_op_of(dn);
           if (dop == Ntype_op::Flop || dop == Ntype_op::Fflop || dop == Ntype_op::Latch || dop == Ntype_op::Memory) {
             flattenable = false;
@@ -7126,7 +10857,6 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   }
 
   Encoder enc(tm);
-  enc.set_encode_budget(opts.timeout);  // 2f-lec: bound per-cycle encode wall-clock like each checkSat
   enc.set_sub_lib(sub_lib);
   enc.set_emit_props(true);
   // Submodule port taps: a monitor may bind a SUBMODULE port (Src::output with
@@ -7158,7 +10888,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     auto gio = design->get_io();
     for (const auto& d : gio->get_input_pin_decls()) {
       auto pin = design->get_input_pin(d.name);
-      int  w   = real_width_io(pin, *gio, d.name);
+      int  w   = gu::real_width(pin, *gio, d.name);
       if (w == 0) {
         w = 1;
       }
@@ -7170,31 +10900,10 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // Reset detection (structural reset_pin inputs + canonical names, or the
   // authoritative formal.reset spec) — single-design copy of prove_equal's rules.
   Io_name_map<bool> reset_negset;
-  auto              reset_name_polarity = [](const std::string& nm, bool& negreset) -> bool {
-    std::string lc = nm;
-    for (auto& c : lc) {
-      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-    }
-    bool   tok_match = false;
-    size_t start     = 0;
-    for (size_t i = 0; i <= lc.size(); ++i) {
-      if (i == lc.size() || lc[i] == '_') {
-        std::string tok = lc.substr(start, i - start);
-        if (tok == "rst" || tok == "reset" || tok == "rstn" || tok == "resetn" || tok == "arst" || tok == "areset" || tok == "nrst"
-            || tok == "nreset" || tok == "por") {
-          tok_match = true;
-        }
-        start = i + 1;
-      }
-    }
-    if (!tok_match) {
-      return false;
-    }
-    auto ends = [&](std::string_view s) { return lc.size() >= s.size() && lc.compare(lc.size() - s.size(), s.size(), s) == 0; };
-    negreset  = ends("_n") || ends("_ni") || ends("_n_i") || ends("_ni_i") || lc == "rstn" || lc == "resetn" || ends("nrst")
-                || ends("nreset");
-    return true;
-  };
+  // Same shared rule as prove_equal's harness: the token set lives in
+  // str_tools so verify and lec cannot drift apart.
+  auto              reset_name_polarity
+      = [](std::string_view nm, bool& negreset) -> bool { return str_tools::reset_name_polarity(nm, negreset); };
   const bool phase_reset = opts.phase == "just_reset";
   const bool phase_run   = opts.phase == "after_reset";
   if (phase_reset || phase_run) {
@@ -7226,7 +10935,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       // a subgraph flop's reset driver is the SUBGRAPH's own input pin, and name-
       // matching its port against the top-level `ins` map could pin an unrelated
       // same-named top input (under-exploration -> unsound PROVEN).
-      for (auto node : design->forward_hier()) {
+      for (auto node : design->occurrences().nodes(hhds::Node_order::forward)) {
         if (graph_util::type_op_of(node) != Ntype_op::Flop) {
           continue;
         }
@@ -7239,9 +10948,8 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           continue;
         }
         bool negreset = false;
-        if (auto neg_d = graph_util::get_driver_of_sink_name(node, "negreset");
-            !neg_d.is_invalid() && graph_util::is_const_pin(neg_d)) {
-          negreset = !graph_util::hydrate_const(neg_d).is_known_false();
+        if (auto neg_d = graph_util::get_driver_of_sink_name(node, "negreset"); neg_d.is_const()) {
+          negreset = !graph_util::const_of(neg_d).is_known_false();
         }
         reset_negset[nm] = negreset;
       }
@@ -7294,7 +11002,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     Io_name_map<int>  fw;
     Io_name_map<bool> fsgn;
     Io_name_map<Val>  init;
-    for (auto node : design->forward_hier()) {
+    for (auto node : design->occurrences().nodes(hhds::Node_order::forward)) {
       if (graph_util::type_op_of(node) != Ntype_op::Flop) {
         continue;
       }
@@ -7303,7 +11011,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         continue;
       }
       auto key = canon_flop_name(node.get_hier_name());
-      int  w   = real_width(q);
+      int  w   = gu::real_width(q);
       if (w == 0) {
         w = 1;
       }
@@ -7360,7 +11068,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   Io_name_map<cvc5::Term> mem;
   {
     Io_name_map<int> occ;
-    for (auto node : design->forward_class()) {
+    for (auto node : design->body().nodes(hhds::Node_order::forward)) {
       if (graph_util::type_op_of(node) != Ntype_op::Memory || !node.has_out_edges()) {
         continue;
       }
@@ -7384,15 +11092,15 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // assume-kind obligation STRUCTURALLY before any cycle is asserted: a cond
   // whose transitive support (expanded through the probe's defining equalities)
   // reaches a state or memory symbol is INTERNAL; a cond over primary inputs
-  // only (free blackbox outputs count as inputs) is INPUT. BOTH are proof
-  // obligations under the prove-then-use discipline — every `assume` is checked
-  // as an assert before it may constrain anything, because asserting an
-  // unproven claim prunes reachable behaviors and can fake a PROVEN (an
-  // input-cone constraint like `assume(op == 7)` can never hold over free
-  // inputs, so it REFUTES — the honest verdict; `assume_nocheck` is the
-  // explicit spelling for a free environment constraint). The class label is
-  // kept for diagnostics only: a refuted INPUT assume earns the "spell it
-  // assume_nocheck" hint, an INTERNAL one is a real design claim gone wrong.
+  // only (free blackbox outputs count as inputs) is INPUT. Child input and
+  // local/state assumptions are proof obligations under the prove-then-use
+  // discipline: asserting an unproven claim could fake a PROVEN. A selected-top
+  // input assumption has no parent capable of discharging it, so it becomes a
+  // disclosed top_input environment constraint. `assume_nocheck` and
+  // formal.assume_check=false likewise keep constraints active without checks.
+  // The class label drives both solver policy and diagnostics: a refuted child
+  // INPUT assume earns the "spell it assume_nocheck" hint, while an INTERNAL one
+  // is a real design claim gone wrong.
   // Only a monitor statement listed in Monitor::nocheck_lines is exempt —
   // UNCHECKED by explicit user fiat.
   // Nothing from the probe is asserted into the solver; the extra encode is
@@ -7403,7 +11111,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       // fast_hier: an existence scan. Being lazy, the early return below now
       // actually stops the walk -- forward_hier materialized+sorted the entire
       // design before yielding the first node, so the `return true` saved nothing.
-      for (auto node : gg->fast_hier()) {
+      for (auto node : gg->grouped_hierarchy().nodes()) {
         if (graph_util::type_op_of(node) != Ntype_op::Sub) {
           continue;
         }
@@ -7411,7 +11119,8 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         if (sio == nullptr || sio->get_name() != graph_util::fproperty_module_name) {
           continue;
         }
-        if (std::string_view nm = graph_util::node_name_of(node); nm.rfind("assume\x1f", 0) == 0) {
+        if (std::string_view nm = graph_util::node_name_of(node);
+            nm.rfind("assume\x1f", 0) == 0 || nm.rfind("assume_nocheck\x1f", 0) == 0) {
           return true;
         }
       }
@@ -7434,6 +11143,11 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       for (const auto& [key, a] : mem) {
         pmem[key] = tm.mkConst(a.getSort(), "pm_" + key);
       }
+      absl::flat_hash_set<uint64_t> input_targets;  // selected-top primary input symbol ids
+      for (const auto& [key, v] : psh) {
+        (void)key;
+        input_targets.insert(v.term.getId());
+      }
       absl::flat_hash_set<uint64_t> targets;  // the state/memory symbol ids
       for (const auto& [key, v] : pstate) {
         targets.insert(v.term.getId());
@@ -7453,7 +11167,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           defs.emplace(l.getId(), r);
         }
       };
-      auto cond_internal = [&](const cvc5::Term& root) {
+      auto cond_reaches = [&](const cvc5::Term& root, const absl::flat_hash_set<uint64_t>& sought) {
         absl::flat_hash_set<uint64_t> seen;
         std::vector<cvc5::Term>       stk{root};
         while (!stk.empty()) {
@@ -7462,7 +11176,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           if (!seen.insert(t.getId()).second) {
             continue;
           }
-          if (targets.contains(t.getId())) {
+          if (sought.contains(t.getId())) {
             return true;
           }
           if (auto it = defs.find(t.getId()); it != defs.end()) {
@@ -7477,18 +11191,33 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       auto classify = [&](const Encoded& eo, int occ_base, const Monitor* mon) {
         for (const auto& [name, v] : eo.outputs) {
           auto k = parse_prop_key(name);
-          if (!k || k->kind != "assume") {
+          if (!k || !is_assume_kind(k->kind)) {
             continue;
           }
           std::string cls;
-          if (mon != nullptr && !mon->nocheck_lines.empty()) {
+          if (!opts.assume_check) {
+            cls = "check_disabled";
+          } else if (k->kind == "assume_nocheck") {
+            cls = "unchecked";
+          } else if (mon != nullptr && !mon->nocheck_lines.empty()) {
             if (auto colon = k->loc.rfind(':');
                 colon != std::string::npos && mon->nocheck_lines.contains(std::atoi(k->loc.c_str() + colon + 1))) {
               cls = "unchecked";
             }
           }
           if (cls.empty()) {
-            cls = cond_internal(v.term) ? "internal" : "input";
+            if (cond_reaches(v.term, targets)) {
+              cls = "internal";
+            } else if (mon == nullptr && eo.prop_top.contains(k->occ) && cond_reaches(v.term, input_targets)) {
+              // The selected top has no parent capable of discharging an IO
+              // precondition. Keep it active, warn at the CLI, and disclose it
+              // exactly like assume_nocheck. A CHILD input assume stays
+              // checked: its actual binding in this top-rooted encode may prove
+              // or refute it.
+              cls = "top_input";
+            } else {
+              cls = "input";
+            }
           }
           occ_aclass[occ_base + k->occ] = cls;
         }
@@ -7594,20 +11323,38 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
 
   absl::flat_hash_map<int, size_t> prop_ix;              // encoder occ -> res.props index
   bool                             any_guarded = false;  // R1 Phase 2: some property sits in an if/match arm
-  int                              uid         = 0;
   bool                             any_refuted = false, any_unknown = false;
   int                              split_checks = 0;
   const Split_pick                 verify_split = (opts.partitions >= 2 && opts.split != "none" && !opts.split.empty())
                                                       ? pick_split_signal(design, opts.split, 8)
                                                       : Split_pick{};
 
+  // Per-cycle snapshot for `past(x, n)` monitor binds: the terms this cycle
+  // asserted, kept so a later cycle can name them. Holds handles to terms the
+  // solver already owns — no re-encoding, and nothing is added unless a monitor
+  // actually carries a delayed bind.
+  struct Mon_cycle {
+    Io_name_map<Val> inputs;
+    Io_name_map<Val> outputs;
+    Io_name_map<Val> state;
+  };
+  std::vector<Mon_cycle> mon_hist;
+  mon_hist.reserve(static_cast<size_t>(total_cyc));
+  std::vector<bool> mon_hist_noted(monitors != nullptr ? monitors->size() : 0, false);
+
   for (int cyc = 0; cyc < total_cyc; ++cyc) {
     const bool checking = phase_run ? (cyc >= reset_hold) : true;
 
     if (cyc > 0) {  // fresh-var state pinning (keeps per-cycle terms shallow)
+      // Named `s<cyc>_<flop>` like the cycle-0 state (`s0_<flop>`), NOT by a
+      // running counter: `state` is a hash map, so a counter numbered the
+      // flops in per-process order and the serialized obligation — which is
+      // the verify cache KEY — spelled `st0` for a_r in one run and for b_r
+      // in the next (measured: 0/2/1 warm hits over three identical runs of a
+      // two-register sidecar).
       Io_name_map<Val> ns;
       for (const auto& [key, pv] : state) {
-        cvc5::Term s = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(pv.width)), "st" + std::to_string(uid++));
+        cvc5::Term s = tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(pv.width)), "s" + std::to_string(cyc) + "_" + key);
         assert_formula(tm.mkTerm(cvc5::Kind::EQUAL, {s, pv.term}));
         ns[key] = Val{s, pv.width, pv.is_signed};
         if (mining_on) {
@@ -7618,7 +11365,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       state = std::move(ns);
       Io_name_map<cvc5::Term> nm;
       for (const auto& [key, pv] : mem) {
-        cvc5::Term s = tm.mkConst(pv.getSort(), "ma" + std::to_string(uid++));
+        cvc5::Term s = tm.mkConst(pv.getSort(), "m" + std::to_string(cyc) + "_" + key);
         assert_formula(tm.mkTerm(cvc5::Kind::EQUAL, {s, pv}));
         nm[key] = s;
       }
@@ -7690,7 +11437,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           ix = res.props.size();
           prop_ix.emplace(occ_key, ix);
           Prop_result pr;
-          pr.kind = ob.k.kind;
+          pr.kind = is_assume_kind(ob.k.kind) ? "assume" : ob.k.kind;
           pr.loc  = ob.k.loc;
           pr.msg  = ob.k.msg;
           if (pr.kind == "assume" && !opts.ignore_assumes) {
@@ -7699,6 +11446,11 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
             // obligation, never a silent free constraint.
             auto ac   = occ_aclass.find(occ_key);
             pr.aclass = ac != occ_aclass.end() ? ac->second : std::string{"internal"};
+          }
+          if (mon == nullptr) {
+            if (auto pit = eo.prop_instance.find(ob.k.occ); pit != eo.prop_instance.end()) {
+              pr.instance = pit->second;
+            }
           }
           if (mon != nullptr) {
             pr.block = mon->block;
@@ -7738,7 +11490,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
           if (opts.ignore_assumes) {
             continue;
           }
-          if (pr.aclass == "unchecked") {
+          if (is_unchecked_assume_class(pr.aclass)) {
             // assume_nocheck: a free environment constraint by explicit user
             // fiat, in force at EVERY cycle, reset prologue included (SVA
             // semantics — otherwise an assert_always checked during the
@@ -7846,33 +11598,59 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
     };
     process_props(e, /*occ_base=*/0, nullptr);
 
+    // HISTORY for `past(x, n)` binds: keep this cycle's input symbols, outputs
+    // and (pre-transition) state so a delayed bind can name the very term that
+    // was asserted `n` cycles ago. Cheap — these are handles to terms the
+    // solver already holds, not new encodings.
+    mon_hist.push_back(Mon_cycle{sh, e.outputs, state});
+
     // Formal-block monitors: encode each with its inputs bound to THIS cycle's
     // design signals (current state / this cycle's input symbols / this cycle's
-    // outputs), then run its obligations through the identical machinery.
+    // outputs), then run its obligations through the identical machinery. A
+    // bind with `delay > 0` reaches back into mon_hist instead (`past`).
     for (size_t mi = 0; monitors != nullptr && mi < monitors->size(); ++mi) {
       const Monitor& mon = (*monitors)[mi];
       if (mon.graph == nullptr) {
         continue;
       }
+      // Not enough history yet: this cycle cannot witness the property at all,
+      // so SKIP it rather than bind an unconstrained symbol (which would invent
+      // history and can only produce spurious counterexamples). Disclosed once
+      // per monitor in the verdict detail.
+      int max_delay = 0;
+      for (const auto& b : mon.binds) {
+        max_delay = std::max(max_delay, b.delay);
+      }
+      if (cyc < max_delay) {
+        if (!mon_hist_noted[mi]) {
+          mon_hist_noted[mi]  = true;
+          res.detail         += "; monitor '" + mon.block + "' needs " + std::to_string(max_delay)
+                                + " cycle(s) of history: obligations unchecked before cycle " + std::to_string(max_delay);
+        }
+        continue;
+      }
       Io_name_map<Val> msh;
       bool             bind_ok = true;
       for (const auto& b : mon.binds) {
-        const Val* v = nullptr;
+        const Val*       v       = nullptr;
+        // `past(x, n)`: resolve against the cycle n steps back. mon_hist was
+        // just extended with this cycle, so index from its END.
+        const Mon_cycle& src_cyc = mon_hist[mon_hist.size() - 1 - static_cast<size_t>(b.delay)];
         switch (b.src) {
           case Monitor::Bind::Src::input: {
-            if (auto it = sh.find(b.key); it != sh.end()) {
+            if (auto it = src_cyc.inputs.find(b.key); it != src_cyc.inputs.end()) {
               v = &it->second;
             }
             break;
           }
           case Monitor::Bind::Src::output: {
-            if (auto it = e.outputs.find(b.key); it != e.outputs.end()) {
+            if (auto it = src_cyc.outputs.find(b.key); it != src_cyc.outputs.end()) {
               v = &it->second;
             }
             break;
           }
           case Monitor::Bind::Src::state: {
-            if (auto it = state.find(b.key); it != state.end()) {
+            if (auto it = src_cyc.state.find(b.key); it != src_cyc.state.end()) {
               v = &it->second;
             }
             break;
@@ -8257,7 +12035,8 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       // Clean bounded-proven asserts AND clean checked assumes (input or
       // internal class) are candidates: a checked assume earns step-frame use
       // only by surviving the same Houdini fixpoint (rule E) — never by fiat.
-      if ((pr.kind != "assume" || pr.aclass != "unchecked") && pr.refuted_at < 0 && pr.unknown_at < 0 && pr.proven_to >= 0) {
+      if ((pr.kind != "assume" || !is_unchecked_assume_class(pr.aclass)) && pr.refuted_at < 0 && pr.unknown_at < 0
+          && pr.proven_to >= 0) {
         cand.push_back(i);
       }
     }
@@ -8265,8 +12044,8 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       solver.push();
       // Frame-0 free state; frame-1 state pinned to frame-0's next-state.
       // Step-frame inputs are free EXCEPT the primary resets, which are pinned
-      // to their DEASSERTED level in the after_reset phase (user ruling,
-      // 2026-07-08): the step then quantifies over post-reset free-running
+      // to their DEASSERTED level in the after_reset phase: the step then
+      // quantifies over post-reset free-running
       // states only, upgrading invariants a mid-trace reset would break. The
       // narrowing is disclosed in the run detail below. NOTE: only PRIMARY reset
       // INPUTS are pinned (an environment assumption) — a DERIVED/internal reset
@@ -8391,7 +12170,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         // compile tier does not use design assumes as hypotheses — see the
         // process_props note above).
         for (const auto& [occ_key, ix] : prop_ix) {
-          if (opts.ignore_assumes || res.props[ix].kind != "assume" || res.props[ix].aclass != "unchecked") {
+          if (opts.ignore_assumes || res.props[ix].kind != "assume" || !is_unchecked_assume_class(res.props[ix].aclass)) {
             continue;
           }
           // Scoped exactly as in the BMC frame: a block's env assume constrains
@@ -8513,7 +12292,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   for (auto& pr : res.props) {
     if (pr.kind == "assume") {
       ++res.n_assumes;
-      if (pr.aclass == "unchecked") {
+      if (is_unchecked_assume_class(pr.aclass)) {
         continue;
       }
     }
@@ -8541,7 +12320,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   absl::flat_hash_map<std::string, int> env_assumes_by_scope;
   if (!opts.ignore_assumes) {
     for (const auto& pr : res.props) {
-      if (pr.kind == "assume" && pr.aclass == "unchecked") {
+      if (pr.kind == "assume" && is_unchecked_assume_class(pr.aclass)) {
         ++env_assumes_by_scope[pr.scope];
       }
     }
@@ -8595,7 +12374,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
         if (!design_tier_vacuous && pr.scope != scope) {
           continue;
         }
-        if ((pr.kind != "assume" || pr.aclass != "unchecked") && pr.verdict == Verdict::Proven) {
+        if ((pr.kind != "assume" || !is_unchecked_assume_class(pr.aclass)) && pr.verdict == Verdict::Proven) {
           pr.verdict   = Verdict::Unknown;
           pr.unbounded = false;
         }
@@ -8632,7 +12411,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   // inconclusive answer there must void the verdict. A vacuous antecedent leaves
   // the obligation genuinely TRUE — it just proved nothing interesting — so this
   // never touches `verdict`, and an inconclusive query stays silent rather than
-  // accusing. The CLI decides warning vs failure (formal.strict).
+  // accusing. The CLI reports UNKNOWN as a failure.
   //
   // The free frame is also why no env assume applies: the guard is judged on its
   // own logic, so an assume can never make this fire. Conservative direction.
@@ -8744,7 +12523,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
       if (pr.kind != "assume") {
         continue;
       }
-      if (pr.aclass == "unchecked") {
+      if (is_unchecked_assume_class(pr.aclass)) {
         ++n_unch;
       } else if (pr.verdict == Verdict::Proven) {
         ++n_cp;
@@ -8879,7 +12658,7 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
   if (solve_budget_on) {
     int n_units = 0;
     for (const auto& pr : res.props) {
-      n_units += (pr.kind == "assume" && pr.aclass == "unchecked") ? 0 : 1;
+      n_units += (pr.kind == "assume" && is_unchecked_assume_class(pr.aclass)) ? 0 : 1;
     }
     res.budget_target_s = opts.timeout;
     res.budget_spent_ms = solve_spent_ms;
@@ -8983,6 +12762,22 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
 
 Verify_result prove_properties(hhds::Graph* design, const Lec_options& opts,
                                const absl::flat_hash_map<hhds::Gid, hhds::Graph*>* sub_lib, const std::vector<Monitor>* monitors) {
+  if (has_activation_loops(design, sub_lib)) {
+    hhds::GraphLibrary                        scratch;
+    std::shared_ptr<hhds::Graph>              scratch_top;
+    std::vector<std::shared_ptr<hhds::Graph>> scratch_graphs;
+    if (!build_activation_scratch(design, sub_lib, scratch, scratch_top, scratch_graphs)) {
+      Verify_result failure;
+      failure.unsupported = true;
+      failure.detail      = "could not realize activation-capable loop occurrences in private formal scratch state";
+      return failure;
+    }
+    Cvc5_stats    acc;
+    Verify_result res  = prove_properties_impl(scratch_top.get(), opts, sub_lib, monitors, opts.stats ? &acc : nullptr);
+    res.cvc5          += acc;
+    return res;
+  }
+
   Cvc5_stats    acc;
   Verify_result res  = prove_properties_impl(design, opts, sub_lib, monitors, opts.stats ? &acc : nullptr);
   // MERGE, never assign: under engine=auto `res` already carries the forked

@@ -61,7 +61,7 @@ uint64_t physical_ram_bytes() {
   }
   const uint64_t host = static_cast<uint64_t>(pages) * static_cast<uint64_t>(page_size);
   // Whatever actually kills us first is the real "physical" memory here.
-  const uint64_t cg = cgroup_limit_bytes();
+  const uint64_t cg   = cgroup_limit_bytes();
   return cg != 0 && cg < host ? cg : host;
 #endif
 }
@@ -72,8 +72,7 @@ uint64_t process_rss_bytes() {
   // now" -- it never goes down after a network is freed. mach task_info does.
   mach_task_basic_info_data_t info{};
   mach_msg_type_number_t      count = MACH_TASK_BASIC_INFO_COUNT;
-  if (::task_info(::mach_task_self(), MACH_TASK_BASIC_INFO, reinterpret_cast<task_info_t>(&info), &count)
-      != KERN_SUCCESS) {
+  if (::task_info(::mach_task_self(), MACH_TASK_BASIC_INFO, reinterpret_cast<task_info_t>(&info), &count) != KERN_SUCCESS) {
     return 0;
   }
   return info.resident_size;
@@ -91,6 +90,33 @@ uint64_t process_rss_bytes() {
   }
   const long page_size = ::sysconf(_SC_PAGE_SIZE);
   return page_size <= 0 ? 0 : static_cast<uint64_t>(resident) * static_cast<uint64_t>(page_size);
+#endif
+}
+
+uint64_t process_peak_rss_bytes() {
+  struct rusage usage{};
+  if (::getrusage(RUSAGE_SELF, &usage) != 0 || usage.ru_maxrss <= 0) {
+    return 0;
+  }
+#if defined(__APPLE__)
+  return static_cast<uint64_t>(usage.ru_maxrss);  // bytes on Darwin
+#else
+  // Linux's rusage high-water counter can lag the current RSS (observable
+  // immediately after faults). /proc reports max(high-water, current RSS),
+  // so prefer its VmHWM while retaining rusage when procfs is unavailable.
+  uint64_t peak = static_cast<uint64_t>(usage.ru_maxrss) * 1024;  // KiB on Linux
+  if (auto* status = std::fopen("/proc/self/status", "r")) {
+    char line[256];
+    while (std::fgets(line, sizeof(line), status) != nullptr) {
+      unsigned long kb = 0;
+      if (std::sscanf(line, "VmHWM: %lu kB", &kb) == 1) {
+        peak = std::max(peak, static_cast<uint64_t>(kb) * 1024);
+        break;
+      }
+    }
+    std::fclose(status);
+  }
+  return peak;
 #endif
 }
 
@@ -130,18 +156,27 @@ uint64_t arm_address_space_limit(uint64_t budget) {
 
 #if defined(__APPLE__)
   // RLIMIT_AS's floor on Darwin is the current virtual_size, so an absolute small
-  // limit EINVALs. Set (virtual_size + budget): real allocations grow VA ~1:1, so
-  // this caps real memory at ~budget. Read virtual_size NOW -- never hardcode the
-  // ~415 GiB arm64 baseline.
+  // limit EINVALs. Read virtual_size NOW -- never hardcode the ~415 GiB arm64
+  // baseline. Real allocator growth is not exactly 1:1 with physical footprint:
+  // xzone reservations and holes made Backend exhaust (virtual_size + budget)
+  // while its physical footprint was still 15-20% below budget. Give VA 25%
+  // accounting headroom; the sampled physical-footprint gate remains pinned to
+  // `budget`. With the default 80%-of-RAM budget, even 1:1 committed growth is
+  // still bounded to approximately installed RAM rather than unbounded swap.
   const uint64_t vsz = process_virtual_size();
   if (vsz == 0) {
     return 0;
   }
-  // Guard the addition against overflow (vsz is already ~415 GiB).
-  if (budget > UINT64_MAX - vsz) {
+  const uint64_t allocator_slack = budget / 4;
+  if (allocator_slack > UINT64_MAX - budget) {
     return 0;
   }
-  const uint64_t limit = vsz + budget;
+  const uint64_t va_budget = budget + allocator_slack;
+  // Guard the addition against overflow (vsz is already ~415 GiB).
+  if (va_budget > UINT64_MAX - vsz) {
+    return 0;
+  }
+  const uint64_t limit = vsz + va_budget;
 #else
   const uint64_t limit = budget;  // Linux: absolute VA cap, baseline VA is a few MB
 #endif
@@ -178,7 +213,9 @@ uint64_t configured_budget_bytes() {
       budget_mb = v;  // 0 is a valid "use the default budget" value
     }
   }
-  return budget_bytes(budget_mb);
+  const auto ceiling   = budget_bytes(0);
+  const auto requested = budget_bytes(budget_mb);
+  return ceiling == 0 ? requested : std::min(requested, ceiling);
 }
 
 uint64_t install_memory_backstop() { return arm_address_space_limit(configured_budget_bytes()); }
@@ -200,11 +237,11 @@ uint64_t reserve_bytes() {
   if (phys == 0) {
     return kFloor;
   }
-  // max(2 GiB, 20% of physical) -- but never so much that nothing is left to
+  // max(2 GiB, 25% of physical) -- but never so much that nothing is left to
   // work with. Without the half-of-physical cap, the 2 GiB floor swallows a
   // <=2 GiB host entirely, budget_bytes returns 0, and the guard silently turns
   // itself OFF on the machine most likely to run out of memory.
-  return std::min(std::max(kFloor, phys / 5), phys / 2);
+  return std::min(std::max(kFloor, phys / 4), phys / 2);
 }
 
 uint64_t budget_bytes(int budget_mb) {

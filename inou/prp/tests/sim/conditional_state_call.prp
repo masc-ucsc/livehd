@@ -1,0 +1,39 @@
+/*
+:name: conditional_state_call
+:type: simulation
+*/
+
+// A conditional stateful call must not advance the child's state while its
+// arm is inactive, and its raw output must remain hidden by the caller merge.
+mod conditional_state_inner(a:u8) -> (out:u8@[0]) {
+  reg q:u8 = 0
+  q = q ^ a
+  out = q
+}
+
+pub mod conditional_state_top(en:bool, a:u8) -> (out:u8@[0]) {
+  out = 0
+  if en {
+    out = conditional_state_inner(a)
+  }
+}
+
+test conditional_state_top.hold_and_mask {
+  mut dut = conditional_state_top
+  mut bad = 0
+  tick 4 {
+    dut.en = (clock == 0) or (clock == 3)
+    dut.a  = 1 << clock
+    step
+
+    if clock == 0 {
+      if dut.out != 1 { bad = bad + 1 }
+    } elif clock == 1 or clock == 2 {
+      if dut.out != 0 { bad = bad + 1 }
+    } else {
+      // The two inactive cycles held q=1, so the next active update is 1^8.
+      if dut.out != 9 { bad = bad + 1 }
+    }
+  }
+  assert(bad == 0, "inactive calls mask outputs and hold child state")
+}

@@ -1,0 +1,14 @@
+/*
+:name: ready_signal_masked
+:type: equiv
+:verilog_top: ready_signal_masked
+:pyrope_top: ready_signal_masked
+*/
+// Independent priority encoder for the concurrent, masked feedback spelling.
+pub comb ready_signal_masked(req:u4) -> (grant:u4) {
+  if req#[0] != 0 { grant = 1 }
+  elif req#[1] != 0 { grant = 2 }
+  elif req#[2] != 0 { grant = 4 }
+  elif req#[3] != 0 { grant = 8 }
+  else { grant = 0 }
+}

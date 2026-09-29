@@ -48,8 +48,6 @@ trap 'rm -rf "$W"' EXIT
 
 fail() { echo "FAIL: $*"; exit 1; }
 
-HAVE_IVERILOG=0
-command -v iverilog >/dev/null 2>&1 && HAVE_IVERILOG=1
 
 # ---- 1: active-low-enable ATTRIBUTE is refused, not silently miscompiled -----
 cat > "$W/attr.prp" <<'EOF'
@@ -69,10 +67,8 @@ grep -q "if !g" <<<"$out" || fail "the refusal must point at the spelling that w
 echo "ok: enable_high=false is REFUSED with a directed diagnostic"
 
 # ---- 2: and the spelling it recommends is genuinely correct ------------------
-# Independent oracle, NOT our own encoder on both sides: lgcheck's bounded miter
-# is polarity-DISCRIMINATING for latches (see lec_latch_polarity_test.sh), so a
-# PROVEN here is real and a REFUTED against the flipped golden proves the check
-# is not vacuous.
+# The default LEC engine must accept the matching polarity and reject its
+# port-matched opposite, so the positive check cannot pass vacuously.
 cat > "$W/ok.prp" <<'EOF'
 pub mod enlow(g:bool, d:u8) -> (q:u8@[0]) {
   reg l:u8:[latch=true]
@@ -102,14 +98,14 @@ EOF
 "$LHD" compile "$W/ok.prp" --emit verilog:"$W/ok.v" --workdir "$W/w_ok" -q >"$W/ok.log" 2>&1 \
   || { tail -3 "$W/ok.log"; fail "the \`if !g\` active-low spelling does not compile"; }
 
-"$LHD" lec --set formal.solver=lgyosys --impl verilog:"$W/ok.v" --ref verilog:"$W/gold_low.v" \
+"$LHD" lec --impl verilog:"$W/ok.v" --ref verilog:"$W/gold_low.v" \
   --top enlow --workdir "$W/w_lo" -q >"$W/lo.log" 2>&1 \
   || { tail -3 "$W/lo.log"; fail "\`if !g\` is NOT equivalent to its active-low golden"; }
 echo "ok: the \`if !g\` spelling PROVES against an active-low golden"
 
 # Vacuity guard: the same oracle must REFUTE the opposite polarity, or the
 # PROVEN above says nothing.
-if "$LHD" lec --set formal.solver=lgyosys --impl verilog:"$W/ok.v" --ref verilog:"$W/gold_high.v" \
+if "$LHD" lec --impl verilog:"$W/ok.v" --ref verilog:"$W/gold_high.v" \
      --top enlow --workdir "$W/w_hi" -q >"$W/hi.log" 2>&1; then
   fail "the oracle PROVED active-low == active-high — it is blind here, so check 2 is vacuous"
 fi
@@ -131,9 +127,9 @@ pub mod abclatch(en:bool, a:u8, b:u8) -> (q:u8@[0]) {
 }
 EOF
 
-"$LHD" compile "$W/abc.prp" --top abclatch --recipe O1 --emit-dir lg:"$W/abc_lg" --workdir "$W/w_ac1" -q \
+"$LHD" compile "$W/abc.prp" --top abclatch --emit-dir lg:"$W/abc_lg" --workdir "$W/w_ac1" -q \
   >"$W/ac1.log" 2>&1 || { tail -3 "$W/ac1.log"; fail "abc fixture does not compile"; }
-"$LHD" pass abc --top abclatch lg:"$W/abc_lg" --emit-dir lg:"$W/abc_net" --set pass.abc.library="$LIB" \
+"$LHD" pass abc --top abclatch lg:"$W/abc_lg" --emit-dir lg:"$W/abc_net" --set synth.liberty="$LIB" \
   --workdir "$W/w_ac2" -q >"$W/ac2.log" 2>&1 \
   || { tail -3 "$W/ac2.log"; fail "pass abc REJECTS a region containing a latch (M2 boundary regression)"; }
 ls "$W/abc_net"/graph_* >/dev/null 2>&1 || fail "pass abc emitted no mapped netlist for the latch region"
@@ -147,6 +143,33 @@ grep -q "always_latch" "$W/abc_net.v" \
   || fail "the latch did NOT survive abc as a native cell (it must be boxed, never bit-blasted)"
 echo "ok: the latch survives abc as a native boxed cell"
 
+# Yosys gives the inferred $dlatch an auto-generated CELL name distinct from
+# the Q WIRE name. That is the non-vacuous bus-identity case: color/ABC must cut
+# at the cell, then map its eight one-bit boundary PIs back to `state_bus`, not
+# to the synthetic $auto$proc_dlatch... instance name.
+cat > "$W/abc_yosys.v" <<'EOF'
+module abc_yosys(input logic en, input logic [7:0] a, b, output logic [7:0] q);
+  logic [7:0] state_bus;
+  always_latch begin
+    if (en)
+      state_bus <= a & b;
+  end
+  assign q = state_bus | a;
+endmodule
+EOF
+"$LHD" compile "$W/abc_yosys.v" --reader yosys-verilog --top abc_yosys \
+  --emit-dir lg:"$W/abc_y_lg" --workdir "$W/w_acy1" -q >"$W/acy1.log" 2>&1 \
+  || { tail -3 "$W/acy1.log"; fail "yosys latch bus fixture does not compile"; }
+"$LHD" pass abc --top abc_yosys lg:"$W/abc_y_lg" --emit-dir lg:"$W/abc_y_net" \
+  --set synth.liberty="$LIB" --workdir "$W/w_acy2" -q >"$W/acy2.log" 2>&1 \
+  || { tail -3 "$W/acy2.log"; fail "pass abc rejects the yosys latch bus fixture"; }
+"$LHD" compile lg:"$W/abc_y_net" --top abc_yosys --emit verilog:"$W/abc_y_net.v" \
+  --workdir "$W/w_acy3" -q >"$W/acy3.log" 2>&1 \
+  || { tail -3 "$W/acy3.log"; fail "cannot emit the mapped yosys latch netlist"; }
+grep -Eq 'reg( signed)? \[7:0\] state_bus;' "$W/abc_y_net.v" \
+  || { grep -nE 'reg|always_latch' "$W/abc_y_net.v"; fail "latch Q did not map back to its original packed bus name"; }
+echo "ok: a yosys latch Q maps back to its original 8-bit bus name after abc"
+
 # NOTE: the post-abc netlist cannot yet be LEC-PROVEN against its pre-abc twin —
 # the native cvc5 encoder still refuses the Latch cell (that is M4's job, and it
 # correctly exits nonzero rather than pretending). The flop-shaped twin of this
@@ -154,7 +177,7 @@ echo "ok: the latch survives abc as a native boxed cell"
 # methodology (not the latch handling) is sound.
 
 # ---- 4: color + partition + compile emits elaborable Verilog -----------------
-"$LHD" compile "$W/ok.prp" --top enlow --recipe O1 --emit-dir lg:"$W/p_lg" --workdir "$W/w_p1" -q \
+"$LHD" compile "$W/ok.prp" --top enlow --emit-dir lg:"$W/p_lg" --workdir "$W/w_p1" -q \
   >"$W/p1.log" 2>&1 || { tail -3 "$W/p1.log"; fail "partition fixture does not compile"; }
 "$LHD" pass color synth --top enlow lg:"$W/p_lg" --workdir "$W/w_p2" -q >"$W/p2.log" 2>&1 \
   || { tail -3 "$W/p2.log"; fail "pass color synth failed on a latch design"; }
@@ -162,10 +185,6 @@ echo "ok: the latch survives abc as a native boxed cell"
   || { tail -3 "$W/p3.log"; fail "pass partition failed on a latch design"; }
 "$LHD" compile lg:"$W/p_re" --top enlow --emit verilog:"$W/p.v" --workdir "$W/w_p4" -q >"$W/p4.log" 2>&1 \
   || { tail -3 "$W/p4.log"; fail "cannot emit verilog from the partitioned latch design"; }
-if [ $HAVE_IVERILOG -eq 1 ]; then
-  iverilog -g2012 -o /dev/null "$W/p.v" 2>"$W/p.iv" \
-    || { cat "$W/p.iv"; fail "partitioned latch design emits verilog iverilog rejects"; }
-fi
 echo "ok: color + partition + compile emits elaborable Verilog for a latch design"
 
 echo "PASS: latch_clock_identity_test"

@@ -11,7 +11,7 @@
 // pass/lec + pass/semdiff + the cvc5 pin — //lhd:formal_salt), so any prover
 // change drops every cached verdict on load, with no human in the loop.
 //
-// Strategy hints are the cache's third record kind (user note 2026-07-10):
+// Strategy hints are the cache's third record kind:
 // which `auto` choice WON per def — keyed by canonical entity NAME, not digest,
 // so a hint survives the design edit that misses the verdict cache and the
 // next run tries the known-good strategy first. Hints are heuristic-only (they
@@ -31,18 +31,19 @@
 namespace livehd::formal {
 
 struct Cached_verdict {
-  std::string engine;          // winning engine ("ind", "bmc", "casesplit", "semdiff")
-  std::string detail;          // original detail line (replayed inside the hit's detail)
-  long long   elapsed_ms = 0;  // original solve time
+  std::string engine;              // winning engine ("ind", "bmc", "casesplit", "semdiff")
+  std::string detail;              // original detail line (replayed inside the hit's detail)
+  long long   elapsed_ms = 0;      // original solve time
+  bool        bounded    = false;  // A finite-depth proof must never replay as unbounded.
 };
 
 struct Strategy_hint {
-  std::string engine;          // winning engine last time
-  std::string split;           // winning case-split selector ("" = none)
+  std::string engine;  // winning engine last time
+  std::string split;   // winning case-split selector ("" = none)
   long long   elapsed_ms = 0;
 };
 
-// Fourth record kind (ruling 2026-07-10): an Unknown ATTEMPT ledger — not a
+// Fourth record kind: an Unknown ATTEMPT ledger — not a
 // verdict (the def still reports inconclusive), just "this exact digest+options
 // already came back Unknown at this budget", so an unchanged re-run skips the
 // re-grind instead of burning the full solver budget again. Salt-gated with the
@@ -109,28 +110,28 @@ public:
   const absl::flat_hash_set<std::string>& cone_digests() const { return cones_; }
   void                                    note_cone_proven(const std::string& digest);
 
-  int  cone_hits() const { return cone_hits_; }
-  int  hits() const { return hits_; }
-  int  stores() const { return stores_; }
-  int  skips() const { return skips_; }
+  int cone_hits() const { return cone_hits_; }
+  int hits() const { return hits_; }
+  int stores() const { return stores_; }
+  int skips() const { return skips_; }
 
   // Atomic persist (tmp + rename). No-op when nothing changed.
   void save() const;
 
 private:
-  std::string workdir_;
-  uint64_t    salt_;
-  bool        dirty_  = false;
-  int         hits_   = 0;
-  int         stores_ = 0;
-  mutable int skips_  = 0;
+  std::string                                       workdir_;
+  uint64_t                                          salt_;
+  bool                                              dirty_  = false;
+  int                                               hits_   = 0;
+  int                                               stores_ = 0;
+  mutable int                                       skips_  = 0;
   mutable std::mutex                                mutex_;
   absl::flat_hash_map<std::string, Cached_verdict>  verdicts_;
   absl::flat_hash_map<std::string, Strategy_hint>   hints_;
   absl::flat_hash_map<std::string, Pair_hint>       pair_hints_;
   absl::flat_hash_map<std::string, Unknown_attempt> unknowns_;
-  absl::flat_hash_set<std::string>                 cones_;
-  int                                              cone_hits_ = 0;  // digests loaded from disk
+  absl::flat_hash_set<std::string>                  cones_;
+  int                                               cone_hits_ = 0;  // digests loaded from disk
 };
 
 }  // namespace livehd::formal

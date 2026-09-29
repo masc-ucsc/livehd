@@ -1,0 +1,27 @@
+/*
+:name: hotmux_sim_wide_selector
+:type: simulation
+*/
+
+// A Hotmux selector is one bit per arm, independent of the result width. The
+// simulator used to truncate this unique-if selector to the 1-bit result and
+// therefore lost every selection above arm zero.
+pub comb pick_high(sel:u4) -> (out:bool) {
+  out = false
+  unique if sel == 0 {
+    out = false
+  } elif sel == 1 {
+    out = false
+  } elif sel == 2 {
+    out = false
+  } elif sel == 3 {
+    out = true
+  }
+}
+
+test pick_high.fourth_arm_reaches_narrow_result {
+  mut acc = pick_high
+  acc.sel = 3
+  step
+  assert(acc.out, "a high selector bit must reach a one-bit Hotmux result")
+}

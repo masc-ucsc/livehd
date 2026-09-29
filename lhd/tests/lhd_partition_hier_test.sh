@@ -6,17 +6,27 @@
 # lhd_partition_test.sh (a single flat Verilog module), this drives two
 # multi-module Pyrope fixtures so the passes must descend the hierarchy:
 #
-#   prp -> lg (O1)
+#   prp -> lg
 #   lhd pass color <alg>                  (colors EVERY def: top + sub-defs)
 #   lhd pass partition --emit-dir lg:dir2 (partitions every def + re-links Subs)
 #   lg:dir2 -> verilog
-#   lhd lec --set formal.solver=lgyosys (partitioned vs original): must be LEC-equivalent
+#   lhd lec (partitioned vs original): must be LEC-equivalent
+#
+# It also pins the transparent-wrapper contract (graph/README.md): the anonymous
+# region wrappers are emitted as plain `__flat___<module>` instances, so the
+# reloaded state names match the original BY NAME (formal.lec.state_pairing=false
+# must still give an unbounded proof), and a changed transition behind them is
+# refuted.
 #
 # Fixtures (inou/prp/tests/pyrope):
 #   hier_comb  - combinational, top instances `adder` x2 + `bitmix`
 #   hier_seq   - sequential 3-level, top -> stage_unit x2 -> delayer (flops)
 #
-# Covers both the `synth` (the abc driver) and `acyclic` colorings.
+# `acyclic` is the coloring here, because it is the one that still colours PER
+# DEF and therefore exercises the re-link. `synth` deliberately no longer does:
+# it colours the flat view of the hierarchy (virtual flattening) and records
+# "hier_flat":true, so pass.partition inlines the hierarchy instead of re-linking
+# it -- that path has its own end-to-end test in lhd_color_hier_flat_test.sh.
 
 set -u
 
@@ -42,49 +52,89 @@ for entry in "${DESIGNS[@]}"; do
   PRP="inou/prp/tests/pyrope/$FIX.prp"
   [ -f "$PRP" ] || fail "missing fixture $PRP"
   BASE="${TOP%.*}"  # e.g. hier_comb
-  for ALG in synth acyclic; do
+  for ALG in acyclic; do
     D="$W/$FIX/$ALG"
     mkdir -p "$D"
     # 1. compile the hierarchical design to an lg library (all defs)
-    run compile "$PRP" --top "$TOP" --recipe O1 --emit-dir lg:"$D/lg" --workdir "$D/w1"
+    run compile "$PRP" --top "$TOP" --emit-dir lg:"$D/lg" --workdir "$D/w1"
     # 2. reference Verilog (pre-color; coloring only adds attrs, but keep it clean)
-    run compile lg:"$D/lg" --top "$TOP" --recipe O0 --emit verilog:"$D/ref.v" --workdir "$D/w2"
+    run compile lg:"$D/lg" --top "$TOP" --emit verilog:"$D/ref.v" --workdir "$D/w2"
     # 3. color every def in the hierarchy.
-    #    absorb=false: this test is about pass.partition RE-LINKING a hierarchy,
-    #    so the hierarchy has to still be there. `synth`'s default min=1000 GE
-    #    would inline these fixtures away wholesale -- every def in them is a few
-    #    dozen gate-equivalents -- which is absorb working as designed and would
-    #    leave nothing here to re-link. Absorb has its own end-to-end test in
-    #    lhd_color_absorb_test.sh.
-    run pass color "$ALG" --top "$TOP" --set color.absorb=false lg:"$D/lg" --workdir "$D/w3"
+    run pass color "$ALG" --top "$TOP" lg:"$D/lg" --workdir "$D/w3"
     # 4. partition every def + re-link Sub instances into a fresh library
     run pass partition --top "$TOP" lg:"$D/lg" --emit-dir lg:"$D/lg2" --workdir "$D/w4"
     # 5. emit Verilog from the partitioned library (verbatim, no re-opt)
-    run compile lg:"$D/lg2" --top "$TOP" --recipe O0 --emit verilog:"$D/part.v" --workdir "$D/w5"
+    run compile lg:"$D/lg2" --top "$TOP" --emit verilog:"$D/part.v" --workdir "$D/w5"
     # hierarchy preserved: the child def survives as its own module (partition
     # re-links the Sub instances to it).
     grep -q "^module ${CHILD}" "$D/part.v" || fail "$FIX/$ALG: child def '$CHILD' dropped (hierarchy lost)"
-    if [ "$ALG" = synth ]; then
-      # synth colors each def as ONE region, so every def is emitted directly
-      # under its own name -- no pointless `<def>__c<id>` wrapper whose only body
-      # is a single region instance (the single-region optimization).
-      grep -q "__c" "$D/part.v" && fail "$FIX/$ALG: single-region defs must not get a __c wrapper"
-    else
-      # acyclic splits some defs into several colors -> per-(def,color) region
-      # submodules under a wrapper.
-      grep -q "__c" "$D/part.v" || fail "$FIX/$ALG: multi-region partition has no per-color submodules"
-    fi
+    # The coloring splits at least one def into several colors -> per-(def,
+    # color) region submodules under a wrapper. The single-region optimization --
+    # no pointless `<def>__c<id>` wrapper whose only body is one region instance
+    # -- is pinned below.
+    grep -q "__c" "$D/part.v" || fail "$FIX/$ALG: multi-region partition has no per-color submodules"
     # 6. LEC: the partitioned hierarchical design must equal the original
-    run lec --set formal.solver=lgyosys --impl verilog:"$D/part.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
+    run lec --impl verilog:"$D/part.v" --ref verilog:"$D/ref.v" --top "$TOP" --workdir "$D/c"
+    # 7. The anonymous region wrappers are emitted with the reserved transparent
+    # prefix as a plain identifier (an escaped dotted `\__flat___file.entity`
+    # reloads as two levels and keeps a spurious `entity` level in state names).
+    grep -q '__flat___' "$D/part.v" || fail "$FIX/$ALG: region wrappers not emitted with the transparent __flat___ prefix"
+    grep -qF '\__flat___' "$D/part.v" && fail "$FIX/$ALG: transparent wrapper emitted as an escaped/dotted identifier"
+    # Name-only correspondence: no tier-2 pairing, and the proof must be
+    # unbounded (a wrapper that is not transparent on reload leaves unmatched
+    # state cuts: UNKNOWN, or only a bounded PASS from the auto engine).
+    run lec --impl verilog:"$D/part.v" --ref verilog:"$D/ref.v" --top "$TOP" \
+      --set formal.lec.state_pairing=false --workdir "$D/cn"
+    python3 -c 'import json,sys; l=json.load(open(sys.argv[1]))["lec"]; sys.exit(0 if l["verdict"]=="proven" and not l.get("bounded") else 1)' \
+      "$W/r.json" || fail "$FIX/$ALG: transparent wrappers not name-matched: $(cat "$W/r.json")"
     echo "PASS: $FIX [$ALG] hierarchical partition is LEC-equivalent to the original"
   done
 done
 
+# Negative control for the name-only proof: a changed stage_unit transition
+# behind the transparent region wrappers must be REFUTED. `^` -> `&` (d1 and d2
+# are bit-disjoint, so `^` -> `|` would be a correct rewrite and must prove).
+ND="$W/neg"
+mkdir -p "$ND"
+sed 's/r = d1 ^ d2/r = d1 \& d2/' inou/prp/tests/pyrope/hier_seq.prp > "$ND/hier_seq.prp"
+grep -q 'r = d1 & d2' "$ND/hier_seq.prp" || fail "negative control: mutation did not apply"
+run compile "$ND/hier_seq.prp" --top hier_seq.top --emit-dir lg:"$ND/lg" --workdir "$ND/w1"
+run pass color acyclic --top hier_seq.top lg:"$ND/lg" --workdir "$ND/w2"
+run pass partition --top hier_seq.top lg:"$ND/lg" --emit-dir lg:"$ND/lg2" --workdir "$ND/w3"
+run compile lg:"$ND/lg2" --top hier_seq.top --emit verilog:"$ND/part.v" --workdir "$ND/w4"
+"$LHD" lec --impl verilog:"$ND/part.v" --ref verilog:"$W/hier_seq/acyclic/ref.v" --top hier_seq.top \
+  --set formal.lec.state_pairing=false --set formal.engine=bmc --set formal.bound=3 \
+  --workdir "$ND/c" -q --result-json "$ND/c.json" && fail "mutated transition behind transparent wrappers unexpectedly proved"
+python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["lec"]["verdict"]=="refuted" else 1)' "$ND/c.json" \
+  || fail "negative control not refuted: $(cat "$ND/c.json")"
+echo "PASS: changed transition behind transparent region wrappers is refuted"
+
+# The single-region optimization: a def that IS one region is emitted directly
+# under its own name -- no `<def>__c<id>` wrapper whose only body is one region
+# instance. `mode=pipe` on the purely combinational fixture is the coloring
+# that gives it (pipe cuts at state only, and hier_comb has none), so every def
+# there is exactly one region. `hier=false` keeps it a PER-DEF coloring: it
+# colours the top body alone (one region) and leaves the children uncolored (one
+# color-0 region each), which is the shape this optimization is about. With the
+# hierarchical default the colours would span defs and partition would flatten.
+# The hierarchy and the LEC must survive it too.
+FD="$W/onecolor"
+mkdir -p "$FD"
+run compile "inou/prp/tests/pyrope/hier_comb.prp" --top hier_comb.top --emit-dir lg:"$FD/lg" --workdir "$FD/w1"
+run compile lg:"$FD/lg" --top hier_comb.top --emit verilog:"$FD/ref.v" --workdir "$FD/w2"
+run pass color synth --top hier_comb.top --set color.hier=false --set color.synth.mode=pipe lg:"$FD/lg" --workdir "$FD/w3"
+run pass partition --top hier_comb.top lg:"$FD/lg" --emit-dir lg:"$FD/lg2" --workdir "$FD/w4"
+run compile lg:"$FD/lg2" --top hier_comb.top --emit verilog:"$FD/part.v" --workdir "$FD/w5"
+grep -q "^module adder" "$FD/part.v" || fail "pipe: child def 'adder' dropped (hierarchy lost)"
+grep -q "__c" "$FD/part.v" && fail "pipe: single-region defs must not get a __c wrapper"
+run lec --impl verilog:"$FD/part.v" --ref verilog:"$FD/ref.v" --top hier_comb.top --workdir "$FD/c"
+echo "PASS: single-region-per-def partition needs no __c wrapper and is LEC-equivalent"
+
 # stats-only mode on a hierarchical input must succeed (per-def region stats).
 SD="$W/stats"
 mkdir -p "$SD"
-run compile "inou/prp/tests/pyrope/hier_comb.prp" --top hier_comb.top --recipe O1 --emit-dir lg:"$SD/lg" --workdir "$SD/w1"
-run pass color synth --top hier_comb.top --set color.absorb=false lg:"$SD/lg" --workdir "$SD/w2"
+run compile "inou/prp/tests/pyrope/hier_comb.prp" --top hier_comb.top --emit-dir lg:"$SD/lg" --workdir "$SD/w1"
+run pass color synth --top hier_comb.top lg:"$SD/lg" --workdir "$SD/w2"
 run pass partition --top hier_comb.top lg:"$SD/lg" --workdir "$SD/w3"
 echo "PASS: hierarchical partition stats-only mode"
 

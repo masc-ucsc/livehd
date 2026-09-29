@@ -183,6 +183,18 @@ public:
   // from an unbound-param template walk (where nils are placeholders).
   bool in_inline_frame() const { return !active_tag_.empty(); }
 
+  // A loop body retains source-local bindings when lifted. Resolve only the
+  // caller-side actuals through the current inline frame.
+  std::string frame_variable(std::string_view raw) const {
+    return active_tag_.empty() ? std::string(raw) : make_inlined_name(active_tag_, raw);
+  }
+
+  // Outlined definitions belong to the receiving module, even when their
+  // source is currently borrowed from an inlined generic function.
+  std::string outlining_owner() const {
+    return std::string((frames_.empty() ? lnast : frames_.front().tree)->get_top_module_name());
+  }
+
   // Re-enter the CURRENT tree at the CURRENT cursor under a fresh rename salt,
   // keeping the active tag — used by the runner's comptime loop unroller to
   // re-walk a loop body once per iteration. The fresh salt gives each

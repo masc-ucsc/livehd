@@ -10,19 +10,19 @@ module \mem_tuple_rw.mtr (
 );
 
   // The tuple memory is split per field: one array for `.a`, one for `.b`.
-  reg [7:0] mem_a [0:7];
-  reg [3:0] mem_b [0:7];
+  reg [7:0] \mem.a [0:7];
+  reg [3:0] \mem.b [0:7];
 
   always @(posedge clock) begin
     if (we) begin
-      mem_a[wi] <= wa;
-      mem_b[wi] <= wb;
+      \mem.a [wi] <= wa;
+      \mem.b [wi] <= wb;
     end
   end
 
   // async read + same-cycle write forwarding (the write precedes the read in
   // program order, so the default ordering="program" forwards it)
-  assign za = (we && (wi == ri)) ? wa : mem_a[ri];
-  assign zb = (we && (wi == ri)) ? wb : mem_b[ri];
+  assign za = (we && (wi == ri)) ? wa : \mem.a [ri];
+  assign zb = (we && (wi == ri)) ? wb : \mem.b [ri];
 
 endmodule

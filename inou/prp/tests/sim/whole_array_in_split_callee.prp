@@ -1,0 +1,118 @@
+/*
+:name: whole_array_in_split_callee
+:type: simulation
+*/
+
+// A COMBINATIONAL whole-array read inside a callee that a false ring forces to
+// be PARTITIONED loses its data input entirely: the array is scattered from a
+// literal zero, so the read returns 0 forever. Found by differential fuzzing
+// against Icarus, 2026-08-06. This is the most dangerous shape found so far --
+// there is no diagnostic, no lag, no edge case: one whole input port is
+// silently replaced by zero on every cycle.
+//
+//     x -> acell.a1 -> fb -> acell.cidx -> acell.ar        (the ring)
+//     cinp ---------------------------------> acell.ar     (the dropped input)
+//
+//     c   : 0   1   2   3   4   5
+//     o2  : 11  10  15  12  11  10    <- Icarus (and `c2` agrees)
+//     o2  : 0   0   0   0   0   0     <- `lhd sim`
+//
+// WHY IT HAPPENS -- the two halves of the split disagree about what a group
+// reads. The caller fills a group's `In` from the per-definition
+// out-port -> in-ports summary and SKIPS any port the summary omits, leaving it
+// zero-initialized. For a per-read-port memory read the summary contributes the
+// address and enable cones but joins the array's `update`/write cone only when
+// forwarding is possible; a combinational whole-array write is not a forwarding
+// case, so `cinp` never enters `ar`'s support. The callee's own emitted body
+// then does exactly what it should -- scatter the array from `In.cinp` and read
+// it -- but `In.cinp` is the zero the caller left there.
+//
+// So the failure needs BOTH halves: the callee must be split (which needs the
+// ring) AND the output's support must be under-reported (which needs the
+// whole-array write). Either alone is correct, which is what the control proves.
+//
+// THE CONTROL IS IN THE DESIGN. `c2` is the SAME definition instantiated again
+// with `cidx` driven by an identical value computed WITHOUT the callee
+// (`nb == fb == (x+2)&3` by construction, since `a1 == x+1`). No ring, so no
+// split, so no dropped input -- and it is correct. `o2 == c2` is therefore the
+// entire bug in one comparison: two instances of one definition, handed the
+// same address and the same array, returning different data.
+//
+// Measured neighbour: the same design with the ring removed matches Icarus on
+// every cycle, so this is not a whole-array bug and not a ring bug -- it is the
+// two together. `mem_whole.prp` covers the whole-array read standing alone.
+//
+// GOLDENS: hand-written Icarus twin (design retyped from this source, never
+// LiveHD's emitter). Pure combinational, sampled after the settle.
+
+mod acell::[timecheck=false](k:u8, cinp:u32, cidx:u2) -> (a1:u16@[], ar:u16@[]) {
+  a1 = k + 1              // cone {k} -- this is what closes the caller's ring
+  mut carr:[4]u8
+  carr = cinp             // whole-array COMBINATIONAL write
+  ar   = carr[cidx]       // cone {cinp, cidx} -- `cinp` is the one that vanishes
+}
+
+pub mod warring::[timecheck=false](x:u8, cinp:u32) -> (o1:u16@[], o2:u16@[],
+                                                       c2:u16@[]) {
+  // THE RING INSTANCE: the callee's first cone feeds the address its second
+  // cone reads, so the callee must be split into two groups.
+  wire fb:u2 = nil
+  mut ir = acell(k=x, cinp=cinp, cidx=fb)
+  fb = (ir.a1 + 1) & 0x3
+  o1 = ir.a1
+  o2 = ir.ar
+
+  // CONTROL -- same definition, same array, same address VALUE, but no ring,
+  // so no split. `nb` is `fb` recomputed from `x` directly.
+  wire nb:u2 = nil
+  nb = (x + 2) & 0x3
+  mut ic = acell(k=x, cinp=cinp, cidx=nb)
+  c2 = ic.ar
+}
+
+test warring.split_callee_keeps_its_whole_array_input {
+  mut acc  = warring
+  mut seen = 0
+  mut bad_o1    = 0
+  mut bad_c2    = 0
+  mut bad_o2    = 0
+  mut bad_agree = 0
+  tick 6 {
+    mut xv:u8  = clock
+    mut cv:u32 = 0x0A0B0C0D + clock
+    acc.x    = xv
+    acc.cinp = cv
+    step
+    mut g_a1:u16  = xv + 1
+    mut g_idx:u16 = (g_a1 + 1) & 0x3
+    mut g_ar:u16  = 0
+    if g_idx == 0 {
+      g_ar = cv#[0..=7]
+    } elif g_idx == 1 {
+      g_ar = cv#[8..=15]
+    } elif g_idx == 2 {
+      g_ar = cv#[16..=23]
+    } else {
+      g_ar = cv#[24..=31]
+    }
+
+    seen = seen + 1
+    if acc.o1 != g_a1 {
+      bad_o1 = bad_o1 + 1
+    }
+    if acc.c2 != g_ar {
+      bad_c2 = bad_c2 + 1
+    }
+    if acc.o2 != g_ar {
+      bad_o2 = bad_o2 + 1
+    }
+    if acc.o2 != acc.c2 {
+      bad_agree = bad_agree + 1
+    }
+  }
+  assert(seen == 6, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_o1 == 0, "CONTROL: the callee cone that FEEDS the ring is correct")
+  assert(bad_c2 == 0, "CONTROL: the same callee with no ring keeps its array input")
+  assert(bad_agree == 0, "two instances of one definition, same array and address, must agree")
+  assert(bad_o2 == 0, "a SPLIT callee still receives the whole-array data input")
+}

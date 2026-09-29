@@ -3,7 +3,6 @@
 :type: equiv
 :verilog_top: instance_out_struct_ident_top
 :pyrope_top: top
-:gold_reader: slang
 */
 
 // KNOWN-FAILING tracker (fixme) — instance-OUTPUT struct dual identity, the

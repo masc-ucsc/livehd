@@ -33,6 +33,7 @@ const std::vector<std::string_view> kOutputKinds{"ln",
                                                  "graphviz",
                                                  "metadata",
                                                  "results",
+                                                 "report",
                                                  "diagnostics"};
 
 std::string canonical_kind(std::string_view kind) {
@@ -99,7 +100,7 @@ std::string_view need_value(std::string_view flag, int& i, int argc, char** argv
   return argv[i];
 }
 
-// A non-negative integer flag value (cycle counts: --restart-at/--vcd-from/-to).
+// A non-negative integer flag value (cycle counts: --restart-cycle/--vcd-from/-to).
 long parse_nonneg(std::string_view flag, std::string_view val) {
   size_t consumed = 0;
   long   n        = 0;
@@ -136,6 +137,24 @@ Typed_path parse_check_side(std::string_view flag, std::string_view arg) {
                   "input kinds: verilog, pyrope, ln, lg"};
 }
 
+void add_cli_set(Options& opts, std::string key, std::string val) {
+  // One argv carrying the same flag with two DIFFERENT values is always a
+  // mistake: which one wins is an implementation detail, so silently
+  // picking one makes the command mean something its author did not write.
+  // A caller layering an override on a base command must COLLAPSE the two
+  // before building argv (see _set_override in inou/prp/tests/prplib.py),
+  // not rely on last-wins. Repeating the SAME value is harmless and
+  // accepted — a script may legitimately pass a default twice.
+  for (const auto& [k, v] : opts.sets) {
+    if (k == key && v != val) {
+      throw Lhd_error{"usage",
+                      std::format("--set {} given twice with different values ('{}' then '{}')", key, v, val),
+                      "drop one — repeating a flag with the SAME value is fine, but two values are ambiguous"};
+    }
+  }
+  opts.sets.emplace_back(std::move(key), std::move(val));
+}
+
 // --emit PATH: KIND:PATH, or a bare output path whose kind is inferred from the
 // extension (.v/.sv -> verilog, .prp -> pyrope). Inference is `--emit` only (a
 // single file); `--emit-dir` directory containers keep their explicit KIND:DIR.
@@ -159,7 +178,7 @@ Typed_path parse_emit_arg(std::string_view flag, std::string_view arg) {
 // A strict TOML *subset*: `#` comments, `[pass]` tables, and `key = value`
 // where value is a quoted string, a boolean, or an integer. Each table entry
 // becomes a `--set pass.flag=value` default (prepended, so an explicit CLI
-// --set always wins); the only top-level key is `recipe` (CLI --recipe wins).
+// --set always wins). All keys belong to pass tables.
 // Anything outside the subset is a config error — reject rather than misread.
 
 std::string_view trim(std::string_view s) {
@@ -215,9 +234,8 @@ std::string toml_value(const std::string& file, int lineno, std::string_view raw
   if (!digits.empty() && digits.front() == '-') {
     digits.remove_prefix(1);
   }
-  if (!digits.empty() && std::all_of(digits.begin(), digits.end(), [](char c) {
-        return std::isdigit(static_cast<unsigned char>(c));
-      })) {
+  if (!digits.empty()
+      && std::all_of(digits.begin(), digits.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)); })) {
     return std::string{raw};
   }
   throw Lhd_error{"config",
@@ -225,7 +243,7 @@ std::string toml_value(const std::string& file, int lineno, std::string_view raw
                   "config values are \"quoted strings\", true/false, or integers"};
 }
 
-// Read `opts.config` and fold it into opts (sets/recipe). Strict subset; see
+// Read `opts.config` and fold it into opts.sets. Strict subset; see
 // the comment block above. Runs before run_id hashing, so a config file and
 // the equivalent explicit flags produce the same run_id.
 void load_config(Options& opts) {
@@ -238,7 +256,6 @@ void load_config(Options& opts) {
   }
 
   std::vector<std::pair<std::string, std::string>> file_sets;
-  std::string                                      file_recipe;
   std::string                                      table;  // current [pass] table ("" = top level)
   std::string                                      line;
   int                                              lineno = 0;
@@ -282,13 +299,9 @@ void load_config(Options& opts) {
     }
     auto value = toml_value(opts.config, lineno, trim(t.substr(eq + 1)));
     if (table.empty()) {
-      if (key != "recipe") {
-        throw Lhd_error{"config",
-                        std::format("{}:{}: unknown top-level key '{}'", opts.config, lineno, key),
-                        "top level takes only `recipe`; pass flags go under [upass]/[cprop]/[bitwidth]/[cgen]"};
-      }
-      file_recipe = value;
-      continue;
+      throw Lhd_error{"config",
+                      std::format("{}:{}: unknown top-level key '{}'", opts.config, lineno, key),
+                      "pass flags go under [upass]/[cprop]/[bitwidth]/[cgen]; the compile pipeline is fixed"};
     }
     // Canonicalize against the `compile` context: a config table is portable
     // across commands, so a bare compile-pass table ([cprop]/[upass]/[cgen]…)
@@ -300,20 +313,17 @@ void load_config(Options& opts) {
   }
 
   // File entries are defaults: prepend so later (CLI) --set entries overwrite
-  // them in merge_sets; --recipe wins over the file's recipe. And unlike an
-  // explicit --recipe, a default that the command has no slot for is simply
-  // ignored (one lhd.toml can serve every step of a flow), so only the
-  // recipe-consuming commands pick it up.
+  // them in merge_sets.
   opts.sets.insert(opts.sets.begin(), file_sets.begin(), file_sets.end());
-  if (opts.recipe.empty() && opts.command == "compile") {
-    opts.recipe = file_recipe;
-  }
 }
 
 }  // namespace
 
 Options parse_args(int argc, char** argv) {
   Options opts;
+  for (int i = 0; i < argc; ++i) {
+    opts.invocation_argv.emplace_back(argv[i]);
+  }
 
   // --version anywhere before `--`.
   for (int j = 1; j < argc; ++j) {
@@ -331,8 +341,8 @@ Options parse_args(int argc, char** argv) {
   // may come before or after it (`lhd --diag-fmt json list options` ==
   // `lhd list options --diag-fmt json`). Value-taking flags consume their
   // value wherever they sit (`lhd --top foo synth ...` keeps foo with --top).
-  bool raw_mode  = false;
-  bool want_help = false;
+  bool        raw_mode  = false;
+  bool        want_help = false;
   // The command-path established by the command words seen so far, dotted
   // (2h-set_path): "" before the command word, the command after it, and
   // "pass.<sub>" once a `pass` sub-command is read. Each --set key to its
@@ -341,7 +351,7 @@ Options parse_args(int argc, char** argv) {
   // Count the logical tokens the user typed (one per loop turn; a value-flag's
   // value is consumed via ++i, so it is not counted separately). A command word
   // is one token, so `n_user_tokens == 1` means the command was typed bare.
-  int n_user_tokens = 0;
+  int         n_user_tokens = 0;
   for (int i = 1; i < argc; ++i) {
     std::string_view a{argv[i]};
     ++n_user_tokens;
@@ -361,15 +371,6 @@ Options parse_args(int argc, char** argv) {
       opts.emit_dirs.emplace_back(parse_typed(a, need_value(a, i, argc, argv), true));
     } else if (a == "--in") {
       opts.ins.emplace_back(parse_typed(a, need_value(a, i, argc, argv), false));
-    } else if (a == "--in-dir") {
-      // Retired: an undocumented alias for a POSITIONAL `ln:DIR`/`lg:DIR` (both
-      // land in opts.in_dirs, so it never did anything the positional form does
-      // not). `lhd compile --help` has always documented inputs as positional.
-      // Kept registered — and rejected — so anyone still passing it is told the
-      // spelling rather than getting a bare "unknown option".
-      throw Lhd_error{"usage",
-                      "--in-dir is not needed — pass IR inputs positionally, as `ln:DIR` or `lg:DIR`",
-                      "e.g. `lhd compile dep.prp ln:pkg_lns/ --emit-dir lg:out` (see `lhd compile --help`)"};
     } else if (a == "--lib") {
       opts.libs.emplace_back(parse_typed(a, need_value(a, i, argc, argv), false));
     } else if (a == "--collapse") {  // lec: proven def(s) to force-blackbox (repeatable / comma-sep)
@@ -412,7 +413,9 @@ Options parse_args(int argc, char** argv) {
       opts.tool_invert = true;
     } else if (a == "--match") {  // `tool diff --match`: visualize via the semdiff `match` attribute
       opts.tool_match = true;
-    } else if (a == "--max" || a == "--hops" || a == "-C" || a == "--context") {  // row cap / focus radius / diff context
+    } else if (a == "--structural") {  // `tool diff --structural`: strict compile-cache H5 comparison
+      opts.tool_structural = true;
+    } else if (a == "--max" || a == "-C" || a == "--context") {  // row cap / diff context
       auto   v        = std::string{need_value(a, i, argc, argv)};
       size_t consumed = 0;
       long   n        = 0;
@@ -426,8 +429,6 @@ Options parse_args(int argc, char** argv) {
       }
       if (a == "--max") {
         opts.tool_max = static_cast<int>(n);
-      } else if (a == "--hops") {
-        opts.tool_hops = static_cast<int>(n);
       } else {
         opts.tool_context = static_cast<int>(n);
       }
@@ -445,9 +446,12 @@ Options parse_args(int argc, char** argv) {
       }
     } else if (a == "--reader") {
       opts.reader = need_value(a, i, argc, argv);
+      if (opts.reader == "yosys") {
+        opts.reader = "yosys-slang";
+      }
       if (opts.reader != "yosys-verilog" && opts.reader != "yosys-slang" && opts.reader != "slang") {
         throw Lhd_error{"usage",
-                        std::format("--reader must be yosys-verilog, yosys-slang, or slang, got '{}'", opts.reader),
+                        std::format("--reader must be slang, yosys, yosys-slang, or yosys-verilog, got '{}'", opts.reader),
                         "yosys-* elaborate to LGraphs via yosys; slang is the direct SV -> LNAST front-end"};
       }
     } else if (a == "--config") {
@@ -458,20 +462,16 @@ Options parse_args(int argc, char** argv) {
       opts.unused_inputs = need_value(a, i, argc, argv);
       // The consuming pass decides what the report is: pass.semdiff the aggregate
       // match report, pass.color the partition-size report, and lec / formal verify
-      // (formal.stats) the cvc5 solve-insight report — that last one costs ~8x.
+      // (lhd.stats) the cvc5 solve-insight report — that last one costs ~8x.
       //
       // On the formal paths that ~8x is NOT purely observational: it eats the same
       // formal.timeout budget the proof does, so a run that proves in time without
       // --stats can time out with it and return UNKNOWN, which the default
-      // formal.strict=true turns into a non-zero exit. Both help blocks
+      // always results in a non-zero exit. Both help blocks
       // (lhd_meta.cpp `lec` and `formal verify`) say so; raise formal.timeout when
       // diagnosing a run that still has to pass.
     } else if (a == "--stats") {
-      opts.stats = true;
-    } else if (a == "--recipe") {
-      opts.recipe = need_value(a, i, argc, argv);
-    } else if (a == "--recipe-file") {
-      opts.recipe_file = need_value(a, i, argc, argv);
+      add_cli_set(opts, "lhd.stats", "true");
     } else if (a == "--set") {
       auto kv  = std::string{need_value(a, i, argc, argv)};
       auto pos = kv.find('=');
@@ -483,21 +483,7 @@ Options parse_args(int argc, char** argv) {
       // (2h-set_path). Fully-qualified keys pass through unchanged.
       auto key = canonical_set_key(kv.substr(0, pos), cmd_path);
       auto val = kv.substr(pos + 1);
-      // One argv carrying the same flag with two DIFFERENT values is always a
-      // mistake: which one wins is an implementation detail, so silently
-      // picking one makes the command mean something its author did not write.
-      // A caller layering an override on a base command must COLLAPSE the two
-      // before building argv (see _set_override in inou/prp/tests/prplib.py),
-      // not rely on last-wins. Repeating the SAME value is harmless and
-      // accepted — a script may legitimately pass a default twice.
-      for (const auto& [k, v] : opts.sets) {
-        if (k == key && v != val) {
-          throw Lhd_error{"usage",
-                          std::format("--set {} given twice with different values ('{}' then '{}')", key, v, val),
-                          "drop one — repeating a flag with the SAME value is fine, but two values are ambiguous"};
-        }
-      }
-      opts.sets.emplace_back(std::move(key), std::move(val));
+      add_cli_set(opts, std::move(key), std::move(val));
     } else if (a == "--dump") {
       // Repeatable, comma-separable: --dump parse --dump lg == --dump parse,lg
       std::string v{need_value(a, i, argc, argv)};
@@ -548,19 +534,6 @@ Options parse_args(int argc, char** argv) {
       }
     } else if (a == "--workdir") {
       opts.workdir = need_value(a, i, argc, argv);
-    } else if (a == "-j" || a == "--jobs") {
-      auto   v        = std::string{need_value(a, i, argc, argv)};
-      size_t consumed = 0;
-      long   n        = 0;
-      try {
-        n = std::stol(v, &consumed);
-      } catch (const std::exception&) {
-        consumed = 0;
-      }
-      if (v.empty() || consumed != v.size() || n < 0) {
-        throw Lhd_error{"usage", std::format("{} expects a non-negative integer, got '{}'", a, v), ""};
-      }
-      opts.jobs = static_cast<int>(n);
     } else if (a == "-q" || a == "--quiet") {
       opts.quiet = true;
     } else if (a == "--verbose") {
@@ -575,12 +548,13 @@ Options parse_args(int argc, char** argv) {
       auto v  = std::string{need_value(a, i, argc, argv)};
       auto eq = v.find('=');
       if (eq == std::string::npos || eq == 0) {
-        throw Lhd_error{"usage", std::format("--arg expects key=value, got '{}'", v),
+        throw Lhd_error{"usage",
+                        std::format("--arg expects key=value, got '{}'", v),
                         "e.g. `lhd sim foo.prp foo.bar --arg max_cycles=30`"};
       }
       opts.sim_args.emplace_back(v.substr(0, eq), v.substr(eq + 1));
-    } else if (a == "--restart-at" || a == "--restart-cycle") {  // `sim`: resume from the nearest checkpoint <= N
-      opts.sim_restart_at = parse_nonneg(a, need_value(a, i, argc, argv));
+    } else if (a == "--restart-cycle") {  // `sim`: resume from the nearest checkpoint <= N
+      opts.sim_restart_cycle = parse_nonneg(a, need_value(a, i, argc, argv));
     } else if (a == "--vcd-from") {  // `sim`: trace VCD starting at cycle N (restart to N first)
       opts.sim_vcd_from = parse_nonneg(a, need_value(a, i, argc, argv));
     } else if (a == "--vcd-to") {  // `sim`: trace VCD up to cycle N (with --vcd-from)
@@ -636,13 +610,34 @@ Options parse_args(int argc, char** argv) {
       } catch (const std::exception&) {
         consumed = 0;
       }
-      if (v.empty() || consumed != v.size() || n <= 0) {
+      if (v.empty() || consumed != v.size() || n <= 0 || n > std::numeric_limits<int>::max()) {
         throw Lhd_error{"usage", std::format("{} expects a positive integer, got '{}'", a, v), ""};
       }
       if (a == "--indent") {
         opts.fmt_indent = static_cast<int>(n);
       } else {
         opts.fmt_width = static_cast<int>(n);
+      }
+    } else if (a == "--min-repeats" || a == "--max-block-statements" || a == "--max-findings") {
+      auto   v        = std::string{need_value(a, i, argc, argv)};
+      size_t consumed = 0;
+      long   n        = 0;
+      try {
+        n = std::stol(v, &consumed);
+      } catch (const std::exception&) {
+        consumed = 0;
+      }
+      const long minimum = a == "--min-repeats" ? 3 : 1;
+      const long maximum = a == "--max-block-statements" ? 4096 : 1000000;
+      if (v.empty() || consumed != v.size() || n < minimum || n > maximum) {
+        throw Lhd_error{"usage", std::format("{} expects an integer in [{}, {}], got '{}'", a, minimum, maximum, v), ""};
+      }
+      if (a == "--min-repeats") {
+        opts.style_min_repeats = static_cast<size_t>(n);
+      } else if (a == "--max-block-statements") {
+        opts.style_max_block_statements = static_cast<size_t>(n);
+      } else {
+        opts.style_max_findings = static_cast<size_t>(n);
       }
     } else if (a == "--verify") {  // `pyrope fmt`: re-parse the formatted output
       opts.fmt_verify = true;
@@ -672,15 +667,21 @@ Options parse_args(int argc, char** argv) {
                         "the LSP server is now `lhd pyrope lsp` (not `lhd lsp`)",
                         "run `lhd pyrope lsp` (or point your editor's launcher at it)"};
       }
-      if (a == "compile" || a == "lec" || a == "scan" || a == "pyrope" || a == "list" || a == "describe"
-          || a == "version" || a == "help" || a == "tool" || a == "tools" || a == "pass" || a == "sim"
-          || a == "formal") {
+      if (a == "compile" || a == "lec" || a == "scan" || a == "pyrope" || a == "list" || a == "describe" || a == "version"
+          || a == "help" || a == "tool" || a == "tools" || a == "pass" || a == "sim" || a == "synth" || a == "formal") {
         // tool keeps its positionals raw and ORDERED in opts.files: the verb
         // (cat/grep/diff/tree), the filter terms (name:/color:/from:…), and the
         // ln:/lg: inputs all keep their place — tool_command classifies them.
         // `tools` is silently accepted as an alias for `tool` (common typo).
         opts.command = (a == "tools") ? std::string{"tool"} : std::string{a};
-        cmd_path     = opts.command;  // command-path root for --set abbreviation (2h-set_path)
+        // Command-path root for --set abbreviation (2h-set_path). `synth` runs
+        // the pass.color / pass.abc / pass.opentimer steps, so its root is
+        // `pass`: `--set abc.adder=cla` resolves to pass.abc exactly as it does
+        // after `lhd pass abc` (the synth.* namespace itself never collects a
+        // prefix — canonical_set_key keeps it verbatim). `lec` is `formal lec`
+        // under its own command word, so its root is `formal.lec` too: `--set
+        // engine=ind` resolves identically after either spelling.
+        cmd_path     = (a == "synth") ? std::string{"pass"} : (a == "lec") ? std::string{"formal.lec"} : opts.command;
       } else {
         throw Lhd_error{"usage", std::format("unknown command '{}'", a), "run `lhd help` for the command list"};
       }
@@ -690,7 +691,7 @@ Options parse_args(int argc, char** argv) {
       // may intervene); inferred from the source-file extensions (.prp ->
       // pyrope, .v/.sv -> verilog) when omitted.
       opts.language = a;
-    } else if (opts.command == "compile" || opts.command == "pass" || opts.command == "sim") {
+    } else if (opts.command == "compile" || opts.command == "pass" || opts.command == "sim" || opts.command == "synth") {
       // `pass` positionals: the subcommand word(s) (color/partition/clear/<alg>)
       // land in opts.files; an lg:DIR is routed to opts.ins by route_positional.
       // `sim` positionals are the .prp source(s) plus an optional test selector,
@@ -737,7 +738,7 @@ Options parse_args(int argc, char** argv) {
   // and reports its own real error.
   if (!want_help && n_user_tokens == 1
       && (opts.command == "compile" || opts.command == "lec" || opts.command == "scan" || opts.command == "tool"
-          || opts.command == "pass" || opts.command == "sim" || opts.command == "formal")) {
+          || opts.command == "pass" || opts.command == "sim" || opts.command == "synth" || opts.command == "formal")) {
     want_help = true;
   }
 
@@ -752,28 +753,22 @@ Options parse_args(int argc, char** argv) {
     return opts;
   }
 
-  if (!opts.recipe_file.empty()) {
-    throw Lhd_error{"unsupported",
-                    "--recipe-file is not implemented yet (built-in recipes ship first)",
-                    "use --recipe O0|O1|O2 and --set pass.flag=value (or --config lhd.toml)"};
-  }
-
-  // Fold --config file defaults into sets/recipe BEFORE anything hashes or
+  // Fold --config file defaults into sets BEFORE anything hashes or
   // consumes the resolved config (a config file and the equivalent explicit
   // flags must be indistinguishable downstream).
   load_config(opts);
 
   // Infer the source language from the file extensions when not given.
-  if ((opts.command == "elaborate" || opts.command == "compile" || opts.command == "sim") && opts.language.empty()
+  if ((opts.command == "compile" || opts.command == "sim" || opts.command == "synth") && opts.language.empty()
       && !opts.files.empty()) {
     bool any_prp = false;
     bool any_v   = false;
     for (const auto& f : opts.files) {
       any_prp |= ends_with(f, ".prp");
-      any_v |= ends_with(f, ".v") || ends_with(f, ".sv");
+      any_v   |= ends_with(f, ".v") || ends_with(f, ".sv");
     }
     if (any_prp && any_v) {
-      throw Lhd_error{"usage", "cannot mix pyrope and verilog sources in one invocation", "split into two elaborates"};
+      throw Lhd_error{"usage", "cannot mix pyrope and verilog sources in one invocation", "split into two compiles"};
     }
     if (any_prp) {
       opts.language = "pyrope";
@@ -786,11 +781,17 @@ Options parse_args(int argc, char** argv) {
     }
   }
 
+  if (opts.reader != "slang" && opts.command != "compile") {
+    throw Lhd_error{"usage",
+                    "Yosys readers are only supported by lhd compile; source inputs otherwise use Slang",
+                    "for a debug comparison, run lhd compile --reader yosys SOURCE --emit-dir lg:DIR, then lhd lec with lg:DIR"};
+  }
+
   // The verilog readers (`slang`, `yosys-slang`, `yosys-verilog`) can take their
   // sources via the raw `--` args (e.g. `-- -F filelist.f`) instead of a
   // positional .v file, in which case there is no extension to infer from, so
   // pin the language to verilog.
-  if ((opts.command == "elaborate" || opts.command == "compile") && opts.language.empty() && !opts.raw_args.empty()
+  if ((opts.command == "compile" || opts.command == "synth") && opts.language.empty() && !opts.raw_args.empty()
       && (opts.reader == "slang" || opts.reader == "yosys-slang" || opts.reader == "yosys-verilog")) {
     opts.language = "verilog";
   }

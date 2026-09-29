@@ -3,6 +3,15 @@
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
+cc_library(
+    name = "process_tree",
+    srcs = ["process_tree.cpp"],
+    hdrs = ["process_tree.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+)
+
 # Host memory facts for ABC memory admission (pass/abc). Deliberately
 # dependency-free (no //graph, no @abc) and parked outside pass/abc: pass.color
 # --stats is meant to warn with the same budget, and pass/abc already depends on

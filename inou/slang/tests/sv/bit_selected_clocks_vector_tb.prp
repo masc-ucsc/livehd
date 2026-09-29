@@ -1,0 +1,39 @@
+// Native directed vectors for the Pyrope round trip of bit_selected_clocks_vector.v
+// (the roundtrip_sim tier of tests/slang_compile.sh). Each `step` is one
+// reference `clk` cycle and each derived bit clock acts as a per-cycle enable:
+// bit b loads data[b] when enable[b] and gate<b> and gate are all high. Cycle 0
+// holds the clear (clr_ low, q = 3'b010). Swapping gate0/gate2 fails cycles 5-7.
+//
+//   cycle  data enable {g2,g1,g0} gate -> q
+//     1     5     7       7        1      5
+//     2     2     1       7        1      4
+//     3     2     2       7        1      6
+//     4     2     4       7        1      2
+//     5     7     7       1        1      3
+//     6     0     7       2        1      1
+//     7     7     7       4        1      5
+//     8     0     7       7        0      5
+const dut = import("lg:bit_selected_clocks")
+
+test bit_selected_clocks.vector {
+  mut acc = dut
+  mut cycle:u32 = 0
+  tick 9 {
+    acc.clr_  = cycle != 0
+    acc.gate  = cycle != 8
+    acc.gate0 = not (cycle == 6 or cycle == 7)
+    acc.gate1 = not (cycle == 5 or cycle == 7)
+    acc.gate2 = not (cycle == 5 or cycle == 6)
+    acc.enable = if cycle == 2 { 1 } elif cycle == 3 { 2 } elif cycle == 4 { 4 } else { 7 }
+    acc.data   = if cycle == 1 { 5 } elif cycle == 5 or cycle == 7 { 7 } elif cycle == 0 or cycle == 6 or cycle == 8 { 0 } else { 2 }
+    step
+    assert((cycle == 0) implies (acc.q == 2), "clear")
+    assert((cycle == 1 or cycle == 7 or cycle == 8) implies (acc.q == 5), "all bits / gate2 only / gate off")
+    assert((cycle == 2) implies (acc.q == 4), "enable bit 0")
+    assert((cycle == 3) implies (acc.q == 6), "enable bit 1")
+    assert((cycle == 4) implies (acc.q == 2), "enable bit 2")
+    assert((cycle == 5) implies (acc.q == 3), "gate0 only")
+    assert((cycle == 6) implies (acc.q == 1), "gate1 only")
+    cycle += 1
+  }
+}

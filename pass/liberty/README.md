@@ -15,5 +15,12 @@ lhd pass liberty gensim file.lib --emit-dir lg:models
 # then: cgen(lg:abc_netlist) + cgen(lg:models) is a complete Verilog design
 ```
 
-Sequential cells are skipped (no parseable comb SOP) — flops stay native
-`Flop` cells in the netlist, never mapped to library DFFs.
+ABC's `read_lib` drops sequential cells, so the ones `pass abc` can map onto
+are read from the Liberty text by `liberty_dff.cpp` (`resolve_dff_cells`) and
+modeled from their `ff` / `latch` / clock-gate groups: the plain DFF pick and
+its drive ladder (`Flop`, `Flop(Not(D))` for a QN cell), the asynchronous
+clear/preset flops (`Flop` with an async `reset_pin`), the integrated
+clock-gate cells (`CLK & Latch(!CLK, EN|SE)`), and the transparent data-latch
+cells (`Latch(din=D, enable=CLK)`, through `Not` for an active-low enable or a
+QN output, with the Latch's own `reset_pin` for a clear/preset latch). Every
+other sequential cell is skipped.

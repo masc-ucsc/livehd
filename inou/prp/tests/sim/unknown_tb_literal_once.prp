@@ -1,0 +1,49 @@
+/*
+:name: unknown_tb_literal_once
+:type: simulation
+*/
+
+// A TESTBENCH `?` literal is ONE value per run, exactly like a DUT one
+// (sim_profile.md ruling 3). The driver routes it through the same
+// once-per-program __lhd_unknown_literal helper the DUT uses, drawn on FIRST
+// use. It used to be a bare `from_pyrope("0ub??..")` at every USE -- a fresh
+// draw every cycle -- so a testbench poking `0ub????` fed the DUT per-cycle
+// noise, and an assert's message could print a different value than the one
+// its condition had just tested.
+//
+// Every check below is deterministic (none asserts a particular random value),
+// so the fixture holds under the default random fill, under a baked
+// sim.unknown_zero=true, and under drv.bin's run-time
+// `--set sim.unknown_zero=true`. The run is several thousand cycles long so a
+// `--set sim.tune.profile=on` run of this driver samples real pairs.
+
+mod unknown_tb_literal_once(a:u64) -> (r:u64@[0], total:u64@[0]) {
+  reg acc:u64 = 0
+
+  r     = a
+  total = acc
+
+  wrap acc = acc + a
+}
+
+test unknown_tb_literal_once.drawn_once {
+  mut dut        = unknown_tb_literal_once
+  mut first:u64  = 0
+  mut second:u64 = 0
+  mut stable     = true
+  tick 4096 {
+    dut.a = 0ub????????????????????????????????????????????????????????????????  // a TESTBENCH literal
+    step
+    if clock == 0 {
+      first = dut.r
+    } elif dut.r != first {
+      stable = false
+    }
+  }
+  assert(stable, "a testbench `?` literal changed between cycles -- it must be drawn once per run")
+
+  // The helper is keyed by (width, spelling): the same literal at a second site
+  // is the same unknown value, not a second draw.
+  second = 0ub????????????????????????????????????????????????????????????????
+  assert(second == first, "two sites of one testbench `?` literal must read the same value")
+}

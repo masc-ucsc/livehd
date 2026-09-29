@@ -7,8 +7,9 @@
 // independent registers, each fed by its own combinational cone, no hierarchy
 // and no narrowing. `pass color synth` splits the def at each register, so abc
 // maps the combinational cones to standard cells and carries each flop across
-// ABC as a latch (retiming-capable), reconstructing native LGraph flops with
-// their `p`/`q` names preserved and their reset (initial = 0) value intact.
+// ABC as a latch (retiming-capable) with the implicit SYNCHRONOUS reset
+// (`= 0`) folded into D; register=true maps the latches to DFF cells named
+// `p_<bit>`/`q_<bit>`, register=false rebuilds native flops under `p`/`q`.
 // Registers only store same-cycle combinational values (no narrowing) because
 // the runtime wrap/sat path has no tolg lowering yet.
 mod abc_seq(a:u4, b:u4, c:u4, d:u4) -> (x:u4@[1], y:u4@[1]) {

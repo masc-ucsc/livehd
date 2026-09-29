@@ -1,0 +1,94 @@
+/*
+:name: chained_clock_gates
+:type: simulation
+*/
+
+// todo_sim_pipeline.md Phase 0 (step 1 anchor) — A GATE FEEDING A GATE.
+//
+// WHY THIS SHAPE MATTERS. flop_sim_gated_clock.prp covers ONE flat gate, which
+// is the only thing cgen_sim's private ICG matcher recognizes: it looks at the
+// flop's `clock_pin` driver, requires it to be a single `And`, and classifies
+// each operand as either the reference clock or an enable. Give it a CHAIN and
+// every operand of the outer And is a non-clock term — one of them is the inner
+// And — so the reference clock is never found and the whole cone is reported as
+// "some other derived clock". Minion is full of these: its VPU lane cascades
+// `cgate_txfma` -> `txfma_top` -> 13 per-stage re-gates, the gated clock
+// crossing three module boundaries.
+//
+// WHAT MUST BE TRUE. The commit guard is the CONJUNCTION of every cell's
+// enable along the chain, and it must be assembled by walking the chain rather
+// than by pattern-matching one node. The schedule below closes the chain at a
+// DIFFERENT level each time — c2 closes the outer gate, c3 the inner one — so a
+// matcher that folded only the outermost enable passes c2 and fails c3.
+//
+// Enables change only while the clock is LOW, the same discipline
+// flop_sim_gated_clock.prp explains: an enable rise racing the clock rise is
+// the glitch hazard a real ICG interposes a latch for (that case is pinned
+// separately by icg_enable_sampling.prp).
+//
+// GOLDEN, from Icarus on the netlist LiveHD itself emits for this module
+// (`posedge (e2 & (clk & e1))`, inputs changed while clk is low):
+//   q = 5, 6, 6, 6, 88   and   ctl = d every cycle.
+//
+// STATUS: LIVE since 2026-08-05 (step 1b). It failed with
+// `gated-clock-unsupported` when written: `resolve_icg` now recurses, so an
+// operand that is itself a clock operation contributes its clock as the
+// chain's clock and its enables to the guard list.
+pub mod chain8(clk:bool, e1:bool, e2:bool, d:u8) -> (q:u8@[1], ctl:u8@[1]) {
+  wire ga:bool = nil
+  ga = clk and e1        // cell A: the root gate
+  wire gb:bool = nil
+  gb = ga and e2         // cell B: a gate on an ALREADY GATED clock
+  reg f:u8:[clock_pin=ref gb] = 0
+  f = d
+  q = f
+
+  // CONTROL: the same data through a flop on the UNGATED reference clock. It
+  // loads every tick regardless of e1/e2, so a failure on `q` is specifically
+  // the chain and not a dead testbench.
+  reg c:u8 = 0
+  c   = d
+  ctl = c
+}
+
+test chain8.every_cell_in_the_chain_gates {
+  mut acc  = chain8
+  mut seen = 0
+  mut bad_q   = 0
+  mut bad_ctl = 0
+  tick 5 {
+    // c0,c1: both cells open -> load. c2: OUTER cell closed. c3: INNER cell
+    // closed. c4: both reopen -> load again.
+    acc.e1 = (clock != 3)
+    acc.e2 = (clock != 2)
+    mut dv:u8 = 5
+    if clock == 1 {
+      dv = 6
+    } elif clock == 2 {
+      dv = 99
+    } elif clock == 3 {
+      dv = 77
+    } elif clock == 4 {
+      dv = 88
+    }
+    acc.d = dv
+    step
+    mut golden:u8 = 5
+    if clock >= 1 {
+      golden = 6
+    }
+    if clock == 4 {
+      golden = 88
+    }
+    seen = seen + 1
+    if acc.q != golden {
+      bad_q = bad_q + 1
+    }
+    if acc.ctl != dv {
+      bad_ctl = bad_ctl + 1
+    }
+  }
+  assert(seen == 5, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_ctl == 0, "CONTROL: the flop on the ungated reference clock loads every tick")
+  assert(bad_q == 0, "a flop behind a GATE CHAIN commits only when EVERY cell's enable is high")
+}

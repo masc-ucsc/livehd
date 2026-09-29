@@ -121,10 +121,11 @@ W7="$WORK/w7"
 $LHD lec --impl "$WORK/impl.prp" --ref "$WORK/impl.prp" --workdir "$W7" >/dev/null 2>&1
 ck "PROVEN => no prp"           '[ ! -f "$W7/simfail_dut.prp" ]'
 
-# ---- hierarchical DUTs: prp_writer re-emits sub-module inputs UNTYPED, so they
-# are auto-typed by width (else an internal `mod` boundary won't re-compile). The
-# setup-only then exercises the multi-level peek + VCD codegen (shared_ptr fix
-# through 2 hierarchy levels) hermetically.
+# ---- hierarchical DUTs: re-emitted sub-module inputs must remain explicitly
+# typed (`bool` may be preserved, or a width-derived `uN` may be emitted), else
+# an internal `mod` boundary won't re-compile. The setup-only then exercises the
+# multi-level peek + VCD codegen (shared_ptr fix through 2 hierarchy levels)
+# hermetically.
 cat > "$WORK/h_impl.prp" <<'EOF'
 mod adder(en:bool) -> (o:u8@[0]) {
   reg r:u8 = 0
@@ -148,7 +149,7 @@ EOF
 WH="$WORK/wh"
 $LHD lec --impl "$WORK/h_impl.prp" --ref "$WORK/h_ref.prp" --impl-top h_impl.topm --ref-top h_ref.topm --workdir "$WH" --set formal.simfail_run=false >/dev/null 2>&1
 ck "hier: prp generated"        '[ -f "$WH/simfail_topm.prp" ]'
-ck "hier: sub-module input typed" 'grep -Eq "mod adder[^(]*\(en:u" "$WH/simfail_topm.prp"'
+ck "hier: sub-module input typed" 'grep -Eq "mod adder[^(]*\(en:(bool|u[0-9]+)" "$WH/simfail_topm.prp"'
 SH="$WORK/sh"
 $LHD sim "$WH/simfail_topm.prp" --setup-only --set sim.vcd=true --workdir "$SH" >/dev/null 2>&1
 ck "hier: testbench sim-valid"  '[ -f "$SH/sim/drv.cpp" ]'
@@ -210,6 +211,56 @@ ck "comb: comb side gets @[]"   'grep -q "ref_r:u8@\[\]" "$WQ/simfail_dut.prp"'
 SQ="$WORK/sq"
 $LHD sim "$WORK/qimpl.prp" "$WORK/qref.prp" "$WQ/simfail_dut.prp" --setup-only --set sim.vcd=true --workdir "$SQ" >/dev/null 2>&1
 ck "comb: testbench sim-valid"  '[ -f "$SQ/sim/drv.cpp" ]'
+
+# ---- STRUCT ports. A nested port (`io:(valid:u1, bits:(x:u4))`) is ONE decl but
+# several scalar leaves, and an instantiation binds it per LEAF (`io.bits.x = e`),
+# never as an aggregate. So the wrapper declares one flat scalar per leaf and the
+# test pokes those. The impl here also carries a field the ref does NOT
+# (`only_impl`), which must appear on the wrapper (impl needs it) and be absent
+# from the ref call. Before leaves existed the header split on every comma, so a
+# struct port shredded into garbage and no testbench came out at all. ----
+cat > "$WORK/simpl.prp" <<'EOF'
+pub mod dut(clock:u1, reset:u1, io:(valid:u1, bits:(x:u4, y:u3, only_impl:u2))) -> (o:u8@[]) {
+  reg cnt:u8:[reset_pin=ref reset] = 0
+  o = cnt
+  if io.valid { cnt = (cnt + io.bits.x + io.bits.y + io.bits.only_impl)#[0..=7] }
+}
+EOF
+cat > "$WORK/sref.prp" <<'EOF'
+pub mod dut(clock:u1, reset:u1, io:(valid:u1, bits:(x:u4, y:u3))) -> (o:u8@[]) {
+  reg cnt:u8:[reset_pin=ref reset] = 0
+  o = cnt
+  if io.valid { cnt = (cnt + io.bits.x + io.bits.y + 1)#[0..=7] }
+}
+EOF
+WS="$WORK/ws"
+$LHD lec --impl "$WORK/simpl.prp" --ref "$WORK/sref.prp" --workdir "$WS" --set formal.simfail_run=false >/dev/null 2>&1
+ck "struct: prp generated"        '[ -f "$WS/simfail_dut.prp" ]'
+ck "struct: leaves are flat ports" 'grep -q "io__bits__x:u4" "$WS/simfail_dut.prp"'
+ck "struct: actuals are per-leaf"  'grep -q "io.bits.x = io__bits__x" "$WS/simfail_dut.prp"'
+ck "struct: impl-only leaf on impl" 'grep -q "implmod(.*io.bits.only_impl = io__bits__only_impl" "$WS/simfail_dut.prp"'
+ck "struct: impl-only leaf NOT on ref" '! grep -q "refmod(.*only_impl" "$WS/simfail_dut.prp"'
+ck "struct: drives each leaf"      'grep -q "_lec_dut.io__bits__y = _drv_io__bits__y\[clock\]" "$WS/simfail_dut.prp"'
+SS="$WORK/ss"
+$LHD sim "$WORK/simpl.prp" "$WORK/sref.prp" "$WS/simfail_dut.prp" --setup-only --set sim.vcd=true --workdir "$SS" >/dev/null 2>&1
+ck "struct: testbench sim-valid"   '[ -f "$SS/sim/drv.cpp" ]'
+
+# ---- import the original popcount design directly. The writer now supports
+# popcount, but replay must still avoid re-emitting either Pyrope side. The
+# absence of lecfail_*_prp below checks that independently of writer support. ----
+sed 's|if io.valid {|const pc:u4 = io.bits.x#+[..]\n  if io.valid {|; s|cnt + io.bits.x|cnt + pc|' \
+    "$WORK/simpl.prp" > "$WORK/pcimpl.prp"
+sed 's|if io.valid {|const pc:u4 = io.bits.x#+[..]\n  if io.valid {|; s|cnt + io.bits.x|cnt + pc|' \
+    "$WORK/sref.prp"  > "$WORK/pcref.prp"
+ck "popcount: writer emits it" \
+   '$LHD compile "$WORK/pcimpl.prp" --emit-dir "pyrope:$WORK/pcw_out" --workdir "$WORK/pcw" >/dev/null 2>&1'
+WC="$WORK/wc"
+$LHD lec --impl "$WORK/pcimpl.prp" --ref "$WORK/pcref.prp" --workdir "$WC" --set formal.simfail_run=false >/dev/null 2>&1
+ck "popcount: prp still generated" '[ -f "$WC/simfail_dut.prp" ]'
+ck "popcount: no writer round trip" '[ ! -d "$WC/lecfail_impl_prp" ] && [ ! -d "$WC/lecfail_ref_prp" ]'
+SC="$WORK/sc"
+$LHD sim "$WORK/pcimpl.prp" "$WORK/pcref.prp" "$WC/simfail_dut.prp" --setup-only --set sim.vcd=true --workdir "$SC" >/dev/null 2>&1
+ck "popcount: testbench sim-valid" '[ -f "$SC/sim/drv.cpp" ]'
 
 if [ $fail -ne 0 ]; then echo "lec_witness_prpfail_test: FAILED"; exit 1; fi
 echo "lec_witness_prpfail_test: PASSED"

@@ -38,7 +38,17 @@ namespace livehd::attrs {
 //   edge        - shared driver<->sink across the net (the wire name); read on
 //                 either end via the shared slot, so no driver/sink restriction
 //   any_pin     - any pin, no driver/sink restriction (IO-port offsets, mixed)
-enum class Attr_kind { node, driver_pin, edge, sink, any_pin };
+// Pin role an attribute may legally be stamped on.
+//
+// There is deliberately NO `sink`: attributes are forbidden on sink pins. The
+// per-pin attr key folds the driver/sink bit (hhds graph.hpp Pin_class::attr
+// masks Pid 0x2), so a same-port driver and sink SHARE one slot and a sink
+// stamp silently aliases the driver's value. `driver_pin` is the signal-source
+// role (bits, signed, delay); `edge` and `any_pin` are the genuinely
+// role-neutral ones (a shared wire name, IO offsets); `node` must not reach a
+// pin setter at all. Adding a `sink` enumerator back would reintroduce the
+// aliasing this classification exists to prevent.
+enum class Attr_kind { node, driver_pin, edge, any_pin };
 
 // Per-pin bitwidth (driver pin), plain int32; storage uses uint32_t
 // for the flat_storage value to avoid signed-int hashmap key issues.
@@ -73,15 +83,13 @@ struct pin_delay_t {
 };
 inline constexpr pin_delay_t pin_delay{};
 
-// Per-pin "is signed" marker (present = signed, absent = unsigned).
-// Stored as a marker value because HHDS attributes currently require a
-// value_type; callers should use graph_util::set_sign/set_unsign instead of
-// setting this attr directly.
+// Per-pin "is signed" marker (present = signed, absent = unsigned). A
+// PRESENCE-ONLY attribute: hhds::flag stores one bit per pin and there is no
+// value to read back. Callers should use graph_util::set_sign/set_unsign
+// instead of touching this attr directly.
 struct pin_signed_t {
-  struct value_type {
-    uint8_t marker = 1;
-  };
-  using storage = hhds::flat_storage;
+  using value_type = hhds::flag;
+  using storage    = hhds::flat_storage;
 };
 inline constexpr pin_signed_t pin_signed{};
 
@@ -92,6 +100,64 @@ struct color_t {
   using storage    = hhds::flat_storage;
 };
 inline constexpr color_t color{};
+
+// Space-separated control color memberships. Coloring writes exactly one (the
+// owner); the partition reader parses a list. Cleared on every recoloring.
+struct ctrl_members_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr ctrl_members_t ctrl_members{};
+struct ctrl_stats_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr ctrl_stats_t ctrl_stats{};
+
+// Region identity carried by a pass.abc mapped body. ABC synthesizes one
+// module per (definition, color); keeping the module name on the graph input
+// lets a later whole-design OpenTimer flatten recover that partition identity
+// without parsing generated instance names.
+struct synth_region_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr synth_region_t synth_region{};
+
+// Compact invocation-local key for synth_region. Stored once on each mapped
+// region graph input; physical hierarchy flattening copies the integer to its
+// transient nodes so OpenTimer can aggregate without duplicating the region
+// name string on every mapped cell.
+struct synth_region_id_t {
+  using value_type = uint32_t;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr synth_region_id_t synth_region_id{};
+
+// Present on a mapped-region node when this pass.abc invocation rebuilt the
+// region; absent means the node came from the incremental cache.  This is a
+// marker rather than a bool because flat_storage reserves the zero value as
+// "attribute absent".  synth_region distinguishes an intentional resynth=0
+// from a graph that did not come from pass.abc.
+struct resynth_t {
+  struct value_type {
+    uint8_t marker = 1;
+  };
+  using storage = hhds::flat_storage;
+};
+inline constexpr resynth_t resynth{};
+
+// Marker on exact native logic that pass.abc retained because it belongs to a
+// combinational-cycle remainder. OpenTimer consumes this structurally: the
+// node remains in the emitted netlist, while STA cuts a documented boundary at
+// its output instead of mistaking And/Or for ordinary packed-bit wiring.
+struct native_comb_boundary_t {
+  struct value_type {
+    uint8_t marker = 1;
+  };
+  using storage = hhds::flat_storage;
+};
+inline constexpr native_comb_boundary_t native_comb_boundary{};
 
 // Per-node place annotation (ArchFP / physical-design floorplan rectangle).
 // Replaces Lgraph_attributes::node_place_map.
@@ -105,7 +171,8 @@ inline constexpr place_t place{};
 // the flat `color` above (one value per node-in-a-def), this is keyed per
 // instance, so two instances of the same module def can carry different ids.
 // Readers prefer this when present and fall back to the flat color otherwise
-// (graph_util::node_color_of). Written only when pass.color hier_color=1.
+// (graph_util::node_color_of). Virtual-flat synthesis coloring writes these
+// overrides when projecting regions back onto shared module definitions.
 struct hier_color_t {
   using value_type = int32_t;
   using storage    = hhds::hier_storage;
@@ -122,6 +189,18 @@ struct coloring_info_t {
 };
 inline constexpr coloring_info_t coloring_info{};
 
+// Newline-separated, sorted names of callee definitions whose bodies
+// pass.legalize dissolved into this graph while repairing a false hierarchy
+// loop.  The compile cache reads the attribute back from the serialized graph
+// instead of trusting its JSON inventory: a body-only edit to one of these
+// callees must invalidate the caller even though the callee's GraphIO did not
+// change.
+struct legalize_inlined_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr legalize_inlined_t legalize_inlined{};
+
 // Per-node / per-pin structural-correspondence id (pass/semdiff, task
 // 2f-semdiff). Two corresponding nodes across a ref/impl pair share one id; a
 // node with no counterpart gets 0. Stamped on the node AND its driver pin(s)
@@ -136,7 +215,7 @@ struct match_t {
 };
 inline constexpr match_t match{};
 
-// Per-node formal-verification status (pass/formal, task 2f-formal). SPARSE
+// Per-node formal-verification status. SPARSE
 // (like match) so 0 is a real value. `proven` marks an obligation (a user
 // assert / assume / a built-in Hotmux one-hotness) that pass.formal discharged
 // by SMT: cgen elides its runtime check, and pass.abc may exploit a proven
@@ -155,28 +234,58 @@ struct runtime_check_t {
 };
 inline constexpr runtime_check_t runtime_check{};
 
+// On an arithmetic ware graph's input node: canonical specialization
+// descriptor, including every port's width/sign and the section options.
+// Synthesis preserves this boundary; STA/LEC may flatten the implementation.
+struct ware_module_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr ware_module_t ware_module{};
+
+// On a memory implementation graph's input node. Synthesis preserves this
+// module boundary; consumers such as STA may explicitly flatten its body.
+struct memory_module_t {
+  using value_type = uint8_t;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr memory_module_t memory_module{};
+
+// A whole-array Memory node whose active-high `reset` condition is
+// asynchronous. Memory's 16-pin ABI is full, so this reset-style bit lives on
+// the node rather than being overloaded onto an unrelated config pin.
+struct memory_async_reset_t {
+  using value_type = uint8_t;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr memory_async_reset_t memory_async_reset{};
+
+// Reversible scalar-replacement provenance for expanded aggregates.
+struct aggregate_origin_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr aggregate_origin_t aggregate_origin{};
+
+#define LIVEHD_AGGREGATE_INT_ATTR(tag_name) \
+  struct tag_name##_t {                     \
+    using value_type = int32_t;             \
+    using storage    = hhds::flat_storage;  \
+  };                                        \
+  inline constexpr tag_name##_t tag_name {}
+
+LIVEHD_AGGREGATE_INT_ATTR(aggregate_source_index);
+LIVEHD_AGGREGATE_INT_ATTR(aggregate_lane_ordinal);
+LIVEHD_AGGREGATE_INT_ATTR(aggregate_bit_offset);
+LIVEHD_AGGREGATE_INT_ATTR(aggregate_bit_width);
+LIVEHD_AGGREGATE_INT_ATTR(aggregate_extent);
+
+#undef LIVEHD_AGGREGATE_INT_ATTR
+
 // Per-node source provenance is hhds::attrs::srcid (one uint64 SourceId
 // resolved through the graph's Source_locator) — the old livehd::attrs::loc
 // (with its pos1=line-vs-byte mismatch) and livehd::attrs::source string pair
 // were write-only and are gone.
-
-// Per-node serialized Dlop value used by Nconst cells.
-// Replaces Lgraph_attributes::const_map (which stored Dlop::serialize()).
-struct const_value_t {
-  using value_type = std::string;
-  using storage    = hhds::flat_storage;
-};
-inline constexpr const_value_t const_value{};
-
-// Per-pin serialized Dlop value carried on CONST_NODE pins whose port_id is
-// beyond the small-int fast-path range (`Const_small_pid_count`). For pins in
-// the small-int range, the value is encoded directly in the port_id (scheme
-// A) and this attribute is absent.
-struct pin_const_value_t {
-  using value_type = std::string;
-  using storage    = hhds::flat_storage;
-};
-inline constexpr pin_const_value_t pin_const_value{};
 
 // Per-node serialized LUT-table Dlop used by LUT cells.
 // Replaces Lgraph_attributes::lut_map.
@@ -230,8 +339,6 @@ inline constexpr Attr_kind attr_kind<pin_signed_t> = Attr_kind::driver_pin;
 template <>
 inline constexpr Attr_kind attr_kind<pin_delay_t> = Attr_kind::driver_pin;
 template <>
-inline constexpr Attr_kind attr_kind<pin_const_value_t> = Attr_kind::driver_pin;
-template <>
 inline constexpr Attr_kind attr_kind<match_t> = Attr_kind::driver_pin;
 template <>
 inline constexpr Attr_kind attr_kind<pin_name_t> = Attr_kind::edge;
@@ -244,19 +351,87 @@ inline constexpr Attr_kind attr_kind<pending_time_t> = Attr_kind::any_pin;
 template <>
 inline constexpr Attr_kind attr_kind<color_t> = Attr_kind::node;
 template <>
+inline constexpr Attr_kind attr_kind<ctrl_members_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<ctrl_stats_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<synth_region_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<synth_region_id_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<resynth_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<native_comb_boundary_t> = Attr_kind::node;
+template <>
 inline constexpr Attr_kind attr_kind<place_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<hier_color_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<coloring_info_t> = Attr_kind::node;
 template <>
+inline constexpr Attr_kind attr_kind<legalize_inlined_t> = Attr_kind::node;
+template <>
 inline constexpr Attr_kind attr_kind<proven_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<runtime_check_t> = Attr_kind::node;
 template <>
-inline constexpr Attr_kind attr_kind<const_value_t> = Attr_kind::node;
+inline constexpr Attr_kind attr_kind<ware_module_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<memory_module_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<memory_async_reset_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<aggregate_origin_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<aggregate_source_index_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<aggregate_lane_ordinal_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<aggregate_bit_offset_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<aggregate_bit_width_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<aggregate_extent_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
+
+// EVERY LiveHD attribute tag, in one list. graph/cell.cpp pre-registers from it
+// and graph/attr_carry.hpp carries from it (role from `attr_kind`), so a tag
+// that is registered is carried and a tag that is carried is registered -- the
+// two cannot drift, and a new tag is one row here. `hhds::attrs::name` and
+// `hhds::attrs::srcid` are hhds-owned and handled by those two files directly.
+#define LIVEHD_FOR_EACH_ATTR_TAG(X) \
+  X(bits)                           \
+  X(pin_offset)                     \
+  X(pin_name)                       \
+  X(pin_delay)                      \
+  X(pin_signed)                     \
+  X(color)                          \
+  X(ctrl_members)                   \
+  X(ctrl_stats)                     \
+  X(synth_region)                   \
+  X(synth_region_id)                \
+  X(resynth)                        \
+  X(native_comb_boundary)           \
+  X(hier_color)                     \
+  X(coloring_info)                  \
+  X(legalize_inlined)               \
+  X(match)                          \
+  X(proven)                         \
+  X(runtime_check)                  \
+  X(ware_module)                    \
+  X(memory_module)                  \
+  X(memory_async_reset)             \
+  X(aggregate_origin)               \
+  X(aggregate_source_index)         \
+  X(aggregate_lane_ordinal)         \
+  X(aggregate_bit_offset)           \
+  X(aggregate_bit_width)            \
+  X(aggregate_extent)               \
+  X(place)                          \
+  X(lut)                            \
+  X(time_range)                     \
+  X(pending_time)
 
 }  // namespace livehd::attrs
 

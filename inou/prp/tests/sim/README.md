@@ -4,6 +4,22 @@ Example designs that drive a DUT from a Pyrope `test` block and check the
 result with an `assert` **at the end of simulation**. These exercise the
 `simulation` mode of the test runner (`prplib.py`, the `run()` dispatch).
 
+## Shared runner
+
+Every top-level `.prp` fixture is discovered by Bazel as `prp-sim-<stem>`.
+The harness runs `lhd sim` with its declared runtime dependencies, checks the
+process status, and requires a nonempty `sim_tests.json` containing only passing,
+uniquely named tests. A failed host build or missing runtime cannot pass.
+The `prp-simeq-*` differential fixtures use the same runner.
+
+Use repeatable `:set: key=value` headers for a fixed configuration. For a small
+configuration comparison, use `:sim_sweep: sim.tune.backend=slop,llvm` (or another
+option with comma-separated values). Every combination runs in a fresh workdir
+and must satisfy the fixture's assertions. Profiling defaults off to keep the
+ordinary regression small; profiling and same-workdir cache behavior have
+separate workflow tests. Keep configuration sweeps small enough for the test
+runtime budget.
+
 ## Pattern
 
 Each file pairs a synthesizable design with one or more `test` blocks:
@@ -12,16 +28,31 @@ Each file pairs a synthesizable design with one or more `test` blocks:
   (`const v = dut(in=val)`). The call drives this cycle's inputs and returns
   this cycle's output. A one-time call made *before* the loop does **not**
   re-evaluate, so the call belongs in the loop body.
-* `tick N { ... }` runs `N` cycles, advancing **one clock per iteration**.
-  Do **not** put a `step` inside a `tick` -- that would advance a second clock.
-  `tick { ... break }` runs until a runtime condition (with `N` as a watchdog).
+* `tick N { ... }` runs `N` cycles. The body **must contain a `step`** — that
+  `step` *is* the clock edge, and the runner hard-fails a `tick` body without
+  one ("a `tick` body must advance the clock with `step`",
+  `inou/prp/prp_sim.cpp`). Everything above the `step`
+  drives this cycle's inputs; everything below it observes what the `step`
+  settled. `tick { ... break }` runs until a runtime condition (with `N` as a
+  watchdog).
 * The per-cycle output is captured into an outer `mut` (declared before the
   loop); the end-of-sim `assert` checks that captured value. Test-local `mut`s
   persist across cycles.
 * A test-local `mut` golden value, updated in lockstep inside the same loop,
   mirrors the design's next-state so the final `assert` is self-checking.
 
-`poke` / `peek` / `sigref` / `regref` are intentionally **not** used here yet.
+These fixtures use only bare dotted DUT access, which is sugar for an anonymous
+`regref` (the binding is hoisted out of the loop either way). The
+explicit spelling is exercised by `../fixme/testbench_step.prp`, which also
+covers the `"unit/field"` string form. `peek`/`poke` are **removed** — every read
+through them copied a value out of a freshly recomputed snapshot of the whole
+design, which is what a bound reference makes unnecessary.
+
+One consequence to keep in mind when writing a fixture: a read placed **above**
+the `step` observes what the previous `step` settled, not the inputs driven by
+the statements just above it. For a Moore output (a plain state read) that is the
+same value; for an output driven combinationally by an input this iteration
+writes, it is one cycle behind. Put such reads below the `step`.
 
 ## Examples
 
@@ -34,6 +65,37 @@ Each file pairs a synthesizable design with one or more `test` blocks:
 | `test_args.prp`   | adder                  | `adder.params`                          | `test name(params)` + `--arg`, default/required/override |
 | `tick_comptime_survives.prp` | passthru    | 2 blocks                                | what stays **comptime** across a `tick` (see below) |
 | `tick_comptime_opaque.prp`   | up-counter  | 7 blocks                                | what a `tick` must make **opaque** (see below) |
+| `loop_cond_sub_break.prp` | conditional add/xor lanes | `loop_cond_sub_break.branch_vectors` | source `for`, pre-call `break`, runtime-conditional Sub calls, runtime `tick` break |
+| `loop_cond_break_no_sub.prp` | conditional reduction | `loop_cond_break_no_sub.branch_vectors` | source `for`, post-write `break`, no Sub calls, runtime `tick` break |
+| `loop_roll_carry.prp` | accumulator over a lifted body | `loop_roll_carry.accumulates` | a ROLLED loop (the default (`compile.unroll=false`)): one replicated `Sub`, asserted by `:expect_instances:` |
+| `loop_roll_carry_unrolled.prp` | same source, rolling off | `loop_roll_carry_unrolled.accumulates` | the other half of the rolled-vs-unrolled differential — same values, six instances |
+| `loop_roll_cond_write.prp` | conditionally-written carry | `loop_roll_cond_write.conditional_carry` | rolled; pins the carry-classification hazard (a variable written on only some paths is still a carry) |
+| `loop_roll_conditional_state_call.prp` | runtime-break loop with stateful conditional child | `rolled_cond_top.compact_for_and_conditional_child_if` | native `std::array` loop, cumulative activation, inactive carry bypass, reset-open child calls |
+| `loop_roll_array_carry.prp` | indexed array carry | `loop_roll_array_carry.lanes` | array loops stay compact by default, without a separate array option |
+| `loop_roll_large_domain.prp` | 1,025-iteration loop | `loop_roll_large_domain.compact` | trip count alone does not trigger source expansion |
+| `loop_roll_final_only.prp` | final-only loop result | `loop_roll_final_only.last_value` | rolled output with no ordinal-0 input value |
+| `loop_roll_named_alias.prp` | source-unit scalar type alias | `loop_roll_named_alias.alias_carry` | alias is resolved to a concrete lifted boundary |
+| `loop_roll_inferred_bool.prp` | inferred boolean carry | `loop_roll_inferred_bool.bool_carry` | boolean boundary inference without guessing an integer width |
+| `loop_roll_later_comptime.prp` | carry used by a later loop domain | `loop_roll_later_comptime.preserved` | planner keeps the first loop unrolled so the later domain remains comptime |
+| `loop_roll_external_reg.prp` | enclosing register carry | `loop_roll_external_reg.shared_reg` | explicit unrolled fallback until `ref` is legal across a `mod` boundary |
+| `loop_comptime_break_under_runtime_if.prp` | guarded loop with a comptime break | `loop_comptime_break_under_runtime_if.guarded` | regression for `loop-runtime-break`: an enclosing RUNTIME `if` must not make a comptime `break` illegal |
+| `conditional_state_named_clock.prp` | stateful conditional child on `clk_i`/`rst_ni` | `named_clock_parent.holds_and_resets` | structural clock/reset discovery; inactive child holds, active-low reset still reaches it |
+
+## Header tags used by these fixtures
+
+- `:set: k=v [k=v ...]` — extra `--set` flags for every mode this fixture runs,
+  the sim lowering included. Use the FULLY-QUALIFIED option name
+  (the default (`compile.unroll=false`)): `lhd compile` accepts the short `unroll`
+  form but `lhd sim` rejects it, so a short-form fixture would silently
+  simulate the default lowering while asserting the other one.
+- `:expect_instances: name=count [...]` — asserts how many `Sub` (instance)
+  nodes the design has, counted on the LGRAPH (`lhd tool grep kind=sub lg:`)
+  rather than on emitted Verilog or C++, whose de-collision spellings
+  (`_cgen2` / `__i2`) differ. `*` is the total, and a name ending in `*` is a
+  prefix glob — `stage__li*=6` says "six replicas of one source call site"
+  without pinning six literal `__li<ordinal>` names. This is what makes a
+  "the loop stayed rolled" claim testable: without it a silent fall back to
+  unrolling still passes every value assertion.
 
 ## `tick` and constant propagation
 
