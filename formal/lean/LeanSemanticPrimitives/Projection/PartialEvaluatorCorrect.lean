@@ -432,6 +432,38 @@ theorem primStruct_scoped {d : Nat} {p : Prim} {rs : List PRes} {r : PRes}
   · exact peelIsNil_scoped hp h.1
   · simp at hp
 
+/-! #### The hot path
+
+`prepare`'s conservative fallback binds a whole subtree and loses its spine.
+That is sound but slow, so the shape `I_hw` actually produces must be proved
+NOT to reach it -- otherwise a later change could silently restore quadratic
+residuals while every correctness theorem stayed green. -/
+
+/-- A pure spine -- values and references only -- prepares to ITSELF, emitting
+no bindings.  This is why the environment argument never needs one. -/
+theorem prepare_toPRes : ∀ (pv : PVal), prepare pv.toPRes = ⟨[], pv⟩
+  | .stat _   => rfl
+  | .dyn _    => rfl
+  | .cons a b => by
+      simp only [PVal.toPRes, prepare, prepare_toPRes a, prepare_toPRes b]
+      simp
+
+/-- THE structural property responsible for linear specialization: extending the
+environment by one node costs exactly ONE binding, the spine survives, and its
+references shift by exactly that one binding.
+
+The fallback is not selected, so the residual grows by a constant per node
+rather than by the length of the environment. -/
+theorem prepare_hot_path {t : Term} (hnv : ∀ i, t ≠ .var i) (spine : PVal) :
+    prepare (.cons (.code t) spine.toPRes)
+      = ⟨[t], .cons (.dyn 0) (PVal.shift 1 spine)⟩ := by
+  have hb := prepare_toPRes spine
+  cases t with
+  | var i => exact absurd rfl (hnv i)
+  | lit _ | letIn _ _ | ite _ _ _ | prim _ _ | ctorT _ _ | caseT _ _ | call _ _ =>
+      simp only [prepare, hb]
+      simp
+
 /-! #### Layer 2: the same-fuel companions
 
 `mixTerm` recurses by REDUCING fuel, while `mixTerms`, `mixUArgs` and `mixAlts`
@@ -640,23 +672,99 @@ theorem ScopedLets_append : ∀ (a b : List Term) (d : Nat),
       have he : d + 1 + ts.length = d + (t :: ts).length := by simp; omega
       rw [he]; exact hb
 
-/- `prepare_scoped` -- preparation preserves scope -- is NOT yet proved.  The
-statement is
+/-! #### Preparation, verified
 
-    PRes.Scoped d r → Prepared.Scoped d (prepare r)
+Built from small lemmas rather than one induction: each shape of `prepare`'s
+answer gets its own, and the arithmetic is isolated in `PVal.Scoped.dyn` so it
+never has to be done inside a structural proof. -/
 
-and it is true; the obstacle is bookkeeping, not content.  Two specific points
-cost several attempts and are recorded so the next go is shorter:
+theorem PVal.Scoped.dyn {k d : Nat} (h : k < d) : PVal.Scoped d (PVal.dyn k) := h
 
-  * in the `code (.var i)` case the goal reduces to `i < d + [].length` while
-    the hypothesis is `Term.Scoped d (.var i)`.  `omega` does not unfold the
-    `Term.Scoped` match on its own, so the hypothesis has to be restated as
-    `i < d` first.
-  * in the two `cons` cases the goal's depth mentions
-    `(prepare a).binds.length` while the `split` equations name `ba`/`bb`.  The
-    equations have to be rewritten INTO the goal before `PVal.Scoped_shift`
-    applies.
--/
+theorem prepare_stat_scoped {v : Val} {d : Nat} :
+    Prepared.Scoped d ⟨[], .stat v⟩ := ⟨trivial, trivial⟩
+
+/-- A reference the caller already held needs no binding. -/
+theorem prepare_ref_scoped {i d : Nat} (h : i < d) :
+    Prepared.Scoped d ⟨[], .dyn i⟩ := by
+  refine ⟨trivial, PVal.Scoped.dyn ?_⟩
+  have hidx : i < d + ([] : List Term).length := by simp; omega
+  exact hidx
+
+/-- Binding arbitrary scoped code exactly once. -/
+theorem prepare_bind_scoped {t : Term} {d : Nat} (h : Term.Scoped d t) :
+    Prepared.Scoped d ⟨[t], .dyn 0⟩ := by
+  refine ⟨⟨h, trivial⟩, PVal.Scoped.dyn ?_⟩
+  have hidx : 0 < d + ([t] : List Term).length := by simp
+  exact hidx
+
+/-- The conservative whole-subtree fallback. -/
+theorem prepare_fallback_scoped {r : PRes} {d : Nat} (h : PRes.Scoped d r) :
+    Prepared.Scoped d ⟨[r.toCode], .dyn 0⟩ :=
+  prepare_bind_scoped (PRes.Scoped_toCode h)
+
+/-- Only the RIGHT side needed bindings, so the left's references shift by them. -/
+theorem prepare_cons_left {d : Nat} {bb : List Term} {va vb : PVal}
+    (ha : Prepared.Scoped d (⟨[], va⟩ : Prepared))
+    (hb : Prepared.Scoped d (⟨bb, vb⟩ : Prepared)) :
+    Prepared.Scoped d (⟨bb, .cons (PVal.shift bb.length va) vb⟩ : Prepared) := by
+  refine ⟨hb.1, ⟨?_, hb.2⟩⟩
+  have hva : PVal.Scoped d va := by simpa [Prepared.Scoped] using ha.2
+  exact PVal.Scoped_shift _ hva
+
+/-- Only the LEFT side needed bindings, so the right's references shift by them. -/
+theorem prepare_cons_right {d : Nat} {ba : List Term} {va vb : PVal}
+    (ha : Prepared.Scoped d (⟨ba, va⟩ : Prepared))
+    (hb : Prepared.Scoped d (⟨[], vb⟩ : Prepared)) :
+    Prepared.Scoped d (⟨ba, .cons va (PVal.shift ba.length vb)⟩ : Prepared) := by
+  refine ⟨ha.1, ⟨ha.2, ?_⟩⟩
+  have hvb : PVal.Scoped d vb := by simpa [Prepared.Scoped] using hb.2
+  exact PVal.Scoped_shift _ hvb
+
+/-- Appending a package's own bindings, the one safe concatenation. -/
+theorem prepare_lets_scoped {d : Nat} {bs : List Term} {p : Prepared}
+    (hbs : ScopedLets d bs) (hp : Prepared.Scoped (d + bs.length) p) :
+    Prepared.Scoped d (⟨bs ++ p.binds, p.value⟩ : Prepared) := by
+  refine ⟨ScopedLets_append bs p.binds d hbs hp.1, ?_⟩
+  have he : d + bs.length + p.binds.length = d + (bs ++ p.binds).length := by
+    simp; omega
+  exact he ▸ hp.2
+
+/-- Preparation preserves scope. -/
+theorem prepare_scoped : ∀ {r : PRes} {d : Nat},
+    PRes.Scoped d r → Prepared.Scoped d (prepare r) := by
+  intro r
+  induction r with
+  | stat v => intro d _; exact prepare_stat_scoped
+  | code t =>
+      intro d h
+      cases t with
+      | var i => exact prepare_ref_scoped h
+      | lit _ | letIn _ _ | ite _ _ _ | prim _ _ | ctorT _ _ | caseT _ _ | call _ _ =>
+          exact prepare_bind_scoped h
+  | cons a b iha ihb =>
+      intro d h
+      have ha := iha h.1
+      have hb := ihb h.2
+      cases hpa : prepare a with
+      | mk abs av =>
+        cases hpb : prepare b with
+        | mk bbs bv =>
+          rw [hpa] at ha
+          rw [hpb] at hb
+          cases abs with
+          | nil => simp only [prepare, hpa, hpb]; exact prepare_cons_left ha hb
+          | cons _ _ =>
+              cases bbs with
+              | nil => simp only [prepare, hpa, hpb]; exact prepare_cons_right ha hb
+              | cons _ _ =>
+                  simp only [prepare, hpa, hpb]
+                  exact prepare_fallback_scoped h
+  | lets bs r ih =>
+      intro d h
+      simp only [prepare]
+      exact prepare_lets_scoped h.1 (ih h.2)
+
+
 
 theorem PEnv.Scoped_stat_map (d : Nat) : ∀ vs : List Val, PEnv.Scoped d (vs.map PVal.stat)
   | []      => trivial
@@ -1416,6 +1524,89 @@ def PreparedOK (P : Program) (ρ : Env) (p : Prepared) (v : Val) : Prop :=
 theorem PreparedOK_toPRes {P ρ p v} (h : PreparedOK P ρ p v) : PResOK P ρ p.toPRes v := by
   obtain ⟨ρ', hl, hv⟩ := h
   exact ⟨ρ', hl, PResOK_toPRes hv⟩
+
+/-! #### Preparation, semantically
+
+The transport lemmas: running bindings extends the residual environment, and a
+value that denoted something before still denotes it after, once its references
+are shifted by the number of bindings run. -/
+
+theorem PVal.shift_add : ∀ (a b : Nat) (v : PVal),
+    PVal.shift a (PVal.shift b v) = PVal.shift (b + a) v
+  | _, _, .stat _   => rfl
+  | a, b, .dyn i    => by simp [PVal.shift]; omega
+  | a, b, .cons x y => by simp [PVal.shift, PVal.shift_add a b x, PVal.shift_add a b y]
+
+theorem EvalLets_nil {P : Program} {ρ ρ' : Env} (h : EvalLets P ρ [] ρ') : ρ' = ρ := by
+  cases h; rfl
+
+theorem EvalLets_append {P : Program} : ∀ {ρ ρ' ρ'' : Env} {a b : List Term},
+    EvalLets P ρ a ρ' → EvalLets P ρ' b ρ'' → EvalLets P ρ (a ++ b) ρ''
+  | _, _, _, [],     _, ha, hb => by cases ha; exact hb
+  | _, _, _, _ :: _, _, ha, hb => by
+      cases ha with
+      | cons he ht => exact .cons he (EvalLets_append ht hb)
+
+theorem PValOK_EvalLets {P : Program} :
+    ∀ {ρ ρ' : Env} {bs : List Term} {pv : PVal} {w : Val},
+      EvalLets P ρ bs ρ' → PValOK ρ pv w → PValOK ρ' (PVal.shift bs.length pv) w
+  | _, _, [],     _, _, h, hv => by cases h; simpa using hv
+  | _, _, _ :: _, _, _, h, hv => by
+      cases h with
+      | cons he ht =>
+          have h2 := PValOK_EvalLets ht (PValOK_shift1 _ hv)
+          simpa [PVal.shift_add, Nat.add_comm] using h2
+
+/-- Preparation preserves meaning: the bindings it emits evaluate, and the
+partial value it keeps denotes what the original result denoted. -/
+theorem prepare_ok {P : Program} : ∀ {ρ : Env} {r : PRes} {v : Val},
+    PResOK P ρ r v → PreparedOK P ρ (prepare r) v := by
+  intro ρ r
+  induction r generalizing ρ with
+  | stat w => intro v h; exact ⟨ρ, .nil, h⟩
+  | code t =>
+      intro v h
+      cases t with
+      | var i =>
+          refine ⟨ρ, .nil, ?_⟩
+          cases h with | var hk => exact hk
+      | lit _ | letIn _ _ | ite _ _ _ | prim _ _ | ctorT _ _ | caseT _ _ | call _ _ =>
+          exact ⟨v :: ρ, .cons h .nil, rfl⟩
+  | cons a b iha ihb =>
+      intro v h
+      obtain ⟨x, y, hv, ha, hb⟩ := h
+      subst hv
+      have pa := iha ha
+      have pb := ihb hb
+      cases hpa : prepare a with
+      | mk abs av =>
+        cases hpb : prepare b with
+        | mk bbs bv =>
+          rw [hpa] at pa
+          rw [hpb] at pb
+          cases abs with
+          | nil =>
+              simp only [prepare, hpa, hpb]
+              obtain ⟨ρa, hla, hva⟩ := pa
+              obtain ⟨ρb, hlb, hvb⟩ := pb
+              cases EvalLets_nil hla
+              exact ⟨ρb, hlb, _, _, rfl, PValOK_EvalLets hlb hva, hvb⟩
+          | cons _ _ =>
+              cases bbs with
+              | nil =>
+                  simp only [prepare, hpa, hpb]
+                  obtain ⟨ρa, hla, hva⟩ := pa
+                  obtain ⟨ρb, hlb, hvb⟩ := pb
+                  cases EvalLets_nil hlb
+                  exact ⟨ρa, hla, _, _, rfl, hva, PValOK_EvalLets hla hvb⟩
+              | cons _ _ =>
+                  simp only [prepare, hpa, hpb]
+                  exact ⟨_, .cons (PResOK_toCode ⟨_, _, rfl, ha, hb⟩) .nil, rfl⟩
+  | lets bs r ih =>
+      intro v h
+      obtain ⟨ρ1, hl1, hr⟩ := h
+      obtain ⟨ρ2, hl2, hv2⟩ := ih hr
+      exact ⟨ρ2, EvalLets_append hl1 hl2, hv2⟩
 
 /-! ## Alternatives of a residualized `caseT`
 

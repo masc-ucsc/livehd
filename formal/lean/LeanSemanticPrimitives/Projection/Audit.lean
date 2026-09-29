@@ -112,4 +112,12 @@ namespace Projection
 #print axioms generateFrom_scoped
 #print axioms mixDriver_scoped
 
+-- preparation: the switch's argument transfer, verified before it is wired
+#print axioms prepare_scoped
+#print axioms prepare_ok
+#print axioms prepare_toPRes
+#print axioms prepare_hot_path
+#print axioms ScopedLets_append
+#print axioms EvalLets_append
+
 end Projection
