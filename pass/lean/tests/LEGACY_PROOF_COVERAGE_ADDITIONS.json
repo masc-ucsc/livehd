@@ -346,5 +346,34 @@
     "completed_utc": "2026-09-28T13:11:09.061826+00:00",
     "wall_time": "12:42.70",
     "peak_rss_kib": "19861680"
+  },
+  {
+    "top": "minion_dcache_miss_handler_unit",
+    "scope": "bridge",
+    "replay_mode": "regenerated",
+    "file": "generated/legacy_refactor/historical_replay/minion_dcache_miss_handler_unit/export/minion_dcache_miss_handler_unit_Lgraph.lean",
+    "library_context_sha256": "eeb9859728a6e800afb8aecac55b696e8769a644b37fc289b3a573ba038ec7ac",
+    "lean_version": "Lean (version 4.31.0, x86_64-unknown-linux-gnu, commit 68218e876d2a38b1985b8590fff244a83c321783, Release)",
+    "workers": 8,
+    "cpus": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7
+    ],
+    "sha256": "b890c815e9960b6c0c6b70d2b018b2f541ba5b3a0c842b42bd74ba2b382e94ab",
+    "verdict": "PROVEN",
+    "started_utc": "2026-09-28T13:11:11.346875+00:00",
+    "exit_code": 0,
+    "sorryAx": false,
+    "errors": 0,
+    "missing_audits": [],
+    "completed_utc": "2026-09-29T02:40:06.363549+00:00",
+    "wall_time": "13:28:52",
+    "peak_rss_kib": "13314368"
   }
 ]
