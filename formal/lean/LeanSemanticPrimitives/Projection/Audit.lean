@@ -107,5 +107,9 @@ namespace Projection
 #print axioms mixAlts_scoped
 #print axioms mixUArgs_inlineEnv_scoped
 #print axioms mixTerm_scoped
+#print axioms buildEnv_scoped
+#print axioms mixFun_scoped
+#print axioms generateFrom_scoped
+#print axioms mixDriver_scoped
 
 end Projection

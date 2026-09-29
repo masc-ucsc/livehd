@@ -787,6 +787,113 @@ theorem mixTerm_scoped : ∀ n, ScopeOK n := by
               mixUArgs_inlineEnv_scoped ih A idx Δ fd.params ts env d rs' dts rq₂ env' henv hu hie
             exact ⟨hbinds, ih A idx _ _ fd.body _ rq₃ _ henv' hb⟩
 
+/-! #### Layer 4: the whole generated program
+
+`mixTerm_scoped` is LOCAL -- it says a result is scoped relative to the
+environment it was given.  That does not say a generated residual FUNCTION is
+scoped, because a function body runs in a fresh argument environment rather than
+the caller's.  This layer supplies the missing half, and together they say that
+successful specialization emits no dangling de Bruijn reference anywhere. -/
+
+/-- Every residual function body is closed at its own arity. -/
+def Program.Scoped (P : Program) : Prop :=
+  ∀ fd ∈ P.funs, Term.Scoped fd.arity fd.body
+
+/-- The environment a specialized function body starts in.  Static parameters
+name no residual variable; the dynamic ones are numbered upwards from `j`, and
+there are exactly `dynCount bs` of them, so every index lands below
+`j + dynCount bs`. -/
+theorem buildEnv_scoped : ∀ (bs : Div) (vs : List Val) (j : Nat) (env : PEnv),
+    buildEnv bs vs j = .ok env → PEnv.Scoped (j + dynCount bs) env := by
+  intro bs
+  induction bs with
+  | nil =>
+      intro vs j env he
+      cases vs with
+      | nil      => simp only [buildEnv] at he; cases he; trivial
+      | cons _ _ => simp [buildEnv] at he
+  | cons b bs' ih =>
+      intro vs j env he
+      cases b with
+      | stat =>
+          cases vs with
+          | nil => simp [buildEnv] at he
+          | cons v vs' =>
+              simp only [buildEnv] at he
+              cases hr : buildEnv bs' vs' j with
+              | error _ => rw [hr] at he; simp at he
+              | ok rest =>
+                  rw [hr] at he
+                  cases he
+                  exact ⟨trivial, by simpa [dynCount] using ih vs' j rest hr⟩
+      | dyn =>
+          simp only [buildEnv] at he
+          cases hr : buildEnv bs' vs (j + 1) with
+          | error _ => rw [hr] at he; simp at he
+          | ok rest =>
+              rw [hr] at he
+              cases he
+              refine ⟨?_, ?_⟩
+              · simp only [PVal.Scoped, dynCount]; omega
+              · have hih := ih vs (j + 1) rest hr
+                have heq : j + 1 + dynCount bs' = j + dynCount (BT.dyn :: bs') := by
+                  simp [dynCount]; omega
+                rw [heq] at hih
+                exact hih
+
+theorem mixFun_scoped {stepFuel : Nat} {A : AProgram} {idx : SpecRequest → Option Nat}
+    {req : SpecRequest} {fd : FunDef} {rq : List SpecRequest}
+    (h : mixFun stepFuel A idx req = .ok (fd, rq)) : Term.Scoped fd.arity fd.body := by
+  simp only [mixFun] at h
+  split at h <;> try contradiction
+  rename_i sfd _
+  split at h <;> try contradiction
+  rename_i env he
+  split at h <;> try contradiction
+  rename_i r rq' hmix
+  cases h
+  exact PRes.Scoped_toCode
+    (mixTerm_scoped stepFuel A idx sfd.params env sfd.body r _ (dynCount sfd.params)
+      (by simpa using buildEnv_scoped sfd.params req.staticArgs 0 env he) hmix)
+
+theorem generateFrom_scoped {stepFuel : Nat} {A : AProgram} {idx : SpecRequest → Option Nat} :
+    ∀ (reqs : List SpecRequest) (funs : List FunDef),
+      generateFrom stepFuel A idx reqs = .ok funs →
+      ∀ fd ∈ funs, Term.Scoped fd.arity fd.body := by
+  intro reqs
+  induction reqs with
+  | nil => intro funs hg fd hfd; simp only [generateFrom] at hg; cases hg; simp at hfd
+  | cons r rs ih =>
+      intro funs hg fd hfd
+      simp only [generateFrom] at hg
+      cases hf : mixFun stepFuel A idx r with
+      | error _ => rw [hf] at hg; simp at hg
+      | ok pr =>
+          obtain ⟨fd', rq'⟩ := pr
+          rw [hf] at hg
+          cases hgs : generateFrom stepFuel A idx rs with
+          | error _ => rw [hgs] at hg; simp at hg
+          | ok fds =>
+              rw [hgs] at hg
+              cases hg
+              cases hfd with
+              | head     => exact mixFun_scoped hf
+              | tail _ m => exact ih fds hgs fd m
+
+/-- Successful specialization emits no dangling de Bruijn reference. -/
+theorem mixDriver_scoped {stepFuel wlFuel : Nat} {A : AProgram} {statics : List Val}
+    {Pr : Program} (h : mixDriver stepFuel wlFuel A statics = .ok Pr) : Program.Scoped Pr := by
+  simp only [mixDriver] at h
+  split at h <;> try contradiction
+  rename_i reqs _
+  split at h <;> try contradiction
+  rename_i funs hgen
+  split at h <;> try contradiction
+  rename_i e _
+  cases h
+  intro fd hfd
+  exact generateFrom_scoped reqs funs hgen fd hfd
+
 /-- The bridge that makes the invariant free where it is already established:
 a partial value that DENOTES something names indices that exist, because
 `ρr[k]? = some v` already says `k < ρr.length`. -/
