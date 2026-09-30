@@ -764,6 +764,77 @@ theorem prepare_scoped : ∀ {r : PRes} {d : Nat},
       simp only [prepare]
       exact prepare_lets_scoped h.1 (ih h.2)
 
+/-- Scope for the single-pass transfer.  Compare `mixUArgs_inlineEnv_scoped`:
+same conclusion, but no private length equality is needed to get it, because
+the binder depth is `bs.length` by construction rather than by arithmetic that
+happens to match. -/
+theorem mixPArgs_scoped {n : Nat} (h : ScopeOK n) :
+    ∀ A idx Δ ps ts env d bs env' rq,
+      PEnv.Scoped d env →
+      mixPArgs n A idx Δ env ps ts = .ok (bs, env', rq) →
+      ScopedLets d bs ∧ PEnv.Scoped (d + bs.length) env' := by
+  intro A idx Δ ps
+  induction ps with
+  | nil =>
+      intro ts env d bs env' rq _ hm
+      cases ts with
+      | nil      => simp only [mixPArgs] at hm; cases hm; exact ⟨trivial, trivial⟩
+      | cons _ _ => simp [mixPArgs] at hm
+  | cons b ps' ih =>
+      intro ts env d bs env' rq henv hm
+      cases ts with
+      | nil => cases b <;> simp [mixPArgs] at hm
+      | cons t ts' =>
+          cases b with
+          | stat =>
+              simp only [mixPArgs] at hm
+              cases ht : mixTerm n A idx Δ env t with
+              | error e => simp only [ht] at hm; simp at hm
+              | ok x =>
+                  obtain ⟨r, rq₁⟩ := x
+                  simp only [ht] at hm
+                  cases r with
+                  | stat v =>
+                      cases hp : mixPArgs n A idx Δ env ps' ts' with
+                      | error e => simp only [hp] at hm; simp at hm
+                      | ok y =>
+                          obtain ⟨bs', env'', rq₂⟩ := y
+                          simp only [hp] at hm
+                          cases hm
+                          obtain ⟨h1, h2⟩ := ih ts' env d _ env'' rq₂ henv hp
+                          exact ⟨h1, ⟨trivial, h2⟩⟩
+                  | code _   => simp at hm
+                  | cons _ _ => simp at hm
+                  | lets _ _ => simp at hm
+          | dyn =>
+              simp only [mixPArgs] at hm
+              cases ht : mixTerm n A idx Δ env t with
+              | error e => simp only [ht] at hm; simp at hm
+              | ok x =>
+                  obtain ⟨r, rq₁⟩ := x
+                  simp only [ht] at hm
+                  have hpr : Prepared.Scoped d (prepare r) :=
+                    prepare_scoped (h A idx Δ env t r rq₁ d henv ht)
+                  cases hp : mixPArgs n A idx Δ (PEnv.shiftBy (prepare r).binds.length env)
+                                ps' ts' with
+                  | error e => simp only [hp] at hm; simp at hm
+                  | ok y =>
+                      obtain ⟨bs', env'', rq₂⟩ := y
+                      simp only [hp] at hm
+                      cases hm
+                      obtain ⟨h1, h2⟩ :=
+                        ih ts' (PEnv.shiftBy (prepare r).binds.length env)
+                           (d + (prepare r).binds.length) _ env'' rq₂
+                           (PEnv.Scoped_shift _ henv) hp
+                      refine ⟨ScopedLets_append _ _ d hpr.1 h1, ⟨?_, ?_⟩⟩
+                      · have := PVal.Scoped_shift bs'.length hpr.2
+                        have he : d + (prepare r).binds.length + bs'.length
+                                = d + ((prepare r).binds ++ bs').length := by simp; omega
+                        exact he ▸ this
+                      · have he : d + (prepare r).binds.length + bs'.length
+                                = d + ((prepare r).binds ++ bs').length := by simp; omega
+                        exact he ▸ h2
+
 
 
 theorem PEnv.Scoped_stat_map (d : Nat) : ∀ vs : List Val, PEnv.Scoped d (vs.map PVal.stat)

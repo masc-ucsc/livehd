@@ -678,6 +678,51 @@ def mixAlts : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
 
 end
 
+/-! ## Argument transfer, in one pass
+
+`mixUArgs` and `inlineEnv` are two functions that must agree about the binding
+layout, and today they agree only because their arithmetic matches: `mixUArgs`
+emits one binding per dynamic parameter and `inlineEnv` indexes with
+`dynCount`.  That equality is about to become FALSE -- once preparation runs,
+one argument may emit zero bindings (it was already a variable), one, or several.
+
+`mixPArgs` replaces the pair with a single pass returning the emitted bindings,
+the callee environment, and -- implicitly, as `binds.length` -- the exact binder
+depth.  The agreement is then structural rather than arithmetic, and no
+`dynCount` appears anywhere in it.
+
+Standalone rather than part of `mixTerm`'s mutual block: `mixTerm` does not call
+it yet.  Wiring it in is the atomic switch, and it joins the block then. -/
+def mixPArgs : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv → Div →
+    List ATerm → Except MixError (List Term × PEnv × List SpecRequest)
+  | _, _, _, _, _, [], [] => .ok ([], [], [])
+  -- a static parameter is consumed by `mix` and emits no binding, so nothing
+  -- after it shifts
+  | n, A, idx, Δ, env, .stat :: ps, t :: ts =>
+      match mixTerm n A idx Δ env t with
+      | .error z          => .error z
+      | .ok (.stat v, rq₁) =>
+        match mixPArgs n A idx Δ env ps ts with
+        | .error z              => .error z
+        | .ok (bs, env', rq₂)   => .ok (bs, .stat v :: env', rq₁ ++ rq₂)
+      | .ok (_, _)        => .error (.notStatic "unfold: static parameter got residual code")
+  -- a dynamic parameter is PREPARED: its code leaves become bindings, its
+  -- partial structure survives.  Everything after it is mixed under however
+  -- many bindings it actually emitted -- zero, one, or several
+  | n, A, idx, Δ, env, .dyn :: ps, t :: ts =>
+      match mixTerm n A idx Δ env t with
+      | .error z => .error z
+      | .ok (r, rq₁) =>
+        let p := prepare r
+        match mixPArgs n A idx Δ (env.shiftBy p.binds.length) ps ts with
+        | .error z            => .error z
+        | .ok (bs, env', rq₂) =>
+            -- `p.value` indexes its own bindings; the later ones sit between it
+            -- and the body, so it shifts by exactly how many there are
+            .ok (p.binds ++ bs, PVal.shift bs.length p.value :: env', rq₁ ++ rq₂)
+  | _, _, _, _, _, _, _ =>
+      .error (.badArity "unfold: argument count does not match the division")
+
 /-! ## Specializing one function -/
 
 /-- Specialize `req.funIdx` with respect to `req.staticArgs`.
