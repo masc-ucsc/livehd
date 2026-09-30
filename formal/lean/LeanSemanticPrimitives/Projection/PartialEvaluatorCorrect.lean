@@ -1628,6 +1628,31 @@ theorem PValOK_EvalLets {P : Program} :
           have h2 := PValOK_EvalLets ht (PValOK_shift1 _ hv)
           simpa [PVal.shift_add, Nat.add_comm] using h2
 
+theorem PEnv.shiftBy_add : ∀ (a b : Nat) (env : PEnv),
+    PEnv.shiftBy a (PEnv.shiftBy b env) = PEnv.shiftBy (b + a) env
+  | _, _, []        => rfl
+  | a, b, v :: rest => by
+      simp only [PEnv.shiftBy, PVal.shift_add, PEnv.shiftBy_add a b rest]
+
+/-- Running a package's bindings transports a WHOLE compatible environment.
+
+This is the transport lemma one-pass argument transfer needs and `mixUArgs`
+never did.  `mixUArgs` entered exactly one binder per dynamic argument, so
+`Compat_shift1` covered it; preparation emits zero, one or several bindings per
+argument, so the later arguments are mixed under `env.shiftBy k` for a `k` only
+`prepare` knows.  The source side does not move -- bindings are residual-only --
+so the statement is `Compat` at the same `Δ` and the same `ρs`. -/
+theorem Compat_after_EvalLets {Pr : Program} :
+    ∀ {ρ ρ' : Env} {bs : List Term} {Δ : Div} {env : PEnv} {ρs : Env},
+      EvalLets Pr ρ bs ρ' → Compat ρ Δ env ρs →
+      Compat ρ' Δ (env.shiftBy bs.length) ρs
+  | _, _, [],     _, _, _, hl, hc => by cases hl; simpa using hc
+  | _, _, _ :: _, _, _, _, hl, hc => by
+      cases hl with
+      | cons he ht =>
+          have h2 := Compat_after_EvalLets ht (Compat_shift1 _ hc)
+          simpa [PEnv.shiftBy_add, Nat.add_comm] using h2
+
 /-- Preparation preserves meaning: the bindings it emits evaluate, and the
 partial value it keeps denotes what the original result denoted. -/
 theorem prepare_ok {P : Program} : ∀ {ρ : Env} {r : PRes} {v : Val},
@@ -1813,6 +1838,105 @@ theorem mixUArgs_ok {A Pr reqs n m} (h : TOK A Pr reqs n m) :
               simp only [PValOK]
               rw [List.getElem?_append_right (by omega), hl]
               simp
+
+/-- The semantic half of one-pass argument transfer.
+
+`mixPArgs` returns the flattened binding list and the partial environment
+TOGETHER, so this says exactly one thing: running the bindings reaches SOME
+residual environment, and under that environment the partial environment is
+compatible with the source argument values.
+
+Contrast `mixUArgs_ok` above, which had to expose both `ws.length = dynCount ps`
+and the shape `ρr' = ws.reverse ++ ρr`.  Those were the two facts a caller then
+had to keep in step with `inlineEnv`'s independent reconstruction of the same
+layout by hand -- the `wrapLets` index-arithmetic class of bug.  Here the
+residual environment is existential and the agreement is structural, so there is
+nothing for a caller to re-derive.  Counting is deliberately private: it lives
+inside the proof, never in the statement. -/
+theorem mixPArgs_ok {A Pr reqs n m} (h : TOK A Pr reqs n m) :
+    ∀ (ps : Div) (ts : List ATerm) (Δ : Div) (env : PEnv) (bs : List Term)
+      (env' : PEnv) (rq : List SpecRequest) (ρr ρs : Env) (vs : List Val),
+      Compat ρr Δ env ρs →
+      mixPArgs n A (indexOfReq reqs) Δ env ps ts = .ok (bs, env', rq) →
+      evalFuelList m (eraseProgram A) ρs (eraseList ts) = .inl vs →
+      ∃ ρr', EvalLets Pr ρr bs ρr' ∧ Compat ρr' ps env' vs := by
+  intro ps
+  induction ps with
+  | nil =>
+      intro ts Δ env bs env' rq ρr ρs vs _ hmix hsrc
+      cases ts with
+      | nil =>
+          simp only [mixPArgs] at hmix
+          cases hmix
+          simp only [eraseList, evalFuelList] at hsrc
+          cases hsrc
+          exact ⟨ρr, .nil, .nil⟩
+      | cons _ _ => simp [mixPArgs] at hmix
+  | cons b ps' ih =>
+      intro ts Δ env bs env' rq ρr ρs vs hc hmix hsrc
+      cases ts with
+      | nil => cases b <;> simp [mixPArgs] at hmix
+      | cons t ts' =>
+        simp only [eraseList, evalFuelList] at hsrc
+        split at hsrc <;> try contradiction
+        rename_i v₀ hv₀
+        split at hsrc <;> try contradiction
+        rename_i vs' hvs'
+        cases hsrc
+        cases b with
+        | stat =>
+            -- a static argument emits no binding, so the residual environment
+            -- the tail is mixed under is the one we already have
+            simp only [mixPArgs] at hmix
+            cases hres : mixTerm n A (indexOfReq reqs) Δ env t with
+            | error z => simp [hres] at hmix
+            | ok pr =>
+              obtain ⟨r, rq₁⟩ := pr
+              have hr := h Δ env t r rq₁ ρr ρs v₀ hc hres hv₀
+              simp only [hres] at hmix
+              cases r with
+              | code _ => simp at hmix
+              | cons _ _ => simp at hmix
+              | lets _ _ => simp at hmix
+              | stat w =>
+                cases hrec : mixPArgs n A (indexOfReq reqs) Δ env ps' ts' with
+                | error z => simp [hrec] at hmix
+                | ok q =>
+                  obtain ⟨bs', env'', rq₂⟩ := q
+                  -- appeal to the tail BEFORE `cases hmix`: `bs'` is a bare
+                  -- variable in that equation, so `cases` eliminates it
+                  obtain ⟨ρf, hlets, hcp⟩ :=
+                    ih ts' Δ env bs' env'' rq₂ ρr ρs vs' hc hrec hvs'
+                  simp only [hrec] at hmix
+                  cases hmix
+                  have hw : w = v₀ := hr.statEq w rfl
+                  subst hw
+                  exact ⟨ρf, hlets, hcp.stat⟩
+        | dyn =>
+            -- a dynamic argument is PREPARED: its code leaves become bindings
+            -- and its partial structure survives as an environment entry.  The
+            -- tail is mixed under however many bindings that actually was --
+            -- `Compat_after_EvalLets` is what carries the invariant across them
+            simp only [mixPArgs] at hmix
+            cases hres : mixTerm n A (indexOfReq reqs) Δ env t with
+            | error z => simp [hres] at hmix
+            | ok pr =>
+              obtain ⟨r, rq₁⟩ := pr
+              have hr := h Δ env t r rq₁ ρr ρs v₀ hc hres hv₀
+              simp only [hres] at hmix
+              obtain ⟨ρp, hpLets, hpVal⟩ := prepare_ok hr
+              cases hrec : mixPArgs n A (indexOfReq reqs) Δ
+                  (env.shiftBy (prepare r).binds.length) ps' ts' with
+              | error z => simp [hrec] at hmix
+              | ok q =>
+                obtain ⟨bs', env'', rq₂⟩ := q
+                simp only [hrec] at hmix
+                cases hmix
+                obtain ⟨ρf, htLets, htCompat⟩ :=
+                  ih ts' Δ (env.shiftBy (prepare r).binds.length) bs' env'' rq₂
+                     ρp ρs vs' (Compat_after_EvalLets hpLets hc) hrec hvs'
+                exact ⟨ρf, EvalLets_append hpLets htLets,
+                       .dyn (PValOK_EvalLets htLets hpVal) htCompat⟩
 
 /-! ## The main induction
 
