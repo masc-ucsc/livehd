@@ -122,5 +122,7 @@ namespace Projection
 #print axioms mixPArgs_scoped
 #print axioms Compat_after_EvalLets
 #print axioms mixPArgs_ok
+#print axioms wrapLets_peel
+#print axioms prepare_peel
 
 end Projection

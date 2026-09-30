@@ -1704,6 +1704,159 @@ theorem prepare_ok {P : Program} : ∀ {ρ : Env} {r : PRes} {v : Val},
       obtain ⟨ρ2, hl2, hv2⟩ := ih hr
       exact ⟨ρ2, EvalLets_append hl1 hl2, hv2⟩
 
+/-! #### Preparation, backwards
+
+The soundness direction reads the residual and must recover the source.  It
+cannot go through `PRes.toCode`, because after the switch the residual never
+RUNS `toCode`.  A spine `prepare` left unbound costs the residual nothing, while
+`toCode` rebuilds the whole `consP` chain and charges one unit of fuel per
+level, so `evalFuel mr` of `toCode` can time out at a fuel the residual finishes
+in.  (Measured: a three-leaf static spine prepares to ZERO bindings, and its
+`toCode` first returns a value at fuel 3.)  Since the fuel bound `mr` comes from
+the residual and `specSound_all` only ever supplies `SOK` at fuels BELOW it,
+that gap cannot be closed by raising the fuel.
+
+So the soundness invariant is stated over what the residual actually runs: the
+prepared form.  `prepare_peel` below is the bridge, and it goes in the easy
+direction -- `toCode` does strictly MORE work than the package, so a `toCode`
+run always contains a package run. -/
+
+/-- A package's bindings, run under a fuel bound.  The bound is uniform rather
+than decreasing: peeling a `wrapLets` produces a decreasing sequence and
+`evalFuel_mono` lifts each step back to the bound, which is what keeps the
+relation composable under `++`. -/
+inductive EvalLetsAt (mr : Nat) (P : Program) : Env → List Term → Env → Prop where
+  | nil  : EvalLetsAt mr P ρ [] ρ
+  | cons : evalFuel mr P ρ e = .value d →
+           EvalLetsAt mr P (d :: ρ) es ρ' → EvalLetsAt mr P ρ (e :: es) ρ'
+
+theorem EvalLetsAt_mono {P : Program} : ∀ {m m' : Nat} {ρ ρ' : Env} {bs : List Term},
+    m ≤ m' → EvalLetsAt m P ρ bs ρ' → EvalLetsAt m' P ρ bs ρ'
+  | _, _, _, _, [],     _,   h => by cases h; exact .nil
+  | _, _, _, _, _ :: _, hle, h => by
+      cases h with
+      | cons he ht =>
+          exact .cons (evalFuel_mono _ _ _ _ _ _ hle he) (EvalLetsAt_mono hle ht)
+
+/-- Dropping the bound recovers the fuel-free relation the completeness side
+uses, so the two halves share `PValOK_EvalLets` rather than each proving it. -/
+theorem EvalLetsAt_toEvalLets {P : Program} : ∀ {m : Nat} {ρ ρ' : Env} {bs : List Term},
+    EvalLetsAt m P ρ bs ρ' → EvalLets P ρ bs ρ'
+  | _, _, _, [],     h => by cases h; exact .nil
+  | _, _, _, _ :: _, h => by
+      cases h with
+      | cons he ht => exact .cons (evalFuel_sound _ _ _ _ _ he) (EvalLetsAt_toEvalLets ht)
+
+theorem EvalLetsAt_append {P : Program} {m : Nat} :
+    ∀ {ρ ρ' ρ'' : Env} {a b : List Term},
+      EvalLetsAt m P ρ a ρ' → EvalLetsAt m P ρ' b ρ'' → EvalLetsAt m P ρ (a ++ b) ρ''
+  | _, _, _, [],     _, ha, hb => by cases ha; exact hb
+  | _, _, _, _ :: _, _, ha, hb => by
+      cases ha with
+      | cons he ht => exact .cons he (EvalLetsAt_append ht hb)
+
+/-- Peeling a `wrapLets` under a fuel bound.  The body is reached at SOME fuel
+below the bound; the bindings are reported at the bound itself. -/
+theorem wrapLets_peel {P : Program} :
+    ∀ (bs : List Term) (mr : Nat) (ρ : Env) (body : Term) (v : Val),
+      evalFuel mr P ρ (wrapLets bs body) = .value v →
+      ∃ (ρ' : Env) (m' : Nat),
+        m' ≤ mr ∧ EvalLetsAt mr P ρ bs ρ' ∧ evalFuel m' P ρ' body = .value v
+  | [],      mr, ρ, body, v, hev => ⟨ρ, mr, Nat.le_refl _, .nil, by simpa [wrapLets] using hev⟩
+  | e :: es, mr, ρ, body, v, hev => by
+      cases mr with
+      | zero => simp [evalFuel] at hev
+      | succ mq =>
+        simp only [wrapLets, evalFuel] at hev
+        cases hd : evalFuel mq P ρ e with
+        | outOfFuel   => rw [hd] at hev; simp at hev
+        | typeError _ => rw [hd] at hev; simp at hev
+        | value d =>
+          rw [hd] at hev
+          obtain ⟨ρ', m', hle, hl, hb⟩ := wrapLets_peel es mq (d :: ρ) body v hev
+          exact ⟨ρ', m', by omega,
+                 .cons (evalFuel_mono _ _ _ _ _ _ (Nat.le_succ mq) hd)
+                       (EvalLetsAt_mono (Nat.le_succ mq) hl), hb⟩
+
+/-- The converse companion to `prepare_ok`: a `toCode` run always contains a
+run of the package.  This is what lets the soundness invariant be stated over
+the prepared form while `specSound_all` still hands it a `toCode` run. -/
+theorem prepare_peel {P : Program} : ∀ (r : PRes) (mr : Nat) (ρ : Env) (v : Val),
+    evalFuel mr P ρ r.toCode = .value v →
+    ∃ ρp, EvalLetsAt mr P ρ (prepare r).binds ρp ∧ PValOK ρp (prepare r).value v := by
+  intro r
+  induction r with
+  | stat w =>
+      intro mr ρ v hev
+      cases mr with
+      | zero => simp [evalFuel] at hev
+      | succ mq =>
+          simp only [PRes.toCode, evalFuel] at hev
+          cases hev
+          exact ⟨ρ, .nil, rfl⟩
+  | code c =>
+      intro mr ρ v hev
+      cases c with
+      | var i =>
+          refine ⟨ρ, .nil, ?_⟩
+          cases mr with
+          | zero => simp [evalFuel] at hev
+          | succ mq =>
+              simp only [PRes.toCode, evalFuel] at hev
+              cases hk : ρ[i]? with
+              | none   => rw [hk] at hev; simp at hev
+              | some u => rw [hk] at hev; cases hev; exact hk
+      | lit _ | letIn _ _ | ite _ _ _ | prim _ _ | ctorT _ _ | caseT _ _ | call _ _ =>
+          exact ⟨v :: ρ, .cons hev .nil, rfl⟩
+  | cons a b iha ihb =>
+      intro mr ρ v hev
+      cases mr with
+      | zero => simp [evalFuel] at hev
+      | succ mq =>
+        simp only [PRes.toCode, evalFuel] at hev
+        cases hx : evalFuel mq P ρ (PRes.toCode a) with
+        | outOfFuel   => simp [evalFuelList, hx] at hev
+        | typeError _ => simp [evalFuelList, hx] at hev
+        | value x =>
+          cases hy : evalFuel mq P ρ (PRes.toCode b) with
+          | outOfFuel   => simp [evalFuelList, hx, hy] at hev
+          | typeError _ => simp [evalFuelList, hx, hy] at hev
+          | value y =>
+            simp only [evalFuelList, hx, hy, evalPrim] at hev
+            cases hev
+            obtain ⟨ρa, hla, hva⟩ := iha mq ρ x hx
+            obtain ⟨ρb, hlb, hvb⟩ := ihb mq ρ y hy
+            have hlea : mq ≤ mq + 1 := Nat.le_succ mq
+            cases hpa : prepare a with
+            | mk abs av =>
+              cases hpb : prepare b with
+              | mk bbs bv =>
+                rw [hpa] at hla hva
+                rw [hpb] at hlb hvb
+                cases abs with
+                | nil =>
+                    cases hla
+                    simp only [prepare, hpa, hpb]
+                    refine ⟨ρb, EvalLetsAt_mono hlea hlb, x, y, rfl, ?_, hvb⟩
+                    exact PValOK_EvalLets (EvalLetsAt_toEvalLets hlb) hva
+                | cons ah at' =>
+                  cases bbs with
+                  | nil =>
+                      cases hlb
+                      simp only [prepare, hpa, hpb]
+                      refine ⟨ρa, EvalLetsAt_mono hlea hla, x, y, rfl, hva, ?_⟩
+                      exact PValOK_EvalLets (EvalLetsAt_toEvalLets hla) hvb
+                  | cons bh bt =>
+                      simp only [prepare, hpa, hpb]
+                      refine ⟨Val.cons x y :: ρ, .cons ?_ .nil, rfl⟩
+                      simp only [PRes.toCode, evalFuel, evalFuelList, hx, hy, evalPrim]
+  | lets bs r' ih =>
+      intro mr ρ v hev
+      simp only [PRes.toCode] at hev
+      obtain ⟨ρ1, m', hle, hl1, hb⟩ := wrapLets_peel bs mr ρ (PRes.toCode r') v hev
+      obtain ⟨ρp, hl2, hv2⟩ := ih m' ρ1 v hb
+      exact ⟨ρp, EvalLetsAt_append hl1 (EvalLetsAt_mono hle hl2), hv2⟩
+
 /-! ## Alternatives of a residualized `caseT`
 
 `mixAlts` keeps each alternative's tag and arity and specializes its body under
