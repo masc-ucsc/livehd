@@ -59,11 +59,13 @@ fi
 # (packages first) and slang needs them that way.  Verify every path exists --
 # a silently-short filelist elaborates to a degenerate model that still
 # "compiles", which is the failure mode run_cva6_alu_lean.sh guards against.
-# Substitute the derived slang-clean copies of the two files that use an
-# identifier before declaring it (scripts/coreet_patch_srcs.py).  Those are
-# original-repo-class defects; the substitution is a pure declaration reorder and
-# is recorded in the .f header so no result silently claims to be about the
-# unpatched source.
+# Substitute the derived slang-clean copies of the CORE-ET files that slang
+# rejects (scripts/coreet_patch_srcs.py).  Those are original-repo-class defects
+# -- a declaration used before it appears, and untyped ANSI `output` ports that
+# default to a net and are then assigned procedurally.  Each substitution is
+# recorded in the .f header, WITH THE CHANGE IT MADE, so no result silently
+# claims to be about the unpatched source.  The derived file states its own
+# change on its first lines; that is what is quoted here.
 PATCH_MAP="$(dirname "$SCRIPT_DIR")/generated/core-et/patched_src/map.tsv"
 subst_of() {
   [[ -r "$PATCH_MAP" ]] || { printf '%s' "$1"; return; }
@@ -77,7 +79,13 @@ trap 'rm -f "$tmp"' EXIT
 n=0
 for f0 in $srcs; do
   f="$(subst_of "$f0")"
-  [[ "$f" != "$f0" ]] && patched_note+="// patched: $(basename "$f0") <- generated/core-et/patched_src/ (decl-before-use reorder)"$'\n'
+  # Quote the derived file's OWN `// change:` line rather than a fixed string:
+  # the map carries two different patch kinds and a hardcoded note mislabels one
+  # of them, which is exactly the silent claim this header exists to prevent.
+  if [[ "$f" != "$f0" ]]; then
+    chg="$(sed -n 's|^// change: ||p' "$f" | head -1)"
+    patched_note+="// patched: $(basename "$f0") <- generated/core-et/patched_src/ (${chg:-derived})"$'\n'
+  fi
   [[ -r "$f" ]] || { echo "FATAL: $MODULE filelist names a missing file: $f" >&2; exit 2; }
   grep -qxF "$f" "$tmp" 2>/dev/null && continue
   printf '%s\n' "$f" >> "$tmp"

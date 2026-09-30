@@ -37,6 +37,19 @@ PATCHES = {
 # `logic` is the lowRISC-standard spelling and is legal for BOTH continuous and
 # procedural drivers, so it is safe to apply to every untyped output in the file
 # rather than only the ones that happen to be procedurally driven today.
+# Files declaring a DPI import `pure` while giving it output arguments.  IEEE
+# 1800 35.5.2: a pure import may have no output or inout arguments and must
+# return a value -- its result must depend only on its inputs.  slang enforces
+# it; Verilator does not.
+#
+# This one is NOT mere conformance.  `pure` licenses a tool to common-
+# subexpression-eliminate or delete calls whose result is unused, so a
+# conforming optimiser may legally drop the writes to those outputs.  The fix is
+# to drop `pure`, which costs only the optimisation.
+PURE_DPI_FILES = [
+    "hw/ip/minion/vpu/rtl/txfma_top_fake.sv",
+]
+
 UNTYPED_OUTPUT_FILES = [
     "hw/ip/minion/vpu/rtl/txfmactl_top.sv",
     "hw/ip/minion/vpu/rtl/txfmaexp_top.sv",
@@ -187,6 +200,52 @@ def type_outputs(rel, coreet_root):
     return src, out
 
 
+def unpure_dpi(rel, coreet_root):
+    """Drop `pure` from a DPI import that declares output arguments."""
+    src = os.path.join(coreet_root, rel)
+    if not os.path.isfile(src):
+        raise SystemExit(f"FATAL: missing source {src}")
+    with open(src) as f:
+        original = f.readlines()
+
+    pat = re.compile(r'^(\s*import\s+"DPI-C"\s+)pure\s+(.*)$')
+    lines, touched = [], []
+    for i, l in enumerate(original):
+        m = pat.match(l.rstrip("\n"))
+        if m:
+            lines.append(f"{m.group(1)}{m.group(2)}\n")
+            touched.append(i + 1)
+        else:
+            lines.append(l)
+
+    if not touched:
+        raise SystemExit(f"FATAL: {rel} has no `pure` DPI import to relax -- "
+                         f"upstream changed; re-check scripts/coreet_patch_srcs.py")
+    # The ONLY difference may be the removal of the `pure` keyword.
+    if len(lines) != len(original):
+        raise SystemExit(f"FATAL: {rel} line count changed -- refusing to emit")
+    for a, b in zip(original, lines):
+        if a != b and a.split() != [t for t in b.split()] + []:
+            if [t for t in a.split() if t != "pure"] != b.split():
+                raise SystemExit(f"FATAL: {rel} patch removed more than `pure`:\n"
+                                 f"  before: {a.rstrip()}\n  after : {b.rstrip()}")
+
+    out = os.path.join(OUTDIR, os.path.basename(rel))
+    os.makedirs(OUTDIR, exist_ok=True)
+    hdr = ("// DERIVED by scripts/coreet_patch_srcs.py -- do not edit.\n"
+           f"// source: {rel}\n"
+           f"// sha256(source): {hashlib.sha256(''.join(original).encode()).hexdigest()[:16]}\n"
+           f"// change: dropped `pure` from {len(touched)} DPI import(s) at line(s) "
+           f"{', '.join(str(t) for t in touched)}.\n"
+           "// reason: IEEE 1800 35.5.2 -- a `pure` import may have no output arguments.\n"
+           "//         Beyond conformance: `pure` lets a tool delete or CSE the call, so a\n"
+           "//         conforming optimiser may legally drop the writes to those outputs.\n")
+    with open(out, "w") as f:
+        f.write(hdr + "".join(lines))
+    print(f"{rel}\n  -> {out}\n     dropped `pure` from {len(touched)} DPI import(s)")
+    return src, out
+
+
 def main():
     coreet_root = os.environ.get("COREET_ROOT", "/soe/czeng14/projects/core-et")
     mapping = {}
@@ -195,6 +254,9 @@ def main():
         mapping[os.path.realpath(src)] = out
     for rel in UNTYPED_OUTPUT_FILES:
         src, out = type_outputs(rel, coreet_root)
+        mapping[os.path.realpath(src)] = out
+    for rel in PURE_DPI_FILES:
+        src, out = unpure_dpi(rel, coreet_root)
         mapping[os.path.realpath(src)] = out
     mf = os.path.join(OUTDIR, "map.tsv")
     with open(mf, "w") as f:

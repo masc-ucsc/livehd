@@ -67,6 +67,15 @@ die() { echo "FATAL: $*" >&2; exit 2; }
 # ---------------------------------------------------------------------------
 # 0. filelist
 # ---------------------------------------------------------------------------
+# Derive the slang-clean copies of the CORE-ET files slang rejects, and refresh
+# them every run.  They are GENERATED artifacts keyed to a source hash, so a
+# stale copy silently models the wrong RTL; regenerating is cheap and the script
+# hard-fails if upstream no longer needs a patch it is told to make.
+# coreet_filelist.sh reads the map it writes and records each substitution, with
+# the change it made, in the .f header.
+COREET_ROOT="$COREET_ROOT" python3 "$SCRIPT_DIR/coreet_patch_srcs.py" \
+  > "$LOG_DIR/patch_srcs.log" 2>&1 || { cat "$LOG_DIR/patch_srcs.log" >&2; exit 2; }
+
 COREET_ROOT="$COREET_ROOT" "$SCRIPT_DIR/coreet_filelist.sh" "$TOP" "$FILELIST" \
   > "$LOG_DIR/filelist.log" 2>&1 || { cat "$LOG_DIR/filelist.log" >&2; exit 2; }
 n_src="$(grep -c '\.sv$' "$FILELIST" || true)"
