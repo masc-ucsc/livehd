@@ -540,6 +540,47 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       } else if (split_dbg) {
         std::print("split[dbg]:   sra amount NON-CONST (dynamic shift)\n");
       }
+    } else if (op == Ntype_op::Sext) {
+      // Op_Sext(a, n): bit i is a[i] for i < n, and a[n-1] (the replicated sign)
+      // for i >= n -- the bit-level reading of `rsextV`, which takes a's low n
+      // bits and sign-extends them (ResidualSemantics.lean:110).
+      //
+      // So a slice lying ENTIRELY BELOW the sign position is exactly the same
+      // slice of the operand, and the rule is a pass-through, the same shape as
+      // SRA's.  Two guards keep that exact:
+      //
+      //   hi <= n      -- above the sign position the bits are a[n-1] replicated,
+      //                   not a[i], and reconstructing that needs a different
+      //                   construction (broadcast the sign bit).  Refuse instead.
+      //   hi <= bits(a) -- if the slice reached past the operand's own width the
+      //                   two sides would disagree on the fill: Sext zero-fills
+      //                   there (`mk_bv n (bv_uint a)` is unsigned), while
+      //                   resolving the slice against a SIGNED operand pin would
+      //                   sign-replicate.  Staying inside the operand's width
+      //                   makes the question moot.
+      //
+      // Measured need: on txfma_f3 every refusal was amt=33 with hi <= 33, i.e.
+      // all pass-through; Sext was the DEEPEST refusal (depth 6) and the Mux /
+      // Get_mask / And refusals above it were cascades of this one.
+      auto kd = drv_at(m, 1);
+      if (!kd.is_invalid() && gu::is_const_pin(kd)) {
+        auto kc = gu::hydrate_const(kd);
+        if (!kc.has_unknowns() && !kc.is_negative() && kc.is_just_i64()) {
+          const int  n   = static_cast<int>(kc.to_just_i64());
+          const auto src = drv_at(m, 0);
+          const int  aw  = src.is_invalid() ? 0 : static_cast<int>(gu::bits_of(src));
+          if (hi <= n && hi <= aw) {
+            res = self(self, src, lo, hi, depth + 1);
+          } else if (split_dbg) {
+            std::print("split[dbg]:   sext slice [{},{}) not below both sign pos {} and operand width {}\n", lo, hi, n,
+                       aw);
+          }
+        } else if (split_dbg) {
+          std::print("split[dbg]:   sext amount const but unknowns/neg/wide\n");
+        }
+      } else if (split_dbg) {
+        std::print("split[dbg]:   sext amount NON-CONST\n");
+      }
     } else if (op == Ntype_op::Mux) {
       // Distribute the slice through the arms: Get_mask(mux(s, xs...), m) ==
       // mux(s, Get_mask(x, m)...) -- the mux picks one arm's bit pattern, so
@@ -709,7 +750,20 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, bool& cap_out
       }
     }
     if (split_dbg && res.is_invalid()) {
-      std::print("split[dbg]: unresolved {} [{},{}) depth={}\n", op_name(op), lo, hi, depth);
+      // For Sext also report the sign position, so a reader can see whether the
+      // slice is a pure pass-through (hi <= amt) or crosses into the replicated
+      // sign bits -- the two need different rules.
+      int sext_amt = -1;
+      if (op == Ntype_op::Sext) {
+        auto kd = drv_at(m, 1);
+        if (!kd.is_invalid() && gu::is_const_pin(kd)) {
+          auto kc = gu::hydrate_const(kd);
+          if (!kc.has_unknowns() && kc.is_just_i64()) {
+            sext_amt = static_cast<int>(kc.to_just_i64());
+          }
+        }
+      }
+      std::print("split[dbg]: unresolved {} [{},{}) depth={} amt={}\n", op_name(op), lo, hi, depth, sext_amt);
     }
     if (!res.is_invalid() || cap_hit == cap_before) {
       // memoize successes always; memoize failures only when NOT tainted by a
@@ -876,7 +930,9 @@ int split_packed_selfref_wires(hhds::Graph* g) {
   int           total       = 0;
   int           unresolved  = 0;
   bool          cap_hit     = false;
+  int           rounds_run  = 0;
   for (int round = 0; round < max_rounds; ++round) {
+    ++rounds_run;
     const int n = split_selfref_pass(g, unresolved, cap_hit);
     total += n;
     if (n == 0) {
@@ -887,14 +943,23 @@ int split_packed_selfref_wires(hhds::Graph* g) {
   // cgen / sim scheduling reject the graph, and the caller (cprop) discards this
   // count. `unresolved` is the final pass's remaining on-cycle reads.
   if (unresolved > 0) {
+    // `rounds_run`, NOT `max_rounds`.  This reported the literal cap for as long
+    // as it existed, so the common case -- the FIRST pass rewrote nothing, so
+    // the loop broke immediately -- printed "0 rewired over 16 pass(es)" and
+    // read as sixteen exhausting attempts.  It was one.  That distinction is the
+    // whole diagnosis: nothing rewired on pass 1 means every reader was refused
+    // up front, which is a missing rule or a genuine self-dependency, not a
+    // budget that ran down.
     livehd::diag::warn("split-selfref", "unresolved-cycle", "internal")
-        .msg("{} on-cycle bit-field read(s) could not be dissolved ({} rewired over {} pass(es)); a "
+        .msg("{} on-cycle bit-field read(s) could not be dissolved ({} rewired over {} pass(es), cap {}); a "
              "word-level combinational cycle may remain",
              unresolved,
              total,
+             rounds_run,
              max_rounds)
         .hint(cap_hit ? "node-creation budget exhausted on a read -- raise the split budget if this is not a real loop"
-                      : "likely a genuine bit-level self-dependency (e.g. w = w + 1)")
+                      : "likely a genuine bit-level self-dependency (e.g. w = w + 1), or a reader shape with no "
+                        "descent rule -- run with LIVEHD_SIM_SPLIT_DEBUG=1 to see which")
         .emit();
   }
   return total;

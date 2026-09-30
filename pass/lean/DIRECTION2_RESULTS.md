@@ -832,6 +832,66 @@ what a genuine tool bug reports.  Since the sweeps classify on that JSON, "this
 design is outside the model, here is why" and "pass.lean fell over" were the same
 row.  Now: `exit_code 7`, `class "unsupported"`, `errors 1`.
 
+### The eleven cycles, diagnosed: none is dissolvable, and the budget was never the limit
+
+Step 1 turned nine hangs into named refusals; step 2 added two more. All eleven
+were then diagnosed with `LIVEHD_SIM_SPLIT_DEBUG=1`. Three of the plan's
+premises did not survive contact:
+
+| premise | measurement |
+|---|---|
+| "raise `per_reader_cap`" | **ruled out.** `cap_hit` is FALSE on every design; the node-creation budget is never reached |
+| "add a `Set_mask` descent rule" | **wrong op.** `Set_mask` appears nowhere. **`Sext`** was the missing rule |
+| "up to 4 modules" | right count, and exactly `txfma_f0/f2/f3/f5` -- but none of them is fixable |
+
+**First, the warning was lying.** `split_packed_selfref_wires` printed the
+literal `max_rounds` as its round count, so "0 rewired over 16 pass(es)" read as
+sixteen exhausting attempts when it was **one** -- the first pass rewired
+nothing, so the loop broke immediately. That distinction is the whole diagnosis:
+nothing rewired on pass 1 means every reader was refused up front, which is a
+missing rule or a genuine self-dependency, never a budget running down. It now
+reports rounds actually run, and points at the debug knob.
+
+**The population splits in two, and neither half is a split_selfref bug.**
+
+*Four designs where it engages and genuinely cannot dissolve the cycle.*
+`txfma_f0` (15 on-stack self-dependencies cascading into 90 unresolved reads) and
+`txfma_f5` (4 -> 12) hit the `on_stack` bail: the slice's own value is on the
+resolution path. `txfma_f2` refuses 2 `Sum` reads because the operand footprints
+are not provably disjoint -- a real adder on the cycle, the textbook `w = w + 1`.
+
+`txfma_f3` was the interesting one, and the only true tooling gap: 0 on-stack, 0
+cap refusals, and `Sext` -- which had **no descent rule at all** -- was the
+deepest refusal at depth 6, with the 16 `Mux` / 11 `Get_mask` / 4 `And` refusals
+above it all cascades of that one. Every refusal was `amt=33` with `hi <= 33`,
+i.e. entirely below the sign position, so the rule needed is a pure pass-through
+(bit `i` of `Sext(a, n)` is `a[i]` for `i < n`), guarded to stay below both the
+sign position and the operand's own width so the zero-fill-vs-sign-fill question
+cannot arise. Adding it moved the deepest refusal from 6 to 7 and turned
+on-stack hits from **0 to 8**: the missing rule had been *masking* a genuine
+self-dependency. The rule is a real improvement and it unblocks nothing -- it
+converts "no rule" into a proof that there is nothing to dissolve.
+
+*Seven designs where it never engages at all.* `txfma_top`, `txfmaexp_top`,
+`txfma_e5`, `txfma_f6`, `intpipe_csr_file`, `minion_dcache_top`, `txfmafrac_top`
+emit no unresolved-read warning. Reader selection requires a `Get_mask`/`And`
+bit-field reader ON the cycle; these cycles run mux->mux or shl->sext and have
+none. split_selfref dissolves bit-field packing, and this is not that. It is the
+wrong tool, not a failing one.
+
+**Open, and not to be assumed either way:** for those seven, whether the loop is
+real in the RTL or an artifact of tolg/cprop lowering has NOT been established.
+What is established is that `pass.single_edge` does not introduce it -- the cycle
+is present in the raw graph, checked by running `pass.lean` directly on
+`lgdb_raw`.
+
+**Regression.** All ten `single_edge` / latch-contract / clock-cell / LEC tests
+pass, and for the first time this session with **iverilog present**, so their
+independent differential legs actually ran rather than skipping -- including the
+negative controls that prove the harness discriminates. All 14 committed Phase-B
+certificates re-emit **byte-identical**, so the Sext rule changes nothing on a
+design that already worked.
+
 ### Porting to the other branches
 
 `DesignCert.lean` was byte-identical across `livehd-new`, `d3`, `d4` and
