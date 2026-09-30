@@ -27,7 +27,13 @@ classify_one() {
   local out="$OUTDIR/$m" log="$OUTDIR/$m/logs"
   local stage=filelist verdict=FAIL nodes= flops= maxw= slots=1 detail=
 
-  if ! COREET_TOP="$m" RUN_LEC_GATE=false STOP_AFTER=lean \
+  # State the mode; do not inherit it.  The stored 2026-08 census rode
+  # run_coreet_module_lean.sh's then-default of `legacy` without recording that,
+  # so its ROM and fast-bridge rows describe the LEGACY path while this branch's
+  # results are verified_compiler -- two different first failures for the same
+  # module, with nothing in the TSV to tell them apart.
+  if ! COREET_TOP="$m" LEAN_MODE="${LEAN_MODE:-verified_compiler}" \
+       RUN_LEC_GATE=false STOP_AFTER=lean \
        "$ROOT/scripts/run_coreet_module_lean.sh" > "$OUTDIR/$m.sweep.log" 2>&1; then
     # Where did it stop, and why?  A named diagnostic beats an exit code.
     if   [[ ! -s "$log/filelist.log" && ! -r "$log/lhd_compile.log" ]]; then

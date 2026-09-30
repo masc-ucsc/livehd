@@ -695,6 +695,26 @@ design is stopped upstream; the two-clock fixture's certificate is the only one.
 
 ### Every gated CORE-ET module, and where its cause lives
 
+**Every row is `formal.lean.mode=verified_compiler`.** The mode is not a detail:
+the same module gives a different FIRST failure in each. `txfma_top`, measured
+both ways on the same binary --
+
+    LEAN_MODE=legacy             -> memory node n_180048 (`init` ROM refusal)
+    LEAN_MODE=verified_compiler  -> COMBINATIONAL CYCLE n_179896 -> n_179900
+
+-- because a ROM with driven `init` is refused outright on the legacy path
+(`pass_lean.cpp:530`: legacy memory state is an unconstrained function, so
+accepting contents there would prove a theorem about an arbitrary table) and
+supported under verified_compiler. The stored 2026-08 census rode
+`run_coreet_module_lean.sh`'s then-default of `legacy` without recording it, so
+its ROM and fast-bridge rows describe the legacy path while everything here is
+verified_compiler. Both runners now state the mode rather than inheriting one.
+
+(This does not undo the staleness finding: ROM `init` support landed 2026-09-01,
+twelve days AFTER the census, so those modules were refused in both modes at the
+time it was taken. But the mode is why a bare re-run reproduced the census
+rather than this table, and that trap is now closed.)
+
 `GATED_MODULES.tsv` is the per-module list, re-derived with today's binary
 rather than read off the stored census — which is dated 2026-08-20 and turned
 out to be wrong about more than half of what it reports.  Of the 40 modules the

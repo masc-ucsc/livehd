@@ -38,7 +38,17 @@ MAX_WIDTH="${LEAN_MAX_WIDTH:-1048576}"
 # It overrides emit_cert/emit_fast_bridge/cert_wf inside the pass, so the three
 # knobs above become inert -- passing them anyway keeps this script's interface
 # unchanged for the legacy mode.
-LEAN_MODE="${LEAN_MODE:-legacy}"
+# THE MODE CHANGES THE ANSWER, so default to this branch's one rather than
+# letting a bare invocation silently measure the other.  Example: a ROM with
+# driven `init` is refused outright on the LEGACY path (pass_lean.cpp:530 --
+# legacy memory state is an unconstrained function, so accepting contents there
+# would prove a theorem about an arbitrary table) and supported under
+# verified_compiler.  Run the same module in the two modes and you get two
+# different first failures, which is how the 2026-08 census came to record ROM
+# refusals for modules that emit fine here.  Same default as the D2 sibling
+# runner, scripts/run_dino_lgraph_lean.sh; set LEAN_MODE=legacy explicitly when
+# you mean to compare against it.
+LEAN_MODE="${LEAN_MODE:-verified_compiler}"
 LEAN_JOBS="${LEAN_JOBS:-8}"
 LEAN_CPUSET="${LEAN_CPUSET:-0-7}"
 # emit | single_edge | lec | lean  -- stop the pipeline early (census sweeps use `emit`)

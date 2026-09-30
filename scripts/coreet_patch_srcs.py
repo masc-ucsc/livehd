@@ -1,23 +1,40 @@
 #!/usr/bin/env python3
-"""Derive slang-clean copies of the two CORE-ET files that use an identifier
-before declaring it.
+"""Derive slang-clean copies of the CORE-ET sources that slang rejects.
 
-WHY THIS EXISTS.  SystemVerilog requires a declaration to precede its use.  Two
-CORE-ET files violate that; Verilator (the repo's DV flow) tolerates it, slang
-does not.  Between them they block 44 of the 122 minion modules from the LEC /
-Lean pipeline.  These are ORIGINAL-REPO-CLASS defects and should be fixed in
-core-et; until then we compile a derived copy, exactly as
+WHY THIS EXISTS.  slang enforces parts of IEEE 1800 that Verilator -- CORE-ET's
+own DV flow -- does not, so these defects were invisible to the project until
+this pipeline compiled it.  Each is an ORIGINAL-REPO-CLASS defect and should be
+fixed upstream; until then we compile a derived copy, exactly as
 scripts/run_cva6_alu_lean.sh derives alu_concrete.sv from upstream alu.sv.
 
-WHAT THE PATCH IS.  A pure MOVE of declaration lines to just above their first
-use.  Nothing is added, removed or reworded -- asserted below by comparing the
-multiset of lines before and after.  A silent no-op here would produce a
-degenerate model that still compiles, so every step hard-fails instead.
+THREE TRANSFORMATIONS, over five files.  Every one is asserted to be the minimal
+change it claims: a silent no-op would produce a degenerate model that still
+compiles, so every step hard-fails instead.
 
-  1. hw/ip/minion/vpu/rtl/vpu_defs_pkg.sv
-       TXFMA_EXP_FRAC_OFFSET   used ~:875, declared ~:892
-  2. hw/ip/tech_generic/prim_mul_div/rtl/intpipe_mul_div_ctl.sv
-       start_mul_2p / start_div_2p   used ~:114/:123, declared ~:139/:140
+  1. DECLARATION MOVEMENT (PATCHES) -- an identifier used before it is declared.
+     A pure reorder, checked by comparing the multiset of lines before and after.
+       hw/ip/minion/vpu/rtl/vpu_defs_pkg.sv                     TXFMA_EXP_FRAC_OFFSET
+       hw/ip/tech_generic/prim_mul_div/rtl/intpipe_mul_div_ctl.sv
+                                                   start_mul_2p / start_div_2p
+
+  2. OUTPUT TYPING (UNTYPED_OUTPUT_FILES) -- an ANSI `output` with no data type
+     defaults to a NET, and a net may not be assigned procedurally.  Adding
+     `logic` is the lowRISC spelling and is legal for both continuous and
+     procedural drivers, so it is applied to every untyped output in the file
+     rather than only those procedurally driven today.  Checked line-count-stable
+     and token-exact.
+       hw/ip/minion/vpu/rtl/txfmactl_top.sv     (156 ports; a leaf of five other
+                                                 tops, so its error gated six)
+       hw/ip/minion/vpu/rtl/txfmaexp_top.sv     (13 ports)
+
+  3. DPI `pure` REMOVAL (PURE_DPI_FILES) -- IEEE 1800 35.5.2: a pure import may
+     have no output arguments.  Not mere conformance: `pure` lets a tool CSE or
+     delete the call, so a conforming optimiser may legally drop the writes.
+       hw/ip/minion/vpu/rtl/txfma_top_fake.sv
+
+Each derived file states its own change in a `// change:` header line, and
+scripts/coreet_filelist.sh quotes that line into the .f header -- so no result
+silently claims to be about the unpatched source.
 """
 import os, re, sys, hashlib
 
