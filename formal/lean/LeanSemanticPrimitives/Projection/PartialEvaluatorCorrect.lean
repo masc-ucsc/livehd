@@ -1117,6 +1117,22 @@ theorem PValOK_Scoped {ρr : Env} : ∀ {pv : PVal} {v : Val},
       obtain ⟨_, _, _, ha, hb⟩ := h
       exact ⟨PValOK_Scoped ha, PValOK_Scoped hb⟩
 
+/-- The converse, and the half of the discard guard that `PRes.total` does NOT
+supply: a scoped partial value DENOTES something.  Computation-freeness says
+nothing may be lost by not running it; this says its references actually resolve.
+Neither implies the other, and the soundness direction needs both. -/
+theorem PValOK_of_Scoped {ρ : Env} : ∀ {pv : PVal},
+    PVal.Scoped ρ.length pv → ∃ v, PValOK ρ pv v
+  | .stat w,   _ => ⟨w, rfl⟩
+  | .dyn k,    h => by
+      have hk : k < ρ.length := h
+      exact ⟨ρ[k], List.getElem?_eq_some_iff.mpr ⟨hk, rfl⟩⟩
+  | .cons a b, h => by
+      obtain ⟨ha, hb⟩ := h
+      obtain ⟨x, hx⟩ := PValOK_of_Scoped (pv := a) ha
+      obtain ⟨y, hy⟩ := PValOK_of_Scoped (pv := b) hb
+      exact ⟨.cons x y, x, y, rfl, hx, hy⟩
+
 /-- …and therefore a compatible environment is a scoped one, which is how the
 specializer obtains the hypothesis it needs at the top of every walk. -/
 theorem Compat_Scoped {ρr Δ env ρs} (h : Compat ρr Δ env ρs) :
@@ -2543,6 +2559,16 @@ theorem EvalLetsAt_getElem {P : Program} {m : Nat} :
           have := EvalLetsAt_getElem (bs := es) (i + 1) ht
           simpa [Nat.add_comm, Nat.add_left_comm, Nat.add_assoc] using this
 
+theorem EvalLetsAt_length {P : Program} {m : Nat} : ∀ {bs : List Term} {ρ ρ' : Env},
+    EvalLetsAt m P ρ bs ρ' → ρ'.length = ρ.length + bs.length
+  | [],      _, _, h => by cases h; simp
+  | _ :: es, _, _, h => by
+      cases h with
+      | cons _ ht =>
+          have h2 := EvalLetsAt_length (bs := es) ht
+          simp only [List.length_cons] at h2 ⊢
+          omega
+
 theorem PValOK_functional {ρr : Env} : ∀ {pv : PVal} {u v : Val},
     PValOK ρr pv u → PValOK ρr pv v → u = v
   | .stat _,   _, _, hu, hv => hu.symm.trans hv
@@ -2946,6 +2972,100 @@ theorem mixUArgs_sound {A Pr reqs n mr} (hsok : SOK A Pr reqs n mr) :
               simp only [PValOK]
               rw [← hlen]
               simpa using hg
+
+/-! ## One-pass argument transfer, backwards
+
+The soundness counterpart of `mixPArgs_ok`, in the same shape as the new
+`mixUArgs_sound`: the residual environment is whatever running the bindings
+reached, and neither the binding COUNT nor its structure appears.
+
+One thing is genuinely new here.  `mixUArgs` bound EVERY dynamic argument, so
+the residual evaluation handed the proof each argument's value.  `mixPArgs`
+binds only what carries computation, so for a prepared spine there is no
+evaluation to read a value off -- it has to be CONSTRUCTED, and that is exactly
+what scopedness buys (`PValOK_of_Scoped`).  This is the second half of the
+discard guard: `PRes.total` says nothing is lost by not running the leaf,
+scopedness says the leaf resolves.  Neither implies the other, which is why
+`mixPArgs_scoped` had to come first. -/
+
+theorem mixPArgs_sound {A Pr reqs n mr} (hsok : SOK A Pr reqs n mr) :
+    ∀ (ps : Div) (ts : List ATerm) (Δ : Div) (env : PEnv) (bs : List Term)
+      (env' : PEnv) (rq : List SpecRequest) (ρr ρs ρ1 : Env),
+      Compat ρr Δ env ρs →
+      mixPArgs n A (indexOfReq reqs) Δ env ps ts = .ok (bs, env', rq) →
+      EvalLetsAt mr Pr ρr bs ρ1 →
+      ∃ vs : List Val,
+        Compat ρ1 ps env' vs ∧
+        EvalList (eraseProgram A) ρs (eraseList ts) vs ∧
+        vs.length = ps.length := by
+  intro ps
+  induction ps with
+  | nil =>
+      intro ts Δ env bs env' rq ρr ρs ρ1 _ hmix hl
+      cases ts with
+      | nil =>
+          simp only [mixPArgs] at hmix
+          cases hmix
+          cases hl
+          exact ⟨[], .nil, .nil, rfl⟩
+      | cons _ _ => simp [mixPArgs] at hmix
+  | cons b ps' ih =>
+      intro ts Δ env bs env' rq ρr ρs ρ1 hc hmix hl
+      cases ts with
+      | nil => cases b <;> simp [mixPArgs] at hmix
+      | cons t ts' =>
+        cases b with
+        | stat =>
+            simp only [mixPArgs] at hmix
+            cases hres : mixTerm n A (indexOfReq reqs) Δ env t with
+            | error z => simp [hres] at hmix
+            | ok pr =>
+              obtain ⟨r, rq₁⟩ := pr
+              have hr := hsok Δ env t r rq₁ ρr ρs hc hres
+              simp only [hres] at hmix
+              cases r with
+              | code _ => simp at hmix
+              | cons _ _ => simp at hmix
+              | lets _ _ => simp at hmix
+              | stat w =>
+                cases hrec : mixPArgs n A (indexOfReq reqs) Δ env ps' ts' with
+                | error z => simp [hrec] at hmix
+                | ok q =>
+                  obtain ⟨bs', env'', rq₂⟩ := q
+                  obtain ⟨vs, hcp, hel, hvl⟩ :=
+                    ih ts' Δ env bs' env'' rq₂ ρr ρs ρ1 hc hrec
+                      (by simp only [hrec] at hmix; cases hmix; exact hl)
+                  simp only [hrec] at hmix
+                  cases hmix
+                  exact ⟨w :: vs, hcp.stat, .cons (hr.statEq w rfl) hel, by simp [hvl]⟩
+        | dyn =>
+            simp only [mixPArgs] at hmix
+            cases hres : mixTerm n A (indexOfReq reqs) Δ env t with
+            | error z => simp [hres] at hmix
+            | ok pr =>
+              obtain ⟨r, rq₁⟩ := pr
+              have hr := hsok Δ env t r rq₁ ρr ρs hc hres
+              simp only [hres] at hmix
+              cases hrec : mixPArgs n A (indexOfReq reqs) Δ
+                  (env.shiftBy (prepare r).binds.length) ps' ts' with
+              | error z => simp [hrec] at hmix
+              | ok q =>
+                obtain ⟨bs', env'', rq₂⟩ := q
+                simp only [hrec] at hmix
+                cases hmix
+                obtain ⟨ρp, hl1, hl2⟩ := EvalLetsAt_split (prepare r).binds hl
+                have hrsc : PRes.Scoped ρr.length r :=
+                  mixTerm_scoped n A (indexOfReq reqs) Δ env t r rq₁ ρr.length
+                    (Compat_Scoped hc) hres
+                obtain ⟨_, hvsc⟩ := prepare_scoped hrsc
+                have hplen : ρp.length = ρr.length + (prepare r).binds.length :=
+                  EvalLetsAt_length hl1
+                obtain ⟨d, hd⟩ := PValOK_of_Scoped (ρ := ρp) (by rw [hplen]; exact hvsc)
+                obtain ⟨vs, hcp, hel, hvl⟩ :=
+                  ih ts' Δ (env.shiftBy (prepare r).binds.length) bs' env'' rq₂
+                     ρp ρs ρ1 (Compat_after_EvalLets (EvalLetsAt_toEvalLets hl1) hc) hrec hl2
+                refine ⟨d :: vs, ?_, .cons (hr ρp d hl1 hd) hel, by simp [hvl]⟩
+                exact .dyn (PValOK_EvalLets (EvalLetsAt_toEvalLets hl2) hd) hcp
 
 theorem allStatic_length : ∀ (rs : List PRes) (ws : List Val),
     allStatic rs = .ok ws → ws.length = rs.length
