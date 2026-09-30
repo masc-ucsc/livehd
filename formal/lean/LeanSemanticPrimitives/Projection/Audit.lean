@@ -126,5 +126,9 @@ namespace Projection
 #print axioms prepare_peel
 #print axioms PValOK_of_Scoped
 #print axioms mixPArgs_sound
+#print axioms peelHd_ok
+#print axioms peelTl_ok
+#print axioms peelIsNil_ok
+#print axioms primStruct_ok
 
 end Projection

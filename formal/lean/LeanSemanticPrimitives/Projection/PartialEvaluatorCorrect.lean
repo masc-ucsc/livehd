@@ -1363,6 +1363,221 @@ theorem PResOK_toCode : ∀ {Pr ρr r v}, PResOK Pr ρr r v → Eval Pr ρr r.to
       obtain ⟨ρ', hl, hr⟩ := h
       exact wrapLets_eval bs ρr ρ' (PRes.toCode r) v hl (PResOK_toCode hr)
 
+/-! #### Structural answers, forwards
+
+`hd`/`tl`/`isNil` answered from a spine `mix` already holds.  Forwards the
+source value is GIVEN, so the peel only has to agree with it; the guard on the
+discarded component is what the other direction needs, and it is not consulted
+here. -/
+
+theorem evalPrim_hd_inv : ∀ {u v : Val}, evalPrim .hd [u] = .ok v → ∃ y, u = .cons v y
+  | .cons _ _, _, h => by simp only [evalPrim] at h; cases h; exact ⟨_, rfl⟩
+  | .int _,  _, h => by simp only [evalPrim] at h; split at h <;> cases h
+  | .bool _, _, h => by simp only [evalPrim] at h; split at h <;> cases h
+  | .nil,    _, h => by simp only [evalPrim] at h; split at h <;> cases h
+  | .ctor _ _, _, h => by simp only [evalPrim] at h; split at h <;> cases h
+
+theorem evalPrim_tl_inv : ∀ {u v : Val}, evalPrim .tl [u] = .ok v → ∃ x, u = .cons x v
+  | .cons _ _, _, h => by simp only [evalPrim] at h; cases h; exact ⟨_, rfl⟩
+  | .int _,  _, h => by simp only [evalPrim] at h; split at h <;> cases h
+  | .bool _, _, h => by simp only [evalPrim] at h; split at h <;> cases h
+  | .nil,    _, h => by simp only [evalPrim] at h; split at h <;> cases h
+  | .ctor _ _, _, h => by simp only [evalPrim] at h; split at h <;> cases h
+
+theorem peelHd_ok {Pr} : ∀ {r r' : PRes} {ρr : Env} {x y : Val},
+    peelHd r = some r' → PResOK Pr ρr r (.cons x y) → PResOK Pr ρr r' x := by
+  intro r
+  induction r with
+  | stat w =>
+      intro r' ρr x y hp hok
+      cases w with
+      | cons a b =>
+          simp only [peelHd] at hp
+          cases hp
+          have he : Val.cons a b = Val.cons x y := hok
+          cases he
+          rfl
+      | int _ | bool _ | nil | ctor _ _ => simp [peelHd] at hp
+  | code c => intro r' ρr x y hp _; cases c <;> simp [peelHd] at hp
+  | cons a b _ _ =>
+      intro r' ρr x y hp hok
+      simp only [peelHd] at hp
+      split at hp
+      · cases hp
+        obtain ⟨_, _, he, ha, _⟩ := hok
+        cases he
+        exact ha
+      · simp at hp
+  | lets bs rr ih =>
+      intro r' ρr x y hp hok
+      simp only [peelHd, Option.map_eq_some_iff] at hp
+      obtain ⟨r'', hp'', hr'⟩ := hp
+      subst hr'
+      obtain ⟨ρ', hl, hrr⟩ := hok
+      exact ⟨ρ', hl, ih hp'' hrr⟩
+
+theorem peelTl_ok {Pr} : ∀ {r r' : PRes} {ρr : Env} {x y : Val},
+    peelTl r = some r' → PResOK Pr ρr r (.cons x y) → PResOK Pr ρr r' y := by
+  intro r
+  induction r with
+  | stat w =>
+      intro r' ρr x y hp hok
+      cases w with
+      | cons a b =>
+          simp only [peelTl] at hp
+          cases hp
+          have he : Val.cons a b = Val.cons x y := hok
+          cases he
+          rfl
+      | int _ | bool _ | nil | ctor _ _ => simp [peelTl] at hp
+  | code c => intro r' ρr x y hp _; cases c <;> simp [peelTl] at hp
+  | cons a b _ _ =>
+      intro r' ρr x y hp hok
+      simp only [peelTl] at hp
+      split at hp
+      · cases hp
+        obtain ⟨_, _, he, _, hb⟩ := hok
+        cases he
+        exact hb
+      · simp at hp
+  | lets bs rr ih =>
+      intro r' ρr x y hp hok
+      simp only [peelTl, Option.map_eq_some_iff] at hp
+      obtain ⟨r'', hp'', hr'⟩ := hp
+      subst hr'
+      obtain ⟨ρ', hl, hrr⟩ := hok
+      exact ⟨ρ', hl, ih hp'' hrr⟩
+
+theorem peelIsNil_ok {Pr} : ∀ {r r' : PRes} {ρr : Env} {u v : Val},
+    peelIsNil r = some r' → PResOK Pr ρr r u → evalPrim .isNil [u] = .ok v →
+    PResOK Pr ρr r' v := by
+  intro r
+  induction r with
+  | stat w =>
+      intro r' ρr u v hp hok hv
+      cases w with
+      | nil =>
+          simp only [peelIsNil] at hp
+          cases hp
+          have he : Val.nil = u := hok
+          cases he
+          simp only [evalPrim] at hv
+          cases hv
+          rfl
+      | cons a b =>
+          simp only [peelIsNil] at hp
+          cases hp
+          have he : Val.cons a b = u := hok
+          cases he
+          simp only [evalPrim] at hv
+          cases hv
+          rfl
+      | int _ | bool _ | ctor _ _ => simp [peelIsNil] at hp
+  | code c => intro r' ρr u v hp _ _; cases c <;> simp [peelIsNil] at hp
+  | cons a b _ _ =>
+      intro r' ρr u v hp hok hv
+      simp only [peelIsNil] at hp
+      split at hp
+      · cases hp
+        obtain ⟨x, y, he, _, _⟩ := hok
+        subst he
+        simp only [evalPrim] at hv
+        cases hv
+        rfl
+      · simp at hp
+  | lets bs rr ih =>
+      intro r' ρr u v hp hok hv
+      simp only [peelIsNil, Option.map_eq_some_iff] at hp
+      obtain ⟨r'', hp'', hr'⟩ := hp
+      subst hr'
+      obtain ⟨ρ', hl, hrr⟩ := hok
+      exact ⟨ρ', hl, ih hp'' hrr hv⟩
+
+/-- A structural answer agrees with the source primitive. -/
+theorem primStruct_ok {Pr : Program} {ρr : Env} {p : Prim} {rs : List PRes}
+    {vs : List Val} {r : PRes} {v : Val}
+    (hps : primStruct p rs = some r) (hrs : PResAll Pr ρr rs vs)
+    (hp : evalPrim p vs = .ok v) :
+    PResOK Pr ρr r v := by
+  cases p with
+  | addI | subI | mulI | divI | modI | ltI | leI | eqI | andB | orB | notB
+  | eqV | mkCtorP | ctorTagP | ctorFieldsP | bvMk | bvWidth | bvUint | bvBit
+  | bvAnd | bvOr | bvXor | bvNot | bvResize => simp [primStruct] at hps
+  | consP =>
+      cases rs with
+      | nil => simp [primStruct] at hps
+      | cons ra rest =>
+        cases rest with
+        | nil => simp [primStruct] at hps
+        | cons rb rest2 =>
+          cases rest2 with
+          | cons _ _ => simp [primStruct] at hps
+          | nil =>
+            cases hrs with
+            | cons hA ht =>
+              cases ht with
+              | cons hB hn =>
+                cases hn
+                simp only [evalPrim] at hp
+                cases hp
+                cases ra with
+                | stat a =>
+                  cases rb with
+                  | stat b =>
+                      -- both operands static: `consP` answers with a VALUE
+                      simp only [primStruct] at hps
+                      cases hps
+                      show Val.cons a b = _
+                      rw [(hA : a = _), (hB : b = _)]
+                  | code _ | cons _ _ | lets _ _ =>
+                      simp only [primStruct] at hps
+                      cases hps
+                      exact ⟨_, _, rfl, hA, hB⟩
+                | code _ | cons _ _ | lets _ _ =>
+                    simp only [primStruct] at hps
+                    cases hps
+                    exact ⟨_, _, rfl, hA, hB⟩
+  | hd =>
+      cases rs with
+      | nil => simp [primStruct] at hps
+      | cons r₀ rest =>
+        cases rest with
+        | cons _ _ => simp [primStruct] at hps
+        | nil =>
+          cases hrs with
+          | cons hA ht =>
+            cases ht
+            obtain ⟨y, hu⟩ := evalPrim_hd_inv hp
+            subst hu
+            simp only [primStruct] at hps
+            exact peelHd_ok hps hA
+  | tl =>
+      cases rs with
+      | nil => simp [primStruct] at hps
+      | cons r₀ rest =>
+        cases rest with
+        | cons _ _ => simp [primStruct] at hps
+        | nil =>
+          cases hrs with
+          | cons hA ht =>
+            cases ht
+            obtain ⟨x, hu⟩ := evalPrim_tl_inv hp
+            subst hu
+            simp only [primStruct] at hps
+            exact peelTl_ok hps hA
+  | isNil =>
+      cases rs with
+      | nil => simp [primStruct] at hps
+      | cons r₀ rest =>
+        cases rest with
+        | cons _ _ => simp [primStruct] at hps
+        | nil =>
+          cases hrs with
+          | cons hA ht =>
+            cases ht
+            simp only [primStruct] at hps
+            exact peelIsNil_ok hps hA hp
+
 theorem allStatic_forall₂ : ∀ (Pr : Program) (ρr : Env) (rs : List PRes)
     (vs ws : List Val), PResAll Pr ρr rs vs → allStatic rs = .ok ws → ws = vs
   | _,  _,  [],            [],      ws, _, hw => by simp [allStatic] at hw; simp [hw]
