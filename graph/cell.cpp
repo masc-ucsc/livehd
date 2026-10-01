@@ -230,7 +230,10 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
         case 7 : return "type";       // comptime x 1 (0:async, 1:sync: 2:array)
         case 8 : return "wensize";    // comptime x 1  -- number of Write Enable bits
         case 9 : return "size";       // comptime x 1
-        case 10: return "rdport";     // comptime x n_ports (1 rd, 0 wr)
+        case 10: return "rdport";     // comptime x n_ports: 0 wr, 1 async rd, 2 sync rd
+                                      // (see Ntype::Memory_rdport_*; widened from a
+                                      // boolean so read timing is per PORT, because
+                                      // the cell-global `type` cannot express a mix)
         case 11:
           return "init";  // comptime x 1 -- contents (entry 0 in the low `bits`, row-major); a reg array with a bound reset
                           // restores it via per-entry write ports (tolg). For a WHOLE-ARRAY cell (the `update` pin is

@@ -2563,7 +2563,10 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           collx = Dlop::from_pyrope(val);
         }
       }
-      auto rd_clke = cell->getParam(ID::RD_CLK_ENABLE).as_int();
+      // NOT used for `type` any more -- see the scalar/sentinel comment below.
+      // Kept only for the diagnostic, so a log can still show the raw mask.
+      const auto rd_clke_mask = cell->getParam(ID::RD_CLK_ENABLE).as_int();
+      (void)rd_clke_mask;
 
       // ---- ONE edge per memory ----------------------------------------------
       // The Memory cell carries a SINGLE global `posclk`; yosys keeps a bit per
@@ -2632,7 +2635,28 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         setup_sink_by_name(exit_node, "undef").connect_driver(create_const(*g, *collx));
       }
       setup_sink_by_name(exit_node, "posclk").connect_driver(create_const(*g, *Dlop::create_integer(wr_clkp)));
-      setup_sink_by_name(exit_node, "type").connect_driver(create_const(*g, *Dlop::create_integer(rd_clke)));
+      // `type` is a SCALAR (0 async / 1 sync / 2 array), never yosys's
+      // RD_CLK_ENABLE bitmask -- writing the mask here is what made a mixed
+      // memory import as `type=24`, and a two-port async+sync memory import as
+      // `type=2`, i.e. silently as a combinational array. A memory whose read
+      // ports DISAGREE has no scalar answer, so it carries the mixed sentinel
+      // and consumers read the per-port `rdport` pins, exactly as `posclk`
+      // already does for a mixed edge.
+      int mem_type = Ntype::Memory_type_async;
+      if (rdports > 0) {
+        const bool first = param_bit(ID::RD_CLK_ENABLE, 0);
+        bool       mixed = false;
+        for (int i = 1; i < rdports; ++i) {
+          if (param_bit(ID::RD_CLK_ENABLE, i) != first) {
+            mixed = true;
+            break;
+          }
+        }
+        mem_type = mixed  ? Ntype::Memory_type_mixed
+                   : first ? Ntype::Memory_type_sync
+                           : Ntype::Memory_type_async;
+      }
+      setup_sink_by_name(exit_node, "type").connect_driver(create_const(*g, *Dlop::create_integer(mem_type)));
       setup_sink_by_name(exit_node, "wensize").connect_driver(create_const(*g, *Dlop::create_integer(width)));
       setup_sink_by_name(exit_node, "size").connect_driver(create_const(*g, *Dlop::create_integer(depth)));
 
@@ -2682,8 +2706,17 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       }
       for (int i = 0; i < rdports; i++) {
         auto port_n = (wrports + i) * static_cast<int>(Ntype::Memory_port_stride);
+        // PER-PORT read timing. This is the authoritative record: the
+        // cell-global `type` cannot express a memory whose read ports differ,
+        // and collapsing yosys's RD_CLK_ENABLE bitmask into it produced
+        // nonsense (mask 0b10 = 2 aliases onto "combinational array"; five
+        // ports with the top two registered gives 24). Widened from the old
+        // boolean 1; every consumer that only asks "is this a read port"
+        // decides with `!is_known_false()` and is unaffected by the 2.
+        const int rd_timing = param_bit(ID::RD_CLK_ENABLE, i) ? Ntype::Memory_rdport_sync
+                                                              : Ntype::Memory_rdport_async;
         exit_node.create_sink_pin(static_cast<hhds::Port_id>(10 + port_n))
-            .connect_driver(create_const(*g, *Dlop::create_integer(1)));
+            .connect_driver(create_const(*g, *Dlop::create_integer(rd_timing)));
         exit_node.create_sink_pin(static_cast<hhds::Port_id>(4 + port_n))
             .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::RD_EN).extract(i, 1), false));
         exit_node.create_sink_pin(static_cast<hhds::Port_id>(0 + port_n))
