@@ -854,11 +854,20 @@ reports rounds actually run, and points at the debug knob.
 
 **The population splits in two, and neither half is a split_selfref bug.**
 
-*Four designs where it engages and genuinely cannot dissolve the cycle.*
-`txfma_f0` (15 on-stack self-dependencies cascading into 90 unresolved reads) and
-`txfma_f5` (4 -> 12) hit the `on_stack` bail: the slice's own value is on the
-resolution path. `txfma_f2` refuses 2 `Sum` reads because the operand footprints
-are not provably disjoint -- a real adder on the cycle, the textbook `w = w + 1`.
+*Four designs where the CURRENT resolver cannot dissolve the cycle.* `txfma_f0`
+(15 on-stack hits cascading into 90 unresolved reads) and `txfma_f5` (4 -> 12)
+hit the `on_stack` bail: the resolver re-encounters the same `(pin, lo, hi)`
+slice on its own resolution path. `txfma_f2` refuses 2 `Sum` reads because
+`footprint` could not PROVE the operand bit-ranges disjoint.
+
+**Read that precisely.** An `on_stack` hit establishes a self-dependency at
+bit-slice granularity *in the post-cprop LGraph* -- it says nothing about the
+source RTL, and nothing about whether a different resolver or a different
+lowering could break it. The `Sum` case is weaker still: `footprint` is an
+over-approximation that bails on any signed pin and past depth 8, so "not proven
+disjoint" is not "overlapping", and calling it a real adder on the cycle would be
+reading a resolver limit as a fact about the design. Both are recorded as
+**origin unestablished**.
 
 `txfma_f3` was the interesting one, and the only true tooling gap: 0 on-stack, 0
 cap refusals, and `Sext` -- which had **no descent rule at all** -- was the
@@ -872,18 +881,20 @@ on-stack hits from **0 to 8**: the missing rule had been *masking* a genuine
 self-dependency. The rule is a real improvement and it unblocks nothing -- it
 converts "no rule" into a proof that there is nothing to dissolve.
 
-*Seven designs where it never engages at all.* `txfma_top`, `txfmaexp_top`,
+*Seven designs where it never engages at all* (origin likewise unestablished). `txfma_top`, `txfmaexp_top`,
 `txfma_e5`, `txfma_f6`, `intpipe_csr_file`, `minion_dcache_top`, `txfmafrac_top`
 emit no unresolved-read warning. Reader selection requires a `Get_mask`/`And`
 bit-field reader ON the cycle; these cycles run mux->mux or shl->sext and have
 none. split_selfref dissolves bit-field packing, and this is not that. It is the
 wrong tool, not a failing one.
 
-**Open, and not to be assumed either way:** for those seven, whether the loop is
+**Open for all eleven, and not to be assumed either way:** whether each loop is
 real in the RTL or an artifact of tolg/cprop lowering has NOT been established.
-What is established is that `pass.single_edge` does not introduce it -- the cycle
-is present in the raw graph, checked by running `pass.lean` directly on
-`lgdb_raw`.
+The next step is provenance, not more resolver rules: compare the source RTL,
+yosys RTLIL SCCs, the raw LGraph and the post-cprop LGraph, and find the first
+stage at which the cycle appears. One thing IS established -- `pass.single_edge`
+does not introduce them, because running `pass.lean` directly on `lgdb_raw`
+reproduces the same cycle.
 
 **Regression.** All ten `single_edge` / latch-contract / clock-cell / LEC tests
 pass, and for the first time this session with **iverilog present**, so their
