@@ -1,0 +1,461 @@
+[
+  {
+    "top": "intpipe_alu",
+    "counts": {
+      "mixed_width": 30
+    },
+    "mixed_nodes": [
+      {
+        "node": 676,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          14240,
+          1000000286
+        ]
+      },
+      {
+        "node": 688,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          14260,
+          1000000469
+        ]
+      },
+      {
+        "node": 576,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          13828,
+          1000000556
+        ]
+      },
+      {
+        "node": 584,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          13844,
+          1000000638
+        ]
+      },
+      {
+        "node": 524,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          13660,
+          1000000725
+        ]
+      },
+      {
+        "node": 532,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          13676,
+          1000000807
+        ]
+      },
+      {
+        "node": 476,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          13528,
+          1000000894
+        ]
+      },
+      {
+        "node": 484,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          13544,
+          1000000976
+        ]
+      },
+      {
+        "node": 428,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          13388,
+          1000001063
+        ]
+      },
+      {
+        "node": 436,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          13404,
+          1000001145
+        ]
+      },
+      {
+        "node": 384,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          12016,
+          1000001232
+        ]
+      },
+      {
+        "node": 392,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          12032,
+          1000001314
+        ]
+      },
+      {
+        "node": 328,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          11112,
+          1000001401
+        ]
+      },
+      {
+        "node": 340,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          11152,
+          1000001483
+        ]
+      },
+      {
+        "node": 300,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          9772,
+          1000001570
+        ]
+      },
+      {
+        "node": 308,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          9788,
+          1000001652
+        ]
+      },
+      {
+        "node": 260,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          9408,
+          1000001739
+        ]
+      },
+      {
+        "node": 268,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          9424,
+          1000001821
+        ]
+      },
+      {
+        "node": 228,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          9332,
+          1000001908
+        ]
+      },
+      {
+        "node": 236,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          9348,
+          1000001990
+        ]
+      },
+      {
+        "node": 196,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          9216,
+          1000002077
+        ]
+      },
+      {
+        "node": 208,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          9264,
+          1000002159
+        ]
+      },
+      {
+        "node": 172,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          9164,
+          1000002246
+        ]
+      },
+      {
+        "node": 180,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          9180,
+          1000002328
+        ]
+      },
+      {
+        "node": 740,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          14376,
+          1000002415
+        ]
+      },
+      {
+        "node": 748,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          14392,
+          1000002497
+        ]
+      },
+      {
+        "node": 712,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          14320,
+          1000002584
+        ]
+      },
+      {
+        "node": 720,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          14336,
+          1000002666
+        ]
+      },
+      {
+        "node": 556,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          13752,
+          1000002753
+        ]
+      },
+      {
+        "node": 596,
+        "op": "LGraphOp.Op_SLT",
+        "widths": [
+          6,
+          7
+        ],
+        "deps": [
+          13872,
+          1000002835
+        ]
+      }
+    ]
+  },
+  {
+    "top": "cva6_alu_export",
+    "counts": {
+      "equal_width": 25
+    },
+    "mixed_nodes": []
+  },
+  {
+    "top": "debug_breakpoint",
+    "counts": {
+      "equal_width": 1
+    },
+    "mixed_nodes": []
+  },
+  {
+    "top": "intpipe_mask_scoreboard",
+    "counts": {
+      "equal_width": 8
+    },
+    "mixed_nodes": []
+  },
+  {
+    "top": "intpipe_rf",
+    "counts": {
+      "equal_width": 2
+    },
+    "mixed_nodes": []
+  },
+  {
+    "top": "minion_dcache_lru_array",
+    "counts": {
+      "equal_width": 1
+    },
+    "mixed_nodes": []
+  },
+  {
+    "top": "minion_dcache_miss_handler",
+    "counts": {
+      "equal_width": 2
+    },
+    "mixed_nodes": []
+  },
+  {
+    "top": "txfma_c2",
+    "counts": {
+      "equal_width": 7
+    },
+    "mixed_nodes": []
+  },
+  {
+    "top": "txfma_c3",
+    "counts": {
+      "equal_width": 3
+    },
+    "mixed_nodes": []
+  },
+  {
+    "top": "txfma_e2",
+    "counts": {
+      "equal_width": 2
+    },
+    "mixed_nodes": []
+  },
+  {
+    "top": "txfma_e6",
+    "counts": {
+      "equal_width": 4
+    },
+    "mixed_nodes": []
+  },
+  {
+    "top": "vpu_ml",
+    "counts": {
+      "equal_width": 22
+    },
+    "mixed_nodes": []
+  },
+  {
+    "top": "vpu_tensorfma",
+    "counts": {
+      "equal_width": 19
+    },
+    "mixed_nodes": []
+  },
+  {
+    "top": "vpu_tensorquant",
+    "counts": {
+      "equal_width": 3
+    },
+    "mixed_nodes": []
+  }
+]

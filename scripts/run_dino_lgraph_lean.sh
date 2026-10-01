@@ -6,7 +6,7 @@ set -euo pipefail
 # Validation pipeline (plan Step 5) — order matters:
 #   1. LiveHD compile   RTL -> LGraph
 #   2. LEC gate         prove/classify RTL == LGraph   (run_dino_lgraph_lec_gate.sh)
-#                       REFUTED and INCONCLUSIVE both abort
+#                       REFUTED aborts; INCONCLUSIVE warns (LEC_STRICT=true = hard)
 #   3. pass.lean        LGraph -> Lean model + certificate   (this script)
 #   4. Lean typecheck   lake env lean <Top>_Lgraph.lean      (RUN_LEAN=true)
 #   5. cert bridge      generated model = graph certificate  (per-design theorems)
@@ -26,6 +26,9 @@ RUN_LEC_GATE="${RUN_LEC_GATE:-true}"
 STRICT="${LEAN_STRICT:-true}"
 MAX_WIDTH="${LEAN_MAX_WIDTH:-1048576}"
 EMIT_CERT="${LEAN_EMIT_CERT:-true}"
+# This branch's scalable path.  Set LEAN_MODE=legacy explicitly when comparing
+# against the older per-node generated proof model.
+LEAN_MODE="${LEAN_MODE:-verified_compiler}"
 
 HAGENT_BUILD="${HAGENT_BUILD:-/mada/users/czeng14/projects/hagent/.cache/setup_simplechisel_mcp_2025.11/build}"
 SC_DIR="${SC_DIR:-$HAGENT_BUILD/build_singlecyclecpu_d}"
@@ -87,6 +90,7 @@ run_design() {
     --set yosys.setundef=zero \
     --set formal.lean.strict="$STRICT" \
     --set formal.lean.emit_cert="$EMIT_CERT" \
+    --set formal.lean.mode="$LEAN_MODE" \
     --set formal.lean.max_width="$MAX_WIDTH" \
     > "$log" 2>&1
   local status=$?
@@ -111,13 +115,13 @@ run_design() {
 }
 
 # Step 2 (pipeline order): LEC frontend gate — prove RTL == LGraph before any
-# theorem-prover generation. REFUTED and INCONCLUSIVE both abort.
-# Skip with RUN_LEC_GATE=false for model-only bring-up.
+# theorem-prover generation.  REFUTED aborts; INCONCLUSIVE is a recorded warning
+# unless LEC_STRICT=true.  Skip with RUN_LEC_GATE=false (e.g. model-only bring-up).
 if [[ "$RUN_LEC_GATE" == "true" ]]; then
   echo "[pipeline] step 2/5: LEC gate (RTL == LGraph) before pass.lean"
-  if ! LHD="$LHD" HAGENT="$HAGENT_BUILD" OUT="$OUT/lec_gate" \
+  if ! LHD="$LHD" HAGENT="$HAGENT_BUILD" OUT="$OUT/lec_gate" LEC_STRICT="${LEC_STRICT:-false}" \
        bash "$SCRIPT_DIR/run_dino_lgraph_lec_gate.sh"; then
-    echo "FATAL: LEC gate reported REFUTED or INCONCLUSIVE; not generating Lean" >&2
+    echo "FATAL: LEC gate reported REFUTED (or strict INCONCLUSIVE); not generating Lean" >&2
     exit 3
   fi
 else

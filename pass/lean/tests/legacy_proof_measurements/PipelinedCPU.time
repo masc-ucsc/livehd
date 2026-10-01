@@ -1,0 +1,23 @@
+	Command being timed: "lean -j 8 generated/legacy_refactor/dino_full_proofs/wf_bridge_fixed/PipelinedCPU/export/PipelinedCPU_Lgraph.lean"
+	User time (seconds): 2100.17
+	System time (seconds): 33.17
+	Percent of CPU this job got: 140%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 25:20.65
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 16470528
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 3897994
+	Voluntary context switches: 2533978
+	Involuntary context switches: 234465
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 56
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

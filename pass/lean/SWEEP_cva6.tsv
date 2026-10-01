@@ -1,0 +1,24 @@
+module	verdict	sources	nodes	flops	mems	wall_s	peak_rss_kb	axioms
+amo_buffer	PROVEN	166	186	7	0	12.98	6654840	1/1
+alu	PROVEN	429	436	0	0	13.76	6694668	1/1
+compressed_decoder	PROVEN	1913	2022	0	0	23.67	6940200	1/1
+controller	PROVEN	118	104	3	0	11.23	6646744	1/1
+csr_buffer	PROVEN	45	44	2	0	10.68	6636288	1/1
+aes	PROVEN	6	4	0	0	10.37	6629092	1/1
+cva6_shared_tlb	PROVEN	146	136	5	0	9.30	6654764	1/1
+cvxif_compressed_if_driver	PROVEN	48	53	0	0	10.01	6644716	1/1
+cvxif_fu	PROVEN	28	23	0	0	9.69	6638536	1/1
+cvxif_issue_register_commit_if_driver	PROVEN	40	38	0	0	9.77	6638588	1/1
+ariane_regfile	PROVEN	1034	1121	32	0	18.26	6799976	1/1
+instr_realign	PROVEN	122	143	3	0	12.40	6662196	1/1
+instr_scan	PROVEN	1230	1257	0	0	17.99	6836096	1/1
+lsu_bypass	PROVEN	359	361	31	0	14.03	6693292	1/1
+multiplier	PROVEN	2132	2329	6	0	25.84	7030240	1/1
+pmp_entry	PROVEN	264	297	0	0	8.11	6713004	1/1
+ras	PROVEN	57	54	4	0	8.71	6676000	1/1
+raw_checker	PROVEN	304	353	0	0	7.88	6720152	1/1
+btb	PROVEN	1784	1782	64	0	22.71	6909696	1/1
+serdiv	PROVEN	1082	1180	12	0	15.38	6851248	1/1
+store_buffer	PROVEN	1331	1387	62	0	16.47	6888816	1/1
+fpu_wrap	PROVEN	24034	27523	275	0	899.58	10847012	1/1
+cva6_tlb	NO_EMIT	timeout 1800s						timeout 1800s

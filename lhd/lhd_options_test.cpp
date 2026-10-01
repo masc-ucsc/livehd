@@ -80,9 +80,6 @@ TEST(LhdOptions, RetiredLabelsAreHiddenAndRejected) {
   for (const std::string key : {
            "compile.cgen.verbose",
            "formal.lean.normalize",
-           "formal.lean.cert_chunk_size",
-           "formal.lean.cert_chunk_limit",
-           "formal.lean.cert_wf_fallback",
            "pass.semdiff.alg",
            "pass.semdiff.verbose",
            "pass.color.compact",
@@ -143,6 +140,26 @@ TEST(LhdOptions, RetiredLabelsAreHiddenAndRejected) {
       EXPECT_NE(error.msg.find("no longer a public option"), std::string::npos) << error.msg;
       EXPECT_FALSE(error.hint.empty());
     }
+  }
+}
+
+// These controls are implemented by the refactored chunked-WF emitter.
+TEST(LhdOptions, LeanChunkControlsAreListedAndAccepted) {
+  const auto listed = lhd::list_set_options();
+  for (const auto& [key, value] : std::vector<std::pair<std::string, std::string>>{
+           { "formal.lean.cert_chunk_size",    "2"},
+           {"formal.lean.cert_chunk_limit",    "1"},
+           {"formal.lean.cert_wf_fallback", "fail"}
+  }) {
+    SCOPED_TRACE(key);
+    EXPECT_TRUE(std::any_of(listed.begin(), listed.end(), [&](const auto& option) { return option.name == key; }));
+    std::vector<std::string> args{"lhd", "compile", "unused.prp", "--set", key + "=" + value};
+    std::vector<char*>       argv;
+    for (auto& arg : args) {
+      argv.push_back(arg.data());
+    }
+    const auto opts = lhd::parse_args(static_cast<int>(argv.size()), argv.data());
+    EXPECT_NO_THROW(lhd::check_known_set_passes(opts));
   }
 }
 

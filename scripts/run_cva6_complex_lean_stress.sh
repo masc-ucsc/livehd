@@ -112,6 +112,7 @@ set +e
   --emit-dir lean:"$LEAN_DIR" \
   --set yosys.filelist_file="$FILELIST" \
   --set yosys.setundef=zero \
+  --set formal.lean.strict=true \
   --set formal.lean.emit_cert="$EMIT_CERT" \
   --set formal.lean.max_width=1048576 \
   -- \
