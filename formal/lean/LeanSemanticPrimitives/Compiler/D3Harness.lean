@@ -61,41 +61,106 @@ def rnd (a b : Nat) : Int :=
   let y := (x * 2246822519 + b * 668265263 + 374761393) % 4294967291
   Int.ofNat (x * 4294967296 + y)
 
-/-- Stimulus is minted at width 128 and `sourceValue` resizes it to each port's
-own width.  A port wider than 128 therefore gets zero in its high bits: real
-entropy, but not full-width entropy, and a bug that lives only above bit 128
-would not be caught here. -/
+/-- Each primary-input ordinal's declared width: the widest `SourceDesc` that
+reads it.
+
+An ordinal can be read by more than one source, and an async reset reads its
+ordinal as a 1-bit condition, so the stimulus has to cover the WIDEST claim on
+each ordinal or the high bits of a wide port are never driven. -/
+def inputWidths (D : DesignCert) : Array Nat :=
+  D.sources.foldl (fun acc s => match s with
+    | .input idx w                => acc.set! idx (max (acc[idx]!) w)
+    | .flopQAsync _ _ resetIn _ _ => acc.set! resetIn (max (acc[resetIn]!) 1)
+    | _                           => acc) (Array.replicate (numInputs D) 0)
+
+/-- 32 deterministic pseudo-random bits. -/
+def rnd32 (a b : Nat) : Nat := (rnd a b).toNat % 4294967296
+
+/-- A deterministic value whose bits vary across the WHOLE of `w`.
+
+Built from `ceil(w/32)` independent chunks, each mixed from a different `b`, so
+no chunk is a function of its neighbours and a difference confined to the top
+bits of a 512-bit port still shows up.  The previous harness minted everything
+at width 128, which `bv_resize` then zero-extended: every bit above 127 was
+constant zero on every stimulus, and a translation bug living there could not
+have been seen.  Width 0 is explicit -- `mk_bv 0 v` is always 0 and there is
+nothing to randomise. -/
+def bvRand (seed w : Nat) : BV :=
+  if w = 0 then mk_bv 0 0
+  else
+    let chunks := (w + 31) / 32
+    mk_bv w (Int.ofNat ((List.range chunks).foldl
+      (fun acc i => acc * 4294967296 + rnd32 seed (i + 1)) 0))
+
 def stimIn (D : DesignCert) (k : Nat) : RuntimeInput :=
-  Array.ofFn (n := numInputs D) (fun i => mk_bv 128 (rnd k i.val))
+  let ws := inputWidths D
+  Array.ofFn (n := ws.size) (fun i => bvRand (k * 7919 + i.val) (ws[i.val]!))
+
+/-- Memory images are sampled, never compared whole, so the addresses matter as
+much as the data.  The plan per memory: the lowest few, the TOP representable
+address, the high-bit address `2^(aw-1)`, and pseudo-random addresses drawn at
+the full address width.
+
+No cap on `aw`.  An earlier version clipped it to 24 and drew the random
+addresses modulo `2^24`, so for a 64-bit address space no address bit above 23
+was ever exercised -- the exact blindness this plan exists to remove.  Lean's
+`Nat` is arbitrary precision, so `2 ^ 64` is an ordinary numeral here and the
+clip bought nothing.
+
+Every address is `< 2 ^ aw` by construction: `top` is `2^aw - 1`, the high-bit
+address is at most `top` for `aw ≥ 1`, the lows are clipped to the space (an
+`aw = 0` memory has exactly ONE cell, and sampling 1..3 there would compare
+addresses the design cannot have), and the random draws are reduced modulo the
+size.  The count is bounded by 11 regardless of `aw`. -/
+def memAddrs (aw : Nat) : List Int :=
+  let size : Nat := 2 ^ aw
+  let top : Nat := size - 1
+  let lows : List Nat := List.range (min 4 size)
+  let highs : List Nat := if aw = 0 then [] else [top, 2 ^ (aw - 1), top - top / 3]
+  let rands : List Nat :=
+    if aw = 0 then [] else
+      (List.range 4).map fun i => ((bvRand (aw * 31 + i + 1) aw).value.toNat) % size
+  ((lows ++ highs ++ rands).eraseDups).map Int.ofNat
+
+/-- The address plan for every memory of a design, in memory order. -/
+def addrPlan (D : DesignCert) : Array (List Int) :=
+  D.memories.map (fun m => memAddrs m.aw)
 
 def stimSt (D : DesignCert) (k : Nat) : RuntimeState :=
-  { flops := Array.ofFn (n := D.flops.size) (fun i => mk_bv 128 (rnd (k + 977) i.val)),
+  { flops := Array.ofFn (n := D.flops.size)
+               (fun i => bvRand (k * 6151 + i.val + 977) ((D.flops[i.val]!).width)),
     mems  := Array.ofFn (n := D.memories.size)
-               (fun i x => mk_bv 64 (rnd (k + 131 + i.val) x.toNat)) }
+               (fun i x => bvRand (k * 3571 + i.val + 131 + x.toNat) ((D.memories[i.val]!).dw)) }
 
-/-- Structural agreement on everything that admits it, plus sampled reads for
-the function-valued memory images.
+/-- Structural agreement on everything that admits it, plus the sampled reads
+for the function-valued memory images.
 
 Sizes are compared FIRST and separately.  `Array.==` on arrays of different
 length is already false, but a size mismatch and a value mismatch are different
 defects — one is a reifier shape bug, the other a semantics bug — and a single
-boolean cannot tell the sweep which it found. -/
-def sameResult (a b : RuntimeResult) (addrs : Nat) : Bool :=
+boolean cannot tell the sweep which it found.
+
+`plan` is the per-memory address sample.  It is an argument rather than a
+constant so the mutation test and the diversity diagnostic can be given exactly
+the same boundary; a checker that samples addresses the mutator never touches
+would report rejections it did not earn. -/
+def sameResult (a b : RuntimeResult) (plan : Array (List Int)) : Bool :=
   a.outputs.size == b.outputs.size
   && a.nextState.flops.size == b.nextState.flops.size
   && a.nextState.mems.size == b.nextState.mems.size
   && a.outputs == b.outputs
   && a.nextState.flops == b.nextState.flops
   && (List.range a.nextState.mems.size).all (fun j =>
-       (List.range addrs).all (fun addr =>
-         (a.nextState.mems[j]!) (Int.ofNat addr) == (b.nextState.mems[j]!) (Int.ofNat addr)))
+       (plan[j]?.getD [0]).all (fun addr =>
+         (a.nextState.mems[j]!) addr == (b.nextState.mems[j]!) addr))
 
 /-- The reified definition against the interpreter, on `n` stimuli. -/
 def agree (D : DesignCert) (fast : RuntimeInput → RuntimeState → RuntimeResult)
-    (R : ResidualProgram) (n : Nat) (addrs : Nat := 16) : Bool :=
+    (R : ResidualProgram) (n : Nat) : Bool :=
+  let plan := addrPlan D
   (List.range n).all fun k =>
     sameResult (fast (stimIn D k) (stimSt D k))
-               (denoteResidual R (stimIn D k) (stimSt D k)) addrs
+               (denoteResidual R (stimIn D k) (stimSt D k)) plan
 
 /-- Force every observable.  Reading only `outputs.size` lets the compiler
 delete the whole chain — measured, and it reported a 20,000-iteration loop as
@@ -143,13 +208,13 @@ rejection would depend on the sampling window rather than on the checker.  The
 memory INDEX is supplied by the caller rather than fixed at 0, so the choice can
 be made from the design's descriptors -- a design whose memory 0 is zero-width
 and whose memory 1 is not would otherwise look unmutatable. -/
-def mutateMem (r : RuntimeResult) (idx addr : Nat) : Option RuntimeResult :=
+def mutateMem (r : RuntimeResult) (idx : Nat) (addr : Int) : Option RuntimeResult :=
   if idx ≥ r.nextState.mems.size then none
   else
     let f := r.nextState.mems[idx]!
-    if (f (Int.ofNat addr)).width = 0 then none
+    if (f addr).width = 0 then none
     else
-      let g : Int → BV := fun x => if x = Int.ofNat addr then bumpBV (f x) else f x
+      let g : Int → BV := fun x => if x = addr then bumpBV (f x) else f x
       some { r with nextState := { r.nextState with mems := r.nextState.mems.set! idx g } }
 
 /-- Per-design self-test of the CHECKER, deterministic and independent of
@@ -185,16 +250,22 @@ def firstWideMem (D : DesignCert) : Option Nat :=
   (List.range D.memories.size).findSome? fun j =>
     if (D.memories[j]!).dw > 0 then some j else none
 
-def checkerSelfTest (D : DesignCert) (R : ResidualProgram) (addrs : Nat := 16) : SelfTest :=
+def checkerSelfTest (D : DesignCert) (R : ResidualProgram) : SelfTest :=
+  let plan := addrPlan D
   let r := denoteResidual R (stimIn D 0) (stimSt D 0)
   let judge : Option RuntimeResult → String
     | none    => "na"
-    | some r' => if sameResult r' r addrs then "ACCEPTED" else "rejected"
+    | some r' => if sameResult r' r plan then "ACCEPTED" else "rejected"
   let memIdx := (firstWideMem D).getD 0
-  { base := sameResult r r addrs
+  -- Mutate at the MAXIMUM sampled address, not address 0 and not whichever
+  -- entry happens to be last (that is a random draw, not the top).  A checker
+  -- that only ever looks low would still reject a low mutation while being
+  -- blind to every high address it claims to cover.
+  let memAddr := (plan[memIdx]?.getD [0]).foldl max 0
+  { base := sameResult r r plan
     out  := judge (mutateOutput r)
     flop := judge (mutateFlop r)
-    mem  := judge (mutateMem r memIdx 0)
+    mem  := judge (mutateMem r memIdx memAddr)
     -- descriptor-derived, independent of the mutators above
     mutableOut  := D.outputs.any (fun o => o.width > 0)
     mutableFlop := D.flops.any (fun f => f.width > 0)
@@ -207,9 +278,9 @@ The diagnostic below must use EXACTLY this boundary.  Counting distinct outputs
 alone would call a design unresponsive when its outputs are constant but its
 flop next-state or its memory image varies with the stimulus — and that design's
 agreement row does carry differential evidence. -/
-def observable (r : RuntimeResult) (addrs : Nat) : Array BV :=
+def observable (r : RuntimeResult) (plan : Array (List Int)) : Array BV :=
   let memVals := ((List.range r.nextState.mems.size).map fun j =>
-    (List.range addrs).map fun a => (r.nextState.mems[j]!) (Int.ofNat a)).flatten
+    (plan[j]?.getD [0]).map fun a => (r.nextState.mems[j]!) a).flatten
   r.outputs ++ r.nextState.flops ++ memVals.toArray
 
 /-- Stimulus-diversity diagnostic: how many DISTINCT observable signatures the
@@ -221,8 +292,9 @@ differential evidence.  That is a property of the STIMULUS and the DESIGN, not
 of the checker — a sound checker still reports `agree=1` — which is why this is
 reported beside `checkerSelfTest` rather than instead of it. -/
 def distinctObservables (D : DesignCert) (f : RuntimeInput → RuntimeState → RuntimeResult)
-    (n : Nat) (addrs : Nat := 16) : Nat :=
-  let sigs := (List.range n).map fun k => observable (f (stimIn D k) (stimSt D k)) addrs
+    (n : Nat) : Nat :=
+  let plan := addrPlan D
+  let sigs := (List.range n).map fun k => observable (f (stimIn D k) (stimSt D k)) plan
   (sigs.foldl (fun acc s => if acc.contains s then acc else s :: acc) []).length
 
 /-- Print one gate line per claim, in the order the driver expects.  Each line

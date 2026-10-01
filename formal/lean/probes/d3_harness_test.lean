@@ -14,6 +14,12 @@ import LeanSemanticPrimitives.Compiler.D3Harness
 open Compiler
 open Compiler.D3
 
+/-- Address plans used by the fixtures below.  `sameResult` now takes the plan
+rather than a count, so the tests name the boundary explicitly. -/
+private def PLAN1 : Array (List Int) := #[[0, 1, 2, 3]]
+private def PLAN0 : Array (List Int) := #[[]]
+private def PLAN_FAR : Array (List Int) := #[[0, 1, 2, 3, 99]]
+
 private def mkD (srcs : Array SourceDesc) : DesignCert :=
   { sources := srcs, nodes := #[], outputs := #[], flops := #[], memories := #[] }
 
@@ -44,21 +50,21 @@ private def r0 : RuntimeResult :=
 
 /- Positivity.  Without this a `sameResult` that returned `false` always would
 score a rejection on every mutation below and look perfect. -/
-#guard sameResult r0 r0 16 == true
+#guard sameResult r0 r0 PLAN1 == true
 
 private def rejects : Option RuntimeResult → Bool
   | none    => false          -- not applicable counts as NOT tested, never as a pass
-  | some r' => !(sameResult r' r0 16)
+  | some r' => !(sameResult r' r0 PLAN1)
 
 #guard rejects (mutateOutput r0) == true
 #guard rejects (mutateFlop r0) == true
-#guard rejects (mutateMem r0 0 0) == true
+#guard rejects (mutateMem r0 0 (0 : Int)) == true
 
 /- Shape changes are caught separately from value changes: a reifier that
 drops an output and a reifier that computes one wrongly are different bugs. -/
-#guard sameResult { r0 with outputs := #[mk_bv 8 5] } r0 16 == false
-#guard sameResult { r0 with nextState := { r0.nextState with flops := #[] } } r0 16 == false
-#guard sameResult { r0 with nextState := { r0.nextState with mems := #[] } } r0 16 == false
+#guard sameResult { r0 with outputs := #[mk_bv 8 5] } r0 PLAN1 == false
+#guard sameResult { r0 with nextState := { r0.nextState with flops := #[] } } r0 PLAN1 == false
+#guard sameResult { r0 with nextState := { r0.nextState with mems := #[] } } r0 PLAN1 == false
 
 /-- The memory limitation, stated as a test rather than a comment: images are
 `Int → BV` and are compared at sampled addresses only, so a difference outside
@@ -67,8 +73,8 @@ private def rfar : RuntimeResult :=
   { r0 with nextState := { r0.nextState with
       mems := #[fun x => if x = 99 then mk_bv 8 0 else mk_bv 8 x] } }
 
-#guard sameResult rfar r0 16 == true
-#guard sameResult rfar r0 100 == false
+#guard sameResult rfar r0 PLAN1 == true
+#guard sameResult rfar r0 PLAN_FAR == false
 
 /- A width-0 position admits no visible mutation, so the mutator must decline
 it instead of reporting a change the checker cannot see. -/
@@ -131,7 +137,7 @@ private def rB : RuntimeResult :=
 /- identical outputs ... -/
 #guard (rA.outputs == rB.outputs) == true
 /- ... but a different observable signature, because the flops differ. -/
-#guard ((observable rA 16) == (observable rB 16)) == false
+#guard ((observable rA PLAN1) == (observable rB PLAN1)) == false
 
 private def rM1 : RuntimeResult :=
   { outputs := #[], nextState := { flops := #[], mems := #[fun x => mk_bv 8 x] } }
@@ -139,9 +145,9 @@ private def rM2 : RuntimeResult :=
   { outputs := #[], nextState := { flops := #[], mems := #[fun x => mk_bv 8 (x + 1)] } }
 
 /- memory-only variation is visible too, within the sampled window. -/
-#guard ((observable rM1 16) == (observable rM2 16)) == false
+#guard ((observable rM1 PLAN1) == (observable rM2 PLAN1)) == false
 /- and a zero-width window sees nothing, which is why `addrs` is explicit. -/
-#guard ((observable rM1 0) == (observable rM2 0)) == true
+#guard ((observable rM1 PLAN0) == (observable rM2 PLAN0)) == true
 
 --------------------------------------------------------------------------------
 -- width-0 observables — present, but not mutable
@@ -163,14 +169,14 @@ private def rZeroOut : RuntimeResult :=
 /- ... and none of them is mutable. -/
 #guard (mutateOutput rZeroOut).isNone == true
 #guard (mutateFlop rZeroOut).isNone == true
-#guard (mutateMem rZeroOut 0 0).isNone == true
+#guard (mutateMem rZeroOut 0 (0 : Int)).isNone == true
 
 /- A mixed case: the mutator must find the first WIDE position, not the first. -/
 private def rMixed : RuntimeResult :=
   { outputs := #[mk_bv 0 0, mk_bv 8 3], nextState := { flops := #[], mems := #[] } }
 #guard (mutateOutput rMixed).isSome == true
 #guard (match mutateOutput rMixed with
-        | some r => sameResult r rMixed 16
+        | some r => sameResult r rMixed PLAN1
         | none   => true) == false
 
 --------------------------------------------------------------------------------
@@ -219,6 +225,126 @@ private def memCert : DesignCert :=
 #guard firstWideMem memCert == some 1
 private def rTwoMems : RuntimeResult :=
   { outputs := #[], nextState := { flops := #[], mems := #[(fun _ => mk_bv 0 0), (fun x => mk_bv 8 x)] } }
-#guard (mutateMem rTwoMems 0 0).isNone == true
-#guard (mutateMem rTwoMems ((firstWideMem memCert).getD 0) 0).isSome == true
+#guard (mutateMem rTwoMems 0 (0 : Int)).isNone == true
+#guard (mutateMem rTwoMems ((firstWideMem memCert).getD 0) (0 : Int)).isSome == true
 #guard firstWideMem (certOf #[] #[] #[{ aw := 4, dw := 0, nextImg := 0 }]) == none
+
+--------------------------------------------------------------------------------
+-- HIGH BITS AND HIGH ADDRESSES
+--
+-- The previous harness minted every input and flop at width 128 and every
+-- memory word at width 64, then let `bv_resize` zero-extend. Every bit above
+-- those positions was constant zero on every stimulus, so a translation bug
+-- living there was invisible while the gate reported `agree=1`. It also sampled
+-- memory addresses 0..15 only.
+--
+-- Each fixture below differs from its partner ONLY in the region the old
+-- harness could not see. `sameResult` must reject every one of them, and
+-- `bvRand` must actually vary those bits.
+--------------------------------------------------------------------------------
+
+/- A 512-bit value whose bits above 127 are not all equal: the old width-128
+   stimulus could not produce this. -/
+#guard (bvRand 1 512).width == 512
+#guard ((bvRand 1 512).value / (2 ^ 128)) != 0
+#guard ((bvRand 1 512).value / (2 ^ 384)) != 0
+/- independent chunks: two seeds differ above bit 128, not only below -/
+#guard (((bvRand 1 512).value / (2 ^ 256)) == ((bvRand 2 512).value / (2 ^ 256))) == false
+/- width 0 is explicit, and a very wide width does not overflow the host -/
+#guard bvRand 3 0 == mk_bv 0 0
+#guard (bvRand 4 4096).width == 4096
+
+private def hiOutA : RuntimeResult :=
+  { outputs := #[mk_bv 256 (2 ^ 200)], nextState := { flops := #[], mems := #[] } }
+private def hiOutB : RuntimeResult :=
+  { outputs := #[mk_bv 256 (2 ^ 200 + 2 ^ 199)], nextState := { flops := #[], mems := #[] } }
+
+/- identical below bit 128, different above it -/
+#guard (bv_uint (hiOutA.outputs[0]!) % (2 ^ 128)) == (bv_uint (hiOutB.outputs[0]!) % (2 ^ 128))
+#guard sameResult hiOutA hiOutB PLAN1 == false
+
+private def hiFlopA : RuntimeResult :=
+  { outputs := #[], nextState := { flops := #[mk_bv 300 (2 ^ 299)], mems := #[] } }
+private def hiFlopB : RuntimeResult :=
+  { outputs := #[], nextState := { flops := #[mk_bv 300 0], mems := #[] } }
+#guard (bv_uint (hiFlopA.nextState.flops[0]!) % (2 ^ 128))
+       == (bv_uint (hiFlopB.nextState.flops[0]!) % (2 ^ 128))
+#guard sameResult hiFlopA hiFlopB PLAN1 == false
+
+/- memory DATA above bit 63: the old 64-bit word could not express it -/
+private def hiMemA : RuntimeResult :=
+  { outputs := #[], nextState := { flops := #[], mems := #[fun _ => mk_bv 128 (2 ^ 100)] } }
+private def hiMemB : RuntimeResult :=
+  { outputs := #[], nextState := { flops := #[], mems := #[fun _ => mk_bv 128 0] } }
+#guard sameResult hiMemA hiMemB PLAN1 == false
+
+/- memory ADDRESS above 15: the old 0..15 window could not reach it -/
+private def hiAddrA : RuntimeResult :=
+  { outputs := #[], nextState := { flops := #[], mems := #[fun x => mk_bv 32 x] } }
+private def hiAddrB : RuntimeResult :=
+  { outputs := #[], nextState := { flops := #[], mems := #[fun x => if x = 65535 then mk_bv 32 0 else mk_bv 32 x] } }
+/- invisible to the old window ... -/
+#guard sameResult hiAddrA hiAddrB PLAN1 == true
+/- ... and caught by a plan that includes the top address of a 16-bit space. -/
+#guard (memAddrs 16).contains 65535 == true
+#guard sameResult hiAddrA hiAddrB #[memAddrs 16] == false
+
+/- Address-plan invariants, at every width that matters.  `aw = 64` is the one
+   the earlier cap broke: it clipped to 24 and drew addresses modulo 2^24, so no
+   address bit above 23 was ever sampled. -/
+#guard (memAddrs 0) == [0]
+#guard (memAddrs 1) == [0, 1]
+#guard (memAddrs 16).contains 65535 == true
+#guard (memAddrs 16).contains 32768 == true
+#guard (memAddrs 4).contains 15 == true
+#guard (memAddrs 64).contains (Int.ofNat (2 ^ 64 - 1)) == true
+#guard (memAddrs 64).contains (Int.ofNat (2 ^ 63)) == true
+/- ... and the random draws really do reach above bit 23 at aw = 64 -/
+#guard ((memAddrs 64).any fun a => a > Int.ofNat (2 ^ 40)) == true
+
+/- bounded at every width, and every address inside the space -/
+#guard (memAddrs 0).length ≤ 11
+#guard (memAddrs 1).length ≤ 11
+#guard (memAddrs 4).length ≤ 11
+#guard (memAddrs 16).length ≤ 11
+#guard (memAddrs 64).length ≤ 11
+#guard ((memAddrs 0).all fun a => 0 ≤ a ∧ a < Int.ofNat (2 ^ 0)) == true
+#guard ((memAddrs 1).all fun a => 0 ≤ a ∧ a < Int.ofNat (2 ^ 1)) == true
+#guard ((memAddrs 4).all fun a => 0 ≤ a ∧ a < Int.ofNat (2 ^ 4)) == true
+#guard ((memAddrs 16).all fun a => 0 ≤ a ∧ a < Int.ofNat (2 ^ 16)) == true
+#guard ((memAddrs 64).all fun a => 0 ≤ a ∧ a < Int.ofNat (2 ^ 64)) == true
+
+/- full-width stimulus: a 512-bit input really is driven above bit 127 -/
+private def wideCert : DesignCert :=
+  { sources := #[.input 0 512], nodes := #[], outputs := #[], flops := #[], memories := #[] }
+#guard (inputWidths wideCert) == #[512]
+#guard ((stimIn wideCert 0)[0]!).width == 512
+#guard (((stimIn wideCert 0)[0]!).value / (2 ^ 128)) != 0
+
+--------------------------------------------------------------------------------
+-- stimSt must stop zero-extending STATE as well as inputs
+--
+-- The sameResult fixtures above prove the COMPARATOR sees high bits. They say
+-- nothing about whether the stimulus ever puts anything there. These do: a
+-- 512-bit flop and a 128-bit memory word, driven at their declared widths.
+--------------------------------------------------------------------------------
+
+private def wideFlop : FlopDesc :=
+  { width := 512, din := 0, enable := none, resetPin := none,
+    resetValue := 0, resetActiveLow := false }
+
+private def stateCert : DesignCert :=
+  { sources := #[], nodes := #[], outputs := #[], flops := #[wideFlop],
+    memories := #[{ aw := 16, dw := 128, nextImg := 0 }] }
+
+#guard ((stimSt stateCert 0).flops[0]!).width == 512
+#guard (((stimSt stateCert 0).flops[0]!).value / (2 ^ 128)) != 0
+#guard (((stimSt stateCert 0).flops[0]!).value / (2 ^ 384)) != 0
+
+#guard (((stimSt stateCert 0).mems[0]!) 0).width == 128
+#guard ((((stimSt stateCert 0).mems[0]!) 0).value / (2 ^ 64)) != 0
+/- different addresses hold different words, including at a high address -/
+#guard (((stimSt stateCert 0).mems[0]!) 0 == ((stimSt stateCert 0).mems[0]!) 65535) == false
+#guard ((((stimSt stateCert 0).mems[0]!) 65535).value / (2 ^ 64)) != 0
+/- and the plan this design gets really does reach the top of its space -/
+#guard (addrPlan stateCert)[0]!.contains 65535 == true

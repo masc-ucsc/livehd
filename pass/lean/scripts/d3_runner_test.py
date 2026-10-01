@@ -91,8 +91,12 @@ def sweep(tmp, manifest, certs_dirs, out, extra=(), env_extra=None, timeout=300)
     dirs = [str(d) for d in (certs_dirs if isinstance(certs_dirs, (list, tuple))
                              else [certs_dirs])]
     return subprocess.run(
+        # --allow-dirty: the fixtures run from a worktree that is dirty by
+        # construction (the tests themselves are uncommitted while being
+        # written). The guard that refuses a dirty CANONICAL run is exercised
+        # directly by `dirty_worktree_refused` below.
         [sys.executable, str(SWEEP), "--certs", *dirs, "--manifest", str(manifest),
-         "--out", str(out), "--jobs", "2", "--timeout", "60", *extra],
+         "--out", str(out), "--jobs", "2", "--timeout", "60", "--allow-dirty", *extra],
         cwd=ROOT, env=env, capture_output=True, text=True, timeout=timeout)
 
 
@@ -252,7 +256,7 @@ def main() -> int:
         env = dict(os.environ, LAKE=str(stub), STUB_DELAY="2")
         proc = subprocess.Popen(
             [sys.executable, str(SWEEP), "--certs", str(cdir), "--manifest", str(man),
-             "--out", str(kill_out), "--jobs", "1", "--timeout", "60"],
+             "--out", str(kill_out), "--jobs", "1", "--timeout", "60", "--allow-dirty"],
             cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         deadline = time.time() + 60
         while time.time() < deadline:
@@ -275,6 +279,22 @@ def main() -> int:
               p.returncode == 0 and len(final) == len(blocks)
               and all(r["verdict"] == "agree" for r in final),
               f"resume completed the run to {len(final)} rows", f, p.stderr[-300:])
+
+        # 14a. a canonical run from a dirty worktree refuses without --allow-dirty
+        dirty_out = tmp / "dirty.tsv"
+        env = dict(os.environ, LAKE=str(stub))
+        dp = subprocess.run(
+            [sys.executable, str(SWEEP), "--certs", str(cdir), "--manifest", str(man),
+             "--out", str(dirty_out), "--jobs", "1", "--timeout", "60"],
+            cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
+        is_dirty = bool(subprocess.run(["git", "-C", str(ROOT), "status", "--porcelain"],
+                                       capture_output=True, text=True).stdout.strip())
+        check("dirty_worktree_refused",
+              (dp.returncode != 0 and "dirty worktree" in dp.stderr) if is_dirty
+              else dp.returncode == 0,
+              "a manifest run refuses a dirty worktree without --allow-dirty"
+              if is_dirty else "worktree is clean; guard not applicable", f,
+              dp.stderr[-200:])
 
         # 14b. exactly one of output / sidecar refuses
         lone = tmp / "lone.tsv"

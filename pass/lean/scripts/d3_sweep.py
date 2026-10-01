@@ -829,6 +829,9 @@ def main() -> int:
                     help="the LARGEST design in each tier, to bound resources before a long run")
     ap.add_argument("--resume", action="store_true",
                     help="reuse terminal rows from an existing --out written by the SAME config")
+    ap.add_argument("--allow-dirty", action="store_true",
+                    help="permit a manifest run from a dirty worktree (exploratory only: "
+                         "the result cannot be reproduced from a commit)")
     ap.add_argument("--force", action="store_true",
                     help="overwrite an existing --out that was not produced by --resume")
     ap.add_argument("--native", action="store_true",
@@ -880,6 +883,25 @@ def main() -> int:
     cfg["worktree_dirty"] = bool(subprocess.run(
         ["git", "-C", str(ROOT), "status", "--porcelain"],
         capture_output=True, text=True).stdout.strip())
+    # The toolchain is part of the experiment: a Lean or Lake upgrade can change
+    # what elaborates, and TOOL_FILES cannot see outside the repository.
+    try:
+        cfg["lake_version"] = subprocess.run(
+            [LAKE, "--version"], capture_output=True, text=True, timeout=60).stdout.strip()
+    except Exception:  # noqa: BLE001
+        cfg["lake_version"] = "unknown"
+    tc = ROOT / "formal" / "lean" / "lean-toolchain"
+    cfg["lean_toolchain"] = tc.read_text().strip() if tc.is_file() else "unknown"
+
+    if a.manifest and cfg["worktree_dirty"] and not a.allow_dirty:
+        # A canonical run must be reproducible from a commit.  TOOL_FILES covers
+        # the files this script knows about; a dirty worktree can carry semantic
+        # changes outside that list, and a result nobody can regenerate is not a
+        # measurement.
+        print("REFUSING a manifest run from a dirty worktree: commit first, or pass "
+              "--allow-dirty for an exploratory run (its rows are not reproducible)",
+              file=sys.stderr)
+        return 2
 
     if out_path.exists() and not (a.resume or a.force):
         print(f"REFUSING to overwrite {out_path}: pass --resume to continue it, "
@@ -925,18 +947,40 @@ def main() -> int:
             except (OSError, csv.Error) as e:
                 print(f"--resume REFUSED: previous output is unreadable ({e})", file=sys.stderr)
                 return 2
-            required = {"target_key", "module", "cert_sha256", "run_status", "verdict"}
+            # The FULL schema, not a handful of identity columns.  A row with
+            # blank gate fields would otherwise be reused as `done` and counted
+            # as a measurement that never happened.
             with out_path.open(encoding="utf-8") as fh:
                 header = next((l for l in fh if not l.startswith("#")), "")
-            missing_cols = required - set(header.rstrip("\n").split("\t"))
+            have_cols = header.rstrip("\n").split("\t")
+            missing_cols = set(RESULT_COLS) - set(have_cols)
             if missing_cols:
                 print(f"--resume REFUSED: previous output is missing column(s) "
                       f"{sorted(missing_cols)}", file=sys.stderr)
                 return 2
             for r in prev_rows:
-                if any(r.get(c) is None for c in required):
-                    print(f"--resume REFUSED: truncated row in {out_path.name}: "
-                          f"{ {k: r.get(k) for k in sorted(required)} }", file=sys.stderr)
+                if any(r.get(c) is None for c in RESULT_COLS):
+                    print(f"--resume REFUSED: truncated row in {out_path.name} "
+                          f"(target_key={r.get('target_key')!r})", file=sys.stderr)
+                    return 2
+                if r.get("run_status") != "done":
+                    continue
+                bad = [g for g in GATES if g != "proof" and r.get(g) not in ("0", "1")]
+                if bad:
+                    print(f"--resume REFUSED: row {r.get('target_key')!r} has "
+                          f"non-boolean gate value(s) {bad}", file=sys.stderr)
+                    return 2
+                if not (r.get("verdict") or "").strip():
+                    print(f"--resume REFUSED: row {r.get('target_key')!r} has no verdict",
+                          file=sys.stderr)
+                    return 2
+                # The verdict must follow from the gates it ships with, or the
+                # row was edited after the fact.
+                recomputed = verdict({g: int(r[g]) for g in GATES if g != "proof"})
+                if r["verdict"] not in (recomputed, "native_ok"):
+                    print(f"--resume REFUSED: row {r.get('target_key')!r} claims verdict "
+                          f"{r['verdict']!r} but its gates give {recomputed!r}",
+                          file=sys.stderr)
                     return 2
                 key = (r.get("target_key") or "").strip()
                 if not key:
