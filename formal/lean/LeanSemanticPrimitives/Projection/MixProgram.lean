@@ -49,8 +49,11 @@ open Surface
 
 def tagPStat : Nat := 60   -- PEnv entry: a known value
 def tagPDyn  : Nat := 61   -- PEnv entry: a residual de Bruijn index
+def tagPCons : Nat := 62   -- PEnv entry: a PRESERVED cons spine
 def tagRStat : Nat := 70   -- PRes: a value
 def tagRCode : Nat := 71   -- PRes: residual code
+def tagRCons : Nat := 72   -- PRes: a partial cons
+def tagRLets : Nat := 73   -- PRes: a package, bindings plus a result
 def tagReq   : Nat := 80   -- SpecRequest
 
 /-! ## Building surface terms -/
@@ -75,7 +78,8 @@ private def pair_ (a b : SExp) := cons_ a b
 private def fst_ (e : SExp) := hd_ e
 private def snd_ (e : SExp) := tl_ e
 
-/-- Triples, for `mixUArgsL`, which returns results, argument codes and requests. -/
+/-- Triples, for `mixPArgsL`, which returns bindings, the callee environment
+and requests. -/
 private def triple_ (a b c : SExp) := cons_ a (cons_ b c)
 private def t1_ (e : SExp) := hd_ e
 private def t2_ (e : SExp) := hd_ (tl_ e)
@@ -97,8 +101,22 @@ private def eProgram (fs e : SExp)     := SExp.mk tagProgram [fs, e]
 
 private def pStat (v : SExp) := SExp.mk tagPStat [v]
 private def pDyn  (k : SExp) := SExp.mk tagPDyn  [k]
+private def pCons (a b : SExp) := SExp.mk tagPCons [a, b]
 private def rStat (v : SExp) := SExp.mk tagRStat [v]
 private def rCode (t : SExp) := SExp.mk tagRCode [t]
+private def rCons (a b : SExp) := SExp.mk tagRCons [a, b]
+private def rLets (bs r : SExp) := SExp.mk tagRLets [bs, r]
+
+private def true_  : SExp := .lit (.bool true)
+private def false_ : SExp := .lit (.bool false)
+private def and_ (a b : SExp) := P2 .andB a b
+private def ctorTag_ (e : SExp) := P1 .ctorTagP e
+private def ctorFields_ (e : SExp) := P1 .ctorFieldsP e
+
+/-- `Option` in `L`: `nil` is `none`, a one-element list is `some`.  Used by the
+peels, which may decline to answer. -/
+private def none_ : SExp := nil_
+private def some_ (e : SExp) := cons_ e nil_
 private def mkReq (f vs : SExp) := SExp.mk tagReq [f, vs]
 
 /-! ## `evalPrim`, in `L`
@@ -146,7 +164,9 @@ private def mixTermAlts : List SAlt :=
             .letN "e" (C "nthE" [R "i", R "env"]) <|
             .ite (eq_ (C "nthS" [R "i", R "D"]) (K 0))
               (pair_ (rStat (C "pvVal" [R "e"])) nil_)
-              (pair_ (rCode (eVar (C "pvIdx" [R "e"]))) nil_))
+              -- a dyn entry reads back as `var k`, a preserved spine as a
+              -- partial cons; `pvToPRes` is the one rule for both
+              (pair_ (C "pvToPRes" [R "e"]) nil_))
 
         , (tagALift, ["e"],
             .letN "o" (C "mixTerm" [R "A", R "reqs", R "D", R "env", R "e"])
@@ -197,7 +217,12 @@ private def mixTermAlts : List SAlt :=
             .letN "rs" (fst_ (R "o")) <|
             .ite (eq_ (R "b") (K 0))
               (pair_ (rStat (C "evalPrimL" [R "p", C "allStaticL" [R "rs"]])) (snd_ (R "o")))
-              (pair_ (rCode (ePrim (R "p") (C "mapToCode" [R "rs"]))) (snd_ (R "o"))))
+              -- a guarded structural answer if the spine supports one,
+              -- otherwise the opaque residual node
+              (.letN "st" (C "primStructL" [R "p", R "rs"]) <|
+               .ite (isNil_ (R "st"))
+                 (pair_ (rCode (ePrim (R "p") (C "mapToCode" [R "rs"]))) (snd_ (R "o")))
+                 (pair_ (hd_ (R "st")) (snd_ (R "o")))))
 
         , (tagACtorT, ["b", "k", "ts"],
             .letN "o" (C "mixTerms" [R "A", R "reqs", R "D", R "env", R "ts"]) <|
@@ -248,18 +273,15 @@ private def mixTermAlts : List SAlt :=
                   [R "A", R "reqs", R "ps",
                    C "mapPStat" [C "allStaticL" [fst_ (R "o")]], C "funBody" [R "fd"]]) <|
                pair_ (fst_ (R "o2")) (C "appendL" [snd_ (R "o"), snd_ (R "o2")]))
-              -- inline: bind each dynamic argument once, then specialize the
-              -- body.  The arguments go through mixUArgsL, which threads the
-              -- residual scope -- argument j sits under the binders of the
-              -- dynamic arguments before it.
-              (.letN "u" (C "mixUArgsL"
+              -- inline: transfer the arguments in one pass, then specialize the
+              -- body in the environment that pass built.  The binding travels
+              -- WITH the body rather than around its reified code, so a partial
+              -- body keeps its spine on the way out.
+              (.letN "u" (C "mixPArgsL"
                   [R "A", R "reqs", R "D", R "env", R "ps", R "ts"]) <|
-               .letN "dts" (t2_ (R "u")) <|
                .letN "o2" (C "mixTerm"
-                   [R "A", R "reqs", R "ps",
-                    C "inlineEnvL" [R "ps", t1_ (R "u")],
-                    C "funBody" [R "fd"]]) <|
-               pair_ (rCode (C "wrapLetsL" [R "dts", C "toCode" [fst_ (R "o2")]]))
+                   [R "A", R "reqs", R "ps", t2_ (R "u"), C "funBody" [R "fd"]]) <|
+               pair_ (rLets (t1_ (R "u")) (fst_ (R "o2")))
                      (C "appendL" [t3_ (R "u"), snd_ (R "o2")]))) ]
 
 /-! ## The program -/
@@ -346,12 +368,27 @@ def mixS : SProgram where
 
   -- ## partial-environment helpers
 
+  -- A partial value may now be a SPINE, and every residual index in its leaves
+  -- moves when a binder is entered -- so shifting is structural, not a single
+  -- arithmetic step on one index.
+  , { name := "shiftPV", params := ["k", "v"]
+    , body := .switch (R "v")
+        [ (tagPStat, ["x"],    pStat (R "x"))
+        , (tagPDyn,  ["j"],    pDyn (add_ (R "j") (R "k")))
+        , (tagPCons, ["a","b"], pCons (C "shiftPV" [R "k", R "a"])
+                                      (C "shiftPV" [R "k", R "b"])) ] }
+
   , { name := "shiftEnv", params := ["k", "env"]
     , body := .ite (isNil_ (R "env")) nil_
-        (.switch (hd_ (R "env"))
-          [ (tagPStat, ["v"], cons_ (pStat (R "v")) (C "shiftEnv" [R "k", tl_ (R "env")]))
-          , (tagPDyn,  ["j"], cons_ (pDyn (add_ (R "j") (R "k")))
-                                    (C "shiftEnv" [R "k", tl_ (R "env")])) ]) }
+        (cons_ (C "shiftPV" [R "k", hd_ (R "env")])
+               (C "shiftEnv" [R "k", tl_ (R "env")])) }
+
+  -- reading a preserved spine back out as a partial RESULT
+  , { name := "pvToPRes", params := ["v"]
+    , body := .switch (R "v")
+        [ (tagPStat, ["x"],    rStat (R "x"))
+        , (tagPDyn,  ["k"],    rCode (eVar (R "k")))
+        , (tagPCons, ["a","b"], rCons (C "pvToPRes" [R "a"]) (C "pvToPRes" [R "b"])) ] }
 
   -- `[dyn j, dyn (j+1), …, dyn (k-1)]`
   , { name := "freshFrom", params := ["j", "k"]
@@ -378,7 +415,103 @@ def mixS : SProgram where
   , { name := "toCode", params := ["r"]
     , body := .switch (R "r")
         [ (tagRStat, ["v"], eLit (R "v"))     -- this is `lift`
-        , (tagRCode, ["t"], R "t") ] }
+        , (tagRCode, ["t"], R "t")
+        -- a spine forced into a dynamic context re-emits the `consP` chain
+        , (tagRCons, ["a","b"],
+            ePrim (K 23) (cons_ (C "toCode" [R "a"]) (cons_ (C "toCode" [R "b"]) nil_)))
+        , (tagRLets, ["bs","r2"], C "wrapLetsL" [R "bs", C "toCode" [R "r2"]]) ] }
+
+  -- ## the discard guard, and the structural answers it licenses
+
+  -- Computation-free: a result that holds no work, so nothing is lost by not
+  -- running it.  A residual VARIABLE qualifies; arbitrary residual code and a
+  -- package do not.
+  , { name := "totalL", params := ["r"]
+    , body := .switch (R "r")
+        [ (tagRStat, ["v"],    true_)
+        , (tagRCode, ["t"],    eq_ (ctorTag_ (R "t")) (K (Int.ofNat tagVar)))
+        , (tagRCons, ["a","b"], and_ (C "totalL" [R "a"]) (C "totalL" [R "b"]))
+        , (tagRLets, ["bs","r2"], false_) ] }
+
+  -- Each peel sees THROUGH a package and puts it back; the guard applies to the
+  -- component being DISCARDED, which is why `hd` tests the tail, `tl` the head,
+  -- and `isNil` both.
+  , { name := "peelHdL", params := ["r"]
+    , body := .switch (R "r")
+        [ (tagRStat, ["v"],    none_)
+        , (tagRCode, ["t"],    none_)
+        , (tagRCons, ["a","b"], .ite (C "totalL" [R "b"]) (some_ (R "a")) none_)
+        , (tagRLets, ["bs","r2"],
+            .letN "o" (C "peelHdL" [R "r2"]) <|
+            .ite (isNil_ (R "o")) none_ (some_ (rLets (R "bs") (hd_ (R "o"))))) ] }
+
+  , { name := "peelTlL", params := ["r"]
+    , body := .switch (R "r")
+        [ (tagRStat, ["v"],    none_)
+        , (tagRCode, ["t"],    none_)
+        , (tagRCons, ["a","b"], .ite (C "totalL" [R "a"]) (some_ (R "b")) none_)
+        , (tagRLets, ["bs","r2"],
+            .letN "o" (C "peelTlL" [R "r2"]) <|
+            .ite (isNil_ (R "o")) none_ (some_ (rLets (R "bs") (hd_ (R "o"))))) ] }
+
+  , { name := "peelIsNilL", params := ["r"]
+    , body := .switch (R "r")
+        [ (tagRStat, ["v"],    none_)
+        , (tagRCode, ["t"],    none_)
+        , (tagRCons, ["a","b"],
+            .ite (and_ (C "totalL" [R "a"]) (C "totalL" [R "b"]))
+                 (some_ (rStat false_)) none_)
+        , (tagRLets, ["bs","r2"],
+            .letN "o" (C "peelIsNilL" [R "r2"]) <|
+            .ite (isNil_ (R "o")) none_ (some_ (rLets (R "bs") (hd_ (R "o"))))) ] }
+
+  -- `consP` discards nothing, so it may always build a spine.
+  , { name := "primStructL", params := ["p", "rs"]
+    , body :=
+        .ite (eq_ (R "p") (K 23))
+          (.ite (eq_ (C "lenL" [R "rs"]) (K 2))
+            (.letN "a" (hd_ (R "rs")) <|
+             .letN "b" (hd_ (tl_ (R "rs"))) <|
+             .ite (and_ (eq_ (ctorTag_ (R "a")) (K (Int.ofNat tagRStat)))
+                        (eq_ (ctorTag_ (R "b")) (K (Int.ofNat tagRStat))))
+               (some_ (rStat (cons_ (C "presVal" [R "a"]) (C "presVal" [R "b"]))))
+               (some_ (rCons (R "a") (R "b"))))
+            none_)
+        (.ite (eq_ (R "p") (K 12))
+          (.ite (eq_ (C "lenL" [R "rs"]) (K 1)) (C "peelHdL" [hd_ (R "rs")]) none_)
+        (.ite (eq_ (R "p") (K 13))
+          (.ite (eq_ (C "lenL" [R "rs"]) (K 1)) (C "peelTlL" [hd_ (R "rs")]) none_)
+        (.ite (eq_ (R "p") (K 11))
+          (.ite (eq_ (C "lenL" [R "rs"]) (K 1)) (C "peelIsNilL" [hd_ (R "rs")]) none_)
+          none_))) }
+
+  -- ## preparation
+
+  -- Turn a result into BINDINGS plus a partial value whose `dyn` leaves index
+  -- them.  Arbitrary code becomes one binding; a reference becomes none; a
+  -- spine survives, and only the side that emitted bindings shifts.
+  , { name := "prepareL", params := ["r"]
+    , body := .switch (R "r")
+        [ (tagRStat, ["v"], pair_ nil_ (pStat (R "v")))
+        , (tagRCode, ["t"],
+            .ite (eq_ (ctorTag_ (R "t")) (K (Int.ofNat tagVar)))
+              (pair_ nil_ (pDyn (hd_ (ctorFields_ (R "t")))))
+              (pair_ (cons_ (R "t") nil_) (pDyn (K 0))))
+        , (tagRCons, ["a","b"],
+            .letN "pa" (C "prepareL" [R "a"]) <|
+            .letN "pb" (C "prepareL" [R "b"]) <|
+            .ite (isNil_ (fst_ (R "pa")))
+              (pair_ (fst_ (R "pb"))
+                     (pCons (C "shiftPV" [C "lenL" [fst_ (R "pb")], snd_ (R "pa")])
+                            (snd_ (R "pb"))))
+              (.ite (isNil_ (fst_ (R "pb")))
+                (pair_ (fst_ (R "pa"))
+                       (pCons (snd_ (R "pa"))
+                              (C "shiftPV" [C "lenL" [fst_ (R "pa")], snd_ (R "pb")])))
+                (pair_ (cons_ (C "toCode" [rCons (R "a") (R "b")]) nil_) (pDyn (K 0)))))
+        , (tagRLets, ["bs","r2"],
+            .letN "p" (C "prepareL" [R "r2"]) <|
+            pair_ (C "appendL" [R "bs", fst_ (R "p")]) (snd_ (R "p"))) ] }
 
   , { name := "allStaticL", params := ["rs"]
     , body := .ite (isNil_ (R "rs")) nil_
@@ -435,14 +568,6 @@ def mixS : SProgram where
   -- inlining wraps one let per dynamic argument, so the j-th of them ends up at
   -- residual index k-1-j -- written as the number of dynamic parameters STILL
   -- TO COME, which is the same number and is locally computable
-  , { name := "inlineEnvL", params := ["params", "rs"]
-    , body := .ite (isNil_ (R "params")) nil_
-        (.ite (eq_ (hd_ (R "params")) (K 0))
-          (cons_ (pStat (C "presVal" [hd_ (R "rs")]))
-                 (C "inlineEnvL" [tl_ (R "params"), tl_ (R "rs")]))
-          (cons_ (pDyn (C "dynCountL" [tl_ (R "params")]))
-                 (C "inlineEnvL" [tl_ (R "params"), tl_ (R "rs")]))) }
-
   , { name := "wrapLetsL", params := ["es", "body"]
     , body := .ite (isNil_ (R "es")) (R "body")
                    (eLetIn (hd_ (R "es")) (C "wrapLetsL" [tl_ (R "es"), R "body"])) }
@@ -527,20 +652,32 @@ def mixS : SProgram where
   -- short by the number of preceding dynamic arguments and it reads the wrong
   -- variable.  Static arguments do not shift, so mixing them deeper is
   -- harmless.
-  , { name := "mixUArgsL", params := ["A", "reqs", "D", "env", "params", "ts"]
+  -- Argument transfer for an unfolded call, in ONE pass.  Returns the emitted
+  -- bindings, the callee environment, and the requests -- so the binder depth
+  -- is `length bindings` by construction instead of an arithmetic count that
+  -- has to be kept in step with a second function.
+  --
+  -- A static parameter emits no binding, so nothing after it shifts.  A dynamic
+  -- one is PREPARED: its code leaves become bindings and its partial structure
+  -- survives, so the tail is mixed under however many bindings that actually
+  -- was -- zero, one, or several.
+  , { name := "mixPArgsL", params := ["A", "reqs", "D", "env", "params", "ts"]
     , body := .ite (isNil_ (R "params")) (triple_ nil_ nil_ nil_)
         (.letN "o1" (C "mixTerm" [R "A", R "reqs", R "D", R "env", hd_ (R "ts")]) <|
          .ite (eq_ (hd_ (R "params")) (K 0))
-           (.letN "o2" (C "mixUArgsL"
+           (.letN "o2" (C "mixPArgsL"
                [R "A", R "reqs", R "D", R "env", tl_ (R "params"), tl_ (R "ts")]) <|
-            triple_ (cons_ (fst_ (R "o1")) (t1_ (R "o2")))
-                    (t2_ (R "o2"))
+            triple_ (t1_ (R "o2"))
+                    (cons_ (pStat (C "presVal" [fst_ (R "o1")])) (t2_ (R "o2")))
                     (C "appendL" [snd_ (R "o1"), t3_ (R "o2")]))
-           (.letN "o2" (C "mixUArgsL"
-               [R "A", R "reqs", R "D", C "shiftEnv" [K 1, R "env"],
+           (.letN "pp" (C "prepareL" [fst_ (R "o1")]) <|
+            .letN "bs0" (fst_ (R "pp")) <|
+            .letN "o2" (C "mixPArgsL"
+               [R "A", R "reqs", R "D", C "shiftEnv" [C "lenL" [R "bs0"], R "env"],
                 tl_ (R "params"), tl_ (R "ts")]) <|
-            triple_ (cons_ (fst_ (R "o1")) (t1_ (R "o2")))
-                    (cons_ (C "toCode" [fst_ (R "o1")]) (t2_ (R "o2")))
+            triple_ (C "appendL" [R "bs0", t1_ (R "o2")])
+                    (cons_ (C "shiftPV" [C "lenL" [t1_ (R "o2")], snd_ (R "pp")])
+                           (t2_ (R "o2")))
                     (C "appendL" [snd_ (R "o1"), t3_ (R "o2")]))) }
 
   , { name := "mixTerms", params := ["A", "reqs", "D", "env", "ts"]

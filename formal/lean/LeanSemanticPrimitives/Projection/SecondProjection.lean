@@ -18,7 +18,7 @@
 
   WHAT THIS DOES NOT SAY, and what `mixProgram_implements_mixHost` would add, is
   that `mixProgram` computes what the LEAN specializer computes.  That is a
-  separate and much larger obligation: it relates a 53-function object program
+  separate and much larger obligation: it relates a 60-function object program
   to a Lean definition, function by function.  Until it is proved, `Gate0`'s
   `objP == Demo.residual2P` remains a check, and the theorem below is about
   `mixProgram` on its own terms.
