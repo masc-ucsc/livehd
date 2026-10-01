@@ -2625,9 +2625,43 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       livehd::diag::warn("pass.lean", "write-failed", "io").msg("could not rename {}", vc_tmp).emit();
       return;
     }
+
+    // The SAME certificate in DCERT1, next to the .lean.
+    //
+    // Not a second description of the design: both come from `din` and the same
+    // `Remap`, so a slot means the same thing in each.  The .lean is what a proof
+    // imports; the .dcert is what `Compiler.CertIO.loadCert` reads at run time,
+    // which is what lets a design skip elaboration entirely -- 1,398.7 s -> 1.97 s
+    // on csr_regfile_gate, and the only way the 108 k-node hpdcache subsystem can
+    // be run at all (DIRECTION4_INCREMENTAL.md Part II).
+    //
+    // Written unconditionally rather than behind a label: it costs one linear pass
+    // over data already in hand, and a certificate that exists in only one of the
+    // two forms is the setup for exactly the drift this emission is meant to retire.
+    const std::string dcert_path = output_dir + "/" + base_name + ".dcert";
+    const std::string dc_tmp     = dcert_path + ".tmp";
+    {
+      std::ofstream dofs(dc_tmp);
+      if (!dofs) {
+        livehd::diag::warn("pass.lean", "write-failed", "io").msg("could not write {}", dc_tmp).emit();
+      } else {
+        lean_design_cert::RemapError derr;
+        if (!lean_design_cert::emit_design_cert_dcert1(din, dofs, derr)) {
+          dofs.close();
+          std::remove(dc_tmp.c_str());
+          fatal(ctx, "verified_compiler DCERT1 export: " + derr.message);
+        }
+        dofs.close();
+        if (std::rename(dc_tmp.c_str(), dcert_path.c_str()) != 0) {
+          livehd::diag::warn("pass.lean", "write-failed", "io").msg("could not rename {}", dc_tmp).emit();
+        }
+      }
+    }
+
     std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " (verified_compiler: " << din.sources.size()
               << " sources, " << din.nodes.size() << " nodes, " << din.flops.size() << " flops, "
               << din.memories.size() << " memories)\n";
+    std::cout << "pass.lean: " << raw_name << " -> " << dcert_path << " (DCERT1)\n";
     return;
   }
 

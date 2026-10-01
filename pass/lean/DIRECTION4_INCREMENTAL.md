@@ -444,6 +444,44 @@ Two independent checks back this up:
   `writeCert` applied to the elaborated literal, on all four designs where both
   can be produced.  That is what licenses using it on the two that cannot.
 
+> **That licence did not hold, and the two rows it was covering are wrong.**
+> Found when `pass_lean.cpp` learned to emit DCERT1 directly and its output was
+> diffed against the converter. The converter matched the C++ on `btb_gate`,
+> `alu_gate`, `decoder_gate` and `aes_gate` and DIFFERED on the other two:
+> it emitted **126 of 136** flops for `csr_regfile_gate` and **535 of 542** for
+> `cva6_hpdcache_subsystem_gate`.
+>
+> Its flop pattern read `resetValue := (\([^)]*\)|-?\d+)`, which cannot cross a
+> nested `)`. A reset value spelled `((Int.ofNat 1))` — 10 records in one design,
+> 7 in the other — failed the whole record match, and `re.finditer` skipped it in
+> silence. The count line shrank with it, so the result was a WELL-FORMED
+> certificate for a different design, not a parse error.
+>
+> The two affected designs are exactly the ones too large to elaborate, so
+> `writeCert` was never able to contradict the converter on them. The byte
+> identity above was measured only where the bug does not occur.
+>
+> It was observable, not cosmetic. Loading the old and new certificates and
+> running one cycle on identical stimulus:
+>
+> | design | converter (flops dropped) | `pass_lean.cpp` DCERT1 |
+> |---|---|---|
+> | `csr_regfile_gate` | `6029296499497964805` | `300773339148941132` |
+> | `cva6_hpdcache_subsystem_gate` | `15957457508183241496` | `14981439447733313809` |
+>
+> Both the C++ emitter and the converter are repaired. The converter now also
+> counts record markers independently and refuses to write when the two disagree,
+> because a regex that fails to match does not raise — it just yields one fewer
+> record. The same latent hole existed in its NODE pattern for a parenthesised
+> `Op_Const` payload; no design in the corpus has `Op_Const` as a node operator
+> (constants are sources), so it was never exercised.
+>
+> The production path is now `emit_design_cert_dcert1` in
+> `pass/lean/design_cert_export.hpp`, which walks the same `DesignIn` and the
+> same `Remap` as the Lean printer, so there is one transcription rather than
+> two. The converter is kept as an independent oracle for the differential test
+> `//pass/lean:dcert_parity`.
+
 ## The digest test had to be repaired before it meant anything
 
 The first version of this comparison reported MATCH on every design and was

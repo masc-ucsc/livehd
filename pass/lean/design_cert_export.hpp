@@ -29,6 +29,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace lean_design_cert {
@@ -324,6 +325,202 @@ inline bool emit_design_cert(const std::string& base, const DesignIn& d, std::os
   os << "  | .ok R    => R\n";
   os << "  | .error _ => default\n\n";
   os << "#print axioms " << base << "_step_correct\n";
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// DCERT1 -- the same certificate as bytes instead of as a Lean term.
+//
+// `Compiler.CertIO.writeCert` defines this format and `parseCert` reads it; a
+// design loaded this way never becomes a Lean constant, which is what removes
+// the elaboration cost (1,398.7 s -> 1.97 s on `csr_regfile_gate`; see
+// DIRECTION4_INCREMENTAL.md Part II).
+//
+// Emitted HERE rather than converted from the Lean text afterwards.  The
+// converter `scripts/lean_cert_to_dcert.py` re-parses the literal this file
+// just printed, so it is a second, independent transcription of the same data
+// and it is trusted at run time.  This function walks the SAME `DesignIn` the
+// Lean printer walks, with the SAME `Remap`, so there is one transcription, not
+// two.  The Python converter is kept as an oracle for differential testing, not
+// as a production step.
+//
+// Whitespace is load-bearing: `writeCert` separates with single spaces and ends
+// every record with '\n', and the parity test compares bytes.
+// ---------------------------------------------------------------------------
+
+namespace detail {
+
+// A Lean `Int` expression as DCERT1 decimal.
+//
+// The emitter writes constants three ways -- `(Int.ofNat 5)`, `(-Int.ofNat 5)`
+// and a bare `5` -- and the certificate may carry values far wider than 64 bits
+// (CVA6 has multi-hundred-bit buses), so this normalises TEXTUALLY and never
+// parses into an integer type.  Leading zeros are dropped and a negative zero
+// becomes "0", matching what Python's `int()` does in the oracle.
+inline std::string dcert_int(std::string_view s) {
+  auto trim = [](std::string_view v) {
+    while (!v.empty() && (v.front() == ' ' || v.front() == '\t' || v.front() == '\n')) {
+      v.remove_prefix(1);
+    }
+    while (!v.empty() && (v.back() == ' ' || v.back() == '\t' || v.back() == '\n')) {
+      v.remove_suffix(1);
+    }
+    return v;
+  };
+  auto strip_parens = [](std::string_view v) {
+    while (!v.empty() && (v.front() == '(' || v.front() == ')')) {
+      v.remove_prefix(1);
+    }
+    while (!v.empty() && (v.back() == '(' || v.back() == ')')) {
+      v.remove_suffix(1);
+    }
+    return v;
+  };
+
+  s = trim(strip_parens(trim(s)));
+  bool neg = false;
+  while (!s.empty() && s.front() == '-') {
+    neg = !neg;
+    s.remove_prefix(1);
+    s = trim(s);
+  }
+  constexpr std::string_view kOfNat = "Int.ofNat";
+  if (s.substr(0, kOfNat.size()) == kOfNat) {
+    s = trim(s.substr(kOfNat.size()));
+  }
+  s = trim(strip_parens(s));
+  // A nested `(-Int.ofNat 5)` puts the sign inside the parens.
+  while (!s.empty() && s.front() == '-') {
+    neg = !neg;
+    s.remove_prefix(1);
+    s = trim(s);
+  }
+  if (s.substr(0, kOfNat.size()) == kOfNat) {
+    s = trim(strip_parens(trim(s.substr(kOfNat.size()))));
+  }
+
+  size_t first_sig = s.find_first_not_of('0');
+  std::string digits = (first_sig == std::string_view::npos) ? std::string("0") : std::string(s.substr(first_sig));
+  if (digits.empty() || digits == "0") {
+    return "0";  // never "-0": the oracle's int() cannot produce one
+  }
+  return neg ? ("-" + digits) : digits;
+}
+
+// `LGraphOp.Op_X [arg]` as the (code, arg) pair `CertIO.opCode` assigns.
+// Only Op_Const, Op_Sum and Op_MemWriteBE carry a payload; every other code
+// writes 0, exactly as `opCode` does.
+inline bool dcert_op(const std::string& op_expr, std::string& code, std::string& arg, std::string& why) {
+  static const std::vector<std::string> kOps = {
+      "Op_Const",   "Op_Sum",   "Op_Sub",     "Op_Mult",   "Op_Div",     "Op_UDiv",   "Op_SDiv",
+      "Op_And",     "Op_Or",    "Op_Xor",     "Op_Ror",    "Op_Not",     "Op_LT",     "Op_GT",
+      "Op_ULT",     "Op_UGT",   "Op_SLT",     "Op_SGT",    "Op_EQ",      "Op_SHL",    "Op_SRA",
+      "Op_MuxBool", "Op_MuxN",  "Op_Sext",    "Op_GetMask", "Op_SetMask", "Op_MemRead", "Op_MemWrite",
+      "Op_MemWriteBE"};
+
+  std::string_view v{op_expr};
+  constexpr std::string_view kPrefix = "LGraphOp.";
+  if (v.substr(0, kPrefix.size()) != kPrefix) {
+    why = "operator `" + op_expr + "` does not start with `LGraphOp.`";
+    return false;
+  }
+  v.remove_prefix(kPrefix.size());
+
+  size_t cut = v.find_first_of(" \t");
+  const std::string name{v.substr(0, cut)};
+  const std::string_view rest = (cut == std::string_view::npos) ? std::string_view{} : v.substr(cut);
+
+  for (size_t i = 0; i < kOps.size(); ++i) {
+    if (kOps[i] == name) {
+      code = std::to_string(i);
+      // `dcert_int` on the remainder, so a parenthesised `Op_Const ((Int.ofNat
+      // 5))` is encoded as 5.  The Python oracle reads the payload with a bare
+      // `(-?\d+)?` and silently yields 0 for that spelling; this does not.
+      const bool has_arg = (name == "Op_Const" || name == "Op_Sum" || name == "Op_MemWriteBE");
+      arg = (has_arg && !rest.empty()) ? dcert_int(rest) : std::string("0");
+      return true;
+    }
+  }
+  why = "unknown operator `" + name + "`; DCERT1 encodes the 29 codes of CertIO.opCode";
+  return false;
+}
+
+}  // namespace detail
+
+// Write the certificate in DCERT1.  Returns false and fills `err` on a remap
+// failure or an operator DCERT1 cannot name.
+inline bool emit_design_cert_dcert1(const DesignIn& d, std::ostream& os, RemapError& err) {
+  const Remap rm(d, err);
+  if (err.failed) {
+    return false;
+  }
+
+  std::ostringstream out;
+  out << "DCERT1\n";
+
+  out << d.sources.size() << "\n";
+  for (const auto& s : d.sources) {
+    switch (s.kind) {
+      case SourceKind::Input: out << "0 " << s.ordinal << " " << s.width << "\n"; break;
+      case SourceKind::Const: out << "1 " << s.width << " " << detail::dcert_int(s.const_int) << "\n"; break;
+      case SourceKind::Flop:
+        if (s.async_reset) {
+          out << "3 " << s.ordinal << " " << s.width << " " << s.reset_input << " "
+              << detail::dcert_int(s.reset_value) << " " << (s.reset_active_low ? 1 : 0) << "\n";
+        } else {
+          out << "2 " << s.ordinal << " " << s.width << "\n";
+        }
+        break;
+      case SourceKind::MemImage: out << "4 " << s.ordinal << " " << s.addr_w << " " << s.width << "\n"; break;
+      case SourceKind::RomConst:
+        out << "5 " << s.addr_w << " " << s.width << " " << s.rom_contents.size();
+        for (const auto& v : s.rom_contents) {
+          out << " " << detail::dcert_int(v);
+        }
+        out << "\n";
+        break;
+    }
+  }
+
+  out << d.nodes.size() << "\n";
+  for (const auto& n : d.nodes) {
+    std::string code, arg, why;
+    if (!detail::dcert_op(n.op_expr, code, arg, why)) {
+      err.failed  = true;
+      err.message = "node " + std::to_string(n.id) + ": " + why;
+      return false;
+    }
+    out << code << " " << arg << " " << n.width << " " << n.deps.size();
+    for (auto dep : n.deps) {
+      out << " " << rm.slot(dep, err, ("node " + std::to_string(n.id) + " dep").c_str());
+    }
+    out << " " << n.id << "\n";  // `origin`: the emitter id, for debugging only
+  }
+
+  out << d.outputs.size() << "\n";
+  for (const auto& o : d.outputs) {
+    out << rm.slot(o.id, err, "output") << " " << o.width << "\n";
+  }
+
+  out << d.flops.size() << "\n";
+  for (const auto& f : d.flops) {
+    const uint32_t he = f.enable.has_value() ? 1 : 0;
+    const uint32_t e  = f.enable.has_value() ? rm.slot(*f.enable, err, "flop enable") : 0;
+    const uint32_t hr = f.reset_pin.has_value() ? 1 : 0;
+    const uint32_t r  = f.reset_pin.has_value() ? rm.slot(*f.reset_pin, err, "flop reset") : 0;
+    out << f.width << " " << rm.slot(f.din, err, "flop din") << " " << he << " " << e << " " << hr << " " << r
+        << " " << detail::dcert_int(f.reset_value) << " " << (f.reset_active_low ? 1 : 0) << "\n";
+  }
+
+  out << d.memories.size() << "\n";
+  for (const auto& m : d.memories) {
+    out << m.addr_w << " " << m.data_w << " " << rm.slot(m.next_img, err, "memory nextImg") << "\n";
+  }
+
+  if (err.failed) {
+    return false;  // nothing written: a partial .dcert must never reach a reader
+  }
+  os << out.str();
   return true;
 }
 

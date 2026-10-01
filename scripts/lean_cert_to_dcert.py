@@ -20,6 +20,16 @@ OPS = ["Op_Const","Op_Sum","Op_Sub","Op_Mult","Op_Div","Op_UDiv","Op_SDiv","Op_A
 OPNUM = {o: i for i, o in enumerate(OPS)}
 ARGOPS = {"Op_Const", "Op_Sum", "Op_MemWriteBE"}
 
+# A Lean `Int` as the emitter spells it: `(5)`, `((Int.ofNat 5))`,
+# `((-Int.ofNat 5))`.  ONE level of nesting is enough for every shape
+# `design_cert_export.hpp` prints, but `\([^)]*\)` is NOT -- it stops at the
+# first `)`, so a nested value made the surrounding record regex fail and
+# `finditer` SKIPPED that record silently.  That dropped 10 of 136 flops in
+# csr_regfile_gate and 7 of 542 in cva6_hpdcache_subsystem_gate: exactly the two
+# designs too large to elaborate, so `writeCert` could never contradict it.
+PAREN = r"\((?:[^()]|\([^()]*\))*\)"
+
+
 def intlit(s):
     """`((Int.ofNat 5))`, `((-Int.ofNat 5))`, `(5)`, `(-5)`, `5` -> int."""
     s = s.strip().strip("()").strip()
@@ -64,10 +74,10 @@ def convert(path, out):
         else: raise SystemExit(f"unknown SourceDesc.{kind}")
 
     nodes = []
-    for m in re.finditer(r"\{\s*op\s*:=\s*LGraphOp\.(\w+)\s*(-?\d+)?\s*,\s*width\s*:=\s*(\d+)\s*,"
+    for m in re.finditer(r"\{\s*op\s*:=\s*LGraphOp\.(\w+)\s*(" + PAREN + r"|-?\d+)?\s*,\s*width\s*:=\s*(\d+)\s*,"
                          r"\s*deps\s*:=\s*#\[([^\]]*)\]\s*,\s*origin\s*:=\s*(\d+)", nod_s):
         op, arg, w, deps, org = m.group(1), m.group(2), int(m.group(3)), m.group(4).strip(), int(m.group(5))
-        a = int(arg) if (arg is not None and op in ARGOPS) else 0
+        a = intlit(arg) if (arg is not None and op in ARGOPS) else 0
         d = [int(x) for x in deps.split(",")] if deps else []
         nodes.append("%d %d %d %d%s %d" % (OPNUM[op], a, w, len(d),
                                            "".join(" %d" % x for x in d), org))
@@ -78,7 +88,7 @@ def convert(path, out):
     flops = []
     for m in re.finditer(r"\{\s*width\s*:=\s*(\d+)\s*,\s*din\s*:=\s*(\d+)\s*,\s*enable\s*:=\s*"
                          r"(none|some\s+\d+)\s*,\s*resetPin\s*:=\s*(none|some\s+\d+)\s*,\s*"
-                         r"resetValue\s*:=\s*(\([^)]*\)|-?\d+)\s*,\s*resetActiveLow\s*:=\s*(true|false)", flo_s):
+                         r"resetValue\s*:=\s*(" + PAREN + r"|-?\d+)\s*,\s*resetActiveLow\s*:=\s*(true|false)", flo_s):
         w, din, en, rp, rv, al = m.groups()
         he, e = (0, 0) if en == "none" else (1, int(en.split()[1]))
         hr, r = (0, 0) if rp == "none" else (1, int(rp.split()[1]))
@@ -86,6 +96,22 @@ def convert(path, out):
 
     mems = ["%s %s %s" % t for t in
             re.findall(r"\{\s*aw\s*:=\s*(\d+)\s*,\s*dw\s*:=\s*(\d+)\s*,\s*nextImg\s*:=\s*(\d+)\s*\}", mem_s)]
+
+    # A regex that fails to match a record does not error -- `finditer` just
+    # yields one fewer, the count line shrinks with it, and the result is a
+    # well-formed certificate for a DIFFERENT design.  That is how 10 flops
+    # vanished from csr_regfile_gate unnoticed.  Count the record markers
+    # independently and refuse to write on a mismatch.
+    for got, want, what in (
+        (len(srcs),  len(re.findall(r"SourceDesc\.",     src_s)), "sources"),
+        (len(nodes), len(re.findall(r"origin\s*:=",      nod_s)), "nodes"),
+        (len(outs),  len(re.findall(r"slot\s*:=",        out_s)), "outputs"),
+        (len(flops), len(re.findall(r"resetActiveLow\s*:=", flo_s)), "flops"),
+        (len(mems),  len(re.findall(r"nextImg\s*:=",     mem_s)), "memories"),
+    ):
+        if got != want:
+            raise SystemExit(f"{path}: parsed {got} {what} but the literal holds {want}; "
+                             f"a record shape is not matched by this converter")
 
     with open(out, "w") as f:
         f.write("DCERT1\n")
