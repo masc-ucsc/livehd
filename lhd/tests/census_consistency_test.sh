@@ -161,7 +161,12 @@ if [ -z "$MERGE" ]; then
   echo "FAIL: cannot find census_merge.py, so the manifest/override rule is untested"
   rc=1
 else
-  TD="${TEST_TMPDIR:-$(dirname "$TSV")}/mo_check"
+  # TEST_TMPDIR under bazel; otherwise a clearly named, git-ignored
+  # project-local path. The previous fallback was `$(dirname "$TSV")/mo_check`,
+  # which put run debris next to the committed census -- i.e. in pass/lean/ --
+  # and seven of those files were committed. Never /tmp either: this project
+  # keeps run artifacts under generated/.
+  TD="${TEST_TMPDIR:-$ROOT/generated/census_consistency_test/runtime_tmp}"
   rm -rf "$TD"; mkdir -p "$TD/base/mod" "$TD/ovr/mod"
   # Two minimal run directories; the rule must fire on the ARGUMENTS, before
   # any of their contents matter.

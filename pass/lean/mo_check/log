@@ -1,6 +1,0 @@
-FATAL: --manifest-out describes a SINGLE run, but --override makes the
-       table multi-run. The published manifest would claim the whole
-       census came from --base, and the consistency test cannot check
-       commit agreement across several generation commits.
-       Publish the merged table without --manifest-out, or re-run the
-       full corpus in one go and publish both.

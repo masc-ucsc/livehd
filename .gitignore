@@ -80,3 +80,7 @@ generated/lean_validation/
 # commit, each holding per-module lgdb trees, certificates and logs. The
 # CENSUS TSV and manifest of a reported run are copied into pass/lean/.
 generated/census_d2/
+
+# Run debris from lhd/tests/census_consistency_test.sh when it is invoked
+# directly (under bazel it uses TEST_TMPDIR instead).
+generated/census_consistency_test/
