@@ -22,9 +22,20 @@
 #
 # Two evidence layers, kept apart on purpose:
 #   STRUCTURAL   may pass without iverilog.
-#   BEHAVIORAL_DIFF is PASS only when iverilog AND Lean both ran and matched;
-#   missing tools print BEHAVIORAL_DIFF_SKIPPED and must never be summarised as
-#   behavioural success.
+#   BEHAVIORAL_DIFF is PASS only when iverilog AND Lean both ran and matched.
+#   ONLY A MISSING iverilog skips. An installed iverilog that cannot
+#   elaborate, a simulation that exits nonzero, or an unreachable Lean
+#   toolchain are FAILURES -- reporting those as "skipped" would let the
+#   wrapper claim a structural pass while the behavioural gate had collapsed.
+#
+# NOT A BAZEL TARGET. It needs the Lean toolchain and the multi-GB .lake tree,
+# which cannot be runfiles; as an sh_test it failed immediately in every
+# sandbox. Run it directly:   bash lhd/tests/mem_mixed_lean_diff_test.sh
+#
+# OBSERVATION PHASE: directStepRaw returns PRE-transition outputs, so at P=2
+# the sample is the state after slot 0 and before slot 1, and the RTL is
+# sampled after the posedge and before the negedge. A slot-1 effect (the
+# negedge element) is therefore seen on the NEXT sample.
 set -u
 
 LHD="${LHD:-lhd/lhd}"

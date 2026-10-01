@@ -1557,7 +1557,9 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
             for (const auto& e : ens) {
               // An ICG term that is not boolean cannot be folded into a 1-bit
               // predicate without the very truncation this exists to avoid.
-              if (gu::bits_of(e) > 1) {
+              // `!= 1`, not `> 1`: width 0 means UNKNOWN, not boolean, and
+              // accepting it would fold a term of unproven width.
+              if (gu::bits_of(e) != 1) {
                 r.error  = true;
                 r.reason = std::format("memory `{}` port {} has an ICG enable {} bits wide; the commit "
                                        "predicate must be boolean, and folding a wider term into it is the "
@@ -1591,21 +1593,28 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
           continue;
         }
 
-        // The lane mask's width. With no existing enable the port writes every
-        // lane, so the "committing" arm is all-ones of the memory's `wensize`.
+        // The enable's width, and with no existing driver it depends on the
+        // PORT ROLE: a write port's enable is the per-bit lane mask
+        // (`wensize`), while a SYNC READ port's enable is a plain boolean
+        // read-enable. Defaulting a read port to `wensize` would invent a
+        // lane mask for something that has none.
         int w = old_en.is_invalid() ? 0 : static_cast<int>(gu::bits_of(old_en));
         if (w <= 0) {
-          const auto wen = mem_sink_const(me.node, Ntype::get_sink_pid(Ntype_op::Memory, "wensize"));
-          if (!wen.has_value() || *wen <= 0) {
-            r.error  = true;
-            r.reason = std::format("memory `{}` port {} has no enable driver and no readable `wensize`, so the "
-                                   "width of its write-lane mask is ambiguous",
-                                   label_of(me.node), static_cast<int>(p));
-            refuse(quiet, "memory-gate-width-unknown", std::format("{}: {}", g->get_name(), r.reason),
-                   "give the memory a constant `wensize`, or an explicit enable driver");
-            return r;
+          if (mem_port_timing(me.node, static_cast<hhds::Port_id>(p)) == Mem_port_timing::SyncRead) {
+            w = 1;
+          } else {
+            const auto wen = mem_sink_const(me.node, Ntype::get_sink_pid(Ntype_op::Memory, "wensize"));
+            if (!wen.has_value() || *wen <= 0) {
+              r.error  = true;
+              r.reason = std::format("memory `{}` WRITE port {} has no enable driver and no readable `wensize`, "
+                                     "so the width of its lane mask is ambiguous",
+                                     label_of(me.node), static_cast<int>(p));
+              refuse(quiet, "memory-gate-width-unknown", std::format("{}: {}", g->get_name(), r.reason),
+                     "give the memory a constant `wensize`, or an explicit enable driver");
+              return r;
+            }
+            w = static_cast<int>(*wen);
           }
-          w = static_cast<int>(*wen);
         }
 
         hhds::Pin_class gated;
