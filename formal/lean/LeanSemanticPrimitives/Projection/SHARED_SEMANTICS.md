@@ -7,24 +7,45 @@ Milestone 5 equivalence theorem meaningless.
 
 ## Pin
 
-Imported verbatim from `livehd-new` at
+Imported verbatim from `livehd-d2-ir-semantics` at
 
-    f82056dbb84174bb4c4fd9fd3c6099efd58e8a23   (2026-09-11)
+    90583be1349acbd25f740b176a406aa8bbe1251c   (clock provenance, multi-clock Phase B)
 
-**These files are not modified in this branch.**  That is the whole point of the
-pin, and it is checkable:
+RE-PINNED from `livehd-new` `f82056dbb84174bb4c4fd9fd3c6099efd58e8a23`
+(2026-09-11).  The multi-clock certificate semantics — `ClockDesc`, a clock
+ordinal on every state element, `ClockEdges` and an edge-aware `interpretDesign`
+— was made in d2's worktree and is the user's to port; `DIRECTION2_RESULTS.md`
+§10 "Porting to the other branches" is the authoritative list.  Three of the
+eight pinned files changed; the other five are byte-identical across both
+revisions, so the pin moved rather than split.
 
-    NEW=<livehd-new>/formal/lean/LeanSemanticPrimitives
+**These files are still not modified in this branch.**  That is the whole point
+of the pin, and it is checkable:
+
+    D2=/mada/users/czeng14/projects/livehd-d2-ir-semantics
     OLD=<this clone>/formal/lean/LeanSemanticPrimitives
     for f in Translation/LGraphModel.lean Translation/GraphRefine.lean \
              Translation/OpBridge.lean Compiler/DesignCert.lean \
              Compiler/Runtime.lean Compiler/DesignCertWF.lean \
              Compiler/DesignSemantics.lean SemanticPrimitives.lean; do
-      cmp -s "$NEW/$f" "$OLD/$f" && echo "ok   $f" || echo "DRIFT $f"
+      (cd "$D2" && git show 90583be13:formal/lean/LeanSemanticPrimitives/$f) \
+        | cmp -s - "$OLD/$f" && echo "ok   $f" || echo "DRIFT $f"
     done
 
-If a file must change, change it in `livehd-new` and re-pin here; do not edit
-the copy.
+If a file must change, change it upstream and re-pin here; do not edit the copy.
+
+## What the port did NOT take
+
+d2's §10 list also covers its C++ exporter, its B1+B2 verified-compiler copies,
+its direct simulator (`directStep`, `Tick`, `runDirect`) and the checker
+additions (`noClocks`, `flopClockOutOfRange`, `asyncFlagMismatch`,
+`edgesMismatch`, and the `DesignSemWF`/`RuntimeSemWF` fields behind them).
+None of those is imported: this branch consumes the shared semantic definitions
+only, and `Compiler/DesignCertWF.lean` is byte-identical at both revisions.
+
+Because the checker is not here, the range facts it would discharge are carried
+as hypotheses instead — `interpretDesign_allEdges` takes them explicitly, and
+`Hw.RuntimeSized` is where `I_hw`'s own unchecked reads record them.
 
 ## What was imported
 

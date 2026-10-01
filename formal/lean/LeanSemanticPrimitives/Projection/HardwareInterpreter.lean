@@ -83,11 +83,12 @@ def hwS : SProgram where
   entry := "main"
   funs := [
 
-  -- main(d, inp, st) : the whole cycle.
-  { name := "main", params := ["d", "inp", "st"], inline := false
+  -- main(d, edges, inp, st) : the whole cycle.  `edges` is the third DYNAMIC
+  -- input: which declared clock domains fire this step.
+  { name := "main", params := ["d", "edges", "inp", "st"], inline := false
   , body :=
       .switch (R "d")
-        [(tagDesign, ["srcs", "nodes", "outs", "flops", "mems"],
+        [(tagDesign, ["srcs", "nodes", "outs", "flops", "mems", "clks"],
           .switch (R "st")
             [(tagState, ["fq"],
               lets
@@ -97,7 +98,8 @@ def hwS : SProgram where
                 , ("env0", C "mkSources" [R "srcs", R "inp", R "fq", nil])
                 , ("env",  C "evalNodes" [R "nodes", R "env0", R "nsrc"])
                 , ("os",   C "mkOutputs" [R "outs", R "env", R "nall"])
-                , ("nf",   C "flopNexts" [R "flops", R "env", R "nall", R "fq", int 0])
+                , ("nf",   C "flopNexts"
+                             [R "flops", R "edges", R "env", R "nall", R "fq", int 0])
                 ]
                 (.mk tagResult [.mk tagState [R "nf"], R "os"]))])]
   },
@@ -193,24 +195,61 @@ def hwS : SProgram where
                    cons (P .bvResize [R "w", C "slot" [R "env", R "n", R "s"]])
                         (C "mkOutputs" [P .tl [R "outs"], R "env", R "n"]))]) },
 
-  { name := "flopNexts", params := ["flops", "env", "n", "fq", "idx"], inline := true
+  { name := "flopNexts", params := ["flops", "edges", "env", "n", "fq", "idx"], inline := true
   , body := .ite (P .isNil [R "flops"]) nil
-              (cons (C "flopNext" [P .hd [R "flops"], R "env", R "n", R "fq", R "idx"])
+              (cons (C "flopNext"
+                       [P .hd [R "flops"], R "edges", R "env", R "n", R "fq", R "idx"])
                     (C "flopNexts"
-                       [P .tl [R "flops"], R "env", R "n", R "fq",
+                       [P .tl [R "flops"], R "edges", R "env", R "n", R "fq",
                         P .addI [R "idx", int 1]])) },
+
+  -- Does this flop's domain fire?  The ORDINAL is static -- it comes out of the
+  -- certificate -- so this is a statically known number of `tl` steps into a
+  -- dynamic array, which is the shape Phase 1 made cost one direct read.  No
+  -- bounds check, exactly like every other runtime read: see `RuntimeSized`.
+  { name := "firesAt", params := ["edges", "c"], inline := true
+  , body := C "nthD" [R "edges", R "c"] },
 
   -- reset before enable; the reset VALUE, not a hardcoded zero; and when
   -- disabled the OLD STATE, read raw -- `srcFlopNext` does not resize that
   -- branch, so neither does this one.
-  { name := "flopNext", params := ["f", "env", "n", "fq", "idx"], inline := true
+  -- CLOCKS.  A quiet domain HOLDS -- unless the reset is ASYNCHRONOUS and
+  -- asserted, which acts regardless of the edge; a SYNCHRONOUS reset is sampled
+  -- at the edge like `din` and so must not act in a quiet step.  Both `ck` and
+  -- `ar` come out of the certificate and are static, so a one-domain design
+  -- specializes back to exactly the rule that was here before.
+  { name := "flopNext", params := ["f", "edges", "env", "n", "fq", "idx"], inline := true
   , body := .switch (R "f")
-              [(tagFlop, ["w", "din", "en", "rp", "rv", "al"],
-                .ite (C "rstActive" [R "rp", R "al", R "env", R "n"])
-                     (P .bvMk [R "w", R "rv"])
-                     (.ite (C "enabled" [R "en", R "env", R "n"])
-                           (P .bvResize [R "w", C "slot" [R "env", R "n", R "din"]])
-                           (C "nthD" [R "fq", R "idx"])))] },
+              [(tagFlop, ["w", "din", "en", "rp", "rv", "al", "ck", "ar"],
+                lets [ ("edge", C "firesAt" [R "edges", R "ck"])
+                     , ("cap",  C "capture"
+                                  [R "en", R "edge", R "w", R "din", R "env", R "n",
+                                   R "fq", R "idx"]) ]
+                  -- EVERY test here that CAN be static IS static, so a residual
+                  -- boolean is emitted only where the edge genuinely forces one.
+                  -- `ar` and the PRESENCE of a reset pin both come out of the
+                  -- certificate; spelling the rule as `rst && (edge || ar)`
+                  -- would have residualized an `orB` always and an `andB` even
+                  -- for a flop with no reset at all.
+                  (.ite (P .isNil [R "rp"])
+                        (R "cap")
+                        (.ite (R "ar")
+                              (.ite (C "rstActive" [R "rp", R "al", R "env", R "n"])
+                                    (P .bvMk [R "w", R "rv"]) (R "cap"))
+                              (.ite (P .andB [C "rstActive" [R "rp", R "al", R "env", R "n"],
+                                              R "edge"])
+                                    (P .bvMk [R "w", R "rv"]) (R "cap")))))] },
+
+  -- capture-or-hold, with the PRESENCE of an enable static as well
+  { name := "capture", params := ["en", "edge", "w", "din", "env", "n", "fq", "idx"]
+  , inline := true
+  , body := .ite (P .isNil [R "en"])
+              (.ite (R "edge")
+                    (P .bvResize [R "w", C "slot" [R "env", R "n", R "din"]])
+                    (C "nthD" [R "fq", R "idx"]))
+              (.ite (P .andB [R "edge", C "nz" [C "slot" [R "env", R "n", P .hd [R "en"]]]])
+                    (P .bvResize [R "w", C "slot" [R "env", R "n", R "din"]])
+                    (C "nthD" [R "fq", R "idx"])) },
 
   -- `xor resetActiveLow (bv_nonzero ...)`, with the polarity static
   { name := "rstActive", params := ["rp", "al", "env", "n"], inline := true
@@ -233,9 +272,9 @@ def hwResolved : Except String (Program × List Bool) := resolveProgram hwS
 def hwP : Program := match hwResolved with | .ok (p, _) => p | .error _ => ⟨[], 0⟩
 def hwInl : List Bool := match hwResolved with | .ok (_, i) => i | .error _ => []
 
-/-- The division: the certificate is static, the runtime input and state are
-dynamic.  Everything else is inferred. -/
-def hwA : Except BTAError AProgram := bta hwP hwInl [.stat, .dyn, .dyn] 200
+/-- The division: the certificate is static; the edge vector, the runtime input
+and the state are dynamic.  Everything else is inferred. -/
+def hwA : Except BTAError AProgram := bta hwP hwInl [.stat, .dyn, .dyn, .dyn] 200
 
 #guard hwA.toOption.isSome
 
@@ -255,19 +294,22 @@ arithmetic. -/
 namespace Acceptance
 open Compiler Projection.Acceptance
 
-def runHw (D : DesignCert) (i : RuntimeInput) (s : RuntimeState) : EvalResult :=
+def runHw (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
+    EvalResult :=
   evalFuel 5000 hwP []
-    (.call hwP.entry [.lit (encDesign D), .lit (encInput i), .lit (encState s)])
+    (.call hwP.entry [.lit (encDesign D), .lit (encEdges e), .lit (encInput i),
+                      .lit (encState s)])
 
-@[inline] def refOf (D : DesignCert) (i : RuntimeInput) (s : RuntimeState) : EvalResult :=
-  .value (encResult (interpretDesign D i s))
+@[inline] def refOf (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
+    EvalResult :=
+  .value (encResult (interpretDesign D e i s))
 
 -- combinational
-#guard runHw tinyD tinyIn tinySt == refOf tinyD tinyIn tinySt
+#guard runHw tinyD (allEdges tinyD) tinyIn tinySt == refOf tinyD (allEdges tinyD) tinyIn tinySt
 -- sequential: enabled, disabled (old state held), and reset (which beats enable)
-#guard runHw seqD (seqIn 5 1 0) (seqSt 0) == refOf seqD (seqIn 5 1 0) (seqSt 0)
-#guard runHw seqD (seqIn 3 0 0) (seqSt 4) == refOf seqD (seqIn 3 0 0) (seqSt 4)
-#guard runHw seqD (seqIn 3 1 1) (seqSt 4) == refOf seqD (seqIn 3 1 1) (seqSt 4)
+#guard runHw seqD (allEdges seqD) (seqIn 5 1 0) (seqSt 0) == refOf seqD (allEdges seqD) (seqIn 5 1 0) (seqSt 0)
+#guard runHw seqD (allEdges seqD) (seqIn 3 0 0) (seqSt 4) == refOf seqD (allEdges seqD) (seqIn 3 0 0) (seqSt 4)
+#guard runHw seqD (allEdges seqD) (seqIn 3 1 1) (seqSt 4) == refOf seqD (allEdges seqD) (seqIn 3 1 1) (seqSt 4)
 
 end Acceptance
 
@@ -277,6 +319,32 @@ Milestone 3's definition, here because it is one line and because the checks
 below are what justify the milestone's proof being worth writing.  The theorem
 (`projectDesign_correct`) is not yet written; these are `#guard`s, and the
 distinction is the one `SHARED_SEMANTICS.md` and Gate 0 already draw. -/
+
+/-- What `I_hw`'s unchecked reads ASSUME about the runtime vectors.
+
+`nthD` has no bounds check: an out-of-range read is `hd nil`, a type error, not
+a default.  `interpretDesign` is total exactly where `I_hw` is not -- `fires`
+reads an undeclared ordinal as `false` -- so the two agree only where these
+hold.  Stated now, and not discovered later inside an adequacy proof, because
+the edge vector is the THIRD such vector and the third place the assumption
+would otherwise be silent.
+
+`edgesSized` is `RuntimeSemWF.edgesSized` in d2's checker and `flopClocks` /
+`memClocks` are `DesignSemWF`'s; the checker itself is not ported here, so these
+are carried as hypotheses.  They are also exactly the hypotheses
+`interpretDesign_allEdges` takes. -/
+structure RuntimeSized (D : Compiler.DesignCert) (e : Compiler.ClockEdges) : Prop where
+  edgesSized : D.clocks.size ≤ e.size
+  flopClocks : ∀ f ∈ D.flops, f.clock < D.clocks.size
+  memClocks  : ∀ m ∈ D.memories, m.clock < D.clocks.size
+
+/-- The all-fire stimulus satisfies the sizing half for any declared design. -/
+theorem RuntimeSized_allEdges {D : Compiler.DesignCert}
+    (hf : ∀ f ∈ D.flops, f.clock < D.clocks.size)
+    (hm : ∀ m ∈ D.memories, m.clock < D.clocks.size) :
+    RuntimeSized D (Compiler.allEdges D) :=
+  { edgesSized := by simp [Compiler.allEdges_size]
+    flopClocks := hf, memClocks := hm }
 
 def projectDesign (D : Compiler.DesignCert) : Except MixError Program :=
   mixDriver 20000 200 hwAP [encDesign D]
@@ -291,18 +359,18 @@ def seqR  : Program := match projectDesign seqD  with | .ok p => p | .error _ =>
 #guard (projectDesign seqD).toOption.isSome
 
 /-- The residual takes the DYNAMIC arguments only: the design is gone. -/
-def runR (R : Program) (i : RuntimeInput) (s : RuntimeState) : EvalResult :=
-  evalFuel 5000 R [] (.call R.entry [.lit (encInput i), .lit (encState s)])
+def runR (R : Program) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) : EvalResult :=
+  evalFuel 5000 R [] (.call R.entry [.lit (encEdges e), .lit (encInput i), .lit (encState s)])
 
-#guard runR tinyR tinyIn tinySt == refOf tinyD tinyIn tinySt
-#guard runR seqR (seqIn 5 1 0) (seqSt 0) == refOf seqD (seqIn 5 1 0) (seqSt 0)
-#guard runR seqR (seqIn 3 0 0) (seqSt 4) == refOf seqD (seqIn 3 0 0) (seqSt 4)
-#guard runR seqR (seqIn 3 1 1) (seqSt 4) == refOf seqD (seqIn 3 1 1) (seqSt 4)
+#guard runR tinyR (allEdges tinyD) tinyIn tinySt == refOf tinyD (allEdges tinyD) tinyIn tinySt
+#guard runR seqR (allEdges seqD) (seqIn 5 1 0) (seqSt 0) == refOf seqD (allEdges seqD) (seqIn 5 1 0) (seqSt 0)
+#guard runR seqR (allEdges seqD) (seqIn 3 0 0) (seqSt 4) == refOf seqD (allEdges seqD) (seqIn 3 0 0) (seqSt 4)
+#guard runR seqR (allEdges seqD) (seqIn 3 1 1) (seqSt 4) == refOf seqD (allEdges seqD) (seqIn 3 1 1) (seqSt 4)
 
--- the design is gone in the literal sense: the residual entry takes two
--- arguments (input, state), not three
-#guard tinyR.funs.map FunDef.arity == [2]
-#guard seqR.funs.map FunDef.arity  == [2]
+-- the design is gone in the literal sense: the residual entry takes the three
+-- DYNAMIC arguments (edges, input, state), not four
+#guard tinyR.funs.map FunDef.arity == [3]
+#guard seqR.funs.map FunDef.arity  == [3]
 
 /-! ### Gate 0, applied to hardware
 
@@ -347,8 +415,11 @@ private partial def primsOf : Term → List Prim
   | .ite a b c => primsOf a ++ primsOf b ++ primsOf c
   | .ctorT _ ts | .call _ ts => (ts.map primsOf).flatten
 
+-- `andB` is new and unavoidable: the EDGE is dynamic, so `edge && enabled`
+-- cannot be decided during specialization.  One per flop, so linear.  `orB`
+-- would have been avoidable and is not here -- see `flopNext`.
 #guard ((seqR.funs.map (fun fd => primsOf fd.body)).flatten).eraseDups.all
-         (fun p => p ∈ [Prim.consP, .bvResize, .hd, .tl, .bvAnd, .notB, .eqI, .bvUint])
+         (fun p => p ∈ [Prim.consP, .bvResize, .hd, .tl, .bvAnd, .andB, .notB, .eqI, .bvUint])
 
 -- the two `ite`s left in the sequential residual are the reset and enable
 -- tests, which are genuinely runtime conditions; the combinational design has

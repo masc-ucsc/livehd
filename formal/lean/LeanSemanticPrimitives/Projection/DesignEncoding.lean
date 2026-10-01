@@ -207,6 +207,7 @@ def tagOutput      : Nat := 112
 def tagFlop        : Nat := 113
 def tagMemory      : Nat := 114
 def tagDesign      : Nat := 115
+def tagClock       : Nat := 116
 
 @[inline] def encOp (op : LGraphOp) : Val := .ctor tagOp [encNat (opCode op), opPayload op]
 
@@ -320,16 +321,19 @@ them: transcribing what an emitter happened to read would turn its bug into a
 theorem. -/
 def encFlop (f : FlopDesc) : Val :=
   .ctor tagFlop [encNat f.width, encNat f.din, encONat f.enable,
-                 encONat f.resetPin, encInt f.resetValue, encBool f.resetActiveLow]
+                 encONat f.resetPin, encInt f.resetValue, encBool f.resetActiveLow,
+                 encNat f.clock, encBool f.asyncReset]
 
 def decFlop : Val → Option FlopDesc
-  | .ctor tg [w, d, e, r, rv, al] =>
+  | .ctor tg [w, d, e, r, rv, al, ck, ar] =>
     if tg = tagFlop then
-      match decNat w, decNat d, decONat e, decONat r, decInt rv, decBool al with
-      | some w', some d', some e', some r', some rv', some al' =>
+      match decNat w, decNat d, decONat e, decONat r, decInt rv, decBool al,
+            decNat ck, decBool ar with
+      | some w', some d', some e', some r', some rv', some al', some ck', some ar' =>
           some { width := w', din := d', enable := e', resetPin := r',
-                 resetValue := rv', resetActiveLow := al' }
-      | _, _, _, _, _, _ => none
+                 resetValue := rv', resetActiveLow := al',
+                 clock := ck', asyncReset := ar' }
+      | _, _, _, _, _, _, _, _ => none
     else none
   | _ => none
 
@@ -337,35 +341,66 @@ def decFlop : Val → Option FlopDesc
   simp [encFlop, decFlop, tagFlop]
 
 def encMemory (m : MemoryDesc) : Val :=
-  .ctor tagMemory [encNat m.aw, encNat m.dw, encNat m.nextImg]
+  .ctor tagMemory [encNat m.aw, encNat m.dw, encNat m.nextImg, encNat m.clock]
 
 def decMemory : Val → Option MemoryDesc
-  | .ctor tg [a, d, n] =>
+  | .ctor tg [a, d, n, ck] =>
     if tg = tagMemory then
-      match decNat a, decNat d, decNat n with
-      | some a', some d', some n' => some { aw := a', dw := d', nextImg := n' }
-      | _, _, _ => none
+      match decNat a, decNat d, decNat n, decNat ck with
+      | some a', some d', some n', some ck' =>
+          some { aw := a', dw := d', nextImg := n', clock := ck' }
+      | _, _, _, _ => none
     else none
   | _ => none
 
 @[simp] theorem decMemory_encMemory (m : MemoryDesc) : decMemory (encMemory m) = some m := by
   simp [encMemory, decMemory, tagMemory]
 
+/-! ## Clock domains
+
+`ClockDesc.name` is PROVENANCE: the semantics reads ordinals and `clocks.size`,
+never a name.  It is still carried faithfully, because `decDesign_encDesign` is
+what makes `encDesign_inj` true and an encoding that silently dropped a field
+would make that theorem a statement about a different certificate.  `Val` has no
+string, so a name travels as the list of its character codes. -/
+
+def encStr (s : String) : Val := encListG (fun c => encNat c.toNat) s.toList
+
+def decStr (v : Val) : Option String :=
+  (decListG (fun w => (decNat w).map Char.ofNat) v).map String.ofList
+
+@[simp] theorem decStr_encStr (s : String) : decStr (encStr s) = some s := by
+  simp only [decStr, encStr,
+             decListG_encListG (e := fun c : Char => encNat c.toNat)
+               (d := fun w => (decNat w).map Char.ofNat)
+               (fun c => by simp [Char.ofNat_toNat])]
+  simp [String.ofList_toList]
+
+def encClock (c : ClockDesc) : Val := .ctor tagClock [encStr c.name]
+
+def decClock : Val → Option ClockDesc
+  | .ctor tg [n] => if tg = tagClock then (decStr n).map (fun s => { name := s }) else none
+  | _            => none
+
+@[simp] theorem decClock_encClock (c : ClockDesc) : decClock (encClock c) = some c := by
+  simp [encClock, decClock, tagClock]
+
 /-! ## The certificate -/
 
 def encDesign (D : DesignCert) : Val :=
   .ctor tagDesign
     [encArr encSource D.sources, encArr encNode D.nodes, encArr encOutput D.outputs,
-     encArr encFlop D.flops, encArr encMemory D.memories]
+     encArr encFlop D.flops, encArr encMemory D.memories, encArr encClock D.clocks]
 
 def decDesign : Val → Option DesignCert
-  | .ctor tg [s, n, o, f, m] =>
+  | .ctor tg [s, n, o, f, m, c] =>
     if tg = tagDesign then
       match decArr decSource s, decArr decNode n, decArr decOutput o,
-            decArr decFlop f, decArr decMemory m with
-      | some s', some n', some o', some f', some m' =>
-          some { sources := s', nodes := n', outputs := o', flops := f', memories := m' }
-      | _, _, _, _, _ => none
+            decArr decFlop f, decArr decMemory m, decArr decClock c with
+      | some s', some n', some o', some f', some m', some c' =>
+          some { sources := s', nodes := n', outputs := o', flops := f',
+                 memories := m', clocks := c' }
+      | _, _, _, _, _, _ => none
     else none
   | _ => none
 
@@ -377,7 +412,8 @@ theorem decDesign_encDesign (D : DesignCert) : decDesign (encDesign D) = some D 
         decArr_encArr (e := encNode)    (d := decNode)    decNode_encNode,
         decArr_encArr (e := encOutput)  (d := decOutput)  decOutput_encOutput,
         decArr_encArr (e := encFlop)    (d := decFlop)    decFlop_encFlop,
-        decArr_encArr (e := encMemory)  (d := decMemory)  decMemory_encMemory]
+        decArr_encArr (e := encMemory)  (d := decMemory)  decMemory_encMemory,
+        decArr_encArr (e := encClock)   (d := decClock)   decClock_encClock]
 
 /-- The consequence everything downstream actually uses: a specializer handed
 `encDesign D` was handed `D`, so `projectDesign_correct` can be a statement

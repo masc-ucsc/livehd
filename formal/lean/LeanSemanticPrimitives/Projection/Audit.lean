@@ -97,6 +97,17 @@ namespace Projection
 #print axioms evalOpCert_And
 #print axioms evalOp_And_two
 #print axioms srcFlopNext_eq
+-- multi-clock: the shared semantics, and conservativity
+#print axioms Compiler.interpretDesign_allEdges
+#print axioms Compiler.srcFlopNext_fires
+#print axioms Compiler.srcMemNext_fires
+#print axioms Compiler.allEdges_size
+#print axioms Compiler.fires_allEdges
+#print axioms Acceptance.tiny_conservative
+#print axioms Acceptance.seq_conservative
+#print axioms decClock_encClock
+#print axioms decStr_encStr
+#print axioms EdgesRel_encEdges
 
 -- scope preservation: successful specialization emits no dangling references
 #print axioms PValOK_Scoped

@@ -121,6 +121,32 @@ theorem InputRel_functional {v : Val} {i j : RuntimeInput}
     (h₁ : InputRel v i) (h₂ : InputRel v j) : i = j :=
   Option.some.inj (h₁ ▸ h₂)
 
+/-! ## Clock edges
+
+Also a bare positional chain, for the same reason the input is: `ClockEdges` is
+`Array Bool` indexed by clock ordinal, and the ordinal a given flop commits on
+is STATIC -- it comes out of the certificate.  So `I_hw` reaches the right edge
+with a statically known number of `tl` steps and one `hd`, which is the shape
+Phase 1 made cheap, rather than by a dynamic search. -/
+
+def encEdges (e : ClockEdges) : Val := encListG (fun b => .bool b) e.toList
+
+def decEdges (v : Val) : Option ClockEdges :=
+  (decListG (fun w => match w with | .bool b => some b | _ => none) v).map List.toArray
+
+def EdgesRel (v : Val) (e : ClockEdges) : Prop := decEdges v = some e
+
+theorem EdgesRel_encEdges (e : ClockEdges) : EdgesRel (encEdges e) e := by
+  simp only [EdgesRel, decEdges, encEdges,
+             decListG_encListG (e := fun b : Bool => (Val.bool b))
+               (d := fun w => match w with | .bool b => some b | _ => none)
+               (fun b => rfl)]
+  simp
+
+theorem EdgesRel_functional {v : Val} {e f : ClockEdges}
+    (h₁ : EdgesRel v e) (h₂ : EdgesRel v f) : e = f :=
+  Option.some.inj (h₁ ▸ h₂)
+
 /-! ## Record wrappers
 
 `field1`/`field2` strip a tagged record's wrapper and nothing else, so every
@@ -238,7 +264,8 @@ a property of the CERTIFICATE rather than per result value -- `mems` is
 graph evaluates to.  Milestone 2's `SupportedByProjection` will contain this
 conjunct. -/
 theorem interpretDesign_memFree {D : DesignCert} (h : D.memories = #[])
-    (i : RuntimeInput) (s : RuntimeState) : MemFree (interpretDesign D i s).nextState := by
+    (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
+    MemFree (interpretDesign D e i s).nextState := by
   simp [MemFree, interpretDesign, h]
 
 /-! ## Milestone 1 acceptance
@@ -274,15 +301,20 @@ theorem seq_state (q : Int) : StateRel (encState (seqSt q)) (seqSt q) := StateRe
 theorem seq_input (d en rst : Int) : InputRel (encInput (seqIn d en rst)) (seqIn d en rst) :=
   InputRel_encInput _
 
-theorem tiny_result :
-    ResultRel (encResult (interpretDesign tinyD tinyIn tinySt))
-              (interpretDesign tinyD tinyIn tinySt) :=
-  ResultRel_encResult (interpretDesign_memFree rfl _ _)
+theorem tiny_result (e : ClockEdges) :
+    ResultRel (encResult (interpretDesign tinyD e tinyIn tinySt))
+              (interpretDesign tinyD e tinyIn tinySt) :=
+  ResultRel_encResult (interpretDesign_memFree rfl _ _ _)
 
-theorem seq_result (d en rst q : Int) :
-    ResultRel (encResult (interpretDesign seqD (seqIn d en rst) (seqSt q)))
-              (interpretDesign seqD (seqIn d en rst) (seqSt q)) :=
-  ResultRel_encResult (interpretDesign_memFree rfl _ _)
+theorem seq_result (e : ClockEdges) (d en rst q : Int) :
+    ResultRel (encResult (interpretDesign seqD e (seqIn d en rst) (seqSt q)))
+              (interpretDesign seqD e (seqIn d en rst) (seqSt q)) :=
+  ResultRel_encResult (interpretDesign_memFree rfl _ _ _)
+
+/-- The edge vector round-trips too, so every one of `I_hw`'s three dynamic
+inputs is covered. -/
+theorem seq_edges : EdgesRel (encEdges (allEdges seqD)) (allEdges seqD) :=
+  EdgesRel_encEdges _
 
 /-! ### …and the whole chain actually runs
 
@@ -292,7 +324,7 @@ the decoded result is compared against the reference semantics' own numbers --
 the same ones `SimulatorContract` pins for `interpretDesign`. -/
 
 private def seqRun (d en rst q : Int) : Option RuntimeResult :=
-  decResult (encResult (interpretDesign seqD (seqIn d en rst) (seqSt q)))
+  decResult (encResult (interpretDesign seqD (allEdges seqD) (seqIn d en rst) (seqSt q)))
 
 #guard (seqRun 5 1 0 0).map (fun r => r.outputs)         == some #[mk_bv 4 0]
 #guard (seqRun 5 1 0 0).map (fun r => r.nextState.flops) == some #[mk_bv 4 4]
@@ -300,7 +332,7 @@ private def seqRun (d en rst q : Int) : Option RuntimeResult :=
 #guard (seqRun 3 1 1 4).map (fun r => r.nextState.flops) == some #[mk_bv 4 0]
 
 -- the flop state survives the round trip as a genuine cycle: 0 -> 4 -> 4
-#guard ((refTrace seqD (seqSt 0) [seqIn 5 1 0, seqIn 5 1 0]).map
+#guard ((refTrace seqD (seqSt 0) [(allEdges seqD, seqIn 5 1 0), (allEdges seqD, seqIn 5 1 0)]).map
           (fun r => (decResult (encResult r)).map (fun x => x.outputs)))
        == [some #[mk_bv 4 0], some #[mk_bv 4 4]]
 

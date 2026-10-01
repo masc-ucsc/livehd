@@ -137,17 +137,24 @@ theorem sourceValue_flopQAsync (i : RuntimeInput) (s : RuntimeState)
 
 Reset before enable, the reset VALUE rather than a hardcoded zero, and the
 old-state fallback when disabled.  All three are read from the descriptor, and
-all three are pinned by a vector in `SimulatorContract.Acceptance.seqD`. -/
+all three are pinned by a vector in `SimulatorContract.Acceptance.seqD`.
 
-theorem srcFlopNext_eq (rho : Nat → CertVal) (s : RuntimeState) (idx : Nat) (f : FlopDesc) :
-    srcFlopNext rho s idx f =
+The edge is part of the rule now: a quiet domain holds, and an ASYNCHRONOUS
+reset acts regardless of it while a synchronous one does not.  Those two are
+pinned by vectors too, in the same place. -/
+
+theorem srcFlopNext_eq (rho : Nat → CertVal) (e : ClockEdges) (s : RuntimeState) (idx : Nat)
+    (f : FlopDesc) :
+    srcFlopNext rho e s idx f =
       (if (match f.resetPin with
            | none   => false
            | some r => xor f.resetActiveLow (bv_nonzero (rho r).asBV))
+          && (fires e f.clock || f.asyncReset)
        then mk_bv f.width f.resetValue
-       else if (match f.enable with
-                | none   => true
-                | some e => bv_nonzero (rho e).asBV)
+       else if fires e f.clock
+               && (match f.enable with
+                   | none    => true
+                   | some en => bv_nonzero (rho en).asBV)
             then bv_resize f.width (rho f.din).asBV
             else s.flops[idx]?.getD (mk_bv f.width 0)) := rfl
 
