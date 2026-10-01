@@ -57,4 +57,5 @@ cc_library(
     "node_count_test",
     "ge_weight_smoke",
     "latch_contract_test",
+    "split_selfref_test",
 ]]
