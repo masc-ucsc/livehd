@@ -44,13 +44,11 @@ namespace Projection
 #print axioms buildEnv_Compat
 #print axioms mixTerm_complete
 #print axioms mixAlts_ok
-#print axioms mixUArgs_ok
 #print axioms mixTerms_ok
 #print axioms specOK_all
 #print axioms mixDriver_sound
 #print axioms mixTerm_sound
 #print axioms mixAlts_sound
-#print axioms mixUArgs_sound
 #print axioms splitArgs_sound
 #print axioms specSound_all
 #print axioms mixDriver_complete
@@ -105,7 +103,6 @@ namespace Projection
 #print axioms Compat_Scoped
 #print axioms mixTerms_scoped
 #print axioms mixAlts_scoped
-#print axioms mixUArgs_inlineEnv_scoped
 #print axioms mixTerm_scoped
 #print axioms buildEnv_scoped
 #print axioms mixFun_scoped

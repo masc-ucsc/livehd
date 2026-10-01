@@ -466,7 +466,7 @@ theorem prepare_hot_path {t : Term} (hnv : ∀ i, t ≠ .var i) (spine : PVal) :
 
 /-! #### Layer 2: the same-fuel companions
 
-`mixTerm` recurses by REDUCING fuel, while `mixTerms`, `mixUArgs` and `mixAlts`
+`mixTerm` recurses by REDUCING fuel, while `mixTerms`, `mixPArgs` and `mixAlts`
 call it at the SAME fuel.  So the architecture is a fuel induction with these
 three as companions derived from its hypothesis -- an induction on `ATerm` would
 leave them nothing to appeal to.  This mirrors the existing `TOK` organization
@@ -545,104 +545,6 @@ theorem mixAlts_scoped {n : Nat} (h : ScopeOK n) :
                 PEnv.Scoped_append (freshDyns_scoped d a.arity) (PEnv.Scoped_shift a.arity henv)
               exact ⟨PRes.Scoped_toCode (h A idx _ _ a.body r rq₁ (d + a.arity) hext ht),
                      ih as' rq₂ d henv has⟩
-
-/-- `mixUArgs` and `inlineEnv` together, because they have to agree about the
-binding layout and proving them apart would state that agreement twice.
-
-The length equality is PRIVATE and disposable: `bs.length = dynCount ps` holds
-for today's implementation, in which each dynamic parameter contributes exactly
-one binding, and becomes FALSE as soon as preparation can emit zero or several
-leaf bindings for one argument.  It is an internal step, never part of the
-interface. -/
-private theorem mixUArgs_inlineEnv_scoped_current {n : Nat} (h : ScopeOK n) :
-    ∀ A idx Δ ps ts env d rs bs rq env',
-      PEnv.Scoped d env →
-      mixUArgs n A idx Δ env ps ts = .ok (rs, bs, rq) →
-      inlineEnv ps rs = .ok env' →
-      ScopedLets d bs ∧ PEnv.Scoped (d + bs.length) env' ∧ bs.length = dynCount ps := by
-  intro A idx Δ ps
-  induction ps with
-  | nil =>
-      intro ts env d rs bs rq env' _ hm hi
-      cases ts with
-      | nil =>
-          simp only [mixUArgs] at hm
-          cases hm
-          simp only [inlineEnv] at hi
-          cases hi
-          exact ⟨trivial, trivial, rfl⟩
-      | cons _ _ => simp [mixUArgs] at hm
-  | cons b ps' ih =>
-      intro ts env d rs bs rq env' henv hm hi
-      cases ts with
-      | nil => cases b <;> simp [mixUArgs] at hm
-      | cons t ts' =>
-          cases b with
-          | stat =>
-              simp only [mixUArgs] at hm
-              cases ht : mixTerm n A idx Δ env t with
-              | error e => rw [ht] at hm; simp at hm
-              | ok x =>
-                  obtain ⟨r, rq₁⟩ := x
-                  rw [ht] at hm
-                  cases hu : mixUArgs n A idx Δ env ps' ts' with
-                  | error e => rw [hu] at hm; simp at hm
-                  | ok y =>
-                      obtain ⟨rs', dts, rq₂⟩ := y
-                      rw [hu] at hm
-                      cases hm
-                      cases r with
-                      | stat v =>
-                          simp only [inlineEnv] at hi
-                          cases hie : inlineEnv ps' rs' with
-                          | error _ => rw [hie] at hi; simp at hi
-                          | ok rest =>
-                              rw [hie] at hi
-                              cases hi
-                              obtain ⟨h1, h2, h3⟩ := ih ts' env d rs' _ rq₂ rest henv hu hie
-                              exact ⟨h1, ⟨trivial, h2⟩, by simpa [dynCount] using h3⟩
-                      | code _   => simp [inlineEnv] at hi
-                      | cons _ _ => simp [inlineEnv] at hi
-                      | lets _ _ => simp [inlineEnv] at hi
-          | dyn =>
-              simp only [mixUArgs] at hm
-              cases ht : mixTerm n A idx Δ env t with
-              | error e => rw [ht] at hm; simp at hm
-              | ok x =>
-                  obtain ⟨r, rq₁⟩ := x
-                  rw [ht] at hm
-                  cases hu : mixUArgs n A idx Δ (PEnv.shiftBy 1 env) ps' ts' with
-                  | error e => rw [hu] at hm; simp at hm
-                  | ok y =>
-                      obtain ⟨rs', dts, rq₂⟩ := y
-                      rw [hu] at hm
-                      cases hm
-                      simp only [inlineEnv] at hi
-                      cases hie : inlineEnv ps' rs' with
-                      | error _ => rw [hie] at hi; simp at hi
-                      | ok rest =>
-                          rw [hie] at hi
-                          cases hi
-                          have hr : PRes.Scoped d r := h A idx Δ env t r rq₁ d henv ht
-                          obtain ⟨h1, h2, h3⟩ :=
-                            ih ts' (PEnv.shiftBy 1 env) (d + 1) rs' _ rq₂ rest
-                               (PEnv.Scoped_shift 1 henv) hu hie
-                          refine ⟨⟨PRes.Scoped_toCode hr, h1⟩, ⟨?_, ?_⟩, by simp [dynCount, h3]⟩
-                          · simp only [PVal.Scoped, List.length_cons]; omega
-                          · simpa [List.length_cons, Nat.add_right_comm, Nat.add_assoc] using h2
-
-/-- The public interface, with the implementation-specific length equality
-discarded.  After the `Prepared` restructuring this statement is unchanged. -/
-theorem mixUArgs_inlineEnv_scoped {n : Nat} (h : ScopeOK n) :
-    ∀ A idx Δ ps ts env d rs bs rq env',
-      PEnv.Scoped d env →
-      mixUArgs n A idx Δ env ps ts = .ok (rs, bs, rq) →
-      inlineEnv ps rs = .ok env' →
-      ScopedLets d bs ∧ PEnv.Scoped (d + bs.length) env' := by
-  intro A idx Δ ps ts env d rs bs rq env' he hm hi
-  obtain ⟨hbs, henv', _⟩ :=
-    mixUArgs_inlineEnv_scoped_current h A idx Δ ps ts env d rs bs rq env' he hm hi
-  exact ⟨hbs, henv'⟩
 
 /-! #### Prepared arguments -/
 
@@ -764,10 +666,10 @@ theorem prepare_scoped : ∀ {r : PRes} {d : Nat},
       simp only [prepare]
       exact prepare_lets_scoped h.1 (ih h.2)
 
-/-- Scope for the single-pass transfer.  Compare `mixUArgs_inlineEnv_scoped`:
-same conclusion, but no private length equality is needed to get it, because
-the binder depth is `bs.length` by construction rather than by arithmetic that
-happens to match. -/
+/-- Scope for the single-pass transfer.  The two-function transfer this replaced
+needed a private length equality to reach the same conclusion; here the binder
+depth is `bs.length` by construction rather than by arithmetic that happens to
+match. -/
 theorem mixPArgs_scoped {n : Nat} (h : ScopeOK n) :
     ∀ A idx Δ ps ts env d bs env' rq,
       PEnv.Scoped d env →
@@ -1642,7 +1544,7 @@ theorem indexOfReq_spec {rs : List SpecRequest} {r : SpecRequest} {k : Nat}
 
 `EvalLets` is what `wrapLets` means: the bound terms are evaluated one after
 another, each in the environment the previous ones have already extended.  That
-staircase is exactly why `mixUArgs` has to thread the residual scope. -/
+staircase is exactly why argument transfer has to thread the residual scope. -/
 
 /-! ## A fully static call's environment -/
 
@@ -1660,7 +1562,7 @@ theorem Compat_allStat : ∀ (ρr : Env) (ps : Div) (ws : List Val),
 
 /-! ## The claim, at one mix fuel and one source fuel
 
-`TOK` is what the main induction proves.  `mixTerms`, `mixAlts` and `mixUArgs`
+`TOK` is what the main induction proves.  `mixTerms`, `mixAlts` and `mixPArgs`
 all call `mixTerm` at the SAME mix fuel, so none of them can be co-inducted with
 it; each is derived from `TOK` at that fuel instead, exactly as
 `evalFuelList_sound_of` is derived from the term case. -/
@@ -2137,100 +2039,6 @@ theorem mixAlts_ok {A Pr reqs n m} (h : TOK A Pr reqs n m) :
         obtain ⟨a'', hf, har, hev⟩ := ih as2 rq₂ ρr ρs tag af vs v hc has hfind harity hsrc
         exact ⟨a'', by simp [findAlt, Alt.tag, htag, hf], har, hev⟩
 
-/-! ## Arguments of an unfolded call
-
-The one place where the residual scope grows while `mix` is still walking, so
-the statement has to say WHERE each argument's value ends up: `ws.reverse ++ ρr`
-names the scope the `let`s build, and `inlineEnv`'s index into it is
-`dynCount` of the parameters still to come. -/
-
-theorem mixUArgs_ok {A Pr reqs n m} (h : TOK A Pr reqs n m) :
-    ∀ (ps : Div) (ts : List ATerm) (Δ : Div) (env : PEnv) (rs : List PRes)
-      (dts : List Term) (rq : List SpecRequest) (ρr ρs : Env) (vs : List Val)
-      (env' : PEnv),
-      Compat ρr Δ env ρs →
-      mixUArgs n A (indexOfReq reqs) Δ env ps ts = .ok (rs, dts, rq) →
-      evalFuelList m (eraseProgram A) ρs (eraseList ts) = .inl vs →
-      inlineEnv ps rs = .ok env' →
-      ∃ ws : List Val, ws.length = dynCount ps ∧
-            EvalLets Pr ρr dts (ws.reverse ++ ρr) ∧
-            Compat (ws.reverse ++ ρr) ps env' vs := by
-  intro ps
-  induction ps with
-  | nil =>
-      intro ts Δ env rs dts rq ρr ρs vs env' _ hmix hsrc hie
-      cases ts with
-      | nil =>
-          simp only [mixUArgs] at hmix
-          cases hmix
-          simp only [eraseList, evalFuelList] at hsrc
-          cases hsrc
-          simp only [inlineEnv] at hie
-          cases hie
-          exact ⟨[], rfl, by simpa using EvalLets.nil, by simpa using Compat.nil⟩
-      | cons _ _ => simp [mixUArgs] at hmix
-  | cons b bs ih =>
-      intro ts Δ env rs dts rq ρr ρs vs env' hc hmix hsrc hie
-      cases ts with
-      | nil => cases b <;> simp [mixUArgs] at hmix
-      | cons t ts =>
-        cases b with
-        | stat =>
-            simp only [mixUArgs] at hmix
-            split at hmix <;> try contradiction
-            rename_i r rq₁ rs' dts' rq₂ ht hrec
-            cases hmix
-            simp only [eraseList, evalFuelList] at hsrc
-            split at hsrc <;> try contradiction
-            rename_i v₀ hv₀
-            split at hsrc <;> try contradiction
-            rename_i vs' hvs'
-            cases hsrc
-            have hr := h Δ env t r rq₁ ρr ρs v₀ hc ht hv₀
-            cases r with
-            | code _ => simp [inlineEnv] at hie
-            | cons _ _ => simp [inlineEnv] at hie
-            | lets _ _ => simp [inlineEnv] at hie
-            | stat w =>
-                simp only [inlineEnv] at hie
-                split at hie <;> try contradiction
-                rename_i env'' hie'
-                cases hie
-                obtain ⟨ws, hlen, hlets, hcp⟩ :=
-                  ih ts Δ env rs' _ rq₂ ρr ρs vs' env'' hc hrec hvs' hie'
-                refine ⟨ws, by simpa [dynCount] using hlen, hlets, ?_⟩
-                have hw : w = v₀ := hr.statEq w rfl
-                subst hw
-                exact hcp.stat
-        | dyn =>
-            simp only [mixUArgs] at hmix
-            split at hmix <;> try contradiction
-            rename_i r rq₁ rs' dts' rq₂ ht hrec
-            cases hmix
-            simp only [eraseList, evalFuelList] at hsrc
-            split at hsrc <;> try contradiction
-            rename_i v₀ hv₀
-            split at hsrc <;> try contradiction
-            rename_i vs' hvs'
-            cases hsrc
-            have hr := h Δ env t r rq₁ ρr ρs v₀ hc ht hv₀
-            simp only [inlineEnv] at hie
-            split at hie <;> try contradiction
-            rename_i env'' hie'
-            cases hie
-            obtain ⟨ws, hlen, hlets, hcp⟩ :=
-              ih ts Δ (env.shiftBy 1) rs' dts' rq₂ (v₀ :: ρr) ρs vs' env''
-                 (Compat_shift1 v₀ hc) hrec hvs' hie'
-            have heq : (v₀ :: ws).reverse ++ ρr = ws.reverse ++ (v₀ :: ρr) := by simp
-            refine ⟨v₀ :: ws, by simp [dynCount, hlen], ?_, ?_⟩
-            · rw [heq]; exact .cons (PResOK_toCode hr) hlets
-            · rw [heq]
-              refine .dyn (pv := .dyn (dynCount bs)) ?_ hcp
-              have hl : ws.reverse.length = dynCount bs := by simp [hlen]
-              simp only [PValOK]
-              rw [List.getElem?_append_right (by omega), hl]
-              simp
-
 /-- The semantic half of one-pass argument transfer.
 
 `mixPArgs` returns the flattened binding list and the partial environment
@@ -2238,9 +2046,9 @@ TOGETHER, so this says exactly one thing: running the bindings reaches SOME
 residual environment, and under that environment the partial environment is
 compatible with the source argument values.
 
-Contrast `mixUArgs_ok` above, which had to expose both `ws.length = dynCount ps`
-and the shape `ρr' = ws.reverse ++ ρr`.  Those were the two facts a caller then
-had to keep in step with `inlineEnv`'s independent reconstruction of the same
+The transfer this replaced had to expose both `ws.length = dynCount ps` and the
+shape `ρr' = ws.reverse ++ ρr`.  Those were the two facts a caller then had to
+keep in step with a second function's independent reconstruction of the same
 layout by hand -- the `wrapLets` index-arithmetic class of bug.  Here the
 residual environment is existential and the agreement is structural, so there is
 nothing for a caller to re-derive.  Counting is deliberately private: it lives
@@ -3619,116 +3427,14 @@ theorem splitArgs_sound {A Pr reqs n mr} (h : SOK A Pr reqs n mr) :
             exact ⟨d :: vs, by simp [srcArgs, hsrc],
                    .cons (PResSound_toCode hr hd) hel, by simp [hlen]⟩
 
-/-! ## An unfolded call's arguments, backwards
-
-`mr` is now fixed OUTSIDE the induction.  It used to be quantified inside,
-because the proof peeled the `wrapLets` itself and each peel cost a unit of
-residual fuel.  `EvalLetsAt` reports the bindings at the bound instead, with
-`evalFuel_mono` absorbing the decrements once, so the recursion no longer moves
-the fuel and neither the binding COUNT nor the shape of the extended residual
-environment has to appear in the statement. -/
-
-theorem mixUArgs_dts_length {n A idx} :
-    ∀ {Δ env : _} {ps : Div} {ts : List ATerm} {rs dts rq},
-      mixUArgs n A idx Δ env ps ts = .ok (rs, dts, rq) → dts.length = dynCount ps
-  | _, _, [],        [],     _, _, _, h => by simp only [mixUArgs] at h; cases h; rfl
-  | _, _, [],        _ :: _, _, _, _, h => by simp [mixUArgs] at h
-  | _, _, _ :: _,    [],     _, _, _, h => by
-      rename_i b _ _ _ _ _; cases b <;> simp [mixUArgs] at h
-  | Δ, env, b :: ps, t :: ts, _, _, _, h => by
-      cases b with
-      | stat =>
-          simp only [mixUArgs] at h
-          split at h <;> try contradiction
-          rename_i _ _ _ dts' _ _ hrec
-          cases h
-          simp [dynCount, mixUArgs_dts_length hrec]
-      | dyn =>
-          simp only [mixUArgs] at h
-          split at h <;> try contradiction
-          rename_i _ _ _ dts' _ _ hrec
-          cases h
-          simp [dynCount, mixUArgs_dts_length hrec]
-
-theorem mixUArgs_sound {A Pr reqs n mr} (hsok : SOK A Pr reqs n mr) :
-    ∀ (ps : Div) (ts : List ATerm) (Δ : Div) (env : PEnv) (rs : List PRes)
-      (dts : List Term) (rq : List SpecRequest) (ρr ρs ρ1 : Env) (env' : PEnv),
-      Compat ρr Δ env ρs →
-      mixUArgs n A (indexOfReq reqs) Δ env ps ts = .ok (rs, dts, rq) →
-      inlineEnv ps rs = .ok env' →
-      EvalLetsAt mr Pr ρr dts ρ1 →
-      ∃ vs : List Val,
-        Compat ρ1 ps env' vs ∧
-        EvalList (eraseProgram A) ρs (eraseList ts) vs ∧
-        vs.length = ps.length := by
-  intro ps
-  induction ps with
-  | nil =>
-      intro ts Δ env rs dts rq ρr ρs ρ1 env' _ hmix hie hl
-      cases ts with
-      | nil =>
-          simp only [mixUArgs] at hmix; cases hmix
-          simp only [inlineEnv] at hie; cases hie
-          cases hl
-          exact ⟨[], .nil, .nil, rfl⟩
-      | cons _ _ => simp [mixUArgs] at hmix
-  | cons b ps' ih =>
-      intro ts Δ env rs dts rq ρr ρs ρ1 env' hc hmix hie hl
-      cases ts with
-      | nil => cases b <;> simp [mixUArgs] at hmix
-      | cons t ts' =>
-        cases b with
-        | stat =>
-            simp only [mixUArgs] at hmix
-            split at hmix <;> try contradiction
-            rename_i r rq₁ rs' dts' rq₂ ht hrec
-            cases hmix
-            cases r with
-            | code _ => simp [inlineEnv] at hie
-            | cons _ _ => simp [inlineEnv] at hie
-            | lets _ _ => simp [inlineEnv] at hie
-            | stat w =>
-                simp only [inlineEnv] at hie
-                split at hie <;> try contradiction
-                rename_i env'' hie'
-                cases hie
-                have hr := hsok Δ env t (.stat w) rq₁ ρr ρs hc ht
-                obtain ⟨vs, hcp, hel, hvl⟩ :=
-                  ih ts' Δ env rs' _ rq₂ ρr ρs ρ1 env'' hc hrec hie' hl
-                exact ⟨w :: vs, hcp.stat, .cons (hr.statEq w rfl) hel, by simp [hvl]⟩
-        | dyn =>
-            simp only [mixUArgs] at hmix
-            split at hmix <;> try contradiction
-            rename_i r rq₁ rs' dts' rq₂ ht hrec
-            cases hmix
-            simp only [inlineEnv] at hie
-            split at hie <;> try contradiction
-            rename_i env'' hie'
-            cases hie
-            cases hl with
-            | cons hd htl =>
-              -- the bound value stays anonymous: `hd` and `htl` pin it, and
-              -- naming it here would collide with the earlier `split`s
-              have hr := hsok Δ env t r rq₁ ρr ρs hc ht
-              obtain ⟨vs, hcp, hel, hvl⟩ :=
-                ih ts' Δ (env.shiftBy 1) rs' dts' rq₂ _ ρs ρ1 env''
-                   (Compat_shift1 _ hc) hrec hie' htl
-              refine ⟨_ :: vs, ?_, .cons (PResSound_toCode hr hd) hel, by simp [hvl]⟩
-              refine .dyn (pv := .dyn (dynCount ps')) ?_ hcp
-              have hlen : dts'.length = dynCount ps' := mixUArgs_dts_length hrec
-              have hg := EvalLetsAt_getElem (bs := dts') 0 htl
-              simp only [PValOK]
-              rw [← hlen]
-              simpa using hg
-
 /-! ## One-pass argument transfer, backwards
 
-The soundness counterpart of `mixPArgs_ok`, in the same shape as the new
-`mixUArgs_sound`: the residual environment is whatever running the bindings
-reached, and neither the binding COUNT nor its structure appears.
+The soundness counterpart of `mixPArgs_ok`: the residual environment is whatever
+running the bindings reached, and neither the binding COUNT nor its structure
+appears.
 
-One thing is genuinely new here.  `mixUArgs` bound EVERY dynamic argument, so
-the residual evaluation handed the proof each argument's value.  `mixPArgs`
+One thing is genuinely new here.  The transfer this replaced bound EVERY dynamic
+argument, so the residual evaluation handed the proof each argument's value.  `mixPArgs`
 binds only what carries computation, so for a prepared spine there is no
 evaluation to read a value off -- it has to be CONSTRUCTED, and that is exactly
 what scopedness buys (`PValOK_of_Scoped`).  This is the second half of the

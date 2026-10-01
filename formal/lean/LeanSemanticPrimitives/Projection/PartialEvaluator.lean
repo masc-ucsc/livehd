@@ -87,8 +87,8 @@ a dynamic list at run time -- which is the O(N^2) wall `Scaling.lean` measures.
 LEAVES ARE `stat` OR `dyn`, NEVER ARBITRARY CODE, and that is forced rather than
 chosen: `PEnv.shiftBy` has to move every residual index when a binder is
 entered, and shifting arbitrary residual TERMS would need a de Bruijn weakening
-operation plus its correctness lemma -- exactly what `mixUArgs` avoids by
-threading the environment instead.  A `dyn` index shifts by arithmetic.  So code
+operation plus its correctness lemma -- exactly what argument transfer avoids
+by threading the environment instead.  A `dyn` index shifts by arithmetic.  So code
 placed into the environment is `let`-bound first and enters as a `dyn`. -/
 inductive PVal where
   | stat : Val → PVal
@@ -240,10 +240,11 @@ def dynCount : Div → Nat
 The result of getting an argument ready to cross an unfolded call: the bindings
 its code leaves need, plus the partial value whose `dyn` leaves index them.
 
-Returning the two TOGETHER is the point.  `mixUArgs` and `inlineEnv` currently
-each reconstruct the same binding layout independently and agree only because
-their arithmetic matches -- the same shape as the `wrapLets` index bug this
-branch already hit once.  With one package the agreement is structural. -/
+Returning the two TOGETHER is the point.  The transfer this replaced ran as two
+functions, `mixUArgs` and `inlineEnv`, each reconstructing the same binding
+layout independently and agreeing only because their arithmetic matched -- the
+same shape as the `wrapLets` index bug this branch already hit once.  With one
+package the agreement is structural. -/
 
 structure Prepared where
   binds : List Term
@@ -377,30 +378,6 @@ def dynArgCodes : Div → List PRes → Except MixError (List Term)
   | .dyn :: bs, r :: rs =>
       match dynArgCodes bs rs with
       | .ok ts   => .ok (r.toCode :: ts)
-      | .error e => .error e
-  | _, _ => .error (.badArity "unfold: argument count does not match the division")
-
-/-- The environment the inlined body is specialized under.
-
-Wrapping the body in `let e₀ in let e₁ in … let e_{k-1} in ·` puts `e_{k-1}` at
-residual index 0, so the `j`-th dynamic argument lands at index `k-1-j`.
-
-That index is written as `dynCount bs` -- the number of dynamic parameters still
-to come -- rather than as `k-1-j` with a total and a counter threaded through.
-The two are equal, and the local form is the one the correctness proof can
-induct on: `k-1-j` mentions a total the recursion does not have in hand, so
-every step would have to relate an index into a scope that is not built yet. -/
-def inlineEnv : Div → List PRes → Except MixError PEnv
-  | [], [] => .ok []
-  | .stat :: bs, .stat v :: rs =>
-      match inlineEnv bs rs with
-      | .ok rest => .ok (.stat v :: rest)
-      | .error e => .error e
-  | .stat :: _, .code _ :: _ =>
-      .error (.notStatic "unfold: static parameter got residual code")
-  | .dyn :: bs, _ :: rs =>
-      match inlineEnv bs rs with
-      | .ok rest => .ok (.dyn (dynCount bs) :: rest)
       | .error e => .error e
   | _, _ => .error (.badArity "unfold: argument count does not match the division")
 
@@ -618,42 +595,6 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
             | .ok (.stat _, _)    => .error (.illAnnotated "ucall: dynamic unfold with a static body")
             | .ok (rb, rq₃)       => .ok (.lets bs rb, rq₂ ++ rq₃)
 
-/-- Arguments of an UNFOLDED call, mixed left to right with the residual scope
-threaded.
-
-`mixTerms` mixes every argument in the same environment, which is right
-everywhere a residual node introduces no binder -- `prim`, `ctorT`, a
-residualized `call`, the branches of an `ite`.  It is WRONG here.  Unfolding
-wraps one `let` per dynamic argument, so argument `j` is evaluated underneath
-the binders of arguments `0 … j-1`: mixed in the caller's environment its de
-Bruijn indices come out short by exactly the number of preceding dynamic
-arguments, and it silently reads the wrong variables.
-
-Shifting the emitted terms afterwards would also work and would need a de Bruijn
-weakening operation on residual terms, plus its correctness lemma.  Threading
-the environment instead costs one `shiftBy` and no new theory: each argument is
-mixed in the environment that already accounts for the binders in front of it.
-
-Static arguments do not shift -- `shiftBy` leaves static entries alone -- so
-mixing them one binder deeper produces the same value. -/
-def mixUArgs : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv → Div →
-    List ATerm → Except MixError (List PRes × List Term × List SpecRequest)
-  | _, _, _, _, _, [], [] => .ok ([], [], [])
-  | n, A, idx, Δ, env, .stat :: ps, t :: ts =>
-      match mixTerm n A idx Δ env t, mixUArgs n A idx Δ env ps ts with
-      | .ok (r, rq₁), .ok (rs, dts, rq₂) => .ok (r :: rs, dts, rq₁ ++ rq₂)
-      | .error z, _ => .error z
-      | _, .error z => .error z
-  | n, A, idx, Δ, env, .dyn :: ps, t :: ts =>
-      -- this argument becomes a residual binder, so everything after it is
-      -- mixed one binder deeper
-      match mixTerm n A idx Δ env t, mixUArgs n A idx Δ (env.shiftBy 1) ps ts with
-      | .ok (r, rq₁), .ok (rs, dts, rq₂) => .ok (r :: rs, r.toCode :: dts, rq₁ ++ rq₂)
-      | .error z, _ => .error z
-      | _, .error z => .error z
-  | _, _, _, _, _, _, _ =>
-      .error (.badArity "unfold: argument count does not match the division")
-
 def mixTerms : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv → List ATerm →
     Except MixError (List PRes × List SpecRequest)
   | _, _, _, _, _, [] => .ok ([], [])
@@ -681,13 +622,13 @@ def mixAlts : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
 
 /-- Argument transfer for an unfolded call, in ONE pass.
 
-`mixUArgs` and `inlineEnv` are two functions that have to agree about the
-binding layout, and they agree only because their arithmetic matches: `mixUArgs`
-emits one binding per dynamic parameter and `inlineEnv` indexes with `dynCount`.
+This replaced a PAIR of functions, `mixUArgs` and `inlineEnv`, that had to agree
+about the binding layout and agreed only because their arithmetic matched: one
+emitted a binding per dynamic parameter, the other indexed with `dynCount`.
 Preparation makes that equality false -- an argument may emit zero bindings (it
 was already a variable), one, or several.
 
-`mixPArgs` replaces the pair with a single pass returning the emitted bindings,
+A single pass returns the emitted bindings,
 the callee environment, and -- implicitly, as `binds.length` -- the exact binder
 depth.  The agreement is structural rather than arithmetic, and no `dynCount`
 appears anywhere in it. -/

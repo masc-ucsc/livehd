@@ -34,11 +34,11 @@
   AN EARLIER VERSION OF THIS COMMENT PROPOSED THE WRONG FIX, and the correction
   is worth keeping.  It said the cure was a specializer-side rewrite
   `hd (consP a b) => a` / `tl (consP a b) => b`.  That rewrite can never fire:
-  `PartialEvaluator.lean`'s `.ucall .dyn` case runs `wrapLets dts b'` and
-  `inlineEnv` maps each dynamic parameter to `PVal.dyn i`, so the environment
-  reaches the body as a residual VARIABLE and the `consP` is never syntactically
-  adjacent to the `hd`.  Post-processing cannot rescue it either, because the
-  O(N^2) term has to be built before anything could simplify it.
+  the `.ucall .dyn` case wrapped the body in the argument bindings and mapped
+  each dynamic parameter to a single `PVal.dyn i`, so the environment reached
+  the body as a residual VARIABLE and the `consP` was never syntactically
+  adjacent to the `hd`.  Post-processing could not rescue it either, because the
+  O(N^2) term had to be built before anything could simplify it.
 
   The actual fix is a partial VALUE DOMAIN in the specializer -- one that
   preserves a known cons spine with dynamic leaves, so a slot read resolves to a
