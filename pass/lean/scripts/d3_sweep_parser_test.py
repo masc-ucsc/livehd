@@ -39,7 +39,7 @@ def log(shape: str, selftest: str | None,
     return "\n".join(parts) + "\n"
 
 
-def run(out: str, rc: int = 0):
+def run(out: str, rc: int = 0, expect_module=None, expect_samples=None):
     row = {g: 0 for g in d3.GATES}
     row["cert"] = 1
     row["proof"] = "na"
@@ -47,7 +47,8 @@ def run(out: str, rc: int = 0):
               "selftest_base", "mut_out", "mut_flop", "mut_mem",
               "mutable_out", "mutable_flop", "mutable_mem", "distinct_obs"):
         row[k] = ""
-    d3.extract_gates(row, out, rc, 900)
+    d3.extract_gates(row, out, rc, 900, expect_module=expect_module,
+                     expect_samples=expect_samples)
     return row, d3.verdict(row)
 
 
@@ -158,6 +159,50 @@ def main() -> int:
               f"agree={row['agree']}  {note}")
         if bad:
             print(f"       detail={row.get('detail')!r}")
+
+    # --- trust order: an identity or shape failure leaves ONLY `cert` --------
+    #
+    # Gates must not be credited from a log before the log is shown to describe
+    # this certificate. An earlier version set compile/reify/typecheck first and
+    # validated identity afterwards, so a stale clean log for another module
+    # still earned verdict=typecheck.
+    ident = [
+        ("wrong_module",
+         log(FULL, GOOD).replace("D3GATE module=m ", "D3GATE module=someone_else "),
+         {"expect_module": "m"},
+         "a clean log for a DIFFERENT module"),
+        ("emitted_count_mismatch",
+         log(FULL, GOOD).replace("emitted, 10 sources, 12 bindings",
+                                 "emitted, 99 sources, 77 bindings"),
+         {"expect_module": "m"},
+         "the reifier's counts contradict the shape line"),
+        ("duplicate_shape_key",
+         log(FULL + " sources=20", GOOD), {"expect_module": "m"},
+         "the shape line repeats `sources`"),
+        ("shape_value_not_a_count",
+         log("sources=ten nodes=12 outputs=2 flops=1 mems=1 inputs=3 bindings=12", GOOD),
+         {"expect_module": "m"},
+         "a shape value that is not a number"),
+    ]
+    for name, text, kw, note in ident:
+        row, v = run(text, 0, **kw)
+        gates_set = [g for g in ("compile", "reify", "typecheck", "sim", "checker", "agree")
+                     if row.get(g) == 1]
+        if v != "cert" or gates_set:
+            print(f"FAIL {name:<24} verdict={v} (want cert), still-set gates={gates_set}")
+            print(f"       detail={row.get('detail')!r}")
+            failures.append(name)
+        else:
+            print(f"ok   {name:<24} verdict=cert, no gate credited  — {note}")
+
+    # the sample count actually run must match the one requested
+    row, v = run(log(FULL, GOOD, "agree=1 samples=8 distinct_obs=9"),
+                 0, expect_module="m", expect_samples=32)
+    if v == "agree":
+        print("FAIL sample_count_mismatch   a run with 8 samples credited against a request for 32")
+        failures.append("sample_count_mismatch")
+    else:
+        print(f"ok   sample_count_mismatch   verdict={v}, samples=8 != requested 32")
 
     # agree=0 with a sound checker must land exactly on `checker`.
     row, v = run(log(FULL, GOOD, "agree=0 samples=32 distinct_obs=9"))

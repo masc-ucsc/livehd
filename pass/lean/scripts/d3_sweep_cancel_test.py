@@ -74,9 +74,13 @@ def settle(mark: str, seconds: float = 25.0) -> list:
 
 def spawn(certs: str, run_id: str, jobs: int, timeout: int, out_name: str, only: str = ""):
     env = dict(os.environ, D3_RUN_ID=run_id)
+    # --force: these outputs are throwaway and persist between runs, so without
+    # it the second run of this suite would trip the overwrite guard and fail
+    # for a reason that has nothing to do with process teardown. The guard
+    # itself is tested in d3_runner_test.py.
     cmd = [sys.executable, str(SWEEP), "--certs", certs,
            "--out", str(ROOT / "temp" / "d3_sweep" / out_name),
-           "--jobs", str(jobs), "--timeout", str(timeout)]
+           "--jobs", str(jobs), "--timeout", str(timeout), "--force"]
     if only:
         cmd += ["--only", only]
     return subprocess.Popen(cmd, cwd=ROOT, env=env,
@@ -142,7 +146,7 @@ def phase_timeout(certs: str, mod: str) -> bool:
     try:
         subprocess.run(
             [sys.executable, str(SWEEP), "--certs", certs, "--out", str(out),
-             "--only", mod, "--jobs", "1", "--timeout", "5"],
+             "--only", mod, "--jobs", "1", "--timeout", "5", "--force"],
             cwd=ROOT, env=env, capture_output=True, text=True, timeout=400)
         if not report(settle(mark), "the timeout"):
             return False
