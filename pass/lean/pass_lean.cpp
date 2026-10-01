@@ -1240,6 +1240,21 @@ std::string emit_node_expr(const LeanCtx& ctx, const Node& node) {
 // endpoints of the back edge -- that is what separates "a cycle survived cprop"
 // from "the emitter is merely slow", which is the distinction the whole
 // txfma_f0/f2/f3/f5 + txfmafrac_top group turned on.
+//
+// A MEMORY IS A BOUNDARY, exactly like a flop.  `Ntype_op::Memory` is an odd
+// slot and bit 0 of the encoding IS `is_loop_last` (graph/cell.hpp), which is
+// how hhds' own topological traversals treat it; this hand-rolled DFS used to
+// be the one consumer that did not.  Treating the CELL as one atomic node makes
+// read-output -> logic -> write-input look like a word-level combinational
+// loop, which it is not: a read sees only the write ports FORWARDED to it, and
+// a synchronous read's output is a register.  That cost four CORE-ET blocks,
+// minion_frontend_thread_buffer among them (pass/lean/CYCLE_PROVENANCE.txt
+// part 3).
+//
+// So memories are not ordered here at all.  Their port cones are already
+// explicit roots, and their per-port dependencies are ordered where they are
+// exact -- over the certificate DAG, in `cert_dag_order`.  A cycle that is real
+// (a read forwarded from the write whose data it feeds) is refused there.
 std::vector<Node> reachable_topo_order(const LeanCtx& ctx, const std::vector<Node_pin>& roots,
                                        const absl::flat_hash_set<uint32_t>& flop_nids) {
   absl::flat_hash_set<uint32_t>      reached;   // BLACK: node and its cone are in `order`
@@ -1261,7 +1276,7 @@ std::vector<Node> reachable_topo_order(const LeanCtx& ctx, const std::vector<Nod
 
   for (const auto& dpin : roots) {
     auto n = pin_node(dpin);
-    if (pin_is_input(dpin) || pin_is_const(dpin) || flop_nids.count(node_id(n)) > 0) {
+    if (pin_is_input(dpin) || pin_is_const(dpin) || flop_nids.count(node_id(n)) > 0 || node_is_memory(n)) {
       continue;
     }
     if (reached.count(node_id(n)) > 0) {
@@ -1289,7 +1304,8 @@ std::vector<Node> reachable_topo_order(const LeanCtx& ctx, const std::vector<Nod
       on_stack.insert(cur_id);
       for (const auto& e : inp_edges_ordered(cur_node)) {
         auto child = pin_node(e.driver);
-        if (pin_is_input(e.driver) || pin_is_const(e.driver) || flop_nids.count(node_id(child)) > 0) {
+        if (pin_is_input(e.driver) || pin_is_const(e.driver) || flop_nids.count(node_id(child)) > 0
+            || node_is_memory(child)) {
           continue;
         }
         const uint32_t child_id = node_id(child);
@@ -1654,43 +1670,23 @@ std::string cert_node_expr(const LeanCtx& ctx, CertBuild& build, const Node& nod
 // unsigned value, so a 5-bit address dep feeding a 4-bit-addressed array would
 // read entry 20 where the fast model reads entry 4.
 // ---------------------------------------------------------------------------
-void cert_memory_expand(LeanCtx& ctx, CertBuild& build, const Node& node, std::vector<uint32_t>& topo_ids,
-                        std::vector<std::string>& cert_nodes, std::vector<CertNodeInfo>& cert_infos,
-                        std::map<uint32_t, MemCertIds>& mem_ids) {
-  const auto& mi  = memory_info_for(ctx, node);
-  const auto  nid = node_id(node);
-  MemCertIds  ids;
-
-  // A memory design is sequential by construction, so the fv defs always take
-  // (i, s).  Computed here rather than read from ctx because the certificate loop
-  // runs whether or not the fast-view bridge is enabled.
-  const std::string fv_args = " i s";
-  const std::string mem_ty  = "(BitVec " + std::to_string(mi.addr_width) + " -> BitVec " + std::to_string(mi.bits) + ")";
-  const std::string bv_ty   = "BitVec " + std::to_string(mi.bits);
-
-  auto emit = [&](uint32_t id, const std::string& op_expr, uint32_t w, const std::vector<uint32_t>& deps,
-                  const std::string& fv_ty, const std::string& fv_expr) {
-    topo_ids.push_back(id);
-    CertNodeInfo info;
-    info.nid     = id;
-    info.op_expr = op_expr;
-    info.width   = w;
-    info.deps    = deps;
-    cert_infos.push_back(info);
-    std::ostringstream oss;
-    oss << "{ nid := " << id << ", op := " << op_expr << ", width := " << w << ", deps := " << nat_list(deps) << " }";
-    cert_nodes.push_back(oss.str());
-    build.synth_fv_expr[id] = fv_expr;
-    build.synth_fv_type[id] = fv_ty;
-  };
-  auto fvref = [&](uint32_t id) { return "(" + ctx.base_name + "_fv" + std::to_string(id) + fv_args + ")"; };
-
-  auto resize = [&](const Node_pin& pin, uint32_t w) -> uint32_t {
-    const uint32_t src = cert_dep_id(ctx, build, pin, w);
-    const uint32_t id  = build.next_synth_id++;
-    emit(id, "LGraphOp.Op_Or", w, {src}, "BitVec " + std::to_string(w), ucast_pin_at(ctx, pin, w));
-    return id;
-  };
+// PHASE 1 of the decomposition: claim the ids anything OUTSIDE this memory can
+// refer to, and nothing else.
+//
+// WHY IT IS SEPARATE FROM THE FILL.  A memory's own port pins may be driven by
+// ANOTHER memory's read output, and `cert_dep_id` resolves such a pin through
+// `build.mem_read_id`.  Allocating and filling one memory at a time would make
+// whichever memory was expanded first fatal on the other's read pin -- and
+// which one that is would be whatever order the graph walk happens to return
+// memories in.  So every memory's read ids exist before any memory's
+// dependencies are built, and the caller sorts the memories by nid so the ids
+// do not depend on graph iteration order either.
+void cert_memory_prealloc(LeanCtx& ctx, CertBuild& build, const Node& node,
+                          std::map<uint32_t, MemCertIds>& mem_ids, CertPool& pool) {
+  const auto&       mi    = memory_info_for(ctx, node);
+  const auto        nid   = node_id(node);
+  const std::string mname = "memory n_" + std::to_string(nid) + " (" + mi.raw_name + ")";
+  MemCertIds        ids;
 
   // The committed array image: a source, like a flop.  `source_exprs` holds the
   // INNER expression; the emission site wraps it by kind (3 => CertVal.mem).
@@ -1705,65 +1701,32 @@ void cert_memory_expand(LeanCtx& ctx, CertBuild& build, const Node& node, std::v
     build.source_rom_contents[ids.array_src] = mi.rom_contents;
   }
 
-  // Write chain for a given set of write ordinals, shared across reads that
-  // forward from the same set.  The empty set is the committed image itself.
-  std::map<std::string, uint32_t> chain_cache;
-  auto build_chain = [&](const std::vector<size_t>& ords) -> uint32_t {
-    std::string sig;
-    for (auto o : ords) {
-      sig += std::to_string(o) + ",";
-    }
-    if (auto it = chain_cache.find(sig); it != chain_cache.end()) {
-      return it->second;
-    }
-    uint32_t    cur      = ids.array_src;
-    std::string cur_expr = "s." + mi.field;
-    for (auto w_ord : ords) {
-      const auto     widx = mi.write_ports[w_ord];
-      const auto&    p    = mi.ports.at(widx);
-      const auto     en_w = std::max<uint32_t>(1, mi.wensize);
-      const uint32_t a_id = resize(p.addr, mi.addr_width);
-      const uint32_t d_id = resize(p.din, mi.bits);
-      const uint32_t e_id = resize(p.enable, en_w);
-      const std::string op_expr = (mi.wensize <= 1)
-                                      ? std::string("LGraphOp.Op_MemWrite")
-                                      : ("LGraphOp.Op_MemWriteBE " + std::to_string(mi.bits / mi.wensize));
-      const uint32_t id = build.next_synth_id++;
-      emit(id, op_expr, mi.bits, {cur, a_id, d_id, e_id}, mem_ty, memory_write_step(ctx, mi, w_ord, cur_expr));
-      build.mem_valued.insert(id);
-      cur      = id;
-      cur_expr = fvref(id);
-    }
-    chain_cache[sig] = cur;
-    return cur;
-  };
-
-  std::vector<size_t> all_ords;
-  for (size_t w_ord = 0; w_ord < mi.write_ports.size(); ++w_ord) {
-    all_ords.push_back(w_ord);
-  }
-
   for (auto pidx : mi.read_ports) {
-    const auto& rp    = mi.ports.at(pidx);
-    const auto  r_ord = memory_read_ordinal(mi, pidx);
-    std::vector<size_t> fwd_ords;
-    for (size_t w_ord = 0; w_ord < mi.write_ports.size(); ++w_ord) {
-      if (memory_fwd_bit(mi, r_ord, w_ord)) {
-        fwd_ords.push_back(w_ord);
-      }
+    const auto&       rp    = mi.ports.at(pidx);
+    const uint64_t    rkey  = (static_cast<uint64_t>(nid) << 32) | rp.driver_pid;
+    const std::string pname = "read port " + std::to_string(pidx) + " of " + mname;
+    // LIVEHD_LEAN_MEM_PROBE=1: the port table the dependency model is reading,
+    // on stderr.  Which port is synchronous and which write ports a read
+    // forwards from decides whether a read/write feedback path is a cycle, and
+    // when a refusal looked wrong this was the only way to tell a bad `fwd`
+    // matrix from a bad traversal.  Same shape as LIVEHD_MEM_TIMING_DEBUG in
+    // the reader and LIVEHD_SE_MEM_GATE_DEBUG in pass.single_edge.
+    if (std::getenv("LIVEHD_LEAN_MEM_PROBE") != nullptr) {
+      std::cerr << "MEMPROBE " << mname << " pidx=" << pidx << " driver_pid=" << rp.driver_pid
+                << " timing=" << (rp.is_sync_read() ? "sync" : (rp.is_async_read() ? "async" : "WRITE"))
+                << " fwd=0x" << std::hex << mi.fwd << std::dec << " fwd_known=" << mi.fwd_known
+                << " nread=" << mi.read_ports.size() << " nwrite=" << mi.write_ports.size() << "\n";
     }
-    const uint32_t base_id   = build_chain(fwd_ords);
-    const std::string base_e = (base_id == ids.array_src) ? ("s." + mi.field) : fvref(base_id);
-    const uint32_t a_id      = resize(rp.addr, mi.addr_width);
-
-    const uint64_t rkey = (static_cast<uint64_t>(nid) << 32) | rp.driver_pid;
 
     if (rp.is_sync_read()) {
-      // Sync read.  What consumers see is the read-data REGISTER, so that
-      // is a source, like a flop.  Its next value is
+      // Sync read.  What consumers see is the read-data REGISTER, so that is a
+      // SOURCE, like a flop -- it depends on nothing in the current cycle, which
+      // is exactly why a synchronous read can never sit on a combinational loop.
+      // Its next value is
       //   sram_sync_read_reg_next ren raw cur = if ren then raw else cur
-      // which is an Op_MuxBool over an UNGATED read -- an Op_MemRead with a literal
-      // enable, closed by mem_read_en_bridge.  No new certificate operator needed.
+      // which is an Op_MuxBool over an UNGATED read -- an Op_MemRead with a
+      // literal enable, closed by mem_read_en_bridge.  No new certificate
+      // operator needed.
       const auto     reg_field = mi.read_reg_field.at(pidx);
       const uint32_t reg_src   = build.next_synth_id++;
       build.source_ids.insert(reg_src);
@@ -1784,37 +1747,171 @@ void cert_memory_expand(LeanCtx& ctx, CertBuild& build, const Node& node, std::v
       build.source_const_int[one_src] = "Int.ofNat 1";
 
       const uint32_t raw_id = build.next_synth_id++;
-      emit(raw_id, "LGraphOp.Op_MemRead", mi.bits, {base_id, a_id, one_src}, bv_ty,
-           memory_raw_read_at(ctx, mi, pidx, base_e));
+      pool.reserve(raw_id, "raw read of " + pname);
       build.mem_raw_reads.insert(raw_id);
-
-      const uint32_t ren_id = resize(rp.enable, pin_width(ctx, rp.enable, mi.node));
       const uint32_t nxt_id = build.next_synth_id++;
-      emit(nxt_id, "LGraphOp.Op_MuxBool", mi.bits, {ren_id, reg_src, raw_id}, bv_ty,
-           "sram_sync_read_reg_next " + memory_read_enable_port(ctx, mi, pidx) + " (" + fvref(raw_id) + ") s." + reg_field);
+      pool.reserve(nxt_id, "read-data register next value of " + pname);
 
-      ids.rdreg_src[pidx]     = reg_src;
-      ids.rdreg_next[pidx]    = nxt_id;
-      build.sync_read_regs[reg_src] = {mi.bits, nxt_id};
+      ids.rdreg_src[pidx]            = reg_src;
+      ids.rdreg_one[pidx]            = one_src;
+      ids.raw_read[pidx]             = raw_id;
+      ids.rdreg_next[pidx]           = nxt_id;
+      build.sync_read_regs[reg_src]  = {mi.bits, nxt_id};
       build.sync_read_owner[reg_src] = mi.nid;
-      ids.read_out[pidx]      = reg_src;
-      build.mem_read_id[rkey] = reg_src;
+      ids.read_out[pidx]             = reg_src;
+      build.mem_read_id[rkey]        = reg_src;
       // No ctx.mem_read_fv entry: driver_expr resolves a sync read to `s.<field>`.
       continue;
     }
 
-    const uint32_t e_id = resize(rp.enable, pin_width(ctx, rp.enable, mi.node));
-    const uint32_t id   = build.next_synth_id++;
-    emit(id, "LGraphOp.Op_MemRead", mi.bits, {base_id, a_id, e_id}, bv_ty,
-         "(if " + memory_read_enable_port(ctx, mi, pidx) + " then " + memory_raw_read_at(ctx, mi, pidx, base_e) + " else "
-             + lit_zero(mi.bits) + ")");
+    const uint32_t id = build.next_synth_id++;
+    pool.reserve(id, "data of " + pname);
     ids.read_out[pidx]      = id;
     build.mem_read_id[rkey] = id;
     ctx.mem_read_fv[rkey]   = id;
   }
 
+  mem_ids[nid] = ids;
+}
+
+// PHASE 2: the write chains, the operand resizes, and the dependencies of the
+// ids phase 1 reserved.  Every `cert_dep_id` on a port pin happens HERE, after
+// every memory's read ids exist.
+void cert_memory_fill(LeanCtx& ctx, CertBuild& build, const Node& node,
+                      std::map<uint32_t, MemCertIds>& mem_ids, CertPool& pool, size_t n_memories) {
+  const auto&       mi    = memory_info_for(ctx, node);
+  const auto        nid   = node_id(node);
+  const std::string mname = "memory n_" + std::to_string(nid) + " (" + mi.raw_name + ")";
+
+  // THE PHASE INVARIANT, checked rather than assumed.  Interleaving prealloc and
+  // fill per memory works for most designs and fails for the one where a memory's
+  // port pin resolves to another memory's read output -- which memory that is
+  // depends on iteration order, so the bug would appear and disappear with the
+  // graph.  Checking the count turns "sometimes" into "always".
+  if (mem_ids.size() != n_memories) {
+    fatal(ctx, "internal: the certificate decomposition filled " + mname + " when only "
+                   + std::to_string(mem_ids.size()) + " of " + std::to_string(n_memories)
+                   + " memories had been preallocated. A memory's port pin may resolve to another "
+                     "memory's read output, so every memory's read ids must exist before any "
+                     "memory's dependencies are built.");
+  }
+  MemCertIds& ids = mem_ids.at(nid);
+
+  // A memory design is sequential by construction, so the fv defs always take
+  // (i, s).  Computed here rather than read from ctx because the certificate loop
+  // runs whether or not the fast-view bridge is enabled.
+  const std::string fv_args = " i s";
+  const std::string mem_ty  = "(BitVec " + std::to_string(mi.addr_width) + " -> BitVec " + std::to_string(mi.bits) + ")";
+  const std::string bv_ty   = "BitVec " + std::to_string(mi.bits);
+
+  auto fill = [&](uint32_t id, const std::string& op_expr, uint32_t w, const std::vector<uint32_t>& deps,
+                  const std::string& fv_ty, const std::string& fv_expr) {
+    CertNodeInfo info;
+    info.nid     = id;
+    info.op_expr = op_expr;
+    info.width   = w;
+    info.deps    = deps;
+    std::ostringstream oss;
+    oss << "{ nid := " << id << ", op := " << op_expr << ", width := " << w << ", deps := " << nat_list(deps) << " }";
+    pool.fill(id, oss.str(), info);
+    build.synth_fv_expr[id] = fv_expr;
+    build.synth_fv_type[id] = fv_ty;
+  };
+  // A node NOTHING outside this memory can name: reserve and fill in one step.
+  auto emit_new = [&](uint32_t id, const std::string& op_expr, uint32_t w, const std::vector<uint32_t>& deps,
+                      const std::string& fv_ty, const std::string& fv_expr, const std::string& what) {
+    pool.reserve(id, what);
+    fill(id, op_expr, w, deps, fv_ty, fv_expr);
+  };
+  auto fvref = [&](uint32_t id) { return "(" + ctx.base_name + "_fv" + std::to_string(id) + fv_args + ")"; };
+
+  auto resize = [&](const Node_pin& pin, uint32_t w, const std::string& what) -> uint32_t {
+    const uint32_t src = cert_dep_id(ctx, build, pin, w);
+    const uint32_t id  = build.next_synth_id++;
+    emit_new(id, "LGraphOp.Op_Or", w, {src}, "BitVec " + std::to_string(w), ucast_pin_at(ctx, pin, w), what);
+    return id;
+  };
+
+  // Write chain for a given set of write ordinals, shared across reads that
+  // forward from the same set.  The empty set is the committed image itself.
+  std::map<std::string, uint32_t> chain_cache;
+  auto build_chain = [&](const std::vector<size_t>& ords) -> uint32_t {
+    std::string sig;
+    for (auto o : ords) {
+      sig += std::to_string(o) + ",";
+    }
+    if (auto it = chain_cache.find(sig); it != chain_cache.end()) {
+      return it->second;
+    }
+    uint32_t    cur      = ids.array_src;
+    std::string cur_expr = "s." + mi.field;
+    for (auto w_ord : ords) {
+      const auto        widx  = mi.write_ports[w_ord];
+      const auto&       p     = mi.ports.at(widx);
+      const auto        en_w  = std::max<uint32_t>(1, mi.wensize);
+      const std::string wname = "write port " + std::to_string(widx) + " of " + mname;
+      const uint32_t    a_id  = resize(p.addr, mi.addr_width, "address of " + wname);
+      const uint32_t    d_id  = resize(p.din, mi.bits, "data of " + wname);
+      const uint32_t    e_id  = resize(p.enable, en_w, "enable of " + wname);
+      const std::string op_expr = (mi.wensize <= 1)
+                                      ? std::string("LGraphOp.Op_MemWrite")
+                                      : ("LGraphOp.Op_MemWriteBE " + std::to_string(mi.bits / mi.wensize));
+      const uint32_t id = build.next_synth_id++;
+      emit_new(id, op_expr, mi.bits, {cur, a_id, d_id, e_id}, mem_ty, memory_write_step(ctx, mi, w_ord, cur_expr),
+               "write chain step " + std::to_string(w_ord) + " of " + mname);
+      build.mem_valued.insert(id);
+      cur      = id;
+      cur_expr = fvref(id);
+    }
+    chain_cache[sig] = cur;
+    return cur;
+  };
+
+  std::vector<size_t> all_ords;
+  for (size_t w_ord = 0; w_ord < mi.write_ports.size(); ++w_ord) {
+    all_ords.push_back(w_ord);
+  }
+
+  for (auto pidx : mi.read_ports) {
+    const auto&       rp    = mi.ports.at(pidx);
+    const auto        r_ord = memory_read_ordinal(mi, pidx);
+    const std::string pname = "read port " + std::to_string(pidx) + " of " + mname;
+    // THE forwarding decision.  A read sees the write chain of the write ports
+    // whose `fwd` bit is set for it and of NO others -- which is why a read fed
+    // back into a non-forwarded write port is not a dependency at all, and why
+    // one fed back into a FORWARDED write port is a genuine cycle that
+    // cert_dag_order must refuse.
+    std::vector<size_t> fwd_ords;
+    for (size_t w_ord = 0; w_ord < mi.write_ports.size(); ++w_ord) {
+      if (memory_fwd_bit(mi, r_ord, w_ord)) {
+        fwd_ords.push_back(w_ord);
+      }
+    }
+    const uint32_t    base_id = build_chain(fwd_ords);
+    const std::string base_e  = (base_id == ids.array_src) ? ("s." + mi.field) : fvref(base_id);
+    const uint32_t    a_id    = resize(rp.addr, mi.addr_width, "address of " + pname);
+
+    if (rp.is_sync_read()) {
+      const auto     reg_field = mi.read_reg_field.at(pidx);
+      const uint32_t reg_src   = ids.rdreg_src.at(pidx);
+      const uint32_t one_src   = ids.rdreg_one.at(pidx);
+      const uint32_t raw_id    = ids.raw_read.at(pidx);
+      const uint32_t nxt_id    = ids.rdreg_next.at(pidx);
+      fill(raw_id, "LGraphOp.Op_MemRead", mi.bits, {base_id, a_id, one_src}, bv_ty,
+           memory_raw_read_at(ctx, mi, pidx, base_e));
+      const uint32_t ren_id = resize(rp.enable, pin_width(ctx, rp.enable, mi.node), "read enable of " + pname);
+      fill(nxt_id, "LGraphOp.Op_MuxBool", mi.bits, {ren_id, reg_src, raw_id}, bv_ty,
+           "sram_sync_read_reg_next " + memory_read_enable_port(ctx, mi, pidx) + " (" + fvref(raw_id) + ") s." + reg_field);
+      continue;
+    }
+
+    const uint32_t e_id = resize(rp.enable, pin_width(ctx, rp.enable, mi.node), "read enable of " + pname);
+    fill(ids.read_out.at(pidx), "LGraphOp.Op_MemRead", mi.bits, {base_id, a_id, e_id}, bv_ty,
+         "(if " + memory_read_enable_port(ctx, mi, pidx) + " then " + memory_raw_read_at(ctx, mi, pidx, base_e) + " else "
+             + lit_zero(mi.bits) + ")");
+  }
+
   ids.next_chain = build_chain(all_ords);
-  mem_ids[nid]   = ids;
 }
 
 }  // namespace
@@ -2248,27 +2345,43 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   // certificate op now fatals before the file is opened instead of part-way
   // through streaming it.
   //
-  // This moves construction only, not emission: the topo loop runs in the same
-  // order, so synthetic id allocation -- and therefore the emitted text of every
-  // non-memory design -- is unchanged.
+  // This moves construction only, not emission.
+  //
+  // FOUR PHASES, and the order of the first three is forced:
+  //   1. RESERVE every memory's externally visible read ids.  A memory's port
+  //      pins may be driven by another memory's read output, so no memory's
+  //      dependencies can be built until all of them have ids.
+  //   2. FILL each memory: write chains, operand resizes, per-port deps.
+  //   3. Build the ordinary combinational nodes.  `cert_dep_id` resolves a
+  //      memory read-data pin through the map phase 1 populated.
+  //   4. ORDER the combined certificate DAG.  Not the LGraph node vector: a
+  //      synthetic memory id has no node, and the memory's real dependencies
+  //      are per port.  See cert_dag_order.
+  //
+  // A design with NO memory is seeded in the LGraph topological order and
+  // cert_dag_order is stable, so its order -- and its emitted text -- does not
+  // move.
   // ---------------------------------------------------------------------------
   if (emit_cert && emit_fast_bridge) {
     ctx.bridge_fv_mode = true;
     ctx.bridge_fv_args = sequential ? " i s" : " i";
   }
+  CertPool cert_pool;
   if (emit_cert) {
+    // By nid, so nothing below depends on the order `fast_class` returned
+    // memories in.
+    std::vector<Node> mems = memory_nodes;
+    std::sort(mems.begin(), mems.end(), [](const Node& a, const Node& b) { return node_id(a) < node_id(b); });
+    for (const auto& mn : mems) {
+      cert_memory_prealloc(ctx, cert_build, mn, mem_cert_ids, cert_pool);
+    }
+    for (const auto& mn : mems) {
+      cert_memory_fill(ctx, cert_build, mn, mem_cert_ids, cert_pool, mems.size());
+    }
     for (const auto& n : topo) {
-      if (node_is_memory(n)) {
-        // One Memory node becomes several cert nodes (write chain + one read per
-        // port), spliced in at the memory's topo position.  Its deps (addr/din/en)
-        // are already earlier in topo order, so dependency ordering is preserved.
-        cert_memory_expand(ctx, cert_build, n, topo_ids, cert_nodes, cert_infos, mem_cert_ids);
-        continue;
-      }
-      topo_ids.push_back(node_id(n));
       CertNodeInfo info;
-      cert_nodes.push_back(cert_node_expr(ctx, cert_build, n, &info));
-      cert_infos.push_back(info);
+      auto         text = cert_node_expr(ctx, cert_build, n, &info);
+      cert_pool.add(node_id(n), std::move(text), info);
     }
 
     for (const auto& kv : ctx.output_field) {
@@ -2297,6 +2410,23 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     }
 
     source_ids.assign(cert_build.source_ids.begin(), cert_build.source_ids.end());
+
+    // PHASE 4.  Sources are settled by now -- the output and flop dependencies
+    // above can mint new constant/input sources, and a source is a leaf the
+    // order must skip rather than try to place.
+    const std::set<uint32_t> source_set(cert_build.source_ids.begin(), cert_build.source_ids.end());
+    auto                     ord = cert_dag_order(cert_pool, source_set);
+    if (!ord.ok) {
+      fatal(ctx, ord.reason);
+    }
+    topo_ids.reserve(ord.order.size());
+    cert_nodes.reserve(ord.order.size());
+    cert_infos.reserve(ord.order.size());
+    for (const auto id : ord.order) {
+      topo_ids.push_back(id);
+      cert_nodes.push_back(cert_pool.text.at(id));
+      cert_infos.push_back(cert_pool.by_id.at(id));
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -2447,23 +2577,71 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       }
     }
 
-    // Emit the `let n_<id> := …` binding(s) for one node.  A Memory node binds
-    // one value per read port (n_<id>_p<dout_pid>); every other node binds one.
-    auto emit_node_lets = [&](std::ostream& os, const Node& n) {
-      if (node_is_memory(n)) {
-        const auto& mi = memory_info_for(ctx, n);
+    // The `let` chain, in ONE binding order.
+    //
+    // A Memory binds one value per READ PORT (n_<id>_p<dout_pid>), and those
+    // bindings have to sit after that port's address cone and before its
+    // consumers.  That is a per-PORT constraint, so the order comes from the
+    // CERTIFICATE order -- memories are not on the LGraph node walk any more,
+    // precisely because the cell-level constraint is the one that was false.
+    //
+    // A SYNCHRONOUS port's value is `s.<field>`: it depends on nothing, so it
+    // is bound up front rather than chased through the order.
+    std::vector<std::pair<const Node*, long>> let_seq;  // (node, read port index or -1)
+    {
+      std::map<uint32_t, const Node*>                    node_by_id;
+      std::map<uint32_t, std::pair<const Node*, size_t>> async_read_by_id;
+      for (const auto& n : topo) {
+        node_by_id[node_id(n)] = &n;
+      }
+      for (const auto& mn : memory_nodes) {
+        const auto& mi = memory_info_for(ctx, mn);
         for (auto pidx : mi.read_ports) {
-          os << "  let n_" << node_id(n) << "_p" << mi.ports.at(pidx).driver_pid << " : BitVec " << mi.bits
-             << " := " << memory_read_port_expr(ctx, mi, pidx) << "\n";
+          if (mi.ports.at(pidx).is_sync_read()) {
+            let_seq.emplace_back(&mn, static_cast<long>(pidx));
+            continue;
+          }
+          auto it = mem_cert_ids.find(node_id(mn));
+          if (it != mem_cert_ids.end()) {
+            auto ro = it->second.read_out.find(pidx);
+            if (ro != it->second.read_out.end()) {
+              async_read_by_id[ro->second] = {&mn, pidx};
+            }
+          }
         }
+      }
+      if (topo_ids.empty()) {
+        // No certificate was built (emit_cert=false), which also means there is
+        // no memory -- a memory design fatals above without one.
+        for (const auto& n : topo) {
+          let_seq.emplace_back(&n, -1);
+        }
+      } else {
+        for (const auto id : topo_ids) {
+          if (auto a = async_read_by_id.find(id); a != async_read_by_id.end()) {
+            let_seq.emplace_back(a->second.first, static_cast<long>(a->second.second));
+          } else if (auto nb = node_by_id.find(id); nb != node_by_id.end()) {
+            let_seq.emplace_back(nb->second, -1);
+          }
+          // anything else is a synthetic memory node with no `let` of its own
+        }
+      }
+    }
+
+    // Emit the `let n_<id> := …` binding for one entry of that order.
+    auto emit_node_lets = [&](std::ostream& os, const Node& n, long port) {
+      if (port >= 0) {
+        const auto& mi = memory_info_for(ctx, n);
+        os << "  let n_" << node_id(n) << "_p" << mi.ports.at(static_cast<size_t>(port)).driver_pid << " : BitVec "
+           << mi.bits << " := " << memory_read_port_expr(ctx, mi, static_cast<size_t>(port)) << "\n";
         return;
       }
       os << "  let n_" << node_id(n) << " : BitVec " << node_width(ctx, n) << " := " << emit_node_expr(ctx, n) << "\n";
     };
 
     auto emit_let_chain = [&](std::ostream& os, const std::string& result_expr) {
-      for (const auto& n : topo) {
-        emit_node_lets(os, n);
+      for (const auto& [n, port] : let_seq) {
+        emit_node_lets(os, *n, port);
       }
       os << result_expr;
     };
@@ -2541,8 +2719,8 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
       ofs << "def " << base_name << "_next (i : " << base_name << "_in) (s : " << base_name << "_state) : "
           << base_name << "_state :=\n";
       if (!bridge) {
-        for (const auto& n : topo) {
-          emit_node_lets(ofs, n);
+        for (const auto& [n, port] : let_seq) {
+          emit_node_lets(ofs, *n, port);
         }
       }
       for (auto& fn : flop_nodes) {

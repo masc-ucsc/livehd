@@ -1,0 +1,36 @@
+{
+  "_what": "The per-port memory dependency model in pass.lean: Memory as a traversal boundary, the `fwd` selection in both directions, the prealloc phase ordering, and a synchronous read's output being a state source.",
+  "target": "//lhd/tests:mem_read_write_feedback_test",
+  "file": "pass/lean/pass_lean.cpp",
+  "bazel": [
+    "--repo_env=CC=/usr/bin/gcc-15",
+    "--repo_env=CXX=/usr/bin/g++-15"
+  ],
+  "mutants": [
+    {
+      "name": "P1 Memory atomic again",
+      "old": "        if (pin_is_input(e.driver) || pin_is_const(e.driver) || flop_nids.count(node_id(child)) > 0\n            || node_is_memory(child)) {",
+      "new": "        if (pin_is_input(e.driver) || pin_is_const(e.driver) || flop_nids.count(node_id(child)) > 0) {"
+    },
+    {
+      "name": "P2 every write forwarded",
+      "old": "      if (memory_fwd_bit(mi, r_ord, w_ord)) {",
+      "new": "      if (memory_fwd_bit(mi, r_ord, w_ord) || true) {"
+    },
+    {
+      "name": "P3 no write ever forwarded",
+      "old": "      if (memory_fwd_bit(mi, r_ord, w_ord)) {\n        fwd_ords.push_back(w_ord);",
+      "new": "      if (memory_fwd_bit(mi, r_ord, w_ord) && false) {\n        fwd_ords.push_back(w_ord);"
+    },
+    {
+      "name": "P4 prealloc interleaved",
+      "old": "    for (const auto& mn : mems) {\n      cert_memory_prealloc(ctx, cert_build, mn, mem_cert_ids, cert_pool);\n    }\n    for (const auto& mn : mems) {\n      cert_memory_fill(ctx, cert_build, mn, mem_cert_ids, cert_pool, mems.size());\n    }",
+      "new": "    for (const auto& mn : mems) {\n      cert_memory_prealloc(ctx, cert_build, mn, mem_cert_ids, cert_pool);\n      cert_memory_fill(ctx, cert_build, mn, mem_cert_ids, cert_pool, mems.size());\n    }"
+    },
+    {
+      "name": "P5 sync read not a source",
+      "old": "      ids.read_out[pidx]             = reg_src;\n      build.mem_read_id[rkey]        = reg_src;",
+      "new": "      ids.read_out[pidx]             = raw_id;\n      build.mem_read_id[rkey]        = raw_id;"
+    }
+  ]
+}

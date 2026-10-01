@@ -23,6 +23,8 @@ filegroup(
         "proc_ifx_scc_compare.sh",
         "lgraph_scc.py",
         "lgraph_cycle_stages.sh",
-    ],
+        "cert_reemit_diff.sh",
+        "mutate_check.py",
+    ] + glob(["mutation_specs/*.json"]),
     visibility = ["//visibility:public"],
 )

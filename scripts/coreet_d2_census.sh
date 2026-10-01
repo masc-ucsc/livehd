@@ -397,8 +397,12 @@ rm -f "$SWEEP_TSV"
 sweep_rc=0
 if [[ "${#PRESENT[@]}" -gt 0 ]]; then
   export TMPDIR="$OUT/runtime_tmp"; mkdir -p "$TMPDIR"
+  # --timeout IS FORWARDED.  The driver parses --timeout (and defaults to
+  # 2700) and used it for phase 1 only, so phase 2 silently ran under
+  # direct_sweep's own 1800s default: a run asked for 7200 and was cut at 1800,
+  # and the row said TIMEOUT as though the model had failed.
   python3 "$ROOT/pass/lean/scripts/direct_sweep.py" --out "$SWEEP_TSV" \
-    --jobs 1 --cycles "$CYCLES" --max-rec-depth 20000000 \
+    --jobs 1 --cycles "$CYCLES" --timeout "$TIMEOUT" --max-rec-depth 20000000 \
     --filter "^($(IFS='|'; echo "${PRESENT[*]}"))$" "$OUT/mod" \
     > "$OUT/logs/direct_sweep.log" 2>&1
   sweep_rc=$?

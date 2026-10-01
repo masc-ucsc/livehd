@@ -1,0 +1,28 @@
+// This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+//
+// The OTHER side of the forwarding decision, and the only route that reaches
+// it: a read port that DOES see a write port's data in the same cycle.
+//
+// No program-ordered RTL can forward a write into the read that feeds that same
+// write -- for the read to see the write the write must come first, and for the
+// write's data to see the read the read must come first -- so the cycle case is
+// a unit test over the certificate DAG (pass/lean/cert_dag_order_test.cpp).
+// What RTL CAN produce is an ordinary forwarded read, and that is this: Pyrope
+// program order makes `z = t[rsel]` see the update above it, so the read's base
+// image is the write CHAIN rather than the committed array.
+//
+// Which is the assertion. If `memory_fwd_bit` stopped selecting write ports,
+// this read would fall back to the committed array and the model would silently
+// return stale data.
+pub mod mem_fwd_read_feedback(rst:bool, a:u8, wsel:u2, rsel:u2, we:bool) -> (z:u8@[0]) {
+  reg t:[4]u8
+  if rst {
+    t[0] = 0
+    t[1] = 0
+    t[2] = 0
+    t[3] = 0
+  } elif we {
+    t[wsel] = t[wsel] | a
+  }
+  z = t[rsel]
+}

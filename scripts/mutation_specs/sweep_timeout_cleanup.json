@@ -1,0 +1,27 @@
+{
+  "_what": "A sweep timeout must take down every descendant, and the census driver must forward its own --timeout. Both were broken: the first leaked an 8 GB Lean probe through the rest of a sweep, the second silently capped phase 2 at the sweep's own default.",
+  "target": "//lhd/tests:direct_sweep_timeout_test",
+  "file": "pass/lean/scripts/direct_sweep.py",
+  "bazel": [
+    "--repo_env=CC=/usr/bin/gcc-15",
+    "--repo_env=CXX=/usr/bin/g++-15"
+  ],
+  "rebuild": [],
+  "mutants": [
+    {
+      "name": "T1 kill only the direct child",
+      "old": "            os.killpg(pgid, sig)",
+      "new": "            os.kill(proc.pid, sig)"
+    },
+    {
+      "name": "T2 child shares our session",
+      "old": "                            text=True, cwd=cwd, env=env, start_new_session=True)",
+      "new": "                            text=True, cwd=cwd, env=env)"
+    },
+    {
+      "name": "T3 exit status dropped",
+      "old": "        return out, err, False, proc.returncode",
+      "new": "        return out, err, False, 0"
+    }
+  ]
+}

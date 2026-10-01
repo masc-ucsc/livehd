@@ -96,4 +96,148 @@ std::string input_name_for_pin(const LeanCtx& ctx, const Node_pin& pin) {
   return {};
 }
 
+// ---------------------------------------------------------------------------
+// The combined certificate DAG's topological order.  See lean_common.hpp.
+// ---------------------------------------------------------------------------
+namespace {
+std::string cert_id_name(const CertPool& pool, uint32_t id) {
+  auto o = pool.origin.find(id);
+  if (o != pool.origin.end()) {
+    return "cert id " + std::to_string(id) + " (" + o->second + ")";
+  }
+  auto n = pool.by_id.find(id);
+  if (n != pool.by_id.end() && !n->second.op_expr.empty()) {
+    return "cert id " + std::to_string(id) + " (node n_" + std::to_string(id) + ", " + n->second.op_expr + ")";
+  }
+  return "cert id " + std::to_string(id);
+}
+}  // namespace
+
+std::vector<std::string> CertPool::errors(const std::set<uint32_t>& sources) const {
+  std::vector<std::string> out;
+  std::set<uint32_t>       seen;
+  for (const auto id : seed) {
+    if (!seen.insert(id).second) {
+      out.push_back("cert id " + std::to_string(id) + " was reserved twice");
+    }
+  }
+  for (const auto id : seen) {
+    if (by_id.find(id) == by_id.end()) {
+      out.push_back(cert_id_name(*this, id) + " was reserved but never filled in");
+      continue;
+    }
+    if (text.find(id) == text.end()) {
+      out.push_back(cert_id_name(*this, id) + " has no emitted text");
+    }
+    if (by_id.at(id).nid != id) {
+      out.push_back(cert_id_name(*this, id) + " is stored under a different key than its own nid ("
+                    + std::to_string(by_id.at(id).nid) + ")");
+    }
+    // A node that is ALSO a source is skipped as a leaf by the sort, so its
+    // operator would never be evaluated and its value would silently become the
+    // source's.  That is a wrong model, not a slow one.
+    if (sources.count(id) != 0) {
+      out.push_back(cert_id_name(*this, id) + " is both a certificate node and a source");
+    }
+  }
+  for (const auto& [id, info] : by_id) {
+    (void)info;
+    if (seen.count(id) == 0) {
+      out.push_back(cert_id_name(*this, id) + " was filled in but never reserved, so it has no place in the order");
+    }
+  }
+  return out;
+}
+
+Cert_dag_result cert_dag_order(const CertPool& pool, const std::set<uint32_t>& sources) {
+  Cert_dag_result res;
+  res.order.reserve(pool.seed.size());
+
+  const auto bad = pool.errors(sources);
+  if (!bad.empty()) {
+    res.ok     = false;
+    res.reason = "internal: the certificate pool is malformed (" + std::to_string(bad.size()) + " problem(s)): ";
+    for (size_t i = 0; i < bad.size() && i < 5; ++i) {
+      res.reason += (i != 0 ? "; " : "") + bad[i];
+    }
+    return res;
+  }
+
+  enum class Mark : uint8_t { none, gray, black };
+  std::map<uint32_t, Mark> mark;
+
+  // Iterative: a certificate cone is as deep as the design, and recursion here
+  // would trade one unbounded-growth bug for another.
+  // Each frame is (id, index of the next dep to visit).
+  std::vector<std::pair<uint32_t, size_t>> stack;
+
+  for (const auto root : pool.seed) {
+    if (mark[root] == Mark::black) {
+      continue;
+    }
+    stack.emplace_back(root, 0);
+    mark[root] = Mark::gray;
+    while (!stack.empty()) {
+      auto& [cur, next] = stack.back();
+      const auto  cur_id = cur;
+      const auto  iit    = pool.by_id.find(cur_id);
+      if (iit == pool.by_id.end()) {  // `errors` rules this out; never throw if it slips
+        res.ok     = false;
+        res.reason = "internal: " + cert_id_name(pool, cur_id) + " is in the order but has no certificate node.";
+        return res;
+      }
+      const auto& info = iit->second;
+      if (next >= info.deps.size()) {
+        mark[cur_id] = Mark::black;
+        res.order.push_back(cur_id);
+        stack.pop_back();
+        continue;
+      }
+      const auto dep = info.deps[next++];
+      if (sources.count(dep) != 0) {
+        continue;  // a leaf: carries no order
+      }
+      auto dit = pool.by_id.find(dep);
+      if (dit == pool.by_id.end()) {
+        res.ok     = false;
+        res.reason = "internal: " + cert_id_name(pool, cur_id) + " depends on " + cert_id_name(pool, dep)
+                     + ", which is neither a certificate node nor a source. The certificate would reference a "
+                       "value that is never defined.";
+        return res;
+      }
+      const auto m = mark[dep];
+      if (m == Mark::black) {
+        continue;
+      }
+      if (m == Mark::gray) {
+        // The gray frames from `dep` to the top of the stack ARE the cycle, so
+        // print them.  Naming only the back edge leaves the reader to rediscover
+        // the path, which on a 19k-node cone is the whole job.
+        std::string path;
+        bool        on = false;
+        for (const auto& fr : stack) {
+          if (fr.first == dep) {
+            on = true;
+          }
+          if (on) {
+            path += "\n    " + cert_id_name(pool, fr.first) + " <- ";
+          }
+        }
+        path += "\n    " + cert_id_name(pool, dep) + "  (closes the cycle)";
+        res.ok     = false;
+        res.reason = "CERTIFICATE CYCLE: " + cert_id_name(pool, cur_id) + " depends on " + cert_id_name(pool, dep)
+                     + ", which is still being resolved. Unlike an LGraph-level loop this is a cycle in the MODEL: "
+                       "a memory read is only ordered after the write ports FORWARDED to it (the `fwd` matrix), and "
+                       "a synchronous read is a state source, so this says the value genuinely depends on itself. "
+                       "There is no dependency order, and therefore no certificate to emit. Each line below depends "
+                       "on the one under it:" + path;
+        return res;
+      }
+      mark[dep] = Mark::gray;
+      stack.emplace_back(dep, 0);
+    }
+  }
+  return res;
+}
+
 }  // namespace livehd::lean_ir

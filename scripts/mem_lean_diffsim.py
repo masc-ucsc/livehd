@@ -16,14 +16,19 @@ precise enough to reproduce:
   * one source period = ONE iverilog clock period = P Lean microsteps;
   * inputs are held across the microsteps of a period, as the RTL holds them
     across a clock period;
-  * `directStepRaw` returns PRE-TRANSITION outputs, so at P=2 the reported
-    sample is the state AFTER slot 0 and BEFORE slot 1;
-  * the RTL is sampled in the matching phase: after the posedge and before the
-    negedge;
-  * therefore a slot-1 effect (the negedge element here) is observed on the
-    NEXT sample, not the current one.
+  * `directStepRaw` returns PRE-TRANSITION outputs -- the design BEFORE the
+    step's LAST slot commits.  Which RTL phase matches depends on P, and
+    `--sample` selects it:
+      P=2, `--sample after-first-edge` (the default, and the historical one):
+        the posedge is slot 0, so the model's pre-slot-1 sample is the state
+        AFTER the posedge and BEFORE the negedge, and a slot-1 effect (a
+        negedge element) is observed on the NEXT sample, not the current one;
+      P=1, `--sample before-first-edge`: there is a single slot, so the
+        matching RTL sample is BEFORE the posedge.  Sampling after it would
+        compare Lean's f(state_k, in_k) against the RTL's f(state_k+1, in_k)
+        and report an off-by-one as a value mismatch.
 A post-state peek would be the other defensible convention; this one is kept
-because both negative controls discriminate under it.
+because the negative controls discriminate under it.
 
 The positional stimulus is derived from the <Top>_io.json sidecar, so the
 named scenario below and the Lean row vectors cannot drift: values are padded
@@ -54,9 +59,11 @@ open Compiler Compiler.Direct in
       let r := directStepRaw D (allEdges D) inp st
       st := r.nextState
       n := n + 1
-      -- One sample per source period. directStepRaw's outputs are
-      -- PRE-transition, so this is the state after slot 0 and before slot 1;
-      -- a slot-1 effect shows up on the next sample.
+      -- One sample per source period (P=@P@ microsteps). directStepRaw's
+      -- outputs are PRE-transition: the design BEFORE the step's last slot
+      -- commits. At P=2 that is after slot 0 and before slot 1, so a slot-1
+      -- effect shows up on the next sample; at P=1 there is one slot, so the
+      -- sample is simply before it.
       if n % @P@ == 0 then
         IO.println (String.intercalate " " (r.outputs.toList.map (fun b => toString (bv_uint b))))
 """
@@ -76,7 +83,7 @@ def build_probe(cert_text, base, widths, stim, p):
     return text[:cut] + tail
 
 
-def build_tb(top, ins, outs, nper, stim, p, init=""):
+def build_tb(top, ins, outs, nper, stim, p, init="", sample="after-first-edge"):
     """One clock period per stimulus period, sampled at the period boundary.
 
     TWO things this has to get right, both of which produced wrong traces on
@@ -102,13 +109,45 @@ def build_tb(top, ins, outs, nper, stim, p, init=""):
     show = ", ".join(n for n, _ in outs)
     fmt = " ".join("%0d" for _ in outs)
     init = init or "    // (no DUT state initialisation supplied)\n"
+    # WHICH EDGE THE SAMPLE SITS AFTER.  `directStepRaw` returns PRE-transition
+    # outputs, so what it reports is the design BEFORE the step's last slot
+    # commits.  At P=2 the posedge is slot 0 and the pre-slot-1 sample is
+    # therefore AFTER the posedge -- the historical default, kept so the P=2
+    # fixture's evidence is unchanged.  At P=1 there is only ONE slot, so the
+    # matching RTL sample is BEFORE the posedge; taking it after would compare
+    # Lean's f(state_k, input_k) against the RTL's f(state_k+1, input_k) and
+    # report an off-by-one as a value mismatch.
+    if sample == "before-first-edge":
+        sample_body = ("      #3;                      // inputs settled, BEFORE the only edge\n"
+                       f'      $display("{fmt}", {show});\n'
+                       "      @(posedge clk);\n"
+                       "      @(negedge clk);")
+    elif sample == "after-first-edge":
+        sample_body = ("      @(posedge clk);\n"
+                       "      #3;                      // after the posedge settles, before the negedge\n"
+                       f'      $display("{fmt}", {show});\n'
+                       "      @(negedge clk);")
+    else:
+        raise SystemExit(f"FATAL: unknown --sample {sample!r}")
     zero_in = "".join(f"    {n} = 0;\n" for n, _ in ins if n != "clk")
+    # The generated file must describe the timing it ACTUALLY has. A fixed
+    # header saying "after the posedge" sat on top of a before-the-posedge
+    # loop under --sample before-first-edge, which is the kind of artifact
+    # someone reads once and then debugs against for an hour.
+    if sample == "before-first-edge":
+        phase_note = ("// One source period per stimulus row. Outputs are sampled BEFORE THE\n"
+                      "// POSEDGE, which is the phase the Lean side reports: directStepRaw yields\n"
+                      "// PRE-transition outputs, and at P=1 there is a single slot, so the model's\n"
+                      "// sample is the state before that slot commits.")
+    else:
+        phase_note = ("// One source period per stimulus row. Outputs are sampled AFTER THE POSEDGE\n"
+                      "// AND BEFORE THE NEGEDGE, which is the phase the Lean side reports:\n"
+                      "// directStepRaw yields PRE-transition outputs, so at P=2 its sample is the\n"
+                      "// state after slot 0 and before slot 1. A slot-1 effect appears on the NEXT\n"
+                      "// sample.")
     return f"""// GENERATED by scripts/mem_lean_diffsim.py -- do not edit.
-// One source period per stimulus row. Outputs are sampled AFTER THE POSEDGE
-// AND BEFORE THE NEGEDGE, which is the phase the Lean side reports:
-// directStepRaw yields PRE-transition outputs, so at P=2 its sample is the
-// state after slot 0 and before slot 1. A slot-1 effect appears on the NEXT
-// sample.
+// sample={sample}, P={p}
+{phase_note}
 module tb;
   reg clk;
 {decl}{odecl}  integer f, i;
@@ -136,10 +175,7 @@ module tb;
     @(negedge clk);
     for (i = 0; i < {nper}; i = i + 1) begin
       #1;                      // off the edge: do not race the negedge NBAs
-{read}      @(posedge clk);
-      #3;                      // after the posedge settles, before the negedge
-      $display("{fmt}", {show});
-      @(negedge clk);
+{read}{sample_body}
     end
     $finish;
   end
@@ -156,6 +192,9 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--scenario", required=True, help="JSON list of {name: value} per source period")
     ap.add_argument("--p", type=int, default=2)
+    ap.add_argument("--sample", default="after-first-edge",
+                    choices=("after-first-edge", "before-first-edge"),
+                    help="which edge the RTL observation sits after; see build_tb")
     ap.add_argument("--rtl-init", default="",
                     help="file holding Verilog that zeroes the DUT state, to match zeroState")
     ap.add_argument("--lean-dir", default="formal/lean")
@@ -222,7 +261,8 @@ def main():
         return 3
     tb = os.path.join(a.out, "tb.v")
     init = open(a.rtl_init).read() if a.rtl_init else ""
-    open(tb, "w").write(build_tb(a.top, ins, outs, len(periods), os.path.abspath(rtl_stim), a.p, init))
+    open(tb, "w").write(build_tb(a.top, ins, outs, len(periods), os.path.abspath(rtl_stim), a.p, init,
+                                 a.sample))
     # ABSOLUTE: the simulation runs with cwd=a.out, which would otherwise
     # re-resolve this relative path against that same directory.
     exe = os.path.abspath(os.path.join(a.out, "sim"))
@@ -273,7 +313,8 @@ def main():
                     for j in range(min(len(r), len(l), len(names))) if r[j] != l[j]]
             print(f"  period {k}: " + "; ".join(diff))
         return 1
-    print(f"BEHAVIORAL_DIFF_PASS {n} period(s), P={a.p}, outputs {','.join(names)}")
+    print(f"BEHAVIORAL_DIFF_PASS {n} period(s), P={a.p}, sample={a.sample}, "
+          f"outputs {','.join(names)}")
     return 0
 
 

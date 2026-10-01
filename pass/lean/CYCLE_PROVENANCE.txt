@@ -143,3 +143,65 @@ minion_dcache_top                 0      67         0      65 PLAIN-COMPILE-FAIL
 # -- which is a real combinational path -- and needs a minimized RTL fixture
 # plus a mutation-sensitive differential or LEC gate before the other three
 # Class-A modules are re-run.
+
+
+###############################################################################
+# PART 4.  The fix: per-port memory dependencies, ordered over the certificate
+###############################################################################
+#
+# `reachable_topo_order` modelled a Memory CELL as one atomic node.  The
+# certificate's dependencies are per PORT, and `cert_memory_expand` already
+# knew that -- a read's base image is the chain of the write ports FORWARDED to
+# it and of no others, and a SYNCHRONOUS read's output is a register source.
+# Only the ordering pre-pass over-approximated, and it did so at cell
+# granularity, where read-output -> logic -> write-input is a self-dependency.
+#
+# WHAT CHANGED.  Four phases, the order of the first three forced:
+#   1. every Memory's externally visible read ids are RESERVED (a memory's port
+#      pin may be driven by ANOTHER memory's read output, so no memory's
+#      dependencies can be built until all of them have ids; the memories are
+#      taken in nid order so nothing depends on graph iteration order, and
+#      cert_memory_fill refuses to run before the count is complete);
+#   2. each Memory is FILLED -- write chains, operand resizes, per-port deps;
+#   3. the ordinary combinational nodes are built;
+#   4. ONE topological order is taken over the COMBINED certificate DAG
+#      (`cert_dag_order`, lean_common.cpp), not over the LGraph node vector.
+# A Memory is now a traversal boundary like a flop, and its port cones were
+# already explicit roots.  The sort is STABLE, so a design with no memory is
+# ordered exactly as before.
+#
+# A cycle that survives phase 4 is a cycle in the MODEL -- a read forwarded
+# from the write whose data it feeds -- and is still refused, now naming the
+# memory, the port and the whole path.
+#
+# EVIDENCE.
+#
+# No regression, over the 105 accepted CORE-ET certificates (re-emitted from
+# each one's stored lgdb_norm with scripts/cert_reemit_diff.sh, so only
+# pass.lean re-ran and any difference is attributable):
+#     identical=76 changed=29 emit-failed=0 missing=0 of 105
+#     memory designs=29  non-memory designs=76  unexpected changes=0
+# The split is exact: every design that moved has a memory, every design
+# without one is byte-identical, and there is no crossover.  All 29 changed
+# certificates are still ACCEPTED by checkDesign and ran 4 cycles (29/29).
+# Two of them got SMALLER -- intpipe_csr_msgs by 2 nodes, txfma_f1 by 16 -- and
+# every node dropped was UNREFERENCED in the old certificate (the memory clock
+# cones the old walk pulled in and nothing ever read).  Both now have zero
+# unreferenced nodes.
+#
+# The four Class-A modules, re-run end to end:
+#     minion_frontend_thread_buffer  compile 0  single_edge 0  emit 0  gates 0  ACCEPTED
+#     minion_frontend                compile 0  single_edge 0  emit 0  gates 0
+#     minion_dcache_top              compile 0  single_edge 0  emit 0  gates 0
+#     intpipe_csr_file               emit 7
+# Three of the four are unblocked.  intpipe_csr_file is NOT a memory cycle: it
+# refuses with `shl_147760 reads sext_5080`, a word-level loop with no Memory
+# in it, which is the packed-aggregate/split_selfref class and a separate fix.
+#
+# GATES.  //pass/lean:cert_dag_order_test (the sort and the pool's fail-closed
+# validation, 19 cases), //lhd/tests:mem_read_write_feedback_test (four RTL and
+# Pyrope fixtures, asserted on certificate STRUCTURE), and
+# lhd/tests/mem_feedback_lean_diff_test.sh (RTL under iverilog vs the Lean
+# certificate over 16 periods against a hand-derived golden trace, plus two
+# mutants that must mismatch ON A VALUE).  Reproducible mutation specs are in
+# scripts/mutation_specs/; every mutant is killed by a named case.

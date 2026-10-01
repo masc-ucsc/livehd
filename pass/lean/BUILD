@@ -1,6 +1,6 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_library(
@@ -48,4 +48,17 @@ filegroup(
         "CENSUS_D2_122_MANIFEST.json",
     ],
     visibility = ["//visibility:public"],
+)
+
+# The certificate DAG's order, where a memory's per-port dependencies live.
+# See the file header for why the forwarded-read cycle can only be pinned here.
+cc_test(
+    name = "cert_dag_order_test",
+    size = "small",
+    srcs = ["cert_dag_order_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":pass_lean",
+        "@googletest//:gtest_main",
+    ],
 )

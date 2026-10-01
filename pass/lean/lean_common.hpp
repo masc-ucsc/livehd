@@ -257,6 +257,8 @@ struct MemCertIds {
   uint32_t                   next_chain = 0;  // all-writes chain tail (== array_src if write-less)
   std::map<size_t, uint32_t> read_out;        // port_id -> id whose value is the port's read DATA
   std::map<size_t, uint32_t> rdreg_src;       // port_id -> read-data register source id (sync only)
+  std::map<size_t, uint32_t> rdreg_one;       // port_id -> the literal-1 read-enable source of the raw read
+  std::map<size_t, uint32_t> raw_read;        // port_id -> cert id of the UNGATED Op_MemRead (sync only)
   std::map<size_t, uint32_t> rdreg_next;      // port_id -> cert id of that register's next value
 };
 
@@ -267,6 +269,93 @@ struct CertNodeInfo {
   uint32_t              width = 0;
   std::vector<uint32_t> deps;
 };
+
+// ---------------------------------------------------------------------------
+// The certificate DAG, and its one topological order.
+//
+// A certificate node's dependencies are the ids in `CertNodeInfo::deps`, and
+// those are the ONLY dependencies the Lean model has.  That is a finer relation
+// than the LGraph's, and the difference is the whole point:
+//
+//   * a Memory CELL is one LGraph node with every port's pins on it, so
+//     read-output -> logic -> write-input looks like a self-dependency;
+//   * the certificate decomposes it per port.  A read sees the write chain of
+//     the write ports FORWARDED to it (`memory_fwd_bit`) and no others, and a
+//     SYNCHRONOUS read sees a register source, which depends on nothing in the
+//     current cycle.
+//
+// So the order is decided HERE, over the combined DAG (ordinary nodes plus the
+// synthetic nodes a memory decomposes into), not over the LGraph node vector.
+// A cycle that survives this IS a cycle in the model -- a read forwarded from a
+// write whose data it feeds -- and must be refused.
+// ---------------------------------------------------------------------------
+
+// Certificate nodes as they are BUILT, before their order is known.  The
+// `seed` is only the order candidates are first considered in; a synthetic
+// memory id has no LGraph node and therefore no position of its own.
+//
+// RESERVE-THEN-FILL, and the reason is cross-memory dependency.  A memory's
+// port pins may be driven by ANOTHER memory's read output, and `cert_dep_id`
+// resolves such a pin through `CertBuild::mem_read_id`.  If each memory were
+// allocated and filled in one go, whichever memory happened to be expanded
+// first would fatal on the other's read pin -- and which one that is would
+// depend on graph iteration order.  So every memory's externally visible read
+// ids are RESERVED first, and only then is any port's dependency built.
+//
+// It also FAILS CLOSED on malformed construction.  `by_id`, `text` and `seed`
+// are three views of one set, and an id silently appearing in two of them (or
+// in `sources` as well) would quietly change the model: a node that is also a
+// source is skipped as a leaf by the sort, so its operator would never run.
+// `errors()` lists every such inconsistency and `cert_dag_order` refuses on it.
+struct CertPool {
+  std::map<uint32_t, CertNodeInfo> by_id;
+  std::map<uint32_t, std::string>  text;    // the emitted `{ nid := ... }` record
+  std::vector<uint32_t>            seed;
+  std::map<uint32_t, std::string>  origin;  // id -> what to call it in a diagnostic
+
+  // Claim `id`'s place in the order now; its deps and text arrive from `fill`.
+  void reserve(uint32_t id, std::string what = {}) {
+    seed.push_back(id);
+    if (!what.empty()) {
+      origin[id] = std::move(what);
+    }
+  }
+
+  void fill(uint32_t id, std::string node_text, CertNodeInfo info) {
+    by_id[id] = std::move(info);
+    text[id]  = std::move(node_text);
+  }
+
+  void add(uint32_t id, std::string node_text, CertNodeInfo info, std::string what = {}) {
+    reserve(id, std::move(what));
+    fill(id, std::move(node_text), std::move(info));
+  }
+
+  [[nodiscard]] bool reserved(uint32_t id) const {
+    return std::find(seed.begin(), seed.end(), id) != seed.end();
+  }
+
+  // Every way the three views can disagree.  Empty iff the pool is well formed.
+  [[nodiscard]] std::vector<std::string> errors(const std::set<uint32_t>& sources) const;
+};
+
+struct Cert_dag_result {
+  std::vector<uint32_t> order;
+  bool                  ok = true;
+  std::string           reason;  // empty iff ok
+};
+
+// A DFS post-order over `pool.seed`, emitting each node after its deps.
+//
+// STABLE: when `seed` is already a valid dependency order the result is `seed`
+// unchanged, so a design with no memory is ordered exactly as before and its
+// emitted text does not move.
+//
+// Fails closed on three things, with the id's `origin` text when it has one: a
+// malformed pool (see `errors`), a dependency cycle, and a dependency that is
+// neither a certificate node nor a source (a dangling reference would otherwise
+// become a silently wrong model).
+Cert_dag_result cert_dag_order(const CertPool& pool, const std::set<uint32_t>& sources);
 
 // ---------------------------------------------------------------------------
 // What the shared scan hands a direction's emitter.

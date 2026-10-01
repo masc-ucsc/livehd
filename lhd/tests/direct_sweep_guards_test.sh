@@ -53,16 +53,20 @@ CASES = [
     ("RUNDIRECT REFUSED",                   OK.replace(f"OK\t{CYCLES}", "REFUSED\tbad"), 0, "RUN_REFUSED"),
 ]
 
-real_run = subprocess.run
+# PATCH WHAT run_one ACTUALLY CALLS.  It used to be `subprocess.run`; it is
+# `ds.run_timed` since the timeout rework, and a stale patch target does not
+# fail loudly -- it quietly lets the test LAUNCH THE REAL `lean`, which then
+# reports whatever it likes while the synthetic case being tested never runs.
+real_run_timed = ds.run_timed
 fails = 0
 for desc, stdout, rc, want in CASES:
-    def fake_run(cmd, **kw):
-        return types.SimpleNamespace(stdout=stdout, stderr="0.1 1000\n", returncode=rc)
-    subprocess.run = fake_run
+    def fake_run_timed(cmd, timeout, cwd=None, env=None, _o=None, _r=None):
+        return _o, "0.1 1000\n", False, _r
+    ds.run_timed = (lambda o, r: (lambda *a, **k: (o, "0.1 1000\n", False, r)))(stdout, rc)
     try:
         row = ds.run_one(cert, out, CYCLES, 60, dict(os.environ))
     finally:
-        subprocess.run = real_run
+        ds.run_timed = real_run_timed
     got = row["verdict"]
     if got != want:
         print(f"FAIL: {desc}: expected {want}, got {got} (reason={row.get('reason','')!r})")
@@ -71,19 +75,30 @@ for desc, stdout, rc, want in CASES:
         print(f"ok: {desc} -> {got}")
 
 # `cycles` must come from the RUN, never from the request.
-def fake_run(cmd, **kw):
-    return types.SimpleNamespace(stdout=OK.replace(f"OK\t{CYCLES}", "OK\t2"),
-                                 stderr="0.1 1000\n", returncode=0)
-subprocess.run = fake_run
+ds.run_timed = lambda *a, **k: (OK.replace(f"OK\t{CYCLES}", "OK\t2"), "0.1 1000\n", False, 0)
 try:
     row = ds.run_one(cert, out, CYCLES, 60, dict(os.environ))
 finally:
-    subprocess.run = real_run
+    ds.run_timed = real_run_timed
 if str(row["cycles"]) == str(CYCLES):
     print(f"FAIL: `cycles` still echoes the request ({CYCLES}) instead of what ran (2)")
     fails += 1
 else:
     print(f"ok: `cycles` reports what ran ({row['cycles']}), not the request ({CYCLES})")
+
+# A TIMEOUT is a harness limit, not a model verdict, and it must say so.
+ds.run_timed = lambda *a, **k: ("", "", True, -9)
+try:
+    row = ds.run_one(cert, out, CYCLES, 60, dict(os.environ))
+finally:
+    ds.run_timed = real_run_timed
+if row["verdict"] != "TIMEOUT":
+    print(f"FAIL: a timed-out probe reported {row['verdict']}, not TIMEOUT"); fails += 1
+elif "harness limit" not in row.get("reason", ""):
+    print(f"FAIL: the TIMEOUT row does not say it is a harness limit: {row.get('reason','')!r}")
+    fails += 1
+else:
+    print("ok: a timed-out probe reports TIMEOUT and names it a harness limit")
 
 sys.exit(1 if fails else 0)
 PY

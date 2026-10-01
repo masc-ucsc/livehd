@@ -1,0 +1,71 @@
+{
+  "_what": "The certificate-DAG topological sort itself: the cycle guard, the source/leaf rule, the dangling-dependency refusal, post-order emission, and the memory/port context in the diagnostic.",
+  "target": "//pass/lean:cert_dag_order_test",
+  "file": "pass/lean/lean_common.cpp",
+  "bazel": [
+    "--repo_env=CC=/usr/bin/gcc-15",
+    "--repo_env=CXX=/usr/bin/g++-15"
+  ],
+  "mutants": [
+    {
+      "name": "M1 gray hit accepted",
+      "old": "      if (m == Mark::gray) {",
+      "new": "      if (m == Mark::gray) {\n        continue;\n      }\n      if (false) {"
+    },
+    {
+      "name": "M2 deps never ordered",
+      "old": "      if (sources.count(dep) != 0) {",
+      "new": "      if (sources.count(dep) != 0 || true) {"
+    },
+    {
+      "name": "M3 no dangling check",
+      "old": "      if (dit == pool.by_id.end()) {",
+      "new": "      if (dit == pool.by_id.end() && false) {"
+    },
+    {
+      "name": "M4 pre-order emission",
+      "old": "        mark[cur_id] = Mark::black;\n        res.order.push_back(cur_id);",
+      "new": "        mark[cur_id] = Mark::black;"
+    },
+    {
+      "name": "M5 roots revisited",
+      "old": "    if (mark[root] == Mark::black) {\n      continue;\n    }",
+      "new": "    if (false) {\n      continue;\n    }"
+    },
+    {
+      "name": "M6 origin dropped",
+      "old": "    return \"cert id \" + std::to_string(id) + \" (\" + o->second + \")\";",
+      "new": "    return \"cert id \" + std::to_string(id);"
+    },
+    {
+      "name": "V1 duplicate seed ok",
+      "old": "    if (!seen.insert(id).second) {",
+      "new": "    if (!seen.insert(id).second && false) {"
+    },
+    {
+      "name": "V2 node-as-source ok",
+      "old": "    if (sources.count(id) != 0) {",
+      "new": "    if (sources.count(id) != 0 && false) {"
+    },
+    {
+      "name": "V3 unfilled reserve ok",
+      "old": "    if (by_id.find(id) == by_id.end()) {\n      out.push_back(cert_id_name(*this, id) + \" was reserved but never filled in\");\n      continue;\n    }",
+      "new": "    if (by_id.find(id) == by_id.end()) {\n      continue;\n    }"
+    },
+    {
+      "name": "V4 unreserved fill ok",
+      "old": "    if (seen.count(id) == 0) {",
+      "new": "    if (seen.count(id) == 0 && false) {"
+    },
+    {
+      "name": "V5 wrong-key info ok",
+      "old": "    if (by_id.at(id).nid != id) {",
+      "new": "    if (by_id.at(id).nid != id && false) {"
+    },
+    {
+      "name": "V6 pool errors ignored",
+      "old": "  if (!bad.empty()) {",
+      "new": "  if (!bad.empty() && false) {"
+    }
+  ]
+}

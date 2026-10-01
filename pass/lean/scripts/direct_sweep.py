@@ -24,6 +24,7 @@ import hashlib
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -98,6 +99,76 @@ def build_probe(src_text, base, cycles, max_rec_depth=0):
     return text[:cut] + PROBE_TAIL.replace("@BASE@", base).replace("@CYCLES@", str(cycles))
 
 
+def kill_process_group(proc, grace=10.0):
+    """SIGTERM the whole process group, then SIGKILL whatever is left.
+
+    `subprocess.run(timeout=...)` kills only the process it started.  Here that
+    is `/usr/bin/time`, whose child `lean` is NOT killed: it is reparented to
+    init and keeps running -- measured, a leaked probe sat at 100% CPU and 8 GB
+    RSS while the sweep moved on to the next module, so the next module's
+    numbers were taken on a machine that was secretly still busy.  Killing the
+    GROUP is what reaches the descendants.
+    """
+    try:
+        pgid = os.getpgid(proc.pid)
+    except (ProcessLookupError, PermissionError):
+        return
+    if pgid == os.getpgrp():
+        # The child is in OUR OWN group, which means it was not started with
+        # start_new_session.  Killing the group here would take down the sweep
+        # -- and whatever launched it -- instead of the probe.  Fall back to the
+        # single process and say so, loudly: the leak this function exists to
+        # prevent is back, and silently doing the old wrong thing is worse than
+        # a line on stderr.
+        print(f"direct_sweep: WARNING pid {proc.pid} shares this process group; "
+              f"killing only it, so its descendants may leak", file=sys.stderr)
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        return
+    for sig, wait_s in ((signal.SIGTERM, grace), (signal.SIGKILL, 5.0)):
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError:
+            return
+        except PermissionError:
+            return
+        deadline = time.time() + wait_s
+        while time.time() < deadline:
+            try:
+                os.killpg(pgid, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.2)
+
+
+def run_timed(cmd, timeout, cwd=None, env=None):
+    """-> (stdout, stderr, timed_out, returncode).
+
+    The command runs in its OWN session, so a timeout can take down every
+    descendant rather than just the wrapper.
+
+    The RETURN CODE is part of the result on purpose: `run_one` promotes an
+    ACCEPTED verdict to LEAN_ERROR when the probe exited non-zero after
+    printing it, and a result shape that dropped the status would have turned
+    that guard into a NameError on every ordinary run.
+    """
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, cwd=cwd, env=env, start_new_session=True)
+    try:
+        out, err = proc.communicate(timeout=timeout)
+        return out, err, False, proc.returncode
+    except subprocess.TimeoutExpired:
+        kill_process_group(proc)
+        try:
+            out, err = proc.communicate(timeout=30)   # reap; pipes are closed by now
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            out, err = "", ""
+        return out, err, True, (proc.returncode if proc.returncode is not None else -signal.SIGKILL)
+
+
 def run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0):
     base_m = CERT_RE.search(open(path, encoding="utf-8", errors="replace").read(1 << 22))
     name = os.path.basename(path).replace("_Lgraph.lean", "")
@@ -117,12 +188,10 @@ def run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0):
     cmd = ["/usr/bin/time", "-f", "%e %M", "nice", "-n", "19", "ionice", "-c", "3",
            "lean", probe]
     t0 = time.time()
-    try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
-                           cwd=LEAN_DIR, env=lean_env)
-        out, err = p.stdout, p.stderr
-    except subprocess.TimeoutExpired:
+    out, err, timed_out, exit_code = run_timed(cmd, timeout, cwd=LEAN_DIR, env=lean_env)
+    if timed_out:
         row["verdict"] = "TIMEOUT"
+        row["reason"] = f"no result within {timeout}s (harness limit, not a model refusal)"
         row["wall_s"] = f"{time.time() - t0:.1f}"
         return row
     row["wall_s"] = f"{time.time() - t0:.1f}"
@@ -165,9 +234,9 @@ def run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0):
     # cycle count.
     if row["verdict"] == "ACCEPTED":
         missing = [k for k in ("check_ms", "step1_ms", "run_ms") if not row[k]]
-        if p.returncode != 0:
+        if exit_code != 0:
             row["verdict"] = "LEAN_ERROR"
-            row["reason"] = (f"probe exited {p.returncode} after printing ACCEPTED"
+            row["reason"] = (f"probe exited {exit_code} after printing ACCEPTED"
                              + (" | " + " | ".join(t[:120] for t in tail[:2]) if tail else ""))
         elif missing or not saw_rundirect_ok:
             row["verdict"] = "SIM_INCOMPLETE"

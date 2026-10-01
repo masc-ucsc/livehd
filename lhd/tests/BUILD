@@ -836,6 +836,40 @@ sh_test(
     ],
 )
 
+# A sweep TIMEOUT must leave nothing running. `subprocess.run(timeout=...)`
+# killed the `/usr/bin/time` wrapper and left `lean` reparented to init, burning
+# 100% CPU and ~8 GB RSS through the rest of the sweep. The test is about
+# DESCENDANTS, not about the call returning. It also pins that
+# coreet_d2_census.sh forwards its own --timeout, which it did not.
+sh_test(
+    name = "direct_sweep_timeout_test",
+    size = "small",
+    srcs = ["direct_sweep_timeout_test.sh"],
+    data = [
+        "//pass/lean:scripts",
+        "//scripts:cycle_provenance_tools",
+    ],
+)
+
+# A memory read feeding its OWN memory's write port is not a combinational loop.
+# pass.lean modelled a Memory cell as one atomic node, so read -> logic -> write
+# came back as a word-level cycle and gated four CORE-ET blocks. The assertions
+# are structural -- the read must be based on the committed array image, not on
+# a write chain -- because an emit-only check would also pass for a model that
+# silently forwarded every write.
+sh_test(
+    name = "mem_read_write_feedback_test",
+    size = "medium",
+    srcs = ["mem_read_write_feedback_test.sh"],
+    data = [
+        "mem_async_read_feedback.v",
+        "mem_sync_read_feedback.v",
+        "mem_two_memories_chained.v",
+        "mem_fwd_read_feedback.prp",
+        "//lhd",
+    ],
+)
+
 # PER-PORT memory read timing at the importer. `type` is a SCALAR (0 async,
 # 1 sync, 2 array) but the reader wrote yosys's RD_CLK_ENABLE BITMASK into it;
 # masks 0 and 1 coincide with the scalar meaning by accident, so every
