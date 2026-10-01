@@ -1493,12 +1493,15 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       std::sort(ports.begin(), ports.end());
       ports.erase(std::unique(ports.begin(), ports.end()), ports.end());
 
-      // LIVEHD_SE_MEM_GATE_DEBUG=1 reports which memory ports this rewrite
-      // actually gates. The claim -- "only the write and SYNCHRONOUS read ports
-      // are slot/ICG gated, the asynchronous reads stay combinational" -- has no
-      // other observable spelling: downstream, a gated and an ungated port
-      // differ only inside the enable cone. Derived from the same predicate the
-      // rewrite uses, printed per port so a regression names the port.
+      // LIVEHD_SE_MEM_GATE_DEBUG=1 reports this rewrite's CLASSIFICATION of each
+      // memory port, before the rewrite runs.
+      //
+      // IT IS NOT EVIDENCE THAT THE GATE WAS INSERTED. It prints what
+      // mem_port_commits() decided, so deleting `terms.push_back(slot_pred[...])`
+      // below -- which gates nothing at all -- leaves this output unchanged
+      // (verified). Read it as "which ports this pass intends to commit", and
+      // get the rewrite itself from a behavioural trace against the NORMALIZED
+      // graph, not from here.
       if (std::getenv("LIVEHD_SE_MEM_GATE_DEBUG") != nullptr) {
         std::string line;
         for (const auto p : ports) {
@@ -1509,11 +1512,14 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
             case Mem_port_timing::SyncRead: t = "sync"; break;
             case Mem_port_timing::Bad: t = "BAD"; break;
           }
+          // "commits"/"combinational", NOT "gated"/"live": these are the
+          // CLASSIFICATION, and calling them gated would claim an insertion
+          // this line cannot see.
           line += std::format(" port{}={}:{}", static_cast<int>(p), t,
-                              mem_port_commits(me.node, static_cast<hhds::Port_id>(p)) ? "gated" : "live");
+                              mem_port_commits(me.node, static_cast<hhds::Port_id>(p)) ? "commits" : "combinational");
         }
-        std::cerr << std::format("pass.single_edge: memory `{}` slots={} gate={}{}\n", label_of(me.node), plan.slots,
-                                 gate ? "yes" : "no", line);
+        std::cerr << std::format("pass.single_edge: memory `{}` port classification (pre-rewrite): slots={} gate={}{}\n",
+                                 label_of(me.node), plan.slots, gate ? "yes" : "no", line);
       }
 
       for (const auto p : ports) {

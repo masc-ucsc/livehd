@@ -1,7 +1,19 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# pass.single_edge must gate memory ports PER PORT.
+# pass.single_edge classifies memory ports PER PORT.
+#
+# SCOPE, STATED UP FRONT: this is a CLASSIFICATION and FORCED-PATH test. It
+# proves the pass labels each port correctly and that the phase lowering
+# actually runs (P=2). It does NOT prove the rewrite happened: the readback it
+# checks is printed BEFORE the rewrite, from the same predicate the rewrite
+# consults. Deleting `terms.push_back(slot_pred[me.slot])` -- which inserts no
+# slot gate at all -- leaves every line below unchanged and this test passing.
+# Verified, not assumed.
+#
+# The rewrite itself needs a behavioural trace of the NORMALIZED graph against
+# the RTL at aligned P=2 microsteps. That is tracked separately and is the
+# evidence for both pass.single_edge and pass.lean mixed-memory handling.
 #
 # Every memory site in that pass used to ask `is_read && me.type != 1`: a
 # per-port question answered with the cell-global `type`. That holds only while
@@ -58,28 +70,31 @@ else
   fails=$((fails+1))
 fi
 
-# ---- the claim ---------------------------------------------------------
-# write + SYNC reads are slot-gated; ASYNC reads stay live on both microsteps.
+# ---- the classification -------------------------------------------------
+# write + SYNC reads are classified as committing; ASYNC reads as
+# combinational. Again: this is the label, not the inserted gate.
 GATE="$(grep -oP 'pass\.single_edge: memory .*' "$T/se.log" | head -1)"
 if [ -z "$GATE" ]; then
   echo "FAIL: no gate readback (LIVEHD_SE_MEM_GATE_DEBUG produced nothing)"; fails=$((fails+1))
 else
   echo "    $GATE"
-  for want in "port0=write:gated" "port1=async:live" "port2=async:live" \
-              "port3=async:live" "port4=sync:gated" "port5=sync:gated"; do
+  for want in "port0=write:commits" "port1=async:combinational" "port2=async:combinational" \
+              "port3=async:combinational" "port4=sync:commits" "port5=sync:commits"; do
     echo "$GATE" | grep -q -- "$want" \
       || { echo "FAIL: expected $want"; fails=$((fails+1)); }
   done
   # Stated as its own check so the failure reads as the SEMANTIC error it is.
-  # `=`-anchored: "async:live" CONTAINS "sync:live", so an unanchored match
-  # here reported a sync port as ungated on a perfectly correct run.
-  echo "$GATE" | grep -q "=async:gated" \
-    && { echo "FAIL: an ASYNCHRONOUS read port was slot-gated -- a combinational output would"
-         echo "      become visible on only one microstep"; fails=$((fails+1)); }
-  echo "$GATE" | grep -q "=sync:live" \
-    && { echo "FAIL: a SYNCHRONOUS read port was left ungated -- its read-data register would"
-         echo "      commit on every sub-step"; fails=$((fails+1)); }
-  [ "$fails" -eq 0 ] && echo "ok: only the write and sync-read ports are gated; async reads stay live"
+  # `=`-anchored: "async:combinational" CONTAINS "sync:combinational", so an
+  # unanchored match reported a sync port as misclassified on a correct run.
+  echo "$GATE" | grep -q "=async:commits" \
+    && { echo "FAIL: an ASYNCHRONOUS read port is classified as committing -- it would be"
+         echo "      slot-gated, making a combinational output visible on only one microstep"
+         fails=$((fails+1)); }
+  echo "$GATE" | grep -q "=sync:combinational" \
+    && { echo "FAIL: a SYNCHRONOUS read port is classified as combinational -- it would be"
+         echo "      left ungated and its read-data register would commit every sub-step"
+         fails=$((fails+1)); }
+  [ "$fails" -eq 0 ] && echo "ok: write and sync reads classified as committing; async reads as combinational"
 fi
 
 # The normalized graph must still be emittable, or "gated correctly" would be
@@ -92,4 +107,4 @@ fi
        grep -oP '"message":"\K[^"]{0,120}' "$T/lean.log" | head -1 | sed 's/^/      /'; fails=$((fails+1)); }
 
 [ "$fails" -eq 0 ] || { echo "FAIL: $fails case(s) failed"; exit 1; }
-echo "PASS: single_edge_mem_mixed_test"
+echo "PASS: single_edge_mem_mixed_test (classification + forced path; NOT rewrite evidence)"
