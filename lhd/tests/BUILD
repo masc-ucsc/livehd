@@ -772,6 +772,21 @@ sh_test(
     ],
 )
 
+# pass.single_edge must gate memory ports PER PORT: the write and SYNCHRONOUS
+# read ports are slot-gated, the ASYNCHRONOUS reads stay live on both
+# microsteps. The fixture carries a negedge element on purpose -- without it
+# the pass reports "skipped: no latch, no negedge state, one clock net" and
+# exercises no commit gating at all, so the claim is unobservable.
+sh_test(
+    name = "single_edge_mem_mixed_test",
+    size = "large",
+    srcs = ["single_edge_mem_mixed_test.sh"],
+    data = [
+        "mem_mixed_rdclk_negedge.v",
+        "//lhd",
+    ],
+)
+
 # PER-PORT memory read timing at the importer. `type` is a SCALAR (0 async,
 # 1 sync, 2 array) but the reader wrote yosys's RD_CLK_ENABLE BITMASK into it;
 # masks 0 and 1 coincide with the scalar meaning by accident, so every

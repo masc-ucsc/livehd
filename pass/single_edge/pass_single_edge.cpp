@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <format>
+#include <iostream>
 #include <optional>
 #include <string>
 #include <utility>
@@ -243,8 +244,23 @@ Mem_port_timing mem_port_timing(const hhds::Node_class& n, hhds::Port_id port) {
 
 // Does this port COMMIT state on a clock edge? Writes and synchronous reads do
 // (a sync read owns a read-data register); an asynchronous read does not.
+//
+// Written as an explicit switch, NOT `timing != AsyncRead`. That form answered
+// "yes" for Bad -- an rdport value that is none of write/async/sync -- so an
+// unparseable port would have been slotted as if it committed. Bad must be
+// refused by validation before any phase asks this, and the default here is
+// the safe side of that contract rather than a second opinion.
 bool mem_port_commits(const hhds::Node_class& n, hhds::Port_id port) {
-  return mem_port_timing(n, port) != Mem_port_timing::AsyncRead;
+  switch (mem_port_timing(n, port)) {
+    case Mem_port_timing::Write:
+    case Mem_port_timing::SyncRead: return true;
+    case Mem_port_timing::AsyncRead: return false;
+    case Mem_port_timing::Bad: break;
+  }
+  // Unreachable for a validated plan: validate_mem_ports() refuses Bad for
+  // EVERY memory, array included, before the plan is built.
+  I(false, "mem_port_commits on an unvalidated rdport value");
+  return false;
 }
 
 struct Plan {
@@ -503,31 +519,27 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_cloc
       Mem_element me;
       me.node = n;
       me.type = mem_sink_const(n, pid_type).value_or(0);
-      if (me.type == 2) {
-        plan.mems.push_back(me);
-        continue;
-      }
-      // `type` is defined as 0 async / 1 sync / 2 array (graph/cell.cpp pid 7).
-      // The yosys reader writes yosys's per-read-port `RD_CLK_ENABLE` BITMASK
-      // into it, so a memory whose read ports MIX clocked and unclocked reads
-      // arrives as, e.g., 24 (= 0b11000: read ports 3 and 4 registered, 0-2
-      // combinational). Measured on core-et's minion_frontend_thread_buffer.
-      // pass.lean refuses that value too; refusing it HERE matters because
-      // treating 24 as "not 1" would leave the two clocked read-data registers
-      // unslotted -- committing on every sub-step -- which is precisely the
-      // wrong lowering this pass exists never to emit.
+
+      // VALIDATE FIRST, skip second. The array early-return used to come
+      // before any of this, so a type=2 memory with a SYNCHRONOUS read port
+      // was pushed unchecked -- pass.lean rejects that contradiction, this
+      // pass silently accepted it, and the sync read-data register would have
+      // gone unslotted. Validation now covers every memory, array included,
+      // which is also what makes Mem_port_timing::Bad unreachable downstream.
+      //
+      // `type` is 0 async / 1 sync / 2 array / 3 mixed (graph/cell.hpp). The
+      // reader once wrote yosys's per-read-port RD_CLK_ENABLE BITMASK here, so
+      // a mixed memory arrived as e.g. 24 (0b11000: read ports 3 and 4
+      // registered, 0-2 combinational) -- measured on core-et's
+      // minion_frontend_thread_buffer. It now arrives as the mixed sentinel,
+      // and the per-port timing is on each port's `rdport`.
       if (me.type != Ntype::Memory_type_async && me.type != Ntype::Memory_type_sync
-          && me.type != Ntype::Memory_type_mixed) {
+          && me.type != Ntype::Memory_type_array && me.type != Ntype::Memory_type_mixed) {
         plan.code = "memory-type-unsupported";
         plan.why  = std::format("memory `{}` has type={}, which is not async 0 / sync 1 / array 2 / mixed 3",
                                 label_of(n), me.type);
         return plan;
       }
-      // The cell-global `type` must AGREE with the ports -- the same check
-      // pass.lean makes. Accepting 3 on its own would let a disagreement
-      // through, and accepting 0/1 without it would let a per-port regression
-      // hide behind a uniform-looking scalar. A port whose `rdport` is not one
-      // of write/async/sync is refused rather than guessed.
       {
         size_t n_sync  = 0;
         size_t n_async = 0;
@@ -555,6 +567,8 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_cloc
           mismatch = "type=1 (sync) but some read port is asynchronous";
         } else if (me.type == Ntype::Memory_type_async && n_sync != 0) {
           mismatch = "type=0 (async) but some read port is synchronous";
+        } else if (me.type == Ntype::Memory_type_array && n_sync != 0) {
+          mismatch = "type=2 (combinational array) but some read port is synchronous";
         } else if (me.type == Ntype::Memory_type_mixed && (n_sync == 0 || n_async == 0)) {
           mismatch = "type=3 (mixed) but the read ports do not actually differ";
         }
@@ -565,6 +579,12 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_cloc
                                   label_of(n), mismatch, n_async, n_sync);
           return plan;
         }
+      }
+      // A combinational array commits nothing and is not slot-gated -- but
+      // only now that its ports have been checked.
+      if (me.type == Ntype::Memory_type_array) {
+        plan.mems.push_back(me);
+        continue;
       }
       const auto posclk = mem_sink_const(n, pid_posclk).value_or(1);
       if (posclk == Ntype::Memory_posclk_mixed) {
@@ -1473,9 +1493,30 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       std::sort(ports.begin(), ports.end());
       ports.erase(std::unique(ports.begin(), ports.end()), ports.end());
 
+      // LIVEHD_SE_MEM_GATE_DEBUG=1 reports which memory ports this rewrite
+      // actually gates. The claim -- "only the write and SYNCHRONOUS read ports
+      // are slot/ICG gated, the asynchronous reads stay combinational" -- has no
+      // other observable spelling: downstream, a gated and an ungated port
+      // differ only inside the enable cone. Derived from the same predicate the
+      // rewrite uses, printed per port so a regression names the port.
+      if (std::getenv("LIVEHD_SE_MEM_GATE_DEBUG") != nullptr) {
+        std::string line;
+        for (const auto p : ports) {
+          const char* t = nullptr;
+          switch (mem_port_timing(me.node, static_cast<hhds::Port_id>(p))) {
+            case Mem_port_timing::Write: t = "write"; break;
+            case Mem_port_timing::AsyncRead: t = "async"; break;
+            case Mem_port_timing::SyncRead: t = "sync"; break;
+            case Mem_port_timing::Bad: t = "BAD"; break;
+          }
+          line += std::format(" port{}={}:{}", static_cast<int>(p), t,
+                              mem_port_commits(me.node, static_cast<hhds::Port_id>(p)) ? "gated" : "live");
+        }
+        std::cerr << std::format("pass.single_edge: memory `{}` slots={} gate={}{}\n", label_of(me.node), plan.slots,
+                                 gate ? "yes" : "no", line);
+      }
+
       for (const auto p : ports) {
-        // `rdport` absent reads as a write port, exactly as pass.lean's walk
-        // defaults it (Memory_port_info::rdport = false).
         if (!mem_port_commits(me.node, static_cast<hhds::Port_id>(p))) {
           continue;  // async read: combinational, nothing commits
         }
