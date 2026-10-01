@@ -2724,6 +2724,37 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         exit_node.create_sink_pin(static_cast<hhds::Port_id>(2 + port_n))
             .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::RD_CLK).extract(i, 1), false));
       }
+
+      // LIVEHD_MEM_TIMING_DEBUG=1 prints the per-port read timing READ BACK OUT
+      // of the graph. Reading it back matters: a line computed from the yosys
+      // parameter would agree with itself even if the pin write were wrong, and
+      // per-port timing has no other observable spelling -- every consumer
+      // decides "is this a read port" with `!is_known_false()`, so an async(1)
+      // and a sync(2) port are indistinguishable downstream until a consumer is
+      // taught the difference.
+      if (std::getenv("LIVEHD_MEM_TIMING_DEBUG") != nullptr) {
+        std::string line;
+        for (int i = 0; i < rdports; i++) {
+          const auto port_n = (wrports + i) * static_cast<int>(Ntype::Memory_port_stride);
+          const auto pid    = static_cast<hhds::Port_id>(10 + port_n);
+          int        v      = -1;
+          for (auto e : exit_node.inp_edges()) {
+            if (e.sink.get_port_id() == pid && livehd::graph_util::is_const_pin(e.driver)) {
+              v = static_cast<int>(livehd::graph_util::hydrate_const(e.driver).to_just_i64());
+              break;
+            }
+          }
+          line += std::format(" port{}={}", i,
+                              v == Ntype::Memory_rdport_sync    ? "sync"
+                              : v == Ntype::Memory_rdport_async ? "async"
+                              : v == Ntype::Memory_rdport_write ? "write"
+                                                                : std::format("UNKNOWN({})", v));
+        }
+        // stderr, not yosys's log(): this runs in-process and the yosys log
+        // is not the stream a caller capturing the compile sees.
+        std::cerr << std::format("lgyosys_tolg: memory read timing: type={} rdports={}{}\n",
+                                 mem_type, rdports, line);
+      }
     } else if (cell->type.c_str()[0] == '$' && cell->type.c_str()[1] != '_' && strncmp(cell->type.c_str(), "$paramod", 8) != 0) {
       log("likely error: add this cell type %s to lgraph\n", cell->type.c_str());
     } else if (std::strncmp(cell->type.c_str(), "$_AND_", 6) == 0) {

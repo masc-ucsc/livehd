@@ -33,17 +33,43 @@ T="${TEST_TMPDIR:-$(cd "$HERE/../.." && pwd)/generated/tests}/mem_mixed_rdclk"
 rm -rf "$T"; mkdir -p "$T"; cd "$T" || exit 1
 fails=0
 
-"$OLDPWD/$LHD" compile verilog "$RTL" --top mem_mixed_rdclk --reader yosys-slang \
+LIVEHD_MEM_TIMING_DEBUG=1 "$OLDPWD/$LHD" compile verilog "$RTL" --top mem_mixed_rdclk --reader yosys-slang \
   --workdir "$T/w" --emit-dir "lg:$T/lg" > "$T/compile.log" 2>&1 \
   || { echo "FAIL: the fixture did not import"; tail -3 "$T/compile.log"; exit 1; }
 echo "ok: the mixed-read fixture imports"
 
 # The input shape itself, so a yosys change that stops producing mask 24 is
-# visible as such rather than as a mysterious pass.
-if [ -r "$T/pp-mem.il" ]; then
-  grep -q "RD_CLK_ENABLE 5'11000" "$T/pp-mem.il" \
-    && echo "ok: yosys reports RD_CLK_ENABLE = 5'11000 (mask 24)" \
-    || { echo "FAIL: the fixture no longer produces the 3-async/2-sync mask"; fails=$((fails+1)); }
+# visible as such rather than as a mysterious pass. Its ABSENCE is a failure:
+# skipping here would quietly drop the only check that the fixture still
+# exercises mixed timing at all.
+if [ ! -r "$T/pp-mem.il" ]; then
+  echo "FAIL: no pp-mem.il -- cannot confirm the fixture still produces a mixed RD_CLK_ENABLE"
+  fails=$((fails+1))
+elif grep -q "RD_CLK_ENABLE 5'11000" "$T/pp-mem.il"; then
+  echo "ok: yosys reports RD_CLK_ENABLE = 5'11000 (mask 24)"
+else
+  echo "FAIL: the fixture no longer produces the 3-async/2-sync mask"
+  grep -oP "RD_CLK_ENABLE.{0,20}" "$T/pp-mem.il" | head -1 | sed 's/^/      /'
+  fails=$((fails+1))
+fi
+
+# ---- EXACT per-port timing, read back out of the graph ----------------------
+# This is the assertion the rest of the file cannot make. Downstream, async(1)
+# and sync(2) are indistinguishable -- every consumer decides "is this a read
+# port" with `!is_known_false()` -- so a regression that wrote all five ports as
+# 1 would satisfy `type=3` and `rdports=5` and be caught by nothing else.
+TIMING="$(grep -oP 'memory read timing: \K.*' "$T/compile.log" | head -1)"
+WANT="type=3 rdports=5 port0=async port1=async port2=async port3=sync port4=sync"
+if [ -z "$TIMING" ]; then
+  echo "FAIL: no per-port timing readback (LIVEHD_MEM_TIMING_DEBUG produced nothing)"
+  fails=$((fails+1))
+elif [ "$TIMING" = "$WANT" ]; then
+  echo "ok: per-port timing reads back exactly: $TIMING"
+else
+  echo "FAIL: per-port timing mismatch"
+  echo "      want: $WANT"
+  echo "      got:  $TIMING"
+  fails=$((fails+1))
 fi
 
 # ---- the representation -----------------------------------------------------
@@ -84,6 +110,22 @@ elif grep -q "memory-mixed-read-timing" "$T/cgen.log"; then
 else
   echo "FAIL: cgen_verilog failed, but not with the mixed-read-timing diagnostic"
   grep -oP '"message":"\K[^"]{0,110}' "$T/cgen.log" | head -1 | sed 's/^/      /'
+  fails=$((fails+1))
+fi
+
+# cgen_sim has its OWN sync-read decision (`p.rd && m.type == 1`, at nine
+# sites), so its refusal needs its own check: a fix to one emitter says nothing
+# about the other.
+"$OLDPWD/$LHD" compile "lg:$T/lg" --top mem_mixed_rdclk --emit-dir "sim:$T/sim" \
+  --workdir "$T/cgs" > "$T/cgen_sim.log" 2>&1
+if [ $? -eq 0 ]; then
+  echo "FAIL: cgen_sim accepted a mixed-timing memory; it would model every read as async"
+  fails=$((fails+1))
+elif grep -q "memory-mixed-read-timing" "$T/cgen_sim.log"; then
+  echo "ok: cgen_sim refuses a mixed-timing memory by name"
+else
+  echo "FAIL: cgen_sim failed, but not with the mixed-read-timing diagnostic"
+  grep -oP '"message":"\K[^"]{0,110}' "$T/cgen_sim.log" | head -1 | sed 's/^/      /'
   fails=$((fails+1))
 fi
 
