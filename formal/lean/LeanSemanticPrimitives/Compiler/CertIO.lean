@@ -165,15 +165,29 @@ def writeCert (h : IO.FS.Handle) (D : DesignCert) : IO Unit := do
 
 @[inline] def isDigit (c : UInt8) : Bool := 48 ≤ c && c ≤ 57
 
-partial def skipWs (b : ByteArray) (i : Nat) : Nat :=
-  if i < b.size && isWs b[i]! then skipWs b (i + 1) else i
+-- TOTAL, not `partial`.  A `partial` definition is opaque to the equation
+-- compiler, so nothing about `parseCert` could be stated, let alone proved; the
+-- round-trip theorem below needs these to reduce.  Each walk only ever moves the
+-- cursor forward inside the buffer, so `b.size - i` is the measure, and the
+-- dependent `if h :` keeps the index in range without the `!` getter's panic
+-- branch -- which would otherwise show up in every proof obligation.
+def skipWs (b : ByteArray) (i : Nat) : Nat :=
+  if h : i < b.size then
+    if isWs b[i] then skipWs b (i + 1) else i
+  else i
+termination_by b.size - i
+decreasing_by omega
 
 /-- Read one non-negative integer.  Returns `(value, next)`; `next == start`
 signals "no digits here", which every caller treats as malformed input. -/
-partial def readNatAux (b : ByteArray) (i acc : Nat) : Nat × Nat :=
-  if i < b.size && isDigit b[i]! then
-    readNatAux b (i + 1) (acc * 10 + (b[i]!.toNat - 48))
+def readNatAux (b : ByteArray) (i acc : Nat) : Nat × Nat :=
+  if h : i < b.size then
+    if isDigit b[i] then
+      readNatAux b (i + 1) (acc * 10 + (b[i].toNat - 48))
+    else (acc, i)
   else (acc, i)
+termination_by b.size - i
+decreasing_by omega
 
 def readNat (b : ByteArray) (i0 : Nat) : Option (Nat × Nat) :=
   let i := skipWs b i0
@@ -194,12 +208,16 @@ def readInt (b : ByteArray) (i0 : Nat) : Option (Int × Nat) :=
 /-- Read `n` values with `f`, accumulating into an array.  `Array.push` is O(1)
 amortised in compiled code — the quadratic `Array.push` behaviour that bit this
 project is a KERNEL reduction effect, and nothing here runs in the kernel. -/
-partial def readMany {α : Type} (f : ByteArray → Nat → Option (α × Nat))
-    (b : ByteArray) (i : Nat) (n : Nat) (acc : Array α) : Option (Array α × Nat) :=
-  if n == 0 then some (acc, i)
-  else match f b i with
-    | some (v, j) => readMany f b j (n - 1) (acc.push v)
-    | none        => none
+-- Structural on the COUNT, so no termination proof is needed and the equations
+-- are definitional: `readMany f b i 0 acc` and `readMany f b i (n+1) acc` both
+-- reduce by `rfl`, which is what makes the round-trip induction go through.
+def readMany {α : Type} (f : ByteArray → Nat → Option (α × Nat))
+    (b : ByteArray) : Nat → Nat → Array α → Option (Array α × Nat)
+  | i, 0,     acc => some (acc, i)
+  | i, n + 1, acc =>
+      match f b i with
+      | some (v, j) => readMany f b j n (acc.push v)
+      | none        => none
 
 def readSource (b : ByteArray) (i : Nat) : Option (SourceDesc × Nat) := do
   let (tag, i) ← readNat b i
