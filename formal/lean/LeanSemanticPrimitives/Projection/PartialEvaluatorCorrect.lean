@@ -1344,11 +1344,16 @@ theorem PResOK.codeEval {Pr ρr r v} (h : PResOK Pr ρr r v) :
     ∀ c, r = .code c → Eval Pr ρr c v := by
   intro c hc; subst hc; exact h
 
-/-- Pointwise `PResOK` over an argument list.  Written out rather than using
-`List.Forall₂`, which is not in core. -/
-inductive PResAll (Pr : Program) (ρr : Env) : List PRes → List Val → Prop where
-  | nil  : PResAll Pr ρr [] []
-  | cons : PResOK Pr ρr r v → PResAll Pr ρr rs vs → PResAll Pr ρr (r :: rs) (v :: vs)
+/-- Pointwise relation over two lists.  Core has no `List.Forall₂` and this
+development is Mathlib-free, so it is defined ONCE here and both pointwise
+relations are instances of it: `PResAll` on the completeness side and
+`PResSoundAll` on the soundness side.  One relation, one recursion. -/
+inductive Forall₂ {α β : Type} (R : α → β → Prop) : List α → List β → Prop where
+  | nil  : Forall₂ R [] []
+  | cons : R a b → Forall₂ R as bs → Forall₂ R (a :: as) (b :: bs)
+
+abbrev PResAll (Pr : Program) (ρr : Env) : List PRes → List Val → Prop :=
+  Forall₂ (PResOK Pr ρr)
 
 theorem PResOK_toCode : ∀ {Pr ρr r v}, PResOK Pr ρr r v → Eval Pr ρr r.toCode v
   | _, _, .stat w, v, h => by
@@ -2896,6 +2901,12 @@ theorem PResSound_of_let1 {A Pr mr ρr ρs t} {e : Term} {rb : PRes}
   cases hl1 with
   | cons he ht => cases ht; exact h _ ρp d he hl2 hval
 
+/-- Pointwise `PResSound` over an operand list -- what a structural primitive
+answer has to consult, since it does not evaluate `rs.map PRes.toCode`. -/
+abbrev PResSoundAll (A : AProgram) (Pr : Program) (mr : Nat) (ρr ρs : Env) :
+    List PRes → List ATerm → Prop :=
+  Forall₂ (PResSound A Pr mr ρr ρs)
+
 def SOK (A : AProgram) (Pr : Program) (reqs : List SpecRequest) (n mr : Nat) : Prop :=
   ∀ (Δ : Div) (env : PEnv) (t : ATerm) (r : PRes) (rq : List SpecRequest) (ρr ρs : Env),
     Compat ρr Δ env ρs →
@@ -2945,34 +2956,68 @@ theorem mixTerms_sound_stat {A Pr reqs n mr} (h : SOK A Pr reqs n mr) :
           exact .cons ((h Δ env t (.stat u) rq₁ ρr ρs hc ht).statEq u rfl)
                       (ih rs' rq₂ ρr ρs us hc hts hus)
 
+/-- Pointwise soundness for an operand list: each operand result is sound for
+its own source term.  This is the primitive fact; everything else about operand
+lists is derived from it rather than re-inducted. -/
+theorem mixTerms_sound_all {A Pr reqs n mr} (h : SOK A Pr reqs n mr) :
+    ∀ (Δ : Div) (env : PEnv) (ts : List ATerm) (rs : List PRes) (rq : List SpecRequest)
+      (ρr ρs : Env),
+      Compat ρr Δ env ρs →
+      mixTerms n A (indexOfReq reqs) Δ env ts = .ok (rs, rq) →
+      PResSoundAll A Pr mr ρr ρs rs ts := by
+  intro Δ env ts
+  induction ts with
+  | nil =>
+      intro rs rq ρr ρs _ hmix
+      simp only [mixTerms] at hmix
+      cases hmix
+      exact .nil
+  | cons t ts ih =>
+      intro rs rq ρr ρs hc hmix
+      simp only [mixTerms] at hmix
+      split at hmix <;> try contradiction
+      rename_i r rq₁ rs' rq₂ ht hts
+      cases hmix
+      exact .cons (h Δ env t r rq₁ ρr ρs hc ht) (ih rs' rq₂ ρr ρs hc hts)
+
+/-- Reading a pointwise-sound operand list through `toCode`, which is what the
+residualizing FALLBACK does run. -/
+theorem PResSoundAll_evalFuelList {A Pr mr ρr ρs} :
+    ∀ {rs : List PRes} {ts : List ATerm} {ds : List Val},
+      PResSoundAll A Pr mr ρr ρs rs ts →
+      evalFuelList mr Pr ρr (rs.map PRes.toCode) = .inl ds →
+      EvalList (eraseProgram A) ρs (eraseList ts) ds := by
+  intro rs
+  induction rs with
+  | nil =>
+      intro ts ds hall hev
+      cases hall
+      simp only [List.map_nil, evalFuelList] at hev
+      cases hev
+      simp only [eraseList]
+      exact .nil
+  | cons r rs' ih =>
+      intro ts ds hall hev
+      cases hall with
+      | cons hr hrest =>
+        simp only [List.map_cons, evalFuelList] at hev
+        split at hev <;> try contradiction
+        rename_i d hd
+        split at hev <;> try contradiction
+        rename_i ds' hds
+        cases hev
+        simp only [eraseList]
+        exact .cons (PResSound_toCode hr hd) (ih hrest hds)
+
 theorem mixTerms_sound_code {A Pr reqs n mr} (h : SOK A Pr reqs n mr) :
     ∀ (Δ : Div) (env : PEnv) (ts : List ATerm) (rs : List PRes) (rq : List SpecRequest)
       (ρr ρs : Env) (ds : List Val),
       Compat ρr Δ env ρs →
       mixTerms n A (indexOfReq reqs) Δ env ts = .ok (rs, rq) →
       evalFuelList mr Pr ρr (rs.map PRes.toCode) = .inl ds →
-      EvalList (eraseProgram A) ρs (eraseList ts) ds := by
-  intro Δ env ts
-  induction ts with
-  | nil =>
-      intro rs rq ρr ρs ds _ hmix hev
-      simp only [mixTerms] at hmix; cases hmix
-      simp only [List.map_nil, evalFuelList] at hev; cases hev
-      exact .nil
-  | cons t ts ih =>
-      intro rs rq ρr ρs ds hc hmix hev
-      simp only [mixTerms] at hmix
-      split at hmix <;> try contradiction
-      rename_i r rq₁ rs' rq₂ ht hts
-      cases hmix
-      simp only [List.map_cons, evalFuelList] at hev
-      split at hev <;> try contradiction
-      rename_i d hd
-      split at hev <;> try contradiction
-      rename_i ds' hds
-      cases hev
-      exact .cons (PResSound_toCode (h Δ env t r rq₁ ρr ρs hc ht) hd)
-                  (ih rs' rq₂ ρr ρs ds' hc hts hds)
+      EvalList (eraseProgram A) ρs (eraseList ts) ds :=
+  fun Δ env ts rs rq ρr ρs ds hc hmix hev =>
+    PResSoundAll_evalFuelList (mixTerms_sound_all h Δ env ts rs rq ρr ρs hc hmix) hev
 
 /-! ## Alternatives, backwards -/
 
