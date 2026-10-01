@@ -49,6 +49,11 @@ FIELD = ('comb w(a:U64, b:U128) -> (z:U64) {\n'
          '  z = io.pc\n'
          '}\n')
 
+# Width-less integer ports: `a:Unsigned` (and `o:Unsigned`) carry no bits at
+# index time, so the hover must still honor the declared sign (`Unsigned`), not
+# default every width-less port to `Signed`.
+NOWIDTH = 'comb nw(a:Unsigned, b:U8) -> (o:Unsigned) { o = a + b }\n'
+
 
 def send(proc, obj):
     body = json.dumps(obj).encode('utf-8')
@@ -230,6 +235,19 @@ def main():
     value = (hov or {}).get('contents', {}).get('value', '')
     if 'U64' not in value or 'int' in value:
         fail('struct-wire field hover should report the declared width U64, not int: %r' % hov)
+
+    # ── width-less unsigned port sign (regression) ──────────────────────────
+    send(proc, {'jsonrpc': '2.0', 'method': 'textDocument/didChange',
+                'params': {'textDocument': {'uri': uri, 'version': 6},
+                           'contentChanges': [{'text': NOWIDTH}]}})
+    for rid, ch, name in ((18, 8, 'a'), (19, 30, 'o')):
+        send(proc, {'jsonrpc': '2.0', 'id': rid, 'method': 'textDocument/hover',
+                    'params': {'textDocument': {'uri': uri},
+                               'position': {'line': 0, 'character': ch}}})
+        hov = read_response(proc, rid).get('result')
+        value = (hov or {}).get('contents', {}).get('value', '')
+        if (name + ' : Unsigned') not in value:
+            fail('width-less unsigned port %s should hover as Unsigned: %r' % (name, hov))
 
     # ── cross-file definition through import() (2n Phase C) ─────────────────
     # A real sibling .prp on disk; the importing buffer is unsaved (didOpen

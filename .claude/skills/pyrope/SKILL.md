@@ -14,7 +14,7 @@ generated code with `lhd` (last section).
 
 ## Ground rules
 
-* Comments are `//` only. `;` is the same as a newline. No variable shadowing,
+* Comments use `//` or nestable `/* ... */` (current language reference). `;` is the same as a newline. No variable shadowing,
   anywhere.
 * Every declaration starts with a kind keyword — data: `const` / `mut` /
   `wire` / `reg`; lambda: `comb` / `pipe` / `mod` / `fluid`. Prefix modifiers:
@@ -56,8 +56,9 @@ generated code with `lhd` (last section).
 * Integers are unlimited-precision **signed**. `U8`, `S4`, `Unsigned`,
   `Signed(min=0, max=300)`, `Unsigned(max=300)` are range constraints on that
   one type (`U<N>` max is 2^N−1). `1K == 1024`, also `M`/`G`/`T`. The `int`
-  type, the `int(...)` cast and the `I<N>`/`iN` types were **removed**: `x:i32` is a
-  compile error ("renamed `S32`"); `I8` is not a type, just an ordinary name (as a type it is an unknown type) — use `S<N>`, `Signed`/`Unsigned`, a sized
+  type, the `int(...)` cast and the `I<N>`/`iN` types were **removed**:
+  `x:i32` is a compile error ("renamed `S32`") and `I8` as a type is an unknown
+  type (as a name it is ordinary). Use `S<N>`, `Signed`/`Unsigned`, a sized
   `U<N>(x)`/`S<N>(x)` cast, or leave the declaration untyped.
 * A width computed from a comptime value or a generic is spelled
   `Unsigned(bits=N)` / `Signed(bits=N)` (`U<N>` needs a LITERAL N). It is
@@ -820,7 +821,8 @@ Re-verified 2026-09-28 (lhd built 2026-09-28) with the OLD lowercase type
 spellings; the entries below are respelled with the 2026-09-29 capitalized type
 words and were not re-run after that migration. **Fixed since 2026-09-27**, no
 workaround needed any more: generic `comb` outputs with generic widths;
-`Unsigned(bits=16 * N)` ports read in loops; false combinational loop through a
+`Unsigned(bits=16 * N)` ports read in loops; `std.clog2(x)` and `K.[bits]` of a
+comptime value (re-checked 2026-09-30); false combinational loop through a
 child's register (drop `::[timecheck=false]`); bit writes straight into an
 output (`y#[i] = ...`); `f<N=x.[bits]>`; nested lambdas reading an enclosing
 `comptime const`; `wire` reads and `reg`-array writes inside `for`; byte-enable
@@ -840,27 +842,29 @@ into a `mod` imported pre-elaborated from an `ln:` dir (or restored from the
 compile cache) now get the argument/output fit checks (they truncated
 silently); `.[bits]` of a typed tuple field after an enum-entry write.
 
-Still open:
+Focused rechecks on 2026-09-30 (binary SHA-256
+`ea862e2551cb3e2089b41bfc9cf50a2f00044c085551420960dfbfa4a7a8d530`):
+rolled register bit-read/conditional bit-write and multiple partial writes to
+an `ordering="old"` memory now LEC-prove against scalar/merged-word references.
+Generic-width register arrays and memory-to-typed-comb arguments compile in
+the saved probes. The formatter preserves the tested type/enum declaration
+order; all 20 cleaned lhdtrack designs prove unchanged after formatting.
+Do not carry those old workarounds into new code without reproducing a need.
 
-* `lhd pyrope fmt` (default `--mode ai`: one line per statement, no width limit,
-  sorts all-named call/tuple lists, rewrites `f(x=x)` to `f(x)`) can still
-  change meaning: it sorts `type`/`enum` field declarations (positional
-  initialization then binds differently) and shortens `q=q` even when the callee
-  has no `q` (an error becomes a valid single-argument bind). LEC the formatted
-  file against the unformatted one. (The compiler bugs where a bare same-name
-  argument bound by position, for `inline=false` comb instances and for a
-  same-kind leftover parameter, are fixed in livehd as of 2026-09-28.)
+Emitter and scalar-cast defects above were repaired and rechecked on
+2026-10-01. All 189 lhdtrack designs compile after fresh Verilog-to-Pyrope
+emission and formatting; the selected 20 also re-emit from cleaned Pyrope.
+Bool initialization, forward wires, partial output writes, loop locals,
+generic imports/bounds, array shapes, and Clock propagation have regression
+coverage. `U2((select.e1 << 1) | select.e0)` now works directly. Sparse or
+unrecoverable runtime masks may still produce a structured unsupported
+writer diagnostic; preserve a reproducer instead of changing valid input.
+Always recompile and LEC newly emitted output. Pyrope emission accepts native
+Slang Verilog, Pyrope, or `ln:` input; it cannot decompile graph-only `lg:`.
 
-* **Silent:** a `reg` both bit-read and conditionally bit-written inside a
-  rolled `for` loop (`out#[p] = r#[p]; if v#[p] == 1 { r#[p] = d#[p] }`) loses
-  the write. Build the next value in a `mut` inside the loop and assign the
-  register once after it, or `--set compile.unroll=true`.
-* **Silent:** `reg mem:[N]T:[ordering="old"]` with several partial writes
-  (`mem[a]#[r] = d`) to one entry in the same cycle keeps only the last one.
-  Write the merged whole word.
-* **Regression:** a memory element passed to a typed `comb` input
-  (`f(x=mem[i])` with `x:U16`) → "(unbounded range) may not fit". Bind
-  `const v:U16 = mem[i]` first.
+Historical reports below are NOT all reverified on this build. Reproduce the
+exact pattern before using a workaround:
+
 * A PARENT value of a hierarchical enum (`Animal.bird`, not a leaf such as
   `Animal.bird.parrot`) does not lower to hardware yet: storing it in a typed
   local, comparing a port with it, or passing it to a port fails
@@ -876,17 +880,11 @@ Still open:
 * `lhd sim` may report a false dependency cycle ("occurrence-wide color
   scheduler") for one rolled loop computing both a request and the ready that
   comes back through another module; split the loop.
-* Arrays with a generic element width: `reg r:[N]Unsigned(bits=N)` ("memory
-  'r' element type must be a sized integer or bool") and array ports of a
-  generic (`v:[N]Unsigned(bits=N)`, "has no declared type"). Pack into
-  `Unsigned(bits=N*W)` and slice `#[(i*W)..+W]`.
+* Generic array PORTS have not been rechecked in this pass; distinguish them
+  from generic-width register arrays, whose current focused compile passed.
 * Bit-assign into an array element inside nested loops
   (`m[i]#[j] = ...`) → "array index is negative (range [-4, 3])". Build the
   row in a scalar local and assign `m[i] = row`.
-* `std.clog2(x)` and value-derived `K.[bits]` (13.[bits] == 4) are documented
-  but not in the compiler (`std` undefined; `.[bits]` of a comptime value is
-  not its width). Pass widths as extra generics, or use
-  `Unsigned(max=DEPTH - 1)` as an index type.
 * An unparenthesized expression as a generic argument (`m<W=2*N - 1>`) does
   not parse; write `m<W=(2*N - 1)>`.
 * Unverified since the fix pass: `lhd sim` reading a `wire` back-edge one
@@ -1003,14 +1001,19 @@ lhd tool cat|grep|diff|tree ...       # inspect ln:/lg: artifacts
   pass while the other fails. When a verdict surprises you, get an
   independent oracle: `--emit verilog` the netlist and simulate against the
   golden with iverilog/verilator over an exhaustive or random sweep.
-* LEC verdicts: `proven`/`refuted` are answers; `unknown` (timeout or
+* Read `lec.verdict` together with `lec.bounded` and `lec.bound`: a result
+  marked `proven` can be bounded to six cycles. Never report that as unbounded
+  equivalence. LEC verdicts: `proven`/`refuted` are answers; `unknown` (timeout or
   inconclusive) is neither — it has hidden real miscompiles, so back it with
   simulation. For refactors, LEC each small step against the *previous*
   version (compile each side with `--set compile.upass.inline=false
   --emit-dir lg:DIR`), not against the original: small deltas prove in
   seconds. Renamed instances break flop pairing (`const arb = child(...)`
   names the instance `arb`); pair them with
-  `--set formal.lec.match='ref.inst.q=impl.inst.q'` (equal widths only).
+  `--set formal.lec.match='old_inst.q=new_inst.q'` (equal widths only).
+  The sides are reference=implementation; `ref.`/`impl.` are not special
+  prefixes. Current LiveHD reports unresolved explicit state names as a usage
+  error before proving; regenerate stale mappings after changing hierarchy.
 * **`lhd synth`** is the one-shot synthesis flow (compile -> `pass color
   synth` -> mapper -> OpenTimer STA) over one in-memory design. `--top` takes
   the bare entity; `--set synth.mapper=abc` (default) | `usyn`; one Liberty
@@ -1024,6 +1027,12 @@ lhd tool cat|grep|diff|tree ...       # inspect ln:/lg: artifacts
   abc.adder=cla`). Check `lhd help synth` for the current knobs.
 * Cleaning machine-emitted Pyrope (e.g. `lhd compile ... --emit-dir pyrope:`)
   into idiomatic code: follow `livehd/docs/sample_prompt_cleanup_pyrope.md`.
+  Verify untouched emission, formatting, and re-emission from Pyrope. For a
+  Verilog-backed cleanup, also `--emit verilog` from Pyrope and compare that
+  output with the original full Verilog sources using both native `lhd lec`
+  and Yosys-backed `lgcheck`; a shared LiveHD lowering bug can evade the native
+  check. Preserve defines and memory images, and keep early inconclusive and
+  setup errors distinct from genuine timeouts.
 * `lhd pyrope style` suggests loops/bundles for repeated code in
   machine-emitted Pyrope; `lhd pyrope fmt -i` formats (re-check long
   if-expressions and argument lists it joins onto one line).

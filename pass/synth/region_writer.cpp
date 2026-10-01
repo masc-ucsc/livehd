@@ -1052,6 +1052,20 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     const auto& cell = mapped.cells[c];
     auto        g    = cell.type;
     const auto  onet = cell.output;
+    if (cell.fanins.empty()) {
+      // A zero-input tie gate (Mio's `_const0_`/`_const1_`, e.g. &nf mapping
+      // region_blast's constant `__livehd_dummy_po`): not a Liberty cell, so
+      // instancing it leaves an undeclared module in the netlist. Its output
+      // net reads an LGraph constant instead (a 0-pin truth is all-zero or
+      // all-one), complemented when it is a QN register's D root.
+      auto one = lib.type(g).truth != 0;
+      if (qn_dnet.contains(onet)) {
+        one = !one;
+        qn_absorbed.insert(onet);
+      }
+      set_net_driver(onet, gu::create_const(*body, *Dlop::create_integer(one ? 1 : 0)));
+      continue;
+    }
     if (cell.fanins.size() == 1 && lib.is_identity(g)) {
       if (readers[onet] > 0 && cell_readers[onet] == 0) {  // its output feeds only outputs and latch inputs
         // output net -> input net; mapped_node2sub stays invalid for this cell

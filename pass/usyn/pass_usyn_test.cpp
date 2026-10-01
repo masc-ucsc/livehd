@@ -246,4 +246,28 @@ TEST_F(PassSynth, ExhaustionRetainsSourceAndCannotFallBackToAbc) {
   EXPECT_FALSE(fs::exists(root + "/qor.json"));
   EXPECT_FALSE(fs::exists(root + "/net"));
 }
+
+TEST_F(PassSynth, FailedRunKeepsPreviousReportProvenance) {
+  hhds::GraphLibrary input;
+  Eprp_var           var;
+  var.graphs.push_back(design(input));
+  var.dict["tmap"]               = "none";
+  var.dict["qor"]                = root + "/qor.json";
+  var.dict["invocation_context"] = R"({"inputs":[],"argv":["first-run"]})";
+  run(var);
+  ASSERT_FALSE(livehd::diag::sink().has_halting_errors());
+  const auto manifest = [&] {
+    std::ifstream file(root + "/qor.json.provenance/manifest.json");
+    return std::string{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+  };
+  const auto published = manifest();
+  ASSERT_NE(published.find("first-run"), std::string::npos);
+  var.dict["work"]               = "1";
+  var.dict["invocation_context"] = R"({"inputs":[],"argv":["failed-run"]})";
+  run(var);
+  EXPECT_TRUE(livehd::diag::sink().has_halting_errors());
+  EXPECT_TRUE(fs::exists(root + "/qor.json"));
+  EXPECT_EQ(manifest(), published);
+  EXPECT_FALSE(fs::exists(root + "/qor.json.provenance.tmp"));
+}
 }  // namespace

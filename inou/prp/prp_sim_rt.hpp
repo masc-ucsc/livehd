@@ -887,6 +887,24 @@ inline constexpr std::string_view kTuneRuntime = R"cpp(
     return _n;
   }
 
+  // An interpolated "..." string assigned to a test local: the same printf
+  // format puts builds, rendered into a value instead of onto stdout.
+  [[gnu::format(printf, 1, 2), maybe_unused]] static std::string _fmt_string(const char* _fmt, ...) {
+    va_list _ap;
+    va_start(_ap, _fmt);
+    const int _n = std::vsnprintf(nullptr, 0, _fmt, _ap);
+    va_end(_ap);
+    if (_n <= 0) {
+      return std::string{};
+    }
+    std::string _s(static_cast<std::size_t>(_n) + 1, '\0');
+    va_start(_ap, _fmt);
+    std::vsnprintf(_s.data(), _s.size(), _fmt, _ap);
+    va_end(_ap);
+    _s.resize(static_cast<std::size_t>(_n));
+    return _s;
+  }
+
   static const _TpRoot* _tp_root(const std::string& _cls) {
     for (const _TpRoot* _r = _tp_roots; _r->cls != nullptr; ++_r) {
       if (_cls == _r->cls) {

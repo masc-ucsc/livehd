@@ -2,7 +2,6 @@
 #pragma once
 
 #include <algorithm>
-
 #include <functional>
 #include <string>
 #include <string_view>
@@ -783,6 +782,10 @@ Query_result int_blast_retry(hhds::Graph* ref, hhds::Graph* impl, const Lec_opti
 // separated by commas / semicolons / newlines; the two names within a pair by "="
 // or whitespace; blank lines and "#" comments are skipped.
 std::vector<std::pair<std::string, std::string>> parse_match_pairs(std::string_view text);
+
+// Validate explicit names once over the user's complete design pair, before
+// hierarchy decomposition gives individual queries only a subset of the state.
+std::string match_names_error(hhds::Graph* ref, hhds::Graph* impl, const std::vector<std::pair<std::string, std::string>>& pairs);
 
 // Validate tier-2 uncertain {ref,impl} pairs against the two designs before
 // injection (pair-hint replay re-validation; fresh same-process semdiff pairs

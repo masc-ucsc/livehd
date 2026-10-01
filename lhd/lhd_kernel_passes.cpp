@@ -962,13 +962,13 @@ void pass_command(Options& opts, Result& res) {
     }
     run_step(method, var, labels, opts, res);
     if (!mapper->report.empty() && user_workdir && labels.contains("qor")) {
-      // The provenance record, and for mapped output the separate native
-      // decision report plus its content-addressed region artifacts.
-      std::vector<std::string> sidecars{labels["qor"] + ".provenance"};
-      if (mapped_output) {
-        sidecars.push_back(labels["qor"] + "." + std::string{mapper->report} + ".json");
-        sidecars.push_back(labels["qor"] + "." + std::string{mapper->report} + ".artifacts");
-      }
+      // The provenance record, the separate native decision report and its
+      // content-addressed region artifacts -- mapped or logical-only alike
+      // (the report references the artifacts either way), as `lhd synth`
+      // declares them. Only what the mapper actually wrote is listed.
+      const std::vector<std::string> sidecars{labels["qor"] + ".provenance",
+                                              labels["qor"] + "." + std::string{mapper->report} + ".json",
+                                              labels["qor"] + "." + std::string{mapper->report} + ".artifacts"};
       for (const auto& sidecar : sidecars) {
         if (fs::exists(sidecar)) {
           res.outputs.push_back(sidecar);

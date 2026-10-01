@@ -1169,10 +1169,26 @@ public:
         body.replace(at, mark.size(), inc);
       }
     }
+    // The cycle counters ride the tb.json frame: they count every `step` since
+    // the test began (pre-tick steps, `step N`), so the restored tick cycle is
+    // not the same number. A checkpoint without the key (older drivers) falls
+    // back to one edge per restored cycle.
+    {
+      constexpr std::string_view kSave = "/*__EDGES_SAVE__*/";
+      std::string                save;
+      for (const auto& var : edges_used_) {
+        save += "_tb[\"__edges_" + var + "\"] = std::to_string(__edges_" + var + ".to_just_i64()); ";
+      }
+      for (auto at = body.find(kSave); at != std::string::npos; at = body.find(kSave, at + save.size())) {
+        body.replace(at, kSave.size(), save);
+      }
+    }
     if (const auto at = body.find("/*__EDGES_RESTART__*/"); at != std::string::npos) {
       std::string restart;
       for (const auto& var : edges_used_) {
-        restart += "__edges_" + var + " = Slop<64>::create_integer(_nc); ";  // one edge per restored cycle
+        restart += "if (auto _it = _rtb.find(\"__edges_" + var + "\"); _it != _rtb.end()) __edges_" + var
+                   + " = Slop<64>::create_integer(std::stoll(_it->second)); else __edges_" + var
+                   + " = Slop<64>::create_integer(_nc); ";
       }
       body.replace(at, std::string_view("/*__EDGES_RESTART__*/").size(), restart);
     }
@@ -1774,9 +1790,11 @@ private:
     if ((string_locals_.count(name) || string_params_.count(name))) {
       return string_val(name);
     }
-    auto dot = name.find('.');
+    auto        dot = name.find('.');
+    std::string base, fld;
     if (dot != std::string::npos) {
-      std::string base = name.substr(0, dot), fld = name.substr(dot + 1);
+      base = name.substr(0, dot);
+      fld  = name.substr(dot + 1);
       if (inst_of_var.count(base) != 0) {
         return port_read(base, fld);
       }
@@ -1786,6 +1804,19 @@ private:
     }
     if (auto it = local_w_.find(name); it != local_w_.end()) {
       return slop_val(name, it->second);
+    }
+    // A file-scope const (`{K}`, `{T.hi}`): the same visibility eval() gives
+    // it (a test parameter of the same name shadows it).
+    if (dot != std::string::npos) {
+      if (local_w_.count(base) == 0 && param_names_.count(base) == 0) {
+        if (const TSNode rv = file_const_field(base, fld); !ts_node_is_null(rv)) {
+          return eval_file_const(name, rv);
+        }
+      }
+    } else if (param_names_.count(name) == 0) {
+      if (const TSNode rv = file_const_rvalue(name); !ts_node_is_null(rv)) {
+        return eval_file_const(name, rv);
+      }
     }
     return long_val("(" + name + ")");
   }
@@ -2164,9 +2195,44 @@ private:
   }
 
   Val eval(TSNode n) {
-    const auto text = text_of(src_, n);
-    if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
-      return string_val("std::string(" + text + ")");
+    // A string literal (by node KIND, not quote text: `"a" ++ "b"` also starts
+    // and ends with a quote). A "..." value decodes its escapes and formats
+    // its `{expr}` holes NOW, through the same hole scanner puts uses.
+    {
+      TSNode lit = n;
+      while (ts_node_named_child_count(lit) == 1
+             && (ntype(lit) == "expression_item" || ntype(lit) == "expression_list" || ntype(lit) == "paren_group"
+                 || ntype(lit) == "constant")) {
+        lit = ts_node_named_child(lit, 0);
+      }
+      if (ntype(lit) == "string_literal") {  // '...' is raw: no escapes, no holes
+        const auto raw = text_of(src_, lit);
+        return string_val("std::string(\""
+                          + c_fmt_bytes(raw.size() >= 2 ? raw.substr(1, raw.size() - 2) : std::string{}, /*printf_fmt=*/false)
+                          + "\")");
+      }
+      if (ntype(lit) == "interpolated_string_literal") {
+        std::vector<std::string> argv;
+        std::string              fmt = build_format(lit, {}, /*cooked=*/true, argv);
+        if (argv.empty()) {
+          // No conversion: every `%` in fmt is a doubled `%%`; a plain literal.
+          std::string plain;
+          for (size_t k = 0; k < fmt.size(); ++k) {
+            plain += fmt[k];
+            if (fmt[k] == '%' && k + 1 < fmt.size() && fmt[k + 1] == '%') {
+              ++k;
+            } else if (fmt[k] == '\\' && k + 1 < fmt.size()) {
+              plain += fmt[++k];  // keep an escape pair whole (`\\%` is not a `%%`)
+            }
+          }
+          return string_val("std::string(\"" + plain + "\")");
+        }
+        std::string call = "_fmt_string(\"" + fmt + "\"";
+        for (const auto& a : argv) {
+          call += ", " + a;
+        }
+        return string_val(call + ")");
+      }
     }
     auto t = ntype(n);
     if (t == "identifier" && !file_const_eval_.empty()) {
@@ -3324,20 +3390,18 @@ private:
       fail(std::string("tick ") + what + " clause needs a `name=value` entry");
     }
     if (seen > 1) {
-      // The message used to read "only a single clock is supported for now",
-      // which is now MISLEADING: multi-clock designs ARE simulated as of
-      // todo/livehd/2f-latch M6 — a second clock is driven as an ordinary data
-      // input and its state commits on a detected edge of that net (see
-      // tests/sim/multiclock_two_domain.prp). What this clause controls is the
-      // VCD waveform plus the tick LOOP VARIABLE, and a tick loop has exactly
-      // one counter, so a second entry has no meaning here rather than being
-      // unimplemented. Say that, so nobody reads the old text as "LiveHD cannot
-      // do multiple clocks" and works around a limitation that is gone.
+      // A tick loop has exactly one counter (the VCD waveform plus the loop
+      // VARIABLE), so a second `clocks=` entry has no meaning here. A register
+      // names only a `Clock` input in `clock_pin=` (a Bool data net is an
+      // error under the Clock type); how a Pyrope test drives a SECOND Clock
+      // is pending (ruling 57, lane sim-multiclock), so multi-clock designs
+      // simulate through Verilog-origin input for now. Re-cite
+      // tests/sim/multiclock_two_domain.prp once it leaves _SIM_FIXME.
       if (std::string_view(what) == "clock") {
         fail("a `tick` has ONE loop counter, so `clocks=(...)` takes ONE entry (got " + std::to_string(seen)
-             + "). This is NOT a multi-clock limitation: drive the second clock as an ordinary input "
-               "(`acc.clkb = ...`) and give its registers `clock_pin=clkb` — they commit on that net's edges. "
-               "See inou/prp/tests/sim/multiclock_two_domain.prp");
+             + "). A register can only name a `Clock` input in `clock_pin=`; driving a second Clock from a "
+               "Pyrope test is pending (ruling 57, sim-multiclock), so multi-clock designs are currently "
+               "simulated through Verilog-origin input");
       }
       fail(std::string("only a single ") + what + " is supported for now (got " + std::to_string(seen) + ")");
     }
@@ -3379,6 +3443,7 @@ private:
     for (const auto& v : string_locals_) {
       o << ind << "    _tb[\"" << v << "\"] = " << v << ";\n";
     }
+    o << ind << "    /*__EDGES_SAVE__*/\n";  // auto-wired Clock cycle counters (filled once the body is known)
     o << ind << "    hlop::ckpt::write_str_map(_cdir + \"/tb.json\", _tb);\n";
     o << ind << "    std::map<std::string, std::string> _meta;\n";
     o << ind << "    _meta[\"arguments\"] = _checkpoint_argument_identity();\n";
@@ -3696,22 +3761,101 @@ private:
     o << ind << "}\n";
   }
 
-  // `puts("text {var} {}", expr)` — runtime print. The interpolated string is
-  // lowered to a printf: `{name}` -> the in-scope value `name`, `{}` -> the next
-  // positional arg, all as %ld (driver values are C++ long). `puts` appends a
-  // newline; `print` does not.
-  void gen_puts(std::ostringstream& o, TSNode n, int depth, bool newline) {
-    std::string ind(depth * 2, ' ');
-    // `file:line:cmd:` origin prefix on every printed message (cmd = puts/print).
-    std::string prefix = c_str_lit(file_short_ + ":" + std::to_string(line_of(n)) + ":" + (newline ? "puts" : "print") + ":");
-    TSNode      args   = field(n, "argument");
-    if (ts_node_is_null(args) || ts_node_named_child_count(args) < 1) {
-      o << ind << "_tp_out(\"" << prefix << (newline ? "\\n" : "") << "\");\n";
+  // Append the decoded bytes of the Pyrope escape at lit[i] (a backslash) to
+  // `out` and leave `i` on its last byte: \n \t \r \\ \" \' \` \0 \xNN \u{N}
+  // (docs 02-basics "Strings", the decoding prp2lnast applies). A malformed
+  // escape keeps its backslash.
+  static void decode_escape(std::string_view lit, size_t& i, std::string& out) {
+    auto hex = [](char c) -> int {
+      return (c >= '0' && c <= '9') ? c - '0' : (c >= 'a' && c <= 'f') ? 10 + (c - 'a') : (c >= 'A' && c <= 'F') ? 10 + (c - 'A') : -1;
+    };
+    if (i + 1 >= lit.size()) {
+      out.push_back('\\');
       return;
     }
-    // format string = first arg (a constant wrapping a [interpolated_]string_literal)
-    const TSNode lit_node = ts_node_named_child(args, 0);
-    std::string  lit      = text_of(src_, lit_node);
+    const char d = lit[i + 1];
+    switch (d) {
+      case 'n' : out.push_back('\n'); ++i; return;
+      case 't' : out.push_back('\t'); ++i; return;
+      case 'r' : out.push_back('\r'); ++i; return;
+      case '0' : out.push_back('\0'); ++i; return;
+      case '\\':
+      case '"' :
+      case '\'':
+      case '`' : out.push_back(d); ++i; return;
+      case 'x' :
+        if (i + 3 < lit.size() && hex(lit[i + 2]) >= 0 && hex(lit[i + 3]) >= 0) {
+          out.push_back(static_cast<char>((hex(lit[i + 2]) << 4) | hex(lit[i + 3])));
+          i += 3;
+          return;
+        }
+        break;
+      case 'u': {
+        const auto close = (i + 2 < lit.size() && lit[i + 2] == '{') ? lit.find('}', i + 3) : std::string_view::npos;
+        uint32_t   cp    = 0;
+        bool       ok    = close != std::string_view::npos && close > i + 3 && close - (i + 3) <= 6;
+        for (size_t k = i + 3; ok && k < close; ++k) {
+          ok = hex(lit[k]) >= 0;
+          cp = cp * 16 + static_cast<uint32_t>(std::max(hex(lit[k]), 0));
+        }
+        if (!ok || cp > 0x10FFFF) {
+          break;
+        }
+        if (cp < 0x80) {
+          out.push_back(static_cast<char>(cp));
+        } else if (cp < 0x800) {
+          out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else if (cp < 0x10000) {
+          out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+          out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else {
+          out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+          out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+          out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        }
+        i = close;
+        return;
+      }
+      default: break;
+    }
+    out.push_back('\\');  // malformed / unknown: the backslash is text
+  }
+
+  // Escape decoded bytes for a generated C `"..."` literal; a control byte
+  // becomes a 3-digit octal escape (never greedy, unlike \x). `printf_fmt`
+  // doubles `%` for a printf format; a plain std::string value keeps it.
+  static std::string c_fmt_bytes(std::string_view s, bool printf_fmt = true) {
+    std::string o;
+    for (char c : s) {
+      const auto u = static_cast<unsigned char>(c);
+      if (c == '\\' || c == '"') {
+        o += '\\';
+        o += c;
+      } else if (c == '%' && printf_fmt) {
+        o += "%%";
+      } else if (u < 0x20 || u == 0x7f) {
+        o += '\\';
+        o += static_cast<char>('0' + ((u >> 6) & 7));
+        o += static_cast<char>('0' + ((u >> 3) & 7));
+        o += static_cast<char>('0' + (u & 7));
+      } else {
+        o += c;
+      }
+    }
+    return o;
+  }
+
+  // The printf format (returned) and its C++ arguments (`argv`) for a string
+  // whose source node is `lit_node`: `{name}` -> the in-scope value `name`,
+  // `{}` -> the next of `pos`, `{name:spec}` -> a formatted render. The one
+  // hole scanner both `puts`/`print` and a string value assigned to a test
+  // local use. `cooked` decodes the Pyrope escapes (a string VALUE); puts keeps
+  // its historical verbatim-backslash rendering of every escape pair.
+  std::string build_format(TSNode lit_node, const std::vector<Val>& pos, bool cooked, std::vector<std::string>& argv) {
+    std::string lit = text_of(src_, lit_node);
     // Absolute offset of lit[0] in the source when `lit` is a "…" body: the
     // hole ends are then found by prpparse's own scanner (the one the parser
     // used), so a `}`/`:` inside a comment, nested string or backtick name in
@@ -3757,19 +3901,16 @@ private:
       const auto e = out.find_last_not_of(" \t\r\n");
       return b == std::string::npos ? std::string{} : out.substr(b, e - b + 1);
     };
-    // positional args after the format string
-    std::vector<Val> pos;
-    uint32_t         ai = 0;  // skips the format string (the first named child)
-    for (TSNode a : ts_node_named_children(args)) {
-      if (ai++ != 0) {
-        pos.push_back(eval(a));
-      }
-    }
-    std::string              fmt;
-    std::vector<std::string> argv;
-    size_t                   pi = 0;
+    std::string fmt;
+    size_t      pi = 0;
     for (size_t i = 0; i < lit.size(); ++i) {
       char c = lit[i];
+      if (c == '\\' && cooked) {
+        std::string bytes;
+        decode_escape(lit, i, bytes);
+        fmt += c_fmt_bytes(bytes);
+        continue;
+      }
       if (c == '\\' && i + 1 < lit.size()) {
         // An escape pair is text, never a hole: `\{` / `\}` print the brace;
         // any other pair keeps its backslash (printed verbatim, as before).
@@ -3800,6 +3941,11 @@ private:
         if (auto c2 = name.rfind(':'); c2 != std::string::npos && name.find(']', c2) == std::string::npos) {
           spec = hole_code(std::string_view(name).substr(c2 + 1));  // trims: `{n : b}`
           name = hole_code(std::string_view(name).substr(0, c2));
+        }
+        if (cooked && name.empty()) {
+          fmt += "{}";  // an expression-less hole is literal text in a string value
+          i = (j == std::string::npos) ? lit.size() : j;
+          continue;
         }
         const Val vv = name.empty() ? (pi < pos.size() ? pos[pi++] : long_val("0")) : interp_expr(name);
         if (vv.kind == Val::Kind::String && spec.empty()) {
@@ -3850,6 +3996,33 @@ private:
         fmt += c;
       }
     }
+    return fmt;
+  }
+
+  // `puts("text {var} {}", expr)` — runtime print. The interpolated string is
+  // lowered to a printf: `{name}` -> the in-scope value `name`, `{}` -> the next
+  // positional arg, all as %ld (driver values are C++ long). `puts` appends a
+  // newline; `print` does not.
+  void gen_puts(std::ostringstream& o, TSNode n, int depth, bool newline) {
+    std::string ind(depth * 2, ' ');
+    // `file:line:cmd:` origin prefix on every printed message (cmd = puts/print).
+    std::string prefix = c_str_lit(file_short_ + ":" + std::to_string(line_of(n)) + ":" + (newline ? "puts" : "print") + ":");
+    TSNode      args   = field(n, "argument");
+    if (ts_node_is_null(args) || ts_node_named_child_count(args) < 1) {
+      o << ind << "_tp_out(\"" << prefix << (newline ? "\\n" : "") << "\");\n";
+      return;
+    }
+    // positional args after the format string
+    std::vector<Val> pos;
+    uint32_t         ai = 0;  // skips the format string (the first named child)
+    for (TSNode a : ts_node_named_children(args)) {
+      if (ai++ != 0) {
+        pos.push_back(eval(a));
+      }
+    }
+    // format string = first arg (a constant wrapping a [interpolated_]string_literal)
+    std::vector<std::string> argv;
+    const std::string        fmt = build_format(ts_node_named_child(args, 0), pos, /*cooked=*/false, argv);
     o << ind << "_tp_out(\"" << prefix << fmt << (newline ? "\\n" : "") << "\"";
     for (const auto& a : argv) {
       o << ", " << a;

@@ -9,54 +9,6 @@
 
 namespace livehd::usyn {
 namespace {
-Window_function formula_function(const Gate_formula& formula, uint32_t inputs, Budget& work) {
-  Window_function result;
-  if (inputs > max_logical_inputs || formula.nodes.empty()) {
-    return result;
-  }
-  if (!work.spend(formula.nodes.size() + (uint64_t{1} << inputs) / 64 + 1)) {
-    result.status = Status::search_exhausted;
-    return result;
-  }
-  result.table = Truth_table(inputs);
-  std::vector<uint64_t>             values(formula.nodes.size());
-  constexpr std::array<uint64_t, 6> variables{0xaaaaaaaaaaaaaaaaULL,
-                                              0xccccccccccccccccULL,
-                                              0xf0f0f0f0f0f0f0f0ULL,
-                                              0xff00ff00ff00ff00ULL,
-                                              0xffff0000ffff0000ULL,
-                                              0xffffffff00000000ULL};
-  for (size_t word = 0; word < result.table.words.size(); ++word) {
-    if (!work.spend(formula.nodes.size())) {
-      result.status = Status::search_exhausted;
-      return result;
-    }
-    for (size_t i = 0; i < formula.nodes.size(); ++i) {
-      const auto& n = formula.nodes[i];
-      switch (n.kind) {
-        case Gate_formula::Kind::constant: values[i] = n.inverted ? ~uint64_t{0} : 0; break;
-        case Gate_formula::Kind::literal:
-          if (n.variable >= inputs) {
-            return result;
-          }
-          values[i] = n.variable < 6 ? variables[n.variable] : ((word >> (n.variable - 6)) & 1) ? ~uint64_t{0} : 0;
-          if (n.inverted) {
-            values[i] = ~values[i];
-          }
-          break;
-        case Gate_formula::Kind::series  : values[i] = values[n.left] & values[n.right]; break;
-        case Gate_formula::Kind::parallel: values[i] = values[n.left] | values[n.right]; break;
-      }
-    }
-    result.table.words[word] = formula.output_inverted ? ~values.back() : values.back();
-  }
-  if (inputs < 6) {
-    result.table.words[0] &= (uint64_t{1} << (1U << inputs)) - 1;
-  }
-  result.status = Status::feasible;
-  return result;
-}
-
 std::vector<Endpoint_rail> rails(const Frozen_cell& cell) {
   std::vector<Endpoint_rail> result;
   for (uint32_t i = 0; i < cell.inputs.size(); ++i) {
@@ -160,11 +112,11 @@ Xag_region expand_endpoint_netlist(const Endpoint_netlist& n, Budget& work, uint
         || metrics->branches > n.gates.branches || cell.rails != rails(cell)) {
       return invalid("invalid endpoint formula, rail demand or technology legality");
     }
-    const auto function = formula_function(cell.formula, cell.inputs.size(), work);
-    if (function.status == Status::search_exhausted) {
-      return exhausted();
+    const auto table = cell.formula.evaluate_table(cell.inputs.size(), work);
+    if (!table) {
+      return work.exhausted ? exhausted() : invalid("endpoint formula does not implement its exact function");
     }
-    if (function.status != Status::feasible || function.table != cell.function) {
+    if (*table != cell.function) {
       return invalid("endpoint formula does not implement its exact function");
     }
     for (const auto& input : cell.inputs) {
@@ -367,11 +319,15 @@ Endpoint_netlist_result freeze_endpoint_netlist(const Logical_region& region, co
         }
       }
       cell.rails    = rails(cell);
-      auto function = formula_function(cell.formula, cell.inputs.size(), work);
-      if (function.status != Status::feasible) {
-        return exhausted();
+      auto table = cell.formula.evaluate_table(cell.inputs.size(), work);
+      if (!table) {
+        if (work.exhausted) {
+          return exhausted();
+        }
+        result.reason = "invalid logical endpoint formula";
+        return result;
       }
-      cell.function = std::move(function.table);
+      cell.function = std::move(*table);
       if (c.latch) {
         frozen.state[e.state_index].domino_latch = frozen.cells.size();
       }

@@ -213,6 +213,10 @@ TEST_F(LogicalCache, CorruptionAndResourceRefusalDoNotPublishPartialEntries) {
   const auto cold = probe();
   ASSERT_TRUE(save(cold.key));
   const auto path = cache.directory / (cold.key + ".usyn-cache");
+  // A published entry is readable by other users sharing the cache directory.
+  const auto perms = std::filesystem::status(path).permissions();
+  EXPECT_NE(perms & std::filesystem::perms::group_read, std::filesystem::perms::none);
+  EXPECT_NE(perms & std::filesystem::perms::others_read, std::filesystem::perms::none);
   std::ofstream(path, std::ios::binary) << "partial";
   EXPECT_EQ(probe().outcome, Cache_lookup::invalid);
   ASSERT_TRUE(save(cold.key));

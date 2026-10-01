@@ -512,10 +512,12 @@ void print_line_diff(std::string& out, const std::vector<std::string>& a, const 
 void tool_cat_ln(Options& opts, Result& res, const std::vector<std::string>& tokens);
 void tool_diff_ln(Options& opts, Result& res, const std::vector<std::string>& tokens);
 // The lg: INPUT libraries a compile absorbed into its working library: the
-// dirs, and the dir each absorbed module body came from (module, dir).
+// dirs, the dir each absorbed module body came from (module, dir), and every
+// module the input dirs declare (their library.txt), held or not before.
 struct Lg_absorbed {
   std::vector<std::string>                         dirs;
   std::vector<std::pair<std::string, std::string>> origins;
+  std::vector<std::string>                         modules;
 };
 // `absorbed` feeds tolg's stale-instance hint; null when none was absorbed.
 void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool need_graphs,

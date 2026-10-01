@@ -1,0 +1,35 @@
+// This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+//
+// The assertions of flop_sim_negedge_sole_clock.prp over its Verilog stand-in
+// (sim_negsole_standin.v, compiled to lg: first).
+const negsole = import("lg:negsole")
+
+test negsole.negedge_commits_only_on_falls {
+  mut acc = negsole
+  tick 10 {
+    // rclk FALLS at every odd tick and RISES at every even one; pclk is its
+    // complement, so the latch is open on the even ticks.
+    acc.pclk = (clock & 1) == 1
+    acc.rclk = (clock & 1) == 0
+    acc.en   = (clock >= 4) and (clock <= 7)
+    acc.d    = 100 + clock
+    step
+    if (clock & 1) == 1 {
+      assert(acc.qa == 100 + clock, "negedge flop takes d at the fall")
+    } elif clock >= 2 {
+      assert(acc.qa == 99 + clock, "negedge flop HOLDS across the rise")
+    }
+    if clock <= 4 {
+      assert(acc.qb == 0, "enabled negedge flop has not written before the first enabled fall")
+      assert(acc.qc == 0, "latch-enabled negedge flop has not written before the first enabled fall")
+    }
+    if (clock == 5) or (clock == 6) {
+      assert(acc.qb == 105, "enabled negedge flop wrote at the fall of tick 5, and holds at 6")
+      assert(acc.qc == 105, "latch-enabled negedge flop wrote at the fall of tick 5, and holds at 6")
+    }
+    if clock >= 7 {
+      assert(acc.qb == 107, "enabled negedge flop wrote at the fall of tick 7 and stops when en drops")
+      assert(acc.qc == 107, "latch-enabled negedge flop wrote at the fall of tick 7 and stops when en drops")
+    }
+  }
+}

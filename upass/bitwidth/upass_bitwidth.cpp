@@ -143,6 +143,12 @@ Lnast_range uPass_bitwidth::range_of_operand(const upass::Operand& o) const {
       }
     }
   }
+  // A comptime value no derivation reached (including a generic tuple-field
+  // bind) is its own range. Its declared envelope is only the fallback for
+  // runtime values; widening a known constant here can invent an overflow.
+  if (value) {
+    return Lnast_range::constant(*value);
+  }
   // Nothing derived (an input port, a register read, a write merged over an
   // uncertain if): a TYPED name still holds a value inside its declared type,
   // because every write into it is held to that type (check_declared_fit
@@ -153,10 +159,6 @@ Lnast_range uPass_bitwidth::range_of_operand(const upass::Operand& o) const {
   if (auto env = declared_type_of(o.name);
       env && (runner_st == nullptr || !runner_st->unchecked_typed.contains(ssa_base_name(o.name)))) {
     return *env;
-  }
-  // A comptime value no derivation reached (a generic's bind) is its own range.
-  if (value) {
-    return Lnast_range::constant(*value);
   }
   // A compiler temp has ONE definition, and the envelope its producer stamped
   // is structural: a bit-select's width, a cast's target type, the declared
@@ -550,6 +552,11 @@ std::optional<Lnast_range> uPass_bitwidth::declared_type_of(std::string_view nam
   }
   if (!typed_names_.contains(base) && lm->unit_lnast()->io_meta().find(base) == nullptr) {
     return std::nullopt;
+  }
+  // Flattened tuple-port reads are scalar operands too. Their declared
+  // envelope lives on the leaf, not on the tuple's scalar slot zero.
+  if (base.find('.') != std::string_view::npos) {
+    return declared_field_type_of(base);
   }
   return decl_envelope_of(base);
 }
@@ -1379,8 +1386,8 @@ void uPass_bitwidth::process_tuple_get() {
   if (runner_st == nullptr || !move_to_child()) {
     return;
   }
-  const std::string dst{current_text()};
-  std::string       src;
+  const std::string           dst{current_text()};
+  std::string                 src;
   // The positions read (an inferred array is sized by them); the names are
   // owned here, the operands view them.
   std::vector<std::string>    idx_names;

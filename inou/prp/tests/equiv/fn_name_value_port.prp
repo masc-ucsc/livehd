@@ -1,0 +1,26 @@
+/*
+:name: fn_name_value_port
+:type: equiv
+:verilog_top: fn_name_value_port
+:pyrope_top: fn_name_value_port
+*/
+// An input port is a VALUE even when a comb elsewhere shares its name. Both
+// constprop's tuple-slot function-name probe (`(sel, inc)`, `(const v = inc)`)
+// and the runner's comb-ref bind on a plain `q = sel` used to resolve the port
+// through the callee registry by the global unique-suffix match on another
+// scope's `outer.sel` / `outer.inc`, and emitted the function NAME as a string
+// constant (`o = ("fn_name_value_port.outer.sel")`).
+
+comb outer(a:U8) -> (c:U8) {
+  comb sel(v:U8) -> (r:U8) { r = v }
+  comb inc(v:U8) -> (r:U8) { wrap r = v + 1 }
+  c = inc(v=sel(v=a))
+}
+
+pub comb fn_name_value_port(sel:U8, inc:U8) -> (o:U8, p:U8, q:U8) {
+  const t = (sel, inc)
+  o = t[0]
+  const n = (const v = inc, const w = sel)
+  p = n.v
+  q = sel
+}

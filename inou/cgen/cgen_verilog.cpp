@@ -1,8 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-#include "absl/strings/escaping.h"
 #include "cgen_verilog.hpp"
-#include "sim_program.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -15,6 +13,7 @@
 
 #include "absl/container/flat_hash_set.h"
 #include "absl/strings/ascii.h"
+#include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
 #include "diag.hpp"  // //core — combinational-loop diagnostic
 #include "file_name.hpp"
@@ -25,6 +24,7 @@
 #include "mask_eval.hpp"
 #include "node_util.hpp"  // //graph:graph — livehd::graph_util::* helpers
 #include "perf_tracing.hpp"
+#include "sim_program.hpp"
 #include "split_selfref.hpp"  // //graph — pure-comb hierarchy false-loop repair
 #include "str_tools.hpp"
 // pass.hpp pulls in the diag reporting surface (livehd::diag) and Pass::info.
@@ -1153,13 +1153,13 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
   hhds::Pin_class mem_reset_dpin;          // 1-bit reset condition (registered whole-array)
 
   for (const auto& sink : node.inp_sorted_pins()) {
-    const auto drv = sink.get_driver_pin();
+    const auto drv      = sink.get_driver_pin();
     // HHDS does not store LiveHD's per-sink-name convention; derive the
     // name from the port_id via Ntype::get_sink_name. For memory the names
     // wrap with `pid % Memory_port_stride` (see Ntype::get_sink_name).
-    auto   raw_pid  = static_cast<int>(sink.get_port_id());
-    auto   pin_name = Ntype::get_sink_name(Ntype_op::Memory, raw_pid);
-    size_t port_id  = static_cast<size_t>(raw_pid) / Ntype::Memory_port_stride;
+    auto       raw_pid  = static_cast<int>(sink.get_port_id());
+    auto       pin_name = Ntype::get_sink_name(Ntype_op::Memory, raw_pid);
+    size_t     port_id  = static_cast<size_t>(raw_pid) / Ntype::Memory_port_stride;
 
     if (port_vector.size() <= port_id) {
       port_vector.resize(1 + port_id);
@@ -1190,8 +1190,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       }
       mem_type = const_of(drv).to_just_i64();
     } else if (pin_name == "posclk") {
-      if (!drv.is_const() || !const_of(drv).is_just_i64()
-          || const_of(drv).to_just_i64() == Ntype::Memory_posclk_mixed) {
+      if (!drv.is_const() || !const_of(drv).is_just_i64() || const_of(drv).to_just_i64() == Ntype::Memory_posclk_mixed) {
         livehd::diag::err("inou.cgen", "mem-clock-edge", "unsupported")
             .msg("memory {} requires per-port clock edge polarity, which Verilog emission does not support", debug_name(node))
             .fatal();
@@ -1698,7 +1697,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       }
     }
 
-    if (base_clock_dpin.is_invalid()) {
+    if (base_clock_dpin.is_invalid() && (mem_type != 0 || n_wr_ports != 0)) {
       livehd::diag::err("inou.cgen", "mem-malformed", "internal")
           .msg("memory {} should have a clock pin", debug_name(node))
           .fatal();
@@ -1729,8 +1728,15 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     // generic O(reads*writes) forwarding ladder is dead code and can grow into
     // gigabytes of Verilog. Give the direct-read specialization its own module
     // name so it can coexist with a forwarding instance of the same shape.
-    if (image) name += "_external";
-    if (!have_wrapper && no_collision_bypass) {
+    // An image (`_external`) wrapper is ALWAYS generated inline, so it needs
+    // the suffix even when the shape has a shipped wrapper: else an `old` and a
+    // `program` image memory of one shape share a body built for whichever
+    // was emitted first.
+    const bool inline_body = image || !have_wrapper;
+    if (image) {
+      name += "_external";
+    }
+    if (inline_body && no_collision_bypass) {
       name += "_nofwd";
     }
 
@@ -1744,13 +1750,18 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         // A macro boundary remains opaque to synthesis even without an RTL writer.
         // Simulators ignore the attribute and execute the full behavioral model.
         auto module_pos = wrapper.find("module ");
-        wrapper.insert(module_pos, "(* blackbox, keep *) ");
+        wrapper.insert(module_pos, "`ifndef LIVEHD_FORMAL_MEMORY_MODEL\n(* blackbox, keep *)\n`endif\n");
         auto params_end = wrapper.find(")\n  (");
         wrapper.insert(params_end, ", parameter INIT_FILE=\"\", INIT_RADIX=16");
         auto storage_end  = wrapper.find("reg [BITS-1:0] data[SIZE-1:0];\n");
         storage_end      += std::string_view("reg [BITS-1:0] data[SIZE-1:0];\n").size();
         wrapper.insert(storage_end,
-                       "initial begin if (INIT_RADIX == 16) $readmemh(INIT_FILE, data); else $readmemb(INIT_FILE, data); end\n");
+                       "generate if (INIT_FILE != \"\") begin:BLOCK_LOAD\n"
+                       "if (INIT_RADIX == 16) begin:BLOCK_LOAD_HEX\n"
+                       "  initial $readmemh(INIT_FILE, data);\n"
+                       "end else begin:BLOCK_LOAD_BIN\n"
+                       "  initial $readmemb(INIT_FILE, data);\n"
+                       "end\nend endgenerate\n");
         fout->prepend(wrapper);
       } else if (have_wrapper) {
         fout->prepend(absl::StrCat("`include \"", name, ".v\" \n"));
@@ -1824,7 +1835,9 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
 
     first_entry = true;
     if (single_clock) {
-      fout->append(absl::StrCat(".clk(", clock_expr(base_clock_dpin), ")\n"));
+      // An async ROM has no clocked behavior. The shared wrapper still
+      // declares clk for its synchronous variant; tie that unused input off.
+      fout->append(absl::StrCat(".clk(", base_clock_dpin.is_invalid() ? "1'b0" : clock_expr(base_clock_dpin), ")\n"));
       first_entry = false;
     }
 
@@ -1837,7 +1850,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         continue;
       }
       if (p.rdport) {
-        if (p.addr.is_invalid() || p.enable.is_invalid() || p.clock.is_invalid()) {
+        if (p.addr.is_invalid() || p.enable.is_invalid() || (mem_type != 0 && p.clock.is_invalid())) {
           livehd::diag::err("inou.cgen", "mem-malformed", "internal")
               .msg("memory {} read port is not correctly configured", debug_name(node))
               .fatal();
@@ -2078,7 +2091,7 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     const bool  result_uns        = is_unsign(dpin);
     bool        signed_arithmetic = false;
     for (const auto& sink : node.inp_sorted_pins()) {
-      const auto drv = sink.get_driver_pin();
+      const auto drv     = sink.get_driver_pin();
       signed_arithmetic |= operand_reads_signed(drv);
     }
     bool saw_context_constant = false;
@@ -2103,7 +2116,7 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       return absl::StrCat("(", const_to_verilog(c, constant_bits, result_uns && !signed_arithmetic && !c.is_negative()), ")");
     };
     for (const auto& sink : node.inp_sorted_pins()) {
-      const auto drv = sink.get_driver_pin();
+      const auto drv     = sink.get_driver_pin();
       const auto raw     = sum_expr(drv);
       // Subtraction can produce a signed value from entirely unsigned inputs
       // (for example -a-1). Preserve that sign when the Sum is inlined into
@@ -2435,6 +2448,12 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     const bool               signed_compare = mixes_operand_signs(node);
     const auto               cmp_expr       = [&](hhds::Pin_class cmp_dpin) {
       auto expr = get_expression(cmp_dpin);
+      // A comparison provides no result-width context to arithmetic operands.
+      // Preserve the graph's full value before Verilog self-determines it from
+      // its leaves (u20*u20 needs 40 bits even when compared with u20+u20).
+      if (!cmp_dpin.is_const() && !pin2var.contains(cmp_dpin.get_class_index()) && bits_of(cmp_dpin) > 0) {
+        expr = absl::StrCat(bits_of(cmp_dpin), "'(", expr, ")");
+      }
       return signed_compare ? signed_operand(cmp_dpin, expr) : expr;
     };
     for (const auto& sink : node.inp_sorted_pins()) {
@@ -2682,6 +2701,9 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     for (const auto& sink : node.inp_sorted_pins()) {
       const auto driver  = sink.get_driver_pin();
       auto       operand = get_expression(driver);
+      if (!driver.is_const() && !pin2var.contains(driver.get_class_index()) && bits_of(driver) > 0) {
+        operand = absl::StrCat(bits_of(driver), "'(", operand, ")");
+      }
       if (mixed_signs) {
         operand = signed_operand(driver, operand);
       }
@@ -4032,8 +4054,8 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
         }
 
         for (const auto& sink : node.inp_sorted_pins()) {
-          const auto drv = sink.get_driver_pin();
-          auto name2 = get_scaped_name(pin_wire_name(drv));
+          const auto drv   = sink.get_driver_pin();
+          auto       name2 = get_scaped_name(pin_wire_name(drv));
           add_to_pin2var(fout, drv, name2, is_unsign(drv));
         }
         if (op == Ntype_op::Memory) {
@@ -4312,7 +4334,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
       // Small bitwise expressions are cheaper to inline at two uses than to
       // materialize as another word-sized temporary. Keep the same expression
       // and precision rules as the single-use path.
-      const bool bitwise = op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor;
+      const bool bitwise   = op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor;
       // Keep the shared net that breaks recursive expansion on a cycle.
       // Fan-IN degree: with one driver per sink pin, the in-edge count IS the
       // connected-sink-pin count, so count pins (no edge vector, early exit).
@@ -4326,8 +4348,8 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
         }
         return true;
       };
-      const int  limit   = bitwise && fanin_le2() && !comb_cycle.contains(node) ? 3 : 2;
-      int        fanout  = 0;
+      const int limit  = bitwise && fanin_le2() && !comb_cycle.contains(node) ? 3 : 2;
+      int       fanout = 0;
       for (const auto& e : node.out_edges()) {
         (void)e;
         if (++fanout >= limit) {
@@ -4469,7 +4491,7 @@ void Cgen_verilog::create_locals(std::shared_ptr<File_output> fout, hhds::Graph*
       continue;
     }
     for (const auto& sink : node.inp_sorted_pins()) {
-      const auto drv = sink.get_driver_pin();
+      const auto drv      = sink.get_driver_pin();
       const auto pin_name = Ntype::get_sink_name(op, sink.get_port_id());
       if (!str_tools::ends_with(pin_name, "clock_pin") && pin_name != "reset_pin") {
         continue;
@@ -4601,7 +4623,9 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
   hhds::Graph* g = graph.get();
   create_module_io(fout, g);
   if (auto program = g->get_input_node().attr(livehd::attrs::simulation_init); program.has() && !program.get().empty()) {
-    fout->append("// synthesis translate_off\ninitial ", livehd::sim_ir::sv_statement(livehd::sim_ir::decode(program.get())), "// synthesis translate_on\n");
+    fout->append("// synthesis translate_off\ninitial ",
+                 livehd::sim_ir::sv_statement(livehd::sim_ir::decode(program.get())),
+                 "// synthesis translate_on\n");
   }
 
   reserve_instance_names(g);

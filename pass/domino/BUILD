@@ -45,6 +45,7 @@ cc_binary(
         "//pass/abc:pass_abc",
         "//pass/common:pass",
         "//pass/synth",
+        "//pass/usyn:lut_cover",
         "//pass/usyn:pass_usyn",
         # The region pipeline lowers memories through emitted RTL: cgen and the
         # yosys reader must be registered in the process.

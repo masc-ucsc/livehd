@@ -255,6 +255,14 @@ r=json.load(open(sys.argv[1])); assert r['lec']['verdict']=='proven',r
 PYTHON
 run pass usyn "lg:$W/logical/synth/lg" --top pipe --set pass.usyn.tmap=none \
   --emit-dir "lg:$W/standalone" --emit "verilog:$W/standalone.v" --workdir "$W/manual"
+# Logical-only still writes the native report + the region artifacts it
+# references; declare them like `lhd synth` does.
+python3 - "$W/result.json" <<'PY'
+import json,sys
+outs=json.load(open(sys.argv[1]))['outputs']
+for s in ('qor.json.provenance','qor.json.usyn.json','qor.json.usyn.artifacts'):
+    assert any(o.endswith('/manual/'+s) for o in outs),(s,outs)
+PY
 run lec --impl "lg:$W/standalone" --ref "lg:$W/logical/synth/lg" --top pipe --workdir "$W/lec_native"
 python3 - "$W/result.json" <<'PY'
 import json,sys

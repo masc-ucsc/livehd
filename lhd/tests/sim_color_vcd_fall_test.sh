@@ -13,7 +13,16 @@ fail() {
   exit 1
 }
 
-"$LHD" sim "$PRP" --setup-only --set sim.vcd=true --workdir "$work/setup" -q >/dev/null
+# NEGSOLE=verilog: the Verilog stand-in (lhd/tests/sim_negsole_standin.v) while
+# the Pyrope fixture waits on the clock lane (its target is fixme).
+SIM_ARGS=("$PRP")
+if [ "${NEGSOLE:-prp}" = verilog ]; then
+  "$LHD" compile lhd/tests/sim_negsole_standin.v --reader slang --emit-dir lg:"$work/lg/" --workdir "$work/lgw" -q \
+    >/dev/null || fail "the Verilog stand-in did not compile"
+  SIM_ARGS=(lg:"$work/lg" lhd/tests/sim_negsole_standin_tb.prp)
+fi
+
+"$LHD" sim "${SIM_ARGS[@]}" --setup-only --set sim.vcd=true --workdir "$work/setup" -q >/dev/null
 header="$(ls "$work"/setup/sim/*negsole.hpp | head -1)"
 body="$(ls "$work"/setup/sim/*negsole.cpp | head -1)"
 
@@ -23,7 +32,7 @@ grep -q '__vcd_snapshot(true)' "$body" || fail "missing pre-rise observation bar
 grep -q '__vcd_snapshot(false)' "$body" || fail "missing pre-fall observation barrier"
 grep -q 'if (__pos == false).* = ma;' "$body" || fail "negedge state is not sampled immediately before fall commit"
 
-"$LHD" sim "$PRP" --set sim.vcd=true --workdir "$work/run" -q >/dev/null
+"$LHD" sim "${SIM_ARGS[@]}" --set sim.vcd=true --workdir "$work/run" -q >/dev/null
 vcd="$(ls "$work"/run/*.vcd | head -1)"
 [ -s "$vcd" ] || fail "mixed-edge direct scheduler did not publish a VCD"
 

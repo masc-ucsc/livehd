@@ -59,15 +59,15 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
       || source.bits.size() != net.latches().size()) {
     return invalid("invalid logical state/control correspondence");
   }
-  // Reserve the writer's worst case before creating the private graph: one
-  // gate plus one memoized inverse per Lnet id, one Flop per latch and one
-  // Concat per control (constants are pooled pins, not nodes). A looser factor
-  // refused regions only after their complete search; region_emit re-checks the
-  // emitted body. Per-loop work still samples memory admission. HHDS stores a
+  // Reserve the writer's worst case before creating the private graph
+  // (logical_emission_nodes; constants are pooled pins, not nodes). Semantic
+  // import and the logical search size against the same bound, so a region is
+  // never refused here only after its complete search; region_emit re-checks
+  // the emitted body. Per-loop work still samples memory admission. HHDS stores a
   // pin's port id in a Port_bits-wide field, so bound IO and Concat lanes by
   // Port_invalid rather than the Port_id type.
-  const uint64_t reserved = 2 * uint64_t{net.size()} + net.latches().size() + source.controls.size() + net.inputs().size()
-                            + net.outputs().size() + 4;
+  const uint64_t reserved
+      = logical_emission_nodes(net.size(), net.latches().size(), source.controls.size(), net.inputs().size(), net.outputs().size());
   if (reserved > max_nodes || net.inputs().size() + net.outputs().size() >= hhds::Port_invalid
       || 2 * control_lanes + 1 >= hhds::Port_invalid) {
     return exhausted();

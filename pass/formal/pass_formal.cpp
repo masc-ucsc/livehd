@@ -784,7 +784,7 @@ void Pass_formal::work(Eprp_var& var) {
       }
       const bool explicit_nocheck = parts.kind == "assume_nocheck";
       if (!assume_check || explicit_nocheck) {
-        gu::set_proven(node, gu::kFormalAssume);
+        gu::set_proven(node, gu::kFormalAssumeUnchecked);  // accepted, NOT proven: lec discloses it as unchecked
         proven_assumes.push_back(cond);
         unchecked_assume_nodes.push_back(node);
         unchecked_hypotheses = true;

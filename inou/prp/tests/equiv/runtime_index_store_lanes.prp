@@ -1,0 +1,17 @@
+/*
+:name: runtime_index_store_lanes
+:type: lec
+:lec_top: runtime_index_store_lanes
+*/
+// PYROPE-vs-PYROPE group (README "Pyrope <-> Pyrope variants"). This file is
+// the REFERENCE: one runtime-indexed store into a zero-initialized array, then
+// constant reads of three lanes. Every variant writes the same lane through an
+// index that upass.constprop sees as an unknown-carrying TEMP (not the bare
+// input), and must keep every lane a runtime read.
+pub mod runtime_index_store_lanes(a:U8, i:U5) -> (p:U8@[0], q:U8@[0], r:U8@[0]) {
+  mut m:[32]U8 = 0
+  m[i] = a ^ 3
+  p = m[0]
+  q = m[1]
+  r = m[2]
+}

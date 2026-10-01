@@ -59,6 +59,24 @@ printf '12 34 @2 ab\n' > "$W/image.hex"
 "$LHD" compile "$W/load.prp" --top load --workdir "$W/export" --emit verilog:"$W/load.v" --emit-dir lg:"$W/lg" --emit-dir ln:"$W/ln"
 grep -q 'blackbox, keep' "$W/load.v"
 grep -q 'INIT_FILE' "$W/load.v"
+# The inline image wrapper's body depends on forwarding, so an `old` and a
+# `program` image memory of ONE shape must not share a module name (the first
+# emitted used to decide whether the `.FWD(1)` instance forwarded at all).
+cat > "$W/two.prp" <<'PRP'
+pub mod two(clk:Clock, rst:Reset, addr:U2, wen:Bool, din:U8) -> (d1:U8@[], d2:U8@[]) {
+  reg m1:[4]U8:[ordering="old"] = std.readmemh("image.hex")
+  reg m2:[4]U8:[ordering="program"] = std.readmemh("image.hex")
+  if wen { m1[addr] = din }
+  d1 = m1[addr]
+  if wen { m2[addr] = din }
+  d2 = m2[addr]
+}
+PRP
+"$LHD" compile "$W/two.prp" --top two --workdir "$W/two" --emit verilog:"$W/two.v"
+fwd_mod=$(sed -nE 's/^(cgen_memory_[a-z0-9_]+) #\(.*\.FWD\(1\).*/\1/p' "$W/two.v")
+[ -n "$fwd_mod" ] || { echo 'no forwarding image memory instance' >&2; exit 1; }
+awk -v m="$fwd_mod" '$1 == "module" && $2 == m {on=1} on && /^endmodule/ {exit} on' "$W/two.v" | grep -q 'd0_fwd' \
+  || { echo "image wrapper $fwd_mod for .FWD(1) lost its forwarding" >&2; exit 1; }
 # Both serialized IR forms retain startup loading and normal runtime writes.
 for kind in ln lg; do
   { printf 'const load = import("%s:load.load")\n' "$kind"; sed -n '/^test preload/,$p' "$W/load.prp"; } > "$W/imported.prp"

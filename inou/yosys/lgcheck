@@ -325,6 +325,8 @@ if [ "${GATE_TOP}" != "" ]; then
   GATE_TOP_STR="-top $GATE_TOP"
 fi
 
+# Enable the behavioral body of emitted file-preloaded memories for proof.
+# Their default blackbox attribute preserves the synthesis macro boundary.
 # GOLD-side read command, shared by every strategy below. --gold_reader slang
 # reads through built-in read_slang (SystemVerilog packed structs / '{...}
 # patterns that read_verilog cannot parse); --no-proc leaves the RTLIL
@@ -348,9 +350,9 @@ gold_read_cmds() {
     # not the resulting hardware: Minion needs both for forward declarations
     # and plain-bit assignments to enum fields.
     if [ -n "${SLANG_PLUGIN}" ]; then echo "plugin -i ${SLANG_PLUGIN}"; fi
-    echo "read_slang ${GOLD_SLANG_TOP} ${SLANG_INC} -j ${LGCHECK_SLANG_THREADS} --allow-use-before-declare --relax-enum-conversions ${GOLD_HIER_FLAG} --no-proc ${GOLD}; hierarchy ${GOLD_TOP_STR}"
+    echo "read_slang -D LIVEHD_FORMAL_MEMORY_MODEL ${GOLD_SLANG_TOP} ${SLANG_INC} -j ${LGCHECK_SLANG_THREADS} --allow-use-before-declare --relax-enum-conversions ${GOLD_HIER_FLAG} --no-proc ${GOLD}; hierarchy ${GOLD_TOP_STR}"
   else
-    echo "read_verilog -sv -icells ${VLG_INC} ${GOLD}; hierarchy ${GOLD_TOP_STR}"
+    echo "read_verilog -sv -icells -D LIVEHD_FORMAL_MEMORY_MODEL ${VLG_INC} ${GOLD}; hierarchy ${GOLD_TOP_STR}"
   fi
 }
 
@@ -368,9 +370,9 @@ gate_read_cmds() {
     GATE_SLANG_TOP=""
     if [ "${GATE_TOP}" != "" ]; then GATE_SLANG_TOP="--top ${GATE_TOP}"; fi
     if [ -n "${SLANG_PLUGIN}" ]; then echo "plugin -i ${SLANG_PLUGIN}"; fi
-    echo "read_slang ${GATE_SLANG_TOP} ${SLANG_INC} -j ${LGCHECK_SLANG_THREADS} --allow-use-before-declare --relax-enum-conversions ${GATE_HIER_FLAG} --no-proc ${GATE}; hierarchy ${GATE_TOP_STR}"
+    echo "read_slang -D LIVEHD_FORMAL_MEMORY_MODEL ${GATE_SLANG_TOP} ${SLANG_INC} -j ${LGCHECK_SLANG_THREADS} --allow-use-before-declare --relax-enum-conversions ${GATE_HIER_FLAG} --no-proc ${GATE}; hierarchy ${GATE_TOP_STR}"
   else
-    echo "read_verilog -sv -icells ${VLG_INC} ${GATE}; hierarchy ${GATE_TOP_STR}"
+    echo "read_verilog -sv -icells -D LIVEHD_FORMAL_MEMORY_MODEL ${VLG_INC} ${GATE}; hierarchy ${GATE_TOP_STR}"
   fi
 }
 
@@ -551,6 +553,8 @@ if ! [[ "$LGCHECK_HEURISTIC_TIMEOUT" =~ ^[0-9]+$ ]]; then
   exit 5
 fi
 LGCHECK_BMC_STEPS="${LGCHECK_BMC_STEPS:-6}"
+# Optional whole-miter induction after a completed, non-refuting bounded check.
+LGCHECK_INDUCT_AFTER_BMC="${LGCHECK_INDUCT_AFTER_BMC:-0}"
 # Failed correspondence guesses do not refute the public outputs. Reserve a
 # bounded share for the final counterexample search, including solver startup,
 # so a short shared budget cannot expire before that search even starts.
@@ -1028,6 +1032,17 @@ if [ $? -eq 0 ] && power_on_ok 1c "$stage_1c"; then
   exit 0
 fi
 
+# Recover structural correspondence after clk2fflogic gives matching state
+# anonymous sampled names. Every proposed pair is proved; check both the
+# original state and the newly paired sampled state for power-on compatibility.
+stage_1cs="${stage_1c}; equiv_struct -icells; $(power_on_pairs 1cs)"
+run_equiv_yosys --heuristic -p "${stage_1cs}; equiv_simple; equiv_induct -seq 4; equiv_status -assert" \
+  2>lgcheck1cs.err | tee lgcheck1cs.log | grep "Equivalence successfully proven!"
+if [ $? -eq 0 ] && power_on_ok 1c "$stage_1cs" && power_on_ok 1cs "$stage_1cs"; then
+  echo "1cs.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+  exit 0
+fi
+
 #${YOSYS} -p " read_verilog -sv ${GOLD}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gold; design -stash gold;
 #read_verilog -sv ${VLG_INC} ${GATE}; hierarchy ${TOP_STR}; opt ; prep; memory; rename -top gate; design -stash gate;
 #design -copy-from gold -as gold gold
@@ -1274,6 +1289,11 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
     bmc_sat_cmds+="sat -seq ${t} ${BMC_RESET_STMT} -set-at ${t} trigger 1 -prove trigger 0 -set-init-zero -set-def-inputs -show-ports miter; "
   done
 
+  bmc_save_model=""
+  if [ "$LGCHECK_INDUCT_AFTER_BMC" = 1 ]; then
+    bmc_save_model="write_rtlil lgcheck_bmc.il"
+  fi
+
   # No -q: yosys -q suppresses the SAT report itself, so the log would always
   # be empty and the greps below would vacuously "pass" any pair of designs.
   # Preserve don't-care state until both sides are in the miter.  Plain `opt`
@@ -1295,6 +1315,7 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
                dffunmap; proc; opt_clean
                hierarchy -top miter
                ${bmc_sat_cmds}
+               ${bmc_save_model}
                " \
     2>lgcheck_bmc.err >lgcheck_bmc.log
   bmc_status=$?
@@ -1320,6 +1341,26 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
   # INCONCLUSIVE result; only the structural/inductive engines above may exit 0.
   if [ "$(grep -c 'no model found: SUCCESS' lgcheck_bmc.log)" -eq "${LGCHECK_BMC_STEPS}" ]; then
     echo "BMC: found no counterexample within ${LGCHECK_BMC_STEPS} steps top:${fm_top}; this bounded result is not a proof."
+    if [ "$LGCHECK_INDUCT_AFTER_BMC" = 1 ]; then
+      # Use the SAME global-clock model, defined inputs, initialization, and
+      # reset window as BMC. No guessed internal correspondence cuts survive
+      # into this whole-miter induction query. A failed induction hypothesis
+      # is not a counterexample; only explicit induction success proves.
+      echo "INFO: trying whole-miter clock-aware induction with the remaining budget"
+      run_equiv_yosys --bmc -p "read_rtlil lgcheck_bmc.il; sat -tempinduct-def -prove trigger 0 ${BMC_RESET_STMT} -set-init-zero -set-def-inputs -show-ports miter" \
+        >lgcheck_induct.log 2>lgcheck_induct.err
+      induct_status=$?
+      if grep -q "Induction step proven: SUCCESS" lgcheck_induct.log; then
+        echo "induct.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
+        exit 0
+      elif [ "$induct_status" -eq 124 ]; then
+        echo "TIMEOUT: whole-miter induction exhausted the shared equivalence budget (${LGCHECK_EQUIV_TIMEOUT}s)."
+      elif [ "$induct_status" -ne 0 ] || grep -q "^ERROR" lgcheck_induct.err; then
+        # A yosys error (bad command, unreadable model) is not an unproven
+        # induction; say so instead of falling silently into INCONCLUSIVE.
+        echo "WARN: whole-miter induction did not run (yosys status ${induct_status}, see lgcheck_induct.err)."
+      fi
+    fi
   elif [ "$bmc_status" -eq 124 ]; then
     echo "TIMEOUT: bounded miter exhausted the shared equivalence budget (${LGCHECK_EQUIV_TIMEOUT}s)."
   else

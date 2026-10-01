@@ -133,6 +133,9 @@ using upass::io_port::is_clock_input;
 using upass::io_port::is_reset_candidate;
 using upass::io_port::is_reset_input;
 using upass::io_port::reset_input_active_low;
+using upass::io_port::reset_name_active_low;
+using upass::io_port::verilog_clock_name;
+using upass::io_port::verilog_reset_name;
 
 // One lowered value: its driver pin plus the literal container width `mw`.
 // Despite the historical name, this is now the same unit as attrs::bits for
@@ -6368,7 +6371,14 @@ private:
         const int polarity = mi.mixed_store_edges ? Ntype::Memory_posclk_mixed : (mi.first_store_posclk ? 1 : 0);
         setup_sink_by_name(mi.node, "posclk").connect_driver(create_const(*g_, *Dlop::create_integer(polarity)));
       } else if (!mi.is_array) {
-        bool        posclk_val = true;
+        // A file preload initializes persistent contents, but an unwritten
+        // array has only asynchronous reads. It needs no clock connection.
+        const auto  init_sink         = driven_sink_at(mi.node, Ntype::get_sink_pid(Ntype_op::Memory, "initial"));
+        const auto  init              = init_sink.is_invalid() ? Pin{} : init_sink.get_driver_pin();
+        const bool  read_only_preload = mi.n_user_wr == 0 && !mi.has_update && !mi.reset_init && !mi.is_pub && init.is_const()
+                                        && livehd::graph_util::const_of(init).is_string()
+                                        && hlop::memory_image(livehd::graph_util::const_of(init).to_string()).has_value();
+        bool        posclk_val        = true;
         std::string clock_pin_name;
         if (auto pit = pending_attrs_.find(std::string(name)); pit != pending_attrs_.end()) {
           if (auto cit = pit->second.find("clock_pin"); cit != pit->second.end()) {
@@ -6414,6 +6424,9 @@ private:
                 clock_pin_name,
                 lnast_->get_top_module_name());
           }
+        } else if (read_only_preload) {
+          // Keep an explicitly bound clock above, but do not introduce an
+          // implicit dependency merely because the contents are a reg array.
         } else if (!clock_name_.empty()) {
           setup_sink_by_name(mi.node, "clock_pin").connect_driver(clock_pin());
         } else {
@@ -7795,9 +7808,11 @@ private:
   // while `lhd sim` steps every clock port. A clk/clock-named input that clocks
   // nothing is plain data, and a body-less lg: black box proves nothing either
   // way. `from_default`: the call omits `pname`, which takes its declared
-  // default.
+  // default. `bound` maps every input of the call to its resolved driver
+  // (actual, positional or named, or declared default).
   void check_const_clock_bind(const Lnast_nid& nid, hhds::GraphIO& gio, std::string_view pname, const Pin& value,
-                              const Lnast* callee_ln, bool from_default = false) {
+                              const Lnast* callee_ln, const absl::flat_hash_map<std::string, Pin>& bound,
+                              bool from_default = false) {
     // docs 04b "Implicit clock and reset": binding a constant to a `Clock`
     // input is ALWAYS a compile error, whether or not a register reads it (a
     // `Bool` input is data whatever its name). A Verilog-origin callee's
@@ -7829,16 +7844,8 @@ private:
     // never writes: its clock is irrelevant (an idle ROM write port). Every
     // other port on that clock must be idle too.
     const auto  held_off = [&](std::string_view enable_input) {
-      for (auto a = lnast_->get_sibling_next(lnast_->get_sibling_next(lnast_->get_first_child(nid))); !a.is_invalid();
-           a      = lnast_->get_sibling_next(a)) {
-        const auto k = Lnast_ntype::is_store(lnast_->get_type(a)) ? lnast_->get_first_child(a) : Lnast_nid{};
-        const auto v = k.is_invalid() ? k : lnast_->get_sibling_next(k);
-        if (!v.is_invalid() && canon_io_name(lnast_->get_name(k)) == enable_input && Lnast_ntype::is_const(lnast_->get_type(v))) {
-          const auto ev = Dlop::from_pyrope(lnast_->get_name(v));
-          return ev && ev->is_known_zero();
-        }
-      }
-      return false;
+      const auto it = bound.find(enable_input);
+      return it != bound.end() && it->second.is_const() && livehd::graph_util::const_of(it->second).is_known_zero();
     };
     const Clocked_state* state = reach.state ? &*reach.state : nullptr;
     for (const auto& port : reach.memory_ports) {
@@ -8024,6 +8031,15 @@ private:
         return;
       }
       auto kind_of_bits = [](uint32_t b) { return b == 1 ? Io_kind::boolean : Io_kind::integer; };
+      // A body-less black box has no Clock/Reset types: class its 1-bit
+      // clk/rst inputs by the Verilog reader's convention, as upass.ssa stamps
+      // a Verilog-origin unit, so a conditional call still gates its clock.
+      auto sig_of       = [](const auto& d) {
+        if (d.bits != 1) {
+          return Io_sig::none;
+        }
+        return verilog_clock_name(d.name) ? Io_sig::clock : (verilog_reset_name(d.name) ? Io_sig::reset : Io_sig::none);
+      };
       for (const auto& d : gio->get_input_pin_decls()) {
         if ((d.name == "clock") || (d.name == "reset")) {
           continue;  // implicit; wired from the parent below, not an argument
@@ -8031,7 +8047,8 @@ private:
         cio_lg.inputs.push_back(Lnast_io_entry{.name      = d.name,
                                                .bits      = static_cast<int32_t>(d.bits),
                                                .is_signed = !d.unsign,
-                                               .kind      = kind_of_bits(d.bits)});
+                                               .kind      = kind_of_bits(d.bits),
+                                               .sig       = sig_of(d)});
       }
       for (const auto& d : gio->get_output_pin_decls()) {
         cio_lg.outputs.push_back(Lnast_io_entry{.name      = d.name,
@@ -8196,6 +8213,17 @@ private:
     absl::flat_hash_set<std::string> bound_ports;
     std::vector<std::pair<Pin, Pin>> deferred_clocks;  // (Sub sink, ungated parent clock)
     std::vector<Pin>                 active_resets;    // normalized active-high callee resets
+    // A callee reset as bound (wire, callee port): its polarity costs a walk of
+    // the callee body, so it is resolved only when a clock gate reads it.
+    std::vector<std::pair<Pin, std::string>>        pending_resets;
+    // Every bound input's resolved driver, and the constant-clock checks that
+    // read them (an idle memory port's enable may be bound after its clock,
+    // positionally, or by a default).
+    absl::flat_hash_map<std::string, Pin>           bound_pins;
+    std::vector<std::tuple<std::string, Pin, bool>> const_clock_checks;  // (port, value, from_default)
+    // A body-less lg: black box has no Clock/Reset types and its implicit
+    // `clock`/`reset` are not in cio_lg: name them as a Verilog unit does.
+    const bool                                      lg_box = !lg_name.empty();
     for (auto a = lnast_->get_sibling_next(callee_n); !a.is_invalid(); a = lnast_->get_sibling_next(a)) {
       std::string pname;
       Lnast_nid   val;
@@ -8277,12 +8305,13 @@ private:
         error_here("upass.tolg: callee '{}' has no input named '{}'", callee_full, pname);
         return;
       }
+      bound_pins[pname] = v.pin;
       if (v.pin.is_const()) {
-        check_const_clock_bind(nid, *gio, pname, v.pin, callee.get());
+        const_clock_checks.emplace_back(pname, v.pin, false);
       } else {
         check_clock_reset_bind(nid, cio, pname, v.pin, callee.get(), callee_bare);
       }
-      if (is_clock_input(cio, pname) && !call_guard.is_invalid()) {
+      if ((is_clock_input(cio, pname) || (lg_box && pname == "clock")) && !call_guard.is_invalid()) {
         // Reset is not known until all actuals have been visited. Defer clock
         // wiring so the gate can use `guard | reset_asserted` and a synchronous
         // reset still reaches state while the source call is inactive.
@@ -8290,12 +8319,8 @@ private:
       } else {
         spin.connect_driver(v.pin);
       }
-      if (is_reset_input(cio, pname)) {
-        auto r = nonzero1(v.pin);
-        if (reset_input_active_low(callee.get(), pname).value_or(false)) {
-          r = not1(r);
-        }
-        active_resets.push_back(r);
+      if (is_reset_input(cio, pname) || (lg_box && pname == "reset")) {
+        pending_resets.emplace_back(v.pin, pname);
       }
     }
     // A compiler-minted activation port is deliberately absent from io_meta,
@@ -8323,7 +8348,7 @@ private:
         // (comb_port_is_dead) may be omitted, whatever its name; nothing drives
         // it, so tie it off. The runner already rejected an omitted input the
         // comb reads (a comb's `clk`/`rst` are data, never auto-wired).
-        if (!declares_input_default(callee.get(), ie) && comb_port_is_dead(*callee, ie)) {
+        if (callee && !declares_input_default(callee.get(), ie) && comb_port_is_dead(*callee, ie)) {
           sub.create_sink_pin(pname).connect_driver(create_const(*g_, *Dlop::create_integer(0)));
           bound_ports.insert(pname);
           continue;
@@ -8335,8 +8360,10 @@ private:
         // wire. (A Pyrope rule: an unconnected Verilog port is not a request
         // for one.) A port with its own declared default (`rst:u1 = 0`) is not
         // omitted for this rule: it keeps the ordinary defaulted-input handling.
-        const bool auto_wire
-            = !lnast_->is_verilog_origin() && callee->get_lambda_kind() != "comb" && !declares_input_default(callee.get(), ie);
+        // An lg: black box (no callee Lnast) auto-wires nothing here: its
+        // implicit clock/reset are forwarded below.
+        const bool auto_wire = callee && !lnast_->is_verilog_origin() && callee->get_lambda_kind() != "comb"
+                               && !declares_input_default(callee.get(), ie);
         if (auto_wire && is_clock_candidate(ie)) {
           if (clock_name_.empty()) {
             error_here("upass.tolg: call to '{}' omits clock input '{}' but '{}' has no clock to wire (needs_clock bug)",
@@ -8387,7 +8414,8 @@ private:
         // (the callee stays a normal unit; its port is driven from here).
         if (const auto dv = input_default_const(callee.get(), ie)) {
           const auto dpin = create_const(*g_, *dv);
-          check_const_clock_bind(nid, *gio, pname, dpin, callee.get(), /*from_default=*/true);
+          const_clock_checks.emplace_back(pname, dpin, /*from_default=*/true);
+          bound_pins[pname] = dpin;
           sub.create_sink_pin(pname).connect_driver(dpin);
           bound_ports.insert(pname);
           continue;
@@ -8395,6 +8423,9 @@ private:
         error_here("upass.tolg: call to '{}' does not bind declared input '{}'", callee_full, pname);
         return;
       }
+    }
+    for (const auto& [pname, value, from_default] : const_clock_checks) {
+      check_const_clock_bind(nid, *gio, pname, value, callee.get(), bound_pins, from_default);
     }
 
     // Minted-clock wiring: the callee's implicit "clock" input exists on its
@@ -8460,7 +8491,7 @@ private:
       sub.create_sink_pin("reset").connect_driver(r);
       // The level at which the callee's regs see their minted reset asserted
       // (they are active-high unless they set `negreset=true`).
-      active_resets.push_back(reset_input_active_low(callee.get(), "reset").value_or(false) ? not1(r) : nonzero1(r));
+      pending_resets.emplace_back(r, "reset");
     }
 
     // Conditional state activation: each clock domain gets its own glitch-free
@@ -8480,10 +8511,14 @@ private:
       deferred_clocks.clear();
     }
     if (!call_guard.is_invalid() && !deferred_clocks.empty()) {
-      if (active_resets.size() > 1) {
+      if (active_resets.size() + pending_resets.size() > 1) {
         error_here("upass.tolg: conditional call to '{}' has multiple reset inputs; clock/reset domain mapping is ambiguous",
                    callee_full);
         return;
+      }
+      for (const auto& [r, port] : pending_resets) {
+        const bool neg = lg_box ? reset_name_active_low(port) : reset_input_active_low(callee.get(), port).value_or(false);
+        active_resets.push_back(neg ? not1(r) : nonzero1(r));
       }
       Pin gate_en = call_guard;
       if (!active_resets.empty()) {
@@ -12661,12 +12696,29 @@ private:
   // need the implicit `clock` input (the slang reader stamps these for
   // non-clk/clock Verilog clock names); collect the covered names first.
   absl::flat_hash_set<std::string>      clocked_elsewhere;
+  absl::flat_hash_set<std::string>      written;
   std::function<void(const Lnast_nid&)> scan_attrs = [&](const Lnast_nid& nid) {
+    if (lnast->is_dce_dead(nid)) {
+      return;
+    }
+    // Reuse the existing scan. Count both indexed and whole-array stores, and
+    // an in-place set_mask (its result is the variable itself: no store
+    // follows); a file initializer itself is a child of declare, not a store.
+    if (const auto nt = lnast->get_type(nid); Lnast_ntype::is_store(nt) || nt == Lnast_ntype::Lnast_ntype_set_mask) {
+      const auto dst = lnast->get_first_child(nid);
+      if (!dst.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(dst))) {
+        const auto name = lnast->get_name(dst);
+        written.emplace(name.substr(0, name.find("___ssa_")));
+      }
+    }
     if (Lnast_ntype::is_attr_set(lnast->get_type(nid))) {
       auto tgt = lnast->get_first_child(nid);
       auto key = tgt.is_invalid() ? tgt : lnast->get_sibling_next(tgt);
       if (!key.is_invalid() && (lnast->get_name(key) == "clock_pin" || lnast->get_name(key) == "__store_clock_pin")) {
         clocked_elsewhere.emplace(lnast->get_name(tgt));
+      }
+      if (!key.is_invalid() && (lnast->get_name(key) == "initial" || lnast->get_name(key) == "reset_pin")) {
+        written.emplace(lnast->get_name(tgt));  // conservatively retain explicit initialization/reset overrides
       }
     }
     for (auto c = lnast->get_first_child(nid); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
@@ -12676,6 +12728,9 @@ private:
   scan_attrs(lnast->get_root());
 
   std::function<bool(const Lnast_nid&)> has_reg = [&](const Lnast_nid& nid) -> bool {
+    if (lnast->is_dce_dead(nid)) {
+      return false;
+    }
     // 1a-mem — a __memory(cfg) instantiation needs the clock too (a type=2
     // array config leaves the minted input unused; acceptable, documented).
     if (Lnast_ntype::is_func_call(lnast->get_type(nid))) {
@@ -12694,6 +12749,14 @@ private:
           if (!c2.is_invalid() && Lnast_ntype::is_const(lnast->get_type(c2))) {
             auto mode = lnast->get_name(c2);
             if ((mode == "reg" || mode.starts_with("reg ")) && !clocked_elsewhere.contains(lnast->get_name(c0))) {
+              const auto init = lnast->get_sibling_next(c2);
+              if (mode == "reg" && Lnast_ntype::is_comp_type_array(lnast->get_type(c1)) && !written.contains(lnast->get_name(c0))
+                  && !init.is_invalid() && Lnast_ntype::is_const(lnast->get_type(init))) {
+                const auto value = Dlop::from_pyrope(lnast->get_name(init));
+                if (value && value->is_string() && hlop::memory_image(value->to_string())) {
+                  return false;  // an unwritten file-preloaded array has no clocked behavior
+                }
+              }
               return true;
             }
           }

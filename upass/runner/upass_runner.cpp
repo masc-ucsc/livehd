@@ -71,6 +71,7 @@
 #include "array_dim.hpp"
 #include "call_resolver.hpp"
 #include "decl_facts.hpp"
+#include "default_prologue.hpp"
 #include "diag.hpp"
 #include "hash_util.hpp"
 #include "io_port_rules.hpp"
@@ -78,7 +79,6 @@
 #include "lsp_index.hpp"
 #include "op_kind_rules.hpp"
 #include "range_bits.hpp"
-#include "default_prologue.hpp"
 #include "ssa_demote.hpp"
 
 namespace {
@@ -2817,7 +2817,10 @@ std::string lsp_render_leaf_type(const Bundle::Entry& fe) {
   }
   const bool have_decl_i64 = dlo && dhi;
   if (!dbits && (!lo || !hi) && !have_decl_i64) {
-    return "Signed";  // no declared width and no derived/point range
+    // no declared width and no derived/point range: a width-less `Unsigned`
+    // (min=0, max=nil) keeps its declared sign
+    const bool unsigned_decl = !fe.decl_min.is_invalid() && fe.decl_min.is_integer() && !fe.decl_min.is_negative();
+    return unsigned_decl ? "Unsigned" : "Signed";
   }
   bool sgn;
   int  bits;
@@ -2963,9 +2966,10 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
   // side-channel (harvested by the SSA upass): the authoritative declared bits +
   // sign + value range. For an internal (non-IO) declared var, fall back to the
   // live bundle's declared envelope (decl_min/decl_max).
-  std::optional<int>     dbits;            // declared bit width (prefix)
-  bool                   dsigned = false;  // declared sign
-  std::optional<int64_t> dlo;              // declared value envelope
+  std::optional<int>     dbits;                // declared bit width (prefix)
+  bool                   dsigned     = false;  // declared sign
+  bool                   dsign_known = false;  // dsigned comes from a declared integer type
+  std::optional<int64_t> dlo;                  // declared value envelope
   std::optional<int64_t> dhi;
   Io_kind                io_kind    = Io_kind::none;  // declared bool/string on an IO leaf
   // Derive the declared width + i64 envelope from a type's (max, min) Consts.
@@ -2976,6 +2980,7 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
       return;
     }
     dsigned       = !dmin.is_invalid() && dmin.is_integer() && dmin.is_negative();
+    dsign_known   = !dmin.is_invalid() && dmin.is_integer();
     const auto bw = [](const Dlop& v) -> int { return (v.is_invalid() || !v.is_integer()) ? 0 : v.get_signed_bits(); };
     const int  b  = dsigned ? std::max(bw(dmax), bw(dmin)) : (dmax.is_known_zero() ? 0 : bw(dmax) - 1);
     if (b > 0) {
@@ -3002,8 +3007,9 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
       }
     }
     if (found != nullptr) {
-      dsigned = found->is_signed;
-      io_kind = found->kind;
+      dsigned     = found->is_signed;
+      dsign_known = found->kind == Io_kind::integer;
+      io_kind     = found->kind;
       if (found->bits > 0) {
         dbits = found->bits;
       }
@@ -3226,7 +3232,8 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
     const bool have_decl = dlo && dhi;  // declared envelope fits int64
     const bool have_inf  = ilo && ihi;  // inferred range known
     if (!have_decl && !have_inf && !dbits) {
-      render += "Signed";  // no declared width and no derived range
+      // no declared width and no derived range: a width-less `x:Unsigned` keeps its sign
+      render += (dsign_known && !dsigned) ? "Unsigned" : "Signed";
     } else {
       // Width prefix = the DECLARED width when known (dbits — handles u64/u128
       // whose bounds don't fit int64), else derived from the i64 envelope/range.
@@ -3950,7 +3957,7 @@ std::optional<std::string> uPass_runner::closed_range_mask(std::string_view rang
 // const bitmask (see closed_range_mask) before the operand fold; everything
 // else goes through the ordinary drop-candidate path.
 void uPass_runner::process_bit_update() {
-  const auto saved = lm->save_cursor();
+  const auto              saved = lm->save_cursor();
   std::vector<Lnast_node> kids;
   if (lm->move_to_child()) {
     do {
@@ -4237,14 +4244,13 @@ void uPass_runner::dispatch_bit_not() {
            || upass::decl_facts::operand_kind(symbol_table_, root_lnast_.get(), name) == upass::Kind::boolean;
   };
   if (!verilog && operand.is_ref() && is_bool(operand.get_name())) {
-    fcall_arg_fail(
-        lm->current_span(),
-        "type-mismatch-arith",
-        std::format("operator `~` requires integer operands ({}:Bool)", Lnast::is_tmp(src_name) ? "<value>" : src_name),
-        std::format("`!{}` is the logical not of a bool; no implicit conversion — cast explicitly: {}",
-                    Lnast::is_tmp(src_name) ? std::string_view{"b"} : src_name,
-                    upass::kBoolIntCastHint),
-        "type");
+    fcall_arg_fail(lm->current_span(),
+                   "type-mismatch-arith",
+                   std::format("operator `~` requires integer operands ({}:Bool)", Lnast::is_tmp(src_name) ? "<value>" : src_name),
+                   std::format("`!{}` is the logical not of a bool; no implicit conversion — cast explicitly: {}",
+                               Lnast::is_tmp(src_name) ? std::string_view{"b"} : src_name,
+                               upass::kBoolIntCastHint),
+                   "type");
   }
   // A template's own walk has no types for its untyped inputs yet: each
   // specialization (and each inlined call) decides with the bound types.
@@ -4939,8 +4945,8 @@ bool uPass_runner::try_lower_wrap_sat() {
   // Need the upper clamp/mask unless the value provably stays ≤ max; the lower
   // unless it provably stays ≥ min. (For an unsigned target min==0, so this is
   // the "value may be negative → clamp to 0" case of saturate_unsigned.)
-  const bool need_hi = !(vmax && !vmax->gt_op(tmax)->is_known_true());
-  const bool need_lo = !(vmin && !vmin->lt_op(tmin)->is_known_true());
+  const bool          need_hi = !(vmax && !vmax->gt_op(tmax)->is_known_true());
+  const bool          need_lo = !(vmin && !vmin->lt_op(tmin)->is_known_true());
 
   // Preserve the per-pass func_call side effects (bitwidth's wrap_sat_exempt_
   // handshake in particular), mirroring process_drop_candidate's step 1, so
@@ -6406,7 +6412,7 @@ std::optional<uPass_runner::Array_port_shape> uPass_runner::array_port_shape(
   std::vector<int64_t> dims;
   auto                 elem = callee->get_first_child(at);
   for (;;) {
-    const auto dim = elem.is_invalid() ? elem : callee->get_sibling_next(elem);
+    const auto dim     = elem.is_invalid() ? elem : callee->get_sibling_next(elem);
     // Missing/empty dimensions are filled from the actual below; retain
     // the declared element envelope independently of the extent.
     // The dim rides as `const '[N]'` (the written name) or `ref %t` (`[N+1]`).
@@ -7822,7 +7828,7 @@ bool uPass_runner::try_inline_func_call() {
           bool                             scalar_destination = false;
           collect_return_consumption(saved, dst_name, req_fields, whole_used, &scalar_destination);
           for (const auto& fn : cands) {
-            auto c = lookup_callee(fn);
+            auto c                 = lookup_callee(fn);
             auto candidate_actuals = ov_actuals;
             if (c) {
               pack_single_tuple(c->io_meta(), candidate_actuals);
@@ -8021,7 +8027,7 @@ bool uPass_runner::try_inline_func_call() {
                     vararg_pos,
                     vararg_named,
                     &tuple_actual_expanded);
-  bind_minted_ok_ = false;
+  bind_minted_ok_           = false;
   // A named actual of the child's minted clock/reset: carried into a re-emitted
   // Sub call below (an all-named call reaches tolg verbatim with it).
   const auto minted_actuals = std::move(bind_minted_actuals_);
@@ -8307,8 +8313,29 @@ bool uPass_runner::try_inline_func_call() {
 
   // ── Splice ───────────────────────────────────────────────────────────────
   const uint32_t    salt  = ++inline_seq_;
-  const uint32_t    tag_n = ++inline_tag_seq_;  // names hardware: see inline_tag_seq_
-  const std::string tag   = std::format("inl{}_", tag_n);
+  if (const auto* unit = lm->unit_lnast().get(); unit != inline_tags_unit_) {
+    inline_tags_unit_ = unit;
+    inline_tags_taken_.clear();
+    for (const auto& node : unit->depth_preorder(unit->get_root())) {
+      const auto n = Lnast_nid(node);
+      if (!Lnast_ntype::is_ref(unit->get_type(n))) {
+        continue;
+      }
+      const auto name = unit->get_name(n);
+      uint32_t   k    = 0;
+      if (name.size() > 4 && name.starts_with("inl")) {
+        const auto [p, ec] = std::from_chars(name.data() + 3, name.data() + name.size(), k);
+        if (ec == std::errc{} && p != name.data() + 3 && p < name.data() + name.size() && *p == '_') {
+          inline_tags_taken_.insert(k);
+        }
+      }
+    }
+  }
+  uint32_t tag_n = ++inline_tag_seq_;  // names hardware: see inline_tag_seq_
+  while (inline_tags_taken_.contains(tag_n)) {
+    tag_n = ++inline_tag_seq_;
+  }
+  const std::string tag = std::format("inl{}_", tag_n);
 
   // Generic-WIDTH ports (`a:unsigned(bits=N * 4)`): the width is the bound
   // folded under this call's binds, never the actual's declared type — the same
@@ -8752,8 +8779,7 @@ bool uPass_runner::try_inline_func_call() {
   if (logical_order.size() == 1) {
     absl::flat_hash_set<std::string> consumed_fields;
     bool                             whole_result_used = false;
-    named_result = collect_return_consumption(
-        saved, dst_name, consumed_fields, whole_result_used, nullptr, logical_order.front());
+    named_result = collect_return_consumption(saved, dst_name, consumed_fields, whole_result_used, nullptr, logical_order.front());
   }
   if (logical_order.empty()) {
     // Void comb (e.g. `top()` called for its casserts) — nothing to bind back.
@@ -9240,8 +9266,7 @@ bool uPass_runner::try_split_leaf_field_store() {
   }
   const auto leaf   = absl::StrCat(base, ".", path);
   const auto slots  = symbol_table_.tuple_slot_ref.find(var);
-  const bool routed = slots != symbol_table_.tuple_slot_ref.end() && slots->second.contains(path)
-                      && slots->second.at(path) == leaf;
+  const bool routed = slots != symbol_table_.tuple_slot_ref.end() && slots->second.contains(path) && slots->second.at(path) == leaf;
   if (!routed && !split_tuple_leaves_.at(base).contains(path)) {
     return false;  // a field the split gave no leaf (a positional comptime entry)
   }
@@ -9579,7 +9604,26 @@ void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Ln
     // Generic substitution: a body `:T` slot is a `ref T` (SSA strips io
     // type refs; only body declare/type_spec slots carry them). Replace it
     // with the bound concrete type (macro expansion).
-    if (type_subst != nullptr) {
+    //
+    // A KEY ref is a label, never a read: the child-0 ref of a `store` directly
+    // under a func_call (named actual `f(a=a)`) or a tuple_add/tuple_concat
+    // (field `(a=a)`). Same rule as makes_store_keys / Lnast_manager's
+    // is_call_arg_key. Substituting it (a rolled loop's caller-namespace
+    // rename, a constant generic `f(N=N)`) names an argument/field that does
+    // not exist (`add2(inl1_a = inl1_a)`), so copy it verbatim.
+    const auto is_key_ref = [&]() {
+      const auto parent = src->get_parent(src_nid);
+      if (parent.is_invalid() || !Lnast_ntype::is_store(src->get_type(parent)) || src->get_first_child(parent) != src_nid) {
+        return false;
+      }
+      const auto gp = src->get_parent(parent);
+      if (gp.is_invalid()) {
+        return false;
+      }
+      const auto gt = src->get_type(gp);
+      return Lnast_ntype::is_func_call(gt) || Lnast_ntype::is_tuple_add(gt) || Lnast_ntype::is_tuple_concat(gt);
+    };
+    if (type_subst != nullptr && !is_key_ref()) {
       if (auto it = type_subst->find(std::string(src->get_name(src_nid))); it != type_subst->end()) {
         const auto& gb = it->second;
         // A CONSTANT-valued generic (`m<3>`): a body reference is a VALUE
@@ -9981,11 +10025,11 @@ uPass_runner::Spec_port uPass_runner::deferred_port_type(const std::shared_ptr<L
                                  e.name),
                      std::format("bind it in the `<…>` list or declare a default `<{}=…>`", unbound));
     }
-    const std::string msg = std::format(
-        "integer type bound `{}` of port `{}` of `{}` is not a compile-time value once its generics are bound",
-        which,
-        e.name,
-        callee_name);
+    const std::string msg
+        = std::format("integer type bound `{}` of port `{}` of `{}` is not a compile-time value once its generics are bound",
+                      which,
+                      e.name,
+                      callee_name);
     livehd::diag::sink().emit(livehd::diag::Diagnostic{
         .severity = livehd::diag::Severity::error,
         .code     = "type-bound-not-comptime",
@@ -9993,8 +10037,8 @@ uPass_runner::Spec_port uPass_runner::deferred_port_type(const std::shared_ptr<L
         .pass     = "upass.runner",
         .message  = msg,
         .span     = span,
-        .hint = "a port bound may use literals, the lambda's own generic parameters, and `comptime const`s computed from "
-                "them with `+ - * / % << >> & | ^` and `std.clog2` only (not by a loop, an `if` or another call)",
+        .hint     = "a port bound may use literals, the lambda's own generic parameters, and `comptime const`s computed from "
+                    "them with `+ - * / % << >> & | ^` and `std.clog2` only (not by a loop, an `if` or another call)",
     });
     throw std::runtime_error(msg);
   };
@@ -10305,8 +10349,8 @@ void collect_body_vars(const Lnast& ln, const Lnast_nid& nid, bool parent_makes_
   // v)` WRITES x: the slang bit-write lowering updates a function-local vector
   // in place).
   const bool value_op   = Lnast_ntype::is_primitive_op(t) && !Lnast_ntype::is_attr_set(t) && !is_store && !is_declare
-                        && !Lnast_ntype::is_stages(t) && !Lnast_ntype::is_timecheck(t) && !Lnast_ntype::is_ref(t)
-                        && !Lnast_ntype::is_const(t);
+                          && !Lnast_ntype::is_stages(t) && !Lnast_ntype::is_timecheck(t) && !Lnast_ntype::is_ref(t)
+                          && !Lnast_ntype::is_const(t);
   const bool defines    = is_store || is_declare || is_call || is_for || Lnast_ntype::is_tuple_add(t) || Lnast_ntype::is_attr_set(t)
                           || Lnast_ntype::is_tuple_get(t) || value_op;
 
@@ -11382,9 +11426,18 @@ private:
             return false;
           }
           env.insert_or_assign(index, Lnast_range::constant(x));
+          const auto mark = exits_.size();
           if (!eval_block(body, env)) {
             return false;
           }
+          // Exits taken in THIS nested iteration belong to the nested loop: a
+          // continue reaches its next iteration, a break the statement after
+          // it. Joining both into the running env over-approximates both
+          // (sound); only exits outside any nested `for` stay for run().
+          for (auto k = mark; k < exits_.size(); ++k) {
+            join_into(env, exits_[k], &env);
+          }
+          exits_.resize(mark);
         }
         continue;
       }
@@ -12713,6 +12766,23 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
   for (const auto& [name, value] : plan.constants) {
     captured[name].const_text = value.to_pyrope();
   }
+  // A re-rolled inline body lives in the caller's namespace. The hardware
+  // payload already binds actual_names; retain the same names in the source
+  // body used by the Pyrope writer and by any subsequent inline replay.
+  for (const auto& [name, actual] : plan.actual_names) {
+    if (name != plan.ivar && name != actual && !captured.contains(name)) {
+      captured[name].func_name = actual;
+    }
+  }
+  // Compiler temporaries are local to this retained loop, too. Multiple
+  // inline calls can retain identically named parser temps in sibling loops.
+  for (const auto& node : src->depth_preorder(source_body)) {
+    const auto n    = Lnast_nid(node);
+    const auto name = src->get_name(n);
+    if (Lnast_ntype::is_ref(src->get_type(n)) && Lnast::is_tmp(name)) {
+      captured[std::string(name)].func_name = "%" + plan.inst + "_" + std::string(name.substr(1));
+    }
+  }
   copy_subtree_into(src, source_body, staging, rolled, &captured);
 
   // The lifted definition's port for a boundary name (see lift_loop_body).
@@ -13900,10 +13970,10 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
   {
     // See in_identity_respecialize_: only the identity clone reuses the
     // template's name, so only its re-walk needs the guard.
-    const bool           saved = in_identity_respecialize_;
-    in_identity_respecialize_  = identity_spec;
+    const bool saved          = in_identity_respecialize_;
+    in_identity_respecialize_ = identity_spec;
     emit_named_instance_call(dst_name, mangled, /*inst_name=*/"", actuals);
-    in_identity_respecialize_  = saved;
+    in_identity_respecialize_ = saved;
   }
   return true;
 }
@@ -14020,7 +14090,7 @@ bool uPass_runner::gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& 
           break;
         }
         Generic_actual ga;
-        ga.value    = std::string(lm->current_text());
+        ga.value                           = std::string(lm->current_text());
         std::tie(ga.src_name, ga.src_base) = source_var_at_cursor();
         if (lm->move_to_sibling()) {
           ga.name = std::string(lm->current_raw_text());
@@ -14238,7 +14308,7 @@ bool uPass_runner::signature_matches(const Lnast_tree_io& io, const std::vector<
       }
       continue;
     }
-    const auto  ak = classify(param_val[i]);
+    const auto ak = classify(param_val[i]);
     if (pe.kind != Io_kind::none && ak != Io_kind::none && pe.kind != ak) {
       return false;  // kind mismatch (bool vs int vs string)
     }
@@ -14279,22 +14349,22 @@ bool uPass_runner::collect_return_consumption(const upass::Lnast_manager::Cursor
   // quadratic term. Use the tree's node API directly; all references in this
   // source frame receive the same inline renaming, so raw-name equality is the
   // same relation as current_text() equality.
-  const auto& ln        = *lm->get_lnast();
-  const auto  fcall_dst = ln.get_first_child(fcall_cursor.current);
-  absl::flat_hash_set<std::string> result_aliases{
-      fcall_dst.is_invalid() ? std::string(dst_name) : std::string(ln.get_name(fcall_dst))};
-  bool target_found = false;
+  const auto&                      ln        = *lm->get_lnast();
+  const auto                       fcall_dst = ln.get_first_child(fcall_cursor.current);
+  absl::flat_hash_set<std::string> result_aliases{fcall_dst.is_invalid() ? std::string(dst_name)
+                                                                         : std::string(ln.get_name(fcall_dst))};
+  bool                             target_found = false;
 
   // One statement. `self` recurses into the statement's nested blocks.
   const auto scan_stmt = [&](const auto& self, Lnast_nid node) -> bool {
-    const auto raw      = ln.get_type(node);
-    const bool is_tget  = Lnast_ntype::is_tuple_get(raw);
-    const auto first    = ln.get_first_child(node);
+    const auto raw     = ln.get_type(node);
+    const bool is_tget = Lnast_ntype::is_tuple_get(raw);
+    const auto first   = ln.get_first_child(node);
     if (first.is_invalid()) {
       return false;
     }
-    const auto second   = ln.get_sibling_next(first);
-    const bool is_alias = Lnast_ntype::is_store(raw) && !second.is_invalid() && ln.get_sibling_next(second).is_invalid();
+    const auto        second      = ln.get_sibling_next(first);
+    const bool        is_alias    = Lnast_ntype::is_store(raw) && !second.is_invalid() && ln.get_sibling_next(second).is_invalid();
     // children in order: [dst, src/operand, field/operand, …]
     std::size_t       idx         = 0;
     bool              names_dst   = false;  // dst_name appears as a non-leading child
@@ -14506,8 +14576,8 @@ std::string uPass_runner::select_init_overload(const std::vector<std::string>& c
   // and a bind that succeeds (the probe rejected on kind/range) keeps the
   // structural fallback.
   if (span != nullptr && candidates.size() == 1) {
-    if (auto callee = lookup_callee(candidates.front()); callee && !callee->io_meta().inputs.empty()
-                                                          && callee->io_meta().inputs[0].name == "self") {
+    if (auto callee = lookup_callee(candidates.front());
+        callee && !callee->io_meta().inputs.empty() && callee->io_meta().inputs[0].name == "self") {
       std::vector<Actual> actuals;
       actuals.push_back(
           Actual{.is_named = false, .is_ref_pass = false, .key = {}, .node = Lnast_node::create_const("0"), .func_name = {}});
@@ -15082,7 +15152,7 @@ void uPass_runner::unroll_for() {
   // accumulation drop, since walk_loop_iteration handles outer-`mut` writes.
   // The shape comes from constprop's tuple, or — for `for x in args` inside a
   // comb — from the gathered var-arg entries (which aren't a constprop tuple).
-  std::optional<std::vector<std::pair<std::string, bool>>> shape = try_tuple_shape(iterable);
+  std::optional<std::vector<std::pair<std::string, bool>>> shape      = try_tuple_shape(iterable);
   // A specialized array input has a concrete extent in io_meta, but no
   // constprop tuple: its elements are slices of the packed runtime port.
   const auto*                                              array_port = lm->get_lnast()->io_meta().find(iterable);
@@ -15402,6 +15472,7 @@ void uPass_runner::run() {
   detuple_index_aliases_.clear();
   detuple_replay_    = false;
   detuple_synthetic_ = false;
+  inline_tags_unit_  = nullptr;  // rescan: a new tree may reuse a freed address
   if (stream_ssa_enabled_) {
     for (const auto& nid : root_lnast_->depth_preorder(root_lnast_->get_root())) {
       if (nid.is_invalid() || !Lnast_ntype::is_declare(root_lnast_->get_type(nid))) {
@@ -16556,7 +16627,7 @@ bool uPass_runner::detuple_layout_is_flat(const uPass_detuple_registry::Layout& 
 // fields; anything else must be named. `out` holds the fields already bound by
 // name; the unnamed values fill the rest. False when reported.
 bool uPass_runner::detuple_bind_unnamed_values(std::string_view var, std::string_view type_name, const Detuple_tuple_value& value,
-                                               const uPass_detuple_registry::Layout& fields,
+                                               const uPass_detuple_registry::Layout&   fields,
                                                std::vector<std::optional<Lnast_node>>& out) {
   if (value.positional_src.size() != value.positional.size()) {
     return true;
@@ -16883,7 +16954,7 @@ bool uPass_runner::try_detuple_store() {
   // valid=…, extra=…)` silently accepted the unknown field -- and equally
   // silently accepted a MISSING one -- while the byte-identical program at FILE
   // scope, where nothing re-versions, reported both correctly.
-  std::string var = detuple_split_name(detuple_text(lhs));
+  std::string             var = detuple_split_name(detuple_text(lhs));
   std::vector<Lnast_node> rest;
   for (auto child = ln->get_sibling_next(lhs); child.is_valid(); child = ln->get_sibling_next(child)) {
     if (Lnast_ntype::is_ref(ln->get_type(child))) {
@@ -17034,7 +17105,7 @@ bool uPass_runner::try_detuple_store() {
       }
       // The first whole-tuple store of a flat typed tuple is its CONSTRUCTION:
       // the unnamed values bind like call arguments (qa.md Q35).
-      const bool constructing = !split_it->second.whole_bound;
+      const bool constructing      = !split_it->second.whole_bound;
       split_it->second.whole_bound = true;
       if (constructing && !values->second.positional.empty() && detuple_layout_is_flat(split.fields)
           && !(values->second.named && values->second.positional.size() + values->second.fields.size() > split.fields.size())) {
@@ -17509,7 +17580,10 @@ void uPass_runner::process_lnast() {
               symbol_table_.sub_output_names.insert_or_assign(self_dst, std::move(names));
             }
           }
-          if (!simulation_body && !rhs_name.empty() && !symbol_table_.has_bundle(rhs_name)) {
+          // An io port is a value, never a function, even when some comb
+          // elsewhere shares its name (`comb m(sel:U8)` beside a nested `sel`).
+          if (!simulation_body && !rhs_name.empty() && !symbol_table_.has_bundle(rhs_name)
+              && lm->unit_lnast()->io_meta().find(rhs_name) == nullptr) {
             if (const auto function = lookup_callee(rhs_name); function && function->get_lambda_kind() == "comb") {
               symbol_table_.set(rhs_name, *Dlop::from_string(function->get_top_module_name()));
             }
@@ -18961,8 +19035,8 @@ void uPass_runner::check_instance_clock_poke(const std::shared_ptr<Lnast>& unit,
   Io_sig sig = e != nullptr ? e->sig : Io_sig::none;
   if (e == nullptr && (port == "clock" || port == "reset") && !unit->is_verilog_origin()
       && (unit->get_lambda_kind() == "mod" || unit->get_lambda_kind() == "pipe")) {
-    const auto want = port == "clock" ? Io_sig::clock : Io_sig::reset;
-    const auto& ins = unit->io_meta().inputs;
+    const auto  want = port == "clock" ? Io_sig::clock : Io_sig::reset;
+    const auto& ins  = unit->io_meta().inputs;
     if (std::none_of(ins.begin(), ins.end(), [&](const Lnast_io_entry& i) { return i.sig == want; })) {
       sig = want;
     }
@@ -18978,13 +19052,12 @@ void uPass_runner::check_instance_clock_poke(const std::shared_ptr<Lnast>& unit,
                      "type");
     }
     if (got == upass::Kind::boolean && !value_is_clock) {
-      fcall_arg_fail(span,
-                     "clock-bound-to-bool",
-                     std::format("the `Clock` input `{}` of `{}` can not be driven by a Bool expression (a Bool is not a Clock)",
-                                 port,
-                                 bare),
-                     "a test passes a real Clock such as the tick's `clock`; a derived clock is not allowed (use an enable)",
-                     "type");
+      fcall_arg_fail(
+          span,
+          "clock-bound-to-bool",
+          std::format("the `Clock` input `{}` of `{}` can not be driven by a Bool expression (a Bool is not a Clock)", port, bare),
+          "a test passes a real Clock such as the tick's `clock`; a derived clock is not allowed (use an enable)",
+          "type");
     }
     return;
   }
@@ -19024,9 +19097,9 @@ void uPass_runner::check_tick_body_kinds() {
   // Names that hold a Clock (the tick's minted `clock`, and plain copies of it):
   // its numeric view is a debug cycle count (kind unknown, so `clock < 2` and
   // `0x10 + clock` stay legal) but it is never a Bool or an integer condition.
-  absl::flat_hash_set<std::string> clock_names;
+  absl::flat_hash_set<std::string>              clock_names;
   // Declared scalar kind of a typed test local (`const n:U8 = ...`).
-  absl::flat_hash_map<std::string, K> declared;
+  absl::flat_hash_map<std::string, K>           declared;
   {
     // The tick body's first statement declares its minted loop variable.
     const auto s0 = lm->save_cursor();
@@ -19054,7 +19127,8 @@ void uPass_runner::check_tick_body_kinds() {
     }
     return {value_kind_of(lm->current_node()), label};
   };
-  const auto operand_is_clock = [&]() { return lm->current_node().is_ref() && clock_names.contains(std::string(lm->current_text())); };
+  const auto operand_is_clock
+      = [&]() { return lm->current_node().is_ref() && clock_names.contains(std::string(lm->current_text())); };
   const auto type_error = [&](std::string_view code, const std::string& msg, const std::string& hint) {
     livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
                                                        .code     = std::string{code},
@@ -19148,8 +19222,8 @@ void uPass_runner::check_tick_body_kinds() {
     if (N::is_store(t) && nkids >= 3) {
       // A poke `store(d, field..., v)` (the check try_instance_handle_store makes).
       if (const auto hit = symbol_table_.instance_handles.find(dst); hit != symbol_table_.instance_handles.end()) {
-        bool       value_is_clock = false;
-        const auto [port, got]    = instance_poke_operands([&] {
+        bool value_is_clock    = false;
+        const auto [port, got] = instance_poke_operands([&] {
           value_is_clock = operand_is_clock();
           return operand().first;
         });
@@ -19175,7 +19249,9 @@ void uPass_runner::check_tick_body_kinds() {
         // A typed local binds like a call argument: a Bool never turns into an integer or the reverse.
         if ((d->second == K::integer && k == K::boolean) || (d->second == K::boolean && k == K::integer)) {
           type_error("type-mismatch-assign",
-                     std::format("cannot assign {} value to `{}` (it is {})", kind_name(k), upass::Lnast_manager::user_name(dst),
+                     std::format("cannot assign {} value to `{}` (it is {})",
+                                 kind_name(k),
+                                 upass::Lnast_manager::user_name(dst),
                                  kind_name(d->second)),
                      d->second == K::integer ? "a `Bool` never turns into an integer implicitly: write `U1(x)` (true == 1)"
                                              : "an integer never turns into a `Bool` implicitly: write `x != 0` or `Bool(x)`");

@@ -17,6 +17,8 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <sstream>
 #include <unordered_map>
 #include <utility>
@@ -42,15 +44,16 @@ namespace {
 
 using Bit = Abc_Obj_t*;  // AIG signal: node pointer with the complement bit in bit 0
 
-// ABC's frame is a process-global singleton (mainFrame.c s_GlobalFrame), so
-// materialize it once, lazily. Never Abc_Stop(): pass.abc / pass.liberty may
-// share the frame within one lhd process, and lec's engine forks each get their
-// own copy-on-write image that dies with the child.
+// ABC's frame is a thread-local singleton (mainFrame.c s_GlobalFrame) that
+// Abc_Start() allocates only when it is NULL, so call it every time rather than
+// latching a once-flag: pass.abc / pass.liberty Abc_Stop() the frame between lec
+// calls, and a stale latch would let a forked child run ABC on a NULL frame (it
+// dies silently, the parent reads EOF, every remaining cone stays Unknown).
+// Never Abc_Stop() here: those passes may share the frame within one lhd
+// process, and lec's engine forks each get their own copy-on-write image that
+// dies with the child.
 void ensure_abc_started() {
-  [[maybe_unused]] static const bool started = [] {
-    Abc_Start();
-    return true;
-  }();
+  Abc_Start();
 }
 
 std::string kind_name(cvc5::Kind k) {
@@ -705,6 +708,9 @@ constexpr int64_t kConeStallShare = 20;
 
 // The child's first record: ABC is up, so the per-cone stall clock starts now
 // rather than at fork (a loaded machine must not stall a cone before it begins).
+// Until it lands only the overall deadline bounds the wait, and the parent
+// starts ABC once before forking so every child inherits the frame (kReady is
+// then near-immediate instead of paying Abc_Start per fork).
 constexpr uint32_t kReady = 0xffffffffU;
 
 void put_u32(unsigned char* p, uint32_t v) {
@@ -746,6 +752,8 @@ std::vector<Cone_verdict> abc_prove_unsat_batch(const std::vector<cvc5::Term>& d
   auto       elapsed = [](std::chrono::steady_clock::time_point since) {
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - since).count();
   };
+
+  ensure_abc_started();  // in the parent: every child inherits the frame copy-on-write
 
   size_t next = 0;  // the first cone no child has reported yet
   while (next < diffs.size()) {
@@ -798,6 +806,8 @@ std::vector<Cone_verdict> abc_prove_unsat_batch(const std::vector<cvc5::Term>& d
     size_t        have   = 0;
     bool          expire = false;
     bool          stall  = false;
+    bool          ready  = false;  // the stall clock runs only once the child reports kReady
+    bool          eof    = false;  // the child closed its pipe: it finished, or it died
     for (;;) {
       int wait_ms = -1;
       if (deadline_ms > 0) {
@@ -807,11 +817,11 @@ std::vector<Cone_verdict> abc_prove_unsat_batch(const std::vector<cvc5::Term>& d
           expire = true;
           break;
         }
-        if (cone <= 0) {
+        if (ready && cone <= 0) {
           stall = true;
           break;
         }
-        wait_ms = static_cast<int>(std::min(left, cone));
+        wait_ms = static_cast<int>(ready ? std::min(left, cone) : left);
       }
       pollfd    p{fds[0], POLLIN, 0};
       const int pr = poll(&p, 1, wait_ms);
@@ -826,7 +836,8 @@ std::vector<Cone_verdict> abc_prove_unsat_batch(const std::vector<cvc5::Term>& d
       }
       const ssize_t n = read(fds[0], rec + have, kRecord - have);
       if (n <= 0) {
-        next = diffs.size();  // EOF: the child finished every cone
+        next = diffs.size();  // EOF: the child finished every cone (checked after waitpid)
+        eof  = true;
         break;
       }
       have += static_cast<size_t>(n);
@@ -836,6 +847,7 @@ std::vector<Cone_verdict> abc_prove_unsat_batch(const std::vector<cvc5::Term>& d
       have               = 0;
       const uint32_t idx = get_u32(rec);
       if (idx == kReady) {
+        ready   = true;
         cone_t0 = std::chrono::steady_clock::now();
         continue;
       }
@@ -856,6 +868,15 @@ std::vector<Cone_verdict> abc_prove_unsat_batch(const std::vector<cvc5::Term>& d
     }
     int status = 0;
     while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+    }
+    // The only kill is ours (deadline / stall). Any other signal or a non-zero
+    // exit is an ABC crash: it must not read as "every cone stays Unknown".
+    if (eof && (WIFSIGNALED(status) || (WIFEXITED(status) && WEXITSTATUS(status) != 0))) {
+      std::fprintf(stderr,
+                   "livehd:error: lec ABC cone-proof child died (%s %d): this is a crash, not an inconclusive proof\n",
+                   WIFSIGNALED(status) ? "signal" : "exit",
+                   WIFSIGNALED(status) ? WTERMSIG(status) : WEXITSTATUS(status));
+      std::abort();
     }
     if (expire || !stall) {
       break;

@@ -127,6 +127,27 @@ grep -q 'PROVEN under 1 unchecked assume' "$W/nocheck.out" \
   || { cat "$W/nocheck.out" >&2; fail "the assume_check=false run must report its active assumption"; }
 echo "PASS: both sanctioned spellings still constrain the miter"
 
+# An `lg:` side is not recompiled by lec, so the CLASS of an active assume comes
+# from its compile-time stamp, not lec's own assume_check: a library built with
+# formal.assume_check=false accepted the constraint without proof, and a later
+# default lec (assume_check=true) must still disclose it as UNCHECKED, never as
+# a proven fact.
+if ! "$LHD" compile "$W/uncheckable.prp" --top dut --emit-dir "lg:$W/LG_NOCHECK" \
+     --set formal.assume_check=false --workdir "$W/lg_nocheck_cw" >"$W/lg_nocheck_c.out" 2>&1; then
+  cat "$W/lg_nocheck_c.out" >&2
+  fail "compile with formal.assume_check=false to lg: failed"
+fi
+if ! "$LHD" lec --ref "$W/golden.v" --impl "lg:$W/LG_NOCHECK" --top dut \
+     --workdir "$W/lg_nocheck_w" >"$W/lg_nocheck.out" 2>&1; then
+  cat "$W/lg_nocheck.out" >&2
+  fail "the lg: side's accepted constraint must still constrain the miter"
+fi
+grep -q 'PROVEN under 1 unchecked assume' "$W/lg_nocheck.out" \
+  || { cat "$W/lg_nocheck.out" >&2; fail "an lg: assume accepted under assume_check=false must be disclosed as unchecked"; }
+grep -q 'proven assume' "$W/lg_nocheck.out" \
+  && { cat "$W/lg_nocheck.out" >&2; fail "an unproven lg: assume was labeled proven"; }
+echo "PASS: an lg: side's unproven assume is disclosed as unchecked"
+
 # Even a structurally identical self-LEC must check its active environment:
 # two explicit constraints whose conjunction is empty may not be laundered by
 # the hierarchy's no-solver structural-identity shortcut.

@@ -64,6 +64,10 @@
 #      claimed the other's leftover mid.md, which then bound leaf's old ports:
 #      every compile of either spelling was refused (exit 4) until the
 #      workdir was wiped.
+#  16. A shared lg: dir and a compile with an lg: INPUT: design A (source +
+#      lg:LIBC) must neither emit nor claim design B's module that the dir
+#      holds. A claimed B's top as its own root, so B renaming its top left
+#      the old one in the dir for good (never pruned).
 
 set -u
 
@@ -656,5 +660,30 @@ grep -q '^graph_io [0-9]* mid.md$' "$V/L/library.txt" && fail "spellings leg: no
 cmp -s "$V/b3.v" "$V/cold_tp.v" || fail "spellings leg: incremental tp Verilog differs from cold: $(diff "$V/b3.v" "$V/cold_tp.v")"
 cmp -s "$V/t3.v" "$V/cold_tb.v" || fail "spellings leg: incremental tb Verilog differs from cold: $(diff "$V/t3.v" "$V/cold_tb.v")"
 echo "PASS: a closure change compiles under every command line sharing a workdir, equal to cold"
+
+# ── 16. a compile with an lg: input claims only its own closure ─────────────
+O="$W/own_lgin"
+mkdir -p "$O/a" "$O/b" "$O/c"
+echo 'mod cc(a:U8)->(z:U8@[0]){ z = a ^ 3 }' > "$O/c/cc.prp"
+echo 'mod topb(a:U8)->(z:U8@[0]){ z = a ^ 1 }' > "$O/b/topb.prp"
+cat > "$O/a/topa.prp" <<'EOF'
+const cc = import("lg:cc.cc")
+mod topa(a:U8)->(z:U8@[0]){ z = cc(a=a).z }
+EOF
+"$LHD" compile "$O/c/cc.prp" --emit-dir lg:"$O/LIBC" -q --result-json "$O/c.json" >/dev/null \
+  || fail "own-lgin leg: cc compile failed: $(cat "$O/c.json" 2>/dev/null)"
+"$LHD" compile "$O/b/topb.prp" --emit-dir lg:"$O/L" -q --result-json "$O/b1.json" >/dev/null \
+  || fail "own-lgin leg: topb compile failed: $(cat "$O/b1.json" 2>/dev/null)"
+"$LHD" compile "$O/a/topa.prp" lg:"$O/LIBC" --emit-dir lg:"$O/L" --emit verilog:"$O/a.v" -q --result-json "$O/a.json" >/dev/null \
+  || fail "own-lgin leg: topa + lg:LIBC compile failed: $(cat "$O/a.json" 2>/dev/null)"
+grep -q '^module topb' "$O/a.v" && fail "own-lgin leg: design A emitted design B's topb: $(cat "$O/a.v")"
+grep -q '^module cc' "$O/a.v" || fail "own-lgin leg: design A lost the lg: input's cc: $(cat "$O/a.v")"
+sed 's/topb(/topb2(/' "$O/b/topb.prp" > "$O/b/topb.new" && mv "$O/b/topb.new" "$O/b/topb.prp"
+"$LHD" compile "$O/b/topb.prp" --emit-dir lg:"$O/L" -q --result-json "$O/b2.json" >/dev/null \
+  || fail "own-lgin leg: renamed topb compile failed: $(cat "$O/b2.json" 2>/dev/null)"
+grep -q '^graph_io [0-9]* topb.topb$' "$O/L/library.txt" \
+  && fail "own-lgin leg: design A's record pinned B's renamed-away topb.topb: $(cat "$O/L/lhd_owners.json")"
+grep -q '^graph_io [0-9]* cc.cc$' "$O/L/library.txt" || fail "own-lgin leg: B's compile pruned A's cc.cc"
+echo "PASS: a compile with an lg: input emits and claims only its own closure in a shared lg: dir"
 
 echo "lhd_lg_reuse_io_test passed"

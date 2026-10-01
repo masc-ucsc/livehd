@@ -18,9 +18,21 @@ SIM_SRC="${SIM_SRC:-inou/prp/tests/sim/flop_feeds_transparent_high_latch.prp}"
 oracle_tmp="$(mktemp -d "${TMPDIR:-/tmp}/lhd-sim-color-latch.XXXXXX")"
 trap 'rm -rf "$oracle_tmp"' EXIT
 
+# LATCH_DUT=verilog: the Verilog stand-in (lhd/tests/sim_flop_high_latch_standin.v
+# + its tb, assertions included) while the Pyrope fixture waits on the clock
+# lane (its target is fixme).
+SIM_ARGS=("$SIM_SRC")
+if [ "${LATCH_DUT:-prp}" = verilog ]; then
+  "$LHD" compile lhd/tests/sim_flop_high_latch_standin.v --reader slang --emit-dir lg:"$oracle_tmp/lg/" \
+    --workdir "$oracle_tmp/lgw" -q >/dev/null
+  SIM_ARGS=(lg:"$oracle_tmp/lg" lhd/tests/sim_flop_high_latch_standin_tb.prp)
+  "$LHD" sim "${SIM_ARGS[@]}" --workdir "$oracle_tmp/run" --set sim.tune.profile=off -q >/dev/null \
+    || { echo "FAIL: the transparent-high latch stand-in did not see the flop's post-rise value"; exit 1; }
+fi
+
 # The product regression must select the replacement path; a green assertion
 # suite on the retired module scheduler is not evidence for this TODO.
-"$LHD" sim "$SIM_SRC" --setup-only --workdir "$oracle_tmp/setup" -q >/dev/null
+"$LHD" sim "${SIM_ARGS[@]}" --setup-only --workdir "$oracle_tmp/setup" -q >/dev/null
 color_header="$(ls "$oracle_tmp"/setup/sim/*flop_high_latch.hpp | head -1)"
 grep -q 'color-direct eligible=true' "$color_header" \
   || { echo "FAIL: flop->transparent-high latch did not select the color-direct schedule"; exit 1; }

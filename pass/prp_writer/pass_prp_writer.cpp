@@ -137,6 +137,11 @@ void Pass_prp_writer::work(Eprp_var& var) {
   std::unordered_set<std::string> instantiated_modules;
   std::unordered_set<std::string> sink_modules;
   for (const auto& ln : var.lnasts) {
+    // A file-level import/container unit is not a callable zero-output module.
+    // Its basename can equal the tail of a real extracted lambda in that file.
+    if (!ln->is_verilog_origin() && ln->get_lambda_kind().empty()) {
+      continue;
+    }
     std::string_view full = ln->get_top_module_name();
     auto             dot  = full.rfind('.');
     auto             tail = std::string(dot == std::string_view::npos ? full : full.substr(dot + 1));
@@ -167,9 +172,37 @@ void Pass_prp_writer::work(Eprp_var& var) {
     }
   }
 
+  // A rolled_for prints its retained source loop. Its lifted implementation
+  // units have artificial index/activation ports and are not source lambdas.
+  std::unordered_set<std::string> loop_implementations;
+  for (const auto& ln : var.lnasts) {
+    for (const auto& node : ln->depth_preorder()) {
+      const auto n = Lnast_nid(node);
+      if (!Lnast_ntype::is_rolled_for(ln->get_type(n))) {
+        continue;
+      }
+      size_t index = 0;
+      for (auto child : ln->children(n)) {
+        if (index++ != lnast_rolled_for::lowering_payload) {
+          continue;
+        }
+        for (auto statement : ln->children(child)) {
+          if (!Lnast_ntype::is_func_call(ln->get_type(statement))) {
+            continue;
+          }
+          const auto callee = ln->get_sibling_next(ln->get_first_child(statement));
+          loop_implementations.emplace(ln->get_name(callee));
+        }
+      }
+    }
+  }
+
   std::map<std::string, std::vector<std::shared_ptr<Lnast>>> by_file;
   std::unordered_set<std::string>                            unemitted_modules;  // the templates dropped below
   for (const auto& ln : var.lnasts) {
+    if (loop_implementations.contains(std::string(ln->get_top_module_name()))) {
+      continue;
+    }
     // A deferred TEMPLATE (`mod f(b)` with an untyped param, `...args`, an
     // unbound `<T>`) is never elaborated — its body still holds the unresolved
     // comptime temps the specialization consumed, so re-emitting it produces a
@@ -186,12 +219,15 @@ void Pass_prp_writer::work(Eprp_var& var) {
       // same unit. Dropping it silently truncated a v2prp artifact to a ZERO-BYTE
       // .prp on re-emit (exit 0, 0 diagnostics, still listed in manifest.json) --
       // and destroyed the input when the emit dir was the input dir.
-      const auto& gens = ln->get_generics();
-      const auto& defs = ln->get_generic_defaults();
-      const bool  fully_defaulted
-          = !gens.empty() && defs.size() >= gens.size()
-         && std::none_of(defs.begin(), defs.end(), [](const auto& d) { return d.empty(); });
-      if (!fully_defaulted) {
+      const auto& gens            = ln->get_generics();
+      const auto& defs            = ln->get_generic_defaults();
+      const bool  fully_defaulted = !gens.empty() && defs.size() >= gens.size()
+                                    && std::none_of(defs.begin(), defs.end(), [](const auto& d) { return d.empty(); });
+      // An untyped comb can be a compile-time helper called by a retained
+      // generic module. It needs no concrete graph: preserve its source body
+      // so the caller can specialize/fold it on the next compile.
+      const bool  source_comb     = ln->get_lambda_kind() == "comb" && gens.empty();
+      if (!fully_defaulted && !source_comb) {
         // Genuinely unelaborated (untyped param, `...args`, an unbound `<T>`).
         // Say so: a skipped unit must never be reported as a successful emit.
         livehd::diag::warn("pass.prp_writer", "template-not-emitted", "io")
@@ -213,6 +249,7 @@ void Pass_prp_writer::work(Eprp_var& var) {
   struct File_result {
     std::string                                      write_error;
     std::vector<std::pair<std::string, std::string>> unimplemented;
+    std::vector<std::pair<std::string, std::string>> clock_as_data;
     std::exception_ptr                               error;
   };
 
@@ -296,6 +333,9 @@ void Pass_prp_writer::work(Eprp_var& var) {
 
       if (!debug_on) {
         for (size_t i = 0; i < units.size(); ++i) {
+          for (const auto& f : writers[i]->clock_as_data()) {
+            result.clock_as_data.emplace_back(units[i]->get_top_module_name(), f);
+          }
           if (!writers[i]->has_unimplemented()) {
             continue;
           }
@@ -340,6 +380,17 @@ void Pass_prp_writer::work(Eprp_var& var) {
     }
     if (!result.write_error.empty()) {
       livehd::diag::err("pass.prp_writer", "write-failed", "io").msg("could not open output file: {}", result.write_error).fatal();
+    }
+    // A Verilog clock that is also data (qa.md section 6) has no Pyrope
+    // spelling: the written unit types it U1 and still clocks a register with
+    // it, which the recompile rejects (clock-bind-not-clock).
+    for (const auto& [unit, what] : result.clock_as_data) {
+      livehd::diag::err("pass.prp_writer", "prp-writer-clock-as-data", "type")
+          .msg("cannot emit Pyrope for '{}': {}", unit, what)
+          .hint(
+              "a Pyrope Clock is not data and only `Clock(clock_pin=clk, enable=en)` derives one: remove the data read, or "
+              "pass --set prp_writer.debug=true to keep the output")
+          .emit();
     }
     for (const auto& [unit, feats] : result.unimplemented) {
       livehd::diag::err("pass.prp_writer", "unimplemented", "unsupported")

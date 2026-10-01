@@ -181,6 +181,26 @@ expect "power-on mem differs (ind)"    "$(verdict_eng pow_a.v pow_b.v ind)"  "UN
 expect "power-on mem equal (v vs prp)" "$(verdict_eng pow_a.v pow_a.prp auto --set formal.lec.semdiff=none)" \
   "PROVEN equivalent"
 
+# Same power-on hole for a memory written ONLY through the whole-array `update`
+# bus (`mem = nx`): it has no per-port write (n_wr == 0) yet is not a ROM, so the
+# shared current-state array still assumes both sides start equal.
+pow_upd() {  # $1=file $2=entry-0 contents (hex)
+  cat > "$WORK/$1" <<EOF
+pub mod romt(clk:Clock, we:Bool, d:U8, wa:U2, ra:U2) -> (q:U8@[0]) {
+  reg mem:[4]U8:[initial=0x040302$2] = nil
+  q = mem[ra]
+  mut nx:[4]U8 = (0,0,0,0)
+  nx[wa] = d
+  if we { mem = nx }
+}
+EOF
+}
+mkdir -p "$WORK/ua" "$WORK/ub"
+pow_upd ua/romt.prp 01
+pow_upd ub/romt.prp 09
+expect "power-on update-bus mem (auto)" "$(verdict_eng ua/romt.prp ub/romt.prp auto)" "REFUTED (not equivalent)"
+expect "power-on update-bus mem (ind)"  "$(verdict_eng ua/romt.prp ub/romt.prp ind)"  "UNKNOWN"
+
 if [ $fail -ne 0 ]; then echo "lec_mem_init_test: FAILED"; exit 1; fi
 echo "lec_mem_init_test: PASSED"
 exit 0

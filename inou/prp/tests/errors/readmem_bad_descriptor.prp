@@ -1,0 +1,11 @@
+/*
+:name: readmem_bad_descriptor
+:type: error
+:error: std.readmemh/readmemb requires one nonempty comptime string filename
+*/
+// `__readmemh` is the compiler-internal form of `std.readmemh` (prp2lnast
+// appends a `@readmemh:1:<dir>` source-dir descriptor), but the bare `__` cell
+// call is reachable from source. A second argument that is not a valid
+// descriptor is a diagnostic -- it used to trip `I(source.has_value())` in
+// upass.constprop (and dereference an empty optional in an opt build).
+const x = __readmemh("a.hex", "zzz")

@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "logical_cache.hpp"
 
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -111,6 +112,9 @@ bool store_logical_cache(const Logical_cache_options& options, std::string_view 
   if (fd < 0) {
     return false;
   }
+  // mkstemp creates 0600; an entry in a cache directory shared across users or
+  // CI accounts must stay readable by them (best effort; still valid if not).
+  fchmod(fd, 0644);
   size_t done = 0;
   while (done < encoded.bytes.size()) {
     const auto count = ::write(fd, encoded.bytes.data() + done, encoded.bytes.size() - done);

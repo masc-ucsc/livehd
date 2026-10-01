@@ -37,4 +37,6 @@ test dut.reads_file_const {
   puts("acc={acc}")
   assert(acc == M * (K + K - T.lo))
   assert(T.hi == 9)
+  // A puts hole reads a file const too (it used to emit the bare name).
+  puts("K={K} M={M} T.hi={T.hi}")
 }

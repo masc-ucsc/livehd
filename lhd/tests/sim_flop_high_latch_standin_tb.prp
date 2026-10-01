@@ -1,0 +1,16 @@
+// This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+//
+// The assertions of flop_feeds_transparent_high_latch.prp over its Verilog
+// stand-in (sim_flop_high_latch_standin.v, compiled to lg: first).
+const flop_high_latch = import("lg:flop_high_latch")
+
+test flop_high_latch.post_rise_value_flows_through_open_latch {
+  mut acc = flop_high_latch
+  tick 6 {
+    const dv = 11 + (17 * clock)
+    acc.d = dv
+    step
+    assert(acc.qf == dv, "posedge flop captured this period's input")
+    assert(acc.qh == dv, "transparent-high latch observed the flop's post-rise value before closing")
+  }
+}

@@ -249,7 +249,7 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
           const char* cmd = opts.command == "lec" ? "lec" : "formal verify";
           throw Lhd_error{"usage", std::format("{} --lib expects lg:DIR, got '{}:'", cmd, lp.kind), ""};
         }
-        auto mv = materialize_verilog(model_opts, res, lp.kind, lp.path, std::format("{}_models{}", side, i));
+        auto mv    = materialize_verilog(model_opts, res, lp.kind, lp.path, std::format("{}_models{}", side, i));
         lib_flags += std::format("{}-v\x1f{}", lib_flags.empty() ? "" : "\x1f", mv);
       }
       Eprp_var::Eprp_dict reader_labels{
@@ -541,12 +541,18 @@ static void disclose_lec_helpers(livehd::lec::Query_result& r, const livehd::lec
 //     active here.
 // The verdict discloses the two classes apart: a checked assume pass.formal
 // proved is a PROVEN fact, while an assume_nocheck (or any assume under
-// assume_check=false) is an UNCHECKED contract.
+// assume_check=false) is an UNCHECKED contract. The class comes from the
+// STAMP (kFormalAssume = proved, kFormalAssumeUnchecked = accepted without
+// proof), never from this lec run's assume_check: an `lg:` side is not
+// recompiled, so it keeps whatever its own compile decided. A graph persisted
+// by an older pass.formal stamped every acceptance kFormalAssume, and a plain
+// assume carrying `proven` AND `runtime_check` there was an undischarged top IO
+// assume promoted to a hypothesis -- it is unchecked too, never proven.
 struct Design_assumes {
   int proven    = 0;
   int unchecked = 0;
 };
-static Design_assumes design_assume_occurrences(hhds::Graph* top, bool assume_check) {
+static Design_assumes design_assume_occurrences(hhds::Graph* top) {
   Design_assumes active;
   if (top == nullptr) {
     return active;
@@ -570,7 +576,9 @@ static Design_assumes design_assume_occurrences(hhds::Graph* top, bool assume_ch
     if (!nocheck_by_name && (!livehd::graph_util::has_proven(base) || proven_hier)) {
       continue;
     }
-    ++(nocheck_by_name || !assume_check ? active.unchecked : active.proven);
+    const bool unchecked = nocheck_by_name || livehd::graph_util::proven_of(base) == livehd::graph_util::kFormalAssumeUnchecked
+                           || livehd::graph_util::has_runtime_check(base);  // legacy promoted top IO assume
+    ++(unchecked ? active.unchecked : active.proven);
   }
   return active;
 }
@@ -716,7 +724,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         if (sio == nullptr) {
           continue;  // body-less marker Sub (see impl_children above): no def to pair
         }
-        std::string cn = canon_ref(sio->get_name());
+        std::string cn  = canon_ref(sio->get_name());
         auto        rit = ref_by_name.find(cn);
         if (rit == ref_by_name.end()) {
           continue;
@@ -4050,8 +4058,8 @@ void lec_command(Options& opts, Result& res) {
   // prove -- a selected-top IO one included (docs 05-assert: every plain
   // assume is an obligation) -- is no hypothesis: it would narrow the compared
   // input space of a miter whose other side never made the claim.
-  const auto ref_assumes  = design_assume_occurrences(ref_g.get(), assume_check);
-  const auto impl_assumes = design_assume_occurrences(impl_g.get(), assume_check);
+  const auto ref_assumes  = design_assume_occurrences(ref_g.get());
+  const auto impl_assumes = design_assume_occurrences(impl_g.get());
   o.proven_assumes        = ref_assumes.proven + impl_assumes.proven;
   o.unchecked_assumes     = ref_assumes.unchecked + impl_assumes.unchecked;
   o.design_assumes        = o.proven_assumes + o.unchecked_assumes > 0;
@@ -4174,6 +4182,10 @@ void lec_command(Options& opts, Result& res) {
 
   if (auto e = livehd::lec::lec_options_range_error(o); !e.empty()) {
     throw Lhd_error{"usage", e, "the BMC engine unrolls one SMT copy of the design per cycle"};
+  }
+
+  if (auto error = livehd::lec::match_names_error(ref_g.get(), impl_g.get(), o.match); !error.empty()) {
+    throw Lhd_error{"usage", error, "use actual state names as reference=implementation; ref. and impl. are not side qualifiers"};
   }
 
   // --lib lg:DIR libraries resolve Sub instances during encoding (e.g. the
@@ -5042,9 +5054,9 @@ void lec_command(Options& opts, Result& res) {
   // materialize_verilog, which re-records their input paths (load_side_graphs
   // already did above) — collapse res.inputs back to one entry per path.
   dedup_inputs(res);
-  auto lgcheck = locate_lgcheck();
-  auto yosys   = locate_lgcheck_yosys();
-  auto rundir  = fs::absolute(workdir(opts)).string();
+  auto      lgcheck         = locate_lgcheck();
+  auto      yosys           = locate_lgcheck_yosys();
+  auto      rundir          = fs::absolute(workdir(opts)).string();
   // lgcheck's bounded miter counts clk2fflogic GLOBAL-clock steps (the clock
   // is a free input sampled every step), and a rising edge becomes visible only
   // every second step: a divergence k edges deep needs 2k steps (measured:
@@ -5115,11 +5127,11 @@ void lec_command(Options& opts, Result& res) {
   res.lec.crosscheck_exit_code = code;
   const bool        lg_known   = code == 0 || code == 1 || (lg_bounded && lec_equiv);
   const bool        lg_equiv   = code == 0 || (lg_bounded && lec_equiv);
-  const std::string lg_verdict
-      = !lg_known  ? std::string{"unknown"}
-        : !lg_equiv ? std::string{"different"}
-        : code != 0 ? std::format("equivalent for {} cycles (bounded; deeper cycles not checked)", lg_cycles)
-                    : std::string{"equivalent"};
+  const std::string lg_verdict = !lg_known   ? std::string{"unknown"}
+                                 : !lg_equiv ? std::string{"different"}
+                                 : code != 0
+                                     ? std::format("equivalent for {} cycles (bounded; deeper cycles not checked)", lg_cycles)
+                                     : std::string{"equivalent"};
 
   std::print("lec cross-check: engine={} -> {}; lgcheck -> {}\n",
              o.engine,

@@ -66,16 +66,16 @@ constexpr bool stmt_is_scope_barrier(Lnast_ntype::Lnast_ntype_int t) {
 // Parse the bits/is_signed from a prim_type_uint/prim_type_sint subtree
 // (or any other type ntype). Returns {bits=0, is_signed=true} on miss.
 struct Type_info {
-  int32_t     bits        = 0;
-  bool        is_signed   = true;
-  Io_kind     kind        = Io_kind::none;
-  Io_sig      sig         = Io_sig::none;  // `Clock`/`Reset` (kind == boolean)
-  bool        has_range   = false;  // explicit `int(min,max)` bounds (both known, fit i64)
-  int64_t     range_min   = 0;
-  int64_t     range_max   = 0;
+  int32_t              bits      = 0;
+  bool                 is_signed = true;
+  Io_kind              kind      = Io_kind::none;
+  Io_sig               sig       = Io_sig::none;  // `Clock`/`Reset` (kind == boolean)
+  bool                 has_range = false;         // explicit `int(min,max)` bounds (both known, fit i64)
+  int64_t              range_min = 0;
+  int64_t              range_max = 0;
   // Both bounds known but past an i64 (see Lnast_io_entry::wide_range_min).
-  std::optional<Dlop> wide_range_min;
-  std::optional<Dlop> wide_range_max;
+  std::optional<Dlop>  wide_range_min;
+  std::optional<Dlop>  wide_range_max;
   // `[N]T` port: packed bus of N lanes (see Lnast_io_entry).
   int64_t              array_size  = 0;
   int32_t              elem_bits   = 0;
@@ -83,8 +83,8 @@ struct Type_info {
   bool                 elem_bool   = false;
   std::vector<int64_t> inner_dims;  // `[N][M]T`: {M} (Lnast_io_entry::inner_dims)
   // Deferred generic-width bound leaves (see Lnast_io_entry::bound_max_text).
-  std::string bound_max_text;
-  std::string bound_min_text;
+  std::string          bound_max_text;
+  std::string          bound_min_text;
 };
 Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid) {
   Type_info ti;
@@ -420,7 +420,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
   absl::flat_hash_map<std::string, Array_view> prior_array_view;
   // Likewise a `Clock`/`Reset` port: the staging io re-emits a Bool-kind port
   // with no type child, so a second pass would read it back untyped.
-  absl::flat_hash_map<std::string, Io_sig> prior_sig;
+  absl::flat_hash_map<std::string, Io_sig>     prior_sig;
   for (const auto* v : {&meta.inputs, &meta.outputs}) {
     for (const auto& e : *v) {
       if (e.array_size > 0 && e.elem_bits > 0) {
@@ -439,9 +439,9 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
 
   auto restore_array_view = [&](std::vector<Flat_field>& fields) {
     for (auto& f : fields) {
-      if (const auto sit = prior_sig.find(f.name);
-          sit != prior_sig.end() && f.sig == Io_sig::none && f.bits == 0 && f.array_size == 0
-          && (f.kind == Io_kind::none || f.kind == Io_kind::boolean)) {
+      if (const auto sit = prior_sig.find(f.name); sit != prior_sig.end() && f.sig == Io_sig::none && f.bits == 0
+                                                   && f.array_size == 0
+                                                   && (f.kind == Io_kind::none || f.kind == Io_kind::boolean)) {
         f.kind = Io_kind::boolean;
         f.sig  = sit->second;
       }
@@ -1011,7 +1011,14 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
       auto a = staging->add_child(tup, Lnast_ntype::create_store());
       staging->add_child(a, Lnast_node::create_ref(f.name));
       staging->add_child(a, Lnast_node::create_const(is_input && f.is_varargs ? "..." : is_input && f.is_ref ? "ref" : "nil"));
-      if (const auto ait = unsized_array_type.find(f.name); f.bits == 0 && ait != unsized_array_type.end()) {
+      if (!lnast->is_verilog_origin() && f.sig != Io_sig::none) {
+        // Specialization clones the structural IO tree, not its old io_meta.
+        // Keep signal classes there so a Clock cannot become an untyped port.
+        staging->add_child(a,
+                           f.sig == Io_sig::clock ? Lnast_ntype::create_prim_type_clock() : Lnast_ntype::create_prim_type_reset());
+      } else if (f.kind == Io_kind::boolean) {
+        staging->add_child(a, Lnast_ntype::create_prim_type_bool());
+      } else if (const auto ait = unsized_array_type.find(f.name); f.bits == 0 && ait != unsized_array_type.end()) {
         copy_type(ait->second, a);
       } else if (f.bits > 0) {
         // Re-emit the canonical prim_type_int(max,min) from the
@@ -1241,6 +1248,18 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
                     if (auto it = pending.find(bn); it != pending.end()) {
                       lnast->set_name(base, it->second);
                     }
+                  }
+                }
+                // An IN-PLACE set_mask (result is the reg itself, the slang
+                // reader's dynamic part-select shape) moves the reg's
+                // next-state past the recorded temp. Drop it so a later
+                // set_mask keeps the reg base, which tolg resolves to the
+                // current pending D; else it would re-read the stale temp
+                // and silently drop this write.
+                if (!res.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(res))) {
+                  auto rn = lnast->get_name(res);
+                  if (reg_only_names.contains(rn)) {
+                    pending.erase(rn);
                   }
                 }
               } else if (Lnast_ntype::is_store(ct)) {
@@ -1912,8 +1931,8 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
         }
         if (kids.size() == 2 && Lnast_ntype::is_ref(lnast->get_type(kids[0])) && Lnast_ntype::is_ref(lnast->get_type(kids[1]))) {
           const std::string dst_name(lnast->get_name(kids[0]));
-          const auto        pit       = whole_port_split.find(dst_name);
-          const bool        via_temp  = pit != whole_port_split.end();
+          const auto        pit      = whole_port_split.find(dst_name);
+          const bool        via_temp = pit != whole_port_split.end();
           if (via_temp || port_prefix.contains(dst_name)) {
             const std::string& port     = via_temp ? pit->second : dst_name;
             const std::string  dot_port = port + ".";

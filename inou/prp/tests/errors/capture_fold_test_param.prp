@@ -1,0 +1,24 @@
+/*
+:name: capture_fold_test_param
+:type: error
+:error: 'k' is a runtime value of the enclosing scope; it is not visible inside lambda 'addk'
+:help: pass 'k' as an input of 'addk'
+*/
+
+// User ruling 2026-09-28 (32), applied to a TEST PARAMETER: `n` is a runtime
+// value of the test frame (an `--arg` can override its default), so `k`
+// does not fold, and reading it in a nested comb is a capture error at the
+// read. Before, the parameter was never recorded as a runtime binding: `k`
+// was classified comptime, `const k = n + 1` was replayed into the comb's
+// prologue, and upass.tolg failed with "unresolved reference 'n'".
+
+mod ctp_cnt(a:U8) -> (o:U8@[0]) { o = a }
+
+test ctp_cnt.tp(n:U8 = 3) {
+  const k = n + 1
+  comb addk(x:U8) -> (o:U10) { o = x + k }   // locate_error_here
+  mut d = ctp_cnt
+  d.a = 1
+  step
+  assert(addk(d.o) == 5)
+}

@@ -1565,6 +1565,13 @@ protected:
   // unrolls its loops inside the splice, a converged one (restored warm) no
   // longer has any.
   uint32_t                                      inline_tag_seq_{0};
+  // `<N>`s of the `inl<N>_` prefixes the walked unit's own source already
+  // spells (a rolled loop retained in an inlined caller's namespace lifts
+  // ports like `inl1_a`; re-read writer output names them too). A splice
+  // tagged `inl1_` would mint `inl1_a` for its callee's `a` and collide, so
+  // such tags are skipped. Scanned lazily once per unit (inline_tags_unit_).
+  absl::flat_hash_set<uint32_t>                 inline_tags_taken_;
+  const Lnast*                                  inline_tags_unit_{nullptr};
   // Comptime loop unroll state. loop_break_hit_ is set by a `func_break`
   // reached on a comptime-taken path during a loop body re-walk; the unroller
   // checks it after each iteration and stops. loop_depth_ counts active

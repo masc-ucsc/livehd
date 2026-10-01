@@ -139,6 +139,24 @@ rc=$?
 set -e
 [[ $rc -ne 0 && $rc -lt 128 ]] || fail "deep nesting after '//' in a string: rc=$rc (crash or accepted)"
 grep -q 'nesting too deep' <<<"$out" || fail "deep nesting after '//' in a string: no nesting-too-deep diagnostic: $out"
+# ... nor by a `{{` literal brace or a `\u{N}` escape in a "..." string (they
+# open no hole; treating them as one swapped string and code for the rest).
+python3 - "$WD/deep3.prp" <<'EOF'
+import sys
+n = 20000
+with open(sys.argv[1], 'w') as f:
+    f.write('pub comb deep(a:U8) -> (r:U8) {\n')
+    f.write('  const s = "{{"\n')
+    f.write('  const u = "\\u{41}"\n')
+    f.write('  r = ' + '(' * n + 'a' + ')' * n + '\n')
+    f.write('}\n')
+EOF
+set +e
+out=$("$LHD" compile "$WD/deep3.prp" --diag-fmt pretty 2>&1)
+rc=$?
+set -e
+[[ $rc -ne 0 && $rc -lt 128 ]] || fail "deep nesting after a {{ string: rc=$rc (crash or accepted)"
+grep -q 'nesting too deep' <<<"$out" || fail "deep nesting after a {{ string: no nesting-too-deep diagnostic: $out"
 
 # --- 3. canonical test / formal block names ------------------------------------
 cat >"$WD/s.prp" <<'EOF'

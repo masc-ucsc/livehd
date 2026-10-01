@@ -184,6 +184,7 @@ _SV_FIXME = [
 # Fixtures with a `// :lec_solver: lgyosys` header: they shell out to lgcheck.
 _SV_LGYOSYS = [
     "tests/sv/memory_sync_reset.v",
+    "tests/sv/nb_dynamic_part_select_chain.v",
 ]
 
 # A new ordinary SV regression is one source file: no per-case BUILD or script.

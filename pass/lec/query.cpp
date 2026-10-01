@@ -213,7 +213,7 @@ absl::flat_hash_map<std::string, std::vector<std::string>> bus_bit_groups(const 
     if (base.empty()) {
       continue;
     }
-    auto& g = indexed[base];
+    auto& g       = indexed[base];
     g.model_only += lone ? 1 : 0;
     if (!g.bits.emplace(index, key).second) {
       g.broken = true;
@@ -280,6 +280,40 @@ std::vector<std::pair<std::string, std::string>> parse_match_pairs(std::string_v
     }
   }
   return out;
+}
+
+std::string match_names_error(hhds::Graph* ref, hhds::Graph* impl, const std::vector<std::pair<std::string, std::string>>& pairs) {
+  if (pairs.empty()) {
+    return {};
+  }
+  // Both full occurrence names (the top miter) and definition-local names
+  // (bottom-up per-module proofs) are legitimate correspondence targets.
+  auto collect = [](hhds::Graph* g) {
+    absl::flat_hash_set<std::string> names;
+    if (g == nullptr) {
+      return names;
+    }
+    for (auto n : g->occurrences().nodes()) {
+      const auto op = graph_util::type_op_of(n);
+      if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch) {
+        names.insert(canon_flop_name(n.get_hier_name()));
+        names.insert(canon_flop_name(n.get_name()));
+      }
+    }
+    return names;
+  };
+  const auto  rn = collect(ref);
+  const auto  in = collect(impl);
+  std::string error;
+  for (const auto& [r, i] : pairs) {
+    if (!rn.contains(canon_flop_name(r))) {
+      error += std::format("unresolved reference state '{}'; ", r);
+    }
+    if (!in.contains(canon_flop_name(i))) {
+      error += std::format("unresolved implementation state '{}'; ", i);
+    }
+  }
+  return error.empty() ? error : "formal.lec.match: " + error;
 }
 
 std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
@@ -2988,9 +3022,9 @@ std::vector<Packed_scalar_bridge> infer_packed_scalar_bridges(const Io_name_map<
     if (bases.size() != 1 || base_claims.at(bases.front()) != 1) {
       continue;  // ambiguous in one direction or the other
     }
-    const auto&              base = bases.front();
-    std::vector<std::string> bits = indexed.at(base);
-    const auto prefix = std::string_view(base).substr(0, base.size() - wide.size() - 1);
+    const auto&              base   = bases.front();
+    std::vector<std::string> bits   = indexed.at(base);
+    const auto               prefix = std::string_view(base).substr(0, base.size() - wide.size() - 1);
     out.push_back(Packed_scalar_bridge{wide, std::move(bits), is_synthetic_partition_prefix(prefix), {}});
   }
   // Tuple scalarization retains the aggregate name as each field's prefix.
@@ -3609,8 +3643,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
         const std::string_view na(a.data() + i, ie - i), nb(b.data() + j, je - j);
         // Compare numerically: strip leading zeros, then by length, then lexically.
-        const auto sa = na.substr(std::min(na.find_first_not_of('0'), na.size() - 1));
-        const auto sb = nb.substr(std::min(nb.find_first_not_of('0'), nb.size() - 1));
+        const auto             sa = na.substr(std::min(na.find_first_not_of('0'), na.size() - 1));
+        const auto             sb = nb.substr(std::min(nb.find_first_not_of('0'), nb.size() - 1));
         if (sa.size() != sb.size()) {
           return sa.size() < sb.size();
         }
@@ -4345,7 +4379,11 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // A memory's constant power-on contents (its `initial` pin), keyed by its cut
   // key, as a size*bits binary string (entry 0 in the low bits, `?` read as 0).
   // A `$readmem` image is a startup command, not a constant, and is skipped.
-  // `writable_only` drops a ROM, whose contents the encoder applies directly.
+  // `writable_only` keeps only the memories whose current contents the encoder
+  // takes from the SHARED persistent array (encode.cpp is_comb / is_rom): a
+  // type==2 array is rebuilt from its own init/update each cycle, and a ROM
+  // (no write port, no whole-array `update` bus) is pinned to its own init. A
+  // memory written only through `update` has n_wr == 0 but is NOT a ROM.
   auto collect_memory_inits = [&](hhds::Graph* g, bool writable_only = false) {
     Io_name_map<std::string> out;
     for (auto node : g->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
@@ -4353,8 +4391,17 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         continue;
       }
       Mem_sig sig = read_mem_sig(node);
-      if (sig.bits <= 0 || sig.size <= 0 || (writable_only && sig.n_wr <= 0)) {
+      if (sig.bits <= 0 || sig.size <= 0) {
         continue;
+      }
+      if (writable_only) {
+        auto tpin = graph_util::get_driver_of_sink_name(node, "type");
+        if (tpin.is_const() && graph_util::const_of(tpin).to_just_i64() == 2) {
+          continue;  // comb array: per-design contents every cycle
+        }
+        if (sig.n_wr <= 0 && graph_util::get_driver_of_sink_name(node, "update").is_invalid()) {
+          continue;  // ROM: per-design a_cur pinned to its own init
+        }
       }
       std::string key  = mem_cut_key(g, node);
       auto        init = graph_util::get_driver_of_sink_name(node, "initial");
@@ -4704,16 +4751,16 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     absl::flat_hash_set<std::string>  ref_power_init_keys;   // ref keys with an explicit power-on value
     size_t                            unpaired_state_n = 0;  // state cuts with no counterpart (disclosed in the verdict)
     {
-      Io_name_map<int>  fw;
-      Io_name_map<bool> fsgn;  // sign of the NARROWEST decl (the value semantics of the shared init)
-      Io_name_map<Val>  init;
-      Io_name_map<Val>  power_init[2];
+      Io_name_map<int>                 fw;
+      Io_name_map<bool>                fsgn;  // sign of the NARROWEST decl (the value semantics of the shared init)
+      Io_name_map<Val>                 init;
+      Io_name_map<Val>                 power_init[2];
       // Per-side key sets, for the bit-blast pairing below. `fw` is a UNION, so it
       // cannot tell "this key exists on both sides" from "only one side has it".
-      Io_name_map<int>  fw_side[2];
+      Io_name_map<int>                 fw_side[2];
       // key -> the hierarchical name it came from (first wins), so the
       // bus-bit bridge below can tell a cell model's state segment apart.
-      Io_name_map<std::string> fw_raw[2];
+      Io_name_map<std::string>         fw_raw[2];
       // Keys with a reset pin on either side: the reset-prologue power-on
       // policy below.
       absl::flat_hash_set<std::string> reset_state_keys;
@@ -5489,7 +5536,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
       Io_name_map<Val> dry_bbox;
       for (const auto& [bk, bv] : shared_bbox) {
-        dry_bbox[bk] = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(bv.width)), "rdry_bb:" + bk), bv.width, bv.is_signed};
+        dry_bbox[bk]
+            = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(bv.width)), "rdry_bb:" + bk), bv.width, bv.is_signed};
       }
       enc.set_shared_bbox(&dry_bbox);
       enc.set_emit_props(false);
@@ -6295,12 +6343,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // sharing at the max keeps the extra bit FREE (sound) — sharing at the min
   // would constrain it (false PROVE), truncating it in the encoder drops it
   // (false REFUTE, e.g. an input 0x80 -> 0).
-  Io_name_map<Val> shared;
+  Io_name_map<Val>         shared;
   // Per-side key/width sets, for the bit-blast pairing after add_flops runs:
   // `shared` alone cannot tell "both sides have this key" from "only one does".
-  Io_name_map<int> ind_side[2];
+  Io_name_map<int>         ind_side[2];
   Io_name_map<std::string> ind_raw[2];  // key -> hierarchical name (see fw_raw)
-  int              ind_side_ix = 0;
+  int                      ind_side_ix = 0;
   // Input bundles FIRST: one flat symbol per base; the leaves are bound to its
   // extracts, so both sides range over the SAME input space (no extra freedom,
   // no lost bits). add_inputs below keeps any name already present at an
@@ -6429,7 +6477,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // which is exactly the "inconclusive in milliseconds" post-synthesis LEC. Bind
   // the impl's bit i to bit i of the ref's one symbol.
   absl::flat_hash_map<std::string, std::vector<std::string>> ind_bitblast;  // ref key -> impl bit keys, LSB first
-  const auto ind_bus_groups = bus_bit_groups(ind_side[1], ind_side[0], ind_raw[1]);
+  const auto                                                 ind_bus_groups = bus_bit_groups(ind_side[1], ind_side[0], ind_raw[1]);
   for (const auto& [key, w] : ind_side[0]) {
     if (w < 1 || ind_side[1].count(key) != 0) {
       continue;
@@ -7622,10 +7670,10 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
         // The seeded state must BE the shared symbol, or its extension.
         const auto& ct = cur->second.term;
-        ok             = ct == sit->second.term
-             || (ct.getNumChildren() == 1 && ct[0] == sit->second.term
-                 && (ct.getKind() == cvc5::Kind::BITVECTOR_ZERO_EXTEND || ct.getKind() == cvc5::Kind::BITVECTOR_SIGN_EXTEND));
-        c.cur[s]  = cur->second;
+        ok       = ct == sit->second.term
+                   || (ct.getNumChildren() == 1 && ct[0] == sit->second.term
+                       && (ct.getKind() == cvc5::Kind::BITVECTOR_ZERO_EXTEND || ct.getKind() == cvc5::Kind::BITVECTOR_SIGN_EXTEND));
+        c.cur[s] = cur->second;
         c.next[s] = nxt->second;
       }
       if (ok) {
@@ -10027,7 +10075,8 @@ void fit_sub_port_widths(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
                      b.is_signed ? "signed" : "unsigned",
                      b.bits);
       }
-      auto [it, fresh] = fitted_of.try_emplace(std::tuple<const hhds::Graph*, hhds::Pin_class, int, bool>{b.graph, b.driver, b.bits, b.is_signed});
+      auto [it, fresh] = fitted_of.try_emplace(
+          std::tuple<const hhds::Graph*, hhds::Pin_class, int, bool>{b.graph, b.driver, b.bits, b.is_signed});
       if (fresh) {
         it->second = gu::fit_to_port(*b.graph, b.driver, b.bits, b.is_signed);
       }

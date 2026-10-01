@@ -160,7 +160,9 @@ Region_emission emit_logical_region(const partition::Region_body& rb, const synt
     if (value.is_invalid()) {
       return {};
     }
-    if (index == 0 && gu::bits_of(value) == 1) {
+    // Only an unsigned one-bit pin is already the {0,1} driver the logical
+    // writer assumes (it inverts with Xor(x, 1)); a signed one-bit true is -1.
+    if (index == 0 && gu::bits_of(value) == 1 && gu::is_unsign(value)) {
       return value;
     }
     auto [it, fresh] = slices.try_emplace({pin, index});

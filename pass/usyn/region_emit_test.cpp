@@ -404,6 +404,41 @@ TEST_F(RegionEmit, SignedCombinationalBoundaryPreservesTheOperandInterpretation)
   }
 }
 
+TEST_F(RegionEmit, SignedOneBitInputIsMaskedBeforeLogicalInversion) {
+  // A signed one-bit true is -1: the logical writer's Xor(x, 1) inversion
+  // would yield -2 unless the region input is first fitted to {0,1}.
+  rb.inputs[2].sign = true;
+  gu::set_sign(input("en"));
+  auto inv = node(Ntype_op::Not, "inv", 1);
+  connect(inv, "a", input("en"));
+  output("q", inv.get_driver_pin(0));
+  auto b = blast();
+  ASSERT_EQ(b.status, synth::Region_blast::Status::blasted);
+  auto selected = select(b);
+  ASSERT_TRUE(selected.region) << selected.reason;
+  Budget work{100000};
+  auto   result = emit_logical_region(rb, b, *selected.region, work);
+  ASSERT_EQ(result.status, Status::feasible) << result.reason;
+  ASSERT_FALSE(gu::is_unsign(body->get_input_pin("en")));
+  unsigned masked = 0;
+  for (auto neo : body->body().nodes()) {
+    for (auto sink : neo.inp_sorted_pins()) {
+      const auto driver = sink.get_driver_pin();
+      if (driver.is_invalid()) {
+        continue;
+      }
+      if (driver == body->get_input_pin("en")) {
+        EXPECT_EQ(gu::type_op_of(neo), Ntype_op::Get_mask);
+        ++masked;
+      }
+      if (gu::type_op_of(neo) == Ntype_op::Xor && !driver.is_const()) {
+        EXPECT_TRUE(gu::is_unsign(driver));
+      }
+    }
+  }
+  EXPECT_GT(masked, 0U);
+}
+
 TEST_F(RegionEmit, MissingConcreteChildIsRefusedInsteadOfBecomingOpaque) {
   auto child_io = source.create_io("concrete");
   child_io->add_input("a", 1);

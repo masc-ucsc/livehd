@@ -248,13 +248,19 @@ void Pass_usyn::work(Eprp_var& var) {
     }
   }
   fs::create_directories(fs::absolute(base).parent_path());
+  // Capture into a staging directory and swap it in only when the report is
+  // published, so a failed invocation leaves the previous report's
+  // provenance matching that report.
   const auto provenance_path = fs::path(base + ".provenance");
+  Scratch    provenance_staging;
+  provenance_staging.path = fs::path(base + ".provenance.tmp");
   {
     std::error_code ec;
-    fs::remove_all(provenance_path, ec);
+    fs::remove_all(provenance_staging.path, ec);
   }
-  const auto provenance
-      = usyn::archive_provenance(provenance_path, var.get("invocation_context", ""), std::to_string(usyn::kUsynSrcSalt));
+  const auto provenance = usyn::archive_provenance(provenance_staging.path,
+                                                   var.get("invocation_context", ""),
+                                                   std::to_string(usyn::kUsynSrcSalt));
   const auto start   = std::chrono::steady_clock::now();
   const auto elapsed = [&] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count(); };
   usyn::Resource_budget resources;
@@ -338,6 +344,29 @@ void Pass_usyn::work(Eprp_var& var) {
                                           provenance_path.filename().string(),
                                           provenance,
                                           artifact_paths);
+  {
+    // rename() cannot replace a non-empty directory: move the old capture
+    // aside (restored if the swap fails), then drop it once the new one is in.
+    std::error_code ec;
+    const auto      previous = fs::path(base + ".provenance.old");
+    fs::remove_all(previous, ec);
+    bool moved_aside = false;
+    if (fs::exists(provenance_path, ec)) {
+      fs::rename(provenance_path, previous, ec);
+      moved_aside = !ec;
+    }
+    ec.clear();
+    fs::rename(provenance_staging.path, provenance_path, ec);
+    if (ec) {
+      if (moved_aside) {
+        std::error_code restore_ec;
+        fs::rename(previous, provenance_path, restore_ec);
+      }
+      livehd::diag::err("pass.usyn", "provenance-write", "io").msg("cannot publish {}", provenance_path.string()).fatal();
+    }
+    fs::remove_all(previous, ec);
+    provenance_staging.path.clear();
+  }
   write_file(base + ".usyn.json", report);
   write_file(base, mapped ? usyn::mapping_report(*mapped, options.tmap, options.mapping.library) : report);
   {

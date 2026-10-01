@@ -100,6 +100,12 @@ Semantic_result import_semantic_region(const synth::Lnet& net, const synth::Sour
     result.reason = std::move(logic.reason);
     return result;
   }
+  // Size against the logical writer before any search: a region whose
+  // emission cannot fit max_nodes is refused here, never after its search.
+  if (logic.graph.size()
+      >= logical_search_nodes(max_nodes, logic.state.size(), source.controls.size(), logic.inputs.size(), logic.outputs.size())) {
+    return exhausted();
+  }
   Semantic_region                                          region;
   std::map<std::tuple<uint64_t, uint32_t, bool>, uint32_t> domains;
   for (uint32_t i = 0; i < state_bits.size(); ++i) {
@@ -162,11 +168,20 @@ Stateful_result synthesize_stateful_region(const synth::Lnet& net, const synth::
     result.reason = std::move(imported.reason);
     return result;
   }
-  auto& semantic = *imported.region;
-  auto  selected = synthesize_logical_region(semantic.logic, semantic.eligible, options, structural, search, semantic.domains);
-  result.status  = selected.status;
-  result.reason  = std::move(selected.reason);
-  result.report  = std::move(selected.report);
+  auto&      semantic = *imported.region;
+  // The search may grow the network (endpoint lowering, residual rebuild):
+  // cap it so every selection it can publish still fits the writer.
+  const auto cap      = logical_search_nodes(options.max_nodes,
+                                             semantic.logic.state.size(),
+                                             semantic.source.controls.size(),
+                                             semantic.logic.inputs.size(),
+                                             semantic.logic.outputs.size());
+  auto       bounded  = options;
+  bounded.max_nodes   = std::min(options.max_nodes, cap);
+  auto selected       = synthesize_logical_region(semantic.logic, semantic.eligible, bounded, structural, search, semantic.domains);
+  result.status       = selected.status;
+  result.reason       = std::move(selected.reason);
+  result.report       = std::move(selected.report);
   if (selected.region) {
     auto frozen = freeze_endpoint_netlist(*selected.region, options, structural, semantic.domains);
     if (!frozen.netlist) {

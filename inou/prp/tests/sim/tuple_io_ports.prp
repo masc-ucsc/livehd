@@ -29,7 +29,7 @@ pub mod tuple_io(clk:Clock, cmd:(op:U4, data:U16), en:Bool) -> (res:(sum:U20, se
   reg total:U20 = 0
   reg hit:U1 = 0
   if en {
-    total = total + cmd.data + cmd.op
+    wrap total = total + cmd.data + cmd.op
     hit = 1
   }
   res.sum = total

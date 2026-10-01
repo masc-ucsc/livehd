@@ -1,0 +1,25 @@
+/*
+:name: test_local_string_interp
+:type: simulation
+*/
+// docs 02-basics "Strings": a "..." string decodes its escapes and formats
+// its `{expr}` holes. A string assigned to a test local used to be pasted
+// into the driver as raw C++ text: `"v={v}"` kept its holes verbatim and
+// `\u{41}` was not decoded. The driver now formats it through the same hole
+// scanner `puts` uses, at the point of the assignment.
+
+mod str_dut(a:U8) -> (q:U8@[0]) { q = a }
+
+test str_dut.interp {
+  mut d = str_dut
+  const v = 5
+  d.a = 2
+  step
+  const s = "v={v} q={d.q:x}"
+  puts("s={s}")
+  assert(s == "v=5 q=2")
+  const e = "x\u{41}y{{ 100%"
+  assert(e == "xAy{{ 100%")
+  const r = 'raw\n'
+  assert(r != "raw\n")
+}

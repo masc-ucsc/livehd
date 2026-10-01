@@ -14,11 +14,11 @@
 #include <span>
 #include <unordered_map>
 
-#include "hlop/memory_init.hpp"
 #include "battr.hpp"  // is_builtin_attr_name (reject `x.bits` for `x.[bits]`)
 #include "cell.hpp"
 #include "decl_facts.hpp"  // lookup() recovers the reinterpret input's declared width
 #include "diag.hpp"
+#include "hlop/memory_init.hpp"
 #include "lnast_ntype.hpp"
 #include "mask_eval.hpp"
 #include "range_bits.hpp"  // classify_typecast + max/min_from_bits for uN()/sN() casts
@@ -983,8 +983,9 @@ void uPass_constprop::process_assign() {
             // positional init value needs those names to bind like a call
             // argument, so name the slots when the init carries positions.
             std::map<std::string, std::string> slot_names;
-            const auto rhs_tops           = rhs_bundle->top_levels();
-            const bool init_has_positions = std::any_of(rhs_tops.begin(), rhs_tops.end(), [](const auto& tl) { return tl.pos >= 0; });
+            const auto                         rhs_tops = rhs_bundle->top_levels();
+            const bool                         init_has_positions
+                = std::any_of(rhs_tops.begin(), rhs_tops.end(), [](const auto& tl) { return tl.pos >= 0; });
             if (init_has_positions) {
               if (const auto it = st().tuple_slot_src.find(nt); it != st().tuple_slot_src.end()) {
                 slot_names = it->second;
@@ -1030,7 +1031,7 @@ void uPass_constprop::process_assign() {
             // a bare variable spelling a field, the lone field, or a value whose
             // type is unique among ALL the fields -- anything else must be named.
             std::vector<std::pair<std::size_t, Bundle::Entry>> positional;  // (position, value)
-            absl::flat_hash_set<std::string>                          bound;       // fields already bound by name
+            absl::flat_hash_set<std::string>                   bound;       // fields already bound by name
             for (const auto& [rk, rep] : rhs_bundle->non_attr_entries()) {
               bool numeric = !rk.empty();
               for (char ch : rk) {
@@ -1060,10 +1061,10 @@ void uPass_constprop::process_assign() {
               std::sort(positional.begin(), positional.end(), [](const auto& l, const auto& r) { return l.first < r.first; });
               const auto field_kind = [&](const std::string& f) { return merged->get_entry(bundle_path::of_string(f)).kind; };
               // An UNTYPED field could take any value, so no value is type-unique.
-              const bool untyped = std::any_of(base_named.begin(), base_named.end(), [&](const std::string& f) {
+              const bool untyped    = std::any_of(base_named.begin(), base_named.end(), [&](const std::string& f) {
                 return field_kind(f) == upass::Kind::unknown;
               });
-              const auto src_of = [&](std::size_t pos) -> std::string {
+              const auto src_of     = [&](std::size_t pos) -> std::string {
                 const auto it = st().tuple_slot_src.find(std::string(current_text()));
                 if (it == st().tuple_slot_src.end()) {
                   return {};
@@ -2532,14 +2533,34 @@ upass::Vote uPass_constprop::process_tuple_add(std::string_view dst_name, Bundle
   // the bundle slot so downstream method dispatch (x.method(...) where
   // method is a tuple field) can look it up via tuple_get + fcall.
   auto try_store_fn_name = [&](std::string_view key, std::string_view ref_text) -> bool {
-    // A field may refer to an enclosing/file-scope function, not just one
-    // declared inside this module. Use the same lexical lookup as a call.
-    const auto fn = upass::call_resolver::lookup_callee(function_registry, ref_text, lm->get_top_module_name());
-    if (!fn) {
+    // A bound VALUE is never a function name, whatever its spelling: a port
+    // (`comb m(sel:U8)` beside some `comb sel`), a declared variable or comptime
+    // const, an SSA version or a tmp (a function-name ref is never renamed).
+    const auto raw = lm->current_raw_text();
+    if (Lnast::is_tmp(raw) || raw.find("___ssa_") != std::string_view::npos || st().has_known(ref_text)
+        || lm->get_lnast()->io_meta().find(raw) != nullptr || st().tuple_slot_ref.contains(std::string(ref_text))) {
       return false;
     }
-    bundle->set(bundle_path::of_string(key), *Dlop::from_string(fn->get_top_module_name()));
-    return true;
+    // A field may refer to an enclosing/file-scope function, not just one
+    // declared inside this module: walk `<scope>.<name>` up the caller's
+    // LEXICAL prefix chain only. No global unique-suffix or bare file-unit
+    // match — a value-position name must be in scope to mean a function.
+    const std::string_view name = raw;
+    std::string            scoped;
+    for (std::string_view unit = lm->get_top_module_name();;) {
+      scoped.assign(unit);
+      scoped.push_back('.');
+      scoped.append(name);
+      if (auto it = function_registry.find(scoped); it != function_registry.end() && it->second && !it->second->io_meta().empty()) {
+        bundle->set(bundle_path::of_string(key), *Dlop::from_string(it->second->get_top_module_name()));
+        return true;
+      }
+      const auto dot = unit.rfind('.');
+      if (dot == std::string_view::npos) {
+        return false;
+      }
+      unit = unit.substr(0, dot);
+    }
   };
 
   int unnamed_pos = 0;  // advances only on unnamed entries
@@ -3815,7 +3836,7 @@ bool uPass_constprop::check_gate_call_binding(std::string_view fname, const std:
       || nop == Ntype_op::AttrSet) {
     return false;
   }
-  const auto pins = Ntype::sink_names(nop);
+  const auto  pins = Ntype::sink_names(nop);
   std::string list;
   for (const auto& pin : pins) {
     list += list.empty() ? pin : ", " + pin;
@@ -4281,8 +4302,18 @@ void uPass_constprop::process_func_call() {
   auto actuals = collect_call_actuals();
 
   if (fname == "__readmemh" || fname == "__readmemb") {
-    if (!actuals || actuals->size() != 2 || (*actuals)[0].is_named || (*actuals)[0].is_bundle || !(*actuals)[0].value.is_string()
-        || !(*actuals)[1].value.is_string() || (*actuals)[0].value.to_string().empty()) {
+    // The 2nd actual is the front end's `@readmem…` source-dir descriptor
+    // (prp2lnast appends it to `std.readmemh(...)`). `__readmemh` is reachable
+    // from source as a bare cell call, so a missing/bogus descriptor is a user
+    // error, not an internal invariant: decode it up front and fold only on
+    // a valid one.
+    std::optional<hlop::Memory_image> source;
+    if (actuals && actuals->size() == 2 && !(*actuals)[1].is_named && !(*actuals)[1].is_bundle
+        && (*actuals)[1].value.is_string()) {
+      source = hlop::memory_image((*actuals)[1].value.to_string());
+    }
+    if (!source || (*actuals)[0].is_named || (*actuals)[0].is_bundle || !(*actuals)[0].value.is_string()
+        || (*actuals)[0].value.to_string().empty()) {
       livehd::diag::sink().emit(livehd::diag::Diagnostic{
           .severity = livehd::diag::Severity::error,
           .code     = "readmem-filename",
@@ -4295,8 +4326,6 @@ void uPass_constprop::process_func_call() {
     } else {
       auto path = std::filesystem::path((*actuals)[0].value.to_string());
       if (path.is_relative()) {
-        const auto source = hlop::memory_image((*actuals)[1].value.to_string());
-        I(source.has_value());
         path = std::filesystem::path(source->path) / path;
       }
       path = std::filesystem::absolute(path).lexically_normal();
@@ -4359,9 +4388,9 @@ void uPass_constprop::process_func_call() {
       move_to_parent();
       return;
     }
-    const auto  arg = (*actuals)[0];
-    const auto  src = arg.var_name.empty() ? nullptr : st().get_bundle(arg.var_name);
-    const bool  src_is_range = src && !src->get_attr("rng_s").is_invalid();
+    const auto arg          = (*actuals)[0];
+    const auto src          = arg.var_name.empty() ? nullptr : st().get_bundle(arg.var_name);
+    const bool src_is_range = src && !src->get_attr("rng_s").is_invalid();
     if (fname == "tuple") {
       if (src_is_range) {
         auto nb = std::make_shared<Bundle>(dst);
@@ -4408,7 +4437,11 @@ void uPass_constprop::process_func_call() {
           cast_error(std::format("`range({})`: the set bits do not form a range", v.to_pyrope()),
                      "a one-hot integer is a range only when its set bits are evenly spaced");
         } else {
-          st().set(dst, make_range_bundle(dst, *Dlop::create_integer(bits.front()), *Dlop::create_integer(bits.back()), *Dlop::create_integer(step)));
+          st().set(dst,
+                   make_range_bundle(dst,
+                                     *Dlop::create_integer(bits.front()),
+                                     *Dlop::create_integer(bits.back()),
+                                     *Dlop::create_integer(step)));
         }
       }
     }
@@ -4571,7 +4604,7 @@ void uPass_constprop::process_func_call() {
             .pass     = "upass.constprop",
             .message  = std::format("`{}(\"{}\")`: the string is not a boolean spelling", fname, text),
             .span     = lm->current_span(),
-            .hint     = "a string casts to Bool only as \"0\", \"1\", \"-1\", \"true\", \"TRUE\", \"t\", \"false\", \"FALSE\" or \"f\"",
+            .hint = "a string casts to Bool only as \"0\", \"1\", \"-1\", \"true\", \"TRUE\", \"t\", \"false\", \"FALSE\" or \"f\"",
         });
         return;
       }
@@ -5392,7 +5425,11 @@ void uPass_constprop::process_tuple_set() {
   for (std::size_t i = 0; i + 1 < path_and_val.size(); ++i) {
     std::string elem = path_and_val[i].text;
     if (path_and_val[i].is_ref) {
-      if (st().has_trivial(elem)) {
+      // Only a FULLY known selector names one field. An unknown-carrying
+      // binding (`%t = i + 0`, the runner's `idx - lo` index-range rebase)
+      // is a runtime selector: its to_field() would name one arbitrary lane
+      // and leave every other lane's stale constant behind.
+      if (st().is_known_const(elem)) {
         // to_field() unwraps a string trivial to its content (no quotes) and
         // renders an int trivial as its decimal text — exactly the field-name
         // shape we want for `tuple[ref] = …`.
@@ -6101,7 +6138,7 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
   // A declared vector initialized with nil can be built by partial writes.
   // Start with unknown bits, never zero-fill unwritten lanes. Once all lanes
   // are written the value becomes a concrete constant for subsequent casserts.
-  const auto base_type = upass::decl_facts::lookup(st(), lm->get_lnast().get(), src[0].name);
+  const auto base_type = upass::decl_facts::lookup_operand(st(), lm->get_lnast().get(), src[0].name);
   if (input_val.is_nil() && base_type && base_type->bits > 0
       && base_type->bits <= static_cast<uint32_t>(std::numeric_limits<int>::max())) {
     input_val = *Dlop::unknown_positive(static_cast<int>(base_type->bits));
@@ -6170,8 +6207,15 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
   }
 
   Dlop result = livehd::eval_set_mask(input_val, final_mask, new_val);
-  if (base_type && base_type->kind == upass::decl_facts::Num::signed_int && base_type->bits > 0) {
-    result = upass::bitwidth::wrap_to_signed(result, base_type->bits);
+  if (base_type && base_type->bits > 0) {
+    if (base_type->kind == upass::decl_facts::Num::signed_int) {
+      result = upass::bitwidth::wrap_to_signed(result, base_type->bits);
+    } else if (base_type->kind == upass::decl_facts::Num::unsigned_int) {
+      // Partial writes to a typed unsigned scalar (including an array
+      // element read through a temporary) have no unknown sign extension.
+      // Keep unwritten in-range bits unknown, but stop at its declared width.
+      result = *result.and_op(*Dlop::get_mask_value(base_type->bits));
+    }
   }
   if (!scatter_positional_array(var, result)) {
     store_trivial(var, result);

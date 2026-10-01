@@ -149,9 +149,19 @@ static int max_parser_depth(std::string_view src, size_t& deepest_byte) {
         break;
       case dq_string:
         if (c == '\\') {
-          ++i;  // skip the escaped byte
+          if (i + 2 < src.size() && src[i + 1] == 'u' && src[i + 2] == '{') {
+            size_t k = i + 3;  // `\u{N}` carries its own braces (no hole)
+            while (k < src.size() && src[k] != '}' && src[k] != '"') {
+              ++k;
+            }
+            i = (k < src.size() && src[k] == '}') ? k : k - 1;
+          } else {
+            ++i;  // skip the escaped byte
+          }
         } else if (c == '"') {
           st = code;
+        } else if (c == '{' && i + 1 < src.size() && src[i + 1] == '{') {
+          ++i;  // `{{` is a literal brace, not a hole (istring_pieces agrees)
         } else if (c == '{') {
           holes.push_back(0);  // a hole: code until its matching `}`
           ++bracket;           // the hole is sub-parsed as an expression
@@ -4757,8 +4767,10 @@ void Prp2lnast::process_tick_statement(TSNode n) {
 
   auto body_idx = lnast->add_child(tick_idx, Lnast_ntype::create_stmts());
   builder.push_stmts(body_idx);
-  tick_body_idx_     = body_idx;
-  tick_direct_steps_ = 0;
+  tick_extra_steps_.clear();
+  if (!ts_node_is_null(code)) {
+    (void)tick_path_steps(code, 0);
+  }
 
   // THE LOOP VARIABLE. A tick body implicitly binds the 0-based cycle index —
   // `clock` by default, renamable through the `clocks=(name=ratio)` clause — and
@@ -4795,6 +4807,7 @@ void Prp2lnast::process_tick_statement(TSNode n) {
   // parameter". Nothing in the source declares this name, so the generic
   // "rename the inner/loop variable" hint points at a line that is not there.
   tick_loop_var_decls_.insert(decl_idx);
+  (void)note_binding(loop_var, Bind_kind::runtime);  // differs every iteration: never comptime
   auto seed_idx = builder.add_child(Lnast_ntype::create_store());
   attach_loc(seed_idx, n);
   lnast->add_child(seed_idx, Lnast_node::create_ref(loop_var));
@@ -4835,6 +4848,39 @@ std::string Prp2lnast::tick_loop_var_name(TSNode tick) {
   return "clock";
 }
 
+// The most `step`s on any path through `n`, entered with `before` already
+// taken on this path: a statement sequence adds up, an `if`/`match` takes its
+// largest arm (arms are alternatives), and a nested function body is its own
+// world. Every step that makes a path's count exceed one is recorded in
+// tick_extra_steps_ (the tick-two-steps diagnostic).
+uint32_t Prp2lnast::tick_path_steps(TSNode n, uint32_t before) {
+  if (ts_node_is_null(n)) {
+    return before;
+  }
+  std::string_view t(ts_node_type(n));
+  if (t == "step_statement") {
+    if (before >= 1) {
+      tick_extra_steps_.insert(ts_node_start_byte(n));
+    }
+    return before + 1;
+  }
+  if (t == "lambda" || t == "tick_statement") {
+    return before;  // a comb's body / a (rejected) nested tick
+  }
+  if (t == "if_expression" || t == "match_expression") {
+    uint32_t most = before;
+    for (TSNode c : ts_node_named_children(n)) {
+      most = std::max(most, tick_path_steps(c, before));  // each arm starts from `before`
+    }
+    return most;
+  }
+  uint32_t cur = before;
+  for (TSNode c : ts_node_named_children(n)) {
+    cur = tick_path_steps(c, cur);
+  }
+  return cur;
+}
+
 // `step [N]` — advance N simulation cycles (default 1). A leaf whose only child
 // is the count, so `step`, `step 5` and `step(1000)` all lower alike.
 void Prp2lnast::process_step_statement(TSNode n) {
@@ -4850,7 +4896,7 @@ void Prp2lnast::process_step_statement(TSNode n) {
     return;
   }
 
-  if (in_tick_statement_ && builder.idx_stmts == tick_body_idx_ && ++tick_direct_steps_ > 1) {
+  if (in_tick_statement_ && tick_extra_steps_.contains(ts_node_start_byte(n))) {
     report_error(n,
                  "tick-two-steps",
                  "syntax",
@@ -8323,6 +8369,13 @@ void Prp2lnast::process_test_statement(TSNode n) {
           check_capture_shadow(pname, id);
           check_signature_shadow(pname, id, "test parameter");
           inflight_name_scopes_.back().emplace_back(get_text(id));
+          // A runtime value of the test frame, like a comb input: a nested
+          // comb that reads a const derived from it is a runtime capture.
+          auto& pb = note_binding(pname, Bind_kind::runtime);
+          if (TSNode pt = child_by_field(pending_typed, "type"); !ts_node_is_null(pt)) {
+            pb.typed = true;
+            pb.range = folded_int_type_range(child_by_field(pt, "type"));
+          }
         }
       }
       pending_typed = TSNode{};

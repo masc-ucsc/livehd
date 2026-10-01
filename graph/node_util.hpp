@@ -279,6 +279,11 @@ inline constexpr uint32_t kFormalAssertAlways = 4;
 // pass/lec must NOT seed a hypothesis from it when the child is compared on its
 // own (see pass/lec/encode.cpp).
 inline constexpr uint32_t kFormalAssumeHier   = 5;
+// An assume ACCEPTED without proof: `assume_nocheck`, or any assume under
+// formal.assume_check=false. Still an active hypothesis (pass/lec/encode.cpp),
+// but `lhd lec` discloses it as UNCHECKED, not proven -- the stamp, not the lec
+// run's own flag, records which (an `lg:` side keeps its compile-time stamp).
+inline constexpr uint32_t kFormalAssumeUnchecked = 6;
 
 // ---------------------------------------------------------------------------
 // Constant pins (HHDS Graph::CONST_NODE singleton + constant pool).

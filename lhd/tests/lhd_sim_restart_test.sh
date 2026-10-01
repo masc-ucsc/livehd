@@ -24,6 +24,10 @@ fail() {
 
 # `total` accumulates across cycles -> only a restored testbench frame reproduces
 # its final value after a restart. A FINAL line reports it for comparison.
+# RESTART_CLKB=1 adds a secondary clock `clkb` the testbench drives as a Bool
+# waveform (the __clkprev_clkb restore check). The Pyrope `Clock` type rejects
+# that until the sim-multiclock lane lands, so that leg is its own fixme target.
+if [ "${RESTART_CLKB:-0}" = 1 ]; then
 cat > "$W/cr.prp" <<'EOF'
 /*
 :name: cr
@@ -59,6 +63,38 @@ test cnt.run {
   assert(bv == 8)
 }
 EOF
+else
+cat > "$W/cr.prp" <<'EOF'
+/*
+:name: cr
+:type: simulation
+*/
+mod cnt(ck:Clock, enable:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
+  value = count
+  if enable { wrap count += 1 }
+}
+test cnt.run {
+  mut acc   = cnt
+  mut v     = 0
+  mut total = 0
+  // Two edges before the tick: the auto-wired Clock `acc.ck` counts every
+  // step, so a restart must restore its count from the checkpoint, not
+  // re-derive it from the tick cycle (FINAL clk 22, not 20).
+  step 2
+  tick 20 {
+    acc.enable = true
+    acc.reset  = clock < 2
+    step
+    v = acc.value
+    total = total + v
+    puts("cyc {clock} v {v}")
+  }
+  puts("FINAL total {total} clk {acc.ck}")
+  assert(v == 18)
+}
+EOF
+fi
 
 # ---- structural: the driver carries the restart prologue + the VCD window -------
 "$LHD" sim "$W/cr.prp" --setup-only --workdir "$W/s" -q >/dev/null 2>&1 || fail "setup-only failed"
@@ -95,6 +131,11 @@ grep -q 'cyc 11 ' "$W/r13.out" && fail "restart RE-RAN cycle 11 (resumed too ear
 R13="$(final_total "$W/r13.out")"
 [ "$R13" = "$FULL" ] || fail "restart FINAL total $R13 != full $FULL (testbench frame not restored -> NOT bit-exact)"
 grep -q 'PASS cnt.run' "$W/r13.out" || fail "restart run did not pass"
+if [ "${RESTART_CLKB:-0}" != 1 ]; then
+  grep -q 'FINAL total [0-9]* clk 22' "$W/full.out" || fail "full run Clock count is not 22: $(grep FINAL "$W/full.out")"
+  grep -q 'FINAL total [0-9]* clk 22' "$W/r13.out" \
+    || fail "restart lost the pre-tick Clock edges (__edges_ not in tb.json): $(grep FINAL "$W/r13.out")"
+fi
 
 # a target before the first checkpoint replays from 0 (still correct)
 "$LHD" sim "$W/cr.prp" --run-only --restart-cycle 1 --workdir "$W/run" --diag-fmt pretty > "$W/r1.out" 2>&1 \

@@ -1,0 +1,22 @@
+/*
+:name: rolled_nested_break_carry_range
+:type: error
+:error: .y. \(range \[.*\]\) may not fit its declared range \[0, 255\]
+*/
+
+// The ROLLED outer loop judges its carry `y` from one abstract walk of the body
+// (Loop_range_eval). A `break` inside the NESTED comptime `for` pushed its env
+// onto the run-wide exit list, joined only after the WHOLE outer body, so
+// `y = y + x` saw only the fall-through `x = 0`: the carry-in range was [0, 0]
+// and the overflow went unreported. With c#[0] set, x stays 100 and y reaches
+// 300. The same design written without the break (`if c#[j] { x = 0 }`)
+// already errored.
+pub mod rolled_nested_break_carry_range(c:U4) -> (o:U8@[0]) {
+  mut y:U8 = 0
+  for i in 0..<3 {
+    mut x:U8 = 100
+    for j in 0..<4 { if c#[j] { break }; x = 0 }
+    y = y + x
+  }
+  o = y
+}

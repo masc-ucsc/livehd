@@ -466,6 +466,7 @@ protected:
   // `clocks=(name=ratio)` lvalue if present, else `clock`. Must agree with
   // prp_sim.cpp's tick_one_entry.
   std::string                           tick_loop_var_name(TSNode tick);
+  uint32_t                              tick_path_steps(TSNode n, uint32_t before);
   // An always-true RECOMPUTED ref (`1 == 1`) for `loop`/`while true` conditions
   // (a literal `const 'true'` cond makes the runner skip the in-loop body fold,
   // so the break-guard never resolves). `lower_infinite_loop` builds the shared
@@ -1106,11 +1107,12 @@ protected:
   // implicit `clock` loop variable, a name their source never declares.
   bool in_tick_statement_ = false;
 
-  // docs 05b: exactly one `step` per tick iteration. The tick body's stmts node
-  // and the number of `step`s written directly in it (steps in an `if` arm are
-  // alternatives, not an extra edge, so only the body's own level is counted).
-  Lnast_nid tick_body_idx_;
-  uint32_t  tick_direct_steps_ = 0;
+  // docs 05b: exactly one `step` per tick iteration. Before a tick body lowers,
+  // a walk counts the `step`s on every PATH through it (an `if`/`match` arm is
+  // an alternative: the body's count is its largest arm, so `step; if c {step}`
+  // is two on one path); the start byte of each step that is a path's second
+  // or later lands here, and process_step_statement reports it.
+  absl::flat_hash_set<uint32_t> tick_extra_steps_;
 
   struct Conditional_scope {
     uint32_t* d;

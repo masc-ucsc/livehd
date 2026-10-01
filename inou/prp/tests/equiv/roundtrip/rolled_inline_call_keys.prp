@@ -1,0 +1,22 @@
+/*
+:name: rolled_inline_call_keys
+:type: compile
+*/
+// A rolled loop inside an INLINED comb is kept in the caller's namespace
+// (`accum`'s `a`/`b` -> `inl1_a`/`inl1_b`). The rename also hit the named
+// argument KEYS, so the writer emitted `add2(inl1_a = inl1_a, ...)` and the
+// re-read failed with `unknown argument inl1_a`; once the keys were right, the
+// re-read top's first inline was tagged `inl1_` too and bound
+// `inl1_a = inl1_a` (`irrelevant assignment`). See
+// ../rolled_inline_call_keys.prp for the two-level form.
+comb add2(a:U8, b:U8) -> (r:U8) { wrap r = a + b }
+
+comb accum(a:U8, c:U8) -> (o:U8) {
+  mut b:U8 = c
+  for i in 0..<4 { b = add2(a=a, b=b) }
+  o = b
+}
+
+pub mod rolled_inline_call_keys(a:U8, c:U8) -> (o:U8@[0]) {
+  o = accum(a=a, c=c)
+}

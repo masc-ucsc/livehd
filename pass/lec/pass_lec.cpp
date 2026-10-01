@@ -351,6 +351,10 @@ void Pass_lec::lec(Eprp_var& var) {
   auto impl = var.graphs[1];
   auto mod  = std::string{impl->get_name()};
 
+  if (auto error = lec::match_names_error(ref.get(), impl.get(), o.match); !error.empty()) {
+    livehd::diag::err("pass.lec", "unresolved-match", "usage").msg("{}", error).fatal();
+    return;
+  }
   auto r = lec::prove_equal(ref.get(), impl.get(), o);
   // int_blast=auto second leg: a solver-give-up Unknown earns one int-blasted
   // re-solve at the min_timeout floor (driver-level, so the recursion inside

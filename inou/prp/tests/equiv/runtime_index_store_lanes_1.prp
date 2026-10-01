@@ -1,0 +1,16 @@
+/*
+:name: runtime_index_store_lanes_1
+*/
+// An INDEX-RANGE array (`[100..<132]`, lo != 0): the runner rebases the
+// runtime index to `%aidx = idx - 100` and stores through that temp.
+// process_tuple_set took any ref with a trivial binding as a FIELD NAME, and
+// the temp's unknown-carrying value named lane 0, so the store invalidated
+// only lanes 0/1 and `m[102]` (r) folded to the initializer 0 -- REFUTED at
+// i=2, a=0.
+pub mod runtime_index_store_lanes(a:U8, i:U5) -> (p:U8@[0], q:U8@[0], r:U8@[0]) {
+  mut m:[100..<132]U8 = 0
+  m[100 + i] = a ^ 3
+  p = m[100]
+  q = m[101]
+  r = m[102]
+}

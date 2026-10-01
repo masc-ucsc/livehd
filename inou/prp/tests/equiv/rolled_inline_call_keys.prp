@@ -1,0 +1,30 @@
+/*
+:name: rolled_inline_call_keys
+:type: equiv
+:verilog_top: rolled_inline_call_keys
+:pyrope_top: rolled_inline_call_keys
+*/
+
+// A ROLLED loop inside an inlined comb keeps its source body in the caller's
+// namespace (`accum`'s `a`/`b` become `inl1_a`/`inl1_b`). Two defects:
+//  * the rename also rewrote the named-argument KEYS (`add2(inl1_a = inl1_a)`),
+//    so the kept body named arguments add2 does not have -- the two-level
+//    `mid -> accum` replay failed with `unknown argument inl1_a`, and the
+//    writer emitted that call (prp-p2p re-reads the emitted Pyrope);
+//  * the lifted loop body's ports are then named `inl1_a`, and the first
+//    inline in that unit was tagged `inl1_` too, binding `inl1_a = inl1_a`
+//    (`irrelevant assignment`). Inline tags now skip prefixes the unit spells.
+comb add2(a:U8, b:U8) -> (r:U8) { wrap r = a + b }
+
+comb accum(a:U8, c:U8) -> (o:U8) {
+  mut b:U8 = c
+  for i in 0..<4 { b = add2(a=a, b=b) }
+  o = b
+}
+
+comb mid(a:U8, c:U8) -> (o:U8) { o = accum(a=a, c=c) }
+
+pub mod rolled_inline_call_keys(a:U8, c:U8) -> (o:U8@[0], p:U8@[0]) {
+  o = mid(a=a, c=c)    // two-level inline of the rolled loop
+  p = accum(a=c, c=a)  // single-level, argument roles swapped
+}

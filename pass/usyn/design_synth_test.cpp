@@ -686,6 +686,31 @@ TEST_F(DesignSynth, RefusalDoesNotPublishPartialDesignOrChangeSource) {
   ASSERT_TRUE(result.design) << result.reason;
   check_function(*result.design, false);
 }
+// The logical writer reserves about twice the exported Lnet. Every node limit
+// between the source size and that reservation must refuse at admission,
+// before the region search, never at emission after a complete search.
+TEST_F(DesignSynth, NodeLimitRefusesBeforeTheSearchNeverAtEmission) {
+  hhds::GraphLibrary library;
+  const auto         design  = build_lanes(library, 4, false, "lane0");
+  bool               refused = false, published = false;
+  // lane0's blast admits from ~48 nodes; its emission fits from ~104.
+  for (uint32_t limit = 44; limit <= 112; limit += 4) {
+    Design_options options;
+    options.logical.max_nodes = limit;
+    Budget work{100000000};
+    auto   result = synthesize_cmos_design(design, options, work);
+    if (result.design) {
+      published = true;
+      continue;
+    }
+    refused = true;
+    EXPECT_EQ(result.status, Status::search_exhausted) << limit << ": " << result.reason;
+    EXPECT_EQ(result.reason.find("emission"), std::string::npos) << limit << ": " << result.reason;
+  }
+  EXPECT_TRUE(refused);
+  EXPECT_TRUE(published);
+}
+
 TEST_F(DesignSynth, EarlierRegionStillHitsAfterALaterSizeEditAndWarmEqualsCold) {
   Budget cold_work{100000000};
   auto   cold = cached_run(top, cache_dir + "/shared", cold_work);

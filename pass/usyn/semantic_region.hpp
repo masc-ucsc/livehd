@@ -26,6 +26,23 @@ struct Semantic_result {
   std::string                    reason;
 };
 
+// write_logical_module's worst-case node reservation for an exported Lnet:
+// one gate plus one memoized inverse per Lnet id, one Flop per latch, one
+// Concat per control, plus IO. Every logical stage sizes against it, so a
+// region the search admits is never refused only after its complete search.
+constexpr uint64_t logical_emission_nodes(uint64_t net_size, uint64_t latches, uint64_t controls, uint64_t inputs,
+                                          uint64_t outputs) {
+  return 2 * net_size + latches + controls + inputs + outputs + 4;
+}
+// Largest XAG (search graph) whose exported Lnet still fits that reservation
+// under max_nodes: export maps each live XAG node to one Lnet id and adds at
+// most one inverter per latch D/output plus a constant. Zero = nothing fits.
+constexpr uint32_t logical_search_nodes(uint32_t max_nodes, uint64_t latches, uint64_t controls, uint64_t inputs,
+                                        uint64_t outputs) {
+  const auto fixed = logical_emission_nodes(latches + outputs + 2, latches, controls, inputs, outputs);
+  return fixed >= max_nodes ? 0 : static_cast<uint32_t>((max_nodes - fixed) / 2);
+}
+
 // Import a RAW Lnet with its matching source snapshot. Normalize backend D
 // polarity, preserve bit/stage names, and classify from semantics, not names.
 // Colliding names retain their spelling plus source node/stage/bit identity;

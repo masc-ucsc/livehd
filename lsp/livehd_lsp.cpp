@@ -1424,8 +1424,12 @@ void handle_hover(const rapidjson::Document& req) {
         if (io_hit->has_range) {
           render += "(bw_min=" + std::to_string(io_hit->range_min) + ", bw_max=" + std::to_string(io_hit->range_max) + ")";
         }
+      } else if (io_hit->kind == Io_kind::integer) {
+        // width-less integer (`a:Unsigned`, or a generic `unsigned(bits=N)`
+        // whose bound is deferred): the declared sign is still known
+        render += io_hit->is_signed ? "Signed" : "Unsigned";
       } else {
-        render += "Signed";
+        render = tok.name;  // untyped param: no declared type to show
       }
       rsl = tok.line0;
       rsc = tok.scol0;

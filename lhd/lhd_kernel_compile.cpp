@@ -8,6 +8,7 @@
 #include <exception>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -26,6 +27,7 @@
 #include "lhd_prp_import.hpp"
 #include "lnast.hpp"
 #include "lnast_ntype.hpp"
+#include "node_util.hpp"
 #include "pass.hpp"
 #include "perf_tracing.hpp"
 #include "prp2lnast.hpp"
@@ -2056,8 +2058,62 @@ static Lg_absorbed absorb_lg_inputs(Result& res, const std::string& lib_path, co
     lib.load_merge(d);
     absorbed.dirs.push_back(d);
     note_bodies(&d);
+    // The input's own module list, whether the working library already held
+    // the body (origins leaves those out) or not: "graph_io <gid> <name>".
+    std::ifstream ifs(fs::path(d) / "library.txt");
+    std::string   line;
+    while (std::getline(ifs, line)) {
+      if (line.starts_with("graph_io ")) {
+        std::istringstream ss(line.substr(9));
+        uint64_t           gid = 0;
+        std::string        name;
+        if (ss >> gid >> name) {
+          absorbed.modules.push_back(std::move(name));
+        }
+      }
+    }
   }
   return absorbed;
+}
+
+// Put the design's own graphs on `var`: what this compile lowered or restored
+// (already there), the modules its lg: inputs declare, and everything those
+// instantiate in the working library. NOT the whole library: a shared emit dir
+// also holds what other designs saved into it, and loading all of it made this
+// design emit those modules and its ownership record (lg_owners_save) claim
+// another design's top as its own root, which the prune then never deleted.
+static void load_design_closure_into_var(const std::string& lib_path, Eprp_var& var, const Lg_absorbed& absorbed) {
+  auto&                    lib = livehd::Hhds_graph_library::instance(lib_path);
+  std::set<std::string>    seen;
+  std::vector<std::string> work;
+  for (const auto& g : var.graphs) {
+    if (g && seen.emplace(g->get_name()).second) {
+      work.emplace_back(g->get_name());
+    }
+  }
+  for (const auto& module : absorbed.modules) {
+    if (seen.insert(module).second) {
+      work.push_back(module);
+    }
+  }
+  while (!work.empty()) {
+    const auto name = std::move(work.back());
+    work.pop_back();
+    auto io = lib.find_io(name);
+    if (!io || !io->has_graph()) {  // a bodyless declaration: nothing to emit or walk
+      continue;
+    }
+    auto g = io->get_graph();
+    var.add(g);  // dedups by shared_ptr against what tolg created
+    for (const auto node : g->body().nodes()) {
+      if (livehd::graph_util::type_op_of(node) != Ntype_op::Sub) {
+        continue;
+      }
+      if (auto child = node.get_subnode_io(); child && seen.emplace(child->get_name()).second) {
+        work.emplace_back(child->get_name());
+      }
+    }
+  }
 }
 
 // Linker: merge lg: libraries + lower the ln: source units that reference them
@@ -2088,7 +2144,7 @@ void compile_link_ir(Options& opts, Result& res, const Ir_inputs& ir) {
   // part of the linked design, so every emit sees them (the lg: emit already did
   // — it IS the library — but `--emit verilog:` would have dropped the black-box
   // bodies). Eprp_var::add dedups by shared_ptr against what tolg just created.
-  load_lg_into_var(lib_path, var);
+  load_design_closure_into_var(lib_path, var, absorbed);
   graph_pipeline_and_emits(opts, res, var, lib_path);
 }
 
@@ -2171,8 +2227,9 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
     // after the lowering keeps tolg's freshly created graphs first, and
     // Eprp_var::add dedups by shared_ptr — the library hands back the same
     // handle tolg created, so a name defined on both sides is added once.
+    // Only the design's own closure: the emit dir may hold other designs too.
     if (!ir.lg_dirs.empty()) {
-      load_lg_into_var(lib_path, var);
+      load_design_closure_into_var(lib_path, var, absorbed);
     }
     if (need_graphs) {
       // F6: an lg: destination is the live closure, not an accumulating bag of

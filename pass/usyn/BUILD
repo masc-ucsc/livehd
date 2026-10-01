@@ -3,6 +3,20 @@ load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//tools:copt_default.bzl", "COPTS")
 
+# Sources outside the native pass.usyn closure: the legacy per-region flow
+# (no longer reached from pass.usyn) and the LUT cover kept for
+# //pass/domino:usyn_ab. Editing them must not change kUsynSrcSalt.
+LEGACY_SRCS = [
+    "evidence.cpp",
+    "evidence.hpp",
+    "lut_cover.cpp",
+    "lut_cover.hpp",
+    "metrics.cpp",
+    "metrics.hpp",
+    "usyn_region.cpp",
+    "usyn_region.hpp",
+]
+
 # `usyn_salt.hpp` is excluded from the glob because it is this package's own
 # generated OUTPUT; globbing a generated header back in as a source is a cycle.
 filegroup(
@@ -17,7 +31,7 @@ filegroup(
             "*_test.cpp",
             "*_smoke.cpp",
             "measure_synth.cpp",
-        ],
+        ] + LEGACY_SRCS,
     ),
     visibility = ["//visibility:public"],
 )
@@ -317,11 +331,11 @@ cc_library(
             "unate.cpp",
             "xag.cpp",
             "xag_lnet.cpp",
-        ],
+        ] + LEGACY_SRCS,
     ),
     hdrs = glob(
         ["*.hpp"],
-        exclude = ["usyn_salt.hpp"],
+        exclude = ["usyn_salt.hpp"] + LEGACY_SRCS,
     ) + [":usyn_salt"],
     copts = COPTS,
     includes = ["."],
@@ -361,6 +375,46 @@ cc_binary(
     ],
 )
 
+cc_library(
+    name = "lut_cover",
+    srcs = ["lut_cover.cpp"],
+    hdrs = ["lut_cover.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//pass/domino:__pkg__"],
+    deps = [
+        ":usyn_logic",
+        "//pass/synth:lnet",
+    ],
+)
+
+# The legacy per-region flow; pass.usyn no longer calls it.
+cc_library(
+    name = "usyn_legacy",
+    srcs = [
+        "evidence.cpp",
+        "metrics.cpp",
+        "usyn_region.cpp",
+    ],
+    hdrs = [
+        "evidence.hpp",
+        "metrics.hpp",
+        "usyn_region.hpp",
+    ],
+    copts = COPTS,
+    includes = ["."],
+    deps = [
+        ":lut_cover",
+        ":pass_usyn",
+        ":usyn_logic",
+        "//core",
+        "//pass/cost:host_mem",
+        "//pass/synth",
+        "//pass/synth:lnet",
+        "@rapidjson",
+    ],
+)
+
 # ---------------------------------------------------------------------------
 # Legacy-cover utility tests remain independent of the optional ABC provider.
 # ---------------------------------------------------------------------------
@@ -372,6 +426,7 @@ cc_binary(
     data = data,
     deps = [
         ":pass_usyn",
+        ":usyn_legacy",
         "//graph",
         "@googletest//:gtest_main",
         "@rapidjson",
@@ -379,11 +434,22 @@ cc_binary(
 ) for name, data in [
     ("usyn_region_test", []),
     ("evidence_test", []),
-    ("lut_cover_test", []),
     ("metrics_test", []),
     ("provenance_test", []),
     ("resource_budget_test", []),
 ]]
+
+cc_test(
+    name = "lut_cover_test",
+    srcs = ["lut_cover_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":lut_cover",
+        ":usyn_logic",
+        "//pass/synth:lnet",
+        "@googletest//:gtest_main",
+    ],
+)
 
 cc_test(
     name = "pass_usyn_test",

@@ -8,6 +8,17 @@ or none>. Preserve the hardware behavior while reconsidering how it is expressed
 - Identify the top, its external interface (who instantiates it: a testbench,
   a harness, another design), the supported parameter configuration(s), the
   existing checks, and any known equivalence gaps.
+- When Verilog is available, test the CURRENT emitter before editing:
+  `lhd compile verilog --top TOP --emit-dir pyrope:tmp/generated -- -F FILELIST
+  -DSYNTHESIS -DBR_PPA_SYNTHESIS` (use the reference's actual defines).
+  Compile the emitted top in its untouched helper tree, then LEC it against
+  the same elaborated reference. Also test re-emission of the cleaned Pyrope
+  itself when evaluating writer behavior. Emission success alone is not a round-trip
+  pass: generated Pyrope may be unattractive, but must compile and preserve
+  behavior. Preserve invalid generated output and reduce the source that
+  produced it. Do not silently fix it and report the emitter as passing.
+  Pyrope emission takes source or `ln:` input, not `lg:` (there is no
+  LGraph-to-LNAST decompiler).
 - Run the baseline checks first (compile, LEC against the reference,
   simulation) so existing failures are not mistaken for regressions. A
   machine-emitted Pyrope may itself be LEC-inconclusive against its Verilog; a
@@ -15,6 +26,11 @@ or none>. Preserve the hardware behavior while reconsidering how it is expressed
 - When using a Verilog reference, match its parameters and defines; for Chisel,
   use the RTL elaborated from the same configuration and record its provenance.
   With no external reference, the original Pyrope is the reference.
+- For file-preloaded memories, run checks with the original image paths
+  resolvable. Current `lgcheck` enables `LIVEHD_FORMAL_MEMORY_MODEL` to read
+  emitted behavioral memory models through their default synthesis black-box
+  boundary. A memory-limit termination is an error, not a timeout or proof;
+  reduce bounded-search unrolling or schedule the check with more memory.
 - Snapshot the starting Pyrope. Every later equivalence step compares against
   the most recent verified snapshot (section 4).
 
@@ -72,8 +88,12 @@ emitter's netlist.
   types, including `U1` ports a generated harness drives with integers. Convert
   to `Bool` right inside the top (`pop_ready == 1`, `U1(flag)`). Built-in
   type names are capitalized (`U8`, `S4`, `Bool`, `Unsigned(bits=N)`); the
-  old lowercase spellings (`u8`, `bool`, `unsigned`) are banned words, also
-  as names.
+  old lowercase spellings are no longer built-in types or casts, but remain
+  legal ordinary identifiers. Reserved-word matching is case-sensitive;
+  `clock` and `reset` are legal names, while `Clock` and `Reset` need
+  backticks when used as names. Physical clock ports must have type `Clock`;
+  correcting an old data-typed clock is a required semantic repair. Preserve
+  its physical name and width, and wire it consistently through the harness.
 - Intermediate interfaces may change. Pass related ports as tuples instead of
   escaped flattened arguments (`` `io_in.control.enable`=enable ``); reuse an
   existing tuple directly (`child(io_in=next_stage)`) or construct a named one
@@ -133,8 +153,10 @@ emitter's netlist.
   module's single `Clock` and `Reset` inputs implicitly, whatever their names
   (`clk:Clock`, `rst:Reset`), or mint `clock:Clock`/`reset:Reset` ports that
   the parent wires to its own. A `clk`/`rst` input typed `Bool`/`U1` is plain
-  data. That is fine for a single-clock design, so a child that has no other
-  use for its clock needs no clock port. In a multi-clock design (two or more
+  data and cannot drive `clock_pin`. A child may omit its clock argument only
+  when implicit typed-clock wiring selects the intended domain; removing a
+  clock port does not remove the need to verify its physical connection.
+  In a multi-clock design (two or more
   `Clock` inputs) pass each clock explicitly and use `clock_pin=`/`reset_pin=`
   on every register. A `comb` never takes a `Clock`/`Reset` input.
 - Do not turn enables or intentional holds into unconditional writes, and do
@@ -142,8 +164,10 @@ emitter's netlist.
 - Unused bits of a packed state vector (e.g. the lower triangle of a
   triangular matrix) should be driven exactly as the reference drives them,
   or LEC state pairing and induction will fail on them.
-- Registered outputs of a `mod` land at `@[1]`, combinational ones at `@[0]`.
-  Read the timecheck error: it usually names the right cycle. A caller that
+- Conditional/feedback state outputs commonly land at `@[0]`; a direct
+  read of a body register written unconditionally from inputs lands at `@[1]`.
+  The blanket rule "all registered outputs are cycle 1" is wrong. Declare
+  intentional timing and read the timecheck error. A caller that
   combines a `@[1]` output with same-cycle values without `stage[N]` alignment
   is rejected ("mixes values at different cycles"); the generated lhdtrack
   harnesses do exactly that, so on an external top declare such an output
@@ -158,26 +182,43 @@ emitter's netlist.
 
 ## 4. Verify each step
 
-Validate incrementally with LiveHD only.
+Validate incrementally with LiveHD, then check emitted Verilog independently with Yosys-backed `lgcheck`.
 
-- **LEC against the previous snapshot, not the original.** After each small
-  change, compile and `lhd lec` the new Pyrope against the last verified
-  snapshot; on a pass, the new version becomes the snapshot. Small deltas prove
-  in seconds where a comparison against the original or the Verilog can take
-  minutes or give up. Compile both sides with
+- **LEC after each significant Pyrope edit.** Compile and `lhd lec` the new
+  Pyrope against the most recent verified Pyrope snapshot; on a proof, the new
+  version becomes the snapshot. These incremental comparisons usually prove
+  faster than comparing every edit against the original Pyrope or Verilog,
+  because the changes between the two versions are smaller. Keep the original
+  reference for the baseline and final checks. Compile both sides with
   `--set compile.upass.inline=false` and compare `lg:` directories. When
   collapsing a field-by-field copy into a whole-tuple assignment, this is the
   check that it is equivalent.
-- **Verdicts.** `proven` is a pass and `refuted` is a failure. A `timeout` or
-  `inconclusive` is not a disproof and may be accepted, **but it is not a proof
-  either**: an inconclusive LEC has hidden real miscompiles in this flow. Every
-  step that is not `proven` must be backed by simulation.
+- **Suspected LiveHD bug.** Run Yosys-backed `inou/yosys/lgcheck` as an
+  independent cross-check when you suspect a LiveHD compiler, emitter, or LEC
+  bug; do not wait for the final cleanup check. Use the original Verilog
+  reference when available, with matching parameters, defines, and memory
+  images. Preserve the reproducer and both tools' verdicts when they disagree;
+  two LiveHD-emitted sides can share a lowering defect.
+- **Verdicts.** Read `lec.verdict`, `lec.bounded`, and `lec.bound` together.
+  `proven` with `bounded=true` proves only the recorded depth; it is not an
+  unbounded equivalence result. Report that distinction per test. `refuted`
+  is a failure. Apply the requested time budget to the entire check and its
+  subprocesses. For the lhdtrack cleanup gate, accept a proof or a genuine
+  timeout at three minutes; never accept a refutation. Record timeouts
+  separately from proofs. An early inconclusive result, unsupported operation,
+  setup failure, or missing result JSON is not a timeout. Every step that is
+  not proven must also be backed by simulation.
 - **Renamed state.** Changed hierarchy or instance names break automatic
   flop pairing and leave LEC inconclusive. Pair renamed registers explicitly
-  with `--set formal.lec.match='ref.path.q=impl.path.q'` (same widths only; a
+  with `--set formal.lec.match='old_instance.q=new_instance.q'` (same widths only; a
   width mismatch yields a spurious refute). Instance names come from the
   binding (`const arb = child(...)` names the instance `arb`). Keep the mapping
-  in the report and separate from automatic matching.
+  in the report and separate from automatic matching. The left name belongs
+  to the reference and the right to the implementation; `ref.` and `impl.`
+  are NOT special prefixes. Use real hierarchical or canonical state names.
+  Current LiveHD rejects unresolved explicit state names before starting the
+  proof. Keep correspondence scoped to the actual pair being checked; a
+  regenerated hierarchy can make an older mapping obsolete.
 - **Simulation.** Run the existing testbench on the original and the cleaned
   source for enough cycles to get past reset into useful work, and compare
   results. Check that the testbench actually exercises the design: a harness
@@ -190,15 +231,21 @@ Validate incrementally with LiveHD only.
   cleanup must repack state, expect an inconclusive LEC and lean on
   simulation plus a proven intermediate step.
 - **Formatter.** `lhd pyrope fmt` defaults to AI mode (one line per
-  statement, sorted named lists, `f(x=x)` → `f(x)`). It can still change
-  meaning when it sorts a `type`/`enum` declaration or shortens an argument
-  that names no parameter, so LEC the formatted source against the
-  pre-format snapshot every time (the pre-format → formatted step is cheap).
+  statement, sorted named lists, `f(x=x)` → `f(x)`). Recheck semantics and
+  idempotency instead of assuming all historical formatter bugs remain.
+  The type/enum declaration-order reproducer preserves order on the
+  2026-09-30 build. LEC the formatted source against the pre-format snapshot
+  every time (the pre-format → formatted step is cheap).
 - **Final checks.** Run `lhd pyrope fmt -i`, then LEC the formatted source
   against the pre-format snapshot, LEC the final source against the external
   reference at the unchanged top, and rerun simulation. Exercise the
-  representative parameter combinations the cleanup touched. Prefer an
-  unbounded (inductive) proof when the original had one.
+  representative parameter combinations the cleanup touched. Also compile the
+  final Pyrope with `--emit verilog:tmp/net.v`, then compare that Verilog against
+  the complete original Verilog with both `lhd lec` and Yosys-backed `lgcheck`.
+  Feed `lgcheck` the original sources, defines, and memory images through its
+  supported reader; using LiveHD-emitted Verilog as both sides can hide a shared
+  lowering defect. Use the same three-minute ceiling for each equivalence
+  check. Prefer an unbounded (inductive) proof when the original had one.
 - Only the external top must stay equivalent; intermediate modules may change
   boundaries. Keep the same top and testbench across Verilog, generated
   Pyrope, and cleaned Pyrope. Where the project uses incremental compilation
@@ -210,53 +257,65 @@ Validate incrementally with LiveHD only.
 
 ## 5. Known LiveHD limitations (check before trusting a workaround)
 
-Re-verified 2026-09-28. Retest each before relying on it, and report any that
-are fixed or new with a minimal reproducer. Do not carry an old workaround
-into new code without re-checking it: most of the 2026-09-27 list is fixed
-(generic `comb` output widths, loop-read generic port widths, the false
-combinational loop through a child's register, bit writes into outputs,
-nested lambdas reading comptime constants, `wire`/`reg`-array use in loops,
-byte-enable memory writes, `a#[0..+1]`, single-output auto-unwrap, tuple-typed
-ports and fields, stateful children in loops under `lhd sim`), so
-`::[timecheck=false]`, `mod`-instead-of-`comb`, typed rebinds, and
-build-then-assign locals are no longer needed.
+The 2026-09-30 round-4 writer fixes address invalid Bool initialization,
+forward-wire double drivers, output slice reads, expanded local scopes,
+retained-loop names, generic imports and bounds, and clock classification
+through wrappers. The sized cast of an expression built from scalar tuple
+fields now compiles. Explicit LEC match names are validated. Keep checking the
+current build: a focused regression passing is not a guarantee for all programs.
 
-- **Silent:** a register both bit-read and conditionally bit-written inside a
-  rolled `for` loop loses the write; build the next value in a `mut` and
-  assign the register once after the loop. **Silent:** an
-  `ordering="old"` memory keeps only the last of several same-cycle partial
-  writes to one entry; write the merged word. Both passed compile and one
-  passed sim; only LEC or the full simulation caught them.
-- A memory element passed to a typed `comb` input now fails ("unbounded
-  range"); bind it to a typed `const` first. In a generic lambda with any
-  `mut`, cast a local (`const b = flag; U1(b)`) rather than a `Bool` port.
-  An import const must not share its file's name.
-- LEC budget is not monotone: a design that is inconclusive at
-  `formal.timeout=30` can prove in seconds at 150. Retry a surprising
-  inconclusive result with a larger budget before restructuring.
-- When the reference stores a triangular or partially-used state vector in
-  one flop (unused bits hold, never reset), the proof needs the Pyrope to
-  mirror that; an idiomatic reset of the unused bits stays inconclusive.
-- Arrays whose element width is generic (`reg r:[N]Unsigned(bits=N)`, array
-  ports of generics) are rejected, and a bit-assign into an array element
-  inside nested loops (`m[i]#[j] = ...`) fails. Pack as `Unsigned(bits=N*W)`
-  with row slices `#[(i*W)..+W]` (or build a row in a scalar and assign
-  `m[i] = row`) and document the layout.
-- `std.clog2` and value-derived `.[bits]` of a comptime constant are
-  documented but not implemented; pass derived widths as extra generics with
-  a `cassert`, or use `Unsigned(max=DEPTH - 1)` for index types.
-- Write an expression used as a generic argument in parentheses
-  (`m<W=(2*N - 1)>`).
-- Range analysis does not use the guarding condition:
-  `x = if x == MAX { 0 } else { x + 1 }` on `Unsigned(max=MAX)` still needs
-  `wrap`.
-- Auto-generated instance names of unnamed calls are long mangled strings;
-  bind calls whose state LEC must pair (`const sync = f(...)`) so instance
-  names stay predictable.
-- Unverified since the fix pass: `lhd sim` reading a `wire` back-edge one
-  cycle late inside a `for` loop. Back loop refactors with a full simulation.
+**Writer checks to retain**
+
+- Compile untouched emitted trees, format them, compile again, and run the
+  external-reference equivalence checks. Keep raw output and diagnostics for
+  failures; successful emission alone is insufficient.
+- Exercise Pyrope-to-Pyrope emission as well as Verilog-to-Pyrope emission.
+  Generic compile-time helpers and loops can follow different writer paths.
+- When repairing LiveHD, run its normal test suite and focused debug emitter
+  and clock checks. Include constant/generic tuple cases and genuine runtime
+  overflow rejection; retain the existing assertions and stimulus.
+- A writer refusal must produce a structured unsupported result, not abort.
+  Sparse or unrecoverable runtime masks may still be unsupported; save a
+  reduced case without changing correct source just to hide the refusal.
+- Memory initialization is observable behavior. Preserve image paths and
+  runtime-versus-source-relative path semantics, and make the same image
+  available to all compilers and equivalence engines.
+- Clock-aware `lgcheck` can need structural state correspondence after lowering
+  clocks to global sampling. Every proposed pair must still be proved, with
+  power-on compatibility checked; do not bypass clock/reset guards. If bounded
+  checking finishes inconclusive, `LGCHECK_INDUCT_AFTER_BMC=1` can try whole-miter
+  induction with the remaining shared budget. It adds no guessed internal
+  correspondence assumptions, and an induction failure is not a refutation.
+
+**Old workarounds that passed their focused rechecks**
+
+- A register bit-read and conditionally bit-written in a rolled loop LEC-proves
+  against scalar writes; no automatic `compile.unroll=true` workaround.
+- Multiple same-cycle partial writes to an `ordering="old"` memory LEC-prove
+  against a merged-word update.
+- Generic-width register arrays and a memory element passed directly into a
+  typed `comb` compile in the saved probes; test the actual design before
+  retaining packed-vector or typed-rebind workarounds.
+- `std.clog2` and `.[bits]` on a comptime integer pass compile-time assertions.
+- The formatter preserves field order in the tested `type` and `enum`, and
+  formatting all 20 cleaned designs LEC-proves against their pre-format forms.
+
+Do not treat untested entries from earlier suggestions as current defects.
+Retest the exact pattern before applying a workaround. Preserve state layout
+when proof pairing depends on it; arbitrary reset changes to previously
+unreset bits still change the implementation. For simulator-specific loop or
+clock concerns, run the recorded full-cycle workload as well as LEC. The
+lhdtrack `suggestions4.md` and `suggestions4_repros/` contain current evidence.
 
 ## 6. Report
+
+Lead the feedback with reproducible Pyrope syntax/semantics, LiveHD emitter,
+compiler, formatter, simulation, and verification issues. Include anything
+still difficult or unresolved. Separate actual defects from source mistakes,
+retired workarounds, and untested historical reports. For each defect give the
+smallest reproducer available, expected behavior, command, result JSON or
+diagnostic, and compiler identity. Keep legacy migration as brief setup
+context; it is not the focus of the feedback.
 
 Report code size against both the starting Pyrope and the matching Verilog,
 including every helper introduced or removed, with the same word-count method

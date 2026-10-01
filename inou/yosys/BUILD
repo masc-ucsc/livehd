@@ -161,4 +161,7 @@ sh_test(
     name = "yosys_clock_domain_test",
     srcs = ["tests/yosys_clock_domain_test.sh"],
     data = [":scripts"],
+    # Isolate the short solver-budget check from concurrent builds
+    # starving debug Yosys before its bounded check reaches the fallback.
+    tags = ["exclusive"],
 )

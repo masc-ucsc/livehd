@@ -1,0 +1,28 @@
+/*
+:name: spec_tests_tick_step_in_arm
+:type: error
+:error: step
+*/
+// Spec: docs 05b "Running cycles (tick)": "there is exactly one `step` per
+// iteration" (see spec_tests_tick_two_steps.prp). The count is per PATH: an
+// `if` arm is an alternative, so `if c { step } else { step }` is one step,
+// but a direct `step` followed by one inside an arm is two on the taken path
+// (2 edges that iteration while the minted `clock` counts one).
+
+mod spec_tsa_cnt(en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_tsa.step_in_arm {
+  mut d = spec_tsa_cnt
+  tick 4 {
+    d.en = true
+    step
+    if d.q < 100 {
+      step               // locate_error_here
+    }
+  }
+  assert(d.q == 4)
+}

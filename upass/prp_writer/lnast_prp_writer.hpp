@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <ostream>
 #include <stack>
@@ -86,10 +87,23 @@ public:
   // connects agrees -- a clock passed into a child's data input (an ICG's
   // `clk`, a `ca` the child never names `clk`) keeps the caller's port data,
   // and a child clock fed from data (a gated net) becomes data too. Keys are
-  // clock_port_key(unit, port). Computed over ALL units by clock_data_ports.
-  void set_clock_data_ports(const absl::flat_hash_set<std::string>* m) { clock_data_ports_ = m; }
-  [[nodiscard]] static std::string                      clock_port_key(std::string_view unit, std::string_view port);
-  [[nodiscard]] static absl::flat_hash_set<std::string> clock_data_ports(const std::vector<std::shared_ptr<Lnast>>& units);
+  // clock_port_key(unit, port). Computed over ALL units by clock_data_ports,
+  // which first promotes scalar wrapper inputs connected to physical clocks
+  // (`promoted`) and propagates that type through unused forwarding
+  // interfaces. The plan is an OVERLAY: the units' io_meta is never written
+  // (an emitter must not change the IR later passes and emits read), so every
+  // writer test of a Clock input goes through is_clock_input.
+  struct Clock_port_plan {
+    absl::flat_hash_set<std::string> data;      // Clock-class inputs printed as data
+    absl::flat_hash_set<std::string> promoted;  // unmarked scalar inputs printed as Clock
+  };
+  void                                 set_clock_data_ports(const Clock_port_plan* m) { clock_data_ports_ = m; }
+  [[nodiscard]] static std::string     clock_port_key(std::string_view unit, std::string_view port);
+  [[nodiscard]] static Clock_port_plan clock_data_ports(const std::vector<std::shared_ptr<Lnast>>& units);
+  // Clock-as-data findings (plan_clock_reset_ports): a Verilog input that
+  // clocks a register AND is read as data has no legal Pyrope spelling (a
+  // Clock is not data, a U1 cannot clock), so pass.prp_writer fails on it.
+  const std::vector<std::string>&      clock_as_data() const { return clock_as_data_; }
 
 private:
   std::ostream&             os;
@@ -434,17 +448,23 @@ private:
 
   // Set of all module names emitted in this run (see set_known_modules); a
   // func_call callee in this set is emitted as a file-top import.
-  const std::unordered_set<std::string>*        known_modules_{nullptr};
-  const std::unordered_set<std::string>*        unemitted_modules_{nullptr};  // see set_unemitted_modules
+  const std::unordered_set<std::string>* known_modules_{nullptr};
+  const std::unordered_set<std::string>* unemitted_modules_{nullptr};  // see set_unemitted_modules
   // Set of every module name emitted in this run, tail-keyed (see
   // set_instantiated_modules); a func_call to one of these is a real submodule
   // instantiation and the writer emits a `::[name=<lhs>]` call-site
   // instance-name annotation.
-  const std::unordered_set<std::string>*        instantiated_modules_{nullptr};
-  const std::unordered_set<std::string>*        sink_modules_{nullptr};
-  const absl::flat_hash_set<std::string>*       clock_data_ports_{nullptr};
+  const std::unordered_set<std::string>* instantiated_modules_{nullptr};
+  const std::unordered_set<std::string>* sink_modules_{nullptr};
+  const Clock_port_plan*                 clock_data_ports_{nullptr};
+  std::vector<std::string>               clock_as_data_;  // see clock_as_data()
+  // An input's Clock/Reset class with the clock_data_ports overlay applied.
+  [[nodiscard]] Io_sig                   effective_sig(const Lnast_io_entry& e) const;
+  [[nodiscard]] bool                     is_clock_input(const Lnast_io_entry& e) const { return effective_sig(e) == Io_sig::clock; }
+  // The clock_data_ports overlay demoted this Clock input to data.
+  [[nodiscard]] bool                     is_clock_data(std::string_view port) const;
   // Distinct func_call callee names seen in this unit (populated in scan_node).
-  absl::flat_hash_set<std::string>              func_call_callees_;
+  absl::flat_hash_set<std::string>       func_call_callees_;
   // Import-const alias per callee module name, used when the natural import name
   // (`const X = import("X.X")`) would EXACTLY collide with a submodule instance
   // variable of the same spelling.  Names are case-sensitive, so the firtool
@@ -511,24 +531,43 @@ private:
   const std::string& cached_strip_prefix(int32_t name_id) const;
   mutable absl::flat_hash_map<int64_t, std::vector<int32_t>> node_read_ids_cache_;
   mutable absl::flat_hash_map<int32_t, std::string>          stripped_name_cache_;
+  absl::flat_hash_map<std::string, std::string>              source_loop_names_;
+  size_t                                                     source_loop_seq_ = 0;
 
   // Walk the top-level body statements and populate folded_attrs_ (mapping the
   // slang attr vocabulary to the Pyrope source one: initial->init,
   // sync->async with the value inverted, everything else verbatim).
-  void        collect_folded_attrs(Lnast_nid stmts_nid);
+  void collect_folded_attrs(Lnast_nid stmts_nid);
   // Clocks and resets bind BY TYPE in Pyrope (docs 07-typesystem "Clock and
   // Reset"): decide, per `Clock`/`Reset`-class input (io_meta sig; a Verilog
   // unit's clk/rst were stamped by upass.ssa), whether the signature prints it
   // `:Clock`/`:Reset` (clock_reset_port_type_) or keeps its data type because
   // the body also reads it as data -- then every register that relied on it as
   // the implicit clock/reset gets an explicit `clock_pin=`/`reset_pin=`
-  // (implicit_pin_inject_, by emitted reg name) so no clock is minted.
-  void        plan_clock_reset_ports(Lnast_nid stmts_nid, bool is_mod);
-  absl::flat_hash_map<std::string, std::string> clock_reset_port_type_;  // raw port name -> "Clock"/"Reset"
-  absl::flat_hash_set<std::string>              clock_copy_nets_;        // nets carrying a clock into a clock pin
-  absl::flat_hash_map<std::string, std::string> implicit_pin_inject_;    // emitted reg name -> "clock_pin=x, …"
+  // (implicit_pin_inject_, by emitted reg name) so no clock is minted. A
+  // Verilog gate `gclk = clk & en` feeding a clock pin is no data read: its
+  // store prints the Clock_cell `Clock(clock_pin=clk, enable=en)`
+  // (clock_gate_store_). A Clock input that clocks a register and is ALSO
+  // read as data is reported in clock_as_data_.
+  void plan_clock_reset_ports(Lnast_nid stmts_nid, bool is_mod);
+  // A Verilog clock gate `wire gclk = clk & en` feeding a clock pin: a
+  // clock-net store of a single-use `bit_and` temp tree (the reader's 1-bit
+  // `& 1` mask included) over exactly ONE Clock input and data enables.
+  struct Clock_gate {
+    std::string            clock;    // the gated Clock input
+    std::vector<Lnast_nid> enables;  // the enable operands
+    std::vector<Lnast_nid> ands;     // the folded `bit_and` temps
+  };
+  // The clock gates of `u` below `stmts`, by store def-key (get_class_index).
+  [[nodiscard]] static absl::flat_hash_map<int64_t, Clock_gate> clock_gates(const Lnast& u, Lnast_nid stmts,
+                                                                            const absl::flat_hash_set<std::string>&      nets,
+                                                                            const std::function<bool(std::string_view)>& clock_in);
+  absl::flat_hash_map<int64_t, Clock_gate>                      clock_gate_store_;       // store def-key -> its gate
+  absl::flat_hash_map<std::string, std::string>                 clock_reset_port_type_;  // raw port name -> "Clock"/"Reset"
+  absl::flat_hash_set<std::string>                              clock_copy_nets_;        // nets carrying a clock into a clock pin
+  absl::flat_hash_map<std::string, std::string>                 implicit_pin_inject_;    // emitted reg name -> "clock_pin=x, …"
   // Render an attr value leaf (const text or ref name) to Pyrope source.
-  std::string render_attr_value(Lnast_nid value_nid) const;
+  std::string                                                   render_attr_value(Lnast_nid value_nid) const;
 
   // ── Single-use temp folding (expression inlining) ─────────────────────────
   // The post-uPass LNAST is fully flattened: every operation is its own
@@ -544,6 +583,7 @@ private:
     int                          decl_defs     = 0;        // of those, bare `declare`s (not value defs)
     bool                         decl_typed    = false;    // a declare carrying a `:T` — inlining would drop it
     int                          use_count     = 0;        // reads of this name
+    int                          spec_uses     = 0;        // of those, `type_spec` annotations (they read nothing)
     int                          def_index     = -1;       // pre-order index of the (single) def
     int                          use_index     = -1;       // pre-order index of the (single) use
     int                          min_use_index = 1 << 30;  // pre-order index of the FIRST (earliest) use
@@ -629,12 +669,12 @@ private:
     std::string lo, hi;
     Lnast_nid   lo_nid, hi_nid;
   };
-  absl::flat_hash_map<std::string, Range_bounds> range_lohi_;  // range-temp name -> bounds
+  absl::flat_hash_map<std::string, Range_bounds> range_lohi_;                          // range-temp name -> bounds
   std::string                                    render_range_bound(Lnast_nid bound);  // fold-aware, parenthesised operand
-  std::vector<Lnast_nid>                 get_mask_nodes_;                             // every get_mask, for range-mask resolution
-  std::vector<Lnast_nid>                 set_mask_nodes_;                             // every set_mask, same range-mask resolution
-  std::vector<std::pair<Lnast_nid, int>> tuple_get_nodes_;                            // every tuple_get + its pre-order index
-  std::vector<std::pair<Lnast_nid, int>> store_nodes_;                                // every store + its pre-order index
+  std::vector<Lnast_nid>                         get_mask_nodes_;                      // every get_mask, for range-mask resolution
+  std::vector<Lnast_nid>                         set_mask_nodes_;                      // every set_mask, same range-mask resolution
+  std::vector<std::pair<Lnast_nid, int>>         tuple_get_nodes_;                     // every tuple_get + its pre-order index
+  std::vector<std::pair<Lnast_nid, int>>         store_nodes_;                         // every store + its pre-order index
   // Element stores (`store(mem, i.., v)`) by the name of their value `v`.
   absl::flat_hash_map<std::string, Lnast_nid>    element_store_by_value_;
   // Constant-mask get_masks by the name of their source (the first one).
@@ -648,10 +688,10 @@ private:
   bool                                           same_operand(Lnast_nid a, Lnast_nid b, int budget = 8) const;
   // Module-instance results (`mut inst = Mod(args)`), stripped names: their output
   // ports may print with dot notation `inst.port` (instead of `inst["port"]`).
-  absl::flat_hash_set<std::string>       instance_results_;
+  absl::flat_hash_set<std::string>               instance_results_;
   // Instance-output extraction temps (`_t = inst["port"]`) selected to be inlined
   // as `inst.port` at every use; their hoisted `wire`/`mut` declaration is dropped.
-  absl::flat_hash_set<std::string>       instance_output_inlined_;
+  absl::flat_hash_set<std::string>               instance_output_inlined_;
 
   // Pre-pass: walk the whole tree, populate the maps above, and decide which
   // temps are foldable.  Called once at the start of write_all().
@@ -727,10 +767,12 @@ private:
   // unary) sub-expression so precedence is preserved when it nests inside
   // another operator; tight postfix forms (`x#[..]`, `x[i]`, `x.[a]`) never get
   // wrapped.
-  std::string        render_value(Lnast_nid node, bool operand_ctx);
+  bool                             rendering_type_bound_ = false;
+  absl::flat_hash_set<std::string> type_bound_active_;
+  std::string                      render_value(Lnast_nid node, bool operand_ctx);
   // Render the RHS expression (everything after `lhs = `) of a value-producing
   // "defining" node, inlining folded operands recursively.
-  std::string        render_def_rhs(Lnast_nid def_node, bool operand_ctx);
+  std::string                      render_def_rhs(Lnast_nid def_node, bool operand_ctx);
   // The heavyweight render_def_rhs cases, each its own function so the COMMON
   // recursive spine (render_def_rhs -> render_value -> render_def_rhs, one level
   // per folded temp) carries a small frame: at -O0 every local of every case of

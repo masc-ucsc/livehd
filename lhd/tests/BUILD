@@ -258,6 +258,10 @@ sh_test(
 # Keep each fixture/backend under the test runtime budget. The Slop leg also
 # checks the backend-independent LEC proof and, with LHD_EXTERNAL_SIM=1 (see
 # AGENTS.md), the external Verilator twin.
+# TODO(clock lane, ruling 57): re-enable these fixme targets when the Pyrope
+# clock lane lands -- sim_rtl_roundtrip_{gated_latch_pair,latch_window}_{slop,llvm},
+# lhd_sim_explicit_clock_edges, lhd_sim_restart_clkb_test, sim_color_latch_oracle,
+# sim_color_vcd_fall_test (the *_v Verilog stand-ins cover them meanwhile).
 _ROUNDTRIP_CLOCK_LATCH_CASES = [
     "gated_latch_pair",
     "latch_window",
@@ -325,6 +329,20 @@ sh_test(
     # (a latch gated by `clk`) or drives a second clock as a Bool waveform,
     # which the Pyrope `Clock` type rejects; see inou/prp/BUILD _SIM_FIXME.
     tags = ["fixme"],
+)
+
+# The Verilog stand-in of flop_sim_negedge_sole_clock (same flops, latch and
+# assertions) keeps the sole-explicit-negedge-clock coverage running meanwhile.
+sh_test(
+    name = "lhd_sim_explicit_clock_edges_v",
+    size = "small",
+    srcs = ["lhd_sim_explicit_clock_edges.sh"],
+    data = [
+        "sim_negsole_standin.v",
+        "sim_negsole_standin_tb.prp",
+        "//lhd",
+    ],
+    env = {"NEGSOLE": "verilog"},
 )
 
 # Unity batching of the small generated simulator TUs: batches are written and
@@ -425,6 +443,15 @@ sh_test(
     name = "lhd_sim_restart_test",
     srcs = ["lhd_sim_restart_test.sh"],
     data = ["//lhd"],
+)
+
+# The same restart checks with a secondary clock `clkb` the testbench drives as
+# a Bool waveform: a restart must restore __clkprev_clkb (no invented rise).
+sh_test(
+    name = "lhd_sim_restart_clkb_test",
+    srcs = ["lhd_sim_restart_test.sh"],
+    data = ["//lhd"],
+    env = {"RESTART_CLKB": "1"},
     # PENDING (clock lane, 2026-09-30): the design uses the clock LEVEL as data
     # (a latch gated by `clk`) or drives a second clock as a Bool waveform,
     # which the Pyrope `Clock` type rejects; see inou/prp/BUILD _SIM_FIXME.
@@ -1014,6 +1041,20 @@ sh_test(
     tags = ["fixme"],
 )
 
+# The Verilog stand-in (posedge flop -> transparent-high latch, the fixture's
+# post-rise assertions in its tb) keeps the schedule gate running meanwhile.
+sh_test(
+    name = "sim_color_latch_oracle_v",
+    srcs = ["sim_color_latch_oracle.sh"],
+    data = [
+        "sim_flop_high_latch_standin.v",
+        "sim_flop_high_latch_standin_tb.prp",
+        "//inou/prp:tests/sim/flop_feeds_transparent_high_latch.prp",
+        "//lhd",
+    ],
+    env = {"LATCH_DUT": "verilog"},
+)
+
 # 3d-sim-color migration rung I: generated-structure plus live execution gate
 # for the first replacement emitter class (flat, ordinary-posedge state).
 sh_test(
@@ -1038,6 +1079,19 @@ sh_test(
     # (a latch gated by `clk`) or drives a second clock as a Bool waveform,
     # which the Pyrope `Clock` type rejects; see inou/prp/BUILD _SIM_FIXME.
     tags = ["fixme"],
+)
+
+sh_test(
+    name = "sim_color_vcd_fall_v_test",
+    size = "large",
+    srcs = ["sim_color_vcd_fall_test.sh"],
+    data = [
+        "sim_negsole_standin.v",
+        "sim_negsole_standin_tb.prp",
+        "//inou/prp:tests/sim/flop_sim_negedge_sole_clock.prp",
+        "//lhd",
+    ],
+    env = {"NEGSOLE": "verilog"},
 )
 
 sh_test(
@@ -1877,12 +1931,22 @@ sh_test(
 
 # `--emit-dir pyrope:DIR` re-emission of a construct-rich source: the
 # coalescer upass per-op hooks (toln consumer present) + pass.prp_writer
-# unit emission, with the verifier discharging every cassert.
-sh_test(
-    name = "lhd_prp_writer_test",
-    srcs = ["lhd_prp_writer_test.sh"],
-    data = _FLOW_DATA + ["writer_rich.prp"],
-)
+# unit emission, with the verifier discharging every cassert. One target per
+# script section keeps each under the test time budget.
+[
+    sh_test(
+        name = "lhd_prp_writer_test" if section == "emit" else "lhd_prp_writer_" + section + "_test",
+        srcs = ["lhd_prp_writer_test.sh"],
+        args = [section],
+        data = _FLOW_DATA + ["writer_rich.prp"],
+    )
+    for section in [
+        "emit",
+        "roundtrip_a",
+        "roundtrip_b",
+        "cgen",
+    ]
+]
 
 # `lhd pyrope lsp` scripted JSON-RPC session over stdio: initialize negotiation,
 # didOpen/didChange/didSave/didClose, pull diagnostics on a broken buffer,
@@ -2164,6 +2228,12 @@ sh_test(
     name = "sim_live_words_invariance_test",
     size = "large",
     srcs = ["sim_live_words_invariance_test.sh"],
+    data = ["//lhd"],
+)
+
+sh_test(
+    name = "readmem_clockless_smoke",
+    srcs = ["readmem_clockless_smoke.sh"],
     data = ["//lhd"],
 )
 

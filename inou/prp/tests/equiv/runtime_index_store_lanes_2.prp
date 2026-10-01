@@ -1,0 +1,13 @@
+/*
+:name: runtime_index_store_lanes_2
+*/
+// A plain array stored through an ARITHMETIC temp index (`i + 0`): the same
+// process_tuple_set selector fault as _1 without the index-range rebase --
+// `m[2]` (r) folded to 0.
+pub mod runtime_index_store_lanes(a:U8, i:U5) -> (p:U8@[0], q:U8@[0], r:U8@[0]) {
+  mut m:[32]U8 = 0
+  m[i + 0] = a ^ 3
+  p = m[0]
+  q = m[1]
+  r = m[2]
+}
