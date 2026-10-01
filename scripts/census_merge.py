@@ -50,10 +50,14 @@ def load(run_dir, root):
     rows = {}
     with open(tsv, newline="") as fh:
         for r in csv.DictReader(fh, delimiter="\t"):
-            # Machine-absolute paths are not portable evidence.
-            a = r.get("artifact", "")
-            if a.startswith(root):
-                r["artifact"] = os.path.relpath(a, root)
+            # Machine-absolute paths are not portable evidence -- and they
+            # appear in CAPTURED DIAGNOSTICS too, not just the artifact column
+            # (a yosys refusal quotes the full read_slang command line). Strip
+            # the repository prefix wherever it occurs so the committed table
+            # diffs cleanly between checkouts.
+            for k, v in list(r.items()):
+                if isinstance(v, str) and root in v:
+                    r[k] = v.replace(root, "")
             r.update(prov)
             rows[r["module"]] = r
     return rows

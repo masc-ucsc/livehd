@@ -1258,3 +1258,69 @@ interrupted (see `generated/census_d2/INCIDENTS.md`) and aggregated later at a
 different commit under `--resume-across-commit`, with `runner` and `lhd` hashes
 verified unchanged. Its gate results are usable; a clean single-commit run is
 what should eventually be cited. The two follow-up runs are clean.
+
+
+## 13. Census re-run after the memory write-mask fix
+
+The 105 figure in §12 was COMBINED evidence across three runs with provisional
+provenance. This is a single clean run of all 122 at one commit, after the
+per-port memory timing work and the slot-gate fix.
+
+**105 of 122 accepted**, same count, now from one run:
+`pass/lean/CENSUS_D2_122.tsv`, manifest in `CENSUS_D2_122_MANIFEST.json`.
+
+* regressed (was accepted, now not): **none**
+* newly accepted: **none**
+* every row carries the same `evidence_run`; nothing is superseded or merged
+
+### The certificates that had to change
+
+A slot-gated memory wrote only bit 0 of its data (§ the `single_edge` fix), so
+no previously accepted memory-bearing certificate could be grandfathered.
+Fourteen accepted modules had memories slotted; **thirteen of their
+certificates changed**:
+
+| module | memories slotted | certificate |
+|---|---|---|
+| minion_dcache_128x64_1r1w_lram | 2 | changed |
+| minion_dcache_128x72_1r1w_lram | 2 | changed |
+| minion_dcache_buffer_array | 1 | changed |
+| minion_dcache_data_array | 8 | changed |
+| minion_dcache_metadata_array | 4 | changed |
+| minion_dcache_replay_queue | 2 | changed |
+| minion_dcache_tlb_array | 1 | changed |
+| minion_tlb | 1 | changed |
+| vpu_lane_tima | 2 | changed |
+| vpu_tensora_rf / b / c / tmp_rf | 1 each | changed |
+| **trans_top** | 6 | **unchanged** |
+
+`trans_top` is unchanged for a good reason, not a missed one: its certificate
+has `memories := #[]`. Its six "slotted" memories are constant ROMs folded into
+`memConst` sources, so there is no write mask to gate. Controls confirm the
+change is confined to the gated-memory path — non-memory accepted modules
+(`intpipe_csr_msgs`, `txfma_e5`) hash identically before and after.
+
+### STRUCTURALLY accepted, not behaviourally validated
+
+The census drives **zero inputs**, which writes nothing. That is exactly how a
+memory that wrote only bit 0 survived 105 "accepted" modules undetected. So for
+every memory-bearing module here, `accepted` means generation + `checkDesign` +
+four executed cycles — it does **not** mean the memory's write behaviour was
+exercised. Only `mem_mixed_rdclk_diff` has behavioural evidence
+(`lhd/tests/mem_mixed_lean_diff_test.sh`, RTL vs the normalized certificate
+with two discriminating negatives).
+
+### The 17 remaining, by category
+
+| category | n | modules |
+|---|---|---|
+| combinational cycle (lean-emit) | 6 | `intpipe_csr_file`, `minion_dcache_top`, `minion_frontend`, `minion_frontend_thread_buffer`, `txfma_top`, `txfmafrac_top` |
+| latch / multi-phase (single_edge) | 4 | `core_top`, `intpipe_top`, `vpu_lane`, `vpu_txfma_trans_top` |
+| latch-array memory (single_edge) | 2 | `vpu_ctrl`, `vpu_rf` |
+| timeout at 45 min | 2 | `minion_top`, `vpu_top` |
+| compile | 2 | `txfma_adder` (zero default parameter), `txfma_top_fake` (yosys-slang unimplemented) |
+| blocked | 1 | `txfmaexp_top` (pre-existing RTL↔LGraph mismatch) |
+
+Combinational cycles are now the largest single category and the next target.
+The `type=24` cluster is gone: `core_top`, `minion_frontend` and
+`minion_frontend_thread_buffer` all cleared it and moved to other blockers.

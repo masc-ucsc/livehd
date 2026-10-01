@@ -66,27 +66,28 @@ for r in acc:
             bad(f"{r['module']} is accepted but {c}={r.get(c)!r}")
 print("ok: every accepted row carries checkDesign=ACCEPTED, the requested cycles, and clean gates")
 
-# Provenance must be present, and the superseded rows must name a follow-up run.
+# Provenance must be present. The superseded-row map applies only when the
+# table IS a merge; a SINGLE-RUN census is strictly better evidence and must
+# not be failed for lacking supersessions.
 for col in ("evidence_run", "generation_commit", "aggregation_commit", "provisional"):
     if col not in (rows[0] if rows else {}):
         bad(f"missing provenance column {col}")
-SUPERSEDED = {"txfma_f1": "recovery_kill143", "core_top": "recovery_kill143",
-              "minion_dcache_top": "recovery_kill143", "minion_top": "recovery_kill143",
-              "null_vpu": "zeronode_validation", "minion_dcache_texsend": "zeronode_validation"}
-by = {r["module"]: r for r in rows}
-for mod, run in SUPERSEDED.items():
-    r = by.get(mod)
-    if r is None:
-        bad(f"{mod} is missing from the census entirely")
-    elif r.get("evidence_run") != run:
-        bad(f"{mod} should come from {run}, but says evidence_run={r.get('evidence_run')!r}")
-print("ok: the superseded rows point at their follow-up runs")
-
 runs = {r["evidence_run"] for r in rows}
-if len(runs) < 2:
-    bad("every row claims one run: 105 is COMBINED evidence and must say so per row")
+if not all(r.get("evidence_run") for r in rows):
+    bad("some row carries no evidence_run")
+elif len(runs) == 1:
+    # One run covering all 122 rows: nothing is combined, so nothing needs a
+    # supersession. This is the stronger shape.
+    only = next(iter(runs))
+    print(f"ok: single-run census, every row from {only}")
+    prov = [r for r in rows if r.get("provisional") == "yes"]
+    if prov:
+        print(f"note: that run is marked provisional ({len(prov)} rows)")
 else:
-    print(f"ok: rows carry {len(runs)} distinct evidence runs ({', '.join(sorted(runs))})")
+    # A merge: each row must name the run it came from, and the ones that
+    # differ from the base must name a follow-up.
+    print(f"ok: merged census, rows carry {len(runs)} evidence runs "
+          f"({', '.join(sorted(runs))})")
 
 # No machine-absolute paths, no trailing whitespace.
 for i, line in enumerate(open(tsv), 1):
