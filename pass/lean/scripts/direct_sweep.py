@@ -29,7 +29,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 LEAN_DIR = os.path.realpath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..", "formal", "lean"))
@@ -308,27 +308,55 @@ def main():
     lean_env = dict(os.environ)
     lean_env["LEAN_NUM_THREADS"] = "1"
     # `lake env` once, reused for every job
-    lp = subprocess.run(["lake", "env", "printenv", "LEAN_PATH"], cwd=LEAN_DIR,
-                        capture_output=True, text=True)
-    if lp.returncode == 0 and lp.stdout.strip():
-        lean_env["LEAN_PATH"] = lp.stdout.strip()
+    try:
+        lp = subprocess.run(["lake", "env", "printenv", "LEAN_PATH"], cwd=LEAN_DIR,
+                            capture_output=True, text=True)
+        if lp.returncode == 0 and lp.stdout.strip():
+            lean_env["LEAN_PATH"] = lp.stdout.strip()
+    except (FileNotFoundError, NotADirectoryError):
+        pass  # no toolchain here; every probe will then fail by name, not by traceback
 
     workdir = tempfile.mkdtemp(prefix="d2sweep_", dir=os.environ.get("TMPDIR", "/tmp"))
     cols = ["module", "verdict", "reason", "sources", "nodes", "outputs", "flops",
             "mems", "inputs", "check_ms", "step1_ms", "run_ms", "cycles", "wall_s",
             "rss_kb", "path"]
     rows = []
+    # EVERY FINISHED ROW IS WRITTEN AS IT FINISHES, to `<out>.partial`.
+    #
+    # The sorted `<out>` is written once at the end, so a sweep that is stopped
+    # -- a harness time limit, a kill, a crash -- used to leave NOTHING, however
+    # many modules had already run.  Measured: minion_dcache_top ACCEPTED after
+    # 4261s and its timings were lost because the next module was still going
+    # when the run was stopped, and a 71-minute probe is not something to repeat
+    # for a column.
+    #
+    # A SEPARATE FILE, not `<out>` itself: a half-written `<out>` would be read
+    # by every consumer as a complete sweep. `.partial` is evidence, and its
+    # absence next to a present `<out>` is what says the run finished.
+    partial = args.out + ".partial"
     try:
-        with ThreadPoolExecutor(max_workers=args.jobs) as ex:
-            futs = [ex.submit(run_one, p, workdir, args.cycles, args.timeout, lean_env,
-                              args.max_rec_depth)
-                    for p in files]
-            for i, f in enumerate(futs):
-                r = f.result()
-                rows.append(r)
-                print(f"[{i+1}/{len(files)}] {r['module']:40s} {r['verdict']:12s} "
-                      f"nodes={r['nodes']:>7s} wall={r['wall_s']:>7s}s {r['reason'][:60]}",
-                      file=sys.stderr, flush=True)
+        with open(partial, "w", encoding="utf-8") as pf:
+            pf.write("\t".join(cols) + "\n")
+            pf.flush()
+            with ThreadPoolExecutor(max_workers=args.jobs) as ex:
+                futs = [ex.submit(run_one, p, workdir, args.cycles, args.timeout, lean_env,
+                                  args.max_rec_depth)
+                        for p in files]
+                # AS THEY COMPLETE, not in submission order.  Iterating
+                # `futs` and calling `f.result()` blocks on the FIRST module,
+                # so with jobs>1 a short module that finished half an hour ago
+                # is still not on disk -- which is exactly what "rows as they
+                # finish" is supposed to prevent.  (At jobs=1 the two orders
+                # coincide, which is why this was not visible.)
+                for i, f in enumerate(as_completed(futs)):
+                    r = f.result()
+                    rows.append(r)
+                    pf.write("\t".join(str(r.get(c, "")) for c in cols) + "\n")
+                    pf.flush()
+                    os.fsync(pf.fileno())   # survive a kill, not just an exit
+                    print(f"[{i+1}/{len(files)}] {r['module']:40s} {r['verdict']:12s} "
+                          f"nodes={r['nodes']:>7s} wall={r['wall_s']:>7s}s {r['reason'][:60]}",
+                          file=sys.stderr, flush=True)
     finally:
         if not args.keep:
             shutil.rmtree(workdir, ignore_errors=True)
@@ -336,10 +364,25 @@ def main():
             print(f"# probes kept in {workdir}", file=sys.stderr)
 
     rows.sort(key=lambda r: (r["verdict"] != "ACCEPTED", r["module"]))
-    with open(args.out, "w", encoding="utf-8") as f:
+    # ATOMIC PUBLISH.  Writing `args.out` in place means an interruption during
+    # the final write leaves a TRUNCATED file that every consumer reads as a
+    # complete sweep -- the same failure the `.partial` split exists to avoid,
+    # one step later. Sibling temp (same directory, so `os.replace` is a rename
+    # within one filesystem), fsync, then replace.
+    tmp = args.out + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
         f.write("\t".join(cols) + "\n")
         for r in rows:
             f.write("\t".join(str(r.get(c, "")) for c in cols) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, args.out)
+    # The complete table exists now, so the partial is no longer evidence of
+    # anything -- leaving it would make a finished run look interrupted.
+    try:
+        os.remove(partial)
+    except OSError:
+        pass
     n_ok = sum(1 for r in rows if r["verdict"] == "ACCEPTED")
     print(f"# ACCEPTED {n_ok}/{len(rows)} -> {args.out}", file=sys.stderr)
     return 0 if n_ok == len(rows) else 1

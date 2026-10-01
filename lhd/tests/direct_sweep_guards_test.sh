@@ -27,7 +27,7 @@ T="${TEST_TMPDIR:-$(cd "$HERE/../.." && pwd)/generated/tests}/direct_sweep_guard
 rm -rf "$T"; mkdir -p "$T"
 
 SWEEP="$SWEEP" OUTDIR="$T" python3 - <<'PY'
-import importlib.util, os, subprocess, sys, types
+import importlib.util, os, subprocess, sys, time, types
 
 spec = importlib.util.spec_from_file_location("ds", os.environ["SWEEP"])
 ds = importlib.util.module_from_spec(spec)
@@ -99,6 +99,153 @@ elif "harness limit" not in row.get("reason", ""):
     fails += 1
 else:
     print("ok: a timed-out probe reports TIMEOUT and names it a harness limit")
+
+# A STOPPED SWEEP MUST STILL LEAVE THE ROWS THAT FINISHED.
+# `<out>` is written once at the end, so an interrupted run used to leave
+# nothing however many modules had already run -- a 71-minute ACCEPTED probe
+# was lost that way. Rows go to `<out>.partial` as they complete; `<out>`
+# appearing WITHOUT a partial beside it is what says the run finished.
+import threading
+
+sweep_root = os.path.join(out, "sweeproot")
+os.makedirs(sweep_root, exist_ok=True)
+for nm in ("aaa", "zzz"):
+    open(os.path.join(sweep_root, f"{nm}_Lgraph.lean"), "w").write(
+        f"def {nm}_designCert : DesignCert := {{}}\n")
+
+second_may_finish = threading.Event()
+real_run_one = ds.run_one
+
+def staged_run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0):
+    name = os.path.basename(path).replace("_Lgraph.lean", "")
+    if name != "aaa":
+        second_may_finish.wait(30)
+    return {"module": name, "path": path, "verdict": "ACCEPTED", "reason": "",
+            "sources": "1", "nodes": "2", "outputs": "1", "flops": "0", "mems": "0",
+            "inputs": "1", "check_ms": "1", "step1_ms": "1", "run_ms": "1",
+            "cycles": str(CYCLES), "wall_s": "0.1", "rss_kb": "1000"}
+
+tsv = os.path.join(out, "sweep.tsv")
+ds.run_one = staged_run_one
+rc_box = {}
+argv = sys.argv
+sys.argv = ["direct_sweep.py", "--out", tsv, "--jobs", "1", "--cycles", str(CYCLES), sweep_root]
+th = threading.Thread(target=lambda: rc_box.update(rc=ds.main()), daemon=True)
+th.start()
+try:
+    deadline = time.time() + 15
+    partial = tsv + ".partial"
+    got = []
+    while time.time() < deadline:
+        if os.path.exists(partial):
+            got = [l for l in open(partial).read().splitlines() if l.strip()]
+            if len(got) >= 2:
+                break
+        time.sleep(0.1)
+    if len(got) < 2:
+        print(f"FAIL: the first finished row never reached {partial!r} while the sweep ran")
+        fails += 1
+    elif not got[1].startswith("aaa\t"):
+        print(f"FAIL: the partial's first data row is {got[1][:40]!r}, not the module that finished")
+        fails += 1
+    elif os.path.exists(tsv):
+        print("FAIL: the FINAL tsv exists while the sweep is still running; a consumer "
+              "would read a half-done sweep as a complete one")
+        fails += 1
+    else:
+        print("ok: a finished row is on disk while the sweep is still running, and the "
+              "final tsv is not")
+finally:
+    second_may_finish.set()
+    th.join(30)
+    sys.argv = argv
+    ds.run_one = real_run_one
+if th.is_alive():
+    print("FAIL: the sweep did not finish after the second module was released"); fails += 1
+elif not os.path.exists(tsv):
+    print("FAIL: no final tsv after a completed sweep"); fails += 1
+elif os.path.exists(tsv + ".partial"):
+    print("FAIL: the partial survived a COMPLETED sweep, so a finished run looks interrupted")
+    fails += 1
+else:
+    print("ok: a completed sweep leaves the final tsv and removes the partial")
+
+# ...and with jobs > 1 a module that FINISHES must reach the partial even while
+# an alphabetically-earlier one is still running. Iterating futures in
+# SUBMISSION order and calling f.result() blocks on the first module, so a
+# short module that finished long ago would still not be on disk -- at jobs=1
+# the two orders coincide, which is why that was invisible.
+first_may_finish = threading.Event()
+
+def blocking_first_run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0):
+    name = os.path.basename(path).replace("_Lgraph.lean", "")
+    if name == "aaa":
+        first_may_finish.wait(30)
+    return {"module": name, "path": path, "verdict": "ACCEPTED", "reason": "",
+            "sources": "1", "nodes": "2", "outputs": "1", "flops": "0", "mems": "0",
+            "inputs": "1", "check_ms": "1", "step1_ms": "1", "run_ms": "1",
+            "cycles": str(CYCLES), "wall_s": "0.1", "rss_kb": "1000"}
+
+tsv2 = os.path.join(out, "sweep_j2.tsv")
+ds.run_one = blocking_first_run_one
+# The final table must be PUBLISHED, not written in place: an interruption
+# during the final write would otherwise leave a truncated file that every
+# consumer reads as a complete sweep -- the same failure `.partial` exists to
+# avoid, one step later. Record the rename and check that nothing appeared at
+# the destination before it.
+replace_calls = []
+real_replace = os.replace
+
+def recording_replace(src, dst, *a, **k):
+    replace_calls.append((src, dst, os.path.exists(dst)))
+    return real_replace(src, dst, *a, **k)
+
+ds.os.replace = recording_replace
+argv = sys.argv
+sys.argv = ["direct_sweep.py", "--out", tsv2, "--jobs", "2", "--cycles", str(CYCLES), sweep_root]
+th2 = threading.Thread(target=ds.main, daemon=True)
+th2.start()
+try:
+    deadline = time.time() + 15
+    rows2 = []
+    while time.time() < deadline:
+        if os.path.exists(tsv2 + ".partial"):
+            rows2 = [l for l in open(tsv2 + ".partial").read().splitlines() if l.strip()]
+            if len(rows2) >= 2:
+                break
+        time.sleep(0.1)
+    if len(rows2) < 2:
+        print("FAIL: at jobs=2, a module that finished did not reach the partial while an "
+              "alphabetically-earlier module was still running")
+        fails += 1
+    elif not rows2[1].startswith("zzz\t"):
+        print(f"FAIL: at jobs=2 the first persisted row is {rows2[1][:40]!r}; expected the "
+              f"module that actually finished first")
+        fails += 1
+    else:
+        print("ok: at jobs=2 a finished module is persisted without waiting for an "
+              "earlier-submitted one")
+finally:
+    first_may_finish.set()
+    th2.join(30)
+    sys.argv = argv
+    ds.run_one = real_run_one
+    ds.os.replace = real_replace
+
+pub = [c for c in replace_calls if c[1] == tsv2]
+if not pub:
+    print("FAIL: the final tsv was written in place, not published by rename; an "
+          "interruption during that write leaves a truncated 'complete' sweep")
+    fails += 1
+elif not pub[0][0].endswith(".tmp"):
+    print(f"FAIL: the final tsv was renamed from {pub[0][0]!r}, not a sibling temp")
+    fails += 1
+elif pub[0][2]:
+    print("FAIL: the destination already existed when the rename ran, so a partially "
+          "written file was visible under the final name")
+    fails += 1
+else:
+    print("ok: the final tsv is published by renaming a sibling temp over it")
 
 sys.exit(1 if fails else 0)
 PY

@@ -1,0 +1,37 @@
+{
+  "_what": "A stopped sweep must still leave the rows that finished, in a file no consumer can mistake for a complete sweep. `<out>` is written once at the end; `<out>.partial` is written as rows complete and removed when the run finishes.",
+  "target": "//lhd/tests:direct_sweep_guards_test",
+  "file": "pass/lean/scripts/direct_sweep.py",
+  "bazel": [
+    "--repo_env=CC=/usr/bin/gcc-15",
+    "--repo_env=CXX=/usr/bin/g++-15"
+  ],
+  "rebuild": [],
+  "mutants": [
+    {
+      "name": "I1 rows not written as they finish",
+      "old": "                    pf.write(\"\\t\".join(str(r.get(c, \"\")) for c in cols) + \"\\n\")\n                    pf.flush()",
+      "new": "                    pf.flush()"
+    },
+    {
+      "name": "I2 partial written to the final path",
+      "old": "    partial = args.out + \".partial\"",
+      "new": "    partial = args.out"
+    },
+    {
+      "name": "I3 partial left behind",
+      "old": "    try:\n        os.remove(partial)\n    except OSError:\n        pass",
+      "new": "    pass"
+    },
+    {
+      "name": "I4 submission-order futures",
+      "old": "                for i, f in enumerate(as_completed(futs)):",
+      "new": "                for i, f in enumerate(futs):"
+    },
+    {
+      "name": "I5 final tsv written in place",
+      "old": "    tmp = args.out + \".tmp\"\n    with open(tmp, \"w\", encoding=\"utf-8\") as f:",
+      "new": "    tmp = args.out\n    with open(tmp, \"w\", encoding=\"utf-8\") as f:"
+    }
+  ]
+}
