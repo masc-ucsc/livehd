@@ -42,6 +42,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -51,12 +52,25 @@ import time
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 LEAN_DIR = ROOT / "formal" / "lean"
 LAKE = os.environ.get("LAKE", "/mada/users/czeng14/.elan/bin/lake")
+# Filled by `main` from `resolve_lean()`.  Empty means "go through lake env",
+# which is what `--via-lake` selects and what a failed resolution falls back to.
+LEAN_BIN, LEAN_ENV, LEAN_ENV_DIGEST = "", {}, ""
 
 # `checker` sits BETWEEN sim and agree deliberately.  An agreement result from a
 # checker that cannot reject a wrong answer is not weak evidence, it is no
 # evidence, so it must not be able to earn a verdict.  Ordering it here means
 # `verdict()` stops at `sim` whenever the self-test fails, whatever `agree` says.
 GATES = ["cert", "compile", "reify", "typecheck", "sim", "checker", "agree", "proof"]
+
+# Outcomes produced by the SCHEDULER rather than by the design under test.  Each
+# means "no gate was judged", which is a different thing from "no gate passed":
+# their rows carry all-zero gates, so recomputing a verdict from those zeros
+# would relabel a memory decision as a compilation result.  They are also
+# NONTERMINAL -- `--resume` must run them again rather than treat them as done.
+#
+#   deferred    the scheduler declined to START it (threshold, or soft cap)
+#   rss_killed  it was started and then TERMINATED by the hard aggregate limit
+NONTERMINAL_SCHEDULER_STATUSES = {"deferred", "rss_killed"}
 
 # ---------------------------------------------------------------------------
 # Child lifetime.
@@ -204,13 +218,28 @@ for _s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
 # `--defer-over-rss-kb` only acts on RSS values MEASURED IN AN EARLIER RUN.  A
 # design whose cost moved, or one never measured, walks straight past both.
 #
-# So the live run is also sampled.  This machine is shared: the policy is to stop
-# handing out NEW work once the aggregate approaches the cap, and never to kill a
-# worker that is already running -- killing it would spend the memory and discard
-# the row, which is the worst of both.
+# So the live run is also sampled.  This machine is shared, so there are TWO
+# limits, and they do different jobs:
+#
+#   --max-aggregate-rss-kb  SOFT.  Stops handing out NEW work.  Never touches a
+#                           running worker: killing it would spend the memory and
+#                           discard the row, which is the worst of both.
+#   --kill-over-rss-kb      HARD, opt-in, default off.  TERMINATES the running
+#                           probe.  The soft cap cannot help against one probe
+#                           that grows past the budget by itself, and the two
+#                           heaviest CORE-ET modules are exactly that case.
+#                           Paying a discarded row is the point: on a shared
+#                           machine, overrunning is someone else's problem.
 # ---------------------------------------------------------------------------
 _RSS_STOP = threading.Event()
-_RSS_PEAK = {"kb": 0, "cap_kb": 0, "tripped_at_kb": 0}
+# The HARD limit.  `_RSS_STOP` only declines to START more work, which cannot
+# help against a single probe that grows past the budget on its own -- and the
+# two heaviest CORE-ET modules are exactly that case.  `_RSS_KILL` terminates
+# the running process group.  It is opt-in because killing a probe spends its
+# memory and time and keeps no row; it is worth it only when exceeding the
+# budget would hurt someone else on a shared machine.
+_RSS_KILL = threading.Event()
+_RSS_PEAK = {"kb": 0, "cap_kb": 0, "tripped_at_kb": 0, "kill_kb": 0, "killed_at_kb": 0}
 _RSS_LOCK = threading.Lock()
 _PAGE_KB = os.sysconf("SC_PAGE_SIZE") // 1024
 
@@ -270,13 +299,26 @@ def _aggregate_rss_kb() -> int:
     return _rss_kb_of(os.getpid()) + sum(_rss_kb_of(pid) for pid in pids)
 
 
-def _rss_monitor(cap_kb: int, interval: float = 5.0) -> None:
+def _rss_monitor(cap_kb: int, interval: float = 5.0, kill_kb: int = 0) -> None:
     interval = float(os.environ.get("D3_RSS_INTERVAL") or interval)
-    while not _SHUTDOWN.is_set() and not _RSS_STOP.is_set():
+    while not _SHUTDOWN.is_set() and not _RSS_KILL.is_set():
         total = _aggregate_rss_kb()
         with _RSS_LOCK:
             if total > _RSS_PEAK["kb"]:
                 _RSS_PEAK["kb"] = total
+        if kill_kb and total >= kill_kb:
+            with _RSS_LOCK:
+                _RSS_PEAK["killed_at_kb"] = total
+            print(f"d3_sweep: AGGREGATE RSS {total} kB reached the HARD limit "
+                  f"{kill_kb} kB -- terminating the running probe(s). The row is "
+                  f"recorded as rss_killed, a SCHEDULING outcome and not a gate "
+                  f"failure.", file=sys.stderr)
+            _RSS_KILL.set()
+            _RSS_STOP.set()
+            _reap_all()
+            return
+        if _RSS_STOP.is_set():
+            return
         if cap_kb and total >= cap_kb:
             with _RSS_LOCK:
                 _RSS_PEAK["tripped_at_kb"] = total
@@ -284,11 +326,69 @@ def _rss_monitor(cap_kb: int, interval: float = 5.0) -> None:
                   f"no further targets will be launched; the running one is left to "
                   f"finish", file=sys.stderr)
             _RSS_STOP.set()
-            return
+            # Deliberately NOT a return when a hard limit is armed: the probe
+            # already running is the one that can still cross it.
+            if not kill_kb:
+                return
         time.sleep(interval)
 
 
-def run_group(cmd, cwd, timeout):
+# Everything whose value can change what `lean` loads or links.  Used for the
+# sidecar digest; the FULL snapshot is what the probe actually runs under, but
+# digesting all of it would make the digest move for reasons like `SSH_TTY`.
+_ENV_KEYS = re.compile(r"^(LEAN|LAKE|ELAN)")
+
+
+def _lean_env_subset(env: dict) -> dict:
+    return {k: v for k, v in env.items()
+            if _ENV_KEYS.match(k) or k in ("PATH", "LD_LIBRARY_PATH")}
+
+
+def resolve_lean():
+    """The exact `lean` binary and Lake's COMPLETE environment, resolved once.
+
+    `lake env lean` FORKS: a `lake` parent sits at ~811,480 kB resident for the
+    entire probe, doing nothing but holding two environment variables.  At
+    jobs=1 that is 811 MB of a 20 GB budget spent per probe on a process that
+    computes nothing, and it is the difference between the largest module
+    fitting and not fitting.
+
+    Resolution goes THROUGH Lake and takes the WHOLE environment, because Lake
+    sets far more than `LEAN_PATH`: measured here it adds 17 variables (LEAN,
+    LEAN_SYSROOT, LEAN_AR, LEAN_SRC_PATH, LEAN_GITHASH, LEAN_RECURSION_COUNT,
+    LAKE_*, ELAN_*) and it MODIFIES both `PATH` and `LD_LIBRARY_PATH`.
+    Reconstructing only `LEAN_PATH` would have run Lean against different shared
+    libraries -- that is changing the execution environment, not removing a
+    process.  The snapshot is taken once and passed verbatim, so the only thing
+    that disappears is Lake's resident parent.
+
+    The binary comes from the snapshot's own `LEAN`, falling back to `which lean`
+    INSIDE that environment; it never picks a `lean` off the ambient PATH.
+
+    Measured on three real certificates the output is byte-identical both ways,
+    and the direct call is also slightly faster.
+    """
+    r = subprocess.run([LAKE, "env", "env", "-0"], cwd=LEAN_DIR,
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return "", {}, ""
+    env = {}
+    for item in r.stdout.split("\0"):
+        if not item:
+            continue
+        k, _, v = item.partition("=")
+        if k:
+            env[k] = v
+    binp = env.get("LEAN") or shutil.which("lean", path=env.get("PATH", ""))
+    if not binp:
+        return "", {}, ""
+    sub = _lean_env_subset(env)
+    digest = hashlib.sha256(
+        "\n".join(f"{k}={sub[k]}" for k in sorted(sub)).encode()).hexdigest()
+    return binp, env, digest
+
+
+def run_group(cmd, cwd, timeout, env=None):
     """Run `cmd` in its own session; return (combined output, returncode).
 
     Returncode 124 means the timeout fired, matching `timeout(1)` so the
@@ -298,7 +398,7 @@ def run_group(cmd, cwd, timeout):
         return "", 143
     p = subprocess.Popen(
         cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, start_new_session=True,
+        text=True, start_new_session=True, env=env,
     )
     pgid = os.getpgid(p.pid)
     with _GROUPS_LOCK:
@@ -516,6 +616,11 @@ TOOL_FILES = [
     ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/D3Harness.lean",
     ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/ReifyGen.lean",
     ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/Reify.lean",
+    # The probe loads the *Defs* modules; the proof modules are kept here anyway
+    # -- see CRITICAL_OLEANS for why.
+    ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/CompileDesignDefs.lean",
+    ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/CompileGraphDefs.lean",
+    ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/CompileOpDefs.lean",
     ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/CompileDesign.lean",
     ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/ResidualSemantics.lean",
     ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/Runtime.lean",
@@ -528,9 +633,16 @@ TOOL_FILES = [
 # `CompileDesign.olean` fourteen minutes into a run while this branch's source
 # sat unchanged, so every source-level guard reported "same tooling" while the
 # compiler under test was swapped.  Hash what gets loaded.
-CRITICAL_OLEANS = ["CompileDesign", "D3Harness", "ReifyGen", "Reify", "Runtime",
-                   "DesignCert", "ResidualIR", "ResidualSemantics",
-                   "CompileOp", "CompileGraph"]
+# The *Defs modules are what a probe now LOADS.  The three proof modules are kept
+# in the list even though a probe no longer imports them: `compileDesign_correct`
+# is the entire reason an `agree` row means anything, so a run that continued
+# across an edit to it would be reporting agreement against a correctness claim
+# that had moved underneath it.  The cost is an abort when a proof is edited
+# mid-run, which is exactly when a run SHOULD abort.
+CRITICAL_OLEANS = ["CompileDesignDefs", "CompileGraphDefs", "CompileOpDefs",
+                   "CompileDesign", "CompileGraph", "CompileOp",
+                   "D3Harness", "ReifyGen", "Reify", "Runtime",
+                   "DesignCert", "ResidualIR", "ResidualSemantics"]
 
 
 def artifact_dir() -> pathlib.Path:
@@ -794,7 +906,12 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
     # chosen from MEASURED peak RSS rather than guessed.  Wrapping rather than
     # sampling: a sampler misses the peak of a short-lived elaboration.
     tv = log_dir / f"{m}.time"
-    cmd = [LAKE, "env", "lean", str(probe)]
+    # Direct `lean` by default; `--via-lake` keeps the old two-process form so
+    # the two can be compared on identical probes rather than assumed equal.
+    if LEAN_BIN:
+        cmd, penv = [LEAN_BIN, str(probe)], LEAN_ENV
+    else:
+        cmd, penv = [LAKE, "env", "lean", str(probe)], None
     if pathlib.Path("/usr/bin/time").exists():
         cmd = ["/usr/bin/time", "-v", "-o", str(tv)] + cmd
     # Immediately BEFORE launch.  A probe started after the compiler moved is
@@ -808,13 +925,23 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
 
     row["launched"] = "1"
     t0 = time.time()
-    out, rc = run_group(cmd, LEAN_DIR, timeout)
+    out, rc = run_group(cmd, LEAN_DIR, timeout, env=penv)
     if os.environ.get("D3_TEST_RAISE_ON") == m:
         # Test seam, placed where the real hazard is: AFTER the probe ran, in the
         # window where timing capture, log writing and gate parsing happen.  main
         # converts an exception here into a `runner_error` row, and that row must
         # still be subject to the artifact check.
         raise RuntimeError("D3_TEST_RAISE_ON (post-probe)")
+    if _RSS_KILL.is_set() and rc != 0:
+        # Killed by the budget, not by anything the design did.  Recorded as a
+        # nonterminal row so `--resume` picks it up, and never passed to
+        # `classify`, which would read the SIGKILL as a compiler failure.
+        r = deferred_row(target, samples,
+                         f"terminated by the hard aggregate RSS limit at "
+                         f"{_RSS_PEAK['killed_at_kb']} kB")
+        r["run_status"], r["verdict"] = "rss_killed", "rss_killed"
+        r["launched"], r["wall_s"] = "1", f"{time.time() - t0:.2f}"
+        return r
     row["wall_s"] = f"{time.time() - t0:.2f}"
     try:
         tt = tv.read_text()
@@ -1090,11 +1217,21 @@ def main() -> int:
     ap.add_argument("--order-by", default="",
                     help="TSV with module/max_rss_kb columns; run order becomes "
                          "cheapest-RSS-first (scheduling only, never evidence)")
+    ap.add_argument("--via-lake", action="store_true",
+                    help="run each probe as `lake env lean` (two processes) instead "
+                         "of exec'ing the resolved lean binary directly. Slower and "
+                         "~811 MB more resident per probe; kept so the two forms can "
+                         "be compared rather than assumed equal.")
     ap.add_argument("--defer-over-rss-kb", type=int, default=0,
                     help="do not START targets whose recorded peak RSS exceeds this "
                          "(or that have no recorded RSS); they are written as "
                          "run_status=deferred and picked up by a later --resume. "
                          "Requires --order-by. Scheduling only.")
+    ap.add_argument("--kill-over-rss-kb", type=int, default=0,
+                    help="HARD limit: terminate the running probe(s) once this "
+                         "run's aggregate resident total reaches it. 0 disables. "
+                         "Unlike --max-aggregate-rss-kb this stops a probe that is "
+                         "ALREADY RUNNING; the row becomes rss_killed and resumable.")
     ap.add_argument("--max-aggregate-rss-kb", type=int, default=20_000_000,
                     help="stop LAUNCHING new targets once this run's aggregate "
                          "resident total reaches this; 0 disables. A running "
@@ -1190,9 +1327,26 @@ def main() -> int:
         print("no targets selected", file=sys.stderr)
         return 2
 
+    global LEAN_BIN, LEAN_ENV, LEAN_ENV_DIGEST
+    if not a.via_lake:
+        LEAN_BIN, LEAN_ENV, LEAN_ENV_DIGEST = resolve_lean()
+        if not LEAN_BIN:
+            print("REFUSING: could not resolve the lean binary through lake; "
+                  "pass --via-lake to use the two-process form deliberately",
+                  file=sys.stderr)
+            return 2
+
     sel_digest = selection_digest(targets)
     cfg = run_config(a, manifest_digest)
     cfg["selection_digest"] = sel_digest
+    # Part of `config`, not of `scheduling`: WHICH lean binary ran a probe can
+    # change what the probe reports, so a resumed run must not mix the two.
+    cfg["lean_bin"] = LEAN_BIN
+    cfg["via_lake"] = bool(a.via_lake)
+    # The resolved EXECUTION ENVIRONMENT, not just the binary: two runs that
+    # differ in LD_LIBRARY_PATH or LEAN_PATH ran different code even with the
+    # same `lean` on disk, so a resume must not mix them.
+    cfg["lean_env_digest"] = LEAN_ENV_DIGEST
     # SCHEDULING metadata lives beside `config`, never inside it.  `--resume`
     # refuses a run whose `config` differs, and it SHOULD: samples, timeout and
     # the manifest change what a row means.  A schedule does not.  Resuming the
@@ -1205,6 +1359,7 @@ def main() -> int:
                             if a.order_by else ""),
         "defer_over_rss_kb": a.defer_over_rss_kb,
         "max_aggregate_rss_kb": a.max_aggregate_rss_kb,
+        "kill_over_rss_kb": a.kill_over_rss_kb,
         "deferred": [{"module": t.module, "why": why} for t, why in deferred_targets],
     }
     cfg["tool_digest"] = tool_digest()
@@ -1237,10 +1392,20 @@ def main() -> int:
 
     cfg["lake_version"] = _probe([LAKE, "--version"])
     cfg["lean_version"] = _probe([LAKE, "env", "lean", "--version"])
+    # The version that was PREFLIGHTED must be the version that RUNS.  Probing
+    # `lake env lean` while the probes exec a separately resolved binary would
+    # authenticate a toolchain nothing used -- the same shape as the earlier bug
+    # where `lake --version` was probed from the repository root and reported
+    # 4.34.1 while every worker ran 4.31.0.
+    if LEAN_BIN:
+        cfg["lean_bin_version"] = _probe([LEAN_BIN, "--version"])
     tc = LEAN_DIR / "lean-toolchain"
     cfg["lean_toolchain"] = tc.read_text().strip() if tc.is_file() else "unknown"
 
     if a.manifest:
+        # Ordered after the `unidentified` refusal below: comparing against an
+        # `unknown` version would report a toolchain MISMATCH when the real
+        # finding is that a version probe failed outright.
         unidentified = [k for k in ("lake_version", "lean_version", "lean_toolchain")
                         if cfg[k] == "unknown"]
         if unidentified:
@@ -1250,6 +1415,18 @@ def main() -> int:
             print(f"REFUSING a manifest run: toolchain not identified ({', '.join(unidentified)}). "
                   f"A canonical result must name the compiler that produced it, and 'unknown' "
                   f"is a value two different failures share.", file=sys.stderr)
+            return 2
+
+        # The version PREFLIGHTED must be the version that RUNS.  Probing
+        # `lake env lean` while each probe execs a separately resolved binary
+        # would authenticate a toolchain nothing used -- the same shape as the
+        # earlier bug where `lake --version` was probed from the repository root
+        # and reported 4.34.1 while every worker ran 4.31.0.
+        if LEAN_BIN and cfg.get("lean_bin_version") != cfg["lean_version"]:
+            print(f"REFUSING: the resolved lean binary reports "
+                  f"{cfg.get('lean_bin_version')!r} but `lake env lean` reports "
+                  f"{cfg['lean_version']!r}; these must be the same toolchain",
+                  file=sys.stderr)
             return 2
 
     external, why = build_root_is_external()
@@ -1357,6 +1534,9 @@ def main() -> int:
                           f"(target_key={r.get('target_key')!r})", file=sys.stderr)
                     return 2
                 if r.get("run_status") != "done":
+                    # Covers NONTERMINAL_SCHEDULER_STATUSES and every error row:
+                    # anything not `done` is re-run rather than reused, so a
+                    # scheduler outcome can never be mistaken for finished work.
                     continue
                 bad = [g for g in GATES if g != "proof" and r.get(g) not in ("0", "1")]
                 if bad:
@@ -1446,6 +1626,8 @@ def main() -> int:
             {"config": cfg, "scheduling": sched, "run_id": RUN_ID,
              "aggregate_rss_peak_kb": _RSS_PEAK["kb"],
              "aggregate_rss_tripped_kb": _RSS_PEAK["tripped_at_kb"],
+             "aggregate_rss_killed_kb": _RSS_PEAK["killed_at_kb"],
+             "lean_env": _lean_env_subset(LEAN_ENV) if LEAN_ENV else {},
              "cert_sha256": {t.key: t.sha256 for t in targets},
              "modules": {t.key: t.module for t in targets},
              "targets": len(targets), "updated": time.strftime("%Y-%m-%d %H:%M:%S")},
@@ -1456,8 +1638,10 @@ def main() -> int:
 
     checkpoint()
     _RSS_PEAK["cap_kb"] = a.max_aggregate_rss_kb
-    if a.max_aggregate_rss_kb:
-        threading.Thread(target=_rss_monitor, args=(a.max_aggregate_rss_kb,),
+    _RSS_PEAK["kill_kb"] = a.kill_over_rss_kb
+    if a.max_aggregate_rss_kb or a.kill_over_rss_kb:
+        threading.Thread(target=_rss_monitor,
+                         args=(a.max_aggregate_rss_kb, 5.0, a.kill_over_rss_kb),
                          daemon=True).start()
     with concurrent.futures.ThreadPoolExecutor(max_workers=a.jobs) as ex:
         futs = {ex.submit(run_one, t, a.samples, a.timeout, a.native, baseline_artifacts): t
@@ -1495,7 +1679,7 @@ def main() -> int:
                     r["drift"] = {"1": "after", "0": "between"}.get(launched_hint, "unknown")
 
             if (not r.get("drift") and not synthesized
-                    and r.get("run_status") != "deferred"):
+                    and r.get("run_status") not in NONTERMINAL_SCHEDULER_STATUSES):
                 # A synthesized row already carries `runner_error`; recomputing a
                 # verdict from its all-zero gates would relabel a crash as the
                 # ordinary "no gate passed" outcome.
@@ -1544,6 +1728,11 @@ def main() -> int:
     for g in GATES:
         n = sum(1 for r in rows if r.get(g) == 1)
         print(f"  {g:<10} {n}/{len(rows)}", file=sys.stderr)
+    nkill = sum(1 for r in rows if r.get("run_status") == "rss_killed")
+    if nkill:
+        print(f"  rss_killed {nkill}/{len(rows)} started and then terminated by the "
+              f"hard aggregate limit ({a.kill_over_rss_kb} kB); resumable, and NOT a "
+              f"gate failure", file=sys.stderr)
     ndef = sum(1 for r in rows if r.get("run_status") == "deferred")
     if ndef:
         # Stated as its own line rather than folded into the gate counts: a

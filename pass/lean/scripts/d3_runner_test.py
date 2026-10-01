@@ -45,10 +45,53 @@ def {m}_designCert : DesignCert := {{ sources := #[], nodes := #[], outputs := #
 # therefore reports a toolchain that executed nothing.
 STUB = r'''#!/usr/bin/env python3
 import pathlib, re, sys, time, os
+# `d3_sweep` resolves the lean binary and LEAN_PATH once, THROUGH lake, then
+# execs that binary per probe.  The stub answers both resolution calls with
+# ITSELF, so the direct path and the `lake env lean` path exercise the same
+# fake compiler and can be compared against each other.
+if sys.argv[1:3] == ["env", "which"] and "lean" in sys.argv:
+    # Hand back a DISTINCT name rather than this path, so the resolved binary
+    # identifies itself as lean.  Returning the same path made the stub answer
+    # the version preflight as `lake`, and the preflight correctly refused the
+    # run -- a real check firing on a fixture that was lying to it.
+    me = pathlib.Path(os.path.realpath(__file__))
+    # Named after THIS stub.  A shared `fake_lean` in the temp directory made the
+    # drift stub resolve to the plain stub that an earlier case had created, so
+    # the drifted run silently ran the non-drifting compiler and every drift
+    # assertion failed for a reason that had nothing to do with drift.
+    ln = me.with_name("lean_" + me.name)
+    if not (ln.is_symlink() and os.path.realpath(ln) == str(me)):
+        try:
+            ln.unlink()
+        except FileNotFoundError:
+            pass
+        ln.symlink_to(me)
+    print(str(ln)); raise SystemExit(0)
+if sys.argv[1:3] == ["env", "printenv"]:
+    print(os.environ.get(sys.argv[3], "")); raise SystemExit(0)
+if sys.argv[1:4] == ["env", "env", "-0"]:
+    # The COMPLETE environment, as `lake env env -0` gives it: real Lake sets 17
+    # variables and rewrites PATH and LD_LIBRARY_PATH, so the runner snapshots
+    # all of it. `LEAN` is what the runner execs.
+    me = pathlib.Path(os.path.realpath(__file__))
+    ln = me.with_name("lean_" + me.name)
+    if not (ln.is_symlink() and os.path.realpath(ln) == str(me)):
+        try:
+            ln.unlink()
+        except FileNotFoundError:
+            pass
+        ln.symlink_to(me)
+    snap = dict(os.environ)
+    snap["LEAN"] = str(ln)
+    snap["LEAN_PATH"] = snap.get("LEAN_PATH", "")
+    snap["LEAN_SYSROOT"] = str(me.parent)
+    sys.stdout.write("\0".join(f"{k}={v}" for k, v in snap.items()) + "\0")
+    raise SystemExit(0)
+AS_LEAN = "lean" in pathlib.Path(sys.argv[0]).name
 if "--version" in sys.argv:
     here = pathlib.Path.cwd()
     where = "LEANDIR" if (here / "lean-toolchain").is_file() else "ROOT"
-    what = "lean" if "lean" in sys.argv else "lake"
+    what = "lean" if (AS_LEAN or "lean" in sys.argv) else "lake"
     print(f"{what}-version-from-{where}")
     raise SystemExit(0)
 probe = pathlib.Path(sys.argv[-1])

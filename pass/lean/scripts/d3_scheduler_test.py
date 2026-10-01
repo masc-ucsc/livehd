@@ -228,6 +228,71 @@ def main() -> int:
                                ["--resume", "--jobs", "1", "--dry-run"]).stdout)) == stopped,
               "an RSS stop is resumable on the same terms as a threshold deferral")
 
+        # ---- 8b. the HARD limit stops a probe that is already running --------
+        # The soft cap cannot help here: it only declines to start more work,
+        # and the case that matters is ONE probe growing past the budget alone.
+        out8b = tmp / "o8b.tsv"
+        d8b = run(tmp, cdir, out8b,
+                  ["--order-by", str(tbl), "--jobs", "1",
+                   "--max-aggregate-rss-kb", "0", "--kill-over-rss-kb", "1"],
+                  env_extra={"STUB_DELAY": "3", "D3_RSS_INTERVAL": "0.05"})
+        rows8b = {r["module"]: r for r in rt.rows_of(out8b)}
+        killed = {m for m, r in rows8b.items() if r["run_status"] == "rss_killed"}
+        check("hard_kill_terminates_running", d8b.returncode == 0 and len(killed) >= 1,
+              f"a running probe was terminated by the hard limit: {sorted(killed)}",
+              d8b.stderr[-900:])
+        check("hard_kill_launched_not_failed",
+              all(rows8b[m]["launched"] == "1" and rows8b[m]["verdict"] == "rss_killed"
+                  and all(rows8b[m][g] == "0" for g in ("compile", "agree"))
+                  for m in killed),
+              "it is recorded as launched-then-killed, not as a gate failure",
+              str({m: rows8b[m].get("detail") for m in killed})[:400])
+        check("hard_kill_resumable",
+              set(order_of(run(tmp, cdir, out8b,
+                               ["--resume", "--jobs", "1", "--dry-run"]).stdout)) >= killed,
+              "and an rss_killed row is nonterminal, so --resume runs it again")
+        check("hard_kill_reported", "HARD limit" in d8b.stderr,
+              "the run says the hard limit is what ended it", d8b.stderr[-300:])
+        # The two outcomes must stay DISTINGUISHABLE in one run: the probe that
+        # was running is `rss_killed`, everything still queued behind it is
+        # `deferred`. Collapsing them would claim a design was terminated when
+        # it was never started.
+        queued = {m for m, r in rows8b.items() if r["run_status"] == "deferred"}
+        check("hard_kill_queued_deferred_not_killed",
+              queued and not (queued & killed)
+              and all(rows8b[m]["launched"] == "0" for m in queued),
+              f"queued targets are deferred, not killed: {sorted(queued)}",
+              str({m: rows8b[m]["run_status"] for m in rows8b}))
+        check("soft_cap_off_in_this_run",
+              json.loads((out8b.with_suffix(".tsv.meta.json")).read_text())
+                  ["scheduling"]["max_aggregate_rss_kb"] == 0,
+              "and this case ran with the SOFT cap disabled, so the hard limit "
+              "is demonstrably what acted (case 8 covers soft-stop-only)")
+
+        # ---- 8c. direct lean and `lake env lean` agree on every gate ----------
+        # The two invocation forms must differ ONLY in process count. Measured on
+        # three real certificates the output is byte-identical; this pins the
+        # plumbing (argv shape, LEAN_PATH propagation) so a future change cannot
+        # quietly make the direct path run something else.
+        od, ol = tmp / "od.tsv", tmp / "ol.tsv"
+        rd = run(tmp, cdir, od, ["--order-by", str(tbl), "--jobs", "1"])
+        rl = run(tmp, cdir, ol, ["--order-by", str(tbl), "--jobs", "1", "--via-lake"])
+        GATES = ["cert", "compile", "reify", "typecheck", "sim", "checker", "agree",
+                 "verdict", "distinct_obs", "selftest_base", "mut_out", "mut_flop"]
+        gd = {r["module"]: tuple(r[g] for g in GATES) for r in rt.rows_of(od)}
+        gl = {r["module"]: tuple(r[g] for g in GATES) for r in rt.rows_of(ol)}
+        check("direct_vs_lake_same_gates",
+              rd.returncode == 0 and rl.returncode == 0 and gd == gl and gd,
+              f"identical gates both ways over {len(gd)} module(s)",
+              f"{rd.stderr[-300:]}\n{rl.stderr[-300:]}")
+        md = json.loads((od.with_suffix(".tsv.meta.json")).read_text())["config"]
+        ml = json.loads((ol.with_suffix(".tsv.meta.json")).read_text())["config"]
+        check("direct_recorded_in_config",
+              md.get("lean_bin") and md.get("via_lake") is False
+              and ml.get("via_lake") is True and not ml.get("lean_bin"),
+              "which binary ran is part of `config`, so a resume cannot mix the two",
+              f"{md.get('lean_bin')!r} / {ml.get('via_lake')!r}")
+
         # ---- 9. the descendant walk sees a grandchild the marker misses -------
         spec2 = importlib.util.spec_from_file_location("d3_sweep", SWEEP)
         sw = importlib.util.module_from_spec(spec2)

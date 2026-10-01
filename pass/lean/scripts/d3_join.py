@@ -164,17 +164,18 @@ def main() -> int:
                                  f"manifest records {want[:12]}")
                 row["status"] = "stale_result"
                 problems.append(f"{key}: certificate hash mismatch")
-            elif (r.get("run_status") or "").strip() == "deferred":
+            elif (r.get("run_status") or "").strip() in ("deferred", "rss_killed"):
                 # The scheduler declined to start it, so no gate was attempted.
                 # Crediting this as `ran` with an all-zero gate row would read as
                 # "it got nowhere" when the truth is "it was never tried", and
                 # the two have opposite implications for the milestone.
                 for g in CREDITABLE:
                     row[g] = 0
-                row["verdict"] = "deferred"
-                row["detail"] = r.get("detail", "") or "deferred by the scheduler"
-                row["status"] = "deferred"
-                problems.append(f"{key}: deferred, not run")
+                st = (r.get("run_status") or "").strip()
+                row["verdict"] = st
+                row["detail"] = r.get("detail", "") or f"{st} by the scheduler"
+                row["status"] = st
+                problems.append(f"{key}: {st}, no gate was judged")
             else:
                 for g in CREDITABLE:
                     row[g] = 1 if str(r.get(g, "0")).strip() == "1" else 0
@@ -253,7 +254,7 @@ def main() -> int:
     for g in CREDITABLE:
         print(f"  {g:<10} {sum(1 for r in out_rows if r.get(g) == 1)}/{len(out_rows)}")
     print(f"  {'proof':<10} 0/{len(out_rows)} (na -- not attempted)")
-    ndef = sum(1 for r in out_rows if r.get("status") == "deferred")
+    ndef = sum(1 for r in out_rows if r.get("status") in ("deferred", "rss_killed"))
     if ndef:
         print(f"  {ndef} target(s) were DEFERRED by the scheduler and never attempted; "
               f"they are uncredited and the table is incomplete until they run.")
