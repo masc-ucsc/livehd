@@ -124,37 +124,90 @@ def opOfCode (c : Nat) (arg : Int) : Option LGraphOp :=
 -- 2.  Writer
 --------------------------------------------------------------------------------
 
-/-- Serialise to a handle rather than a `String`: `++` on a 14 MB certificate is
-quadratic, and this is the reference implementation the round-trip test uses. -/
-def writeCert (h : IO.FS.Handle) (D : DesignCert) : IO Unit := do
-  h.putStr "DCERT1\n"
-  h.putStr s!"{D.sources.size}\n"
-  for s in D.sources do
-    match s with
-    | .input idx w              => h.putStr s!"0 {idx} {w}\n"
-    | .const w v                => h.putStr s!"1 {w} {v}\n"
-    | .flopQ idx w              => h.putStr s!"2 {idx} {w}\n"
-    | .flopQAsync idx w ri rv a => h.putStr s!"3 {idx} {w} {ri} {rv} {if a then 1 else 0}\n"
-    | .memImg idx aw dw         => h.putStr s!"4 {idx} {aw} {dw}\n"
-    | .memConst aw dw cs        =>
-        h.putStr s!"5 {aw} {dw} {cs.size}"
-        for v in cs do h.putStr s!" {v}"
-        h.putStr "\n"
-  h.putStr s!"{D.nodes.size}\n"
-  for n in D.nodes do
-    let (c, arg) := opCode n.op
-    h.putStr s!"{c} {arg} {n.width} {n.deps.size}"
-    for d in n.deps do h.putStr s!" {d}"
-    h.putStr s!" {n.origin}\n"
-  h.putStr s!"{D.outputs.size}\n"
-  for o in D.outputs do h.putStr s!"{o.slot} {o.width}\n"
-  h.putStr s!"{D.flops.size}\n"
-  for f in D.flops do
-    let (he, e) := match f.enable   with | some x => (1, x) | none => (0, 0)
-    let (hr, r) := match f.resetPin with | some x => (1, x) | none => (0, 0)
-    h.putStr s!"{f.width} {f.din} {he} {e} {hr} {r} {f.resetValue} {if f.resetActiveLow then 1 else 0}\n"
-  h.putStr s!"{D.memories.size}\n"
-  for m in D.memories do h.putStr s!"{m.aw} {m.dw} {m.nextImg}\n"
+/-! The renderer is PURE and the IO does nothing but hand its bytes to a handle.
+
+The round-trip theorem has to name the bytes, so they cannot be produced by an
+`IO` action; and the decimal rendering is spelled out here rather than borrowed
+from `Nat.repr`, so the proof reasons about one recursion of its own instead of
+about the internals of `Nat.toDigits`.
+
+`natBytes` agrees with `Nat.repr` on every input -- same digits, no leading
+zeros -- which is what keeps the bytes identical to those the previous
+`h.putStr s!"{n}"` writer produced, and is checked against the stored
+certificates by the differential harness rather than assumed. -/
+
+@[inline] def chSpace : UInt8 := 32
+@[inline] def chNL    : UInt8 := 10
+@[inline] def chMinus : UInt8 := 45
+
+/-- Decimal digits, most significant first.  `natBytes 0 = ['0']`. -/
+def natBytes (n : Nat) : List UInt8 :=
+  if n < 10 then [UInt8.ofNat (48 + n)]
+  else natBytes (n / 10) ++ [UInt8.ofNat (48 + n % 10)]
+termination_by n
+decreasing_by exact Nat.div_lt_self (by omega) (by omega)
+
+/-- `Int.negSucc n` is `-(n+1)`, so a negative renders as '-' then the digits of
+its magnitude.  Zero is never signed. -/
+def intBytes : Int → List UInt8
+  | .ofNat n   => natBytes n
+  | .negSucc n => chMinus :: natBytes (n + 1)
+
+@[inline] def spc (l : List UInt8) : List UInt8 := chSpace :: l
+
+def srcBytes : SourceDesc → List UInt8
+  | .input idx w              => natBytes 0 ++ spc (natBytes idx) ++ spc (natBytes w) ++ [chNL]
+  | .const w v                => natBytes 1 ++ spc (natBytes w) ++ spc (intBytes v) ++ [chNL]
+  | .flopQ idx w              => natBytes 2 ++ spc (natBytes idx) ++ spc (natBytes w) ++ [chNL]
+  | .flopQAsync idx w ri rv a =>
+      natBytes 3 ++ spc (natBytes idx) ++ spc (natBytes w) ++ spc (natBytes ri)
+        ++ spc (intBytes rv) ++ spc (natBytes (if a then 1 else 0)) ++ [chNL]
+  | .memImg idx aw dw         =>
+      natBytes 4 ++ spc (natBytes idx) ++ spc (natBytes aw) ++ spc (natBytes dw) ++ [chNL]
+  | .memConst aw dw cs        =>
+      natBytes 5 ++ spc (natBytes aw) ++ spc (natBytes dw) ++ spc (natBytes cs.size)
+        ++ (cs.toList.map (fun v => spc (intBytes v))).flatten ++ [chNL]
+
+def nodeBytes (n : DenseNodeCert) : List UInt8 :=
+  let (c, arg) := opCode n.op
+  natBytes c ++ spc (intBytes arg) ++ spc (natBytes n.width) ++ spc (natBytes n.deps.size)
+    ++ (n.deps.toList.map (fun d => spc (natBytes d))).flatten
+    ++ spc (natBytes n.origin) ++ [chNL]
+
+def outBytes (o : OutputDesc) : List UInt8 :=
+  natBytes o.slot ++ spc (natBytes o.width) ++ [chNL]
+
+def flopBytes (f : FlopDesc) : List UInt8 :=
+  let (he, e) := match f.enable   with | some x => (1, x) | none => (0, 0)
+  let (hr, r) := match f.resetPin with | some x => (1, x) | none => (0, 0)
+  natBytes f.width ++ spc (natBytes f.din) ++ spc (natBytes he) ++ spc (natBytes e)
+    ++ spc (natBytes hr) ++ spc (natBytes r) ++ spc (intBytes f.resetValue)
+    ++ spc (natBytes (if f.resetActiveLow then 1 else 0)) ++ [chNL]
+
+def memBytes (m : MemoryDesc) : List UInt8 :=
+  natBytes m.aw ++ spc (natBytes m.dw) ++ spc (natBytes m.nextImg) ++ [chNL]
+
+/-- A length-prefixed section: the count on its own line, then one record each. -/
+@[inline] def section' {α : Type} (f : α → List UInt8) (xs : Array α) : List UInt8 :=
+  natBytes xs.size ++ [chNL] ++ (xs.toList.map f).flatten
+
+/-- "DCERT1\n" -- spelled as bytes so the proof never unfolds `String.toUTF8`. -/
+def magicBytes : List UInt8 := [68, 67, 69, 82, 84, 49, 10]
+
+/-- The certificate as bytes.  This is the thing `parseCert` is proved to invert. -/
+def certBytes (D : DesignCert) : List UInt8 :=
+  magicBytes
+    ++ section' srcBytes  D.sources
+    ++ section' nodeBytes D.nodes
+    ++ section' outBytes  D.outputs
+    ++ section' flopBytes D.flops
+    ++ section' memBytes  D.memories
+
+def renderCert (D : DesignCert) : ByteArray := ⟨(certBytes D).toArray⟩
+
+/-- IO and nothing else.  Every byte decision lives in `renderCert`. -/
+def writeCert (h : IO.FS.Handle) (D : DesignCert) : IO Unit :=
+  h.write (renderCert D)
 
 --------------------------------------------------------------------------------
 -- 3.  Reader  — UNVERIFIED, and therefore trusted
