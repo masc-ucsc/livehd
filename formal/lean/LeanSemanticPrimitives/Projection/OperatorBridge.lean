@@ -106,6 +106,11 @@ and `Op_Sext` all need it, and none of them re-derives sign conversion. -/
 @[simp] theorem prim_bvSint (a : BV) :
     evalPrim .bvSint [encBV a] = .ok (.int (bv_sint a)) := rfl
 
+/-- One shifted copy, delegating to the helper the overlay named. -/
+@[simp] theorem prim_bvShl (w : Nat) (a b : BV) :
+    evalPrim .bvShl [.int (Int.ofNat w), encBV a, encBV b]
+      = .ok (encBV (bv_shl_step w a b)) := rfl
+
 /-! ## Derived tests
 
 `bv_nonzero` is a `Bool` in the hardware model and has no primitive of its own,
@@ -328,6 +333,24 @@ theorem evalOp_Sext (w : Nat) (a amount : BV) :
 theorem evalOpCert_Sext (w : Nat) (l : List BV) :
     eval_op_cert .Op_Sext w (l.map CertVal.bv) = .bv (eval_op .Op_Sext w l) :=
   eval_op_cert_bv .Op_Sext w l (fun _ => ⟨by simp, by simp, by simp⟩)
+
+/-! ### `Op_SHL`, the last operator in the census
+
+NOT an accumulator shift.  The first operand is shifted INDEPENDENTLY by each
+remaining operand, and those copies are XOR-folded into a ZERO seed -- so `a`
+never moves and the accumulator is never shifted.  A one-operand node is
+therefore 0, not `a`: there are no shift amounts to fold in. -/
+
+theorem evalOp_SHL_nil (w : Nat) : eval_op .Op_SHL w [] = mk_bv w 0 := rfl
+
+theorem evalOp_SHL_cons (w : Nat) (a : BV) (bs : List BV) :
+    eval_op .Op_SHL w (a :: bs)
+      = bs.foldl (fun acc b => bv_bitwise w (fun x y => xor x y) acc (bv_shl_step w a b))
+          (mk_bv w 0) := rfl
+
+theorem evalOpCert_SHL (w : Nat) (l : List BV) :
+    eval_op_cert .Op_SHL w (l.map CertVal.bv) = .bv (eval_op .Op_SHL w l) :=
+  eval_op_cert_bv .Op_SHL w l (fun _ => ⟨by simp, by simp, by simp⟩)
 
 theorem evalOpCert_GetMask (w : Nat) (l : List BV) :
     eval_op_cert .Op_GetMask w (l.map CertVal.bv) = .bv (eval_op .Op_GetMask w l) :=

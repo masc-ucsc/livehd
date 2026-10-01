@@ -94,6 +94,7 @@ private def ugtCode     : Int := Int.ofNat (opCode .Op_UGT)
 private def sltCode     : Int := Int.ofNat (opCode .Op_SLT)
 private def sgtCode     : Int := Int.ofNat (opCode .Op_SGT)
 private def sextCode    : Int := Int.ofNat (opCode .Op_Sext)
+private def shlCode     : Int := Int.ofNat (opCode .Op_SHL)
 
 def hwS : SProgram where
   entry := "main"
@@ -226,7 +227,9 @@ def hwS : SProgram where
                   (C "opCmp" [R "w", R "deps", R "env", R "n", bool true, bool true])
                 (.ite (P .eqI [R "code", .lit (.int sextCode)])
                   (C "opSext" [R "w", R "deps", R "env", R "n"])
-                  (P .bvMk [R "w", int 0]))))))))))))))))) ] },
+                (.ite (P .eqI [R "code", .lit (.int shlCode)])
+                  (C "opShl" [R "w", R "deps", R "env", R "n"])
+                  (P .bvMk [R "w", int 0])))))))))))))))))) ] },
 
   -- Op_And: resize the FIRST operand to the node width, fold the rest in
   -- unchanged.  Mirrors `eval_op` exactly; see `OperatorBridge.evalOp_And_cons`.
@@ -361,6 +364,28 @@ def hwS : SProgram where
                     (C "muxPick"
                        [ R "w", P .tl [R "args"], R "env", R "n", R "sel"
                        , P .addI [R "k", int 1] ])) },
+
+  -- Op_SHL is NOT an accumulator shift.  The FIRST operand is shifted
+  -- INDEPENDENTLY by each remaining operand -- `a` is read once and never
+  -- moves -- and those copies are XOR-folded into a ZERO seed.  So a
+  -- one-operand node is 0, not `a`.  (`OperatorBridge.evalOp_SHL_cons`.)
+  { name := "opShl", params := ["w", "deps", "env", "n"], inline := true
+  , body := .ite (P .isNil [R "deps"]) (P .bvMk [R "w", int 0])
+              (C "foldShl"
+                 [ P .tl [R "deps"], R "env", R "n"
+                 , P .bvMk [R "w", int 0]
+                 , C "slot" [R "env", R "n", P .hd [R "deps"]]
+                 , R "w" ]) },
+
+  { name := "foldShl", params := ["bs", "env", "n", "acc", "a", "w"], inline := true
+  , body := .ite (P .isNil [R "bs"]) (R "acc")
+              (C "foldShl"
+                 [ P .tl [R "bs"], R "env", R "n"
+                 , P .bvXor
+                     [ R "w", R "acc"
+                     , P .bvShl
+                         [R "w", R "a", C "slot" [R "env", R "n", P .hd [R "bs"]]] ]
+                 , R "a", R "w" ]) },
 
   -- The four comparisons differ along exactly two STATIC axes: which reading
   -- of the bits (`signed`: 0 unsigned, 1 signed) and which way round
@@ -765,6 +790,79 @@ private def sextOut (w : Nat) (a amt : Int) : Array BV :=
 #guard runHw (sextD 2) (allEdges (sextD 2)) (binIn 5 4) tinySt
          == refOf (sextD 2) (allEdges (sextD 2)) (binIn 5 4) tinySt
 
+/-! ### `Op_SHL`: the last operator
+
+`a` is shifted INDEPENDENTLY by each remaining operand and the copies are
+XOR-folded into a zero seed.  The vectors below separate that from the two
+things it is not: an accumulator shift, and an OR-fold. -/
+
+#guard [(1,0),(1,2),(1,3),(1,4),(3,3),(8,1),(15,0),(5,1)].all
+         (fun q => binOK .Op_SHL q.1 q.2)
+
+private def shlOut (a b : Int) : Array BV :=
+  (interpretDesign (binD .Op_SHL) (allEdges (binD .Op_SHL)) (binIn a b) tinySt).outputs
+
+-- ordinary shifts
+#guard shlOut 1 0 == #[mk_bv 4 1]
+#guard shlOut 1 2 == #[mk_bv 4 4]
+#guard shlOut 3 1 == #[mk_bv 4 6]
+-- WIDTH TRUNCATION: 1 << 4 is 16, which is 0 at width 4; 3 << 3 is 24, which
+-- is 8; the high bit of 0b1000 shifts straight out
+#guard shlOut 1 4 == #[mk_bv 4 0]
+#guard shlOut 3 3 == #[mk_bv 4 8]
+#guard shlOut 8 1 == #[mk_bv 4 0]
+
+/-- Two shift amounts, so the FOLD is visible. -/
+private def shl3D : DesignCert where
+  sources  := #[.input 0 4, .input 1 4, .input 2 4]
+  nodes    := #[{ op := .Op_SHL, width := 4, deps := #[0, 1, 2] }]
+  outputs  := #[{ slot := 3, width := 4 }]
+  flops    := #[]
+  memories := #[]
+
+private def shl3In (a b c : Int) : Array BV := #[mk_bv 4 a, mk_bv 4 b, mk_bv 4 c]
+private def shl3Out (a b c : Int) : Array BV :=
+  (interpretDesign shl3D (allEdges shl3D) (shl3In a b c) tinySt).outputs
+
+#guard [(1,0,1),(1,1,1),(3,0,2),(1,2,3),(5,0,0)].all (fun t =>
+  runHw shl3D (allEdges shl3D) (shl3In t.1 t.2.1 t.2.2) tinySt
+    == refOf shl3D (allEdges shl3D) (shl3In t.1 t.2.1 t.2.2) tinySt)
+
+-- `a` is shifted by EACH amount independently: 1<<0 xor 1<<1 = 1 xor 2 = 3.
+-- An accumulator shift would give (1<<0)<<1 = 2.
+#guard shl3Out 1 0 1 == #[mk_bv 4 3]
+#guard shl3Out 3 0 2 == #[mk_bv 4 15]
+-- THE DECIDING VECTOR: the fold is XOR, not OR.  Two EQUAL shift amounts
+-- cancel -- 1<<1 xor 1<<1 = 0 -- where an OR-fold would give 2.
+#guard shl3Out 1 1 1 == #[mk_bv 4 0]
+
+/-- No shift amounts at all, so the fold never runs and the seed stands: a
+one-operand node is ZERO, not `a`. -/
+private def shl1D : DesignCert where
+  sources  := #[.input 0 4]
+  nodes    := #[{ op := .Op_SHL, width := 4, deps := #[0] }]
+  outputs  := #[{ slot := 1, width := 4 }]
+  flops    := #[]
+  memories := #[]
+
+#guard [0,1,5,15].all (fun a =>
+  runHw shl1D (allEdges shl1D) #[mk_bv 4 a] tinySt
+    == refOf shl1D (allEdges shl1D) #[mk_bv 4 a] tinySt)
+#guard (interpretDesign shl1D (allEdges shl1D) #[mk_bv 4 5] tinySt).outputs == #[mk_bv 4 0]
+
+/-- The EMPTY case, which no well-formed certificate emits but the pinned
+semantics still fixes at zero. -/
+private def shl0D : DesignCert where
+  sources  := #[.input 0 4]
+  nodes    := #[{ op := .Op_SHL, width := 4, deps := #[] }]
+  outputs  := #[{ slot := 1, width := 4 }]
+  flops    := #[]
+  memories := #[]
+
+#guard runHw shl0D (allEdges shl0D) #[mk_bv 4 5] tinySt
+         == refOf shl0D (allEdges shl0D) #[mk_bv 4 5] tinySt
+#guard (interpretDesign shl0D (allEdges shl0D) #[mk_bv 4 5] tinySt).outputs == #[mk_bv 4 0]
+
 -- SRA IS ARITHMETIC, and this is the vector that says so: 0b1000 is -8 at
 -- width 4, so shifting right by one gives -4 = 0b1100, not the 0b0100 a
 -- LOGICAL shift would give.
@@ -876,8 +974,11 @@ to keep growing. -/
 private def binR (o : LGraphOp) : Program :=
   match projectDesign (binD o) with | .ok p => p | .error _ => ⟨[], 0⟩
 
+-- operators whose answer needs NO runtime comparison, so the sharp "no `eqI`
+-- survives" assertion still applies to them
 private def b12Ops : List LGraphOp :=
-  [.Op_Or, .Op_SRA, .Op_GetMask, .Op_Xor, .Op_Not, .Op_Sum 2, .Op_Sum 1, .Op_Sum 0]
+  [.Op_Or, .Op_SRA, .Op_GetMask, .Op_Xor, .Op_Not, .Op_Sum 2, .Op_Sum 1, .Op_Sum 0,
+   .Op_SHL]
 
 #guard b12Ops.all (fun o => (projectDesign (binD o)).toOption.isSome)
 
@@ -986,6 +1087,13 @@ each, which is the comparison the operator IS. -/
 #guard cnt (sextD 4) .bvSint == 1
 #guard cnt (sextD 4) .bvUint == 1
 #guard cnt (sextD 4) .bvMk   == 1
+
+-- `Op_SHL`: one shifted copy and one XOR per shift amount, and nothing else --
+-- in particular no comparison, since the operator needs none
+#guard tagsIn (projOf (binD .Op_SHL)) == [tagState]
+#guard tagsIn (projOf shl3D) == [tagState]
+#guard cnt (binD .Op_SHL) .bvShl == 1 && cnt (binD .Op_SHL) .bvXor == 1
+#guard cnt shl3D .bvShl == 2 && cnt shl3D .bvXor == 2
 
 -- batch 2, at the primitive level
 #guard (((binR .Op_Xor).funs.map (fun fd => primsOf fd.body)).flatten).contains Prim.bvXor

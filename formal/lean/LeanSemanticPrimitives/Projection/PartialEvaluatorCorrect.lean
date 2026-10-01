@@ -1382,7 +1382,7 @@ theorem primStruct_ok {Pr : Program} {ρr : Env} {p : Prim} {rs : List PRes}
   | addI | subI | mulI | divI | modI | ltI | leI | eqI | andB | orB | notB
   | eqV | mkCtorP | ctorTagP | ctorFieldsP | bvMk | bvWidth | bvUint | bvBit
   | bvAnd | bvOr | bvXor | bvNot | bvResize
-  | bvSra | bvGetMask | bvSint => simp [primStruct] at hps
+  | bvSra | bvGetMask | bvSint | bvShl => simp [primStruct] at hps
   | consP =>
       cases rs with
       | nil => simp [primStruct] at hps
@@ -3170,7 +3170,7 @@ theorem primStruct_sound {A Pr mr ρr ρs} {p : Prim} {rs : List PRes} {ts : Lis
   | addI | subI | mulI | divI | modI | ltI | leI | eqI | andB | orB | notB
   | eqV | mkCtorP | ctorTagP | ctorFieldsP | bvMk | bvWidth | bvUint | bvBit
   | bvAnd | bvOr | bvXor | bvNot | bvResize
-  | bvSra | bvGetMask | bvSint => simp [primStruct] at hps
+  | bvSra | bvGetMask | bvSint | bvShl => simp [primStruct] at hps
   | consP =>
       cases rs with
       | nil => simp [primStruct] at hps

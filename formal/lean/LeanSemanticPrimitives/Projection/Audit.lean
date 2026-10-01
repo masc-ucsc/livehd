@@ -141,6 +141,11 @@ namespace Projection
 #print axioms evalOpCert_SLT
 #print axioms evalOpCert_SGT
 #print axioms evalOpCert_Sext
+-- Phase 3, last operator: Op_SHL
+#print axioms prim_bvShl
+#print axioms evalOp_SHL_nil
+#print axioms evalOp_SHL_cons
+#print axioms evalOpCert_SHL
 #print axioms srcFlopNext_eq
 -- multi-clock: the shared semantics, and conservativity
 #print axioms Compiler.interpretDesign_allEdges

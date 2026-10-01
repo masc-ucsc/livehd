@@ -148,6 +148,9 @@ def evalPrim (p : Prim) (vs : List Val) : Except String Val :=
   | .bvSint, [a] => match asBV a with
                     | some x => .ok (.int (bv_sint x))
                     | none   => .error "bvSint: not a BV"
+  | .bvShl, [.int w, a, b] => match asBV a, asBV b with
+                              | some x, some s => .ok (ofBV (bv_shl_step (widthOf w) x s))
+                              | _, _ => .error "bvShl: not a BV"
   | p, vs =>
       if vs.length = p.arity then
         .error s!"primitive {repr p}: operand types do not match"

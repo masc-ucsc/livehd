@@ -175,7 +175,7 @@ inductive Prim where
   -- operator's operand fold lives in the interpreter, where it is static
   | bvSra | bvGetMask
   -- the SIGNED reading of a bit vector; `bv_uint` has `bvUint` already
-  | bvSint
+  | bvSint | bvShl
   deriving DecidableEq, Inhabited, Repr
 
 /-- Arity of a primitive.  `evalPrim` rejects any other operand count, so this is
@@ -198,6 +198,7 @@ def Prim.arity : Prim → Nat
   | .bvSra                                => 3   -- width, x, shamt
   | .bvGetMask                            => 3   -- width, x, mask
   | .bvSint                               => 1   -- x
+  | .bvShl                                => 3   -- width, x, shift amount
 
 /-! ## Terms -/
 

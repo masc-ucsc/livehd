@@ -77,7 +77,7 @@ def primCode : Prim → Nat
   | .bvResize => 22
   | .consP => 23 | .eqV => 24
   | .mkCtorP => 25 | .ctorTagP => 26 | .ctorFieldsP => 27
-  | .bvSra => 28 | .bvGetMask => 29 | .bvSint => 30
+  | .bvSra => 28 | .bvGetMask => 29 | .bvSint => 30 | .bvShl => 31
 
 def primOfCode : Nat → Option Prim
   | 0 => some .addI  | 1 => some .subI  | 2 => some .mulI
@@ -91,6 +91,7 @@ def primOfCode : Nat → Option Prim
   | 23 => some .consP | 24 => some .eqV
   | 25 => some .mkCtorP | 26 => some .ctorTagP | 27 => some .ctorFieldsP
   | 28 => some .bvSra | 29 => some .bvGetMask | 30 => some .bvSint
+  | 31 => some .bvShl
   | _ => none
 
 @[simp] theorem primOfCode_primCode (p : Prim) : primOfCode (primCode p) = some p := by

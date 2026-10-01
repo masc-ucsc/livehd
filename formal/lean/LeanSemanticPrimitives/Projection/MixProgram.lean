@@ -148,7 +148,7 @@ private def primTable : List (Int × SExp) :=
   , (25, .prim .mkCtorP [pA, pB]), (26, .prim .ctorTagP [pA])
   , (27, .prim .ctorFieldsP [pA])
   , (28, .prim .bvSra [pA, pB, pC]), (29, .prim .bvGetMask [pA, pB, pC])
-  , (30, .prim .bvSint [pA]) ]
+  , (30, .prim .bvSint [pA]), (31, .prim .bvShl [pA, pB, pC]) ]
 
 /-- An unrecognised code falls through to `hd nil`, a `typeError`. -/
 private def evalPrimBody : SExp :=
