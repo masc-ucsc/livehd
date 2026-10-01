@@ -70,3 +70,8 @@ generated/provenance/
 # traces. Kept ON DISK; the conclusions are in pass/lean/DIRECTION2_RESULTS.md
 # and pass/lean/GATED_MODULES.tsv.
 generated/equiv7/
+
+# D2-local Lake build tree + Lean validation evidence. Several GB (hardlinked
+# deps). See generated/lean_validation/README.md -- this directory exists
+# because formal/lean/.lake used to be a symlink into another worktree.
+generated/lean_validation/

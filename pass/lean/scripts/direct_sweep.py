@@ -104,7 +104,9 @@ def run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0):
     row = {"module": name, "path": path, "verdict": "NO_CERT", "reason": "",
            "sources": "", "nodes": "", "outputs": "", "flops": "", "mems": "",
            "inputs": "", "check_ms": "", "step1_ms": "", "run_ms": "",
-           "cycles": cycles, "wall_s": "", "rss_kb": ""}
+           # NOT prefilled from the request: `cycles` must be what the run
+           # actually reported, or it is not evidence that any cycle ran.
+           "cycles": "", "wall_s": "", "rss_kb": ""}
     if not base_m:
         return row
     base = base_m.group(1)
@@ -124,6 +126,7 @@ def run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0):
         row["wall_s"] = f"{time.time() - t0:.1f}"
         return row
     row["wall_s"] = f"{time.time() - t0:.1f}"
+    saw_rundirect_ok = False
     tail = err.strip().splitlines()
     if tail:
         m = re.match(r"^([\d.]+)\s+(\d+)$", tail[-1])
@@ -152,6 +155,26 @@ def run_one(path, workdir, cycles, timeout, lean_env, max_rec_depth=0):
             if parts[1] != "OK":
                 row["verdict"] = "RUN_REFUSED"
                 row["reason"] = parts[2] if len(parts) > 2 else ""
+            else:
+                saw_rundirect_ok = True
+                row["cycles"] = parts[2] if len(parts) > 2 else ""
+    # A VERDICT line is printed before execution finishes, so an ACCEPTED that
+    # is followed by a crash, a truncated run, or a missing RUNDIRECT would
+    # otherwise survive into the TSV as a pass. Require the process to have
+    # exited 0 AND every execution marker to be present with the requested
+    # cycle count.
+    if row["verdict"] == "ACCEPTED":
+        missing = [k for k in ("check_ms", "step1_ms", "run_ms") if not row[k]]
+        if p.returncode != 0:
+            row["verdict"] = "LEAN_ERROR"
+            row["reason"] = (f"probe exited {p.returncode} after printing ACCEPTED"
+                             + (" | " + " | ".join(t[:120] for t in tail[:2]) if tail else ""))
+        elif missing or not saw_rundirect_ok:
+            row["verdict"] = "SIM_INCOMPLETE"
+            row["reason"] = ("missing " + ",".join(missing + ([] if saw_rundirect_ok else ["RUNDIRECT/OK"])))
+        elif str(row["cycles"]) != str(cycles):
+            row["verdict"] = "SIM_INCOMPLETE"
+            row["reason"] = f"ran {row['cycles']} cycle(s), expected {cycles}"
     if row["verdict"] == "NO_CERT" and tail:
         row["verdict"] = "LEAN_ERROR"
         row["reason"] = " | ".join(t[:200] for t in tail[:3])
@@ -165,7 +188,9 @@ def main():
     ap.add_argument("--jobs", type=int, default=4)
     ap.add_argument("--cycles", type=int, default=4)
     ap.add_argument("--limit", type=int, default=0)
-    ap.add_argument("--filter", default="")
+    ap.add_argument("--filter", default="",
+                    help="regex matched against the MODULE NAME (not the path), "
+                         "e.g. '^(txfma_f0|txfma_e5)$'")
     ap.add_argument("--timeout", type=int, default=1800)
     ap.add_argument("--max-rec-depth", type=int, default=0,
                     help="override the emitted `set_option maxRecDepth`; the emitted\n1000000 is not enough for the largest CVA6 certificates (try 20000000)")
@@ -180,7 +205,12 @@ def main():
                 if not n.endswith("_Lgraph.lean"):
                     continue
                 p = os.path.join(dirpath, n)
-                if pat and not pat.search(p):
+                # Match the MODULE NAME, not the path. Matching the path made
+                # `--filter '^(a|b)$'` match nothing at all (every candidate is
+                # an absolute path), so a caller selecting an explicit module
+                # set silently swept zero certificates and every column read
+                # "not-run".
+                if pat and not pat.search(n.replace("_Lgraph.lean", "")):
                     continue
                 try:
                     h = hashlib.md5(open(p, "rb").read()).hexdigest()
@@ -193,6 +223,15 @@ def main():
                 seen.add(h)
                 files.append(p)
     files.sort(key=lambda p: os.path.getsize(p))
+
+    # A sweep that found NOTHING is a configuration error, not a vacuous pass:
+    # without this every caller gets "ACCEPTED 0/0" and a filter typo reads as
+    # success. (A --filter regex matched against the path instead of the module
+    # name did exactly that here.)
+    if not files:
+        print(f"direct_sweep: no certificates matched (roots={args.roots} "
+              f"filter={args.filter!r})", file=sys.stderr)
+        return 2
     if args.limit:
         files = files[:args.limit]
     print(f"# {len(files)} unique certificates", file=sys.stderr)

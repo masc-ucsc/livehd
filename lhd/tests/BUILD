@@ -637,6 +637,22 @@ sh_test(
     data = ["//lhd"],
 )
 
+# False-pass guards in pass/lean/scripts/direct_sweep.py. Its VERDICT line is
+# printed BEFORE execution finishes, so without these an ACCEPTED followed by a
+# crash, a missing RUNDIRECT, or a short run still landed in the TSV as a pass
+# -- and `cycles` was prefilled from the REQUEST, so the column that looked
+# like evidence of execution was an echo of the argument. Drives run_one()
+# with synthetic probe output; needs no Lean and no certificates.
+sh_test(
+    name = "direct_sweep_guards_test",
+    size = "small",
+    srcs = ["direct_sweep_guards_test.sh"],
+    data = [
+        "//pass/lean:scripts",
+        "//scripts:cycle_provenance_tools",
+    ],
+)
+
 # Sensitivity control for the differential-simulation harness. It reports
 # DIFFSIM-PASS, which is worth nothing unless the harness can see a real
 # difference -- a testbench that drove nothing would report DIFFSIM-PASS on

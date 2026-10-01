@@ -30,3 +30,11 @@ cc_library(
     ],
     alwayslink = True,
 )
+
+# Direction 2's certificate-sweep tooling, exposed so tests can depend on the
+# scripts they pin (a regression only run by hand is not a maintained one).
+filegroup(
+    name = "scripts",
+    srcs = glob(["scripts/*.py"]),
+    visibility = ["//visibility:public"],
+)

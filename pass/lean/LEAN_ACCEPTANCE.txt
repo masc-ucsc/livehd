@@ -1,0 +1,13 @@
+build_root=/mada/users/czeng14/projects/livehd-d2-ir-semantics/generated/lean_validation/lake
+lean=Lean (version 4.31.0, x86_64-unknown-linux-gnu, commit 68218e876d2a38b1985b8590fff244a83c321783, Release)
+commit=6429f9f2a
+direct_sweep exit=0 filter=^(txfma_f0|txfma_f2|txfma_f3|txfma_f5|txfma_e5|txfma_f6)$ tsv=/mada/users/czeng14/projects/livehd-d2-ir-semantics/generated/lean_validation/direct_sweep.tsv
+MODULE         EMIT   GATES  TYPECHK  COMPILES_THM    CHECKDESIGN     DIRECT_SIM    RTL_DIFFSIM  AXIOMS
+txfma_f0       0      0      0        elaborated      accepts(47ms)   ran-4cyc      prior-smoke  native_decide(trusted)
+txfma_f2       0      0      0        elaborated      accepts(92ms)   ran-4cyc      prior-smoke  native_decide(trusted)
+txfma_f3       0      0      0        elaborated      accepts(31ms)   ran-4cyc      prior-smoke  native_decide(trusted)
+txfma_f5       0      0      0        elaborated      accepts(14ms)   ran-4cyc      prior-smoke  native_decide(trusted)
+txfma_e5       0      0      0        elaborated      accepts(14ms)   ran-4cyc      prior-smoke  native_decide(trusted)
+txfma_f6       0      0      0        elaborated      accepts(30ms)   ran-4cyc      prior-smoke  native_decide(trusted)
+
+all 6 requested module(s) accepted (emit/gates/typecheck 0, theorem elaborated, checkDesign ACCEPTED, 4 simulator cycles). Differential smoke is reported, not gated.

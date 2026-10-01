@@ -1145,3 +1145,46 @@ few thousand defined-input vectors. That is a smoke-level validation, not
 equivalence. `ifx` remains the default; selective plain mode stays **explicit
 and experimental**. Lean acceptance (`lake build` / `checkDesign` / simulator)
 is the next gate and is what the 122-CORE-ET milestone needs.
+
+### Lean acceptance for the six, with the stages kept apart
+
+`scripts/lean_validate.sh` (gate in `scripts/lean_validate_join.py`). Columns
+are deliberately separate: typechecking a generated theory is not the compiles
+theorem elaborating, which is not `checkDesign` accepting, which is not the
+simulator executing cycles, which is not agreement with the RTL.
+
+| module | emit | gates | typecheck | compiles thm | checkDesign | direct sim | RTL diffsim | axioms |
+|---|---|---|---|---|---|---|---|---|
+| txfma_f0 | 0 | 0 | 0 | elaborated | accepts (47 ms) | ran 4 cyc | prior-smoke | `native_decide` |
+| txfma_f2 | 0 | 0 | 0 | elaborated | accepts (92 ms) | ran 4 cyc | prior-smoke | `native_decide` |
+| txfma_f3 | 0 | 0 | 0 | elaborated | accepts (31 ms) | ran 4 cyc | prior-smoke | `native_decide` |
+| txfma_f5 | 0 | 0 | 0 | elaborated | accepts (14 ms) | ran 4 cyc | prior-smoke | `native_decide` |
+| txfma_e5 | 0 | 0 | 0 | elaborated | accepts (14 ms) | ran 4 cyc | prior-smoke | `native_decide` |
+| txfma_f6 | 0 | 0 | 0 | elaborated | accepts (30 ms) | ran 4 cyc | prior-smoke | `native_decide` |
+
+`<Top>_compiles` closes over **`native_decide`** — a trusted-computation
+boundary, not an axiom-free proof. `prior-smoke` marks the differential as
+coming from the earlier `coreet_equiv7.sh` run: it is not cryptographically
+tied to the certificate regenerated here, and finite randomized simulation is
+reported, never gated on.
+
+#### The shared Lake build tree (a reproducibility trap)
+
+`formal/lean/.lake` was a **symlink into another worktree**. That worktree's
+`DesignCert` has no `clocks` field, so a build there replaced this branch's own
+oleans and all six modules failed with ``​`clocks` is not a field of structure
+`DesignCert` `` — while the stale `.olean`'s mtime was **newer** than the
+source, so the ordinary staleness check said it was fine. Only elaborating a
+probe against the built library exposed it.
+
+`scripts/lean_local_lake.sh` now builds this branch in its own tree, with
+dependencies **reflink-copied** (distinct inodes, shared extents on btrfs, so
+no disk cost and a write through one tree cannot reach the other). It is not
+hardlinks: a first attempt used `cp -al` and the script's own `--verify-only`
+correctly refused it, since an in-place write to a hardlink hits both trees.
+`lean_validate.sh` refuses to run if `.lake` resolves outside this worktree.
+
+One `lake build` ran through the shared tree before the isolation was in place
+and overwrote that worktree's oleans. Nothing there was deleted and its sources
+are untouched; a `lake build` in that worktree restores them. It was left for
+its owner rather than changed from here.
