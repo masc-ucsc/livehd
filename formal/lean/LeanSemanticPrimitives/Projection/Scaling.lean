@@ -81,6 +81,24 @@ def chainD (n : Nat) : DesignCert where
   flops    := #[]
   memories := #[]
 
+/-- `chainD` with a FLOP on every node, so the edge vector is actually read.
+
+`fanD` and `chainD` have no flops at all, so they measure the slot environment
+and nothing about clocks.  This one pins the claim step 4 of the multi-clock
+port rests on: a flop's clock ORDINAL is static, so reading its edge is a
+statically known number of `tl` steps into the dynamic edge array -- O(1) per
+flop, not a search -- and the residual stays linear. -/
+def flopD (n : Nat) : DesignCert where
+  sources  := #[.input 0 4, .const 4 12]
+  nodes    := (List.range n).toArray.map (fun i =>
+                { op := .Op_And, width := 4
+                , deps := if i = 0 then #[0, 1] else #[2 + i - 1, 0] })
+  outputs  := #[{ slot := 2 + (n - 1), width := 4 }]
+  flops    := (List.range n).toArray.map (fun i =>
+                { width := 4, din := 2 + i, enable := none, resetPin := none
+                , resetValue := 0, resetActiveLow := false })
+  memories := #[]
+
 /-! ## Counting -/
 
 partial def tsize : Term → Nat
@@ -203,6 +221,41 @@ consequences. -/
 
 -- fuel is not the binding constraint: `projectDesign`'s own 20000/200 still works
 #guard (Hw.projectDesign (chainD 64)).toOption.isSome
+
+/-! ## The flop state vector: a SECOND chain, and it is still quadratic
+
+`fanD` and `chainD` have no flops, and the shared `seqD` has one, so nothing
+above has ever measured what `I_hw` costs per FLOP.  `flopD` does, and the
+answer is that Phase 1 removed one quadratic and left another standing.
+
+The slot ENVIRONMENT is gone -- that is what the numbers above show.  The
+runtime STATE vector is a different list: `flopNext` reads the old value of flop
+`idx` with `nthD fq idx`, and `idx` is static, so flop `idx` costs `idx` steps
+and `F` flops cost O(F^2).  Measured below, pinned as Phase 0 pinned the first
+one, and NOT fixed here: fixing it is a partially-static treatment of the state
+vector, the same shape as the environment fix, and it belongs to its own
+increment.
+
+NOT caused by the clock port.  With `firesAt` replaced by a constant the numbers
+are identical to the digit, so the edge vector costs nothing: a clock ORDINAL is
+static, so its edge is one direct read per flop.
+
+AND THE INSTRUMENT ABOVE CANNOT SEE IT.  `peelKinds` reports every one of these
+peels as a DIRECT read of a variable, because preparation let-binds each
+intermediate `tl` -- so a let-bound chain and a genuine direct read look alike.
+That is a real limit of the check, recorded here rather than left to be
+rediscovered. -/
+
+#guard [8, 16, 32, 64].all (fun n => tlOf (flopD n) == n * n)
+#guard [8, 16, 32, 64].all (fun n => szOf (flopD n) == 3 * n * n + 26 * n + 33)
+
+-- what IS linear, and what the clock port had to keep linear: one node
+-- operation per node, and no residual boolean that could have been decided
+-- during specialization (`asyncReset` and the presence of a reset pin and an
+-- enable are all static, so none of them residualizes)
+#guard [8, 16, 32, 64].all (fun n => pOf .bvAnd (flopD n) == n)
+#guard [8, 16, 32, 64].all (fun n => pOf .andB  (flopD n) == 0)
+#guard [8, 16, 32, 64].all (fun n => pOf .orB   (flopD n) == 0)
 
 end Scaling
 end Projection
