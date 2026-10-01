@@ -64,8 +64,33 @@ if [[ -n "$RESUME" ]]; then
   OUT="$RESUME"
   [[ -d "$OUT" ]] || { echo "FATAL: --resume: no such directory: $OUT" >&2; exit 2; }
 fi
-OUT="${OUT:-$ROOT/generated/census_d2/$COMMIT}"
+# UNIQUE RUN ID. Two runs sharing a directory corrupt each other, and the
+# failure is silent: a stale orphan keeps writing into a tree a new run has
+# just recreated. The default output path therefore carries a timestamp, so a
+# relaunch never lands on a live run's directory.
+RUN_ID="${RUN_ID:-${COMMIT}_$(date +%Y%m%d-%H%M%S)}"
+OUT="${OUT:-$ROOT/generated/census_d2/$RUN_ID}"
 mkdir -p "$OUT/logs" "$OUT/mod"
+
+# EXCLUSIVE LOCK, held for the life of the run.
+#
+# This is what would have prevented the incident recorded in
+# generated/census_d2/INCIDENTS.md: a driver was killed, its `xargs -P` was
+# reparented to PPID 1 and kept generating, the directory was then removed and
+# recreated for a fresh run, and for several minutes TWO jobs wrote the same
+# tree -- one of them into an unlinked inode. Children inherit the descriptor,
+# so an orphaned xargs still holds this lock and the relaunch refuses instead
+# of colliding.
+exec 9>"$OUT/.lock" || { echo "FATAL: cannot create $OUT/.lock" >&2; exit 2; }
+if ! flock -n 9; then
+  echo "FATAL: another census is already using $OUT (lock held)." >&2
+  echo "       A previous driver may have died leaving an orphaned xargs still" >&2
+  echo "       writing there. Find it with:" >&2
+  echo "         fuser -v $OUT/.lock" >&2
+  echo "       and stop that process GROUP before reusing this directory." >&2
+  exit 2
+fi
+echo "run_id=$(basename "$OUT")  (lock held)"
 
 # ---- the corpus, validated -------------------------------------------------
 # Count AND digest, so a stale or partially regenerated list cannot be swept as

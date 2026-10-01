@@ -637,6 +637,23 @@ sh_test(
     data = ["//lhd"],
 )
 
+# The census run-directory lock. A killed driver left its `xargs -P` orphaned
+# at PPID 1 and still generating; the directory was then rm -rf'd and recreated
+# for a fresh run, and two jobs wrote the same tree for several minutes, one of
+# them into an unlinked inode (generated/census_d2/INCIDENTS.md). The lock is
+# held for the life of the run and INHERITED by children, so an orphaned worker
+# still holds it and the relaunch refuses -- that inheritance is the point, so
+# it is tested rather than assumed.
+sh_test(
+    name = "census_lock_test",
+    size = "small",
+    srcs = ["census_lock_test.sh"],
+    data = [
+        "//inou/yosys:inou_yosys_scripts",
+        "//scripts:cycle_provenance_tools",
+    ],
+)
+
 # The census --resume gate. Generation runs under `xargs -P`; if the driver
 # dies, xargs is reparented to PPID 1 and the workers finish with nobody left
 # to aggregate -- which happened, with 121 of 122 modules already generated.
