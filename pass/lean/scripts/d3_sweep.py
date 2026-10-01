@@ -379,6 +379,42 @@ def selection_digest(targets) -> str:
     return h.hexdigest()
 
 
+def order_by_rss(targets, path: pathlib.Path):
+    """RUN ORDER only: smallest measured peak RSS first, largest last.
+
+    This machine is shared, so a sweep is staged by MEMORY rather than by
+    whatever `free -g` reports idle.  Cheap targets first means an interrupted
+    run has already banked most of its rows, and it puts the targets that could
+    approach the budget at the end, where they can be dropped without losing
+    anything earned.
+
+    This is SCHEDULING metadata and never evidence.  The file it reads may come
+    from a run with a DIFFERENT artifact digest -- that is fine here and only
+    here, because nothing from it reaches a result row.  `selection_digest`
+    sorts by key, so the identity of the selected SET is unchanged by the order
+    its members run in; the sidecar records this file's digest so the schedule
+    is reproducible anyway.
+
+    A target with no recorded RSS sorts LAST.  Unmeasured is not the same as
+    small, and assuming it small is exactly the assumption that blows a budget.
+    """
+    rss = {}
+    with path.open(encoding="utf-8") as fh:
+        for r in csv.DictReader((l for l in fh if not l.startswith("#")), delimiter="\t"):
+            try:
+                v = int(r.get("max_rss_kb") or 0)
+            except ValueError:
+                continue
+            if v > 0:
+                rss[(r.get("module") or "").strip()] = v
+    unknown = sorted(t.module for t in targets if not rss.get(t.module))
+    if unknown:
+        print(f"d3_sweep: {len(unknown)} target(s) have no recorded RSS and run LAST: "
+              f"{', '.join(unknown[:8])}{' ...' if len(unknown) > 8 else ''}",
+              file=sys.stderr)
+    return sorted(targets, key=lambda t: (rss.get(t.module) or (1 << 62), t.key))
+
+
 # Everything whose CONTENT can change what a row means.  A worktree HEAD plus a
 # dirty bit is not enough: two different dirty states share both, and an
 # uncommitted edit to the reifier or the harness is exactly the kind of change
@@ -929,6 +965,12 @@ def main() -> int:
                          "the result cannot be reproduced from a commit)")
     ap.add_argument("--force", action="store_true",
                     help="overwrite an existing --out that was not produced by --resume")
+    ap.add_argument("--order-by", default="",
+                    help="TSV with module/max_rss_kb columns; run order becomes "
+                         "cheapest-RSS-first (scheduling only, never evidence)")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="print the selected targets IN RUN ORDER and exit, "
+                         "writing nothing")
     ap.add_argument("--native", action="store_true",
                     help="run the UNMODIFIED certificate: compilesOk by native_decide + axioms")
     a = ap.parse_args()
@@ -983,6 +1025,10 @@ def main() -> int:
         targets = [best[k] for k in sorted(best, key=lambda n: rank.get(n, len(TIERS)))]
     if a.limit:
         targets = targets[: a.limit]
+    if a.order_by:
+        # AFTER --limit on purpose: --limit still selects its subset the way it
+        # always did, and this only changes the order that subset runs in.
+        targets = order_by_rss(targets, pathlib.Path(a.order_by))
     if not targets:
         print("no targets selected", file=sys.stderr)
         return 2
@@ -990,6 +1036,10 @@ def main() -> int:
     sel_digest = selection_digest(targets)
     cfg = run_config(a, manifest_digest)
     cfg["selection_digest"] = sel_digest
+    if a.order_by:
+        cfg["order_by"] = a.order_by
+        cfg["order_by_digest"] = hashlib.sha256(
+            pathlib.Path(a.order_by).read_bytes()).hexdigest()
     cfg["tool_digest"] = tool_digest()
     cfg["worktree_dirty"] = bool(subprocess.run(
         ["git", "-C", str(ROOT), "status", "--porcelain"],
@@ -1193,6 +1243,15 @@ def main() -> int:
           f"(NOT written here -- the join owns them), jobs={a.jobs}, "
           f"timeout={a.timeout}s, samples={a.samples}, tier={a.tier or 'all'}, "
           f"native={a.native}", file=sys.stderr)
+
+    if a.dry_run:
+        # Printed from the SAME list the executor would consume, so the order
+        # shown is the order that would run -- not a second computation of it.
+        print(f"d3_sweep: DRY RUN -- nothing executed, nothing written")
+        for i, t in enumerate(todo, 1):
+            print(f"  {i:>3}. {t.module:<36} nodes={t.nodes or '?':>7} "
+                  f"tier={tier_of(t.nodes)}")
+        return 0
 
     # Only selected, attempted targets appear in this table.  Appending the
     # manifest's no-certificate rows to every tier slice would make the slices
