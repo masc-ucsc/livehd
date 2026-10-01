@@ -405,6 +405,26 @@ CRITICAL_OLEANS = ["CompileDesign", "D3Harness", "ReifyGen", "Reify", "Runtime",
                    "CompileOp", "CompileGraph"]
 
 
+def artifact_dir() -> pathlib.Path:
+    """Where the loaded `.olean`s live.
+
+    `D3_ARTIFACT_DIR` is a TEST SEAM, and a dangerous one: it changes what is
+    HASHED without changing what Lean LOADS, so a run that inherited it from the
+    environment would validate one set of files while the probes used another.
+    `--runner-selftest` is required before it is honoured, and a canonical
+    manifest run refuses outright if the variable is set at all.
+    """
+    env = os.environ.get("D3_ARTIFACT_DIR")
+    if env and os.environ.get("D3_RUNNER_SELFTEST") == "1":
+        return pathlib.Path(env)
+    return (build_root() / "build" / "lib" / "lean" / "LeanSemanticPrimitives" / "Compiler")
+
+
+def missing_oleans() -> list:
+    base = artifact_dir()
+    return [m for m in CRITICAL_OLEANS if not (base / f"{m}.olean").is_file()]
+
+
 def build_root() -> pathlib.Path:
     return (LEAN_DIR / ".lake").resolve()
 
@@ -423,15 +443,29 @@ def build_root_is_external() -> tuple:
 
 
 def artifact_digest() -> str:
-    """Digest of the compiled closure the probes load."""
-    base = build_root() / "build" / "lib" / "lean" / "LeanSemanticPrimitives" / "Compiler"
+    """Digest of the compiled closure the probes load.
+
+    A missing object hashes as `<missing>` so drift is still detected if one
+    disappears mid-run; a canonical run refuses up front when any is absent, so
+    that placeholder never stands in for real evidence.
+    """
+    base = artifact_dir()
     h = hashlib.sha256()
     for m in CRITICAL_OLEANS:
         f = base / f"{m}.olean"
+        # No is_file() probe first: that is a TOCTOU race, and this function runs
+        # in the central post-result check where an escaping OSError would kill
+        # the driver before it could write an aborted sidecar.  Absent and
+        # unreadable get DIFFERENT deterministic markers, so either one shows up
+        # as drift rather than as a silent equality.
         try:
             h.update(f"{m}:".encode() + hashlib.sha256(f.read_bytes()).digest())
-        except OSError:
-            h.update(f"{m}:<missing>".encode())
+        except FileNotFoundError:
+            h.update(f"{m}:<absent>".encode())
+        except OSError as e:
+            h.update(f"{m}:<unreadable:{e.errno}>".encode())
+        except Exception:  # noqa: BLE001
+            h.update(f"{m}:<error>".encode())
     return h.hexdigest()
 
 
@@ -552,7 +586,7 @@ def classify(log: str, rc: int, timeout: int) -> str:
     return ""
 
 
-def run_one(target: Target, samples: int, timeout: int, native: bool):
+def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: str = ""):
     cert, m = target.path, target.module
     probe_dir = RUN_DIR / ("probes_native" if native else "probes")
     log_dir = RUN_DIR / ("logs_native" if native else "logs")
@@ -572,6 +606,8 @@ def run_one(target: Target, samples: int, timeout: int, native: bool):
     row["max_rss_kb"] = ""
     row["user_s"] = ""
     row["sys_s"] = ""
+    row["drift"] = ""
+    row["launched"] = "0"
     row["proof"] = "na"  # never attempted by this pass; see the module docstring
     for k in ("sources", "nodes", "outputs", "flops", "mems", "inputs", "bindings",
               "selftest_base", "mut_out", "mut_flop", "mut_mem",
@@ -603,8 +639,24 @@ def run_one(target: Target, samples: int, timeout: int, native: bool):
     cmd = [LAKE, "env", "lean", str(probe)]
     if pathlib.Path("/usr/bin/time").exists():
         cmd = ["/usr/bin/time", "-v", "-o", str(tv)] + cmd
+    # Immediately BEFORE launch.  A probe started after the compiler moved is
+    # already measuring something else.
+    if baseline and artifact_digest() != baseline:
+        row["drift"] = "before"
+        row["run_status"] = "aborted_artifact_drift"
+        row["detail"] = "build artifacts changed before this module was launched"
+        row["wall_s"] = "0.00"
+        return row
+
+    row["launched"] = "1"
     t0 = time.time()
     out, rc = run_group(cmd, LEAN_DIR, timeout)
+    if os.environ.get("D3_TEST_RAISE_ON") == m:
+        # Test seam, placed where the real hazard is: AFTER the probe ran, in the
+        # window where timing capture, log writing and gate parsing happen.  main
+        # converts an exception here into a `runner_error` row, and that row must
+        # still be subject to the artifact check.
+        raise RuntimeError("D3_TEST_RAISE_ON (post-probe)")
     row["wall_s"] = f"{time.time() - t0:.2f}"
     try:
         tt = tv.read_text()
@@ -848,6 +900,7 @@ RESULT_COLS = (["target_key", "module", "verdict"] + GATES + [
     "mutable_out", "mutable_flop", "mutable_mem", "distinct_obs",
     "sources", "nodes", "outputs", "flops", "mems", "inputs", "bindings",
     "tier", "manifest_nodes", "requested_samples", "cert_sha256", "run_status",
+    "drift", "launched",
     "max_rss_kb", "user_s", "sys_s", "wall_s", "detail"])
 
 
@@ -869,6 +922,8 @@ def main() -> int:
                     help="the LARGEST design in each tier, to bound resources before a long run")
     ap.add_argument("--resume", action="store_true",
                     help="reuse terminal rows from an existing --out written by the SAME config")
+    ap.add_argument("--runner-selftest", action="store_true",
+                    help="honour D3_ARTIFACT_DIR (runner tests only; never canonical)")
     ap.add_argument("--allow-dirty", action="store_true",
                     help="permit a manifest run from a dirty worktree (exploratory only: "
                          "the result cannot be reproduced from a commit)")
@@ -877,6 +932,17 @@ def main() -> int:
     ap.add_argument("--native", action="store_true",
                     help="run the UNMODIFIED certificate: compilesOk by native_decide + axioms")
     a = ap.parse_args()
+
+    if a.runner_selftest:
+        os.environ["D3_RUNNER_SELFTEST"] = "1"
+    elif os.environ.get("D3_ARTIFACT_DIR"):
+        # Inherited from the environment without the flag: refuse rather than
+        # silently ignore, because the two readings differ in what gets checked.
+        print("REFUSING: D3_ARTIFACT_DIR is set but --runner-selftest was not passed. "
+              "That variable changes what is hashed, not what Lean loads, so honouring "
+              "it outside the runner tests would validate files the probes never use.",
+              file=sys.stderr)
+        return 2
 
     out_path = pathlib.Path(a.out)
     meta_path = out_path.with_suffix(out_path.suffix + ".meta.json")
@@ -970,6 +1036,15 @@ def main() -> int:
             return 2
 
     external, why = build_root_is_external()
+    cfg["runner_selftest"] = bool(a.runner_selftest)
+    if a.runner_selftest:
+        # Branded in the metadata rather than forbidden: the drift regressions
+        # must exercise the manifest path.  The brand is what stops the result
+        # being mistaken for evidence -- d3_join.py refuses a self-test sidecar,
+        # and `runner_selftest` is part of the resume config, so such rows can
+        # never be extended by a canonical run.
+        print("NOTE: --runner-selftest — the artifact digest is redirected away from the "
+              "build the probes load. This run is NOT canonical evidence.", file=sys.stderr)
     cfg["build_root"] = str(build_root())
     cfg["build_root_external"] = external
     cfg["artifact_digest"] = artifact_digest()
@@ -979,6 +1054,13 @@ def main() -> int:
               f"worktree ({why}). Another worktree can rebuild an .olean mid-run, and a "
               f"source-level digest cannot see it -- that is how a pilot got three rows "
               f"from two different compilers.", file=sys.stderr)
+        return 2
+
+    absent = missing_oleans()
+    if a.manifest and absent:
+        print(f"REFUSING a manifest run: critical build artifact(s) absent from "
+              f"{artifact_dir()}: {absent}. A digest over missing objects is not "
+              f"evidence that the right compiler was loaded.", file=sys.stderr)
         return 2
 
     if a.manifest and cfg["worktree_dirty"] and not a.allow_dirty:
@@ -1018,6 +1100,12 @@ def main() -> int:
                 return 2
             if not isinstance(prev, dict) or "config" not in prev:
                 print("--resume REFUSED: sidecar has no config block", file=sys.stderr)
+                return 2
+            if prev["config"].get("aborted_artifact_drift"):
+                print(f"--resume REFUSED: {meta_path.name} is marked "
+                      f"aborted_artifact_drift (at {prev['config'].get('aborted_at_target')!r}, "
+                      f"phase {prev['config'].get('aborted_phase')!r}). Those rows came from a "
+                      f"run whose compiler changed; they cannot be extended.", file=sys.stderr)
                 return 2
             mismatch = {k: (prev["config"].get(k), v)
                         for k, v in cfg.items() if prev["config"].get(k) != v}
@@ -1130,13 +1218,18 @@ def main() -> int:
 
     checkpoint()
     with concurrent.futures.ThreadPoolExecutor(max_workers=a.jobs) as ex:
-        futs = {ex.submit(run_one, t, a.samples, a.timeout, a.native): t for t in todo}
-        for i, f in enumerate(concurrent.futures.as_completed(futs), 1):
-            t = futs[f]
+        futs = {ex.submit(run_one, t, a.samples, a.timeout, a.native, baseline_artifacts): t
+                for t in todo}
+        for i, fut in enumerate(concurrent.futures.as_completed(futs), 1):
+            t = futs[fut]
+            launched_hint, synthesized = "unknown", False
             try:
-                r = f.result()
-                r["verdict"] = "native_ok" if (a.native and r.get("compile") == 1) else verdict(r)
+                r = fut.result()
+                launched_hint = r.get("launched", "0")
+            except concurrent.futures.CancelledError:
+                continue
             except Exception as e:  # noqa: BLE001
+                synthesized = True
                 # One module's failure must not strand the batch or discard the
                 # checkpoint; it becomes an explicit terminal row.
                 r = {g: 0 for g in GATES}
@@ -1144,7 +1237,51 @@ def main() -> int:
                           "cert_sha256": t.sha256, "manifest_nodes": t.nodes,
                           "requested_samples": a.samples, "run_status": "error",
                           "verdict": "runner_error", "wall_s": "",
+                          "drift": "", "launched": "unknown",
                           "detail": f"{type(e).__name__}: {e}"[:200]})
+
+            # UNCONDITIONAL, for every outcome: a normal result, a --native
+            # result, and a synthesized `runner_error`.  Doing this inside
+            # run_one missed the native early return and every exception raised
+            # after the probe, either of which could have ended a drifted run on
+            # a row that looked ordinary.
+            if not r.get("drift"):
+                now_d = artifact_digest()
+                if now_d != baseline_artifacts:
+                    # `between` only when the row proves no worker ran; the phase
+                    # is diagnostic, the abort is not conditional on it.
+                    r["drift"] = {"1": "after", "0": "between"}.get(launched_hint, "unknown")
+
+            if not r.get("drift") and not synthesized:
+                # A synthesized row already carries `runner_error`; recomputing a
+                # verdict from its all-zero gates would relabel a crash as the
+                # ordinary "no gate passed" outcome.
+                r["verdict"] = ("native_ok" if (a.native and r.get("compile") == 1)
+                                else verdict(r))
+
+            if r.get("drift"):
+                # The compiler moved. The WHOLE run is invalid, not just this
+                # module, so the tainted row is NOT appended -- crediting it as
+                # ordinary evidence is exactly the failure this guard exists for.
+                aborted = True
+                now = artifact_digest()
+                _SHUTDOWN.set()
+                for f2 in futs:
+                    f2.cancel()
+                _teardown()          # kill every live process group, not just flag it
+                cfg["artifact_digest_end"] = now
+                cfg["aborted_artifact_drift"] = True
+                cfg["aborted_at_target"] = t.key
+                cfg["aborted_phase"] = r["drift"]
+                with lock:
+                    checkpoint()
+                print(f"\nABORTED: build artifacts changed {r['drift']} {t.key} "
+                      f"({baseline_artifacts[:16]} -> {now[:16]}). The run is void: rows "
+                      f"already written are preserved for diagnosis but must NOT be "
+                      f"reported, and the tainted row was not recorded.",
+                      file=sys.stderr, flush=True)
+                break
+
             r["tier"] = tier_of(t.nodes)
             with lock:
                 rows.append(r)
@@ -1153,20 +1290,11 @@ def main() -> int:
             print(f"[{i}/{len(todo)}] {r['target_key']:<44} {r['verdict']:<13} "
                   f"{r.get('wall_s','')}s rss={r.get('max_rss_kb','?')}kB "
                   f"{r.get('detail','')[:60]}", file=sys.stderr, flush=True)
-            # After EVERY module: did the compiled closure move underneath us?
-            now = artifact_digest()
-            if now != baseline_artifacts:
-                aborted = True
-                _SHUTDOWN.set()
-                print(f"\nABORTING: the Lean build artifacts changed mid-run "
-                      f"({baseline_artifacts[:16]} -> {now[:16]}). Rows already written "
-                      f"are preserved, but this run is NOT a single experiment and must "
-                      f"not be reported as one.", file=sys.stderr, flush=True)
-                with lock:
-                    cfg["artifact_digest_end"] = now
-                    cfg["aborted_artifact_drift"] = True
-                    checkpoint()
-                break
+
+    if aborted:
+        print(f"wrote {out_path} ({len(rows)} rows) and {meta_path.name} "
+              f"-- MARKED ABORTED, not usable as evidence", file=sys.stderr)
+        return 3
 
     checkpoint()
     print(f"\nwrote {out_path} ({len(rows)} rows) and {meta_path.name}", file=sys.stderr)

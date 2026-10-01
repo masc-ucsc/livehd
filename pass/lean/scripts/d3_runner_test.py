@@ -67,6 +67,24 @@ print(f"D3GATE agree=1 samples={samples} distinct_obs=9")
 '''
 
 
+def mark_for(run_id: str) -> str:
+    return str(ROOT / "temp" / "d3_sweep" / "runs" / run_id)
+
+
+def residual(mark: str) -> list:
+    found, me = [], os.getpid()
+    for e in pathlib.Path("/proc").iterdir():
+        if not e.name.isdigit() or int(e.name) == me:
+            continue
+        try:
+            cl = (e / "cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
+        except (OSError, ProcessLookupError):
+            continue
+        if mark in cl and "d3_runner_test" not in cl:
+            found.append(int(e.name))
+    return found
+
+
 def sha256(p: pathlib.Path) -> str:
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
@@ -377,6 +395,195 @@ def main() -> int:
               f"({before_dig[:12]} -> {after_dig[:12]})", f)
         check("artifact_digest_stable", d3mod.artifact_digest() == before_dig,
               "and restoring the bytes restores the digest", f)
+
+        # 13f. ARTIFACT DRIFT — the failure that voided the first pilot
+        #
+        # A fake artifact directory (D3_ARTIFACT_DIR) stands in for the compiled
+        # .olean closure, so the test can move it mid-run without touching the
+        # real build output. The fake lake mutates one object while a chosen
+        # module is elaborating.
+        CRIT = d3mod.CRITICAL_OLEANS
+
+        def fake_artifacts(d: pathlib.Path):
+            d.mkdir(parents=True, exist_ok=True)
+            for m in CRIT:
+                (d / f"{m}.olean").write_bytes(b"v1-" + m.encode())
+            return d
+
+        DRIFT_STUB = STUB.replace(
+            'probe = pathlib.Path(sys.argv[-1])',
+            'probe = pathlib.Path(sys.argv[-1])\n'
+            'ad = os.environ.get("D3_ARTIFACT_DIR")\n'
+            'trig = os.environ.get("DRIFT_ON", "")\n'
+            'if ad and trig and probe.stem == trig:\n'
+            '    import pathlib as _p\n'
+            '    f = _p.Path(ad) / "CompileDesign.olean"\n'
+            '    f.write_bytes(f.read_bytes() + b"-mutated")\n')
+
+        drift_lake = tmp / "fake_lake_drift"
+        drift_lake.write_text(DRIFT_STUB)
+        drift_lake.chmod(0o755)
+
+        adir = fake_artifacts(tmp / "artifacts")
+        drift_out = tmp / "drift.tsv"
+        dres = subprocess.run(
+            [sys.executable, str(SWEEP), "--certs", str(cdir), "--manifest", str(man),
+             "--out", str(drift_out), "--jobs", "3", "--timeout", "60", "--allow-dirty", "--runner-selftest"],
+            cwd=ROOT, env=dict(os.environ, LAKE=str(drift_lake),
+                               D3_ARTIFACT_DIR=str(adir), DRIFT_ON=f"{blocks[2]}_gate",
+                               STUB_DELAY="1"),
+            capture_output=True, text=True, timeout=300)
+
+        drows = rows_of(drift_out) if drift_out.is_file() else []
+        dmeta = json.loads((tmp / "drift.tsv.meta.json").read_text())
+        check("drift_nonzero_exit", dres.returncode != 0,
+              f"a drifted run exits nonzero (rc={dres.returncode})", f, dres.stderr[-250:])
+        check("drift_sidecar_marked", dmeta["config"].get("aborted_artifact_drift") is True,
+              f"sidecar records aborted_artifact_drift at "
+              f"{dmeta['config'].get('aborted_at_target')!r} "
+              f"phase {dmeta['config'].get('aborted_phase')!r}", f)
+        check("drift_no_tainted_row",
+              all(r.get("drift", "") == "" for r in drows)
+              and all(r.get("run_status") != "aborted_artifact_drift" for r in drows),
+              f"the tainted row was not written ({len(drows)} clean row(s) preserved)", f,
+              str([(r['target_key'], r.get('run_status')) for r in drows]))
+        leaked = residual(mark_for(dmeta["run_id"])) if "run_id" in dmeta else []
+        check("drift_workers_torn_down", not leaked,
+              "every worker process group was terminated on abort", f, str(leaked))
+
+        # resume must refuse the aborted sidecar outright
+        # same LAKE and artifact dir, so the only thing resume can object to is
+        # the abort marker itself
+        rp = subprocess.run(
+            [sys.executable, str(SWEEP), "--certs", str(cdir), "--manifest", str(man),
+             "--out", str(drift_out), "--jobs", "1", "--timeout", "60",
+             "--allow-dirty", "--runner-selftest", "--resume"],
+            cwd=ROOT, env=dict(os.environ, LAKE=str(drift_lake),
+                               D3_ARTIFACT_DIR=str(adir), DRIFT_ON=""),
+            capture_output=True, text=True, timeout=180)
+        check("drift_resume_refused",
+              rp.returncode != 0 and "aborted_artifact_drift" in rp.stderr,
+              "resume refuses rows from a drifted run", f, rp.stderr[-250:])
+
+        # and so must the join. The drift sidecar also carries the self-test
+        # brand, which the join refuses first, so the ABORT guard is tested on a
+        # copy with the brand cleared -- otherwise this would pass on the wrong
+        # refusal and the drift check could rot unnoticed.
+        drift_meta = json.loads((tmp / "drift.tsv.meta.json").read_text())
+        drift_meta["config"]["runner_selftest"] = False
+        unbranded = tmp / "drift_unbranded.meta.json"
+        unbranded.write_text(json.dumps(drift_meta, indent=2))
+        jp = subprocess.run([sys.executable, str(JOIN), "--manifest", str(man),
+                             "--results", str(drift_out), "--out", str(tmp / "drift_join.tsv"),
+                             "--meta", str(unbranded)],
+                            cwd=ROOT, capture_output=True, text=True, timeout=120)
+        check("drift_join_refused",
+              jp.returncode != 0 and "aborted_artifact_drift" in jp.stderr,
+              "the join refuses a drifted sweep on the drift marker itself", f,
+              jp.stderr[-250:])
+
+        # 13g. --native must be subject to the same check. It returned from
+        # run_one before the post-run digest test, so a drifted native run could
+        # end on a row that looked ordinary.
+        fake_artifacts(adir)
+        nat_out = tmp / "drift_native.tsv"
+        np_ = subprocess.run(
+            [sys.executable, str(SWEEP), "--certs", str(cdir), "--manifest", str(man),
+             "--out", str(nat_out), "--jobs", "2", "--timeout", "60", "--allow-dirty", "--runner-selftest",
+             "--native"],
+            cwd=ROOT, env=dict(os.environ, LAKE=str(drift_lake), D3_ARTIFACT_DIR=str(adir),
+                               DRIFT_ON=f"{blocks[1]}_gate", STUB_DELAY="1"),
+            capture_output=True, text=True, timeout=300)
+        nmeta = json.loads((tmp / "drift_native.tsv.meta.json").read_text())
+        nrows = rows_of(nat_out) if nat_out.is_file() else []
+        check("drift_native_aborts",
+              np_.returncode != 0 and nmeta["config"].get("aborted_artifact_drift") is True
+              and all(r.get("drift", "") == "" for r in nrows),
+              f"a drifted --native run aborts (rc={np_.returncode}) with no tainted row", f,
+              np_.stderr[-250:])
+
+        # 13h. an exception raised after the probe must not escape the check
+        # either: main synthesizes a `runner_error` row for it.
+        fake_artifacts(adir)
+        exc_out = tmp / "drift_exc.tsv"
+        ep = subprocess.run(
+            [sys.executable, str(SWEEP), "--certs", str(cdir), "--manifest", str(man),
+             "--out", str(exc_out), "--jobs", "2", "--timeout", "60", "--allow-dirty",
+             "--runner-selftest"],
+            cwd=ROOT, env=dict(os.environ, LAKE=str(drift_lake), D3_ARTIFACT_DIR=str(adir),
+                               DRIFT_ON=f"{blocks[1]}_gate",
+                               D3_TEST_RAISE_ON=f"{blocks[3]}_gate", STUB_DELAY="1"),
+            capture_output=True, text=True, timeout=300)
+        emeta = json.loads((tmp / "drift_exc.tsv.meta.json").read_text())
+        erows = rows_of(exc_out) if exc_out.is_file() else []
+        check("drift_with_exception_aborts",
+              ep.returncode != 0 and emeta["config"].get("aborted_artifact_drift") is True
+              and all(r.get("drift", "") == "" for r in erows),
+              f"drift concurrent with a worker exception still aborts "
+              f"(rc={ep.returncode})", f, ep.stderr[-250:])
+
+        # and without drift, a worker exception alone is an ordinary terminal row
+        fake_artifacts(adir)
+        only_exc = tmp / "only_exc.tsv"
+        op_ = subprocess.run(
+            [sys.executable, str(SWEEP), "--certs", str(cdir), "--manifest", str(man),
+             "--out", str(only_exc), "--jobs", "2", "--timeout", "60", "--allow-dirty",
+             "--runner-selftest"],
+            cwd=ROOT, env=dict(os.environ, LAKE=str(stub), D3_ARTIFACT_DIR=str(adir),
+                               D3_TEST_RAISE_ON=f"{blocks[3]}_gate"),
+            capture_output=True, text=True, timeout=300)
+        orows = rows_of(only_exc) if only_exc.is_file() else []
+        err_row = next((r for r in orows if r["target_key"] == blocks[3]), None)
+        check("exception_without_drift_is_a_row",
+              op_.returncode == 0 and err_row is not None
+              and err_row["verdict"] == "runner_error" and len(orows) == len(blocks),
+              f"a worker exception alone is one terminal row, run completes "
+              f"({len(orows)} rows)", f, op_.stderr[-250:])
+
+        # 13i. the seam must not be honourable without the flag, and must never
+        # apply to a canonical run: it changes what is HASHED, not what Lean
+        # LOADS, so an inherited variable would validate the wrong files.
+        fake_artifacts(adir)
+        inh = subprocess.run(
+            [sys.executable, str(SWEEP), "--certs", str(cdir), "--manifest", str(man),
+             "--out", str(tmp / "inherit.tsv"), "--jobs", "1", "--timeout", "60",
+             "--allow-dirty"],
+            cwd=ROOT, env=dict(os.environ, LAKE=str(stub), D3_ARTIFACT_DIR=str(adir)),
+            capture_output=True, text=True, timeout=180)
+        check("artifact_seam_needs_flag",
+              inh.returncode != 0 and "--runner-selftest was not passed" in inh.stderr,
+              "an inherited D3_ARTIFACT_DIR refuses rather than being honoured", f,
+              inh.stderr[-250:])
+
+        sel_out = tmp / "selftest_manifest.tsv"
+        sel = subprocess.run(
+            [sys.executable, str(SWEEP), "--certs", str(cdir), "--manifest", str(man),
+             "--out", str(sel_out), "--jobs", "1", "--timeout", "60",
+             "--allow-dirty", "--runner-selftest"],
+            cwd=ROOT, env=dict(os.environ, LAKE=str(stub), D3_ARTIFACT_DIR=str(adir)),
+            capture_output=True, text=True, timeout=180)
+        smeta = json.loads((tmp / "selftest_manifest.tsv.meta.json").read_text())
+        check("selftest_branded", smeta["config"].get("runner_selftest") is True,
+              "a self-test run brands its own sidecar", f, sel.stderr[-200:])
+        sj = subprocess.run([sys.executable, str(JOIN), "--manifest", str(man),
+                             "--results", str(sel_out), "--out", str(tmp / "sj.tsv"),
+                             "--meta", str(tmp / "selftest_manifest.tsv.meta.json")],
+                            cwd=ROOT, capture_output=True, text=True, timeout=120)
+        check("selftest_join_refused",
+              sj.returncode != 0 and "runner-selftest" in sj.stderr,
+              "the join refuses a self-test sweep", f, sj.stderr[-250:])
+
+        # a missing critical artifact refuses a canonical run up front
+        (adir / "CompileDesign.olean").unlink()
+        mp = subprocess.run(
+            [sys.executable, str(SWEEP), "--certs", str(cdir), "--manifest", str(man),
+             "--out", str(tmp / "missing.tsv"), "--jobs", "1", "--timeout", "60",
+             "--allow-dirty", "--runner-selftest"],
+            cwd=ROOT, env=dict(os.environ, LAKE=str(stub), D3_ARTIFACT_DIR=str(adir)),
+            capture_output=True, text=True, timeout=180)
+        check("missing_olean_refused",
+              mp.returncode != 0 and "artifact(s) absent" in mp.stderr,
+              "an absent critical .olean refuses a canonical run", f, mp.stderr[-200:])
 
         # 14a. a canonical run from a dirty worktree refuses without --allow-dirty
         dirty_out = tmp / "dirty.tsv"

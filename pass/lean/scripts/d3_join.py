@@ -183,6 +183,20 @@ def main() -> int:
         except (OSError, json.JSONDecodeError) as e:
             raise JoinError(f"sidecar {a.meta} is unreadable: {e}")
         cfg = meta.get("config", {}) or {}
+        if cfg.get("runner_selftest"):
+            raise JoinError(
+                "the sweep was run with --runner-selftest, which redirects the artifact "
+                "digest away from the build the probes load: it is a runner regression, "
+                "not evidence, and cannot be joined")
+        if cfg.get("aborted_artifact_drift"):
+            # Rows from a run whose compiler changed partway are not evidence,
+            # and a join is where they would otherwise acquire the authority of
+            # a milestone table.
+            raise JoinError(
+                f"the sweep is marked aborted_artifact_drift (at "
+                f"{cfg.get('aborted_at_target')!r}, phase {cfg.get('aborted_phase')!r}): "
+                f"its rows came from a run whose build artifacts changed and cannot be "
+                f"joined or credited")
         # Basename equality proves nothing: two files can share a name and
         # differ in every row. Authenticate the manifest's BYTES.
         want_digest = cfg.get("manifest_digest", "")
