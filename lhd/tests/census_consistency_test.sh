@@ -161,12 +161,21 @@ if [ -z "$MERGE" ]; then
   echo "FAIL: cannot find census_merge.py, so the manifest/override rule is untested"
   rc=1
 else
-  # TEST_TMPDIR under bazel; otherwise a clearly named, git-ignored
-  # project-local path. The previous fallback was `$(dirname "$TSV")/mo_check`,
-  # which put run debris next to the committed census -- i.e. in pass/lean/ --
-  # and seven of those files were committed. Never /tmp either: this project
-  # keeps run artifacts under generated/.
-  TD="${TEST_TMPDIR:-$ROOT/generated/census_consistency_test/runtime_tmp}"
+  # ALWAYS A CHILD PATH, never the temp root itself.
+  #
+  # Under bazel this lives inside TEST_TMPDIR; otherwise it is a clearly named,
+  # git-ignored project-local path. Two earlier spellings were wrong in
+  # opposite directions: `$(dirname "$TSV")/mo_check` wrote debris beside the
+  # committed census (inside pass/lean/, and seven files were committed), and
+  # bare `$TEST_TMPDIR` made the `rm -rf` below target BAZEL'S OWN sandbox temp
+  # root -- "Device or resource busy", ignored only because this script is not
+  # `set -e`, so the test passed noisily. Never /tmp either: this project keeps
+  # run artifacts under generated/, which also survives a machine rebuild.
+  if [ -n "${TEST_TMPDIR:-}" ]; then
+    TD="$TEST_TMPDIR/census_consistency_test_runtime"
+  else
+    TD="$ROOT/generated/census_consistency_test/runtime_tmp"
+  fi
   rm -rf "$TD"; mkdir -p "$TD/base/mod" "$TD/ovr/mod"
   # Two minimal run directories; the rule must fire on the ARGUMENTS, before
   # any of their contents matter.
