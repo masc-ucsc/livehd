@@ -75,3 +75,8 @@ generated/equiv7/
 # deps). See generated/lean_validation/README.md -- this directory exists
 # because formal/lean/.lake used to be a symlink into another worktree.
 generated/lean_validation/
+
+# Direction 2 census runs (scripts/coreet_d2_census.sh): one directory per
+# commit, each holding per-module lgdb trees, certificates and logs. The
+# CENSUS TSV and manifest of a reported run are copied into pass/lean/.
+generated/census_d2/

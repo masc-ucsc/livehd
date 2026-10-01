@@ -1,0 +1,144 @@
+# CORE-ET module corpus for the Direction 2 census -- the DENOMINATOR.
+#
+# 122 modules, one per line, sorted. sha256 of the newline-joined names:
+#   3246cbd08fa6a0225347be4cdcbbb9600817659ff17ba999608c9164d396a9ed
+# A driver must validate BOTH the count and this digest before an expensive
+# run, so a stale or partially-regenerated set cannot be swept as if it were
+# the corpus.
+#
+# PROVENANCE. Snapshotted from generated/core-et/filelists/*.f, which
+# scripts/coreet_filelist.sh derives per module from
+#   1. <core-et>/dv/rtlcosim/<module>/Makefile  (NEW_RTL_FINAL), else
+#   2. <core-et>/hw/ip/<ip>/dv/Makefile         (RTL_SRCS, whole-IP fallback)
+# Of the 122, 94 have their own dv/rtlcosim directory and
+# 28 come from the whole-IP fallback.
+#
+# THE DENOMINATOR IS NOT VERIFIED COMPLETE. core-et currently has
+# 218 dv/rtlcosim directories, so this corpus is a historical subset, not
+# "every CORE-ET module". It is kept because every prior figure in
+# GATED_MODULES.tsv and VERIFIED_COMPILER_STATUS.md is against these 122;
+# widening it is a separate decision and would reset those comparisons.
+#
+# Snapshotted 2026-10-01 at commit a3e957a15.
+core_top
+debug_breakpoint
+intpipe_alu
+intpipe_csr_file
+intpipe_csr_file_conv
+intpipe_csr_file_fl_barrier
+intpipe_csr_msgs
+intpipe_csr_pmu_read_interface
+intpipe_csr_replay
+intpipe_decode
+intpipe_fp_scoreboard
+intpipe_imm
+intpipe_inst_bits_stage
+intpipe_int_scoreboard
+intpipe_mask_scoreboard
+intpipe_mul_div_top
+intpipe_rf
+intpipe_top
+minion_dcache_128x64_1r1w_lram
+minion_dcache_128x72_1r1w_lram
+minion_dcache_atomic_alu_unit
+minion_dcache_buffer_array
+minion_dcache_cache_op_unit
+minion_dcache_cache_op_unit_l2
+minion_dcache_data_array
+minion_dcache_lru_array
+minion_dcache_metadata_array
+minion_dcache_miss_handler
+minion_dcache_miss_handler_unit
+minion_dcache_pma_unit
+minion_dcache_reduce
+minion_dcache_replay_queue
+minion_dcache_scratchpad_ctrl
+minion_dcache_store_merge_unit
+minion_dcache_tensor_load
+minion_dcache_texsend
+minion_dcache_tlb_array
+minion_dcache_top
+minion_dcache_writeback_unit
+minion_debug_apb_slv
+minion_frontend
+minion_frontend_rvc_expander
+minion_frontend_thread_buffer
+minion_frontend_thread_sched
+minion_tlb
+minion_top
+null_vpu
+tima_adder
+tima_top
+trans_exp_rom_case_c0
+trans_exp_rom_case_c1c2
+trans_log_rom_case_c0
+trans_log_rom_case_c1c2
+trans_rcp_rom_case_c0
+trans_rcp_rom_case_c1c2
+trans_rsqrt_rom_case_c0
+trans_rsqrt_rom_case_c1c2
+trans_sin_rom_case_c0
+trans_sin_rom_case_c1c2
+trans_top
+txfma_4_2_compressor
+txfma_4_2_compressor_array
+txfma_adder
+txfma_align_shf
+txfma_booth_ppg_32r4
+txfma_booth_ppg_32r4_msb
+txfma_booth_ppg_32r4_norm
+txfma_c0
+txfma_c1
+txfma_c2
+txfma_c3
+txfma_c4
+txfma_c5
+txfma_c6
+txfma_csa
+txfma_e1
+txfma_e2
+txfma_e4
+txfma_e5
+txfma_e6
+txfma_ediff_opdorder_logic
+txfma_exp_special_detect
+txfma_f0
+txfma_f1
+txfma_f2
+txfma_f3
+txfma_f4
+txfma_f5
+txfma_f6
+txfma_frac_zero_detect
+txfma_lxd
+txfma_norm_shf
+txfma_rnd_adder
+txfma_top
+txfma_top_fake
+txfma_trz
+txfma_trz2
+txfma_wallace1
+txfma_wallace2
+txfmactl_top
+txfmaexp_top
+txfmafrac_top
+vpu_bypass
+vpu_ctrl
+vpu_decoder
+vpu_lane
+vpu_lane_tima
+vpu_mask
+vpu_ml
+vpu_rf
+vpu_sh_sw
+vpu_tensora_rf
+vpu_tensorb_rf
+vpu_tensorc_rf
+vpu_tensorfma
+vpu_tensorquant
+vpu_tensorreduce
+vpu_tensortmp_rf
+vpu_top
+vpu_trans
+vpu_txfma_trans_top
+vpu_uinst_decoder

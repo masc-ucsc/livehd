@@ -10,6 +10,8 @@ filegroup(
     srcs = [
         "coreet_filelist.sh",
         "coreet_print.mk",
+        "coreet_d2_census.sh",
+        "coreet_d2_census_report.py",
         "coreet_lowering_diffsim.py",
         "cycle_provenance.sh",
         "lean_validate.sh",
