@@ -14,6 +14,7 @@ filegroup(
         "coreet_d2_census.sh",
         "coreet_d2_census_report.py",
         "coreet_lowering_diffsim.py",
+        "mem_lean_diffsim.py",
         "cycle_provenance.sh",
         "lean_validate.sh",
         "lean_validate_join.py",

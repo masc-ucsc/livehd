@@ -772,6 +772,26 @@ sh_test(
     ],
 )
 
+# BEHAVIOURAL evidence for mixed-timing memory: source RTL under iverilog vs
+# the NORMALIZED Lean certificate at P=2 period boundaries. This is the gate
+# the other memory tests cannot give -- checkDesign plus zero-input cycles
+# writes nothing, and the classification test reports intent before the
+# rewrite. Its first run found a real defect (a slot-gated memory wrote only
+# bit 0). Two negatives must MISMATCH: P=1 on a P=2 certificate, and bypassing
+# the inserted slot gate. Without iverilog it reports BEHAVIORAL_DIFF_SKIPPED
+# and claims structural evidence only.
+sh_test(
+    name = "mem_mixed_lean_diff_test",
+    size = "enormous",
+    srcs = ["mem_mixed_lean_diff_test.sh"],
+    data = [
+        "mem_mixed_rdclk_diff.v",
+        "//lhd",
+        "//scripts:cycle_provenance_tools",
+    ],
+    tags = ["manual"],  # needs the Lean toolchain + iverilog; run explicitly
+)
+
 # The <Top>_io.json sidecar. DesignCert is POSITIONAL, so an external driver
 # needs names -- and re-walking GraphIO to recover them is how a sidecar
 # silently drifts from the model. Ordinals are recorded in the same loops that

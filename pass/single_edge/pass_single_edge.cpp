@@ -1528,41 +1528,124 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
         }
         const auto en_pid  = static_cast<hhds::Port_id>(p * stride + pid_en);
         const auto en_name = std::string(Ntype::get_sink_name(Ntype_op::Memory, en_pid));
-        // enable := [slot predicate &] old enable & every ICG enable on this port
-        std::vector<hhds::Pin_class> terms;
-        if (gate) {
-          terms.push_back(slot_pred[me.slot]);
-        }
-        if (auto old = mem_sink_driver(me.node, en_pid); !old.is_invalid()) {
-          terms.push_back(old);
-        }
-        bool any_icg = false;
-        for (const auto& [ip, ens] : me.icg_enables) {
-          if (ip == p) {
-            terms.insert(terms.end(), ens.begin(), ens.end());
-            any_icg = any_icg || !ens.empty();
+        auto       old_en  = mem_sink_driver(me.node, en_pid);
+
+        // TWO LAYERS, and they must not be collapsed into one AND.
+        //
+        // A memory write port's `enable` is a PER-BIT (byte/lane) write mask of
+        // width `wensize`, not a boolean. The previous code AND-folded the slot
+        // predicate straight into it and then forced the result to one bit
+        // (`set_bits(acc, 1)`), which is correct for a FLOP enable and silently
+        // destroyed every lane above 0 for a memory: measured, a slot-gated
+        // memory wrote only bit 0 of its data (write 0xA5, read back 1; write
+        // 0x02, read 0). Widening that AND to W would not fix it either -- a
+        // 1-bit term zero-extended to W still gates lane 0 alone.
+        //
+        // So: build a strictly 1-bit COMMIT predicate, then use it to SELECT
+        // between the port's real lane mask and all-zero. The mask is preserved
+        // bit for bit and is suppressed COLLECTIVELY outside the commit slot.
+        hhds::Pin_class commit;  // 1-bit
+        {
+          std::vector<hhds::Pin_class> bool_terms;
+          if (gate) {
+            bool_terms.push_back(slot_pred[me.slot]);
+          }
+          for (const auto& [ip, ens] : me.icg_enables) {
+            if (ip != p) {
+              continue;
+            }
+            for (const auto& e : ens) {
+              // An ICG term that is not boolean cannot be folded into a 1-bit
+              // predicate without the very truncation this exists to avoid.
+              if (gu::bits_of(e) > 1) {
+                r.error  = true;
+                r.reason = std::format("memory `{}` port {} has an ICG enable {} bits wide; the commit "
+                                       "predicate must be boolean, and folding a wider term into it is the "
+                                       "truncation this gating exists to avoid",
+                                       label_of(me.node), static_cast<int>(p), gu::bits_of(e));
+                refuse(quiet, "memory-gate-nonboolean", std::format("{}: {}", g->get_name(), r.reason),
+                       "an ICG enable must be a boolean gate term");
+                return r;
+              }
+              bool_terms.push_back(e);
+            }
+          }
+          const bool any_icg_here = bool_terms.size() > (gate ? 1u : 0u);
+          if (!gate && !any_icg_here) {
+            continue;  // this port changes nothing
+          }
+          for (const auto& t : bool_terms) {
+            if (commit.is_invalid()) {
+              commit = t;
+              continue;
+            }
+            auto andn = gu::create_typed_node(*g, Ntype_op::And);
+            commit.connect_sink(andn.create_sink_pin(0));
+            t.connect_sink(andn.create_sink_pin(0));
+            commit = andn.create_driver_pin(0);
+            gu::set_bits(commit, 1);
+            gu::set_unsign(commit);
           }
         }
-        if (!gate && !any_icg) {
-          continue;  // this port changes nothing
+        if (commit.is_invalid()) {
+          continue;
         }
-        hhds::Pin_class acc;
-        for (const auto& t : terms) {
-          if (acc.is_invalid()) {
-            acc = t;
-            continue;
+
+        // The lane mask's width. With no existing enable the port writes every
+        // lane, so the "committing" arm is all-ones of the memory's `wensize`.
+        int w = old_en.is_invalid() ? 0 : static_cast<int>(gu::bits_of(old_en));
+        if (w <= 0) {
+          const auto wen = mem_sink_const(me.node, Ntype::get_sink_pid(Ntype_op::Memory, "wensize"));
+          if (!wen.has_value() || *wen <= 0) {
+            r.error  = true;
+            r.reason = std::format("memory `{}` port {} has no enable driver and no readable `wensize`, so the "
+                                   "width of its write-lane mask is ambiguous",
+                                   label_of(me.node), static_cast<int>(p));
+            refuse(quiet, "memory-gate-width-unknown", std::format("{}: {}", g->get_name(), r.reason),
+                   "give the memory a constant `wensize`, or an explicit enable driver");
+            return r;
           }
-          auto andn = gu::create_typed_node(*g, Ntype_op::And);
-          acc.connect_sink(andn.create_sink_pin(0));
-          t.connect_sink(andn.create_sink_pin(0));
-          acc = andn.create_driver_pin(0);
-          gu::set_bits(acc, 1);
-          gu::set_unsign(acc);
+          w = static_cast<int>(*wen);
         }
+
+        hhds::Pin_class gated;
+        if (w == 1) {
+          // A one-lane mask is a boolean; AND is exact and cheaper than a mux.
+          if (old_en.is_invalid()) {
+            gated = commit;
+          } else {
+            auto andn = gu::create_typed_node(*g, Ntype_op::And);
+            old_en.connect_sink(andn.create_sink_pin(0));
+            commit.connect_sink(andn.create_sink_pin(0));
+            gated = andn.create_driver_pin(0);
+            gu::set_bits(gated, 1);
+            gu::set_unsign(gated);
+          }
+        } else {
+          // Mux pins: 0 = selector, 1 = value when false, 2 = when true.
+          auto mux = gu::create_typed_node(*g, Ntype_op::Mux, w);
+          gu::setup_sink_by_name(mux, "s").connect_driver(commit);
+          gu::setup_sink_by_name(mux, "p1").connect_driver(
+              livehd::graph_util::create_const(*g, *Dlop::create_integer(0)));
+          if (old_en.is_invalid()) {
+            gu::setup_sink_by_name(mux, "p2").connect_driver(
+                livehd::graph_util::create_const(*g, *Dlop::get_mask_value(w - 1, 0)));
+          } else {
+            gu::setup_sink_by_name(mux, "p2").connect_driver(old_en);
+          }
+          gated = mux.create_driver_pin(0);
+          gu::set_bits(gated, w);
+          gu::set_unsign(gated);
+        }
+
         drop_sink(me.node, en_name);
-        if (!acc.is_invalid()) {
-          acc.connect_sink(gu::setup_sink_by_name(me.node, en_name));
-        }
+        gated.connect_sink(gu::setup_sink_by_name(me.node, en_name));
+
+        // The rewritten enable must still be the port's lane mask, not a
+        // boolean: this is exactly the invariant whose violation wrote only
+        // bit 0.
+        I(static_cast<int>(gu::bits_of(gated)) == w,
+          "single_edge: rewritten memory enable width does not match the port's lane mask");
       }
       // Every commit is now expressed by its slot on the reference clock (or,
       // off-reference, by its own root's edge). A negedge `posclk` left in place
