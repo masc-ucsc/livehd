@@ -637,6 +637,23 @@ sh_test(
     data = ["//lhd"],
 )
 
+# The census --resume gate. Generation runs under `xargs -P`; if the driver
+# dies, xargs is reparented to PPID 1 and the workers finish with nobody left
+# to aggregate -- which happened, with 121 of 122 modules already generated.
+# Resume must therefore exist, and must FAIL CLOSED: a resumed census that
+# silently aggregates a partial or foreign generation directory looks
+# authoritative and is worse than none. Gate only; no lhd/Lean/CORE-ET.
+sh_test(
+    name = "census_resume_test",
+    size = "small",
+    srcs = ["census_resume_test.sh"],
+    data = [
+        # the driver derives its plain-proc variant from the real read script
+        "//inou/yosys:inou_yosys_scripts",
+        "//scripts:cycle_provenance_tools",
+    ],
+)
+
 # The D2 census accept/reject logic. Two distinctions that were wrong at first:
 # direct_sweep exits 1 when it COMPLETED with refusals (near-certain over 122
 # modules), which must not mark every other row UNTRUSTED; and `accepted`

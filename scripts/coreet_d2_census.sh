@@ -29,8 +29,14 @@ CYCLES="${CYCLES:-4}"
 TIMEOUT="${TIMEOUT:-2700}"
 ONLY=""
 OUT=""
+RESUME=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    # Aggregate + sweep an EXISTING generation directory. Generation can be
+    # interrupted (a killed driver leaves its xargs orphaned at PPID 1 and the
+    # workers finish with nobody left to aggregate), and rerunning 121 modules
+    # to recover is pure waste. Fail-closed: see the checks below.
+    --resume) RESUME="$2"; shift 2 ;;
     --only) ONLY="$2"; shift 2 ;;
     --jobs) JOBS="$2"; shift 2 ;;
     --cycles) CYCLES="$2"; shift 2 ;;
@@ -40,7 +46,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+COMMIT_FULL="$(git -C "$ROOT" rev-parse HEAD)"
 COMMIT="$(git -C "$ROOT" rev-parse --short HEAD)"
+if [[ -n "$RESUME" ]]; then
+  OUT="$RESUME"
+  [[ -d "$OUT" ]] || { echo "FATAL: --resume: no such directory: $OUT" >&2; exit 2; }
+fi
 OUT="${OUT:-$ROOT/generated/census_d2/$COMMIT}"
 mkdir -p "$OUT/logs" "$OUT/mod"
 
@@ -101,10 +112,15 @@ sed 's/^proc -ifx$/proc/' "$ROOT/inou/yosys/inou_yosys_read.ys" > "$PLAIN_YS"
 grep -qx 'proc' "$PLAIN_YS" || { echo "FATAL: the -ifx substitution did not apply"; exit 2; }
 
 START="$(date -Is)"
+# On resume the generation manifest must be PRESERVED, not overwritten: it is
+# the record of how those artifacts were produced, and rewriting it would
+# re-stamp old artifacts with the resuming run's provenance.
+if [[ -z "$RESUME" ]]; then
 cat > "$OUT/manifest.json" <<JSON
 {
   "kind": "coreet_d2_census",
-  "commit": "$COMMIT",
+  "commit": "$COMMIT_FULL",
+  "commit_short": "$COMMIT",
   "module_list": "$LIST",
   "module_list_sha256": "$DIGEST",
   "modules_requested": ${#MODULES[@]},
@@ -115,12 +131,13 @@ cat > "$OUT/manifest.json" <<JSON
   "cycles": $CYCLES,
   "per_module_timeout_s": $TIMEOUT,
   "generation_jobs": $JOBS,
-  "git_dirty": $(if [[ -n "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ]]; then echo true; else echo false; fi),
-  "driver_sha256": "$(sha256sum "$ROOT/scripts/coreet_d2_census.sh" | cut -c1-16)",
-  "report_sha256": "$(sha256sum "$ROOT/scripts/coreet_d2_census_report.py" | cut -c1-16)",
-  "runner_sha256": "$(sha256sum "$ROOT/scripts/run_coreet_module_lean.sh" | cut -c1-16)",
-  "direct_sweep_sha256": "$(sha256sum "$ROOT/pass/lean/scripts/direct_sweep.py" | cut -c1-16)",
-  "lhd_sha256": "$(sha256sum "$ROOT/bazel-bin/lhd/lhd" 2>/dev/null | cut -c1-16)",
+  "tracked_dirty": $(if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then echo true; else echo false; fi),
+  "untracked_paths": $(git -C "$ROOT" status --porcelain 2>/dev/null | grep -c '^??'),
+  "driver_sha256": "$(sha256sum "$ROOT/scripts/coreet_d2_census.sh" | cut -d' ' -f1)",
+  "report_sha256": "$(sha256sum "$ROOT/scripts/coreet_d2_census_report.py" | cut -d' ' -f1)",
+  "runner_sha256": "$(sha256sum "$ROOT/scripts/run_coreet_module_lean.sh" | cut -d' ' -f1)",
+  "direct_sweep_sha256": "$(sha256sum "$ROOT/pass/lean/scripts/direct_sweep.py" | cut -d' ' -f1)",
+  "lhd_sha256": "$(sha256sum "$ROOT/bazel-bin/lhd/lhd" 2>/dev/null | cut -d' ' -f1)",
   "lhd_mtime": "$(stat -c '%y' "$ROOT/bazel-bin/lhd/lhd" 2>/dev/null | cut -d. -f1)",
   "lean_build_root": "$(readlink -f "$ROOT/formal/lean/.lake")",
   "lean": "$(cd "$ROOT/formal/lean" && lake env lean --version 2>/dev/null | head -1)",
@@ -128,6 +145,20 @@ cat > "$OUT/manifest.json" <<JSON
   "started": "$START"
 }
 JSON
+else
+  python3 - "$OUT/manifest.json" "$START" <<'PYR'
+import json, sys
+p, started = sys.argv[1], sys.argv[2]
+try:
+    d = json.load(open(p))
+except Exception:
+    d = {}
+d.setdefault("resumed", []).append({"started": started, "note":
+    "generation was interrupted; this run only aggregated + swept existing artifacts"})
+json.dump(d, open(p, "w"), indent=2)
+PYR
+  echo "resume: generation manifest preserved; resume recorded"
+fi
 
 # ---- phase 1: generate (bounded, fail-closed, per module) ------------------
 gen_one() {
@@ -157,9 +188,48 @@ gen_one() {
 export -f gen_one blocked_reason
 export OUT ROOT TIMEOUT PLAIN_SET BLOCKED_SET PLAIN_YS
 
+if [[ -n "$RESUME" ]]; then
+  # ---- fail-closed resume gate -------------------------------------------
+  # Everything here is a REFUSAL, not a warning: a resumed census that
+  # silently aggregates a partial or foreign generation directory is worse
+  # than no census, because it looks authoritative.
+  fail=0
+  MF="$OUT/manifest.json"
+  [[ -r "$MF" ]] || { echo "FATAL: --resume: no manifest at $MF" >&2; exit 2; }
+  mf_digest="$(grep -oP '"module_list_sha256":\s*"\K[0-9a-f]+' "$MF" | head -1)"
+  mf_commit="$(grep -oP '"commit":\s*"\K[^"]+' "$MF" | head -1)"
+  if [[ "$mf_digest" != "$DIGEST" ]]; then
+    echo "FATAL: --resume: that run used module list digest $mf_digest, this corpus is $DIGEST" >&2
+    fail=1
+  fi
+  if [[ "$mf_commit" != "$COMMIT" && "$mf_commit" != "$COMMIT_FULL" ]]; then
+    echo "FATAL: --resume: that run was generated at commit $mf_commit, HEAD is $COMMIT" >&2
+    echo "       resuming across a code change would attribute old artifacts to new code" >&2
+    fail=1
+  fi
+  n_status="$(find "$OUT/mod" -mindepth 2 -maxdepth 2 -name status 2>/dev/null | wc -l)"
+  if [[ "$n_status" -ne "${#MODULES[@]}" ]]; then
+    echo "FATAL: --resume: $n_status per-module status file(s), expected ${#MODULES[@]}" >&2
+    echo "       generation is incomplete; let it finish before resuming" >&2
+    fail=1
+  fi
+  for m in "${MODULES[@]}"; do
+    [[ -r "$OUT/mod/$m/status" ]] || { echo "FATAL: --resume: no status for $m" >&2; fail=1; }
+  done
+  extra="$(find "$OUT/mod" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null \
+            | LC_ALL=C sort | comm -13 <(printf '%s\n' "${MODULES[@]}" | LC_ALL=C sort) -)"
+  if [[ -n "$extra" ]]; then
+    echo "FATAL: --resume: module directories not in the corpus: $(echo $extra)" >&2
+    fail=1
+  fi
+  [[ "$fail" -eq 0 ]] || exit 2
+  echo "resume: $n_status/${#MODULES[@]} status files, digest and commit match -- aggregating"
+else
+
 echo "phase 1: generating ${#MODULES[@]} module(s), jobs=$JOBS"
 printf '%s\n' "${MODULES[@]}" | xargs -P "$JOBS" -I{} bash -c 'gen_one "$@"' _ {} 
 echo "phase 1 done"
+fi
 
 # ---- phase 2: checkDesign + runDirect over THIS run's certificates ---------
 # Serialized (jobs=1): the Lean runs are memory-hungry and parallelism here is
@@ -181,6 +251,22 @@ for m in "${MODULES[@]}"; do
   done
   [[ "$ok" == "1" ]] && PRESENT+=("$m")
 done
+# An aggregate generation record, written BEFORE the sweep, so an interrupted
+# run still leaves a readable account of what generation produced.
+GEN_TSV="$OUT/generation.tsv"
+printf 'module\tlowering\trunner_rc\tcompile\tsingle_edge\temit\tstatic_gates\tcert\tpresent\n' > "$GEN_TSV"
+for m in "${MODULES[@]}"; do
+  st="$OUT/mod/$m/status"; lg="$OUT/logs/$m.log"
+  low="$(cut -f1 "$st" 2>/dev/null)"; rc="$(cut -f2 "$st" 2>/dev/null)"
+  g() { grep -oP "$1\K[0-9]+" "$lg" 2>/dev/null | head -1; }
+  inp=no; for x in "${PRESENT[@]:-}"; do [[ "$x" == "$m" ]] && inp=yes; done
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$m" "${low:--}" "${rc:--}" \
+    "$(g 'compile exit=')" "$(g 'single_edge exit=')" "$(g 'lean emit exit=')" \
+    "$(g 'static gates: gate_status=')" \
+    "$([[ -r "$OUT/mod/$m/lean/${m}_Lgraph.lean" ]] && echo yes || echo no)" "$inp" >> "$GEN_TSV"
+done
+echo "generation summary: $GEN_TSV"
+
 echo "phase 2: ${#PRESENT[@]} certificate(s) to sweep, serialized, cycles=$CYCLES"
 SWEEP_TSV="$OUT/direct_sweep.tsv"
 rm -f "$SWEEP_TSV"
