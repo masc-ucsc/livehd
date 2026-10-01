@@ -1,0 +1,34 @@
+# 32 of the authoritative 78 blocks have no certificate.
+block	reason
+acc_dispatcher	not attempted in emit.tsv
+amo_alu	not attempted in emit.tsv
+ariane_regfile_fpga	not attempted in emit.tsv
+axi_adapter	not attempted in emit.tsv
+axi_adapter_arbiter	not attempted in emit.tsv
+axi_shim	not attempted in emit.tsv
+bht2lvl	not attempted in emit.tsv
+cache_ctrl	not attempted in emit.tsv
+cva6	NO_EMIT
+cva6_accel_first_pass_decoder	not attempted in emit.tsv
+cva6_hpdcache_subsystem_axi_arbiter	not attempted in emit.tsv
+cva6_hpdcache_subsystem_l15_adapter	not attempted in emit.tsv
+cva6_icache_axi_wrapper	not attempted in emit.tsv
+cva6_mmu	NO_EMIT
+cva6_tlb	NO_EMIT
+ex_stage	NO_EMIT
+load_store_unit	NO_EMIT
+macro_decoder	not attempted in emit.tsv
+miss_handler	not attempted in emit.tsv
+std_cache_subsystem	not attempted in emit.tsv
+std_nbdcache	not attempted in emit.tsv
+tag_cmp	not attempted in emit.tsv
+trigger_module	not attempted in emit.tsv
+wt_axi_adapter	not attempted in emit.tsv
+wt_cache_subsystem	not attempted in emit.tsv
+wt_dcache	not attempted in emit.tsv
+wt_dcache_ctrl	not attempted in emit.tsv
+wt_dcache_mem	not attempted in emit.tsv
+wt_dcache_missunit	not attempted in emit.tsv
+wt_dcache_wbuffer	not attempted in emit.tsv
+wt_l15_adapter	not attempted in emit.tsv
+zcmt_decoder	not attempted in emit.tsv
