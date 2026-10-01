@@ -1,0 +1,31 @@
+diff --git a/formal/lean/LeanSemanticPrimitives/Translation/LGraphModel.lean b/formal/lean/LeanSemanticPrimitives/Translation/LGraphModel.lean
+--- a/formal/lean/LeanSemanticPrimitives/Translation/LGraphModel.lean
++++ b/formal/lean/LeanSemanticPrimitives/Translation/LGraphModel.lean
+@@ -102,6 +102,9 @@
+ def bv_sra (w : Nat) (x shamt : BV) : BV :=
+   mk_bv w (bv_sint x / (2 ^ (bv_uint shamt).toNat : Int))
+ 
++def bv_shl_step (w : Nat) (a b : BV) : BV :=
++  mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat)
++
+ def bv_sdiv (w : Nat) (a b : BV) : BV :=
+   mk_bv w
+     (if bv_uint b = 0 then 0
+@@ -179,7 +182,7 @@
+   | LGraphOp.Op_SHL, w, []         => mk_bv w 0
+   | LGraphOp.Op_SHL, w, (a :: bs)  =>
+     bs.foldl (fun acc b =>
+-      bv_bitwise w (fun x y => xor x y) acc (mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat)))
++      bv_bitwise w (fun x y => xor x y) acc (bv_shl_step w a b))
+       (mk_bv w 0)
+   | LGraphOp.Op_SRA, w, [a, b]     => bv_sra w a b
+   | LGraphOp.Op_MuxBool, w, [sel, false_v, true_v] =>
+@@ -235,7 +238,7 @@
+   | LGraphOp.Op_SHL, w, []         => mk_bv w 0
+   | LGraphOp.Op_SHL, w, (a :: bs)  =>
+     bs.foldl (fun acc b =>
+-      bv_bitwise w (fun x y => xor x y) acc (mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat)))
++      bv_bitwise w (fun x y => xor x y) acc (bv_shl_step w a b))
+       (mk_bv w 0)
+   | LGraphOp.Op_SRA, w, [a, b]     => bv_sra w a b
+   | LGraphOp.Op_MuxBool, w, [sel, false_v, true_v] =>

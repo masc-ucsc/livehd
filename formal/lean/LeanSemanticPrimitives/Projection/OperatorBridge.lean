@@ -71,6 +71,36 @@ any of these. -/
     evalPrim .bvGetMask [.int (Int.ofNat w), encBV a, encBV m]
       = .ok (encBV (bv_get_mask w a m)) := rfl
 
+/-! ## The one local overlay, and the proof that it changed nothing
+
+`Translation/LGraphModel.lean` in THIS branch is the semantic base plus one
+definitional factoring: `bv_shl_step` names the shifted copy `Op_SHL` folds,
+which was previously written inline.  `Projection/overlays/` carries the patch
+and a drift check for it.
+
+The theorems below are the obligation that goes with taking that liberty, and
+they are stated so that they cannot be satisfied by a semantic change: each
+restates `Op_SHL`'s body AS IT READ BEFORE the overlay -- the inline
+power/mod/sign expression, with no mention of `bv_shl_step` -- and proves it by
+`rfl`.  If the overlay had altered meaning rather than introduced a name, these
+would not typecheck.  Both operator-semantics functions the overlay touched are
+covered. -/
+
+theorem bv_shl_step_unfolds (w : Nat) (a b : BV) :
+    bv_shl_step w a b = mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat) := rfl
+
+theorem evalOp_SHL_unchanged_by_overlay (w : Nat) (a : BV) (bs : List BV) :
+    eval_op .Op_SHL w (a :: bs)
+      = bs.foldl (fun acc b =>
+          bv_bitwise w (fun x y => xor x y) acc
+            (mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat))) (mk_bv w 0) := rfl
+
+theorem denoteOp_SHL_unchanged_by_overlay (w : Nat) (a : BV) (bs : List BV) :
+    denote_op .Op_SHL w (a :: bs)
+      = bs.foldl (fun acc b =>
+          bv_bitwise w (fun x y => xor x y) acc
+            (mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat))) (mk_bv w 0) := rfl
+
 /-- The SIGNED reading, delegating to the pinned `bv_sint`.  `Op_SLT`/`Op_SGT`
 and `Op_Sext` all need it, and none of them re-derives sign conversion. -/
 @[simp] theorem prim_bvSint (a : BV) :

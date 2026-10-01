@@ -126,6 +126,10 @@ namespace Projection
 #print axioms evalOpCert_MuxBool
 #print axioms evalOpCert_MuxN
 -- Phase 3 batch 4: the comparisons and Op_Sext
+-- the local overlay is definitionally inert
+#print axioms bv_shl_step_unfolds
+#print axioms evalOp_SHL_unchanged_by_overlay
+#print axioms denoteOp_SHL_unchanged_by_overlay
 #print axioms prim_bvSint
 #print axioms evalOp_ULT
 #print axioms evalOp_UGT
