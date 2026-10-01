@@ -196,6 +196,98 @@ for _s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
     signal.signal(_s, _on_signal)
 
 
+# ---------------------------------------------------------------------------
+# Memory budget.
+#
+# ORDERING IS NOT A CAP.  Running cheapest-first decides what runs when; it does
+# nothing to stop the next target from exceeding the budget on its own, and
+# `--defer-over-rss-kb` only acts on RSS values MEASURED IN AN EARLIER RUN.  A
+# design whose cost moved, or one never measured, walks straight past both.
+#
+# So the live run is also sampled.  This machine is shared: the policy is to stop
+# handing out NEW work once the aggregate approaches the cap, and never to kill a
+# worker that is already running -- killing it would spend the memory and discard
+# the row, which is the worst of both.
+# ---------------------------------------------------------------------------
+_RSS_STOP = threading.Event()
+_RSS_PEAK = {"kb": 0, "cap_kb": 0, "tripped_at_kb": 0}
+_RSS_LOCK = threading.Lock()
+_PAGE_KB = os.sysconf("SC_PAGE_SIZE") // 1024
+
+
+def _rss_kb_of(pid: int) -> int:
+    try:
+        return int(pathlib.Path(f"/proc/{pid}/statm").read_text().split()[1]) * _PAGE_KB
+    except (FileNotFoundError, ProcessLookupError, PermissionError, OSError,
+            IndexError, ValueError):
+        return 0
+
+
+def _descendants(root: int) -> set:
+    """Every live descendant of `root`, by walking real ppid links.
+
+    The marker scan alone is NOT enough for a memory budget.  `_marked_pids`
+    matches on the command line, which catches `/usr/bin/time`, `lake` and the
+    `lean` worker because the probe path is an argument to each -- but a process
+    one of them forks need not mention that path at all, and an uncounted child
+    is memory the cap cannot see.  Teardown can afford a command-line match
+    because it only has to kill what it can find and then rescan; a budget
+    cannot, because what it misses is spent either way.
+    """
+    kids = {}
+    for entry in pathlib.Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            stat = (entry / "stat").read_text()
+            # comm can contain spaces and parentheses, so ppid is read from
+            # AFTER the last ')' rather than by splitting the whole line.
+            ppid = int(stat[stat.rindex(")") + 1:].split()[1])
+        except (FileNotFoundError, ProcessLookupError, PermissionError, OSError,
+                ValueError, IndexError):
+            continue
+        kids.setdefault(ppid, []).append(int(entry.name))
+    out, stack = set(), [root]
+    while stack:
+        for c in kids.get(stack.pop(), []):
+            if c not in out:
+                out.add(c)
+                stack.append(c)
+    return out
+
+
+def _aggregate_rss_kb() -> int:
+    """Resident total of THIS run's process tree, plus any marked stragglers.
+
+    The union matters in both directions: the ppid walk catches a grandchild
+    that never names the probe path, and the marker catches a worker that has
+    been REPARENTED away from this driver -- which is precisely the state the
+    nine orphaned `lean` processes were in.  Scoping by this run's own marker
+    also means a concurrent sweep's workers are not charged to this budget, and
+    that this run cannot hide behind someone else's idle machine.
+    """
+    pids = _descendants(os.getpid()) | set(_marked_pids())
+    return _rss_kb_of(os.getpid()) + sum(_rss_kb_of(pid) for pid in pids)
+
+
+def _rss_monitor(cap_kb: int, interval: float = 5.0) -> None:
+    interval = float(os.environ.get("D3_RSS_INTERVAL") or interval)
+    while not _SHUTDOWN.is_set() and not _RSS_STOP.is_set():
+        total = _aggregate_rss_kb()
+        with _RSS_LOCK:
+            if total > _RSS_PEAK["kb"]:
+                _RSS_PEAK["kb"] = total
+        if cap_kb and total >= cap_kb:
+            with _RSS_LOCK:
+                _RSS_PEAK["tripped_at_kb"] = total
+            print(f"d3_sweep: AGGREGATE RSS {total} kB reached the cap {cap_kb} kB -- "
+                  f"no further targets will be launched; the running one is left to "
+                  f"finish", file=sys.stderr)
+            _RSS_STOP.set()
+            return
+        time.sleep(interval)
+
+
 def run_group(cmd, cwd, timeout):
     """Run `cmd` in its own session; return (combined output, returncode).
 
@@ -412,7 +504,7 @@ def order_by_rss(targets, path: pathlib.Path):
         print(f"d3_sweep: {len(unknown)} target(s) have no recorded RSS and run LAST: "
               f"{', '.join(unknown[:8])}{' ...' if len(unknown) > 8 else ''}",
               file=sys.stderr)
-    return sorted(targets, key=lambda t: (rss.get(t.module) or (1 << 62), t.key))
+    return sorted(targets, key=lambda t: (rss.get(t.module) or (1 << 62), t.key)), rss
 
 
 # Everything whose CONTENT can change what a row means.  A worktree HEAD plus a
@@ -622,6 +714,31 @@ def classify(log: str, rc: int, timeout: int) -> str:
     return ""
 
 
+def deferred_row(target: Target, samples: int, why: str) -> dict:
+    """A target the SCHEDULER declined to start.
+
+    Deliberately not an error row and not a `done` row.  It did not fail -- no
+    gate was even attempted -- so every gate is 0 and the verdict says `deferred`
+    rather than being recomputed from those zeros, which would relabel "we chose
+    not to run this" as "it passed nothing".  `run_status` is `deferred`, which
+    `--resume` does not treat as terminal, so a later run picks it up.
+    """
+    row = {g: 0 for g in GATES}
+    row.update({
+        "target_key": target.key, "module": target.module,
+        "cert_sha256": target.sha256, "manifest_nodes": target.nodes,
+        "requested_samples": samples, "run_status": "deferred",
+        "verdict": "deferred", "proof": "na", "detail": why,
+        "max_rss_kb": "", "user_s": "", "sys_s": "", "wall_s": "0.00",
+        "drift": "", "launched": "0",
+    })
+    for k in ("sources", "nodes", "outputs", "flops", "mems", "inputs", "bindings",
+              "selftest_base", "mut_out", "mut_flop", "mut_mem",
+              "mutable_out", "mutable_flop", "mutable_mem", "distinct_obs", "tier"):
+        row.setdefault(k, "")
+    return row
+
+
 def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: str = ""):
     cert, m = target.path, target.module
     probe_dir = RUN_DIR / ("probes_native" if native else "probes")
@@ -649,6 +766,11 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
               "selftest_base", "mut_out", "mut_flop", "mut_mem",
               "mutable_out", "mutable_flop", "mutable_mem", "distinct_obs"):
         row[k] = ""
+
+    if _RSS_STOP.is_set():
+        return deferred_row(target, samples,
+                            f"aggregate RSS cap reached before launch "
+                            f"({_RSS_PEAK['tripped_at_kb']} kB)")
 
     if not cert.is_file() or cert.stat().st_size == 0:
         row["detail"] = "certificate file missing or empty"
@@ -968,6 +1090,15 @@ def main() -> int:
     ap.add_argument("--order-by", default="",
                     help="TSV with module/max_rss_kb columns; run order becomes "
                          "cheapest-RSS-first (scheduling only, never evidence)")
+    ap.add_argument("--defer-over-rss-kb", type=int, default=0,
+                    help="do not START targets whose recorded peak RSS exceeds this "
+                         "(or that have no recorded RSS); they are written as "
+                         "run_status=deferred and picked up by a later --resume. "
+                         "Requires --order-by. Scheduling only.")
+    ap.add_argument("--max-aggregate-rss-kb", type=int, default=20_000_000,
+                    help="stop LAUNCHING new targets once this run's aggregate "
+                         "resident total reaches this; 0 disables. A running "
+                         "target is never killed by this.")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the selected targets IN RUN ORDER and exit, "
                          "writing nothing")
@@ -1025,10 +1156,36 @@ def main() -> int:
         targets = [best[k] for k in sorted(best, key=lambda n: rank.get(n, len(TIERS)))]
     if a.limit:
         targets = targets[: a.limit]
+    rss_map, deferred_targets = {}, []
     if a.order_by:
         # AFTER --limit on purpose: --limit still selects its subset the way it
         # always did, and this only changes the order that subset runs in.
-        targets = order_by_rss(targets, pathlib.Path(a.order_by))
+        targets, rss_map = order_by_rss(targets, pathlib.Path(a.order_by))
+    elif a.defer_over_rss_kb:
+        print("--defer-over-rss-kb needs --order-by: the threshold is compared "
+              "against the RSS table that option reads", file=sys.stderr)
+        return 2
+    if a.defer_over_rss_kb:
+        # `targets` deliberately keeps ALL of them. The selection digest, the
+        # sidecar and the denominator describe the SET under study; which of its
+        # members this particular invocation chose to start is a schedule, and a
+        # schedule must not be able to shrink the experiment silently.
+        keep = []
+        for t in targets:
+            seen_rss = rss_map.get(t.module)
+            if seen_rss is None:
+                deferred_targets.append(
+                    (t, "no recorded peak RSS, so it cannot be shown to fit the "
+                        "memory budget"))
+            elif seen_rss > a.defer_over_rss_kb:
+                deferred_targets.append(
+                    (t, f"recorded peak RSS {seen_rss} kB exceeds the "
+                        f"{a.defer_over_rss_kb} kB launch threshold"))
+            else:
+                keep.append(t)
+        run_now = keep
+    else:
+        run_now = list(targets)
     if not targets:
         print("no targets selected", file=sys.stderr)
         return 2
@@ -1036,10 +1193,20 @@ def main() -> int:
     sel_digest = selection_digest(targets)
     cfg = run_config(a, manifest_digest)
     cfg["selection_digest"] = sel_digest
-    if a.order_by:
-        cfg["order_by"] = a.order_by
-        cfg["order_by_digest"] = hashlib.sha256(
-            pathlib.Path(a.order_by).read_bytes()).hexdigest()
+    # SCHEDULING metadata lives beside `config`, never inside it.  `--resume`
+    # refuses a run whose `config` differs, and it SHOULD: samples, timeout and
+    # the manifest change what a row means.  A schedule does not.  Resuming the
+    # deferred remainder WITHOUT `--defer-over-rss-kb` has to be allowed, so
+    # these keys must not be part of that comparison.
+    sched = {
+        "jobs": a.jobs,
+        "order_by": a.order_by,
+        "order_by_digest": (hashlib.sha256(pathlib.Path(a.order_by).read_bytes()).hexdigest()
+                            if a.order_by else ""),
+        "defer_over_rss_kb": a.defer_over_rss_kb,
+        "max_aggregate_rss_kb": a.max_aggregate_rss_kb,
+        "deferred": [{"module": t.module, "why": why} for t, why in deferred_targets],
+    }
     cfg["tool_digest"] = tool_digest()
     cfg["worktree_dirty"] = bool(subprocess.run(
         ["git", "-C", str(ROOT), "status", "--porcelain"],
@@ -1233,7 +1400,8 @@ def main() -> int:
                 done[key] = r
             print(f"--resume: reusing {len(done)} terminal row(s)", file=sys.stderr)
 
-    todo = [t for t in targets if t.key not in done]
+    todo = [t for t in run_now if t.key not in done]
+    deferred_now = [(t, why) for t, why in deferred_targets if t.key not in done]
 
     print(f"d3_sweep: run_id={RUN_ID} dir={RUN_DIR}", file=sys.stderr)
     print(f"d3_sweep: manifest={a.manifest or '(none: exploratory)'} "
@@ -1245,12 +1413,19 @@ def main() -> int:
           f"native={a.native}", file=sys.stderr)
 
     if a.dry_run:
-        # Printed from the SAME list the executor would consume, so the order
+        # Printed from the SAME lists the executor would consume, so the order
         # shown is the order that would run -- not a second computation of it.
-        print(f"d3_sweep: DRY RUN -- nothing executed, nothing written")
+        def _rss_s(m):
+            kb = rss_map.get(m)
+            return (f"{kb} kB ({kb / 1048576:.2f} GiB)" if kb else "unknown")
+        print("d3_sweep: DRY RUN -- nothing executed, nothing written")
+        print(f"  selection covers {len(targets)} target(s); {len(todo)} would run, "
+              f"{len(deferred_now)} deferred, {len(done)} reused")
         for i, t in enumerate(todo, 1):
-            print(f"  {i:>3}. {t.module:<36} nodes={t.nodes or '?':>7} "
-                  f"tier={tier_of(t.nodes)}")
+            print(f"  {i:>3}. {t.module:<34} prior_rss={_rss_s(t.module):<26} "
+                  f"nodes={t.nodes or '?':>7} tier={tier_of(t.nodes)}")
+        for t, why in deferred_now:
+            print(f"  DEFER {t.module:<32} prior_rss={_rss_s(t.module):<26} {why}")
         return 0
 
     # Only selected, attempted targets appear in this table.  Appending the
@@ -1260,13 +1435,17 @@ def main() -> int:
     rows = list(done.values())
     for r in rows:
         r.setdefault("proof", "na")
+    for t, why in deferred_now:
+        rows.append(deferred_row(t, a.samples, why))
 
     lock = threading.Lock()
 
     def checkpoint():
         write_rows_atomic(out_path, RESULT_COLS, rows)
         _atomic_write(meta_path, json.dumps(
-            {"config": cfg, "run_id": RUN_ID,
+            {"config": cfg, "scheduling": sched, "run_id": RUN_ID,
+             "aggregate_rss_peak_kb": _RSS_PEAK["kb"],
+             "aggregate_rss_tripped_kb": _RSS_PEAK["tripped_at_kb"],
              "cert_sha256": {t.key: t.sha256 for t in targets},
              "modules": {t.key: t.module for t in targets},
              "targets": len(targets), "updated": time.strftime("%Y-%m-%d %H:%M:%S")},
@@ -1276,6 +1455,10 @@ def main() -> int:
     aborted = False
 
     checkpoint()
+    _RSS_PEAK["cap_kb"] = a.max_aggregate_rss_kb
+    if a.max_aggregate_rss_kb:
+        threading.Thread(target=_rss_monitor, args=(a.max_aggregate_rss_kb,),
+                         daemon=True).start()
     with concurrent.futures.ThreadPoolExecutor(max_workers=a.jobs) as ex:
         futs = {ex.submit(run_one, t, a.samples, a.timeout, a.native, baseline_artifacts): t
                 for t in todo}
@@ -1311,7 +1494,8 @@ def main() -> int:
                     # is diagnostic, the abort is not conditional on it.
                     r["drift"] = {"1": "after", "0": "between"}.get(launched_hint, "unknown")
 
-            if not r.get("drift") and not synthesized:
+            if (not r.get("drift") and not synthesized
+                    and r.get("run_status") != "deferred"):
                 # A synthesized row already carries `runner_error`; recomputing a
                 # verdict from its all-zero gates would relabel a crash as the
                 # ordinary "no gate passed" outcome.
@@ -1360,6 +1544,18 @@ def main() -> int:
     for g in GATES:
         n = sum(1 for r in rows if r.get(g) == 1)
         print(f"  {g:<10} {n}/{len(rows)}", file=sys.stderr)
+    ndef = sum(1 for r in rows if r.get("run_status") == "deferred")
+    if ndef:
+        # Stated as its own line rather than folded into the gate counts: a
+        # deferred target is not a target that failed every gate, and the two
+        # must not be read off the same number.
+        print(f"  deferred   {ndef}/{len(rows)} not started by the scheduler "
+              f"(threshold {a.defer_over_rss_kb} kB); rerun with --resume and no "
+              f"--defer-over-rss-kb to pick them up", file=sys.stderr)
+    peak = _RSS_PEAK["kb"]
+    print(f"  aggregate RSS peak {peak} kB ({peak / 1048576:.2f} GiB) "
+          f"against a {a.max_aggregate_rss_kb} kB cap"
+          + ("  -- CAP TRIPPED" if _RSS_PEAK["tripped_at_kb"] else ""), file=sys.stderr)
     if skipped:
         print(f"  {len(skipped)} manifest target(s) have no certificate; join with "
               f"d3_join.py for the exact denominator", file=sys.stderr)
