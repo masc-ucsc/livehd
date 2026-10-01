@@ -74,6 +74,12 @@ regenerating it from the base plus the stored patch.  The hash arm still means
 something when the base repository is unavailable, so the record does not depend
 on anything outside this repository.
 
+`overlays/bv_shl_step.patch` in THIS repository is the authoritative copy.  An
+earlier copy was staged under `automate_workspace/d4-futamura-projection/` while
+the factoring was still a proposal; it has context lines where this one is
+zero-context, and it is now only a historical artifact.  Nothing in this
+repository reads it.
+
 If one of the seven must change, change it at the base and update this document.
 If the overlay must grow, it needs a new theorem of the same shape as the three
 above, and the check script's recorded hash updated in the same commit.
