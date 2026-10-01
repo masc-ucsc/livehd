@@ -1,0 +1,12 @@
+/*
+:name: style_reset_clean
+:type: style
+:style: none
+*/
+// The target style: a `Reset` input driving a structural `reset_pin`. Nothing to
+// report.
+pub mod m(clk:Clock, rst:Reset, din:U8) -> (dout:U8@[]) {
+  reg q:U8:[reset_pin=rst] = 0
+  dout = q
+  q = din
+}

@@ -1,0 +1,13 @@
+/*
+:name: struct_top_port
+:type: equiv
+:verilog_top: struct_top_port
+:pyrope_top: struct_top_port
+*/
+// Same but a bit cleaner reset
+//
+pub mod struct_top_port(clk:Clock, rst_ni:Reset, din:U7) -> (dout:U7@[]) {
+  reg dout_q:U7:[reset_pin=rst_ni,negreset=true] = 0
+  dout = dout_q
+  dout_q = din
+}

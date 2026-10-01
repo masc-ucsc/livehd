@@ -1,0 +1,14 @@
+/*
+:name: style_reset_port_type
+:type: style
+:style: reset-port-type
+:message: only acts as a reset
+:help: Reset
+*/
+// Already structural (`reset_pin`), but `rst` is a plain U1: resets bind by type,
+// not by name, so declare it `Reset`.
+pub mod m(clk:Clock, rst:U1, din:U8) -> (dout:U8@[]) {  // locate_style_reset-port-type
+  reg q:U8:[reset_pin=rst] = 0
+  dout = q
+  q = din
+}

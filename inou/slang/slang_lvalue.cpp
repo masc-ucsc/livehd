@@ -760,11 +760,12 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
                 auto                   ti = tinfo(*lhs.type);
                 std::optional<int64_t> lo = const_lane_lo(ti.bits);
                 if (lo && *lo >= 0 && *lo + ti.bits <= f->bits) {
-                  auto        val = to_pattern(to_int_value(rhs), ti.bits, ti.is_signed);
-                  std::string sel_mask
-                      = *lo == 0 ? mask_text(ti.bits) : std::string(Dlop::get_mask_value(*lo + ti.bits - 1, *lo)->to_pyrope());
+                  auto val = to_pattern(to_int_value(rhs), ti.bits, ti.is_signed);
                   note_write(bsym, current_assign_nonblocking_, lhs.sourceRange.start());
-                  builder_.create_set_mask_stmts(absl::StrCat(lname_of(bsym), ".", f->name), sel_mask, val);
+                  builder_.create_set_mask_stmts(absl::StrCat(lname_of(bsym), ".", f->name),
+                                                 val,
+                                                 std::to_string(*lo),
+                                                 std::to_string(*lo + ti.bits));
                   return;
                 }
               }
@@ -803,9 +804,10 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
                 std::string part  = ov_lo == *lo ? val : to_int_value(builder_.create_sra_stmts(val, std::to_string(ov_lo - *lo)));
                 part              = to_pattern(part, ov_bits, false);
                 const int64_t rel = ov_lo - f.off;  // LSB position within the field leaf
-                std::string   sel_mask
-                    = rel == 0 ? mask_text(ov_bits) : std::string(Dlop::get_mask_value(rel + ov_bits - 1, rel)->to_pyrope());
-                builder_.create_set_mask_stmts(absl::StrCat(lname_of(bsym), ".", f.name), sel_mask, part);
+                builder_.create_set_mask_stmts(absl::StrCat(lname_of(bsym), ".", f.name),
+                                               part,
+                                               std::to_string(rel),
+                                               std::to_string(rel + ov_bits));
               }
               return;
             }
@@ -1237,12 +1239,17 @@ void Slang_context::emit_leaf_split_rmw(const Packed_lv& lv, const std::string& 
       store_field(f, f.is_signed ? builder_.create_sext_stmts(part, std::to_string(f.bits - 1)) : part);
       continue;
     }
-    std::string sel_mask = rel == 0 ? mask_text(ov_bits) : std::string(Dlop::get_mask_value(rel + ov_bits - 1, rel)->to_pyrope());
     if (is_tuple) {
       // A tuple field has no in-place bit write: splice a copy of it.
-      store_field(f, fit_wrap(splice_mask(to_pattern(read_field(f), f.bits, f.is_signed), sel_mask, part), f.bits, f.is_signed));
+      store_field(f,
+                  fit_wrap(splice_range(to_pattern(read_field(f), f.bits, f.is_signed),
+                                        std::to_string(rel),
+                                        std::to_string(rel + ov_bits - 1),
+                                        part),
+                           f.bits,
+                           f.is_signed));
     } else {
-      builder_.create_set_mask_stmts(absl::StrCat(base, ".", f.name), sel_mask, part);
+      builder_.create_set_mask_stmts(absl::StrCat(base, ".", f.name), part, std::to_string(rel), std::to_string(rel + ov_bits));
     }
   }
 }
@@ -1921,17 +1928,8 @@ bool Slang_context::lower_mem_element_splice_write(const slang::ast::Expression&
   // It is the read -> set_mask -> store chain upass.tolg recognizes as a
   // partial write: the read sees the writes of the cycle before it, so any
   // number of partial writes to one entry merge in program order.
-  auto splice = [&](const std::string& src, const std::string& mask, const std::string& piece) {
-    auto dst = builder_.create_lnast_tmp();
-    auto sm  = builder_.add_child(Lnast_ntype::create_set_mask());
-    ln.add_child(sm, Lnast_node::create_ref(dst));
-    builder_.add_value_child_pub(sm, src);
-    builder_.add_value_child_pub(sm, mask);
-    builder_.add_value_child_pub(sm, piece);
-    return dst;
-  };
   auto splice_const = [&](const std::string& src, int64_t lo, int bits, const std::string& piece) {
-    return splice(src, lo == 0 ? mask_text(bits) : std::string(Dlop::get_mask_value(lo + bits - 1, lo)->to_pyrope()), piece);
+    return splice_range(src, std::to_string(lo), std::to_string(lo + bits - 1), piece);
   };
 
   note_write(*mem_sym, current_assign_nonblocking_, lhs.sourceRange.start());
@@ -1992,12 +1990,7 @@ bool Slang_context::lower_mem_element_splice_write(const slang::ast::Expression&
   // A runtime position is an inclusive `range(lo, hi)` mask: the same chain as
   // the constant one, so it merges just the same.
   auto range_splice = [&](const std::string& lo, const std::string& hi, const std::string& piece) {
-    auto sel      = builder_.add_child(Lnast_ntype::create_range());
-    auto range_id = builder_.create_lnast_tmp();
-    ln.add_child(sel, Lnast_node::create_ref(range_id));
-    builder_.add_value_child_pub(sel, lo);
-    builder_.add_value_child_pub(sel, hi);
-    store(trunc_to(splice(read_entry(), range_id, piece), mi.elem_bits));
+    store(trunc_to(splice_range(read_entry(), lo, hi, piece), mi.elem_bits));
   };
   // Verilog writes only the bits of the part select inside the word (see
   // clip_window): the emitted range is inside the word by construction.
@@ -2065,10 +2058,8 @@ void Slang_context::flat_port_write(const slang::ast::ElementSelectExpression& e
       emit_warning(es.sourceRange, "select-out-of-range", "bitwidth", "constant array-port select is out of range");
       lo_bit = std::max<int64_t>(lo_bit, 0);
     }
-    std::string sel_mask
-        = lo_bit == 0 ? mask_text(mi.elem_bits) : std::string(Dlop::get_mask_value(lo_bit + mi.elem_bits - 1, lo_bit)->to_pyrope());
     note_write(*base_sym, current_assign_nonblocking_, es.sourceRange.start());
-    builder_.create_set_mask_stmts(base_name, sel_mask, val);
+    builder_.create_set_mask_stmts(base_name, val, std::to_string(lo_bit), std::to_string(lo_bit + mi.elem_bits));
     return;
   }
 
@@ -2304,7 +2295,7 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
         out.const_off += (*const_low) * stride;
       }
       if (!dyn_low.empty()) {
-        std::string term = stride == 1 ? dyn_low : builder_.create_mult_stmts(dyn_low, std::to_string(stride));
+        std::string term            = stride == 1 ? dyn_low : builder_.create_mult_stmts(dyn_low, std::to_string(stride));
         // A runtime part select that may leave `base` keeps the container, so
         // the writer can clip the window to it. When `base` is the root
         // itself, only a window that can start below bit 0 needs that: the
@@ -2394,10 +2385,8 @@ void Slang_context::emit_packed_rmw(const Packed_lv& lv, const std::string& rhs,
       emit_warning(sr, "select-out-of-range", "bitwidth", "constant select is out of the declared range");
       lo_bit = 0;
     }
-    std::string sel_mask = lo_bit == 0 ? mask_text(static_cast<int>(lv.width))
-                                       : std::string(Dlop::get_mask_value(lo_bit + lv.width - 1, lo_bit)->to_pyrope());
     note_write(*lv.base, current_assign_nonblocking_, sr.start());
-    builder_.create_set_mask_stmts(base_name, sel_mask, val);
+    builder_.create_set_mask_stmts(base_name, val, std::to_string(lo_bit), std::to_string(lo_bit + lv.width));
     return;
   }
 
@@ -2419,29 +2408,17 @@ void Slang_context::emit_packed_rmw(const Packed_lv& lv, const std::string& rhs,
   emit_dynamic_slice_write(base_name, dr.lo, dr.hi, dr.piece);
 }
 
-std::string Slang_context::dynamic_mask(const std::string& lo, const std::string& hi) {
-  auto& ln    = *builder_.lnast;
-  auto  range = builder_.add_child(Lnast_ntype::create_range());
-  auto  rid   = builder_.create_lnast_tmp();
-  ln.add_child(range, Lnast_node::create_ref(rid));
-  builder_.add_value_child_pub(range, lo);
-  builder_.add_value_child_pub(range, hi);
-  return rid;
-}
-
 std::string Slang_context::splice_range(const std::string& src, const std::string& lo, const std::string& hi,
                                         const std::string& piece) {
-  return splice_mask(src, dynamic_mask(lo, hi), piece);
-}
-
-std::string Slang_context::splice_mask(const std::string& src, const std::string& mask, const std::string& piece) {
-  auto& ln  = *builder_.lnast;
-  auto  dst = builder_.create_lnast_tmp();
-  auto  sm  = builder_.add_child(Lnast_ntype::create_set_mask());
+  auto  upper = builder_.create_plus_stmts(hi, "1");
+  auto& ln    = *builder_.lnast;
+  auto  dst   = builder_.create_lnast_tmp();
+  auto  sm    = builder_.add_child(Lnast_ntype::create_set_mask());
   ln.add_child(sm, Lnast_node::create_ref(dst));
   builder_.add_value_child_pub(sm, src);
-  builder_.add_value_child_pub(sm, mask);
   builder_.add_value_child_pub(sm, piece);
+  builder_.add_value_child_pub(sm, lo);
+  builder_.add_value_child_pub(sm, upper);
   return dst;
 }
 
@@ -2556,5 +2533,5 @@ std::string Slang_context::guard_element_index(const std::string& idx, const std
 
 void Slang_context::emit_dynamic_slice_write(const std::string& base, const std::string& lo, const std::string& hi,
                                              const std::string& value) {
-  builder_.create_set_mask_stmts(base, dynamic_mask(lo, hi), value);
+  builder_.create_set_mask_stmts(base, value, lo, builder_.create_plus_stmts(hi, "1"));
 }

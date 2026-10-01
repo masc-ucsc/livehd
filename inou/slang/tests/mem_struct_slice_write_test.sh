@@ -38,16 +38,16 @@ grep -qE '^\s*(onef|span)\[' "$prp" \
   && fail "a store still targets the aggregate array name (the write is dropped after detuple)"
 
 # ── slice covering exactly one field: a plain field store, no read-back ─────
-grep -qE '`onef\.lo`\[adr\] = din#\[0\.\.=3\]' "$prp" \
+grep -qE '`onef\.lo`\[adr\] = din#\[0\.\.<4\]' "$prp" \
   || fail "the one-field slice did not become a plain store of onef.lo"
 grep -qE '`onef\.hi`\[[^]]*\] *=' "$prp" \
   && fail "the one-field slice wrote onef.hi, which the slice does not cover"
 
 # ── slice crossing the field boundary: one field-local splice per field ─────
 # `span[..][5:2] <= din[11:8]` puts din[1:0] in lo[3:2] and din[3:2] in hi[1:0].
-grep -qE '#\[0\.\.=1\] = din#\[8\.\.=11\]#\[2\.\.=3\]' "$prp" \
+grep -qE '#\[0\.\.<2\] = din#\[8\.\.<12\]#\[2\.\.<4\]' "$prp" \
   || fail "the hi half of the boundary-crossing slice is missing or misplaced"
-grep -qE '#\[2\.\.=3\] = din#\[8\.\.=11\]#\[0\.\.=1\]' "$prp" \
+grep -qE '#\[2\.\.<4\] = din#\[8\.\.<12\]#\[0\.\.<2\]' "$prp" \
   || fail "the lo half of the boundary-crossing slice is missing or misplaced"
 # The writer spells each field's read-modify-write as the partial write it is
 # (`` `span.hi`[i]#[0..=1] = .. ``), so the write-back is that same statement.

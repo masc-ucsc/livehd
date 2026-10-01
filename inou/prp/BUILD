@@ -94,18 +94,41 @@ filegroup(
     visibility = ["//visibility:public"],
 )
 
+# `lhd pyrope style`: source-only Tree-sitter analysis (repetition, tuple/bundle
+# copies, single-destination conditionals, hand-written resets). Independent of
+# the compiler front end; the CLI presents its Report and tests/style/ pins each
+# rule with a small fixture (`prp-style-<name>` targets).
+cc_library(
+    name = "pyrope_style",
+    srcs = ["pyrope_style.cpp"],
+    hdrs = ["pyrope_style.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@tree_sitter",
+        # Provides tree_sitter_pyrope().
+        "@tree_sitter_pyrope//:prpfmt",
+    ],
+)
+
 cc_library(
     name = "inou_prp",
     srcs = glob(
         ["*.cpp"],
         exclude = [
             "*test*.cpp",
+            # Own library (tree-sitter only, no LiveHD deps): see :pyrope_style.
+            "pyrope_style.cpp",
             # Standalone gtest smoke check (no _test suffix: it exercises only
             # the external prpparse API, not a sibling .cpp here).
             "prpparse_stream_smoke.cpp",
         ],
     ),
-    hdrs = glob(["*.hpp"]),
+    hdrs = glob(
+        ["*.hpp"],
+        exclude = ["pyrope_style.hpp"],
+    ),
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
@@ -273,6 +296,30 @@ sh_test(
         ],
     )
     for prp_file in glob(["tests/warnings/*.prp"])
+]
+
+# Style-hint tests (`:type: style`, in tests/style/): `lhd pyrope style` must
+# report exactly the rule codes in the header `:style:` (or `none` for a clean
+# file), each hint naming its `// prp-style-allow <code>` tag. One small fixture
+# per rule plus negatives and the allow-scope cases; without them a regression in
+# the analyzer would pass silently. Distinct `prp-style-` target prefix.
+[
+    sh_test(
+        name = "prp-style-%s" % prp_file.split("/")[-1].split(".")[0],
+        srcs = ["tests/pyrope_test.py"],
+        args = [
+            "-i",
+            "$(location //inou/prp:%s)" % prp_file,
+        ],
+        data = [
+            "//inou/prp:tests/lec.py",
+            "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/pyrope_test.py",
+            "//inou/prp:%s" % prp_file,
+            "//lhd",
+        ],
+    )
+    for prp_file in glob(["tests/style/*.prp"])
 ]
 
 # TBD-feature trackers (tests/fixme/): each `.prp` exercises a documented but
@@ -1033,6 +1080,8 @@ _STATEMATCH_COMB = [
     "single_bit_arith",
     "spec_types_cast_runtime_zext",
     "splice_merge",
+    "sparse_bit_read",
+    "sparse_bit_write",
     "split_assign_bits_width",
     "sra_const_range",
     "stream_ssa_tuple_slot",

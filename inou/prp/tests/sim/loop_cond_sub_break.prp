@@ -25,7 +25,7 @@ mod loop_cond_sub_break(x:U8, choose_add:U8) -> (total:U12@[0]) {
   for ordinal in 0..<8 {
     if ordinal == 6 { break }
 
-    if choose_add#[ordinal] {
+    if choose_add#[ordinal] != 0 {
       const term = add_term::[name=add_lane](x=x, ordinal=ordinal)
       acc = acc + term
     } else {

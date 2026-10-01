@@ -159,10 +159,10 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       break;
     case Ntype_op::Rxor    :
     case Ntype_op::Popcount:
-    case Ntype_op::Sext:
-    case Ntype_op::Div :
-    case Ntype_op::Rem :
-    case Ntype_op::SRA :
+    case Ntype_op::Sext    :
+    case Ntype_op::Div     :
+    case Ntype_op::Rem     :
+    case Ntype_op::SRA     :
     case Ntype_op::SHL:
       // a,b are single-driver positional operands -> plain names. (SHL no longer
       // folds multiple one-hot shift amounts on b; that runtime form was
@@ -362,15 +362,17 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       break;
     case Ntype_op::Get_mask:
       switch (pid) {
-        case 0 : return "a";     // input net to get bits
-        case 2 : return "mask";  // bit position
+        case 0 : return "a";   // input net to get bits
+        case 2 : return "lo";  // inclusive bit position
+        case 3 : return "hi";  // exclusive bit position
         default: return "invalid";
       }
       break;
     case Ntype_op::Set_mask:
       switch (pid) {
-        case 0 : return "a";     // input net to set bits
-        case 2 : return "mask";  // bit position
+        case 0 : return "a";   // input net to set bits
+        case 2 : return "lo";  // inclusive bit position
+        case 3 : return "hi";  // exclusive bit position
         case 4 : return "value";
         default: return "invalid";
       }

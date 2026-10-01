@@ -303,7 +303,11 @@ std::shared_ptr<hhds::Graph> two_carry_body(hhds::GraphLibrary& lib, const std::
 
   auto sm = gu::create_typed_node(*g, Ntype_op::Set_mask, 32);  // parallel: pout = set_mask(pin, idx, inv)
   pin.connect_sink(gu::setup_sink_by_name(sm, "a"));
-  idx.connect_sink(gu::setup_sink_by_name(sm, "mask"));
+  idx.connect_sink(gu::setup_sink_by_name(sm, "lo"));
+  auto upper = gu::create_typed_node(*sm.get_graph(), Ntype_op::Sum, 33);
+  idx.connect_sink(gu::setup_sink_by_name(upper, "as"));
+  gu::create_const(*sm.get_graph(), *Dlop::create_integer(1)).connect_sink(gu::setup_sink_by_name(upper, "as"));
+  upper.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(sm, "hi"));
   inv.connect_sink(gu::setup_sink_by_name(sm, "value"));
   sm.create_driver_pin(0).connect_sink(g->get_output_node().create_sink_pin(kLPout));
 
@@ -452,7 +456,11 @@ TEST(LoopSplit, AHalfThatReadsTheOtherHalfsCarryIsRefused) {
 
   auto sm = gu::create_typed_node(*g, Ntype_op::Set_mask, 32);  // pout = set_mask(pin, iin, inv): position = the COUNTER
   pin.connect_sink(gu::setup_sink_by_name(sm, "a"));
-  iin.connect_sink(gu::setup_sink_by_name(sm, "mask"));
+  iin.connect_sink(gu::setup_sink_by_name(sm, "lo"));
+  auto upper = gu::create_typed_node(*sm.get_graph(), Ntype_op::Sum, 33);
+  iin.connect_sink(gu::setup_sink_by_name(upper, "as"));
+  gu::create_const(*sm.get_graph(), *Dlop::create_integer(1)).connect_sink(gu::setup_sink_by_name(upper, "as"));
+  upper.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(sm, "hi"));
   inv.connect_sink(gu::setup_sink_by_name(sm, "value"));
   sm.create_driver_pin(0).connect_sink(g->get_output_node().create_sink_pin(kLPout));
 
@@ -507,7 +515,11 @@ TEST(LoopSplit, ABodyWithANonCarryOutputIsLeftWhole) {
   gu::set_ubits(iin, 32);
   auto sm = gu::create_typed_node(*g, Ntype_op::Set_mask, 32);
   pin.connect_sink(gu::setup_sink_by_name(sm, "a"));
-  idx.connect_sink(gu::setup_sink_by_name(sm, "mask"));
+  idx.connect_sink(gu::setup_sink_by_name(sm, "lo"));
+  auto upper = gu::create_typed_node(*sm.get_graph(), Ntype_op::Sum, 33);
+  idx.connect_sink(gu::setup_sink_by_name(upper, "as"));
+  gu::create_const(*sm.get_graph(), *Dlop::create_integer(1)).connect_sink(gu::setup_sink_by_name(upper, "as"));
+  upper.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(sm, "hi"));
   inv.connect_sink(gu::setup_sink_by_name(sm, "value"));
   sm.create_driver_pin(0).connect_sink(g->get_output_node().create_sink_pin(kLPout));
   auto acc = gu::create_typed_node(*g, Ntype_op::Sum, 32);

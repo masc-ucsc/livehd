@@ -17,7 +17,7 @@ pub mod loop_runtime_break_reads_wire(stop:U8, a:U4) -> (total:U12@[0]) {
   wire w:U4 = nil
   mut acc:U12 = 0
   for i in 0..<8 {
-    if stop#[i] { break }
+    if stop#[i] != 0 { break }
     acc = acc + w
   }
   w = a

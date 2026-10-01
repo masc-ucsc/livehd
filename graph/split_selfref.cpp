@@ -224,39 +224,8 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       return any ? u : std::pair<int, int>{0, 0};
     }
     if (op == Ntype_op::Get_mask) {
-      auto md = drv_at(m, 2);
-      if (!md.is_invalid()) {
-        if (!md.is_const()) {
-          return kBail;
-        }
-        const auto& mc = gu::const_of(md);
-        if (mc.has_unknowns()) {
-          return kBail;
-        }
-        // mask == -1 is the "to-unsigned" idiom: the RESULT is the non-negative
-        // low sig bits of the output pin (fall through to the unsigned bound).
-        if (!gu::is_whole_value_mask(mc)) {
-          auto window = gu::mask_window_of(mc);
-          if (!window || window->second > (1 << 28)) {
-            return kBail;
-          }
-          const auto [a, b] = *window;
-          int        w      = b - a;
-          if (w <= 1) {
-            // The EMITTED single-bit Get_mask clamps to a 0/1 magnitude
-            // (node_expr appends .zext_to<1>() for a popcount-1 mask), so at
-            // sim semantics the value is soundly bounded {0,1}. This was the
-            // footprint bail that vetoed the whole split for every 1-bit
-            // packed field (valid bits: sim_packed_selfref_1bit family).
-            return {0, 1};
-          }
-          return {0, w};  // extracted bits are packed down to [0, w)
-        }
-      }
-      // unary width-adjust (zext) OR to-unsigned: result is the non-negative low
-      // sig bits of THIS node's (unsigned) output pin.
-      int b = gu::bits_of(p);
-      return b > 0 ? std::pair<int, int>{0, b} : kBail;
+      const auto range = gu::bit_range(m);
+      return range ? std::pair<int, int>{0, range->second - range->first} : kBail;
     }
     // generic value: an over-approximation is sound only when UNSIGNED; its
     // literal width bounds every possibly-set bit.
@@ -288,8 +257,6 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
   //  * EQ control bit -> rebuild only from complete bounded operands
   //  * Concat -> re-based descent into the lane(s) the slice lands in (the
   //    disjointness the Or spelling must PROVE is a cell invariant here)
-  auto mask_const
-      = [&](int lo, int hi) -> hhds::Pin_class { return livehd::graph_util::create_const(*g, gu::mask_window_const(lo, hi)); };
   // Node-creation budget, split into a PER-READER cap (reset at the reader-loop
   // head below) and a GLOBAL ceiling proportional to the design. The old code
   // had ONE global counter that was never reset: a big def's early readers burnt
@@ -754,41 +721,13 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       // width, so a slice reaching ABOVE that width reads zeros: cap the
       // recursion instead of failing (the sbox chains read bit k of narrower
       // extractions all the time).
-      auto md = drv_at(m, 2);
-      if (md.is_invalid()) {
-        // unary zext: positions [0, sig) preserved; above sig -> zeros
-        int b   = gu::bits_of(v);
-        int sig = b;
-        if (sig > 0) {
-          if (lo >= sig) {
-            res = livehd::graph_util::create_const(*g, *Dlop::create_integer(0));
-          } else {
-            res = self(self, drv_at(m, 0), lo, std::min(hi, sig), depth + 1);
-          }
-        }
-      } else if (md.is_const()) {
-        const auto& mc = gu::const_of(md);
-        if (!mc.has_unknowns()) {
-          if (mc.is_just_i64() && mc.to_just_i64() == -1) {
-            // to-unsigned keeps positions; above the sig width -> zeros
-            int b   = gu::bits_of(v);
-            int sig = b;
-            if (sig > 0 && lo >= sig) {
-              res = livehd::graph_util::create_const(*g, *Dlop::create_integer(0));
-            } else if (sig > 0) {
-              res = self(self, drv_at(m, 0), lo, std::min(hi, sig), depth + 1);
-            } else {
-              res = self(self, drv_at(m, 0), lo, hi, depth + 1);
-            }
-          } else if (auto window = gu::mask_window_of(mc); window) {
-            const auto [a, b] = *window;
-            const int  width  = b - a;  // packed extraction width
-            if (lo >= width) {
-              res = livehd::graph_util::create_const(*g, *Dlop::create_integer(0));
-            } else {
-              res = self(self, drv_at(m, 0), a + lo, a + std::min(hi, width), depth + 1);  // re-base + cap
-            }
-          }
+      if (const auto window = gu::bit_range(m)) {
+        const auto [a, b] = *window;
+        const int width   = b - a;
+        if (lo >= width) {
+          res = gu::create_const(*g, *Dlop::create_integer(0));
+        } else {
+          res = self(self, drv_at(m, 0), a + lo, a + std::min(hi, width), depth + 1);
         }
       }
     } else if (op == Ntype_op::Set_mask) {
@@ -807,7 +746,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
       // what the per-leaf (flattened) form would have given for free.
       auto md = drv_at(m, 2);
       if (md.is_const()) {
-        if (auto window = gu::mask_window_of(gu::const_of(md)); window) {
+        if (auto window = gu::bit_range(m); window) {
           const auto [a, b] = *window;
           if (hi <= a || lo >= b) {
             res = self(self, drv_at(m, 0), lo, hi, depth + 1);  // disjoint lane: `a` is untouched here
@@ -901,7 +840,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
   // And(SRA(w, const k), const 2^j-1) -- the other reader form the slang->prp
   // regeneration emits. Mutation is deferred so the analysis sees a stable
   // graph (created helper nodes are new and never on the cycle).
-  std::vector<std::tuple<hhds::Node_class, hhds::Pin_class, hhds::Pin_class>> gm_rewires;   // (reader, resolved, new mask)
+  std::vector<std::tuple<hhds::Node_class, hhds::Pin_class, int>>             gm_rewires;   // (reader, resolved, new mask)
   std::vector<std::tuple<hhds::Node_class, hhds::Pin_class, hhds::Pin_class>> and_rewires;  // (And, old SRA driver, resolved)
   int      unresolved_on_cycle = 0;  // on-cycle bit-field reads we could not dissolve (diagnostic)
   unsigned any_stop_reasons    = 0;  // ... and WHICH limit stopped them (kStop* bits)
@@ -916,17 +855,12 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
     stop_reasons = 0;
     auto rop     = gu::type_op_of(R);
     if (rop == Ntype_op::Get_mask) {
-      auto md = drv_at(R, 2);
-      if (md.is_invalid() || !md.is_const()) {
-        continue;  // needs a constant slice mask
-      }
-      const auto& mc     = gu::const_of(md);
-      auto        window = gu::mask_window_of(mc);  // empty for the -1 full read
+      const auto window = gu::bit_range(R);
       if (!window || window->second > (1 << 28)) {
         continue;  // not a bit-field slice
       }
       const auto [rlo, rhi] = *window;
-      auto vd = drv_at(R, 0);
+      auto vd               = drv_at(R, 0);
       if (vd.is_invalid() || vd.is_const()) {
         continue;
       }
@@ -936,7 +870,7 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
         any_stop_reasons |= stop_reasons;
         continue;
       }
-      gm_rewires.emplace_back(R, res, mask_const(0, rhi - rlo));
+      gm_rewires.emplace_back(R, res, rhi - rlo);
     } else if (rop == Ntype_op::And) {
       // exactly two operands: a const 2^j-1 mask and an SRA(word, const k)
       hhds::Pin_class cpin, other;
@@ -1009,14 +943,14 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
     // SNAPSHOT before mutating: the body deletes the edge it stands on.
     for (auto sink : R.inp_pins_snapshot()) {
       auto pid = static_cast<uint32_t>(sink.get_port_id());
-      if (pid == 0 || pid == 2) {
+      if (pid == 0 || pid == 2 || pid == 3) {
         sink.del_sink(sink.get_driver_pin());  // drop this sink pin's one driver
       }
     }
     // resolve() returned the packed-down [0,w) slice, so the reader becomes a
     // low-w identity read: same value, same single-bit clamp semantics.
     res.connect_sink(livehd::graph_util::setup_sink_pid(R, static_cast<hhds::Port_id>(0)));
-    nm.connect_sink(livehd::graph_util::setup_sink_pid(R, static_cast<hhds::Port_id>(2)));
+    gu::connect_bit_range(R, 0, nm);
   }
   for (auto& [A, oldd, res] : and_rewires) {
     // SNAPSHOT before mutating: the body deletes the edge it stands on.
@@ -1854,11 +1788,11 @@ static int split_packed_cycle_slices(hhds::Graph* g) {
     }
 
     auto result  = split_packed_selfref_wires_body(g,
-                                                  kSplitInlineDepth,
-                                                  &cycle,
-                                                  /*scoped_buffer=*/nullptr,
-                                                  /*scoped_driver=*/nullptr,
-                                                  /*max_rounds=*/1);
+                                                   kSplitInlineDepth,
+                                                   &cycle,
+                                                   /*scoped_buffer=*/nullptr,
+                                                   /*scoped_driver=*/nullptr,
+                                                   /*max_rounds=*/1);
     repaired    += result.total;
 
     if ((result.stop_reasons & kStopDepth) != 0) {

@@ -46,8 +46,8 @@ public:
   bool at_top_stmts() const { return stmts_stack_.empty(); }
 
   // ── naming ───────────────────────────────────────────────────────────────
-  std::string      create_lnast_tmp();
-  Lnast_node       mint_tmp_ref() { return Lnast_node::create_ref(create_lnast_tmp()); }
+  std::string create_lnast_tmp();
+  Lnast_node  mint_tmp_ref() { return Lnast_node::create_ref(create_lnast_tmp()); }
 
   // ── tmp-id scoping (stable SSA/tmp ids) ──────────────────────────────────
   // create_lnast_tmp() mints intermediate/SSA temps in the parser-impossible
@@ -129,8 +129,8 @@ public:
   std::string create_mult_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_div_stmts(std::string_view a_var, std::string_view b_var);
   std::string create_mod_stmts(std::string_view a_var, std::string_view b_var);
-  std::string create_get_mask_stmts(std::string_view sel_var, std::string_view bitmask);
-  void        create_set_mask_stmts(std::string_view sel_var, std::string_view bitmask, std::string_view value);
+  std::string create_get_mask_stmts(std::string_view sel_var, std::string_view lo, std::string_view hi);
+  void        create_set_mask_stmts(std::string_view sel_var, std::string_view value, std::string_view lo, std::string_view hi);
 
   // One `concat` lane: a value and the width of the window it occupies.
   // `bits <= 0` means UNDECIDED — the builder emits a `nil` width operand and
@@ -230,8 +230,8 @@ private:
   // tmp-id scoping state (see set_tmp_scope). tmp_scope_ empty => global %N
   // fallback via tmp_var_cnt; otherwise temps are `%<tmp_scope_>_<counter>`
   // where the counter is per-label and monotonic for the whole lnast.
-  std::string                              tmp_scope_;
-  absl::flat_hash_map<std::string, int>    tmp_label_cnt_;
+  std::string                           tmp_scope_;
+  absl::flat_hash_map<std::string, int> tmp_label_cnt_;
   // note_unsigned_bits() bookkeeping, per lnast (cleared by new_lnast).
-  absl::flat_hash_map<std::string, int>    tmp_ubits_;
+  absl::flat_hash_map<std::string, int> tmp_ubits_;
 };

@@ -256,12 +256,12 @@ struct Slang_module_state {
     std::vector<Dim> dims;
     size_t           rank() const { return dims.empty() ? 1 : dims.size(); }
   };
-  absl::flat_hash_map<const slang::ast::Symbol*, Mem_info>                   mem_info_;
+  absl::flat_hash_map<const slang::ast::Symbol*, Mem_info>                        mem_info_;
   // Per-module stable name for each struct element type (keyed by the canonical
   // type pointer so two memories of the same struct share one typedef) and the
   // set of typedef names already emitted into this module's stmts.
-  absl::flat_hash_map<const slang::ast::Type*, std::string>                  tuple_type_names_;
-  absl::flat_hash_set<std::string>                                           emitted_tuple_types_;
+  absl::flat_hash_map<const slang::ast::Type*, std::string>                       tuple_type_names_;
+  absl::flat_hash_set<std::string>                                                emitted_tuple_types_;
   // Power-on memory contents harvested from `initial begin mem[k]=v; … end`
   // blocks (a pre-pass in lower_module, BEFORE the declares emit). Keyed by the
   // array symbol; the inner map is entry→value, the entry being the 0-based
@@ -273,19 +273,19 @@ struct Slang_module_state {
   // tuple literal).
   absl::flat_hash_map<const slang::ast::Symbol*, std::map<int64_t, slang::SVInt>> mem_init_vals_;
   // File preload commands retain externally writable state, including read-only RTL memories.
-  absl::flat_hash_map<const slang::ast::Symbol*, std::string> mem_init_images_;
-  absl::flat_hash_set<const slang::ast::ProceduralBlockSymbol*> plusarg_blocks_;
-  absl::flat_hash_set<const slang::ast::ValueSymbol*> plusarg_vars_;
-  absl::flat_hash_set<const slang::ast::Expression*> readmem_calls_;
+  absl::flat_hash_map<const slang::ast::Symbol*, std::string>                     mem_init_images_;
+  absl::flat_hash_set<const slang::ast::ProceduralBlockSymbol*>                   plusarg_blocks_;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>                             plusarg_vars_;
+  absl::flat_hash_set<const slang::ast::Expression*>                              readmem_calls_;
 
   // Constant scalar register initializers, from either `logic q = CONST` or a
   // simple `initial q = CONST`. A declaration carrying one causes tolg to use
   // the module's implicit reset and this value instead of reset-less X state.
   // Keep the applied/reset sets separate so the warning is emitted only after
   // async-reset attributes have had a chance to override the initializer.
-  absl::flat_hash_map<const slang::ast::ValueSymbol*, std::string>           reg_init_vals_;
-  absl::flat_hash_set<const slang::ast::ValueSymbol*>                        reg_init_applied_;
-  absl::flat_hash_set<const slang::ast::ValueSymbol*>                        reset_attr_syms_;
+  absl::flat_hash_map<const slang::ast::ValueSymbol*, std::string>         reg_init_vals_;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>                      reg_init_applied_;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>                      reset_attr_syms_;
   // Unpacked-array PORTS are not memories: an `output T arr[N-1:0]` port lowers
   // to a FLAT packed [N*elem_bits-1:0] IO bus (Verilator/yosys flatten unpacked
   // ports the same way, so LEC lines up), and element access `arr[i]` becomes a
@@ -293,13 +293,13 @@ struct Slang_module_state {
   // descending ranges and `(upper-i)*elem_bits` for ascending ranges. Symbols
   // here carry their range in mem_info_ but route through bit-slice get/set
   // instead of store/tuple_get.
-  absl::flat_hash_set<const slang::ast::Symbol*>                             flat_port_syms_;
+  absl::flat_hash_set<const slang::ast::Symbol*>                           flat_port_syms_;
   // PACKED 2-D reg arrays (`reg [N-1:0][W-1:0]`, W>1) that are RUNTIME-indexed
   // somewhere — a firtool-style register file. These memory-ize (one `__memory`
   // node) instead of flattening to a single N*W-bit flop, so they LEC against an
   // equivalent Pyrope memory. Populated by the runtime-index pre-pass; the
   // declare + element read/write consult it to route through the memory path.
-  absl::flat_hash_set<const slang::ast::Symbol*>                             packed_mem_regs_;
+  absl::flat_hash_set<const slang::ast::Symbol*>                           packed_mem_regs_;
   // Per-ENTRY async-reset values for a packed 2-D reg whose reset arm loads a
   // pattern rather than one repeated value (`spec_table <= '{33,…,1,0}` — how
   // firtool spells an index-initialized rename/free-list table). The reset
@@ -308,7 +308,7 @@ struct Slang_module_state {
   // the reset-arm pre-pass in lower_members (BEFORE the declares emit, like
   // mem_init_vals_); declare_reg emits them as the array's tuple initializer
   // and the async-reset lowering then skips its scalar `initial` for these.
-  absl::flat_hash_map<const slang::ast::Symbol*, std::vector<std::string>>   array_reset_lanes_;
+  absl::flat_hash_map<const slang::ast::Symbol*, std::vector<std::string>> array_reset_lanes_;
 
   // ── scalar packed-struct vars as per-field BUNDLES ─────────────────────────
   // A scalar (non-array, non-reg, non-port) packed-struct variable lowers to one
@@ -485,7 +485,7 @@ private:
   absl::flat_hash_map<const slang::ast::InstanceBodySymbol*, std::string>            module_names_;
   absl::flat_hash_set<std::string>                                                   module_names_used_;
   std::vector<std::shared_ptr<Lnast>>                                                ordered_lnasts_;
-  absl::flat_hash_set<const slang::ast::ValueSymbol*> simulation_only_vars_;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>                                simulation_only_vars_;
 
   // ── per-module state ───────────────────────────────────────────────────────
   // Lives in Slang_module_state (the private base) so lower_module can swap it
@@ -548,8 +548,8 @@ private:
   };
 
   // ── structure (slang_structure.cpp) ───────────────────────────────────────
-  void prepare_plusargs(const slang::ast::InstanceBodySymbol& body);
-  void hoist_plusargs(const slang::ast::RootSymbol& root);
+  void        prepare_plusargs(const slang::ast::InstanceBodySymbol& body);
+  void        hoist_plusargs(const slang::ast::RootSymbol& root);
   bool        lower_module(const slang::ast::InstanceSymbol& symbol);
   std::string module_name_of(const slang::ast::InstanceSymbol& symbol);
   void        emit_module_io(const slang::ast::InstanceSymbol& symbol, const Lnast_nid& in_tup, const Lnast_nid& out_tup);
@@ -983,14 +983,12 @@ private:
   std::optional<std::pair<int64_t, int64_t>> selector_bounds(const slang::ast::Expression& e);
   // The mask of the runtime window [lo, hi]: a `range` temp (upass.tolg lowers
   // a window whose `hi` is `lo` plus a constant with a constant-width mask).
-  std::string                                dynamic_mask(const std::string& lo, const std::string& hi);
   // `base#[lo..=hi] = value` with runtime endpoints, in place.
   void emit_dynamic_slice_write(const std::string& base, const std::string& lo, const std::string& hi, const std::string& value);
   // `src` with bits [lo, hi] (runtime endpoints) replaced by `piece`, as a new
   // temp: the copy-temp set_mask shape (`src` itself is not rebound).
   std::string splice_range(const std::string& src, const std::string& lo, const std::string& hi, const std::string& piece);
   // The same with a constant or prebuilt `mask`.
-  std::string splice_mask(const std::string& src, const std::string& mask, const std::string& piece);
   // A runtime window `[lo, lo + width - 1]` of a `cont_bits`-bit container,
   // clipped to it the way Verilog writes a part select: `meets` is the
   // condition that the window touches the container ("" = always), and

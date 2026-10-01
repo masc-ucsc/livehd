@@ -238,8 +238,6 @@ cc_binary(
         "lhd_main.cpp",
         "lhd_pyrope.cpp",
         "lhd_pyrope.hpp",
-        "pyrope_style.cpp",
-        "pyrope_style.hpp",
     ],
     copts = COPTS,
     data = [
@@ -270,6 +268,7 @@ cc_binary(
     visibility = ["//visibility:public"],
     deps = [
         ":lhd_lib",
+        "//inou/prp:pyrope_style",
         "//lsp",
         "//pass/cost:host_mem",
         "@tree_sitter",

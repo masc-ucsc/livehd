@@ -99,19 +99,19 @@ std::optional<Shape> shape_of(const Node& node, size_t& budget) {
     return result;
   }
   const auto   count    = result.operands.size();
-  const size_t expected = op == Ntype_op::Not ? 1 : op == Ntype_op::Set_mask ? 3 : 2;
+  const size_t expected = op == Ntype_op::Not ? 1 : op == Ntype_op::Set_mask ? 4 : op == Ntype_op::Get_mask ? 3 : 2;
   if (op == Ntype_op::Concat ? count % 2 != 0 : count != expected) {
     return {};
   }
   for (size_t i = 0; i < count; ++i) {
     const auto& operand = result.operands[i];
     // Masks use sparse positional pids: a=0, mask=2, replacement=4.
-    const auto  pid     = op == Ntype_op::Get_mask || op == Ntype_op::Set_mask ? 2 * i : i;
+    const auto  pid     = op == Ntype_op::Get_mask || op == Ntype_op::Set_mask ? (i == 0 ? 0 : i + 1) : i;
     if (operand.role != pid) {
       return {};
     }
     const bool parameter = ((op == Ntype_op::Sext || op == Ntype_op::Rxor || op == Ntype_op::Popcount) && i == 1)
-                           || ((op == Ntype_op::Get_mask || op == Ntype_op::Set_mask) && operand.role == 2)
+                           || ((op == Ntype_op::Get_mask || op == Ntype_op::Set_mask) && (operand.role == 2 || operand.role == 3))
                            || (op == Ntype_op::Concat && i % 2 == 1);
     if (parameter && !operand.value.is_const()) {
       return {};
@@ -137,7 +137,7 @@ bool align(const Shape& base, Shape& other) {
       const auto role = base.operands[i].role;
       const bool parameter
           = ((base.op == Ntype_op::Sext || base.op == Ntype_op::Rxor || base.op == Ntype_op::Popcount) && role == 1)
-            || ((base.op == Ntype_op::Get_mask || base.op == Ntype_op::Set_mask) && role == 2)
+            || ((base.op == Ntype_op::Get_mask || base.op == Ntype_op::Set_mask) && (role == 2 || role == 3))
             || (base.op == Ntype_op::Concat && role % 2 == 1);
       if (parameter && base.operands[i].value != other.operands[i].value) {
         return false;
@@ -253,7 +253,7 @@ void share_hotmux_operators(hhds::Graph& graph, size_t& budget) {
         const auto role      = operand.role;
         const auto op        = shape->op;
         const bool parameter = ((op == Ntype_op::Sext || op == Ntype_op::Rxor || op == Ntype_op::Popcount) && role == 1)
-                               || ((op == Ntype_op::Get_mask || op == Ntype_op::Set_mask) && role == 2)
+                               || ((op == Ntype_op::Get_mask || op == Ntype_op::Set_mask) && (role == 2 || role == 3))
                                || (op == Ntype_op::Concat && role % 2 == 1);
         key.push_back(role);
         key.push_back(parameter ? operand.value.get_class_index().value : 0);

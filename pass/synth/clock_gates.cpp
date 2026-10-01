@@ -28,10 +28,9 @@ hhds::Pin_class clock_root(hhds::Pin_class p, const absl::flat_hash_set<hhds::Pi
     if (gu::type_op_of(m) != Ntype_op::Get_mask) {
       break;
     }
-    auto a    = gu::get_driver_of_sink_name(m, "a");
-    auto mask = gu::get_driver_of_sink_name(m, "mask");
-    if (a.is_invalid() || std::max(1, gu::real_width(a)) != 1 || mask.is_invalid() || !mask.is_const()
-        || !gu::const_of(mask).bit_test(0)) {
+    auto       a    = gu::get_driver_of_sink_name(m, "a");
+    const auto mask = livehd::graph_util::bit_range(m);
+    if (a.is_invalid() || std::max(1, gu::real_width(a)) != 1 || !mask.has_value() || mask->first != 0) {
       break;
     }
     p = a;  // get_mask(bit0) of a 1-bit wire == the wire

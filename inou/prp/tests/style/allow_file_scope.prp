@@ -1,0 +1,17 @@
+/*
+:name: style_allow_file_scope
+:type: style
+:style: none
+*/
+// At file scope the allow lasts to the end of the file, and several codes can be
+// listed. Both the type hint and the structural reset hint are silenced here.
+// prp-style-allow hardcoded-reset, reset-port-type, single-destination-conditional
+pub mod m(clk:Clock, rst_ni:U1, din:U7) -> (dout:U7@[]) {
+  reg dout_q:U7 = nil
+  dout = dout_q
+  if rst_ni == 0 {
+    dout_q = 0
+  } else {
+    dout_q = din
+  }
+}

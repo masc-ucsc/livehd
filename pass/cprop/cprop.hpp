@@ -73,14 +73,14 @@ protected:
   // Constant slice of a packed (Or-of-shifted-disjoint-fields) wire -> the one
   // operand that drives it. true = node deleted (folded to a constant); false
   // may still have rewired the node in place.
-  bool scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_const);
+  bool scalar_get_mask_packed(hhds::Node_class& node);
   // Multi-bit slice straddling several Set_mask/Concat lanes -> one Concat of
   // the covering pieces. true = node retyped (no longer a Get_mask).
 
   void bwd_del_node(hhds::Node_class& node);
 
   // Retype And(x, 2^n-1) [binary, one const] into the value-identical
-  // Get_mask(x, 2^n-1) so every low-mask truncation shares ONE shape.
+  // Get_mask(x, 0, n) so every low-mask truncation shares ONE shape.
   void canonicalize_and_mask(hhds::Node_class& node);
   // Hash-cons identical pure combinational nodes (same op, same input pins).
   void cse_pass(const std::vector<hhds::Node_class>& order);
@@ -121,7 +121,7 @@ namespace livehd {
 // The k of a value spelled as a low-lane form (Or(Shl(H,k),L), Shl(H,k),
 // And(x,-2^k), or a two-lane Concat; cprop_lowlane.cpp): its low k bits are
 // structurally known. 0 for any other value.
-int low_lane_bits(const hhds::Pin_class& pin);
+int  low_lane_bits(const hhds::Pin_class& pin);
 // Disjoint mux regions: ordinary cprop leaves destination-Q regions intact;
 // enableopt exclusively owns their feedback-to-enable transformation.
 void share_mux_regions(hhds::Graph& graph, bool state_context,

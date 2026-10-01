@@ -88,7 +88,7 @@ both accepted; at least one must supply sources). lhd hands the args to
 | `slang_structure.cpp` | modules, ports/io, process classification (comb/ff/async-reset), dataflow-ordered driver emission, instances, generate |
 | `slang_stmt.cpp` | statements: if, case→`if`/`unique_if`, capped slang-side loop unrolling |
 | `slang_expr.cpp` | rvalue expressions; reductions expanded inline; selects via shift+const-mask |
-| `slang_lvalue.cpp` | assignment targets: vars, packed selects (const→`set_mask` mask, dynamic→`set_mask` range, clipped to the selected container), concat split, memory element writes |
+| `slang_lvalue.cpp` | assignment targets: vars, packed selects (half-open `set_mask` endpoints, clipped to the selected container), concat split, memory element writes |
 | `slang_types.cpp` | type info + the single materialize-conversion seam (`trunc_to`/`fit_wrap`/`to_pattern`) |
 | `slang_location.hpp` | slang SourceRange → diag span + hhds SourceId minting |
 | `slang_diag.hpp` | slang DiagnosticClient → LiveHD diag sink |

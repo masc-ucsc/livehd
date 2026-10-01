@@ -17,7 +17,7 @@
 pub mod top(stop:U8) -> (total:U12@[0]) {
   mut acc:U12 = 0
   for i in 0..<8 {
-    if stop#[i] { break }
+    if stop#[i] != 0 { break }
     acc = acc + 1
   }
   total = acc

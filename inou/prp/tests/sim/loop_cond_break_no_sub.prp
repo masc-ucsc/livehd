@@ -12,7 +12,7 @@
 mod loop_cond_break_no_sub(seed:U8, weighted:U8) -> (total:U12@[0]) {
   mut acc:U12 = seed
   for ordinal in 0..<8 {
-    if weighted#[ordinal] {
+    if weighted#[ordinal] != 0 {
       acc = acc + ordinal + 1
     } else {
       acc = acc + 1

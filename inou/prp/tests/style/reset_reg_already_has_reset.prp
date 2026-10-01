@@ -1,0 +1,25 @@
+/*
+:name: style_reset_reg_already_has_reset
+:type: style
+:style: none
+*/
+// A register that already has a reset (an explicit `reset_pin`, or an initial
+// value other than `nil` which binds the implicit reset) is not missing one. A
+// conditional write to it is ordinary next-state logic -- here a set and a
+// synchronous clear -- so neither reset rule fires.
+pub mod explicit(clk:Clock, start:U1, kill:Reset) -> (ready:U1@[]) {
+  reg busy:U1:[reset_pin=kill] = 0
+  ready = busy ^ 1
+  if start != 0 {
+    busy = 1
+  }
+}
+
+pub mod implicit(clk:Clock, rst:Reset, kill:U1, start:U1) -> (ready:U1@[]) {
+  reg busy:U1 = 0
+  ready = busy ^ 1
+  busy = start
+  if kill != 0 {
+    busy = 0
+  }
+}

@@ -9,13 +9,13 @@
 // onto the run-wide exit list, joined only after the WHOLE outer body, so
 // `y = y + x` saw only the fall-through `x = 0`: the carry-in range was [0, 0]
 // and the overflow went unreported. With c#[0] set, x stays 100 and y reaches
-// 300. The same design written without the break (`if c#[j] { x = 0 }`)
+// 300. The same design written without the break (`if c#[j] != 0 { x = 0 }`)
 // already errored.
 pub mod rolled_nested_break_carry_range(c:U4) -> (o:U8@[0]) {
   mut y:U8 = 0
   for i in 0..<3 {
     mut x:U8 = 100
-    for j in 0..<4 { if c#[j] { break }; x = 0 }
+    for j in 0..<4 { if c#[j] != 0 { break }; x = 0 }
     y = y + x
   }
   o = y

@@ -1,0 +1,32 @@
+/*
+:name: bitset_mut_branch_mem
+:type: equiv
+:verilog_top: bitset_mut_branch_mem_top
+:pyrope_top: foo
+:equiv_lec_grep: (?m)^lec: '[^']+' PROVEN equivalent
+*/
+// `:equiv_lec_grep:` pins the UNBOUNDED proof: a fall back to a bounded PASS(n)
+// means the wide-flop bridge of pass/lec/query.cpp (the golden's packed register
+// vs the memory) stopped pairing.
+
+// Whole-array `q` is copied into a packed mut before the conditional partial
+// writes. The read_all pin and its reported width must both be 16*4 bits;
+// otherwise the first set_mask truncates the retained high lanes.
+pub mod foo(a:U64, load:Bool, clear_low:Bool, rst_n:U1) -> (o:U64@[0]) {
+  reg q:[16]U4
+  mut d:U64 = 0
+  d = q
+  if clear_low {
+    for i in 0..<56 step 4 {
+      d#[i..+4]   = 0 // same 14 nibbles as the unrolled base
+    }
+  } elif load {
+    d = a
+  }
+  if rst_n == 0 {
+    q = 0
+  } elif clear_low or load {
+    q = d
+  }
+  o = d
+}

@@ -70,7 +70,7 @@ TEST(CpropMasks, BoundaryAnnotationsCannotProveAMaskRedundant) {
     }
     auto mask = gu::create_typed_node(*g, Ntype_op::Get_mask);
     gu::setup_sink_by_name(mask, "a").connect_driver(input);
-    gu::setup_sink_by_name(mask, "mask").connect_driver(gu::create_const(*g, *Dlop::create_integer(255)));
+    livehd::graph_util::connect_bit_range(mask, 0, 8);
     mask.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
     Cprop{}.do_trans(g);
     // One driver per sink pin: a graph output is driven by exactly one pin.
@@ -371,7 +371,7 @@ TEST(CpropCleanup, ConditionalPackReachesFixedPoint) {
     auto write = gu::create_typed_node(*g, Ntype_op::Set_mask, 12);
     gu::set_ubits(write.create_driver_pin(0), 12);
     gu::setup_sink_by_name(write, "a").connect_driver(value);
-    gu::setup_sink_by_name(write, "mask").connect_driver(gu::create_const(*g, *Dlop::create_integer(15LL << (4 * (i / 3)))));
+    gu::connect_bit_range(write, 4 * (i / 3), 4 * (i / 3) + 4);
     gu::setup_sink_by_name(write, "value").connect_driver(g->get_input_pin("d"));
     auto mux = gu::create_typed_node(*g, Ntype_op::Mux, 12);
     gu::set_ubits(mux.create_driver_pin(0), 12);
@@ -419,7 +419,7 @@ TEST(CpropCleanup, PackedWritesKeepTruncation) {
     auto write = gu::create_typed_node(*g, Ntype_op::Set_mask, 8);
     gu::set_ubits(write.create_driver_pin(0), 8);
     gu::setup_sink_by_name(write, "a").connect_driver(value);
-    gu::setup_sink_by_name(write, "mask").connect_driver(gu::create_const(*g, *Dlop::create_integer(15 << (4 * lane))));
+    gu::connect_bit_range(write, 4 * lane, 4 * lane + 4);
     gu::setup_sink_by_name(write, "value").connect_driver(mux.create_driver_pin(0));
     value = write.create_driver_pin(0);
   }
@@ -763,14 +763,14 @@ int64_t mux_eval(Test_pin pin, Test_values& values) {
       result          |= static_cast<int64_t>((static_cast<uint64_t>(mux_eval(lane.value, values)) & mask) << lane.offset);
     }
   } else if (op == Ntype_op::Set_mask) {
-    const auto [lo, hi] = gu::const_of(gu::get_driver_of_sink_name(node, "mask")).get_mask_range();
+    const auto [lo, hi] = *gu::bit_range(node);
     const auto mask     = ((uint64_t{1} << (hi - lo)) - 1) << lo;
     const auto base     = static_cast<uint64_t>(mux_eval(gu::get_driver_of_sink_name(node, "a"), values));
     const auto value    = static_cast<uint64_t>(mux_eval(gu::get_driver_of_sink_name(node, "value"), values));
     result              = static_cast<int64_t>((base & ~mask) | ((value << lo) & mask));
   } else if (op == Ntype_op::Get_mask) {
     // Constant contiguous window only: bits [lo,hi) of `a`, LSB-aligned.
-    const auto [lo, hi] = gu::const_of(gu::get_driver_of_sink_name(node, "mask")).get_mask_range();
+    const auto [lo, hi] = *gu::bit_range(node);
     EXPECT_GE(lo, 0);
     const auto value = mux_eval(gu::get_driver_of_sink_name(node, "a"), values);
     result           = (value >> lo) & ((int64_t{1} << (hi - lo)) - 1);
@@ -1190,10 +1190,17 @@ TEST(CpropBool, EnableMakesLaneHoldMuxDead) {
   gu::set_ubits(enable.create_driver_pin(0), 1);
   enable.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(flop, "enable"));
   auto lane_read = gu::create_typed_node(*g, Ntype_op::Get_mask);
-  gu::connect_mask_operands(lane_read, q, constant(2));
+  gu::connect_mask_operands(lane_read,
+                            q,
+                            livehd::graph_util::mask_window(livehd::graph_util::const_of(constant(2))).first,
+                            livehd::graph_util::mask_window(livehd::graph_util::const_of(constant(2))).second);
   gu::set_ubits(lane_read.create_driver_pin(0), 1);
   auto lane = mux(rst, mux(upd, lane_read.create_driver_pin(0), next), constant(1));
-  auto din  = gu::create_set_mask(*g, q, constant(2), lane);
+  auto din  = gu::create_set_mask(*g,
+                                  q,
+                                  lane,
+                                  livehd::graph_util::mask_window(livehd::graph_util::const_of(constant(2))).first,
+                                  livehd::graph_util::mask_window(livehd::graph_util::const_of(constant(2))).second);
   gu::set_ubits(din.create_driver_pin(0), 4);
   din.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(flop, "din"));
   optimize_state(g);
@@ -1430,8 +1437,8 @@ TEST(CpropMuxSharing, TwoGroupEqualCostRejectionLeavesNoResidue) {
 
 TEST(CpropMuxSharing, NamedInteriorRemainsAddressable) {
   Mux_graph f("two_group_named", 3);
-  auto left = f.mux(f.controls[1], f.a, f.b);
-  auto right = f.mux(f.controls[2], f.a, f.b);
+  auto      left  = f.mux(f.controls[1], f.a, f.b);
+  auto      right = f.mux(f.controls[2], f.a, f.b);
   gu::set_pin_name(left, "visible_selection");
   f.mux(f.controls[0], left, right).connect_sink(f.graph->get_output_pin("out"));
   livehd::share_mux_regions(*f.graph, false);
@@ -1486,7 +1493,7 @@ TEST(CpropMasks, CyclicPackedReadDoesNotRotateAtWalkBudget) {
   for (int i = 0; i < 65; ++i) {
     auto node = gu::create_typed_node(*graph, Ntype_op::Set_mask, 2);
     gu::set_ubits(node.create_driver_pin(0), 2);
-    gu::setup_sink_by_name(node, "mask").connect_driver(gu::create_const(*graph, *Dlop::create_integer(2)));
+    livehd::graph_util::connect_bit_range(node, 1, 2);
     gu::setup_sink_by_name(node, "value").connect_driver(gu::create_const(*graph, *Dlop::create_integer(1)));
     writers.push_back(node);
   }
@@ -1496,7 +1503,7 @@ TEST(CpropMasks, CyclicPackedReadDoesNotRotateAtWalkBudget) {
   auto       read   = gu::create_typed_node(*graph, Ntype_op::Get_mask, 1);
   const auto source = writers.front().get_driver_pin(0);
   gu::setup_sink_by_name(read, "a").connect_driver(source);
-  gu::setup_sink_by_name(read, "mask").connect_driver(gu::create_const(*graph, *Dlop::create_integer(1)));
+  livehd::graph_util::connect_bit_range(read, 0, 1);
   read.create_driver_pin(0).connect_sink(graph->get_output_pin("q"));
   Cprop cp;
   cp.do_trans(graph);
@@ -1538,7 +1545,7 @@ TEST(CpropMasks, StraddlingSliceOfLongWriteChainGathersItsLanes) {
 
     auto write = gu::create_typed_node(*g, Ntype_op::Set_mask);
     gu::setup_sink_by_name(write, "a").connect_driver(value);
-    gu::setup_sink_by_name(write, "mask").connect_driver(gu::create_const(*g, gu::mask_window_const(i, i + 1)));
+    livehd::graph_util::connect_bit_range(write, i, i + 1);
     gu::setup_sink_by_name(write, "value").connect_driver(mux.create_driver_pin(0));
     gu::set_ubits(write.create_driver_pin(0), kLinks);
     value = write.create_driver_pin(0);
@@ -1558,7 +1565,7 @@ TEST(CpropMasks, StraddlingSliceOfLongWriteChainGathersItsLanes) {
   // The four lane muxes vectorize, then operator sharing factors their equal
   // masks: Get_mask(Mux(s,a,b), [0,4)). Only one word mux and one read remain.
   ASSERT_EQ(gu::type_op_of(head), Ntype_op::Get_mask);
-  EXPECT_EQ(gu::const_of(gu::get_driver_of_sink_name(head, "mask")).to_just_i64(), 15);
+  EXPECT_EQ(*gu::bit_range(head), std::make_pair(0, 4));
   EXPECT_EQ(gu::type_op_of(gu::get_driver_of_sink_name(head, "a").get_master_node()), Ntype_op::Mux);
   EXPECT_EQ(gu::bits_of(out), 4);
   size_t muxes = 0;
@@ -1585,7 +1592,7 @@ TEST(CpropMasks, StraddlingSlicePreservesSharedWord) {
   for (int i = 0; i < 8; ++i) {
     auto write = gu::create_typed_node(*g, Ntype_op::Set_mask);
     gu::setup_sink_by_name(write, "a").connect_driver(value);
-    gu::setup_sink_by_name(write, "mask").connect_driver(gu::create_const(*g, gu::mask_window_const(i, i + 1)));
+    livehd::graph_util::connect_bit_range(write, i, i + 1);
     gu::setup_sink_by_name(write, "value").connect_driver(g->get_input_pin("d"));
     gu::set_ubits(write.create_driver_pin(0), 8);
     value = write.create_driver_pin(0);
@@ -1693,7 +1700,12 @@ TEST(CpropMasks, SharedWriteVersionsHaveBoundedExpansion) {
     for (int i = 0; i < size; ++i) {
       auto value = gu::create_get_mask(*graph, source, i, i + 1).create_driver_pin(0);
       auto mask  = gu::create_const(*graph, gu::mask_window_const(i, i + 1));
-      word       = gu::create_set_mask(*graph, word, mask, value).create_driver_pin(0);
+      word       = gu::create_set_mask(*graph,
+                                       word,
+                                       value,
+                                       livehd::graph_util::mask_window(livehd::graph_util::const_of(mask)).first,
+                                       livehd::graph_util::mask_window(livehd::graph_util::const_of(mask)).second)
+                       .create_driver_pin(0);
       word.connect_sink(graph->get_output_pin("word" + std::to_string(i)));
       auto read = gu::create_get_mask(*graph, word, i, i + 1).create_driver_pin(0);
       read.connect_sink(graph->get_output_pin("bit" + std::to_string(i)));
@@ -1714,7 +1726,7 @@ TEST(CpropMasks, SharedWriteVersionsHaveBoundedExpansion) {
       const auto read = graph->get_output_pin("bit" + std::to_string(i)).get_driver_pin();
       ASSERT_EQ(gu::type_op_of(read.get_master_node()), Ntype_op::Get_mask);
       EXPECT_EQ(gu::get_driver_of_sink_name(read.get_master_node(), "a"), source);
-      EXPECT_EQ(gu::mask_window_of(gu::const_of(gu::get_driver_of_sink_name(read.get_master_node(), "mask"))),
+      EXPECT_EQ(gu::bit_range(read.get_master_node()),
                 (std::optional<std::pair<int, int>>{
                     {i, i + 1}
       }));
@@ -1727,7 +1739,12 @@ TEST(CpropMasks, SharedWriteVersionsHaveBoundedExpansion) {
 TEST(CpropMasks, SharedOverwriteVersionsPreserveSignedSlices) {
   Mux_graph f("shared_overwrites", 0, 8, true);
   auto      write = [&](Test_pin base, Test_pin value) {
-    return gu::create_set_mask(*f.graph, base, f.constant(6), value).create_driver_pin(0);
+    return gu::create_set_mask(*f.graph,
+                               base,
+                               value,
+                               livehd::graph_util::mask_window(livehd::graph_util::const_of(f.constant(6))).first,
+                               livehd::graph_util::mask_window(livehd::graph_util::const_of(f.constant(6))).second)
+        .create_driver_pin(0);
   };
   auto first = write(f.a, f.b);
   auto last  = write(first, f.constant(1));
@@ -1805,7 +1822,11 @@ TEST(CpropOpSharing, PositionalAndBankedOperatorsPreserveValues) {
     const auto expr = [&](Test_pin value) {
       auto n = f.node(op);
       if (op == Ntype_op::Get_mask || op == Ntype_op::Set_mask) {
-        gu::connect_mask_operands(n, value, f.constant(15), op == Ntype_op::Set_mask ? f.controls[1] : Test_pin{});
+        gu::connect_mask_operands(n,
+                                  value,
+                                  livehd::graph_util::mask_window(livehd::graph_util::const_of(f.constant(15))).first,
+                                  livehd::graph_util::mask_window(livehd::graph_util::const_of(f.constant(15))).second,
+                                  op == Ntype_op::Set_mask ? f.controls[1] : Test_pin{});
       } else if (op == Ntype_op::Concat) {
         auto lane = gu::create_get_mask(*f.graph, value, 0, 8);
         n.create_sink_pin(0).connect_driver(lane.create_driver_pin(0));
@@ -2003,7 +2024,11 @@ TEST(CpropOpSharing, UnstampedRootKeepsArmRealization) {
     Mux_graph  f(same_stamp ? "opshare_unstamped_root" : "opshare_unstamped_mixed", 1, 8, true);
     const auto slice = [&](Test_pin value, int bits) {
       auto n = f.node(Ntype_op::Get_mask, bits);
-      gu::connect_mask_operands(n, value, f.constant(15), Test_pin{});
+      gu::connect_mask_operands(n,
+                                value,
+                                livehd::graph_util::mask_window(livehd::graph_util::const_of(f.constant(15))).first,
+                                livehd::graph_util::mask_window(livehd::graph_util::const_of(f.constant(15))).second,
+                                Test_pin{});
       return n.create_driver_pin(0);
     };
     auto root = gu::create_typed_node(*f.graph, Ntype_op::Mux, 0);

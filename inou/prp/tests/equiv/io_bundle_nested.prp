@@ -11,9 +11,9 @@
 // per-field leaf nets, so prp-v2prp2v-io_bundle_nested PROVES equivalent (see the
 // .v header for the slang_structure.cpp fix).
 comb top(io_x:U1, io_a:U2) -> (io_c:U2) {
-  if io_x != 0 {
-    io_c = io_a
+  io_c = if io_x != 0 {
+    io_a
   } else {
-    io_c = 0
+    0
   }
 }

@@ -1,0 +1,13 @@
+/*
+:name: style_whole_tuple_copy
+:type: style
+:style: whole-tuple-copy
+:message: matching field copies
+:help: dst = src
+*/
+// Field-by-field copies of one bundle into another: `dst = src` when the fields
+// form the whole compatible bundle.
+comb f(src:(valid:U1, data:U8)) -> (dst:(valid:U1, data:U8)) {
+  dst.valid = src.valid  // locate_style_whole-tuple-copy
+  dst.data  = src.data
+}

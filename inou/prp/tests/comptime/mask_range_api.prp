@@ -1,0 +1,15 @@
+/*
+:name: mask_range_api
+:type: comptime
+:verifier_pass: 8
+:verifier_fail: 0
+*/
+// Cell endpoints are half-open; the two-operand read selects a bit position.
+cassert(__get_mask(a=0xab, lo=4, hi=8) == 0xa)
+cassert(__get_mask(a=0xab, lo=3) == 1)
+cassert(__get_mask(a=0xab, lo=2) == 0)
+cassert(__get_mask(a=-1, lo=60, hi=68) == 255)
+cassert(__set_mask(a=0xab, value=3, lo=4, hi=8) == 0x3b)
+cassert(__set_mask(a=0, value=1, lo=7) == 128)
+cassert(0xa5#[0..<8 step 2] == 3)
+cassert(0xa5#[1..<8 step 2] == 12)

@@ -1,0 +1,18 @@
+/*
+:name: style_hardcoded_reset
+:type: style
+:style: hardcoded-reset
+:help: reset_pin=rst
+*/
+// `rst` is only ever the condition of a constant clear of a register: make the
+// reset structural (`reg q:U8:[reset_pin=rst] = 0`). `rst` is already `Reset`, so
+// the port-type rule stays quiet; the if has no else so it is not also a
+// single-destination conditional.
+pub mod m(clk:Clock, rst:Reset, din:U8) -> (dout:U8@[]) {
+  reg q:U8 = nil
+  dout = q
+  q = din
+  if rst {  // locate_style_hardcoded-reset
+    q = 0
+  }
+}

@@ -7,5 +7,5 @@
 pub comb p(x:U4) -> (y:U4) {
   comptime const seed = 3
   enum State = (first=seed, second, third)
-  if x == State.second { y = State.third } else { y = State.first }
+  y= if x == State.second { State.third } else { State.first }
 }

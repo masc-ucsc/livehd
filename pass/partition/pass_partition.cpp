@@ -577,9 +577,9 @@ private:
     std::unique_ptr<hhds::GraphLibrary> pre_lib;
     livehd::partition::Region_body      region;
   };
-  std::vector<Pending_body> pending_;
-  size_t                    batch_size_ = 64;
-  void                      flush_batch();
+  std::vector<Pending_body>    pending_;
+  size_t                       batch_size_ = 64;
+  void                         flush_batch();
   livehd::partition::Admission admission_;
   void                         admit(std::string_view stage, uint64_t work = 1) const { check_admission(admission_, stage, work); }
 
@@ -649,6 +649,7 @@ private:
   void                           build_module(uint32_t r);
   void                           build_module_as_top(uint32_t r);
   void                           build_top(const std::vector<uint32_t>& regs);
+  std::shared_ptr<hhds::Graph>   create_top_body(const std::shared_ptr<hhds::GraphIO>& gio, std::string_view stage);
   // Region-module construction shared by build_module's classic (no-hook) body
   // and the incremental pre-body (same edge tables => byte-stable output).
   std::shared_ptr<hhds::GraphIO> declare_region_io(uint32_t r, hhds::GraphLibrary* dst_lib, const std::string& name);
@@ -980,7 +981,7 @@ void Partitioner::name_ports() {
   admit("forward-signatures", 0);
   const auto fwd_memo = fwd_cone_signatures(fwd_roots, admission_);
   admit("forward-signatures-done", 0);
-  auto       producer_roots = fwd_roots;
+  auto producer_roots = fwd_roots;
   for (const auto& ports : module_outputs_) {
     admit("name_ports-step");
     for (const auto& port : ports) {
@@ -1554,6 +1555,42 @@ void Partitioner::build_module(uint32_t r) {
   admit("committed", 0);
 }
 
+// Whole-top interfaces are identical for the mapped body, wrapper and cache
+// comparison body. Preserve both declaration metadata and input-pin attrs.
+std::shared_ptr<hhds::Graph> Partitioner::create_top_body(const std::shared_ptr<hhds::GraphIO>& gio, std::string_view stage) {
+  auto src_gio = g_->get_io();
+  for (const auto& decl : src_gio->get_input_pin_decls()) {
+    admit(stage);
+    gio->add_input(decl.name, decl.port_id, decl.loop_break);
+    if (decl.bits != 0) {
+      gio->set_bits(decl.name, decl.bits);
+    }
+    gio->set_unsign(decl.name, decl.unsign);
+  }
+  for (const auto& decl : src_gio->get_output_pin_decls()) {
+    admit(stage);
+    gio->add_output(decl.name, decl.port_id, decl.loop_break);
+    if (decl.bits != 0) {
+      gio->set_bits(decl.name, decl.bits);
+    }
+    gio->set_unsign(decl.name, decl.unsign);
+  }
+  auto body = gio->create_graph();
+
+  // GraphIO declarations do not propagate bits/sign to materialized pins.
+  // Cgen and subsequent synthesis read the pin attributes directly.
+  for (const auto& decl : src_gio->get_input_pin_decls()) {
+    admit(stage);
+    auto ip = body->get_input_pin(decl.name);
+    if (decl.bits != 0) {
+      gu::set_bits(ip, static_cast<int>(decl.bits));
+    }
+    decl.unsign ? gu::set_unsign(ip) : gu::set_sign(ip);
+  }
+
+  return body;
+}
+
 // Whole-design flatten, single region: the region IS the design. Emit it
 // directly under the top's own name with the top's own port list (no wrapper,
 // no __c suffix) — `pass.color flat` + `pass.abc` then yields exactly one
@@ -1563,38 +1600,9 @@ void Partitioner::build_module(uint32_t r) {
 // instance-path-prefixed by the flattener and cannot collide with port names).
 void Partitioner::build_module_as_top(uint32_t r) {
   admit("build_module_as_top", 0);
-  auto src_gio   = g_->get_io();
   auto gio       = outlib_->create_io(top_);
   module_gio_[r] = gio;
-  for (const auto& decl : src_gio->get_input_pin_decls()) {
-    admit("build_module_as_top-step");
-    gio->add_input(decl.name, decl.port_id, decl.loop_break);
-    if (decl.bits != 0) {
-      gio->set_bits(decl.name, decl.bits);
-    }
-    gio->set_unsign(decl.name, decl.unsign);
-  }
-  for (const auto& decl : src_gio->get_output_pin_decls()) {
-    admit("build_module_as_top-step");
-    gio->add_output(decl.name, decl.port_id, decl.loop_break);
-    if (decl.bits != 0) {
-      gio->set_bits(decl.name, decl.bits);
-    }
-    gio->set_unsign(decl.name, decl.unsign);
-  }
-  auto body = gio->create_graph();
-
-  // Stamp bits/sign on the materialized input pins (same invariant as
-  // build_module/build_top: the decl is not auto-propagated to pin attrs and
-  // every reader sizes from the pin).
-  for (const auto& decl : src_gio->get_input_pin_decls()) {
-    admit("build_module_as_top-step");
-    auto ip = body->get_input_pin(decl.name);
-    if (decl.bits != 0) {
-      gu::set_bits(ip, static_cast<int>(decl.bits));
-    }
-    decl.unsign ? gu::set_unsign(ip) : gu::set_sign(ip);
-  }
+  auto body      = create_top_body(gio, "build_module_as_top-step");
 
   // With one region there is no other region to drive a boundary port, so
   // every input port must come from a primary input.
@@ -1796,33 +1804,8 @@ void Partitioner::emit_top_passthrough_outputs(hhds::Graph* body) {
 hhds::Graph* Partitioner::build_pre_body_as_top(uint32_t r, hhds::GraphLibrary& dst_lib, const std::string& name,
                                                 const std::vector<hhds::Node_class>& rnodes) {
   admit("build_pre_body_as_top", 0);
-  auto src_gio = g_->get_io();
-  auto gio     = dst_lib.create_io(name);
-  for (const auto& decl : src_gio->get_input_pin_decls()) {
-    admit("build_pre_body_as_top-step");
-    gio->add_input(decl.name, decl.port_id, decl.loop_break);
-    if (decl.bits != 0) {
-      gio->set_bits(decl.name, decl.bits);
-    }
-    gio->set_unsign(decl.name, decl.unsign);
-  }
-  for (const auto& decl : src_gio->get_output_pin_decls()) {
-    admit("build_pre_body_as_top-step");
-    gio->add_output(decl.name, decl.port_id, decl.loop_break);
-    if (decl.bits != 0) {
-      gio->set_bits(decl.name, decl.bits);
-    }
-    gio->set_unsign(decl.name, decl.unsign);
-  }
-  auto body = gio->create_graph();
-  for (const auto& decl : src_gio->get_input_pin_decls()) {
-    admit("build_pre_body_as_top-step");
-    auto ip = body->get_input_pin(decl.name);
-    if (decl.bits != 0) {
-      gu::set_bits(ip, static_cast<int>(decl.bits));
-    }
-    decl.unsign ? gu::set_unsign(ip) : gu::set_sign(ip);
-  }
+  auto gio  = dst_lib.create_io(name);
+  auto body = create_top_body(gio, "build_pre_body_as_top-step");
   emit_region_body_as_top(r, body.get(), &dst_lib, rnodes, internal_edges_[r], const_edges_[r], /*decl_only_subs=*/true);
   emit_top_passthrough_outputs(body.get());
   admit("commit", 0);
@@ -1837,38 +1820,8 @@ hhds::Graph* Partitioner::build_pre_body_as_top(uint32_t r, hhds::GraphLibrary& 
 
 void Partitioner::build_top(const std::vector<uint32_t>& regs) {
   admit("build_top", 0);
-  auto src_gio = g_->get_io();
-  auto tgio    = outlib_->create_io(top_);
-  for (const auto& decl : src_gio->get_input_pin_decls()) {
-    admit("build_top-step");
-    tgio->add_input(decl.name, decl.port_id, decl.loop_break);
-    if (decl.bits != 0) {
-      tgio->set_bits(decl.name, decl.bits);
-    }
-    tgio->set_unsign(decl.name, decl.unsign);
-  }
-  for (const auto& decl : src_gio->get_output_pin_decls()) {
-    admit("build_top-step");
-    tgio->add_output(decl.name, decl.port_id, decl.loop_break);
-    if (decl.bits != 0) {
-      tgio->set_bits(decl.name, decl.bits);
-    }
-    tgio->set_unsign(decl.name, decl.unsign);
-  }
-  auto t = tgio->create_graph();
-
-  // Stamp bits/sign on the materialized top input pins, mirroring tolg: the
-  // GraphIO decl is not auto-propagated to the pin attrs, and readers that
-  // re-consume this wrapper (pass.abc re-mapping a netlist, cgen) size a port
-  // from the PIN attr — without it an 8-bit input reads as 1 bit.
-  for (const auto& decl : src_gio->get_input_pin_decls()) {
-    admit("build_top-step");
-    auto ip = t->get_input_pin(decl.name);
-    if (decl.bits != 0) {
-      gu::set_bits(ip, static_cast<int>(decl.bits));
-    }
-    decl.unsign ? gu::set_unsign(ip) : gu::set_sign(ip);
-  }
+  auto tgio = outlib_->create_io(top_);
+  auto t    = create_top_body(tgio, "build_top-step");
 
   // One Sub instance per region.
   std::vector<hhds::Node_class>                                  sub_of(module_gio_.size());
@@ -2260,7 +2213,7 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
     std::shared_ptr<hhds::Graph> flat_holder;
     std::string                  flat_name;
     if (order.size() > 1) {
-      flat_name   = livehd::partition::flatten_scratch_name(top);
+      flat_name = livehd::partition::flatten_scratch_name(top);
       check_admission(admission, "flatten", 0);
       flat_holder = livehd::partition::flatten_hierarchy(g, outlib, flat_name, nullptr, true, preserved_defs, admission);
       if (!flat_holder) {

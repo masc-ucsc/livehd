@@ -15,10 +15,10 @@
 #include <tuple>
 #include <vector>
 
+#include "bitwidth.hpp"
 #include "cell.hpp"
 #include "cprop.hpp"
 #include "enableopt.hpp"
-#include "bitwidth.hpp"
 #include "encode.hpp"
 #include "flatten.hpp"
 #include "gtest/gtest.h"
@@ -114,7 +114,7 @@ std::shared_ptr<hhds::Graph> build_overwide_concat(hhds::GraphLibrary& lib, cons
   if (pretruncate) {
     auto mask = graph_util::create_typed_node(*g, Ntype_op::Get_mask, 4);
     lane.connect_sink(livehd::graph_util::setup_sink_pid(mask, 0));
-    graph_util::create_const(*g, *Dlop::create_integer(15)).connect_sink(livehd::graph_util::setup_sink_pid(mask, 2));
+    graph_util::connect_bit_range(mask, 0, 4);
     lane = mask.create_driver_pin(0);
     graph_util::set_ubits(lane, 4);
   }
@@ -399,7 +399,7 @@ TEST(CombEquiv, PackedFeedbackSlicesAreRepairedPrivately) {
     if (packed) {
       auto slice = gu::create_typed_node(*g, Ntype_op::Get_mask, 2);
       word.connect_sink(livehd::graph_util::setup_sink_pid(slice, 0));
-      gu::create_const(*g, *Dlop::create_integer(real_cycle ? 3 : 12)).connect_sink(livehd::graph_util::setup_sink_pid(slice, 2));
+      gu::connect_bit_range(slice, real_cycle ? 0 : 2, real_cycle ? 2 : 4);
       lane = slice.create_driver_pin(0);
       gu::set_ubits(lane, 2);
     }
@@ -631,8 +631,8 @@ TEST(CombEquiv, ProvenBodyAndMatchedDescriptorUseCompactLoopCertificate) {
   lec::Lec_options body_options;
   body_options.engine = "ind";
   auto body_result    = lec::prove_equal(ref_lib.find_io("active_body")->get_graph().get(),
-                                      impl_lib.find_io("active_body")->get_graph().get(),
-                                      body_options);
+                                         impl_lib.find_io("active_body")->get_graph().get(),
+                                         body_options);
   ASSERT_EQ(body_result.verdict, Verdict::Proven) << body_result.detail;
 
   lec::Lec_options top_options;
@@ -1039,10 +1039,10 @@ TEST(CombEquiv, WindowInsertionPreservesAndClearsPositionalUnknowns) {
     io->set_unsign(name, true);
   }
   auto g      = io->create_graph();
-  auto insert = [&](hhds::Pin_class base, int mask, const char* value) {
+  auto insert = [&](hhds::Pin_class base, int lo, int hi, const char* value) {
     auto node = graph_util::create_typed_node(*g, Ntype_op::Set_mask);
     base.connect_sink(graph_util::setup_sink_by_name(node, "a"));
-    graph_util::create_const(*g, *Dlop::create_integer(mask)).connect_sink(graph_util::setup_sink_by_name(node, "mask"));
+    graph_util::connect_bit_range(node, lo, hi);
     graph_util::create_const(*g, *Dlop::from_binary(value, true)).connect_sink(graph_util::setup_sink_by_name(node, "value"));
     auto out = node.create_driver_pin(0);
     graph_util::set_ubits(out, 8);
@@ -1050,11 +1050,11 @@ TEST(CombEquiv, WindowInsertionPreservesAndClearsPositionalUnknowns) {
   };
   const auto all_unknown = [&] { return graph_util::create_const(*g, *Dlop::from_binary("????????", true)); };
   // bits [2,6) <- 1,?,0,1 (LSB-first), so bits 0,1,6,7 and bit 3 stay unknown.
-  auto partial = insert(all_unknown(), 0x3c, "10?1");
+  auto       partial     = insert(all_unknown(), 2, 6, "10?1");
   // Three more windows cover every remaining unknown bit, bit 3 included.
-  auto complete = insert(insert(insert(partial, 0x03, "01"), 0xc0, "10"), 0x08, "1");
+  auto       complete    = insert(insert(insert(partial, 0, 2, "01"), 6, 8, "10"), 3, 4, "1");
   // The -1 spelling is "replace the whole value": nothing of the base survives.
-  auto negative = insert(all_unknown(), -1, "1011011");
+  auto       negative    = insert(all_unknown(), 0, 8, "1011011");
   partial.connect_sink(g->get_output_pin("partial"));
   complete.connect_sink(g->get_output_pin("complete"));
   negative.connect_sink(g->get_output_pin("negative"));

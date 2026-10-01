@@ -162,8 +162,12 @@ std::pair<int, int> occurrence_packed_footprint_uncached(const hhds::Occurrence_
   if (op == Ntype_op::Get_mask) {
     const auto mask = occurrence_driver_at(node, 2);
     if (mask.is_const()) {
-      const auto& constant = gu::const_of(mask);
-      const auto [lo, hi]  = constant.get_mask_range();
+      const auto window = gu::bit_range(node);
+      if (!window) {
+        return kPacked_footprint_bail;
+      }
+      const auto [lo, hi] = *window;
+      const auto constant = gu::mask_window_const(lo, hi);
       if (!constant.has_unknowns() && constant.is_positive() && lo >= 0 && hi > lo) {
         const auto inner = occurrence_packed_footprint(occurrence_driver_at(node, 0), depth + 1, visits, cache, cut);
         if (inner.first >= 0) {
@@ -2009,9 +2013,9 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         }
       } else if (op == Ntype_op::Get_mask) {
         const auto source = lc::sink_driver_hier(node, "a");
-        const auto mask   = lc::sink_driver_hier(node, "mask");
+        const auto mask   = lc::sink_driver_hier(node, "lo");
         if (!mask.is_invalid() && mask.is_const()) {
-          const auto window = gu::mask_window_of(gu::const_of(mask));
+          const auto window = gu::bit_range(node);
           if (window && window->first == 0 && window->second >= 1) {
             result = phase_boolean(source, high);
           }
@@ -2100,23 +2104,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     uint32_t    output_boundary_width  = 0;
     bool        output_boundary_unsign = gu::is_unsign(use_driver);
     if (consumer_op == Ntype_op::Get_mask && use_sink.get_port_id() == Ntype::get_sink_pid(Ntype_op::Get_mask, "a")) {
-      bool mask_found = false;  // the old walk's `break` left BOTH loops
-      for (const auto& input_sink : consumer_base.node.inp_sorted_pins()) {
-        if (input_sink.get_port_id() != Ntype::get_sink_pid(Ntype_op::Get_mask, "mask")) {
-          continue;
-        }
-        for (const auto& input_drv : input_sink.get_driver_pins()) {
-          if (input_drv.is_const()) {
-            std::tie(lo, hi) = gu::const_of(input_drv).get_mask_range();
-            mask_found       = true;
-            break;
-          }
-        }
-        if (mask_found) {
-          break;
-        }
+      if (const auto range = gu::bit_range(consumer_base.node)) {
+        std::tie(lo, hi) = *range;
       }
     }
+
     // Occurrence traversal also erases a child's GraphIO output node. Recover
     // that public carrier before fusing the child producer into its parent
     // consumer. The child expression itself can be wider (for example, a
@@ -2216,21 +2208,9 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           hhds::Occurrence_pin value;
           bool                 transparent = op == Ntype_op::Sext;
           if (op == Ntype_op::Sext || op == Ntype_op::Get_mask) {
-            hhds::Occurrence_pin mask;
-            for (const auto& input_sink : wrapper.inp_sorted_pins()) {
-              for (const auto& input_drv : input_sink.get_driver_pins()) {
-                if (input_sink.get_port_id() == 0) {
-                  value = input_drv;
-                } else {
-                  mask = input_drv;
-                }
-              }
-            }
-            transparent |= mask.is_invalid();
-            if (mask.is_const()) {
-              const auto& constant  = gu::const_of(mask);
-              transparent          |= constant.is_just_i64() && constant.to_just_i64() == -1;
-            }
+            value             = occurrence_driver_at(wrapper, 0);
+            const auto range  = gu::bit_range(wrapper);
+            transparent      |= range && range->first == 0 && !value.is_invalid() && range->second >= gu::bits_of(value);
           }
           if (!transparent || value.is_invalid()) {
             break;
@@ -2280,17 +2260,10 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
               }
             }
           }
-          bool transparent = false;
-          if (!value.is_invalid() && !mask.is_invalid()) {
-            const auto& constant = gu::const_of(mask);
-            transparent          = gu::is_whole_value_mask(constant);
-            if (!transparent && gu::is_unsign(value)) {
-              if (auto window = gu::mask_window_of(constant); window) {
-                const auto value_bits = gu::bits_of(value);
-                transparent           = window->first == 0 && value_bits > 0 && window->second >= value_bits;
-              }
-            }
-          }
+          const auto window      = gu::bit_range(crossing_node);
+          const auto value_bits  = gu::bits_of(value);
+          const bool transparent = !value.is_invalid() && gu::is_unsign(value) && window && window->first == 0 && value_bits > 0
+                                   && window->second >= value_bits;
           if (!transparent || value.is_invalid()) {
             break;
           }
@@ -2374,11 +2347,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           }
           if (packed_op == Ntype_op::Get_mask) {
             const auto value = occurrence_driver_at(packed, Ntype::get_sink_pid(Ntype_op::Get_mask, "a"));
-            const auto mask  = occurrence_driver_at(packed, Ntype::get_sink_pid(Ntype_op::Get_mask, "mask"));
+            const auto mask  = occurrence_driver_at(packed, Ntype::get_sink_pid(Ntype_op::Get_mask, "lo"));
             if (value.is_invalid() || mask.is_invalid() || !mask.is_const()) {
               break;
             }
-            const auto window = gu::mask_window_of(gu::const_of(mask));
+            const auto window = gu::bit_range(packed);
             if (!window || hi > window->second - window->first) {
               break;
             }
@@ -2465,7 +2438,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           if (mask.is_invalid() || !mask.is_const()) {
             break;
           }
-          const auto window = gu::mask_window_of(gu::const_of(mask));
+          const auto window = gu::bit_range(packed);
           if (!window) {
             break;
           }

@@ -134,7 +134,8 @@ std::shared_ptr<hhds::Graph> build_compact_loop(const std::string& dir, uint64_t
 
 // y = ~x, optionally with a Get_mask boundary between x and Not. `mask ==
 // nullopt` is the direct form.
-std::shared_ptr<hhds::Graph> build_mask_boundary(const std::string& dir, std::optional<int64_t> mask, int mask_bits = 8) {
+std::shared_ptr<hhds::Graph> build_mask_boundary(const std::string& dir, std::optional<std::pair<int, int>> range,
+                                                 int mask_bits = 8) {
   auto& lib = livehd::Hhds_graph_library::instance(dir);
   auto  gio = lib.create_io("mask_boundary");
   gio->add_input("x", 0);
@@ -145,11 +146,10 @@ std::shared_ptr<hhds::Graph> build_mask_boundary(const std::string& dir, std::op
   livehd::graph_util::set_bits(g->get_input_pin("x"), 8);
 
   hhds::Pin_class value = g->get_input_pin("x");
-  if (mask) {
+  if (range) {
     auto gm = create_typed_node(*g, Ntype_op::Get_mask);
     value.connect_sink(livehd::graph_util::setup_sink_by_name(gm, "a"));
-    livehd::graph_util::create_const(*g, *Dlop::create_integer(*mask))
-        .connect_sink(livehd::graph_util::setup_sink_by_name(gm, "mask"));
+    livehd::graph_util::connect_bit_range(gm, range->first, range->second);
     value = gm.create_driver_pin(0);
     livehd::graph_util::set_bits(value, mask_bits);
   }
@@ -305,8 +305,8 @@ TEST(Semdiff, ExactArtifactFallbackResolvesAmbiguousStateCuts) {
 
 TEST(Semdiff, IdentityGetMaskIsTransparent) {
   auto direct = build_mask_boundary("lgdb_semdiff_gm_direct", std::nullopt);
-  auto exact  = build_mask_boundary("lgdb_semdiff_gm_exact", 0xff);
-  auto all    = build_mask_boundary("lgdb_semdiff_gm_all", -1);
+  auto exact  = build_mask_boundary("lgdb_semdiff_gm_exact", std::pair{0, 8});
+  auto all    = build_mask_boundary("lgdb_semdiff_gm_all", std::pair{0, 8});
 
   EXPECT_TRUE(livehd::semdiff::structural_identical(direct.get(), exact.get()));
   EXPECT_TRUE(livehd::semdiff::structural_identical(direct.get(), all.get()));
@@ -320,11 +320,11 @@ TEST(Semdiff, IdentityGetMaskIsTransparent) {
 
 TEST(Semdiff, NonIdentityGetMaskNeverDisappears) {
   auto direct = build_mask_boundary("lgdb_semdiff_gm_bad_direct", std::nullopt);
-  auto narrow = build_mask_boundary("lgdb_semdiff_gm_narrow", 0x7f);
-  auto offset = build_mask_boundary("lgdb_semdiff_gm_offset", 0xfe);  // bits [1,8): a slice, not a wrapper
-  auto wider  = build_mask_boundary("lgdb_semdiff_gm_wider", 0x1ff);
-  auto fit_lo = build_mask_boundary("lgdb_semdiff_gm_fit_lo", -1, 7);
-  auto fit_hi = build_mask_boundary("lgdb_semdiff_gm_fit_hi", -1, 9);
+  auto narrow = build_mask_boundary("lgdb_semdiff_gm_narrow", std::pair{0, 7});
+  auto offset = build_mask_boundary("lgdb_semdiff_gm_offset", std::pair{1, 8});  // bits [1,8): a slice, not a wrapper
+  auto wider  = build_mask_boundary("lgdb_semdiff_gm_wider", std::pair{0, 9});
+  auto fit_lo = build_mask_boundary("lgdb_semdiff_gm_fit_lo", std::pair{0, 8}, 7);
+  auto fit_hi = build_mask_boundary("lgdb_semdiff_gm_fit_hi", std::pair{0, 8}, 9);
 
   EXPECT_FALSE(livehd::semdiff::structural_identical(direct.get(), narrow.get()));
   EXPECT_FALSE(livehd::semdiff::structural_identical(direct.get(), offset.get()));

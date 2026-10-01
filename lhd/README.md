@@ -109,7 +109,7 @@ re-parses the output.
 ```
 
 `pyrope style` parses the source with Tree-sitter, without compiling or resolving
-imports. It reports repetition and three structural cleanup opportunities. All
+imports. It reports repetition and five structural cleanup opportunities. All
 findings are advisory; they do not establish that a replacement is equivalent.
 
 The repetition detector finds **contiguous repeated sequences of statements within a scope**.
@@ -171,12 +171,48 @@ The additional rules are enabled by default and do not use `--min-repeats`:
   declarations, branch-local calculations, calls in branch values, indexed
   destinations, compound assignments, and `wrap`/`sat` are excluded.
 
+- **`hardcoded-reset`** finds an `if PORT { reg = CONST }` clear (the clearing arm
+  may also be the `else`; `PORT`, `!PORT`, `not PORT`, `~PORT`, `PORT == 0|1` and
+  `PORT != 0|1` are recognized) where `PORT` is a `U1`/`Bool`/`Reset` module input
+  that is used **only** as a reset: every use is such a condition or a
+  `reset_pin=PORT`. The test is functional, not by name. The suggestion is to
+  declare the register `reg r:T:[reset_pin=PORT] = CONST` (adding `negreset=true`
+  for an active-low condition) and delete the clearing arm. Excluded: a port also
+  used as data, a later write to the register (the clear is then not a priority
+  reset), both arms constant (a data mux), clears mixed with non-register
+  assignments, `elif` chains that reuse the port, arrays/memories and latches.
+- **`reset-port-type`** finds a `U1`/`Bool` input that only acts as a reset (same
+  functional test, counting `reset_pin=PORT` uses too) and suggests declaring it
+  `Reset`, since clocks and resets bind by type, not by name. It is the follow-up
+  to `hardcoded-reset`: `struct_top_port.prp` (hand-written clear) triggers both,
+  `struct_top_port_1.prp` (`reset_pin`, `U1`) only this one, and
+  `struct_top_port_2.prp` (`Reset`) neither.
+
 New findings include `score` plus `destination`/`source`/`field_count`,
-`bundle`/`argument_count`, or `destination`/`branch_count`, respectively.
+`bundle`/`argument_count`, `destination`/`branch_count`, `reset`/`registers`/`polarity`/`value`/`port_type`, or `port`/`declared_type`/`reset_uses`, respectively.
 Related locations are capped at eight per finding; counts include all matches.
 Existing repetition findings retain their template/count/progression attributes.
 
-Findings and a per-file summary use the normal diagnostic stream: human text on
+### Silencing a suggestion on purpose
+
+Some code is deliberately "not so nice" (tests, generated fixtures). A comment
+`// prp-style-allow code-a, code-b` (or the `/* ... */` form) silences those
+rule codes from the comment to the end of the **enclosing scope**; when the tree
+traversal leaves that scope the allow ends. Placed first in a function body it
+covers the whole function; inside an `if` arm only that arm; at file level the
+rest of the file. Only findings that start after the comment are silenced.
+Codes are the `code` of the diagnostic (`single-destination-conditional`,
+`repeated-code`, ...); unknown codes are ignored. The summary `suppressed`
+attribute counts the silenced findings.
+
+```pyrope
+pub comb fun3(a:U3, b:U7, cond:Bool) -> (res:U4) {
+  // prp-style-allow single-destination-conditional
+  if cond { res = a + 1 } else { res = b#[0..<4] }
+}
+```
+
+Findings and, when a file has any, a per-file summary use the normal diagnostic stream: human text on
 stderr with `--diag-fmt pretty`, JSONL with `--diag-fmt json`, and a structured
 file with `--emit diagnostics:PATH`. JSON records include spans, related notes,
 and rule-specific `attrs`. `-q` suppresses stderr while
@@ -192,8 +228,12 @@ which also exits 2. A script can test `$? -ne 0`.
 The repetition detector does not match reordered or scattered statements, arbitrary
 identifier renamings, or irregular iteration progressions. It does not merge
 sequences across scope boundaries. The source-only analyzer in
-`pyrope_style.hpp` returns a report independently of CLI presentation, so future
+`inou/prp/pyrope_style.hpp` returns a report independently of CLI presentation, so future
 rules and editor integration can share it.
+
+The analyzer lives in `inou/prp/pyrope_style.{hpp,cpp}`; one small fixture per rule
+(plus negatives and the allow-scope cases) is in `inou/prp/tests/style/` and runs as
+`bazel test //inou/prp:prp-style-<name>` (see its README).
 
 Run the focused regressions with:
 

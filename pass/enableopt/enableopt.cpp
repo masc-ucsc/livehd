@@ -413,9 +413,10 @@ public:
                      || ((op == Ntype_op::Or || op == Ntype_op::Xor || op == Ntype_op::Mux || op == Ntype_op::Hotmux) && has_data
                          && all_bool);
       if (op == Ntype_op::Get_mask) {
-        auto mask = get_driver_of_sink_name(node, "mask");
-        boolean
-            = mask.is_const() && !const_of(mask).is_negative() && !const_of(mask).has_unknowns() && const_of(mask).popcount() <= 1;
+        const auto mask = livehd::graph_util::bit_range(node);
+        boolean         = mask.has_value() && !livehd::graph_util::mask_window_const(mask->first, mask->second).is_negative()
+                          && !livehd::graph_util::mask_window_const(mask->first, mask->second).has_unknowns()
+                          && livehd::graph_util::mask_window_const(mask->first, mask->second).popcount() <= 1;
       }
       for (auto output : node.out_sorted_pins()) {
         if (boolean) {

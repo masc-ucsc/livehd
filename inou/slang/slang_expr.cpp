@@ -675,7 +675,7 @@ std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang
   // unit, `q#[0..=N*W-1]`) sees one N*W-bit integer, never the array shape.
   if (packed_mem_regs_.contains(&sym)) {
     if (auto mit = mem_info_.find(&sym); mit != mem_info_.end() && mit->second.size > 0) {
-      return builder_.create_get_mask_stmts(name, mask_text(static_cast<int>(mit->second.size * mit->second.elem_bits)));
+      return builder_.create_get_mask_stmts(name, "0", std::to_string(mit->second.size * mit->second.elem_bits));
     }
   }
 
@@ -760,7 +760,7 @@ std::string Slang_context::lower_unary(const slang::ast::UnaryExpression& expr) 
     case UnaryOperator::BitwiseXnor: {
       // An explicit window fixes the count even if the operand's range later
       // narrows. It also converts signed inputs to their finite bit pattern.
-      auto v      = builder_.create_get_mask_stmts(to_int_value(lower_rvalue(operand)), mask_text(oi.bits));
+      auto v      = builder_.create_get_mask_stmts(to_int_value(lower_rvalue(operand)), "0", std::to_string(oi.bits));
       auto parity = builder_.create_red_xor_stmts(v);
       if (expr.op == UnaryOperator::BitwiseXnor) {
         return mark_bool(builder_.create_eq_stmts(parity, "0"));
@@ -1750,7 +1750,9 @@ std::string Slang_context::lower_call(const slang::ast::CallExpression& expr) {
     auto name = expr.getSubroutineName();
     auto args = expr.arguments();
     if (name == "$test$plusargs" || name == "$value$plusargs") {
-      emit_unsupported(expr.sourceRange, "plusarg-placement", "plusarg reads require a simulation-only initial block and cannot affect hardware");
+      emit_unsupported(expr.sourceRange,
+                       "plusarg-placement",
+                       "plusarg reads require a simulation-only initial block and cannot affect hardware");
       return "0";
     }
     if ((name == "$signed" || name == "$unsigned") && args.size() == 1) {

@@ -95,6 +95,66 @@ class Detector {
   std::vector<Range>                      parse_errors;
   std::unordered_set<uint32_t>            io_identifiers;
 
+  // `// prp-style-allow code-a, code-b` silences those rule codes from the end
+  // of the comment to the end of the tree node that holds it (its scope). The
+  // traversal pops that scope when it leaves the node, so the allow ends there.
+  struct Allow {
+    uint32_t                 start, end;
+    std::vector<std::string> codes;
+  };
+  std::vector<Allow> allows;
+  size_t             suppressed = 0;
+
+  static bool blank(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
+
+  void directive(TSNode comment, TSNode scope) {
+    auto body = text(comment);
+    if (body.starts_with("//")) {
+      body.remove_prefix(2);
+    } else if (body.starts_with("/*") && body.ends_with("*/") && body.size() >= 4) {
+      body = body.substr(2, body.size() - 4);
+    } else {
+      return;
+    }
+    constexpr std::string_view tag = "prp-style-allow";
+    while (!body.empty() && blank(body.front())) {
+      body.remove_prefix(1);
+    }
+    if (!body.starts_with(tag)) {
+      return;
+    }
+    body.remove_prefix(tag.size());
+    if (!body.empty() && !blank(body.front())) {
+      return;  // e.g. `prp-style-allowed`
+    }
+    Allow allow{ts_node_end_byte(comment), ts_node_end_byte(scope), {}};
+    for (;;) {
+      while (!body.empty() && (body.front() == ',' || blank(body.front()))) {
+        body.remove_prefix(1);
+      }
+      if (body.empty()) {
+        break;
+      }
+      const auto n = body.find_first_of(", \t\r\n");
+      allow.codes.emplace_back(body.substr(0, n));
+      body.remove_prefix(n == std::string_view::npos ? body.size() : n);
+    }
+    if (!allow.codes.empty()) {
+      allows.push_back(std::move(allow));
+    }
+  }
+
+  bool allowed(const Finding& f) const {
+    const auto code = rule_name(f.rule);
+    for (const auto& a : allows) {
+      if (f.range.start_byte >= a.start && f.range.start_byte < a.end
+          && std::find(a.codes.begin(), a.codes.end(), code) != a.codes.end()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   std::string_view text(TSNode n) const {
     return source.substr(ts_node_start_byte(n), ts_node_end_byte(n) - ts_node_start_byte(n));
   }
@@ -305,6 +365,9 @@ class Detector {
   }
 
   static TSNode field(TSNode node, std::string_view name) {
+    if (ts_node_is_null(node)) {
+      return node;
+    }
     return ts_node_child_by_field_name(node, name.data(), static_cast<uint32_t>(name.size()));
   }
 
@@ -603,6 +666,399 @@ class Detector {
     candidates.push_back(std::move(f));
   }
 
+  // ---- reset rules -------------------------------------------------------
+  // A module input that only ever acts as a reset should be (1) a structural
+  // `reset_pin` of the registers it clears and (2) typed `Reset`, whatever its
+  // name. "Only acts as a reset" is functional: every use of the port is either
+  // the condition of a hand-written `if PORT { reg = CONST }` clear or a
+  // `reset_pin=PORT` attribute; any other use (arithmetic, data, an argument)
+  // disqualifies it.
+  struct Port {
+    TSNode      node;
+    std::string type;  // "U1", "Bool" or "Reset"
+    size_t      total = 0, hardcoded = 0, structural = 0;
+  };
+  struct RegInfo {
+    std::string type;  // declared type text; empty when untyped
+    bool        has_attributes = false;
+    // Arrays (a memory) and latches are not flop resets: clearing a whole array
+    // in one cycle changes the hardware, and a latch has no clock for a sync reset.
+    bool        eligible = true;
+    // A register that already has a reset (`reset_pin=`, or any initial value
+    // other than `nil`, which binds the implicit reset) is not "missing" one: a
+    // later conditional write to it is ordinary next-state logic.
+    bool        has_reset = false;
+  };
+  struct ResetIf {
+    TSNode                        node;
+    std::string_view              port, value;
+    bool                          active_high;
+    std::vector<std::string_view> regs;
+    std::vector<TSNode>           assigns;
+    size_t                        removable;
+  };
+
+  template <typename Fn>
+  static void descend(TSNode n, Fn&& fn) {  // pre-order over named nodes; fn returns false to prune
+    if (!fn(n)) {
+      return;
+    }
+    children(n, [&](TSNode c, const char*) {
+      if (ts_node_is_named(c)) {
+        descend(c, fn);
+      }
+    });
+  }
+
+  static std::string_view kind_of(TSNode n) { return ts_node_is_null(n) ? std::string_view{} : std::string_view(ts_node_type(n)); }
+
+  // `X`, `(X)`, `!X`, `not X`, `~X`, `X == 0|1`, `X != 0|1` (also true/false).
+  bool reset_condition(TSNode cond, std::string_view& port, bool& active_high) const {
+    if (ts_node_is_null(cond)) {
+      return false;
+    }
+    const auto k = kind_of(cond);
+    if (k == "identifier") {
+      port        = text(cond);
+      active_high = true;
+      return true;
+    }
+    if (k == "tuple" || k == "paren_group") {
+      return ts_node_named_child_count(cond) == 1 && reset_condition(ts_node_named_child(cond, 0), port, active_high);
+    }
+    if (k == "unary_expression") {
+      const auto op = kind_of(field(cond, "operator"));
+      if ((op != "op_log_not" && op != "op_bit_not") || !reset_condition(field(cond, "argument"), port, active_high)) {
+        return false;
+      }
+      active_high = !active_high;
+      return true;
+    }
+    if (k == "expression_item" && ts_node_named_child_count(cond) == 3) {
+      const auto lhs = ts_node_named_child(cond, 0), op = ts_node_named_child(cond, 1), rhs = ts_node_named_child(cond, 2);
+      if (kind_of(op) != "binary_compare_op" || (text(op) != "==" && text(op) != "!=")) {
+        return false;
+      }
+      const bool eq   = text(op) == "==";
+      auto       ident = lhs, konst = rhs;
+      if (kind_of(lhs) == "constant") {
+        ident = rhs;
+        konst = lhs;
+      }
+      if (kind_of(ident) != "identifier" || kind_of(konst) != "constant") {
+        return false;
+      }
+      const auto v = text(konst);
+      if (v != "0" && v != "1" && v != "true" && v != "false") {
+        return false;
+      }
+      port        = text(ident);
+      active_high = eq == (v == "1" || v == "true");
+      return true;
+    }
+    return false;
+  }
+
+  // A scope whose every statement is `reg = CONSTANT` (at least one).
+  bool constant_reg_arm(TSNode scope, const std::map<std::string_view, RegInfo>& regs, ResetIf& out) const {
+    bool ok = true;
+    children(scope, [&](TSNode st, const char*) {
+      const auto k = kind_of(st);
+      if (!ts_node_is_named(st) || k == "comment") {
+        return;
+      }
+      Path dst;
+      if (!ok || !plain_assignment(st, dst) || dst.size() != 1 || kind_of(field(st, "rvalue")) != "constant") {
+        ok = false;
+        return;
+      }
+      const auto it = regs.find(dst.front());
+      if (it == regs.end() || !it->second.eligible || it->second.has_reset) {
+        ok = false;
+        return;
+      }
+      out.regs.push_back(it->first);
+      out.assigns.push_back(st);
+      if (out.value.empty()) {
+        out.value = text(field(st, "rvalue"));
+      }
+    });
+    return ok && !out.regs.empty();
+  }
+
+  static std::string_view root_name(TSNode n, const std::string_view src) {
+    while (!ts_node_is_null(n) && std::string_view(ts_node_type(n)) != "identifier") {
+      TSNode next{};
+      for (uint32_t i = 0; i < ts_node_named_child_count(n) && ts_node_is_null(next); ++i) {
+        auto c = ts_node_named_child(n, i);
+        if (std::string_view(ts_node_type(c)) != "comment") {
+          next = c;
+        }
+      }
+      n = next;
+    }
+    return ts_node_is_null(n) ? std::string_view{} : src.substr(ts_node_start_byte(n), ts_node_end_byte(n) - ts_node_start_byte(n));
+  }
+
+  bool writes_any(TSNode n, const std::vector<std::string_view>& regs) const {
+    bool hit = false;
+    descend(n, [&](TSNode c) {
+      if (hit || kind_of(c) == "lambda") {
+        return false;
+      }
+      if (kind_of(c) == "assignment") {
+        const auto name = root_name(field(c, "lvalue"), source);
+        hit             = std::find(regs.begin(), regs.end(), name) != regs.end();
+      }
+      return !hit;
+    });
+    return hit;
+  }
+
+  void analyze_reset_if(const std::vector<TSNode>& stmts, size_t idx, const std::map<std::string_view, RegInfo>& regs,
+                        std::map<std::string_view, Port>& ports, std::vector<ResetIf>& found) const {
+    const auto node = stmts[idx];
+    if (kind_of(node) != "if_expression" || ts_node_has_error(node)) {
+      return;
+    }
+    TSNode cond{}, first{}, other{};
+    size_t conditions = 0;
+    bool   valid      = true;
+    children(node, [&](TSNode c, const char* name) {
+      const std::string_view f = name ? name : "";
+      if (kind_of(c) == "unique" || f == "init") {
+        valid = false;
+      } else if (f == "condition" && conditions++ == 0) {
+        cond = c;
+      } else if (f == "code" && ts_node_is_null(first)) {
+        first = c;
+      } else if (f == "else") {
+        other = c;
+      }
+    });
+    std::string_view port;
+    bool             high = true;
+    if (!valid || ts_node_is_null(first) || !reset_condition(cond, port, high)) {
+      return;
+    }
+    const auto pit = ports.find(port);
+    if (pit == ports.end()) {
+      return;
+    }
+    ResetIf r{node, port, {}, high, {}, {}, 0};
+    ResetIf alt = r;
+    const bool first_const = constant_reg_arm(first, regs, r);
+    const bool other_const = !ts_node_is_null(other) && constant_reg_arm(other, regs, alt);
+    if (first_const && !other_const) {
+      r.removable = tokens(cond) + tokens(first);
+    } else if (other_const && !first_const && conditions == 1) {
+      r             = alt;  // the clear is the `else` arm: it runs when the condition is false
+      r.active_high = !high;
+      r.removable   = tokens(cond) + tokens(other);
+    } else {
+      return;  // both arms constant (a data mux of constants) or neither
+    }
+    for (size_t i = idx + 1; i < stmts.size(); ++i) {
+      if (writes_any(stmts[i], r.regs)) {
+        return;  // a later write wins over the clear, so it is not a priority reset
+      }
+    }
+    ++pit->second.hardcoded;
+    found.push_back(std::move(r));
+  }
+
+  void resets(TSNode lambda) {
+    TSNode sig{};
+    children(lambda, [&](TSNode c, const char*) {
+      if (kind_of(c) == "function_definition_decl") {
+        sig = c;
+      }
+    });
+    const auto code = field(lambda, "code");
+    if (ts_node_is_null(sig) || ts_node_is_null(code) || ts_node_is_null(field(sig, "input"))) {
+      return;
+    }
+    std::map<std::string_view, Port>    ports;
+    std::map<std::string_view, RegInfo> regs;
+    children(field(sig, "input"), [&](TSNode a, const char*) {
+      if (kind_of(a) != "typed_identifier") {
+        return;
+      }
+      const auto id = field(a, "identifier"), ty = field(field(a, "type"), "type");
+      if (ts_node_is_null(id) || ts_node_is_null(ty)) {
+        return;
+      }
+      const auto tk = kind_of(ty);
+      if (tk == "reset_type") {
+        ports.try_emplace(text(id), Port{a, "Reset"});
+      } else if (tk == "bool_type") {
+        ports.try_emplace(text(id), Port{a, "Bool"});
+      } else if (tk == "uint_type" && text(ty) == "U1") {
+        ports.try_emplace(text(id), Port{a, "U1"});
+      }
+    });
+    if (ports.empty()) {
+      return;
+    }
+    if (const auto output = field(sig, "output"); !ts_node_is_null(output)) {
+      bool             reg_next = false;
+      std::string_view last_reg;
+      children(output, [&](TSNode a, const char* name) {
+        const std::string_view f = name ? name : "";
+        if (f == "mod") {
+          reg_next = text(a) == "reg";
+        } else if (f == "definition") {
+          if (!last_reg.empty() && !(kind_of(a) == "identifier" && text(a) == "nil")) {
+            regs.at(last_reg).has_reset = true;
+          }
+        } else if (kind_of(a) == "typed_identifier") {
+          last_reg = {};
+          if (reg_next && !ts_node_is_null(field(a, "identifier"))) {
+            last_reg = text(field(a, "identifier"));
+            regs.try_emplace(last_reg);
+          }
+          reg_next = false;
+        }
+      });
+    }
+    std::vector<TSNode> scopes;
+    descend(code, [&](TSNode n) {
+      const auto k = kind_of(n);
+      if (k == "lambda") {
+        return false;
+      }
+      if (k == "identifier") {
+        if (const auto it = ports.find(text(n)); it != ports.end()) {
+          ++it->second.total;
+        }
+        return false;
+      }
+      if (k == "scope_statement") {
+        scopes.push_back(n);
+      } else if (k == "assignment") {
+        const auto decl = field(n, "decl");
+        const auto lv   = field(n, "lvalue");
+        if (!ts_node_is_null(decl) && kind_of(field(decl, "storage")) == "reg_decl" && !ts_node_is_null(lv)) {
+          RegInfo info;
+          auto    id = lv;
+          if (kind_of(lv) == "typed_identifier") {
+            id             = field(lv, "identifier");
+            const auto cast = field(lv, "type");
+            if (!ts_node_is_null(cast)) {
+              // The `attribute` field also labels the ':' token; find the bracket list itself.
+              children(cast, [&](TSNode c, const char*) {
+                if (kind_of(c) == "attribute_sq") {
+                  info.has_attributes = true;
+                  const auto list = text(c);
+                  if (list.find("latch") != std::string_view::npos) {
+                    info.eligible = false;
+                  }
+                  if (list.find("reset_pin") != std::string_view::npos && list.find("reset_pin=false") == std::string_view::npos) {
+                    info.has_reset = true;
+                  }
+                }
+              });
+              if (const auto t = field(cast, "type"); !ts_node_is_null(t)) {
+                info.type = std::string(text(t));
+                if (kind_of(t) == "array_type") {
+                  info.eligible = false;
+                }
+              }
+            }
+          }
+          const auto init = field(n, "rvalue");
+          if (!ts_node_is_null(init) && !(kind_of(init) == "identifier" && text(init) == "nil")) {
+            info.has_reset = true;
+          }
+          if (!ts_node_is_null(id) && kind_of(id) == "identifier") {
+            regs.try_emplace(text(id), std::move(info));
+          }
+        }
+      } else if (k == "attribute_assignment") {
+        const auto lv = field(n, "lvalue"), rv = field(n, "rvalue");
+        if (!ts_node_is_null(lv) && !ts_node_is_null(rv) && text(lv) == "reset_pin" && kind_of(rv) == "identifier") {
+          if (const auto it = ports.find(text(rv)); it != ports.end()) {
+            ++it->second.structural;
+          }
+        }
+      }
+      return true;
+    });
+    std::vector<ResetIf> found;
+    for (const auto scope : scopes) {
+      std::vector<TSNode> stmts;
+      children(scope, [&](TSNode c, const char*) {
+        if (ts_node_is_named(c) && kind_of(c) != "comment") {
+          stmts.push_back(c);
+        }
+      });
+      for (size_t i = 0; i < stmts.size(); ++i) {
+        analyze_reset_if(stmts, i, regs, ports, found);
+      }
+    }
+    const auto pure = [&](std::string_view name) {
+      const auto& p = ports.at(name);
+      return p.total > 0 && p.total == p.hardcoded + p.structural;
+    };
+    for (auto& r : found) {
+      if (!pure(r.port)) {
+        continue;
+      }
+      std::string names;
+      for (auto reg : r.regs) {
+        names += (names.empty() ? "" : ", ");
+        names += reg;
+      }
+      const std::string polarity = r.active_high ? "active-high" : "active-low";
+      const std::string attr     = std::format("reset_pin={}{}", r.port, r.active_high ? "" : ", negreset=true");
+      Finding f{};
+      f.rule    = Rule::HardcodedReset;
+      f.range   = range(r.node, r.node);
+      f.message = std::format("'{}' is cleared to a constant by an 'if' on '{}', which is used only as a reset", names, r.port);
+      f.hint    = std::format(
+          "make the reset structural: declare the register with ':[{}] = {}' and delete the clearing arm, keeping the "
+          "other arm as the normal next-state logic; reset_pin has priority over later writes and a sync reset is the default "
+          "(async=true for an asynchronous one)",
+          attr,
+          r.value);
+      const auto reg = regs.at(r.regs.front());
+      if (r.regs.size() == 1 && !reg.type.empty() && !reg.has_attributes) {
+        f.hint += std::format("; e.g. 'reg {}:{}:[{}] = {}'", names, reg.type, attr, r.value);
+      }
+      f.attributes = {
+          {     "reset",                  std::string(r.port)},
+          {"registers",                                 names},
+          { "polarity",                              polarity},
+          {     "value",                  std::string(r.value)},
+          {"port_type",            ports.at(r.port).type}
+      };
+      f.score = r.removable;
+      for (auto a : r.assigns) {
+        related(f, a, "register cleared to a constant");
+      }
+      candidates.push_back(std::move(f));
+    }
+    for (const auto& [name, port] : ports) {
+      if (port.type == "Reset" || !pure(name) || port.hardcoded + port.structural == 0) {
+        continue;
+      }
+      Finding f{};
+      f.rule    = Rule::ResetPortType;
+      f.range   = range(port.node, port.node);
+      f.message = std::format("'{}' only acts as a reset but is declared '{}'", name, port.type);
+      f.hint    = std::format(
+          "declare it as '{}:Reset': clocks and resets bind by type, not by name; polarity stays per register (negreset=true)",
+          name);
+      f.attributes = {
+          {         "port",        std::string(name)},
+          {"declared_type",                port.type},
+          {   "reset_uses", std::to_string(port.hardcoded + port.structural)}
+      };
+      f.score = 1 + port.hardcoded + port.structural;
+      candidates.push_back(std::move(f));
+    }
+  }
+
   void visit(TSNode node) {
     std::string_view kind = ts_node_type(node);
     if (kind == "ERROR" || ts_node_is_missing(node)) {
@@ -613,6 +1069,9 @@ class Detector {
     }
     if (!ts_node_has_error(node)) {
       bundle_arguments(node);
+      if (kind == "lambda") {
+        resets(node);
+      }
     }
     if (kind == "scope_statement" || kind == "description") {
       std::vector<Statement> stmts;
@@ -657,7 +1116,12 @@ class Detector {
       tuple_copies(stmts);
     }
     children(node, [&](TSNode c, const char*) {
-      if ((ts_node_is_named(c) || ts_node_is_missing(c)) && std::string_view(ts_node_type(c)) != "comment") {
+      if (!ts_node_is_named(c) && !ts_node_is_missing(c)) {
+        return;
+      }
+      if (std::string_view(ts_node_type(c)) == "comment") {
+        directive(c, node);
+      } else {
         visit(c);
       }
     });
@@ -670,6 +1134,13 @@ public:
     std::unordered_map<std::string_view, size_t> io_names;
     track_ios(root, io_names);
     visit(root);
+    if (!allows.empty()) {
+      std::erase_if(candidates, [&](const Finding& f) {
+        const bool drop = allowed(f);
+        suppressed += drop;
+        return drop;
+      });
+    }
     std::sort(candidates.begin(), candidates.end(), [](const Finding& a, const Finding& b) {
       if (a.score != b.score) {
         return a.score > b.score;
@@ -685,6 +1156,7 @@ public:
     Report report;
     report.partial      = ts_node_has_error(root);
     report.parse_errors = std::move(parse_errors);
+    report.suppressed   = suppressed;
     std::map<Rule, std::map<uint32_t, uint32_t>> occupied_by_rule;
     for (auto& f : candidates) {
       // The two repetition codes are one detector and retain their shared
@@ -715,6 +1187,8 @@ std::string_view rule_name(Rule rule) {
     case Rule::WholeTupleCopy              : return "whole-tuple-copy";
     case Rule::FlattenedBundleArguments    : return "flattened-bundle-arguments";
     case Rule::SingleDestinationConditional: return "single-destination-conditional";
+    case Rule::HardcodedReset               : return "hardcoded-reset";
+    case Rule::ResetPortType                : return "reset-port-type";
   }
   throw std::invalid_argument("unknown style rule");
 }

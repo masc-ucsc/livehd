@@ -228,7 +228,7 @@ std::shared_ptr<hhds::Graph> make_fixed_lane_extract(std::string_view tag) {
 
   auto get_mask = gu::create_typed_node(*graph, Ntype_op::Get_mask);
   packed.connect_sink(gu::setup_sink_by_name(get_mask, "a"));
-  gu::create_const(*graph, *Dlop::create_integer(0xf0)).connect_sink(gu::setup_sink_by_name(get_mask, "mask"));
+  livehd::graph_util::connect_bit_range(get_mask, 4, 8);
   auto lane = get_mask.create_driver_pin(0);
   gu::set_bits(lane, 4);
   gu::set_unsign(lane);
@@ -249,7 +249,7 @@ std::shared_ptr<hhds::Graph> make_fixed_top_input_lane_extract(std::string_view 
 
   auto get_mask = gu::create_typed_node(*graph, Ntype_op::Get_mask);
   graph->get_input_pin("in").connect_sink(gu::setup_sink_by_name(get_mask, "a"));
-  gu::create_const(*graph, *Dlop::create_integer(0xf0)).connect_sink(gu::setup_sink_by_name(get_mask, "mask"));
+  livehd::graph_util::connect_bit_range(get_mask, 4, 8);
   auto lane = get_mask.create_driver_pin(0);
   gu::set_bits(lane, 4);
   gu::set_unsign(lane);
@@ -281,14 +281,14 @@ std::shared_ptr<hhds::Graph> make_disjoint_or_pack_feedback(std::string_view tag
 
   auto wide_read = gu::create_typed_node(*graph, Ntype_op::Get_mask);
   packed.connect_sink(gu::setup_sink_by_name(wide_read, "a"));
-  gu::create_const(*graph, *Dlop::create_integer(0xffff)).connect_sink(gu::setup_sink_by_name(wide_read, "mask"));
+  livehd::graph_util::connect_bit_range(wide_read, 0, 16);
   auto wide_lane = wide_read.create_driver_pin(0);
   gu::set_bits(wide_lane, 16);
   gu::set_unsign(wide_lane);
 
   auto low_read = gu::create_typed_node(*graph, Ntype_op::Get_mask);
   wide_lane.connect_sink(gu::setup_sink_by_name(low_read, "a"));
-  gu::create_const(*graph, *Dlop::create_integer(0x100)).connect_sink(gu::setup_sink_by_name(low_read, "mask"));
+  livehd::graph_util::connect_bit_range(low_read, 8, 9);
   auto low_lane = low_read.create_driver_pin(0);
   gu::set_bits(low_lane, 1);
   gu::set_unsign(low_lane);
@@ -420,7 +420,7 @@ std::shared_ptr<hhds::Graph> make_cross_child_packed_feedback(std::string_view t
 
   auto high_read = gu::create_typed_node(*parent, Ntype_op::Get_mask);
   selected_record.connect_sink(gu::setup_sink_by_name(high_read, "a"));
-  gu::create_const(*parent, *Dlop::create_integer(0x100)).connect_sink(gu::setup_sink_by_name(high_read, "mask"));
+  livehd::graph_util::connect_bit_range(high_read, 8, 9);
   auto shift = high_read.create_driver_pin(0);
   gu::set_bits(shift, 1);
   gu::set_unsign(shift);
@@ -1876,7 +1876,7 @@ TEST(SimColorPlan, TuneWiringSitesAreClassedAndCostWholeWords) {
   gu::set_unsign(packed);
   auto get_mask = gu::create_typed_node(*graph, Ntype_op::Get_mask);
   packed.connect_sink(gu::setup_sink_by_name(get_mask, "a"));
-  gu::create_const(*graph, *Dlop::create_integer(0xf0)).connect_sink(gu::setup_sink_by_name(get_mask, "mask"));
+  livehd::graph_util::connect_bit_range(get_mask, 4, 8);
   auto lane = get_mask.create_driver_pin(0);
   gu::set_bits(lane, 4);
   gu::set_unsign(lane);
@@ -1971,7 +1971,7 @@ std::shared_ptr<hhds::Graph> make_pairwise_class_overflow(std::string_view name,
       if (heavy(i, j)) {
         auto set_mask = gu::create_typed_node(*graph, Ntype_op::Set_mask);
         q[i].connect_sink(gu::setup_sink_by_name(set_mask, "a"));
-        gu::create_const(*graph, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_by_name(set_mask, "mask"));
+        livehd::graph_util::connect_bit_range(set_mask, 0, 1);
         q[j].connect_sink(gu::setup_sink_by_name(set_mask, "value"));
         out = set_mask.create_driver_pin(0);
         gu::set_bits(out, 256);

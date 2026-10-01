@@ -514,8 +514,8 @@ protected:
   // never a constant (`value` is a literal) and never a Bool expression; a
   // `Bool` input never takes a Clock (`value_is_clock`); the minted `reset` is
   // Bool-like, so an integer needs a Bool. Fatal on a violation.
-  void check_instance_clock_poke(const std::shared_ptr<Lnast>& unit, std::string_view port, upass::Kind got, const Lnast_node& value,
-                                 bool value_is_clock, const livehd::diag::Span& span) const;
+  void check_instance_clock_poke(const std::shared_ptr<Lnast>& unit, std::string_view port, upass::Kind got,
+                                 const Lnast_node& value, bool value_is_clock, const livehd::diag::Span& span) const;
 
   // After a tuple_get or a Sub call: a read of an opaque Sub output
   // (Symbol_table::opaque_sub_outputs) -- `c.o`, or the call result itself
@@ -611,7 +611,7 @@ protected:
   // value it reads the lhs's declared envelope (decl_facts::lookup) and the
   // value's bitwidth-derived range, then emits:
   //   * nothing-to-narrow (value range already fits the type) → `dst = value`.
-  //   * wrap → get_mask(dst, value, 2^N-1)  [+ sext(dst, .., N-1) when signed]
+  //   * wrap → get_mask(dst, value, 0, N)  [+ sext(dst, .., N-1) when signed]
   //     (C/C++ truncation: low N bits, sign-reinterpreted per the type).
   //   * sat  → seed `dst = value`, then bw-gated clamps `if (value > max) dst =
   //     max` / `if (value < min) dst = min` (signed targets re-sign the clamp
@@ -628,7 +628,7 @@ protected:
   // on a RUNTIME operand (a comptime-constant operand is folded by constprop —
   // this declines for those so the fold path runs). Mirrors try_lower_wrap_sat:
   //   * int(bool)/sN(bool)  → sext(dst, x, 0)        — true = -1 (1-bit signed)
-  //   * uint(bool)/uN(bool) → get_mask(dst, x, 0b1)  — true = 1  (unsigned bit)
+  //   * uint(bool)/uN(bool) → get_mask(dst, x, 0)  — true = 1  (unsigned bit)
   //   * int(intval)         → `dst = x` (signed is unbounded; value-preserving)
   //   * uint/uN/sN(intval)  → the operand range must provably FIT the target
   //     (a sized cast is CHECKED, not truncating); if it can overflow this is a
@@ -828,38 +828,38 @@ protected:
                                      const Lnast_node& value);
   void detuple_error(std::string code, std::string message, std::string hint = {});
 
-  void                       initialize_stream_port_abi();
-  std::optional<std::string> resolve_stream_port_path(std::string_view name) const;
+  void                                    initialize_stream_port_abi();
+  std::optional<std::string>              resolve_stream_port_path(std::string_view name) const;
   // Cursor on store(tmp, tuple-port-prefix). The parser emits this carrier
   // before a dotted access chain. Record only the structural alias and delay
   // materialization until a scalar leaf is selected.
-  bool                       try_stream_tuple_port_alias_store();
+  bool                                    try_stream_tuple_port_alias_store();
   // Cursor on a just-dispatched 2-child store. A runtime tuple VALUE bound to
   // a variable that can be rewritten under control flow gets one scalar leaf
   // per runtime field, so its field reads merge per leaf (see definition).
   std::optional<std::vector<std::string>> runtime_tuple_prior_fields() const;
-  void split_runtime_tuple_store(const std::optional<std::vector<std::string>>& prior);
+  void                                    split_runtime_tuple_store(const std::optional<std::vector<std::string>>& prior);
   // Cursor on a >=3-child store. Rewrites a static tuple-output field write
   // into a scalar dotted-leaf binding and dispatches that synthesized binding
   // through every enabled pass. False means the ordinary tuple-set path owns
   // the statement (non-port, dynamic path, input write, or malformed node).
-  bool                       try_stream_tuple_port_store();
-  bool                       try_split_leaf_field_store();
+  bool                                    try_stream_tuple_port_store();
+  bool                                    try_split_leaf_field_store();
   // Tuple values (by SSA base name) split_runtime_tuple_store gave scalar
   // leaves, and the fields that have one.
   absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> split_tuple_leaves_;
   // Assign the current value-producing statement's output version before
   // dispatch. Passes continue to see source names; only the emitted LNAST uses
   // these scalar SSA names.
-  void                       note_stream_ssa_definition();
-  std::string                stream_ssa_ref_name(std::string_view name) const;
+  void                                                               note_stream_ssa_definition();
+  std::string                                                        stream_ssa_ref_name(std::string_view name) const;
   // Called from process_lnast's tuple_get case. Returns true (and emits a copy
   // `dst = <picked ref>`) iff the cursor's tuple_get is a single-segment pick
   // with a comptime-known index/name resolving to a known runtime ref — from a
   // gathered var-arg (vararg_bindings_) OR constprop's slot→ref map
   // (try_tuple_slot_ref). False leaves the node to the normal fold/emit path
   // (nested access, dynamic index, comptime slot, or unknown ref).
-  bool                       try_resolve_tuple_get();
+  bool                                                               try_resolve_tuple_get();
   // `dst = src[idx]` with a RUNTIME index into a comptime fixed-size tuple of
   // scalar wires (`const choices=[a,b,c,d]`) lowers to a balanced Hotmux —
   // `match idx { ==0 {dst=e0} … else {dst=e_{n-1}} }` — instead of erroring in
@@ -936,26 +936,26 @@ protected:
   // `:T` slots; normal typing rules apply afterwards (no special coercion).
   struct Generic_bind {
     uPass_detuple_registry::Layout tuple_fields;
-    Io_kind                        kind       = Io_kind::none;  // integer/boolean/string; none = named type
-    std::optional<Dlop>            max        = {};             // integer envelope when known
-    std::optional<Dlop>            min        = {};
-    std::string                    type_name  = {};  // named type (kind == none)
-    std::string                    from       = {};  // binding source, for the mismatch diagnostic
+    Io_kind                        kind         = Io_kind::none;  // integer/boolean/string; none = named type
+    std::optional<Dlop>            max          = {};             // integer envelope when known
+    std::optional<Dlop>            min          = {};
+    std::string                    type_name    = {};  // named type (kind == none)
+    std::string                    from         = {};  // binding source, for the mismatch diagnostic
     // A CONSTANT-valued generic (`f<3>`): the literal substituted for body reads
     // of the generic name (`r = a + N` → `a + 3`). Non-empty ⇒ constant bind;
     // `kind`/`max`/`min` still carry its envelope (so a constant bound into a
     // type slot has a width — todo 3g D). Never inferred (explicit/default only).
-    std::string                    const_text = {};
+    std::string                    const_text   = {};
     // A constant bound FROM a typed comptime constant (`f<N=W>` with `comptime
     // const W:u8 = 13`): W's declared envelope. An attribute query on a generic
     // reads the substituted ENTITY (docs 06-functions), so `N.[bits]` is 8 as
     // `W.[bits]` is, not the value width of the literal 13 (user ruling 6).
-    bool                           decl_typed = false;
-    std::optional<Dlop>            decl_max   = {};
-    std::optional<Dlop>            decl_min   = {};
+    bool                           decl_typed   = false;
+    std::optional<Dlop>            decl_max     = {};
+    std::optional<Dlop>            decl_min     = {};
     // A LAMBDA-valued generic (`f<inc>`): the bound callee name, registered in
     // func_param_bindings_ so a body call `F(v)` dispatches to it (todo 3g A).
-    std::string                    func_name  = {};
+    std::string                    func_name    = {};
     // This bind came from the DECLARATION DEFAULT (`<N=8>`), not from an
     // explicit `<…>` argument and not from inference. A call that defaults
     // EVERY declared generic and injects no port type is an IDENTITY
@@ -978,7 +978,7 @@ protected:
   // positions (literals contribute their kind only), then falls to its
   // declaration default. Conflicts and arity mismatches are fatal call-site
   // errors. A generic that nothing types stays absent (`triadd(a=1,b=2,c=3)`).
-  [[nodiscard]] static std::string generic_cast_token(const Generic_bind& gb);
+  [[nodiscard]] static std::string               generic_cast_token(const Generic_bind& gb);
   absl::flat_hash_map<std::string, Generic_bind> resolve_generic_binds(
       const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io, const std::vector<Lnast_node>& param_val,
       const std::vector<bool>& param_set, std::size_t nbind, const std::vector<Generic_actual>& explicit_generics,
@@ -1017,7 +1017,7 @@ protected:
   struct Array_port_shape {
     int64_t              lanes{0};
     bool                 infer_lanes{false};  // [] input: each call supplies the extent
-    Dlop                 elem_min;  // the LEAF element's range (`[2][4]u8`: a u8)
+    Dlop                 elem_min;            // the LEAF element's range (`[2][4]u8`: a u8)
     Dlop                 elem_max;
     bool                 elem_bool{false};
     std::vector<int64_t> inner_dims;  // below `lanes`, outermost first (Lnast_io_entry::inner_dims)
@@ -1207,9 +1207,9 @@ protected:
                                                                int depth = 0, std::string* unbound = nullptr);
   // Concrete port type of an io entry with has_deferred_bound(); a side that
   // does not fold is a fatal `type-bound-not-comptime`.
-  [[nodiscard]] Spec_port deferred_port_type(const std::shared_ptr<Lnast>& tmpl, const Lnast_io_entry& e,
-                                             const absl::flat_hash_map<std::string, Generic_bind>& binds,
-                                             const std::string& callee_name, const livehd::diag::Span& span);
+  [[nodiscard]] Spec_port                  deferred_port_type(const std::shared_ptr<Lnast>& tmpl, const Lnast_io_entry& e,
+                                                              const absl::flat_hash_map<std::string, Generic_bind>& binds,
+                                                              const std::string& callee_name, const livehd::diag::Span& span);
   void copy_subtree_into(const std::shared_ptr<Lnast>& src, const Lnast_nid& src_nid, const std::shared_ptr<Lnast>& dst,
                          const Lnast_nid& dst_parent, const absl::flat_hash_map<std::string, Generic_bind>* type_subst = nullptr);
   // Emit a `func_call(dst, callee, [name=], port=val…)` with NAMED actuals into a
@@ -1315,16 +1315,16 @@ protected:
   // positional `f(t)`). A Sub-bound callee (mod/pipe, or a comb kept as an
   // instance under inline=false) must then re-emit the call with the dotted
   // NAMED binding — the source spelling names no leaf port tolg could wire.
-  bool bind_call_actuals(const Lnast_tree_io& io, const std::vector<Actual>& actuals, bool commit,
-                         std::string_view callee_name, const livehd::diag::Span& call_span, std::vector<Lnast_node>& param_val,
-                         std::vector<bool>& param_set, std::vector<std::string>& param_func, std::vector<Lnast_node>& vararg_pos,
+  bool bind_call_actuals(const Lnast_tree_io& io, const std::vector<Actual>& actuals, bool commit, std::string_view callee_name,
+                         const livehd::diag::Span& call_span, std::vector<Lnast_node>& param_val, std::vector<bool>& param_set,
+                         std::vector<std::string>& param_func, std::vector<Lnast_node>& vararg_pos,
                          std::vector<std::pair<std::string, Lnast_node>>& vararg_named, bool* out_tuple_expanded = nullptr);
   // docs 04b: a `mod`/`pipe` child with no declared `Clock` (`Reset`) input
   // has one MINTED (`clock`/`reset`), which a caller may bind by that name
   // (a two-clock caller must). bind_call_actuals accepts such a named actual
   // only while bind_minted_ok_ is set (the callee is a mod/pipe), collecting
   // it into bind_minted_actuals_ for the Sub call tolg wires.
-  bool                                            bind_minted_ok_ = false;
+  bool bind_minted_ok_ = false;
   std::vector<std::pair<std::string, Lnast_node>> bind_minted_actuals_;
   // A gathered lambda set `const add = [f1, f2]` folds (constprop) to a bundle
   // of qualified function-name strings under numeric keys "0","1",… — the same
@@ -1333,7 +1333,7 @@ protected:
   // set. try_inline_func_call rewrites the callee to the FIRST candidate whose
   // signature accepts the call (signature_matches), then proceeds as a normal
   // single-callee inline; no candidate → a fatal `fcall-no-overload` diag.
-  std::vector<std::string> overload_candidates_of(std::string_view name);
+  std::vector<std::string>                        overload_candidates_of(std::string_view name);
   // True iff callee signature `io` accepts `actuals` — naming + arity + scalar
   // kind/range fit. The synchronous overload-dispatch predicate: a non-fatal
   // mirror of try_inline_func_call's bind loop plus a per-arg kind/range
@@ -1341,8 +1341,8 @@ protected:
   // it must be re-derived here to choose among candidates). Used ONLY to pick
   // among gathered candidates; the winner still runs the full bind path, which
   // remains the authority for diagnostics.
-  bool signature_matches(const Lnast_tree_io& io, const std::vector<Actual>& actuals,
-                         const std::shared_ptr<Lnast>& callee = nullptr);
+  bool                                            signature_matches(const Lnast_tree_io& io, const std::vector<Actual>& actuals,
+                                                                    const std::shared_ptr<Lnast>& callee = nullptr);
   // The RETURN half of the overload-dispatch callability test (so "can handle"
   // means the WHOLE `c = f(b)` would be valid, not just the call side): true iff
   // candidate `io`'s OUTPUTS can bind to how the call's result is consumed at the
@@ -1434,11 +1434,8 @@ protected:
   // declared width (s4 → -2). sign_bit is the top bit index (bits-1).
   void emit_inline_sext(const std::string& dst, const std::string& src, int sign_bit);
 
-  // Emits `dst = get_mask(value, mask_text)` through the walk. `mask_text` is a
-  // const bitmask in pyrope form (tolg's Get_mask requires a const/range mask).
-  // Used by runtime `wrap` to keep the low N bits (zero-extended) of `value`.
+  // Pack aggregate operands and resolve selection bounds before dispatch.
   void process_bit_selection();
-  // set_mask counterpart of process_bit_selection's closed-range mask (below).
   void process_bit_update();
 
   // `~x` (user ruling 26): an UNSIGNED-typed operand of known width N flips
@@ -1471,35 +1468,26 @@ protected:
   // it reads ONE element of a declared one-dimensional unsigned array
   // (`arr[i]` of `[N]uW`, a reg/memory array, an array port), else 0.
   [[nodiscard]] std::pair<std::string, uint32_t>                array_elem_read_bits() const;
-  // Whether `mask_raw`, the mask of the get_mask statement `stmt`, is the
-  // single-bit `1 << pos` a runtime or named index lowers to (`a#[i]`, `a#[k]`).
-  [[nodiscard]] bool                         is_single_bit_mask(const Lnast_nid& stmt, std::string_view mask_raw);
   // Result temp -> its integer type: a `~` of a typed operand, a bitwise
   // and/or/xor over typed operands (unsigned when all are), a sized or
   // sign cast (none of them has a declared type of its own when it folds at
   // comptime), a one-bit select at a runtime or named position, an element
   // read of an unsigned array.
-  absl::flat_hash_map<std::string, Int_type> typed_expr_types_;
+  absl::flat_hash_map<std::string, Int_type>                    typed_expr_types_;
   // Names typed by their OWN declaration or type_spec (bake_decl_pre_step, a
   // bit-select's envelope stamp), or an untyped `const` alias of a typed value
   // (ruling 38, inherit_alias_type) -- not other names whose envelope rode in
   // on a value (`mut t = x#[..]` leaves `t` untyped). An untyped declaration of
   // the name drops it again: a sibling scope may reuse a name (no shadowing, so
   // two live bindings never share one).
-  absl::flat_hash_set<std::string>           declared_typed_;
+  absl::flat_hash_set<std::string>                              declared_typed_;
 
-  // The const bitmask of a CLOSED range ref with concrete non-negative bounds
-  // (`a#[S..=S]`, `a#[K..+1]` with comptime-named bounds); nullopt otherwise.
-  std::optional<std::string> closed_range_mask(std::string_view range_name) const;
-  bool                       try_lower_tuple_spread();
-  void emit_inline_get_mask(const std::string& dst, const Lnast_node& value, const std::string& mask_text);
+  bool try_lower_tuple_spread();
+  void emit_inline_get_mask(const std::string& dst, const Lnast_node& value, int lo, int hi);
 
-  // Width of a bit-select range whose ENDS are runtime but whose span is not:
-  // `v#[s..+4]` lowers to `plus(%p, s, 4); minus(%m, %p, 1); range(%r, s, %m)`,
-  // and hi - lo folds to 3 for every `s`. `stmt` is the get_mask statement and
-  // `mask_raw` its (un-renamed) range operand; nullopt when the span is not a
-  // compile-time constant.
-  std::optional<int64_t> runtime_range_width(const Lnast_nid& stmt, std::string_view mask_raw);
+  // Compile-time difference of the explicit half-open endpoints, even when
+  // their shared base is a runtime value.
+  std::optional<int64_t> runtime_range_width(const Lnast_nid& stmt);
 
   // Runtime `bool(x)` == `(x != 0)`: emit `ne(dst, value, 0)` so the passes run
   // (typecheck stamps the boolean result kind).
@@ -1557,33 +1545,33 @@ protected:
   // salt. Cross-pass idempotence is a documented follow-up. Also used per
   // comptime loop iteration (unroll_for/unroll_while) so each iteration's
   // re-walk gets a fresh tmp-rename namespace + block-scope id.
-  uint32_t                                      inline_seq_{0};
+  uint32_t                      inline_seq_{0};
   // Numbers the `inl<N>_` rename TAG of each inline call site, apart from the
   // salts: the tag names hardware (an inlined array local becomes memory
   // `inl<N>_m`), so it must not depend on how many loop iterations an earlier
   // callee's body took to unroll -- a callee still unconverged (a cold compile)
   // unrolls its loops inside the splice, a converged one (restored warm) no
   // longer has any.
-  uint32_t                                      inline_tag_seq_{0};
+  uint32_t                      inline_tag_seq_{0};
   // `<N>`s of the `inl<N>_` prefixes the walked unit's own source already
   // spells (a rolled loop retained in an inlined caller's namespace lifts
   // ports like `inl1_a`; re-read writer output names them too). A splice
   // tagged `inl1_` would mint `inl1_a` for its callee's `a` and collide, so
   // such tags are skipped. Scanned lazily once per unit (inline_tags_unit_).
-  absl::flat_hash_set<uint32_t>                 inline_tags_taken_;
-  const Lnast*                                  inline_tags_unit_{nullptr};
+  absl::flat_hash_set<uint32_t> inline_tags_taken_;
+  const Lnast*                  inline_tags_unit_{nullptr};
   // Comptime loop unroll state. loop_break_hit_ is set by a `func_break`
   // reached on a comptime-taken path during a loop body re-walk; the unroller
   // checks it after each iteration and stops. loop_depth_ counts active
   // (nested) unrolls so the fuel/depth guard bounds non-terminating loops the
   // same way recursion is bounded.
-  bool                                          loop_break_hit_{false};
+  bool                          loop_break_hit_{false};
   // Set by a `func_continue` reached on a comptime-taken path: like break it
   // stops the rest of the CURRENT iteration's body walk, but (unlike break) the
   // unroller does NOT stop — it proceeds to the next iteration. Reset at the
   // start of each iteration (walk_loop_iteration).
-  bool                                          loop_continue_hit_{false};
-  int                                           loop_depth_{0};
+  bool                          loop_continue_hit_{false};
+  int                           loop_depth_{0};
   // A deferred type bound the bake folded IN PLACE on its source node while a
   // loop body is walked, with the ref it held. The unroller re-walks the SAME
   // body nodes every iteration, so walk_loop_iteration restores its own
@@ -1656,7 +1644,7 @@ protected:
 
   // The sole loop representation switch. False preserves compact loops;
   // true requests per-iteration source expansion for benchmarking.
-  bool unroll_requested_{false};
+  bool     unroll_requested_{false};
   // Per-unit counter making each lifted definition's name unique (the dedup in
   // specialized_emitted_ / pass_upass is BY NAME and silently DROPS a second
   // definition that collides).
@@ -1689,17 +1677,17 @@ protected:
     std::string inst;                      // instance name for the replicated Sub
     bool        has_loop_control = false;  // body owns break/continue and needs activation roles
 
-    absl::flat_hash_map<std::string, std::string> actual_names;  // body-local name -> enclosing binding
+    absl::flat_hash_map<std::string, std::string>                 actual_names;  // body-local name -> enclosing binding
     // Boundary names the lifted definition spells differently (filled by
     // lift_loop_body; see emit_rolled_loop_call's port_of): a body-local
     // private SSA version.
     absl::flat_hash_map<std::string, std::string>                 port_names;
-    std::vector<std::pair<std::string, Dlop>>     constants;     // copied values, never boundary ports
-    std::vector<std::string>                    invariants;
-    std::vector<std::string>                    carries;
-    absl::flat_hash_set<std::string>              registers;  // separate invariant Q and carried D
-    std::vector<std::string>                    finals;  // must-written, no incoming ordinal-0 value
-    absl::flat_hash_map<std::string, Spec_port> types;   // boundary name -> declared type
+    std::vector<std::pair<std::string, Dlop>>                     constants;  // copied values, never boundary ports
+    std::vector<std::string>                                      invariants;
+    std::vector<std::string>                                      carries;
+    absl::flat_hash_set<std::string>                              registers;  // separate invariant Q and carried D
+    std::vector<std::string>                                      finals;     // must-written, no incoming ordinal-0 value
+    absl::flat_hash_map<std::string, Spec_port>                   types;      // boundary name -> declared type
     // Carry -> {min, max} of the values that enter an iteration (seeds the
     // lifted body's carry-in range; see plan_loop_roll).
     absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>> carry_in_ranges;
@@ -1711,12 +1699,12 @@ protected:
   // Suffixes for the two compiler-owned ports a carry needs. The body is copied
   // VERBATIM, so a carry keeps its own name inside the body as an ordinary
   // `mut` local seeded from the input port and written back to the output port.
-  static constexpr std::string_view kCarryInSuffix  = "__carry_in";
-  static constexpr std::string_view kCarryOutSuffix = "__carry_out";
+  static constexpr std::string_view kCarryInSuffix   = "__carry_in";
+  static constexpr std::string_view kCarryOutSuffix  = "__carry_out";
   static constexpr std::string_view kCarryNextSuffix = "__carry_next";
-  static constexpr std::string_view kLoopValid      = "__valid";
-  static constexpr std::string_view kLoopExec       = "__loop_exec";
-  static constexpr std::string_view kLoopNextActive = "__next_active";
+  static constexpr std::string_view kLoopValid       = "__valid";
+  static constexpr std::string_view kLoopExec        = "__loop_exec";
+  static constexpr std::string_view kLoopNextActive  = "__next_active";
 
   // Analysis only: decides whether this range loop can roll and fills `out`.
   // Returns false (with a debug-log reason) to fall back to unrolling.
@@ -1742,10 +1730,10 @@ protected:
   // declared with, which keeps the planner conservative.
   using Name_deps = absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>>;
   struct Loop_scope_facts {
-    absl::flat_hash_set<std::string> wires;      // declared `wire`
-    absl::flat_hash_set<std::string> regs;       // declared `reg`
-    absl::flat_hash_set<std::string> arrays;     // declared with an array type (also via a `type` alias)
-    absl::flat_hash_set<std::string> comptimes;  // declared `comptime` (never a carry of a rolled body)
+    absl::flat_hash_set<std::string>          wires;      // declared `wire`
+    absl::flat_hash_set<std::string>          regs;       // declared `reg`
+    absl::flat_hash_set<std::string>          arrays;     // declared with an array type (also via a `type` alias)
+    absl::flat_hash_set<std::string>          comptimes;  // declared `comptime` (never a carry of a rolled body)
     // Straight-line def-use (name -> every name its writes read), per scope:
     // the definition's own statements, and the body of each enclosing loop.
     absl::flat_hash_map<Lnast_nid, Name_deps> deps;
@@ -1768,7 +1756,7 @@ private:
   // loop_scope_facts' cache: source tree -> definition -> facts. `tree` pins
   // the tree so its address cannot be reused by another while cached.
   struct Loop_tree_facts {
-    std::shared_ptr<Lnast>                            tree;
+    std::shared_ptr<Lnast>                           tree;
     absl::flat_hash_map<Lnast_nid, Loop_scope_facts> definitions;
   };
   absl::flat_hash_map<const Lnast*, Loop_tree_facts> loop_tree_facts_;

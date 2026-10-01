@@ -75,8 +75,8 @@ Prover::Prover(hhds::Graph* g, const Prove_options& opts) : g_(g), opts_(opts) {
     if (w == 0) {
       w = 1;
     }
-    bool sgn                      = !gio->is_unsign(d.name);
-    Term t                        = tm_.mkConst(tm_.mkBitVectorSort(w < 1 ? 1 : w), std::string(d.name));
+    bool sgn                           = !gio->is_unsign(d.name);
+    Term t                             = tm_.mkConst(tm_.mkBitVectorSort(w < 1 ? 1 : w), std::string(d.name));
     memo_[{0, dpin.get_class_index()}] = Val{t, w, sgn};
     inputs_.emplace_back(std::string(d.name), t);
     leaf(t, 0, dpin);
@@ -92,9 +92,9 @@ void Prover::leaf(const Term& t, uint32_t scope, const hhds::Pin_class& pin) {
 // The value of every leaf the refuted formula (plus the standing assumptions
 // and memory ties) mentions, at most 4096 of them.
 Model Prover::model(cvc5::Solver& solver, const Term& refute) {
-  Model                        out;
-  std::vector<Term>            pending{refute};
-  std::unordered_set<Term>     seen;
+  Model                    out;
+  std::vector<Term>        pending{refute};
+  std::unordered_set<Term> seen;
   for (const auto& a : assumes_) {
     pending.push_back(a);
   }
@@ -657,52 +657,27 @@ std::optional<Val> Prover::encode_comb(uint32_t scope, const hhds::Node_class& n
         enc_unsupported_ = true;
         return std::nullopt;
       }
-      const Val&      a        = pid(0)[0];
-      // mask is a single const driver; read it directly (no inp_edges scan).
-      hhds::Pin_class mask_pin = gu::get_driver_of_sink_name(node, "mask");
-      if (mask_pin.is_invalid() || !mask_pin.is_const()) {
+      const Val& a     = pid(0)[0];
+      const auto range = gu::bit_range(node);
+      if (!range) {
         enc_unsupported_ = true;
         return std::nullopt;
       }
-      Dlop mask = gu::const_of(mask_pin);
-      if (mask.is_just_i64() && mask.to_just_i64() == -1) {
-        result = lec::fit_to(tm_, Val{a.term, a.width, false}, W);
-        break;
-      }
-      auto range = mask.get_mask_range();
-      int  rb = range.first, re = range.second;
-      if (rb < 0 || re <= rb) {
-        enc_unsupported_ = true;
-        return std::nullopt;
-      }
-      Term aw    = re > a.width ? lec::fit_to(tm_, a, re) : a.term;
-      Term slice = bv_extract(aw, re - 1, rb);
-      result     = lec::fit_to(tm_, Val{slice, re - rb, false}, W);
+      const auto [rb, re] = *range;
+      Term aw             = re > a.width ? lec::fit_to(tm_, a, re) : a.term;
+      Term slice          = bv_extract(aw, re - 1, rb);
+      result              = lec::fit_to(tm_, Val{slice, re - rb, false}, W);
       break;
     }
     case Ntype_op::Set_mask: {
-      // mask is a single const driver; read it directly (no inp_edges scan).
-      hhds::Pin_class mask_pin = gu::get_driver_of_sink_name(node, "mask");
-      if (mask_pin.is_invalid() || !mask_pin.is_const() || pid(0).empty()) {
+      const auto range = gu::bit_range(node);
+      if (!range || pid(0).empty()) {
         enc_unsupported_ = true;
         return std::nullopt;
       }
-      const Val& a    = pid(0)[0];
-      Dlop       mask = gu::const_of(mask_pin);
-      if (mask.is_known_zero()) {
-        result = lec::fit_to(tm_, a, W);
-        break;
-      }
-      // graph/cell.hpp: the mask is ONE window, or -1 == "replace everything",
-      // i.e. the window [0, Wm). Fails CLOSED (enc_unsupported_) on anything
-      // else -- this is a proof encoder, not a codegen path.
-      int  Wm    = std::max(1, W);
-      auto range = gu::is_whole_value_mask(mask) ? std::pair<int, int>{0, Wm} : mask.get_mask_range();
-      int  rb = range.first, re = range.second;
-      if (rb < 0 || re <= rb) {
-        enc_unsupported_ = true;
-        return std::nullopt;
-      }
+      const Val& a        = pid(0)[0];
+      const int  Wm       = std::max(1, W);
+      const auto [rb, re] = *range;
       if (rb >= Wm) {
         result = lec::fit_to(tm_, a, Wm);
         break;
@@ -969,8 +944,8 @@ Query_out Prover::truth_when(const hhds::Pin_class& cond, bool truth, const std:
 
 Query_out Prover::equal(const hhds::Pin_class& a, const hhds::Pin_class& b) {
   absl::flat_hash_set<Key> seen;
-  int                                    n  = 0;
-  bool                                   st = false, unsup = false;
+  int                      n  = 0;
+  bool                     st = false, unsup = false;
   cone_walk(0, a, seen, n, st, unsup);
   cone_walk(0, b, seen, n, st, unsup);
   work_ += static_cast<uint64_t>(n);
@@ -996,8 +971,8 @@ Query_out Prover::equal(const hhds::Pin_class& a, const hhds::Pin_class& b) {
 Query_out Prover::address_relation(const hhds::Pin_class& a, const hhds::Pin_class& b, const std::vector<hhds::Pin_class>& enables,
                                    bool equal, int address_bits) {
   absl::flat_hash_set<Key> seen;
-  int                                    nodes    = 0;
-  bool                                   stateful = false, unsupported = false;
+  int                      nodes    = 0;
+  bool                     stateful = false, unsupported = false;
   cone_walk(0, a, seen, nodes, stateful, unsupported);
   cone_walk(0, b, seen, nodes, stateful, unsupported);
   for (const auto& enable : enables) {
@@ -1059,7 +1034,7 @@ Term Prover::bv_of(int width, const Dlop& v) {
 }
 
 // Encode every pin's cone, fit each to `width`, and solve refute_of(terms).
-Query_out Prover::masked(const std::vector<hhds::Pin_class>& pins,
+Query_out Prover::masked(const std::vector<hhds::Pin_class>&                                 pins,
                          const std::function<std::optional<Term>(const std::vector<Term>&)>& refute_of, int width) {
   absl::flat_hash_set<Key> seen;
   int                      n  = 0;
@@ -1094,12 +1069,14 @@ Query_out Prover::masked_const(const hhds::Pin_class& pin, int width, const Dlop
       {pin},
       [&](const std::vector<Term>& t) -> std::optional<Term> {
         const auto m = bv_of(width, mask);
-        return tm_.mkTerm(Kind::DISTINCT, {tm_.mkTerm(Kind::BITVECTOR_AND, {t[0], m}), tm_.mkTerm(Kind::BITVECTOR_AND, {bv_of(width, value), m})});
+        return tm_.mkTerm(Kind::DISTINCT,
+                          {tm_.mkTerm(Kind::BITVECTOR_AND, {t[0], m}), tm_.mkTerm(Kind::BITVECTOR_AND, {bv_of(width, value), m})});
       },
       width);
 }
 
-Query_out Prover::masked_relation(const hhds::Pin_class& a, const hhds::Pin_class& b, int width, const Dlop& mask, bool complement) {
+Query_out Prover::masked_relation(const hhds::Pin_class& a, const hhds::Pin_class& b, int width, const Dlop& mask,
+                                  bool complement) {
   return masked(
       {a, b},
       [&](const std::vector<Term>& t) -> std::optional<Term> {
@@ -1110,7 +1087,8 @@ Query_out Prover::masked_relation(const hhds::Pin_class& a, const hhds::Pin_clas
       width);
 }
 
-Query_out Prover::bit_gate(const hhds::Pin_class& t, Ntype_op op, const hhds::Pin_class& a, const hhds::Pin_class& b, bool invert_b) {
+Query_out Prover::bit_gate(const hhds::Pin_class& t, Ntype_op op, const hhds::Pin_class& a, const hhds::Pin_class& b,
+                           bool invert_b) {
   if (op != Ntype_op::And && op != Ntype_op::Or && op != Ntype_op::Xor) {
     return {Verdict::Unknown, false, "", {}};
   }
@@ -1202,7 +1180,7 @@ Query_out Prover::unchanged_under(const hhds::Pin_class& target, int width, cons
     }
   }
   // Replace, re-encode the window in order, read the exits, restore.
-  const auto key_of = [](const hhds::Pin_class& p) { return Key{0, p.get_class_index()}; };
+  const auto                                   key_of = [](const hhds::Pin_class& p) { return Key{0, p.get_class_index()}; };
   absl::flat_hash_map<Key, std::optional<Val>> saved;
   const auto                                   save = [&](const hhds::Pin_class& p) {
     const auto k = key_of(p);
@@ -1215,11 +1193,12 @@ Query_out Prover::unchanged_under(const hhds::Pin_class& target, int width, cons
   for (const auto& p : outputs) {
     save(p);
   }
-  const auto m        = bv_of(width, mask);
-  const auto t        = lec::fit_to(tm_, lec::Val{tv->term, static_cast<int>(tv->term.getSort().getBitVectorSize()), tv->is_signed}, width);
-  const auto replaced = tm_.mkTerm(Kind::BITVECTOR_OR,
-                                   {tm_.mkTerm(Kind::BITVECTOR_AND, {t, tm_.mkTerm(Kind::BITVECTOR_NOT, {m})}),
-                                    tm_.mkTerm(Kind::BITVECTOR_AND, {bv_of(width, value), m})});
+  const auto m = bv_of(width, mask);
+  const auto t
+      = lec::fit_to(tm_, lec::Val{tv->term, static_cast<int>(tv->term.getSort().getBitVectorSize()), tv->is_signed}, width);
+  const auto replaced   = tm_.mkTerm(Kind::BITVECTOR_OR,
+                                     {tm_.mkTerm(Kind::BITVECTOR_AND, {t, tm_.mkTerm(Kind::BITVECTOR_NOT, {m})}),
+                                      tm_.mkTerm(Kind::BITVECTOR_AND, {bv_of(width, value), m})});
   memo_[key_of(target)] = Val{replaced, width, tv->is_signed};
   bool ok               = true;
   for (const auto& node : window) {
@@ -1267,8 +1246,8 @@ Query_out Prover::unchanged_under(const hhds::Pin_class& target, int width, cons
 }
 
 Query_out Prover::are_exclusive(const std::vector<hhds::Pin_class>& controls) {
-  bool                                   st = false, unsup = false;
-  int                                    n = 0;
+  bool                     st = false, unsup = false;
+  int                      n = 0;
   absl::flat_hash_set<Key> seen_pins;
   for (const auto& control : controls) {
     cone_walk(0, control, seen_pins, n, st, unsup);

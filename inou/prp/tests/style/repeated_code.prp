@@ -1,0 +1,18 @@
+/*
+:name: style_repeated_code
+:type: style
+:style: repeated-code
+:style_args: --min-repeats 3
+:help: loop
+*/
+// The same statement repeated with nothing advancing between copies: a loop or a
+// shared helper is the likely intent. (Numeric progression would be reported as
+// `likely-unrolled-loop` instead, see likely_unrolled_loop.prp.)
+comb f(a:U8) -> (o:U8) {
+  mut t:U8 = a
+  wrap t = t ^ 0x5a  // locate_style_repeated-code
+  wrap t = t ^ 0x5a
+  wrap t = t ^ 0x5a
+  wrap t = t ^ 0x5a
+  o = t
+}

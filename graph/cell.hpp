@@ -47,23 +47,11 @@ enum class Ntype_op : uint8_t {
 
   Not,  // bitwise not
 
-  // Get_mask(a, mask): the bits of `a` selected by `mask`, packed LSB-first as
-  // an UNSIGNED value (`#[..]` zero-extends; only an explicit `#sext` may be
-  // negative). Set_mask(a, mask, value) replaces them.
-  //
-  // CONTRACT on the `mask` pin -- see livehd::graph_util::mask_window:
-  //   * it is a CONSTANT. A runtime mask has never been representable (tolg
-  //     lowers a dynamic part-select to And/Or/Ror and errors on a mask pin
-  //     that is not const), and
-  //   * that constant is either the CONTIGUOUS window Dlop::get_mask_value(hi-1,
-  //     lo) with 0 <= lo < hi, or the literal -1 meaning "the whole value":
-  //     Get_mask(a, -1) is to-unsigned, Set_mask(a, -1, v) is v.
-  //
-  // A SPARSE mask (0x0f0f) is not part of the IR. Nothing produces one -- a
-  // concat lvalue `{a[3],a[0]} = x` becomes one Set_mask per operand, every
-  // `#[...]` form is a single window, and yosys hands over one SigChunk at a
-  // time -- and consumers that had to tolerate one paid for it with per-bit
-  // gather loops and with bail arms that declined real rewrites.
+  // Get_mask(a, lo, hi) extracts [lo, hi) as an unsigned value.
+  // Set_mask(a, value, lo, hi) replaces that window with value's low bits.
+  // lo and hi are constant non-negative bit positions with lo < hi.
+  // A single bit is [bit, bit+1). Sparse selections are expanded by lowering;
+  // dynamic positions lower to shifts and bitwise operations.
   Get_mask,
   Set_mask,
   Sext,  // Sign extend from a given bit (b) position
@@ -187,37 +175,37 @@ protected:
     for (auto& s : a) {
       s = "invalid";
     }
-    a[static_cast<size_t>(Ntype_op::Sum)]      = "sum";
-    a[static_cast<size_t>(Ntype_op::Mult)]     = "mult";
-    a[static_cast<size_t>(Ntype_op::Div)]      = "div";
-    a[static_cast<size_t>(Ntype_op::And)]      = "and";
-    a[static_cast<size_t>(Ntype_op::Or)]       = "or";
-    a[static_cast<size_t>(Ntype_op::Xor)]      = "xor";
-    a[static_cast<size_t>(Ntype_op::Ror)]      = "ror";
+    a[static_cast<size_t>(Ntype_op::Sum)]        = "sum";
+    a[static_cast<size_t>(Ntype_op::Mult)]       = "mult";
+    a[static_cast<size_t>(Ntype_op::Div)]        = "div";
+    a[static_cast<size_t>(Ntype_op::And)]        = "and";
+    a[static_cast<size_t>(Ntype_op::Or)]         = "or";
+    a[static_cast<size_t>(Ntype_op::Xor)]        = "xor";
+    a[static_cast<size_t>(Ntype_op::Ror)]        = "ror";
     a[static_cast<size_t>(Ntype_op::Rxor)]       = "rxor";
     a[static_cast<size_t>(Ntype_op::Popcount)]   = "popcount";
-    a[static_cast<size_t>(Ntype_op::Not)]      = "not";
-    a[static_cast<size_t>(Ntype_op::Get_mask)] = "get_mask";
-    a[static_cast<size_t>(Ntype_op::Set_mask)] = "set_mask";
-    a[static_cast<size_t>(Ntype_op::Sext)]     = "sext";
-    a[static_cast<size_t>(Ntype_op::LT)]       = "lt";
-    a[static_cast<size_t>(Ntype_op::GT)]       = "gt";
-    a[static_cast<size_t>(Ntype_op::EQ)]       = "eq";
-    a[static_cast<size_t>(Ntype_op::SHL)]      = "shl";
-    a[static_cast<size_t>(Ntype_op::SRA)]      = "sra";
-    a[static_cast<size_t>(Ntype_op::LUT)]      = "lut";
-    a[static_cast<size_t>(Ntype_op::Mux)]      = "mux";
-    a[static_cast<size_t>(Ntype_op::Hotmux)]   = "hotmux";
-    a[static_cast<size_t>(Ntype_op::IO)]       = "io";
-    a[static_cast<size_t>(Ntype_op::Memory)]   = "memory";
-    a[static_cast<size_t>(Ntype_op::Flop)]     = "flop";
-    a[static_cast<size_t>(Ntype_op::Latch)]    = "latch";
-    a[static_cast<size_t>(Ntype_op::Fflop)]    = "fflop";
-    a[static_cast<size_t>(Ntype_op::Sub)]      = "sub";
+    a[static_cast<size_t>(Ntype_op::Not)]        = "not";
+    a[static_cast<size_t>(Ntype_op::Get_mask)]   = "get_mask";
+    a[static_cast<size_t>(Ntype_op::Set_mask)]   = "set_mask";
+    a[static_cast<size_t>(Ntype_op::Sext)]       = "sext";
+    a[static_cast<size_t>(Ntype_op::LT)]         = "lt";
+    a[static_cast<size_t>(Ntype_op::GT)]         = "gt";
+    a[static_cast<size_t>(Ntype_op::EQ)]         = "eq";
+    a[static_cast<size_t>(Ntype_op::SHL)]        = "shl";
+    a[static_cast<size_t>(Ntype_op::SRA)]        = "sra";
+    a[static_cast<size_t>(Ntype_op::LUT)]        = "lut";
+    a[static_cast<size_t>(Ntype_op::Mux)]        = "mux";
+    a[static_cast<size_t>(Ntype_op::Hotmux)]     = "hotmux";
+    a[static_cast<size_t>(Ntype_op::IO)]         = "io";
+    a[static_cast<size_t>(Ntype_op::Memory)]     = "memory";
+    a[static_cast<size_t>(Ntype_op::Flop)]       = "flop";
+    a[static_cast<size_t>(Ntype_op::Latch)]      = "latch";
+    a[static_cast<size_t>(Ntype_op::Fflop)]      = "fflop";
+    a[static_cast<size_t>(Ntype_op::Sub)]        = "sub";
     a[static_cast<size_t>(Ntype_op::Clock_cell)] = "clock_cell";
-    a[static_cast<size_t>(Ntype_op::Rem)]      = "rem";
-    a[static_cast<size_t>(Ntype_op::Concat)]   = "concat";
-    a[static_cast<size_t>(Ntype_op::AttrSet)]  = "attr_set";
+    a[static_cast<size_t>(Ntype_op::Rem)]        = "rem";
+    a[static_cast<size_t>(Ntype_op::Concat)]     = "concat";
+    a[static_cast<size_t>(Ntype_op::AttrSet)]    = "attr_set";
     return a;
   }();
 
@@ -322,16 +310,16 @@ public:
   // not banked at all.
   static inline constexpr int sink_bank_count(Ntype_op op) {
     switch (op) {
-      case Ntype_op::Sum:
-      case Ntype_op::LT:
-      case Ntype_op::GT: return 2;  // as (even pid) / bs (odd pid)
+      case Ntype_op::Sum :
+      case Ntype_op::LT  :
+      case Ntype_op::GT  : return 2;  // as (even pid) / bs (odd pid)
       case Ntype_op::Mult:
-      case Ntype_op::And:
-      case Ntype_op::Or:
-      case Ntype_op::Xor:
-      case Ntype_op::Ror:
-      case Ntype_op::EQ: return 1;  // as
-      default: return 0;
+      case Ntype_op::And :
+      case Ntype_op::Or  :
+      case Ntype_op::Xor :
+      case Ntype_op::Ror :
+      case Ntype_op::EQ  : return 1;  // as
+      default            : return 0;
     }
   }
   static inline constexpr bool is_banked_sink_op(Ntype_op op) { return sink_bank_count(op) != 0; }

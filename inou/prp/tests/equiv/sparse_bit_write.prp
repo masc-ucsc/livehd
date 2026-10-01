@@ -1,0 +1,11 @@
+/*
+:name: sparse_bit_write
+:type: equiv
+:verilog_top: sparse_bit_write
+:pyrope_top: sparse_bit_write
+*/
+// Replace bits 0, 2, 4, and 6 with value[0..3], preserving x's odd bits.
+pub comb sparse_bit_write(x:U8, value:U4) -> (y:U8) {
+  y = x
+  y#[0..<8 step 2] = value
+}

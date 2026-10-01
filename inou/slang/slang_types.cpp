@@ -67,22 +67,14 @@ std::string Slang_context::trunc_to(const std::string& v, int bits) {
     builder_.note_unsigned_bits(r, 1);
     return r;
   }
-  return builder_.create_get_mask_stmts(v, mask_text(bits));
+  return builder_.create_get_mask_stmts(v, "0", std::to_string(bits));
 }
 
 std::string Slang_context::extract_field(const std::string& v, int64_t lo, int bits) {
   if (lo <= 0) {
     return trunc_to(v, bits);
   }
-  // get_mask both selects and shifts down, but its single-bit form is the
-  // -1/0 boolean; shift+trunc keeps the verilog 0/1 value for any width.
-  if (bits == 1) {
-    auto r = builder_.create_bit_and_stmts(builder_.create_sra_stmts(v, std::to_string(lo)), "1");
-    builder_.note_unsigned_bits(r, 1);
-    return r;
-  }
-  return builder_.create_get_mask_stmts(v,
-                                        Dlop::get_mask_value(static_cast<int>(lo) + bits - 1, static_cast<int>(lo))->to_pyrope());
+  return builder_.create_get_mask_stmts(v, std::to_string(lo), std::to_string(lo + bits));
 }
 
 std::string Slang_context::materialize_conversion(const std::string& v, int from_bits, bool from_signed, int to_bits,
@@ -100,7 +92,7 @@ std::string Slang_context::materialize_conversion(const std::string& v, int from
     // two's-complement pattern materialized, even when the signed value's
     // effective width is small.
     if (effective_bits) {
-      const bool fits_same_sign = from_signed == to_signed && *effective_bits <= to_bits;
+      const bool fits_same_sign          = from_signed == to_signed && *effective_bits <= to_bits;
       // An N-bit unsigned value needs fewer than N effective bits to fit the
       // positive half of an N-bit signed destination. Equality can set the new
       // sign bit and therefore needs the normal truncate+reinterpret path.

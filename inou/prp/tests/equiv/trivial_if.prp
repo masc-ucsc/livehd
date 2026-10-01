@@ -6,6 +6,7 @@
 */
 
 pub comb fun3(a:U3, b:U7, cond:Bool) -> (res:U4) {
+  // prp-style-allow single-destination-conditional
   if cond {
     res = a + 1
   }else{

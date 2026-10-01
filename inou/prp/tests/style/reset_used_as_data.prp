@@ -1,0 +1,15 @@
+/*
+:name: style_reset_used_as_data
+:type: style
+:style: none
+*/
+// `clr` also feeds the datapath, so it is a data input, not just a reset:
+// neither reset rule applies.
+pub mod m(clk:Clock, clr:U1, din:U8) -> (dout:U8@[]) {
+  reg q:U8 = nil
+  dout = q + clr
+  q = din
+  if clr {
+    q = 0
+  }
+}

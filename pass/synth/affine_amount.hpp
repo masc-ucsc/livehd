@@ -22,22 +22,22 @@ namespace livehd::synth {
 struct Affine_link {
   Ntype_op op;
   int64_t  k;       // Sum: added constant; SHL: amount; Mult: factor; Or: constant;
-                    // And: trailing-zero count of the mask; Get_mask: kept low bits (-1: all)
+                    // And: trailing-zero count of the mask; Get_mask: kept low bits
   int      bits;    // the link's output width
   bool     unsign;  // the link's output sign
 };
 
 struct Affine_chain {
-  hhds::Pin_class                                        index;  // the one variable leaf
+  hhds::Pin_class                                           index;  // the one variable leaf
   std::vector<std::pair<hhds::Node_class, hhds::Pin_class>> links;  // index side first; links.back() drives the amount
-  int64_t                                                scale = 1;
-  int64_t                                                bias  = 0;
-  std::vector<Affine_link>                               ops;  // parallel to `links`
+  int64_t                                                   scale = 1;
+  int64_t                                                   bias  = 0;
+  std::vector<Affine_link>                                  ops;  // parallel to `links`
 
   // The exact value the amount NET carries (its low `bits` bits) for an index
   // value `v`, every link computed and truncated to its own output width as
   // the cells do -- so a link may wrap, e.g. satopt's odc narrowing
-  // `Get_mask(amount, 0x3ff)` of an amount whose top value (1024) no output
+  // `Get_mask(amount, 0, 10)` of an amount whose top value (1024) no output
   // observes. nullopt when a value leaves the modelled range or an
   // intermediate signed output would read negative.
   [[nodiscard]] std::optional<uint64_t> eval(uint64_t v) const {
@@ -51,12 +51,12 @@ struct Affine_chain {
           }
           v = l.k < 0 ? v - static_cast<uint64_t>(-l.k) : v + static_cast<uint64_t>(l.k);
           break;
-        case Ntype_op::SHL: v <<= l.k; break;
+        case Ntype_op::SHL : v <<= l.k; break;
         case Ntype_op::Mult: v *= static_cast<uint64_t>(l.k); break;
-        case Ntype_op::Or: v |= static_cast<uint64_t>(l.k); break;
-        case Ntype_op::And: v &= ~((uint64_t{1} << l.k) - 1); break;
+        case Ntype_op::Or  : v |= static_cast<uint64_t>(l.k); break;
+        case Ntype_op::And : v &= ~((uint64_t{1} << l.k) - 1); break;
         case Ntype_op::Get_mask:
-          if (l.k >= 0) {
+          if (l.k < 64) {
             v &= (uint64_t{1} << l.k) - 1;
           }
           break;
@@ -80,14 +80,14 @@ struct Affine_chain {
 // amount = index*scale + bias through Sum (added variable, constant terms),
 // SHL (variable `a`, constant `b`), Mult (constant factors), Or (a constant
 // that fits the variable's zero low bits), And(x, -2^k) (satopt's proven
-// low-zero mask, an identity there) and Get_mask(x, 2^n-1 or -1) (a low
+// low-zero mask, an identity there) and Get_mask(x, 0, n) (a low
 // truncation, e.g. satopt's odc narrowing; scale/bias read it as the
 // identity, `eval` applies the wrap) links, at least one of them a
 // stride (SHL or Mult): cprop folds `(i << 5) + 32` to `Shl(i + 1, 5)`, a
 // one-link chain whose index is `i + 1`. nullopt for any other shape, a negative/overflowing
 // scale or bias, or a graph input inside the chain.
 inline std::optional<Affine_chain> affine_chain(const hhds::Pin_class& amount) {
-  namespace gu = livehd::graph_util;
+  namespace gu           = livehd::graph_util;
   const auto small_const = [](const hhds::Pin_class& p) -> std::optional<int64_t> {
     if (!p.is_const()) {
       return std::nullopt;
@@ -103,10 +103,10 @@ inline std::optional<Affine_chain> affine_chain(const hhds::Pin_class& amount) {
     Ntype_op op;
     int64_t  k;  // Sum: added constant; SHL: amount; Mult: factor; Or: constant
   };
-  Affine_chain         chain;
-  std::vector<Step>    steps;  // amount side first
-  hhds::Pin_class      cur = amount;
-  bool                 stride = false;
+  Affine_chain      chain;
+  std::vector<Step> steps;  // amount side first
+  hhds::Pin_class   cur    = amount;
+  bool              stride = false;
   while (!cur.is_invalid() && !cur.is_const() && !gu::is_graph_input_pin(cur) && cur.get_port_id() == 0) {
     const auto node = cur.get_master_node();
     const auto op   = gu::type_op_of(node);
@@ -117,20 +117,27 @@ inline std::optional<Affine_chain> affine_chain(const hhds::Pin_class& amount) {
     hhds::Pin_class var;
     int64_t         k     = op == Ntype_op::Mult ? 1 : 0;
     bool            valid = true;
-    bool            has_k = false;  // SHL/Get_mask: exactly one constant operand
+    bool            has_k = false;  // SHL: constant amount; Get_mask: constant endpoints
     for (const auto& in : node.inp_sorted_pins()) {
       const auto drv = in.get_driver_pin();
       const auto pid = in.get_port_id();
-      if (op == Ntype_op::SHL || op == Ntype_op::Get_mask) {
+      if (op == Ntype_op::Get_mask) {
+        const auto range = gu::bit_range(node);
+        valid            = range && range->first == 0;
+        if (!valid) {
+          break;
+        }
+        var   = gu::get_driver_of_sink_name(node, "a");
+        k     = range->second;
+        has_k = true;
+        break;
+      }
+      if (op == Ntype_op::SHL) {
         const auto c = pid == 0 || has_k ? std::nullopt : small_const(drv);
         if (pid == 0) {
           var = drv;
         } else if (c && op == Ntype_op::SHL && *c >= 0 && *c < 40) {
           k     = *c;
-          has_k = true;
-        } else if (c && op == Ntype_op::Get_mask && (*c == -1 || (*c > 0 && ((*c + 1) & *c) == 0))) {
-          // A low window [0, n), or -1: the whole value.
-          k     = *c == -1 ? -1 : static_cast<int64_t>(std::bit_width(static_cast<uint64_t>(*c)));
           has_k = true;
         } else {
           valid = false;
@@ -141,8 +148,8 @@ inline std::optional<Affine_chain> affine_chain(const hhds::Pin_class& amount) {
         if (op == Ntype_op::Sum) {
           k += Ntype::sink_bank(op, pid) == 1 ? -*c : *c;
         } else if (op == Ntype_op::Mult) {
-          valid = valid && *c > 0 && k <= (int64_t{1} << 40) / *c;
-          k    *= *c;
+          valid  = valid && *c > 0 && k <= (int64_t{1} << 40) / *c;
+          k     *= *c;
         } else if (op == Ntype_op::And) {
           // Only And(x, -2^k), satopt's proven-low-zero mask (k stored as the
           // mask's trailing zero count).

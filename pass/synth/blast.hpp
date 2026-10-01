@@ -26,46 +26,52 @@ namespace blast_gu = livehd::graph_util;
 // The blaster's knobs (abc_cleanup.md section 5): the arithmetic
 // architectures, and how registers cross a region's translation.
 struct Blast_options {
-  arith::Adder_kind adder          = arith::Adder_kind::rca;
-  int               block_size     = 0;  // CSKA skip-block / CLA group width; 0 = auto from the operating width
-  arith::Mult_kind  multiplier     = arith::Mult_kind::array;
-  bool              reverse_barrel = false;
+  arith::Adder_kind adder            = arith::Adder_kind::rca;
+  int               block_size       = 0;  // CSKA skip-block / CLA group width; 0 = auto from the operating width
+  arith::Mult_kind  multiplier       = arith::Mult_kind::array;
+  bool              reverse_barrel   = false;
   // Flops cross as latches (register mapping); false keeps every flop a native
   // boundary.
-  bool              map_register   = true;
+  bool              map_register     = true;
   // A crossing latch without a power-on value stores ~next_state: the QN-only
   // DFF encoding, exact only under a flow that preserves the latches.
-  bool              qn_encode      = false;
+  bool              qn_encode        = false;
   // Asynchronous-reset register cells for reset value v: -1 none, else that
   // cell's q_inverted (0/1). A register whose async reset the cells can
   // express crosses as a latch (reset left OUT of D, Seq_flop::async_reset);
   // otherwise it stays a native boundary.
-  int8_t            areset_cell[2] = {-1, -1};
+  int8_t            areset_cell[2]   = {-1, -1};
   // Whether that cell's reset pin asserts at 0 (Dff_cell::reset_low): the
   // level an internally computed reset crosses at (Seq_flop::arst_po).
-  bool              areset_low[2]  = {false, false};
+  bool              areset_low[2]    = {false, false};
   // The flow keeps every latch as crossed (why an async cell may be absent:
   // reported precisely in the reset-native diagnostic).
-  bool              areset_flow_ok = true;
+  bool              areset_flow_ok   = true;
   // The Liberty has an integrated clock-gate cell (Dff_selection::icg_ladder)
   // and the flow keeps every latch as crossed: a register clocked by a
   // recognized latch+AND clock gate crosses as a latch clocked by an ICG cell
   // (Region_blast::icgs) instead of staying a native flop.
-  bool              icg            = false;
+  bool              icg              = false;
   // Why `icg` is off, for the derived-clock-native report: false = the flow may
   // reshape latches, true = the Liberty has no ICG cell (or no DFF cell).
-  bool              icg_flow_ok    = true;
+  bool              icg_flow_ok      = true;
   // The Liberty's transparent data-latch cells (Dff_selection::latch_ladder),
   // [enable active-low][0 plain, 1 reset-to-0, 2 reset-to-1]: -1 none, else
   // that pick's q_inverted (0/1). A level-sensitive Latch whose shape a cell
   // covers is still a native boundary for ABC (a level-sensitive latch never
   // crosses as an ABC latch), but the read-back mints one cell per bit
   // (Bbox::latch_map) instead of rebuilding the native Latch.
-  int8_t            latch_cell[2][3] = {{-1, -1, -1}, {-1, -1, -1}};
+  int8_t            latch_cell[2][3] = {
+      {-1, -1, -1},
+      {-1, -1, -1}
+  };
   // The reset pin level of each reset latch pick (Dff_cell::reset_low): the
   // level a computed reset crosses at.
-  bool              latch_reset_low[2][3] = {{false, false, false}, {false, false, false}};
-  bool              verbose        = false;
+  bool latch_reset_low[2][3] = {
+      {false, false, false},
+      {false, false, false}
+  };
+  bool verbose = false;
 
   // Snapshot source semantics independently of mapping. Expanded memories use
   // their structural memory_module attribute; other special scopes are explicit.
@@ -114,30 +120,16 @@ public:
       auto [it, fresh] = aliases_.try_emplace(node);
       auto& alias      = it->second;
       if (fresh) {
-        alias.base    = gu::get_driver_of_sink_name(node, "a");
-        alias.value   = gu::get_driver_of_sink_name(node, "value");
-        auto mask_pin = gu::get_driver_of_sink_name(node, "mask");
-        if (!mask_pin.is_const() || gu::const_of(mask_pin).has_unknowns()) {
-          fail("set_mask needs a known constant mask");
+        alias.base          = gu::get_driver_of_sink_name(node, "a");
+        alias.value         = gu::get_driver_of_sink_name(node, "value");
+        const auto mask_pin = livehd::graph_util::bit_range(node);
+        if (!mask_pin.has_value()) {
+          fail("set_mask needs constant lo/hi endpoints");
           return finish(zero());
         }
-        // graph/cell.hpp: the mask is ONE window [lo, hi), or -1 == "replace
-        // everything", i.e. the whole declared width. So there is exactly one
-        // run and `value` is read from its bit 0 -- no per-bit scan.
-        const auto& mask  = gu::const_of(mask_pin);
-        const int   width = gu::bits_of(pin);
-        int         lo = 0, hi = 0;
-        if (gu::is_whole_value_mask(mask)) {
-          hi = width;  // an unwidthed pin leaves the window empty, as before
-        } else {
-          const auto window = gu::mask_window_of(mask);
-          if (!window) {
-            fail("set_mask needs a contiguous constant mask");
-            return finish(zero());
-          }
-          lo = window->first;
-          hi = width > 0 ? std::min(window->second, width) : window->second;
-        }
+        const int width = gu::bits_of(pin);
+        const int lo    = mask_pin->first;
+        const int hi    = width > 0 ? std::min(mask_pin->second, width) : mask_pin->second;
         if (hi > lo) {
           alias.runs.push_back({lo, hi, 0});
         }
@@ -146,7 +138,7 @@ public:
         alias.valid = true;
       }
       if (!alias.valid) {
-        fail("set_mask needs a known constant mask");
+        fail("set_mask needs constant lo/hi endpoints");
         return finish(zero());
       }
       for (const auto& run : alias.runs) {
@@ -442,64 +434,35 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
     }
   } else if (op == Ntype_op::Get_mask) {
     // out[j] = a[positions[j]] where positions = mask-selected source bits.
-    auto a_drv = gu::get_driver_of_sink_name(n, "a");
-    auto m_drv = gu::get_driver_of_sink_name(n, "mask");
-    if (!m_drv.is_const()) {
+    auto       a_drv = gu::get_driver_of_sink_name(n, "a");
+    const auto m_drv = livehd::graph_util::bit_range(n);
+    if (!m_drv.has_value()) {
       refuse(n,
              "unsupported-cell",
              "unsupported",
-             "get_mask has a non-constant mask, which cannot be technology-mapped",
+             "get_mask requires constant lo/hi endpoints for technology mapping",
              {},
-             m_drv,
-             "mask driven here");
+             gu::get_driver_of_sink_name(n, "lo"),
+             "endpoint driven here");
     } else {
-      // graph/cell.hpp: the mask is ONE window [lo, hi), or -1 == the whole
-      // source. Either way the selected positions are CONSECUTIVE, so output
-      // bit j reads source bit lo + j -- no per-bit scan and no position list.
-      const auto& mask   = gu::const_of(m_drv);
-      int         a_bits = gu::bits_of(a_drv);
-      if (a_bits == 0 && a_drv.is_const()) {
-        // A CONSTANT driver carries no `bits` attr, so bits_of is 0 (see
-        // eff_width above — create_const stamps only the value, never a width).
-        // The zero-extend idiom Get_mask(a, -1) selects EVERY source position,
-        // and that window is bounded by a_bits: left at 0 it would write const0
-        // into every output bit, silently replacing the literal with 0. Note
-        // abc_bit is never reached, so its unmaterialized-driver diagnostic
-        // cannot warn. Size the literal from its VALUE, exactly as eff_width does.
-        a_bits = std::max(1, static_cast<int>(gu::const_of(a_drv).get_signed_bits()));
-      }
-      const auto window = gu::is_whole_value_mask(mask) ? std::optional<std::pair<int, int>>{{0, a_bits}}
-                                                        : gu::mask_window_of(mask);
-      if (!window) {
-        // REFUSE rather than abort: this is a mapping pass, and its answer to a
-        // cell it cannot express is a diagnostic naming the pin, not a crash.
-        refuse(n,
-               "unsupported-cell",
-               "unsupported",
-               "get_mask has a mask that is neither a contiguous window nor -1, which cannot be technology-mapped",
-               {},
-               m_drv,
-               "mask driven here");
-      } else {
-        const auto [lo, hi] = *window;
-        const int span      = hi - lo;
-        for (int b = 0; b < out_bits; ++b) {
-          slots[b] = b < span ? abc_bit(a_drv, lo + b) : abc_const_bit(false);
-        }
+      const auto [lo, hi] = *m_drv;
+      const int span      = hi - lo;
+      for (int b = 0; b < out_bits; ++b) {
+        slots[b] = b < span ? abc_bit(a_drv, lo + b) : abc_const_bit(false);
       }
     }
   } else if (op == Ntype_op::Set_mask) {
     // Pure wiring, resolved lazily by abc_bit above. Do not materialize every
     // bit of a wide sparse-update bus here.
-    auto m_drv = gu::get_driver_of_sink_name(n, "mask");
-    if (!m_drv.is_const()) {
+    const auto m_drv = livehd::graph_util::bit_range(n);
+    if (!m_drv.has_value()) {
       refuse(n,
              "unsupported-cell",
              "unsupported",
-             "set_mask has a non-constant mask, which cannot be technology-mapped",
+             "set_mask requires constant lo/hi endpoints for technology mapping",
              {},
-             m_drv,
-             "mask driven here");
+             gu::get_driver_of_sink_name(n, "lo"),
+             "endpoint driven here");
     }
   } else if (op == Ntype_op::Sext) {
     // The Sext cell's `b` is the KEPT BIT COUNT, so the sign bit sits at
@@ -735,12 +698,12 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
           all_slices = false;
           break;
         }
-        auto mask_drv = gu::get_driver_of_sink_name(sink_node, "mask");
-        if (!mask_drv.is_const()) {
+        const auto mask_drv = livehd::graph_util::bit_range(sink_node);
+        if (!mask_drv.has_value()) {
           all_slices = false;
           break;
         }
-        const auto& mask = gu::const_of(mask_drv);
+        const auto& mask = livehd::graph_util::mask_window_const(mask_drv->first, mask_drv->second);
         if (mask.is_negative()) {
           all_slices = false;
           break;
@@ -797,7 +760,7 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
       // shift whose own result is already narrower than its operand (a ware
       // module narrows its output port to the demanded width, so its consumer
       // is a module port, never an in-region Get_mask) is the same word select.
-      const bool narrow_demand = sliced_demand || demand_w < cw;
+      const bool            narrow_demand = sliced_demand || demand_w < cw;
       hhds::Pin_class       index;
       std::vector<uint64_t> amounts;  // the amount net's value for each index value
       if (narrow_demand) {
@@ -806,8 +769,8 @@ void blast_comb(const hhds::Node_class& n, int out_bits, Slots& slots, Ops& ops,
         if (const auto chain = affine_chain(b_d); chain && gu::is_unsign(chain->index)) {
           const int iw    = eff_width(chain->index);
           bool      valid = iw > 0 && iw <= 16
-                       && (uint64_t{1} << iw) * static_cast<uint64_t>(demand_w)
-                              < static_cast<uint64_t>(cw) * static_cast<uint64_t>(std::max(nb, 1));
+                            && (uint64_t{1} << iw) * static_cast<uint64_t>(demand_w)
+                                   < static_cast<uint64_t>(cw) * static_cast<uint64_t>(std::max(nb, 1));
           for (size_t i = 0; valid && i < chain->links.size(); ++i) {
             valid = region.contains(chain->links[i].first);
           }

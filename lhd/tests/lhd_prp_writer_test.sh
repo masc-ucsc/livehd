@@ -73,7 +73,7 @@ EOF
 grep -q '^pub comb f(a:U4, b:U4 = 3) ' "$W/dout/dflt.prp" || fail "constant default lost: $(cat "$W/dout/dflt.prp")"
 grep -q '^pub comb g(a:U4, b:U4 = a ^ 5, c:U4 = 1) ' "$W/dout/dflt.prp" \
   || fail "expression default lost: $(cat "$W/dout/dflt.prp")"
-grep -q '^pub comb h(a:U4, b:U4 = a#\[0\.\.=1\]) ' "$W/dout/dflt.prp" \
+grep -q '^pub comb h(a:U4, b:U4 = a#\[0\.\.<2\]) ' "$W/dout/dflt.prp" \
   || fail "bit-select default lost: $(cat "$W/dout/dflt.prp")"
 # The select temp is read only by the default (its `type_spec` window reads
 # nothing): no dead body line duplicates it.

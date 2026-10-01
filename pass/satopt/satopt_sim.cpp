@@ -15,8 +15,8 @@ constexpr uint64_t kMaxStored = 4'000'000;
 
 uint64_t splitmix(uint64_t x) {
   x += 0x9e3779b97f4a7c15ULL;
-  x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
-  x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+  x  = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+  x  = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
   return x ^ (x >> 31);
 }
 
@@ -95,22 +95,22 @@ std::optional<Dlop> Word_sim::leaf(const Key& k, uint32_t j) {
     // wraps and sign boundaries a handful of random words rarely hit.
     const auto corner = [&](int b) {
       switch (j) {
-        case 0: return false;
-        case 1: return true;
-        case 2: return (b & 1) == 0;
-        case 3: return (b & 1) == 1;
-        case 4: return b == w - 1;
-        case 5: return b != w - 1;
+        case 0 : return false;
+        case 1 : return true;
+        case 2 : return (b & 1) == 0;
+        case 3 : return (b & 1) == 1;
+        case 4 : return b == w - 1;
+        case 5 : return b != w - 1;
         default: return b == 0;
       }
     };
     return fit(from_bits(w, corner), p);
   }
-  const auto  n    = p.get_master_node();
-  const auto  seed = splitmix(opts_.salt ^ scopes_[k.first].path ^ splitmix(static_cast<uint64_t>(n.get_debug_nid()))
+  const auto n    = p.get_master_node();
+  const auto seed = splitmix(opts_.salt ^ scopes_[k.first].path ^ splitmix(static_cast<uint64_t>(n.get_debug_nid()))
                              ^ (static_cast<uint64_t>(p.get_port_id()) << 48) ^ (static_cast<uint64_t>(j) << 32));
-  uint64_t    word = 0;
-  const auto  bit  = [&](int b) {
+  uint64_t   word = 0;
+  const auto bit  = [&](int b) {
     if (b % 64 == 0) {
       word = splitmix(seed + static_cast<uint64_t>(b / 64));
     }
@@ -166,8 +166,8 @@ std::optional<Dlop> Word_sim::column(const Key& k, uint32_t j) {
   if (is_leaf(k)) {
     return leaf(k, j);
   }
-  const auto n  = p.get_master_node();
-  const auto op = gu::type_op_of(n);
+  const auto                              n  = p.get_master_node();
+  const auto                              op = gu::type_op_of(n);
   // Operands by BANK (a commutative cell spends one sink pid per operand), in
   // pid order; each operand's column j.
   std::map<int, std::vector<const Dlop*>> ins;
@@ -264,13 +264,21 @@ std::optional<Dlop> Word_sim::column(const Key& k, uint32_t j) {
     if (a == nullptr || m == nullptr) {
       return std::nullopt;
     }
-    v = livehd::eval_get_mask(*a, *m);
+    const auto range = gu::bit_range(n);
+    if (!range) {
+      return std::nullopt;
+    }
+    v = *a->get_mask_op_opt(range->first, range->second);
   } else if (op == Ntype_op::Set_mask) {
     const auto *a = arg(0), *m = arg(2), *s = arg(4);
     if (a == nullptr || m == nullptr || s == nullptr) {
       return std::nullopt;
     }
-    v = livehd::eval_set_mask(*a, *m, *s);
+    const auto range = gu::bit_range(n);
+    if (!range) {
+      return std::nullopt;
+    }
+    v = *a->set_mask_op_opt(range->first, range->second, *s);
   } else if (op == Ntype_op::LT || op == Ntype_op::GT) {
     const auto as = ins.find(0), bs = ins.find(1);
     if (as == ins.end() || bs == ins.end() || as->second.empty() || bs->second.empty()) {
@@ -461,7 +469,7 @@ bool Word_sim::add_model(const formal::Model& model) {
 }
 
 std::optional<bool> Word_sim::unchanged_under(const Pin& target, const Dlop& mask, const Dlop& value,
-                                             const std::vector<Node>& window, const std::vector<Pin>& exits) {
+                                              const std::vector<Node>& window, const std::vector<Pin>& exits) {
   const auto* tv = values(target);
   if (tv == nullptr) {
     return std::nullopt;

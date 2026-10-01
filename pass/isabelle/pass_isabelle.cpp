@@ -70,20 +70,10 @@ bool pin_is_input(const Node_pin& pin) { return livehd::graph_util::is_graph_inp
 
 bool pin_is_const(const Node_pin& pin) { return pin.is_const(); }
 
-// The node's DRIVEN sink pins, ascending by port id, one driver each.
-//
-// This used to materialize the in-edges and then sort_drivers_within_pin() them
-// for deterministic emission. ONE DRIVER PER SINK PIN retires that tie-break
-// entirely: a commutative cell now spends one sink pid per operand, so the
-// hhds ascending-port contract IS the total order. A SNAPSHOT (not the lazy
-// inp_sorted_pins view) because the old return value was a vector.
-//
-// ONE DRIVER PER SINK PIN holds for everything this pass can certify. The one
-// sanctioned exception -- a compact loop's carry-in sink, which holds the seed
-// AND a self edge (pass/legalize/legalize.cpp:301) -- lives on an Ntype_op::Sub,
-// and Sub is rejected as unsupported below, so it never reaches an operand
-// walk here.
-absl::InlinedVector<hhds::Pin_class, 8> inp_sinks_ordered(const Node& node) { return node.inp_pins_snapshot(); }
+// Read-only operand walks keep HHDS's ascending sink-port order without
+// allocating a snapshot. Sub nodes (whose carry inputs may have multiple
+// drivers) are rejected by this emitter.
+auto inp_sinks_ordered(const Node& node) { return node.inp_sorted_pins(); }
 
 // Named by its SINK PIN: one driver per sink pin, so the edge adds nothing.
 std::string sink_pin_name(const Node_pin& sink) {
@@ -179,9 +169,7 @@ void Pass_isabelle::setup() {
                  &Pass_isabelle::work);
   m1.add_label_optional("path", "Output directory for emitted *_Lgraph.thy");
   m1.add_label_optional("top", "Top module name (informational only)");
-  m1.add_label_optional("strict",
-                        "true|false. Abort on unsupported ops",
-                        "true");
+  m1.add_label_optional("strict", "true|false. Abort on unsupported ops", "true");
   m1.add_label_optional("normalize", "true|false. Normalize pre-export width artifacts (formal.normalize applies too)", "true");
   m1.add_label_optional("max_width", "Hard cap on node Bits width; 0 or 'unlimited' = no cap (default 1024).", "1024");
   m1.add_label_optional("cert_wf", "skip|eval|sorry|chunked. Certificate well-formedness proof mode.", "skip");
@@ -1025,19 +1013,9 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
         break;
 
       case Ntype_op::Div: {
-        Node_pin a, b;
-        bool     have_a = false, have_b = false;
-        for (const auto& e : inp_sinks_ordered(node)) {
-          auto pname = sink_pin_name(e);
-          if (pname == "a" || e.get_port_id() == 0) {
-            a      = e.get_driver_pin();
-            have_a = true;
-          } else if (pname == "b" || e.get_port_id() == 1) {
-            b      = e.get_driver_pin();
-            have_b = true;
-          }
-        }
-        if (!have_a || !have_b) {
+        const auto a = livehd::graph_util::get_driver_of_sink_name(node, "a");
+        const auto b = livehd::graph_util::get_driver_of_sink_name(node, "b");
+        if (a.is_invalid() || b.is_invalid()) {
           fatal(ctx, "Div node n_" + std::to_string(node_id(node)) + " missing a/b.");
         }
         op_expr = "Op_UDiv";
@@ -1046,7 +1024,7 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
       }
 
       case Ntype_op::And:
-      case Ntype_op::Or:
+      case Ntype_op::Or :
       case Ntype_op::Xor:
       case Ntype_op::Ror:
       case Ntype_op::EQ : {
@@ -1222,19 +1200,9 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
       }
 
       case Ntype_op::Sext: {
-        Node_pin a, b;
-        bool     have_a = false, have_b = false;
-        for (const auto& e : inp_sinks_ordered(node)) {
-          auto pname = sink_pin_name(e);
-          if (pname == "a" || e.get_port_id() == 0) {
-            a      = e.get_driver_pin();
-            have_a = true;
-          } else if (pname == "b" || e.get_port_id() == 1) {
-            b      = e.get_driver_pin();
-            have_b = true;
-          }
-        }
-        if (!have_a || !have_b) {
+        const auto a = livehd::graph_util::get_driver_of_sink_name(node, "a");
+        const auto b = livehd::graph_util::get_driver_of_sink_name(node, "b");
+        if (a.is_invalid() || b.is_invalid()) {
           fatal(ctx, "Sext node n_" + std::to_string(node_id(node)) + " missing a/b.");
         }
         // Mirror the fast model's amount widening (emit_node_expr, Sext arm): a
@@ -1251,64 +1219,36 @@ std::string cert_node_expr(const Ctx& ctx, Cert_build& build, const Node& node, 
       }
 
       case Ntype_op::Get_mask: {
-        Node_pin              a, mask;
-        bool                  have_a = false, have_m = false;
-        std::vector<Node_pin> ordered;
-        for (const auto& e : inp_sinks_ordered(node)) {
-          ordered.push_back(e.get_driver_pin());
-          auto pname = sink_pin_name(e);
-          if (pname == "a" || e.get_port_id() == 0) {
-            a      = e.get_driver_pin();
-            have_a = true;
-          } else if (pname == "mask" || e.get_port_id() == 1) {
-            mask   = e.get_driver_pin();
-            have_m = true;
-          }
+        const auto range = livehd::graph_util::bit_range(node);
+        if (!range) {
+          fatal(ctx, "Get_mask requires constant lo/hi endpoints");
         }
-        if ((!have_a || !have_m) && ordered.size() == 2) {
-          a      = ordered[0];
-          mask   = ordered[1];
-          have_a = true;
-          have_m = true;
-        }
-        if (!have_a || !have_m) {
-          fatal(ctx, "Get_mask node n_" + std::to_string(node_id(node)) + " missing operands.");
-        }
-        // Mirror the fast model above: widen the mask to at least the source
-        // width so the -1 zext idiom is not truncated to bit 0 in the cert.
-        const uint32_t gm_src_w  = pin_width(ctx, a, node);
-        const uint32_t gm_mask_w = std::max(pin_width(ctx, mask, node), gm_src_w);
-        op_expr                  = "Op_GetMask";
-        deps                     = {cert_dep_id(ctx, build, a, gm_src_w), cert_dep_id(ctx, build, mask, gm_mask_w)};
+        const auto     a     = livehd::graph_util::get_driver_of_sink_name(node, "a");
+        const auto     mask  = livehd::graph_util::create_const(*node.get_graph(),
+                                                                livehd::graph_util::mask_window_const(range->first, range->second));
+        const uint32_t src_w = pin_width(ctx, a, node);
+        const uint32_t mask_w = range->second;
+        op_expr               = "Op_GetMask";
+        deps                  = {cert_dep_id(ctx, build, a, src_w), cert_dep_id(ctx, build, mask, mask_w)};
         break;
       }
 
       case Ntype_op::Set_mask: {
-        Node_pin a, mask, value;
-        bool     have_a = false, have_m = false, have_v = false;
-        for (const auto& e : inp_sinks_ordered(node)) {
-          auto pname = sink_pin_name(e);
-          if (pname == "a" || e.get_port_id() == 0) {
-            a      = e.get_driver_pin();
-            have_a = true;
-          } else if (pname == "mask" || e.get_port_id() == 1) {
-            mask   = e.get_driver_pin();
-            have_m = true;
-          } else if (pname == "value" || e.get_port_id() == 2) {
-            value  = e.get_driver_pin();
-            have_v = true;
-          }
+        const auto range = livehd::graph_util::bit_range(node);
+        if (!range) {
+          fatal(ctx, "Set_mask requires constant lo/hi endpoints");
         }
-        if (!have_a || !have_m || !have_v) {
-          fatal(ctx, "Set_mask node n_" + std::to_string(node_id(node)) + " missing operands.");
-        }
-        op_expr = "Op_SetMask";
-        deps    = {cert_dep_id(ctx, build, a, w),
-                   cert_dep_id(ctx, build, mask, pin_width(ctx, mask, node)),
-                   cert_dep_id(ctx, build, value, pin_width(ctx, value, node))};
+        const auto     a     = livehd::graph_util::get_driver_of_sink_name(node, "a");
+        const auto     value = livehd::graph_util::get_driver_of_sink_name(node, "value");
+        const auto     mask  = livehd::graph_util::create_const(*node.get_graph(),
+                                                                livehd::graph_util::mask_window_const(range->first, range->second));
+        const uint32_t mask_w = range->second;
+        op_expr               = "Op_SetMask";
+        deps                  = {cert_dep_id(ctx, build, a, w),
+                                 cert_dep_id(ctx, build, mask, mask_w),
+                                 cert_dep_id(ctx, build, value, pin_width(ctx, value, node))};
         break;
       }
-
       case Ntype_op::Concat:
         // Deliberate refusal, not an oversight.  The certificate op set is fixed
         // DATA in Translation_LGraph_Model.thy (`datatype lgraph_op`), a file
@@ -1946,19 +1886,9 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
 
     case Ntype_op::Div: {
       // v1: emit sem_udiv unconditionally.
-      Node_pin a, b;
-      bool     have_a = false, have_b = false;
-      for (const auto& e : inp_sinks_ordered(node)) {
-        auto pname = sink_pin_name(e);
-        if (pname == "a" || e.get_port_id() == 0) {
-          a      = e.get_driver_pin();
-          have_a = true;
-        } else if (pname == "b" || e.get_port_id() == 1) {
-          b      = e.get_driver_pin();
-          have_b = true;
-        }
-      }
-      if (!have_a || !have_b) {
+      const auto a = livehd::graph_util::get_driver_of_sink_name(node, "a");
+      const auto b = livehd::graph_util::get_driver_of_sink_name(node, "b");
+      if (a.is_invalid() || b.is_invalid()) {
         const auto reason = "Div node n_" + std::to_string(node_id(node)) + " missing a or b";
         if (ctx.strict) {
           fatal(ctx, reason + ".");
@@ -2220,19 +2150,9 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
     }
 
     case Ntype_op::Sext: {
-      Node_pin a, b;
-      bool     have_a = false, have_b = false;
-      for (const auto& e : inp_sinks_ordered(node)) {
-        auto pname = sink_pin_name(e);
-        if (pname == "a" || e.get_port_id() == 0) {
-          a      = e.get_driver_pin();
-          have_a = true;
-        } else if (pname == "b" || e.get_port_id() == 1) {
-          b      = e.get_driver_pin();
-          have_b = true;
-        }
-      }
-      if (!have_a || !have_b) {
+      const auto a = livehd::graph_util::get_driver_of_sink_name(node, "a");
+      const auto b = livehd::graph_util::get_driver_of_sink_name(node, "b");
+      if (a.is_invalid() || b.is_invalid()) {
         const auto reason = "Sext node n_" + std::to_string(node_id(node)) + " missing a/b";
         if (ctx.strict) {
           fatal(ctx, reason + ".");
@@ -2254,74 +2174,30 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
     }
 
     case Ntype_op::Get_mask: {
-      Node_pin                 a, mask;
-      bool                     have_a = false, have_m = false;
-      std::vector<Node_pin>    ordered;
-      std::vector<std::string> pins;
-      for (const auto& e : inp_sinks_ordered(node)) {
-        ordered.push_back(e.get_driver_pin());
-        auto pname = sink_pin_name(e);
-        pins.push_back(pname + "#" + std::to_string(e.get_port_id()));
-        if (pname == "a" || e.get_port_id() == 0) {
-          a      = e.get_driver_pin();
-          have_a = true;
-        } else if (pname == "mask" || e.get_port_id() == 1) {
-          mask   = e.get_driver_pin();
-          have_m = true;
-        }
+      const auto range = livehd::graph_util::bit_range(node);
+      if (!range) {
+        fatal(ctx, "Get_mask requires constant lo/hi endpoints");
       }
-      if ((!have_a || !have_m) && ordered.size() == 2) {
-        a      = ordered[0];
-        mask   = ordered[1];
-        have_a = true;
-        have_m = true;
-      }
-      if (!have_a || !have_m) {
-        std::string detail;
-        for (const auto& p : pins) {
-          detail += " " + p;
-        }
-        const auto reason = "Get_mask node n_" + std::to_string(node_id(node)) + " missing a/mask; pins:" + detail;
-        if (ctx.strict) {
-          fatal(ctx, reason);
-        }
-        return undefined_at(w, reason);
-      }
-      uint32_t src_w  = pin_width(ctx, a, node);
-      // The canonical zext idiom Get_mask(a, -1) declares the -1 mask at 1 bit;
-      // emitting sem_get_mask at that width would select only bit 0. Widen the
-      // mask to at least the source width (matches pass.lean and cgen_sim).
-      uint32_t mask_w = std::max(pin_width(ctx, mask, node), src_w);
-      return "((sem_get_mask " + ucast_pin_at(ctx, a, src_w) + " " + ucast_pin_at(ctx, mask, mask_w) + ") " + ty_word(w) + ")";
+      const auto a = livehd::graph_util::get_driver_of_sink_name(node, "a");
+      const auto mask
+          = livehd::graph_util::create_const(*node.get_graph(), livehd::graph_util::mask_window_const(range->first, range->second));
+      const uint32_t src_w  = pin_width(ctx, a, node);
+      const uint32_t mask_w = range->second;
+      return "((sem_get_mask " + ucast_pin_at(ctx, a, src_w) + " " + driver_expr_at(ctx, mask, mask_w) + ") " + ty_word(w) + ")";
     }
 
     case Ntype_op::Set_mask: {
-      Node_pin a, mask, value;
-      bool     have_a = false, have_m = false, have_v = false;
-      for (const auto& e : inp_sinks_ordered(node)) {
-        auto pname = sink_pin_name(e);
-        if (pname == "a" || e.get_port_id() == 0) {
-          a      = e.get_driver_pin();
-          have_a = true;
-        } else if (pname == "mask" || e.get_port_id() == 1) {
-          mask   = e.get_driver_pin();
-          have_m = true;
-        } else if (pname == "value" || e.get_port_id() == 2) {
-          value  = e.get_driver_pin();
-          have_v = true;
-        }
+      const auto range = livehd::graph_util::bit_range(node);
+      if (!range) {
+        fatal(ctx, "Set_mask requires constant lo/hi endpoints");
       }
-      if (!have_a || !have_m || !have_v) {
-        const auto reason = "Set_mask node n_" + std::to_string(node_id(node)) + " missing operands";
-        if (ctx.strict) {
-          fatal(ctx, reason + ".");
-        }
-        return undefined_at(w, reason);
-      }
-      auto mask_w  = pin_width(ctx, mask, node);
-      auto value_w = pin_width(ctx, value, node);
+      const auto a     = livehd::graph_util::get_driver_of_sink_name(node, "a");
+      const auto value = livehd::graph_util::get_driver_of_sink_name(node, "value");
+      const auto mask
+          = livehd::graph_util::create_const(*node.get_graph(), livehd::graph_util::mask_window_const(range->first, range->second));
+      const uint32_t mask_w = range->second;
       return "(sem_set_mask " + ucast_pin_at(ctx, a, w) + " " + driver_expr_at(ctx, mask, mask_w) + " "
-             + driver_expr_at(ctx, value, value_w) + ")";
+             + driver_expr_at(ctx, value, pin_width(ctx, value, node)) + ")";
     }
 
     case Ntype_op::Concat: {
@@ -2391,10 +2267,10 @@ std::string emit_node_expr(const Ctx& ctx, const Node& node) {
     }
 
     // Unsupported in v1.
-    case Ntype_op::Latch:
-    case Ntype_op::Fflop:
-    case Ntype_op::Sub:
-    case Ntype_op::LUT:
+    case Ntype_op::Latch  :
+    case Ntype_op::Fflop  :
+    case Ntype_op::Sub    :
+    case Ntype_op::LUT    :
     case Ntype_op::AttrSet:
     case Ntype_op::Hotmux : {
       const std::string opn(Ntype::get_name(op));

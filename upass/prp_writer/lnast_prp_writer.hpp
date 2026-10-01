@@ -671,13 +671,12 @@ private:
   };
   absl::flat_hash_map<std::string, Range_bounds> range_lohi_;                          // range-temp name -> bounds
   std::string                                    render_range_bound(Lnast_nid bound);  // fold-aware, parenthesised operand
-  std::vector<Lnast_nid>                         get_mask_nodes_;                      // every get_mask, for range-mask resolution
-  std::vector<Lnast_nid>                         set_mask_nodes_;                      // every set_mask, same range-mask resolution
+  std::vector<Lnast_nid>                         get_mask_nodes_;                      // every get_mask, for range resolution
   std::vector<std::pair<Lnast_nid, int>>         tuple_get_nodes_;                     // every tuple_get + its pre-order index
   std::vector<std::pair<Lnast_nid, int>>         store_nodes_;                         // every store + its pre-order index
   // Element stores (`store(mem, i.., v)`) by the name of their value `v`.
   absl::flat_hash_map<std::string, Lnast_nid>    element_store_by_value_;
-  // Constant-mask get_masks by the name of their source (the first one).
+  // Constant-range get_masks by the name of their source (the first one).
   absl::flat_hash_map<std::string, Lnast_nid>    const_get_mask_by_source_;
   // The store that closes a memory PARTIAL write `mem[i]#[..] = v` whose
   // read-modify-write this set_mask is (element read -> set_mask -> [full-width
@@ -780,9 +779,6 @@ private:
   // frame is what overflowed a 512 KiB worker stack on CVA6.
   std::string        render_infix_rhs(Lnast_nid def, Lnast_ntype::Lnast_ntype_int t, std::string_view sym, bool operand_ctx);
   std::string        render_get_mask_rhs(Lnast_nid c0, bool operand_ctx);
-  // The position operand when `mask` is the one-bit `1 << pos` a runtime or
-  // named bit index lowers to (`a#[i]`), else invalid.
-  Lnast_nid          single_bit_mask_pos(Lnast_nid mask) const;
   std::string        render_concat_rhs(Lnast_nid c0, bool operand_ctx);
   // `~x` under user ruling 26 (the re-read flips an unsigned-typed operand's
   // own width): the typed bit_not(x, N) and the plain `-x - 1` are each spelled

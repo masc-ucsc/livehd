@@ -85,8 +85,8 @@ TEST(BitwidthInfer, FoldedConstantsPreserveOperandMultiplicity) {
       // Bitwidth need not fold the consumer (e.g. XOR uses a conservative
       // interval). Evaluate its remaining constant operands independently.
       ASSERT_TRUE(producer.is_invalid());
-      int64_t lhs = op == Ntype_op::Mult ? 1 : 0;
-      int64_t rhs = 0;
+      int64_t    lhs           = op == Ntype_op::Mult ? 1 : 0;
+      int64_t    rhs           = 0;
       const auto consumer_node = output.get_master_node();
       const auto consumer_op   = gu::type_op_of(consumer_node);
       for (const auto& in_pin : consumer_node.inp_sorted_pins()) {
@@ -275,7 +275,7 @@ TEST(BitwidthInfer, MaskDoesNotFoldNonmonotoneInterval) {
   one.connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
   auto mask = gu::create_typed_node(*g, Ntype_op::Get_mask);
   sum.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(mask, "a"));
-  one.connect_sink(gu::setup_sink_by_name(mask, "mask"));
+  gu::connect_bit_range(mask, 0, 1);
   mask.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
   Bitwidth(10).do_trans(g);
   EXPECT_FALSE(mask.is_invalid());
@@ -461,8 +461,7 @@ TEST(BitwidthInfer, GetMaskClearsStaleSignedHint) {
   unused_shift.del_node();
   auto mask = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
   g->get_input_pin("data").connect_sink(livehd::graph_util::setup_sink_by_name(mask, "a"));
-  livehd::graph_util::create_const(*g, *Dlop::create_integer(255))
-      .connect_sink(livehd::graph_util::setup_sink_by_name(mask, "mask"));
+  livehd::graph_util::connect_bit_range(mask, 0, 8);
   auto result = mask.create_driver_pin(0);
   livehd::graph_util::set_sbits(result, 8);
   result.connect_sink(g->get_output_pin("o"));
@@ -479,8 +478,7 @@ TEST(BitwidthInfer, SextReinterpretsUnsignedMask) {
   unused_shift.del_node();
   auto mask = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
   g->get_input_pin("data").connect_sink(livehd::graph_util::setup_sink_by_name(mask, "a"));
-  livehd::graph_util::create_const(*g, *Dlop::create_integer(255))
-      .connect_sink(livehd::graph_util::setup_sink_by_name(mask, "mask"));
+  livehd::graph_util::connect_bit_range(mask, 0, 8);
   auto pattern = mask.create_driver_pin(0);
   livehd::graph_util::set_ubits(pattern, 8);
   auto sext = livehd::graph_util::create_typed_node(*g, Ntype_op::Sext);
@@ -662,7 +660,7 @@ TEST(BitwidthInfer, GetMaskKeepsEverySelectedBitOfSignedInput) {
 
   auto gm = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);  // no bits
   livehd::graph_util::setup_sink_by_name(gm, "a").connect_driver(g->get_input_pin("a"));
-  livehd::graph_util::setup_sink_by_name(gm, "mask").connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(7)));
+  livehd::graph_util::connect_bit_range(gm, 0, 3);
   gm.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   EXPECT_EQ(run_and_read_driver(g, gm), 3) << "a & 0b111 over [-4..3] spans [0..7]: u3";
@@ -682,7 +680,7 @@ TEST(BitwidthInfer, GetMaskOverUnsignedInputKeepsWidth) {
 
   auto gm = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
   livehd::graph_util::setup_sink_by_name(gm, "a").connect_driver(g->get_input_pin("a"));
-  livehd::graph_util::setup_sink_by_name(gm, "mask").connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(7)));
+  livehd::graph_util::connect_bit_range(gm, 0, 3);
   gm.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   Bitwidth bw(10);
@@ -707,7 +705,7 @@ TEST(BitwidthInfer, MaskedInputPlusOneKeepsCarry) {
 
   auto gm = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
   livehd::graph_util::setup_sink_by_name(gm, "a").connect_driver(g->get_input_pin("a"));
-  livehd::graph_util::setup_sink_by_name(gm, "mask").connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(7)));
+  livehd::graph_util::connect_bit_range(gm, 0, 3);
 
   auto sum = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);
   gm.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
@@ -735,7 +733,7 @@ TEST(BitwidthInfer, MaskThenSextThenPlusOneKeepsCarry) {
 
   auto gm = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
   livehd::graph_util::setup_sink_by_name(gm, "a").connect_driver(g->get_input_pin("a"));
-  livehd::graph_util::setup_sink_by_name(gm, "mask").connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(7)));
+  livehd::graph_util::connect_bit_range(gm, 0, 3);
 
   auto sx = livehd::graph_util::create_typed_node(*g, Ntype_op::Sext);
   livehd::graph_util::setup_sink_by_name(sx, "a").connect_driver(gm.create_driver_pin(0));
@@ -750,16 +748,9 @@ TEST(BitwidthInfer, MaskThenSextThenPlusOneKeepsCarry) {
   EXPECT_EQ(bits, 4) << "[0..7] sign-extended then +1 spans [1..8]: u4";
 }
 
-// The zero-extend every slang front end emits: a signed N-bit port masked with
-// an ALL-ONES (negative, -1) mask. `x` spans [-128..127] and `x & -1` maps
-// x=-1 to 255, so the image is [0..255] and `+1` needs u9.
-//
-// The worst-case probe used the literal -1, but a negative mask makes
-// get_mask_op copy bits [0, src_bits) of the SOURCE and -1 is one bit wide, so
-// the single-bit rule returned -1 and the bound fell back to 2^(N-1) = 128.
-// get_bits(128) == get_bits(255) == 9, so the mask pin itself looked identical
-// and only the consumer exposed it: the sum came out one bit narrow and cgen
-// truncated (`r(ref=256 impl=0) @ x=255`).
+// Reinterpret the complete signed 8-bit port as unsigned: [-128,127] maps
+// into [0,255], so adding one needs nine unsigned bits. The bound must include
+// 255, even though both 128 and 255 have the same significant-bit width.
 TEST(BitwidthInfer, AllOnesMaskOverSignedPortKeepsFullRange) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_test");
   auto  gio = lib.create_io("bw_allones_mask");
@@ -771,8 +762,7 @@ TEST(BitwidthInfer, AllOnesMaskOverSignedPortKeepsFullRange) {
 
   auto gm = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
   livehd::graph_util::setup_sink_by_name(gm, "a").connect_driver(g->get_input_pin("x"));
-  livehd::graph_util::setup_sink_by_name(gm, "mask")
-      .connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(-1)));
+  livehd::graph_util::connect_bit_range(gm, 0, 8);
 
   auto sum = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);
   gm.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
@@ -800,7 +790,7 @@ TEST(BitwidthInfer, VariableSraKeepsRangeAndSurvives) {
   // shift amount = (n & 3) + 1  -> [1..4], strictly positive
   auto nm = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
   livehd::graph_util::setup_sink_by_name(nm, "a").connect_driver(g->get_input_pin("n"));
-  livehd::graph_util::setup_sink_by_name(nm, "mask").connect_driver(livehd::graph_util::create_const(*g, *Dlop::create_integer(3)));
+  livehd::graph_util::connect_bit_range(nm, 0, 2);
   auto amt = livehd::graph_util::create_typed_node(*g, Ntype_op::Sum);
   nm.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(amt, 0));
   livehd::graph_util::create_const(*g, *Dlop::create_integer(1)).connect_sink(livehd::graph_util::setup_sink_pid(amt, 0));
@@ -996,8 +986,8 @@ TEST(BitwidthInfer, MuxUnionsDataArms) {
 // same width as each other.
 TEST(BitwidthInfer, ConcatWidthIsSumOfDeclaredLanes) {
   auto g  = bounded_inputs("bw_concat", 3, 5);
-  auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::Concat);  // no bits
-  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));              // lane 0 value (MSB lane)
+  auto op = livehd::graph_util::create_typed_node(*g, Ntype_op::Concat);          // no bits
+  g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_pid(op, 0));  // lane 0 value (MSB lane)
   livehd::graph_util::create_const(*g, *Dlop::create_integer(3)).connect_sink(livehd::graph_util::setup_sink_pid(op, 1));
   g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(op, 2));  // lane 1 value (LSB lane)
   livehd::graph_util::create_const(*g, *Dlop::create_integer(5)).connect_sink(livehd::graph_util::setup_sink_pid(op, 3));
@@ -1012,8 +1002,7 @@ TEST(BitwidthInfer, OversizedConcatLaneReportsError) {
   auto g      = bounded_inputs("bw_concat_invalid", 8, 1);
   auto select = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);
   g->get_input_pin("a").connect_sink(livehd::graph_util::setup_sink_by_name(select, "a"));
-  livehd::graph_util::create_const(*g, *Dlop::create_integer(15))
-      .connect_sink(livehd::graph_util::setup_sink_by_name(select, "mask"));
+  livehd::graph_util::connect_bit_range(select, 0, 4);
   auto concat = livehd::graph_util::create_typed_node(*g, Ntype_op::Concat);
   select.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(concat, 0));
   livehd::graph_util::create_const(*g, *Dlop::create_integer(2)).connect_sink(livehd::graph_util::setup_sink_pid(concat, 1));
@@ -1027,6 +1016,9 @@ TEST(BitwidthMasks, DropsOnlyFiniteLowMaskIdentities) {
   for (auto op : {Ntype_op::Get_mask, Ntype_op::And}) {
     for (auto mask : {15, 31, 12, 5}) {
       for (bool signed_input : {false, true}) {
+        if (op == Ntype_op::Get_mask && mask == 5) {
+          continue;
+        }  // sparse bitwise AND only
         auto name = "bw_mask_identity_" + std::to_string(id++);
         auto g    = bounded_inputs(name.c_str(), 4, 1);
         g->get_io()->set_unsign("a", !signed_input);
@@ -1035,7 +1027,8 @@ TEST(BitwidthMasks, DropsOnlyFiniteLowMaskIdentities) {
         auto constant = gu::create_const(*g, *Dlop::create_integer(mask));
         if (op == Ntype_op::Get_mask) {
           src.connect_sink(gu::setup_sink_by_name(node, "a"));
-          constant.connect_sink(gu::setup_sink_by_name(node, "mask"));
+          const auto [lo, hi] = gu::const_of(constant).get_mask_range();
+          gu::connect_bit_range(node, lo, hi);
         } else {
           src.connect_sink(livehd::graph_util::setup_sink_pid(node, 0));
           constant.connect_sink(livehd::graph_util::setup_sink_pid(node, 0));
@@ -1063,7 +1056,7 @@ TEST(BitwidthMasks, KeepsDeclaredWidthAndDuplicateConsumers) {
     auto src  = g->get_input_pin("a");
     auto node = gu::create_typed_node(*g, Ntype_op::Get_mask);
     src.connect_sink(gu::setup_sink_by_name(node, "a"));
-    gu::create_const(*g, *Dlop::create_integer(15)).connect_sink(gu::setup_sink_by_name(node, "mask"));
+    livehd::graph_util::connect_bit_range(node, 0, 4);
     if (duplicate) {
       auto sum = gu::create_typed_node(*g, Ntype_op::Sum);
       src.connect_sink(livehd::graph_util::setup_sink_pid(sum, 0));
@@ -1093,7 +1086,7 @@ TEST(BitwidthMasks, KeepsInstancePortWidth) {
   g->get_io()->set_unsign("a", true);
   auto node = gu::create_typed_node(*g, Ntype_op::Get_mask);
   g->get_input_pin("a").connect_sink(gu::setup_sink_by_name(node, "a"));
-  gu::create_const(*g, *Dlop::create_integer(15)).connect_sink(gu::setup_sink_by_name(node, "mask"));
+  livehd::graph_util::connect_bit_range(node, 0, 4);
   auto sub = gu::create_typed_node(*g, Ntype_op::Sub);
   sub.set_subnode(child);
   node.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_by_name(sub, "a"));
@@ -1206,7 +1199,7 @@ TEST(BitwidthMemory, WriteDataDoesNotWidenSharedMaskedExpression) {
   memory.create_driver_pin(0).connect_sink(g->get_output_pin("read"));
   auto mask = gu::create_typed_node(*g, Ntype_op::Get_mask);
   g->get_input_pin("data").connect_sink(gu::setup_sink_by_name(mask, "a"));
-  constant(255).connect_sink(gu::setup_sink_by_name(mask, "mask"));
+  gu::connect_bit_range(mask, 0, 8);
   mask.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(memory, "din"));
   auto mux = gu::create_typed_node(*g, Ntype_op::Mux);
   g->get_input_pin("select").connect_sink(livehd::graph_util::setup_sink_pid(mux, 0));

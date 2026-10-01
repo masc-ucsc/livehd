@@ -31,9 +31,9 @@ pub mod verilog_mem_oob_depth::[timecheck=false](clk:Clock, we:U1, waddr:U8, rad
   }
 
   const ri = (raddr - 5)#[0..<7]
-  if ri < 126 {
-    dout = mem[ri]
+  dout = if ri < 126 {
+    mem[ri]
   } else {
-    dout = 0
+    0
   }
 }

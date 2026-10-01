@@ -12,6 +12,10 @@
 // atomically (all inputs -> all outputs via one child.cycle()), and
 // flatten_false_loop_subs declines because callee_is_pure_comb() rejects any
 // callee containing a Flop, so the survivor errs `comb-loop-through-instance`.
+
+
+// prp-style-allow hardcoded-reset
+// prp-style-allow reset-port-type
 pub mod busy_cell::[timecheck=false](start:U1, kill:U1) -> (ready:U1@[]) {
   reg busy:U1 = 0
   ready = busy ^ 1

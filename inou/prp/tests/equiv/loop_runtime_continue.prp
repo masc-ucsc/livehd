@@ -10,7 +10,7 @@
 pub mod top(skip:U8) -> (total:U4@[0]) {
   mut acc:U4 = 0
   for i in 0..<8 {
-    if skip#[i] { continue }
+    if skip#[i] != 0 { continue }
     acc = acc + 1
   }
   total = acc

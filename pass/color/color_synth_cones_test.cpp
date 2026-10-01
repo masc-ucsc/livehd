@@ -462,10 +462,12 @@ TEST(ColorSynthCones, MapperProfileSuppliesStopDefaultsAndExplicitWins) {
     const char* stop_arith;  // "" = left to the profile
     bool        merged;
   };
-  for (const auto& c : {Case{"abc", "", false},
-                        Case{"usyn", "", true},
-                        Case{"usyn", "true", false},
-                        Case{"abc", "false", true}}) {
+  for (const auto& c : {
+           Case{ "abc",      "", false},
+           Case{"usyn",      "",  true},
+           Case{"usyn",  "true", false},
+           Case{ "abc", "false",  true}
+  }) {
     Eprp_var            var;
     Eprp_var::Eprp_dict labels{
         {     "alg",  "synth"},
@@ -487,7 +489,7 @@ TEST(ColorSynthCones, MapperProfileSuppliesStopDefaultsAndExplicitWins) {
                                              {
                                                  {   "alg", "synth"},
                                                  {  "hier", "false"},
-                                                 {"mapper",  "yosys"}
+                                                 {"mapper", "yosys"}
   }));
 }
 
@@ -809,7 +811,7 @@ TEST(ColorSynthCones, RuntimeSraKeepsItsConstantMaskSlice) {
   // prefix for. `mask` is sink pid 2 (cell.cpp), NOT 1.
   auto slice = create_typed_node(*g, Ntype_op::Get_mask, 8);
   sra_d.connect_sink(livehd::graph_util::setup_sink_pid(slice, 0));
-  create_const(*g, *Dlop::create_integer(0xff)).connect_sink(livehd::graph_util::setup_sink_pid(slice, 2));
+  livehd::graph_util::connect_bit_range(slice, 0, 8);
   auto slice_d = slice.create_driver_pin(0);
   set_bits(slice_d, 8);
 
@@ -912,9 +914,9 @@ TEST(ColorSynthCones, ForwardDefaultDoesNotBreakOtherSynthesisModes) {
     EXPECT_NO_THROW(Pass::eprp.run_method_now("pass.color",
                                               var,
                                               {
-                                                  {      "alg", "synth"},
-                                                  {     "mode",    mode},
-                                                  {     "hier", "false"}
+                                                  { "alg", "synth"},
+                                                  {"mode",    mode},
+                                                  {"hier", "false"}
     }));
     EXPECT_EQ(uncolored_count(f.g.get()), 0u);
   }
@@ -1241,8 +1243,8 @@ TEST(ColorSynthCones, MuxPlacementChangesDataBoundaryButKeepsSelectAndArithmetic
       data.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(m, 2));
       return m;
     };
-    auto m1   = mux(g->get_input_pin("b"));
-    auto m2   = mux(m1.create_driver_pin(0));
+    auto m1 = mux(g->get_input_pin("b"));
+    auto m2 = mux(m1.create_driver_pin(0));
     m2.create_driver_pin(0).connect_sink(g->get_output_pin("y"));
     auto flop = make_flop(*g, m2.create_driver_pin(0), 16);
     select.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(flop, 4));
@@ -1566,7 +1568,7 @@ TEST(ColorSynthCones, MuxGroupKeepsInternalWiringButNotExternalData) {
   auto fixed = shift(first.create_driver_pin(0), create_const(*g, *Dlop::create_integer(2)));
   auto mask  = create_typed_node(*g, Ntype_op::Get_mask, 8);
   fixed.create_driver_pin(0).connect_sink(livehd::graph_util::setup_sink_pid(mask, 0));
-  create_const(*g, *Dlop::create_integer(255)).connect_sink(livehd::graph_util::setup_sink_pid(mask, 1));
+  livehd::graph_util::connect_bit_range(mask, 0, 8);
   auto second = mux(mask.create_driver_pin(0));
   second.create_driver_pin(0).connect_sink(g->get_output_pin("y"));
   auto runtime = shift(first.create_driver_pin(0), g->get_input_pin("amount"));
@@ -1683,15 +1685,15 @@ Absorb_fixture absorb_fixture(const char* dir, int32_t tail_bits) {
   io->add_output("ya", 64);
   io->add_output("yb", tail_bits);
   Absorb_fixture f;
-  f.g       = io->create_graph();
-  auto data = f.g->get_input_pin("a");
+  f.g                  = io->create_graph();
+  auto            data = f.g->get_input_pin("a");
   hhds::Pin_class middle;
   for (int i = 0; i < 12; ++i) {
     auto n = create_typed_node(*f.g, i % 3 == 0 ? Ntype_op::Xor : (i % 3 == 1 ? Ntype_op::And : Ntype_op::Or), 64);
     data.connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
     f.g->get_input_pin("b").connect_sink(livehd::graph_util::setup_sink_pid(n, 0));
     f.chain_pred += livehd::graph_util::predict_abc_size(n);
-    data = n.create_driver_pin(0);
+    data          = n.create_driver_pin(0);
     if (i == 5) {
       middle = data;
     }
@@ -1714,7 +1716,7 @@ Absorb_fixture absorb_fixture(const char* dir, int32_t tail_bits) {
 TEST(ColorSynthCones, SmallColorJoinsItsMostOverlappingNeighbourPastMaxGate) {
   for (const int32_t tail_bits : {8, 64}) {
     for (const uint32_t min_nodes : {0U, 12U}) {
-      auto f = absorb_fixture(std::format("lg_cones_absorb_{}_{}", tail_bits, min_nodes).c_str(), tail_bits);
+      auto f         = absorb_fixture(std::format("lg_cones_absorb_{}_{}", tail_bits, min_nodes).c_str(), tail_bits);
       auto opts      = capped_opts(f.chain_pred + 4);
       opts.min_nodes = min_nodes;
       ASSERT_GT(f.chain_pred + f.tail_pred, opts.max_gate);

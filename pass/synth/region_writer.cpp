@@ -57,14 +57,14 @@ void bypass_setmask_bit_reads(hhds::Graph* g) {
         resolved = false;
         break;
       }
-      auto mask  = gu::get_driver_of_sink_name(writer, "mask");
-      auto base  = gu::get_driver_of_sink_name(writer, "a");
-      auto value = gu::get_driver_of_sink_name(writer, "value");
-      if (mask.is_invalid() || base.is_invalid() || value.is_invalid() || !mask.is_const()) {
+      const auto mask  = livehd::graph_util::bit_range(writer);
+      auto       base  = gu::get_driver_of_sink_name(writer, "a");
+      auto       value = gu::get_driver_of_sink_name(writer, "value");
+      if (!mask.has_value() || base.is_invalid() || value.is_invalid()) {
         resolved = false;
         break;
       }
-      auto window = gu::mask_window_of(gu::const_of(mask));
+      auto window = mask;
       if (!window) {
         resolved = false;
         break;
@@ -116,28 +116,28 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
         .emit();
     return false;
   }
-  const auto& outputs              = blast.lnet.outputs();
-  const auto& flops                = blast.flops;
-  const auto& bboxes               = blast.bboxes;
-  const auto& native_comb_logic    = blast.native_comb_logic;
-  const auto& region_in_name       = blast.region_in_name;
-  const auto& pi_order             = blast.pi_order;
-  const auto& all_pi_order         = blast.all_pi_order;
-  const auto& bbox_pi              = blast.bbox_pi;
-  const auto& po_order             = blast.po_order;
-  const auto& bbox_po              = blast.bbox_po;
-  const auto& direct_native_output = blast.direct_native_output;
-  const bool  has_dummy_po         = blast.has_dummy_po;
-  const bool  map_register         = registers.map;
-  const auto& dff                  = *registers.cell;
-  const auto& dff_ladder           = *registers.ladder;
+  const auto&                                 outputs              = blast.lnet.outputs();
+  const auto&                                 flops                = blast.flops;
+  const auto&                                 bboxes               = blast.bboxes;
+  const auto&                                 native_comb_logic    = blast.native_comb_logic;
+  const auto&                                 region_in_name       = blast.region_in_name;
+  const auto&                                 pi_order             = blast.pi_order;
+  const auto&                                 all_pi_order         = blast.all_pi_order;
+  const auto&                                 bbox_pi              = blast.bbox_pi;
+  const auto&                                 po_order             = blast.po_order;
+  const auto&                                 bbox_po              = blast.bbox_po;
+  const auto&                                 direct_native_output = blast.direct_native_output;
+  const bool                                  has_dummy_po         = blast.has_dummy_po;
+  const bool                                  map_register         = registers.map;
+  const auto&                                 dff                  = *registers.cell;
+  const auto&                                 dff_ladder           = *registers.ladder;
   static const std::vector<liberty::Dff_cell> kNoCells;
   // The asynchronous clear (false) / preset (true) cell ladders.
-  auto areset_ladder = [&](bool v) -> const std::vector<liberty::Dff_cell>& {
+  auto                                        areset_ladder = [&](bool v) -> const std::vector<liberty::Dff_cell>& {
     const auto* l = v ? registers.areset1 : registers.areset0;
     return l != nullptr ? *l : kNoCells;
   };
-  bool        unsupported          = false;  // a black box whose child def is missing
+  bool unsupported = false;  // a black box whose child def is missing
 
   // --- read back: each mapped gate -> a 1-bit blackbox Sub in the body ---
   auto* body = rb.body;
@@ -424,10 +424,10 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     std::vector<const liberty::Dff_cell*>     lcell_type;
     hhds::Node_class                          lbus;  // the reassembled Q bus (a Concat), deleted when unread
   };
-  std::vector<Bbox_recon> bbox_recon(bboxes.size());
+  std::vector<Bbox_recon>                     bbox_recon(bboxes.size());
   // --- latch cells (Bbox::latch) ---
   static const std::vector<liberty::Dff_cell> kNoLatchCells;
-  auto latch_ladder = [&](bool low, int kind) -> const std::vector<liberty::Dff_cell>& {
+  auto                                        latch_ladder = [&](bool low, int kind) -> const std::vector<liberty::Dff_cell>& {
     return registers.latch != nullptr ? (*registers.latch)[low ? 1 : 0][kind] : kNoLatchCells;
   };
   int    latch_cells     = 0;
@@ -435,7 +435,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   int    latch_inv_cells = 0;  // D-side inverters (QN cells) and enable/reset level inverters
   // One min-size library inverter (the same cell a negedge clock or a reset
   // polarity takes), shared per source where the caller caches it.
-  auto mint_inverter = [&](const hhds::Pin_class& src, const std::string& name) -> hhds::Pin_class {
+  auto   mint_inverter   = [&](const hhds::Pin_class& src, const std::string& name) -> hhds::Pin_class {
     const auto inv_type = lib.inverter();
     I(inv_type.has_value());  // a backend refuses a library without an inverter
     const auto& desc = lib.decl(*outlib_, *inv_type);
@@ -453,7 +453,9 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   auto latch_d_connect = [&](Bbox_recon& br, int b, hhds::Pin_class drv) {
     const auto* cell = br.lcell_type[static_cast<size_t>(b)];
     if (cell->q_inverted) {
-      drv = mint_inverter(drv, std::format("{}__dinv", std::string{br.lcell[static_cast<size_t>(b)].attr(hhds::attrs::name).get_or("")}));
+      drv = mint_inverter(
+          drv,
+          std::format("{}__dinv", std::string{br.lcell[static_cast<size_t>(b)].attr(hhds::attrs::name).get_or("")}));
     }
     drv.connect_sink(br.lcell[static_cast<size_t>(b)].create_sink_pin(cell->d_pin));
   };
@@ -494,10 +496,10 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     fo[static_cast<size_t>(b)] += static_cast<int>(readers[mapped.sources[i]]);
   }
   absl::flat_hash_map<std::string, int> latch_name_used;
-  auto build_latch_cells = [&](size_t bi) {
-    const auto& bb = bboxes[bi];
-    const auto& lm = bb.latch;
-    auto&       br = bbox_recon[bi];
+  auto                                  build_latch_cells = [&](size_t bi) {
+    const auto&    bb  = bboxes[bi];
+    const auto&    lm  = bb.latch;
+    auto&          br  = bbox_recon[bi];
     hhds::SourceId sid = hhds::SourceId_invalid;
     if (auto a = bb.node.attr(hhds::attrs::srcid); a.has() && a.get() != 0) {
       sid = out_srcmap.import_from(rb.src->source_locator(), a.get());
@@ -507,11 +509,11 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       const int   kind   = lm.reset_cells ? (lm.rst_val[static_cast<size_t>(b)] ? 2 : 1) : 0;
       const auto& ladder = latch_ladder(lm.cell_low, kind);
       I(!ladder.empty());  // the blaster planned this latch only when its cell exists
-      const auto& fo     = latch_fanout[bi];
-      const int   loads  = b < static_cast<int>(fo.size()) ? fo[static_cast<size_t>(b)] : 1;
-      const auto  rung   = std::min<size_t>(loads <= 8 ? 0 : (loads <= 16 ? 1 : 2), ladder.size() - 1);
-      const auto& cell   = ladder[rung];
-      auto        sub    = gu::create_typed_node(*body, Ntype_op::Sub);
+      const auto& fo    = latch_fanout[bi];
+      const int   loads = b < static_cast<int>(fo.size()) ? fo[static_cast<size_t>(b)] : 1;
+      const auto  rung  = std::min<size_t>(loads <= 8 ? 0 : (loads <= 16 ? 1 : 2), ladder.size() - 1);
+      const auto& cell  = ladder[rung];
+      auto        sub   = gu::create_typed_node(*body, Ntype_op::Sub);
       sub.set_subnode(liberty::create_dff_io(*outlib_, cell));
       // The source latch's name (the standard `x[i]` bit name when wide,
       // core/bus_name.hpp, with the aggregate provenance a DFF-mapped register
@@ -594,7 +596,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       build_latch_cells(bi);
       continue;
     }
-    auto  nn = gu::create_typed_node(*body, bb.op);
+    auto nn = gu::create_typed_node(*body, bb.op);
     if (bb.op == Ntype_op::Sub) {
       if (auto child = bb.node.get_subnode_io()) {
         // A def with a body was partitioned children-first; a body-less black
@@ -763,14 +765,14 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   // (a register clock, a PI read by mapped logic, or a child gate's clock): CLK
   // from the region input -- or from the parent gate's cell for a gate chain --
   // the test pin tied inactive (0), EN from the gate's ABC PO (pass 2b).
-  int                                              icg_cells = 0;
-  double                                           icg_area  = 0.0;
-  static const std::vector<liberty::Icg_cell>      kNoIcgs;
-  const auto&                                      icg_ladder = registers.icg != nullptr ? *registers.icg : kNoIcgs;
-  absl::flat_hash_set<std::string>                 icg_names;
-  std::vector<hhds::Pin_class>                     icg_out(blast.icgs.size());
+  int                                                             icg_cells = 0;
+  double                                                          icg_area  = 0.0;
+  static const std::vector<liberty::Icg_cell>                     kNoIcgs;
+  const auto&                                                     icg_ladder = registers.icg != nullptr ? *registers.icg : kNoIcgs;
+  absl::flat_hash_set<std::string>                                icg_names;
+  std::vector<hhds::Pin_class>                                    icg_out(blast.icgs.size());
   std::vector<std::tuple<hhds::Node_class, std::string, int32_t>> icg_en_pending;  // (cell, EN pin, PO) for pass 2b
-  std::function<hhds::Pin_class(size_t)>           icg_output = [&](size_t i) -> hhds::Pin_class {
+  std::function<hhds::Pin_class(size_t)>                          icg_output = [&](size_t i) -> hhds::Pin_class {
     auto& out = icg_out[i];
     if (!out.is_invalid()) {
       return out;
@@ -904,8 +906,8 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   // flop (clock/reset) and to ABC's own latch init.
   std::vector<const Cell_netlist::Latch*> lat;
   std::vector<const Seq_flop*>            latch_owner;
-  std::vector<int>             latch_owner_bit;
-  int                          crossed_bits = 0;
+  std::vector<int>                        latch_owner_bit;
+  int                                     crossed_bits = 0;
   if (map_register && !flops.empty()) {
     for (const auto& l : mapped.latches) {
       lat.push_back(&l);
@@ -984,14 +986,14 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   // The asynchronous-reset register latch k belongs to (Seq_flop::async_reset),
   // or null. Only reachable with the latch count preserved: the guard in pass
   // 1c refuses a reshaped set that carries one.
-  auto async_owner = [&](int k) -> const Seq_flop* {
+  auto async_owner  = [&](int k) -> const Seq_flop* {
     if (k < static_cast<int>(latch_owner.size()) && latch_owner[k]->async_reset) {
       return latch_owner[k];
     }
     return nullptr;
   };
   // The value latch k's async reset loads (async_owner(k) != null).
-  auto async_value = [&](int k) -> bool { return latch_owner[k]->arst_val[static_cast<size_t>(latch_owner_bit[k])]; };
+  auto async_value   = [&](int k) -> bool { return latch_owner[k]->arst_val[static_cast<size_t>(latch_owner_bit[k])]; };
   // Whether the cell latch k maps to shows the complement (a QN cell): the
   // plain pick, or the clear/preset pick for an async-reset bit.
   auto cell_inverted = [&](int k) -> bool {
@@ -1033,10 +1035,10 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       }
     }
   }
-  const auto   mio_inv  = lib.inverter();
-  const double inv_area = mio_inv ? lib.type(*mio_inv).area : 0.0;
-  int qn_dropped = 0;  // root inverters removed
-  int qn_swapped = 0;  // root gates replaced by their inverting twin
+  const auto   mio_inv    = lib.inverter();
+  const double inv_area   = mio_inv ? lib.type(*mio_inv).area : 0.0;
+  int          qn_dropped = 0;  // root inverters removed
+  int          qn_swapped = 0;  // root gates replaced by their inverting twin
 
   // pass 1b: each mapped gate -> a Sub; map its output net -> Sub output pin.
   // A decoupling buffer -- single-input identity gate whose output feeds only
@@ -1138,9 +1140,9 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   // retime-reshaped count falls back to a single-root collapse (one register
   // name in the region) or per-latch deterministically-named 1-bit flops.
   struct Recon_flop {
-    hhds::Node_class        node;
-    int                     bits = 0;
-    std::vector<uint32_t>   dnet;  // per-bit latch data-in net (wired in pass 2b)
+    hhds::Node_class      node;
+    int                   bits = 0;
+    std::vector<uint32_t> dnet;  // per-bit latch data-in net (wired in pass 2b)
   };
   std::vector<Recon_flop> recon;
   // register=true DFF-cell mapping: one library DFF Sub per surviving latch (its
@@ -1162,9 +1164,9 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     int32_t          po;
   };
   std::vector<Pending_reset> pending_resets;
-  int                    clock_inv_cells = 0;
-  int                    reset_inv_cells = 0;
-  bool                   init_dropped    = false;  // a concrete power-on init lost to a plain DFF cell
+  int                        clock_inv_cells = 0;
+  int                        reset_inv_cells = 0;
+  bool                       init_dropped    = false;  // a concrete power-on init lost to a plain DFF cell
   if (map_register && !flops.empty()) {
     // src external driver -> body driver pin (region input port, or recreated const)
     absl::flat_hash_map<hhds::Pin_class, std::string> src_in_to_name;
@@ -1400,7 +1402,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       // One IO decl per cell actually used (create_dff_io is find-or-create,
       // so an unused rung leaves no stray decl in the output library).
       absl::flat_hash_map<std::string, std::shared_ptr<hhds::GraphIO>> cell_io;
-      auto                                                              io_for = [&](const liberty::Dff_cell& c) {
+      auto                                                             io_for = [&](const liberty::Dff_cell& c) {
         auto& io = cell_io[c.name];
         if (!io) {
           io = liberty::create_dff_io(*outlib_, c);
@@ -1456,9 +1458,9 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
         int32_t            source = 0;
       };
       auto map_dff_cell = [&](int k, const std::string& owner = {}, const Blast_lane* lane = nullptr) {
-        const auto* L    = lat[k];
-        const auto  qnet = L->q;
-        const auto  dnet = L->d;
+        const auto* L      = lat[k];
+        const auto  qnet   = L->q;
+        const auto  dnet   = L->d;
         const auto* af     = async_owner(k);
         const bool  aval   = af != nullptr && async_value(k);
         const auto& ladder = af != nullptr ? areset_ladder(aval) : dff_ladder;
@@ -1490,8 +1492,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
             rdrv.connect_sink(sub.create_sink_pin(cell.reset_pin(aval)));
           }
           if (const auto& other = cell.reset_pin(!aval); !other.empty()) {
-            gu::create_const(*body, *Dlop::create_integer(cell.reset_low(!aval) ? 1 : 0))
-                .connect_sink(sub.create_sink_pin(other));
+            gu::create_const(*body, *Dlop::create_integer(cell.reset_low(!aval) ? 1 : 0)).connect_sink(sub.create_sink_pin(other));
           }
         }
         if (lane != nullptr) {
@@ -1712,16 +1713,17 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   if (mapped.outputs.size()
       != po_order.size() + bbox_po.size() + blast.arst_pos + blast.icg_pos + blast.latch_pos + (has_dummy_po ? 1 : 0)) {
     livehd::diag::warn("pass.abc", "abc-readback", "internal")
-        .msg("pass.abc: region '{}': mapped PO count {} != created {} (region {} + bbox {} + async reset {} + clock-gate "
-             "enable {} + latch cell {}) — read-back misaligned",
-             rb.module_name,
-             mapped.outputs.size(),
-             po_order.size() + bbox_po.size() + blast.arst_pos + blast.icg_pos + blast.latch_pos,
-             po_order.size(),
-             bbox_po.size(),
-             blast.arst_pos,
-             blast.icg_pos,
-             blast.latch_pos)
+        .msg(
+            "pass.abc: region '{}': mapped PO count {} != created {} (region {} + bbox {} + async reset {} + clock-gate "
+            "enable {} + latch cell {}) — read-back misaligned",
+            rb.module_name,
+            mapped.outputs.size(),
+            po_order.size() + bbox_po.size() + blast.arst_pos + blast.icg_pos + blast.latch_pos,
+            po_order.size(),
+            bbox_po.size(),
+            blast.arst_pos,
+            blast.icg_pos,
+            blast.latch_pos)
         .emit();
   }
   for (int i = 0; i < static_cast<int>(mapped.outputs.size()); ++i) {
@@ -1841,7 +1843,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     // The cell driving a signal, or kNone for a source or a latch.
     const auto driving_cell = [&](uint32_t sig) {
       return sig != Cell_netlist::kNone && mapped.signals[sig].kind == Cell_netlist::Kind::cell ? mapped.signals[sig].index
-                                                                                               : Cell_netlist::kNone;
+                                                                                                : Cell_netlist::kNone;
     };
     std::vector<std::vector<uint32_t>> port_roots(rb.outputs.size());
     std::vector<hhds::SourceId>        cone_srcid(po_srcid);

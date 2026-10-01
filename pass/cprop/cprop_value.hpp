@@ -125,9 +125,10 @@ inline int unsigned_width(const Pin& pin) {
     return std::max(1, static_cast<int>(std::bit_width(static_cast<unsigned>(gu::reduction_count(node)))));
   }
   if (op == Ntype_op::Get_mask) {
-    auto mask = gu::get_driver_of_sink_name(node, "mask");
-    if (mask.is_const() && !gu::const_of(mask).is_negative() && !gu::const_of(mask).has_unknowns()) {
-      return gu::const_of(mask).popcount();
+    const auto mask = livehd::graph_util::bit_range(node);
+    if (mask.has_value() && !livehd::graph_util::mask_window_const(mask->first, mask->second).is_negative()
+        && !livehd::graph_util::mask_window_const(mask->first, mask->second).has_unknowns()) {
+      return livehd::graph_util::mask_window_const(mask->first, mask->second).popcount();
     }
   }
   if (active) {
@@ -204,8 +205,8 @@ inline void remember(const Node& node) {
   }
   if (op == Ntype_op::Set_mask) {
     const auto base       = gu::get_driver_of_sink_name(node, "a");
-    const auto mask       = gu::get_driver_of_sink_name(node, "mask");
-    const auto window     = mask.is_const() ? gu::mask_window_of(gu::const_of(mask)) : std::nullopt;
+    const auto mask       = livehd::graph_util::bit_range(node);
+    const auto window     = mask.has_value() ? mask : std::nullopt;
     const int  base_width = unsigned_width(base);
     size_t     cost       = 1;
     if (auto prior = active->write_costs.find(base.get_class_index()); prior != active->write_costs.end()) {
@@ -238,9 +239,9 @@ inline void remember(const Node& node) {
       }
     }
   } else if (op == Ntype_op::Get_mask) {
-    const auto mask = gu::get_driver_of_sink_name(node, "mask");
-    if (mask.is_const()) {
-      auto       window = gu::mask_window_of(gu::const_of(mask));
+    const auto mask = livehd::graph_util::bit_range(node);
+    if (mask.has_value()) {
+      auto       window = mask;
       const auto source = footprint(gu::get_driver_of_sink_name(node, "a"));
       if (window && source.first >= 0) {
         const int lo = std::max(source.first, window->first), hi = std::min(source.second, window->second);

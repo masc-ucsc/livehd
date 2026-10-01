@@ -8,11 +8,7 @@ using namespace livehd::graph_util;
 using livehd::cprop_value::make_node;
 Cprop::Inp_pins ordered_inp_edges(const hhds::Node_class& node) { return node.inp_pins_snapshot(); }
 hhds::Pin_class drv_at(const hhds::Node_class& node, uint32_t port) { return node.get_sink_pin(port).get_driver_pin(); }
-int             low_mask_width(const Dlop& mask) {
-  auto window = mask_window_of(mask);
-  return window && window->first == 0 ? window->second : -1;
-}
-bool has_single_consumer(const hhds::Pin_class& pin) {
+bool            has_single_consumer(const hhds::Pin_class& pin) {
   auto edges = pin.out_edges();
   auto it    = edges.begin();
   return it != edges.end() && ++it == edges.end();
@@ -61,11 +57,11 @@ bool Bitwidth_rewrite::scalar_concat_range(hhds::Node_class& node) {
 
 bool Bitwidth_rewrite::scalar_get_mask_range(hhds::Node_class& node) {
   const auto source = drv_at(node, 0);
-  const auto mask   = drv_at(node, 2);
-  if (source.is_invalid() || !mask.is_const()) {
+  const auto mask   = bit_range(node);
+  if (source.is_invalid() || !mask) {
     return false;
   }
-  const int width = low_mask_width(const_of(mask));
+  const int width = mask->first == 0 ? mask->second : -1;
   if (width <= 0 || source.is_const() || is_graph_input_pin(source) || !has_single_consumer(source)
       || fits_unsigned_window(source, width)) {
     return false;

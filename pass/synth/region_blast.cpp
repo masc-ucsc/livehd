@@ -248,7 +248,6 @@ void rewrite_trivial_rems(hhds::Graph* g) {
   }
 }
 
-
 // A region consisting solely of a constant shift is pure bus wiring (plus
 // sign extension for SRA). ABC turns its padding into one mapped object per
 // output bit (Rob has hundreds of these regions, growing to 10k bits each).
@@ -293,7 +292,6 @@ bool rewrite_single_shift(const livehd::partition::Region_body& rb) {
     }
   }
   return false;
-
 }
 
 Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_options& options, const Blast_hooks& hooks) {
@@ -314,25 +312,25 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     }
     return true;
   };
-  auto&        lnet                 = result.lnet;
-  auto&        flops                = result.flops;
-  auto&        bboxes               = result.bboxes;
-  auto&        region               = result.region;
-  auto&        native_comb_logic    = result.native_comb_logic;
-  auto&        region_in_name       = result.region_in_name;
-  auto&        pi_order             = result.pi_order;
-  auto&        all_pi_order         = result.all_pi_order;
-  auto&        bbox_pi              = result.bbox_pi;
-  auto&        po_order             = result.po_order;
-  auto&        bbox_po              = result.bbox_po;
-  auto&        direct_native_output = result.direct_native_output;
-  auto&        has_dummy_po         = result.has_dummy_po;
-  const auto   trace_stage          = [&](std::string_view name) {
+  auto&      lnet                 = result.lnet;
+  auto&      flops                = result.flops;
+  auto&      bboxes               = result.bboxes;
+  auto&      region               = result.region;
+  auto&      native_comb_logic    = result.native_comb_logic;
+  auto&      region_in_name       = result.region_in_name;
+  auto&      pi_order             = result.pi_order;
+  auto&      all_pi_order         = result.all_pi_order;
+  auto&      bbox_pi              = result.bbox_pi;
+  auto&      po_order             = result.po_order;
+  auto&      bbox_po              = result.bbox_po;
+  auto&      direct_native_output = result.direct_native_output;
+  auto&      has_dummy_po         = result.has_dummy_po;
+  const auto trace_stage          = [&](std::string_view name) {
     if (hooks.stage) {
       hooks.stage(name);
     }
   };
-  const auto   since                = [&] { return hooks.elapsed_ms ? hooks.elapsed_ms() : 0.0; };
+  const auto since = [&] { return hooks.elapsed_ms ? hooks.elapsed_ms() : 0.0; };
 
   // The region's logic is recorded on a RAW Lnet (lnet_ops.hpp); a backend
   // replays it once translation succeeds.
@@ -447,9 +445,9 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
   // the latch/AND nodes they absorb, gate output -> Region_blast::icgs index
   // (the gated clock is a PI of the mapped logic, read back from the cell),
   // and gate output -> why it stays native.
-  absl::flat_hash_set<hhds::Node_class>             icg_absorbed;
-  absl::flat_hash_map<hhds::Pin_class, int32_t>     icg_of_gclk;
-  absl::flat_hash_map<hhds::Pin_class, std::string> icg_rejected;
+  absl::flat_hash_set<hhds::Node_class>                    icg_absorbed;
+  absl::flat_hash_map<hhds::Pin_class, int32_t>            icg_of_gclk;
+  absl::flat_hash_map<hhds::Pin_class, std::string>        icg_rejected;
   for (size_t pi = 0; pi < rb.inputs.size(); ++pi) {
     region_input_index.emplace(rb.inputs[pi].src_driver, pi);
   }
@@ -479,9 +477,9 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
       return net;
     }
     if (auto it = region_input_index.find(drv); it != region_input_index.end()) {
-      const size_t pi = it->second;
+      const size_t pi  = it->second;
       const auto   net = lnet.add_input(std::format("{}_b{}", rb.inputs[pi].name, eff));
-      slots[eff]     = net;
+      slots[eff]       = net;
       all_pi_order.push_back({Pi_kind::region_input, pi_order.size()});
       pi_order.emplace_back(pi, eff);
       return net;
@@ -503,11 +501,16 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     }
     auto master = drv.get_master_node();
     if (gu::type_op_of(master) == Ntype_op::Set_mask || gu::type_op_of(master) == Ntype_op::Concat) {
-      const auto net = wiring_blaster.bit(drv, eff, abc_bit, [&] { return ops.zero(); }, [&](std::string_view why) {
-        if (!unsupported) {
-          refuse(master, "unsupported-cell", "unsupported", why);
-        }
-      });
+      const auto net = wiring_blaster.bit(
+          drv,
+          eff,
+          abc_bit,
+          [&] { return ops.zero(); },
+          [&](std::string_view why) {
+            if (!unsupported) {
+              refuse(master, "unsupported-cell", "unsupported", why);
+            }
+          });
       slots[eff] = net;
       return net;
     }
@@ -530,7 +533,6 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
   };
 
   auto real_width = [&](const hhds::Pin_class& p) -> int { return std::max(1, gu::real_width(p)); };
-
 
   // Region-input driver -> port name. Used twice: to reconnect a flop
   // boundary's control pins natively (see the boundary scan below), and to
@@ -555,10 +557,10 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
   // that yosys's normalize then mapped to DFFHQNx1 + 64 INVx1 + 24 extra HB1
   // (18.196 vs 17.729 um^2, 114.5 vs 102.8 ps on ASAP7), and left every
   // reset-cone node native with fanout 77-113 (br_amba_axi_demux 2045 ps).
-  absl::flat_hash_set<hhds::Node_class> clk_demoted;
+  absl::flat_hash_set<hhds::Node_class>                        clk_demoted;
   // Derived-clock registers kept native, keyed by the precise reason.
   std::map<std::string, absl::flat_hash_set<hhds::Node_class>> clk_demoted_by;
-  const std::string_view icg_unavailable
+  const std::string_view                                       icg_unavailable
       = options.icg ? "register(s) clocked by region-internal logic (a gated/derived clock) kept as native flops — a DFF "
                       "cell cannot take its clock from mapped logic; the clock cone is still mapped and reconnected"
         : options.icg_flow_ok
@@ -619,10 +621,11 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     // (Not complements it, Sext and a bit-0 Get_mask keep it) whatever the
     // intermediate widths are: slang spells `~rst_n` as a signed 2-bit Not
     // under a Get_mask. Only the traced region input itself must be one bit.
-    const auto multi_bit = "asynchronous-reset register(s) kept as native flops — the reset is a multi-bit value "
-                           "(asserted when non-zero), not one wire a cell's reset pin can take; their surrounding data "
-                           "cones are still mapped";
-    auto       src       = f.rst_drv;
+    const auto multi_bit
+        = "asynchronous-reset register(s) kept as native flops — the reset is a multi-bit value "
+          "(asserted when non-zero), not one wire a cell's reset pin can take; their surrounding data "
+          "cones are still mapped";
+    auto src = f.rst_drv;
     if (real_width(src) != 1) {
       return multi_bit;
     }
@@ -642,13 +645,13 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
           break;
         }
         low ^= op == Ntype_op::Not;
-        src = a;
+        src  = a;
         continue;
       }
       if (op == Ntype_op::Get_mask) {
-        auto a    = gu::get_driver_of_sink_name(m, "a");
-        auto mask = gu::get_driver_of_sink_name(m, "mask");
-        if (a.is_invalid() || mask.is_invalid() || !mask.is_const() || !gu::const_of(mask).bit_test(0)) {
+        auto       a    = gu::get_driver_of_sink_name(m, "a");
+        const auto mask = livehd::graph_util::bit_range(m);
+        if (a.is_invalid() || !mask.has_value() || mask->first != 0) {
           break;
         }
         src = a;
@@ -849,16 +852,16 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
       if (auto nr = gu::get_driver_of_sink_name(n, "negreset"); nr.is_const()) {
         f.neg_reset = gu::const_of(nr).bit_test(0);
       }
-      bool has_rval                     = f.rval_drv.is_const();
-      auto rval                         = has_rval ? gu::const_of(f.rval_drv) : Dlop{};
-      f.has_init                        = has_rval;
-      f.init_val                        = rval;  // read-back cannot re-resolve the source pin (see Seq_flop::has_init)
+      bool has_rval            = f.rval_drv.is_const();
+      auto rval                = has_rval ? gu::const_of(f.rval_drv) : Dlop{};
+      f.has_init               = has_rval;
+      f.init_val               = rval;  // read-back cannot re-resolve the source pin (see Seq_flop::has_init)
       // A resetless init is a TRUE power-on value: that bit is rebuilt native
       // on read-back and must keep the honest encoding (its latch init would
       // be complemented too). With a reset the init is the reset value, folded
       // into D below, and the bit maps to a cell like an init-less one.
-      const bool power_on_init          = has_rval && !f.has_reset;
-      f.d_inverted                      = !options.logical_state && options.qn_encode && !power_on_init;
+      const bool power_on_init = has_rval && !f.has_reset;
+      f.d_inverted             = !options.logical_state && options.qn_encode && !power_on_init;
       if (f.async_reset && !options.logical_state) {
         // The AIG-side QN encoding holds for an async register only when every
         // bit's clear/preset cell is itself a QN cell; otherwise the read-back
@@ -1015,7 +1018,7 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     // node its pin tracker also cannot model, turning a clean ABC refusal into a
     // fatal in a later pass.
     if (op == Ntype_op::Get_mask || op == Ntype_op::Set_mask) {
-      wiring = width >= kNativeWiringBits && const_operand(n, "mask");
+      wiring = width >= kNativeWiringBits && gu::bit_range(n).has_value();
     } else if (op == Ntype_op::Sext || op == Ntype_op::SRA || op == Ntype_op::SHL) {
       wiring = width >= kNativeWiringBits && const_operand(n, "b");
     }
@@ -1233,12 +1236,13 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
       }
       auto w = livehd::diag::warn(from_pass, "comb-loop-native", "unsupported");
       w.at(node_span(rb, cyclic_remainder.front()))
-          .msg("{} region '{}': preserved {} node(s) in a combinational-cycle remainder as native logic; acyclic cones "
-               "around it are still {}",
-               from_pass,
-               rb.module_name,
-               cyclic_remainder.size(),
-               options.logical_state ? "synthesized" : "technology-mapped")
+          .msg(
+              "{} region '{}': preserved {} node(s) in a combinational-cycle remainder as native logic; acyclic cones "
+              "around it are still {}",
+              from_pass,
+              rb.module_name,
+              cyclic_remainder.size(),
+              options.logical_state ? "synthesized" : "technology-mapped")
           .hint("remove the combinational feedback to obtain an all-standard-cell region and a complete timing score");
       constexpr size_t kMaxNamed = 5;
       for (size_t k = 0; k < std::min(kMaxNamed, cyclic_remainder.size()); ++k) {
@@ -1291,7 +1295,7 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
   // clock gate's output; `inv` accumulates the complement parity. Only bit 0
   // of the start matters (the caller checks it is one bit wide), and every
   // step keeps bit 0: slang spells `!clk` as `clk == 0`.
-  auto peel_control = [&](hhds::Pin_class p, bool& inv) -> hhds::Pin_class {
+  auto                                                         peel_control = [&](hhds::Pin_class p, bool& inv) -> hhds::Pin_class {
     for (int guard = 0; guard < 64 && !p.is_invalid(); ++guard) {  // guard: a wiring cycle, > any sane chain
       if (p.is_const() || region_in_name.contains(p) || icg_of_gclk.contains(p)) {
         break;
@@ -1304,13 +1308,13 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
           break;
         }
         inv ^= op == Ntype_op::Not;
-        p = a;
+        p    = a;
         continue;
       }
       if (op == Ntype_op::Get_mask) {
-        auto a    = gu::get_driver_of_sink_name(m, "a");
-        auto mask = gu::get_driver_of_sink_name(m, "mask");
-        if (a.is_invalid() || mask.is_invalid() || !mask.is_const() || !gu::const_of(mask).bit_test(0)) {
+        auto       a    = gu::get_driver_of_sink_name(m, "a");
+        const auto mask = livehd::graph_util::bit_range(m);
+        if (a.is_invalid() || !mask.has_value() || mask->first != 0) {
           break;
         }
         p = a;
@@ -1336,7 +1340,7 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
           break;
         }
         inv ^= c.to_just_i64() == 0;
-        p = x;
+        p    = x;
         continue;
       }
       break;
@@ -1401,11 +1405,11 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     // The enable's natural cell polarity: the level of the traced source that
     // opens the latch (no inverter), or the latch's own spelling for a
     // computed enable (ABC absorbs either level for free).
-    bool en_inv_parity = false;
-    auto en_root       = real_width(lm.en_drv) == 1 ? peel_control(lm.en_drv, en_inv_parity) : hhds::Pin_class{};
-    const bool native_en = !en_root.is_invalid() && (region_in_name.contains(en_root) || icg_of_gclk.contains(en_root));
-    const bool root_low  = lm.en_neg != en_inv_parity;  // en_root opens the latch at 0
-    const bool natural   = native_en ? root_low : lm.en_neg;
+    bool             en_inv_parity = false;
+    auto             en_root       = real_width(lm.en_drv) == 1 ? peel_control(lm.en_drv, en_inv_parity) : hhds::Pin_class{};
+    const bool       native_en     = !en_root.is_invalid() && (region_in_name.contains(en_root) || icg_of_gclk.contains(en_root));
+    const bool       root_low      = lm.en_neg != en_inv_parity;  // en_root opens the latch at 0
+    const bool       natural       = native_en ? root_low : lm.en_neg;
     // Which ladders the bits need: plain (no reset), else per bit reset value.
     std::vector<int> kinds;
     if (!lm.rst_drv.is_invalid()) {
@@ -1432,7 +1436,8 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
       lm.cell_low = natural;
     } else if (covers(!natural)) {
       lm.cell_low = !natural;
-    } else if (!lm.rst_drv.is_invalid() && (options.latch_cell[natural ? 1 : 0][0] >= 0 || options.latch_cell[natural ? 0 : 1][0] >= 0)) {
+    } else if (!lm.rst_drv.is_invalid()
+               && (options.latch_cell[natural ? 1 : 0][0] >= 0 || options.latch_cell[natural ? 0 : 1][0] >= 0)) {
       // No reset cell for some bit: fold the reset into D and the enable (a
       // plain latch cell), exact for a level-sensitive latch.
       lm.fold     = true;
@@ -1471,9 +1476,8 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
   };
   // The Latch sink pins a mapped latch owns (everything but `din`, which
   // crosses like any black-box input unless the reset folds into it).
-  auto latch_owned_pin = [](const Latch_map& lm, hhds::Port_id pid) {
-    return pid != Ntype::get_sink_pid(Ntype_op::Latch, "din") || lm.fold;
-  };
+  auto latch_owned_pin
+      = [](const Latch_map& lm, hhds::Port_id pid) { return pid != Ntype::get_sink_pid(Ntype_op::Latch, "din") || lm.fold; };
 
   for (const auto& n : rb.nodes) {
     auto op = gu::type_op_of(n);
@@ -1541,13 +1545,14 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
           .emit();
     }
     Bbox bb;
-    bb.node                              = n;
-    bb.op                                = op;
+    bb.node = n;
+    bb.op   = op;
     if (latch_boundary && options.map_register && !options.logical_state) {
       if (!latch_mapping) {
-        latch_native_by["latch(es) kept native — the Liberty has no usable transparent latch cell (a `latch` group with a "
-                        "bare data_in/enable, not dont_use, isolation or clock-gate)"]
-            .insert(n);
+        latch_native_by
+            ["latch(es) kept native — the Liberty has no usable transparent latch cell (a `latch` group with a "
+             "bare data_in/enable, not dont_use, isolation or clock-gate)"]
+                .insert(n);
       } else if (auto why = plan_latch(n, bb.latch); !why.empty()) {
         bb.latch = Latch_map{};
         latch_native_by[why].insert(n);
@@ -1938,7 +1943,7 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
       }
       if (rst_active) {
         const Lid rval = f.rval_drv.is_invalid() ? ops.konst(false) : abc_bit(f.rval_drv, b);
-        d               = ops.mux(*rst_active, rval, d);  // reset? rval : (en? din : Q)
+        d              = ops.mux(*rst_active, rval, d);  // reset? rval : (en? din : Q)
       }
       // QN cell under the built-in flow: the latch stores ~next_state (abc_not
       // folds constants; strash turns it into a complemented edge), so `&nf`
@@ -2023,7 +2028,7 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
   // register's own polarity (negreset). ABC maps the inversion with the rest.
   {
     absl::flat_hash_map<std::pair<hhds::Pin_class, bool>, int32_t> arst_index;
-    const size_t                                                    first = lnet.outputs().size();
+    const size_t                                                   first = lnet.outputs().size();
     for (auto& f : flops) {
       if (options.logical_state || !f.async_reset || !f.arst_src.is_invalid()) {
         continue;
@@ -2118,8 +2123,8 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
         const bool q_inv = options.latch_cell[lm.cell_low ? 1 : 0][0] == 1;
         lm.d_po.assign(static_cast<size_t>(lm.bits), -1);
         for (int b = 0; b < lm.bits; ++b) {
-          const Lid init = lm.init.unknown_bit_test(b) ? ops.konst(false) : ops.konst(lm.init.bit_test(b));
-          const Lid d    = ops.mux(*rst, init, abc_bit(din, b));  // rst ? init : din
+          const Lid init                  = lm.init.unknown_bit_test(b) ? ops.konst(false) : ops.konst(lm.init.bit_test(b));
+          const Lid d                     = ops.mux(*rst, init, abc_bit(din, b));  // rst ? init : din
           lm.d_po[static_cast<size_t>(b)] = static_cast<int32_t>(lnet.outputs().size());
           lnet.add_output(q_inv ? ops.inv(d) : d, std::format("__lat{}_d{}", bi, b));
         }

@@ -21,7 +21,15 @@ struct Range {
   uint32_t start_line, start_column, end_line, end_column;
 };
 
-enum class Rule { RepeatedCode, LikelyUnrolledLoop, WholeTupleCopy, FlattenedBundleArguments, SingleDestinationConditional };
+enum class Rule {
+  RepeatedCode,
+  LikelyUnrolledLoop,
+  WholeTupleCopy,
+  FlattenedBundleArguments,
+  SingleDestinationConditional,
+  HardcodedReset,
+  ResetPortType
+};
 
 std::string_view rule_name(Rule rule);
 
@@ -47,6 +55,7 @@ struct Finding {
 struct Report {
   bool                 partial        = false;
   size_t               total_findings = 0;
+  size_t               suppressed     = 0;  // findings silenced by `// prp-style-allow`
   std::vector<Finding> findings;
   std::vector<Range>   parse_errors;
 };

@@ -18,6 +18,8 @@
 // golden's `d = q` / `q <= d` (Pyrope has no runtime whole-array assignment).
 // The const-indexed READ of a written comb-array entry is the regression — see
 // the golden .v.
+
+// prp-style-allow likely-unrolled-loop
 pub mod top(clk_i:Clock, en_i:U1, wa_i:U3, wd_i:U3, ra_i:U3) -> (rd_o:U3@[]) {
   reg q:[8]U3:[ordering="old", clock_pin=clk_i]
   mut d:[8]U3 = 0
@@ -31,14 +33,9 @@ pub mod top(clk_i:Clock, en_i:U1, wa_i:U3, wd_i:U3, ra_i:U3) -> (rd_o:U3@[]) {
   d[7] = q[7]
   d[wa_i] = wd_i
   if en_i != 0 {
-    q[0] = d[0]
-    q[1] = d[1]
-    q[2] = d[2]
-    q[3] = d[3]
-    q[4] = d[4]
-    q[5] = d[5]
-    q[6] = d[6]
-    q[7] = d[7]
+    for x in 0..<8 {
+      q[x] = d[x]
+    }
   }
   rd_o = q[ra_i]
 }

@@ -92,7 +92,7 @@ TEST(CgenVerilog, CyclicExpressionsRetainNets) {
     bp.connect_sink(a.create_sink_pin(0));
     bp.connect_sink(graph->get_output_pin("out"));
     if (identity_mask) {
-      gu::create_const(*graph, *Dlop::create_integer(255)).connect_sink(gu::setup_sink_by_name(b, "mask"));
+      livehd::graph_util::connect_bit_range(b, 0, 8);
     }
     if (shifts) {
       auto amount = gu::create_const(*graph, *Dlop::create_integer(1));

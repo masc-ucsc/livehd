@@ -1,0 +1,33 @@
+/*
+:name: style_reset_not_a_priority_clear
+:type: style
+:style: none
+*/
+// Negatives for hardcoded-reset. A later write beats the clear, so it is not a
+// priority reset; a whole-array clear (a memory) and a latch are not flop resets.
+pub mod later_write(clk:Clock, go:U1, din:U8) -> (dout:U8@[]) {
+  reg q:U8 = nil
+  dout = q
+  if go {
+    q = 0
+  }
+  q = din
+}
+
+pub mod array_clear(clk:Clock, go:U1, i:U2, din:U8) -> (dout:U8@[]) {
+  reg mem:[4]U8 = nil
+  dout = mem[i]
+  mem[i] = din
+  if go {
+    mem = 0
+  }
+}
+
+pub mod latch_clear(clk:Clock, go:U1, din:U8) -> (dout:U8@[]) {
+  reg l:U8:[latch=true] = nil
+  dout = l
+  l = din
+  if go {
+    l = 0
+  }
+}

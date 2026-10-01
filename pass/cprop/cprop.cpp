@@ -155,7 +155,6 @@ using livehd::muxctx::Bool_condition;
   return !a.is_invalid() && !b.is_invalid() && a.get_class_index() == b.get_class_index();
 }
 
-
 // Truth identity and polarity are computed from canonical producers once.
 // References follow forwarding and retain their generation across ID reuse.
 [[nodiscard]] std::optional<Bool_condition> lookup_bool_condition(const hhds::Pin_class& p) {
@@ -246,12 +245,8 @@ constexpr int                 kConcatPackFanInLimit = 4096;
 // The half-open [begin,end) window of a Get_mask's CONSTANT mask, or kFpBail
 // for the `-1` to-unsigned spelling (which has no window).
 [[nodiscard]] std::pair<int, int> const_mask_range(const hhds::Node_class& m) {
-  auto md = drv_at(m, 2);
-  if (md.is_invalid() || !md.is_const()) {
-    return kFpBail;
-  }
-  auto window = livehd::graph_util::mask_window_of(const_of(md));
-  return window ? *window : kFpBail;
+  const auto range = livehd::graph_util::bit_range(m);
+  return range ? *range : kFpBail;
 }
 
 // The width n of a low-contiguous mask 2^n-1 (n>=1), or -1 for anything else
@@ -435,7 +430,10 @@ void emit_concat(hhds::Graph& g, hhds::Node_class& node, const std::vector<Pack_
         value = create_const(g, *const_of(value).and_op(*mask));
       } else {
         auto get = make_node(g, Ntype_op::Get_mask);
-        livehd::graph_util::connect_mask_operands(get, value, create_const(g, *mask));
+        livehd::graph_util::connect_mask_operands(get,
+                                                  value,
+                                                  livehd::graph_util::mask_window(*mask).first,
+                                                  livehd::graph_util::mask_window(*mask).second);
         value = get.create_driver_pin(0);
         livehd::graph_util::set_ubits(value, w);
       }
@@ -1206,19 +1204,18 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges
     const auto selected = const_of(input).get_mask_op_opt(0, livehd::graph_util::reduction_count(node));
     replace_node(node, op == Ntype_op::Rxor ? selected->rxor_op() : selected->popcount_op());
   } else if (op == Ntype_op::Set_mask) {
-    auto a_pin     = livehd::graph_util::get_driver_of_sink_name(node, "a");
-    auto mask_pin  = livehd::graph_util::get_driver_of_sink_name(node, "mask");
-    auto value_pin = livehd::graph_util::get_driver_of_sink_name(node, "value");
+    auto       a_pin     = livehd::graph_util::get_driver_of_sink_name(node, "a");
+    const auto mask_pin  = livehd::graph_util::bit_range(node);
+    auto       value_pin = livehd::graph_util::get_driver_of_sink_name(node, "value");
 
     if (a_pin.is_invalid()) {
       return;
     }
     Dlop val = const_of(a_pin);
 
-    if (!mask_pin.is_invalid() && !value_pin.is_invalid()) {
-      const auto& mask  = const_of(mask_pin);
+    if (!!mask_pin.has_value() && !value_pin.is_invalid()) {
       const auto& value = const_of(value_pin);
-      replace_node(node, livehd::eval_set_mask(val, mask, value));
+      replace_node(node, livehd::eval_set_mask(val, value, mask_pin->first, mask_pin->second));
     } else {
       replace_node(node, val);
     }
@@ -1415,21 +1412,13 @@ void Cprop::replace_all_inputs_const(hhds::Node_class& node, Inp_pins& inp_edges
     result = Dlop::create_integer(cmp->is_known_true() ? 1 : 0);
     replace_node(node, result);
   } else if (op == Ntype_op::Get_mask) {
-    auto a_pin    = livehd::graph_util::get_driver_of_sink_name(node, "a");
-    auto mask_pin = livehd::graph_util::get_driver_of_sink_name(node, "mask");
-    if (a_pin.is_invalid() || mask_pin.is_invalid()) {
+    auto       a_pin    = livehd::graph_util::get_driver_of_sink_name(node, "a");
+    const auto mask_pin = livehd::graph_util::bit_range(node);
+    if (a_pin.is_invalid() || !mask_pin.has_value()) {
       return;
     }
-    Dlop a    = const_of(a_pin);
-    Dlop mask = const_of(mask_pin);
-    if (mask.is_negative()) {
-      // The -1 to-positive idiom: identity on a non-negative value only.
-      if (mask.is_just_i64() && mask.to_just_i64() == -1 && a.is_positive()) {
-        replace_node(node, a);
-      }
-      return;
-    }
-    replace_node(node, livehd::eval_get_mask(a, mask));
+    const Dlop& a = const_of(a_pin);
+    replace_node(node, livehd::eval_get_mask(a, mask_pin->first, mask_pin->second));
   } else if (op == Ntype_op::Concat) {
     // Every lane VALUE is constant, so the whole assembly is one non-negative
     // sum(w_i)-bit constant.
@@ -1532,13 +1521,13 @@ bool Cprop::scalar_mux(hhds::Node_class& node, Inp_pins& inp_edges_ordered, bool
     }
     const auto base0  = livehd::graph_util::get_driver_of_sink_name(sm0, "a");
     const auto base1  = livehd::graph_util::get_driver_of_sink_name(sm1, "a");
-    const auto mask0  = livehd::graph_util::get_driver_of_sink_name(sm0, "mask");
+    const auto mask0  = livehd::graph_util::bit_range(sm0);
     const auto value0 = livehd::graph_util::get_driver_of_sink_name(sm0, "value");
     const auto value1 = livehd::graph_util::get_driver_of_sink_name(sm1, "value");
     const auto range0 = const_mask_range(sm0);
     const auto range1 = const_mask_range(sm1);
     const int  width  = range0.second - range0.first;
-    if (!same_pin(base0, base1) || mask0.is_invalid() || value0.is_invalid() || value1.is_invalid() || range0.first < 0
+    if (!same_pin(base0, base1) || !mask0.has_value() || value0.is_invalid() || value1.is_invalid() || range0.first < 0
         || range0 != range1 || width <= 0) {
       return false;
     }
@@ -1550,7 +1539,7 @@ bool Cprop::scalar_mux(hhds::Node_class& node, Inp_pins& inp_edges_ordered, bool
 
     clear_all_sinks(node);
     livehd::graph_util::set_type_op(node, Ntype_op::Set_mask);
-    livehd::graph_util::connect_mask_operands(node, base0, mask0, lane);
+    livehd::graph_util::connect_mask_operands(node, base0, mask0->first, mask0->second, lane);
     normalize_emitted(lane_mux);
     if (!sm0.has_out_edges()) {
       bwd_del_node(sm0);
@@ -1587,15 +1576,15 @@ bool Cprop::scalar_mux(hhds::Node_class& node, Inp_pins& inp_edges_ordered, bool
       return false;
     }
     const auto sm_base = livehd::graph_util::get_driver_of_sink_name(sm, "a");
-    const auto mask    = livehd::graph_util::get_driver_of_sink_name(sm, "mask");
+    const auto mask    = livehd::graph_util::bit_range(sm);
     const auto value   = livehd::graph_util::get_driver_of_sink_name(sm, "value");
     const auto range   = const_mask_range(sm);
     const int  width   = range.second - range.first;
-    if (!same_pin(sm_base, base) || mask.is_invalid() || value.is_invalid() || range.first < 0 || width <= 0) {
+    if (!same_pin(sm_base, base) || !mask.has_value() || value.is_invalid() || range.first < 0 || width <= 0) {
       return false;
     }
     auto get = livehd::cprop_value::make_node(*current_graph, Ntype_op::Get_mask);
-    livehd::graph_util::connect_mask_operands(get, base, mask);
+    livehd::graph_util::connect_mask_operands(get, base, mask->first, mask->second);
     auto old_lane = get.create_driver_pin(0);
     livehd::graph_util::set_ubits(old_lane, width);
 
@@ -1612,7 +1601,7 @@ bool Cprop::scalar_mux(hhds::Node_class& node, Inp_pins& inp_edges_ordered, bool
 
     clear_all_sinks(node);
     livehd::graph_util::set_type_op(node, Ntype_op::Set_mask);
-    livehd::graph_util::connect_mask_operands(node, base, mask, lane);
+    livehd::graph_util::connect_mask_operands(node, base, mask->first, mask->second, lane);
     normalize_emitted(get);
     normalize_emitted(lane_mux);
     if (!sm.has_out_edges()) {
@@ -2214,8 +2203,8 @@ bool Cprop::try_broadcast_or(hhds::Node_class& node, Inp_pins& inp_edges_ordered
   return false;
 }
 
-bool Cprop::scalar_get_mask_packed(hhds::Node_class& node, const Dlop& mask_const) {
-  const auto window = livehd::graph_util::mask_window_of(mask_const);
+bool Cprop::scalar_get_mask_packed(hhds::Node_class& node) {
+  const auto window = livehd::graph_util::bit_range(node);
   if (!window) {
     return false;
   }
@@ -2855,17 +2844,17 @@ bool Cprop::indexed_get_mask(hhds::Node_class& node, hhds::Pin_class source, int
 }
 
 bool Cprop::scalar_get_mask(hhds::Node_class& node) {
-  auto a_pin    = drv_at(node, 0);
-  auto mask_pin = drv_at(node, 2);
-  if (a_pin.is_invalid() || mask_pin.is_invalid() || !node.has_out_edges()) {
+  auto       a_pin    = drv_at(node, 0);
+  const auto mask_pin = livehd::graph_util::bit_range(node);
+  if (a_pin.is_invalid() || !node.has_out_edges()) {
     livehd::cprop_value::retire(node);
     return true;
   }
-  if (!mask_pin.is_const()) {
+  if (!mask_pin.has_value()) {
     return false;
   }
 
-  const auto& mask_const = const_of(mask_pin);
+  const auto& mask_const = livehd::graph_util::mask_window_const(mask_pin->first, mask_pin->second);
 
   // A private modular Sum region is absorbed only at its terminal mask.
   // Interior masks defer, avoiding growing operand lists at every prefix.
@@ -2875,8 +2864,8 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
     const auto next = (*node.out_edges().begin()).sink.get_master_node();
     if (type_op_of(next) == Ntype_op::Sum && has_single_consumer(next)) {
       const auto mask    = (*next.out_edges().begin()).sink.get_master_node();
-      const auto literal = type_op_of(mask) == Ntype_op::Get_mask ? drv_at(mask, 2) : hhds::Pin_class{};
-      interior           = literal.is_const() && low_mask_width(const_of(literal)) == modulus;
+      const auto literal = type_op_of(mask) == Ntype_op::Get_mask ? livehd::graph_util::bit_range(mask) : std::nullopt;
+      interior           = literal && literal->first == 0 && literal->second == modulus;
     }
   }
   if (!interior && modulus > 0 && !a_pin.is_const() && has_single_consumer(a_pin)
@@ -2900,10 +2889,11 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
         leaves.push_back(operand);
         continue;
       }
-      const auto literal = drv_at(mask, 2), source = drv_at(mask, 0);
-      auto       child = source.get_master_node();
-      if (!literal.is_const() || low_mask_width(const_of(literal)) != modulus || source.is_invalid()
-          || type_op_of(child) != Ntype_op::Sum || !has_single_consumer(source)) {
+      const auto literal = livehd::graph_util::bit_range(mask);
+      const auto source  = drv_at(mask, 0);
+      auto       child   = source.get_master_node();
+      if (!literal || literal->first != 0 || literal->second != modulus || source.is_invalid() || type_op_of(child) != Ntype_op::Sum
+          || !has_single_consumer(source)) {
         leaves.push_back(operand);
         continue;
       }
@@ -2928,20 +2918,6 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
         livehd::cprop_value::retire(child);
       }
     }
-  }
-
-  // Rule 4: get_mask(a, -1) == a — only when `a` is provably non-negative.
-  // get_mask always yields a non-negative value (it zero-extends the selected
-  // bits), so it is the to-positive wrapper for signed-read pins (e.g. module
-  // ports, which cgen declares `signed`). Bypassing it around a pin that can
-  // go negative changes the value: u3 a=0b101 must read 5, not -3 (caught by
-  // LEC once the lgcheck BMC stage became sound).
-  if (mask_const.is_just_i64() && mask_const.to_just_i64() == -1) {
-    const bool nonneg = livehd::cprop_value::unsigned_width(a_pin) >= 0;
-    if (!nonneg) {
-      return false;
-    }
-    return collapse_forward_for_pin(node, a_pin);
   }
 
   // A low contiguous mask is redundant only when an explicit expression
@@ -2976,8 +2952,8 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
         if (has_single_consumer(a_pin) && !w_pin.is_invalid() && !w_pin.is_const() && !is_graph_input_pin(w_pin)) {
           auto inner = w_pin.get_master_node();
           if (!inner.is_invalid() && type_op_of(inner) == Ntype_op::Get_mask && inner.get_class_index() != node.get_class_index()) {
-            auto inner_mask_pin = drv_at(inner, 2);
-            if (inner_mask_pin.is_const() && low_mask_width(const_of(inner_mask_pin)) >= m_w) {
+            auto inner_mask_pin = livehd::graph_util::bit_range(inner);
+            if (inner_mask_pin && inner_mask_pin->first == 0 && inner_mask_pin->second >= m_w) {
               auto y = drv_at(inner, 0);
               if (!y.is_invalid() && !same_pin(y, a_pin)) {  // a self-feeding Not must stay
                 auto not_sink = find_sink_pin(not_node, "a");
@@ -3002,19 +2978,19 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
   if (window && (source_op == Ntype_op::Set_mask || source_op == Ntype_op::Concat)) {
     return indexed_get_mask(node, a_pin, window->first, window->second);
   }
-  return scalar_get_mask_packed(node, mask_const);
+  return scalar_get_mask_packed(node);
 }
 
 bool Cprop::scalar_set_mask(hhds::Node_class& node) {
-  auto base_pin  = livehd::graph_util::get_driver_of_sink_name(node, "a");
-  auto mask_pin  = livehd::graph_util::get_driver_of_sink_name(node, "mask");
-  auto value_pin = livehd::graph_util::get_driver_of_sink_name(node, "value");
-  if (base_pin.is_invalid() || mask_pin.is_invalid() || value_pin.is_invalid() || !base_pin.is_const() || !mask_pin.is_const()) {
+  auto       base_pin  = livehd::graph_util::get_driver_of_sink_name(node, "a");
+  const auto mask_pin  = livehd::graph_util::bit_range(node);
+  auto       value_pin = livehd::graph_util::get_driver_of_sink_name(node, "value");
+  if (base_pin.is_invalid() || !mask_pin.has_value() || value_pin.is_invalid() || !base_pin.is_const()) {
     return false;
   }
 
   const auto& base   = const_of(base_pin);
-  auto        window = livehd::graph_util::mask_window_of(const_of(mask_pin));
+  auto        window = mask_pin;
   if (!base.is_known_zero() || !window || window->first != 0) {
     return false;
   }
@@ -3081,7 +3057,10 @@ void Cprop::canonicalize_and_mask(hhds::Node_class& node) {
   edges[0].del_sink();  // one driver per sink pin
   edges[1].del_sink();
   livehd::graph_util::set_type_op(node, Ntype_op::Get_mask);
-  livehd::graph_util::connect_mask_operands(node, x_pin, mask_pin);
+  livehd::graph_util::connect_mask_operands(node,
+                                            x_pin,
+                                            livehd::graph_util::mask_window(livehd::graph_util::const_of(mask_pin)).first,
+                                            livehd::graph_util::mask_window(livehd::graph_util::const_of(mask_pin)).second);
 }
 
 // Hash-cons identical combinational nodes: two nodes with the same op reading
@@ -3244,8 +3223,8 @@ void Cprop::normalize_emitted(hhds::Node_class& node) {
   const auto op     = type_op_of(node);
   if (op == Ntype_op::Get_mask) {
     // Wiring constructors do one indexed read; no modular-cone discovery.
-    auto mask = drv_at(node, 2);
-    if (mask.is_const() && scalar_get_mask_packed(node, const_of(mask))) {
+    auto mask = livehd::graph_util::bit_range(node);
+    if (mask && scalar_get_mask_packed(node)) {
       return;
     }
   } else if (op == Ntype_op::Mux) {

@@ -1,5 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include <cstdint>
+#include <limits>
 #include <string>
 
 #include "gtest/gtest.h"
@@ -8,6 +10,44 @@
 #include "str_tools.hpp"
 
 namespace {
+
+TEST(StrTools, ParsesSignedIntegers) {
+  for (int value : {std::numeric_limits<int>::min(), -3, -1, 0, 1, 3, std::numeric_limits<int>::max()}) {
+    const auto text = std::to_string(value);
+    EXPECT_TRUE(str_tools::is_i(text)) << text;
+    EXPECT_EQ(str_tools::to_i(text), value) << text;
+  }
+  EXPECT_EQ(str_tools::to_i("-0"), 0);
+  for (auto text : {"", "-", "invalid", "99999999999999999999", "-99999999999999999999"}) {
+    EXPECT_FALSE(str_tools::is_i(text)) << text;
+    EXPECT_EQ(str_tools::to_i(text), 0) << text;
+  }
+  // Graph port-name decoding relies on reading just the numeric prefix.
+  EXPECT_EQ(str_tools::to_i("12addr"), 12);
+}
+
+TEST(StrTools, FormatsFullUnsignedRange) {
+  for (uint64_t value : {uint64_t{0},
+                         uint64_t{9},
+                         uint64_t{1000000000000000000},
+                         uint64_t{10000000000000000000ULL},
+                         std::numeric_limits<uint64_t>::max()}) {
+    EXPECT_EQ(str_tools::to_s(value), std::to_string(value));
+  }
+}
+
+TEST(StrTools, OptionTruthPreservesAsciiSemantics) {
+  for (auto value : {"", "0", "false", "FaLsE", "NO", "oFf"}) {
+    EXPECT_FALSE(str_tools::option_is_true(value)) << value;
+  }
+  for (auto value : {"1", "true", "yes", " false", "false ", "offx", "a long arbitrary option value"}) {
+    EXPECT_TRUE(str_tools::option_is_true(value)) << value;
+  }
+  EXPECT_TRUE(str_tools::ascii_iequals("AbC", "aBc"));
+  EXPECT_FALSE(str_tools::ascii_iequals("AbC", "aB"));
+  EXPECT_FALSE(str_tools::ascii_iequals("\xc0", "\xe0"));
+  EXPECT_TRUE(str_tools::ascii_iequals("\xc0", "\xc0"));
+}
 
 TEST(JsonUtil, EscapesEveryControlByte) {
   std::string input;
@@ -32,8 +72,7 @@ TEST(HashUtil, StablePrimitives) {
 
   // Seeded chaining splices fragments; the u64 fold matches the byte-fed form.
   static_assert(livehd::hash_util::fnv1a64("bc", livehd::hash_util::fnv1a64("a")) == livehd::hash_util::fnv1a64("abc"));
-  static_assert(livehd::hash_util::fnv1a64_u64(0x0123456789abcdefULL, livehd::hash_util::kFnv1a64_offset)
-                == 0x37eb3f3347761c55ULL);
+  static_assert(livehd::hash_util::fnv1a64_u64(0x0123456789abcdefULL, livehd::hash_util::kFnv1a64_offset) == 0x37eb3f3347761c55ULL);
 }
 
 TEST(StrTools, CanonicalEntityName) {

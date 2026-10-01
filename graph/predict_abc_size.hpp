@@ -107,24 +107,24 @@ struct Ctrl_pids {
   const auto  rp_pid = ctrl.reset;
   for (auto e_sink : node.inp_sorted_pins()) {
     for (auto e_drv : e_sink.get_driver_pins()) {
-    // Bank, not raw pid: a commutative cell now spends one pid per operand
-    // (graph/cell.hpp), and those extra pids are more TERMS of one fold, not
-    // extra ARMS -- counting them as arms would inflate every wide reduction's
-    // predicted gate count.
-    const auto pid = Ntype::sink_bank(op, e_sink.get_port_id());
-    ++sh.terms;
-    if (pid != 0) {
-      ++sh.arms;
-    }
-    if (const auto b = bits_of(e_drv); b > 0 && static_cast<uint64_t>(b) > sh.widest) {
-      sh.widest = static_cast<uint64_t>(b);
-    }
-    if (en_pid != hhds::Port_invalid && pid == en_pid) {
-      sh.has_enable = true;
-    }
-    if (rp_pid != hhds::Port_invalid && pid == rp_pid) {
-      sh.has_reset = true;
-    }
+      // Bank, not raw pid: a commutative cell now spends one pid per operand
+      // (graph/cell.hpp), and those extra pids are more TERMS of one fold, not
+      // extra ARMS -- counting them as arms would inflate every wide reduction's
+      // predicted gate count.
+      const auto pid = Ntype::sink_bank(op, e_sink.get_port_id());
+      ++sh.terms;
+      if (pid != 0) {
+        ++sh.arms;
+      }
+      if (const auto b = bits_of(e_drv); b > 0 && static_cast<uint64_t>(b) > sh.widest) {
+        sh.widest = static_cast<uint64_t>(b);
+      }
+      if (en_pid != hhds::Port_invalid && pid == en_pid) {
+        sh.has_enable = true;
+      }
+      if (rp_pid != hhds::Port_invalid && pid == rp_pid) {
+        sh.has_reset = true;
+      }
     }
   }
   if (op == Ntype_op::Hotmux) {
@@ -145,13 +145,13 @@ struct Ctrl_pids {
   uint64_t total = 0;
   for (auto e_sink : node.inp_sorted_pins()) {
     for (auto e_drv : e_sink.get_driver_pins()) {
-    const uint64_t w = atleast1(static_cast<uint64_t>(std::max(0, bits_of(e_drv))));
-    if (acc == 0) {
-      acc = w;
-      continue;
-    }
-    total = sat_add(total, sat_mul(9, sat_mul(acc, w)));
-    acc   = sat_add(acc, w);
+      const uint64_t w = atleast1(static_cast<uint64_t>(std::max(0, bits_of(e_drv))));
+      if (acc == 0) {
+        acc = w;
+        continue;
+      }
+      total = sat_add(total, sat_mul(9, sat_mul(acc, w)));
+      acc   = sat_add(acc, w);
     }
   }
   return total;
@@ -219,11 +219,11 @@ struct Ctrl_pids {
 
     case Ntype_op::Rem: return rem_is_power_of_two_mask(node) ? atleast1(ge_detail::out_width(node)) : 0;
 
-    // ---- masks: constant mask is a bit rename, a runtime mask is real logic --
+    // ---- selections: constant endpoints are wiring; runtime endpoints need logic --
     case Ntype_op::Get_mask:
     case Ntype_op::Set_mask: {
-      const auto mask = get_driver_of_sink_name(node, "mask");
-      if (mask.is_invalid() || mask.is_const()) {
+      const auto mask = livehd::graph_util::bit_range(node);
+      if (mask.has_value()) {
         return 0;
       }
       return atleast1(ge_detail::out_width(node));  // ~1 gate/bit of masking
@@ -245,7 +245,7 @@ struct Ctrl_pids {
     }
     case Ntype_op::Rxor    : return sat_mul(3, atleast1(reduction_count(node)));
     case Ntype_op::Popcount: return sat_mul(7, atleast1(reduction_count(node)));
-    case Ntype_op::Ror: {
+    case Ntype_op::Ror     : {
       const auto sh = fanin_shape(node, op);
       return atleast1(sh.widest);  // one OR level per operand bit
     }

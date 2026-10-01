@@ -205,7 +205,7 @@ bool const_value_is_structural(const Node& n, const Pin& sink) {
   // any pid the cell does not declare (Get_mask/Set_mask carry `mask` on pid 2,
   // so a graph that parked it elsewhere aborts the whole pass), while
   // get_sink_pid answers a known name without a string build.
-  return sink.get_port_id() == Ntype::get_sink_pid(op, "mask");
+  return sink.get_port_id() == Ntype::get_sink_pid(op, "lo") || sink.get_port_id() == Ntype::get_sink_pid(op, "hi");
 }
 
 Sig const_token(const Pin& d, bool value_sensitive) {
@@ -293,7 +293,8 @@ void compute_signatures(Cone& k, const absl::flat_hash_map<Node, int32_t>& cone_
       for (auto e_sink : n.inp_sorted_pins()) {
         for (auto e_drv : e_sink.get_driver_pins()) {
           if (auto it = leaf_ix.find(e_drv); it != leaf_ix.end()) {
-            uses[it->second].emplace_back(sig.at(n), static_cast<uint32_t>(Ntype::sink_bank(gu::type_op_of(n), e_sink.get_port_id())));
+            uses[it->second].emplace_back(sig.at(n),
+                                          static_cast<uint32_t>(Ntype::sink_bank(gu::type_op_of(n), e_sink.get_port_id())));
           }
         }
       }
@@ -660,10 +661,10 @@ void mine_def(hhds::Graph* g, const Reduce_opts& opts, std::vector<Cone>& out, R
 
 // Operand of one member, classified for pairing.
 struct Opnd {
-  int         kind = 0;      // 0 = const, 1 = leaf, 2 = member
-  Sig         key{};         // pairing class: const shape token / leaf token / member sig
-  std::string cval;          // kind 0: serialized value (exact compare + tie order)
-  bool        cunk = false;  // kind 0: value carries unknown (x) bits
+  int         kind = 0;       // 0 = const, 1 = leaf, 2 = member
+  Sig         key{};          // pairing class: const shape token / leaf token / member sig
+  std::string cval;           // kind 0: serialized value (exact compare + tie order)
+  bool        cunk  = false;  // kind 0: value carries unknown (x) bits
   // kind 0, the const's REAL facts. `key` is a HASH of these, and match_cones is
   // the walk that DECIDES a splice, so it must compare the facts themselves --
   // otherwise a 64-bit collision accepts two operands of different width or sign.
@@ -672,10 +673,10 @@ struct Opnd {
   int32_t     cbits = 0;      // kind 0: get_signed_bits()
   bool        cneg  = false;  // kind 0: is_negative()
   bool        cvsen = false;  // kind 0: the value is STRUCTURAL here (Get_mask/Set_mask mask)
-  Pin         pin;           // any kind: the driver pin
-  Node        node;          // kind 2: the member
-  Pin_shape   shape{};       // kinds 1,2: driver-pin shape (bits/sign/offset; pid for 2)
-  uint64_t    tie = 0;       // deterministic tie-break inside equal keys (nid-based)
+  Pin         pin;            // any kind: the driver pin
+  Node        node;           // kind 2: the member
+  Pin_shape   shape{};        // kinds 1,2: driver-pin shape (bits/sign/offset; pid for 2)
+  uint64_t    tie = 0;        // deterministic tie-break inside equal keys (nid-based)
 };
 
 bool opnd_less(const Opnd& x, const Opnd& y) {
@@ -722,7 +723,7 @@ bool operands_of(const Cone& K, const absl::flat_hash_map<Pin, Sig>& tok, const 
       }
       Opnd o;
       if (d.is_const()) {
-        const auto& v = gu::const_of(d);
+        const auto& v  = gu::const_of(d);
         const bool  vs = const_value_is_structural(n, e_sink);
         o.kind         = 0;
         o.cval         = v.serialize();

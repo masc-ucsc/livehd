@@ -323,7 +323,7 @@ TEST_F(RegionEmit, SparseHighBitUsesSmallConstantsAndAnExplicitMask) {
   ASSERT_EQ(result.status, Status::feasible) << result.reason;
   auto mask = body->get_output_pin("q").get_driver_pin().get_master_node();
   ASSERT_EQ(gu::type_op_of(mask), Ntype_op::Get_mask);
-  EXPECT_EQ(gu::const_of(gu::get_driver_of_sink_name(mask, "mask")).to_just_i64(), 1);
+  EXPECT_EQ(*gu::bit_range(mask), std::make_pair(0, 1));
   auto shift = gu::get_driver_of_sink_name(mask, "a").get_master_node();
   ASSERT_EQ(gu::type_op_of(shift), Ntype_op::SRA);
   EXPECT_EQ(gu::const_of(gu::get_driver_of_sink_name(shift, "b")).to_just_i64(), 99999);

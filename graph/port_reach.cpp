@@ -36,8 +36,10 @@ struct Leaf {
 
 std::vector<Leaf> concat_leaves(const hhds::Pin_class& drv) {
   std::vector<Leaf>                                 leaves;
-  std::vector<std::pair<uint32_t, hhds::Pin_class>> work{{0, drv}};
-  int                                               budget = 64;
+  std::vector<std::pair<uint32_t, hhds::Pin_class>> work{
+      {0, drv}
+  };
+  int budget = 64;
   while (!work.empty()) {
     if (--budget < 0) {
       return {};
@@ -109,16 +111,16 @@ std::vector<Leaf> concat_leaves(const hhds::Pin_class& drv) {
       for (auto e_sink : n.inp_sorted_pins()) {
         auto e_drv = e_sink.get_driver_pin();
         switch (e_sink.get_port_id()) {
-          case 0: base = e_drv; break;
-          case 2: msk = e_drv; break;
-          case 4: val = e_drv; break;
+          case 0 : base = e_drv; break;
+          case 2 : msk = e_drv; break;
+          case 4 : val = e_drv; break;
           default: break;
         }
       }
       if (msk.is_invalid() || val.is_invalid() || !msk.is_const()) {
         return {};
       }
-      auto window = gu::mask_window_of(gu::const_of(msk));
+      auto window = gu::bit_range(n);
       if (!window) {
         return {};
       }
@@ -200,7 +202,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
     // And(SRA(in, k) | in, low-mask). Returns true when an atom was recorded.
     auto input_atom_of = [&](const hhds::Pin_class& d, std::vector<In_atom>& atoms) -> bool {
       // Peel the identity wrappers tolg puts on a typed port read (unary
-      // Get_mask, the to-positive `mask == -1` idiom, Sext) so the idioms
+      // Get_mask, a full-width unsigned view, Sext) so the idioms
       // below see the input itself.
       auto peel_ident = [&](hhds::Pin_class p) -> hhds::Pin_class {
         for (int hops = 0; hops < 8 && !p.is_invalid(); ++hops) {
@@ -214,25 +216,11 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
             continue;
           }
           if (op == Ntype_op::Get_mask) {
-            hhds::Pin_class val, msk;
-            for (auto e_sink : n.inp_sorted_pins()) {
-              auto e_drv = e_sink.get_driver_pin();
-              if (e_sink.get_port_id() == 0) {
-                val = e_drv;
-              } else {
-                msk = e_drv;
-              }
-            }
-            if (msk.is_invalid()) {
-              p = val;  // unary width adjust
+            const auto range = gu::bit_range(n);
+            const auto value = gu::get_driver_of_sink_name(n, "a");
+            if (range && !value.is_invalid() && range->first == 0 && range->second >= gu::bits_of(value)) {
+              p = value;
               continue;
-            }
-            if (msk.is_const()) {
-              const auto& mv = gu::const_of(msk);
-              if (mv.is_just_i64() && mv.to_just_i64() == -1) {
-                p = val;  // to-positive idiom
-                continue;
-              }
             }
             break;
           }
@@ -278,8 +266,8 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
       if (d.is_invalid() || d.is_const() || gu::is_graph_input_pin(d)) {
         return false;
       }
-      auto       n  = d.get_master_node();
-      const auto op = gu::type_op_of(n);
+      auto       n   = d.get_master_node();
+      const auto op  = gu::type_op_of(n);
       uint32_t   pid = 0, k = 0;
       if (op == Ntype_op::Get_mask) {
         hhds::Pin_class val, msk;
@@ -293,8 +281,10 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
         }
         val = peel_ident(val);
         if (!val.is_invalid() && gu::is_graph_input_pin(val) && msk.is_const()) {
-          if (auto window = gu::mask_window_of(gu::const_of(msk)); window) {
-            add_atom(atoms, static_cast<uint32_t>(val.get_port_id()), static_cast<uint32_t>(window->first),
+          if (auto window = gu::bit_range(n); window) {
+            add_atom(atoms,
+                     static_cast<uint32_t>(val.get_port_id()),
+                     static_cast<uint32_t>(window->first),
                      static_cast<uint32_t>(window->second - window->first));
             return true;
           }
@@ -461,8 +451,10 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
             }
           }
           if (!val.is_invalid() && gu::is_graph_input_pin(val) && msk.is_const()) {
-            if (auto window = gu::mask_window_of(gu::const_of(msk)); window) {
-              add_atom(atoms, static_cast<uint32_t>(val.get_port_id()), static_cast<uint32_t>(window->first),
+            if (auto window = gu::bit_range(m); window) {
+              add_atom(atoms,
+                       static_cast<uint32_t>(val.get_port_id()),
+                       static_cast<uint32_t>(window->first),
                        static_cast<uint32_t>(window->second - window->first));
               continue;
             }
@@ -617,8 +609,7 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
         auto        sn = leaves[0].pin.get_master_node();
         auto        cg = sn.get_subnode_graph();
         const auto& cr = callee_of(cg);
-        if (auto it = cr.out_slices.find(static_cast<uint32_t>(leaves[0].pin.get_port_id()));
-            cg && it != cr.out_slices.end()) {
+        if (auto it = cr.out_slices.find(static_cast<uint32_t>(leaves[0].pin.get_port_id())); cg && it != cr.out_slices.end()) {
           std::vector<Out_slice> mine;
           bool                   ok = true;
           for (const auto& cs : it->second) {
@@ -649,8 +640,9 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
                 }
               }
             }
-            std::sort(ps.ins.begin(), ps.ins.end(),
-                      [](const In_atom& a, const In_atom& b) { return std::tie(a.pid, a.lo, a.len) < std::tie(b.pid, b.lo, b.len); });
+            std::sort(ps.ins.begin(), ps.ins.end(), [](const In_atom& a, const In_atom& b) {
+              return std::tie(a.pid, a.lo, a.len) < std::tie(b.pid, b.lo, b.len);
+            });
             mine.push_back(std::move(ps));
           }
           if (ok && mine.size() > 1) {
@@ -667,8 +659,8 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
       uint32_t               covered = 0;  // the decomposition must TILE [0, out_bits)
       for (size_t k = 0; k < leaves.size(); ++k) {
         const uint32_t lo = leaves[k].lo;
-        const uint32_t hi = leaves[k].len != 0 ? std::min(lo + leaves[k].len, out_bits)
-                                               : ((k + 1 < leaves.size()) ? leaves[k + 1].lo : out_bits);
+        const uint32_t hi
+            = leaves[k].len != 0 ? std::min(lo + leaves[k].len, out_bits) : ((k + 1 < leaves.size()) ? leaves[k + 1].lo : out_bits);
         if (hi <= lo || lo >= out_bits) {
           ok = false;
           break;
@@ -690,8 +682,9 @@ const Def_reach& Cache::of(const std::shared_ptr<hhds::Graph>& g) {
         sl.len  = hi - lo;
         sl.leaf = leaves[k].pin;
         run_walk({sl.leaf}, sl.ins);
-        std::sort(sl.ins.begin(), sl.ins.end(),
-                  [](const In_atom& a, const In_atom& b) { return std::tie(a.pid, a.lo, a.len) < std::tie(b.pid, b.lo, b.len); });
+        std::sort(sl.ins.begin(), sl.ins.end(), [](const In_atom& a, const In_atom& b) {
+          return std::tie(a.pid, a.lo, a.len) < std::tie(b.pid, b.lo, b.len);
+        });
         slices.push_back(std::move(sl));
       }
       if (ok && covered != out_bits) {

@@ -521,33 +521,27 @@ void Lnast_builder::create_declare_stmts(std::string_view var, std::string_view 
 
 void Lnast_builder::add_value_child_pub(const Lnast_nid& parent, std::string_view value) { add_value_child(parent, value); }
 
-std::string Lnast_builder::create_get_mask_stmts(std::string_view sel_var, std::string_view bitmask) {
-  I(sel_var.size() && bitmask.size());
-
+std::string Lnast_builder::create_get_mask_stmts(std::string_view sel_var, std::string_view lo, std::string_view hi) {
   auto res_var = create_lnast_tmp();
   auto idx     = lnast->add_child(idx_stmts, Lnast_ntype::create_get_mask());
   add_ref_child(idx, res_var);
-  add_value_child(idx, sel_var);  // a constant selectee is legal (constprop folds it)
-  add_value_child(idx, bitmask);
-
-  // get_mask packs the selected bits LSB-first and zero-extends, so the result
-  // is a non-negative popcount(mask)-wide integer -- a one-bit mask included.
-  if (const auto* m = literal_value(bitmask); m != nullptr && m->is_integer() && !m->has_unknowns() && !m->is_negative()) {
-    const int w = m->popcount();
-    if (w >= 1) {
-      note_unsigned_bits(res_var, w);
-    }
+  add_value_child(idx, sel_var);
+  add_value_child(idx, lo);
+  add_value_child(idx, hi);
+  const auto* l = literal_value(lo);
+  const auto* h = literal_value(hi);
+  if (l && h && l->is_just_i64() && h->is_just_i64() && h->to_just_i64() > l->to_just_i64()) {
+    note_unsigned_bits(res_var, h->to_just_i64() - l->to_just_i64());
   }
-
   return res_var;
 }
 
-void Lnast_builder::create_set_mask_stmts(std::string_view sel_var, std::string_view bitmask, std::string_view value) {
-  I(sel_var.size() && bitmask.size() && value.size());
-
+void Lnast_builder::create_set_mask_stmts(std::string_view sel_var, std::string_view value, std::string_view lo,
+                                          std::string_view hi) {
   auto idx = lnast->add_child(idx_stmts, Lnast_ntype::create_set_mask());
   add_ref_child(idx, sel_var);
   add_ref_child(idx, sel_var);
-  add_value_child(idx, bitmask);
   add_value_child(idx, value);
+  add_value_child(idx, lo);
+  add_value_child(idx, hi);
 }

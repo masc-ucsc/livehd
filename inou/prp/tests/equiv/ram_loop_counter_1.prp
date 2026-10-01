@@ -13,6 +13,7 @@ pub mod ram_loop_counter_1(en:Bool, sel:Bool, d:U4) -> (q:U4@[0], seen:S32@[0], 
   reg b:S32:[latch=true] = nil
   if en {
     r0_dout_tmp = d
+    // prp-style-allow single-destination-conditional
     if sel { b = 3 } else { b = 5 }
   }
   q = r0_dout_tmp

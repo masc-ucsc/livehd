@@ -27,29 +27,40 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
         proc = subprocess.run([LHD, "pyrope", "style", *map(str, paths), "--diag-fmt", "json", *threshold, *flags],
                               text=True, capture_output=True, timeout=30)
         assert proc.returncode in (0, 2), proc.stderr
+        codes_all = {"likely-unrolled-loop", "repeated-code", "whole-tuple-copy", "flattened-bundle-arguments",
+                     "single-destination-conditional", "hardcoded-reset", "reset-port-type"}
         codes = {"likely-unrolled-loop", "repeated-code"}
         if rule == "all":
             codes |= {"whole-tuple-copy", "flattened-bundle-arguments", "single-destination-conditional"}
         elif rule:
             codes = {rule}
-        results, records = [], []
+        # A file with no suggestions prints nothing (no summary), so records are
+        # attributed to files by their own file reference.
+        def owner(record):
+            if record.get("attrs", {}).get("file"):
+                return record["attrs"]["file"]
+            for span in [record.get("span")] + [n.get("span") for n in record.get("notes", [])]:
+                if span:
+                    return span["file"]
+            raise AssertionError(record)
+
+        by_file = {str(p): [] for p in paths}
         for line in proc.stderr.splitlines():
             record = json.loads(line)
-            records.append(record)
-            if record["code"] != "style-summary":
-                continue
-            index = len(results)
-            assert index < len(paths), proc.stderr
-            assert record["attrs"]["file"] == str(paths[index]), record
-            assert record["attrs"]["partial"] == str(partial).lower(), records
-            assert paths[index].read_text() == sources[index], "style must not rewrite input"
-            findings = [r for r in records if r["code"] in codes]
-            results.append((findings, records, paths[index]))
-            records = []
-        assert len(results) == len(paths) and not records, proc.stderr
+            assert owner(record) in by_file, record
+            by_file[owner(record)].append(record)
+        results = []
+        for path, source in zip(paths, sources):
+            records = by_file[str(path)]
+            summaries = [r for r in records if r["code"] == "style-summary"]
+            assert len(summaries) <= 1, records
+            assert bool(summaries) == any(r["code"] in codes_all for r in records), records
+            assert any(r["code"] == "partial-analysis" for r in records) == partial, records
+            assert path.read_text() == source, "style must not rewrite input"
+            results.append(([r for r in records if r["code"] in codes], records, path))
         # Exit 2 iff any file reported a suggestion (scripts test `$? -ne 0`).
-        any_suggestion = any(int(r["attrs"]["total_findings"]) > 0
-                             for _, recs, _ in results for r in recs if r["code"] == "style-summary")
+        any_suggestion = any(int(r["attrs"]["total_findings"]) > 0 for _, recs, _ in results for r in recs
+                             if r["code"] == "style-summary")
         assert proc.returncode == (2 if any_suggestion else 0), (proc.returncode, proc.stderr)
         return results
 
@@ -279,6 +290,90 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
     assert f["span"]["start_line"] == 1 and f["span"]["end_line"] == 9, f
     assert "branch order" in f["hint"], f
     assert len(run("if select { out = a + 1; } else { /* gap */ out = b - 1; }\n", rule=conditional_rule)[0]) == 1
+    # Hand-written resets: an input used only as a reset should be a structural
+    # reset_pin (hardcoded-reset) and typed Reset (reset-port-type).
+    hard, rtype = "hardcoded-reset", "reset-port-type"
+
+    def mod(body, port="rst:U1", extra=""):
+        return f"pub mod m(clk:Clock, {port}, din:U7{extra}) -> (dout:U7@[]) {{\n  reg q:U7 = nil\n  dout = q\n{body}}}\n"
+
+    findings, _, _ = run(mod("  if rst_ni == 0 { q = 0 } else { q = din }\n", "rst_ni:U1"), rule=hard)
+    assert len(findings) == 1, findings
+    f = findings[0]
+    assert f["attrs"]["polarity"] == "active-low" and f["attrs"]["registers"] == "q" and f["attrs"]["value"] == "0", f
+    assert f["attrs"]["port_type"] == "U1" and "reset_pin=" in f["hint"] and "negreset=true" in f["hint"], f
+    assert "reg q:U7:[reset_pin=" in f["hint"], f
+    for cond, pol in [("rst", "active-high"), ("!rst", "active-low"), ("not rst", "active-low"), ("~rst", "active-low"),
+                      ("(rst)", "active-high"), ("rst == 1", "active-high"), ("rst != 0", "active-high"),
+                      ("rst != 1", "active-low"), ("rst == true", "active-high")]:
+        findings, _, _ = run(mod(f"  if {cond} {{ q = 0 }} else {{ q = din }}\n"), rule=hard)
+        assert len(findings) == 1 and findings[0]["attrs"]["polarity"] == pol, (cond, findings)
+    # The clear may be the else arm (reset when the condition is false) or have no other arm.
+    findings, _, _ = run(mod("  if rst { q = din } else { q = 0 }\n"), rule=hard)
+    assert len(findings) == 1 and findings[0]["attrs"]["polarity"] == "active-low", findings
+    assert len(run(mod("  if rst { q = 0 }\n"), rule=hard)[0]) == 1
+    assert len(run(mod("  q = din\n  if rst { q = 0 }\n"), rule=hard)[0]) == 1
+    # Several registers cleared by one `if`; the port may serve many clears.
+    two_regs = "pub mod m(clk:Clock, rst:U1, din:U7) -> (dout:U7@[]) {\n  reg a:U7 = nil\n  reg b:U7 = nil\n  dout = a\n" \
+               "  if rst { a = 0; b = 1 } else { a = din; b = a }\n}\n"
+    findings, _, _ = run(two_regs, rule=hard)
+    assert len(findings) == 1 and findings[0]["attrs"]["registers"] == "a, b", findings
+    # A Reset-typed port still gets the structural suggestion but not the type one.
+    assert len(run(mod("  if rst { q = 0 } else { q = din }\n", "rst:Reset"), rule=hard)[0]) == 1
+    assert run(mod("  if rst { q = 0 } else { q = din }\n", "rst:Reset"), rule=rtype)[0] == []
+    findings, _, _ = run(mod("  if rst { q = 0 } else { q = din }\n"), rule=rtype)
+    assert len(findings) == 1 and findings[0]["attrs"]["port"] == "rst" and findings[0]["attrs"]["declared_type"] == "U1", findings
+    assert len(run(mod("  if rst { q = 0 } else { q = din }\n", "rst:Bool"), rule=rtype)[0]) == 1
+    # Already structural: only the type is left to improve.
+    structural = "pub mod m(clk:Clock, rst:U1, din:U7) -> (dout:U7@[]) {\n  reg q:U7:[reset_pin=rst] = 0\n  dout = q\n  q = din\n}\n"
+    assert run(structural, rule=hard)[0] == [] and len(run(structural, rule=rtype)[0]) == 1
+    assert run(structural.replace("rst:U1", "rst:Reset"), rule=rtype)[0] == []
+    hard_negatives = [
+        mod("  if rst { q = 0 } else { q = din }\n  dout = q + rst\n"),        # also used as data
+        mod("  if rst { q = 0 } else { q = din }\n", "rst:U8"),                 # not a 1-bit control
+        mod("  if rst { q = 0 } else { q = din }\n  q = 1\n"),                  # a later write beats the clear
+        mod("  if rst { q = 0 } else { q = 1 }\n"),                              # both arms constant: a data mux
+        mod("  if rst { q = din + 1 } else { q = din }\n"),                      # no constant clear
+        mod("  if rst { q = 0; dout = 1 } else { q = din }\n"),                  # clear arm also drives non-registers
+        mod("  if rst { q = 0 } elif rst == 0 { q = din }\n"),                   # port used again in the chain
+        mod("  if rst == 2 { q = 0 } else { q = din }\n"),                       # not a 0/1 test
+        mod("  if rst { q = 0 } else { q = din }\n  if rst { q = 1 }\n  q = din\n"),
+        mod("  if din == 0 { q = 0 } else { q = din }\n"),                       # a data input, not 1 bit port
+        mod("  if rst and din { q = 0 } else { q = din }\n"),
+        mod("  wire w = 0\n  if rst { w = 0 } else { w = 1 }\n"),             # not a register
+        "pub mod m(clk:Clock, rst:U1, din:U7) -> (o:U7@[]) {\n  reg a:[4]U7 = nil\n  o = a[0]\n  if rst { a = 0 } else { a[0] = din }\n}\n",  # memory
+        mod("  reg l:U7:[latch=true] = nil\n  if rst { l = 0 } else { l = din }\n"),  # latch
+        mod("  reg k:U7:[reset_pin=other] = 0\n  if rst { k = 0 } else { k = din }\n", extra=", other:Reset"),  # already has a reset_pin
+        mod("  reg k:U7 = 0\n  if rst { k = 0 } else { k = din }\n"),  # initial value binds the implicit reset
+        "pub comb f(rst:U1, din:U7) -> (o:U7) {\n  if rst { o = 0 } else { o = din }\n}\n",
+    ]
+    for case_source, (findings, _, _) in zip(hard_negatives, run_many(hard_negatives, rule=hard)):
+        assert findings == [], (case_source, findings)
+    for case_source, (findings, _, _) in zip(hard_negatives[:1], run_many(hard_negatives[:1], rule=rtype)):
+        assert findings == [], (case_source, findings)
+    # Untyped parameters have no type node (regression: null-node field lookup crashed).
+    assert run("pub mod m(clk:Clock, rst, din) -> (dout) {\n  reg q = nil\n  dout = q\n  if rst { q = 0 } else { q = din }\n}\n"
+               "comb dox(a) -> (foo, c) { foo = (bar = a + 1) }\n", rule=hard)[0] == []
+    # Both rules honor prp-style-allow (the port's rule from before the module).
+    allowed = "// prp-style-allow hardcoded-reset, reset-port-type\n" + mod("  if rst { q = 0 } else { q = din }\n")
+    assert run(allowed, rule=hard)[0] == [] and run(allowed, rule=rtype)[0] == []
+
+    # `// prp-style-allow CODE[, CODE]` silences those codes for the rest of the
+    # enclosing scope only; leaving the scope (tree pop) ends the allow.
+    two_ifs = "if a { out = x } else { out = y }\n"
+    allow = "// prp-style-allow single-destination-conditional\n"
+    assert len(run(two_ifs, rule=conditional_rule)[0]) == 1
+    assert run(allow + two_ifs, rule=conditional_rule)[0] == []  # file scope, rest of file
+    assert run("/* prp-style-allow other-code, single-destination-conditional */\n" + two_ifs, rule=conditional_rule)[0] == []
+    assert len(run("// prp-style-allow other-code\n" + two_ifs, rule=conditional_rule)[0]) == 1  # code must match
+    assert len(run("// prp-style-allowed single-destination-conditional\n" + two_ifs, rule=conditional_rule)[0]) == 1
+    assert len(run("// prp-style-allow\n" + two_ifs, rule=conditional_rule)[0]) == 1  # no codes
+    assert len(run(two_ifs + allow, rule=conditional_rule)[0]) == 1  # only what follows the comment
+    nested = "pub comb f(a:U1) -> (out:U1) {\n  if a {\n    " + allow + "    " + two_ifs + "  } else { out = 1 }\n  " + two_ifs + "}\n"
+    assert [f["span"]["start_line"] for f in run(nested, rule=conditional_rule)[0]] == [6], nested  # inner arm allowed, popped after it
+    # A clean file prints no summary at all (scripts treat any output as a finding).
+    proc = subprocess.run([LHD, "pyrope", "style", str(run(allow + two_ifs)[2])], capture_output=True, text=True)
+    assert proc.returncode == 0 and proc.stderr == "", (proc.returncode, proc.stderr)
     negatives = [
         "if enabled { out = data }\n",  # enable/hold, not exhaustive
         "if a { out = x } elif b { out = y }\n",

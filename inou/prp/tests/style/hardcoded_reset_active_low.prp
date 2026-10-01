@@ -1,0 +1,17 @@
+/*
+:name: style_hardcoded_reset_active_low
+:type: style
+:style: hardcoded-reset
+:message: dout_q
+:help: negreset=true
+*/
+// An active-low test (`== 0`, `!x`, `not x`, `~x`) needs `negreset=true` on the
+// register; the hint must say so.
+pub mod m(clk:Clock, rst_n:Reset, din:U7) -> (dout:U7@[]) {
+  reg dout_q:U7 = nil
+  dout = dout_q
+  dout_q = din
+  if rst_n == 0 {  // locate_style_hardcoded-reset
+    dout_q = 0
+  }
+}

@@ -301,24 +301,22 @@ TEST(ColorReduce, DivergentGetMaskStaysStructural) {
   }
   auto g = gio->create_graph();
 
-  auto k5   = gu::create_const(*g, *Dlop::create_integer(5));
-  auto k6   = gu::create_const(*g, *Dlop::create_integer(6));
-  auto make = [&](int i, const hhds::Pin_class& mask) {
+  auto make = [&](int i, int lo) {
     auto x = create_typed_node(*g, Ntype_op::Xor);
     g->get_input_pin(std::string{"in"} + std::to_string(i)).connect_sink(x.create_sink_pin(0));
     auto xp = x.create_driver_pin(0);
     gu::set_bits(xp, 3);
     auto slice = create_typed_node(*g, Ntype_op::Get_mask);
     xp.connect_sink(gu::setup_sink_by_name(slice, "a"));
-    mask.connect_sink(gu::setup_sink_by_name(slice, "mask"));
+    gu::connect_bit_range(slice, lo, lo + 2);
     auto out = slice.create_driver_pin(0);
     gu::set_bits(out, 2);
     out.connect_sink(g->get_output_pin(std::string{"y"} + std::to_string(i)));
   };
-  make(0, k5);
-  make(1, k5);
-  make(2, k5);
-  make(3, k6);
+  make(0, 0);
+  make(1, 0);
+  make(2, 0);
+  make(3, 1);
 
   Reduce_stats st;
   hhds::Graph* defs[] = {g.get()};

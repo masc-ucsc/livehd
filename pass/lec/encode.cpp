@@ -568,21 +568,6 @@ Term fit_x_mask_to(cvc5::TermManager& tm, const Val& v, int width) {
 
 namespace {
 
-// The [begin, end) window a mask selects, CLIPPED to `width`; empty when it
-// selects nothing inside it. graph/cell.hpp guarantees the mask is one window
-// or the -1 "whole value" spelling, and the clip turns -1 into [0, width).
-std::optional<std::pair<int, int>> mask_window_clipped(const Dlop& mask, int width) {
-  if (width <= 0) {
-    return std::nullopt;
-  }
-  const auto clipped   = mask.and_op(*Dlop::get_mask_value(width - 1, 0));
-  auto [begin, end]    = clipped->get_mask_range();
-  if (begin < 0 || end <= begin || begin >= width) {
-    return std::nullopt;
-  }
-  return std::pair<int, int>{begin, std::min(end, width)};
-}
-
 // Exact X plane for a constant-mask Get_mask (bit EXTRACT), or a null Term when
 // the shape is anything else (caller then falls back to the conservative
 // whole-value smear).
@@ -604,25 +589,12 @@ Term exact_get_mask_x_plane(cvc5::TermManager& tm, const hhds::Occurrence_node& 
   if (a.x_mask.isNull()) {
     return Term();  // `a` is fully known; the plane can only come from the mask pin
   }
-  auto mask_pin = gu::get_driver_of_sink_name(node, "mask");
-  if (mask_pin.is_invalid() || !mask_pin.is_const()) {
+  const auto range = gu::bit_range(node);
+  if (!range) {
     return Term();
   }
-  Dlop mask = gu::const_of(mask_pin);
-  if (mask.has_unknowns()) {
-    return Term();  // an unknown mask selects unknown POSITIONS: smear
-  }
-  if (mask.is_just_i64() && mask.to_just_i64() == -1) {
-    // Unsigned cast: the value is re-read as unsigned, so the plane extends with
-    // known-zero bits exactly like the value extends with zeros.
-    return fit_x_mask_to(tm, Val{a.term, a.width, /*is_signed=*/false, a.x_mask}, width);
-  }
-  auto      range = mask.get_mask_range();  // [begin, end)
-  const int rb = range.first, re = range.second;
-  if (rb < 0 || re <= rb) {
-    return Term();  // non-contiguous: the value path refuses too
-  }
-  Term axw = re > a.width ? fit_x_mask_to(tm, a, re) : a.x_mask;
+  const auto [rb, re] = *range;
+  Term axw            = re > a.width ? fit_x_mask_to(tm, a, re) : a.x_mask;
   if (axw.isNull()) {
     return Term();
   }
@@ -2925,81 +2897,53 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           if (pid(0).empty()) {
             return fail("Get_mask missing a");
           }
-          const Val&           a = pid(0)[0];
-          hhds::Occurrence_pin mask_pin;
-          for (const auto& sink : node.inp_sorted_pins()) {
-            if (sink.get_port_id() != Ntype::get_sink_pid(op, "mask")) {
-              continue;
-            }
-            for (const auto& driver : sink.get_driver_pins()) {
-              mask_pin = driver;  // first driver of that sink == the first matching edge
-              break;
-            }
-            break;  // that `break` left the WHOLE walk
+          const Val& a     = pid(0)[0];
+          const auto range = gu::bit_range(node);
+          if (!range) {
+            return fail_unsupported("Get_mask requires constant lo/hi endpoints");
           }
-          if (mask_pin.is_invalid() || !mask_pin.is_const()) {
-            return fail_unsupported("Get_mask with non-constant mask not supported (M1)");
-          }
-          Dlop mask = gu::const_of(mask_pin);
-          if (mask.is_just_i64() && mask.to_just_i64() == -1) {
-            // zero-extend (sign -> unsigned cast)
-            Val zext{a.term, a.width, false};
-            result = fit(zext, W);
-            break;
-          }
-          // graph/cell.hpp: the -1 spelling was handled above, so this is ONE
-          // window. Still fails CLOSED rather than asserting -- this is the
-          // verification oracle, and an unencodable cell must not silently
-          // become a vacuous PROVEN.
-          auto range = mask.get_mask_range();  // [begin, end)
-          int  rb = range.first, re = range.second;
-          if (rb < 0 || re <= rb) {
-            return fail_unsupported("Get_mask mask is neither a window nor -1 (M1)");
-          }
+          const auto [rb, re] = *range;
           // Bits at/above the operand width are its sign/zero extension (matching
           // the bit-blast's per-bit extension, lec.md bit-width trap), so widen
           // `a` to cover [rb,re) rather than failing on an out-of-range slice.
-          Term aw    = re > a.width ? fit(a, re) : a.term;
-          Term slice = bv_extract(tm_, aw, re - 1, rb);
+          Term aw             = re > a.width ? fit(a, re) : a.term;
+          Term slice          = bv_extract(tm_, aw, re - 1, rb);
           Val  sv{slice, re - rb, false};
           result = fit(sv, W);
           break;
         }
         case Ntype_op::Set_mask: {
-          hhds::Occurrence_pin mask_pin;
-          for (const auto& sink : node.inp_sorted_pins()) {
-            if (sink.get_port_id() != Ntype::get_sink_pid(op, "mask")) {
-              continue;
+          const auto range = gu::bit_range(node);
+          if (!range) {
+            // Loop-body endpoints can remain symbolic until the enclosing loop
+            // binds its index. Encode the same shift/bitwise insertion as tolg.
+            if (pid(0).empty() || pid(2).empty() || pid(3).empty() || pid(4).empty()) {
+              return fail("Set_mask missing a/value/lo/hi");
             }
-            for (const auto& driver : sink.get_driver_pins()) {
-              mask_pin = driver;  // first driver of that sink == the first matching edge
-              break;
+            for (auto operand : {0, 2, 3, 4}) {
+              if (!pid(operand)[0].x_mask.isNull()) {
+                return fail_unsupported("symbolic Set_mask with unknown operands");
+              }
             }
-            break;  // that `break` left the WHOLE walk
-          }
-          if (mask_pin.is_invalid() || !mask_pin.is_const()) {
-            return fail_unsupported("Set_mask with non-constant mask not supported (M1)");
+            const int cw       = std::max({W, pid(2)[0].width + 1, pid(3)[0].width + 1});
+            auto      low      = fit(pid(2)[0], cw);
+            auto      high     = fit(pid(3)[0], cw);
+            auto      ones     = tm_.mkTerm(Kind::BITVECTOR_NOT, {bv_const(tm_, cw, 0)});
+            auto      below_hi = tm_.mkTerm(Kind::BITVECTOR_NOT, {tm_.mkTerm(Kind::BITVECTOR_SHL, {ones, high})});
+            auto      above_lo = tm_.mkTerm(Kind::BITVECTOR_SHL, {ones, low});
+            auto      mask     = tm_.mkTerm(Kind::BITVECTOR_AND, {below_hi, above_lo});
+            auto      placed   = tm_.mkTerm(Kind::BITVECTOR_SHL, {fit(pid(4)[0], cw), low});
+            auto      kept     = tm_.mkTerm(Kind::BITVECTOR_AND, {fit(pid(0)[0], cw), tm_.mkTerm(Kind::BITVECTOR_NOT, {mask})});
+            auto      inserted = tm_.mkTerm(Kind::BITVECTOR_AND, {placed, mask});
+            result             = fit(Val{tm_.mkTerm(Kind::BITVECTOR_OR, {kept, inserted}), cw, false}, W);
+            break;
           }
           if (pid(0).empty()) {
             return fail("Set_mask missing a");
           }
-          const Val& a    = pid(0)[0];
-          Dlop       mask = gu::const_of(mask_pin);
-          if (mask.is_known_zero()) {
-            result = fit(a, W);  // nothing replaced
-            break;
-          }
-          // ONE-window bit-insert (the bit-blast's output concat): out[i] =
-          // (rb<=i<re) ? value[i-rb] : a[i]. `a` and `value` are already stored
-          // at their own literal widths; fit() reconciles them to the window /
-          // result widths. graph/cell.hpp guarantees one window or -1, and -1
-          // means "replace everything", i.e. the window [0, Wm).
-          int  Wm    = std::max(1, W);
-          auto range = gu::is_whole_value_mask(mask) ? std::pair<int, int>{0, Wm} : mask.get_mask_range();
-          int  rb = range.first, re = range.second;
-          if (rb < 0 || re <= rb) {
-            return fail_unsupported("Set_mask mask is neither a window nor -1 (M1)");
-          }
+          const Val& a        = pid(0)[0];
+          const int  Wm       = std::max(1, W);
+          const auto [rb, re] = *range;
           if (rb >= Wm) {
             result = fit(a, Wm);  // replaced region entirely above the result
             break;
@@ -3228,8 +3172,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               }
               out_val.x_mask = u;
             }
-          } else if (op == Ntype_op::Set_mask && !pid(Ntype::get_sink_pid(op, "mask")).empty()
-                     && pid(Ntype::get_sink_pid(op, "mask"))[0].x_mask.isNull() && !pid(Ntype::get_sink_pid(op, "value")).empty()
+          } else if (op == Ntype_op::Set_mask && gu::bit_range(node).has_value() && !pid(Ntype::get_sink_pid(op, "value")).empty()
                      && !pid(0).empty()) {
             // Insert the value's X plane into precisely the same windows as its
             // value bits. A non-null plane can evaluate to zero after previous
@@ -3238,11 +3181,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               Term x = fit_x_mask_to(tm_, v, width);
               return x.isNull() ? tm_.mkBitVector(static_cast<uint32_t>(width), 0) : x;
             };
-            Term ax       = plane(pid(0)[0], W);
-            auto mask_pin = gu::get_driver_of_sink_name(node, "mask");
-            if (auto window = mask_window_clipped(gu::const_of(mask_pin), W); window) {
-              const auto [begin, end] = *window;
-              Term inserted           = plane(pid(Ntype::get_sink_pid(op, "value"))[0], std::max(1, end - begin));
+            Term ax                  = plane(pid(0)[0], W);
+            const auto [begin, high] = *gu::bit_range(node);
+            const int end            = std::min(high, W);
+            if (begin < end) {
+              Term inserted = plane(pid(Ntype::get_sink_pid(op, "value"))[0], std::max(1, end - begin));
               if (end < W) {
                 inserted = tm_.mkTerm(Kind::BITVECTOR_CONCAT, {bv_extract(tm_, ax, W - 1, end), inserted});
               }
@@ -4650,7 +4593,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               xmask = xmask.isNull() ? xm : tm_.mkTerm(Kind::BITVECTOR_CONCAT, {xmask, xm});
             }
           }
-          wmask = mask;
+          wmask    = mask;
           enable_x = xmask;
         } else {
           Term en_hot = tm_.mkTerm(Kind::DISTINCT, {ev.term, bv_const(tm_, ev.width, 0)});
@@ -4664,7 +4607,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
                 = tm_.mkTerm(Kind::ITE,
                              {xu, tm_.mkTerm(Kind::BITVECTOR_NOT, {bv_const(tm_, mc.sig.bits, 0)}), bv_const(tm_, mc.sig.bits, 0)});
           }
-          wmask       = tm_.mkTerm(
+          wmask = tm_.mkTerm(
               Kind::ITE,
               {en_hot, tm_.mkTerm(Kind::BITVECTOR_NOT, {bv_const(tm_, mc.sig.bits, 0)}), bv_const(tm_, mc.sig.bits, 0)});
         }
@@ -4719,7 +4662,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           x_next             = tm_.mkTerm(Kind::ITE, {uncertain, unknown_array, x_next});
         }
       }
-      a_next        = tm_.mkTerm(Kind::STORE, {a_next, addr, new_word});
+      a_next = tm_.mkTerm(Kind::STORE, {a_next, addr, new_word});
       // Snapshot after each write port so a read port can source the array as
       // of its own program position: `fwd` row r is a PREFIX of the write ports
       // under ordering="program" (and all/none under "fwd"/"none"), so
@@ -4836,8 +4779,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       // untouched: `rd_src` stays a_cur, so the `shared_cur` dout-merge route
       // keeps working and no false PROVEN is introduced.
       if (k < mc.rd_xmask.size() && !mc.rd_xmask[k].isNull()) {
-        Term zero    = bv_const(tm_, mc.sig.bits, 0);
-        Term plane   = zero;
+        Term zero  = bv_const(tm_, mc.sig.bits, 0);
+        Term plane = zero;
         // A null knowledge array (none yet, or a snapshot taken before the
         // first unknown write this cycle) is the all-known plane.
         if (mc.x_track) {

@@ -91,7 +91,7 @@ std::optional<Form> shift_form(const Pin& p) {
   const auto n  = p.get_master_node();
   const auto op = gu::type_op_of(n);
   if (op == Ntype_op::SHL) {
-    const int k = const_amount(driver(n, 1));
+    const int  k = const_amount(driver(n, 1));
     const auto x = driver(n, 0);
     if (k > 0 && !x.is_invalid()) {
       return Form{k, x, false, {}};
@@ -228,7 +228,7 @@ public:
     return n.create_driver_pin(0);
   }
   Pin low_mask(const Pin& x, int lo, int hi) {
-    auto n = livehd::cprop_value::make_get_mask(g_, x, constant(*Dlop::get_mask_value(hi - 1, lo)));
+    auto n = livehd::cprop_value::make_get_mask(g_, x, lo, hi);
     if (gu::has_color(origin_)) {
       gu::set_color(n, gu::color_of(origin_));
     }
@@ -276,20 +276,20 @@ bool Cprop::low_lane(hhds::Node_class& node) {
   }
   const auto op = gu::type_op_of(node);
   switch (op) {
-    case Ntype_op::Sum:
-    case Ntype_op::Mult:
-    case Ntype_op::And:
-    case Ntype_op::Or:
-    case Ntype_op::Xor:
-    case Ntype_op::Mux:
-    case Ntype_op::EQ:
-    case Ntype_op::LT:
-    case Ntype_op::GT:
-    case Ntype_op::SRA:
+    case Ntype_op::Sum     :
+    case Ntype_op::Mult    :
+    case Ntype_op::And     :
+    case Ntype_op::Or      :
+    case Ntype_op::Xor     :
+    case Ntype_op::Mux     :
+    case Ntype_op::EQ      :
+    case Ntype_op::LT      :
+    case Ntype_op::GT      :
+    case Ntype_op::SRA     :
     case Ntype_op::Get_mask:
-    case Ntype_op::Sext:
-    case Ntype_op::Not: break;
-    default: return false;
+    case Ntype_op::Sext    :
+    case Ntype_op::Not     : break;
+    default                : return false;
   }
   // Operands in pid order, with their pid.
   std::vector<std::pair<hhds::Port_id, Pin>> ops;
@@ -336,15 +336,15 @@ bool Cprop::low_lane(hhds::Node_class& node) {
     if (k == 0 || ops.size() < 2) {
       return false;
     }
-    auto parts = parts_at(k);
+    auto parts   = parts_at(k);
     // Low parts: at most one runtime L, added (never subtracted); constants
     // fold into one value whose carry moves into the H sum.
-    Dlop cl       = *Dlop::create_integer(0);
-    int  runtime  = -1;
-    int  n_arbit  = 0;
+    Dlop cl      = *Dlop::create_integer(0);
+    int  runtime = -1;
+    int  n_arbit = 0;
     for (size_t i = 0; i < parts.size(); ++i) {
-      const bool minus = Ntype::sink_bank(op, ops[i].first) == 1;
-      n_arbit += parts[i].arbitrary ? 1 : 0;
+      const bool minus  = Ntype::sink_bank(op, ops[i].first) == 1;
+      n_arbit          += parts[i].arbitrary ? 1 : 0;
       if (parts[i].lc) {
         cl = minus ? *cl.sub_op(*parts[i].lc) : *cl.add_op(*parts[i].lc);
       } else if (runtime >= 0 || minus) {
@@ -392,8 +392,8 @@ bool Cprop::low_lane(hhds::Node_class& node) {
         if (c->is_known_zero()) {
           return false;
         }
-        const int tz = c->get_trailing_zeroes();
-        total += tz;
+        const int tz  = c->get_trailing_zeroes();
+        total        += tz;
         hs.push_back(b.constant(*c->sra_op(*Dlop::create_integer(tz))));
       } else if (const auto f = form_of(p); f && f->l.is_invalid()) {
         any    = true;
@@ -429,7 +429,7 @@ bool Cprop::low_lane(hhds::Node_class& node) {
     if (k == 0) {
       return false;
     }
-    auto parts = parts_at(k);
+    auto      parts   = parts_at(k);
     // Or merges two or more low-lane operands (an Or of one form and a small
     // value IS the form); Xor also takes one arbitrary operand.
     const int forms   = count(parts, [](const Part& p) { return p.form; });
@@ -504,8 +504,8 @@ bool Cprop::low_lane(hhds::Node_class& node) {
     if (op != Ntype_op::EQ && (ops[0].first != 0 || ops[1].first != 1)) {
       return false;
     }
-    auto       parts = parts_at(k);
-    const int  arbit = count(parts, [](const Part& p) { return p.arbitrary; });
+    auto       parts     = parts_at(k);
+    const int  arbit     = count(parts, [](const Part& p) { return p.arbitrary; });
     const bool const_low = parts[0].lc && parts[1].lc;
     if (arbit > (op == Ntype_op::EQ ? 1 : 0) || (op != Ntype_op::EQ && !(const_low && parts[0].lc->is_known_eq(*parts[1].lc)))) {
       return false;
@@ -548,14 +548,11 @@ bool Cprop::low_lane(hhds::Node_class& node) {
         result = b.join(hb(), fk - j, f->l.is_invalid() ? Pin{} : b.shift(Ntype_op::SRA, f->l, j));
       }
     } else if (op == Ntype_op::Get_mask) {
-      const auto mask = ops.size() == 2 ? known_const(ops[1].second) : std::nullopt;
-      if (!mask || mask->is_negative()) {
+      const auto range = gu::bit_range(node);
+      if (!range) {
         return false;
       }
-      const auto [lo, hi] = mask->get_mask_range();  // [lo, hi)
-      if (lo < 0 || hi <= lo) {
-        return false;
-      }
+      const auto [lo, hi] = *range;
       if (lo >= fk) {
         result = b.low_mask(hb(), lo - fk, hi - fk);
       } else if (hi <= fk) {

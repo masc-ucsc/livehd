@@ -216,8 +216,8 @@ void Color_synth::preserve_arith_cuts() {
       for (const auto& e : dpin.out_edges()) {
         auto sink = e.sink.get_master_node();
         if (type_op_of(sink) == Ntype_op::Get_mask && !is_seeded(sink)) {
-          auto mask = graph_util::get_driver_of_sink_name(sink, "mask");
-          if (mask.is_const()) {
+          const auto mask = livehd::graph_util::bit_range(sink);
+          if (mask.has_value()) {
             flat_node2id[sink] = cut_id;
           }
         }

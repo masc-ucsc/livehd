@@ -8,7 +8,6 @@
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <limits>
 #include <optional>
 #include <string>
@@ -16,8 +15,10 @@
 
 namespace str_tools {
 
-[[nodiscard]] inline int to_i(std::string_view str) {  // convert to integer
-  if (str.empty() || !std::isdigit(str.front())) {
+// Parse a signed decimal prefix; invalid or out-of-range input returns zero.
+// Prefix parsing is also used for numbered pin names such as "12addr".
+[[nodiscard]] inline int to_i(std::string_view str) {
+  if (str.empty()) {
     return 0;
   }
   int result{};
@@ -26,7 +27,7 @@ namespace str_tools {
 }
 
 [[nodiscard]] inline std::string to_s(uint64_t v) {
-  std::array<char, 18> str2;
+  std::array<char, std::numeric_limits<uint64_t>::digits10 + 1> str2;
   auto [ptr, ec] = std::to_chars(str2.data(), str2.data() + str2.size(), v, 10);
   (void)ec;
   std::string str(str2.data(), ptr - str2.data());
@@ -40,7 +41,7 @@ namespace str_tools {
   }
 
   auto ch = str.front();
-  if (std::isdigit(ch) || ch == '-') {
+  if (std::isdigit(static_cast<unsigned char>(ch)) || ch == '-') {
     return false;
   }
 
@@ -48,7 +49,7 @@ namespace str_tools {
 }
 
 [[nodiscard]] inline bool is_i(std::string_view str) {
-  if (str.size() == 0 || !(std::isdigit(str.front()) || str.front() == '-')) {
+  if (str.size() == 0 || !(std::isdigit(static_cast<unsigned char>(str.front())) || str.front() == '-')) {
     return false;
   }
 
@@ -80,18 +81,7 @@ namespace str_tools {
   return str.substr(0, pos);
 }
 
-[[nodiscard]] inline bool ends_with(std::string_view str, std::string_view end) {
-  if (end.size() == str.size()) {
-    return str == end;  // faster path
-  }
-  if (end.size() > str.size()) {
-    return false;  // end is larger
-  }
-
-  const auto* base_en   = end.data();
-  const auto* base_self = str.data() + str.size() - end.size();
-  return memcmp(base_self, base_en, end.size()) == 0;
-}
+[[nodiscard]] inline bool ends_with(std::string_view str, std::string_view end) { return str.ends_with(end); }
 
 // ---------------------------------------------------------------------------
 // ASCII lowercase fold. LiveHD/Pyrope names are matched CASE-SENSITIVELY; this
@@ -101,6 +91,11 @@ namespace str_tools {
 // ---------------------------------------------------------------------------
 
 [[nodiscard]] inline char ascii_tolower(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
+
+[[nodiscard]] inline bool ascii_iequals(std::string_view a, std::string_view b) {
+  return a.size() == b.size()
+         && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) { return ascii_tolower(x) == ascii_tolower(y); });
+}
 
 // ASCII-lowercased copy of `s`, for case-collision detection only.
 [[nodiscard]] inline std::string ascii_fold(std::string_view s) {
@@ -116,8 +111,8 @@ namespace str_tools {
 // contract, NOT Pyrope boolean-literal semantics (which accept only false/0 —
 // see upass_attributes_sticky).
 [[nodiscard]] inline bool option_is_true(std::string_view value) {
-  const auto lower = ascii_fold(value);
-  return !(lower.empty() || lower == "0" || lower == "false" || lower == "no" || lower == "off");
+  return !(value.empty() || value == "0" || ascii_iequals(value, "false") || ascii_iequals(value, "no")
+           || ascii_iequals(value, "off"));
 }
 
 // Parse the max_width knob. "0"/"unlimited"/"inf"/"none" (case-insensitive) mean

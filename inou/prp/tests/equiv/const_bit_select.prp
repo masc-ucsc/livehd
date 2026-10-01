@@ -27,9 +27,9 @@
 // literal (`5'shf`) instead of `(const)[range]`. Guards prp-equiv-const_bit_select.
 pub comb top(sel:U1, b:S9) -> (o:U4) {
   mut cur:S9 = 0sb1????????
-  if sel!=0 {
-    o = cur#[12..=15]
+  o = if sel!=0 {
+    cur#[12..=15]
   } else {
-    o = b#[12..=15]
+    b#[12..=15]
   }
 }

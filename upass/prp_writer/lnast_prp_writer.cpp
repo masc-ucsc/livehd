@@ -4570,83 +4570,18 @@ static int pow2_width(std::string_view s) {
   return -1;
 }
 
-// True when `s` parses as a mask with at least one set bit that is NOT one
-// contiguous run. graph/cell.hpp says that shape does not exist -- prp2lnast
-// rejects a tuple index and slang emits one set_mask per concat-lvalue operand
-// -- and write_set_mask's single bit-range assign would silently DROP the bits
-// outside the bounding run if one ever appeared, so it is checked, not assumed.
-static bool sparse_mask(std::string_view s);
-
-// If `s` is a single contiguous run of set bits [lo..hi] (lo may be > 0),
-// returns (lo, hi); else nullopt.  Works at ARBITRARY width via the hex string
-// (decimal narrow via int64) — a get_mask packs the selected bits LSB-first, so
-// a non-zero-based contiguous mask is `src#[lo..=hi]` (which compacts), NOT
-// `src & mask` (which leaves them in place).  The from-0 case (lo==0) is the
-// width-truncation mask; lo>0 is a bit-field extract / shifter slice.
-static std::optional<std::pair<int, int>> contiguous_run(std::string_view s) {
-  std::vector<bool> bits;
-  if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
-    std::string_view h = s.substr(2);
-    for (size_t i = h.size(); i-- > 0;) {  // LSB hex digit first
-      int d = hex_digit(h[i]);
-      if (d < 0) {
-        return std::nullopt;
-      }
-      for (int b = 0; b < 4; ++b) {
-        bits.push_back((d >> b) & 1);
-      }
-    }
-  } else {
-    auto v = parse_int_const(s);
-    if (!v || *v <= 0) {
-      return std::nullopt;
-    }
-    unsigned long long m = static_cast<unsigned long long>(*v);
-    for (int b = 0; b < 64; ++b) {
-      bits.push_back((m >> b) & 1ULL);
-    }
+// Constant half-open LNAST selection, returned as an inclusive printing window.
+static std::optional<std::pair<int, int>> selection_window(const Lnast& ln, Lnast_nid lo) {
+  if (lo.is_invalid() || !Lnast_ntype::is_const(ln.get_type(lo))) {
+    return std::nullopt;
   }
-  int lo = -1;
-  int hi = -1;
-  for (int i = 0; i < static_cast<int>(bits.size()); ++i) {
-    if (bits[i]) {
-      if (lo < 0) {
-        lo = i;
-      }
-      hi = i;
-    }
+  auto hi = ln.get_sibling_next(lo);
+  auto l  = parse_int_const(ln.get_name(lo));
+  auto h  = hi.is_invalid() ? (l ? std::optional<long long>(*l + 1) : std::nullopt) : parse_int_const(ln.get_name(hi));
+  if (!l || !h || *l < 0 || *h <= *l || *h > std::numeric_limits<int>::max()) {
+    return std::nullopt;
   }
-  if (lo < 0) {
-    return std::nullopt;  // all-zero mask
-  }
-  for (int i = lo; i <= hi; ++i) {
-    if (!bits[i]) {
-      return std::nullopt;  // non-contiguous
-    }
-  }
-  return std::make_pair(lo, hi);
-}
-
-static bool sparse_mask(std::string_view s) {
-  if (contiguous_run(s)) {
-    return false;
-  }
-  // Not a run: sparse only if something IS set. A `0` mask and an unparsable
-  // one (a range temp's NAME, say) are both legitimately not runs.
-  if (s.size() > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
-    for (size_t i = 2; i < s.size(); ++i) {
-      const int d = hex_digit(s[i]);
-      if (d < 0) {
-        return false;
-      }
-      if (d != 0) {
-        return true;
-      }
-    }
-    return false;
-  }
-  const auto v = parse_int_const(s);
-  return v && *v > 0;
+  return std::pair<int, int>{*l, *h - 1};
 }
 
 // True if `n` is a declare initializer made only of compile-time constants: a
@@ -4833,34 +4768,13 @@ std::optional<int> Lnast_prp_writer::known_unsigned_bits(Lnast_nid n, int walk_d
       return it->second;
     }
     case N::Lnast_ntype_get_mask: {
-      // The emitted `s#[lo..=hi]` is an unsigned select of hi-lo+1 bits. A
-      // ONE-bit select is excluded: its constant fold is the signed -1/0
-      // boolean (Dlop::get_mask_op), so it carries no unsigned window.
-      auto src  = c0.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(c0);
-      auto mask = src.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(src);
-      if (mask.is_invalid()) {
-        return std::nullopt;
+      auto src = lnast->get_sibling_next(c0);
+      auto lo  = lnast->get_sibling_next(src);
+      if (lnast->get_sibling_next(lo).is_invalid()) {
+        return 1;
       }
-      if (lnast->get_type(mask) == N::Lnast_ntype_ref) {
-        auto rit = range_lohi_.find(std::string(lnast->get_name(mask)));
-        if (rit == range_lohi_.end()) {
-          return std::nullopt;
-        }
-        const auto lo = parse_int_const(rit->second.lo);
-        const auto hi = parse_int_const(rit->second.hi);
-        if (!lo || !hi || *lo < 0 || *hi < *lo + 1) {
-          return std::nullopt;
-        }
-        return static_cast<int>(*hi - *lo + 1);
-      }
-      if (lnast->get_type(mask) != N::Lnast_ntype_const) {
-        return std::nullopt;
-      }
-      auto run = contiguous_run(lnast->get_name(mask));  // the compacting (`#[lo..=hi]`) spelling
-      if (!run || run->second - run->first < 1) {
-        return std::nullopt;
-      }
-      return run->second - run->first + 1;
+      const auto run = selection_window(*lnast, lo);
+      return run ? std::optional<int>(run->second - run->first + 1) : std::nullopt;
     }
     case N::Lnast_ntype_concat: {
       // sum(lane widths) — the concat's result is that non-negative width.
@@ -6056,90 +5970,29 @@ void Lnast_prp_writer::write_delay_assign() {
   move_to_parent();
 }
 
-// Decompose a (hex- or decimal-) constant mask into its maximal contiguous runs
-// of set bits, LSB-first.  Empty when the mask is zero/unparsable.  Each run is
-// a closed `[lo..hi]` bit range.  set_mask places the inserted value LSB-first
-// across all selected bits, so run k consumes the next (hi-lo+1) bits of the
-// insert value after the runs below it.
-// set_mask( dst, val, mask, ins ) — dst = val with the bits selected by the
-// constant `mask` replaced by `ins` (placed LSB-first across the selected bits).
-// Reparsable spelling: a bit-range LHS assign `dst#[lo..=hi] = ins`, which
-// prp2lnast re-lowers to exactly this set_mask shape (read-modify-write).  The
-// slang reader emits dst==val (in-place RMW); when they differ (e.g. prp2lnast
-// minted a fresh result temp) a `dst = val` base copy is emitted first.  A
-// The mask is ONE contiguous window (graph/cell.hpp; the LNAST producers spell
-// nothing else -- prp2lnast rejects a tuple index and slang emits one set_mask
-// per concat-lvalue operand), so this is a single bit-range assign. A runtime
-// window is a ref to a `range` temp, or a one-hot `1 << pos` temp for a single
-// bit (`dst#[pos] = ins`).
+// set_mask(dst, base, value, lo, [hi]) renders as a bit-view assignment.
+// Copy the base first when the result has a distinct name.
 void Lnast_prp_writer::write_set_mask() {
-  if (!move_to_child()) {
-    return;
-  }
-  std::string dst = std::string(strip_prefix(current_text()));  // SSA suffix stripped
-  std::string val = dst;
-  if (move_to_sibling()) {  // val (base) — may be a single-use temp to inline
-    val = render_value(cur, /*operand_ctx=*/true);
-  }
-  std::string         mask_txt;
-  // A RUNTIME bit range arrives as a ref to a `range` temp: `q[addr] <= 1`
-  // lowers to `range(%r, addr, addr)` + `set_mask(q, q, %r, 1)`. scan_node
-  // recorded its bounds in range_lohi_ (the same table the READ side uses).
-  // mask_runs can never parse that ref NAME, so without this the write fell
-  // through to the "unparsable mask" arm below and was silently DROPPED.
-  const Range_bounds* dyn_range = nullptr;
-  // A RUNTIME single bit arrives as a one-hot `shl(%m, 1, pos)` mask:
-  // prp2lnast's `x#[pos] = v`. Falling through to the "unparsable mask" arm
-  // silently DROPPED the write (the base copy alone was printed).
-  Lnast_nid           dyn_bit;
-  bool                mask_is_ref = false;
-  if (move_to_sibling()) {  // mask: a const, a ref to a range temp, or a one-hot `1 << pos`
-    mask_txt    = std::string(current_text());
-    mask_is_ref = current_ntype() == Lnast_ntype::Lnast_ntype_ref;
-    if (mask_is_ref) {
-      if (auto rit = range_lohi_.find(mask_txt); rit != range_lohi_.end()) {
-        dyn_range = &rit->second;
-      } else {
-        dyn_bit = single_bit_mask_pos(cur);
-      }
-    }
-  }
-  std::string ins;
-  if (move_to_sibling()) {  // insert value — may be a single-use temp to inline
-    // The window consumes `ins` WHOLE (`dst#[lo..=hi] = ins`), so a loose
-    // expression needs no parens there.
-    ins = render_value(cur,
-                       /*operand_ctx=*/dyn_range == nullptr && dyn_bit.is_invalid() && !contiguous_run(mask_txt).has_value());
-  }
-  move_to_parent();
-  const std::string bit_pos = dyn_bit.is_invalid() ? std::string{} : render_value(dyn_bit, /*operand_ctx=*/false);
-
-  // A memory partial write prints as one: `mem[i]#[lo..=hi] = ins`. `val` is
-  // the element read, already rendered inline (`mem[i]`), and the store that
-  // writes the merged word back is dropped.
-  if (const auto store = mem_partial_write_store(cur); !store.is_invalid()) {
-    folded_node_.insert(store.get_class_index().value);
-    if (dyn_range != nullptr) {
-      const std::string lo = render_range_bound(dyn_range->lo_nid);
-      const std::string hi = render_range_bound(dyn_range->hi_nid);
-      os << (lo == hi ? std::format("{}#[{}] = {}", val, lo, ins) : std::format("{}#[{}..={}] = {}", val, lo, hi, ins));
-    } else if (!dyn_bit.is_invalid()) {
-      os << std::format("{}#[{}] = {}", val, bit_pos, ins);
-    } else {
-      const auto window = contiguous_run(mask_txt);
-      I(window);  // mem_partial_write_store accepts only a printable mask
-      os << std::format("{} = {}", fmt_bit_range(val, window->first, window->second), ins);
-    }
-    return;
-  }
-
-  // The reader lowers a source bit write to set_mask(%tmp, base, mask, v)
-  // followed by store(base, %tmp). Keep that as a direct bit write. Copying
-  // base first would read an output's still-unbound lanes on its first write.
-  // Only collapse an adjacent single-use temporary, with no intervening effects.
-  const auto result = lnast->get_child(cur);
+  const auto stmt   = cur;
+  const auto result = lnast->get_child(stmt);
   const auto base   = lnast->get_sibling_next(result);
-  const auto next   = lnast->get_sibling_next(cur);
+  const auto value  = lnast->get_sibling_next(base);
+  const auto lo     = lnast->get_sibling_next(value);
+  const auto hi     = lnast->get_sibling_next(lo);
+  I(!lo.is_invalid());
+  std::string dst(strip_prefix(lnast->get_name(result)));
+  const auto  val       = render_value(base, true);
+  const auto  ins       = render_value(value, false);
+  const auto  selection = [&](const std::string& target) {
+    return hi.is_invalid() ? std::format("{}#[{}]", target, render_range_bound(lo))
+                           : std::format("{}#[{}..<{}]", target, render_range_bound(lo), render_range_bound(hi));
+  };
+  if (const auto store = mem_partial_write_store(stmt); !store.is_invalid()) {
+    folded_node_.insert(store.get_class_index().value);
+    os << std::format("{} = {}", selection(val), ins);
+    return;
+  }
+  const auto next = lnast->get_sibling_next(stmt);
   if (Lnast_ntype::is_ref(lnast->get_type(base)) && !next.is_invalid() && Lnast_ntype::is_store(lnast->get_type(next))) {
     const auto lhs = lnast->get_child(next);
     const auto rhs = lnast->get_sibling_next(lhs);
@@ -6147,89 +6000,19 @@ void Lnast_prp_writer::write_set_mask() {
     if (!rhs.is_invalid() && lnast->get_sibling_next(rhs).is_invalid() && Lnast_ntype::is_ref(lnast->get_type(rhs))
         && lnast->get_name(rhs) == lnast->get_name(result)
         && strip_prefix(lnast->get_name(lhs)) == strip_prefix(lnast->get_name(base)) && fi != fold_info_.end()
-        && fi->second.use_count == 1 && (dyn_range != nullptr || !dyn_bit.is_invalid() || contiguous_run(mask_txt))) {
+        && fi->second.use_count == 1) {
       dst = val;
       folded_node_.insert(next.get_class_index().value);
     }
   }
-
-  // A set_mask is an in-place RMW.  After SSA stripping, the slang reader's
-  // versioned result (`set_mask(OUT___ssa_1, OUT, ..)`) collapses to dst==val,
-  // i.e. an in-place write on the base (the redundant `OUT = OUT___ssa_1`
-  // store-back then folds away in write_store).  When the base genuinely differs
-  // from the source value, copy it in first.
-  std::string target   = dst;
-  bool        need_sep = false;
-  const auto  window   = contiguous_run(mask_txt);
   if (dst != val) {
-    // The copy is followed by the lane write, so the target is assigned TWICE
-    // even though the LNAST defines it once — it must not be declared `const`
-    // ("const `t` rebind (assigned 2 times)" on recompile).
-    if (window || dyn_range != nullptr || !dyn_bit.is_invalid()) {
-      multi_def_tmp_.insert(target);
-      single_store_.erase(target);
-    }
-    print(decl_prefix(target));
-    print(target);
-    os << std::format(" = {}", val);
-    need_sep = true;
-  }
-
-  if (!dyn_bit.is_invalid()) {
-    if (need_sep) {
-      os << "\n";
-      print_indent();
-    }
-    os << std::format("{}#[{}] = {}", target, bit_pos, ins);
-    return;
-  }
-
-  if (dyn_range != nullptr) {
-    if (need_sep) {
-      os << "\n";
-      print_indent();
-    }
-    // `x#[i]` and `x#[lo..=hi]` are both writable LHS forms; a range temp whose
-    // two bounds are the same expression IS the single-bit spelling. The bounds
-    // are OPERANDS (a name, a literal, or a folded temp's inlined expression),
-    // so they render like any other operand — a bare name here left a folded
-    // `t6 = t4 + 7` referenced but never defined (`bank#[t4..=t6]`).
-    const std::string lo = render_range_bound(dyn_range->lo_nid);
-    const std::string hi = render_range_bound(dyn_range->hi_nid);
-    if (lo == hi) {
-      os << std::format("{}#[{}] = {}", target, lo, ins);
-    } else {
-      os << std::format("{}#[{}..={}] = {}", target, lo, hi, ins);
-    }
-    return;
-  }
-
-  if (!window) {
-    // A mask with set bits that is not ONE run has no single bit-range assign,
-    // and emitting the base copy below would silently drop the write. No LNAST
-    // producer makes one (see sparse_mask); fail loudly rather than miscompile.
-    if (sparse_mask(mask_txt)) {
-      emit_unimplemented(std::format("set_mask requires a contiguous range, got '{}'", mask_txt));
-      return;
-    }
-    if (mask_is_ref) {
-      emit_unimplemented(std::format("set_mask runtime mask '{}' has no recoverable bit range", mask_txt));
-      return;
-    }
-    // Zero mask: nothing to overwrite.  Emit a base copy if we haven't
-    // already (keeps the statement non-empty and the value flowing).
-    if (!need_sep) {
-      os << std::format("{} = {}", target, val);
-    }
-    return;
-  }
-
-  if (need_sep) {
-    os << "\n";
+    multi_def_tmp_.insert(dst);
+    single_store_.erase(dst);
+    print(decl_prefix(dst));
+    os << std::format("{} = {}\n", dst, val);
     print_indent();
   }
-  // The window consumes `ins` from its bit 0: the slice width truncates it.
-  os << std::format("{} = {}", fmt_bit_range(target, window->first, window->second), ins);
+  os << std::format("{} = {}", selection(dst), ins);
 }
 
 // A memory PARTIAL write `mem[i]#[lo..=hi] = v` reaches the writer as its
@@ -6251,15 +6034,12 @@ Lnast_nid Lnast_prp_writer::mem_partial_write_store(Lnast_nid sm) const {
     return it == fold_info_.end() || it->second.def_count - it->second.decl_defs != 1 || it->second.use_count != 1 ? nullptr
                                                                                                                    : &it->second;
   };
-  auto dst  = lnast->get_child(sm);
-  auto base = dst.is_invalid() ? dst : lnast->get_sibling_next(dst);
-  auto mask = base.is_invalid() ? base : lnast->get_sibling_next(base);
-  if (mask.is_invalid() || !N::is_ref(lnast->get_type(dst)) || !N::is_ref(lnast->get_type(base))
+  auto dst   = lnast->get_child(sm);
+  auto base  = dst.is_invalid() ? dst : lnast->get_sibling_next(dst);
+  auto value = base.is_invalid() ? base : lnast->get_sibling_next(base);
+  auto lo    = value.is_invalid() ? value : lnast->get_sibling_next(value);
+  if (lo.is_invalid() || !N::is_ref(lnast->get_type(dst)) || !N::is_ref(lnast->get_type(base))
       || !is_foldable(lnast->get_name(base))) {
-    return {};
-  }
-  if (!range_lohi_.contains(lnast->get_name(mask)) && !contiguous_run(lnast->get_name(mask))
-      && single_bit_mask_pos(mask).is_invalid()) {
     return {};
   }
   const auto* rd = single(lnast->get_name(base));
@@ -6278,7 +6058,7 @@ Lnast_nid Lnast_prp_writer::mem_partial_write_store(Lnast_nid sm) const {
     if (const auto git = const_get_mask_by_source_.find(word); git != const_get_mask_by_source_.end()) {
       const auto elem = array_decl_elem_.find(mem_name);
       auto       gd   = lnast->get_child(git->second);
-      const auto run  = contiguous_run(lnast->get_name(lnast->get_sibling_next(lnast->get_sibling_next(gd))));
+      const auto run  = selection_window(*lnast, lnast->get_sibling_next(lnast->get_sibling_next(gd)));
       if (!run || run->first != 0 || elem == array_decl_elem_.end() || run->second + 1 < elem->second.bits
           || !is_foldable(lnast->get_name(gd)) || single(lnast->get_name(gd)) == nullptr) {
         return {};
@@ -6789,9 +6569,6 @@ void Lnast_prp_writer::scan_node(Lnast_nid nid, int& index) {
   }
   if (t == Lnast_ntype::Lnast_ntype_get_mask) {
     get_mask_nodes_.push_back(nid);
-  }
-  if (t == Lnast_ntype::Lnast_ntype_set_mask) {
-    set_mask_nodes_.push_back(nid);
   }
   if (t == Lnast_ntype::Lnast_ntype_tuple_get) {
     tuple_get_nodes_.emplace_back(nid, my_index);
@@ -7464,47 +7241,6 @@ void Lnast_prp_writer::analyze_folding() {
     }
   }
 
-  // A range temp feeding a mask reconstructs a `#[lo..=hi]` slice: the READ
-  // `get_mask(dst, src, mask)` and the WRITE `set_mask(dst, val, mask, ins)`
-  // both hold it at child2. Record its bounds, and (when the range is used only
-  // there) suppress the standalone range statement. Without the set_mask half a
-  // RUNTIME-indexed bit write (`q[addr] <= 1`) had no parsable mask, and
-  // write_set_mask fell through to its "unparsable mask" arm — emitting the
-  // base copy `q = q` and DROPPING the write.
-  for (const auto* nodes : {&get_mask_nodes_, &set_mask_nodes_}) {
-    for (auto mn_node : *nodes) {
-      auto src = lnast->get_child(mn_node);
-      if (src.is_invalid()) {
-        continue;
-      }
-      src = lnast->get_sibling_next(src);  // child1: src (get) / val (set)
-      if (src.is_invalid()) {
-        continue;
-      }
-      auto mask = lnast->get_sibling_next(src);  // child2: mask
-      if (mask.is_invalid() || lnast->get_type(mask) != Lnast_ntype::Lnast_ntype_ref) {
-        continue;
-      }
-      std::string mn(lnast->get_name(mask));
-      auto        it = fold_info_.find(mn);
-      if (it == fold_info_.end() || it->second.def_type != Lnast_ntype::Lnast_ntype_range) {
-        continue;
-      }
-      auto rlo = lnast->get_child(it->second.def_node);
-      if (rlo.is_invalid()) {
-        continue;
-      }
-      rlo             = lnast->get_sibling_next(rlo);  // child1: lo
-      auto        rhi = rlo.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(rlo);
-      std::string lo  = rlo.is_invalid() ? std::string("0") : std::string(lnast->get_name(rlo));
-      std::string hi  = rhi.is_invalid() ? lo : std::string(lnast->get_name(rhi));
-      range_lohi_[mn] = Range_bounds{.lo = lo, .hi = hi, .lo_nid = rlo, .hi_nid = rhi.is_invalid() ? rlo : rhi};
-      if (it->second.use_count == 1) {
-        folded_node_.insert(it->second.def_node.get_class_index().value);  // range stmt inlined into the slice
-      }
-    }
-  }
-
   // Select the single-def names whose value-producing definition can be inlined
   // back into its use(s). Policy (mirrors the inou.cgen Verilog "don't materialise
   // a bare bar[x]" rule):
@@ -7994,23 +7730,10 @@ int Lnast_prp_writer::renders_as_slice_bits(Lnast_nid n) const {
   if (mask.is_invalid()) {
     return 0;
   }
-  if (!single_bit_mask_pos(mask).is_invalid()) {
-    return 1;  // `x#[i]`
+  if (lnast->get_sibling_next(mask).is_invalid()) {
+    return 1;
   }
-  std::optional<std::pair<long long, long long>> lohi;
-  if (lnast->get_type(mask) == Lnast_ntype::Lnast_ntype_ref) {
-    if (const auto rit = range_lohi_.find(std::string(lnast->get_name(mask))); rit != range_lohi_.end()) {
-      const auto lo = parse_int_const(rit->second.lo);
-      const auto hi = parse_int_const(rit->second.hi);
-      if (lo && hi && *lo >= 0 && *hi >= *lo) {
-        lohi = std::pair{*lo, *hi};
-      }
-    }
-  } else if (lnast->get_type(mask) == Lnast_ntype::Lnast_ntype_const) {
-    if (const auto run = contiguous_run(lnast->get_name(mask))) {
-      lohi = std::pair<long long, long long>{run->first, run->second};
-    }
-  }
+  const auto lohi = selection_window(*lnast, mask);
   if (!lohi || lohi->second - lohi->first + 1 > std::numeric_limits<int>::max()
       || is_whole_width_mask(src, static_cast<int>(lohi->first), static_cast<int>(lohi->second))) {
     return 0;
@@ -8018,98 +7741,21 @@ int Lnast_prp_writer::renders_as_slice_bits(Lnast_nid n) const {
   return static_cast<int>(lohi->second - lohi->first + 1);
 }
 
-Lnast_nid Lnast_prp_writer::single_bit_mask_pos(Lnast_nid mask) const {
-  using N = Lnast_ntype;
-  if (mask.is_invalid() || lnast->get_type(mask) != N::Lnast_ntype_ref) {
-    return {};
-  }
-  Lnast_nid  local_def;
-  const auto statement = lnast->get_parent(mask);
-  if (N::is_stmts(lnast->get_type(lnast->get_parent(statement)))) {
-    local_def = lnast->get_sibling_prev(statement);  // the statement just before (O(1), not a block scan)
-  }
-  if (!local_def.is_invalid() && N::is_shl(lnast->get_type(local_def))) {
-    const auto dst = lnast->get_child(local_def);
-    const auto one = lnast->get_sibling_next(dst);
-    const auto pos = lnast->get_sibling_next(one);
-    if (lnast->get_name(dst) == lnast->get_name(mask) && N::is_const(lnast->get_type(one))
-        && parse_int_const(lnast->get_name(one)) == 1 && !pos.is_invalid()) {
-      return pos;
-    }
-  }
-  const auto fit = fold_info_.find(std::string(lnast->get_name(mask)));
-  if (fit == fold_info_.end() || fit->second.def_count - fit->second.decl_defs != 1
-      || lnast->get_type(fit->second.def_node) != N::Lnast_ntype_shl) {
-    return {};
-  }
-  const auto one = lnast->get_sibling_next(lnast->get_child(fit->second.def_node));
-  const auto pos = one.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(one);
-  if (pos.is_invalid() || !lnast->get_sibling_next(pos).is_invalid() || lnast->get_type(one) != N::Lnast_ntype_const
-      || parse_int_const(lnast->get_name(one)) != 1) {
-    return {};
-  }
-  return pos;
-}
-
 std::string Lnast_prp_writer::render_get_mask_rhs(Lnast_nid c0, bool operand_ctx) {
-  using N     = Lnast_ntype;
-  auto src    = lnast->get_sibling_next(c0);
-  auto mask   = src.is_invalid() ? Lnast_nid{} : lnast->get_sibling_next(src);
-  // A mask that selects every bit is dropped, and the source is then NOT a
-  // sub-expression of a `#[..]` postfix — it inherits THIS node's context,
-  // so it must not be parenthesised on its own account.
-  auto srctxt = [&](bool as_operand) { return src.is_invalid() ? std::string{} : render_value(src, /*operand_ctx=*/as_operand); };
-  if (!mask.is_invalid()) {
-    if (lnast->get_type(mask) == N::Lnast_ntype_ref) {
-      auto rit = range_lohi_.find(std::string(lnast->get_name(mask)));
-      if (rit != range_lohi_.end()) {
-        // The bounds are TEXT here (a range temp's operands need not be
-        // literals); only a numeric pair can be simplified.
-        const auto lo = parse_int_const(rit->second.lo);
-        const auto hi = parse_int_const(rit->second.hi);
-        if (lo && hi && *lo >= 0 && *hi >= *lo) {
-          if (is_whole_width_mask(src, static_cast<int>(*lo), static_cast<int>(*hi))) {
-            return srctxt(operand_ctx);  // selects every bit of the source: a no-op
-          }
-          return fmt_bit_range(srctxt(true), static_cast<int>(*lo), static_cast<int>(*hi));  // tight
-        }
-        // Non-literal bounds are OPERANDS (a name, or a folded temp's inlined
-        // expression): render them, never print the raw name — the fold policy
-        // may have suppressed the bound's own definition line.
-        return std::format("{}#[{}..={}]",
-                           srctxt(true),
-                           render_range_bound(rit->second.lo_nid),
-                           render_range_bound(rit->second.hi_nid));  // tight
-      }
-      // `a#[i]` at a runtime (or named) position: get_mask packs the selected
-      // bit down to bit 0, so the mask must not be spelled as an `&`
-      // (`a & (1 << i)` keeps the bit in place).
-      if (const auto pos = single_bit_mask_pos(mask); !pos.is_invalid()) {
-        return std::format("{}#[{}]", srctxt(true), render_value(pos, /*operand_ctx=*/false));  // tight
-      }
-    } else if (lnast->get_type(mask) == N::Lnast_ntype_const) {
-      std::string mt(lnast->get_name(mask));
-      // An all-ones mask IS `#[..]`, the full bit vector, and that is the only
-      // spelling that re-parses for every source kind. `contiguous_run` cannot
-      // describe it (there is no highest set bit), so without this the fallback
-      // below emits `x & -1` -- which re-parses as an ordinary `&` and is a hard
-      // type error the moment the source is a tuple or an array
-      // (`operator & requires integer operands (lanes:tuple, …)`), exactly the
-      // shape a packed array round-trips as.
-      if (mt == "-1") {
-        return wrap_operand(std::format("{}#[..]", srctxt(true)), operand_ctx, /*loose=*/false);
-      }
-      if (auto run = contiguous_run(mt)) {
-        if (is_whole_width_mask(src, run->first, run->second)) {
-          return srctxt(operand_ctx);  // selects every bit of the source: a no-op
-        }
-        return fmt_bit_range(srctxt(true), run->first, run->second);  // tight
-      }
-      return wrap_operand(std::format("{} & {}", srctxt(true), canonical_const_text(mt)), operand_ctx, /*loose=*/true);
-    }
+  const auto src = lnast->get_sibling_next(c0);
+  const auto lo  = lnast->get_sibling_next(src);
+  const auto hi  = lnast->get_sibling_next(lo);
+  I(!lo.is_invalid());
+  const auto  value = render_value(src, true);
+  std::string expr;
+  if (hi.is_invalid()) {
+    expr = std::format("{}#[{}]", value, render_range_bound(lo));
+  } else if (lnast->get_name(hi) == "nil") {
+    expr = std::format("{}#[{}..]", value, render_range_bound(lo));
+  } else {
+    expr = std::format("{}#[{}..<{}]", value, render_range_bound(lo), render_range_bound(hi));
   }
-  std::string mv = mask.is_invalid() ? std::string("0") : render_value(mask, /*operand_ctx=*/true);
-  return wrap_operand(std::format("{} & {}", srctxt(true), mv), operand_ctx, /*loose=*/true);
+  return wrap_operand(expr, operand_ctx, false);
 }
 
 std::string Lnast_prp_writer::render_concat_rhs(Lnast_nid c0, bool operand_ctx) {

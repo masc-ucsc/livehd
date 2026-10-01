@@ -3702,297 +3702,106 @@ void uPass_runner::process_bit_selection() {
       declared_typed_.insert(dst);
     }
   };
-  if ((lm->get_lnast() && lm->get_lnast()->is_verilog_origin())
-      || std::none_of(upasses.begin(), upasses.end(), [](const auto& p) { return p.name == "constprop"; })) {
-    process_drop_candidate_push(static_cast<upass::Push_method>(&upass::uPass::process_get_mask), false);
-    // This bail-out skips the PYROPE-ONLY machinery below (packed-array /
-    // named-bundle lanes, the "bitsel-pack" concat) -- NOT the window's width.
-    // `b = a#[lo..=hi]` ESTABLISHES b as a (hi-lo+1)-bit unsigned value, the
-    // same way `c = true` establishes a boolean, and that is true of every
-    // origin. Without this stamp a Verilog-read unit left every slice with NO
-    // width at all, and a following `unsigned(slice)` was refused as
-    // `cast-not-typed` although the slice's width was static all along. Only
-    // the value-INDEPENDENT masks are used here: a non-negative const
-    // (popcount) or a fully bounded range.
-    {
-      const auto             sv = lm->save_cursor();
-      std::string            dst;
-      std::string            value_name;
-      std::optional<int64_t> selected;
-      if (lm->move_to_child()) {
-        dst = std::string(lm->current_text());
-        if (lm->move_to_sibling()) {  // VALUE
-          if (!Lnast_ntype::is_const(lm->get_raw_ntype())) {
-            value_name = std::string(lm->current_text());
-          }
-        }
-        if (!value_name.empty() && lm->move_to_sibling()) {  // MASK
-          if (Lnast_ntype::is_const(lm->get_raw_ntype())) {
-            if (const auto m = Dlop::from_pyrope(lm->current_text());
-                m && m->is_integer() && !m->has_unknowns() && !m->is_negative()) {
-              selected = m->popcount();
-            }
-          } else if (const auto r = symbol_table_.get_bundle(lm->current_text()); r && !r->get_attr("rng_s").is_invalid()) {
-            const auto& lo = r->get_attr("rng_s");
-            const auto& hi = r->get_attr("rng_e");
-            if (lo.is_integer() && hi.is_integer() && lo.is_just_i64() && hi.is_just_i64() && !lo.has_unknowns()
-                && !hi.has_unknowns() && lo.to_just_i64() >= 0 && hi.to_just_i64() >= lo.to_just_i64()) {
-              selected = hi.to_just_i64() - lo.to_just_i64() + 1;
-            }
-          } else {
-            selected = runtime_range_width(sv.current, lm->current_raw_text());
-          }
-        }
-      }
-      lm->restore_cursor(sv);
-      // COMPILER TEMPS ONLY. An expression's slice result is always a temp; a
-      // get_mask whose dst is a USER variable (`x = y#[lo..=hi]`) is typed by
-      // x's own declare, and stamping an integer envelope on it is wrong when
-      // x is a tuple (a slang-imported `core_ctrl_resp` struct port hit exactly
-      // that: "cannot assign integer value ... (it is tuple)").
-      const bool dst_is_tmp       = !dst.empty() && (dst.front() == '%' || dst.starts_with("___"));
-      // ... and only over a SCALAR source. On this (slang) path a packed struct
-      // IS a bit vector: `s.field[i] = v` is a read-modify-write whose get_mask
-      // temps are whole-struct (tuple-shaped) copies, and declaring one of
-      // those an integer turns the writeback into a type change ("cannot
-      // assign integer value to `core_ctrl_resp` (it is tuple)"). A named or
-      // multi-positional source is left alone; an element read (at most one
-      // positional, or shape attrs only) is exactly the case this exists for.
-      bool       source_is_scalar = !value_name.empty();
-      if (source_is_scalar) {
-        if (const auto vb = symbol_table_.get_bundle(value_name); vb) {
-          source_is_scalar = !vb->has_named_top() && vb->unnamed_top_count() <= 1;
-        }
-      }
-      if (dst_is_tmp && source_is_scalar && selected && *selected > 0 && *selected <= std::numeric_limits<int>::max()) {
-        // The plain get_mask over an ARRAY ELEMENT read (`arr[0]#[lo..=hi]`)
-        // can leave the result with the array's SHAPE attrs (__array_size,
-        // __elem_max, ...) and no value at all -- no scalar slot, no fields.
-        // Such a bundle is not empty (attrs count), so the typespec below is
-        // refused as "not a scalar", and `concat_array_lane_bits` would even
-        // read those attrs and treat the window as an aggregate. A bit window
-        // is a scalar by construction: drop the shape-only leftover first.
-        // Strict on purpose -- only when there is nothing but array-shape
-        // attrs, so a real value is never discarded.
-        if (const auto b = symbol_table_.get_bundle_for_write(dst);
-            b && !b->is_empty() && !b->has_trivial(bundle_path::of_string("0")) && !b->has_named_top()
-            && b->unnamed_top_count() == 0 && std::all_of(b->get_attrs().begin(), b->get_attrs().end(), [](const auto& a) {
-                 return a.first.starts_with("__array_") || a.first.starts_with("__elem_");
-               })) {
-          // ERASE in place: Symbol_table::set treats residual attrs as NAME
-          // facts and re-carries them onto any replacement bundle, so swapping
-          // the bundle for an empty one is a no-op here.
-          std::vector<std::string> shape_attrs;
-          for (const auto& a : b->get_attrs()) {
-            shape_attrs.emplace_back(a.first);
-          }
-          for (const auto& k : shape_attrs) {
-            b->clear_attr(k);
-          }
-        }
-        // The ENVELOPE ONLY: a scratch `type_spec` node is also consumed by
-        // upass.typecheck, which would turn the temp's kind from `unknown`
-        // into `integer`; on this path a packed struct is a bit vector and its
-        // field read-modify-write temps flow back INTO the tuple-kinded struct
-        // variable relying on `unknown` being a wildcard, so the kind change
-        // made that writeback an `assign-type-mismatch`.
-        stamp_envelope(dst, static_cast<uint32_t>(*selected));
-      }
-    }
-    return;
-  }
-  const auto saved = lm->save_cursor();
-  if (!lm->move_to_child()) {
-    return;
-  }
-  const std::string dst(lm->current_text());
-  const bool        dst_is_tmp = Lnast::is_tmp(lm->current_raw_text());
-  if (!lm->move_to_sibling()) {
-    lm->restore_cursor(saved);
-    return;
-  }
-  Lnast_node value = Lnast_ntype::is_const(lm->get_raw_ntype()) ? Lnast_node::create_const(std::string(lm->current_text()))
-                                                                : Lnast_node::create_ref(std::string(lm->current_text()));
-  if (!lm->move_to_sibling()) {
-    lm->restore_cursor(saved);
-    return;
-  }
-  const std::string mask_raw(lm->current_raw_text());  // un-renamed, for runtime_range_width
-
-  Lnast_node mask = Lnast_ntype::is_const(lm->get_raw_ntype()) ? Lnast_node::create_const(std::string(lm->current_text()))
-                                                               : Lnast_node::create_ref(std::string(lm->current_text()));
-  lm->restore_cursor(saved);
-  const auto bundle    = value.is_const() ? nullptr : symbol_table_.get_bundle(value.get_name());
-  // A value with a SCALAR slot is never a runtime array, even when it carries
-  // an array's shape attrs: an element read can hand them on (`(m[0] + a)#[..]`
-  // once `m` is written in a sibling arm), and packing that scalar as a
-  // declared array lane failed with `concat-untyped-lane`.
-  const bool aggregate = bundle && bundle->get_attr("rng_s").is_invalid() && bundle->get_attr("enumentry").is_invalid()
-                         && bundle->get_attr("enumval").is_invalid()
-                         && (bundle->has_named_top() || bundle->unnamed_top_count() > 1
-                             || (!bundle->is_scalar() && concat_array_lane_bits(*bundle) != 0));
-  if (!scratch_forest_) {
-    scratch_forest_ = hhds::Forest::create();
-  }
-  if (aggregate) {
-    // Reuse concat's declared lane geometry and diagnostics for every packed
-    // variable spelling, including runtime arrays and comptime tuples.
-    auto s    = std::make_shared<Lnast>(scratch_forest_->create_tree_temp("bitsel-pack"), "bitsel-pack");
-    auto root = s->set_root(Lnast_ntype::create_concat());
-    stamp_scratch_srcid(s, root);
-    const std::string packed = dst + "_packed";
-    s->add_child(root, Lnast_node::create_ref(packed));
-    s->add_child(root, value);
-    s->add_child(root, Lnast_node::create_const("nil"));
-    flush_deferred_emits();
-    lm->push_source(s, "", 0);
-    concat_checked_.erase(lm->get_current_nid());
-    process_lnast();
-    flush_deferred_emits();
-    lm->pop_source();
-    value = Lnast_node::create_ref(packed);
-  }
-  uint32_t bits = value.is_const() ? 0 : concat_lane_declared_bits(value.get_name());
-  if (bits == 0) {
-    const std::optional<Dlop> v
-        = value.is_const() ? std::optional<Dlop>(*Dlop::from_pyrope(value.get_name())) : try_fold_ref(value.get_name());
-    if (v && v->is_integer()) {
-      bits = v->get_signed_bits();  // scalar selections do not impose a packing layout
-    }
-  }
-  std::optional<int64_t> selected;
-  bool                   finite_mask = false;
-  if (mask.is_const()) {
-    const auto m = Dlop::from_pyrope(mask.get_name());
-    if (m && m->is_integer() && !m->has_unknowns()) {
-      if (!m->is_negative()) {
-        selected = m->popcount();
-      } else if (bits != 0) {
-        auto bounded = m->and_op(*Dlop::get_mask_value(bits));
-        selected     = bounded->popcount();
-        mask         = Lnast_node::create_const(std::string(bounded->to_pyrope()));
-        finite_mask  = true;
-      }
-    }
-  } else if (const auto r = symbol_table_.get_bundle(mask.get_name()); r && !r->get_attr("rng_s").is_invalid()) {
-    const auto& lo = r->get_attr("rng_s");
-    auto        hi = r->get_attr("rng_e");
-    if ((hi.is_invalid() || hi.is_nil()) && bits != 0) {
-      hi = *Dlop::create_integer(bits - 1);
-      if (lo.is_just_i64() && !lo.has_unknowns() && lo.to_just_i64() >= 0 && lo.to_just_i64() < bits) {
-        mask        = Lnast_node::create_const(std::string(Dlop::get_mask_value(bits - 1, lo.to_just_i64())->to_pyrope()));
-        finite_mask = true;
-      }
-    }
-    if (lo.is_integer() && hi.is_integer() && lo.is_just_i64() && hi.is_just_i64() && !lo.has_unknowns() && !hi.has_unknowns()) {
-      selected = hi.to_just_i64() - lo.to_just_i64() + 1;
-    }
-    if (!finite_mask) {
-      if (auto m = closed_range_mask(mask.get_name())) {
-        mask        = Lnast_node::create_const(*m);
-        finite_mask = true;
-      }
-    }
-  } else {
-    selected = runtime_range_width(saved.current, mask_raw);
-  }
-  if (aggregate || finite_mask) {
-    auto s    = std::make_shared<Lnast>(scratch_forest_->create_tree_temp("bitsel"), "bitsel");
-    auto root = s->set_root(Lnast_ntype::create_get_mask());
-    stamp_scratch_srcid(s, root);
-    s->add_child(root, Lnast_node::create_ref(dst));
-    s->add_child(root, value);
-    s->add_child(root, mask);
-    flush_deferred_emits();
-    lm->push_source(s, "", 0);
-    process_drop_candidate_push(static_cast<upass::Push_method>(&upass::uPass::process_get_mask), false);
-    flush_deferred_emits();
-    lm->pop_source();
-  } else {
-    process_drop_candidate_push(static_cast<upass::Push_method>(&upass::uPass::process_get_mask), false);
-  }
-  if (selected && *selected > 0 && *selected <= std::numeric_limits<int>::max()) {
-    if (dst_is_tmp && symbol_table_.in_uncertain_scope()) {
-      // emit_inline_typespec declines inside an if arm (one arm's force must
-      // not become a variable's declared envelope), but a compiler temp has
-      // this one definition and its width is value-independent.
-      stamp_envelope(dst, static_cast<uint32_t>(*selected));
-    } else {
-      emit_inline_typespec(dst, static_cast<int>(*selected), false);
-    }
-  } else if (dst_is_tmp && mask.is_ref() && is_single_bit_mask(saved.current, mask_raw)) {
-    // `a#[i]` is a u1 for `~` (ruling 26) like `a#[1]`. Not stamped as a type:
-    // the corpus reads a runtime-position bit as a condition (`if stop#[i]`).
-    typed_expr_types_[dst] = Int_type{.bits = 1};
-  }
-}
-
-// A comptime range used as a bit-select mask names a WINDOW, never a value: a
-// ONE-element range folds (like a 1-tuple) to the trivial scalar `lo`, so the
-// operand fold substituted `lo` itself for the mask -- `a#[k..+1]` then selected
-// the bits of `k` (bit 0 for k=1, bit 1 for k=2, "mask 0" for k=0) instead of
-// bit k. Resolve a closed range with concrete bounds to its const bitmask here,
-// before any operand fold sees the ref. A descending or negative range keeps
-// its range node (tolg's range lowering diagnoses it).
-std::optional<std::string> uPass_runner::closed_range_mask(std::string_view range_name) const {
-  const auto r = symbol_table_.get_bundle(range_name);
-  if (!r) {
-    return std::nullopt;
-  }
-  const auto& lo = r->get_attr("rng_s");
-  const auto& hi = r->get_attr("rng_e");
-  if (lo.is_invalid() || hi.is_invalid() || !lo.is_integer() || !hi.is_integer() || !lo.is_just_i64() || !hi.is_just_i64()
-      || lo.has_unknowns() || hi.has_unknowns()) {
-    return std::nullopt;
-  }
-  const auto l = lo.to_just_i64();
-  const auto h = hi.to_just_i64();
-  if (l < 0 || h < l || h > std::numeric_limits<int>::max()) {
-    return std::nullopt;
-  }
-  return std::string(Dlop::get_mask_value(static_cast<int>(h), static_cast<int>(l))->to_pyrope());
-}
-
-// set_mask(dst, value, mask, ins): a comptime closed-range mask becomes its
-// const bitmask (see closed_range_mask) before the operand fold; everything
-// else goes through the ordinary drop-candidate path.
-void uPass_runner::process_bit_update() {
   const auto              saved = lm->save_cursor();
   std::vector<Lnast_node> kids;
   if (lm->move_to_child()) {
     do {
-      const auto t = lm->get_raw_ntype();
-      if (Lnast_ntype::is_ref(t)) {
-        kids.push_back(Lnast_node::create_ref(std::string(lm->current_text())));
-      } else if (Lnast_ntype::is_const(t)) {
-        kids.push_back(Lnast_node::create_const(std::string(lm->current_text())));
-      } else {
-        kids.clear();
-        break;
-      }
+      kids.push_back(Lnast_ntype::is_const(lm->get_raw_ntype()) ? Lnast_node::create_const(std::string(lm->current_text()))
+                                                                : Lnast_node::create_ref(std::string(lm->current_text())));
     } while (lm->move_to_sibling());
   }
   lm->restore_cursor(saved);
-  const auto mask = kids.size() == 4 && kids[2].is_ref() ? closed_range_mask(kids[2].get_name()) : std::nullopt;
-  if (!mask) {
-    process_drop_candidate_push(static_cast<upass::Push_method>(&upass::uPass::process_set_mask), /*fold_all=*/false);
+  if (kids.size() < 3 || kids.size() > 4) {
     return;
   }
-  kids[2] = Lnast_node::create_const(*mask);
+  const std::string dst(kids[0].get_name());
+  auto              value = kids[1];
+  const auto        fold  = [&](const Lnast_node& n) -> std::optional<Dlop> {
+    return n.is_const() ? std::optional<Dlop>(*Dlop::from_pyrope(n.get_name())) : try_fold_ref(n.get_name());
+  };
   if (!scratch_forest_) {
     scratch_forest_ = hhds::Forest::create();
   }
-  auto s    = std::make_shared<Lnast>(scratch_forest_->create_tree_temp("bitupd"), "bitupd");
-  auto root = s->set_root(Lnast_ntype::create_set_mask());
-  stamp_scratch_srcid(s, root);
-  for (const auto& k : kids) {
-    s->add_child(root, k);
+  const auto bundle    = value.is_const() ? nullptr : symbol_table_.get_bundle(value.get_name());
+  const bool aggregate = bundle && !lm->get_lnast()->is_verilog_origin() && bundle->get_attr("rng_s").is_invalid()
+                         && bundle->get_attr("enumentry").is_invalid() && bundle->get_attr("enumval").is_invalid()
+                         && (bundle->has_named_top() || bundle->unnamed_top_count() > 1
+                             || (!bundle->is_scalar() && concat_array_lane_bits(*bundle) != 0));
+  if (aggregate) {
+    auto packed = std::make_shared<Lnast>(scratch_forest_->create_tree_temp("bitsel-pack"), "bitsel-pack");
+    auto root   = packed->set_root(Lnast_ntype::create_concat());
+    stamp_scratch_srcid(packed, root);
+    const std::string name = dst + "_packed";
+    packed->add_child(root, Lnast_node::create_ref(name));
+    packed->add_child(root, value);
+    packed->add_child(root, Lnast_node::create_const("nil"));
+    flush_deferred_emits();
+    lm->push_source(packed, "", 0);
+    concat_checked_.erase(lm->get_current_nid());
+    process_lnast();
+    flush_deferred_emits();
+    lm->pop_source();
+    kids[1] = value = Lnast_node::create_ref(name);
   }
-  flush_deferred_emits();
-  lm->push_source(s, "", 0);
-  process_drop_candidate_push(static_cast<upass::Push_method>(&upass::uPass::process_set_mask), /*fold_all=*/false);
-  flush_deferred_emits();
-  lm->pop_source();
+  bool       rewritten = aggregate;
+  const auto lo        = fold(kids[2]);
+  auto       hi        = kids.size() == 4 ? fold(kids[3]) : std::optional<Dlop>{};
+  if (kids.size() == 4 && hi && hi->is_nil()) {
+    uint32_t bits = value.is_const() ? 0 : concat_lane_declared_bits(value.get_name());
+    if (bits == 0) {
+      if (const auto v = fold(value); v && v->is_integer()) {
+        bits = v->get_signed_bits();
+      }
+    }
+    if (bits > 0) {
+      rewritten = true;
+      kids[3]   = Lnast_node::create_const(static_cast<int64_t>(bits));
+      hi        = *Dlop::create_integer(bits);
+    }
+  }
+  if (rewritten) {
+    auto selected = std::make_shared<Lnast>(scratch_forest_->create_tree_temp("bitsel"), "bitsel");
+    auto root     = selected->set_root(Lnast_ntype::create_get_mask());
+    stamp_scratch_srcid(selected, root);
+    for (const auto& k : kids) {
+      selected->add_child(root, k);
+    }
+    flush_deferred_emits();
+    lm->push_source(selected, "", 0);
+    process_drop_candidate_push(static_cast<upass::Push_method>(&upass::uPass::process_get_mask), false);
+    flush_deferred_emits();
+    lm->pop_source();
+  } else {
+    process_drop_candidate_push(static_cast<upass::Push_method>(&upass::uPass::process_get_mask), false);
+  }
+  int64_t width = runtime_range_width(saved.current).value_or(0);
+  if (lo && hi && lo->is_just_i64() && hi->is_just_i64() && !lo->has_unknowns() && !hi->has_unknowns()) {
+    width = hi->to_just_i64() - lo->to_just_i64();
+  }
+  if (width > 0 && width <= std::numeric_limits<int>::max()) {
+    if (const auto b = symbol_table_.get_bundle_for_write(dst);
+        b && !b->is_empty() && !b->has_trivial(bundle_path::of_string("0")) && !b->has_named_top() && b->unnamed_top_count() == 0
+        && std::all_of(b->get_attrs().begin(), b->get_attrs().end(), [](const auto& a) {
+             return a.first.starts_with("__array_") || a.first.starts_with("__elem_");
+           })) {
+      std::vector<std::string> attrs;
+      for (const auto& a : b->get_attrs()) {
+        attrs.emplace_back(a.first);
+      }
+      for (const auto& a : attrs) {
+        b->clear_attr(a);
+      }
+    }
+    if (lm->get_lnast()->is_verilog_origin() || (Lnast::is_tmp(dst) && symbol_table_.in_uncertain_scope())) {
+      stamp_envelope(dst, static_cast<uint32_t>(width));
+    } else {
+      emit_inline_typespec(dst, static_cast<int>(width), false);
+    }
+  }
+}
+
+void uPass_runner::process_bit_update() {
+  process_drop_candidate_push(static_cast<upass::Push_method>(&upass::uPass::process_set_mask), false);
 }
 
 // The integer type of a TYPED value (user rulings 26, 38, 44), or nullopt.
@@ -4154,33 +3963,6 @@ std::pair<std::string, uint32_t> uPass_runner::array_elem_read_bits() const {
     return {dst, static_cast<uint32_t>(pe->elem_bits)};
   }
   return {dst, 0};
-}
-
-// `a#[i]` / `a#[k]` lower to get_mask(dst, a, m) with `m = 1 << pos` (a literal
-// position folds to a const mask in the front end instead): a one-bit window
-// whatever the position.
-bool uPass_runner::is_single_bit_mask(const Lnast_nid& stmt, std::string_view mask_raw) {
-  if (!Lnast::is_tmp(mask_raw)) {
-    return false;
-  }
-  const auto& ln     = lm->get_lnast();
-  int         budget = 16;  // the front end emits the mask right before its get_mask
-  for (auto s = ln->get_sibling_prev(stmt); !s.is_invalid() && budget-- > 0; s = ln->get_sibling_prev(s)) {
-    const auto d = ln->get_first_child(s);
-    if (d.is_invalid() || !Lnast_ntype::is_ref(ln->get_type(d)) || ln->get_name(d) != mask_raw) {
-      continue;
-    }
-    if (!Lnast_ntype::is_shl(ln->get_type(s))) {
-      return false;
-    }
-    const auto one = ln->get_sibling_next(d);
-    if (one.is_invalid() || !Lnast_ntype::is_const(ln->get_type(one))) {
-      return false;
-    }
-    const auto v = Dlop::from_pyrope(ln->get_name(one));
-    return v && v->is_just_i64() && v->to_just_i64() == 1;
-  }
-  return false;
 }
 
 // `~x` (user rulings 26 and 44): on an UNSIGNED-typed operand of known width N
@@ -4418,7 +4200,7 @@ void uPass_runner::dispatch_bitwise(upass::Push_method fn) {
   }
 }
 
-std::optional<int64_t> uPass_runner::runtime_range_width(const Lnast_nid& stmt, std::string_view mask_raw) {
+std::optional<int64_t> uPass_runner::runtime_range_width(const Lnast_nid& stmt) {
   const auto& ln = lm->get_lnast();
 
   // Compiler temps have ONE definition, emitted by the front end just before
@@ -4460,13 +4242,13 @@ std::optional<int64_t> uPass_runner::runtime_range_width(const Lnast_nid& stmt, 
     return v->to_just_i64();
   };
 
-  const auto rng = def_of(mask_raw);
-  if (rng.is_invalid() || !Lnast_ntype::is_range(ln->get_type(rng))) {
-    return std::nullopt;
+  const auto src = ln->get_sibling_next(ln->get_first_child(stmt));
+  const auto lo  = ln->get_sibling_next(src);
+  const auto hi  = ln->get_sibling_next(lo);
+  if (hi.is_invalid()) {
+    return 1;
   }
-  const auto lo = ln->get_sibling_next(ln->get_first_child(rng));
-  const auto hi = lo.is_invalid() ? lo : ln->get_sibling_next(lo);
-  if (hi.is_invalid() || !Lnast_ntype::is_ref(ln->get_type(lo))) {
+  if (!Lnast_ntype::is_ref(ln->get_type(lo))) {
     return std::nullopt;
   }
   // The front end lowers each spelling of a bound on its own: in
@@ -4547,10 +4329,10 @@ std::optional<int64_t> uPass_runner::runtime_range_width(const Lnast_nid& stmt, 
   if (!span || *span < 0) {
     return std::nullopt;
   }
-  return *span + 1;
+  return *span;
 }
 
-void uPass_runner::emit_inline_get_mask(const std::string& dst, const Lnast_node& value, const std::string& mask_text) {
+void uPass_runner::emit_inline_get_mask(const std::string& dst, const Lnast_node& value, int lo, int hi) {
   if (!scratch_forest_) {
     scratch_forest_ = hhds::Forest::create();
   }
@@ -4558,9 +4340,10 @@ void uPass_runner::emit_inline_get_mask(const std::string& dst, const Lnast_node
   auto s    = std::make_shared<Lnast>(body, "inl-getmask");
   auto root = s->set_root(Lnast_ntype::create_get_mask());
   stamp_scratch_srcid(s, root);
-  s->add_child(root, Lnast_node::create_ref(dst));          // dst
-  s->add_child(root, value);                                // value
-  s->add_child(root, Lnast_node::create_const(mask_text));  // const bitmask
+  s->add_child(root, Lnast_node::create_ref(dst));  // dst
+  s->add_child(root, value);                        // value
+  s->add_child(root, Lnast_node::create_const(lo));
+  s->add_child(root, Lnast_node::create_const(hi));
   flush_deferred_emits();
   lm->push_source(s, "", 0);
   process_lnast();  // cursor at get_mask root → push path: dispatch + emit
@@ -4977,13 +4760,12 @@ bool uPass_runner::try_lower_wrap_sat() {
 
   if (is_wrap) {
     // C/C++ truncation: keep the low N bits; sign-reinterpret per the type.
-    const std::string mask_text(Dlop::get_mask_value(static_cast<int>(ub))->to_pyrope());
     if (is_signed) {
       const std::string masked = dst + "_wm";
-      emit_inline_get_mask(masked, *value, mask_text);
+      emit_inline_get_mask(masked, *value, 0, static_cast<int>(ub));
       emit_inline_sext(dst, masked, static_cast<int>(ub) - 1);
     } else {
-      emit_inline_get_mask(dst, *value, mask_text);
+      emit_inline_get_mask(dst, *value, 0, static_cast<int>(ub));
     }
     return true;
   }
@@ -5012,8 +4794,10 @@ bool uPass_runner::try_lower_wrap_sat() {
   if (is_signed) {
     emit_staging_op(N::create_sext(), dst, {Lnast_node::create_ref(clamp), Lnast_node::create_const(static_cast<int64_t>(ub) - 1)});
   } else {
-    const std::string mask_text(Dlop::get_mask_value(static_cast<int>(ub))->to_pyrope());
-    emit_staging_op(N::create_get_mask(), dst, {Lnast_node::create_ref(clamp), Lnast_node::create_const(mask_text)});
+    emit_staging_op(
+        N::create_get_mask(),
+        dst,
+        {Lnast_node::create_ref(clamp), Lnast_node::create_const("0"), Lnast_node::create_const(static_cast<int64_t>(ub))});
   }
   return true;
 }
@@ -5278,7 +5062,6 @@ bool uPass_runner::try_lower_typecast() {
   };
 
   // 1-bit unsigned mask, used to read a bool's bit as an unsigned 0/1.
-  const auto mask1 = std::string(Dlop::get_mask_value(1)->to_pyrope());
 
   switch (tc->kind) {
     case upass::Typecast_kind::to_string:
@@ -5323,7 +5106,7 @@ bool uPass_runner::try_lower_typecast() {
       // REINTERPRET as unsigned (Verilog $unsigned): keep the input's bits,
       // re-tag the sign. A negative `sN` value reads as its 2^N magnitude.
       if (operand_is_bool) {
-        emit_inline_get_mask(dst, arg_node, mask1);  // unsigned bit: true = 1, false = 0
+        emit_inline_get_mask(dst, arg_node, 0, 1);  // unsigned bit: true = 1, false = 0
         emit_inline_typespec(dst, 1, false);
         return true;
       }
@@ -5347,7 +5130,7 @@ bool uPass_runner::try_lower_typecast() {
         return true;
       }
       // Mask to the low W bits: same bits, now an unsigned value/range.
-      emit_inline_get_mask(dst, arg_node, std::string(Dlop::get_mask_value(reinterpret_W)->to_pyrope()));
+      emit_inline_get_mask(dst, arg_node, 0, static_cast<int>(reinterpret_W));
       emit_inline_typespec(dst, static_cast<int>(reinterpret_W), false);
       return true;
 
@@ -5358,7 +5141,7 @@ bool uPass_runner::try_lower_typecast() {
         if (sgn) {
           emit_inline_sext(dst, arg_name, 0);  // true = -1
         } else {
-          emit_inline_get_mask(dst, arg_node, mask1);  // true = 1
+          emit_inline_get_mask(dst, arg_node, 0, 1);  // true = 1
         }
         emit_inline_typespec(dst, static_cast<int>(ub), sgn);
         return true;
@@ -8312,7 +8095,7 @@ bool uPass_runner::try_inline_func_call() {
   }
 
   // ── Splice ───────────────────────────────────────────────────────────────
-  const uint32_t    salt  = ++inline_seq_;
+  const uint32_t salt = ++inline_seq_;
   if (const auto* unit = lm->unit_lnast().get(); unit != inline_tags_unit_) {
     inline_tags_unit_ = unit;
     inline_tags_taken_.clear();
@@ -11216,6 +10999,7 @@ private:
   Callee_out                                                            callee_out_;
   absl::flat_hash_set<std::string>                                      narrowed_;  // wrap/sat results
   absl::flat_hash_map<std::string, std::pair<Lnast_range, Lnast_range>> ranges_;    // `range` temps: lo, hi
+  absl::flat_hash_map<std::string, Lnast_nid>                           bound_defs_;
   std::vector<Env>                                                      exits_;
   int64_t                                                               budget_ = 1 << 19;  // statement evaluations
 
@@ -11262,17 +11046,44 @@ private:
     return it == env.end() ? Lnast_range::make_unbounded() : it->second;
   }
 
-  // Width of a get_mask/set_mask window: a constant mask, or a `range` temp
-  // with constant bounds. {lo, width}.
-  std::optional<std::pair<int64_t, int64_t>> window(const Lnast_nid& mask, const Env& env) const {
-    if (const auto m = val(mask, env); m.is_constant() && m.min >= 0) {
-      const auto u = static_cast<uint64_t>(m.min);
-      return std::pair{u == 0 ? int64_t{0} : static_cast<int64_t>(std::countr_zero(u)), static_cast<int64_t>(std::popcount(u))};
+  std::optional<std::pair<int64_t, int64_t>> window(const Lnast_nid& lo_node, const Lnast_nid& hi_node, const Env& env) const {
+    const auto lo = val(lo_node, env);
+    const auto hi = val(hi_node, env);
+    if (lo.is_constant() && hi.is_constant() && lo.min >= 0 && hi.min > lo.min) {
+      return std::pair{lo.min, hi.min - lo.min};
     }
-    if (const auto it = ranges_.find(ref_name(mask)); it != ranges_.end()) {
-      const auto& [lo, hi] = it->second;
-      if (lo.is_constant() && hi.is_constant() && lo.min >= 0 && hi.min >= lo.min && hi.min < 62) {
-        return std::pair{lo.min, hi.min - lo.min + 1};
+    return std::nullopt;
+  }
+
+  // Recognize hi = lo + W even when the moving endpoint is not constant.
+  // Only compiler temporaries enter bound_defs_: mutable source variables
+  // cannot be substituted by a definition from an earlier statement.
+  std::optional<int64_t> bound_offset(const Lnast_nid& hi, const Lnast_nid& lo, const Env& env, int depth = 4) const {
+    if (!ref_name(hi).empty() && ref_name(hi) == ref_name(lo)) {
+      return 0;
+    }
+    if (depth == 0) {
+      return std::nullopt;
+    }
+    const auto it = bound_defs_.find(ref_name(hi));
+    if (it == bound_defs_.end()) {
+      return std::nullopt;
+    }
+    const auto stmt  = it->second;
+    const auto left  = ln_.get_sibling_next(ln_.get_first_child(stmt));
+    const auto right = ln_.get_sibling_next(left);
+    if (right.is_invalid() || !ln_.get_sibling_next(right).is_invalid()) {
+      return std::nullopt;
+    }
+    const auto rv = val(right, env);
+    const auto lv = val(left, env);
+    if (rv.is_constant() && rv.min >= -4096 && rv.min <= 4096) {
+      if (auto offset = bound_offset(left, lo, env, depth - 1)) {
+        return *offset + (Lnast_ntype::is_minus(ln_.get_type(stmt)) ? -rv.min : rv.min);
+      }
+    } else if (lv.is_constant() && lv.min >= -4096 && lv.min <= 4096 && Lnast_ntype::is_plus(ln_.get_type(stmt))) {
+      if (auto offset = bound_offset(right, lo, env, depth - 1)) {
+        return *offset + lv.min;
       }
     }
     return std::nullopt;
@@ -11343,7 +11154,12 @@ private:
       return b.is_constant() ? Lnast_range::sext_to(b.min) : Lnast_range::make_unbounded();
     }
     if (N::is_get_mask(t)) {
-      const auto w = window(ops[1], env);
+      const auto w = ops.size() >= 3 ? window(ops[1], ops[2], env) : std::nullopt;
+      if (!w && ops.size() >= 3) {
+        if (const auto width = bound_offset(ops[2], ops[1], env); width && *width > 0 && *width < 62) {
+          return Lnast_range::constant(0).join(Lnast_range::constant((int64_t{1} << *width) - 1));
+        }
+      }
       if (!w || w->second >= 62) {
         return Lnast_range::make_unbounded();
       }
@@ -11357,7 +11173,8 @@ private:
       return r;
     }
     if (N::is_set_mask(t)) {
-      if (const auto w = window(ops[1], env); w && !a.is_unbounded() && a.min >= 0 && w->first + w->second < 62) {
+      if (const auto w = ops.size() >= 4 ? window(ops[2], ops[3], env) : std::nullopt;
+          w && !a.is_unbounded() && a.min >= 0 && w->first + w->second < 62) {
         const int64_t m = ((int64_t{1} << w->second) - 1) << w->first;
         return Lnast_range::constant(0).join(Lnast_range::constant(Lnast_range::ones_cover(std::max(a.max, m))));
       }
@@ -11485,7 +11302,7 @@ private:
       for (auto c = ln_.get_sibling_next(dst_nid); !c.is_invalid(); c = ln_.get_sibling_next(c)) {
         ops.push_back(c);
       }
-      if (Lnast_ntype::is_declare(t)) {
+      if (Lnast_ntype::is_declare(t) || Lnast_ntype::is_type_spec(t)) {
         // declare(var, prim_type_int(max, min), mode[, value]): the type a
         // later write is judged against.
         // An array declare, `comp_type_array(…(prim_type_int(max, min)), dim)`,
@@ -11503,7 +11320,16 @@ private:
           const auto mn = ln_.get_first_child(ty).is_invalid() ? Lnast_range::make_unbounded()
                                                                : val(ln_.get_sibling_next(ln_.get_first_child(ty)), env);
           if (mx.is_constant() && mn.is_constant() && mn.min <= mx.min) {
-            (array ? elem_typed_ : typed_).insert_or_assign(dst, Lnast_range::constant(mn.min).join(Lnast_range::constant(mx.min)));
+            const auto declared = Lnast_range::constant(mn.min).join(Lnast_range::constant(mx.min));
+            (array ? elem_typed_ : typed_).insert_or_assign(dst, declared);
+            if (Lnast_ntype::is_type_spec(t) && !array) {
+              // A selection's type annotation refines its envelope; it must
+              // not overwrite the value just inferred for this temporary.
+              const auto current = env.find(dst);
+              env.insert_or_assign(
+                  dst,
+                  current == env.end() || current->second.is_unbounded() ? declared : current->second.meet(declared));
+            }
           }
         }
         continue;
@@ -11557,6 +11383,9 @@ private:
           env.insert_or_assign(dst, it->second);
           continue;
         }
+      }
+      if (Lnast::is_tmp(dst) && (Lnast_ntype::is_plus(t) || Lnast_ntype::is_minus(t))) {
+        bound_defs_.insert_or_assign(dst, stmt);
       }
       env.insert_or_assign(dst, eval_op(t, ops, env));
     }

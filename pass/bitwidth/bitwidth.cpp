@@ -1,7 +1,6 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include "bitwidth.hpp"
-#include "bitwidth_rewrite.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -16,6 +15,7 @@
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "bitwidth_range.hpp"
+#include "bitwidth_rewrite.hpp"
 #include "diag.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "hhds/graph.hpp"
@@ -100,15 +100,6 @@ constexpr bool infer_internal_range(Ntype_op op) {
   }
 }
 
-// Drop the driver feeding a sink pin. One driver per sink pin (graph/cell.hpp),
-// so this is a single disconnect, not the edge sweep it used to be.
-void clear_sink(const hhds::Pin_class& spin) {
-  if (spin.is_invalid()) {
-    return;
-  }
-  spin.del_sink();
-}
-
 // Every consumer SINK of `node`, materialized.
 //
 // Two reasons this exists rather than being inlined at each call site:
@@ -164,20 +155,6 @@ void Bitwidth::do_trans(const std::shared_ptr<hhds::Graph>& g) {
   }
 #endif
 
-  // A sized to-positive boundary captures a finite bus, not the future
-  // significant width of its producer. Make that window explicit before
-  // inference can narrow a signed producer (e.g. a 4-bit mux of 0 and -1).
-  for (auto node : g->body().nodes(hhds::Node_order::forward)) {
-    if (type_op_of(node) != Ntype_op::Get_mask) {
-      continue;
-    }
-    const auto output = node.get_driver_pin(0);
-    const auto mask   = get_driver_of_sink_name(node, "mask");
-    if (bits_of(output) > 0 && mask.is_const() && const_of(mask).is_just_i64() && const_of(mask).to_just_i64() == -1) {
-      clear_sink(find_sink_pin(node, "mask"));
-      setup_sink_by_name(node, "mask").connect_driver(create_const(*g, *Dlop::get_mask_value(bits_of(output))));
-    }
-  }
   bw_pass(g.get());
 }
 
@@ -242,9 +219,9 @@ void Bitwidth::set_bits_sign(const hhds::Pin_class& dpin, const Bitwidth_range& 
   // aborts a dbg `lhd sim` on the saved lg:. Get_mask always returns unsigned;
   // a consumer's signed range must not reinterpret the selected top bit.
   if (auto master = dpin.get_master_node(); !master.is_invalid() && type_op_of(master) == Ntype_op::Get_mask) {
-    auto mask = get_driver_of_sink_name(master, "mask");
-    if (mask.is_const()) {
-      const auto& mv = const_of(mask);
+    const auto mask = livehd::graph_util::bit_range(master);
+    if (mask.has_value()) {
+      const auto& mv = livehd::graph_util::mask_window_const(mask->first, mask->second);
       if (!mv.is_negative() && !mv.has_unknowns()) {
         const auto capacity = static_cast<int32_t>(mv.popcount());
         if (capacity > 0 && b > capacity) {
@@ -1071,75 +1048,20 @@ void Bitwidth::process_set_mask(hhds::Node_class& node) {
   }
   Bitwidth_range bw{it->second};
 
-  auto mask_dpin = get_driver_of_sink_name(node, "mask");
-  if (mask_dpin.is_invalid()) {
-    livehd::diag::err("pass.bitwidth", "setmask-undefined", "bitwidth").msg("set_mask can not have an undefined mask").fatal();
+  const auto mask_dpin = livehd::graph_util::bit_range(node);
+  if (!mask_dpin) {
+    livehd::diag::err("pass.bitwidth", "setmask-undefined", "bitwidth").msg("set_mask requires constant lo/hi endpoints").fatal();
   }
-
-  if (!mask_dpin.is_const()) {
-    not_finished = true;
-    return;
-  }
-  const auto& mask = const_of(mask_dpin);
-
-  auto value_dpin = get_driver_of_sink_name(node, "value");
-  if (value_dpin.is_invalid()) {
+  if (get_driver_of_sink_name(node, "value").is_invalid()) {
     livehd::diag::err("pass.bitwidth", "setmask-undefined", "bitwidth").msg("set_mask can not have an undefined value").fatal();
   }
-
-  auto           it2 = bwmap.find(value_dpin.get_class_index());
-  Bitwidth_range value_bw;
-  if (it2 == bwmap.end()) {
-    if (value_dpin.is_const()) {
-      value_bw.set_range(Dlop::create_integer(0), const_of(value_dpin));
-    } else if (mask.is_negative()) {
-      debug_unconstrained_msg(node, value_dpin);
-      not_finished = true;
-      return;
-    } else {
-      bw.set_wider_range(Dlop::create_integer(0), mask);
-      adjust_bw(node.create_driver_pin(0), bw);
-      return;
-    }
-  } else {
-    value_bw = it2->second;
-  }
-
-  if (mask.is_just_i64() && mask.to_just_i64() == -1) {
-    adjust_bw(node.create_driver_pin(0), value_bw);
-    return;
-  }
-  if (mask.is_known_zero()) {
-    adjust_bw(node.create_driver_pin(0), bw);
-    return;
-  }
-
-  if (!mask.is_negative()) {
-    // A finite insertion scatters the value's low bits into the mask window;
-    // a negative value sign-fills THAT window, not the result above it. Bounds
-    // on the shifted signed value would mis-sign and undersize the assembly.
-    Bitwidth_range result;
-    if (bw.is_always_positive()) {
-      result.set_ubits_range(std::max(bw.get_ubits(), static_cast<int32_t>(mask.get_payload_bits())));
-    } else {
-      result.set_sbits_range(std::max(bw.get_sbits(), static_cast<int32_t>(mask.get_signed_bits())));
-    }
-    adjust_bw(node.create_driver_pin(0), result);
-    return;
-  }
-
-  // A negative mask overwrites the infinite high tail, so the result's sign
-  // follows the inserted value. The finite prefix can still contain base bits;
-  // even inserting constant zero does not make the whole result constant zero.
-  // `get_payload_bits()` drops the sign slot only for a NON-NEGATIVE value, and
-  // this branch is the NEGATIVE-mask one, so it would return the full signed
-  // width and inflate the result by a bit. The prefix is the mask's finite part.
-  const int32_t  prefix = mask.get_signed_bits() - 1;
+  // Only the selected finite window changes. Its replacement cannot change
+  // the base's sign above the window, even when the inserted value is signed.
   Bitwidth_range result;
-  if (value_bw.is_always_positive()) {
-    result.set_ubits_range(prefix + value_bw.get_ubits());
+  if (bw.is_always_positive()) {
+    result.set_ubits_range(std::max(bw.get_ubits(), static_cast<int32_t>(mask_dpin->second)));
   } else {
-    result.set_sbits_range(prefix + value_bw.get_sbits());
+    result.set_sbits_range(std::max(bw.get_sbits(), static_cast<int32_t>(mask_dpin->second + 1)));
   }
   adjust_bw(node.create_driver_pin(0), result);
 }
@@ -1153,7 +1075,7 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
     return;
   }
 
-  auto mask_dpin = get_driver_of_sink_name(node, "mask");
+  const auto mask_dpin = livehd::graph_util::bit_range(node);
 
   auto it = bwmap.find(a_dpin.get_class_index());
   if (it == bwmap.end()) {
@@ -1162,28 +1084,15 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
     return;
   }
 
-  auto it2 = bwmap.find(mask_dpin.get_class_index());
-  Dlop mask_val;
-  if (mask_dpin.is_const()) {
-    mask_val = const_of(mask_dpin);
-  } else if (it2 == bwmap.end()) {
-    debug_unconstrained_msg(node, mask_dpin);
-    not_finished = true;
-    return;
-  } else {
-    mask_val = it2->second.get_max().or_op(it2->second.get_min());
-  }
-
-  // Analyses may inspect hand-built or incomplete graphs. Do not infer a
-  // range or an identity for a selection outside the construction contract.
-  if (!mask_dpin.is_const() || !livehd::graph_util::is_legal_mask(mask_val)) {
+  if (!mask_dpin) {
     return;
   }
+  const Dlop mask_val = livehd::graph_util::mask_window_const(mask_dpin->first, mask_dpin->second);
 
   Dlop a_max = it->second.get_max();
   Dlop a_min = it->second.get_min();
 
-  if (mask_dpin.is_const() && is_finite_low_mask(mask_val) && !a_min.is_negative() && a_max.le_op(mask_val)->is_known_true()) {
+  if (is_finite_low_mask(mask_val) && !a_min.is_negative() && a_max.le_op(mask_val)->is_known_true()) {
     // Preserve the lower bound as well as the width. Turning [1,8] into
     // [0,15] here makes a following `(1 << count) - 1` look possibly negative
     // and leaves unnecessary coercion masks behind even after this one dies.
@@ -1194,13 +1103,13 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
 
   // get_mask is the zext (force) bit-select: the packed result is never
   // negative, a lone selected set bit included (only `#sext` may be negative).
-  auto gm = [](const Dlop& v, const Dlop& m) -> Dlop { return livehd::eval_get_mask(v, m); };
+  auto gm = [&](const Dlop& v) -> Dlop { return livehd::eval_get_mask(v, mask_dpin->first, mask_dpin->second); };
 
   Dlop res_max;
   if (a_max.same_repr(a_min)) {
-    res_max = gm(a_max, mask_val);
+    res_max = gm(a_max);
   } else {
-    res_max = gm(*a_max.get_mask_value(), mask_val);
+    res_max = gm(*a_max.get_mask_value());
   }
 
   // Bit extraction is not monotone: [1,2] masked by 1 contains both 0 and 1,
@@ -1208,30 +1117,8 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
   Dlop res_min = a_max.same_repr(a_min) ? res_max : *Dlop::create_integer(0);
 
   if (a_min.is_negative()) {
-    // Probe the worst case: the operand with EVERY bit set.
-    //
-    // The literal -1 expresses that only for a NON-negative mask. A negative
-    // (carve-out) mask makes Dlop::get_mask_op copy bits [positive_mask_bits,
-    // src_bits) of the SOURCE, and src_bits is the source's OWN
-    // get_signed_bits() -- and -1 is one bit wide, so exactly one bit gets
-    // selected and the pack is the 1-bit value, not an all-ones pattern. The
-    // probe then never raised res_max and the bound fell back to a_min.neg_op(),
-    // i.e. 2^(N-1) instead of 2^N-1: an 8-bit port zero-extended by `x & 8'hff`
-    // was modelled as [0..128] instead of [0..255]. bits_of hides it
-    // (get_bits(128) == get_bits(255) == 9), so the Get_mask pin looks identical
-    // and only a consumer reveals it -- `+1` needs 9 bits for 128 but 10 for
-    // 255, and the one-bit-narrow sum truncated: `r(ref=256 impl=0) @ x=255`.
-    //
-    // For a negative mask, probe at the OPERAND's width instead. The positive
-    // branch keeps -1: for a sparse mask like 0xf00 that is the bound that
-    // yields the right envelope.
-    Dlop tmp;
-    if (mask_val.is_negative()) {
-      const auto a_bits = std::max(a_max.get_signed_bits(), a_min.get_signed_bits());
-      tmp               = gm(*Dlop::get_mask_value(a_bits), mask_val);
-    } else {
-      tmp = gm(*Dlop::create_integer(-1), mask_val);
-    }
+    // A negative source can fill the entire selected range with ones.
+    const Dlop tmp = gm(*Dlop::create_integer(-1));
     if (tmp.gt_op(res_max)->is_known_true()) {
       res_max = tmp;
     }
@@ -1240,7 +1127,7 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
   }
 
   Dlop val2;
-  val2 = gm(a_min, mask_val);
+  val2 = gm(a_min);
   if (val2.gt_op(res_max)->is_known_true()) {
     res_max = val2;
   }
@@ -1781,14 +1668,17 @@ void Bitwidth::insert_tposs_nodes(hhds::Node_class& node_attr, int32_t ubits) {
       if (sink_type == Ntype_op::Get_mask) {
         // The sibling's mask may be a live wire; only a constant equal to ours
         // makes it the same selection. (Used to read a non-const mask as 0.)
-        const auto* m = get_driver_of_sink_name(sink_node, "mask").const_value();
-        if (m != nullptr && m->same_repr(*mask)) {
+        const auto m = livehd::graph_util::bit_range(sink_node);
+        if (m && livehd::graph_util::mask_window_const(m->first, m->second).same_repr(*mask)) {
           continue;
         }
       }
 
       if (ntposs.is_invalid()) {
-        ntposs = livehd::graph_util::create_get_mask(*current_graph, name_dpin, create_const(*current_graph, *mask));
+        ntposs = livehd::graph_util::create_get_mask(*current_graph,
+                                                     name_dpin,
+                                                     livehd::graph_util::mask_window(*mask).first,
+                                                     livehd::graph_util::mask_window(*mask).second);
       }
 
       ntposs.create_driver_pin(0).connect_sink(e.sink);
@@ -2208,24 +2098,31 @@ void Bitwidth::remove_mask_identities(hhds::Graph* g) {
   }
   for (auto node : masks) {
     hhds::Pin_class source;
-    hhds::Pin_class mask;
+    Dlop            value;
     if (type_op_of(node) == Ntype_op::Get_mask) {
-      source = get_driver_of_sink_name(node, "a");
-      mask   = get_driver_of_sink_name(node, "mask");
+      source            = get_driver_of_sink_name(node, "a");
+      const auto window = livehd::graph_util::bit_range(node);
+      if (!window) {
+        continue;
+      }
+      value = livehd::graph_util::mask_window_const(window->first, window->second);
     } else {
       // SNAPSHOT: the And is rewired and deleted further down this loop body.
       const auto inputs = node.inp_pins_snapshot();
       if (inputs.size() != 2) {
         continue;
       }
-      const auto pos = inputs[0].get_driver_pin().is_const() ? 0 : 1;
-      mask           = inputs[pos].get_driver_pin();
-      source         = inputs[1 - pos].get_driver_pin();
+      const auto pos  = inputs[0].get_driver_pin().is_const() ? 0 : 1;
+      const auto mask = inputs[pos].get_driver_pin();
+      if (!mask.is_const()) {
+        continue;
+      }
+      value  = const_of(mask);
+      source = inputs[1 - pos].get_driver_pin();
     }
-    if (source.is_invalid() || !mask.is_const()) {
+    if (source.is_invalid()) {
       continue;
     }
-    const auto& value = const_of(mask);
     // is_mask alone is not enough: only a finite mask beginning at bit zero
     // preserves positions. Sparse and offset selections pack their bits.
     if (!is_finite_low_mask(value)) {

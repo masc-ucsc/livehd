@@ -28,8 +28,6 @@
 #include <utility>
 #include <vector>
 
-#include "fanin_lookup.hpp"
-#include "region_cache.hpp"
 #include "abc_backend.hpp"
 #include "abc_flow.hpp"  // lib_has_nldm_timing
 #include "absl/container/flat_hash_map.h"
@@ -37,11 +35,13 @@
 #include "cell.hpp"
 #include "diag.hpp"
 #include "dlop.hpp"
+#include "fanin_lookup.hpp"
 #include "hhds/attrs/name.hpp"
 #include "hhds/graph.hpp"
 #include "host_mem.hpp"
 #include "node_util.hpp"
 #include "pin_tracker.hpp"
+#include "region_cache.hpp"
 
 // clang-format off
 // ABC headers must stay in dependency order (see abc_map.cpp). Do not sort.
@@ -242,8 +242,8 @@ void Abc_backend::resolve_boundary_defaults() {
 // ---------------------------------------------------------------------------
 
 int Abc_backend::fill_static_boundary(Boundary_table& table, const livehd::partition::Region_body& rb,
-                                 const absl::flat_hash_set<hhds::Node_class>& region, const std::vector<int>& pi_port,
-                                 const std::vector<std::pair<size_t, int>>& po_order) {
+                                      const absl::flat_hash_set<hhds::Node_class>& region, const std::vector<int>& pi_port,
+                                      const std::vector<std::pair<size_t, int>>& po_order) {
   const float        io_load = base_.io_load >= 0.0f ? base_.io_load : std::max(typical_cap_ff_, 0.0f);
   int                bits    = 0;
   // Per output port: consumer pins outside the region (each reads the whole
@@ -572,7 +572,7 @@ static bool import_def(Refine& R, Imp_def& d) {
             continue;
           }
           const int k = static_cast<int>(od.port_id) - 2;
-          trk.add_get_mask(out, a, width_of(a), *Dlop::get_mask_value(k, k));
+          trk.add_get_mask(out, a, width_of(a), k, k + 1);
         }
         continue;
       }
@@ -694,7 +694,7 @@ static bool import_def(Refine& R, Imp_def& d) {
       if (op == Ntype_op::Get_mask || op == Ntype_op::Set_mask || op == Ntype_op::SRA || op == Ntype_op::SHL
           || op == Ntype_op::Sext) {
         auto a = gu::get_driver_of_sink_name(node, "a");
-        auto b = gu::get_driver_of_sink_name(node, op == Ntype_op::Get_mask || op == Ntype_op::Set_mask ? "mask" : "b");
+        auto b = gu::get_driver_of_sink_name(node, op == Ntype_op::Get_mask || op == Ntype_op::Set_mask ? "lo" : "b");
         auto v = op == Ntype_op::Set_mask ? gu::get_driver_of_sink_name(node, "value") : hhds::Pin_class{};
         if (a.is_invalid() || b.is_invalid() || !b.is_const()) {
           d.depth_complete = false;
@@ -715,14 +715,20 @@ static bool import_def(Refine& R, Imp_def& d) {
         }
         const auto& k = gu::const_of(b);
         if (op == Ntype_op::Get_mask) {
-          trk.add_get_mask(out, a, a_bits, k);
+          const auto range = gu::bit_range(node);
+          I(range);
+          trk.add_get_mask(out, a, a_bits, range->first, range->second);
         } else if (op == Ntype_op::Set_mask) {
           if (v.is_const()) {
-            trk.add_constant(v, std::max(static_cast<int>(k.get_signed_bits()), 1));
+            const auto range = gu::bit_range(node);
+            I(range);
+            trk.add_constant(v, range->second - range->first);
           } else {
             seed(v);
           }
-          trk.add_set_mask(out, a, a_bits, k, v);
+          const auto range = gu::bit_range(node);
+          I(range);
+          trk.add_set_mask(out, a, a_bits, v, range->first, range->second);
         } else if (op == Ntype_op::SRA) {
           trk.add_sra(out, a, a_bits, k);
         } else if (op == Ntype_op::SHL) {
@@ -1154,7 +1160,9 @@ uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, c
     }
   }
   if (delay_target <= 0.0f
-      && std::none_of(design.region_delay_targets.begin(), design.region_delay_targets.end(), [](const auto& kv) { return kv.second > 0; })) {
+      && std::none_of(design.region_delay_targets.begin(), design.region_delay_targets.end(), [](const auto& kv) {
+           return kv.second > 0;
+         })) {
     return 0;  // nothing to size to
   }
   auto*  frame = static_cast<Abc_Frame_t*>(pabc_);
@@ -1165,7 +1173,7 @@ uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, c
   R.typical_cap = std::max(typical_cap_ff_, 0.0f);
   R.io_load     = base_.io_load >= 0.0f ? base_.io_load : R.typical_cap;
   R.drive_cell  = static_cast<SC_Cell*>(drive_cell_);
-  R.pin_names   = [this, &outlib](Mio_Gate_t* g) -> const std::vector<std::string>& { return cell_desc_for(outlib, g).input_names; };
+  R.pin_names = [this, &outlib](Mio_Gate_t* g) -> const std::vector<std::string>& { return cell_desc_for(outlib, g).input_names; };
   if (R.mio == nullptr || R.scl == nullptr) {
     return 0;
   }
@@ -1597,8 +1605,9 @@ uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, c
 // State outputs/inputs cut paths; the persistent graph is never flattened.
 synth::Ware_score Abc_backend::score(hhds::GraphLibrary& outlib, std::string_view top, const synth::Design_ctx& design) {
   const float target = synth::ware_delay_target(base_.delay);
-  const bool  timing
-      = std::any_of(design.region_delay_targets.begin(), design.region_delay_targets.end(), [](const auto& kv) { return kv.second > 0; });
+  const bool  timing = std::any_of(design.region_delay_targets.begin(), design.region_delay_targets.end(), [](const auto& kv) {
+    return kv.second > 0;
+  });
   if (!start_for_design(design) || (timing && (!scl_lib_ok_ || !scl_timing_ok_))) {
     return {};
   }
@@ -1636,7 +1645,7 @@ synth::Ware_score Abc_backend::score(hhds::GraphLibrary& outlib, std::string_vie
   R.typical_cap = std::max(typical_cap_ff_, 0.0f);
   R.io_load     = base_.io_load >= 0.0f ? base_.io_load : R.typical_cap;
   R.drive_cell  = static_cast<SC_Cell*>(drive_cell_);
-  R.pin_names   = [this, &outlib](Mio_Gate_t* g) -> const std::vector<std::string>& { return cell_desc_for(outlib, g).input_names; };
+  R.pin_names = [this, &outlib](Mio_Gate_t* g) -> const std::vector<std::string>& { return cell_desc_for(outlib, g).input_names; };
   if (R.mio == nullptr) {
     return {};
   }

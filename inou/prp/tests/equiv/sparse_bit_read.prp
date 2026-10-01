@@ -1,0 +1,11 @@
+/*
+:name: sparse_bit_read
+:type: equiv
+:verilog_top: sparse_bit_read
+:pyrope_top: sparse_bit_read
+*/
+// Noncontiguous reads pack selected bits in increasing index order.
+pub comb sparse_bit_read(x:U8) -> (even:U4, odd:U4) {
+  even = x#[0..<8 step 2]
+  odd = x#[1..<8 step 2]
+}

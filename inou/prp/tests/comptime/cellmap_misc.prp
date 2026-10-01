@@ -53,4 +53,4 @@ cassert(    __mux(s=3, p1=10, p2=20, p3=30, p4=40) == 40)
 // Get_mask on the high nibble (cellmap_comb covered the low nibble).
 comb cell_get_high(a:U8) -> (y) { y = a#[4..=7] }
 cassert(cell_get_high(0xab) == 0xa)
-cassert( __get_mask(a=0xab, mask=0xf0) == 0xa)  // get_mask compresses masked bits to the LSB
+cassert( __get_mask(a=0xab, lo=4, hi=8) == 0xa)  // get_mask compresses masked bits to the LSB

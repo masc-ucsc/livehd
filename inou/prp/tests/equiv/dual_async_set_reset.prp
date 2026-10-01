@@ -15,9 +15,9 @@
 // refutes too. ALL THREE directions are fixme until the cell grows a second slot.
 pub mod dual_async_set_reset::[timecheck=false](clk:Clock, D:U1, S:Reset, R:U1) -> (Q:U1@[]) {
   reg Q:U1:[initial=1, reset_pin=S, negreset=true, async=true]
-  if R == 0 {
-    Q = 0
+  Q = if R == 0 {
+    0
   } else {
-    Q = D
+    D
   }
 }

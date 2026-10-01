@@ -1182,10 +1182,10 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
           // at — so this cut is NOT skipped when the node drives a PO.
           make_opaque_logic_boundary(node, dpin0, wname, boundary_counted);
         } else if (op == Ntype_op::Set_mask) {
-          auto a_dpin     = hier_driver_of(node, "a");
-          auto mask_dpin  = hier_driver_of(node, "mask");
-          auto value_dpin = hier_driver_of(node, "value");
-          if (a_dpin.is_invalid() || mask_dpin.is_invalid() || value_dpin.is_invalid()) {
+          auto       a_dpin     = hier_driver_of(node, "a");
+          const auto mask_dpin  = livehd::graph_util::bit_range(node);
+          auto       value_dpin = hier_driver_of(node, "value");
+          if (a_dpin.is_invalid() || !mask_dpin.has_value() || value_dpin.is_invalid()) {
             livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
                 .msg("Invalid corrupt set_mask node {} (cprop should have deleted it)", debug_name(node))
                 .fatal();
@@ -1195,21 +1195,21 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
             deferred_nodes.push_back(node);
             continue;
           }
-          if (!mask_dpin.is_const()) {
+          if (!mask_dpin.has_value()) {
             livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
                 .msg("opentimer can not handle non-constant masks on node {} (cprop/tmap first)", debug_name(node))
                 .fatal();
             return;
           }
-          const auto& mask_const = const_of(mask_dpin);
+          const auto& mask_const = livehd::graph_util::mask_window_const(mask_dpin->first, mask_dpin->second);
           const auto  a_bits     = operand_bits_of(node, "a", a_dpin);
           seed_operand(a_dpin, a_bits);
           seed_operand(value_dpin, static_cast<int32_t>(mask_const.get_signed_bits()));
-          pin_tracker.add_set_mask(wname, trk_id(a_dpin), a_bits, mask_const, trk_id(value_dpin));
+          pin_tracker.add_set_mask(wname, trk_id(a_dpin), a_bits, trk_id(value_dpin), mask_dpin->first, mask_dpin->second);
         } else if (op == Ntype_op::Get_mask) {
-          auto a_dpin    = hier_driver_of(node, "a");
-          auto mask_dpin = hier_driver_of(node, "mask");
-          if (a_dpin.is_invalid() || mask_dpin.is_invalid()) {
+          auto       a_dpin    = hier_driver_of(node, "a");
+          const auto mask_dpin = livehd::graph_util::bit_range(node);
+          if (a_dpin.is_invalid() || !mask_dpin.has_value()) {
             livehd::diag::err("pass.opentimer", "netlist-malformed", "internal")
                 .msg("Invalid corrupt get_mask node {} (cprop should have deleted it)", debug_name(node))
                 .fatal();
@@ -1219,16 +1219,15 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
             deferred_nodes.push_back(node);
             continue;
           }
-          if (!mask_dpin.is_const()) {
+          if (!mask_dpin.has_value()) {
             livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
                 .msg("opentimer can not handle non-constant masks on node {} (cprop/tmap first)", debug_name(node))
                 .fatal();
             return;
           }
-          const auto& mask_const = const_of(mask_dpin);
-          const auto  a_bits     = operand_bits_of(node, "a", a_dpin);
+          const auto a_bits = operand_bits_of(node, "a", a_dpin);
           seed_operand(a_dpin, a_bits);
-          pin_tracker.add_get_mask(wname, trk_id(a_dpin), a_bits, mask_const);
+          pin_tracker.add_get_mask(wname, trk_id(a_dpin), a_bits, mask_dpin->first, mask_dpin->second);
         } else if (op == Ntype_op::SRA) {
           auto a_dpin = hier_driver_of(node, "a");
           auto b_dpin = hier_driver_of(node, "b");

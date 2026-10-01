@@ -112,11 +112,11 @@ cassert(  __not(a=0sb1_0000_0000) == 0xff)
 comb cell_get_mask(a:U8) -> (y) { y = a#[0..=3] }
 
 cassert(cell_get_mask(0xab) == 0xb)
-cassert(  __get_mask(a=0xab, mask=0xf) == 0xb)
+cassert(  __get_mask(a=0xab, lo=0, hi=4) == 0xb)
 cassert(cell_get_mask(0x0f) == 0xf)
-cassert(  __get_mask(a=0x0f, mask=0xf) == 0xf)
+cassert(  __get_mask(a=0x0f, lo=0, hi=4) == 0xf)
 cassert(cell_get_mask(0xf0) == 0)
-cassert(  __get_mask(a=0xf0, mask=0xf) == 0)
+cassert(  __get_mask(a=0xf0, lo=0, hi=4) == 0)
 
 // Ntype_op::Set_mask -- pins a, mask, value
 comb cell_set_mask(base:U8, lo:U4) -> (y:U8) {
@@ -126,11 +126,11 @@ comb cell_set_mask(base:U8, lo:U4) -> (y:U8) {
 }
 
 cassert(cell_set_mask(base=0xf0, lo=0xa) == 0xfa)
-cassert(  __set_mask(a=0xf0, mask=0xf, value=0xa) == 0xfa)
+cassert(  __set_mask(a=0xf0, lo=0, hi=4, value=0xa) == 0xfa)
 cassert(cell_set_mask(base=0, lo=0x5) == 0x05)
-cassert(  __set_mask(a=0, mask=0xf, value=0x5) == 0x05)
+cassert(  __set_mask(a=0, lo=0, hi=4, value=0x5) == 0x05)
 cassert(cell_set_mask(base=0xff, lo=0) == 0xf0)
-cassert(  __set_mask(a=0xff, mask=0xf, value=0) == 0xf0)
+cassert(  __set_mask(a=0xff, lo=0, hi=4, value=0) == 0xf0)
 
 // Ntype_op::Sext -- pins a, b (b is the sign-bit position)
 comb cell_sext(a:U8) -> (y:Signed) { y = a#sext[0..=3] }

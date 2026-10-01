@@ -139,7 +139,11 @@ TEST(LoopSplit, PerLaneSliceWriteIsParallelButNeedsADisjointnessProof) {
   auto                         body = make_body(lib, "b_slice", [](hhds::Graph& g, auto idx, auto inv, auto carry) {
     auto sm = gu::create_typed_node(g, Ntype_op::Set_mask, 32);
     carry.connect_sink(gu::setup_sink_by_name(sm, "a"));
-    idx.connect_sink(gu::setup_sink_by_name(sm, "mask"));
+    idx.connect_sink(gu::setup_sink_by_name(sm, "lo"));
+    auto upper = gu::create_typed_node(*sm.get_graph(), Ntype_op::Sum, 33);
+    idx.connect_sink(gu::setup_sink_by_name(upper, "as"));
+    gu::create_const(*sm.get_graph(), *Dlop::create_integer(1)).connect_sink(gu::setup_sink_by_name(upper, "as"));
+    upper.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(sm, "hi"));
     inv.connect_sink(gu::setup_sink_by_name(sm, "value"));
     return sm.create_driver_pin(0);
   });
@@ -167,7 +171,11 @@ TEST(LoopSplit, SliceWriteWithACarryDependentMaskIsInduction) {
     carry.connect_sink(gu::setup_sink_by_name(pos, "as"));  // <- position uses the carry
     auto sm = gu::create_typed_node(g, Ntype_op::Set_mask, 32);
     carry.connect_sink(gu::setup_sink_by_name(sm, "a"));
-    pos.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(sm, "mask"));
+    pos.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(sm, "lo"));
+    auto upper = gu::create_typed_node(*sm.get_graph(), Ntype_op::Sum, 33);
+    pos.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(upper, "as"));
+    gu::create_const(*sm.get_graph(), *Dlop::create_integer(1)).connect_sink(gu::setup_sink_by_name(upper, "as"));
+    upper.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(sm, "hi"));
     inv.connect_sink(gu::setup_sink_by_name(sm, "value"));
     return sm.create_driver_pin(0);
   });
@@ -238,7 +246,7 @@ TEST(LoopSplit, ConstantMaskIsNotAPerLaneSlice) {
     (void)idx;
     auto sm = gu::create_typed_node(g, Ntype_op::Set_mask, 32);
     carry.connect_sink(gu::setup_sink_by_name(sm, "a"));
-    gu::create_const(g, *Dlop::create_integer(2)).connect_sink(gu::setup_sink_by_name(sm, "mask"));
+    livehd::graph_util::connect_bit_range(sm, 1, 2);
     inv.connect_sink(gu::setup_sink_by_name(sm, "value"));
     return sm.create_driver_pin(0);
   });

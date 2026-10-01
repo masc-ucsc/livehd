@@ -879,36 +879,31 @@ std::string emit_node_expr(const LeanCtx& ctx, const Node& node) {
     }
 
     case Ntype_op::Get_mask: {
-      std::vector<Node_pin> drivers;
-      for (const auto& e : inp_sinks_ordered(node)) {
-        drivers.push_back(e.get_driver_pin());
+      const auto range = livehd::graph_util::bit_range(node);
+      if (!range) {
+        fatal(ctx, "Get_mask requires constant lo/hi endpoints");
       }
-      if (drivers.size() != 2) {
-        fatal(ctx, "Get_mask node n_" + std::to_string(node_id(node)) + " is not binary.");
-      }
-      // The mask must be materialized wide enough to address every source bit.
-      // LiveHD's canonical zext idiom is Get_mask(a, -1) == zext(a) (cprop.cpp:852):
-      // the -1 mask is an all-ones sentinel, NOT a 1-bit 0b1. cgen reads it at a
-      // common width cw = max(src_w, mask_w, out_w) (cgen_sim.cpp:201); we mirror
-      // that here. Emitting it at the mask pin's declared 1-bit width would make
-      // sem_get_mask select only bit 0. For -1 the widened value is all-ones over
-      // the source; for a concrete positive pattern the extra high bits are 0.
-      const uint32_t mask_src_w = pin_width(ctx, drivers[0], node);
-      const uint32_t mask_w     = std::max(mask_src_w, w);
-      return "((sem_get_mask " + driver_expr(ctx, drivers[0]) + " " + driver_expr_at(ctx, drivers[1], mask_w) + ") : BitVec "
+      const auto a = livehd::graph_util::get_driver_of_sink_name(node, "a");
+      const auto mask
+          = livehd::graph_util::create_const(*node.get_graph(), livehd::graph_util::mask_window_const(range->first, range->second));
+      const uint32_t src_w  = pin_width(ctx, a, node);
+      const uint32_t mask_w = range->second;
+      return "((sem_get_mask " + ucast_pin_at(ctx, a, src_w) + " " + driver_expr_at(ctx, mask, mask_w) + ")  : BitVec "
              + std::to_string(w) + ")";
     }
 
     case Ntype_op::Set_mask: {
-      std::vector<Node_pin> drivers;
-      for (const auto& e : inp_sinks_ordered(node)) {
-        drivers.push_back(e.get_driver_pin());
+      const auto range = livehd::graph_util::bit_range(node);
+      if (!range) {
+        fatal(ctx, "Set_mask requires constant lo/hi endpoints");
       }
-      if (drivers.size() != 3) {
-        fatal(ctx, "Set_mask node n_" + std::to_string(node_id(node)) + " is not ternary.");
-      }
-      return "(sem_set_mask " + ucast_pin_at(ctx, drivers[0], w) + " " + driver_expr(ctx, drivers[1]) + " "
-             + driver_expr(ctx, drivers[2]) + ")";
+      const auto a     = livehd::graph_util::get_driver_of_sink_name(node, "a");
+      const auto value = livehd::graph_util::get_driver_of_sink_name(node, "value");
+      const auto mask
+          = livehd::graph_util::create_const(*node.get_graph(), livehd::graph_util::mask_window_const(range->first, range->second));
+      const uint32_t mask_w = range->second;
+      return "(sem_set_mask " + ucast_pin_at(ctx, a, w) + " " + driver_expr_at(ctx, mask, mask_w) + " "
+             + driver_expr_at(ctx, value, pin_width(ctx, value, node)) + ")";
     }
 
     case Ntype_op::Concat: {
@@ -1272,31 +1267,36 @@ std::string cert_node_expr(const LeanCtx& ctx, CertBuild& build, const Node& nod
       }
       break;
     case Ntype_op::Get_mask: {
-      op_expr = "LGraphOp.Op_GetMask";
-      // Mirror the fast-model widening (see Ntype_op::Get_mask in emit_node_expr
-      // and cgen_sim.cpp:201): the mask (port 1) is materialized at
-      // max(src_w, out_w) so an all-ones -1 mask selects every source bit. The
-      // source operand (port 0) keeps its own width. Keeping this in lockstep
-      // with the fast model preserves the model = certificate bridge theorem.
-      std::vector<Node_pin> gm_drivers;
-      for (const auto& e : inp_sinks_ordered(node)) {
-        gm_drivers.push_back(e.get_driver_pin());
+      const auto range = livehd::graph_util::bit_range(node);
+      if (!range) {
+        fatal(ctx, "Get_mask requires constant lo/hi endpoints");
       }
-      const uint32_t gm_src_w  = gm_drivers.empty() ? w : pin_width(ctx, gm_drivers[0], node);
-      const uint32_t gm_mask_w = std::max(gm_src_w, w);
-      for (size_t gi = 0; gi < gm_drivers.size(); ++gi) {
-        const uint32_t dep_w = (gi == 1) ? gm_mask_w : pin_width(ctx, gm_drivers[gi], node);
-        deps.push_back(cert_dep_id(ctx, build, gm_drivers[gi], dep_w));
-      }
+      const auto a = livehd::graph_util::get_driver_of_sink_name(node, "a");
+      const auto mask
+          = livehd::graph_util::create_const(*node.get_graph(), livehd::graph_util::mask_window_const(range->first, range->second));
+      const uint32_t src_w  = pin_width(ctx, a, node);
+      const uint32_t mask_w = range->second;
+      op_expr               = "LGraphOp.Op_GetMask";
+      deps                  = {cert_dep_id(ctx, build, a, src_w), cert_dep_id(ctx, build, mask, mask_w)};
       break;
     }
-    case Ntype_op::Set_mask:
-      op_expr = "LGraphOp.Op_SetMask";
-      for (const auto& e : inp_sinks_ordered(node)) {
-        const auto drv = e.get_driver_pin();
-        deps.push_back(cert_dep_id(ctx, build, drv, pin_width(ctx, drv, node)));
+
+    case Ntype_op::Set_mask: {
+      const auto range = livehd::graph_util::bit_range(node);
+      if (!range) {
+        fatal(ctx, "Set_mask requires constant lo/hi endpoints");
       }
+      const auto a     = livehd::graph_util::get_driver_of_sink_name(node, "a");
+      const auto value = livehd::graph_util::get_driver_of_sink_name(node, "value");
+      const auto mask
+          = livehd::graph_util::create_const(*node.get_graph(), livehd::graph_util::mask_window_const(range->first, range->second));
+      const uint32_t mask_w = range->second;
+      op_expr               = "LGraphOp.Op_SetMask";
+      deps                  = {cert_dep_id(ctx, build, a, w),
+                               cert_dep_id(ctx, build, mask, mask_w),
+                               cert_dep_id(ctx, build, value, pin_width(ctx, value, node))};
       break;
+    }
     case Ntype_op::Concat:
       // Deliberate refusal, not an oversight.  The certificate op set is fixed
       // DATA in LGraphModel.lean (`inductive LGraphOp`), a file this pass does
@@ -1350,9 +1350,7 @@ void Pass_lean::setup() {
   Eprp_method m1("pass.lean", "Emit per-design Lean theories for graph-certificate translation proofs.", &Pass_lean::work);
   m1.add_label_optional("path", "Output directory for emitted Lean files.");
   m1.add_label_optional("top", "Top module name override.");
-  m1.add_label_optional("strict",
-                        "true|false. Abort on unsupported ops",
-                        "true");
+  m1.add_label_optional("strict", "true|false. Abort on unsupported ops", "true");
 
   m1.add_label_optional("emit_cert", "true|false. Emit graph certificate and cert-model definitions.", "true");
   m1.add_label_optional("emit_fast_bridge",

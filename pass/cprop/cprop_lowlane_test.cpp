@@ -27,8 +27,8 @@ Dlop eval(const Pin& p, std::unordered_map<uint64_t, Dlop>& memo) {
   if (auto it = memo.find(key); it != memo.end()) {
     return it->second;
   }
-  const auto n  = p.get_master_node();
-  const auto op = gu::type_op_of(n);
+  const auto                                  n  = p.get_master_node();
+  const auto                                  op = gu::type_op_of(n);
   std::vector<std::pair<hhds::Port_id, Dlop>> in;
   for (auto s : n.inp_sorted_pins()) {
     for (auto d : s.get_driver_pins()) {
@@ -73,19 +73,19 @@ Dlop eval(const Pin& p, std::unordered_map<uint64_t, Dlop>& memo) {
         r = *r.xor_op(v);
       }
       break;
-    case Ntype_op::Not: r = *at(0).not_op(); break;
-    case Ntype_op::SHL: r = *at(0).shl_op(at(1)); break;
-    case Ntype_op::SRA: r = *at(0).sra_op(at(1)); break;
-    case Ntype_op::Sext: r = *at(0).sext_op(at(1)); break;
+    case Ntype_op::Not     : r = *at(0).not_op(); break;
+    case Ntype_op::SHL     : r = *at(0).shl_op(at(1)); break;
+    case Ntype_op::SRA     : r = *at(0).sra_op(at(1)); break;
+    case Ntype_op::Sext    : r = *at(0).sext_op(at(1)); break;
     case Ntype_op::Get_mask: {
-      const auto [lo, hi] = at(2).get_mask_range();  // mask is pid 2
+      const auto [lo, hi] = *gu::bit_range(n);
       r                   = *at(0).get_mask_op_opt(lo, hi);
       break;
     }
-    case Ntype_op::Mux: r = at(at(0).is_known_zero() ? 1 : 2); break;
-    case Ntype_op::EQ: r = *in[0].second.eq_op(in[1].second); break;
-    case Ntype_op::LT: r = *at(0).lt_op(at(1)); break;
-    case Ntype_op::GT: r = *at(0).gt_op(at(1)); break;
+    case Ntype_op::Mux   : r = at(at(0).is_known_zero() ? 1 : 2); break;
+    case Ntype_op::EQ    : r = *in[0].second.eq_op(in[1].second); break;
+    case Ntype_op::LT    : r = *at(0).lt_op(at(1)); break;
+    case Ntype_op::GT    : r = *at(0).gt_op(at(1)); break;
     case Ntype_op::Concat: {
       // Each lane masked into its window (graph/cell.hpp Concat).
       for (const auto& l : gu::concat_lanes(n)) {
@@ -131,12 +131,28 @@ struct Fixture {
     }
     return n.create_driver_pin(0);
   }
-  Pin shl(const Pin& x, int k_) { return node(Ntype_op::SHL, {{"a", x}, {"b", k(k_)}}); }
-  Pin sra(const Pin& x, int k_) { return node(Ntype_op::SRA, {{"a", x}, {"b", k(k_)}}); }
-  Pin low(const Pin& x, int lo, int hi) {
-    return gu::create_get_mask(*g, x, gu::create_const(*g, *Dlop::get_mask_value(hi - 1, lo))).create_driver_pin(0);
+  Pin shl(const Pin& x, int k_) {
+    return node(Ntype_op::SHL,
+                {
+                    {"a",     x},
+                    {"b", k(k_)}
+    });
   }
-  Pin orr(const Pin& x, const Pin& y) { return node(Ntype_op::Or, {{"as", x}, {"as", y}}); }
+  Pin sra(const Pin& x, int k_) {
+    return node(Ntype_op::SRA,
+                {
+                    {"a",     x},
+                    {"b", k(k_)}
+    });
+  }
+  Pin low(const Pin& x, int lo, int hi) { return gu::create_get_mask(*g, x, lo, (hi - 1) + 1).create_driver_pin(0); }
+  Pin orr(const Pin& x, const Pin& y) {
+    return node(Ntype_op::Or,
+                {
+                    {"as", x},
+                    {"as", y}
+    });
+  }
   Pin mux(const Pin& sel, const Pin& f, const Pin& t) {
     auto n = gu::create_typed_node(*g, Ntype_op::Mux);
     n.create_sink_pin(0).connect_driver(sel);
@@ -155,9 +171,9 @@ struct Fixture {
 };
 
 struct Case {
-  std::string                     name;
-  bool                            narrows;
-  std::function<Pin(Fixture&)>    build;
+  std::string                  name;
+  bool                         narrows;
+  std::function<Pin(Fixture&)> build;
 };
 
 std::vector<Dlop> run(Fixture& f, const std::vector<std::array<int64_t, 4>>& vectors) {
@@ -176,66 +192,171 @@ std::vector<Dlop> run(Fixture& f, const std::vector<std::array<int64_t, 4>>& vec
 
 TEST(CpropLowLane, RewritesKeepTheValue) {
   const std::vector<Case> cases{
-      {"sum_shl_any", true, [](Fixture& f) { return f.node(Ntype_op::Sum, {{"as", f.shl(f.a, 2)}, {"as", f.b}}); }},
+      {        "sum_shl_any",
+       true,                                                                                    [](Fixture& f) {
+         return f.node(Ntype_op::Sum,
+                       {
+                           {                                                                                    "as",                                                                                    f.shl(f.a,                                                                                    2)},
+                           {                                                                                    "as",       f.b}});
+       }},
       {"sum_two_forms_const",
-       true,
-       [](Fixture& f) { return f.node(Ntype_op::Sum, {{"as", f.shl(f.a, 3)}, {"as", f.shl(f.b, 2)}, {"as", f.k(7)}}); }},
-      {"sum_carry_const", false, [](Fixture& f) { return f.node(Ntype_op::Sum, {{"as", f.shl(f.a, 2)}, {"as", f.k(-5)}}); }},
-      {"sub_forms",
-       true,
-       [](Fixture& f) { return f.node(Ntype_op::Sum, {{"as", f.shl(f.a, 2)}, {"bs", f.shl(f.b, 2)}, {"bs", f.k(3)}}); }},
-      {"sub_arbitrary_kept", false, [](Fixture& f) { return f.node(Ntype_op::Sum, {{"as", f.shl(f.a, 2)}, {"bs", f.b}}); }},
-      {"sum_chain",
-       true,
-       [](Fixture& f) {
-         auto s1 = f.node(Ntype_op::Sum, {{"as", f.shl(f.a, 2)}, {"as", f.b}});
-         return f.node(Ntype_op::Sum, {{"as", s1}, {"as", f.shl(f.c, 2)}});
+       true,                                                                                    [](Fixture& f) {
+         return f.node(Ntype_op::Sum,
+                       {
+                           {                                                                                    "as",                                                                                    f.shl(f.a,                                                                                    3)},
+                           {                                                                                    "as",                                                                                    f.shl(f.b,                                                                                    2)},
+                           {                                                                                    "as",       f.k(7)}});
        }},
-      {"mult_forms", true, [](Fixture& f) { return f.node(Ntype_op::Mult, {{"as", f.shl(f.a, 2)}, {"as", f.shl(f.b, 1)}}); }},
-      {"mult_const", true, [](Fixture& f) { return f.node(Ntype_op::Mult, {{"as", f.shl(f.a, 2)}, {"as", f.k(12)}}); }},
-      {"mult_and_mask",
-       true,
-       [](Fixture& f) { return f.node(Ntype_op::Mult, {{"as", f.node(Ntype_op::And, {{"as", f.a}, {"as", f.k(-8)}})}, {"as", f.b}}); }},
-      {"and_zero_low", true, [](Fixture& f) { return f.node(Ntype_op::And, {{"as", f.shl(f.a, 2)}, {"as", f.b}}); }},
-      {"or_two_forms",
-       true,
-       [](Fixture& f) { return f.node(Ntype_op::Or, {{"as", f.orr(f.shl(f.a, 2), f.k(1))}, {"as", f.orr(f.shl(f.b, 2), f.k(2))}}); }},
-      {"xor_any", true, [](Fixture& f) { return f.node(Ntype_op::Xor, {{"as", f.shl(f.a, 2)}, {"as", f.b}}); }},
-      {"xor_forms",
-       true,
-       [](Fixture& f) { return f.node(Ntype_op::Xor, {{"as", f.orr(f.shl(f.a, 2), f.k(3))}, {"as", f.shl(f.b, 3)}}); }},
-      {"mux_forms", true, [](Fixture& f) { return f.mux(f.s, f.shl(f.a, 2), f.orr(f.shl(f.b, 2), f.k(1))); }},
-      {"mux_const", true, [](Fixture& f) { return f.mux(f.s, f.shl(f.a, 2), f.k(-8)); }},
-      {"eq_any", true, [](Fixture& f) { return f.node(Ntype_op::EQ, {{"as", f.shl(f.a, 2)}, {"as", f.b}}); }},
-      {"eq_low_differs",
-       true,
-       [](Fixture& f) { return f.node(Ntype_op::EQ, {{"as", f.orr(f.shl(f.a, 2), f.k(1))}, {"as", f.shl(f.b, 2)}}); }},
-      {"lt_forms", true, [](Fixture& f) { return f.node(Ntype_op::LT, {{"as", f.shl(f.a, 2)}, {"bs", f.shl(f.b, 2)}}); }},
-      {"gt_same_low",
-       true,
-       [](Fixture& f) {
-         return f.node(Ntype_op::GT, {{"as", f.orr(f.shl(f.a, 2), f.k(3))}, {"bs", f.orr(f.shl(f.b, 2), f.k(3))}});
+      {    "sum_carry_const",
+       false,                                                                                    [](Fixture& f) {
+         return f.node(Ntype_op::Sum,
+                       {
+                           {                                                                                    "as",                                                                                    f.shl(f.a,                                                                                    2)},
+                           {                                                                                    "as",       f.k(-5)}});
        }},
-      {"sra_below", true, [](Fixture& f) { return f.sra(f.orr(f.shl(f.a, 4), f.low(f.c, 0, 4)), 2); }},
-      {"sra_above", true, [](Fixture& f) { return f.sra(f.orr(f.shl(f.a, 4), f.low(f.c, 0, 4)), 5); }},
-      {"sra_and_mask", true, [](Fixture& f) { return f.sra(f.node(Ntype_op::And, {{"as", f.a}, {"as", f.k(-8)}}), 5); }},
-      {"get_mask_high",
-       true,
-       [](Fixture& f) { return f.low(f.orr(f.shl(f.a, 4), f.low(f.c, 0, 4)), 4, 10); }},
-      {"get_mask_low", true, [](Fixture& f) { return f.low(f.orr(f.shl(f.a, 4), f.low(f.c, 0, 4)), 0, 3); }},
-      {"get_mask_straddle", false, [](Fixture& f) { return f.low(f.orr(f.shl(f.a, 4), f.low(f.c, 0, 4)), 2, 6); }},
-      {"sext", true, [](Fixture& f) { return f.node(Ntype_op::Sext, {{"a", f.orr(f.shl(f.a, 2), f.k(1))}, {"b", f.k(8)}}); }},
-      {"not", true, [](Fixture& f) { return f.node(Ntype_op::Not, {{"a", f.orr(f.shl(f.a, 2), f.low(f.c, 0, 2))}}); }},
-      {"concat_form",
-       true,
-       [](Fixture& f) {
-         return f.node(Ntype_op::Sum, {{"as", f.concat(f.low(f.a, 0, 4), 4, f.low(f.b, 0, 2), 2)}, {"as", f.shl(f.c, 2)}});
+      {          "sub_forms",
+       true,                                                                                    [](Fixture& f) {
+         return f.node(Ntype_op::Sum,
+                       {
+                           {                                                                                    "as",                                                                                    f.shl(f.a,                                                                                    2)},
+                           {                                                                                    "bs",                                                                                    f.shl(f.b,                                                                                    2)},
+                           {                                                                                    "bs",       f.k(3)}});
+       }},
+      { "sub_arbitrary_kept",
+       false,                                                                                    [](Fixture& f) {
+         return f.node(Ntype_op::Sum,
+                       {
+                           {                                                                                    "as",                                                                                    f.shl(f.a,                                                                                    2)},
+                           {                                                                                    "bs",       f.b}});
+       }},
+      {          "sum_chain",
+       true,                                                                                    [](Fixture& f) {
+         auto s1 = f.node(Ntype_op::Sum,
+                          {
+                              {                                                                                    "as",                                                                                    f.shl(f.a,                                                                                    2)},
+                              {                                                                                    "as",                                                                                    f.b}});
+         return f.node(Ntype_op::Sum,
+                       {
+                           {                                                                                    "as",                                                                                    s1},
+                           {                                                                                    "as",                                                                                    f.shl(f.c,       2)}});
+       }},
+      {         "mult_forms",
+       true,                                                                                    [](Fixture& f) {
+         return f.node(Ntype_op::Mult,
+                       {
+                           {                                                                                    "as",                                                                                    f.shl(f.a,                                                                                    2)},
+                           {                                                                                    "as",                                                                                    f.shl(f.b,       1)}});
+       }},
+      {         "mult_const",
+       true,                                                                                    [](Fixture& f) {
+         return f.node(Ntype_op::Mult,
+                       {
+                           {                                                                                    "as",                                                                                    f.shl(f.a,                                                                                    2)},
+                           {                                                                                    "as",       f.k(12)}});
+       }},
+      {      "mult_and_mask",
+       true,                                                                                    [](Fixture& f) {
+         return f.node(Ntype_op::Mult,
+                       {
+                           {                                                                                    "as",                                                                                    f.node(Ntype_op::And,                                                                                    {{"as", f.a}, {"as", f.k(-8)}})},
+                           {                                                                                    "as",       f.b}});
+       }},
+      {       "and_zero_low",
+       true,                                                                                    [](Fixture& f) {
+         return f.node(Ntype_op::And,
+                       {
+                           {                                                                                    "as",                                                                                    f.shl(f.a,                                                                                    2)},
+                           {                                                                                    "as",       f.b}});
+       }},
+      {       "or_two_forms",
+       true,                                                                                    [](Fixture& f) {
+         return f.node(Ntype_op::Or,
+                       {
+                           {                                                                                    "as",                                                                                    f.orr(f.shl(f.a,                                                                                    2),                                                                                    f.k(1))},
+                           {                                                                                    "as",                                                                                    f.orr(f.shl(f.b,                                                                                    2),       f.k(2))}});
+       }},
+      {            "xor_any",
+       true,                                                                                    [](Fixture& f) {
+         return f.node(Ntype_op::Xor,
+                       {
+                           {                                                                                    "as",                                                                                    f.shl(f.a,                                                                                    2)},
+                           {                                                                                    "as",       f.b}});
+       }},
+      {          "xor_forms",
+       true,                                                                                    [](Fixture& f) {
+         return f.node(Ntype_op::Xor,
+                       {
+                           {                                                                                    "as",                                                                                    f.orr(f.shl(f.a,                                                                                    2),                                                                                    f.k(3))},
+                           {                                                                                    "as",                                                                                    f.shl(f.b,       3)}});
+       }},
+      {          "mux_forms",  true, [](Fixture& f) { return f.mux(f.s, f.shl(f.a, 2), f.orr(f.shl(f.b, 2), f.k(1))); }},
+      {          "mux_const",  true, [](Fixture& f) { return f.mux(f.s, f.shl(f.a, 2), f.k(-8)); }},
+      {             "eq_any",
+       true,                                                                                    [](Fixture& f) {
+         return f.node(Ntype_op::EQ,
+                       {
+                           {                                                                                    "as",                                                                                    f.shl(f.a,                                                                                    2)},
+                           {                                                                                    "as",       f.b}});
+       }},
+      {     "eq_low_differs",
+       true,                                                                                    [](Fixture& f) {
+         return f.node(Ntype_op::EQ,
+                       {
+                           {                                                                                    "as",                                                                                    f.orr(f.shl(f.a,                                                                                    2),                                                                                    f.k(1))},
+                           {                                                                                    "as",                                                                                    f.shl(f.b,       2)}});
+       }},
+      {           "lt_forms",
+       true,                                                                                    [](Fixture& f) {
+         return f.node(Ntype_op::LT,
+                       {
+                           {                                                                                    "as",                                                                                    f.shl(f.a,                                                                                    2)},
+                           {                                                                                    "bs",                                                                                    f.shl(f.b,       2)}});
+       }},
+      {        "gt_same_low",
+       true,                                                                                    [](Fixture& f) {
+         return f.node(Ntype_op::GT,
+                       {
+                           {                                                                                    "as",                                                                                    f.orr(f.shl(f.a,                                                                                    2),                                                                                    f.k(3))},
+                           {                                                                                    "bs",                                                                                    f.orr(f.shl(f.b,                                                                                    2),       f.k(3))}});
+       }},
+      {          "sra_below",  true, [](Fixture& f) { return f.sra(f.orr(f.shl(f.a, 4), f.low(f.c, 0, 4)), 2); }},
+      {          "sra_above",  true, [](Fixture& f) { return f.sra(f.orr(f.shl(f.a, 4), f.low(f.c, 0, 4)), 5); }},
+      {       "sra_and_mask",
+       true,                                                                                    [](Fixture& f) {
+         return f.sra(f.node(Ntype_op::And,
+                             {
+                                 {                                                                                    "as",                                                                                    f.a},
+                                 {                                                                                    "as",       f.k(-8)}}),
+       5);
+       }},
+      {      "get_mask_high",  true, [](Fixture& f) { return f.low(f.orr(f.shl(f.a, 4), f.low(f.c, 0, 4)), 4, 10); }},
+      {       "get_mask_low",  true, [](Fixture& f) { return f.low(f.orr(f.shl(f.a, 4), f.low(f.c, 0, 4)), 0, 3); }},
+      {  "get_mask_straddle", false, [](Fixture& f) { return f.low(f.orr(f.shl(f.a, 4), f.low(f.c, 0, 4)), 2, 6); }},
+      {               "sext",
+       true,                                                                                    [](Fixture& f) {
+         return f.node(Ntype_op::Sext,
+                       {
+                           {                                                                                    "a",                                                                                    f.orr(f.shl(f.a,                                                                                    2),                                                                                    f.k(1))},
+                           {                                                                                    "b",       f.k(8)}});
+       }},
+      {                "not",
+       true,                                                                                    [](Fixture& f) {
+         return f.node(Ntype_op::Not,
+                       {
+                           {                                                                                    "a",                                                                                    f.orr(f.shl(f.a,                                                                                    2),                                                                                    f.low(f.c,                                                                                    0,       2))}});
+       }},
+      {        "concat_form",
+       true,                                                                                    [](Fixture& f) {
+         return f.node(Ntype_op::Sum,
+                       {
+                           {                                                                                    "as",                                                                                    f.concat(f.low(f.a,                                                                                    0,                                                                                    4),                                                                                    4,                                                                                    f.low(f.b,                                                                                    0,                                                                                    2),                                                                                    2)},
+                           {                                                                                    "as",                                                                                    f.shl(f.c,       2)}});
        }},
   };
 
-  std::mt19937_64                          rng(7);
-  std::uniform_int_distribution<int64_t>   dist(-5000, 5000);
-  std::vector<std::array<int64_t, 4>>      vectors;
+  std::mt19937_64                        rng(7);
+  std::uniform_int_distribution<int64_t> dist(-5000, 5000);
+  std::vector<std::array<int64_t, 4>>    vectors;
   for (int i = 0; i < 200; ++i) {
     vectors.push_back({dist(rng), dist(rng), dist(rng), static_cast<int64_t>(i & 1)});
   }
@@ -246,12 +367,13 @@ TEST(CpropLowLane, RewritesKeepTheValue) {
     top.connect_sink(f.g->get_output_pin("o"));
     const auto top_node = top.get_master_node();
     const auto before   = run(f, vectors);
-    Cprop cp{true};
+    Cprop      cp{true};
     cp.do_trans(f.g);
     const auto after = run(f, vectors);
     ASSERT_EQ(before.size(), after.size());
     for (size_t i = 0; i < before.size(); ++i) {
-      ASSERT_TRUE(before[i].is_known_eq(after[i])) << "vector " << i << ": " << before[i].to_pyrope() << " != " << after[i].to_pyrope();
+      ASSERT_TRUE(before[i].is_known_eq(after[i]))
+          << "vector " << i << ": " << before[i].to_pyrope() << " != " << after[i].to_pyrope();
     }
     if (tc.narrows) {
       EXPECT_TRUE(top_node.is_invalid()) << "expected the rewrite";
@@ -262,7 +384,11 @@ TEST(CpropLowLane, RewritesKeepTheValue) {
 // Off by default: plain Cprop leaves the operation alone.
 TEST(CpropLowLane, OffByDefault) {
   Fixture f("off_by_default");
-  auto    top = f.node(Ntype_op::Sum, {{"as", f.shl(f.a, 2)}, {"as", f.b}});
+  auto    top = f.node(Ntype_op::Sum,
+                       {
+                           {"as", f.shl(f.a, 2)},
+                           {"as", f.b}
+  });
   top.connect_sink(f.g->get_output_pin("o"));
   const auto n = top.get_master_node();
   Cprop      cp;

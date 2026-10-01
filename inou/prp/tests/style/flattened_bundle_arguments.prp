@@ -1,0 +1,12 @@
+/*
+:name: style_flattened_bundle_arguments
+:type: style
+:style: flattened-bundle-arguments
+:help: structured
+*/
+// Escaped dotted argument names (`io_in.valid`) encode a bundle by hand; pass a
+// real tuple and update the callee interface instead.
+comb f(enabled:U1, data:U8) -> (o:U8) {
+  const r = child(`io_in.valid`=enabled, `io_in.data`=data)  // locate_style_flattened-bundle-arguments
+  o = r
+}

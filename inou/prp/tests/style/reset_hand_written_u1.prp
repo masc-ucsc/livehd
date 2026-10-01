@@ -1,0 +1,19 @@
+/*
+:name: style_reset_hand_written_u1
+:type: style
+:style: hardcoded-reset reset-port-type single-destination-conditional
+:help: negreset=true
+*/
+// The full "not so nice" form: a U1 input used only as the condition of a
+// constant clear. Three independent hints fire: make the reset structural, type
+// the port Reset, and (because both arms assign dout_q) the if-expression form.
+// inou/prp/tests/equiv/struct_top_port.prp is the equivalence twin of this shape.
+pub mod m(clk:Clock, rst_ni:U1, din:U7) -> (dout:U7@[]) {
+  reg dout_q:U7 = nil
+  dout = dout_q
+  if rst_ni == 0 {  // locate_style_hardcoded-reset locate_style_single-destination-conditional
+    dout_q = 0
+  } else {
+    dout_q = din
+  }
+}

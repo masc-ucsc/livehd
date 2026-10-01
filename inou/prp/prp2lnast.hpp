@@ -150,7 +150,7 @@ protected:
   // as it appears in does/equals/case operand
   // position (plain `identifier` there — the grammar's *_type nodes only
   // exist in type contexts).
-  static bool         is_prim_type_token(std::string_view txt);
+  static bool               is_prim_type_token(std::string_view txt);
   // Lower one `does`/`equals`/`case` operand. An integer type-call
   // (`int(max=…,min=…)` / `u8(min=…)`) lowers to a
   // `declare(tmp, prim_type_int(max,min), 'type')` and returns the tmp ref; a
@@ -159,39 +159,39 @@ protected:
   // name — e.g. `u2` — still wins because the fold consults the symbol
   // table / type-info first). Anything else falls through to expr_to_node.
   std::optional<Lnast_node> int_type_literal(TSNode n);
-  Lnast_node          does_operand_to_node(TSNode n);
+  Lnast_node                does_operand_to_node(TSNode n);
   // Fold the integer-only expression subset admitted by integer type bounds,
   // generic defaults and statically known declaration values. Names resolve
   // through the visible bindings (Binding::int_value; `Z.[bits]` through
   // Binding::range; `cfg.w` through a file-scope comptime tuple), so a type
   // such as `signed(bits=W)` or `signed(max=(1 << W)-1)` is canonicalized
   // before uPass consumes its prim_type_int(max,min) node.
-  std::optional<Dlop> resolve_type_int_value(TSNode n) const;
+  std::optional<Dlop>       resolve_type_int_value(TSNode n) const;
   // Shared by emit_type_expr (declare side) and does_operand_to_node
   // (operand side): classify an integer type keyword and refine its (max,min)
   // bounds from a `(max=…, min=…, bits=…)` constraint/argument tuple. Returns
   // false when `kw` is not an integer type keyword.
-  bool                int_type_call_bounds(std::string_view kw, TSNode tup, std::string& max_txt, std::string& min_txt);
+  bool                      int_type_call_bounds(std::string_view kw, TSNode tup, std::string& max_txt, std::string& min_txt);
   // 2f-type_bound — lower any integer type bound in `type_cast_node` that
   // resolve_type_int_value cannot fold, into statements emitted AT THE CURRENT
   // STATEMENT POSITION, and stash the resulting refs in prelowered_int_bounds_.
   // Must run BEFORE the declaration's `attr_set` cluster head: the emitted
   // statements have to precede the `declare` that consumes them, and
   // rewrite_decls_to_declare merges a CONTIGUOUS attr_set/type_spec run.
-  void                prelower_type_bounds(TSNode type_cast_node);
+  void                      prelower_type_bounds(TSNode type_cast_node);
   // Same, for the TYPE node itself (a `f<T=unsigned(bits=N)>` argument). An
   // array type recurses into its element and prelowers each dimension that is
   // an expression this front end cannot fold (see prelowered_array_dims_).
-  void                prelower_int_type_bounds(TSNode ty);
+  void                      prelower_int_type_bounds(TSNode ty);
   // The dimension node of an `array_length` slot: the prelowered ref, the
   // folded `[n]`, or the written text (a bare name the runner folds).
-  Lnast_node          array_dim_to_node(TSNode len);
+  Lnast_node                array_dim_to_node(TSNode len);
   // The expression of an `array_length` slot that has to be lowered to
   // statements to fold (`[N+1]` over a generic); null for an empty slot, a
   // bare name, a range, or an expression that folds here.
-  TSNode              prelowerable_array_dim(TSNode len) const;
+  TSNode                    prelowerable_array_dim(TSNode len) const;
   // One `<head>(%tmp, l, r)` statement; returns the fresh %tmp ref.
-  Lnast_node          emit_bound_binop(Lnast_ntype::Lnast_ntype_int head, const Lnast_node& l, const Lnast_node& r);
+  Lnast_node                emit_bound_binop(Lnast_ntype::Lnast_ntype_int head, const Lnast_node& l, const Lnast_node& r);
 
   // Reject `a = 3` with no prior `mut`/`const`/declare (or param/output) visible
   // in scope. Runs on the producer tree (pre-upass), so it sees only source-level
@@ -310,7 +310,7 @@ protected:
     // 2026-09-28 (33)); only the wording differs (unknown-generic-name).
     Generic_read generic = Generic_read::none;
   };
-  std::vector<Read_site>                                                        read_sites_;
+  std::vector<Read_site> read_sites_;
   // Per-scope (stmts node) declaration index: name -> EARLIEST child position that
   // declares it (the same declarations read_is_visible's stmt_declares matches).
   // Built once in check_undefined_reads so read_is_visible resolves a frame in
@@ -327,28 +327,28 @@ protected:
   mutable absl::flat_hash_map<Lnast_nid, absl::flat_hash_map<std::string, Read_declaration>> read_scope_decls_;
   // Child position of each direct child of a stmts scope (the boundary nodes
   // read_is_visible compares against). Built in the same walk.
-  mutable absl::flat_hash_map<Lnast_nid, int>                                   read_child_index_;
+  mutable absl::flat_hash_map<Lnast_nid, int>                                                read_child_index_;
   // The `declare` nodes process_tick_statement synthesizes for a tick's implicit
   // loop variable (`clock`). They are exempt from the no-shadowing rule: no
   // source line wrote them, so "rename the inner/loop variable" is unactionable
   // advice for the one shape that trips it — a test parameter named like the
   // loop var, which `lhd sim` reports as "collides with a test parameter".
-  absl::flat_hash_set<Lnast_nid>                                                tick_loop_var_decls_;
+  absl::flat_hash_set<Lnast_nid>                                                             tick_loop_var_decls_;
   // Names that behave as declarations at the root stmts of a directly
   // streamed lambda: its io/generic names plus the comptime captures its body
   // prologue declares.  A file wrapper leaves this empty.
-  absl::flat_hash_set<std::string>                                              streamed_scope_names_;
+  absl::flat_hash_set<std::string>                                                           streamed_scope_names_;
 
   struct Destination_state {
-    std::shared_ptr<Lnast>                                                lnast;
-    Lnast_builder                                                         builder;
-    std::vector<Read_site>                                                read_sites;
+    std::shared_ptr<Lnast>                                                             lnast;
+    Lnast_builder                                                                      builder;
+    std::vector<Read_site>                                                             read_sites;
     absl::flat_hash_map<Lnast_nid, absl::flat_hash_map<std::string, Read_declaration>> read_scope_decls;
-    absl::flat_hash_map<Lnast_nid, int>                                   read_child_index;
-    absl::flat_hash_set<Lnast_nid>                                        tick_loop_var_decls;
-    absl::flat_hash_set<Lnast_nid>                                        decl_shape_seed_stores;
-    absl::flat_hash_set<std::string>                                      streamed_scope_names;
-    absl::node_hash_map<Lnast_nid, Prp_stmt_rw>                           capture_rw;
+    absl::flat_hash_map<Lnast_nid, int>                                                read_child_index;
+    absl::flat_hash_set<Lnast_nid>                                                     tick_loop_var_decls;
+    absl::flat_hash_set<Lnast_nid>                                                     decl_shape_seed_stores;
+    absl::flat_hash_set<std::string>                                                   streamed_scope_names;
+    absl::node_hash_map<Lnast_nid, Prp_stmt_rw>                                        capture_rw;
   };
   std::vector<Destination_state>              destination_stack_;
   // The current tree's capture_rw: the read/write sets of the statements a
@@ -626,17 +626,12 @@ protected:
   Lnast_node bit_selection_to_node(TSNode n);
   Lnast_node member_selection_to_node(TSNode n);
 
-  // Bit-range mask synthesis shared between bit_selection reads
-  // (`bit_selection_to_node`) and bit-range writes (the `bit_selection` arm of
-  // `process_lvalue_for_assign`). `sel_node` is the `select` TS child of a
-  // `bit_selection`. Returns the Lnast_node to use as the mask operand of
-  // `get_mask` / `set_mask`: a `Dlop` when both range endpoints are
-  // integer-literal (encoded as a bitmask via `Dlop::get_mask_value`), or a
-  // ref to a freshly-emitted `range` / `shl` LNAST stmt for dynamic cases.
-  Lnast_node compute_bit_mask_ref(TSNode sel_node, int* const_width = nullptr);
-  Lnast_node emit_range_node(const Lnast_node& start, const Lnast_node& end);
+  // Source selections lower to elementary half-open ranges. A stepped range
+  // contributes one range per selected position, in increasing packed order.
+  std::vector<std::pair<Lnast_node, Lnast_node>> bit_selection_ranges(TSNode sel_node, int* const_width = nullptr);
+  Lnast_node                                     emit_range_node(const Lnast_node& start, const Lnast_node& end);
 
-  // The number of bits a `#[...]` select covers when compute_bit_mask_ref could
+  // The number of bits a `#[...]` select covers when bit_selection_ranges could
   // not fold it (a bound is a NAME, not a literal): a const when the bounds
   // fold through visible compile-time names, else a ref to the statements
   // computing it, for the runner to fold. nullopt for an open range or a width
@@ -660,11 +655,11 @@ protected:
     bool        is_hole = false;
   };
   std::vector<Istring_piece> istring_pieces(TSNode n) const;
-  Lnast_node tuple_to_node(TSNode n, bool is_square, bool field_types_on_target = false);
-  Lnast_node identifier_to_node(TSNode n, bool for_lvalue);
-  Lnast_node constant_text_to_node(std::string_view text);
+  Lnast_node                 tuple_to_node(TSNode n, bool is_square, bool field_types_on_target = false);
+  Lnast_node                 identifier_to_node(TSNode n, bool for_lvalue);
+  Lnast_node                 constant_text_to_node(std::string_view text);
   // `expr::[attr=…]` write-side attribute bracket in expression position.
-  Lnast_node attribute_set_to_node(TSNode n);
+  Lnast_node                 attribute_set_to_node(TSNode n);
 
   // Type handling
   void                 emit_type_spec(const Lnast_node& target, TSNode type_cast_node);
@@ -945,7 +940,7 @@ protected:
 
   private:
     Prp2lnast&                         lower_;
-    const Lnast*                      destination_;
+    const Lnast*                       destination_;
     std::optional<Capture_frame_guard> capture_;
   };
   struct Capture_lookup {
@@ -1179,16 +1174,14 @@ protected:
   // Helpers
   // Source text of a node, with a whole-node plain escaped identifier
   // canonicalized (`` `foo` `` -> `foo`, `` `foo[bar]` `` kept): `foo` == foo.
-  std::string_view        get_text(const TSNode& n) const;
+  std::string_view                get_text(const TSNode& n) const;
   // Decoded backtick names (`` `d\\e` `` is the identifier `d\e`: a backtick
   // name reads the string escapes). A deque, so a returned view stays valid.
   mutable std::deque<std::string> decoded_names_;
   // The exact source bytes (no canonicalization). Only for KEYWORD-literal
   // tests on an identifier node: an escaped keyword (`` `true` ``) is an
   // ordinary name, never the literal it spells.
-  std::string_view        get_raw_text(const TSNode& n) const {
-    return text_between(ts_node_start_byte(n), ts_node_end_byte(n));
-  }
+  std::string_view        get_raw_text(const TSNode& n) const { return text_between(ts_node_start_byte(n), ts_node_end_byte(n)); }
   static std::string_view trim(std::string_view s);
   std::string_view        text_between(uint32_t start, uint32_t end) const;
 

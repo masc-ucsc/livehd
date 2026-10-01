@@ -569,7 +569,8 @@ TEST(LnastPrpWriter, ConcatDropsProvenLaneMaskAndZeroLane) {
   auto gm = ln->add_child(stmts, Lnast_ntype::create_get_mask());  // lo = x#[0..=31]
   ln->add_child(gm, Lnast_node::create_ref("lo"));
   ln->add_child(gm, Lnast_node::create_ref("x"));
-  ln->add_child(gm, Lnast_node::create_const("0xffffffff"));
+  ln->add_child(gm, Lnast_node::create_const("0"));
+  ln->add_child(gm, Lnast_node::create_const("32"));
 
   auto concat = ln->add_child(stmts, Lnast_ntype::create_concat());
   ln->add_child(concat, Lnast_node::create_ref("z"));
@@ -593,7 +594,7 @@ TEST(LnastPrpWriter, SingleBitRangeIsSpelledWithoutRange) {
   auto gm = ln->add_child(stmts, Lnast_ntype::create_get_mask());
   ln->add_child(gm, Lnast_node::create_ref("b"));
   ln->add_child(gm, Lnast_node::create_ref("x"));
-  ln->add_child(gm, Lnast_node::create_const("8"));  // bit 3 only
+  ln->add_child(gm, Lnast_node::create_const("3"));  // bit 3 only
 
   auto store = ln->add_child(stmts, Lnast_ntype::create_store());
   ln->add_child(store, Lnast_node::create_ref("out"));

@@ -445,6 +445,80 @@ class PrpRunner:
         print('{} - warning - success (matched: {})'.format(name, messages))
         return 0
 
+    def run_style(self, tmp_dir, test: PrpTest):
+        # Style-hint test (tests/style/): `lhd pyrope style` must report EXACTLY
+        # the rule codes listed in the `:style:` header (`none` = clean file).
+        # Source-only analysis: nothing is compiled, so a fixture only has to
+        # parse. Optional header tags:
+        #   :style_args: extra CLI args, e.g. `--min-repeats 3`
+        #   :message:    regex matched against the finding message(s)
+        #   :help:       regex matched against the finding hint(s)
+        # A comment containing `locate_style_<code>` pins the line where that
+        # rule's finding starts. Every hint must name the exact
+        # `// prp-style-allow <code>` that silences it.
+        name     = test.params['name']
+        expected = set(test.params.get('style', '').split())
+        if not expected:
+            print('{} - style - FAILED: missing the :style: header (rule codes, or `none`)'.format(name))
+            return 1
+        expected.discard('none')
+
+        cmd  = [self.lhd, 'pyrope', 'style'] + test.params['files'] + ['--diag-fmt', 'json']
+        cmd += test.params.get('style_args', '').split()
+        proc = subprocess.run(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+        records = []
+        for line in proc.stderr.splitlines():
+            try:
+                records.append(json.loads(line))
+            except ValueError:
+                print('{} - style - FAILED: unparsable diagnostic line: {}'.format(name, line))
+                return 1
+        # A style fixture must be clean input: a partial parse or an infrastructure
+        # error would hide missing findings behind a "skipped region".
+        bad = [r for r in records if r.get('severity') in ('error', 'warning')]
+        if bad or proc.returncode not in (0, 2):
+            print('{} - style - FAILED: expected a clean analysis, got rc={} and {}'.format(
+                name, proc.returncode, ' || '.join(r.get('message', '') for r in bad) or '(no diagnostic)'))
+            print(proc.stderr)
+            return 1
+
+        findings = [r for r in records if r.get('severity') == 'info' and r.get('code') != 'style-summary']
+        found    = {r['code'] for r in findings}
+        if found != expected:
+            print('{} - style - FAILED: expected rule(s) {} but got {}'.format(
+                name, sorted(expected) or '(none)', sorted(found) or '(none)'))
+            print(proc.stderr)
+            return 1
+        if proc.returncode != (2 if findings else 0):
+            print('{} - style - FAILED: exit status {} does not match {} finding(s)'.format(name, proc.returncode, len(findings)))
+            return 1
+
+        for r in findings:
+            if '// prp-style-allow {}'.format(r['code']) not in r.get('hint', ''):
+                print('{} - style - FAILED: the {} hint does not name its silencing tag: {}'.format(name, r['code'], r.get('hint')))
+                return 1
+
+        for tag, key in (('message', 'message'), ('help', 'hint')):
+            pat = test.params.get(tag)
+            if pat is not None:
+                text = ' || '.join(r.get(key, '') for r in findings)
+                if not self._pattern_matches(pat, text):
+                    print('{} - style - FAILED: :{}: /{}/ did not match: {}'.format(name, tag, pat, text))
+                    return 1
+
+        for code in sorted(expected):
+            marker_lines = self._find_marker_lines(test, 'locate_style_' + code)
+            lines = {(r.get('span') or {}).get('start_line') for r in findings if r['code'] == code}
+            missing = [ln for ln in marker_lines if ln not in lines]
+            if missing:
+                print('{} - style - FAILED: locate_style_{} at line(s) {} but the finding starts at {}'.format(
+                    name, code, missing, sorted(x for x in lines if x)))
+                return 1
+
+        print('{} - style - success ({})'.format(name, ', '.join(sorted(found)) or 'clean'))
+        return 0
+
     @staticmethod
     def _verilog_modules(vpath):
         # Names (unescaped, without the leading `\`) of all modules declared in
@@ -1496,6 +1570,9 @@ class PrpRunner:
                 continue
             if mode == 'warning':
                 rc = self.run_warning(tmp_dir, test)
+                continue
+            if mode == 'style':
+                rc = self.run_style(tmp_dir, test)
                 continue
             if mode == 'equiv':
                 rc = self.run_equiv(tmp_dir, test)

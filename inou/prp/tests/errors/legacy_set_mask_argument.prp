@@ -1,0 +1,7 @@
+/*
+:name: legacy_set_mask_argument
+:type: error
+:error: mask
+*/
+const result = __set_mask(a=0xab, mask=0xf0, value=3)
+cassert(result == 0x3b)

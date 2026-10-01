@@ -115,7 +115,7 @@ public:
     return true;
   }
 
-  void add_get_mask(Pin dst_pin, Pin a_pin, int32_t a_sbits, Dlop mask) {
+  void add_get_mask(Pin dst_pin, Pin a_pin, int32_t a_sbits, int lo, int hi) {
     auto& pv = full_map[dst_pin];
     pv.clear();
 
@@ -125,14 +125,6 @@ public:
       it = full_map.find(a_pin);
     }
 
-    // ONE window (graph/cell.hpp: a mask pin is [lo,hi) or the -1 whole-value
-    // spelling). The -1 form carries no window, and the tracker models bit
-    // IDENTITY -- to-unsigned clears the sign bit, so the result's top bit is
-    // not the source's -- so it contributes no tracked bits, as before.
-    if (mask.is_negative()) {
-      return;
-    }
-    const auto [lo, hi] = mask.get_mask_range();  // half-open
     if (lo < 0 || hi <= lo) {
       return;
     }
@@ -142,18 +134,15 @@ public:
     }
   }
 
-  void add_set_mask(Pin dst_pin, Pin a_pin, int32_t a_sbits, Dlop mask, Pin v_pin) {
+  void add_set_mask(Pin dst_pin, Pin a_pin, int32_t a_sbits, Pin v_pin, int lo, int hi) {
     Pin_vector pv   = get_or_create_pv(a_pin, a_sbits);
-    Pin_vector v_pv = get_or_create_pv(v_pin, mask.get_signed_bits());
+    Pin_vector v_pv = get_or_create_pv(v_pin, hi - lo);
 
     if (pv.size() < v_pv.size()) {
       pv.resize(v_pv.size(), {zero_, -1});
     }
 
-    // ONE window, same contract as add_get_mask above; the -1 whole-value
-    // spelling writes no tracked bit.
-    if (!mask.is_negative()) {
-      const auto [lo, hi] = mask.get_mask_range();  // half-open
+    {
       if (lo >= 0 && hi > lo) {
         const auto end = static_cast<size_t>(hi);
         if (pv.size() <= end) {

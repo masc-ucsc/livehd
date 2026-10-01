@@ -93,12 +93,11 @@ struct Build {
     const int target = std::max(pin_width(a), pin_width(b));
     return mux(s, zero_extend(a, target), zero_extend(b, target), target);
   }
-  Pin mask(Pin a, const Dlop& value, int width) {
+  Pin slice(Pin a, int lo, int width) {
     auto n = node(Ntype_op::Get_mask);
-    gu::connect_mask_operands(n, a, gu::create_const(g, value));
+    gu::connect_mask_operands(n, a, lo, lo + width);
     return output(n, width);
   }
-  Pin slice(Pin a, int lo, int width) { return mask(a, *Dlop::get_mask_value(lo + width - 1, lo), width); }
   // Compress an address after deleting an invariant dimension. Selecting all
   // bits except `bit` is two windows, not a legal sparse Get_mask operand.
   Pin remove_address_bit(Pin address, int bit) {
@@ -218,9 +217,9 @@ void read_queries(const std::string& path, Memory_queries& queries, const std::s
   rapidjson::Document doc;
   doc.Parse(text.c_str());
   if (!doc.IsObject() || !doc.HasMember("version") || !doc["version"].IsInt() || doc["version"].GetInt() != kMemoryCacheVersion
-      || !doc.HasMember("source") || !doc["source"].IsString() || doc["source"].GetString() != source
-      || !doc.HasMember("options") || !doc["options"].IsString() || doc["options"].GetString() != options
-      || !doc.HasMember("answers") || !doc["answers"].IsObject()) {
+      || !doc.HasMember("source") || !doc["source"].IsString() || doc["source"].GetString() != source || !doc.HasMember("options")
+      || !doc["options"].IsString() || doc["options"].GetString() != options || !doc.HasMember("answers")
+      || !doc["answers"].IsObject()) {
     return;
   }
   for (const auto& member : doc["answers"].GetObject()) {
@@ -308,7 +307,7 @@ struct Proofs {
       , prefix(shared ? "shared:" : "") {}
   Proofs(const Proofs&)            = delete;
   Proofs& operator=(const Proofs&) = delete;
-  bool dead(Pin en) {
+  bool    dead(Pin en) {
     if (en.is_known_false()) {
       return true;
     }
@@ -331,9 +330,9 @@ struct Proofs {
         }
       }
     }
-    return cache.ask("exclusive:" + identity(a) + ":" + identity(b),
-                     prover,
-                     [&] { return prover.are_exclusive({a, b}).verdict == Verdict::Proven; });
+    return cache.ask("exclusive:" + identity(a) + ":" + identity(b), prover, [&] {
+      return prover.are_exclusive({a, b}).verdict == Verdict::Proven;
+    });
   }
   bool relation(const Port& a, const Port& b, bool equal) {
     if (equal && same(a.a, b.a)) {
@@ -503,9 +502,9 @@ void optimize(hhds::Graph& g, Node mem, Memory_satopt& stats, Memory_queries& qu
           } else if (bit >= width(port.a)) {
             agrees &= !value;
           } else {
-            agrees &= queries.ask(std::format("bit:{}:{}:{}", proof.identity(port.a), bit, value),
-                                  proof.prover,
-                                  [&] { return proof.prover.constant_bit(port.a, bit, value).verdict == Verdict::Proven; });
+            agrees &= queries.ask(std::format("bit:{}:{}:{}", proof.identity(port.a), bit, value), proof.prover, [&] {
+              return proof.prover.constant_bit(port.a, bit, value).verdict == Verdict::Proven;
+            });
           }
         }
       }
@@ -758,8 +757,8 @@ void optimize(hhds::Graph& g, Node mem, Memory_satopt& stats, Memory_queries& qu
   }
 }
 }  // namespace
-Memory_satopt optimize_memories(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view cache_dir, Profile profile,
-                                Meter* meter) {
+Memory_satopt optimize_memories(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string_view cache_dir,
+                                Profile profile, Meter* meter) {
   Meter         unlimited;
   auto&         m       = meter ? *meter : unlimited;
   const auto    options = m.budget().proof_key();

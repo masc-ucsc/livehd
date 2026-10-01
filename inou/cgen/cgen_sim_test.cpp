@@ -90,9 +90,13 @@ TEST(CgenSim, MaskWritesUseRangesIncludingWholeAndOutsideCarrier) {
   }
   auto graph = io->create_graph();
   int  index = 0;
-  for (const auto& mask :
-       {gu::mask_whole_const(), gu::mask_window_const(3, 6), gu::mask_window_const(6, 70), gu::mask_window_const(64, 70)}) {
-    auto node = gu::create_set_mask(*graph, graph->get_input_pin("a"), gu::create_const(*graph, mask), graph->get_input_pin("v"));
+  for (const auto& [lo, hi] : {
+           std::pair{ 0,  8},
+           std::pair{ 3,  6},
+           std::pair{ 6, 70},
+           std::pair{64, 70}
+  }) {
+    auto node = gu::create_set_mask(*graph, graph->get_input_pin("a"), graph->get_input_pin("v"), lo, hi);
     auto out  = node.create_driver_pin(0);
     gu::set_ubits(out, 8);
     out.connect_sink(graph->get_output_pin("y" + std::to_string(index++)));

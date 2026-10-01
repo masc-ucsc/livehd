@@ -345,7 +345,7 @@ using Sub_out_times = absl::flat_hash_map<std::pair<uint64_t, uint64_t>, std::pa
 // one of those names is absent or left over from an earlier build, so nothing
 // may read through it yet.
 struct Lowering_pass {
-  absl::flat_hash_set<std::string> pending;
+  absl::flat_hash_set<std::string>               pending;
   // graph name -> the unit that lowers to it (a Sub's callee, for its port
   // types); a miss is memoized as nullptr (an lg: black box).
   absl::flat_hash_map<std::string, const Lnast*> units;
@@ -510,7 +510,7 @@ constexpr int kClockHops = 8;  // bounds a backward clock-path fold
 }
 
 // Bit 0 of a clock-path value: all a clock pin samples.
-[[nodiscard]] Dlop clock_bit(const Dlop& v) { return livehd::eval_get_mask(v, *Dlop::create_integer(1)); }
+[[nodiscard]] Dlop clock_bit(const Dlop& v) { return livehd::eval_get_mask(v, 0); }
 
 // The constant the cell driving `out` settles to, its operands folded by
 // clock_const_of. Only the cells a clock or a gate enable legally crosses
@@ -555,25 +555,21 @@ constexpr int kClockHops = 8;  // bounds a backward clock-path fold
     }
     return acc;
   };
-  const auto op_kind  = gu::type_op_of(n);
+  const auto op_kind = gu::type_op_of(n);
   switch (op_kind) {
     case Ntype_op::Not: {
       const auto a = operand(gu::first_value_driver(n));
       return a ? std::optional<Dlop>(*a->not_op()) : std::nullopt;
     }
     case Ntype_op::Get_mask: {
-      const auto [a, mask] = operands("a", "mask");
-      if (!a || !mask) {
+      const auto a     = operand(gu::get_driver_of_sink_name(n, "a"));
+      const auto range = gu::bit_range(n);
+      if (!a || !range) {
         return std::nullopt;
       }
-      // A graph mask is one window or -1; anything else never folds.
-      const auto [lo, hi] = mask->get_mask_range();
-      if (!mask->has_unknowns() && !mask->is_known_zero() && !(mask->is_just_i64() && mask->to_just_i64() == -1)
-          && (mask->is_negative() || lo < 0 || hi <= lo)) {
-        return std::nullopt;
-      }
-      return livehd::eval_get_mask(*a, *mask);
+      return livehd::eval_get_mask(*a, range->first, range->second);
     }
+
     case Ntype_op::Sext: {
       const auto [a, b] = operands("a", "b");
       return a && b ? std::optional<Dlop>(*a->sext_op(*b)) : std::nullopt;
@@ -802,8 +798,9 @@ private:
 
 public:
   void build() {
-    if (const auto program = lnast_->get_simulation_init(); !program.empty())
+    if (const auto program = lnast_->get_simulation_init(); !program.empty()) {
       g_->get_input_node().attr(livehd::attrs::simulation_init).set(program);
+    }
     index_mem_write_sites();
     // Module anchor: graph io nodes
     // cgen reads for the module header, at the unit's `mod`/`comb` declaration
@@ -1353,7 +1350,7 @@ private:
     } else if (N::is_declare(t)) {
       lower_declare(nid);
     } else if (N::is_range(t)) {
-      lower_range(nid);
+      // Range values are consumed by upass; selection nodes carry their endpoints directly.
     } else if (N::is_get_mask(t)) {
       lower_get_mask(nid);
     } else if (N::is_set_mask(t)) {
@@ -1673,11 +1670,11 @@ private:
         setup_sink_by_name(narrow, "b").connect_driver(create_const(*g_, *Dlop::create_integer(info.decl_mw)));
         set_sbits(out, info.decl_mw);
       } else {
-        livehd::graph_util::connect_mask_operands(narrow, din, create_const(*g_, *Dlop::get_mask_value(info.decl_mw)));
+        livehd::graph_util::connect_mask_operands(narrow, din, 0, info.decl_mw);
         set_ubits(out, info.decl_mw);
       }
-      din         = out;
-      info.narrow = narrow;
+      din                                 = out;
+      info.narrow                         = narrow;
       wire_cells_[narrow.get_debug_nid()] = info.data_typed;
     }
 
@@ -2246,7 +2243,7 @@ private:
         // 2c-wire — a wire clock signal (a gated/derived clock): use its DRIVER
         // (din) directly, not the passthrough buffer (cgen drops a buffer whose
         // only consumer is a flop control pin).
-        const auto cp     = info.clock_pin_is_const ? Pin{} : resolve_attr_signal(info.clock_pin_name);
+        const auto cp = info.clock_pin_is_const ? Pin{} : resolve_attr_signal(info.clock_pin_name);
         // User rulings 27/41/80: a register clocked by a constant never ticks
         // in the emitted Verilog while `lhd sim` steps it, whatever the front
         // end: `const k = 0` then `clock_pin=k`, a Verilog `posedge` on a
@@ -2853,9 +2850,8 @@ private:
       // `%t = r.a` as the write's base): remember the alias instead of
       // resolving the undriven leaf, so set_mask_base seeds it exactly like
       // the leaf itself. Any other read of the temp still errors.
-      if (Lnast::is_tmp(lhs_name) && !pin_map_.contains(canon_io_name(rhs_name))
-          && scalar_decl_.contains(canon_io_name(rhs_name)) && !reg_map_.contains(rhs_name)
-          && !wire_names_.contains(rhs_name)) {
+      if (Lnast::is_tmp(lhs_name) && !pin_map_.contains(canon_io_name(rhs_name)) && scalar_decl_.contains(canon_io_name(rhs_name))
+          && !reg_map_.contains(rhs_name) && !wire_names_.contains(rhs_name)) {
         nil_seed_alias_.insert_or_assign(std::string(canon_io_name(lhs_name)), std::string(canon_io_name(rhs_name)));
         return;
       }
@@ -3370,10 +3366,10 @@ private:
 
     // Per write port, in program order: what forward_mem_read replays.
     struct Wr_site {
-      Pin addr;
-      Pin din;
-      Pin en;          // the path condition before the chunk shift; invalid => always
-      int chunk = -1;  // the wensize lane a chunked write stores, -1 = the whole entry
+      Pin                 addr;
+      Pin                 din;
+      Pin                 en;          // the path condition before the chunk shift; invalid => always
+      int                 chunk = -1;  // the wensize lane a chunked write stores, -1 = the whole entry
       // A write-MASKED partial write (Masked_pw_val): `bitmask` is the
       // entry-wide mask of the bits it writes (`cmask` when constant); invalid
       // => not one. finalize_mems turns it into the port's lane enable.
@@ -3507,7 +3503,11 @@ private:
             const auto offset = i * view.elem_mw;
             auto       mask   = Dlop::get_mask_value(static_cast<int>(offset + view.elem_mw - 1), static_cast<int>(offset));
             auto       put    = make_node(Ntype_op::Set_mask);
-            livehd::graph_util::connect_mask_operands(put, packed, create_const(*g_, *mask), value.pin);
+            livehd::graph_util::connect_mask_operands(put,
+                                                      packed,
+                                                      livehd::graph_util::mask_window(*mask).first,
+                                                      livehd::graph_util::mask_window(*mask).second,
+                                                      value.pin);
             packed = put.create_driver_pin(0);
             set_ubits(packed, packed_mw);
           }
@@ -3902,7 +3902,7 @@ private:
 
   // A memory PARTIAL write `mem[i…]#[mask] = v` as the three statements the
   // front end desugars it to:
-  //   tuple_get(%t0, mem, i…)   set_mask(%t1, %t0, mask, v)   store(mem, i…, %t1)
+  //   tuple_get(%t0, mem, i…)   set_mask(%t1, %t0, v, lo, hi)   store(mem, i…, %t1)
   // with only temp arithmetic between them (the mask of a runtime position, a
   // store index spelled again), the store naming the same memory with as many
   // index operands. Returns the
@@ -3958,9 +3958,9 @@ private:
       return v;
     };
     const auto g = kids(nid);  // %t0, mem, i…
-    const auto m = kids(sm);   // %t1, %t0, mask, v
+    const auto m = kids(sm);   // %t1, %t0, v, lo, [hi]
     const auto s = kids(st);   // mem, i…, %t1
-    if (g.size() < 3 || m.size() != 4 || s.size() != g.size()) {
+    if (g.size() < 3 || (m.size() != 4 && m.size() != 5) || s.size() != g.size()) {
       return std::nullopt;
     }
     auto is_tmp_ref = [&](const Lnast_nid& n) { return N::is_ref(lnast_->get_type(n)) && Lnast::is_tmp(lnast_->get_name(n)); };
@@ -4731,9 +4731,9 @@ private:
     if (callee_name != "__memory") {
       return false;
     }
-    auto dst      = lnast_->get_first_child(nid);
-    auto callee_n = lnast_->get_sibling_next(dst);
-    auto arg      = lnast_->get_sibling_next(callee_n);
+    auto      dst      = lnast_->get_first_child(nid);
+    auto      callee_n = lnast_->get_sibling_next(dst);
+    auto      arg      = lnast_->get_sibling_next(callee_n);
     // Two spellings (08-memories.md RTL instantiation): the named-argument call
     // `__memory(addr=…, bits=…, …)` (every `__` cell call binds by name: the
     // fcall carries one `store(name, value)` child per argument) and the older
@@ -5045,11 +5045,11 @@ private:
     if (callee_name != "__mux") {
       return false;
     }
-    auto dst      = lnast_->get_first_child(nid);
-    auto callee_n = lnast_->get_sibling_next(dst);
-    auto mux      = make_node(Ntype_op::Mux);
-    int32_t mw    = 1;
-    bool    sel   = false;
+    auto    dst      = lnast_->get_first_child(nid);
+    auto    callee_n = lnast_->get_sibling_next(dst);
+    auto    mux      = make_node(Ntype_op::Mux);
+    int32_t mw       = 1;
+    bool    sel      = false;
     for (auto arg = lnast_->get_sibling_next(callee_n); !arg.is_invalid(); arg = lnast_->get_sibling_next(arg)) {
       if (!Lnast_ntype::is_store(lnast_->get_type(arg))) {
         error_here("upass.tolg: every argument of `__mux` must be named with its pin name (`s`, `p1`, `p2`, ...)");
@@ -5148,7 +5148,7 @@ private:
         masked_bits = create_const(*g_, *masked->cmask->and_op(*Dlop::get_mask_value(mi.elem_mw)));
       } else {
         auto gm = make_node(Ntype_op::Get_mask);
-        livehd::graph_util::connect_mask_operands(gm, masked->mask, create_const(*g_, *Dlop::get_mask_value(mi.elem_mw)));
+        livehd::graph_util::connect_mask_operands(gm, masked->mask, 0, mi.elem_mw);
         masked_bits = gm.create_driver_pin(0);
         set_ubits(masked_bits, mi.elem_mw);
       }
@@ -5159,7 +5159,7 @@ private:
       if (!same_value(addr, masked->base.addr)) {
         const auto old = mint_mem_read(mi, masked->base.addr, masked->base.wr_before, masked->base.bulk_before);
         auto       gm  = make_node(Ntype_op::Get_mask);
-        livehd::graph_util::connect_mask_operands(gm, old, create_const(*g_, *Dlop::get_mask_value(mi.elem_mw)));
+        livehd::graph_util::connect_mask_operands(gm, old, 0, mi.elem_mw);
         auto old_u = gm.create_driver_pin(0);
         set_ubits(old_u, mi.elem_mw);
         rmw_din = lower_dynamic_mask_rmw(Val{old_u, mi.elem_mw}, masked_bits, leaf(val).pin);
@@ -5342,7 +5342,11 @@ private:
       const int64_t off  = *lane * view.elem_mw;
       auto          mask = Dlop::get_mask_value(static_cast<int>(off + view.elem_mw - 1), static_cast<int>(off));
       auto          sm   = make_node(Ntype_op::Set_mask);
-      livehd::graph_util::connect_mask_operands(sm, base.pin, create_const(*g_, *mask), value.pin);
+      livehd::graph_util::connect_mask_operands(sm,
+                                                base.pin,
+                                                livehd::graph_util::mask_window(*mask).first,
+                                                livehd::graph_util::mask_window(*mask).second,
+                                                value.pin);
       auto out = sm.create_driver_pin(0);
       set_ubits(out, base.mw);
       record(name, out, base.mw);
@@ -5376,7 +5380,7 @@ private:
       set_bits(sout, view.elem_mw);
       set_sign(sout);
       auto gm = make_node(Ntype_op::Get_mask);
-      livehd::graph_util::connect_mask_operands(gm, sout, create_const(*g_, *Dlop::get_mask_value(view.elem_mw)));
+      livehd::graph_util::connect_mask_operands(gm, sout, 0, view.elem_mw);
       lane_value = gm.create_driver_pin(0);
       set_ubits(lane_value, view.elem_mw);
     }
@@ -5411,7 +5415,7 @@ private:
     set_ubits(shifted, packed.mw);
 
     auto gm = make_node(Ntype_op::Get_mask);
-    livehd::graph_util::connect_mask_operands(gm, shifted, create_const(*g_, *Dlop::get_mask_value(view.elem_mw)));
+    livehd::graph_util::connect_mask_operands(gm, shifted, 0, view.elem_mw);
     auto out = gm.create_driver_pin(0);
     if (view.elem_signed) {
       // A Get_mask is UNSIGNED by construction: stamping the sign on its
@@ -5611,7 +5615,7 @@ private:
                lnast_->get_name(src),
                lnast_->get_name(src));
     }
-    auto& mi = it->second;
+    auto&                  mi = it->second;
     // Gather the full index chain (tuple_get(dst, mem, i, j, …) is FLAT).
     std::vector<Lnast_nid> idxs;
     for (auto c = idx; !c.is_invalid(); c = lnast_->get_sibling_next(c)) {
@@ -5751,7 +5755,7 @@ private:
     // Bits [lo, hi) of `v` as an unsigned value.
     auto          field = [&](const Pin& v, int lo, int hi) {
       auto gm = make_node(Ntype_op::Get_mask);
-      livehd::graph_util::connect_mask_operands(gm, v, create_const(*g_, livehd::graph_util::mask_window_const(lo, hi)));
+      livehd::graph_util::connect_mask_operands(gm, v, lo, hi);
       auto out = gm.create_driver_pin(0);
       set_ubits(out, hi - lo);
       return out;
@@ -5829,10 +5833,7 @@ private:
         const int lo = static_cast<int>(s.chunk * lane_bits);
         const int hi = static_cast<int>(lo + lane_bits);
         auto      sm = make_node(Ntype_op::Set_mask);
-        livehd::graph_util::connect_mask_operands(sm,
-                                                  v,
-                                                  create_const(*g_, livehd::graph_util::mask_window_const(lo, hi)),
-                                                  field(s.din, lo, hi));
+        livehd::graph_util::connect_mask_operands(sm, v, lo, hi, field(s.din, lo, hi));
         take = sm.create_driver_pin(0);
         set_ubits(take, bits);
       }
@@ -5869,7 +5870,7 @@ private:
     const int32_t packed = static_cast<int32_t>(mi.size * bits);
     auto          field  = [&](const Pin& v, int lo, int hi) {
       auto gm = make_node(Ntype_op::Get_mask);
-      livehd::graph_util::connect_mask_operands(gm, v, create_const(*g_, livehd::graph_util::mask_window_const(lo, hi)));
+      livehd::graph_util::connect_mask_operands(gm, v, lo, hi);
       auto out = gm.create_driver_pin(0);
       set_ubits(out, hi - lo);
       return out;
@@ -5918,9 +5919,9 @@ private:
       setup_sink_by_name(mult, "as").connect_driver(create_const(*g_, *Dlop::create_integer(bits)));
       auto offset = mult.create_driver_pin(0);
       set_ubits(offset, std::max<int32_t>(pin_mw_of(ws.addr) + std::bit_width(static_cast<uint32_t>(bits)), 1));
-      auto mask  = shl(ws.bitmask.is_invalid() ? create_const(*g_, livehd::graph_util::mask_window_const(lo, hi))
-                                               : field(ws.bitmask, 0, bits),
-                      offset);
+      auto mask = shl(
+          ws.bitmask.is_invalid() ? create_const(*g_, livehd::graph_util::mask_window_const(lo, hi)) : field(ws.bitmask, 0, bits),
+          offset);
       auto value = shl(field(ws.din, 0, bits), offset);
       auto take  = lower_dynamic_mask_rmw(Val{v, packed}, mask, value);
       v          = pick(and2(ws.en, mi.not_rst), v, take);
@@ -7413,21 +7414,29 @@ private:
       return "the value";
     };
     if (ce->sig == Io_sig::clock && *cls != Io_sig::clock) {
-      error_hint_at(nid,
-                    {"clock-bind-not-clock", "type"},
-                    std::format("`Clock` input `{}` of `{}` is bound to {}, which is {}", pname, callee_bare, what(),
-                                *cls == Io_sig::reset ? "a `Reset`, not a Clock" : "data, not a Clock (there are no derived clocks)"),
-                    "bind a `Clock` (a clock input of this module); gate a clock with an enable instead of logic");
+      error_hint_at(
+          nid,
+          {"clock-bind-not-clock", "type"},
+          std::format("`Clock` input `{}` of `{}` is bound to {}, which is {}",
+                      pname,
+                      callee_bare,
+                      what(),
+                      *cls == Io_sig::reset ? "a `Reset`, not a Clock" : "data, not a Clock (there are no derived clocks)"),
+          "bind a `Clock` (a clock input of this module); gate a clock with an enable instead of logic");
     }
     // A data input the callee never reads as data uses nothing as data (a
     // blackbox's unused `clk`, a Verilog cell's `ca` that only names a
     // `clock_pin`): only a data READ makes a Clock data.
     if (ce->sig != Io_sig::clock && *cls == Io_sig::clock && upass::io_port::body_reads_input_as_data(*callee, ce->name)) {
-      error_hint_at(nid,
-                    {"clock-as-data", "type"},
-                    std::format("{} is a `Clock` bound to input `{}` of `{}`, which is {}", what(), pname, callee_bare,
-                                ce->sig == Io_sig::reset ? "a `Reset`: a Clock is never a reset" : "not a `Clock`: a Clock is not data"),
-                    "a Clock only drives register clock pins (`clock_pin=clk`) or a child's `Clock` input");
+      error_hint_at(
+          nid,
+          {"clock-as-data", "type"},
+          std::format("{} is a `Clock` bound to input `{}` of `{}`, which is {}",
+                      what(),
+                      pname,
+                      callee_bare,
+                      ce->sig == Io_sig::reset ? "a `Reset`: a Clock is never a reset" : "not a `Clock`: a Clock is not data"),
+          "a Clock only drives register clock pins (`clock_pin=clk`) or a child's `Clock` input");
     }
   }
 
@@ -7463,7 +7472,8 @@ private:
       }
       const auto ins  = lnast_->get_first_child(io_n);
       const auto outs = ins.is_invalid() ? ins : lnast_->get_sibling_next(ins);
-      for (auto st = outs.is_invalid() ? outs : lnast_->get_first_child(outs); !st.is_invalid(); st = lnast_->get_sibling_next(st)) {
+      for (auto st = outs.is_invalid() ? outs : lnast_->get_first_child(outs); !st.is_invalid();
+           st      = lnast_->get_sibling_next(st)) {
         if (const auto nm = lnast_->get_first_child(st); !nm.is_invalid() && canon_io_name(lnast_->get_name(nm)) == name) {
           return st;
         }
@@ -7485,7 +7495,7 @@ private:
         return it->second;
       }
       debug_memo[n.get_debug_nid()] = false;  // a cycle is not a debug cone
-      bool any = false;
+      bool any                      = false;
       for (auto dp : n.out_sorted_pins()) {
         for (const auto& e : dp.out_edges()) {
           any = true;
@@ -7860,7 +7870,7 @@ private:
       return;
     }
     const std::string               what  = clocked_state_label(state->memory ? "memory" : "register", state->name, state->port);
-    const auto        owner = source_module_name(state->owner);
+    const auto                      owner = source_module_name(state->owner);
     std::vector<livehd::diag::Note> notes;
     if (!state->span.is_null()) {
       notes.push_back({std::format("{} of `{}` is declared here", what, owner), state->span});
@@ -8208,11 +8218,11 @@ private:
     // in order. Track bound ports per-port so a duplicate bind or an omitted
     // input is caught individually — a bare count of provided-vs-declared could
     // net out equal when one port was bound twice and another left undriven.
-    const std::string_view           callee_bare = std::string_view(callee_full).substr(callee_full.rfind('.') + 1);
-    std::size_t                      pos         = 0;
-    absl::flat_hash_set<std::string> bound_ports;
-    std::vector<std::pair<Pin, Pin>> deferred_clocks;  // (Sub sink, ungated parent clock)
-    std::vector<Pin>                 active_resets;    // normalized active-high callee resets
+    const std::string_view                          callee_bare = std::string_view(callee_full).substr(callee_full.rfind('.') + 1);
+    std::size_t                                     pos         = 0;
+    absl::flat_hash_set<std::string>                bound_ports;
+    std::vector<std::pair<Pin, Pin>>                deferred_clocks;  // (Sub sink, ungated parent clock)
+    std::vector<Pin>                                active_resets;    // normalized active-high callee resets
     // A callee reset as bound (wire, callee port): its polarity costs a walk of
     // the callee body, so it is resolved only when a clock gate reads it.
     std::vector<std::pair<Pin, std::string>>        pending_resets;
@@ -8805,8 +8815,7 @@ private:
                                   top.substr(top.rfind('.') + 1),
                                   candidates.size(),
                                   absl::StrJoin(candidates, "`, `")),
-                      std::format("bind this one with `:[reset_pin={}]`, or pass the reset by name at a call",
-                                  candidates.front()));
+                      std::format("bind this one with `:[reset_pin={}]`, or pass the reset by name at a call", candidates.front()));
       }
       auto p = g_->get_input_pin(reset_name_);
       if (reset_minted_) {
@@ -8832,170 +8841,42 @@ private:
     return valid_pin_;
   }
 
-  // range(ref(dst), lo, hi) — record [lo,hi] for a later get_mask; no node.
-  // A comptime range (both endpoints const) is folded to int bounds in
-  // range_map_; a range with a runtime endpoint (`a#[n..=m]`) is kept as
-  // (lo,hi) nids in range_dyn_map_ so lower_get_mask can synthesize the
-  // shift+mask hardware select. An OPEN range (`a#[lo..]` — hi is the const
-  // sentinel "nil") with a comptime lo goes to range_open_map_: its upper bound
-  // is the sliced VALUE's MSB, which is not known here (lower_range sees only
-  // the range, not which value indexes it), so the consuming get_mask/set_mask
-  // closes it to `lo..=(value bits-1)`. (A runtime-lo open range stays in
-  // range_dyn_map_, where lower_dynamic_range_select handles the nil hi.)
-  void lower_range(const Lnast_nid& nid) {
-    auto dst = lnast_->get_first_child(nid);
-    if (dst.is_invalid()) {
-      return;
-    }
-    auto lo = lnast_->get_sibling_next(dst);
-    if (lo.is_invalid()) {
-      return;
-    }
-    auto hi = lnast_->get_sibling_next(lo);
-    if (hi.is_invalid()) {
-      return;
-    }
-    std::string name{lnast_->get_name(dst)};
-    const bool  open = Lnast_ntype::is_const(lnast_->get_type(hi)) && lnast_->get_name(hi) == "nil";
-    if (Lnast_ntype::is_const(lnast_->get_type(lo)) && Lnast_ntype::is_const(lnast_->get_type(hi))) {
-      if (open) {
-        range_open_map_[name] = lo;  // close to lo..=(MSB) where the value's width is known
-      } else {
-        range_map_[name] = {const_val(lo), const_val(hi)};
-      }
-    } else {
-      range_dyn_map_[name] = {lo, hi};
-    }
-  }
-
   [[nodiscard]] int64_t const_val(const Lnast_nid& nid) {
     auto c = Dlop::from_pyrope(lnast_->get_name(nid));
     return c->is_just_i64() ? c->to_just_i64() : 0;
   }
 
-  // get_mask(ref(dst), value, mask) — mask is a const bitmask, a comptime range
-  // ref, OR (the runtime-index exception) a non-const single-bit mask `1<<i` or
-  // a runtime `range` ref. The runtime forms have no static bitmask, so they
-  // lower to an explicit shift+mask select instead of a Get_mask cell.
+  // get_mask(dst, value, lo, [hi]): half-open range or one bit.
+  // Runtime endpoints lower to explicit shifts and bitwise operations.
   void lower_get_mask(const Lnast_nid& nid) {
     auto dst = lnast_->get_first_child(nid);
-    if (dst.is_invalid()) {
-      return;
-    }
     auto val = lnast_->get_sibling_next(dst);
-    if (val.is_invalid()) {
+    auto lo  = lnast_->get_sibling_next(val);
+    auto hi  = lnast_->get_sibling_next(lo);
+    I(!lo.is_invalid());
+    extend_mem_rmw_read(dst, val, false);
+    auto a = leaf(val);
+    if (Lnast_ntype::is_const(lnast_->get_type(lo)) && (hi.is_invalid() || Lnast_ntype::is_const(lnast_->get_type(hi)))) {
+      auto l = Dlop::from_pyrope(lnast_->get_name(lo));
+      auto h = hi.is_invalid()                 ? l->add_op(*Dlop::create_integer(1))
+               : lnast_->get_name(hi) == "nil" ? Dlop::create_integer(a.mw)
+                                               : Dlop::from_pyrope(lnast_->get_name(hi));
+      if (!l->is_just_i64() || !h->is_just_i64() || l->to_just_i64() < 0 || h->to_just_i64() > std::numeric_limits<int>::max()) {
+        error_at(nid, {"bit-range-invalid", "type"}, "invalid get_mask endpoints");
+      }
+      int low = l->to_just_i64(), high = h->to_just_i64();
+      if (high <= low) {
+        bind_result(lnast_->get_name(dst), create_const(*g_, *Dlop::create_integer(0)), 1);
+        return;
+      }
+      auto out = make_node(Ntype_op::Get_mask);
+      livehd::graph_util::connect_mask_operands(out, a.pin, low, high);
+      bind_result(lnast_->get_name(dst), out.create_driver_pin(0), high - low);
       return;
     }
-    auto mask_op = lnast_->get_sibling_next(val);
-    if (mask_op.is_invalid()) {
-      return;
-    }
-    extend_mem_rmw_read(dst, val, /*merges=*/false);
-
-    // Open-ended slice with a comptime offset — `a#[lo..]`. lower_range stashed
-    // only the lo nid (the MSB is the sliced VALUE's, unknown until now); close
-    // it to `lo..=(value bits-1)` and emit the exact Get_mask. Without this the
-    // open range used to be recorded as a closed `{lo,0}` and selected the LOW
-    // bits (dropping the offset, wrong width+sign).
-    std::string mname{lnast_->get_name(mask_op)};
-    if (auto it = range_open_map_.find(mname); it != range_open_map_.end()) {
-      lower_open_range_select(dst, val, it->second);
-      return;
-    }
-    // Runtime (non-comptime) bit index — `a#[n..=m]` with a non-const endpoint.
-    // lower_range stashed the live lo/hi nids; build `(a>>n) &
-    // ((1<<(m-n+1))-1)`.
-    if (auto it = range_dyn_map_.find(mname); it != range_dyn_map_.end()) {
-      lower_dynamic_range_select(dst, val, it->second.first, it->second.second, nid);
-      return;
-    }
-    // Runtime single-bit index — `a#[i]`. prp2lnast emits the mask as `1<<i`
-    // (a one-hot SHL tmp), so it is neither a const nor a recorded range.
-    // Select bit i with `(a & (1<<i)) != 0` (== the `(a>>i)&1` workaround,
-    // reusing the already-built one-hot mask). Result is a 1-bit unsigned.
-    const bool runtime_mask = !Lnast_ntype::is_const(lnast_->get_type(mask_op)) && !range_map_.contains(mname);
-    if (runtime_mask) {
-      lower_dynamic_bit_select(dst, val, mask_op);
-      return;
-    }
-
-    auto mask = mask_from_operand(mask_op);
-
-    auto a_val = leaf(val);
-    auto node  = make_node(Ntype_op::Get_mask);
-    livehd::graph_util::connect_mask_operands(node, a_val.pin, create_const(*g_, *mask));
-    auto    drv = node.create_driver_pin(0);
-    // An all-ones mask (-1) is the open `#[..]` form: it selects EVERY bit of
-    // `a`, so the result width is `a`'s width. popcount(-1) is NOT a finite bit
-    // count (the spec mask is infinite ones); using it collapsed the result to
-    // ~1 bit, which OpW::firstw then propagated into a following shift and the
-    // SMT LEC truncated the shift operand (a false "not equivalent"). A finite
-    // (non-negative) mask packs popcount(mask) selected bits, LSB-first.
-    int32_t mw  = (mask->is_just_i64() && mask->to_just_i64() == -1) ? a_val.mw : mask_popcount(*mask);
-    bind_result(lnast_->get_name(dst), drv, mw);
+    lower_dynamic_range_select(dst, val, lo, hi, nid);
   }
 
-  // `a#[i]` with a RUNTIME index — the runtime single-bit select. prp2lnast
-  // already lowered the mask to the one-hot `1<<i` (the `mask_op` SHL tmp). A
-  // one-hot AND isolates bit i of `a`; OR-reducing it yields that bit as a
-  // 1-bit unsigned. This equals the documented `(a>>i)&1` workaround while
-  // reusing the mask that was already built (no second variable shifter).
-  void lower_dynamic_bit_select(const Lnast_nid& dst, const Lnast_nid& val, const Lnast_nid& mask_op) {
-    auto a_val = leaf(val);
-    auto m     = leaf(mask_op);
-
-    auto andn = make_node(Ntype_op::And);  // commutative: both operands feed sink "a"
-    setup_sink_by_name(andn, "as").connect_driver(a_val.pin);
-    setup_sink_by_name(andn, "as").connect_driver(m.pin);
-    const int32_t and_mw = std::max(a_val.mw, m.mw);
-    auto          and_dp = andn.create_driver_pin(0);
-    set_ubits(and_dp, and_mw);
-
-    auto ror = make_node(Ntype_op::Ror);  // |(a & (1<<i)) -> the selected bit
-    setup_sink_by_name(ror, "as").connect_driver(and_dp);
-    bind_result(lnast_->get_name(dst), ror.create_driver_pin(0), 1);
-  }
-
-  // Close an open-ended `lo..` slice to the constant bitmask of bits
-  // `lo..=msb`, where `msb` is the sliced value's most-significant bit. A `lo`
-  // that starts at or past the MSB (or a negative `lo`, already diagnosed
-  // upstream) leaves no bits, so the mask is 0 (an empty, zero slice).
-  [[nodiscard]] spool_ptr<Dlop> closed_open_mask(int64_t lo, int32_t msb) {
-    if (lo < 0 || lo > msb) {
-      return Dlop::create_integer(0);
-    }
-    return Dlop::get_mask_value(msb, static_cast<int>(lo));  // h==l (single bit) handled inside
-  }
-
-  // `a#[lo..]` with a COMPTIME offset — the open-ended slice. The upper bound
-  // is the sliced value's MSB (`a_val.mw-1`), so close the range to `lo..=msb`
-  // and emit the exact Get_mask: bits lo..msb packed LSB-first as an UNSIGNED
-  // value
-  // (`#[]` zero-extends), with the tight `msb-lo+1` width. This is identical to
-  // what the explicit `a#[lo..=msb]` workaround lowers to. (A runtime offset
-  // `a#[k..]` keeps its `a>>k` lowering via range_dyn_map_.)
-  void lower_open_range_select(const Lnast_nid& dst, const Lnast_nid& val, const Lnast_nid& lo) {
-    auto          a_val = leaf(val);
-    const int32_t msb   = a_val.mw > 0 ? a_val.mw - 1 : 0;
-
-    auto    lo_c = Dlop::from_pyrope(lnast_->get_name(lo));
-    int64_t lo_i = lo_c->is_just_i64() ? lo_c->to_just_i64() : 0;
-    auto    mask = closed_open_mask(lo_i, msb);
-    if (mask->is_known_zero()) {
-      bind_result(lnast_->get_name(dst), create_const(*g_, *Dlop::create_integer(0)), 1);
-      return;
-    }
-
-    auto node = make_node(Ntype_op::Get_mask);
-    livehd::graph_util::connect_mask_operands(node, a_val.pin, create_const(*g_, *mask));
-    bind_result(lnast_->get_name(dst), node.create_driver_pin(0), mask_popcount(*mask));
-  }
-
-  // `a#[n..=m]` with a RUNTIME range — lower to `(a>>n) & ((1<<(m-n+1))-1)`,
-  // the contiguous-slice select. `lo`/`hi` are the live range endpoints stashed
-  // by lower_range. The open form `a#[n..]` (hi == const "nil") selects every
-  // bit from n upward, i.e. just `a>>n`. A descending range (m<n) violates the
-  // select precondition; lower_get_mask's caller emits the lgassert(m>=n).
   void lower_dynamic_range_select(const Lnast_nid& dst, const Lnast_nid& val, const Lnast_nid& lo, const Lnast_nid& hi,
                                   const Lnast_nid& loc_nid) {
     auto a_val = leaf(val);
@@ -9013,14 +8894,20 @@ private:
       set_ubits(sra_dp, a_val.mw);
     }
 
-    if (Lnast_ntype::is_const(lnast_->get_type(hi)) && lnast_->get_name(hi) == "nil") {
+    if (!hi.is_invalid() && Lnast_ntype::is_const(lnast_->get_type(hi)) && lnast_->get_name(hi) == "nil") {
       // Open range `a#[n..]`: bits n..msb are exactly `a>>n`; no mask, no
       // m>=n precondition (there is no `m`).
       bind_result(lnast_->get_name(dst), sra_dp, a_val.mw);
       return;
     }
 
-    auto m  = leaf(hi);
+    auto m = range_upper(n, hi);
+    if (const auto width = const_window_offset(m.pin, n.pin); width && *width > 0) {
+      auto out = make_node(Ntype_op::Get_mask);
+      livehd::graph_util::connect_mask_operands(out, sra_dp, 0, static_cast<int>(*width));
+      bind_result(lnast_->get_name(dst), out.create_driver_pin(0), static_cast<int>(*width));
+      return;
+    }
     auto rw = lower_range_width(n, m);
 
     // pow = 1 << width. One headroom bit represents 2^a_width before -1.
@@ -9031,7 +8918,7 @@ private:
     auto          pow_dp = pow.create_driver_pin(0);
     set_ubits(pow_dp, pow_mw);
 
-    // mask = pow - 1   (the low (m-n+1) bits set).
+    // mask = pow - 1   (the low (m-n) bits set).
     auto maskn = make_node(Ntype_op::Sum);
     setup_sink_by_name(maskn, "as").connect_driver(pow_dp);
     setup_sink_by_name(maskn, "bs").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
@@ -9047,7 +8934,7 @@ private:
     lower_range_assert(rw.reversed, loc_nid);
   }
 
-  // `hi + 1 - lo`, plus the one-bit "this range is REVERSED" flag that both the
+  // `hi - lo`, plus the one-bit "this range is REVERSED" flag that both the
   // data path and the runtime assert need. Shared by the range READ and the
   // range WRITE: the two halves of one bit view have to agree on the geometry.
   //
@@ -9069,12 +8956,24 @@ private:
   // comparison's signedness from the OPERAND pins, so the same node also
   // disagreed between the two backends. Both operands of `width < 0` are
   // signed, so every backend agrees, and it is the exact condition wanted:
-  // `width == 0` (the empty `hi == lo - 1`) already yields a zero mask.
+  // `width == 0` (the empty `hi == lo`) already yields a zero mask.
   struct Range_width {
     Pin     clamped;   // unsigned: the width, or 0 when the range is reversed
     Pin     reversed;  // u1: 1 when hi < lo
     int32_t mw;
   };
+
+  Val range_upper(const Val& lo, const Lnast_nid& hi) {
+    if (!hi.is_invalid()) {
+      return leaf(hi);
+    }
+    auto sum = make_node(Ntype_op::Sum);
+    setup_sink_by_name(sum, "as").connect_driver(lo.pin);
+    setup_sink_by_name(sum, "as").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
+    auto out = sum.create_driver_pin(0);
+    set_ubits(out, lo.mw + 1);
+    return Val{out, lo.mw + 1};
+  }
 
   Range_width lower_range_width(const Val& lo, const Val& hi) {
     // One bit WIDER than the endpoints' own carrier: the widest legal width,
@@ -9083,7 +8982,6 @@ private:
     const int32_t w_mw  = std::max(lo.mw, hi.mw) + 1;
     auto          width = make_node(Ntype_op::Sum);
     setup_sink_by_name(width, "as").connect_driver(hi.pin);
-    setup_sink_by_name(width, "as").connect_driver(create_const(*g_, *Dlop::create_integer(1)));
     setup_sink_by_name(width, "bs").connect_driver(lo.pin);
     auto width_dp = width.create_driver_pin(0);
     set_sbits(width_dp, w_mw + 1);
@@ -9347,56 +9245,6 @@ private:
     }
     sub.attr(hhds::attrs::name).set(kind + "\x1f" + loc + "\x1f" + msg);
   }
-
-  // The mask of a get_mask/set_mask is a full Dlop, never an int64: a 64-bit
-  // (or wider) mask like 2^64-1 (`0x0ffffffffffffffff`, a full-width truncate)
-  // overflows int64 and would silently collapse to 0 — the value `from_pyrope`
-  // parses correctly is kept as-is.
-  [[nodiscard]] spool_ptr<Dlop> mask_from_operand(const Lnast_nid& mask_op) {
-    if (Lnast_ntype::is_const(lnast_->get_type(mask_op))) {
-      auto value = Dlop::from_pyrope(lnast_->get_name(mask_op));
-      // graph/cell.hpp: a Get_mask/Set_mask mask is ONE contiguous window, or
-      // the -1 "whole value" spelling. This is the only producer that passes a
-      // literal through unchecked, so a sparse mask has to be refused HERE --
-      // every consumer downstream reads a window and would otherwise take the
-      // bounding one, selecting bits the source never asked for.
-      if (!value || !livehd::graph_util::is_legal_mask(*value)) {
-        error_at(mask_op,
-                 {"mask-not-contiguous", "unsupported"},
-                 "upass.tolg: get_mask/set_mask mask '{}' is not a contiguous bit range "
-                 "(a sparse mask has no lowering; write one mask per range)",
-                 lnast_->get_name(mask_op));
-      }
-      return value;
-    }
-    auto it = range_map_.find(std::string{lnast_->get_name(mask_op)});
-    if (it != range_map_.end()) {
-      auto [lo, hi] = it->second;
-      if (hi < lo) {
-        std::swap(lo, hi);
-      }
-      if (lo < 0 || hi < lo) {
-        return Dlop::create_integer(0);
-      }
-      return Dlop::get_mask_value(static_cast<int>(hi),
-                                  static_cast<int>(lo));  // multi-word capable, no 63-bit cap
-    }
-    error_at(mask_op,
-             {"mask-not-const", "unsupported"},
-             "upass.tolg: get_mask mask operand '{}' is not a constant or "
-             "range — a runtime mask has no lowering here "
-             "(the mask must be comptime)",
-             lnast_->get_name(mask_op));
-  }
-
-  // Number of set bits in a (non-negative) mask = the get_mask result width.
-  static int32_t mask_popcount(const Dlop& m) {
-    auto pc = m.popcount_op();
-    return pc->is_just_i64() ? static_cast<int32_t>(pc->to_just_i64()) : 0;
-  }
-
-  // Highest set bit + 1 of a (non-negative) mask = the set_mask reach.
-  static int32_t mask_high_bit(const Dlop& m) { return m.is_positive() ? static_cast<int32_t>(m.get_payload_bits()) : int32_t{0}; }
 
   // `r.f#[..] = v` on a REGISTER field. After the register's detuple,
   // prp2lnast's read-modify-write reads the field into a temp, splices the lane
@@ -9665,7 +9513,7 @@ private:
       set_bits(wide, base.mw);
       set_sign(wide);
       auto gm = make_node(Ntype_op::Get_mask);
-      livehd::graph_util::connect_mask_operands(gm, wide, create_const(*g_, *Dlop::get_mask_value(base.mw)));
+      livehd::graph_util::connect_mask_operands(gm, wide, 0, base.mw);
       base.pin = gm.create_driver_pin(0);
       set_ubits(base.pin, base.mw);
     }
@@ -9693,7 +9541,7 @@ private:
   void lower_dynamic_range_update(const Lnast_nid& dst, const Lnast_nid& val, const Lnast_nid& ins, const Lnast_nid& lo,
                                   const Lnast_nid& hi, const Lnast_nid& loc_nid) {
     auto          n         = leaf(lo);
-    auto          m         = leaf(hi);
+    auto          m         = range_upper(n, hi);
     auto          iv        = leaf(ins);
     // The write reaches bit hi_max: `hi` fits its `mw` bits (one fewer when it
     // can be negative). Past 2^12 bits the reach is capped the way a runtime
@@ -9711,12 +9559,12 @@ private:
     auto shifted_dp = shifted.create_driver_pin(0);
     set_ubits(shifted_dp, mw);
 
-    // A window of constant width W (`hi` is `lo + W - 1`): its mask is a
+    // A window of constant width W (`hi` is `lo + W`): its mask is a
     // constant run shifted into place, it is never reversed (no runtime
     // check), and a value of at most W non-negative bits already stays inside
     // it once shifted.
     if (const auto fixed = const_window_offset(m.pin, n.pin)) {
-      const int64_t w     = *fixed + 1;
+      const int64_t w     = *fixed;
       auto          maskn = make_node(Ntype_op::SHL);
       setup_sink_by_name(maskn, "a").connect_driver(create_const(*g_, *Dlop::get_mask_value(static_cast<int>(w))));
       setup_sink_by_name(maskn, "b").connect_driver(n.pin);
@@ -9728,7 +9576,7 @@ private:
       return;
     }
 
-    // width = hi + 1 - lo, clamped to 0 on a reversed range so the mask comes
+    // width = hi - lo, clamped to 0 on a reversed range so the mask comes
     // out 0 and the RMW leaves `dst` untouched. The clamped value is
     // non-negative by construction, so the shift amounts below never see a
     // negative-as-unsigned count.
@@ -9757,46 +9605,6 @@ private:
     lower_range_assert(rw.reversed, loc_nid);
   }
 
-  // `dst#[idx] = value`: prp2lnast has already built the one-hot mask `1<<idx`.
-  // Multiplying that mask by the checked one-bit value places the insertion at
-  // the selected position without recovering the original index expression.
-  void lower_dynamic_bit_update(const Lnast_nid& nid, const Lnast_nid& dst, const Lnast_nid& val, const Lnast_nid& mask_op,
-                                const Lnast_nid& ins) {
-    auto          mask      = leaf(mask_op);
-    auto          iv        = leaf(ins);
-    bool          is_signed = false;
-    auto          base      = dynamic_update_base(nid, dst, val, is_signed, mask.mw);  // the one-hot mask reaches the top bit
-    const int32_t mw        = std::max<int32_t>(base.mw, 1);
-
-    // The mask prp2lnast builds is `1 << idx`: shift the value to `idx`, the
-    // same cells as the window [idx, idx] of a range write (so a bit write
-    // lowered either way matches structurally, and no multiply reaches the
-    // netlist or the solver). Any other mask places it by a multiply.
-    Pin        placed_dp;
-    const auto shl = mask.pin.is_const() || mask.pin.get_port_id() != 0 ? hhds::Node_class{} : mask.pin.get_master_node();
-    const auto one = shl.is_invalid() || livehd::graph_util::type_op_of(shl) != Ntype_op::SHL
-                         ? Pin{}
-                         : livehd::graph_util::get_driver_of_sink_name(shl, "a");
-    if (!one.is_invalid() && one.is_const() && livehd::graph_util::const_of(one).is_just_i64()
-        && livehd::graph_util::const_of(one).to_just_i64() == 1) {
-      auto placed = make_node(Ntype_op::SHL);
-      setup_sink_by_name(placed, "a").connect_driver(iv.pin);
-      setup_sink_by_name(placed, "b").connect_driver(livehd::graph_util::get_driver_of_sink_name(shl, "b"));
-      placed_dp = placed.create_driver_pin(0);
-    } else {
-      auto placed = make_node(Ntype_op::Mult);
-      setup_sink_by_name(placed, "as").connect_driver(mask.pin);
-      setup_sink_by_name(placed, "as").connect_driver(iv.pin);
-      placed_dp = placed.create_driver_pin(0);
-    }
-    set_ubits(placed_dp, mw);
-
-    // A one-bit non-negative value placed at the mask's bit stays inside it.
-    const bool inside = !pin_can_be_negative(iv.pin) && iv.mw == 1;
-    auto       merged = dynamic_update_result(lower_dynamic_mask_rmw(base, mask.pin, placed_dp, inside), mw, is_signed);
-    record_set_mask_result(lnast_->get_name(dst), merged, mw);
-  }
-
   // set_mask(ref(dst), value, mask, ins).
   // Carries the old-value chain of a memory partial write (mem_rmw_reads_)
   // from `val` to the temp `dst`: a set_mask over the chain merges the written
@@ -9823,14 +9631,10 @@ private:
     if (val.is_invalid()) {
       return;
     }
-    auto mask_op = lnast_->get_sibling_next(val);
-    if (mask_op.is_invalid()) {
-      return;
-    }
-    auto ins = lnast_->get_sibling_next(mask_op);
-    if (ins.is_invalid()) {
-      return;
-    }
+    auto ins = lnast_->get_sibling_next(val);
+    auto lo  = lnast_->get_sibling_next(ins);
+    auto hi  = lnast_->get_sibling_next(lo);
+    I(!lo.is_invalid());
     extend_mem_rmw_read(dst, val, /*merges=*/true);
     // Over the zero base of a write-masked memory partial write (lower_tuple_get)
     // the result is just the written bits; record which bits those are.
@@ -9848,42 +9652,25 @@ private:
       masked_pw_vals_.insert_or_assign(std::string(lnast_->get_name(dst)),
                                        Masked_pw_val{.base = *pw_base, .mask = written, .cmask = std::move(cmask)});
     };
-    // An open-ended bit-range WRITE `dst#[lo..] = ins` would have to derive its
-    // top bit from the destination's DECLARED width, which is not tracked per
-    // logical name here (only the current value's width is). Closing it to the
-    // current width would silently drop or extend bits, so require the explicit
-    // upper bound instead. The READ form `a#[lo..]` IS supported
-    // (lower_open_range_select). (range_open_map_ holds only comptime-lo
-    // opens.)
-    if (auto it = range_open_map_.find(std::string{lnast_->get_name(mask_op)}); it != range_open_map_.end()) {
+    if (!hi.is_invalid() && lnast_->get_name(hi) == "nil") {
       error_at(nid,
                {"open-range-write", "unsupported"},
-               "upass.tolg: open-ended bit-range write `dst#[{}..] = …` is not "
-               "supported — give the upper bound "
-               "explicitly, e.g. `dst#[{}..=<msb>]`",
-               lnast_->get_name(it->second),
-               lnast_->get_name(it->second));
+               "open-ended bit-range write is not supported — give the upper bound explicitly");
     }
-    const std::string mask_name{lnast_->get_name(mask_op)};
-    if (auto it = range_dyn_map_.find(mask_name); it != range_dyn_map_.end()) {
-      if (Lnast_ntype::is_const(lnast_->get_type(it->second.second)) && lnast_->get_name(it->second.second) == "nil") {
-        error_at(nid,
-                 {"open-range-write", "unsupported"},
-                 "upass.tolg: open-ended runtime bit-range write is not supported — give the upper bound explicitly");
-      }
-      lower_dynamic_range_update(dst, val, ins, it->second.first, it->second.second, nid);
+    if (!Lnast_ntype::is_const(lnast_->get_type(lo)) || (!hi.is_invalid() && !Lnast_ntype::is_const(lnast_->get_type(hi)))) {
+      lower_dynamic_range_update(dst, val, ins, lo, hi, nid);
       note_pw_write(last_rmw_mask_, std::nullopt);
       return;
     }
-    const bool runtime_mask = !Lnast_ntype::is_const(lnast_->get_type(mask_op)) && !range_map_.contains(mask_name);
-    if (runtime_mask) {
-      lower_dynamic_bit_update(nid, dst, val, mask_op, ins);
-      note_pw_write(last_rmw_mask_, std::nullopt);
-      return;
+    auto l = Dlop::from_pyrope(lnast_->get_name(lo));
+    auto h = hi.is_invalid() ? l->add_op(*Dlop::create_integer(1)) : Dlop::from_pyrope(lnast_->get_name(hi));
+    if (!l->is_just_i64() || !h->is_just_i64() || l->to_just_i64() < 0 || h->to_just_i64() <= l->to_just_i64()
+        || h->to_just_i64() > std::numeric_limits<int>::max()) {
+      error_at(nid, {"bit-range-invalid", "type"}, "invalid set_mask endpoints");
     }
-    auto mask = mask_from_operand(mask_op);
-    if (pw_base && mask) {
-      note_pw_write(Pin{}, *mask);
+    const int low = l->to_just_i64(), high = h->to_just_i64();
+    if (pw_base) {
+      note_pw_write(Pin{}, *Dlop::get_mask_value(high - 1, low));
     }
 
     // A partial bit-range WRITE of a declared reg/wire is a next-state
@@ -9917,8 +9704,8 @@ private:
     auto vv = signed_scalar_bit_write(nid, dst, val) ? dynamic_update_base(nid, dst, val, is_signed) : set_mask_base(val, nid);
 
     auto node = make_node(Ntype_op::Set_mask);
-    livehd::graph_util::connect_mask_operands(node, vv.pin, create_const(*g_, *mask), leaf(ins).pin);
-    int32_t mask_mw = mask_high_bit(*mask);
+    livehd::graph_util::connect_mask_operands(node, vv.pin, low, high, leaf(ins).pin);
+    int32_t mask_mw = high;
     auto    drv     = node.create_driver_pin(0);
     int32_t res_mw  = std::max(vv.mw, mask_mw);
     set_ubits(drv, res_mw);
@@ -10031,7 +9818,7 @@ private:
       set_ubits(src, packed_mw);
     }
     auto gm = make_node(Ntype_op::Get_mask);
-    livehd::graph_util::connect_mask_operands(gm, src, create_const(*g_, *Dlop::get_mask_value(elem_mw)));
+    livehd::graph_util::connect_mask_operands(gm, src, 0, elem_mw);
     auto out = gm.create_driver_pin(0);
     set_ubits(out, elem_mw);  // an unsized pin emits as ONE bit
     return out;
@@ -10411,7 +10198,7 @@ private:
                lnast_->get_name(width));
     }
     auto gm = make_node(Ntype_op::Get_mask);
-    livehd::graph_util::connect_mask_operands(gm, drv, create_const(*g_, *Dlop::get_mask_value(static_cast<int>(bits))));
+    livehd::graph_util::connect_mask_operands(gm, drv, 0, static_cast<int>(bits));
     bind_result(lnast_->get_name(dst), gm.create_driver_pin(0), static_cast<int32_t>(bits));
   }
 
@@ -10695,7 +10482,7 @@ private:
       for (int32_t lo = 0; lo < cur_mw; lo += 2) {
         const int32_t hi = std::min(lo + 1, cur_mw - 1);
         auto          gm = make_node(Ntype_op::Get_mask);
-        livehd::graph_util::connect_mask_operands(gm, cur, create_const(*g_, *Dlop::get_mask_value(hi, lo)));
+        livehd::graph_util::connect_mask_operands(gm, cur, lo, (hi) + 1);
         auto          d   = gm.create_driver_pin(0);
         const int32_t dmw = hi - lo + 1;  // 1 or 2 bits per base-4 digit
         set_ubits(d, dmw);
@@ -10894,11 +10681,11 @@ private:
     // with its own established semantics; only the path copy is reduced.
     // `match` rides this too: it lowers to a unique_if whose arms are
     // branch-lowered here before lower_unique_merge runs.
-    const size_t     path_base = path_terms_.size();
+    const size_t               path_base = path_terms_.size();
     // Arm k is taken when every earlier condition is false and c_k is true, so
     // its terms are ¬c_0 … ¬c_{k-1}, c_k; the bare else drops the final c_k.
-    std::vector<Pin> prior_conds;
-    auto             merge_cond = [&](const Pin& raw) { return !valid_minted_ ? raw : and2(valid_pin(), nonzero1(raw)); };
+    std::vector<Pin>           prior_conds;
+    auto                       merge_cond = [&](const Pin& raw) { return !valid_minted_ ? raw : and2(valid_pin(), nonzero1(raw)); };
     // Ruling 15 coverage of lane-built array outputs: each arm starts from the
     // pre-`if` lanes, and after the `if` a lane counts as driven only when
     // every path drives it (merge_arm_coverage).
@@ -11334,31 +11121,19 @@ private:
   const uPass_tolg::Registry* registry_ = nullptr;
   hhds::GraphLibrary*         lib_      = nullptr;
 
-  absl::flat_hash_map<std::string, Pin>                             pin_map_;
-  absl::flat_hash_map<std::string, int32_t>                         mw_map_;
+  absl::flat_hash_map<std::string, Pin>                     pin_map_;
+  absl::flat_hash_map<std::string, int32_t>                 mw_map_;
   // The last driver written to each LOGICAL variable (SSA versions x /
   // x___ssa_1 / … collapsed to "x"): the value after ALL in-cycle writes, used
   // for a derived `reset_pin = <signal>` / `clock_pin = <signal>` resolution
   // and for a `wire`'s buffer pin.
-  absl::flat_hash_map<std::string, std::pair<Pin, int32_t>>         logical_last_;
+  absl::flat_hash_map<std::string, std::pair<Pin, int32_t>> logical_last_;
   // A field read whose source is a Sub result created by a call lowered LATER
   // in the body. Deferred to end-of-pass, then re-resolved with tget_final_ so
   // a still-unresolved one warns instead of looping.
-  std::vector<Lnast_nid>                                            pending_tgets_;
-  bool                                                              tget_final_ = false;
-  absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>>     range_map_;
-  // A `range` whose endpoints are NOT comptime constants (`a#[n..=m]` with
-  // runtime n/m). Keyed by the range tmp name; carries the lo/hi LNAST nids so
-  // lower_get_mask can build the shift+mask select. An open `lo..` form stores
-  // a const "nil" hi nid. (Comptime ranges stay in range_map_ as folded ints.)
-  absl::flat_hash_map<std::string, std::pair<Lnast_nid, Lnast_nid>> range_dyn_map_;
-  // An open-ended `lo..` range with a COMPTIME lo (`a#[3..]`): only the lo nid
-  // is stashed (keyed by the range tmp name). The upper bound is the sliced
-  // value's MSB, known only at the consuming get_mask/set_mask, which closes
-  // the range to `lo..=(value bits-1)`. (A runtime-lo open range lives in
-  // range_dyn_map_ with a const "nil" hi.)
-  absl::flat_hash_map<std::string, Lnast_nid>                       range_open_map_;
-  std::vector<WriteMap>                                             branch_writes_;
+  std::vector<Lnast_nid>                                    pending_tgets_;
+  bool                                                      tget_final_ = false;
+  std::vector<WriteMap>                                     branch_writes_;
   struct Branch_restore {
     std::optional<Pin>     pin;
     std::optional<int32_t> mw;
@@ -11384,8 +11159,8 @@ private:
     bool                          is_signed  = false;
     bool                          bound      = false;
     bool                          data_typed = false;  // declared with a type other than `Clock`
-    Pin                           bound_din;      // driver of the LATEST bind (what finalize splits against)
-    std::vector<hhds::Node_class> early_readers;  // consumers present at any bind
+    Pin                           bound_din;           // driver of the LATEST bind (what finalize splits against)
+    std::vector<hhds::Node_class> early_readers;       // consumers present at any bind
   };
   absl::flat_hash_set<std::string>            wire_names_;  // gates lower_store
   std::vector<std::string>                    wire_order_;  // declaration order
@@ -11786,7 +11561,7 @@ public:
       idx.emplace(n.get_debug_nid(), nodes.size());
       nodes.push_back(n);
     }
-    const size_t nn              = nodes.size();
+    const size_t nn = nodes.size();
     // Ruling 83: a partial write (`r#[0..<4] = x`) keeps the bits it does not
     // write, so its Set_mask reads the reg's own q as its base -- the untouched
     // bits, not a hold path. That edge neither makes the reg state (a reg

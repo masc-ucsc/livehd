@@ -171,8 +171,8 @@ class Cprop_wiring {
       return uniform(pin);
     }
     if (op == Ntype_op::Get_mask) {
-      const auto mask   = gu::get_driver_of_sink_name(node, "mask");
-      const auto window = mask.is_const() ? gu::mask_window_of(gu::const_of(mask)) : std::nullopt;
+      const auto mask   = livehd::graph_util::bit_range(node);
+      const auto window = mask.has_value() ? mask : std::nullopt;
       if (!window || window->first < 0 || window->second <= window->first) {
         return uniform(pin);
       }
@@ -271,9 +271,9 @@ public:
     }
     for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
       auto       node   = it->get_master_node();
-      const auto mask   = gu::get_driver_of_sink_name(node, "mask");
+      const auto mask   = livehd::graph_util::bit_range(node);
       const auto value  = gu::get_driver_of_sink_name(node, "value");
-      const auto window = mask.is_const() ? gu::mask_window_of(gu::const_of(mask)) : std::nullopt;
+      const auto window = mask.has_value() ? mask : std::nullopt;
       if (!value.is_invalid() && window && window->first >= 0 && window->second > window->first) {
         root = write(root, window->first, window->second, select(known(value), 0, window->second - window->first, window->first));
       } else {

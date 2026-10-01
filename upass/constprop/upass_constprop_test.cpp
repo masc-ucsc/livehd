@@ -306,9 +306,10 @@ TEST(UpassConstprop, FoldsTypedBitNot) {
 }
 
 TEST(UpassConstprop, FoldsGetMask) {
-  ConstpropFixture  f;
+  ConstpropFixture f;
   // 0x12345678#[0..=7] = 0x78
-  auto              op = f.add_binary_node(Lnast_ntype::create_get_mask(), "a", 0x12345678, 0xff);
+  auto             op = f.add_binary_node(Lnast_ntype::create_get_mask(), "a", 0x12345678, 0);
+  f.ln->add_child(op, Lnast_node::create_const("8"));
   TestableConstprop cp(f.lm);
   cp.position(op);
   cp.push_from_cursor(&uPass_constprop::process_get_mask);
@@ -320,7 +321,8 @@ TEST(UpassConstprop, WideGetMaskPreservesUnknownPlane) {
   auto             op = f.ln->add_child(f.stmts_nid, Lnast_ntype::create_get_mask());
   f.ln->add_child(op, Lnast_node::create_ref("a"));
   f.ln->add_child(op, Lnast_node::create_const(Dlop::unknown(1008)->to_pyrope()));
-  f.ln->add_child(op, Lnast_node::create_const(Dlop::get_mask_value(721, 361)->to_pyrope()));
+  f.ln->add_child(op, Lnast_node::create_const("361"));
+  f.ln->add_child(op, Lnast_node::create_const("722"));
 
   TestableConstprop cp(f.lm);
   cp.position(op);

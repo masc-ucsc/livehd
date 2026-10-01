@@ -46,7 +46,7 @@ class Cone {
   partition::Region_body                       rb_;
   Blast_options                                options_;
 
-  bool                                         reject_unstamped_ = false;
+  bool reject_unstamped_ = false;
 
 public:
   explicit Cone(Lnet_ops& ops, bool reject_unstamped = false) : ops_(ops), reject_unstamped_(reject_unstamped) {}
@@ -160,13 +160,14 @@ public:
 // candidate (nonzero exactly when its claim fails), or Lnet::kNone for an
 // unsupported one; the prover proves which are constant zero. nullopt when
 // the prover attempted nothing.
-std::optional<std::vector<bool>> prove_zero(const Prove_const0& prove, const std::function<std::vector<Lid>(Lnet_ops&, Cone&)>& build,
-                                            bool reject_unstamped, uint64_t& nodes) {
-  Lnet                net;
-  Lnet_ops            ops(net, Lnet_ops::Constants::lazy, kMaxProofNodes);
-  Cone                cone(ops, reject_unstamped);
-  const auto          refutes = build(ops, cone);
-  nodes                       = net.size();
+std::optional<std::vector<bool>> prove_zero(const Prove_const0&                                      prove,
+                                            const std::function<std::vector<Lid>(Lnet_ops&, Cone&)>& build, bool reject_unstamped,
+                                            uint64_t& nodes) {
+  Lnet       net;
+  Lnet_ops   ops(net, Lnet_ops::Constants::lazy, kMaxProofNodes);
+  Cone       cone(ops, reject_unstamped);
+  const auto refutes = build(ops, cone);
+  nodes              = net.size();
   std::vector<size_t> outputs;
   std::vector<bool>   proven(refutes.size(), false);
   for (size_t i = 0; i < refutes.size(); ++i) {
@@ -192,7 +193,7 @@ std::optional<std::vector<bool>> prove_zero(const Prove_const0& prove, const std
 }
 
 bool crosses_walk(const Node& n, const Arms& arms, absl::flat_hash_set<Pin>& seen) {
-  std::vector<Pin>         pending = arms.values;
+  std::vector<Pin> pending = arms.values;
   for (const auto& c : arms.controls) {
     if (!c.is_invalid()) {
       pending.push_back(c);
@@ -243,7 +244,7 @@ struct Cached {
 };
 std::map<std::string, Cached> saved;
 std::mutex                    saved_mutex;
-Cached read_cache(const std::string& path) {
+Cached                        read_cache(const std::string& path) {
   Cached row;
   if (path.empty()) {
     return row;
@@ -283,7 +284,7 @@ void write_cache(const std::string& path, const Cached& row) {
   if (path.empty()) {
     return;
   }
-  auto text  = std::format(
+  auto text = std::format(
       "{{\"version\":{},\"source\":\"{}\",\"colors\":\"{}\",\"options\":\"{}\",\"all\":{},\"complete\":{},\"work\":{},"
       "\"queries\":{},\"facts\":[",
       kMuxCacheVersion,
@@ -332,16 +333,16 @@ bool survives(Word_sim& sim, const Arms& arms, const Mux_fact& f) {
     if (!selected) {
       continue;
     }
-    const bool bit      = get(arms.values[f.arm])[j].bit_test(f.bit);
-    const bool expected = f.kind == Mux_fact::Kind::one
-                          || (f.other >= 0 && (get(arms.values[f.other])[j].bit_test(f.bit) != (f.kind == Mux_fact::Kind::complement)));
+    const bool bit = get(arms.values[f.arm])[j].bit_test(f.bit);
+    const bool expected
+        = f.kind == Mux_fact::Kind::one
+          || (f.other >= 0 && (get(arms.values[f.other])[j].bit_test(f.bit) != (f.kind == Mux_fact::Kind::complement)));
     if (bit != expected) {
       return false;
     }
   }
   return true;
 }
-
 
 // What bit `bit` of `pin` reads inside the mux's own region, through the
 // wiring a rewrite builds (Get_mask windows, Concat lanes, Xor with a
@@ -369,21 +370,22 @@ Local_bit local_bit(Pin pin, int bit, const Node& mux, bool uncolored) {
       }
       return {.value = v.bit_test(bit) != inverted};
     }
-    const int w = gu::bits_of(pin);
-    const auto n = pin.get_master_node();
-    const bool same_region = uncolored && !gu::has_color(mux) ? !gu::has_color(n)
-                                                              : gu::has_color(mux) && gu::has_color(n) && gu::color_of(n) == gu::color_of(mux);
+    const int  w           = gu::bits_of(pin);
+    const auto n           = pin.get_master_node();
+    const bool same_region = uncolored && !gu::has_color(mux)
+                                 ? !gu::has_color(n)
+                                 : gu::has_color(mux) && gu::has_color(n) && gu::color_of(n) == gu::color_of(mux);
     if ((w > 0 && bit >= w) || !same_region) {
       break;
     }
     const auto op = gu::type_op_of(n);
     if (op == Ntype_op::Get_mask) {
-      const auto mask   = gu::get_driver_of_sink_name(n, "mask");
-      const auto window = mask.is_const() ? gu::mask_window_of(gu::const_of(mask)) : std::nullopt;
+      const auto mask   = livehd::graph_util::bit_range(n);
+      const auto window = mask.has_value() ? mask : std::nullopt;
       if (!window) {
         break;
       }
-      pin = gu::get_driver_of_sink_name(n, "a");
+      pin  = gu::get_driver_of_sink_name(n, "a");
       bit += window->first;
       continue;
     }
@@ -393,7 +395,7 @@ Local_bit local_bit(Pin pin, int bit, const Node& mux, bool uncolored) {
       if (lane == lanes.end()) {
         break;
       }
-      pin = lane->value;
+      pin  = lane->value;
       bit -= lane->offset;
       continue;
     }
@@ -414,7 +416,7 @@ Local_bit local_bit(Pin pin, int bit, const Node& mux, bool uncolored) {
         break;
       }
       inverted ^= k.bit_test(bit);
-      pin = ins[0].is_const() ? ins[1] : ins[0];
+      pin       = ins[0].is_const() ? ins[1] : ins[0];
       continue;
     }
     break;
@@ -512,10 +514,10 @@ void apply_mux_facts(Select_rewrite& rw, const Node& n, const std::vector<Mux_fa
     std::vector<Run> runs;
     int              rewritten = 0;
     for (int b = 0; b < width; ++b) {
-      const int c     = choice[a][b];
-      const int kind  = c < 0 ? -1 : static_cast<int>(facts[c].kind);
-      const int other = c < 0 ? -1 : facts[c].other;
-      rewritten += c >= 0;
+      const int c      = choice[a][b];
+      const int kind   = c < 0 ? -1 : static_cast<int>(facts[c].kind);
+      const int other  = c < 0 ? -1 : facts[c].other;
+      rewritten       += c >= 0;
       if (!runs.empty() && runs.back().kind == kind && runs.back().other == other && runs.back().hi == b) {
         runs.back().hi = b + 1;
       } else {
@@ -528,7 +530,7 @@ void apply_mux_facts(Select_rewrite& rw, const Node& n, const std::vector<Mux_fa
     const auto run_pin = [&](const Run& r) -> Pin {
       switch (static_cast<Mux_fact::Kind>(r.kind)) {
         case Mux_fact::Kind::zero: return gu::create_const(rw.g, *Dlop::create_integer(0));
-        case Mux_fact::Kind::one: return build.ones(r.hi - r.lo);
+        case Mux_fact::Kind::one : return build.ones(r.hi - r.lo);
         case Mux_fact::Kind::equal:
           return r.lo == 0 && r.hi == width ? arms.values[r.other] : build.slice(arms.values[r.other], r.lo, r.hi);
         case Mux_fact::Kind::complement: return build.complement(arms.values[r.other], r.lo, r.hi);
@@ -610,7 +612,7 @@ void apply_mux_facts(Select_rewrite& rw, const Node& n, const std::vector<Mux_fa
     }
   }
   for (const auto& [a, replacement] : plan) {
-    const auto pid = !arms.hot ? static_cast<hhds::Port_id>(a + 1)
+    const auto pid = !arms.hot           ? static_cast<hhds::Port_id>(a + 1)
                      : a < explicit_arms ? static_cast<hhds::Port_id>(2 * a + 1)
                                          : static_cast<hhds::Port_id>(2 * explicit_arms);
     rw.replace(n, pid, replacement);
@@ -658,8 +660,8 @@ std::shared_ptr<const Satopt_result> mux_satopt(hhds::Graph* graph, const Mux_pr
   // Work: the walks, one unit per candidate and eight word-level samples per
   // evaluated value. The candidate caps and the budget make the search
   // partial, never wrong.
-  bool       afford = true;
-  const auto capped = [&] {
+  bool                                                          afford = true;
+  const auto                                                    capped = [&] {
     if (result->candidates >= 1000000 || candidates.size() >= 100000) {
       result->complete = false;
       return true;
@@ -797,8 +799,8 @@ std::shared_ptr<const Satopt_result> mux_satopt(hhds::Graph* graph, const Mux_pr
   save();
   return result;
 }
-Mux_satopt optimize_muxes(hhds::Graph* graph, const Mux_prover& prover, std::string_view cache_dir, bool all_regions, Profile profile,
-                          Meter* meter) {
+Mux_satopt optimize_muxes(hhds::Graph* graph, const Mux_prover& prover, std::string_view cache_dir, bool all_regions,
+                          Profile profile, Meter* meter) {
   Meter      unlimited;
   auto&      m = meter ? *meter : unlimited;
   Mux_satopt stats;
@@ -825,10 +827,10 @@ Mux_satopt optimize_muxes(hhds::Graph* graph, const Mux_prover& prover, std::str
       subjects.emplace(static_cast<uint64_t>(n.get_debug_nid()), n);
     }
   }
-  const bool                      shared = profile == Profile::shared;
-  Select_rewrite                  rw{*graph, {}, shared};
-  std::optional<formal::Prover>   onehot;  // built on first use, before any rewrite of this graph
-  const auto                      exclusive = [&](const Node& n) {
+  const bool                    shared = profile == Profile::shared;
+  Select_rewrite                rw{*graph, {}, shared};
+  std::optional<formal::Prover> onehot;  // built on first use, before any rewrite of this graph
+  const auto                    exclusive = [&](const Node& n) {
     if (gu::proven_of(n) == gu::kFormalOnehot && !gu::has_runtime_check(n)) {
       return true;
     }
@@ -925,7 +927,10 @@ Collapse_satopt collapse_hotmuxes(hhds::Graph* graph, Profile profile, Meter* me
     }
     stats.nodes_removed = before > after ? before - after : 0;
   }
-  std::print("[pass.satopt] {}: {} Hotmux(es) proven exclusive of {} candidate(s)\n", graph->get_name(), stats.proven, stats.candidates);
+  std::print("[pass.satopt] {}: {} Hotmux(es) proven exclusive of {} candidate(s)\n",
+             graph->get_name(),
+             stats.proven,
+             stats.candidates);
   return stats;
 }
 

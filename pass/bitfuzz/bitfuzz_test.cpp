@@ -205,7 +205,7 @@ TEST(Bitfuzz, ExplicitGetMaskIsClean) {
   // signed width is 9. Declaring 8 here would itself be an implicit truncation.
   auto mask = gu::create_typed_node(*g, Ntype_op::Get_mask, 9);
   gu::setup_sink_by_name(mask, "a").connect_driver(sum.create_driver_pin(0));
-  gu::setup_sink_by_name(mask, "mask").connect_driver(gu::create_const(*g, *Dlop::get_mask_value(8)));
+  livehd::graph_util::connect_bit_range(mask, 0, 8);
   mask.create_driver_pin(0).connect_sink(g->get_output_pin("o"));
 
   quiet_diag();

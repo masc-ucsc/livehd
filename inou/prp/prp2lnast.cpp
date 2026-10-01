@@ -119,8 +119,8 @@ static size_t skip_nested_block_comment(std::string_view s, size_t i) {
 // skipped). *deepest_byte gets the offset where the peak occurred.
 static int max_parser_depth(std::string_view src, size_t& deepest_byte) {
   int    bracket = 0, unary_run = 0, peak = 0;
-  int    comment_depth = 0;  // Pyrope block comments nest
-  size_t peak_byte     = 0;
+  int    comment_depth                                                         = 0;  // Pyrope block comments nest
+  size_t peak_byte                                                             = 0;
   // String lexing matches the prpparse lexer: '…' has no escapes, "…" has
   // escapes and `{…}` holes that hold CODE (comments, nested strings, brackets),
   // and a backtick name is one token. A `//` or `"` inside any of them must not
@@ -1252,7 +1252,7 @@ bool prp_wire_driver_store(const Lnast& ln, const Lnast_nid& nid, std::string_vi
 // as a separate driver made the packed-wire class — the one shape that
 // manufactured a set_mask self-reference — unwritable in Pyrope.
 // `mask_out`, when given, receives the LANE this write covers: the constant
-// mask compute_bit_mask_ref baked for `#[lo..=hi]`, or "" for a runtime lane.
+// mask bit_selection_ranges baked for `#[lo..=hi]`, or "" for a runtime lane.
 // Callers need it because "refines the same value" only holds while the lanes
 // are DISJOINT — two writes to the same bits are a genuine double-drive, and
 // upass.tolg chains them on one din accumulator so the second silently wins.
@@ -1278,9 +1278,15 @@ bool prp_wire_partial_store(const Lnast& ln, const Lnast_nid& nid, const Lnast_n
     return false;
   }
   if (mask_out != nullptr) {
-    auto d2 = ln.get_sibling_next(d1);  // set_mask lane mask
-    if (!d2.is_invalid() && Lnast_ntype::is_const(ln.get_type(d2))) {
-      *mask_out = std::string(ln.get_name(d2));
+    auto value = ln.get_sibling_next(d1);
+    auto lo    = ln.get_sibling_next(value);
+    auto hi    = ln.get_sibling_next(lo);
+    if (!lo.is_invalid() && !hi.is_invalid() && Lnast_ntype::is_const(ln.get_type(lo)) && Lnast_ntype::is_const(ln.get_type(hi))) {
+      auto l = Dlop::from_pyrope(ln.get_name(lo));
+      auto h = Dlop::from_pyrope(ln.get_name(hi));
+      if (l->is_just_i64() && h->is_just_i64() && l->to_just_i64() >= 0 && h->to_just_i64() > l->to_just_i64()) {
+        *mask_out = Dlop::get_mask_value(h->to_just_i64() - 1, l->to_just_i64())->to_pyrope();
+      }
     }
   }
   return true;
@@ -1410,7 +1416,7 @@ void gather_field_store_wires(const Lnast& ln, const Lnast_nid& nid, absl::flat_
 void gather_loop_driven_wires(const Lnast& ln, const Lnast_nid& nid, bool in_loop, absl::flat_hash_set<std::string>& out,
                               const Driver_scope* outer = nullptr) {
   const Driver_scope scope(ln, nid, outer);
-  const auto t = ln.get_type(nid);
+  const auto         t = ln.get_type(nid);
   if (Lnast_ntype::is_stmts(t)) {
     for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
       if (in_loop) {
@@ -1464,7 +1470,7 @@ void wire_lanes_merge(Wire_lanes& dst, const Wire_lanes& src, bool detect) {
 void gather_subtree_write_wires(const Lnast& ln, const Lnast_nid& nid, absl::flat_hash_map<std::string, int>& out,
                                 absl::flat_hash_set<std::string>& full, Wire_lanes& lanes, const Driver_scope* outer = nullptr) {
   const Driver_scope scope(ln, nid, outer);
-  const auto t = ln.get_type(nid);
+  const auto         t = ln.get_type(nid);
   if (Lnast_ntype::is_stmts(t)) {
     Lnast_nid prev;
     for (auto c = ln.get_first_child(nid); !c.is_invalid(); prev = c, c = ln.get_sibling_next(c)) {
@@ -1522,7 +1528,7 @@ void gather_subtree_write_wires(const Lnast& ln, const Lnast_nid& nid, absl::fla
 void gather_count_wire_drivers(const Lnast& ln, const Lnast_nid& stmts, absl::flat_hash_map<std::string, int>& count,
                                absl::flat_hash_set<std::string>& full, Wire_lanes& lanes, const Driver_scope* outer = nullptr) {
   const Driver_scope scope(ln, stmts, outer);
-  Lnast_nid prev;
+  Lnast_nid          prev;
   for (auto c = ln.get_first_child(stmts); !c.is_invalid(); prev = c, c = ln.get_sibling_next(c)) {
     const auto t = ln.get_type(c);
     const auto w = prp_store_ref_name(ln, c);
@@ -3273,7 +3279,8 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
             report_error(inner,
                          "destructure-rename-unnamed",
                          "name",
-                         std::format("destructure slot `{}`: the right-hand side is an unnamed tuple, it has no field names", get_text(inner)),
+                         std::format("destructure slot `{}`: the right-hand side is an unnamed tuple, it has no field names",
+                                     get_text(inner)),
                          "bind an unnamed tuple by position with bare names, `(a, b) = t`");
           }
           if (!rhs_is_fcall && destructure_rhs_ == Destructure_rhs::rooted && !prefix.empty()) {
@@ -3754,7 +3761,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     // tmp, which is exactly the old-value input we want feeding set_mask.
     Lnast_node cur_val    = expr_to_node(arg_n);
     int        lane_width = 0;
-    Lnast_node mask_ref   = compute_bit_mask_ref(sel_node, &lane_width);
+    const auto ranges     = bit_selection_ranges(sel_node, &lane_width);
 
     // A wrap/sat policy applies to the SELECTED lane, not to the whole base.
     // Give the policy call a synthetic unsigned type whose width is the number
@@ -3783,7 +3790,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
         const auto n1 = Dlop::create_integer(1);
         lane_max      = Lnast_node::create_const(std::string(n1->shl_op(wv)->sub_op(*n1)->to_pyrope()));
       } else if (w) {
-        // The literal forms get this from compute_bit_mask_ref; bounds that
+        // The literal forms get this from bit_selection_ranges; bounds that
         // are comptime NAMES fold only here.
         TSNode range_n = child_by_field(sel_node, "index");
         if (ts_node_is_null(range_n)) {
@@ -3827,14 +3834,29 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       store_value = narrowed;
     }
 
-    // set_mask new_word cur_val mask_ref store_value
-    auto       sm_idx   = builder.add_child(Lnast_ntype::create_set_mask());
-    Lnast_node new_word = builder.mint_tmp_ref();
-    lnast->add_child(sm_idx, new_word);
-    lnast->add_child(sm_idx, cur_val);
-    lnast->add_child(sm_idx, mask_ref);
-    lnast->add_child(sm_idx, store_value);
-    attach_loc(sm_idx, lvalue);
+    Lnast_node new_word      = cur_val;
+    int        packed_offset = 0;
+    for (const auto& [lo, hi] : ranges) {
+      auto part = store_value;
+      if (ranges.size() > 1) {
+        auto get = builder.add_child(Lnast_ntype::create_get_mask());
+        part     = builder.mint_tmp_ref();
+        lnast->add_child(get, part);
+        lnast->add_child(get, store_value);
+        lnast->add_child(get, Lnast_node::create_const(packed_offset));
+        lnast->add_child(get, Lnast_node::create_const(packed_offset + 1));
+        ++packed_offset;
+      }
+      auto       sm   = builder.add_child(Lnast_ntype::create_set_mask());
+      const auto next = builder.mint_tmp_ref();
+      lnast->add_child(sm, next);
+      lnast->add_child(sm, new_word);
+      lnast->add_child(sm, part);
+      lnast->add_child(sm, lo);
+      lnast->add_child(sm, hi);
+      attach_loc(sm, lvalue);
+      new_word = next;
+    }
 
     // Write the updated word back to the argument lvalue. Recursing keeps the
     // member_selection / dot_expression handling in one place; passing null
@@ -4300,10 +4322,11 @@ void Prp2lnast::process_assignment(TSNode n) {
     }
   }
   const auto saved_rhs = destructure_rhs_;
-  destructure_rhs_ = rhs_unnamed_var ? Destructure_rhs::unnamed_var
-                     : (rhs_is_fcall || rhs_positional_literal || ts_node_is_null(rv) || std::string_view(ts_node_type(rv)) == "tuple")
-                         ? Destructure_rhs::legacy
-                         : Destructure_rhs::rooted;
+  destructure_rhs_
+      = rhs_unnamed_var ? Destructure_rhs::unnamed_var
+        : (rhs_is_fcall || rhs_positional_literal || ts_node_is_null(rv) || std::string_view(ts_node_type(rv)) == "tuple")
+            ? Destructure_rhs::legacy
+            : Destructure_rhs::rooted;
   (void)process_lvalue_for_assign(lv,
                                   rvalue_node,
                                   decl,
@@ -4411,9 +4434,9 @@ Prp2lnast::Initializer_scope_guard::~Initializer_scope_guard() {
 
 void Prp2lnast::process_while_statement(TSNode n) {
   Initializer_scope_guard init_scope(*this, n);
-  TSNode cond = child_by_field(n, "condition");
-  TSNode code = child_by_field(n, "code");
-  TSNode init = child_by_field(n, "init");
+  TSNode                  cond = child_by_field(n, "condition");
+  TSNode                  code = child_by_field(n, "code");
+  TSNode                  init = child_by_field(n, "init");
 
   if (!ts_node_is_null(init)) {
     // Evaluate once, inside the initializer scope but outside the loop.
@@ -7150,9 +7173,9 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
         if (!Lnast_ntype::is_store(lnast->get_type(entry))) {
           continue;
         }
-        auto name_n = lnast->get_first_child(entry);
-        auto def_n  = name_n.is_invalid() ? name_n : lnast->get_sibling_next(name_n);
-        auto type_n = def_n.is_invalid() ? def_n : lnast->get_sibling_next(def_n);
+        auto name_n     = lnast->get_first_child(entry);
+        auto def_n      = name_n.is_invalid() ? name_n : lnast->get_sibling_next(name_n);
+        auto type_n     = def_n.is_invalid() ? def_n : lnast->get_sibling_next(def_n);
         bool open_array = false;
         for (auto lvl = type_n; !lvl.is_invalid() && Lnast_ntype::is_comp_type_array(lnast->get_type(lvl));) {
           const auto elem  = lnast->get_first_child(lvl);
@@ -8241,7 +8264,7 @@ static std::string canonical_import_unit(std::string_view unit) {
 
 void Prp2lnast::emit_import_call(const Lnast_node& target, std::string_view unit_src, TSNode loc_node) {
   const std::string unit = canonical_import_unit(unit_src);
-  auto              idx = builder.add_child(Lnast_ntype::create_func_call());
+  auto              idx  = builder.add_child(Lnast_ntype::create_func_call());
   lnast->add_child(idx, target);
   lnast->add_child(idx, Lnast_node::create_const("import"));
   lnast->add_child(idx, Lnast_node::create_const(absl::StrCat("'", unit, "'")));
@@ -8711,15 +8734,30 @@ static std::string unescape_cooked_string(std::string_view raw) {
     }
     char next = raw[i + 1];
     switch (next) {
-      case 'n' : out.push_back('\n'); ++i; break;
-      case 't' : out.push_back('\t'); ++i; break;
-      case 'r' : out.push_back('\r'); ++i; break;
-      case '0' : out.push_back('\0'); ++i; break;
+      case 'n':
+        out.push_back('\n');
+        ++i;
+        break;
+      case 't':
+        out.push_back('\t');
+        ++i;
+        break;
+      case 'r':
+        out.push_back('\r');
+        ++i;
+        break;
+      case '0':
+        out.push_back('\0');
+        ++i;
+        break;
       case '\\':
       case '"' :
       case '\'':
-      case '`' : out.push_back(next); ++i; break;
-      case 'x' : {
+      case '`':
+        out.push_back(next);
+        ++i;
+        break;
+      case 'x': {
         int hi = (i + 2 < raw.size()) ? hex_digit(raw[i + 2]) : -1;
         int lo = (i + 3 < raw.size()) ? hex_digit(raw[i + 3]) : -1;
         if (hi >= 0 && lo >= 0) {
@@ -8806,8 +8844,8 @@ std::vector<Prp2lnast::Istring_piece> Prp2lnast::istring_pieces(TSNode n) const 
   }
   size_t next_expr = 0;
 
-  std::string lit;               // decoded literal text not yet emitted
-  uint32_t    seg = body_start;  // start of the raw literal run not yet decoded
+  std::string lit;                     // decoded literal text not yet emitted
+  uint32_t    seg       = body_start;  // start of the raw literal run not yet decoded
   auto        flush_raw = [&](uint32_t upto) {
     if (upto > seg) {
       lit += unescape_cooked_string(text_between(seg, upto));
@@ -10469,36 +10507,36 @@ void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view n
       // `initial` is the canonical spelling in BOTH layers now: it is the
       // LGraph Flop/Latch/Memory reset-value pin (graph/cell.cpp) and the
       // Pyrope declaration attribute. `init` was the old attribute spelling.
-      {    "init",                                                                         "use `initial`"                  },
+      {    "init",                                                     "use `initial`"                  },
       // Deleted from the vocabulary — without a row here each of these would
       // silently fold to nil as a user attribute instead of erroring.
-      {  "inputs",                                               "use `inp` to read a lambda's input port names (`f.[inp]`)"},
-      { "outputs",                                              "use `out` to read a lambda's output port names (`f.[out]`)"},
-      {   "ubits",                            "there is no `ubits` attribute: use `bits`, and read the sign with `x.[sign]`"},
-      {   "sbits",                            "there is no `sbits` attribute: use `bits`, and read the sign with `x.[sign]`"},
-      {   "defer",                     "the `.[defer]` end-of-cycle read was removed — forward-declare a `wire` and read it"},
+      {  "inputs",                           "use `inp` to read a lambda's input port names (`f.[inp]`)"},
+      { "outputs",                          "use `out` to read a lambda's output port names (`f.[out]`)"},
+      {   "ubits",        "there is no `ubits` attribute: use `bits`, and read the sign with `x.[sign]`"},
+      {   "sbits",        "there is no `sbits` attribute: use `bits`, and read the sign with `x.[sign]`"},
+      {   "defer", "the `.[defer]` end-of-cycle read was removed — forward-declare a `wire` and read it"},
       // `.[loc]`/`.[file]` were registered but nothing ever derived them (the
       // documented `puts` example printed nil for both); removed from the
       // vocabulary, so pin the error here.
-      {     "loc",                                             "the `.[loc]` / `.[file]` source-location reads were removed"},
-      {    "file",                                             "the `.[loc]` / `.[file]` source-location reads were removed"},
+      {     "loc",                         "the `.[loc]` / `.[file]` source-location reads were removed"},
+      {    "file",                         "the `.[loc]` / `.[file]` source-location reads were removed"},
       // `saturate` was an alias only the CALL form honoured (`saturate x = …`
       // never parsed); `sat` is the one spelling, as in prp_keywords.def.
-      {"saturate",                                                                                               "use `sat`"},
-      {     "clk",                  "use `clock_pin=<wire>` to pick a register's clock (a clock input is typed `:Clock`)"},
-      {     "rst",                  "use `reset_pin=<wire>` to pick a register's reset (a reset input is typed `:Reset`)"},
-      {   "width",                      "use `bits` to read a width (`x.[bits]`); to set a width declare a type, e.g. `:U8`"},
-      {      "en",                                                                                            "use `enable`"},
-      { "posedge",                                                                            "use `posclk` (`posclk=true`)"},
-      { "negedge",                                                                                      "use `posclk=false`"},
-      {  "signed",                           "signedness is derived from the type — declare `:S<N>` (read it with `x.[sign]`)"},
-      {"unsigned",                           "signedness is derived from the type — declare `:U<N>` (read it with `x.[sign]`)"},
+      {"saturate",                                                                           "use `sat`"},
+      {     "clk", "use `clock_pin=<wire>` to pick a register's clock (a clock input is typed `:Clock`)"},
+      {     "rst", "use `reset_pin=<wire>` to pick a register's reset (a reset input is typed `:Reset`)"},
+      {   "width",  "use `bits` to read a width (`x.[bits]`); to set a width declare a type, e.g. `:U8`"},
+      {      "en",                                                                        "use `enable`"},
+      { "posedge",                                                        "use `posclk` (`posclk=true`)"},
+      { "negedge",                                                                  "use `posclk=false`"},
+      {  "signed",     "signedness is derived from the type — declare `:S<N>` (read it with `x.[sign]`)"},
+      {"unsigned",     "signedness is derived from the type — declare `:U<N>` (read it with `x.[sign]`)"},
       // A proposed-but-never-adopted spelling: whether an array is a flop bank
       // or a memory is the synthesis flow's call, and a `reg` array with a
       // reset value already resets every entry in one cycle (08-memories.md).
       { "storage",
        "there is no `storage` attribute: a `reg` array with a reset value already resets every entry in one cycle (see "
-       "08-memories.md); an array is registers or a memory by the synthesis flow, not by attribute"                         },
+       "08-memories.md); an array is registers or a memory by the synthesis flow, not by attribute"     },
   };
   for (const auto& m : mistakes) {
     if (name == m.wrong) {
@@ -11735,6 +11773,7 @@ Lnast_node Prp2lnast::if_expr_to_node(TSNode n, bool need_result) {
       "tuple_sq",
       "paren_group",
       "attribute_set",
+      "timed_identifier",
       "constant",
   };
 
@@ -12007,6 +12046,7 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
       "tuple_sq",
       "paren_group",
       "attribute_set",
+      "timed_identifier",
       "constant",
   };
 
@@ -12098,230 +12138,129 @@ Lnast_node Prp2lnast::emit_range_node(const Lnast_node& start, const Lnast_node&
   return rng_ref;
 }
 
-Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node, int* const_width) {
-  // The grammar's `select` admits exactly one of `index` (single expression)
-  // or `range` (a selection_range form). Tuple/comma indices like `#[1,4]`
-  // aren't accepted by the grammar; tree-sitter error-recovers them silently
-  // and just keeps the first expression — so flag any parse error on the
-  // select node as a hard compile error rather than emitting wrong code.
-  //
-  // `const_width`, when given, receives the number of selected bits when that
-  // is a compile-time constant even though the POSITION may not be (a
-  // `x#[(j*4)..+4]` window inside a loop), else 0. A `wrap`/`sat` into a bit
-  // range needs only that width.
-  if (const_width != nullptr) {
+std::vector<std::pair<Lnast_node, Lnast_node>> Prp2lnast::bit_selection_ranges(TSNode sel_node, int* const_width) {
+  if (const_width) {
     *const_width = 0;
   }
-  if (ts_node_is_null(sel_node)) {
-    report_error("bit-range-empty",
-                 "syntax",
-                 "empty bit selection `#[]` (expected an index or range)",
-                 "write a single bit `#[3]` or a range `#[0..=3]`");
+  if (ts_node_is_null(sel_node) || ts_node_has_error(sel_node)) {
+    report_error(sel_node, "bit-range-index", "syntax", "invalid bit selection", "use an index or an increasing range");
   }
-  if (ts_node_has_error(sel_node)) {
-    report_error(sel_node,
-                 "bit-range-index",
-                 "syntax",
-                 std::format("invalid bit-range index `{}` (tuple/comma indices not supported in `#[...]`)", get_text(sel_node)),
-                 "use a single index `#[3]` or a range `#[0..=3]`; OR them for a multi-bit mask");
-  }
-
-  // A bound folds here only when its text is ONE integer literal (optionally
-  // signed). An identifier must not: Dlop::from_pyrope happily parses a single
-  // letter as a character literal (`"i"` -> 105), which would silently produce
-  // a bit-105 mask for `t#[i]`. Nor may an expression (`4 * 2`): it takes the
-  // expression path and its own diagnostics.
-  auto literal_value = [&](TSNode node) -> std::optional<Dlop> {
-    auto text = get_text(node);
-    auto body = text;
-    if (!body.empty() && (body.front() == '-' || body.front() == '+')) {
-      body.remove_prefix(1);
+  const auto zero = Lnast_node::create_const("0");
+  const auto one  = Lnast_node::create_const("1");
+  auto       add  = [&](const Lnast_node& x, const Lnast_node& y) {
+    if (x.is_const() && y.is_const()) {
+      return Lnast_node::create_const(Dlop::from_pyrope(x.get_name())->add_op(*Dlop::from_pyrope(y.get_name()))->to_pyrope());
     }
-    if (body.empty() || body.front() < '0' || body.front() > '9' || !std::all_of(body.begin(), body.end(), [](char c) {
-          return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '?';
-        })) {
-      return std::nullopt;
-    }
-    auto v = Dlop::from_pyrope(text);
-    if (v->is_invalid() || !v->is_integer()) {
-      return std::nullopt;
-    }
-    return *v;
+    return emit_bound_binop(Lnast_ntype::create_plus(), x, y);
   };
-
-  auto make_const_mask = [&](TSNode node) -> std::optional<Lnast_node> {
-    auto v = literal_value(node);
-    if (!v) {
-      return std::nullopt;
+  auto bound = [&](TSNode n) {
+    if (auto v = resolve_type_int_value(n)) {
+      return Lnast_node::create_const(std::string(v->to_pyrope()));
     }
-    // A negative bit index is a compile error — never a value, never a `1<<-N`
-    // (which would feed a negative amount into Dlop::shln). There is NO
-    // distance-from-end `#[]` indexing; use an open range `x#[lo..]`.
-    // (2f-neg_bitrange)
-    if (v->is_negative()) {
-      report_error(node,
-                   "negative-bit-index",
-                   "type",
-                   std::format("negative bit index `{}` is not allowed", get_text(node)),
-                   "bit/array/cycle indices are non-negative; select to the end with an open range like `x#[lo..]`");
-    }
-    // `#[N]` selects bit position N → single-bit mask `1 << N`. Pure Dlop
-    // arithmetic (no to_i; works for any position width).
-    return Lnast_node::create_const(Dlop::create_integer(1)->shl_op(*v)->to_pyrope());
+    return expr_to_node(n);
   };
-
-  auto make_range_mask = [&](TSNode expr_item) -> std::optional<Lnast_node> {
-    const std::string_view kind = range_op_kind(expr_item);
+  auto       index = child_by_field(sel_node, "index");
+  const auto range = child_by_field(sel_node, "range");
+  Lnast_node lo = zero, hi = Lnast_node::create_const("nil");
+  int64_t    step = 1;
+  if (!ts_node_is_null(index)) {
+    if (ts_node_named_child_count(index) == 3
+        && std::string_view(ts_node_type(ts_node_named_child(index, 1))) == "binary_step_op") {
+      const auto amount = resolve_type_int_value(ts_node_named_child(index, 2));
+      if (!amount || !amount->is_just_i64() || amount->has_unknowns() || amount->to_just_i64() <= 0) {
+        report_error(index,
+                     "bit-range-step",
+                     "type",
+                     "bit selection step must be a positive compile-time integer",
+                     "use a positive constant step");
+      }
+      step  = amount->to_just_i64();
+      index = ts_node_named_child(index, 0);
+    }
+    const auto kind = range_op_kind(index);
     if (kind.empty()) {
-      return std::nullopt;
+      lo = bound(index);
+      hi = add(lo, one);
+      if (const_width) {
+        *const_width = 1;
+      }
+    } else {
+      lo = bound(ts_node_named_child(index, 0));
+      hi = bound(ts_node_named_child(index, 2));
+      if (hi.is_const() && Dlop::from_pyrope(hi.get_name())->is_negative()) {
+        report_error(sel_node,
+                     "negative-bit-index",
+                     "type",
+                     "negative bit index is not allowed",
+                     "bit/array/cycle indices are non-negative");
+      }
+      if (kind == "op_range_inclusive") {
+        hi = add(hi, one);
+      }
+      if (kind == "op_range_count") {
+        if (const_width && hi.is_const()) {
+          auto width = Dlop::from_pyrope(hi.get_name());
+          if (width->is_just_i64() && width->to_just_i64() > 0 && width->to_just_i64() <= std::numeric_limits<int>::max()) {
+            *const_width = width->to_just_i64();
+          }
+        }
+        hi = add(lo, hi);
+      }
     }
-    TSNode     lo   = ts_node_named_child(expr_item, 0);
-    TSNode     hi   = ts_node_named_child(expr_item, 2);
-    const auto one  = Dlop::create_integer(1);
-    const auto hi_v = literal_value(hi);
-    const auto lo_v = literal_value(lo);
-    // A literal count `n` fixes the WIDTH even when `lo` is a runtime
-    // expression (`x#[(j*4)..+4]`); the window itself then stays a `range`
-    // node (the caller's dynamic path).
-    if (kind == "op_range_count" && hi_v && !hi_v->is_negative() && hi_v->is_just_i64() && const_width != nullptr
-        && hi_v->to_just_i64() <= std::numeric_limits<int>::max()) {
-      *const_width = static_cast<int>(hi_v->to_just_i64());
+  } else if (!ts_node_is_null(range)) {
+    const auto from = child_by_field(range, "open_from");
+    const auto incl = child_by_field(range, "from_zero_inclusive");
+    const auto excl = child_by_field(range, "from_zero_exclusive");
+    if (!ts_node_is_null(from)) {
+      lo = bound(from);
     }
-    if (!lo_v || !hi_v) {
-      return std::nullopt;  // a runtime endpoint: the `range` node path
+    if (!ts_node_is_null(incl)) {
+      hi = add(bound(incl), one);
     }
-    // `lo..<hi` is `lo..=hi-1` and `lo..+n` is `lo..=lo+n-1`: one fold, with
-    // the same endpoint checks, for all three forms.
-    Dlop last = *hi_v;
-    if (kind == "op_range_exclusive") {
-      last = *hi_v->sub_op(*one);
-    } else if (kind == "op_range_count") {
-      last = *lo_v->add_op(*hi_v)->sub_op(*one);
+    if (!ts_node_is_null(excl)) {
+      hi = bound(excl);
     }
-    // A negative endpoint or a descending range is a compile error — indices are
-    // non-negative and ranges increasing (no distance-from-end `#[]`). Without
-    // this `1<<(hi-lo+1)` / `1<<lo` would feed a negative amount into shln.
-    // (2f-neg_bitrange)
-    if (lo_v->is_negative() || (kind == "op_range_inclusive" && hi_v->is_negative())) {
-      report_error(expr_item,
-                   "negative-bit-index",
-                   "type",
-                   std::format("negative bit-range endpoint in `{}` is not allowed", get_text(expr_item)),
-                   "bit/array/cycle indices are non-negative; select to the end with an open range like `x#[lo..]`");
-    }
-    // `#[lo..=hi]` → contiguous mask `((1 << (hi-lo+1)) - 1) << lo`, all Dlop
-    // arithmetic (no to_i; any width).
-    auto width = last.sub_op(*lo_v)->add_op(*one);
-    if (width->is_negative() || width->is_known_zero()) {
-      const bool empty = kind != "op_range_inclusive" && width->is_known_zero();  // `4..<4`, `0..+0`
-      report_error(expr_item,
+  }
+  std::vector<std::pair<Lnast_node, Lnast_node>> result;
+  const auto                                     lv = lo.is_const() ? Dlop::from_pyrope(lo.get_name()) : Dlop::nil();
+  const auto                                     hv = hi.is_const() ? Dlop::from_pyrope(hi.get_name()) : Dlop::nil();
+  if (lv->is_integer() && lv->is_negative()) {
+    report_error(sel_node,
+                 "negative-bit-index",
+                 "type",
+                 "negative bit index is not allowed",
+                 "bit/array/cycle indices are non-negative");
+  }
+  if (lv->is_integer() && hv->is_integer() && !lv->has_unknowns() && !hv->has_unknowns()) {
+    if (hv->le_op(*lv)->is_known_true()) {
+      report_error(sel_node,
                    "descending-bit-range",
                    "type",
-                   std::format("{} bit range `{}` is not allowed (ranges are increasing and select at least one bit)",
-                               empty ? "empty" : "descending",
-                               get_text(expr_item)),
-                   "write the bounds low-to-high, e.g. `x#[lo..=hi]` with lo <= hi");
+                   hv->eq_op(*lv)->is_known_true() ? "empty bit range is not allowed" : "descending bit range is not allowed",
+                   "write the bounds low-to-high and select at least one bit");
     }
-    return Lnast_node::create_const(one->shl_op(*width)->sub_op(*one)->shl_op(*lo_v)->to_pyrope());
-  };
-
-  auto make_dynamic_mask = [&](TSNode expr) {
-    auto pos = expr_to_node(expr);
-    auto idx = builder.add_child(Lnast_ntype::create_shl());
-    auto ref = builder.mint_tmp_ref();
-    lnast->add_child(idx, ref);
-    lnast->add_child(idx, Lnast_node::create_const("1"));
-    lnast->add_child(idx, pos);
-    return ref;
-  };
-
-  // True when an `expression_item` is a range form (`lo..=hi`, `lo..<hi`,
-  // `lo..+n`) rather than a single-bit index. A range lowers (via expr_to_node)
-  // to a `range` LNAST node that constprop turns into a contiguous mask; a plain
-  // index must instead become the single-bit mask `1 << index` (make_dynamic_mask).
-  // Without this split, `b#[lo+1]` would pass `lo+1` straight to get_mask as a
-  // literal bitmask — e.g. `#[5]` → mask 0b101 selects bits {0,2}, not bit 5.
-  auto expr_item_is_range = [](TSNode expr_item) -> bool { return !range_op_kind(expr_item).empty(); };
-
-  TSNode index_n = child_by_field(sel_node, "index");
-  TSNode range   = child_by_field(sel_node, "range");
-
-  if (!ts_node_is_null(range)) {
-    // selection_range carries one of:
-    //   open_all              — bare `..`
-    //   open_from: <expr>     — `expr..`
-    //   from_zero_inclusive   — `..=expr`
-    //   from_zero_exclusive   — `..<expr`
-    TSNode open_all  = ts_node_child_by_field_name(range, "open_all", 8);
-    TSNode open_from = ts_node_child_by_field_name(range, "open_from", 9);
-    TSNode fz_incl   = ts_node_child_by_field_name(range, "from_zero_inclusive", 19);
-    TSNode fz_excl   = ts_node_child_by_field_name(range, "from_zero_exclusive", 19);
-    if (!ts_node_is_null(open_all)) {
-      return emit_range_node(Lnast_node::create_const("0"), Lnast_node::create_const("nil"));
-    }
-    if (!ts_node_is_null(open_from)) {
-      // `0..` selects from bit 0 to the top — exactly the whole value, the same
-      // as the bare `#[..]` full slice. Emit the all-ones mask directly (the
-      // `#[..]` path): width-independent, and it sidesteps the degenerate
-      // zero-start open `range` whose folded scalar collapses the select.
-      if (auto ft = get_text(open_from); !ft.empty() && (ft.front() >= '0' && ft.front() <= '9')) {
-        if (auto fv = Dlop::from_pyrope(ft); fv && fv->is_integer() && fv->is_just_i64() && fv->to_just_i64() == 0) {
-          return Lnast_node::create_const("-1");
+    if (lv->is_just_i64() && hv->is_just_i64() && hv->to_just_i64() <= std::numeric_limits<int>::max()) {
+      const auto first = lv->to_just_i64(), last = hv->to_just_i64();
+      if (const_width) {
+        *const_width = static_cast<int>((last - first - 1) / step + 1);
+      }
+      if (step != 1) {
+        for (auto bit = first; bit < last; bit += step) {
+          result.emplace_back(Lnast_node::create_const(bit), Lnast_node::create_const(bit + 1));
         }
+        return result;
       }
-      return emit_range_node(expr_to_node(open_from), Lnast_node::create_const("nil"));
     }
-    if (!ts_node_is_null(fz_incl) || !ts_node_is_null(fz_excl)) {
-      bool       is_lt    = !ts_node_is_null(fz_excl);
-      TSNode     expr_n   = is_lt ? fz_excl : fz_incl;
-      Lnast_node end_expr = expr_to_node(expr_n);
-      Lnast_node end_node = end_expr;
-      if (is_lt) {
-        // `..<n` is exclusive: end = n - 1 (matches the inclusive form
-        // stored on the range node downstream).
-        auto m    = builder.add_child(Lnast_ntype::create_minus());
-        auto mref = builder.mint_tmp_ref();
-        lnast->add_child(m, mref);
-        lnast->add_child(m, end_expr);
-        lnast->add_child(m, Lnast_node::create_const("1"));
-        end_node = mref;
-      }
-      return emit_range_node(Lnast_node::create_const("0"), end_node);
-    }
-    return Lnast_node::create_const("-1");
   }
-
-  if (!ts_node_is_null(index_n)) {
-    auto et = std::string_view(ts_node_type(index_n));
-    if (et == "expression_item") {
-      if (auto const_mask = make_range_mask(index_n)) {
-        if (const_width != nullptr) {
-          const auto& mv = Dlop::from_pyrope_cached(const_mask->get_name());
-          *const_width   = mv.is_integer() && !mv.is_negative() ? static_cast<int>(mv.popcount()) : 0;
-        }
-        return *const_mask;  // literal `lo..=hi` / `lo..<hi` / `lo..+n` → folded mask
-      }
-      if (expr_item_is_range(index_n)) {
-        return expr_to_node(index_n);  // runtime-bound range → `range` node (range_map)
-      }
-      if (const_width != nullptr) {
-        *const_width = 1;
-      }
-      return make_dynamic_mask(index_n);  // plain single-bit index expr → `1 << index`
-    }
-    if (auto const_mask = make_const_mask(index_n)) {
-      if (const_width != nullptr) {
-        *const_width = 1;
-      }
-      return *const_mask;
-    }
-    if (const_width != nullptr) {
-      *const_width = 1;  // a runtime single-bit index is still one bit
-    }
-    return make_dynamic_mask(index_n);
+  if (step != 1) {
+    report_error(sel_node,
+                 "bit-range-step",
+                 "unsupported",
+                 "stepped bit selection needs compile-time bounds",
+                 "use compile-time range bounds");
   }
-
-  return Lnast_node::create_const("-1");
+  result.emplace_back(lo, hi);
+  return result;
 }
 
 std::optional<Lnast_node> Prp2lnast::bit_range_lane_width(TSNode sel_node) {
@@ -12542,57 +12481,38 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
   TSNode type_node = child_by_field(n, "reduction");
   TSNode ext_node  = child_by_field(n, "extension");
 
-  Lnast_node mask_ref = compute_bit_mask_ref(sel_node);
-
-  // `(a, b)#[..]` selects every bit of the packing, so the mask is a no-op --
-  // and applying it anyway would COST the layout its declared width. The concat
-  // node records sum(window) as its result's declared type; a get_mask temp
-  // records nothing. That width is exactly what makes a nested pack a legal
-  // entry of an outer one (`(c, (l, h)#[..])#[..]`) and what the
-  // destination-width check compares a declared `z:u12` against, so the mask
-  // must not sit between them.
-  //
-  // Only the bare whole-vector select takes this path. A narrower select really
-  // is a select, and a reduction or `#sext` needs the ordinary node below to
-  // stamp its own result width -- neither can be an entry of an outer pack, so
-  // neither needs the declared width this preserves.
-  if (packed_base && ts_node_is_null(type_node) && ts_node_is_null(ext_node) && mask_ref.is_const()) {
-    const auto& mv = Dlop::from_pyrope_cached(mask_ref.get_name());
-    if (!mv.is_invalid() && mv.is_integer() && mv.is_just_i64() && mv.to_just_i64() == -1) {
-      return *packed_base;
+  int        selected_width = 0;
+  const auto ranges         = bit_selection_ranges(sel_node, &selected_width);
+  if (packed_base && ts_node_is_null(type_node) && ts_node_is_null(ext_node) && ranges.size() == 1 && ranges[0].first.is_const()
+      && ranges[0].first.get_name() == "0" && ranges[0].second.get_name() == "nil") {
+    return *packed_base;
+  }
+  std::vector<Lnast_node> parts;
+  for (const auto& [lo, hi] : ranges) {
+    auto get  = builder.add_child(Lnast_ntype::create_get_mask());
+    auto part = builder.mint_tmp_ref();
+    lnast->add_child(get, part);
+    lnast->add_child(get, base);
+    lnast->add_child(get, lo);
+    lnast->add_child(get, hi);
+    parts.push_back(part);
+  }
+  auto ref = parts.front();
+  if (parts.size() > 1) {
+    auto cat = builder.add_child(Lnast_ntype::create_concat());
+    ref      = builder.mint_tmp_ref();
+    lnast->add_child(cat, ref);
+    for (auto it = parts.rbegin(); it != parts.rend(); ++it) {
+      lnast->add_child(cat, *it);
+      lnast->add_child(cat, Lnast_node::create_const("1"));
     }
   }
-
-  auto idx = builder.add_child(Lnast_ntype::create_get_mask());
-  auto ref = builder.mint_tmp_ref();
-  lnast->add_child(idx, ref);
-  lnast->add_child(idx, base);
-  lnast->add_child(idx, mask_ref);
-
-  // A constant, non-negative mask selects a fixed width W = popcount(mask): type
-  // the result `uW` so `signed(x#[lo..=hi])`/`unsigned(...)` see a first-class
-  // width — even a high slice (`x#[32..=63]`, mask 0xFFFF_FFFF_0000_0000) whose
-  // mask exceeds int64 and so is invisible to the bitwidth pass. Open carve-outs
-  // (negative mask) and dynamic ranges keep their source-derived width.
-  if (mask_ref.is_const()) {
-    // from_pyrope_cached: the same range mask repeats thousands of times in
-    // generated (v2prp) code and can be 10^4+ bits wide — parse each distinct
-    // text once per thread instead of re-parsing per bit_selection.
-    const auto& mv = Dlop::from_pyrope_cached(mask_ref.get_name());
-    if (!mv.is_invalid() && mv.is_integer() && !mv.is_negative()) {
-      const int w = mv.popcount();
-      // Type every constant-mask slice, single bit included: `x#[3]` is `u1`, a
-      // bit VALUE — not a boolean. `if x#[0] { ... }` is therefore a type error
-      // (write `if x#[0] != 0`), matching `if 5 { }` being rejected. This keeps
-      // bool and int from silently mixing.
-      if (w >= 1) {
-        auto ts_idx = builder.add_child(Lnast_ntype::create_type_spec());
-        lnast->add_child(ts_idx, ref);
-        auto pt = lnast->add_child(ts_idx, Lnast_ntype::create_prim_type_int());
-        lnast->add_child(pt, Lnast_node::create_const(std::string(Dlop::get_mask_value(w)->to_pyrope())));  // max = 2^w-1
-        lnast->add_child(pt, Lnast_node::create_const("0"));                                                // min = 0
-      }
-    }
+  if (selected_width > 0) {
+    auto ts = builder.add_child(Lnast_ntype::create_type_spec());
+    lnast->add_child(ts, ref);
+    auto pt = lnast->add_child(ts, Lnast_ntype::create_prim_type_int());
+    lnast->add_child(pt, Lnast_node::create_const(Dlop::get_mask_value(selected_width)->to_pyrope()));
+    lnast->add_child(pt, Lnast_node::create_const("0"));
   }
 
   if (!ts_node_is_null(type_node)) {
@@ -12618,34 +12538,27 @@ Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
 
   // Sign/zero extension (`#sext[lo..=hi]` / `#zext[lo..=hi]`). `get_mask`
   // already produces the selected bits as an unsigned value packed LSB-first
-  // into positions 0..popcount(mask)-1, which IS the zero-extended result.
+  // into positions 0..selected_width-1, which IS the zero-extended result.
   // For sext we additionally sign-extend from the top selected bit: the
-  // packed slice's sign bit sits at position popcount(mask)-1, so emit a
+  // packed slice's sign bit sits at position selected_width-1, so emit a
   // `sext` whose position operand is that index (constprop folds it via
   // Dlop::sext_op, matching the graph Sext cell).
   if (!ts_node_is_null(ext_node)) {
     std::string_view et(ts_node_type(ext_node));
     if (et == "sign_extend") {
-      if (mask_ref.is_const()) {
-        const auto& mv = Dlop::from_pyrope_cached(mask_ref.get_name());
-        if (!mv.is_invalid() && mv.is_integer() && !mv.is_negative()) {
-          int sign_bit = mv.popcount() - 1;
-          if (sign_bit < 0) {
-            sign_bit = 0;
-          }
-          auto s_idx = builder.add_child(Lnast_ntype::create_sext());
-          auto s_ref = builder.mint_tmp_ref();
-          lnast->add_child(s_idx, s_ref);
-          lnast->add_child(s_idx, ref);
-          lnast->add_child(s_idx, Lnast_node::create_const(sign_bit));
-          return s_ref;
-        }
+      if (selected_width > 0) {
+        auto sx  = builder.add_child(Lnast_ntype::create_sext());
+        auto out = builder.mint_tmp_ref();
+        lnast->add_child(sx, out);
+        lnast->add_child(sx, ref);
+        lnast->add_child(sx, Lnast_node::create_const(selected_width - 1));
+        return out;
       } else {
         // Non-literal closed range `#sext[lo..=hi]`: the mask is a `range` ref
         // (non-const), so popcount isn't statically known — but the sign-bit
         // position equals `hi - lo` (= popcount(mask)-1 for a contiguous mask).
         // Emit `sext(ref, hi-lo)`; constprop folds the minus + sext once lo/hi
-        // resolve. (Mirror compute_bit_mask_ref's inclusive-range detection.)
+        // resolve. (Mirror bit_selection_ranges's inclusive-range detection.)
         TSNode idxn = child_by_field(sel_node, "index");
         if (!ts_node_is_null(idxn) && std::string_view(ts_node_type(idxn)) == "expression_item"
             && ts_node_named_child_count(idxn) == 3) {
@@ -12962,8 +12875,8 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
     // inside a longer text, so canonicalize that head: `` `x` `` names x.
     if (callee.size() > 2 && callee.front() == '`' && callee.back() != '`') {
       if (const auto close = callee.find('`', 1); close != std::string_view::npos) {
-        func_ref = Lnast_node::create_ref(
-            absl::StrCat(canonical_escaped_ident(callee.substr(0, close + 1)), callee.substr(close + 1)));
+        func_ref
+            = Lnast_node::create_ref(absl::StrCat(canonical_escaped_ident(callee.substr(0, close + 1)), callee.substr(close + 1)));
       } else {
         func_ref = Lnast_node::create_ref(callee);
       }
@@ -13448,8 +13361,8 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/, bool field_typ
       // Bare typed_identifier inside a tuple (no preceding decl keyword).
       // Treat as a positional ref slot.
       Item   it;
-      TSNode id = child_by_field(c, "identifier");
-      it.value  = ts_node_is_null(id) ? builder.mint_tmp_ref() : identifier_to_node(id, true);
+      TSNode id         = child_by_field(c, "identifier");
+      it.value          = ts_node_is_null(id) ? builder.mint_tmp_ref() : identifier_to_node(id, true);
       it.declares_field = true;
       items.push_back(std::move(it));
     } else if (t == "lambda" && !ts_node_is_null(child_by_field(c, "name"))) {

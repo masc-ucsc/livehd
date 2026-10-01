@@ -11,7 +11,6 @@
 // HHDS library stays free of LiveHD-specific encodings (Ntype_op bit-shift,
 // the "%dot.name" wire-naming scheme, etc.).
 
-#include "hlop/memory_init.hpp"
 #include <algorithm>
 #include <bit>
 #include <cstdint>
@@ -27,14 +26,14 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
 #include "absl/container/inlined_vector.h"
-
-
 #include "attrs.hpp"
 #include "cell.hpp"
 #include "hhds/attrs/name.hpp"
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
+#include "hlop/memory_init.hpp"
 
 // GCC's -Wdangling-reference heuristic flags `const T& x = f(temporary())`
 // for any `f` that returns a reference and takes one by reference, even when
@@ -145,8 +144,7 @@ struct Sink_driver {
   return out;
 }
 
-[[nodiscard]] inline absl::InlinedVector<Sink_driver<hhds::Occurrence_pin>, 4> inp_sink_drivers(
-    const hhds::Occurrence_node& node) {
+[[nodiscard]] inline absl::InlinedVector<Sink_driver<hhds::Occurrence_pin>, 4> inp_sink_drivers(const hhds::Occurrence_node& node) {
   absl::InlinedVector<Sink_driver<hhds::Occurrence_pin>, 4> out;
   if (node.is_invalid()) {
     return out;
@@ -198,8 +196,8 @@ template <typename Node>
   // the pairs come out in pin order. inp_sink_drivers serves BOTH the flat and
   // the hierarchical handle -- see its note -- which is why this stays a
   // template over `Node`.
-  auto               ins = inp_sink_drivers(node);
-  using Pin              = std::decay_t<decltype(ins[0].driver)>;
+  auto ins  = inp_sink_drivers(node);
+  using Pin = std::decay_t<decltype(ins[0].driver)>;
   Hotmux_inputs<Pin> result;
   Pin                pending;
   size_t             pid = 0;
@@ -269,16 +267,16 @@ inline constexpr std::string_view single_edge_phase_name = "single_edge_phase";
 }
 
 // pass/formal obligation-kind codes stored in the proven / runtime_check attrs.
-inline constexpr uint32_t kFormalOnehot       = 1;
-inline constexpr uint32_t kFormalAssert       = 2;
-inline constexpr uint32_t kFormalAssume       = 3;
-inline constexpr uint32_t kFormalAssertAlways = 4;
+inline constexpr uint32_t kFormalOnehot          = 1;
+inline constexpr uint32_t kFormalAssert          = 2;
+inline constexpr uint32_t kFormalAssume          = 3;
+inline constexpr uint32_t kFormalAssertAlways    = 4;
 // An input assume discharged by the HIERARCHY: proven at every occurrence this
 // design has, under the parents' actual bindings. That is a proof about the
 // design, not about the child def alone, so cgen elides the runtime check but
 // pass/lec must NOT seed a hypothesis from it when the child is compared on its
 // own (see pass/lec/encode.cpp).
-inline constexpr uint32_t kFormalAssumeHier   = 5;
+inline constexpr uint32_t kFormalAssumeHier      = 5;
 // An assume ACCEPTED without proof: `assume_nocheck`, or any assume under
 // formal.assume_check=false. Still an active hypothesis (pass/lec/encode.cpp),
 // but `lhd lec` discloses it as UNCHECKED, not proven -- the stamp, not the lec
@@ -329,13 +327,10 @@ inline constexpr uint32_t kFormalAssumeUnchecked = 6;
   }
   return *v;
 }
-[[nodiscard]] LIVEHD_NO_DANGLING inline const Dlop& const_of(const hhds::Occurrence_pin& pin) {
-  return const_of(pin.base_pin());
-}
+[[nodiscard]] LIVEHD_NO_DANGLING inline const Dlop& const_of(const hhds::Occurrence_pin& pin) { return const_of(pin.base_pin()); }
 // Nodes never carry a value: probing one is a compile error, not a silent 0.
 const Dlop&                                         const_of(const hhds::Node_class&)      = delete;
 const Dlop&                                         const_of(const hhds::Occurrence_node&) = delete;
-
 
 // hhds `NodeEntry::type` is 16 bits whose bit 0 is hhds's own per-node
 // `is_loop_break` cut flag. LiveHD stores `(op << 1) | loop_last` (see
@@ -702,14 +697,12 @@ inline void debug_check_pin_hint([[maybe_unused]] const hhds::Pin_class& dpin) {
                   is_uns ? "un" : "")
           .c_str());
   } else if (op == Ntype_op::Get_mask) {
-    auto mask = get_driver_of_sink_name(dpin.get_master_node(), "mask");
-    if (mask.is_const()) {
-      const auto& mv = const_of(mask);
-      if (!mv.is_negative() && !mv.has_unknowns()) {
-        const auto capacity = static_cast<int32_t>(mv.popcount());
-        I(capacity == 0 || nbits <= capacity,
-          std::format("Get_mask pin '{}' selects {} bits but is hinted at {}", wire_name(dpin), capacity, nbits).c_str());
-      }
+    const auto lo = get_driver_of_sink_name(dpin.get_master_node(), "lo");
+    const auto hi = get_driver_of_sink_name(dpin.get_master_node(), "hi");
+    if (lo.is_const() && hi.is_const()) {
+      const auto capacity = const_of(hi).to_just_i64() - const_of(lo).to_just_i64();
+      I(capacity > 0 && nbits <= capacity,
+        std::format("Get_mask pin '{}' selects {} bits but is hinted at {}", wire_name(dpin), capacity, nbits).c_str());
     }
   }
 #endif
@@ -1211,6 +1204,24 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
   return drivers.front();
 }
 
+// Constant half-open selection endpoints. Invalid/incomplete cells are declined
+// by analyses; producers validate the same invariant before connecting edges.
+template <class Node>
+[[nodiscard]] inline std::optional<std::pair<int, int>> bit_range(const Node& node) {
+  const auto lo = get_driver_of_sink_name(node, "lo");
+  const auto hi = get_driver_of_sink_name(node, "hi");
+  if (!lo.is_const() || !hi.is_const()) {
+    return std::nullopt;
+  }
+  const auto& l = const_of(lo);
+  const auto& h = const_of(hi);
+  if (!l.is_integer() || !h.is_integer() || !l.is_just_i64() || !h.is_just_i64() || l.has_unknowns() || h.has_unknowns()
+      || l.to_just_i64() < 0 || h.to_just_i64() <= l.to_just_i64() || h.to_just_i64() > std::numeric_limits<int>::max()) {
+    return std::nullopt;
+  }
+  return std::pair{static_cast<int>(l.to_just_i64()), static_cast<int>(h.to_just_i64())};
+}
+
 // File preloads are external state for hardware/formal, not constant ROM bits.
 template <class Node>
 [[nodiscard]] inline std::optional<hlop::Memory_image> memory_image_of(const Node& node) {
@@ -1350,16 +1361,7 @@ inline void set_type_op(const hhds::Node_class& node, Ntype_op op) {
   return node.create_sink_pin(pid);
 }
 
-// ---------------------------------------------------------------------------
-// Get_mask / Set_mask mask pin: the contiguous-window contract (graph/cell.hpp)
-// ---------------------------------------------------------------------------
-// The mask constant is either the window [lo, hi) or the literal -1 ("the whole
-// value"). These are the ONLY spellings the IR accepts, so every consumer reads
-// a window instead of scanning for runs.
-
-// The window CONSTANT for bits [lo, hi). `lo == 0 && hi <= 0` is rejected: a
-// mask that selects nothing is not a cell, it is a constant 0 the producer
-// should have folded.
+// Integer masks for bitwise operations. Get_mask/Set_mask use endpoint pins.
 [[nodiscard]] inline Dlop mask_window_const(int lo, int hi) {
   if (lo < 0 || hi <= lo) {
     throw std::invalid_argument("Get_mask/Set_mask window must be a non-empty [lo, hi) with lo >= 0");
@@ -1367,33 +1369,7 @@ inline void set_type_op(const hhds::Node_class& node, Ntype_op op) {
   return *Dlop::get_mask_value(hi - 1, lo);
 }
 
-// "The whole value": Get_mask(a, -1) is to-unsigned, Set_mask(a, -1, v) is v.
-[[nodiscard]] inline Dlop mask_whole_const() { return *Dlop::create_integer(-1); }
-[[nodiscard]] inline bool is_whole_value_mask(const Dlop& mask) {
-  return mask.is_integer() && !mask.has_unknowns() && mask.is_just_i64() && mask.to_just_i64() == -1;
-}
-
-// True for either legal spelling. A producer minting a mask pin passes through
-// here; a consumer normally asks mask_window() instead.
-[[nodiscard]] inline bool is_legal_mask(const Dlop& mask) {
-  if (!mask.is_integer() || mask.has_unknowns()) {
-    return false;
-  }
-  if (is_whole_value_mask(mask)) {
-    return true;
-  }
-  if (mask.is_negative()) {
-    return false;  // a carve-out other than -1 is not part of the IR
-  }
-  const auto [lo, hi] = mask.get_mask_range();  // {-1,-1} == noncontiguous
-  return lo >= 0 && hi > lo;
-}
-
-// The window as an OPTIONAL: empty for the -1 whole-value spelling (which has
-// no window) and for anything the contract forbids. This is the form for a
-// caller whose answer to "not a bit-field slice" is to DECLINE -- an analysis
-// that only ever refuses an optimization stays correct whatever it is handed,
-// so it needs no assert of its own and no hand-rolled contiguity test.
+// Recognize a non-empty contiguous bitwise mask as [lo, hi).
 [[nodiscard]] inline std::optional<std::pair<int, int>> mask_window_of(const Dlop& mask) {
   if (!mask.is_integer() || mask.has_unknowns() || mask.is_negative()) {
     return std::nullopt;
@@ -1406,19 +1382,11 @@ inline void set_type_op(const hhds::Node_class& node, Ntype_op op) {
 }
 
 [[noreturn]] inline void not_a_mask_window(const Dlop& mask) {
-  std::fprintf(stderr,
-               "livehd: Get_mask/Set_mask mask constant '%s' is neither a contiguous window nor the -1 whole-value "
-               "spelling (graph/cell.hpp)\n",
-               std::string(mask.to_pyrope()).c_str());
+  std::fprintf(stderr, "livehd: bitwise mask '%s' is not a contiguous non-empty range\n", std::string(mask.to_pyrope()).c_str());
   std::abort();
 }
 
-// The half-open [lo, hi) window of a mask constant. FAILS CLOSED on the -1
-// spelling (a caller that can handle "the whole value" must test for it first)
-// and on anything the contract forbids -- unconditionally, NOT through I():
-// silently treating a sparse mask as its bounding window would select bits the
-// cell never asked for, and that is a miscompile a release build must not make
-// quietly. A caller that simply declines uses mask_window_of instead.
+// A caller requiring a contiguous bitwise mask fails closed on other values.
 [[nodiscard]] inline std::pair<int, int> mask_window(const Dlop& mask) {
   const auto window = mask_window_of(mask);
   if (!window) {
@@ -1438,58 +1406,70 @@ inline void set_type_op(const hhds::Node_class& node, Ntype_op op) {
   return node;
 }
 
-// Validate before creating a node or changing any edges. These checks are not
-// debug assertions: consumers may only interpret a mask as one window or -1.
-inline void require_mask(const hhds::Pin_class& mask) {
-  if (!mask.is_const() || !is_legal_mask(const_of(mask))) {
-    throw std::invalid_argument("Get_mask/Set_mask requires a constant contiguous window or -1");
+// Endpoint operands are validated before mutating the graph. No mask-valued
+// constructor exists: a sparse source selection must already be expanded.
+inline void require_bit_range(int lo, int hi) {
+  if (lo < 0 || hi <= lo) {
+    throw std::invalid_argument("Get_mask/Set_mask requires 0 <= lo < hi");
   }
 }
 
-inline void connect_mask_operands(const hhds::Node_class& node, const hhds::Pin_class& value, const hhds::Pin_class& mask,
+inline void connect_bit_range(const hhds::Node_class& node, int lo, int hi) {
+  require_bit_range(lo, hi);
+  auto& graph = *node.get_graph();
+  setup_sink_by_name(node, "lo").connect_driver(create_const(graph, *Dlop::create_integer(lo)));
+  setup_sink_by_name(node, "hi").connect_driver(create_const(graph, *Dlop::create_integer(hi)));
+}
+
+inline void connect_mask_operands(const hhds::Node_class& node, const hhds::Pin_class& value, int lo, int hi,
                                   const hhds::Pin_class& replacement = {}) {
-  require_mask(mask);
+  require_bit_range(lo, hi);
   const auto op = type_op_of(node);
   if ((op != Ntype_op::Get_mask && op != Ntype_op::Set_mask) || value.is_invalid()
       || (op == Ntype_op::Set_mask && replacement.is_invalid())) {
     throw std::invalid_argument("invalid Get_mask/Set_mask operands");
   }
   setup_sink_by_name(node, "a").connect_driver(value);
-  setup_sink_by_name(node, "mask").connect_driver(mask);
+  connect_bit_range(node, lo, hi);
   if (op == Ntype_op::Set_mask) {
     setup_sink_by_name(node, "value").connect_driver(replacement);
   }
 }
 
-[[nodiscard]] inline hhds::Node_class create_get_mask(hhds::Graph& graph, const hhds::Pin_class& value,
-                                                      const hhds::Pin_class& mask) {
-  require_mask(mask);
+[[nodiscard]] inline hhds::Node_class create_get_mask(hhds::Graph& graph, const hhds::Pin_class& value, int lo, int hi) {
+  require_bit_range(lo, hi);
   if (value.is_invalid()) {
     throw std::invalid_argument("invalid Get_mask operand");
   }
   auto node = create_typed_node(graph, Ntype_op::Get_mask);
-  connect_mask_operands(node, value, mask);
+  connect_mask_operands(node, value, lo, hi);
   return node;
 }
 
-[[nodiscard]] inline hhds::Node_class create_get_mask(hhds::Graph& graph, const hhds::Pin_class& value, int lo, int hi) {
-  return create_get_mask(graph, value, create_const(graph, mask_window_const(lo, hi)));
+[[nodiscard]] inline hhds::Node_class create_get_mask(hhds::Graph& graph, const hhds::Pin_class& value, int bit) {
+  if (bit < 0 || bit == std::numeric_limits<int>::max()) {
+    throw std::invalid_argument("invalid bit position");
+  }
+  return create_get_mask(graph, value, bit, bit + 1);
 }
 
-[[nodiscard]] inline hhds::Node_class create_set_mask(hhds::Graph& graph, const hhds::Pin_class& value, const hhds::Pin_class& mask,
-                                                      const hhds::Pin_class& replacement) {
-  require_mask(mask);
+[[nodiscard]] inline hhds::Node_class create_set_mask(hhds::Graph& graph, const hhds::Pin_class& value,
+                                                      const hhds::Pin_class& replacement, int lo, int hi) {
+  require_bit_range(lo, hi);
   if (value.is_invalid() || replacement.is_invalid()) {
     throw std::invalid_argument("invalid Set_mask operands");
   }
   auto node = create_typed_node(graph, Ntype_op::Set_mask);
-  connect_mask_operands(node, value, mask, replacement);
+  connect_mask_operands(node, value, lo, hi, replacement);
   return node;
 }
 
-[[nodiscard]] inline hhds::Node_class create_set_mask(hhds::Graph& graph, const hhds::Pin_class& value, int lo, int hi,
-                                                      const hhds::Pin_class& replacement) {
-  return create_set_mask(graph, value, create_const(graph, mask_window_const(lo, hi)), replacement);
+[[nodiscard]] inline hhds::Node_class create_set_mask(hhds::Graph& graph, const hhds::Pin_class& value,
+                                                      const hhds::Pin_class& replacement, int bit) {
+  if (bit < 0 || bit == std::numeric_limits<int>::max()) {
+    throw std::invalid_argument("invalid bit position");
+  }
+  return create_set_mask(graph, value, replacement, bit, bit + 1);
 }
 
 // Per-pin offset (used by Get_mask / Set_mask / Sext positional ops, and IO-port
@@ -1723,7 +1703,7 @@ namespace ge_detail {
 // of a comparator/reduce, whose own output is a single bit.
 [[nodiscard]] inline uint64_t widest_operand(const hhds::Node_class& node) {
   uint64_t w = 0;
-  for (auto sink : node.inp_sorted_pins()) {  // read-only walk
+  for (auto sink : node.inp_sorted_pins()) {   // read-only walk
     for (auto drv : sink.get_driver_pins()) {  // PLURAL: max over drivers == max over the old edges
       const auto b = bits_of(drv);
       if (b > 0 && static_cast<uint64_t>(b) > w) {
@@ -1948,14 +1928,14 @@ struct Concat_lane {
     // out_width is the SUM of its lanes, so the default arm would charge the
     // whole assembled bus as logic and make any packing-heavy region look
     // enormous to the size windows.
-    case Ntype_op::Concat:
+    case Ntype_op::Concat  :
     case Ntype_op::Get_mask:
     case Ntype_op::Set_mask: return 0;
 
     case Ntype_op::Sub: return atleast1(ge_detail::sub_port_bits(node));
 
-    case Ntype_op::Div:
-    case Ntype_op::Rem:
+    case Ntype_op::Div   :
+    case Ntype_op::Rem   :
     case Ntype_op::Memory: return atleast1(ge_detail::port_bits_sum(node));
 
     case Ntype_op::Mult: {
@@ -1963,10 +1943,10 @@ struct Concat_lane {
       return w == 0 ? 1 : w * w;
     }
 
-    case Ntype_op::LT:
-    case Ntype_op::GT:
-    case Ntype_op::EQ:
-    case Ntype_op::Ror: return atleast1(ge_detail::widest_operand(node));
+    case Ntype_op::LT      :
+    case Ntype_op::GT      :
+    case Ntype_op::EQ      :
+    case Ntype_op::Ror     : return atleast1(ge_detail::widest_operand(node));
     case Ntype_op::Rxor    : return atleast1(reduction_count(node)) * 3;
     case Ntype_op::Popcount: return atleast1(reduction_count(node)) * 7;
 

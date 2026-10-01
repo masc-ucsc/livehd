@@ -60,29 +60,23 @@ TEST(NodeUtil, MaskConstructionChecksBeforeCreatingNodes) {
     }
     return count;
   };
-  for (auto mask : {gu::create_const(*graph, *Dlop::create_integer(0x55)),
-                    gu::create_const(*graph, *Dlop::create_integer(-5)),
-                    gu::create_const(*graph, *Dlop::create_integer(0)),
-                    gu::create_const(*graph, *Dlop::from_pyrope("0ub1?1")),
-                    value,
-                    hhds::Pin_class{}}) {
+  for (auto [lo, hi] : {
+           std::pair{-1, 3},
+           std::pair{ 4, 4},
+           std::pair{ 5, 2}
+  }) {
     const auto before = count_nodes();
-    EXPECT_THROW((void)gu::create_get_mask(*graph, value, mask), std::invalid_argument);
-    EXPECT_THROW((void)gu::create_set_mask(*graph, value, mask, value), std::invalid_argument);
+    EXPECT_THROW((void)gu::create_get_mask(*graph, value, lo, hi), std::invalid_argument);
+    EXPECT_THROW((void)gu::create_set_mask(*graph, value, value, lo, hi), std::invalid_argument);
     EXPECT_EQ(count_nodes(), before);
   }
-  EXPECT_THROW((void)gu::create_get_mask(*graph, value, -1, 3), std::invalid_argument);
-  EXPECT_THROW((void)gu::create_get_mask(*graph, value, 4, 4), std::invalid_argument);
   const auto get = gu::create_get_mask(*graph, value, 3, 70);
-  const auto set = gu::create_set_mask(*graph, value, 3, 70, value);
+  const auto set = gu::create_set_mask(*graph, value, value, 3, 70);
   for (auto node : {get, set}) {
     EXPECT_EQ(gu::get_driver_of_sink_name(node, "a"), value);
-    EXPECT_EQ(gu::mask_window(gu::const_of(gu::get_driver_of_sink_name(node, "mask"))), std::make_pair(3, 70));
+    EXPECT_EQ(*gu::bit_range(node), std::make_pair(3, 70));
   }
   EXPECT_EQ(gu::get_driver_of_sink_name(set, "value"), value);
-  const auto whole = gu::create_const(*graph, gu::mask_whole_const());
-  EXPECT_NO_THROW((void)gu::create_get_mask(*graph, value, whole));
-  EXPECT_NO_THROW((void)gu::create_set_mask(*graph, value, whole, value));
 }
 
 TEST(NodeUtil, TransparentInstanceLogicalNames) {

@@ -148,7 +148,7 @@ Per region (`Region_body` from the partition seam):
    same Lnet is what `pass.usyn` (`synth.mapper=usyn`) covers, with no ABC
    logic synthesis in between. Multi-bit module IO becomes per-bit ABC
    PIs/POs (the bit-blast boundary). Supported cells: `and/or/xor/not/ror`,
-   `mux/hotmux`, `get_mask/set_mask/sext` (constant mask/position), `sum` +
+   `mux/hotmux`, `get_mask/set_mask/sext` (constant endpoints/position), `sum` +
    `lt/gt/eq` (via the selectable adder library, 2i-abc_arith), `mult` (a simple
    single-cycle array multiplier whose partial-product additions reuse the
    selectable adder; sign/zero-extended to the magnitude width then multiplied

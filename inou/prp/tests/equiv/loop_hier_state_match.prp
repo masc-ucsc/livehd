@@ -30,7 +30,7 @@ pub mod top(d:U8, addr:U1, write_mask:U2) -> (q:U8@[0]) {
     const lane_q = lane(  // lane::[name=lane_q] is redundant (defailts to lhs variable)
       x=(d >> (ordinal * 4)) & 0xf,
       addr=addr,
-      we=write_mask#[ordinal],
+      we=write_mask#[ordinal] != 0,
     )
     packed = packed | (lane_q << (ordinal * 4))
   }

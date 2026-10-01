@@ -320,44 +320,6 @@ static std::string format_interp_value(const Dlop& v, std::string_view spec, con
   return out;
 }
 
-// get_mask is Pyrope's default-zext bit-select (the "force" operator): with a
-// non-negative mask the extracted bits are packed LSB-first as an UNSIGNED
-// value, so the fold is never negative (only the explicit `#sext` form may be).
-// The range-based mask evaluator produces that; this wrapper exists only for the
-// X-plane rebuild below.
-static Dlop get_mask_x_plane(const Dlop& value, const Dlop& mask) {
-  // Dlop's multiword get_mask path historically lost the extra (unknown) plane
-  // for a wide positive mask: selecting bits 361..721 from a u1008 all-X value
-  // returned 361 known ones.  Besides being a needlessly hostile X refinement,
-  // that makes a Verilog -> Pyrope round trip disagree with the source under
-  // Yosys/lgcheck (the source keeps `?`, the folded Pyrope commits to ones).
-  //
-  // Rebuild positive-mask selections containing X bit-by-bit.  This is the
-  // exact get_mask contract (selected source positions packed LSB-first), and
-  // it uses Dlop's sign-extending bit accessors, so an unknown sign bit remains
-  // unknown above the stored words while a known 0/1 sign extends normally.
-  // Known-only values stay on Dlop's faster path; negative-mask carve-outs keep
-  // their existing specialized semantics.
-  if (value.has_unknowns() && !mask.has_unknowns() && !mask.is_negative()) {
-    std::string low_to_high;
-    const int   mask_bits = mask.get_signed_bits();
-    low_to_high.reserve(static_cast<size_t>(std::max(mask_bits, 0)));
-    for (int pos = 0; pos < mask_bits; ++pos) {
-      if (!mask.bit_test(pos)) {
-        continue;
-      }
-      low_to_high.push_back(value.unknown_bit_test(pos) ? '?' : (value.bit_test(pos) ? '1' : '0'));
-    }
-    if (low_to_high.empty()) {
-      return *Dlop::create_integer(0);
-    }
-    std::reverse(low_to_high.begin(), low_to_high.end());
-    return *Dlop::from_pyrope(std::string{"0ub"} + low_to_high);
-  }
-
-  return livehd::eval_get_mask(value, mask);
-}
-
 Dlop uPass_constprop::apply_range_mask(const Dlop& value, const Dlop& start, const Dlop& end) {
   // Bit-slice `value#[start..=end]` (and the open `value#[start..]` when `end`
   // is nil). Everything stays in Dlop arithmetic — no is_i/to_i, no int round-
@@ -407,8 +369,10 @@ Dlop uPass_constprop::apply_range_mask(const Dlop& value, const Dlop& start, con
     neg_index_error("a descending bit/array range");
     return *Dlop::create_integer(0);  // negative-width (empty) slice — degenerate
   }
-  auto mask = one->shl_op(*width)->sub_op(*one)->shl_op(start);
-  return get_mask_x_plane(value, *mask);
+  if (!start.is_just_i64() || !end.is_just_i64() || end.to_just_i64() >= std::numeric_limits<int>::max()) {
+    return Dlop{};
+  }
+  return livehd::eval_get_mask(value, static_cast<int>(start.to_just_i64()), static_cast<int>(end.to_just_i64() + 1));
 }
 
 uPass_constprop::uPass_constprop(std::shared_ptr<upass::Lnast_manager>& _lm) : uPass(_lm) {
@@ -3920,9 +3884,7 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
     }
   } else {
     // Scalar pins, named or positional. Order by sink pid (cell.cpp pin
-    // order) and pack densely — get_mask/set_mask number their pins with gaps
-    // (a=0, mask=2, value=4), but the kernels take a compact (a, mask[,
-    // value]) list, which the pid sort reproduces.
+    // order) and pack densely: selections use a=0, lo=2, hi=3, value=4.
     std::vector<std::pair<hhds::Port_id, const Dlop*>> slots;
     slots.reserve(actuals.size());
     for (std::size_t i = 0; i < actuals.size(); ++i) {
@@ -4033,13 +3995,31 @@ bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view 
       matched = true;
     }
   } else if (op == "get_mask") {
-    if (need_n(2)) {
-      result  = get_mask_x_plane(args[0], args[1]);
+    if ((need_n(2) || need_n(3)) && args[1].is_just_i64() && (need_n(2) || args[2].is_just_i64())) {
+      const auto lower = args[1].to_just_i64();
+      if (lower < 0 || lower >= std::numeric_limits<int>::max()) {
+        return false;
+      }
+      const auto upper = need_n(2) ? lower + 1 : args[2].to_just_i64();
+      if (upper <= lower || upper > std::numeric_limits<int>::max()) {
+        return false;
+      }
+      const int lo = static_cast<int>(lower), hi = static_cast<int>(upper);
+      result  = livehd::eval_get_mask(args[0], lo, hi);
       matched = true;
     }
   } else if (op == "set_mask") {
-    if (need_n(3)) {
-      result  = livehd::eval_set_mask(args[0], args[1], args[2]);
+    // Named cell operands are sorted by graph pin: a, lo, hi, value.
+    if ((need_n(3) || need_n(4)) && args[1].is_just_i64() && (need_n(3) || args[2].is_just_i64())) {
+      const auto lo = args[1].to_just_i64();
+      if (lo < 0 || lo >= std::numeric_limits<int>::max()) {
+        return false;
+      }
+      const auto hi = need_n(3) ? lo + 1 : args[2].to_just_i64();
+      if (lo < 0 || hi <= lo || hi > std::numeric_limits<int>::max()) {
+        return false;
+      }
+      result  = livehd::eval_set_mask(args[0], args.back(), static_cast<int>(lo), static_cast<int>(hi));
       matched = true;
     }
   } else if (op == "lt") {
@@ -4308,8 +4288,7 @@ void uPass_constprop::process_func_call() {
     // error, not an internal invariant: decode it up front and fold only on
     // a valid one.
     std::optional<hlop::Memory_image> source;
-    if (actuals && actuals->size() == 2 && !(*actuals)[1].is_named && !(*actuals)[1].is_bundle
-        && (*actuals)[1].value.is_string()) {
+    if (actuals && actuals->size() == 2 && !(*actuals)[1].is_named && !(*actuals)[1].is_bundle && (*actuals)[1].value.is_string()) {
       source = hlop::memory_image((*actuals)[1].value.to_string());
     }
     if (!source || (*actuals)[0].is_named || (*actuals)[0].is_bundle || !(*actuals)[0].value.is_string()
@@ -6013,14 +5992,7 @@ bool uPass_constprop::report_reduction_nonint(upass::Src_span src) {
 
 upass::Vote uPass_constprop::process_get_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   propagate_poison(dst_name, src);  // 2c-shortcircuit: this hook bypasses the push_* templates
-  // Layout: ref(dst), ref(value), (const|ref)(mask)
-  // The mask operand may be:
-  //   - a constant integer / known scalar (treated as a bitmask),
-  //   - a `range` ref carrying folded "rng_s"/"rng_e" bounds (`b#[lo..]`,
-  //     `b#[lo..=hi]`, `b#[..=hi]`, etc.).
-  // Range refs lower via apply_range_mask, which routes open-ended `lo..`
-  // through sra_op (skipping get_mask_op's broken negative-mask path) and
-  // closed `lo..=hi` through get_mask_op with the equivalent positive mask.
+  // Layout: dst, value, lo, [hi]; missing hi selects one bit.
   (void)dst;
   if (dst_name.empty() || src.size() < 2) {
     return classify_vote();
@@ -6078,51 +6050,23 @@ upass::Vote uPass_constprop::process_get_mask(std::string_view dst_name, Bundle&
     }
   }
 
-  bool is_range = false;
-  Dlop range_start;
-  Dlop range_end;
-  Dlop mask;
-  if (!src[1].name.empty() && src[1].bundle && !src[1].bundle->get_attr("rng_s").is_invalid()) {
-    is_range    = true;
-    range_start = src[1].bundle->get_attr("rng_s");
-    range_end   = src[1].bundle->get_attr("rng_e");
-  } else {
-    mask = operand_value(src[1]);
+  const Dlop lo = operand_value(src[1]);
+  Dlop       hi = src.size() >= 3 ? operand_value(src[2]) : *lo.add_op(*Dlop::create_integer(1));
+  if (hi.is_nil() && is_numeric(value)) {
+    hi = *Dlop::create_integer(value.get_signed_bits());
   }
-
-  // Delegate to Dlop: a value with unknown bits is sliced bit-precisely by
-  // get_mask_op, so only non-values (invalid/string) are skipped here.
-  if (!is_numeric(value)) {
+  if (!is_numeric(value) || !lo.is_integer() || !hi.is_integer() || !lo.is_just_i64() || !hi.is_just_i64() || lo.has_unknowns()
+      || hi.has_unknowns() || lo.to_just_i64() < 0 || hi.to_just_i64() < lo.to_just_i64()
+      || hi.to_just_i64() > std::numeric_limits<int>::max()) {
     return classify_vote();
   }
-
-  if (is_range) {
-    const Dlop result = apply_range_mask(value, range_start, range_end);
-    if (!result.is_invalid()) {
-      store_trivial(var, result);
-    }
-    return classify_vote();
-  }
-
-  // The mask may itself carry unknown bits — get_mask_op handles that
-  // (returns a sound bounded-width unknown), so don't pre-filter it.
-  if (!is_numeric(mask)) {
-    return classify_vote();
-  }
-  // get_mask is the default zext select, so a single set bit reads as the
-  // unsigned 1 (never -1; `#sext` sign-extends via a separate sext node). We
-  // store whatever it returns (invalid included): the fold is real and
-  // downstream code shouldn't silently drop it.
-  store_trivial(var, get_mask_x_plane(value, mask));
+  store_trivial(var, livehd::eval_get_mask(value, static_cast<int>(lo.to_just_i64()), static_cast<int>(hi.to_just_i64())));
   return classify_vote();
 }
 
 upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   propagate_poison(dst_name, src);  // 2c-shortcircuit: this hook bypasses the push_* templates
-  // Layout: ref(dst), ref(input), (const|ref)(mask), (const|ref)(value)
-  // Mirrors process_get_mask but writes back via set_mask_op. The mask
-  // operand can be a constant integer (treated as a bitmask) or a `range`
-  // ref carrying folded "rng_s"/"rng_e" bounds (lo..hi closed; `lo..` open).
+  // Layout: dst, input, value, lo, [hi]; missing hi replaces one bit.
   (void)dst;
   if (dst_name.empty() || src.size() < 3) {
     return classify_vote();
@@ -6161,52 +6105,15 @@ upass::Vote uPass_constprop::process_set_mask(std::string_view dst_name, Bundle&
     return classify_vote();
   };
 
-  bool is_range = false;
-  Dlop range_start;
-  Dlop range_end;
-  Dlop mask;
-  if (!src[1].name.empty() && src[1].bundle && !src[1].bundle->get_attr("rng_s").is_invalid()) {
-    is_range    = true;
-    range_start = src[1].bundle->get_attr("rng_s");
-    range_end   = src[1].bundle->get_attr("rng_e");
-  } else {
-    mask = operand_value(src[1]);
-  }
-
-  Dlop new_val = operand_value(src[2]);
-
-  // Delegate to Dlop: both the input being written into and the value being
-  // written may carry unknown bits — set_mask_op_opt tracks them bit-precisely.
-  // Only the *mask* (which bits to write) must be concrete (see below).
-  if (!is_numeric(input_val) || !is_numeric(new_val)) {
+  const Dlop new_val = operand_value(src[1]);
+  const Dlop lo      = operand_value(src[2]);
+  const Dlop hi      = src.size() >= 4 ? operand_value(src[3]) : *lo.add_op(*Dlop::create_integer(1));
+  if (!is_numeric(input_val) || !is_numeric(new_val) || !lo.is_integer() || !hi.is_integer() || !lo.is_just_i64()
+      || !hi.is_just_i64() || lo.has_unknowns() || hi.has_unknowns() || lo.to_just_i64() < 0 || hi.to_just_i64() < lo.to_just_i64()
+      || hi.to_just_i64() > std::numeric_limits<int>::max()) {
     return decline_runtime_redefine();
   }
-
-  Dlop final_mask;
-  if (is_range) {
-    if (range_end.is_nil()) {
-      // Open-ended `lo..`: bits lo and above. For set_mask we need a concrete
-      // bitmask, but the upper bound isn't fixed. Skip — without a pinned
-      // width there's no concrete mask to emit.
-      return decline_runtime_redefine();
-    }
-    // mask = ((1 << (end - start + 1)) - 1) << start — all Dlop arithmetic,
-    // no to_i / width / range guards (mirrors apply_range_mask).
-    auto one   = Dlop::create_integer(1);
-    auto width = range_end.sub_op(range_start)->add_op(*one);
-    final_mask = *one->shl_op(*width)->sub_op(*one)->shl_op(range_start);
-  } else {
-    // The mask selects *which* bits to overwrite and must be concrete before
-    // converting it to a contiguous range. This is a precondition on the
-    // bit-selection, not a value pre-filter — the
-    // data operands (input_val/new_val) above already pass unknowns through.
-    if (!foldable(mask)) {
-      return decline_runtime_redefine();
-    }
-    final_mask = mask;
-  }
-
-  Dlop result = livehd::eval_set_mask(input_val, final_mask, new_val);
+  Dlop result = livehd::eval_set_mask(input_val, new_val, static_cast<int>(lo.to_just_i64()), static_cast<int>(hi.to_just_i64()));
   if (base_type && base_type->bits > 0) {
     if (base_type->kind == upass::decl_facts::Num::signed_int) {
       result = upass::bitwidth::wrap_to_signed(result, base_type->bits);

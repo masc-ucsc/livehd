@@ -1,0 +1,20 @@
+/*
+:name: style_likely_unrolled_loop
+:type: style
+:style: likely-unrolled-loop
+:style_args: --min-repeats 3
+:help: loop
+*/
+// Copies whose literals/indices advance by a fixed stride: an unrolled loop.
+comb f(data:U32) -> (o:U32) {
+  mut r:U32 = 0
+  const t0 = data#[0..=7]  // locate_style_likely-unrolled-loop
+  wrap r += t0
+  const t1 = data#[8..=15]
+  wrap r += t1
+  const t2 = data#[16..=23]
+  wrap r += t2
+  const t3 = data#[24..=31]
+  wrap r += t3
+  o = r
+}

@@ -117,7 +117,7 @@ struct Connection {
 constexpr std::string_view kEntryPrefix = "__lhdmem_h64617461_e.data[";
 // The lowered storage array inside the memory instance: entry N is the flop
 // `_mem[N]` (core/bus_name.hpp), so the whole-design name is `<memory>._mem[N]`.
-constexpr std::string_view kStorageBus = "_mem";
+constexpr std::string_view kStorageBus  = "_mem";
 
 bool all_digits(std::string_view v) {
   return !v.empty() && std::ranges::all_of(v, [](char c) { return c >= '0' && c <= '9'; });
@@ -264,7 +264,7 @@ void merge_entry_lanes(hhds::Graph& g, int64_t mem_bits) {
       const auto& l  = lanes[i];
       const int   w  = l.hi - l.lo;
       auto        gm = gu::create_typed_node(g, Ntype_op::Get_mask);
-      livehd::graph_util::connect_mask_operands(gm, q, gu::create_const(g, gu::mask_window_const(l.lo, l.hi)));
+      livehd::graph_util::connect_mask_operands(gm, q, l.lo, l.hi);
       q_slice[i] = gm.create_driver_pin(0);
       gu::set_bits(q_slice[i], w);
       gu::set_unsign(q_slice[i]);

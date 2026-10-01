@@ -84,3 +84,16 @@ distinct logical names or use ordinary named instances. LEC rejects ambiguous
 state cuts instead of merging them, and semdiff leaves a compare-point key that
 repeats on one side undecidable. Replicated loop instances must retain their
 ordinary occurrence names/ordinals; they are not transparent wrappers.
+
+### Bit selection cells
+
+`Get_mask(a, lo, hi)` returns the unsigned bits in `[lo, hi)`.
+`Set_mask(a, value, lo, hi)` replaces that window with the low `hi-lo` bits
+of `value`, preserving the other bits of `a`. Graph pins are `a=0`, `lo=2`,
+`hi=3`, and `value=4` (Set_mask only). Endpoints are constant, nonnegative,
+and satisfy `lo < hi`.
+
+The single-bit construction helpers expand `bit` to `[bit, bit+1)`.
+Sparse source selections lower to individual selections and insertions (or
+concatenation); runtime endpoints lower to shifts and bitwise operations.
+There is no mask-valued operand or whole-value sentinel.

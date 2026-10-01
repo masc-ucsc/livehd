@@ -67,13 +67,13 @@ using livehd::graph_util::type_op_of;
 // (INPUT_NODE / OUTPUT_NODE / CONST_NODE) occupy 0..3; user nodes start at 4.
 [[nodiscard]] inline uint32_t idx_of(const hhds::Node_class& n) { return static_cast<uint32_t>(n.get_debug_nid() >> 2); }
 
-constexpr uint8_t kPresent      = 1;   // a live node of this def's body
-constexpr uint8_t kPart         = 2;   // is_partitionable
-constexpr uint8_t kSeeded       = 4;   // a source-seeded (block-attr) node: a wall
-constexpr uint8_t kLoopBreak    = 8;   // flop / memory / latch / stateful sub
-constexpr uint8_t kArithCut     = 16;  // Mult/Div, Sum wider than 8: its own color
-constexpr uint8_t kConstMaskGet = 32;  // Get_mask with a CONSTANT mask
-constexpr uint8_t kRuntimeSra   = 64;  // SRA with a runtime amount (barrel)
+constexpr uint8_t kPresent      = 1;    // a live node of this def's body
+constexpr uint8_t kPart         = 2;    // is_partitionable
+constexpr uint8_t kSeeded       = 4;    // a source-seeded (block-attr) node: a wall
+constexpr uint8_t kLoopBreak    = 8;    // flop / memory / latch / stateful sub
+constexpr uint8_t kArithCut     = 16;   // Mult/Div, Sum wider than 8: its own color
+constexpr uint8_t kConstMaskGet = 32;   // Get_mask with a CONSTANT mask
+constexpr uint8_t kRuntimeSra   = 64;   // SRA with a runtime amount (barrel)
 constexpr uint8_t kDead         = 128;  // combinational, observed by no output/state/instance
 
 // The register / memory sink pids this file decodes, spelled ONCE. Not asked of
@@ -107,24 +107,24 @@ struct Cone_stats {
   uint64_t merges = 0, refused = 0;
   uint64_t max_pred = 0, over_max = 0;
   uint64_t fwd_merges = 0, fwd_refused = 0, fwd_max_chain = 0;
-  uint64_t dead       = 0;               // dead combinational nodes (shape no region)
-  uint64_t ctrl_small = 0;               // control groups under min_nodes left to data
+  uint64_t dead       = 0;                                  // dead combinational nodes (shape no region)
+  uint64_t ctrl_small = 0;                                  // control groups under min_nodes left to data
   uint64_t absorbed = 0, absorb_left = 0, absorb_ctrl = 0;  // small data colors folded / left alone / into control
 };
 
 // One def's cone state. Every array is indexed by idx_of(); every phase after
 // prepare() reads only these arrays.
 struct Cones {
-  hhds::Graph* g        = nullptr;
-  uint64_t     max_gate = 0;
+  hhds::Graph* g            = nullptr;
+  uint64_t     max_gate     = 0;
   bool         flop_to_flop = false;  // walks and the overlap merge ignore max_gate
-  Forward_mode forward  = Forward_mode::off;
+  Forward_mode forward      = Forward_mode::off;
 
   bool                  ctrl_cones    = false;
   bool                  mux_in_data   = false;
   bool                  stop_arith    = true;
   uint64_t              ctrl_max_gate = 0, ctrl_min_gate = 0;
-  uint32_t              min_nodes = 0;  // no emitted color below this many nodes (0: no floor)
+  uint32_t              min_nodes  = 0;  // no emitted color below this many nodes (0: no floor)
   uint32_t              ctrl_count = 0, ctrl_mux_groups = 0, ctrl_enable_groups = 0;
   uint64_t              ctrl_roots = 0, ctrl_empty = 0, ctrl_nodes = 0;
   uint64_t              ctrl_largest = 0, ctrl_pred = 0;
@@ -132,14 +132,14 @@ struct Cones {
   // at most one: the mint loop claims each index exactly once.
   std::vector<uint32_t> ctrl_member;
 
-  bool is_ctrl(uint32_t c) const { return c != 0 && c <= ctrl_count; }
+  bool     is_ctrl(uint32_t c) const { return c != 0 && c <= ctrl_count; }
   // A color is SMALL when it has fewer than min_nodes nodes AND predicts at
   // most this much AIG. A few-node color can hold one heavy operation (a wide
   // multiplier a truncated walk left behind): it is a real region, and folding
   // several of them together would build a monster.
   // Raw cones (max_gate=0, no merge at all) keep every color: nothing is small.
   uint64_t small_limit() const { return max_gate / 64; }
-  bool is_mux(uint32_t n) const {
+  bool     is_mux(uint32_t n) const {
     return n < op.size() && (static_cast<Ntype_op>(op[n]) == Ntype_op::Mux || static_cast<Ntype_op>(op[n]) == Ntype_op::Hotmux);
   }
   bool control_cut(uint32_t n) const {
@@ -1401,7 +1401,7 @@ void Color_synth::label_cones(hhds::Graph* g) {
       }
       const auto op = type_op_of(node);
       cn.op[i]      = static_cast<uint8_t>(op);
-      if (op == Ntype_op::Get_mask && graph_util::get_driver_of_sink_name(node, "mask").is_const()) {
+      if (op == Ntype_op::Get_mask && graph_util::bit_range(node).has_value()) {
         f |= kConstMaskGet;
       } else if (op == Ntype_op::SRA && graph_util::shift_mux_count(node) != 0) {
         f |= kRuntimeSra;

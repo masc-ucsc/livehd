@@ -1,0 +1,12 @@
+/*
+:name: sparse_bit_write_explicit
+:type: equiv
+:lec_top: sparse_bit_write
+*/
+pub comb sparse_bit_write(x:U8, value:U4) -> (y:U8) {
+  y = x
+  y#[0] = value#[0]
+  y#[2] = value#[1]
+  y#[4] = value#[2]
+  y#[6] = value#[3]
+}

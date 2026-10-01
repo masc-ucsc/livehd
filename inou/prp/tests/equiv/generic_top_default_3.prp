@@ -5,9 +5,9 @@
 */
 
 pub mod generic_top_default<MODE="add", N=3>(a:U8) -> (y:U9@[0]) {
-  if MODE == "add" {
-    y = a + N
+  y = if MODE == "add" {
+    a + N
   } else {
-    y = a
+    a
   }
 }

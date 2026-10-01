@@ -91,7 +91,10 @@ TEST(CpropOpSharingProof, MixedSignsAndNarrowObservation) {
           gu::set_sbits(n.create_driver_pin(0), 3);
         }
         if (op == Ntype_op::Get_mask) {
-          gu::connect_mask_operands(n, ref->get_input_pin(name), constant(7));
+          gu::connect_mask_operands(n,
+                                    ref->get_input_pin(name),
+                                    livehd::graph_util::mask_window(livehd::graph_util::const_of(constant(7))).first,
+                                    livehd::graph_util::mask_window(livehd::graph_util::const_of(constant(7))).second);
         } else {
           gu::setup_sink_pid(n, 0).connect_driver(ref->get_input_pin(name));
           gu::setup_sink_pid(n, Ntype::sink_bank_count(op) == 1 || op == Ntype_op::Sum ? 0 : 1)

@@ -1,10 +1,10 @@
 /*
 :name: loop_capture_constants
 :type: simulation
-:expect_instances: u_loop_0=2 *=3
+:expect_instances: u_loop_0=2 *=2
 */
-// Two nested loop bodies plus the generated bounds-check assertion. Captured width and domain constants must stay local
-// constants, and must not prevent either loop from remaining compact.
+// Two nested loop bodies; the fixed-width selection needs no range assertion.
+// Captured constants must stay local and keep both loops compact.
 mod loop_capture_constants(x:U8) -> (total:U16@[0]) {
   comptime const OUTER = 3
   comptime const INNER = 4

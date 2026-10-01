@@ -56,17 +56,12 @@ using livehd::graph_util::const_of;
 // A graph-boundary mask can remain to preserve a declared port width even
 // when it changes no value. Emit that identity without an intermediate net.
 bool unsigned_mask_identity(const hhds::Node_class& node) {
-  auto a = livehd::graph_util::get_driver_of_sink_name(node, "a");
-  auto m = livehd::graph_util::get_driver_of_sink_name(node, "mask");
-  if (a.is_invalid() || a.is_const() || !is_unsign(a) || bits_of(a) <= 0 || !m.is_const()) {
+  auto       a = livehd::graph_util::get_driver_of_sink_name(node, "a");
+  const auto m = livehd::graph_util::bit_range(node);
+  if (a.is_invalid() || a.is_const() || !is_unsign(a) || bits_of(a) <= 0 || !m.has_value()) {
     return false;
   }
-  const auto& mask = const_of(m);
-  if (!mask.is_integer() || mask.has_unknowns() || mask.is_negative()) {
-    return false;
-  }
-  auto [lo, hi] = mask.get_mask_range();
-  return lo == 0 && hi >= bits_of(a) && bits_of(node.get_driver_pin(0)) == bits_of(a);
+  return m->first == 0 && m->second >= bits_of(a) && bits_of(node.get_driver_pin(0)) == bits_of(a);
 }
 
 // Emit a constant as Verilog. hlop's Dlop::to_verilog() formats a NEGATIVE
@@ -1720,9 +1715,9 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
                                      && (mem_undef_dpin.is_invalid() || const_of(mem_undef_dpin).is_known_zero());
 
     std::string name;
-    name = absl::StrCat(name, "cgen_memory_", single_clock ? "" : "multiclock_");
-    name = absl::StrCat(name, eff_rd, "rd_");
-    name = absl::StrCat(name, eff_wr, "wr");
+    name                   = absl::StrCat(name, "cgen_memory_", single_clock ? "" : "multiclock_");
+    name                   = absl::StrCat(name, eff_rd, "rd_");
+    name                   = absl::StrCat(name, eff_wr, "wr");
     // A large restored array can have thousands of read and write ports. When
     // both collision matrices are known zero (`ordering="old"`), emitting the
     // generic O(reads*writes) forwarding ladder is dead code and can grow into
@@ -2217,20 +2212,11 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
     auto a_dpin = get_driver(find_sink_pin(node, "a"));
     auto a      = get_expression(a_dpin);
 
-    auto mask_dpin = get_driver(find_sink_pin(node, "mask"));
-    I(mask_dpin.is_const());
-    const auto& mask_v = const_of(mask_dpin);
-    I(!mask_v.has_unknowns());
+    const auto range = livehd::graph_util::bit_range(node);
+    I(range);
 
-    if (mask_v.is_known_zero()) {
-      final_expr = a;
-    } else {
-      // graph/cell.hpp: a mask pin is ONE window or the -1 "whole value"
-      // spelling, which for Set_mask means `= value` -- i.e. the window that
-      // covers the whole result.
-      auto [range_begin, range_end] = livehd::graph_util::is_whole_value_mask(mask_v)
-                                          ? std::pair<int, int>{0, static_cast<int>(bits_of(dpin))}
-                                          : livehd::graph_util::mask_window(mask_v);
+    {
+      auto [range_begin, range_end] = *range;
       if (range_end > static_cast<int>(bits_of(dpin))) {
         range_end = bits_of(dpin);
       }
@@ -2286,10 +2272,8 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       }
     }
   } else if (op == Ntype_op::Get_mask) {
-    auto mask_dpin = get_driver(find_sink_pin(node, "mask"));
-    I(mask_dpin.is_const());
-    const auto& mask_v = const_of(mask_dpin);
-    I(!mask_v.has_unknowns());
+    const auto range = livehd::graph_util::bit_range(node);
+    I(range);
 
     auto a_dpin   = get_driver(find_sink_pin(node, "a"));
     auto a_bits   = bits_of(a_dpin);
@@ -2310,29 +2294,9 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
       // InvalidSelectExpression / "lhd lec ERROR" category). The select is fully
       // determined at generation time, so apply the mask to the constant directly
       // and emit the resulting literal (the value cprop would have folded to).
-      final_expr = const_to_verilog(livehd::eval_get_mask(const_of(a_dpin), mask_v));
-    } else if (mask_v.is_just_i64() && mask_v.to_just_i64() == -1) {
-      if (a_bits > 0 && !is_unsign(a_dpin)) {
-        // To-positive of a signed driver: a plain copy sign-extends when the
-        // unsigned LHS is wider (e.g. 1-bit signed ~(|b) into a 2-bit reg).
-        // AND with an unsigned mask of the driver's width so the expression
-        // turns unsigned and zero-extends — get_mask(a,-1) == zext(a).
-        std::string m;
-        if (auto rem = a_bits % 4; rem != 0) {
-          m += absl::StrCat((1 << rem) - 1);
-        }
-        m.append(a_bits / 4, 'f');
-        final_expr = absl::StrCat("(", a, " & ", a_bits, "'h", m, ")");
-      } else if (bits_of(dpin) > a_bits && a_bits > 0) {
-        final_expr = absl::StrCat("{{", bits_of(dpin) - a_bits, "{1'b0}},", a, "}");
-      } else if (bits_of(dpin) > 0 && a_bits > bits_of(dpin)) {
-        final_expr = absl::StrCat(a, "[", bits_of(dpin) - 1, ":0]");
-      } else {
-        final_expr = a;
-      }
+      final_expr = const_to_verilog(livehd::eval_get_mask(const_of(a_dpin), range->first, range->second));
     } else {
-      // The -1 "whole value" spelling was handled above, so this is a window.
-      auto [range_begin, range_end] = livehd::graph_util::mask_window(mask_v);
+      auto [range_begin, range_end] = *range;
       int32_t a_bits_to_use         = static_cast<int32_t>(range_end - range_begin);
       if (a_bits_to_use > bits_of(dpin)) {
         range_end = bits_of(dpin) + range_begin;

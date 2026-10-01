@@ -180,8 +180,10 @@ int run_style(const lhd::Options& opts) {
       }
       for (const auto& f : report.findings) {
         auto b = livehd::diag::Builder(livehd::diag::Severity::info, "lhd.pyrope.style", style::rule_name(f.rule), "syntax");
+        // Every hint ends with the exact tag that silences the finding.
+        const auto silence = std::format("silence with '// prp-style-allow {}'", style::rule_name(f.rule));
         if (f.rule != style::Rule::RepeatedCode && f.rule != style::Rule::LikelyUnrolledLoop) {
-          b.at(style_span(path, f.range)).msg("{}", f.message).hint(f.hint).attr("score", std::to_string(f.score));
+          b.at(style_span(path, f.range)).msg("{}", f.message).hint(std::format("{}; {}", f.hint, silence)).attr("score", std::to_string(f.score));
           for (const auto& [key, value] : f.attributes) {
             b.attr(key, value);
           }
@@ -198,8 +200,10 @@ int run_style(const lhd::Options& opts) {
                  f.repetitions,
                  f.range.start_line,
                  f.range.end_line)
-            .hint(f.progressing ? "consider a loop; numbered scalar names may first need an indexed collection"
-                                : "consider a loop or a shared helper")
+            .hint(std::format("{}; {}",
+                              f.progressing ? "consider a loop; numbered scalar names may first need an indexed collection"
+                                            : "consider a loop or a shared helper",
+                              silence))
             .attr("statements_per_copy", std::to_string(f.statements))
             .attr("repetitions", std::to_string(f.repetitions))
             .attr("score", std::to_string(f.score))
@@ -212,17 +216,21 @@ int run_style(const lhd::Options& opts) {
         }
         b.emit();
       }
-      livehd::diag::Builder(livehd::diag::Severity::info, "lhd.pyrope.style", "style-summary", "syntax")
-          .msg("'{}': {} suggestions, {} shown{}",
-               path,
-               report.total_findings,
-               report.findings.size(),
-               report.partial ? " (partial parse)" : "")
-          .attr("file", path)
-          .attr("partial", report.partial ? "true" : "false")
-          .attr("total_findings", std::to_string(report.total_findings))
-          .attr("shown_findings", std::to_string(report.findings.size()))
-          .emit();
+      // A clean file stays silent so scripts can treat any output as a finding.
+      if (report.total_findings > 0) {
+        livehd::diag::Builder(livehd::diag::Severity::info, "lhd.pyrope.style", "style-summary", "syntax")
+            .msg("'{}': {} suggestions, {} shown{}",
+                 path,
+                 report.total_findings,
+                 report.findings.size(),
+                 report.partial ? " (partial parse)" : "")
+            .attr("file", path)
+            .attr("partial", report.partial ? "true" : "false")
+            .attr("total_findings", std::to_string(report.total_findings))
+            .attr("shown_findings", std::to_string(report.findings.size()))
+            .attr("suppressed", std::to_string(report.suppressed))
+            .emit();
+      }
       suggestions |= report.total_findings > 0;
     } catch (const std::exception& e) {
       livehd::diag::err("lhd.pyrope.style", "analysis-failed", "internal").msg("'{}': {}", path, e.what()).emit();

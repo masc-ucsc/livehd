@@ -40,18 +40,6 @@ int64_t storage_bits_for_env(const Lnast_range& env) {
   return env.get_sbits();
 }
 
-bool mask_touches_outside_bits(int64_t mask, int64_t storage_bits) {
-  if (mask <= 0) {
-    return false;
-  }
-  if (storage_bits <= 0) {
-    return mask != 0;
-  }
-  if (storage_bits >= 63) {
-    return false;
-  }
-  return (static_cast<uint64_t>(mask) >> storage_bits) != 0;
-}
 }  // namespace
 
 // ── Constructor ──────────────────────────────────────────────────────────────
@@ -1139,27 +1127,13 @@ upass::Vote uPass_bitwidth::process_get_mask(std::string_view dst_name, Bundle& 
   if (src.size() < 2) {
     return stamp(dst_name, dst, Lnast_range::make_unbounded());
   }
-  int64_t    lo         = 0;
-  int64_t    w          = 0;
-  bool       contiguous = false;
-  const auto mask       = range_of_operand(src[1]);
-  if (mask.is_constant() && mask.min >= 0) {
-    const auto m = static_cast<uint64_t>(mask.min);
-    w            = std::popcount(m);
-    lo           = m == 0 ? 0 : std::countr_zero(m);
-    contiguous   = m != 0 && (((m >> lo) + 1) & (m >> lo)) == 0;
-  } else if (const auto& b = src[1].bundle; b && !b->get_attr("rng_s").is_invalid()) {
-    const auto rs = const_to_i64(b->get_attr("rng_s"));
-    const auto re = const_to_i64(b->get_attr("rng_e"));
-    if (!rs || !re || *rs < 0 || *re < *rs) {
-      return stamp(dst_name, dst, Lnast_range::make_unbounded());
-    }
-    lo         = *rs;
-    w          = *re - *rs + 1;
-    contiguous = true;
-  } else {
+  const auto low  = range_of_operand(src[1]);
+  const auto high = src.size() > 2 ? range_of_operand(src[2]) : low.add(Lnast_range::constant(1));
+  if (!low.is_constant() || !high.is_constant() || low.min < 0 || high.min < low.min) {
     return stamp(dst_name, dst, Lnast_range::make_unbounded());
   }
+  const int64_t lo = low.min;
+  const int64_t w  = high.min - lo;
   if (w == 0) {
     return stamp(dst_name, dst, Lnast_range::constant(0));
   }
@@ -1172,7 +1146,7 @@ upass::Vote uPass_bitwidth::process_get_mask(std::string_view dst_name, Bundle& 
   r.unbounded = false;
   if (const auto base = range_of_operand(src[0]); !base.is_unbounded() && base.min >= 0) {
     r.max = std::min(r.max, lo >= 63 ? int64_t{0} : base.max >> lo);
-    if (contiguous && lo == 0 && base.max <= r.max) {
+    if (lo == 0 && base.max <= r.max) {
       r.min = base.min;
     }
   }
@@ -1180,59 +1154,47 @@ upass::Vote uPass_bitwidth::process_get_mask(std::string_view dst_name, Bundle& 
 }
 
 upass::Vote uPass_bitwidth::process_set_mask(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
-  // set_mask(base, mask, value) has TWO independent fit requirements:
-  //   1. the selected destination bits must lie inside the base storage;
-  //   2. the inserted value must fit the selected lane width.
-  //
-  // The second check is the partial-write counterpart of an ordinary typed
-  // assignment.  LGraph cannot own it: by then set_mask has already made the
-  // hardware truncation explicit and the source-level omission of wrap/sat is
-  // no longer distinguishable.  An explicit RHS bit-select and the frontend's
-  // wrap/sat lowering both carry a selected-width type envelope, so they pass.
-  if (src.size() >= 2 && !src[0].name.empty()) {
-    const auto mask = range_of_operand(src[1]);
-    if (mask.is_constant() && mask.min >= 0) {
-      const auto base = ssa_base_name(src[0].name);
-      if (auto env = decl_envelope_of(base)) {
-        if (mask_touches_outside_bits(mask.min, storage_bits_for_env(*env))) {
-          record_overflow(base, mask, *env);
-        }
-      }
+  if (src.size() < 3) {
+    return stamp_carry(dst_name, dst, Lnast_range::make_unbounded(), src);
+  }
+  const auto low  = range_of_operand(src[2]);
+  const auto high = src.size() > 3 ? range_of_operand(src[3]) : low.add(Lnast_range::constant(1));
+  if (!src[0].name.empty() && high.is_constant()) {
+    const auto base = ssa_base_name(src[0].name);
+    if (auto env = decl_envelope_of(base); env && high.min > storage_bits_for_env(*env)) {
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "bit-range-overflow",
+          .category = "bitwidth",
+          .pass     = "upass.bitwidth",
+          .message
+          = std::format("bit range ending at {} does not fit the {}-bit destination", high.min, storage_bits_for_env(*env)),
+          .span = lm->current_span(),
+          .hint = "keep the selection within the destination storage",
+      });
     }
   }
-
-  if (src.size() >= 3) {
+  {
     std::optional<int64_t> lane_bits;
-    if (src[1].name.empty() && src[1].bundle) {
-      const auto mask = src[1].bundle->scalar();
-      if (mask && mask->is_integer() && !mask->has_unknowns() && !mask->is_negative()) {
-        lane_bits = mask->popcount();
+    if (low.is_constant() && high.is_constant() && low.min >= 0 && high.min >= low.min) {
+      lane_bits = high.min - low.min;
+    } else if (src.size() == 3) {
+      lane_bits = 1;
+    } else if (!src[2].name.empty() && !src[3].name.empty()) {
+      const auto l = affine_of(src[2].name);
+      const auto h = affine_of(src[3].name);
+      if (l.base == h.base && h.offset > l.offset) {
+        lane_bits = h.offset - l.offset;
       }
     }
-    if (!lane_bits) {
-      const auto mask = range_of_operand(src[1]);
-      if (mask.is_constant() && mask.min >= 0) {
-        lane_bits = std::popcount(static_cast<uint64_t>(mask.min));
-      }
-    }
-    // A runtime position with a constant lane width is held to it the same way
-    // (a Verilog-origin unit truncates by the language's own rule).
-    if (!lane_bits && !src[1].name.empty()) {
-      if (const auto it = runtime_lane_bits_.find(src[1].name); it != runtime_lane_bits_.end()) {
-        if (const auto& ln = lm->get_lnast(); ln && !ln->is_template() && !ln->is_verilog_origin()) {
-          lane_bits = it->second;
-        }
-      }
-    }
-
     if (lane_bits && *lane_bits > 0) {
       // Prefer the declared envelope: `b:u8` remains an eight-bit source even
       // if an earlier optimization happened to learn a narrower current value.
       // Compiler temporaries (arithmetic, literals) fall back to their derived
       // range when they have no declaration.
-      auto value_env = envelope_of_operand(src[2]);
+      auto value_env = envelope_of_operand(src[1]);
       if (value_env.is_unbounded()) {
-        value_env = range_of_operand(src[2]);
+        value_env = range_of_operand(src[1]);
       }
       if (!value_env.is_unbounded()) {
         const int64_t value_bits = storage_bits_for_env(value_env);
@@ -1263,16 +1225,10 @@ upass::Vote uPass_bitwidth::process_set_mask(std::string_view dst_name, Bundle& 
       return stamp_carry(dst_name, dst, *env, src);
     }
   }
-  if (src.size() >= 2) {
+  {
     std::optional<int64_t> mask_bits;
-    if (const auto mask = range_of_operand(src[1]); mask.is_constant() && mask.min >= 0) {
-      mask_bits = mask.min;
-    } else if (const auto& b = src[1].bundle; b && !b->get_attr("rng_s").is_invalid()) {
-      const auto rs = const_to_i64(b->get_attr("rng_s"));
-      const auto re = const_to_i64(b->get_attr("rng_e"));
-      if (rs && re && *rs >= 0 && *re >= *rs && *re < 62) {
-        mask_bits = (int64_t{1} << (*re + 1)) - (int64_t{1} << *rs);
-      }
+    if (low.is_constant() && high.is_constant() && low.min >= 0 && high.min > low.min && high.min < 63) {
+      mask_bits = (int64_t{1} << high.min) - (int64_t{1} << low.min);
     }
     if (const auto base = range_of_operand(src[0]); mask_bits && !base.is_unbounded() && base.min >= 0) {
       Lnast_range r;

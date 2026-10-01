@@ -13,7 +13,7 @@ pub mod ram_loop_counter(en:Bool, sel:Bool, d:U4) -> (q:U4@[0], seen:S32@[0], ex
   reg b:S32:[latch=true] = nil
   if en {
     r0_dout_tmp = d
-    if sel { b = 3 } else { b = 5 }
+    b = if sel { 3 } else { 5 }
   }
   q = r0_dout_tmp
   seen = b

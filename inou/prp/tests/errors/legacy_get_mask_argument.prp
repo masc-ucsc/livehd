@@ -1,0 +1,7 @@
+/*
+:name: legacy_get_mask_argument
+:type: error
+:error: mask
+*/
+const result = __get_mask(a=0xab, mask=0xf0)
+cassert(result == 10)

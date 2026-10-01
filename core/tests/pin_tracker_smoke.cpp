@@ -39,7 +39,7 @@ TEST(PinTrackerSmoke, EmptyTrackedSourceStaysZeroThroughShifts) {
   Pin_tracker<std::string> tracker{"zero"};
 
   tracker.add_input("src", 4);
-  tracker.add_get_mask("empty", "src", 4, *Dlop::create_integer(16));
+  tracker.add_get_mask("empty", "src", 4, 4, 5);
   ASSERT_TRUE(tracker.get_pin_vector("empty").empty());
 
   tracker.add_sra("sra", "empty", 4, *Dlop::create_integer(0));
@@ -60,10 +60,10 @@ TEST(PinTrackerSmoke, EmptySetMaskValueWritesZero) {
   Pin_tracker<std::string> tracker{"zero"};
 
   tracker.add_input("src", 4);
-  tracker.add_get_mask("empty", "src", 4, *Dlop::create_integer(16));
+  tracker.add_get_mask("empty", "src", 4, 4, 5);
   ASSERT_TRUE(tracker.get_pin_vector("empty").empty());
 
-  tracker.add_set_mask("set", "src", 4, *Dlop::create_integer(1), "empty");
+  tracker.add_set_mask("set", "src", 4, "empty", 0, 1);
   const auto& pins = tracker.get_pin_vector("set");
   ASSERT_EQ(pins.size(), 4);
   EXPECT_EQ(pins[0].id(), "zero");
@@ -99,7 +99,7 @@ TEST(PinTrackerSmoke, CellOutputSeededByConsumerMatchesProducerFirstOrder) {
   // Producer-first: the cell stamps its scalar shape, then the consumer reads bit 2.
   Pin_tracker<std::string> producer_first{"zero"};
   producer_first.add_scalar("cell", 4);  // stale 4-bit stamp on a 1-bit Liberty output
-  producer_first.add_get_mask("read2", "cell", 4, *Dlop::create_integer(1 << 2));
+  producer_first.add_get_mask("read2", "cell", 4, 2, 3);
   const auto& want = producer_first.get_pin_vector("read2");
   ASSERT_EQ(want.size(), 1u);
   EXPECT_EQ(want[0].id(), "zero");  // bit 2 of a scalar cell output is known zero
@@ -109,7 +109,7 @@ TEST(PinTrackerSmoke, CellOutputSeededByConsumerMatchesProducerFirstOrder) {
   // stamp is an idempotent rewrite.
   Pin_tracker<std::string> consumer_first{"zero"};
   EXPECT_TRUE(consumer_first.add_scalar_if_absent("cell", 4));
-  consumer_first.add_get_mask("read2", "cell", 4, *Dlop::create_integer(1 << 2));
+  consumer_first.add_get_mask("read2", "cell", 4, 2, 3);
   EXPECT_FALSE(consumer_first.add_scalar_if_absent("cell", 4));  // producer arrives: no rewrite
   const auto& got = consumer_first.get_pin_vector("read2");
   ASSERT_EQ(got.size(), 1u);
@@ -119,7 +119,7 @@ TEST(PinTrackerSmoke, CellOutputSeededByConsumerMatchesProducerFirstOrder) {
   // The defect being fixed: with NO seed the consumer keeps "cell" bit 2, which
   // becomes the OpenTimer net "cell.2" -- a net a scalar cell output never has.
   Pin_tracker<std::string> unseeded{"zero"};
-  unseeded.add_get_mask("read2", "cell", 4, *Dlop::create_integer(1 << 2));
+  unseeded.add_get_mask("read2", "cell", 4, 2, 3);
   const auto& bad = unseeded.get_pin_vector("read2");
   ASSERT_EQ(bad.size(), 1u);
   EXPECT_EQ(bad[0].id(), "cell");

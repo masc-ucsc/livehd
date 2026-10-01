@@ -12,6 +12,7 @@
 // vanished. The io-output keep guard preserves both arm stores so tolg
 // builds the mux.
 pub comb mixedarm(s:Bool, a:U2) -> (o:U2) {
+  // prp-style-allow single-destination-conditional
   if s {
     o = 1
   } else {

@@ -183,7 +183,7 @@ endmodule
 EOF
 ${LHD} compile "$W/wren.sv" --top wren_cast --emit-dir pyrope:"$W/wren_prp/" --workdir "$W/ww" -q \
   || fail "widening-cast + full-range overwrite falsely rejected (declared-range alias)"
-if grep -q 'en4_q#\[0\.\.=3\]' "$W/wren_prp"/*.prp; then
+if grep -q 'en4_q#\[0\.\.<4\]' "$W/wren_prp"/*.prp; then
   fail "widening cast emitted an identity slice/getmask for en4_q"
 fi
 ${LHD} lec --impl pyrope:"$W/wren_prp/wren_cast.prp" \
@@ -282,7 +282,7 @@ EOF
 ${LHD} compile "$W/substruct_unpack.sv" --reader slang --top substruct_unpack \
   --emit-dir pyrope:"$W/substruct_unpack_prp/" --workdir "$W/substruct_unpack_w" -q \
   || fail "nested packed-substruct lowering failed"
-if ! grep -q '#\[3\.\.=8\]' "$W/substruct_unpack_prp/substruct_unpack.prp"; then
+if ! grep -q '#\[3\.\.<9\]' "$W/substruct_unpack_prp/substruct_unpack.prp"; then
   fail "packed-substruct leaf split omitted the explicit padding slice"
 fi
 ${LHD} lec --impl pyrope:"$W/substruct_unpack_prp/substruct_unpack.prp" \
@@ -383,9 +383,9 @@ ${LHD} compile "$W/packed_sroa_stride.sv" --reader slang --top packed_sroa_strid
 # spelling: the constant inner element ordinal must still become a BIT offset
 # (five-bit elements => lane 1 is bits 5..9), whether the destination is an
 # `eN` leaf or the flat packed bus. Assert the bit range, not the carrier.
-grep -qE '#\[5\.\.=9\]' "$W/packed_sroa_stride_prp/packed_sroa_stride.prp" \
+grep -qE '#\[5\.\.<10\]' "$W/packed_sroa_stride_prp/packed_sroa_stride.prp" \
   || fail "packed inner element 1 did not use its five-bit stride"
-if grep -qE '#\[1\.\.=5\]' "$W/packed_sroa_stride_prp/packed_sroa_stride.prp"; then
+if grep -qE '#\[1\.\.<6\]' "$W/packed_sroa_stride_prp/packed_sroa_stride.prp"; then
   fail "packed inner element 1 used its ordinal as a bit offset"
 fi
 ${LHD} lec --impl pyrope:"$W/packed_sroa_stride_prp/packed_sroa_stride.prp" \

@@ -329,16 +329,16 @@ uint64_t fold_operands(uint64_t base, absl::flat_hash_map<int, std::vector<uint6
 // walk). Everything else — clock, reset, polarity, pipe bounds — is excluded.
 bool data_sink_port(Ntype_op op, int pid) {
   switch (op) {
-    case Ntype_op::Flop:
-    case Ntype_op::Latch: return pid == 3 || pid == 4;              // din, enable
-    case Ntype_op::Fflop: return pid == 0 || pid == 3 || pid == 5;  // valid, din, stop
+    case Ntype_op::Flop  :
+    case Ntype_op::Latch : return pid == 3 || pid == 4;              // din, enable
+    case Ntype_op::Fflop : return pid == 0 || pid == 3 || pid == 5;  // valid, din, stop
     case Ntype_op::Memory: {
       // Port k's pins sit at k*Memory_port_stride + role (graph/cell.hpp), so
       // test the role: a raw pid would drop every port but the first.
       const auto role = pid % Ntype::Memory_port_stride;
       return role == 0 || role == 3 || role == 4 || role == 12 || role == 13;  // addr, din, enable, update, update_enable
     }
-    default: return true;                                                 // comb node: every input is data
+    default: return true;  // comb node: every input is data
   }
 }
 
@@ -361,23 +361,23 @@ struct State_cell {
   // Annotation only refines buckets, and lec re-verifies every pair anyway.
   std::vector<std::pair<uint32_t, uint32_t>> reach_b;  // (index, dist>=1)
   std::vector<std::pair<uint32_t, uint32_t>> reach_f;
-  uint64_t                                   token = 0;  // nonzero = resolved (tier-1 seed or tier-2 pair)
+  uint64_t                                   token              = 0;  // nonzero = resolved (tier-1 seed or tier-2 pair)
   // Aggregate provenance reconstructed from a bus-expansion NAME (`x[i]`,
   // core/bus_name.hpp) when the aggregate_* attributes did not survive (a
   // netlist read back from Verilog). name_lane < 0 = not reconstructed.
-  int32_t                                    name_lane   = -1;
-  int32_t                                    name_extent = 0;
+  int32_t                                    name_lane          = -1;
+  int32_t                                    name_extent        = 0;
   // `key` was rewritten by reconstruct_bus_groups (a regrouped `x[i]` bit or a
   // lone `x.flop_16` / `x_cgen1.l` renamed to `x`). The pairing is a
   // bus_name HINT; the compare-point obligations below re-verify it.
   bool                                       name_reconstructed = false;
-  bool     t1_pair = false, t1_group = false, t2_pair = false, physical_bridge = false, ambiguous = false;
-  uint64_t kind_nw    = 0;      // `kind` WITHOUT the width term (see collect_state)
-  uint64_t kind_ni    = 0;      // op + commit edge only: no init, no width (the reset-agnostic phase)
-  bool        has_init = false;  // a constant reset/initial value is attached
-  std::string init;              // its serialization ("" when none)
-  bool     kind_clash = false;  // unpaired: cross-side SRP/ERP match refused by the
-                                // kind fold (op/init — the pair precondition)
+  bool        t1_pair = false, t1_group = false, t2_pair = false, physical_bridge = false, ambiguous = false;
+  uint64_t    kind_nw  = 0;        // `kind` WITHOUT the width term (see collect_state)
+  uint64_t    kind_ni  = 0;        // op + commit edge only: no init, no width (the reset-agnostic phase)
+  bool        has_init = false;    // a constant reset/initial value is attached
+  std::string init;                // its serialization ("" when none)
+  bool        kind_clash = false;  // unpaired: cross-side SRP/ERP match refused by the
+                                   // kind fold (op/init — the pair precondition)
 };
 
 struct State_side {
@@ -658,7 +658,7 @@ uint64_t rp_signature(const State_side& ss, const State_cell& c, bool backward,
 void reconstruct_bus_groups(State_side& side, const State_side& other) {
   auto name_of = [](const State_cell& c) { return normalize_reg_name(c.node.get_hier_name()); };
   // The DECLARED Q width (node_out_bits only sees connected driver pins).
-  auto q_bits = [](const State_cell& c) {
+  auto q_bits  = [](const State_cell& c) {
     auto b = gu::bits_of(c.node.get_driver_pin(0));
     return b != 0 ? b : node_out_bits(c.node);
   };
@@ -682,8 +682,8 @@ void reconstruct_bus_groups(State_side& side, const State_side& other) {
     }
   }
   struct Member {
-    uint32_t    cell;
-    int64_t     index;
+    uint32_t cell;
+    int64_t  index;
   };
   absl::flat_hash_map<std::string, std::vector<Member>>   groups;
   absl::flat_hash_map<std::string, std::vector<uint32_t>> lone;  // `r.<model state>` of an unsplit register
@@ -1077,7 +1077,7 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
     return false;
   };
   if (opts.state_pairing && has_unresolved(sa) && has_unresolved(sb)) {
-    const uint32_t maxiter = std::max<uint32_t>(1, opts.synalign_maxiter);
+    const uint32_t                maxiter = std::max<uint32_t>(1, opts.synalign_maxiter);
     // TWO PHASES. The strict phase keeps the declared width in the identity, so
     // when both a same-width and a different-width candidate exist the
     // same-width one is taken first and nothing that pairs today changes. Only
@@ -1098,14 +1098,14 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
     // pair's relation is initially true by choosing it equal to the impl's
     // (validate_uncertain_pairs applies the same rule), and lec re-verifies
     // the pair like any tier-2 pair.
-    int                           phase = 0;  // 0 strict, 1 width-blind, 2 reset-agnostic
-    absl::flat_hash_set<uint64_t> reset_in;   // graph-input anchors that reach a reset pin
+    int                           phase   = 0;  // 0 strict, 1 width-blind, 2 reset-agnostic
+    absl::flat_hash_set<uint64_t> reset_in;     // graph-input anchors that reach a reset pin
     for (auto* g : {ga, gb}) {
       for (auto node : g->body().nodes(hhds::Node_order::forward)) {
         if (!is_persistent_state(node)) {
           continue;
         }
-        const auto op  = gu::type_op_of(node);
+        const auto op = gu::type_op_of(node);
         if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Memory) {
           continue;
         }
@@ -1173,8 +1173,9 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
           continue;
         }
         // Reset-agnostic phase: the init-less-REFERENCE precondition above.
-        const bool init_ok = phase < 2 || av.size() != 1 || it->second.size() != 1 || !sa.cells[av.front()].has_init
-                             || (sb.cells[it->second.front()].has_init && sa.cells[av.front()].init == sb.cells[it->second.front()].init);
+        const bool init_ok
+            = phase < 2 || av.size() != 1 || it->second.size() != 1 || !sa.cells[av.front()].has_init
+              || (sb.cells[it->second.front()].has_init && sa.cells[av.front()].init == sb.cells[it->second.front()].init);
         if (av.size() == 1 && it->second.size() == 1 && init_ok) {
           uint64_t tok = hcombine(hstr("\x02pair"), sig);
           if (opts.explain_noise > 0) {
@@ -1471,37 +1472,10 @@ std::optional<hhds::Pin_class> identity_get_mask_input(const hhds::Node_class& n
   if (gu::type_op_of(node) != Ntype_op::Get_mask) {
     return std::nullopt;
   }
-  const auto      a_pid = Ntype::get_sink_pid(Ntype_op::Get_mask, "a");
-  const auto      m_pid = Ntype::get_sink_pid(Ntype_op::Get_mask, "mask");
-  hhds::Pin_class a;
-  hhds::Pin_class mask;
-  // `node` is a Get_mask (checked above), so it is never a compact-loop Sub and
-  // the pin walk is exact: one driver per sink pin.
-  for (const auto& sink : node.inp_sorted_pins()) {
-    if (sink.get_port_id() == a_pid) {
-      if (!a.is_invalid()) {
-        return std::nullopt;
-      }
-      a = sink.get_driver_pin();
-    } else if (sink.get_port_id() == m_pid) {
-      if (!mask.is_invalid()) {
-        return std::nullopt;
-      }
-      mask = sink.get_driver_pin();
-    }
-  }
-  const int bits     = gu::bits_of(a);
-  const int out_bits = node_out_bits(node);
-  if (a.is_invalid() || mask.is_invalid() || bits <= 0 || out_bits != bits || !mask.is_const()) {
-    return std::nullopt;
-  }
-  const auto& value = gu::const_of(mask);
-  // -1 is the explicit all-source-bits sentinel used by Get_mask.
-  if (gu::is_whole_value_mask(value)) {
-    return a;
-  }
-  auto window = gu::mask_window_of(value);
-  if (!window || window->first != 0 || window->second != bits) {
+  const auto a      = gu::get_driver_of_sink_name(node, "a");
+  const auto window = gu::bit_range(node);
+  const int  bits   = gu::bits_of(a);
+  if (a.is_invalid() || bits <= 0 || node_out_bits(node) != bits || !window || window->first != 0 || window->second != bits) {
     return std::nullopt;
   }
   return a;
@@ -1581,15 +1555,14 @@ bool cut_signature(const Side& s, const hhds::Node_class& node, uint64_t& out) {
   absl::flat_hash_map<int, std::vector<uint64_t>> by_port;
   // A cut point can be a Sub, so this is an arbitrary-node walk: route it
   // through for_each_inp_operand (a compact loop's carry-in keeps both drivers).
-  const bool complete
-      = for_each_inp_operand(node, [&](const hhds::Pin_class& sink, const hhds::Pin_class& driver) {
-          uint64_t dsig = 0;
-          if (!resolve_driver(s, driver, dsig)) {
-            return false;
-          }
-          by_port[Ntype::sink_bank(gu::type_op_of(node), sink.get_port_id())].push_back(dsig);
-          return true;
-        });
+  const bool complete = for_each_inp_operand(node, [&](const hhds::Pin_class& sink, const hhds::Pin_class& driver) {
+    uint64_t dsig = 0;
+    if (!resolve_driver(s, driver, dsig)) {
+      return false;
+    }
+    by_port[Ntype::sink_bank(gu::type_op_of(node), sink.get_port_id())].push_back(dsig);
+    return true;
+  });
   if (!complete) {
     return false;
   }
@@ -1741,8 +1714,8 @@ Side analyze(hhds::Graph* g, const Semdiff_options& opts,
           break;
         }
         usig = hcombine(it2->second,
-                        static_cast<uint64_t>(static_cast<uint32_t>(
-                            Ntype::sink_bank(gu::type_op_of(snk.get_master_node()), snk.get_port_id()))));
+                        static_cast<uint64_t>(
+                            static_cast<uint32_t>(Ntype::sink_bank(gu::type_op_of(snk.get_master_node()), snk.get_port_id()))));
       }
       by_port[Ntype::sink_bank(gu::type_op_of(snk.get_master_node()), snk.get_port_id())].push_back(usig);
     }
@@ -1964,8 +1937,8 @@ void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Si
         // The body's OUTPUT node -- never a compact-loop Sub -- so the pin walk
         // is exact: one output port, one sink pin, one driver.
         for (const auto& sink : onode.inp_sorted_pins()) {
-          auto     key  = s.matching_io_names ? "o:" + std::string(gu::pin_name_of(sink))
-                                              : "p:" + std::to_string(static_cast<uint32_t>(sink.get_port_id()));
+          auto     key   = s.matching_io_names ? "o:" + std::string(gu::pin_name_of(sink))
+                                               : "p:" + std::to_string(static_cast<uint32_t>(sink.get_port_id()));
           uint64_t dsig  = 0;
           bool     known = resolve_driver(s, sink.get_driver_pin(), dsig);
           add(key, known, dsig);
@@ -2311,10 +2284,9 @@ uint64_t driver_desc(const hhds::Pin_class& drv, bool a_side, const Bimap& ab, c
 // every caller now walks sorted sink pins and the drivers of each, so the
 // (sink, driver) pair IS the operand, one-driver sink and two-driver compact
 // loop carry-in alike.
-uint64_t operand_desc(const hhds::Pin_class& sink, const hhds::Pin_class& driver, bool sink_is_sub, bool a_side,
-                      const Bimap& ab, const Bimap& ba, bool& ok) {
-  uint64_t sink_port
-      = sink_is_sub ? hstr(sink.get_pin_name()) : static_cast<uint64_t>(static_cast<uint32_t>(sink.get_port_id()));
+uint64_t operand_desc(const hhds::Pin_class& sink, const hhds::Pin_class& driver, bool sink_is_sub, bool a_side, const Bimap& ab,
+                      const Bimap& ba, bool& ok) {
+  uint64_t sink_port = sink_is_sub ? hstr(sink.get_pin_name()) : static_cast<uint64_t>(static_cast<uint32_t>(sink.get_port_id()));
   bool     resolved;
   uint64_t d = driver_desc(driver, a_side, ab, ba, resolved);
   ok         = resolved;
@@ -2475,12 +2447,9 @@ bool occurrence_all_bits_mask(const hhds::Occurrence_node& node) {
   if (gu::type_op_of(node) != Ntype_op::Get_mask) {
     return false;
   }
-  auto mask = occurrence_value_input(node, "mask");
-  if (!mask || !mask->is_const()) {
-    return false;
-  }
-  const auto& value = gu::const_of(*mask);
-  return !value.has_unknowns() && value.is_just_i64() && value.to_just_i64() == -1;
+  const auto range = gu::bit_range(node);
+  const auto value = occurrence_value_input(node, "a");
+  return range && value && range->first == 0 && range->second == gu::bits_of(*value);
 }
 
 // at_width's per-graph CACHE identity (not the cross-design fold key): the
@@ -2502,7 +2471,7 @@ struct Memo_key {
 
 // Canonicalize a virtually-flattened combinational graph. The one intentional
 // algebraic normalization is addition modulo the selected output width:
-// intermediate Get_mask(-1) fits may move across an all-positive Sum when both
+// intermediate full-width Get_mask fits may move across an all-positive Sum when both
 // sides of the fit are at least that modulus. This is the exact bit-vector
 // identity (a+b mod 2^W), and is what lets a compact carry chain compare with
 // cprop's single n-ary reduction without materializing either representation.
@@ -2519,7 +2488,7 @@ public:
       return std::nullopt;
     }
     std::vector<std::pair<std::string, Term_id>> result;
-    auto                                          out = view_.lift(graph_->get_output_node());
+    auto                                         out = view_.lift(graph_->get_output_node());
     // Occurrence_node (view_.lift): the hier-resolving SORTED pin walk, then the
     // PLURAL driver reader per sink -- one iteration per in-edge, in the same
     // order, which is all the edge walk ever was. The name/width lookup stays
@@ -2645,7 +2614,7 @@ private:
       // Get_mask globally transparent; outside an additive reduction it stays
       // a normal node with its own width and operand.
       if (occurrence_all_bits_mask(node)) {
-        auto       input           = occurrence_value_input(node, "a");
+        auto       input = occurrence_value_input(node, "a");
         const bool input_preserves
             = input
               && ((input->is_const() && !gu::const_of(*input).has_unknowns() && !gu::const_of(*input).is_negative())
@@ -2696,7 +2665,7 @@ private:
       const auto node = pin.get_master_node();
       visited_.insert(node.get_occurrence_index());
       if (occurrence_all_bits_mask(node)) {
-        auto       input           = occurrence_value_input(node, "a");
+        auto       input = occurrence_value_input(node, "a");
         const bool input_preserves
             = input
               && ((input->is_const() && !gu::const_of(*input).has_unknowns() && !gu::const_of(*input).is_negative())
@@ -2718,7 +2687,7 @@ private:
         // operands to the unsignedness question instead of only drivers.front().
         // `stop` is load-bearing: the edge walk's `break` left the WHOLE walk,
         // and an inner `break` would only leave one sink's drivers.
-        bool stop = false;
+        bool stop               = false;
         for (const auto& sink : node.inp_sorted_pins()) {
           for (const auto& driver : sink.get_driver_pins()) {
             // Added operands only. Bank parity, not the raw pid: every Sum
@@ -2847,7 +2816,7 @@ private:
   hhds::Graph*                                graph_ = nullptr;
   hhds::Occurrences_view                      view_;
   absl::flat_hash_map<Memo_key, Term_id>      memo_;
-  Term_pool*                                 pool_ = nullptr;
+  Term_pool*                                  pool_ = nullptr;
   absl::flat_hash_set<Memo_key>               active_;
   absl::flat_hash_set<hhds::Occurrence_index> visited_;
   bool                                        failed_ = false;

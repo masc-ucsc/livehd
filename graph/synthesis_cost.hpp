@@ -27,11 +27,11 @@ template <typename Allows>
     if (!allows(consumer) || type_op_of(consumer) != Ntype_op::Get_mask || edge.sink.get_port_id() != 0) {
       return false;
     }
-    const auto pin = get_driver_of_sink_name(consumer, "mask");
-    if (!pin.is_const()) {
+    const auto pin = livehd::graph_util::bit_range(consumer);
+    if (!pin.has_value()) {
       return false;
     }
-    const auto& mask = const_of(pin);
+    const auto& mask = livehd::graph_util::mask_window_const(pin->first, pin->second);
     if (mask.is_negative() || mask.has_unknowns()) {
       return false;
     }
@@ -97,12 +97,12 @@ namespace shift_detail {
         saw_use = false;
         break;
       }
-      const auto mask_pin = get_driver_of_sink_name(consumer, "mask");
-      if (!mask_pin.is_const()) {
+      const auto mask_pin = livehd::graph_util::bit_range(consumer);
+      if (!mask_pin.has_value()) {
         saw_use = false;
         break;
       }
-      const auto& mask = const_of(mask_pin);
+      const auto& mask = livehd::graph_util::mask_window_const(mask_pin->first, mask_pin->second);
       if (mask.is_negative()) {
         saw_use = false;
         break;

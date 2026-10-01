@@ -1,0 +1,24 @@
+/*
+:name: style_allow_scope
+:type: style
+:style: single-destination-conditional
+*/
+// `// prp-style-allow CODE` silences CODE from the comment to the end of the
+// ENCLOSING scope; when the scope closes the allow ends. The first function is
+// silenced, the second (a sibling scope) still reports.
+comb quiet(sel:U1, a:U8, b:U8) -> (o:U8) {
+  // prp-style-allow single-destination-conditional
+  if sel {
+    o = a
+  } else {
+    o = b
+  }
+}
+
+comb loud(sel:U1, a:U8, b:U8) -> (o:U8) {
+  if sel {  // locate_style_single-destination-conditional
+    o = a
+  } else {
+    o = b
+  }
+}

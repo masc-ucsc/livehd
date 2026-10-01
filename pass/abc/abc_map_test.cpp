@@ -34,7 +34,7 @@ TEST(AbcMap, NativeBoundarySchedulesReverseOrderedSliceConsumers) {
   gu::set_ubits(q, 8);
   auto slice = gu::create_typed_node(*source, Ntype_op::Get_mask);
   q.connect_sink(gu::setup_sink_by_name(slice, "a"));
-  gu::create_const(*source, *Dlop::create_integer(8)).connect_sink(gu::setup_sink_by_name(slice, "mask"));
+  livehd::graph_util::connect_bit_range(slice, 3, 4);
   auto bit = slice.create_driver_pin(0);
   gu::set_ubits(bit, 1);
   auto inv = gu::create_typed_node(*source, Ntype_op::Not);

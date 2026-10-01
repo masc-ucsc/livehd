@@ -193,7 +193,7 @@ TEST(PredictAbcSize, WiringIsFree) {
 
   auto gm = create_typed_node(*g, Ntype_op::Get_mask);
   g->get_input_pin("a").connect_sink(gm.create_sink_pin(0));
-  create_const(*g, *Dlop::create_integer(0xff)).connect_sink(gm.create_sink_pin(2));  // const mask
+  livehd::graph_util::connect_bit_range(gm, 0, 8);  // const mask
   set_bits(gm.create_driver_pin(0), 8);
 
   // A Concat is lane renaming: its sinks are INTERLEAVED (value, declared-width)

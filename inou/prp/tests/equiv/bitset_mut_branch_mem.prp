@@ -3,6 +3,7 @@
 :type: equiv
 :verilog_top: bitset_mut_branch_mem_top
 :pyrope_top: foo
+:lec_top: foo
 :equiv_lec_grep: (?m)^lec: '[^']+' PROVEN equivalent
 */
 // `:equiv_lec_grep:` pins the UNBOUNDED proof: a fall back to a bounded PASS(n)
@@ -17,6 +18,7 @@ pub mod foo(a:U64, load:Bool, clear_low:Bool, rst_n:U1) -> (o:U64@[0]) {
   mut d:U64 = 0
   d = q
   if clear_low {
+    // prp-style-allow likely-unrolled-loop
     d#[0..=3]   = 0
     d#[4..=7]   = 0
     d#[8..=11]  = 0

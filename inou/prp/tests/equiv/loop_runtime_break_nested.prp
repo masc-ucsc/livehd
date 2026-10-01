@@ -12,7 +12,7 @@ pub mod top(stop:U8) -> (total:U4@[0]) {
   for outer in 0..<2 {
     for i in 0..<4 {
       const bit = outer * 4 + i
-      if stop#[bit] { break }
+      if stop#[bit] != 0 { break }
       acc = acc + 1
     }
   }

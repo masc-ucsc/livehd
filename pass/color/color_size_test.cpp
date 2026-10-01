@@ -291,8 +291,7 @@ TEST(ColorSize, WideSraUsesNarrowSliceDemand) {
 
   auto slice = create_typed_node(*g, Ntype_op::Get_mask);
   shifted.connect_sink(livehd::graph_util::setup_sink_by_name(slice, "a"));
-  livehd::graph_util::create_const(*g, *Dlop::create_integer((int64_t{1} << 20) - 1))
-      .connect_sink(livehd::graph_util::setup_sink_by_name(slice, "mask"));
+  livehd::graph_util::connect_bit_range(slice, 0, 20);
   auto word = slice.create_driver_pin(0);
   set_bits(word, 20);
   word.connect_sink(g->get_output_pin("y"));
@@ -348,7 +347,7 @@ TEST(ColorSize, WideShlAndNotKeepTheirNarrowMask) {
   livehd::graph_util::set_sbits(inverted, 65544);
   auto slice = create_typed_node(*g, Ntype_op::Get_mask);
   inverted.connect_sink(slice.create_sink_pin(0));
-  livehd::graph_util::create_const(*g, *Dlop::create_integer(255)).connect_sink(slice.create_sink_pin(2));
+  livehd::graph_util::connect_bit_range(slice, 0, 8);
   auto y = slice.create_driver_pin(0);
   livehd::graph_util::set_ubits(y, 8);
   y.connect_sink(g->get_output_pin("y"));

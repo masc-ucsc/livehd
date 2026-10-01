@@ -27,9 +27,9 @@ hhds::Pin_class skip_identities(hhds::Pin_class d) {
     if (n.is_invalid() || type_op_of(n) != Ntype_op::Get_mask) {
       return d;
     }
-    auto a    = get_driver_of_sink_name(n, "a");
-    auto mask = get_driver_of_sink_name(n, "mask");
-    if (a.is_invalid() || mask.is_invalid() || !mask.is_const()) {
+    auto       a    = get_driver_of_sink_name(n, "a");
+    const auto mask = livehd::graph_util::bit_range(n);
+    if (a.is_invalid() || !mask.has_value()) {
       return d;
     }
     const auto bits     = bits_of(a);
@@ -37,8 +37,8 @@ hhds::Pin_class skip_identities(hhds::Pin_class d) {
     if (bits <= 0 || (out_bits > 0 && out_bits < bits)) {
       return d;
     }
-    const auto& value    = const_of(mask);
-    const bool all_bits = value.is_just_i64() && value.to_just_i64() == -1;
+    const auto& value    = livehd::graph_util::mask_window_const(mask->first, mask->second);
+    const bool  all_bits = value.is_just_i64() && value.to_just_i64() == -1;
     if (!all_bits) {
       auto full = Dlop::get_mask_value(bits);
       if (!full || !value.is_known_eq(*full)) {
@@ -141,10 +141,10 @@ hhds::Pin_class declared_input_pin(const hhds::Graph& body, hhds::Port_id port) 
 
 bool is_associative_op(Ntype_op op) {
   switch (op) {
-    case Ntype_op::Sum:
+    case Ntype_op::Sum :
     case Ntype_op::Mult:
-    case Ntype_op::And:
-    case Ntype_op::Or:
+    case Ntype_op::And :
+    case Ntype_op::Or  :
     case Ntype_op::Xor : return true;
     default            : return false;
   }
@@ -243,12 +243,13 @@ Loop_split classify_loop(const hhds::Node_class& loop_sub) {
       // question (do two lanes' windows overlap?) is a value question this
       // cannot settle; flag it for the consumer.
       auto       base           = get_driver_of_sink_name(head_n, "a");
-      auto       mask           = get_driver_of_sink_name(head_n, "mask");
+      const auto lo             = get_driver_of_sink_name(head_n, "lo");
+      const auto hi             = get_driver_of_sink_name(head_n, "hi");
       auto       value          = get_driver_of_sink_name(head_n, "value");
       const bool base_is_carry  = !base.is_invalid() && skip_identities(base) == carry_in;
-      const bool mask_is_free   = !mask.is_invalid() && !depends_on_a_carry(mask);
+      const bool mask_is_free   = !lo.is_invalid() && !hi.is_invalid() && !depends_on_a_carry(lo) && !depends_on_a_carry(hi);
       const bool value_is_free  = value.is_invalid() || !depends_on_a_carry(value);
-      const bool mask_via_index = !mask.is_invalid() && cone_reaches_any(mask, index_pins);
+      const bool mask_via_index = cone_reaches_any(lo, index_pins) || cone_reaches_any(hi, index_pins);
       if (base_is_carry && mask_is_free && value_is_free && mask_via_index) {
         cc.kind                 = Carry_kind::disjoint_slice;
         cc.needs_disjoint_proof = true;
