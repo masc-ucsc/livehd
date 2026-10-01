@@ -772,6 +772,23 @@ sh_test(
     ],
 )
 
+# The <Top>_io.json sidecar. DesignCert is POSITIONAL, so an external driver
+# needs names -- and re-walking GraphIO to recover them is how a sidecar
+# silently drifts from the model. Ordinals are recorded in the same loops that
+# assign them; this pins that they cannot disagree, including the subtle part:
+# an input consumed only as a CLOCK still occupies a RuntimeInput ordinal that
+# nothing reads but a driver must supply. NON-SEMANTIC: no DesignCert field,
+# no part of compileDesign_correct.
+sh_test(
+    name = "lean_io_metadata_test",
+    size = "large",
+    srcs = ["lean_io_metadata_test.sh"],
+    data = [
+        "mem_mixed_rdclk_negedge.v",
+        "//lhd",
+    ],
+)
+
 # pass.single_edge must gate memory ports PER PORT: the write and SYNCHRONOUS
 # read ports are slot-gated, the ASYNCHRONOUS reads stay live on both
 # microsteps. The fixture carries a negedge element on purpose -- without it

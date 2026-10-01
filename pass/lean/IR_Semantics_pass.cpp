@@ -66,10 +66,26 @@ void emit(const Design_scan& scan) {
     // Ordinals must match the runtime arrays: `RuntimeInput[k]`, `.flops[k]`,
     // `.mems[k]`.  Both maps below are std::map, so the order is deterministic.
     std::map<uint32_t, uint32_t> input_ordinal;   // source id -> input index
+    // NON-SEMANTIC IO METADATA, collected in the SAME loops that assign the
+    // ordinals. An external driver needs names to build a stimulus, and the
+    // certificate is positional by design -- but deriving the mapping by
+    // re-walking GraphIO and assuming it agrees is exactly how a sidecar drifts
+    // from the model it claims to describe. Nothing here touches DesignCert or
+    // compileDesign_correct.
+    struct Io_meta {
+      std::string name;
+      uint32_t    ordinal;
+      uint32_t    width;
+    };
+    std::vector<Io_meta> io_inputs;
+    std::vector<Io_meta> io_outputs;
+    std::vector<std::string> io_clocks;
     {
       uint32_t k = 0;
       for (const auto& kv : ctx.input_field) {
         if (auto it = ctx.input_source_id.find(kv.first); it != ctx.input_source_id.end()) {
+          const auto wit = ctx.input_width.find(kv.first);
+          io_inputs.push_back({kv.first, k, wit == ctx.input_width.end() ? 0 : wit->second});
           input_ordinal[it->second] = k++;
         }
       }
@@ -240,6 +256,10 @@ void emit(const Design_scan& scan) {
       if (it == output_cert_ids.end()) {
         continue;  // undriven output: no slot to name
       }
+      // Appended in lockstep with din.outputs, so RuntimeResult.outputs[k] and
+      // the metadata's k-th entry cannot disagree: an UNDRIVEN output is
+      // skipped by both or by neither.
+      io_outputs.push_back({kv.first, static_cast<uint32_t>(din.outputs.size()), ctx.output_width.at(kv.first)});
       din.outputs.push_back({it->second, ctx.output_width.at(kv.first)});
     }
 
@@ -423,11 +443,13 @@ void emit(const Design_scan& scan) {
     for (const auto& [k, w] : clock_order) {
       clock_ordinal[k] = static_cast<uint32_t>(din.clocks.size());
       din.clocks.push_back({clock_display.at(k)});
+      io_clocks.push_back(clock_display.at(k));
     }
     if (din.clocks.empty()) {
       // A purely combinational design still declares its (unused) domain:
       // `checkDesign` requires ordinal 0 to exist.
       din.clocks.push_back({"clock"});
+      io_clocks.push_back("clock");
     }
     const auto flop_clock = [&](uint32_t fid) -> uint32_t {
       if (auto it = flop_clock_key.find(fid); it != flop_clock_key.end()) {
@@ -498,6 +520,52 @@ void emit(const Design_scan& scan) {
     if (std::rename(vc_tmp.c_str(), lean_path.c_str()) != 0) {
       livehd::diag::warn("pass.lean", "write-failed", "io").msg("could not rename {}", vc_tmp).emit();
       return;
+    }
+
+    // IO sidecar, written ONLY once the certificate itself is on disk, and via
+    // a temp + rename like the certificate: a refused or half-written design
+    // must not leave behind metadata that looks valid and describes nothing.
+    {
+      const std::string io_path = lean_path.substr(0, lean_path.rfind("_Lgraph.lean")) + "_io.json";
+      const std::string io_tmp  = io_path + ".tmp";
+      std::ofstream iofs(io_tmp, std::ios::trunc);
+      if (iofs.is_open()) {
+        auto esc = [](const std::string& v) {
+          std::string o;
+          for (char c : v) {
+            if (c == '"' || c == '\\') {
+              o += '\\';
+            }
+            o += c;
+          }
+          return o;
+        };
+        iofs << "{\n  \"schema_version\": 1,\n  \"kind\": \"lean_design_io\",\n";
+        iofs << "  \"top\": \"" << esc(raw_name) << "\",\n";
+        iofs << "  \"note\": \"Positional map for DesignCert. inputs[k].ordinal indexes RuntimeInput; "
+                "outputs[k].ordinal indexes RuntimeResult.outputs; clocks[k] indexes ClockEdges. "
+                "NON-SEMANTIC: no DesignCert field and no part of compileDesign_correct.\",\n";
+        auto dump = [&](const char* key, const std::vector<Io_meta>& v) {
+          iofs << "  \"" << key << "\": [";
+          for (size_t i = 0; i < v.size(); ++i) {
+            iofs << (i ? ",\n    " : "\n    ") << "{\"name\": \"" << esc(v[i].name) << "\", \"ordinal\": " << v[i].ordinal
+                 << ", \"width\": " << v[i].width << "}";
+          }
+          iofs << (v.empty() ? "" : "\n  ") << "],\n";
+        };
+        dump("inputs", io_inputs);
+        dump("outputs", io_outputs);
+        iofs << "  \"clocks\": [";
+        for (size_t i = 0; i < io_clocks.size(); ++i) {
+          iofs << (i ? ",\n    " : "\n    ") << "{\"name\": \"" << esc(io_clocks[i]) << "\", \"ordinal\": " << i << "}";
+        }
+        iofs << (io_clocks.empty() ? "" : "\n  ") << "]\n}\n";
+        iofs.close();
+        if (std::rename(io_tmp.c_str(), io_path.c_str()) != 0) {
+          livehd::diag::warn("pass.lean", "write-failed", "io").msg("could not rename {}", io_tmp).emit();
+          std::remove(io_tmp.c_str());
+        }
+      }
     }
     std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " (verified_compiler: " << din.sources.size()
               << " sources, " << din.nodes.size() << " nodes, " << din.flops.size() << " flops, "
