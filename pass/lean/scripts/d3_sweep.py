@@ -348,10 +348,10 @@ def resolve_lean():
     """The exact `lean` binary and Lake's COMPLETE environment, resolved once.
 
     `lake env lean` FORKS: a `lake` parent sits at ~811,480 kB resident for the
-    entire probe, doing nothing but holding two environment variables.  At
-    jobs=1 that is 811 MB of a 20 GB budget spent per probe on a process that
-    computes nothing, and it is the difference between the largest module
-    fitting and not fitting.
+    whole probe, long after its only job -- establishing the environment
+    described below -- is finished.  At jobs=1 that is 811 MB of a 20 GB budget
+    held per probe by a process that has nothing left to do, and it is the
+    difference between the largest module fitting and not fitting.
 
     Resolution goes THROUGH Lake and takes the WHOLE environment, because Lake
     sets far more than `LEAN_PATH`: measured here it adds 17 variables (LEAN,
