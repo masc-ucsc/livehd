@@ -1299,15 +1299,8 @@ theorem peelHd_ok {Pr} : ∀ {r r' : PRes} {ρr : Env} {x y : Val},
   intro r
   induction r with
   | stat w =>
-      intro r' ρr x y hp hok
-      cases w with
-      | cons a b =>
-          simp only [peelHd] at hp
-          cases hp
-          have he : Val.cons a b = Val.cons x y := hok
-          cases he
-          rfl
-      | int _ | bool _ | nil | ctor _ _ => simp [peelHd] at hp
+      intro r' ρr x y hp _
+      simp [peelHd] at hp
   | code c => intro r' ρr x y hp _; cases c <;> simp [peelHd] at hp
   | cons a b _ _ =>
       intro r' ρr x y hp hok
@@ -1331,15 +1324,8 @@ theorem peelTl_ok {Pr} : ∀ {r r' : PRes} {ρr : Env} {x y : Val},
   intro r
   induction r with
   | stat w =>
-      intro r' ρr x y hp hok
-      cases w with
-      | cons a b =>
-          simp only [peelTl] at hp
-          cases hp
-          have he : Val.cons a b = Val.cons x y := hok
-          cases he
-          rfl
-      | int _ | bool _ | nil | ctor _ _ => simp [peelTl] at hp
+      intro r' ρr x y hp _
+      simp [peelTl] at hp
   | code c => intro r' ρr x y hp _; cases c <;> simp [peelTl] at hp
   | cons a b _ _ =>
       intro r' ρr x y hp hok
@@ -1364,25 +1350,8 @@ theorem peelIsNil_ok {Pr} : ∀ {r r' : PRes} {ρr : Env} {u v : Val},
   intro r
   induction r with
   | stat w =>
-      intro r' ρr u v hp hok hv
-      cases w with
-      | nil =>
-          simp only [peelIsNil] at hp
-          cases hp
-          have he : Val.nil = u := hok
-          cases he
-          simp only [evalPrim] at hv
-          cases hv
-          rfl
-      | cons a b =>
-          simp only [peelIsNil] at hp
-          cases hp
-          have he : Val.cons a b = u := hok
-          cases he
-          simp only [evalPrim] at hv
-          cases hv
-          rfl
-      | int _ | bool _ | ctor _ _ => simp [peelIsNil] at hp
+      intro r' ρr u v hp _ _
+      simp [peelIsNil] at hp
   | code c => intro r' ρr u v hp _ _; cases c <;> simp [peelIsNil] at hp
   | cons a b _ _ =>
       intro r' ρr u v hp hok hv
@@ -2811,16 +2780,8 @@ theorem peelHd_run_inv {Pr : Program} {m : Nat} :
   intro r
   induction r with
   | stat w =>
-      intro r' ρ ρp d hp _ hl hv
-      cases w with
-      | cons a b =>
-          simp only [peelHd] at hp
-          cases hp
-          cases hl
-          have hd : a = d := hv
-          subst hd
-          exact ⟨b, .nil, rfl⟩
-      | int _ | bool _ | nil | ctor _ _ => simp [peelHd] at hp
+      intro r' ρ ρp d hp _ _ _
+      simp [peelHd] at hp
   | code c => intro r' ρ ρp d hp _ _ _; cases c <;> simp [peelHd] at hp
   | cons a b _ _ =>
       intro r' ρ ρp d hp hsc hl hv
@@ -2860,16 +2821,8 @@ theorem peelTl_run_inv {Pr : Program} {m : Nat} :
   intro r
   induction r with
   | stat w =>
-      intro r' ρ ρp d hp _ hl hv
-      cases w with
-      | cons a b =>
-          simp only [peelTl] at hp
-          cases hp
-          cases hl
-          have hd : b = d := hv
-          subst hd
-          exact ⟨a, .nil, rfl⟩
-      | int _ | bool _ | nil | ctor _ _ => simp [peelTl] at hp
+      intro r' ρ ρp d hp _ _ _
+      simp [peelTl] at hp
   | code c => intro r' ρ ρp d hp _ _ _; cases c <;> simp [peelTl] at hp
   | cons a b _ _ =>
       intro r' ρ ρp d hp hsc hl hv
@@ -2909,23 +2862,8 @@ theorem peelIsNil_run_inv {Pr : Program} {m : Nat} :
   intro r
   induction r with
   | stat w =>
-      intro r' ρ ρp d hp _ hl hv
-      cases w with
-      | nil =>
-          simp only [peelIsNil] at hp
-          cases hp
-          cases hl
-          have hd : Val.bool true = d := hv
-          subst hd
-          exact ⟨.nil, .nil, rfl, rfl⟩
-      | cons a b =>
-          simp only [peelIsNil] at hp
-          cases hp
-          cases hl
-          have hd : Val.bool false = d := hv
-          subst hd
-          exact ⟨.cons a b, .nil, rfl, rfl⟩
-      | int _ | bool _ | ctor _ _ => simp [peelIsNil] at hp
+      intro r' ρ ρp d hp _ _ _
+      simp [peelIsNil] at hp
   | code c => intro r' ρ ρp d hp _ _ _; cases c <;> simp [peelIsNil] at hp
   | cons a b _ _ =>
       intro r' ρ ρp d hp hsc hl hv

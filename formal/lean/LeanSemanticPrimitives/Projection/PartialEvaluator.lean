@@ -329,23 +329,36 @@ Both halves are needed.
 wiring these rules in waits on the invariant that `mixTerm` preserves it.  Until
 then these definitions are deliberately NOT wired into the `prim` rule. -/
 
+/-- THE PEELS ANSWER FROM A SPINE, NEVER FROM A STATIC VALUE.
+
+An earlier revision also had `peelHd (.stat (.cons a _)) = some (.stat a)` and
+its two siblings.  They are gone, for two reasons that agree.
+
+They were dead: a `hd`/`tl`/`isNil` whose operand is wholly static is already
+answered by the STATIC branch of the `prim` case, which just runs `evalPrim`.
+Reaching the static arm needs a binding-time analysis that marked a wholly
+static term dynamic.  Removing them was measured INERT -- `Scaling`'s and
+`Gate0`'s residuals are unchanged to the digit.
+
+And they were not expressible in `L`.  The object specializer has to make the
+same decisions as this one or the second projection's agreement is a
+coincidence, and deciding "is this Val a cons" needs a primitive `L` does not
+have: `isNil` separates nil from everything else, and `hd` on a non-cons is a
+type error rather than a failure one can test.  Keeping an arm here that the
+object cannot mirror would mean two independently designed specializers. -/
 def peelHd : PRes → Option PRes
   | .lets bs r        => (peelHd r).map (PRes.lets bs)
   | .cons a b         => if b.total then some a else none
-  | .stat (.cons a _) => some (.stat a)
   | _                 => none
 
 def peelTl : PRes → Option PRes
   | .lets bs r        => (peelTl r).map (PRes.lets bs)
   | .cons a b         => if a.total then some b else none
-  | .stat (.cons _ b) => some (.stat b)
   | _                 => none
 
 def peelIsNil : PRes → Option PRes
   | .lets bs r        => (peelIsNil r).map (PRes.lets bs)
   | .cons a b         => if a.total && b.total then some (.stat (.bool false)) else none
-  | .stat .nil        => some (.stat (.bool true))
-  | .stat (.cons _ _) => some (.stat (.bool false))
   | _                 => none
 
 /-- `consP` discards nothing, so it may always build a spine. -/
