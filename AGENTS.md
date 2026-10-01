@@ -133,3 +133,38 @@ Enforced by `scripts/contracts/diff_no_compile_flags_touched.sh`.
 - Modern Yosys produces `$mem_v2` (not `$mem`). Match both: `cell->type == "$mem" || cell->type == "$mem_v2"`.
 - Do NOT use `strncmp("$mem", 4)` — it catches `$memrd`/`$memwr`/`$meminit` which have different port structures.
 - Memory RTL modules are in `ware/rtl/cgen_memory_*.v`. The `multiclock` variants have per-port clock inputs instead of a shared `clk`.
+
+## Never modify a driver while it is executing
+
+A long-running shell or Python driver (`scripts/coreet_d2_census.sh`,
+`scripts/run_coreet_module_lean.sh`, `pass/lean/scripts/direct_sweep.py`, the
+sweep harnesses) must not be edited, committed over, or replaced until it has
+exited.
+
+**Why no replacement trick saves you.** bash reads a script incrementally, *by
+byte offset*, as it executes. A driver that is halfway through has not yet read
+its later phases, so changing the bytes under it makes it resume parsing at a
+stale offset in new content:
+
+    scripts/coreet_d2_census.sh: line 341: syntax error near unexpected token `('
+    `echo "phase 1: generating ${#MODULES[@]} module(s), jobs=$JOBS"'
+
+That killed a census driver immediately after `phase 1 done`, discarding the
+aggregation and sweep of four modules that had already generated.
+
+"Atomic replace" does not rescue this in general, and the common way of
+attempting it is itself broken here: the session scratchpad under `/tmp` is a
+**different filesystem** from `/mada` and `/soe`, so `mv /tmp/new scripts/x.sh`
+is not a rename — GNU `mv` falls back to `open(dest, O_TRUNC)` and rewrites the
+*same inode* in place. Even a true same-filesystem rename only helps a process
+that has already read the whole file, which a mid-run driver has not.
+
+**The locking does not cover this.** `<out>/.lock` (and the stable lock under
+`generated/census_d2/runtime_locks/`) protects a run *directory* from a second
+writer. It says nothing about the executable text of the driver itself.
+
+**What to do instead:** wait for the run to exit, or let it finish and use
+`--resume` (which is fail-closed and exists precisely because interrupted
+generation should not be regenerated). If an edit is genuinely urgent, stop the
+run first — by exact pid and process group, never by pattern — and relaunch
+into a *new* run directory.
