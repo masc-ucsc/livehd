@@ -1069,3 +1069,79 @@ both hit during this work: `write_rtlil pp-mem.il` is a **relative** path and
 yosys is linked *into* `lhd`, so the dump lands in `lhd`'s CWD, not `--workdir`;
 and `lhd compile lg:` defaults to recipe **O1**, which runs `pass.cprop`, so a
 "raw graph" column without an explicit `--recipe O0` is a second cprop column.
+
+
+### Validating the plain-proc lowering: differential simulation, not equivalence
+
+Zero RTLIL SCCs and a certificate are necessary, not sufficient — the lowering
+also has to agree with the RTL. **`lhd lec` cannot provide that check here, and
+that is not a configuration mistake.** Its reference side elaborates the RTL
+through the shipped `proc -ifx`, which is the lowering that leaves the cycle, so
+the solver refuses the *reference*:
+
+```
+ref encode failed: operand of 'mux_440' has no encodable driver
+root: WORD-LEVEL CYCLE through: mux_440 -> mux_536 -> mux_532 -> mux_536
+```
+
+`--reader slang` as an alternative reference also fails — that frontend cannot
+elaborate this RTL at all. So the reference is **verilator reading the original
+sources** (CORE-ET's own DV flow, sharing no lowering with the thing under
+test), via `scripts/coreet_equiv7.sh`.
+
+**This is randomized + directed differential simulation. It is NOT formal
+equivalence, and nothing below should be read as a proof.** A pass is reported
+as `DIFFSIM-PASS seed=<s> vectors=<n>` and means only that no disagreement was
+observed on those vectors.
+
+| module | compile | single_edge | cert emitted | differential |
+|---|---|---|---|---|
+| txfma_f0 | 0 | 0 | yes | `DIFFSIM-PASS seed=1 vectors=2574` |
+| txfma_f2 | 0 | 0 | yes | `DIFFSIM-PASS seed=1 vectors=2854` |
+| txfma_f3 | 0 | 0 | yes | `DIFFSIM-PASS seed=1 vectors=2566` |
+| txfma_f5 | 0 | 0 | yes | `DIFFSIM-PASS seed=1 vectors=2228` |
+| txfma_e5 | 0 | 0 | yes | `DIFFSIM-PASS seed=1 vectors=2326` |
+| txfma_f6 | 0 | 0 | yes | `DIFFSIM-PASS seed=1 vectors=2250` |
+| txfmaexp_top | 0 | 0 | yes | `DIFFSIM-MISMATCH ... mismatches=7` |
+
+Vectors are **directed first, then random**, because random vectors alone can
+miss exactly the branch-coverage question at issue: all-zero, all-one, one-hot
+and one-cold over the whole input word, every value of each narrow input port
+(where case selectors live) against both a zero and an all-ones background, and
+bounded pairwise cross products of the narrowest ports. `--x-assign 0
+--x-initial 0` on both sides, since these designs have no reset. Seed, vector
+counts, input width, simulator version and source/candidate hashes are recorded
+in each run's `diffsim.json`.
+
+**Domain.** Defined 2-state inputs only — the honest limit, since the lowering
+difference under test is precisely about what an X case selector does.
+
+**The harness is sensitivity-controlled** by
+`//lhd/tests:diffsim_sensitivity_test`: a planted one-bit output inversion must
+be caught, an identical pair must pass, and a truncated vector file must exit
+nonzero rather than "agree" on its prefix. Two earlier false-pass holes are
+closed — a nonzero simulation exit is no longer treated as a result, and each
+side must produce *exactly* the expected line count.
+
+#### txfmaexp_top: a separate, pre-existing bug — NOT caused by this work
+
+Two controls establish the attribution:
+
+* the same differential against a netlist built by the **default `-ifx`** flow
+  reproduces the *same 7 vectors with the same values*; and
+* a direct **plain-proc netlist vs `-ifx` netlist** differential is
+  `DIFFSIM-PASS seed=1 vectors=2980` — the two candidate lowerings agree with
+  *each other* everywhere, while both differ from the source RTL on those 7.
+
+So the plain-proc fallback changes nothing observable here. What remains is a
+**pre-existing RTL-to-LGraph semantic mismatch** (~0.24% of vectors, in adjacent
+pairs, so state-dependent) that must be isolated on its own. `txfmaexp_top` is
+**not** accepted for the simulator milestone until it is.
+
+#### Honest status of the six passing modules
+
+Certificate emitted, plus independent differential-simulation agreement on a
+few thousand defined-input vectors. That is a smoke-level validation, not
+equivalence. `ifx` remains the default; selective plain mode stays **explicit
+and experimental**. Lean acceptance (`lake build` / `checkDesign` / simulator)
+is the next gate and is what the 122-CORE-ET milestone needs.

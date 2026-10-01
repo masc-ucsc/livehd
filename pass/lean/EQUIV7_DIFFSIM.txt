@@ -1,0 +1,8 @@
+MODULE           COMPILE   SINGLE_EDGE   CERT_EMIT    DIFFSIM
+txfma_f0         0         0             CERT-EMITTED DIFFSIM-PASS seed=1 vectors=2574
+txfma_f2         0         0             CERT-EMITTED DIFFSIM-PASS seed=1 vectors=2854
+txfma_f3         0         0             CERT-EMITTED DIFFSIM-PASS seed=1 vectors=2566
+txfma_f5         0         0             CERT-EMITTED DIFFSIM-PASS seed=1 vectors=2228
+txfma_e5         0         0             CERT-EMITTED DIFFSIM-PASS seed=1 vectors=2326
+txfma_f6         0         0             CERT-EMITTED DIFFSIM-PASS seed=1 vectors=2250
+txfmaexp_top     0         0             CERT-EMITTED DIFFSIM-MISMATCH seed=1 vectors=2980 mismatches=7

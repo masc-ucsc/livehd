@@ -64,3 +64,9 @@ generated/core-et/patched_src/
 # the CONCLUSIONS belong in pass/lean/GATED_MODULES.tsv and
 # pass/lean/DIRECTION2_RESULTS.md, which are tracked.
 generated/provenance/
+
+# Defined-input equivalence evidence (scripts/coreet_equiv7.sh): per-module
+# lgdb directories, emitted netlists, verilator build trees and simulation
+# traces. Kept ON DISK; the conclusions are in pass/lean/DIRECTION2_RESULTS.md
+# and pass/lean/GATED_MODULES.tsv.
+generated/equiv7/

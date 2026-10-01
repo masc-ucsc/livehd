@@ -637,6 +637,19 @@ sh_test(
     data = ["//lhd"],
 )
 
+# Sensitivity control for the differential-simulation harness. It reports
+# DIFFSIM-PASS, which is worth nothing unless the harness can see a real
+# difference -- a testbench that drove nothing would report DIFFSIM-PASS on
+# every module forever and the failure would look like success. Requires a
+# planted one-bit output inversion to be caught, an identical pair to pass, and
+# a truncated vector file to exit nonzero rather than "agree" on its prefix.
+sh_test(
+    name = "diffsim_sensitivity_test",
+    size = "medium",
+    srcs = ["diffsim_sensitivity_test.sh"],
+    data = ["//scripts:cycle_provenance_tools"],
+)
+
 # The CORE-ET LEC gate decision. The gate used to exit only on the literal text
 # REFUTED, so UNKNOWN, a solver timeout, a crashed run and a MISSING verdict all
 # printed "inconclusive; not fatal" and continued -- with LEC_STRICT=true too,
