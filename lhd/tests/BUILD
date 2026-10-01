@@ -772,6 +772,22 @@ sh_test(
     ],
 )
 
+# PER-PORT memory read timing at the importer. `type` is a SCALAR (0 async,
+# 1 sync, 2 array) but the reader wrote yosys's RD_CLK_ENABLE BITMASK into it;
+# masks 0 and 1 coincide with the scalar meaning by accident, so every
+# all-async and all-sync memory looked right and no existing test could catch
+# it. Failures start at two ports (one async + one sync = mask 2, aliasing onto
+# "array"). Checks the REPRESENTATION, not merely that something was refused.
+sh_test(
+    name = "mem_mixed_rdclk_test",
+    size = "large",
+    srcs = ["mem_mixed_rdclk_test.sh"],
+    data = [
+        "mem_mixed_rdclk.v",
+        "//lhd",
+    ],
+)
+
 # todo/livehd/2f-latch M9 — Clock_cell recognition at the Sub boundary: the
 # cases INLINING structurally cannot cover (a TRUSTED gate, a MEMORY clock, and
 # an enable that is a CONE rather than a bare port).

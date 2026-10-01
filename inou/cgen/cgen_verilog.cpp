@@ -1061,6 +1061,25 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         return;
       }
       mem_type = hydrate_const(e.driver).to_just_i64();
+      // FAIL CLOSED on a mixed-timing memory. The normal memory path below is
+      // guarded by `mem_type == 0 || mem_type == 1`, so Memory_type_mixed falls
+      // through to the ARRAY path -- which is exactly how a 3-async/2-sync
+      // memory came out as a stateless combinational lookup, with both
+      // synchronous read registers gone and the write folded into an
+      // always_comb. Refuse by name until this emitter reads the per-port
+      // `rdport` timing.
+      if (mem_type == Ntype::Memory_type_mixed) {
+        livehd::diag::err("inou.cgen", "memory-mixed-read-timing", "unsupported")
+            .msg("memory {} has read ports of DIFFERENT timing (some asynchronous, some "
+                 "synchronous); this emitter selects its memory model from the cell-global "
+                 "`type` and would emit a combinational array, dropping the synchronous read "
+                 "registers",
+                 debug_name(node))
+            .hint("per-port timing is on each read port's `rdport` pin "
+                  "(Ntype::Memory_rdport_async / _sync); this emitter does not read it yet")
+            .fatal();
+        return;
+      }
     } else if (pin_name == "wensize") {
       if (!is_const_pin(e.driver)) {
         livehd::diag::err("inou.cgen", "mem-malformed", "internal")
