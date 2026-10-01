@@ -654,6 +654,19 @@ sh_test(
     ],
 )
 
+# The static shape gate. It replaced a `nodes > 0` check that was UNSOUNDLY
+# STRICT: null_vpu and minion_dcache_texsend are real CORE-ET modules with
+# all-constant sources, no nodes, and every output resolving to a valid source
+# slot -- refused for having no combinational logic, which is a gate defect
+# reported as two module failures. What must hold is that every reference
+# resolves; a parse failure must say so rather than look like an empty design.
+sh_test(
+    name = "cert_shape_check_test",
+    size = "small",
+    srcs = ["cert_shape_check_test.sh"],
+    data = ["//pass/lean:scripts"],
+)
+
 # The D2 census accept/reject logic. Two distinctions that were wrong at first:
 # direct_sweep exits 1 when it COMPLETED with refusals (near-certain over 122
 # modules), which must not mark every other row UNTRUSTED; and `accepted`

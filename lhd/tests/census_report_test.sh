@@ -122,5 +122,51 @@ n=$(( $(wc -l < "$D/census.tsv") - 1 ))
   || { echo "FAIL: expected 3 rows, got $n -- a module that vanishes looks like a pass"; fails=$((fails+1)); }
 check "a blocked module is explicit" "$D/census.tsv" blk blocked
 
+# ---------------------------------------------------------------------------
+# REASON EXTRACTION. A blank reason reads as "no diagnostic available" when the
+# log in fact had one. The capture was written `([^"]{0,220})"`, which requires
+# the closing quote within 220 characters, so every message LONGER than that
+# silently produced an empty reason -- and real yosys diagnostics are longer.
+# ---------------------------------------------------------------------------
+python3 - "$REP" "$T" <<'PYDIAG'
+import importlib.util, os, sys
+spec = importlib.util.spec_from_file_location("r", sys.argv[1])
+m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+T = sys.argv[2]; fails = 0
+
+long_msg = "cmd:read_slang " + "x" * 400
+p1 = os.path.join(T, "long.log")
+open(p1, "w").write('{"severity":"error","code":"yosys-failed","message":"%s"}\n' % long_msg)
+got = m.first_diag(p1, "1")
+if not got.startswith("cmd:read_slang"):
+    print("FAIL: a >220-char diagnostic produced %r instead of the message" % got); fails += 1
+else:
+    print("ok: a long structured diagnostic is extracted (and truncated)")
+if len(got) > 260:
+    print("FAIL: the reason was not truncated (%d chars)" % len(got)); fails += 1
+
+p2 = os.path.join(T, "sig.log"); open(p2, "w").write("some noise\n")
+for rc, needle in (("143", "NOT a design failure"), ("124", "timed out"),
+                   ("134", "SIGABRT"), ("137", "OOM")):
+    got = m.first_diag(p2, rc)
+    if needle not in got:
+        print("FAIL: exit %s -> %r, expected mention of %r" % (rc, got, needle)); fails += 1
+    else:
+        print("ok: exit %s is explained (%s)" % (rc, needle))
+
+p3 = os.path.join(T, "gate.log"); open(p3, "w").write("== shape ==\nFAIL: no nodes emitted\n")
+if "no nodes emitted" not in m.first_diag(p3, "0"):
+    print("FAIL: a plain FAIL: line from the static gates was not picked up"); fails += 1
+else:
+    print("ok: a static-gate FAIL line is picked up")
+
+if m.first_diag(os.path.join(T, "does_not_exist.log"), "0") != "":
+    print("FAIL: a missing log should yield an empty reason, not an invention"); fails += 1
+else:
+    print("ok: a missing log yields no invented reason")
+sys.exit(1 if fails else 0)
+PYDIAG
+[ $? -eq 0 ] || fails=$((fails+1))
+
 [ "$fails" -eq 0 ] || { echo "FAIL: $fails case(s) failed"; exit 1; }
 echo "PASS: census_report_test"

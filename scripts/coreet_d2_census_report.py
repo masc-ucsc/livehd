@@ -38,18 +38,55 @@ def grep1(path, pat, default=""):
     return default
 
 
-def first_diag(path):
-    """The first error diagnostic, so a failed row says WHY."""
+SIGNALS = {124: "timed out (SIGTERM from `timeout`)",
+           130: "interrupted (SIGINT)",
+           134: "aborted (SIGABRT -- an uncaught C++ exception)",
+           137: "killed (SIGKILL -- often the OOM killer)",
+           143: "terminated (SIGTERM -- an external kill, NOT a design failure)"}
+
+
+def first_diag(path, rc=""):
+    """The most informative reason available, never blank when a log exists.
+
+    The bound on the captured message used to be written `([^"]*{0,220})"`,
+    which requires the closing quote to fall within 220 characters -- so every
+    message LONGER than that failed to match and the row's reason came out
+    empty, which reads as "no diagnostic" rather than "a long one". Capture
+    unbounded and truncate afterwards.
+    """
+    out = []
     try:
         with open(path, errors="replace") as fh:
             body = fh.read()
     except OSError:
-        return ""
-    m = re.search(r'"severity":"error".*?"message":"([^"]{0,220})"', body, re.S)
-    if m:
-        return m.group(1)
-    m = re.search(r'^\[ERROR\][^\n]{0,220}', body, re.M)
-    return m.group(0) if m else ""
+        body = ""
+    if body:
+        m = re.search(r'"severity":"error".*?"message":"([^"]*)"', body, re.S)
+        if m:
+            out.append(m.group(1)[:220])
+        if not out:
+            m = re.search(r"^\[ERROR\][^\n]*", body, re.M)
+            if m:
+                out.append(m.group(0)[:220])
+        if not out:
+            # static gates print plain FAIL lines, not structured diagnostics
+            m = re.search(r"^FAIL: [^\n]*", body, re.M)
+            if m:
+                out.append(m.group(0)[:220])
+        if not out:
+            m = re.search(r"^(?:ERROR|FATAL|terminate called)[^\n]*", body, re.M)
+            if m:
+                out.append(m.group(0)[:220])
+    # An exit status is always something, and for a signal it is the whole story.
+    try:
+        n = int(rc)
+    except (TypeError, ValueError):
+        n = None
+    if n is not None and n in SIGNALS:
+        out.append(SIGNALS[n])
+    elif n not in (None, 0) and not out:
+        out.append(f"runner exited {n} with no structured diagnostic")
+    return " | ".join(dict.fromkeys(x for x in out if x)) or ""
 
 
 def main():
@@ -176,7 +213,7 @@ def main():
                 row["stage"] = "no-certificate" if rc in ("", "0") else f"runner-exit-{rc}"
                 if rc == "124":
                     row["stage"] = "timeout"
-            row["reason"] = first_diag(log)
+            row["reason"] = first_diag(log, rc)
         counts[row["stage"]] = counts.get(row["stage"], 0) + 1
         rows.append(row)
 

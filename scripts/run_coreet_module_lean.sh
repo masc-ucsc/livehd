@@ -242,10 +242,19 @@ if [[ "$LEAN_MODE" == "verified_compiler" ]]; then
   # What IS worth gating here is cheap and specific:
   {
     echo "== shape =="
-    n_src="$(grep -c 'SourceDesc\.' "$generated" || true)"
-    n_nod="$(grep -c 'origin :=' "$generated" || true)"
-    echo "sources=$n_src nodes=$n_nod"
-    [[ "$n_nod" -gt 0 ]] || { echo "FAIL: no nodes emitted"; gate_status=1; }
+    # STRUCTURAL REFERENCE VALIDATION, not `nodes > 0`.
+    #
+    # The old check refused any design with no combinational nodes. Two real
+    # CORE-ET modules are legitimately zero-node -- `null_vpu` and
+    # `minion_dcache_texsend` have all-constant sources, `nodes := #[]`, and
+    # every output resolving to a valid source slot. They are what their names
+    # say, and refusing them was a gate defect, not a finding. What must hold
+    # is that every reference RESOLVES: slots are dense, so every output slot,
+    # flop din/enable/resetPin, node dep and memory nextImg must be within
+    # sources+nodes.
+    if ! python3 "$LIVEHD_ROOT/pass/lean/scripts/cert_shape_check.py" "$generated"; then
+      gate_status=1
+    fi
 
     echo "== required declarations =="
     for d in _designCert _step _compiles _step_correct; do
