@@ -96,6 +96,16 @@ namespace Projection
 #print axioms prim_bvUint
 #print axioms evalOpCert_And
 #print axioms evalOp_And_two
+-- Phase 3 batch 1: Op_Or, Op_SRA, Op_GetMask
+#print axioms prim_bvSra
+#print axioms prim_bvGetMask
+#print axioms evalOp_Or_fold
+#print axioms evalOp_Or_two
+#print axioms evalOp_SRA
+#print axioms evalOp_GetMask
+#print axioms evalOpCert_Or
+#print axioms evalOpCert_SRA
+#print axioms evalOpCert_GetMask
 #print axioms srcFlopNext_eq
 -- multi-clock: the shared semantics, and conservativity
 #print axioms Compiler.interpretDesign_allEdges

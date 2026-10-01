@@ -75,9 +75,12 @@ open Surface
 @[inline] private def P (p : Prim) (es : List SExp) : SExp := .prim p es
 @[inline] private def C (f : String) (es : List SExp) : SExp := .call f es
 
-/-- `Op_And`'s code in `DesignEncoding.opCode`.  Named rather than spelled `7`
+/-- Operator codes from `DesignEncoding.opCode`, named rather than spelled
 inline so the two cannot drift apart silently. -/
-private def andCode : Int := Int.ofNat (opCode .Op_And)
+private def andCode     : Int := Int.ofNat (opCode .Op_And)
+private def orCode      : Int := Int.ofNat (opCode .Op_Or)
+private def sraCode     : Int := Int.ofNat (opCode .Op_SRA)
+private def getMaskCode : Int := Int.ofNat (opCode .Op_GetMask)
 
 def hwS : SProgram where
   entry := "main"
@@ -165,12 +168,27 @@ def hwS : SProgram where
   -- the operator dispatch.  `code` is static, so this `ite` is resolved at
   -- specialization time and does not appear in the residual -- that is the
   -- Gate 0 criterion, applied to hardware.
+  -- The opcode is STATIC -- it comes out of the certificate -- so this chain is
+  -- decided during specialization and no dispatch survives into the residual.
+  -- That is the Gate 0 property, and it is why one `ite` per supported operator
+  -- costs the residual nothing.
+  --
+  -- THE FALLBACK IS A WRONG ANSWER, NOT A REFUSAL.  An unsupported operator
+  -- yields `mk_bv w 0` here, exactly as it does in `eval_op`'s own catch-all,
+  -- so the two agree -- but neither refuses.  Excluding such designs is
+  -- `SupportedByProjection`'s job in Milestone 2 and is not done yet.
   { name := "applyOp", params := ["op", "w", "deps", "env", "n"], inline := true
   , body := .switch (R "op")
               [(tagOp, ["code", "pay"],
                 .ite (P .eqI [R "code", .lit (.int andCode)])
-                     (C "opAnd" [R "w", R "deps", R "env", R "n"])
-                     (P .bvMk [R "w", int 0]))] },
+                  (C "opAnd" [R "w", R "deps", R "env", R "n"])
+                (.ite (P .eqI [R "code", .lit (.int orCode)])
+                  (C "opOr" [R "w", R "deps", R "env", R "n"])
+                (.ite (P .eqI [R "code", .lit (.int sraCode)])
+                  (C "opSra" [R "w", R "deps", R "env", R "n"])
+                (.ite (P .eqI [R "code", .lit (.int getMaskCode)])
+                  (C "opGetMask" [R "w", R "deps", R "env", R "n"])
+                  (P .bvMk [R "w", int 0])))))] },
 
   -- Op_And: resize the FIRST operand to the node width, fold the rest in
   -- unchanged.  Mirrors `eval_op` exactly; see `OperatorBridge.evalOp_And_cons`.
@@ -187,6 +205,31 @@ def hwS : SProgram where
                  [ P .tl [R "deps"], R "env", R "n"
                  , P .bvAnd [R "w", R "acc", C "slot" [R "env", R "n", P .hd [R "deps"]]]
                  , R "w" ]) },
+
+  -- Op_Or: NOT Op_And's shape.  Seeds with `mk_bv w 0` and folds in EVERY
+  -- operand including the first -- there is no `bv_resize` of a head operand
+  -- here (`LGraphModel.lean:163-164`, `OperatorBridge.evalOp_Or_fold`).
+  { name := "opOr", params := ["w", "deps", "env", "n"], inline := true
+  , body := C "foldOr" [R "deps", R "env", R "n", P .bvMk [R "w", int 0], R "w"] },
+
+  { name := "foldOr", params := ["deps", "env", "n", "acc", "w"], inline := true
+  , body := .ite (P .isNil [R "deps"]) (R "acc")
+              (C "foldOr"
+                 [ P .tl [R "deps"], R "env", R "n"
+                 , P .bvOr [R "w", R "acc", C "slot" [R "env", R "n", P .hd [R "deps"]]]
+                 , R "w" ]) },
+
+  -- Op_SRA and Op_GetMask are binary and delegate directly; the operand order
+  -- is the pinned model's (`eval_op .. w [a, b]`).
+  { name := "opSra", params := ["w", "deps", "env", "n"], inline := true
+  , body := P .bvSra [ R "w"
+                     , C "slot" [R "env", R "n", P .hd [R "deps"]]
+                     , C "slot" [R "env", R "n", P .hd [P .tl [R "deps"]]] ] },
+
+  { name := "opGetMask", params := ["w", "deps", "env", "n"], inline := true
+  , body := P .bvGetMask [ R "w"
+                         , C "slot" [R "env", R "n", P .hd [R "deps"]]
+                         , C "slot" [R "env", R "n", P .hd [P .tl [R "deps"]]] ] },
 
   { name := "mkOutputs", params := ["outs", "env", "n"], inline := true
   , body := .ite (P .isNil [R "outs"]) nil
@@ -311,6 +354,52 @@ def runHw (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState
 #guard runHw seqD (allEdges seqD) (seqIn 3 0 0) (seqSt 4) == refOf seqD (allEdges seqD) (seqIn 3 0 0) (seqSt 4)
 #guard runHw seqD (allEdges seqD) (seqIn 3 1 1) (seqSt 4) == refOf seqD (allEdges seqD) (seqIn 3 1 1) (seqSt 4)
 
+/-! ### Batch 1 operators: `Op_Or`, `Op_SRA`, `Op_GetMask`
+
+One two-input node per operator, run through `I_hw` and compared against the
+SHARED reference.  Agreement is the check that matters: the two are independent
+implementations of the same pinned `eval_op` case, so a mistake in the operand
+order or the fold shape shows up here. -/
+
+private def binD (o : LGraphOp) : DesignCert where
+  sources  := #[.input 0 4, .input 1 4]
+  nodes    := #[{ op := o, width := 4, deps := #[0, 1] }]
+  outputs  := #[{ slot := 2, width := 4 }]
+  flops    := #[]
+  memories := #[]
+
+private def binIn (a b : Int) : RuntimeInput := #[mk_bv 4 a, mk_bv 4 b]
+
+private def binOK (o : LGraphOp) (a b : Int) : Bool :=
+  runHw (binD o) (allEdges (binD o)) (binIn a b) tinySt
+    == refOf (binD o) (allEdges (binD o)) (binIn a b) tinySt
+
+#guard [(5,3),(12,10),(0,15),(8,1),(15,15)].all (fun p => binOK .Op_Or  p.1 p.2)
+#guard [(5,3),(12,10),(0,15),(8,1),(15,15)].all (fun p => binOK .Op_SRA p.1 p.2)
+#guard [(5,3),(12,10),(0,15),(8,1),(15,15)].all (fun p => binOK .Op_GetMask p.1 p.2)
+
+-- `Op_Or` folds EVERY operand from a zero seed, so a three-input node is not
+-- `Op_And`'s shape with a different gate; this is the case that would break if
+-- `opOr` had been copied from `opAnd`
+private def or3D : DesignCert where
+  sources  := #[.input 0 4, .input 1 4, .input 2 4]
+  nodes    := #[{ op := .Op_Or, width := 4, deps := #[0, 1, 2] }]
+  outputs  := #[{ slot := 3, width := 4 }]
+  flops    := #[]
+  memories := #[]
+
+#guard [(1,2,4),(8,4,2),(0,0,0),(15,0,1)].all (fun t =>
+  runHw or3D (allEdges or3D) #[mk_bv 4 t.1, mk_bv 4 t.2.1, mk_bv 4 t.2.2] tinySt
+    == refOf or3D (allEdges or3D) #[mk_bv 4 t.1, mk_bv 4 t.2.1, mk_bv 4 t.2.2] tinySt)
+
+-- SRA IS ARITHMETIC, and this is the vector that says so: 0b1000 is -8 at
+-- width 4, so shifting right by one gives -4 = 0b1100, not the 0b0100 a
+-- LOGICAL shift would give.
+#guard (interpretDesign (binD .Op_SRA) (allEdges (binD .Op_SRA))
+          (binIn 8 1) tinySt).outputs == #[mk_bv 4 12]
+#guard (interpretDesign (binD .Op_SRA) (allEdges (binD .Op_SRA))
+          (binIn 8 1) tinySt).outputs != #[mk_bv 4 4]
+
 end Acceptance
 
 /-! ## The first projection, on hardware
@@ -403,6 +492,27 @@ private def tagsIn (R : Program) : List Nat :=
         tagSrcMemImg, tagSrcMemConst, tagNode, tagOp, tagOutput, tagFlop].all
          (fun t => t ∉ tagsIn seqR)
 
+/-! ### Batch 1: the residual shape
+
+Each new operator projects, and the OPCODE DISPATCH is gone: `applyOp`'s chain
+of `ite`s is decided during specialization, so no `tagOp` and no residual `eqI`
+against an operator code survives.  One `ite` per supported operator therefore
+costs the residual nothing, which is what makes the chain the right structure
+to keep growing. -/
+
+private def binR (o : LGraphOp) : Program :=
+  match projectDesign (binD o) with | .ok p => p | .error _ => ⟨[], 0⟩
+
+#guard [LGraphOp.Op_Or, .Op_SRA, .Op_GetMask].all
+         (fun o => (projectDesign (binD o)).toOption.isSome)
+
+-- no design tag survives, for any of them
+#guard [LGraphOp.Op_Or, .Op_SRA, .Op_GetMask].all (fun o =>
+  [tagDesign, tagSrcInput, tagSrcConst, tagNode, tagOp, tagOutput].all
+    (fun t => t ∉ tagsIn (binR o)))
+
+-- (the primitive-level checks need `primsOf`, and follow its definition below)
+
 /-- What the residual is made of.  The hardware primitives are the point; the
 `consP`/`hd`/`tl` are the environment plumbing the file header flags as the
 O(N^2) cost to be removed by a specializer-side simplification.  There is no
@@ -420,6 +530,15 @@ private partial def primsOf : Term → List Prim
 -- would have been avoidable and is not here -- see `flopNext`.
 #guard ((seqR.funs.map (fun fd => primsOf fd.body)).flatten).eraseDups.all
          (fun p => p ∈ [Prim.consP, .bvResize, .hd, .tl, .bvAnd, .andB, .notB, .eqI, .bvUint])
+
+-- Batch 1, at the primitive level: each residual contains exactly the hardware
+-- primitive its operator names, and NO `eqI` -- the opcode comparisons in
+-- `applyOp` are all decided during specialization.
+#guard (((binR .Op_SRA).funs.map (fun fd => primsOf fd.body)).flatten).contains Prim.bvSra
+#guard (((binR .Op_GetMask).funs.map (fun fd => primsOf fd.body)).flatten).contains Prim.bvGetMask
+#guard (((binR .Op_Or).funs.map (fun fd => primsOf fd.body)).flatten).contains Prim.bvOr
+#guard [LGraphOp.Op_Or, .Op_SRA, .Op_GetMask].all (fun o =>
+  !(((binR o).funs.map (fun fd => primsOf fd.body)).flatten).contains Prim.eqI)
 
 -- the two `ite`s left in the sequential residual are the reset and enable
 -- tests, which are genuinely runtime conditions; the combinational design has

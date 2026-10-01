@@ -63,6 +63,14 @@ any of these. -/
     evalPrim .bvXor [.int (Int.ofNat w), encBV a, encBV b]
       = .ok (encBV (bv_bitwise w xor a b)) := rfl
 
+@[simp] theorem prim_bvSra (w : Nat) (a s : BV) :
+    evalPrim .bvSra [.int (Int.ofNat w), encBV a, encBV s]
+      = .ok (encBV (bv_sra w a s)) := rfl
+
+@[simp] theorem prim_bvGetMask (w : Nat) (a m : BV) :
+    evalPrim .bvGetMask [.int (Int.ofNat w), encBV a, encBV m]
+      = .ok (encBV (bv_get_mask w a m)) := rfl
+
 /-! ## Derived tests
 
 `bv_nonzero` is a `Bool` in the hardware model and has no primitive of its own,
@@ -104,6 +112,43 @@ definitionally. -/
 theorem evalOpCert_And (w : Nat) (l : List BV) :
     eval_op_cert .Op_And w (l.map CertVal.bv) = .bv (eval_op .Op_And w l) :=
   eval_op_cert_bv .Op_And w l (fun _ => ⟨by simp, by simp, by simp⟩)
+
+/-! ### Batch 1: `Op_Or`, `Op_SRA`, `Op_GetMask`
+
+`Op_Or` DOES NOT share `Op_And`'s shape, and the difference is the kind that is
+easy to smooth over by accident.  `Op_And` seeds the fold with `bv_resize w a`
+and folds the REST; `Op_Or` seeds with `mk_bv w 0` and folds ALL of them,
+including the first (`LGraphModel.lean:163-164`).  Each is transcribed from the
+pinned model, not generalised from the other. -/
+
+theorem evalOp_Or_fold (w : Nat) (args : List BV) :
+    eval_op .Op_Or w args
+      = args.foldl (fun acc b => bv_bitwise w (fun x y => x || y) acc b) (mk_bv w 0) := rfl
+
+theorem evalOp_Or_nil (w : Nat) : eval_op .Op_Or w [] = mk_bv w 0 := rfl
+
+theorem evalOp_Or_two (w : Nat) (a b : BV) :
+    eval_op .Op_Or w [a, b]
+      = bv_bitwise w (fun x y => x || y)
+          (bv_bitwise w (fun x y => x || y) (mk_bv w 0) a) b := rfl
+
+theorem evalOpCert_Or (w : Nat) (l : List BV) :
+    eval_op_cert .Op_Or w (l.map CertVal.bv) = .bv (eval_op .Op_Or w l) :=
+  eval_op_cert_bv .Op_Or w l (fun _ => ⟨by simp, by simp, by simp⟩)
+
+theorem evalOp_SRA (w : Nat) (a s : BV) :
+    eval_op .Op_SRA w [a, s] = bv_sra w a s := rfl
+
+theorem evalOpCert_SRA (w : Nat) (l : List BV) :
+    eval_op_cert .Op_SRA w (l.map CertVal.bv) = .bv (eval_op .Op_SRA w l) :=
+  eval_op_cert_bv .Op_SRA w l (fun _ => ⟨by simp, by simp, by simp⟩)
+
+theorem evalOp_GetMask (w : Nat) (a m : BV) :
+    eval_op .Op_GetMask w [a, m] = bv_get_mask w a m := rfl
+
+theorem evalOpCert_GetMask (w : Nat) (l : List BV) :
+    eval_op_cert .Op_GetMask w (l.map CertVal.bv) = .bv (eval_op .Op_GetMask w l) :=
+  eval_op_cert_bv .Op_GetMask w l (fun _ => ⟨by simp, by simp, by simp⟩)
 
 /-! ## Sources
 
