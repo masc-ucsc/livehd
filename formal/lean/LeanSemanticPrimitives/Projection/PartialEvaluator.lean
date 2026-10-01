@@ -520,7 +520,12 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
             match evalPrim p vs with
             | .ok v      => .ok (.stat v, rq)
             | .error msg => .error (.primFailed msg)
-        | .dyn => .ok (.code (.prim p (rs.map PRes.toCode)), rq)
+        | .dyn =>
+          -- a guarded structural answer if the spine supports one, otherwise
+          -- the opaque residual node
+          match primStruct p rs with
+          | some r => .ok (r, rq)
+          | none   => .ok (.code (.prim p (rs.map PRes.toCode)), rq)
     | .ctorT b k ts =>
       match mixTerms n A idx Δ env ts with
       | .error z => .error z
@@ -605,16 +610,13 @@ def mixTerm : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
         -- is specialized in a scope whose shape we chose -- and what stops an
         -- argument expression being duplicated at each of its uses.
         | .dyn =>
-          match mixUArgs n A idx Δ env fd.params ts with
+          match mixPArgs n A idx Δ env fd.params ts with
           | .error z => .error z
-          | .ok (rs', dts, rq₂) =>
-            match inlineEnv fd.params rs' with
-            | .error z => .error z
-            | .ok env' =>
-              match mixTerm n A idx fd.params env' fd.body with
-              | .error z            => .error z
-              | .ok (.stat _, _)    => .error (.illAnnotated "ucall: dynamic unfold with a static body")
-              | .ok (rb, rq₃)       => .ok (.lets dts rb, rq₂ ++ rq₃)
+          | .ok (bs, env', rq₂) =>
+            match mixTerm n A idx fd.params env' fd.body with
+            | .error z            => .error z
+            | .ok (.stat _, _)    => .error (.illAnnotated "ucall: dynamic unfold with a static body")
+            | .ok (rb, rq₃)       => .ok (.lets bs rb, rq₂ ++ rq₃)
 
 /-- Arguments of an UNFOLDED call, mixed left to right with the residual scope
 threaded.
@@ -676,23 +678,19 @@ def mixAlts : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv
       | .error z, _ => .error z
       | _, .error z => .error z
 
-end
 
-/-! ## Argument transfer, in one pass
+/-- Argument transfer for an unfolded call, in ONE pass.
 
-`mixUArgs` and `inlineEnv` are two functions that must agree about the binding
-layout, and today they agree only because their arithmetic matches: `mixUArgs`
-emits one binding per dynamic parameter and `inlineEnv` indexes with
-`dynCount`.  That equality is about to become FALSE -- once preparation runs,
-one argument may emit zero bindings (it was already a variable), one, or several.
+`mixUArgs` and `inlineEnv` are two functions that have to agree about the
+binding layout, and they agree only because their arithmetic matches: `mixUArgs`
+emits one binding per dynamic parameter and `inlineEnv` indexes with `dynCount`.
+Preparation makes that equality false -- an argument may emit zero bindings (it
+was already a variable), one, or several.
 
 `mixPArgs` replaces the pair with a single pass returning the emitted bindings,
 the callee environment, and -- implicitly, as `binds.length` -- the exact binder
-depth.  The agreement is then structural rather than arithmetic, and no
-`dynCount` appears anywhere in it.
-
-Standalone rather than part of `mixTerm`'s mutual block: `mixTerm` does not call
-it yet.  Wiring it in is the atomic switch, and it joins the block then. -/
+depth.  The agreement is structural rather than arithmetic, and no `dynCount`
+appears anywhere in it. -/
 def mixPArgs : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEnv → Div →
     List ATerm → Except MixError (List Term × PEnv × List SpecRequest)
   | _, _, _, _, _, [], [] => .ok ([], [], [])
@@ -722,6 +720,7 @@ def mixPArgs : Nat → AProgram → (SpecRequest → Option Nat) → Div → PEn
             .ok (p.binds ++ bs, PVal.shift bs.length p.value :: env', rq₁ ++ rq₂)
   | _, _, _, _, _, _, _ =>
       .error (.badArity "unfold: argument count does not match the division")
+end
 
 /-! ## Specializing one function -/
 

@@ -919,7 +919,12 @@ theorem mixTerm_scoped : ∀ n, ScopeOK n := by
           · split at hm <;> try contradiction
             split at hm <;> try contradiction
             rename_i _ _ _ _; cases hm; trivial
-          · cases hm; exact PRes.ScopedList_toCode hall
+          · split at hm
+            · rename_i r' hstruct
+              cases hm
+              exact primStruct_scoped hstruct hall
+            · cases hm
+              exact PRes.ScopedList_toCode hall
       | ctorT b k ts =>
           simp only [mixTerm] at hm
           split at hm <;> try contradiction
@@ -987,14 +992,12 @@ theorem mixTerm_scoped : ∀ n, ScopeOK n := by
             cases hm
             exact ih A idx _ _ fd.body _ _ d (PEnv.Scoped_stat_map d vs) hb
           · split at hm <;> try contradiction
-            rename_i rs' dts rq₂ hu
-            split at hm <;> try contradiction
-            rename_i env' hie
+            rename_i bs env' rq₂ hu
             split at hm <;> try contradiction
             rename_i rb rq₃ _hne hb
             cases hm
             obtain ⟨hbinds, henv'⟩ :=
-              mixUArgs_inlineEnv_scoped ih A idx Δ fd.params ts env d rs' dts rq₂ env' henv hu hie
+              mixPArgs_scoped ih A idx Δ fd.params ts env d bs env' rq₂ henv hu
             exact ⟨hbinds, ih A idx _ _ fd.body _ rq₃ _ henv' hb⟩
 
 /-! #### Layer 4: the whole generated program
@@ -2445,8 +2448,12 @@ theorem mixTerm_complete (A : AProgram) (Pr : Program) (reqs : List SpecRequest)
               rw [allStatic_forall₂ Pr ρr rs vs ws hall hws] at hp'
               rw [hp] at hp'
               exact PResOK_stat (Except.ok.inj hp').symm
-            · cases hmix
-              exact PResOK_code (.prim (toCode_forall₂ Pr ρr rs vs hall) hp)
+            · split at hmix
+              · rename_i r' hstruct
+                cases hmix
+                exact primStruct_ok hstruct hall hp
+              · cases hmix
+                exact PResOK_code (.prim (toCode_forall₂ Pr ρr rs vs hall) hp)
 
         | ctorT b k ts =>
             simp only [mixTerm] at hmix
@@ -2634,17 +2641,15 @@ theorem mixTerm_complete (A : AProgram) (Pr : Program) (reqs : List SpecRequest)
                 hbody (by simpa [eraseFunDef] using hsrc)
             · -- inline: the `let`s build the scope the body is specialized in
               split at hmix <;> try contradiction
-              rename_i rs' dts rq₂ hua
-              split at hmix <;> try contradiction
-              rename_i env' hie
+              rename_i bs env' rq₂ hua
               split at hmix <;> try contradiction
               rename_i rb rq₃ _hne hbody
               cases hmix
-              obtain ⟨ws, _, hlets, hcp⟩ :=
-                mixUArgs_ok ihm' fd.params ts Δ env rs' dts rq₂ ρr ρs vs env' hc hua hvs hie
-              have hb := ihm' _ _ fd.body rb rq₃ (ws.reverse ++ ρr) vs v hcp hbody
+              obtain ⟨ρr', hlets, hcp⟩ :=
+                mixPArgs_ok ihm' fd.params ts Δ env bs env' rq₂ ρr ρs vs hc hua hvs
+              have hb := ihm' _ _ fd.body rb rq₃ ρr' vs v hcp hbody
                            (by simpa [eraseFunDef] using hsrc)
-              exact ⟨ws.reverse ++ ρr, hlets, hb⟩
+              exact ⟨ρr', hlets, hb⟩
 
 /-! ## Tying the knot
 
@@ -3918,18 +3923,30 @@ theorem mixTerm_sound (A : AProgram) (Pr : Program) (reqs : List SpecRequest) :
             exact PResSound_of_stat (fun _ hw => by
               cases hw
               exact .prim (mixTerms_sound_stat ihm Δ env ts rs _ ρr ρs ws hc hts hws) hp)
-          · cases hmix
-            refine PResSound_of_code (by intro i; simp) (fun v hev => ?_)
-            cases mr with
-            | zero => simp [evalFuel] at hev
-            | succ mq =>
-                simp only [evalFuel] at hev
-                split at hev <;> try contradiction
-                rename_i ds hds
-                split at hev <;> try contradiction
-                rename_i w hp
-                cases hev
-                exact .prim (mixTerms_sound_code (ihle mq (by omega)) Δ env ts rs _ ρr ρs ds hc hts hds) hp
+          · split at hmix
+            · -- a guarded structural answer: the operands are consulted
+              -- POINTWISE, since the residual does not evaluate their `toCode`
+              rename_i r' hstruct
+              cases hmix
+              intro ρp d hl hval
+              have hall := mixTerms_sound_all ihm Δ env ts rs _ ρr ρs hc hts
+              have hsc : PRes.ScopedList ρr.length rs :=
+                mixTerms_scoped (mixTerm_scoped n) A (indexOfReq reqs) Δ env ts rs _
+                  ρr.length (Compat_Scoped hc) hts
+              simp only [erase]
+              exact primStruct_sound hstruct hall hsc hl hval
+            · cases hmix
+              refine PResSound_of_code (by intro i; simp) (fun v hev => ?_)
+              cases mr with
+              | zero => simp [evalFuel] at hev
+              | succ mq =>
+                  simp only [evalFuel] at hev
+                  split at hev <;> try contradiction
+                  rename_i ds hds
+                  split at hev <;> try contradiction
+                  rename_i w hp
+                  cases hev
+                  exact .prim (mixTerms_sound_code (ihle mq (by omega)) Δ env ts rs _ ρr ρs ds hc hts hds) hp
 
       | ctorT b k ts =>
           simp only [mixTerm] at hmix
@@ -4107,16 +4124,14 @@ theorem mixTerm_sound (A : AProgram) (Pr : Program) (reqs : List SpecRequest) :
               (by simpa [eraseFunDef] using hwl)
               (by simpa [eraseFunDef] using hb ρp d hl hval)
           · split at hmix <;> try contradiction
-            rename_i rs' dts rq₂ hua
-            split at hmix <;> try contradiction
-            rename_i env' hie
+            rename_i bs env' rq₂ hua
             split at hmix <;> try contradiction
             rename_i rb rq₃ _hne hbody
             cases hmix
             -- an unfolded call also returns a PACKAGE now
             refine PResSound_of_lets (fun ρ1 ρp d hl1 hl2 hval => ?_)
             obtain ⟨vs, hcp, hel, hvl⟩ :=
-              mixUArgs_sound ihm fd.params ts Δ env rs' dts rq₂ ρr ρs ρ1 env' hc hua hie hl1
+              mixPArgs_sound ihm fd.params ts Δ env bs env' rq₂ ρr ρs ρ1 hc hua hl1
             have hb := ihm _ _ fd.body rb rq₃ ρ1 vs hcp hbody
             exact .call hel (eraseProgram_fn hfn) (by simpa [eraseFunDef] using hvl.symm)
               (by simpa [eraseFunDef] using hb ρp d hl2 hval)

@@ -114,21 +114,92 @@ def stats (D : DesignCert) : Option (Nat × Nat) :=
 /-! ## The regression
 
 Small `N` only, so the build stays fast; the shape is already unambiguous by
-N = 32.  **When the partially-static environment lands, the first `#guard`
-should read `0` and the pinned sizes should drop to linear.** That flip is the
-acceptance test for the fix, which is why the current numbers are written down
-rather than merely observed. -/
+N = 32.  These numbers were QUADRATIC before partially-static values landed:
+`tlOf (fanD n)` was exactly `n * n`, `tlOf (chainD 16)` was 136 and
+`szOf (chainD 32)` was 2708.  They are pinned here, as before, so a regression
+shows up as a failing build rather than as a slow one. -/
 
--- the wall, exactly: every read at maximum depth costs N steps, N times over
-#guard [1, 2, 4, 8, 16, 32].all (fun n => tlOf (fanD n) == n * n)
+/-- For every residual `hd`/`tl`: is its operand a plain variable (a DIRECT
+read), a `consP` (a chain rebuilt only to be taken apart again), or something
+else (a nested peel, i.e. walking a chain)?
 
--- the realistic shape, ~N^2/2
-#guard tlOf (chainD 16) == 136
-#guard tlOf (chainD 32) == 528
+This is Trap 2 restated for peels.  A global `tl` COUNT conflates two unrelated
+things: walking the slot environment, which the switch was meant to eliminate,
+and reading the runtime input/state vectors, which are genuinely dynamic data
+and must still be read.  Only the second should survive, and it shows up as
+depth-one peels of a variable. -/
+partial def peelKinds : Term → Nat × Nat × Nat
+  | .lit _ | .var _ => (0,0,0)
+  | .letIn a b =>
+      let (x,y,z) := peelKinds a; let (u,v,w) := peelKinds b; (x+u, y+v, z+w)
+  | .ite a b c =>
+      let (x,y,z) := peelKinds a; let (u,v,w) := peelKinds b; let (r,s,t) := peelKinds c
+      (x+u+r, y+v+s, z+w+t)
+  | .caseT sc as =>
+      as.foldl (fun acc a =>
+        let (x,y,z) := acc; let (u,v,w) := peelKinds (Alt.body a); (x+u,y+v,z+w))
+        (peelKinds sc)
+  | .ctorT _ ts | .call _ ts =>
+      ts.foldl (fun acc t => let (x,y,z) := acc; let (u,v,w) := peelKinds t; (x+u,y+v,z+w)) (0,0,0)
+  | .prim p ts =>
+      let base := ts.foldl (fun acc t =>
+        let (x,y,z) := acc; let (u,v,w) := peelKinds t; (x+u,y+v,z+w)) (0,0,0)
+      let (x,y,z) := base
+      match p, ts with
+      | .hd, [a] | .tl, [a] =>
+          match a with
+          | .var _         => (x+1, y, z)
+          | .prim .consP _ => (x, y+1, z)
+          | _              => (x, y, z+1)
+      | _, _ => base
 
--- and the residual term count that follows from it
-#guard szOf (chainD 16) == 1004
-#guard szOf (chainD 32) == 2708
+def peelsOf (D : DesignCert) : Nat × Nat × Nat :=
+  ((project D).map (fun P =>
+      P.funs.foldl (fun acc fd =>
+        let (x,y,z) := acc; let (u,v,w) := peelKinds fd.body; (x+u,y+v,z+w)) (0,0,0))).getD (0,0,0)
+
+def pOf (p : Prim) (D : DesignCert) : Nat :=
+  ((project D).map (fun P => tot (countPrim p) P)).getD 99999
+
+-- THE WALL IS GONE.  `fanD`'s `tl` count was exactly `n * n`; it is now `n`,
+-- and those `n` are reads of the dynamic INPUT vector, not of a slot chain.
+#guard [1, 2, 4, 8, 16, 32].all (fun n => tlOf (fanD n) == n)
+#guard tlOf (chainD 16) == 16
+#guard tlOf (chainD 32) == 32
+#guard tlOf (chainD 64) == 64
+
+-- and the residual size that follows from it: LINEAR, checked as a shape
+-- rather than as four unexplained constants
+#guard [1, 2, 4, 8, 16, 32].all (fun n => szOf (fanD n) == 16 * n + 32)
+#guard [16, 32, 64, 128].all (fun n => szOf (chainD n) == 15 * n + 33)
+
+-- each dynamic graph-node operation appears EXACTLY once: no duplication took
+-- the place of the `tl` chains
+#guard [1, 2, 4, 8, 16, 32].all (fun n => pOf .bvAnd (fanD n) == n)
+#guard [16, 32, 64].all (fun n => pOf .bvAnd (chainD n) == n)
+
+-- and no slot chain is rebuilt: every residual peel reads a variable directly,
+-- none takes apart a `consP`, and none is nested inside another peel
+#guard [1, 2, 4, 8, 16, 32].all (fun n => (peelsOf (fanD n)).2 == (0, 0))
+#guard [16, 32, 64].all (fun n => (peelsOf (chainD n)).2 == (0, 0))
+
+/-! ## The guard, exhibited
+
+`hd (consP X loop)` must NOT reduce: the source has no value at all, because
+`EvalList` needs every operand to have one, so dropping the tail would make
+`mixDriver_complete` false.  These pin the guard itself rather than its
+consequences. -/
+
+-- a discarded tail that could fail or diverge: no structural answer
+#guard (primStruct .hd [.cons (.stat (.int 1)) (.code (.call 0 []))]).isNone
+-- a discarded tail that is a bound reference: computation-free, so it fires
+#guard (primStruct .hd [.cons (.stat (.int 1)) (.code (.var 0))]).isSome
+-- `tl` discards the HEAD, so the guard moves
+#guard (primStruct .tl [.cons (.code (.call 0 [])) (.stat (.int 1))]).isNone
+#guard (primStruct .tl [.cons (.code (.var 0)) (.stat (.int 1))]).isSome
+-- `isNil` discards BOTH, and that is the one that is easy to miss
+#guard (primStruct .isNil [.cons (.code (.var 0)) (.code (.call 0 []))]).isNone
+#guard (primStruct .isNil [.cons (.code (.var 0)) (.code (.var 1))]).isSome
 
 -- fuel is not the binding constraint: `projectDesign`'s own 20000/200 still works
 #guard (Hw.projectDesign (chainD 64)).toOption.isSome
