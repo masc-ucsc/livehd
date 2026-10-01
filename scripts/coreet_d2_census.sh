@@ -30,6 +30,7 @@ TIMEOUT="${TIMEOUT:-2700}"
 ONLY=""
 OUT=""
 RESUME=""
+ACROSS=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     # Aggregate + sweep an EXISTING generation directory. Generation can be
@@ -37,6 +38,14 @@ while [[ $# -gt 0 ]]; do
     # workers finish with nobody left to aggregate), and rerunning 121 modules
     # to recover is pure waste. Fail-closed: see the checks below.
     --resume) RESUME="$2"; shift 2 ;;
+    # Resume artifacts generated at a DIFFERENT commit. Requires a written
+    # reason, which is recorded in the manifest next to both commits. The
+    # default refusal is right -- resuming across a code change attributes old
+    # artifacts to new code -- but a change that provably cannot affect
+    # generation (e.g. only the aggregation/report path) should not force
+    # regenerating the whole corpus. Making it explicit and recorded is the
+    # difference between a judgement call and a silently weakened gate.
+    --resume-across-commit) ACROSS="$2"; shift 2 ;;
     --only) ONLY="$2"; shift 2 ;;
     --jobs) JOBS="$2"; shift 2 ;;
     --cycles) CYCLES="$2"; shift 2 ;;
@@ -146,15 +155,19 @@ cat > "$OUT/manifest.json" <<JSON
 }
 JSON
 else
-  python3 - "$OUT/manifest.json" "$START" <<'PYR'
+  COMMIT_FULL="$COMMIT_FULL" ACROSS="$ACROSS" python3 - "$OUT/manifest.json" "$START" <<'PYR'
 import json, sys
 p, started = sys.argv[1], sys.argv[2]
 try:
     d = json.load(open(p))
 except Exception:
     d = {}
-d.setdefault("resumed", []).append({"started": started, "note":
-    "generation was interrupted; this run only aggregated + swept existing artifacts"})
+import os
+d.setdefault("resumed", []).append({
+    "started": started,
+    "aggregated_at_commit": os.environ.get("COMMIT_FULL", ""),
+    "across_commit_reason": os.environ.get("ACROSS", "") or None,
+    "note": "generation was interrupted; this run only aggregated + swept existing artifacts"})
 json.dump(d, open(p, "w"), indent=2)
 PYR
   echo "resume: generation manifest preserved; resume recorded"
@@ -203,9 +216,19 @@ if [[ -n "$RESUME" ]]; then
     fail=1
   fi
   if [[ "$mf_commit" != "$COMMIT" && "$mf_commit" != "$COMMIT_FULL" ]]; then
-    echo "FATAL: --resume: that run was generated at commit $mf_commit, HEAD is $COMMIT" >&2
-    echo "       resuming across a code change would attribute old artifacts to new code" >&2
-    fail=1
+    if [[ -n "$ACROSS" ]]; then
+      echo "NOTE: resuming ACROSS a commit change, by explicit request." >&2
+      echo "      artifacts generated at: $mf_commit" >&2
+      echo "      aggregating at HEAD:    $COMMIT" >&2
+      echo "      stated reason: $ACROSS" >&2
+      echo "      generation inputs are unchanged by that delta; this is recorded in the manifest." >&2
+    else
+      echo "FATAL: --resume: that run was generated at commit $mf_commit, HEAD is $COMMIT" >&2
+      echo "       resuming across a code change would attribute old artifacts to new code." >&2
+      echo "       If the delta provably cannot affect GENERATION, re-run with" >&2
+      echo "       --resume-across-commit '<why>' and it will be recorded." >&2
+      fail=1
+    fi
   fi
   n_status="$(find "$OUT/mod" -mindepth 2 -maxdepth 2 -name status 2>/dev/null | wc -l)"
   if [[ "$n_status" -ne "${#MODULES[@]}" ]]; then

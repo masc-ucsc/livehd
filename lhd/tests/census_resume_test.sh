@@ -82,6 +82,20 @@ mkrun "$T/othercommit" 3
 sed -i "s/\"commit\": \"$COMMIT\"/\"commit\": \"0000000\"/" "$T/othercommit/manifest.json"
 expect_refusal "commit mismatch" "$T/othercommit" "commit"
 
+echo "--- resuming across a commit needs an EXPLICIT, recorded reason ---"
+mkrun "$T/across" 3
+sed -i "s/\"commit\": \"$COMMIT\"/\"commit\": \"0000000\"/" "$T/across/manifest.json"
+out="$(LIST="$T/corpus.txt" EXPECT_N=3 SKIP_SWEEP=1 bash "$DRV" --resume "$T/across" \
+        --out "$T/across" --resume-across-commit "report-only change" 2>&1)"
+if echo "$out" | grep -q "resume: 3/3 status files"; then
+  echo "ok: an explicit --resume-across-commit is allowed"
+else
+  echo "FAIL: --resume-across-commit did not permit the resume"; fails=$((fails+1))
+fi
+grep -q "report-only change" "$T/across/manifest.json" \
+  && echo "ok: the stated reason is recorded in the manifest" \
+  || { echo "FAIL: the override reason was not recorded"; fails=$((fails+1)); }
+
 echo "--- a stray module directory outside the corpus must be refused ---"
 mkrun "$T/stray" 3 zzz_not_in_corpus
 expect_refusal "module dir not in the corpus" "$T/stray" "not in the corpus"
