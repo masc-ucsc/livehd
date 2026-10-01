@@ -7,10 +7,12 @@ The graph-level step (`compileGraph_correct`) is *uniqueness of the topo
 fixpoint*, not a fresh induction — see `CompileGraph.lean`'s header.
 -/
 import Mathlib
+import LeanSemanticPrimitives.Compiler.CompileDesignDefs
 import LeanSemanticPrimitives.Compiler.CompileGraph
 
 namespace Compiler
 open Residual GraphRefine DesignCert
+
 
 theorem runBindings_append : ∀ (l1 l2 : List ResidualBinding) (env : SlotEnv),
     runBindings (l1 ++ l2) env = runBindings l2 (runBindings l1 env) := by
@@ -164,21 +166,6 @@ theorem slot_agree (D : DesignCert) (hdb : DesignCert.DepsBounded D)
       simp only [srcEnv, Array.getElem?_eq_none (Nat.le_of_not_lt hks), denoteRef, hnone,
         Option.getD_none]
 
---------------------------------------------------------------------------------
--- Step 7: outputs and sequential state
---------------------------------------------------------------------------------
-
-def compileOutput (o : OutputDesc) : ResidualOutput := { slot := o.slot, width := o.width }
-
-/-- Every Flop field is carried across.  Dropping `resetValue` or flipping
-`resetActiveLow` here is what `flopNext_agree` refuses to prove. -/
-def compileFlop (f : FlopDesc) : ResidualFlopUpdate :=
-  { width := f.width, din := f.din, enable := f.enable, resetPin := f.resetPin,
-    resetValue := f.resetValue, resetActiveLow := f.resetActiveLow }
-
-def compileMemory (m : MemoryDesc) : ResidualMemoryUpdate :=
-  { aw := m.aw, dw := m.dw, nextImg := m.nextImg }
-
 /-- Reset priority, reset polarity, reset value, enable behaviour, and the
 old-state fallback — all five checked at once, against two independently
 written rules (`xor` + `match` on the source side, nested `if`s on the target). -/
@@ -191,34 +178,6 @@ theorem flopNext_agree (rho : Nat → CertVal) (env : SlotEnv)
     intro rv; cases f.resetActiveLow <;> simp
   simp only [srcFlopNext, flopNext, compileFlop, hb, hxor]
   rfl
-
---------------------------------------------------------------------------------
--- `compileDesign`
---------------------------------------------------------------------------------
-
-/-- First dependency that is not strictly earlier, if any.  Checking this inside
-`compileDesign` rather than assuming it means `hc : compileDesign D = .ok R`
-WITNESSES dependency-ordering, so the final theorem needs no separate
-well-formedness hypothesis for it. -/
-def firstBadDep (D : DesignCert) : Option (Nat × Nat) :=
-  (DesignCert.slotsFrom 0 D.nodes.size).findSome? fun i =>
-    match D.nodes[i]? with
-    | none   => none
-    | some c => (c.deps.toList.find? fun d => decide ¬(d < D.sources.size + i)).map
-                  fun d => (D.slotOfNode i, d)
-
-def compileDesign (D : DesignCert) : Except CompileError ResidualProgram :=
-  match firstBadDep D with
-  | some (n, d) => .error (.depNotEarlier n d)
-  | none =>
-    match compileGraph D with
-    | .error e => .error e
-    | .ok bs =>
-      .ok { sources       := D.sources
-            bindings      := bs
-            outputs       := D.outputs.map compileOutput
-            flopUpdates   := D.flops.map compileFlop
-            memoryUpdates := D.memories.map compileMemory }
 
 theorem depsBounded_of_firstBadDep (D : DesignCert) (h : firstBadDep D = none) :
     DesignCert.DepsBounded D := by
@@ -299,14 +258,6 @@ theorem compileDesign_correct (D : DesignCert) (R : ResidualProgram)
     · intro i h1 h2
       simp only [Array.getElem_map, compileOutput, refBV]
 
-/-- Boolean "did it compile?".  Its own definition rather than an `Except`
-helper, so the `native_decide` target is a single constructor test and does not
-depend on which spelling the library happens to provide. -/
-def compilesOk (D : DesignCert) : Bool :=
-  match compileDesign D with
-  | .ok _    => true
-  | .error _ => false
-
 /-- Witness the `.ok` side condition from that BOOLEAN check.
 
 Discharging `compileDesign D = .ok <Top>_residual` directly asks the evaluator to
@@ -319,35 +270,6 @@ theorem compileDesign_ok_witness (D : DesignCert) (h : compilesOk D = true) :
   cases hc : compileDesign D with
   | error e => rw [hc] at h; exact absurd h (by simp)
   | ok R    => simp only [hc]
-
---------------------------------------------------------------------------------
--- The generated-file interface.
---
--- WHY THIS EXISTS.  The obvious shape for a generated design is
---
---     def <Top>_residual  := match compileDesign <Top>_designCert with ...
---     theorem <Top>_compiles : compileDesign <Top>_designCert = .ok <Top>_residual := ...
---
--- and it is a trap.  The second declaration's STATEMENT names a definition whose
--- body is a `match` on `compileDesign <Top>_designCert`, so type-checking it asks
--- the KERNEL to decide `.ok <Top>_residual` defeq `.ok (match compileDesign D …)`.
--- The kernel does not stop at a delta step: it reduces `compileDesign D`, and
--- `Array.push` is `⟨as.toList ++ [a]⟩`, so building 4,772 bindings costs O(N^2)
--- list cells *as kernel terms*.  Measured on `SingleCycleCPU`: >1 h and 120 GB
--- before it was killed, against 38 s / 7.4 GB for the same design when no theorem
--- names a `ResidualProgram`.
---
--- So: no `ResidualProgram` ever appears in a theorem statement.  `compileAndRun`
--- keeps it inside a function body, the witness is a Bool, and the generated
--- theorem is one delta-unfold away from `compileAndRun_correct`.
---------------------------------------------------------------------------------
-
-/-- Compile and run, in one total function.  A design the compiler refuses
-returns `default` rather than being a partial function. -/
-def compileAndRun (D : DesignCert) (inp : RuntimeInput) (st : RuntimeState) : RuntimeResult :=
-  match compileDesign D with
-  | .ok R    => denoteResidual R inp st
-  | .error _ => default
 
 /-- The whole per-design obligation, reduced to ONE boolean check.
 

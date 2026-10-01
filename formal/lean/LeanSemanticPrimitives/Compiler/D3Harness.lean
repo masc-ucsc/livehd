@@ -34,7 +34,7 @@ Memory next-state images are `Int → BV`, so they admit no decidable equality.
 They are compared at sampled addresses only, and that limitation is why
 `sameResult` takes the address count explicitly instead of hiding a default.
 -/
-import LeanSemanticPrimitives.Compiler.CompileDesign
+import LeanSemanticPrimitives.Compiler.CompileDesignDefs
 
 namespace Compiler
 namespace D3

@@ -27,10 +27,12 @@ compiler's storage: it is built by repeated `envSetG`, so a lookup traverses N
 (never executed, only reasoned about) and fatal for the compiler (actually runs).
 -/
 import Mathlib
+import LeanSemanticPrimitives.Compiler.CompileGraphDefs
 import LeanSemanticPrimitives.Compiler.CompileOp
 
 namespace Compiler
 open Residual GraphRefine
+
 
 --------------------------------------------------------------------------------
 -- `runBindings`: size, stability of earlier slots, and the value at each slot
@@ -80,35 +82,6 @@ theorem runBindings_at : ∀ (bs : List ResidualBinding) (env : SlotEnv) (k : Na
             simp only [Array.size_push]; omega
           simp only [runBindings, hsz, ih _ k hk', List.take_succ_cons,
             List.getElem?_cons_succ]
-
---------------------------------------------------------------------------------
--- The compiler over the whole graph
---------------------------------------------------------------------------------
-
-/-- Advisory slot type.  The semantics never reads it — `CertVal` carries the
-`bv | mem` distinction at runtime — but the exporter and any external checker
-want it. -/
-def opValueType (c : DenseNodeCert) : ValueType :=
-  match c.op with
-  | .Op_MemWrite     => .mem 0 c.width
-  | .Op_MemWriteBE _ => .mem 0 c.width
-  | _                => .bv c.width
-
-/-- Compile `n` nodes starting at dense index `start`, appending to `acc`.
-Structural recursion on the COUNT, so no termination proof is needed. -/
-def compileFrom (D : DesignCert) (start : Nat) :
-    Nat → Array ResidualBinding → Except CompileError (Array ResidualBinding)
-  | 0,     acc => .ok acc
-  | n + 1, acc =>
-    match D.nodes[start]? with
-    | none   => .error (.slotOutOfRange (D.slotOfNode start))
-    | some c =>
-      match compileOp (D.slotOfNode start) c with
-      | .error err => .error err
-      | .ok e      => compileFrom D (start + 1) n (acc.push { ty := opValueType c, rhs := e })
-
-def compileGraph (D : DesignCert) : Except CompileError (Array ResidualBinding) :=
-  compileFrom D 0 D.nodes.size #[]
 
 --------------------------------------------------------------------------------
 -- What a successful compile witnesses

@@ -23,7 +23,7 @@ Two facts are needed at step `k` and both must be O(1) to maintain:
     bindings all reference one source quadratic *by construction* rather than
     because the proof is bad.
 -/
-import LeanSemanticPrimitives.Compiler.CompileGraph
+import LeanSemanticPrimitives.Compiler.CompileGraphDefs
 
 namespace Compiler
 
