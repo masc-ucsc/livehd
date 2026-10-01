@@ -14,11 +14,11 @@
 # this script makes local.
 #
 # DEPENDENCIES (mathlib et al., ~7.6 GB) are copied with `--reflink=auto`. On
-# btrfs that is copy-on-write: distinct inodes, shared extents, no disk cost,
-# and a write through one tree CANNOT affect the other. If the filesystem does
-# not support reflinks the copy is a real one, and if that is refused the
-# script says so rather than silently falling back to hardlinks -- a hardlink
-# is NOT an isolation boundary, because an in-place write hits both trees.
+# btrfs that is copy-on-write: distinct inodes with shared extents, so the copy
+# is near-free. `--reflink=auto` FALLS BACK to a real copy where reflinks are
+# unsupported, so the GUARANTEED properties are distinct inodes and
+# non-mutation -- not zero disk cost. Never `-l`: a hardlink is not an
+# isolation boundary, because an in-place write hits both trees.
 #
 # It never writes to, or removes, the shared tree: only this worktree's symlink
 # is replaced.

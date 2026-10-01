@@ -47,20 +47,44 @@ mkdir -p "$OUT/logs" "$OUT/mod"
 # ---- the corpus, validated -------------------------------------------------
 # Count AND digest, so a stale or partially regenerated list cannot be swept as
 # if it were the corpus.
+# Every property is REQUIRED, not opportunistically checked. A corpus that is
+# the wrong size, has duplicates, is unsorted, or carries no digest is a
+# configuration error -- treating any of those as "good enough" is how an
+# expensive run ends up authoritative over the wrong set.
+EXPECT_N="${EXPECT_N:-122}"
 mapfile -t ALL < <(grep -v '^#' "$LIST" | grep -v '^[[:space:]]*$')
-DIGEST="$(printf '%s\n' "${ALL[@]}" | tr -d '\r' | head -c -1 | sha256sum | cut -d' ' -f1)"
+if [[ "${#ALL[@]}" -ne "$EXPECT_N" ]]; then
+  echo "FATAL: corpus has ${#ALL[@]} modules, expected $EXPECT_N ($LIST)" >&2; exit 2
+fi
+if [[ "$(printf '%s\n' "${ALL[@]}" | sort -u | wc -l)" -ne "${#ALL[@]}" ]]; then
+  echo "FATAL: corpus contains duplicate module names" >&2; exit 2
+fi
+if ! printf '%s\n' "${ALL[@]}" | sort -c 2>/dev/null; then
+  echo "FATAL: corpus is not sorted; the digest is order-sensitive" >&2; exit 2
+fi
+DIGEST="$(printf '%s\n' "${ALL[@]}" | head -c -1 | sha256sum | cut -d' ' -f1)"
 WANT="$(grep -oP '^#   \K[0-9a-f]{64}' "$LIST" | head -1)"
-if [[ -n "$WANT" && "$DIGEST" != "$WANT" ]]; then
+if [[ -z "$WANT" ]]; then
+  echo "FATAL: $LIST carries no 64-hex expected digest; refusing to run" >&2; exit 2
+fi
+if [[ "$DIGEST" != "$WANT" ]]; then
   echo "FATAL: module list digest mismatch" >&2
   echo "  list says $WANT" >&2
   echo "  computed  $DIGEST" >&2
   exit 2
 fi
-echo "corpus: ${#ALL[@]} modules, digest ${DIGEST:0:16} (validated)"
+echo "corpus: ${#ALL[@]} modules, digest ${DIGEST:0:16} (count, uniqueness, order and digest all validated)"
 
 MODULES=("${ALL[@]}")
 if [[ -n "$ONLY" ]]; then
   IFS=',' read -r -a MODULES <<< "$ONLY"
+  if [[ "$(printf '%s\n' "${MODULES[@]}" | sort -u | wc -l)" -ne "${#MODULES[@]}" ]]; then
+    echo "FATAL: --only lists a module more than once" >&2; exit 2
+  fi
+  for m in "${MODULES[@]}"; do
+    printf '%s\n' "${ALL[@]}" | grep -qx "$m" \
+      || { echo "FATAL: --only names '$m', which is not in the corpus" >&2; exit 2; }
+  done
   echo "restricted to ${#MODULES[@]} module(s): ${MODULES[*]}"
 fi
 
@@ -87,6 +111,13 @@ cat > "$OUT/manifest.json" <<JSON
   "cycles": $CYCLES,
   "per_module_timeout_s": $TIMEOUT,
   "generation_jobs": $JOBS,
+  "git_dirty": $(if [[ -n "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ]]; then echo true; else echo false; fi),
+  "driver_sha256": "$(sha256sum "$ROOT/scripts/coreet_d2_census.sh" | cut -c1-16)",
+  "report_sha256": "$(sha256sum "$ROOT/scripts/coreet_d2_census_report.py" | cut -c1-16)",
+  "runner_sha256": "$(sha256sum "$ROOT/scripts/run_coreet_module_lean.sh" | cut -c1-16)",
+  "direct_sweep_sha256": "$(sha256sum "$ROOT/pass/lean/scripts/direct_sweep.py" | cut -c1-16)",
+  "lhd_sha256": "$(sha256sum "$ROOT/bazel-bin/lhd/lhd" 2>/dev/null | cut -c1-16)",
+  "lhd_mtime": "$(stat -c '%y' "$ROOT/bazel-bin/lhd/lhd" 2>/dev/null | cut -d. -f1)",
   "lean_build_root": "$(readlink -f "$ROOT/formal/lean/.lake")",
   "lean": "$(cd "$ROOT/formal/lean" && lake env lean --version 2>/dev/null | head -1)",
   "yosys_in_lhd": "linked into lhd",
@@ -129,9 +160,22 @@ echo "phase 1 done"
 # ---- phase 2: checkDesign + runDirect over THIS run's certificates ---------
 # Serialized (jobs=1): the Lean runs are memory-hungry and parallelism here is
 # how a census turns into an aggregate OOM.
+# PRESENT = cleared EVERY generation gate, not merely "a certificate file
+# exists". A certificate can be written and then fail a static gate; sweeping
+# it on file existence alone let such a module come back ACCEPTED.
 PRESENT=()
 for m in "${MODULES[@]}"; do
-  [[ -r "$OUT/mod/$m/lean/${m}_Lgraph.lean" ]] && PRESENT+=("$m")
+  cert="$OUT/mod/$m/lean/${m}_Lgraph.lean"
+  [[ -r "$cert" ]] || continue
+  log="$OUT/logs/$m.log"
+  rc="$(cut -f2 "$OUT/mod/$m/status" 2>/dev/null)"
+  [[ "$rc" == "0" ]] || continue
+  ok=1
+  for pat in 'compile exit=' 'single_edge exit=' 'lean emit exit=' 'static gates: gate_status='; do
+    v="$(grep -oP "${pat}\K[0-9]+" "$log" 2>/dev/null | head -1)"
+    [[ "$v" == "0" ]] || ok=0
+  done
+  [[ "$ok" == "1" ]] && PRESENT+=("$m")
 done
 echo "phase 2: ${#PRESENT[@]} certificate(s) to sweep, serialized, cycles=$CYCLES"
 SWEEP_TSV="$OUT/direct_sweep.tsv"
@@ -152,6 +196,7 @@ END="$(date -Is)"
 python3 "$ROOT/scripts/coreet_d2_census_report.py" \
   --out-dir "$OUT" --modules "$(IFS=,; echo "${MODULES[*]}")" \
   --sweep-tsv "$SWEEP_TSV" --sweep-rc "$sweep_rc" --cycles "$CYCLES" \
+  --present "$(IFS=,; echo "${PRESENT[*]:-}")" \
   --started "$START" --ended "$END"
 rc=$?
 echo "census TSV: $OUT/census.tsv   manifest: $OUT/manifest.json"

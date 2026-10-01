@@ -10,8 +10,9 @@
 # .olean's mtime was NEWER than the source, so the usual staleness check said
 # it was fine. This branch now builds in its own tree
 # (generated/lean_validation/lake; dependencies REFLINK-COPIED from the shared
-# one -- distinct inodes with shared extents, so no disk cost and a write
-# through one tree cannot reach the other. NOT hardlinks: an in-place write to
+# one -- distinct inodes, and on btrfs shared extents so the copy is
+# near-free; `--reflink=auto` falls back to a real copy elsewhere, so the
+# guaranteed properties are distinct inodes and non-mutation, not zero cost. NOT hardlinks: an in-place write to
 # a hardlink hits both trees, which is not an isolation boundary.) The resolved build root goes in every
 # log, and scripts/lean_local_lake.sh creates and verifies the arrangement.
 #

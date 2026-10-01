@@ -58,17 +58,53 @@ def main():
     ap.add_argument("--modules", required=True)
     ap.add_argument("--sweep-tsv", default="")
     ap.add_argument("--sweep-rc", type=int, default=0)
+    ap.add_argument("--present", default="",
+                    help="comma-separated modules that cleared EVERY generation "
+                         "gate and were handed to the sweep")
     ap.add_argument("--cycles", type=int, default=4)
     ap.add_argument("--started", default="")
     ap.add_argument("--ended", default="")
     a = ap.parse_args()
 
     modules = [m for m in a.modules.split(",") if m]
-    sweep = {}
+    sweep, dup_rows = {}, set()
     if a.sweep_tsv and os.path.exists(a.sweep_tsv):
         with open(a.sweep_tsv, newline="") as fh:
             for r in csv.DictReader(fh, delimiter="\t"):
-                sweep[r.get("module", "")] = r
+                m = r.get("module", "")
+                if m in sweep:
+                    dup_rows.add(m)
+                sweep[m] = r
+
+    # SWEEP INTEGRITY, separated from sweep OUTCOMES.
+    #
+    # direct_sweep exits 1 when it ran to completion but some certificate was
+    # REFUSED. Over 122 modules that is near-certain, and treating it as
+    # infrastructure failure would mark every good row UNTRUSTED because one
+    # row refused. So rc=1 is accepted as "complete, some refused" ONLY when
+    # the row set is exactly the set handed to it; rc>=2, or any missing,
+    # extra or duplicate row, is infrastructure failure and taints everything.
+    present = [m for m in a.present.split(",") if m]
+    infra = []
+    if a.sweep_rc >= 2:
+        infra.append(f"direct_sweep exited {a.sweep_rc} (infrastructure failure)")
+    if present or sweep:
+        got, want = set(sweep), set(present)
+        if want - got:
+            infra.append("swept no row for: " + ",".join(sorted(want - got)))
+        if got - want:
+            infra.append("sweep returned rows not handed to it: " + ",".join(sorted(got - want)))
+        if dup_rows:
+            infra.append("duplicate sweep rows: " + ",".join(sorted(dup_rows)))
+    sweep_trustworthy = not infra
+    if infra:
+        print("SWEEP INTEGRITY FAILURE -- every checkDesign/cycle cell is UNTRUSTED:",
+              file=sys.stderr)
+        for i in infra:
+            print(f"  - {i}", file=sys.stderr)
+    elif a.sweep_rc == 1:
+        print("note: direct_sweep exited 1 = completed with refusals; row set verified "
+              "exact, so each row's own verdict is used.")
 
     rows, counts = [], {}
     for m in modules:
@@ -99,20 +135,34 @@ def main():
         row["static_gates"] = grep1(log, r"static gates: gate_status=(\d+)", "-")
         row["rtl_evidence"] = "prior-smoke" if m in PRIOR_SMOKE else "not-measured"
 
+        # A row is `accepted` only if EVERY generation gate was 0 as well.
+        # Sweeping on certificate existence alone once let a module whose
+        # static gate had failed come back ACCEPTED.
+        stages_ok = all(row[c] == "0" for c in
+                        ("compile", "single_edge", "emit", "static_gates"))
         s = sweep.get(m)
-        if s is not None and a.sweep_rc == 0:
+        if s is not None and sweep_trustworthy:
             v = s.get("verdict", "")
             row["checkdesign"] = "ACCEPTED" if v == "ACCEPTED" else v
             row["direct_cycles"] = s.get("cycles", "")
             row["wall_s"] = s.get("wall_s", "")
             row["rss_kb"] = s.get("rss_kb", "")
-            if v == "ACCEPTED" and str(s.get("cycles", "")) == str(a.cycles):
+            if not stages_ok:
+                row["stage"] = "stage-gate-failed"
+                row["reason"] = ("swept despite a failed generation gate: "
+                                 + ",".join(f"{c}={row[c]}" for c in
+                                            ("compile", "single_edge", "emit", "static_gates")
+                                            if row[c] != "0"))
+            elif v == "ACCEPTED" and str(s.get("cycles", "")) == str(a.cycles):
                 row["stage"] = "accepted"
+            elif v == "ACCEPTED":
+                row["stage"] = "sim-incomplete"
+                row["reason"] = f"ran {s.get('cycles','') or 0} cycle(s), expected {a.cycles}"
             else:
                 row["stage"] = "sim-refused"
                 row["reason"] = s.get("reason", "") or v
         elif s is not None:
-            row["checkdesign"] = "UNTRUSTED(sweep rc!=0)"
+            row["checkdesign"] = "UNTRUSTED(sweep integrity)"
             row["stage"] = "sim-untrusted"
         else:
             # No sweep row: find the earliest stage that failed, so the reason
@@ -152,7 +202,11 @@ def main():
     for k in sorted(counts, key=lambda k: (-counts[k], k)):
         print(f"  {counts[k]:4d}  {k}")
     accepted = counts.get("accepted", 0)
-    print(f"\nACCEPTED (checkDesign + {a.cycles} executed cycles): {accepted}/{len(rows)}")
+    print(f"\nACCEPTED (all generation gates 0, checkDesign ACCEPTED, "
+          f"{a.cycles} executed cycles): {accepted}/{len(rows)}")
+    if infra:
+        print("THE SWEEP COLUMNS ARE NOT TRUSTWORTHY -- see the integrity failure above.")
+        return 2
     # Nonzero while blockers remain, but the census itself has completed and
     # every row is preserved.
     return 0 if accepted == len(rows) else 1

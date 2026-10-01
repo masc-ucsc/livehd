@@ -637,6 +637,19 @@ sh_test(
     data = ["//lhd"],
 )
 
+# The D2 census accept/reject logic. Two distinctions that were wrong at first:
+# direct_sweep exits 1 when it COMPLETED with refusals (near-certain over 122
+# modules), which must not mark every other row UNTRUSTED; and `accepted`
+# requires every GENERATION gate to be 0 too, since PRESENT was once computed
+# from certificate existence alone and a module whose static gate had failed
+# could still be swept and reported ACCEPTED. Synthetic run dirs; no lhd/Lean.
+sh_test(
+    name = "census_report_test",
+    size = "small",
+    srcs = ["census_report_test.sh"],
+    data = ["//scripts:cycle_provenance_tools"],
+)
+
 # False-pass guards in pass/lean/scripts/direct_sweep.py. Its VERDICT line is
 # printed BEFORE execution finishes, so without these an ACCEPTED followed by a
 # crash, a missing RUNDIRECT, or a short run still landed in the TSV as a pass
