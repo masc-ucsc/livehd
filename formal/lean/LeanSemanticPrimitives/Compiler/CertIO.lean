@@ -155,37 +155,52 @@ def intBytes : Int → List UInt8
 
 @[inline] def spc (l : List UInt8) : List UInt8 := chSpace :: l
 
-def srcBytes : SourceDesc → List UInt8
-  | .input idx w              => natBytes 0 ++ spc (natBytes idx) ++ spc (natBytes w) ++ [chNL]
-  | .const w v                => natBytes 1 ++ spc (natBytes w) ++ spc (intBytes v) ++ [chNL]
-  | .flopQ idx w              => natBytes 2 ++ spc (natBytes idx) ++ spc (natBytes w) ++ [chNL]
+-- Each record is a BODY followed by its newline.  A reader stops at the end of
+-- the body -- the newline is eaten by the next reader's `skipWs` -- so keeping
+-- the two separable is what lets the round-trip lemmas say "consumes exactly
+-- this chunk" instead of doing arithmetic with a trailing byte.
+
+def srcBody : SourceDesc → List UInt8
+  | .input idx w              => natBytes 0 ++ spc (natBytes idx) ++ spc (natBytes w)
+  | .const w v                => natBytes 1 ++ spc (natBytes w) ++ spc (intBytes v)
+  | .flopQ idx w              => natBytes 2 ++ spc (natBytes idx) ++ spc (natBytes w)
   | .flopQAsync idx w ri rv a =>
       natBytes 3 ++ spc (natBytes idx) ++ spc (natBytes w) ++ spc (natBytes ri)
-        ++ spc (intBytes rv) ++ spc (natBytes (if a then 1 else 0)) ++ [chNL]
+        ++ spc (intBytes rv) ++ spc (natBytes (if a then 1 else 0))
   | .memImg idx aw dw         =>
-      natBytes 4 ++ spc (natBytes idx) ++ spc (natBytes aw) ++ spc (natBytes dw) ++ [chNL]
+      natBytes 4 ++ spc (natBytes idx) ++ spc (natBytes aw) ++ spc (natBytes dw)
   | .memConst aw dw cs        =>
       natBytes 5 ++ spc (natBytes aw) ++ spc (natBytes dw) ++ spc (natBytes cs.size)
-        ++ (cs.toList.map (fun v => spc (intBytes v))).flatten ++ [chNL]
+        ++ (cs.toList.map (fun v => spc (intBytes v))).flatten
 
-def nodeBytes (n : DenseNodeCert) : List UInt8 :=
+def srcBytes (s : SourceDesc) : List UInt8 := srcBody s ++ [chNL]
+
+def nodeBody (n : DenseNodeCert) : List UInt8 :=
   let (c, arg) := opCode n.op
   natBytes c ++ spc (intBytes arg) ++ spc (natBytes n.width) ++ spc (natBytes n.deps.size)
     ++ (n.deps.toList.map (fun d => spc (natBytes d))).flatten
-    ++ spc (natBytes n.origin) ++ [chNL]
+    ++ spc (natBytes n.origin)
 
-def outBytes (o : OutputDesc) : List UInt8 :=
-  natBytes o.slot ++ spc (natBytes o.width) ++ [chNL]
+def nodeBytes (n : DenseNodeCert) : List UInt8 := nodeBody n ++ [chNL]
 
-def flopBytes (f : FlopDesc) : List UInt8 :=
+def outBody (o : OutputDesc) : List UInt8 :=
+  natBytes o.slot ++ spc (natBytes o.width)
+
+def outBytes (o : OutputDesc) : List UInt8 := outBody o ++ [chNL]
+
+def flopBody (f : FlopDesc) : List UInt8 :=
   let (he, e) := match f.enable   with | some x => (1, x) | none => (0, 0)
   let (hr, r) := match f.resetPin with | some x => (1, x) | none => (0, 0)
   natBytes f.width ++ spc (natBytes f.din) ++ spc (natBytes he) ++ spc (natBytes e)
     ++ spc (natBytes hr) ++ spc (natBytes r) ++ spc (intBytes f.resetValue)
-    ++ spc (natBytes (if f.resetActiveLow then 1 else 0)) ++ [chNL]
+    ++ spc (natBytes (if f.resetActiveLow then 1 else 0))
 
-def memBytes (m : MemoryDesc) : List UInt8 :=
-  natBytes m.aw ++ spc (natBytes m.dw) ++ spc (natBytes m.nextImg) ++ [chNL]
+def flopBytes (f : FlopDesc) : List UInt8 := flopBody f ++ [chNL]
+
+def memBody (m : MemoryDesc) : List UInt8 :=
+  natBytes m.aw ++ spc (natBytes m.dw) ++ spc (natBytes m.nextImg)
+
+def memBytes (m : MemoryDesc) : List UInt8 := memBody m ++ [chNL]
 
 /-- A length-prefixed section: the count on its own line, then one record each. -/
 @[inline] def section' {α : Type} (f : α → List UInt8) (xs : Array α) : List UInt8 :=
