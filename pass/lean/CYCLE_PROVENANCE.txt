@@ -199,7 +199,7 @@ minion_dcache_top                 0      67         0      65 PLAIN-COMPILE-FAIL
 # in it, which is the packed-aggregate/split_selfref class and a separate fix.
 #
 # GATES.  //pass/lean:cert_dag_order_test (the sort and the pool's fail-closed
-# validation, 19 cases), //lhd/tests:mem_read_write_feedback_test (four RTL and
+# validation, 18 cases), //lhd/tests:mem_read_write_feedback_test (four RTL and
 # Pyrope fixtures, asserted on certificate STRUCTURE), and
 # lhd/tests/mem_feedback_lean_diff_test.sh (RTL under iverilog vs the Lean
 # certificate over 16 periods against a hand-derived golden trace, plus two
