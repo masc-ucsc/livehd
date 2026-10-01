@@ -233,5 +233,38 @@ PYTRAIL
   [ $? -eq 0 ] || rc=1
 fi
 
+# ---- the pair must publish together, or not at all -----------------------
+# The certificate used to be renamed final BEFORE the sidecar was written, so a
+# sidecar failure aborted the command having already published a new
+# _Lgraph.lean with no metadata beside it -- a half generation a file scanner
+# reads as success. Obstruct the sidecar's destination with a DIRECTORY, which
+# rename() cannot overwrite, and require: nonzero exit, and no certificate left
+# behind by this invocation.
+OB="$T/obstruct"
+rm -rf "$OB"; mkdir -p "$OB"
+# A NON-EMPTY directory. An empty one is not an obstruction: the generation
+# transaction's std::remove() succeeds on it (POSIX remove() rmdir's an empty
+# directory), so the probe quietly cleared its own obstacle and reported
+# success. A non-empty directory resists both remove() and rename().
+mkdir -p "$OB/mem_mixed_rdclk_negedge_io.json"
+: > "$OB/mem_mixed_rdclk_negedge_io.json/keep"
+"$LHD" compile "lg:$T/lg_norm" --top mem_mixed_rdclk_negedge --workdir "$T/lw_ob" \
+  --emit-dir "lean:$OB" --set formal.lean.mode=verified_compiler \
+  --set formal.lean.strict=true > "$T/obstruct.log" 2>&1
+obrc=$?
+if [ "$obrc" -eq 0 ]; then
+  echo "FAIL: an unwritable sidecar destination still reported success"
+  rc=1
+elif [ -e "$OB/mem_mixed_rdclk_negedge_Lgraph.lean" ]; then
+  echo "FAIL: the command failed but left a certificate with no sidecar beside it"
+  echo "      (a scanner would read that half-pair as a successful generation)"
+  rc=1
+elif ls "$OB"/*.tmp >/dev/null 2>&1; then
+  echo "FAIL: temp files were left behind after the failed publish"; rc=1
+else
+  echo "ok: an unwritable sidecar destination fails and leaves no half-pair"
+fi
+rm -rf "$OB"
+
 [ "$rc" -eq 0 ] || { echo "FAIL: sidecar/certificate disagreement"; exit 1; }
 echo "PASS: lean_io_metadata_test"

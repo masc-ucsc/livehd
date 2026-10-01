@@ -512,30 +512,49 @@ void emit(const Design_scan& scan) {
           {mi.addr_width, mi.bits, mem_cert_ids.at(mnid).next_chain, clock_ordinal.at(mem_clock_key.at(mnid))});
     }
 
-    const std::string vc_tmp = lean_path + ".tmp";
-    std::ofstream     vofs(vc_tmp);
+    // THE CERTIFICATE AND ITS SIDECAR ARE PUBLISHED AS A PAIR.
+    //
+    // Both are staged to temp files and fully verified BEFORE either is
+    // renamed into place. Writing the certificate final first and the sidecar
+    // afterwards left a window in which a sidecar failure aborted the command
+    // having already published a new _Lgraph.lean with no metadata beside it
+    // -- a half generation that a file scanner reads as success even though
+    // the command failed.
+    //
+    // On any failure every temp is removed, and if the first rename succeeds
+    // while the second fails the first is rolled back, so an invocation either
+    // publishes both artifacts or leaves none of its own behind.
+    const std::string io_path = lean_path.substr(0, lean_path.rfind("_Lgraph.lean")) + "_io.json";
+    const std::string vc_tmp  = lean_path + ".tmp";
+    const std::string io_tmp  = io_path + ".tmp";
+    auto drop_temps = [&]() {
+      std::remove(vc_tmp.c_str());
+      std::remove(io_tmp.c_str());
+    };
+
+    std::ofstream vofs(vc_tmp);
     if (!vofs) {
-      livehd::diag::warn("pass.lean", "write-failed", "io").msg("could not write {}", vc_tmp).emit();
-      return;
+      drop_temps();
+      // A requested artifact that cannot be written is a failure, not a
+      // warning: the old warn+return reported a PASSING command with no
+      // certificate at all.
+      fatal(ctx, "could not open the certificate file " + vc_tmp);
     }
     lean_design_cert::RemapError err;
     if (!lean_design_cert::emit_design_cert(base_name, din, vofs, err)) {
       vofs.close();
-      std::remove(vc_tmp.c_str());
+      drop_temps();
       fatal(ctx, "verified_compiler export: " + err.message);
     }
-    vofs.close();
-    if (std::rename(vc_tmp.c_str(), lean_path.c_str()) != 0) {
-      livehd::diag::warn("pass.lean", "write-failed", "io").msg("could not rename {}", vc_tmp).emit();
-      return;
+    vofs.flush();
+    if (!vofs) {
+      vofs.close();
+      drop_temps();
+      fatal(ctx, "could not write the certificate file " + vc_tmp);
     }
+    vofs.close();
 
-    // IO sidecar, written ONLY once the certificate itself is on disk, and via
-    // a temp + rename like the certificate: a refused or half-written design
-    // must not leave behind metadata that looks valid and describes nothing.
     {
-      const std::string io_path = lean_path.substr(0, lean_path.rfind("_Lgraph.lean")) + "_io.json";
-      const std::string io_tmp  = io_path + ".tmp";
       std::ofstream iofs(io_tmp, std::ios::trunc);
       // FAIL CLOSED on the artifact that was asked for. The sidecar is
       // non-semantic -- it is no part of compileDesign_correct -- but a
@@ -543,6 +562,7 @@ void emit(const Design_scan& scan) {
       // metadata leaves an external driver with a certificate it cannot name
       // the ports of. That is a generation failure, not a detail.
       if (!iofs.is_open()) {
+        drop_temps();
         fatal(ctx, "could not open the IO metadata file " + io_tmp);
       }
       {
@@ -619,15 +639,25 @@ void emit(const Design_scan& scan) {
         iofs.flush();
         if (!iofs) {
           iofs.close();
-          std::remove(io_tmp.c_str());
+          drop_temps();
           fatal(ctx, "could not write the IO metadata file " + io_tmp);
         }
         iofs.close();
-        if (std::rename(io_tmp.c_str(), io_path.c_str()) != 0) {
-          std::remove(io_tmp.c_str());
-          fatal(ctx, "could not rename the IO metadata file " + io_tmp + " to " + io_path);
-        }
       }
+    }
+
+    // ---- publish: both temps are complete, so rename them into place ------
+    if (std::rename(vc_tmp.c_str(), lean_path.c_str()) != 0) {
+      drop_temps();
+      fatal(ctx, "could not rename the certificate " + vc_tmp + " to " + lean_path);
+    }
+    if (std::rename(io_tmp.c_str(), io_path.c_str()) != 0) {
+      // ROLL BACK the certificate: leaving it would be the very half-pair this
+      // ordering exists to prevent.
+      std::remove(lean_path.c_str());
+      drop_temps();
+      fatal(ctx, "could not rename the IO metadata file " + io_tmp + " to " + io_path
+                     + "; the certificate was rolled back so no half-pair is left behind");
     }
     std::cout << "pass.lean: " << raw_name << " -> " << lean_path << " (verified_compiler: " << din.sources.size()
               << " sources, " << din.nodes.size() << " nodes, " << din.flops.size() << " flops, "
