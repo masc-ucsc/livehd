@@ -64,33 +64,51 @@ if [[ -n "$RESUME" ]]; then
   OUT="$RESUME"
   [[ -d "$OUT" ]] || { echo "FATAL: --resume: no such directory: $OUT" >&2; exit 2; }
 fi
-# UNIQUE RUN ID. Two runs sharing a directory corrupt each other, and the
-# failure is silent: a stale orphan keeps writing into a tree a new run has
-# just recreated. The default output path therefore carries a timestamp, so a
-# relaunch never lands on a live run's directory.
-RUN_ID="${RUN_ID:-${COMMIT}_$(date +%Y%m%d-%H%M%S)}"
-OUT="${OUT:-$ROOT/generated/census_d2/$RUN_ID}"
+# UNIQUE RUN ID, claimed ATOMICALLY.
+#
+# A second-resolution timestamp can collide between two rapid launches, and a
+# collision here means two jobs share a tree. `mkdir` either creates the
+# directory or fails, so the winner of the race is unambiguous.
+if [[ -z "$OUT" ]]; then
+  base="$ROOT/generated/census_d2"
+  mkdir -p "$base"
+  while :; do
+    cand="$base/${RUN_ID:-${COMMIT}_$(date +%Y%m%d-%H%M%S)_$$_${RANDOM}}"
+    if mkdir "$cand" 2>/dev/null; then OUT="$cand"; break; fi
+    # An explicit RUN_ID names one directory; retrying would spin forever.
+    [[ -n "${RUN_ID:-}" ]] && { echo "FATAL: RUN_ID directory already exists: $cand" >&2; exit 2; }
+  done
+fi
 mkdir -p "$OUT/logs" "$OUT/mod"
 
-# EXCLUSIVE LOCK, held for the life of the run.
+# EXCLUSIVE LOCK, on a path OUTSIDE the run tree.
 #
-# This is what would have prevented the incident recorded in
-# generated/census_d2/INCIDENTS.md: a driver was killed, its `xargs -P` was
-# reparented to PPID 1 and kept generating, the directory was then removed and
-# recreated for a fresh run, and for several minutes TWO jobs wrote the same
-# tree -- one of them into an unlinked inode. Children inherit the descriptor,
-# so an orphaned xargs still holds this lock and the relaunch refuses instead
-# of colliding.
-exec 9>"$OUT/.lock" || { echo "FATAL: cannot create $OUT/.lock" >&2; exit 2; }
+# The first version of this put the lock at <out>/.lock, which does NOT stop
+# the incident it was written for: a launcher that does `rm -rf <out>` first
+# leaves the orphan holding a lock on an UNLINKED inode, and the new driver
+# then creates a different .lock inode and proceeds. Both run. The lock must
+# therefore live somewhere the run tree's removal cannot touch, keyed by the
+# canonical output path.
+#
+# Children inherit the descriptor, so an orphaned `xargs` still holds it --
+# which is exactly the case in generated/census_d2/INCIDENTS.md.
+LOCK_DIR="$ROOT/generated/census_d2/runtime_locks"
+mkdir -p "$LOCK_DIR"
+OUT_CANON="$(readlink -m "$OUT")"
+LOCK_FILE="$LOCK_DIR/$(printf '%s' "$OUT_CANON" | sha256sum | cut -d' ' -f1).lock"
+exec 9>"$LOCK_FILE" || { echo "FATAL: cannot create $LOCK_FILE" >&2; exit 2; }
 if ! flock -n 9; then
-  echo "FATAL: another census is already using $OUT (lock held)." >&2
+  echo "FATAL: another census is already using $OUT_CANON" >&2
+  echo "       (lock held on $LOCK_FILE)" >&2
   echo "       A previous driver may have died leaving an orphaned xargs still" >&2
-  echo "       writing there. Find it with:" >&2
-  echo "         fuser -v $OUT/.lock" >&2
+  echo "       writing there -- note the lock survives `rm -rf` of the run tree," >&2
+  echo "       which is the point. Find the holder with:" >&2
+  echo "         fuser -v $LOCK_FILE" >&2
   echo "       and stop that process GROUP before reusing this directory." >&2
   exit 2
 fi
-echo "run_id=$(basename "$OUT")  (lock held)"
+printf 'out=%s\npid=%s\nstarted=%s\n' "$OUT_CANON" "$$" "$(date -Is)" >&9
+echo "run_id=$(basename "$OUT")  (lock: $LOCK_FILE)"
 
 # ---- the corpus, validated -------------------------------------------------
 # Count AND digest, so a stale or partially regenerated list cannot be swept as
