@@ -38,3 +38,13 @@ filegroup(
     srcs = glob(["scripts/*.py"]),
     visibility = ["//visibility:public"],
 )
+
+# Committed census results, so the consistency test can read them.
+filegroup(
+    name = "census_data",
+    srcs = [
+        "CENSUS_D2_122.tsv",
+        "CENSUS_D2_122_BASELINE_PROVISIONAL.tsv",
+    ],
+    visibility = ["//visibility:public"],
+)

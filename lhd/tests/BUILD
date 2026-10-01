@@ -684,6 +684,20 @@ sh_test(
     data = ["//pass/lean:scripts"],
 )
 
+# The committed census must agree with the number it is cited under. It did
+# not once: CENSUS_D2_122.tsv was published alongside a "105 of 122" claim
+# while still being the provisional 102-row baseline, so the primary data
+# contradicted the summary. Checks row count, uniqueness, the accepted count,
+# that every accepted row carries its evidence, that superseded rows name
+# their follow-up run, and that no absolute paths or trailing whitespace leak
+# into committed data.
+sh_test(
+    name = "census_consistency_test",
+    size = "small",
+    srcs = ["census_consistency_test.sh"],
+    data = ["//pass/lean:census_data"],
+)
+
 # The D2 census accept/reject logic. Two distinctions that were wrong at first:
 # direct_sweep exits 1 when it COMPLETED with refusals (near-certain over 122
 # modules), which must not mark every other row UNTRUSTED; and `accepted`

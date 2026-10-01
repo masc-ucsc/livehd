@@ -1233,6 +1233,24 @@ eight groups, and each group has one cause.
 in the `type=24`, split-selfref and timeout clusters respectively. Their
 baseline rows were misattributed, not merely noisy.
 
+### The committed tables
+
+`pass/lean/CENSUS_D2_122.tsv` is the **adjudicated** result: 122 rows, with the
+six superseded rows taken from the follow-up runs, and per-row provenance
+(`evidence_run`, `generation_commit`, `aggregation_commit`, `provisional`) so
+that 105 reads as *combined current evidence* rather than one uninterrupted
+run. It is produced by `scripts/census_merge.py`, not edited by hand.
+
+`pass/lean/CENSUS_D2_122_BASELINE_PROVISIONAL.tsv` preserves the baseline
+classifications verbatim for audit — including the three rows now known to be
+wrong (`txfma_f1` as `compile=143`, `null_vpu` and `minion_dcache_texsend` as
+`static-gates-failed`). They are kept, not silently overwritten.
+
+`//lhd/tests:census_consistency_test` asserts the adjudicated table agrees with
+the number it is cited under: 122 unique rows, 105 accepted, every accepted row
+carrying `checkDesign=ACCEPTED` with the requested cycle count and clean gates,
+and every superseded row naming its follow-up run.
+
 ### Provenance
 
 The baseline run is **provisional, not authoritative**: generation was
