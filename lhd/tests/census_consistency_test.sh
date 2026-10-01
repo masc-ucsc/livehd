@@ -145,5 +145,47 @@ else:
 sys.exit(1 if fails else 0)
 PYCHK
 rc=$?
+# ---- a manifest may only be published for a SINGLE-run table --------------
+# census_merge.py can merge several runs, but a manifest describes ONE. If it
+# published the base run's manifest beside a merged table, that manifest would
+# assert the whole census came from that run -- and the commit-agreement check
+# above cannot even verify it once the table carries several generation
+# commits. The tool must refuse the combination rather than emit a manifest
+# that describes part of its table.
+MERGE=""
+for c in "${TEST_SRCDIR:-}/_main/scripts/census_merge.py" \
+         "$ROOT/scripts/census_merge.py" "scripts/census_merge.py"; do
+  [ -r "$c" ] && { MERGE="$c"; break; }
+done
+if [ -z "$MERGE" ]; then
+  echo "FAIL: cannot find census_merge.py, so the manifest/override rule is untested"
+  rc=1
+else
+  TD="${TEST_TMPDIR:-$(dirname "$TSV")}/mo_check"
+  rm -rf "$TD"; mkdir -p "$TD/base/mod" "$TD/ovr/mod"
+  # Two minimal run directories; the rule must fire on the ARGUMENTS, before
+  # any of their contents matter.
+  printf 'module\tstage\tartifact\n' > "$TD/base/census.tsv"
+  printf 'a\taccepted\t-\n'          >> "$TD/base/census.tsv"
+  cp "$TD/base/census.tsv" "$TD/ovr/census.tsv"
+  echo '{"commit": "aaaa", "module_list_sha256": "x"}' > "$TD/base/manifest.json"
+  echo '{"commit": "bbbb", "module_list_sha256": "x"}' > "$TD/ovr/manifest.json"
+  if python3 "$MERGE" --base "$TD/base" --override "$TD/ovr" --out "$TD/out.tsv" \
+       --manifest-out "$TD/out.json" --expect-modules 1 > "$TD/log" 2>&1; then
+    echo "FAIL: census_merge published a manifest for a MERGED table"; rc=1
+  elif grep -q "manifest-out" "$TD/log"; then
+    echo "ok: publishing a manifest beside a merged table is refused"
+  else
+    echo "FAIL: it refused, but not because of the manifest/override rule:"
+    head -2 "$TD/log" | sed 's/^/      /'; rc=1
+  fi
+  # and the same merge WITHOUT a manifest must still work
+  python3 "$MERGE" --base "$TD/base" --override "$TD/ovr" --out "$TD/out2.tsv" \
+    --expect-modules 1 > "$TD/log2" 2>&1 \
+    && echo "ok: merging without --manifest-out is still allowed" \
+    || { echo "FAIL: a plain merge was refused too, so the rule is too broad"
+         head -2 "$TD/log2" | sed 's/^/      /'; rc=1; }
+fi
+
 [ "$rc" -eq 0 ] || { echo "FAIL: the committed census contradicts its own summary"; exit 1; }
 echo "PASS: census_consistency_test"

@@ -75,6 +75,20 @@ def main():
     a = ap.parse_args()
     root = os.path.abspath(a.root).rstrip("/") + "/"
 
+    # A manifest describes ONE run. With overrides the table is multi-run, so
+    # publishing the base run's manifest beside it would assert that the whole
+    # 122 rows came from that run -- the exact claim the consistency test
+    # verifies via generation_commit, and which it cannot verify at all once
+    # the table carries several. Refuse rather than publish a manifest that
+    # describes part of the table.
+    if a.manifest_out and a.override:
+        sys.exit("FATAL: --manifest-out describes a SINGLE run, but --override makes the\n"
+                 "       table multi-run. The published manifest would claim the whole\n"
+                 "       census came from --base, and the consistency test cannot check\n"
+                 "       commit agreement across several generation commits.\n"
+                 "       Publish the merged table without --manifest-out, or re-run the\n"
+                 "       full corpus in one go and publish both.")
+
     merged = load(a.base, root)
     order = list(merged)
     replaced = []

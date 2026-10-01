@@ -695,7 +695,10 @@ sh_test(
     name = "census_consistency_test",
     size = "small",
     srcs = ["census_consistency_test.sh"],
-    data = ["//pass/lean:census_data"],
+    data = [
+        "//pass/lean:census_data",
+        "//scripts:cycle_provenance_tools",
+    ],
 )
 
 # The D2 census accept/reject logic. Two distinctions that were wrong at first:
