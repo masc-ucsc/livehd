@@ -85,6 +85,10 @@ private def xorCode     : Int := Int.ofNat (opCode .Op_Xor)
 private def notCode     : Int := Int.ofNat (opCode .Op_Not)
 -- `opCode` ignores the payload, so any witness names the same code
 private def sumCode     : Int := Int.ofNat (opCode (.Op_Sum 0))
+private def eqCode      : Int := Int.ofNat (opCode .Op_EQ)
+private def rorCode     : Int := Int.ofNat (opCode .Op_Ror)
+private def muxBoolCode : Int := Int.ofNat (opCode .Op_MuxBool)
+private def muxNCode    : Int := Int.ofNat (opCode .Op_MuxN)
 
 def hwS : SProgram where
   entry := "main"
@@ -199,7 +203,15 @@ def hwS : SProgram where
                 (.ite (P .eqI [R "code", .lit (.int sumCode)])
                   -- the ONLY operator that reads the opcode payload
                   (C "opSum" [R "w", R "pay", R "deps", R "env", R "n"])
-                  (P .bvMk [R "w", int 0])))))))) ] },
+                (.ite (P .eqI [R "code", .lit (.int eqCode)])
+                  (C "opEq" [R "w", R "deps", R "env", R "n"])
+                (.ite (P .eqI [R "code", .lit (.int rorCode)])
+                  (C "opRor" [R "w", R "deps", R "env", R "n"])
+                (.ite (P .eqI [R "code", .lit (.int muxBoolCode)])
+                  (C "opMuxBool" [R "w", R "deps", R "env", R "n"])
+                (.ite (P .eqI [R "code", .lit (.int muxNCode)])
+                  (C "opMuxN" [R "w", R "deps", R "env", R "n"])
+                  (P .bvMk [R "w", int 0])))))))))))) ] },
 
   -- Op_And: resize the FIRST operand to the node width, fold the rest in
   -- unchanged.  Mirrors `eval_op` exactly; see `OperatorBridge.evalOp_And_cons`.
@@ -271,6 +283,69 @@ def hwS : SProgram where
                     , C "sumSubs" [int 0, P .tl [R "deps"], R "env", R "n"] ])
                  (C "sumSubs"
                     [P .subI [R "k", int 1], P .tl [R "deps"], R "env", R "n"])) },
+
+  -- Op_EQ: an EMPTY operand list is 1, not 0; otherwise every operand is
+  -- compared against the FIRST (`OperatorBridge.evalOp_EQ_cons`).  The answer
+  -- depends on operand VALUES, so a comparison legitimately survives into the
+  -- residual -- what must not survive is the certificate's own structure.
+  { name := "opEq", params := ["w", "deps", "env", "n"], inline := true
+  , body := .ite (P .isNil [R "deps"]) (P .bvMk [R "w", int 1])
+              (.ite (C "eqAll"
+                       [ P .tl [R "deps"], R "env", R "n"
+                       , P .bvUint [C "slot" [R "env", R "n", P .hd [R "deps"]]] ])
+                    (P .bvMk [R "w", int 1])
+                    (P .bvMk [R "w", int 0])) },
+
+  { name := "eqAll", params := ["deps", "env", "n", "a"], inline := true
+  , body := .ite (P .isNil [R "deps"]) (bool true)
+              (P .andB
+                 [ P .eqI [ P .bvUint [C "slot" [R "env", R "n", P .hd [R "deps"]]]
+                          , R "a" ]
+                 , C "eqAll" [P .tl [R "deps"], R "env", R "n", R "a"] ]) },
+
+  -- Op_Ror is a REDUCTION -- any operand nonzero -- yielding 1 or 0.  It is
+  -- NOT a bitwise `Op_Or`, and the node width is 1 in every emitted
+  -- certificate for exactly that reason.
+  { name := "opRor", params := ["w", "deps", "env", "n"], inline := true
+  , body := .ite (C "anyNz" [R "deps", R "env", R "n"])
+              (P .bvMk [R "w", int 1])
+              (P .bvMk [R "w", int 0]) },
+
+  { name := "anyNz", params := ["deps", "env", "n"], inline := true
+  , body := .ite (P .isNil [R "deps"]) (bool false)
+              (P .orB
+                 [ C "nz" [C "slot" [R "env", R "n", P .hd [R "deps"]]]
+                 , C "anyNz" [P .tl [R "deps"], R "env", R "n"] ]) },
+
+  -- Op_MuxBool: operands are [sel, false_v, true_v] IN THAT ORDER, so the
+  -- nonzero branch takes the THIRD.  A polarity slip here is a silent swap,
+  -- which is why both directions are pinned by vectors.
+  { name := "opMuxBool", params := ["w", "deps", "env", "n"], inline := true
+  , body := .ite (C "nz" [C "slot" [R "env", R "n", P .hd [R "deps"]]])
+              (P .bvResize
+                 [R "w", C "slot" [R "env", R "n", P .hd [P .tl [P .tl [R "deps"]]]]])
+              (P .bvResize
+                 [R "w", C "slot" [R "env", R "n", P .hd [P .tl [R "deps"]]]]) },
+
+  -- Op_MuxN: the FIRST operand is the selector and the rest are indexed from
+  -- 0; out of range answers zero.  The dep list is STATIC and the index
+  -- counter `k` is static, so this unrolls into a chain of `ite` on the
+  -- selector -- a DIRECT selection.  No runtime list is walked and no `nth`
+  -- chain is rebuilt: the only dynamic value here is the selector itself.
+  { name := "opMuxN", params := ["w", "deps", "env", "n"], inline := true
+  , body := .ite (P .isNil [R "deps"]) (P .bvMk [R "w", int 0])
+              (C "muxPick"
+                 [ R "w", P .tl [R "deps"], R "env", R "n"
+                 , P .bvUint [C "slot" [R "env", R "n", P .hd [R "deps"]]]
+                 , int 0 ]) },
+
+  { name := "muxPick", params := ["w", "args", "env", "n", "sel", "k"], inline := true
+  , body := .ite (P .isNil [R "args"]) (P .bvMk [R "w", int 0])
+              (.ite (P .eqI [R "sel", R "k"])
+                    (P .bvResize [R "w", C "slot" [R "env", R "n", P .hd [R "args"]]])
+                    (C "muxPick"
+                       [ R "w", P .tl [R "args"], R "env", R "n", R "sel"
+                       , P .addI [R "k", int 1] ])) },
 
   -- Op_SRA and Op_GetMask are binary and delegate directly; the operand order
   -- is the pinned model's (`eval_op .. w [a, b]`).
@@ -498,6 +573,86 @@ private def notD : DesignCert where
           (binIn 15 15) tinySt).outputs == #[mk_bv 4 14]
 #guard binOK (.Op_Sum 2) 15 15
 
+/-! ### Batch 3 operators: `Op_EQ`, `Op_Ror`, `Op_MuxBool`, `Op_MuxN`
+
+The first operators whose answer depends on operand VALUES, so these vectors
+pin behaviour a residual comparison could get backwards. -/
+
+#guard [(5,5),(5,3),(0,0),(15,15),(0,15)].all (fun p => binOK .Op_EQ p.1 p.2)
+
+-- EQ compares every operand against the FIRST, so a three-input node is 1 only
+-- when both followers match the head
+private def eq3D : DesignCert where
+  sources  := #[.input 0 4, .input 1 4, .input 2 4]
+  nodes    := #[{ op := .Op_EQ, width := 4, deps := #[0, 1, 2] }]
+  outputs  := #[{ slot := 3, width := 4 }]
+  flops    := #[]
+  memories := #[]
+
+private def eq3 (a b c : Int) : Array BV := #[mk_bv 4 a, mk_bv 4 b, mk_bv 4 c]
+
+#guard [(7,7,7),(7,7,1),(7,1,7),(1,7,7),(0,0,0)].all (fun t =>
+  runHw eq3D (allEdges eq3D) (eq3 t.1 t.2.1 t.2.2) tinySt
+    == refOf eq3D (allEdges eq3D) (eq3 t.1 t.2.1 t.2.2) tinySt)
+#guard (interpretDesign eq3D (allEdges eq3D) (eq3 7 7 7) tinySt).outputs == #[mk_bv 4 1]
+#guard (interpretDesign eq3D (allEdges eq3D) (eq3 7 7 1) tinySt).outputs == #[mk_bv 4 0]
+#guard (interpretDesign eq3D (allEdges eq3D) (eq3 7 1 7) tinySt).outputs == #[mk_bv 4 0]
+
+-- Op_Ror is a REDUCTION: any operand nonzero gives 1, at width 1.  A bitwise
+-- `Op_Or` would give 5 on (1, 4); this gives 1.
+private def rorD : DesignCert where
+  sources  := #[.input 0 4, .input 1 4]
+  nodes    := #[{ op := .Op_Ror, width := 1, deps := #[0, 1] }]
+  outputs  := #[{ slot := 2, width := 1 }]
+  flops    := #[]
+  memories := #[]
+
+#guard [(0,0),(1,0),(0,1),(1,4),(15,15)].all (fun q =>
+  runHw rorD (allEdges rorD) #[mk_bv 4 q.1, mk_bv 4 q.2] tinySt
+    == refOf rorD (allEdges rorD) #[mk_bv 4 q.1, mk_bv 4 q.2] tinySt)
+#guard (interpretDesign rorD (allEdges rorD) #[mk_bv 4 0, mk_bv 4 0] tinySt).outputs
+         == #[mk_bv 1 0]
+#guard (interpretDesign rorD (allEdges rorD) #[mk_bv 4 1, mk_bv 4 4] tinySt).outputs
+         == #[mk_bv 1 1]
+
+-- Op_MuxBool: [sel, false_v, true_v].  BOTH polarities pinned as values, since
+-- a swap is silent.
+private def muxBD : DesignCert where
+  sources  := #[.input 0 1, .input 1 4, .input 2 4]
+  nodes    := #[{ op := .Op_MuxBool, width := 4, deps := #[0, 1, 2] }]
+  outputs  := #[{ slot := 3, width := 4 }]
+  flops    := #[]
+  memories := #[]
+
+private def muxBIn (sel fv tv : Int) : Array BV := #[mk_bv 1 sel, mk_bv 4 fv, mk_bv 4 tv]
+
+#guard [(0,5,9),(1,5,9),(0,0,15),(1,15,0)].all (fun t =>
+  runHw muxBD (allEdges muxBD) (muxBIn t.1 t.2.1 t.2.2) tinySt
+    == refOf muxBD (allEdges muxBD) (muxBIn t.1 t.2.1 t.2.2) tinySt)
+#guard (interpretDesign muxBD (allEdges muxBD) (muxBIn 0 5 9) tinySt).outputs == #[mk_bv 4 5]
+#guard (interpretDesign muxBD (allEdges muxBD) (muxBIn 1 5 9) tinySt).outputs == #[mk_bv 4 9]
+
+-- Op_MuxN: selector FIRST, data indexed from 0, out of range answers ZERO.
+private def muxND : DesignCert where
+  sources  := #[.input 0 4, .input 1 4, .input 2 4, .input 3 4]
+  nodes    := #[{ op := .Op_MuxN, width := 4, deps := #[0, 1, 2, 3] }]
+  outputs  := #[{ slot := 4, width := 4 }]
+  flops    := #[]
+  memories := #[]
+
+private def muxNIn (s a b c : Int) : Array BV :=
+  #[mk_bv 4 s, mk_bv 4 a, mk_bv 4 b, mk_bv 4 c]
+
+#guard [(0,7,8,9),(1,7,8,9),(2,7,8,9),(3,7,8,9),(15,7,8,9)].all (fun t =>
+  runHw muxND (allEdges muxND) (muxNIn t.1 t.2.1 t.2.2.1 t.2.2.2) tinySt
+    == refOf muxND (allEdges muxND) (muxNIn t.1 t.2.1 t.2.2.1 t.2.2.2) tinySt)
+-- selector 0 picks the FIRST data operand, 2 the LAST…
+#guard (interpretDesign muxND (allEdges muxND) (muxNIn 0 7 8 9) tinySt).outputs == #[mk_bv 4 7]
+#guard (interpretDesign muxND (allEdges muxND) (muxNIn 2 7 8 9) tinySt).outputs == #[mk_bv 4 9]
+-- …and OUT OF RANGE is zero, not a wrap and not the last
+#guard (interpretDesign muxND (allEdges muxND) (muxNIn 3 7 8 9) tinySt).outputs == #[mk_bv 4 0]
+#guard (interpretDesign muxND (allEdges muxND) (muxNIn 15 7 8 9) tinySt).outputs == #[mk_bv 4 0]
+
 -- SRA IS ARITHMETIC, and this is the vector that says so: 0b1000 is -8 at
 -- width 4, so shifting right by one gives -4 = 0b1100, not the 0b0100 a
 -- LOGICAL shift would give.
@@ -647,6 +802,51 @@ private partial def primsOf : Term → List Prim
 #guard (((binR .Op_Or).funs.map (fun fd => primsOf fd.body)).flatten).contains Prim.bvOr
 #guard b12Ops.all (fun o =>
   !(((binR o).funs.map (fun fd => primsOf fd.body)).flatten).contains Prim.eqI)
+
+/-! ### Batch 3: the residual criterion, sharpened
+
+The B1/B2 assertion was "no `eqI` survives".  That is still right for those
+operators -- none of them needs a runtime comparison -- but it is the WRONG
+test from here on: `Op_EQ` and `Op_MuxN` compare operand values, and `Op_Ror`
+and `Op_MuxBool` test them, so a residual comparison is the hardware's, not
+leftover dispatch.
+
+What must disappear is the CERTIFICATE's structure.  The check below is
+therefore that the only `caseT` tag surviving anywhere is `tagState` -- the
+runtime state record.  Every certificate and operator tag, `tagOp` included, is
+gone, which is exactly what says `applyOp`'s opcode chain was decided during
+specialization.  What remains is data-dependent and is counted operator by
+operator. -/
+
+private def projOf (D : DesignCert) : Program :=
+  match projectDesign D with | .ok p => p | .error _ => ⟨[], 0⟩
+
+private def cnt (D : DesignCert) (q : Prim) : Nat :=
+  (((projOf D).funs.map (fun fd => primsOf fd.body)).flatten).countP (· == q)
+
+-- the ONLY surviving tag is the runtime state record
+#guard [eq3D, rorD, muxBD, muxND].all (fun D => tagsIn (projOf D) == [tagState])
+
+-- and the surviving comparisons are data-dependent, one per operand as each
+-- operator's own semantics requires
+#guard cnt eq3D  .eqI == 2   -- every operand compared against the FIRST
+#guard cnt rorD  .orB == 2   -- the reduction, one disjunct per operand
+#guard cnt muxBD .eqI == 1   -- the single `bv_nonzero` test on the selector
+#guard cnt muxND .eqI == 3   -- one selector test per DATA operand: the ite chain
+
+/-- `Op_MuxN`'s selection must be a DIRECT `ite` chain, not a runtime walk of
+the operand list.  The control is a same-shape `Op_Or` design: it reads the same
+inputs and selects nothing, so if `Op_MuxN` were rebuilding or walking a list
+its peel counts would be strictly higher.  They are equal. -/
+private def or4D : DesignCert where
+  sources  := #[.input 0 4, .input 1 4, .input 2 4, .input 3 4]
+  nodes    := #[{ op := .Op_Or, width := 4, deps := #[0, 1, 2, 3] }]
+  outputs  := #[{ slot := 4, width := 4 }]
+  flops    := #[]
+  memories := #[]
+
+#guard cnt muxND .tl == cnt or4D .tl
+#guard cnt muxND .hd == cnt or4D .hd
 
 -- batch 2, at the primitive level
 #guard (((binR .Op_Xor).funs.map (fun fd => primsOf fd.body)).flatten).contains Prim.bvXor

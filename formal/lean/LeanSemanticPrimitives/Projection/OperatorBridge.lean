@@ -182,6 +182,57 @@ theorem evalOpCert_Sum (nAdd w : Nat) (l : List BV) :
     eval_op_cert (.Op_Sum nAdd) w (l.map CertVal.bv) = .bv (eval_op (.Op_Sum nAdd) w l) :=
   eval_op_cert_bv (.Op_Sum nAdd) w l (fun _ => ⟨by simp, by simp, by simp⟩)
 
+/-! ### Batch 3: `Op_EQ`, `Op_MuxBool`, `Op_MuxN`, `Op_Ror`
+
+The first operators whose answer genuinely DEPENDS on operand values at run
+time, so the residual keeps a comparison or an `ite`.  That is not leftover
+dispatch: what must disappear is the certificate's own structure, not the
+hardware's conditionals.
+
+`Op_EQ` compares every operand against the FIRST, and an empty operand list is
+`1`, not `0`.  `Op_Ror` is a REDUCTION -- any operand nonzero -- and yields a
+one-bit answer, not a bitwise `Op_Or`.  `Op_MuxBool`'s operands are
+`[sel, false_v, true_v]` in that order, so a polarity slip is a silent swap.
+`Op_MuxN` takes its selector FIRST and indexes the rest from 0, with
+out-of-range answering zero rather than wrapping or erroring. -/
+
+theorem evalOp_EQ_nil (w : Nat) : eval_op .Op_EQ w [] = mk_bv w 1 := rfl
+
+theorem evalOp_EQ_cons (w : Nat) (a : BV) (args : List BV) :
+    eval_op .Op_EQ w (a :: args)
+      = mk_bv w (if args.all fun b => bv_uint b = bv_uint a then 1 else 0) := rfl
+
+theorem evalOpCert_EQ (w : Nat) (l : List BV) :
+    eval_op_cert .Op_EQ w (l.map CertVal.bv) = .bv (eval_op .Op_EQ w l) :=
+  eval_op_cert_bv .Op_EQ w l (fun _ => ⟨by simp, by simp, by simp⟩)
+
+theorem evalOp_Ror (w : Nat) (xs : List BV) :
+    eval_op .Op_Ror w xs = mk_bv w (if xs.any bv_nonzero then 1 else 0) := rfl
+
+theorem evalOpCert_Ror (w : Nat) (l : List BV) :
+    eval_op_cert .Op_Ror w (l.map CertVal.bv) = .bv (eval_op .Op_Ror w l) :=
+  eval_op_cert_bv .Op_Ror w l (fun _ => ⟨by simp, by simp, by simp⟩)
+
+theorem evalOp_MuxBool (w : Nat) (sel fv tv : BV) :
+    eval_op .Op_MuxBool w [sel, fv, tv]
+      = if bv_nonzero sel then bv_resize w tv else bv_resize w fv := rfl
+
+theorem evalOpCert_MuxBool (w : Nat) (l : List BV) :
+    eval_op_cert .Op_MuxBool w (l.map CertVal.bv) = .bv (eval_op .Op_MuxBool w l) :=
+  eval_op_cert_bv .Op_MuxBool w l (fun _ => ⟨by simp, by simp, by simp⟩)
+
+theorem evalOp_MuxN_nil (w : Nat) : eval_op .Op_MuxN w [] = mk_bv w 0 := rfl
+
+theorem evalOp_MuxN_cons (w : Nat) (sel : BV) (args : List BV) :
+    eval_op .Op_MuxN w (sel :: args)
+      = (let idx := (bv_uint sel).toNat
+         if idx < args.length then bv_resize w ((args[idx]?).getD (mk_bv w 0))
+         else mk_bv w 0) := rfl
+
+theorem evalOpCert_MuxN (w : Nat) (l : List BV) :
+    eval_op_cert .Op_MuxN w (l.map CertVal.bv) = .bv (eval_op .Op_MuxN w l) :=
+  eval_op_cert_bv .Op_MuxN w l (fun _ => ⟨by simp, by simp, by simp⟩)
+
 theorem evalOpCert_GetMask (w : Nat) (l : List BV) :
     eval_op_cert .Op_GetMask w (l.map CertVal.bv) = .bv (eval_op .Op_GetMask w l) :=
   eval_op_cert_bv .Op_GetMask w l (fun _ => ⟨by simp, by simp, by simp⟩)
