@@ -131,22 +131,97 @@ for nm, w in (("clk", 1), ("we", 1), ("wdata", 8), ("ra3", 4)):
     if e is None or e["width"] != w:
         bad(f"input {nm} should be {w} bit(s), sidecar says {e and e['width']}")
 print("ok: spot-checked input widths")
+
+# --- runtime_input_arity and used_by_model ----------------------------------
+# inputArity is the highest READ ordinal plus one; DirectSim ignores anything
+# the model does not read. A driver needs both facts, so both are asserted
+# against the certificate rather than taken on trust.
+arity = io.get("runtime_input_arity")
+if arity is None:
+    bad("the sidecar does not report runtime_input_arity")
+else:
+    want = (max(cert_in) + 1) if cert_in else 0
+    if arity != want:
+        bad(f"runtime_input_arity is {arity}, but the highest certificate input ordinal "
+            f"plus one is {want}")
+    else:
+        print(f"ok: runtime_input_arity {arity} matches the certificate")
+for i in io["inputs"]:
+    used = i.get("used_by_model")
+    if used is None:
+        bad(f"input {i['name']} has no used_by_model flag"); break
+    if used != (i["ordinal"] in cert_in):
+        bad(f"input {i['name']} (ordinal {i['ordinal']}) is marked used_by_model={used}, "
+            f"but the certificate {'reads' if i['ordinal'] in cert_in else 'never reads'} it")
+else:
+    print("ok: used_by_model agrees with the certificate for every input")
 sys.exit(1 if fails else 0)
 PYIO
 rc=$?
 
-# A REFUSED design must not leave metadata behind that looks valid.
-"$LHD" compile "lg:$T/lg" --top mem_mixed_rdclk_negedge --workdir "$T/lw_raw" \
-  --emit-dir "lean:$T/lean_raw" --set formal.lean.mode=verified_compiler \
-  --set formal.lean.max_nodes=1 > "$T/lean_raw.log" 2>&1
+# ---- a refused REGENERATION must not leave the previous run's metadata ----
+# Checking a fresh directory only proves a failed run creates no NEW sidecar.
+# The dangerous case is the same output directory: succeed, then fail, and the
+# old io.json sits beside a stale certificate looking current.
+[ -r "$IOJ" ] || { echo "FAIL: expected a sidecar from the successful run"; exit 1; }
+"$LHD" compile "lg:$T/lg_norm" --top mem_mixed_rdclk_negedge --workdir "$T/lw2" \
+  --emit-dir "lean:$T/lean" --set formal.lean.mode=verified_compiler \
+  --set formal.lean.max_nodes=1 > "$T/lean_refuse.log" 2>&1
 if [ $? -eq 0 ]; then
-  echo "note: the refusal probe did not refuse; skipping the stale-metadata check"
+  echo "note: the refusal probe did not refuse; stale-metadata check SKIPPED"
+elif [ -r "$IOJ" ]; then
+  echo "FAIL: a refused REGENERATION left the previous run's sidecar in place"
+  echo "      (a driver would read it as describing the current certificate)"
+  rc=1
+elif ls "$T/lean"/*_io.json.tmp >/dev/null 2>&1; then
+  echo "FAIL: a refused regeneration left a .tmp sidecar behind"; rc=1
 else
-  if ls "$T/lean_raw"/*_io.json >/dev/null 2>&1; then
-    echo "FAIL: a REFUSED design left an IO sidecar behind"; rc=1
-  else
-    echo "ok: a refused design leaves no sidecar"
-  fi
+  echo "ok: a refused regeneration removes the previous sidecar"
+fi
+
+# ---- a TRAILING unused input, not just the interior clock hole ------------
+# `runtime_input_arity` is the highest read ordinal plus one, so an unused port
+# at the END sits outside it entirely -- a driver padding to the port count
+# would feed values DirectSim ignores, and one padding to the arity would be
+# right. The interior clock hole does not exercise that.
+cat > "$T/trailing.v" <<'EOF'
+module trailing_unused (
+   input        clk
+  ,input  [3:0] a
+  ,output reg [3:0] y
+  ,input  [7:0] zz_unused   // never read: highest ordinal, outside inputArity
+);
+  always @(posedge clk) y <= a;
+endmodule
+EOF
+"$LHD" compile verilog "$T/trailing.v" --top trailing_unused --reader yosys-slang   --workdir "$T/tw" --emit-dir "lg:$T/tlg" > "$T/t_compile.log" 2>&1   && "$LHD" compile "lg:$T/tlg" --top trailing_unused --workdir "$T/tlw"        --emit-dir "lean:$T/tlean" --set formal.lean.mode=verified_compiler        > "$T/t_lean.log" 2>&1
+if [ $? -ne 0 ]; then
+  echo "note: the trailing-unused fixture did not emit; that sub-check is SKIPPED"
+  grep -oP '"message":"\K[^"]{0,100}' "$T/t_lean.log" | head -1 | sed 's/^/      /'
+else
+  TJ="$T/tlean/trailing_unused_io.json"
+  TJ="$TJ" python3 - <<'PYTRAIL'
+import json, os, sys
+d = json.load(open(os.environ["TJ"]))
+ins = sorted(d["inputs"], key=lambda i: i["ordinal"])
+arity = d["runtime_input_arity"]
+last = ins[-1]
+fails = 0
+if last["name"] != "zz_unused":
+    print(f"FAIL: expected zz_unused to hold the highest ordinal, got {last['name']}"); fails += 1
+elif last["used_by_model"]:
+    print("FAIL: zz_unused is never read but is marked used_by_model"); fails += 1
+elif arity > last["ordinal"]:
+    print(f"FAIL: runtime_input_arity {arity} includes the unread trailing ordinal "
+          f"{last['ordinal']}"); fails += 1
+else:
+    print(f"ok: a trailing unused input sits outside runtime_input_arity "
+          f"({arity} <= ordinal {last['ordinal']}), and is marked used_by_model=false")
+if arity > len(ins):
+    print(f"FAIL: runtime_input_arity {arity} exceeds the {len(ins)} declared ports"); fails += 1
+sys.exit(1 if fails else 0)
+PYTRAIL
+  [ $? -eq 0 ] || rc=1
 fi
 
 [ "$rc" -eq 0 ] || { echo "FAIL: sidecar/certificate disagreement"; exit 1; }

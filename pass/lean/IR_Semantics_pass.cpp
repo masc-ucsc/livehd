@@ -20,6 +20,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <set>
 #include <optional>
 #include <string>
 #include <vector>
@@ -530,13 +531,29 @@ void emit(const Design_scan& scan) {
       const std::string io_tmp  = io_path + ".tmp";
       std::ofstream iofs(io_tmp, std::ios::trunc);
       if (iofs.is_open()) {
+        // Mirrors core/diag.cpp's json_escape (which lives in an anonymous
+        // namespace and cannot be reused). Quote and backslash are not enough:
+        // every control character below 0x20 needs an escape, or one odd signal
+        // name makes the whole sidecar unparseable. \b and \f are covered by the
+        // \u fallback, which is valid JSON for them.
         auto esc = [](const std::string& v) {
           std::string o;
           for (char c : v) {
-            if (c == '"' || c == '\\') {
-              o += '\\';
+            switch (c) {
+              case '"': o += "\\\""; break;
+              case '\\': o += "\\\\"; break;
+              case '\n': o += "\\n"; break;
+              case '\r': o += "\\r"; break;
+              case '\t': o += "\\t"; break;
+              default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                  char buf[8];
+                  std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned>(static_cast<unsigned char>(c)));
+                  o += buf;
+                } else {
+                  o += c;
+                }
             }
-            o += c;
           }
           return o;
         };
@@ -545,6 +562,31 @@ void emit(const Design_scan& scan) {
         iofs << "  \"note\": \"Positional map for DesignCert. inputs[k].ordinal indexes RuntimeInput; "
                 "outputs[k].ordinal indexes RuntimeResult.outputs; clocks[k] indexes ClockEdges. "
                 "NON-SEMANTIC: no DesignCert field and no part of compileDesign_correct.\",\n";
+        // WHICH ordinals the model actually reads. The sidecar lists every
+        // dense primary-port ordinal, because a driver must supply them all to
+        // keep the later ones aligned -- but `inputArity` is the highest
+        // SourceDesc.input ordinal plus one, and anything the model does not
+        // read is IGNORED by DirectSim. A driver needs that distinction, and
+        // the gap is not only the interior clock hole: a TRAILING unused input
+        // also sits outside inputArity.
+        std::set<uint32_t> used_ordinals;
+        for (const auto& src : din.sources) {
+          if (src.kind == lean_design_cert::SourceKind::Input) {
+            used_ordinals.insert(src.ordinal);
+          }
+        }
+        const uint32_t runtime_input_arity = used_ordinals.empty() ? 0 : (*used_ordinals.rbegin() + 1);
+        iofs << "  \"runtime_input_arity\": " << runtime_input_arity << ",\n";
+
+        iofs << "  \"inputs\": [";
+        for (size_t i = 0; i < io_inputs.size(); ++i) {
+          const bool used = used_ordinals.count(io_inputs[i].ordinal) != 0;
+          iofs << (i ? ",\n    " : "\n    ") << "{\"name\": \"" << esc(io_inputs[i].name)
+               << "\", \"ordinal\": " << io_inputs[i].ordinal << ", \"width\": " << io_inputs[i].width
+               << ", \"used_by_model\": " << (used ? "true" : "false") << "}";
+        }
+        iofs << (io_inputs.empty() ? "" : "\n  ") << "],\n";
+
         auto dump = [&](const char* key, const std::vector<Io_meta>& v) {
           iofs << "  \"" << key << "\": [";
           for (size_t i = 0; i < v.size(); ++i) {
@@ -553,7 +595,6 @@ void emit(const Design_scan& scan) {
           }
           iofs << (v.empty() ? "" : "\n  ") << "],\n";
         };
-        dump("inputs", io_inputs);
         dump("outputs", io_outputs);
         iofs << "  \"clocks\": [";
         for (size_t i = 0; i < io_clocks.size(); ++i) {

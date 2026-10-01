@@ -1939,6 +1939,21 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   const std::string base_name = sanitize_lean(raw_name);
   const std::string lean_path = output_dir + "/" + base_name + "_Lgraph.lean";
 
+  // A GENERATION TRANSACTION for the verified_compiler IO sidecar, opened
+  // HERE -- before any analysis that can refuse.
+  //
+  // Clearing it next to the write is not enough, and clearing it on entry to
+  // the D2 emitter is not either: most refusals (an unsupported memory, a
+  // combinational cycle, the max_nodes cap in reachable_topo_order) fire
+  // before that emitter is ever reached. A stale io.json then sits beside a
+  // stale or absent certificate, looking current to an external driver. A
+  // failed regeneration must leave NO metadata.
+  {
+    const std::string io_path = output_dir + "/" + base_name + "_io.json";
+    std::remove(io_path.c_str());
+    std::remove((io_path + ".tmp").c_str());
+  }
+
   LeanCtx ctx;
   ctx.g         = g;
   ctx.base_name = raw_name;
