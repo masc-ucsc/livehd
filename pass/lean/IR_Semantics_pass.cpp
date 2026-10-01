@@ -328,7 +328,10 @@ void emit(const Design_scan& scan) {
     std::vector<uint32_t> mem_clocked;
     for (const auto& kv : mem_cert_ids) {
       const auto& mi = ctx.memory_info.at(kv.first);
-      if (mi.is_rom && !mi.sync) {
+      // An immutable ROM with NO synchronous read port commits nothing and
+      // owns no register. One sync read port is enough to give it a domain,
+      // because that port's read-data register commits on an edge.
+      if (mi.is_rom && !mi.any_sync_read) {
         continue;
       }
       mem_clocked.push_back(kv.first);
@@ -342,7 +345,11 @@ void emit(const Design_scan& scan) {
       }
       std::optional<lc::Commit_class> mcc;
       for (const auto& port : mi.ports) {
-        if (port.rdport && !mi.sync) {
+        // Skip only the ASYNCHRONOUS read ports. `port.rdport && !mi.sync`
+        // asked a memory-level question of a port: on a mixed memory it
+        // skipped every read port, including the synchronous ones whose
+        // read-data registers do commit on an edge.
+        if (port.is_async_read()) {
           continue;  // an async read commits nothing
         }
         if (port.clock.is_invalid()) {

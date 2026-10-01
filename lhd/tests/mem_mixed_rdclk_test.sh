@@ -72,30 +72,39 @@ else
   fails=$((fails+1))
 fi
 
-# ---- the representation -----------------------------------------------------
-# `type` must be the MIXED SENTINEL (3), never the raw mask (24) and never a
-# scalar that claims the memory is uniform.
-TYPE="$(grep -oP 'type=\K[0-9]+' "$T/lean.log" 2>/dev/null | head -1)"
-if [ -z "$TYPE" ]; then
-  "$OLDPWD/$LHD" compile "lg:$T/lg" --top mem_mixed_rdclk --workdir "$T/lw" \
-    --emit-dir "lean:$T/lean" --set formal.lean.mode=verified_compiler \
-    > "$T/lean.log" 2>&1
-  TYPE="$(grep -oP 'type=\K[0-9]+' "$T/lean.log" | head -1)"
+# ---- the Lean certificate: state exists ONLY for the sync read ports -------
+# These assertions used to scrape pass.lean's REFUSAL text for `type=`/`rdports=`.
+# That message is gone now that the certificate path models per-port timing, and
+# a test that depends on a failure message silently stops testing anything the
+# moment the failure is fixed. The readback above already pins type and port
+# count from the GRAPH; what matters here is the model that comes out.
+"$OLDPWD/$LHD" compile "lg:$T/lg" --top mem_mixed_rdclk --workdir "$T/lw" \
+  --emit-dir "lean:$T/lean" --set formal.lean.mode=verified_compiler \
+  --set formal.lean.strict=true > "$T/lean.log" 2>&1
+if [ $? -ne 0 ]; then
+  echo "FAIL: pass.lean refused the mixed-timing memory"
+  grep -oP '"message":"\K[^"]{0,120}' "$T/lean.log" | head -1 | sed 's/^/      /'
+  fails=$((fails+1))
+else
+  echo "ok: pass.lean emits a certificate for a mixed-timing memory"
+  CERT="$T/lean/mem_mixed_rdclk_Lgraph.lean"
+  # Exactly TWO synthetic read-data registers: one per SYNC read port. Three
+  # (or five) would mean state was allocated for asynchronous outputs, which
+  # nothing ever writes; one would mean a sync port lost its register.
+  NFLOP="$(sed -n '/flops    :=/,/memories :=/p' "$CERT" | grep -c 'din :=')"
+  if [ "$NFLOP" = "2" ]; then
+    echo "ok: exactly 2 synthetic read registers (one per sync read port)"
+  else
+    echo "FAIL: $NFLOP synthetic read register(s), expected 2 -- one per SYNC read port only"
+    fails=$((fails+1))
+  fi
+  NQ="$(grep -c 'SourceDesc.flopQ' "$CERT")"
+  [ "$NQ" = "2" ] && echo "ok: exactly 2 flopQ sources, so the async outputs carry no state" \
+    || { echo "FAIL: $NQ flopQ source(s), expected 2"; fails=$((fails+1)); }
+  NMEM="$(sed -n '/memories :=/,/clocks   :=/p' "$CERT" | grep -c 'aw :=')"
+  [ "$NMEM" = "1" ] && echo "ok: one memory image" \
+    || { echo "FAIL: $NMEM memory image(s), expected 1"; fails=$((fails+1)); }
 fi
-case "$TYPE" in
-  3)  echo "ok: the mixed memory records type=3 (Memory_type_mixed)" ;;
-  24) echo "FAIL: type=24 -- the RD_CLK_ENABLE bitmask is being written into the scalar \`type\` again"; fails=$((fails+1)) ;;
-  2)  echo "FAIL: type=2 -- a mixed memory is being recorded as a COMBINATIONAL ARRAY"; fails=$((fails+1)) ;;
-  "") echo "FAIL: could not determine the memory type from the emitter diagnostics"; fails=$((fails+1)) ;;
-  *)  echo "FAIL: type=$TYPE -- expected the mixed sentinel 3"; fails=$((fails+1)) ;;
-esac
-
-# Every read port must carry an explicit, unambiguous timing: async(1) or
-# sync(2). A port left at the old boolean 1 for a SYNC read would read as
-# "async" and lose its register.
-RD="$(grep -oP 'rdports=\K[0-9]+' "$T/lean.log" | head -1)"
-[ "$RD" = "5" ] && echo "ok: all 5 read ports are present" \
-  || { echo "FAIL: rdports=$RD, expected 5"; fails=$((fails+1)); }
 
 # ---- the consumers must FAIL CLOSED until they read per-port timing ---------
 # Without this, `type=3` is simply not 1, so cgen's `m.type == 1` sync tests all

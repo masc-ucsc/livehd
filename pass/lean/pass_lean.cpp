@@ -359,7 +359,22 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
     } else if (pname == "posclk") {
       mi.posclk = const_pin_int_or(e.driver, 1);  // unused in async emission; tolerate non-const
     } else if (pname == "rdport") {
-      mi.ports[port_id].rdport = const_pin_int(ctx, e.driver, node, pname) != 0;
+      // Explicit timing, range-checked. The old `!= 0` collapsed async(1) and
+      // sync(2) into "is a read port", which is precisely the distinction a
+      // mixed memory needs; an unrecognised value must be refused rather than
+      // silently read as a write port or as async.
+      {
+        const auto raw = const_pin_int(ctx, e.driver, node, pname);
+        switch (raw) {
+          case Ntype::Memory_rdport_write: mi.ports[port_id].timing = Port_timing::Write; break;
+          case Ntype::Memory_rdport_async: mi.ports[port_id].timing = Port_timing::AsyncRead; break;
+          case Ntype::Memory_rdport_sync:  mi.ports[port_id].timing = Port_timing::SyncRead; break;
+          default:
+            fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " port " + std::to_string(port_id)
+                           + " has rdport=" + std::to_string(raw)
+                           + ", which is not write(0) / async read(1) / sync read(2).");
+        }
+      }
     } else if (pname == "addr") {
       mi.ports[port_id].addr = e.driver;
     } else if (pname == "din") {
@@ -409,7 +424,7 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
     if (p.addr.is_invalid() && p.din.is_invalid() && p.enable.is_invalid() && p.clock.is_invalid()) {
       continue;
     }
-    if (p.rdport) {
+    if (p.is_read()) {
       mi.read_ports.push_back(idx);
       if (p.addr.is_invalid()) {
         fatal(ctx, "Memory node n_" + std::to_string(mi.nid) + " read port missing addr.");
@@ -537,9 +552,39 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
   }
 
   // type 0/2 = async/array (combinational read); type 1 = sync-read (registered
-  // read data, modeled with a read-data register field + sram_sync_read_reg_next).
-  if (!(mi.type == 0 || mi.type == 1 || mi.type == 2)) {
-    fatal(ctx, memory_policy_summary(mi) + ". pass.lean memory supports async/array (type 0/2) and sync-read (type 1) only.");
+  // read data, modeled with a read-data register field + sram_sync_read_reg_next);
+  // type 3 = MIXED, meaning the read ports disagree and the answer is per port.
+  if (!(mi.type == Ntype::Memory_type_async || mi.type == Ntype::Memory_type_sync
+        || mi.type == Ntype::Memory_type_array || mi.type == Ntype::Memory_type_mixed)) {
+    fatal(ctx, memory_policy_summary(mi)
+                   + ". pass.lean memory supports async/array (type 0/2), sync-read (type 1) and mixed (type 3) only.");
+  }
+  // The global type must AGREE with the ports. Accepting type=3 without this
+  // would let a disagreement through unnoticed, and accepting type 0/1 without
+  // it would let a per-port regression hide behind a uniform-looking scalar.
+  {
+    size_t n_sync = 0;
+    size_t n_async = 0;
+    for (auto idx : mi.read_ports) {
+      if (mi.ports.at(idx).is_sync_read()) {
+        ++n_sync;
+      } else {
+        ++n_async;
+      }
+    }
+    const char* want = nullptr;
+    if (mi.type == Ntype::Memory_type_sync && n_async != 0) {
+      want = "type=1 (sync) but some read port is asynchronous";
+    } else if ((mi.type == Ntype::Memory_type_async || mi.type == Ntype::Memory_type_array) && n_sync != 0) {
+      want = "type=0/2 (async/array) but some read port is synchronous";
+    } else if (mi.type == Ntype::Memory_type_mixed && (n_sync == 0 || n_async == 0)) {
+      want = "type=3 (mixed) but the read ports do not actually differ";
+    }
+    if (want != nullptr) {
+      fatal(ctx, memory_policy_summary(mi) + ". the cell-global type disagrees with the per-port timing: "
+                     + want + " (" + std::to_string(n_async) + " async, " + std::to_string(n_sync) + " sync)");
+    }
+    mi.any_sync_read = n_sync != 0;
   }
   if (mi.undef) {
     fatal(ctx,
@@ -565,8 +610,6 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
                 + " bits (reads x writes), which does not fit the i64 window used to read it.");
     }
   }
-  mi.sync = (mi.type == 1);
-
   return mi;
 }
 
@@ -758,7 +801,10 @@ std::string memory_raw_read_port(const LeanCtx& ctx, const Memory_info& mi, size
 // Read output of a specific read port.  Sync (type 1): the registered read-data
 // field (value captured last edge).  Async (type 0/2): enable-gated raw value.
 std::string memory_read_port_expr(const LeanCtx& ctx, const Memory_info& mi, size_t port_idx) {
-  if (mi.sync) {
+  // THIS PORT's timing, not the memory's. On a mixed memory the two disagree by
+  // construction, and using the memory-level answer would give an async output
+  // a registered value (or a sync output a combinational one).
+  if (mi.ports.at(port_idx).is_sync_read()) {
     return "s." + mi.read_reg_field.at(port_idx);
   }
   return "(if " + memory_read_enable_port(ctx, mi, port_idx) + " then " + memory_raw_read_port(ctx, mi, port_idx) + " else "
@@ -819,10 +865,15 @@ std::string driver_expr(const LeanCtx& ctx, const Node_pin& dpin) {
       }
       // A SYNC read has no computed node to name: the value consumers see is the
       // read-data REGISTER, a state field (and a certificate source).
+      // Resolve to a state field only when THE PORT THIS PIN BELONGS TO is a
+      // synchronous read. Gating on the memory having *some* sync read port
+      // would let an ASYNCHRONOUS output resolve as state because a different
+      // port happens to be registered -- on a mixed memory, every async output.
       auto mit = ctx.memory_info.find(node_id(driver_node));
-      if (mit != ctx.memory_info.end() && mit->second.sync) {
+      if (mit != ctx.memory_info.end()) {
         for (const auto& kv : mit->second.read_reg_field) {
-          if (mit->second.ports.at(kv.first).driver_pid == dpin.get_port_id()) {
+          const auto& port = mit->second.ports.at(kv.first);
+          if (port.driver_pid == dpin.get_port_id() && port.is_sync_read()) {
             return "s." + kv.second;
           }
         }
@@ -1707,8 +1758,8 @@ void cert_memory_expand(LeanCtx& ctx, CertBuild& build, const Node& node, std::v
 
     const uint64_t rkey = (static_cast<uint64_t>(nid) << 32) | rp.driver_pid;
 
-    if (mi.sync) {
-      // Sync read (type 1).  What consumers see is the read-data REGISTER, so that
+    if (rp.is_sync_read()) {
+      // Sync read.  What consumers see is the read-data REGISTER, so that
       // is a source, like a flop.  Its next value is
       //   sram_sync_read_reg_next ren raw cur = if ren then raw else cur
       // which is an Op_MuxBool over an UNGATED read -- an Op_MemRead with a literal
@@ -1977,9 +2028,11 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     }
     mi.raw_name                   = mem_raw;
     mi.field                      = make_field_name("st_", mem_raw, ctx.used_fields);
-    // Sync-read memories carry a registered read-data field per read port.
-    if (mi.sync) {
-      for (auto pidx : mi.read_ports) {
+    // A registered read-data field exists for each SYNCHRONOUS read port only.
+    // Allocating one per read port on a mixed memory would create state for an
+    // asynchronous output that nothing ever writes.
+    for (auto pidx : mi.read_ports) {
+      if (mi.ports.at(pidx).is_sync_read()) {
         mi.read_reg_field[pidx] = make_field_name("st_", mem_raw + "_rdata_" + std::to_string(pidx), ctx.used_fields);
       }
     }

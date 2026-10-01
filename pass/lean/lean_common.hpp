@@ -61,14 +61,35 @@ Dlop        pin_const_value(const Node_pin& pin);
 Dlop        node_const_value(const Node& node);
 bool        node_output_is_signed(const Node& node);
 
+// A memory port's role AND, for a read port, its TIMING.
+//
+// This was a `bool rdport`, which could not distinguish an asynchronous read
+// from a synchronous one -- so read timing had to come from the cell-global
+// `type`, and a memory whose read ports DIFFER has no scalar answer there. The
+// importer now records timing per port (Ntype::Memory_rdport_*); these are the
+// same values, named.
+//
+// Deliberately NOT convertible to bool: `if (p.rdport)` was true for every read
+// port regardless of timing, and the whole point here is that the two differ.
+// Ask `is_read()` or `is_sync_read()`.
+enum class Port_timing : uint8_t {
+  Write      = 0,
+  AsyncRead  = 1,
+  SyncRead   = 2,
+};
+
 struct Memory_port_info {
-  size_t   port_id = 0;
-  bool     rdport  = false;
-  Node_pin addr;
-  Node_pin din;
-  Node_pin enable;
-  Node_pin clock;
-  uint32_t driver_pid = 0;  // read-output driver pin id, valid only for rdport
+  size_t      port_id = 0;
+  Port_timing timing  = Port_timing::Write;
+  Node_pin    addr;
+  Node_pin    din;
+  Node_pin    enable;
+  Node_pin    clock;
+  uint32_t    driver_pid = 0;  // read-output driver pin id, valid only for a read port
+
+  [[nodiscard]] bool is_read() const { return timing != Port_timing::Write; }
+  [[nodiscard]] bool is_sync_read() const { return timing == Port_timing::SyncRead; }
+  [[nodiscard]] bool is_async_read() const { return timing == Port_timing::AsyncRead; }
 };
 
 struct Memory_info {
@@ -97,8 +118,12 @@ struct Memory_info {
   std::vector<Memory_port_info> ports;
   std::vector<size_t>           read_ports;
   std::vector<size_t>           write_ports;
-  bool                          sync = false;                   // type == 1 (registered read data)
-  std::map<size_t, std::string> read_reg_field;                 // port_id -> st_ read-data register field (sync only)
+  // EXISTENCE only: "does this memory have at least one synchronous read
+  // port?". NEVER a per-port answer -- a mixed memory has both, so every
+  // output / next-state / state-field decision must consult the PORT's own
+  // `timing`. Derived from the ports, not from the cell-global `type`.
+  bool                          any_sync_read = false;
+  std::map<size_t, std::string> read_reg_field;                 // port_id -> st_ read-data register field (SYNC read ports only)
 
   // Initialization / whole-array pins (graph/cell.cpp pids 11..14).  RECORDED
   // during the pin walk and CLASSIFIED after it: the strict ROM test needs the
