@@ -1,6 +1,8 @@
 # CORE-ET module corpus for the Direction 2 census -- the DENOMINATOR.
 #
-# 122 modules, one per line, sorted. sha256 of the newline-joined names:
+# 122 modules, one per line, in BYTE order (LC_ALL=C; a locale-aware sort
+# collates '_' against letters differently and would reorder txfma_f6 against
+# txfmactl_top). sha256 of the newline-joined names:
 #   3246cbd08fa6a0225347be4cdcbbb9600817659ff17ba999608c9164d396a9ed
 # A driver must validate BOTH the count and this digest before an expensive
 # run, so a stale or partially-regenerated set cannot be swept as if it were

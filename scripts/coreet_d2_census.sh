@@ -56,11 +56,15 @@ mapfile -t ALL < <(grep -v '^#' "$LIST" | grep -v '^[[:space:]]*$')
 if [[ "${#ALL[@]}" -ne "$EXPECT_N" ]]; then
   echo "FATAL: corpus has ${#ALL[@]} modules, expected $EXPECT_N ($LIST)" >&2; exit 2
 fi
-if [[ "$(printf '%s\n' "${ALL[@]}" | sort -u | wc -l)" -ne "${#ALL[@]}" ]]; then
+if [[ "$(printf '%s\n' "${ALL[@]}" | LC_ALL=C sort -u | wc -l)" -ne "${#ALL[@]}" ]]; then
   echo "FATAL: corpus contains duplicate module names" >&2; exit 2
 fi
-if ! printf '%s\n' "${ALL[@]}" | sort -c 2>/dev/null; then
-  echo "FATAL: corpus is not sorted; the digest is order-sensitive" >&2; exit 2
+# LC_ALL=C: the list is written in BYTE order (python's sorted()), and the
+# ambient locale collates '_' against letters differently -- `txfma_f6` vs
+# `txfmactl_top` reorder, so an unpinned `sort -c` rejects a correct list.
+# Byte order is also what the digest is taken over.
+if ! printf '%s\n' "${ALL[@]}" | LC_ALL=C sort -c 2>/dev/null; then
+  echo "FATAL: corpus is not in BYTE (LC_ALL=C) order; the digest is order-sensitive" >&2; exit 2
 fi
 DIGEST="$(printf '%s\n' "${ALL[@]}" | head -c -1 | sha256sum | cut -d' ' -f1)"
 WANT="$(grep -oP '^#   \K[0-9a-f]{64}' "$LIST" | head -1)"
