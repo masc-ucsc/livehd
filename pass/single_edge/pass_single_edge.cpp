@@ -1557,14 +1557,24 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
             for (const auto& e : ens) {
               // An ICG term that is not boolean cannot be folded into a 1-bit
               // predicate without the very truncation this exists to avoid.
-              // `!= 1`, not `> 1`: width 0 means UNKNOWN, not boolean, and
-              // accepting it would fold a term of unproven width.
-              if (gu::bits_of(e) != 1) {
+              //
+              // "Boolean" is a MAGNITUDE question, not a raw-width one. An
+              // UNSIGNED pin of width b carries b-1 magnitude bits, so this
+              // codebase's canonical boolean is 2 bits unsigned -- "one
+              // magnitude bit + spare sign" (graph/split_selfref.cpp:685), and
+              // pass.lean emits comparison results that way. A plain `!= 1`
+              // rejected it and REGRESSED two CORE-ET modules whose ICG
+              // enables are exactly that shape. Width 0 is still refused: it
+              // means unknown, not boolean.
+              const auto eb   = gu::bits_of(e);
+              const bool is_b = (eb == 1) || (eb == 2 && gu::is_unsign(e));
+              if (!is_b) {
                 r.error  = true;
-                r.reason = std::format("memory `{}` port {} has an ICG enable {} bits wide; the commit "
-                                       "predicate must be boolean, and folding a wider term into it is the "
+                r.reason = std::format("memory `{}` port {} has an ICG enable {} bits wide ({}signed), which is "
+                                       "not boolean -- 1 bit, or 2 bits unsigned (one magnitude bit plus the "
+                                       "spare sign), is; folding a wider term into the commit predicate is the "
                                        "truncation this gating exists to avoid",
-                                       label_of(me.node), static_cast<int>(p), gu::bits_of(e));
+                                       label_of(me.node), static_cast<int>(p), eb, gu::is_unsign(e) ? "un" : "");
                 refuse(quiet, "memory-gate-nonboolean", std::format("{}: {}", g->get_name(), r.reason),
                        "an ICG enable must be a boolean gate term");
                 return r;
