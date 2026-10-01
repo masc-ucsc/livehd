@@ -57,6 +57,9 @@ done
 
 COMMIT_FULL="$(git -C "$ROOT" rev-parse HEAD)"
 COMMIT="$(git -C "$ROOT" rev-parse --short HEAD)"
+if [[ -n "$ACROSS" && -z "$RESUME" ]]; then
+  echo "FATAL: --resume-across-commit has no meaning without --resume" >&2; exit 2
+fi
 if [[ -n "$RESUME" ]]; then
   OUT="$RESUME"
   [[ -d "$OUT" ]] || { echo "FATAL: --resume: no such directory: $OUT" >&2; exit 2; }
@@ -124,83 +127,9 @@ START="$(date -Is)"
 # On resume the generation manifest must be PRESERVED, not overwritten: it is
 # the record of how those artifacts were produced, and rewriting it would
 # re-stamp old artifacts with the resuming run's provenance.
-if [[ -z "$RESUME" ]]; then
-cat > "$OUT/manifest.json" <<JSON
-{
-  "kind": "coreet_d2_census",
-  "commit": "$COMMIT_FULL",
-  "commit_short": "$COMMIT",
-  "module_list": "$LIST",
-  "module_list_sha256": "$DIGEST",
-  "modules_requested": ${#MODULES[@]},
-  "corpus_size": ${#ALL[@]},
-  "default_lowering": "proc -ifx (maintained)",
-  "plain_proc_modules": "$(echo $PLAIN_SET)",
-  "blocked_modules": "$(echo $BLOCKED_SET)",
-  "cycles": $CYCLES,
-  "per_module_timeout_s": $TIMEOUT,
-  "generation_jobs": $JOBS,
-  "tracked_dirty": $(if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then echo true; else echo false; fi),
-  "untracked_paths": $(git -C "$ROOT" status --porcelain 2>/dev/null | grep -c '^??'),
-  "driver_sha256": "$(sha256sum "$ROOT/scripts/coreet_d2_census.sh" | cut -d' ' -f1)",
-  "report_sha256": "$(sha256sum "$ROOT/scripts/coreet_d2_census_report.py" | cut -d' ' -f1)",
-  "runner_sha256": "$(sha256sum "$ROOT/scripts/run_coreet_module_lean.sh" | cut -d' ' -f1)",
-  "direct_sweep_sha256": "$(sha256sum "$ROOT/pass/lean/scripts/direct_sweep.py" | cut -d' ' -f1)",
-  "lhd_sha256": "$(sha256sum "$ROOT/bazel-bin/lhd/lhd" 2>/dev/null | cut -d' ' -f1)",
-  "lhd_mtime": "$(stat -c '%y' "$ROOT/bazel-bin/lhd/lhd" 2>/dev/null | cut -d. -f1)",
-  "lean_build_root": "$(readlink -f "$ROOT/formal/lean/.lake")",
-  "lean": "$(cd "$ROOT/formal/lean" && lake env lean --version 2>/dev/null | head -1)",
-  "yosys_in_lhd": "linked into lhd",
-  "started": "$START"
-}
-JSON
-else
-  COMMIT_FULL="$COMMIT_FULL" ACROSS="$ACROSS" python3 - "$OUT/manifest.json" "$START" <<'PYR'
-import json, sys
-p, started = sys.argv[1], sys.argv[2]
-try:
-    d = json.load(open(p))
-except Exception:
-    d = {}
-import os
-d.setdefault("resumed", []).append({
-    "started": started,
-    "aggregated_at_commit": os.environ.get("COMMIT_FULL", ""),
-    "across_commit_reason": os.environ.get("ACROSS", "") or None,
-    "note": "generation was interrupted; this run only aggregated + swept existing artifacts"})
-json.dump(d, open(p, "w"), indent=2)
-PYR
-  echo "resume: generation manifest preserved; resume recorded"
-fi
-
-# ---- phase 1: generate (bounded, fail-closed, per module) ------------------
-gen_one() {
-  local m="$1"
-  local mo="$OUT/mod/$m" log="$OUT/logs/$m.log"
-  mkdir -p "$mo"
-  if [[ "$BLOCKED_SET" == *" $m "* ]]; then
-    printf 'BLOCKED\t%s\n' "$(blocked_reason)" > "$mo/status"
-    return 0
-  fi
-  local ys="" low="ifx"
-  if [[ "$PLAIN_SET" == *" $m "* ]]; then ys="$PLAIN_YS"; low="plain"; fi
-  # A certificate left by an earlier run must never be swept as this run's.
-  rm -f "$mo/lean/${m}_Lgraph.lean"
-  # `env`, not a bare assignment prefix: bash decides at PARSE time whether a
-  # word is an assignment, so a leading parameter expansion (the optional
-  # ${ys:+YOSYS_SCRIPT=...}) makes every following VAR=VAL a COMMAND NAME
-  # instead -- every module then failed with
-  #   "COREET_TOP=<module>: command not found"  (exit 127).
-  env ${ys:+YOSYS_SCRIPT="$ys"} \
-      COREET_TOP="$m" OUT="$mo" LEAN_MODE=verified_compiler \
-      RUN_LEAN=false RUN_LEC_GATE=false STOP_AFTER=lean \
-      nice -n19 ionice -c3 timeout "$TIMEOUT" "$ROOT/scripts/run_coreet_module_lean.sh" \
-    > "$log" 2>&1
-  printf '%s\t%s\n' "$low" "$?" > "$mo/status"
-}
-export -f gen_one blocked_reason
-export OUT ROOT TIMEOUT PLAIN_SET BLOCKED_SET PLAIN_YS
-
+# The resume gate runs BEFORE anything is written: a REFUSED resume must
+# leave the run directory byte-for-byte unchanged, or the refusal has
+# already damaged the evidence it was protecting.
 if [[ -n "$RESUME" ]]; then
   # ---- fail-closed resume gate -------------------------------------------
   # Everything here is a REFUSAL, not a warning: a resumed census that
@@ -208,7 +137,12 @@ if [[ -n "$RESUME" ]]; then
   # than no census, because it looks authoritative.
   fail=0
   MF="$OUT/manifest.json"
-  [[ -r "$MF" ]] || { echo "FATAL: --resume: no manifest at $MF" >&2; exit 2; }
+  if [[ ! -r "$MF" ]]; then
+    echo "FATAL: --resume: manifest.json is missing or unreadable at $MF" >&2
+    echo "       without it the generation's provenance is unknown and the artifacts" >&2
+    echo "       cannot be attributed to any corpus, commit or toolchain" >&2
+    exit 2
+  fi
   mf_digest="$(grep -oP '"module_list_sha256":\s*"\K[0-9a-f]+' "$MF" | head -1)"
   mf_commit="$(grep -oP '"commit":\s*"\K[^"]+' "$MF" | head -1)"
   if [[ "$mf_digest" != "$DIGEST" ]]; then
@@ -245,10 +179,134 @@ if [[ -n "$RESUME" ]]; then
     echo "FATAL: --resume: module directories not in the corpus: $(echo $extra)" >&2
     fail=1
   fi
-  [[ "$fail" -eq 0 ]] || exit 2
-  echo "resume: $n_status/${#MODULES[@]} status files, digest and commit match -- aggregating"
-else
+  # Whatever the stated reason, the inputs that actually DETERMINE generation
+  # must be unchanged. A free-text justification is not evidence.
+  HASH_REPORT=""
+  hashcheck() {  # <manifest-key> <file> <label>
+    local key="$1" file="$2" label="$3"
+    local old new
+    old="$(grep -oP "\"$key\":\s*\"\\K[0-9a-f]+" "$MF" | head -1)"
+    new="$(sha256sum "$file" 2>/dev/null | cut -d' ' -f1)"
+    if [[ -z "$old" ]]; then
+      HASH_REPORT+="$label=not-recorded "
+      if [[ -n "$ACROSS" ]]; then
+        echo "FATAL: --resume-across-commit: cannot be shown that $label is unchanged" >&2
+        echo "       (the run recorded no $key, so there is nothing to compare against)" >&2
+        fail=1
+      fi
+      return
+    fi
+    # Older runs stored a 16-char prefix; compare on the recorded length.
+    if [[ "${new:0:${#old}}" == "$old" ]]; then
+      HASH_REPORT+="$label=match "
+    else
+      HASH_REPORT+="$label=CHANGED "
+      echo "FATAL: --resume: $label changed since generation ($key)" >&2
+      echo "       recorded $old, current ${new:0:${#old}}" >&2
+      echo "       artifacts generated by a different $label cannot be aggregated as this run" >&2
+      fail=1
+    fi
+  }
+  # Generation-critical only: the binary that compiled, and the runner that
+  # drove it. The driver/report/sweep are the AGGREGATION path and are allowed
+  # to differ -- that is the whole point of resuming.
+  hashcheck runner_sha256 "$ROOT/scripts/run_coreet_module_lean.sh" "module runner"
+  hashcheck lhd_sha256    "$ROOT/bazel-bin/lhd/lhd"                 "lhd binary"
 
+  [[ "$fail" -eq 0 ]] || exit 2
+  echo "resume: $n_status/${#MODULES[@]} status files, digest ok -- aggregating"
+  echo "resume: generation-critical inputs: $HASH_REPORT"
+fi
+
+if [[ -z "$RESUME" ]]; then
+cat > "$OUT/manifest.json" <<JSON
+{
+  "kind": "coreet_d2_census",
+  "commit": "$COMMIT_FULL",
+  "commit_short": "$COMMIT",
+  "module_list": "$LIST",
+  "module_list_sha256": "$DIGEST",
+  "modules_requested": ${#MODULES[@]},
+  "corpus_size": ${#ALL[@]},
+  "default_lowering": "proc -ifx (maintained)",
+  "plain_proc_modules": "$(echo $PLAIN_SET)",
+  "blocked_modules": "$(echo $BLOCKED_SET)",
+  "cycles": $CYCLES,
+  "per_module_timeout_s": $TIMEOUT,
+  "generation_jobs": $JOBS,
+  "tracked_dirty": $(if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then echo true; else echo false; fi),
+  "untracked_paths": $(git -C "$ROOT" status --porcelain 2>/dev/null | grep -c '^??'),
+  "driver_sha256": "$(sha256sum "$ROOT/scripts/coreet_d2_census.sh" | cut -d' ' -f1)",
+  "report_sha256": "$(sha256sum "$ROOT/scripts/coreet_d2_census_report.py" | cut -d' ' -f1)",
+  "runner_sha256": "$(sha256sum "$ROOT/scripts/run_coreet_module_lean.sh" | cut -d' ' -f1)",
+  "direct_sweep_sha256": "$(sha256sum "$ROOT/pass/lean/scripts/direct_sweep.py" | cut -d' ' -f1)",
+  "lhd_sha256": "$(sha256sum "$ROOT/bazel-bin/lhd/lhd" 2>/dev/null | cut -d' ' -f1)",
+  "lhd_mtime": "$(stat -c '%y' "$ROOT/bazel-bin/lhd/lhd" 2>/dev/null | cut -d. -f1)",
+  "lean_build_root": "$(readlink -f "$ROOT/formal/lean/.lake")",
+  "lean": "$(cd "$ROOT/formal/lean" && lake env lean --version 2>/dev/null | head -1)",
+  "yosys_in_lhd": "linked into lhd",
+  "started": "$START"
+}
+JSON
+else
+  COMMIT_FULL="$COMMIT_FULL" ACROSS="$ACROSS" HASH_REPORT="$HASH_REPORT" \
+  TRACKED_DIRTY="$(if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then echo true; else echo false; fi)" \
+  H_DRIVER="$(sha256sum "$ROOT/scripts/coreet_d2_census.sh" | cut -d' ' -f1)" \
+  H_REPORT="$(sha256sum "$ROOT/scripts/coreet_d2_census_report.py" | cut -d' ' -f1)" \
+  H_SWEEP="$(sha256sum "$ROOT/pass/lean/scripts/direct_sweep.py" | cut -d' ' -f1)" \
+  python3 - "$OUT/manifest.json" "$START" <<'PYR'
+import json, sys
+p, started = sys.argv[1], sys.argv[2]
+try:
+    d = json.load(open(p))
+except Exception:
+    d = {}
+import os
+d.setdefault("resumed", []).append({
+    "started": started,
+    "aggregated_at_commit": os.environ.get("COMMIT_FULL", ""),
+    "aggregated_tracked_dirty": os.environ.get("TRACKED_DIRTY", "") == "true",
+    "across_commit_reason": os.environ.get("ACROSS", "") or None,
+    "generation_input_hash_check": os.environ.get("HASH_REPORT", "").strip(),
+    "aggregation_driver_sha256": os.environ.get("H_DRIVER", ""),
+    "aggregation_report_sha256": os.environ.get("H_REPORT", ""),
+    "aggregation_direct_sweep_sha256": os.environ.get("H_SWEEP", ""),
+    "note": ("generation was interrupted and happened earlier, possibly at another "
+             "commit; this run only aggregated + swept those existing artifacts")})
+json.dump(d, open(p, "w"), indent=2)
+PYR
+  echo "resume: generation manifest preserved; resume recorded"
+fi
+
+# ---- phase 1: generate (bounded, fail-closed, per module) ------------------
+gen_one() {
+  local m="$1"
+  local mo="$OUT/mod/$m" log="$OUT/logs/$m.log"
+  mkdir -p "$mo"
+  if [[ "$BLOCKED_SET" == *" $m "* ]]; then
+    printf 'BLOCKED\t%s\n' "$(blocked_reason)" > "$mo/status"
+    return 0
+  fi
+  local ys="" low="ifx"
+  if [[ "$PLAIN_SET" == *" $m "* ]]; then ys="$PLAIN_YS"; low="plain"; fi
+  # A certificate left by an earlier run must never be swept as this run's.
+  rm -f "$mo/lean/${m}_Lgraph.lean"
+  # `env`, not a bare assignment prefix: bash decides at PARSE time whether a
+  # word is an assignment, so a leading parameter expansion (the optional
+  # ${ys:+YOSYS_SCRIPT=...}) makes every following VAR=VAL a COMMAND NAME
+  # instead -- every module then failed with
+  #   "COREET_TOP=<module>: command not found"  (exit 127).
+  env ${ys:+YOSYS_SCRIPT="$ys"} \
+      COREET_TOP="$m" OUT="$mo" LEAN_MODE=verified_compiler \
+      RUN_LEAN=false RUN_LEC_GATE=false STOP_AFTER=lean \
+      nice -n19 ionice -c3 timeout "$TIMEOUT" "$ROOT/scripts/run_coreet_module_lean.sh" \
+    > "$log" 2>&1
+  printf '%s\t%s\n' "$low" "$?" > "$mo/status"
+}
+export -f gen_one blocked_reason
+export OUT ROOT TIMEOUT PLAIN_SET BLOCKED_SET PLAIN_YS
+
+if [[ -z "$RESUME" ]]; then
 echo "phase 1: generating ${#MODULES[@]} module(s), jobs=$JOBS"
 printf '%s\n' "${MODULES[@]}" | xargs -P "$JOBS" -I{} bash -c 'gen_one "$@"' _ {} 
 echo "phase 1 done"
