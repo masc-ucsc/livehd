@@ -2,7 +2,7 @@
   "kind": "coreet_d2_census",
   "commit": "036429f3964db2c1d695777128c6b49d33e8c2e8",
   "commit_short": "036429f39",
-  "module_list": "/mada/users/czeng14/projects/livehd-d2-ir-semantics/pass/lean/COREET_MODULES.txt",
+  "module_list": "pass/lean/COREET_MODULES.txt",
   "module_list_sha256": "3246cbd08fa6a0225347be4cdcbbb9600817659ff17ba999608c9164d396a9ed",
   "modules_requested": 122,
   "corpus_size": 122,
@@ -20,7 +20,7 @@
   "direct_sweep_sha256": "74767dfb0ad6ef820b1043c5cf8f1483ade29b0deaaeb492167ed2053a7119e7",
   "lhd_sha256": "b2b8e47de589856c260febdfe042213df7311a204a178e36e281bc00f91efbd5",
   "lhd_mtime": "2026-10-01 07:04:31",
-  "lean_build_root": "/mada/users/czeng14/projects/livehd-d2-ir-semantics/generated/lean_validation/lake",
+  "lean_build_root": "generated/lean_validation/lake",
   "lean": "Lean (version 4.31.0, x86_64-unknown-linux-gnu, commit 68218e876d2a38b1985b8590fff244a83c321783, Release)",
   "yosys_in_lhd": "linked into lhd",
   "started": "2026-10-01T07:11:05-07:00",
@@ -39,5 +39,6 @@
     "started": "2026-10-01T07:11:05-07:00",
     "ended": "2026-10-01T08:25:08-07:00"
   },
-  "ended": "2026-10-01T08:25:08-07:00"
+  "ended": "2026-10-01T08:25:08-07:00",
+  "lean_build_root_is_local": true
 }

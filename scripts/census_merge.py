@@ -70,6 +70,8 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--root", default=os.getcwd())
     ap.add_argument("--expect-modules", type=int, default=122)
+    ap.add_argument("--manifest-out", default="",
+                    help="also publish a SANITIZED copy of the base run's manifest here")
     a = ap.parse_args()
     root = os.path.abspath(a.root).rstrip("/") + "/"
 
@@ -105,6 +107,40 @@ def main():
                 # blank value. `-` is the file's convention for "not reached".
                 row[k] = v if v else "-"
             w.writerow(row)
+
+    # Publish the manifest alongside the table, sanitized the same way. A
+    # committed manifest carrying absolute paths is as unportable as a
+    # committed table carrying them, and the two must describe the same run.
+    if a.manifest_out:
+        try:
+            man = json.load(open(os.path.join(a.base, "manifest.json")))
+        except Exception as e:
+            sys.exit(f"FATAL: cannot read the base manifest: {e}")
+
+        def scrub(v):
+            if isinstance(v, str):
+                v = v.replace(root, "")
+                return v.rstrip("/") if v.endswith("/") and v != "/" else v
+            if isinstance(v, list):
+                return [scrub(x) for x in v]
+            if isinstance(v, dict):
+                return {k: scrub(x) for k, x in v.items()}
+            return v
+
+        man = scrub(man)
+        # `lean_build_root` is a machine path by nature. Inside the repo it
+        # relativizes; outside it is replaced by a DESCRIPTION, because the
+        # useful fact is whether the build tree was local to this worktree --
+        # which is the reproducibility property that mattered -- not where it
+        # physically sat.
+        lbr = man.get("lean_build_root", "")
+        man["lean_build_root_is_local"] = bool(lbr) and not os.path.isabs(lbr)
+        if os.path.isabs(lbr):
+            man["lean_build_root"] = "<outside this repository>"
+        with open(a.manifest_out, "w") as fh:
+            json.dump(man, fh, indent=2)
+            fh.write("\n")      # POSIX final newline
+        print(f"manifest -> {a.manifest_out}")
 
     acc = sum(1 for r in merged.values() if r.get("stage") == "accepted")
     print(f"{len(merged)} modules -> {a.out}")

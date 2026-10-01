@@ -23,10 +23,12 @@ TSV="${CENSUS_TSV:-}"
   [ -r "$c" ] && { TSV="$c"; break; }
 done
 [ -n "$TSV" ] || { echo "FAIL: cannot find CENSUS_D2_122.tsv"; exit 1; }
+MAN="${MAN:-${TSV%.tsv}_MANIFEST.json}"
 echo "checking $TSV"
+echo "     and $MAN"
 
-CENSUS_TSV="$TSV" EXPECT_MODULES="${EXPECT_MODULES:-122}" EXPECT_ACCEPTED="${EXPECT_ACCEPTED:-105}" \
-CYCLES="${CYCLES:-4}" python3 - <<'PYCHK'
+CENSUS_TSV="$TSV" CENSUS_MANIFEST="$MAN" EXPECT_MODULES="${EXPECT_MODULES:-122}" \
+EXPECT_ACCEPTED="${EXPECT_ACCEPTED:-105}" CYCLES="${CYCLES:-4}" python3 - <<'PYCHK'
 import csv, os, sys
 tsv = os.environ["CENSUS_TSV"]
 want_n = int(os.environ["EXPECT_MODULES"]); want_acc = int(os.environ["EXPECT_ACCEPTED"])
@@ -97,6 +99,49 @@ for i, line in enumerate(open(tsv), 1):
     if line.rstrip("\n") != line.rstrip():
         bad(f"line {i} has trailing whitespace (git show --check will flag it)"); break
 print("ok: no absolute paths, no trailing whitespace")
+
+# --- the manifest must describe THIS table, portably ------------------------
+# A committed manifest carrying absolute paths is as unportable as a committed
+# table carrying them, and the two must agree about which run they describe.
+import json
+mp = os.environ["CENSUS_MANIFEST"]
+if not os.path.exists(mp):
+    bad(f"no manifest beside the census ({mp})")
+else:
+    raw = open(mp).read()
+    if not raw.endswith("\n"):
+        bad("the manifest has no final newline")
+    for pat in ("/mada/", "/soe/"):
+        if pat in raw:
+            for i, line in enumerate(raw.splitlines(), 1):
+                if pat in line:
+                    bad(f"manifest line {i} carries a machine-absolute path ({pat})"); break
+            break
+    try:
+        man = json.load(open(mp))
+    except Exception as e:
+        bad(f"the manifest is not valid JSON: {e}"); man = {}
+    sm = man.get("summary", {})
+    for key, got, want in (("modules", sm.get("modules"), want_n),
+                           ("accepted", (sm.get("counts") or {}).get("accepted"), want_acc),
+                           ("cycles", sm.get("cycles"), int(cycles)),
+                           ("sweep_rc", sm.get("sweep_rc"), 0)):
+        if got != want:
+            bad(f"manifest summary {key}={got!r}, expected {want!r}")
+    # The manifest must describe the run the TABLE says it came from.
+    gen = {r.get("generation_commit", "") for r in rows}
+    mc = (man.get("commit") or "")
+    if len(gen) == 1:
+        g = next(iter(gen))
+        if not g or not (mc.startswith(g) or g.startswith(mc)):
+            bad(f"manifest commit {mc[:12]!r} does not match the table's "
+                f"generation_commit {g!r}")
+        else:
+            print(f"ok: manifest and table agree on the generation commit ({g})")
+    if man.get("lean_build_root_is_local") is not True:
+        print("note: the Lean build tree was NOT local to this worktree for that run")
+    print("ok: manifest is portable and matches the table")
+
 sys.exit(1 if fails else 0)
 PYCHK
 rc=$?

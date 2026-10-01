@@ -45,6 +45,7 @@ filegroup(
     srcs = [
         "CENSUS_D2_122.tsv",
         "CENSUS_D2_122_BASELINE_PROVISIONAL.tsv",
+        "CENSUS_D2_122_MANIFEST.json",
     ],
     visibility = ["//visibility:public"],
 )
