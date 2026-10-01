@@ -1,0 +1,16 @@
+/*
+:name: spec_calls_generic_positional
+:type: error
+:error: ambiguous|must be named|named
+*/
+
+// docs 06-functions.md: "Explicit call-site bindings follow the **same naming
+// rules as arguments** ("Argument naming" below): each binding is named
+// (`f<T=U8, N=8>(…)`) unless it is unambiguous -- a single generic name,
+// bindings whose kinds (type vs constant vs lambda) match only one assignment,
+// or a bound identifier whose name matches the generic's name."
+// Two constant-valued generics given two unnamed constants: ambiguous.
+
+comb lin<A, B>(v) -> (r) { r = v * A + B }
+
+const r = lin<3, 4>(v=1) // locate_error_here

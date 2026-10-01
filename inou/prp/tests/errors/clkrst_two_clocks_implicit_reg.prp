@@ -1,0 +1,16 @@
+/*
+:name: clkrst_two_clocks_implicit_reg
+:type: error
+:tolg: 1
+:error: 2 `Clock` inputs .*no implicit clock
+*/
+// docs 04b "Implicit clock and reset": two or more `Clock` inputs leave no
+// implicit clock, so a register without `clock_pin` is a compile error.
+pub mod clkrst_two_clocks_implicit_reg(clk_a:Clock, clk_b:Clock, a:U8) -> (qa:U8@[0], qc:U8@[0]) {
+  reg ra:U8:[clock_pin=clk_a] = 0
+  reg rc:U8 = 0
+  ra = a
+  rc = a
+  qa = ra
+  qc = rc
+}

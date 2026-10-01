@@ -3,9 +3,11 @@
 :type: error
 :verifier_pass: 0
 :verifier_fail: 0
-:error: ')'
-:help: opened here
+:error: expected a name
 */
+// The unclosed `(` of the input list: prpparse now stops at the `->` where it
+// expects an input name (it used to report the missing `)` with a note at the
+// opening one).
 
 comb foo( -> (z) { // locate_error_here
   b = 0x5a

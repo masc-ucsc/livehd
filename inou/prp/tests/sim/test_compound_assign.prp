@@ -9,11 +9,11 @@
 // tick's top level, inside an `if`, inside an `elif`. `s = s + e` was always
 // right, which is why no fixture caught it. Each test below is one placement.
 
-mod pass_through(x:s8) -> (y:s8@[0]) { y = x }
+mod pass_through(x:S8) -> (y:S8@[0]) { y = x }
 
 test compound.plus_eq_in_elif {
   mut dut = pass_through
-  mut s:s20 = 0
+  mut s:S20 = 0
   tick 4 {
     if clock > 10 {
       dut.x = 0
@@ -31,7 +31,7 @@ test compound.plus_eq_in_elif {
 
 test compound.plus_eq_toplevel {
   mut dut = pass_through
-  mut s:s20 = 0
+  mut s:S20 = 0
   tick 4 {
     const r = clock + 1
     dut.x = r
@@ -43,7 +43,7 @@ test compound.plus_eq_toplevel {
 
 test compound.plus_eq_in_if_no_const {
   mut dut = pass_through
-  mut s:s20 = 0
+  mut s:S20 = 0
   tick 4 {
     dut.x = 0
     if clock < 4 {
@@ -56,10 +56,10 @@ test compound.plus_eq_in_if_no_const {
 
 test compound.other_ops {
   mut dut = pass_through
-  mut a:s20 = 100
-  mut o:u8  = 0
-  mut m:s20 = 1
-  mut sh:u16 = 1
+  mut a:S20 = 100
+  mut o:U8  = 0
+  mut m:S20 = 1
+  mut sh:U16 = 1
   tick 4 {
     dut.x = 0
     a  -= clock + 1            // 100 - (1+2+3+4) = 90

@@ -13,7 +13,7 @@ test condout_mixed_arms.sig {
   mut sig = 0
   tick 1000 {
     s_ = s_ * 6364136223846793005 + 1442695040888963407
-    acc.s = s_ & 0x1
+    acc.s = Bool(s_ & 0x1)
     s_ = s_ * 6364136223846793005 + 1442695040888963407
     acc.a = s_ & 0x3
     step

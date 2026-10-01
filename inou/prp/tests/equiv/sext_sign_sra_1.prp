@@ -5,6 +5,6 @@
 :set: compile.formal.mode=none
 */
 // Sign extension must agree with explicit fill or native signed arithmetic.
-comb sra(x:u32) -> (r:s32) {
+comb sra(x:U32) -> (r:S32) {
   r = (x#sext[0..=31]) >> 4
 }

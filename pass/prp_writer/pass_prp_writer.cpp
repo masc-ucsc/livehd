@@ -7,6 +7,7 @@
 #include <exception>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <memory>
 #include <sstream>
@@ -23,6 +24,66 @@
 #include "worker_pool.hpp"   // livehd::run_workers (big-stack workers)
 
 static Pass_plugin sample("pass_prp_writer", Pass_prp_writer::setup);
+
+namespace {
+// `units` (one source file's, sorted by name) reordered so every lambda follows
+// the same-file lambdas it calls -- a Pyrope call names a lambda declared
+// EARLIER, so a sibling instantiated by a body or called by an input default
+// (`b:U8 = g(a=a)`, user ruling 2026-09-28 (39)) must be written first. The
+// file-level unit stays first; independent lambdas keep their name order.
+void order_callees_first(std::vector<std::shared_ptr<Lnast>>& units, std::string_view file_name) {
+  std::unordered_map<std::string, size_t> by_name;
+  for (size_t i = 0; i < units.size(); ++i) {
+    by_name.emplace(std::string(units[i]->get_top_module_name()), i);
+  }
+  const auto callees_of = [&](const Lnast& ln) {
+    std::vector<size_t> out;
+    for (const auto& n : ln.depth_preorder(ln.get_root())) {
+      const auto nid = Lnast_nid(n);
+      if (!Lnast_ntype::is_func_call(ln.get_type(nid))) {
+        continue;
+      }
+      const auto dst = ln.get_first_child(nid);
+      const auto cal = dst.is_invalid() ? dst : ln.get_sibling_next(dst);
+      if (cal.is_invalid()) {
+        continue;
+      }
+      std::string_view name = ln.get_name(cal);
+      if (name.size() >= 2 && name.front() == '\'' && name.back() == '\'') {
+        name = name.substr(1, name.size() - 2);
+      }
+      auto it = by_name.find(std::string(name));
+      if (it == by_name.end()) {
+        it = by_name.find(std::format("{}.{}", file_name, name));
+      }
+      if (it != by_name.end()) {
+        out.push_back(it->second);
+      }
+    }
+    return out;
+  };
+  std::vector<std::shared_ptr<Lnast>> ordered;
+  std::vector<uint8_t>                seen(units.size(), 0);
+  std::function<void(size_t)>         visit = [&](size_t i) {
+    if (seen[i] != 0) {
+      return;  // emitted, or a call cycle (recursion keeps its name order)
+    }
+    seen[i] = 1;
+    for (const auto c : callees_of(*units[i])) {
+      visit(c);
+    }
+    ordered.push_back(units[i]);
+  };
+  if (const auto self = by_name.find(std::string(file_name)); self != by_name.end()) {
+    seen[self->second] = 1;  // the file scope precedes every lambda
+    ordered.push_back(units[self->second]);
+  }
+  for (size_t i = 0; i < units.size(); ++i) {
+    visit(i);
+  }
+  units = std::move(ordered);
+}
+}  // namespace
 
 void Pass_prp_writer::setup() {
   Eprp_method m1("pass.prp_writer", "emit LNAST as Pyrope 3.0 source files", &Pass_prp_writer::work);
@@ -107,6 +168,7 @@ void Pass_prp_writer::work(Eprp_var& var) {
   }
 
   std::map<std::string, std::vector<std::shared_ptr<Lnast>>> by_file;
+  std::unordered_set<std::string>                            unemitted_modules;  // the templates dropped below
   for (const auto& ln : var.lnasts) {
     // A deferred TEMPLATE (`mod f(b)` with an untyped param, `...args`, an
     // unbound `<T>`) is never elaborated — its body still holds the unresolved
@@ -136,6 +198,7 @@ void Pass_prp_writer::work(Eprp_var& var) {
             .msg("unit `{}` is an unelaborated template — not written", ln->get_top_module_name())
             .hint("its concrete specializations are emitted instead; give every generic a default to emit the template itself")
             .emit();
+        unemitted_modules.emplace(ln->get_top_module_name());
         continue;
       }
     }
@@ -153,14 +216,19 @@ void Pass_prp_writer::work(Eprp_var& var) {
     std::exception_ptr                               error;
   };
 
+  // Clock ports every connected net agrees on (Lnast_prp_writer::clock_data_ports).
+  const auto clock_data_ports = Lnast_prp_writer::clock_data_ports(var.lnasts);
+
   std::vector<File_job> jobs;
   jobs.reserve(by_file.size());
   for (auto& [file_name, units] : by_file) {
     // File-level unit (name == file) first, then the lambdas in name order, so
-    // the emission is deterministic and the file scope precedes its users.
+    // the emission is deterministic and the file scope precedes its users;
+    // a lambda follows the same-file lambdas it calls.
     std::sort(units.begin(), units.end(), [](const auto& a, const auto& b) {
       return a->get_top_module_name() < b->get_top_module_name();
     });
+    order_callees_first(units, file_name);
     jobs.push_back(File_job{.file_name = &file_name, .units = &units});
   }
 
@@ -186,8 +254,10 @@ void Pass_prp_writer::work(Eprp_var& var) {
         auto w = std::make_unique<Lnast_prp_writer>(bodies[i], units[i]);
         w->set_debug(debug_on);
         w->set_known_modules(&emitted_modules);
+        w->set_unemitted_modules(&unemitted_modules);
         w->set_instantiated_modules(&instantiated_modules);
         w->set_sink_modules(&sink_modules);
+        w->set_clock_data_ports(&clock_data_ports);
         w->set_header_sink(&header);
         w->collect_header();
         writers.emplace_back(std::move(w));

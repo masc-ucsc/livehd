@@ -191,3 +191,66 @@ TEST(CpropMuxTreeProof, TwoGroupSelectionAndExclusiveDefaults) {
   }
 }
 }  // namespace
+
+TEST(CpropHotmuxOpSharingProof, GroupsPreserveExplicitAndImplicitDefaults) {
+  for (auto op : {Ntype_op::Sum, Ntype_op::Div, Ntype_op::SRA}) {
+    for (int default_kind = 0; default_kind < 3; ++default_kind) {
+      SCOPED_TRACE(std::string{Ntype::get_name(op)} + " default=" + std::to_string(default_kind));
+      hhds::GraphLibrary reference_library, implementation_library;
+      auto               io = reference_library.create_io("hotmux_opshare");
+      for (const auto& [name, pid] : {
+               std::pair{"s", 1},
+               {"a", 2},
+               {"b", 3}
+      }) {
+        io->add_input(name, pid);
+        io->set_bits(name, 8);
+        io->set_unsign(name, false);
+      }
+      io->add_output("out", 4);
+      io->set_bits("out", 12);
+      io->set_unsign("out", false);
+      auto ref = io->create_graph();
+      for (auto name : {"s", "a", "b"}) {
+        gu::set_sbits(ref->get_input_pin(name), 8);
+      }
+      const auto constant   = [&](int n) { return gu::create_const(*ref, *Dlop::create_integer(n)); };
+      const auto expression = [&](const char* input, int operand) {
+        auto n = gu::create_typed_node(*ref, op);
+        gu::setup_sink_pid(n, 0).connect_driver(ref->get_input_pin(input));
+        gu::setup_sink_pid(n, op == Ntype_op::Sum ? 0 : 1).connect_driver(constant(operand));
+        gu::set_sbits(n.create_driver_pin(0), 12);
+        return n.create_driver_pin(0);
+      };
+      auto hot = gu::create_typed_node(*ref, Ntype_op::Hotmux);
+      for (int i = 0; i < 2; ++i) {
+        auto eq = gu::create_typed_node(*ref, Ntype_op::EQ);
+        gu::setup_sink_pid(eq, 0).connect_driver(ref->get_input_pin("s"));
+        gu::setup_sink_pid(eq, 0).connect_driver(constant(i));
+        gu::set_ubits(eq.create_driver_pin(0), 1);
+        hot.create_sink_pin(2 * i).connect_driver(eq.create_driver_pin(0));
+        hot.create_sink_pin(2 * i + 1).connect_driver(expression(i ? "b" : "a", op == Ntype_op::SRA ? 3 : 3 + i));
+      }
+      if (default_kind) {
+        hot.create_sink_pin(4).connect_driver(default_kind == 1 ? constant(-7) : expression("s", 3));
+      }
+      gu::set_sbits(hot.create_driver_pin(0), 12);
+      hot.create_driver_pin(0).connect_sink(ref->get_output_pin("out"));
+      // Keep identical arm realizations for this direct-IR rewrite, and prove
+      // the exact stamped pre/post graphs before any range-dependent cleanup.
+      ASSERT_TRUE(implementation_library.copy_from(reference_library, "hotmux_opshare"));
+      auto impl = implementation_library.find_io("hotmux_opshare")->get_graph();
+      Cprop{}.do_trans(impl);
+      size_t operators = 0;
+      for (auto n : impl->body().nodes()) {
+        operators += gu::type_op_of(n) == op;
+      }
+      EXPECT_EQ(operators, 1);
+      livehd::lec::Lec_options options;
+      options.cones     = "false";
+      options.timeout   = 5;
+      const auto result = livehd::lec::prove_equal(ref.get(), impl.get(), options);
+      EXPECT_EQ(result.verdict, livehd::lec::Verdict::Proven) << result.detail << '\n' << result.witness;
+    }
+  }
+}

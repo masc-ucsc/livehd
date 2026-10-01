@@ -1,0 +1,14 @@
+/*
+:name: spec_calls_type_unique_all_params
+:type: error
+:error: must be named|ambiguous|name the argument
+*/
+
+// qa.md Appendix §7: positional binding needs "an argument whose type is unique
+// among ALL params". `a` is named, but the unnamed `2` still has two integer
+// parameters (`a`, `b`) in the whole signature, so it is not type-unique and
+// must be named (it must not fall into the one integer slot left unset).
+
+comb f(a:U8, b:U8, c:String) -> (r:U8) { r = if c == "a" { a } else { b } }
+
+const r = f(a=1, 2, c="b") // locate_error_here

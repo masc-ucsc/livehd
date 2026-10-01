@@ -5,7 +5,7 @@
 :verifier_fail: 0
 */
 // bool -> int: true is the all-ones (1-bit signed) value = -1; false = 0.
-// Hence string(int(true)) is the decimal "-1".
-cassert(signed(true)  == -1)
-cassert(signed(false) == 0)
-cassert(string(signed(true)) == "-1")
+// Hence String(int(true)) is the decimal "-1".
+cassert(Signed(true)  == -1)
+cassert(Signed(false) == 0)
+cassert(String(Signed(true)) == "-1")

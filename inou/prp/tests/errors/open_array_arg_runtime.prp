@@ -1,0 +1,8 @@
+/*
+:name: open_array_arg_runtime
+:type: error
+:error: has an element outside
+*/
+
+comb sum(x:[]U8) -> (total) { total = 0; for a in x { total += a } }
+pub comb top(a:U16) -> (r) { r = sum(a,1) } // locate_error_here

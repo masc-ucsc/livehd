@@ -8,4 +8,4 @@
 // `initial` is the ONE spelling of the reset-value attribute: it is what the
 // LGraph Flop/Latch/Memory pin is called (graph/cell.cpp), so the declaration
 // attribute uses the same name.  `init` was the old Pyrope-only spelling.
-reg r:u8:[init=0] = 0  // locate_error_here
+reg r:U8:[init=0] = 0  // locate_error_here

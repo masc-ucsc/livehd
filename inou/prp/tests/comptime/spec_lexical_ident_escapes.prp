@@ -1,0 +1,14 @@
+/*
+:name: spec_lexical_ident_escapes
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// qa.md appendix 8: "Same escapes inside backticked identifiers." docs
+// 02-basics "Identifiers": "The identifier uses the same escape sequence as
+// strings." (Q41: "identifiers in backticks use the same escapes, e.g. `a\`b`".)
+const `foo is . strange!\nidentifier` = 4
+const `for` = 3
+cassert(`for`+1 == `foo is . strange!\nidentifier`)
+const `a\`b` = 5
+cassert(`a\`b` == 5)

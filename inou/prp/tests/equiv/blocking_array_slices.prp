@@ -4,9 +4,9 @@
 :verilog_top: blocking_array_slices
 :pyrope_top: blocking_array_slices
 */
-pub mod blocking_array_slices(clk:u1, en:u1, addr:u1, din:u4, ra:u1) -> (q:u4@[]) {
-  reg mem:[2]u4:[ordering="old"] = nil
-  reg q:u4 = nil
+pub mod blocking_array_slices(clk:Clock, en:U1, addr:U1, din:U4, ra:U1) -> (q:U4@[]) {
+  reg mem:[2]U4:[ordering="old"] = nil
+  reg q:U4 = nil
   q = mem[ra]
   if en != 0 {
     mem[addr] = din

@@ -13,9 +13,10 @@
 
 #include "cone_abc.hpp"
 
-#include <unistd.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
+#include <chrono>
 #include <cstdint>
 #include <random>
 #include <string>
@@ -26,6 +27,7 @@
 
 using namespace cvc5;
 using livehd::lec::abc_prove_unsat;
+using livehd::lec::abc_prove_unsat_batch;
 using livehd::lec::Cone_verdict;
 
 namespace {
@@ -382,4 +384,36 @@ TEST(ConeDigest, DistinguishesDistinctSymbolsSharingAName) {
 
   // ... and the disambiguation must stay STABLE: the same term digests the same.
   EXPECT_EQ(livehd::lec::cone_digest(distinct(tm, fa, fb)), livehd::lec::cone_digest(distinct(tm, fa, fb)));
+}
+
+// A cone ABC cannot finish (wide multiplier commutativity) must not starve the
+// cones queued behind it: the batch abandons it to cvc5 after its stall budget,
+// a fresh child resumes at the next cone, and the index bookkeeping lands every
+// verdict on its own cone -- all well inside the deadline.
+TEST(ConeAbc, BatchResumesPastAStalledCone) {
+  TermManager tm;
+  Sort        wide = tm.mkBitVectorSort(32);
+  Sort        bv8  = tm.mkBitVectorSort(8);
+  Term        x    = tm.mkConst(wide, "x");
+  Term        y    = tm.mkConst(wide, "y");
+  Term        a    = tm.mkConst(bv8, "a");
+  Term        b    = tm.mkConst(bv8, "b");
+  const Term  hard = distinct(tm, tm.mkTerm(Kind::BITVECTOR_MULT, {x, y}), tm.mkTerm(Kind::BITVECTOR_MULT, {y, x}));
+  const Term  add  = distinct(tm, tm.mkTerm(Kind::BITVECTOR_ADD, {a, b}), tm.mkTerm(Kind::BITVECTOR_ADD, {b, a}));
+  const Term  sat  = distinct(tm, a, tm.mkTerm(Kind::BITVECTOR_ADD, {a, tm.mkBitVector(8, 1)}));
+  const Term  inv  = distinct(tm, tm.mkTerm(Kind::BITVECTOR_NOT, {tm.mkTerm(Kind::BITVECTOR_NOT, {a})}), a);
+
+  constexpr int64_t                    deadline_ms = 3000;  // a 250 ms stall budget per cone
+  std::vector<livehd::lec::Cone_stats> stats;
+  const auto                           t0       = std::chrono::steady_clock::now();
+  const auto                           verdicts = abc_prove_unsat_batch({hard, add, hard, sat, inv}, kLimit, deadline_ms, &stats);
+  const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+
+  ASSERT_EQ(verdicts.size(), 5U);
+  EXPECT_NE(verdicts[0], Cone_verdict::Refuted) << "commutativity is UNSAT";
+  EXPECT_NE(verdicts[2], Cone_verdict::Refuted) << "commutativity is UNSAT";
+  EXPECT_EQ(verdicts[1], Cone_verdict::Proven) << "a+b == b+a behind a stalled cone";
+  EXPECT_EQ(verdicts[3], Cone_verdict::Refuted) << "a vs a+1 behind a stalled cone";
+  EXPECT_EQ(verdicts[4], Cone_verdict::Proven) << "~~a == a after two stalls";
+  EXPECT_LT(ms, deadline_ms) << "a stalled cone held the batch to its deadline";
 }

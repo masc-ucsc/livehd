@@ -71,16 +71,14 @@ struct Encoded {
 
   // Occurrence metadata for the synthetic \x04prop:<occ> outputs. Kept outside
   // the encoded output name so the existing fork/cache protocol and arbitrary
-  // user messages remain unambiguous. `prop_top` distinguishes a property
-  // authored in the selected top definition from the same source statement
-  // reached through a child occurrence; `prop_instance` is the occurrence path
-  // used by diagnostics and is intentionally available for a future modular
-  // hierarchical-verify scheduler.
-  absl::flat_hash_set<int>              prop_top;
+  // user messages remain unambiguous. `prop_instance` is the occurrence path of
+  // a property reached through a child occurrence (none for one authored in the
+  // selected top), used by diagnostics and intentionally available for a future
+  // modular hierarchical-verify scheduler.
   absl::flat_hash_map<int, std::string> prop_instance;
   // Assume occurrences pass.formal ACCEPTED as active hypotheses (it stamped the
-  // `proven` attr: assume_nocheck, a selected-top IO assume, or every assume
-  // under formal.assume_check=false). An assume it left as a runtime check —
+  // `proven` attr: assume_nocheck, a proven assume, or every assume under
+  // formal.assume_check=false). An assume it left as a runtime check —
   // checked but never discharged — is NOT here, and neither is any assume in a
   // library pass.formal never ran on (a `lg:` input, or an O0 side). Asserting
   // one of those as a LEC hypothesis restricts the compared input space on no
@@ -279,12 +277,16 @@ struct Mem_sig {
 };
 
 // Decode the size/bits/port-count signature of a Memory node from its config
-// pins (mirrors inou/cgen's port decode). occ is supplied by the caller as the
-// running count of prior same-signature memories in body().nodes(hhds::Node_order::forward) order, so
-// the key is stable and identical across the two front-ends.
+// pins (mirrors inou/cgen's port decode).
 Mem_sig        read_mem_sig(const hhds::Node_class& node);
 inline Mem_sig read_mem_sig(const hhds::Occurrence_node& node) { return read_mem_sig(node.base_node()); }
+// The cross-design key of a Memory cut: its shape plus either its
+// correspondence NAME (unique in the shape bucket on both sides) or an
+// occurrence ordinal among the memories a name cannot pair. query.cpp builds
+// the per-design map once (Encoder::set_mem_keys); a bare Encoder user keys
+// every memory by its occurrence among same-shape memories in walk order.
 std::string    mem_state_key(const Mem_sig& sig, int occ);
+std::string    mem_state_key(const Mem_sig& sig, std::string_view name);
 
 // Stable cross-design / cross-front-end correspondence key for a Flop state
 // cell (source span preferred, then pin name). Used by both the encoder (to
@@ -393,6 +395,13 @@ public:
   // drifted apart and any key invented here could alias a different instance.
   // Unset (a bare Encoder user) keeps the legacy per-encode occurrence counter.
   void set_box_keys(const Io_name_map<std::string>* k) { box_keys_ = k; }
+
+  // Memory correspondence: box_node_key(memory node) -> its cross-design key
+  // (mem_state_key), built ONCE by query.cpp over both designs (name-first,
+  // occurrence fallback) and set separately before encoding each side. Once
+  // set, a Memory absent from it is a hard encode error (walk drift), exactly
+  // like set_box_keys. Unset keeps the legacy per-encode occurrence counter.
+  void set_mem_keys(const Io_name_map<std::string>* k) { mem_keys_ = k; }
 
   // Encode the combinational logic of `g`.
   //
@@ -512,6 +521,7 @@ private:
   const absl::flat_hash_map<std::string, State_box>*  state_boxes_   = nullptr;
   const absl::flat_hash_map<std::string, Comb_box>*   comb_boxes_    = nullptr;
   const Io_name_map<std::string>*                     box_keys_      = nullptr;
+  const Io_name_map<std::string>*                     mem_keys_      = nullptr;
   int                                                 sub_depth_     = 0;      // Sub flattening recursion guard
   const Io_name_map<cvc5::Term>*                       memory_x_state_ = nullptr;
   bool                                                x_dontcare_    = false;  // ref-side X = don't-care (lec.gold_x=ignore)

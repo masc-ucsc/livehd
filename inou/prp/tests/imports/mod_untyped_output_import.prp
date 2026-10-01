@@ -1,0 +1,18 @@
+/*
+:name: mod_untyped_output_import
+:type: lgraph
+:files: inou/prp/tests/imports/mod_untyped_output_import.prp inou/prp/tests/imports/lib_untyped_cnt.prp
+*/
+// User ruling 2026-09-28 (28) across files: the untyped output of an IMPORTED
+// fully typed `mod` carries the range its body derives ([1, 16]), which fits a
+// `U8` with no `wrap`. `:files:` lists the importer FIRST, so the check does
+// not depend on the order the units are handed in: pass.upass walks a mod/pipe
+// callee before its callers (sim/mod_untyped_output_range.prp is the same-file
+// case). Before, the importer's walk came first, saw no derived range, and
+// failed "`y` (unbounded range) may not fit its declared range [0, 255]".
+const Cnt = import("lib_untyped_cnt.lib_untyped_cnt")
+
+pub mod mod_untyped_output_import(x:U4) -> (y:U8@[0]) {
+  const c = Cnt(a=x)
+  y = c.o
+}

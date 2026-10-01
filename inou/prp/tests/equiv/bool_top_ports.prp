@@ -1,0 +1,25 @@
+/*
+:name: bool_top_ports
+:type: equiv
+:verilog_top: bool_top_ports
+:pyrope_top: bool_top_ports
+*/
+// User ruling 2026-09-27: `foo:Bool` is a legal port at EVERY level, the top
+// included, and it is a plain 1-bit Verilog port (true == 1), in and out,
+// combinational or registered. Only the places where a bool meets an integer
+// need an explicit conversion (`U1(x)` bool->bit, `Bool(x)` bit->bool).
+// This pair passes today; it guards the ruling while the bool/int boundary
+// checks are tightened (errors/bool_port_*.prp).
+mod bool_top_ports_arm(go:Bool, stop:Bool) -> (hit:Bool@[0]) {
+  hit = go and not stop
+}
+
+pub mod bool_top_ports(clk:Clock, rst:Reset, go:Bool, stop:Bool, n:U4) -> (busy:Bool@[0], hit:Bool@[0], cnt:U4@[0], run_bit:U1@[0]) {
+  reg run:Bool = false
+  if go { run = true } elif stop { run = false }
+  const a = bool_top_ports_arm(go=go, stop=stop)
+  busy = run
+  hit  = a.hit
+  cnt  = if run { n } else { 0 }
+  run_bit = U1(run)
+}

@@ -80,13 +80,13 @@ expect_fail_with() { # <label> <code> <cmd...>
 # A closed testbench (no free inputs): stimulus is a pure function of an
 # explicitly-initialized cycle counter, per the 2f-latch fixture conventions.
 cat > "$W/lverify.prp" <<'EOF'
-pub mod lhold_tb() -> (ok:bool@[0]) {
-  reg cyc:u3 = 0
-  reg l:u8:[latch=true]
+pub mod lhold_tb() -> (ok:Bool@[0]) {
+  reg cyc:U3 = 0
+  reg l:U8:[latch=true]
   const c  = cyc
   const lq = l
   const en = (c == 0) or (c == 4)
-  mut dv:u8 = 42
+  mut dv:U8 = 42
   if c <= 1 {
     dv = 5
   }
@@ -213,8 +213,8 @@ echo "ok: lec REFUTES an enable-polarity flip (the proof above is not vacuous)"
 # latch_sim_master_slave, flop_sim_gated_clock); all this file still owes is
 # that the two misleading OLD failure modes never come back.
 cat > "$W/lsim.prp" <<'EOF'
-pub mod lhold8(en:bool, d:u8) -> (q:u8@[0]) {
-  reg l:u8:[latch=true]
+pub mod lhold8(en:Bool, d:U8) -> (q:U8@[0]) {
+  reg l:U8:[latch=true]
   q = l
   if en {
     l = d
@@ -224,12 +224,12 @@ pub mod lhold8(en:bool, d:u8) -> (q:u8@[0]) {
 test lhold8.opens_and_holds {
   mut acc = lhold8
   tick 3 {
-    acc.en = clock == 0
+    acc.en = `clock` == 0
     acc.d  = 5
     step
     // Observation-visibility rule: read q only at CLOSED ticks, after at least
     // one closing edge. c1 and c2 are both closed and must show the captured 5.
-    assert((clock >= 1) implies (acc.q == 5), "latch captured 5 and holds it")
+    assert((`clock` >= 1) implies (acc.q == 5), "latch captured 5 and holds it")
   }
 }
 EOF
@@ -243,10 +243,9 @@ grep -q "combinational-loop" <<<"$out" \
 echo "ok: a latch simulates, and the phantom combinational-loop diagnostic stays gone"
 
 cat > "$W/gated.prp" <<'EOF'
-pub mod gate8(clk:bool, en:bool, d:u8) -> (q:u8@[1]) {
-  wire gclk:bool = nil
-  gclk = clk and en
-  reg f:u8:[clock_pin=ref gclk] = 0
+pub mod gate8(clk:Clock, en:Bool, d:U8) -> (q:U8@[1]) {
+  const gclk = Clock(clock_pin=clk, enable=en)   // the ICG (a Clock_cell)
+  reg f:U8:[clock_pin=gclk] = 0
   q = f
   f = d
 }
@@ -254,10 +253,10 @@ pub mod gate8(clk:bool, en:bool, d:u8) -> (q:u8@[1]) {
 test gate8.holds_while_gated {
   mut acc = gate8
   tick 3 {
-    acc.en = clock == 0
-    acc.d  = if clock == 0 { 5 } else { 99 }
+    acc.en = `clock` == 0
+    acc.d  = if `clock` == 0 { 5 } else { 99 }
     step
-    assert((clock >= 1) implies (acc.q == 5), "en=0: no edge on the gated clock, flop HOLDS")
+    assert((`clock` >= 1) implies (acc.q == 5), "en=0: no edge on the gated clock, flop HOLDS")
   }
 }
 EOF
@@ -267,12 +266,13 @@ EOF
 echo "ok: an ICG-shaped gated clock folds into a commit guard"
 
 # A derived clock that is NOT the foldable ICG shape must STILL fail closed:
-# simulating it would commit every tick with the gate as dead code.
+# simulating it would commit every tick with the gate as dead code. A `Clock`
+# is not data (ruling 81: no derived clocks), so the front end refuses it.
 cat > "$W/derived.prp" <<'EOF'
-pub mod der8(clk:bool, sel:bool, d:u8) -> (q:u8@[1]) {
-  wire dclk:bool = nil
+pub mod der8(clk:Clock, sel:Bool, d:U8) -> (q:U8@[1]) {
+  wire dclk:Bool = nil
   dclk = clk != sel
-  reg f:u8:[clock_pin=ref dclk] = 0
+  reg f:U8:[clock_pin=dclk] = 0
   q = f
   f = d
 }
@@ -287,8 +287,34 @@ test der8.smoke {
 }
 EOF
 
-expect_fail_with "sim on a NON-ICG derived clock" "gated-clock-unsupported" \
+expect_fail_with "sim on a NON-ICG derived clock" "a Clock is not data" \
   "$LHD" sim "$W/derived.prp" --setup-only --workdir "$W/dwd"
+
+# The front ends refuse a derived clock (Pyrope by type, the slang reader by
+# ruling 81), but a netlist the yosys reader builds still reaches inou.cgen.sim
+# with one: its own refusal must stay fail-closed, never simulate the gate as
+# dead code.
+cat > "$W/dxor.v" <<'EOF'
+module dxor(input clk, input sel, input [7:0] d, output reg [7:0] q);
+  wire g = clk ^ sel;
+  always @(posedge g) q <= d;
+endmodule
+EOF
+cat > "$W/dxor_tb.prp" <<'EOF'
+const dut = import("lg:dxor")
+test dxor.smoke {
+  mut acc = dut
+  tick 2 {
+    acc.sel = false
+    acc.d   = 1
+    step
+  }
+}
+EOF
+"$LHD" compile "$W/dxor.v" --reader yosys --top dxor --emit-dir lg:"$W/dxlg/" --workdir "$W/dxw" >"$W/dx.log" 2>&1 \
+  || { tail -3 "$W/dx.log"; fail "the yosys reader no longer compiles a derived-clock netlist (the sim refusal below is untested)"; }
+expect_fail_with "sim on a yosys-read derived clock" "gated-clock-unsupported" \
+  "$LHD" sim lg:"$W/dxlg" "$W/dxor_tb.prp" --setup-only --workdir "$W/dxs"
 
 # ---- 5: LIFTED BY M6 — a second clock domain now simulates -------------------
 # M0 REFUSED a design with state on two clock nets, because every clock was
@@ -299,9 +325,9 @@ expect_fail_with "sim on a NON-ICG derived clock" "gated-clock-unsupported" \
 # inou/prp/tests/sim/multiclock_two_domain.prp against an iverilog golden; all
 # this file owes is that the refusal is gone.
 cat > "$W/twoclk.prp" <<'EOF'
-pub mod twoclk(clkb:bool, d:u8) -> (qa:u8@[1], qb:u8@[2]) {
-  reg ra:u8 = 0
-  reg rb:u8:[clock_pin=ref clkb] = 0
+pub mod twoclk(clka:Clock, clkb:Clock, d:U8) -> (qa:U8@[1], qb:U8@[2]) {
+  reg ra:U8:[clock_pin=clka] = 0
+  reg rb:U8:[clock_pin=clkb] = 0
   qa = ra
   qb = rb
   ra = d
@@ -311,10 +337,8 @@ pub mod twoclk(clkb:bool, d:u8) -> (qa:u8@[1], qb:u8@[2]) {
 test twoclk.second_domain_holds {
   mut acc = twoclk
   tick 3 {
-    acc.d    = 7
-    acc.clkb = false          // never toggles: the second domain must HOLD
+    acc.d = 7
     step
-    assert(acc.qb == 0, "no clkb edge: the second domain never commits")
   }
 }
 EOF
@@ -327,8 +351,8 @@ echo "ok: a second clock domain simulates (M0 refusal lifted by M6)"
 # The two refusals above are narrow. If they over-trigger, every ordinary design
 # stops simulating — so pin the negative side too.
 cat > "$W/plain.prp" <<'EOF'
-pub mod plain8(d:u8) -> (q:u8@[1]) {
-  reg f:u8 = 0
+pub mod plain8(d:U8) -> (q:U8@[1]) {
+  reg f:U8 = 0
   q = f
   f = d
 }
@@ -338,7 +362,7 @@ test plain8.one_cycle_delay {
   tick 3 {
     acc.d = 7
     step
-    assert((clock >= 1) implies (acc.q == 7), "a plain flop still delays by one cycle")
+    assert((`clock` >= 1) implies (acc.q == 7), "a plain flop still delays by one cycle")
   }
 }
 EOF

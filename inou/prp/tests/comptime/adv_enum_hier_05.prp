@@ -5,12 +5,12 @@
 :verifier_fail: 0
 */
 
-// Doc 03-bundle.md "Enumerate typecast": string()/parse of a hierarchical enum.
+// Doc 03-bundle.md "Enumerate typecast": String()/parse of a hierarchical enum.
 enum E3 = (
-  l1 = enum(l1a, l1b),
-  l2 = enum(l2a, l2b)
+  l1 = (l1a, l1b),
+  l2 = (l2a, l2b)
 )
 
-cassert(string(E3.l1.l1a) == "E3.l1.l1a")
-cassert(string(E3.l1) == "E3.l1")
+cassert(String(E3.l1.l1a) == "E3.l1.l1a")
+cassert(String(E3.l1) == "E3.l1")
 cassert(E3("l1.l1b") == E3.l1.l1b)

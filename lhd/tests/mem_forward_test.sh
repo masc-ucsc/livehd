@@ -39,8 +39,8 @@ trap 'rm -rf "$W"' EXIT
 fail() { echo "FAIL: $*"; exit 1; }
 
 cat > "$W/rf.prp" <<'EOF'
-pub mod rf(rst:bool, a:u4, wsel:u1, rsel:u1, we:bool) -> (z:u4@[0]) {
-  reg t:[2]u4
+pub mod rf(rst:Bool, a:U4, wsel:U1, rsel:U1, we:Bool) -> (z:U4@[0]) {
+  reg t:[2]U4
   if rst {
     t[0] = 0
     t[1] = 0
@@ -150,7 +150,7 @@ echo "ok: dropping the write-data self-read REFUTES -- the read-modify-write is 
 #    non-forwarding flop array, which is the mirror of case 1 -- so the encoder
 #    is modelling the ORDERING and not just always-forward or never-forward.
 # ---------------------------------------------------------------------------
-sed 's|reg t:\[2\]u4|reg t:[2]u4:[ordering="old"]|' "$W/rf.prp" > "$W/rf_old.prp"
+sed 's|reg t:\[2\]U4|reg t:[2]U4:[ordering="old"]|' "$W/rf.prp" > "$W/rf_old.prp"
 grep -q 'ordering="old"' "$W/rf_old.prp" || fail "case 5: the ordering sed did not apply"
 build_prp "$W/rf_old.prp" impl_old
 

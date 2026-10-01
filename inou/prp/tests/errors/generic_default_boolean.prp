@@ -1,0 +1,18 @@
+/*
+:name: generic_default_boolean
+:type: error
+:error: `boolean` was renamed `Bool`
+*/
+
+// User rulings 2026-09-28 (37) and 2026-09-29 (52): only `Bool` names the type
+// (`Bool(x)` is the cast), in every type position, and the old spellings are
+// banned words. A generic DEFAULT is one: before, `<T=boolean>` compiled and
+// the default was silently ignored (the explicit argument form `f<boolean>` was
+// already rejected).
+comb pass<T=boolean>(a:T) -> (y:T) {  // locate_error_here
+  y = a
+}
+
+pub mod generic_default_boolean(a:Bool) -> (o:Bool@[0]) {
+  o = pass(a=a)
+}

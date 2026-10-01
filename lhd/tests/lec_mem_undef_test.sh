@@ -34,8 +34,8 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 # read is textually AFTER the write on purpose -- under the ordering="program"
 # default it would forward, so this also pins that `ordering` is honored at all.
 cat > "$W/ref.prp" <<'EOF'
-pub mod top(clk:u1, ra:u2, we:u1, wa:u2, wd:u4) -> (o:u4@[]) {
-  reg m:[4]u4:[ordering="none"]
+pub mod top(clk:Clock, ra:U2, we:U1, wa:U2, wd:U4) -> (o:U4@[]) {
+  reg m:[4]U4:[ordering="none"]
   if we != 0 {
     m[wa] = wd
   }

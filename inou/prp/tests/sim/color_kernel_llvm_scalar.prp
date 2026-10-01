@@ -5,7 +5,7 @@
 // A multi-node, single-output region exercises the profitable scalar LLVM ABI
 // and the host-bitcode inliner. Unlike the wide fixtures, this must emit LLVM
 // bitcode instead of deliberately selecting the Slop fallback.
-pub mod llvm_scalar(d:u32, e:u32) -> (result:u32@[0]) {
+pub mod llvm_scalar(d:U32, e:U32) -> (result:U32@[0]) {
   const sum   = d + e
   const mixed = (sum * 13) ^ (d << 7)
   result = (mixed + (e >> 3))#[0..=31]

@@ -1,0 +1,17 @@
+/*
+:name: spec_calls_type_unique_untyped_param
+:type: error
+:error: must be named|ambiguous|name the argument
+*/
+
+// docs 06-functions.md "Argument naming", exception 3: "This applies when each
+// unnamed call-site value matches exactly one of all the parameters by type; if
+// two parameters have the same type, or an untyped parameter could accept the
+// value, the call must name the argument."
+// qa.md Appendix §7: "argument whose type is unique among ALL params".
+// "hi" is a String and `a` is the only String parameter, but the untyped `b`
+// could also accept it, so the String actual is not type-unique.
+
+comb tag(a:String, b) -> (r) { r = b }
+
+const t = tag("hi", b=3) // locate_error_here

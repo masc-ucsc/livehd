@@ -1,0 +1,17 @@
+/*
+:name: array_output_lane_read_before_drive
+:type: error
+:tolg: 1
+:error: lane 2 of output .v. is read before it is driven
+*/
+
+// User ruling 15 (2026-09-27): an output starts as nil. Reading a lane of an
+// array output built lane by lane before that lane is written reads nil, an
+// error exactly like reading a never-written scalar output ("unresolved
+// reference"). It used to read 0 silently.
+pub mod array_output_lane_read_before_drive(a:U4) -> (v:[4]U4@[0]) {
+  v[0] = a
+  v[1] = v[2]   // locate_error_here
+  v[2] = a ^ 2
+  v[3] = a ^ 3
+}

@@ -1,0 +1,70 @@
+/*
+:name: loop_ring_through_own_carry
+:type: simulation
+*/
+
+// Sibling of loop_ring_nested_outer_index.prp (lhdtrack suggestions 1.3): here
+// the wire ring closes through the SAME rolled loop's own carry
+// (`pv` carry-out -> `w` -> `wc` -> an invariant input of the same loop).
+// Bit-level it is acyclic: lane i's `lr` reads `wc`, and `pv` never does.
+//
+// Both `lhd compile` (pass.formal) and `lhd sim` (inou.cgen.sim occurrence
+// materialization) used to stop with
+//   error[internal]: Subnode_group::validate: carry input needs one self-edge
+//   and one external initial driver
+// The roll planner now sees the ring and unrolls the loop (the shapes it
+// cannot see stay rolled: loop_ring_hidden_from_planner.prp). A rolled `i`
+// loop would still exercise the loop_ring_nested_outer_index.prp binding: its
+// nested `j` loop reads the OUTER index.
+//
+// `const wc = w` and `::[timecheck=false]`: see loop_ring_nested_outer_index.prp.
+// The ruling-5 unroll keys on a DIRECT wire read in the loop body, not on
+// dataflow through `wc`. The fix may either materialize this ring or refuse
+// to roll the loop, so there is deliberately no `:expect_instances:` pin.
+// This fixture runs only `lhd sim`; equiv/loop_ring_own_carry.prp pins the
+// `lhd compile` path (pass.formal), which fails with the same error.
+// Same values as `--set compile.unroll=true` (which passes today).
+pub mod roc::[timecheck=false](b:U16, sel:U8) -> (o:U4@[0]) {
+  wire w:U16 = nil
+  const wc = w
+  mut r:U4 = 0
+  mut pv:U16 = 0
+  for i in 0..<4 {
+    mut lr:U4 = 0
+    for j in 0..<4 {
+      lr#[j] = wc#[j * 4 + i]
+    }
+    r#[i] = lr#[sel#[(i * 2)..+2]]
+    pv#[(i * 4)..+4] = b#[(i * 4)..+4] ^ 0x5
+  }
+  w = pv
+  o = r
+}
+
+test roc.values {
+  mut x    = roc
+  mut bad  = 0
+  mut seen = 0
+  tick 16 {
+    const bv:U16 = (clock * 40503 + 12345) & 0xFFFF
+    const sv:U8  = (clock * 97 + 5) & 0xFF
+    x.b   = bv
+    x.sel = sv
+    step
+    // w == b ^ 0x5555; lane i picks bit (sel_i*4 + i) of it
+    const av:U16 = bv ^ 0x5555
+    const st0 = sv & 3
+    const st1 = (sv >> 2) & 3
+    const st2 = (sv >> 4) & 3
+    const st3 = (sv >> 6) & 3
+    const e0:U1 = (av >> (st0 * 4 + 0)) & 1
+    const e1:U1 = (av >> (st1 * 4 + 1)) & 1
+    const e2:U1 = (av >> (st2 * 4 + 2)) & 1
+    const e3:U1 = (av >> (st3 * 4 + 3)) & 1
+    const oexp:U4 = (e3 << 3) | (e2 << 2) | (e1 << 1) | e0
+    seen += 1
+    if x.o != oexp { bad += 1 }
+  }
+  assert(seen == 16, "the comparisons ran")
+  assert(bad == 0, "the ring through the loop's own carry is not a combinational loop")
+}

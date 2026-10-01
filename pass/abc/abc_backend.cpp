@@ -747,10 +747,16 @@ std::optional<synth::Cell_netlist> Abc_backend::map(const synth::Region_ctx& ctx
   if (rewrite.map == synth::Region_rewrite::Map::tmap) {
     const auto nf = region_.delay.empty() ? std::string{"&nf"} : std::format("&nf -D {}", region_.delay);
     for (const auto* command : {"strash", "&get -n", nf.c_str(), "&put -o"}) {
+      if (flow_admission && !flow_admission(command)) {
+        return std::nullopt;
+      }
       if (Cmd_CommandExecute(frame, command) != 0) {
         livehd::diag::err("pass.abc", "abc-tmap", "internal")
             .msg("ABC '{}' failed on the rewritten logic of region '{}'", command, rb.module_name)
             .fatal();
+        return std::nullopt;
+      }
+      if (flow_admission && !flow_admission(command)) {
         return std::nullopt;
       }
     }
@@ -769,10 +775,16 @@ std::optional<synth::Cell_netlist> Abc_backend::map(const synth::Region_ctx& ctx
         while (!command.empty() && command.front() == ' ') {
           command.remove_prefix(1);
         }
+        if (!command.empty() && flow_admission && !flow_admission(command)) {
+          return std::nullopt;
+        }
         if (!command.empty() && Cmd_CommandExecute(frame, std::string{command}.c_str()) != 0) {
           livehd::diag::err("pass.abc", "abc-flow", "internal")
               .msg("ABC '{}' failed on the technology-mapped rewrite of region '{}'", command, rb.module_name)
               .fatal();
+          return std::nullopt;
+        }
+        if (!command.empty() && flow_admission && !flow_admission(command)) {
           return std::nullopt;
         }
       }

@@ -11,6 +11,7 @@
 // HHDS library stays free of LiveHD-specific encodings (Ntype_op bit-shift,
 // the "%dot.name" wire-naming scheme, etc.).
 
+#include "hlop/memory_init.hpp"
 #include <algorithm>
 #include <bit>
 #include <cstdint>
@@ -385,6 +386,21 @@ inline void connect_folded_const([[maybe_unused]] hhds::Graph& graph, hhds::Pin_
 
 [[nodiscard]] inline bool is_type_sub(const hhds::Node_class& node) { return type_op_of(node) == Ntype_op::Sub; }
 [[nodiscard]] inline bool is_type_sub(const hhds::Occurrence_node& node) { return type_op_of(node) == Ntype_op::Sub; }
+
+// Would connecting `sink` straight to `driver` give a compact loop Sub an edge
+// from its own output to its own input? On a loop Sub that self-edge IS the
+// carry relation (hhds Subnode_group::carries), so a forwarding fold (a wire
+// buffer or a redundant mask on a ring that closes over the loop) would turn an
+// invariant input into a bogus carry, or give a carry a second self-driver.
+// Forwarding rewrites keep the forwarded node instead.
+[[nodiscard]] inline bool closes_loop_self_edge(const hhds::Pin_class& driver, const hhds::Pin_class& sink) {
+  const auto master = driver.get_master_node();
+  return sink.get_master_node() == master && master.is_loop_subnode();
+}
+template <typename Sinks>
+[[nodiscard]] bool closes_loop_self_edge(const hhds::Pin_class& driver, const Sinks& sinks) {
+  return std::ranges::any_of(sinks, [&](const hhds::Pin_class& sink) { return closes_loop_self_edge(driver, sink); });
+}
 
 // Per-pin bit width. `livehd::attrs::bits` holds the value (0 == unspecified).
 // For graph-IO pins, the declared bits live on `GraphIO::get_bits(name)`
@@ -1188,6 +1204,17 @@ inline void set_pin_name(const hhds::Pin_class& pin, std::string_view name) {
   }
   I(drivers.size() == 1, "get_driver_of_sink_name on a multi-driver sink; use inp_drivers_of");
   return drivers.front();
+}
+
+// File preloads are external state for hardware/formal, not constant ROM bits.
+template <class Node>
+[[nodiscard]] inline std::optional<hlop::Memory_image> memory_image_of(const Node& node) {
+  auto pin = get_driver_of_sink_name(node, "initial");
+  if (!pin.is_const()) {
+    return std::nullopt;
+  }
+  const auto& value = const_of(pin);
+  return value.is_string() ? hlop::memory_image(value.to_string()) : std::nullopt;
 }
 
 // Reduction semantics use the explicit count operand, never a pin-width hint.

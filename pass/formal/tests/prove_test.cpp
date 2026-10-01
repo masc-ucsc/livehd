@@ -197,3 +197,25 @@ TEST(Prove, CountedReductionsMatchBitTreesAndPreserveSourceOnExport) {
     }
   }
 }
+
+TEST(Prove, SignedEqualityDoesNotCoerceNegativeToUnsigned) {
+  for (bool variadic : {false, true}) {
+    hhds::GraphLibrary lib;
+    auto               io = lib.create_io("signed_equality");
+    io->add_input("a", 0);
+    io->set_bits("a", 4);
+    io->set_unsign("a", false);
+    auto graph = io->create_graph();
+    auto a     = graph->get_input_pin("a");
+    graph_util::set_sbits(a, 4);
+    auto eq = graph_util::create_typed_node(*graph, Ntype_op::EQ);
+    graph_util::setup_sink_pid(eq, 0).connect_driver(a);
+    graph_util::setup_sink_pid(eq, 0).connect_driver(graph_util::create_const(*graph, *Dlop::create_integer(15)));
+    if (variadic) {
+      graph_util::setup_sink_pid(eq, 0).connect_driver(a);
+    }
+    graph_util::set_ubits(eq.create_driver_pin(0), 1);
+    formal::Prover prover(graph.get());
+    EXPECT_EQ(prover.is_false(eq.create_driver_pin(0)).verdict, Verdict::Proven);
+  }
+}

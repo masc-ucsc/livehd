@@ -11,9 +11,9 @@
 // unnamed `<u4, 3>` binding is unambiguous by kind (type → T, constant → N).
 // Flips green only when BOTH land; the fully-substituted form
 // (`in2` passed explicitly as 3) compiles green.
-comb f<T, N>(in1:T, in2=N) -> (out:u8) {
+comb f<T, N>(in1:T, in2=N) -> (out:U8) {
   out = in1 + in2
 }
-pub comb generic_default_arg(x:u4) -> (r:u8) {
-  r = f<u4, 3>(in1=x)
+pub comb generic_default_arg(x:U4) -> (r:U8) {
+  r = f<U4, 3>(in1=x)
 }

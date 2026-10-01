@@ -1,0 +1,39 @@
+/*
+:name: spec_tests_dut_two_clocks_autowire
+:type: simulation
+*/
+// Spec: docs 05b "Running cycles (tick)": "The DUT instances stepped inside the
+// tick auto-wire their unbound `Clock` input to it, like any instance whose
+// caller has a single Clock." qa.md appendix section 7 (Instances): "an unbound
+// child `Clock`/`Reset` input is auto-wired to the caller's single Clock/Reset
+// ...; if the caller has 2+ Clocks (or Resets), every child Clock (Reset) input
+// must be bound explicitly". A tick's test has exactly ONE Clock (the minted
+// `clock`, section 8).
+//
+// Rule pinned: the test is a caller with a SINGLE Clock, so a DUT with TWO
+// unbound Clock inputs gets BOTH auto-wired to the tick's `clock`; registers
+// on either (`clock_pin=ck1` / `clock_pin=ck2`) advance once per `step`.
+// (Contrast the Q38 option text "A DUT with 2+ Clocks needs explicit Clocks
+// declared in the test", which the owner did not select -- see the audit's
+// contradiction list.)
+
+mod spec_d2c_cnt(ck1:Clock, ck2:Clock, en:Bool) -> (q1:U8@[0], q2:U8@[0]) {
+  reg c1:U8:[clock_pin=ck1] = 0
+  reg c2:U8:[clock_pin=ck2] = 0
+  if en {
+    wrap c1 = c1 + 1
+    wrap c2 = c2 + 2
+  }
+  q1 = c1
+  q2 = c2
+}
+
+test spec_d2c.both_autowired {
+  mut d = spec_d2c_cnt
+  tick 5 {
+    d.en = true
+    step
+  }
+  assert(d.q1 == 5)
+  assert(d.q2 == 10)
+}

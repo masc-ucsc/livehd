@@ -19,7 +19,7 @@
 //   * the READ index must be non-constant (`arr[sel]`). With `arr[0]` the front
 //     end degenerates the array to a scalar bit-select and the bug is bypassed.
 //   * the store RHS must be a `mut` DECLARED in one statement and ASSIGNED in
-//     another. `mut m:u1 = d` (decl+init together) is lowered CORRECTLY, as is
+//     another. `mut m:U1 = d` (decl+init together) is lowered CORRECTLY, as is
 //     a literal RHS (`arr[1] = 17`) and a direct port RHS (`arr[0] = d`).
 // Reading the same `m` into a SCALAR output in the same def is also correct —
 // so the defect is specific to the array-store `din`, not to `m`'s binding.
@@ -28,12 +28,12 @@
 // arr_comb_mux_const / arr_comb_tmp pairs and lhdsuite array_problem.md.
 //
 // WHY IT MATTERS: this is the root cause of `minion_dcache_tensor_load`
-// refuting in //bench:minion_lec. There `mut _mux_33:u5 = 0` is hoisted, then
+// refuting in //bench:minion_lec. There `mut _mux_33:U5 = 0` is hoisted, then
 // assigned from an enum, then stored into `my_miss_id[0]` — so all four array
 // entries hold 0 and `l2_req_o.id` reads 0 for any index.
-pub comb array_store_stale_rhs(sel:u1, d:u1) -> (o:u1) {
-  mut m:u1 = 0
-  mut arr:[2]u1 = 0
+pub comb array_store_stale_rhs(sel:U1, d:U1) -> (o:U1) {
+  mut m:U1 = 0
+  mut arr:[2]U1 = 0
   m = d
   arr[0] = m
   o = arr[sel]

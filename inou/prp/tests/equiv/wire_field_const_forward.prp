@@ -7,6 +7,6 @@
 
 // The Verilog closes a bit-acyclic struct feedback path. Its ready field is
 // driven by one even though the read appears before that constant driver.
-pub comb wire_field_const_forward(valid:u1, bits:u5) -> (ready:u1) {
+pub comb wire_field_const_forward(valid:U1, bits:U5) -> (ready:U1) {
   ready = 1
 }

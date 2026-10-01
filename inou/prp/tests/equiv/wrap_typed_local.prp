@@ -1,0 +1,29 @@
+/*
+:name: wrap_typed_local
+:type: equiv
+:verilog_top: wrap_typed_local
+:pyrope_top: wrap_typed_local
+*/
+// User ruling 2026-09-27 (overflow rule): `wrap`/`sat` into a TYPED local must
+// apply the local's declared width in every backend. The Verilog, and the LEC
+// against the golden, here; the same design's sim values are pinned in
+// sim/wrap_typed_local.prp. It used to be a silent miscompile: the unwrapped
+// `mut t:U4 = 0; t = x + 16; y = t` emitted `y = x + 16`.
+comb low_sum(a:U4, b:U4) -> (s:U8) {
+  mut t:U4 = 0
+  wrap t = a + b
+  s = t
+}
+
+pub mod wrap_typed_local(x:U4, z:U4) -> (y:U8@[0], y3:U8@[0], ys:U8@[0], c:U8@[0]) {
+  mut t:U4 = 0
+  wrap t = x + 16
+  y = t
+  mut t3:U4 = 0
+  wrap t3 = x + 3
+  y3 = t3
+  mut s:U4 = 0
+  sat s = x + z
+  ys = s
+  c = low_sum(a=x, b=z)
+}

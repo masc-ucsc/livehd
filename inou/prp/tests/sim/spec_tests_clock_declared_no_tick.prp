@@ -1,0 +1,23 @@
+/*
+:name: spec_tests_clock_declared_no_tick
+:type: simulation
+*/
+// Spec (qa.md appendix section 8): "`clock` outside a tick block is undefined
+// unless declared." docs 05b "Running cycles (tick)": "Outside a `tick` block,
+// `clock` is undefined unless the test declares it."
+//
+// Rule pinned (the "unless declared" half): `clock` is not a reserved word, so
+// a test with no `tick` may declare its own local named `clock` and read it.
+
+mod spec_cdn_pass(a:U8) -> (o:U8@[0]) {
+  o = a
+}
+
+test spec_cdn.declared {
+  mut d     = spec_cdn_pass
+  const clock = 7
+  d.a = clock
+  step
+  assert(d.o == 7)
+  assert(clock == 7)
+}

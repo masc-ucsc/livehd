@@ -1,0 +1,62 @@
+/*
+:name: mod_state_feedback_through_grandchild
+:type: simulation
+*/
+
+// A caller ring through a GRANDCHILD's register is sequential, not
+// combinational (lhdtrack suggestions 2.1). `mid.q` is a pure feedthrough of
+// `st.q`, which reads only the state register `r`; `d` reaches `r`'s NEXT
+// value only. So the ring `gr -> mid.d -> st.d -> r -> st.q -> mid.q -> gr`
+// is cut by a flop two levels down, and `mid` itself holds no register.
+//
+// Before the 2.1 fix, upass.tolg's time-checker modeled each Sub instance as
+// a crossbar (every input feeds every output) and refused the design:
+//   upass.tolg: combinational loop in 'mod_state_feedback_through_grandchild.top'
+// This forces the per-output dependences to be TRANSITIVE (a child output's
+// cone must be summarized through its own Sub children): a fix that only asks
+// "is this child output driven directly by a flop" passes the one-level
+// fixtures (sim/mod_state_feedback_through_child.prp) but not this one.
+// No `::[timecheck=false]` anywhere: the fix must accept the plain spelling.
+mod st(en:Bool, d:U4) -> (q:U4@[0]) {
+  reg r:U4 = 8
+  if en { r = d }
+  q = r
+}
+
+mod mid(en:Bool, d:U4) -> (q:U4@[0]) {
+  q = st(en=en, d=d)
+}
+
+pub mod top(req:U4) -> (g:U4@[0], s:U4@[0]) {
+  wire gr:U4 = nil
+  const m = mid(en=req != 0, d=gr)
+  gr = req & ~m
+  g = gr
+  s = m
+}
+
+test top.grant_feeds_grandchild_state {
+  mut dut  = top
+  mut r:U4 = 8
+  mut bad  = 0
+  mut seen = 0
+  tick 10 {
+    mut rq:U4 = (clock * 11 + 6) & 15
+    if clock == 3 { rq = 0 }
+    if clock == 6 { rq = 0 }
+    dut.reset = clock == 0
+    dut.req = rq
+    // Golden next state: r' = (req != 0) ? (req & ~r) : r; reset forces 8.
+    if clock == 0 {
+      r = 8
+    } elif rq != 0 {
+      r = rq & ~r
+    }
+    step
+    seen = seen + 1
+    if dut.s != r { bad = bad + 1 }
+    if dut.g != (rq & ~r) { bad = bad + 1 }
+  }
+  assert(seen == 10, "the comparisons ran (guards against a vacuous pass)")
+  assert(bad == 0, "the grandchild's state register loads the grant fed back through the wire")
+}

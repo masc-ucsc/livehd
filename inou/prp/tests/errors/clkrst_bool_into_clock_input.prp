@@ -1,0 +1,18 @@
+/*
+:name: clkrst_bool_into_clock_input
+:type: error
+:tolg: 1
+:error: `Clock` input `c` of `cnt` is bound to the value, which is data, not a Clock \(there are no derived clocks\)
+*/
+// docs 07-typesystem: a `Clock` is never modified except through a clock
+// gate; there are no derived clocks, so logic (`clk_a and en` over Bool data)
+// does not bind to a child's `Clock` input.
+mod cnt(c:Clock, en:Bool) -> (q:U8@[0]) {
+  reg r:U8 = 0
+  if en { wrap r = r + 1 }
+  q = r
+}
+pub mod clkrst_bool_into_clock_input(ck:Clock, gate:Bool, en:Bool) -> (o:U8@[0]) {
+  const x = cnt(c=gate and en, en=en)   // locate_error_here
+  o = x.q
+}

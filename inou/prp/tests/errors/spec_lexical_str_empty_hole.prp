@@ -1,0 +1,9 @@
+/*
+:name: spec_lexical_str_empty_hole
+:type: error
+:error: empty interpolation hole
+*/
+// qa.md appendix 8: "Empty holes: `{}` inside a string is ALWAYS an error".
+// docs 02-basics: `const bad4 = "num={}"  // error: empty hole, write "num={num}"`
+const num = 2
+const s = "num={}"   // locate_error_here

@@ -1,0 +1,35 @@
+/*
+:name: typeword_all_positions
+:type: compile
+*/
+// docs 07-typesystem "Built-in types": the capitalized type words in every
+// type position -- ports, locals, arrays, tuple fields, type aliases, enum
+// level types, generic arguments, `does` operands -- and the type name as the
+// cast (`U8(x)`, `S8(y)`, `Bool(x)`, `U1(f)`, `String(n)`, `Unsigned(x)`),
+// plus a type word used as a value (`U8.[max]`, a tuple of types).
+type Word = U32
+type Flag = Bool
+enum Color:U8 = (Red = 1, Green = 2, Blue = 4)
+comb pass<T>(a:T) -> (y:T) { y = a }
+pub comb typeword_all_positions(a:U8, b:S4, c:Unsigned(bits=8, max=200), d:Signed(bits=8), e:Bool, w:[4]U2,
+                                t:(x:U4, y:Bool)) -> (o1:U8, o2:Word, o3:Bool, o4:U1, o5:S8, o6:U8, o7:U4, o8:Bool) {
+  cassert(a does U8)
+  cassert(!(a does S4))
+  cassert(U8.[max] == 255 and S4.[min] == -8)
+  cassert(U8(3) + S4(-1) == 2)
+  cassert(Bool(3) and U1(true) == 1)
+  cassert(String(5) == "5")
+  const k:Word = 7
+  mut f:Flag = e
+  o1 = U8(c)
+  o2 = k
+  o3 = f and Bool(a)
+  o4 = U1(e)
+  o5 = S8(b)
+  o6 = pass<U8>(a)
+  o7 = t.x
+  o8 = t.y
+  const bit0 = U8(a)#[0]
+  const ub   = Unsigned(b)
+  const tt   = (const p=U8, const q=S20)
+}

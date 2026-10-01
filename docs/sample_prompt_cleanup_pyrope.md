@@ -3,138 +3,266 @@ Use the Pyrope skill to rewrite <source.prp or source directory> into
 An equivalent Verilog or Chisel design may be available at <reference path,
 or none>. Preserve the hardware behavior while reconsidering how it is expressed.
 
-First identify the top, supported parameter configurations, existing checks,
-and any known equivalence gaps. Run relevant baseline checks before editing so
-existing failures can be distinguished from regressions. When using a
-Verilog reference, match its parameters and defines; for Chisel, use the RTL
-elaborated from the same configuration and record its provenance. If no external
-reference is available, compare against the original Pyrope.
+## 1. Before editing
 
-Run the source-only style analyzer before editing, especially on large generated
-files, and again after each substantial cleanup:
+- Identify the top, its external interface (who instantiates it: a testbench,
+  a harness, another design), the supported parameter configuration(s), the
+  existing checks, and any known equivalence gaps.
+- Run the baseline checks first (compile, LEC against the reference,
+  simulation) so existing failures are not mistaken for regressions. A
+  machine-emitted Pyrope may itself be LEC-inconclusive against its Verilog; a
+  cleaner rewrite often proves where the original could not.
+- When using a Verilog reference, match its parameters and defines; for Chisel,
+  use the RTL elaborated from the same configuration and record its provenance.
+  With no external reference, the original Pyrope is the reference.
+- Snapshot the starting Pyrope. Every later equivalence step compares against
+  the most recent verified snapshot (section 4).
+
+## 2. Find the repetition
+
+Run the source-only style analyzer before editing and after each substantial
+cleanup:
 
 ```sh
-../livehd/bazel-bin/lhd/lhd pyrope style <file.prp> --diag-fmt pretty
-../livehd/bazel-bin/lhd/lhd pyrope style <directory>/*.prp --emit diagnostics:/tmp/pyrope-style.jsonl
+lhd pyrope style <file.prp> --diag-fmt pretty
+lhd pyrope style <directory>/*.prp --emit diagnostics:/tmp/pyrope-style.jsonl
 ```
 
 Inspect the highest-ranked findings first. The analyzer recognizes contiguous
-repeated statement blocks, including consistent strides in literals and numbered
-identifiers. Use the reported first-copy range and progressions to identify an
-indexed collection and a comptime loop; its template placeholders are descriptive,
-not executable Pyrope. The default is 20 findings per file; raise `--max-findings`
-when the summary reports more. `--max-block-statements` can expose repetitions
-whose individual copies exceed the default 128 statements. Findings are advisory:
-check dependencies, assignment priority, reset attributes, and old-state reads
-before rewriting. Exit zero can include a partial parse; inspect diagnostics.
-Neither no findings nor a successful style run establishes correctness or
-completeness, and the command does not rewrite code or resolve imports.
+repeated statement blocks (with strides in literals and numbered identifiers)
+and flattened bundle arguments; its templates are descriptive, not executable
+Pyrope. The default is 20 findings per file (`--max-findings`);
+`--max-block-statements` exposes repetitions whose copies exceed 128
+statements. Exit 2 means suggestions were reported, 1 an input/parser failure;
+exit 0 can include a partial parse, so read the diagnostics. The analyzer only
+finds repetition: zero findings says nothing about naming, types, structure, or
+correctness, and it does not rewrite code or resolve imports.
 
-Aim for code a person would naturally write from the design's intent:
+## 3. What clean Pyrope looks like
 
-- Organize by function, such as instruction decoding, memory transactions, and
-  arithmetic. Place state near the logic that owns it. Extract coherent modules
-  and useful combinational functions; avoid a large block of unrelated register
-  declarations at the start of the file.
-- Consolidate generated module variants that differ only in widths, field
-  types, or configuration into one parameterized implementation. Update callers
-  to use it directly and remove obsolete numbered module files. Sharing a body
-  underneath a family of unnecessary wrappers, or moving those wrappers into
-  one file, is not the completed cleanup. Retain concrete entry modules only
-  where an external interface or a verification flow actually requires them.
-- Group related fields into tuples and repeated structures into arrays where
-  that expresses their meaning. Use packed values for actual bit encodings and
-  loops for repeated operations. Choose boundaries that clarify ownership and
-  dependencies rather than mechanically grouping names by prefix.
-- Before introducing or retaining pack/unpack helpers, check whether the
-  consumer can accept the existing unpacked bundle. Change internal submodules
-  to take and return typed bundles, including nested bundles and generic
-  pipeline storage where useful. Pass a stage's bundle directly to the next
-  stage instead of packing it into a bus only to unpack it immediately. Remove
-  obsolete adapters, bit offsets, and Chisel-generated `io_xxx` leaf shuffling
-  once callers and callees share the meaningful shape. Keep explicit packing
-  for real instruction or protocol encodings, bit-vector operations, and required
-  external boundaries; document the lane order and widths there. A compiler
-  failure on a valid bundle connection calls for a minimal reproducer and a
-  LiveHD fix, not an assumption that the hardware requires a packed interface.
-- Pass related ports as tuple arguments instead of escaped generated arguments
-  such as `` `io_in.control.enable`=enable ``. Reuse an existing tuple directly
-  (`child(io_in=next_stage)`) when it already has the needed fields. Otherwise
-  construct a named tuple, including nested tuples where appropriate, for
-  example `child(io_in=(const control=(const enable=enable), const data=data))`.
-  Change intermediate interfaces and their callers together; do not preserve
-  flattened generated port spellings merely because they appeared in the RTL.
-- Assign whole tuples instead of copying fields one at a time, for example
-  `control = decoder.control`. Make producer and consumer agree on field names
-  and nesting (`ex_ctrl`, `mem_ctrl`, `wb_ctrl`), and select the named output
-  bundle explicitly where needed. A nested return does not bind to a flat
-  destination, and a leaf name is not found by searching the tree. Rename a
-  callee's generated outputs to meaningful bundle fields and update its callers
-  together instead of spreading `io_xxx` names through the design. Subtuples
-  are ordinary values: read, pass, and assign `ctl.ex_ctrl` directly instead of
-  expanding its leaves.
-- Use `if` expressions when every branch selects the value of one destination:
-  `result = if select { a } elif other { b } else { c }`. Keep pure branch-local
-  calculations inside the expression. Preserve priority with `if`/`elif`;
-  use `match` only when its mutually exclusive case semantics are appropriate.
-  Do not turn register enables or intentional holds into unconditional writes.
+Aim for code a person would write from the design's intent, not from the
+emitter's netlist.
 
-- Replace repeated encodings, masks, field positions, sizes, and configuration
-  values with meaningful `comptime const` names. Define them in the file that
-  owns their meaning, or export `pub comptime const` values from a shared file
-  when several modules use the same encoding. Producers and consumers must use
-  the same definitions. Use named types for recurring data layouts where useful.
-  Name values for their meaning, not their numeric spelling; ordinary zero
-  initialization, boolean conversions, and obvious arithmetic need no artificial
-  constants solely to eliminate every literal.
-- Use `bool` and `true`/`false` for predicates and control state. Keep numeric
-  types for counters, encodings, and bit vectors. Prefer logical operations for
-  conditions and make conversions at numeric boundaries explicit.
-- Use typed destinations and `wrap` for intentional fixed-width arithmetic,
-  for example `wrap add_sub = if subtract { a - b } else { a + b }` with a
-  declared `u32` result. Keep slices for extracting fields. Check signedness,
-  extension, and shift behavior rather than treating every slice as truncation.
-- Express register reset values and polarity in declarations where equivalent,
-  for example `reg running:bool:[negreset=true,reset_pin=ref resetn] = false`.
-  Retain reset-dependent logic when it also controls enables, holds unreset
-  state, or otherwise changes behavior beyond assigning a reset value.
-- Use constants or template parameters for configuration, and concrete entry
-  modules where required. Preserve supported configurations; explicitly identify
-  unsupported ones. Do not expand feature support unless requested.
+**Structure**
 
-Preserve cycle timing, register old-value reads, assignment priority, reset and
-power-on behavior, memory semantics, and parameter-dependent behavior. Do not
-replace unknown or uninitialized state with convenient constants. Intermediate
-interfaces may change when that improves clarity; update their callers and
-test variants consistently. Preserve the external top-level interface.
+- Organize by function and place state next to the logic that owns it. Extract
+  coherent modules and useful combinational helpers; avoid a block of unrelated
+  register declarations at the top of a file.
+- Consolidate numbered variants (`foo`, `foo_p1`, `foo_p2`) that differ only in
+  widths, types, or configuration into one generic (`mod foo<N=..>(a:Unsigned(bits=N))`).
+  Update callers to use it directly and delete the obsolete files. A shared
+  body behind a family of wrappers is not the finished cleanup.
+- Delete modules that elaborate to nothing: assertion-only checkers
+  (`*_checks_*`, `*_intg`, `*_impl`), `br_misc_unused`/`tieoff` sinks, and the
+  calls that fed them. Ports that only fed those checks (typically `clk`/`rst`
+  on combinational children) go too; keep them on the external top.
+- Inline trivial helpers (one-hot mux, bin/onehot encoders, a 1-stage delay,
+  popcount of a 1-bit value) where a loop, reduction, or one register says the
+  same thing more clearly. Keep a helper module when it has a real name in the
+  design's vocabulary and more than one caller.
+- Keep one module per file where the source did, named as before, so imports,
+  test harnesses, and LEC hierarchy pairing keep working.
+- Write a short comment per module saying what it does, and at non-obvious
+  logic say why (priority order, reset intent, which configuration is
+  supported). Do not narrate the syntax.
 
-Validate incrementally using only LiveHD: compile both sides, run `lhd lec`,
-and use Pyrope simulation where needed. When collapsing a field-by-field copy
-into a whole-tuple assignment, LEC the collapsed source against the expanded one
-it replaced: the two must be equivalent, and that check is cheap enough to run
-after each block rather than once at the end. Exercise representative parameter
-combinations and interactions, including nondefault configurations touched by
-the cleanup. Simulations must check data and run beyond reset into useful work.
-Re-run relevant checks on the final source, and check LEC stability across
-repeated runs. Simulation supplements an incomplete proof; it does not turn it
-into an equivalence proof. Require equivalence at the external top level after
-changing module boundaries or interfaces; intermediate modules need not remain
-equivalent individually. Preserve the same external top and testbench across
-Verilog, generated Pyrope, and cleaned Pyrope2. Preserve an
-established unbounded proof rather than accepting only a bounded result after
-cleanup. Where the project uses incremental compilation or precompiled imports,
-check those paths too, especially after introducing generics or shared files.
+**Interfaces and bundles**
 
-Use small comparison adapters only where the verification flow needs to select
-or name the same external top, without changing its ports or behavior. If moved or renamed
-state needs explicit LEC correspondence, keep that mapping reviewable and report
-it separately from automatic matching. Do not weaken assertions, alter the
-reference behavior, or change benchmark settings merely to obtain a pass.
-When an internal interface changes, translate its existing checks to the new
-representation while preserving their assertions, stimulus, and coverage.
+- Preserve the external top-level interface exactly: port names, widths, and
+  types, including `U1` ports a generated harness drives with integers. Convert
+  to `Bool` right inside the top (`pop_ready == 1`, `U1(flag)`). Built-in
+  type names are capitalized (`U8`, `S4`, `Bool`, `Unsigned(bits=N)`); the
+  old lowercase spellings (`u8`, `bool`, `unsigned`) are banned words, also
+  as names.
+- Intermediate interfaces may change. Pass related ports as tuples instead of
+  escaped flattened arguments (`` `io_in.control.enable`=enable ``); reuse an
+  existing tuple directly (`child(io_in=next_stage)`) or construct a named one
+  (`child(io_in=(const control=(const enable=enable), const data=data))`).
+  Change callee and callers together.
+- Assign whole tuples instead of field-by-field copies (`control = decoder.control`);
+  make producer and consumer agree on field names and nesting. A nested
+  return does not bind to a flat destination, and a leaf name is not searched
+  for in the tree.
+- Before keeping pack/unpack helpers, check whether the consumer can take the
+  unpacked bundle. Keep explicit packing only for real encodings, bit-vector
+  operations, and external boundaries, and document lane order and widths
+  there. A compiler failure on a valid bundle connection calls for a minimal
+  reproducer and a LiveHD fix, not a packed interface (but see the workaround
+  list in section 5).
 
-Report code-size changes against both the starting Pyrope and matching Verilog,
-including every helper introduced or removed. Use the same word-count method and
-source scope on both snapshots, state the method, and distinguish formatter-only
-changes from reductions in repeated logic. Fewer words are useful evidence of a
-simpler representation, not a reason to compress whitespace or weaken validation.
+**Expressions**
+
+- Use loops, reductions, and whole-vector operations instead of per-bit
+  statements: `bin#[i] = gray#^[i..]`, `count = in#+[..]`,
+  `mask#[i] = last#|[i..]`, `lowest = v & -v`, `onehot = 1 << idx`.
+- Derive widths and counts from declarations with `.[bits]`
+  (`for i in 0..<gray.[bits]`, `comptime const N = request.[bits]`) instead of
+  restating literals. `.[bits]` works on inputs and outputs; bind it to a
+  `comptime const` before using it inside a `<...>` generic argument.
+- Build a vector bit by bit in a typed local (`mut v:U16 = 0; v#[i] = ...`),
+  then assign the output once.
+- Use `if` expressions when every branch selects one destination's value
+  (`x = if a { b } elif c { d } else { e }`). Preserve priority with
+  `if`/`elif`; use `match` only when its parallel, mutually exclusive
+  semantics are intended.
+- Replace magic encodings, masks, field positions, and sizes with `comptime
+  const` names defined where they belong (or `pub comptime const` in a shared
+  file). Ordinary zero init, boolean conversions, and obvious arithmetic need
+  no artificial constants.
+- Use `Bool` and `true`/`false` for predicates and control. Keep integers for
+  counters, encodings, and bit vectors, and make conversions explicit at the
+  boundary (`U1(b)`, `x == 1`). The `int(...)` cast and the `int` type no
+  longer exist.
+- Use typed destinations and `wrap` for intentional fixed-width arithmetic
+  (`mut limit:U12 = 0; wrap limit = base + size - 1`). Check signedness,
+  extension, and shift behavior rather than treating every slice as a
+  truncation.
+
+**State**
+
+- Declare reset value and pin with the register:
+  `reg last:U16:[reset_pin=rst] = 0x8000` (sync, active-high by default;
+  `negreset=true`, `async=true` otherwise; a reset's name, `_n` included,
+  carries no polarity). Replace the emitter's
+  `reg q___q` + `if rst {...} elif en {...}` with that plus `if en { q = d }`.
+  Keep reset-dependent logic that does more than assign a reset value.
+- A reset value must be comptime. Compute a structured one with a `comb`
+  bound to a `comptime const` (`comptime const INIT = upper_triangle(size=N)`),
+  not with a runtime `mut` loop.
+- Clocks and resets bind by TYPE, not by name: registers bind the enclosing
+  module's single `Clock` and `Reset` inputs implicitly, whatever their names
+  (`clk:Clock`, `rst:Reset`), or mint `clock:Clock`/`reset:Reset` ports that
+  the parent wires to its own. A `clk`/`rst` input typed `Bool`/`U1` is plain
+  data. That is fine for a single-clock design, so a child that has no other
+  use for its clock needs no clock port. In a multi-clock design (two or more
+  `Clock` inputs) pass each clock explicitly and use `clock_pin=`/`reset_pin=`
+  on every register. A `comb` never takes a `Clock`/`Reset` input.
+- Do not turn enables or intentional holds into unconditional writes, and do
+  not replace unknown or unreset state with convenient constants.
+- Unused bits of a packed state vector (e.g. the lower triangle of a
+  triangular matrix) should be driven exactly as the reference drives them,
+  or LEC state pairing and induction will fail on them.
+- Registered outputs of a `mod` land at `@[1]`, combinational ones at `@[0]`.
+  Read the timecheck error: it usually names the right cycle. A caller that
+  combines a `@[1]` output with same-cycle values without `stage[N]` alignment
+  is rejected ("mixes values at different cycles"); the generated lhdtrack
+  harnesses do exactly that, so on an external top declare such an output
+  `@[]` and say why in a comment.
+
+**Configuration**
+
+- Use generics or `comptime const` for configuration and keep concrete entry
+  modules where the flow requires them. Preserve supported configurations;
+  mark unsupported ones with `cassert` and a comment
+  (`cassert(NUM_REQUESTERS >= 2, "...")`). Do not add features.
+
+## 4. Verify each step
+
+Validate incrementally with LiveHD only.
+
+- **LEC against the previous snapshot, not the original.** After each small
+  change, compile and `lhd lec` the new Pyrope against the last verified
+  snapshot; on a pass, the new version becomes the snapshot. Small deltas prove
+  in seconds where a comparison against the original or the Verilog can take
+  minutes or give up. Compile both sides with
+  `--set compile.upass.inline=false` and compare `lg:` directories. When
+  collapsing a field-by-field copy into a whole-tuple assignment, this is the
+  check that it is equivalent.
+- **Verdicts.** `proven` is a pass and `refuted` is a failure. A `timeout` or
+  `inconclusive` is not a disproof and may be accepted, **but it is not a proof
+  either**: an inconclusive LEC has hidden real miscompiles in this flow. Every
+  step that is not `proven` must be backed by simulation.
+- **Renamed state.** Changed hierarchy or instance names break automatic
+  flop pairing and leave LEC inconclusive. Pair renamed registers explicitly
+  with `--set formal.lec.match='ref.path.q=impl.path.q'` (same widths only; a
+  width mismatch yields a spurious refute). Instance names come from the
+  binding (`const arb = child(...)` names the instance `arb`). Keep the mapping
+  in the report and separate from automatic matching.
+- **Simulation.** Run the existing testbench on the original and the cleaned
+  source for enough cycles to get past reset into useful work, and compare
+  results. Check that the testbench actually exercises the design: a harness
+  that ties a handshake input to a constant (or a recorded checksum of 0)
+  makes the simulation gate vacuous; drive it randomly in a scratch harness
+  and compare original vs cleaned there. Simulation cannot see clock-domain mistakes when the harness ties
+  all clocks together; multi-clock designs need LEC.
+- **Packed or split state** cannot be paired (`formal.lec.match` maps whole
+  flops only). Prefer keeping the reference's state granularity; when a
+  cleanup must repack state, expect an inconclusive LEC and lean on
+  simulation plus a proven intermediate step.
+- **Formatter.** `lhd pyrope fmt` defaults to AI mode (one line per
+  statement, sorted named lists, `f(x=x)` → `f(x)`). It can still change
+  meaning when it sorts a `type`/`enum` declaration or shortens an argument
+  that names no parameter, so LEC the formatted source against the
+  pre-format snapshot every time (the pre-format → formatted step is cheap).
+- **Final checks.** Run `lhd pyrope fmt -i`, then LEC the formatted source
+  against the pre-format snapshot, LEC the final source against the external
+  reference at the unchanged top, and rerun simulation. Exercise the
+  representative parameter combinations the cleanup touched. Prefer an
+  unbounded (inductive) proof when the original had one.
+- Only the external top must stay equivalent; intermediate modules may change
+  boundaries. Keep the same top and testbench across Verilog, generated
+  Pyrope, and cleaned Pyrope. Where the project uses incremental compilation
+  or precompiled imports, check those paths too.
+- Do not weaken assertions, alter the reference, or change benchmark settings
+  to get a pass. Translate existing checks of a changed internal interface to
+  the new representation, preserving their assertions, stimulus, and
+  coverage.
+
+## 5. Known LiveHD limitations (check before trusting a workaround)
+
+Re-verified 2026-09-28. Retest each before relying on it, and report any that
+are fixed or new with a minimal reproducer. Do not carry an old workaround
+into new code without re-checking it: most of the 2026-09-27 list is fixed
+(generic `comb` output widths, loop-read generic port widths, the false
+combinational loop through a child's register, bit writes into outputs,
+nested lambdas reading comptime constants, `wire`/`reg`-array use in loops,
+byte-enable memory writes, `a#[0..+1]`, single-output auto-unwrap, tuple-typed
+ports and fields, stateful children in loops under `lhd sim`), so
+`::[timecheck=false]`, `mod`-instead-of-`comb`, typed rebinds, and
+build-then-assign locals are no longer needed.
+
+- **Silent:** a register both bit-read and conditionally bit-written inside a
+  rolled `for` loop loses the write; build the next value in a `mut` and
+  assign the register once after the loop. **Silent:** an
+  `ordering="old"` memory keeps only the last of several same-cycle partial
+  writes to one entry; write the merged word. Both passed compile and one
+  passed sim; only LEC or the full simulation caught them.
+- A memory element passed to a typed `comb` input now fails ("unbounded
+  range"); bind it to a typed `const` first. In a generic lambda with any
+  `mut`, cast a local (`const b = flag; U1(b)`) rather than a `Bool` port.
+  An import const must not share its file's name.
+- LEC budget is not monotone: a design that is inconclusive at
+  `formal.timeout=30` can prove in seconds at 150. Retry a surprising
+  inconclusive result with a larger budget before restructuring.
+- When the reference stores a triangular or partially-used state vector in
+  one flop (unused bits hold, never reset), the proof needs the Pyrope to
+  mirror that; an idiomatic reset of the unused bits stays inconclusive.
+- Arrays whose element width is generic (`reg r:[N]Unsigned(bits=N)`, array
+  ports of generics) are rejected, and a bit-assign into an array element
+  inside nested loops (`m[i]#[j] = ...`) fails. Pack as `Unsigned(bits=N*W)`
+  with row slices `#[(i*W)..+W]` (or build a row in a scalar and assign
+  `m[i] = row`) and document the layout.
+- `std.clog2` and value-derived `.[bits]` of a comptime constant are
+  documented but not implemented; pass derived widths as extra generics with
+  a `cassert`, or use `Unsigned(max=DEPTH - 1)` for index types.
+- Write an expression used as a generic argument in parentheses
+  (`m<W=(2*N - 1)>`).
+- Range analysis does not use the guarding condition:
+  `x = if x == MAX { 0 } else { x + 1 }` on `Unsigned(max=MAX)` still needs
+  `wrap`.
+- Auto-generated instance names of unnamed calls are long mangled strings;
+  bind calls whose state LEC must pair (`const sync = f(...)`) so instance
+  names stay predictable.
+- Unverified since the fix pass: `lhd sim` reading a `wire` back-edge one
+  cycle late inside a `for` loop. Back loop refactors with a full simulation.
+
+## 6. Report
+
+Report code size against both the starting Pyrope and the matching Verilog,
+including every helper introduced or removed, with the same word-count method
+and source scope on both snapshots. Separate formatter-only changes from
+reductions in repeated logic; fewer words are evidence of a simpler
+representation, not a reason to compress whitespace or weaken validation.
+List per test: final LEC verdict against the reference, any `formal.lec.match`
+pairs used, the simulation comparison, unsupported configurations, and
+LiveHD workarounds left in the source.

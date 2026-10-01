@@ -1,0 +1,32 @@
+/*
+:name: mod_multi_output_cycle_mismatch_import
+:type: error
+:tolg: 1
+:files: inou/prp/tests/imports/mod_multi_output_cycle_mismatch_import.prp
+:error: 'vv'.*lands at cycle
+*/
+// The IMPORTED spelling of errors/mod_multi_output_cycle_mismatch.prp
+// (lhdtrack suggestions 2.1): a caller must see EACH output of a multi-output
+// `mod` child at that output's own declared landing cycle. The imported
+// `dly2.vld` lands at cycle 1, so re-exporting it as a cycle-0 output breaks
+// the caller's interface contract and must be rejected with "lands at cycle".
+//
+// The imported case matters on its own: upass.timecheck cannot see an
+// imported callee's body, so only upass.tolg's time-checker can report it
+// (the single-output imported analogue does: "'vv' in '<unit>.mtop' lands at
+// cycle(s) (1,1) but (0,0) is declared at the interface"). Before the 2.1 fix
+// tolg keyed a Sub's landing cycle only for a SINGLE-output child and saw every
+// output of a multi-output child at cycle 0, so this design compiled silently.
+// A fix that only made upass.timecheck per-output (enough for the same-file
+// fixtures) leaves this red.
+//
+// `:files:` names only the importer; importer-directory discovery appends
+// lib_multi_output_dly.prp. No line marker: the timecheck form of this error
+// has no source span.
+const dly2 = import("lib_multi_output_dly.dly2")
+
+pub mod mtop(en:Bool, a:U4) -> (vv:Bool@[0], qq:U4@[0]) {
+  const x = dly2(en=en, d=a)
+  vv = x.vld
+  qq = x.q
+}

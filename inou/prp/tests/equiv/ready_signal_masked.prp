@@ -5,7 +5,7 @@
 :pyrope_top: ready_signal_masked
 */
 // Independent priority encoder for the concurrent, masked feedback spelling.
-pub comb ready_signal_masked(req:u4) -> (grant:u4) {
+pub comb ready_signal_masked(req:U4) -> (grant:U4) {
   if req#[0] != 0 { grant = 1 }
   elif req#[1] != 0 { grant = 2 }
   elif req#[2] != 0 { grant = 4 }

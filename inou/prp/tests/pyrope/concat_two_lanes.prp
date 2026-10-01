@@ -10,12 +10,12 @@
 // window comes from each lane's DECLARED type — never from the live value.
 //
 // `:type: compile` runs the whole flow: upass.tolg builds the cell (so the
-// windows really come from `a:u4` / `b:u2` -- a `:type: upass` run would stop
+// windows really come from `a:U4` / `b:U2` -- a `:type: upass` run would stop
 // before the only pass that reads the declared widths) and inou.cgen.verilog
 // then emits it as `{a, b}`.
 //
 // z is u6 = 4 + 2 (the lane sum), with `a` occupying bits [5..2]; the result of
 // a concat is always non-negative, hence unsigned.
-comb concat_two_lanes(a:u4, b:u2) -> (z:u6) {
+comb concat_two_lanes(a:U4, b:U2) -> (z:U6) {
   z = (b, a)#[..]
 }

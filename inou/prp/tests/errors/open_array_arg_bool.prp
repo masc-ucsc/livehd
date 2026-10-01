@@ -1,0 +1,8 @@
+/*
+:name: open_array_arg_bool
+:type: error
+:error: wrong kind
+*/
+
+comb sum(x:[]U8) -> (total) { total = 0; for a in x { total += a } }
+const r = sum(1,true) // locate_error_here

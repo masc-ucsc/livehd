@@ -17,7 +17,7 @@ test trivial_if.sig {
     s = s * 6364136223846793005 + 1442695040888963407
     acc.b = s & 0x7f
     s = s * 6364136223846793005 + 1442695040888963407
-    acc.cond = s & 0x1
+    acc.cond = Bool(s & 0x1)
     step
     sig = sig * 1099511628211 + (acc.res & 0xf)
   }

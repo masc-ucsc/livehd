@@ -1,0 +1,15 @@
+/*
+:name: spec_clock_does_bool
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+// SPEC (clock lane): `Clock` and `Reset` are distinct basic types; `Clock does
+// Bool` is false.
+//   qa.md Appendix 6: "Clock and Reset are distinct basic types (`Clock does
+//     Bool` is false)."
+//   docs 07-typesystem: "`Clock` and `Reset` are distinct basic types (`Clock
+//     does Bool` is false)."
+cassert(!(Clock does Bool))
+cassert(!(Clock does Reset))
+cassert(!(Reset does Clock))

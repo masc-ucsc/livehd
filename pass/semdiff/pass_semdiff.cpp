@@ -39,6 +39,10 @@ void Pass_semdiff::setup() {
       "sweep every def pair (entity-paired; --top scopes to its subtree) and aggregate state stats (false = one top pair)",
       "true");
   m.add_label_optional("save", "save both lg: libraries back (default: on; off under stats iteration sweeps)", "");
+  m.add_label_optional("inline_absent",
+                       "dissolve each instance whose def the other side lacks (a cgen memory wrapper, a synthesis "
+                       "region) into its caller first, as lec[hier] does (default: on under stats; needs save off)",
+                       "");
   m.add_label_optional("name_noise", "experiment: destroy this fraction of impl-side state keys before tier-1 (0..1)", "0");
   m.add_label_optional("noise_seed", "selects which keys name_noise destroys (deterministic)", "1");
   m.add_label_optional("synalign_maxiter", "tier-2 fixed-point round cap (default 64 = converge; 1 = no propagation)", "64");

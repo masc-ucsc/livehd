@@ -1,6 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <cstdint>
+#include <functional>
 #include <memory>
 #include <string_view>
 #include <unordered_set>
@@ -9,6 +11,11 @@
 #include "hhds/graph.hpp"
 
 namespace livehd::partition {
+
+// Optional cooperative admission, shared by flattening and decomposition.
+// Work counts traversal steps. Zero-work checkpoints force process/time checks
+// around bulk operations; individual allocations are not a peak-byte bound.
+using Admission = std::function<bool(std::string_view stage, uint64_t work)>;
 
 // Resolve `inst`'s child def in `outlib`, cloning the IO decl when the def is a
 // body-less black box (liberty/tie cell, external IP, fproperty marker) so the
@@ -54,8 +61,13 @@ using Flat_origin_map = absl::flat_hash_map<hhds::Node_class, Flat_origin>;
 // attrs::ware_module remain instances. The pass-local preserved_defs set adds
 // boundaries, including compact loop bodies. Their mapped bodies must already
 // exist in lib (children-first emission).
+// Optional admission stops instance expansion and connectivity walks. Refusal
+// returns nullptr without a diagnostic; callback exceptions still propagate.
+// As with other failures, lib/origin may contain partial output: callers must
+// discard it and must not publish it. Source definitions remain unchanged.
 [[nodiscard]] std::shared_ptr<hhds::Graph> flatten_hierarchy(hhds::Graph* top, hhds::GraphLibrary* lib, std::string_view flat_name,
                                                              Flat_origin_map* origin = nullptr, bool preserve_modules = false,
-                                                             const std::unordered_set<hhds::Gid>& preserved_defs = {});
+                                                             const std::unordered_set<hhds::Gid>& preserved_defs = {},
+                                                             const Admission&                     admission      = {});
 
 }  // namespace livehd::partition

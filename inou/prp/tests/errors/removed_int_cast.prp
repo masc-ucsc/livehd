@@ -5,9 +5,9 @@
 :error: cast was removed
 */
 
-// The `int(x)` cast was removed. Use `signed(x)`/`unsigned(x)` (sign reinterpret)
-// or a sized `uN(x)`/`sN(x)`.
+// The `int(x)` cast was removed. Use `Signed(x)`/`Unsigned(x)` (sign reinterpret)
+// or a sized `U<N>(x)`/`S<N>(x)`.
 
-pub comb t(a:u8) -> (r:u8) {
+pub comb t(a:U8) -> (r:U8) {
   r = int(a)
 }

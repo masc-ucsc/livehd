@@ -1,0 +1,33 @@
+/*
+:name: import_escaped_member
+:type: comptime
+:files: inou/prp/tests/imports/lib_escaped_member.prp inou/prp/tests/imports/import_escaped_member.prp
+:verifier_pass: 7
+:verifier_fail: 0
+*/
+// `foo` and foo are the same identifier: a backticked plain-identifier segment
+// of an `import("unit.member")` path must resolve exactly like the bare
+// spelling (prp2lnast canonicalizes the path; the call_resolver member match
+// canonicalizes too). A segment that genuinely needs its escape (`in c`) keeps
+// it. Before the fix, `import("lib_escaped_member.`my_inc`")` left `f`
+// unresolved and the value form stalled with import-no-progress.
+const f = import("lib_escaped_member.`my_inc`")
+cassert(f(a=3) == 4)
+
+const g = import("lib_escaped_member.my_inc")
+cassert(g(a=3) == 4)
+
+const h = import("lib_escaped_member.`in c`")
+cassert(h(a=3) == 5)
+
+const k = import("lib_escaped_member.`kval`")
+cassert(k == 5)
+
+const u = import("`lib_escaped_member`.`my_inc`")
+cassert(u(a=1) == 2)
+
+import "lib_escaped_member.`my_inc`" as s
+cassert(s(a=7) == 8)
+
+const lib = import("`lib_escaped_member`")
+cassert(lib.my_inc(a=0) == 1)

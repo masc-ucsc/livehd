@@ -1,0 +1,102 @@
+/*
+:name: reg_rw_rolled_loop
+:type: equiv
+:verilog_top: reg_rw_rolled_loop
+:pyrope_top: reg_rw_rolled_loop
+:lec_top: reg_rw_rolled_loop
+:expect_instances: u_loop_*=7
+*/
+// lhdtrack suggestions2.md 1.1 (found in br_fifo_shared_read_xbar; LEC against
+// the Verilog refuted it there): a register that the loop body both READS and
+// conditionally bit-WRITES, in a loop that stays ROLLED (the default,
+// `compile.unroll=false`). The rolled body carries the register's pending D
+// through the ordinals (`r__carry_in` -> `r__carry_out`) while Q stays an
+// invariant input. With a SECOND carry in the same loop (`out` here) the
+// result came back through a `tuple_get` straight into the register NAME, which
+// rebinds the name instead of writing the flop's D: the emitted Verilog was
+// `___next_r = r` (the flop never changes) and `lhd sim` printed q=3 where
+// the unrolled build printed q=2 -- silently. A loop with ONE carry used a
+// plain store and was right, which is why loop_register_transport stayed green.
+//
+// A register that every iteration writes and none reads was worse: the planner
+// made it a loop FINAL (a plain value) bound to the register name the same
+// way, so the output read the loop's D combinationally and the flop never
+// changed (`z` dropped to 0 on every cycle the loop did not run). A register
+// is always a carry now (it has an incoming value, its pending D).
+//
+// One design, six register shapes, every loop rolled (`:expect_instances:`
+// pins the seven compact-loop instances, the nested inner loop included, so a
+// silent fall back to unrolling cannot pass): per-bit read of Q then a
+// conditional per-bit write (the 1.1 repro), a whole-word read of Q, two
+// registers in one loop, nested loops, the write placed BEFORE the read (a
+// register read still sees Q), and a register written on every path and never
+// read. The golden `.v` is written per bit, with no loop.
+// `reg_rw_rolled_loop_1.prp` proves the rolled build against the unrolled one.
+pub mod reg_rw_rolled_loop(v:U2, d:U2, e:U4, s:U1) -> (q:U2@[0], w:U4@[0], p:U2@[0], y:U2@[0], m:U4@[0], k:U2@[0], x:U1@[0], z:U4@[0]) {
+  // per-bit read of Q, then a conditional per-bit write (two carries: out, r)
+  reg r:U2 = 0
+  mut out:U2 = 0
+  for i in 0..<2 {
+    out#[i] = r#[i]
+    if v#[i] == 1 {
+      r#[i] = d#[i]
+    }
+  }
+  q = out
+
+  // whole-word read of Q, conditional bit write
+  reg t:U4 = 0
+  for i in 0..<4 {
+    if e#[i] == 1 {
+      t#[i] = (t >> 3)#[0] ^ s
+    }
+  }
+  w = t
+
+  // two registers in one loop: a0 takes a1's Q, a1 takes d
+  reg a0:U2 = 0
+  reg a1:U2 = 0
+  for i in 0..<2 {
+    if v#[i] == 1 {
+      a0#[i] = a1#[i]
+      a1#[i] = d#[i]
+    }
+  }
+  p = a0
+  y = a1
+
+  // nested loops, each bit reading the mirrored bit of Q
+  reg n:U4 = 0
+  for i in 0..<2 {
+    for j in 0..<2 {
+      if e#[i * 2 + j] == 1 {
+        n#[i * 2 + j] = d#[j] ^ n#[3 - (i * 2 + j)]
+      }
+    }
+  }
+  m = n
+
+  // the write before the read: the read still sees Q
+  reg b:U2 = 0
+  mut got:U2 = 0
+  for i in 0..<2 {
+    if v#[i] == 1 {
+      b#[i] = d#[i]
+    }
+    got#[i] = b#[i]
+  }
+  k = got
+
+  // written on every path of the loop body, never read in it: the last
+  // iteration's value is the flop's D when the loop runs, and it holds when not
+  reg f:U4 = 0
+  mut par:U1 = 0
+  if s == 1 {
+    for i in 0..<2 {
+      par = par ^ v#[i]
+      f = d ^ i
+    }
+  }
+  x = par
+  z = f
+}

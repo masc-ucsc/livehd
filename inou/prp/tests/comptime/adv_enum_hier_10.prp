@@ -6,9 +6,9 @@
 */
 
 // Integer-typed enum with no explicit values: sequential 0,1,2 (doc rule that
-// :signed switches off one-hot numbering).
-enum V6:signed = (a, b, c)
+// :Signed switches off one-hot numbering).
+enum V6:Signed = (a, b, c)
 
-cassert(u8(V6.a) == 0)
-cassert(u8(V6.b) == 1)
-cassert(u8(V6.c) == 2)
+cassert(U8(V6.a) == 0)
+cassert(U8(V6.b) == 1)
+cassert(U8(V6.c) == 2)

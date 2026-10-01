@@ -8,4 +8,4 @@
 // A closed landing-cycle RANGE on a mod output is LEGAL (multi-path values,
 // see equiv/mod_twopaths) — but it is still CHECKED: a combinational
 // feedthrough computes (0,0), which the declared (1,2) interval rejects.
-mod f(a:u8) -> (x:u8@[1..=2]) { x = a }
+mod f(a:U8) -> (x:U8@[1..=2]) { x = a }

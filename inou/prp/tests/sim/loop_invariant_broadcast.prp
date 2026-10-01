@@ -4,19 +4,19 @@
 */
 // Repeated and changing wide inputs cross two compact-loop boundaries. Lane
 // zero is sometimes inactive while later lanes consume the changed input.
-mod broadcast_lane(a:u8, reset:bool) -> (q:u16@[0]) {
-  reg acc:u16:[reset_pin = ref reset, async = true] = 0
-  acc = acc + a
+mod broadcast_lane(a:U8, reset:Reset) -> (q:U16@[0]) {
+  reg acc:U16:[reset_pin = reset, async = true] = 0
+  wrap acc = acc + a
   q = acc
 }
-pub mod loop_invariant_broadcast(bus:u512, enable:bool, reset:bool) -> (total:u16@[0]) {
-  mut sum:u16 = 0
+pub mod loop_invariant_broadcast(bus:U512, enable:Bool, reset:Reset) -> (total:U16@[0]) {
+  mut sum:U16 = 0
   for group in 0..<4 {
     for lane in 0..<16 {
       if enable or lane != 0 {
-        const value = bus#[((group*16 + lane)*8) ..+ 8]
+        const value = bus#[((group*16 + lane)*8)..+8]
         const q = broadcast_lane(a=value, reset=reset)
-        sum = sum + q
+        wrap sum = sum + q   // q is a U16 port: the sum may not fit
       }
     }
   }

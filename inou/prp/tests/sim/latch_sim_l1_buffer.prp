@@ -31,9 +31,9 @@
 //
 // The `ql` assert is the NON-VACUITY CONTROL: the latch half is already
 // correct, so a failure is specifically the coincident-edge reader.
-pub mod l1buf(clk:bool, d:u8) -> (ql:u8@[0], qf:u8@[1]) {
-  reg l:u8:[latch=true]
-  reg f:u8:[clock_pin=ref clk] = 0
+pub mod l1buf(clk:Bool, d:U8) -> (ql:U8@[0], qf:U8@[1]) {
+  reg l:U8:[latch=true]
+  reg f:U8:[clock_pin=clk] = 0
   ql = l
   qf = f
   if !clk {

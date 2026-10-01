@@ -1,0 +1,12 @@
+/*
+:name: clkrst_clock_as_reset_pin
+:type: error
+:tolg: 1
+:error: `ck` is a `Clock`.*(never a reset|not data)
+*/
+// docs 04b: `reset_pin` takes a `Reset` or a `Bool`, never a `Clock`.
+pub mod clkrst_clock_as_reset_pin(ck:Clock, rs:Reset, d:U8) -> (q:U8@[0]) {
+  reg r:U8:[reset_pin=ck] = 0   // locate_error_here
+  if d != 0 { r = d }
+  q = r
+}

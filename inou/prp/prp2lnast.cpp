@@ -4,15 +4,17 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <functional>
 #include <iostream>
 #include <limits>
 #include <optional>
-#include <utility>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -20,6 +22,7 @@
 #include "absl/strings/str_cat.h"
 #include "battr.hpp"  // THE attribute vocabulary (//upass/core:battr_hdr, header-only)
 #include "diag.hpp"
+#include "hlop/memory_init.hpp"
 #include "pass.hpp"
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
 #include "prp_builtins.hpp"
@@ -28,32 +31,36 @@
 #include "prpparse/prp_diag.hpp"
 #include "prpparse/source_buffer.hpp"
 #include "prpparse/token.hpp"
-#include "range_bits.hpp"  // kMaxIntTypeWidth (//upass/core:range_bits_hdr, header-only)
+#include "range_bits.hpp"  // kMaxIntTypeWidth, std_clog2 (//upass/core:range_bits_hdr, header-only)
 #include "source_path.hpp"
 #include "str_tools.hpp"
 
-static constexpr std::string_view call_ref_arg_marker     = "__ref_arg";
+static constexpr std::string_view call_ref_arg_marker           = "__ref_arg";
 // Marks the receiver actual of a UFCS method call `obj.method(...)`
 // so the runner can reject UFCS onto a self-less callee (the direct call form
 // `method(obj, ...)` lowers without it). Positional, like __ref_arg.
-static constexpr std::string_view call_ufcs_arg_marker    = "__ufcs_arg";
+static constexpr std::string_view call_ufcs_arg_marker          = "__ufcs_arg";
 // Marks an explicit call-site generic binding (`f<int,string>(…)`): one
 // `store(__generic_arg, type_ref)` per type argument, in declaration order,
 // emitted BEFORE the normal actuals. The type_ref is either a named-type ref
 // or a `declare(tmp, prim_type, 'type')` tmp the runner resolves through the
 // same decl-facts ladder as a declared variable.
-static constexpr std::string_view call_generic_arg_marker = "__generic_arg";
+static constexpr std::string_view call_generic_arg_marker       = "__generic_arg";
 // Marks a call-argument spread (`f(..., ...rest)`): the runner expands the
 // referenced bundle's fields into named (`b=…`) / positional actuals at call
 // resolution, so `foo(a=1, ...rest)` binds rest's fields to the matching
 // params. The value child is the spread bundle's ref.
-static constexpr std::string_view call_spread_arg_marker  = "__spread_arg";
+static constexpr std::string_view call_spread_arg_marker        = "__spread_arg";
 // Marks a call-site instance name (`alu::[name=pipeB_ex_mem](…)`): the value
 // child is a const string with the user-chosen instance name. Consumed (never
 // bound to a callee port) by the runner inliner — which uses it as the
 // hierarchical prefix for the inlined regs/mems — and by tolg, which uses it
 // as the Sub instance name when the callee is a non-inlined pipe/mod.
-static constexpr std::string_view call_inst_name_marker   = "__inst_name";
+static constexpr std::string_view call_inst_name_marker         = "__inst_name";
+// Child of a kept (non-streamed) func_def's kind const: the lambda was declared
+// `::[timecheck=false]`. upass/func_extract stamps the extracted lambda (and
+// only it) as timing-check free; keep the spelling in sync there.
+static constexpr std::string_view lambda_timecheck_false_marker = "__timecheck_false";
 
 namespace {
 std::string slurp_file(std::string_view filename) {
@@ -80,6 +87,29 @@ std::string slurp_file(std::string_view filename) {
 // below the overflow threshold.
 static constexpr int kMaxParseNesting = 4000;
 
+// `s[i]`/`s[i+1]` is the `/*` opening a Pyrope block comment. Block comments
+// NEST (`/* a /* b */ c */` is one comment, matching the prpparse lexer and the
+// tree-sitter scanner), so every raw-text comment skipper in this file must use
+// this instead of stopping at the first `*/`. Returns the offset just past the
+// matching `*/`, or s.size() for an unterminated comment.
+static size_t skip_nested_block_comment(std::string_view s, size_t i) {
+  int depth = 0;
+  while (i + 1 < s.size()) {
+    if (s[i] == '/' && s[i + 1] == '*') {
+      ++depth;
+      i += 2;
+    } else if (s[i] == '*' && s[i + 1] == '/') {
+      i += 2;
+      if (--depth == 0) {
+        return i;
+      }
+    } else {
+      ++i;
+    }
+  }
+  return s.size();
+}
+
 // Approximate the peak recursive-descent parser depth `src` would induce, so we
 // can reject stack-overflowing input before it reaches the parser. Two unbounded
 // recursion drivers exist: bracket nesting (`(`/`[`/`{` -> parse_paren etc.) and
@@ -89,8 +119,15 @@ static constexpr int kMaxParseNesting = 4000;
 // skipped). *deepest_byte gets the offset where the peak occurred.
 static int max_parser_depth(std::string_view src, size_t& deepest_byte) {
   int    bracket = 0, unary_run = 0, peak = 0;
-  size_t peak_byte                                         = 0;
-  enum { code, line_comment, block_comment, dq_string } st = code;
+  int    comment_depth = 0;  // Pyrope block comments nest
+  size_t peak_byte     = 0;
+  // String lexing matches the prpparse lexer: '…' has no escapes, "…" has
+  // escapes and `{…}` holes that hold CODE (comments, nested strings, brackets),
+  // and a backtick name is one token. A `//` or `"` inside any of them must not
+  // switch the scan into a comment or string (that hid a deep expression from
+  // this guard). `holes` keeps, per open hole, its inner `{` depth.
+  enum { code, line_comment, block_comment, dq_string, sq_string, bt_name } st = code;
+  std::vector<int> holes;
   for (size_t i = 0; i < src.size(); ++i) {
     const char c = src[i];
     switch (st) {
@@ -100,8 +137,13 @@ static int max_parser_depth(std::string_view src, size_t& deepest_byte) {
         }
         break;
       case block_comment:
-        if (c == '*' && i + 1 < src.size() && src[i + 1] == '/') {
-          st = code;
+        if (c == '/' && i + 1 < src.size() && src[i + 1] == '*') {
+          ++comment_depth;
+          ++i;
+        } else if (c == '*' && i + 1 < src.size() && src[i + 1] == '/') {
+          if (--comment_depth == 0) {
+            st = code;
+          }
           ++i;
         }
         break;
@@ -110,6 +152,22 @@ static int max_parser_depth(std::string_view src, size_t& deepest_byte) {
           ++i;  // skip the escaped byte
         } else if (c == '"') {
           st = code;
+        } else if (c == '{') {
+          holes.push_back(0);  // a hole: code until its matching `}`
+          ++bracket;           // the hole is sub-parsed as an expression
+          st = code;
+        }
+        break;
+      case sq_string:
+        if (c == '\'' || c == '\n') {
+          st = code;
+        }
+        break;
+      case bt_name:
+        if (c == '\\') {
+          ++i;
+        } else if (c == '`' || c == '\n') {
+          st = code;
         }
         break;
       case code:
@@ -117,13 +175,30 @@ static int max_parser_depth(std::string_view src, size_t& deepest_byte) {
           st = line_comment;
           ++i;
         } else if (c == '/' && i + 1 < src.size() && src[i + 1] == '*') {
-          st = block_comment;
+          st            = block_comment;
+          comment_depth = 1;
           ++i;
         } else if (c == '"') {
           st = dq_string;
+        } else if (c == '\'') {
+          st = sq_string;
+        } else if (c == '`') {
+          st = bt_name;
+        } else if (c == '}' && !holes.empty() && holes.back() == 0) {
+          holes.pop_back();  // the hole's own `}`: back in its string
+          if (bracket > 0) {
+            --bracket;
+          }
+          st = dq_string;
         } else if (c == '(' || c == '[' || c == '{') {
+          if (c == '{' && !holes.empty()) {
+            ++holes.back();
+          }
           ++bracket;
         } else if (c == ')' || c == ']' || c == '}') {
+          if (c == '}' && !holes.empty()) {
+            --holes.back();
+          }
           if (bracket > 0) {
             --bracket;
           }
@@ -242,7 +317,30 @@ std::string_view Prp2lnast::get_text(const TSNode& node) const {
   auto length = end - start;
 
   I(end <= prp_file.size());
-  return std::string_view(prp_file).substr(start, length);
+  // `foo` and foo are the SAME identifier whenever the escaped text is plain
+  // identifier characters (`foo[bar]` stays a distinct, escaped name). Every
+  // name the front end reads from source -- builtin callee (`assume`), type-call
+  // key (`bits`), attribute, named argument, generic, tuple field -- goes
+  // through here, so canonicalizing at the one text accessor makes every raw
+  // spelling comparison and lookup honor the rule. Only a node whose WHOLE
+  // text is one escaped plain identifier changes (the inner text may not hold
+  // a backtick, space or operator), so a larger node's text is untouched.
+  const auto txt = str_tools::canonical_escaped_ident(std::string_view(prp_file).substr(start, length));
+  // A backtick name reads the STRING escapes (docs 02-basics "Identifiers";
+  // `` `d\\e` `` is the identifier `d\e`, a Verilog escaped id). Decode a whole
+  // single backtick token once, keeping the quotes, so the LNAST name is the
+  // identifier's value -- the spelling every consumer (tolg, cgen, the Verilog
+  // reader) already uses for it.
+  if (txt.size() >= 3 && txt.front() == '`' && txt.back() == '`' && txt.find('\\') != std::string_view::npos) {
+    if (auto dec = str_tools::decode_backtick_ident(txt)) {
+      decoded_names_.push_back(std::move(*dec));
+      // The decoded value can itself be a plain identifier (`` `c\u{41}` ``
+      // decodes to `cA`): canonicalize AFTER decoding so it is the same name
+      // as the bare spelling.
+      return str_tools::canonical_escaped_ident(decoded_names_.back());
+    }
+  }
+  return txt;
 }
 
 std::string_view Prp2lnast::text_between(uint32_t start, uint32_t end) const {
@@ -359,13 +457,14 @@ namespace {
 // with NO implicit conversion. These mirror the upass `uPass_typecheck` kind
 // model so prp2lnast can reject a literal initializer whose kind contradicts the
 // declared type at parse time, identically for both declaration forms.
-enum class Scalar_kind { unknown, integer, boolean, string };
+enum class Scalar_kind { unknown, integer, boolean, string, clock };
 
 const char* scalar_kind_name(Scalar_kind k) {
   switch (k) {
     case Scalar_kind::integer: return "integer";
     case Scalar_kind::boolean: return "boolean";
     case Scalar_kind::string : return "string";
+    case Scalar_kind::clock  : return "Clock";
     default                  : return "unknown";
   }
 }
@@ -402,15 +501,20 @@ Scalar_kind literal_scalar_kind(const Lnast_node& v) {
 }
 
 // Declared scalar kind of a type node (`bool_type` / `string_type` /
-// `uint_type` / `sint_type`). Composite/named/none types do not constrain the
-// scalar kind here, so they read as `unknown` (check skipped).
+// `uint_type` / `sint_type` / `clock_type` / `reset_type`). Composite/named/none
+// types do not constrain the scalar kind here, so they read as `unknown` (check
+// skipped). A `Reset` is Bool-like (docs 07-typesystem "Clock and Reset": the
+// constant `false` means no reset); a `Clock` takes no literal at all.
 Scalar_kind declared_scalar_kind(TSNode ty) {
   if (ts_node_is_null(ty)) {
     return Scalar_kind::unknown;
   }
   std::string_view t(ts_node_type(ty));
-  if (t == "bool_type") {
+  if (t == "bool_type" || t == "reset_type") {
     return Scalar_kind::boolean;
+  }
+  if (t == "clock_type") {
+    return Scalar_kind::clock;
   }
   if (t == "string_type") {
     return Scalar_kind::string;
@@ -434,6 +538,13 @@ void Prp2lnast::check_decl_init_kind(std::string_view name, const Lnast_node& va
     return;  // named/composite/unsized-named type — kind not constrained here
   }
   Scalar_kind vk = literal_scalar_kind(value);
+  if (dk == Scalar_kind::clock && vk != Scalar_kind::unknown) {
+    report_error(anchor,
+                 "clock-const-bind",
+                 "type",
+                 std::format("`{}` is a `Clock`: a Clock is never bound to a constant (`{}`)", name, value.get_name()),
+                 "drive it from a `Clock` input; to hold registers use an enable");
+  }
   if (vk == Scalar_kind::unknown || vk == dk) {
     return;  // no static initializer kind, or kinds already agree
   }
@@ -445,8 +556,11 @@ void Prp2lnast::check_decl_init_kind(std::string_view name, const Lnast_node& va
                            scalar_kind_name(dk),
                            scalar_kind_name(vk),
                            value.get_name()),
-               "no implicit conversion — the initializer must match the declared type, or cast explicitly "
-               "(e.g. `signed(x)`/`unsigned(x)`, `x == false`)");
+               (dk == Scalar_kind::string || vk == Scalar_kind::string)
+                   ? std::string("no implicit conversion — the initializer must match the declared type")
+                   : std::format("no implicit conversion — the initializer must match the declared type, or cast "
+                                 "explicitly: {}",
+                                 upass::kBoolIntCastHint));
 }
 
 void Prp2lnast::report_error(std::string_view code, std::string_view category, std::string message, std::string_view hint) const {
@@ -519,6 +633,12 @@ void prp_collect_sig_targets(const Lnast* ln, const Lnast_nid& node, absl::flat_
     auto v = ln->get_first_child(node);
     if (!v.is_invalid() && Lnast_ntype::is_ref(ln->get_type(v))) {
       out.insert(std::string(ln->get_name(v)));
+      // A defaulted comb input also declares the body-prologue local that
+      // holds its default value (emit_arg_assign's `__default` sentinel).
+      auto d = ln->get_sibling_next(v);
+      if (!d.is_invalid() && Lnast_ntype::is_const(ln->get_type(d)) && ln->get_name(d) == "__default") {
+        out.insert(Lnast_io_entry::default_value_name(ln->get_name(v)));
+      }
     }
     return;
   }
@@ -736,32 +856,32 @@ void Prp2lnast::check_writes_in_scope(const Lnast_nid& scope_stmts, std::vector<
 // NAME(...)` — func_def child0, used as a value in higher-order calls like
 // `apply_each(add_1)`) and type/enum declarations (declare/attr_set with a
 // non-var mode). These are comptime entities — forward references are fine.
-void Prp2lnast::collect_hoisted_names(const Lnast_nid& node, absl::flat_hash_set<std::string>& hoisted) const {
-  const auto t = lnast->get_type(node);
+void Prp2lnast::collect_hoisted_names(const Lnast& ln, const Lnast_nid& node, absl::flat_hash_set<std::string>& hoisted) {
+  const auto t = ln.get_type(node);
   if (Lnast_ntype::is_func_def(t)) {
-    auto c0 = lnast->get_first_child(node);
-    if (!c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0))) {
-      hoisted.insert(std::string(lnast->get_name(c0)));
+    auto c0 = ln.get_first_child(node);
+    if (!c0.is_invalid() && Lnast_ntype::is_ref(ln.get_type(c0))) {
+      hoisted.insert(std::string(ln.get_name(c0)));
     }
   } else if (Lnast_ntype::is_declare(t) || Lnast_ntype::is_attr_set(t)) {
     // declare(name, TYPE, mode) — `type Foo = …` / `enum Foo = …` carry mode
     // "type". attr_set(name, "type", mode) is the pre-rewrite decl form; var
     // modes (mut/const/reg/stage) are program-order scoped, anything else is
     // a comptime entity.
-    auto c0 = lnast->get_first_child(node);
-    if (!c0.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(c0))) {
-      auto c1 = lnast->get_sibling_next(c0);
-      auto c2 = c1.is_invalid() ? c1 : lnast->get_sibling_next(c1);
-      if (!c2.is_invalid() && (Lnast_ntype::is_declare(t) || lnast->get_name(c1) == "type")) {
-        auto mode = lnast->get_name(c2);
+    auto c0 = ln.get_first_child(node);
+    if (!c0.is_invalid() && Lnast_ntype::is_ref(ln.get_type(c0))) {
+      auto c1 = ln.get_sibling_next(c0);
+      auto c2 = c1.is_invalid() ? c1 : ln.get_sibling_next(c1);
+      if (!c2.is_invalid() && (Lnast_ntype::is_declare(t) || ln.get_name(c1) == "type")) {
+        auto mode = ln.get_name(c2);
         if (mode != "mut" && mode != "const" && mode != "reg" && mode != "stage") {
-          hoisted.insert(std::string(lnast->get_name(c0)));
+          hoisted.insert(std::string(ln.get_name(c0)));
         }
       }
     }
   }
-  for (auto c = lnast->get_first_child(node); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
-    collect_hoisted_names(c, hoisted);
+  for (auto c = ln.get_first_child(node); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+    collect_hoisted_names(ln, c, hoisted);
   }
 }
 
@@ -769,10 +889,10 @@ void Prp2lnast::collect_hoisted_names(const Lnast_nid& node, absl::flat_hash_set
 // read position (a declaration is visible from its statement onward), then
 // climb the enclosing frames. Crossing a func_def boundary also checks its
 // signature (params/outputs); names visible at the lambda's definition point
-// stay readable inside the body — whether the captured VALUE is
-// comptime-constant is the runner's closure-capture check (entry 1x, see
-// closure_capture.prp), not a parse-time rule. Crossing a `for` node makes
-// its iterator visible (the runner-unroll form carries no attr_set decl).
+// stay readable inside the body. Whether a nested lambda may read an enclosing
+// binding at all (comptime only) is checked when the read is lowered, see
+// capture_frames_ / check_capture_read. Crossing a `for` node makes its
+// iterator visible (the runner-unroll form carries no attr_set decl).
 namespace {
 // Names a statement-level child declares (mirror of read_is_visible's
 // stmt_declares lambda). Used to precompute read_scope_decls_.
@@ -818,21 +938,26 @@ bool Prp2lnast::read_is_visible(const Read_site& rs) const {
 
   Lnast_nid frame    = rs.scope;
   Lnast_nid boundary = rs.before;  // inclusive; invalid = frame was empty at read time
+  if (frame.is_invalid()) {
+    return streamed_scope_names_.contains(rs.name);  // a streamed lambda's signature (no stmts frame yet)
+  }
 
   while (!frame.is_invalid()) {
     // O(1) frame resolution (was an O(siblings) scan per read): `rs.name` is
     // declared in this frame at or before the read iff its earliest declaring
     // child index is <= the boundary child's index. read_scope_decls_ /
     // read_child_index_ are precomputed in check_undefined_reads; this matches the
-    // old scan exactly (which returned at the first declaring child up to and
-    // including `boundary`).
+    // old scan's IR boundary, with a source-order check for declarations moved
+    // ahead of an earlier read (notably an elif initializer ahead of if bodies).
     if (!boundary.is_invalid()) {
       const auto sd = read_scope_decls_.find(frame);
       if (sd != read_scope_decls_.end()) {
         const auto di = sd->second.find(rs.name);
         const auto bi = read_child_index_.find(boundary);
-        if (di != sd->second.end() && bi != read_child_index_.end() && di->second <= bi->second) {
-          return true;
+        if (di != sd->second.end() && bi != read_child_index_.end() && di->second.index <= bi->second) {
+          // A captured binding may also appear in streamed_scope_names_. Do
+          // not let that fallback make a known later declaration visible.
+          return di->second.start_byte <= rs.start_byte;
         }
       }
     }
@@ -885,9 +1010,17 @@ bool Prp2lnast::name_in_inflight_scope(std::string_view name) const {
   return false;
 }
 
+namespace {
+std::string prp_undefined_read_message(std::string_view name) {
+  return std::format("read of undefined variable '{}' (not visible here: declared later, out of scope, or never)", name);
+}
+constexpr std::string_view prp_undefined_read_hint
+    = "declare it with `mut`/`const`/`reg` before use — a variable is visible from its declaration to the end of its scope";
+}  // namespace
+
 void Prp2lnast::check_undefined_reads() const {
   absl::flat_hash_set<std::string> hoisted;
-  collect_hoisted_names(lnast->get_root(), hoisted);
+  collect_hoisted_names(*lnast, lnast->get_root(), hoisted);
 
   // Precompute, per stmts scope, name -> earliest declaring child index (and each
   // child's index), so read_is_visible resolves a frame in O(1) instead of an
@@ -906,7 +1039,11 @@ void Prp2lnast::check_undefined_reads() const {
           for (const auto& nm : names) {
             auto it = decls.find(nm);
             if (it == decls.end()) {
-              decls.emplace(nm, idx);  // earliest declaring position
+              const auto span  = lnast->span_of(c);
+              // Only compare positions within this source file. Captured and
+              // synthesized nodes without a local span still use IR order.
+              const auto start = span.file == src_relpath ? span.start_byte.value_or(0) : 0;
+              decls.emplace(nm, Read_declaration{idx, static_cast<uint32_t>(start)});
             }
           }
         }
@@ -926,6 +1063,22 @@ void Prp2lnast::check_undefined_reads() const {
     if (read_is_visible(rs)) {
       continue;
     }
+    // Old type spellings are ordinary identifiers. Resolve declared names
+    // first, then help an unresolved use migrate to the capitalized type.
+    if (const auto renamed = str_tools::renamed_type_spelling(rs.name);
+        !renamed.empty() && (rs.is_call || rs.is_type || rs.generic != Generic_read::none)) {
+      report_error_at(
+          rs.start_byte,
+          rs.end_byte,
+          rs.start_line,
+          rs.start_col,
+          rs.end_line,
+          rs.end_col,
+          "renamed-type",
+          "name",
+          std::format("`{}` was renamed `{}`", rs.name, renamed),
+          std::format("use `{}` for the built-in type or cast, or declare `{}` before using it as a name", renamed, rs.name));
+    }
     // report_error throws — the first undefined read aborts the parse. The
     // pre-captured span (2f-stream: the originating TSNode is gone) locates it.
     if (rs.is_call) {
@@ -941,10 +1094,27 @@ void Prp2lnast::check_undefined_reads() const {
                         rs.end_col,
                         "removed-int-cast",
                         "type",
-                        std::format("the `{}(...)` cast was removed — use `signed(x)`/`unsigned(x)` to reinterpret a "
-                                    "value's sign, or a sized cast `uN(x)`/`sN(x)`",
+                        std::format("the `{}(...)` cast was removed — use `Signed(x)`/`Unsigned(x)` to reinterpret a "
+                                    "value's sign, or a sized cast `U<N>(x)`/`S<N>(x)`",
                                     rs.name),
-                        "Pyrope spells sign intent explicitly: `signed`/`unsigned` (or `sN`/`uN`)");
+                        "Pyrope spells sign intent explicitly: `Signed`/`Unsigned` (or `S<N>`/`U<N>`)");
+      } else if (rs.name == "Clock" || rs.name == "Reset") {
+        // A type word, but not a cast (docs 07-typesystem "Clock and Reset").
+        report_error_at(rs.start_byte,
+                        rs.end_byte,
+                        rs.start_line,
+                        rs.start_col,
+                        rs.end_line,
+                        rs.end_col,
+                        "no-clock-reset-cast",
+                        "type",
+                        rs.name == "Clock" ? std::string("`Clock(...)` is not a cast: a Clock is never made from data "
+                                                         "(there are no derived clocks)")
+                                           : std::string("`Reset(...)` is not a cast: a Reset is Bool-like, a `Bool` "
+                                                         "expression binds to it without a cast"),
+                        rs.name == "Clock" ? "drive a clock pin from a `Clock` input, or gate one with "
+                                             "`Clock(clock_pin=clk, enable=en)`"
+                                           : "pass the `Bool` expression itself (`reset_pin=rst or soft_rst`)");
       } else {
         report_error_at(
             rs.start_byte,
@@ -958,6 +1128,21 @@ void Prp2lnast::check_undefined_reads() const {
             std::format("call to undefined function '{}' (no such `comb`/`mod`/`pipe`, variable, or built-in)", rs.name),
             "define it with `comb`/`mod`/`pipe`, import it, or check the spelling");
       }
+    } else if (rs.is_type && prp_builtins::is_removed_int_keyword(rs.name)) {
+      // `a:int` / `a:uint` / `a:integer`: removed types, not an unknown name.
+      report_error_at(rs.start_byte,
+                      rs.end_byte,
+                      rs.start_line,
+                      rs.start_col,
+                      rs.end_line,
+                      rs.end_col,
+                      "removed-int-type",
+                      "type",
+                      std::format("the `{}` type was removed — use `{}` (unbounded) or a sized `{}`",
+                                  rs.name,
+                                  rs.name == "uint" ? "Unsigned" : "Signed",
+                                  rs.name == "uint" ? "U<N>" : "S<N>"),
+                      "Pyrope spells sign intent explicitly: `Signed`/`Unsigned` (or `S<N>`/`U<N>`)");
     } else if (rs.is_type) {
       report_error_at(rs.start_byte,
                       rs.end_byte,
@@ -969,21 +1154,45 @@ void Prp2lnast::check_undefined_reads() const {
                       "type",
                       std::format("`{}` is not a type (no such `type`/`enum` is declared or in scope)", rs.name),
                       std::format("declare it with `type {0} = …` / `enum {0} = …`, or use a built-in type "
-                                  "like `u4`/`bool`/`string`",
+                                  "like `U4`/`Bool`/`String`",
                                   rs.name));
+    } else if (rs.generic != Generic_read::none) {
+      report_error_at(rs.start_byte,
+                      rs.end_byte,
+                      rs.start_line,
+                      rs.start_col,
+                      rs.end_line,
+                      rs.end_col,
+                      "unknown-generic-name",
+                      "name",
+                      std::format("unknown type or lambda '{}' in a generic {} (it is not declared before this point)",
+                                  rs.name,
+                                  rs.generic == Generic_read::default_value ? "default" : "argument"),
+                      std::format("declare `{}` before its use: a generic default or argument names a type, a lambda or a "
+                                  "comptime const declared earlier in the file",
+                                  rs.name));
+    } else if (rs.name == prp_builtins::std_namespace) {
+      report_error_at(rs.start_byte,
+                      rs.end_byte,
+                      rs.start_line,
+                      rs.start_col,
+                      rs.end_line,
+                      rs.end_col,
+                      "std-not-a-value",
+                      "name",
+                      "`std` is the built-in namespace, not a value",
+                      "call one of its functions, e.g. `std.clog2(x)`");
     } else {
-      report_error_at(
-          rs.start_byte,
-          rs.end_byte,
-          rs.start_line,
-          rs.start_col,
-          rs.end_line,
-          rs.end_col,
-          "undefined-read",
-          "name",
-          std::format("read of undefined variable '{}' (not visible here: declared later, out of scope, or never)", rs.name),
-          "declare it with `mut`/`const`/`reg` before use — a variable is visible from its "
-          "declaration to the end of its scope");
+      report_error_at(rs.start_byte,
+                      rs.end_byte,
+                      rs.start_line,
+                      rs.start_col,
+                      rs.end_line,
+                      rs.end_col,
+                      "undefined-read",
+                      "name",
+                      prp_undefined_read_message(rs.name),
+                      prp_undefined_read_hint);
     }
   }
 }
@@ -1141,9 +1350,34 @@ std::string_view prp_store_ref_name(const Lnast& ln, const Lnast_nid& c) {
   return ln.get_name(c0);
 }
 
+// Driver metrics belong to bindings, not spellings. A declaration in a
+// nested scope starts a different binding (possibly before a later declaration
+// in the enclosing scope), so its writes must not count against that scope.
+struct Driver_scope {
+  const Driver_scope*                   outer;
+  absl::flat_hash_set<std::string_view> locals;
+
+  Driver_scope(const Lnast& ln, const Lnast_nid& node, const Driver_scope* parent) : outer(parent) {
+    if (outer && Lnast_ntype::is_stmts(ln.get_type(node))) {
+      for (auto c : ln.children(node)) {
+        if (Lnast_ntype::is_declare(ln.get_type(c))) {
+          const auto name = ln.get_first_child(c);
+          if (!name.is_invalid()) {
+            locals.insert(ln.get_name(name));
+          }
+        }
+      }
+    }
+  }
+
+  bool hides(std::string_view name) const { return locals.contains(name) || (outer && outer->hides(name)); }
+};
+
 // Mirror of prp_wire_has_field_store, for all wires: a `store(w, 'field', v)`
 // (>=3 children, const selector) anywhere except inside a func_def body.
-void gather_field_store_wires(const Lnast& ln, const Lnast_nid& nid, absl::flat_hash_set<std::string>& out) {
+void gather_field_store_wires(const Lnast& ln, const Lnast_nid& nid, absl::flat_hash_set<std::string>& out,
+                              const Driver_scope* outer = nullptr) {
+  const Driver_scope scope(ln, nid, outer);
   if (Lnast_ntype::is_func_def(ln.get_type(nid))) {
     return;
   }
@@ -1152,31 +1386,33 @@ void gather_field_store_wires(const Lnast& ln, const Lnast_nid& nid, absl::flat_
     if (!c0.is_invalid() && Lnast_ntype::is_ref(ln.get_type(c0))) {
       auto c1 = ln.get_sibling_next(c0);
       auto c2 = c1.is_invalid() ? c1 : ln.get_sibling_next(c1);
-      if (!c2.is_invalid() && Lnast_ntype::is_const(ln.get_type(c1))) {
+      if (!c2.is_invalid() && Lnast_ntype::is_const(ln.get_type(c1)) && !scope.hides(ln.get_name(c0))) {
         out.insert(std::string(ln.get_name(c0)));
       }
     }
   }
   for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
-    gather_field_store_wires(ln, c, out);
+    gather_field_store_wires(ln, c, out, &scope);
   }
 }
 
 // Mirror of prp_wire_written_under_loop, for all wires.
-void gather_loop_driven_wires(const Lnast& ln, const Lnast_nid& nid, bool in_loop, absl::flat_hash_set<std::string>& out) {
+void gather_loop_driven_wires(const Lnast& ln, const Lnast_nid& nid, bool in_loop, absl::flat_hash_set<std::string>& out,
+                              const Driver_scope* outer = nullptr) {
+  const Driver_scope scope(ln, nid, outer);
   const auto t = ln.get_type(nid);
   if (Lnast_ntype::is_stmts(t)) {
     for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
       if (in_loop) {
         const auto w = prp_store_ref_name(ln, c);
-        if (!w.empty() && prp_wire_driver_store(ln, c, w)) {
+        if (!w.empty() && !scope.hides(w) && prp_wire_driver_store(ln, c, w)) {
           out.insert(std::string(w));
         }
       }
       const auto ct = ln.get_type(c);
       if (Lnast_ntype::is_if_like(ct) || Lnast_ntype::is_for(ct) || Lnast_ntype::is_while(ct) || Lnast_ntype::is_tick(ct)
           || Lnast_ntype::is_stmts(ct)) {
-        gather_loop_driven_wires(ln, c, in_loop, out);
+        gather_loop_driven_wires(ln, c, in_loop, out, &scope);
       }
     }
     return;
@@ -1185,7 +1421,7 @@ void gather_loop_driven_wires(const Lnast& ln, const Lnast_nid& nid, bool in_loo
     const bool nl = in_loop || Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t) || Lnast_ntype::is_tick(t);
     for (auto c = ln.get_first_child(nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
       if (Lnast_ntype::is_stmts(ln.get_type(c))) {
-        gather_loop_driven_wires(ln, c, nl, out);
+        gather_loop_driven_wires(ln, c, nl, out, &scope);
       }
     }
   }
@@ -1216,13 +1452,14 @@ void wire_lanes_merge(Wire_lanes& dst, const Wire_lanes& src, bool detect) {
 // `if c { w = a; w = b }` is two — the shape a presence-set could not tell
 // apart).
 void gather_subtree_write_wires(const Lnast& ln, const Lnast_nid& nid, absl::flat_hash_map<std::string, int>& out,
-                                absl::flat_hash_set<std::string>& full, Wire_lanes& lanes) {
+                                absl::flat_hash_set<std::string>& full, Wire_lanes& lanes, const Driver_scope* outer = nullptr) {
+  const Driver_scope scope(ln, nid, outer);
   const auto t = ln.get_type(nid);
   if (Lnast_ntype::is_stmts(t)) {
     Lnast_nid prev;
     for (auto c = ln.get_first_child(nid); !c.is_invalid(); prev = c, c = ln.get_sibling_next(c)) {
       const auto w = prp_store_ref_name(ln, c);
-      if (!w.empty() && prp_wire_driver_store(ln, c, w)) {
+      if (!w.empty() && !scope.hides(w) && prp_wire_driver_store(ln, c, w)) {
         ++out[std::string(w)];
         std::string m;
         if (!prp_wire_partial_store(ln, c, prev, w, &m)) {
@@ -1235,13 +1472,13 @@ void gather_subtree_write_wires(const Lnast& ln, const Lnast_nid& nid, absl::fla
       if (Lnast_ntype::is_if_like(ct) || Lnast_ntype::is_for(ct) || Lnast_ntype::is_while(ct) || Lnast_ntype::is_tick(ct)) {
         Wire_lanes                            sub;  // ONE construct == one union over its arms
         absl::flat_hash_map<std::string, int> sub_count;
-        gather_subtree_write_wires(ln, c, sub_count, full, sub);
+        gather_subtree_write_wires(ln, c, sub_count, full, sub, &scope);
         for (const auto& [ww, k] : sub_count) {
           out[ww] += k;  // the construct runs after the writes above it
         }
         wire_lanes_merge(lanes, sub, /*detect=*/true);
       } else if (Lnast_ntype::is_stmts(ct)) {
-        gather_subtree_write_wires(ln, c, out, full, lanes);  // a plain block: same straight line
+        gather_subtree_write_wires(ln, c, out, full, lanes, &scope);  // a plain block: same straight line
       }
     }
     return;
@@ -1251,7 +1488,7 @@ void gather_subtree_write_wires(const Lnast& ln, const Lnast_nid& nid, absl::fla
       if (Lnast_ntype::is_stmts(ln.get_type(c))) {
         Wire_lanes                            arm;
         absl::flat_hash_map<std::string, int> arm_count;
-        gather_subtree_write_wires(ln, c, arm_count, full, arm);
+        gather_subtree_write_wires(ln, c, arm_count, full, arm, &scope);
         for (const auto& [ww, k] : arm_count) {
           auto& slot = out[ww];
           slot       = std::max(slot, k);  // arms never both run
@@ -1273,12 +1510,13 @@ void gather_subtree_write_wires(const Lnast& ln, const Lnast_nid& nid, absl::fla
 // written value — see lower_if's wire don't-care fill). What stays illegal is a
 // SECOND driver, which is what `count`/`full`/`lanes` measure.
 void gather_count_wire_drivers(const Lnast& ln, const Lnast_nid& stmts, absl::flat_hash_map<std::string, int>& count,
-                               absl::flat_hash_set<std::string>& full, Wire_lanes& lanes) {
+                               absl::flat_hash_set<std::string>& full, Wire_lanes& lanes, const Driver_scope* outer = nullptr) {
+  const Driver_scope scope(ln, stmts, outer);
   Lnast_nid prev;
   for (auto c = ln.get_first_child(stmts); !c.is_invalid(); prev = c, c = ln.get_sibling_next(c)) {
     const auto t = ln.get_type(c);
     const auto w = prp_store_ref_name(ln, c);
-    if (!w.empty() && prp_wire_driver_store(ln, c, w)) {
+    if (!w.empty() && !scope.hides(w) && prp_wire_driver_store(ln, c, w)) {
       ++count[std::string(w)];
       std::string m;
       if (!prp_wire_partial_store(ln, c, prev, w, &m)) {
@@ -1292,7 +1530,7 @@ void gather_count_wire_drivers(const Lnast& ln, const Lnast_nid& stmts, absl::fl
       // inside one arm is two.
       absl::flat_hash_map<std::string, int> writes;
       Wire_lanes                            arm_lanes;
-      gather_subtree_write_wires(ln, c, writes, full, arm_lanes);
+      gather_subtree_write_wires(ln, c, writes, full, arm_lanes, &scope);
       for (const auto& [ww, k] : writes) {
         count[ww] += k;
       }
@@ -1307,14 +1545,14 @@ void gather_count_wire_drivers(const Lnast& ln, const Lnast_nid& stmts, absl::fl
         }
         absl::flat_hash_map<std::string, int> ac;
         Wire_lanes                            al;
-        gather_count_wire_drivers(ln, a, ac, full, al);
+        gather_count_wire_drivers(ln, a, ac, full, al, &scope);
         for (const auto& ww : al.overlap) {
           lanes.overlap.insert(ww);
         }
       }
     } else if (Lnast_ntype::is_stmts(t)) {
       absl::flat_hash_map<std::string, int> nc;
-      gather_count_wire_drivers(ln, c, nc, full, lanes);  // a plain block: same straight line
+      gather_count_wire_drivers(ln, c, nc, full, lanes, &scope);  // a plain block: same straight line
       for (const auto& [ww, k] : nc) {
         count[ww] += k;
       }
@@ -1326,13 +1564,14 @@ void gather_count_wire_drivers(const Lnast& ln, const Lnast_nid& stmts, absl::fl
 void Prp2lnast::check_wire_drivers() const {
   check_wire_scope(lnast->get_root());
 
-  // Compact-loop contract 20 is a SOURCE legality rule, independent of the
-  // roll knob: a loop body may not observe or drive a `wire`. A wire is a
-  // module-wide single-driver net, so allowing a rolled body's output to feed
-  // parent combinational logic that in turn feeds the next ordinal would
-  // require parent/body interleaving that one eager simulator loop cannot
-  // represent. Enforce the same rule on the unrolled path so changing the
-  // trip-count policy never changes program legality.
+  // A loop body may READ a `wire` but never DRIVE one (docs 05b-statements.md
+  // "Loops and `wire`"): the body runs once per iteration, so a write there
+  // adds one driver per iteration and breaks the single-driver rule. A
+  // body-local `wire w = expr` drives it too. This is a SOURCE legality rule,
+  // independent of the roll knob; a loop whose body reads a wire is unrolled
+  // (uPass_runner::plan_loop_roll) unless a runtime `break`/`continue` leaves
+  // it no unrolled form, so rolled and unrolled lowerings never disagree about
+  // what compiles.
   const auto                            root = lnast->get_root();
   std::function<void(const Lnast_nid&)> check_unit;
   check_unit = [&](const Lnast_nid& unit) {
@@ -1351,8 +1590,8 @@ void Prp2lnast::check_wire_drivers() const {
       }
     };
     // Every wire declared anywhere under `root` (any depth). Used for the loop
-    // BODY, where a body-local wire is banned by the same rule and is not
-    // visible to the enclosing scope.
+    // BODY: a body-local wire is not visible to the enclosing scope, and its
+    // declaration-drive (`wire w = expr`) is a drive inside the loop.
     std::function<void(const Lnast_nid&, absl::flat_hash_set<std::string>&)> gather_subtree
         = [&](const Lnast_nid& nid, absl::flat_hash_set<std::string>& out) {
             if (nid.is_invalid() || Lnast_ntype::is_func_def(lnast->get_type(nid))) {
@@ -1364,37 +1603,39 @@ void Prp2lnast::check_wire_drivers() const {
             }
           };
 
-    std::function<std::optional<std::pair<Lnast_nid, std::string>>(const Lnast_nid&, bool, const absl::flat_hash_set<std::string>&)>
-        find_use;
-    find_use = [&](const Lnast_nid&                        nid,
-                   bool                                    structural_key,
-                   const absl::flat_hash_set<std::string>& wires) -> std::optional<std::pair<Lnast_nid, std::string>> {
+    // The first store under `nid` that drives one of `wires`: a whole write, a
+    // field write, or the write-back half of a bit-range write (the same
+    // driver shape the single-driver count uses). `= nil` only forward-declares
+    // a wire declared in the body itself; on a wire declared outside the loop
+    // (`outer`) it is a write like any other. A named actual or a tuple field
+    // label (a `store` directly under a call/tuple_add) is a structural key,
+    // not a write; every other use of a wire is a legal read.
+    std::function<std::optional<std::pair<Lnast_nid, std::string>>(const Lnast_nid&,
+                                                                   bool,
+                                                                   const absl::flat_hash_set<std::string>&,
+                                                                   const absl::flat_hash_set<std::string>&)>
+        find_drive;
+    find_drive = [&](const Lnast_nid&                        nid,
+                     bool                                    structural_key,
+                     const absl::flat_hash_set<std::string>& wires,
+                     const absl::flat_hash_set<std::string>& outer) -> std::optional<std::pair<Lnast_nid, std::string>> {
       if (nid.is_invalid() || Lnast_ntype::is_func_def(lnast->get_type(nid))) {
         return std::nullopt;
       }
-      const auto type  = lnast->get_type(nid);
-      const bool keys  = Lnast_ntype::is_func_call(type) || Lnast_ntype::is_tuple_add(type) || Lnast_ntype::is_tuple_concat(type);
-      int        index = 0;
-      for (auto c : lnast->children(nid)) {
-        if (Lnast_ntype::is_ref(lnast->get_type(c))) {
-          const auto name        = std::string(lnast->get_name(c));
-          // Declaration targets and named-actual/tuple field labels are
-          // structural names. A store target outside those contexts is a real
-          // write; every other matching ref is a real read.
-          const bool decl_target = Lnast_ntype::is_declare(type) && index == 0;
-          const bool call_callee = Lnast_ntype::is_func_call(type) && index == 1;
-          const bool key_target  = structural_key && Lnast_ntype::is_store(type) && index == 0;
-          if (!decl_target && !call_callee && !key_target && wires.contains(name)) {
-            // Statement/operator nodes carry the source span; leaf refs often
-            // do not. Anchor on the containing node so line-pinned diagnostics
-            // remain stable as the file changes.
-            return std::pair{nid, name};
-          }
+      const auto type = lnast->get_type(nid);
+      if (!structural_key) {
+        const auto target = prp_store_ref_name(*lnast, nid);
+        if (!target.empty() && wires.contains(target) && (outer.contains(target) || prp_wire_driver_store(*lnast, nid, target))) {
+          // The statement carries the source span (a leaf ref often does not),
+          // so line-pinned diagnostics stay stable as the file changes.
+          return std::pair{nid, std::string(target)};
         }
-        if (auto found = find_use(c, keys, wires); found) {
+      }
+      const bool keys = Lnast_ntype::is_func_call(type) || Lnast_ntype::is_tuple_add(type) || Lnast_ntype::is_tuple_concat(type);
+      for (auto c : lnast->children(nid)) {
+        if (auto found = find_drive(c, keys, wires, outer); found) {
           return found;
         }
-        ++index;
       }
       return std::nullopt;
     };
@@ -1432,14 +1673,13 @@ void Prp2lnast::check_wire_drivers() const {
           }
           auto body_wires = *visible;
           gather_subtree(body, body_wires);
-          if (auto use = find_use(body, false, body_wires); use) {
-            report_error(use->first,
-                         "wire-in-loop",
-                         "unsupported",
-                         std::format("{} body may not read or write wire '{}'",
-                                     Lnast_ntype::is_for(type) ? "for-loop" : "loop",
-                                     use->second),
-                         "move the combinational connection outside the loop and carry an ordinary typed value instead");
+          if (auto drive = find_drive(body, false, body_wires, *visible); drive) {
+            report_error(
+                drive->first,
+                "wire-in-loop",
+                "name",
+                std::format("{} body may not drive wire '{}'", Lnast_ntype::is_for(type) ? "for-loop" : "loop", drive->second),
+                "drive the wire outside the loop; a loop body may only read a wire");
           }
         }
       }
@@ -1501,6 +1741,15 @@ void Prp2lnast::check_wire_scope(const Lnast_nid& node) const {
       scope_wires.emplace_back(c, lnast->get_name(name_n));
     }
     if (!scope_wires.empty() || !scope_consts.empty()) {
+      // The names whose declaration in THIS scope emitted a shape seed.
+      absl::flat_hash_set<std::string> seeded;
+      for (auto c = lnast->get_first_child(node); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
+        if (decl_shape_seed_stores_.contains(c)) {
+          if (const auto t = lnast->get_first_child(c); !t.is_invalid()) {
+            seeded.insert(std::string(lnast->get_name(t)));
+          }
+        }
+      }
       absl::flat_hash_set<std::string>      field_wires;
       absl::flat_hash_set<std::string>      loop_wires;
       absl::flat_hash_map<std::string, int> driver_count;
@@ -1524,9 +1773,9 @@ void Prp2lnast::check_wire_scope(const Lnast_nid& node) const {
         const auto dit     = driver_count.find(wname);
         int        drivers = dit == driver_count.end() ? 0 : dit->second;
         // Discount the inline-tuple TYPE's shape-seed store (see
-        // decl_shape_seed_targets_): it is a compiler artifact of the type, not
+        // decl_shape_seed_stores_): it is a compiler artifact of the type, not
         // one of the net's drivers.
-        if (drivers > 0 && decl_shape_seed_targets_.contains(wname)) {
+        if (drivers > 0 && seeded.contains(wname)) {
           --drivers;
           if (drivers <= 1) {
             full_driven_wires.erase(wname);  // the seed was the only WHOLE store
@@ -1559,11 +1808,9 @@ void Prp2lnast::check_wire_scope(const Lnast_nid& node) const {
                        "assign it (a `wire` must have exactly one driver), or remove the declaration");
         }
       }
-      // A name DECLARED twice in one scope is either a legal match-local reuse
-      // (`match const t = a(); …` twice — each match scope closes, so the second
-      // `t` is a fresh binding, not a rebind) or a redeclaration upass.semacheck
-      // already reports. Either way the scope-wide driver count cannot be
-      // attributed to one of the two declares, so skip the name.
+      // A name declared twice in one scope is a redeclaration semacheck
+      // reports. The driver count cannot be attributed to either declaration.
+      // Initializer locals have separate scopes and do not need this exemption.
       absl::flat_hash_set<std::string> redeclared_consts;
       {
         absl::flat_hash_set<std::string> seen;
@@ -1581,7 +1828,15 @@ void Prp2lnast::check_wire_scope(const Lnast_nid& node) const {
           continue;
         }
         const auto dit     = driver_count.find(cname);
-        const int  drivers = dit == driver_count.end() ? 0 : dit->second;
+        int        drivers = dit == driver_count.end() ? 0 : dit->second;
+        // A typed tuple's shape-seed store (`const k:(a:u6, b:bool) = …`) is
+        // the TYPE's layout, not a bind -- the same discount as for a wire.
+        if (drivers > 0 && seeded.contains(cname)) {
+          --drivers;
+          if (drivers <= 1) {
+            full_driven_wires.erase(cname);
+          }
+        }
         // Disjoint bit-field assembly is ONE bind, exactly as for a wire.
         if (drivers > 1 && (full_driven_wires.contains(cname) || lanes.overlap.contains(std::string(cname)))) {
           report_error(c,
@@ -1674,7 +1929,7 @@ void Prp2lnast::process_description() {
   // during its own walk).
   std::string_view pending_overflow;
   uint32_t         prev_end = 0;  // start of buffer (matches lower_children_range's from==0)
-  while (const prpparse::Ast* c_ast = prp_parser->parse_next()) {
+  while (prpparse::Ast* c_ast = prp_parser->parse_next()) {
     lower_streamed_top_level(TSNode{c_ast, prp_buf.get()}, pending_overflow, prev_end);
   }
   finalize_current_lnast();
@@ -1700,7 +1955,7 @@ void Prp2lnast::finalize_current_lnast() {
   check_wire_drivers();
 }
 
-void Prp2lnast::push_streamed_destination(std::string_view name, std::string_view kind, bool verilog_origin,
+void Prp2lnast::push_streamed_destination(std::string_view name, std::string_view kind, bool timecheck_off,
                                           std::string_view lg_name) {
   destination_stack_.push_back(Destination_state{.lnast                  = std::move(lnast),
                                                  .builder                = std::move(builder),
@@ -1708,12 +1963,15 @@ void Prp2lnast::push_streamed_destination(std::string_view name, std::string_vie
                                                  .read_scope_decls       = std::move(read_scope_decls_),
                                                  .read_child_index       = std::move(read_child_index_),
                                                  .tick_loop_var_decls    = std::move(tick_loop_var_decls_),
+                                                 .decl_shape_seed_stores = std::move(decl_shape_seed_stores_),
                                                  .streamed_scope_names   = std::move(streamed_scope_names_),
-                                                 .streamed_lexical_names = std::move(streamed_lexical_names_)});
+                                                 .capture_rw             = std::move(capture_rw_)});
   lnast = std::make_shared<Lnast>(name);
   lnast->set_root(Lnast_ntype::create_top());
   lnast->set_lambda_kind(kind);
-  lnast->set_verilog_origin(verilog_origin);
+  // `::[timecheck=false]` relaxes TIMING only; it never marks Pyrope as
+  // Verilog-origin (user ruling 2026-09-28 (22)).
+  lnast->set_skip_timecheck(timecheck_off);
   if (!lg_name.empty()) {
     lnast->set_lg_name(lg_name);
   }
@@ -1726,8 +1984,9 @@ void Prp2lnast::push_streamed_destination(std::string_view name, std::string_vie
   read_scope_decls_.clear();
   read_child_index_.clear();
   tick_loop_var_decls_.clear();
+  decl_shape_seed_stores_.clear();
   streamed_scope_names_.clear();
-  streamed_lexical_names_.clear();
+  capture_rw_.clear();
 }
 
 std::shared_ptr<Lnast> Prp2lnast::pop_streamed_destination() {
@@ -1742,8 +2001,9 @@ std::shared_ptr<Lnast> Prp2lnast::pop_streamed_destination() {
   read_scope_decls_       = std::move(state.read_scope_decls);
   read_child_index_       = std::move(state.read_child_index);
   tick_loop_var_decls_    = std::move(state.tick_loop_var_decls);
+  decl_shape_seed_stores_ = std::move(state.decl_shape_seed_stores);
   streamed_scope_names_   = std::move(state.streamed_scope_names);
-  streamed_lexical_names_ = std::move(state.streamed_lexical_names);
+  capture_rw_             = std::move(state.capture_rw);
   return completed;
 }
 
@@ -1769,65 +2029,58 @@ Lnast_nid prp_copy_one_node(const Lnast& src, const Lnast_nid& src_nid, Lnast& d
 // lambda marker rides this in the wrapper tree, where it participates in the
 // compile cache's semantic hash: hashing the RAW bytes made a comment (or
 // reindent) INSIDE a lambda body defeat the comment-only warm hit that
-// semantic_identical provides everywhere else. Comments are stripped and
-// whitespace runs collapse to one byte, both suspended inside string literals;
-// every real token byte (including the hidden `wrap`/`sat` prefixes, which are
-// plain text here) still contributes.
+// semantic_identical provides everywhere else.
+//
+// The span is re-lexed with prpparse's own Lexer, so what counts as a comment is
+// exactly what the parser skipped: a `//` or `/*` inside a string ('…' has no
+// escapes, "…" has escapes and `{…}` holes that may hold nested strings) or a
+// backtick name is a real token byte, never stripped (a hand-rolled scanner got
+// `'\'` and `"{"a" ++ "//2"}"` wrong and reused a stale netlist). The hash
+// covers every token's bytes (the hidden `wrap`/`sat` prefixes are ordinary
+// tokens) plus one separator per inter-token gap: '\n' when the gap holds a
+// newline outside its comments (statement boundaries), ' ' for any other
+// whitespace/comment, nothing for adjacent tokens. A comment inside a string
+// hole is part of that string token's bytes (a miss, never a stale hit).
 uint64_t stable_source_fingerprint(std::string_view txt) {
   std::string norm;
   norm.reserve(txt.size());
-  bool pending_ws = false;
-  for (size_t i = 0; i < txt.size();) {
-    const char c = txt[i];
-    if (c == '"' || c == '\'') {
-      if (pending_ws) {
-        norm.push_back(' ');
-        pending_ws = false;
-      }
-      const char quote = c;
-      norm.push_back(txt[i++]);
-      while (i < txt.size()) {
-        norm.push_back(txt[i]);
-        if (txt[i] == '\\' && i + 1 < txt.size()) {
-          norm.push_back(txt[i + 1]);
-          i += 2;
-          continue;
+  try {
+    const prpparse::Source_buffer buf("", std::string(txt));
+    prpparse::Lexer               lex(buf);
+    const auto                    toks = lex.tokenize();
+    const auto&                   cmts = lex.comments();  // in source order
+    size_t                        ci   = 0;
+    uint32_t                      prev = 0;
+    for (const auto& tok : toks) {
+      const uint32_t gs = prev;
+      const uint32_t ge = tok.start_byte;
+      if (ge > gs) {
+        bool nl = false;
+        for (uint32_t k = gs; k < ge;) {
+          while (ci < cmts.size() && cmts[ci].end_byte <= k) {
+            ++ci;
+          }
+          if (ci < cmts.size() && cmts[ci].start_byte <= k) {
+            k = cmts[ci].end_byte;  // inside a comment: its newlines do not count
+            continue;
+          }
+          if (txt[k] == '\n') {
+            nl = true;
+            break;
+          }
+          ++k;
         }
-        if (txt[i] == quote) {
-          ++i;
-          break;
-        }
-        ++i;
+        norm.push_back(nl ? '\n' : ' ');
       }
-      continue;
+      norm.append(txt.substr(tok.start_byte, tok.end_byte - tok.start_byte));
+      norm.push_back('\0');  // token boundary: `ab` != `a` `b` even when adjacent
+      prev = tok.end_byte;
     }
-    if (c == '/' && i + 1 < txt.size() && txt[i + 1] == '/') {
-      while (i < txt.size() && txt[i] != '\n') {
-        ++i;
-      }
-      pending_ws = true;
-      continue;
-    }
-    if (c == '/' && i + 1 < txt.size() && txt[i + 1] == '*') {
-      i += 2;
-      while (i + 1 < txt.size() && !(txt[i] == '*' && txt[i + 1] == '/')) {
-        ++i;
-      }
-      i          = std::min(txt.size(), i + 2);
-      pending_ws = true;
-      continue;
-    }
-    if (std::isspace(static_cast<unsigned char>(c)) != 0) {
-      pending_ws = true;
-      ++i;
-      continue;
-    }
-    if (pending_ws) {
-      norm.push_back(' ');
-      pending_ws = false;
-    }
-    norm.push_back(c);
-    ++i;
+  } catch (...) {
+    // Not lexable on its own (should not happen for a parsed span): hash the
+    // raw bytes — a comment edit then misses the cache, which is safe.
+    norm.assign("\x01raw:");
+    norm.append(txt);
   }
   return std::hash<std::string>{}(norm);
 }
@@ -2146,13 +2399,8 @@ std::string_view Prp2lnast::scan_overflow_in_gap(uint32_t prev_end, uint32_t gap
         ++k;  // line comment to EOL
       }
     } else if (k + 1 < g.size() && g[k] == '/' && g[k + 1] == '*') {
-      k += 2;
-      while (k + 1 < g.size() && !(g[k] == '*' && g[k + 1] == '/')) {
-        ++k;
-      }
-      if (k + 1 < g.size()) {
-        k += 2;  // past the closing */
-      }
+      k = skip_nested_block_comment(g, k);  // comments nest
+      stripped.push_back(' ');              // a comment separates tokens
     } else {
       stripped.push_back(g[k]);
       ++k;
@@ -2487,8 +2735,10 @@ void Prp2lnast::process_scope_statement(TSNode n, Lnast_nid /*target_stmts*/) {
   // match arm / lambda (or an inline scope expression) — never the top-level
   // file scope (process_description walks the root directly). Bump
   // conditional_depth_ so a write inside cannot capture/update a file-scope
-  // comptime int binding (see const_int_bindings_).
-  Conditional_scope guard(&conditional_depth_);
+  // comptime int binding (see Binding::int_value). Its declarations close
+  // with it (capture_frames_).
+  Conditional_scope   guard(&conditional_depth_);
+  Capture_frame_guard frame(capture_frames_, Capture_frame{});
 
   TSNode attrs = child_by_field(n, "attributes");
   if (ts_node_is_null(attrs)) {
@@ -2731,7 +2981,7 @@ std::vector<int64_t> Prp2lnast::extract_array_dims(TSNode type_cast_node) const 
     TSNode                 idx = ts_node_child_by_field_name(len, "index", 5);
     // A `constant` literal OR a compile-time-resolvable `const`/`mut` binding
     // (`[sz]u8` where `sz` was statically known at the declaration point) — both
-    // resolve through resolve_cycle_value (which consults const_int_bindings_,
+    // resolve through resolve_cycle_value (which reads Binding::int_value,
     // tracking decl-time-known muts with the same UPDATE/ERASE rules). The
     // resolved length must still be > 0, as before.
     std::optional<int64_t> v   = resolve_cycle_value(idx);
@@ -2787,14 +3037,8 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
   // Decode storage class + comptime/pub modifiers from the decl's structured fields.
   auto [kind, has_comptime, has_pub] = decode_decl(decl_node);
 
-  // A stage decl without an initializer has no value to deliver.
-  if (kind == "stage") {
-    report_error(decl_node,
-                 "stage-needs-value",
-                 "type",
-                 "`stage[N]` requires an initializer: it delivers the right-hand side N cycles later",
-                 "write `stage[N] name = value`");
-  }
+  // A timed stage decl with no initializer (`stage[1] out@[4]`) is LEGAL (qa.md Q39 item 7,
+  // docs 15-tbd.md "Other parser rules"): the value arrives from a later assignment.
 
   // `pub` marks a file-scope const value declaration exportable.
   if (has_pub) {
@@ -2834,6 +3078,10 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
     // nothing may be inserted once the cluster head below is emitted.
     prelower_type_bounds(child_by_field(ti, "type"));
     Lnast_node ref = identifier_to_node(id, /*for_lvalue=*/true);
+    check_capture_shadow(ref.get_name(), id);
+    auto& b      = note_binding(ref.get_name(), has_comptime ? Bind_kind::comptime : Bind_kind::runtime);
+    b.fold_const = !has_comptime && kind == "const";
+    b.replayable = kind == "const" || kind == "mut";
     {
       auto idx = builder.add_child(Lnast_ntype::create_attr_set());
       lnast->add_child(idx, ref);
@@ -2843,6 +3091,26 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
       // declaration-site diagnostics (semacheck redeclaration/shadowing) can
       // point at the `mut/const x` line. Mirrors the assignment-form site.
       attach_loc(idx, id);
+      // `stage[N] out@[4]` (no initializer, legal): the (min,max) still rides
+      // the cluster head as the trailing stages node, exactly as in the
+      // assignment form, so the decl-merge builds a depth-N stage `declare`
+      // and the later `out = rhs` store creates the pipeline flop.
+      if (kind == "stage") {
+        if (lambda_kind_stack_.empty() || lambda_kind_stack_.back() != "mod") {
+          report_error(decl_node,
+                       "stage-not-in-mod",
+                       "type",
+                       "`stage[N]` is only valid inside `mod` bodies",
+                       lambda_kind_stack_.empty() || lambda_kind_stack_.back() == "comb"
+                           ? "comb logic is all at cycle 0 — use a plain assignment"
+                           : "pipe bodies use stage inference — use an explicit `reg` stage register instead");
+        }
+        TSNode storage          = ts_node_child_by_field_name(decl_node, "storage", 7);
+        auto [min_txt, max_txt] = parse_stage_slot(storage);
+        auto st                 = lnast->add_child(idx, Lnast_ntype::create_stages());
+        lnast->add_child(st, Lnast_node::create_const(min_txt));
+        lnast->add_child(st, Lnast_node::create_const(max_txt));
+      }
     }
     if (has_comptime) {
       auto idx = builder.add_child(Lnast_ntype::create_attr_set());
@@ -2853,6 +3121,14 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
     TSNode tc = child_by_field(ti, "type");
     if (!ts_node_is_null(tc)) {
       emit_type_spec(ref, tc);
+    }
+    if (kind == "stage") {
+      // `stage[1] out@[4]`: keep the landing-cycle check, as the assignment form does.
+      TSNode timing = child_by_field(ti, "timing");
+      if (ts_node_is_null(timing) && !ts_node_is_null(tc)) {
+        timing = child_by_field(tc, "timing");
+      }
+      maybe_emit_timecheck(timing, id);
     }
   };
 
@@ -2868,7 +3144,8 @@ void Prp2lnast::process_declaration_statement(TSNode n) {
 
 Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node,
                                                 bool rhs_is_fcall, std::string_view rhs_fcall_name, std::string_view overflow_kind,
-                                                bool rhs_name_bindable, std::optional<int64_t> resolved_rvalue_int) {
+                                                bool rhs_name_bindable, std::optional<int64_t> resolved_rvalue_int,
+                                                bool rvalue_comptime) {
   std::string_view lvt(ts_node_type(lvalue));
   if (lvt == "lvalue_list") {
     // Tuple lvalue: `(x0, x1, …) = rhs`. Each item is an `lvalue_item`,
@@ -2980,8 +3257,22 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
           // tuple-of-fcalls RHS, prepend a positional tuple_get on the
           // current lvalue_list slot so the prefix's path applies to the
           // matching call's return.
+          if (destructure_rhs_ == Destructure_rhs::unnamed_var) {
+            // qa.md Appendix 8: an UNNAMED tuple has no names to match, and a
+            // rename slot must not silently bind slot 0.
+            report_error(inner,
+                         "destructure-rename-unnamed",
+                         "name",
+                         std::format("destructure slot `{}`: the right-hand side is an unnamed tuple, it has no field names", get_text(inner)),
+                         "bind an unnamed tuple by position with bare names, `(a, b) = t`");
+          }
+          if (!rhs_is_fcall && destructure_rhs_ == Destructure_rhs::rooted && !prefix.empty()) {
+            // A named variable on the right: the slot's source path starts at
+            // that tuple's own fields (`(x=a, y=b.c) = t`).
+            path_keys.insert(path_keys.begin(), std::move(prefix));
+          }
           Lnast_node tmp = rvalue;
-          if (!rhs_is_fcall) {
+          if (!rhs_is_fcall && destructure_rhs_ == Destructure_rhs::legacy) {
             auto       tg_idx = builder.add_child(Lnast_ntype::create_tuple_get());
             Lnast_node next   = builder.mint_tmp_ref();
             lnast->add_child(tg_idx, next);
@@ -2997,7 +3288,16 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
             lnast->add_child(tg_idx, Lnast_node::create_const(k));
             tmp = next;
           }
-          (void)process_lvalue_for_assign(name_node, tmp, decl_node, item_tc, false, {}, overflow_kind);
+          (void)process_lvalue_for_assign(name_node,
+                                          tmp,
+                                          decl_node,
+                                          item_tc,
+                                          false,
+                                          {},
+                                          overflow_kind,
+                                          false,
+                                          std::nullopt,
+                                          rvalue_comptime);
           ++pos;
           continue;
         }
@@ -3042,7 +3342,8 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       }
       // Recurse: the per-position tmp is the new "rvalue" for the inner lvalue.
       // `decl_node` propagates so `mut (a, b) = …` declares both items.
-      (void)process_lvalue_for_assign(inner, tmp, decl_node, item_tc, false, {}, overflow_kind);
+      (void)
+          process_lvalue_for_assign(inner, tmp, decl_node, item_tc, false, {}, overflow_kind, false, std::nullopt, rvalue_comptime);
       ++pos;
     }
     return rvalue;
@@ -3062,7 +3363,8 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
                                        rhs_fcall_name,
                                        overflow_kind,
                                        rhs_name_bindable,
-                                       resolved_rvalue_int);
+                                       resolved_rvalue_int,
+                                       rvalue_comptime);
     }
   }
   if (lvt == "identifier" || lvt == "typed_identifier") {
@@ -3101,31 +3403,28 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       lnast->add_pub(canonical_escaped_ident(trim(get_text(id))), "value", mint_src(id));
     }
 
-    // Track compile-time-resolvable integer bindings so a later
-    // `@[NAME]`, `stage[NAME]`, or `pipe[NAME]` timing slot can resolve them
-    // (see resolve_cycle_value / const_int_bindings_). No-shadowing is already
-    // enforced, so a fresh binding may safely overwrite an earlier same-name
-    // one.
+    // The statically known integer of this write (see Binding::int_value), so
+    // a later `@[NAME]`, `stage[NAME]`, `pipe[NAME]` timing slot or integer
+    // type bound can resolve the name:
     //
     //   - `const NAME = <compile-time integer expression>` → record
-    //       (immutable, always valid;
-    //       no-shadowing + no-reassign make scoping unambiguous, so no depth
-    //       gate).
+    //       (immutable, always valid, so no depth gate).
     //   - `mut NAME = <compile-time integer expression>` → record with
     //       declaration-time-capture. A later statement-level plain write of
-    //       another resolvable expression UPDATES it,
-    //       and ANY other write ERASEs it. The
-    //       erase covers a runtime rhs, a compound op (the scalar `rvalue`
-    //       arrives as a tmp ref, never a const, so is_const() is false), and
-    //       any write nested in a conditional/loop/lambda body (which makes
-    //       the value no longer statically known — conditional_depth_ > 0).
+    //       another resolvable expression UPDATES it, and ANY other write
+    //       ERASEs it. The erase covers a runtime rhs, a compound op (the
+    //       scalar `rvalue` arrives as a tmp ref, never a const, so is_const()
+    //       is false), and any write nested in a conditional/loop body deeper
+    //       than the declaration (which makes the value no longer statically
+    //       known — conditional_depth_ != Binding::decl_depth). The rule is
+    //       the same in every scope (user ruling 2026-09-28 (32)): a `mod` or
+    //       `comb` body tracks its own `mut` exactly like the file scope.
     //
-    // Updating a mut is gated on conditional_depth_ == 0 so only an
-    // unconditional, statement-level write is captured. A timing slot then
-    // resolves the value known AT THE LAMBDA DECLARATION POINT.
+    // A timing slot then resolves the value known AT THE LAMBDA DECLARATION
+    // POINT.
+    std::optional<int64_t> known_int;
     {
-      std::string nm(trim(get_text(id)));
-      auto        as_int = [&]() -> std::optional<int64_t> {
+      auto as_int = [&]() -> std::optional<int64_t> {
         if (resolved_rvalue_int) {
           return resolved_rvalue_int;
         }
@@ -3137,60 +3436,41 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
         }
         return std::nullopt;
       };
-      if (has_decl && kind_sv == "const") {
-        if (auto v = as_int()) {
-          const_int_bindings_[nm] = *v;
+      if (has_decl && (kind_sv == "const" || kind_sv == "mut")) {
+        known_int = as_int();  // a declaration is unconditional in its own scope
+      } else if (!has_decl) {
+        if (auto* b = find_binding(canonical_escaped_ident(trim(get_text(id))))) {
+          b->int_value = conditional_depth_ == b->decl_depth ? as_int() : std::nullopt;
         }
-      } else if ((has_decl && kind_sv == "mut") || (!has_decl)) {
-        // `mut NAME = lit` (decl) or a plain re-assignment `NAME = lit`.
-        // Record/UPDATE only on an unconditional integer-literal write;
-        // anything else ERASEs the (possibly stale) capture.
-        if (auto v = as_int(); v && conditional_depth_ == 0) {
-          const_int_bindings_[nm] = *v;
-        } else {
-          const_int_bindings_.erase(nm);
-        }
-      } else if (has_decl) {
-        // reg / stage (or any other) decl of NAME: not a comptime int binding.
-        const_int_bindings_.erase(nm);
       }
     }
 
-    // General declaration-point closure values (integer timing constants use
-    // the specialized map above). Writes inside a lambda/conditional do not
-    // mutate the enclosing capture environment. Capture keys must use the same
-    // canonical spelling as declarations and calls, including keyword escapes.
-    if (conditional_depth_ == 0) {
-      const std::string nm(canonical_escaped_ident(trim(get_text(id))));
-      auto              clear_capture = [&]() {
-        capture_const_bindings_.erase(nm);
-        capture_import_bindings_.erase(nm);
-      };
-      if (resolved_rvalue_int) {
-        clear_capture();
-        capture_const_bindings_[nm] = std::to_string(*resolved_rvalue_int);
-      } else if (rvalue.is_const()) {
-        clear_capture();
-        capture_const_bindings_[nm] = std::string(rvalue.get_name());
-      } else if (rvalue.is_ref()) {
-        const std::string rhs(rvalue.get_name());
-        if (auto it = capture_const_bindings_.find(rhs); it != capture_const_bindings_.end()) {
-          auto value = it->second;
-          clear_capture();
-          capture_const_bindings_[nm] = std::move(value);
-        } else if (auto import_it = capture_import_bindings_.find(rhs); import_it != capture_import_bindings_.end()) {
-          auto value = import_it->second;
-          clear_capture();
-          capture_import_bindings_[nm] = std::move(value);
-        } else {
-          clear_capture();
-        }
-      } else {
-        clear_capture();
+    // Nested-lambda capture scope (see capture_frames_): a `comptime const` is
+    // a comptime binding, and so is a plain `const` whose value is a
+    // compile-time constant (ruling 2026-09-28 #24: a known integer, an
+    // expression over comptime bindings, a comptime entity such as an import
+    // namespace, an enum type or a lambda) or exported `pub` (a pub value must
+    // fold). Every other declaration is a runtime binding.
+    if (has_decl) {
+      check_capture_shadow(canonical_escaped_ident(trim(get_text(id))), id);
+      const bool comptime_decl
+          = has_cpt || (kind_sv == "const" && (has_pub || rvalue_comptime || known_int.has_value() || is_comptime_rvalue(rvalue)));
+      auto& b = note_binding(canonical_escaped_ident(trim(get_text(id))), comptime_decl ? Bind_kind::comptime : Bind_kind::runtime);
+      b.int_value  = known_int;
+      b.fold_const = !comptime_decl && kind_sv == "const";
+      b.replayable = kind_sv == "const" || kind_sv == "mut";
+      if (!ts_node_is_null(tc)) {
+        b.typed = true;
+        b.range = folded_int_type_range(child_by_field(tc, "type"));
       }
     }
-    if (!destination_stack_.empty() && has_decl && kind_sv != "const") {
-      streamed_lexical_names_.insert(std::string(canonical_escaped_ident(trim(get_text(id)))));
+    // A file-scope import binding is replayed into every streamed lambda. Keys
+    // use the same canonical spelling as declarations and calls.
+    if (conditional_depth_ == 0 && rvalue.is_ref()) {
+      if (auto it = capture_import_bindings_.find(std::string(rvalue.get_name())); it != capture_import_bindings_.end()) {
+        capture_import_bindings_.insert_or_assign(std::string(canonical_escaped_ident(trim(get_text(id)))),
+                                                  std::string(it->second));
+      }
     }
 
     // 2f-type_bound — same rule as the bare-declaration path in emit_decl_attrs:
@@ -3334,7 +3614,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
         Lnast_node casted = builder.mint_tmp_ref();
         auto       fc     = builder.add_child(Lnast_ntype::create_func_call());
         lnast->add_child(fc, casted);
-        lnast->add_child(fc, Lnast_node::create_ref("string"));
+        lnast->add_child(fc, Lnast_node::create_ref("String"));
         lnast->add_child(fc, store_value);
         store_value = casted;
       }
@@ -3462,43 +3742,70 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     // Read the argument's current value via the expression path. For a plain
     // identifier this is just a ref; for `a.b` this emits a tuple_get into a
     // tmp, which is exactly the old-value input we want feeding set_mask.
-    Lnast_node cur_val  = expr_to_node(arg_n);
-    Lnast_node mask_ref = compute_bit_mask_ref(sel_node);
+    Lnast_node cur_val    = expr_to_node(arg_n);
+    int        lane_width = 0;
+    Lnast_node mask_ref   = compute_bit_mask_ref(sel_node, &lane_width);
 
     // A wrap/sat policy applies to the SELECTED lane, not to the whole base.
     // Give the policy call a synthetic unsigned type whose width is the number
     // of selected bits, then feed its narrowed result to set_mask.  A bare
     // write keeps the original rvalue so upass.bitwidth can reject a source
-    // wider than the selected lane.  Dynamic/open masks have no compile-time
-    // lane width and therefore cannot define wrap/sat semantics here.
+    // wider than the selected lane.  Only the lane WIDTH must be static (a
+    // `acc#[(j*4)..+4]` window may move); a range whose width is not known at
+    // compile time cannot define wrap/sat semantics here.
     Lnast_node store_value = rvalue;
     if (!overflow_kind.empty()) {
-      if (!mask_ref.is_const()) {
+      // The lane type's max, 2^width - 1. A width counted by a compile-time
+      // NAME (`comptime const n = 3; wrap a#[2..+n] = ..`, an attribute read, a
+      // generic, a loop index) is a literal once folded here; when it only
+      // folds after elaboration, the max rides the type_spec as a ref the
+      // runner folds, like any deferred integer type bound (a loop whose body
+      // bakes one unrolls, see plan_loop_roll; a lane that folds to no bits is
+      // rejected by the runner's wrap/sat lowering).
+      const Lnast_node one = Lnast_node::create_const("1");
+      Lnast_node       lane_max;
+      const auto       w = lane_width >= 1 ? std::nullopt : bit_range_lane_width(sel_node);
+      if (lane_width >= 1) {
+        lane_max = Lnast_node::create_const(std::string(Dlop::get_mask_value(lane_width)->to_pyrope()));
+      } else if (w && !w->is_const()) {
+        lane_max = emit_bound_binop(Lnast_ntype::create_minus(), emit_bound_binop(Lnast_ntype::create_shl(), one, *w), one);
+      } else if (const auto& wv = w ? Dlop::from_pyrope_cached(w->get_name()) : Dlop{}; w && wv.is_positive()) {
+        const auto n1 = Dlop::create_integer(1);
+        lane_max      = Lnast_node::create_const(std::string(n1->shl_op(wv)->sub_op(*n1)->to_pyrope()));
+      } else if (w) {
+        // The literal forms get this from compute_bit_mask_ref; bounds that
+        // are comptime NAMES fold only here.
+        TSNode range_n = child_by_field(sel_node, "index");
+        if (ts_node_is_null(range_n)) {
+          range_n = child_by_field(sel_node, "range");
+        }
+        report_error(lvalue,
+                     "descending-bit-range",
+                     "type",
+                     std::format("{} bit range `{}` is not allowed (ranges are increasing and select at least one bit)",
+                                 wv.is_known_zero() ? "empty" : "descending",
+                                 get_text(range_n)),
+                     "write the bounds low-to-high, e.g. `x#[lo..=hi]` with lo <= hi");
+        lane_max = Lnast_node::create_const("0");
+      } else {
         report_error(lvalue,
                      "dynamic-bit-range-overflow-policy",
                      "type",
                      std::format("cannot apply `{}` to a bit-range whose width is not known at compile time", overflow_kind),
                      "use a constant-width destination range, or explicitly select the desired bits on the right-hand side");
-      }
-      const auto& mv = Dlop::from_pyrope_cached(mask_ref.get_name());
-      if (mv.is_invalid() || !mv.is_integer() || mv.is_negative() || mv.popcount() < 1) {
-        report_error(lvalue,
-                     "invalid-bit-range-overflow-policy",
-                     "type",
-                     std::format("cannot derive the destination width for `{}` on `{}`", overflow_kind, get_text(lvalue)),
-                     "use a non-empty constant bit range, or explicitly select the desired bits on the right-hand side");
+        lane_max = Lnast_node::create_const("0");
       }
 
-      const int  width    = mv.popcount();
       Lnast_node type_ref = builder.mint_tmp_ref();
       auto       ts_idx   = builder.add_child(Lnast_ntype::create_type_spec());
       lnast->add_child(ts_idx, type_ref);
       auto pt = lnast->add_child(ts_idx, Lnast_ntype::create_prim_type_int());
-      lnast->add_child(pt, Lnast_node::create_const(std::string(Dlop::get_mask_value(width)->to_pyrope())));
+      lnast->add_child(pt, lane_max);
       lnast->add_child(pt, Lnast_node::create_const("0"));
 
       Lnast_node narrowed = builder.mint_tmp_ref();
       auto       fc       = builder.add_child(Lnast_ntype::create_func_call());
+      attach_loc(fc, lvalue);  // a lane width that folds late is diagnosed at this call
       lnast->add_child(fc, narrowed);
       lnast->add_child(fc, Lnast_node::create_ref(overflow_kind));
       auto va = lnast->add_child(fc, Lnast_ntype::create_store());
@@ -3551,6 +3858,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
     std::vector<Lnast_node>     path;
     Lnast_node                  root;
     bool                        have_root = false;
+    bool                        indexed   = false;  // a `[i]` selection on the path
     std::function<void(TSNode)> collect   = [&](TSNode n) {
       std::string_view t(ts_node_type(n));
       if (t == "dot_expression") {
@@ -3599,6 +3907,7 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
           TSNode idx_node = child_by_field(c, "index");
           if (!ts_node_is_null(idx_node)) {
             path.push_back(expr_to_node(idx_node));
+            indexed = true;
           }
         }
       } else if (t == "identifier") {
@@ -3610,6 +3919,17 @@ Lnast_node Prp2lnast::process_lvalue_for_assign(TSNode lvalue, const Lnast_node&
       }
     };
     collect(lvalue);
+    if (!overflow_kind.empty() && indexed) {
+      // 04b-attributes.md: the prefix attaches to a plain name or a dotted
+      // field; an entry picked with an index has no declared name to narrow to.
+      report_error(lvalue,
+                   "overflow-indexed-entry",
+                   "type",
+                   std::format("`{}` cannot apply to an entry picked with an index: `{}`", overflow_kind, trim(get_text(lvalue))),
+                   std::format("narrow into a typed variable first (`{} v = …`, `v` of the entry's type) and store `v` into "
+                               "the entry, or bit-select the value",
+                               overflow_kind));
+    }
     if (have_root) {
       Lnast_node store_val = rvalue;
       // A `wrap`/`sat` write to a FIELD (`wrap self.v += x`) must lower the value
@@ -3739,24 +4059,18 @@ void Prp2lnast::process_assignment(TSNode n) {
   }
 
   // Keep the RHS node of a top-level `const NAME = "str" | (tuple)` so a later
-  // `enum(...NAME, …)` spread can splice it in place (see const_rvalue_nodes_).
+  // `enum(...NAME, …)` spread can splice it in place (see const_rvalue_nodes_),
+  // and of `const NAME = enum(…)` so its entries fold as a `mod`/`pipe` input
+  // default (enum_entry_value).
   if (!ts_node_is_null(decl) && !ts_node_is_null(lv) && !ts_node_is_null(rv) && conditional_depth_ == 0
       && std::string_view(ts_node_type(lv)) == "identifier" && decode_decl(decl).kind == "const") {
-    if (std::string_view rvt(ts_node_type(rv)); rvt == "constant" || rvt == "tuple") {
+    if (std::string_view rvt(ts_node_type(rv)); rvt == "constant" || rvt == "tuple" || rvt == "enum_definition") {
       // Clone the RHS subtree into the persistent arena (2f-stream): the spread
       // can be a LATER top-level statement, after this construct's arena is reset.
       prpparse::Ast* kept = clone_prp_subtree(retained_arena_, rv.a);
       prpparse::link_parents(kept);
-      // Same canonical spelling as the capture_const_bindings_ key above: the
-      // streamed-lambda prologue replays this name as a ref, and pass.lnastfmt
-      // rejects a backtick-escaped pure-alnum ref as malformed.
-      const std::string const_name(canonical_escaped_ident(trim(get_text(lv))));
-      if (const_rvalue_nodes_.insert_or_assign(const_name, TSNode{kept, prp_buf.get()}).second) {
-        // Source declaration order — the streamed-lambda capture prologue
-        // replays consts and enums in this order so a const tuple that reads
-        // an earlier const/enum sees its producer already emitted.
-        capture_stmt_order_.push_back(Capture_stmt{.is_enum = false, .name = const_name, .node = {}});
-      }
+      // Canonical spelling, like every other declaration key.
+      const_rvalue_nodes_.insert_or_assign(canonical_escaped_ident(trim(get_text(lv))), TSNode{kept, prp_buf.get()});
     }
   }
 
@@ -3869,6 +4183,11 @@ void Prp2lnast::process_assignment(TSNode n) {
       resolved_rvalue_int = v->to_just_i64();
     }
   }
+  // Same for a plain `const` initialized with any other compile-time constant
+  // (`const w = N * 4` over a generic N): a comptime binding a nested lambda
+  // may read (ruling 2026-09-28 #24).
+  const bool rvalue_comptime
+      = !ts_node_is_null(decl) && !ts_node_is_null(rv) && decode_decl(decl).kind == "const" && is_comptime_expression(rv);
 
   // Get rvalue node or fallback text for hidden tokens
   Lnast_node rvalue_node;
@@ -3945,6 +4264,36 @@ void Prp2lnast::process_assignment(TSNode n) {
       }
     }
   }
+  // A variable bound to an UNNAMED tuple literal binds by position too:
+  // named-vs-unnamed is a property of the value, not of how it is spelled.
+  bool rhs_unnamed_var = false;
+  if (!ts_node_is_null(rv) && !rhs_is_fcall && std::string_view(ts_node_type(rv)) == "identifier") {
+    if (const auto* b = find_binding(canonical_escaped_ident(trim(get_text(rv)))); b != nullptr && b->unnamed_tuple) {
+      rhs_unnamed_var = true;
+    }
+  }
+  // `mut (c, d) = 1`: a destructuring list of 2+ slots needs a tuple on the
+  // right; a single value is not broadcast (docs 03-bundle.md "mut (c,d) = 1
+  // // error: 2 entry tuple in lhs, same in rhs").
+  if (!ts_node_is_null(lv) && !ts_node_is_null(rv) && std::string_view(ts_node_type(lv)) == "lvalue_list"
+      && std::string_view(ts_node_type(rv)) == "constant") {
+    size_t slots = 0;
+    for (TSNode item : ts_node_named_children(lv)) {
+      slots += std::string_view(ts_node_type(item)) == "lvalue_item" ? 1 : 0;
+    }
+    if (slots >= 2) {
+      report_error(lv,
+                   "destructure-arity",
+                   "type",
+                   std::format("destructuring {} names needs a {}-entry tuple on the right, found a single value", slots, slots),
+                   "a single value is not broadcast to every slot; write `(v0, v1, ...)` or assign each name");
+    }
+  }
+  const auto saved_rhs = destructure_rhs_;
+  destructure_rhs_ = rhs_unnamed_var ? Destructure_rhs::unnamed_var
+                     : (rhs_is_fcall || rhs_positional_literal || ts_node_is_null(rv) || std::string_view(ts_node_type(rv)) == "tuple")
+                         ? Destructure_rhs::legacy
+                         : Destructure_rhs::rooted;
   (void)process_lvalue_for_assign(lv,
                                   rvalue_node,
                                   decl,
@@ -3952,8 +4301,26 @@ void Prp2lnast::process_assignment(TSNode n) {
                                   rhs_is_fcall,
                                   rhs_fcall_name,
                                   overflow_kind,
-                                  /*rhs_name_bindable=*/!rhs_positional_literal,
-                                  resolved_rvalue_int);
+                                  /*rhs_name_bindable=*/!rhs_positional_literal && !rhs_unnamed_var,
+                                  resolved_rvalue_int,
+                                  rvalue_comptime);
+  destructure_rhs_ = saved_rhs;
+  // Record the shape of a variable this statement bound to a tuple literal.
+  if (!ts_node_is_null(lv) && std::string_view(ts_node_type(lv)) == "identifier") {
+    if (auto* b = find_binding(canonical_escaped_ident(trim(get_text(lv)))); b != nullptr) {
+      bool unnamed = !ts_node_is_null(rv) && std::string_view(ts_node_type(rv)) == "tuple";
+      if (unnamed) {
+        for (TSNode f : ts_node_named_children(rv)) {
+          const std::string_view ft(ts_node_type(f));
+          if (ft == "assignment" || ft == "simple_assignment" || trim(get_text(f)).starts_with("...")) {
+            unnamed = false;
+            break;
+          }
+        }
+      }
+      b->unnamed_tuple = unnamed;
+    }
+  }
 }
 
 // ---------------- Control Flow ----------------
@@ -4005,13 +4372,41 @@ void Prp2lnast::lower_infinite_loop(TSNode code, TSNode loc) {
   builder.pop_stmts();
 }
 
+Prp2lnast::Initializer_scope_guard::Initializer_scope_guard(Prp2lnast& lower, TSNode n)
+    : lower_(lower), destination_(lower.lnast.get()) {
+  // `if` may have only an elif initializer; inspect every header field.
+  for (uint32_t i = 0; i < ts_node_child_count(n); ++i) {
+    const char* field = ts_node_field_name_for_child(n, i);
+    if (!field || std::string_view(field) != "init") {
+      continue;
+    }
+    capture_.emplace(lower_.capture_frames_, Capture_frame{});
+    // A bare stmts Block does not merge writes to enclosing mutable bindings.
+    // An always-taken if arm both bounds local visibility and exports those
+    // writes through the existing if/SSA merge. uPass folds away the wrapper.
+    auto scope = lower_.builder.add_child(Lnast_ntype::create_if());
+    lower_.lnast->add_child(scope, Lnast_node::create_const("true"));
+    lower_.builder.push_stmts(lower_.lnast->add_child(scope, Lnast_ntype::create_stmts()));
+    break;
+  }
+}
+
+Prp2lnast::Initializer_scope_guard::~Initializer_scope_guard() {
+  // A diagnostic while finalizing a streamed nested lambda can unwind before
+  // its destination is restored. Its builder does not own our saved cursor.
+  if (capture_ && lower_.lnast.get() == destination_) {
+    lower_.builder.pop_stmts();
+  }
+}
+
 void Prp2lnast::process_while_statement(TSNode n) {
+  Initializer_scope_guard init_scope(*this, n);
   TSNode cond = child_by_field(n, "condition");
   TSNode code = child_by_field(n, "code");
   TSNode init = child_by_field(n, "init");
 
   if (!ts_node_is_null(init)) {
-    // Init stmt_list hoists outside
+    // Evaluate once, inside the initializer scope but outside the loop.
     for (TSNode c : ts_node_named_children(init)) {
       process_statement(c);
     }
@@ -4019,7 +4414,7 @@ void Prp2lnast::process_while_statement(TSNode n) {
 
   // Infinite form — `while { … }` (no cond) or `while true { … }` (literal-true
   // cond) — shares the `loop {}` lowering (recomputed `1==1` ref condition).
-  if (ts_node_is_null(cond) || trim(get_text(cond)) == "true") {
+  if (ts_node_is_null(cond) || trim(get_raw_text(cond)) == "true") {
     lower_infinite_loop(code, n);
     return;
   }
@@ -4268,7 +4663,21 @@ void Prp2lnast::process_for_statement(TSNode n) {
   lnast->add_child(for_idx, iterable_ref);
   auto body_idx = lnast->add_child(for_idx, Lnast_ntype::create_stmts());
   builder.push_stmts(body_idx);
-  process_scope_statement(code, body_idx);
+  {
+    // The loop binds hold one value per (unrolled) iteration. The index and
+    // the key are comptime, and so is the value of a comptime iterable (a
+    // range, a tuple of comptime values): a lambda nested in the body gets
+    // them as generics (see capture_frames_). The value of a runtime iterable
+    // (`for x in (a, b)`) is a runtime binding, which no nested lambda reads.
+    Capture_frame_guard binds(capture_frames_, Capture_frame{});
+    const bool          comptime_value = is_range_data(data) || is_comptime_expression(data);
+    for (size_t i = 0; i < bind_ids.size(); ++i) {
+      const bool is_value = i == (have_idx ? 1 : 0);
+      note_binding(canonical_escaped_ident(trim(get_text(bind_ids[i]))),
+                   !is_value || comptime_value ? Bind_kind::generic : Bind_kind::runtime);
+    }
+    process_scope_statement(code, body_idx);
+  }
   builder.pop_stmts();
 
   // Trailing metadata (after the body): iteration mode + optional idx/key binds.
@@ -4319,6 +4728,15 @@ void Prp2lnast::process_tick_statement(TSNode n) {
   // later with its own check and cannot see that set, so the exemption alone is
   // not enough. Reporting at parse time keeps the honest message and the right
   // source span.
+  // docs 05b "Running cycles (tick)": `tick` is usable only inside `test`.
+  if (simulation_test_depth_ == 0) {
+    report_error(n,
+                 "tick-outside-test",
+                 "syntax",
+                 "`tick` is only allowed inside a `test` block",
+                 "a design body has no testbench clock: move the loop into a `test` block");
+    return;
+  }
   if (in_tick_statement_) {
     report_error(n,
                  "tick-nested",
@@ -4339,6 +4757,8 @@ void Prp2lnast::process_tick_statement(TSNode n) {
 
   auto body_idx = lnast->add_child(tick_idx, Lnast_ntype::create_stmts());
   builder.push_stmts(body_idx);
+  tick_body_idx_     = body_idx;
+  tick_direct_steps_ = 0;
 
   // THE LOOP VARIABLE. A tick body implicitly binds the 0-based cycle index —
   // `clock` by default, renamable through the `clocks=(name=ratio)` clause — and
@@ -4419,6 +4839,26 @@ std::string Prp2lnast::tick_loop_var_name(TSNode tick) {
 // is the count, so `step`, `step 5` and `step(1000)` all lower alike.
 void Prp2lnast::process_step_statement(TSNode n) {
   TSNode count = child_by_field(n, "value");
+
+  // docs 05b "Test only statements": `step [ncycles]` is not available outside `test` blocks.
+  if (simulation_test_depth_ == 0) {
+    report_error(n,
+                 "step-outside-test",
+                 "syntax",
+                 "`step` is only allowed inside a `test` block",
+                 "a design body has no testbench clock: advance simulation cycles from a `test` block");
+    return;
+  }
+
+  if (in_tick_statement_ && builder.idx_stmts == tick_body_idx_ && ++tick_direct_steps_ > 1) {
+    report_error(n,
+                 "tick-two-steps",
+                 "syntax",
+                 "a `tick` iteration has exactly one `step`, this is the second",
+                 "each tick iteration is one cycle (the minted `clock` counts one per iteration): use `step N` or a "
+                 "second `tick` for more cycles");
+    return;
+  }
 
   auto step_idx = builder.add_child(Lnast_ntype::create_step());
   attach_loc(step_idx, n);
@@ -4554,6 +4994,12 @@ std::vector<Prp2lnast::Generic_call_arg> Prp2lnast::collect_generic_args(TSNode 
   // Lower one type-argument node (`u8`, `3`, `Byte`, `inc`) into a ref/const.
   auto lower_one = [&](TSNode ty) -> Lnast_node {
     std::string_view tt(ts_node_type(ty));
+    // A bare POSTFIX attribute read (`f<N=x.[bits]>`): prpparse builds it like
+    // its expression spelling, so it lowers like any attribute read and the tmp
+    // folds to the comptime constant the generic binds.
+    if (tt == "attribute_read") {
+      return expr_to_node(ty);
+    }
     if (tt == "expression_type" || tt == "dot_expression_type") {
       // A COMPOUND value expression (`f<N=(SIZE >> 1)>`, `f<N=(lvl + 1)>`)
       // reaches here as an `expression_type` wrapping a parenthesized `tuple`
@@ -4575,16 +5021,24 @@ std::vector<Prp2lnast::Generic_call_arg> Prp2lnast::collect_generic_args(TSNode 
           return expr_to_node(inner);
         }
       }
-      auto       txt = trim(get_text(ty));
+      auto txt = trim(get_text(ty));
+      if (!lookup_capture(canonical_escaped_ident(txt))) {
+        check_type_name_spelling(ty);  // `f<T=i8>`, unless a value is named `i8`
+      }
+      record_name_reads(ty, Generic_read::argument);  // passed through by name: the runner binds the entity
       // A CONSTANT-valued generic (`f<3>`, `f<true>`, `f<'s'>`) rides as a
       // const, not a ref — a ref named `3` is malformed (lnastfmt) and the
       // runner substitutes the literal for body reads of the generic (todo 3g
       // A/D). A named type / lambda stays a ref (resolved at bind time).
-      const char c0  = txt.empty() ? '\0' : txt.front();
+      const char c0 = txt.empty() ? '\0' : txt.front();
       const bool is_const_arg
           = std::isdigit(static_cast<unsigned char>(c0)) || c0 == '\'' || c0 == '"' || txt == "true" || txt == "false";
       return is_const_arg ? Lnast_node::create_const(std::string(txt)) : Lnast_node::create_ref(std::string(txt));
     }
+    // A bound that does not fold here (`f<T=unsigned(bits=N)>` in a generic
+    // body) is computed by statements ahead of the declare, like a body
+    // variable's; the runner folds them once the caller's generics are bound.
+    prelower_int_type_bounds(ty);
     auto didx = builder.add_child(Lnast_ntype::create_declare());
     auto tref = builder.mint_tmp_ref();
     lnast->add_child(didx, tref);
@@ -4673,23 +5127,32 @@ void Prp2lnast::append_streamed_capture_actuals(const Lnast_nid& fcall, std::str
   if (it == streamed_capture_actuals_.end()) {
     return;
   }
+  // Generics this call already binds by name (`f<W=3>(…)` wins).
   absl::flat_hash_set<std::string> present;
   for (auto c = lnast->get_first_child(fcall); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
     if (!Lnast_ntype::is_store(lnast->get_type(c))) {
       continue;
     }
     auto key = lnast->get_first_child(c);
-    if (!key.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(key))) {
-      present.insert(std::string(lnast->get_name(key)));
+    auto val = key.is_invalid() ? key : lnast->get_sibling_next(key);
+    auto gen = val.is_invalid() ? val : lnast->get_sibling_next(val);
+    if (!gen.is_invalid() && lnast->get_name(key) == call_generic_arg_marker) {
+      present.insert(std::string(lnast->get_name(gen)));
     }
   }
   for (const auto& name : it->second) {
     if (!present.insert(name).second) {
       continue;
     }
+    // The implicit generic binds to the caller's own value of the name.
     auto arg = lnast->add_child(fcall, Lnast_ntype::create_store());
+    lnast->add_child(arg, Lnast_node::create_ref(call_generic_arg_marker));
     lnast->add_child(arg, Lnast_node::create_ref(name));
-    lnast->add_child(arg, Lnast_node::create_ref(name));
+    lnast->add_child(arg, Lnast_node::create_const(name));
+    // A caller that is itself nested now reads the enclosing generic too.
+    if (const auto hit = lookup_capture(name); hit && hit->innermost_crossed && hit->kind == Bind_kind::generic) {
+      note_implicit_generic(*hit, name);
+    }
   }
 }
 
@@ -4697,6 +5160,9 @@ void Prp2lnast::patch_streamed_capture_calls(const std::shared_ptr<Lnast>& targe
                                              const std::vector<std::string>& captures) {
   if (!target || captures.empty()) {
     return;
+  }
+  if (target == lnast) {
+    capture_rw_.clear();  // the patched calls read more names now
   }
   auto saved = lnast;
   lnast      = target;
@@ -4713,11 +5179,929 @@ void Prp2lnast::patch_streamed_capture_calls(const std::shared_ptr<Lnast>& targe
   lnast = std::move(saved);
 }
 
+namespace {
+// Names a statement WRITES and READS, for the nested-lambda capture slice
+// (plan_streamed_captures). A statement's first ref is its destination (store,
+// declare, attr_set, type_spec, an op's dst, a call's dst); a field-path store
+// or a set_mask also reads it. Loop/if nodes contribute their whole subtree.
+// The first child of a `store` under a `tuple_add`/`func_call` is a field or
+// argument KEY, never a variable.
+bool prp_is_key_store(const Lnast& ln, const Lnast_nid& nid) {
+  if (!Lnast_ntype::is_store(ln.get_type(nid))) {
+    return false;
+  }
+  const auto p = ln.get_parent(nid);
+  return !p.is_invalid() && (Lnast_ntype::is_tuple_add(ln.get_type(p)) || Lnast_ntype::is_func_call(ln.get_type(p)));
+}
+
+void prp_collect_reads(const Lnast& ln, const Lnast_nid& nid, absl::flat_hash_set<std::string>& reads) {
+  if (Lnast_ntype::is_ref(ln.get_type(nid))) {
+    reads.insert(std::string(ln.get_name(nid)));
+    return;
+  }
+  const bool keyed = prp_is_key_store(ln, nid);
+  bool       first = true;
+  for (auto c : ln.children(nid)) {
+    if (!(keyed && first)) {
+      prp_collect_reads(ln, c, reads);
+    }
+    first = false;
+  }
+}
+
+// The variable a call actual `val` names: a ref, or the root of the
+// `tuple_get` temp an earlier sibling of the call built for a multi-level
+// UFCS receiver (`a.b.inc()`).
+std::optional<std::string> prp_call_actual_root(const Lnast& ln, const Lnast_nid& call, const Lnast_nid& val) {
+  if (val.is_invalid() || !Lnast_ntype::is_ref(ln.get_type(val))) {
+    return std::nullopt;
+  }
+  std::string name(ln.get_name(val));
+  for (auto s = ln.get_sibling_prev(call); Lnast::is_tmp(name) && !s.is_invalid(); s = ln.get_sibling_prev(s)) {
+    const auto dst = ln.get_first_child(s);
+    if (!Lnast_ntype::is_tuple_get(ln.get_type(s)) || dst.is_invalid() || ln.get_name(dst) != name) {
+      continue;
+    }
+    const auto base = ln.get_sibling_next(dst);
+    if (base.is_invalid() || !Lnast_ntype::is_ref(ln.get_type(base))) {
+      return std::nullopt;
+    }
+    name = ln.get_name(base);
+  }
+  if (Lnast::is_tmp(name)) {
+    return std::nullopt;
+  }
+  return name;
+}
+
+void prp_stmt_rw(const Lnast& ln, const Lnast_nid& stmt, Prp_stmt_rw& rw,
+                 const std::function<bool(std::string_view)>& ufcs_writes_receiver) {
+  const auto t = ln.get_type(stmt);
+  if (Lnast_ntype::is_stmts(t)) {
+    for (auto c : ln.children(stmt)) {
+      prp_stmt_rw(ln, c, rw, ufcs_writes_receiver);
+    }
+    return;
+  }
+  if (Lnast_ntype::is_if_like(t) || Lnast_ntype::is_while(t)) {
+    for (auto c : ln.children(stmt)) {
+      if (Lnast_ntype::is_stmts(ln.get_type(c))) {
+        prp_stmt_rw(ln, c, rw, ufcs_writes_receiver);
+      } else {
+        prp_collect_reads(ln, c, rw.reads);
+      }
+    }
+    return;
+  }
+  if (Lnast_ntype::is_for(t)) {
+    // for(value, iterable, stmts, mode [, idx [, key]]): the binds are declared.
+    int pos = 0;
+    for (auto c = ln.get_first_child(stmt); !c.is_invalid(); c = ln.get_sibling_next(c), ++pos) {
+      const auto ct = ln.get_type(c);
+      if (Lnast_ntype::is_stmts(ct)) {
+        prp_stmt_rw(ln, c, rw, ufcs_writes_receiver);
+      } else if (Lnast_ntype::is_ref(ct) && pos == 1) {
+        rw.reads.insert(std::string(ln.get_name(c)));
+      } else if (Lnast_ntype::is_ref(ct)) {
+        rw.writes.insert(std::string(ln.get_name(c)));
+        rw.declares.insert(std::string(ln.get_name(c)));  // a loop bind is scoped to the loop
+      }
+    }
+    return;
+  }
+  const bool no_dst = Lnast_ntype::is_cassert(t) || Lnast_ntype::is_timecheck(t) || Lnast_ntype::is_func_break(t)
+                      || Lnast_ntype::is_func_continue(t) || Lnast_ntype::is_func_return(t);
+  auto       c      = ln.get_first_child(stmt);
+  if (Lnast_ntype::is_func_call(t) && !c.is_invalid()) {
+    const auto fn = ln.get_sibling_next(c);
+    if (!fn.is_invalid() && Lnast_ntype::is_ref(ln.get_type(fn))) {
+      rw.callees.insert(std::string(ln.get_name(fn)));
+    }
+    // A `ref x` actual, and the receiver of a `ref self` method, is written
+    // back by the call.
+    for (auto a = fn.is_invalid() ? fn : ln.get_sibling_next(fn); !a.is_invalid(); a = ln.get_sibling_next(a)) {
+      const auto key = Lnast_ntype::is_store(ln.get_type(a)) ? ln.get_first_child(a) : Lnast_nid{};
+      if (key.is_invalid()) {
+        continue;
+      }
+      const auto k = ln.get_name(key);
+      if (k == call_ref_arg_marker
+          || (k == call_ufcs_arg_marker && Lnast_ntype::is_ref(ln.get_type(fn)) && ufcs_writes_receiver(ln.get_name(fn)))) {
+        if (auto root = prp_call_actual_root(ln, stmt, ln.get_sibling_next(key))) {
+          rw.writes.insert(std::move(*root));
+        }
+      }
+    }
+  }
+  if (!no_dst && !c.is_invalid() && Lnast_ntype::is_ref(ln.get_type(c))) {
+    std::string dst(ln.get_name(c));
+    // `declare(x, …)`, or the pre-merge cluster head `attr_set(x, 'type', mode)`.
+    if (const auto key = ln.get_sibling_next(c);
+        Lnast_ntype::is_declare(t) || (Lnast_ntype::is_attr_set(t) && !key.is_invalid() && ln.get_name(key) == "type")) {
+      rw.declares.insert(dst);
+    }
+    // A field-path store (3+ children) or a set_mask updates part of dst.
+    const auto val = ln.get_sibling_next(c);
+    if (Lnast_ntype::is_set_mask(t) || (Lnast_ntype::is_store(t) && !val.is_invalid() && !ln.get_sibling_next(val).is_invalid())) {
+      rw.reads.insert(dst);
+    }
+    rw.writes.insert(std::move(dst));
+    c = ln.get_sibling_next(c);
+  }
+  for (; !c.is_invalid(); c = ln.get_sibling_next(c)) {
+    prp_collect_reads(ln, c, rw.reads);
+  }
+}
+
+// A `type`/`enum` declaration (declare or the pre-merge attr_set cluster with a
+// non-variable mode): its name is a hoisted comptime entity the lambda already
+// sees, never something to replay.
+std::optional<std::string_view> prp_declared_type_name(const Lnast& ln, const Lnast_nid& stmt) {
+  const auto t = ln.get_type(stmt);
+  if (!Lnast_ntype::is_declare(t) && !Lnast_ntype::is_attr_set(t)) {
+    return std::nullopt;
+  }
+  const auto c0 = ln.get_first_child(stmt);
+  const auto c1 = c0.is_invalid() ? c0 : ln.get_sibling_next(c0);
+  const auto c2 = c1.is_invalid() ? c1 : ln.get_sibling_next(c1);
+  if (c2.is_invalid() || !Lnast_ntype::is_ref(ln.get_type(c0)) || (Lnast_ntype::is_attr_set(t) && ln.get_name(c1) != "type")) {
+    return std::nullopt;
+  }
+  const auto mode = ln.get_name(c2);
+  if (mode == "mut" || mode == "const" || mode == "reg" || mode == "stage" || mode == "wire" || mode.starts_with("mut ")
+      || mode.starts_with("const ")) {
+    return std::nullopt;
+  }
+  return ln.get_name(c0);
+}
+
+// The statements of `ln` visible at the builder cursor `stmts`, in program
+// order: every child of the innermost open frame, and of each enclosing frame
+// the children before the statement that holds the next inner frame.
+void prp_visible_stmts(const Lnast& ln, const Lnast_nid& stmts, std::vector<Lnast_nid>& out) {
+  std::vector<std::pair<Lnast_nid, Lnast_nid>> frames;  // (stmts, first invisible child)
+  Lnast_nid                                    stop;
+  for (Lnast_nid s = stmts; !s.is_invalid();) {
+    frames.emplace_back(s, stop);
+    Lnast_nid child = s;
+    Lnast_nid p     = ln.get_parent(s);
+    while (!p.is_invalid() && !Lnast_ntype::is_stmts(ln.get_type(p))) {
+      child = p;
+      p     = ln.get_parent(p);
+    }
+    stop = child;
+    s    = p;
+  }
+  for (auto it = frames.rbegin(); it != frames.rend(); ++it) {
+    for (auto c = ln.get_first_child(it->first); !c.is_invalid() && c != it->second; c = ln.get_sibling_next(c)) {
+      out.push_back(c);
+    }
+  }
+}
+
+// Copy a captured statement into a streamed lambda's prologue, renaming the
+// variable refs in `rename` (field/argument keys keep their text).
+void prp_copy_capture(const Lnast& src, const Lnast_nid& nid, Lnast& dst, const Lnast_nid& parent,
+                      const absl::flat_hash_map<std::string, std::string>& rename, bool is_key) {
+  const auto t = src.get_type(nid);
+  Lnast_nid  nn;
+  if (Lnast_ntype::is_ref(t)) {
+    const auto name = src.get_name(nid);
+    const auto it   = is_key ? rename.end() : rename.find(name);
+    nn              = dst.add_child(parent, Lnast_node::create_ref(it == rename.end() ? std::string(name) : it->second));
+  } else if (Lnast_ntype::is_const(t)) {
+    nn = dst.add_child(parent, Lnast_node::create_const(src.get_name(nid)));
+  } else {
+    nn = dst.add_child(parent, t);
+  }
+  if (Lnast::srcid_carries(t)) {
+    if (const auto id = src.get_srcid(nid); id != hhds::SourceId_invalid) {
+      dst.set_srcid(nn, dst.source_locator().import_from(src.source_locator(), id));
+    }
+  }
+  const bool keyed = prp_is_key_store(src, nid);
+  bool       first = true;
+  for (auto c : src.children(nid)) {
+    prp_copy_capture(src, c, dst, nn, rename, keyed && first);
+    first = false;
+  }
+}
+}  // namespace
+
+Prp2lnast::Binding& Prp2lnast::note_binding(std::string_view name, Bind_kind kind) {
+  auto& b = capture_frames_.back().names[std::string(name)];
+  b       = Binding{.kind = kind, .decl_depth = conditional_depth_};
+  return b;
+}
+
+std::optional<Prp2lnast::Capture_lookup> Prp2lnast::lookup_capture(std::string_view name) const {
+  std::optional<size_t> crossed;
+  for (size_t i = capture_frames_.size(); i-- > 0;) {
+    const auto& f = capture_frames_[i];
+    if (const auto it = f.names.find(name); it != f.names.end()) {
+      return Capture_lookup{.kind = it->second.kind, .frame = i, .innermost_crossed = crossed, .binding = &it->second};
+    }
+    if (f.lambda_boundary && !crossed) {
+      crossed = i;
+    }
+  }
+  return std::nullopt;
+}
+
+Prp2lnast::Binding* Prp2lnast::find_binding(std::string_view name) {
+  for (size_t i = capture_frames_.size(); i-- > 0;) {
+    if (const auto it = capture_frames_[i].names.find(name); it != capture_frames_[i].names.end()) {
+      return &it->second;
+    }
+  }
+  return nullptr;
+}
+
+void Prp2lnast::check_capture_read(std::string_view name, const TSNode& at) const {
+  const auto hit = lookup_capture(name);
+  if (!hit || !hit->innermost_crossed) {
+    return;
+  }
+  const auto in_lambda = [](const Capture_frame& f) {
+    return f.lambda_name.empty() ? std::string{"an anonymous lambda"} : std::format("lambda '{}'", f.lambda_name);
+  };
+  if (binding_visible_in_lambda(*hit->binding)) {
+    // A comptime const, or a fold_const (user ruling 2026-09-28 (32)): visible
+    // unless replaying its computation reaches a runtime root.
+    for (size_t j = capture_frames_.size(); j-- > hit->frame + 1;) {
+      const auto& f  = capture_frames_[j];
+      const auto  it = f.uncapturable.find(name);
+      if (it == f.uncapturable.end()) {
+        continue;
+      }
+      if (hit->binding->fold_const) {
+        const auto& lambda = f.lambda_name;
+        report_error(at,
+                     "nested-runtime-capture",
+                     "name",
+                     std::format("'{}' is a runtime value of the enclosing scope; it is not visible inside {} (its value "
+                                 "depends on '{}', so it does not fold to a compile-time constant)",
+                                 name,
+                                 in_lambda(f),
+                                 it->second),
+                     std::format("a nested lambda sees an enclosing value only when it folds to a compile-time constant; "
+                                 "pass '{}' as an input of {}",
+                                 name,
+                                 lambda.empty() ? std::string{"the lambda"} : std::format("'{}'", lambda)));
+      } else {
+        report_error(at,
+                     "nested-runtime-capture",
+                     "name",
+                     std::format("'{}' is computed from '{}', a runtime value of the enclosing scope; it is not visible inside {}",
+                                 name,
+                                 it->second,
+                                 in_lambda(f)),
+                     std::format("a nested lambda sees only the comptime values it can recompute from comptime bindings; "
+                                 "compute '{}' inside {}, or pass it as an input",
+                                 name,
+                                 in_lambda(f)));
+      }
+    }
+    return;
+  }
+  if (hit->kind != Bind_kind::runtime) {
+    return;
+  }
+  const auto& lambda = capture_frames_[*hit->innermost_crossed].lambda_name;
+  const auto  inside = in_lambda(capture_frames_[*hit->innermost_crossed]);
+  if (hit->frame == 0) {
+    // The file scope has no inputs: its runtime bindings are a `mut` (or a
+    // `reg`/`wire`), a variable whose value changes over the file.
+    report_error(
+        at,
+        "nested-runtime-capture",
+        "name",
+        std::format("'{}' is not a compile-time constant a nested lambda can recompute; it is not visible inside {}", name, inside),
+        std::format("a nested lambda reads an enclosing value only through a `const` that folds to a compile-time "
+                    "constant: bind the `mut` to one (`const k = {}`), or pass '{}' as an input of {}",
+                    name,
+                    name,
+                    lambda.empty() ? std::string{"the lambda"} : std::format("'{}'", lambda)));
+  }
+  report_error(at,
+               "nested-runtime-capture",
+               "name",
+               std::format("'{}' is a runtime value of the enclosing scope; it is not visible inside {}", name, inside),
+               std::format("a nested lambda sees only comptime bindings (a const with a compile-time value, generics, imports, "
+                           "types, lambdas); pass '{}' as an input of {}",
+                           name,
+                           lambda.empty() ? std::string{"the lambda"} : std::format("'{}'", lambda)));
+}
+
+bool Prp2lnast::visible_in_lambda(std::string_view name, const Capture_lookup& hit) {
+  if (!binding_visible_in_lambda(*hit.binding)) {
+    return false;
+  }
+  if (!hit.binding->fold_const || !hit.innermost_crossed) {
+    return true;  // a comptime binding, or a const a test block reads directly
+  }
+  // A fold_const is visible iff its value folds (ruling 2026-09-28 (32)).
+  for (size_t j = hit.frame + 1; j < capture_frames_.size(); ++j) {
+    if (capture_frames_[j].uncapturable.contains(name)) {
+      return false;
+    }
+  }
+  const std::string                             seed(name);
+  absl::flat_hash_map<std::string, std::string> uncapturable;
+  std::vector<std::string>                      generics;
+  (void)slice_captures(collect_capture_visible(/*include_current=*/!capture_frames_[*hit.innermost_crossed].streamed),
+                       {seed},
+                       {},
+                       uncapturable,
+                       generics);
+  return !uncapturable.contains(seed);
+}
+
+void Prp2lnast::check_capture_shadow(std::string_view name, const TSNode& at) {
+  const auto hit = lookup_capture(name);
+  if (!hit || !visible_in_lambda(name, *hit)) {
+    return;
+  }
+  const std::string_view what = hit->binding->fold_const ? "constant" : "comptime";
+  if (!hit->innermost_crossed) {
+    // No lambda in between, but a test block's local still shadows the
+    // enclosing comptime binding the test sees (a file-scope `const`).
+    for (size_t j = hit->frame + 1; j < capture_frames_.size(); ++j) {
+      if (capture_frames_[j].test_scope) {
+        report_error(
+            at,
+            "variable-shadowing",
+            "name",
+            std::format("variable shadowing: '{}' is already declared in an enclosing scope", name),
+            std::format("rename the test's variable: the enclosing {} '{}' is visible inside {}",
+                        what,
+                        name,
+                        capture_frames_[j].lambda_name.empty() ? std::string{"the test"}
+                                                               : std::format("test '{}'", capture_frames_[j].lambda_name)));
+        return;
+      }
+    }
+    return;
+  }
+  const auto& lambda = capture_frames_[*hit->innermost_crossed].lambda_name;
+  report_error(at,
+               "variable-shadowing",
+               "name",
+               std::format("variable shadowing: '{}' is already declared in an enclosing scope", name),
+               std::format("rename the inner variable: the enclosing {} '{}' is visible inside {}",
+                           what,
+                           name,
+                           lambda.empty() ? std::string{"the lambda"} : std::format("lambda '{}'", lambda)));
+}
+
+void Prp2lnast::check_signature_shadow(std::string_view name, const TSNode& at, std::string_view role) {
+  if (name.empty() || name == "self" || capture_frames_.size() < 2) {
+    return;
+  }
+  const auto& scope  = capture_frames_.back();
+  const auto& lambda = scope.lambda_name;
+  // Lexical: the innermost enclosing declaration of `name` decides; a runtime
+  // binding there (an enclosing mod's input) is not visible inside the lambda,
+  // and it already hides any outer same-name one.
+  for (size_t i = capture_frames_.size() - 1; i-- > 0;) {
+    const auto&      f = capture_frames_[i];
+    std::string_view what;
+    if (const auto it = f.names.find(name); it != f.names.end()) {
+      std::optional<size_t> crossed;
+      for (size_t j = capture_frames_.size(); j-- > i + 1 && !crossed;) {
+        if (capture_frames_[j].lambda_boundary) {
+          crossed = j;
+        }
+      }
+      const Capture_lookup hit{.kind = it->second.kind, .frame = i, .innermost_crossed = crossed, .binding = &it->second};
+      if (!visible_in_lambda(name, hit)) {
+        return;
+      }
+      what = it->second.fold_const ? "constant" : "comptime";
+    } else if (f.types.contains(name)) {
+      what = "type";
+    } else if (f.lambdas.contains(name)) {
+      // A lambda does not enclose itself: `comb parity(d:u8) -> (parity:u1)`
+      // (the Verilog idiom of a port named like its module) names a port.
+      if (i + 2 == capture_frames_.size() && scope.lambda_boundary && canonical_escaped_ident(lambda) == name) {
+        continue;
+      }
+      what = "lambda";
+    } else {
+      continue;
+    }
+    report_error(at,
+                 "variable-shadowing",
+                 "name",
+                 std::format("variable shadowing: '{}' is already declared in an enclosing scope", name),
+                 std::format("rename the {}: the enclosing {} '{}' is visible inside {}",
+                             role,
+                             what,
+                             name,
+                             lambda.empty()     ? std::string{"the lambda"}
+                             : scope.test_scope ? std::format("test '{}'", lambda)
+                                                : std::format("lambda '{}'", lambda)));
+  }
+}
+
+bool Prp2lnast::ufcs_writes_receiver(std::string_view callee) const {
+  if (ref_param_funcs_.contains(callee)) {
+    return true;
+  }
+  for (const auto& f : capture_frames_) {
+    if (f.lambdas.contains(callee)) {
+      return false;
+    }
+  }
+  return !streamed_function_names_.contains(callee);
+}
+
+void Prp2lnast::note_call_write(std::string_view name) {
+  if (auto* b = find_binding(name)) {
+    b->int_value.reset();
+  }
+}
+
+void Prp2lnast::note_implicit_generic(const Capture_lookup& hit, std::string_view name) {
+  for (size_t j = hit.frame + 1; j < capture_frames_.size(); ++j) {
+    auto& f = capture_frames_[j];
+    if (f.lambda_boundary && f.streamed
+        && std::find(f.implicit_generics.begin(), f.implicit_generics.end(), name) == f.implicit_generics.end()) {
+      f.implicit_generics.emplace_back(name);
+    }
+  }
+}
+
+void Prp2lnast::note_capture_read(std::string_view name, const TSNode& at) {
+  if (const auto hit = lookup_capture(name); hit && hit->innermost_crossed && hit->binding->fold_const) {
+    resolve_kept_lambda_fold_const(name, *hit);
+  }
+  check_capture_read(name, at);
+  if (const auto hit = lookup_capture(name); hit && hit->innermost_crossed && hit->kind == Bind_kind::generic) {
+    note_implicit_generic(*hit, name);
+  }
+}
+
+void Prp2lnast::note_comptime_rvalue(const Lnast_node& tmp) {
+  if (tmp.is_ref()) {
+    comptime_rvalue_tmps_.emplace(lnast.get(), std::string(tmp.get_name()));
+  }
+}
+
+bool Prp2lnast::is_comptime_rvalue(const Lnast_node& value) const {
+  if (!value.is_ref()) {
+    return false;
+  }
+  const std::string name(value.get_name());
+  // A named lambda bound to a new name (`const f = add1`) is a lambda too.
+  return streamed_function_names_.contains(name)
+         || comptime_rvalue_tmps_.contains(std::pair<const Lnast*, std::string>{lnast.get(), name});
+}
+
+// Every name `e` reads is a comptime binding (a comptime const, a plain const
+// with a comptime value, a generic, a loop index, an import, a type, a lambda)
+// or a runtime one whose value is statically known (Binding::int_value), and
+// every call is a type cast, a `std` function or a `comb` (resolved
+// lexically): a `mod`/`pipe` call is an instance, a runtime value. An
+// attribute read (`a.[bits]`) is comptime whatever it reads (ruling
+// 2026-09-28 #24); a nested lambda that cannot recompute one reports it (see
+// Capture_frame::uncapturable). A name with no binding is a type, a lambda, a
+// builtin, or an undefined name that check_undefined_reads reports. A lambda
+// literal is comptime only as the whole value (`const f = comb(…){…}`): a
+// capture cannot replay a method hoisted out of a tuple literal.
+bool Prp2lnast::is_comptime_expression(TSNode e) const {
+  const auto reads = expr_reads(e, /*enter_attribute_reads=*/false);
+  for (TSNode c : reads.names) {
+    const auto hit = lookup_capture(canonical_escaped_ident(trim(get_text(c))));
+    if (hit && hit->kind == Bind_kind::runtime && !hit->binding->int_value) {
+      return false;
+    }
+  }
+  for (TSNode fn : reads.callees) {
+    const std::string_view ft(ts_node_type(fn));
+    bool                   comptime = false;
+    if (ft == "identifier") {
+      const auto name = trim(get_text(fn));
+      comptime        = prp_builtins::is_type_cast_callee(name) || resolves_to_comb(canonical_escaped_ident(name));
+    } else if (ft == "dot_expression" && ts_node_named_child_count(fn) == 2) {
+      comptime = trim(get_text(ts_node_named_child(fn, 0))) == prp_builtins::std_namespace
+                 && prp_builtins::is_std_member(trim(get_text(ts_node_named_child(fn, 1))));
+    }
+    if (!comptime) {
+      return false;
+    }
+  }
+  for (TSNode l : reads.lambdas) {
+    if (ts_node_start_byte(l) != ts_node_start_byte(e) || ts_node_end_byte(l) != ts_node_end_byte(e)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool Prp2lnast::resolves_to_comb(std::string_view name) const {
+  for (size_t i = capture_frames_.size(); i-- > 0;) {
+    if (const auto it = capture_frames_[i].lambdas.find(name); it != capture_frames_[i].lambdas.end()) {
+      return it->second;
+    }
+  }
+  return false;
+}
+
+void Prp2lnast::check_lambda_used_as_value(TSNode operand) {
+  if (ts_node_is_null(operand) || std::string_view(ts_node_type(operand)) != "identifier") {
+    return;
+  }
+  const auto name = canonical_escaped_ident(trim(get_text(operand)));
+  for (size_t i = capture_frames_.size(); i-- > 0;) {
+    if (capture_frames_[i].names.contains(name)) {
+      return;  // a variable of that name hides the lambda
+    }
+    if (capture_frames_[i].lambdas.contains(name)) {
+      report_error(operand,
+                   "lambda-needs-call",
+                   "syntax",
+                   std::format("`{}` is a lambda: every lambda call requires parentheses, write `{}()`", name, name),
+                   "call it with `name()` / `name(arg=...)`; a lambda cannot be used as an operand value");
+    }
+  }
+}
+
+bool Prp2lnast::callee_is_replayable(std::string_view callee) const {
+  if (resolves_to_comb(callee) || prp_builtins::is_type_cast_callee(callee)) {
+    return true;
+  }
+  if (callee.starts_with(prp_builtins::std_namespace) && callee.size() > prp_builtins::std_namespace.size()
+      && callee[prp_builtins::std_namespace.size()] == '.'
+      && prp_builtins::is_std_member(callee.substr(prp_builtins::std_namespace.size() + 1))) {
+    return true;
+  }
+  const auto hit = lookup_capture(callee);
+  return hit && hit->kind == Bind_kind::comptime;  // a lambda value (`const f = comb(…){…}`)
+}
+
+// Plan the capture prologue of a streamed lambda (see capture_frames_). Runs
+// once the lambda's boundary frame is pushed (so every enclosing binding reads
+// as crossed) and its destination opened (so every enclosing tree sits in
+// destination_stack_ with its builder cursor at the declaration point).
+Prp2lnast::Capture_plan Prp2lnast::plan_streamed_captures(TSNode lambda_node, TSNode code) {
+  Capture_plan plan;
+  plan.rename.resize(destination_stack_.size());
+  // The lambda's own generics, inputs and outputs: a read of one of them is
+  // never a capture (the signature is not lowered yet, so the boundary frame
+  // does not hold them).
+  absl::flat_hash_set<std::string> own;
+  for (TSNode fdef : ts_node_named_children(lambda_node)) {
+    if (std::string_view(ts_node_type(fdef)) != "function_definition_decl") {
+      continue;
+    }
+    const auto add_own = [&](TSNode item) {
+      const std::string_view it(ts_node_type(item));
+      TSNode id = it == "typed_identifier" ? child_by_field(item, "identifier") : (it == "identifier" ? item : TSNode{});
+      if (!ts_node_is_null(id)) {
+        own.insert(std::string(canonical_escaped_ident(trim(get_text(id)))));
+      }
+    };
+    for (uint32_t i = 0; i < child_count(fdef); ++i) {
+      const char* fn = ts_node_field_name_for_child(fdef, i);
+      if (fn == nullptr) {
+        continue;
+      }
+      const std::string_view field(fn);
+      TSNode                 ci = child(fdef, i);
+      const std::string_view ct(ts_node_type(ci));
+      if (field != "generic" && field != "input" && field != "output") {
+        continue;
+      }
+      if (ct == "typed_identifier_list" || ct == "arg_list") {
+        // Only the declared names: an `arg_list` also holds `= default`
+        // expressions, which may well read a capture.
+        for (TSNode item : ts_node_named_children(ci)) {
+          if (std::string_view(ts_node_type(item)) == "typed_identifier") {
+            add_own(item);
+          }
+        }
+      } else {
+        add_own(ci);
+      }
+    }
+  }
+  // Names the lambda, its signature and any lambda nested in it may read. An
+  // over-approximation is harmless: an unused capture is dead code.
+  absl::flat_hash_set<std::string> ids;
+  std::vector<TSNode>              todo{lambda_node};
+  if (!ts_node_is_null(code)) {
+    todo.push_back(code);
+  }
+  while (!todo.empty()) {
+    TSNode c = todo.back();
+    todo.pop_back();
+    const std::string_view ct(ts_node_type(c));
+    if (ct == "identifier") {
+      ids.insert(std::string(canonical_escaped_ident(trim(get_text(c)))));
+      continue;
+    }
+    if (ct == "dot_expression" || ct == "member_selection") {
+      // Only the base names a binding; the rest are field names.
+      if (ts_node_named_child_count(c) != 0) {
+        todo.push_back(ts_node_named_child(c, 0));
+      }
+      continue;
+    }
+    TSNode key{};
+    if (ct == "arg_assignment" || ct == "attribute_assignment") {
+      key = child_by_field(c, "lvalue");  // a named argument / attribute key
+    }
+    for (TSNode k : ts_node_named_children(c)) {
+      if (ts_node_is_null(key) || ts_node_start_byte(k) != ts_node_start_byte(key)) {
+        todo.push_back(k);
+      }
+    }
+  }
+
+  for (const auto& id : ids) {
+    if (own.contains(id)) {
+      continue;
+    }
+    const auto hit = lookup_capture(id);
+    if (!hit || !hit->innermost_crossed) {
+      continue;
+    }
+    if (hit->kind == Bind_kind::generic) {
+      note_implicit_generic(*hit, id);
+    } else if (binding_visible_in_lambda(*hit->binding) && !capture_import_bindings_.contains(id)) {
+      plan.seeds.push_back(id);
+    }
+  }
+  if (plan.seeds.empty()) {
+    return plan;
+  }
+  std::sort(plan.seeds.begin(), plan.seeds.end());
+
+  const auto                       vis          = collect_capture_visible(/*include_current=*/false);
+  auto&                            uncapturable = capture_frames_.back().uncapturable;
+  std::vector<std::string>         generics;
+  auto                             take = slice_captures(vis, plan.seeds, {}, uncapturable, generics);
+  // A seed whose computation reads a runtime name of the enclosing scope, but
+  // whose value this front end already folded to an integer (an untyped
+  // comptime const: `const W = a.[bits]` of an input `a:u8`), is bound to
+  // that value instead (ruling 2026-09-28 (32), fold-based). The replay would
+  // read the runtime name, or the lambda's own same-name binding (`a`).
+  // Every other seed is replayed, which keeps its declared type (`const t = w`
+  // of a `w:u3` is a u3, ruling 38).
+  absl::flat_hash_set<std::string> by_value;
+  for (const auto& seed : plan.seeds) {
+    const auto hit = uncapturable.contains(seed) ? lookup_capture(seed) : std::nullopt;
+    if (hit && hit->kind == Bind_kind::comptime && !hit->binding->typed && hit->binding->int_value) {
+      plan.values.emplace_back(seed, *hit->binding->int_value);
+      by_value.insert(seed);
+      uncapturable.erase(seed);
+    }
+  }
+  if (!by_value.empty()) {
+    // Re-slice the others: one computed from a bound seed replays now.
+    std::vector<std::string> replayed;
+    for (const auto& n : plan.seeds) {
+      if (!by_value.contains(n)) {
+        uncapturable.erase(n);
+        replayed.push_back(n);
+      }
+    }
+    take = slice_captures(vis, replayed, by_value, uncapturable, generics);
+  }
+  for (const auto& name : generics) {
+    note_implicit_generic(*lookup_capture(name), name);
+  }
+  std::erase_if(plan.seeds, [&](const std::string& seed) { return uncapturable.contains(seed); });
+  for (size_t i = 0; i < vis.stmts.size(); ++i) {
+    if (!take[i]) {
+      continue;
+    }
+    const auto depth = vis.stmts[i].depth;
+    plan.stmts.push_back(Capture_copy{.src = destination_stack_[depth].lnast, .nid = vis.stmts[i].nid, .depth = depth});
+    // The copy runs in the lambda's own namespace: temps and runtime names the
+    // enclosing computation writes (a file-scope `mut` accumulator, a loop
+    // index) get private names; the names the lambda sees keep theirs.
+    auto& rename = plan.rename[depth];
+    for (const auto& w : vis.rws[i]->writes) {
+      if (rename.contains(w)) {
+        continue;
+      }
+      if (Lnast::is_tmp(w)) {
+        rename.emplace(w, std::format("%cap{}_{}", depth, std::string_view(w).substr(1)));
+      } else if (const auto hit = lookup_capture(w); !hit || !binding_visible_in_lambda(*hit->binding)) {
+        rename.emplace(w, std::format("__cap{}_{}", depth, w));
+      }
+    }
+  }
+  return plan;
+}
+
+Prp2lnast::Capture_visible Prp2lnast::collect_capture_visible(bool include_current) {
+  Capture_visible vis;
+  const auto      add_tree
+      = [&](const Lnast& ln, const Lnast_nid& cursor, absl::node_hash_map<Lnast_nid, Prp_stmt_rw>& cache, size_t depth) {
+          std::vector<Lnast_nid> nids;
+          prp_visible_stmts(ln, cursor, nids);
+          for (const auto& nid : nids) {
+            auto [it, fresh] = cache.try_emplace(nid);
+            auto& rw         = it->second;
+            if (fresh) {
+              if (Lnast_ntype::is_func_def(ln.get_type(nid))) {
+                rw.opaque = true;
+              } else if (const auto tn = prp_declared_type_name(ln, nid)) {
+                rw.opaque        = true;
+                rw.declared_type = *tn;
+              } else {
+                prp_stmt_rw(ln, nid, rw, [this](std::string_view callee) { return ufcs_writes_receiver(callee); });
+              }
+            }
+            if (!rw.declared_type.empty()) {
+              vis.type_names.insert(rw.declared_type);
+            }
+            vis.stmts.push_back(Capture_visible::Stmt{.nid = nid, .depth = depth});
+            vis.rws.push_back(rw.opaque ? nullptr : &rw);
+          }
+        };
+  for (size_t d = 0; d < destination_stack_.size(); ++d) {
+    auto& st = destination_stack_[d];
+    add_tree(*st.lnast, st.builder.idx_stmts, st.capture_rw, d);
+  }
+  if (include_current) {
+    add_tree(*lnast, builder.idx_stmts, capture_rw_, destination_stack_.size());
+  }
+  return vis;
+}
+
+// Backward slice over the statements visible at the declaration point: keep
+// every statement that writes a needed name, and need what it reads (and
+// whatever else it writes, so that name's declaration comes along too).
+std::vector<bool> Prp2lnast::slice_captures(const Capture_visible& vis, const std::vector<std::string>& seeds,
+                                            const absl::flat_hash_set<std::string>&        by_value,
+                                            absl::flat_hash_map<std::string, std::string>& uncapturable,
+                                            std::vector<std::string>&                      generics) const {
+  const auto provided = [&](const std::string& name) {
+    return by_value.contains(name) || vis.type_names.contains(name) || capture_import_bindings_.contains(name)
+           || streamed_function_names_.contains(name);
+  };
+  // A seed computed from an enclosing RUNTIME value (`comptime const K =
+  // a.[bits]` with `a` an input of the enclosing mod, a `const s = r` of a
+  // register) cannot be replayed: the copy would read the lambda's own
+  // same-name binding, or nothing, or build a second register. Such a seed is
+  // left out (a read of it reports, see check_capture_read) and the slice
+  // recomputed without it.
+  std::vector<bool> take;
+  for (;;) {
+    absl::flat_hash_map<std::string, std::string> needed;  // name -> the seed whose value needs it
+    for (const auto& seed : seeds) {
+      if (!uncapturable.contains(seed)) {
+        needed.emplace(seed, seed);
+      }
+    }
+    take.assign(vis.stmts.size(), false);
+    size_t                                        depth = std::numeric_limits<size_t>::max();
+    absl::flat_hash_map<std::string, std::string> calls;  // callee -> the seed whose value needs the call
+    for (size_t i = vis.stmts.size(); i-- > 0;) {
+      if (vis.stmts[i].depth != depth) {
+        // Temps are numbered per tree: an inner tree's temp never names a value
+        // of an enclosing tree.
+        absl::erase_if(needed, [](const auto& kv) { return Lnast::is_tmp(kv.first); });
+        depth = vis.stmts[i].depth;
+      }
+      const auto* rw = vis.rws[i];
+      if (rw == nullptr) {
+        continue;
+      }
+      std::string from;
+      for (const auto& w : rw->writes) {
+        if (const auto it = needed.find(w); it != needed.end() && !provided(w)) {
+          from = it->second;
+          break;
+        }
+      }
+      if (from.empty()) {
+        continue;
+      }
+      take[i] = true;
+      for (const auto* names : {&rw->writes, &rw->reads}) {
+        for (const auto& n : *names) {
+          if (!provided(n)) {
+            needed.try_emplace(n, from);
+          }
+        }
+      }
+      for (const auto& c : rw->callees) {
+        calls.try_emplace(c, from);
+      }
+      // An earlier writer of a name declared here writes another binding (an
+      // enclosing scope's, or the source a prologue copy came from).
+      for (const auto& d : rw->declares) {
+        needed.erase(d);
+      }
+    }
+    absl::flat_hash_set<std::string> written;
+    for (size_t i = 0; i < vis.stmts.size(); ++i) {
+      if (take[i]) {
+        written.insert(vis.rws[i]->writes.begin(), vis.rws[i]->writes.end());
+      }
+    }
+    // What the copies read and do not compute themselves: an enclosing generic
+    // (`comptime const K = W + 1` in `mod m<W>`) is bound per specialization;
+    // an enclosing runtime value -- or a runtime binding the copies would
+    // re-create (an output, a `reg`, a `wire`) -- makes its seed uncapturable.
+    generics.clear();
+    bool changed = false;
+    for (const auto& [name, from] : needed) {
+      if (Lnast::is_tmp(name) || provided(name)) {
+        continue;
+      }
+      const auto hit = lookup_capture(name);
+      if (!hit || !hit->innermost_crossed) {
+        continue;
+      }
+      if (hit->kind == Bind_kind::generic) {
+        if (!written.contains(name)) {
+          generics.push_back(name);
+        }
+      } else if (hit->kind == Bind_kind::runtime && (!hit->binding->replayable || !written.contains(name))) {
+        changed |= uncapturable.try_emplace(from, name).second;
+      }
+    }
+    // A `mod`/`pipe` call is an instance, a runtime value: replaying it would
+    // build a second instance inside the lambda. (A `comptime const` states
+    // its value is comptime; its calls are left to the runner's fold.)
+    for (const auto& [callee, from] : calls) {
+      const auto seed = lookup_capture(from);
+      if (seed && seed->binding->fold_const && !callee_is_replayable(callee)) {
+        changed |= uncapturable.try_emplace(from, callee).second;
+      }
+    }
+    if (!changed) {
+      break;
+    }
+  }
+  return take;
+}
+
+void Prp2lnast::resolve_kept_lambda_fold_const(std::string_view name, const Capture_lookup& hit) {
+  auto& f = capture_frames_[*hit.innermost_crossed];
+  if (f.streamed || f.fold_decided.contains(name)) {
+    return;  // a streamed lambda planned its captures up front
+  }
+  f.fold_decided.emplace(name);
+  const std::string                             seed(name);
+  absl::flat_hash_map<std::string, std::string> uncapturable;
+  std::vector<std::string>                      generics;
+  (void)slice_captures(collect_capture_visible(/*include_current=*/true), {seed}, {}, uncapturable, generics);
+  if (const auto it = uncapturable.find(seed); it != uncapturable.end()) {
+    f.uncapturable.insert_or_assign(seed, it->second);
+  }
+}
+
+void Prp2lnast::emit_capture_plan(const Capture_plan& plan, const Lnast_nid& body_idx) {
+  for (const auto& [name, value] : plan.values) {
+    auto decl = lnast->add_child(body_idx, Lnast_ntype::create_attr_set());
+    lnast->add_child(decl, Lnast_node::create_ref(name));
+    lnast->add_child(decl, Lnast_node::create_const("type"));
+    lnast->add_child(decl, Lnast_node::create_const("const"));
+    auto st = lnast->add_child(body_idx, Lnast_ntype::create_store());
+    lnast->add_child(st, Lnast_node::create_ref(name));
+    lnast->add_child(st, Lnast_node::create_const(Dlop::create_integer(value)->to_pyrope()));
+  }
+  for (const auto& c : plan.stmts) {
+    // The enclosing scope already checked the value is comptime; replay the
+    // declaration as a plain `const` (a replayed `comptime` attribute made a
+    // `mut` initialized from it inherit the const binding in upass).
+    if (const auto& ln = *c.src; Lnast_ntype::is_attr_set(ln.get_type(c.nid))) {
+      const auto key = ln.get_sibling_next(ln.get_first_child(c.nid));
+      if (!key.is_invalid() && ln.get_name(key) == "comptime") {
+        continue;
+      }
+    }
+    prp_copy_capture(*c.src, c.nid, *lnast, body_idx, plan.rename[c.depth], /*is_key=*/false);
+  }
+  streamed_scope_names_.insert(plan.seeds.begin(), plan.seeds.end());
+}
+
 void Prp2lnast::process_lambda_statement(TSNode n) { process_lambda_statement_named(n, {}); }
+
+void Prp2lnast::reject_std_declaration(TSNode name, std::string_view what) {
+  if (ts_node_is_null(name) || canonical_escaped_ident(trim(get_text(name))) != prp_builtins::std_namespace) {
+    return;
+  }
+  // A user `mod std` next to the built-in namespace would split `std(a=x)` (the
+  // user's) from `std.clog2(x)` (the built-in) with no diagnostic.
+  report_error(name,
+               "std-reserved",
+               "name",
+               std::format("the {} name `std` is reserved: `std` is the built-in namespace", what),
+               "rename it: `std` is the built-in namespace, visible in every file without an import");
+}
 
 void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_name) {
   TSNode func_type_node = child_by_field(n, "func_type");
   TSNode name_node      = child_by_field(n, "name");
+  reject_std_declaration(name_node, "lambda");
   // function_definition_decl is a named child that isn't directly a field
   TSNode fdef;
   for (TSNode c : ts_node_named_children(n)) {
@@ -4785,8 +6169,8 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // tolg renames the artifact (NOT the `import("file.entity")` key). A bare/
   // misplaced `lg` on a non-lambda is rejected by reject_common_mistakes_attr_name.
   std::string lg_value;
-  bool        has_lg  = false;
-  bool        has_hdl = false;  // `::[hdl]` — HDL-imported unit (verilog reg = state)
+  bool        has_lg        = false;
+  bool        timecheck_off = false;  // `::[timecheck=false]` (old spelling `::[hdl]`): timing checks off
   TSNode      lg_node{};
   if (!ts_node_is_null(fdef)) {
     // The `::[…]` prefix lands in the function_definition_decl's `pipe_config`
@@ -4821,13 +6205,14 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
           // checks: a plain reg is an always_ff cycle-0 STATE element (not a
           // feedforward pipeline stage), an undriven wire / unresolved comb-cycle
           // net reads as X (not a hard error), and a same-cycle ring through a
-          // wire is not flagged as a combinational loop. inou.slang sets it for
-          // every Verilog-imported unit (which routinely carries these
-          // firtool/handshake shapes) and prp_writer re-emits it. `timecheck=true`
+          // wire is not flagged as a combinational loop. It relaxes TIMING only
+          // (user ruling 2026-09-28 (22)): every other Pyrope rule still holds.
+          // prp_writer emits it on Pyrope regenerated from Verilog (which
+          // routinely carries these firtool/handshake shapes). `timecheck=true`
           // (the default) keeps all checks.
           const std::string_view val = ts_node_is_null(rv) ? std::string_view{} : trim(get_text(rv));
           if (val == "false" || val == "0") {
-            has_hdl = true;
+            timecheck_off = true;
           } else if (!val.empty() && val != "true" && val != "1") {
             report_error(item,
                          "timecheck-bad-value",
@@ -4838,7 +6223,7 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
           continue;
         }
         if (key == "hdl") {
-          has_hdl = true;  // DEPRECATED spelling of `timecheck=false` (same effect)
+          timecheck_off = true;  // DEPRECATED spelling of `timecheck=false` (same effect)
           continue;
         }
         if (key != "lg") {
@@ -4890,9 +6275,6 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
                  "type",
                  "the `lg` attribute is only valid on a `pub` lambda definition",
                  "add `pub` before the definition, or remove the `lg` attribute");
-  }
-  if (has_hdl) {
-    lnast->set_verilog_origin(true);
   }
 
   // Workaround for tree-sitter not always attaching the body to `code`:
@@ -5004,9 +6386,8 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // method body re-enter tuple lowering before the enclosing tuple has been
   // completed.  File/nested source definitions (which have no synthetic
   // hoist_name) can stream directly into their final sibling tree.
-  const bool                       stream_lambda       = hoist_name.empty() && lambda_ref.is_ref() && !lambda_ref.get_name().empty()
-                                                         && (kind == "comb" || kind == "pipe" || kind == "mod");
-  const auto                       outer_runtime_names = streamed_lexical_names_;
+  const bool                       stream_lambda = hoist_name.empty() && lambda_ref.is_ref() && !lambda_ref.get_name().empty()
+                                                   && (kind == "comb" || kind == "pipe" || kind == "mod");
   absl::flat_hash_set<std::string> outer_hoisted_names;
   if (stream_lambda) {
     // Types, enums, and sibling function names are file/function-scope
@@ -5014,12 +6395,20 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
     // func_def node through which read_is_visible can discover them, so carry
     // the compact name set across the destination switch.  Their definitions
     // remain in the enclosing source-unit tree and are consumed through the
-    // shared runner registries; no declaration subtree is copied.
-    collect_hoisted_names(lnast->get_root(), outer_hoisted_names);
+    // shared runner registries; no declaration subtree is copied. Every
+    // enclosing tree contributes: a lambda nested in a `mod` still sees the
+    // file's types.
+    collect_hoisted_names(*lnast, lnast->get_root(), outer_hoisted_names);
+    for (const auto& st : destination_stack_) {
+      collect_hoisted_names(*st.lnast, st.lnast->get_root(), outer_hoisted_names);
+    }
   }
   std::string streamed_entity;
   Lnast_nid   fd_idx;
   Lnast_nid   signature_parent;
+  if (lambda_ref.is_ref() && !ts_node_is_null(name_node)) {
+    capture_frames_.back().lambdas.insert_or_assign(std::string(lambda_ref.get_name()), kind == "comb");
+  }
   if (stream_lambda) {
     const std::string entity(lambda_ref.get_name());
     streamed_entity = entity;
@@ -5039,7 +6428,10 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
     }
 
     const std::string streamed_name = std::format("{}.{}", lnast->get_top_module_name(), entity);
-    push_streamed_destination(streamed_name, kind, has_hdl || lnast->is_verilog_origin(), is_pub ? lg_value : std::string_view{});
+    push_streamed_destination(streamed_name,
+                              kind,
+                              timecheck_off || lnast->get_skip_timecheck(),
+                              is_pub ? lg_value : std::string_view{});
     // The streamed destination has no enclosing func_def node from which the
     // source mapper can inherit the declaration span.  Seed its root so that
     // synthesized io/declaration nodes still map back to this function.
@@ -5050,9 +6442,33 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   } else {
     fd_idx = builder.add_child(Lnast_ntype::create_func_def());
     lnast->add_child(fd_idx, lambda_ref);
-    lnast->add_child(fd_idx, Lnast_node::create_const(kind));
+    auto kind_idx = lnast->add_child(fd_idx, Lnast_node::create_const(kind));
+    // `timecheck=false` belongs to THIS lambda. A streamed lambda carries it on
+    // its own destination (push_streamed_destination above); a func_def kept in
+    // the enclosing tree carries it on its kind node, and func_extract stamps
+    // only the extracted lambda. Marking the enclosing tree would switch the
+    // checks off for everything else in it.
+    if (timecheck_off) {
+      lnast->add_child(kind_idx, Lnast_node::create_const(lambda_timecheck_false_marker));
+    }
     signature_parent = fd_idx;
+    // An anonymous lambda is a comptime value: `const f = comb(…){…}` binds a
+    // lambda, which a nested lambda may read.
+    if (ts_node_is_null(name_node) && hoist_name.empty()) {
+      note_comptime_rvalue(lambda_ref);
+    }
   }
+  // The lambda's capture scope: its generics, inputs and outputs, and the line
+  // every enclosing binding crosses (see capture_frames_). A streamed lambda
+  // plans its comptime-capture prologue now -- it may make the lambda generic
+  // before the signature lowers -- and emits it once the body stmts exist.
+  const size_t        boundary_frame = capture_frames_.size();
+  Capture_frame_guard boundary_guard(
+      capture_frames_,
+      Capture_frame{.lambda_boundary = true,
+                    .streamed        = stream_lambda,
+                    .lambda_name = !ts_node_is_null(name_node) ? std::string(trim(get_text(name_node))) : std::string(hoist_name)});
+  const Capture_plan       capture_plan = stream_lambda ? plan_streamed_captures(n, code) : Capture_plan{};
   // generics tuple: each `<T, U>` name becomes a `ref` child of
   // this tuple_add. Empty when absent. func_extract copies these onto the
   // extracted Lnast (Lnast::generics_) so a generic signature is detected as a
@@ -5065,6 +6481,12 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   if (!stream_lambda) {
     gen_idx = lnast->add_child(fd_idx, Lnast_ntype::create_tuple_add());
   }
+  // In-flight signature frame: the generics, then the params and outputs as
+  // collect_args flushes them, are readable by a later generic default, port
+  // bound or default-value expression (which lower into the ENCLOSING stmts
+  // frame, or none for a streamed lambda). Popped before the body — body reads
+  // resolve against the func_def signature in read_is_visible instead.
+  inflight_name_scopes_.emplace_back();
   if (!ts_node_is_null(fdef)) {
     uint32_t fcount = child_count(fdef);
     for (uint32_t i = 0; i < fcount; i++) {
@@ -5076,8 +6498,39 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
       std::string_view ct(ts_node_type(ci));
       auto             add_one = [&](TSNode ti) {
         TSNode id = child_by_field(ti, "identifier");
+        // User ruling 2026-09-28 (19): a generic is macro substitution with no
+        // constraint clause (docs 06-functions), so `<W:u8>` is an error, never
+        // a silently dropped type.
+        if (TSNode gt = child_by_field(ti, "type"); !ts_node_is_null(id) && !ts_node_is_null(gt)) {
+          const auto gname = trim(get_text(id));
+          auto       gtype = trim(get_text(gt));
+          if (gtype.starts_with(':')) {
+            gtype = trim(gtype.substr(1));
+          }
+          report_error(gt,
+                       "generic-typed-param",
+                       "type",
+                       std::format("generic parameter `{}` cannot declare a type (`{}:{}`): a generic is substituted as "
+                                   "written, with no constraint clause",
+                                   gname,
+                                   gname,
+                                   gtype),
+                       std::format("drop `:{}` and check the bound value in the body: `cassert({} does {})`", gtype, gname, gtype));
+        }
         if (!ts_node_is_null(id)) {
           Lnast_nid gref;
+          check_signature_shadow(canonical_escaped_ident(trim(get_text(id))), id, "generic");
+          note_binding(canonical_escaped_ident(trim(get_text(id))), Bind_kind::generic);
+          // A default is read by name at each call (the runner re-reads it),
+          // so a name it reads must be declared here: this generic and the
+          // later ones are not yet visible to it.
+          if (TSNode def = child_by_field(ti, "definition"); !ts_node_is_null(def)) {
+            if (!lookup_capture(canonical_escaped_ident(trim(get_text(def))))) {
+              check_type_name_spelling(def);  // `<T=boolean>`, unless a value is named so
+            }
+            record_name_reads(def, Generic_read::default_value);
+          }
+          inflight_name_scopes_.back().emplace_back(get_text(id));
           if (stream_lambda) {
             streamed_generics.emplace_back(get_text(id));
             streamed_scope_names_.insert(std::string(get_text(id)));
@@ -5100,6 +6553,29 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
             }
             if (const auto value = plain_string_literal_text(literal); value) {
               default_text = Dlop::from_string(*value)->to_pyrope();
+            } else if (const auto folded
+                       = std::string_view(ts_node_type(literal)) == "identifier" ? std::nullopt : resolve_type_int_value(def);
+                       folded) {
+              // A comptime integer written as an expression (`<N=Z.[bits]>`,
+              // `<N=(Z.[bits])>`, `<N=(W*2)>`): fold it HERE, in the scope of
+              // the declaration. The runner applies a default at each call
+              // site, where a name the default reads may not be visible. A
+              // bare name (`<N=W>`) stays a name: the runner binds the entity,
+              // so a typed W keeps its declared `.[bits]`.
+              default_text = std::string(folded->to_pyrope());
+            } else if (std::string_view(ts_node_type(literal)) == "attribute_read") {
+              // The runner re-reads a default as a type, a constant or a
+              // lambda name; an attribute read is none of those, so one that
+              // does not fold here (`Z.[bits]` of a `Z:unsigned`, which is nil)
+              // must not reach it.
+              report_error(def,
+                           "generic-default-not-comptime",
+                           "type",
+                           std::format("default `{}` of generic `{}` does not fold to a compile-time integer",
+                                       trim(get_text(def)),
+                                       trim(get_text(id))),
+                           "`.[bits]`/`.[max]`/`.[min]` of a comptime value declared without bounds (`Z:Unsigned`) "
+                           "is nil: give it a width, or write the number");
             } else {
               default_text             = std::string(trim(get_text(def)));
               // Signed numeric defaults are grouped by the grammar (`N=(-1)`).
@@ -5151,6 +6627,9 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
       } else if (ct == "typed_identifier") {
         add_one(ci);
       } else if (ct == "identifier") {
+        check_signature_shadow(canonical_escaped_ident(trim(get_text(ci))), ci, "generic");
+        note_binding(canonical_escaped_ident(trim(get_text(ci))), Bind_kind::generic);
+        inflight_name_scopes_.back().emplace_back(get_text(ci));
         if (stream_lambda) {
           streamed_generics.emplace_back(get_text(ci));
           streamed_generic_defaults.emplace_back();
@@ -5165,9 +6644,10 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // (see Pending_port_bound). Scoped to the signature: restored once the body
   // frame opens (flush_deferred_port_bounds below), so a nested lambda starts
   // clean.
-  const bool saved_has_generics = std::exchange(
-      lambda_has_generics_,
-      stream_lambda ? !streamed_generics.empty() : (!gen_idx.is_invalid() && !lnast->get_first_child(gen_idx).is_invalid()));
+  const bool saved_has_generics
+      = std::exchange(lambda_has_generics_,
+                      stream_lambda ? !streamed_generics.empty() || !capture_frames_[boundary_frame].implicit_generics.empty()
+                                    : (!gen_idx.is_invalid() && !lnast->get_first_child(gen_idx).is_invalid()));
   if (stream_lambda) {
     lnast->set_generics(std::move(streamed_generics));
     lnast->set_generic_defaults(std::move(streamed_generic_defaults));
@@ -5212,17 +6692,24 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
           // (`comb f(a, b = a+5)` — 04-variables.md "Tuple scope" default
           // example): expose through the in-flight signature frame.
           inflight_name_scopes_.back().emplace_back(get_text(id));
+          const std::string pname(canonical_escaped_ident(get_text(id)));
+          check_signature_shadow(pname, id, is_io_output ? "output" : "input");
+          auto&  pb = note_binding(pname, Bind_kind::runtime);
+          TSNode pt = child_by_field(pending_typed, "type");
+          if (!ts_node_is_null(pt)) {
+            pb.typed = true;
+            pb.range = folded_int_type_range(child_by_field(pt, "type"));
+          }
           if (stream_lambda) {
-            const std::string pname(canonical_escaped_ident(get_text(id)));
             streamed_scope_names_.insert(pname);
-            streamed_lexical_names_.insert(pname);
           }
           if (names_out) {
             names_out->emplace_back(get_text(id));
           }
-          // A comb INPUT default rides to the body prologue (todo 3g E); the io
-          // slot only carries the `__default` sentinel (see emit_arg_assign).
-          if (!is_io_output && kind == "comb" && !ts_node_is_null(pending_def)) {
+          // A comb INPUT default (and a mod/pipe one that does not fold here)
+          // rides to the body prologue (todo 3g E); the io slot only carries
+          // the `__default` sentinel (see emit_arg_assign).
+          if (input_default_in_prologue(pending_def, kind, is_io_output, pending_is_vararg)) {
             input_defaults.emplace_back(std::string(trim(get_text(id))), pending_def);
           }
         }
@@ -5298,11 +6785,6 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
     }
     flush();
   };
-  // In-flight signature frame: params/outputs become readable (by later
-  // default-value expressions, which lower into the ENCLOSING stmts frame) as
-  // collect_args flushes them. Popped before the body — body reads resolve
-  // against the func_def signature in read_is_visible instead.
-  inflight_name_scopes_.emplace_back();
   if (!ts_node_is_null(fdef)) {
     TSNode inp = child_by_field(fdef, "input");
     if (!ts_node_is_null(inp)) {
@@ -5332,6 +6814,8 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
         TSNode id = child_by_field(o, "identifier");
         if (!ts_node_is_null(id)) {
           output_refs.emplace_back(get_text(id));
+          check_signature_shadow(canonical_escaped_ident(get_text(id)), id, "output");
+          note_binding(canonical_escaped_ident(get_text(id)), Bind_kind::runtime);
         }
       }
     }
@@ -5360,41 +6844,30 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   // method hoisted out of a tuple literal must not resolve bare names against
   // the literal's fields (runtime upper-scope names need `self` or explicit
   // args; 04-variables.md "Lambda scope"). Suspend the stack; params resolve
-  // via the func_def signature in read_is_visible.
-  auto saved_inflight_scopes = std::exchange(inflight_name_scopes_, {});
-  auto body_idx              = lnast->add_child(stream_lambda ? lnast->get_root() : fd_idx, Lnast_ntype::create_stmts());
+  // via the func_def signature in read_is_visible. The stack comes back on
+  // every exit: a compile error thrown in the body unwinds through the
+  // enclosing tuple literal's Inflight_scope_guard, which pops its frame.
+  struct Inflight_suspend {
+    std::vector<std::vector<std::string>>& scopes;
+    std::vector<std::vector<std::string>>  saved;
+    explicit Inflight_suspend(std::vector<std::vector<std::string>>& s) : scopes(s), saved(std::exchange(s, {})) {}
+    ~Inflight_suspend() { scopes = std::move(saved); }
+    Inflight_suspend(const Inflight_suspend&)            = delete;
+    Inflight_suspend& operator=(const Inflight_suspend&) = delete;
+  };
+  std::optional<Inflight_suspend> suspended_inflight(std::in_place, inflight_name_scopes_);
+  auto body_idx = lnast->add_child(stream_lambda ? lnast->get_root() : fd_idx, Lnast_ntype::create_stmts());
   builder.push_stmts(body_idx);
   if (stream_lambda) {
-    // Declaration-point captures are emitted before the first user statement.
-    // They are compact scalar/import/bundle reconstructions, never copies of
-    // the enclosing function tree.
-    //
-    // The scalar/import maps are absl hash maps: iterate them SORTED so the
-    // emitted prologue (and every hash/tmp-id derived from it downstream —
-    // the compile cache's semantic hash above all) is process-independent.
-    // Their values are pre-resolved literals / unit strings, so order among
-    // them carries no dependency.
-    std::vector<std::pair<std::string_view, std::string_view>> sorted_bindings;
-    sorted_bindings.reserve(capture_const_bindings_.size());
-    for (const auto& [name, value] : capture_const_bindings_) {
-      sorted_bindings.emplace_back(name, value);
-    }
-    std::sort(sorted_bindings.begin(), sorted_bindings.end());
-    for (const auto& [name, value] : sorted_bindings) {
-      if (streamed_scope_names_.contains(name)) {
-        continue;
-      }
-      auto st = lnast->add_child(body_idx, Lnast_ntype::create_store());
-      lnast->add_child(st, Lnast_node::create_ref(name));
-      lnast->add_child(st, Lnast_node::create_const(value));
-      streamed_scope_names_.insert(std::string(name));
-    }
-    sorted_bindings.clear();
-    for (const auto& [name, unit] : capture_import_bindings_) {
-      sorted_bindings.emplace_back(name, unit);
-    }
-    std::sort(sorted_bindings.begin(), sorted_bindings.end());
-    for (const auto& [name, unit] : sorted_bindings) {
+    // Captures are emitted before the first user statement (see
+    // capture_frames_). File-scope imports come first: the import map is an
+    // absl hash map, so iterate it SORTED to keep the prologue (and every hash
+    // derived from it downstream, the compile cache's semantic hash above all)
+    // process-independent.
+    std::vector<std::pair<std::string_view, std::string_view>> sorted_imports(capture_import_bindings_.begin(),
+                                                                              capture_import_bindings_.end());
+    std::sort(sorted_imports.begin(), sorted_imports.end());
+    for (const auto& [name, unit] : sorted_imports) {
       if (streamed_scope_names_.contains(name) || (!name.empty() && name.front() == '%')) {
         continue;
       }
@@ -5404,43 +6877,32 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
       lnast->add_child(fc, Lnast_node::create_const(unit));
       streamed_scope_names_.insert(std::string(name));
     }
-    // Const tuple/string rvalues and enums replay in SOURCE DECLARATION order
-    // (capture_stmt_order_): a const tuple may read an earlier const tuple's
-    // field or an earlier enum's entry, and an enum spread may splice an
-    // earlier const — hash-map order emitted such reads before their producer
-    // ("unresolved reference" at tolg). Enums are comptime bundles, not scalar
-    // constants; re-lowering the retained declaration gives a body read such
-    // as `Color.Green` a real local producer both when the comb is inlined and
-    // when it is compiled as its own module. This is declaration-point capture:
-    // later source edits/rebindings cannot change the captured value.
-    for (const auto& cs : capture_stmt_order_) {
-      if (cs.is_enum) {
-        replaying_capture_enum_ = true;
-        process_enum_assignment(cs.node);
-        replaying_capture_enum_ = false;
-        continue;
-      }
-      if (streamed_scope_names_.contains(cs.name)) {
-        continue;
-      }
-      const auto it = const_rvalue_nodes_.find(cs.name);
-      if (it == const_rvalue_nodes_.end()) {
-        continue;
-      }
-      auto value = expr_to_node(it->second);
-      auto st    = lnast->add_child(body_idx, Lnast_ntype::create_store());
-      lnast->add_child(st, Lnast_node::create_ref(cs.name));
-      lnast->add_child(st, value);
-      streamed_scope_names_.insert(cs.name);
+    // The enclosing scopes' enums replay in SOURCE DECLARATION order. Enums
+    // are comptime bundles, not scalar constants; re-lowering the retained
+    // declaration gives a body read such as `Color.Green` a real local producer
+    // both when the comb is inlined and when it is compiled as its own module.
+    // Before the captured consts, which may read one (`const START = St.Idle`).
+    std::vector<TSNode> enum_decls;
+    for (size_t f = 0; f < boundary_frame; ++f) {
+      enum_decls.insert(enum_decls.end(), capture_frames_[f].enum_decls.begin(), capture_frames_[f].enum_decls.end());
     }
+    replaying_capture_enum_ = true;
+    for (const auto& decl : enum_decls) {
+      process_enum_assignment(decl);
+    }
+    replaying_capture_enum_ = false;
+    // The comptime consts the lambda reads, computed as the enclosing scopes
+    // compute them.
+    emit_capture_plan(capture_plan, body_idx);
   }
   // Comb INPUT defaults (todo 3g E): the FIRST body statements, in declaration
   // order, so the default evaluates in param-tuple scope (an earlier param is
-  // already visible) and is self-contained (survives func_extract). At a call
-  // that OMITS the arg the inliner lets this `store(name, expr)` bind the param;
-  // when the arg is PROVIDED the inliner skips this store (the actual wins). A
-  // literal default like `store(in2, 3)` folds; an expression `b = a + 5` emits
-  // its tmp here too (not in the enclosing frame). Emitted before the reg/attr
+  // already visible) and is self-contained (survives func_extract). The value
+  // lands in the Lnast_io_entry::default_value_name() local, never in the port:
+  // the comb's own module reads its input port (the default local is dead
+  // there), and only the inliner, at a call that OMITS the arg, binds the param
+  // from it; a PROVIDED arg skips the store. An expression `b = a + 5` emits its
+  // tmp here too (not in the enclosing frame). Emitted before the reg/attr
   // prologues below and the user body.
   //
   // 2f-generic_port_width — port bounds deferred by emit_arg_assign: lower
@@ -5452,10 +6914,14 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
   for (const auto& [pname, pdef] : input_defaults) {
     // Lower the default FIRST (it may append a `%t = a + 5` tmp to the body),
     // then the store that consumes it — so the tmp precedes its use.
-    auto val  = expr_to_node(pdef);
-    auto stix = lnast->add_child(body_idx, Lnast_ntype::create_store());
-    lnast->add_child(stix, Lnast_node::create_ref(canonical_escaped_ident(pname)));
+    auto       val   = expr_to_node(pdef);
+    const auto local = Lnast_io_entry::default_value_name(canonical_escaped_ident(pname));
+    auto       stix  = lnast->add_child(body_idx, Lnast_ntype::create_store());
+    lnast->add_child(stix, Lnast_node::create_ref(local));
     lnast->add_child(stix, val);
+    if (stream_lambda) {
+      streamed_scope_names_.insert(local);
+    }
   }
   // Synthesize the body `reg` declare for each `-> (reg q:T)` output
   // register, the same cluster process_lvalue_for_assign emits for a body
@@ -5480,9 +6946,9 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
     lnast->add_child(setix, Lnast_node::create_const("reg"));
     attach_loc(setix, or_id);
     if (!ts_node_is_null(or_def)) {
-      // Literal initializer only (a reset value must be a compile-time
-      // constant); tolg rejects anything unresolved.
-      lnast->add_child(setix, Lnast_node::create_const(trim(get_text(or_def))));
+      // A reset value is a compile-time constant: the same value the io slot
+      // folded (a constant-valued `const RST` is its value, never the text).
+      lnast->add_child(setix, comptime_default_node(or_def, or_id));
     }
     TSNode or_tc = child_by_field(or_typed, "type");
     if (!ts_node_is_null(or_tc)) {
@@ -5510,81 +6976,6 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
       lnast->add_child(cix, tmp);
     }
   }
-  // Capture formal-parameter widths so parse_int_const can resolve
-  // `x.[bits]` while processing the body (see param_bits_stack_).
-  // Walk the input arg container looking for typed_identifier nodes whose
-  // type carries a concrete uint_type/sint_type width. Each frame is a
-  // lexical scope; outer scopes remain visible for nested lambdas.
-  absl::flat_hash_map<std::string, int64_t> body_param_bits;
-  std::function<void(TSNode)>               capture_param_bits = [&](TSNode node) {
-    if (ts_node_is_null(node)) {
-      return;
-    }
-    std::string_view nt(ts_node_type(node));
-    if (nt == "typed_identifier") {
-      TSNode id = child_by_field(node, "identifier");
-      TSNode tc = child_by_field(node, "type");
-      if (!ts_node_is_null(id) && !ts_node_is_null(tc)) {
-        std::string                                   nm(trim(get_text(id)));
-        // Walk the type_cast subtree for a uint_type/sint_type carrying a
-        // concrete width as its first integer-literal child.
-        std::function<std::optional<int64_t>(TSNode)> find_width = [&](TSNode t) -> std::optional<int64_t> {
-          if (ts_node_is_null(t)) {
-            return std::nullopt;
-          }
-          std::string_view tt(ts_node_type(t));
-          // uint_type / sint_type carry their width as a HIDDEN integer token
-          // (per [[tree_sitter_pyrope_hidden_tokens]]), so ts_node_named_child
-          // returns nothing — extract the width from the node's TEXT instead.
-          // `u6` → strip leading `u` → "6"; `s12` → strip `s` → "12".
-          const auto       alias_text = trim(get_text(t));
-          const bool       signed_alias
-              = tt == "expression_type" && alias_text.size() >= 2 && alias_text.front() == 'i' && is_prim_type_token(alias_text);
-          if (tt == "uint_type" || tt == "sint_type" || signed_alias) {
-            auto txt = trim(get_text(t));
-            // A `constraint` tuple (`u6(max=3)`) extends the node text past
-            // the keyword; keep only the width token.
-            if (auto paren = txt.find('('); paren != std::string_view::npos) {
-              txt = trim(txt.substr(0, paren));
-            }
-            if (txt.size() >= 2 && (txt.front() == 'u' || txt.front() == 's' || txt.front() == 'i')) {
-              auto digits = txt.substr(1);
-              try {
-                size_t  pos = 0;
-                int64_t v   = std::stoll(std::string(digits), &pos);
-                if (pos == digits.size() && v > 0) {
-                  return v;
-                }
-              } catch (...) {
-              }
-            }
-            return std::nullopt;
-          }
-          if (tt == "bool_type") {
-            return 1;
-          }
-          for (TSNode tc2 : ts_node_named_children(t)) {
-            if (auto v = find_width(tc2)) {
-              return v;
-            }
-          }
-          return std::nullopt;
-        };
-        if (auto w = find_width(tc)) {
-          body_param_bits[nm] = *w;
-        }
-      }
-    }
-    for (TSNode kc : ts_node_named_children(node)) {
-      capture_param_bits(kc);
-    }
-  };
-  // Inputs: walk the lambda's arg_list / typed_identifier_list. Easier and
-  // safer than reconstructing from the collect_args call — that path also
-  // walks `mod`/`definition` siblings we don't care about here. Just look
-  // through every TS child of the lambda node for typed_identifiers.
-  capture_param_bits(n);
-  param_bits_stack_.push_back(std::move(body_param_bits));
   // Body-processing context: gates `stage[N]` (mod-only) and
   // `x@[N]` timecheck emission (mod/pipe only).
   lambda_kind_stack_.emplace_back(kind);
@@ -5673,45 +7064,38 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
       in_return_loop_   = saved_in_loop;
     }
   }
-  // Drop the body's param-bits frame even if there was no `code` (defensive:
-  // we pushed unconditionally above).
-  if (!param_bits_stack_.empty()) {
-    param_bits_stack_.pop_back();
-  }
   if (!lambda_kind_stack_.empty()) {
     lambda_kind_stack_.pop_back();
   }
   builder.pop_stmts();
-  inflight_name_scopes_ = std::move(saved_inflight_scopes);
+  suspended_inflight.reset();
   if (stream_lambda) {
-    // Reads that resolve in the enclosing streamed lambda but are neither
-    // constants/imports nor explicit local io become closure inputs.  Append
-    // them to the already-created input tuple; the tree is still mutable and
-    // no body copy/rebuild is needed.
-    std::vector<std::string>         runtime_captures;
-    absl::flat_hash_set<std::string> seen_captures;
-    for (const auto& rs : read_sites_) {
-      if (rs.is_call || rs.is_type || !outer_runtime_names.contains(rs.name) || streamed_scope_names_.contains(rs.name)
-          || !seen_captures.insert(rs.name).second) {
-        continue;
+    // Enclosing generics (and loop indices) the lambda reads become its
+    // IMPLICIT generics, bound `<G=G>` by every call in the enclosing scope, so
+    // each specialization of the enclosing lambda binds its own value.
+    const auto implicit = capture_frames_[boundary_frame].implicit_generics;  // a copy: patching may grow the frame
+    if (!implicit.empty()) {
+      auto gens = lnast->get_generics();
+      auto defs = lnast->get_generic_defaults();
+      defs.resize(gens.size());
+      for (const auto& g : implicit) {
+        if (std::find(gens.begin(), gens.end(), g) == gens.end()) {
+          gens.push_back(g);
+          defs.emplace_back();
+        }
+        streamed_scope_names_.insert(g);
       }
-      auto entry = lnast->add_child(in_idx, Lnast_ntype::create_store());
-      lnast->add_child(entry, Lnast_node::create_ref(rs.name));
-      lnast->add_child(entry, Lnast_node::create_const("nil"));
-      streamed_scope_names_.insert(rs.name);
-      streamed_lexical_names_.insert(rs.name);
-      runtime_captures.push_back(rs.name);
-    }
-    if (!runtime_captures.empty()) {
+      lnast->set_generics(std::move(gens));
+      lnast->set_generic_defaults(std::move(defs));
       // Keyed by the DEFINING scope (the enclosing destination): sibling
       // scopes may each declare a same-named helper with different captures.
       I(!destination_stack_.empty());
       streamed_capture_actuals_[streamed_actuals_key(destination_stack_.back().lnast->get_top_module_name(), streamed_entity)]
-          = runtime_captures;
-      patch_streamed_capture_calls(lnast, streamed_entity, runtime_captures);
+          = implicit;
+      patch_streamed_capture_calls(lnast, streamed_entity, implicit);
     }
 
-    // An untyped input or generic is a deferred template, matching the former
+    // An untyped/open-array input or generic is a deferred template, matching the former
     // extractor's metadata decision. SSA consumes the io node directly.
     if (lnast->has_generics()) {
       lnast->set_template(true);
@@ -5723,16 +7107,24 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
         auto name_n = lnast->get_first_child(entry);
         auto def_n  = name_n.is_invalid() ? name_n : lnast->get_sibling_next(name_n);
         auto type_n = def_n.is_invalid() ? def_n : lnast->get_sibling_next(def_n);
+        bool open_array = false;
+        for (auto lvl = type_n; !lvl.is_invalid() && Lnast_ntype::is_comp_type_array(lnast->get_type(lvl));) {
+          const auto elem  = lnast->get_first_child(lvl);
+          const auto dim   = elem.is_invalid() ? elem : lnast->get_sibling_next(elem);
+          open_array      |= dim.is_invalid() || lnast->get_name(dim) == "[]";
+          lvl              = elem;
+        }
         if (!name_n.is_invalid() && lnast->get_name(name_n) != "self"
-            && (type_n.is_invalid() || (Lnast_ntype::is_const(lnast->get_type(def_n)) && lnast->get_name(def_n) == "..."))) {
+            && (type_n.is_invalid() || open_array
+                || (Lnast_ntype::is_const(lnast->get_type(def_n)) && lnast->get_name(def_n) == "..."))) {
           lnast->set_template(true);
           break;
         }
       }
     }
     auto completed = pop_streamed_destination();
-    if (!runtime_captures.empty()) {
-      patch_streamed_capture_calls(lnast, streamed_entity, runtime_captures);
+    if (!implicit.empty()) {
+      patch_streamed_capture_calls(lnast, streamed_entity, implicit);
     }
     root_lnast_->add_streamed_lambda(std::move(completed));
   }
@@ -5740,8 +7132,8 @@ void Prp2lnast::process_lambda_statement_named(TSNode n, std::string_view hoist_
 
 // Resolve a timing-index node to a compile-time integer. A
 // `constant` CST node parses through the Pyrope literal parser (so hex/octal/
-// underscore-grouped forms work); an `identifier` looks up a recorded
-// `const NAME = <int literal>` binding (see const_int_bindings_). Anything
+// underscore-grouped forms work); an `identifier` reads the recorded integer of
+// the binding it names (see Binding::int_value). Anything
 // else (a mut/input/runtime ref, a non-integer const, a too-wide literal) is
 // std::nullopt so the caller can emit its own diagnostic.
 std::optional<int64_t> Prp2lnast::resolve_cycle_value(TSNode n) const {
@@ -5760,13 +7152,42 @@ std::optional<int64_t> Prp2lnast::resolve_cycle_value(TSNode n) const {
     return std::nullopt;
   }
   if (t == "identifier") {
-    auto it = const_int_bindings_.find(std::string(trim(get_text(n))));
-    if (it != const_int_bindings_.end()) {
-      return it->second;
-    }
-    return std::nullopt;
+    return visible_const_int(n);
   }
   return std::nullopt;
+}
+
+std::optional<std::string> Prp2lnast::unfolded_comptime_read(TSNode n) const {
+  std::vector<TSNode> todo{n};
+  while (!todo.empty()) {
+    TSNode c = todo.back();
+    todo.pop_back();
+    if (ts_node_is_null(c)) {
+      continue;
+    }
+    const std::string_view t(ts_node_type(c));
+    if (t == "identifier") {
+      const auto name = canonical_escaped_ident(trim(get_text(c)));
+      if (const auto hit = lookup_capture(name); hit && hit->kind == Bind_kind::comptime && !hit->binding->int_value) {
+        return std::string(name);
+      }
+      continue;
+    }
+    if (t == "dot_expression" || t == "member_selection" || (t == "expression_type" && ts_node_named_child_count(c) > 1)) {
+      continue;  // a field of an import or a comptime tuple, not a comptime integer
+    }
+    for (TSNode k : ts_node_named_children(c)) {
+      todo.push_back(k);
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<int64_t> Prp2lnast::visible_const_int(TSNode id) const {
+  const auto nm = canonical_escaped_ident(trim(get_text(id)));
+  check_capture_read(nm, id);
+  const auto hit = lookup_capture(nm);
+  return hit ? hit->binding->int_value : std::nullopt;
 }
 
 // Resolve the pipe_lambda `depth` field to the (min,max) stages
@@ -6201,7 +7622,7 @@ void Prp2lnast::expand_enum_spread(TSNode operand, std::vector<Enum_entry>& entr
 }
 
 Lnast_node Prp2lnast::lower_enum_def(std::string_view enum_name, TSNode enum_level_type, const std::vector<Enum_entry>& entries,
-                                     int64_t parent_bits, int* bit_counter) {
+                                     TSNode loc, int64_t parent_bits, int* bit_counter, Enum_encoding* enc) {
   // An enum is a finite value hierarchy, not a recursive algebraic data
   // type. Check payload annotations before their textual carrier is stored;
   // otherwise a self-reference silently survives as an unresolved type.
@@ -6241,33 +7662,31 @@ Lnast_node Prp2lnast::lower_enum_def(std::string_view enum_name, TSNode enum_lev
     }
     return std::string(trim(get_text(tc)));
   };
-  const std::string level_pt    = type_text_of(enum_level_type);
-  // An INTEGER level type (`enum V:int`/`:i4`/`:u8` …) forces SEQUENTIAL ordinal
-  // numbering (0,1,2,…), not the default one-hot, and makes an explicit entry
-  // value an ORDINAL (not a payload construction) that resets the sequence.
-  // (2f-enum group B.)
-  auto              is_int_type = [](std::string_view s) {
-    if (s == "int" || s == "integer" || s == "uint" || s == "unsigned" || s == "signed") {
-      return true;
+  const std::string level_pt     = type_text_of(enum_level_type);
+  // An INTEGER level type (`enum V:u8`, `:unsigned(bits=4)`, an alias of one)
+  // forces SEQUENTIAL ordinal numbering (0,1,2,…), not the default one-hot, and
+  // makes an explicit entry value an ORDINAL (not a payload construction) that
+  // resets the sequence. (2f-enum group B.)
+  const bool        level_is_int = int_type_of(enum_level_type).has_value();
+  const auto        one_hot_bit  = [&](std::string_view entry) {
+    if (bit >= kMaxOneHotEnumBits) {
+      const auto msg = std::format("one-hot enum `{}` needs more than {} bits (entry `{}`)", root_name, kMaxOneHotEnumBits, entry);
+      constexpr std::string_view hint = "give the enum an integer level type (`enum E:U8 = (…)`) for sequential values";
+      if (ts_node_is_null(loc)) {
+        report_error("enum-too-wide", "type", msg, hint);
+      }
+      report_error(loc, "enum-too-wide", "type", msg, hint);
     }
-    return s.size() >= 2 && (s[0] == 'u' || s[0] == 'i' || s[0] == 's')
-           && std::all_of(s.begin() + 1, s.end(), [](unsigned char c) { return std::isdigit(c); });
+    return int64_t{1} << bit++;
   };
-  const bool level_is_int = is_int_type(level_pt);
 
-  // Ordinal mode (payload-less): one-hot when NO entry is explicit, else a
-  // traditional sequence (explicit value resets the counter) — 03-bundle.md.
-  // A nested `enum(...)` entry is one-hot hierarchical, never an ordinal seed.
-  bool any_explicit = false;
-  for (const auto& e : entries) {
-    if (e.has_value && !e.has_type && level_pt.empty() && ts_node_is_null(enum_definition_node_of(e.value_node))) {
-      any_explicit = true;
-      break;
-    }
-  }
+  // Ordinal mode (payload-less, no level type): see enum_entries_sequential.
+  const bool any_explicit = level_pt.empty() && enum_entries_sequential(entries);
+
   std::vector<std::pair<std::string, Lnast_node>> fields;
   fields.reserve(entries.size());
-  Lnast_node seq_next = Lnast_node::create_const("0");
+  Lnast_node          seq_next  = Lnast_node::create_const("0");
+  std::optional<Dlop> seq_value = *Dlop::create_integer(0);  // seq_next's value, when it folds here
   for (std::size_t i = 0; i < entries.size(); ++i) {
     const auto&       e    = entries[i];
     const std::string pt   = e.has_type ? type_text_of(e.type_node) : level_pt;
@@ -6282,19 +7701,21 @@ Lnast_node Prp2lnast::lower_enum_def(std::string_view enum_name, TSNode enum_lev
       // `parent_bits`. The carrier IS the children bundle (so `.eagle` still
       // navigates); the parent's own bare-bit encoding rides as a `__enumval`
       // attr that int()/==/in read back (03-bundle.md "Hierarchical enumerates").
-      const int64_t own_value = parent_bits | (int64_t(1) << bit);
-      ++bit;
+      const int64_t own_value = parent_bits | one_hot_bit(e.name);
+      if (enc != nullptr) {
+        enc->add(*Dlop::create_integer(own_value));
+      }
       std::vector<Enum_entry> inner;
       parse_enum_definition_entries(nested, inner);
       // Pass the fully-qualified prefix (`E3.l1`) so nested leaf identity is
       // `E3.l1.l1a`, not the prefix-less `l1.l1a` (string() reads __enumentry).
-      carrier = lower_enum_def(full, TSNode{}, inner, own_value, &bit);
+      carrier = lower_enum_def(full, TSNode{}, inner, loc, own_value, &bit, enc);
 
       auto vidx = builder.add_child(Lnast_ntype::create_store());
       lnast->add_child(vidx, carrier);
       lnast->add_child(vidx, Lnast_node::create_const("__enumval"));
       lnast->add_child(vidx, Lnast_node::create_const(std::to_string(own_value)));
-    } else if (!pt.empty() && e.has_value && !is_int_type(pt)) {
+    } else if (!pt.empty() && e.has_value && !int_type_of(e.has_type ? e.type_node : enum_level_type)) {
       // Typed payload entry (`Yellow:Rgb = 0xff_ff00`): construct `Rgb(v)`.
       // An INTEGER-typed enum (`:i4`) is NOT a payload — its explicit value is
       // an ordinal, handled by the ordinal branch below.
@@ -6302,20 +7723,30 @@ Lnast_node Prp2lnast::lower_enum_def(std::string_view enum_name, TSNode enum_lev
       auto val  = expr_to_node(e.value_node);
       auto fidx = builder.add_child(Lnast_ntype::create_func_call());
       carrier   = builder.mint_tmp_ref();
+      if (enc != nullptr) {
+        enc->known = false;  // a tagged union: no integer encoding
+      }
       lnast->add_child(fidx, carrier);
       lnast->add_child(fidx, Lnast_node::create_ref(pt));
       lnast->add_child(fidx, val);
     } else {
-      Lnast_node value = Lnast_node::create_invalid();
+      Lnast_node          value = Lnast_node::create_invalid();
+      std::optional<Dlop> known;  // the entry's value, when it folds here
       if (e.has_value) {
         value = expr_to_node(e.value_node);
+        known = resolve_type_int_value(e.value_node);
       } else if (any_explicit || level_is_int) {
         value = seq_next;
+        known = seq_value;
       } else {
-        const int64_t v = parent_bits | (int64_t(1) << bit);
-        ++bit;
-        value = Lnast_node::create_const(std::to_string(v));
+        const int64_t v = parent_bits | one_hot_bit(e.name);
+        value           = Lnast_node::create_const(std::to_string(v));
+        known           = *Dlop::create_integer(v);
       }
+      if (enc != nullptr) {
+        enc->add(known);
+      }
+      seq_value = known ? std::optional<Dlop>(*known->add_op(*Dlop::create_integer(1))) : std::nullopt;
 
       if ((any_explicit || level_is_int) && !e.has_type && i + 1 < entries.size() && !entries[i + 1].has_value) {
         // Compute the next ordinal in LNAST so named constants and arbitrary
@@ -6346,7 +7777,8 @@ Lnast_node Prp2lnast::lower_enum_def(std::string_view enum_name, TSNode enum_lev
     fields.emplace_back(e.name, carrier);
   }
 
-  // The enum-type bundle: entry name → carrier.
+  // The enum-type bundle: entry name → carrier. A comptime entity: `const
+  // Color = enum(…)` is a comptime binding (see capture_frames_).
   auto bidx = builder.add_child(Lnast_ntype::create_tuple_add());
   auto bref = builder.mint_tmp_ref();
   lnast->add_child(bidx, bref);
@@ -6355,7 +7787,141 @@ Lnast_node Prp2lnast::lower_enum_def(std::string_view enum_name, TSNode enum_lev
     lnast->add_child(aidx, Lnast_node::create_ref(k));
     lnast->add_child(aidx, v);
   }
+  note_comptime_rvalue(bref);
   return bref;
+}
+
+void Prp2lnast::parse_enum_statement_entries(TSNode values, std::vector<Enum_entry>& entries) {
+  if (ts_node_is_null(values)) {
+    return;
+  }
+  for (TSNode c : ts_node_named_children(values)) {
+    std::string_view t(ts_node_type(c));
+    if (t == "comment") {
+      continue;
+    }
+    // `enum Other = (...a, b=3, ...c)` (docs 03-bundle): a spread of a
+    // comptime const splices in place -- a const string names one entry, a
+    // const tuple splices its named fields (expand_enum_spread).
+    if (t == "unary_expression") {
+      TSNode op  = child_by_field(c, "operator");
+      TSNode arg = child_by_field(c, "argument");
+      if (!ts_node_is_null(op) && !ts_node_is_null(arg) && trim(get_text(op)) == "...") {
+        expand_enum_spread(arg, entries);
+      }
+      continue;
+    }
+    Enum_entry e;
+    if (t == "identifier") {
+      e.name = trim(get_text(c));
+    } else if (t == "typed_identifier" || t == "typed_field") {
+      // `(value:Signed, add:(A, B))`: a payload entry. prpparse spells a
+      // valueless `name:Type` tuple item a `typed_field`.
+      TSNode id = child_by_field(c, "identifier");
+      e.name    = trim(get_text(ts_node_is_null(id) ? c : id));
+      if (TSNode tc = child_by_field(c, "type"); !ts_node_is_null(tc)) {
+        e.type_node = tc;
+        e.has_type  = true;
+      }
+    } else if (t == "assignment") {
+      TSNode lv = child_by_field(c, "lvalue");
+      TSNode rv = child_by_field(c, "rvalue");
+      if (ts_node_is_null(lv)) {
+        continue;
+      }
+      if (std::string_view(ts_node_type(lv)) == "typed_identifier") {
+        TSNode id = child_by_field(lv, "identifier");
+        e.name    = trim(get_text(ts_node_is_null(id) ? lv : id));
+        if (TSNode tc = child_by_field(lv, "type"); !ts_node_is_null(tc)) {
+          e.type_node = tc;
+          e.has_type  = true;
+        }
+      } else {
+        e.name = trim(get_text(lv));
+      }
+      if (!ts_node_is_null(rv)) {
+        e.value_node = rv;
+        e.has_value  = true;
+      }
+    } else {
+      // Never drop an entry silently: an unlowered item would vanish from
+      // the enum (and from its encoding) with no diagnostic.
+      report_error(c,
+                   "enum-entry-unsupported",
+                   "syntax",
+                   std::format("unsupported enum entry `{}`", trim(get_text(c))),
+                   "an enum entry is `name`, `name=value`, `name:Type`, `name:Type=value` or a `...const` spread");
+    }
+    if (!e.name.empty()) {
+      entries.push_back(std::move(e));
+    }
+  }
+}
+
+bool Prp2lnast::enum_entries_sequential(const std::vector<Enum_entry>& entries) {
+  return std::any_of(entries.begin(), entries.end(), [](const Enum_entry& e) {
+    return e.has_value && !e.has_type && ts_node_is_null(enum_definition_node_of(e.value_node));
+  });
+}
+
+std::optional<Dlop> Prp2lnast::enum_entry_value(std::string_view enum_name, std::string_view entry) {
+  // The innermost visible declaration of `enum_name` (capture frames close
+  // with their scope, so a sibling lambda's same-named enum is not visible).
+  TSNode decl{};
+  for (auto f = capture_frames_.rbegin(); f != capture_frames_.rend() && ts_node_is_null(decl); ++f) {
+    for (auto d = f->enum_decls.rbegin(); d != f->enum_decls.rend(); ++d) {
+      if (TSNode nm = child_by_field(*d, "name"); !ts_node_is_null(nm) && trim(get_text(nm)) == enum_name) {
+        decl = *d;
+        break;
+      }
+    }
+  }
+  std::vector<Enum_entry> entries;
+  if (!ts_node_is_null(decl)) {
+    if (!ts_node_is_null(child_by_field(decl, "type"))) {
+      return std::nullopt;  // a payload / level-typed enum
+    }
+    parse_enum_statement_entries(child_by_field(decl, "values"), entries);
+  } else {
+    // `const NAME = enum(…)`, the expression form: a visible comptime binding
+    // whose kept right-hand side is the enum definition.
+    const auto hit = lookup_capture(canonical_escaped_ident(enum_name));
+    const auto rv  = const_rvalue_nodes_.find(canonical_escaped_ident(enum_name));
+    if (!hit || hit->kind != Bind_kind::comptime || rv == const_rvalue_nodes_.end()
+        || std::string_view(ts_node_type(rv->second)) != "enum_definition") {
+      return std::nullopt;
+    }
+    parse_enum_definition_entries(rv->second, entries);
+  }
+  for (const auto& e : entries) {
+    if (e.has_type || (e.has_value && !ts_node_is_null(enum_definition_node_of(e.value_node)))) {
+      return std::nullopt;  // a payload or hierarchical entry: not a plain encoding
+    }
+  }
+  // The values lower_enum_def emits: one-hot, or a sequence (enum_entries_sequential).
+  const bool any_explicit = enum_entries_sequential(entries);
+  Dlop       next         = *Dlop::create_integer(0);
+  int64_t    bit          = 0;
+  for (const auto& e : entries) {
+    Dlop v = next;
+    if (e.has_value) {
+      const auto ev = resolve_type_int_value(e.value_node);
+      if (!ev) {
+        return std::nullopt;
+      }
+      v = *ev;
+    } else if (!any_explicit) {
+      if (bit >= kMaxOneHotEnumBits) {
+        return std::nullopt;  // lower_enum_def reports it
+      }
+      v = *Dlop::create_integer(int64_t{1} << bit++);
+    }
+    if (e.name == entry) {
+      return v;
+    }
+    next = *v.add_op(*Dlop::create_integer(1));
+  }
+  return std::nullopt;
 }
 
 void Prp2lnast::process_enum_assignment(TSNode n) {
@@ -6363,72 +7929,26 @@ void Prp2lnast::process_enum_assignment(TSNode n) {
   if (ts_node_is_null(name)) {
     return;
   }
-  if (!replaying_capture_enum_ && conditional_depth_ == 0) {
+  reject_std_declaration(name, "enum");
+  capture_frames_.back().types.insert(std::string(canonical_escaped_ident(trim(get_text(name)))));
+  if (!replaying_capture_enum_) {
     // parse_next recycles the current construct's CST arena.  A later lambda
     // still needs the enum's declaration-point value, so retain only this
-    // compact declaration in the persistent capture arena.  Only UNCONDITIONAL
-    // file-scope declarations qualify (the same rule as capture_const_bindings_
-    // / const_rvalue_nodes_): an enum local to a lambda/if body must not leak
-    // into sibling lambdas — replaying it there collided with the sibling's own
-    // same-named enum ("redeclaration of variable in the same scope").
+    // compact declaration in the persistent capture arena, on the frame of its
+    // scope: it closes with that scope, so an enum local to a lambda/if body
+    // never leaks into a sibling lambda (which may declare its own same-named
+    // enum).
     prpparse::Ast* kept = clone_prp_subtree(retained_arena_, n.a);
     prpparse::link_parents(kept);
-    capture_stmt_order_.push_back(Capture_stmt{
-        .is_enum = true,
-        .name    = {},
-        .node    = TSNode{kept, prp_buf.get()}
-    });
+    capture_frames_.back().enum_decls.push_back(TSNode{kept, prp_buf.get()});
   }
-  TSNode etype  = child_by_field(n, "type");    // `enum Color2:Rgb = (…)` payload type
-  TSNode values = child_by_field(n, "values");  // the entries tuple
+  TSNode etype = child_by_field(n, "type");  // `enum Color2:Rgb = (…)` payload type
 
   std::vector<Enum_entry> entries;
-  if (!ts_node_is_null(values)) {
-    for (TSNode c : ts_node_named_children(values)) {
-      std::string_view t(ts_node_type(c));
-      if (t == "comment") {
-        continue;
-      }
-      Enum_entry e;
-      if (t == "identifier") {
-        e.name = trim(get_text(c));
-      } else if (t == "typed_identifier") {
-        TSNode id = child_by_field(c, "identifier");
-        e.name    = trim(get_text(ts_node_is_null(id) ? c : id));
-        if (TSNode tc = child_by_field(c, "type"); !ts_node_is_null(tc)) {
-          e.type_node = tc;
-          e.has_type  = true;
-        }
-      } else if (t == "assignment") {
-        TSNode lv = child_by_field(c, "lvalue");
-        TSNode rv = child_by_field(c, "rvalue");
-        if (ts_node_is_null(lv)) {
-          continue;
-        }
-        if (std::string_view(ts_node_type(lv)) == "typed_identifier") {
-          TSNode id = child_by_field(lv, "identifier");
-          e.name    = trim(get_text(ts_node_is_null(id) ? lv : id));
-          if (TSNode tc = child_by_field(lv, "type"); !ts_node_is_null(tc)) {
-            e.type_node = tc;
-            e.has_type  = true;
-          }
-        } else {
-          e.name = trim(get_text(lv));
-        }
-        if (!ts_node_is_null(rv)) {
-          e.value_node = rv;
-          e.has_value  = true;
-        }
-      } else {
-        continue;  // spreads / exotic items: not lowered yet
-      }
-      if (!e.name.empty()) {
-        entries.push_back(std::move(e));
-      }
-    }
-  }
+  parse_enum_statement_entries(child_by_field(n, "values"), entries);
 
-  auto bref = lower_enum_def(get_text(name), etype, entries);
+  Enum_encoding enc;
+  auto          bref = lower_enum_def(get_text(name), etype, entries, name, 0, nullptr, &enc);
 
   // Mirror `type Foo = (…)`: declare with mode `type`, then bind the bundle —
   // so `mut x:Color2 = …` resolves the typename and `Color2.Green` folds.
@@ -6441,6 +7961,74 @@ void Prp2lnast::process_enum_assignment(TSNode n) {
   attach_loc(sidx, n);
   lnast->add_child(sidx, Lnast_node::create_ref(get_text(name)));
   lnast->add_child(sidx, bref);
+
+  emit_enum_encoding_alias(get_text(name), etype, enc, n);
+}
+
+void Prp2lnast::emit_enum_encoding_alias(std::string_view enum_name, TSNode etype, const Enum_encoding& enc, TSNode loc) {
+  // User ruling 2026-09-28 (29): a value of an integer-encoded enum (every
+  // entry value folds, no payload) is an UNSIGNED integer as wide as its
+  // widest entry value needs -- one-hot `(a, b, c)` is 3 bits, `(a, b=5, c)`
+  // 3 bits, a hierarchical enum one bit per node. That range rides the hidden
+  // scalar alias Lnast::enum_encoding_type(NAME), which a port (upass.ssa), a
+  // `reg` or a local (the runner) of the enum type resolves like any integer
+  // alias (`type Byte = u8`). A negative entry makes it signed. An integer
+  // level type (`enum Op:u8 = (…)`, `:unsigned(bits=4)`, an alias of one) is
+  // the encoding itself. A payload enum (a tagged union) has no integer
+  // encoding.
+  Int_type_range level;
+  if (!ts_node_is_null(etype)) {
+    const auto lt = int_type_of(etype);
+    if (!lt) {
+      return;  // a payload level type
+    }
+    level = *lt;
+  }
+  if (enum_name.empty() || !enc.known || !enc.max || !enc.min) {
+    return;
+  }
+  Dlop max = *enc.max;
+  Dlop min = enc.min->is_negative() ? *enc.min : *Dlop::create_integer(0);
+  if (level) {
+    std::tie(max, min) = *level;
+  } else {
+    const auto bits = static_cast<uint32_t>(std::max<int64_t>(1, upass::range_bits(*enc.max, *enc.min)));
+    max             = upass::max_from_bits(bits, enc.min->is_negative());
+    min             = upass::min_from_bits(bits, enc.min->is_negative());
+  }
+  auto eidx = builder.add_child(Lnast_ntype::create_declare());
+  attach_loc(eidx, loc);
+  lnast->add_child(eidx, Lnast_node::create_ref(Lnast::enum_encoding_type(enum_name)));
+  auto tidx = lnast->add_child(eidx, Lnast_ntype::create_prim_type_int());
+  lnast->add_child(tidx, Lnast_node::create_const(std::string(max.to_pyrope())));
+  lnast->add_child(tidx, Lnast_node::create_const(std::string(min.to_pyrope())));
+  lnast->add_child(eidx, Lnast_node::create_const("type"));
+}
+
+std::optional<Prp2lnast::Int_type_range> Prp2lnast::int_type_of(TSNode ty) const {
+  if (ts_node_is_null(ty)) {
+    return std::nullopt;
+  }
+  if (TSNode inner = child_by_field(ty, "type"); !ts_node_is_null(inner)) {
+    ty = inner;  // a type_cast wrapper
+  }
+  while (std::string_view(ts_node_type(ty)) == "expression_type" && ts_node_named_child_count(ty) == 1) {
+    ty = ts_node_named_child(ty, 0);
+  }
+  const std::string_view t(ts_node_type(ty));
+  if (t == "uint_type" || t == "sint_type") {
+    return folded_int_type_range(ty);
+  }
+  if (t != "identifier") {
+    return std::nullopt;
+  }
+  const auto name = trim(get_text(ty));
+  for (auto f = capture_frames_.rbegin(); f != capture_frames_.rend(); ++f) {
+    if (const auto it = f->int_type_aliases.find(name); it != f->int_type_aliases.end()) {
+      return it->second;
+    }
+  }
+  return std::nullopt;
 }
 
 void Prp2lnast::process_type_statement(TSNode n) {
@@ -6448,6 +8036,7 @@ void Prp2lnast::process_type_statement(TSNode n) {
   if (ts_node_is_null(name)) {
     return;
   }
+  reject_std_declaration(name, "type");
   // `pub type X = …`: an exportable type alias — registered as a pub of kind
   // "type" so an importer's `x:pkg.X` can bind it (the alias's scalar range
   // rides pub_values as its `uN`/`sN` text — see harvest_pub_values).
@@ -6464,21 +8053,50 @@ void Prp2lnast::process_type_statement(TSNode n) {
   // `type Foo = …` is a declaration whose mode is `type` (replaces
   // the former type_def node). The type slot is normally `prim_type_none` and
   // the mode const carries "type" — EXCEPT for a SCALAR primitive alias
-  // (`type Foo = u10`/`s8`/`bool`/`string`), where the resolved
+  // (`type Foo = U10`/`S8`/`Bool`/`String`/`Clock`/`Reset`), where the resolved
   // `prim_type_int(max,min)` lands in the type slot so a later `:Foo`
   // annotation borrows the width (a scalar type carries no field bundle, so
-  // the store-the-tuple path below cannot preserve it). Named-identifier
-  // aliases (`type Foo = Bar`) and tuple types keep `prim_type_none`.
+  // the store-the-tuple path below cannot preserve it). A named-identifier
+  // alias (`type Foo = Bar`) carries `ref Bar`; a tuple type keeps
+  // `prim_type_none` and describes its fields with `type_spec` rows.
   TSNode     alias = child_by_field(n, "alias");
   const bool scalar_prim_alias
       = !ts_node_is_null(alias)
         && (std::string_view(ts_node_type(alias)) == "uint_type" || std::string_view(ts_node_type(alias)) == "sint_type"
-            || std::string_view(ts_node_type(alias)) == "bool_type" || std::string_view(ts_node_type(alias)) == "string_type");
+            || std::string_view(ts_node_type(alias)) == "bool_type" || std::string_view(ts_node_type(alias)) == "string_type"
+            || std::string_view(ts_node_type(alias)) == "clock_type" || std::string_view(ts_node_type(alias)) == "reset_type");
 
+  // An alias of another NAMED type (`type Loc_t = pk.Req_t`, `type A = B`)
+  // keeps its target as a `ref` in the type slot, so a port typed `Loc_t`
+  // resolves to the target's layout.
+  bool named_alias = !ts_node_is_null(alias) && std::string_view(ts_node_type(alias)) == "expression_type"
+                     && ts_node_named_child_count(alias) != 0;
+  for (uint32_t i = 0; named_alias && i < ts_node_named_child_count(alias); ++i) {
+    named_alias = std::string_view(ts_node_type(ts_node_named_child(alias, i))) == "identifier";
+  }
+
+  if (scalar_prim_alias) {
+    // `type Row = Unsigned(bits=N)` in a generic body: the bound only folds
+    // once N is bound, so it defers like a variable declaration's.
+    prelower_int_type_bounds(alias);
+  }
+  capture_frames_.back().types.insert(std::string(canonical_escaped_ident(trim(get_text(name)))));
   auto idx = builder.add_child(Lnast_ntype::create_declare());
   lnast->add_child(idx, Lnast_node::create_ref(get_text(name)));
   if (scalar_prim_alias) {
-    emit_type_expr(idx, alias);  // prim_type_int(max,min) / prim_type_bool / prim_type_string
+    emit_type_expr(idx, alias);  // prim_type_int(max,min) / _bool / _string / _clock / _reset
+    if (const std::string_view at(ts_node_type(alias)); at == "uint_type" || at == "sint_type") {
+      capture_frames_.back().int_type_aliases.insert_or_assign(std::string(trim(get_text(name))), folded_int_type_range(alias));
+    }
+  } else if (named_alias) {
+    if (const auto target = int_type_of(alias)) {
+      capture_frames_.back().int_type_aliases.insert_or_assign(std::string(trim(get_text(name))), *target);
+    }
+    // The target must be a type in scope (`type T = Nope_t` is as wrong as a
+    // `:Nope_t` annotation), and not the removed `I<N>` spelling.
+    check_type_name_spelling(alias);
+    record_type_name_read(alias);
+    lnast->add_child(idx, Lnast_node::create_ref(trim(get_text(alias))));
   } else {
     lnast->add_child(idx, Lnast_ntype::create_prim_type_none());
   }
@@ -6543,14 +8161,16 @@ std::optional<std::string> Prp2lnast::plain_string_literal_text(TSNode n) {
     return std::nullopt;
   }
   if (t == "interpolated_string_literal") {  // double-quoted; reject `{expr}` parts
-    if (ts_node_named_child_count(n) != 0) {
-      return std::nullopt;
-    }
     if (ts_node_end_byte(n) < ts_node_start_byte(n) + 2) {
       return std::nullopt;
     }
-    auto body = text_between(ts_node_start_byte(n) + 1, ts_node_end_byte(n) - 1);
-    return unescape_cooked_string(body);
+    // Same decoding as interpolated_string_to_node: a comment-only hole is an
+    // empty hole (literal `{}`), never text that leaks into the value.
+    auto pieces = istring_pieces(n);
+    if (pieces.size() != 1 || pieces[0].is_hole) {
+      return std::nullopt;
+    }
+    return std::move(pieces[0].text);
   }
   return std::nullopt;
 }
@@ -6560,12 +8180,27 @@ std::optional<std::string> Prp2lnast::plain_string_literal_text(TSNode n) {
 // — exactly what `lhd scan` (collect_imports) matches and the upass resolver
 // folds. The callee is a CONST (not a ref) so constprop
 // leaves it unfolded and no user `import` definition can capture it.
-void Prp2lnast::emit_import_call(const Lnast_node& target, std::string_view unit, TSNode loc_node) {
-  auto idx = builder.add_child(Lnast_ntype::create_func_call());
+//
+// `foo` and foo are the same identifier: every `.`-separated segment of a plain
+// unit/member path is canonicalized (`import("lib.`name`")` ≡
+// `import("lib.name")`, while `` `in c` `` keeps its escape) so the unit key
+// matches the canonical names prp2lnast stamps on `pub` entries and trees. The
+// `ln:`/`lg:` forms name a tree/graph verbatim and are left alone.
+static std::string canonical_import_unit(std::string_view unit) {
+  if (unit.starts_with("ln:") || unit.starts_with("lg:")) {
+    return std::string(unit);
+  }
+  return str_tools::canonical_escaped_path(unit);
+}
+
+void Prp2lnast::emit_import_call(const Lnast_node& target, std::string_view unit_src, TSNode loc_node) {
+  const std::string unit = canonical_import_unit(unit_src);
+  auto              idx = builder.add_child(Lnast_ntype::create_func_call());
   lnast->add_child(idx, target);
   lnast->add_child(idx, Lnast_node::create_const("import"));
   lnast->add_child(idx, Lnast_node::create_const(absl::StrCat("'", unit, "'")));
   attach_loc(idx, loc_node);  // → resolution diagnostics point at the call site
+  note_comptime_rvalue(target);
   if (conditional_depth_ == 0 && target.is_ref()) {
     capture_import_bindings_[std::string(target.get_name())] = absl::StrCat("'", unit, "'");
   }
@@ -6626,7 +8261,12 @@ void Prp2lnast::process_import_statement(TSNode n) {
   Lnast_node tmp = builder.mint_tmp_ref();
   emit_import_call(tmp, *text, n);
 
+  reject_std_declaration(alias, "import alias");
   Lnast_node ref = Lnast_node::create_ref(canonical_escaped_ident(trim(get_text(alias))));
+  note_binding(ref.get_name(), Bind_kind::comptime);
+  if (conditional_depth_ == 0) {
+    capture_import_bindings_[std::string(ref.get_name())] = absl::StrCat("'", canonical_import_unit(*text), "'");
+  }
   {
     auto idx = builder.add_child(Lnast_ntype::create_attr_set());
     lnast->add_child(idx, ref);
@@ -6645,6 +8285,7 @@ void Prp2lnast::process_import_statement(TSNode n) {
 }
 
 void Prp2lnast::process_test_statement(TSNode n) {
+  ++simulation_test_depth_;
   TSNode      code = child_by_field(n, "code");
   // The grammar splits the dotted test selector (f_name: `test_name`, e.g.
   // `counter.held_high`) from the optional runtime parameter list (f_input: an
@@ -6652,8 +8293,10 @@ void Prp2lnast::process_test_statement(TSNode n) {
   // lets the sim runner pick a test; the parameters are bound per `--arg`.
   std::string test_name;
   if (TSNode name = child_by_field(n, "name"); !ts_node_is_null(name)) {
-    test_name = std::string(trim(get_text(name)));
+    test_name = str_tools::canonical_escaped_path(trim(get_text(name)));  // `cnt`.`basic` == cnt.basic
   }
+  Capture_frame_guard test_frame(capture_frames_, Capture_frame{.test_scope = true, .lambda_name = test_name});
+
   auto fd_idx = builder.add_child(Lnast_ntype::create_func_def());
   auto tmp    = builder.mint_tmp_ref();
   lnast->add_child(fd_idx, tmp);
@@ -6673,6 +8316,12 @@ void Prp2lnast::process_test_statement(TSNode n) {
       if (!ts_node_is_null(pending_typed)) {
         emit_arg_assign(in_idx, pending_typed, pending_def, /*is_ref_mod=*/false, nullptr, "comb", /*is_io_output=*/false);
         if (TSNode id = child_by_field(pending_typed, "identifier"); !ts_node_is_null(id)) {
+          // User ruling 2026-09-28 (31): a test parameter named like a visible
+          // file-scope const is shadowing, like a test local; like a lambda
+          // input (35), one named like a type or a lambda (the DUT) is too.
+          const auto pname = canonical_escaped_ident(get_text(id));
+          check_capture_shadow(pname, id);
+          check_signature_shadow(pname, id, "test parameter");
           inflight_name_scopes_.back().emplace_back(get_text(id));
         }
       }
@@ -6711,6 +8360,7 @@ void Prp2lnast::process_test_statement(TSNode n) {
     lnast->add_child(nidx, Lnast_node::create_const("test_name"));
     lnast->add_child(nidx, Lnast_node::create_const(absl::StrCat("'", test_name, "'")));
   }
+  --simulation_test_depth_;
 }
 
 void Prp2lnast::process_spawn_statement(TSNode n) {
@@ -6776,7 +8426,12 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
     }
     std::vector<Enum_entry> entries;
     parse_enum_definition_entries(n, entries);
-    return lower_enum_def(ename, TSNode{}, entries);
+    // `const Color = enum(…)` is a type too (`c:Color`, `mut y:Color`), with
+    // the same integer encoding as `enum Color = (…)` (user ruling 29).
+    Enum_encoding enc;
+    auto          bref = lower_enum_def(ename, TSNode{}, entries, n, 0, nullptr, &enc);
+    emit_enum_encoding_alias(ename, TSNode{}, enc, n);
+    return bref;
   }
   if (t == "constant") {
     // `constant` wraps one of: integer_literal, bool_literal, unknown_literal,
@@ -6842,7 +8497,8 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
       // 1-tuple would stamp Kind::tuple and a parent `+`/`&`/`==` would reject
       // it; see 2f-unary_type) — EXCEPT a spread `...x`, which is a genuine
       // 1-element bundle.
-      bool             plain = itt != "assignment" && itt != "comment";
+      // A `typed_field` (`(val:Signed)`) is a one-field tuple TYPE, never grouping.
+      bool             plain = itt != "assignment" && itt != "typed_field" && itt != "comment";
       if (itt == "unary_expression") {
         TSNode op_n = child_by_field(it, "operator");
         plain       = !ts_node_is_null(op_n) && std::string_view(ts_node_type(op_n)) != "op_spread";
@@ -6932,6 +8588,7 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
         "scope_statement",
     };
     Conditional_scope   guard(&conditional_depth_);
+    Capture_frame_guard frame(capture_frames_, Capture_frame{});
     // Collected once: the block can be huge and both the reverse last-non-
     // comment scan and the forward walk need indexed access.
     std::vector<TSNode> kids;
@@ -6968,9 +8625,11 @@ Lnast_node Prp2lnast::expr_to_node(TSNode n) {
   return constant_text_to_node(trim(get_text(n)));
 }
 
-// Decode the cooked (double-quoted) escape set: \n, \t, \\, \", \xNN.
-// Anything else with a leading backslash is left as-is (the backslash and the
-// following char both survive). Single-quoted (raw) strings never reach here.
+// Decode a double-quoted string's literal text (docs 02-basics "Strings"): the
+// escapes \n \t \r \\ \" \' \` \0 \xNN \u{N}, and a DOUBLED brace is a
+// literal brace (`{{` is `{`, `}}` is `}`; `\{` is not an escape). The lexer
+// already rejected every other `\c` and a lone `}`, so a malformed sequence
+// here is kept verbatim. Single-quoted (raw) strings never reach here.
 static std::string unescape_cooked_string(std::string_view raw) {
   auto hex_digit = [](char c) -> int {
     if (c >= '0' && c <= '9') {
@@ -6988,37 +8647,26 @@ static std::string unescape_cooked_string(std::string_view raw) {
   out.reserve(raw.size());
   for (size_t i = 0; i < raw.size(); ++i) {
     char c = raw[i];
+    if ((c == '{' || c == '}') && i + 1 < raw.size() && raw[i + 1] == c) {
+      out.push_back(c);  // `{{` / `}}`: one literal brace
+      ++i;
+      continue;
+    }
     if (c != '\\' || i + 1 >= raw.size()) {
       out.push_back(c);
       continue;
     }
     char next = raw[i + 1];
     switch (next) {
-      case 'n':
-        out.push_back('\n');
-        ++i;
-        break;
-      case 't':
-        out.push_back('\t');
-        ++i;
-        break;
+      case 'n' : out.push_back('\n'); ++i; break;
+      case 't' : out.push_back('\t'); ++i; break;
+      case 'r' : out.push_back('\r'); ++i; break;
+      case '0' : out.push_back('\0'); ++i; break;
       case '\\':
-        out.push_back('\\');
-        ++i;
-        break;
-      case '"':
-        out.push_back('"');
-        ++i;
-        break;
-      case '{':  // `\{` / `\}` escape the interpolation braces to literal { }
-        out.push_back('{');
-        ++i;
-        break;
-      case '}':
-        out.push_back('}');
-        ++i;
-        break;
-      case 'x': {
+      case '"' :
+      case '\'':
+      case '`' : out.push_back(next); ++i; break;
+      case 'x' : {
         int hi = (i + 2 < raw.size()) ? hex_digit(raw[i + 2]) : -1;
         int lo = (i + 3 < raw.size()) ? hex_digit(raw[i + 3]) : -1;
         if (hi >= 0 && lo >= 0) {
@@ -7029,70 +8677,192 @@ static std::string unescape_cooked_string(std::string_view raw) {
         }
         break;
       }
+      case 'u': {
+        // `\u{N}`: 1..6 hex digits, UTF-8 encoded (the backtick-name decoder
+        // in str_tools reads the identical set).
+        const auto close = (i + 2 < raw.size() && raw[i + 2] == '{') ? raw.find('}', i + 3) : std::string_view::npos;
+        uint32_t   cp    = 0;
+        bool       ok    = close != std::string_view::npos && close > i + 3 && close - (i + 3) <= 6;
+        for (size_t k = i + 3; ok && k < close; ++k) {
+          const int h = hex_digit(raw[k]);
+          ok          = h >= 0;
+          cp          = cp * 16 + static_cast<uint32_t>(std::max(h, 0));
+        }
+        if (!ok || cp > 0x10FFFF) {
+          out.push_back(c);  // malformed \u — keep verbatim
+          break;
+        }
+        if (cp < 0x80) {
+          out.push_back(static_cast<char>(cp));
+        } else if (cp < 0x800) {
+          out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else if (cp < 0x10000) {
+          out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+          out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else {
+          out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+          out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+          out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        }
+        i = close;
+        break;
+      }
       default:
-        out.push_back(c);  // unknown escape — keep backslash
+        out.push_back(c);  // unknown escape (the lexer rejects it) — keep backslash
         break;
     }
   }
   return out;
 }
 
+// `s` is code (a hole's text): drop `//` line comments (to, not including, the
+// newline) and NESTING `/* */` block comments, keep everything else verbatim.
+// Only used on hole text outside the expression (the format-spec gap, an
+// expression-less hole), which holds no strings or backtick names.
+static std::string strip_code_comments(std::string_view s) {
+  std::string out;
+  out.reserve(s.size());
+  for (size_t k = 0; k < s.size();) {
+    if (k + 1 < s.size() && s[k] == '/' && s[k + 1] == '/') {
+      while (k < s.size() && s[k] != '\n') {
+        ++k;
+      }
+    } else if (k + 1 < s.size() && s[k] == '/' && s[k + 1] == '*') {
+      k = skip_nested_block_comment(s, k);
+    } else {
+      out.push_back(s[k]);
+      ++k;
+    }
+  }
+  return out;
+}
+
+std::vector<Prp2lnast::Istring_piece> Prp2lnast::istring_pieces(TSNode n) const {
+  std::vector<Istring_piece> pieces;
+  const uint32_t             body_start = ts_node_start_byte(n) + 1;
+  const uint32_t             body_end   = ts_node_end_byte(n) > body_start ? ts_node_end_byte(n) - 1 : body_start;
+
+  std::vector<TSNode> exprs;  // the holes' expressions, in source order
+  for (TSNode c : ts_node_named_children(n)) {
+    if (std::string_view(ts_node_type(c)) != "comment") {
+      exprs.push_back(c);
+    }
+  }
+  size_t next_expr = 0;
+
+  std::string lit;               // decoded literal text not yet emitted
+  uint32_t    seg = body_start;  // start of the raw literal run not yet decoded
+  auto        flush_raw = [&](uint32_t upto) {
+    if (upto > seg) {
+      lit += unescape_cooked_string(text_between(seg, upto));
+    }
+  };
+
+  // Walk the body exactly like prpparse's Parser::parse_istring (the parser
+  // that produced the hole expressions): an escape pair is text, `{{` is a
+  // literal brace pair, and every other `{` opens a hole whose end the LEXER
+  // finds (comments, nested strings and backtick names are skipped there).
+  const prpparse::Lexer lex(*prp_buf);
+  uint32_t              i = body_start;
+  while (i < body_end) {
+    const char c = prp_file[i];
+    if (c == '\\') {
+      // `\u{N}` carries its own braces: skip them whole (they open no hole).
+      if (i + 2 < body_end && prp_file[i + 1] == 'u' && prp_file[i + 2] == '{') {
+        uint32_t k = i + 3;
+        while (k < body_end && prp_file[k] != '}') {
+          ++k;
+        }
+        i = k < body_end ? k + 1 : body_end;
+        continue;
+      }
+      i += 2;
+      continue;
+    }
+    if (c != '{') {
+      ++i;
+      continue;
+    }
+    if (i + 1 < body_end && prp_file[i + 1] == '{') {
+      i += 2;
+      continue;
+    }
+    const uint32_t hole_end = lex.istring_hole_end(i);  // past the matching '}'
+    const uint32_t close    = (hole_end > i + 1 && hole_end <= body_end) ? hole_end - 1 : body_end;
+    while (next_expr < exprs.size() && ts_node_start_byte(exprs[next_expr]) <= i) {
+      ++next_expr;  // defensive: an expression outside every hole
+    }
+    const bool has_expr = next_expr < exprs.size() && ts_node_start_byte(exprs[next_expr]) < close;
+    flush_raw(i);
+    if (!has_expr) {
+      // No expression (`{}`, `{ }`, `{/* c */}`): the hole is literal text, and
+      // a comment in it is a comment (removed), exactly like an empty hole.
+      lit += "{";
+      lit += strip_code_comments(text_between(i + 1, close));
+      if (close < body_end) {
+        lit += "}";
+      }
+    } else {
+      TSNode expr = exprs[next_expr++];
+      if (!lit.empty()) {
+        pieces.push_back(Istring_piece{.text = std::move(lit)});
+        lit.clear();
+      }
+      // Between the expression and the hole's `}`: only an optional `:spec`,
+      // whitespace and comments (a `:` or `}` inside a comment is neither a
+      // spec nor the hole's end).
+      const std::string gap_s = strip_code_comments(text_between(ts_node_end_byte(expr), close));
+      auto              gap   = trim(gap_s);
+      std::string       spec;
+      if (!gap.empty() && gap.front() == ':') {
+        spec = std::string(trim(gap.substr(1)));
+      } else if (!gap.empty()) {
+        report_error(expr,
+                     "bad-interpolation",
+                     "syntax",
+                     std::format("unexpected `{}` after the expression in a string interpolation hole", gap),
+                     "a hole holds one expression and an optional `:format` spec: \"{expr}\" or \"{expr:b}\"");
+      }
+      while (next_expr < exprs.size() && ts_node_start_byte(exprs[next_expr]) < close) {
+        ++next_expr;  // defensive: one expression per hole
+      }
+      pieces.push_back(Istring_piece{.expr = expr, .spec = std::move(spec), .is_hole = true});
+    }
+    i   = close < body_end ? close + 1 : body_end;
+    seg = i;
+  }
+  flush_raw(body_end);
+  if (!lit.empty() || pieces.empty()) {
+    pieces.push_back(Istring_piece{.text = std::move(lit)});
+  }
+  return pieces;
+}
+
 Lnast_node Prp2lnast::interpolated_string_to_node(TSNode n) {
-  // Double-quoted string body, possibly containing `{expr[:fmt]}` chunks.
-  // With no interpolations the named-child list is empty (all quote/text
-  // tokens are anonymous), so re-emit the body as a single-quoted pyrope
-  // string literal that `Dlop::from_pyrope` can round-trip. Escape sequences
-  // (\n, \t, \\, \", \xNN) are processed here — the resulting bytes are
-  // embedded directly inside the single-quoted wrapper.
-  uint32_t nnc        = ts_node_named_child_count(n);
-  uint32_t body_start = ts_node_start_byte(n) + 1;
-  uint32_t body_end   = ts_node_end_byte(n) - 1;
-  if (nnc == 0) {
-    auto body    = text_between(body_start, body_end);
-    auto decoded = unescape_cooked_string(body);
-    return Lnast_node::create_const(absl::StrCat("'", decoded, "'"));
+  // Double-quoted string body, possibly containing `{expr[:fmt]}` holes. With
+  // no expression hole, re-emit the body as a single-quoted pyrope string
+  // literal that `Dlop::from_pyrope` can round-trip (escape sequences \n, \t,
+  // \\, \", \xNN are decoded by istring_pieces; the resulting bytes are
+  // embedded directly inside the single-quoted wrapper).
+  auto pieces = istring_pieces(n);
+  if (pieces.size() == 1 && !pieces[0].is_hole) {
+    return Lnast_node::create_const(absl::StrCat("'", pieces[0].text, "'"));
   }
 
   // Lower to `string("part0", expr0, "part1", expr1, ..., "partN")`. The
   // constprop pass folds calls whose every arg is a comptime constant into a
   // single string literal; otherwise the call survives at runtime.
-  // Literal chunks aren't named children — find each `{` by scanning back
-  // from the expression's start byte, and the matching `}` (past any format
-  // spec, which is also anonymous) by scanning forward from its end.
   std::vector<Lnast_node> args;
-  uint32_t                cursor = body_start;
-  for (TSNode expr : ts_node_named_children(n)) {
-    uint32_t expr_start = ts_node_start_byte(expr);
-    uint32_t expr_end   = ts_node_end_byte(expr);
-
-    uint32_t brace_open = expr_start;
-    while (brace_open > cursor && prp_file[brace_open - 1] != '{') {
-      --brace_open;
+  for (auto& p : pieces) {
+    if (!p.is_hole) {
+      args.push_back(Lnast_node::create_const(absl::StrCat("'", p.text, "'")));
+      continue;
     }
-    if (brace_open > cursor) {
-      --brace_open;  // step onto the `{`
-    }
-    auto pre = text_between(cursor, brace_open);
-    if (!pre.empty()) {
-      auto pre_decoded = unescape_cooked_string(pre);
-      args.push_back(Lnast_node::create_const(absl::StrCat("'", pre_decoded, "'")));
-    }
-
-    // The closing `}` sits past an optional `:fmt` format spec, which is
-    // anonymous in the grammar (`_format_spec` is a hidden rule). Find the
-    // brace, then read the spec text sitting between the expression and it.
-    uint32_t brace_close = expr_end;
-    while (brace_close < body_end && prp_file[brace_close] != '}') {
-      ++brace_close;
-    }
-    auto             gap = text_between(expr_end, brace_close);  // e.g. ":b", " : b", ""
-    std::string_view spec;
-    if (auto colon = gap.find(':'); colon != std::string_view::npos) {
-      spec = trim(gap.substr(colon + 1));
-    }
-
-    auto value_node = expr_to_node(expr);
-    if (spec.empty()) {
+    auto value_node = expr_to_node(p.expr);
+    if (p.spec.empty()) {
       args.push_back(value_node);
     } else {
       // `{expr:fmt}` → render `expr` through `__fmt(expr, 'fmt')`, an internal
@@ -7104,24 +8874,15 @@ Lnast_node Prp2lnast::interpolated_string_to_node(TSNode n) {
       lnast->add_child(fidx, fref);
       lnast->add_child(fidx, Lnast_node::create_ref("__fmt"));
       lnast->add_child(fidx, value_node);
-      lnast->add_child(fidx, Lnast_node::create_const(absl::StrCat("'", spec, "'")));
+      lnast->add_child(fidx, Lnast_node::create_const(absl::StrCat("'", p.spec, "'")));
       args.push_back(fref);
-    }
-
-    cursor = brace_close < body_end ? brace_close + 1 : body_end;
-  }
-  if (cursor < body_end) {
-    auto tail = text_between(cursor, body_end);
-    if (!tail.empty()) {
-      auto tail_decoded = unescape_cooked_string(tail);
-      args.push_back(Lnast_node::create_const(absl::StrCat("'", tail_decoded, "'")));
     }
   }
 
   auto idx = builder.add_child(Lnast_ntype::create_func_call());
   auto ref = builder.mint_tmp_ref();
   lnast->add_child(idx, ref);
-  lnast->add_child(idx, Lnast_node::create_ref("string"));
+  lnast->add_child(idx, Lnast_node::create_ref("String"));
   for (auto& a : args) {
     lnast->add_child(idx, a);
   }
@@ -7170,10 +8931,32 @@ Lnast_node Prp2lnast::constant_text_to_node(std::string_view text) {
 }
 
 Lnast_node Prp2lnast::identifier_to_node(TSNode n, bool for_lvalue) {
-  auto name = trim(get_text(n));
-  // Keyword constants that fell through as identifiers.
+  auto name = trim(get_raw_text(n));
+  // Keyword constants that fell through as identifiers (raw text: an escaped
+  // `` `true` `` is a name, not the literal).
   if (name == "true" || name == "false" || name == "nil") {
+    if (for_lvalue) {
+      // Binding a keyword constant (`const nil = a`) would assign into a
+      // constant and silently drop the value; the parser already rejects the
+      // `true`/`false` forms the same way.
+      report_error(n,
+                   "reserved-word-as-name",
+                   "syntax",
+                   std::format("'{}' is a reserved word, so it cannot be a variable name", name),
+                   std::format("wrap it in backticks (`{}`) to use it as an identifier", name));
+    }
     return Lnast_node::create_const(name);
+  }
+  if (!for_lvalue && str_tools::is_pyrope_type_word(name)) {
+    // A bare type word used as a value (`(a=U8, b=S20)`, `[Bool, Clock]`,
+    // `U8.[max]`): the TYPE, never a variable (a type word is reserved; the
+    // backticked `` `U8` `` is the name and keeps its backticks).
+    return type_word_value(n, name);
+  }
+  if (name.size() >= 3 && name.front() == '`' && name.find('\\') != std::string_view::npos) {
+    // A backtick name reads the string escapes (`` `i\x41` `` is the name `iA`):
+    // get_text decodes and canonicalizes, so declarations and reads agree.
+    name = get_text(n);
   }
   name = canonical_escaped_ident(name);
   if (for_lvalue) {
@@ -7186,20 +8969,11 @@ Lnast_node Prp2lnast::identifier_to_node(TSNode n, bool for_lvalue) {
   // earlier lambda params feeding a default value) are resolved right here —
   // they have no statement-level declaration the scope walk could find.
   if (!name_in_inflight_scope(name)) {
+    note_capture_read(name, n);
     // Capture the read site's span NOW (2f-stream): the streaming arena reset
     // means `n` (its Ast) will not outlive this construct, but the undefined-read
     // check runs after the whole walk.
-    const auto sp = ts_node_start_point(n);
-    const auto ep = ts_node_end_point(n);
-    read_sites_.push_back(Read_site{.name       = std::string{name},
-                                    .start_byte = ts_node_start_byte(n),
-                                    .end_byte   = ts_node_end_byte(n),
-                                    .start_line = sp.row + 1,
-                                    .start_col  = sp.column + 1,
-                                    .end_line   = ep.row + 1,
-                                    .end_col    = ep.column + 1,
-                                    .scope      = builder.idx_stmts,
-                                    .before     = lnast->get_last_child(builder.idx_stmts)});
+    push_read_site(n, std::string{name}, /*no_frame=*/false);
   }
   return Lnast_node::create_ref(name);
 }
@@ -7247,6 +9021,77 @@ static std::optional<int> try_parse_int_type_width(std::string_view digits) {
   return static_cast<int>(v);
 }
 
+std::optional<std::pair<Dlop, Dlop>> Prp2lnast::folded_int_type_range(TSNode ty) const {
+  if (ts_node_is_null(ty)) {
+    return std::nullopt;
+  }
+  const std::string_view t(ts_node_type(ty));
+  if (t != "uint_type" && t != "sint_type") {
+    return std::nullopt;
+  }
+  TSNode           constraint = child_by_field(ty, "constraint");
+  std::string_view kw         = trim(get_text(ty));
+  if (!ts_node_is_null(constraint)) {
+    kw = trim(kw.substr(0, kw.find('(')));
+  }
+  // `U<N>`/`S<N>` (sized) or `Unsigned`/`Signed` (unsized; sign from the node kind).
+  const bool          sized     = kw.size() >= 2 && (kw[0] == 'U' || kw[0] == 'S')
+                                  && std::all_of(kw.begin() + 1, kw.end(), [](unsigned char ch) { return std::isdigit(ch); });
+  const bool          is_signed = t == "sint_type";
+  std::optional<Dlop> mx;
+  std::optional<Dlop> mn;
+  const auto          from_bits = [&](int64_t w) {
+    if (w <= 0 || w > kMaxIntTypeWidth) {
+      return false;
+    }
+    const auto n = static_cast<int>(w);
+    mx           = is_signed ? *Dlop::get_mask_value(n - 1) : *Dlop::get_mask_value(n);
+    mn           = is_signed ? *Dlop::get_neg_mask_value(n - 1) : *Dlop::create_integer(0);
+    return true;
+  };
+  if (sized) {
+    const auto w = try_parse_int_type_width(kw.substr(1));
+    if (!w || !from_bits(*w)) {
+      return std::nullopt;
+    }
+  } else if (!is_signed) {
+    mn = *Dlop::create_integer(0);  // `Unsigned`
+  }
+  if (!ts_node_is_null(constraint)) {
+    for (TSNode item : ts_node_named_children(constraint)) {
+      const std::string_view it(ts_node_type(item));
+      if (it != "assignment" && it != "arg_assignment" && it != "attribute_assignment") {
+        continue;
+      }
+      TSNode lv = child_by_field(item, "lvalue");
+      TSNode rv = child_by_field(item, "rvalue");
+      if (ts_node_is_null(lv) || ts_node_is_null(rv)) {
+        return std::nullopt;
+      }
+      const auto key = trim(get_text(lv));
+      const auto v   = resolve_type_int_value(rv);
+      if (!v) {
+        return std::nullopt;
+      }
+      if (key == "bits") {
+        if (!v->is_just_i64() || !from_bits(v->to_just_i64())) {
+          return std::nullopt;
+        }
+      } else if (key == "max") {
+        mx = *v;
+      } else if (key == "min") {
+        mn = *v;
+      } else {
+        return std::nullopt;
+      }
+    }
+  }
+  if (!mx || !mn) {
+    return std::nullopt;
+  }
+  return std::pair{*mx, *mn};
+}
+
 Lnast_node Prp2lnast::emit_bound_binop(Lnast_ntype::Lnast_ntype_int head, const Lnast_node& l, const Lnast_node& r) {
   auto idx = builder.add_child(head);
   auto ref = builder.mint_tmp_ref();
@@ -7256,15 +9101,48 @@ Lnast_node Prp2lnast::emit_bound_binop(Lnast_ntype::Lnast_ntype_int head, const 
   return ref;
 }
 
+// The range operator of an array dimension written as an index range
+// (`[100..<132]`, 08-memories.md "Array index"): `op_range_exclusive` /
+// `op_range_inclusive` / `op_range_count`, or "" for any other expression.
+static std::string_view range_dim_op(TSNode e) {
+  if (ts_node_is_null(e) || std::string_view(ts_node_type(e)) != "expression_item" || ts_node_named_child_count(e) != 3) {
+    return {};
+  }
+  TSNode                 op = ts_node_named_child(e, 1);
+  TSNode                 k  = std::string_view(ts_node_type(op)) == "binary_other_op" ? ts_node_named_child(op, 0) : TSNode{};
+  const std::string_view kind(ts_node_is_null(k) ? "" : ts_node_type(k));
+  return kind.starts_with("op_range_") ? kind : std::string_view{};
+}
+
 void Prp2lnast::prelower_type_bounds(TSNode type_cast_node) {
   if (ts_node_is_null(type_cast_node)) {
     return;
   }
-  TSNode ty = child_by_field(type_cast_node, "type");
+  prelower_int_type_bounds(child_by_field(type_cast_node, "type"));
+}
+
+void Prp2lnast::prelower_int_type_bounds(TSNode ty) {
   if (ts_node_is_null(ty)) {
     return;
   }
   const std::string_view t(ts_node_type(ty));
+  if (t == "array_type") {
+    // `[N+1]unsigned(bits=N)`: the element bound defers like a scalar one, and
+    // so does a dimension written as an expression over a generic (a bare name
+    // keeps its text: the runner folds it, a generic one at specialization).
+    TSNode len = child_by_field(ty, "length");
+    TSNode idx = ts_node_is_null(len) ? TSNode{} : child_by_field(len, "index");
+    if (TSNode e = prelowerable_array_dim(len); !ts_node_is_null(e)) {
+      prelowered_array_dims_.insert_or_assign(ts_node_start_byte(len), expr_to_node(e));
+    } else if (!range_dim_op(idx).empty()
+               && !(resolve_type_int_value(ts_node_named_child(idx, 0)) && resolve_type_int_value(ts_node_named_child(idx, 2)))) {
+      // An index range whose bounds do not fold here (`[N..<(N+2)]` over a
+      // generic) lowers to a `range` value the runner reads once it folds.
+      prelowered_array_dims_.insert_or_assign(ts_node_start_byte(len), expr_to_node(idx));
+    }
+    prelower_int_type_bounds(child_by_field(ty, "base"));
+    return;
+  }
   if (t != "uint_type" && t != "sint_type") {
     return;
   }
@@ -7277,8 +9155,7 @@ void Prp2lnast::prelower_type_bounds(TSNode type_cast_node) {
   if (const auto paren = kw.find('('); paren != std::string::npos) {
     kw = std::string(trim(std::string_view(kw).substr(0, paren)));
   }
-  const bool is_signed = kw == "signed" || kw == "int" || kw == "integer"
-                         || (kw.size() >= 2 && (kw[0] == 's' || kw[0] == 'i') && std::isdigit(static_cast<unsigned char>(kw[1])));
+  const bool is_signed = t == "sint_type";  // `S<N>` / `Signed`
 
   Prelowered_bounds out;
   for (TSNode item : ts_node_named_children(constraint)) {
@@ -7325,9 +9202,57 @@ void Prp2lnast::prelower_type_bounds(TSNode type_cast_node) {
   }
 }
 
-// Does this integer type carry a `bits=`/`max=`/`min=` bound that does not
-// fold here (a generic parameter, an expression over one)?
+TSNode Prp2lnast::array_elem_type(TSNode ty) const {
+  while (!ts_node_is_null(ty) && std::string_view(ts_node_type(ty)) == "array_type") {
+    ty = child_by_field(ty, "base");
+  }
+  return ty;
+}
+
+TSNode Prp2lnast::prelowerable_array_dim(TSNode len) const {
+  TSNode e = ts_node_is_null(len) ? TSNode{} : child_by_field(len, "index");
+  if (ts_node_is_null(e) || std::string_view(ts_node_type(e)) == "identifier" || resolve_type_int_value(e)) {
+    return {};
+  }
+  // A range dimension (`[0..<4]`, 08-memories.md) is not an extent.
+  if (!range_dim_op(e).empty()) {
+    return {};
+  }
+  return e;
+}
+
+Lnast_node Prp2lnast::array_dim_to_node(TSNode len) {
+  if (const auto it = prelowered_array_dims_.find(ts_node_start_byte(len)); it != prelowered_array_dims_.end()) {
+    return it->second;
+  }
+  // An expression that folds here (`[N+1]` over a visible `comptime const N`)
+  // is written as its extent; every downstream reader parses `[n]`.
+  TSNode e = child_by_field(len, "index");
+  if (!ts_node_is_null(e) && std::string_view(ts_node_type(e)) != "identifier") {
+    if (const auto v = resolve_type_int_value(e); v && v->is_just_i64() && v->to_just_i64() >= 0) {
+      return Lnast_node::create_const(std::format("[{}]", v->to_just_i64()));
+    }
+    // An index range (`[100..<132]`, 08-memories.md "Array index") whose
+    // bounds fold here is written with literal bounds; the runner lowers it to
+    // its extent (upass::array_dim_range). One whose bounds do not fold was
+    // prelowered to a `range` value (prelower_int_type_bounds); anywhere else
+    // it keeps its text for the runner to fold by name.
+    if (const auto kind = range_dim_op(e); !kind.empty()) {
+      const auto lo = resolve_type_int_value(ts_node_named_child(e, 0));
+      const auto hi = lo ? resolve_type_int_value(ts_node_named_child(e, 2)) : std::nullopt;
+      if (lo && hi && lo->is_just_i64() && hi->is_just_i64()) {
+        const char* spelling = kind == "op_range_inclusive" ? "..=" : (kind == "op_range_count" ? "..+" : "..<");
+        return Lnast_node::create_const(std::format("[{}{}{}]", lo->to_just_i64(), spelling, hi->to_just_i64()));
+      }
+    }
+  }
+  return expr_to_node(len);
+}
+
+// Does this integer type (or array element type) carry a `bits=`/`max=`/`min=`
+// bound that does not fold here (a generic parameter, an expression over one)?
 bool Prp2lnast::int_type_has_unfoldable_bound(TSNode ty) const {
+  ty = array_elem_type(ty);
   if (ts_node_is_null(ty)) {
     return false;
   }
@@ -7357,15 +9282,77 @@ bool Prp2lnast::int_type_has_unfoldable_bound(TSNode ty) const {
   return false;
 }
 
+// 2f-generic_port_width — a port (or port tuple field) type of a GENERIC
+// lambda whose integer bound does not fold here: the placeholder entry makes
+// int_type_call_bounds treat the site as deferred (no warning) and
+// emit_type_expr emit `nil` for now; flush_deferred_port_bounds rewrites the
+// leaves of `store` once the body prologue exists.
+void Prp2lnast::defer_port_bound(TSNode type_cast, const Lnast_nid& store) {
+  if (ts_node_is_null(type_cast)) {
+    return;
+  }
+  TSNode ty           = child_by_field(type_cast, "type");
+  // An array port's dimensions: a name of a visible `comptime const`
+  // (`v:[W]u4`) folds here -- outside a template nothing downstream folds a
+  // port's shape. An expression over a generic (`v:[N+1]u4`) defers like an
+  // integer bound: a placeholder now, the body-prologue ref once flushed.
+  bool   deferred_dim = false;
+  for (TSNode at = ty; std::string_view(ts_node_type(at)) == "array_type"; at = child_by_field(at, "base")) {
+    TSNode len = child_by_field(at, "length");
+    TSNode e   = ts_node_is_null(len) ? TSNode{} : child_by_field(len, "index");
+    if (ts_node_is_null(e)) {
+      continue;
+    }
+    if (std::string_view(ts_node_type(e)) == "identifier") {
+      if (const auto v = resolve_type_int_value(e); v && v->is_just_i64() && v->to_just_i64() >= 0) {
+        prelowered_array_dims_.insert_or_assign(ts_node_start_byte(len),
+                                                Lnast_node::create_const(std::format("[{}]", v->to_just_i64())));
+      }
+    } else if (lambda_has_generics_ && !ts_node_is_null(prelowerable_array_dim(len))) {
+      prelowered_array_dims_.try_emplace(ts_node_start_byte(len), Lnast_node::create_const("nil"));
+      deferred_dim = true;
+    }
+  }
+  const bool deferred_bound = lambda_has_generics_ && int_type_has_unfoldable_bound(ty);
+  if (deferred_bound) {
+    prelowered_int_bounds_.try_emplace(ts_node_start_byte(child_by_field(array_elem_type(ty), "constraint")), Prelowered_bounds{});
+  }
+  if (deferred_bound || deferred_dim) {
+    pending_port_bounds_.push_back({type_cast, store});
+  }
+}
+
 // 2f-generic_port_width — see Pending_port_bound. Runs once the body stmts
 // frame is open: the desugar lands in the body prologue and the io leaves are
 // rewritten IN PLACE (the tree is append-only, and SSA's flatten_assign takes
 // the FIRST type child, so appending a second prim_type_int would not do).
 void Prp2lnast::flush_deferred_port_bounds() {
   auto pending = std::exchange(pending_port_bounds_, {});
+  auto patch   = [&](const Lnast_nid& leaf, const Lnast_node& n) {
+    if (leaf.is_invalid() || n.is_invalid()) {
+      return;
+    }
+    lnast->set_type(leaf, n.get_type());
+    lnast->set_name(leaf, n.get_name());
+  };
   for (const auto& pb : pending) {
     prelower_type_bounds(pb.type_cast);  // emits into the current stmts frame == the body prologue
-    TSNode ty         = child_by_field(pb.type_cast, "type");
+    // A deferred dimension: comp_type_array(elem, dim) mirrors the array_type
+    // levels, outermost first.
+    TSNode at = child_by_field(pb.type_cast, "type");
+    for (auto c : lnast->children(pb.store)) {
+      for (auto lvl = c; !lvl.is_invalid() && Lnast_ntype::is_comp_type_array(lnast->get_type(lvl)) && !ts_node_is_null(at)
+                         && std::string_view(ts_node_type(at)) == "array_type";
+           lvl = lnast->get_first_child(lvl), at = child_by_field(at, "base")) {
+        const auto elem = lnast->get_first_child(lvl);
+        TSNode     len  = child_by_field(at, "length");
+        const auto it = ts_node_is_null(len) ? prelowered_array_dims_.end() : prelowered_array_dims_.find(ts_node_start_byte(len));
+        if (!elem.is_invalid() && it != prelowered_array_dims_.end() && it->second.is_ref()) {
+          patch(lnast->get_sibling_next(elem), it->second);
+        }
+      }
+    }
+    TSNode ty         = array_elem_type(child_by_field(pb.type_cast, "type"));
     TSNode constraint = ts_node_is_null(ty) ? TSNode{} : child_by_field(ty, "constraint");
     if (ts_node_is_null(constraint)) {
       continue;
@@ -7375,18 +9362,15 @@ void Prp2lnast::flush_deferred_port_bounds() {
       continue;
     }
     for (auto c : lnast->children(pb.store)) {
+      // An array port's element sits under its comp_type_array levels.
+      while (Lnast_ntype::is_comp_type_array(lnast->get_type(c)) && !lnast->get_first_child(c).is_invalid()) {
+        c = lnast->get_first_child(c);
+      }
       if (!Lnast_ntype::is_prim_type_int(lnast->get_type(c))) {
         continue;
       }
-      auto mx    = lnast->get_first_child(c);
-      auto mn    = mx.is_invalid() ? mx : lnast->get_sibling_next(mx);
-      auto patch = [&](const Lnast_nid& leaf, const Lnast_node& n) {
-        if (leaf.is_invalid() || n.is_invalid()) {
-          return;
-        }
-        lnast->set_type(leaf, n.get_type());
-        lnast->set_name(leaf, n.get_name());
-      };
+      auto mx = lnast->get_first_child(c);
+      auto mn = mx.is_invalid() ? mx : lnast->get_sibling_next(mx);
       patch(mx, it->second.max);
       patch(mn, it->second.min);
       break;
@@ -7396,16 +9380,17 @@ void Prp2lnast::flush_deferred_port_bounds() {
 
 bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::string& max_txt, std::string& min_txt) {
   // Classify the base keyword → signedness and optional concrete width.
+  // `Unsigned`/`Signed` or the sized `U<N>`/`S<N>` (docs 07-typesystem).
   bool unsigned_base = false;
   bool signed_base   = false;
-  if (kw == "uint" || kw == "unsigned") {
+  if (kw == "Unsigned") {
     unsigned_base = true;
-  } else if (kw == "signed" || kw == "int" || kw == "integer") {
+  } else if (kw == "Signed") {
     signed_base = true;
-  } else if (kw.size() >= 2 && kw[0] == 'u'
+  } else if (kw.size() >= 2 && kw[0] == 'U'
              && std::all_of(kw.begin() + 1, kw.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
     unsigned_base = true;
-  } else if (kw.size() >= 2 && (kw[0] == 's' || kw[0] == 'i')
+  } else if (kw.size() >= 2 && kw[0] == 'S'
              && std::all_of(kw.begin() + 1, kw.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
     signed_base = true;
   } else {
@@ -7424,8 +9409,8 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
   if (unsigned_base) {
     min_txt = "0";
   }
-  // Concrete width sugar (`u8(min=…)`): seed bounds from the width first.
-  if (kw.size() >= 2 && (kw[0] == 'u' || kw[0] == 's' || kw[0] == 'i') && std::isdigit(static_cast<unsigned char>(kw[1]))) {
+  // Concrete width sugar (`U8(min=…)`): seed bounds from the width first.
+  if (kw.size() >= 2 && (kw[0] == 'U' || kw[0] == 'S') && std::isdigit(static_cast<unsigned char>(kw[1]))) {
     auto w = try_parse_int_type_width(kw.substr(1));
     if (!w) {
       report_error(tup,
@@ -7464,7 +9449,7 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
     // will land back here.
     constexpr std::string_view bound_hint
         = "use a literal or a `comptime const`; a generic parameter is resolved on a variable declaration inside the body "
-          "and on the ports of the generic lambda itself (`mod m<N=8>(a:unsigned(bits=N))`), not on a tuple field type or "
+          "and on the ports of the generic lambda itself (`mod m<N=8>(a:Unsigned(bits=N))`), not on a tuple field type or "
           "a `<…>` argument";
     if (key == "range") {
       // No `range` type argument — it would be pure sugar for max/min, so it
@@ -7473,7 +9458,7 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
                    "int-type-range",
                    "type",
                    std::format("`{}(range=…)` is not a valid integer type bound", kw),
-                   "bound the type with `max=`/`min=` (e.g. `int(max=15, min=0)`) or a width type `u4`/`s5`");
+                   "bound the type with `max=`/`min=` (e.g. `Unsigned(max=15, min=0)`) or a width type `U4`/`S5`");
     }
     const bool deferred         = prelowered_int_bounds_.contains(ts_node_start_byte(tup));
     // Reached by prelower_type_bounds? If not, this site (a port/return type, a
@@ -7484,6 +9469,53 @@ bool Prp2lnast::int_type_call_bounds(std::string_view kw, TSNode tup, std::strin
     // lowering, so the drop is at least no longer SILENT.
     const bool prelowered_here  = prelower_visited_.contains(ts_node_start_byte(tup));
     auto       bound_unresolved = [&](std::string_view which) {
+      // A name the bound reads must still be declared: this site does not lower
+      // the bound, so nothing else records the read.
+      if (!prelowered_here) {
+        record_name_reads(rv);
+        // A declared RUNTIME value (an input, a const computed from one) never
+        // sizes a type: an error, not the dropped-width warning below.
+        for (TSNode c : expr_reads(rv, /*enter_attribute_reads=*/false).names) {
+          const std::string nm{canonical_escaped_ident(trim(get_text(c)))};
+          if (const auto hit = lookup_capture(nm); hit && hit->kind == Bind_kind::runtime && !hit->binding->int_value) {
+            if (hit->binding->fold_const) {
+              // A plain `const` may still fold to a constant (user ruling
+              // 2026-09-28 (32)), but not one this declaration can evaluate.
+              report_error(c,
+                           "type-bound-not-comptime",
+                           "type",
+                           std::format("`{}(...)` bound `{}` reads const `{}`, whose value this declaration cannot "
+                                       "evaluate (it is computed by statements -- a loop, an `if`, a call -- or from a "
+                                       "runtime value)",
+                                       kw,
+                                       which,
+                                       nm),
+                           "size it with a literal, a generic parameter, or a const folded from literals (`const W = N + 1`)");
+            }
+            report_error(c,
+                         "type-bound-not-comptime",
+                         "type",
+                         std::format("`{}(...)` bound `{}` reads `{}`, a runtime value: a type bound must be a compile-time "
+                                     "value",
+                                     kw,
+                                     which,
+                                     nm),
+                         "size it with a literal, a generic parameter, or a `const` with a compile-time value");
+          }
+        }
+      }
+      if (const auto cpt = unfolded_comptime_read(rv)) {
+        report_error(rv,
+                     "type-bound-not-comptime",
+                     "type",
+                     std::format("`{}(...)` bound `{}` reads comptime const `{}`, whose value is computed by statements (a "
+                                 "loop, an `if`, a call) this declaration cannot evaluate",
+                                 kw,
+                                 which,
+                                 *cpt),
+                     "size it with a literal, a generic parameter, or a comptime const folded from literals (`comptime "
+                     "const W = N + 1`)");
+      }
       if (prelowered_here) {
         // A site prelowering DID visit: the bound is genuinely not comptime, so
         // this is a hard error. Return -- without it the warning below fired too
@@ -7545,14 +9577,111 @@ std::optional<Dlop> Prp2lnast::resolve_type_int_value(TSNode n) const {
     return std::nullopt;
   }
   if (t == "identifier") {
-    if (auto it = const_int_bindings_.find(std::string(trim(get_text(n)))); it != const_int_bindings_.end()) {
-      return *Dlop::create_integer(it->second);
+    if (const auto v = visible_const_int(n)) {
+      return *Dlop::create_integer(*v);
+    }
+    return std::nullopt;
+  }
+  if ((t == "tuple" || t == "expression_type" || t == "paren_group" || t == "expression_list")
+      && ts_node_named_child_count(n) == 1) {
+    return resolve_type_int_value(ts_node_named_child(n, 0));
+  }
+  // A field of a file-scope comptime tuple (`cfg.w`, parsed as a dotted type
+  // name): fold the field's initializer.
+  if (t == "expression_type" && ts_node_named_child_count(n) == 2
+      && std::string_view(ts_node_type(ts_node_named_child(n, 0))) == "identifier"
+      && std::string_view(ts_node_type(ts_node_named_child(n, 1))) == "identifier") {
+    TSNode     base_id = ts_node_named_child(n, 0);
+    const auto base    = canonical_escaped_ident(trim(get_text(base_id)));
+    const auto field   = trim(get_text(ts_node_named_child(n, 1)));
+    check_capture_read(base, base_id);
+    // const_rvalue_nodes_ only holds file-scope declarations (frame 0).
+    const auto hit = lookup_capture(base);
+    const auto tup = const_rvalue_nodes_.find(base);
+    if (!hit || hit->kind != Bind_kind::comptime || hit->frame != 0 || tup == const_rvalue_nodes_.end()
+        || std::string_view(ts_node_type(tup->second)) != "tuple") {
+      return std::nullopt;
+    }
+    for (TSNode item : ts_node_named_children(tup->second)) {
+      TSNode lv = child_by_field(item, "lvalue");
+      if (std::string_view(ts_node_type(item)) != "assignment" || ts_node_is_null(lv)) {
+        continue;
+      }
+      if (TSNode fid = std::string_view(ts_node_type(lv)) == "typed_identifier" ? child_by_field(lv, "identifier") : lv;
+          !ts_node_is_null(fid) && trim(get_text(fid)) == field) {
+        return resolve_type_int_value(child_by_field(item, "rvalue"));
+      }
+    }
+    return std::nullopt;
+  }
+  // An integer attribute read (`Z.[bits]`, `Z.[max]`, `Z.[min]`) of a visible
+  // binding declared with an integer type whose bounds fold: the attribute
+  // comes from the TYPE (see Binding::range).
+  if (t == "attribute_read") {
+    TSNode arg = child_by_field(n, "argument");
+    if (ts_node_is_null(arg) || ts_node_named_child_count(n) != 2) {
+      return std::nullopt;
+    }
+    auto attr = trim(get_text(ts_node_named_child(n, 1)));
+    if (attr.size() < 2 || attr.front() != '[' || attr.back() != ']') {
+      return std::nullopt;
+    }
+    attr = trim(attr.substr(1, attr.size() - 2));
+    if (std::string_view(ts_node_type(arg)) == "constant") {
+      // A literal's `.[bits]` is value-derived like an untyped comptime
+      // integer's (user rulings 2026-09-27 (6) and 2026-09-28 (23)): 13 -> 4.
+      const auto v = attr == "bits" ? resolve_type_int_value(arg) : std::nullopt;
+      return v ? std::optional<Dlop>(*Dlop::create_integer(upass::value_bits(*v))) : std::nullopt;
+    }
+    if (std::string_view(ts_node_type(arg)) != "identifier") {
+      return std::nullopt;
+    }
+    const auto name = canonical_escaped_ident(trim(get_text(arg)));
+    check_capture_read(name, arg);
+    const auto hit = lookup_capture(name);
+    // An attribute read is comptime whatever it reads (ruling 2026-09-28
+    // (23)): a typed runtime binding (`a:u8` input, `mut x:u4`) states it.
+    if (!hit || (hit->kind != Bind_kind::comptime && !(hit->binding->typed && hit->binding->range))) {
+      return std::nullopt;
+    }
+    if (!hit->binding->range) {
+      // An UNTYPED comptime integer is as wide as its value (user ruling
+      // 2026-09-27 (6), the rule upass.attributes applies): 13 -> 4, 0 -> 1.
+      // A typed one keeps its declared type even unbounded (`Z:unsigned`
+      // reads nil), so it never folds from the value.
+      if (attr != "bits" || hit->binding->typed || !hit->binding->int_value) {
+        return std::nullopt;
+      }
+      return *Dlop::create_integer(upass::value_bits(*Dlop::create_integer(*hit->binding->int_value)));
+    }
+    const auto& [mx, mn] = *hit->binding->range;
+    if (attr == "max") {
+      return mx;
+    }
+    if (attr == "min") {
+      return mn;
+    }
+    if (attr == "bits") {
+      return *Dlop::create_integer(upass::range_bits(mx, mn));
     }
     return std::nullopt;
   }
   if (t == "tuple" || t == "expression_type") {
-    if (ts_node_named_child_count(n) == 1) {
-      return resolve_type_int_value(ts_node_named_child(n, 0));
+    return std::nullopt;
+  }
+  // `std.clog2(x)` of a foldable x (docs 13-stdlib): a comptime width, like the
+  // arithmetic below. A bad x (<= 0) does not fold here; upass reports it.
+  if (t == "function_call_expression") {
+    TSNode fn  = child_by_field(n, "function");
+    TSNode arg = child_by_field(n, "argument");
+    if (ts_node_is_null(fn) || ts_node_is_null(arg) || std::string_view(ts_node_type(fn)) != "dot_expression"
+        || ts_node_named_child_count(fn) != 2 || trim(get_text(ts_node_named_child(fn, 0))) != prp_builtins::std_namespace
+        || trim(get_text(ts_node_named_child(fn, 1))) != "clog2" || ts_node_named_child_count(arg) != 1
+        || std::string_view(ts_node_type(ts_node_named_child(arg, 0))) == "assignment") {
+      return std::nullopt;
+    }
+    if (const auto v = resolve_type_int_value(ts_node_named_child(arg, 0))) {
+      return upass::std_clog2(*v);
     }
     return std::nullopt;
   }
@@ -7622,66 +9751,75 @@ std::optional<Dlop> Prp2lnast::resolve_type_int_value(TSNode n) const {
 }
 
 bool Prp2lnast::is_prim_type_token(std::string_view txt) {
-  if (txt == "int" || txt == "integer" || txt == "uint" || txt == "signed" || txt == "unsigned" || txt == "bool"
-      || txt == "string") {
-    return true;
+  // A bare built-in type word (`U8`, `S4`, `Unsigned`, `Signed`, `Bool`,
+  // `String`, `Clock`, `Reset`). A backticked `` `U8` `` keeps its backticks
+  // through get_text, so it is a plain name here.
+  return str_tools::is_pyrope_type_word(txt);
+}
+
+// An integer TYPE literal written as a call -- only the named-size form
+// (`Unsigned(bits=4)`, `S8(min=-3)`): at least one argument, all `max=` /
+// `min=` / `bits=` (`U8(3)` stays a cast). Declares a type tmp carrying the
+// canonical prim_type_int(max, min), read back through the attributes
+// Type_info seam like a declared variable (`Unsigned(bits=4).[max]`,
+// `x does Unsigned(bits=4)`). nullopt for any other call.
+std::optional<Lnast_node> Prp2lnast::int_type_literal(TSNode n) {
+  TSNode fn  = child_by_field(n, "function");
+  TSNode arg = child_by_field(n, "argument");
+  if (ts_node_is_null(fn) || ts_node_is_null(arg) || !is_prim_type_token(trim(get_text(fn)))
+      || (std::string_view(ts_node_type(arg)) != "tuple" && std::string_view(ts_node_type(arg)) != "arg_tuple")) {
+    return std::nullopt;
   }
-  return txt.size() >= 2 && (txt[0] == 'u' || txt[0] == 's' || txt[0] == 'i')
-         && std::all_of(txt.begin() + 1, txt.end(), [](unsigned char ch) { return std::isdigit(ch); });
+  bool all_size = ts_node_named_child_count(arg) >= 1;
+  for (TSNode item : ts_node_named_children(arg)) {
+    if (!all_size) {
+      break;
+    }
+    std::string_view it(ts_node_type(item));
+    if (it != "assignment" && it != "arg_assignment" && it != "attribute_assignment") {
+      all_size = false;
+      break;
+    }
+    TSNode lv = child_by_field(item, "lvalue");
+    if (ts_node_is_null(lv)) {
+      all_size = false;
+      break;
+    }
+    auto key = trim(get_text(lv));
+    all_size = (key == "max" || key == "min" || key == "bits");
+  }
+  std::string max_txt;
+  std::string min_txt;
+  if (!all_size || !int_type_call_bounds(trim(get_text(fn)), arg, max_txt, min_txt)) {
+    return std::nullopt;
+  }
+  auto didx = builder.add_child(Lnast_ntype::create_declare());
+  auto ref  = builder.mint_tmp_ref();
+  lnast->add_child(didx, ref);
+  auto pt = lnast->add_child(didx, Lnast_ntype::create_prim_type_int());
+  lnast->add_child(pt, Lnast_node::create_const(max_txt.empty() ? "nil" : max_txt));
+  lnast->add_child(pt, Lnast_node::create_const(min_txt.empty() ? "nil" : min_txt));
+  lnast->add_child(didx, Lnast_node::create_const("type"));
+  return ref;
 }
 
 Lnast_node Prp2lnast::does_operand_to_node(TSNode n) {
   std::string_view t(ts_node_type(n));
   if (t == "identifier") {
     auto name = trim(get_text(n));
+    if (!lookup_capture(canonical_escaped_ident(name))) {
+      check_type_name_spelling(n);  // `x does I8`, unless a value is named so
+    }
     if (is_prim_type_token(name)) {
-      // Type-token operand (`a does u32`): a bare ref with NO read site —
+      // Type-token operand (`a does U32`): a bare ref with NO read site —
       // check_undefined_reads must not demand a variable here. constprop
-      // decodes the name to kind+envelope; a real variable of this name
-      // (e.g. `i2`) still wins because the fold consults the symbol table /
-      // type-info first.
+      // decodes the name to kind+envelope. A type word is reserved, so no
+      // variable can be named so (a backticked `` `U32` `` keeps its backticks).
       return Lnast_node::create_ref(name);
     }
   } else if (t == "function_call_expression") {
-    TSNode fn  = child_by_field(n, "function");
-    TSNode arg = child_by_field(n, "argument");
-    if (!ts_node_is_null(fn) && !ts_node_is_null(arg) && std::string_view(ts_node_type(fn)) == "identifier"
-        && (std::string_view(ts_node_type(arg)) == "tuple" || std::string_view(ts_node_type(arg)) == "arg_tuple")) {
-      // Only the named-arg form is a type literal — `u8(3)` stays a
-      // constructor cast. Require ≥1 argument, all `max=`/`min=`/`bits=`.
-      bool all_size = ts_node_named_child_count(arg) >= 1;
-      for (TSNode item : ts_node_named_children(arg)) {
-        if (!all_size) {
-          break;
-        }
-        std::string_view it(ts_node_type(item));
-        if (it != "assignment" && it != "arg_assignment" && it != "attribute_assignment") {
-          all_size = false;
-          break;
-        }
-        TSNode lv = child_by_field(item, "lvalue");
-        if (ts_node_is_null(lv)) {
-          all_size = false;
-          break;
-        }
-        auto key = trim(get_text(lv));
-        all_size = (key == "max" || key == "min" || key == "bits");
-      }
-      std::string max_txt;
-      std::string min_txt;
-      if (all_size && int_type_call_bounds(trim(get_text(fn)), arg, max_txt, min_txt)) {
-        // Integer type-call (`int(max=…)`): declare a type tmp carrying the
-        // canonical prim_type_int(max,min); the fold reads it back through
-        // the attributes Type_info seam exactly like a declared variable.
-        auto didx = builder.add_child(Lnast_ntype::create_declare());
-        auto ref  = builder.mint_tmp_ref();
-        lnast->add_child(didx, ref);
-        auto pt = lnast->add_child(didx, Lnast_ntype::create_prim_type_int());
-        lnast->add_child(pt, Lnast_node::create_const(max_txt.empty() ? "nil" : max_txt));
-        lnast->add_child(pt, Lnast_node::create_const(min_txt.empty() ? "nil" : min_txt));
-        lnast->add_child(didx, Lnast_node::create_const("type"));
-        return ref;
-      }
+    if (auto lit = int_type_literal(n)) {
+      return *lit;
     }
   }
   return expr_to_node(n);
@@ -7789,9 +9927,7 @@ void Prp2lnast::emit_type_spec(const Lnast_node& target, TSNode type_cast_node) 
           lnast->add_child(aidx, bundle_ref);
           // 2c-wire: this store is the TYPE's shape, not a driver. Record the
           // target so the single-driver counter discounts it (see the member).
-          if (const auto tn = target.get_name(); !tn.empty()) {
-            decl_shape_seed_targets_.insert(std::string(tn));
-          }
+          decl_shape_seed_stores_.insert(aidx);
           // The tuple-shape store above carries the field VALUES/shape, and
           // tuple_to_node records each field's type on the field's tuple_get
           // tmp (read side: `does`/`.[bits]`). ALSO stamp each field's type on
@@ -7843,6 +9979,38 @@ attrs:
   }
 }
 
+// A type position spelled `I<N>` (`I8`, `I32`): not a type word, so prpparse
+// reads it as a named type. The signed sized type is `S<N>`; point there
+// instead of the generic unknown-type error. Lowercase former type spellings
+// are ordinary names, so check their lexical bindings before diagnosing them.
+void Prp2lnast::check_type_name_spelling(const TSNode& node) const {
+  const auto text = trim(get_text(node));
+  if (const auto renamed = str_tools::renamed_type_spelling(text);
+      !renamed.empty() && !lookup_capture(text) && !name_in_inflight_scope(text)
+      && std::none_of(capture_frames_.begin(), capture_frames_.end(), [&](const Capture_frame& frame) {
+           return frame.types.contains(text) || frame.lambdas.contains(text);
+         })) {
+    report_error(node,
+                 "renamed-type",
+                 "type",
+                 std::format("`{}` was renamed `{}`", text, renamed),
+                 std::format("use `{}` for the built-in type, or declare `{}` before using it as a name", renamed, text));
+  }
+  if (text.size() >= 2 && text[0] == 'I'
+      && std::all_of(text.begin() + 1, text.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
+    report_removed_int_type(span_of_node(node), text);
+  }
+}
+
+void Prp2lnast::report_removed_int_type(livehd::diag::Span span, std::string_view text) const {
+  const auto width = text.substr(1);
+  stage_error(std::move(span),
+              "removed-int-type",
+              "syntax",
+              std::format("`{}` was renamed `S{}`", text, width),
+              std::format("write `S{}` (a signed {}-bit integer)", width, width));
+}
+
 void Prp2lnast::record_type_name_read(const TSNode& type_node) {
   // A named type is a read of the type SYMBOL: route it through the same
   // undefined-read check as value reads. Record only the LEADING identifier —
@@ -7863,13 +10031,15 @@ void Prp2lnast::record_type_name_read(const TSNode& type_node) {
   if (base.empty() || name_in_inflight_scope(base)) {
     return;
   }
-  // Only validate type references in plain statement contexts (top-level and
-  // lambda BODIES, where inflight_name_scopes_ is empty). Skip while a lambda
-  // SIGNATURE or tuple literal is being built (non-empty stack): a signature's
-  // param/output types may name GENERIC parameters (`comb f<T>(a:T)`) that
-  // resolve during instantiation, not via the symbol table — checking them
-  // here would be a false positive.
-  if (!inflight_name_scopes_.empty()) {
+  // Validate type references in plain statement contexts (top-level and
+  // lambda BODIES, where inflight_name_scopes_ is empty) and in the SIGNATURE
+  // of a streamed lambda: its own generics (`comb f<T>(a:T)`), the enclosing
+  // types and the file imports all sit in streamed_scope_names_, which
+  // read_is_visible consults for a site with no stmts frame. A kept func_def's
+  // signature or a tuple literal (the other non-empty stacks) is skipped: its
+  // generics are not visible from the enclosing frame the site would record.
+  const bool streamed_signature = is_streamed_signature();
+  if (!inflight_name_scopes_.empty() && !streamed_signature) {
     return;
   }
   const auto sp = ts_node_start_point(type_node);
@@ -7880,9 +10050,114 @@ void Prp2lnast::record_type_name_read(const TSNode& type_node) {
                                   .start_col  = sp.column + 1,
                                   .end_line   = sp.row + 1,
                                   .end_col    = sp.column + 1 + static_cast<uint32_t>(n),
-                                  .scope      = builder.idx_stmts,
-                                  .before     = lnast->get_last_child(builder.idx_stmts),
+                                  .scope      = streamed_signature ? Lnast_nid{} : builder.idx_stmts,
+                                  .before     = streamed_signature ? Lnast_nid{} : lnast->get_last_child(builder.idx_stmts),
                                   .is_type    = true});
+}
+
+bool Prp2lnast::is_streamed_signature() const {
+  return inflight_name_scopes_.size() == 1 && capture_frames_.back().lambda_boundary && capture_frames_.back().streamed;
+}
+
+void Prp2lnast::push_read_site(TSNode id, std::string name, bool no_frame, Generic_read generic) {
+  const auto sp = ts_node_start_point(id);
+  const auto ep = ts_node_end_point(id);
+  read_sites_.push_back(Read_site{.name       = std::move(name),
+                                  .start_byte = ts_node_start_byte(id),
+                                  .end_byte   = ts_node_end_byte(id),
+                                  .start_line = sp.row + 1,
+                                  .start_col  = sp.column + 1,
+                                  .end_line   = ep.row + 1,
+                                  .end_col    = ep.column + 1,
+                                  .scope      = no_frame ? Lnast_nid{} : builder.idx_stmts,
+                                  .before     = no_frame ? Lnast_nid{} : lnast->get_last_child(builder.idx_stmts),
+                                  .generic    = generic});
+}
+
+Prp2lnast::Expr_reads Prp2lnast::expr_reads(TSNode e, bool enter_attribute_reads) const {
+  Expr_reads          out;
+  std::vector<TSNode> todo{e};
+  const auto          push_field = [&](TSNode c, const char* field) {
+    if (TSNode f = child_by_field(c, field); !ts_node_is_null(f)) {
+      todo.push_back(f);
+    }
+  };
+  while (!todo.empty()) {
+    TSNode c = todo.back();
+    todo.pop_back();
+    if (ts_node_is_null(c)) {
+      continue;
+    }
+    const std::string_view ct(ts_node_type(c));
+    if (ct == "identifier") {
+      if (const auto txt = trim(get_raw_text(c)); txt != "true" && txt != "false" && txt != "nil") {
+        out.names.push_back(c);
+      }
+      continue;
+    }
+    if (ct == "lambda") {
+      out.lambdas.push_back(c);
+      continue;
+    }
+    if (ct == "attribute_read" && !enter_attribute_reads) {
+      continue;
+    }
+    if (ct == "dot_expression" || ct == "dot_expression_type" || ct == "member_selection" || ct == "attribute_read"
+        || (ct == "expression_type" && ts_node_named_child_count(c) > 1)) {
+      // Only the base reads a name; the rest are field or attribute names.
+      // `std.clog2` names a built-in, not a value.
+      if (ts_node_named_child_count(c) == 0) {
+        continue;
+      }
+      TSNode base = ts_node_named_child(c, 0);
+      if (ct != "attribute_read" && ts_node_named_child_count(c) > 1 && trim(get_text(base)) == prp_builtins::std_namespace
+          && prp_builtins::is_std_member(trim(get_text(ts_node_named_child(c, 1))))) {
+        continue;
+      }
+      todo.push_back(base);
+      continue;
+    }
+    if (ct == "arg_assignment" || ct == "attribute_assignment" || ct == "assignment") {
+      push_field(c, "rvalue");  // the lvalue is a key (or a declared name)
+      continue;
+    }
+    if (ct == "typed_identifier" || ct == "typed_field") {
+      push_field(c, "type");  // a tuple-TYPE field: its name is not a read
+      push_field(c, "definition");
+      continue;
+    }
+    TSNode callee{};
+    if (ct == "function_call_expression" || ct == "function_call_type") {
+      callee = child_by_field(c, "function");
+      if (!ts_node_is_null(callee)) {
+        out.callees.push_back(callee);
+      }
+    }
+    for (TSNode k : ts_node_named_children(c)) {
+      if (ts_node_is_null(callee) || ts_node_start_byte(k) != ts_node_start_byte(callee)) {
+        todo.push_back(k);
+      }
+    }
+  }
+  return out;
+}
+
+void Prp2lnast::record_name_reads(TSNode e, Generic_read generic) {
+  // A streamed lambda's signature has no stmts frame yet: the site resolves
+  // against streamed_scope_names_ (see read_is_visible). Anywhere else (a
+  // statement, a tuple literal, a kept func_def's signature) the site records
+  // at the builder position, as identifier_to_node does; the names an
+  // in-flight construct introduces (earlier tuple fields, earlier params and
+  // the generics of the signature being lowered) resolve right here.
+  const bool no_frame = is_streamed_signature() || builder.idx_stmts.is_invalid();
+  for (TSNode c : expr_reads(e, /*enter_attribute_reads=*/true).names) {
+    std::string name{canonical_escaped_ident(trim(get_text(c)))};
+    if (str_tools::is_pyrope_type_word(name) || name_in_inflight_scope(name)) {
+      continue;  // a bare type word is the type, not a read (`` `U8` `` keeps its backticks)
+    }
+    note_capture_read(name, c);
+    push_read_site(c, std::move(name), no_frame, generic);
+  }
 }
 
 void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
@@ -7890,22 +10165,27 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
   if (t == "function_call_type"
       || (t == "expression_type" && ts_node_named_child_count(type_node) != 0
           && std::string_view(ts_node_type(ts_node_named_child(type_node, 0))) == "function_call_expression")) {
+    const auto raw  = trim(get_text(type_node));
+    const auto name = trim(raw.substr(0, raw.find('(')));
+    if (const auto renamed = str_tools::renamed_type_spelling(name); !renamed.empty() && !lookup_capture(name)) {
+      report_error(type_node,
+                   "renamed-type",
+                   "type",
+                   std::format("`{}` was renamed `{}`", name, renamed),
+                   std::format("use `{}` for the built-in type", renamed));
+    }
     report_error(type_node,
                  "type-from-call-removed",
                  "type",
                  "a function call cannot be used as a type",
                  "use explicit generic parameters, for example `<T>` and a `:T` annotation");
   }
-  // prpparse can classify the signed-width alias iN as a named type. It is
-  // reserved by the scalar type vocabulary, so lower it with the same bounds
-  // as sN instead of leaving an unresolved type reference on a module port.
-  const auto type_text = trim(get_text(type_node));
-  if (t == "expression_type" && type_text.size() >= 2 && type_text.front() == 'i' && is_prim_type_token(type_text)) {
-    t = "sint_type";
+  if (t == "expression_type") {
+    check_type_name_spelling(type_node);
   }
   if (t == "uint_type" || t == "sint_type") {
     // Emit the canonical `prim_type_int(max, min)`. The width sugar
-    // `uN`/`sN`/`iN` computes its bounds; the unsized spellings (`uint`,
+    // `uN`/`sN` computes its bounds; the unsized spellings (`uint`,
     // `unsigned`, `int`, `integer`) leave both bounds "nil" (unbounded). "nil"
     // marks an unbounded bound (a non-integer the consumers read as unset).
     // An optional `constraint` tuple (`int(max=…, min=…, bits=…)`) refines
@@ -7921,7 +10201,7 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
     if (!ts_node_is_null(constraint)) {
       int_type_call_bounds(txt, constraint, max_txt, min_txt);
     } else if (!txt.empty() && std::isdigit(static_cast<unsigned char>(txt.back()))) {
-      // First char is u/s/i; the remainder is the bit width.
+      // First char is u/s; the remainder is the bit width.
       auto w = try_parse_int_type_width(std::string_view{txt}.substr(1));
       if (!w) {
         report_error(type_node,
@@ -7940,6 +10220,8 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
         max_txt = std::string(Dlop::get_mask_value(n)->to_pyrope());
         min_txt = "0";
       }
+    } else if (txt == "Unsigned") {
+      min_txt = "0";  // docs 04-variables: `Unsigned` is `Signed(min=0)`
     }
     auto                     idx = lnast->add_child(parent, Lnast_ntype::create_prim_type_int());
     // 2f-type_bound — a bound prelower_type_bounds could not fold rides as a
@@ -7965,6 +10247,10 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
     lnast->add_child(parent, Lnast_ntype::create_prim_type_bool());
   } else if (t == "string_type") {
     lnast->add_child(parent, Lnast_ntype::create_prim_type_string());
+  } else if (t == "clock_type") {
+    lnast->add_child(parent, Lnast_ntype::create_prim_type_clock());
+  } else if (t == "reset_type") {
+    lnast->add_child(parent, Lnast_ntype::create_prim_type_reset());
   } else if (t == "array_type") {
     auto   idx  = lnast->add_child(parent, Lnast_ntype::create_comp_type_array());
     TSNode base = child_by_field(type_node, "base");
@@ -7973,7 +10259,7 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
     }
     TSNode len = child_by_field(type_node, "length");
     if (!ts_node_is_null(len)) {
-      lnast->add_child(idx, expr_to_node(len));
+      lnast->add_child(idx, array_dim_to_node(len));
     }
   } else if (t == "expression_type" || t == "dot_expression_type" || t == "function_call_type") {
     // A bare literal used as a type — `:3333`, `:[4]3333`, `:true`, `:"s"` —
@@ -7989,7 +10275,7 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
                    "not-a-type",
                    "type",
                    std::format("`{}` is a value, not a type", trim(get_text(type_node))),
-                   "use a type here, e.g. `u4`/`bool`/`string` or a declared `type`/`enum` name");
+                   "use a type here, e.g. `U4`/`Bool`/`String` or a declared `type`/`enum` name");
     }
     // A named type is a `ref` to its symbol-table binding (resolved
     // via that name's bundle); the typename is still tracked by the separate
@@ -7999,6 +10285,61 @@ void Prp2lnast::emit_type_expr(const Lnast_nid& parent, TSNode type_node) {
   } else {
     lnast->add_child(parent, Lnast_ntype::create_prim_type_none());
   }
+}
+
+void Prp2lnast::emit_bare_type_word(const Lnast_nid& parent, std::string_view word, TSNode anchor) {
+  if (word == "Bool") {
+    lnast->add_child(parent, Lnast_ntype::create_prim_type_bool());
+    return;
+  }
+  if (word == "String") {
+    lnast->add_child(parent, Lnast_ntype::create_prim_type_string());
+    return;
+  }
+  if (word == "Clock") {
+    lnast->add_child(parent, Lnast_ntype::create_prim_type_clock());
+    return;
+  }
+  if (word == "Reset") {
+    lnast->add_child(parent, Lnast_ntype::create_prim_type_reset());
+    return;
+  }
+  // `U<N>` / `S<N>` / `Unsigned` / `Signed` (the emit_type_expr rule without a
+  // constraint: the unsized words leave both bounds nil).
+  std::string max_txt;
+  std::string min_txt;
+  if (word.size() >= 2 && std::isdigit(static_cast<unsigned char>(word[1]))) {
+    const auto w = try_parse_int_type_width(word.substr(1));
+    if (!w) {
+      report_error(anchor,
+                   "width-too-large",
+                   "type",
+                   std::format("integer type width '{}' is out of range (0..{} bits)", word, kMaxIntTypeWidth),
+                   "use a smaller bit width");
+    }
+    const int n = *w;
+    if (word[0] == 'S') {
+      max_txt = std::string(Dlop::get_mask_value(n - 1)->to_pyrope());
+      min_txt = std::string(Dlop::get_neg_mask_value(n - 1)->to_pyrope());
+    } else {
+      max_txt = std::string(Dlop::get_mask_value(n)->to_pyrope());
+      min_txt = "0";
+    }
+  } else if (word == "Unsigned") {
+    min_txt = "0";  // docs 04-variables: `Unsigned` is `Signed(min=0)`
+  }
+  auto idx = lnast->add_child(parent, Lnast_ntype::create_prim_type_int());
+  lnast->add_child(idx, Lnast_node::create_const(max_txt.empty() ? "nil" : max_txt));
+  lnast->add_child(idx, Lnast_node::create_const(min_txt.empty() ? "nil" : min_txt));
+}
+
+Lnast_node Prp2lnast::type_word_value(TSNode n, std::string_view word) {
+  auto didx = builder.add_child(Lnast_ntype::create_declare());
+  auto tref = builder.mint_tmp_ref();
+  lnast->add_child(didx, tref);
+  emit_bare_type_word(didx, word, n);
+  lnast->add_child(didx, Lnast_node::create_const("type"));
+  return tref;
 }
 
 void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view name, bool has_value) const {
@@ -8033,17 +10374,23 @@ void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view n
   // name to battr.hpp and both sides learn it at once.
   auto is_known = [](std::string_view n) { return battr::is_builtin_attr_name(n); };
 
+  // `clock`/`reset` signal-classification attributes (`clk::[clock]`) are
+  // gone: a clock or reset is declared with the `Clock`/`Reset` TYPE (docs 04b
+  // "Synthesis attribute list"), and a register picks one with `*_pin`.
+  if (name == "clock" || name == "reset") {
+    report_error(node,
+                 "attr-name-mistake",
+                 "syntax",
+                 std::format("there is no `{}` attribute: a {} is declared by its type (`:{}`), not by an attribute",
+                             name,
+                             name,
+                             name == "clock" ? "Clock" : "Reset"),
+                 std::format("declare the input `:{}`; to pick a register's {} use `{}_pin=<wire>`",
+                             name == "clock" ? "Clock" : "Reset",
+                             name,
+                             name));
+  }
   if (is_known(name)) {
-    // `clock`/`reset` are valid only as flag-only signal classifications
-    // (`clk::[clock]`). With `=value` the user almost surely meant the
-    // per-register pin override.
-    if (has_value && (name == "clock" || name == "reset")) {
-      report_error(node,
-                   "attr-name-mistake",
-                   "syntax",
-                   std::format("attribute `{}` does not take a value — it marks a declared signal as a {}", name, name),
-                   std::format("to pick a register's {0} use `{0}_pin=ref <wire>`", name));
-    }
     // The INVERSE rule, for the pin family: each of these NAMES A SIGNAL, so a
     // flag-only spelling says nothing. Without this the value defaults to the
     // text `true` and the mistake only surfaces much later, as tolg's
@@ -8055,7 +10402,7 @@ void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view n
           "attr-needs-value",
           "syntax",
           std::format("attribute `{}` needs a value — it names the signal it binds, it is not a flag", name),
-          name == "enable" ? "write `enable=<condition>` (e.g. `enable=(wen != 0)`)" : std::format("write `{}=ref <wire>`", name));
+          name == "enable" ? "write `enable=<condition>` (e.g. `enable=(wen != 0)`)" : std::format("write `{}=<wire>`", name));
     }
     return;
   }
@@ -8069,7 +10416,7 @@ void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view n
       // `initial` is the canonical spelling in BOTH layers now: it is the
       // LGraph Flop/Latch/Memory reset-value pin (graph/cell.cpp) and the
       // Pyrope declaration attribute. `init` was the old attribute spelling.
-      {    "init",                                                                                           "use `initial`"},
+      {    "init",                                                                         "use `initial`"                  },
       // Deleted from the vocabulary — without a row here each of these would
       // silently fold to nil as a user attribute instead of erroring.
       {  "inputs",                                               "use `inp` to read a lambda's input port names (`f.[inp]`)"},
@@ -8085,20 +10432,20 @@ void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view n
       // `saturate` was an alias only the CALL form honoured (`saturate x = …`
       // never parsed); `sat` is the one spelling, as in prp_keywords.def.
       {"saturate",                                                                                               "use `sat`"},
-      {     "clk", "use `clock_pin=ref <wire>` to pick a register's clock, or `clock` to classify a signal (`clk::[clock]`)"},
-      {     "rst", "use `reset_pin=ref <wire>` to pick a register's reset, or `reset` to classify a signal (`rst::[reset]`)"},
-      {   "width",                      "use `bits` to read a width (`x.[bits]`); to set a width declare a type, e.g. `:u8`"},
+      {     "clk",                  "use `clock_pin=<wire>` to pick a register's clock (a clock input is typed `:Clock`)"},
+      {     "rst",                  "use `reset_pin=<wire>` to pick a register's reset (a reset input is typed `:Reset`)"},
+      {   "width",                      "use `bits` to read a width (`x.[bits]`); to set a width declare a type, e.g. `:U8`"},
       {      "en",                                                                                            "use `enable`"},
       { "posedge",                                                                            "use `posclk` (`posclk=true`)"},
       { "negedge",                                                                                      "use `posclk=false`"},
-      {  "signed",                           "signedness is derived from the type — declare `:sN` (read it with `x.[sign]`)"},
-      {"unsigned",                           "signedness is derived from the type — declare `:uN` (read it with `x.[sign]`)"},
+      {  "signed",                           "signedness is derived from the type — declare `:S<N>` (read it with `x.[sign]`)"},
+      {"unsigned",                           "signedness is derived from the type — declare `:U<N>` (read it with `x.[sign]`)"},
       // A proposed-but-never-adopted spelling: whether an array is a flop bank
       // or a memory is the synthesis flow's call, and a `reg` array with a
       // reset value already resets every entry in one cycle (08-memories.md).
       { "storage",
        "there is no `storage` attribute: a `reg` array with a reset value already resets every entry in one cycle (see "
-       "08-memories.md); an array is registers or a memory by the synthesis flow, not by attribute"                  },
+       "08-memories.md); an array is registers or a memory by the synthesis flow, not by attribute"                         },
   };
   for (const auto& m : mistakes) {
     if (name == m.wrong) {
@@ -8123,6 +10470,105 @@ void Prp2lnast::reject_common_mistakes_attr_name(TSNode node, std::string_view n
   }
 }
 
+Lnast_node Prp2lnast::io_default_to_node(TSNode def, TSNode param) {
+  if (!builder.idx_stmts.is_invalid()) {
+    return expr_to_node(def);  // a func_def kept in its enclosing tree: lowered there
+  }
+  return comptime_default_node(def, param);
+}
+
+bool Prp2lnast::input_default_in_prologue(TSNode def, std::string_view lambda_kind, bool is_io_output, bool is_vararg) {
+  if (ts_node_is_null(def) || is_io_output || is_vararg) {
+    return false;
+  }
+  if (lambda_kind == "comb") {
+    return true;
+  }
+  if (lambda_kind != "mod" && lambda_kind != "pipe") {
+    return false;
+  }
+  return !front_end_default_value(def).has_value();  // else the io slot holds the constant
+}
+
+std::optional<Lnast_node> Prp2lnast::front_end_default_value(TSNode def) {
+  TSNode lit = def;
+  while ((std::string_view(ts_node_type(lit)) == "expression_type" || std::string_view(ts_node_type(lit)) == "paren_group")
+         && ts_node_named_child_count(lit) == 1) {
+    lit = ts_node_named_child(lit, 0);
+  }
+  // A literal first: expr_to_node reports a malformed one (`0b1010` needs a
+  // sign) at its span, and emits no statement.
+  const std::string_view lt(ts_node_type(lit));
+  if (const auto txt = trim(get_text(lit));
+      lt == "constant" || (lt == "identifier" && (txt == "true" || txt == "false" || txt == "nil"))) {
+    return expr_to_node(lit);
+  }
+  if (const auto v = resolve_type_int_value(def); v && v->is_integer()) {
+    return Lnast_node::create_const(std::string(v->to_pyrope()));
+  }
+  // An enum entry (`c:Color = Color.Green`): its integer encoding.
+  if ((lt == "dot_expression" || lt == "expression_type") && ts_node_named_child_count(lit) == 2
+      && std::string_view(ts_node_type(ts_node_named_child(lit, 0))) == "identifier"
+      && std::string_view(ts_node_type(ts_node_named_child(lit, 1))) == "identifier") {
+    if (const auto v = enum_entry_value(trim(get_text(ts_node_named_child(lit, 0))), trim(get_text(ts_node_named_child(lit, 1))))) {
+      return Lnast_node::create_const(std::string(v->to_pyrope()));
+    }
+  }
+  return std::nullopt;
+}
+
+namespace {
+constexpr std::string_view kDefaultNotComptimeHint
+    = "a `mod`/`pipe` input default (and an output register's reset value) must fold to a compile-time constant: a "
+      "literal, a generic, a `comptime const`, an attribute read, an enum entry, or a comb call or expression over "
+      "them; or pass the argument at every call";
+}  // namespace
+
+void Prp2lnast::check_default_reads_no_input(TSNode def, TSNode param) {
+  for (TSNode c : expr_reads(def, /*enter_attribute_reads=*/false).names) {
+    const std::string name{canonical_escaped_ident(trim(get_text(c)))};
+    if (const auto hit = lookup_capture(name); hit && hit->kind == Bind_kind::runtime && name_in_inflight_scope(name)) {
+      report_error(def,
+                   "default-not-comptime",
+                   "type",
+                   std::format("the default of `{}` reads the runtime input `{}`", trim(get_text(param)), name),
+                   kDefaultNotComptimeHint);
+    }
+  }
+}
+
+Lnast_node Prp2lnast::comptime_default_node(TSNode def, TSNode param) {
+  if (auto v = front_end_default_value(def)) {
+    return *v;
+  }
+  // Anything else needs statements, which this position has none to compute
+  // in. A name nothing declares is an undefined-read (never a nil default):
+  // check it here, since the default-not-comptime error below ends the parse
+  // before check_undefined_reads runs. Conservative: any binding in scope, an
+  // in-flight or streamed-scope name, a lambda, a type or a built-in counts as
+  // declared.
+  absl::flat_hash_set<std::string> hoisted;
+  collect_hoisted_names(*lnast, lnast->get_root(), hoisted);
+  for (const auto& st : destination_stack_) {
+    collect_hoisted_names(*st.lnast, st.lnast->get_root(), hoisted);
+  }
+  for (TSNode c : expr_reads(def, /*enter_attribute_reads=*/true).names) {
+    const std::string name{canonical_escaped_ident(trim(get_text(c)))};
+    note_capture_read(name, c);
+    if (!lookup_capture(name) && !name_in_inflight_scope(name) && !streamed_scope_names_.contains(name)
+        && !streamed_function_names_.contains(name) && !hoisted.contains(name) && !str_tools::is_pyrope_type_word(name)
+        && name != "self" && name != prp_builtins::std_namespace) {
+      report_error(c, "undefined-read", "name", prp_undefined_read_message(name), prp_undefined_read_hint);
+    }
+  }
+  check_default_reads_no_input(def, param);
+  report_error(def,
+               "default-not-comptime",
+               "type",
+               std::format("the default of `{}` must be a compile-time constant", trim(get_text(param))),
+               kDefaultNotComptimeHint);
+}
+
 void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_ident, TSNode definition_or_null, bool is_ref_mod,
                                 std::vector<Param_attr>* attrs_out, std::string_view lambda_kind, bool is_io_output,
                                 bool is_vararg_mod) {
@@ -8145,17 +10591,22 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
   // collide. A var-arg never carries a default — the `...` marker WINS over any
   // (meaningless) `= expr` so downstream var-arg detection (which keys on the
   // sentinel) is never silently lost if the grammar admits `...args = e`.
-  // A comb INPUT default is lowered later as a body-prologue `store(name, expr)`
-  // (evaluated in param-tuple scope, self-contained → survives extraction, todo
-  // 3g E): the io slot only records that a default EXISTS via the `__default`
-  // sentinel (SSA turns it into io_meta.has_default). Emitting it here via
-  // expr_to_node would (for an expression default) pollute the ENCLOSING frame
-  // with a dangling tmp — so the sentinel replaces it. Outputs / mod / pipe keep
-  // the direct encoding.
-  const bool defer_default = !is_io_output && lambda_kind == "comb" && !is_vararg_mod && !ts_node_is_null(definition_or_null);
+  // A comb INPUT default is lowered later as a body-prologue store into its
+  // default-value local (evaluated in param-tuple scope, self-contained →
+  // survives extraction, todo 3g E): the io slot only records that a default
+  // EXISTS via the `__default` sentinel (SSA turns it into
+  // io_meta.has_default). Emitting it here via expr_to_node would (for an
+  // expression default) pollute the ENCLOSING frame with a dangling tmp — so
+  // the sentinel replaces it. So does a mod/pipe default that does not fold
+  // here (input_default_in_prologue). Outputs and the other mod / pipe
+  // defaults keep the direct encoding (a compile-time constant).
+  if (!ts_node_is_null(definition_or_null) && !is_io_output && (lambda_kind == "mod" || lambda_kind == "pipe")) {
+    check_default_reads_no_input(definition_or_null, id);
+  }
+  const bool defer_default = input_default_in_prologue(definition_or_null, lambda_kind, is_io_output, is_vararg_mod);
   Lnast_node arg_val       = is_vararg_mod                          ? Lnast_node::create_const("...")
                              : defer_default                        ? Lnast_node::create_const("__default")
-                             : !ts_node_is_null(definition_or_null) ? expr_to_node(definition_or_null)
+                             : !ts_node_is_null(definition_or_null) ? io_default_to_node(definition_or_null, id)
                              : is_ref_mod                           ? Lnast_node::create_const("ref")
                                                                     : Lnast_node::create_const("nil");
   lnast->add_child(aidx, arg_val);
@@ -8163,6 +10614,22 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
   TSNode type_cast = child_by_field(typed_ident, "type");
   if (!ts_node_is_null(type_cast)) {
     TSNode ty = child_by_field(type_cast, "type");
+    if (!ts_node_is_null(ty) && lambda_kind == "comb" && !is_io_output) {
+      // A comb holds no state (docs 04b "Implicit clock and reset"): a `Clock`
+      // or `Reset` input is a compile error, and nothing is auto-wired into it.
+      if (const std::string_view tk(ts_node_type(ty)); tk == "clock_type" || tk == "reset_type") {
+        const bool clk = tk == "clock_type";
+        report_error(type_cast,
+                     "comb-clock-reset-input",
+                     "type",
+                     std::format("`comb` input `{}` is a `{}`: a comb holds no state and can not declare a {} input",
+                                 trim(get_text(id)),
+                                 clk ? "Clock" : "Reset",
+                                 clk ? "Clock" : "Reset"),
+                     clk ? "make it a `mod` (a clocked module), or pass the value as data (`:Bool`)"
+                         : "make it a `mod`, or pass the value as data (`:Bool`)");
+      }
+    }
     if (!ts_node_is_null(ty)) {
       // A literal default must match the declared scalar kind, exactly as a
       // variable declaration `mut b:bool = 3` would (shared check). When the
@@ -8178,13 +10645,9 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
       } else {
         check_decl_init_kind(trim(get_text(id)), arg_val, ty, type_cast);
       }
-      // 2f-generic_port_width — see Pending_port_bound. The placeholder entry
-      // makes int_type_call_bounds treat the site as deferred (no warning) and
-      // emit_type_expr emit `nil` for now; the flush rewrites the leaves.
-      if (!lambda_kind.empty() && lambda_has_generics_ && int_type_has_unfoldable_bound(ty)) {
-        prelowered_int_bounds_.try_emplace(ts_node_start_byte(child_by_field(ty, "constraint")), Prelowered_bounds{});
-        pending_port_bounds_.push_back({type_cast, aidx});
-      }
+      // 2f-generic_port_width — see Pending_port_bound. Also a field of a
+      // tuple-typed port (lambda_kind is empty there).
+      defer_port_bound(type_cast, aidx);
       emit_arg_type(aidx, ty);
     }
     // Parameter-side attribute carrier (`a::[comptime]`, `a:T::[debug=2]`).
@@ -8354,6 +10817,16 @@ void Prp2lnast::emit_arg_assign(const Lnast_nid& tuple_parent, TSNode typed_iden
       }
       if (!ts_node_is_null(index_n) && !got_range) {
         std::optional<int64_t> lit = resolve_cycle_value(index_n);
+        if (const auto cpt = lit ? std::nullopt : unfolded_comptime_read(index_n)) {
+          report_error(index_n,
+                       "invalid-mod-cycle",
+                       "type",
+                       std::format("the landing cycle of mod output '{}' reads comptime const `{}`, whose value is computed by "
+                                   "statements (a loop, an `if`, a call) this declaration cannot evaluate",
+                                   arg_name,
+                                   *cpt),
+                       "use a literal, or a comptime const folded from literals (`comptime const D = N + 1`)");
+        }
         if (!lit) {
           report_error(index_n,
                        "invalid-mod-cycle",
@@ -8420,6 +10893,7 @@ void Prp2lnast::emit_arg_type(const Lnast_nid& assign_parent, TSNode type_node) 
           lnast->add_child(aidx, Lnast_node::create_ref(canonical_escaped_ident(trim(get_text(arg)))));
           lnast->add_child(aidx, Lnast_node::create_const("nil"));
           if (!ts_node_is_null(ty)) {
+            defer_port_bound(tc, aidx);
             emit_arg_type(aidx, ty);
           }
         } else if (it == "assignment") {
@@ -8439,6 +10913,45 @@ void Prp2lnast::emit_arg_type(const Lnast_nid& assign_parent, TSNode type_node) 
     }
   }
   emit_type_expr(assign_parent, type_node);
+}
+
+// Ruling 2026-09-27 #8 (04b-attributes.md): `async` is the canonical
+// reset-kind attribute -- `sync=` is still accepted, with a deprecation
+// warning. A `*_pin` attribute CONNECTS a wire (docs 04b "Attributes"): it
+// takes the signal directly (`clock_pin=clk2`, `reset_pin=rst or soft_rst`);
+// the older `ref` spelling is an error (ruling 82: the Clock/Reset types make
+// it unnecessary). A `Clock` is never bound to a constant: a constant
+// `clock_pin` is reported by upass.tolg (`clock-const`), where every front
+// end's constant clock lands.
+void Prp2lnast::check_attribute_value(TSNode item, std::string_view key, TSNode rv) const {
+  // A `ref` anywhere in the value (`(ref clk)`, a per-port `(ref c0, c1)`).
+  const std::function<TSNode(TSNode)> find_ref = [&](TSNode node) -> TSNode {
+    if (std::string_view(ts_node_type(node)) == "ref_identifier") {
+      return node;
+    }
+    for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i) {
+      if (const auto r = find_ref(ts_node_named_child(node, i)); !ts_node_is_null(r)) {
+        return r;
+      }
+    }
+    return TSNode{};
+  };
+  if ((key == "clock_pin" || key == "reset_pin") && !ts_node_is_null(rv)) {
+    if (const auto r = find_ref(rv); !ts_node_is_null(r)) {
+      report_error(r,
+                   "pin-attr-ref",
+                   "syntax",
+                   std::format("`{}` takes the signal directly: `ref` is not allowed here", key),
+                   std::format("drop the `ref`: write `{}={}`", key, trim(get_text(ts_node_named_child(r, 0)))));
+    }
+  }
+  if (key == "sync") {
+    report_warning(item,
+                   "reg-attr-sync-deprecated",
+                   "type",
+                   "reg attribute `sync` is deprecated; write `async`",
+                   "`sync=false` is `async=true`; `sync=true` is the default `async=false`");
+  }
 }
 
 void Prp2lnast::emit_attribute_list(const Lnast_node& target, TSNode attr_list_node) {
@@ -8481,6 +10994,7 @@ void Prp2lnast::emit_attribute_list(const Lnast_node& target, TSNode attr_list_n
           continue;
         }
         reject_common_mistakes_attr_name(lv, key_txt, !ts_node_is_null(rv));
+        check_attribute_value(item, key_txt, rv);
         auto idx = builder.add_child(Lnast_ntype::create_attr_set());
         lnast->add_child(idx, target);
         lnast->add_child(idx, Lnast_node::create_const(key_txt));
@@ -8545,6 +11059,7 @@ void Prp2lnast::emit_attribute_list(const Lnast_node& target, TSNode attr_list_n
       }
     }
     reject_common_mistakes_attr_name(name_n, get_text(name_n), have_val);
+    check_attribute_value(name_n, get_text(name_n), have_val ? val_n : TSNode{});
     auto idx = builder.add_child(Lnast_ntype::create_attr_set());
     lnast->add_child(idx, target);
     lnast->add_child(idx, Lnast_node::create_const(get_text(name_n)));
@@ -8635,6 +11150,9 @@ Lnast_node Prp2lnast::binary_expr_to_node(TSNode n) {
   for (size_t j = 0; j < operand_nodes.size(); ++j) {
     const bool type_pos
         = (j > 0 && j - 1 < ops.size() && is_type_pos_op(ops[j - 1].kind)) || (j < ops.size() && is_type_pos_op(ops[j].kind));
+    if (!type_pos) {
+      check_lambda_used_as_value(operand_nodes[j]);
+    }
     operands.push_back(type_pos ? does_operand_to_node(operand_nodes[j]) : expr_to_node(operand_nodes[j]));
   }
 
@@ -8994,6 +11512,9 @@ Lnast_node Prp2lnast::unary_expr_to_node(TSNode n) {
     auto start = ts_node_is_null(op_n) ? ts_node_start_byte(n) : ts_node_end_byte(op_n);
     arg_ref    = constant_text_to_node(trim(text_between(start, ts_node_end_byte(n))));
   } else {
+    if (std::string_view(ts_node_type(ts_node_is_null(op_n) ? arg_n : op_n)) != "op_spread") {
+      check_lambda_used_as_value(arg_n);
+    }
     arg_ref = expr_to_node(arg_n);
   }
   // The `operator` field is one of the aliased operator nodes:
@@ -9052,6 +11573,8 @@ Lnast_node Prp2lnast::if_expr_to_node(TSNode n, bool need_result) {
   if (need_result) {
     result = builder.mint_tmp_ref();
   }
+
+  Initializer_scope_guard init_scope(*this, n);
 
   struct Arm {
     Lnast_node cref;
@@ -9240,39 +11763,11 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
     result_outer = builder.mint_tmp_ref();
   }
 
-  // Previously the match wrapped its init+compare+if in a private `stmts`
-  // scope so the `init` local (e.g. `match const t = m1; t { … }`'s `t`)
-  // could not leak after the match exited. That extra Block scope also
-  // isolated assignments to outer-scope `mut` vars from propagating after
-  // the match (e.g. `hit = …` inside an arm body). The arm bodies already
-  // run inside an `if` whose own `stmts` provides phi-merge for the outer
-  // vars; we leave the init+compare nodes at the enclosing stmts level so
-  // outer-var writes propagate correctly. `t` (or any init local) is
-  // released after the match by an explicit `assign t = nil` emitted below.
-  std::vector<std::string> init_locals;
+  Initializer_scope_guard init_scope(*this, n);
 
-  // Init: process every statement in the init list — they declare locals
-  // (typical: `const t = subject`) at the enclosing stmts level. Track the
-  // bound names so we can release them after the match exits.
   TSNode init = child_by_field(n, "init");
   if (!ts_node_is_null(init)) {
     for (TSNode c : ts_node_named_children(init)) {
-      std::string_view ct(ts_node_type(c));
-      if (ct == "declaration_statement" || ct == "assignment") {
-        TSNode lv = child_by_field(c, "lvalue");
-        if (!ts_node_is_null(lv)) {
-          std::string_view lvt(ts_node_type(lv));
-          TSNode           id;
-          if (lvt == "typed_identifier") {
-            id = child_by_field(lv, "identifier");
-          } else if (lvt == "identifier") {
-            id = lv;
-          }
-          if (!ts_node_is_null(id)) {
-            init_locals.emplace_back(get_text(id));
-          }
-        }
-      }
       process_statement(c);
     }
   }
@@ -9511,18 +12006,30 @@ Lnast_node Prp2lnast::match_expr_to_node(TSNode n, bool need_result) {
     emit_body(else_code);
   }
 
-  // Release any local declared by the `init` clause (e.g.
-  // `match const t = subject; …` → `t`) so reads after the match observe
-  // it as nil instead of the still-live bundle. Emitted as plain
-  // `assign <name> = nil` at the enclosing stmts level since we no longer
-  // wrap the match in a private scope.
-  for (const auto& name : init_locals) {
-    auto idx = builder.add_child(Lnast_ntype::create_store());
-    lnast->add_child(idx, Lnast_node::create_ref(name));
-    lnast->add_child(idx, Lnast_node::create_const("nil"));
-  }
-
   return need_result ? result : Lnast_node::create_const("0");
+}
+
+// The operator of a `lo..=hi` / `lo..<hi` / `lo..+n` expression_item (its
+// `op_range_*` node type), or "" when `expr_item` is not one of those forms.
+// The operator is the aliased child of the binary_other_op wrapper, so the
+// node type names it without reading text.
+static std::string_view range_op_kind(TSNode expr_item) {
+  if (ts_node_is_null(expr_item) || ts_node_named_child_count(expr_item) != 3) {
+    return {};
+  }
+  TSNode op = ts_node_named_child(expr_item, 1);
+  if (std::string_view(ts_node_type(op)) != "binary_other_op") {
+    return {};
+  }
+  TSNode op_inner = ts_node_named_child(op, 0);
+  if (ts_node_is_null(op_inner)) {
+    return {};
+  }
+  const std::string_view kind(ts_node_type(op_inner));
+  if (kind != "op_range_inclusive" && kind != "op_range_exclusive" && kind != "op_range_count") {
+    return {};
+  }
+  return kind;
 }
 
 Lnast_node Prp2lnast::emit_range_node(const Lnast_node& start, const Lnast_node& end) {
@@ -9538,12 +12045,20 @@ Lnast_node Prp2lnast::emit_range_node(const Lnast_node& start, const Lnast_node&
   return rng_ref;
 }
 
-Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
+Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node, int* const_width) {
   // The grammar's `select` admits exactly one of `index` (single expression)
   // or `range` (a selection_range form). Tuple/comma indices like `#[1,4]`
   // aren't accepted by the grammar; tree-sitter error-recovers them silently
   // and just keeps the first expression — so flag any parse error on the
   // select node as a hard compile error rather than emitting wrong code.
+  //
+  // `const_width`, when given, receives the number of selected bits when that
+  // is a compile-time constant even though the POSITION may not be (a
+  // `x#[(j*4)..+4]` window inside a loop), else 0. A `wrap`/`sat` into a bit
+  // range needs only that width.
+  if (const_width != nullptr) {
+    *const_width = 0;
+  }
   if (ts_node_is_null(sel_node)) {
     report_error("bit-range-empty",
                  "syntax",
@@ -9558,21 +12073,32 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
                  "use a single index `#[3]` or a range `#[0..=3]`; OR them for a multi-bit mask");
   }
 
-  auto make_const_mask = [&](TSNode node) -> std::optional<Lnast_node> {
-    // Only accept actual numeric source literals here. Identifier text like
-    // `i` must NOT be reinterpreted as a Pyrope constant — Dlop::from_pyrope
-    // happily parses single letters as character literals (`"i"` → 105),
-    // which would silently produce a bit-105 mask for `t#[i]`.
+  // A bound folds here only when its text is ONE integer literal (optionally
+  // signed). An identifier must not: Dlop::from_pyrope happily parses a single
+  // letter as a character literal (`"i"` -> 105), which would silently produce
+  // a bit-105 mask for `t#[i]`. Nor may an expression (`4 * 2`): it takes the
+  // expression path and its own diagnostics.
+  auto literal_value = [&](TSNode node) -> std::optional<Dlop> {
     auto text = get_text(node);
-    if (text.empty()) {
-      return std::nullopt;
+    auto body = text;
+    if (!body.empty() && (body.front() == '-' || body.front() == '+')) {
+      body.remove_prefix(1);
     }
-    char c0 = text.front();
-    if (!(c0 >= '0' && c0 <= '9') && c0 != '-' && c0 != '+') {
+    if (body.empty() || body.front() < '0' || body.front() > '9' || !std::all_of(body.begin(), body.end(), [](char c) {
+          return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '?';
+        })) {
       return std::nullopt;
     }
     auto v = Dlop::from_pyrope(text);
     if (v->is_invalid() || !v->is_integer()) {
+      return std::nullopt;
+    }
+    return *v;
+  };
+
+  auto make_const_mask = [&](TSNode node) -> std::optional<Lnast_node> {
+    auto v = literal_value(node);
+    if (!v) {
       return std::nullopt;
     }
     // A negative bit index is a compile error — never a value, never a `1<<-N`
@@ -9583,7 +12109,7 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
       report_error(node,
                    "negative-bit-index",
                    "type",
-                   std::format("negative bit index `{}` is not allowed", text),
+                   std::format("negative bit index `{}` is not allowed", get_text(node)),
                    "bit/array/cycle indices are non-negative; select to the end with an open range like `x#[lo..]`");
     }
     // `#[N]` selects bit position N → single-bit mask `1 << N`. Pure Dlop
@@ -9592,48 +12118,38 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
   };
 
   auto make_range_mask = [&](TSNode expr_item) -> std::optional<Lnast_node> {
-    if (ts_node_named_child_count(expr_item) != 3) {
+    const std::string_view kind = range_op_kind(expr_item);
+    if (kind.empty()) {
       return std::nullopt;
     }
-    TSNode lo = ts_node_named_child(expr_item, 0);
-    TSNode op = ts_node_named_child(expr_item, 1);
-    TSNode hi = ts_node_named_child(expr_item, 2);
-    // Inclusive ranges only — `..=`. The aliased child of the binary_other_op
-    // wrapper names the operator without text.
-    if (std::string_view(ts_node_type(op)) != "binary_other_op") {
-      return std::nullopt;
+    TSNode     lo   = ts_node_named_child(expr_item, 0);
+    TSNode     hi   = ts_node_named_child(expr_item, 2);
+    const auto one  = Dlop::create_integer(1);
+    const auto hi_v = literal_value(hi);
+    const auto lo_v = literal_value(lo);
+    // A literal count `n` fixes the WIDTH even when `lo` is a runtime
+    // expression (`x#[(j*4)..+4]`); the window itself then stays a `range`
+    // node (the caller's dynamic path).
+    if (kind == "op_range_count" && hi_v && !hi_v->is_negative() && hi_v->is_just_i64() && const_width != nullptr
+        && hi_v->to_just_i64() <= std::numeric_limits<int>::max()) {
+      *const_width = static_cast<int>(hi_v->to_just_i64());
     }
-    TSNode op_inner = ts_node_named_child(op, 0);
-    if (ts_node_is_null(op_inner) || std::string_view(ts_node_type(op_inner)) != "op_range_inclusive") {
-      return std::nullopt;
+    if (!lo_v || !hi_v) {
+      return std::nullopt;  // a runtime endpoint: the `range` node path
     }
-
-    // Only fold endpoints that are actual numeric literals. A bare identifier
-    // (`n`, `hi`) is a RUNTIME endpoint — Dlop::from_pyrope would otherwise
-    // mis-parse a single letter as a char literal (`"n"` -> 110) and bake a
-    // garbage constant mask. A non-literal endpoint returns nullopt so the
-    // caller routes `a#[n..=m]` through the dynamic `range` node path instead.
-    auto numeric_leading = [](std::string_view t) {
-      if (t.empty()) {
-        return false;
-      }
-      char c = t.front();
-      return (c >= '0' && c <= '9') || c == '-' || c == '+';
-    };
-    if (!numeric_leading(get_text(lo)) || !numeric_leading(get_text(hi))) {
-      return std::nullopt;
-    }
-
-    auto lo_v = Dlop::from_pyrope(get_text(lo));
-    auto hi_v = Dlop::from_pyrope(get_text(hi));
-    if (lo_v->is_invalid() || hi_v->is_invalid() || !lo_v->is_integer() || !hi_v->is_integer()) {
-      return std::nullopt;
+    // `lo..<hi` is `lo..=hi-1` and `lo..+n` is `lo..=lo+n-1`: one fold, with
+    // the same endpoint checks, for all three forms.
+    Dlop last = *hi_v;
+    if (kind == "op_range_exclusive") {
+      last = *hi_v->sub_op(*one);
+    } else if (kind == "op_range_count") {
+      last = *lo_v->add_op(*hi_v)->sub_op(*one);
     }
     // A negative endpoint or a descending range is a compile error — indices are
     // non-negative and ranges increasing (no distance-from-end `#[]`). Without
     // this `1<<(hi-lo+1)` / `1<<lo` would feed a negative amount into shln.
     // (2f-neg_bitrange)
-    if (lo_v->is_negative() || hi_v->is_negative()) {
+    if (lo_v->is_negative() || (kind == "op_range_inclusive" && hi_v->is_negative())) {
       report_error(expr_item,
                    "negative-bit-index",
                    "type",
@@ -9642,13 +12158,15 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
     }
     // `#[lo..=hi]` → contiguous mask `((1 << (hi-lo+1)) - 1) << lo`, all Dlop
     // arithmetic (no to_i; any width).
-    auto one   = Dlop::create_integer(1);
-    auto width = hi_v->sub_op(*lo_v)->add_op(*one);
-    if (width->is_negative()) {
+    auto width = last.sub_op(*lo_v)->add_op(*one);
+    if (width->is_negative() || width->is_known_zero()) {
+      const bool empty = kind != "op_range_inclusive" && width->is_known_zero();  // `4..<4`, `0..+0`
       report_error(expr_item,
                    "descending-bit-range",
                    "type",
-                   std::format("descending bit range `{}` is not allowed (ranges are increasing)", get_text(expr_item)),
+                   std::format("{} bit range `{}` is not allowed (ranges are increasing and select at least one bit)",
+                               empty ? "empty" : "descending",
+                               get_text(expr_item)),
                    "write the bounds low-to-high, e.g. `x#[lo..=hi]` with lo <= hi");
     }
     return Lnast_node::create_const(one->shl_op(*width)->sub_op(*one)->shl_op(*lo_v)->to_pyrope());
@@ -9670,21 +12188,7 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
   // index must instead become the single-bit mask `1 << index` (make_dynamic_mask).
   // Without this split, `b#[lo+1]` would pass `lo+1` straight to get_mask as a
   // literal bitmask — e.g. `#[5]` → mask 0b101 selects bits {0,2}, not bit 5.
-  auto expr_item_is_range = [](TSNode expr_item) -> bool {
-    if (ts_node_named_child_count(expr_item) != 3) {
-      return false;
-    }
-    TSNode op = ts_node_named_child(expr_item, 1);
-    if (std::string_view(ts_node_type(op)) != "binary_other_op") {
-      return false;
-    }
-    TSNode op_inner = ts_node_named_child(op, 0);
-    if (ts_node_is_null(op_inner)) {
-      return false;
-    }
-    auto k = std::string_view(ts_node_type(op_inner));
-    return k == "op_range_inclusive" || k == "op_range_exclusive" || k == "op_range_count";
-  };
+  auto expr_item_is_range = [](TSNode expr_item) -> bool { return !range_op_kind(expr_item).empty(); };
 
   TSNode index_n = child_by_field(sel_node, "index");
   TSNode range   = child_by_field(sel_node, "range");
@@ -9738,20 +12242,138 @@ Lnast_node Prp2lnast::compute_bit_mask_ref(TSNode sel_node) {
     auto et = std::string_view(ts_node_type(index_n));
     if (et == "expression_item") {
       if (auto const_mask = make_range_mask(index_n)) {
-        return *const_mask;  // inclusive `lo..=hi` with const endpoints → folded mask
+        if (const_width != nullptr) {
+          const auto& mv = Dlop::from_pyrope_cached(const_mask->get_name());
+          *const_width   = mv.is_integer() && !mv.is_negative() ? static_cast<int>(mv.popcount()) : 0;
+        }
+        return *const_mask;  // literal `lo..=hi` / `lo..<hi` / `lo..+n` → folded mask
       }
       if (expr_item_is_range(index_n)) {
-        return expr_to_node(index_n);  // dynamic/exclusive range → `range` node (range_map)
+        return expr_to_node(index_n);  // runtime-bound range → `range` node (range_map)
+      }
+      if (const_width != nullptr) {
+        *const_width = 1;
       }
       return make_dynamic_mask(index_n);  // plain single-bit index expr → `1 << index`
     }
     if (auto const_mask = make_const_mask(index_n)) {
+      if (const_width != nullptr) {
+        *const_width = 1;
+      }
       return *const_mask;
+    }
+    if (const_width != nullptr) {
+      *const_width = 1;  // a runtime single-bit index is still one bit
     }
     return make_dynamic_mask(index_n);
   }
 
   return Lnast_node::create_const("-1");
+}
+
+std::optional<Lnast_node> Prp2lnast::bit_range_lane_width(TSNode sel_node) {
+  // A width that reads a runtime binding (a port, a `mut`, a runtime `const`
+  // whose value this front end does not know) is not a compile-time width.
+  // Every other name -- a comptime const, a generic, a loop index -- is left to
+  // the runner, which folds it once the name has a value. So is an attribute
+  // read: it is comptime whatever its base (`x.[bits]` of a port).
+  auto reads_runtime = [&](TSNode e) {
+    std::vector<TSNode> todo{e};
+    while (!todo.empty()) {
+      TSNode c = todo.back();
+      todo.pop_back();
+      if (ts_node_is_null(c)) {
+        continue;
+      }
+      const std::string_view ct(ts_node_type(c));
+      if (ct == "attribute_read") {
+        continue;
+      }
+      if (ct == "identifier") {
+        const auto hit = lookup_capture(canonical_escaped_ident(trim(get_text(c))));
+        if (hit && hit->kind == Bind_kind::runtime && !hit->binding->int_value) {
+          return true;
+        }
+        continue;
+      }
+      for (TSNode k : ts_node_named_children(c)) {
+        todo.push_back(k);
+      }
+    }
+    return false;
+  };
+  auto bound = [&](TSNode e) -> std::optional<Lnast_node> {
+    if (ts_node_is_null(e)) {
+      return std::nullopt;
+    }
+    if (const auto v = resolve_type_int_value(e)) {
+      return Lnast_node::create_const(std::string(v->to_pyrope()));
+    }
+    if (reads_runtime(e)) {
+      return std::nullopt;
+    }
+    return expr_to_node(e);
+  };
+
+  // (first, last) such that width = last - first + `inclusive`: the index
+  // forms `lo..=hi` / `lo..<hi` / `lo..+n` and the from-zero `..=e` / `..<e`.
+  TSNode index_n   = child_by_field(sel_node, "index");
+  TSNode range     = child_by_field(sel_node, "range");
+  TSNode lo_n      = {};
+  TSNode hi_n      = {};
+  bool   count     = false;
+  bool   inclusive = false;
+  if (!ts_node_is_null(index_n) && std::string_view(ts_node_type(index_n)) == "expression_item") {
+    const std::string_view kind = range_op_kind(index_n);
+    if (kind.empty()) {
+      return std::nullopt;
+    }
+    lo_n      = ts_node_named_child(index_n, 0);
+    hi_n      = ts_node_named_child(index_n, 2);
+    count     = kind == "op_range_count";
+    inclusive = kind == "op_range_inclusive";
+  } else if (!ts_node_is_null(range)) {
+    TSNode fz_incl = ts_node_child_by_field_name(range, "from_zero_inclusive", 19);
+    TSNode fz_excl = ts_node_child_by_field_name(range, "from_zero_exclusive", 19);
+    hi_n           = ts_node_is_null(fz_incl) ? fz_excl : fz_incl;
+    inclusive      = !ts_node_is_null(fz_incl);
+    if (ts_node_is_null(hi_n)) {
+      return std::nullopt;  // `lo..` / `..`: the width depends on the base
+    }
+  } else {
+    return std::nullopt;
+  }
+
+  const auto last = bound(hi_n);
+  if (!last) {
+    return std::nullopt;
+  }
+  std::optional<Lnast_node> first;
+  if (!count && !ts_node_is_null(lo_n)) {
+    first = bound(lo_n);
+    if (!first) {
+      return std::nullopt;
+    }
+  }
+  const Lnast_node one = Lnast_node::create_const("1");
+  if (last->is_const() && (!first || first->is_const())) {
+    auto w = Dlop::from_pyrope(last->get_name());
+    if (first) {
+      w = w->sub_op(*Dlop::from_pyrope(first->get_name()));
+    }
+    if (inclusive) {
+      w = w->add_op(*Dlop::create_integer(1));
+    }
+    return Lnast_node::create_const(std::string(w->to_pyrope()));
+  }
+  Lnast_node w = *last;
+  if (first) {
+    w = emit_bound_binop(Lnast_ntype::create_minus(), w, *first);
+  }
+  if (inclusive) {
+    w = emit_bound_binop(Lnast_ntype::create_plus(), w, one);
+  }
+  return w;
 }
 
 Lnast_node Prp2lnast::bit_selection_to_node(TSNode n) {
@@ -10168,6 +12790,11 @@ Lnast_node Prp2lnast::dot_expression_to_node(TSNode n) {
 }
 
 Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
+  // `Unsigned(bits=4)` in value position is a TYPE literal, not a cast
+  // (`Unsigned(bits=4).[max]` heads a suffix chain like `U4.[max]`).
+  if (auto lit = int_type_literal(n)) {
+    return *lit;
+  }
   TSNode func = child_by_field(n, "function");
   TSNode arg  = child_by_field(n, "argument");  // tuple
 
@@ -10225,6 +12852,36 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
   bool       has_receiver = false;
   if (ts_node_is_null(func)) {
     func_ref = Lnast_node::create_const("nil");
+  } else if (std::string_view(ts_node_type(func)) == "dot_expression" && ts_node_named_child_count(func) == 2
+             && std::string_view(ts_node_type(ts_node_named_child(func, 0))) == "identifier"
+             && trim(get_text(ts_node_named_child(func, 0))) == prp_builtins::std_namespace) {
+    // `std.clog2(x)`: a function of the built-in `std` namespace, not a method
+    // call on a value named `std`. It needs no import and lowers to a plain call
+    // of the qualified name. A local binding named `std` would silently change
+    // what the call means, so it is an error here rather than a shadow.
+    const auto member = canonical_escaped_ident(trim(get_text(ts_node_named_child(func, 1))));
+    if (find_binding(prp_builtins::std_namespace) != nullptr) {
+      report_error(func,
+                   "std-shadowed",
+                   "name",
+                   std::format("`std.{}` names the built-in `std` namespace, but a local binding `std` hides it here", member),
+                   "rename the local `std`: `std` is the built-in namespace, visible in every file without an import");
+    }
+    if (!prp_builtins::is_std_member(member)) {
+      report_error(func,
+                   "std-unknown-member",
+                   "name",
+                   std::format("`std.{}` is not a function of the built-in `std` namespace", member),
+                   "the built-in `std` namespace provides `std.clog2(x)`, `std.readmemh(file)`, and `std.readmemb(file)`");
+    }
+    if ((member == "testplusarg" || member == "valueplusarg") && simulation_test_depth_ == 0) {
+      report_error(func,
+                   "simulation-only-argument",
+                   "type",
+                   "simulation arguments may only be read inside a test block",
+                   "pass stimulus through testbench DUT inputs; hardware debug argument reads are not supported yet");
+    }
+    func_ref = Lnast_node::create_ref(absl::StrCat(prp_builtins::std_namespace, ".", member));
   } else if (std::string_view(ts_node_type(func)) == "dot_expression" && ts_node_named_child_count(func) >= 2) {
     uint32_t fnc         = ts_node_named_child_count(func);
     TSNode   method_node = ts_node_named_child(func, fnc - 1);
@@ -10247,7 +12904,19 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
     }
     has_receiver = true;
   } else {
-    func_ref = Lnast_node::create_ref(canonical_escaped_ident(trim(get_text(func))));
+    auto callee = trim(get_text(func));
+    // A callee with a selector suffix (`` `past`[1] ``) carries its escaped head
+    // inside a longer text, so canonicalize that head: `` `x` `` names x.
+    if (callee.size() > 2 && callee.front() == '`' && callee.back() != '`') {
+      if (const auto close = callee.find('`', 1); close != std::string_view::npos) {
+        func_ref = Lnast_node::create_ref(
+            absl::StrCat(canonical_escaped_ident(callee.substr(0, close + 1)), callee.substr(close + 1)));
+      } else {
+        func_ref = Lnast_node::create_ref(callee);
+      }
+    } else {
+      func_ref = Lnast_node::create_ref(canonical_escaped_ident(callee));
+    }
   }
 
   // `import("unit")` is a comptime builtin with its own canonical
@@ -10330,6 +12999,59 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
 
   auto call_args    = collect_call_args(arg);
   auto generic_args = collect_generic_args(n);
+
+  // Ruling 56 (docs 07-typesystem "Clock and Reset"): the one derived Clock is
+  // a GATED one, a Clock construction with the named arguments `clock_pin`
+  // and `enable` (`Clock(clock_pin=clk, enable=en)`), lowered by upass.tolg
+  // to the LGraph Clock_cell (an ICG). A bare variable named like the
+  // parameter binds by name as in any call. A positional `Clock(x)` is not a
+  // cast and falls through to the undefined-read check (no-clock-reset-cast).
+  const bool clock_gate = !has_receiver && func_ref.is_ref() && func_ref.get_name() == "Clock"
+                          && std::ranges::any_of(call_args, [](const Call_arg& a) { return a.is_assign; });
+  if (clock_gate) {
+    bool has_clock  = false;
+    bool has_enable = false;
+    bool bad        = !generic_args.empty();
+    for (auto& a : call_args) {
+      if (!a.is_assign && !a.is_ref && !a.is_spread && !a.is_ufcs && a.value.is_ref()) {
+        a.is_assign  = true;  // `enable` for `enable=enable`
+        a.assign_key = std::string(a.value.get_name());
+      }
+      bool* seen = a.assign_key == "clock_pin" ? &has_clock : a.assign_key == "enable" ? &has_enable : nullptr;
+      if (!a.is_assign || a.is_ref || seen == nullptr || *seen) {
+        bad = true;
+      } else {
+        *seen = true;
+      }
+    }
+    if (bad || !has_clock || !has_enable) {
+      report_error(n,
+                   "clock-gate-args",
+                   "type",
+                   "`Clock(...)` gates a clock and takes exactly the named arguments `clock_pin` and `enable`",
+                   "write `Clock(clock_pin=clk, enable=en)`: `clk` a `Clock`, `en` a `Bool` enable");
+    }
+  }
+
+  if (!has_receiver && (func_ref.get_name() == "std.readmemh" || func_ref.get_name() == "std.readmemb")) {
+    if (call_args.size() != 1 || call_args[0].is_assign || call_args[0].is_spread || !generic_args.empty()) {
+      report_error(n,
+                   "readmem-filename",
+                   "type",
+                   "std.readmemh/readmemb requires one nonempty comptime string filename",
+                   "use reg mem:[DEPTH]uWIDTH = std.readmemh(\"image.hex\")");
+    }
+    const bool hex = func_ref.get_name() == "std.readmemh";
+    // Diagnostic source IDs intentionally discard absolute roots. Carry the
+    // runtime file-resolution base explicitly, including through cached LNAST.
+    Call_arg   source;
+    source.value = Lnast_node::create_const(
+        Dlop::create_string(
+            hlop::memory_image_command(hex ? 16 : 2, std::filesystem::absolute(src_filename).parent_path().string()))
+            ->to_pyrope());
+    call_args.push_back(std::move(source));
+    func_ref = Lnast_node::create_ref(hex ? "__readmemh" : "__readmemb");
+  }
   // Tuple key introspection shares the named-field list with .[fields].
   if (has_receiver && func_ref.get_name() == "keys") {
     if (!call_args.empty() || !generic_args.empty()) {
@@ -10366,6 +13088,11 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
   add_generic_args_to_fcall(idx, generic_args);
   add_call_args_to_fcall(idx, call_args);
   append_streamed_capture_actuals(idx, func_ref.get_name());
+  for (const auto& a : call_args) {
+    if (a.value.is_ref() && (a.is_ref || (a.is_ufcs && ufcs_writes_receiver(func_ref.get_name())))) {
+      note_call_write(a.value.get_name());
+    }
+  }
   attach_loc(idx, n);  // call-site span → upass argument-naming diagnostics point here
 
   // Validate the callee EXISTS (like a value/type read): a free call `foo(...)`
@@ -10375,7 +13102,7 @@ Lnast_node Prp2lnast::function_call_expr_to_node(TSNode n) {
   //   * methods / UFCS (`x.f()`) — has_receiver; resolved via the receiver type,
   //   * built-ins (assert/cputs/import/casts/…) — the central whitelist,
   //   * signature contexts (default-value calls) — generic params resolve late.
-  if (!has_receiver && func_ref.is_ref() && inflight_name_scopes_.empty()) {
+  if (!has_receiver && func_ref.is_ref() && inflight_name_scopes_.empty() && !clock_gate) {
     const auto callee = func_ref.get_name();
     if (!callee.empty() && !prp_name_is_tmp(callee) && callee.find('.') == std::string::npos
         && !prp_builtins::is_builtin_callee(callee)) {
@@ -10439,6 +13166,9 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/, bool field_typ
     // so the attributes pass records Decl_kind::mut_kind on the field path —
     // writes through a mut field of a const tuple are legal, not a rebind.
     bool        is_mut{false};
+    // `mut c:U24` / `c:U24` without a value: a NAMED field declaration (of a tuple
+    // type), even though it lowers as a positional slot.
+    bool        declares_field{false};
   };
   std::vector<Item> items;
   items.reserve(nnc);
@@ -10654,6 +13384,7 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/, bool field_typ
           } else {
             it.value = builder.mint_tmp_ref();
           }
+          it.declares_field = true;
         } else {
           it.value = expr_to_node(next);
         }
@@ -10666,6 +13397,7 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/, bool field_typ
       Item   it;
       TSNode id = child_by_field(c, "identifier");
       it.value  = ts_node_is_null(id) ? builder.mint_tmp_ref() : identifier_to_node(id, true);
+      it.declares_field = true;
       items.push_back(std::move(it));
     } else if (t == "lambda" && !ts_node_is_null(child_by_field(c, "name"))) {
       // In-tuple method definition (`comb call(ref self, a) -> (r) { … }`).
@@ -10716,6 +13448,40 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/, bool field_typ
         it.value = expr_to_node(c);
       }
       items.push_back(std::move(it));
+    }
+  }
+
+  // A tuple is ALL-NAMED or ALL-UNNAMED (03-bundle.md: `mut c = (1, const d=4)`
+  // is an error). Only a literal bound to an UNTYPED declaration is checked here:
+  // a typed destination (`mut x:T = (a="hello", 3)`) may drop names under the
+  // call naming rules, and a splice's named/unnamed mix is checked where the
+  // spliced tuples are known (constprop's tuple_concat).
+  {
+    bool any_named = false;
+    bool any_pos   = false;
+    for (const auto& it : items) {
+      if (it.is_spread) {
+        continue;
+      }
+      if ((it.is_assign && !Lnast::is_tmp(it.assign_key)) || it.declares_field) {
+        any_named = true;
+      } else {
+        any_pos = true;
+      }
+    }
+    if (any_named && any_pos) {
+      const TSNode parent = ts_node_parent(n);
+      if (!ts_node_is_null(parent) && std::string_view(ts_node_type(parent)) == "assignment"
+          && !ts_node_is_null(child_by_field(parent, "decl"))) {
+        const TSNode lv = child_by_field(parent, "lvalue");
+        if (!ts_node_is_null(lv) && std::string_view(ts_node_type(lv)) != "typed_identifier") {
+          report_error(n,
+                       "tuple-mixed-named",
+                       "type",
+                       "a tuple cannot mix named and unnamed entries: it must be all-named or all-unnamed",
+                       "name every entry (`(a=1, d=4)`) or none of them (`(1, 4)`)");
+        }
+      }
     }
   }
 
@@ -10773,11 +13539,13 @@ Lnast_node Prp2lnast::tuple_to_node(TSNode n, bool /*is_square*/, bool field_typ
         TSNode ty = child_by_field(it.type_cast_node, "type");
         if (!ts_node_is_null(ty)) {
           std::string_view tt(ts_node_type(ty));
-          if (tt == "uint_type" || tt == "sint_type" || tt == "bool_type" || tt == "string_type") {
+          if (tt == "uint_type" || tt == "sint_type" || tt == "bool_type" || tt == "string_type" || tt == "clock_type"
+              || tt == "reset_type") {
             auto ts_idx = builder.add_child(Lnast_ntype::create_type_spec());
             lnast->add_child(ts_idx, tg_ref);
             emit_type_expr(ts_idx, ty);
           } else if (tt == "expression_type" || tt == "dot_expression_type" || tt == "function_call_type") {
+            check_type_name_spelling(ty);
             auto raw = trim(get_text(ty));
             if (!raw.empty()) {
               auto as_idx = builder.add_child(Lnast_ntype::create_attr_set());

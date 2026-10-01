@@ -17,7 +17,7 @@ test matched_filter.sig {
     s = s * 6364136223846793005 + 1442695040888963407
     acc.c_in = s & 0xf
     s = s * 6364136223846793005 + 1442695040888963407
-    acc.load = s & 0x1
+    acc.load = Bool(s & 0x1)
     acc.reset = clock < 4
     step
     if clock >= 4 {

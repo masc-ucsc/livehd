@@ -8,30 +8,30 @@
 // `sat` clamps to the declared max/min (07-typesystem.md / 04b-attributes.md:
 // "saturate clamps to the declared max/min"). For power-of-two-width types
 // (uN/sN) the implementation clamps to the declared bounds exactly. (Custom
-// `signed(min,max)` ranges do NOT yet clamp under sat in the lowering — the
+// `Signed(min,max)` ranges do NOT yet clamp under sat in the lowering — the
 // 'int' type that once expressed those custom ranges is removed — so this test
 // exercises the power-of-two bounds where sat is correct.) Every cassert below
 // is the documented, correct clamped result.
-mut a:u4 = 0
+mut a:U4 = 0
 sat a = 50
-cassert(a == 15)           // clamp to declared max=15 (u4)
+cassert(a == 15)           // clamp to declared max=15 (U4)
 
-mut b:u4 = 0
+mut b:U4 = 0
 sat b = -3
-cassert(b == 0)            // clamp to declared min=0 (u4)
+cassert(b == 0)            // clamp to declared min=0 (U4)
 
-mut c:s4 = 0
+mut c:S4 = 0
 sat c = 100
-cassert(c == 7)            // clamp to declared max=7 (s4)
+cassert(c == 7)            // clamp to declared max=7 (S4)
 
-mut d:s4 = 0
+mut d:S4 = 0
 sat d = -99
-cassert(d == -8)           // clamp to declared min=-8 (s4)
+cassert(d == -8)           // clamp to declared min=-8 (S4)
 
-mut e:u8 = 0
+mut e:U8 = 0
 sat e = 300
-cassert(e == 255)          // clamp to declared max=255 (u8)
+cassert(e == 255)          // clamp to declared max=255 (U8)
 
-mut f:s8 = 0
+mut f:S8 = 0
 sat f = -200
-cassert(f == -128)         // clamp to declared min=-128 (s8)
+cassert(f == -128)         // clamp to declared min=-128 (S8)

@@ -1,0 +1,29 @@
+/*
+:name: shadow_runtime_const_ok
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+:verifier_include_funcs: true
+*/
+
+// User rulings 2026-09-28 (32) and (35): shadowing is about VISIBLE names. An
+// enclosing const whose value depends on an input does not fold, so it is not
+// visible inside a nested lambda, and the lambda may bind the same name (an
+// input or a local), exactly as it may for an enclosing `mut`. A const that
+// folds IS visible there, and reusing its name stays an error
+// (errors/nested_lambda_const_shadow.prp, errors/io_name_shadows_const.prp).
+// Before, a runtime const counted as visible and both lambdas below were
+// "variable shadowing" errors.
+pub mod shadow_runtime_const_ok(x:U8) -> (o:U8@[0]) {
+  const s = x + 1
+  comb f(s:U8) -> (r:U8) {
+    r = s
+  }
+  comb g(v:U8) -> (r:U8) {
+    const s = v
+    cassert(s.[bits] == 8)  // an alias of the U8 input
+    r = s
+  }
+  cassert(s.[bits] == nil)
+  wrap o = f(s=x) + g(v=x)
+}

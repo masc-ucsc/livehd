@@ -1,0 +1,17 @@
+/*
+:name: ln_callee_arg_overflow
+:type: error
+:files: inou/prp/tests/imports/ln_callee_arg_overflow.prp
+:ln_files: inou/prp/tests/imports/lib_ln_scale.prp
+:error: argument `a` \(range \[0, 255\]\) in call to `.*lib_ln_scale` may not fit its declared range \[0, 15\]
+:help: slice it at the call site
+*/
+// Ruling 1 through a PRE-ELABORATED `ln:` mod: a `U8` argument into its `a:U4`
+// input is a compile error, as for a source callee. Before, the call into the
+// ln: unit skipped the argument fit check and the Sub input silently dropped
+// the high bits.
+const S = import("lib_ln_scale.lib_ln_scale")
+
+pub mod ln_callee_arg_overflow(x:U8) -> (y:U6@[0]) {
+  y = S(a=x).o
+}

@@ -1,0 +1,20 @@
+/*
+:name: std_reserved_lambda
+:type: error
+:error: the lambda name `std` is reserved: `std` is the built-in namespace
+:help: rename it
+*/
+
+// `std` is the built-in namespace (user ruling 2026-09-27 (6): `std.clog2(x)`
+// needs no import). A user `mod std` next to it would split `std(a=x)` (the
+// user's mod) from `std.clog2(x)` (the built-in) with no diagnostic, so the
+// name is reserved at the declaration. A local binding named `std` is caught
+// where `std.<member>` is read (errors/std_clog2_*).
+
+mod std(a:U4) -> (y:U4@[0]) { y = a }   // locate_error_here
+
+pub mod top(a:U4) -> (y:U4@[0], w:U4@[0]) {
+  const c = std(a=a)
+  y = c.y
+  w = std.clog2(9)
+}

@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import sys
 
-from lec import run_lec, verdict
+from lec import final_verdict, run_lec, verdict
 
 NATIVE_CHECK_TIMEOUT = 20
 # Budget for comparing emitted Verilog with its source using default LEC.
@@ -118,12 +118,20 @@ def main():
         [lhd, "lec", "--impl", impl_arg, "--ref", "pyrope:" + ref_prp,
          "--impl-top", vtop, "--ref-top", ptop,
          "--workdir", os.path.join(work, "w_native_check")], timeout=NATIVE_CHECK_TIMEOUT)
-    native_failed = verdict(native) != "proven"
+    # A `:lec_expect: refuted` pair is a MUTATED golden: its round trip must
+    # still differ from the handwritten Pyrope. The Verilog leg below compares
+    # the golden with its OWN round trip, so it must prove either way.
+    expect = (_header(ref_prp, "lec_expect") or "proven").lower()
+    if expect == "refuted":
+        native_failed = native.returncode != 10 or " REFUTED " not in final_verdict(
+            native.stdout.decode("utf-8", "replace"))
+    else:
+        native_failed = verdict(native) != "proven"
     if native_failed:
-        print("{} - v2prp2v - FAILED: native Pyrope proof".format(name))
+        print("{} - v2prp2v - FAILED: native Pyrope check did not report {}".format(name, expect.upper()))
         print(native.stdout.decode("utf-8", "replace"))
     else:
-        print("{} - v2prp2v - native Pyrope proof passed".format(name))
+        print("{} - v2prp2v - native Pyrope check {}".format(name, "refuted as expected" if expect == "refuted" else "passed"))
     if args.native_only:
         return int(native_failed)
 

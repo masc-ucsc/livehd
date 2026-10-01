@@ -1,7 +1,7 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# Tuple-typed PORT call-site coverage. A tuple-typed port (`req:(a:u4,b:u8)`)
+# Tuple-typed PORT call-site coverage. A tuple-typed port (`req:(a:U4,b:U8)`)
 # flattens to dotted leaf ports (`req.a`, `req.b`) on the Sub instance; the
 # call site must materialize the tuple actual as dotted NAMED actuals for
 # every Sub-bound callee form, and the multi-output result must be readable
@@ -45,11 +45,11 @@ lec_proven() { # <name> <prp>
 
 # ── (a) mod callee + NAMED tuple actual ───────────────────────────────────────
 cat >"$W/mod_named.prp" <<'EOF'
-pub mod leafm(req:(a:u4, b:u8)) -> (rsp:(sum:u9, lo:u4)@[0]) {
+pub mod leafm(req:(a:U4, b:U8)) -> (rsp:(sum:U9, lo:U4)@[0]) {
   rsp.sum = req.a + req.b
   rsp.lo  = req.a
 }
-pub mod parent(x:u4, y:u8) -> (out:u9@[0], out2:u4@[0]) {
+pub mod parent(x:U4, y:U8) -> (out:U9@[0], out2:U4@[0]) {
   const mytup = (const a = x, const b = y)
   const r = leafm(req=mytup)
   out  = r["rsp.sum"]
@@ -63,11 +63,11 @@ echo "PASS: mod callee + named tuple actual (req=t) compiles and is cvc5-PROVEN"
 
 # ── (b) COMB callee (explicit inline:false → Sub): named AND positional ───────
 cat >"$W/comb_named.prp" <<'EOF'
-pub comb leaf(req:(a:u4, b:u8)) -> (rsp:(sum:u9, lo:u4)) {
+pub comb leaf(req:(a:U4, b:U8)) -> (rsp:(sum:U9, lo:U4)) {
   rsp.sum = req.a + req.b
   rsp.lo  = req.a
 }
-pub comb parent(x:u4, y:u8) -> (out:u9, out2:u4) {
+pub comb parent(x:U4, y:U8) -> (out:U9, out2:U4) {
   const mytup = (const a = x, const b = y)
   const r = leaf(req=mytup)
   out  = r["rsp.sum"]
@@ -78,11 +78,11 @@ EOF
   || fail "comb + NAMED tuple actual did not compile"
 lec_proven comb_named "$W/comb_named.prp"
 cat >"$W/comb_pos.prp" <<'EOF'
-pub comb leaf(req:(a:u4, b:u8)) -> (rsp:(sum:u9, lo:u4)) {
+pub comb leaf(req:(a:U4, b:U8)) -> (rsp:(sum:U9, lo:U4)) {
   rsp.sum = req.a + req.b
   rsp.lo  = req.a
 }
-pub comb parent(x:u4, y:u8) -> (out:u9, out2:u4) {
+pub comb parent(x:U4, y:U8) -> (out:U9, out2:U4) {
   const mytup = (const a = x, const b = y)
   const r = leaf(mytup)
   out  = r["rsp.sum"]
@@ -96,11 +96,11 @@ echo "PASS: comb callee kept as a Sub takes named and positional tuple actuals (
 
 # ── (c) dot-form multi-output read r.rsp.sum ─────────────────────────────────
 cat >"$W/dot_read.prp" <<'EOF'
-pub mod leafm(req:(a:u4, b:u8)) -> (rsp:(sum:u9, lo:u4)@[0]) {
+pub mod leafm(req:(a:U4, b:U8)) -> (rsp:(sum:U9, lo:U4)@[0]) {
   rsp.sum = req.a + req.b
   rsp.lo  = req.a
 }
-pub mod parent(x:u4, y:u8) -> (out:u9@[0], out2:u4@[0]) {
+pub mod parent(x:U4, y:U8) -> (out:U9@[0], out2:U4@[0]) {
   const mytup = (const a = x, const b = y)
   const r = leafm(mytup)
   out  = r.rsp.sum
@@ -113,13 +113,14 @@ lec_proven dot_read "$W/dot_read.prp"
 echo "PASS: dot-form multi-output instance read (r.rsp.sum) compiles and is cvc5-PROVEN"
 
 # A PARTIAL leaf name must stay an error (full-path match only): the output is
-# `rsp.sum`, so `r.sum` names no output.
+# `rsp.sum`, so `r.sum` names no output. Ruling 24 reports it at the read
+# (upass.constprop "unknown field `sum` on instance `r`"), before tolg would.
 cat >"$W/dot_bad.prp" <<'EOF'
-pub mod leafm(req:(a:u4, b:u8)) -> (rsp:(sum:u9, lo:u4)@[0]) {
+pub mod leafm(req:(a:U4, b:U8)) -> (rsp:(sum:U9, lo:U4)@[0]) {
   rsp.sum = req.a + req.b
   rsp.lo  = req.a
 }
-pub mod parent(x:u4, y:u8) -> (out:u9@[0], out2:u4@[0]) {
+pub mod parent(x:U4, y:U8) -> (out:U9@[0], out2:U4@[0]) {
   const mytup = (const a = x, const b = y)
   const r = leafm(mytup)
   out  = r.sum
@@ -129,7 +130,7 @@ EOF
 if "$LHD" compile "$W/dot_bad.prp" --top parent --workdir "$W/wcbad" -q >"$W/bad.json" 2>&1; then
   fail "partial output name r.sum unexpectedly compiled (must be a full-path no-output error)"
 fi
-grep -q "no output named" "$W/bad.json" || fail "r.sum failed for the wrong reason: $(cat "$W/bad.json")"
+grep -Eq 'unknown field `(sum|lo)` on instance `r`' "$W/bad.json" || fail "r.sum failed for the wrong reason: $(cat "$W/bad.json")"
 echo "PASS: partial output name (r.sum for rsp.sum) is still rejected"
 
 # ── (e) tuple-literal actual with LOCAL-computed field values ─────────────────
@@ -146,10 +147,10 @@ module p2(input [7:0] fi, output [7:0] oo);
 endmodule
 EOF
 cat >"$W/local_fields.prp" <<'EOF'
-pub comb c2(req:(hi:u4, lo:u4)) -> (o:u8) {
+pub comb c2(req:(hi:U4, lo:U4)) -> (o:U8) {
   o = (req.hi << 4) | req.lo
 }
-pub comb p2(fi:u8) -> (oo:u8) {
+pub comb p2(fi:U8) -> (oo:U8) {
   const u = c2(req=(hi=fi#[4..=7], lo=fi#[0..=3]))
   oo = u
 }
@@ -161,10 +162,10 @@ EOF
   || fail "local-fields lec run failed: $(cat "$W/lec_local.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/lec_local.json" || fail "local-fields lec not PROVEN: $(cat "$W/lec_local.json")"
 cat >"$W/local_fields2.prp" <<'EOF'
-pub comb c2(req:(hi:u4, lo:u4)) -> (o:u8) {
+pub comb c2(req:(hi:U4, lo:U4)) -> (o:U8) {
   o = (req.hi << 4) | req.lo
 }
-pub comb p2(fi:u8) -> (oo:u8) {
+pub comb p2(fi:U8) -> (oo:U8) {
   const vh = fi#[4..=7]
   const vl = fi#[0..=3]
   const u = c2(req=(hi=vh, lo=vl))
@@ -204,11 +205,11 @@ echo "PASS: emitted hierarchy reads back through native slang"
 # `<odir>/../lib/core.core.v`, failed, and the compile process segfaulted.
 mkdir -p "$W/relative/lib" "$W/relative/app"
 cat >"$W/relative/lib/core.prp" <<'EOF'
-pub comb core(a:u8) -> (y:u8) { y = a + 1 }
+pub comb core(a:U8) -> (y:U8) { wrap y = a + 1 }
 EOF
 cat >"$W/relative/app/top.prp" <<'EOF'
 const core_t = import("../lib/core.core")
-pub comb relative_top(a:u8) -> (y:u8) {
+pub comb relative_top(a:U8) -> (y:U8) {
   const r = core_t(a=a)
   y = r.y
 }

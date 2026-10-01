@@ -23,7 +23,9 @@ TEST(Bus_name, ParseRoundTrip) {
     EXPECT_EQ(p->index, i);
     EXPECT_TRUE(p->suffix.empty());
   }
-  auto p = bn::parse_bus_piece(bn::entry_bit("m", 3, 4));
+  // A Piece views its input: keep the minted name alive while it is used.
+  const auto entry = bn::entry_bit("m", 3, 4);
+  auto       p     = bn::parse_bus_piece(entry);
   ASSERT_TRUE(p.has_value());
   EXPECT_EQ(p->base, "m[3]");
   EXPECT_EQ(p->index, 4);
@@ -58,6 +60,23 @@ TEST(Bus_name, CellStateOwner) {
   EXPECT_FALSE(bn::cell_state_owner("q").has_value());
   EXPECT_FALSE(bn::cell_state_owner("q.").has_value());
   EXPECT_FALSE(bn::cell_state_owner("x.y[3]").has_value());  // a bus piece is parse_bus_piece's
+}
+
+TEST(Bus_name, MemoryStorage) {
+  // cgen's wrapper storage and its inline packed register name the source memory.
+  auto w = bn::parse_memory_storage("lane.__lhdmem_h6d656d_e.data");
+  ASSERT_TRUE(w.has_value());
+  EXPECT_EQ(w->prefix, "lane.");
+  EXPECT_EQ(w->source, "mem");
+  auto dotted = bn::parse_memory_storage("__lhdmem_h612e62_e_3_data");  // `a.b`, uniquified instance
+  ASSERT_TRUE(dotted.has_value());
+  EXPECT_EQ(dotted->prefix, "");
+  EXPECT_EQ(dotted->source, "a.b");
+  EXPECT_EQ(bn::parse_memory_storage("x___lhdmem_h71_e_data", '_').value_or(bn::Memory_storage{}).source, "q");
+  for (const char* s : {"mem", "__lhdmem_h6d656d_e", "__lhdmem_h6d656d_e.rd_dout_0", "__lhdmem_h6d6_e.data",
+                        "__lhdmem_hzz_e.data", "__lhdmem_h_e.data", "__lhdmem_h6d_e_x_data", "__lhdmem_h6d_e.data[0]"}) {
+    EXPECT_FALSE(bn::parse_memory_storage(s).has_value()) << s;
+  }
 }
 
 TEST(Bus_name, RejectsNonStandard) {

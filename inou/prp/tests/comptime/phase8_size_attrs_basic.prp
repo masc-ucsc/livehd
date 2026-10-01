@@ -10,34 +10,34 @@
 // (negative ⇒ signed). These attributes are populated only when a
 // concrete type pins them; otherwise they read nil.
 
-const a:signed  = 3
-cassert(a.[bits] == nil)        // `signed` is unbounded
+const a:Signed  = 3
+cassert(a.[bits] == nil)        // `Signed` is unbounded
 cassert(a.[max]  == nil)
 cassert(a.[min]  == nil)
 
-const b:u4   = 3
+const b:U4   = 3
 cassert(b.[bits] == 4)
 cassert(b.[min]  == 0)
 cassert(b.[max]  == 15)
 
-const c:bool = true
+const c:Bool = true
 cassert(c.[bits] == 1)
-cassert(c.[min]  == 0)          // bool is the hardware u1 envelope {0,1}
+cassert(c.[min]  == 0)          // bool is the hardware U1 envelope {0,1}
 cassert(c.[max]  == 1)
 
-mut   d:s5   = 3
+mut   d:S5   = 3
 cassert(d.[bits] == 5)
 cassert(d.[min]  == -16)
 cassert(d.[max]  == 15)
 
-comptime const e:s5 = 3
+comptime const e:S5 = 3
 cassert(e.[bits] == 5)
 cassert(e.[min]  == -16)
 cassert(e.[max]  == 15)
-cassert(e.[comptime])
+cassert(e.[`comptime`])
 
-comptime mut f:string = "foo"
+comptime mut f:String = "foo"
 cassert(f.[bits] == nil)        // string has no numeric envelope
 cassert(f.[max]  == nil)
 cassert(f.[min]  == nil)
-cassert(f.[comptime])
+cassert(f.[`comptime`])

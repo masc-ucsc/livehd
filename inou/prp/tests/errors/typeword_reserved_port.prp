@@ -1,0 +1,9 @@
+/*
+:name: typeword_reserved_port
+:type: error
+:error: reserved type word
+*/
+// ... nor a port.
+pub comb typeword_reserved_port(Clock:U8) -> (o:U8) {  // locate_error_here
+  o = Clock
+}

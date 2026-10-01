@@ -1,0 +1,9 @@
+/*
+:name: spec_types_u_generic_width_not_type
+:type: error
+:error: .
+*/
+// SPEC docs 07-typesystem "Bitwidth": "`U<N>`/`S<N>` take a literal width only ... (`U<W>` with a generic `W` is
+// not a type)"; the width-parameterized spelling is `Unsigned(bits=W)`.
+comb f<W>(a:U<W>) -> (o) { o = a }  // locate_error_here
+const y = f<W=4>(a=3)

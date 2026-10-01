@@ -99,8 +99,15 @@ def main():
         mem_gold.write_text(MEM_RESET_GOLD)
         mem_bad = Path(tmp) / "mem_reset_power_on_only.v"
         mem_bad.write_text(MEM_RESET_POWER_ON_ONLY)
+        # Own budget: the counterexample needs the reset window clocked, then a
+        # write, then a second reset (10 BMC steps), and lgcheck reserves only a
+        # quarter of the shared budget for that search, after the cheaper
+        # strategies have each had their turn. At the 3 s default this pair came
+        # back INCONCLUSIVE (tolerated => 0), which is a false green for the
+        # one check this test exists to keep honest.
+        mem_test = make_test(tmp, ":yosys_lec_timeout: 15\n")
         rc |= check("power-on-only memory reset (oracle MUST refute a reset re-asserted after a write)",
-                    runner.run_yosys_lec(test, str(mem_bad), "memory_reset", str(mem_gold), "memory_reset",
+                    runner.run_yosys_lec(mem_test, str(mem_bad), "memory_reset", str(mem_gold), "memory_reset",
                                          os.path.join(tmp, "mem_reset")),
                     1)
         # ...and the documented opt-out must still opt out.

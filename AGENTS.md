@@ -50,9 +50,9 @@ LiveHD depends on several sibling repos. **Always look in these exact paths — 
 - `inou/cgen/`: Verilog code generation from LGraph
 - `pass/cprop/`: Constant propagation pass
 - `pass/synth/`: the shared, ABC-free synthesis pipeline (private copy, ware/memory modules, region driver, `Lnet` translation, region cache, read-back); see `pass/synth/README.md`
-- `pass/satopt/`: `pass.satopt`, bounded proof-backed simplification with selectable stages, run only by the compile step (`--set pass.satopt=true`; on by default for `lhd synth`/`lhd lec` compiling a source) and `lhd pass satopt`; see `pass/satopt/README.md`
+- `pass/satopt/`: `pass.satopt`, bounded proof-backed simplification with selectable stages, run only by the compile step (`--set pass.satopt=true`; off by default for every command, including `lhd synth`/`lhd lec`) and `lhd pass satopt`; see `pass/satopt/README.md`
 - `pass/abc/`: the ABC backend and `pass.abc` — the only synthesis code that includes or calls ABC
-- `pass/usyn/`: unate synthesis (`pass.usyn`, `synth.mapper=usyn`): a domino LUT cover as a region hook, mapped by the ABC backend
+- `pass/usyn/`: native register-rooted XAG synthesis (`pass.usyn`, `synth.mapper=usyn`), including logical region reuse; independent of ABC except optional technology mapping through the ABC provider
 - `ware/rtl/`: Memory RTL modules (`cgen_memory_*.v`, `cgen_memory_multiclock_*.v`)
 
 ## Tree library
@@ -85,7 +85,8 @@ comb module boundaries is part of the flow.
 lg:` / `verilog:` for the mapped netlist, `report:` for the sidecars); the
 individual `lhd pass color|abc|opentimer` steps remain for any other
 coloring or for inspecting intermediates. Every persistent reuse tier (the
-compile cache, `abc_cache/`, `sta_cache/`, the formal verdict cache) lives under a
+compile cache, `abc_cache/`, `usyn_cache/` including its optional `tmap/` stage,
+`sta_cache/`, the formal verdict cache) lives under a
 user-named `--workdir` and follows the ONE switch `--set
 lhd.incremental=true|false` (default true) — there is no per-tier cache flag.
 Internally lhd drives the registered EPRP methods (conceptually the pipe
@@ -99,9 +100,12 @@ design**: the synthesis salts are layered -- `//pass/synth:synth_salt` hashes
 `pass/synth` + the passes a mapped region depends on (graph, memory RTL,
 cprop, enableopt, bitwidth, color, the DFF pick, formal, `pass/partition`),
 `//pass/abc:abc_salt` hashes `pass/abc` + `synth_salt` + `MODULE.bazel` + the
-ABC patch, and `//pass/usyn:usyn_salt` hashes `pass/usyn` + `abc_salt` --
+ABC patch, and `//pass/usyn:usyn_salt` hashes `pass/usyn` + `synth_salt` (no ABC dependency) --
 `//pass/opentimer:sta_salt` hashes `pass/opentimer` + `pass/partition` +
-`MODULE.bazel`, `//lhd:formal_salt` and `//lhd:compile_salt` likewise. Even a `clang-format -i` counts. Always run the warm command **twice**
+`MODULE.bazel`, `//lhd:formal_salt` hashes the prover (`pass/lec`, `pass/semdiff`,
+the cvc5 pin) + the proof preparation whose output the verdict cache digests
+(`pass/single_edge`, graph, cprop, `lhd/lhd_kernel_formal.cpp`), and
+`//lhd:compile_salt` likewise. Even a `clang-format -i` counts. Always run the warm command **twice**
 after a rebuild and read the second number, and never rebuild in the middle of a
 measurement sweep — a cold pass stored under salt A and a warm pass loaded under
 salt B looks exactly like "the cache forgot everything".

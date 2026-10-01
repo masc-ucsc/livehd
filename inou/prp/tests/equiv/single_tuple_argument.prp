@@ -1,0 +1,10 @@
+/*
+:name: single_tuple_argument
+:type: lec
+:lec_top: top
+*/
+pub comb top(a:U8,b:U8,c:U8) -> (x:U10,y:U10,z:U10) {
+  x = a + b + c
+  y = a + b + c
+  z = a + b + c
+}

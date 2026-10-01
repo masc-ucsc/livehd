@@ -1,0 +1,13 @@
+/*
+:name: backtick_unicode_ident
+:type: compile
+*/
+
+// `é` and é are the same name: a non-ASCII letter is an identifier character,
+// so the backticks carry no escape.
+pub comb backtick_unicode_ident(a:U8, b:U8) -> (o:U8, p:U8) {
+  const `é` = a
+  const ü = b
+  o = é
+  p = `ü`
+}

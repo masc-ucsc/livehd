@@ -5,24 +5,29 @@
 # two sides declare the same port differently, LEC ENLARGES the smaller view to
 # match the larger -- it never refuses and never truncates.
 #
-#   u8 vs u4 -> the u4 is zero-padded to u8
-#   u3 vs s5 -> the u3 is zero-padded to s5
-#   s4 vs s8 -> the s4 is sign-extended to s8
-#   s3 vs u8 -> BOTH go to s9 (the s3 sign-extends, the u8 zero-pads)
+# The narrower declaration is the bus that drives both sides, and it reaches the
+# wider port the way a Verilog port connection does: extended by ITS OWN sign.
 #
-# Two widths fall out. The CARRIER is that common type, so no side is
-# truncated. The FREE SYMBOL is narrower: one symbol drives the port on both
-# sides, so it may only range over the INTERSECTION of the two domains
-# (u8 n u4 = [0,15]; s3 n u8 = [0,3]). Before the fix the symbol was free at the
-# carrier width, so the solver picked values the narrower port cannot hold and
-# the two designs read the same bits differently -- `input signed [1:0] a` vs
-# `input a` refuted at `a=2` (0b10), a value a 1-bit port cannot produce.
+#   u8 vs u4 -> a free u4, zero-extended   (the u8 side sees [0,15])
+#   u3 vs s5 -> a free u3, zero-extended   (the s5 side sees [0,7])
+#   s4 vs s8 -> a free s4, sign-extended   (the s8 side sees [-8,7])
+#   s3 vs u8 -> a free s3, sign-extended   (the u8 side sees 0..3, 252..255)
+#
+# Two widths fall out. The CARRIER is the widest declaration, so no side is
+# truncated. The FREE SYMBOL is the narrowest one. Before the enlargement the
+# symbol was free at the carrier width, so the solver picked values the narrower
+# port cannot hold and the two designs read the same bits differently -- `input
+# signed [1:0] a` vs `input a` refuted at `a=2` (0b10), a value a 1-bit port
+# cannot produce. Restricting the symbol to the VALUES both domains share went
+# too far the other way: s3 vs u8 lost the s3 port's negative half and
+# false-PROVED a sign- vs zero-extension difference (case 2b).
 #
 # Where the domains genuinely differ this is an ASSUMPTION, not a proof: a port
 # the impl narrowed by mistake is spelled exactly like one the front ends merely
 # declare differently. Every case below therefore also asserts that the verdict
 # DISCLOSES which ports it fired on, and case (5) pins that a real functional
-# difference still refutes.
+# difference still refutes. Equal widths are NOT reconciled (case 6): the port
+# is one bus that each side reads with its own sign.
 
 set -u
 
@@ -81,28 +86,30 @@ verdict | grep -q 'width/sign reconciled on top port(s) a' \
 echo "PASS: combinational sign-slot data port reconciles and discloses"
 
 # ── (2) the four shapes of the ruling ────────────────────────────────────────
-# Enlarge the smaller view to match the larger; the SHARED input symbol ranges
-# over the intersection so neither port is ever driven out of its own domain.
-#   u8 vs u4 -> u4 zero-padded to u8        u3 vs s5 -> u3 zero-padded to s5
-#   s4 vs s8 -> s4 sign-extended to s8      s3 vs u8 -> BOTH to s9
+# Enlarge the smaller view to match the larger; the shared input symbol is the
+# narrower declaration, extended by its own sign, so neither port is ever
+# driven out of its own domain.
 decl_case() {
   cat >"$WORK/$1.v" <<EOF
 module m(input $2 a, output signed [15:0] y);
-  assign y = a;
+  assign y = $3;
 endmodule
 EOF
 }
-decl_case u8 "[7:0]"
-decl_case u4 "[3:0]"
-decl_case u3 "[2:0]"
-decl_case s5 "signed [4:0]"
-decl_case s4 "signed [3:0]"
-decl_case s8 "signed [7:0]"
-decl_case s3 "signed [2:0]"
+decl_case u8 "[7:0]" a
+decl_case u4 "[3:0]" a
+decl_case u3 "[2:0]" a
+decl_case s5 "signed [4:0]" a
+decl_case s4 "signed [3:0]" a
+decl_case s8 "signed [7:0]" a
+decl_case s3 "signed [2:0]" a
+decl_case u8s "[7:0]" '$signed(a)'
 # semdiff=none on purpose: its structural prefilter is IO-declaration-blind, so
 # it would short-circuit these to PROVEN without ever reaching the encoder --
 # the very code under test. (That blindness is a separate, pre-existing hole.)
-for pair in "u8 u4" "u3 s5" "s4 s8" "s3 u8"; do
+# s3 vs u8s: the u8 side reads its bus as signed, which is what the s3 side's
+# sign extension puts there, so the two agree on every value the s3 bus drives.
+for pair in "u8 u4" "u3 s5" "s4 s8" "s3 u8s"; do
   set -- $pair
   run_lec "shape_$1_$2" --ref "$WORK/$1.v" --impl "$WORK/$2.v" --set formal.lec.semdiff=none
   verdict | grep -Eq 'PROVEN|PASS\(' \
@@ -111,6 +118,20 @@ for pair in "u8 u4" "u3 s5" "s4 s8" "s3 u8"; do
     || fail "$1 vs $2 reconciled without disclosing it: $(verdict)"
 done
 echo "PASS: u8/u4, u3/s5, s4/s8 and s3/u8 all reconcile by enlargement and disclose"
+
+# ── (2b) a signed narrow port keeps its negative half ────────────────────────
+# s3 vs u8 with `y = a`: the s3 side sign-extends a = -4 to 0xfffc, the u8 side
+# zero-extends the same bus (0xfc) to 0x00fc. The old value-intersection
+# symbol ranged over [0,3] only and false-PROVED this pair.
+for eng in auto bmc; do
+  engine_args=()
+  [ "$eng" = "auto" ] || engine_args=(--set "formal.engine=$eng")
+  run_lec "shape_s3_u8_$eng" --ref "$WORK/s3.v" --impl "$WORK/u8.v" --set formal.lec.semdiff=none \
+    ${engine_args[@]+"${engine_args[@]}"}
+  verdict | grep -q 'REFUTED' \
+    || fail "engine=$eng: s3 vs u8 hid a sign- vs zero-extension difference: $(verdict)"
+done
+echo "PASS: a signed narrow port facing a wider unsigned one refutes a sign-extension difference"
 
 # ── (3) sequential, every engine ─────────────────────────────────────────────
 cat >"$WORK/seq_ref.v" <<'EOF'
@@ -201,5 +222,52 @@ run_lec neg --ref "$WORK/seq_ref.v" --impl "$WORK/neg_impl.v" --set formal.engin
 verdict | grep -q 'REFUTED' \
   || fail "a real functional difference was swallowed by the sign-slot carrier: $(verdict)"
 echo "PASS: a real difference on a sign-slot port pair still refutes"
+
+# ── (6) EQUAL widths are one bus, never reconciled ───────────────────────────
+# `input signed [3:0] b` and `input [3:0] b` are the same four wires; each side
+# extends them by its OWN sign. Restricting the shared symbol to the values both
+# signs agree on ([0,7]) false-PROVED a sign- vs zero-extension difference.
+cat >"$WORK/bus_ref.v" <<'EOF'
+module b(input [3:0] b, output [7:0] y);
+  assign y = {4'd0, b};
+endmodule
+EOF
+cat >"$WORK/bus_impl.v" <<'EOF'
+module b(input signed [3:0] b, output signed [7:0] y);
+  assign y = b;
+endmodule
+EOF
+run_lec bus --ref "$WORK/bus_ref.v" --impl "$WORK/bus_impl.v"
+verdict | grep -q 'REFUTED' \
+  || fail "an equal-width signed/unsigned port hid a sign-extension difference: $(verdict)"
+sed 's/assign y = b;/assign y = $unsigned(b);/' "$WORK/bus_impl.v" >"$WORK/bus_zext.v"
+run_lec bus_zext --ref "$WORK/bus_ref.v" --impl "$WORK/bus_zext.v"
+verdict | grep -q 'PROVEN' || fail "an equal-width zero-extension did not prove: $(verdict)"
+if verdict | grep -q 'reconciled'; then
+  fail "an equal-width port pair was reconciled: $(verdict)"
+fi
+echo "PASS: an equal-width signed/unsigned port pair is one bus (refutes a sign difference)"
+
+# ── (7) a collapsed child's output is read with each side's OWN sign ─────────
+# The two children are equal bit for bit, so the child proves and is collapsed
+# into a box whose output bits both parents share. The parents differ only in
+# how they extend those bits (signed vs unsigned child port); the box's union
+# sign made both extend alike and false-PROVED the parents.
+cat >"$WORK/box_ref.v" <<'EOF'
+module c(input [3:0] a, input [3:0] b, output signed [3:0] o);
+  assign o = a ^ b;
+endmodule
+module top(input [3:0] a, input [3:0] b, output [7:0] y);
+  wire signed [3:0] t;
+  c u(.a(a), .b(b), .o(t));
+  assign y = t;
+endmodule
+EOF
+sed -e 's/output signed \[3:0\] o/output [3:0] o/' -e 's/wire signed/wire/' "$WORK/box_ref.v" >"$WORK/box_impl.v"
+run_lec box --ref "$WORK/box_ref.v" --impl "$WORK/box_impl.v" --top top
+verdict | grep -q 'REFUTED' \
+  || fail "a collapsed child's output sign was not honored per side: $(verdict)"
+grep -q "'c' PROVEN" "$OUT" || fail "the bit-equal child did not prove (so no box was exercised): $(cat "$OUT")"
+echo "PASS: a collapsed child's output keeps each side's own sign"
 
 echo "lec_sign_slot_test: OK"

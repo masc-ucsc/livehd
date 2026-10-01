@@ -1,0 +1,11 @@
+/*
+:name: spec_syntax_lvalue_call_in_destructure
+:type: error
+:error: this cannot be assigned
+*/
+// qa.md Appendix §4: "Assignment targets: ... Errors: ..., `(a, f(x)) = g()`, ..." (Q20).
+comb f(x) -> (r) { r = x }
+comb g() -> (p, q) { p = 1; q = 2 }
+mut a = 0
+mut x = 0
+(a, f(x)) = g()   // locate_error_here

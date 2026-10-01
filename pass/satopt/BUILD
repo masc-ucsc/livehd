@@ -147,3 +147,29 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "satopt_muxtree_test",
+    srcs = ["satopt_muxtree_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":satopt",
+        "//graph",
+        "//pass/cprop:pass_cprop",
+        "//pass/formal:formal",
+        "//pass/lec:lec_query",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "satopt_share_test",
+    srcs = ["satopt_share_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":satopt",
+        "//graph",
+        "//pass/lec:lec_query",
+        "@googletest//:gtest_main",
+    ],
+)

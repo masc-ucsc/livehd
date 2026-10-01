@@ -1,0 +1,8 @@
+/*
+:name: vararg_typed_positional
+:type: error
+:error: must be named
+*/
+// A capture's element type does not turn it into an ordinary scalar parameter.
+comb capture(...rest:U8) -> (r) { r = 100 }
+const r = capture(1) // locate_error_here

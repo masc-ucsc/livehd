@@ -5,12 +5,12 @@
 :verifier_fail: 0
 */
 
-mut x:u8 = 255
+mut x:U8 = 255
 cassert(x==255)
 wrap x = 0xCAFE
 cassert(x == 0xFE)
 
-mut y:s4 = -1
+mut y:S4 = -1
 cassert(y==-1)
 wrap y = 0xCAFE  // 0sb0..._1111_1110
 cassert(y == 0sb1110 == -2)

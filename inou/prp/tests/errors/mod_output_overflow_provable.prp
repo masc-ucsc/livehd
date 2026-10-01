@@ -1,0 +1,19 @@
+/*
+:name: mod_output_overflow_provable
+:type: error
+:tolg: 1
+:error: `o` \((value 16|range \[16, 31\])\) does not fit its declared range \[0, 15\]
+:help: (apply a wrap/saturate policy|`wrap`/`sat`)
+*/
+// The `mod` twin of comb_output_overflow_provable: `o:U4@[0]` holds [0, 15]
+// and `a + 16` with a:U4 spans [16, 31], so every value overflows. A fix that
+// checks only inlined comb outputs must not satisfy this fixture.
+//
+// Today it compiles silently and wraps: `module incm` emits `o = a + 0`.
+mod incm(a:U4) -> (o:U4@[0]) {
+  o = a + 16   // locate_error_here
+}
+
+pub mod mod_output_overflow_provable(x:U4) -> (y:U8@[0]) {
+  y = incm(a=x)
+}

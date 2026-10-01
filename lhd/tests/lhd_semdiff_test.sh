@@ -38,13 +38,13 @@ matched_count() {  # nodes with a nonzero match id (the matched set)
 # 1. Identical / commutative: a+b+c vs b+a+c must match fully.
 # ---------------------------------------------------------------------------
 cat > "$W/g1.prp" <<'EOF'
-mod m(a:u8, b:u8, c:u8) -> (y:u9@[0]) {
-  y = a + b + c
+mod m(a:U8, b:U8, c:U8) -> (y:U9@[0]) {
+  wrap y = a + b + c
 }
 EOF
 cat > "$W/o1.prp" <<'EOF'
-mod m(a:u8, b:u8, c:u8) -> (y:u9@[0]) {
-  y = b + a + c
+mod m(a:U8, b:U8, c:U8) -> (y:U9@[0]) {
+  wrap y = b + a + c
 }
 EOF
 compile "$W/g1.prp" "$W/g1"
@@ -65,14 +65,14 @@ echo "PASS: identical/commutative -> full match, similarity 1.000"
 #    present in the IR.
 # ---------------------------------------------------------------------------
 cat > "$W/g2.prp" <<'EOF'
-mod m(a:u8, b:u8, c:u8) -> (y:u10@[0]) {
+mod m(a:U8, b:U8, c:U8) -> (y:U10@[0]) {
   const t = a & b
   const u = c * 3
   y = t + u
 }
 EOF
 cat > "$W/o2.prp" <<'EOF'
-mod m(a:u8, b:u8, c:u8) -> (y:u10@[0]) {
+mod m(a:U8, b:U8, c:U8) -> (y:U10@[0]) {
   const t = a | b
   const u = c * 3
   y = t + u
@@ -97,15 +97,15 @@ echo "PASS: real difference -> isolated gap, surrounding logic matched, diff --m
 #    flop is a gap; on -> the flop anchors by name and matches (more matched).
 # ---------------------------------------------------------------------------
 cat > "$W/g3.prp" <<'EOF'
-mod m(a:u8, b:u8) -> (q:u8@[1]) {
-  reg r:u8 = 0
+mod m(a:U8, b:U8) -> (q:U8@[1]) {
+  reg r:U8 = 0
   q = r
   r = a & b
 }
 EOF
 cat > "$W/o3.prp" <<'EOF'
-mod m(a:u8, b:u8) -> (q:u8@[1]) {
-  reg r:u8 = 0
+mod m(a:U8, b:U8) -> (q:U8@[1]) {
+  reg r:U8 = 0
   q = r
   r = a | b
 }
@@ -155,12 +155,12 @@ echo "PASS: hier=0 single top-pair compare still stamps and saves match attrs"
 #     NOTHING is a hard error, not a silent pass.
 # ---------------------------------------------------------------------------
 cat > "$W/ma.prp" <<'EOF'
-mod ma(a:u8, b:u8) -> (y:u9@[0]) {
+mod ma(a:U8, b:U8) -> (y:U9@[0]) {
   y = a + b
 }
 EOF
 cat > "$W/mb.prp" <<'EOF'
-mod mb(a:u8, b:u8) -> (y:u9@[0]) {
+mod mb(a:U8, b:U8) -> (y:U9@[0]) {
   y = a + b
 }
 EOF
@@ -175,6 +175,44 @@ if "$LHD" pass semdiff --ref lg:"$W/ma2" --impl lg:"$W/mb2" -q --workdir "$W/w5c
   fail "#5c 0-pair sweep passed; expected hard error"
 fi
 echo "PASS: renamed tops pair via --ref-top/--impl-top; 0-pair sweep is a hard error"
+
+# ---------------------------------------------------------------------------
+# 5d. --stats reports the hierarchy lec compares: cgen realizes a memory as a
+#     `cgen_memory_*` wrapper instance the source never had, and lec[hier]
+#     dissolves it before pairing, so --stats must too (inline_absent) -- else
+#     the memory reads `memories ref 0/1` while lec pairs it memory-to-memory.
+#     The splice edits the loaded libraries, so a saving run refuses it.
+# ---------------------------------------------------------------------------
+cat > "$W/m5d.prp" <<'EOF'
+pub mod m5d(clk:Clock, we:Bool, wa:U2, wd:U4, ra:U2) -> (q:U4@[0]) {
+  reg ma:[4]U4 = nil
+  q = ma[ra]
+  if we {
+    ma[wa] = wd
+  }
+}
+EOF
+"$LHD" compile "$W/m5d.prp" --emit verilog:"$W/m5d_cgen.v" -q --workdir "$W/wc5d" >/dev/null 2>&1 || fail "compile #5d to verilog"
+grep -q '__lhdmem_h' "$W/m5d_cgen.v" || fail "#5d cgen no longer wraps the memory (rework this case)"
+compile "$W/m5d.prp" "$W/g5d"
+compile "$W/m5d_cgen.v" "$W/o5d"
+out5d=$("$LHD" pass semdiff --stats --ref lg:"$W/g5d" --impl lg:"$W/o5d" --workdir "$W/w5d" 2>/dev/null)
+echo "$out5d" | grep -q 'memories  ref 1/1 paired' || { echo "$out5d"; fail "#5d the memory behind the cgen wrapper is not paired"; }
+out5d=$("$LHD" pass semdiff --stats --set pass.semdiff.inline_absent=0 --ref lg:"$W/g5d" --impl lg:"$W/o5d" --workdir "$W/w5d2" 2>/dev/null)
+echo "$out5d" | grep -q 'memories  ref 0/1 paired' || { echo "$out5d"; fail "#5d inline_absent=0 no longer keeps the wrapper boundary"; }
+if "$LHD" pass semdiff --stats --set pass.semdiff.save=1 --ref lg:"$W/g5d" --impl lg:"$W/o5d" -q --workdir "$W/w5d3" >/dev/null 2>&1; then
+  fail "#5d a saving run accepted the in-memory splice"
+fi
+# A top the sweep cannot resolve is refused before any splice (no "inlined" line).
+if out5d=$("$LHD" pass semdiff --stats --ref lg:"$W/g5d" --impl lg:"$W/o5d" --top no_such_top --workdir "$W/w5d4" 2>&1); then
+  fail "#5d an unknown --top was accepted"
+fi
+echo "$out5d" | grep -q "ref top 'no_such_top' not found" || { echo "$out5d"; fail "#5d an unknown --top lost its error"; }
+if echo "$out5d" | grep -q 'semdiff: inlined'; then
+  echo "$out5d"
+  fail "#5d an unknown --top still dissolved hierarchy before failing"
+fi
+echo "PASS: --stats dissolves a cgen memory wrapper and pairs the memory; a saving run or an unknown top refuses the splice"
 
 # ---------------------------------------------------------------------------
 # 6. usage guards: non-lg sides and same dir are rejected.

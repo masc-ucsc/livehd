@@ -1,0 +1,57 @@
+/*
+:name: mod_delay_child_ring_timecheck_off
+:type: simulation
+*/
+
+// `::[timecheck=false]` is the documented escape hatch that turns off ALL
+// timing checks in its lambda (user ruling 2026-09-27), including the check
+// that mixes a child's DECLARED `@[1]` output with cycle-0 values inside a
+// ring. `st1` is a 1-cycle delay (an always-written reg is a feedforward stage
+// register, so its output legally declares `@[1]`); the caller closes a ring
+// through it. The flat spelling of the same hardware (`reg r = gr;
+// gr = req & ~r`) compiles, because a reg in a feedback SCC is state.
+//
+// Before the fix, the caller's attribute removed the combinational-loop check
+// (it cut the wire ring) but NOT the cycle-mix check, which still propagated
+// the child's declared latency into the caller (Time_checker eval_node for a
+// Sub: cycle(out) = meet(cycle(inputs)) + declared) and refused the design:
+//   upass.tolg: 'mod_delay_child_ring_timecheck_off.rtop' mixes values at
+//   different cycles ((0,0) vs (1,1)) ...
+// Without the attribute the same ring must be refused with that cycle-mix
+// error (not a false combinational loop): errors/mod_delay_child_ring_cycle_mix.prp.
+mod st1(d:U4) -> (q:U4@[1]) {
+  reg r:U4 = 8
+  r = d
+  q = r
+}
+
+pub mod rtop::[timecheck=false](req:U4) -> (g:U4@[0]) {
+  wire gr:U4 = nil
+  const m = st1(d=gr)
+  gr = req & ~m
+  g = gr
+}
+
+test rtop.delay_child_in_ring {
+  mut dut  = rtop
+  mut r:U4 = 8
+  mut bad  = 0
+  mut seen = 0
+  tick 8 {
+    mut rq:U4 = (clock * 5 + 3) & 15
+    dut.reset = clock == 0
+    dut.req = rq
+    // Golden: the child's register loads this cycle's grant every cycle;
+    // reset forces 8.
+    if clock == 0 {
+      r = 8
+    } else {
+      r = rq & ~r
+    }
+    step
+    seen = seen + 1
+    if dut.g != (rq & ~r) { bad = bad + 1 }
+  }
+  assert(seen == 8, "the comparisons ran (guards against a vacuous pass)")
+  assert(bad == 0, "the delay child's register closes the ring")
+}

@@ -2,9 +2,8 @@
 
 #include "prp_sim.hpp"
 
-#include "cpp_ident.hpp"  // livehd::cpp_ident — the SAME rule cgen_sim declares members with
-
 #include <algorithm>
+#include <bit>
 #include <cctype>
 #include <cerrno>
 #include <cstdio>
@@ -15,6 +14,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "cpp_ident.hpp"  // livehd::cpp_ident — the SAME rule cgen_sim declares members with
 #include "file_output.hpp"
 #include "hash_util.hpp"  // fnv1a64: the once-per-program key of a testbench `?` literal
 #include "prp_ast_facade.hpp"
@@ -30,7 +31,9 @@
 #include "prpparse/parser.hpp"
 #include "prpparse/source_buffer.hpp"
 #include "rapidjson/document.h"  // 2f-sim B0: read cgen_sim's <stem>.iface.json manifests
+#include "sim_plusargs_rt.hpp"
 #include "sim_tune_rt.hpp"       // `?`-literal + tune-hash helper text, shared verbatim with inou.cgen.sim
+#include "str_tools.hpp"         // canonical_escaped_ident: `foo` == foo
 
 namespace prp_sim {
 
@@ -74,6 +77,11 @@ struct Dut {
   // ---- 2f-sim B0/B: the rest of the manifest, for the query catalog ----------
   // Parallel to the vectors above (same index = same signal), so the existing
   // name/width lookups are untouched while the catalog gets what it needs.
+  // Inputs some state commits on (`clock`), and for a SECONDARY clock net the
+  // member holding its previous level (`prev`, "" for the reference clock). Both
+  // parallel to `inputs`.
+  std::vector<bool>                     inputs_clock;
+  std::vector<std::string>              inputs_prev;
   std::vector<bool>                     inputs_s, outputs_s, regs_s;     // signed?
   std::vector<int>                      inputs_dw, outputs_dw, regs_dw;  // source-DECLARED width
   std::vector<std::string>              regs_kind;                       // "flop" | "pipe"
@@ -85,6 +93,18 @@ struct Dut {
   std::vector<std::vector<std::string>> arrays_rd_regs;
 
   bool has_input(const std::string& f) const { return std::find(inputs.begin(), inputs.end(), f) != inputs.end(); }
+  // Is input `f` a clock net some state of this unit commits on?
+  bool is_clock_input(const std::string& f) const {
+    auto it = std::find(inputs.begin(), inputs.end(), f);
+    const size_t i = static_cast<size_t>(it - inputs.begin());
+    return it != inputs.end() && i < inputs_clock.size() && inputs_clock[i];
+  }
+  // The `__clkprev_*` member of a SECONDARY clock input ("" for the reference clock).
+  std::string clock_prev(const std::string& f) const {
+    auto it = std::find(inputs.begin(), inputs.end(), f);
+    const size_t i = static_cast<size_t>(it - inputs.begin());
+    return it != inputs.end() && i < inputs_prev.size() ? inputs_prev[i] : std::string{};
+  }
   bool has_output(const std::string& f) const { return std::find(outputs.begin(), outputs.end(), f) != outputs.end(); }
   bool has_reg(const std::string& f) const { return std::find(regs.begin(), regs.end(), f) != regs.end(); }
 
@@ -173,6 +193,10 @@ bool parse_iface(const std::string& path, Dut& d, std::string& err) {
       (is_in ? d.inputs_w : d.outputs_w).push_back(num(e, "bits", 1));
       (is_in ? d.inputs_dw : d.outputs_dw).push_back(num(e, "declared_bits", num(e, "bits", 1)));
       (is_in ? d.inputs_s : d.outputs_s).push_back(flag(e, "signed"));
+      if (is_in) {
+        d.inputs_clock.push_back(flag(e, "clock"));
+        d.inputs_prev.emplace_back(str(e, "prev"));
+      }
     }
   }
   if (doc.HasMember("regs") && doc["regs"].IsArray()) {
@@ -348,7 +372,10 @@ std::string text_of(const std::string& src, TSNode n) {
   if (ts_node_is_null(n) || e > src.size() || s > e) {
     return {};
   }
-  return src.substr(s, e - s);
+  // `foo` == foo when the escaped text is plain identifier characters -- the
+  // same rule (and the same helper) Prp2lnast::get_text applies, so a test
+  // block's `puts`/`step`/port/field names match what the front end lowered.
+  return std::string(str_tools::canonical_escaped_ident(std::string_view(src).substr(s, e - s)));
 }
 
 // The bound name of an assignment lvalue: a plain `identifier`, or the inner
@@ -538,6 +565,38 @@ int declared_slop_width(const std::string& src, TSNode lv) {
   return 0;
 }
 
+// The N of an unsigned annotation on a declaration (`U<N>`, `Unsigned(bits=N)`,
+// `Unsigned(max=M)` -- its bits), else 0: the operand width the typed `~`
+// flips (user ruling 26).
+int declared_uint_bits(const std::string& src, TSNode lv) {
+  if (ts_node_is_null(lv) || ntype(lv) != "typed_identifier") {
+    return 0;
+  }
+  for (TSNode c : ts_node_named_children(lv)) {
+    if (ntype(c) != "type_cast") {
+      continue;
+    }
+    for (TSNode tc : ts_node_named_children(c)) {
+      if (ntype(tc) != "uint_type") {
+        continue;
+      }
+      std::string tx = text_of(src, tc);
+      tx.erase(std::remove_if(tx.begin(), tx.end(), [](unsigned char ch) { return std::isspace(ch) != 0 || ch == '_'; }), tx.end());
+      if (tx.size() >= 2 && std::isdigit(static_cast<unsigned char>(tx[1])) != 0) {
+        return std::max(std::atoi(tx.c_str() + 1), 0);  // `U<N>`
+      }
+      if (const auto p = tx.find("bits="); p != std::string::npos) {
+        return std::max(std::atoi(tx.c_str() + p + 5), 0);
+      }
+      if (const auto p = tx.find("max="); p != std::string::npos) {
+        const long long m = std::atoll(tx.c_str() + p + 4);
+        return m > 0 ? static_cast<int>(std::bit_width(static_cast<unsigned long long>(m))) : 0;
+      }
+    }
+  }
+  return 0;
+}
+
 // Translation error (carried up via a thrown string).
 struct Gen_error {
   std::string msg;
@@ -545,7 +604,7 @@ struct Gen_error {
 [[noreturn]] void fail(const std::string& m) { throw Gen_error{m}; }
 
 // One `test name(params)` parameter. The generated driver exposes each as a
-// `--<name> <value>` command-line flag, defaulting to `default_expr` (the
+// `+<name>=<value>` command-line flag, defaulting to `default_expr` (the
 // signature's default) when present; a parameter with no default (or `=nil`)
 // is required, and the driver reports a clear error if it is not supplied.
 // Values are bound at RUN time (argv), never baked in, so one built driver can
@@ -553,6 +612,8 @@ struct Gen_error {
 struct Param {
   std::string name;
   bool        has_default{false};
+  std::string type;
+  bool        is_string = false;
   std::string default_expr;  // C++ expression for the default (valid iff has_default)
 };
 
@@ -565,6 +626,7 @@ struct Param_raw {
   std::string name;
   bool        required{false};
   TSNode      default_node{};
+  std::string type;
 };
 
 std::vector<Param_raw> read_params_raw(const std::string& src, TSNode test) {
@@ -593,7 +655,14 @@ std::vector<Param_raw> read_params_raw(const std::string& src, TSNode test) {
       cur       = Param_raw{};
       TSNode id = field(ci, "identifier");
       cur.name  = ts_node_is_null(id) ? std::string{} : std::string(text_of(src, id));
-      have      = true;
+      for (TSNode child : ts_node_named_children(ci)) {
+        if (ntype(child) == "type_cast") {
+          for (TSNode type : ts_node_named_children(child)) {
+            cur.type = text_of(src, type);
+          }
+        }
+      }
+      have = true;
     } else if (have) {
       cur.default_node = ci;  // the parameter's default expression (next named child)
     }
@@ -660,7 +729,7 @@ constexpr const char* kDefaultSeed      = "0xC0FFEEULL";
 constexpr const char* kDefaultSeedShown = "0xC0FFEE";
 
 // A `test name(params)` parameter name is emitted VERBATIM into the generated
-// driver as (a) a C++ storage variable `long <name>`, (b) the `--<name>` CLI
+// driver as (a) a C++ storage variable `long <name>`, (b) the `+<name>=VALUE` CLI
 // flag, and (c) body references (the `tick`/call code reads it by name). So it
 // must be a plain C++ identifier that collides with neither a C++ keyword nor
 // any identifier the driver itself emits. Anything else (a backtick/`$`/Unicode
@@ -689,9 +758,7 @@ bool is_reserved_param_name(std::string_view n) {
   };
   // Other identifiers the driver references at the same (function) scope but that
   // are NOT `_`-prefixed (so the leading-underscore bar in is_valid_param_name
-  // does not catch them): `main`'s parameters, the reserved CLI flags
-  // (`--test NAME`, `--seed`, `--set k=v`, `--help`/`-h` — a param named like one
-  // would be swallowed by that flag instead of binding), the libc macros from <cerrno> (a
+  // does not catch them): `main`'s parameters and the libc macros from <cerrno> (a
   // param named `errno` would expand `long errno = …` to `long (*__error()) = …`
   // — a hard error), and the free functions the driver calls unqualified. The
   // driver's own `_`-prefixed locals need no entry.
@@ -699,11 +766,6 @@ bool is_reserved_param_name(std::string_view n) {
       "argc",
       "argv",
       "main",
-      "seed",
-      "set",
-      "help",
-      "h",
-      "test",
       "errno",
       "ERANGE",
       "hlop_set_random_seed",
@@ -735,6 +797,11 @@ public:
   // helper key): each is ONE draw per program (see literal_val), so generate()
   // unions them over every test and bakes the count into the driver.
   const std::set<std::pair<int, uint64_t>>& tb_unknown_keys() const { return tb_unknown_keys_; }
+
+  // File-scope `const` / `comptime const` declarations, name -> right-hand
+  // side (see file_const_rvalue). The nodes belong to the parse the caller
+  // keeps alive for this generator's whole lifetime.
+  void set_file_consts(const std::map<std::string, TSNode>* consts) { file_consts_ = consts; }
 
   Driver_gen(const std::string& src, const std::map<std::string, Dut>& duts, const std::string& vcd_dir, const std::string& file,
              bool runtime_support_on, bool unknown_zero)
@@ -827,7 +894,7 @@ public:
   //   static long <fn_id>(const std::map<std::string,std::string>& _args,
   //                       std::set<std::string>& _consumed, std::string& _err, _Fail& _ff);
   // It binds the test's parameters from `_args` (marking each consumed key, so
-  // main() can warn about leftover `--key`s), runs the body, and returns the
+  // main() can warn about leftover `+key`s), runs the body, and returns the
   // count of failed asserts — or -1 with `_err` set when a required parameter is
   // missing. `name` is the dotted selector. `params_out` receives the test's
   // parameter list (for the registry JSON + the kernel's `--arg` forwarding);
@@ -844,6 +911,13 @@ public:
     for (TSNode c : ts_node_named_children(code)) {
       stmts.push_back(c);
     }
+    for (const auto& raw : read_params_raw(src_, test)) {
+      param_names_.insert(raw.name);  // before any eval: a parameter is never a file-scope const
+      const auto def = ts_node_is_null(raw.default_node) ? std::string{} : text_of(src_, raw.default_node);
+      if (raw.type == "String" || (!def.empty() && def.front() == '"')) {
+        string_params_.insert(raw.name);
+      }
+    }
     // pass 1: discover scalar locals (every assigned lvalue identifier) and the
     // DUT instances used (a `mut acc = Module` declaration).
     discover(stmts);
@@ -851,10 +925,15 @@ public:
     // expression is emitted (an expression's shape depends on those widths).
     infer_local_widths();
 
+    for (const auto& str_name : string_locals_) {
+      locals_.erase(str_name);
+      local_w_.erase(str_name);
+    }
+
     // Parameters: name + default. A name is emitted verbatim as a driver C++
     // identifier (see is_valid_param_name); reject anything unsafe — a
     // backtick/`$`/Unicode identifier, a C++ keyword (`default`, `class`, …), a
-    // reserved flag (`seed`/`help`/`h`), `main`'s `argc`/`argv`, or a
+    // runtime name (`argc`/`argv`), or a
     // leading-underscore name that could shadow a driver-internal local — with a
     // clear message rather than silently miscompiling the generated driver.
     std::vector<Param> params;
@@ -863,17 +942,19 @@ public:
         fail("test parameter '" + r.name
              + "' is not a usable simulation parameter name: it must be a plain identifier "
                "(a letter followed by letters/digits/underscores), not a leading-underscore name, "
-               "a C++ keyword, or a reserved driver flag (seed/set/help/h/argc/argv) — rename it");
+               "a C++ keyword, or a reserved C++ runtime name — rename it");
       }
       param_names_.insert(r.name);  // for the tick clock-name collision check
       Param p;
       p.name        = r.name;
+      p.type        = r.type;
+      p.is_string   = string_params_.count(r.name) != 0;
       p.has_default = !r.required;
       if (p.has_default) {
         // A test parameter is CLI-bound control (a cycle count / iteration
         // bound), so it stays on the C++ long plane and lifts into a Slop
         // wherever the body uses it as data.
-        p.default_expr = as_long(r.default_node);
+        p.default_expr = p.is_string ? eval(r.default_node).cpp : as_long(r.default_node);
       }
       params.push_back(p);
       Param_info pi;
@@ -891,27 +972,51 @@ public:
       << "(const std::map<std::string, std::string>& _args, std::set<std::string>& _consumed, std::string& _err, "
          "[[maybe_unused]] _Fail& _ff) {\n";
     o << "  long _fails = 0;\n";
+    o << "  _resolved_params.clear();\n";
     // `_clk` tracks the current cycle (the active tick loop variable) so a located
     // assert can report it even AFTER the tick loop (e.g. a `wait`-timeout assert),
     // where the loop variable is out of C++ scope. -1 means "before any clock edge".
     o << "  [[maybe_unused]] long _clk = -1;\n";
 
-    // ---- Parameters bound from the shared `_args` map (`--<name> N`). A
+    // ---- Parameters bound from the shared `_args` map (`+<name>=VALUE`). A
     // parameter defaults to its signature default; one with no default (or
     // `=nil`) is required — when absent, the test reports a clear error rather
-    // than running with a silent 0. Each consumed `--key` is recorded so main()
-    // can warn about a `--key` that no test uses.
+    // than running with a silent 0. Each consumed `+key` is recorded so main()
+    // can warn about a `+key` that no test uses.
     for (const auto& p : params) {
       locals_.erase(p.name);  // bound as a parameter, not a zero-init body local
-      o << "  long " << p.name << " = " << (p.has_default ? p.default_expr : "0") << ";\n";
+      o << "  " << (p.is_string ? "std::string " : "long ") << p.name << " = " << (p.is_string ? "std::string()" : "0") << ";\n";
       o << "  { auto _it = _args.find(\"" << cpp_str_lit(p.name) << "\");\n";
-      o << "    if (_it != _args.end()) { " << p.name << " = _to_i64(\"" << cpp_str_lit(p.name)
-        << "\", _it->second); _consumed.insert(\"" << cpp_str_lit(p.name) << "\"); }\n";
+      const std::string reader = p.is_string ? "_valueplusarg_string" : p.type == "Bool" ? "_valueplusarg_bool" : "_valueplusarg";
+      o << "    if (_it != _args.end()) { " << p.name << " = " << reader << "(\"" << cpp_str_lit(p.name) << "\", "
+        << (p.is_string ? "std::string()" : "0") << ", false); _consumed.insert(\"" << cpp_str_lit(p.name) << "\"); }\n";
       if (!p.has_default) {
-        o << "    else { _err = \"test `" << cpp_str_lit(name) << "` requires --" << cpp_str_lit(p.name)
-          << " <value>\"; return -1; }\n";
+        o << "    else { _err = \"test `" << cpp_str_lit(name) << "` requires +" << cpp_str_lit(p.name)
+          << "=<value>\"; return -1; }\n";
+      } else {
+        o << "    else { " << p.name << " = " << p.default_expr << "; }\n";
       }
       o << "  }\n";
+      if (p.type.size() > 1 && p.type.size() <= 5 && (p.type[0] == 'U' || p.type[0] == 'S')
+          && std::all_of(p.type.begin() + 1, p.type.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
+        const int   bits = std::stoi(p.type.substr(1));
+        std::string bad;
+        if (p.type[0] == 'U') {
+          bad = p.name + " < 0";
+          if (bits < 63) {
+            bad += " || " + p.name + " > " + std::to_string((uint64_t{1} << bits) - 1) + "L";
+          }
+        } else if (bits < 64) {
+          const auto hi = (uint64_t{1} << (bits - 1)) - 1;
+          bad           = p.name + " < -" + std::to_string(hi + 1) + "L || " + p.name + " > " + std::to_string(hi) + "L";
+        }
+        if (!bad.empty()) {
+          o << "  if (" << bad << ") throw std::runtime_error(\"+" << cpp_str_lit(p.name) << " is outside " << p.type
+            << " range\");\n";
+        }
+      }
+      o << "  _resolved_params[\"" << cpp_str_lit(p.name) << "\"] = " << (p.is_string ? p.name : "std::to_string(" + p.name + ")")
+        << ";\n";
     }
 
     // ---- DUT instances. One persistent instance per `mut acc = Module`
@@ -964,6 +1069,9 @@ public:
     // value plane below): zero-initialized, and wide enough for the widest thing
     // ever assigned to it. There is no separate "wide constant" plane any more —
     // a 97-bit element is just a Slop<98> like every other element.
+    for (const auto& v : string_locals_) {
+      o << "  std::string " << v << ";\n";
+    }
     for (const auto& v : locals_) {
       o << "  Slop<" << local_w_.at(v) << "> " << v << "{};\n";
     }
@@ -1029,6 +1137,9 @@ public:
     for (const auto& v : locals_) {
       o << "    _tp_tb = _tp_fnv_local(_tp_tb, \"" << v << "\", " << v << ".to_pyrope());\n";
     }
+    for (const auto& v : string_locals_) {
+      o << "    _tp_tb = _tp_fnv_local(_tp_tb, \"" << v << "\", " << v << ");\n";
+    }
     o << "    _tp.body_end(_tp_left, _tp_d, _tp_tb); }\n";
     // The function's stdout is the test's runtime output (puts + any ASSERT
     // FAILED lines); the returned count is the verdict main() renders.
@@ -1047,6 +1158,24 @@ public:
       }
       body.replace(mark, kRefMark.size(), binds);
     }
+    // The cycle-counter increments after each step(): code only for an instance
+    // whose auto-wired Clock input the test read, nothing otherwise.
+    for (const auto& [var, m] : inst_of_var) {
+      const std::string mark = std::string(kEdgeMark) + var + "__*/";
+      const std::string inc = edges_used_.count(var) != 0
+                                   ? "__edges_" + var + " = Slop<64>::create_integer(__edges_" + var + ".to_just_i64() + 1);"
+                                   : std::string{};
+      for (auto at = body.find(mark); at != std::string::npos; at = body.find(mark, at + inc.size())) {
+        body.replace(at, mark.size(), inc);
+      }
+    }
+    if (const auto at = body.find("/*__EDGES_RESTART__*/"); at != std::string::npos) {
+      std::string restart;
+      for (const auto& var : edges_used_) {
+        restart += "__edges_" + var + " = Slop<64>::create_integer(_nc); ";  // one edge per restored cycle
+      }
+      body.replace(at, std::string_view("/*__EDGES_RESTART__*/").size(), restart);
+    }
     return body;
   }
 
@@ -1054,7 +1183,7 @@ private:
   // One testbench value. See "the testbench value plane" below for what each
   // kind means and why the data plane is Slop rather than a C++ scalar.
   struct Val {
-    enum class Kind { Slop, Long, Bool };
+    enum class Kind { Slop, Long, Bool, String };
     Kind        kind = Kind::Slop;
     std::string cpp;
     int         w       = 0;      // Slop width (Kind::Slop only)
@@ -1062,6 +1191,7 @@ private:
     long long   lit     = 0;      // ...used for a compile-time shift amount
   };
   static Val slop_val(std::string c, int w) { return Val{Val::Kind::Slop, std::move(c), w, false, 0}; }
+  static Val string_val(std::string c) { return Val{Val::Kind::String, std::move(c), 0, false, 0}; }
   static Val long_val(std::string c) { return Val{Val::Kind::Long, std::move(c), 0, false, 0}; }
   static Val bool_val(std::string c) { return Val{Val::Kind::Bool, std::move(c), 0, false, 0}; }
 
@@ -1092,19 +1222,31 @@ private:
   bool                                        unknown_zero_       = false;  // sim.unknown_zero: `?` literal bits are 0, not random
   bool                                        in_tick_            = false;  // inside a tick body (reject nested ticks)
   bool                                        restart_block_emitted_ = false;  // --restart-cycle handled by the first tick
-  std::set<std::string>                       locals_;                         // scalar driver vars
-  std::map<std::string, int>                  local_w_;                        // ...and the Slop width each is declared at
-  std::map<std::string, int>                  local_decl_w_;                   // `mut x:u97 = …` annotation (0 = infer)
-  std::set<std::string>                       param_names_;                    // test parameter names
-  std::set<std::pair<int, uint64_t>>          tb_unknown_keys_;                // distinct runtime `?` literals: (width, key)
-  std::map<std::string, std::string>          inst_of_var;                     // instance var -> module name (`mut acc = M`)
-  std::map<std::string, std::vector<TSNode>>  arrays_;                         // array name -> element nodes
-  std::map<std::string, int>                  array_w_;                        // array name -> element Slop width
-  std::vector<std::pair<std::string, TSNode>> assigns_;                        // (local, rhs) pairs, for width inference
-  std::set<std::string>                       import_bound_;                   // names bound by `= import(...)` (module refs)
-  std::map<std::string, std::pair<std::string, std::string>> import_path_;     // bound name -> {unit, entry}
-  std::map<std::string, std::string>                         import_ref_;      // bound name -> import string, `lg:`/`ln:` stripped
-  std::set<std::string> import_artifact_;  // ...of those, the ones that named lg:/ln: explicitly
+  std::set<std::string>                       string_params_;
+  std::set<std::string>                       string_locals_;
+  std::set<std::string>                       locals_;                      // scalar driver vars
+  std::map<std::string, int>                  local_w_;                     // ...and the Slop width each is declared at
+  std::map<std::string, int>                  local_decl_w_;                // `mut x:u97 = …` annotation (0 = infer)
+  std::map<std::string, int>                  local_ubits_;                 // `mut x:uN` locals: N, the width `~x` flips
+  std::map<std::string, TSNode>               const_alias_rv_;              // untyped `const x = …` locals -> rvalue (ruling 38)
+  std::set<std::string>                       param_names_;                 // test parameter names
+  const std::map<std::string, TSNode>*        file_consts_ = nullptr;       // file-scope const -> rvalue
+  std::set<std::string>                       file_const_eval_;             // file consts being evaluated (cycle guard)
+  std::set<std::pair<int, uint64_t>>          tb_unknown_keys_;             // distinct runtime `?` literals: (width, key)
+  std::map<std::string, std::string>          inst_of_var;                  // instance var -> module name (`mut acc = M`)
+  // docs 05b "Running cycles": an unbound `Clock` input of a stepped DUT is
+  // auto-wired to the tick's clock. `poked_` = (instance, input) pairs the test
+  // drives itself (never auto-wired); `edges_used_` = instances whose auto-wired
+  // Clock input the test READS, which sees that clock's own cycle counter.
+  std::set<std::pair<std::string, std::string>> poked_;
+  std::set<std::string>                         edges_used_;
+  std::map<std::string, std::vector<TSNode>>  arrays_;                      // array name -> element nodes
+  std::map<std::string, int>                  array_w_;                     // array name -> element Slop width
+  std::vector<std::pair<std::string, TSNode>> assigns_;                     // (local, rhs) pairs, for width inference
+  std::set<std::string>                       import_bound_;                // names bound by `= import(...)` (module refs)
+  std::map<std::string, std::pair<std::string, std::string>> import_path_;  // bound name -> {unit, entry}
+  std::map<std::string, std::string>                         import_ref_;   // bound name -> import string, `lg:`/`ln:` stripped
+  std::set<std::string> import_artifact_;                                   // ...of those, the ones that named lg:/ln: explicitly
 
   // `mut acc = Module` -- the rvalue is a bare module name. Unwrap single-child
   // expression wrappers and return the module name iff it is a known DUT.
@@ -1387,8 +1529,8 @@ private:
         continue;
       }
       std::string_view s(bare.data() + seg, i - seg);
-      const auto       br = s.find('[');
-      out += livehd::cpp_ident(br == std::string_view::npos ? s : s.substr(0, br));
+      const auto       br  = s.find('[');
+      out                 += livehd::cpp_ident(br == std::string_view::npos ? s : s.substr(0, br));
       if (br != std::string_view::npos) {
         out.append(s.substr(br));  // `[idx]` is C++ already
       }
@@ -1427,6 +1569,16 @@ private:
     {
       const Dut& td = duts_.at(inst_of_var.at(var));
       if (td.has_input(fld)) {
+        if (!write && td.is_clock_input(fld) && poked_.count({var, fld}) == 0) {
+          // A Clock input the test never drives is auto-wired to the tick's
+          // clock: in simulation its value is that clock's CYCLE COUNT (rising
+          // edges so far), not the 1-bit level (qa.md section 6).
+          if (edges_used_.insert(var).second) {
+            ref_binds_.push_back("  Slop<64> __edges_" + var + "{};\n");
+          }
+          width(64);
+          return "__edges_" + var;
+        }
         width(td.input_width(fld));
         sign(td.input_signed(fld));
         return var + ".__in." + fld;
@@ -1619,6 +1771,9 @@ private:
   // `clock` loop var). Every kind renders exactly — the Slop formatters are
   // width-agnostic, so nothing goes through a 64-bit narrowing.
   Val interp_expr(const std::string& name) {
+    if ((string_locals_.count(name) || string_params_.count(name))) {
+      return string_val(name);
+    }
     auto dot = name.find('.');
     if (dot != std::string::npos) {
       std::string base = name.substr(0, dot), fld = name.substr(dot + 1);
@@ -1684,7 +1839,12 @@ private:
         if (local_decl_w_.count(name) != 0 || subtree_reads(rhs, name)) {
           continue;
         }
-        const int w = to_slop(eval(rhs)).w;
+        const Val value = eval(rhs);
+        if (value.kind == Val::Kind::String) {
+          changed |= string_locals_.insert(name).second;
+          continue;
+        }
+        const int w = to_slop(value).w;
         if (w > local_w_[name]) {
           local_w_[name] = w;
           changed        = true;
@@ -1720,6 +1880,9 @@ private:
       TSNode      lv = field(n, "lvalue");
       std::string ln = lvalue_name(src_, lv);
       TSNode      rv = field(n, "rvalue");
+      if (std::string pb, pf; ln.empty() && inst_dot(lv, pb, pf)) {
+        poked_.emplace(unquote_field_path(pb), cxx_field_path(pf));  // `acc.fld = v` drives the input itself
+      }
       if (!ln.empty()) {
         std::string m = ts_node_is_null(rv) ? std::string{} : rvalue_module(rv);
         if (!ts_node_is_null(rv) && ntype(rv) == "tuple_sq") {
@@ -1751,6 +1914,12 @@ private:
           locals_.insert(ln);
           if (const int dw = declared_slop_width(src_, lv); dw > 0) {
             local_decl_w_[ln] = std::max(local_decl_w_[ln], dw);
+          }
+          if (const int ub = declared_uint_bits(src_, lv); ub > 0) {
+            local_ubits_[ln] = ub;
+          } else if (TSNode decl = field(n, "decl"), kind = ts_node_is_null(decl) ? TSNode{} : field(decl, "storage");
+                     !ts_node_is_null(rv) && ntype(lv) == "identifier" && !ts_node_is_null(kind) && ntype(kind) == "const_decl") {
+            const_alias_rv_[ln] = rv;
           }
           // A compound write (`s += e`) reads its own target exactly as
           // `s = s + e` does, so it must not size the local from `e` alone.
@@ -1791,6 +1960,9 @@ private:
   // model on both sides of the testbench boundary.
   // `v` on the Slop plane, at its natural width.
   static Val to_slop(const Val& v) {
+    if (v.kind == Val::Kind::String) {
+      fail("string used as a numeric simulation value");
+    }
     if (v.kind == Val::Kind::Slop) {
       return v;
     }
@@ -1816,6 +1988,9 @@ private:
 
   // A C++ `bool` for a guard position (`if`, `assert`, `&&`/`||` operand).
   static std::string as_bool_of(const Val& v) {
+    if (v.kind == Val::Kind::String) {
+      fail("string used as a boolean simulation value");
+    }
     if (v.kind == Val::Kind::Bool) {
       return v.cpp;
     }
@@ -1828,6 +2003,9 @@ private:
   // array indices, VCD clock ratios. Every one of those is a loop bound, so 64
   // bits is the natural type rather than a narrowing.
   static std::string as_long_of(const Val& v) {
+    if (v.kind == Val::Kind::String) {
+      fail("string used as a numeric simulation value");
+    }
     if (v.kind == Val::Kind::Long) {
       return v.cpp;
     }
@@ -1842,6 +2020,9 @@ private:
   // A std::string decimal rendering of any value — exact at any width (a bool
   // prints as 0/1, matching how it reads in the source).
   static std::string decimal_of(const Val& v) {
+    if (v.kind == Val::Kind::String) {
+      return v.cpp;
+    }
     if (v.kind == Val::Kind::Bool) {
       return "std::string((" + v.cpp + ") ? \"1\" : \"0\")";
     }
@@ -1938,10 +2119,69 @@ private:
     return v;
   }
 
+  // A file-scope `const` is lexically visible in every test block (ruling
+  // 2026-09-28 (24); only a constant-valued one exists at file scope). The
+  // driver has no C++ binding for it, so a read REPLAYS the declaration's
+  // right-hand side in place -- as a streamed lambda's capture prologue does --
+  // which keeps the value's own width. A test local of the same name is
+  // shadowing (a compile error); a test parameter hides it. The right-hand
+  // side itself sees FILE scope only (eval_file_const): a test's names never
+  // leak into it.
+  TSNode file_const_rvalue(const std::string& nm) const {
+    if (file_consts_ == nullptr || (file_const_eval_.empty() && (locals_.count(nm) != 0 || inst_of_var.count(nm) != 0))) {
+      return TSNode{};
+    }
+    const auto it = file_consts_->find(nm);
+    return it == file_consts_->end() ? TSNode{} : it->second;
+  }
+
+  // `T.lo` of a file-scope tuple const `const T = (const lo = 1, ...)`: the
+  // field's own right-hand side (null when `base` is no such tuple).
+  TSNode file_const_field(const std::string& base, const std::string& fld) const {
+    TSNode tup = file_const_rvalue(base);
+    while (!ts_node_is_null(tup) && ntype(tup) != "tuple" && ts_node_named_child_count(tup) == 1
+           && (ntype(tup) == "expression_item" || ntype(tup) == "expression_list" || ntype(tup) == "paren_group")) {
+      tup = ts_node_named_child(tup, 0);
+    }
+    if (ts_node_is_null(tup) || ntype(tup) != "tuple") {
+      return TSNode{};
+    }
+    for (TSNode item : ts_node_named_children(tup)) {
+      if (ntype(item) == "assignment" && lvalue_name(src_, field(item, "lvalue")) == fld) {
+        return field(item, "rvalue");
+      }
+    }
+    return TSNode{};
+  }
+
+  Val eval_file_const(const std::string& nm, TSNode rv) {
+    if (!file_const_eval_.insert(nm).second) {
+      fail("file-scope const '" + nm + "' is defined in terms of itself");
+    }
+    Val v = eval(rv);
+    file_const_eval_.erase(nm);
+    return v;
+  }
+
   Val eval(TSNode n) {
+    const auto text = text_of(src_, n);
+    if (text.size() >= 2 && text.front() == '"' && text.back() == '"') {
+      return string_val("std::string(" + text + ")");
+    }
     auto t = ntype(n);
+    if (t == "identifier" && !file_const_eval_.empty()) {
+      // Inside a file-scope const's right-hand side: file scope only.
+      std::string nm = text_of(src_, n);
+      if (const TSNode rv = file_const_rvalue(nm); !ts_node_is_null(rv)) {
+        return eval_file_const(nm, rv);
+      }
+      fail("file-scope const reads '" + nm + "', which is not a file-scope const the test driver can evaluate");
+    }
     if (t == "identifier") {
       std::string nm = text_of(src_, n);
+      if ((string_locals_.count(nm) || string_params_.count(nm))) {
+        return string_val(nm);
+      }
       if (nm == "nil") {
         return long_val("0");
       }
@@ -1953,6 +2193,11 @@ private:
       }
       if (auto it = local_w_.find(nm); it != local_w_.end()) {
         return slop_val(nm, it->second);
+      }
+      if (param_names_.count(nm) == 0) {
+        if (const TSNode rv = file_const_rvalue(nm); !ts_node_is_null(rv)) {
+          return eval_file_const(nm, rv);
+        }
       }
       return long_val(nm);  // a test parameter or the tick loop counter
     }
@@ -1992,7 +2237,8 @@ private:
       if (ts_node_is_null(opnd)) {
         fail("unary operator with no operand: " + text_of(src_, n).substr(0, 40));
       }
-      return apply_unary(op, eval(opnd));
+      const Val v = eval(opnd);
+      return op == "~" ? apply_bit_not(v, test_unsigned_bits(opnd, &v)) : apply_unary(op, v);
     }
     if (t == "function_call_expression") {
       // A bare `regref(x)` used as a value (rather than bound to a
@@ -2017,9 +2263,53 @@ private:
       {
         TSNode      fn   = field(n, "function");
         std::string fnnm = ts_node_is_null(fn) ? "" : text_of(src_, fn);
-        if (fnnm.size() >= 2 && (fnnm[0] == 'u' || fnnm[0] == 's')
+        if (fnnm == "std.testplusarg" || fnnm == "std.valueplusarg") {
+          const TSNode args     = field(n, "argument");
+          const auto   count    = ts_node_named_child_count(args);
+          const bool   presence = fnnm == "std.testplusarg";
+          if (count < 1 || count > (presence ? 1u : 2u)) {
+            fail(fnnm + " expects a key and, for valueplusarg, an optional default");
+          }
+          const Val key = eval(ts_node_named_child(args, 0));
+          if (key.kind != Val::Kind::String) {
+            fail(fnnm + " key must be a string");
+          }
+          if (presence) {
+            return bool_val("_testplusarg(" + key.cpp + ")");
+          }
+          Val fallback = long_val("0");
+          if (count == 2) {
+            TSNode def = ts_node_named_child(args, 1);
+            while ((ntype(def) == "expression_item" || ntype(def) == "expression_list") && ts_node_named_child_count(def) == 1) {
+              def = ts_node_named_child(def, 0);
+            }
+            if (ntype(def) == "assignment" || ntype(def) == "arg_assignment") {
+              if (text_of(src_, field(def, "lvalue")) != "default") {
+                fail("valueplusarg optional argument is named default");
+              }
+              def = field(def, "rvalue");
+            }
+            fallback = eval(def);
+          }
+          const std::string supplied = count == 2 ? "true" : "false";
+          if (fallback.kind == Val::Kind::String) {
+            return string_val("_valueplusarg_string(" + key.cpp + ", " + fallback.cpp + ", " + supplied + ")");
+          }
+          return long_val("_valueplusarg(" + key.cpp + ", " + as_long_of(fallback) + ", " + supplied + ")");
+        }
+        // `Bool(x)`: the integer->Bool conversion (true when non-zero) a
+        // strict-bool testbench writes to drive a `Bool` input.
+        if (fnnm == "Bool") {
+          TSNode args = field(n, "argument");
+          if (ts_node_is_null(args) || ts_node_named_child_count(args) != 1) {
+            fail("'Bool' needs exactly one argument");
+          }
+          const Val a = eval(ts_node_named_child(args, 0));
+          return a.kind == Val::Kind::Bool ? a : compare("!=", a, literal_val("0"));
+        }
+        if (fnnm.size() >= 2 && (fnnm[0] == 'U' || fnnm[0] == 'S')
             && std::all_of(fnnm.begin() + 1, fnnm.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
-          if (fnnm[0] == 's') {
+          if (fnnm[0] == 'S') {
             fail("signed width-cast '" + fnnm + "' in a test expression: test values are unsigned; cast in the DUT instead");
           }
           TSNode args = field(n, "argument");
@@ -2034,8 +2324,8 @@ private:
           const Val s = to_slop(a);
           // First wrap to W bits, then retain a zero sign bit in the value
           // plane. Slop<W> alone interprets an unsigned cast's top bit as a
-          // sign: u1(true) compared unequal to a DUT output containing 1,
-          // and u8(255) became -1 in comparisons and arithmetic.
+          // sign: U1(true) compared unequal to a DUT output containing 1,
+          // and U8(255) became -1 in comparisons and arithmetic.
           return slop_val("(" + at_width(s, w) + ").zext_to<" + std::to_string(w + 1) + ">()", w + 1);
         }
       }
@@ -2044,6 +2334,9 @@ private:
       std::string base, fld;
       if (inst_dot(n, base, fld)) {  // read `acc.field` (output / reg / input)
         return port_read(base, fld);
+      }
+      if (const TSNode rv = file_const_field(base, fld); !ts_node_is_null(rv)) {
+        return eval_file_const(base + "." + fld, rv);
       }
       fail("unsupported dot expression: " + text_of(src_, n).substr(0, 40));
     }
@@ -2160,10 +2453,64 @@ private:
     return out;
   }
 
-  // `value#[hi]` / `value#[lo..=hi]` — a bit select on a testbench value. The
-  // bounds must be compile-time constants (they set the result's width, and the
-  // driver's values are statically sized); a runtime index is rejected with a
-  // clear message rather than an invalid-C++ driver. Lowered as shift + mask,
+  // A compile-time integer in a bit-select bound: a literal, or `+ - *` over
+  // literals (parenthesized or not). nullopt for anything else -- a test-local
+  // `const` is emitted as a C++ variable and has no value here.
+  std::optional<long long> fold_const_int(TSNode k) {
+    std::vector<TSNode> kids;
+    for (TSNode c : ts_node_named_children(k)) {
+      kids.push_back(c);
+    }
+    if (ntype(k) == "constant" || ntype(k) == "integer_literal" || kids.empty()) {
+      const Val v = eval(k);
+      return v.has_lit ? std::optional<long long>{v.lit} : std::nullopt;
+    }
+    if (kids.size() == 1) {
+      return fold_const_int(kids[0]);
+    }
+    // an operand/operator run: split at the rightmost loosest `+`/`-`, as
+    // eval_kids does, so `a - b + c` stays left-associative
+    const auto fold_run = [&](auto&& self, size_t b, size_t e) -> std::optional<long long> {
+      if (e - b == 1) {
+        return fold_const_int(kids[b]);
+      }
+      size_t at = e;
+      for (size_t i = b; i < e; ++i) {
+        const auto t = text_of(src_, kids[i]);
+        if (is_binary_op(ntype(kids[i])) && (t == "+" || t == "-")) {
+          at = i;
+        }
+      }
+      if (at == e) {
+        for (size_t i = b; i < e; ++i) {
+          if (is_binary_op(ntype(kids[i])) && text_of(src_, kids[i]) == "*") {
+            at = i;
+          }
+        }
+      }
+      if (at == e || at == b || at + 1 == e) {
+        return std::nullopt;
+      }
+      const auto l = self(self, b, at);
+      const auto r = self(self, at + 1, e);
+      if (!l || !r) {
+        return std::nullopt;
+      }
+      const auto op = text_of(src_, kids[at]);
+      return op == "+" ? *l + *r : op == "-" ? *l - *r : *l * *r;
+    };
+    return fold_run(fold_run, 0, kids.size());
+  }
+
+  // `value#[i]` / `value#[lo..=hi]` / `value#[lo..<hi]` / `value#[lo..+n]` (n
+  // bits starting at lo) / `value#[..=hi]` / `value#[..<hi]` — a bit select on
+  // a testbench value. The bounds must be compile-time constants (they set the
+  // result's width, and the driver's values are statically sized); a runtime
+  // index is rejected with a clear message rather than an invalid-C++ driver.
+  // The select's `index` is a range exactly when it is `lo <range-op> hi` (the
+  // prp2lnast rule), so `x#[2 + 1]` is bit 3, never the range 2..=1. The
+  // open-top forms (`lo..`, `..`) need the value's declared width, which a
+  // testbench value does not carry: rejected. Lowered as shift + mask,
   // ZERO-extended, so a slice is a plain non-negative value of its own width.
   Val eval_bit_select(TSNode n) {
     TSNode base = ts_node_named_child(n, 0);
@@ -2176,39 +2523,50 @@ private:
     if (ts_node_is_null(sel)) {
       fail("bit select with no range: " + text_of(src_, n).substr(0, 40));
     }
-    // the range: either one constant (a single bit) or `lo ..= hi` / `lo ..< hi`
-    std::vector<TSNode> parts;
-    std::string         range_op;
-    for (TSNode c : ts_node_named_children(sel)) {
-      for (TSNode k : ts_node_named_children(c)) {
-        if (is_binary_op(ntype(k))) {
-          range_op = text_of(src_, k);
-        } else {
-          parts.push_back(k);
-        }
-      }
-      if (parts.empty()) {
-        parts.push_back(c);  // a bare `#[3]`: the select wraps the constant directly
-      }
-    }
-    auto const_of = [&](TSNode k) {
-      const Val v = eval(k);
-      if (!v.has_lit) {
+    auto bound = [&](TSNode k) {
+      const auto v = fold_const_int(k);
+      if (!v) {
         fail("bit select bounds must be compile-time constants in a test: " + text_of(src_, n).substr(0, 40));
       }
-      return static_cast<int>(v.lit);
+      return static_cast<int>(*v);
     };
-    int lo = 0, hi = 0;
-    if (parts.size() == 1) {
-      lo = hi = const_of(parts[0]);
-    } else if (parts.size() == 2) {
-      lo = const_of(parts[0]);
-      hi = const_of(parts[1]);
-      if (range_op == "..<") {
+    // The kind of a range operator node (`op_range_inclusive` ...), or "".
+    auto range_kind = [&](TSNode item) -> std::string {
+      if (ntype(item) != "expression_item" || ts_node_named_child_count(item) != 3) {
+        return "";
+      }
+      const TSNode op = ts_node_named_child(item, 1);
+      if (ntype(op) != "binary_other_op" || ts_node_named_child_count(op) == 0) {
+        return "";
+      }
+      const auto k = ntype(ts_node_named_child(op, 0));
+      return k == "op_range_inclusive" || k == "op_range_exclusive" || k == "op_range_count" ? std::string{k} : "";
+    };
+    int          lo = 0, hi = 0;
+    const TSNode index = field(sel, "index");
+    const TSNode range = field(sel, "range");
+    if (!ts_node_is_null(range)) {
+      const TSNode incl = field(range, "from_zero_inclusive");
+      const TSNode excl = field(range, "from_zero_exclusive");
+      if (!ts_node_is_null(incl)) {
+        hi = bound(incl);
+      } else if (!ts_node_is_null(excl)) {
+        hi = bound(excl) - 1;
+      } else {
+        fail("open-ended bit select needs an explicit upper bound in a test (write `lo..=hi`): " + text_of(src_, n).substr(0, 40));
+      }
+    } else if (ts_node_is_null(index)) {
+      fail("unsupported bit select in test: " + text_of(src_, n).substr(0, 40));
+    } else if (const auto kind = range_kind(index); !kind.empty()) {
+      lo = bound(ts_node_named_child(index, 0));
+      hi = bound(ts_node_named_child(index, 2));
+      if (kind == "op_range_exclusive") {
         --hi;
+      } else if (kind == "op_range_count") {
+        hi = lo + hi - 1;
       }
     } else {
-      fail("unsupported bit select in test: " + text_of(src_, n).substr(0, 40));
+      lo = hi = bound(index);
     }
     if (hi < lo || lo < 0) {
       fail("bit select range must be ascending and non-negative: " + text_of(src_, n).substr(0, 40));
@@ -2221,6 +2579,121 @@ private:
     // are zext (the signed conversion would take a bit ABOVE the field as the
     // sign, and the second would sign-extend the field's own top bit).
     return slop_val("(" + shifted + ").zext_to<" + std::to_string(w) + ">().zext_to<" + std::to_string(w + 1) + ">()", w + 1);
+  }
+
+  // The width N when a test operand is UNSIGNED-typed, the case where `~`
+  // flips N bits (user ruling 26), the same rule the compiler applies: a local
+  // or file-scope const declared `uN` / `unsigned(bits=N)`, an untyped `const`
+  // alias of such (ruling 38), an unsigned DUT field or `regref`, a `uN(...)`
+  // cast, a bit select, a `~` of such, a bitwise `&`/`|`/`^` of such (the
+  // widest), any of them in parentheses. 0 for a signed or untyped value (`-x
+  // - 1`). `v` is the operand's evaluated value when there is one (a select is
+  // its N-bit field in an N+1 plane); a nested operand has none.
+  int test_unsigned_bits(TSNode n, const Val* v) {
+    n = unwrap(n);
+    while (ntype(n) == "tuple" && ts_node_named_child_count(n) == 1) {  // `~(x)`: the same value
+      n = unwrap(ts_node_named_child(n, 0));
+    }
+    const auto t = ntype(n);
+    if (t == "identifier") {
+      const std::string nm = text_of(src_, n);
+      if (file_const_eval_.empty()) {  // a file const's right-hand side sees file scope only
+        if (auto it = ref_alias_.find(nm); it != ref_alias_.end()) {
+          return it->second.is_signed ? 0 : it->second.width;
+        }
+        if (const auto it = local_ubits_.find(nm); it != local_ubits_.end()) {
+          return it->second;
+        }
+        if (const auto it = const_alias_rv_.find(nm); it != const_alias_rv_.end()) {
+          const Val av = eval(it->second);
+          return test_unsigned_bits(it->second, &av);
+        }
+      }
+      // A file-scope `const K:u3 = ...` (its declaration is the rvalue's
+      // parent), or an untyped `const t = K` alias of one.
+      const TSNode rv = file_const_rvalue(nm);
+      if (ts_node_is_null(rv)) {
+        return 0;
+      }
+      const TSNode lv = field(ts_node_parent(rv), "lvalue");
+      if (ntype(lv) != "identifier" || !file_const_eval_.insert(nm).second) {
+        return declared_uint_bits(src_, lv);
+      }
+      const Val av = eval(rv);
+      const int ub = test_unsigned_bits(rv, &av);
+      file_const_eval_.erase(nm);
+      return ub;
+    }
+    if (t == "expression_item") {
+      // `a & b`, `a | b ^ c`: a uN (the widest) when every operand is one, as
+      // the compiler types a bitwise and/or/xor (so nand/nor/xnor follow the
+      // rule); any other operator or operand is untyped.
+      int  bits    = 0;
+      bool operand = true;
+      for (TSNode c : ts_node_named_children(n)) {
+        if (!operand) {
+          const TSNode op = ts_node_named_child(c, 0);
+          const auto   ot = ts_node_is_null(op) ? std::string_view{} : ntype(op);
+          if (ntype(c) != "binary_other_op" || (ot != "op_bit_and" && ot != "op_bit_or" && ot != "op_bit_xor")) {
+            return 0;
+          }
+        } else {
+          const int w = test_unsigned_bits(c, nullptr);
+          if (w == 0) {
+            return 0;
+          }
+          bits = std::max(bits, w);
+        }
+        operand = !operand;
+      }
+      return operand ? 0 : bits;  // a dangling operator is no expression
+    }
+    if (t == "dot_expression") {
+      std::string base, fld;
+      if (!inst_dot(n, base, fld)) {
+        return 0;
+      }
+      int  w         = 0;
+      bool is_signed = false;
+      (void)field_access(base, fld, /*write=*/false, &w, &is_signed);
+      return is_signed ? 0 : w;
+    }
+    if (t == "function_call_expression") {
+      const TSNode      fn   = field(n, "function");
+      const std::string fnnm = ts_node_is_null(fn) ? "" : text_of(src_, fn);
+      if (fnnm.size() >= 2 && fnnm[0] == 'U'
+          && std::all_of(fnnm.begin() + 1, fnnm.end(), [](unsigned char c) { return std::isdigit(c) != 0; })) {
+        return std::atoi(fnnm.c_str() + 1);
+      }
+      return 0;
+    }
+    if (t == "unary_expression") {  // `~~x`: a typed `~` result is a uN itself
+      std::string op;
+      TSNode      inner{};
+      for (TSNode c : ts_node_named_children(n)) {
+        if (is_unary_op(ntype(c))) {
+          op = text_of(src_, c);
+        } else {
+          inner = c;
+        }
+      }
+      return op == "~" && !ts_node_is_null(inner) ? test_unsigned_bits(inner, nullptr) : 0;
+    }
+    if (t == "bit_selection" && v != nullptr && v->kind == Val::Kind::Slop && v->w >= 2) {
+      return v->w - 1;
+    }
+    return 0;
+  }
+
+  // `~v`: the typed form flips only the operand's own `ub` bits, read back as
+  // the non-negative N-bit field (zero sign slot); ub == 0 is `-v - 1`.
+  Val apply_bit_not(const Val& v, int ub) {
+    if (ub <= 0) {
+      return apply_unary("~", v);
+    }
+    return slop_val(
+        "((" + to_slop(v).cpp + ").not_op()).zext_to<" + std::to_string(ub) + ">().zext_to<" + std::to_string(ub + 1) + ">()",
+        ub + 1);
   }
 
   Val apply_unary(const std::string& op, const Val& v) {
@@ -2336,15 +2809,27 @@ private:
     if (i >= e) {
       fail("dangling unary operator in test expression");
     }
-    Val v = eval(kids[i]);
+    Val v  = eval(kids[i]);
+    int ub = test_unsigned_bits(kids[i], &v);  // a typed `~` result stays a uN for an outer `~`
     ++i;
     for (auto it = pre.rbegin(); it != pre.rend(); ++it) {
-      v = apply_unary(*it, v);
+      if (*it == "~") {
+        v = apply_bit_not(v, ub);
+      } else {
+        v  = apply_unary(*it, v);
+        ub = 0;
+      }
     }
     return v;
   }
 
   Val compare(const std::string& op, const Val& a, const Val& b) {
+    if (a.kind == Val::Kind::String || b.kind == Val::Kind::String) {
+      if (a.kind != b.kind) {
+        fail("comparison between string and numeric simulation values");
+      }
+      return bool_val("(" + a.cpp + " " + op + " " + b.cpp + ")");
+    }
     // Both sides are built non-negative (or explicitly signed), so one common
     // width is enough and the signed compare agrees with the unsigned reading.
     const Val         as = to_slop(a), bs = to_slop(b);
@@ -2543,6 +3028,26 @@ private:
     return true;
   }
 
+  // The per-instance cycle counter a test's read of an auto-wired Clock input
+  // sees. One increment marker follows each `step()`; it becomes real code only
+  // when the test reads such an input (edges_used_), once the body is generated.
+  static constexpr std::string_view kEdgeMark = "/*__EDGE_";
+
+  // Auto-wire every SECONDARY Clock input of `var` the test never drives to the
+  // clock being stepped: the simulator commits a secondary clock's state on a
+  // detected rising edge of its net (the reference clock commits every period),
+  // so raise the net and forget its previous level before each period.
+  void emit_clock_autowire(std::ostringstream& o, const std::string& ind, const std::string& var) {
+    const Dut& d = duts_.at(inst_of_var.at(var));
+    for (size_t i = 0; i < d.inputs.size(); ++i) {
+      if (i >= d.inputs_prev.size() || d.inputs_prev[i].empty() || poked_.count({var, d.inputs[i]}) != 0) {
+        continue;
+      }
+      o << ind << "__prp_poke(" << var << ".__in." << d.inputs[i] << ", Slop<2>::create_integer(1));\n";
+      o << ind << var << "." << d.inputs_prev[i] << " = false;\n";
+    }
+  }
+
   // ---- statements -----------------------------------------------------------
   void gen_stmt(std::ostringstream& o, TSNode n, int depth) {
     std::string ind(depth * 2, ' ');
@@ -2573,13 +3078,17 @@ private:
       TSNode                            cnt   = field(n, "value");
       if (ts_node_is_null(cnt)) {
         for (const auto& [var, m] : inst_of_var) {
+          emit_clock_autowire(o, ind, var);
           o << ind << var << ".step();\n";
+          o << ind << kEdgeMark << var << "__*/\n";
         }
         o << ind << kHook;
       } else {
         o << ind << "for (long _s = 0; _s < (long)(" << as_long(cnt) << "); ++_s) {\n";
         for (const auto& [var, m] : inst_of_var) {
+          emit_clock_autowire(o, ind + "  ", var);
           o << ind << "  " << var << ".step();\n";
+          o << ind << "  " << kEdgeMark << var << "__*/\n";
         }
         o << ind << "  " << kHook;
         o << ind << "}\n";
@@ -2723,6 +3232,14 @@ private:
     }
     // The local's declared width is >= every value assigned to it (see
     // infer_local_widths), so this conversion never loses anything.
+    if (string_locals_.count(lname)) {
+      const Val value = rhs_val();
+      if (value.kind != Val::Kind::String) {
+        fail("string local assigned a non-string value");
+      }
+      o << ind << lname << " = " << value.cpp << ";\n";
+      return;
+    }
     o << ind << lname << " = " << at_width(rhs_val(), local_w_.at(lname)) << ";\n";
   }
 
@@ -2819,7 +3336,7 @@ private:
       if (std::string_view(what) == "clock") {
         fail("a `tick` has ONE loop counter, so `clocks=(...)` takes ONE entry (got " + std::to_string(seen)
              + "). This is NOT a multi-clock limitation: drive the second clock as an ordinary input "
-               "(`acc.clkb = ...`) and give its registers `clock_pin=ref clkb` — they commit on that net's edges. "
+               "(`acc.clkb = ...`) and give its registers `clock_pin=clkb` — they commit on that net's edges. "
                "See inou/prp/tests/sim/multiclock_two_domain.prp");
       }
       fail(std::string("only a single ") + what + " is supported for now (got " + std::to_string(seen) + ")");
@@ -2859,8 +3376,12 @@ private:
     for (const auto& v : locals_) {
       o << ind << "    _tb[\"" << v << "\"] = " << v << ".to_pyrope();\n";
     }
+    for (const auto& v : string_locals_) {
+      o << ind << "    _tb[\"" << v << "\"] = " << v << ";\n";
+    }
     o << ind << "    hlop::ckpt::write_str_map(_cdir + \"/tb.json\", _tb);\n";
     o << ind << "    std::map<std::string, std::string> _meta;\n";
+    o << ind << "    _meta[\"arguments\"] = _checkpoint_argument_identity();\n";
     o << ind << "    _meta[\"cycle\"] = std::to_string(" << clk << ");\n";
     o << ind << "    unsigned long long _dh = hlop::ckpt::kFnvOffset;\n";
     for (const auto& [var, m] : inst_of_var) {
@@ -2896,6 +3417,10 @@ private:
     o << ind << "  long _nc = hlop::ckpt::nearest_checkpoint_cycle(_ckpt_base, _rt);\n";
     o << ind << "  if (_nc >= 0) {\n";
     o << ind << "    std::string _cdir = hlop::ckpt::ckpt_path(_ckpt_base, _nc);\n";
+    o << ind << "    const auto _ameta = hlop::ckpt::read_str_map(_cdir + \"/meta.json\");\n";
+    o << ind
+      << "    if (auto _ai = _ameta.find(\"arguments\"); _ai == _ameta.end() || _ai->second != _checkpoint_argument_identity()) "
+         "throw std::runtime_error(\"checkpoint simulation arguments differ or are unavailable; restart without checkpoint\");\n";
     o << ind << "    auto _rregs = hlop::ckpt::read_str_map(_cdir + \"/regs.json\");\n";
     for (const auto& [var, m] : inst_of_var) {
       o << ind << "    " << var << ".load_state(\"" << var << ".\", _rregs, _cdir);\n";
@@ -2904,6 +3429,9 @@ private:
     for (const auto& v : locals_) {
       o << ind << "    if (auto _it = _rtb.find(\"" << v << "\"); _it != _rtb.end()) " << v << " = Slop<" << local_w_.at(v)
         << ">::from_pyrope(_it->second);\n";
+    }
+    for (const auto& v : string_locals_) {
+      o << ind << "    if (auto _it = _rtb.find(\"" << v << "\"); _it != _rtb.end()) " << v << " = _it->second;\n";
     }
     o << ind << "    { unsigned long long _dh = hlop::ckpt::kFnvOffset;\n";
     for (const auto& [var, m] : inst_of_var) {
@@ -2924,6 +3452,7 @@ private:
          "\"lhd sim: warning: checkpoint used randomness (%s draws); PRNG stream is not restored, so randomized "
          "stimulus will diverge after restart\\n\", _rd->second.c_str()); }\n";
     o << ind << "    " << clk << " = _nc;\n";
+    o << ind << "    /*__EDGES_RESTART__*/\n";
     if (!vcd_dir_.empty()) {
       // Align the VCD time axis with the absolute cycle (the period counter is not
       // checkpointed; reset_cycle zeroed it), so a windowed trace timestamps at ~cycle*10.
@@ -3181,10 +3710,53 @@ private:
       return;
     }
     // format string = first arg (a constant wrapping a [interpolated_]string_literal)
-    std::string lit = text_of(src_, ts_node_named_child(args, 0));
+    const TSNode lit_node = ts_node_named_child(args, 0);
+    std::string  lit      = text_of(src_, lit_node);
+    // Absolute offset of lit[0] in the source when `lit` is a "…" body: the
+    // hole ends are then found by prpparse's own scanner (the one the parser
+    // used), so a `}`/`:` inside a comment, nested string or backtick name in
+    // a hole never ends it or starts a format spec.
+    bool     dq_body  = false;
+    uint32_t body_off = 0;
     if (lit.size() >= 2 && lit.front() == '"' && lit.back() == '"') {
-      lit = lit.substr(1, lit.size() - 2);
+      lit      = lit.substr(1, lit.size() - 2);
+      dq_body  = lit_node.buf != nullptr;
+      body_off = ts_node_start_byte(lit_node) + 1;
     }
+    // Hole text is code: drop `//` and nesting `/* */` comments, then trim.
+    auto hole_code = [](std::string_view h) {
+      std::string out;
+      for (size_t k = 0; k < h.size();) {
+        if (k + 1 < h.size() && h[k] == '/' && h[k + 1] == '/') {
+          while (k < h.size() && h[k] != '\n') {
+            ++k;
+          }
+        } else if (k + 1 < h.size() && h[k] == '/' && h[k + 1] == '*') {
+          int d = 0;
+          while (k + 1 < h.size()) {
+            if (h[k] == '/' && h[k + 1] == '*') {
+              ++d;
+              k += 2;
+            } else if (h[k] == '*' && h[k + 1] == '/') {
+              k += 2;
+              if (--d == 0) {
+                break;
+              }
+            } else {
+              ++k;
+            }
+          }
+          if (d > 0) {
+            k = h.size();
+          }
+        } else {
+          out.push_back(h[k++]);
+        }
+      }
+      const auto b = out.find_first_not_of(" \t\r\n");
+      const auto e = out.find_last_not_of(" \t\r\n");
+      return b == std::string::npos ? std::string{} : out.substr(b, e - b + 1);
+    };
     // positional args after the format string
     std::vector<Val> pos;
     uint32_t         ai = 0;  // skips the format string (the first named child)
@@ -3198,23 +3770,42 @@ private:
     size_t                   pi = 0;
     for (size_t i = 0; i < lit.size(); ++i) {
       char c = lit[i];
+      if (c == '\\' && i + 1 < lit.size()) {
+        // An escape pair is text, never a hole: `\{` / `\}` print the brace;
+        // any other pair keeps its backslash (printed verbatim, as before).
+        const char d = lit[++i];
+        if (d == '{' || d == '}') {
+          fmt += d;
+        } else {
+          fmt += "\\\\";
+          fmt += d == '"' ? std::string("\\\"") : d == '\\' ? std::string("\\\\") : d == '%' ? std::string("%%") : std::string(1, d);
+        }
+        continue;
+      }
       if (c == '{') {
         if (i + 1 < lit.size() && lit[i + 1] == '{') {
           fmt += '{';
           ++i;
           continue;
         }
-        size_t      j    = lit.find('}', i);
-        std::string name = (j == std::string::npos) ? "" : lit.substr(i + 1, j - i - 1);
+        size_t j = lit.find('}', i);
+        if (dq_body) {
+          const uint32_t end = prpparse::Lexer(*lit_node.buf).istring_hole_end(body_off + static_cast<uint32_t>(i));
+          j = (end > body_off && end - 1 - body_off < lit.size()) ? size_t{end - 1 - body_off} : std::string::npos;
+        }
+        std::string name = (j == std::string::npos) ? "" : hole_code(std::string_view(lit).substr(i + 1, j - i - 1));
         // `{val:spec}` — split the format spec off; a bracketed index
         // (`{acc.registers.regs[2]:x}`) keeps its brackets in `name`.
         std::string spec;
         if (auto c2 = name.rfind(':'); c2 != std::string::npos && name.find(']', c2) == std::string::npos) {
-          spec = name.substr(c2 + 1);
-          name = name.substr(0, c2);
+          spec = hole_code(std::string_view(name).substr(c2 + 1));  // trims: `{n : b}`
+          name = hole_code(std::string_view(name).substr(0, c2));
         }
         const Val vv = name.empty() ? (pi < pos.size() ? pos[pi++] : long_val("0")) : interp_expr(name);
-        if (vv.kind == Val::Kind::Bool && spec.empty()) {
+        if (vv.kind == Val::Kind::String && spec.empty()) {
+          fmt += "%s";
+          argv.push_back("(" + vv.cpp + ").c_str()");
+        } else if (vv.kind == Val::Kind::Bool && spec.empty()) {
           fmt += "%ld";
           argv.push_back("(long)(" + vv.cpp + ")");
         } else {
@@ -3273,7 +3864,7 @@ private:
 // stored in `src_out`; the TSNodes handed to the callback reference it, so it
 // must outlive the callback (the caller owns it).
 int for_each_test(const std::string& file, const std::string& test_sel, std::string& src_out, std::string& err,
-                  const std::function<void(TSNode, const std::string&)>& on_test) {
+                  const std::function<void(TSNode, const std::string&, const std::map<std::string, TSNode>&)>& on_test) {
   src_out = slurp(file);
   if (src_out.empty()) {
     err = "could not read source file: " + file;
@@ -3289,7 +3880,20 @@ int for_each_test(const std::string& file, const std::string& test_sel, std::str
     return -1;
   }
   TSNode root_node{root, &buf};
-  int    matched = 0;
+
+  // File-scope `const` / `comptime const` declarations, visible in every test
+  // block (Driver_gen::file_const_rvalue).
+  std::map<std::string, TSNode> file_consts;
+  for (TSNode c : ts_node_named_children(root_node)) {
+    TSNode decl = ntype(c) == "assignment" ? field(c, "decl") : TSNode{};
+    TSNode kind = ts_node_is_null(decl) ? TSNode{} : field(decl, "storage");
+    if (!ts_node_is_null(kind) && ntype(kind) == "const_decl") {
+      if (const auto nm = lvalue_name(src_out, field(c, "lvalue")); !nm.empty() && !ts_node_is_null(field(c, "rvalue"))) {
+        file_consts[nm] = field(c, "rvalue");
+      }
+    }
+  }
+  int matched = 0;
   for (TSNode c : ts_node_named_children(root_node)) {
     if (ntype(c) != "test_statement") {
       continue;
@@ -3298,14 +3902,15 @@ int for_each_test(const std::string& file, const std::string& test_sel, std::str
     if (ts_node_is_null(name_node)) {
       continue;
     }
-    std::string name = text_of(src_out, name_node);
-    if (!test_sel.empty() && name != test_sel) {
+    // `cnt`.`basic` and cnt.basic are the same test, however either side spells it.
+    std::string name = str_tools::canonical_escaped_path(text_of(src_out, name_node));
+    if (!test_sel.empty() && name != str_tools::canonical_escaped_path(test_sel)) {
       continue;
     }
     if (std::getenv("PRP_SIM_DUMP") != nullptr) {
       dump_node(src_out, c, 0);
     }
-    on_test(c, name);
+    on_test(c, name, file_consts);
     ++matched;
   }
   return matched;
@@ -3393,7 +3998,8 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   std::set<std::string>              dut_classes;
   std::set<std::pair<int, uint64_t>> tb_unknown_keys;
 
-  int matched = for_each_test(file, test_sel, src, err, [&](TSNode test, const std::string& name) {
+  using File_consts = std::map<std::string, TSNode>;
+  int matched = for_each_test(file, test_sel, src, err, [&](TSNode test, const std::string& name, const File_consts& file_consts) {
     if (gen_failed) {
       return;  // stop emitting after the first error (err already captured)
     }
@@ -3406,6 +4012,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
 
     Driver_gen              gen(src, duts, vcd_dir, file, runtime_support_on, unknown_zero);  // fresh per-test state
     std::vector<Param_info> pinfo;
+    gen.set_file_consts(&file_consts);
     try {
       fns << gen.emit_run_fn(test, name, fn_id, pinfo, includes) << "\n";
     } catch (const Gen_error& ge) {
@@ -3457,6 +4064,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   // sim.tune markers (lhd greps them before forwarding a `--set`: an older driver
   // swallows `--set` as a test parameter and only warns).
   o << "// driver-set-parser: 1\n";
+  o << "// driver-plusarg-parser: 1\n";
   o << "// tune-sampler: 1\n";
   o << "// One driver for every `test` block of " << file << ":\n";
   o << "//   --list-tests          print the tests + parameters as JSON, then exit\n";
@@ -3464,7 +4072,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   o << "//   --seed N              hlop PRNG seed for random / unknown bits\n";
   o << "//   --set KEY=VALUE       a run-time lhd key (lhd.seed, sim.init_zero, sim.unknown_zero=true,\n";
   o << "//                         sim.checkpoint*, sim.tune.profile*); a codegen key must restate the baked value\n";
-  o << "//   --<param> N           bind a `test name(params)` parameter\n";
+  o << "//   +<param>=VALUE       bind a `test name(params)` parameter\n";
   o << "//   --help, -h            usage\n";
   for (const auto& h : includes) {
     o << "#include \"" << h << "\"\n";
@@ -3477,6 +4085,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   // every module header: include-guarded, so after a DUT header this is a no-op,
   // and it is the only copy for a driver whose tests include no DUT header.
   o << livehd::sim::kUnknownLiteralHelper;
+  o << livehd::sim::kPlusargHelper;
   o << livehd::sim::kTuneHashHelper;
   // Width-adapting input poke: a testbench value is a Slop of its OWN width, so
   // driving it into a Slop<N> port is a width change with Verilog `port = val`
@@ -3903,6 +4512,8 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "    std::fprintf(stderr, \"lhd sim: --%s expects a non-negative integer, got '%s'\\n\", _key.c_str(), "
        "_s.c_str());\n    std::exit(2);\n  }\n  return _r;\n}\n\n";
 
+  o << kPlusargRuntime;
+
   // ---- sim.tune (sim_profile.md §6): what this binary was generated with, the
   // per-root identity, then the runtime + the `--set` parser (prp_sim_rt.hpp).
   const auto cbool = [](bool b) { return b ? "true" : "false"; };
@@ -3941,7 +4552,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   }
   o << "};\n";
   // Every test parameter declared in this binary (union over all tests). The
-  // end-of-run check warns about an unknown `--key` against THIS set (not the
+  // end-of-run check warns about an unknown `+key` against THIS set (not the
   // per-run `_consumed`), so a declared-but-unbound parameter — e.g. one a test
   // fail-fasts past on an earlier required parameter — is not falsely flagged.
   {
@@ -3963,7 +4574,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
 
   o << "static void _usage(const char* _argv0) {\n"
        "  std::printf(\"usage: %s [--list-tests] [--test NAME]... [--seed N] [--result-json PATH] [--set KEY=VALUE]... "
-       "[--<param> N]...\\n\", _argv0);\n"
+       "[+<param>=VALUE]...\\n\", _argv0);\n"
        "  std::printf(\"  Runs the lhd-sim test(s) compiled into this binary (default: all).\\n\");\n"
        "  std::printf(\"options:\\n\");\n"
        "  std::printf(\"  --list-tests       print the tests + parameters as JSON and exit\\n\");\n"
@@ -3977,7 +4588,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "  std::printf(\"  --set KEY=VALUE    a run-time lhd key: lhd.seed, sim.init_zero, sim.unknown_zero=true, "
        "sim.checkpoint*,\\n\");\n"
        "  std::printf(\"                     sim.tune.profile=auto|on|off, sim.tune.profile_dir=DIR (repeatable)\\n\");\n"
-       "  std::printf(\"  --<param> N        bind a test parameter (see --list-tests)\\n\");\n"
+       "  std::printf(\"  +<param>=VALUE     bind a test parameter (see --list-tests)\\n\");\n"
        "  std::printf(\"  --help, -h         show this message and exit\\n\");\n"
        "  std::printf(\"tests:\\n\");\n"
        "  for (const auto& _t : _tests) std::printf(\"  %s\\n\", _t.name);\n"
@@ -3987,7 +4598,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   // the generic `--<param> value` test flags), then run the selected test(s). The
   // seed is set once (hlop's PRNG latches its thread_local engine on first use, so
   // it is process-wide, not re-applied per test). A required-parameter-missing
-  // test reports FAIL and the run continues; an unknown `--key` that no run test
+  // test reports FAIL and the run continues; an unknown `+key` that no run test
   // consumes is warned about at the end.
   o << "int main(int argc, char** argv) {\n"
        "  unsigned long long _seed = "
@@ -3996,9 +4607,10 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "  bool _list = false;\n"
        "  std::string _result_json;\n"
        "  std::vector<std::string> _selected;\n"
-       "  std::map<std::string, std::string> _args;\n"
+       "  auto& _args = _plusargs;\n"
        "  for (int _i = 1; _i < argc; ++_i) {\n"
        "    std::string _arg = argv[_i], _key = _arg, _val; bool _has_val = false;\n"
+       "    if (!_arg.empty() && _arg[0] == '+') { _add_plusarg(_arg); continue; }\n"
        "    if (auto _eq = _arg.find('='); _eq != std::string::npos) { _key = _arg.substr(0, _eq); _val = "
        "_arg.substr(_eq + 1); _has_val = true; }\n"
        "    auto _need = [&]() -> std::string { if (_has_val) return _val; if (_i + 1 < argc) return argv[++_i]; "
@@ -4037,13 +4649,15 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "    else if (_key == \"--query-json\") { _q.out = _need(); }\n"
        "    else if (_key == \"--test\") { _selected.push_back(_need()); }\n"
        // BEFORE the generic `--<param>` arm, which would bind it as a test
-       // parameter named `set` (a reserved name for exactly that reason).
+       // legacy test-parameter alias; +set remains an independent application key.
        "    else if (_key == \"--set\") { _apply_set(_need(), _seed); }\n"
-       "    else if (_key.size() > 2 && _key[0] == '-' && _key[1] == '-') { _args[_key.substr(2)] = _need(); }\n"
+       "    else if (_key.size() > 2 && _key[0] == '-' && _key[1] == '-') { _add_plusarg(\"+\" + _key.substr(2) + \"=\" + "
+       "_need()); }\n"
        "    else { std::fprintf(stderr, \"lhd sim: unknown argument '%s'\\n\", _key.c_str()); _usage(argv[0]); return "
        "2; }\n"
        "  }\n"
        "  if (_list) { std::printf(\"%s\\n\", _tests_json); return 0; }\n"
+       "  __lhd_sim_print_hook = [](const std::string& text) { _tp_out(\"%s\", text.c_str()); };\n"
        "  hlop_set_random_seed(_seed);\n"
        "  _seed_used = _seed;  // mirrored into checkpoint meta.json\n"
        // Before any test: every `?` literal draws on FIRST USE, so this makes all
@@ -4087,7 +4701,9 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "    std::string _err; _Fail _ff;\n"
     << (vcd_on ? "    vcd::global_timestamp = 0;  // each test gets an independent VCD timeline (#0..)\n" : "")
     << "    _tp.begin_test(_t->name);\n"
-       "    long _f = _t->run(_args, _consumed, _err, _ff);\n"
+       "    long _f = -1;\n"
+       "    try { _f = _t->run(_args, _consumed, _err, _ff); }\n"
+       "    catch (const std::exception& e) { _err = e.what(); }\n"
        // Freeze the test's accounting BEFORE anything else prints or re-runs it.
        "    _tp.finish_test(_f, _ff);\n"
        // 2f-sim: the anchor a failure-relative query resolves against.
@@ -4127,6 +4743,7 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "      _rj += _rj_first ? \"\" : \",\"; _rj_first = false;\n"
        "      _rj += \"{\\\"test\\\":\\\"\"; _rj += _json_esc(_t->name); _rj += \"\\\",\\\"status\\\":\\\"\"; _rj += "
        "_status; _rj += \"\\\"\";\n"
+       "      _rj += _argument_json();\n"
        "      if (_f < 0) { _rj += \",\\\"error\\\":\\\"\"; _rj += _json_esc(_err); _rj += \"\\\"\"; }\n"
        "      else if (_f > 0 && _ff.has) {\n"
        "        _rj += \",\\\"cycle\\\":\"; _rj += std::to_string(_ff.cycle);\n"
@@ -4150,8 +4767,9 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
        "_result_json.c_str()); }\n"
        "    else { _ofs << _rj << \"\\n\"; }\n"
        "  }\n"
-       "  for (const auto& _kv : _args) if (_declared_params.find(_kv.first) == _declared_params.end()) std::fprintf(stderr, \"lhd "
-       "sim: warning: --%s matches no test parameter (ignored)\\n\", _kv.first.c_str());\n"
+       "  for (const auto& _kv : _args) if (_declared_params.find(_kv.first) == _declared_params.end() && "
+       "!_plusarg_consumed.count(_kv.first)) std::fprintf(stderr, \"lhd "
+       "sim: warning: +%s matches no test parameter or argument read (unused)\\n\", _kv.first.c_str());\n"
        // ---- observability output (--list-signals / --probe / --break-when) ----
        "  if (_dbg.has_break && _dbg.break_hit) std::fprintf(stderr, \"lhd sim: break-when '%s %s %s' first held at "
        "clock %ld\\n\", _dbg.b_lhs.c_str(), _dbg.b_op.c_str(), _dbg.b_rhs.c_str(), _dbg.break_cycle);\n"
@@ -4417,7 +5035,8 @@ int generate(const std::string& file, const std::string& simdir, const std::stri
   o << "  if (_tp.on) {\n"
        "    std::vector<std::string> _sel;\n"
        "    for (const auto* _t : _torun) _sel.emplace_back(_t->name);\n"
-       "    _tp.write_raw(argv[0], _seed, _args, _sel);\n"
+       "    auto _profile_args = _args; _profile_args[\"+argv\"] = _argument_identity();\n"
+       "    _tp.write_raw(argv[0], _seed, _profile_args, _sel);\n"
        "  }\n";
   o << "  hlop::ckpt::drain_checkpoints();  // block until in-flight checkpoint children finish (write _done)\n"
        "  if (_ckpt.enabled && !_ckpt.dir.empty()) {\n"
@@ -4477,7 +5096,7 @@ std::string tests_to_json(const std::string& file, const std::vector<Test_info>&
 
 int list_tests(const std::string& file, const std::string& test_sel, std::vector<Test_info>& tests, std::string& err) {
   std::string src;
-  int         matched = for_each_test(file, test_sel, src, err, [&](TSNode test, const std::string& name) {
+  int         matched = for_each_test(file, test_sel, src, err, [&](TSNode test, const std::string& name, const auto&) {
     Test_info ti;
     ti.name = name;
     for (const auto& r : read_params_raw(src, test)) {

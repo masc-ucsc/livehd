@@ -1,0 +1,15 @@
+/*
+:name: spec_lexical_cont_case
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// qa.md appendix 3: "... or `case` (word operator -- ALWAYS continues)
+// continues the previous statement." (Q5 answer: "Always continues".)
+const t = (const a=1, const b=3)
+const r = t
+  case (a=1)
+cassert(r)
+const s = t
+  case (a=2)
+cassert(not s)

@@ -8,7 +8,7 @@
 // Task 1k — `ref self` writes back into the receiver, so it needs a `mut`
 // value receiver. A const (or a `type` binding) is rejected.
 
-type t1 = (a:u32=nil, b:string="")
+type t1 = (a:U32=nil, b:String="")
 
 comb set_b(ref self:t1) {
   self.b = "foo"

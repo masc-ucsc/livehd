@@ -1,0 +1,16 @@
+/*
+:name: clock_gate_wire_alias
+:type: compile
+*/
+// An untyped or `Clock` wire is an alias of its Clock: it gates, clocks and
+// passes to a `Clock` output like the Clock itself. A gate's reference clock
+// carries no cycle (ruling 83), so a staged enable times the gate alone.
+pub mod clock_gate_wire_alias(clk:Clock, e:Bool, d:U8) -> (q:U8@[1], o:Clock@[]) {
+  wire w:Clock = clk
+  stage[1] e1 = e
+  const g = Clock(clock_pin=w, enable=e1)
+  reg f:U8:[clock_pin=g] = 0
+  f = d
+  q = f
+  o = w
+}

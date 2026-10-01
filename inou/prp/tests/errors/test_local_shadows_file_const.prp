@@ -1,0 +1,26 @@
+/*
+:name: test_local_shadows_file_const
+:type: error
+:error: variable shadowing: 'A' is already declared in an enclosing scope
+:help: rename the test's variable
+*/
+
+// A file-scope `const` is visible in every test block (ruling 24), so a test
+// local of the same name is shadowing, an error as in a nested lambda
+// (04-variables "Variable scope"). Before, the test compiled and `lhd sim`
+// replayed `B = A * 3` against the TEST's `A`, driving 30 instead of 6.
+
+const A = 2
+const B = A * 3
+
+mod dut(a:U8) -> (o:U8@[0]) {
+  o = a
+}
+
+test dut.t {
+  mut d = dut
+  mut A = 10   // locate_error_here
+  d.a = B
+  step
+  assert(d.o == 6)
+}

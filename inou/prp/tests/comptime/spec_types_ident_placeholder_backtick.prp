@@ -1,0 +1,12 @@
+/*
+:name: spec_types_ident_placeholder_backtick
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// SPEC docs 02-basics "Identifiers": "The pattern matches the whole name: `_1_a` and `__0` remain legal. Using the
+// backtick form (`_`, `_0`, `_1a` in backticks) bypasses the reservation".
+const `_1a` = 8
+const _1_a = 2
+const __0 = 3
+cassert(`_1a` + _1_a + __0 == 13)

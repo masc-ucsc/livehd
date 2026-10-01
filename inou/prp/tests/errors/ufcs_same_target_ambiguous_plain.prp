@@ -1,0 +1,9 @@
+/*
+:name: ufcs_same_target_ambiguous_plain
+:type: error
+:error: ambiguous dotted call.*addk2
+*/
+
+comb addk2(self, a) -> (r) { r = a + 3 }
+const ns2 = (const addk2 = addk2)
+const c5 = ns2.addk2(a=1) // locate_error_here

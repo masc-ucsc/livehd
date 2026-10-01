@@ -4,9 +4,9 @@
 */
 // One source loop contains both a recurrence and independent per-lane writes.
 // Simulation must retain one ordinal loop for the two kinds of work.
-mod loop_mixed_carry(x:u4) -> (sum:u16@[0], lane:u4@[0]) {
-  mut recurrence:u16 = 1
-  mut independent:u4 = 0
+mod loop_mixed_carry(x:U4) -> (sum:U16@[0], lane:U4@[0]) {
+  mut recurrence:U16 = 1
+  mut independent:U4 = 0
   for i in 0..<4 {
     independent#[i] = x#[i]
     recurrence = recurrence * 3 + x#[i]

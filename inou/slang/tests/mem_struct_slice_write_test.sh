@@ -49,8 +49,10 @@ grep -qE '#\[0\.\.=1\] = din#\[8\.\.=11\]#\[2\.\.=3\]' "$prp" \
   || fail "the hi half of the boundary-crossing slice is missing or misplaced"
 grep -qE '#\[2\.\.=3\] = din#\[8\.\.=11\]#\[0\.\.=1\]' "$prp" \
   || fail "the lo half of the boundary-crossing slice is missing or misplaced"
-grep -qE '`span\.hi`\[[^]]*\] *=' "$prp" || fail "span.hi was never written back"
-grep -qE '`span\.lo`\[[^]]*\] *=' "$prp" || fail "span.lo was never written back"
+# The writer spells each field's read-modify-write as the partial write it is
+# (`` `span.hi`[i]#[0..=1] = .. ``), so the write-back is that same statement.
+grep -qE '`span\.hi`\[[^]]*\](#\[[^]]*\])? *=' "$prp" || fail "span.hi was never written back"
+grep -qE '`span\.lo`\[[^]]*\](#\[[^]]*\])? *=' "$prp" || fail "span.lo was never written back"
 
 echo "PASS: $TOP"
 exit 0

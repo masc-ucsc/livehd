@@ -1,0 +1,12 @@
+/*
+:name: spec_calls_vararg_mixed
+:type: error
+:error: must be named|name the argument|mixed|named
+*/
+
+// A punned fixed parameter is legal; positional leftovers are not captured.
+
+comb tag_sum(a, ...inp) -> (r) { r = a + inp[0] + inp[1] }
+
+const a = 1
+const s = tag_sum(a, 2, 3) // locate_error_here

@@ -18,11 +18,14 @@ const q = scale(a, b=10)
 cassert(q == 60)
 
 // Both explicit names but swapped order still binds correctly.
-const r = scale(b=3, a=4)
-cassert(r == 12)
+const r2 = scale(b=3, a=4)
+cassert(r2 == 12)
 
-// Single matching-name variable into a one-arg comb.
-comb negate(a) -> (r) { r = 0 - a }
+// Single matching-name variable into a one-arg comb. (Its input is not named
+// `a`, nor the const above `r`: a visible file-scope const named like a
+// lambda input or output is shadowing, a compile error -- user ruling
+// 2026-09-28 (35).)
+comb negate(v) -> (r) { r = 0 - v }
 const aa = 5
 const s = negate(aa)
 cassert(s == -5)

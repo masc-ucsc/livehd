@@ -7,8 +7,8 @@
 // exactly the spelling the array form exists to REPLACE (the array keeps a
 // compact indexed store for simulation instead of shift/mask packing), so the
 // two must prove equal.
-pub mod top(we:u1, v:u16, raddr:u2) -> (rd:u4@[0]) {
-  reg foo:u16 = nil
+pub mod top(we:U1, v:U16, raddr:U2) -> (rd:U4@[0]) {
+  reg foo:U16 = nil
   rd = (foo >> (raddr * 4)) & 0xf
   if we != 0 {
     foo = v

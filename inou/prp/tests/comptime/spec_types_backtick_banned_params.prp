@@ -1,0 +1,11 @@
+/*
+:name: spec_types_backtick_banned_params
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// SPEC qa.md appendix section 8: "a backticked banned/reserved word (`u8`, `bool`, `U8`, `_0`, `_`) is an
+// ordinary name". Rule: backticked banned words work as a parameter, an output and a named argument.
+comb f(`u8`:U8) -> (`bool`:Bool) { `bool` = `u8` == 3 }
+cassert(f(`u8`=3))
+cassert(not f(`u8`=4))

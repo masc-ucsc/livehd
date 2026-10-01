@@ -11,26 +11,26 @@
 // Entry k of an N-entry array splice lands at bits [k*w .. k*w+w-1] of that
 // splice's window: entry 0 lowest. The indices below say exactly that, and the
 // loop is comptime-unrolled, so this is N literal range writes.
-pub mod top(inp:u8, p:u8, q:u8) -> (regw:u40@[0], combw:u24@[0]) {
-  reg stages:[4]u8:[ordering="old"]
+pub mod top(inp:U8, p:U8, q:U8) -> (regw:U40@[0], combw:U24@[0]) {
+  reg stages:[4]U8:[ordering="old"]
   stages[0] = inp
   stages[1] = stages[0]
   stages[2] = stages[1]
   stages[3] = stages[2]
 
-  mut lanes:[3]u8 = 0
+  mut lanes:[3]U8 = 0
   lanes[0] = inp
   lanes[1] = p
   lanes[2] = q
 
-  mut rw:u40 = 0
+  mut rw:U40 = 0
   rw#[0..=7] = inp          // the scalar entry, at the bottom
   for i in 0..<4 {
     rw#[(8 + i * 8)..=(15 + i * 8)] = stages[i]
   }
   regw = rw
 
-  mut cw:u24 = 0
+  mut cw:U24 = 0
   for i in 0..<3 {
     cw#[(i * 8)..=(7 + i * 8)] = lanes[i]
   }

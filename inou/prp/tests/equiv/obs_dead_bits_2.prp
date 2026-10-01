@@ -1,0 +1,14 @@
+/*
+:name: obs_dead_bits_2
+:lec_grep: observability: 8 unobservable state bit
+*/
+// A NARROWER register: `r` keeps only the observable nibble. The reference's
+// wider `r` pairs with it on the observable (low) bits; its high bits are free
+// rather than pinned to the narrow side's extension.
+pub mod obs_dead_bits(en:Bool, d:U8) -> (q:U4@[0]) {
+  reg r:U4 = 0
+  reg s:U4 = 0
+  if en { r = d#[0..<4] }
+  s = 0
+  q = r
+}

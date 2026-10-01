@@ -1,0 +1,22 @@
+/*
+:name: type_generic_comb_arg_wider_than_param
+:type: error
+:tolg: 1
+:error: argument .a. \(range \[0, 65535\]\) in call to .lowt. may not fit its declared range \[0, 15\]
+:help: an argument never narrows implicitly
+*/
+// User ruling 2026-09-27 (docs 06-functions "Argument types"): the TYPE-generic
+// twin of generic_comb_arg_wider_than_param. `a:T` with `T=u4` declares
+// [0, 15] once the generic is bound, so a u16 actual may not fit and is a
+// compile error at run time too (errors/generic_overflow.prp pins only the
+// comptime-literal case). The caller writes `lowt<T=u4>(a=x#[0..<4])`.
+//
+// Today this compiles silently: the inlined comb passes all 16 bits of `x`
+// through `a:T` and `o:T` (the emitted `y = x`).
+comb lowt<T>(a:T) -> (o:T) {
+  o = a
+}
+
+pub mod type_generic_comb_arg_wider_than_param(x:U16) -> (y:U16@[0]) {
+  y = lowt<T=U4>(a=x)   // locate_error_here
+}

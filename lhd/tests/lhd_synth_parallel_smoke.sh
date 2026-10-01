@@ -9,11 +9,11 @@ import sys
 # Eight independent regions exercise scheduling; multiplier width is not
 # part of that contract. Keep real arithmetic while avoiding 32-bit mapping
 # and netlist-proof costs in every serial, parallel, warm, and error run.
-ports = ', '.join(f'y{i}:u8@[0]' for i in range(8))
+ports = ', '.join(f'y{i}:U8@[0]' for i in range(8))
 with open(sys.argv[1], 'w') as f:
-    f.write(f'mod parallel(a:u8, b:u8) -> ({ports}) {{\n')
+    f.write(f'mod parallel(a:U8, b:U8) -> ({ports}) {{\n')
     for i in range(8):
-        f.write(f'  {{::[color={i+1}]\n    y{i} = (a + {2*i+1}) * (b ^ {2*i+3})\n  }}\n')
+        f.write(f'  {{::[color={i+1}]\n    wrap y{i} = (a + {2*i+1}) * (b ^ {2*i+3})\n  }}\n')
     f.write('}\n')
 PY
 run_synth() {

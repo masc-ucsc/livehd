@@ -1,0 +1,24 @@
+/*
+:name: timecheck_false_scoped_to_lambda
+:type: error
+:tolg: 1
+:error: lands at cycle 0, not 2
+*/
+
+// `::[timecheck=false]` turns the timing checks off in THAT lambda only (user
+// ruling 2026-09-27). `helper` opts out, so its cycle mix (a `stage[1]` value
+// against a cycle-0 input) is accepted. `top` follows it in the same file and
+// keeps every check: its `@[2]` assertion on a cycle-0 value must still fail.
+//
+// The attribute used to mark the whole FILE as Verilog-origin, so every
+// lambda defined after `helper` silently lost its timing and comb-loop checks
+// and this file compiled.
+mod helper::[timecheck=false](d:U4, e:U4) -> (q:U4@[0]) {
+  stage[1] s = d
+  q = s ^ e
+}
+
+pub mod top(a:U4, b:U4) -> (o:U4@[0]) {
+  const t@[2] = a ^ b   // locate_error_here
+  o = t
+}

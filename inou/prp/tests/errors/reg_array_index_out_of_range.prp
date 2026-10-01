@@ -1,0 +1,18 @@
+/*
+:name: reg_array_index_out_of_range
+:type: error
+:error: Pyrope array index 5 is outside \[0, 5\) for .t.
+:help: use an index within the array's declared extent
+*/
+
+// A constant index past a `reg` array's declared extent is the same static
+// error as for a `mut` array. It used to drop the write silently (a generic
+// `[N+1]` extent written at `t[N+1]` too).
+mod m<N=2>(d:U4) -> (q:U4@[1]) {
+  reg t:[N+1]U4 = 0
+  t[N+1] = d   // locate_error_here
+  q = t[0]
+}
+pub mod reg_array_index_out_of_range(d:U4) -> (q:U4@[1]) {
+  q = m<N=4>(d=d)
+}

@@ -11,8 +11,8 @@
 // illegal `% 0` must still be reported. The twin positive case (`N == 0 or …`,
 // which must compile clean) is ../equiv/short_circuit.prp.
 
-const N = 0
-pub mod top(a:u8) -> (y:u8@[0]) {
+comptime const N = 0
+pub mod top(a:U8) -> (y:U8@[0]) {
   cassert(N != 0 or (64 % N == 0)) // locate_error_here
   y = a
 }

@@ -1,0 +1,12 @@
+/*
+:name: spec_types_backtick_reserved_callee
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// SPEC qa.md appendix section 1: "a backticked reserved word is an ordinary name (never the type) in every
+// position." (Q4 "`u4`(x) means the type" was superseded by Q6/Q14-Q16.)
+// Rule: `` `U8`(x) `` calls the USER lambda named U8; the bare `U8(x)` is still the cast.
+comb `U8`(a) -> (o) { o = a + 1 }
+cassert(`U8`(3) == 4)
+cassert(U8(3) == 3)

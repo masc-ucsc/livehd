@@ -37,11 +37,11 @@ run() {
 #    it; the BMC+induction engine proves it UNBOUNDED under mode=normal -> ELIDE.
 # ---------------------------------------------------------------------------
 cat >"$W/fsm.prp" <<'EOF'
-mod fsm(x:bool) -> (o:u2@[0]) {
-  reg st:u2 = 1
+mod fsm(x:Bool) -> (o:U2@[0]) {
+  reg st:U2 = 1
   o = st
   assert(st != 0, "state never zero")
-  st = if st == 3 { 1 } else { st + 1 }
+  wrap st = if st == 3 { 1 } else { st + 1 }
 }
 EOF
 run fsm.prp fsm fast
@@ -60,8 +60,8 @@ grep -q 'assert-deferred\|assert-refuted' "$OUT" \
 #    single-frame witness may be unreachable).
 # ---------------------------------------------------------------------------
 cat >"$W/bug.prp" <<'EOF'
-mod bug(x:bool) -> (o:u8@[0]) {
-  reg s:u8 = 0
+mod bug(x:Bool) -> (o:U8@[0]) {
+  reg s:U8 = 0
   o = s
   assert(s != 3, "s reaches 3")
   wrap s += 1
@@ -82,8 +82,8 @@ grep -q 'assert-deferred' "$OUT" || fail "mode=fast must DEFER the stateful refu
 #    error — even though the free-state Prover fallback "refutes" it.
 # ---------------------------------------------------------------------------
 cat >"$W/deep.prp" <<'EOF'
-mod deep(enable:bool) -> (o:u8@[0]) {
-  reg s:u8 = 0
+mod deep(enable:Bool) -> (o:U8@[0]) {
+  reg s:U8 = 0
   o = s
   assert(s != 200, "s only reaches 200 deep")
   if enable { wrap s += 1 }

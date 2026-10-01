@@ -5,11 +5,11 @@
 */
 // Equivalent spelling with two separately materialized reads at the same
 // address. LEC must merge equal-address douts even when read-port counts differ.
-mod mem_duplicate_read_ports(waddr:u2, wdata:u8, we:u1, raddr:u2) -> (result:u8@[0]) {
-  reg mem:[4]u8 = 0
+mod mem_duplicate_read_ports(waddr:U2, wdata:U8, we:U1, raddr:U2) -> (result:U8@[0]) {
+  reg mem:[4]U8 = 0
   const rd0 = mem[raddr]
   const rd1 = mem[raddr]
-  result = rd0 ^ (rd1 << 1)
+  wrap result = rd0 ^ (rd1 << 1)
   if we != 0 {
     mem[waddr] = wdata
   }

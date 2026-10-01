@@ -1,0 +1,17 @@
+/*
+:name: output_tuple_leaf_bitset
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// A FIELD of a tuple OUTPUT is an output too, so it also starts as nil and can
+// be assembled bit by bit (the output_port_bitset rule, user ruling
+// 2026-09-27). The field write reads the leaf through a copy temp (`%t = r.a`)
+// that feeds the bit write; that copy of the still-undriven leaf failed with
+// "unresolved reference 'r.a'".
+pub comb top(x:U4, s:Bool) -> (r:(a:U4, b:Bool)) {
+  r.a#[0..<2] = x#[2..<4]
+  r.a#[2..<4] = x#[0..<2]
+  r.b = s
+}

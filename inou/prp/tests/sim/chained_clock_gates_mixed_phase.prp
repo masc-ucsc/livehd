@@ -42,36 +42,36 @@
 // gates the FALL. Accepting it would move the commit half a period silently.
 // The edge belongs to the phase plan (step 2); the c2 row is what step 2 must
 // not fold away afterwards.
-pub mod mixphase(clk:bool, e1:bool, e2:bool, d:u8) -> (qp:u8@[1], qn:u8@[1], ctl:u8@[1]) {
+pub mod mixphase(clk:Bool, e1:Bool, e2:Bool, d:U8) -> (qp:U8@[1], qn:U8@[1], ctl:U8@[1]) {
   // CELL A — ORDINARY flavour. Enable latch transparent while `clk` is LOW, so
   // it closes (samples e1) at the RISE; the gate is an AND with the clock.
-  reg e1l:bool:[latch=true]
+  reg e1l:Bool:[latch=true]
   if !clk {
     e1l = e1
   }
-  wire ga:bool = nil
+  wire ga:Bool = nil
   ga = clk and e1l
-  reg fp:u8:[clock_pin=ref ga] = 0
+  reg fp:U8:[clock_pin=ga] = 0
   fp = d
   qp = fp
 
   // CELL B — ACTIVE-LOW flavour, on the ALREADY GATED clock. Its clock input is
   // `not ga`, so its enable latch is transparent while `ga` is HIGH and samples
   // e2 at the FALL — a different phase from cell A, in the same chain.
-  reg e2l:bool:[latch=true]
+  reg e2l:Bool:[latch=true]
   if ga {
     e2l = e2
   }
-  wire nga:bool = nil
+  wire nga:Bool = nil
   nga = not ga
-  wire gb:bool = nil
+  wire gb:Bool = nil
   gb = nga and e2l
-  reg fn:u8:[clock_pin=ref gb] = 0
+  reg fn:U8:[clock_pin=gb] = 0
   fn = d
   qn = fn
 
   // CONTROL: a flop on the ungated reference clock.
-  reg c:u8:[clock_pin=ref clk] = 0
+  reg c:U8:[clock_pin=clk] = 0
   c   = d
   ctl = c
 }
@@ -87,7 +87,7 @@ test mixphase.each_cell_samples_its_own_enable {
     // row). c3: only the ordinary cell closed. c4: both reopen. c5: both closed.
     acc.e1 = (clock != 3) and (clock != 5)
     acc.e2 = (clock != 2) and (clock != 5)
-    mut dv:u8 = 5
+    mut dv:U8 = 5
     if clock == 1 {
       dv = 6
     } elif clock == 2 {
@@ -101,8 +101,8 @@ test mixphase.each_cell_samples_its_own_enable {
     }
     acc.d = dv
     step
-    mut gp:u8 = 5
-    mut gn:u8 = 5
+    mut gp:U8 = 5
+    mut gn:U8 = 5
     if clock >= 1 {
       gp = 6
       gn = 6

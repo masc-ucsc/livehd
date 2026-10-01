@@ -1,0 +1,8 @@
+/*
+:name: spec_lexical_colon_colon_split
+:type: error
+:error: expected a type
+*/
+// qa.md Q39 item 1 / appendix 8: "`: :[attr]` split -> error (`::` one
+// token)".
+const tmp: :[debug] = 1   // locate_error_here

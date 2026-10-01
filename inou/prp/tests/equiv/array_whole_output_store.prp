@@ -1,0 +1,15 @@
+/*
+:name: array_whole_output_store
+:type: lec
+:lec_top: array_whole_output_store
+*/
+// PYROPE-vs-PYROPE group (README "Pyrope <-> Pyrope variants"), lhdtrack
+// suggestions.md 2.2(d)/(e). This file is the REFERENCE: an array OUTPUT
+// written lane by lane. Each `array_whole_output_store_<k>.prp` beside it
+// computes the same lanes another way and must PROVE with no spurious
+// `unset-unused-field` warning.
+pub mod array_whole_output_store(a:U7) -> (o:[2]U8@[0]) {
+  o = 0
+  o[0] = a
+  o[1] = a + 1
+}

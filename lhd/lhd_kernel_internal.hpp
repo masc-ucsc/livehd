@@ -237,7 +237,7 @@ inline constexpr Retired_set_option kRetiredSetOptions[] = {
     {         "pass.lec",
      "strict", "An UNKNOWN verdict always fails now (exit 7): an inconclusive run proved nothing, so it can never exit 0. Drop the setting."                                        },
     {        "pass.usyn",
-     "recipes", "pass.usyn runs ONE recipe now: --set pass.usyn.support=6, pass.usyn.literals=16 and pass.usyn.series=4."},
+     "recipes", "pass.usyn runs one native recipe; tune logical_inputs, stack, branches and cut_inputs instead. Drop the setting."},
     {        "pass.usyn",
      "proof_seconds", "pass.usyn no longer proves equivalence; verify the mapped netlist with `lhd lec` as a separate step. Drop the setting."},
     {        "pass.usyn",
@@ -245,31 +245,29 @@ inline constexpr Retired_set_option kRetiredSetOptions[] = {
     {        "pass.usyn",
      "delay_tolerance", "pass.usyn no longer compares its result against an ABC baseline. Drop the setting."},
     {        "pass.usyn",
-     "max_depth", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+     "max_depth", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
     {        "pass.usyn",
-     "work", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+     "cuts", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
     {        "pass.usyn",
-     "cuts", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+     "joint_limit", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
     {        "pass.usyn",
-     "joint_limit", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+     "joint_windows", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
     {        "pass.usyn",
-     "joint_windows", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+     "image_inputs", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
     {        "pass.usyn",
-     "image_inputs", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+     "reshape_limit", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
     {        "pass.usyn",
-     "reshape_limit", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+     "encoding_limit", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
     {        "pass.usyn",
-     "encoding_limit", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+     "encoding_code_limit", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
     {        "pass.usyn",
-     "encoding_code_limit", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+     "encoding_pair_limit", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
     {        "pass.usyn",
-     "encoding_pair_limit", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+     "symbolic_nodes", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
     {        "pass.usyn",
-     "symbolic_nodes", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+     "cover_limit", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
     {        "pass.usyn",
-     "cover_limit", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
-    {        "pass.usyn",
-     "divisor_limit", "The unate search this bounded was removed (pass.usyn is the LUT cover: domino_levels, depth_slack and cover_cuts bound it). Drop the setting."},
+     "divisor_limit", "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop the setting."},
     {        "pass.usyn",
      "split", "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."},
     {        "pass.usyn",
@@ -287,7 +285,7 @@ inline constexpr Retired_set_option kRetiredSetOptions[] = {
 };
 inline std::string_view retired_set_hint(std::string_view method, std::string_view flag) {
   if ((method == "pass.abc" || method == "pass.usyn") && flag == "satopt") {
-    return "use --set pass.satopt=true|false (satopt runs in the compile step; default on only for synth/lec compiling a source)";
+    return "use --set pass.satopt=true|false (satopt runs in the compile step; default false for every command)";
   }
   for (int pass = 0; pass < 2; ++pass) {
     for (const auto& option : kRetiredSetOptions) {
@@ -419,12 +417,10 @@ void              set_crash_context(std::string_view step, std::string_view log)
 std::string_view  set_pass_method(std::string_view set_name);
 bool              is_kernel_label(std::string_view flag);
 void              merge_sets(const Options& opts, std::string_view pass_name, Eprp_var::Eprp_dict& labels);
-// merge_sets for a MAPPER method (lhd.hpp kMappers). pass.usyn registers
-// ABC's mapping labels (Pass_abc::add_mapping_labels), so `abc.*` tuning
-// applies to both mappers; an explicit `pass.usyn.*` wins. Both the
-// fused `lhd synth` and the standalone `lhd pass <mapper>` go through here so
-// the precedence rule cannot drift between the two entry points.
+// Merge mapper options using kMappers. Native USYN has its own vocabulary and
+// does not inherit ABC synthesis recipes. Both CLI entry points use this seam.
 void              merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::Eprp_dict& labels);
+bool              mapper_maps_cells(const Options& opts, std::string_view method);
 // merge_sets for pass.color: its generic options (`pass.color.*`) and the synth
 // coloring's own (`pass.color.synth.*`) both feed the one pass.color method.
 void              merge_color_sets(const Options& opts, Eprp_var::Eprp_dict& labels);
@@ -447,9 +443,8 @@ std::optional<bool> satopt_setting(const Options& opts);  // the explicit pass.s
 // tops), and satopt pinned off -- an explicit pass.satopt=true targets the
 // elaborated design, never the model library.
 Options           library_model_opts(const Options& opts);
-// satopt in the compile graph pipeline: explicit setting, else on for synth/lec
-// compiling a Pyrope/Verilog source (`from_source`).
-bool              satopt_during_compile(const Options& opts, bool from_source);
+// satopt in the compile graph pipeline: explicit setting, otherwise disabled.
+bool              satopt_during_compile(const Options& opts);
 bool              compile_cache_enabled(const Options& opts);
 void              apply_log_settings(const Options& opts);
 void              apply_lhd_settings(Options& opts);
@@ -516,7 +511,15 @@ std::vector<std::shared_ptr<Lnast>> sorted_by_name(std::vector<std::shared_ptr<L
 void print_line_diff(std::string& out, const std::vector<std::string>& a, const std::vector<std::string>& b, size_t context = 2);
 void tool_cat_ln(Options& opts, Result& res, const std::vector<std::string>& tokens);
 void tool_diff_ln(Options& opts, Result& res, const std::vector<std::string>& tokens);
-void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool need_graphs);
+// The lg: INPUT libraries a compile absorbed into its working library: the
+// dirs, and the dir each absorbed module body came from (module, dir).
+struct Lg_absorbed {
+  std::vector<std::string>                         dirs;
+  std::vector<std::pair<std::string, std::string>> origins;
+};
+// `absorbed` feeds tolg's stale-instance hint; null when none was absorbed.
+void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool need_graphs,
+                  const Lg_absorbed* absorbed = nullptr);
 // 2i-import S1 — transitively pull in imported sibling .prp sources from each
 // importing file's own directory (fixpoint; importer-dir-relative only), so a
 // single-file load needs no dependency list. `seed_files` are the already-parsed
@@ -525,10 +528,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
 // Shared by compile AND the lec/verify side loaders (a Pyrope side never needs
 // a pre-compile to lg: just to resolve its imports).
 void discover_imports(Eprp_var& var, Result& res, size_t n_imports, const std::vector<std::string>& seed_files);
-// `from_source`: the graphs were just lowered from Pyrope/Verilog (not an lg:/ln:
-// input); it only sets the satopt default (satopt_during_compile).
-void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool already_final = false,
-                              bool from_source = false);
+void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool already_final = false);
 void compile_sources(Options& opts, Result& res, const Ir_inputs& inputs);
 void compile_command(Options& opts, Result& res);
 void scan_command(Options& opts, Result& res);

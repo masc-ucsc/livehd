@@ -20,21 +20,21 @@
 // which happens to be the right answer here. `lhd sim` draws random bits, so
 // this simulation is the check that actually sees it.
 
-comb inner(rs:u5) -> (sel:u3) {
+comb inner(rs:U5) -> (sel:U3) {
   sel = 0
   if rs != 0 {
     sel = 2
   }
 }
 
-mod inline_const_default(rs:u5) -> (o:u3@[0]) {
+mod inline_const_default(rs:U5) -> (o:U3@[0]) {
   o = inner(rs=rs).sel
 }
 
 test inline_const_default.default_survives_inlining {
   mut dut = inline_const_default
-  mut seen_default:bool = false
-  mut seen_override:bool = false
+  mut seen_default:Bool = false
+  mut seen_override:Bool = false
   tick 8 {
     dut.rs = if clock % 2 == 0 { 0 } else { 7 }
     step

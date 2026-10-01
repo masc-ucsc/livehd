@@ -1,0 +1,46 @@
+/*
+:name: array_output_lane_writes
+:type: simulation
+*/
+// lhdtrack suggestions.md 2.2(d): an ARRAY OUTPUT port written lane by lane
+// with no whole-array assignment first. An output starts as nil, like
+// `mut v:[4]U4 = nil`, so writing its lanes one at a time is legal (user ruling
+// 2026-09-27 #15); every lane is written here, so no lane is left unset.
+// It failed with "upass.tolg: array 'v' is written before it has an
+// initializer", both for straight-line lane writes and inside a `for`; a
+// leading `v = 0` was the workaround.
+//
+// The parent reads the lanes back through `const w:[4]U4 = x`, the spelling
+// that already worked (array_output_port_index.prp covers `x[3]`).
+mod straight(a:U4) -> (v:[4]U4@[0]) {
+  v[0] = a
+  v[1] = a ^ 1
+  v[2] = a ^ 2
+  v[3] = a ^ 3
+}
+mod looped(a:U4) -> (v:[4]U4@[0]) {
+  for i in 0..<4 {
+    v[i] = a ^ (i + 4)
+  }
+}
+
+pub mod array_output_lane_writes(a:U4) -> (st0:U4@[0], st3:U4@[0], l0:U4@[0], l3:U4@[0]) {
+  const s:[4]U4 = straight(a=a)
+  st0 = s[0]
+  st3 = s[3]
+  const l:[4]U4 = looped(a=a)
+  l0 = l[0]
+  l3 = l[3]
+}
+
+test array_output_lane_writes.lanes {
+  mut dut = array_output_lane_writes
+  mut ok  = true
+  tick 16 {
+    dut.a = clock
+    step
+    if dut.st0 != clock or dut.st3 != (clock ^ 3) { ok = false }
+    if dut.l0 != (clock ^ 4) or dut.l3 != (clock ^ 7) { ok = false }
+  }
+  assert(ok, "every lane of an array output written one at a time")
+}

@@ -16,6 +16,7 @@ cc_library(
     deps = [
         "//core",
         "//lnast",
+        "//upass/bitwidth:lnast_range_hdr",
         "//upass/core:array_dim_hdr",
         "//upass/core:upass",
     ],

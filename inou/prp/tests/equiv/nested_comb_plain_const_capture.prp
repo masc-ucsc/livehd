@@ -1,0 +1,45 @@
+/*
+:name: nested_comb_plain_const_capture
+:type: equiv
+:verilog_top: nested_comb_plain_const_capture
+:pyrope_top: nested_comb_plain_const_capture
+*/
+
+// Ruling 2026-09-28 #24: a lambda nested in a `mod` may read the enclosing
+// mod's plain `const`s whose values are compile-time constants, with no
+// `comptime` keyword: a literal (`n`), a const computed from a const (`w`),
+// and a const computed from the enclosing GENERIC (`m`, one value per
+// specialization: bump<K=3> and bump<K=6>). They are read as values from a
+// nested `comb` and a nested `mod`, and as a width in a nested signature
+// (`x:Unsigned(bits=w)`). A const computed from a RUNTIME value stays
+// invisible (errors/nested_lambda_runtime_const.prp).
+mod bump<K=3>(a:U8) -> (o:U8@[0], p:U8@[0], l:U8@[0]) {
+  const n = 3
+  const w = n + 1
+  const m = K + 1
+
+  comb addnm(x:U8) -> (y:U8) {
+    y = (x + n + m)#[0..<8]
+  }
+
+  comb low(x:Unsigned(bits=w)) -> (y:U8) {
+    y = x
+  }
+
+  mod xorw(x:U8) -> (y:U8@[0]) {
+    y = x ^ (w * 5)
+  }
+
+  o = addnm(x=a)
+  l = low(x=a#[0..<w])
+  p = xorw(x=a)
+}
+
+pub mod nested_comb_plain_const_capture(a:U8) -> (o3:U8@[0], p3:U8@[0], l3:U8@[0], o6:U8@[0]) {
+  const b3 = bump<K=3>(a)
+  const b6 = bump<K=6>(a)
+  o3 = b3.o
+  p3 = b3.p
+  l3 = b3.l
+  o6 = b6.o
+}

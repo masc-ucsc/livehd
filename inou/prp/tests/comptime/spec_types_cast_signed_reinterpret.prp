@@ -1,0 +1,12 @@
+/*
+:name: spec_types_cast_signed_reinterpret
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// SPEC docs 07-typesystem "Bitwidth": "A sign cast `Signed(x)`... *reinterprets* `x`s bits under the
+// target signedness. The unsized `Signed(x)`/`Unsigned(x)` keep the bit width unchanged". Rule: Signed(U4 15)==-1.
+const a:U4 = 15
+const b:U4 = 7
+cassert(Signed(a) == -1)
+cassert(Signed(b) == 7)

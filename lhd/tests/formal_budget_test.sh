@@ -35,11 +35,11 @@ fail() { echo "FAIL: $*"; rc=1; }
 # first solve, so every obligation after it is skipped outright -- which is what
 # makes case 2 deterministic instead of a race with one lucky query.
 {
-  echo 'pub mod budget(a:u8, b:u8) -> (o:u8@[0]) {'
+  echo 'pub mod budget(a:U8, b:U8) -> (o:U8@[0]) {'
   for i in $(seq 0 31); do
     echo "  assert((a & $i) <= a)"
   done
-  echo '  o = a + b'
+  echo '  wrap o = a + b'
   echo '}'
 } > "$W/budget.prp"
 

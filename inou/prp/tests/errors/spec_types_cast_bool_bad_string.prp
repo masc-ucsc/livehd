@@ -1,0 +1,8 @@
+/*
+:name: spec_types_cast_bool_bad_string
+:type: error
+:error: Bool
+*/
+// SPEC docs 04-variables "Boolean": "String input typecase is valid, but anything different than ("0", "1",
+// "-1", "true", "TRUE", "t", "false", "FALSE", "f") raises an assertion failure." Rule: Bool("xyz") is an error.
+const y = Bool("xyz")  // locate_error_here

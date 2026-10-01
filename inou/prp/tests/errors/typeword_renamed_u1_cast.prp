@@ -1,0 +1,10 @@
+/*
+:name: typeword_renamed_u1_cast
+:type: error
+:error: `u1` was renamed `U1`
+*/
+// The cast is a call on the TYPE word (`U1(flag)`); the lowercase `u1(...)`
+// cast is gone with the lowercase type.
+pub comb typeword_renamed_u1_cast(f:Bool) -> (o:U1) {
+  o = u1(f)  // locate_error_here
+}

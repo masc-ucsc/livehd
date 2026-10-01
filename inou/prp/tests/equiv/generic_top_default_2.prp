@@ -4,6 +4,6 @@
 :lec_top: generic_top_default
 */
 
-pub mod generic_top_default<T=u8, N=3>(a:T) -> (y:u9@[0]) {
+pub mod generic_top_default<T=U8, N=3>(a:T) -> (y:U9@[0]) {
   y = a + N
 }

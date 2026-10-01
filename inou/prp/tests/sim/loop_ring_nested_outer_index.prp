@@ -1,0 +1,88 @@
+/*
+:name: loop_ring_nested_outer_index
+:type: simulation
+:expect_instances: u_loop*=3
+*/
+
+// lhdtrack suggestions 1.3 (br_flow_xbar_rr): a `wire` back-edge read inside a
+// ROLLED `for` whose body holds a NESTED loop that reads the OUTER index. LEC
+// proves this design equal to the obvious Verilog
+// (o[i] = (b ^ 0x5555)[sel_i*4 + i]); `lhd sim` returned wrong values. It was
+// reported as "one cycle stale"; it is not a timing problem.
+//
+// THE MECHANISM. The wire closes a word-level ring through the rolled loops
+// (loop `i` -> `pv` -> loop `k` -> `w` -> loop `i`), so inou.cgen.sim
+// materializes loop `i` into one Sub per ordinal (`u_loop_0__li0..3`, each
+// driven with its literal ordinal on its `i` input). The nested `j` loop stays
+// a compact call and reads the OUTER index `i`. The colour-plan emitter binds a
+// literal-driven occurrence input only for DATA sites; the compact-loop
+// control branch bound the nested loop's `i` to `0 /*UNRESOLVED-CYCLE*/`, so
+// every lane read lane 0's bits (bad == 14 of 16 today).
+//
+// WHY `const wc = w`. A body that reads a `wire` directly is UNROLLED (user
+// ruling 2026-09-27), which would hide this bug; copying the wire into a
+// `const` before the loop keeps the loops rolled, as in the lhdtrack design.
+// The unroll decision must key on a DIRECT read of a wire NAME in the loop
+// body (docs 05b-statements.md "Loops and `wire`"), not on dataflow from a
+// wire through `wc`; otherwise the `u_loop*=3` pin below fails for a reason
+// unrelated to this bug. The direct spelling (unrolled) is covered by
+// loop_body_reads_wire.prp (lbw_nested).
+//
+// WHY `::[timecheck=false]`. upass.tolg treats a rolled-loop Sub as an atomic
+// node, so the (bit-level acyclic) ring is refused before any backend -- the
+// same reason comb_false_loop_sub.prp carries it. The attribute is the
+// documented escape hatch that turns every timing check off in this lambda.
+//
+// `:expect_instances: u_loop*=3` keeps the claim honest: the outer `i` loop,
+// its nested `j` loop and the `k` loop all stay rolled (a silent unroll would
+// pass the values without exercising the bug).
+//
+// Same values as `--set compile.unroll=true` (which passes today).
+pub mod rno::[timecheck=false](b:U16, sel:U8) -> (o:U4@[0]) {
+  wire w:U16 = nil
+  const wc = w
+  mut r:U4 = 0
+  mut pv:U16 = 0
+  for i in 0..<4 {
+    mut lr:U4 = 0
+    for j in 0..<4 {
+      lr#[j] = wc#[j * 4 + i]   // the nested loop reads the OUTER index
+    }
+    r#[i] = lr#[sel#[(i * 2)..+2]]
+    pv#[(i * 4)..+4] = b#[(i * 4)..+4]
+  }
+  mut q:U16 = 0
+  for k in 0..<4 {
+    q#[(k * 4)..+4] = pv#[(k * 4)..+4] ^ 0x5
+  }
+  w = q
+  o = r
+}
+
+test rno.lanes_use_their_own_index {
+  mut x    = rno
+  mut bad  = 0
+  mut seen = 0
+  tick 16 {
+    const bv:U16 = (clock * 40503 + 12345) & 0xFFFF
+    const sv:U8  = (clock * 97 + 5) & 0xFF
+    x.b   = bv
+    x.sel = sv
+    step
+    // w == b ^ 0x5555; lane i picks bit (sel_i*4 + i) of it
+    const av:U16 = bv ^ 0x5555
+    const st0 = sv & 3
+    const st1 = (sv >> 2) & 3
+    const st2 = (sv >> 4) & 3
+    const st3 = (sv >> 6) & 3
+    const e0:U1 = (av >> (st0 * 4 + 0)) & 1
+    const e1:U1 = (av >> (st1 * 4 + 1)) & 1
+    const e2:U1 = (av >> (st2 * 4 + 2)) & 1
+    const e3:U1 = (av >> (st3 * 4 + 3)) & 1
+    const oexp:U4 = (e3 << 3) | (e2 << 2) | (e1 << 1) | e0
+    seen += 1
+    if x.o != oexp { bad += 1 }
+  }
+  assert(seen == 16, "the comparisons ran")
+  assert(bad == 0, "every lane of the materialized loop reads its own ordinal")
+}

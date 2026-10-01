@@ -1,0 +1,16 @@
+/*
+:name: clkrst_minted_autowire
+:type: compile
+*/
+// docs 04b: a module with registers and no `Clock`/`Reset` input gets
+// `clock:Clock`/`reset:Reset` minted, and a caller auto-wires its own
+// implicit clock/reset (minted here too) into the child.
+mod cnt(en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+pub mod clkrst_minted_autowire(go:Bool) -> (o:U8@[0]) {
+  const x = cnt(en=go)
+  o = x.q
+}

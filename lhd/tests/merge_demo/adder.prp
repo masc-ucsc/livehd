@@ -1,2 +1,2 @@
 // A Pyrope leaf module (its lg: graph name is `adder.adder`: file.entity).
-pub comb adder(a:s8) -> (r:s9) { r = a + 1 }
+pub comb adder(a:S8) -> (r:S9) { r = a + 1 }

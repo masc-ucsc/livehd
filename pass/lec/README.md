@@ -8,6 +8,12 @@ Everything here is about `lhd lec --top T`. **Equivalence is a claim about `T`
 only.** Proving other modules is a separate request (`--top X`), never something
 the driver asserts on the user's behalf.
 
+The ABC cone accelerator is optional. In the ABC-free CLI build
+(`--define=livehd_abc=false`), every accelerator request returns `Unsupported`;
+the original obligations remain for CVC5. Stable cone digests and verdict names
+live in `cone_digest.cpp`, independently of ABC. The normal build retains the
+existing accelerator and its differential tests.
+
 ## 1. The shape of the proof — top-down, then discharge
 
 ```
@@ -196,6 +202,16 @@ permutation retry in `todo/livehd/2f-lec.html`.
 A box key present on **one side only** yields one-sided obligations, which the
 miters gate to an incomplete correspondence — never a Proven or a Refuted.
 
+A paired flop need not correspond on EVERY bit. A bit that reaches no compared
+obligation (output, box input, property, memory port), directly or through
+other observable flop bits, is dropped from the induction hypothesis and from
+the step (`observe.cpp`, lec.md "Observability"): the relation proven is then
+"the observable bits are equal", which is weaker than full equality and so
+initially true whenever full equality is, and every remaining obligation is
+still solved. This is what lets a reference register that keeps bits nothing
+reads (bedrock's lower-triangle LRU state) pair with an implementation that
+stores something else there, or nothing at all (a narrower register).
+
 ## 5. Timing: the phase schedule
 
 Orthogonal to the above, and documented in `todo/livehd/2f-lec.html`
@@ -214,6 +230,76 @@ fall        negedge flops, negedge memory ports
 rewrite, no synthesized phase counter, no timing state threaded through ports, so
 it composes across hierarchy. A close microstep only runs when something happens
 in it, so a plain posedge/negedge design costs two encodes per period, not four.
+
+### Mapped cells: one netlist, one schedule
+
+The schedule classifies a latch from its enable's **structure** (`clk & en_l` is a
+clock-role latch closing at the fall; an enable it cannot see through makes a
+data latch committing at the rise, with the clock read as data). The `lg:` form
+of a mapped netlist and its Verilog re-read should therefore reach it in the
+same shape. Two causes of a divergence are repaired before the first query:
+
+- **which body, and port binding** (pass/single_edge/proof_prep.cpp,
+  graph/inline_sub.cpp, used by every `prepare_time_base` client): an instance
+  of a `--lib` cell whose definition the design's own library holds is spliced
+  from **that** body, bound by id through its own IO -- the encoder's rule too
+  (an instance with a body is descended into; `sub_lib` resolves only a
+  body-less one). Splicing the `--lib` model over a body the design carries
+  compared the model instead of the design: an `lg:` netlist shipped with its
+  own bypassed `DLCLKPx1` (`GCLK = CLK`) or `INVx1` (`Y = A`) PROVED against the
+  gated RTL. A Verilog side elaborates the `--lib` models itself, so there the
+  own body *is* the model. Only a **body-less** instance takes the model, bound
+  by port **name** through the instance's IO: the model can number ports
+  differently from the netlist's declaration (gensim's `DLCLKPx1` puts `GCLK`
+  after the internal `IQ` pin), and id binding dropped the gate output and left
+  every latch it enabled always-transparent. A model that lacks a port the
+  instance declares, or states it at another width, refuses the run
+  (`unsupported`) instead of being spliced around. Names follow the model
+  either way: an own body's single state element takes the model's name (or
+  its anonymity), so a correspondence key does not depend on which copy of the
+  cell was spliced (cgen invents `latch_16` for gensim's anonymous latch, and
+  keying on it paired two netlists' latches by instance name alone);
+- **latch-enable cells** (`lib_cell_prep.{hpp,cpp}`): after edge normalization
+  declines, the single-product cells (`AND2`, `NAND2`, `NOR2`, `INV`, ...) whose
+  output depends on a clock are spliced on every latch enable, so
+  `AND2x1(clk, en_l)` in an `lg:` netlist is the same clock-role gate as
+  `clk & en_l` in the RTL or a re-read Verilog netlist.
+
+Known gaps, where the two forms can still be classified differently (observed
+as a false REFUTED):
+
+- a single-product cell on a gate's **non-clock** operand stays opaque in the
+  `lg:` form (only clock-dependent cells are spliced) while the Verilog re-read
+  dissolves it: an active-low gate `NOR2x1(clk, INVx1(held_en))` exposes the NOR2
+  but keeps the INVx1, and that `lg:` netlist refutes its own Verilog emission;
+- cells with an `Or` in their model (`OR2`, `XOR2`, `AOI`...) stay opaque, because
+  the schedule's `Or`-form gate model is itself incomplete: natively,
+  `gclk_n = clk | ~held_en` (held_en latched while clk is high) consumed as
+  `always_latch if (!gclk_n)` refutes against the equivalent
+  `always_latch if (!clk && held_en)`, with no cell involved.
+
+`tests/lib_cell_prep_test.sh` pins the repaired cases on a clock-gated data latch
+mapped by ABC and USYN: the `lg:` netlist, its Verilog emission, and the netlist
+against its own emission all prove; broken twins refute against each; a `--lib`
+model with a renamed port refuses; an `lg:` netlist compiled with its own cell
+bodies proves, and with one broken cell body refutes. `//graph:inline_sub_test`
+pins the by-name binding and the state-name override themselves.
+
+### Name bridges are hypotheses, re-checked by the step
+
+A bridge that relates state by NAME or SHAPE -- the bit-blast regroup (`r` <->
+`r[i]`, or a one-bit `r` <-> a read-back cell's state `r.<seg>`, core/bus_name),
+a packed/scalar split, a memory <-> flop-bank pairing -- ties one side's
+current state to the other's. That is sound only as the hypothesis of an
+induction whose step proves the tied next states equal again, so both
+inductive arms (the single-step miter and the phase-scheduled composed period
+and per-microstep accelerator) fold the impl's bits back under the ref's key
+and compare them. A tied key is never excused as "one-sided internal state"
+(`internal_state_only` holds only for state whose current value is a free
+symbol): left unmatched, it keeps the verdict open. The composed period used
+to excuse `nxt:g` / `nxt:g_l` after tying `g` to the impl's `g.l` (a `DLX g`
+holding latch `l`), and PROVED a ref `g = ~d` against an impl `g = d`
+(`tests/lec_phase_test.sh`, pair E).
 
 ### The clock forest
 

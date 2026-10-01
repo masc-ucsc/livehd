@@ -1,0 +1,16 @@
+/*
+:name: typeword_backtick_names
+:type: compile
+*/
+// docs 02-basics "Identifiers": a backticked type word (`` `U4` ``) is a plain
+// name, never the type, and a backticked banned old spelling (`` `s1` ``,
+// `` `u8` ``) is an ordinary name.
+pub comb typeword_backtick_names(a:U8) -> (y:U8, z:U4) {
+  const `s1` = 3
+  const `U4` = 2
+  mut q:U4 = `U4`
+  const cfg = (const `U8` = 1, const `bool` = true)
+  cassert(cfg.`U8` == 1 and cfg.`bool`)
+  wrap y = a + `s1`
+  z = q
+}

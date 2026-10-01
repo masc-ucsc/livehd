@@ -1,0 +1,11 @@
+/*
+:name: spec_syntax_tuple_type_field
+:type: error
+*/
+// qa.md Q39 item 8 / Appendix §8: "`reg f:(a:Bool).flags` (field of a tuple type in type
+// position) -> error".
+mod spec_syntax_tuple_type_field(a:Bool) -> (o:Bool@[1]) {
+  reg f:(a:Bool).flags = false   // locate_error_here
+  f = a
+  o = f
+}

@@ -7,13 +7,13 @@
 // wire, then drive the whole tuple with one unpacking call. The helper and
 // wire deliberately have matching fields, so no nested-to-flat conversion
 // is required. This must compile and simulate without per-field assignments.
-comb unpack_control(bits:u3) -> (op:u2, valid:u1) {
+comb unpack_control(bits:U3) -> (op:U2, valid:U1) {
   op = bits#[0..=1]
   valid = bits#[2]
 }
 
-pub mod tuple_wire_unpack(bits:u3) -> (op:u2@[0], valid:u1@[0]) {
-  wire control:(op:u2, valid:u1) = nil
+pub mod tuple_wire_unpack(bits:U3) -> (op:U2@[0], valid:U1@[0]) {
+  wire control:(op:U2, valid:U1) = nil
   op = control.op
   valid = control.valid
 

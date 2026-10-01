@@ -1,0 +1,22 @@
+/*
+:name: overload_shorthand_dispatch
+:type: equiv
+:pyrope_top: top
+:verilog_top: top
+*/
+// A gathered overload set dispatches to the FIRST lambda that can accept the
+// call under the argument-naming rules. `ff(a, b)` (same-name shorthand, what
+// `lhd pyrope fmt` emits for `ff(a=a, b=b)`) must reject `f1(a, c)` -- `b`
+// names no parameter of f1 and f1 has two u4 params -- and pick `f2(a, b)`.
+comb f1(a:U4, c:U4) -> (out:U4) {
+  wrap out = a - c
+}
+comb f2(a:U4, b:U4) -> (out:U4) {
+  wrap out = a + b
+}
+const ff = [f1, f2]
+
+pub mod top(a:U4, b:U4) -> (o:U4@[0], p:U4@[0]) {
+  o = ff(a, b)
+  p = ff(a=a, b=b)
+}

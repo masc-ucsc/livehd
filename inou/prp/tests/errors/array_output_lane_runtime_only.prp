@@ -1,0 +1,15 @@
+/*
+:name: array_output_lane_runtime_only
+:type: error
+:tolg: 1
+:error: lane 0 of output .v. is never driven
+:help: every bit of a value built from pieces must be driven
+*/
+
+// User ruling 15 (2026-09-27): a lane written at a RUNTIME index drives one
+// lane per cycle, so it proves no lane of an output built lane by lane is
+// always driven. `v[k] = a` alone leaves the other lanes nil: a compile error,
+// never lanes that silently read 0.
+pub mod array_output_lane_runtime_only(a:U4, k:U2) -> (v:[4]U4@[0]) {   // locate_error_here
+  v[k] = a
+}

@@ -1,0 +1,10 @@
+/*
+:name: spec_types_banned_unsigned_cast
+:type: error
+:error: `unsigned` was renamed `Unsigned`
+*/
+// Undeclared lowercase type/cast spellings must name their replacement (07-typesystem.md).
+// Rule: the old CAST spelling `unsigned(x)` (value position) is an error.
+pub comb spec_types_banned_unsigned_cast(a:S4) -> (o:U4) {
+  o = unsigned(a)  // locate_error_here
+}

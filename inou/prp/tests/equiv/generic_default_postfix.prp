@@ -1,0 +1,46 @@
+/*
+:name: generic_default_postfix
+:type: equiv
+:verilog_top: generic_default_postfix
+:pyrope_top: generic_default_postfix
+*/
+
+// Ruling 2026-09-27 #14 (suggestions 2.3 row 2 / 4.7), DECLARATION half:
+// 06-functions.md "Inside `<…>`, at the declaration and at the call site
+// alike, a binding may be a type, a literal, a name, or a postfix value
+// written bare". So a generic DEFAULT may be an attribute read of a visible
+// comptime value, bare (`<N=Z.[bits]>`) or parenthesized (`<N=(Z.[bits])>`).
+// Today the bare default is a parse error ("expected '>' to close generics
+// (found '.')"), and the parenthesized one lowers to a ref spelled like the
+// source: as a width, "integer type bound `max` of port `y` of `lowp` is not a
+// compile-time value once its generics are bound"; as a value, "upass.tolg:
+// unresolved reference '(Z.[bits])'". `<N=cfg.w>` (dotted) already works and
+// stays as the control; `addn<N=2>` checks that an explicit binding still
+// overrides the default.
+// Z is 63 so its width is 6 whether taken from the type or the value.
+comptime const Z:U6 = 63
+comptime const cfg = (const w = 5)
+
+comb addn<N=Z.[bits]>(x:U8) -> (y:U8) {
+  y = (x + N)#[0..<8]
+}
+
+mod low<N=Z.[bits]>(x:U8) -> (y:Unsigned(bits=N)@[0]) {
+  y = x#[0..<N]
+}
+
+mod lowp<N=(Z.[bits])>(x:U8) -> (y:Unsigned(bits=N)@[0]) {
+  y = x#[0..<N]
+}
+
+mod lowc<N=cfg.w>(x:U8) -> (y:Unsigned(bits=N)@[0]) {
+  y = x#[0..<N]
+}
+
+pub mod generic_default_postfix(b:U8) -> (s:U8@[0], r:U6@[0], p:U6@[0], u:U5@[0], k:U8@[0]) {
+  s = addn(x=b)        // default N = 6: b + 6
+  r = low(x=b)         // default N = 6: b[5:0]
+  p = lowp(x=b)        // default N = 6: b[5:0]
+  u = lowc(x=b)        // default N = 5: b[4:0]
+  k = addn<N=2>(x=b)   // explicit binding: b + 2
+}

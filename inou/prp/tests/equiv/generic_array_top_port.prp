@@ -1,0 +1,16 @@
+/*
+:name: generic_array_top_port
+:type: lec
+:lec_top: generic_array_top_port
+*/
+// PYROPE-vs-PYROPE group (README "Pyrope <-> Pyrope variants"), lhdtrack
+// suggestions.md 2.2(d), TOP side. This file is the REFERENCE: the array port
+// spelled with literal sizes, a packed 16-bit bus with lane k at bits
+// [4k..4k+3]. Each `generic_array_top_port_<k>.prp` beside it is the same
+// module with the port shape taken from a DEFAULTED generic, which must
+// specialize under the defaults to exactly this port (user ruling 2026-09-27
+// #7: `Unsigned(bits=N)` works everywhere).
+pub mod generic_array_top_port(v:[4]U4) -> (lo:U4@[0], hi:U4@[0]) {
+  lo = v[0]
+  hi = v[3]
+}

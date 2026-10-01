@@ -1,0 +1,15 @@
+/*
+:name: backtick_attr
+:type: lec
+:lec_top: backtick_attr
+*/
+// Every attribute NAME escaped (`` `timecheck` ``, `` `clock_pin` ``,
+// `` `reset_pin` ``): each is the builtin attribute, and the design lowers to
+// the same Verilog as the reference. (LEC compares from the reset state, so it
+// cannot see a reset pin by itself; comptime/backtick_attr_read.prp pins the
+// escaped attribute keys and reads through their values.)
+pub mod backtick_attr::[`timecheck`=false](clk:Clock, rst:Reset, d:U8) -> (q:U8@[1]) {
+  reg r:U8:[`clock_pin`=clk, `reset_pin`=rst] = 5
+  q = r
+  r = d
+}

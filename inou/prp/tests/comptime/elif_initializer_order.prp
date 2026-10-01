@@ -1,0 +1,26 @@
+/*
+:name: elif_initializer_order
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// Earlier declarations remain visible in later headers, bodies and captures.
+comb choose(flag:Bool) -> (r) {
+  if const earlier = 2; false { r = earlier }
+  elif const later = earlier + 1; flag {
+    comb read() -> (value) { value = later }
+    r = read()
+  } else { r = earlier + later }
+}
+cassert(choose(true) == 3)
+cassert(choose(false) == 5)
+
+const selected = unique if const first = 2; false { first }
+elif const second = first + 1; true { first + second }
+else { 0 }
+cassert(selected == 5)
+
+// Declaration-only headers obey the same source-order rule.
+if mut forward:U8 = nil; false { }
+elif true { forward = 7; cassert(forward == 7) }

@@ -1,0 +1,18 @@
+/*
+:name: clkrst_clock_into_bool_input
+:type: error
+:tolg: 1
+:error: `clk` is a `Clock` bound to input `en` of `cnt`, which is not a `Clock`: a Clock is not data
+*/
+// docs 07-typesystem "Clock and Reset": a Clock only drives clock pins or a
+// child's `Clock` input -- binding it to a `Bool` data input uses it as data
+// (LiveHD sim reads a clock's cycle count, the Verilog its level).
+mod cnt(c:Clock, en:Bool) -> (q:U8@[0]) {
+  reg r:U8 = 0
+  if en { wrap r = r + 1 }
+  q = r
+}
+pub mod clkrst_clock_into_bool_input(clk:Clock) -> (o:U8@[0]) {
+  const x = cnt(en=clk)   // locate_error_here
+  o = x.q
+}

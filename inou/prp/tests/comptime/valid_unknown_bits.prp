@@ -13,7 +13,7 @@
 //   - clearing unknowns when a known value is reassigned
 //   - unknown bits do NOT poison validity (value is still valid)
 
-mut v:u8 = 0sb1?01_?000
+mut v:U8 = 0sb1?01_?000
 
 // Partial unknown: known bits compare against masked extraction.
 // v = 0sb1?01_?000 → bit3=?, bit4=1, bit5=0, bit6=? (LSB-first). The slice
@@ -27,7 +27,7 @@ const zeroed = v & 0
 cassert(zeroed == 0)
 
 // OR with all-ones forces all bits known.
-// `v` is u8 (unsigned), so `v | 0xff` forces every bit to 1 → the *value* 255,
+// `v` is U8 (unsigned), so `v | 0xff` forces every bit to 1 → the *value* 255,
 // not -1: `==` compares integer values, not bit patterns (0sb1111_1111 is the
 // signed value -1). Use the unsigned all-ones literal to match the value.
 const ones = v | 0xff
@@ -45,7 +45,7 @@ cassert("{w + 1:b}" == "{0sb???:b}")           // unknown grows by carry
 // Assigning a known value clears the unknown completely.
 v = 100
 cassert(v == 100)
-cassert(v.[bits] == 8)               // v:u8 → declared width is 8 (typesystem redesign)
+cassert(v.[bits] == 8)               // v:U8 → declared width is 8 (typesystem redesign)
 
 // Multi-step: become unknown, do arithmetic, then resolve.
 mut z = 0sb?

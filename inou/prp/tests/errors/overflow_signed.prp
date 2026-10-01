@@ -8,4 +8,4 @@
 // Doc: ../docs/docs/pyrope/04-variables.md  `c = a // error: 100 overflows the maximum value of 'c'`
 // The unsigned counterpart is pinned in overflow_unsigned.prp.
 
-const x:s4 = 200
+const x:S4 = 200

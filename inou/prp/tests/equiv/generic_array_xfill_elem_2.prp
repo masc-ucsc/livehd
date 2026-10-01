@@ -1,0 +1,23 @@
+/*
+:name: generic_array_xfill_elem_2
+:lec_expect: proven
+*/
+// The streaming-SSA half alone: NOT generic, but `::[timecheck=false]`. Each
+// element store stayed on the raw array name while the reads used the version
+// the whole `w = 0sb?` store minted, so `o` came out all-X and LEC against the
+// Verilog golden REFUTED.
+pub mod generic_array_xfill_elem::[timecheck=false](a:U32, b:U32, c:U32) -> (o:U64@[0], p:U32@[0]) {
+  mut w:[2]U64 = 0
+  w = 0sb?
+  mut lo = w[0]
+  lo#[0..=31] = a
+  w[0] = lo
+  mut hi = w[0]
+  hi#[32..=63] = b
+  w[0] = hi
+  mut e1 = w[1]
+  e1#[0..=31] = c
+  w[1] = e1
+  o = w[0]
+  p = w[1]#[0..=31]
+}

@@ -1,0 +1,20 @@
+/*
+:name: timecheck_false_negative_index
+:type: error
+:error: array index is negative
+:help: must be >= 0
+*/
+
+// User ruling 2026-09-28 (22): `::[timecheck=false]` turns off the TIMING
+// checks of its lambda and nothing else. A negative array index is not a
+// timing question, so it stays the same compile error it is without the
+// attribute (errors/neg_array_index.prp).
+//
+// The attribute used to mark the lambda as Verilog-origin, the internal flag
+// the slang reader sets, and upass.bitwidth skips the negative-index check for
+// that flag: `m[a - 4]` (always in [-4, -1]) compiled clean.
+pub mod top::[timecheck=false](a:U2, d:U8) -> (r:U8@[0]) {
+  mut m:[4]U8 = 0
+  m[a - 4] = d   // locate_error_here
+  r = m[0]
+}

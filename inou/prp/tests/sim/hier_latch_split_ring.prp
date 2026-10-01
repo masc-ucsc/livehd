@@ -47,8 +47,8 @@
 
 // Three INDEPENDENT output cones in one definition. No output reads another
 // output's inputs, so a correct schedule always exists.
-mod lane::[timecheck=false](a:u8, b:u8, c:u8, d:u8, e:u8)
-                         -> (o1:u16@[], o2:u16@[], o3:u16@[]) {
+mod lane::[timecheck=false](a:U8, b:U8, c:U8, d:U8, e:U8)
+                         -> (o1:U16@[], o2:U16@[], o3:U16@[]) {
   o1 = a + b      // cone {a, b}
   o2 = c ^ d      // cone {c, d}
   o3 = e + 1      // cone {e}
@@ -59,10 +59,10 @@ mod lane::[timecheck=false](a:u8, b:u8, c:u8, d:u8, e:u8)
 // before any backend ever sees it. Opting out of the sigma-timing check is what
 // lets this design reach the emitter at all. minion's generated Pyrope carries
 // exactly these two annotations for exactly this reason.
-pub mod ltop::[timecheck=false](x:u8, y:u8, z:u8, w:u8, lat_en:bool)
-     -> (sum:u16@[], xr:u16@[], ring3:u16@[], ctl:u16@[]) {
-  wire back:u8 = nil
-  wire lz:u8   = nil
+pub mod ltop::[timecheck=false](x:U8, y:U8, z:U8, w:U8, lat_en:Bool)
+     -> (sum:U16@[], xr:U16@[], ring3:U16@[], ctl:U16@[]) {
+  wire back:U8 = nil
+  wire lz:U8   = nil
   mut (o1, o2, o3) = lane(a=x, b=y, c=back, d=w, e=lz)
 
   // FALSE EDGE 1 (always combinational): the caller feeds o1 into the input o2
@@ -71,7 +71,7 @@ pub mod ltop::[timecheck=false](x:u8, y:u8, z:u8, w:u8, lat_en:bool)
 
   // FALSE EDGE 2 (combinational only while the latch is OPEN): o2 into the
   // input o3 needs. `hold`'s data never depends on `hold`, so still no loop.
-  reg hold:u8:[latch=true] = 0
+  reg hold:U8:[latch=true] = 0
   if lat_en {
     hold = (o2 + 3) & 0xFF
   }
@@ -83,7 +83,7 @@ pub mod ltop::[timecheck=false](x:u8, y:u8, z:u8, w:u8, lat_en:bool)
 
   // CONTROL: an ordinary flop touching neither ring, so a failure above is
   // attributable to the ring rather than to a dead testbench.
-  reg cr:u8 = 0
+  reg cr:U8 = 0
   cr  = (x + w) & 0xFF
   ctl = cr
 }
@@ -95,13 +95,13 @@ test ltop.latch_extends_the_false_ring {
   mut bad_sum  = 0
   mut bad_xr   = 0
   mut bad_ring = 0
-  mut g_hold:u16 = 0            // the latch's state, carried across ticks
+  mut g_hold:U16 = 0            // the latch's state, carried across ticks
   tick 8 {
-    mut xv:u8    = 10 + clock
-    mut yv:u8    = 20 + (clock * 2)
-    mut zv:u8    = 3 + clock
-    mut wv:u8    = 5 + clock
-    mut env:bool = (clock == 0) or (clock == 1) or (clock == 4)
+    mut xv:U8    = 10 + clock
+    mut yv:U8    = 20 + (clock * 2)
+    mut zv:U8    = 3 + clock
+    mut wv:U8    = 5 + clock
+    mut env:Bool = (clock == 0) or (clock == 1) or (clock == 4)
     acc.lat_en = env
     acc.x = xv
     acc.y = yv
@@ -110,14 +110,14 @@ test ltop.latch_extends_the_false_ring {
     step
     // The golden, evaluated in the only order that exists: o1, then the
     // caller's back edge, then o2, then the latch, then o3.
-    mut g_o1:u16   = xv + yv
-    mut g_back:u16 = (g_o1 + zv) & 0xFF
-    mut g_o2:u16   = g_back ^ wv
+    mut g_o1:U16   = xv + yv
+    mut g_back:U16 = (g_o1 + zv) & 0xFF
+    mut g_o2:U16   = g_back ^ wv
     if env {
       g_hold = (g_o2 + 3) & 0xFF
     }
-    mut g_o3:u16 = g_hold + 1
-    mut g_ctl:u16 = (xv + wv) & 0xFF
+    mut g_o3:U16 = g_hold + 1
+    mut g_ctl:U16 = (xv + wv) & 0xFF
 
     seen = seen + 1
     if acc.ctl != g_ctl {

@@ -7,8 +7,8 @@
 
 // Check all inputs before and after formatting. Token boundaries in the
 // named argument must preserve both parsing and boolean semantics.
-comb pass_flag(flag:bool) -> (result:bool) { result = flag }
-comb select_flag(a:bool, b:bool, c:bool) -> (result:bool) {
+comb pass_flag(flag:Bool) -> (result:Bool) { result = flag }
+comb select_flag(a:Bool, b:Bool, c:Bool) -> (result:Bool) {
   result = pass_flag(flag=not a and (b or c))
 }
 

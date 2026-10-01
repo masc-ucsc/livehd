@@ -11,10 +11,10 @@
 // EVERY path — identical to writing the assignment unconditionally. The `if`
 // below has no `else`, and `o` (read outside it) is `a + 1` regardless of `c`.
 // This replaces the old `wire_incomplete` error test, which required coverage.
-pub comb wcond(a:u8, c:bool) -> (o:u8) {
-  wire w:u8 = nil
+pub comb wcond(a:U8, c:Bool) -> (o:U8) {
+  wire w:U8 = nil
   if c {
-    w = a + 1
+    wrap w = a + 1
   }
   o = w
 }

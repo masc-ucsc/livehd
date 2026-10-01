@@ -1,0 +1,23 @@
+/*
+:name: spec_memory_inferred_size
+:type: equiv
+:verilog_top: spec_memory_inferred_size
+:pyrope_top: spec_memory_inferred_size
+*/
+// SPEC (docs 08-memories.md): "In most cases, the arrays and async memories can be
+// inferred automatically. The maximum/minimum value on the index effectively sets
+// the size and the default initialization is zero."
+//   reg mem:[] = 0
+//   mem[3]   = something // async memory
+// and "mut index:U7 ... array[index] = something ... the compiler infers that the
+// tuple at most has 127 entries."
+// Rule encoded here: `reg mem:[] = 0` written and read through U2 indices infers a
+// 4-entry memory of the stored U8 values, reset (and powered on) to 0. The module
+// has no Reset input, so `reset:Reset` is minted (docs 08).
+pub mod spec_memory_inferred_size(clk:Clock, we:Bool, wa:U2, d:U8, ra:U2) -> (q:U8@[0]) {
+  reg mem:[] = 0
+  q = mem[ra]
+  if we {
+    mem[wa] = d
+  }
+}

@@ -1,0 +1,29 @@
+/*
+:name: spec_memory_partial_merge_none
+:type: equiv
+:verilog_top: spec_memory_partial_merge_none
+:pyrope_top: spec_memory_partial_merge_none
+*/
+// SPEC (docs 08-memories.md, Same-cycle ordering): "`ordering` governs what a
+// same-cycle *user* read observes (and the write-write column above). Two rules
+// hold in every ordering: * A **partial write** `mem[a]#[lo..=hi] = v` updates the
+// entry as the earlier writes of the cycle left it, so several partial writes to
+// one entry merge (a later one wins where they overlap). Its own read of the entry
+// is not a user read."
+// Rule encoded here: EVEN under ordering="none" (where a user read of a written
+// address is undefined), a whole write followed by two overlapping partial writes
+// to the same entry merge in program order: bits [15:12] from `d`, [11:4] from
+// `y`, [3:0] from `x`. Only the user read `q` has a don't-care collision window.
+pub mod spec_memory_partial_merge_none(clk:Clock, wf:Bool, we:Bool, wh:Bool, a:U2, b:U2, d:U16, x:U8, y:U8, ra:U2) -> (q:U16@[0]) {
+  reg m:[4]U16:[ordering="none"] = nil
+  q = m[ra]
+  if wf {
+    m[a] = d
+  }
+  if we {
+    m[a]#[0..<8] = x
+  }
+  if wh {
+    m[b]#[4..<12] = y
+  }
+}

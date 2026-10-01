@@ -27,6 +27,7 @@ struct Lnast_attr_init {
     // `ln:` format). The live in-memory name is the int32 lnast_attrs::lnast_name.
     hhds::register_attr_tag<hhds::attrs::name_t>("hhds::attrs::name");
     hhds::register_attr_tag<lnast_attrs::lnast_name_t>("lnast_attrs::lnast_name");
+    hhds::register_attr_tag<lnast_attrs::simulation_init_t>("lnast_attrs::simulation_init");
     // hhds::attrs::srcid self-registers (srcid.hpp), so no entry here.
   }
 };
@@ -76,11 +77,15 @@ Lnast::~Lnast() = default;
 
 void Lnast::replace_body(std::shared_ptr<hhds::Tree> new_body) {
   I(treeio_, "replace_body: this Lnast was not constructed with a TreeIO");
+  const auto simulation_init = get_simulation_init();
   // Drop our raw ref so the body's only owner is the slot (otherwise
   // replace's keep_previous default-false path would still see refs).
   tree_.reset();
   treeio_->replace(std::move(new_body));
   tree_ = treeio_->get_tree();
+  if (!simulation_init.empty()) {
+    set_simulation_init(simulation_init);
+  }
   // Node class-indices are body-relative: a swapped-in body invalidates any
   // recorded dead-statement marks (the Lnast overload below re-transfers the
   // staging's own marks after this).

@@ -1,0 +1,41 @@
+/*
+:name: comb_untyped_bits_two_widths
+:type: simulation
+*/
+// An UNTYPED comb is inlined from its template at every call, and its body may
+// size a local from the actual (`Unsigned(bits=x.[bits])`). Folding that bound
+// is per call: the first inline used to write its width INTO the shared
+// template, so every later call kept it -- a U3 call after a U6 one wrapped at
+// 6 bits (`halfinc(7)` gave 4 instead of 0), and an array local sized by the
+// first call rejected the second one's values as overflows.
+comb halfinc(x) -> (o) {
+  mut t:Unsigned(bits=x.[bits]) = 0
+  wrap t = x + 1
+  o = t >> 1
+}
+comb spread(x) -> (o) {
+  mut m:[4]Unsigned(bits=x.[bits]) = 0
+  m[3] = x
+  o = m[3]
+}
+
+pub mod comb_untyped_bits_two_widths(a:U3, b:U6) -> (p:U3@[0], q:U6@[0], sp:U3@[0], sq:U6@[0]) {
+  q  = halfinc(b)
+  p  = (halfinc(a))#[0..<3]
+  sq = spread(b)
+  sp = spread(a)
+}
+
+test comb_untyped_bits_two_widths.t {
+  mut dut = comb_untyped_bits_two_widths
+  mut bad = 0
+  tick 8 {
+    dut.a = 7 - clock
+    dut.b = 40 + clock
+    step
+    if dut.p != ((7 - clock + 1) & 7) >> 1 { bad += 1 }
+    if dut.q != (40 + clock + 1) >> 1 { bad += 1 }
+    if dut.sp != 7 - clock or dut.sq != 40 + clock { bad += 1 }
+  }
+  assert(bad == 0, "each call folds its own width")
+}

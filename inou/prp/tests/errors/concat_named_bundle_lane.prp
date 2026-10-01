@@ -9,7 +9,7 @@
 // whole bundle would therefore expose the compiler's canonical alphabetical
 // key order as a surprising bit layout. Select the fields explicitly instead:
 // `(x.lo, x.hi)#[..]` or `(x.hi, x.lo)#[..]`.
-comb concat_named_bundle_lane() -> (z:u12) {
-  const x = (const hi:u4=3, const lo:u8=2)
+comb concat_named_bundle_lane() -> (z:U12) {
+  const x = (const hi:U4=3, const lo:U8=2)
   z = x#[..]
 }

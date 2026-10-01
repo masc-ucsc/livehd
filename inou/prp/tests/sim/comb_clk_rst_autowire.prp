@@ -1,0 +1,79 @@
+/*
+:name: comb_clk_rst_autowire
+:type: simulation
+*/
+// User ruling 2026-09-27 (12), narrowed by ruling 2026-09-28 (30) and ruling
+// 52 (by type): omitting a `mod`/`pipe` child's `Clock` or `Reset` input (any
+// name) wires the caller's implicit clock/reset to it, but a `comb` holds no
+// state: it cannot declare a `Clock`/`Reset` input, its `clk`/`rst` are plain
+// `U1` data, never auto-wired. The Pyrope that lhdtrack regenerates from Verilog keeps each
+// module's `clk`/`rst` ports even on a purely combinational `comb`, and its
+// harness calls the DUT without them (lhdtrack br_enc_bin2onehot and friends):
+//   * enc:   a `comb` whose clk/rst inputs are UNUSED: omitted, nothing wired
+//            (a dead comb input may be omitted, whatever its name);
+//   * clr:   a `comb` that READS its `rst`: the caller passes it like any data
+//            input (omitting it is an error: errors/comb_reads_omitted_rst.prp);
+//   * pass8: a `mod` with unused `clk:Clock`/`rst:Reset` and no regs:
+//            auto-wired;
+//   * comb_rst_n_caller: an ACTIVE-LOW caller converts its own reset for
+//            `clr` -- the polarity of a data input is the caller's business.
+// sim/child_clock_reset_auto_wire.prp covers mod callees with regs, and
+// sim/comb_dead_input_omitted.prp more dead comb inputs.
+
+comb enc(clk:U1, rst:U1, v:U3, en:U1) -> (out:U8) {
+  out = if en != 0 { 1 << v } else { 0 }
+}
+
+comb clr(rst:U1, a:U8) -> (o:U8) {
+  o = if rst != 0 { 0 } else { a }
+}
+
+mod pass8(clk:Clock, rst:Reset, a:U8) -> (o:U8@[0]) {
+  o = a
+}
+
+pub mod comb_clk_rst_autowire(rst:Reset, v:U3, en:U1) -> (q:U8@[1], p:U8@[0], z:U8@[0]) {
+  reg r:U8 = 0
+  const e = enc(v=v, en=en)   // comb: clk and rst omitted
+  r = e
+  q = r
+  const c = pass8(a=e)        // mod: clk and rst omitted
+  p = c.o
+  z = clr(rst=U1(rst), a=e)   // a comb that reads its rst: the Reset passed as data
+}
+
+test comb_clk_rst_autowire.run {
+  mut d = comb_clk_rst_autowire
+  mut bad = 0
+  tick 12 {
+    const in_rst = clock < 2
+    const v:U3   = clock & 7
+    const en     = (clock & 1) == 0
+    const oh     = if en { 1 << v } else { 0 }
+    const qg     = if in_rst { 0 } else { oh }   // what this step latches into `r`
+    d.rst = in_rst
+    d.v   = v
+    d.en  = U1(en)
+    step
+    if d.p != oh { bad += 1 }
+    if d.z != qg { bad += 1 }
+    if d.q != qg { bad += 1 }
+  }
+  puts("bad={bad}")
+  assert(bad == 0)
+}
+
+pub mod comb_rst_n_caller(rst_n:U1, a:U8) -> (z:U8@[0]) {
+  z = clr(rst=rst_n ^ 1, a=a)  // the caller's own active-low reset, as data
+}
+
+test comb_rst_n_caller.polarity {
+  mut d = comb_rst_n_caller
+  d.a     = 7
+  d.rst_n = 0
+  step
+  assert(d.z == 0)
+  d.rst_n = 1
+  step
+  assert(d.z == 7)
+}

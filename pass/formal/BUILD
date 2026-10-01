@@ -16,7 +16,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//graph",
-        "//pass/lec:lec_query",  # the shared cvc5 Encoder + Val + fit_to/real_width/flop_state_key
+        "//pass/lec:lec_encode",  # shared Encoder/Val helpers, without the relational/ABC engines
         "@cvc5",
         "@hhds//hhds:graph",
     ],
@@ -35,8 +35,8 @@ cc_library(
         ":formal",
         "//core",
         "//graph",
-        "//pass/lec:lec_query",
         "//pass/common:pass",
+        "//pass/lec:lec_query",
         "@hhds//hhds:graph",
     ],
     alwayslink = True,  # static Pass_plugin registration

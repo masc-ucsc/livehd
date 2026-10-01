@@ -4,9 +4,9 @@
 :error: (boolean|integer value)
 */
 
-// BUG (type check) symmetric variant: a boolean array (`[]bool`) must NOT accept
+// BUG (type check) symmetric variant: a boolean array (`[]Bool`) must NOT accept
 // a plain integer element, even one whose value fits [0,1]. `a[1] = 1` keeps the
 // range but changes the kind (int into a bool element) — a compile error.
-mut a:[]bool = nil
+mut a:[]Bool = nil
 
 a[1] = 1   // int into a bool element; value fits [0,1] but kind differs

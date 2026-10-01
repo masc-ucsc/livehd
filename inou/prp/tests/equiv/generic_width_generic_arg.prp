@@ -1,0 +1,32 @@
+/*
+:name: generic_width_generic_arg
+:type: equiv
+:verilog_top: generic_width_generic_arg
+:pyrope_top: generic_width_generic_arg
+*/
+
+// Suggestions 4.6 / ruling 2026-09-27 #7: `Unsigned(bits=N)` written INSIDE a
+// `<...>` argument of a generic call made from a generic body
+// (`pass_t<T=Unsigned(bits=N)>`, `pass_t<T=Unsigned(bits=N+2)>`) must resolve
+// to the caller's N, exactly like a generic port type. Today prp2lnast only
+// warns ("`Unsigned(...)` bound `bits` is not a compile-time value") and BOTH
+// calls collapse onto one callee `pass_t__u0` with 1-bit ports, so the emitted
+// Verilog drops the upper bits. The second call carries a value that needs
+// all 10 bits (`a*4 + 3`, 0..1023), so `N+2` must key a DISTINCT u10
+// specialization -- evaluating it as N (u8) or sharing one key still REFUTES.
+mod pass_t<T>(a:T) -> (y:T@[0]) {
+  y = a
+}
+
+mod mid<N=4>(a:Unsigned(bits=N)) -> (y:Unsigned(bits=N)@[0], z:Unsigned(bits=N+2)@[0]) {
+  const i = pass_t<T=Unsigned(bits=N)>(a=a)
+  const j = pass_t<T=Unsigned(bits=N+2)>(a=a * 4 + 3)
+  y = i.y
+  z = j.y
+}
+
+pub mod generic_width_generic_arg(a:U8) -> (y:U8@[0], z:U10@[0]) {
+  const m = mid<N=8>(a=a)
+  y = m.y
+  z = m.z
+}

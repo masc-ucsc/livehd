@@ -1,0 +1,16 @@
+/*
+:name: obs_live_bits_2
+:lec_expect: refuted
+*/
+// Drops bits 6..7, observable only through register `s`.
+pub mod obs_live_bits(en:Bool, d:U8) -> (q:U4@[0]) {
+  reg r:U8 = 0
+  reg s:U4 = 0
+  if en {
+    r = d & 0x3F
+  } else {
+    r#[0..<4] = (r#[0..<4] + r#[4..<6])#[0..<4]
+  }
+  s = r#[6..<8]
+  q = r#[0..<4] ^ s
+}

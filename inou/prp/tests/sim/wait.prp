@@ -10,8 +10,8 @@
 //   * inline monitor: an `if`-block that checks an invariant every cycle, sharing
 //     the loop's `mut`s (here: the sum never decreases).
 
-mod accumulator(din:u8) -> (sum:u32@[0]) {
-  reg total:u32 = 0
+mod accumulator(din:U8) -> (sum:U32@[0]) {
+  reg total:U32 = 0
   sum = total                   // combinational read of total.q -> @[0]
   wrap total = total + din      // registered next-state
 }

@@ -11,9 +11,9 @@
 //  * mw_of_val() returned 1 for EVERY negative constant, so `(-3) << ua` was
 //    sized from magnitude 1 and its 9-bit intermediate wrapped `-3 << 7` from
 //    -384 to +128.
-pub comb signed_shift_widen::[timecheck=false](sa:s3, ua:u3) -> (y0:u16, y1:u16, y2:u16) {
+pub comb signed_shift_widen::[timecheck=false](sa:S3, ua:U3) -> (y0:U16, y1:U16, y2:U16) {
   wrap y0 = sa << ua
   // y1 = (sa << 5)#sext[0..=15]#[0..=15]
-  y1 = (sa << 5)#sext[0..=15]
+  wrap y1 = (sa << 5)#sext[0..=15]
   wrap y2 = -3 << ua
 }

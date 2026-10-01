@@ -1,0 +1,132 @@
+/*
+:name: loop_false_loop_child_rolled_output
+:type: simulation
+:expect_instances: u_loop*=3
+*/
+
+// lhdtrack suggestions 1.3 (br_flow_xbar_rr, "a wire -> child reg -> wire feedback is
+// scheduled as a combinational loop in sim"). Same ring as
+// loop_false_loop_moore_child.prp, but the child derives its output from its
+// register through a rolled `for` (br_rr_state_internal's priority mask).
+//
+// Inside a rolled loop body the arbiter is emitted per module, and
+// callee_is_moore() gives up at the first nested Sub on an output cone -- the
+// child's own compact mask loop -- so the child is not deferred and the
+// emitter refuses the design:
+//   module `...fr_arb` has a combinational loop the single-pass sim schedule
+//   cannot order: `sub_NN:m` (a combinational-cycle back-edge) ...
+// The child's output depends only on `r` (the loop reads `r`, never `d`).
+//
+// WHY `::[timecheck=false]`: see loop_false_loop_moore_child.prp.
+//
+// Once deferred, the child is a Moore boundary like the one in
+// loop_false_loop_moore_child.prp: `fr_top_reg` feeds the array only to a root
+// register, where the loop's post-edge settle never runs.
+//
+// `:expect_instances: u_loop*=3`: both `j` loops and the child's mask loop
+// stay rolled (the bug lives only on the rolled path).
+//
+// Same values as `--set compile.unroll=true` (which passes today).
+mod fr_state(rst:Reset, en:Bool, d:U4) -> (q:U4@[0]) {
+  reg r:U4:[reset_pin=rst] = 8
+  if en { r = d }
+  // bit i: some bit of r at or above i is set (computed by a rolled loop)
+  mut m:U4 = 0
+  for i in 0..<4 {
+    m#[i] = r#|[i..]
+  }
+  q = m
+}
+
+mod fr_arb::[timecheck=false](rst:Reset, req:U4) -> (g:U4@[0]) {
+  wire gr:U4 = nil
+  const m = fr_state(rst=rst, en=req != 0, d=gr)
+  gr = req & ~m
+  g  = gr
+}
+
+pub mod fr_top(rst:Reset, req:U8) -> (g:U8@[0]) {
+  mut acc:U8 = 0
+  for j in 0..<2 {
+    const a = fr_arb(rst=rst, req=req#[(j * 4)..+4])
+    acc#[(j * 4)..+4] = a
+  }
+  g = acc
+}
+
+pub mod fr_top_reg(rst:Reset, req:U8) -> (s:U8@[]) {
+  mut acc:U8 = 0
+  for j in 0..<2 {
+    const a = fr_arb(rst=rst, req=req#[(j * 4)..+4])
+    wrap acc = acc | (a << (j * 4))
+  }
+  reg sr:U8 = 0
+  sr = acc
+  s  = sr
+}
+
+test fr_top.rolled_child_output_is_state_only {
+  mut x    = fr_top
+  mut r0:U4 = 8
+  mut r1:U4 = 8
+  mut bad  = 0
+  mut seen = 0
+  tick 12 {
+    const rq:U8 = (clock * 37 + 11) & 0xFF
+    x.rst = clock < 1
+    x.req = rq
+    step
+    const q0:U4 = rq#[0..<4]
+    const q1:U4 = rq#[4..<8]
+    if clock == 0 {
+      r0 = 8
+      r1 = 8
+    } else {
+      const pm0:U4 = r0 | (r0 >> 1) | (r0 >> 2) | (r0 >> 3)
+      const pm1:U4 = r1 | (r1 >> 1) | (r1 >> 2) | (r1 >> 3)
+      if q0 != 0 { r0 = q0 & ~pm0 }
+      if q1 != 0 { r1 = q1 & ~pm1 }
+    }
+    const m0:U4 = r0 | (r0 >> 1) | (r0 >> 2) | (r0 >> 3)
+    const m1:U4 = r1 | (r1 >> 1) | (r1 >> 2) | (r1 >> 3)
+    const gexp:U8 = ((q1 & ~m1) << 4) | (q0 & ~m0)
+    seen += 1
+    if x.g != gexp { bad += 1 }
+  }
+  assert(seen == 12, "the comparisons ran")
+  assert(bad == 0, "wire -> child reg -> wire is not a combinational loop")
+}
+
+test fr_top_reg.registered_grant_sees_child_state {
+  mut x     = fr_top_reg
+  mut r0:U4 = 8
+  mut r1:U4 = 8
+  mut bad   = 0
+  mut seen  = 0
+  tick 12 {
+    const rq:U8 = (clock * 37 + 11) & 0xFF
+    x.rst = clock < 1
+    x.req = rq
+    step
+    const q0:U4 = rq#[0..<4]
+    const q1:U4 = rq#[4..<8]
+    // `sr` captured this cycle's grant, computed from the child register
+    // BEFORE the edge
+    const m0:U4 = r0 | (r0 >> 1) | (r0 >> 2) | (r0 >> 3)
+    const m1:U4 = r1 | (r1 >> 1) | (r1 >> 2) | (r1 >> 3)
+    const g0:U4 = q0 & ~m0
+    const g1:U4 = q1 & ~m1
+    if clock == 0 {
+      r0 = 8
+      r1 = 8
+    } else {
+      if q0 != 0 { r0 = g0 }
+      if q1 != 0 { r1 = g1 }
+      const sexp:U8 = (g1 << 4) | g0
+      seen += 1
+      if x.s != sexp { bad += 1 }
+    }
+  }
+  assert(seen == 11, "the comparisons ran")
+  assert(bad == 0, "a register fed only by the loop sees the child's CURRENT state")
+}

@@ -27,14 +27,14 @@
 // nested spelling must lower to exactly the same hardware as writing the fields
 // out one by one.
 
-pub comb unpack(bits:u4) -> (io_data:(ex:(aa:u1, bb:u1), wb:(cc:u1))) {
+pub comb unpack(bits:U4) -> (io_data:(ex:(aa:U1, bb:U1), wb:(cc:U1))) {
   io_data.ex.aa = bits#[0]
   io_data.ex.bb = bits#[1]
   io_data.wb.cc = bits#[2]
 }
 
-pub mod nested_tuple_return(clock:u1, bits:u4) -> (y:u1@[], z:u1@[]) {
-  reg ctl:(ex:(aa:u1, bb:u1), wb:(cc:u1)) = nil
+pub mod nested_tuple_return(clock:Clock, bits:U4) -> (y:U1@[], z:U1@[]) {
+  reg ctl:(ex:(aa:U1, bb:U1), wb:(cc:U1)) = nil
   ctl = unpack(bits=bits)
   y = ctl.ex.aa
   z = ctl.wb.cc

@@ -1,0 +1,44 @@
+/*
+:name: nested_comb_generic_capture
+:type: equiv
+:verilog_top: nested_comb_generic_capture
+:pyrope_top: nested_comb_generic_capture
+*/
+
+// Ruling 2026-09-27 (suggestions 2.3 row 3, generic half): a `comb` nested in
+// a GENERIC `mod` sees the enclosing generic `W` and a derived
+// `comptime const K = W + 1` -- as values and as a width. Both are known only
+// per specialization, so each of `bump<W=5>` and `bump<W=2>` must see its own
+// W/K; a single literal captured at parse time cannot represent them. Today
+// the nested body read fails in inou.prp with "read of undefined variable
+// 'K'" (and 'W').
+mod bump<W=3>(a:U8) -> (o:U8@[0], q:U8@[0], l:Unsigned(bits=W)@[0]) {
+  comptime const K = W + 1
+
+  comb addk(x:U8) -> (y:U8) {
+    y = (x + K)#[0..<8]
+  }
+
+  comb addw(x:U8) -> (y:U8) {
+    y = (x + W)#[0..<8]
+  }
+
+  comb loww(x:U8) -> (y:Unsigned(bits=W)) {
+    y = x#[0..<W]
+  }
+
+  o = addk(x=a)
+  q = addw(x=a)
+  l = loww(x=a)
+}
+
+pub mod nested_comb_generic_capture(a:U8) -> (o5:U8@[0], q5:U8@[0], l5:U5@[0], o2:U8@[0], q2:U8@[0], l2:U2@[0]) {
+  const b5 = bump<W=5>(a)
+  const b2 = bump<W=2>(a)
+  o5 = b5.o
+  q5 = b5.q
+  l5 = b5.l
+  o2 = b2.o
+  q2 = b2.q
+  l2 = b2.l
+}

@@ -6,7 +6,7 @@
 */
 
 // c has no mut/const, do mut by default
-const t = (mut a:u4=1, mut b=(c:u7=33, mut d:u6=44))
+const t = (mut a:U4=1, mut b=(c:U7=33, mut d:U6=44))
 
 t.a += 3
 t.b.c += 5

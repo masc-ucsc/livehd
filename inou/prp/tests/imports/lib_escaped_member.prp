@@ -1,0 +1,5 @@
+// import_escaped_member fixture: a plain-named pub lambda, a plain-named pub
+// value, and a pub lambda whose name genuinely needs its escape.
+pub comb my_inc(a) -> (r) { r = a + 1 }
+pub comb `in c`(a) -> (r) { r = a + 2 }
+pub const kval = 5

@@ -1,0 +1,3 @@
+// Library for spec_syntax_generic_dotted_import.prp (a `lib_*` file: no standalone target):
+// a generic comb reached through an import namespace.
+pub comb addk<K>(a) -> (r) { r = a + K }

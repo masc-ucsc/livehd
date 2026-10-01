@@ -9,8 +9,8 @@
 // A parent equals its own child within the same subtree (the parent bit is a
 // prefix of the child encoding); cross-subtree names differ.
 enum Animal = (
-  bird   = enum(eagle, parrot),
-  mammal = enum(rat, human)
+  bird   = (eagle, parrot),
+  mammal = (rat, human)
 )
 
 cassert(Animal.bird.eagle != Animal.mammal)

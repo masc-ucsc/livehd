@@ -1,0 +1,12 @@
+/*
+:name: fn_bitloop_struct_bound
+:type: equiv
+:verilog_top: fn_bitloop_struct_bound
+:pyrope_top: fn_bitloop_struct_bound
+*/
+
+// Pyrope twin of the golden (see the .v): bits 0..2 of `pass` are set when
+// `a` names them, so the OR-reduction is true exactly when `a != 3`.
+pub comb fn_bitloop_struct_bound(a:U2) -> (o:U1) {
+  o = U1(a != 3)
+}

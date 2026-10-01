@@ -1,0 +1,22 @@
+/*
+:name: spec_memory_ordering_none
+:type: equiv
+:verilog_top: spec_memory_ordering_none
+:pyrope_top: spec_memory_ordering_none
+*/
+// SPEC (qa.md appendix section 5): "`ordering` may be set to "fwd"/"none"/"old"
+// explicitly."
+// SPEC (docs 08-memories.md): "`"none"`: no ordering hardware at all -- the
+// cheapest option. Any read of an address written this cycle is undefined." and
+// "in formal, a `?` -- either value is acceptable".
+// Rule encoded here: under ordering="none" a non-colliding read is the committed
+// word and a colliding read (either side of the write) is a don't-care (the
+// golden spells it `x`), so any refinement proves.
+pub mod spec_memory_ordering_none(clk:Clock, we:Bool, wa:U2, wd:U4, ra:U2, rb:U2) -> (pre:U4@[0], post:U4@[0]) {
+  reg mem:[4]U4:[ordering="none"] = nil
+  pre = mem[ra]
+  if we {
+    mem[wa] = wd
+  }
+  post = mem[rb]
+}

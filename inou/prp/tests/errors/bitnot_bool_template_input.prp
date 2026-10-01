@@ -1,0 +1,19 @@
+/*
+:name: bitnot_bool_template_input
+:type: error
+:error: operator .~. requires integer operands \(x:Bool\)
+:help: U1\(
+*/
+
+// User rulings 2026-09-27 (2) and 2026-09-29 (44): `~x` needs an INTEGER
+// operand, also when `x` is the untyped input of a template comb that a call
+// binds to a `Bool`. Before, the inlined body read the caller's bool through
+// the unit's io, which the operator typecheck did not see, and `~b` of the
+// bool compiled silently.
+comb neg(x) -> (r) {
+  r = ~x  // locate_error_here
+}
+
+mod bitnot_bool_template_input(b:Bool) -> (o:Bool@[0]) {
+  o = neg(x=b).r
+}

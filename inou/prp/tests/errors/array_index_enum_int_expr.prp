@@ -1,0 +1,16 @@
+/*
+:name: array_index_enum_int_expr
+:type: error
+:error: indexed by the entries of enum `X`, not by an integer
+*/
+// An enum-indexed array takes the entries of its enum only (08-memories.md
+// "Array index": `x2[0]  // error: only enum index`) -- an integer
+// EXPRESSION too, not just a literal or an integer-typed name.
+enum X = (t1 = 0, t2, t3)
+pub mod array_index_enum_int_expr(clk:Clock, rst:Reset, wa:X, d:U8, we:Bool, ia:U2) -> (q:U8@[0]) {
+  reg mem:[X]U8 = 0
+  q = mem[ia + 0]   // locate_error_here
+  if we {
+    mem[wa] = d
+  }
+}

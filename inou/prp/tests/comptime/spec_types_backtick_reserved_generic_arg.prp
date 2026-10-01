@@ -1,0 +1,14 @@
+/*
+:name: spec_types_backtick_reserved_generic_arg
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+// SPEC qa.md appendix section 1: "a backticked reserved word is an ordinary name (never the type) in every
+// position." Rule: in a GENERIC ARGUMENT `` `U8` `` names the user type (an alias of U4), while the bare `U8`
+// is the built-in 8-bit type.
+type `U8` = U4
+comb mx<T>(a:T) -> (o) { o = a.[max] }
+cassert(mx<`U8`>(a=1) == 15)
+cassert(mx<T=`U8`>(a=1) == 15)
+cassert(mx<U8>(a=1) == 255)

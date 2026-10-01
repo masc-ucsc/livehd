@@ -1,0 +1,21 @@
+/*
+:name: test_poke_overflow
+:type: error
+:error: poke of input `a` of `dut` \(value 300\) does not fit its declared range \[0, 255\]
+:help: a poke never narrows implicitly
+*/
+
+// A poke into an instance handle binds like a call argument (ruling 1): a
+// value that may not fit the input is an error, never a silent truncation.
+// Before, `d.a = 300` compiled and `lhd sim` drove 44.
+
+mod dut(a:U8) -> (o:U8@[0]) {
+  o = a
+}
+
+test dut.t {
+  mut d = dut
+  d.a = 300   // locate_error_here
+  step
+  assert(d.o == 44)
+}

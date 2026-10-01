@@ -1,0 +1,9 @@
+/*
+:name: while_init_scope_read
+:type: error
+:error: read of undefined variable 'index'
+*/
+
+// Initializer declarations end with their construct, including folded branches.
+while mut index = 0; index < 2 { index += 1 }
+cassert(index == 2) // locate_error_here

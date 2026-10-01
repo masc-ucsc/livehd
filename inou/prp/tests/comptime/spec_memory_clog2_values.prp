@@ -1,0 +1,22 @@
+/*
+:name: spec_memory_clog2_values
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// SPEC (qa.md appendix section 5, Memories):
+//   "`std.clog2(x)` exists (comptime; clog2(13)==4, clog2(16)==4, clog2(17)==5,
+//    clog2(1)==0; x<=0 or runtime x is an error)."
+// SPEC (docs 13-stdlib.md): "with `comptime const N = 16`, `N.[bits] == 5` but
+// `std.clog2(N) == 4`" -- clog2 is the INDEX width, `.[bits]` the VALUE width.
+// Rule encoded here: the four spec values of the built-in `std.clog2` (no import).
+
+cassert(std.clog2(13) == 4)
+cassert(std.clog2(16) == 4)
+cassert(std.clog2(17) == 5)
+cassert(std.clog2(1) == 0)
+
+comptime const N = 16
+cassert(N.[bits] == 5)
+cassert(std.clog2(N) == 4)

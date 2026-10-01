@@ -1,0 +1,74 @@
+/*
+:name: mem_partial_write_ordering_old
+:type: simulation
+*/
+// lhdtrack suggestions2.md 1.2 (mem_partial_write_ordering_old): two byte-lane
+// writes to the SAME entry in one cycle kept only the last lane under
+// `ordering="old"` (cycle 0 read back 0xaa00 for 0xaaaa, no diagnostic). A
+// partial write `mem[a]#[..] = v` reads the entry, merges the lane and writes
+// the entry back; its read must see the earlier writes of the same cycle
+// whatever `ordering` says, or a later lane writes the old earlier lane back.
+//
+// Every memory takes the same byte-lane writes: `mo` is the 1.2 repro
+// (ordering="old" with a `clock_pin`; lhd sim steps every clock, so `wclk`
+// needs no driving), `mf` is ordering="fwd" (the partial writes used to be a
+// combinational cycle through their own forwarding), `mn` is ordering="none"
+// (the sim used to refuse a partial write after another write), `mr` has a
+// reset value and `mu` a whole-array clear in the cycle of one write, which
+// the lanes must land on. Writes happen on even cycles and the entry is read
+// back on the odd ones, when nothing is written (an "none" read of an entry
+// written in the same cycle is undefined).
+// equiv/mem_partial_write_ordering_old.prp and mem_partial_write_update.prp
+// prove the same shapes against Verilog goldens.
+mod mem_partial_write_ordering_old(clk:Clock, wclk:Clock, we:U1, clr:U1, a:U2, d:U32, be:U4, ra:U2) -> (qo:U32@[0], qf:U32@[0], qn:U32@[0], qr:U32@[0], qu:U32@[0]) {
+  reg mo:[4]U32:[ordering = "old", clock_pin = wclk] = nil
+  reg mf:[4]U32:[ordering = "fwd", clock_pin = clk] = nil   // two Clock inputs: name it
+  reg mn:[4]U32:[ordering = "none", clock_pin = clk] = nil
+  reg mr:[4]U32:[ordering = "old", clock_pin = clk] = 0
+  reg mu:[4]U32:[ordering = "old", clock_pin = clk] = nil
+  if clr == 1 {
+    mu = 0
+  }
+  if we == 1 {
+    for w in 0..<4 {
+      if be#[w] == 1 {
+        mo[a]#[(w * 8)..+8] = d#[(w * 8)..+8]
+        mf[a]#[(w * 8)..+8] = d#[(w * 8)..+8]
+        mn[a]#[(w * 8)..+8] = d#[(w * 8)..+8]
+        mr[a]#[(w * 8)..+8] = d#[(w * 8)..+8]
+        mu[a]#[(w * 8)..+8] = d#[(w * 8)..+8]
+      }
+    }
+  }
+  qo = mo[ra]
+  qf = mf[ra]
+  qn = mn[ra]
+  qr = mr[ra]
+  qu = mu[ra]
+}
+
+test mem_partial_write_ordering_old.lanes {
+  mut x = mem_partial_write_ordering_old
+  tick 8 {
+    const phase = clock >> 1
+    x.a   = 1
+    x.ra  = 1
+    x.we  = U1((clock & 1) == 0)
+    x.clr = U1(clock == 4)
+    x.d   = if phase == 0 { 0xaaaa_aaaa } elif phase == 1 { 0x5555_5555 } elif phase == 2 { 0x1234_5678 } else { 0xffff_ffff }
+    x.be  = if phase == 0 { 0xf } elif phase == 1 { 0x5 } elif phase == 2 { 0x6 } else { 0x9 }
+    step
+    if (clock & 1) == 1 {
+      // The entry after the write cycle: every lane of it landed.
+      const want = if phase == 0 { 0xaaaa_aaaa } elif phase == 1 { 0xaa55_aa55 } elif phase == 2 { 0xaa34_5655 } else { 0xff34_56ff }
+      assert(x.qo == want, "every byte lane of one entry lands in the same cycle (ordering=old)")
+      assert(x.qf == want, "every byte lane of one entry lands in the same cycle (ordering=fwd)")
+      assert(x.qn == want, "every byte lane of one entry lands in the same cycle (ordering=none)")
+      assert(x.qr == want, "every byte lane of one entry lands in the same cycle (reset value)")
+      // `mu` was cleared in the cycle of the phase-2 write: the new lanes land
+      // on the cleared entry.
+      const want_u = if phase == 2 { 0x0034_5600 } elif phase == 3 { 0xff34_56ff } else { want }
+      assert(x.qu == want_u, "the lanes land on a whole-array clear of the same cycle")
+    }
+  }
+}

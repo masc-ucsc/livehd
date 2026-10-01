@@ -28,13 +28,13 @@
 // ── a SIGNED value that does not fit an unsigned destination ─────────────────
 // 0xFF is +255 (an implicit leading sign-0); ORing it onto a negative value
 // sign-extends through `|`, so the result is signed -1, NOT 255.
-mut v8:s8 = -1
+mut v8:S8 = -1
 const ones = v8 | 0xff
 cassert(ones == 0sb1111_1111)        // == -1, signed
 
 // FUTURE COMPILE ERROR (1b — keep as comment until [[4h]] lands):
-//   w_bad:u8 = ones
-//   error: value -1 (range [-1,-1], signed) does not fit u8 (range [0,255]);
+//   w_bad:U8 = ones
+//   error: value -1 (range [-1,-1], signed) does not fit U8 (range [0,255]);
 //          force the bits — ones#[0..=7] == 255 — or use `wrap`.
 
 // ── read-side force: bit-select #[lo..=hi] (get_mask → unsigned, [0,2^w-1]) ───
@@ -44,25 +44,25 @@ cassert(ones == 0sb1111_1111)        // == -1, signed
 // get_mask_op — see [[1b]].)
 const forced = ones#[0..=7]          // low 8 bits of -1, unsigned → 255
 cassert(forced == 255)
-mut w_ok:u8 = ones#[0..=7]               // fits [0,255] by construction
+mut w_ok:U8 = ones#[0..=7]               // fits [0,255] by construction
 cassert(w_ok == 255)
 
 // The select width is itself range-checked — force is NOT blanket-ignore.
 // FUTURE COMPILE ERROR (1b):
-//   w_wide:u8 = ones#[0..=9]        // [0,1023] does not fit u8 (range [0,255])
+//   w_wide:U8 = ones#[0..=9]        // [0,1023] does not fit U8 (range [0,255])
 
 // An OVER-RANGE positive value forces the same way (high bits dropped).
 const big = 0x1ff                    // 511, range [511,511] — 9 bits
-// FUTURE COMPILE ERROR (1b):  w_over:u8 = big   // 511 ⊄ [0,255]
+// FUTURE COMPILE ERROR (1b):  w_over:U8 = big   // 511 ⊄ [0,255]
 cassert(big#[0..=7] == 255)          // low 8 bits
 
 // ── write-side force: bit-set field write (set_mask bounds to the field) ──────
-mut z:u8 = 0
+mut z:U8 = 0
 z#[0..=7] = ones                     // -1 pattern into the 8-bit field → 255
 cassert(z == 255)
 
 // COMPILE ERROR pinned in errors/overflow_force_set_wide.prp:
-//   z#[0..=9] = 0                   // 10-bit field write into a u8 var
+//   z#[0..=9] = 0                   // 10-bit field write into a U8 var
 
 // ── a literal pattern that genuinely fits needs no force ─────────────────────
 const ab     = 0xab                  // 0b1010_1011
@@ -72,8 +72,8 @@ cassert(lownib == 11)
 // ── signed range-fit enforcement (task 1b, LANDED): in-range fits silently;
 //    a SIGNED overflow is a hard error (no reinterpret — unlike the unsigned
 //    negative-pattern coercion above). ────────────────────────────────────────
-const sfit:s8 = -100                 // fits [-128, 127]
+const sfit:S8 = -100                 // fits [-128, 127]
 cassert(sfit == -100)
 // NOW A COMPILE ERROR (1b — uPass_attributes range-fit check):
-//   const sbad:s8 = 200             // 200 does not fit declared range [-128, 127]
+//   const sbad:S8 = 200             // 200 does not fit declared range [-128, 127]
 //   error: comptime write to `sbad` (value 0xc8) does not fit its declared range [-128, 127]

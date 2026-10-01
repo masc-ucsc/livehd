@@ -1,0 +1,9 @@
+/*
+:name: match_init_scope_read
+:type: error
+:error: read of undefined variable 'local'
+*/
+
+// Initializer declarations end with their construct, including folded branches.
+match const local = 1; local { == 1 { cassert(local == 1) } }
+cassert(local == nil) // locate_error_here

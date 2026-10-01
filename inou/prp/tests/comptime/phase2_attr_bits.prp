@@ -6,18 +6,20 @@
 */
 
 // Phase 2 — `.[bits]` reads under the typesystem redesign (entry 1v).
-// Declaration-driven: typed `:uN`/`:sN` → fixed envelope; untyped → nil.
-// `.[ubits]`/`.[sbits]` have been removed.
+// Declaration-driven: typed `:UN`/`:SN` → fixed envelope. An untyped COMPTIME
+// integer is as wide as its value (user ruling 2026-09-27, docs 04b "Integer
+// Bitwidth"); an untyped runtime value reads nil. `.[ubits]`/`.[sbits]` have
+// been removed.
 
-mut a:u8 = 0
+mut a:U8 = 0
 cassert(a.[bits] == 8)
 a = 200
 cassert(a.[bits] == 8)        // bits is declared, not value-derived
 
-const c:s4 = -1
+const c:S4 = -1
 cassert(c.[bits] == 4)
 cassert(c.[min] == -8)
 cassert(c.[max] == 7)
 
-const e = 0                   // untyped → nil
-cassert(e.[bits] == nil)
+const e = 0                   // untyped comptime → its value's width
+cassert(e.[bits] == 1)

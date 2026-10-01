@@ -1,0 +1,35 @@
+/*
+:name: mod_multi_output_cycle_mismatch
+:type: error
+:tolg: 1
+:error: 'vv'.*lands at cycle
+*/
+
+// A caller must see EACH output of a multi-output `mod` child at that output's
+// own declared landing cycle (lhdtrack suggestions 2.1). The child's `vld`
+// lands at cycle 1 (a 1-cycle delay register), so re-exporting it as a
+// cycle-0 output breaks the caller's own interface contract, exactly like the
+// single-output case (`g:U4@[0] = dly(d=a)` with `dly.q@[1]` is rejected with
+// "lands at cycle"). Before the 2.1 fix a MULTI-output child's outputs were
+// all seen at cycle 0 (only a single-output child stamped its landing cycle on
+// the Sub), so this design compiled silently. The accepted counterpart is
+// sim/mod_multi_output_landing_cycles.prp. For a SAME-FILE child the error may
+// come from upass.timecheck; the IMPORTED spelling, which only upass.tolg can
+// check, is imports/mod_multi_output_cycle_mismatch_import.prp.
+//
+// No line marker: the single-output form of this error is reported by
+// upass.timecheck with no source span; the tolg form carries one.
+mod dly2(en:Bool, d:U4) -> (vld:Bool@[1], q:U4@[0]) {
+  reg vr:Bool = false
+  vr = en
+  vld = vr
+  reg r:U4 = 0
+  if en { r = d }
+  q = r
+}
+
+pub mod mtop(en:Bool, a:U4) -> (vv:Bool@[0], qq:U4@[0]) {
+  const x = dly2(en=en, d=a)
+  vv = x.vld
+  qq = x.q
+}

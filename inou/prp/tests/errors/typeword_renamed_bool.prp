@@ -1,0 +1,8 @@
+/*
+:name: typeword_renamed_bool
+:type: error
+:error: `bool` was renamed `Bool`
+*/
+pub comb typeword_renamed_bool(a:bool) -> (o:Bool) {  // locate_error_here
+  o = a
+}

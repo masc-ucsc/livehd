@@ -1,0 +1,22 @@
+/*
+:name: rolled_loop_carry_overflow
+:type: error
+:tolg: 1
+:error: `acc` \(range \[16, 34\]\) does not fit its declared range \[0, 15\]
+:help: apply a wrap/saturate policy
+*/
+// The overflow rule inside a loop the default compile ROLLS (compile.unroll is
+// false): the carried `acc` is written in the lifted body, and that write is
+// checked like any other. Every iteration writes 16 + x + i, which never fits
+// a u4. It used to compile silently when rolled (the carry was exempt) while
+// `--set compile.unroll=true` reported it: legality must not depend on the
+// unroll knob.
+pub mod rolled_loop_carry_overflow(x:U4, c:Bool) -> (y:U8@[0]) {
+  mut acc:U4 = 0
+  for i in 0..<4 {
+    if c {
+      acc = x + 16 + i   // locate_error_here
+    }
+  }
+  y = acc
+}

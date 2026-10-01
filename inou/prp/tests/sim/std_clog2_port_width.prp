@@ -1,0 +1,53 @@
+/*
+:name: std_clog2_port_width
+:type: simulation
+*/
+// User ruling 2026-09-27: `std.clog2(N)` (Verilog `$clog2`) sizes a port and a
+// register from a generic count, with no import and no helper generic. A
+// modulo-16 counter needs std.clog2(16) == 4 bits. N=16 is chosen because it
+// separates clog2 from the VALUE width (`N.[bits] == 5`, docs 04b / 13-stdlib):
+//   * a 3-bit register (clog2 off by one) wraps at 8 and the lockstep golden
+//     below diverges on the 9th counting cycle (`bad == 0` fails);
+//   * a 5-bit register (clog2 confused with `.[bits]`) counts the same values
+//     but `w` reports 5 (`w == 4` fails).
+// The `wrap` never fires with the right width (c == 15 resets to 0 first); it
+// only keeps the increment legal under the narrowing-assignment rule.
+//
+// Today `std` is an undefined variable ("read of undefined variable 'std'"),
+// so this is written as `mod m<N=16, B=4>` plus a cassert.
+
+mod mod_counter<N=16>(en:Bool) -> (q:Unsigned(bits=std.clog2(N))@[0], w:U8@[0]) {
+  reg c:Unsigned(bits=std.clog2(N)) = 0
+  if en {
+    if c == N - 1 { c = 0 } else { wrap c = c + 1 }
+  }
+  q = c
+  w = c.[bits]
+}
+
+pub mod std_clog2_port_width(en:Bool) -> (q:U4@[0], w:U8@[0]) {
+  const m = mod_counter<N=16>(en=en)
+  q = m.q
+  w = m.w
+}
+
+test std_clog2_port_width.wraps_at_16 {
+  mut d = std_clog2_port_width
+  mut g = 0        // golden: count modulo 16 (value after this cycle's step)
+  mut seen = 0
+  mut bad = 0
+  mut w:U8 = 0
+  tick 30 {
+    d.en    = true
+    d.reset = clock < 2
+    if clock < 2 { g = 0 } else { g = if g == 15 { 0 } else { g + 1 } }
+    step
+    if d.q != g { bad += 1 }
+    seen += 1
+    w = d.w
+  }
+  puts("seen={seen} bad={bad} w={w} last={g}")
+  assert(seen == 30)
+  assert(bad == 0)
+  assert(w == 4)
+}

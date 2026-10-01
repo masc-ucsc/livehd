@@ -1,0 +1,10 @@
+/*
+:name: empty_interpolation_comment_hole
+:type: error
+:error: empty interpolation hole: a `\{...\}` in a string needs an expression
+*/
+// docs 02-basics "Strings": a hole holds exactly one expression, and a comment
+// inside a hole is a comment -- so a hole holding only a comment is EMPTY, an
+// error like `"{}"` (a literal brace is written doubled, `{{`/`}}`).
+const e = "a{/* c */}b"   // locate_error_here
+cassert(e == "ab")

@@ -12,10 +12,10 @@
 // (Unlike `wire`, a `const` is NOT position-independent: a read before the bind
 // is an error, which is why the emitter prefers this form when the write comes
 // first.)
-pub comb cnb(a:u8, c:bool) -> (o:u8) {
-  const w:u8 = nil
+pub comb cnb(a:U8, c:Bool) -> (o:U8) {
+  const w:U8 = nil
   if c {
-    w = a + 1
+    wrap w = a + 1
   }
   o = w
 }

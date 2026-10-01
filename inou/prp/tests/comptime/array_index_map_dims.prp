@@ -1,0 +1,62 @@
+/*
+:name: array_index_map_dims
+:type: comptime
+:verifier_pass: 13
+:verifier_fail: 0
+*/
+// Index-range and enum dimensions (08-memories.md "Array index") next to plain
+// ones, iterated, copied and passed to a comb.
+//
+// USED TO FAIL: a plain dimension of an array that also had a range or enum
+// dimension read as a 0-entry mapped dimension ("index 1 is outside the index
+// range [0, 0)"), a `for` loop over a mapped array had its positions checked
+// as user indices, and a comb argument dropped the index map (`arr[101]` of a
+// passed `[100..<132]` array was out of range, `arr[1]` read entry 101).
+
+enum X = (t1 = 0, t2, t3)
+
+mut m:[2][100..<102]U4 = 0
+m[1][101] = 3
+m[0][100] = 2
+cassert(m[1][101] == 3 and m[0][100] == 2 and m[1][100] == 0)
+cassert(m.[size] == 2)
+
+mut r:[10..<12][3]U4 = 0
+r[11][2] = 3
+cassert(r[11][2] == 3 and r[10][2] == 0)
+cassert(r.[size] == 2)
+
+mut t:[X][2]U4 = 0
+t[X.t2][1] = 3
+cassert(t[X.t2][1] == 3 and t[X.t1][1] == 0)
+
+mut x4:[100..<102]U8 = 0
+x4[101] = 3
+mut s = 0
+for v in x4 { s += v }
+cassert(s == 3)
+
+mut x2:[X]U3 = 0
+x2[X.t3] = 5
+mut sum2 = 0
+for v in x2 { sum2 += v }
+cassert(sum2 == 5)
+
+comb get(arr, i) -> (res) { res = arr[i] }
+mut x5:[100..<132]U3 = 0
+x5[101] = 5
+cassert(get(arr=x5, i=101) == 5)
+cassert(get(arr=x5, i=100) == 0)
+cassert(get(arr=x2, i=X.t3) == 5)
+
+mut y = x5
+cassert(y[101] == 5)
+y[102] = 3
+cassert(y[102] == 3 and x5[102] == 0)
+
+comb g<LO>(i, v) -> (res) {
+  mut a:[LO..<(LO+4)]U8 = 0
+  a[i] = v
+  res = a[LO+1] + a.[size]
+}
+cassert(g<LO=100>(i=101, v=7) == 11)

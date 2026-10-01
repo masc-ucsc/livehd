@@ -1,0 +1,30 @@
+/*
+:name: alias_signed_bitwise
+:type: comptime
+:verifier_pass: 7
+:verifier_fail: 0
+:verifier_include_funcs: true
+*/
+
+// User ruling 2026-09-28 (38): an untyped `const` alias of a typed value has
+// its type for attribute reads.
+//   * An unbounded `Signed` has no range: the alias's `.[max]`/`.[min]` are
+//     nil like the source's (they read 0, a [0,0] envelope, before).
+//   * A bitwise and/or/xor of mixed signs is signed, and an unsigned N-bit
+//     operand needs N+1 signed bits: `U8 & S4` spans [0, 255], so its alias
+//     is 9 bits (it read S8, max 127, before).
+const y:Signed = -100000
+const z = y
+cassert(y.[max] == nil)
+cassert(z.[max] == nil)
+cassert(z.[min] == nil)
+
+mod alias_signed_bitwise(u:U8, s:S4) -> (o:S10@[0]) {
+  const m = u & s
+  cassert(m.[bits] == 9)
+  cassert(m.[max] == 255)
+  cassert(m.[sign])
+  const n = ~m  // signed: -m - 1
+  cassert(n.[bits] == 9)
+  o = n
+}

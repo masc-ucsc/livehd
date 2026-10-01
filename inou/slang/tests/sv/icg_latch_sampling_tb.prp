@@ -1,0 +1,53 @@
+// Native directed vectors for icg_latch_sampling.v (the `sim` tier of
+// tests/slang_compile.sh): each `step` is one whole reference `clk` cycle.
+const dut = import("lg:icg_latch_sampling")
+
+test icg_latch_sampling.enable_is_sampled_at_the_closing_edge {
+  mut acc          = dut
+  mut i:U8         = 0
+  mut seen:U8      = 0
+  mut bad_q:U8     = 0
+  mut bad_pair:U8  = 0
+  mut bad_ctl:U8   = 0
+  tick 6 {
+    // c0,c1 enabled -> load; c2,c3 disabled -> HOLD; c4 enabled again -> load
+    // IN THIS PERIOD; c5 disabled -> hold what c4 loaded.
+    acc.ein = (i <= 1) or (i == 4)
+    mut dv:U8 = 5
+    if i == 1 {
+      dv = 6
+    } elif i == 2 {
+      dv = 99
+    } elif i == 3 {
+      dv = 77
+    } elif i == 4 {
+      dv = 88
+    } elif i == 5 {
+      dv = 41
+    }
+    acc.d = dv
+    step
+    mut golden:U8 = 5
+    if i >= 1 {
+      golden = 6
+    }
+    if i >= 4 {
+      golden = 88
+    }
+    seen += 1
+    if acc.q != golden {
+      bad_q += 1
+    }
+    if acc.q != acc.qraw {
+      bad_pair += 1
+    }
+    if acc.ctl != dv {
+      bad_ctl += 1
+    }
+    i += 1
+  }
+  assert(seen == 6, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_ctl == 0, "CONTROL: the flop on the ungated reference clock loads every tick")
+  assert(bad_q == 0, "the ICG commits in the period whose enable the latch captured at the rise")
+  assert(bad_pair == 0, "the enable latch is absorbed into the guard: latched and raw gates agree")
+}

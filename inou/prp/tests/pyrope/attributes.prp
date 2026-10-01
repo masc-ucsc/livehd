@@ -5,15 +5,15 @@
 :verifier_fail: 0
 */
 
-comb top(a::[comptime], b::[comptime], c) -> (r) {
+comb top(a::[`comptime`], b::[`comptime`], c) -> (r) {
   mut x = 0
-  // `.[comptime]` is an integer (1/0); convert with `!= 0` to compare against
+  // `.[`comptime`]` is an integer (1/0); convert with `!= 0` to compare against
   // boolean literals — mixing types in a comparison is a compile error.
-  r = (a.[comptime] != 0, b.[comptime] != 0, c.[comptime] != 0)
+  r = (a.[`comptime`] != 0, b.[`comptime`] != 0, c.[`comptime`] != 0)
   cassert((true, true, false) == r)
 }
 
-reg x:u32
+reg x:U32
 
 const z = top(a=10, b=30, c=x)
 cassert(z == (true, true, false))

@@ -13,6 +13,7 @@
 #include <sstream>
 #include <thread>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
@@ -710,8 +711,6 @@ void slang_parse(Options& opts, Result& res, Eprp_var& var) {
   }
 }
 
-void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool need_graphs);  // fwd
-
 // True when any requested observable needs LGraphs (gates the tolg lowering —
 // the CLI-level equivalent of pass.upass's tolg:0|1 toggle). A --dump lg is
 // an observable like an emit, so it pulls the stage in too.
@@ -1173,10 +1172,28 @@ void tool_diff_ln(Options& opts, Result& res, const std::vector<std::string>& to
 //   one lg: dir (pass-through copy)      -> lg:DIR
 // ---- synth ------------------------------------------------------------------
 
+// tolg's `stale-instance` refusal is about the lg: library, not the source:
+// the library holds a module this compile does not rebuild, bound to ports
+// the compile changes. Report it as the config error it is (exit 4) instead of
+// what its diagnostic category folds to. Call from a catch block; returns when
+// the failure is anything else, for the caller to rethrow.
+void rethrow_stale_instance_as_config() {
+  const auto& recs = livehd::diag::sink().records();
+  for (auto it = recs.rbegin(); it != recs.rend(); ++it) {
+    if (it->severity == livehd::diag::Severity::error) {
+      if (it->pass == "upass.tolg" && it->code == "stale-instance") {
+        throw Lhd_error{"config", it->message, it->hint};
+      }
+      return;
+    }
+  }
+}
+
 // Lower LNAST units: lnastfmt + upass, then (only when `need_graphs`) the
 // terminal LNAST->LGraph sub-pass into the library at lib_path — the
 // CLI-level tolg:0|1 gate, derived from the requested emits.
-void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool need_graphs) {
+void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool need_graphs,
+                  const Lg_absorbed* absorbed) {
   // Publish parser-streamed lambda siblings before lnastfmt and, critically,
   // before the import-defer loop snapshots pristine trees. If pass.upass were
   // the first owner to take them, a blocked import retry would erase the
@@ -1275,7 +1292,8 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
   // cycles and missing units). Import-free invocations take the single-pass
   // fast path (no clones, no defer mode).
   // NOTE: this test must stay origin-AGNOSTIC. Pyrope re-emitted from Verilog
-  // carries `::[hdl]` (is_verilog_origin) AND a real file-scope
+  // carries `::[timecheck=false]` (skip_timecheck; never verilog_origin, which
+  // only the Verilog reader sets) AND a real file-scope
   // `const X = import("X.X")` header, and it needs the retry loop exactly like
   // hand-written Pyrope does — skipping such trees here made `tmod` fail to
   // resolve `tpkg` on recompile (//lhd/tests:slang_param_provenance_test).
@@ -1620,13 +1638,35 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
     // 2f-lg: reject two units pinned to the same artifact name (lg="…")
     // before any GraphIO is created.
     uPass_tolg::detect_lg_collisions(var.lnasts);
+    // A module of a unit this scope's previous generation held, and the edit
+    // dropped from the import closure, is a leftover compile_cache_prune_graphs
+    // deletes after the lowering: its stale instances are refused only if it
+    // survives the prune (compile_sources runs check_leftover_instances then).
+    // Only the Pyrope compile cache fills the list, and its caller checks.
+    uPass_tolg::set_prior_units(res.compile_cache_prior_units);
+    // A refused caller's hint names its origin: an absorbed lg: input, or the
+    // working library itself (an earlier compile's leftover in the emit dir).
+    // A scratch working library is never named: its mkdtemp path would leak
+    // into the result envelope's hint.
+    {
+      const auto* lg_out = find_slot(opts.emit_dirs, "lg");
+      const bool  named  = (lg_out != nullptr && lg_out->path == lib_path) || !opts.workdir_scratch;
+      uPass_tolg::set_library_origins(named ? lib_path : std::string{},
+                                      absorbed ? absorbed->dirs : std::vector<std::string>{},
+                                      absorbed ? absorbed->origins : std::vector<std::pair<std::string, std::string>>{});
+    }
     // Two-phase: register every module's GraphIO first so call
     // sites can bind callee GraphIOs (Sub instances) regardless of order.
-    for (const auto& ln : var.lnasts) {
-      if (ln->is_graph_restored()) {
-        continue;  // graph body restored from the compile cache
+    try {
+      for (const auto& ln : var.lnasts) {
+        if (ln->is_graph_restored()) {
+          continue;  // graph body restored from the compile cache
+        }
+        uPass_tolg::register_io(ln, lib_path, var.lnasts);
       }
-      uPass_tolg::register_io(ln, lib_path, var.lnasts);
+    } catch (const std::exception&) {
+      rethrow_stale_instance_as_config();
+      throw;
     }
     // The reset_style elaboration flag rides the upass set
     // (`--set upass.reset_style=async`); tolg is its only consumer.
@@ -1634,22 +1674,32 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
     if (auto it = up.find("reset_style"); it != up.end() && !it->second.empty()) {
       reset_style = it->second;
     }
-    std::vector<std::shared_ptr<hhds::Graph>> lowered;
-    for (const auto& ln : var.lnasts) {
+    // Callees lower first, so a caller's combinational-loop checks read its
+    // children's finished bodies (an imported child follows its importer in
+    // var.lnasts); the graphs still join `var` in registry order.
+    absl::flat_hash_map<const Lnast*, std::shared_ptr<hhds::Graph>> built;
+    for (const auto& ln : uPass_tolg::lowering_order(var.lnasts)) {
       if (ln->is_graph_restored()) {
         continue;  // final post-formal graph already lives in lib_path/var
       }
-      auto g = uPass_tolg::run(ln, lib_path, var.lnasts, reset_style);
-      if (g) {
+      if (auto g = uPass_tolg::run(ln, lib_path, var.lnasts, reset_style)) {
+        built.insert_or_assign(ln.get(), std::move(g));  // a unit listed twice: the last lowering wins
+      }
+    }
+    std::vector<std::shared_ptr<hhds::Graph>> lowered;
+    for (const auto& ln : var.lnasts) {
+      const auto it = built.find(ln.get());
+      if (it != built.end()) {
+        const auto g = std::move(it->second);
+        built.erase(it);  // a unit listed twice joins once
         // tolg REPLACES a body that already exists under this name (delete +
         // recreate on the stable gid), which tombstones every older handle to
         // it: a second unit lowering to the same name (duplicate names are
         // legal upstream, last wins), or a body some earlier step put in `var`.
         // Eprp_var::add dedups by pointer, so the dead handle would otherwise
         // ride along and the next walk reads released storage.
-        const auto replaced = [&g](const std::shared_ptr<hhds::Graph>& old) {
-          return old && old != g && old->get_name() == g->get_name();
-        };
+        const auto replaced
+            = [&g](const std::shared_ptr<hhds::Graph>& old) { return old && old != g && old->get_name() == g->get_name(); };
         if (std::erase_if(var.graphs, replaced) != 0) {
           // The body just lowered is no longer the cached FINAL graph: it must
           // ride the recipe passes, the latch-contract check and pass.formal
@@ -1665,7 +1715,10 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
     uPass_tolg::gate_activation_clocks(lowered);
   }
   res.recipe_steps.emplace_back("lnast.tolg");
-  if (livehd::diag::sink().has_errors()) {
+  // Halting errors only: a DEFERRED one (a refuted formal property) is recorded
+  // and fails the run, but must not stop a later lowering -- `lhd lec` lowers
+  // its impl side after the ref side's pass.formal already ran.
+  if (livehd::diag::sink().has_halting_errors()) {
     throw classify_engine_failure("lnast.tolg reported errors");
   }
   account_redone();
@@ -1674,8 +1727,7 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
 // Graph half shared by synth and compile: recipe passes + typed emits.
 // `lib_path` is the library the graphs in `var` live in ("" when there are
 // no graphs, e.g. a pure-LNAST run).
-void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool already_final,
-                              bool from_source) {
+void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool already_final) {
   check_known_set_passes(opts);
   const auto                       redo_begin = std::chrono::steady_clock::now();
   Eprp_var                         fresh;
@@ -1706,7 +1758,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
     // restored graph was optimized when it was stored (the compile cache
     // context names the resolved switch). This is the ONLY place satopt runs
     // in a flow: synthesis maps what compile produced.
-    if (satopt_during_compile(opts, from_source) && !active->graphs.empty()) {
+    if (satopt_during_compile(opts) && !active->graphs.empty()) {
       run_satopt_step(*active, {}, opts, res);
     }
 
@@ -1852,7 +1904,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
       if (!lib_path.empty()) {
         TRACE_EVENT("pass", "lg.save");
         Phase_timer phase(res, "lg.save");
-        livehd::Hhds_graph_library::save(lib_path);
+        lg_owners_save(res, var, lib_path);
       }
       res.outputs.push_back(lg_out->path);
     } else {
@@ -1861,7 +1913,7 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
       TRACE_EVENT("pass", "lg.save");
       {
         Phase_timer phase(res, "lg.save");
-        livehd::Hhds_graph_library::save(lib_path);
+        lg_owners_save(res, var, lib_path);
       }
       res.outputs.push_back(lg_out->path);
     }
@@ -1976,6 +2028,38 @@ void compile_ir(Options& opts, Result& res, const Ir_inputs& ir) {
   graph_pipeline_and_emits(opts, res, var, lib_path);
 }
 
+// Absorb each lg: INPUT library into the working library at lib_path, in
+// order, and record which input each absorbed module BODY came from, for
+// tolg's stale-instance hint (uPass_tolg::set_library_origins). load_merge
+// keeps a body the library already holds, so a module that had one before a
+// merge is not that input's: it came from an earlier input, or the working
+// library held it already (an earlier compile left it in the emit dir).
+static Lg_absorbed absorb_lg_inputs(Result& res, const std::string& lib_path, const std::vector<std::string>& dirs) {
+  Lg_absorbed absorbed;
+  if (dirs.empty()) {
+    return absorbed;
+  }
+  auto&                            lib = livehd::Hhds_graph_library::instance(lib_path);
+  absl::flat_hash_set<std::string> bodies;
+  const auto                       note_bodies = [&](const std::string* dir) {
+    for (const auto gid : lib.all_io_gids()) {
+      auto io = lib.find_io(gid);
+      if (io && lib.has_graph(gid) && bodies.emplace(io->get_name()).second && dir != nullptr) {
+        absorbed.origins.emplace_back(std::string(io->get_name()), *dir);
+      }
+    }
+  };
+  note_bodies(nullptr);
+  for (const auto& d : dirs) {
+    check_lg_input_dir(d);
+    res.inputs.push_back(d);
+    lib.load_merge(d);
+    absorbed.dirs.push_back(d);
+    note_bodies(&d);
+  }
+  return absorbed;
+}
+
 // Linker: merge lg: libraries + lower the ln: source units that reference them
 // (`import("lg:foo")` -> a black-box Sub) into one new lg: library, then run
 // the shared graph pipeline (recipe + emits).
@@ -1989,22 +2073,17 @@ void compile_link_ir(Options& opts, Result& res, const Ir_inputs& ir) {
   // Absorb each lg: library into the output library. Name-hash gids make a
   // shared graph name keep the same gid across libraries, so load_merge is
   // conflict-free for matching names (and dedups them).
-  auto&             lib      = livehd::Hhds_graph_library::instance(lib_path);
-  for (const auto& d : ir.lg_dirs) {
-    check_lg_input_dir(d);
-    res.inputs.push_back(d);
-    lib.load_merge(d);
-  }
+  const auto        absorbed = absorb_lg_inputs(res, lib_path, ir.lg_dirs);
   // Lower the ln: source units into the SAME library; their `import("lg:…")`
   // calls resolve to the absorbed graphs by name at tolg.
-  Eprp_var var;
+  Eprp_var          var;
   for (const auto& d : ir.ln_dirs) {
     res.inputs.push_back(d);
     for (auto& ln : load_ln_dir(d)) {
       var.add(ln);
     }
   }
-  lower_lnasts(opts, res, var, lib_path, /*need_graphs=*/true);
+  lower_lnasts(opts, res, var, lib_path, /*need_graphs=*/true, &absorbed);
   // Same rule as the source+lg: path in compile_sources: the absorbed graphs are
   // part of the linked design, so every emit sees them (the lg: emit already did
   // — it IS the library — but `--emit verilog:` would have dropped the black-box
@@ -2046,18 +2125,15 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
         run_step("pass.lnastfmt", var, {}, opts, res);
       }
     };
+    // What this design and others already saved into the library (prior units
+    // for the prune and tolg's leftover deferral; roots the prune never
+    // deletes). Read after the parse, which publishes the manifest's.
+    lg_owners_load(opts, res, lib_path);
     // 2f-lgimport — absorb any lg: input libraries into the working library
     // BEFORE lowering, so a source unit's `import("lg:name")` resolves to the
     // pre-compiled graph by name at tolg (the same linker mechanism the
     // ln:+lg: path uses). Name-hash gids make matching names dedup cleanly.
-    if (!ir.lg_dirs.empty()) {
-      auto& lib = livehd::Hhds_graph_library::instance(lib_path);
-      for (const auto& d : ir.lg_dirs) {
-        check_lg_input_dir(d);
-        res.inputs.push_back(d);
-        lib.load_merge(d);
-      }
-    }
+    const auto absorbed = absorb_lg_inputs(res, lib_path, ir.lg_dirs);
     // Tier B restores the all-clean closure as a fast path and transplants
     // eligible units into a mixed restored+fresh dirty-cone rebuild. LNAST-
     // observing outputs still need a complete post-upass forest, and mixed
@@ -2084,7 +2160,7 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
     // Bare `lhd compile FILE.prp` (no emit) still lowers to LGraphs for max
     // diagnostics; the graphs are built and discarded (force_diag_graphs).
     if (!graph_cache_hit) {
-      lower_lnasts(opts, res, var, lib_path, need_graphs);
+      lower_lnasts(opts, res, var, lib_path, need_graphs, &absorbed);
     }
     // An absorbed lg: library is part of the DESIGN, not just a name table for
     // `import("lg:…")` to bind against. Put its graphs on `var` so every emit
@@ -2103,11 +2179,19 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
       // definitions from prior runs. Keep real bodies and referenced blackbox
       // declarations; remove renamed/deleted ghosts before any emit/save.
       compile_cache_prune_graphs(var, res, lib_path);
+      // A leftover module tolg deferred a stale-instance refusal on is gone
+      // now, unless something live still instantiates it: refuse that one.
+      try {
+        uPass_tolg::check_leftover_instances();
+      } catch (const std::exception&) {
+        rethrow_stale_instance_as_config();
+        throw;
+      }
     }
     if (ln_out != nullptr) {
       publish_source_ln(opts, res, var, n_imports, ln_out->path);
     }
-    graph_pipeline_and_emits(opts, res, var, lib_path, graph_cache_hit, /*from_source=*/true);
+    graph_pipeline_and_emits(opts, res, var, lib_path, graph_cache_hit);
     if (res.compile_cache.enabled && need_graphs && !graph_cache_hit && ir.ln_dirs.empty() && ir.lg_dirs.empty()) {
       compile_cache_store_graphs(opts, res, var, lib_path);
     }
@@ -2147,10 +2231,10 @@ void compile_sources(Options& opts, Result& res, const Ir_inputs& ir) {
         units.insert(units.end(), wrappers.begin(), wrappers.end());
         save_ln_dir(opts, res, units, ln_out->path);
       }
-      graph_pipeline_and_emits(opts, res, var, lib_path, false, /*from_source=*/true);
+      graph_pipeline_and_emits(opts, res, var, lib_path);
     } else {
       auto lib_path = verilog_frontend(opts, res, var);
-      graph_pipeline_and_emits(opts, res, var, lib_path, false, /*from_source=*/true);
+      graph_pipeline_and_emits(opts, res, var, lib_path);
     }
   }
   const auto closure = harvest_source_files(res, var.lnasts);

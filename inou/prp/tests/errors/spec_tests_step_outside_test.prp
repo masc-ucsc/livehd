@@ -1,0 +1,16 @@
+/*
+:name: spec_tests_step_outside_test
+:type: error
+:error: step
+*/
+// Spec: docs 05b "Test only statements": "`test` code blocks are allowed to
+// use special statements not available outside testing blocks: * `step
+// [ncycles]` advances the simulation one cycle"; 09 status table: "`step
+// [N]` | `test` only".
+//
+// Rule pinned: a `step` statement in a design body (here a `mod`) is an error.
+
+pub mod spec_sot(a:U8) -> (o:U8@[0]) {
+  step                   // locate_error_here
+  o = a
+}

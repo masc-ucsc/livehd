@@ -1,0 +1,16 @@
+/*
+:name: spec_syntax_enum_decl
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+// qa.md Appendix §4: "Enums require `=`: `enum E = (a, b)`, `enum E:U8 = (a, b)`."
+// qa.md Appendix §7: "Enums: ONLY the declaration `enum E = (...)` / `enum E:T = (...)`".
+// Both legal declaration forms (untyped one-hot, typed sequential).
+enum E = (a, b)
+enum F:U8 = (x, y=5, z)
+
+cassert(E.a != E.b)
+cassert(Signed(F.x) == 0)
+cassert(Signed(F.y) == 5)
+cassert(Signed(F.z) == 6)

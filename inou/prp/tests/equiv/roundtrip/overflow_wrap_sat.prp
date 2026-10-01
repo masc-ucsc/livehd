@@ -1,0 +1,28 @@
+// User ruling 2026-09-27 (overflow rule): the Pyrope the writer emits must
+// itself obey the rule, so a `wrap`/`sat` into a typed destination has to
+// re-read as a narrowing the recompile accepts. `wrap` lowers to a bit-select;
+// `sat` to a clamp mux, whose unsigned form re-read as
+// `c = if v > 0xff { 0xff } else { v }` MAY reach 510 by range alone (no
+// guard-aware analysis) -- so the lowering ends in the target's bit-select too.
+// Registers, a typed local and a comb output, signed and unsigned.
+comb inc4(a:U4) -> (o:U4) {
+  wrap o = a + 1
+}
+
+pub mod overflow_wrap_sat(en:U1, a:U8, b:S8, x:U4) -> (q:U8@[], r:S8@[], w:U8@[], s:U8@[], i:U4@[]) {
+  reg cnt:U8 = 0
+  reg sc:S8 = 0
+  reg wc:U8 = 0
+  if en == 1 {
+    sat cnt += a
+    sat sc = sc - b
+    wrap wc += a
+  }
+  mut t:U4 = 0
+  sat t = x + a#[0..=3]
+  q = cnt
+  r = sc
+  w = wc
+  s = t
+  i = inc4(a=x)
+}

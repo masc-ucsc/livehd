@@ -7,8 +7,8 @@
 
 // `in` array-membership on a hierarchical enum's leaf values.
 enum Dir = (
-  vert  = enum(up, down),
-  horiz = enum(left, right)
+  vert  = (up, down),
+  horiz = (left, right)
 )
 
 cassert(Dir.vert.up in (Dir.vert.up, Dir.vert.down))

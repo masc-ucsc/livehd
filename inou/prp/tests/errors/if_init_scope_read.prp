@@ -1,0 +1,9 @@
+/*
+:name: if_init_scope_read
+:type: error
+:error: read of undefined variable 'limit'
+*/
+
+// Initializer declarations end with their construct, including folded branches.
+if const limit = 3; limit > 2 { cassert(limit == 3) }
+cassert(limit == 3) // locate_error_here

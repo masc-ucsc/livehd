@@ -1,0 +1,12 @@
+/*
+:name: spec_types_unsigned_runtime_negative
+:type: error
+:error: fit its declared range
+*/
+// SPEC docs 04-variables "Integer or Signed": "`Unsigned`: the same as `Signed(min=0)`"; docs 07-typesystem
+// "Bitwidth": "when the current range of a right-hand side may fall outside the constrained range of its typed
+// destination (above `max` or below `min`), the assignment is a mandatory compile error ... to comptime and runtime
+// values alike." Rule: a RUNTIME S4 (range [-8, 7]) into an `Unsigned` output is a compile error.
+pub comb spec_types_unsigned_runtime_negative(a:S4) -> (o:Unsigned) {
+  o = a  // locate_error_here
+}

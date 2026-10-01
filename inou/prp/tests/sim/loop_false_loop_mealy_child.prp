@@ -1,0 +1,122 @@
+/*
+:name: loop_false_loop_mealy_child
+:type: simulation
+:expect_instances: u_loop*=2
+*/
+
+// The MEALY twin of loop_false_loop_moore_child.prp. The child `mc_state` has
+// a state-only output `q` (its register) AND a combinational one `e` (a
+// function of its input `x`), so it is not a Moore machine: inside the rolled
+// loop body the per-module emitter pre-binds only `q` (the Mealy state-only
+// boundary) and calls the child in order for `e`.
+//
+// The settle pass read the pre-bound `m.__out.q` BEFORE its own call to
+// `m.__compact_publish()`, i.e. the value the child published one period
+// earlier: `q` lagged the register by a cycle, silently. The fix republishes a
+// pre-bound child right after the advance that committed its state.
+//
+// `mc_top_reg` feeds the same array only to a root register, so the loop's
+// post-edge settle never runs at all: without that republish the rise read
+// `q` frozen at its reset value.
+//
+// WHY `::[timecheck=false]`: see loop_false_loop_moore_child.prp.
+//
+// Same values as `--set compile.unroll=true`.
+mod mc_state(rst:Reset, en:Bool, d:U4, x:U4) -> (q:U4@[0], e:U4@[0]) {
+  reg r:U4:[reset_pin=rst] = 8
+  if en { r = d }
+  q = r
+  e = x ^ 3
+}
+
+mod mc_arb::[timecheck=false](rst:Reset, req:U4) -> (g:U4@[0]) {
+  wire gr:U4 = nil
+  const m = mc_state(rst=rst, en=req != 0, d=gr, x=req)
+  gr = req & ~m.q
+  g  = gr ^ m.e
+}
+
+pub mod mc_top(rst:Reset, req:U8) -> (g:U8@[0]) {
+  mut acc:U8 = 0
+  for j in 0..<2 {
+    const a = mc_arb(rst=rst, req=req#[(j * 4)..+4])
+    acc#[(j * 4)..+4] = a
+  }
+  g = acc
+}
+
+pub mod mc_top_reg(rst:Reset, req:U8) -> (s:U8@[]) {
+  mut acc:U8 = 0
+  for j in 0..<2 {
+    const a = mc_arb(rst=rst, req=req#[(j * 4)..+4])
+    wrap acc = acc | (a << (j * 4))
+  }
+  reg sr:U8 = 0
+  sr = acc
+  s  = sr
+}
+
+test mc_top.state_only_output_is_current {
+  mut x     = mc_top
+  mut r0:U4 = 8
+  mut r1:U4 = 8
+  mut bad   = 0
+  mut seen  = 0
+  tick 12 {
+    const rq:U8 = (clock * 37 + 11) & 0xFF
+    x.rst = clock < 1
+    x.req = rq
+    step
+    const q0:U4 = rq#[0..<4]
+    const q1:U4 = rq#[4..<8]
+    if clock == 0 {
+      r0 = 8
+      r1 = 8
+    } else {
+      // the child register loads this cycle's grant; outputs are read after step
+      if q0 != 0 { r0 = q0 & ~r0 }
+      if q1 != 0 { r1 = q1 & ~r1 }
+    }
+    const g0:U4   = (q0 & ~r0) ^ (q0 ^ 3)
+    const g1:U4   = (q1 & ~r1) ^ (q1 ^ 3)
+    const gexp:U8 = (g1 << 4) | g0
+    seen += 1
+    if x.g != gexp { bad += 1 }
+  }
+  assert(seen == 12, "the comparisons ran")
+  assert(bad == 0, "the arbiter sees its Mealy child's CURRENT register")
+}
+
+test mc_top_reg.registered_grant_sees_child_state {
+  mut x     = mc_top_reg
+  mut r0:U4 = 8
+  mut r1:U4 = 8
+  mut bad   = 0
+  mut seen  = 0
+  tick 12 {
+    const rq:U8 = (clock * 37 + 11) & 0xFF
+    x.rst = clock < 1
+    x.req = rq
+    step
+    const q0:U4 = rq#[0..<4]
+    const q1:U4 = rq#[4..<8]
+    // `sr` captured this cycle's grant, computed from the child register
+    // BEFORE the edge
+    const gr0:U4 = q0 & ~r0
+    const gr1:U4 = q1 & ~r1
+    if clock == 0 {
+      r0 = 8
+      r1 = 8
+    } else {
+      if q0 != 0 { r0 = gr0 }
+      if q1 != 0 { r1 = gr1 }
+      const g0:U4   = gr0 ^ (q0 ^ 3)
+      const g1:U4   = gr1 ^ (q1 ^ 3)
+      const sexp:U8 = (g1 << 4) | g0
+      seen += 1
+      if x.s != sexp { bad += 1 }
+    }
+  }
+  assert(seen == 11, "the comparisons ran")
+  assert(bad == 0, "a register fed only by the loop sees the Mealy child's CURRENT register")
+}

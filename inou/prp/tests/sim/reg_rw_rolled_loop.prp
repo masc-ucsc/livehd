@@ -1,0 +1,96 @@
+/*
+:name: reg_rw_rolled_loop
+:type: simulation
+:expect_instances: u_loop_*=3
+*/
+// lhdtrack suggestions2.md 1.1 (reg_rw_in_rolled_loop): a register the loop
+// body both bit-READS and conditionally bit-WRITES, in a ROLLED loop (the
+// default) that also carries a second value. The rolled body returned the
+// register's next value through a `tuple_get` into the register NAME, which
+// rebinds the name instead of writing the flop: the flop kept Q forever and
+// `lhd sim` printed q=3 on every cycle where the unrolled build (and the
+// Verilog) printed q=2 -- no diagnostic. equiv/reg_rw_rolled_loop.prp proves
+// the same shapes against a Verilog golden and rolled against unrolled.
+//
+// `q`: the 1.1 repro. `p`/`y`: two registers written in one rolled loop.
+// `z`: a register written on every path of the loop and never read in it (a
+// loop final bound the same way: `z` read the loop's D combinationally and the
+// flop never changed, so `z` dropped to 0 whenever the loop did not run).
+// `mq`: bit 0 of each entry of a memory, read then partially written by a loop
+// (a loop that writes a memory stays UNROLLED; only the three register loops
+// are the `u_loop_*` instances). Every read sees Q; the lockstep golden below
+// mirrors the next state.
+mod reg_rw_rolled_loop(clk:Clock, v:U2, d:U2, e:U2) -> (q:U2@[0], p:U2@[0], y:U2@[0], z:U2@[0], pa:U1@[0], mq:U2@[0]) {
+  reg r:U2 = 0
+  mut out:U2 = 0
+  for i in 0..<2 {
+    out#[i] = r#[i]
+    if v#[i] == 1 {
+      r#[i] = d#[i]
+    }
+  }
+  q = out
+
+  reg a0:U2 = 0
+  reg a1:U2 = 0
+  for i in 0..<2 {
+    if v#[i] == 1 {
+      a0#[i] = a1#[i]
+      a1#[i] = d#[i]
+    }
+  }
+  p = a0
+  y = a1
+
+  reg f:U2 = 0
+  mut par:U1 = 0
+  if e#[1] == 1 {
+    for i in 0..<2 {
+      par = par ^ v#[i]
+      f = d ^ i
+    }
+  }
+  z = f
+  pa = par
+
+  reg mem:[2]U2 = 0
+  mut rd:U2 = 0
+  for i in 0..<2 {
+    rd#[i] = mem[i]#[0]
+    if e#[i] == 1 {
+      mem[i]#[0] = d#[i]
+    }
+  }
+  mq = rd
+}
+
+test reg_rw_rolled_loop.lanes {
+  mut x   = reg_rw_rolled_loop
+  mut gr  = 0
+  mut ga0 = 0
+  mut ga1 = 0
+  mut gm  = 0
+  mut gf  = 0
+  tick 12 {
+    const vv = if clock == 0 { 3 } else { clock % 4 }
+    const dd = if clock < 3 { 2 } else { (clock * 3) % 4 }
+    const ee = (clock * 5 + 1) % 4
+    x.v = vv
+    x.d = dd
+    x.e = ee
+    step
+    gr  = (gr & (3 ^ vv)) | (dd & vv)
+    ga0 = (ga0 & (3 ^ vv)) | (ga1 & vv)
+    ga1 = (ga1 & (3 ^ vv)) | (dd & vv)
+    gm  = (gm & (3 ^ ee)) | (dd & ee)
+    if (ee >> 1) == 1 {
+      gf = dd ^ 1
+    }
+    assert(x.q == gr, "the register written by a rolled loop with two carries must take its next value")
+    assert(x.p == ga0, "a0 takes a1's Q")
+    assert(x.y == ga1, "a1 takes d")
+    assert(x.mq == gm, "the memory entries keep the partially written bit")
+    assert(x.z == gf, "a register every iteration writes takes the last iteration's value")
+    assert(x.pa == (ee >> 1) * ((vv & 1) ^ (vv >> 1)), "the loop's other carry")
+  }
+}

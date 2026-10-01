@@ -1,0 +1,65 @@
+/*
+:name: partsel_clip_write
+:type: equiv
+:verilog_top: partsel_clip_write
+:pyrope_top: partsel_clip_write
+:yosys_lec: false
+*/
+// Runtime part-select WRITES whose window leaves what it selects from (see the
+// golden .v). Verilog writes only the in-range bits, and nothing through an
+// out-of-range element index. inou/slang flattened `mem[j][c +: 4]` onto the
+// array's packed bus and lost the element's bounds, so a window running past
+// bit 7 silently spilled into the NEIGHBORING element (iverilog differential:
+// 54/400 mismatches). The reader now records each select's container and the
+// writer clips the window to it, guards the element index, and makes every
+// position non-negative, so the regenerated Pyrope needs no out-of-range
+// write either (prp-v2prp2v).
+//
+// This reference spells each clip with a wider temp: `t#[c..+4] = y` never
+// leaves `t`, and the kept slice is the element.
+//
+// No yosys cross-check: yosys read_verilog drops a `-:` write whose window
+// starts below bit 0 entirely (`v[2 -: 4] = 6` leaves v = 0; IEEE 1800 and
+// iverilog write v[2:0] = 3), so it "refutes" the correct pair.
+pub mod partsel_clip_write(j:U2, c:U3, k:U3, b:U4, y:U4, d:U8, e:U16)
+  -> (all:U32@[0], six:U48@[0], w:U16@[0], fl:U24@[0]) {
+  // `mem[j][c +: 4] = y`: bits c..min(c+3, 7) of element j.
+  mut t:U11 = d
+  t#[c..+4] = y
+  const hit = t#[0..=7]
+  mut a:U32 = 0
+  a#[0..=7]   = if j == 0 { hit } else { d }
+  a#[8..=15]  = if j == 1 { hit } else { d }
+  a#[16..=23] = if j == 2 { hit } else { d }
+  a#[24..=31] = if j == 3 { hit } else { d }
+  all = a
+
+  // `arr[k][c -: 4] = y`: bits max(c-3, 0)..c of element k (k <= 5).
+  mut s:U11 = d << 3
+  s#[c..+4] = y
+  const low = s#[3..=10]
+  mut x:U48 = 0
+  x#[0..=7]   = if k == 0 { low } else { d }
+  x#[8..=15]  = if k == 1 { low } else { d }
+  x#[16..=23] = if k == 2 { low } else { d }
+  x#[24..=31] = if k == 3 { low } else { d }
+  x#[32..=39] = if k == 4 { low } else { d }
+  x#[40..=47] = if k == 5 { low } else { d }
+  six = x
+
+  // `v[b -: 4] = y` on a 16-bit vector.
+  mut u:U19 = e << 3
+  u#[b..+4] = y
+  w = u#[3..=18]
+
+  // `fa[k] = y` on an ascending [0:5] array: element n sits at bits 4n..4n+3.
+  const dl = d#[0..=3]
+  mut f:U24 = 0
+  f#[0..=3]   = if k == 0 { y } else { dl }
+  f#[4..=7]   = if k == 1 { y } else { dl }
+  f#[8..=11]  = if k == 2 { y } else { dl }
+  f#[12..=15] = if k == 3 { y } else { dl }
+  f#[16..=19] = if k == 4 { y } else { dl }
+  f#[20..=23] = if k == 5 { y } else { dl }
+  fl = f
+}

@@ -21,28 +21,26 @@
 // periods where the enable was high at the rise: en open c0,c1 and c4 with
 // d = 10+clock: q = 10, 11, 11, 11, 14, 14. ctl = d every cycle.
 
-mod leafst(gclk:bool, d:u8) -> (q:u8@[1]) {
-  reg f:u8:[clock_pin=ref gclk] = 0
+mod leafst(gclk:Clock, d:U8) -> (q:U8@[1]) {
+  reg f:U8:[clock_pin=gclk] = 0
   f = d
   q = f
 }
 
 // The pass-through wrapper: NO state, NO gate — just a port-to-port wire.
-mod wrap(wclk:bool, d:u8) -> (q:u8@[1]) {
-  wire g:bool = nil
-  g = wclk
+mod `wrap`(wclk:Clock, d:U8) -> (q:U8@[1]) {
+  const g = wclk
   mut inner = leafst(gclk=g, d=d)
   q = inner
 }
 
-pub mod gtw(clk:bool, en:bool, d:u8) -> (q:u8@[1], ctl:u8@[1]) {
-  wire gp:bool = nil
-  gp = clk and en
-  mut w = wrap(wclk=gp, d=d)
+pub mod gtw(clk:Clock, en:Bool, d:U8) -> (q:U8@[1], ctl:U8@[1]) {
+  const gp = Clock(clock_pin=clk, enable=en)
+  mut w = `wrap`(wclk=gp, d=d)
   q = w
 
   // CONTROL: a flop on the ungated reference clock.
-  reg c:u8:[clock_pin=ref clk] = 0
+  reg c:U8:[clock_pin=clk] = 0
   c   = d
   ctl = c
 }
@@ -52,10 +50,10 @@ test gtw.gate_survives_a_stateless_wrapper {
   mut seen = 0
   mut bad_q   = 0
   mut bad_ctl = 0
-  mut golden:u8 = 0
+  mut golden:U8 = 0
   tick 6 {
     acc.en = (clock <= 1) or (clock == 4)
-    mut dv:u8 = 10 + clock
+    mut dv:U8 = 10 + clock
     acc.d = dv
     step
     if (clock <= 1) or (clock == 4) {

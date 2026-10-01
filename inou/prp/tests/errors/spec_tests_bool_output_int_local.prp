@@ -1,0 +1,30 @@
+/*
+:name: spec_tests_bool_output_int_local
+:type: error
+:error: (boolean|Bool)
+*/
+// Spec: docs 04-variables "Boolean": "Booleans can not mix with integers in
+// expressions unless there is an explicit typecast (`U1(false)==0`,
+// `U1(true)==1`, ...)"; ruling 20 (lhdtrack rulings 2026-09-28): "Strict
+// bool applies INSIDE `test` blocks too: ... `U1(d.f)` in arithmetic".
+//
+// Rule pinned: in a tick, initializing an INTEGER-typed test local from a
+// `Bool` instance output (`const n:U8 = d.f`) is the Bool/integer mix error
+// (the same statement in a mod body is rejected: "cannot assign boolean value
+// to `n` (it is integer)"); write `const n:U8 = U1(d.f)`.
+
+mod spec_boil_dut(a:U8) -> (f:Bool@[0]) {
+  f = a != 0
+}
+
+test spec_boil.bool_to_int {
+  mut d   = spec_boil_dut
+  mut sum = 0
+  tick 3 {
+    d.a = 5
+    step
+    const n:U8 = d.f     // locate_error_here
+    sum += n
+  }
+  assert(sum == 3)
+}

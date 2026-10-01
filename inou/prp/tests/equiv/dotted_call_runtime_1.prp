@@ -1,0 +1,15 @@
+/*
+:name: dotted_call_runtime
+:type: lec
+:lec_top: top
+*/
+
+comb addk1<K>(a:U8) -> (r:U8) { wrap r = a + K }
+comb addk2<K>(self, a:U8) -> (r:U8) { wrap r = a + K }
+const ns = (const addk1 = addk1)
+const deep = (const inner = (const renamed = addk1))
+pub mod top(x:U8) -> (a:U8@[], b:U8@[], c:U8@[]) {
+  a = ns.addk1<K=3>(a=x)
+  b = x.addk2<K=5>(a=x)
+  c = deep.inner.renamed<K=7>(a=x)
+}

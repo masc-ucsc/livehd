@@ -7,15 +7,15 @@
 // The call returns every field of Control plus `extra`. A whole-tuple
 // assignment must reject that extra field, not silently discard it.
 // Use `mut` so wire driver counting cannot mask the shape mismatch.
-type Control = (op:u2, valid:u1)
+type Control = (op:U2, valid:U1)
 
-comb unpack_control(bits:u4) -> (op:u2, valid:u1, extra:u1) {
+comb unpack_control(bits:U4) -> (op:U2, valid:U1, extra:U1) {
   op = bits#[0..=1]
   valid = bits#[2]
   extra = bits#[3]
 }
 
-pub comb tuple_return_extra_field(bits:u4) -> (result:u2) {
+pub comb tuple_return_extra_field(bits:U4) -> (result:U2) {
   mut control:Control = nil
   control = unpack_control(bits=bits)
   result = control.op

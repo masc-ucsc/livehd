@@ -1,0 +1,32 @@
+/*
+:name: spec_clock_clk_bool_is_data
+:type: simulation
+*/
+// SPEC (clock lane): an input named `clk` that is not typed `Clock` is plain
+// data; the register is clocked by the minted `clock:Clock` instead.
+//   qa.md Appendix 1: "Name-based binding (clk/clock/rst/reset) is REMOVED."
+//   docs 04b: "an input named `clk`, `clock`, `rst` or `reset` that is not typed
+//     `Clock`/`Reset` (a `Bool`, a `U1`) is plain data."
+//   docs 04b: "A module with registers and no `Clock` (or `Reset`) input gets
+//     one minted: `clock:Clock` (or `reset:Reset`)."
+// `clk` is held false: if it clocked `c` the counter would never move.
+pub mod spec_clock_clk_bool_is_data(clk:Bool, en:Bool) -> (q:U8@[0], p:Bool@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+  p = clk
+}
+
+test spec_clock_clk_bool_is_data.minted_clock {
+  mut t = spec_clock_clk_bool_is_data
+  mut last = 0
+  tick 6 {
+    t.clk = false
+    t.en  = true
+    step
+    last = t.q
+  }
+  puts("clk_bool: q={last}")
+  assert(t.p == false)
+  assert(last == 6)
+}

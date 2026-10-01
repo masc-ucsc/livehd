@@ -5,9 +5,9 @@
 
 // Each independent conditional merges the previous value with one new value.
 // The LGraph carrier for an unsigned value has one spare zero sign bit; that
-// slot must not become new magnitude at every merge. Before the fix this u4
+// slot must not become new magnitude at every merge. Before the fix this U4
 // chain grew one bit per `if` and eventually generated a narrowing mux.
-pub comb pick(sel:u4) -> (out:u4) {
+pub comb pick(sel:U4) -> (out:U4) {
   out = 0
   if sel == 0  { out = 1  }
   if sel == 1  { out = 2  }
@@ -37,7 +37,7 @@ test pick.every_arm_stays_lossless {
 // Its result capacity must follow the selected field, not the packed source;
 // otherwise putting the field back at its original offset creates an illegal
 // narrowing SHL even though the source program made the truncation explicit.
-pub comb repack_field(x:u64) -> (out:u64) {
+pub comb repack_field(x:U64) -> (out:U64) {
   const field = x#[0..=63]#[57..=62]
   out = field << 57
 }

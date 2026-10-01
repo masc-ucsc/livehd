@@ -1,0 +1,5 @@
+// Imported by mod_untyped_output_import.prp: a fully typed `mod` whose output
+// is UNTYPED, so its range is what the body derives (`a + 1` over a u4: [1, 16]).
+pub mod lib_untyped_cnt(a:U4) -> (o@[0]) {
+  o = a + 1
+}

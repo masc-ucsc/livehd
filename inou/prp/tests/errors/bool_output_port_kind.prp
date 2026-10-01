@@ -1,0 +1,22 @@
+/*
+:name: bool_output_port_kind
+:type: error
+:tolg: 1
+:error: cannot assign (boolean|integer) value to .(q|r). \(it is (integer|boolean)\)
+*/
+
+// User ruling 2026-09-27: `Bool` ports are strict in both directions. An OUTPUT
+// port is a typed destination like a typed local: a `Bool` into a `U1` output
+// needs `U1(x)`, and an integer bit into a `Bool` output needs `Bool(x)` (or
+// `x != 0`). The typed-local twins are rejected today ("cannot assign boolean
+// value to `x` (it is integer)"), but the store check cannot see an output
+// port's declared kind (it rides io_meta), so both lines below compile
+// silently.
+//
+// Legal spelling: `q = U1(w)` and `r = Bool(v#[0])`.
+
+pub mod bool_output_port_kind(v:U4) -> (q:U1@[0], r:Bool@[0]) {
+  const w:Bool = v != 0
+  q = w        // locate_error_here
+  r = v#[0]    // locate_error_here
+}

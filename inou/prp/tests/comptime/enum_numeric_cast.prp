@@ -4,13 +4,13 @@
 :verifier_pass: 8
 :verifier_fail: 0
 */
-const Animal = enum(bird=(eagle,parrot),mammal=(rat,human))
-cassert(signed(Animal.bird) == 1)
-cassert(signed(Animal.bird.eagle) == 3)
-cassert(signed(Animal.bird.parrot) == 5)
-cassert(signed(Animal.mammal) == 8)
-cassert(signed(Animal.mammal.rat) == 24)
-cassert(signed(Animal.mammal.human) == 40)
-cassert(unsigned(Animal.mammal.human) == Animal.mammal.human#[..])
-const State = enum(a=3,b)
-cassert(unsigned(State.b) == 4)
+enum Animal = (bird=(eagle,parrot),mammal=(rat,human))
+cassert(Signed(Animal.bird) == 1)
+cassert(Signed(Animal.bird.eagle) == 3)
+cassert(Signed(Animal.bird.parrot) == 5)
+cassert(Signed(Animal.mammal) == 8)
+cassert(Signed(Animal.mammal.rat) == 24)
+cassert(Signed(Animal.mammal.human) == 40)
+cassert(Unsigned(Animal.mammal.human) == Animal.mammal.human#[..])
+enum State = (a=3,b)
+cassert(Unsigned(State.b) == 4)

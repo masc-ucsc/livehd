@@ -1,0 +1,36 @@
+/*
+:name: typed_tuple_const_init
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// A TYPED `const` tuple declared with an initializer is ONE assignment
+// (lhdtrack suggestions 2.3 row 8, found next to typed_tuple_init_read, which
+// is the `mut` twin). Today every spelling fails with "const 'k' rebind — a
+// `const` is assigned exactly once" in inou.prp: the typed declaration and its
+// initializer store are counted as two definitions of `k`. Covered:
+//   k -- named initializer `(addr = ..., write = ...)` (03-bundle allows a bare
+//        `(addr=...)` as the value of an explicitly typed construction)
+//   j -- positional initializer `(a, not w)` (like 04-variables'
+//        `reg flags:(active:Bool, delayed:Bool) = (false, false)`)
+//   c -- a multi-output call result bound to a typed tuple (06-functions:
+//        "binding to one variable produces a tuple whose fields have the
+//        output names")
+// The untyped `const c = pr(x=a)` compiles today.
+comb pr(x:U6) -> (addr:U6, write:Bool) {
+  addr  = x ^ 5
+  write = x == 7
+}
+
+pub mod top(a:U6, w:Bool) -> (ky:Bool@[], kz:U6@[], jy:Bool@[], jz:U6@[], cy:Bool@[], cz:U6@[]) {
+  const k:(addr:U6, write:Bool) = (addr = a ^ 3, write = w)
+  ky = k.write
+  kz = k.addr
+  const j:(addr:U6, write:Bool) = (a, not w)
+  jy = j.write
+  jz = j.addr
+  const c:(addr:U6, write:Bool) = pr(x=a)
+  cy = c.write
+  cz = c.addr
+}

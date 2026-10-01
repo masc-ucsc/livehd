@@ -1,0 +1,8 @@
+/*
+:name: spec_types_dollar_not_ident
+:type: error
+:error: .
+*/
+// SPEC qa.md appendix section 2: "`$` is NOT an identifier character: `foo$bar` must be written `` `foo$bar` ``."
+// docs 02-basics "Identifiers": "const foo$bar = 2      // error: `$` is not an identifier character".
+const foo$bar = 2  // locate_error_here

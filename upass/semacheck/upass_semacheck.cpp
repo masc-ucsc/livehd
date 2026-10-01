@@ -35,10 +35,10 @@ namespace {
 // safe to enforce today.
 std::string_view derived_attr_violation(std::string_view attr) {
   if (attr == "max" || attr == "min") {
-    return "settable only through a type (`:int(max=,min=)`, `:uN`/`:sN`), never via an attribute write";
+    return "settable only through a type (`:Signed(max=,min=)`, `:U<N>`/`:S<N>`), never via an attribute write";
   }
   if (attr == "range") {
-    return "not an attribute; declare the bounds through a type instead (`:int(max=,min=)`, `:uN`/`:sN`)";
+    return "not an attribute; declare the bounds through a type instead (`:Signed(max=,min=)`, `:U<N>`/`:S<N>`)";
   }
   if (attr == "bits" || attr == "size" || attr == "sign" || attr == "key" || attr == "bw_max" || attr == "bw_min") {
     return "a derived read-only attribute (computed from the type/bundle); it can be read but not set";
@@ -96,7 +96,7 @@ void uPass_semacheck::check_attr_writes(const Lnast* ln) {
       emit_sema_error("read-only-attr-write",
                       "type",
                       std::format("cannot write attribute `.[{}]` — `{}` is {}", attr, attr, why),
-                      "read it with `.[attr]`; set max/min by declaring a type, e.g. `:u8` or `:int(max=,min=)`",
+                      "read it with `.[attr]`; set max/min by declaring a type, e.g. `:U8` or `:Signed(max=,min=)`",
                       ln,
                       it);
       return;  // first violation only — matches the relocated lnastfmt behavior

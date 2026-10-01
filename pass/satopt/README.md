@@ -11,13 +11,15 @@ It runs in exactly two places, both with the shared profile:
 | `lhd pass satopt lg:DIR --emit-dir lg:OUT` | same |
 
 `pass.satopt` is the single public enable switch for the compile step. It is
-off by default, and on by default only when `lhd synth` or `lhd lec` compiles a
-Pyrope/Verilog SOURCE: `lhd synth foo.prp` is `lhd compile --set
-pass.satopt=true foo.prp` followed by mapping. An lg:/ln: input (`lhd synth
-lg:...`, an lg: LEC side, `lhd pass abc|usyn`) is taken as compiled: no satopt
-unless `--set pass.satopt=true`. An explicit `--set pass.satopt=true|false` or
-configuration setting always wins. The mappers never run satopt themselves;
-mapper-local `pass.abc.satopt`/`pass.usyn.satopt` options are retired.
+off by default for every command, including `lhd synth` and `lhd lec`, for both
+source and compiled inputs. Enable it with `--set pass.satopt=true` or a
+configuration setting, or run `lhd pass satopt` explicitly. The mappers never
+run satopt themselves; mapper-local `pass.abc.satopt`/`pass.usyn.satopt` options
+are retired. When enabled, all stages run unless `pass.satopt.stages` narrows them.
+
+SAT proofs preserve behavior, but simplifying the graph does not guarantee
+better mapped area or delay. SAT remains opt-in because the evaluated designs
+show mixed QoR effects across frontends and mapping policies.
 
 It calls no ABC. `pass/abc` registers its `&fraig` mux-fact prover
 (`abc_satopt.cpp`) at static initialization; an ABC-free build skips mux-arm
@@ -37,6 +39,8 @@ default; an explicit `pass.satopt.stages` list replaces that.
 | `equiv` | an operation output always equal to a value earlier in topological order, same width and sign (consumers rewired) | on |
 | `complement` | an output always the complement of an earlier value, when its private cone is larger than the `Not`/mask `Xor` that replaces it | on |
 | `odc` | an output none of whose fanout-window exits (one or two levels, at most 16 cells) observes it: a constant, or only its low bits; proven over the window and applied one at a time | on |
+| `muxtree` | a private binary select or exclusive Hotmux control has constant truth under at most four ancestor facts; matching simulation columns nominate, a query-local implication proves | on |
+| `share` | arithmetic in separate mux regions has exclusive complete activations; share matching operands only after proving exclusivity and rejecting dependency cycles | on |
 | `hotmux` | per-bit mux-arm facts (an arm bit is 0/1/equal/complement to another arm's bit whenever selected; ABC `&fraig`), then Hotmux collapse: `unique if` controls proven exclusive globally are stamped proven and cprop's mux sharing absorbs them | on |
 | `memory` | memory ports: synthesis merges/removes/narrows; shared only ties a write enable proven never active | on |
 | `resub` | experimental: a one-bit output whose private cone has 2+ cells re-expressed as And/Or/Xor/And-not of two nearby one-bit values | on |
@@ -77,6 +81,27 @@ Boolean cells; proofs additionally cap the cone at 512 pins. The shared work,
 query and solver-resource budgets still apply. Solver state is allocated only
 after simulation and gain filters accept a candidate. This stage currently
 reruns its bounded search rather than persisting proof-cache rows.
+
+`muxtree` rejects empty simulation contexts and keeps Unknown/Refuted/budget-out
+candidates unchanged. Private regions stop at names, colors, runtime checks,
+state holds and shared outputs. It never asserts a contextual Hotmux control
+globally: false controls can be disabled; a true control stays intact while
+other exclusive controls can be disabled. Proof hypotheses are query-local,
+and simulation/prover state is rebuilt after mutations.
+
+`share` initially accepts exactly one binary-mux data use of an unnamed,
+uncolored Mult/Div/Rem (result width at least 4) or variable SHL/SRA (at least 8).
+Multiple uses, graph outputs and opaque/check uses reject the operator. It
+requires matching result realizations and an operand-width ratio at most two,
+uses cprop's exact shape/carrier checks, tries at most 32 previous candidates
+per bucket entry, and caps dependency walks at 256 pins. Neither activation nor
+new operands may reach either replaced output. These stages rerun their bounded
+searches rather than persisting contextual proof rows; report JSON includes both
+stages, and normal compile-cache reuse still applies. For isolated comparison:
+
+```
+lhd compile design.v --set pass.satopt=true --set pass.satopt.stages=muxtree,share
+```
 
 ## Profiles
 
@@ -131,6 +156,8 @@ line).
 | File | Role |
 |---|---|
 | `satopt_stages.{hpp,cpp}` | stages, profiles, `Budget`/`Meter`, `Report`, the coordinator `run()` |
+| `satopt_muxtree.{hpp,cpp}` | bounded contextual select proofs |
+| `satopt_share.{hpp,cpp}` | exclusive arithmetic sharing with complete-use guards |
 | `satopt_ctrl.{hpp,cpp}` | small-support, exact control resynthesis (`simp_ctrl`) |
 | `satopt_sim.{hpp,cpp}` | `Word_sim`: patterns, models, signatures, window re-simulation |
 | `satopt.{hpp,cpp}` | selector proofs, `Satopt_seeds`, the source key, synthesis dead-logic drop |
@@ -143,7 +170,7 @@ line).
 ## Tests
 
 Unit: `satopt_stages_test`, `satopt_sim_test`, `satopt_test`, `satopt_sweep_test`,
-`satopt_memory_test`, `satopt_ctrl_test`, and `//pass/abc:abc_satopt_test` (ABC mux facts). End to
+`satopt_memory_test`, `satopt_ctrl_test`, `satopt_muxtree_test`, `satopt_share_test`, and `//pass/abc:abc_satopt_test` (ABC mux facts). End to
 end: `//lhd/tests:lhd_satopt_test` (compile opt-in and standalone LEC,
 idempotence, stages, budgets, cache across edits, reports, synthesis from a
 source vs an lg: input),

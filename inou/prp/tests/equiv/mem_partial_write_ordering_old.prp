@@ -1,0 +1,41 @@
+/*
+:name: mem_partial_write_ordering_old
+:type: equiv
+:verilog_top: mem_partial_write_ordering_old
+:pyrope_top: mem_partial_write_ordering_old
+*/
+// lhdtrack suggestions2.md 1.2: two byte-lane writes to the SAME entry in one
+// cycle, on a memory with `ordering="old"`, kept only the LAST lane (cycle 0
+// stored 0xaa00 for 0xaaaa, silently; one-lane cycles were right, and so was the
+// default ordering). `mem[a]#[lo..+8] = v` is a read-modify-write: an element
+// read, a set_mask, and a whole-entry write. "old" made the SECOND write's
+// element read skip the first write (a user read under "old" never forwards),
+// so the second write stored the old low byte back over the first.
+//
+// `ordering` only says what a same-cycle USER read observes. The old-value
+// read of a partial write forwards the writes that precede it in program
+// order whatever the ordering, so partial writes to one entry merge exactly
+// like the golden's nonblocking slice writes. `q` reads after the writes and,
+// under "old", must still see the committed contents.
+//
+// The golden's `[9:3]` slice is not byte aligned, so the slang reader lowers
+// it as the same read-modify-write (every Verilog memory is "old"): reading
+// the golden merged it with the byte-lane writes of the same cycle only after
+// the fix -- before it, the Verilog side dropped them just the same. The
+// Pyrope writer must re-emit each of these writes as `mem[i]#[..] = v`
+// (prp-p2p-*, v2prp2v): its old `mut t = mem[i]; t#[..] = v; mem[i] = t`
+// spelling is a USER read, which under "old" skips the earlier lanes again.
+pub mod mem_partial_write_ordering_old(we:Bool, a:U2, d:U16, be:U2, wb:Bool, b:U2, e:U16, ra:U2) -> (q:U16@[0]) {
+  reg mem:[4]U16:[ordering="old"] = nil
+  if we {
+    for w in 0..<2 {
+      if be#[w] == 1 {
+        mem[a]#[(w * 8)..+8] = d#[(w * 8)..+8]
+      }
+    }
+  }
+  if wb {
+    wrap mem[b]#[3..=9] = e + 1
+  }
+  q = mem[ra]
+}

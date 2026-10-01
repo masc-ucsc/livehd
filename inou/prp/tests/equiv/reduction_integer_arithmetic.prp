@@ -5,7 +5,7 @@
 :pyrope_top: foo
 :lec_top: foo
 */
-pub comb foo(a:i32, b:u3) -> (r_or:i34, r_and:i34, r_xor:i34) {
+pub comb foo(a:S32, b:U3) -> (r_or:S34, r_and:S34, r_xor:S34) {
   r_or = a + b#|[1..]
   r_and = a + b#&[1..]
   r_xor = a + b#^[1..]

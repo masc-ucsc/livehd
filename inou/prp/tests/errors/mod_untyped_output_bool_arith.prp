@@ -1,0 +1,22 @@
+/*
+:name: mod_untyped_output_bool_arith
+:type: error
+:error: operator `\+` requires integer operands \(c.o:Bool
+:help: U1
+*/
+
+// User ruling 2026-09-28 (28) with the strict-bool ruling (2): the untyped
+// output of a fully typed `mod` takes the KIND its body derives, not only its
+// range -- `cmp`'s `o` holds a bool, so it is a bool at the call site, exactly
+// like a typed `o:Bool` output (sim/mod_untyped_output_range.prp is the legal
+// side). Arithmetic on it needs `U1(c.o)`; its [0, 1] range never makes it an
+// integer.
+
+mod cmp(a:U4) -> (o@[0]) {
+  o = a > 3
+}
+
+pub mod mod_untyped_output_bool_arith(x:U4) -> (y:U8@[0]) {
+  const c = cmp(a=x)
+  y = c.o + 1   // locate_error_here
+}

@@ -1,0 +1,22 @@
+/*
+:name: spec_reg_bitslice_lands_at_1
+:type: compile
+*/
+// SPEC (clock lane): a body register written ONLY through bit slices lands
+// like one written whole: one cycle after the inputs that drive it. The
+// untouched bits of a partial write are not a hold path (a conditional or
+// feedback write still makes a register state, see `hold` below).
+//   ruling 83 (qa Q28): "A reg written only through a bit slice landing at
+//     @[0] is a BUG."
+// The @[0] twin is errors/spec_reg_bitslice_lands_at_1_decl0.prp.
+pub mod spec_reg_bitslice_lands_at_1(clk:Clock, we:Bool, x:U4) -> (q:U8@[1], lo:U4@[1], hold:U4@[0]) {
+  reg r:U8 = 0
+  r#[0..<4] = x      // the upper bits keep their value
+  q  = r
+  lo = r#[0..<4]
+  reg h:U16 = 0
+  if we {
+    h#[0..<4] = x    // conditional: a hold path, so `h` is state
+  }
+  hold = h#[0..<4]
+}

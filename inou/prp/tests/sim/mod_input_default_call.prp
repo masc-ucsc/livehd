@@ -1,0 +1,55 @@
+/*
+:name: mod_input_default_call
+:type: simulation
+*/
+// 06-functions.md: a `mod`/`pipe` input may declare a default, used where a
+// call omits the argument; the callee stays a normal unit (own module, its
+// port driven by the caller), like a fully typed `comb` (ruling 17). The
+// default must be a compile-time value, and every compile-time spelling folds:
+// a literal (`b:U8 = 3`), an enum entry (`c:Color = Color.Green`) and an
+// attribute read (`w:U8 = 13.[bits]`, value-derived: 4, rulings 6/23).
+// Before, `m(a=x)` failed "upass.tolg: call to 'm' does not bind declared
+// input 'b'", and the enum / attribute defaults were rejected as
+// "the default of `c` must be a literal or a compile-time integer".
+// This checks the FOLDED defaults through `lhd sim`. The enum-typed port is
+// as wide as its encoding (ruling 29: `Color` is 2 bits here), so the default
+// crosses the emitted Verilog unchanged too (equiv/enum_mod_port.prp).
+
+enum Color = (Red = 1, Green = 2, Blue = 3)
+
+mod m(a:U8, b:U8 = 3, c:Color = Color.Green, w:U8 = 13.[bits]) -> (o:U8@[1], g:Bool@[1]) {
+  reg r:U8 = 0
+  reg k:Bool = false
+  wrap r = a + b + w
+  k = c == Color.Green
+  o = r
+  g = k
+}
+
+pub mod mod_input_default_call(x:U8) -> (y0:U8@[1], y1:U8@[1], y2:U8@[1], g0:Bool@[1], g1:Bool@[1]) {
+  const r0 = m(a=x)                            // b=3, c=Green, w=4
+  const r1 = m(a=x, b=10)                      // c and w defaulted
+  const r2 = m(a=x, b=0, c=Color.Red, w=0)     // nothing defaulted
+  y0 = r0.o
+  y1 = r1.o
+  y2 = r2.o
+  g0 = r0.g
+  g1 = r2.g
+}
+
+test mod_input_default_call.run {
+  mut d = mod_input_default_call
+  mut bad = 0
+  tick 4 {
+    const x:U8 = clock + 20
+    d.x = x
+    step
+    if d.y0 != x + 7 { bad += 1 }
+    if d.y1 != x + 14 { bad += 1 }
+    if d.y2 != x { bad += 1 }
+    if not d.g0 { bad += 1 }
+    if d.g1 { bad += 1 }
+  }
+  puts("bad={bad}")
+  assert(bad == 0)
+}

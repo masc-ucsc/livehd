@@ -4,9 +4,9 @@
 :error: outside the callee's declared latency range
 */
 
-pipe[3] mul(a:u16, b:u16) -> (c:u32) { c = a * b }
+pipe[3] mul(a:U16, b:U16) -> (c:U32) { c = a * b }
 
-mod top(in1:u16, in2:u16) -> (out:u32@[2]) {
+mod top(in1:U16, in2:U16) -> (out:U32@[2]) {
   stage[2] tmp = mul(a=in1, b=in2)
   out = tmp
 }

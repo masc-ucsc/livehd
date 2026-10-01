@@ -9,6 +9,6 @@
 // aliases `z = a` AND emits an `unnecessary-wrap` warning. This equiv test pins
 // the aliasing behavior (z == a, zero-extended); the warning is checked
 // separately.
-pub comb rt_wrap_noop(a:u4) -> (z:u8) {
+pub comb rt_wrap_noop(a:U4) -> (z:U8) {
   wrap z = a
 }

@@ -1,0 +1,72 @@
+/*
+:name: mem_dynamic_splice_bounds
+:type: equiv
+:verilog_top: mem_dynamic_splice_bounds
+:pyrope_top: mem_dynamic_splice_bounds
+:yosys_lec: false
+*/
+// A Verilog part select at a RUNTIME position writes only its in-range bits.
+// The golden's positions reach past the word on both sides; this Pyrope side
+// spells out the bits each one writes, so the slang reading of the golden is
+// checked against an independent statement of the Verilog semantics.
+//
+// * `mw[a][b - 1]`, `mw[a][b - 2 +: 2]`: a 32-bit position (Verilog `b - 1` is
+//   32 bits wide), so b = 0 wraps far past the word and writes nothing. The
+//   one-hot mask of that shift once shrank to the operand's single bit
+//   (pass.bitwidth dropped the unbounded corner of `1 << n`): every write
+//   landed on bit 0.
+// * `mn[a][b -: 4]`: the low end falls below bit 0 when b < 3, and the bits
+//   still in the word are written with the value's top bits.
+// * `mu[a][bu +: 4]` on an ascending `[0:15]` word: index bu is bit 15 - bu,
+//   so the select runs below bit 0 when bu > 12 and leaves the word at 16.
+// Those two used to write nothing at all. The slang reader now guards the
+// write by the window meeting the word and clips its bounds to the word, so
+// the Pyrope it emits (prp-v2prp2v) has no out-of-range write either.
+// Every splice follows a full write of the same word in the same cycle.
+//
+// No yosys cross-check: yosys read_verilog writes `mu[a][bu +: 4]` on the
+// ascending `[0:15]` word as if it were descending (bits 15:12 for bu = 12;
+// IEEE 1800 and iverilog write bits 3:0), so it "refutes" the correct pair.
+pub mod mem_dynamic_splice_bounds(wf:Bool, wb:Bool, a:U2, d:U16, b:U4, bu:U5, x:U1, v:U4, ra:U2) -> (qw:U16@[0], qn:U16@[0], qu:U16@[0]) {
+  reg mw:[4]U16:[ordering="old"] = nil
+  reg mn:[4]U16:[ordering="old"] = nil
+  reg mu:[4]U16:[ordering="old"] = nil
+
+  if wf {
+    mw[a] = d
+    mn[a] = d
+    mu[a] = d
+  }
+  if wb {
+    if b >= 1 {
+      mw[a]#[(b - 1)#[0..<4]] = x
+    }
+    if b >= 2 {
+      mw[a]#[(b - 2)#[0..<4]..+2] = v#[0..<2]
+    }
+
+    if b >= 3 {
+      mn[a]#[(b - 3)#[0..<4]..+4] = v
+    } elif b == 2 {
+      mn[a]#[0..<3] = v#[1..<4]
+    } elif b == 1 {
+      mn[a]#[0..<2] = v#[2..<4]
+    } else {
+      mn[a]#[0] = v#[3]
+    }
+
+    if bu <= 12 {
+      mu[a]#[(12 - bu)#[0..<4]..+4] = v
+    } elif bu == 13 {
+      mu[a]#[0..<3] = v#[1..<4]
+    } elif bu == 14 {
+      mu[a]#[0..<2] = v#[2..<4]
+    } elif bu == 15 {
+      mu[a]#[0] = v#[3]
+    }
+  }
+
+  qw = mw[ra]
+  qn = mn[ra]
+  qu = mu[ra]
+}

@@ -28,10 +28,13 @@ PRP="$W/prp/$TOP.prp"
 
 # A declaration initializer and a simple initial-block assignment both become
 # the register declaration's concrete initializer. tolg turns that into the
-# module's implicit reset rather than leaving the register's power-up state X.
-grep -q 'reg decl_q:u8 = 0xa5' "$PRP" \
+# module's reset rather than leaving the register's power-up state X. The
+# writer binds that reset either implicitly (a `rst:Reset` input) or, when it
+# keeps `rst` a `U1` (ruling 52: resets bind by TYPE), explicitly through
+# `reset_pin=rst`.
+grep -Eq 'reg decl_q:U8(:\[reset_pin=rst\])? = 0xa5' "$PRP" \
   || fail "declaration initializer was not preserved as the reset value"
-grep -q 'reg block_q:u8 = 60' "$PRP" \
+grep -Eq 'reg block_q:U8(:\[reset_pin=rst\])? = 60' "$PRP" \
   || fail "initial-block assignment was not preserved as the reset value"
 grep -Eq 'decl_q <= .*a5' "$W/out.v" \
   || fail "declaration-initialized register has no generated reset assignment"
@@ -40,7 +43,7 @@ grep -Eq 'block_q <= .*3c' "$W/out.v" \
 
 # An explicit source reset is preserved as the register's one initial value, and
 # such a register must not receive the no-reset warning.
-grep -q 'reg reset_q:u8:\[initial=17, reset_pin=ref rst, async=true\]' "$PRP" \
+grep -q 'reg reset_q:U8:\[initial=17, reset_pin=rst, async=true\]' "$PRP" \
   || fail "explicit reset value was not preserved"
 grep -Eq 'reset_q <= .*11' "$W/out.v" \
   || fail "explicit reset assignment was replaced by the declaration initializer"
@@ -125,18 +128,18 @@ SV
   --emit-dir pyrope:"$W/sync_prp" --workdir "$W/sync-work" -q >/dev/null 2>&1 \
   || fail "the synchronous-reset fixture did not compile"
 SP="$W/sync_prp/sync_reset.prp"
-grep -q 'reg q:u8:\[initial=0, reset_pin=ref rst, async=false\]' "$SP" \
+grep -q 'reg q:U8:\[initial=0, reset_pin=rst, async=false\]' "$SP" \
   || fail "a synchronous `if (rst)` guard was not recognized as a reset"
-grep -q 'reg p:u8:\[initial=60, reset_pin=ref rst, async=false\]' "$SP" \
+grep -q 'reg p:U8:\[initial=60, reset_pin=rst, async=false\]' "$SP" \
   || fail "the second register of the same reset arm was not recognized"
-grep -q 'reg lo:u8:\[initial=42, reset_pin=ref rst_n, async=false, negreset=true\]' "$SP" \
+grep -q 'reg lo:U8:\[initial=42, reset_pin=rst_n, async=false, negreset=true\]' "$SP" \
   || fail "an active-low synchronous reset lost its polarity"
 # The guard must stay narrow: a reset is recognized by the SHARED reset-name
 # token test, and its value must be constant. Anything else is ordinary logic,
 # and reclassifying it would put a functional enable on the design's reset pin.
-grep -q 'reg en_q:u8$' "$SP" \
+grep -q 'reg en_q:U8$' "$SP" \
   || fail "an enable-guarded register was reclassified as reset-bearing: $(grep 'reg en_q' "$SP")"
-grep -q 'reg dyn:u8$' "$SP" \
+grep -q 'reg dyn:U8$' "$SP" \
   || fail "a runtime `if (rst) q <= e` value was treated as a reset value: $(grep 'reg dyn' "$SP")"
 
 echo "PASS: scalar initial values become implicit reset values with a located warning"

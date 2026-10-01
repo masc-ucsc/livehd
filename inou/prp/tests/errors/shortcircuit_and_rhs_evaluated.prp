@@ -9,8 +9,8 @@
 // only when the LEFT one is FALSE. Here it is comptime TRUE, so the `/ 0` IS
 // evaluated and must still be reported.
 
-const N = 0
-pub mod top(a:u8) -> (y:u8@[0]) {
+comptime const N = 0
+pub mod top(a:U8) -> (y:U8@[0]) {
   cassert((N == 0 and (64 / N == 0)) == false) // locate_error_here
   y = a
 }

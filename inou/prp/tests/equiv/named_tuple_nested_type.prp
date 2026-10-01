@@ -1,0 +1,40 @@
+/*
+:name: named_tuple_nested_type
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// Suggestions 2.3 row 6, nested half: a named tuple type whose field is
+// ANOTHER named tuple type (`type Outer = (inner:Inner, tag:U2)`), used as a
+// top PORT type (`i`), as a typed local (`o`), and as a CHILD port type
+// (`leaf`). The inline nested spelling `(inner:(d:U4, v:Bool), tag:U2)` always
+// worked; the named one is never expanded into its layout (same family as
+// named_tuple_port). Today the local fails with "unknown field `tag` on tuple
+// `o`" and the port with "field/index read of 'i' could not be resolved".
+// `leaf` is fed from the INLINE-typed top input `j`, so the LEC also sees
+// each field's WIDTH through `Outer` (a top input's width is reconciled away).
+type Inner = (d:U4, v:Bool)
+type Outer = (inner:Inner, tag:U2)
+
+mod leaf(x:Outer) -> (d:U4@[0], k:U2@[0]) {
+  d = x.inner.d
+  k = x.tag
+}
+
+pub mod top(i:Outer, j:(inner:(d:U4, v:Bool), tag:U2), a:U4, v:Bool, t:U2)
+  -> (y:U4@[], w:Bool@[], z:U2@[], iy:U4@[], iw:Bool@[], iz:U2@[], ld:U4@[], lk:U2@[]) {
+  mut o:Outer = nil
+  o.inner.d = a
+  o.inner.v = v
+  o.tag     = t
+  y  = o.inner.d
+  w  = o.inner.v
+  z  = o.tag
+  iy = i.inner.d ^ a
+  iw = i.inner.v
+  iz = i.tag
+  const l = leaf(x=j)
+  ld = l.d
+  lk = l.k
+}

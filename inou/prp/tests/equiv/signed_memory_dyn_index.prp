@@ -9,12 +9,17 @@
 // storage as RAW BITS -- an element read is `q[i]#sext[0..=W-1]`, so the value
 // flowing into an element write carries the UNSIGNED reinterpretation of that
 // storage (range [0, 2^W-1]). check_array_elem_fit judged it against the
-// SIGNED element envelope only, so `reg q:[4]s17` died on
+// SIGNED element envelope only, so `reg q:[4]S17` died on
 // "`q` (value 0) does not fit its declared range [-65536, 65535]" -- a range
 // that plainly contains 0. An unsigned array escaped only because that
 // judgement tests r.min, never r.max.
-pub mod signed_memory_dyn_index::[timecheck=false](clk:u1, en:u1, sel:u2, d:s17) -> (o:s17@[]) {
-  reg q:[4]s17:[ordering="old"]
+//
+// This Pyrope twin states that storage model the way the Pyrope writer now
+// emits it: an UNSIGNED 17-bit element holding the raw pattern. A raw pattern
+// stored into an `s17` element may not fit it, and `::[timecheck=false]` no
+// longer excuses that (user ruling 2026-09-28 (22), errors/timecheck_false_overflow.prp).
+pub mod signed_memory_dyn_index::[timecheck=false](clk:Clock, en:U1, sel:U2, d:S17) -> (o:S17@[]) {
+  reg q:[4]U17:[ordering="old"]
   o = 0sb?
   if en != 0 {
     q[sel] = d#[0..=16]

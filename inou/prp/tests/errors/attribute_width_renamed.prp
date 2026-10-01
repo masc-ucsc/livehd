@@ -6,6 +6,6 @@
 */
 
 // Verilog habit — Pyrope widths are read with `.[bits]` and set by
-// declaring a type (`:u8`), never via a `width` attribute.
+// declaring a type (`:U8`), never via a `width` attribute.
 
-mut x:u8:[width=4] = 1  // locate_error_here
+mut x:U8:[width=4] = 1  // locate_error_here

@@ -1,11 +1,16 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "cprop_opshare.hpp"
+
 #include <algorithm>
 #include <limits>
+#include <map>
 #include <optional>
 #include <vector>
 
+#include "attr_carry.hpp"
 #include "cprop.hpp"
+#include "cprop_muxctx.hpp"
 #include "cprop_value.hpp"
 
 namespace {
@@ -50,22 +55,22 @@ bool private_arm(const Node& node, const Node& mux) {
 std::optional<Shape> shape_of(const Node& node, size_t& budget) {
   const auto op = gu::type_op_of(node);
   switch (op) {
-    case Ntype_op::Sum:
-    case Ntype_op::LT:
-    case Ntype_op::GT:
-    case Ntype_op::And:
-    case Ntype_op::Or:
-    case Ntype_op::Xor:
-    case Ntype_op::Mult:
-    case Ntype_op::EQ:
-    case Ntype_op::Ror:
-    case Ntype_op::Not:
-    case Ntype_op::SHL:
-    case Ntype_op::SRA:
-    case Ntype_op::Div:
-    case Ntype_op::Rem:
-    case Ntype_op::Sext:
-    case Ntype_op::Rxor:
+    case Ntype_op::Sum     :
+    case Ntype_op::LT      :
+    case Ntype_op::GT      :
+    case Ntype_op::And     :
+    case Ntype_op::Or      :
+    case Ntype_op::Xor     :
+    case Ntype_op::Mult    :
+    case Ntype_op::EQ      :
+    case Ntype_op::Ror     :
+    case Ntype_op::Not     :
+    case Ntype_op::SHL     :
+    case Ntype_op::SRA     :
+    case Ntype_op::Div     :
+    case Ntype_op::Rem     :
+    case Ntype_op::Sext    :
+    case Ntype_op::Rxor    :
     case Ntype_op::Popcount:
     case Ntype_op::Get_mask:
     case Ntype_op::Set_mask:
@@ -206,6 +211,161 @@ std::optional<std::pair<int32_t, bool>> union_carrier(const std::vector<Shape>& 
   }
   return std::pair<int32_t, bool>{std::max(sbits, ubits == 0 ? 0 : ubits + 1), false};
 }
+// Same shape buckets are disjoint, and each operator has exactly one use.
+// Keep the outer controls/default, so grouping cannot change their obligation
+// or the all-controls-zero behavior. Inner controls are exclusive subsets.
+void share_hotmux_operators(hhds::Graph& graph, size_t& budget) {
+  std::vector<Node> roots;
+  for (auto n : graph.body().nodes()) {
+    if (gu::type_op_of(n) == Ntype_op::Hotmux) {
+      roots.push_back(n);
+    }
+  }
+  for (auto root : roots) {
+    if (!spend(budget) || gu::has_color(root) || !root.has_out_edges() || !livehd::muxctx::exclusive(root)) {
+      continue;
+    }
+    const auto inputs = gu::hotmux_inputs(root);
+    if (!spend(budget, inputs.arms.size() * 4 + 1)) {
+      break;
+    }
+    struct Arm {
+      Pin   sink;
+      Pin   control;
+      Node  node;
+      Shape shape;
+    };
+    using Key = std::vector<uint64_t>;
+    std::map<Key, std::vector<Arm>> buckets;
+    const auto                      collect = [&](Pin sink, Pin control, Pin value) {
+      if (value.is_const() || !private_arm(value.get_master_node(), root)) {
+        return;
+      }
+      auto shape = shape_of(value.get_master_node(), budget);
+      if (!shape) {
+        return;
+      }
+      // Keep each operator's realized output boundary. This also avoids
+      // inventing a common finite carrier for unstamped/differently stamped
+      // operator results in clients that do not rerun bitwidth.
+      Key key{static_cast<uint64_t>(shape->op), static_cast<uint64_t>(gu::bits_of(value)), gu::is_unsign(value)};
+      for (const auto& operand : shape->operands) {
+        const auto role      = operand.role;
+        const auto op        = shape->op;
+        const bool parameter = ((op == Ntype_op::Sext || op == Ntype_op::Rxor || op == Ntype_op::Popcount) && role == 1)
+                               || ((op == Ntype_op::Get_mask || op == Ntype_op::Set_mask) && role == 2)
+                               || (op == Ntype_op::Concat && role % 2 == 1);
+        key.push_back(role);
+        key.push_back(parameter ? operand.value.get_class_index().value : 0);
+      }
+      buckets[std::move(key)].push_back({sink, control, value.get_master_node(), std::move(*shape)});
+    };
+    for (size_t i = 0; i < inputs.arms.size(); ++i) {
+      collect(root.get_sink_pin(2 * i + 1), inputs.arms[i].first, inputs.arms[i].second);
+    }
+    if (!inputs.fallback.is_invalid()) {
+      collect(root.get_sink_pin(2 * inputs.arms.size()), {}, inputs.fallback);
+    }
+    for (auto& [key, group] : buckets) {
+      (void)key;
+      if (group.size() < 2) {
+        continue;
+      }
+      std::vector<Shape> shapes;
+      bool               valid = true;
+      for (auto& arm : group) {
+        if (!spend(budget, arm.shape.operands.size()) || (!shapes.empty() && !align(shapes.front(), arm.shape))) {
+          valid = false;
+          break;
+        }
+        shapes.push_back(arm.shape);
+      }
+      if (!valid) {
+        continue;
+      }
+      const auto& base = shapes.front();
+      for (size_t j = 0; j < base.operands.size(); ++j) {
+        const auto value = base.operands[j].value;
+        const bool same
+            = std::all_of(shapes.begin() + 1, shapes.end(), [&](const auto& s) { return s.operands[j].value == value; });
+        if (same) {
+          continue;
+        }
+        if ((base.op == Ntype_op::SHL || base.op == Ntype_op::SRA) && base.operands[j].role == 1
+            && std::any_of(shapes.begin(), shapes.end(), [&](const auto& s) { return s.operands[j].value.is_const(); })) {
+          valid = false;
+        }
+        if (base.op == Ntype_op::Concat && j % 2 == 0) {
+          const auto& width = gu::const_of(base.operands[j + 1].value);
+          if (!width.is_just_i64() || width.to_just_i64() <= 0) {
+            valid = false;
+            break;
+          }
+          for (const auto& s : shapes) {
+            const int bits  = cv::unsigned_width(s.operands[j].value);
+            valid          &= bits >= 0 && bits <= width.to_just_i64();
+          }
+        }
+      }
+      if (!valid || !spend(budget, 8 * group.size() * base.operands.size())) {
+        continue;
+      }
+      auto shared = cv::make_node(graph, base.op);
+      gu::carry_srcid(group.front().node, shared);
+      auto       output = shared.create_driver_pin(0);
+      const auto old    = group.front().node.get_driver_pin(0);
+      if (gu::bits_of(old) > 0) {
+        if (gu::is_unsign(old)) {
+          gu::set_ubits(output, gu::bits_of(old));
+        } else {
+          gu::set_sbits(output, gu::bits_of(old));
+        }
+      }
+      for (size_t j = 0; j < base.operands.size(); ++j) {
+        auto       value = base.operands[j].value;
+        const bool same
+            = std::all_of(shapes.begin() + 1, shapes.end(), [&](const auto& s) { return s.operands[j].value == value; });
+        if (!same) {
+          auto   mux      = cv::make_node(graph, Ntype_op::Hotmux);
+          size_t pid      = 0;
+          // A group without the original default uses one ORIGINAL operand
+          // vector when inactive, not zeros that could introduce div-by-zero
+          // or an invalid extension/shift. The outer Hotmux hides its value.
+          Pin    fallback = value;
+          for (size_t i = 0; i < group.size(); ++i) {
+            if (group[i].control.is_invalid()) {
+              fallback = shapes[i].operands[j].value;
+            } else {
+              gu::setup_sink_pid(mux, pid++).connect_driver(group[i].control);
+              gu::setup_sink_pid(mux, pid++).connect_driver(shapes[i].operands[j].value);
+            }
+          }
+          gu::setup_sink_pid(mux, pid).connect_driver(fallback);
+          gu::set_proven(mux, gu::kFormalOnehot);
+          value = mux.create_driver_pin(0);
+          if (const auto carrier = union_carrier(shapes, j)) {
+            if (carrier->second) {
+              gu::set_ubits(value, carrier->first);
+            } else {
+              gu::set_sbits(value, carrier->first);
+            }
+          }
+        }
+        gu::setup_sink_pid(shared, base.operands[j].role).connect_driver(value);
+      }
+      if (base.op == Ntype_op::Concat) {
+        gu::set_ubits(output, gu::concat_total_width(shared));
+      }
+      cv::forget(root.get_driver_pin(0));
+      for (const auto& arm : group) {
+        arm.sink.get_driver_pin().del_sink(arm.sink);
+        output.connect_sink(arm.sink);
+        I(!arm.node.has_out_edges());
+        cv::retire(arm.node);
+      }
+    }
+  }
+}
 }  // namespace
 
 void Cprop::mux_op_share_pass() {
@@ -229,6 +389,7 @@ void Cprop::mux_op_share_pass() {
       pending.push_back({node, generation(node)});
     }
   }
+  share_hotmux_operators(*current_graph, budget);
   for (size_t next = 0; next < pending.size() && spend(budget); ++next) {
     auto root = pending[next].node;
     if (root.is_invalid() || generation(root) != pending[next].generation || gu::type_op_of(root) != Ntype_op::Mux
@@ -292,14 +453,14 @@ void Cprop::mux_op_share_pass() {
         if (base.operands[j].role == 0) {
           continue;  // the shifted value
         }
-        const auto value   = base.operands[j].value;
-        const bool same    = std::all_of(shapes.begin() + 1, shapes.end(), [&](const auto& s) {
+        const auto value = base.operands[j].value;
+        const bool same  = std::all_of(shapes.begin() + 1, shapes.end(), [&](const auto& s) {
           const auto& other = s.operands[j].value;
-          return other == value
-                 || (other.is_const() && value.is_const() && gu::const_of(other).is_known_eq(gu::const_of(value)));
+          return other == value || (other.is_const() && value.is_const() && gu::const_of(other).is_known_eq(gu::const_of(value)));
         });
-        const bool any_cst = std::any_of(shapes.begin(), shapes.end(), [&](const auto& s) { return s.operands[j].value.is_const(); });
-        valid              = valid && (same || !any_cst);
+        const bool any_cst
+            = std::any_of(shapes.begin(), shapes.end(), [&](const auto& s) { return s.operands[j].value.is_const(); });
+        valid = valid && (same || !any_cst);
       }
       if (!valid) {
         continue;
@@ -434,4 +595,88 @@ void Cprop::mux_op_share_pass() {
     }
     remember_node(root);
   }
+}
+
+bool livehd::share_exclusive_operators(hhds::Graph& graph, Node first, Node second, Pin selector, bool first_when_true,
+                                       size_t& budget, bool commit) {
+  if (first == second || first.is_invalid() || second.is_invalid() || gu::has_color(first) || gu::has_color(second)
+      || gu::has_runtime_check(first) || gu::has_runtime_check(second) || gu::has_name(first) || gu::has_name(second)) {
+    return false;
+  }
+  auto a = first.get_driver_pin(0), b = second.get_driver_pin(0);
+  if (!gu::pin_name_of(a).empty() || !gu::pin_name_of(b).empty() || gu::bits_of(a) <= 0 || gu::bits_of(a) != gu::bits_of(b)
+      || gu::is_unsign(a) != gu::is_unsign(b)) {
+    return false;
+  }
+  auto one_use = [](Node n) -> Pin {
+    auto edges = n.out_edges();
+    auto it    = edges.begin();
+    if (it == edges.end()) {
+      return {};
+    }
+    const auto sink = (*it).sink;
+    return ++it == edges.end() ? sink : Pin{};
+  };
+  const auto sink_a = one_use(first), sink_b = one_use(second);
+  if (sink_a.is_invalid() || sink_b.is_invalid()) {
+    return false;
+  }
+  auto shape_a = shape_of(first, budget), shape_b = shape_of(second, budget);
+  if (!shape_a || !shape_b || !align(*shape_a, *shape_b)) {
+    return false;
+  }
+  const auto op = shape_a->op;
+  if (op != Ntype_op::Mult && op != Ntype_op::Div && op != Ntype_op::Rem && op != Ntype_op::SHL && op != Ntype_op::SRA) {
+    return false;
+  }
+  if (op == Ntype_op::SHL || op == Ntype_op::SRA) {
+    const auto x = shape_a->operands[1].value, y = shape_b->operands[1].value;
+    if (x != y && (x.is_const() || y.is_const())) {
+      return false;
+    }
+  }
+  std::vector<Shape> shapes{*shape_a, *shape_b};
+  for (size_t i = 0; i < shape_a->operands.size(); ++i) {
+    if (shape_a->operands[i].value != shape_b->operands[i].value && !union_carrier(shapes, i)) {
+      return false;
+    }
+  }
+  if (!spend(budget, 16 * shape_a->operands.size())) {
+    return false;
+  }
+  if (!commit) {
+    return true;
+  }
+  std::vector<Pin> operands;
+  for (size_t i = 0; i < shape_a->operands.size(); ++i) {
+    const auto x = shape_a->operands[i].value, y = shape_b->operands[i].value;
+    if (x == y) {
+      operands.push_back(x);
+      continue;
+    }
+    auto mux = cv::make_node(graph, Ntype_op::Mux);
+    gu::setup_sink_pid(mux, 0).connect_driver(selector);
+    gu::setup_sink_pid(mux, 1).connect_driver(first_when_true ? y : x);
+    gu::setup_sink_pid(mux, 2).connect_driver(first_when_true ? x : y);
+    const auto carrier = *union_carrier(shapes, i);
+    auto       output  = mux.create_driver_pin(0);
+    if (carrier.second) {
+      gu::set_ubits(output, carrier.first);
+    } else {
+      gu::set_sbits(output, carrier.first);
+    }
+    operands.push_back(output);
+  }
+  cv::forget(a);
+  for (auto sink : first.inp_pins_snapshot()) {
+    sink.del_sink();
+  }
+  gu::clear_proven(first);
+  for (size_t i = 0; i < operands.size(); ++i) {
+    gu::setup_sink_pid(first, shape_a->operands[i].role).connect_driver(operands[i]);
+  }
+  b.del_sink(sink_b);
+  a.connect_sink(sink_b);
+  cv::retire(second);
+  return true;
 }

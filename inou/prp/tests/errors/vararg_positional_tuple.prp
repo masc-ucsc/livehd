@@ -1,0 +1,7 @@
+/*
+:name: vararg_positional_tuple
+:type: error
+:error: must be named
+*/
+comb capture(...rest) -> (r) { r = 100 }
+const r = capture((1,2,3)) // locate_error_here

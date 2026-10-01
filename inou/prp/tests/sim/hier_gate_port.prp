@@ -14,10 +14,10 @@
 // be in the SAME definition. So each direction fails for its own reason:
 //
 //   DOWN (gate in the parent, gclk is a child's clock PORT): the child's flop
-//   sees a graph INPUT as its clock, with the And that produced it in another
+//   sees a graph INPUT as its clock, with the gate that produced it in another
 //   definition entirely.
 //   UP (gate in a child, its output clocks parent state): the parent's flop
-//   sees a Sub OUTPUT as its clock, with the And inside the callee.
+//   sees a Sub OUTPUT as its clock, with the gate inside the callee.
 //
 // Minion has at least five such sites (prim_mul_div.sv:94, vpu_lane_tima.sv:65,
 // minion_dcache_reduce.sv:307, tensor_load:260, csr_file:478), which is why the
@@ -45,33 +45,31 @@
 // The UP refusal used to abort the run first, which is the only reason the DOWN
 // row was never seen as a wrong number. `prp-vsim-hier_gate_port` runs the same
 // design under Verilator, so both rows are corroborated independently.
-comb gmaker(clk:bool, en:bool) -> (g:bool) {
-  g = clk and en
+mod gmaker(clk:Clock, en:Bool) -> (g:Clock@[]) {  // a comb has no Clock input
+  g = Clock(clock_pin=clk, enable=en)
 }
 
-mod gchild(gclk:bool, d:u8) -> (o:u8@[1]) {
-  reg f:u8:[clock_pin=ref gclk] = 0
+mod gchild(gclk:Clock, d:U8) -> (o:U8@[1]) {
+  reg f:U8:[clock_pin=gclk] = 0
   f = d
   o = f
 }
 
-pub mod hgp(clk:bool, en:bool, d:u8) -> (qdown:u8@[1], qup:u8@[1], ctl:u8@[1]) {
+pub mod hgp(clk:Clock, en:Bool, d:U8) -> (qdown:U8@[1], qup:U8@[1], ctl:U8@[1]) {
   // DOWN — the gate lives HERE and its output is the child's clock port.
-  wire gp:bool = nil
-  gp = clk and en
+  const gp = Clock(clock_pin=clk, enable=en)
   stage[1] cd = gchild(gclk=gp, d=d)
   qdown = cd
 
   // UP — the gate lives in a CALLEE and its output clocks state in this module.
-  wire gu:bool = nil
-  gu = gmaker(clk=clk, en=en)
-  reg fu:u8:[clock_pin=ref gu] = 0
+  const gm = gmaker(clk=clk, en=en)
+  reg fu:U8:[clock_pin=gm.g] = 0
   fu  = d
   qup = fu
 
   // CONTROL: a flop on the UNGATED reference clock, so a failure above is
   // specifically the port-crossing gate.
-  reg c:u8 = 0
+  reg c:U8:[clock_pin=clk] = 0
   c   = d
   ctl = c
 }
@@ -85,7 +83,7 @@ test hgp.a_gate_means_the_same_thing_across_a_port {
   tick 5 {
     // c0,c1 open -> load; c2,c3 closed -> HOLD; c4 reopens -> load.
     acc.en = (clock <= 1) or (clock == 4)
-    mut dv:u8 = 5
+    mut dv:U8 = 5
     if clock == 1 {
       dv = 6
     } elif clock == 2 {
@@ -97,7 +95,7 @@ test hgp.a_gate_means_the_same_thing_across_a_port {
     }
     acc.d = dv
     step
-    mut golden:u8 = 5
+    mut golden:U8 = 5
     if clock >= 1 {
       golden = 6
     }

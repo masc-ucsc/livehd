@@ -9,9 +9,9 @@
 // and Elem_T are compile-time declarations; the array must lower as two signed
 // four-bit elements rather than reaching tolg with an unresolved type ref.
 comptime const W = 4
-type Elem_T = signed(bits=W)
+type Elem_T = Signed(bits=W)
 
-pub comb top(x:s4) -> (y:s4) {
+pub comb top(x:S4) -> (y:S4) {
   mut values:[2]Elem_T = 0
   values[0] = x
   y = values[0]

@@ -1,0 +1,20 @@
+/*
+:name: bitnot_alias_typed
+:type: equiv
+*/
+// User rulings 2026-09-28 (38) and 2026-09-29 (44): an untyped `const` alias
+// of a typed value has that value's type, so `~` of it flips the declared
+// bits (unsigned) or is `-x - 1` (signed) exactly like `~` of the original.
+// Before, the alias was untyped and `~t` of a u8 alias was `-t - 1`.
+pub mod bitnot_alias_typed(a:U8, b:U5, s:S4) -> (o:U8@[0], p:U3@[0], q:S4@[0], r:U5@[0]) {
+  const x = a
+  o = ~x
+  const sl = b#[1..<4]
+  const y = sl
+  p = ~y
+  const z = s
+  q = ~z
+  const bb = b
+  const b2 = bb
+  r = ~(b2 & bb)
+}

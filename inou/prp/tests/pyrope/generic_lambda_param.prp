@@ -9,12 +9,12 @@
 //   undefined-call: call to undefined function 'F'
 // The concrete substitution (`r = inc(v=a)`) compiles green, so this file
 // flips green exactly when lambda generics land.
-comb inc(v:u8) -> (o:u9) {
+comb inc(v:U8) -> (o:U9) {
   o = v + 1
 }
-comb apply<F>(a:u8) -> (r:u9) {
+comb apply<F>(a:U8) -> (r:U9) {
   r = F(v=a)
 }
-pub comb generic_lambda_param(x:u8) -> (r:u9) {
+pub comb generic_lambda_param(x:U8) -> (r:U9) {
   r = apply<inc>(a=x)
 }

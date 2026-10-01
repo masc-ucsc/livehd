@@ -4,8 +4,8 @@
 :verifier_pass: 4
 :verifier_fail: 0
 */
-// string(bool) renders the literal word; string(integer) is decimal text.
-cassert(string(true)  == "true")
-cassert(string(false) == "false")
-cassert(string(1)  == "1")      // control: integer string is decimal (works)
-cassert(string(-1) == "-1")
+// String(bool) renders the literal word; String(integer) is decimal text.
+cassert(String(true)  == "true")
+cassert(String(false) == "false")
+cassert(String(1)  == "1")      // control: integer string is decimal (works)
+cassert(String(-1) == "-1")

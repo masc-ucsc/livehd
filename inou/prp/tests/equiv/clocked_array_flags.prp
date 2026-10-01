@@ -5,8 +5,8 @@
 :pyrope_top: clocked_array_flags
 */
 // LPDDR5-style temporary flags reduce to explicit bypass predicates.
-pub mod clocked_array_flags(clk:u1, reset:u1, push:u1, pop:u1, addr:u1) -> (counts:u4@[0]) {
-  reg state:[2]u2:[ordering="old"] = nil
+pub mod clocked_array_flags(clk:Clock, reset:U1, push:U1, pop:U1, addr:U1) -> (counts:U4@[0]) {
+  reg state:[2]U2:[ordering="old"] = nil
   if reset != 0 {
     state[0] = 0
     state[1] = 0

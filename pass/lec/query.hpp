@@ -13,6 +13,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
 #include "phase_sched.hpp"
+#include "property_types.hpp"
 #include "solve_stats.hpp"
 
 namespace livehd::lec {
@@ -20,7 +21,6 @@ namespace livehd::lec {
 // L1 relational query API. v1 covers the combinational equivalence client:
 // prove_equal(ref, impl) under assume_equal(primary inputs). prove_distinct /
 // is_sat are the duals/relatives (added as the clients land).
-enum class Verdict { Proven, Refuted, Unknown };
 
 // Machine-readable counterexample trace: the reproducible input sequence a
 // REFUTED BMC run found, uncapped and grouped by cycle (the display `witness`
@@ -190,6 +190,10 @@ struct Query_result {
 // Exported because it is also the acceptance rule for CLIENTS of a Proven
 // verdict (pass.synth's publication gate): a Proven carrying unmatched cut
 // points is sound exactly when this holds, and nowhere else.
+// The inductive engines apply it more narrowly still: a key whose CURRENT
+// state a name/shape bridge tied to the other side (a bit-blast regroup, a
+// memory <-> flop-bank pairing) is never excused, since its value is not free
+// (query.cpp `ind_tied_state`), so a Proven never carries one.
 template <typename Ref_range, typename Impl_range>
 bool internal_state_only(const Ref_range& unmatched_ref, const Impl_range& unmatched_impl) {
   if (unmatched_ref.empty() && unmatched_impl.empty()) {
@@ -582,6 +586,7 @@ struct Lec_options {
   // reuse that prepared graph rather than copying and expanding it again.
   bool                             _loop_prepared              = false;
   bool                             _boundary_feedback_prepared = false;
+  bool                             _ports_fitted               = false;  // every unfit Sub port is spelled (scratch)
   // Internal-only mode for the speculative-pair recovery leg. With a detected
   // reset it is inert. Without one, otherwise-uninitialized reference flop state
   // gets a full '?' plane under gold_x=ignore (implementation power-on remains
@@ -613,6 +618,7 @@ struct Lec_options {
   int                         proven_helpers    = 0;
   int                         input_assumes     = 0;
   int                         unchecked_assumes = 0;
+  int                         proven_assumes    = 0;  // design `assume`s pass.formal proved (disclosed apart from contracts)
 
   // Compile tier (2f-formal): treat design `assume` fproperties as NO-OPs — never
   // asserted as constraints, never induction hypotheses (they still occupy an occ
@@ -623,9 +629,9 @@ struct Lec_options {
   // discipline lives in the pass.formal driver, which proves assumes separately
   // and recovers assume-dependent elisions with the single-frame Prover). The
   // verify CLI leaves this false: there, child/local assumes are proof
-  // obligations (prove-then-use); an explicit assume_nocheck, a selected-top IO
-  // assume, or every assume under formal.assume_check=false is a disclosed free
-  // environment constraint.
+  // obligations (prove-then-use), a selected-top IO one included; an explicit
+  // assume_nocheck, or every assume under formal.assume_check=false, is a
+  // disclosed free environment constraint.
   bool ignore_assumes = false;
 
   // Verify-obligation cache hooks. The engine computes a rule-F key downstream
@@ -799,12 +805,6 @@ std::vector<std::pair<std::string, std::string>> validate_uncertain_pairs(
 // are ABSOLUTE unroll indices (the after_reset reset-hold prologue occupies
 // 0..reset_hold-1; plain `assert` is checked only in the run window,
 // `assert_always` at every cycle, and in just_reset every cycle is checked).
-[[nodiscard]] inline bool is_assume_kind(std::string_view kind) { return kind == "assume" || kind == "assume_nocheck"; }
-
-[[nodiscard]] inline bool is_unchecked_assume_class(std::string_view aclass) {
-  return aclass == "unchecked" || aclass == "top_input" || aclass == "check_disabled";
-}
-
 struct Prop_result {
   std::string   kind;   // assert | assert_always | assume
   std::string   loc;    // source location ("" when tolg carried none)
@@ -837,8 +837,6 @@ struct Prop_result {
   //   "unchecked" — assume_nocheck (and the fcore spelling
   //                 assume_nocheck_formal): a free constraint by explicit user
   //                 fiat; never checked, disclosed distinctly.
-  //   "top_input" — design-body input constraint authored in the selected top;
-  //                 no parent can discharge it, so it is active and unchecked.
   //   "check_disabled" — formal.assume_check=false; active and unchecked.
   std::string   aclass;
   Verdict       verdict       = Verdict::Unknown;

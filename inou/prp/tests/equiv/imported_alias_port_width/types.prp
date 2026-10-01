@@ -1,0 +1,4 @@
+// Imported helper for ../imported_alias_port_width.prp: public SCALAR type
+// aliases used as PORT types by the importer.
+pub type Byte = U8
+pub type Nib  = S4

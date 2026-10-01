@@ -48,7 +48,12 @@ compile a.v a_lg
 compile eq.v eq_lg
 compile ne.v ne_lg
 
-fail=0
+# The sections below are independent. Each runs in its own background subshell
+# (a -c dbg lhd spends ~1 s just starting, and every check spawns several), so a
+# failure is recorded as a marker file rather than a shell variable.
+mark_fail() { : > "$WORK/FAILED.$1"; }
+
+section_comb() {
 
 # Equivalent pair: both engine and lgcheck must say equivalent -> exit 0.
 out=$($LHD lec --impl "lg:$WORK/eq_lg" --ref "lg:$WORK/a_lg" --top foo \
@@ -56,10 +61,10 @@ out=$($LHD lec --impl "lg:$WORK/eq_lg" --ref "lg:$WORK/a_lg" --top foo \
 rc=$?
 echo "$out" | grep -i "cross-check" || true
 if echo "$out" | grep -qi "DISAGREE"; then
-  echo "FAIL: lec engine and lgcheck DISAGREE on the equivalent pair"; fail=1
+  echo "FAIL: lec engine and lgcheck DISAGREE on the equivalent pair"; mark_fail comb
 fi
 if [ $rc -ne 0 ]; then
-  echo "FAIL: equivalent pair returned rc=$rc (expected 0)"; fail=1
+  echo "FAIL: equivalent pair returned rc=$rc (expected 0)"; mark_fail comb
 fi
 
 # Different pair: both must say different -> equiv_fail (exit 10), NO disagreement.
@@ -68,11 +73,12 @@ out=$($LHD lec --impl "lg:$WORK/ne_lg" --ref "lg:$WORK/a_lg" --top foo \
 rc=$?
 echo "$out" | grep -i "cross-check" || true
 if echo "$out" | grep -qi "DISAGREE"; then
-  echo "FAIL: lec engine and lgcheck DISAGREE on the different pair"; fail=1
+  echo "FAIL: lec engine and lgcheck DISAGREE on the different pair"; mark_fail comb
 fi
 if [ $rc -eq 0 ]; then
-  echo "FAIL: different pair returned rc=0 (expected non-zero equiv_fail)"; fail=1
+  echo "FAIL: different pair returned rc=0 (expected non-zero equiv_fail)"; mark_fail comb
 fi
+}
 
 # Memory wrappers need a proven state correspondence in lgcheck as well as
 # native LEC. Exercise a write corruption so added structural candidates can
@@ -88,11 +94,12 @@ module memory_check(input clk, we, input [1:0] wa, ra,
 endmodule
 EOF
 sed "s/mem\[wa\] <= d;/mem[wa] <= d ^ 4'h1;/" "$WORK/memory.v" > "$WORK/memory_bad.v"
-for variant in memory memory_bad; do
+section_memory() {
+  local variant=$1
   $LHD compile "$WORK/$variant.v" --reader yosys --top memory_check \
     --emit-dir "lg:$WORK/${variant}_yosys" --emit "verilog:$WORK/$variant.net.v" \
     --workdir "$WORK/compile_$variant" > "$WORK/compile_$variant.log" 2>&1 || {
-      cat "$WORK/compile_$variant.log"; exit 1;
+      cat "$WORK/compile_$variant.log"; mark_fail "compile_$variant"; return;
     }
   $LHD lec --impl "verilog:$WORK/$variant.net.v" --ref "verilog:$WORK/memory.v" --top memory_check \
     --set formal.lec.hier=false --set formal.lec.cross=true --workdir "$WORK/check_$variant" \
@@ -104,9 +111,9 @@ for variant in memory memory_bad; do
   if [ "$rc" -ne "$expected" ] || ! grep -q "\"verdict\":\"$verdict\"" "$WORK/$variant.json"; then
     echo "FAIL: memory cross-check $variant returned rc=$rc, expected $expected ($verdict)"
     cat "$WORK/check_$variant.log" "$WORK/$variant.json"
-    fail=1
+    mark_fail "$variant"
   fi
-done
+}
 
 # Transparent latches need the oracle's clock-aware formal model; ignoring an
 # unsupported latch cell is not a proof. Check a genuine changed data input.
@@ -116,11 +123,12 @@ module latch_check(input d, g, output logic q);
 endmodule
 EOF
 sed 's/q <= d;/q <= ~d;/' "$WORK/latch.v" > "$WORK/latch_bad.v"
-for variant in latch latch_bad; do
+section_latch() {
+  local variant=$1
   $LHD compile "$WORK/$variant.v" --reader yosys --top latch_check \
     --emit-dir "lg:$WORK/${variant}_yosys" --emit "verilog:$WORK/$variant.net.v" \
     --workdir "$WORK/compile_$variant" > "$WORK/compile_$variant.log" 2>&1 || {
-      cat "$WORK/compile_$variant.log"; exit 1;
+      cat "$WORK/compile_$variant.log"; mark_fail "compile_$variant"; return;
     }
   $LHD lec --impl "$WORK/$variant.net.v" --ref "$WORK/latch.v" --top latch_check \
     --set formal.lec.cross=true --workdir "$WORK/check_$variant" \
@@ -132,9 +140,9 @@ for variant in latch latch_bad; do
   if [ "$rc" -ne "$expected" ] || ! grep -q "\"verdict\":\"$verdict\"" "$WORK/$variant.json"; then
     echo "FAIL: latch cross-check $variant returned rc=$rc, expected $expected ($verdict)"
     cat "$WORK/check_$variant.log" "$WORK/$variant.json"
-    fail=1
+    mark_fail "$variant"
   fi
-done
+}
 
 # Bounded windows must line up. lgcheck's bounded miter counts clk2fflogic
 # global-clock steps (two per clock edge), so lhd converts formal.bound design
@@ -157,7 +165,8 @@ module cnt(input clock, output o);
   assign o = 1'b0;
 endmodule
 EOF
-for bound in 5 6; do
+section_bounded() {
+  local bound=$1 rc expected cross
   $LHD lec --impl "$WORK/cnt_impl.v" --ref "$WORK/cnt_ref.v" --top cnt \
     --set formal.solver=lgyosys --set formal.bound=$bound --set formal.simfail_run=false \
     --workdir "$WORK/cnt_$bound" --result-json "$WORK/cnt_$bound.json" > "$WORK/cnt_$bound.log" 2>&1
@@ -172,58 +181,79 @@ for bound in 5 6; do
   if [ "$rc" -ne "$expected" ] || grep -qi DISAGREE "$WORK/cnt_$bound.log" || ! grep -qF "$cross" "$WORK/cnt_$bound.json"; then
     echo "FAIL: bounded counter cross-check at formal.bound=$bound returned rc=$rc, expected $expected with $cross"
     cat "$WORK/cnt_$bound.log" "$WORK/cnt_$bound.json"
-    fail=1
+    mark_fail "cnt_$bound"
   fi
-done
+}
 
 # Deterministic process-status controls: UNKNOWN and a crashed/setup oracle
 # must not be reported as a counterexample or agreement with native REFUTED.
-for oracle_rc in 2 5; do
-  expected_status=7
+section_status() {
+  local oracle_rc=$1 expected_status=7 variant rc
   [ "$oracle_rc" -ne 5 ] || expected_status=5
-  printf '#!/bin/sh\nexit %s\n' "$oracle_rc" > "$WORK/oracle"
-  chmod +x "$WORK/oracle"
+  printf '#!/bin/sh\nexit %s\n' "$oracle_rc" > "$WORK/oracle_$oracle_rc"
+  chmod +x "$WORK/oracle_$oracle_rc"
   for variant in eq ne; do
-    LHD_LGCHECK="$WORK/oracle" $LHD lec --impl "lg:$WORK/${variant}_lg" --ref "lg:$WORK/a_lg" --top foo \
+    LHD_LGCHECK="$WORK/oracle_$oracle_rc" $LHD lec --impl "lg:$WORK/${variant}_lg" --ref "lg:$WORK/a_lg" --top foo \
       --set formal.lec.hier=false --set formal.lec.cross=true --workdir "$WORK/status_${oracle_rc}_$variant" \
       > "$WORK/status_${oracle_rc}_$variant.log" 2>&1
     rc=$?
     if [ "$rc" -ne "$expected_status" ] || ! grep -q 'lgcheck -> unknown' "$WORK/status_${oracle_rc}_$variant.log"; then
       echo "FAIL: lgcheck exit $oracle_rc became a verdict for $variant (rc=$rc)"
       cat "$WORK/status_${oracle_rc}_$variant.log"
-      fail=1
+      mark_fail "status_$oracle_rc"
     fi
   done
-done
+}
 
 # The legacy lgyosys selector is a DEBUG comparison request, never a unique
 # Yosys proof. This option-validation case requires the default native verdict
 # in the result and still fails when the additional oracle returns UNKNOWN.
-printf '#!/bin/sh\nexit 2\n' > "$WORK/oracle"
-LHD_LGCHECK="$WORK/oracle" $LHD lec --impl "lg:$WORK/eq_lg" --ref "lg:$WORK/a_lg" --top foo \
+section_legacy() {
+printf '#!/bin/sh\nexit 2\n' > "$WORK/oracle_legacy"
+chmod +x "$WORK/oracle_legacy"
+LHD_LGCHECK="$WORK/oracle_legacy" $LHD lec --impl "lg:$WORK/eq_lg" --ref "lg:$WORK/a_lg" --top foo \
   --set formal.solver=lgyosys --workdir "$WORK/legacy_cross" --result-json "$WORK/legacy_cross.json" \
   > "$WORK/legacy_cross.log" 2>&1
 if [ "$?" -ne 7 ] || ! grep -q '"solver":"cvc5"' "$WORK/legacy_cross.json" \
     || ! grep -q 'lgcheck -> unknown' "$WORK/legacy_cross.log"; then
   echo 'FAIL: lgyosys selector bypassed native LEC or accepted an unknown comparison'
   cat "$WORK/legacy_cross.log" "$WORK/legacy_cross.json"
-  fail=1
+  mark_fail legacy
 fi
+}
 
 # Even an oracle claiming success cannot bless a vacuous native comparison.
 cat > "$WORK/empty.v" <<'EOF'
 module empty(input a);
 endmodule
 EOF
-printf '#!/bin/sh\nexit 0\n' > "$WORK/oracle"
-LHD_LGCHECK="$WORK/oracle" $LHD lec --impl "$WORK/empty.v" --ref "$WORK/empty.v" --top empty \
+section_empty() {
+printf '#!/bin/sh\nexit 0\n' > "$WORK/oracle_empty"
+chmod +x "$WORK/oracle_empty"
+LHD_LGCHECK="$WORK/oracle_empty" $LHD lec --impl "$WORK/empty.v" --ref "$WORK/empty.v" --top empty \
   --set formal.lec.hier=false --set formal.lec.cross=true --workdir "$WORK/empty_cross" \
   > "$WORK/empty_cross.log" 2>&1
 if [ "$?" -eq 0 ]; then
   echo 'FAIL: cross-check accepted a vacuous native comparison'
   cat "$WORK/empty_cross.log"
-  fail=1
+  mark_fail empty
 fi
+}
+
+rm -f "$WORK"/FAILED.*
+pids=()
+section_comb & pids+=($!)
+for variant in memory memory_bad; do section_memory "$variant" & pids+=($!); done
+for variant in latch latch_bad; do section_latch "$variant" & pids+=($!); done
+for bound in 5 6; do section_bounded "$bound" & pids+=($!); done
+for oracle_rc in 2 5; do section_status "$oracle_rc" & pids+=($!); done
+section_legacy & pids+=($!)
+section_empty & pids+=($!)
+# Every section returns 0 unless it dies abnormally (signal, failed fork, a
+# set -u abort): a non-zero wait status fails the test even without a marker.
+fail=0
+for pid in "${pids[@]}"; do wait "$pid" || fail=1; done
+if compgen -G "$WORK/FAILED.*" > /dev/null; then fail=1; fi
 
 if [ $fail -ne 0 ]; then
   echo "lec_cross_test: FAILED"

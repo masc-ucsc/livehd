@@ -1,0 +1,156 @@
+/*
+:name: mem_bulk_vs_entry_order
+:type: simulation
+*/
+// Ruling 45: a whole-array store (`mem = v`) and a per-entry write of the same
+// cycle resolve in PROGRAM ORDER, like any two writes (docs 08-memories, "last
+// write wins"). The per-entry write used to win whatever the order (a
+// `memory-update-and-write` warning), so `ec` kept its entry through a later
+// clear. Same shapes as equiv/mem_bulk_vs_entry_order.prp:
+//
+// * `ec`: entry write, then clear; `ce`: clear, then entry write.
+// * `rl`: reset value; entry write, runtime whole-array load, entry write.
+// * `pc`: whole-entry and lane write, then clear; `cp`: reset value; entry
+//   write, clear, lane write.
+// * `pr` (default program ordering): each read sees the writes before it, the
+//   clear included; `pf` (ordering="fwd") sees the whole cycle. The reads of
+//   the write cycle are captured into registers (`cap`), because a read below
+//   `step` already sees the committed write.
+// Writes happen on even cycles; the odd cycles write nothing and check.
+mod mem_bulk_vs_entry_order(cap:Bool, wf:Bool, clr:Bool, we:Bool, ld:Bool, a:U2, d:U16, x:U8, z:U64, ra:U2) -> (ec_q:U16@[0], ce_q:U16@[0], rl_q:U16@[0], pc_q:U16@[0], cp_q:U16@[0], k1_q:U16@[0], k2_q:U16@[0], k3_q:U16@[0], kf_q:U16@[0]) {
+  reg ec:[4]U16:[ordering="old"] = nil
+  reg ce:[4]U16:[ordering="old"] = nil
+  reg rl:[4]U16:[ordering="old"] = 0
+  reg pc:[4]U16:[ordering="old"] = nil
+  reg cp:[4]U16:[ordering="old"] = 0
+  reg pr:[4]U16 = nil
+  reg pf:[4]U16:[ordering="fwd"] = nil
+  reg k1:U16 = 0
+  reg k2:U16 = 0
+  reg k3:U16 = 0
+  reg kf:U16 = 0
+
+  k1_q = k1
+  k2_q = k2
+  k3_q = k3
+  kf_q = kf
+
+  const f = pf[ra]
+
+  if wf {
+    ec[a] = d
+  }
+  if clr {
+    ec = 0
+  }
+
+  if clr {
+    ce = 0
+  }
+  if wf {
+    ce[a] = d
+  }
+
+  if wf {
+    rl[a] = d
+  }
+  if ld {
+    rl = z
+  }
+  if we {
+    rl[ra] = x
+  }
+
+  if wf {
+    pc[a] = d
+  }
+  if we {
+    pc[a]#[0..<8] = x
+  }
+  if clr {
+    pc = 0
+  }
+
+  if wf {
+    cp[a] = d
+  }
+  if clr {
+    cp = 0
+  }
+  if we {
+    cp[a]#[8..<16] = x
+  }
+
+  if wf {
+    pr[a] = d
+    pf[a] = d
+  }
+  const m1 = pr[ra]
+  if clr {
+    pr = 0
+    pf = 0
+  }
+  const m2 = pr[ra]
+  if we {
+    pr[a]#[8..<16] = x
+    pf[a]#[8..<16] = x
+  }
+  const m3 = pr[ra]
+
+  if cap {
+    k1 = m1
+    k2 = m2
+    k3 = m3
+    kf = f
+  }
+
+  ec_q = ec[ra]
+  ce_q = ce[ra]
+  rl_q = rl[ra]
+  pc_q = pc[ra]
+  cp_q = cp[ra]
+}
+
+test mem_bulk_vs_entry_order.orders {
+  mut t = mem_bulk_vs_entry_order
+  tick 12 {
+    const phase = clock >> 1
+    const wr    = (clock & 1) == 0 and clock >= 2
+    t.reset = clock < 2
+    t.a     = 1
+    t.ra    = 1
+    t.z     = 0x4444_5555_6666_7777
+    t.cap   = wr
+    // phase 1: entry write only; 2: entry write + clear; 3: everything;
+    // 4: entry write + load; 5: lane writes only.
+    t.wf    = wr and phase != 5
+    t.clr   = wr and (phase == 2 or phase == 3)
+    t.we    = wr and (phase == 3 or phase == 5)
+    t.ld    = wr and (phase == 3 or phase == 4)
+    t.d     = if phase == 1 { 0x1111 } elif phase == 2 { 0x2222 } elif phase == 3 { 0x3333 } else { 0x5a5a }
+    t.x     = if phase == 3 { 0xab } else { 0xcd }
+    step
+    if (clock & 1) == 1 and clock >= 3 {
+      // Entry 1 of each memory after the write cycle, and the captured
+      // program-order reads m1/m2/m3 and fwd read of that cycle (the fwd read
+      // sees what m3, the last read, sees).
+      const w_ec = if phase == 1 { 0x1111 } elif phase == 2 or phase == 3 { 0 } else { 0x5a5a }
+      const w_ce = if phase == 1 { 0x1111 } elif phase == 2 { 0x2222 } elif phase == 3 { 0x3333 } else { 0x5a5a }
+      const w_rl = if phase == 1 { 0x1111 } elif phase == 2 { 0x2222 } elif phase == 3 { 0x00ab } elif phase == 4 { 0x6666 } else { 0x00cd }
+      const w_pc = if phase == 1 { 0x1111 } elif phase == 2 or phase == 3 { 0 } elif phase == 4 { 0x5a5a } else { 0x5acd }
+      const w_cp = if phase == 1 { 0x1111 } elif phase == 2 { 0 } elif phase == 3 { 0xab00 } elif phase == 4 { 0x5a5a } else { 0xcd5a }
+      const w_k1 = if phase == 1 { 0x1111 } elif phase == 2 { 0x2222 } elif phase == 3 { 0x3333 } else { 0x5a5a }
+      const w_k2 = if phase == 1 { 0x1111 } elif phase == 2 or phase == 3 { 0 } else { 0x5a5a }
+      const w_k3 = if phase == 1 { 0x1111 } elif phase == 2 { 0 } elif phase == 3 { 0xab00 } elif phase == 4 { 0x5a5a } else { 0xcd5a }
+      assert(t.ec_q == w_ec, "entry write then clear: the clear wins")
+      assert(t.ce_q == w_ce, "clear then entry write: the entry write wins")
+      assert(t.rl_q == w_rl, "entry write, whole-array load, entry write: program order")
+      assert(t.pc_q == w_pc, "entry and lane writes then clear: the clear wins")
+      assert(t.cp_q == w_cp, "entry write, clear, lane write: the lane lands on the cleared entry")
+      assert(t.k1_q == w_k1, "a program-order read sees the entry write before it")
+      assert(t.k2_q == w_k2, "a program-order read sees the clear before it")
+      assert(t.k3_q == w_k3, "a program-order read sees the lane write after the clear")
+      assert(t.kf_q == w_k3, "a fwd read sees the entry as the whole cycle leaves it")
+    }
+  }
+}

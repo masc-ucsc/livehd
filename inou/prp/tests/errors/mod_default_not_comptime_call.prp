@@ -1,0 +1,23 @@
+/*
+:name: mod_default_not_comptime_call
+:type: error
+:error: the default of input `b` of `m` is not a compile-time constant
+:help: fold to a compile-time constant
+*/
+
+// User ruling 2026-09-28 (34): a `mod`/`pipe` input default is legal when it
+// FOLDS to a compile-time constant (sim/mod_default_comptime_expr.prp). A
+// default computed by a `mod` instance is hardware, not a constant: the
+// unit's own elaboration cannot fold it, so it is `default-not-comptime`.
+
+mod k(a:U8) -> (o:U8@[0]) {
+  o = a
+}
+
+mod m(a:U8, b:U8 = k(a=3)) -> (o:U8@[0]) {  // locate_error_here
+  wrap o = a + b
+}
+
+pub mod mod_default_not_comptime_call(x:U8) -> (y:U8@[0]) {
+  y = m(a=x)
+}

@@ -1,0 +1,37 @@
+/*
+:name: clkrst_autowire_negreset
+:type: simulation
+*/
+// docs 04b "Implicit clock and reset": an omitted child `Clock`/`Reset` input
+// is auto-wired to the caller's single `Clock`/`Reset`, whatever the names. A
+// reset is a raw wire: its polarity belongs to each register (`negreset=`),
+// never to the signal or its name, so the wire crosses the call unchanged --
+// exactly like an explicit binding (`e` below). Here the caller resets by
+// driving `rst_n` low, and the child's registers read it active-low. A
+// computed reset binds by value (`d`).
+mod cnt8(core_clk:Clock, rst_n:Reset, en:Bool) -> (q:U8@[0]) {
+  reg cnt:U8:[negreset=true] = 0
+  if en { wrap cnt = cnt + 1 }
+  q = cnt
+}
+pub mod top(clk:Clock, rst_n:Reset, soft:Bool, en:Bool) -> (q:U8@[0], q2:U8@[0], q3:U8@[0]) {
+  const c = cnt8(en=en)                          // `core_clk`/`rst_n` auto-wired to `clk`/`rst_n`
+  const d = cnt8(rst_n=rst_n and !soft, en=en)   // a computed reset
+  const e = cnt8(rst_n=rst_n, en=en)             // explicit: the same wire as `c`
+  q  = c.q
+  q2 = d.q
+  q3 = e.q
+}
+
+test top.autowire {
+  mut t = top
+  tick 8 {
+    t.rst_n = clock >= 2   // low (reset) for cycles 0 and 1
+    t.soft  = clock == 5
+    t.en    = true
+    step
+  }
+  assert(t.q == 6)    // counted cycles 2..7
+  assert(t.q2 == 2)   // soft reset at cycle 5, then counted 6..7
+  assert(t.q3 == t.q) // auto-wire and explicit binding agree
+}

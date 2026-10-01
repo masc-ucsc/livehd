@@ -1,0 +1,30 @@
+/*
+:name: array_bit_assign_rolled_1
+:lec_grep_not: unset-unused-field
+*/
+// The same rows built with per-element bit assignments `matrix[i]#[j] = ...`
+// into a `mut matrix:[4]U4` inside a nested `for`, which stays ROLLED (the
+// default). It proves today, but compiling it warned (code
+// unset-unused-field) "field `matrix__carry_out.1..3` is declared but never
+// set and never used": the rolled body publishes its array carry with ONE
+// whole-array store onto the carry-out port, and upass.constprop's
+// record_field_write ignores a store whose path has no `.`, so lanes 1..3 look
+// unset (same cause as array_whole_output_store_1.prp). The other spurious
+// warning of this loop, negative-shift, is a separate cause pinned by
+// array_bit_assign_rolled_2.prp. `lhd lec` echoes both sides' compile
+// diagnostics as JSON lines (with their `code`), which is what `:lec_grep_not:`
+// reads.
+pub mod array_bit_assign_rolled(a:U4) -> (q:U4@[0], r:U4@[0]) {
+  mut matrix:[4]U4 = 0
+  for i in 0..<4 {
+    for j in 0..<4 {
+      if i < j {
+        matrix[i]#[j] = a#[j]
+      } elif i > j {
+        matrix[i]#[j] = ~a#[i] & 1
+      }
+    }
+  }
+  q = matrix[2]
+  r = matrix[1]
+}

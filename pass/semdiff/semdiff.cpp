@@ -142,7 +142,15 @@ std::string normalize_reg_name(std::string_view raw) {
   if (auto p = s.find("___ssa_"); p != std::string_view::npos) {
     s = s.substr(0, p);
   }
-  return gu::logical_hier_name(s);
+  auto name = gu::logical_hier_name(s);
+  // cgen's reversible memory wrapper (`<inst>.data`, or an inline `_data`
+  // register) names the SAME state as its source Memory. Decoding it is what
+  // lets a golden `mem` pair memory-to-memory with the round trip's
+  // `__lhdmem_h6d656d_e.data`, by name, the way LEC's own correspondence does.
+  if (auto storage = livehd::bus_name::parse_memory_storage(name)) {
+    return std::string(storage->prefix) + storage->source;
+  }
+  return name;
 }
 
 std::string state_key(hhds::Graph* g, const hhds::Node_class& node) {
@@ -324,8 +332,12 @@ bool data_sink_port(Ntype_op op, int pid) {
     case Ntype_op::Flop:
     case Ntype_op::Latch: return pid == 3 || pid == 4;              // din, enable
     case Ntype_op::Fflop: return pid == 0 || pid == 3 || pid == 5;  // valid, din, stop
-    case Ntype_op::Memory:
-      return pid == 0 || pid == 3 || pid == 4 || pid == 12 || pid == 13;  // addr, din, enable, update, update_enable
+    case Ntype_op::Memory: {
+      // Port k's pins sit at k*Memory_port_stride + role (graph/cell.hpp), so
+      // test the role: a raw pid would drop every port but the first.
+      const auto role = pid % Ntype::Memory_port_stride;
+      return role == 0 || role == 3 || role == 4 || role == 12 || role == 13;  // addr, din, enable, update, update_enable
+    }
     default: return true;                                                 // comb node: every input is data
   }
 }
@@ -355,8 +367,15 @@ struct State_cell {
   // netlist read back from Verilog). name_lane < 0 = not reconstructed.
   int32_t                                    name_lane   = -1;
   int32_t                                    name_extent = 0;
+  // `key` was rewritten by reconstruct_bus_groups (a regrouped `x[i]` bit or a
+  // lone `x.flop_16` / `x_cgen1.l` renamed to `x`). The pairing is a
+  // bus_name HINT; the compare-point obligations below re-verify it.
+  bool                                       name_reconstructed = false;
   bool     t1_pair = false, t1_group = false, t2_pair = false, physical_bridge = false, ambiguous = false;
   uint64_t kind_nw    = 0;      // `kind` WITHOUT the width term (see collect_state)
+  uint64_t kind_ni    = 0;      // op + commit edge only: no init, no width (the reset-agnostic phase)
+  bool        has_init = false;  // a constant reset/initial value is attached
+  std::string init;              // its serialization ("" when none)
   bool     kind_clash = false;  // unpaired: cross-side SRP/ERP match refused by the
                                 // kind fold (op/init — the pair precondition)
 };
@@ -404,11 +423,14 @@ State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
       }
       c.kind = hcombine(c.kind, hstr(pos ? "\x01commit+" : "\x01commit-"));
     }
+    c.kind_ni = c.kind;
     if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
       // Reset/init value folds into the identity — the 2f-lec precondition:
       // state with differing reset values must never pair.
       if (auto init_d = gu::get_driver_of_sink_name(node, "initial"); init_d.is_const()) {
-        c.kind = hcombine(c.kind, hstr(gu::const_of(init_d).serialize()));
+        c.has_init = true;
+        c.init     = gu::const_of(init_d).serialize();
+        c.kind     = hcombine(c.kind, hstr(c.init));
       }
     } else if (op == Ntype_op::Memory) {
       if (auto size_d = gu::get_driver_of_sink_name(node, "size"); size_d.is_const()) {
@@ -437,6 +459,7 @@ State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
     c.kind_nw = c.kind;
     if (c.is_mem) {
       c.kind_nw = hcombine(c.kind_nw, static_cast<uint64_t>(static_cast<uint32_t>(node_out_bits(node))));
+      c.kind_ni = c.kind_nw;  // a memory keeps its shape (size folded above, width here)
     }
     c.kind = hcombine(c.kind, static_cast<uint64_t>(static_cast<uint32_t>(node_out_bits(node))));
     ss.index.emplace(node.get_class_index(), static_cast<uint32_t>(ss.cells.size()));
@@ -564,21 +587,35 @@ State_side collect_state(hhds::Graph* g, const Semdiff_options& opts) {
 // resolved tokens (their hop dist), and the members' IO anchors (dist+1).
 // Commutative by construction — this annotated set is the identity the
 // full-match compares, and what the explain dump renders/diffs.
-std::vector<std::pair<uint64_t, uint32_t>> rp_items(const State_side& ss, const State_cell& c, bool backward) {
+// `drop` (optional) removes graph-input anchor tokens from the set -- the
+// reset-agnostic phase's view, where a reset input carries no identity. In
+// that view the cell's OWN membership of its closure is dropped too: a hold
+// spelled as an enable pin has no self-loop, the same hold spelled as a
+// data-path mux (`if (rst) q <= K; else if (en) q <= d;` read by slang) has one.
+std::vector<std::pair<uint64_t, uint32_t>> rp_items(const State_side& ss, const State_cell& c, bool backward,
+                                                    const absl::flat_hash_set<uint64_t>* drop = nullptr) {
   const auto&                                reach = backward ? c.reach_b : c.reach_f;
   const auto&                                own   = backward ? c.in_anchors : c.out_anchors;
+  auto                                       kept  = [&](uint64_t t) { return drop == nullptr || !drop->contains(t); };
   std::vector<std::pair<uint64_t, uint32_t>> items;
   items.reserve(own.size() + reach.size() * 2);
   for (uint64_t t : own) {
-    items.emplace_back(t, 1);
+    if (kept(t)) {
+      items.emplace_back(t, 1);
+    }
   }
   for (auto [i, d] : reach) {
     const auto& m = ss.cells[i];
+    if (drop != nullptr && &m == &c) {
+      continue;
+    }
     if (m.token != 0) {
       items.emplace_back(m.token, d);
     }
     for (uint64_t t : backward ? m.in_anchors : m.out_anchors) {
-      items.emplace_back(t, d + 1);
+      if (kept(t)) {
+        items.emplace_back(t, d + 1);
+      }
     }
   }
   std::sort(items.begin(), items.end());
@@ -586,9 +623,10 @@ std::vector<std::pair<uint64_t, uint32_t>> rp_items(const State_side& ss, const 
   return items;
 }
 
-uint64_t rp_signature(const State_side& ss, const State_cell& c, bool backward) {
+uint64_t rp_signature(const State_side& ss, const State_cell& c, bool backward,
+                      const absl::flat_hash_set<uint64_t>* drop = nullptr) {
   uint64_t h = hstr("\x01rp");
-  for (auto [t, d] : rp_items(ss, c, backward)) {
+  for (auto [t, d] : rp_items(ss, c, backward, drop)) {
     h = hcombine(h, hcombine(t, d));
   }
   return h;
@@ -610,6 +648,13 @@ uint64_t rp_signature(const State_side& ss, const State_cell& c, bool backward) 
 //     and none of the group's own names; `side` must not also hold an `x`.
 // Anything else keeps its per-bit identity and stays unpaired as before.
 // The LEC consumer builds its own bit-level correspondence and re-verifies it.
+// Inside semdiff the rename only PROPOSES the pair: build_sides keys every
+// state cell's compare-point obligation by the seed it was matched with, never
+// by its raw cut_point_key, so a renamed pair's din/enable/reset/initial
+// operands are compared pairwise. Keyed by the raw names (`n:g` vs `n:g.l`)
+// both obligations were one-sided and silently skipped, and a `g` vs `g.l`
+// pair with swapped dins or a different reset constant PROVED with no solver.
+// Every renamed cell is marked name_reconstructed (State_stats counts them).
 void reconstruct_bus_groups(State_side& side, const State_side& other) {
   auto name_of = [](const State_cell& c) { return normalize_reg_name(c.node.get_hier_name()); };
   // The DECLARED Q width (node_out_bits only sees connected driver pins).
@@ -701,11 +746,12 @@ void reconstruct_bus_groups(State_side& side, const State_side& other) {
       continue;
     }
     for (const auto& m : members) {
-      auto& c         = side.cells[m.cell];
-      c.aggregate_key = base;
-      c.key           = "n:" + base;
-      c.name_lane     = static_cast<int32_t>(m.index);
-      c.name_extent   = static_cast<int32_t>(n);
+      auto& c              = side.cells[m.cell];
+      c.aggregate_key      = base;
+      c.key                = "n:" + base;
+      c.name_lane          = static_cast<int32_t>(m.index);
+      c.name_extent        = static_cast<int32_t>(n);
+      c.name_reconstructed = true;
     }
   }
   // An unsplit register read back through its cell model: `r.flop_16` (or
@@ -723,7 +769,8 @@ void reconstruct_bus_groups(State_side& side, const State_side& other) {
     if (wide.is_mem || !wide.aggregate_key.empty() || wide.key != "n:" + owner || q_bits(wide) != 1) {
       continue;
     }
-    side.cells[cells.front()].key = "n:" + owner;
+    side.cells[cells.front()].key                = "n:" + owner;
+    side.cells[cells.front()].name_reconstructed = true;
   }
 }
 
@@ -920,6 +967,12 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
         st.b_name_grouped += static_cast<uint32_t>(it->second.size());
         continue;
       }
+      // A key that matched on both sides only because reconstruct_bus_groups
+      // rewrote one of them is a hint-based correspondence (see there).
+      if (std::any_of(av.begin(), av.end(), [&](uint32_t i) { return sa.cells[i].name_reconstructed; })
+          || std::any_of(it->second.begin(), it->second.end(), [&](uint32_t i) { return sb.cells[i].name_reconstructed; })) {
+        ++st.name_reconstructed;
+      }
       for (uint32_t i : av) {
         sa.cells[i].token           = tok;
         sa.cells[i].t1_pair         = true;
@@ -1031,30 +1084,98 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
     // the residue that STILL has no counterpart is then retried width-blind
     // (see collect_state for why that is sound). Doing it the other way round
     // would let a width-crossing pair win a slot from an exact one.
-    bool           relaxed = false;
+    //
+    // A THIRD, reset-agnostic phase then retries what is still unpaired with
+    // the reset/initial value out of the identity and every graph input that
+    // drives a state cell's reset pin (on EITHER side) out of the fan-in
+    // anchors. It pairs the same register written two ways -- a reset pin with
+    // a reset value on one side, the reset folded into the data path of an
+    // init-less flop on the other (a Verilog `if (rst) q <= K` read by slang,
+    // against a Pyrope `reg q:[reset_pin=rst] = K`) -- which the first two
+    // phases see as different anchors AND a different kind. It only admits a
+    // pair whose REF cell has no initial value (or the same one): an init-less
+    // reference register holds an unknown, don't-care power-on value, so the
+    // pair's relation is initially true by choosing it equal to the impl's
+    // (validate_uncertain_pairs applies the same rule), and lec re-verifies
+    // the pair like any tier-2 pair.
+    int                           phase = 0;  // 0 strict, 1 width-blind, 2 reset-agnostic
+    absl::flat_hash_set<uint64_t> reset_in;   // graph-input anchors that reach a reset pin
+    for (auto* g : {ga, gb}) {
+      for (auto node : g->body().nodes(hhds::Node_order::forward)) {
+        if (!is_persistent_state(node)) {
+          continue;
+        }
+        const auto op  = gu::type_op_of(node);
+        if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Memory) {
+          continue;
+        }
+        auto rst = gu::get_driver_of_sink_name(node, op == Ntype_op::Memory ? "reset" : "reset_pin");
+        if (rst.is_invalid() || rst.is_const()) {
+          continue;
+        }
+        // The reset condition's own (small) comb cone: `rst`, `!rst_n`, `rst == 1`.
+        std::vector<hhds::Pin_class>           work{rst};
+        absl::flat_hash_set<hhds::Class_index> seen;
+        while (!work.empty() && seen.size() < 32) {
+          auto drv = work.back();
+          work.pop_back();
+          if (gu::is_graph_input_pin(drv)) {
+            reset_in.insert(hcombine(hstr("\x01in"), hstr(drv.get_pin_name())));
+            continue;
+          }
+          if (drv.is_const()) {
+            continue;
+          }
+          auto m = drv.get_master_node();
+          if (is_persistent_state(m) || !seen.insert(m.get_class_index()).second) {
+            continue;
+          }
+          for_each_inp_operand(m, [&](const hhds::Pin_class&, const hhds::Pin_class& d) {
+            work.push_back(d);
+            return true;
+          });
+        }
+      }
+    }
     for (uint32_t round = 1; round <= maxiter; ++round) {
       absl::flat_hash_map<uint64_t, std::vector<uint32_t>> asig, bsig;
-      auto                                                 sig_of = [&](const State_side& ss, const State_cell& c) {
+      const bool                                           relaxed = phase >= 1;
+      auto                                                 sig_of  = [&](const State_side& ss, const State_cell& c) {
+        if (phase == 2) {
+          uint64_t h = hcombine(hcombine(hstr("\x01noreset"), c.kind_ni), rp_signature(ss, c, /*backward=*/true, &reset_in));
+          return hcombine(h, rp_signature(ss, c, /*backward=*/false, &reset_in));
+        }
         uint64_t h = hcombine(relaxed ? c.kind_nw : c.kind, rp_signature(ss, c, /*backward=*/true));
         return hcombine(h, rp_signature(ss, c, /*backward=*/false));
       };
-      for (uint32_t i = 0; i < sa.cells.size(); ++i) {
-        if (sa.cells[i].token == 0) {
-          asig[sig_of(sa, sa.cells[i])].push_back(i);
+      // The reset-agnostic phase is for registers only: a memory pair is also a
+      // confident collapse hint to lec (a_mem_diverged), so it keeps its reset
+      // anchors.
+      auto bucket = [&]() {
+        asig.clear();
+        bsig.clear();
+        for (uint32_t i = 0; i < sa.cells.size(); ++i) {
+          if (sa.cells[i].token == 0 && (phase < 2 || !sa.cells[i].is_mem)) {
+            asig[sig_of(sa, sa.cells[i])].push_back(i);
+          }
         }
-      }
-      for (uint32_t i = 0; i < sb.cells.size(); ++i) {
-        if (sb.cells[i].token == 0) {
-          bsig[sig_of(sb, sb.cells[i])].push_back(i);
+        for (uint32_t i = 0; i < sb.cells.size(); ++i) {
+          if (sb.cells[i].token == 0 && (phase < 2 || !sb.cells[i].is_mem)) {
+            bsig[sig_of(sb, sb.cells[i])].push_back(i);
+          }
         }
-      }
+      };
+      bucket();
       bool progress = false;
       for (auto& [sig, av] : asig) {
         auto it = bsig.find(sig);
         if (it == bsig.end()) {
           continue;
         }
-        if (av.size() == 1 && it->second.size() == 1) {
+        // Reset-agnostic phase: the init-less-REFERENCE precondition above.
+        const bool init_ok = phase < 2 || av.size() != 1 || it->second.size() != 1 || !sa.cells[av.front()].has_init
+                             || (sb.cells[it->second.front()].has_init && sa.cells[av.front()].init == sb.cells[it->second.front()].init);
+        if (av.size() == 1 && it->second.size() == 1 && init_ok) {
           uint64_t tok = hcombine(hstr("\x02pair"), sig);
           if (opts.explain_noise > 0) {
             sa.label.try_emplace(tok, "pair:" + sa.cells[av.front()].key);
@@ -1091,12 +1212,19 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
       if (progress) {
         st.rounds = round;
       }
-      if (!progress && !relaxed && round < maxiter) {
+      if (!progress && phase < 2 && round < maxiter) {
         // The strict phase converged. Anything still unresolved could not find a
         // same-width counterpart; retry it width-blind before declaring it
-        // unpaired. This is the phase switch, not a terminal round.
-        relaxed = true;
+        // unpaired, and then reset-agnostic. This is the phase switch, not a
+        // terminal round.
+        ++phase;
         continue;
+      }
+      if ((!progress || round == maxiter) && phase == 2) {
+        // Classify the residue (ambiguous / diverged memory) exactly as the
+        // width-blind phase did before the reset-agnostic one existed.
+        phase = 1;
+        bucket();
       }
       if (!progress || round == maxiter) {
         // Terminal round (converged, or capped by synalign_maxiter): cells
@@ -1280,11 +1408,12 @@ void pair_state(hhds::Graph* ga, hhds::Graph* gb, State_side& sa, State_side& sb
                    g->get_name(),
                    c.truth.empty() ? c.key : c.truth,
                    c.truth.empty() ? "" : " (noised)",
-                   c.t1_pair     ? "name"
-                   : c.t1_group  ? "name-group"
-                   : c.t2_pair   ? "full"
-                   : c.ambiguous ? "UNPAIRED(ambiguous)"
-                                 : "UNPAIRED(no-counterpart)");
+                   c.t1_pair && c.name_reconstructed ? "name(reconstructed)"
+                   : c.t1_pair                       ? "name"
+                   : c.t1_group                      ? "name-group"
+                   : c.t2_pair                       ? "full"
+                   : c.ambiguous                     ? "UNPAIRED(ambiguous)"
+                                                     : "UNPAIRED(no-counterpart)");
       }
     }
   };
@@ -1669,6 +1798,22 @@ void stamp(const hhds::Node_class& node, uint32_t id) {
 // stamps + counts (structural_match) or checks the bijection cheaply
 // (structural_identical) -- both run byte-identical analysis this way.
 void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Side& sa, Side& sb, Match_result& res) {
+  // The compare-point identity of every SEEDED state cell is the seed itself:
+  // the one cross-side identity the forward/backward signatures were built on.
+  // Keying its obligation by anything else lets the two disagree. That is the
+  // hole cut_point_key left open: it is the RAW state_key, while the seed
+  // can come from a reconstructed bus name (`g.l` renamed `n:g`), a
+  // physical-name bridge, a tier-2 pair or a caller seed. Such a pair matched
+  // through the shared seed, but its two obligations (`n:g` / `n:g.l`) were
+  // each one-sided and skipped. So swapped dins, or a different reset or
+  // initial constant, stayed invisible, and lec's no-solver skip PROVED it.
+  // `label` is diagnostics only (cut_violations).
+  struct Cut_id {
+    std::string key;
+    std::string label;
+  };
+  using Cut_id_map = absl::flat_hash_map<hhds::Class_index, Cut_id>;
+  Cut_id_map cut_ids_a, cut_ids_b;
   if (opts.matching_names || opts.state_pairing) {
     // Tier-1 (name) + tier-2 (full-match) state pairing first; the resolved
     // tokens seed the structural analysis so structure flows through paired
@@ -1677,8 +1822,9 @@ void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Si
     State_side ssa = collect_state(a, opts);
     State_side ssb = collect_state(b, opts);
     pair_state(a, b, ssa, ssb, opts, res);
-    absl::flat_hash_map<hhds::Class_index, uint64_t> seeds_a, seeds_b;
-    auto build_seeds = [&](State_side& ss, absl::flat_hash_map<hhds::Class_index, uint64_t>& seeds) {
+    using Seed_map = absl::flat_hash_map<hhds::Class_index, uint64_t>;
+    Seed_map seeds_a, seeds_b;
+    auto     build_seeds = [&](State_side& ss, Seed_map& seeds, Cut_id_map& cut_ids) {
       for (auto& c : ss.cells) {
         uint64_t s = c.token;
         if (s == 0 && opts.matching_names) {
@@ -1686,11 +1832,16 @@ void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Si
         }
         if (s != 0) {
           seeds.emplace(c.node.get_class_index(), s);
+          std::string label = c.key;
+          if (!c.physical_key.empty() && c.physical_key != c.key) {
+            label += std::format(" [{}]", c.physical_key);
+          }
+          cut_ids.emplace(c.node.get_class_index(), Cut_id{std::format("s:{:016x}", s), std::move(label)});
         }
       }
     };
-    build_seeds(ssa, seeds_a);
-    build_seeds(ssb, seeds_b);
+    build_seeds(ssa, seeds_a, cut_ids_a);
+    build_seeds(ssb, seeds_b, cut_ids_b);
     // Cut Subs get the same treatment as a Flop: a name seed so structure flows
     // through the hoisted instance in BOTH directions. They are seeded HERE rather
     // than routed through collect_state/pair_state on purpose — that path feeds the
@@ -1764,10 +1915,22 @@ void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Si
   // forward-authoritative so the bsig that WOULD differ is discarded. Fold each
   // compare point's inputs with the forward pass's own operand rule and compare
   // the two sides PAIRWISE (strictly stronger than fcommon set membership).
+  //
+  // A SEEDED state cell is keyed by its seed (cut_ids_*, see the top of this
+  // function), so the obligation always pairs exactly the two cells the
+  // signatures treated as one, whatever tier or name bridge chose them. A seed
+  // shared by several cells on one side (an aggregate's leaves, a colliding
+  // name) is undecidable below, never "first one wins". Only an unseeded cut
+  // (a Sub, a combinational-array Memory, state with no name identity) keeps
+  // cut_point_key.
   {
-    absl::flat_hash_map<std::string, uint64_t> ka, kb;  // compare point -> csig
-    absl::flat_hash_set<std::string>           ua, ub;  // ... or "undecidable"
-    auto collect_cuts = [&](const Side& s, absl::flat_hash_map<std::string, uint64_t>& k, absl::flat_hash_set<std::string>& u) {
+    using Csig_map  = absl::flat_hash_map<std::string, uint64_t>;
+    using Key_set   = absl::flat_hash_set<std::string>;
+    using Label_map = absl::flat_hash_map<std::string, std::string>;
+    Csig_map  ka, kb;  // compare point -> csig
+    Key_set   ua, ub;  // ... or "undecidable"
+    Label_map la, lb;  // seed key -> state label (diagnostics)
+    auto      collect_cuts = [&](const Side& s, const Cut_id_map& cut_ids, Csig_map& k, Key_set& u, Label_map& labels) {
       // A key seen twice on one side (two state cells normalizing to one
       // logical name, two anonymous instances of one def, ...) cannot be paired
       // by name: keeping only the first obligation would silently drop the
@@ -1783,9 +1946,15 @@ void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Si
         if (!is_cut(node, opts.blackbox_subs)) {
           continue;
         }
-        uint64_t csig  = 0;
-        auto     key   = cut_point_key(s.g, node);
-        bool     known = cut_signature(s, node, csig);  // false: an operand had no fsig, NEVER dischargeable
+        uint64_t    csig = 0;
+        std::string key;
+        if (auto id = cut_ids.find(node.get_class_index()); id != cut_ids.end()) {
+          key = id->second.key;
+          labels.try_emplace(key, id->second.label);
+        } else {
+          key = cut_point_key(s.g, node);
+        }
+        bool known = cut_signature(s, node, csig);  // false: an operand had no fsig, NEVER dischargeable
         add(key, known, csig);
       }
       // Graph outputs are compare points too — a swapped output perturbs only the
@@ -1803,8 +1972,8 @@ void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Si
         }
       }
     };
-    collect_cuts(sa, ka, ua);
-    collect_cuts(sb, kb, ub);
+    collect_cuts(sa, cut_ids_a, ka, ua, la);
+    collect_cuts(sb, cut_ids_b, kb, ub, lb);
 
     for (const auto& [key, va] : ka) {
       if (ub.contains(key)) {
@@ -1821,7 +1990,15 @@ void build_sides(hhds::Graph* a, hhds::Graph* b, const Semdiff_options& opts, Si
         ++res.cut_discharged;
       } else {
         ++res.cut_violated;
-        res.cut_violations.push_back(key);
+        auto ia = la.find(key);
+        auto ib = lb.find(key);
+        if (ia == la.end() || ib == lb.end()) {
+          res.cut_violations.push_back(key);
+        } else if (ia->second == ib->second) {
+          res.cut_violations.push_back(ia->second);
+        } else {
+          res.cut_violations.push_back(std::format("{} <-> {}", ia->second, ib->second));
+        }
       }
     }
     for (const auto& key : ua) {
@@ -3216,6 +3393,21 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl
       b = it->second;
     }
     uint64_t tok = hcombine(hcombine(f, b), node_kind_key(node));
+    // A state cell's fsig is its NAME: the forward pass never folds its
+    // operands, and a constant operand (a reset value on `initial`, a constant
+    // din) is not a node, so nothing above sees it. Fold the cell's
+    // compare-point obligation (its operands, exactly as structural_match
+    // checks them), or two designs that differ only in a register's reset
+    // value share one digest -- and the lec verdict cache replayed a PROVEN
+    // onto the refuted one. An operand without a forward signature leaves the
+    // def undigestable (never cached) rather than silently under-keyed.
+    if (is_state(gu::type_op_of(node))) {
+      uint64_t cs = 0;
+      if (!cut_signature(s, node, cs)) {
+        return {};
+      }
+      tok = hcombine(hcombine(tok, hstr("\x01cut")), cs);
+    }
     // interface mode: a Sub folds ONLY its def identity (the gid in node_kind_key)
     // and its boundary connectivity (already in f/b) -- exactly a bodyless
     // blackbox. abc region reuse needs this: a child-body edit must not invalidate
@@ -3265,6 +3457,17 @@ Canonical_digest digest_one(hhds::Graph* g, const Digest_resolver& resolve, absl
     uint64_t t = hcombine(hstr("\x01odecl"), matching_io_names ? hstr(dio.name) : static_cast<uint64_t>(dio.port_id));
     t = hcombine(t, static_cast<uint64_t>(static_cast<uint32_t>(gu::bits_of(g->get_output_pin(dio.name), *gio, dio.name))));
     t = hcombine(t, static_cast<uint64_t>(dio.port_id) | (static_cast<uint64_t>(dio.unsign) << 32U));
+    // What drives the output: a constant (`q = 5`) is no node, so the node
+    // tokens above cannot tell `q = 5` from `q = 6`.
+    if (auto opin = g->get_output_pin(dio.name); !opin.is_invalid()) {
+      for (const auto& drv : opin.get_driver_pins()) {
+        uint64_t ds = 0;
+        if (!resolve_driver(s, drv, ds)) {
+          return {};
+        }
+        t = hcombine(t, ds);
+      }
+    }
     toks.push_back(t);
   }
   std::sort(toks.begin(), toks.end());

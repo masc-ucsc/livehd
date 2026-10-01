@@ -1,0 +1,10 @@
+/*
+:name: spec_types_signed_min_only_overflow
+:type: error
+:error: does not fit its declared range
+*/
+// SPEC qa.md appendix section 1: "`Unsigned`, `Signed` (with constraints: `Unsigned(bits=N, max=.., min=..)`, ...)";
+// docs 07-typesystem "Bitwidth": "when the current range of a right-hand side may fall outside the constrained
+// range of its typed destination (above `max` or below `min`), the assignment is a mandatory compile error".
+// Rule: a ONE-SIDED constraint (only `min=`) is still checked.
+const b:Signed(min=-5) = -9  // locate_error_here

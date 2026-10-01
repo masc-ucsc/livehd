@@ -1,0 +1,24 @@
+/*
+:name: obs_dead_bits
+:type: lec
+:lec_top: obs_dead_bits
+:lec_set: formal.engine=ind
+*/
+// PYROPE-vs-PYROPE group (README "Pyrope <-> Pyrope variants"): flop bits that
+// can reach NO output are left out of the inductive LEC obligation
+// (pass/lec/observe.hpp). This file is the REFERENCE: `r` stores all eight
+// bits of `d` but only its low nibble is ever read; its high nibble feeds `s`,
+// which nothing reads. Every variant keeps the observable behavior and stores
+// something else in the dead bits, so full-width state equality is NOT
+// inductive (nxt:r / nxt:s differ) and only the observability reduction can
+// prove the pair -- in the UNBOUNDED inductive engine (`formal.engine=ind`;
+// under `auto` a bounded BMC pass would hide a missing reduction). The live
+// counterpart, where the "unused" bits do reach the output and must stay
+// refuted, is obs_live_bits.prp.
+pub mod obs_dead_bits(en:Bool, d:U8) -> (q:U4@[0]) {
+  reg r:U8 = 0
+  reg s:U4 = 0
+  if en { r = d }
+  s = r#[4..<8] ^ s
+  q = r#[0..<4]
+}

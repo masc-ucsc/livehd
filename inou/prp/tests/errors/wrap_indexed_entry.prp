@@ -1,0 +1,17 @@
+/*
+:name: wrap_indexed_entry
+:type: error
+:error: .wrap. cannot apply to an entry picked with an index
+:help: narrow into a typed variable first
+*/
+
+// 04b-attributes.md: the `wrap`/`sat` prefix attaches to a plain name or a
+// dotted field; "an entry picked with an index cannot carry it". It used to
+// reach upass.tolg as "call to undefined function 'wrap'" (the element has no
+// declared name to narrow to).
+pub mod wrap_indexed_entry(a:U4, b:U8) -> (q:U4@[0]) {
+  mut m:[2]U4 = 0
+  wrap m[0] = b  // locate_error_here
+  m[1] = a
+  q = m[0]
+}

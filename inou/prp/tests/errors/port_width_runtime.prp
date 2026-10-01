@@ -1,0 +1,13 @@
+/*
+:name: port_width_runtime
+:type: error
+:error: bound .bits. reads .n., a runtime value: a type bound must be a compile-time value
+:help: size it with a literal, a generic parameter, or a `const` with a compile-time value
+*/
+
+// Ruling 2026-09-28 #24: a type bound is a compile-time value. A port width
+// that reads a sibling INPUT used to be only a type-bound-not-comptime
+// warning, and the width was dropped: `a` compiled as a 1-bit port.
+pub comb port_width_runtime(n:U8, a:Unsigned(bits=n)) -> (o:U8) {  // locate_error_here
+  o = a
+}

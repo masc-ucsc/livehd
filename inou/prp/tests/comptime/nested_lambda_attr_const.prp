@@ -1,0 +1,32 @@
+/*
+:name: nested_lambda_attr_const
+:type: comptime
+:verifier_pass: 7
+:verifier_fail: 0
+:verifier_include_funcs: true
+*/
+
+// User rulings 2026-09-28 (23) and (32): an attribute read is comptime, and
+// capture is fold-based, so a const computed from an attribute of a runtime
+// input (`a.[bits]` of `a:U8` is 8) folds and is visible in a nested lambda.
+// The lambda sees the enclosing scope's VALUE: `f`'s own input `a:U4` must not
+// change K (replaying `a.[bits]` inside `f` would read `f`'s `a`, K == 4: the
+// silent bug that made this an error before). Formerly
+// errors/nested_lambda_runtime_derived_const.prp.
+pub mod nested_lambda_attr_const(a:U8) -> (o:U8@[0], p:U8@[0]) {
+  comptime const K = a.[bits]
+  const W = a.[bits]
+  const L = std.clog2(a.[bits])
+  cassert(K == 8)
+  comb f(a:U4) -> (y:U8) {
+    cassert(K == 8)
+    cassert(W == 8)
+    cassert(L == 3)
+    y = (a + K)#[0..<8]
+  }
+  comb g(x:U8) -> (y:U8) {
+    wrap y = x + W + L
+  }
+  o = f(a=a#[0..<4])
+  p = g(x=a)
+}

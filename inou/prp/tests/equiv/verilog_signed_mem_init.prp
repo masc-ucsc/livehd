@@ -1,0 +1,26 @@
+/*
+:name: verilog_signed_mem_init
+:type: equiv
+:verilog_top: verilog_signed_mem_init
+:pyrope_top: verilog_signed_mem_init
+*/
+
+// The golden's signed memories as raw 8-bit storage, which is how the Verilog
+// reader models them: every write stores the element's bit pattern, every read
+// sign-extends it, and every initial value is its raw pattern (-3 -> 253,
+// -128 -> 128, -5 -> 251). Declaring the elements `s8` and initializing them
+// with the negative values would be the same hardware, but a write of the raw
+// `din#[0..=7]` into an `s8` element may overflow (user ruling 16).
+// The golden's `initial` block is POWER-ON contents only, never a reset (docs
+// 08-memories): `initial=<packed contents>` (entry 0 in the low bits) next to
+// `= nil`, which binds no reset.
+pub mod verilog_signed_mem_init::[timecheck=false](clk:Clock, we:U1, wa:U2, ra:U2, din:S8) -> (dout:S10@[]) {
+  reg dout:S10
+  reg mem:[4]U8:[ordering="old", initial=0x048002fd] = nil
+  reg mem2:[4]U8:[ordering="old", initial=0xfbfbfbfb] = nil
+  if we != 0 {
+    mem[wa] = din#[0..=7]
+    mem2[wa] = din#[0..=7]
+  }
+  dout = mem[ra]#sext[0..=7] + mem2[ra]#sext[0..=7]
+}

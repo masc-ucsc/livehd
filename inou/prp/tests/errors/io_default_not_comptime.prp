@@ -1,0 +1,20 @@
+/*
+:name: io_default_not_comptime
+:type: error
+:error: the default of `b` reads the runtime input `a`
+:help: pass the argument at every call
+*/
+
+// User ruling 2026-09-28 (34): a `mod` input default is what the caller drives
+// the omitted port with, so it must fold to a compile-time constant (a
+// literal, a generic, a `comptime const`, an attribute read or an enum entry,
+// sim/mod_default_comptime_expr.prp); an expression over another input is the
+// `default-not-comptime` error (errors/mod_default_runtime_input.prp). An
+// expression over another input used to crash the compiler (SIGSEGV).
+mod addb(a:U8, b:U8 = a + 1) -> (r:U8@[0]) {  // locate_error_here
+  r = (a + b)#[0..<8]
+}
+
+pub mod io_default_not_comptime(a:U8) -> (r:U8@[0]) {
+  r = addb(a=a, b=a)
+}

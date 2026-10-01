@@ -22,16 +22,16 @@
 // capture-time) resolve fixes `post_write` and breaks `pre_write`:
 //   post_write -- captured AFTER the reassignment  -> must be y
 //   pre_write  -- captured BEFORE the reassignment -> must be x
-// This is the reduction of the lhdsuite dino ALU, whose `[16]u64` result table
+// This is the reduction of the lhdsuite dino ALU, whose `[16]U64` result table
 // silently produced 0 for SRL/SRA/SUB/ADD/SLL.
 
-pub comb stream_ssa_tuple_slot::[timecheck=false](sel:u2, x:u8, y:u8) -> (post_write:u8, pre_write:u8) {
-  mut m:u8 = x
+pub comb stream_ssa_tuple_slot::[timecheck=false](sel:U2, x:U8, y:U8) -> (post_write:U8, pre_write:U8) {
+  mut m:U8 = x
   m = y
   const t = (10, 20, m, 30)
   post_write = t[sel]
 
-  mut n:u8 = x
+  mut n:U8 = x
   const u = (40, 50, n, 60)
   n = y
   pre_write = u[sel]

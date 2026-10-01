@@ -1,0 +1,28 @@
+/*
+:name: overload_range_dispatch
+:type: simulation
+*/
+// User ruling 2026-09-27 (argument width) and overload dispatch: an argument
+// that MAY not fit a candidate's declared parameter range cannot take that
+// candidate, so the overload set skips it for the next one instead of picking
+// it and then failing the argument check. A runtime U8 skips `f4(a:U4)` for
+// `f8(a:U8)`; a U4 still takes the first candidate.
+comb f4(a:U4) -> (r:U16) { r = a + 100 }
+comb f8(a:U8) -> (r:U16) { r = a + 1000 }
+
+pub mod overload_range_dispatch(x:U8, s:U4) -> (y:U16@[0], y2:U16@[0]) {
+  const f = [f4, f8]
+  y  = f(a=x)
+  y2 = f(a=s)
+}
+
+test overload_range_dispatch.picks {
+  mut d = overload_range_dispatch
+  tick 1 {
+    d.x = 200
+    d.s = 3
+    step
+    assert(d.y == 1200, "a u8 actual dispatches to f8")
+    assert(d.y2 == 103, "a u4 actual keeps the first candidate, f4")
+  }
+}

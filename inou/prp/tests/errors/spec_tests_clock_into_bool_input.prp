@@ -1,0 +1,31 @@
+/*
+:name: spec_tests_clock_into_bool_input
+:type: error
+:error: (boolean|Bool)
+*/
+// Spec: docs 04-variables "Boolean": "Booleans can not mix with integers in
+// expressions unless there is an explicit typecast"; qa.md appendix section
+// 6: "Clock and Reset are distinct basic types (`Clock does Bool` is
+// false)"; the numeric view of a Clock (its cycle count) is legal in tests
+// "to drive inputs such as a reset (`acc.reset = clock < 2`)"; ruling 20:
+// "Strict bool applies INSIDE `test` blocks too: `d.en = true` (or
+// `Bool(1)`)".
+//
+// Rule pinned: poking the tick's `clock` (a Clock / cycle count, never a Bool)
+// straight into a `Bool` input (`d.en = clock`) is an error; the test writes a
+// Bool expression such as `d.en = clock > 0`.
+
+mod spec_cib_cnt(en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_cib.clock_into_bool {
+  mut d = spec_cib_cnt
+  tick 4 {
+    d.en = clock         // locate_error_here
+    step
+  }
+  assert(d.q == 3)
+}

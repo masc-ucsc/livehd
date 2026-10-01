@@ -1,0 +1,15 @@
+/*
+:name: removed_sized_i_type
+:type: error
+:error: .i8. was renamed .S8.
+*/
+
+// User rulings 2026-09-27 (14) and 2026-09-29 (52): the `iN` spellings (`i8`,
+// `i32`) are REMOVED; the signed sized type is `S<N>`. Before ruling 14
+// prp2lnast silently rewrote `i8` to `s8`, so `i8` compiled. It is a compile
+// error whose message names the `S<N>` spelling, like the removed `int`/`uint`
+// types (removed_int_type.prp).
+
+pub comb removed_sized_i_type(a:i8) -> (r:S9) {   // locate_error_here
+  r = a + 1
+}

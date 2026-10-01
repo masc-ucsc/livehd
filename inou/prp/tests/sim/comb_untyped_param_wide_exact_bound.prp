@@ -1,0 +1,57 @@
+/*
+:name: comb_untyped_param_wide_exact_bound
+:type: simulation
+*/
+// The exact-bound twin of sim/comb_untyped_param_bits_wide.prp. That fixture
+// covers `.[bits]` of an untyped comb param whose actual is a full-width
+// uN/sN io port. Here the ports declare bounds that are NOT a power-of-two
+// window and that do not fit an i64: `Unsigned(max=0x3f_ffff_ffff_ffff_fffb)`
+// and `Signed(min=-0x3f_ffff_ffff_ffff_fffb, max=5)`. The port's `.[max]` and
+// `.[min]` are the DECLARED bounds, read directly or through an untyped param
+// that adopts the actual's type. An io port records an i64 range only, so such
+// a port kept just its `bits`. A fix that rebuilt the range from `bits` folded
+// `.[max]` to the 70-bit window's 0x3f_ffff_ffff_ffff_ffff. That is silently
+// wrong: every compare below read false.
+
+comb mxv(data) -> (o:Bool) {
+  o = data.[max] == 0x3f_ffff_ffff_ffff_fffb
+}
+
+comb mnv(data) -> (o:Bool) {
+  o = data.[min] == -0x3f_ffff_ffff_ffff_fffb
+}
+
+comb bv(data) -> (o:U8) {
+  o = data.[bits]
+}
+
+mod comb_untyped_param_wide_exact_bound(x:Unsigned(max=0x3f_ffff_ffff_ffff_fffb),
+    z:Signed(min=-0x3f_ffff_ffff_ffff_fffb, max=5), w:U64)
+  -> (dx:Bool@[0], px:Bool@[0], bx:U8@[0], dz:Bool@[0], pz:Bool@[0], bz:U8@[0], dw:Bool@[0], bw:U8@[0]) {
+  dx = x.[max] == 0x3f_ffff_ffff_ffff_fffb
+  px = mxv(data=x)
+  bx = bv(data=x)
+  dz = z.[min] == -0x3f_ffff_ffff_ffff_fffb
+  pz = mnv(data=z)
+  bz = bv(data=z)
+  dw = w.[max] == 0xffff_ffff_ffff_ffff
+  bw = bv(data=w)
+}
+
+test comb_untyped_param_wide_exact_bound.bounds {
+  mut dut = comb_untyped_param_wide_exact_bound
+  tick 1 {
+    dut.x = 1
+    dut.z = -1
+    dut.w = 2
+    step
+    assert(dut.dx, "x.[max] is the declared max, not the 70-bit window's")
+    assert(dut.px, "an untyped param adopts x's exact max")
+    assert(dut.bx == 70, "x has 70 bits")
+    assert(dut.dz, "z.[min] is the declared min")
+    assert(dut.pz, "an untyped param adopts z's exact min")
+    assert(dut.bz == 71, "z has 71 bits (70 plus the sign)")
+    assert(dut.dw, "a full u64 window keeps its max")
+    assert(dut.bw == 64, "u64 has 64 bits")
+  }
+}

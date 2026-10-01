@@ -1,0 +1,8 @@
+/*
+:name: spec_types_banned_string_cast
+:type: error
+:error: `string` was renamed `String`
+*/
+// Undeclared lowercase type/cast spellings must name their replacement (07-typesystem.md).
+// Rule: the old CAST spelling `string(x)` (value position) is an error.
+const s = string(3)  // locate_error_here

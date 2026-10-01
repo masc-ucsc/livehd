@@ -1,0 +1,27 @@
+/*
+:name: spec_memory_caller_two_resets
+:type: error
+:tolg: 1
+:error: [Rr]eset
+*/
+
+// SPEC (docs 08-memories.md): "An instantiating caller auto-wires its own single
+// `Reset` to that input; a caller with two or more `Reset` inputs must bind it
+// explicitly."
+// SPEC (qa.md appendix section 7): "if the caller has 2+ Clocks (or Resets), every
+// child Clock (Reset) input must be bound explicitly (else error)."
+// Rule encoded here: the child's initialized memory mints `reset:Reset`; the caller
+// has TWO Reset inputs and does not bind the child's reset -> compile error.
+
+mod child(a:U2, d:U8, we:Bool) -> (q:U8@[0]) {
+  reg mem:[4]U8 = 0
+  q = mem[a]
+  if we {
+    mem[a] = d
+  }
+}
+
+pub mod spec_memory_caller_two_resets(clk:Clock, r_a:Reset, r_b:Reset, a:U2, d:U8, we:Bool) -> (q:U8@[0]) {
+  const c = child(a=a, d=d, we=we)
+  q = c.q
+}

@@ -6,7 +6,7 @@
 // TUPLE PORTS, addressed from a testbench — on BOTH sides of the interface.
 //
 // A tuple (or a Verilog `struct packed`) port flattens to dotted leaves:
-// `cmd:(op:u4, data:u16)` becomes the ports `cmd.op` and `cmd.data`, and the
+// `cmd:(op:U4, data:U16)` becomes the ports `cmd.op` and `cmd.data`, and the
 // lgraph never sees the tuple. A dot is not a legal C++ member name, so this
 // used to be mangled away to `cmd_op` and a `test` block could then address
 // the port under NO spelling — not the aggregate, not the leaf, not flat —
@@ -25,9 +25,9 @@
 // OUTPUT that is read — plus a scalar port alongside them, so a mixed
 // interface stays correct. Each tick adds cmd.data + cmd.op = 11 to the
 // accumulator, so after the tick at `clock` the sum is 11*(clock+1).
-pub mod tuple_io(clk:bool, cmd:(op:u4, data:u16), en:bool) -> (res:(sum:u20, seen:u1)@[0]) {
-  reg total:u20 = 0
-  reg hit:u1 = 0
+pub mod tuple_io(clk:Clock, cmd:(op:U4, data:U16), en:Bool) -> (res:(sum:U20, seen:U1)@[0]) {
+  reg total:U20 = 0
+  reg hit:U1 = 0
   if en {
     total = total + cmd.data + cmd.op
     hit = 1
@@ -40,7 +40,7 @@ test tuple_io.drive_and_read {
   mut acc = tuple_io
   tick 4 {
     // drive the LEAVES of a tuple input, next to a plain scalar port
-    acc.en = 1
+    acc.en = true
     acc.cmd.op = 1
     acc.cmd.data = 10
     step
@@ -56,7 +56,7 @@ test tuple_io.leaves_are_independent {
     // holding en low must freeze the accumulator even while the tuple input
     // leaves are being driven — i.e. the leaves are distinct ports, not one
     // aliased blob
-    acc.en = 0
+    acc.en = false
     acc.cmd.op = 7
     acc.cmd.data = 900
     step
@@ -71,7 +71,7 @@ test tuple_io.leaves_are_independent {
 // forgets to close one) silently attributes `mid`, or another tuple's leaves,
 // to the wrong port. Every field here is distinct and prime-weighted so any
 // such mix-up changes the sum.
-pub mod tuple_pair(clk:bool, lhs:(a:u8, b:u8), mid:u8, rhs:(c:u8, d:u8)) -> (sums:(lo:u12, hi:u12)@[0]) {
+pub mod tuple_pair(clk:Clock, lhs:(a:U8, b:U8), mid:U8, rhs:(c:U8, d:U8)) -> (sums:(lo:U12, hi:U12)@[0]) {
   sums.lo = lhs.a + (lhs.b * 3) + mid
   sums.hi = rhs.c + (rhs.d * 5) + mid
 }

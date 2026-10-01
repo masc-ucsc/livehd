@@ -1,0 +1,45 @@
+/*
+:name: bitnot_roundtrip
+:type: equiv
+:verilog_top: bitnot_roundtrip
+:pyrope_top: bitnot_roundtrip
+*/
+// User ruling 26 (`~x` flips an unsigned-typed x's own N bits; a signed x is
+// -x - 1) through the shapes the Pyrope writer re-emits (prp-p2p) and the
+// optimizer rewrites:
+//   * a `const` NAME bound without a type to a typed value (`const t =
+//     x#[..]`, `const m = a & b`, `const k = ~w`) has that value's type (user
+//     ruling 2026-09-28 (38)), so the writer must re-emit it as an alias of a
+//     typed value (a `mut`, or an untyped runtime value, is a compile error
+//     under `~`, user ruling 2026-09-29 (44));
+//   * an untyped template-comb input takes its argument's type;
+//   * a bit select at a runtime position (`a#[i]`) is a u1 and must re-emit
+//     as a select, not `a & (1 << i)`;
+//   * two `~` of one slice at different widths (`~t2`, `~U8(t2)`) used to be
+//     merged by cprop into ONE Not of the unmasked source.
+comb tmpl(v) -> (o) { o = ~v }
+
+pub comb bitnot_roundtrip(w:U3, a:U3, b:U5, s:S4, c:U2, i:U2)
+  -> ( o1:S9, o2:S9, o3:S9, o4:S9, o5:S9, o6:S9, o7:S9, o8:S9, o9:S9
+     , o10:S8, o11:S8, o12:U8, o13:S8, o14:U2, o16:U8) {
+  const t = w#[0..<2]
+  o1  = ~t                 // an alias of a 2-bit slice: 3 - w[1:0]
+  o2  = ~w#[0..<2]         // a 2-bit slice: 3 - w[1:0]
+  const m = a & b
+  o3  = ~m                 // an alias of a u5 and: 31 - (a & b)
+  o4  = ~(a & b)           // 31 - (a & b)
+  const q:U4 = w
+  o5  = ~q                 // 15 - w
+  o6  = ~(s & a)           // a signed operand: -v - 1
+  o7  = ~U8(w)             // 255 - w
+  o8  = ~(c | a)           // 7 - (c | a)
+  const k = ~w
+  o9  = ~k                 // k (7 - w) is a u3 alias: 7 - k == w
+  o10 = ~a#[1]             // 1 - a[1]
+  o11 = tmpl(a)            // the template input is a u3 here: 7 - a
+  o12 = a#[i] + 0          // bit i, at bit 0
+  o13 = ~a#[i]             // 1 - a[i]
+  const t2:U2 = w#[0..<2]
+  o14 = ~t2                // 3 - w[1:0]
+  o16 = ~U8(t2)            // 255 - w[1:0]
+}

@@ -1,0 +1,12 @@
+/*
+:name: clkrst_two_resets_implicit_reg
+:type: error
+:tolg: 1
+:error: 2 `Reset` inputs .*no implicit reset
+*/
+// Two `Reset` inputs: an initialized register must name its `reset_pin`.
+pub mod clkrst_two_resets_implicit_reg(clk:Clock, ra:Reset, rb:Reset, a:U8) -> (q:U8@[0]) {
+  reg r:U8 = 0
+  r = a
+  q = r
+}

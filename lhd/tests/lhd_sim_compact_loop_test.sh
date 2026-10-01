@@ -24,13 +24,13 @@ write_design() {
 :name: compact
 :type: simulation
 */
-mod lane(x:u8) -> (q:u16@[0]) {
-  reg acc:u16 = 0
+mod lane(x:U8) -> (q:U16@[0]) {
+  reg acc:U16 = 0
   q = acc
   wrap acc = acc + x
 }
-mod top(x:u8) -> (total:u32@[0]) {
-  mut sum:u32 = 0
+mod top(x:U8) -> (total:U32@[0]) {
+  mut sum:U32 = 0
   for i in 0..<$count {
     if i == x { break }
     // Keep the descriptor compact while its lifted body contains a runtime

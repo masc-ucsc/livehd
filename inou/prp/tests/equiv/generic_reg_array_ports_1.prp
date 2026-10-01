@@ -1,0 +1,26 @@
+/*
+:name: generic_reg_array_ports_1
+:lec_expect: proven
+*/
+// The generic spelling of generic_reg_array_ports: `reg r:[N]Unsigned(bits=W)`
+// with array ports of the same generic shape, specialized at <N=4, W=8> and
+// <N=3, W=5>.
+mod shreg<N=2, W=4>(en:Bool, d:Unsigned(bits=W), v:[N]Unsigned(bits=W)) -> (q:Unsigned(bits=W)@[0], o:[N]Unsigned(bits=W)@[0]) {
+  reg r:[N]Unsigned(bits=W) = 0
+  if en {
+    for i in 1..<N { r[N-i] = r[N-i-1] }
+    r[0] = d
+  }
+  q = r[N-1]
+  o = 0
+  for i in 0..<N { o[i] = v[i] ^ r[i] }
+}
+
+pub mod generic_reg_array_ports(en:Bool, d:U8, v4:[4]U8, v3:[3]U5) -> (q8:U8@[0], q5:U5@[0], o8:[4]U8@[0], o5:[3]U5@[0]) {
+  const a = shreg<N=4, W=8>(en=en, d=d, v=v4)
+  const b = shreg<N=3, W=5>(en=en, d=d#[0..<5], v=v3)
+  q8 = a.q
+  o8 = a.o
+  q5 = b.q
+  o5 = b.o
+}

@@ -1,0 +1,17 @@
+/*
+:name: spec_clock_mem_pin_reset
+:type: error
+:tolg: 1
+:error: `rs`.*`Reset`, not a Clock
+*/
+// SPEC (clock lane): `Clock` and `Reset` are distinct types -- a memory's
+// `clock_pin` never names a `Reset` (the register twin is
+// errors/clkrst_clock_pin_reset.prp).
+//   qa.md Appendix 6: "Clock and Reset are distinct basic types"
+//   docs 04b memory attributes: "`clock_pin`: Optional clock pin
+//     (`clock_pin=clk2`)" / docs 04b: "`clock_pin` always names a `Clock` signal."
+pub mod spec_clock_mem_pin_reset(clk:Clock, rs:Reset, we:Bool, wa:U2, wd:U8, ra:U2) -> (q:U8@[0]) {
+  reg m:[4]U8:[clock_pin=rs] = nil   // locate_error_here
+  if we { m[wa] = wd }
+  q = m[ra]
+}

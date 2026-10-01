@@ -1,0 +1,14 @@
+/*
+:name: verilog_port_named_clock
+:type: equiv
+:verilog_top: verilog_port_named_clock
+:pyrope_top: verilog_port_named_clock
+*/
+
+// Pyrope twin of the golden: the Clock and the Reset are named by backticked
+// type words; they are still the implicit clock and reset (they bind by type).
+pub mod verilog_port_named_clock(`Clock`:Clock, `Reset`:Reset, d:U8) -> (q:U8@[1]) {
+  reg r:U8 = 9
+  r = d
+  q = r
+}

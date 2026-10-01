@@ -46,7 +46,7 @@ grep -qi 'memory' "$W/bw_mem.gen.v" || fail "optimized memory netlist lost the m
 # 4. A wide right shift observed only through a narrow output must be sized
 # at that output, while retaining every input bit the shift can select.
 cat > "$W/mux.prp" <<'EOF'
-pub comb mux::[timecheck=false](sel:u4, data:u1024) -> (out:u64) {
+pub comb mux::[timecheck=false](sel:U4, data:U1024) -> (out:U64) {
   out = data >> (sel * 0x40)
 }
 EOF

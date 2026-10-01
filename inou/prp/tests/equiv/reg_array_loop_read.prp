@@ -1,0 +1,50 @@
+/*
+:name: reg_array_loop_read
+:type: equiv
+:verilog_top: reg_array_loop_read
+:pyrope_top: reg_array_loop_read
+:lec_top: reg_array_loop_read
+*/
+// lhdtrack L3: a reg array read inside a `for` loop. The loop only reads the
+// array, so it stays rolled and its body takes the array WHOLE (the memory
+// cell's read_all output). read_all is the COMMITTED contents -- it has no
+// same-cycle collision row -- so the reads ignored the array's `ordering`:
+// `if en { r[i] = d }; for k in .. { o[k] = r[k] }` read the stale entry
+// under "program" (the default), while `q = r[0]` (a per-element port) saw
+// `d`, and "fwd" never forwarded to a loop placed before the writes.
+// upass.tolg now replays the cycle's visible writes over each whole-array
+// read (forward_read_all):
+//   * r* (program): the loops AFTER the writes see them;
+//   * g* (fwd): the loop BEFORE the writes sees them too;
+//   * h* (old): the loop after the writes still reads the committed entries.
+// Literal-width REFERENCE of the group; reg_array_loop_read_1.prp is the
+// generic spelling at two shapes.
+pub mod reg_array_loop_read(en:Bool, i:U2, d:U5, v2:[2]U3, v4:[4]U5)
+  -> (o2:[2]U3@[0], f2:[2]U3@[0], `s2`:[2]U3@[0], o4:[4]U5@[0], f4:[4]U5@[0], `s4`:[4]U5@[0]) {
+  reg r2:[2]U3 = 0
+  reg g2:[2]U3:[ordering="fwd"] = 0
+  reg h2:[2]U3:[ordering="old"] = 0
+  reg r4:[4]U5 = 0
+  reg g4:[4]U5:[ordering="fwd"] = 0
+  reg h4:[4]U5:[ordering="old"] = 0
+  f2 = 0
+  f4 = 0
+  for k in 0..<2 { f2[k] = g2[k] ^ v2[k] }
+  for k in 0..<4 { f4[k] = g4[k] ^ v4[k] }
+  if en {
+    r2[i#[0]] = d#[0..<3]
+    g2[i#[0]] = d#[0..<3]
+    h2[i#[0]] = d#[0..<3]
+    r4[i] = d
+    g4[i] = d
+    h4[i] = d
+  }
+  o2 = 0
+  `s2` = 0
+  o4 = 0
+  `s4` = 0
+  for k in 0..<2 { o2[k] = r2[k] ^ v2[k] }
+  for k in 0..<2 { `s2`[k] = h2[k] ^ v2[k] }
+  for k in 0..<4 { o4[k] = r4[k] ^ v4[k] }
+  for k in 0..<4 { `s4`[k] = h4[k] ^ v4[k] }
+}

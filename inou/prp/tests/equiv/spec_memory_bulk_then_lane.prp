@@ -1,0 +1,25 @@
+/*
+:name: spec_memory_bulk_then_lane
+:type: equiv
+:verilog_top: spec_memory_bulk_then_lane
+:pyrope_top: spec_memory_bulk_then_lane
+*/
+// SPEC (docs 08-memories.md): "A **whole-array store** (`mem = 0`, `mem = other_bus`)
+// is a write of every entry at its place in program order, so against a per-entry
+// write of the same cycle it resolves like two per-entry writes (under `"program"`
+// and `"old"`, the later one wins)." -- and the docs example, VERBATIM:
+//   reg mem:[4]U16 = nil
+//   if wr  { mem[a] = 0xffff }
+//   if clr { mem = 0 }             // both enabled: mem[a] is 0 (the clear is later)
+//   if we  { mem[a]#[0..<8] = x }  // lands on the cleared entry: 0x00xx
+// (qa.md / ruling 45: "Memory write-write in one cycle resolves in PROGRAM ORDER for
+// whole-array stores too".)
+// Rule encoded here: exactly the docs example; the read `q` sits before the writes
+// (committed contents), so the test observes what each cycle committed.
+pub mod spec_memory_bulk_then_lane(clk:Clock, wr:Bool, clr:Bool, we:Bool, a:U2, x:U8, ra:U2) -> (q:U16@[0]) {
+  reg mem:[4]U16 = nil
+  q = mem[ra]
+  if wr  { mem[a] = 0xffff }
+  if clr { mem = 0 }             // both enabled: mem[a] is 0 (the clear is later)
+  if we  { mem[a]#[0..<8] = x }  // lands on the cleared entry: 0x00xx
+}

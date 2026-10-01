@@ -9,14 +9,14 @@ const a = 0ub1010   // 4 bits (5bits signed)
 const b = 0ub01     // 2 bits (3bits signed)
 const c = 0ub1      // 1 bit  (2bits signed)
 
-mut r:u7 = nil
+mut r:U7 = nil
 r#[0]    = c#[0]
 r#[1..=2] = b#[0..<2]
 r#[3..=6] = a#[0..=3]
 cputs("r:{r}")
 cassert(r == 0ub1010_01_1)
 
-mut x:u10 = nil
+mut x:U10 = nil
 x#[0..+2] = c
 x#[2..+3] = b
 x#[5..+5] = a

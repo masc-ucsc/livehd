@@ -1,0 +1,10 @@
+/*
+:name: clkrst_clock_into_data_output
+:type: error
+:tolg: 1
+:error: `clk` is a `Clock` driving output `o`, which is not a `Clock`: a Clock is not data
+*/
+// docs 07-typesystem: a Clock passes through only as a `Clock` output.
+pub mod clkrst_clock_into_data_output(clk:Clock) -> (o:Bool@[0]) {
+  o = clk
+}

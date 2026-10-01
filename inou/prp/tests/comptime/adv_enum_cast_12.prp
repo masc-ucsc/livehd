@@ -16,6 +16,6 @@ cassert(p == Phase.Execute)
 cassert(p != Phase.Fetch)
 
 p = Phase.Write
-cassert(string(p) == "Phase.Write")
-cassert(u8(p) == 8)   // one-hot: Fetch=1, Decode=2, Execute=4, Write=8
+cassert(String(p) == "Phase.Write")
+cassert(U8(p) == 8)   // one-hot: Fetch=1, Decode=2, Execute=4, Write=8
 cassert(p in (Phase.Fetch, Phase.Decode, Phase.Execute, Phase.Write))

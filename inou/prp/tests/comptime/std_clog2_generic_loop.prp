@@ -1,0 +1,30 @@
+/*
+:name: std_clog2_generic_loop
+:type: parsing lnast comptime
+:verifier_pass: 14
+:verifier_fail: 0
+*/
+
+// `std.clog2(x)` (docs 04b-attributes) in a generic bind, a generic default,
+// a type bound, and a loop over a comptime range (the index is comptime in
+// each iteration).
+
+comptime const D = 24
+
+comb idx_bits<N=4>() -> (r) { r = std.clog2(N) }
+cassert(idx_bits<N=(std.clog2(D))>() == 3)     // clog2(clog2(24)) == clog2(5)
+cassert(idx_bits<N=D>() == 5)
+
+comb dflt<N=13, W=(std.clog2(N))>() -> (r) { r = W }
+cassert(dflt() == 4)
+cassert(dflt<N=17>() == 5)
+
+mut sum = 0
+for k in 1..=8 {
+  cassert(std.clog2(1 << k) == k)
+  sum = sum + std.clog2(k)
+}
+cassert(sum == 17)
+
+const t:Unsigned(bits=std.clog2(D)) = 0
+cassert(t.[bits] == 5)

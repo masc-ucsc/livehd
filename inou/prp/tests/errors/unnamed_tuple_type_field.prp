@@ -5,8 +5,8 @@
 :help: name each field
 */
 // A tuple used as a TYPE must have NAMED fields (`name:T`). A bare type entry
-// like `(signed, signed, signed)` has no field name and is malformed — use an array
-// `[N]T` for N uniform elements, or name each field. (Named fields `x:signed` and
+// like `(Signed, Signed, Signed)` has no field name and is malformed — use an array
+// `[N]T` for N uniform elements, or name each field. (Named fields `x:Signed` and
 // `x=nil` are fine; only the bare-type form errors.)
-mut x:(signed, signed, signed) = (1, 2, 3)
+mut x:(Signed, Signed, Signed) = (1, 2, 3)
 cassert(x[0] == 1)

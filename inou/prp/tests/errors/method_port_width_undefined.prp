@@ -1,0 +1,18 @@
+/*
+:name: method_port_width_undefined
+:type: error
+:error: read of undefined variable 'ZZ'
+:help: declare it
+*/
+
+// Ruling 2026-09-28 #24 (clarification): an undeclared name is a direct
+// compile error at the read in every context. A tuple METHOD's port width is
+// not lowered where it is written; an undeclared name there used to warn only
+// ("not a compile-time value") and the width was silently dropped.
+pub comb method_port_width_undefined(a:U8) -> (o:U8) {
+  const obj = (
+    const v:U8 = 1,
+    comb get(self, q:Unsigned(bits=ZZ)) -> (r:U8) { r = (self.v + q)#[0..<8] }  // locate_error_here
+  )
+  o = obj.get(q=a)
+}

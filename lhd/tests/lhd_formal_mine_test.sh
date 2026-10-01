@@ -45,15 +45,15 @@ fail() {
 }
 
 cat >"$W/miner.prp" <<'EOF'
-mod miner(a:u32, b:u32, en:bool) -> (o:u8@[0]) {
-  reg count:u8 = 0
+mod miner(a:U32, b:U32, en:Bool) -> (o:U8@[0]) {
+  reg count:U8 = 0
   o = count
-  assert((a * b) * (u32(count) + 1) == (a * b * u32(count)) + (a * b), "hard with count")
+  assert((a * b) * (U32(count) + 1) == (a * b * U32(count)) + (a * b), "hard with count")
   if en {
     if count == 5 {
       count = 0
     } else {
-      count += 1
+      wrap count += 1
     }
   }
 }

@@ -5,40 +5,40 @@
 // Reading an element of a SIGNED `mut` array into a WIDER consumer must
 // sign-extend. It did not for a comptime index: upass.tolg stamped the sign on
 // the element's Get_mask driver (unsigned by construction) and cprop's
-// constant-slice fold dropped it, so `a[0] = -3; y:s12 = a[0]` read 253. A
+// constant-slice fold dropped it, so `a[0] = -3; y:S12 = a[0]` read 253. A
 // runtime index, a `reg` array, a scalar, and a same-width consumer were
 // always right — each is a control here, so a regression names its path.
-// Found by the matched_filter_4 loop variant (an s8 product array copied into
-// an s12 tree array, REFUTED against its own base).
+// Found by the matched_filter_4 loop variant (an S8 product array copied into
+// an S12 tree array, REFUTED against its own base).
 
-pub mod comptime_index(x:s4) -> (y:s12@[0]) {
-  mut a:[2]s8 = 0
+pub mod comptime_index(x:S4) -> (y:S12@[0]) {
+  mut a:[2]S8 = 0
   a[0] = x
   a[1] = x + 1
   y = a[0] + a[1]
 }
-pub mod runtime_index(x:s4, k:u1) -> (y:s12@[0]) {
-  mut a:[2]s8 = 0
+pub mod runtime_index(x:S4, k:U1) -> (y:S12@[0]) {
+  mut a:[2]S8 = 0
   a[0] = x
   a[1] = x
   y = a[k]
 }
-pub mod reg_array(x:s4) -> (y:s12@[0]) {
-  reg a:[2]s8 = 0
+pub mod reg_array(x:S4) -> (y:S12@[0]) {
+  reg a:[2]S8 = 0
   a[0] = x
   y = a[0]
 }
-pub mod same_width(x:s4) -> (y:s12@[0]) {
-  mut a:[2]s12 = 0
+pub mod same_width(x:S4) -> (y:S12@[0]) {
+  mut a:[2]S12 = 0
   a[0] = x
   a[1] = x + 1
-  y = a[0] + a[1]
+  wrap y = a[0] + a[1]
 }
-pub mod value_iteration(x:s4) -> (y:s12@[0]) {
-  mut a:[2]s8 = 0
+pub mod value_iteration(x:S4) -> (y:S12@[0]) {
+  mut a:[2]S8 = 0
   a[0] = x
   a[1] = x + 1
-  mut acc:s12 = 0
+  mut acc:S12 = 0
   for p in a {
     acc = acc + p
   }

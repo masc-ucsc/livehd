@@ -7,10 +7,10 @@
 
 // 2b/I — func_call named-arg + var-arg RESULT DESTRUCTURING coverage: a
 // callee's multi-output tuple destructures at the call site by field name,
-// for named actuals, positional actuals gathered into a var-arg, and mixes.
+// for named actuals, a var-arg bound by its own name to a tuple, and mixes.
 // Two outputs MUST destructure by the output names (no binding to one var).
 
-comb divmod(n:u8, d:u8) -> (q:u8, r:u8) {
+comb divmod(n:U8, d:U8) -> (q:U8, r:U8) {
   q = n / d
   r = n % d
 }
@@ -20,28 +20,29 @@ const (q, r) = divmod(n=17, d=5)
 cassert(q == 3)
 cassert(r == 2)
 
-// Matching-name variables satisfy the arg-naming rule positionally; the
+// Matching-name variables satisfy the arg-naming rule by pun; the
 // result still destructures by output name (remap to fresh names here).
 const n = 17
 const d = 5
 const (q2 = divmod.q, r2 = divmod.r) = divmod(n, d)
 cassert(q2 == 3 and r2 == 2)
 
-// Var-arg callee whose result is a tuple built from the gathered args:
+// Var-arg callee (`xs=(..)` names the var-arg) whose result is a tuple built from the args:
 // destructure both a named field and the leftover-count-dependent sum.
 comb stats(...xs) -> (lo, sum) {
   lo  = if xs[0] < xs[1] { xs[0] } else { xs[1] }
   sum = xs[0] + xs[1] + xs[2]
 }
 
-const (lo, sum) = stats(9, 4, 2)
+const (lo, sum) = stats(xs=(9, 4, 2))
 cassert(lo == 4)
 cassert(sum == 15)
 
-// Named leftovers into the var-arg, mixed with destructuring.
+// A var-arg is one parameter holding a tuple and is named like any argument
+// (qa.md "Var-args"): a named tuple bound to it, mixed with destructuring.
 comb pick(...kv) -> (a, b) {
   a = kv.first
   b = kv.second
 }
-const (a, b) = pick(first=11, second=22)
+const (a, b) = pick(kv=(first=11, second=22))
 cassert(a == 11 and b == 22)

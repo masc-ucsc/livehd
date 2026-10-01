@@ -1,0 +1,15 @@
+/*
+:name: spec_calls_destructure_named_nomatch
+:type: error
+:error: not a field|no field|unknown field|does not match|match
+*/
+
+// qa.md Appendix §8 (assistant reading, all-named/all-unnamed rule): "a bare
+// slot whose name matches no field of a named RHS is an error (so 03-bundle
+// `const (y,z) = x` with fields f1/f2 is an error)."
+// docs 03-bundle.md: `const (y,z) = x   // error: `y` and `z` are not fields
+// of `x``.
+
+const x = (const f1=(const f1a=1, const f1b=3), const f2=4)
+const (y, z) = x // locate_error_here
+cassert(z == 4)

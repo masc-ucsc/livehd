@@ -10,8 +10,8 @@
 // lives inside the type as an `init` method; construction runs it.
 
 type Mix_tup = (
-  mut flag:bool = false,
-  mut state:u2,
+  mut flag:Bool = false,
+  mut state:U2,
   comb init(ref self) {
     self.flag  = true
     self.state = 2

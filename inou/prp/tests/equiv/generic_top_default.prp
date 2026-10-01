@@ -8,6 +8,6 @@
 
 // The top uses its declared N=3 default, including when compared to a
 // concrete design with no parameter list.
-pub mod generic_top_default<N=3>(a:u8) -> (y:u9@[0]) {
+pub mod generic_top_default<N=3>(a:U8) -> (y:U9@[0]) {
   y = a + N
 }

@@ -1,0 +1,16 @@
+/*
+:name: spec_memory_untyped_elem_array
+:type: equiv
+:verilog_top: spec_memory_untyped_elem_array
+:pyrope_top: spec_memory_untyped_elem_array
+*/
+// SPEC (docs 08-memories.md, declaration forms):
+//   "mut mem4:[13] = 0          // array 13 entries size, initialized to zero"
+// Rule encoded here: a `mut` array with a declared SIZE but no element type is
+// legal: 13 entries, every entry 0 each cycle, then one runtime-index store and one
+// runtime-index read (program order, so the read sees the store).
+pub mod spec_memory_untyped_elem_array(a:U3, d:U8, b:U3) -> (q:U8@[0]) {
+  mut mem4:[13] = 0
+  mem4[a] = d
+  q = mem4[b]
+}

@@ -1,0 +1,45 @@
+/*
+:name: bitrange_one_bit
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// One-bit bit slices spelled as a RANGE (`..+1`, `..<k+1`, or `..=` with a
+// comptime-named bound). A one-element range folds to a single-entry tuple,
+// which the runner's operand fold treated as a trivial SCALAR and substituted
+// its START index as the get_mask/set_mask MASK -- so `a#[0..+1]` failed with
+// "mask '0' is not a contiguous bit range", `a#[1..+1]` silently read bit 0
+// and `a#[K..=K]` (K=2) silently read bit 1 (lhdtrack suggestions 2.3 row 10).
+// A literal `lo..=hi` (folded by prp2lnast to a const mask) and 2+-bit ranges
+// were always right; they stay here as controls (c0..c2). Reads and writes
+// (set_mask, a separate path) are both covered, in the `..+1`, `..<` (w3)
+// and `K..=K` spellings.
+pub mod top(a:U4, v:U1) -> (r0:U1@[], r1:U1@[], r2:U1@[], r3:U1@[], r4:U1@[], r5:U1@[], r6:U1@[], r7:U1@[],
+                            c0:U1@[], c1:U2@[], c2:U2@[], w0:U4@[], w1:U4@[], w2:U4@[], w3:U4@[]) {
+  comptime const S = 0
+  comptime const K = 2
+  r0 = a#[0..+1]     // bit 0
+  r1 = a#[0..<1]     // bit 0
+  r2 = a#[S..=S]     // bit 0
+  r3 = a#[1..+1]     // bit 1
+  r4 = a#[3..+1]     // bit 3
+  r5 = a#[2..<3]     // bit 2
+  r6 = a#[K..=K]     // bit 2
+  r7 = a#[K..+1]     // bit 2
+  c0 = a#[1..=1]     // control: literal inclusive range
+  c1 = a#[2..+2]     // control: two-bit range
+  c2 = a#[K..+2]     // control: two-bit range, comptime-named start
+  mut t0:U4 = a
+  t0#[0..+1] = v
+  w0 = t0
+  mut t1:U4 = a
+  t1#[1..+1] = v
+  w1 = t1
+  mut t2:U4 = a
+  t2#[K..=K] = v
+  w2 = t2
+  mut t3:U4 = a
+  t3#[2..<3] = v
+  w3 = t3
+}

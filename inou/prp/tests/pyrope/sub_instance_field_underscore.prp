@@ -14,18 +14,21 @@
 // inliner then splats the >1-output result as a bundle and rejects the
 // bind-then-field-read form below with `multi-output-one-var`. There is no
 // placeholder lambda sugar in Pyrope (06-functions.md), so `_0` is just a field.
-// Generated (Chisel/FIRRTL) code names vector fields `_0`/`_1` constantly.
+// Generated (Chisel/FIRRTL) code names vector fields `_0`/`_1` constantly. The
+// bare `_0`/`_1` spellings are reserved for future placeholders (02-basics.md
+// "Identifiers"), so the fields are written backticked: `` `_0` `` is the same
+// field name a Verilog import produces.
 
-comb pick(a:u4, b:u4) -> (o1:u4, o2:u4, o3:u1) {
-  wire g:(_0:u1, _1:u1) = nil
-  g._0 = a#[0..=0]
-  g._1 = b#[0..=0]
-  o1   = a + b
-  o2   = a - b
-  o3   = g._0 & g._1
+comb pick(a:U4, b:U4) -> (o1:U4, o2:U4, o3:U1) {
+  wire g:(`_0`:U1, `_1`:U1) = nil
+  g.`_0` = a#[0..=0]
+  g.`_1` = b#[0..=0]
+  wrap o1   = a + b
+  wrap o2   = a - b
+  o3   = g.`_0` & g.`_1`
 }
 
-pub mod top(x:u4, y:u4) -> (r1:u5@[], r2:u5@[], r3:u1@[]) {
+pub mod top(x:U4, y:U4) -> (r1:U5@[], r2:U5@[], r3:U1@[]) {
   mut inst = pick::[name=inst](a = x, b = y)
   r1 = inst.o1
   r2 = inst.o2

@@ -1,0 +1,15 @@
+/*
+:name: spec_lexical_str_comment_opener_text
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+// qa.md appendix 3: "Comment openers inside strings are text". docs 02-basics:
+// `cassert("a // b" == 'a // b')  // a comment opener inside a string is text`
+const a = "a // b"
+const b = 'a // b'
+const c = "a /* b"
+const d = 'x /* y */ z'
+cassert(a == b)
+cassert(c.[size] == 6)
+cassert(d.[size] == 11)

@@ -1,0 +1,24 @@
+/*
+:name: timecheck_false_overflow
+:type: error
+:error: element of .m. \(range \[0, 15\]\) may not fit its declared range \[-8, 7\]
+:help: wrap/saturate
+*/
+
+// User ruling 2026-09-28 (22): `::[timecheck=false]` turns off the TIMING
+// checks of its lambda and nothing else, so a store that may overflow its
+// typed destination (user ruling 16) is still the mandatory compile error.
+//
+// Both stores below used to compile under the attribute, because it marked the
+// lambda Verilog-origin and upass.bitwidth keeps the Verilog storage rules for
+// that internal flag: a signed element takes any raw bit pattern of its width
+// (so the u4 `a` fit an s4 element) and a reg keeps its raw initializer (so 20
+// fit a u4). Without the attribute both are errors; with it they must be too.
+pub mod top::[timecheck=false](a:U4, i:U1) -> (r:S4@[0], q:U4@[0]) {
+  mut m:[2]S4 = 0
+  m[i] = a        // locate_error_here
+  r = m[1]
+  reg s:U4 = 20   // locate_error_here
+  s = a
+  q = s
+}

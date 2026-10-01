@@ -1,0 +1,9 @@
+/*
+:name: spec_lexical_str_raw_newline_single
+:type: error
+:error: newline in single-quoted string
+*/
+// docs 02-basics "Strings": "A raw newline inside either kind of string is a
+// syntax error (write `\n`)".
+const s = 'ab   // locate_error_here
+cd'

@@ -1,0 +1,33 @@
+/*
+:name: spec_clock_bind_any_name
+:type: simulation
+*/
+// SPEC (clock lane): Clock/Reset bind by TYPE, whatever the port name.
+//   qa.md Appendix 1: "Clock/Reset bind by TYPE: a port `c:Clock` / `r:Reset` is
+//     the clock/reset; registers bind implicitly to the module's single
+//     Clock/Reset input (any name)."
+//   docs 04b: "Implicit reset: the module's single `Reset` input, whatever its name."
+// `zap:Reset` is the implicit reset of `c`: pulsing it at cycle 10 must clear
+// the counter (a name-based binder would ignore `zap`).
+pub mod spec_clock_bind_any_name(core:Clock, zap:Reset, en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_clock_bind_any_name.reset_by_type {
+  mut t   = spec_clock_bind_any_name
+  mut g   = 0
+  mut bad = 0
+  tick 16 {
+    const r = clock < 2 or clock == 10
+    t.zap = r
+    t.en  = true
+    if r { g = 0 } else { g += 1 }
+    step
+    if t.q != g { bad += 1 }
+  }
+  puts("any_name: g={g} bad={bad}")
+  assert(bad == 0)
+  assert(g == 5)   // cleared at cycle 10, counted 11..15
+}

@@ -1,0 +1,13 @@
+/*
+:name: backtick_attr_read
+:type: comptime
+*/
+// `bits`/`max`/`min` == bits/max/min, both as type-call keys and as attribute
+// reads: every spelling must see the same declared range.
+const t:Unsigned(`max`=5) = 3
+cassert(t.[`max`] == 5)
+cassert(t.[max] == 5)
+const u:Unsigned(bits=6) = 3
+cassert(u.[`bits`] == 6)
+const s:Signed(`min`=-4, `max`=3) = 1
+cassert(s.[`min`] == -4 and s.[bits] == 3)

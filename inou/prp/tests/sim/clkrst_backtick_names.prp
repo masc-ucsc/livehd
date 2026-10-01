@@ -1,0 +1,37 @@
+/*
+:name: clkrst_backtick_names
+:type: simulation
+*/
+// docs 02-basics "Identifiers": a backticked type word is an ordinary name in
+// every position -- a `Clock` or `Reset` port named `` `U1` ``/`` `U4` ``, an
+// input `` `U8` `` and a child output `` `S4` `` read as `` c.`S4` ``. LNAST
+// keeps the quotes (the bare word is the type) while the netlist port is
+// `U1`: the implicit clock/reset used to miss the port (an `'hx` clock and a
+// dropped reset, exit 0).
+mod child(`U8`:U8, en:Bool) -> (`S4`:U8@[0]) {
+  reg r:U8 = 0
+  if en { r = `U8` }
+  `S4` = r
+}
+pub mod clkrst_backtick_names(`U1`:Clock, `U4`:Reset, v:U8, en:Bool) -> (o:U8@[0], k:U8@[0]) {
+  reg x:U8 = 9
+  if en { x = v }
+  k = x
+  const c = child(`U8`=v, en=en)
+  o = c.`S4`
+}
+test clkrst_backtick_names.t {
+  mut d = clkrst_backtick_names
+  tick 6 {
+    d.`U4` = clock < 2       // reset for cycles 0 and 1
+    d.v    = 7
+    d.en   = clock >= 4      // load from cycle 4 on
+    step
+    if clock >= 2 and clock < 4 {
+      assert(d.k == 9)       // held at the reset value
+      assert(d.o == 0)
+    }
+  }
+  assert(d.k == 7)
+  assert(d.o == 7)
+}

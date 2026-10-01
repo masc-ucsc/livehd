@@ -1,0 +1,7 @@
+/*
+:name: spec_lexical_str_escape_u_digits
+:type: error
+:error: a code point is written
+*/
+// qa.md appendix 8: "`\u{1..6 hex}`" -- at most six hex digits.
+const s = "\u{1234567}"   // locate_error_here

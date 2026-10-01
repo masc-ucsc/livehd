@@ -1,0 +1,29 @@
+/*
+:name: spec_tests_if_clock_cond
+:type: error
+:error: (condition|boolean|Bool)
+*/
+// Spec: docs 05b-statements "if": "a condition is a Bool: `if a` is an
+// error"; qa.md appendix section 6: "Clock and Reset are distinct basic types
+// (`Clock does Bool` is false)"; in simulation a Clock "is a CYCLE counter
+// (rising edges), so `clock < 1000` works"; ruling 20: "Strict bool applies
+// INSIDE `test` blocks too".
+//
+// Rule pinned: the tick's minted `clock` is not a Bool (its debug view is a
+// cycle count), so `if clock { ... }` is the "condition must be Bool" error;
+// write `if clock != 0` / `if clock > 3`.
+
+mod spec_icc_pass(a:U8) -> (o:U8@[0]) {
+  o = a
+}
+
+test spec_icc.if_clock {
+  mut d    = spec_icc_pass
+  mut hits = 0
+  tick 4 {
+    if clock { hits += 1 }   // locate_error_here
+    d.a = 1
+    step
+  }
+  assert(hits == 3)
+}

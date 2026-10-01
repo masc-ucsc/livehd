@@ -1,0 +1,12 @@
+/*
+:name: array_init_tuple_overflow
+:type: error
+:error: element of .m. \(value 20\) does not fit its declared range \[0, 15\]
+*/
+
+// User ruling 16 for a whole-array value: each entry of `(1, 2, 3, 20)` is
+// written into a u4 element, and 20 does not fit. It used to be truncated to 4.
+pub mod array_init_tuple_overflow(s:U2) -> (q:U4@[0]) {
+  mut m:[4]U4 = (1, 2, 3, 20)   // locate_error_here
+  q = m[s]
+}

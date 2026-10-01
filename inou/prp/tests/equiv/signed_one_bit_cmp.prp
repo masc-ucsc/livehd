@@ -5,8 +5,8 @@
 :pyrope_top: p
 */
 
-// Ordered comparison of a 1-bit SIGNED value. `signed(x#[3])` reinterprets the
-// u1 bit as s1 = {-1, 0}; a set bit is -1, so `signed(x#[3]) < 0` == x[3]. The
+// Ordered comparison of a 1-bit SIGNED value. `Signed(x#[3])` reinterprets the
+// u1 bit as s1 = {-1, 0}; a set bit is -1, so `Signed(x#[3]) < 0` == x[3]. The
 // W==1 signed ordered-compare gap (LT/encode signedness + cgen signed reg) is
 // FIXED, so both directions now PROVE:
 //   * forward prp-equiv: cgen emits `reg signed; b = (sext < 'sb0)`, yosys
@@ -14,6 +14,6 @@
 //   * reverse native leg of prp-v2prp2v: cvc5 proves the reconstructed Pyrope.
 // The golden .v module is the escaped full name `\signed_one_bit_cmp.p ` to
 // match the :verilog_top: header (the filename.func convention, like trivial_if.v).
-pub comb p(x:u8) -> (b:bool) {
-  b = signed(x#[3]) < 0
+pub comb p(x:U8) -> (b:Bool) {
+  b = Signed(x#[3]) < 0
 }

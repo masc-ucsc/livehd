@@ -1,0 +1,13 @@
+/*
+:name: spec_calls_splice_named_overlap
+:type: error
+:error: already exists|already declared|overlap|duplicate
+*/
+
+// qa.md Appendix §8: "named ++ named merges (overlapping names are an error, as
+// today)".
+// docs 03-bundle.md: `const bad = (...(const a=2), ...(const a=20)) // error:
+// 'a' already exists`.
+
+const bad = (...(const a=2), ...(const a=20)) // locate_error_here
+cassert(bad.a == 2)

@@ -1,0 +1,34 @@
+/*
+:name: backtick_test_names
+:type: simulation
+*/
+// `foo` == foo inside a test block too: the escaped handle, port, field and
+// builtin spellings below must drive and read the same DUT signals the plain
+// spellings do (prp_sim reads test-block names straight from the source text,
+// so it applies the same canonicalization as the front end).
+
+mod dut(en:Bool, a:U8) -> (o:U8@[0], seen:Bool@[0]) {
+  reg r:U8 = 0
+  reg s:Bool = false
+  o    = r
+  seen = s
+  if en {
+    r = a
+    s = true
+  }
+}
+
+test dut.backtick_names {
+  mut `d` = `dut`
+  d.`en` = true
+  `d`.a  = 5
+  tick 2 { step }
+  `assert`(`d`.o == 5)
+  assert(d.`seen`)
+  `puts`("o={d.`o`}")
+  d.en = false
+  d.`a` = 9
+  tick 1 { step }
+  const `held` = d.`o`
+  `assert`(held == 5 and `held` == d.o)
+}

@@ -33,13 +33,13 @@
 //     see the sim twin) — the schedule is cyclic (u3 counter wraps into the
 //     same window pattern), which is what lets the obligations prove
 //     INDUCTIVELY, not just to the bound (verified on the flop analog).
-pub mod lhold_tb() -> (ok:bool@[0]) {
-  reg cyc:u3 = 0
-  reg l:u8:[latch=true]
+pub mod lhold_tb() -> (ok:Bool@[0]) {
+  reg cyc:U3 = 0
+  reg l:U8:[latch=true]
   const c  = cyc
   const lq = l
   const en = (c == 0) or (c == 4)   // window OPEN at c==0 and c==4
-  mut dv:u8 = 42
+  mut dv:U8 = 42
   if c <= 1 {
     dv = 5
   } elif c == 2 {

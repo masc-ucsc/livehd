@@ -1,0 +1,16 @@
+/*
+:name: nested_comment_wrap_sat
+:type: compile
+:set: compile.upass.inline=false
+*/
+
+// Pyrope block comments NEST. A nested comment between the `wrap`/`sat`
+// overflow prefix and the assignment must not hide the prefix, and a
+// `wrap`/`sat` word inside a nested comment must not be read as one.
+// Each of these narrowing assignments compiles only because its prefix is
+// honored; a lost prefix is a bitwidth-overflow error.
+pub comb nested_comment_wrap_sat(a:U8, b:U8) -> (w:U8, s:U8, n:U8) {
+  wrap /* note /* nested */ still comment */ w = a + b
+  sat /* x /* y */ z */ s = a + b
+  wrap /* c /* d */ */ n = a + b
+}

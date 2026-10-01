@@ -12,5 +12,5 @@
 // overflows the maximum value of 'd'` (the `wrap d = c+1` / `sat d = c+1`
 // forms are the documented fixes).
 
-const c:u5 = 31
-const d:u5 = c + 1
+const c:U5 = 31
+const d:U5 = c + 1

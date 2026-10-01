@@ -1,0 +1,20 @@
+/*
+:name: dyn_bit_write_var
+:type: equiv
+:verilog_top: dyn_bit_write_var
+:pyrope_top: dyn_bit_write_var
+*/
+// A bit write at a RUNTIME position into a plain variable, `w#[b] = x`.
+// prp2lnast lowers it to a set_mask over a one-hot `1 << b` mask, which the
+// Pyrope writer could not spell: it printed the bare base copy and DROPPED the
+// write, so the prp-p2p round trip computed `d` for `q`. `u` takes a runtime
+// nibble first (a `range` mask, which the writer already spelled).
+pub mod dyn_bit_write_var(d:U16, b:U4, c:U3, x:U1, v:U4) -> (q:U16@[0], r:U16@[0]) {
+  mut w:U16 = d
+  w#[b] = x
+  q = w
+  mut u:U16 = d
+  u#[c..+4] = v
+  u#[b] = x
+  r = u
+}

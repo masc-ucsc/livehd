@@ -1,0 +1,24 @@
+/*
+:name: spec_clock_two_clk_docs
+:type: compile
+*/
+// SPEC (clock lane): the docs `two_clk` example with `qa:U8@[0]` compiles:
+// its registers are written under `if a != 0` / `if b != 0`, a hold path, so
+// they are state and land at their home stage @[0] -- the same rule for an
+// explicit `clock_pin` as for the implicit clock (ruling 83; an
+// unconditionally written body reg lands at @[1], see
+// spec_clock_pin_reg_lands_at_1.prp).
+//   docs 04b "Implicit clock and reset" / 07-typesystem "Clock and Reset":
+//     mod two_clk(clk_a:Clock, clk_b:Clock, rst:Reset, a:U8, b:U8) -> (qa:U8@[0], qb:U8@[0]) {
+//       reg ra:U8:[clock_pin=clk_a] = 0   // two Clock inputs: name the clock
+//   docs 06-functions "Cycle rules for `mod` outputs": "A conditional or
+//     feedback write makes it a state register that lands at its home stage"
+// The docs example minus its two `// error:` lines (rc, and qb = rb + clk_a).
+pub mod two_clk(clk_a:Clock, clk_b:Clock, rst:Reset, a:U8, b:U8) -> (qa:U8@[0], qb:U8@[0]) {
+  reg ra:U8:[clock_pin=clk_a] = 0   // two Clock inputs: name the clock
+  reg rb:U8:[clock_pin=clk_b] = 0   // both reset by the single Reset 'rst'
+  if a != 0 { ra = a }
+  if b != 0 { rb = b }
+  qa = ra
+  qb = rb
+}

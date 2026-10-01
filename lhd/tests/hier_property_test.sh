@@ -5,10 +5,11 @@
 # on one of its inputs, and whether that obligation is discharged depends on what
 # the PARENT binds to `a`. The contract:
 #
-#   1. sub compiled ALONE      -> the obligation is KEPT in the lgraph. `a` is a
-#      free input here, so the assume is neither provable nor violated; it is the
-#      importer that still owes the proof. Compiling a submodule on its own must
-#      not fail on it (its inputs are constrained by a parent that is not present).
+#   1. sub compiled ALONE      -> sub is the selected top, and every plain assume
+#      is CHECKED (docs 05-assert): over the free input `a` it is REFUTED
+#      (assume-refuted fails the build). With compile.formal.on_refute=warn the
+#      compile goes through and the obligation is KEPT in the lgraph, so an
+#      importer can still discharge it at its real binding.
 #   2. parent binds a=3        -> now PROVABLE, so the obligation is DISCHARGED:
 #      the fproperty node stays (marked `proven`) and its runtime check is gone
 #      from the emitted netlist.
@@ -25,8 +26,9 @@
 # checks that marking on its own, with no hierarchy involved.
 #
 # The top-rooted contract walk implements this without a second modular verify
-# driver: selected-top IO assumptions remain active/unchecked, while a parent
-# occurrence proves or refutes each child input obligation at its actual bind.
+# driver: a selected-top IO assumption is checked in the top's own frame, while
+# a parent occurrence proves or refutes each child input obligation at its
+# actual bind.
 set -u
 
 LHD="${LHD:-lhd/lhd}"
@@ -39,27 +41,27 @@ rc=0
 fail() { echo "FAIL: $*"; rc=1; }
 
 cat > "$W/taut.prp" <<'EOF'
-pub mod taut(a:u8) -> (o:u8@[0]) {
+pub mod taut(a:U8) -> (o:U8@[0]) {
   assert(a <= 255)
   o = a
 }
 EOF
 cat > "$W/lib_sub.prp" <<'EOF'
-pub mod sub(a:u8) -> (o:u8@[0]) {
+pub mod sub(a:U8) -> (o:U8@[0]) {
   assume(a == 3)
-  o = a + 1
+  wrap o = a + 1
 }
 EOF
 cat > "$W/use_ok.prp" <<'EOF'
 const lib_sub = import("lib_sub")
-pub mod use_ok(x:u8) -> (o:u8@[0]) { o = lib_sub.sub(a=3).o }
+pub mod use_ok(x:U8) -> (o:U8@[0]) { o = lib_sub.sub(a=3).o }
 EOF
 cat > "$W/use_bad.prp" <<'EOF'
 const lib_sub = import("lib_sub")
-pub mod use_bad(x:u8) -> (o:u8@[0]) { o = lib_sub.sub(a=4).o }
+pub mod use_bad(x:U8) -> (o:U8@[0]) { o = lib_sub.sub(a=4).o }
 EOF
 cat > "$W/explicit_nocheck.prp" <<'EOF'
-pub mod explicit_nocheck(a:u8) -> (o:u8@[0]) {
+pub mod explicit_nocheck(a:U8) -> (o:U8@[0]) {
   assume_nocheck(a < 4)
   o = a
 }
@@ -113,18 +115,26 @@ else
   fail "the tautology assert should compile cleanly"
 fi
 
-# --- 1. the submodule on its own keeps the obligation ------------------------
-if $LHD compile "$W/lib_sub.prp" --top sub --emit-dir "lg:$W/SOLO" \
-     --workdir "$W/w1" -q >"$W/l1.log" 2>&1; then
+# --- 1. the submodule on its own: a checked top IO assume -------------------
+if $LHD compile "$W/lib_sub.prp" --top sub --emit-dir "lg:$W/SOLO_REFUTED" \
+     --workdir "$W/w1" >"$W/l1.log" 2>&1; then
+  fail "sub alone as the top compiled clean: its plain input assume must be checked and refuted"
+elif grep -q '"code":"assume-refuted"' "$W/l1.log"; then
+  echo "ok: sub alone as the top refutes its (checked) input assume"
+else
+  fail "sub alone as the top failed without an assume-refuted diagnostic: $(cat "$W/l1.log")"
+fi
+if $LHD compile "$W/lib_sub.prp" --top sub --emit-dir "lg:$W/SOLO" --set compile.formal.on_refute=warn \
+     --workdir "$W/w1w" -q >"$W/l1w.log" 2>&1; then
   n=$(props "$W/SOLO")
   if [ "$n" -ge 1 ]; then
-    echo "ok: sub alone keeps its obligation ($n fproperty)"
+    echo "ok: sub alone (on_refute=warn) keeps its obligation ($n fproperty)"
   else
     fail "sub alone dropped the obligation (fproperty count $n); the importer can no longer discharge it"
   fi
 else
-  fail "sub alone did not compile — a submodule's input assume must not fail its own build:"
-  grep -o '"message":"[^"]*"' "$W/l1.log" | head -1 | sed 's/^/      /'
+  fail "sub alone with compile.formal.on_refute=warn did not compile:"
+  grep -o '"message":"[^"]*"' "$W/l1w.log" | head -1 | sed 's/^/      /'
 fi
 
 # --- 2. a parent that satisfies the assume discharges it ---------------------

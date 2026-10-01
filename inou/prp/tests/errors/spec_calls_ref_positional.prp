@@ -1,0 +1,23 @@
+/*
+:name: spec_calls_ref_positional
+:type: error
+:error: must be named|ambiguous|name the argument
+*/
+
+// qa.md chat ruling "Positional binding: function calls NEVER bind by position.
+// They bind by name, with the simplifications listed under "Argument naming" in
+// 06-functions.md." Appendix §4: the only exceptions are a single non-self
+// parameter, a bare variable whose name matches, a type-unique argument, and
+// `self`. A `ref` actual is not an exception: `bump(ref x, ref y)` into two
+// untyped `ref` params whose names do not match must be named
+// (`bump(p=ref x, q=ref y)`, grammar `arg_assignment` accepts `name = ref x`).
+
+comb bump(ref p, ref q) -> () {
+  p += 1
+  q += 10
+}
+
+mut x = 0
+mut y = 0
+bump(ref x, ref y) // locate_error_here
+cassert(x == 1 and y == 10)

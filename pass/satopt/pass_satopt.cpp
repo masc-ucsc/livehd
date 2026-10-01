@@ -122,10 +122,11 @@ public:
                        "edits and small resubstitutions -- each a selectable stage under one deterministic budget",
                        &work);
     method.add_label_optional("top", "Optimize this definition and the definitions it reaches (default: every graph)", "");
-    method.add_label_optional("stages",
-                              "none, default, all, or a comma-separated list of: constants, equiv, complement, odc, hotmux, memory, "
-                              "resub, simp_ctrl (always run in that order)",
-                              "");
+    method.add_label_optional(
+        "stages",
+        "none, default, all, or a comma-separated list of: constants, equiv, complement, odc, muxtree, share, hotmux, memory, "
+        "resub, simp_ctrl (always run in that order)",
+        "");
     method.add_label_optional("cleanup", "true: constant propagation and bitwidth on every changed graph afterwards", "true");
     method.add_label_optional("work",
                               "Deterministic effort limit for the whole run (simulation, graph walks, solver cones); out of "

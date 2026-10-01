@@ -245,7 +245,7 @@ echo "PASS: pass.abc large-region direct flow is selected and LEC-equivalent"
 P="$W/wide_wiring"
 mkdir -p "$P"
 cat >"$P/wide_wiring.prp" <<'EOF'
-pub mod wide_wiring(value:u4096, tag:u8) -> (out_value:u4096@[0], out_tag:u8@[]) {
+pub mod wide_wiring(value:U4096, tag:U8) -> (out_value:U4096@[0], out_tag:U8@[]) {
   const packed = (value << 8) | tag
   out_value = packed#[8..=4103]
   out_tag = packed#[0..=7]
@@ -311,8 +311,8 @@ echo "PASS: pass.abc preserves combinational SCCs and opentimer reports their ex
 FT="$W/feedthrough"
 mkdir -p "$FT"
 cat >"$FT/abc_feedthrough.prp" <<'EOF'
-pub mod abc_feedthrough(clk:u1, din:u4, din2:u4, a:u1, b:u1) -> (out:u4@[0], out2:u4@[1], out3:u1@[0], out4:u1@[0]) {
-  reg state:u4:[clock_pin=ref clk] = nil
+pub mod abc_feedthrough(clk:Clock, din:U4, din2:U4, a:U1, b:U1) -> (out:U4@[0], out2:U4@[1], out3:U1@[0], out4:U1@[0]) {
+  reg state:U4:[clock_pin=clk] = nil
   state = din2
   out = din
   out2 = state
@@ -360,7 +360,7 @@ echo "PASS: feed-through wires map to no buffer cell (identity-buffer bypass) an
 RO="$W/reduce_or"
 mkdir -p "$RO"
 cat >"$RO/reduce_or.prp" <<'PRP'
-comb reduce_or(a:u65, b:s9) -> (y:u3) {
+comb reduce_or(a:U65, b:S9) -> (y:U3) {
   y = a#|[..] + 2 * b#|[0..=8]
 }
 PRP

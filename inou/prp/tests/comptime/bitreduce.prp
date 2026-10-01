@@ -20,12 +20,12 @@ mut pop_count = value#+[..]     // Population count
 mut extended = value#sext[0..=3] // Sign extend bits 0-3 (3 is sign)
 mut zero_ext = value#zext[1..=5] // Zero extend bits 1-5 (no sign)
 
-mut sparse:u3 = nil
+mut sparse:U3 = nil
 sparse#[0] = value#[0]
 sparse#[1] = value#[3]
 sparse#[2] = value#[7]
 
-mut rparse:u3 = nil
+mut rparse:U3 = nil
 rparse#[0] = value#[7]
 rparse#[1] = value#[3]
 rparse#[2] = value#[0]

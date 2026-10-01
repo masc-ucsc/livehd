@@ -9,7 +9,7 @@
 // `q` must read `v__w1` (i.e. the input `b`).  Under the bug the demoted
 // `v___ssa_1` lands on `v__w1`, both variables emit under one identifier, and
 // `q` silently returns `v` instead.
-pub mod ssa_demote_collision(a:u4, b:u4, s:u1, t:u1) -> (o:u4@[], q:u4@[]) {
+pub mod ssa_demote_collision(a:U4, b:U4, s:U1, t:U1) -> (o:U4@[], q:U4@[]) {
   mut v__w1 = b
   mut v = a
   if s != 0 {
@@ -18,6 +18,6 @@ pub mod ssa_demote_collision(a:u4, b:u4, s:u1, t:u1) -> (o:u4@[], q:u4@[]) {
     }
   }
   v = v + 3
-  o = v
+  wrap o = v
   q = v__w1
 }

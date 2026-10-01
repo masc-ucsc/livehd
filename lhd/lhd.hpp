@@ -151,8 +151,9 @@ struct Options {
   // pyrope command; harmless defaults elsewhere.
   bool        fmt_inplace = false;  // -i / --inplace: rewrite each input file
   std::string fmt_output;           // -o / --output FILE: write to FILE (one input)
+  bool        fmt_human  = false;   // --mode human|ai: width-limited, aligned layout (ai, the default, has neither)
   int         fmt_indent = 2;       // --indent N: spaces per level
-  int         fmt_width  = 132;     // --width N: wrap column
+  int         fmt_width  = 0;       // --width N: wrap column, --mode human only (0 = unset: prpfmt's 132)
   bool        fmt_verify = false;   // --verify: re-parse the formatted output
 
   // Source-only repetition analysis (`pyrope style`).
@@ -181,34 +182,33 @@ struct Options {
   bool list_tests = false;
 
   // `sim` command modifiers
-  bool sim_setup_only = false;  // generate the C++ sim, do NOT build/run
-  bool sim_run_only   = false;  // build/run an already-generated sim (needs --workdir), no regen
-  // `sim --arg key=value` (repeatable): bind a `test name(params)` parameter; an
-  // override wins over the parameter's default. A param with neither is an error.
-  std::vector<std::pair<std::string, std::string>> sim_args;
+  bool                     sim_setup_only = false;  // generate the C++ sim, do NOT build/run
+  bool                     sim_run_only   = false;  // build/run an already-generated sim (needs --workdir), no regen
+  // Ordered application arguments; signature defaults stay local to each test.
+  std::vector<std::string> sim_plusargs;  // ordered +key[=value], including normalized --arg aliases
   // `sim` debug-replay flags (sim_checkpoint_debug_plan). The driver loads the
   // nearest checkpoint <= the target and resumes from there. -1 = not requested.
-  long                                             sim_restart_cycle = -1;  // --restart-cycle N: jump to cycle N
-  long                                             sim_vcd_from      = -1;  // --vcd-from Y: trace VCD starting at cycle Y
-  long                                             sim_vcd_to        = -1;  // --vcd-to Z: trace VCD up to cycle Z (with --vcd-from)
-  bool        sim_vcd_on_fail     = false;  // --vcd-on-fail: re-run a failed test with a VCD of the failure region
-  long        sim_vcd_fail_window = 20;     // --vcd-fail-window N: cycles before the failure to trace
+  long                     sim_restart_cycle   = -1;     // --restart-cycle N: jump to cycle N
+  long                     sim_vcd_from        = -1;     // --vcd-from Y: trace VCD starting at cycle Y
+  long                     sim_vcd_to          = -1;     // --vcd-to Z: trace VCD up to cycle Z (with --vcd-from)
+  bool                     sim_vcd_on_fail     = false;  // --vcd-on-fail: re-run a failed test with a VCD of the failure region
+  long                     sim_vcd_fail_window = 20;     // --vcd-fail-window N: cycles before the failure to trace
   // `sim` observability: query signal values without re-instrumenting (the driver
   // snapshots scalar signals by hierarchical name). Results land in the result
   // envelope's "debug" member (and `--result-json`).
-  bool        sim_list_signals    = false;  // --list-signals: enumerate observable signals, then exit
-  std::string sim_probe;                    // --probe SIG,...: per-cycle JSON trajectory of these signals
-  long        sim_probe_from = -1;          // --probe-from A
-  long        sim_probe_to   = -1;          // --probe-to B
-  std::string sim_break_when;               // --break-when 'SIG OP VALUE|SIG': first cycle the condition holds
+  bool                     sim_list_signals    = false;  // --list-signals: enumerate observable signals, then exit
+  std::string              sim_probe;                    // --probe SIG,...: per-cycle JSON trajectory of these signals
+  long                     sim_probe_from = -1;          // --probe-from A
+  long                     sim_probe_to   = -1;          // --probe-to B
+  std::string              sim_break_when;               // --break-when 'SIG OP VALUE|SIG': first cycle the condition holds
   // `sim --query FILE|-|{inline}` (2f-sim): a BATCHED JSON request
   // ({schema_version:1, kind:"sim_query", queries:[...]}). Batching is what lets
   // the planner union every question's time range and answer them all from ONE
   // replay; the legacy flags above stay the low-ceremony spelling of the same
   // engine. Answers land in the envelope's "query" member.
-  std::string sim_query;
-  bool        sim_observe         = false;  // setup-time hierarchical instrumentation needed by VCD/probe/query
-  bool        sim_runtime_support = true;   // generated checkpoint/probe/query methods; false only for a lean checkpoint-off setup
+  std::string              sim_query;
+  bool                     sim_observe = false;  // setup-time hierarchical instrumentation needed by VCD/probe/query
+  bool sim_runtime_support = true;  // generated checkpoint/probe/query methods; false only for a lean checkpoint-off setup
   // The RESOLVED `sim.tune.*` vector (explicit --set > sim.tune.file > the
   // workdir's tuned decision > default), set by `lhd sim` before it compiles
   // and handed to inou.cgen.sim as concrete labels. Deliberately NOT mirrored
@@ -354,15 +354,21 @@ struct Result {
   std::string                                      compile_cache_context;
   std::string                                      compile_cache_closure_key;
   std::vector<std::pair<std::string, std::string>> compile_cache_unit_keys;
+  std::vector<std::pair<std::string, uint64_t>>    compile_cache_unit_interfaces;  // source interface hash per unit
   std::vector<std::string>                         compile_cache_clean_units;
   std::vector<std::string>                         compile_cache_restored_graphs;
   // Clean final graph bodies to overlay after a diagnostic-carrying partial
   // restore is refused and the complete pipeline runs live.
   std::vector<std::string>                         compile_cache_overlay_graphs;
-  // Unit names of this scope's PRIOR generation (empty when none/incompatible).
-  // Ghost pruning may delete artifacts of a unit that left the closure only
-  // when that unit provably belonged to this same scope's previous compile.
+  // Unit names of this scope's PRIOR generation (empty when none/incompatible),
+  // plus the modules the library's ownership record lists (lg_owners_load). Ghost pruning may delete artifacts of a unit that left
+  // the closure only when that unit provably belonged to this design's previous compile.
   std::vector<std::string>                         compile_cache_prior_units;
+  // The graph library's ownership record (lg_owners_load): this design's key
+  // (empty: the compile records no ownership) and the roots OTHER designs
+  // recorded in the library, which the prune never deletes.
+  std::string                                      lg_owner_design;
+  std::vector<std::string>                         lg_foreign_claims;
   // [mark, end) is the half-open range of diag::sink().records() produced by the
   // GRAPH PIPELINE — upass, tolg, cprop, pass.formal — which is exactly the set
   // of stages a warm restore SKIPS, so it is what the generation must carry and
@@ -677,7 +683,7 @@ struct Mapper {
 };
 inline constexpr Mapper kMappers[] = {
     { "abc",  "pass.abc",  "abc_cache",  "abc", false, false,     ""},
-    {"usyn", "pass.usyn", "usyn_cache", "usyn",  true,  true, "usyn"},
+    {"usyn", "pass.usyn", "usyn_cache", "usyn", false,  true, "usyn"},
 };
 [[nodiscard]] constexpr const Mapper* find_mapper(std::string_view name) {
   for (const auto& m : kMappers) {
@@ -700,28 +706,28 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {   "mapper",
      "abc",  Synth_set_option::Kind::mapper,
      "abc|usyn: ABC synthesis (pass.abc), or unate synthesis (pass.usyn: a domino-gate LUT cover of every region, "
-     "technology-mapped by ABC, with the ABC flow as the fallback)"                                                             },
+     "technology-mapped by ABC, with the ABC flow as the fallback)"                                                       },
     {  "threads",
      "0", Synth_set_option::Kind::integer,
      "shared maximum concurrent ABC workers for synth and pass abc: 0 selects the machine's available CPUs; 1 maps serially. "
      "IGNORED by synth.mapper=usyn, which pins one synthesis tree at a time. "
-     "New workers require actual process memory plus outstanding and new projections below half of physical RAM"                },
+     "New workers require actual process memory plus outstanding and new projections below half of physical RAM"          },
     {  "liberty",
      "",    Synth_set_option::Kind::file,
      "PATH -- THE Liberty .lib, for every command that reads one: `lhd synth`, `lhd pass abc` (maps to its cells) "
      "and `lhd pass opentimer` (times with it, when no .lib positional is given). Empty = "
      "$HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib (install a PDK with `ciel`). It is the ONE spelling -- a "
-     "`pass.abc.library` --set is refused -- so no two readers in a flow can land on different cells"                           },
+     "`pass.abc.library` --set is refused -- so no two readers in a flow can land on different cells"                     },
     {"opentimer",
      "true", Synth_set_option::Kind::boolean,
      "run OpenTimer STA on the mapped netlist (timing.json under --workdir/synth, the critical path in the "
-     "report). false stops after the ABC map"                                                                                   },
+     "report). false stops after the ABC map"                                                                             },
     {   "reduce",
      "false", Synth_set_option::Kind::boolean,
      "experimental: can reduce synthesis time but degrade QoR (area and depth). Extract repeated one- and two-node "
-     "combinational cones into shared definitions before coloring; disabled by default"                                         },
-    {      "sdc", "",    Synth_set_option::Kind::file,       "PATH -- optional .sdc timing constraints handed to pass.opentimer"},
-    {     "spef", "",    Synth_set_option::Kind::file,              "PATH -- optional .spef parasitics handed to pass.opentimer"},
+     "combinational cones into shared definitions before coloring; disabled by default"                                   },
+    {      "sdc", "",    Synth_set_option::Kind::file, "PATH -- optional .sdc timing constraints handed to pass.opentimer"},
+    {     "spef", "",    Synth_set_option::Kind::file,        "PATH -- optional .spef parasitics handed to pass.opentimer"},
 };
 
 // The `lhd pass` subcommand vocabulary (pass_command dispatches exactly these).
@@ -767,12 +773,14 @@ void init_engine();
 void install_crash_reporter();
 
 // Deterministic content-hash run_id over (tool version + command + resolved
-// config + input bytes). A lec --impl/--ref side of kind lg: hashes only its
-// per-side --top slice — the top graph(s) plus transitive Sub dependencies,
-// bodies AND library.txt IO declarations — because the proof reads nothing
-// else, so nothing else may move the run_id. Per-side tops hash into every
-// impl/ref row (file or directory); --lib model libraries and every other
-// directory input hash whole.
+// config + input bytes). The input bytes include the transitive on-disk import
+// closure of every Pyrope source (resolved like the compile driver does), so
+// an edit of an imported file moves it. A lec --impl/--ref side of kind lg:
+// hashes only its per-side --top slice — the top graph(s) plus transitive Sub
+// dependencies, bodies AND library.txt IO declarations — because the proof
+// reads nothing else, so nothing else may move the run_id. The side role and
+// per-side top hash into every impl/ref row (file or directory); --lib model
+// libraries and every other directory input hash whole.
 std::string compute_run_id(const Options& opts);
 
 // Serialize the result envelope (single JSON line) to --result-json or stdout.

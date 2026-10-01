@@ -23,9 +23,9 @@ fail() { echo "FAIL: $*"; exit 1; }
 
 # Two-stage pipeline; the impl clone renames every register.
 cat > "$W/ref.prp" <<'EOF'
-mod dut(d:u8) -> (q:u8@[1]) {
-  reg ra:u8 = 0
-  reg rb:u8 = 0
+mod dut(d:U8) -> (q:U8@[1]) {
+  reg ra:U8 = 0
+  reg rb:U8 = 0
   q = rb
   rb = ra
   ra = d
@@ -112,7 +112,7 @@ echo "PASS: bogus crossed pairs are discarded; pair-free BMC proves from no-rese
 #    report says why; the real divergence (the differing reset) still FAILs
 #    through the pair-free confirmation.
 # ---------------------------------------------------------------------------
-sed 's/reg xa:u8 = 0/reg xa:u8 = 1/' "$W/impl.prp" > "$W/init.prp"
+sed 's/reg xa:U8 = 0/reg xa:U8 = 1/' "$W/impl.prp" > "$W/init.prp"
 OUT=$("$LHD" lec "${NO_REPLAY[@]}" --ref "$W/ref.prp" --impl "$W/init.prp" --workdir "$W/wd5" 2>&1)
 RC=$?
 [ "$RC" -ne 0 ] || fail "#5 differing reset value is a real difference, must FAIL: $OUT"
@@ -338,20 +338,20 @@ pub mod pipe_cell<T>::[timecheck=false](d:T) -> (q:T@[0]) {
   q_r = full#[0..=(d.[bits] - 1)]
 }
 
-mod valid_stage::[timecheck=false](in_valid:bool, clear:bool) -> (out_valid:bool@[0]) {
-  reg valid_r:bool = false
+mod valid_stage::[timecheck=false](in_valid:Bool, clear:Bool) -> (out_valid:Bool@[0]) {
+  reg valid_r:Bool = false
   out_valid = valid_r
   valid_r = if clear { false } else { in_valid }
 }
 
-pub mod dut::[timecheck=false](d:u4, reset:bool) -> (q:u4@[0], valid:bool@[0]) {
-  mut x:u4 = d
+pub mod dut::[timecheck=false](d:U4, `reset`:Reset) -> (q:U4@[0], valid:Bool@[0]) {
+  mut x:U4 = d
   for i in 0..<2 {
-    x = pipe_cell<u4>(d=x).q
+    x = pipe_cell<U4>(d=x).q
   }
-  mut v:bool = not reset
+  mut v:Bool = not `reset`
   for i in 0..<3 {
-    v = valid_stage(in_valid=v, clear=reset)
+    v = valid_stage(in_valid=v, clear=`reset`)
   }
   q = x
   valid = v

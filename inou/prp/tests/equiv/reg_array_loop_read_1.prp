@@ -1,0 +1,36 @@
+/*
+:name: reg_array_loop_read_1
+:lec_expect: proven
+*/
+// The generic spelling of reg_array_loop_read: `reg r:[1 << A]Unsigned(bits=W)`
+// with array ports of the same generic shape, specialized at <A=1, W=3> and
+// <A=2, W=5>.
+mod win<A=1, W=4>(en:Bool, i:Unsigned(bits=A), d:Unsigned(bits=W), v:[1 << A]Unsigned(bits=W))
+  -> (o:[1 << A]Unsigned(bits=W)@[0], f:[1 << A]Unsigned(bits=W)@[0], s:[1 << A]Unsigned(bits=W)@[0]) {
+  reg r:[1 << A]Unsigned(bits=W) = 0
+  reg g:[1 << A]Unsigned(bits=W):[ordering="fwd"] = 0
+  reg h:[1 << A]Unsigned(bits=W):[ordering="old"] = 0
+  f = 0
+  for k in 0..<(1 << A) { f[k] = g[k] ^ v[k] }
+  if en {
+    r[i] = d
+    g[i] = d
+    h[i] = d
+  }
+  o = 0
+  for k in 0..<(1 << A) { o[k] = r[k] ^ v[k] }
+  s = 0
+  for k in 0..<(1 << A) { s[k] = h[k] ^ v[k] }
+}
+
+pub mod reg_array_loop_read(en:Bool, i:U2, d:U5, v2:[2]U3, v4:[4]U5)
+  -> (o2:[2]U3@[0], f2:[2]U3@[0], `s2`:[2]U3@[0], o4:[4]U5@[0], f4:[4]U5@[0], `s4`:[4]U5@[0]) {
+  const x = win<A=1, W=3>(en=en, i=i#[0], d=d#[0..<3], v=v2)
+  const y = win<A=2, W=5>(en=en, i=i, d=d, v=v4)
+  o2 = x.o
+  f2 = x.f
+  `s2` = x.s
+  o4 = y.o
+  f4 = y.f
+  `s4` = y.s
+}

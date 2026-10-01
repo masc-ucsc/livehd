@@ -4,7 +4,7 @@
 :error: requires boolean operands
 :help: bitwise integers
 */
-comb foo(a:u8) -> (r:u1) {
+comb foo(a:U8) -> (r:U1) {
   if true and a#|[..] {
     r = 1
   } else {

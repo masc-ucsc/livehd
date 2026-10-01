@@ -18,9 +18,9 @@ comptime const ST_IDLE = 0
 comptime const ST_RUN  = 1
 comptime const ST_DONE = 2
 
-mod runner(start:bool, len:u8) -> (busy:bool@[0], done:bool@[0]) {
-  reg st:u2  = ST_IDLE
-  reg cnt:u8 = 0
+mod runner(start:Bool, len:U8) -> (busy:Bool@[0], done:Bool@[0]) {
+  reg st:U2  = ST_IDLE
+  reg cnt:U8 = 0
 
   busy = st == ST_RUN
   done = st == ST_DONE

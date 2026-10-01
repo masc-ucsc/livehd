@@ -77,8 +77,8 @@ fi
 # all eight Q bits observable by timing (not merely a dead state declaration).
 LPRP="$W/latch.prp"
 cat > "$LPRP" <<'EOF'
-pub mod ot_latch(en:bool, a:u8, b:u8) -> (q:u8@[0]) {
-  reg held:u8:[latch=true]
+pub mod ot_latch(en:Bool, a:U8, b:U8) -> (q:U8@[0]) {
+  reg held:U8:[latch=true]
   if en {
     held = a & b
   }
@@ -124,8 +124,8 @@ grep -q '"max_delay":' "$W/wd/timing.json" || fail "default timing.json missing 
 # `n$sra_*` timing root or reading a zero-width boundary pin.
 XPRP="$W/cross_region.prp"
 cat >"$XPRP" <<'EOF'
-pub mod ot_cross_region(a:s8, b:s8) -> (y:s8@[0]) {
-  const wide:s64 = a
+pub mod ot_cross_region(a:S8, b:S7) -> (y:S8@[0]) {
+  const wide:S64 = a
   const shifted  = wide >> 11
   y = shifted + b
 }
@@ -154,11 +154,11 @@ fi
 # output arity without inventing an `invalid_*` bus net.
 CSPR="$W/const_splitter.prp"
 cat >"$CSPR" <<'EOF'
-mod dense(a:u300) -> (y:u300@[0]) {
+mod dense(a:U300) -> (y:U300@[0]) {
   y = a + 1
 }
 
-pub mod ot_const_splitter() -> (y:u300@[0]) {
+pub mod ot_const_splitter() -> (y:U300@[0]) {
   y = dense(a=0).y
 }
 EOF
@@ -174,8 +174,8 @@ grep -q '"kind":"sta"' "$W/csw/synth/timing.json" || fail "constant-splitter tim
 # and ABC must no longer report an untimed divider boundary.
 DPRP="$W/div_boundary.prp"
 cat >"$DPRP" <<'EOF'
-pub mod ot_div_boundary(a:u16, b:u8) -> (y:u16@[0]) {
-  y = (a / (b | 1)) + 3
+pub mod ot_div_boundary(a:U16, b:U8) -> (y:U16@[0]) {
+  wrap y = (a / (b | 1)) + 3
 }
 EOF
 run synth "$DPRP" --top ot_div_boundary --workdir "$W/dw" --emit-dir lg:"$W/dnet" \
@@ -192,12 +192,12 @@ grep -q '"kind":"sta"' "$W/dw/synth/timing.json" || fail "divider-boundary timin
 # OpenTimer a malformed over-wide lane.
 CPRP="$W/concat_lane_fit.prp"
 cat >"$CPRP" <<'EOF'
-pub mod ot_concat_lane(clk:u1, addr:u1, a:u64) -> (y:u64@[0]) {
-  reg mem:[2]u64:[clock_pin=ref clk]
+pub mod ot_concat_lane(clk:Clock, addr:U1, a:U64) -> (y:U64@[0]) {
+  reg mem:[2]U64:[clock_pin=clk]
   mem[addr] = a
-  mut read:u64 = 0sb?
+  mut read:U64 = 0sb?
   read#[0..=63] = mem[addr]#[0..=63]
-  mut lane:[1]u64 = 0
+  mut lane:[1]U64 = 0
   lane[0] = read
   y = lane[0]
 }
@@ -256,8 +256,8 @@ fi
 # bit-range select. A Sub that drives NOTHING is on no timing path.
 MARK="$W/marker.prp"
 cat > "$MARK" <<'EOF'
-mod marker_sta(a:u8, b:u8, sel:u3) -> (o:u8@[1]) {
-  reg r:u8 = 0
+mod marker_sta(a:U8, b:U8, sel:U3) -> (o:U8@[1]) {
+  reg r:U8 = 0
   r = (a & b) ^ (a#[0..=sel] + 1)
   o = r
 }

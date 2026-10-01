@@ -6,7 +6,7 @@
 */
 
 // `clk` is a common wire NAME, not an attribute — picking a register's
-// clock is `clock_pin=ref <wire>`; classifying a signal is `c::[clock]`.
+// clock is `clock_pin=<wire>`; a clock input is declared by its type (`:Clock`).
 
 mut c = false
-reg r:u8:[clk=ref c] = 0  // locate_error_here
+reg r:U8:[clk=ref c] = 0  // locate_error_here

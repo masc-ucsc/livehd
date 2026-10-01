@@ -31,10 +31,10 @@
 // `a` on the REFERENCE clock is what makes clkb a genuine SECOND domain: with
 // clkb as the only clock_pin net, cgen_sim would pick it as the reference clock
 // waveform instead and no edge detection would be generated at all.
-pub mod secneg(clkb:bool, d:u8) -> (qa:u8@[1], qp:u8@[2], qn:u8@[2]) {
-  reg a:u8 = 0
-  reg bp:u8:[clock_pin=ref clkb] = 0
-  reg bn:u8:[clock_pin=ref clkb, posclk=false] = 0
+pub mod secneg(clkb:Bool, d:U8) -> (qa:U8@[1], qp:U8@[2], qn:U8@[2]) {
+  reg a:U8 = 0
+  reg bp:U8:[clock_pin=clkb] = 0
+  reg bn:U8:[clock_pin=clkb, posclk=false] = 0
   qa = a
   qp = bp
   qn = bn

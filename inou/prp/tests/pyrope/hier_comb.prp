@@ -14,20 +14,20 @@
 // depending on frontend-inserted width/sign wrappers. The fanout must survive
 // cprop: `p | b` would absorb to `b` and leave `p` with a single reader.
 
-mod adder(a:u8, b:u8) -> (s:u9@[0]) {
+mod adder(a:U8, b:U8) -> (s:U9@[0]) {
   s = a + b
 }
 
-mod bitmix(a:u8, b:u8) -> (x:u8@[0]) {
+mod bitmix(a:U8, b:U8) -> (x:U8@[0]) {
   const p = a & b
   const q = p ^ a
   const r = p | (b >> 1)
   x = q & r
 }
 
-mod top(a:u8, b:u8, c:u8) -> (o:u12@[0]) {
-  const s1 = adder(a=a, b=b)
-  const s2 = adder(a=b, b=c)
+mod top(a:U8, b:U8, c:U8) -> (o:U12@[0]) {
+  const sum1 = adder(a=a, b=b)
+  const sum2 = adder(a=b, b=c)
   const m1 = bitmix(a=a, b=c)
-  o = s1 + s2 + m1
+  o = sum1 + sum2 + m1
 }

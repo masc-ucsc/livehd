@@ -13,7 +13,7 @@ test reg_async_flag.sig {
   mut sig = 0
   tick 1000 {
     s = s * 6364136223846793005 + 1442695040888963407
-    acc.enable = s & 0x1
+    acc.enable = Bool(s & 0x1)
     acc.reset = clock < 4
     step
     if clock >= 4 {

@@ -32,27 +32,25 @@
 // what the fold could NOT do was a chain, a memory, or a hierarchy crossing.
 // The ctl row is what step 3's colouring and step 5's `if (enable)` sinking
 // must not break afterwards; it is the one an over-eager sink gets wrong.
-pub mod actsplit(clk:bool, ea:bool, eb:bool, d:u8) -> (qa:u8@[1], qb:u8@[1], ctl:u8@[1]) {
+pub mod actsplit(clk:Clock, ea:Bool, eb:Bool, d:U8) -> (qa:U8@[1], qb:U8@[1], ctl:U8@[1]) {
   // SHARED, unclassed logic: read by both guarded cones and by the control.
-  mut shared:u8 = (d * 3) & 0xFF
+  mut shared:U8 = (d * 3) & 0xFF
 
   // ACTIVATION CLASS A.
-  wire ga:bool = nil
-  ga = clk and ea
-  reg fa:u8:[clock_pin=ref ga] = 0
+  const ga = Clock(clock_pin=clk, enable=ea)
+  reg fa:U8:[clock_pin=ga] = 0
   fa = (shared + 1) & 0xFF
   qa = fa
 
   // ACTIVATION CLASS B — same root clock, same edge, DIFFERENT enable.
-  wire gb:bool = nil
-  gb = clk and eb
-  reg fb:u8:[clock_pin=ref gb] = 0
+  const gb = Clock(clock_pin=clk, enable=eb)
+  reg fb:U8:[clock_pin=gb] = 0
   fb = (shared + 2) & 0xFF
   qb = fb
 
   // CONTROL / unclassed consumer: proves `shared` is still evaluated on the
   // ticks where both gates are closed.
-  reg c:u8:[clock_pin=ref clk] = 0
+  reg c:U8:[clock_pin=clk] = 0
   c   = shared
   ctl = c
 }
@@ -63,18 +61,18 @@ test actsplit.two_classes_one_edge {
   mut bad_a   = 0
   mut bad_b   = 0
   mut bad_ctl = 0
-  mut ga_v:u8 = 0
-  mut gb_v:u8 = 0
+  mut ga_v:U8 = 0
+  mut gb_v:U8 = 0
   tick 6 {
     // c0 both open; c1 only A; c2 only B; c3 NEITHER; c4 both; c5 NEITHER.
     mut eav = (clock == 0) or (clock == 1) or (clock == 4)
     mut ebv = (clock == 0) or (clock == 2) or (clock == 4)
-    mut dv:u8 = 5 + clock
+    mut dv:U8 = 5 + clock
     acc.ea = eav
     acc.eb = ebv
     acc.d  = dv
     step
-    mut sh:u8 = (dv * 3) & 0xFF
+    mut sh:U8 = (dv * 3) & 0xFF
     if eav {
       ga_v = (sh + 1) & 0xFF
     }

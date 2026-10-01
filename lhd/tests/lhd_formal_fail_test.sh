@@ -51,9 +51,9 @@ compile_case() {
 #    netlist is still emitted with the runtime assert KEPT.
 # ---------------------------------------------------------------------------
 cat >"$W/assert_fail.prp" <<'EOF'
-comb chk(a:u8, b:u8) -> (x:u8) {
+comb chk(a:U8, b:U8) -> (x:U8) {
   assert(a != b, "a and b must differ")
-  x = a + b
+  wrap x = a + b
 }
 EOF
 compile_graph assert_fail
@@ -67,20 +67,19 @@ grep -q 'assert (' "$VOUT" || fail "the failing assert must be KEPT as a runtime
 grep -q 'a and b must differ' "$VOUT" || fail "runtime assert must keep its \$error message: $(cat "$VOUT")"
 
 # ---------------------------------------------------------------------------
-# 2. A child `assume` refuted at its real call-site binding: same FAIL policy.
-#    A selected-top IO assume is an unchecked environment constraint, so the
-#    checked negative case belongs at a hierarchy boundary where the parent can
-#    actually discharge (or refute) it.
+# 2. A child `assume` refuted at its real call-site binding: same FAIL policy
+#    as a selected-top IO assume (every plain assume is checked), but here the
+#    refute comes from the parent's actual binding, not from a free input.
 # ---------------------------------------------------------------------------
 cat >"$W/assume_fail_sub.prp" <<'EOF'
-pub comb chk(a:u8, b:u8) -> (x:u8) {
+pub comb chk(a:U8, b:U8) -> (x:U8) {
   assume(a != b)
-  x = a + b
+  wrap x = a + b
 }
 EOF
 cat >"$W/assume_fail.prp" <<'EOF'
 const assume_fail_sub = import("assume_fail_sub")
-comb assume_fail(a:u8) -> (x:u8) {
+comb assume_fail(a:U8) -> (x:U8) {
   x = assume_fail_sub.chk(a=0, b=0).x
 }
 EOF
@@ -95,7 +94,7 @@ grep -q 'assume (' "$VOUT" || fail "the failing assume must be KEPT as a runtime
 #    .fatal() path is gone — same FAIL policy (record + continue + emit).
 # ---------------------------------------------------------------------------
 cat >"$W/hotmux_fail.prp" <<'EOF'
-comb chk(p:bool, q:bool) -> (y:u8) {
+comb chk(p:Bool, q:Bool) -> (y:U8) {
   mut y = 0
   unique if p { y = 1 } elif q { y = 2 }
 }
@@ -112,7 +111,7 @@ grep -q '"code":"onehot-violated"' "$DIAG" || fail "missing onehot-violated diag
 #     build. A failing assert survives satopt the same way.
 # ---------------------------------------------------------------------------
 cat >"$W/hotmux_masked.prp" <<'EOF'
-comb chk(p:bool, q:bool, a:u8, x:u8) -> (y:u8) {
+comb chk(p:Bool, q:Bool, a:U8, x:U8) -> (y:U8) {
   mut t = 0
   unique if p { t = 1 } elif q { t = 2 }
   y = if x == x + 1 { t } else { a }
@@ -126,13 +125,14 @@ grep -q 'proven constant' "$W/hotmux_masked_satopt"/logs/*pass_satopt*.log \
 grep -q ' 1 proven constant' "$W/hotmux_masked_satopt"/logs/*pass_satopt*.log \
   || fail "satopt did not prove the masking select constant: $(cat "$W/hotmux_masked_satopt"/logs/*pass_satopt*.log)"
 cat >"$W/assert_satopt.prp" <<'EOF'
-comb chk(a:u8, x:u8) -> (y:u8) {
-  y = if x == x + 1 { a + 1 } else { a }
-  assert a != 7
+comb chk(a:U8, x:U8) -> (y:U8) {
+  wrap y = if x == x + 1 { a + 1 } else { a }
+  assert(a != 7)
 }
 EOF
 compile_case assert_satopt assert_satopt --set pass.satopt=true
 [ "$RC" -ne 0 ] || fail "satopt must not hide a failing assert (got rc=0)"
+grep -q '"code":"assert-refuted"' "$DIAG" || fail "missing assert-refuted diagnostic after satopt: $(cat "$DIAG")"
 
 # ---------------------------------------------------------------------------
 # 4. A provably one-hot `unique if` (distinct constant arms): PROVEN, so it
@@ -140,7 +140,7 @@ compile_case assert_satopt assert_satopt --set pass.satopt=true
 #    path that may elide/optimize.
 # ---------------------------------------------------------------------------
 cat >"$W/onehot_ok.prp" <<'EOF'
-comb chk(x:u2, a:u8, b:u8) -> (y:u8) {
+comb chk(x:U2, a:U8, b:U8) -> (y:U8) {
   mut y = 0
   unique if x == 0 { y = a } elif x == 1 { y = b }
 }
@@ -155,9 +155,9 @@ grep -q '"severity":"error"' "$DIAG" && fail "proven one-hot must emit no error:
 #    COMBINATIONAL refuted assert is caught (induction is exact for comb logic).
 # ---------------------------------------------------------------------------
 cat >"$W/comb_ref.prp" <<'EOF'
-comb chk(a:u8, b:u8) -> (x:u8) {
+comb chk(a:U8, b:U8) -> (x:U8) {
   assert(a != b)
-  x = a + b
+  wrap x = a + b
 }
 EOF
 compile_case comb_ref comb_default
@@ -180,8 +180,8 @@ grep -q '"code":"assert-refuted"' "$DIAG" && fail "mode=none must NOT run the fo
 #    DEFERS to a runtime check; `normal` (BMC-intent) trusts it and fails.
 # ---------------------------------------------------------------------------
 cat >"$W/seq_ref.prp" <<'EOF'
-mod chk(d:u4) -> (q:u4@[1]) {
-  reg r:u4 = 0
+mod chk(d:U4) -> (q:U4@[1]) {
+  reg r:U4 = 0
   assert(r != 5)
   r = d
   q = r
@@ -203,11 +203,11 @@ grep -q '"code":"assert-refuted"' "$DIAG" || fail "normal must record assert-ref
 #    root / design boundary) DOES fail. (don't mask, but don't false-fail.)
 # ---------------------------------------------------------------------------
 cat >"$W/hier_ref.prp" <<'EOF'
-mod leaf(a:u4) -> (b:u4@[0]) {
+mod leaf(a:U4) -> (b:U4@[0]) {
   assert(a != 5)
-  b = a + 1
+  wrap b = a + 1
 }
-mod root(c:u4) -> (d:u4@[0]) {
+mod root(c:U4) -> (d:U4@[0]) {
   const s = leaf(a = 3)
   d = s
 }
@@ -219,9 +219,9 @@ grep -q 'not enough top' "$DIAG" || fail "deferred warning must explain the miss
 grep -q '"code":"assert-refuted"' "$DIAG" && fail "a non-top submodule refutation must NOT be a build-failing error: $(cat "$DIAG")"
 
 cat >"$W/leaf_solo.prp" <<'EOF'
-mod leaf(a:u4) -> (b:u4@[0]) {
+mod leaf(a:U4) -> (b:U4@[0]) {
   assert(a != 5)
-  b = a + 1
+  wrap b = a + 1
 }
 EOF
 compile_case leaf_solo leaf_solo --top leaf
@@ -235,9 +235,9 @@ grep -q '"code":"assert-refuted"' "$DIAG" || fail "a root refutation must be a b
 #    sound; only a 'fail' can be spurious, so only a 'fail' is downgradable.)
 # ---------------------------------------------------------------------------
 cat >"$W/downgrade_ref.prp" <<'EOF'
-comb chk(a:u8, b:u8) -> (x:u8) {
+comb chk(a:U8, b:U8) -> (x:U8) {
   assert(a != b)
-  x = a + b
+  wrap x = a + b
 }
 EOF
 compile_case downgrade_ref downgrade_warn --set compile.formal.on_refute=warn
@@ -262,7 +262,7 @@ grep -q '"severity":"error"' "$DIAG" && fail "on_refute=warn must NOT emit any e
 #     control: a satisfiable guard must stay silent, or the check is useless.
 # ---------------------------------------------------------------------------
 cat >"$W/dead_guard.prp" <<'EOF'
-comb chk(a:u8) -> (x:u8) {
+comb chk(a:U8) -> (x:U8) {
   x = a
   if a > 200 and a < 100 {
     assert(a == 7, "dead branch")
@@ -276,7 +276,7 @@ grep -q 'dead branch' "$DIAG" || fail "the vacuity warning must name the asserti
 grep -q '"severity":"error"' "$DIAG" && fail "a dead guard must not error: $(cat "$DIAG")"
 
 cat >"$W/live_guard.prp" <<'EOF'
-comb chk2(a:u8) -> (x:u8) {
+comb chk2(a:U8) -> (x:U8) {
   x = a
   if a < 4 {
     assert(a < 10, "live branch")
@@ -304,14 +304,14 @@ grep -q 'formal-vacuous-guard' "$DIAG" \
 #      the hidden activation ABI. The property must be implication-guarded in
 #      the callee, matching the inlined form, with no former limitation warning.
 cat >"$W/gunit.prp" <<'EOF'
-pub mod gunit(a:u8) -> (o:u8@[0]) {
+pub mod gunit(a:U8) -> (o:U8@[0]) {
   o = a
   assert(a != 0, "callee property")
 }
 EOF
 cat >"$W/gcaller.prp" <<'EOF'
 const gunit = import("gunit.gunit")
-pub mod gcaller(valid:bool, a:u8) -> (r:u8@[0]) {
+pub mod gcaller(valid:Bool, a:U8) -> (r:U8@[0]) {
   r = 0
   if valid {
     const u = gunit(a=a)
@@ -330,7 +330,7 @@ grep -Eq '= \(+__valid\)* ==' "$VOUT" \
 # when this same definition is activation-capable elsewhere in the registry.
 cat >"$W/gplain.prp" <<'EOF'
 const gunit = import("gunit.gunit")
-pub mod gplain(a:u8) -> (r:u8@[0]) {
+pub mod gplain(a:U8) -> (r:U8@[0]) {
   const u = gunit(a=a)
   r = u.o
 }
@@ -345,10 +345,10 @@ grep -q 'guarded-instance-property' "$DIAG" \
 #      invisible and `wr_enable` came out as the inner condition alone — the
 #      memory was written on cycles the source does not.
 cat >"$W/memguard.prp" <<'EOF'
-pub mod memguard(c1:bool, c2:bool, a:u2, d:u8) -> (o:u8@[0]) {
+pub mod memguard(c1:Bool, c2:Bool, a:U2, d:U8) -> (o:U8@[0]) {
   o = 0
   if c1 {
-    reg m:[4]u8 = (0,0,0,0)
+    reg m:[4]U8 = (0,0,0,0)
     o = m[a]
     if c2 {
       m[a] = d

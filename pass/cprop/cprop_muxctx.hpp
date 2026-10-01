@@ -2,7 +2,9 @@
 #pragma once
 
 #include <array>
+#include <functional>
 #include <optional>
+#include <vector>
 
 #include "node_util.hpp"
 
@@ -84,4 +86,39 @@ std::optional<Bool_condition> compute_condition(const hhds::Pin_class& pin, cons
   }
   return condition;
 }
+// Exact constant comparisons use integer values, never a result-width hint.
+struct Equality {
+  hhds::Pin_class value;
+  int64_t         constant;
+};
+std::optional<Equality> equality(const hhds::Pin_class& pin);
+bool                    exclusive(const hhds::Node_class& node);
+
+using Decode  = std::function<std::optional<Bool_condition>(const hhds::Pin_class&)>;
+using Boolean = std::function<bool(const hhds::Pin_class&)>;
+
+// A bounded path snapshot. Copying it for a sibling is rollback: neither
+// dropped facts nor a contradiction can leak into another branch.
+class Path_facts {
+  struct Fact {
+    hhds::Pin_class value;
+    int64_t         constant;
+    bool            equal;
+  };
+  std::array<Fact, 16> facts{};
+  size_t               used     = 0;
+  bool                 possible = true;
+  std::optional<bool>  compare(hhds::Pin_class value, int64_t constant) const;
+  void                 add(hhds::Pin_class value, int64_t constant, bool equal);
+
+public:
+  bool                reachable() const { return possible; }
+  size_t              size() const { return used; }
+  std::optional<bool> truth(hhds::Pin_class pin, const Decode& decode) const;
+  void                assume(hhds::Pin_class pin, bool truth, const Decode& decode);
+};
+
+// Disjoint, private data regions; no nodes created and no global substitution
+// from contextual facts. The decoder and bool01 facts belong to the caller.
+size_t prune(hhds::Graph& graph, const Decode& decode, const Boolean& boolean);
 }  // namespace livehd::muxctx

@@ -1,0 +1,17 @@
+/*
+:name: clkrst_clock_wire_into_bool_input
+:type: error
+:tolg: 1
+:error: is a `Clock` bound to input `b` of `cwk_kid`, which is not a `Clock`: a Clock is not data
+*/
+// An untyped `wire` alias of a Clock is still that Clock: binding it to a
+// child's `Bool` input that the child reads as data is clock-as-data, as
+// binding the Clock itself is.
+mod cwk_kid(b:Bool, d:U8) -> (q:U8@[0]) {
+  q = d
+  if b { q = 0 }
+}
+pub mod clkrst_clock_wire_into_bool_input(clk:Clock, d:U8) -> (q:U8@[0]) {
+  wire w = clk
+  q = cwk_kid(b=w, d=d)
+}

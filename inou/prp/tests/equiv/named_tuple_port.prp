@@ -1,0 +1,34 @@
+/*
+:name: named_tuple_port
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// Suggestions 2.3 row 6: a file-scope NAMED tuple type (`type Req_t = (...)`)
+// used as a PORT type -- a `comb` input, a child `mod` input and output, and
+// the top's input and output. The inline spelling `req:(addr:U8, write:Bool,
+// data:U8)` always worked. The named one keeps the port as ONE width-less leaf
+// `req`: uPass_ssa flatten_assign only expands an INLINE tuple_add type slot
+// and the runner's emit_scalar_named_type_slot leaves a tuple-typed ref
+// verbatim, so every `req.addr` read resolves to nil. Today: "upass.tolg:
+// unresolved reference '%<tmp>' — it has no driver".
+type Req_t = (addr:U8, write:Bool, data:U8)
+type Rsp_t = (data:U8, hit:Bool)
+
+comb mix(req:Req_t) -> (v:U8) {
+  v = (req.addr + req.data)#[0..<8]
+}
+
+mod lookup(req:Req_t) -> (rsp:Rsp_t@[0]) {
+  rsp.data = req.addr ^ req.data
+  rsp.hit  = req.write and (req.addr == 3)
+}
+
+pub mod top(req:Req_t) -> (rsp:Rsp_t@[], y:U8@[], w:Bool@[], z:U8@[]) {
+  const l = lookup(req=req)
+  rsp = l.rsp
+  y   = req.data
+  w   = req.write
+  z   = mix(req=req)
+}

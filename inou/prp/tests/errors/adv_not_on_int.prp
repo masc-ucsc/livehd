@@ -4,5 +4,5 @@
 :error: (not|boolean)
 */
 // `not`/`!` are boolean-only; applying to an integer is a compile error.
-const n1:u3 = 1
+const n1:U3 = 1
 const r = not n1

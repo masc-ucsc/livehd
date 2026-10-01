@@ -17,8 +17,8 @@
 // `:expect_instances:` is the real claim — without it a silent fall back to
 // unrolling would still satisfy the value checks below.
 
-pub mod chunk_sum(x:u32) -> (o:u32@[0]) {
-  mut acc:u32 = 0
+pub mod chunk_sum(x:U32) -> (o:U32@[0]) {
+  mut acc:U32 = 0
   for i in 0..<4 {
     const chunk = x#[(i*8)..=(i*8+7)]
     if chunk == 0 { break }

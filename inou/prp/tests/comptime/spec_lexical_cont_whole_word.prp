@@ -1,0 +1,27 @@
+/*
+:name: spec_lexical_cont_whole_word
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// docs 02-basics "Newlines and spaces": "The match is whole-word, so a line
+// that starts with an identifier like `order` or `index` is a new statement."
+mut order = 0
+mut andy = 0
+mut cases = 0
+mut hash = 0
+mut index = 0
+mut doesnt = 0
+mut orx = 0
+mut equalsx = 0
+const a = 1
+order = 2
+andy = 3
+cases = 4
+hash = 5
+index = 6
+doesnt = 7
+orx = 8
+equalsx = 9
+cassert(a == 1 and order == 2 and andy == 3 and cases == 4)
+cassert(hash == 5 and index == 6 and doesnt == 7 and orx == 8 and equalsx == 9)

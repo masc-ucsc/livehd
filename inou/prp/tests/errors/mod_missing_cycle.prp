@@ -5,4 +5,4 @@
 :help: combinational feedthrough
 */
 
-mod f(a:u8) -> (x:u8) { x = a }   // locate_error_here
+mod f(a:U8) -> (x:U8) { x = a }   // locate_error_here

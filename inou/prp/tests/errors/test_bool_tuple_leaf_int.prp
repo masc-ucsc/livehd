@@ -1,0 +1,28 @@
+/*
+:name: test_bool_tuple_leaf_int
+:type: error
+:error: cannot bind integer value to input .cmd\.go. of .dut. \(it is boolean\)
+:help: (Bool\(|\btrue\b)
+*/
+
+// User ruling 2026-09-28 (20), the tuple-port twin of
+// errors/test_bool_input_int.prp: a LEAF of a tuple input is a port too, so
+// poking an integer into its `Bool` leaf (`d.cmd.go = 1`) is the same error as
+// binding it at a call site. Before, only a one-field poke (`d.en = 1`) was
+// kind-checked; the deeper store fell through as a tuple write.
+//
+// Legal spelling: `d.cmd.go = true`.
+
+mod dut(cmd:(op:U4, go:Bool)) -> (o:U4@[0]) {
+  o = if cmd.go { cmd.op } else { 0 }
+}
+
+test dut.poke_leaf_int {
+  mut d = dut
+  tick 2 {
+    d.cmd.op = 3
+    d.cmd.go = 1   // locate_error_here
+    step
+  }
+  assert(d.o == 3)
+}

@@ -5,23 +5,23 @@
 :verifier_fail: 0
 */
 
-mut v1:u32 = 0
-mut v2:u32 = 0
+mut v1:U32 = 0
+mut v2:U32 = 0
 
 cassert(v1 == 0 and v2 == 0)
 
 v1 = 0sb?
 v2 = 0sb?
 
-cassert(string(v1 != 0) == "0ub?")
-cassert(string(v2 != 0) == "0ub?")
+cassert(String(v1 != 0) == "0ub?")
+cassert(String(v2 != 0) == "0ub?")
 
 const res1 = v1 + 0
 
-cassert(string(res1 != 0) == "0ub?")  // the unknown propagates through the arithmetic
+cassert(String(res1 != 0) == "0ub?")  // the unknown propagates through the arithmetic
 
 // `0sb?` is the WIDTH-TAKING wildcard: the `?` fills the DECLARED width of the
-// destination and stops there, so `v2:u32 = 0sb?` holds 32 unknown bits — the
+// destination and stops there, so `v2:U32 = 0sb?` holds 32 unknown bits — the
 // same value as `0ub` followed by 32 `?`, not the 1 bit the literal is written
 // as. A destination with no declared width keeps the 1-bit signed unknown.
 cassert("{v2:b}" == "????????????????????????????????")

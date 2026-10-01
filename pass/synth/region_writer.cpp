@@ -110,6 +110,12 @@ void bypass_setmask_bit_reads(hhds::Graph* g) {
 bool Region_writer::write(const livehd::partition::Region_body& rb, const Region_blast& blast, const Cell_netlist& mapped,
                           const Cell_library& lib, const Registers& registers, Counts& counts,
                           const std::function<void(std::string_view)>& trace_stage) {
+  if (blast.logical_state) {
+    diag::err("pass.synth", "logical-state-writer", "unsupported")
+        .msg("region '{}' requires a logical-state writer preserving clock and asynchronous control outputs", rb.module_name)
+        .emit();
+    return false;
+  }
   const auto& outputs              = blast.lnet.outputs();
   const auto& flops                = blast.flops;
   const auto& bboxes               = blast.bboxes;

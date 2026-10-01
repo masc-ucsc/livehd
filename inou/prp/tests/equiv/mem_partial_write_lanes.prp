@@ -1,0 +1,105 @@
+/*
+:name: mem_partial_write_lanes
+:type: equiv simulation
+:verilog_top: mem_partial_write_lanes
+:pyrope_top: mem_partial_write_lanes
+*/
+// Memory PARTIAL writes `mem[a]#[lo..<hi] = v` lower to a write-MASKED port
+// (the memory's `wensize` lanes), not to a read-modify-write: no old-value read
+// port, and the cell's last-port-wins lanes merge several partial writes of
+// one entry in one cycle. That merge is the language rule in EVERY ordering
+// (docs 08-memories: a partial write updates the entry as the earlier writes
+// of the cycle left it); ordering governs only what a same-cycle USER read
+// sees. The read-modify-write lowering once lost it under ordering="old": its
+// old-value reads saw the committed entry, so only the last lane survived.
+//
+//   P  "program": qp0 is read before the writes (committed), qp1 after them
+//   O  "old":     qo sees the committed entry
+//   F  "fwd":     qf, placed before the writes, still sees all of them
+//   N  "none":    a colliding read is undefined, so qn only reads when idle
+//   R  default ("program"), whole-entry + runtime-position writes: `#[k]` and
+//      `#[j..+4]` have no constant lane, so R takes single-bit lanes
+// The lanes of P/O/F/N are 4 bits wide: the byte writes and the [4..<12]
+// write share 4-bit boundaries (wensize 4).
+pub mod mem_partial_write_lanes(we0:Bool, we1:Bool, we2:Bool, we3:Bool, a:U2, b:U2, c:U2, x:U8, y:U8, z:U8, w:U16, k:U4, j:U3, bv:U1, nib:U4, ra:U2)
+  -> (qp0:U16@[0], qp1:U16@[0], qo:U16@[0], qf:U16@[0], qn:U16@[0], qr:U16@[0]) {
+  reg P:[4]U16:[ordering="program"] = nil
+  reg O:[4]U16:[ordering="old"] = nil
+  reg F:[4]U16:[ordering="fwd"] = nil
+  reg N:[4]U16:[ordering="none"] = nil
+  reg R:[4]U16 = nil
+
+  qp0 = P[ra]
+  qf  = F[ra]
+  if we0 {
+    P[a]#[0..<8] = x
+    O[a]#[0..<8] = x
+    F[a]#[0..<8] = x
+    N[a]#[0..<8] = x
+  }
+  if we1 {
+    P[b]#[8..<16] = y
+    O[b]#[8..<16] = y
+    F[b]#[8..<16] = y
+    N[b]#[8..<16] = y
+  }
+  if we2 {
+    P[c]#[4..<12] = z
+    O[c]#[4..<12] = z
+    F[c]#[4..<12] = z
+    N[c]#[4..<12] = z
+  }
+  qp1 = P[ra]
+  qo  = O[ra]
+  const nread = N[ra]
+  qn = if we0 or we1 or we2 { 0 } else { nread }
+
+  if we3 { R[c] = w }
+  if we0 { R[a]#[k] = bv }
+  if we1 { R[b]#[j..+4] = nib }
+  qr = R[ra]
+}
+
+// Four cycles fill entries 0..3 with two byte writes each; cycle 4 writes all
+// three lanes of entry 1 (0xAA low byte, 0xBB high byte, then 0xCC over bits
+// 4..11): the entry must end 0xBCCA in every ordering. The sampled outputs
+// read the state after each clock edge.
+test mem_partial_write_lanes.merge {
+  mut d = mem_partial_write_lanes
+  const we  = [1, 1, 1, 1, 1, 0]
+  const we2 = [0, 0, 0, 0, 1, 0]
+  const ad  = [0, 1, 2, 3, 1, 1]
+  const xs  = [0x10, 0x11, 0x12, 0x13, 0xAA, 0]
+  const ys  = [0x20, 0x21, 0x22, 0x23, 0xBB, 0]
+  const e   = [0x2010, 0x2111, 0x2212, 0x2313, 0xBCCA, 0xBCCA]
+  tick 6 {
+    d.we0 = we[clock] == 1
+    d.we1 = we[clock] == 1
+    d.we2 = we2[clock] == 1
+    d.we3 = clock == 0
+    d.a   = ad[clock]
+    d.b   = ad[clock]
+    d.c   = ad[clock]
+    d.ra  = ad[clock]
+    d.x   = xs[clock]
+    d.y   = ys[clock]
+    d.z   = 0xCC
+    d.w   = 0x5555
+    d.k   = 15
+    d.j   = 2
+    d.bv  = 1
+    d.nib = 0xF
+    step
+    assert(d.qp0 == e[clock])
+    assert(d.qp1 == e[clock])
+    assert(d.qo == e[clock])
+    assert(d.qf == e[clock])
+    if we[clock] == 0 {
+      assert(d.qn == e[clock])
+    }
+    // R: entry 0 is 0x5555, then bit 15 set, then bits 2..5 set: 0xD57D.
+    if clock == 0 {
+      assert(d.qr == 0xD57D)
+    }
+  }
+}

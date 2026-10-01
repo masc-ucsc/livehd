@@ -1,0 +1,17 @@
+/*
+:name: mem_pair_by_name_1
+:type: lec
+:lec_top: mem_pair_by_name
+*/
+// The reference with its two memories declared in the other order: the same
+// design, so it must PROVE whatever order each side lists its memories in.
+pub mod mem_pair_by_name(w:Bool, a:U2, d:U8, ra:U2) -> (qa:U8@[0], qb:U8@[0]) {
+  reg mb:[4]U8:[ordering="old"] = nil
+  reg ma:[4]U8:[ordering="old"] = nil
+  if w {
+    ma[a] = d
+    mb[a] = d
+  }
+  qa = ma[ra]
+  qb = mb[ra]
+}

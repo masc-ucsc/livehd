@@ -525,8 +525,10 @@ namespace {
 TEST(Factor, EightVariableThresholdsUnderBudgetAreFast) {
   Sp_factorer F;
   const int   n = 8;
-  for (int budget : {16, 24}) {
-    const auto t0 = std::chrono::steady_clock::now();
+  // Deterministic bound on explored factoring states (the memo), not wall
+  // time: a loaded test machine must not turn this into a flake. Measured
+  // cumulative memo: 799 after budget 16 and 17145 after budget 24.
+  for (const auto& [budget, memo_limit] : {std::pair{16, size_t{1600}}, std::pair{24, size_t{34000}}}) {
     for (int th = 1; th <= n; ++th) {
       Truth f;
       for (int x = 0; x < (1 << n); ++x) {
@@ -562,13 +564,7 @@ TEST(Factor, EightVariableThresholdsUnderBudgetAreFast) {
         }
       }
     }
-    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
-#ifdef NDEBUG
-    const long limit_ms = 8000;  // -c opt: measured ~4 s for both budgets together
-#else
-    const long limit_ms = 40000;  // -c dbg is 5-6x slower; the whole test must stay under 60 s
-#endif
-    EXPECT_LT(ms, limit_ms) << "budget " << budget << " took " << ms << " ms";
+    EXPECT_LE(F.memo_size(), memo_limit) << "budget " << budget;
   }
 }
 

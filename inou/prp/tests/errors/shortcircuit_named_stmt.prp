@@ -11,7 +11,7 @@
 // illegal operation into its own statement must NOT buy the short-circuit
 // exemption, even though the `or` below would have skipped the operand.
 
-pub mod top(a:u8) -> (y:u8@[0]) {
+pub mod top(a:U8) -> (y:U8@[0]) {
   const N = 0
   const z = 64 % N // locate_error_here
   cassert(N == 0 or (z == 0))

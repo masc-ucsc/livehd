@@ -1,0 +1,7 @@
+/*
+:name: uniform_name_enum
+:type: error
+:error: reserved
+:help: backticks
+*/
+enum E = (and, other) // locate_error_here

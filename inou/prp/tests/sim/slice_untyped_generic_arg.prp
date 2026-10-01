@@ -1,0 +1,52 @@
+/*
+:name: slice_untyped_generic_arg
+:type: simulation
+:expect_instances: u_loop_0=1
+*/
+// An UNTYPED binding of a fixed-width bit slice passed to a `mod` whose port
+// type comes from the actual: a type-generic `<T>` (unified from the actual)
+// or an untyped input `a` (lhdtrack suggestions 2.3 row 15). `v#[s..+4]` always
+// has 4 bits, but when the start is a runtime value -- an input `s`, or the
+// index `j` of a loop kept ROLLED (the default `compile.unroll=false`, where
+// `j` becomes an input port of the lifted body) -- the upass get_mask typing
+// only knows a constant mask or a range with constant ends (prp2lnast lowers
+// `lo..+n` to `lo..=lo+n-1` and drops the known count n), so `x` carried no
+// width and the call died with "argument `a` to template `flip_lane` has no
+// declared type". A constant start (`v#[4..+4]`) or `const x:U4 = ...` works.
+// `:expect_instances: u_loop_0=1` pins the `j` loop ROLLED: an unrolled loop
+// would make `j` comptime and the `y` half would no longer test a runtime start.
+
+mod flip_lane<T>(a:T) -> (o:T@[0]) {
+  o = a ^ 1
+}
+
+mod flip_any(a) -> (o@[0]) {
+  o = a ^ 2
+}
+
+mod slice_untyped_generic_arg(v:U16, s:U4) -> (z:U4@[0], u:U4@[0], y:U16@[0]) {
+  const x = v#[s..+4]            // runtime start, fixed 4-bit width
+  z = flip_lane(a=x)
+  wrap u = flip_any(a=x)         // untyped output: unknown range (ruling 21)
+
+  mut acc:U16 = 0
+  for j in 0..<4 {
+    const n = v#[(j*4)..+4]      // rolled loop: `j` is runtime inside the body
+    acc#[(j*4)..+4] = flip_lane(a=n)
+  }
+  y = acc
+}
+
+test slice_untyped_generic_arg.lanes {
+  mut dut = slice_untyped_generic_arg
+  tick 4 {
+    dut.v = 0xA5C3
+    dut.s = clock * 4
+    step
+    // nibbles of 0xA5C3 from bit 0: 0x3, 0xC, 0x5, 0xA
+    const nib = (0xA5C3 >> (clock * 4)) & 0xF
+    assert(dut.z == nib ^ 1)
+    assert(dut.u == nib ^ 2)
+    assert(dut.y == 0xB4D2, "every nibble of 0xA5C3 with bit 0 flipped")
+  }
+}

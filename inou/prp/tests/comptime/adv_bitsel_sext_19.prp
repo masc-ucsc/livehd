@@ -6,7 +6,7 @@
 */
 
 // sext inside a comb lambda called with constant args, compared at top level.
-comb top_bit_sext(x:u8, lo:signed, hi:signed) -> (r:signed) {
+comb top_bit_sext(x:U8, lo:Signed, hi:Signed) -> (r:Signed) {
   r = x#sext[lo..=hi]
 }
 const r1 = top_bit_sext(x=0ub1010_0000, lo=4, hi=7)  // 1010 top set -> -6

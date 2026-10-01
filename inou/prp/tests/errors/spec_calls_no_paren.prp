@@ -1,0 +1,14 @@
+/*
+:name: spec_calls_no_paren
+:type: error
+:error: noarg\(\)|parenthes|call|lambda|type
+*/
+
+// docs 06-functions.md: "Every lambda call requires parentheses. `foo()`,
+// `foo(a=1,b=2)`, and `x.bar(y=y)` are the only forms." and
+// `assert(noarg)  // error: `noarg()` needed for calls`.
+
+comb noarg() -> (r) { r = 33 }
+
+cassert(noarg() == 33)
+cassert(noarg == 33) // locate_error_here

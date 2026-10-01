@@ -1,0 +1,24 @@
+/*
+:name: bool_port_bind_bitsel
+:type: error
+:tolg: 1
+:error: cannot bind integer value to input .go. of .*leaf.* \(it is boolean\)
+:help: Bool\(
+*/
+
+// User ruling 2026-09-27: a 1-bit SELECT of an integer (`v#[2]`) is an
+// integer, not a bool, so binding it to a `Bool` input of a `mod` needs
+// `Bool(v#[2])` (or `v#[2] != 0`) -- the twin of bool_port_bind_u1.prp
+// (a `U1` port as the actual). Today the Sub call connects the bit straight
+// to the callee pin with no kind check and compiles silently.
+//
+// Legal spelling: `leaf(go=Bool(v#[2]))`.
+
+mod leaf(go:Bool) -> (idle:Bool@[0]) {
+  idle = not go
+}
+
+pub mod bool_port_bind_bitsel(v:U4) -> (q:Bool@[0]) {
+  const c = leaf(go=v#[2])   // locate_error_here
+  q = c.idle
+}

@@ -1,0 +1,8 @@
+/*
+:name: spec_syntax_nonascii_name
+:type: error
+:error: a name holds only letters, digits and `_`
+*/
+// qa.md Q39 item 3 / Appendix §8: "non-ASCII symbols (emoji, NBSP, ZWSP, BOM, em dash,
+// fullwidth +, ...) in names -> error in both, only letters/digits/_". An emoji inside a name:
+const a😀b = 1   // locate_error_here

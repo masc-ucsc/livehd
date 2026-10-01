@@ -19,8 +19,8 @@ test lead_or_chain.sig {
     s = s * 6364136223846793005 + 1442695040888963407
     acc.y = s & 0xff
     step
-    sig = sig * 1099511628211 + (acc.out1 & 0x1)
-    sig = sig * 1099511628211 + (acc.out2 & 0x1)
+    sig = sig * 1099511628211 + (U1(acc.out1) & 0x1)
+    sig = sig * 1099511628211 + (U1(acc.out2) & 0x1)
   }
   assert((sig & 0x3FFFFFFFFFFFFFFF) == 3342865803117809338, "signature mismatch vs iverilog golden lead_or_chain")
 }

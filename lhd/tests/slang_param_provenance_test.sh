@@ -60,14 +60,14 @@ EOF
 $LHD compile "$W/tpkg.sv" "$W/tmod.sv" --top tmod --emit-dir pyrope:"$W/p1" --workdir "$W/w1" -q \
   || fail "provenance emission (constprop=1) did not compile"
 grep -q 'pub comptime const SEL_A = 3' "$W/p1/tpkg.prp" || fail "constprop=1 pkg unit lacks SEL_A=3: $(cat "$W/p1/tpkg.prp")"
-grep -q 'pub comptime const NEG:s10 = -12' "$W/p1/tpkg.prp" || fail "pkg unit lacks typed NEG:s10=-12: $(cat "$W/p1/tpkg.prp")"
+grep -q 'pub comptime const NEG:S10 = -12' "$W/p1/tpkg.prp" || fail "pkg unit lacks typed NEG:S10=-12: $(cat "$W/p1/tpkg.prp")"
 grep -q 'tpkg\.SEL_A' "$W/p1/tmod.prp" || fail "module body folded tpkg.SEL_A: $(cat "$W/p1/tmod.prp")"
 # defining EXPRESSION preserved (not the folded 9), in SOURCE order (SEL_A first)
 grep -qE 'pub comptime const DIFF = \(SEL_B - SEL_A\)' "$W/p1/tpkg.prp" \
   || fail "pkg unit folded DIFF's defining expression: $(cat "$W/p1/tpkg.prp")"
 head -1 "$W/p1/tpkg.prp" | grep -q 'SEL_W' || fail "pkg unit not in source order: $(head -3 "$W/p1/tpkg.prp")"
 # a `[SEL_W-1:0]` port dim mints an exported scalar type alias + a typed port
-grep -q 'pub type SEL_W_T = u4' "$W/p1/tpkg.prp" || fail "pkg unit lacks the SEL_W_T alias: $(cat "$W/p1/tpkg.prp")"
+grep -q 'pub type SEL_W_T = U4' "$W/p1/tpkg.prp" || fail "pkg unit lacks the SEL_W_T alias: $(cat "$W/p1/tpkg.prp")"
 grep -q 's:tpkg\.SEL_W_T' "$W/p1/tmod.prp" || fail "port did not use the imported alias: $(head -3 "$W/p1/tmod.prp")"
 # a module-local param becomes a body-level const with its defining expression
 grep -qE 'const LOCAL_TH = tpkg\.SEL_A \+ 1' "$W/p1/tmod.prp" \
@@ -79,7 +79,7 @@ $LHD compile "$W/tpkg.sv" "$W/tmod.sv" --top tmod --emit-dir pyrope:"$W/p0" --wo
   --set compile.upass.constprop=0 \
   || fail "provenance emission (constprop=0) did not compile"
 grep -q 'pub comptime const SEL_A = 3' "$W/p0/tpkg.prp" || fail "constprop=0 pkg unit lacks SEL_A=3: $(cat "$W/p0/tpkg.prp")"
-grep -q 'pub comptime const NEG:s10 = -12' "$W/p0/tpkg.prp" || fail "constprop=0 pkg unit lacks NEG=-12: $(cat "$W/p0/tpkg.prp")"
+grep -q 'pub comptime const NEG:S10 = -12' "$W/p0/tpkg.prp" || fail "constprop=0 pkg unit lacks NEG=-12: $(cat "$W/p0/tpkg.prp")"
 echo "PASS: constprop=0 package unit still carries real values"
 
 # ── (3) value-changing narrowing cast must keep its truncation ────────────────
@@ -139,11 +139,11 @@ endmodule
 EOF
 $LHD compile "$W/params.sv" --top pair --emit-dir pyrope:"$W/params" --workdir "$W/params-w" -q \
   || fail "module parameter emission failed"
-grep -q 'STEP=3' "$W/params/params.prp" || fail "default STEP missing from generic header"
-grep -q 'STEP=7' "$W/params/params_p1.prp" || fail "overridden STEP missing from specialization header"
+grep -q '`STEP`=3' "$W/params/params.prp" || fail "default STEP missing from generic header"
+grep -q '`STEP`=7' "$W/params/params_p1.prp" || fail "overridden STEP missing from specialization header"
 grep -Fq 'NEG=(-2)' "$W/params/params.prp" || fail "negative generic default missing"
 grep -Fq 'TAG="a' "$W/params/params.prp" || fail "string generic default missing"
-grep -Eq 'const STEP\b|const NEG\b' "$W/params/params.prp" && fail "generic parameter rebound in body"
+grep -Eq 'const `STEP`|const NEG\b' "$W/params/params.prp" && fail "generic parameter rebound in body"
 grep -q 'const BIAS' "$W/params/params.prp" || fail "localparam missing from body"
 for top in pair params; do
   $LHD lec --ref verilog:"$W/params.sv" --ref-top "$top" --impl pyrope:"$W/params/" --impl-top "$top.$top" \
@@ -152,8 +152,8 @@ for top in pair params; do
 done
 cat >"$W/params/params_override.prp" <<'EOF'
 const pp = import("params.params")
-pub comb params_override(a:u8) -> (y:u9, z:u9) {
-  const r = pp<STEP=9, NEG=(-4)>(a=a)
+pub comb params_override(a:U8) -> (y:U9, z:U9) {
+  const r = pp<`STEP`=9, NEG=(-4)>(a=a)
   y = r.y
   z = r.z
 }
@@ -204,7 +204,7 @@ echo "PASS: a reserved-word Verilog parameter folds instead of becoming an unpar
 $LHD compile "$W/params/pair.prp" "$W/params/params.prp" "$W/params/params_p1.prp"   --emit-dir pyrope:"$W/reemit" --workdir "$W/reemit-w" -q || fail "re-emit of generated Pyrope failed"
 for u in params params_p1; do
   [ -s "$W/reemit/$u.prp" ] || fail "re-emit wrote a ZERO-BYTE $u.prp (template silently dropped)"
-  grep -q 'STEP=' "$W/reemit/$u.prp" || fail "re-emitted $u.prp lost its generic header"
+  grep -q '`STEP`=' "$W/reemit/$u.prp" || fail "re-emitted $u.prp lost its generic header"
 done
 echo "PASS: a fully-defaulted generic unit survives a pyrope -> pyrope re-emit"
 

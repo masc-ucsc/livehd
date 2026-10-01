@@ -1,0 +1,14 @@
+/*
+:name: spec_types_lowercase_field_read
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+// Former lowercase type spellings are ordinary identifiers (07-typesystem.md).
+pub comb spec_types_lowercase_field_read(a:Bool) -> (o:Bool) {
+  const t = (const `bool` = true)
+  o = a and t.bool
+}
+
+cassert(spec_types_lowercase_field_read(a=true) and not spec_types_lowercase_field_read(a=false))

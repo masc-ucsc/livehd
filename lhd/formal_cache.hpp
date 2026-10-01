@@ -8,8 +8,9 @@
 // only (a REFUTE is rare and fast to reconfirm; caching it would need witness
 // revalidation). Unknown is NEVER cached. The whole verdict section is keyed
 // under the engine-identity salt (kFormalSrcSalt: a build-time content hash of
-// pass/lec + pass/semdiff + the cvc5 pin — //lhd:formal_salt), so any prover
-// change drops every cached verdict on load, with no human in the loop.
+// pass/lec + pass/semdiff + the proof-prep code (lhd_kernel_formal.cpp, graph,
+// pass/single_edge, pass/cprop) + the cvc5 pin — //lhd:formal_salt), so any
+// prover change drops every cached verdict on load, with no human in the loop.
 //
 // Strategy hints are the cache's third record kind:
 // which `auto` choice WON per def — keyed by canonical entity NAME, not digest,

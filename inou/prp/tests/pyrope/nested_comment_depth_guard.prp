@@ -1,0 +1,12 @@
+/*
+:name: nested_comment_depth_guard
+:type: compile
+*/
+
+// The parser-depth pre-scan must follow comment NESTING: everything from the
+// outer `/*` to its matching `*/` is comment, so neither the brackets nor the
+// `"` inside count.
+/* /* */ " ((((((((((((((((((((((((((((((((((((((((((((((((((((((((((( */
+pub comb nested_comment_depth_guard(a:U8) -> (o:U8) {
+  o = ((((a))))
+}

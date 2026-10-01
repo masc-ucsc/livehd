@@ -122,6 +122,9 @@ struct Driver_options {
   unsigned          threads          = 1;  // 0: available CPUs; synth defaults to automatic
   uint64_t          time_budget_ms   = 0;  // per mapped color; 0 disables the soft gate
   bool              allow_oversize   = false;
+  // Optional caller admission in addition to the normal memory/time gates.
+  // False refuses the result; it never switches to an alternative flow.
+  std::function<bool(std::string_view)> admission;
 };
 
 // What the driver resolved for one region, and the services a backend calls
@@ -131,12 +134,16 @@ struct Region_ctx {
       : rb(region), options(region_options) {}
   const livehd::partition::Region_body& rb;
   const Driver_options&                 options;  // the region's effective options (region_opts applied)
+  // Owned, resolved metadata built under the graph lock. Available to a
+  // region hook after blasting; null before translation and on cache hits.
+  // No source-graph access is needed to read these snapshots.
+  const Source_state_table*             source_state = nullptr;
   // region_opts overrides of the backend's own command strings (flow, load).
   std::optional<std::string>            flow;
   std::optional<std::string>            load;
   // A ware trial re-maps a remembered region under candidate options: its
   // overrides are the ones recorded when the region was first mapped.
-  bool                                  ware_trial = false;
+  bool                                  ware_trial       = false;
   // A delay target anywhere in this run: the run level, this region, or any
   // region_opts (CLI or graph-embedded).
   bool                                  timing_requested = false;

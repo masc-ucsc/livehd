@@ -1,0 +1,10 @@
+/*
+:name: spec_types_banned_bool_cast
+:type: error
+:error: `bool` was renamed `Bool`
+*/
+// Undeclared lowercase type/cast spellings must name their replacement (07-typesystem.md).
+// Rule: the old CAST spelling `bool(x)` (value position) is an error.
+pub comb spec_types_banned_bool_cast(a:U4) -> (o:Bool) {
+  o = bool(a)  // locate_error_here
+}

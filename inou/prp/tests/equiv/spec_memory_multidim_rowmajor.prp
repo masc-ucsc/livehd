@@ -1,0 +1,19 @@
+/*
+:name: spec_memory_multidim_rowmajor
+:type: equiv
+:verilog_top: spec_memory_multidim_rowmajor
+:pyrope_top: spec_memory_multidim_rowmajor
+*/
+// SPEC (docs 08-memories.md): "A multi-dimensional memory lowers to one flat
+// memory with **row-major** addressing (`b[i][j]` on a `[4][8]` array reads flat
+// address `i*8 + j`), and every access must supply one index per dimension."
+// Rule encoded here: a `reg b:[4][8]U8` memory written and read through two
+// runtime indices is the flat 32-entry memory addressed `i*8 + j` (the golden is
+// literally flat).
+pub mod spec_memory_multidim_rowmajor(clk:Clock, we:Bool, wi:U2, wj:U3, d:U8, ri:U2, rj:U3) -> (q:U8@[0]) {
+  reg b:[4][8]U8 = nil
+  q = b[ri][rj]
+  if we {
+    b[wi][wj] = d
+  }
+}

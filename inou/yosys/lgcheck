@@ -704,16 +704,82 @@ run_clock_blind_yosys() {
   run_equiv_yosys "$@"
 }
 
+# The engines of stages 1..1c and 4 (equiv_simple/equiv_induct) have no base
+# case: they prove every $equiv from state ASSUMED to have been equal -- a
+# same-named register (equiv_make), a stage-1r rename, a structural merge
+# (equiv_struct) -- and they unroll back through UNPAIRED state as if an
+# earlier clock edge had set it, so no power-on value is ever applied. A
+# stage's proof therefore counts only once its first cycles from power-on are
+# covered too (power_on.py holds the one per-bit rule: a gold `init` bit that
+# is x -- absent init = all x -- is a don't-care the gate's power-on value
+# refines, as in the bounded miter's -ignore_gold_x; a defined one must match):
+#  - every PAIRED state bit must start compatible, else the stage falls
+#    through and the bounded miter, which starts from power-on, decides;
+#  - when some state with a defined power-on value is on NO pair (a renamed
+#    register the stage never matched, a memory's init), the first
+#    ${base_steps} cycles from power-on must agree on every $equiv the proof
+#    assumed: a bounded `sat` of the stage's own equiv_miter, from the power-on
+#    values. That covers the -seq 4 induction window and equiv_simple's step.
+# `power_on_pairs` dumps the pairs a stage proposes, and only what the check
+# reads: the init-bearing nets, their aliases, the $equiv cells and memories.
+# Each stage keeps the commands that build its equiv module in one variable
+# (`stage_N`), so `power_on_ok N "$stage_N"` can rebuild that module for the
+# base case only when one is needed, instead of every stage keeping a
+# `design -save` copy of the whole design around its proof.
+power_on_tool="${SELF_DIR}/power_on.py"
+base_steps=5
+power_on_pairs() {
+  echo "select equiv/a:init %a equiv/t:\$equiv %u equiv/t:\$mem* %u; write_json -selected lgcheck$1_pairs.json; select -clear"
+}
+power_on_ok() {
+  local stage=$1
+  local build=$2
+  python3 "$power_on_tool" check "lgcheck${stage}_pairs.json"
+  case $? in
+  0) return 0 ;;
+  3) ;; # a state bit on no pair has a power-on value: the base case decides
+  *) return 1 ;;
+  esac
+  # equiv_miter drops every wire attribute, so the power-on values travel
+  # beside it and power_on.py puts them back. The constraints must be
+  # satisfiable (step 1 alone has a model), or an init clash would make the
+  # proof below vacuous.
+  if run_equiv_yosys --heuristic -p "${build%;}; equiv_miter -trigger -undef lgcheck_base equiv;
+          select lgcheck_base equiv/a:init; write_rtlil -selected lgcheck${stage}_base.il" \
+      >"lgcheck${stage}_miter.log" 2>&1 \
+      && python3 "$power_on_tool" inject "lgcheck${stage}_base.il" "lgcheck${stage}_base_init.il" \
+      && run_equiv_yosys --heuristic -p "read_rtlil lgcheck${stage}_base_init.il; hierarchy -top lgcheck_base;
+          memory_map; opt_clean;
+          sat -seq 1 -set-init-undef -enable_undef -set-def-inputs lgcheck_base;
+          sat -seq ${base_steps} -set-init-undef -enable_undef -set-def-inputs -prove trigger 0 lgcheck_base" \
+      >"lgcheck${stage}_base.log" 2>&1 \
+      && grep -q "SAT solving finished - model found" "lgcheck${stage}_base.log" \
+      && grep -q "SAT proof finished - no model found: SUCCESS!" "lgcheck${stage}_base.log"; then
+    return 0
+  fi
+  echo "INFO: stage ${stage}: state on no pair has a power-on value, and the first ${base_steps} cycles from power-on were not shown to agree (lgcheck${stage}_miter.log, lgcheck${stage}_base.log); that proof is not accepted"
+  return 1
+}
+
 yosys_prep="proc; bmuxmap; memory -nomap; write_verilog trace0.v ; equiv_make gold gate equiv; write_verilog trace0b.v ; prep -flatten -top equiv; hierarchy -top equiv; hierarchy -check; flatten; proc; bmuxmap; opt_clean;"
+# The same, dumping the pairs equiv_make proposed (stage `$1`) before prep's
+# opt_merge folds a gold and a gate register that agree on power-on: the fold
+# keeps ONE init attribute, so afterwards a gate net would read as never
+# initialized. (It never merges two different inits.)
+yosys_prep_pairs() {
+  echo "${yosys_prep/equiv_make gold gate equiv;/equiv_make gold gate equiv; $(power_on_pairs "$1");}"
+}
 
 yosys_equiv="equiv_simple;"
 #yosys_equiv_extra="${yosys_simple}; equiv_simple -seq 4; equiv_induct -seq 4;"
 yosys_equiv_extra="${yosys_simple}; equiv_induct -seq 4;"
 
-run_clock_blind_yosys --heuristic -p "${yosys_read}; ${yosys_prep}; ${yosys_equiv}; write_verilog trace1.v ; equiv_status -assert" \
+rm -f lgcheck{1,1n,1r,1p,1m,1c,4}_pairs.json lgcheck{1,1n,1r,1p,1m,1c,4}_base.il
+stage_1="${yosys_read}; $(yosys_prep_pairs 1)"
+run_clock_blind_yosys --heuristic -p "${stage_1} ${yosys_equiv}; write_verilog trace1.v ; equiv_status -assert" \
   2>/dev/null | tee lgcheck1.log | grep "Equivalence successfully proven!"
 
-if [ $? -eq 0 ]; then
+if [ $? -eq 0 ] && power_on_ok 1 "$stage_1"; then
   echo "1.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
   exit 0
 fi
@@ -734,12 +800,12 @@ yosys_state_prep="${yosys_read}; memory; opt -full;
     rename -hide w:* @state_outputs %d; select -unset state_outputs;
     splitnets"
 rm -f lgcheck1n.json lgcheck_memory_names.ys
-run_clock_blind_yosys --heuristic -p "${yosys_state_prep};
-    equiv_make gold gate equiv; hierarchy -top equiv;
-    equiv_simple -undef; equiv_induct -undef -seq 4;
+stage_1n="${yosys_state_prep};
+    equiv_make gold gate equiv; hierarchy -top equiv; $(power_on_pairs 1n)"
+run_clock_blind_yosys --heuristic -p "${stage_1n}; equiv_simple -undef; equiv_induct -undef -seq 4;
     write_json lgcheck1n.json; equiv_status -assert" \
   2>lgcheck1n.err | tee lgcheck1n.log | grep "Equivalence successfully proven!"
-if [ $? -eq 0 ]; then
+if [ $? -eq 0 ] && power_on_ok 1n "$stage_1n"; then
   echo "1n.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
   exit 0
 fi
@@ -750,10 +816,14 @@ fi
 # hide their internal names, then rebuild and reprove the ENTIRE comparison.
 # No previously proved cut is assumed, and rename -hide never hides ports.
 # This is a new proof attempt, not deletion of failed obligations from a proof.
-state_retry_names=$(python3 - <<'PYSTATE_RETRY'
+state_retry_names=$(python3 -B - "$SELF_DIR" <<'PYSTATE_RETRY'
+import functools
 import json
 import re
+import sys
 from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from power_on import compatible
 try:
     module = json.loads(Path("lgcheck1n.json").read_text())["modules"]["equiv"]
 except (OSError, ValueError, KeyError):
@@ -781,54 +851,143 @@ for name, net in nets.items():
     if other and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.$]*(\[[0-9]+\])*", base):
         if any((a, b) in unproven for a, b in zip(net["bits"], other["bits"])):
             names.add("w:" + base.replace("[", "?").replace("]", "?"))
-# Cgen encodes the source Memory name reversibly in its wrapper instance.
-# memory_module.cpp preserves <source>._mem[<word>][<bit>] after mapping.
-# Restore only existing pairs, without collisions or port changes. A fresh
-# comparison below must prove every proposed memory state and public output.
+# Cgen encodes the source Memory name reversibly: `__lhdmem_h<hex>_e` is the
+# wrapper instance of memory <decoded> (its storage `.data[word][bit]`), or,
+# for an inline packed memory, the register `_e_data[word*bits+bit]`. The
+# counterpart on the other side is either a mapped netlist's
+# <source>._mem[<word>][<bit>] (memory_module.cpp) or an RTL array's
+# <source>[<word>][<bit>] after `memory` (memory_map), or a hand-written flop
+# bank per word, `<source><word>` / `<source>_<word>` (pass/lec pairs the same
+# banks with the memory). A rolled loop's
+# replica `u_loop_<n>__li<k>.<inst>.X` is the unrolled `<inst>__li<k>.X`
+# (the same fold pass/lec/encode.cpp applies). Restore only existing pairs,
+# without collisions or port changes. A fresh comparison below must prove
+# every proposed state and public output.
 memory_commands = []
 ports = module.get("ports", {})
+side_names = {"gold": set(), "gate": set()}
 for name in nets:
-    match = re.fullmatch(
-        r"(.*?)__lhdmem_h([0-9a-f]+)_e\.data\[([0-9]+)\]\[([0-9]+)\]_(gold|gate)", name
-    )
+    for side in side_names:
+        if name.endswith("_" + side):
+            side_names[side].add(name[:-(len(side) + 1)])
+
+
+def fold_rolled_loops(name):
+    out, tags = [], ""
+    for seg in name.split("."):
+        loop = re.fullmatch(r"u_loop_[0-9]+((?:__li[0-9]+)+)", seg)
+        if loop:
+            tags += loop.group(1)  # wrapper level: drop it, carry its ordinal tag
+            continue
+        head = re.match(r"[^\[]*", seg).group(0)
+        out.append(head + tags + seg[len(head):])
+        tags = ""
+    return ".".join(out) if not tags else name
+
+
+# A word spelling per counterpart form; `{w}` is the word and `[<bit>]` follows.
+WORD_FORMS = ("{b}._mem[{w}]", "{b}[{w}]", "{b}{w}", "{b}_{w}")
+
+
+@functools.lru_cache(maxsize=None)
+def word_bits(side, base, form):
+    # The bits per word of `base` spelled WORD_FORMS[form] on `side`, 0 if absent.
+    # One scan per memory and form, never one per bit.
+    pattern = re.escape(WORD_FORMS[form].format(b=base, w="\x00")).replace("\x00", "-?[0-9]+") + r"\[([0-9]+)\]"
+    bits = [int(m.group(1)) for n in side_names[side] for m in [re.fullmatch(pattern, n)] if m]
+    return max(bits) + 1 if bits else 0
+
+
+@functools.lru_cache(maxsize=None)
+def word_span(side, base, form):
+    # The (lowest, highest) word index of `base` spelled WORD_FORMS[form] on
+    # `side`, None if absent. A declared index may be negative (`mem [-3:4]`).
+    pattern = re.escape(WORD_FORMS[form].format(b=base, w="\x00")).replace("\x00", "(-?[0-9]+)") + r"\[[0-9]+\]"
+    words = [int(m.group(1)) for n in side_names[side] for m in [re.fullmatch(pattern, n)] if m]
+    return (min(words), max(words)) if words else None
+
+
+@functools.lru_cache(maxsize=None)
+def wrapper_words(side, prefix, encoded):
+    # The number of words of the cgen memory wrapper `<prefix>__lhdmem_h<encoded>_e`.
+    pattern = re.escape(f"{prefix}__lhdmem_h{encoded}_e.data[") + r"([0-9]+)\]\[[0-9]+\]"
+    words = [int(m.group(1)) for n in side_names[side] for m in [re.fullmatch(pattern, fold_rolled_loops(n))] if m]
+    return max(words) + 1 if words else 0
+
+
+def counterparts(name, side, other):
+    folded = fold_rolled_loops(name)
+    match = re.fullmatch(r"(.*?)__lhdmem_h([0-9a-f]+)_e(?:\.data\[([0-9]+)\]\[([0-9]+)\]|_data\[([0-9]+)\])", folded)
     if not match:
-        continue
-    prefix, encoded, word, bit, side = match.groups()
+        return [folded] if folded != name else []
+    prefix, encoded, word, bit, flat = match.groups()
     try:
         decoded = bytes.fromhex(encoded).decode("utf-8")
     except (ValueError, UnicodeError):
-        continue
-    old = name[:-(len(side) + 1)]
-    new = f"{prefix}{decoded}._mem[{word}][{bit}]"
-    other = "gate" if side == "gold" else "gold"
-    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.$]*(\[[0-9]+\])*", new):
-        continue
-    if new + "_" + other not in nets or new + "_" + side in nets:
-        continue
-    if old in ports or new in ports:
-        continue
-    memory_commands += [f"cd {side}", f"rename {old} {new}", "cd .."]
+        return []
+    base = f"{prefix}{decoded}"
+    out  = []
+    for form, spell in enumerate(WORD_FORMS):
+        if flat is None:
+            # A cgen wrapper counts its words from 0, while memory_map names an
+            # RTL array's words by their DECLARED index: `mem [5:50]` spells
+            # wrapper word 0 `mem[5]`. Shift by the counterpart's lowest index
+            # when its span is exactly this memory's.
+            span  = word_span(other, base, form)
+            shift = span[0] if span and span[1] - span[0] + 1 == wrapper_words(side, prefix, encoded) else 0
+            out.append(spell.format(b=base, w=int(word) + shift) + f"[{bit}]")
+        elif (bits := word_bits(other, base, form)) > 0:
+            out.append(spell.format(b=base, w=int(flat) // bits) + f"[{int(flat) % bits}]")
+    return out
+
+
+# The engines that consume these renames (equiv_simple/equiv_induct) have no
+# base case: a paired state is assumed equal at power-on. So pair only state
+# that can START equal (power_on.compatible, the rule every stage's power-on
+# check applies). A power-on mismatch stays unpaired and is left to the base
+# case and the bounded miter, which start from power-on.
+def init_of(side, name):
+    init = nets.get(f"{name}_{side}", {}).get("attributes", {}).get("init")
+    return None if init is None else str(init).lower()
+
+
+claimed = set()
+for side, other in (("gold", "gate"), ("gate", "gold")):
+    for old in sorted(side_names[side]):
+        if old in ports:
+            continue
+        for new in counterparts(old, side, other):
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.$]*(\[-?[0-9]+\])*", new):
+                continue
+            if new not in side_names[other] or new in side_names[side] or new in ports or (side, new) in claimed:
+                continue
+            inits = {side: init_of(side, old), other: init_of(other, new)}
+            if not compatible(inits["gold"], inits["gate"]):
+                break
+            claimed.add((side, new))
+            memory_commands += [f"cd {side}", f"rename {old} {new}", "cd .."]
+            break
 Path("lgcheck_memory_names.ys").write_text(";\n".join(memory_commands))
 print(" ".join(sorted(names)))
 PYSTATE_RETRY
 )
 if [ -s lgcheck_memory_names.ys ]; then
-  run_clock_blind_yosys --heuristic -p "${yosys_state_prep}; script lgcheck_memory_names.ys;
-      equiv_make gold gate equiv; hierarchy -top equiv;
-      equiv_simple -undef; equiv_induct -undef -seq 4; equiv_status -assert" \
+  stage_1r="${yosys_state_prep}; script lgcheck_memory_names.ys;
+      equiv_make gold gate equiv; hierarchy -top equiv; $(power_on_pairs 1r)"
+  run_clock_blind_yosys --heuristic -p "${stage_1r}; equiv_simple -undef; equiv_induct -undef -seq 4; equiv_status -assert" \
     2>lgcheck1r.err | tee lgcheck1r.log | grep "Equivalence successfully proven!"
-  if [ $? -eq 0 ]; then
+  if [ $? -eq 0 ] && power_on_ok 1r "$stage_1r"; then
     echo "1r.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
     exit 0
   fi
 fi
 
 if [ -n "$state_retry_names" ]; then
-  run_clock_blind_yosys --heuristic -p "${yosys_state_prep}; rename -hide ${state_retry_names};
-      equiv_make gold gate equiv; hierarchy -top equiv;
-      equiv_simple -undef; equiv_induct -undef -seq 4; equiv_status -assert" \
+  stage_1p="${yosys_state_prep}; rename -hide ${state_retry_names};
+      equiv_make gold gate equiv; hierarchy -top equiv; $(power_on_pairs 1p)"
+  run_clock_blind_yosys --heuristic -p "${stage_1p}; equiv_simple -undef; equiv_induct -undef -seq 4; equiv_status -assert" \
     2>lgcheck1p.err | tee lgcheck1p.log | grep "Equivalence successfully proven!"
-  if [ $? -eq 0 ]; then
+  if [ $? -eq 0 ] && power_on_ok 1p "$stage_1p"; then
     echo "1p.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
     exit 0
   fi
@@ -838,11 +997,12 @@ fi
 # Map memories and propose structural correspondence, then PROVE every added
 # $equiv obligation. Leaving $mem cells opaque makes equiv_simple inconclusive;
 # a monolithic temporal SAT query also misses this useful state correspondence.
-run_clock_blind_yosys --heuristic -p "${yosys_read}; memory; opt -full;
+stage_1m="${yosys_read}; memory; opt -full;
     equiv_make gold gate equiv; hierarchy -top equiv;
-    equiv_struct -icells; equiv_simple; equiv_induct -seq 4; equiv_status -assert" \
+    equiv_struct -icells; $(power_on_pairs 1m)"
+run_clock_blind_yosys --heuristic -p "${stage_1m}; equiv_simple; equiv_induct -seq 4; equiv_status -assert" \
   2>lgcheck1m.err | tee lgcheck1m.log | grep "Equivalence successfully proven!"
-if [ $? -eq 0 ]; then
+if [ $? -eq 0 ] && power_on_ok 1m "$stage_1m"; then
   echo "1m.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
   exit 0
 fi
@@ -851,11 +1011,19 @@ fi
 # clock model, including transparency/hold behavior, and prove the original
 # public comparison points. Structural guesses at a latch's D input are too
 # strong: D is deliberately don't-care while the latch is closed.
-run_equiv_yosys --heuristic -p "${yosys_read}; memory; opt -full; clk2fflogic; opt -full;
-    equiv_make gold gate equiv; hierarchy -top equiv;
-    equiv_simple; equiv_induct -seq 4; equiv_status -assert" \
+# clk2fflogic re-samples every register into anonymous `$auto$...#sampled`
+# cells, so its pairs are no longer register outputs; the power-on check reads
+# the same-name pairs of the design BEFORE that rewrite (equiv_make leaves
+# gold and gate in place, so that pairing module is simply deleted again). The
+# base case runs on the clk2fflogic model the proof used: its steps are
+# global-clock ticks, and the induction window is counted in the same ticks.
+stage_1c="${yosys_read}; memory; opt -full;
+    equiv_make gold gate equiv; $(power_on_pairs 1c); delete equiv;
+    clk2fflogic; opt -full;
+    equiv_make gold gate equiv; hierarchy -top equiv"
+run_equiv_yosys --heuristic -p "${stage_1c}; equiv_simple; equiv_induct -seq 4; equiv_status -assert" \
   2>lgcheck1c.err | tee lgcheck1c.log | grep "Equivalence successfully proven!"
-if [ $? -eq 0 ]; then
+if [ $? -eq 0 ] && power_on_ok 1c "$stage_1c"; then
   echo "1c.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
   exit 0
 fi
@@ -1027,13 +1195,14 @@ if [ "$ASYNC_FF" -eq 0 ]; then
 else
   stage4_runner=false
 fi
-$stage4_runner -p "${yosys_read};
+stage_4="${yosys_read};
     memory -nomap; opt_expr -full; opt -purge; proc; opt -purge;
     opt_reduce -full; opt_expr -mux_undef; opt_reduce; opt_merge; opt_clean -purge; techmap -map +/adff2dff.v;
-    ${yosys_prep}; opt -purge; proc; opt -purge; ${yosys_equiv_extra}; equiv_status -assert" \
+    $(yosys_prep_pairs 4) opt -purge; proc; opt -purge"
+$stage4_runner -p "${stage_4}; ${yosys_equiv_extra}; equiv_status -assert" \
   2>/dev/null | tee lgcheck4.log | grep "Equivalence successfully proven!"
 
-if [ $? -eq 0 ]; then
+if [ $? -eq 0 ] && power_on_ok 4 "$stage_4"; then
   echo "4.Successfully matched ${GATE} with ${GOLD} top:${OPT_TOP}"
   exit 0
 fi

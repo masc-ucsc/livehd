@@ -20,14 +20,14 @@
 // `snap` has no reset and no initializer, so it powers on to a seeded draw
 // (sim.init_zero=false, the default): it must HOLD that draw through reset and
 // until the first push, then take one byte per push.
-pub mod loop_carry_split_reset_domains(reset:u1, en:u1, d:u8) -> (q:u32@[], v:u4@[]) {
-  reg snap:u32 = nil
-  reg valids:u4:[reset_pin = ref reset, async = true] = 0
-  reg ptr:u2:[reset_pin = ref reset, async = true] = 0
-  reg ren:u1:[reset_pin = ref reset, async = true] = 0
+pub mod loop_carry_split_reset_domains(reset:Reset, en:U1, d:U8) -> (q:U32@[], v:U4@[]) {
+  reg snap:U32 = nil
+  reg valids:U4:[reset_pin = reset, async = true] = 0
+  reg ptr:U2:[reset_pin = reset, async = true] = 0
+  reg ren:U1:[reset_pin = reset, async = true] = 0
   ren = en
-  mut nxt:u32 = snap
-  mut nv:u4 = valids
+  mut nxt:U32 = snap
+  mut nv:U4 = valids
   for slot in 0..<4 {
     if (ren != 0) and (ptr == slot) {
       nxt#[(slot * 8)..+8] = d
@@ -35,7 +35,7 @@ pub mod loop_carry_split_reset_domains(reset:u1, en:u1, d:u8) -> (q:u32@[], v:u4
     }
   }
   if ren != 0 {
-    ptr = ptr + 1
+    wrap ptr = ptr + 1
   }
   snap = nxt
   valids = nv
@@ -48,7 +48,7 @@ test loop_carry_split_reset_domains.holds_power_on_until_push {
   const first = acc.q  // the settled power-on draw, before any edge
   tick 8 {
     acc.reset = clock < 2
-    acc.en = (clock == 4) or (clock == 5)  // `ren` pushes at edges 5 and 6
+    acc.en = U1((clock == 4) or (clock == 5))  // `ren` pushes at edges 5 and 6
     acc.d = 0x5A + clock
     step
     if clock < 5 {

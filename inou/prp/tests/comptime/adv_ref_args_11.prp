@@ -7,12 +7,12 @@
 
 // A `wrap`-qualified write to a `ref` parameter must propagate back to the
 // caller, exactly like a plain write does. None of these increments actually
-// wrap (every result fits in u8), so each result is the ordinary +1.
-comb wrap_inc(ref a:u8) -> () {
+// wrap (every result fits in U8), so each result is the ordinary +1.
+comb wrap_inc(ref a:U8) -> () {
   wrap a += 1
 }
 
-mut v:u8 = 10
+mut v:U8 = 10
 wrap_inc(ref v)
 cassert(v == 11)
 wrap_inc(ref v)

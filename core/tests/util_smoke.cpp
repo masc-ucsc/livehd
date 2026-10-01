@@ -38,6 +38,7 @@ TEST(HashUtil, StablePrimitives) {
 
 TEST(StrTools, CanonicalEntityName) {
   EXPECT_EQ(str_tools::canonical_entity_name("file.foo__u8_s16_bool"), "foo");
+  EXPECT_EQ(str_tools::canonical_entity_name("file.foo__U8_S16_Bool"), "foo");
   EXPECT_EQ(str_tools::canonical_entity_name("file.foo__named"), "foo__named");
   EXPECT_EQ(str_tools::canonical_entity_name("foo"), "foo");
 }

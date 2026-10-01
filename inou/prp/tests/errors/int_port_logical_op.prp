@@ -1,0 +1,20 @@
+/*
+:name: int_port_logical_op
+:type: error
+:tolg: 1
+:error: operator .and. requires boolean operands \(a:integer
+*/
+
+// User ruling 2026-09-27 (2): a `U1` PORT is an integer, so it is not a
+// logical operand -- the mirror of bool_port_arith_mix.prp (a bool port in
+// arithmetic). The same expression with a local `const a:U1` is rejected
+// today ("operator `and` requires boolean operands (a:integer, b:unknown)"),
+// but the operator typecheck never falls back to the port's io_meta kind, so
+// `a and b` compiles. This guards against a fix that only stamps BOOL port
+// kinds.
+//
+// Legal spelling: `q = a == 1 and b` (or `Bool(a) and b`).
+
+pub mod int_port_logical_op(a:U1, b:Bool) -> (q:Bool@[0]) {
+  q = a and b   // locate_error_here
+}

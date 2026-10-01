@@ -28,7 +28,7 @@ module array2d_mem_partial_write (
 
   // A chunk WIDER than one bit at a constant lane, with the outer dimension
   // constant and only the inner one dynamic — the mixed const/runtime selector
-  // chain that build_unpacked_index folds into one linear address.
+  // chain that build_unpacked_address folds into one linear address.
   logic [1:0][3:0] wide[2][2];
   always_ff @(posedge clk) begin
     wide[1][adr[0]][1] <= din[11:8];

@@ -21,8 +21,10 @@
 #include "array_dim.hpp"
 #include "diag.hpp"
 #include "hlop/dlop.hpp"
+#include "io_port_rules.hpp"
 #include "lnast_ntype.hpp"
 #include "range_bits.hpp"
+#include "ssa_demote.hpp"
 #include "str_tools.hpp"
 
 namespace {
@@ -61,37 +63,25 @@ constexpr bool stmt_is_scope_barrier(Lnast_ntype::Lnast_ntype_int t) {
          || Lnast_ntype::is_func_return(t);
 }
 
-// Return the separator/digit offsets for a private SSA version suffix.
-std::optional<std::pair<size_t, size_t>> stale_ssa_suffix(std::string_view name) {
-  const auto pos = name.rfind("___ssa_");
-  if (pos == std::string_view::npos) {
-    return std::nullopt;
-  }
-  const size_t digit_pos = pos + 7;
-  if (digit_pos >= name.size()) {
-    return std::nullopt;
-  }
-  for (size_t i = digit_pos; i < name.size(); ++i) {
-    if (name[i] < '0' || name[i] > '9') {
-      return std::nullopt;
-    }
-  }
-  return std::pair{pos, digit_pos};
-}
-
 // Parse the bits/is_signed from a prim_type_uint/prim_type_sint subtree
 // (or any other type ntype). Returns {bits=0, is_signed=true} on miss.
 struct Type_info {
   int32_t     bits        = 0;
   bool        is_signed   = true;
   Io_kind     kind        = Io_kind::none;
+  Io_sig      sig         = Io_sig::none;  // `Clock`/`Reset` (kind == boolean)
   bool        has_range   = false;  // explicit `int(min,max)` bounds (both known, fit i64)
   int64_t     range_min   = 0;
   int64_t     range_max   = 0;
+  // Both bounds known but past an i64 (see Lnast_io_entry::wide_range_min).
+  std::optional<Dlop> wide_range_min;
+  std::optional<Dlop> wide_range_max;
   // `[N]T` port: packed bus of N lanes (see Lnast_io_entry).
-  int64_t     array_size  = 0;
-  int32_t     elem_bits   = 0;
-  bool        elem_signed = false;
+  int64_t              array_size  = 0;
+  int32_t              elem_bits   = 0;
+  bool                 elem_signed = false;
+  bool                 elem_bool   = false;
+  std::vector<int64_t> inner_dims;  // `[N][M]T`: {M} (Lnast_io_entry::inner_dims)
   // Deferred generic-width bound leaves (see Lnast_io_entry::bound_max_text).
   std::string bound_max_text;
   std::string bound_min_text;
@@ -108,16 +98,27 @@ Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid
     // can register the lane view (signed lanes need their own sign).
     auto elem_nid = lnast->get_first_child(type_nid);
     auto len_nid  = elem_nid.is_invalid() ? elem_nid : lnast->get_sibling_next(elem_nid);
-    if (elem_nid.is_invalid() || len_nid.is_invalid() || !Lnast_ntype::is_const(lnast->get_type(len_nid))) {
+    if (elem_nid.is_invalid() || len_nid.is_invalid()) {
+      return ti;
+    }
+    // A generic element width (`v:[N]unsigned(bits=N)`): the ELEMENT's deferred
+    // bound leaves, which the specializer folds and patches into the element.
+    auto et = type_info_from(lnast, elem_nid);
+    if (et.kind == Io_kind::boolean) {
+      et.bits      = 1;
+      et.is_signed = false;
+    }
+    ti.bound_max_text = et.bound_max_text;
+    ti.bound_min_text = et.bound_min_text;
+    if (!Lnast_ntype::is_const(lnast->get_type(len_nid))) {
       return ti;
     }
     const auto lanes = upass::array_dim_lanes(lnast->get_name(len_nid));
     if (!lanes) {
       return ti;  // a still-unfolded name, not a size (see array_dim.hpp)
     }
-    const auto n  = *lanes;
-    auto       et = type_info_from(lnast, elem_nid);
-    if (et.kind != Io_kind::integer || et.bits <= 0) {
+    const auto n = *lanes;
+    if ((et.kind != Io_kind::integer && et.kind != Io_kind::boolean) || et.bits <= 0) {
       return ti;
     }
     // Validate the int64 product BEFORE narrowing to the int32 `bits` field.
@@ -144,12 +145,28 @@ Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid
     ti.array_size  = n;
     ti.elem_bits   = et.bits;
     ti.elem_signed = et.is_signed;
-    ti.bits        = static_cast<int32_t>(total_bits);
-    ti.is_signed   = false;
+    ti.elem_bool   = et.kind == Io_kind::boolean;
+    if (et.array_size > 0) {
+      // `[N][M]T`: the element is itself a packed row. Keep its dims, so the
+      // port is not mistaken for N lanes of one wide integer, and the LEAF's
+      // sign (a packed row is unsigned).
+      ti.inner_dims.push_back(et.array_size);
+      ti.inner_dims.insert(ti.inner_dims.end(), et.inner_dims.begin(), et.inner_dims.end());
+      ti.elem_signed = et.elem_signed;
+      ti.elem_bool   = et.elem_bool;
+    }
+    ti.bits      = static_cast<int32_t>(total_bits);
+    ti.is_signed = false;
     return ti;
   }
   if (Lnast_ntype::is_prim_type_bool(tty)) {
     ti.kind = Io_kind::boolean;
+    return ti;
+  }
+  if (Lnast_ntype::is_prim_type_clock_or_reset(tty)) {
+    // `Clock`/`Reset`: a 1-bit Bool-shaped port that binds by type.
+    ti.kind = Io_kind::boolean;
+    ti.sig  = Lnast_ntype::is_prim_type_clock(tty) ? Io_sig::clock : Io_sig::reset;
     return ti;
   }
   if (Lnast_ntype::is_prim_type_string(tty)) {
@@ -203,6 +220,9 @@ Type_info type_info_from(const std::shared_ptr<Lnast>& lnast, Lnast_nid type_nid
         ti.has_range = true;
         ti.range_min = min_v->to_just_i64();
         ti.range_max = max_v->to_just_i64();
+      } else {
+        ti.wide_range_min = min_v;
+        ti.wide_range_max = max_v;
       }
     }
   }
@@ -323,53 +343,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
   // against targets already handed out) and bumped until it is free. The map
   // keeps the rename consistent: every occurrence of one stale name lands on
   // the same demoted name, which is what preserves the def/use links.
-  // Freshly parsed trees cannot contain this private suffix. Check that cheap
-  // path before allocating/copying every node name into the collision set used
-  // only when an already-lowered tree is sent through SSA again.
-  bool has_stale_ssa = false;
-  for (auto nid : lnast->depth_preorder(root)) {
-    if (!nid.is_invalid() && stale_ssa_suffix(lnast->get_name(nid))) {
-      has_stale_ssa = true;
-      break;
-    }
-  }
-  if (has_stale_ssa) {
-    absl::flat_hash_set<std::string>              taken;   // every name in the body
-    absl::flat_hash_map<std::string, std::string> demote;  // stale name -> demoted
-    for (auto nid : lnast->depth_preorder(root)) {
-      if (!nid.is_invalid()) {
-        taken.emplace(lnast->get_name(nid));
-      }
-    }
-    for (auto nid : lnast->depth_preorder(root)) {
-      if (nid.is_invalid()) {
-        continue;
-      }
-      const std::string_view nm     = lnast->get_name(nid);
-      const auto             suffix = stale_ssa_suffix(nm);
-      if (!suffix) {
-        continue;
-      }
-      const auto [pos, d] = *suffix;
-      std::string stale(nm);
-      auto        it = demote.find(stale);
-      if (it == demote.end()) {
-        const std::string base(nm.substr(0, pos));
-        uint64_t          version = 0;
-        for (size_t i = d; i < nm.size() && version < (1ULL << 40); ++i) {
-          version = version * 10 + static_cast<uint64_t>(nm[i] - '0');
-        }
-        std::string cand;
-        do {
-          cand = base + "__w" + std::to_string(version);
-          ++version;
-        } while (taken.contains(cand));
-        taken.emplace(cand);
-        it = demote.emplace(std::move(stale), std::move(cand)).first;
-      }
-      lnast->set_name(nid, it->second);  // interns the demoted name
-    }
-  }
+  const bool has_stale_ssa = !upass::demote_stale_ssa(*lnast, root).empty();
 
   // ── Detect post-func_extract shape: top must have an 'io' child ──────────
   bool      found_io    = false;
@@ -434,23 +408,43 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
   // bus. Carry the view across the overwrite; the packed width has to agree, so
   // a genuinely changed port cannot inherit a stale one.
   struct Array_view {
-    int64_t size        = 0;
-    int32_t elem_bits   = 0;
-    bool    elem_signed = false;
+    int64_t              size        = 0;
+    int32_t              elem_bits   = 0;
+    bool                 elem_signed = false;
+    bool                 elem_bool   = false;
+    std::vector<int64_t> inner_dims;
   };
   // By VALUE, not by pointer into meta.inputs/meta.outputs: those two vectors
   // are replaced wholesale a few lines below, and a pointer that is merely
   // still-valid-today is a trap for the next edit that moves the restore call.
   absl::flat_hash_map<std::string, Array_view> prior_array_view;
+  // Likewise a `Clock`/`Reset` port: the staging io re-emits a Bool-kind port
+  // with no type child, so a second pass would read it back untyped.
+  absl::flat_hash_map<std::string, Io_sig> prior_sig;
   for (const auto* v : {&meta.inputs, &meta.outputs}) {
     for (const auto& e : *v) {
       if (e.array_size > 0 && e.elem_bits > 0) {
-        prior_array_view.insert_or_assign(e.name, Array_view{e.array_size, e.elem_bits, e.elem_signed});
+        prior_array_view.insert_or_assign(e.name, Array_view{e.array_size, e.elem_bits, e.elem_signed, e.elem_bool, e.inner_dims});
+      }
+      if (e.sig != Io_sig::none) {
+        prior_sig.insert_or_assign(e.name, e.sig);
       }
     }
   }
+  // An array port whose shape does not fold yet (`v:[N]u4` or
+  // `v:[N]unsigned(bits=N)` on a generic lambda): its io entry has no width,
+  // so the staging io re-emits the DECLARED comp_type_array verbatim for the
+  // specializer to fold under the binds (clone_template_specialized).
+  absl::flat_hash_map<std::string, Lnast_nid> unsized_array_type;
+
   auto restore_array_view = [&](std::vector<Flat_field>& fields) {
     for (auto& f : fields) {
+      if (const auto sit = prior_sig.find(f.name);
+          sit != prior_sig.end() && f.sig == Io_sig::none && f.bits == 0 && f.array_size == 0
+          && (f.kind == Io_kind::none || f.kind == Io_kind::boolean)) {
+        f.kind = Io_kind::boolean;
+        f.sig  = sit->second;
+      }
       if (f.array_size > 0) {
         continue;
       }
@@ -461,6 +455,8 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
       f.array_size  = it->second.size;
       f.elem_bits   = it->second.elem_bits;
       f.elem_signed = it->second.elem_signed;
+      f.elem_bool   = it->second.elem_bool;
+      f.inner_dims  = it->second.inner_dims;
     }
   };
 
@@ -490,7 +486,286 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
     return {smin, smax};
   };
 
+  // ── Named port types (`req:Req_t`, `a:pk.Byte`, `p:Pair_t`) ──────────────
+  // A named type resolves to the unit that declares it: its
+  // `declare(<name>, <type>, 'type')` (a scalar alias carries the type there, a
+  // tuple type carries prim_type_none followed by one `type_spec(<name>.<field>,
+  // <type>)` row per field). An import binding is looked up where the name is
+  // spelled -- this unit's body prologue replays `func_call(pk, 'import',
+  // 'dir/types')`, a file shell binds `store(pk, %t)` after the call -- so the
+  // binding need not match the file stem, and a single-entry import
+  // (`import("dir/types.Pair_t")`) names the member itself. Any other name is
+  // local: the unit or one of its enclosing units (`file.top.inner` ->
+  // `file.top` -> `file`) declares it.
+  //
+  // The lookups are built lazily and memoized for the run: a unit may have many
+  // named-type ports, and every one used to rescan the same statements.
+  struct Named_type {
+    std::shared_ptr<Lnast> unit;
+    std::string            member;
+  };
+  absl::flat_hash_map<std::string_view, std::shared_ptr<Lnast>> units_by_name;
+  const auto                                                    unit_named = [&](std::string_view name) -> std::shared_ptr<Lnast> {
+    if (units_by_name.empty()) {
+      for (const auto& ex : *all_units_) {
+        if (ex != nullptr) {
+          units_by_name.try_emplace(ex->get_top_module_name(), ex);
+        }
+      }
+    }
+    const auto it = units_by_name.find(name);
+    return it == units_by_name.end() ? nullptr : it->second;
+  };
+  const auto first_stmts = [](const Lnast& ln) -> Lnast_nid {
+    for (auto top : ln.children(ln.get_root())) {
+      if (Lnast_ntype::is_stmts(ln.get_type(top))) {
+        return top;
+      }
+    }
+    return Lnast_nid{};
+  };
+  // Per unit: import binding -> unquoted unit text.
+  absl::flat_hash_map<const Lnast*, absl::flat_hash_map<std::string, std::string>> import_bindings;
+  const auto import_text_of = [&](const Lnast& ln, std::string_view binding) -> std::optional<std::string> {
+    auto [cached, fresh] = import_bindings.try_emplace(&ln);
+    if (fresh) {
+      absl::flat_hash_map<std::string_view, std::string_view>    imports;  // call dst -> quoted unit text
+      std::vector<std::pair<std::string_view, std::string_view>> stores;   // binding <- call dst
+      if (const auto stmts = first_stmts(ln); !stmts.is_invalid()) {
+        for (auto stmt : ln.children(stmts)) {
+          const auto dst = ln.get_first_child(stmt);
+          const auto arg = dst.is_invalid() ? dst : ln.get_sibling_next(dst);
+          if (arg.is_invalid() || !Lnast_ntype::is_ref(ln.get_type(dst))) {
+            continue;
+          }
+          if (Lnast_ntype::is_func_call(ln.get_type(stmt))) {
+            const auto txt = ln.get_sibling_next(arg);
+            if (Lnast_ntype::is_const(ln.get_type(arg)) && ln.get_name(arg) == "import" && !txt.is_invalid()) {
+              imports.insert_or_assign(ln.get_name(dst), ln.get_name(txt));
+            }
+          } else if (Lnast_ntype::is_store(ln.get_type(stmt)) && Lnast_ntype::is_ref(ln.get_type(arg))) {
+            stores.emplace_back(ln.get_name(dst), ln.get_name(arg));
+          }
+        }
+      }
+      const auto unquote = [](std::string_view text) {
+        if (text.size() >= 2 && (text.front() == '\'' || text.front() == '"') && text.back() == text.front()) {
+          text = text.substr(1, text.size() - 2);
+        }
+        return std::string(text);
+      };
+      for (const auto& [dst, text] : imports) {
+        cached->second.try_emplace(std::string(dst), unquote(text));
+      }
+      for (const auto& [bind, tmp] : stores) {
+        if (const auto it = imports.find(tmp); it != imports.end() && !imports.contains(bind)) {
+          cached->second.insert_or_assign(std::string(bind), unquote(it->second));
+        }
+      }
+    }
+    const auto it = cached->second.find(binding);
+    return it == cached->second.end() ? std::nullopt : std::optional<std::string>(it->second);
+  };
+  // Per unit: type name -> its `declare(<member>, <type>, 'type')`.
+  absl::flat_hash_map<const Lnast*, absl::flat_hash_map<std::string, Lnast_nid>> type_decls;
+  const auto type_decl_of = [&](const Named_type& nt) -> Lnast_nid {
+    const auto& ex       = *nt.unit;
+    auto [cached, fresh] = type_decls.try_emplace(&ex);
+    if (fresh) {
+      if (const auto stmts = first_stmts(ex); !stmts.is_invalid()) {
+        for (auto stmt : ex.children(stmts)) {
+          if (!Lnast_ntype::is_declare(ex.get_type(stmt))) {
+            continue;
+          }
+          const auto n_nid = ex.get_first_child(stmt);
+          const auto t_nid = n_nid.is_invalid() ? n_nid : ex.get_sibling_next(n_nid);
+          const auto m_nid = t_nid.is_invalid() ? t_nid : ex.get_sibling_next(t_nid);
+          if (!m_nid.is_invalid() && Lnast_ntype::is_ref(ex.get_type(n_nid)) && Lnast_ntype::is_const(ex.get_type(m_nid))
+              && ex.get_name(m_nid) == "type") {
+            cached->second.try_emplace(std::string(ex.get_name(n_nid)), stmt);
+          }
+        }
+      }
+    }
+    const auto it = cached->second.find(nt.member);
+    return it == cached->second.end() ? Lnast_nid{} : it->second;
+  };
+  // Another unit exports only its `pub type`s. A unit that is loaded but does
+  // not export the member is a user error (`why`); a unit that is not loaded
+  // here says nothing.
+  const auto imported = [&](const std::shared_ptr<Lnast>& unit,
+                            std::string                   member,
+                            std::string_view              spelled,
+                            std::string&                  why) -> std::optional<Named_type> {
+    if (unit == nullptr) {
+      return std::nullopt;
+    }
+    const auto& pubs = unit->get_pub_list();
+    if (std::none_of(pubs.begin(), pubs.end(), [&](const Lnast_pub_entry& p) { return p.kind == "type" && p.name == member; })) {
+      // A `pub const Hue = enum(…)` is a type through its hidden integer
+      // encoding alias (user ruling 2026-09-28 (29)).
+      if (std::any_of(pubs.begin(), pubs.end(), [&](const Lnast_pub_entry& p) { return p.name == member; })) {
+        if (Named_type enc{unit, Lnast::enum_encoding_type(member)}; !type_decl_of(enc).is_invalid()) {
+          return enc;
+        }
+      }
+      Named_type nt{unit, member};
+      why = type_decl_of(nt).is_invalid()
+                ? std::format("`{}` is not a type (`{}` declares no `type {}`)", spelled, unit->get_top_module_name(), member)
+                : std::format("type `{}` of `{}` is not `pub`", member, unit->get_top_module_name());
+      return std::nullopt;
+    }
+    return Named_type{unit, std::move(member)};
+  };
+  // (context unit, spelled name) -> (the type, or why it is not one).
+  absl::flat_hash_map<std::pair<const Lnast*, std::string>, std::pair<std::optional<Named_type>, std::string>> resolved_types;
+
+  const auto resolve_named_type
+      = [&](const std::shared_ptr<Lnast>& ctx, const std::string& type_name, std::string& why) -> std::optional<Named_type> {
+    if (all_units_ == nullptr || ctx == nullptr) {
+      return std::nullopt;
+    }
+    auto [cached, fresh]   = resolved_types.try_emplace(std::pair<const Lnast*, std::string>{ctx.get(), type_name});
+    auto& [result, reason] = cached->second;
+    if (fresh) {
+      if (const auto dot = type_name.rfind('.'); dot != std::string::npos) {
+        const auto binding = type_name.substr(0, dot);
+        const auto text    = import_text_of(*ctx, binding);
+        result             = imported(unit_named(text ? *text : binding), type_name.substr(dot + 1), type_name, reason);
+      } else if (const auto text = import_text_of(*ctx, type_name)) {
+        if (const auto mdot = text->rfind('.'); mdot != std::string::npos) {
+          result = imported(unit_named(std::string_view(*text).substr(0, mdot)), text->substr(mdot + 1), type_name, reason);
+        }
+      } else {
+        for (std::string unit{ctx->get_top_module_name()};;) {
+          if (auto ex = unit_named(unit)) {
+            if (Named_type nt{ex, type_name}; !type_decl_of(nt).is_invalid()) {
+              result = std::move(nt);
+              break;
+            }
+          }
+          const auto udot = unit.rfind('.');
+          if (udot == std::string::npos) {
+            break;
+          }
+          unit.resize(udot);
+        }
+      }
+    }
+    why = reason;
+    return result;
+  };
+
   std::function<void(Lnast_nid, const std::string&, bool, std::vector<Flat_field>&, int32_t, int32_t)> flatten_assign;
+  // Expand a named TUPLE type into its leaves under `full` (a field typed by
+  // another named type recurses in the scope of the unit that declares it).
+  // `ti` receives a scalar alias's type instead. False when the name resolves
+  // to nothing; `why` then says why when that is a user error.
+  std::function<bool(const std::shared_ptr<Lnast>&,
+                     const std::string&,
+                     const std::string&,
+                     bool,
+                     std::vector<Flat_field>&,
+                     int32_t,
+                     int32_t,
+                     Type_info&,
+                     int,
+                     std::string&)>
+      expand_named_type;
+  expand_named_type = [&](const std::shared_ptr<Lnast>& ctx,
+                          const std::string&            type_name,
+                          const std::string&            full,
+                          bool                          expand_tuple,
+                          std::vector<Flat_field>&      out,
+                          int32_t                       smin,
+                          int32_t                       smax,
+                          Type_info&                    ti,
+                          int                           depth,
+                          std::string&                  why) -> bool {
+    const auto nt = depth < 16 ? resolve_named_type(ctx, type_name, why) : std::nullopt;
+    if (!nt) {
+      // `const Color = enum(…)` binds a value, not a `type`, but it is a type
+      // through its hidden integer encoding alias (user ruling 2026-09-28 (29)).
+      if (depth >= 16 || !why.empty() || type_name.find('.') != std::string::npos) {
+        return false;
+      }
+      const auto enc = resolve_named_type(ctx, Lnast::enum_encoding_type(type_name), why);
+      if (!enc) {
+        return false;
+      }
+      const auto& ex = *enc->unit;
+      ti             = type_info_from(enc->unit, ex.get_sibling_next(ex.get_first_child(type_decl_of(*enc))));
+      return ti.kind != Io_kind::none;
+    }
+    const auto decl = type_decl_of(*nt);
+    if (decl.is_invalid()) {
+      return false;
+    }
+    const auto& ex    = *nt->unit;
+    const auto  t_nid = ex.get_sibling_next(ex.get_first_child(decl));
+    if (Lnast_ntype::is_ref(ex.get_type(t_nid))) {  // an alias of another named type
+      return expand_named_type(nt->unit, std::string(ex.get_name(t_nid)), full, expand_tuple, out, smin, smax, ti, depth + 1, why);
+    }
+    if (!Lnast_ntype::is_prim_type_none(ex.get_type(t_nid))) {
+      ti = type_info_from(nt->unit, t_nid);  // a scalar alias
+      return ti.kind != Io_kind::none;
+    }
+    // An integer-encoded enum: its values are the unsigned integer range of the
+    // hidden alias prp2lnast declares next to it (user ruling 2026-09-28 (29)).
+    if (const auto enc = type_decl_of(Named_type{nt->unit, Lnast::enum_encoding_type(nt->member)}); !enc.is_invalid()) {
+      ti = type_info_from(nt->unit, ex.get_sibling_next(ex.get_first_child(enc)));
+      return ti.kind != Io_kind::none;
+    }
+    if (!expand_tuple) {
+      return true;  // a tuple type left whole (a named `self`)
+    }
+    const auto field_prefix = nt->member + ".";
+    bool       any          = false;
+    // The rows follow the declare; a named field's `attr_set(<f>, 'typename',
+    // …)` sits among them.
+    for (auto row = ex.get_sibling_next(decl);
+         !row.is_invalid() && (Lnast_ntype::is_type_spec(ex.get_type(row)) || Lnast_ntype::is_attr_set(ex.get_type(row)));
+         row = ex.get_sibling_next(row)) {
+      if (!Lnast_ntype::is_type_spec(ex.get_type(row))) {
+        continue;
+      }
+      const auto f_nid = ex.get_first_child(row);
+      const auto f_ty  = f_nid.is_invalid() ? f_nid : ex.get_sibling_next(f_nid);
+      if (f_ty.is_invalid() || !ex.get_name(f_nid).starts_with(field_prefix)) {
+        continue;
+      }
+      any                 = true;
+      const auto leaf     = full + "." + std::string(ex.get_name(f_nid).substr(field_prefix.size()));
+      Type_info  field_ti = type_info_from(nt->unit, f_ty);
+      if (Lnast_ntype::is_ref(ex.get_type(f_ty))
+          && expand_named_type(nt->unit, std::string(ex.get_name(f_ty)), leaf, true, out, smin, smax, field_ti, depth + 1, why)
+          && field_ti.kind == Io_kind::none) {
+        continue;  // a nested tuple type: its leaves are in `out`
+      }
+      if (!why.empty()) {
+        return false;
+      }
+      // Exactly the leaf the inline spelling (`x:(v:[2]u4, s:s3)`) flattens to.
+      out.push_back({leaf, field_ti.bits, field_ti.is_signed, false, false, field_ti.kind, smin, smax, {}});
+      out.back().array_size     = field_ti.array_size;
+      out.back().elem_bits      = field_ti.elem_bits;
+      out.back().elem_signed    = field_ti.elem_signed;
+      out.back().elem_bool      = field_ti.elem_bool;
+      out.back().inner_dims     = field_ti.inner_dims;
+      out.back().has_range      = field_ti.has_range;
+      out.back().range_min      = field_ti.range_min;
+      out.back().range_max      = field_ti.range_max;
+      out.back().wide_range_min = std::move(field_ti.wide_range_min);
+      out.back().wide_range_max = std::move(field_ti.wide_range_max);
+    }
+    if (any) {
+      saw_composite_port = true;
+    } else if (why.empty()) {
+      // Without this the port would harvest width-less (`input signed a`).
+      why = std::format("type `{}` gives a port no width (an enum with payloads, or a tuple type without typed fields)", type_name);
+    }
+    return any;
+  };
   flatten_assign = [&](Lnast_nid                assign_nid,
                        const std::string&       prefix,
                        bool                     collect_is_ref,
@@ -587,109 +862,81 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
     if (!type_nid.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(type_nid))) {
       type_name = std::string(lnast->get_name(type_nid));
     }
-    auto ti               = type_info_from(lnast, type_nid);
-    // THE one bounds->io_meta rule for a resolved scalar ALIAS, shared by the
-    // local and the imported recovery below so the two cannot drift.
-    auto alias_int_bounds = [&ti](const Dlop& max_v, const Dlop& min_v) {
-      ti.kind      = Io_kind::integer;
-      ti.is_signed = min_v.is_negative();
-      ti.bits      = min_v.is_negative() ? static_cast<int32_t>(std::max<int64_t>(max_v.get_signed_bits(), min_v.get_signed_bits()))
-                                         : (static_cast<int32_t>(max_v.get_payload_bits()));
-      if (max_v.is_just_i64() && min_v.is_just_i64()) {
-        ti.has_range = true;
-        ti.range_min = min_v.to_just_i64();
-        ti.range_max = max_v.to_just_i64();
+    auto        ti   = type_info_from(lnast, type_nid);
+    // A NAMED port type -- a scalar alias (`type Elem_T = u4`, `pk.Byte`) or a
+    // tuple type (`type Req_t = (…)`) -- is harvested HERE from the raw `ref`:
+    // without it the port harvested width-less (`input signed a`, one SIGNED
+    // bit) and a tuple port stayed ONE leaf whose field reads resolved to nil.
+    // A tuple type flattens exactly like its inline spelling; a named `self`
+    // stays whole (the inliner's has_self/does-check needs it). A generic stays
+    // for the specializer.
+    const auto& gens = lnast->get_generics();
+    if (ti.kind == Io_kind::none && !type_name.empty() && std::find(gens.begin(), gens.end(), type_name) == gens.end()) {
+      const bool  keep_whole = collect_is_ref && prefix.empty() && leaf_name == "self";
+      const auto  before     = out.size();
+      std::string why;
+      if (expand_named_type(lnast, type_name, full, !keep_whole, out, smin, smax, ti, 0, why) && ti.kind == Io_kind::none
+          && out.size() != before) {
+        return;  // the tuple's leaves replace the port
       }
-    };
-    // A LOCAL scalar alias port type (`type Elem_T = u4` in the same file, then
-    // `mod m(a:Elem_T)`) resolves off the FILE-SCOPE shell unit. The runner's
-    // emit_scalar_named_type_slot concretizes the LNAST slot later, so the tree
-    // dump looks right — but io_meta is harvested HERE, from the raw `ref`, and
-    // without this the port harvested width-less: `type Elem_T = u4` emitted
-    // `input signed a` (one bit, SIGNED) instead of `input [3:0] a`, and
-    // `a.[bits]` read nil. Silent, exit 0. Only the dotted IMPORTED spelling
-    // below was ever handled.
-    if (ti.kind == Io_kind::none && !type_name.empty() && type_name.find('.') == std::string::npos && all_units_ != nullptr) {
-      std::string unit{lnast->get_graph_name()};
-      if (const auto dot = unit.rfind('.'); dot != std::string::npos) {
-        unit.resize(dot);
-      }
-      for (const auto& ex : *all_units_) {
-        if (ex == nullptr || ex->get_top_module_name() != unit || !ex->get_lambda_kind().empty()) {
-          continue;
-        }
-        // Scan the shell's `declare(<alias>, prim_type_int(max,min), 'type')`,
-        // the same shape emit_scalar_named_type_slot recovers.
-        for (auto top : ex->children(ex->get_root())) {
-          if (!Lnast_ntype::is_stmts(ex->get_type(top))) {
-            continue;
-          }
-          for (auto stmt : ex->children(top)) {
-            if (!Lnast_ntype::is_declare(ex->get_type(stmt))) {
-              continue;
-            }
-            const auto n_nid = ex->get_first_child(stmt);
-            const auto t_nid = n_nid.is_invalid() ? n_nid : ex->get_sibling_next(n_nid);
-            const auto m_nid = t_nid.is_invalid() ? t_nid : ex->get_sibling_next(t_nid);
-            if (n_nid.is_invalid() || t_nid.is_invalid() || m_nid.is_invalid() || !Lnast_ntype::is_ref(ex->get_type(n_nid))
-                || ex->get_name(n_nid) != type_name || !Lnast_ntype::is_const(ex->get_type(m_nid)) || ex->get_name(m_nid) != "type"
-                || !Lnast_ntype::is_prim_type_int(ex->get_type(t_nid))) {
-              continue;
-            }
-            const auto mx = ex->get_first_child(t_nid);
-            const auto mn = mx.is_invalid() ? mx : ex->get_sibling_next(mx);
-            if (mx.is_invalid() || mn.is_invalid()) {
-              continue;
-            }
-            auto max_v = Dlop::from_pyrope(ex->get_name(mx));
-            auto min_v = Dlop::from_pyrope(ex->get_name(mn));
-            if (!max_v || !min_v || !max_v->is_integer() || !min_v->is_integer()) {
-              continue;
-            }
-            alias_int_bounds(*max_v, *min_v);
-            break;
-          }
-          if (ti.kind != Io_kind::none) {
-            break;
-          }
-        }
-        break;
+      if (!why.empty()) {
+        // Without this the port would harvest width-less (`input signed a`).
+        livehd::diag::sink().emit(livehd::diag::Diagnostic{
+            .severity = livehd::diag::Severity::error,
+            .code     = "unknown-type",
+            .category = "type",
+            .pass     = "upass.ssa",
+            .message  = std::format("port `{}` of `{}`: {}", full, lnast->get_top_module_name(), why),
+            .span     = lnast->span_of(type_nid).is_null() ? lnast->span_of_nearest(assign_nid) : lnast->span_of(type_nid),
+            .hint     = "import a `pub type` of that unit, or declare the type here; a port type needs a width (an integer, "
+                        "a tuple of typed fields, or an enum without payloads)"});
+        throw std::runtime_error(why);
       }
     }
-    // An IMPORTED scalar alias port type (`cmd:pkg.VPU_FCMD_SZ_T`) resolves
-    // its range off the exporting unit's pub-type face — without it the port
-    // harvests width-less and the lowering breaks.
-    if (ti.kind == Io_kind::none && !type_name.empty() && all_units_ != nullptr) {
-      if (const auto dot = type_name.rfind('.'); dot != std::string::npos) {
-        const std::string unit = type_name.substr(0, dot);
-        const std::string mem  = type_name.substr(dot + 1);
-        for (const auto& ex : *all_units_) {
-          if (ex == nullptr || ex->get_top_module_name() != unit || !ex->get_lambda_kind().empty()) {
-            continue;
-          }
-          std::string max_txt;
-          std::string min_txt;
-          if (ex->pub_type_face(mem, max_txt, min_txt)) {
-            auto max_v = Dlop::from_pyrope(max_txt);
-            auto min_v = Dlop::from_pyrope(min_txt);
-            if (max_v && min_v && max_v->is_integer() && min_v->is_integer()) {
-              alias_int_bounds(*max_v, *min_v);
-            }
-          }
+    if (ti.bits == 0 && !type_nid.is_invalid() && Lnast_ntype::is_comp_type_array(lnast->get_type(type_nid))) {
+      unsized_array_type.insert_or_assign(full, type_nid);
+      // Outside a template nothing folds a port's shape later: a dimension
+      // that is no extent here would otherwise harvest a width-less port
+      // (`input signed v`, one bit) and silently drop every lane.
+      for (auto lvl = type_nid; !lnast->is_template() && Lnast_ntype::is_comp_type_array(lnast->get_type(lvl));) {
+        const auto elem = lnast->get_first_child(lvl);
+        const auto dim  = elem.is_invalid() ? elem : lnast->get_sibling_next(elem);
+        if (!dim.is_invalid() && !(Lnast_ntype::is_const(lnast->get_type(dim)) && upass::array_dim_lanes(lnast->get_name(dim)))) {
+          const auto msg = std::format("the dimension of array port `{}` of `{}` is not a compile-time constant",
+                                       full,
+                                       lnast->get_top_module_name());
+          livehd::diag::sink().emit(livehd::diag::Diagnostic{
+              .severity = livehd::diag::Severity::error,
+              .code     = "array-port-dim-not-comptime",
+              .category = "type",
+              .pass     = "upass.ssa",
+              .message  = msg,
+              .span     = lnast->span_of_nearest(assign_nid),
+              .hint     = "size a port with a literal, a `comptime const`, or an expression over the lambda's generic "
+                          "parameters (`[N+1]`)"});
+          throw std::runtime_error(msg);
+        }
+        if (elem.is_invalid()) {
           break;
         }
+        lvl = elem;
       }
     }
     out.push_back({full, ti.bits, ti.is_signed, is_ref, is_vararg, ti.kind, smin, smax, std::move(type_name)});
     out.back().array_size     = ti.array_size;
     out.back().elem_bits      = ti.elem_bits;
     out.back().elem_signed    = ti.elem_signed;
+    out.back().elem_bool      = ti.elem_bool;
+    out.back().inner_dims     = ti.inner_dims;
     out.back().has_range      = ti.has_range;
     out.back().range_min      = ti.range_min;
     out.back().range_max      = ti.range_max;
+    out.back().wide_range_min = std::move(ti.wide_range_min);
+    out.back().wide_range_max = std::move(ti.wide_range_max);
     out.back().has_default    = has_default;
     out.back().bound_max_text = ti.bound_max_text;
     out.back().bound_min_text = ti.bound_min_text;
+    out.back().sig            = ti.sig;
   };
 
   if (!in_tup_nid.is_invalid()) {
@@ -704,6 +951,27 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
   }
   restore_array_view(flat_inputs);
   restore_array_view(flat_outputs);
+  // Clocks and resets bind by TYPE (`Clock`/`Reset`, docs 07-typesystem). A
+  // unit read from Verilog has no such types: stamp the class so every binding
+  // rule downstream reads one field. A 1-bit input that clocks a register or a
+  // memory (a `clock_pin`/`__store_clock_pin` the reader emits, ruling 80: the
+  // use, never the name, makes a Verilog clock) is a clock; otherwise the
+  // reader's naming convention (clk/clock, reset/rst/reset_n/rst_n) decides.
+  // The port keeps its integer kind (Verilog has no Bool either).
+  if (lnast->is_verilog_origin()) {
+    const auto clocking = upass::io_port::clock_nets(*lnast, lnast->get_root());
+    for (auto& f : flat_inputs) {
+      const bool one_bit = f.array_size == 0 && (f.kind == Io_kind::boolean || f.bits <= 1);
+      if (f.sig != Io_sig::none || !one_bit) {
+        continue;
+      }
+      if (clocking.contains(f.name) || upass::io_port::verilog_clock_name(f.name)) {
+        f.sig = Io_sig::clock;
+      } else if (upass::io_port::verilog_reset_name(f.name)) {
+        f.sig = Io_sig::reset;
+      }
+    }
+  }
   meta.invalidate_index();
   meta.inputs  = flat_inputs;
   meta.outputs = flat_outputs;
@@ -721,6 +989,21 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
 
   // Re-emit the io node with flattened leaf entries (no nested tuple_add
   // type subtree). Width/signedness for each entry come from io_meta.
+  std::function<void(const Lnast_nid&, const Lnast_nid&)> copy_type = [&](const Lnast_nid& src, const Lnast_nid& dst_parent) {
+    const auto t = lnast->get_type(src);
+    Lnast_nid  n;
+    if (Lnast_ntype::is_const(t)) {
+      n = staging->add_child(dst_parent, Lnast_node::create_const(lnast->get_name(src)));
+    } else if (Lnast_ntype::is_ref(t)) {
+      n = staging->add_child(dst_parent, Lnast_node::create_ref(lnast->get_name(src)));
+    } else {
+      n = staging->add_child(dst_parent, t);
+    }
+    for (auto c : lnast->children(src)) {
+      copy_type(c, n);
+    }
+  };
+
   auto new_io       = staging->add_child(new_root, Lnast_ntype::create_io());
   auto emit_section = [&](const std::vector<Flat_field>& fields, bool is_input) {
     auto tup = staging->add_child(new_io, Lnast_ntype::create_tuple_add());
@@ -728,7 +1011,9 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
       auto a = staging->add_child(tup, Lnast_ntype::create_store());
       staging->add_child(a, Lnast_node::create_ref(f.name));
       staging->add_child(a, Lnast_node::create_const(is_input && f.is_varargs ? "..." : is_input && f.is_ref ? "ref" : "nil"));
-      if (f.bits > 0) {
+      if (const auto ait = unsized_array_type.find(f.name); f.bits == 0 && ait != unsized_array_type.end()) {
+        copy_type(ait->second, a);
+      } else if (f.bits > 0) {
         // Re-emit the canonical prim_type_int(max,min) from the
         // flat field's (bits, signed).
         auto ty = staging->add_child(a, Lnast_ntype::create_prim_type_int());
@@ -1256,8 +1541,14 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
           // Slang/v2prp output is already scalar and uses globally unique
           // control-flow temporaries. Its rare repeated user name is a
           // straight-line declaration/poison overwrite, which the shared
-          // runner can version while streaming. Keep hand-written Pyrope on
-          // the established transformer until branch phi insertion migrates.
+          // runner can version while streaming. The gate is a SCOPE heuristic,
+          // not what makes streaming exact: the guards here and below (plain
+          // stores, no output, no write under control) are, for any origin.
+          // It admits every `::[timecheck=false]` unit (is_timecheck_off: a
+          // slang unit, its v2prp re-read -- which no longer carries
+          // verilog_origin -- and hand-written Pyrope carrying the attribute);
+          // other Pyrope keeps the established transformer until branch phi
+          // insertion migrates.
           // A repeated output needs a final-version commit back to the stable
           // port name. The current linear streaming path would otherwise keep
           // the poison first definition as the DCE root and discard the real
@@ -1270,7 +1561,7 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
           // (note_stream_ssa_definition). A repeated destination reached
           // through any other dest-bearing node would keep both drivers on
           // the raw name — force the branch-aware rebuild for those.
-          if (allow_stream_ssa && lnast->is_verilog_origin() && plain_store && def_it->second) {
+          if (allow_stream_ssa && lnast->is_timecheck_off() && plain_store && def_it->second) {
             use_stream_ssa = true;
             stream_ssa_names.emplace(name);
           } else {
@@ -1605,21 +1896,26 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
       // fall through: a non-port tuple_get is copied generically
     }
     if (Lnast_ntype::is_store(type)) {
-      // A WHOLE-tuple copy to a temp that feeds a post-if whole-store to a
-      // tuple-output port (`___p0 = ___pN`, with a later `store(p,___p0)`):
-      // distribute it into one per-leaf write `store(p.first,
-      // ___pN.first)`,
-      // ... so each output leaf is driven in BOTH arms and tolg muxes it.
-      // This is exactly the hand-written conditional per-field form. The
-      // post-if whole-store is then dropped (port_split_armed, below).
+      // A WHOLE-tuple write inside an arm whose destination is a tuple-output
+      // port: either a copy to a temp that feeds a post-if whole-store
+      // (`___p0 = ___pN`, with a later `store(p,___p0)`), or a direct
+      // `store(p, %tuple)` (`if s { r = (a=…, b=…) }`). Distribute it into one
+      // per-leaf write `store(p.first, ___pN.first)`, ... so each output leaf
+      // is driven in the arm and tolg muxes it against the other arm (or the
+      // value before the `if`). This is exactly the hand-written conditional
+      // per-field form. For the temp form the post-if whole-store is then
+      // dropped (port_split_armed, below); the direct form has none.
       {
         std::vector<Lnast_nid> kids;
         for (auto c : lnast->children(src_nid)) {
           kids.push_back(c);
         }
         if (kids.size() == 2 && Lnast_ntype::is_ref(lnast->get_type(kids[0])) && Lnast_ntype::is_ref(lnast->get_type(kids[1]))) {
-          if (auto pit = whole_port_split.find(std::string(lnast->get_name(kids[0]))); pit != whole_port_split.end()) {
-            const std::string& port     = pit->second;
+          const std::string dst_name(lnast->get_name(kids[0]));
+          const auto        pit       = whole_port_split.find(dst_name);
+          const bool        via_temp  = pit != whole_port_split.end();
+          if (via_temp || port_prefix.contains(dst_name)) {
+            const std::string& port     = via_temp ? pit->second : dst_name;
             const std::string  dot_port = port + ".";
             std::string        src_name(lnast->get_name(kids[1]));
             if (auto rit = rename_map.find(src_name); rit != rename_map.end()) {
@@ -1660,7 +1956,9 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
               staging->add_child(st, Lnast_node::create_ref(value_ref));
             }
             if (any) {
-              port_split_armed.insert(port);
+              if (via_temp) {
+                port_split_armed.insert(port);
+              }
               return;
             }
           }

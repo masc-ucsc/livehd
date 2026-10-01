@@ -67,13 +67,19 @@
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "absl/strings/str_join.h"
 #include "array_dim.hpp"
 #include "call_resolver.hpp"
 #include "decl_facts.hpp"
 #include "diag.hpp"
 #include "hash_util.hpp"
+#include "io_port_rules.hpp"
+#include "lnast_range.hpp"
 #include "lsp_index.hpp"
+#include "op_kind_rules.hpp"
 #include "range_bits.hpp"
+#include "default_prologue.hpp"
+#include "ssa_demote.hpp"
 
 namespace {
 
@@ -82,10 +88,10 @@ namespace {
 // the throw unwinds up to main's top-level catch, so the error-test harness sees
 // it even though the throw aborts the remaining pipeline stages.
 [[noreturn]] void fcall_arg_fail(const livehd::diag::Span& span, std::string_view code, const std::string& msg,
-                                 std::string_view hint) {
+                                 std::string_view hint, std::string_view category = "name") {
   livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
                                                      .code     = std::string{code},
-                                                     .category = "name",
+                                                     .category = std::string{category},
                                                      .pass     = "upass.runner",
                                                      .message  = msg,
                                                      .span     = span,
@@ -366,11 +372,15 @@ void collect_body_assigned_vars(const Lnast& ln, const Lnast_nid& nid, absl::fla
 
 // Emit a fatal comptime-loop diagnostic anchored at the `while` node's source
 // span (prp2lnast's attach_loc survives the lnastfmt round-trip), then abort the
-// walk — mirrors fcall_arg_fail's crash-safe flush-before-throw.
-[[noreturn]] void loop_fail(const livehd::diag::Span& span, std::string_view code, const std::string& msg, std::string_view hint) {
+// walk — mirrors fcall_arg_fail's crash-safe flush-before-throw. The category is
+// what the run's error class reports (lhd map_diag_category): `type` for a loop
+// the source got wrong (it can never exit), `unsupported` for a valid loop
+// LiveHD cannot lower yet — never the `internal` of an unmapped category.
+[[noreturn]] void loop_fail(const livehd::diag::Span& span, std::string_view category, std::string_view code,
+                            const std::string& msg, std::string_view hint) {
   livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
                                                      .code     = std::string{code},
-                                                     .category = "comptime",
+                                                     .category = std::string{category},
                                                      .pass     = "upass.runner",
                                                      .message  = msg,
                                                      .span     = span,
@@ -663,6 +673,18 @@ void uPass_runner::emit_subtree_verbatim() {
   }
 }
 
+std::optional<Dlop> uPass_runner::fold_frame_ref(std::string_view name) const {
+  if (auto v = symbol_table_.known_const_scalar(name)) {
+    return v;
+  }
+  // Inside an inlined body a user name is bound under the frame's tag (a
+  // generic `<N>`, a constant comb argument): `[N]` / `[0..<N]` read it there.
+  if (lm->in_inline_frame() && !Lnast::is_tmp(name)) {
+    return symbol_table_.known_const_scalar(lm->frame_variable(name));
+  }
+  return std::nullopt;
+}
+
 std::optional<Dlop> uPass_runner::try_fold_ref(std::string_view name) {
   // Every pass's fold values land on the runner-owned table now
   // (constprop trivials, attr_get/`is` results, wrap/sat narrowing), so read
@@ -753,16 +775,38 @@ std::optional<std::vector<std::pair<std::string, bool>>> uPass_runner::try_tuple
   std::vector<std::pair<std::string, bool>> out;
   std::set<std::string>                     seen;
   auto is_positional = [](const std::string& k) { return !k.empty() && k.find_first_not_of("0123456789") == std::string::npos; };
+  const auto slots   = symbol_table_.tuple_slot_ref.find(std::string(name));
   if (auto b = symbol_table_.get_bundle(name); b) {
+    // A runtime tuple split into per-field leaves (split_runtime_tuple_store)
+    // has exactly those fields: every slot reads a split leaf, its own or the
+    // one of the value it copies (`const d = if s { … } else { … }`). A
+    // runtime slot "0" beside them is the scalar carrier of a whole write
+    // (`d = %t`), which an `if` arm leaves runtime-divergent
+    // (Symbol_table::leave_scope): counting it as a field made `h(t=d)` look
+    // for a `t.0` leaf and `for f in d` iterate a value that does not exist.
+    auto reads_split_leaf = [&](const std::string& slot, const std::string& ref) {
+      if (!ref.ends_with(absl::StrCat(".", slot))) {
+        return false;
+      }
+      const auto split = split_tuple_leaves_.find(ref.substr(0, ref.size() - slot.size() - 1));
+      return split != split_tuple_leaves_.end() && split->second.contains(slot);
+    };
+    const bool scalar_marker
+        = slots != symbol_table_.tuple_slot_ref.end() && !slots->second.empty() && !slots->second.contains("0")
+          && b->get_trivial(bundle_path::of_string("0")).is_invalid()
+          && std::ranges::all_of(slots->second, [&](const auto& s) { return reads_split_leaf(s.first, s.second); });
     for (const auto& tl : b->top_levels()) {
       std::string key = tl.pos >= 0 ? std::to_string(tl.pos) : std::string(tl.name);
+      if (scalar_marker && key == "0") {
+        continue;
+      }
       if (!key.empty() && seen.insert(key).second) {
         out.emplace_back(key, is_positional(key));
       }
     }
   }
-  if (auto it = symbol_table_.tuple_slot_ref.find(std::string(name)); it != symbol_table_.tuple_slot_ref.end()) {
-    for (const auto& [slot, _] : it->second) {
+  if (slots != symbol_table_.tuple_slot_ref.end()) {
+    for (const auto& [slot, _] : slots->second) {
       if (seen.insert(slot).second) {
         out.emplace_back(slot, is_positional(slot));
       }
@@ -839,9 +883,9 @@ void uPass_runner::record_runtime_tuple_slot_refs() {
 
   // 2f-stream_ssa — pin each carrier to the version live AT CAPTURE.
   //
-  // Under STREAMING SSA (selected for a repeatedly-assigned scalar in a
-  // `is_verilog_origin()` unit, i.e. anything carrying `::[timecheck=false]`)
-  // the LNAST keeps the BASE name on every read and only the runner versions
+  // Under STREAMING SSA (selected for a repeatedly-assigned scalar in an
+  // `is_verilog_origin()` unit, i.e. one the slang reader produced) the
+  // LNAST keeps the BASE name on every read and only the runner versions
   // it, at emit time (emit_ref_or_folded -> stream_ssa_ref_name). But the
   // slot->carrier map records the RAW source name (constprop's
   // `tuple_slot_ref[dvar][slot] = current_text()`, and `consider` above), so a
@@ -1045,8 +1089,8 @@ void uPass_runner::check_self_does(const livehd::diag::Span& span, std::string_v
     auto kind_name = [](Io_kind k) -> std::string_view {
       switch (k) {
         case Io_kind::integer: return "integer";
-        case Io_kind::boolean: return "bool";
-        case Io_kind::string : return "string";
+        case Io_kind::boolean: return "Bool";
+        case Io_kind::string : return "String";
         case Io_kind::none   : break;
       }
       return "untyped";
@@ -1279,6 +1323,15 @@ bool uPass_runner::emit_scalar_named_type_slot(std::string_view type_name, std::
       lm->get_lnast()->add_imported_package(base);
     }
   }
+  // An integer-encoded enum declaration type (`reg st:Color`) concretizes to
+  // its hidden encoding alias (user ruling 2026-09-28 (29)), declared next to
+  // the enum: in this unit (an `enum` statement is replayed into every lambda
+  // that reads it) or in the file shell (a file-scope `const Color =
+  // enum(…)`). A port keeps the enum's name: upass.ssa already sized it.
+  const auto enc = Lnast::enum_encoding_type(type_name);
+  if (port_name.empty() && (symbol_table_.has_bundle(enc) || lookup_file_type(enc).first)) {
+    type_name = enc;
+  }
   auto tb = symbol_table_.get_bundle(type_name);
   if (!tb) {
     Dlop imax, imin;
@@ -1310,6 +1363,10 @@ bool uPass_runner::emit_scalar_named_type_slot(std::string_view type_name, std::
       }
       if (Lnast_ntype::is_prim_type_bool(shell.get_type(type_n))) {
         emit_leaf(Lnast_ntype::create_prim_type_bool());
+        return true;
+      }
+      if (Lnast_ntype::is_prim_type_clock_or_reset(shell.get_type(type_n))) {
+        emit_leaf(shell.get_type(type_n));  // `type C = Clock`: keep the class
         return true;
       }
       if (Lnast_ntype::is_prim_type_string(shell.get_type(type_n))) {
@@ -1597,7 +1654,7 @@ void uPass_runner::check_concat_lanes() {
         .span     = std::move(span),
         .hint     = "a concat window is sized by the lane's DECLARED type -- never by its value, an inferred range, "
                     "or a literal's spelling -- because narrowing one lane would shift every lane above it; bind it to "
-                    "a typed name first (`const w:u4 = <expr>` then `(..., w, ...)#[..]`)",
+                    "a typed name first (`const w:U4 = <expr>` then `(..., w, ...)#[..]`)",
     });
     bad = true;
   }
@@ -1659,7 +1716,7 @@ void uPass_runner::check_concat_dest(std::string_view dest_name, std::string_vie
         .message  = std::format("`{}` is assigned a concat but has no declared type", dest_name),
         .span     = std::move(span),
         .hint     = std::format("a concat's destination must declare the {}-bit width its lanes add up to "
-                                "(e.g. `{}:u{}` or `{}:s{}`)",
+                                "(e.g. `{}:U{}` or `{}:S{}`)",
                                 cit->second,
                                 dest_name,
                                 cit->second,
@@ -1913,6 +1970,26 @@ static std::string_view ssa_version_base(std::string_view name) {
   return {};
 }
 
+// The variable a COMPILER-MINTED SSA version in `ln` belongs to, or "" when
+// `name` is not one: upass.ssa's private `x___ssa_<N>`, and a `x__w<N>` that
+// demote_stale_ssa recorded on `ln` (both may stack). Unlike ssa_version_base
+// this never strips a source-authored `x__w2`, which is a distinct variable.
+static std::string minted_ssa_base(const Lnast& ln, std::string_view name) {
+  std::string_view base     = name;
+  bool             stripped = false;
+  for (;;) {
+    if (const auto suffix = upass::stale_ssa_suffix(base); suffix && suffix->first > 0) {
+      base = base.substr(0, suffix->first);
+    } else if (const auto demoted = ln.ssa_demoted_base(base); !demoted.empty()) {
+      base = demoted;
+    } else {
+      break;
+    }
+    stripped = true;
+  }
+  return stripped ? std::string(base) : std::string{};
+}
+
 // `x:u48 = 0sb?` — an UNKNOWN sign extension is the WIDTH-TAKING wildcard: the
 // `?` replicates into the destination's DECLARED width and stops there, so the
 // store is exactly `x = 0ub` + 48 `?` (and `v:u8 = 0sb?1` is `0ub??????_?1`).
@@ -2059,7 +2136,13 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
   // `ref` must NOT be folded: the ref names a TYPE, not a value, so folding it
   // through the symbol table (e.g. `const a = …; const x:a = …`) would replace
   // the type with `a`'s value. Keep child 1 verbatim for these op-nodes.
-  const bool type_slot_at_1 = Lnast_ntype::is_declare(op_ntype) || Lnast_ntype::is_type_spec(op_ntype);
+  const bool type_slot_at_1  = Lnast_ntype::is_declare(op_ntype) || Lnast_ntype::is_type_spec(op_ntype);
+  // A tuple/array element store (`store(w, 0, v)`) mutates the aggregate's
+  // CURRENT stream-SSA version in place, as the established SSA transformer
+  // does (`store(w___ssa_1, 0, v)`). The raw name would update a version that
+  // every later read has already moved past (`w = 0sb?; w[0] = a; o = w[0]`
+  // read all-X).
+  const bool stream_mutation = stream_ssa_enabled_ && Lnast_ntype::is_store(op_ntype) && lm->current_num_children() > 2;
 
   if (lm->has_child()) {
     lm->move_to_child();
@@ -2075,6 +2158,9 @@ void uPass_runner::emit_op_with_fold(bool fold_all) {
         // to primitive types — nothing else to emit
       } else if (idx == 0 && is_lhs && stream_ssa_active_def_.has_value() && Lnast_ntype::is_ref(lm->get_raw_ntype())) {
         emit_leaf(Lnast_node::create_ref(stream_ssa_active_def_->output));
+      } else if (idx == 0 && stream_mutation && Lnast_ntype::is_ref(lm->get_raw_ntype())
+                 && stream_ssa_ref_name(lm->current_text()) != lm->current_text()) {
+        emit_leaf(Lnast_node::create_ref(stream_ssa_ref_name(lm->current_text())));
       } else if (!is_lhs && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref) {
         emit_ref_or_folded(lm->current_text());
       } else if (!is_lhs && Lnast_ntype::is_store(lm->get_raw_ntype())) {
@@ -2378,7 +2464,7 @@ bool uPass_runner::resolve_node_operands(Resolved_node& out) {
         // leaves are read through plain refs (never tuple_get), so this is
         // the only place those reads are visible — constprop's
         // unset-unused-field warning consults the set.
-        symbol_table_.field_touched.insert(Symbol_table::field_touch_key(lm->get_top_module_name(), name));
+        symbol_table_.field_touched.insert(Symbol_table::field_touch_key(lm->unit_lnast()->get_top_module_name(), name));
       }
       std::shared_ptr<Bundle> b = symbol_table_.get_bundle(name);
       if (!b) {
@@ -2459,13 +2545,15 @@ bool uPass_runner::dispatch_push(upass::Push_method fn, Resolved_node& rn) {
           const bool over  = e0.trivial.gt_op(e0.bw_max)->is_known_true();
           const bool under = e0.trivial.lt_op(e0.bw_min)->is_known_true();
           if ((over || under) && !livehd::diag::sink().has_errors()) {
+            auto user = upass::Lnast_manager::user_name(Bundle::get_first_level(rn.dst_name));
+            user      = user.substr(0, user.find("___ssa_"));  // the variable, not its SSA version
             livehd::diag::sink().emit(livehd::diag::Diagnostic{
                 .severity = livehd::diag::Severity::error,
                 .code     = "bitwidth-overflow",
                 .category = "bitwidth",
                 .pass     = "upass.runner",
                 .message  = std::format("`{}` (value {}) does not fit its declared range [{}, {}]",
-                                        rn.dst_name,
+                                        user,
                                         e0.trivial.to_decimal_string(),
                                         e0.bw_min.to_decimal_string(),
                                         e0.bw_max.to_decimal_string()),
@@ -2651,7 +2739,13 @@ void uPass_runner::process_drop_candidate_push(upass::Push_method fn, bool fold_
   // must still fold away completely (the comptime suite depends on it), and a
   // constant PARAMETER binding is not an output so it keeps folding either way
   // — that is what generic `<N=SIZE>` specialization rides on.
-  const bool output_driver        = io_output_names_.contains(rn.dst_name);
+  //
+  // A defaulted input's default-value local (todo 3g E) is the same kind of
+  // root: nothing in this unit reads it (its own module drives the port from
+  // the input), but a later inliner of this materialized body binds the param
+  // from it at every call that omits the arg, so a constant default must
+  // survive as a store instead of folding away with its (absent) readers.
+  const bool output_driver        = io_output_names_.contains(rn.dst_name) || default_value_names_.contains(rn.dst_name);
   const bool inline_output_driver = !output_driver && vote_drop && is_inline_output_driver(rn.dst_name);
   if ((!vote_drop || output_driver || inline_output_driver || parameter_expr) && !any_pass_drops()) {
     emit_op_with_fold(fold_all);
@@ -2668,17 +2762,17 @@ namespace {
 // dotted names — the per-field range lives on the bundle Entry itself).
 std::string lsp_render_leaf_type(const Bundle::Entry& fe) {
   switch (fe.kind) {
-    case upass::Kind::boolean: return "bool";
-    case upass::Kind::string : return "string";
+    case upass::Kind::boolean: return "Bool";
+    case upass::Kind::string : return "String";
     case upass::Kind::enumv  : return "enum";
     case upass::Kind::tuple  : return "tuple";
     default                  : break;
   }
   if (!fe.trivial.is_invalid() && fe.trivial.is_string()) {
-    return "string";
+    return "String";
   }
   if (!fe.trivial.is_invalid() && fe.trivial.is_bool()) {
-    return "bool";
+    return "Bool";
   }
   const auto to_i64 = [](const Dlop& v) -> std::optional<int64_t> {
     if (v.is_invalid() || !v.is_integer() || v.has_unknowns() || v.get_signed_bits() > 62) {
@@ -2723,7 +2817,7 @@ std::string lsp_render_leaf_type(const Bundle::Entry& fe) {
   }
   const bool have_decl_i64 = dlo && dhi;
   if (!dbits && (!lo || !hi) && !have_decl_i64) {
-    return "int";  // no declared width and no derived/point range
+    return "Signed";  // no declared width and no derived/point range
   }
   bool sgn;
   int  bits;
@@ -2737,7 +2831,7 @@ std::string lsp_render_leaf_type(const Bundle::Entry& fe) {
     sgn  = *lo < 0;
     bits = sgn ? sbits(*lo, *hi) : ubits(*hi);
   }
-  std::string r(1, sgn ? 's' : 'u');
+  std::string r(1, sgn ? 'S' : 'U');
   r += std::to_string(bits);
   // Show bw_min/bw_max ONLY when the value is strictly NARROWER than the
   // declared full range — a full-range value adds no info, and wide-type
@@ -3104,7 +3198,7 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
   } else if (is_tuple) {
     render += lsp_render_tuple(*bun, symbol_table_, base);
   } else if (kind == upass::Kind::boolean) {
-    render += "bool";
+    render += "Bool";
   } else if (kind == upass::Kind::string) {
     // A callee-name string ('unit.entity', how constprop folds an imported or
     // aliased lambda) is a function value, not text — show it as one. Gate the
@@ -3126,13 +3220,13 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
       render        += ' ';
       render        += txt;
     } else {
-      render += "string";
+      render += "String";
     }
   } else {
     const bool have_decl = dlo && dhi;  // declared envelope fits int64
     const bool have_inf  = ilo && ihi;  // inferred range known
     if (!have_decl && !have_inf && !dbits) {
-      render += "int";  // no declared width and no derived range
+      render += "Signed";  // no declared width and no derived range
     } else {
       // Width prefix = the DECLARED width when known (dbits — handles u64/u128
       // whose bounds don't fit int64), else derived from the i64 envelope/range.
@@ -3145,7 +3239,7 @@ void uPass_runner::record_lsp_def(std::string_view dst_name) {
       } else {
         bits = (*ilo < 0) ? sbits(*ilo, *ihi) : ubits(*ihi);
       }
-      render += sgn ? 's' : 'u';
+      render += sgn ? 'S' : 'U';
       render += std::to_string(bits);
       // Show bw_min/bw_max ONLY when the inferred range is strictly NARROWER
       // than the declared full range (`z:u8` narrowed to 0..15 →
@@ -3579,6 +3673,28 @@ void uPass_runner::emit_inline_sext(const std::string& dst, const std::string& s
 }
 
 void uPass_runner::process_bit_selection() {
+  // Stamp a compiler temp's selected width as its declared ENVELOPE ONLY --
+  // decl_max/decl_min on its scalar entry -- never through a scratch
+  // `type_spec` node. decl_facts::lookup derives range, bits and (from
+  // min >= 0) unsignedness from it; the temp's kind is left alone.
+  const auto stamp_envelope = [&](const std::string& dst, uint32_t w) {
+    if (!symbol_table_.has_known(dst)) {
+      (void)symbol_table_.set(dst, std::make_shared<Bundle>(dst));
+    }
+    if (const auto b = symbol_table_.get_bundle_for_write(dst);
+        b && (b->is_empty() || b->has_trivial(bundle_path::of_string("0")))) {
+      Bundle::Entry e = b->get_entry(bundle_path::of_string("0"));
+      e.immutable     = false;
+      if (e.decl_max.is_invalid()) {
+        e.decl_max = upass::max_from_bits(w, false);
+      }
+      if (e.decl_min.is_invalid()) {
+        e.decl_min = upass::min_from_bits(w, false);
+      }
+      b->set(bundle_path::of_string("0"), e);
+      declared_typed_.insert(dst);
+    }
+  };
   if ((lm->get_lnast() && lm->get_lnast()->is_verilog_origin())
       || std::none_of(upasses.begin(), upasses.end(), [](const auto& p) { return p.name == "constprop"; })) {
     process_drop_candidate_push(static_cast<upass::Push_method>(&upass::uPass::process_get_mask), false);
@@ -3586,12 +3702,11 @@ void uPass_runner::process_bit_selection() {
     // named-bundle lanes, the "bitsel-pack" concat) -- NOT the window's width.
     // `b = a#[lo..=hi]` ESTABLISHES b as a (hi-lo+1)-bit unsigned value, the
     // same way `c = true` establishes a boolean, and that is true of every
-    // origin. Without this stamp a Verilog-origin unit (which is what
-    // `::[timecheck=false]`, re-emitted by prp_writer on every imported
-    // module, marks) left every slice with NO width at all, and a following
-    // `unsigned(slice)` was refused as `cast-not-typed` although the slice's
-    // width was static all along. Only the value-INDEPENDENT masks are used
-    // here: a non-negative const (popcount) or a fully bounded range.
+    // origin. Without this stamp a Verilog-read unit left every slice with NO
+    // width at all, and a following `unsigned(slice)` was refused as
+    // `cast-not-typed` although the slice's width was static all along. Only
+    // the value-INDEPENDENT masks are used here: a non-negative const
+    // (popcount) or a fully bounded range.
     {
       const auto             sv = lm->save_cursor();
       std::string            dst;
@@ -3617,6 +3732,8 @@ void uPass_runner::process_bit_selection() {
                 && !hi.has_unknowns() && lo.to_just_i64() >= 0 && hi.to_just_i64() >= lo.to_just_i64()) {
               selected = hi.to_just_i64() - lo.to_just_i64() + 1;
             }
+          } else {
+            selected = runtime_range_width(sv.current, lm->current_raw_text());
           }
         }
       }
@@ -3666,31 +3783,13 @@ void uPass_runner::process_bit_selection() {
             b->clear_attr(k);
           }
         }
-        // Write the ENVELOPE ONLY -- decl_max/decl_min on the temp's scalar
-        // entry -- never through a scratch `type_spec` node. That node is also
-        // consumed by upass.typecheck, which would turn the temp's kind from
-        // `unknown` into `integer`; on this path a packed struct is a bit
-        // vector and its field read-modify-write temps flow back INTO the
-        // tuple-kinded struct variable relying on `unknown` being a wildcard,
-        // so the kind change made that writeback an `assign-type-mismatch`.
-        // The envelope alone is what a consumer needs: decl_facts::lookup
-        // derives range, bits and (from min >= 0) unsignedness from it.
-        if (!symbol_table_.has_known(dst)) {
-          (void)symbol_table_.set(dst, std::make_shared<Bundle>(dst));
-        }
-        if (const auto b = symbol_table_.get_bundle_for_write(dst);
-            b && (b->is_empty() || b->has_trivial(bundle_path::of_string("0")))) {
-          const auto    w = static_cast<uint32_t>(*selected);
-          Bundle::Entry e = b->get_entry(bundle_path::of_string("0"));
-          e.immutable     = false;
-          if (e.decl_max.is_invalid()) {
-            e.decl_max = upass::max_from_bits(w, false);
-          }
-          if (e.decl_min.is_invalid()) {
-            e.decl_min = upass::min_from_bits(w, false);
-          }
-          b->set(bundle_path::of_string("0"), e);
-        }
+        // The ENVELOPE ONLY: a scratch `type_spec` node is also consumed by
+        // upass.typecheck, which would turn the temp's kind from `unknown`
+        // into `integer`; on this path a packed struct is a bit vector and its
+        // field read-modify-write temps flow back INTO the tuple-kinded struct
+        // variable relying on `unknown` being a wildcard, so the kind change
+        // made that writeback an `assign-type-mismatch`.
+        stamp_envelope(dst, static_cast<uint32_t>(*selected));
       }
     }
     return;
@@ -3700,6 +3799,7 @@ void uPass_runner::process_bit_selection() {
     return;
   }
   const std::string dst(lm->current_text());
+  const bool        dst_is_tmp = Lnast::is_tmp(lm->current_raw_text());
   if (!lm->move_to_sibling()) {
     lm->restore_cursor(saved);
     return;
@@ -3710,13 +3810,20 @@ void uPass_runner::process_bit_selection() {
     lm->restore_cursor(saved);
     return;
   }
+  const std::string mask_raw(lm->current_raw_text());  // un-renamed, for runtime_range_width
+
   Lnast_node mask = Lnast_ntype::is_const(lm->get_raw_ntype()) ? Lnast_node::create_const(std::string(lm->current_text()))
                                                                : Lnast_node::create_ref(std::string(lm->current_text()));
   lm->restore_cursor(saved);
   const auto bundle    = value.is_const() ? nullptr : symbol_table_.get_bundle(value.get_name());
+  // A value with a SCALAR slot is never a runtime array, even when it carries
+  // an array's shape attrs: an element read can hand them on (`(m[0] + a)#[..]`
+  // once `m` is written in a sibling arm), and packing that scalar as a
+  // declared array lane failed with `concat-untyped-lane`.
   const bool aggregate = bundle && bundle->get_attr("rng_s").is_invalid() && bundle->get_attr("enumentry").is_invalid()
                          && bundle->get_attr("enumval").is_invalid()
-                         && (bundle->has_named_top() || bundle->unnamed_top_count() > 1 || concat_array_lane_bits(*bundle) != 0);
+                         && (bundle->has_named_top() || bundle->unnamed_top_count() > 1
+                             || (!bundle->is_scalar() && concat_array_lane_bits(*bundle) != 0));
   if (!scratch_forest_) {
     scratch_forest_ = hhds::Forest::create();
   }
@@ -3773,6 +3880,14 @@ void uPass_runner::process_bit_selection() {
     if (lo.is_integer() && hi.is_integer() && lo.is_just_i64() && hi.is_just_i64() && !lo.has_unknowns() && !hi.has_unknowns()) {
       selected = hi.to_just_i64() - lo.to_just_i64() + 1;
     }
+    if (!finite_mask) {
+      if (auto m = closed_range_mask(mask.get_name())) {
+        mask        = Lnast_node::create_const(*m);
+        finite_mask = true;
+      }
+    }
+  } else {
+    selected = runtime_range_width(saved.current, mask_raw);
   }
   if (aggregate || finite_mask) {
     auto s    = std::make_shared<Lnast>(scratch_forest_->create_tree_temp("bitsel"), "bitsel");
@@ -3790,8 +3905,643 @@ void uPass_runner::process_bit_selection() {
     process_drop_candidate_push(static_cast<upass::Push_method>(&upass::uPass::process_get_mask), false);
   }
   if (selected && *selected > 0 && *selected <= std::numeric_limits<int>::max()) {
-    emit_inline_typespec(dst, static_cast<int>(*selected), false);
+    if (dst_is_tmp && symbol_table_.in_uncertain_scope()) {
+      // emit_inline_typespec declines inside an if arm (one arm's force must
+      // not become a variable's declared envelope), but a compiler temp has
+      // this one definition and its width is value-independent.
+      stamp_envelope(dst, static_cast<uint32_t>(*selected));
+    } else {
+      emit_inline_typespec(dst, static_cast<int>(*selected), false);
+    }
+  } else if (dst_is_tmp && mask.is_ref() && is_single_bit_mask(saved.current, mask_raw)) {
+    // `a#[i]` is a u1 for `~` (ruling 26) like `a#[1]`. Not stamped as a type:
+    // the corpus reads a runtime-position bit as a condition (`if stop#[i]`).
+    typed_expr_types_[dst] = Int_type{.bits = 1};
   }
+}
+
+// A comptime range used as a bit-select mask names a WINDOW, never a value: a
+// ONE-element range folds (like a 1-tuple) to the trivial scalar `lo`, so the
+// operand fold substituted `lo` itself for the mask -- `a#[k..+1]` then selected
+// the bits of `k` (bit 0 for k=1, bit 1 for k=2, "mask 0" for k=0) instead of
+// bit k. Resolve a closed range with concrete bounds to its const bitmask here,
+// before any operand fold sees the ref. A descending or negative range keeps
+// its range node (tolg's range lowering diagnoses it).
+std::optional<std::string> uPass_runner::closed_range_mask(std::string_view range_name) const {
+  const auto r = symbol_table_.get_bundle(range_name);
+  if (!r) {
+    return std::nullopt;
+  }
+  const auto& lo = r->get_attr("rng_s");
+  const auto& hi = r->get_attr("rng_e");
+  if (lo.is_invalid() || hi.is_invalid() || !lo.is_integer() || !hi.is_integer() || !lo.is_just_i64() || !hi.is_just_i64()
+      || lo.has_unknowns() || hi.has_unknowns()) {
+    return std::nullopt;
+  }
+  const auto l = lo.to_just_i64();
+  const auto h = hi.to_just_i64();
+  if (l < 0 || h < l || h > std::numeric_limits<int>::max()) {
+    return std::nullopt;
+  }
+  return std::string(Dlop::get_mask_value(static_cast<int>(h), static_cast<int>(l))->to_pyrope());
+}
+
+// set_mask(dst, value, mask, ins): a comptime closed-range mask becomes its
+// const bitmask (see closed_range_mask) before the operand fold; everything
+// else goes through the ordinary drop-candidate path.
+void uPass_runner::process_bit_update() {
+  const auto saved = lm->save_cursor();
+  std::vector<Lnast_node> kids;
+  if (lm->move_to_child()) {
+    do {
+      const auto t = lm->get_raw_ntype();
+      if (Lnast_ntype::is_ref(t)) {
+        kids.push_back(Lnast_node::create_ref(std::string(lm->current_text())));
+      } else if (Lnast_ntype::is_const(t)) {
+        kids.push_back(Lnast_node::create_const(std::string(lm->current_text())));
+      } else {
+        kids.clear();
+        break;
+      }
+    } while (lm->move_to_sibling());
+  }
+  lm->restore_cursor(saved);
+  const auto mask = kids.size() == 4 && kids[2].is_ref() ? closed_range_mask(kids[2].get_name()) : std::nullopt;
+  if (!mask) {
+    process_drop_candidate_push(static_cast<upass::Push_method>(&upass::uPass::process_set_mask), /*fold_all=*/false);
+    return;
+  }
+  kids[2] = Lnast_node::create_const(*mask);
+  if (!scratch_forest_) {
+    scratch_forest_ = hhds::Forest::create();
+  }
+  auto s    = std::make_shared<Lnast>(scratch_forest_->create_tree_temp("bitupd"), "bitupd");
+  auto root = s->set_root(Lnast_ntype::create_set_mask());
+  stamp_scratch_srcid(s, root);
+  for (const auto& k : kids) {
+    s->add_child(root, k);
+  }
+  flush_deferred_emits();
+  lm->push_source(s, "", 0);
+  process_drop_candidate_push(static_cast<upass::Push_method>(&upass::uPass::process_set_mask), /*fold_all=*/false);
+  flush_deferred_emits();
+  lm->pop_source();
+}
+
+// The integer type of a TYPED value (user rulings 26, 38, 44), or nullopt.
+// Typed means the value states its type: a name declared `uN`/`sN` /
+// `unsigned(bits=N)` (a variable, a port, a tuple field or instance output read
+// through its temp), an untyped `const` alias of one (ruling 38), a compiler
+// temp whose producer stamped a `uN` envelope (a bit slice `x#[..]`, a `uN(...)`
+// cast), or the result of a `~` of a typed value, of a bitwise and/or/xor over
+// typed operands, or of a cast that folded at comptime (typed_expr_types_). A
+// bool, a literal and an untyped value (whose runtime `.[bits]` is nil) are not.
+std::optional<uPass_runner::Int_type> uPass_runner::typed_int_of(std::string_view name) const {
+  if (name.empty()) {
+    return std::nullopt;
+  }
+  if (const auto it = typed_expr_types_.find(name); it != typed_expr_types_.end()) {
+    return it->second;
+  }
+  const auto* ln       = lm ? lm->get_lnast().get() : nullptr;
+  const auto  declared = [&](std::string_view n) -> std::optional<Int_type> {
+    using Num    = upass::decl_facts::Num;
+    const auto f = upass::decl_facts::lookup(symbol_table_, ln, n);
+    if (!f || !f->has_type_spec) {
+      return std::nullopt;
+    }
+    if (f->kind == Num::none && f->bits == 0 && !f->range_max && !f->range_min) {
+      return Int_type{.is_signed = true};  // `x:signed`: an unbounded signed integer
+    }
+    // An unsigned type with no width (`x:unsigned`) states no bits to flip.
+    if ((f->kind != Num::unsigned_int || f->bits == 0) && f->kind != Num::signed_int) {
+      return std::nullopt;
+    }
+    Int_type t{.is_signed = f->kind == Num::signed_int, .bits = f->bits};
+    if (f->range_max && f->range_min) {
+      t.max = *f->range_max;
+      t.min = *f->range_min;
+    }
+    return t;
+  };
+  // Typed by its own declaration or type_spec; an SSA version reads its base's.
+  if (declared_typed_.contains(name)) {
+    return declared(name);
+  }
+  std::string_view base = name;
+  if (const auto p = base.find("___ssa_"); p != std::string_view::npos) {
+    base = base.substr(0, p);
+  }
+  if (declared_typed_.contains(base)) {
+    return declared(base);
+  }
+  // A port of the unit: its signature declares it (an unbounded `a:signed`
+  // port pins no bits, so decl_facts has nothing for it).
+  if (const auto* pe = ln != nullptr ? ln->io_meta().find(base) : nullptr) {
+    if (pe->kind == Io_kind::integer && pe->is_signed && pe->bits == 0 && !pe->has_range && !pe->wide_range_min) {
+      return Int_type{.is_signed = true};
+    }
+    return declared(base);
+  }
+  // A read temp typed by what it reads: a declared tuple field or an instance
+  // output (`t.f`, `inst.o`).
+  if (Lnast::is_tmp(name)) {
+    if (const auto o = symbol_table_.tget_origin.find(name); o != symbol_table_.tget_origin.end()) {
+      return declared(o->second);
+    }
+  }
+  // A single-output instance handle, through its temp or the name it was
+  // bound to (`stage[1] m = st(d=x)`, `const c = child(a=x)`): its output's type.
+  for (const auto n : {name, base}) {
+    if (const auto so = symbol_table_.single_output_port.find(n); so != symbol_table_.single_output_port.end()) {
+      return declared(absl::StrCat(n, ".", so->second));
+    }
+  }
+  return std::nullopt;
+}
+
+void uPass_runner::inherit_alias_type(const std::string& dst, const std::string& src) {
+  // An arithmetic result stays untyped (`const y = a + 1` has a nil `.[bits]`,
+  // ruling 6): only a plain copy of a typed name reaches here. A `mut` is a
+  // variable, not an alias, and a Verilog-read unit keeps Verilog widths. The
+  // temp of an `if`/`match` expression is written once per arm: one typed arm
+  // does not type it (`if c { a } else { a + 1 }` is untyped).
+  if (dst == src || declared_typed_.contains(dst) || (lm->get_lnast() && lm->get_lnast()->is_verilog_origin())
+      || symbol_table_.is_conditional_write(dst)) {
+    return;
+  }
+  if (bundle_key::find_top_dot(dst) != std::string_view::npos) {
+    return;  // a field store (`c.addr` of a detupled `const c:(..) = call()`), not an alias of a bare var
+  }
+  const auto* ln = lm->get_lnast().get();
+  if (ln != nullptr && ln->io_meta().find(dst) != nullptr) {
+    return;  // a port: its signature types it (an untyped output's range is derived, ruling 28)
+  }
+  const auto df = upass::decl_facts::lookup(symbol_table_, ln, dst);
+  if (!df || df->mode != upass::Mode::const_kind) {
+    return;
+  }
+  const auto ty = typed_int_of(src);
+  if (!ty) {
+    return;
+  }
+  const auto b = symbol_table_.get_bundle_for_write(dst);
+  if (!b || b->has_named_top() || b->unnamed_top_count() > 1) {
+    return;  // a tuple alias carries its fields' own types
+  }
+  Bundle::Entry e = b->get_entry(bundle_path::of_string("0"));
+  e.immutable     = false;
+  if (ty->bits == 0 && ty->max.is_invalid()) {
+    e.kind = upass::Kind::integer;  // an unbounded `signed`: typed, with no range (`.[max]` is nil)
+  } else {
+    e.decl_max = ty->max.is_invalid() ? upass::max_from_bits(ty->bits, ty->is_signed) : ty->max;
+    e.decl_min = ty->min.is_invalid() ? upass::min_from_bits(ty->bits, ty->is_signed) : ty->min;
+  }
+  b->set(bundle_path::of_string("0"), e);
+  declared_typed_.insert(dst);
+}
+
+// An element of a declared `[N]uW` array is a uW (ruling 26 types `~arr[i]`
+// like `~x` of a `uW` x), whether the index is a constant or runtime. Only a
+// ONE-dimensional array read with one index: a multi-dimensional read may
+// stop at a packed row.
+std::pair<std::string, uint32_t> uPass_runner::array_elem_read_bits() const {
+  if (!lm->has_child() || (lm->get_lnast() && lm->get_lnast()->is_verilog_origin())) {
+    return {};
+  }
+  const auto  saved = lm->save_cursor();
+  std::string dst;
+  std::string src;
+  int         n_idx = 0;
+  lm->move_to_child();
+  if (Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+    dst = std::string(lm->current_text());
+    if (lm->move_to_sibling() && Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+      src = std::string(lm->current_text());
+      while (lm->move_to_sibling()) {
+        ++n_idx;
+      }
+    }
+  }
+  lm->restore_cursor(saved);
+  if (dst.empty() || src.empty() || n_idx != 1) {
+    return {dst, 0};
+  }
+  const auto base = std::string_view(src).substr(0, std::string_view(src).find("___ssa_"));
+  if (const auto b = symbol_table_.get_bundle(base); b && !b->get_attr("__array_size").is_invalid()) {
+    const auto& size    = b->get_attr("__array_size");
+    const auto& flat    = b->get_attr("__array_flat_size");
+    const auto& kind    = b->get_attr("__elem_kind");
+    const auto& emin    = b->get_attr("__elem_min");
+    const bool  one_dim = flat.is_invalid() || flat.same_repr(size);
+    const bool  integer
+        = kind.is_invalid() || (kind.is_just_i64() && kind.to_just_i64() == static_cast<int64_t>(upass::Kind::integer));
+    if (!one_dim || !integer || !emin.is_integer() || emin.is_negative()) {
+      return {dst, 0};
+    }
+    return {dst, array_elem_declared_bits(*b)};
+  }
+  const auto* ln = lm->get_lnast().get();
+  if (const auto* pe = ln != nullptr ? ln->io_meta().find(base) : nullptr;
+      pe != nullptr && pe->array_size > 0 && pe->inner_dims.empty() && !pe->elem_signed && pe->elem_bits > 0) {
+    return {dst, static_cast<uint32_t>(pe->elem_bits)};
+  }
+  return {dst, 0};
+}
+
+// `a#[i]` / `a#[k]` lower to get_mask(dst, a, m) with `m = 1 << pos` (a literal
+// position folds to a const mask in the front end instead): a one-bit window
+// whatever the position.
+bool uPass_runner::is_single_bit_mask(const Lnast_nid& stmt, std::string_view mask_raw) {
+  if (!Lnast::is_tmp(mask_raw)) {
+    return false;
+  }
+  const auto& ln     = lm->get_lnast();
+  int         budget = 16;  // the front end emits the mask right before its get_mask
+  for (auto s = ln->get_sibling_prev(stmt); !s.is_invalid() && budget-- > 0; s = ln->get_sibling_prev(s)) {
+    const auto d = ln->get_first_child(s);
+    if (d.is_invalid() || !Lnast_ntype::is_ref(ln->get_type(d)) || ln->get_name(d) != mask_raw) {
+      continue;
+    }
+    if (!Lnast_ntype::is_shl(ln->get_type(s))) {
+      return false;
+    }
+    const auto one = ln->get_sibling_next(d);
+    if (one.is_invalid() || !Lnast_ntype::is_const(ln->get_type(one))) {
+      return false;
+    }
+    const auto v = Dlop::from_pyrope(ln->get_name(one));
+    return v && v->is_just_i64() && v->to_just_i64() == 1;
+  }
+  return false;
+}
+
+// `~x` (user rulings 26 and 44): on an UNSIGNED-typed operand of known width N
+// it flips the N bits, `(2^N - 1) - x`, a uN result; on a signed-typed operand,
+// or a compile-time integer (`~5`, `const k = 5; ~k`), it is `-x - 1`; on an
+// UNTYPED runtime value (`~(a + 1)`) it is a compile error -- a bitwise not is
+// ambiguous unless the type is known. This is the ONE place the choice is
+// made. A Pyrope `bit_not`
+// whose operand is unsigned-typed is re-issued in its TYPED form
+// `bit_not(dst, x, N)`, so every consumer reads the width off the node instead
+// of re-deriving it: constprop/bitwidth/typecheck at this dispatch, the loop
+// planner's range eval, tolg (the existing `Not` cell plus a `Get_mask` of N
+// bits -- no new LGraph cell), and the Pyrope writer. An untyped node is left
+// exactly as written (a bare `Not`).
+//
+// A Verilog-read unit never gets here typed by the runner: its reader already
+// states Verilog's context-width `~` explicitly (the typed form for an
+// unsigned result, the bare `-x - 1` for a signed one), so re-typing an
+// operand's declared width there would change the Verilog meaning.
+void uPass_runner::dispatch_bit_not() {
+  const auto  saved = lm->save_cursor();
+  std::string dst;
+  Lnast_node  operand;
+  std::string operand_src;  // the operand as the source spelled it (no inline tag)
+  uint32_t    stated = 0;   // the width of an already-typed node
+  bool        simple = false;
+  if (lm->move_to_child()) {
+    dst = std::string(lm->current_text());
+    if (lm->move_to_sibling()) {
+      const auto t = lm->get_raw_ntype();
+      simple       = Lnast_ntype::is_ref(t) || Lnast_ntype::is_const(t);
+      operand      = Lnast_ntype::is_ref(t) ? Lnast_node::create_ref(std::string(lm->current_text()))
+                                            : Lnast_node::create_const(std::string(lm->current_text()));
+      operand_src  = std::string(lm->current_raw_text());
+      if (lm->move_to_sibling()) {
+        simple = false;
+        if (Lnast_ntype::is_const(lm->get_raw_ntype())) {
+          const auto v = Dlop::from_pyrope(lm->current_text());
+          if (v && v->is_just_i64() && v->to_just_i64() > 0 && v->to_just_i64() <= std::numeric_limits<uint32_t>::max()) {
+            stated = static_cast<uint32_t>(v->to_just_i64());
+          }
+        }
+      }
+    }
+  }
+  lm->restore_cursor(saved);
+
+  const bool     verilog = lm->get_lnast() && lm->get_lnast()->is_verilog_origin();
+  const auto     type    = (simple && !verilog && operand.is_ref()) ? typed_int_of(operand.get_name()) : std::nullopt;
+  const uint32_t bits    = type && !type->is_signed ? type->bits : 0;
+
+  // A `bool` operand is typed, just not an integer (the typecheck rule of
+  // `~`, reported here for a template input too: an inlined body reads the
+  // caller's bool through the unit's io, which typecheck does not see).
+  const std::string_view src_name = std::string_view(operand_src).substr(0, operand_src.find("___ssa_"));
+  const auto             is_bool  = [&](std::string_view name) {
+    if (const auto b = symbol_table_.get_bundle(name); b && upass::decl_facts::bundle_kind(*b) == upass::Kind::boolean) {
+      return true;
+    }
+    return upass::decl_facts::operand_kind(symbol_table_, lm->get_lnast().get(), name) == upass::Kind::boolean
+           || upass::decl_facts::operand_kind(symbol_table_, root_lnast_.get(), name) == upass::Kind::boolean;
+  };
+  if (!verilog && operand.is_ref() && is_bool(operand.get_name())) {
+    fcall_arg_fail(
+        lm->current_span(),
+        "type-mismatch-arith",
+        std::format("operator `~` requires integer operands ({}:Bool)", Lnast::is_tmp(src_name) ? "<value>" : src_name),
+        std::format("`!{}` is the logical not of a bool; no implicit conversion — cast explicitly: {}",
+                    Lnast::is_tmp(src_name) ? std::string_view{"b"} : src_name,
+                    upass::kBoolIntCastHint),
+        "type");
+  }
+  // A template's own walk has no types for its untyped inputs yet: each
+  // specialization (and each inlined call) decides with the bound types.
+  if (!verilog && stated == 0 && !type && operand.is_ref() && !root_lnast_->is_template()) {
+    const auto folded = try_fold_ref(operand.get_name());
+    if (!folded || folded->is_invalid()) {
+      fcall_arg_fail(lm->current_span(),
+                     "bitnot-untyped",
+                     Lnast::is_tmp(src_name)
+                         ? std::string{"`~` needs an operand of known type: this expression is an untyped runtime value"}
+                         : std::format("`~` needs an operand of known type: `{}` is an untyped runtime value", src_name),
+                     "give it a type (`const t:U8 = …`) or slice it (`(x)#[0..<N]`): a bitwise not flips the bits of a declared "
+                     "width, and an arithmetic result has none",
+                     "type");
+    }
+  }
+  if (bits == 0) {
+    process_drop_candidate_push(static_cast<upass::Push_method>(&upass::uPass::process_bit_not), /*fold_all=*/false);
+  } else {
+    if (!scratch_forest_) {
+      scratch_forest_ = hhds::Forest::create();
+    }
+    auto s    = std::make_shared<Lnast>(scratch_forest_->create_tree_temp("bitnot"), "bitnot");
+    auto root = s->set_root(Lnast_ntype::create_bit_not());
+    stamp_scratch_srcid(s, root);
+    s->add_child(root, Lnast_node::create_ref(dst));
+    s->add_child(root, operand);
+    s->add_child(root, Lnast_node::create_const(std::to_string(bits)));
+    flush_deferred_emits();
+    lm->push_source(s, "", 0);
+    process_drop_candidate_push(static_cast<upass::Push_method>(&upass::uPass::process_bit_not), /*fold_all=*/false);
+    flush_deferred_emits();
+    lm->pop_source();
+  }
+  if (verilog) {
+    return;
+  }
+  // The result of a `~` has its operand's type (`~~x`, `~x & y`): a uN for a
+  // typed flip, the signed type for `-x - 1` of a signed value.
+  std::optional<Int_type> result;
+  if (bits != 0 || stated != 0) {
+    result = Int_type{.bits = bits != 0 ? bits : stated};
+  } else if (type) {
+    result = Int_type{.is_signed = true, .bits = type->bits};
+  }
+  if (result && !dst.empty()) {
+    typed_expr_types_[dst] = *result;
+  } else {
+    typed_expr_types_.erase(dst);
+  }
+}
+
+// The type a typecast gives its result (rulings 26, 44): `uN(x)`/`sN(x)` is a
+// uN/sN, and `unsigned(x)`/`signed(x)` reinterprets a typed x at its declared
+// width. Recorded whatever path lowers the call: a runtime cast stamps its
+// temp, but a comptime one folds straight to a value that would otherwise read
+// as untyped (`~u8(k)` of a `const k:u3`). nullopt for a non-cast call, or a
+// cast whose width is not known.
+std::optional<std::pair<std::string, uPass_runner::Int_type>> uPass_runner::typed_cast_result() const {
+  if (!lm->has_child() || (lm->get_lnast() && lm->get_lnast()->is_verilog_origin())) {
+    return std::nullopt;
+  }
+  const auto  saved = lm->save_cursor();
+  std::string dst;
+  std::string callee;
+  std::string arg;
+  bool        simple = false;
+  lm->move_to_child();
+  if (Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+    dst = std::string(lm->current_text());
+    if (lm->move_to_sibling()) {
+      callee = std::string(lm->current_raw_text());  // an inlined body tag-prefixes it; the builtin name is raw
+      if (lm->move_to_sibling() && Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+        arg    = std::string(lm->current_text());
+        simple = !lm->move_to_sibling();
+      }
+    }
+  }
+  lm->restore_cursor(saved);
+  if (!simple || dst.empty()) {
+    return std::nullopt;
+  }
+  auto tc = upass::classify_typecast(callee);
+  if (!tc) {
+    if (const auto gb = generic_cast_binds_.find(callee); gb != generic_cast_binds_.end()) {
+      tc = upass::classify_typecast(gb->second);
+    }
+  }
+  if (!tc) {
+    return std::nullopt;
+  }
+  if (tc->kind == upass::Typecast_kind::to_sized && tc->sized_bits > 0) {
+    return std::pair{
+        dst,
+        Int_type{.is_signed = tc->sized_signed, .bits = static_cast<uint32_t>(tc->sized_bits)}
+    };
+  }
+  if (tc->kind != upass::Typecast_kind::to_uint && tc->kind != upass::Typecast_kind::to_signed) {
+    return std::nullopt;
+  }
+  uint32_t bits = 0;
+  if (const auto t = typed_int_of(arg)) {
+    bits = t->bits;
+  } else if (const auto f = upass::decl_facts::lookup_operand(symbol_table_, lm->get_lnast().get(), arg);
+             f && f->has_type_spec && f->kind == upass::decl_facts::Num::signed_int) {
+    bits = f->bits;
+  }
+  if (bits == 0) {
+    return std::nullopt;
+  }
+  return std::pair{
+      dst,
+      Int_type{.is_signed = tc->kind == upass::Typecast_kind::to_signed, .bits = bits}
+  };
+}
+
+// A bitwise and/or/xor: its result is typed when EVERY operand is (a literal
+// or an untyped operand makes it untyped): unsigned at the widest operand's
+// width when all operands are, else signed wide enough for every operand. So
+// a negated form -- nand
+// `~(a & b)`, nor, xnor -- follows the same rule as a plain `~x` (rulings 26,
+// 44).
+void uPass_runner::dispatch_bitwise(upass::Push_method fn) {
+  std::string             dst;
+  std::optional<Int_type> type;
+  std::vector<Int_type>   operands;
+  if (!lm->get_lnast() || !lm->get_lnast()->is_verilog_origin()) {
+    const auto saved = lm->save_cursor();
+    if (lm->move_to_child()) {
+      dst = std::string(lm->current_text());
+      while (lm->move_to_sibling()) {
+        const auto t = Lnast_ntype::is_ref(lm->get_raw_ntype()) ? typed_int_of(lm->current_text()) : std::nullopt;
+        if (!t) {
+          operands.clear();
+          break;
+        }
+        operands.push_back(*t);
+      }
+    }
+    lm->restore_cursor(saved);
+  }
+  // Mixed signs make a signed result, where an unsigned N-bit operand needs
+  // N+1 bits (`u8 & s4` spans [0, 255]); an unbounded signed operand leaves
+  // it unbounded.
+  if (!operands.empty()) {
+    const bool is_signed = std::any_of(operands.begin(), operands.end(), [](const Int_type& t) { return t.is_signed; });
+    uint32_t   bits      = 0;
+    for (const auto& t : operands) {
+      if (t.is_signed && t.bits == 0) {
+        bits = 0;
+        break;
+      }
+      bits = std::max(bits, t.bits + (is_signed && !t.is_signed ? 1 : 0));
+    }
+    type = Int_type{.is_signed = is_signed, .bits = bits};
+  }
+  process_drop_candidate_push(fn, /*fold_all=*/false);
+  if (dst.empty()) {
+    return;
+  }
+  if (type) {
+    typed_expr_types_[dst] = *type;
+  } else {
+    typed_expr_types_.erase(dst);
+  }
+}
+
+std::optional<int64_t> uPass_runner::runtime_range_width(const Lnast_nid& stmt, std::string_view mask_raw) {
+  const auto& ln = lm->get_lnast();
+
+  // Compiler temps have ONE definition, emitted by the front end just before
+  // the statement that consumes them; a short backward window finds it.
+  constexpr int kDefWindow = 16;
+  const auto    def_of     = [&](std::string_view name) -> Lnast_nid {
+    if (!Lnast::is_tmp(name)) {
+      return Lnast_nid{};
+    }
+    int budget = kDefWindow;
+    for (auto s = ln->get_sibling_prev(stmt); !s.is_invalid() && budget-- > 0; s = ln->get_sibling_prev(s)) {
+      const auto d = ln->get_first_child(s);
+      if (!d.is_invalid() && Lnast_ntype::is_ref(ln->get_type(d)) && ln->get_name(d) == name) {
+        return s;
+      }
+    }
+    return Lnast_nid{};
+  };
+  // A comptime operand: a literal, or a ref (a generic, a comptime const) that
+  // folds under its current frame name.
+  const auto comptime_of = [&](const Lnast_nid& n) -> std::optional<int64_t> {
+    std::optional<Dlop> v;
+    if (Lnast_ntype::is_const(ln->get_type(n))) {
+      if (auto c = Dlop::from_pyrope(ln->get_name(n)); c) {
+        v = *c;
+      }
+    } else if (Lnast_ntype::is_ref(ln->get_type(n))) {
+      const auto here = lm->save_cursor();
+      lm->restore_cursor({n, here.depth});
+      const std::string name(lm->current_text());
+      lm->restore_cursor(here);
+      v = try_fold_ref(name);
+    }
+    constexpr int64_t kMaxStep = int64_t{1} << 40;  // keeps the offset sums far from int64 overflow
+    if (!v || !v->is_integer() || v->has_unknowns() || !v->is_just_i64() || v->to_just_i64() >= kMaxStep
+        || v->to_just_i64() <= -kMaxStep) {
+      return std::nullopt;
+    }
+    return v->to_just_i64();
+  };
+
+  const auto rng = def_of(mask_raw);
+  if (rng.is_invalid() || !Lnast_ntype::is_range(ln->get_type(rng))) {
+    return std::nullopt;
+  }
+  const auto lo = ln->get_sibling_next(ln->get_first_child(rng));
+  const auto hi = lo.is_invalid() ? lo : ln->get_sibling_next(lo);
+  if (hi.is_invalid() || !Lnast_ntype::is_ref(ln->get_type(lo))) {
+    return std::nullopt;
+  }
+  // The front end lowers each spelling of a bound on its own: in
+  // `a#[(b*4)..=((b*4)+3)]` hi reads a second `b*4` temp. Two temps with the
+  // same operation over the same operands hold the same value.
+  std::function<bool(const Lnast_nid&, const Lnast_nid&, int)> same_value
+      = [&](const Lnast_nid& x, const Lnast_nid& y, int depth) -> bool {
+    const auto tx = ln->get_type(x);
+    if (tx != ln->get_type(y)) {
+      return false;
+    }
+    if (Lnast_ntype::is_const(tx)) {
+      return ln->get_name(x) == ln->get_name(y);
+    }
+    if (!Lnast_ntype::is_ref(tx)) {
+      return false;
+    }
+    if (ln->get_name(x) == ln->get_name(y)) {
+      return true;
+    }
+    const auto dx = depth < 4 ? def_of(ln->get_name(x)) : Lnast_nid{};
+    const auto dy = depth < 4 ? def_of(ln->get_name(y)) : Lnast_nid{};
+    if (dx.is_invalid() || dy.is_invalid() || ln->get_type(dx) != ln->get_type(dy)
+        || !(Lnast_ntype::is_plus(ln->get_type(dx)) || Lnast_ntype::is_minus(ln->get_type(dx))
+             || Lnast_ntype::is_mult(ln->get_type(dx)) || Lnast_ntype::is_shl(ln->get_type(dx)))) {
+      return false;
+    }
+    auto a = ln->get_sibling_next(ln->get_first_child(dx));
+    auto b = ln->get_sibling_next(ln->get_first_child(dy));
+    for (; !a.is_invalid() && !b.is_invalid(); a = ln->get_sibling_next(a), b = ln->get_sibling_next(b)) {
+      if (!same_value(a, b, depth + 1)) {
+        return false;
+      }
+    }
+    return a.is_invalid() && b.is_invalid();
+  };
+
+  // hi == lo + offset, through plus/minus by comptime amounts.
+  std::function<std::optional<int64_t>(const Lnast_nid&, int)> offset
+      = [&](const Lnast_nid& n, int depth) -> std::optional<int64_t> {
+    if (!Lnast_ntype::is_ref(ln->get_type(n))) {
+      return std::nullopt;
+    }
+    if (same_value(n, lo, 0)) {
+      return 0;
+    }
+    const auto def = depth < 4 ? def_of(ln->get_name(n)) : Lnast_nid{};
+    if (def.is_invalid()) {
+      return std::nullopt;
+    }
+    const auto t = ln->get_type(def);
+    const auto a = ln->get_sibling_next(ln->get_first_child(def));
+    const auto b = a.is_invalid() ? a : ln->get_sibling_next(a);
+    if (b.is_invalid() || !ln->get_sibling_next(b).is_invalid()) {
+      return std::nullopt;
+    }
+    if (Lnast_ntype::is_plus(t)) {
+      if (const auto c = comptime_of(b); c) {
+        if (const auto o = offset(a, depth + 1); o) {
+          return *o + *c;
+        }
+      }
+      if (const auto c = comptime_of(a); c) {
+        if (const auto o = offset(b, depth + 1); o) {
+          return *o + *c;
+        }
+      }
+    } else if (Lnast_ntype::is_minus(t)) {
+      if (const auto c = comptime_of(b); c) {
+        if (const auto o = offset(a, depth + 1); o) {
+          return *o - *c;
+        }
+      }
+    }
+    return std::nullopt;
+  };
+  const auto span = offset(hi, 0);
+  if (!span || *span < 0) {
+    return std::nullopt;
+  }
+  return *span + 1;
 }
 
 void uPass_runner::emit_inline_get_mask(const std::string& dst, const Lnast_node& value, const std::string& mask_text) {
@@ -4140,6 +4890,26 @@ bool uPass_runner::try_lower_wrap_sat() {
   if (const auto pos = type_src.find("___ssa_"); pos != std::string::npos) {
     type_src.resize(pos);
   }
+  // A destination that holds no bits has nothing to narrow into: a bit range
+  // whose width only folds here (`wrap d#[1..+k]`, `k` a generic or a comptime
+  // const computed by a call, that folds to 0 -- prp2lnast rejects the forms
+  // it can fold itself), or an integer type of width 0. Checked for comptime
+  // values too, which otherwise fold silently below.
+  if (const auto target = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), type_src);
+      target && target->range_max && target->range_min && target->range_max->is_known_zero()
+      && target->range_min->is_known_zero()) {
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = "overflow-policy-zero-width",
+        .category = "type",
+        .pass     = "upass.runner",
+        .message  = std::format("`{}` into a destination that holds no bits (its width folds to 0)", is_wrap ? "wrap" : "sat"),
+        .span     = lm->current_span(),
+        .hint     = "a bit range must select at least one bit (`x#[lo..+n]` with n >= 1), and an integer type needs bits >= 1",
+    });
+    emit_inline_binding(dst, Lnast_node::create_const("0"));
+    return true;
+  }
   // Comptime values are folded by the attributes pass (and the drop path
   // retires the call); only RUNTIME values need hardware here.
   if (value_name.empty()) {
@@ -4163,27 +4933,9 @@ bool uPass_runner::try_lower_wrap_sat() {
   // value's DECLARED envelope (e.g. a module input never gets a per-write
   // bw_*). Both are sound over-approximations — needed both to gate the clamps
   // and to prove a no-op for the unnecessary-wrap/sat warning.
-  std::optional<Dlop> vmax;
-  std::optional<Dlop> vmin;
-  if (auto b = symbol_table_.get_bundle(value_name); b) {
-    const auto& e = b->get_entry(bundle_path::of_string("0"));
-    if (!e.bw_max.is_invalid() && e.bw_max.is_integer()) {
-      vmax = e.bw_max;
-    }
-    if (!e.bw_min.is_invalid() && e.bw_min.is_integer()) {
-      vmin = e.bw_min;
-    }
-  }
-  if (!vmax || !vmin) {
-    if (auto vf = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), value_name)) {
-      if (!vmax && vf->range_max && vf->range_max->is_integer()) {
-        vmax = vf->range_max;
-      }
-      if (!vmin && vf->range_min && vf->range_min->is_integer()) {
-        vmin = vf->range_min;
-      }
-    }
-  }
+  const auto          vr      = value_range_of(Lnast_node::create_ref(value_name));
+  std::optional<Dlop> vmax    = vr.max;
+  std::optional<Dlop> vmin    = vr.min;
   // Need the upper clamp/mask unless the value provably stays ≤ max; the lower
   // unless it provably stays ≥ min. (For an unsigned target min==0, so this is
   // the "value may be negative → clamp to 0" case of saturate_unsigned.)
@@ -4198,17 +4950,21 @@ bool uPass_runner::try_lower_wrap_sat() {
 
   if (!need_hi && !need_lo) {
     // The value provably fits the target type — the wrap/sat narrows nothing.
-    // Warn (the keyword is dead) and emit a plain alias.
-    livehd::diag::Span span = lm->current_span();
-    livehd::diag::sink().emit(livehd::diag::Diagnostic{
-        .severity = livehd::diag::Severity::warning,
-        .code     = is_wrap ? "unnecessary-wrap" : "unnecessary-sat",
-        .category = "bitwidth",
-        .pass     = "upass.runner",
-        .message  = std::format("unnecessary `{}`: the value already fits the target type", is_wrap ? "wrap" : "sat"),
-        .span     = std::move(span),
-        .hint     = "the value's range is within the target type, so the wrap/saturate has no effect",
-    });
+    // Warn (the keyword is dead) and emit a plain alias. Only for the
+    // definition itself: inside an inlined comb the range is one call site's,
+    // and the body's `wrap` is still needed for the others (and its own module).
+    if (!lm->in_inline_frame()) {
+      livehd::diag::Span span = lm->current_span();
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::warning,
+          .code     = is_wrap ? "unnecessary-wrap" : "unnecessary-sat",
+          .category = "bitwidth",
+          .pass     = "upass.runner",
+          .message  = std::format("unnecessary `{}`: the value already fits the target type", is_wrap ? "wrap" : "sat"),
+          .span     = std::move(span),
+          .hint     = "the value's range is within the target type, so the wrap/saturate has no effect",
+      });
+    }
     emit_inline_binding(dst, *value);  // alias
     return true;
   }
@@ -4227,12 +4983,13 @@ bool uPass_runner::try_lower_wrap_sat() {
   }
 
   // sat: seed then bw-gated clamps, built straight into staging (the `if` can't
-  // go through process_lnast — see emit_staging_op). A signed target re-signs
-  // the clamped low-N bits through a final sext (the clamp result lies in
-  // [min,max], so its low N bits are the correct two's-complement value); an
-  // unsigned target writes the mux result directly (values in [0,max], read
-  // unsigned).
-  const std::string clamp = is_signed ? dst + "_sc" : dst;
+  // go through process_lnast — see emit_staging_op). The clamp result lies in
+  // [min,max], so its low N bits are the value: a signed target re-signs them
+  // through a final sext, an unsigned one keeps them through a final get_mask.
+  // Neither changes a clamped value, but both give the result the target's
+  // range without a guard-aware analysis -- a re-read of the lowered form (the
+  // Pyrope writer's `if v > 0xff { 0xff } else { v }`) must still fit.
+  const std::string clamp = dst + "_sc";
   emit_staging_op(N::create_store(), clamp, {*value});  // seed: clamp = value
   if (need_hi) {
     const std::string cond = dst + "_sgt";
@@ -4248,6 +5005,9 @@ bool uPass_runner::try_lower_wrap_sat() {
   }
   if (is_signed) {
     emit_staging_op(N::create_sext(), dst, {Lnast_node::create_ref(clamp), Lnast_node::create_const(static_cast<int64_t>(ub) - 1)});
+  } else {
+    const std::string mask_text(Dlop::get_mask_value(static_cast<int>(ub))->to_pyrope());
+    emit_staging_op(N::create_get_mask(), dst, {Lnast_node::create_ref(clamp), Lnast_node::create_const(mask_text)});
   }
   return true;
 }
@@ -4351,7 +5111,7 @@ bool uPass_runner::try_lower_typecast() {
   }
   lm->restore_cursor(saved);  // back on the func_call
 
-  if (callee == "signed" || callee == "unsigned") {
+  if (callee == "Signed" || callee == "Unsigned") {
     const auto value
         = arg_name.empty() ? std::optional<Dlop>(*Dlop::from_pyrope(arg_node.get_name())) : symbol_table_.comptime_scalar(arg_name);
     if (value && value->is_string()) {
@@ -4372,6 +5132,24 @@ bool uPass_runner::try_lower_typecast() {
   // only a runtime value needs hardware here.
   if (arg_name.empty()) {
     return false;  // const operand → comptime
+  }
+  // docs 07-typesystem "Clock and Reset": a Clock is not data, so `U1(clk)` /
+  // `Bool(clk)` is a compile error (only its debug `String(...)` text form is
+  // left to the string path).
+  if (tc->kind != upass::Typecast_kind::to_string && !lm->get_lnast()->is_verilog_origin()) {
+    if (const auto* pe = lm->get_lnast()->io_meta().find(arg_name); pe != nullptr && pe->is_clock()) {
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "clock-as-data",
+          .category = "type",
+          .pass     = "upass.runner",
+          .message  = std::format("`{}({})`: `{}` is a `Clock`, and a Clock is not data", callee, arg_name, arg_name),
+          .span     = lm->current_span(),
+          .hint     = "a Clock only drives register clock pins (`clock_pin=clk`) or a child's `Clock` input; use an "
+                      "enable for clock-dependent logic",
+      });
+      return true;
+    }
   }
   if (symbol_table_.known_const_scalar(arg_name).has_value()) {
     return false;  // folds to a known scalar → comptime
@@ -4425,14 +5203,7 @@ bool uPass_runner::try_lower_typecast() {
     // from stash_sub_instance_port_facts at the decline. Without the hop a `bool`
     // output port of an instantiated `mod` had no known width and the cast failed
     // with `cast-not-typed` even though the callee declares it.
-    std::string fact_name(arg_name);
-    if (const auto origin = symbol_table_.tget_origin.find(fact_name); origin != symbol_table_.tget_origin.end()) {
-      if (const auto of = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), origin->second);
-          of && of->kind != upass::decl_facts::Num::none) {
-        fact_name = origin->second;
-      }
-    }
-    if (auto vf = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), fact_name)) {
+    if (auto vf = operand_decl_facts(arg_name)) {
       if (vf->kind == upass::decl_facts::Num::boolean) {
         operand_is_bool = true;
         operand_kind    = upass::Kind::boolean;
@@ -4440,28 +5211,27 @@ bool uPass_runner::try_lower_typecast() {
                  && (vf->kind == upass::decl_facts::Num::unsigned_int || vf->kind == upass::decl_facts::Num::signed_int)) {
         operand_kind = upass::Kind::integer;
       }
-      if (vf->kind == upass::decl_facts::Num::unsigned_int) {
+      // A declared type bounds the value unless a write into it could not be
+      // judged (Symbol_table::unchecked_typed).
+      const bool bounded_by_type = !symbol_table_.unchecked_typed.contains(arg_name.substr(0, arg_name.find("___ssa_")));
+      if (vf->kind == upass::decl_facts::Num::unsigned_int && bounded_by_type) {
         operand_decl_unsigned = true;
       }
-      if (!vmax && vf->range_max && vf->range_max->is_integer()) {
+      if (!vmax && vf->range_max && vf->range_max->is_integer() && bounded_by_type) {
         vmax = vf->range_max;
       }
-      if (!vmin && vf->range_min && vf->range_min->is_integer()) {
+      if (!vmin && vf->range_min && vf->range_min->is_integer() && bounded_by_type) {
         vmin = vf->range_min;
       }
       reinterpret_W = vf->bits;
     }
   }
-  // Fallback: a slice (`x#[0..=31]`) or arithmetic result has no DECLARED width,
-  // but the bitwidth pass stamped a range — derive the reinterpret width from it
-  // so `signed(x#[0..=31])` / `signed(a + b)` work, not just declared variables.
-  if (!operand_is_bool && reinterpret_W == 0 && vmax && vmin) {
-    if (!vmin->is_negative()) {
-      reinterpret_W = static_cast<uint32_t>(vmax->get_payload_bits());
-    } else {
-      reinterpret_W = static_cast<uint32_t>(std::max<int64_t>(vmax->get_signed_bits(), vmin->get_signed_bits()));
-    }
-  }
+  // The reinterpret width is the operand's DECLARED (structural) width: a typed
+  // name, or a temp whose width its producer fixed (a bit-select `x#[0..=31]`,
+  // an inner cast). An arithmetic result (`a / 17 * 17`) has only the range
+  // the bitwidth analysis derived, and that depends on how tight the analysis
+  // is: identical math could reinterpret at different widths (8 bits give
+  // -1 for 255, 9 give 255), so it never decides a sign (see the arms below).
 
   // Only a genuine runtime hardware scalar (int/bool) is lowered here. Enums
   // (`string(E.x)`/`int(E.x)`), comptime strings, tuples, ranges, nil — all
@@ -4508,7 +5278,7 @@ bool uPass_runner::try_lower_typecast() {
     case upass::Typecast_kind::to_string:
       // A runtime value has no string form (strings are comptime-only).
       cast_error("runtime-string-cast",
-                 "`string(...)` needs a compile-time value — a runtime signal has no string form",
+                 "`String(...)` needs a compile-time value — a runtime signal has no string form",
                  "build the string from comptime data, or print it via a debug statement");
       return true;
 
@@ -4523,7 +5293,8 @@ bool uPass_runner::try_lower_typecast() {
         if (reinterpret_W == 0) {
           cast_error("cast-not-typed",
                      std::format("`{}(...)` reinterpret needs a fully-typed input (a known bit width)", callee),
-                     "give the operand a sized type (`:uN`/`:sN`) before reinterpreting its sign");
+                     "give the operand a sized type (`:U<N>`/`:S<N>`, e.g. a typed local or a bit-select `x#[0..<N]`) "
+                     "before reinterpreting its sign");
           return true;
         }
         // Read bit W-1 as the sign: same W bits, now a signed value/range.
@@ -4565,7 +5336,7 @@ bool uPass_runner::try_lower_typecast() {
       if (reinterpret_W == 0) {
         cast_error("cast-not-typed",
                    std::format("`{}(...)` reinterpret needs a fully-typed input (a known bit width)", callee),
-                   "give the operand a sized type (`:uN`/`:sN`) before reinterpreting its sign, "
+                   "give the operand a sized type (`:U<N>`/`:S<N>`) before reinterpreting its sign, "
                    "or drop the cast if it is already unsigned");
         return true;
       }
@@ -4596,7 +5367,7 @@ bool uPass_runner::try_lower_typecast() {
                                callee,
                                tmin.to_decimal_string(),
                                tmax.to_decimal_string()),
-                   "a sized cast (`uN`/`sN`) is checked, not truncating; use a `wrap` or `sat` prefix to drop bits");
+                   "a sized cast (`U<N>`/`S<N>`) is checked, not truncating; use a `wrap` or `sat` prefix to drop bits");
         return true;
       }
       emit_inline_binding(dst, arg_node);  // fits → value-preserving
@@ -4791,7 +5562,7 @@ void uPass_runner::emit_inline_op(Lnast_ntype::Lnast_ntype_int op, const std::st
   lm->pop_source();
 }
 
-bool uPass_runner::bind_call_actuals(const Lnast_tree_io& io, const std::vector<Actual>& actuals, bool is_ctor_call, bool commit,
+bool uPass_runner::bind_call_actuals(const Lnast_tree_io& io, const std::vector<Actual>& actuals, bool commit,
                                      std::string_view callee_name, const livehd::diag::Span& call_span,
                                      std::vector<Lnast_node>& param_val, std::vector<bool>& param_set,
                                      std::vector<std::string>& param_func, std::vector<Lnast_node>& vararg_pos,
@@ -4799,8 +5570,8 @@ bool uPass_runner::bind_call_actuals(const Lnast_tree_io& io, const std::vector<
   const std::size_t nparams    = io.inputs.size();
   // A trailing `...args` var-arg param (always the LAST input) gathers every
   // actual not consumed by a fixed leading param into one synthesized tuple:
-  // positional leftovers become positional entries (`args[i]`), named leftovers
-  // become named fields (`args.NAME`).
+  // only named leftovers become fields (`args.NAME`). Positional values must
+  // bind an ordinary parameter under the normal naming exceptions.
   const bool        has_vararg = nparams > 0 && io.inputs[nparams - 1].is_varargs;
   const std::size_t nbind      = has_vararg ? nparams - 1 : nparams;  // bindable fixed params (vararg excluded)
 
@@ -4925,10 +5696,94 @@ bool uPass_runner::bind_call_actuals(const Lnast_tree_io& io, const std::vector<
     }
     return true;
   };
+  // The var-arg parameter `...x` is ONE parameter holding a tuple and, like every
+  // argument, is bound by NAME (qa.md "Var-args": `add1(x=(1, 2, 3))`). Expand the
+  // named actual's fields into the gathered entries: unnamed fields take the
+  // canonical positional keys (`x[0]`, `x[1]`...), named fields keep their names
+  // (`x.NAME`). A scalar actual is a one-element var-arg. False when a field of a
+  // tuple actual cannot be resolved to a value.
+  auto expand_vararg_actual = [&](const Actual& a) -> bool {
+    if (!a.node.is_ref()) {
+      vararg_pos.push_back(a.node);
+      return true;
+    }
+    const auto tup       = std::string(a.node.get_name());
+    const auto shape_opt = try_tuple_shape(tup);
+    if (!shape_opt || shape_opt->empty()) {
+      vararg_pos.push_back(a.node);  // a runtime scalar variable
+      return true;
+    }
+    const auto                                      comptime = try_bundle_fields(tup);
+    std::vector<std::pair<std::string, Lnast_node>> fields;  // (key, value), declaration order
+    for (const auto& [fld, is_pos] : *shape_opt) {
+      bool resolved = false;
+      if (comptime) {
+        for (const auto& [k, v] : *comptime) {
+          if (k == fld && !v.is_invalid()) {
+            fields.emplace_back(is_pos ? std::string{} : fld, Lnast_node::create_const(v.to_pyrope()));
+            resolved = true;
+            break;
+          }
+        }
+      }
+      if (!resolved) {
+        if (auto rn = try_tuple_slot_ref(tup, fld)) {
+          fields.emplace_back(is_pos ? std::string{} : fld, Lnast_node::create_ref(*rn));
+          resolved = true;
+        }
+      }
+      if (!resolved) {
+        return false;
+      }
+    }
+    for (auto& [k, v] : fields) {
+      if (k.empty()) {
+        vararg_pos.push_back(std::move(v));
+      } else {
+        vararg_named.emplace_back(k, std::move(v));
+      }
+    }
+    return true;
+  };
   const bool        has_self       = nbind > 0 && io.inputs[0].name == "self";
-  const std::size_t n_named_params = nbind - (has_self ? 1 : 0);  // fixed, non-self (var-arg excluded)
+  const std::size_t first_param    = has_self ? 1 : 0;     // first non-self fixed param
+  const std::size_t n_named_params = nbind - first_param;  // fixed, non-self (var-arg excluded)
   auto              actual_kind    = [&](const Lnast_node& node) { return actual_node_kind(node); };
-  for (const auto& a : actuals) {
+
+  // Exception 2: a positional bare variable whose name matches a parameter
+  // binds to it. Match the SOURCE spelling (Actual::src_name), exact name
+  // first, then the variable a compiler-minted SSA version belongs to. Returns
+  // the unset, non-self fixed param it spells, or nbind.
+  auto pun_index = [&](const Actual& a) -> std::size_t {
+    for (const std::string* nm : {&a.src_name, &a.src_base}) {
+      if (nm->empty()) {
+        continue;
+      }
+      if (const auto idx = param_index(*nm); idx >= first_param && idx < nbind && !param_set[idx]) {
+        return idx;
+      }
+    }
+    return nbind;
+  };
+  // The same for a flattened tuple-param GROUP (`p` for the leaves `p.x`,
+  // `p.y`) with an unset leaf, or "".
+  auto pun_group = [&](const Actual& a) -> std::string {
+    for (const std::string* nm : {&a.src_name, &a.src_base}) {
+      if (nm->empty()) {
+        continue;
+      }
+      const std::string prefix = *nm + ".";
+      for (std::size_t i = first_param; i < nbind; ++i) {
+        if (!param_set[i] && canonical_port_name(io.inputs[i].name).starts_with(prefix)) {
+          return *nm;
+        }
+      }
+    }
+    return {};
+  };
+  bool vararg_bound = false;  // the var-arg param was bound by its own name
+  for (std::size_t ai = 0; ai < actuals.size(); ++ai) {
+    const auto& a = actuals[ai];
     if (a.is_named) {
       if (a.key == "self") {
         if (!commit) {
@@ -4940,6 +5795,28 @@ bool uPass_runner::bind_call_actuals(const Lnast_tree_io& io, const std::vector<
                        "self is bound positionally by the UFCS receiver (`value.method(...)`)");
       }
       const auto idx = param_index(a.key);
+      if (has_vararg && canonical_port_name(a.key) == canonical_port_name(io.inputs[nbind].name)) {
+        if (vararg_bound) {
+          if (!commit) {
+            return false;  // duplicate
+          }
+          fcall_arg_fail(call_span,
+                         "fcall-duplicate-arg",
+                         std::format("duplicate argument `{}` in call to `{}`", a.key, callee_name),
+                         "each parameter may be bound only once");
+        }
+        vararg_bound = true;
+        if (!expand_vararg_actual(a)) {
+          if (!commit) {
+            return false;
+          }
+          fcall_arg_fail(call_span,
+                         "fcall-vararg-unresolved",
+                         std::format("var-arg `{}` of `{}` is bound to a tuple with a field that has no value", a.key, callee_name),
+                         "every field of the var-arg tuple must be a known value");
+        }
+        continue;
+      }
       if (idx >= nbind) {
         // A named actual that matches no fixed param is a named leftover gathered
         // into the var-arg tuple (`args.NAME`); otherwise a bundle-typed actual
@@ -4951,6 +5828,14 @@ bool uPass_runner::bind_call_actuals(const Lnast_tree_io& io, const std::vector<
         bool expanded = false;
         if (a.node.is_ref()) {
           expanded = expand_tuple_actual(a.node.get_name(), a.key);
+        }
+        if (!expanded && bind_minted_ok_ && (a.key == "clock" || a.key == "reset")) {
+          // The child's MINTED clock/reset (it declares none): bindable by name.
+          const auto want = a.key == "clock" ? Io_sig::clock : Io_sig::reset;
+          if (std::none_of(io.inputs.begin(), io.inputs.end(), [&](const Lnast_io_entry& e) { return e.sig == want; })) {
+            bind_minted_actuals_.emplace_back(a.key, a.node);
+            continue;
+          }
         }
         if (!expanded) {
           if (!commit) {
@@ -4990,63 +5875,23 @@ bool uPass_runner::bind_call_actuals(const Lnast_tree_io& io, const std::vector<
         }
         return nbind;
       };
-      // Pass-by-ref (`f(ref x)`) binds positionally by design — exempt from the
-      // naming rules — and so does the UFCS receiver bound to `self`.
-      if (a.is_ref_pass) {
-        const auto slot = next_unset(0);
-        if (slot >= nbind) {
-          if (has_vararg) {
-            vararg_pos.push_back(a.node);
-            continue;
-          }
-          if (!commit) {
-            return false;  // too many positional
-          }
-          fcall_arg_fail(call_span,
-                         "fcall-too-many-args",
-                         std::format("too many positional arguments in call to `{}`", callee_name),
-                         "remove the extra argument(s) or pass them by name");
-        }
-        bind(slot);
-        continue;
-      }
+      // A pass-by-ref actual (`f(ref x)`) follows the ordinary naming rules
+      // (qa.md "Positional binding"); only the UFCS receiver bound to `self`
+      // is exempt.
       if (has_self && !param_set[0]) {
         bind(0);  // self ← UFCS receiver
         continue;
       }
-      // With a var-arg param, fixed leading params bind positionally in
-      // declaration order; every actual past them is a positional leftover
-      // gathered into the var-arg tuple. The naming exceptions below are skipped.
-      if (has_vararg) {
-        const auto slot = next_unset(has_self ? 1 : 0);
-        if (slot < nbind) {
-          bind(slot);
-        } else {
-          vararg_pos.push_back(a.node);
-        }
-        continue;
-      }
-      // Constructor call (synthesized): construction args bind in tuple order.
-      if (is_ctor_call) {
-        const auto slot = next_unset(has_self ? 1 : 0);
-        if (slot >= nparams) {
-          if (!commit) {
-            return false;
-          }
-          fcall_arg_fail(call_span,
-                         "fcall-too-many-args",
-                         std::format("too many constructor arguments for `{}`", callee_name),
-                         "the construction value has more entries than the init overload's parameters");
-        }
-        bind(slot);
-        continue;
-      }
-      // Positional TUPLE actual → a flattened tuple-param GROUP. A tuple-typed
-      // param `p:(x,y)` is flattened to leaves `p.x`,`p.y`; a positional tuple
-      // actual binds by EXPANDING its fields into those leaves.
+      // Constructor arguments (explicit `T(...)` and `mut x:T = (...)`) bind like
+      // any call (qa.md Q31): by name, single parameter, name match or unique
+      // type -- never by tuple order.
+      // A positional TUPLE actual (more than one field, or a named one) binds a
+      // flattened tuple-param GROUP: a tuple-typed param `p:(x,y)` is flattened
+      // to the leaves `p.x`,`p.y`, and the actual's fields EXPAND into them.
+      std::optional<std::vector<std::pair<std::string, bool>>> shape_opt;
+      bool                                                     is_tuple_actual = false;
       if (a.node.is_ref()) {
-        const auto shape_opt       = try_tuple_shape(a.node.get_name());
-        bool       is_tuple_actual = false;
+        shape_opt = try_tuple_shape(a.node.get_name());
         if (shape_opt) {
           is_tuple_actual = shape_opt->size() > 1;
           for (const auto& [fld, is_pos] : *shape_opt) {
@@ -5056,67 +5901,117 @@ bool uPass_runner::bind_call_actuals(const Lnast_tree_io& io, const std::vector<
             }
           }
         }
-        if (is_tuple_actual) {
-          // Find the unset flattened tuple-param GROUP whose leaf count matches
-          // the actual's field count, then expand the fields into it.
-          absl::flat_hash_map<std::string, std::size_t> group_count;
-          for (std::size_t i = (has_self ? 1u : 0u); i < nbind; ++i) {
-            if (param_set[i]) {
-              continue;
-            }
-            const auto& pn = io.inputs[i].name;
-            if (auto dp = pn.rfind('.'); dp != std::string::npos) {
-              ++group_count[pn.substr(0, dp)];
-            }
-          }
-          bool matched = false;
-          for (const auto& [prefix, cnt] : group_count) {
-            if (cnt == shape_opt->size() && expand_tuple_actual(a.node.get_name(), prefix)) {
-              matched = true;
-              break;
-            }
-          }
-          if (matched) {
-            continue;
-          }
-          // A tuple actual that matched no group must NOT bind a lone scalar
-          // param in the overload probe (that is the tuple-vs-scalar
-          // discrimination); the real bind falls through to exception 1.
-          if (!commit) {
-            return false;
-          }
+      }
+      // Exception 2 first: a bare variable whose name matches an unset, non-self
+      // parameter binds to THAT parameter (so `f(b, a)` binds by name), a
+      // tuple variable to the tuple-param group it names (`dx(to, from)`). The
+      // match is on the SOURCE spelling: inside an inlined body (a recursive
+      // call passing the caller's own param) `node` is the frame-renamed
+      // `inl<N>_v`. In the overload probe a tuple actual never binds a lone
+      // scalar param (the tuple-vs-scalar discrimination).
+      if (const auto pidx = pun_index(a); pidx < nbind && (commit || !is_tuple_actual)) {
+        bind(pidx);
+        continue;
+      }
+      if (a.node.is_ref()) {
+        if (const auto group = pun_group(a); !group.empty() && expand_tuple_actual(a.node.get_name(), group)) {
+          continue;
         }
       }
-      // Exception 2: a bare variable whose name matches an unset, non-self
-      // parameter binds to THAT parameter (so `f(b, a)` binds by name).
-      if (a.node.is_ref()) {
-        const auto nidx = param_index(a.node.get_name());
-        if (nidx < nparams && nidx >= (has_self ? 1u : 0u) && !param_set[nidx]) {
-          bind(nidx);
+      if (is_tuple_actual) {
+        // Otherwise the ONE unset group whose leaves are exactly the actual's
+        // fields takes it (the argument's shape makes the mapping unambiguous).
+        // Two such groups (`dx(from:Pt, to:Pt)`) are ambiguous: the argument
+        // must be named. Groups are walked in declaration order.
+        std::vector<std::pair<std::string, std::size_t>> groups;  // (prefix, unset leaf count)
+        for (std::size_t i = first_param; i < nbind; ++i) {
+          const auto& pn = io.inputs[i].name;
+          const auto  dp = pn.rfind('.');
+          if (param_set[i] || dp == std::string::npos) {
+            continue;
+          }
+          const auto prefix = pn.substr(0, dp);
+          auto       it     = std::find_if(groups.begin(), groups.end(), [&](const auto& g) { return g.first == prefix; });
+          if (it == groups.end()) {
+            groups.emplace_back(prefix, 1);
+          } else {
+            ++it->second;
+          }
+        }
+        const std::string* match  = nullptr;
+        std::size_t        nmatch = 0;
+        const auto&        fields = *shape_opt;
+        for (const auto& [prefix, cnt] : groups) {
+          const bool fits = cnt == fields.size() && std::all_of(fields.begin(), fields.end(), [&](const auto& f) {
+                              const auto lidx = param_index(prefix + "." + f.first);
+                              return lidx < nbind && !param_set[lidx];
+                            });
+          if (fits) {
+            match = &prefix;
+            ++nmatch;
+          }
+        }
+        if (nmatch == 1 && expand_tuple_actual(a.node.get_name(), *match)) {
           continue;
+        }
+        // A tuple actual that matched no group must NOT bind a lone scalar
+        // param in the overload probe; the real bind falls through to
+        // exception 1 (whole tuple into the only param) or the naming error.
+        if (!commit
+            && !(n_named_params == 1 && (io.inputs[first_param].kind == Io_kind::none || io.inputs[first_param].array_size > 0))) {
+          return false;
         }
       }
       // Exception 1: exactly one non-self parameter — a single positional value
       // maps unambiguously (also the whole-tuple→scalar path under commit).
       if (n_named_params == 1) {
         const auto slot = next_unset(has_self ? 1 : 0);
-        if (slot < nparams) {
+        if (slot < nbind) {
           bind(slot);
           continue;
         }
       }
-      // Exception 3: the actual's kind uniquely identifies one unset, typed,
-      // non-self parameter. Untyped params (kind=none) never match.
+      // Exception 3: the actual's kind uniquely identifies one typed, non-self
+      // parameter of the WHOLE signature (06-functions.md: "if two parameters
+      // have the same type ... the call must name the argument"). Counting only
+      // the still-unset params made the last same-kind slot a positional
+      // fallback: `f1(a, b)` into `f1(a:u4, c:u4)` bound b→c once `a` punned,
+      // which also let an overload set dispatch to the wrong lambda. Untyped
+      // params (kind=none) never match.
       if (const auto k = actual_kind(a.node); k != Io_kind::none) {
+        std::size_t match   = nparams;
+        std::size_t count   = 0;
+        bool        untyped = false;  // an untyped param could accept the value too: not unique
+        for (std::size_t i = (has_self ? 1u : 0u); i < nbind; ++i) {
+          const auto& e = io.inputs[i];
+          if (e.kind == k) {
+            match = i;
+            ++count;
+          } else if (e.kind == Io_kind::none && e.type_name.empty() && e.bits == 0 && !e.has_range && e.array_size == 0
+                     && !e.wide_range_min && !e.has_deferred_bound()) {
+            untyped = true;
+          }
+        }
+        if (count == 1 && !untyped && !param_set[match]) {
+          bind(match);
+          continue;
+        }
+      }
+      // A `ref` actual (`f(ref m, by=2)`) is identified by its MODE the way
+      // Exception 3 identifies a value by its type: it may only bind a `ref`
+      // parameter, so exactly one `ref` parameter in the whole signature makes
+      // the mapping unambiguous. Two `ref` parameters (`bump(ref x, ref y)`)
+      // must be named (`bump(p=ref x, q=ref y)`).
+      if (a.is_ref_pass) {
         std::size_t match = nparams;
         std::size_t count = 0;
-        for (std::size_t i = (has_self ? 1u : 0u); i < nparams; ++i) {
-          if (!param_set[i] && io.inputs[i].kind == k) {
+        for (std::size_t i = first_param; i < nbind; ++i) {
+          if (io.inputs[i].is_ref) {
             match = i;
             ++count;
           }
         }
-        if (count == 1) {
+        if (count == 1 && !param_set[match]) {
           bind(match);
           continue;
         }
@@ -5127,6 +6022,10 @@ bool uPass_runner::bind_call_actuals(const Lnast_tree_io& io, const std::vector<
       // Otherwise the positional argument is ambiguous and must be named.
       const auto  slot  = next_unset(has_self ? 1 : 0);
       std::string pname = slot < nparams ? io.inputs[slot].name : std::string{"argument"};
+      // A flattened tuple-param leaf (`p.x`) is named as its parameter (`p=`).
+      if (const auto dp = pname.find('.'); dp != std::string::npos && !pname.starts_with('`')) {
+        pname.resize(dp);
+      }
       if (slot >= nparams) {
         fcall_arg_fail(call_span,
                        "fcall-too-many-args",
@@ -5142,6 +6041,49 @@ bool uPass_runner::bind_call_actuals(const Lnast_tree_io& io, const std::vector<
   return true;
 }
 
+namespace {
+// The declared comp_type_array of port `name` when its shape does not fold in
+// `tmpl` (`v:[N]u4`, `v:[N]unsigned(bits=N)` on a generic lambda): upass.ssa
+// keeps that type in the io tree (the io entry has no width), and the
+// specialization folds it under the binds (clone_template_specialized). The
+// declaration types the port, never the actual. Invalid otherwise.
+Lnast_nid unsized_array_port(const Lnast& tmpl, const Lnast_io_entry& e, bool output) {
+  if (e.bits > 0 || e.array_size > 0 || e.has_range || e.kind != Io_kind::none) {
+    return {};  // a sized port (a `[4]u8` array is too)
+  }
+  const auto name = std::string_view(e.name);
+  const auto io   = tmpl.get_first_child(tmpl.get_root());
+  if (io.is_invalid() || !Lnast_ntype::is_io(tmpl.get_type(io))) {
+    return {};
+  }
+  auto tup = tmpl.get_first_child(io);
+  if (output && !tup.is_invalid()) {
+    tup = tmpl.get_sibling_next(tup);
+  }
+  if (tup.is_invalid()) {
+    return {};
+  }
+  for (auto st : tmpl.children(tup)) {
+    const auto nm = tmpl.get_first_child(st);
+    if (nm.is_invalid() || tmpl.get_name(nm) != name) {
+      continue;
+    }
+    for (auto c : tmpl.children(st)) {
+      if (Lnast_ntype::is_comp_type_array(tmpl.get_type(c))) {
+        return c;
+      }
+    }
+    return {};
+  }
+  return {};
+}
+
+// An ARRAY port: a sized one (`v:[4]u8`) or an unsized one (see above).
+bool is_array_port(const Lnast& tmpl, const Lnast_io_entry& e, bool output) {
+  return e.array_size > 0 || !unsized_array_port(tmpl, e, output).is_invalid();
+}
+}  // namespace
+
 // A call that DECLINES the comb splice lowers to a Sub INSTANCE, and the handle's
 // FIELDS are the callee's declared output ports. tolg re-derives them when it
 // builds the Sub, but the runner's own declared-type consumers run FIRST -- so
@@ -5152,13 +6094,75 @@ bool uPass_runner::bind_call_actuals(const Lnast_tree_io& io, const std::vector<
 // facts for a dotted path whose field entry does not exist yet" side slot that
 // upass::decl_facts::lookup already consults -- so every existing consumer picks
 // them up with no new plumbing.
-void uPass_runner::stash_sub_instance_port_facts(std::string_view handle, const std::shared_ptr<Lnast>& callee) {
+void uPass_runner::stash_sub_instance_port_facts(std::string_view handle, const std::shared_ptr<Lnast>& callee,
+                                                 const std::vector<Spec_port>* out_inject) {
   if (handle.empty() || !callee) {
     return;
   }
-  for (const auto& oe : callee->io_meta().outputs) {
+  if (const auto& outs = callee->io_meta().outputs; outs.size() == 1 && !outs.front().name.empty()) {
+    symbol_table_.single_output_port.insert_or_assign(std::string(handle), outs.front().name);
+    if (Lnast::is_tmp(handle)) {
+      const auto cn = callee->get_top_module_name();
+      symbol_table_.call_result_label.insert_or_assign(
+          std::string(handle),
+          absl::StrCat(cn.substr(cn.rfind('.') == std::string_view::npos ? 0 : cn.rfind('.') + 1), "(…).", outs.front().name));
+    }
+  }
+  const auto& outs  = callee->io_meta().outputs;
+  auto&       names = symbol_table_.sub_output_names[std::string(handle)];
+  names.clear();
+  for (const auto& oe : outs) {
+    // Unquoted, as a field read spells it (a Verilog port rides `` `rsp.data` ``).
+    const bool quoted = oe.name.size() >= 2 && oe.name.front() == '`' && oe.name.back() == '`';
+    names.push_back(quoted ? oe.name.substr(1, oe.name.size() - 2) : oe.name);
+  }
+  for (std::size_t oi = 0; oi < outs.size(); ++oi) {
+    auto oe = outs[oi];
     if (oe.name.empty()) {
       continue;
+    }
+    // A generic-width output (`o:unsigned(bits=N)`) of a specialized template:
+    // its width is this call's folded bound, not the template's unbounded port.
+    // An array output's folded bound is its ELEMENT's, never the port's.
+    if (out_inject != nullptr && oi < out_inject->size() && (*out_inject)[oi].inject
+        && unsized_array_port(*callee, oe, true).is_invalid()) {
+      const auto& sp = (*out_inject)[oi];
+      if (sp.kind == Io_kind::boolean) {
+        oe.kind = Io_kind::boolean;
+      } else if (sp.type_name.empty() && sp.array_size == 0 && sp.max && sp.min && sp.max->is_just_i64() && sp.min->is_just_i64()) {
+        oe.kind      = Io_kind::integer;
+        oe.has_range = true;
+        oe.range_max = sp.max->to_just_i64();
+        oe.range_min = sp.min->to_just_i64();
+      } else if (sp.type_name.empty() && sp.array_size == 0 && sp.max && sp.min) {
+        oe.kind           = Io_kind::integer;
+        oe.wide_range_max = *sp.max;
+        oe.wide_range_min = *sp.min;
+      }
+    }
+    const auto key = absl::StrCat(handle, ".", oe.name);
+    // Ruling 21 names a `mod`/`pipe` instance's untyped output: one still
+    // untyped here has no range to promise (a template's specialization, or an
+    // output its body left unbounded) -- a fully typed callee's derived range
+    // was already exported into its io_meta (ruling 28, pass.upass). A `comb`
+    // is inlined unless `compile.upass.inline=false` keeps it a Sub, and the
+    // inlined body derives the output's range: marking the Sub's output
+    // unknown would make the knob decide whether the program compiles.
+    if (callee->get_lambda_kind() != "comb" && (oe.kind == Io_kind::none || oe.kind == Io_kind::integer) && oe.array_size == 0
+        && oe.bits == 0 && !oe.has_range && !oe.wide_range_min && !oe.has_deferred_bound() && oe.type_name.empty()
+        && unsized_array_port(*callee, oe, true).is_invalid()) {
+      symbol_table_.opaque_sub_outputs[handle].insert(oe.name);
+    }
+    if (oe.kind == Io_kind::integer && oe.array_size == 0) {
+      auto& ports = symbol_table_.sub_output_ranges[handle];
+      if (oe.has_range) {
+        ports.insert_or_assign(oe.name, std::pair{*Dlop::create_integer(oe.range_min), *Dlop::create_integer(oe.range_max)});
+      } else if (oe.wide_range_min && oe.wide_range_max) {
+        ports.insert_or_assign(oe.name, std::pair{*oe.wide_range_min, *oe.wide_range_max});
+      } else if (oe.bits > 0) {
+        const auto w = static_cast<uint32_t>(oe.bits);
+        ports.insert_or_assign(oe.name, std::pair{upass::min_from_bits(w, oe.is_signed), upass::max_from_bits(w, oe.is_signed)});
+      }
     }
     Symbol_table::Pending_decl pd;
     if (oe.kind == Io_kind::boolean) {
@@ -5184,10 +6188,1366 @@ void uPass_runner::stash_sub_instance_port_facts(std::string_view handle, const 
       // operand can be negative), which is why those are safe to claim.
       continue;
     }
-    const auto key = absl::StrCat(handle, ".", oe.name);
     symbol_table_.pending_decl_facts.insert_or_assign(key, pd);
     symbol_table_.pending_keys_by_root[std::string(handle)].push_back(key);
   }
+}
+
+void uPass_runner::note_opaque_output_read() {
+  if (symbol_table_.opaque_sub_outputs.empty() || !lm->has_child()) {
+    return;
+  }
+  const auto saved = lm->save_cursor();
+  lm->move_to_child();
+  const std::string dst(lm->current_text());
+  lm->restore_cursor(saved);
+  // `c.o`: the tuple_get's origin "handle.port", recorded by the dispatch. A
+  // call to a ONE-output callee is its output's value itself (`y = m(a=x)`).
+  std::string_view handle;
+  std::string_view port;
+  if (const auto origin = symbol_table_.tget_origin.find(dst); origin != symbol_table_.tget_origin.end()) {
+    const auto dot = origin->second.find('.');
+    if (dot == std::string::npos) {
+      return;
+    }
+    handle = std::string_view(origin->second).substr(0, dot);
+    port   = std::string_view(origin->second).substr(dot + 1);
+  } else if (const auto so = symbol_table_.single_output_port.find(dst); so != symbol_table_.single_output_port.end()) {
+    handle = dst;
+    port   = so->second;
+  } else {
+    return;
+  }
+  const auto oo = symbol_table_.opaque_sub_outputs.find(handle);
+  if (oo != symbol_table_.opaque_sub_outputs.end() && oo->second.contains(port)) {
+    symbol_table_.wide_values.insert(dst);  // unknown range: judged like a too-wide value (ruling 21)
+  }
+}
+
+std::optional<upass::decl_facts::Facts> uPass_runner::operand_decl_facts(std::string_view name) const {
+  return upass::decl_facts::lookup_operand(symbol_table_, lm ? lm->get_lnast().get() : nullptr, name);
+}
+
+uPass_runner::Value_range uPass_runner::value_range_of(const Lnast_node& v) const {
+  Value_range r;
+  if (v.is_const()) {
+    // A 0sb/0ub BIT-PATTERN literal carries bits, not a value: binding it is a
+    // force/reinterpret, never an overflow (the same rule upass.bitwidth applies).
+    const auto txt = v.get_name();
+    if (txt.size() >= 3 && txt[0] == '0' && (txt[1] == 's' || txt[1] == 'u') && txt[2] == 'b') {
+      return r;
+    }
+    const auto& c = Dlop::from_pyrope_cached(txt);
+    if (c.is_invalid() || !c.is_integer() || c.has_unknowns()) {
+      return r;
+    }
+    r.integer = true;
+    r.min     = c;
+    r.max     = c;
+    return r;
+  }
+  if (!v.is_ref()) {
+    return r;
+  }
+  // A ref reads the RANGE upass.bitwidth derived, never the folded value, so a
+  // pattern-derived constant keeps its force semantics here too.
+  const auto name = v.get_name();
+  const auto b    = symbol_table_.get_bundle(name);
+  if (b) {
+    const auto& e = b->get_entry(bundle_path::of_string("0"));
+    if (!e.bw_max.is_invalid() && e.bw_max.is_integer() && !e.bw_min.is_invalid() && e.bw_min.is_integer()) {
+      r.integer = true;
+      r.min     = e.bw_min;
+      r.max     = e.bw_max;
+      return r;
+    }
+    // An enum entry (`Dir.W`) is its integer encoding (user ruling 2026-09-28
+    // (29)); nothing derives a range for its carrier, and a narrower port must
+    // not truncate it silently.
+    if (bundle_enum_type(b)) {
+      if (const auto ev = b->scalar(); ev && ev->is_integer() && !ev->has_unknowns()) {
+        r.integer = true;
+        r.min     = *ev;
+        r.max     = *ev;
+        return r;
+      }
+    }
+  }
+  // A range published before this walk (e.g. a rolled loop's index, whose
+  // port type is only a signed storage window around its elaborated domain).
+  const auto& ranges = lm->get_lnast()->bw_meta().ranges;
+  if (auto it = ranges.find(std::string(name)); it != ranges.end() && !it->second.unbounded) {
+    r.integer = true;
+    r.min     = *Dlop::create_integer(it->second.min);
+    r.max     = *Dlop::create_integer(it->second.max);
+    return r;
+  }
+  // A read of a Sub instance's output (`child.o`) is a tuple_get temp with no
+  // type of its own: the instance port bounds it (stash_sub_instance_port_facts).
+  // (Also a single-output instance read through its handle, `f(a=s1)`.)
+  const Symbol_table::Port_range* port = nullptr;
+  if (const auto origin = symbol_table_.tget_origin.find(std::string(name)); origin != symbol_table_.tget_origin.end()) {
+    port = symbol_table_.sub_output_range(origin->second);
+  } else if (const auto h = symbol_table_.sub_output_ranges.find(name);
+             h != symbol_table_.sub_output_ranges.end() && h->second.size() == 1) {
+    port = &h->second.begin()->second;
+  }
+  if (port != nullptr) {
+    r.integer = true;
+    r.min     = port->first;
+    r.max     = port->second;
+    return r;
+  }
+  // Its declared type, unless a write into it was one upass.bitwidth could not
+  // judge (then the type does not bound what it holds).
+  if (const auto vf = operand_decl_facts(name)) {
+    if (vf->kind == upass::decl_facts::Num::boolean || vf->kind == upass::decl_facts::Num::string) {
+      return r;
+    }
+    const auto base = name.substr(0, name.find("___ssa_"));
+    if (vf->range_max && vf->range_max->is_integer() && vf->range_min && vf->range_min->is_integer()
+        && !symbol_table_.unchecked_typed.contains(base)) {
+      r.integer = true;
+      r.min     = vf->range_min;
+      r.max     = vf->range_max;
+      return r;
+    }
+  }
+  // A value too WIDE for a derived range (`x << n`, a >62-bit product, as
+  // upass.bitwidth classified it). A value nothing derived a range for is left
+  // alone.
+  r.integer = symbol_table_.wide_values.contains(name);
+  return r;
+}
+
+namespace {
+// Does the result `dst` of the call at `call_nid` reach a `comptime`
+// declaration through the straight-line copies after it? `comptime const T =
+// f(...)` lowers to the call into a temp, T's declare, then `store(T, %tmp)`.
+// Such a call is evaluated at compile time, so its loops cannot roll. The walk
+// follows the value to its FIRST consumer only (and never past a compound
+// statement): it runs for every inlined call, so it must not rescan the rest
+// of the scope.
+bool feeds_comptime_decl(const Lnast& ln, const Lnast_nid& call_nid, std::string_view dst) {
+  std::string_view                      flow = dst;
+  absl::flat_hash_set<std::string_view> comptime_decls;
+  for (auto s = ln.get_sibling_next(call_nid); !s.is_invalid(); s = ln.get_sibling_next(s)) {
+    const auto t = ln.get_type(s);
+    const auto a = ln.get_first_child(s);
+    const auto b = a.is_invalid() ? a : ln.get_sibling_next(a);
+    if (Lnast_ntype::is_if_like(t) || Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t) || Lnast_ntype::is_stmts(t)) {
+      return false;
+    }
+    if (a.is_invalid() || b.is_invalid() || !Lnast_ntype::is_ref(ln.get_type(a))) {
+      continue;
+    }
+    if (Lnast_ntype::is_declare(t)) {
+      const auto mode = ln.get_sibling_next(b);
+      if (!mode.is_invalid() && Lnast_ntype::is_const(ln.get_type(mode))
+          && ln.get_name(mode).find("comptime") != std::string_view::npos) {
+        if (ln.get_name(a) == flow) {
+          return true;
+        }
+        comptime_decls.insert(ln.get_name(a));
+      }
+      continue;
+    }
+    if (Lnast_ntype::is_store(t) && Lnast_ntype::is_ref(ln.get_type(b)) && ln.get_sibling_next(b).is_invalid()
+        && ln.get_name(b) == flow) {
+      if (comptime_decls.contains(ln.get_name(a))) {
+        return true;
+      }
+      if (!Lnast::is_tmp(ln.get_name(a))) {
+        return false;  // a runtime variable holds the value
+      }
+      flow = ln.get_name(a);  // a compiler copy: follow it
+      continue;
+    }
+    for (auto n : ln.depth_preorder(s)) {
+      if (Lnast_ntype::is_ref(ln.get_type(n)) && ln.get_name(n) == flow) {
+        return false;  // consumed by anything else: a runtime use
+      }
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
+std::optional<uPass_runner::Array_port_shape> uPass_runner::array_port_shape(
+    const std::shared_ptr<Lnast>& callee, const Lnast_io_entry& e, bool output,
+    const absl::flat_hash_map<std::string, Generic_bind>& gbinds, const Lnast_node* actual) {
+  if (e.array_size > 0 && e.elem_bits > 0) {
+    // A multi-dimensional port's elem_bits is one packed row: the leaf is that
+    // row split over the inner dims.
+    int64_t row = 1;
+    for (const auto d : e.inner_dims) {
+      row *= d;
+    }
+    if (row <= 0 || e.elem_bits % row != 0) {
+      return std::nullopt;
+    }
+    const auto w = static_cast<uint32_t>(e.elem_bits / row);
+    return Array_port_shape{.lanes      = e.array_size,
+                            .elem_min   = upass::min_from_bits(w, e.elem_signed),
+                            .elem_max   = upass::max_from_bits(w, e.elem_signed),
+                            .elem_bool  = e.elem_bool,
+                            .inner_dims = e.inner_dims};
+  }
+  if (!callee || e.bits > 0 || e.array_size > 0) {
+    return std::nullopt;
+  }
+  const auto at = unsized_array_port(*callee, e, output);
+  if (at.is_invalid()) {
+    return std::nullopt;
+  }
+  // `comp_type_array(elem, dim)`, outer dim first: a multi-dimensional port's
+  // elem is itself the array of the next dimension (`[N][M]T`).
+  std::vector<int64_t> dims;
+  auto                 elem = callee->get_first_child(at);
+  for (;;) {
+    const auto dim = elem.is_invalid() ? elem : callee->get_sibling_next(elem);
+    // Missing/empty dimensions are filled from the actual below; retain
+    // the declared element envelope independently of the extent.
+    // The dim rides as `const '[N]'` (the written name) or `ref %t` (`[N+1]`).
+    auto       dim_txt = dim.is_invalid() ? std::string_view{} : callee->get_name(dim);
+    if (dim_txt.size() >= 2 && dim_txt.front() == '[' && dim_txt.back() == ']') {
+      dim_txt = dim_txt.substr(1, dim_txt.size() - 2);
+    }
+    if (dim_txt.empty()) {
+      dims.push_back(0);
+    } else {
+      const auto lanes = fold_template_bound(callee, dim_txt, gbinds);
+      if (!lanes || !lanes->is_just_i64() || lanes->to_just_i64() <= 0) {
+        return std::nullopt;
+      }
+      dims.push_back(lanes->to_just_i64());
+    }
+    if (!Lnast_ntype::is_comp_type_array(callee->get_type(elem))) {
+      break;
+    }
+    elem = callee->get_first_child(elem);
+  }
+  Array_port_shape shape{.lanes       = dims.front(),
+                         .infer_lanes = dims.front() == 0,
+                         .inner_dims  = std::vector<int64_t>(dims.begin() + 1, dims.end())};
+  if (shape.infer_lanes && output) {
+    return std::nullopt;  // This inference rule applies to input arguments.
+  }
+  if (shape.infer_lanes && actual) {
+    if (actual->is_const()) {
+      shape.lanes = 1;
+    } else if (actual->is_ref()) {
+      const auto name = actual->get_name();
+      const auto b    = symbol_table_.get_bundle(name);
+      if (b && !b->get_attr("__array_size").is_invalid() && b->get_attr("__array_size").is_just_i64()) {
+        shape.lanes = b->get_attr("__array_size").to_just_i64();
+      } else if (const auto* port = lm->get_lnast()->io_meta().find(name); port && port->array_size > 0) {
+        shape.lanes = port->array_size;
+      } else if (auto fields = try_tuple_shape(name)) {
+        shape.lanes = fields->size();
+      } else if (actual_node_kind(*actual) != Io_kind::none) {
+        shape.lanes = 1;
+      }
+    }
+  }
+  if (Lnast_ntype::is_prim_type_bool(callee->get_type(elem))) {
+    shape.elem_bool = true;
+    shape.elem_min  = *Dlop::create_integer(0);
+    shape.elem_max  = *Dlop::create_integer(1);
+    return shape;
+  }
+  const auto mx   = Lnast_ntype::is_prim_type_int(callee->get_type(elem)) ? callee->get_first_child(elem) : Lnast_nid{};
+  const auto mn   = mx.is_invalid() ? mx : callee->get_sibling_next(mx);
+  const auto vmax = mn.is_invalid() ? std::nullopt : fold_template_bound(callee, callee->get_name(mx), gbinds);
+  const auto vmin = mn.is_invalid() ? std::nullopt : fold_template_bound(callee, callee->get_name(mn), gbinds);
+  if (!vmax || !vmin) {
+    return std::nullopt;
+  }
+  shape.elem_max = *vmax;
+  shape.elem_min = *vmin;
+  return shape;
+}
+
+std::optional<std::pair<Dlop, Dlop>> uPass_runner::declared_param_range(
+    const std::shared_ptr<Lnast>& callee, const Lnast_io_entry& e, const absl::flat_hash_map<std::string, Generic_bind>& gbinds) {
+  if (e.array_size > 0 || (callee && is_array_port(*callee, e, false))) {
+    return std::nullopt;  // an array port: its shape is checked lane by lane (check_call_args_fit)
+  }
+  const auto gbi = e.type_name.empty() ? gbinds.end() : gbinds.find(e.type_name);
+  const bool gen = gbi != gbinds.end() && gbi->second.type_name.empty() && gbi->second.const_text.empty();
+  if (e.kind == Io_kind::boolean || (gen && gbi->second.kind == Io_kind::boolean)) {
+    return std::pair{*Dlop::create_integer(0), *Dlop::create_integer(1)};
+  }
+  if (e.kind == Io_kind::integer && e.has_range) {
+    return std::pair{*Dlop::create_integer(e.range_min), *Dlop::create_integer(e.range_max)};
+  }
+  if (e.kind == Io_kind::integer && e.wide_range_min && e.wide_range_max) {
+    return std::pair{*e.wide_range_min, *e.wide_range_max};
+  }
+  if (e.kind == Io_kind::integer && e.bits > 0 && e.array_size == 0) {
+    const auto w = static_cast<uint32_t>(e.bits);
+    return std::pair{upass::min_from_bits(w, e.is_signed), upass::max_from_bits(w, e.is_signed)};
+  }
+  if (e.has_deferred_bound()) {
+    // Generic-width port (`a:unsigned(bits=N)`): the bound folded under this
+    // call's binds. A bound that does not fold here is diagnosed by the
+    // specialization / splice path, not by the argument check.
+    if (!callee) {
+      return std::nullopt;
+    }
+    std::optional<Dlop> dmax;
+    std::optional<Dlop> dmin;
+    if (!e.bound_max_text.empty() && e.bound_max_text != "nil") {
+      dmax = fold_template_bound(callee, e.bound_max_text, gbinds, 0, nullptr);
+    }
+    if (!e.bound_min_text.empty() && e.bound_min_text != "nil") {
+      dmin = fold_template_bound(callee, e.bound_min_text, gbinds, 0, nullptr);
+    }
+    if (dmax && dmin) {
+      return std::pair{*dmin, *dmax};
+    }
+    return std::nullopt;
+  }
+  if (gen && gbi->second.kind == Io_kind::integer && gbi->second.max && gbi->second.min) {
+    return std::pair{*gbi->second.min, *gbi->second.max};  // `a:T` with T bound to an integer type
+  }
+  return std::nullopt;
+}
+
+upass::Kind uPass_runner::value_kind_of(const Lnast_node& v) const {
+  if (v.is_const()) {
+    const auto txt = v.get_name();
+    if (txt == "true" || txt == "false") {
+      return upass::Kind::boolean;
+    }
+    if (!txt.empty() && txt.front() == '"') {
+      return upass::Kind::string;
+    }
+    if (txt == "nil" || txt == "0sb?" || txt == "0ub?") {
+      return upass::Kind::unknown;  // nil, or the typeless single unknown bit
+    }
+    // A string literal rides as `'text'` too (a one-character `'a'` is a
+    // character, an integer).
+    const auto& c = Dlop::from_pyrope_cached(txt);
+    if (c.is_invalid()) {
+      return upass::Kind::unknown;
+    }
+    return c.is_integer() ? upass::Kind::integer : c.is_string() ? upass::Kind::string : upass::Kind::unknown;
+  }
+  if (!v.is_ref()) {
+    return upass::Kind::unknown;
+  }
+  const auto name = v.get_name();
+  if (const auto b = symbol_table_.get_bundle(name)) {
+    if (const auto k = upass::decl_facts::bundle_kind(*b); k != upass::Kind::unknown) {
+      return k;
+    }
+  }
+  return upass::decl_facts::operand_kind(symbol_table_, lm ? lm->get_lnast().get() : nullptr, name);
+}
+
+void uPass_runner::check_call_arg_kind(const Lnast_io_entry& e, const absl::flat_hash_map<std::string, Generic_bind>& gbinds,
+                                       const Lnast_node& actual, std::string_view callee,
+                                       const livehd::diag::Span& call_span) const {
+  if (e.array_size != 0) {
+    return;
+  }
+  // A `Clock`/`Reset` input (or actual) is a 1-bit signal that binds by type
+  // (docs 07-typesystem "Clock and Reset"): a Bool expression binds to a Reset
+  // without a cast, and a clock crosses into a Verilog child's 1-bit `clk`.
+  // Only a string is never one.
+  bool clock_reset = e.sig != Io_sig::none;
+  if (actual.is_ref() && lm) {
+    if (const auto* ae = lm->get_lnast()->io_meta().find(actual.get_name()); ae != nullptr && ae->sig != Io_sig::none) {
+      clock_reset = true;
+    }
+  }
+  if (clock_reset) {
+    if (value_kind_of(actual) == upass::Kind::string) {
+      check_bind_kind(e, Io_kind::boolean, upass::Kind::string, callee, call_span);
+    }
+    return;
+  }
+  auto want = e.kind;
+  if (const auto gbi = e.type_name.empty() ? gbinds.end() : gbinds.find(e.type_name);
+      gbi != gbinds.end() && gbi->second.type_name.empty() && gbi->second.const_text.empty()) {
+    want = gbi->second.kind;  // `a:T` with T bound to a scalar type
+  }
+  check_bind_kind(e, want, value_kind_of(actual), callee, call_span);
+}
+
+void uPass_runner::check_bind_kind(const Lnast_io_entry& e, Io_kind want, upass::Kind got, std::string_view callee,
+                                   const livehd::diag::Span& call_span) {
+  if (want == Io_kind::boolean && got == upass::Kind::integer) {
+    fcall_arg_fail(call_span,
+                   "fcall-arg-kind",
+                   std::format("cannot bind integer value to input `{}` of `{}` (it is boolean)", e.name, callee),
+                   "an integer never turns into a `Bool` implicitly: pass `Bool(x)` (true when non-zero, i.e. `x != 0`), "
+                   "pick one bit with `Bool(x#[i])`, or write `true`/`false` for a constant",
+                   "type");
+  }
+  if (want == Io_kind::integer && got == upass::Kind::boolean) {
+    fcall_arg_fail(call_span,
+                   "fcall-arg-kind",
+                   std::format("cannot bind boolean value to input `{}` of `{}` (it is integer)", e.name, callee),
+                   "a `Bool` never turns into an integer implicitly: pass `U1(x)` (true == 1)",
+                   "type");
+  }
+  if ((want == Io_kind::integer || want == Io_kind::boolean) && got == upass::Kind::string) {
+    fcall_arg_fail(call_span,
+                   "fcall-arg-kind",
+                   std::format("cannot bind string value to input `{}` of `{}` (it is {})",
+                               e.name,
+                               callee,
+                               want == Io_kind::boolean ? "boolean" : "integer"),
+                   "a string never turns into an integer or a `Bool`",
+                   "type");
+  }
+}
+
+bool uPass_runner::sub_input_may_be_omitted(const std::shared_ptr<Lnast>& callee, const Lnast_io_entry& e) const {
+  if (upass::io_port::declares_input_default(callee.get(), e)) {
+    return true;
+  }
+  return (upass::io_port::is_clock_candidate(e) || upass::io_port::is_reset_candidate(e)) && !lm->get_lnast()->is_verilog_origin();
+}
+
+void uPass_runner::check_call_args_fit(const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io,
+                                       const std::vector<Lnast_node>& param_val, const std::vector<bool>& param_set,
+                                       std::size_t nbind, const absl::flat_hash_map<std::string, Generic_bind>& gbinds,
+                                       std::string_view callee_name, const livehd::diag::Span& call_span) {
+  // Diagnostics name the callee as the user spells it, never import-qualified.
+  const auto bare = callee_name.substr(callee_name.rfind('.') == std::string_view::npos ? 0 : callee_name.rfind('.') + 1);
+  for (std::size_t i = 0; i < nbind && i < io.inputs.size() && i < param_val.size(); ++i) {
+    if (!param_set[i]) {
+      check_omitted_default_fit(callee, io.inputs[i], gbinds, bare, call_span);
+      continue;
+    }
+    if (param_val[i].is_invalid()) {
+      continue;
+    }
+    const auto& e = io.inputs[i];
+    if (e.array_size > 0 || (callee && is_array_port(*callee, e, false))) {
+      check_call_array_arg(callee, e, gbinds, param_val[i], bare, call_span);
+      continue;
+    }
+    check_call_arg_kind(e, gbinds, param_val[i], bare, call_span);
+    const auto declared = declared_param_range(callee, e, gbinds);
+    if (!declared) {
+      continue;  // untyped: the parameter takes the actual's type
+    }
+    const auto& [dmin, dmax] = *declared;
+    const auto actual        = value_range_of(param_val[i]);
+    if (!actual.may_exceed(dmin, dmax)) {
+      continue;  // not an integer (a kind mismatch is typecheck's), or every value it may take fits
+    }
+    const auto gbi = e.type_name.empty() ? gbinds.end() : gbinds.find(e.type_name);
+    if (e.kind == Io_kind::boolean
+        || (gbi != gbinds.end() && gbi->second.type_name.empty() && gbi->second.const_text.empty()
+            && gbi->second.kind == Io_kind::boolean)) {
+      fcall_arg_fail(call_span,
+                     "fcall-arg-overflow",
+                     std::format("cannot bind integer value to input `{}` of `{}` (it is boolean)", e.name, bare),
+                     "an integer never narrows into a `Bool` implicitly: pass `Bool(x)` (true when non-zero, i.e. "
+                     "`x != 0`), or pick one bit with `Bool(x#[i])`",
+                     "type");
+    }
+    std::string what     = "unbounded range";
+    bool        disjoint = false;
+    if (actual.bounded()) {
+      const auto& amin = *actual.min;
+      const auto& amax = *actual.max;
+      disjoint         = amin.gt_op(dmax)->is_known_true() || amax.lt_op(dmin)->is_known_true();
+      what             = amin.same_repr(amax) ? std::format("value {}", amin.to_decimal_string())
+                                              : std::format("range [{}, {}]", amin.to_decimal_string(), amax.to_decimal_string());
+    }
+    std::string example;
+    if (!dmin.is_negative() && dmax.add_op(*Dlop::create_integer(1))->is_power2()) {
+      example = std::format(" (e.g. `{}=x#[0..<{}]`)", e.name, dmax.get_payload_bits());
+    }
+    fcall_arg_fail(call_span,
+                   "fcall-arg-overflow",
+                   std::format("argument `{}` ({}) in call to `{}` {} not fit its declared range [{}, {}]",
+                               e.name,
+                               what,
+                               bare,
+                               disjoint ? "does" : "may",
+                               dmin.to_decimal_string(),
+                               dmax.to_decimal_string()),
+                   std::format("an argument never narrows implicitly: slice it at the call site{} or narrow it into a "
+                               "typed local with a `wrap`/`sat` assignment first",
+                               example),
+                   "type");
+  }
+}
+
+void uPass_runner::check_omitted_default_fit(const std::shared_ptr<Lnast>& callee, const Lnast_io_entry& e,
+                                             const absl::flat_hash_map<std::string, Generic_bind>& gbinds, std::string_view bare,
+                                             const livehd::diag::Span& call_span) {
+  // A `mod`/`pipe` default drives the Sub port from this call (lnast.tolg), so
+  // it binds like an argument: the same kind and overflow rules. (A comb's
+  // default is a body-prologue local, checked where the inlined body assigns it.)
+  auto dv = upass::io_port::input_default_const(callee.get(), e);
+  if (!dv && e.has_default && callee->is_template() && callee->get_lambda_kind() != "comb") {
+    // A default over a generic (`c:u8 = N * 2`, ruling 34) folds with this
+    // call's binds: the value the specialization's slot will hold. One this
+    // bound fold cannot evaluate (a comb call, an if-expression) is folded by
+    // the specialization's own walk, which pass.upass checks the same way.
+    dv = fold_template_bound(callee, Lnast_io_entry::default_value_name(e.name), gbinds, 0, nullptr);
+  }
+  if (!dv || !dv->is_integer() || e.array_size != 0) {
+    return;
+  }
+  check_bind_kind(e, e.kind, upass::Kind::integer, bare, call_span);
+  const auto declared = declared_param_range(callee, e, gbinds);
+  if (!declared || !(dv->lt_op(declared->first)->is_known_true() || dv->gt_op(declared->second)->is_known_true())) {
+    return;
+  }
+  fcall_arg_fail(call_span,
+                 "fcall-arg-overflow",
+                 std::format("the default of input `{}` of `{}` (value {}) does not fit its declared range [{}, {}]",
+                             e.name,
+                             bare,
+                             dv->to_decimal_string(),
+                             declared->first.to_decimal_string(),
+                             declared->second.to_decimal_string()),
+                 "a default binds like an argument and never narrows implicitly: change the default, or widen the input's type",
+                 "type");
+}
+
+std::optional<uPass_runner::Array_prefill> uPass_runner::array_init_prefill() const {
+  const auto& ln = lm->get_lnast();
+  if (lm->current_num_children() != 2 || !lm->has_child() || (ln->is_template() && !lm->in_inline_frame())
+      || ln->is_verilog_origin()) {
+    return std::nullopt;
+  }
+  const auto stmt = lm->get_current_nid();
+  const auto dst  = ln->get_first_child(stmt);
+  const auto val  = dst.is_invalid() ? dst : ln->get_sibling_next(dst);
+  if (val.is_invalid() || !Lnast_ntype::is_ref(ln->get_type(dst)) || !Lnast_ntype::is_const(ln->get_type(val))) {
+    return std::nullopt;
+  }
+  // A known value only (the front end's pre-fill skips `nil` the same way).
+  if (const auto& v = Dlop::from_pyrope_cached(ln->get_name(val));
+      v.is_invalid() || !(v.is_integer() || v.is_bool()) || v.has_unknowns()) {
+    return std::nullopt;
+  }
+  // The initializer right after its array declare, `declare(m, comp_type_array
+  // (…, [n]), mut); store(m, 0)`, and not already followed by the front end's
+  // own per-lane pre-fill (an extent it could fold, `[4]`): that one starts at
+  // lane `0…0` with the initializer's value, a user's first element write
+  // (`m[1][101] = 3` into a `[2][100..<102]` it could not size) does not.
+  const auto var  = ln->get_name(dst);
+  const auto decl = ln->get_sibling_prev(stmt);
+  if (decl.is_invalid() || !Lnast_ntype::is_declare(ln->get_type(decl))) {
+    return std::nullopt;
+  }
+  const auto dvar = ln->get_first_child(decl);
+  auto       ty   = dvar.is_invalid() ? dvar : ln->get_sibling_next(dvar);
+  if (ty.is_invalid() || ln->get_name(dvar) != var || !Lnast_ntype::is_comp_type_array(ln->get_type(ty))) {
+    return std::nullopt;
+  }
+  if (const auto next = ln->get_sibling_next(stmt); !next.is_invalid() && Lnast_ntype::is_store(ln->get_type(next))) {
+    const auto ndst    = ln->get_first_child(next);
+    bool       prefill = !ndst.is_invalid() && ln->get_name(ndst) == var;
+    size_t     nsel    = 0;
+    auto       k       = ndst.is_invalid() ? ndst : ln->get_sibling_next(ndst);
+    for (; prefill && !k.is_invalid() && !ln->get_sibling_next(k).is_invalid(); k = ln->get_sibling_next(k), ++nsel) {
+      prefill = Lnast_ntype::is_const(ln->get_type(k)) && ln->get_name(k) == "0";
+    }
+    if (prefill && nsel > 0 && !k.is_invalid() && Lnast_ntype::is_const(ln->get_type(k)) && ln->get_name(k) == ln->get_name(val)) {
+      return std::nullopt;
+    }
+  }
+  Array_prefill fill{.var = std::string(var), .value = std::string(ln->get_name(val)), .dims = {}};
+
+  // An index-range / enum dimension has the extent its declaration was
+  // lowered to (Index_dims_scope recorded it on the binding).
+  std::shared_ptr<const Bundle> binding;
+  {
+    const auto here = lm->save_cursor();
+    lm->move_to_nid(dst);
+    binding = symbol_table_.get_bundle(lm->current_text());
+    lm->restore_cursor(here);
+  }
+  int64_t lanes = 1;
+  for (size_t k = 0; !ty.is_invalid() && Lnast_ntype::is_comp_type_array(ln->get_type(ty)); ty = ln->get_first_child(ty), ++k) {
+    const auto             dim = upass::array_level_dim(*ln, ty);
+    std::optional<int64_t> n;
+    if (!dim.is_invalid() && Lnast_ntype::is_const(ln->get_type(dim))) {
+      n = upass::array_dim_lanes(ln->get_name(dim));
+    }
+    if (const auto nk = std::format("__array_n{}", k); !n && binding && binding->has_attr(nk)) {
+      n = binding->get_attr(nk).to_just_i64();
+    }
+    constexpr int64_t kMaxPrefillLanes = int64_t{1} << 16;
+    if (!n || *n <= 0 || lanes > kMaxPrefillLanes / *n) {
+      return std::nullopt;
+    }
+    lanes *= *n;
+    fill.dims.push_back(*n);
+  }
+  return fill;
+}
+
+void uPass_runner::emit_array_prefill(const Array_prefill& fill) {
+  // Every flat slot, outermost index first -- the order prp2lnast pre-fills a
+  // `[4][2]u8 = v` it can size, so a later element read or a runtime-index
+  // read-modify-write (`m[i]#[j] = b`) finds each lane. The lanes are
+  // physical: an index-range array is not rebased again.
+  std::vector<int64_t> idx(fill.dims.size(), 0);
+  const bool           outer_physical = std::exchange(physical_indices_, true);
+  while (true) {
+    std::vector<Lnast_node> ops;
+    ops.reserve(idx.size() + 1);
+    for (const auto i : idx) {
+      ops.push_back(Lnast_node::create_const(std::to_string(i)));
+    }
+    ops.push_back(Lnast_node::create_const(fill.value));
+    emit_inline_op(Lnast_ntype::create_store(), fill.var, ops);
+    auto k = static_cast<int>(idx.size()) - 1;
+    for (; k >= 0; --k) {
+      if (++idx[k] < fill.dims[k]) {
+        break;
+      }
+      idx[k] = 0;
+    }
+    if (k < 0) {
+      physical_indices_ = outer_physical;
+      return;
+    }
+  }
+}
+
+void uPass_runner::track_open_fill_array() {
+  // Cursor at a whole store `store(a, v)`: it replaces any contents a tracked
+  // `a` had. It is the fill of an inferred-extent array only as the
+  // initializer right after `declare(a, comp_type_array([]…), mut)`.
+  const auto& ln  = lm->get_lnast();
+  const auto  dst = ln->get_first_child(lm->get_current_nid());
+  const auto  val = dst.is_invalid() ? dst : ln->get_sibling_next(dst);
+  if (val.is_invalid() || !Lnast_ntype::is_ref(ln->get_type(dst))) {
+    return;
+  }
+  std::string var;
+  {
+    const auto here = lm->save_cursor();
+    lm->move_to_nid(dst);
+    var = std::string(lm->current_text());
+    lm->restore_cursor(here);
+  }
+  open_fill_arrays_.erase(var);
+  const auto decl = ln->get_sibling_prev(lm->get_current_nid());
+  if (!Lnast_ntype::is_const(ln->get_type(val)) || decl.is_invalid() || !Lnast_ntype::is_declare(ln->get_type(decl))
+      || (ln->is_template() && !lm->in_inline_frame())) {
+    return;
+  }
+  const auto dvar = ln->get_first_child(decl);
+  const auto type = dvar.is_invalid() ? dvar : ln->get_sibling_next(dvar);
+  const auto mode = type.is_invalid() ? type : ln->get_sibling_next(type);
+  if (mode.is_invalid() || ln->get_name(dvar) != ln->get_name(dst) || ln->get_name(mode) != "mut"
+      || !Lnast_ntype::is_comp_type_array(ln->get_type(type))) {
+    return;
+  }
+  for (auto level = type; Lnast_ntype::is_comp_type_array(ln->get_type(level)); level = ln->get_first_child(level)) {
+    const auto dim = upass::array_level_dim(*ln, level);
+    if (dim.is_invalid() || ln->get_name(dim) != "[]") {
+      return;  // a sized dimension: array_init_prefill fills every lane up front
+    }
+  }
+  if (const auto& v = Dlop::from_pyrope_cached(ln->get_name(val));
+      v.is_invalid() || !(v.is_integer() || v.is_bool()) || v.has_unknowns()) {
+    return;  // `nil` / `0sb?`: no known fill
+  }
+  open_fill_arrays_.insert_or_assign(std::move(var), std::string(ln->get_name(val)));
+}
+
+bool uPass_runner::try_open_fill_access() {
+  if (open_fill_arrays_.empty() || !lm->has_child()) {
+    return false;
+  }
+  // store(a, i…, v) / tuple_get(d, a, i…), every operand a leaf.
+  const bool              is_store = Lnast_ntype::is_store(lm->get_raw_ntype());
+  std::vector<Lnast_node> kids;
+  {
+    const auto here = lm->save_cursor();
+    for (bool more = lm->move_to_child(); more; more = lm->move_to_sibling()) {
+      if (!Lnast_ntype::is_ref(lm->get_raw_ntype()) && !Lnast_ntype::is_const(lm->get_raw_ntype())) {
+        kids.clear();
+        break;
+      }
+      kids.push_back(lm->current_node());
+    }
+    lm->restore_cursor(here);
+  }
+  const size_t base = is_store ? 0 : 1;
+  if (kids.size() < 3 || !kids[base].is_ref()) {
+    return false;
+  }
+  const auto it = open_fill_arrays_.find(kids[base].get_name());
+  if (it == open_fill_arrays_.end()) {
+    return false;
+  }
+  const size_t last = is_store ? kids.size() - 1 : kids.size();  // one past the last index
+  std::string  path;
+  for (size_t k = base + 1; k < last; ++k) {
+    std::optional<int64_t> v;
+    if (kids[k].is_const()) {
+      v = upass::int_literal(kids[k].get_name());
+    } else if (const auto fv = symbol_table_.known_const_scalar(kids[k].get_name()); fv && fv->is_just_i64()) {
+      v = fv->to_just_i64();
+    }
+    if (!v || *v < 0) {
+      // A runtime index: the runner no longer knows which entries a write
+      // reached (and a read of one decides nothing here).
+      if (is_store) {
+        open_fill_arrays_.erase(it);
+      }
+      return false;
+    }
+    absl::StrAppend(&path, path.empty() ? "" : ".", *v);
+  }
+  if (is_store) {
+    return false;  // a constant-index write defines its entry as usual
+  }
+  const auto b = symbol_table_.get_bundle(it->first);
+  if (!b || b->has_trivial(bundle_path::of_string(path)) || b->has_bundle(bundle_path::of_string(path))) {
+    return false;
+  }
+  // No write reached this entry: it holds the initializer's fill.
+  emit_inline_op(Lnast_ntype::create_store(), std::string(kids[0].get_name()), {Lnast_node::create_const(it->second)});
+  return true;
+}
+
+std::optional<uPass_runner::Array_index_dim> uPass_runner::array_index_dim(std::string_view dim_txt, std::string* why) const {
+  if (dim_txt.size() >= 2 && dim_txt.front() == '[' && dim_txt.back() == ']') {
+    dim_txt = dim_txt.substr(1, dim_txt.size() - 2);
+  }
+  const auto fold = [&](std::string_view bound) -> std::optional<int64_t> {
+    if (const auto v = upass::int_literal(bound)) {
+      return v;
+    }
+    if (const auto v = fold_frame_ref(bound); v && v->is_just_i64()) {
+      return v->to_just_i64();
+    }
+    return std::nullopt;
+  };
+  if (const auto r = upass::array_dim_range(dim_txt, fold)) {
+    return Array_index_dim{.lanes = r->lanes, .lo = r->lo, .enum_type = {}};
+  }
+  // `[X]` over an enum TYPE: its bundle holds one named entry per enum entry,
+  // each tagged `<entry>.enumentry`.
+  auto b = symbol_table_.get_bundle(dim_txt);
+  if (!b && lm->in_inline_frame()) {
+    b = symbol_table_.get_bundle(lm->frame_variable(dim_txt));
+  }
+  if (!b || !b->has_named_top() || b->has_unnamed_top()) {
+    return std::nullopt;
+  }
+  const auto& attrs = b->get_attrs();
+  if (std::none_of(attrs.begin(), attrs.end(), [](const auto& kv) {
+        return Bundle::get_last_level(kv.first) == battr::enumentry;
+      })) {
+    return std::nullopt;
+  }
+  std::vector<int64_t> values;
+  for (const auto& tl : b->top_levels()) {
+    if (tl.has_leafs || !tl.scalar.is_just_i64()) {
+      *why = "has hierarchical or payload entries";
+      return std::nullopt;
+    }
+    values.push_back(tl.scalar.to_just_i64());
+  }
+  std::sort(values.begin(), values.end());
+  const Array_index_dim map{.lanes = static_cast<int64_t>(values.size()), .lo = values.front(), .enum_type = std::string(dim_txt)};
+  // One entry per enum entry, at the entry's value: the values must be
+  // consecutive (a default one-hot enum numbers 1, 2, 4, …).
+  if (std::adjacent_find(values.begin(), values.end()) != values.end() || values.back() - values.front() + 1 != map.lanes) {
+    *why = "does not number its entries consecutively";
+  }
+  return map;
+}
+
+std::optional<uPass_runner::Array_index_dim> uPass_runner::range_value_dim(std::string_view name) const {
+  // A comptime `range` value carries its (inclusive) bounds as attrs.
+  const auto b = symbol_table_.get_bundle(name);
+  if (!b || !b->has_attr("rng_s") || !b->has_attr("rng_e")) {
+    return std::nullopt;
+  }
+  const auto& start = b->get_attr("rng_s");
+  const auto& end   = b->get_attr("rng_e");
+  const auto& step  = b->get_attr("rng_step");
+  if (!start.is_just_i64() || !end.is_just_i64() || (b->has_attr("rng_step") && !(step.is_just_i64() && step.to_just_i64() == 1))
+      || end.to_just_i64() < start.to_just_i64()) {
+    return std::nullopt;
+  }
+  return Array_index_dim{.lanes = end.to_just_i64() - start.to_just_i64() + 1, .lo = start.to_just_i64(), .enum_type = {}};
+}
+
+uPass_runner::Index_dims_scope::Index_dims_scope(uPass_runner& r) : r_(r) {
+  const auto& lm = r_.lm;
+  if (!lm->has_child()) {
+    return;
+  }
+  const auto& ln   = lm->get_lnast();
+  const auto  name = ln->get_first_child(lm->get_current_nid());
+  const auto  type = name.is_invalid() ? name : ln->get_sibling_next(name);
+  if (type.is_invalid() || !Lnast_ntype::is_ref(ln->get_type(name)) || !Lnast_ntype::is_comp_type_array(ln->get_type(type))) {
+    return;
+  }
+  for (auto level = type; !level.is_invalid() && Lnast_ntype::is_comp_type_array(ln->get_type(level));
+       level      = ln->get_first_child(level)) {
+    Level lv{.dim = upass::array_level_dim(*ln, level), .text = {}, .map = {}, .is_ref = false};
+    if (!lv.dim.is_invalid() && Lnast_ntype::is_const(ln->get_type(lv.dim))) {
+      lv.text = std::string(ln->get_name(lv.dim));
+      std::string why;
+      if (lv.text != "[]" && !upass::array_dim_lanes(lv.text)) {
+        if (const auto m = r_.array_index_dim(lv.text, &why)) {
+          lv.map  = *m;
+          mapped_ = true;
+        }
+      }
+      if (!why.empty()) {
+        r_.index_dim_reported_ = true;  // the bake does not report the dim again
+        livehd::diag::sink().emit(livehd::diag::Diagnostic{
+            .severity = livehd::diag::Severity::error,
+            .code     = "array-dim-enum",
+            .category = "type",
+            .pass     = "upass.runner",
+            .message  = std::format("array dimension `{}` is an enum that {}, so it has no dense index", lv.text, why),
+            .span     = lm->current_span(),
+            .hint     = "an enum dimension needs a flat enum numbered consecutively: give its first entry a value "
+                        "(`enum X = (a = 0, b, c)`)",
+        });
+      }
+    } else if (!lv.dim.is_invalid() && Lnast_ntype::is_ref(ln->get_type(lv.dim))) {
+      // An index range whose bounds prp2lnast could not fold (`[N..<(N+2)]`
+      // over a generic) is a `range` value, known once the generic is bound.
+      const auto here = lm->save_cursor();
+      lm->move_to_nid(lv.dim);
+      const std::string value(lm->current_text());
+      lm->restore_cursor(here);
+      if (const auto m = r_.range_value_dim(value)) {
+        lv.text   = std::string(ln->get_name(lv.dim));
+        lv.map    = *m;
+        lv.is_ref = true;
+        mapped_   = true;
+      }
+    }
+    levels_.push_back(std::move(lv));
+  }
+  ln_             = ln;
+  const auto here = lm->save_cursor();
+  (void)lm->move_to_child();
+  var_ = std::string(lm->current_text());
+  lm->restore_cursor(here);
+  for (const auto& lv : levels_) {
+    if (lv.map.lanes > 0) {
+      if (lv.is_ref) {
+        ln_->set_type(lv.dim, Lnast_ntype::create_const());
+      }
+      ln_->set_name(lv.dim, std::format("[{}]", lv.map.lanes));
+    }
+  }
+}
+
+uPass_runner::Index_dims_scope::~Index_dims_scope() {
+  if (levels_.empty()) {
+    return;
+  }
+  r_.index_dim_reported_ = false;
+  for (const auto& lv : levels_) {
+    if (lv.map.lanes > 0) {
+      if (lv.is_ref) {
+        ln_->set_type(lv.dim, Lnast_ntype::create_ref());
+      }
+      ln_->set_name(lv.dim, lv.text);
+    }
+  }
+  // The index map rides the array's binding (and so every copy of it, a comb
+  // argument included). A plain array declaration drops any map an earlier
+  // binding of the same name left behind.
+  const auto rb    = r_.symbol_table_.get_bundle(var_);
+  const auto stale = [&] {
+    for (size_t k = 0; k < levels_.size(); ++k) {
+      if (rb->has_attr(std::format("__array_n{}", k))) {
+        return true;
+      }
+    }
+    return false;
+  };
+  if (!rb || (!mapped_ && !stale())) {
+    return;
+  }
+  const auto b = r_.symbol_table_.get_bundle_for_write(var_);
+  for (size_t k = 0; k < levels_.size(); ++k) {
+    const auto& m  = levels_[k].map;
+    const auto  nk = std::format("__array_n{}", k);
+    const auto  lk = std::format("__array_lo{}", k);
+    const auto  ek = std::format("__array_enum{}", k);
+    if (m.lanes <= 0) {
+      b->clear_attr(nk);
+      b->clear_attr(lk);
+      b->clear_attr(ek);
+      continue;
+    }
+    b->set_attr(nk, *Dlop::create_integer(m.lanes));
+    b->set_attr(lk, *Dlop::create_integer(m.lo));
+    if (m.enum_type.empty()) {
+      b->clear_attr(ek);
+    } else {
+      b->set_attr(ek, *Dlop::from_string(m.enum_type));
+    }
+  }
+  r_.any_index_mapped_ = r_.any_index_mapped_ || mapped_;
+}
+
+bool uPass_runner::try_lower_array_index() {
+  if (physical_indices_ || !any_index_mapped_ || !lm->has_child()) {
+    return false;
+  }
+  const bool               is_store = Lnast_ntype::is_store(lm->get_raw_ntype());
+  std::vector<Lnast_node>  kids;
+  std::vector<std::string> raw;  // each operand as written in the tree being walked
+  {
+    const auto here = lm->save_cursor();
+    for (bool more = lm->move_to_child(); more; more = lm->move_to_sibling()) {
+      if (!Lnast_ntype::is_ref(lm->get_raw_ntype()) && !Lnast_ntype::is_const(lm->get_raw_ntype())) {
+        kids.clear();
+        break;
+      }
+      kids.push_back(lm->current_node());
+      raw.emplace_back(lm->current_raw_text());
+    }
+    lm->restore_cursor(here);
+  }
+  // store(a, i…, v) / tuple_get(d, a, i…)
+  const size_t base = is_store ? 0 : 1;
+  if (kids.size() < 3 || !kids[base].is_ref()) {
+    return false;
+  }
+  const size_t last         = is_store ? kids.size() - 1 : kids.size();  // one past the last index
+  // The operator that computed temp `tmp` a few statements up (`ia + 0`), if
+  // any: an arithmetic result is an integer, never an enum entry.
+  const auto   integer_expr = [&](std::string_view tmp) {
+    const auto& ln = lm->get_lnast();
+    auto        at = ln->get_sibling_prev(lm->get_current_nid());
+    for (int n = 0; n < 32 && !at.is_invalid(); ++n, at = ln->get_sibling_prev(at)) {
+      const auto def = ln->get_first_child(at);
+      if (!def.is_invalid() && Lnast_ntype::is_ref(ln->get_type(def)) && ln->get_name(def) == tmp) {
+        const auto rule = upass::op_kind::rule_of(ln->get_type(at));
+        return (rule && rule->result == upass::Kind::integer) || ln->get_type(at) == Lnast_ntype::Lnast_ntype_shl;
+      }
+    }
+    return false;
+  };
+  // The index map rides the binding (a copy or a comb argument keeps it).
+  const std::string array(kids[base].get_name());
+  const auto        b = symbol_table_.get_bundle(array);
+  if (!b || std::none_of(b->get_attrs().begin(), b->get_attrs().end(), [](const auto& kv) {
+        return std::string_view(kv.first).starts_with("__array_n");
+      })) {
+    return false;
+  }
+  const auto shown_array = upass::Lnast_manager::user_name(array);
+  const auto fail        = [&](std::string_view code, std::string msg, std::string hint) {
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = std::string(code),
+        .category = "type",
+        .pass     = "upass.runner",
+        .message  = std::move(msg),
+        .span     = lm->current_span(),
+        .hint     = std::move(hint),
+    });
+    return false;
+  };
+  bool rebased = false;
+  for (size_t k = 0; base + 1 + k < last; ++k) {
+    const auto nk = std::format("__array_n{}", k);
+    if (!b->has_attr(nk)) {
+      continue;  // a plain zero-based dimension
+    }
+    const int64_t              n       = b->get_attr(nk).to_just_i64();
+    const int64_t              lo      = b->get_attr(std::format("__array_lo{}", k)).to_just_i64();
+    const auto&                en_attr = b->get_attr(std::format("__array_enum{}", k));
+    const auto                 en      = en_attr.is_string() ? en_attr.to_string() : std::string{};
+    auto&                      idx     = kids[base + 1 + k];
+    std::optional<int64_t>     v;
+    std::optional<std::string> idx_type;  // the index's enum/named type, "" = an integer, nullopt = unknown
+    if (idx.is_const()) {
+      v = upass::int_literal(idx.get_name());
+      if (!v) {
+        continue;  // not a position (a named-field key): judged elsewhere
+      }
+      idx_type = std::string{};
+    } else {
+      const auto  ib   = symbol_table_.get_bundle(idx.get_name());
+      const auto& name = raw[base + 1 + k];
+      if (ib && (ib->has_attr("rng_s") || ib->has_named_top() || ib->unnamed_top_count() > 1)) {
+        return fail("array-index-not-scalar",
+                    std::format("array `{}` is declared over an index range or enum: index one entry at a time", shown_array),
+                    "a range or tuple index (a slice) is not supported on an array with an index map");
+      }
+      // An input of the unit or of the inlined comb being walked: its declared
+      // type (an untyped comb input takes whatever the caller passes).
+      const auto* port = lm->get_lnast()->io_meta().find(name);
+      idx_type         = bundle_enum_type(ib);  // an enum entry (`X.t1`) carries its enum
+      if (const auto fv = symbol_table_.known_const_scalar(idx.get_name()); fv && fv->is_just_i64()) {
+        v = fv->to_just_i64();
+        if (!idx_type) {
+          idx_type = std::string{};
+        }
+      } else if (!idx_type && ib && !ib->get_type_name().empty()) {
+        idx_type = std::string(ib->get_type_name());  // a typed local (`mut s:X`)
+      } else if (!idx_type && port != nullptr) {
+        if (!port->type_name.empty()) {
+          idx_type = port->type_name;  // `s:X`
+        } else if (port->kind != Io_kind::none) {
+          idx_type = std::string{};  // `u:U2`
+        }
+      } else if (!idx_type && ib && declared_typed_.contains(std::string(idx.get_name()))) {
+        idx_type = std::string{};  // `mut j:U2`
+      } else if (!idx_type && Lnast::is_tmp(name) && integer_expr(name)) {
+        idx_type = std::string{};  // an integer expression (`ia + 0`)
+      }
+    }
+    // An enum dimension takes the entries of its enum only (08-memories.md
+    // "Array index": `x2[0]` is an error). A runtime value of unknown type
+    // cannot be judged here.
+    if (!en.empty() && idx_type && *idx_type != en && *idx_type != Lnast::enum_encoding_type(en)) {
+      // A compiler temp (`ia + 0`, `Z.z2`) has no source spelling to show.
+      const bool named = idx.is_const() || !Lnast::is_tmp(idx.get_name());
+      const auto kind  = idx_type->empty() ? std::string("an integer") : std::format("a `{}`", *idx_type);
+      const auto what  = named ? std::format("`{}` ({})", upass::Lnast_manager::user_name(idx.get_name()), kind) : kind;
+      return fail("array-index-not-enum",
+                  std::format("array `{}` is indexed by the entries of enum `{}`, not by {}", shown_array, en, what),
+                  std::format("index it with an entry of `{}` (`{}[{}.<entry>]`) or a value typed `{}`", en, shown_array, en, en));
+    }
+    if (v) {
+      if (*v < lo || *v - lo >= n) {
+        (void)fail("array-index-out-of-range",
+                   std::format("index {} is outside the index range [{}, {}) of array `{}`", *v, lo, lo + n, shown_array),
+                   "use an index within the array's declared index range");
+        v = lo;  // the compile already failed: the first entry keeps every later check quiet
+      }
+      rebased = rebased || lo != 0 || idx.is_ref();
+      idx     = Lnast_node::create_const(*v - lo);
+    } else if (lo != 0) {
+      auto tmp = std::format("{}{}_{}", upass::kRebasedIndexPrefix, ++inline_seq_, k);
+      emit_inline_op(Lnast_ntype::create_minus(), tmp, {idx, Lnast_node::create_const(lo)});
+      if (!en.empty()) {
+        // An enum value's range is its encoding type's (`enum Y = (a = 4, b,
+        // c)` is a U3), not its entries': keep the lane bits only, so the
+        // rebased index is non-negative (an entry is always a lane).
+        const auto bits = std::max<int64_t>(1, std::bit_width(static_cast<uint64_t>(n - 1)));
+        auto       mask = std::format("{}m{}_{}", upass::kRebasedIndexPrefix, inline_seq_, k);
+        emit_inline_op(Lnast_ntype::create_bit_and(),
+                       mask,
+                       {Lnast_node::create_ref(tmp), Lnast_node::create_const((int64_t{1} << bits) - 1)});
+        tmp = std::move(mask);
+      }
+      idx     = Lnast_node::create_ref(tmp);
+      rebased = true;
+    }
+  }
+  if (!rebased) {
+    return false;
+  }
+  if (!scratch_forest_) {
+    scratch_forest_ = hhds::Forest::create();
+  }
+  auto body = scratch_forest_->create_tree_temp("inl-aidx");
+  auto s    = std::make_shared<Lnast>(body, std::string(root_lnast_->get_top_module_name()));
+  auto root = s->set_root(is_store ? Lnast_ntype::create_store() : Lnast_ntype::create_tuple_get());
+  stamp_scratch_srcid(s, root);
+  for (const auto& kid : kids) {
+    s->add_child(root, kid);
+  }
+  flush_deferred_emits();
+  const bool outer_physical = std::exchange(physical_indices_, true);
+  lm->push_source(s, "", 0);
+  process_lnast();
+  flush_deferred_emits();
+  lm->pop_source();
+  physical_indices_ = outer_physical;
+  return true;
+}
+
+bool uPass_runner::has_in_place_type_folds(const Lnast& tmpl) {
+  const auto [it, fresh] = in_place_fold_cache_.try_emplace(&tmpl, false);
+  if (!fresh) {
+    return it->second;
+  }
+  for (auto n : tmpl.depth_preorder(tmpl.get_root())) {
+    const auto t = tmpl.get_type(n);
+    if (Lnast_ntype::is_prim_type_int(t)) {
+      for (auto c : tmpl.children(n)) {
+        if (Lnast_ntype::is_ref(tmpl.get_type(c))) {
+          it->second = true;  // `unsigned(bits=x.[bits])`
+          return true;
+        }
+      }
+    } else if (Lnast_ntype::is_comp_type_array(t)) {
+      const auto elem = tmpl.get_first_child(n);
+      const auto dim  = elem.is_invalid() ? elem : tmpl.get_sibling_next(elem);
+      if (!dim.is_invalid() && !(Lnast_ntype::is_const(tmpl.get_type(dim)) && upass::array_dim_lanes(tmpl.get_name(dim)))) {
+        it->second = true;  // `[N]T`, `[N+1]T`
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+void uPass_runner::check_array_port_dims(const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io,
+                                         const absl::flat_hash_map<std::string, Generic_bind>& gbinds, std::string_view callee_name,
+                                         const livehd::diag::Span& call_span) const {
+  if (!callee || !callee->is_template()) {
+    return;  // a concrete callee's ports were sized by upass.ssa
+  }
+  const auto bare  = callee_name.substr(callee_name.rfind('.') == std::string_view::npos ? 0 : callee_name.rfind('.') + 1);
+  const auto check = [&](const Lnast_io_entry& e, bool output) {
+    for (auto lvl = unsized_array_port(*callee, e, output);
+         !lvl.is_invalid() && Lnast_ntype::is_comp_type_array(callee->get_type(lvl));
+         lvl = callee->get_first_child(lvl)) {
+      const auto elem = callee->get_first_child(lvl);
+      const auto dim  = elem.is_invalid() ? elem : callee->get_sibling_next(elem);
+      if (dim.is_invalid()) {
+        return;  // an open `[]`
+      }
+      auto txt = callee->get_name(dim);
+      if (txt.size() >= 2 && txt.front() == '[' && txt.back() == ']') {
+        txt = txt.substr(1, txt.size() - 2);
+      }
+      if (txt.empty() && !output) {
+        continue;  // [] is inferred from this call's actual, not a generic expression.
+      }
+      std::string unbound;
+      if (const auto n = fold_template_bound(callee, txt, gbinds, 0, &unbound); !n || !n->is_just_i64() || n->to_just_i64() <= 0) {
+        if (!unbound.empty()) {
+          fcall_arg_fail(call_span,
+                         "fcall-generic-arity",
+                         std::format("generic `{}` of `{}` is unbound and has no default (it sets the shape of port `{}`)",
+                                     unbound,
+                                     bare,
+                                     e.name),
+                         std::format("bind it in the `<…>` list or declare a default `<{}=…>`", unbound));
+        }
+        // The specialization would harvest a width-less port (one bit).
+        fcall_arg_fail(call_span,
+                       "array-port-dim-not-comptime",
+                       std::format("the dimension of array port `{}` of `{}` is not a compile-time constant once its "
+                                   "generics are bound",
+                                   e.name,
+                                   bare),
+                       "size a port with a literal, a `comptime const`, or an expression over the lambda's generic "
+                       "parameters (`[N+1]`)",
+                       "type");
+      }
+    }
+  };
+  for (const auto& e : io.inputs) {
+    check(e, false);
+  }
+  for (const auto& e : io.outputs) {
+    check(e, true);
+  }
+}
+
+bool uPass_runner::check_call_array_arg(const std::shared_ptr<Lnast>& callee, const Lnast_io_entry& e,
+                                        const absl::flat_hash_map<std::string, Generic_bind>& gbinds, const Lnast_node& actual,
+                                        std::string_view callee_name, const livehd::diag::Span& call_span, bool probe) {
+  if (lm->get_lnast()->is_verilog_origin()) {
+    return true;  // the Verilog reader binds by the language's own (packed) rules
+  }
+  const auto shape = array_port_shape(callee, e, false, gbinds);
+  if (!shape || !shape->inner_dims.empty()) {
+    return true;  // multi-dimensional, or a shape the specialization diagnoses
+  }
+  if (shape->infer_lanes) {
+    const auto fail = [&](std::string_view code, std::string_view why) {
+      if (!probe) {
+        fcall_arg_fail(call_span,
+                       code,
+                       std::format("argument `{}` in call to `{}` {}", e.name, callee_name, why),
+                       "every element must fit the declared array element type",
+                       "type");
+      }
+      return false;
+    };
+    const auto fits = [&](const Lnast_node& value) {
+      const auto kind = actual_node_kind(value);
+      if (kind == Io_kind::none && value.is_ref()) {
+        if (const auto fields = try_tuple_shape(value.get_name()); fields && fields->size() > 1) {
+          return fail("fcall-arg-kind", "has a tuple-valued element where a scalar is required");
+        }
+      }
+      const auto want = shape->elem_bool ? Io_kind::boolean : Io_kind::integer;
+      if (kind != Io_kind::none && kind != want) {
+        return fail("fcall-arg-kind", "has an element of the wrong kind");
+      }
+      if (!shape->elem_bool && value_range_of(value).may_exceed(shape->elem_min, shape->elem_max)) {
+        return fail("fcall-arg-overflow", "has an element outside its declared range");
+      }
+      return true;
+    };
+    if (actual.is_const()) {
+      return fits(actual);  // a scalar is a one-entry tuple
+    }
+    const auto name = actual.get_name();
+    const auto b    = symbol_table_.get_bundle(name);
+    if (b && !b->get_attr("__array_size").is_invalid() && b->get_attr("__array_size").is_just_i64()) {
+      const auto& flat = b->get_attr("__array_flat_size");
+      if (!flat.is_invalid() && !flat.same_repr(b->get_attr("__array_size"))) {
+        return fail("fcall-arg-shape", "has array-valued elements where scalar elements are required");
+      }
+      const auto& kind = b->get_attr("__elem_kind");
+      const auto  want = shape->elem_bool ? upass::Kind::boolean : upass::Kind::integer;
+      if (!kind.is_invalid() && kind.is_just_i64() && kind.to_just_i64() != static_cast<int64_t>(want)) {
+        return fail("fcall-arg-kind", "has elements of the wrong kind");
+      }
+      const auto& mx = b->get_attr("__elem_max");
+      const auto& mn = b->get_attr("__elem_min");
+      if (mx.is_integer() && mn.is_integer() && !shape->elem_bool
+          && (mx.gt_op(shape->elem_max)->is_known_true() || mn.lt_op(shape->elem_min)->is_known_true())) {
+        return fail("fcall-arg-overflow", "has elements outside its declared range");
+      }
+      return true;
+    }
+    if (const auto* port = lm->get_lnast()->io_meta().find(name); port && port->array_size > 0) {
+      if (!port->inner_dims.empty()) {
+        return fail("fcall-arg-shape", "has array-valued elements where scalar elements are required");
+      }
+      if (port->elem_bool != shape->elem_bool) {
+        return fail("fcall-arg-kind", "has elements of the wrong kind");
+      }
+      const auto mx = upass::max_from_bits(port->elem_bits, port->elem_signed);
+      const auto mn = upass::min_from_bits(port->elem_bits, port->elem_signed);
+      if (!shape->elem_bool && (mx.gt_op(shape->elem_max)->is_known_true() || mn.lt_op(shape->elem_min)->is_known_true())) {
+        return fail("fcall-arg-overflow", "has elements outside its declared range");
+      }
+      return true;
+    }
+    const auto fields = try_tuple_shape(name);
+    if (!fields) {
+      if (b && b->get_value_kind() == upass::Kind::tuple && b->non_attr_entries().empty()) {
+        return true;
+      }
+      return fits(actual);
+    }
+    const auto values = try_bundle_fields(name);
+    for (const auto& [key, positional] : *fields) {
+      if (!positional) {
+        return fail("fcall-arg-shape", "is a named tuple rather than an array");
+      }
+      bool checked = false;
+      if (values) {
+        for (const auto& [k, v] : *values) {
+          if (k.starts_with(key + ".")) {
+            return fail("fcall-arg-kind", "has a tuple-valued element where a scalar is required");
+          }
+          if (k == key && !v.is_invalid()) {
+            if (!fits(Lnast_node::create_const(v.to_pyrope()))) {
+              return false;
+            }
+            checked = true;
+            break;
+          }
+        }
+      }
+      if (!checked) {
+        if (auto ref = try_tuple_slot_ref(name, key)) {
+          if (!fits(Lnast_node::create_ref(*ref))) {
+            return false;
+          }
+        }
+      }
+    }
+    return true;
+  }
+  const auto declared   = std::format("[{}] with elements in [{}, {}]",
+                                      shape->lanes,
+                                      shape->elem_min.to_decimal_string(),
+                                      shape->elem_max.to_decimal_string());
+  const auto shape_fail = [&](std::string_view what) {
+    if (probe) {
+      return;
+    }
+    fcall_arg_fail(call_span,
+                   "fcall-arg-shape",
+                   std::format("argument `{}` in call to `{}` {}: the port is declared {}", e.name, callee_name, what, declared),
+                   "pass an array of the declared length; build it lane by lane (`mut t:[N]T = 0; t[i] = …`) when the "
+                   "value has another shape",
+                   "type");
+  };
+  // What the actual is known to be: a declared array (a body `[N]T`, or an
+  // array input port of the caller) or a scalar integer.
+  int64_t             lanes = 0;
+  std::optional<Dlop> amin;
+  std::optional<Dlop> amax;
+  bool                scalar = false;
+  if (actual.is_const()) {
+    const auto& c = Dlop::from_pyrope_cached(actual.get_name());
+    scalar        = !c.is_invalid() && (c.is_integer() || c.is_bool());
+  } else if (actual.is_ref()) {
+    const auto name = actual.get_name();
+    const auto base = name.substr(0, name.find("___ssa_"));
+    const auto b    = symbol_table_.get_bundle(base);
+    if (b && !b->get_attr("__array_size").is_invalid() && b->get_attr("__array_size").is_just_i64()) {
+      const auto& flat = b->get_attr("__array_flat_size");
+      if (!flat.is_invalid() && !flat.same_repr(b->get_attr("__array_size"))) {
+        return true;  // a multi-dimensional actual binds packed rows
+      }
+      lanes = b->get_attr("__array_size").to_just_i64();
+      if (const auto &mx = b->get_attr("__elem_max"), &mn = b->get_attr("__elem_min"); mx.is_integer() && mn.is_integer()) {
+        amax = mx;
+        amin = mn;
+      }
+    } else if (const auto* ce = lm->get_lnast()->io_meta().find(name); ce != nullptr && ce->array_size > 0) {
+      if (!ce->inner_dims.empty()) {
+        return true;  // a multi-dimensional actual binds packed rows (elem_signed is the leaf's sign)
+      }
+      lanes        = ce->array_size;
+      const auto w = static_cast<uint32_t>(ce->elem_bits);
+      amin         = upass::min_from_bits(w, ce->elem_signed);
+      amax         = upass::max_from_bits(w, ce->elem_signed);
+    } else if (const auto f = operand_decl_facts(name);
+               f && f->has_type_spec
+               && (f->kind == upass::decl_facts::Num::unsigned_int || f->kind == upass::decl_facts::Num::signed_int)
+               && !(b && (b->has_named_top() || b->unnamed_top_count() > 1))) {
+      scalar = true;
+    }
+  }
+  if (scalar) {
+    shape_fail("is not an array");
+    return false;
+  }
+  if (lanes > 0 && lanes != shape->lanes) {
+    shape_fail(std::format("has {} lane{}", lanes, lanes == 1 ? "" : "s"));
+    return false;
+  }
+  if (amin && amax && !shape->elem_bool
+      && (amax->gt_op(shape->elem_max)->is_known_true() || amin->lt_op(shape->elem_min)->is_known_true())) {
+    if (probe) {
+      return false;
+    }
+    fcall_arg_fail(call_span,
+                   "fcall-arg-overflow",
+                   std::format("argument `{}` (elements in [{}, {}]) in call to `{}` may not fit its declared element range "
+                               "[{}, {}]",
+                               e.name,
+                               amin->to_decimal_string(),
+                               amax->to_decimal_string(),
+                               callee_name,
+                               shape->elem_min.to_decimal_string(),
+                               shape->elem_max.to_decimal_string()),
+                   "an argument never narrows implicitly: copy it lane by lane into an array of the declared element type "
+                   "first, narrowing each lane with a bit-select or a `wrap`/`sat` variable",
+                   "type");
+  }
+  return true;
 }
 
 bool uPass_runner::try_inline_func_call() {
@@ -5203,6 +7563,8 @@ bool uPass_runner::try_inline_func_call() {
   // spliced init body.
   const bool is_ctor_call = ctor_call_pending_;
   ctor_call_pending_      = false;
+  const auto ctor_args    = std::move(ctor_call_args_);
+  ctor_call_args_.clear();
   // Cursor at the func_call node. Layout: [dst(ref), callee(ref), actual...].
   if (!lm->has_child()) {
     return false;
@@ -5216,6 +7578,15 @@ bool uPass_runner::try_inline_func_call() {
   // resolves through the tree that owns the node.
   const auto         call_nid  = lm->get_current_nid();  // func_call node in the source tree
   livehd::diag::Span call_span = lm->get_lnast()->span_of(call_nid);
+  // User ruling 2026-09-28 (39): a call in this `comb` unit's own default-only
+  // prologue (`b:u8 = g(a=a)`) stays a call. The comb's module never uses the
+  // default (lnast.tolg skips that prologue), a caller that omits `b` inlines
+  // the call from this body, and the Pyrope writer re-emits it as the
+  // default's expression.
+  if (!lm->in_inline_frame() && lm->get_lnast().get() == root_lnast_.get()
+      && default_prologue_calls_.contains(call_nid.get_class_index().value)) {
+    return false;
+  }
 
   lm->move_to_child();  // dst
   if (lm->get_raw_ntype() != Lnast_ntype::Lnast_ntype_ref) {
@@ -5279,78 +7650,10 @@ bool uPass_runner::try_inline_func_call() {
   };
   bool consider_sub_instance = sub_instance_eligible(callee);
 
-  // Method dispatch: `obj.method(args)` lowers to `func_call[dst, method,
-  // store(__ufcs_arg, obj), args…]` — `method` is not itself a registry
-  // function, but obj's type bundle carries it as a function-name field.
-  // Resolve method → function via obj's typename (the receiver then naturally
-  // binds to the function's first `self` param as the leading positional
-  // actual). The receiver rides inside the UFCS marker store; unwrap
-  // it to read the obj ref (a bare ref sibling is the legacy/direct shape).
-  {
-    const auto here              = lm->save_cursor();
-    bool       have_obj          = false;
-    bool       explicit_receiver = false;
-    if (lm->move_to_sibling()) {
-      if (Lnast_ntype::is_ref(lm->get_raw_ntype())) {
-        have_obj = true;
-      } else if (Lnast_ntype::is_store(lm->get_raw_ntype()) && lm->move_to_child() && lm->current_raw_text() == call_ufcs_arg_marker
-                 && lm->move_to_sibling() && Lnast_ntype::is_ref(lm->get_raw_ntype())) {
-        explicit_receiver = true;
-        have_obj          = true;  // cursor now on the receiver ref inside the marker store
-      }
-    }
-    if (have_obj && (!callee || explicit_receiver)) {
-      const auto fallback = callee;
-      if (explicit_receiver) {
-        callee.reset();
-      }
-      // Candidate bundles, most-specific first: the receiver's own value
-      // bundle (an untyped tuple literal carries its methods directly —
-      // tup_method), then its declared typename's bundle (the decorator
-      // pattern: methods live on the comptime type tuple).
-      const std::string recv(lm->current_text());
-      const auto        tn = try_typename(recv);
-      for (const auto& bundle_name : {recv, std::string(tn)}) {
-        if (bundle_name.empty() || callee) {
-          continue;
-        }
-        if (auto bf = try_bundle_fields(bundle_name)) {
-          for (const auto& [fld, val] : *bf) {
-            if ((fld == callee_name) && val.is_string()) {
-              auto fn = val.to_pyrope();
-              if (fn.size() >= 2 && fn.front() == '\'' && fn.back() == '\'') {
-                fn = fn.substr(1, fn.size() - 2);  // strip pyrope quotes
-              }
-              if (auto m = lookup_callee(fn)) {
-                callee      = m;
-                callee_name = fn;
-              }
-              break;
-            }
-          }
-        }
-      }
-      if (!callee) {
-        // An unbound template receiver has no member table yet. Resolve it
-        // when the method is instantiated, instead of checking an unrelated
-        // same-named file function as though it were the receiver's method.
-        const auto receiver = symbol_table_.get_bundle(recv);
-        if (explicit_receiver
-            && ((recv == "self" && lm->get_lnast()->io_meta().find("self") != nullptr)
-                || (lm->get_lnast()->is_template() && (!receiver || receiver->non_attr_entries().empty())))) {
-          lm->restore_cursor(saved);
-          return false;
-        }
-        callee = fallback;
-      }
-    }
-    lm->restore_cursor(here);
-  }
-
   // Call through a lambda-ref binding: `const f = b.add1` or
   // `const f = import("ln:u.g")` bind `f` to the callee's TREE NAME as a
   // string (the fcall-ref-const lambda-value form). Resolve it like the
-  // bundle-field method path above.
+  // bundle-field method path below.
   if (!callee) {
     if (auto fv = try_fold_ref(callee_name); fv && fv->is_string()) {
       auto fn = fv->to_pyrope();
@@ -5373,6 +7676,123 @@ bool uPass_runner::try_inline_func_call() {
       }
     }
   }
+
+  // Dotted calls have two independent candidates: a callable member, and an
+  // external function declaring `self`. Generic bindings and other metadata
+  // may precede the receiver, so locate its marker by name, not child index.
+  const auto declares_self = [](const std::shared_ptr<Lnast>& fn) {
+    return fn && !fn->io_meta().inputs.empty() && fn->io_meta().inputs.front().name == "self";
+  };
+  bool        explicit_receiver = false;
+  bool        member_access     = false;
+  std::string recv_name;
+  {
+    const auto here = lm->save_cursor();
+    while (lm->move_to_sibling()) {
+      const auto arg = lm->save_cursor();
+      if (Lnast_ntype::is_store(lm->get_raw_ntype()) && lm->move_to_child() && lm->current_raw_text() == call_ufcs_arg_marker
+          && lm->move_to_sibling()) {
+        explicit_receiver = true;
+        if (Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+          recv_name = std::string(lm->current_text());
+        }
+        break;
+      }
+      lm->restore_cursor(arg);
+    }
+    lm->restore_cursor(here);
+
+    // Retain the legacy unmarked receiver shape for hand-built LNAST with an
+    // unresolved callee; a resolved direct call never performs member lookup.
+    if (!explicit_receiver && !callee && lm->move_to_sibling() && Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+      recv_name = std::string(lm->current_text());
+    }
+    lm->restore_cursor(here);
+  }
+  if (!recv_name.empty()) {
+    const auto             external = callee;
+    std::shared_ptr<Lnast> member;
+    std::string            member_name;
+    // Value fields take precedence over their declared type's field defaults.
+    const auto             tn = try_typename(recv_name);
+    for (const auto& bundle_name : {recv_name, std::string(tn)}) {
+      if (bundle_name.empty() || member) {
+        continue;
+      }
+      if (auto bf = try_bundle_fields(bundle_name)) {
+        for (const auto& [fld, val] : *bf) {
+          if (fld != source_callee_name || !val.is_string()) {
+            continue;
+          }
+          auto fn = val.to_pyrope();
+          if (fn.size() >= 2 && fn.front() == '\'' && fn.back() == '\'') {
+            fn = fn.substr(1, fn.size() - 2);
+          }
+          if (auto m = lookup_callee(fn)) {
+            member      = m;
+            member_name = fn;
+          }
+          break;
+        }
+      }
+    }
+    if (member) {
+      if (explicit_receiver && declares_self(external)) {
+        fcall_arg_fail(
+            call_span,
+            "fcall-ambiguous-member-ufcs",
+            std::format("ambiguous dotted call `{}`: both a callable member and an external function declaring `self` exist",
+                        source_callee_name),
+            "rename the member or external function, or call the intended function explicitly");
+      }
+      callee                = member;
+      callee_name           = member_name;
+      member_access         = true;
+      consider_sub_instance = false;
+    } else {
+      // An unbound template receiver has no member table yet. Defer until it
+      // is instantiated rather than treating an external name as its member.
+      const auto receiver = symbol_table_.get_bundle(recv_name);
+      if (explicit_receiver
+          && ((recv_name == "self" && lm->get_lnast()->io_meta().find("self") != nullptr)
+              || (lm->get_lnast()->is_template() && (!receiver || receiver->non_attr_entries().empty())))) {
+        lm->restore_cursor(saved);
+        return false;
+      }
+    }
+  }
+
+  // A sole ordinary parameter can receive the whole positional argument
+  // tuple: f(1,2,3) == f((1,2,3)) == f(x=(1,2,3)). A capture is excluded.
+  // Materialize outside the signature probe, once per receiver shape, so the
+  // probe and the selected call see the same real tuple (including runtime
+  // values) without mutating state inside bind_call_actuals(commit=false).
+  std::map<std::size_t, Actual> packed_call_tuples;
+  const auto                    pack_single_tuple = [&](const Lnast_tree_io& io, std::vector<Actual>& args) {
+    if (io.inputs.empty() || io.inputs.back().is_varargs || is_ctor_call) {
+      return;
+    }
+    const std::size_t first = io.inputs.front().name == "self" ? 1 : 0;
+    if (io.inputs.size() != first + 1 || args.size() <= first + 1 || io.inputs[first].is_ref
+        || (io.inputs[first].kind != Io_kind::none && io.inputs[first].array_size == 0)
+        || std::any_of(args.begin(), args.end(), [](const Actual& a) { return a.is_named || a.is_ref_pass; })) {
+      return;
+    }
+    auto it = packed_call_tuples.find(first);
+    if (it == packed_call_tuples.end()) {
+      std::vector<Lnast_node> values;
+      for (std::size_t i = first; i < args.size(); ++i) {
+        values.push_back(args[i].node);
+      }
+      const auto name = std::format("%calltuple{}", ++inline_seq_);
+      emit_inline_positional_tuple(name, values);
+      Actual tuple;
+      tuple.node = Lnast_node::create_ref(name);
+      it         = packed_call_tuples.emplace(first, std::move(tuple)).first;
+    }
+    args.resize(first);
+    args.push_back(it->second);
+  };
 
   // Overload-gathering dispatch (2f-overload): `const add = [f1, f2]` folds to
   // a bundle of qualified lambda-name strings under numeric keys. When the
@@ -5403,7 +7823,11 @@ bool uPass_runner::try_inline_func_call() {
           collect_return_consumption(saved, dst_name, req_fields, whole_used, &scalar_destination);
           for (const auto& fn : cands) {
             auto c = lookup_callee(fn);
-            if (c && signature_matches(c->io_meta(), ov_actuals, /*is_ctor_call=*/false)
+            auto candidate_actuals = ov_actuals;
+            if (c) {
+              pack_single_tuple(c->io_meta(), candidate_actuals);
+            }
+            if (c && signature_matches(c->io_meta(), candidate_actuals, c)
                 && return_matches(c->io_meta(), req_fields, whole_used, scalar_destination)) {
               chosen = fn;
               break;
@@ -5427,63 +7851,18 @@ bool uPass_runner::try_inline_func_call() {
     return false;  // not a known comb body → typecast / cell-op / marker path
   }
 
-  // Call-form enforcement: the UFCS form `obj.f(...)` is only valid
-  // when the callee declares `self` (as its first input). The direct form
-  // `f(obj, ...)` carries no marker and stays subject to the normal argument
-  // rules. Checked here — before the inlinable/fuel gates — so a marked call
-  // can never silently fall through to the evaluator path.
-  //
-  // Namespace-access exemption through an import tuple:
-  // `b.add1(args)` where `b = import("unit")` and b's field `add1` is a
-  // lambda ref (a string naming this callee's tree). The receiver is a
-  // namespace, not a method receiver: drop it from the actuals instead of
-  // requiring `self`.
+  // A tuple field is a namespace lookup, independent of external names. A
+  // self-less field call drops the namespace; a self method binds the receiver.
+  // Without a field, only an external function declaring self supports UFCS.
   bool drop_ufcs_receiver = false;
-  {
-    const auto  here        = lm->save_cursor();
-    bool        ufcs_marked = false;
-    std::string recv_name;
-    if (lm->move_to_sibling() && Lnast_ntype::is_store(lm->get_raw_ntype()) && lm->move_to_child()) {
-      ufcs_marked = lm->current_raw_text() == call_ufcs_arg_marker;
-      if (ufcs_marked && lm->move_to_sibling() && Lnast_ntype::is_ref(lm->get_raw_ntype())) {
-        recv_name = std::string(lm->current_text());
-      }
+  if (explicit_receiver && !declares_self(callee)) {
+    if (!member_access) {
+      fcall_arg_fail(call_span,
+                     "fcall-ufcs-no-self",
+                     std::format("`{}` does not declare `self`; it cannot be called as a method", callee_name),
+                     "use the direct call form `f(args...)`, or declare `self` as the first parameter");
     }
-    lm->restore_cursor(here);
-    if (ufcs_marked) {
-      const auto& cio = callee->io_meta();
-      if (cio.inputs.empty() || cio.inputs[0].name != "self") {
-        bool namespace_access = false;
-        if (!recv_name.empty()) {
-          if (auto bf = try_bundle_fields(recv_name)) {
-            for (const auto& [fld, val] : *bf) {
-              if (!(fld == source_callee_name) || !val.is_string()) {
-                continue;
-              }
-              auto fn = val.to_pyrope();
-              if (fn.size() >= 2 && fn.front() == '\'' && fn.back() == '\'') {
-                fn = fn.substr(1, fn.size() - 2);
-              }
-              if ((fn == callee->get_top_module_name()) || lookup_callee(fn) == callee) {
-                namespace_access = true;
-              }
-              break;
-            }
-          }
-        }
-        if (!namespace_access) {
-          fcall_arg_fail(call_span,
-                         "fcall-ufcs-no-self",
-                         std::format("`{}` does not declare `self`; it cannot be called as a method", callee_name),
-                         "use the direct call form `f(args...)`, or declare `self` as the first parameter");
-        }
-        // Reached only on a namespace access (the no-self error above is
-        // [[noreturn]]); set the flag explicitly under the same condition so
-        // the receiver-drop never decouples from namespace detection if the
-        // error path ever stops being fatal.
-        drop_ufcs_receiver = namespace_access;
-      }
-    }
+    drop_ufcs_receiver = true;
   }
   // A callee with no declared outputs (`-> ()`) produces no value, so its call
   // result must not be consumed (`const a = top()` — the named_tuple.prp bug:
@@ -5551,7 +7930,19 @@ bool uPass_runner::try_inline_func_call() {
   // Single gate: only splice callees the runner fully supports today
   // (precomputed in set_function_registry). Everything else — multi-output,
   // placeholders/implicit-return, no-signature — routes to the evaluator.
-  if (!reg().inlinable_callees.contains(std::string(callee->get_top_module_name()))) {
+  // A concrete `mod`/`pipe` reused as-is -- PRE-ELABORATED from an `ln:` dir,
+  // or restored from the compile cache with its graph -- has no body to splice
+  // either, but it is always a Sub instance with a restored io_meta: it goes on
+  // to bind its actuals, so the call-site checks (argument fit, the typed /
+  // derived output range and bool kind its instance handle carries) run
+  // exactly as for a source callee, then it declines below.
+  const auto reused_instance = [&]() {
+    const auto  kind = callee->get_lambda_kind();
+    const auto& cio  = callee->io_meta();
+    return (callee->is_pre_elaborated() || callee->is_graph_restored()) && !callee->is_template()
+           && (kind == "mod" || kind == "pipe") && (cio.inputs.empty() || cio.inputs[0].name != "self");
+  };
+  if (!reg().inlinable_callees.contains(std::string(callee->get_top_module_name())) && !reused_instance()) {
     lm->restore_cursor(saved);
     return false;
   }
@@ -5576,6 +7967,17 @@ bool uPass_runner::try_inline_func_call() {
   std::vector<Generic_actual> explicit_generics;  // `f<int,string>(…)` binds, in order (named or positional)
   if (!gather_actuals(drop_ufcs_receiver, actuals, explicit_generics)) {
     return false;
+  }
+  pack_single_tuple(callee->io_meta(), actuals);
+  // The synthesized ctor call's refs carry the caller's renamed text: take
+  // each argument's source spelling from its Ctor_arg (actuals[0] is the
+  // receiver). A construction VALUE (`mut x:T = (..)`) carries none.
+  if (is_ctor_call) {
+    for (std::size_t i = 1; i < actuals.size(); ++i) {
+      const bool known    = i - 1 < ctor_args.size();
+      actuals[i].src_name = known ? ctor_args[i - 1].src_name : std::string{};
+      actuals[i].src_base = known ? ctor_args[i - 1].src_base : std::string{};
+    }
   }
   lm->restore_cursor(saved);                               // back on the func_call node (gather left it on the callee ref)
   const std::string call_inst_name = gathered_inst_name_;  // call-site name= (if any); stable past later gathers
@@ -5606,9 +8008,10 @@ bool uPass_runner::try_inline_func_call() {
   // signature_matches is a separate, discarded bind). A Sub-bound callee must
   // then re-emit the call with the dotted NAMED binding below.
   bool                                            tuple_actual_expanded = false;
+  bind_minted_ok_ = callee->get_lambda_kind() == "mod" || callee->get_lambda_kind() == "pipe";
+  bind_minted_actuals_.clear();
   bind_call_actuals(io,
                     actuals,
-                    is_ctor_call,
                     /*commit=*/true,
                     callee_name,
                     call_span,
@@ -5618,6 +8021,11 @@ bool uPass_runner::try_inline_func_call() {
                     vararg_pos,
                     vararg_named,
                     &tuple_actual_expanded);
+  bind_minted_ok_ = false;
+  // A named actual of the child's minted clock/reset: carried into a re-emitted
+  // Sub call below (an all-named call reaches tolg verbatim with it).
+  const auto minted_actuals = std::move(bind_minted_actuals_);
+  bind_minted_actuals_.clear();
   const std::size_t nparams    = io.inputs.size();
   const bool        has_vararg = nparams > 0 && io.inputs[nparams - 1].is_varargs;
   const std::size_t nbind      = has_vararg ? nparams - 1 : nparams;
@@ -5641,6 +8049,8 @@ bool uPass_runner::try_inline_func_call() {
   // substitute from the same map. Also validates `<…>` on a non-generic
   // callee and unification conflicts (fatal).
   const auto gbinds = resolve_generic_binds(callee, io, param_val, param_set, nbind, explicit_generics, callee_name, call_span);
+  check_call_args_fit(callee, io, param_val, param_set, nbind, gbinds, callee_name, call_span);
+  check_array_port_dims(callee, io, gbinds, callee_name, call_span);
 
   // `in_identity_respecialize_`: this IS the call an identity specialization
   // just emitted, coming back through emit_named_instance_call's re-walk. The
@@ -5657,7 +8067,7 @@ bool uPass_runner::try_inline_func_call() {
       // instead of being silently pushed as an invalid actual (is_method==false
       // here, so there is no self slot to skip).
       for (std::size_t i = 0; i < nbind; ++i) {
-        if (!param_set[i] && !io.inputs[i].has_default) {
+        if (!param_set[i] && !sub_input_may_be_omitted(callee, io.inputs[i])) {
           fcall_arg_fail(call_span,
                          "fcall-missing-arg",
                          std::format("missing required argument `{}` in call to `{}`", io.inputs[i].name, callee_name),
@@ -5707,6 +8117,7 @@ bool uPass_runner::try_inline_func_call() {
           named.emplace_back(io.inputs[i].name, param_val[i]);
         }
       }
+      named.insert(named.end(), minted_actuals.begin(), minted_actuals.end());
       emit_named_instance_call(dst_name, callee_name, call_inst_name, named);
       return true;
     }
@@ -5745,10 +8156,16 @@ bool uPass_runner::try_inline_func_call() {
   // Every non-self FIXED parameter must be bound — an unset input means the
   // caller omitted a required argument. EXCEPT a param with a declared default
   // (`comb f(in1:u4, in2=3)`, todo 3g E): an omitted default takes the
-  // body-prologue value (bound below). The var-arg slot (index nbind, when
-  // present) is always satisfied — it gathers zero or more leftovers.
+  // body-prologue value (bound below). And a `comb` input the body never reads
+  // (user ruling 2026-09-28 (30)): nothing is wired into it, whatever its name
+  // -- a comb holds no state, so its `clk`/`rst` are plain data and never
+  // auto-wired. The var-arg slot (index nbind, when present) is always
+  // satisfied — it gathers zero or more leftovers.
   for (std::size_t i = (has_self ? 1 : 0); i < nbind; ++i) {
     if (!param_set[i] && !io.inputs[i].has_default) {
+      if (upass::io_port::comb_port_is_dead(*callee, io.inputs[i])) {
+        continue;
+      }
       fcall_arg_fail(call_span,
                      "fcall-missing-arg",
                      std::format("missing required argument `{}` in call to `{}`", io.inputs[i].name, callee_name),
@@ -5858,7 +8275,20 @@ bool uPass_runner::try_inline_func_call() {
     // wireable by tolg, so materialize the resolved binding as dotted NAMED
     // actuals. `!has_self`: a method comb is not a standalone Sub — keep the
     // plain decline for it (pre-existing behavior).
-    if (tuple_actual_expanded && !has_self) {
+    // Also re-emit when the source used any unnamed actual (a same-name
+    // shorthand `f(b)` or a type-distinguished one): the runner resolved it by
+    // NAME/KIND, but tolg binds an unnamed actual to the next declared port, so
+    // `f(a=x, b)` bound `b` to `a` ("binds input more than once") and `f(b, a)`
+    // silently swapped the ports. Calls never bind by position
+    // (06-functions.md §"Argument naming"). A `ref` actual keeps the decline.
+    const bool any_unnamed = std::any_of(actuals.begin(), actuals.end(), [](const Actual& a) { return !a.is_named; });
+    const bool any_ref     = std::any_of(actuals.begin(), actuals.end(), [](const Actual& a) { return a.is_ref_pass; });
+    // Also re-emit inside an inline frame (a call in a spliced generic/closure
+    // body): the plain decline copies the func_call through the frame rename,
+    // which tags the CALLEE ref too (`inc` -> `inl1_inc`, or a generic lambda
+    // `F` -> `inl1_F`), naming a function tolg cannot find. The re-emit spells
+    // the resolved callee.
+    if ((tuple_actual_expanded || (any_unnamed && !any_ref) || (lm->in_inline_frame() && !any_ref)) && !has_self) {
       std::vector<std::pair<std::string, Lnast_node>> named;
       named.reserve(nbind);
       for (std::size_t i = 0; i < nbind; ++i) {
@@ -5866,6 +8296,7 @@ bool uPass_runner::try_inline_func_call() {
           named.emplace_back(io.inputs[i].name, param_val[i]);
         }
       }
+      named.insert(named.end(), minted_actuals.begin(), minted_actuals.end());
       emit_named_instance_call(dst_name, callee_name, call_inst_name, named);
       return true;
     }
@@ -5875,8 +8306,29 @@ bool uPass_runner::try_inline_func_call() {
   }
 
   // ── Splice ───────────────────────────────────────────────────────────────
-  const uint32_t    salt = ++inline_seq_;
-  const std::string tag  = std::format("inl{}_", salt);
+  const uint32_t    salt  = ++inline_seq_;
+  const uint32_t    tag_n = ++inline_tag_seq_;  // names hardware: see inline_tag_seq_
+  const std::string tag   = std::format("inl{}_", tag_n);
+
+  // Generic-WIDTH ports (`a:unsigned(bits=N * 4)`): the width is the bound
+  // folded under this call's binds, never the actual's declared type — the same
+  // rule maybe_specialize_template_call applies to a mod. Folded once here: the
+  // prologue types the inlined param/output from it, and the private inline
+  // body below gets the same concrete io leaves, so a later scan of that tree
+  // (the loop roller's declaration lookup) never meets the template's
+  // `prim_type_int(ref %tmp, …)`.
+  std::vector<Spec_port> inject(nparams);
+  std::vector<Spec_port> out_inject(io.outputs.size());
+  for (std::size_t i = 0; i < nparams; ++i) {
+    if (io.inputs[i].has_deferred_bound()) {
+      inject[i] = deferred_port_type(callee, io.inputs[i], gbinds, callee_name, call_span);
+    }
+  }
+  for (std::size_t i = 0; i < io.outputs.size(); ++i) {
+    if (io.outputs[i].has_deferred_bound()) {
+      out_inject[i] = deferred_port_type(callee, io.outputs[i], gbinds, callee_name, call_span);
+    }
+  }
 
   // Prologue: declare param + output widths (so `<tag>x.[bits]` folds), then
   // bind param values. Ref-param actuals are remembered for write-back.
@@ -5917,10 +8369,20 @@ bool uPass_runner::try_inline_func_call() {
     }
     const auto pname = upass::Lnast_manager::make_inlined_name(tag, e.name);
     const auto gbit  = e.type_name.empty() ? gbinds.end() : gbinds.find(e.type_name);
-    if (e.kind == Io_kind::boolean) {
+    if (is_array_port(*callee, e, false)) {
+      // `v:[4]u8`, `v:[N]unsigned(bits=N)`: the declared array, never its
+      // packed width nor its element's bound (a multi-dimensional unsized one
+      // takes the actual's shape).
+      if (const auto shape = array_port_shape(callee, e, false, gbinds, param_set[i] ? &param_val[i] : nullptr);
+          shape && shape->lanes > 0) {
+        emit_inline_declare_array(pname, *shape);
+      }
+    } else if (e.kind == Io_kind::boolean) {
       emit_inline_typespec_bool(pname);
     } else if (e.bits > 0) {
       emit_inline_typespec(pname, e.bits, e.is_signed);
+    } else if (inject[i].inject) {
+      emit_inline_typespec_range(pname, inject[i].max, inject[i].min);  // folded generic-width bound
     } else if (gbit != gbinds.end() && gbit->second.type_name.empty() && gbit->second.kind == Io_kind::boolean) {
       // `a:T` with T bound to `bool` — must precede the (max||min) branch since
       // a bool bind also carries max=1/min=0 (else it would be typed int(1,0)).
@@ -5970,7 +8432,11 @@ bool uPass_runner::try_inline_func_call() {
       continue;
     }
     if (!gb.const_text.empty()) {
-      emit_inline_binding(upass::Lnast_manager::make_inlined_name(tag, g), Lnast_node::create_const(gb.const_text));
+      const auto gname = upass::Lnast_manager::make_inlined_name(tag, g);
+      if (gb.decl_typed) {
+        emit_inline_typespec_range(gname, gb.decl_max, gb.decl_min);  // the bound constant's declared type
+      }
+      emit_inline_binding(gname, Lnast_node::create_const(gb.const_text));
       continue;
     }
     if (gb.type_name.empty() && gb.kind == Io_kind::boolean) {
@@ -5998,7 +8464,8 @@ bool uPass_runner::try_inline_func_call() {
   for (const auto& ie : io.inputs) {
     input_names.insert(ie.name);
   }
-  for (const auto& o : io.outputs) {
+  for (std::size_t oi = 0; oi < io.outputs.size(); ++oi) {
+    const auto& o = io.outputs[oi];
     if (input_names.contains(o.name)) {
       continue;  // shared input/output name: input binding stands (see above)
     }
@@ -6020,8 +8487,17 @@ bool uPass_runner::try_inline_func_call() {
         }
       }
     }
+    const bool array_out = is_array_port(*callee, o, true);
     if (o.kind == Io_kind::boolean) {
       emit_inline_typespec_bool(oname);
+    } else if (array_out) {
+      // `-> (r:[2]u8)`, `-> (r:[N]unsigned(bits=N))`: an array, not its packed
+      // width nor its element's bound.
+      if (const auto shape = array_port_shape(callee, o, true, gbinds)) {
+        emit_inline_declare_array(oname, *shape);
+      }
+    } else if (out_inject[oi].inject) {
+      emit_inline_typespec_range(oname, out_inject[oi].max, out_inject[oi].min);  // folded generic-width bound
     } else {
       emit_inline_typespec(oname, o.bits, o.is_signed);
     }
@@ -6059,7 +8535,7 @@ bool uPass_runner::try_inline_func_call() {
       d.resize(p);
     }
     const bool is_tmp = Lnast::is_tmp(d);
-    inline_level      = (!is_tmp && !d.empty()) ? d : ("u_" + callee_name + "_" + std::to_string(salt));
+    inline_level      = (!is_tmp && !d.empty()) ? d : ("u_" + callee_name + "_" + std::to_string(tag_n));
   }
 
   // Body: walk the callee stmts in place (names rewritten by the frame tag)
@@ -6079,15 +8555,14 @@ bool uPass_runner::try_inline_func_call() {
     }
     inline_call_sites_.push_back(call_site_id);
   }
-  // A PROVIDED arg that also has a default: the body opens with a prologue
-  // `store(name, default)` (todo 3g E) — skip that one store so the actual bound
-  // in the param loop wins. Only the FIRST prologue store per name is dropped
-  // (a later body write to the same name is real). An OMITTED default is NOT in
-  // this set, so its prologue store runs and binds the default value.
-  absl::flat_hash_set<std::string> skip_default_stores;
+  // A defaulted input (todo 3g E): the body opens with a prologue store of the
+  // default into Lnast_io_entry::default_value_name(), never into the port. A
+  // PROVIDED arg skips that store (the actual bound in the param loop wins); an
+  // OMITTED one walks it and then binds the param from it, before any body read.
+  absl::flat_hash_map<std::string, std::size_t> default_stores;  // default-value local -> input index
   for (std::size_t i = 0; i < nbind && i < io.inputs.size(); ++i) {
-    if (param_set[i] && io.inputs[i].has_default) {
-      skip_default_stores.insert(io.inputs[i].name);
+    if (io.inputs[i].has_default) {
+      default_stores.emplace(Lnast_io_entry::default_value_name(io.inputs[i].name), i);
     }
   }
   // The callee's TUPLE ports live in its io_meta as flattened leaves
@@ -6129,30 +8604,63 @@ bool uPass_runner::try_inline_func_call() {
     }
   }
   // Baking dependent declaration bounds rewrites their nodes in place.
-  // A generic comb can be inlined with several widths: specialize a private
-  // body so one call cannot freeze the shared template's type/array bounds.
+  // A generic comb can be inlined with several widths, and so can an untyped
+  // one (`mut t:unsigned(bits=x.[bits])` sized by each call's actual):
+  // specialize a private body so one call cannot freeze the shared template's
+  // type/array bounds.
   const auto inline_source
-      = gbinds.empty() ? callee
-                       : clone_template_specialized(callee, std::string(callee->get_top_module_name()), {}, {}, {}, {}, gbinds);
+      = gbinds.empty() && !has_in_place_type_folds(*callee)
+            ? callee
+            : clone_template_specialized(callee, std::string(callee->get_top_module_name()), inject, {}, {}, out_inject, gbinds);
+  // A call evaluated at compile time (its result feeds a `comptime`
+  // declaration) cannot roll its loops: a rolled body is runtime hardware, so
+  // `comptime const INIT = rows(size=4)` would lose its value.
+  const bool saved_unroll = unroll_requested_;
+  if (feeds_comptime_decl(*lm->get_lnast(), call_nid, dst_raw_name)) {
+    unroll_requested_ = true;
+  }
   lm->push_source(inline_source, tag, salt);
   if (lm->move_to_child()) {
     if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_io) {
       lm->move_to_sibling();
     }
+    // A PROVIDED arg's default is not taken: the statements that only compute
+    // it (its side effects included, e.g. an assert of an inlined checker in
+    // the default expression) are skipped with its store.
+    absl::flat_hash_set<int64_t> unused_default;
+    if (!default_stores.empty() && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_stmts) {
+      absl::flat_hash_set<std::string> provided;
+      absl::flat_hash_set<std::string> omitted;
+      for (const auto& [local, idx] : default_stores) {
+        (param_set[idx] ? provided : omitted).insert(local);
+      }
+      unused_default = upass::unused_default_prologue(*inline_source, lm->get_current_nid(), provided, omitted);
+    }
     if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_stmts && lm->move_to_child()) {
       do {
-        if (!skip_default_stores.empty() && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_store) {
-          const auto sc      = lm->save_cursor();
-          bool       skipped = false;
+        if (!unused_default.empty() && unused_default.contains(lm->get_current_nid().get_class_index().value)) {
+          continue;
+        }
+        if (!default_stores.empty() && lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_store) {
+          const auto                 sc = lm->save_cursor();
+          std::optional<std::size_t> dflt;
           if (lm->move_to_child() && Lnast_ntype::is_ref(lm->get_raw_ntype())) {
-            if (auto it = skip_default_stores.find(std::string(lm->current_raw_text())); it != skip_default_stores.end()) {
-              skip_default_stores.erase(it);
-              skipped = true;
+            if (auto it = default_stores.find(lm->current_raw_text()); it != default_stores.end()) {
+              dflt = it->second;
+              default_stores.erase(it);
             }
           }
           lm->restore_cursor(sc);
-          if (skipped) {
-            continue;  // provided arg wins over its default prologue store
+          if (dflt) {
+            if (param_set[*dflt]) {
+              continue;  // provided arg wins over its default prologue store
+            }
+            process_lnast();
+            const auto& pname = io.inputs[*dflt].name;
+            emit_inline_binding(
+                upass::Lnast_manager::make_inlined_name(tag, pname),
+                Lnast_node::create_ref(upass::Lnast_manager::make_inlined_name(tag, Lnast_io_entry::default_value_name(pname))));
+            continue;
           }
         }
         process_lnast();
@@ -6161,6 +8669,7 @@ bool uPass_runner::try_inline_func_call() {
   }
   flush_deferred_emits();  // flush callee-tree parked writes before leaving
   lm->pop_source();
+  unroll_requested_ = saved_unroll;
   inline_call_sites_.pop_back();
   active_inline_callees_.pop_back();
   hier_prefix_stack_.pop_back();
@@ -6203,11 +8712,18 @@ bool uPass_runner::try_inline_func_call() {
   // A signed output is reinterpreted to its declared width first (mirrors the
   // deleted evaluator's adjust_for_type): a bit-slice like `res:s4 = b#[0..<4]`
   // yields the raw bits 0b1110 = 14, which as s4 must read back as -2.
-  auto output_ref = [&](const auto& o) -> Lnast_node {
+  // A generic-width output's signed width comes from its folded bound.
+  auto output_ref = [&](std::size_t oi) -> Lnast_node {
+    const auto& o         = io.outputs[oi];
+    const auto& sp        = out_inject[oi];
+    int         sign_bits = o.is_signed ? o.bits : 0;
+    if (sp.inject && sp.max && sp.min && sp.min->is_negative()) {
+      sign_bits = static_cast<int>(std::max(sp.max->get_signed_bits(), sp.min->get_signed_bits()));
+    }
     const auto raw = upass::Lnast_manager::make_inlined_name(tag, o.name);
-    if (o.is_signed && o.bits > 0) {
+    if (sign_bits > 0) {
       const auto sx = upass::Lnast_manager::make_inlined_name(tag, o.name + "_sx");
-      emit_inline_sext(sx, raw, o.bits - 1);
+      emit_inline_sext(sx, raw, sign_bits - 1);
       return Lnast_node::create_ref(sx);
     }
     return Lnast_node::create_ref(raw);
@@ -6222,14 +8738,15 @@ bool uPass_runner::try_inline_func_call() {
   // (2f-arg_naming_tuple: the symmetric of the call-arg tuple regroup.)
   std::vector<std::string>                                                          logical_order;
   absl::flat_hash_map<std::string, std::vector<std::pair<std::string, Lnast_node>>> logical;
-  for (const auto& o : io.outputs) {
+  for (std::size_t oi = 0; oi < io.outputs.size(); ++oi) {
+    const auto& o     = io.outputs[oi];
     const auto  dp    = o.name.find('.');
     std::string lname = dp == std::string::npos ? o.name : o.name.substr(0, dp);
     std::string sub   = dp == std::string::npos ? std::string{} : o.name.substr(dp + 1);
     if (!logical.contains(lname)) {
       logical_order.push_back(lname);
     }
-    logical[lname].emplace_back(std::move(sub), output_ref(o));
+    logical[lname].emplace_back(std::move(sub), output_ref(oi));
   }
   bool named_result = false;
   if (logical_order.size() == 1) {
@@ -6312,6 +8829,28 @@ void uPass_runner::initialize_stream_port_abi() {
   for (const auto& output : io.outputs) {
     io_output_names_.emplace(output.name);
     register_leaf(output.name, false);
+  }
+  default_value_names_.clear();
+  for (const auto& input : io.inputs) {
+    if (input.has_default) {
+      default_value_names_.emplace(Lnast_io_entry::default_value_name(input.name));
+    }
+  }
+  default_prologue_calls_.clear();
+  if (root_lnast_->get_lambda_kind() == "comb" && !default_value_names_.empty()) {
+    for (auto top : root_lnast_->children(root_lnast_->get_root())) {
+      if (!Lnast_ntype::is_stmts(root_lnast_->get_type(top))) {
+        continue;
+      }
+      const auto prologue = upass::unused_default_prologue(*root_lnast_, top, default_value_names_, {});
+      for (auto stmt : root_lnast_->children(top)) {
+        const auto idx = stmt.get_class_index().value;
+        if (prologue.contains(idx) && Lnast_ntype::is_func_call(root_lnast_->get_type(stmt))) {
+          default_prologue_calls_.insert(idx);
+        }
+      }
+      break;
+    }
   }
 }
 
@@ -6401,11 +8940,172 @@ bool uPass_runner::try_stream_tuple_port_alias_store() {
   }
   auto source = resolve_stream_port_path(lm->current_text());
   lm->restore_cursor(saved);
-  if (!source) {
+  // Only an INTERIOR port path is a disposable carrier (a later field pick
+  // resolves through the alias). A copy of a LEAF (`%c = %t` over `%t =
+  // req.addr`, e.g. a cast's value-preserving bind) is a scalar value that
+  // plain reads use: keep the store.
+  if (!source || stream_port_in_leaf_.contains(*source) || stream_port_out_leaf_.contains(*source)) {
     return false;
   }
   stream_port_alias_.insert_or_assign(std::move(dst), std::move(*source));
   return true;
+}
+
+// Under control flow, the comptime fields a whole-tuple store's destination
+// holds before the store (nullopt: no tuple value yet, e.g. an if-expression's
+// result temp). split_runtime_tuple_store merges against them.
+std::optional<std::vector<std::string>> uPass_runner::runtime_tuple_prior_fields() const {
+  if (lm->current_num_children() != 2 || !lm->has_child() || !symbol_table_.in_uncertain_scope()) {
+    return std::nullopt;
+  }
+  const auto saved = lm->save_cursor();
+  lm->move_to_child();
+  const bool        is_ref = Lnast_ntype::is_ref(lm->get_raw_ntype());
+  const std::string lhs(lm->current_text());
+  lm->restore_cursor(saved);
+  const auto b = is_ref ? symbol_table_.get_bundle(lhs) : nullptr;
+  if (!b || !(b->has_named_top() || b->unnamed_top_count() > 1)) {
+    return std::nullopt;
+  }
+  std::vector<std::string> fields;
+  for (const auto& [key, e] : b->non_attr_entries()) {
+    if (e.trivial.is_numeric()) {
+      fields.push_back(key);
+    }
+  }
+  return fields;
+}
+
+// A runtime tuple VALUE (fixed shape, runtime fields: a tuple literal over
+// runtime values, a multi-output call result) lives only as per-slot refs
+// (Symbol_table::tuple_slot_ref) that name whichever temps produced the fields.
+// A whole write under an `if` (`if s { d = (a=…, b=…) }`, or an if-expression's
+// arms writing the same temp) re-pointed those refs at ONE arm's temps, and the
+// field reads after the `if` forwarded that arm's value on every path (the
+// other path read an undriven X). Give such a variable one scalar LEAF per
+// field (`d.a = %t`, and `d.b = 5` for a comptime field) and point its slot
+// refs at the leaves: every write of the value then writes the same leaf
+// names, which tolg merges into a mux per field exactly like hand-written
+// per-field writes. Needed for a write under control flow, and for a `mut` (a
+// later arm may rewrite it, and the arm merge needs the value before the `if`
+// on the same leaf names -- a comptime initializer included). Outside control
+// flow a comptime field keeps folding from the binding (its declared type and
+// attributes ride there); only its leaf store is emitted, as the pre-`if`
+// value of a later conditional write. A POSITIONAL comptime field gets no leaf
+// (`t.0` also names the binding's own scalar slot, so a leaf store there would
+// retype a comptime tuple: `mut acc = (0, 1); acc ++= …`), and neither does a
+// field that is no scalar (a nested tuple, a string, a function). A write
+// under control flow that would have to merge such a field is refused rather
+// than left to read an undriven X on its other path.
+void uPass_runner::split_runtime_tuple_store(const std::optional<std::vector<std::string>>& prior) {
+  if (lm->current_num_children() != 2 || !lm->has_child()) {
+    return;
+  }
+  const auto saved = lm->save_cursor();
+  lm->move_to_child();
+  const bool        is_ref = Lnast_ntype::is_ref(lm->get_raw_ntype());
+  const std::string lhs(lm->current_text());
+  lm->restore_cursor(saved);
+  if (!is_ref || lhs.find('.') != std::string::npos) {
+    return;
+  }
+  const bool uncertain = symbol_table_.in_uncertain_scope();
+  if (!uncertain) {
+    const auto f = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), lhs);
+    if (!f || f->mode != upass::Mode::mut_kind) {
+      return;
+    }
+  }
+  // Snapshot: each emitted store re-enters constprop, which edits the map.
+  std::map<std::string, std::string> slots;
+  if (const auto it = symbol_table_.tuple_slot_ref.find(lhs); it != symbol_table_.tuple_slot_ref.end()) {
+    slots = it->second;
+  }
+  std::map<std::string, Lnast_node> consts;
+  std::string                       unsplit;  // a field that gets no leaf
+  // A tuple by SHAPE: a one-field `(a=1)` is one too (is_scalar() says
+  // otherwise for any single-entry bundle).
+  if (const auto b = symbol_table_.get_bundle(lhs); b && (b->has_named_top() || b->unnamed_top_count() > 1)
+                                                    && b->get_attr("__array_size").is_invalid()
+                                                    && b->get_attr("__elem_max").is_invalid()) {
+    for (const auto& [key, e] : b->non_attr_entries()) {
+      if (slots.contains(key)) {
+        continue;
+      }
+      const bool named = !key.empty() && (key.front() < '0' || key.front() > '9');
+      if (named && e.trivial.is_numeric()) {
+        consts.emplace(key, Lnast_node::create_const(e.trivial.to_pyrope()));
+      } else if (unsplit.empty()) {
+        unsplit = key;
+      }
+    }
+    if (!unsplit.empty()) {
+      consts.clear();
+    }
+  }
+  // Leaves are named after the SSA BASE: every version of the value (a second
+  // whole write outside control flow is `d___ssa_1`) writes the same leaves,
+  // so an arm merge reads the latest one as its pre-`if` value.
+  const std::string base(std::string_view(lhs).substr(0, lhs.find("___ssa_")));
+  if (prior) {
+    // By value: the emits below re-enter the passes, which may touch the map.
+    absl::flat_hash_set<std::string> have;
+    if (const auto it = split_tuple_leaves_.find(base); it != split_tuple_leaves_.end()) {
+      have = it->second;
+    }
+    std::string missing = unsplit;
+    for (const auto& key : *prior) {
+      if (missing.empty() && !have.contains(key)) {
+        missing = key;
+      }
+    }
+    if (!missing.empty()) {
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "tuple-cond-write-unsplit",
+          .category = "unsupported",
+          .pass     = "upass",
+          .message  = std::format("conditional write of tuple `{}`: field `{}` cannot be merged across the `if` (a "
+                                  "compile-time POSITIONAL field, or a field that is not a scalar)",
+                                  base,
+                                  missing),
+          .span     = lm->current_span(),
+          .hint     = std::format("name the fields (`mut {} = (a=…, b=…)`) or declare the tuple's type", base),
+      });
+      return;
+    }
+  }
+  if (slots.empty() && consts.empty()) {
+    return;
+  }
+  std::map<std::string, std::string> leaves;
+  for (const auto& [slot, ref] : slots) {
+    auto leaf = absl::StrCat(base, ".", slot);
+    if (ref != leaf) {
+      emit_inline_binding(leaf, Lnast_node::create_ref(ref));
+    }
+    leaves.emplace(slot, std::move(leaf));
+  }
+  for (const auto& [slot, value] : consts) {
+    auto leaf = absl::StrCat(base, ".", slot);
+    emit_inline_binding(leaf, value);
+    if (uncertain) {
+      leaves.emplace(slot, std::move(leaf));
+    }
+  }
+  auto& split = split_tuple_leaves_[base];
+  for (const auto& [slot, ref] : slots) {
+    (void)ref;
+    split.insert(slot);
+  }
+  for (const auto& [slot, value] : consts) {
+    (void)value;
+    split.insert(slot);
+  }
+  if (leaves.empty()) {
+    return;
+  }
+  symbol_table_.tuple_slot_ref.insert_or_assign(lhs, std::move(leaves));
 }
 
 bool uPass_runner::try_stream_tuple_port_store() {
@@ -6476,6 +9176,88 @@ bool uPass_runner::try_stream_tuple_port_store() {
     symbol_table_.field_touched.insert(Symbol_table::field_touch_key(root_lnast_->get_top_module_name(), path));
   }
   emit_inline_binding(path, value);
+  return true;
+}
+
+// A field write `store(d, 'a', v)` into a tuple value whose fields
+// split_runtime_tuple_store gave scalar leaves writes that leaf instead, and
+// the field reads through it from then on (tuple_slot_ref[d][a] == "d.a"; a
+// comptime value still folds there). The aggregate write alone left a
+// re-pointed field stale, and tolg has no lowering for it at all; the leaf
+// write merges under control flow like any scalar write. A dynamic field
+// keeps the ordinary path.
+bool uPass_runner::try_split_leaf_field_store() {
+  if (lm->current_num_children() < 3 || !lm->has_child() || split_tuple_leaves_.empty()) {
+    return false;
+  }
+  const auto saved = lm->save_cursor();
+  lm->move_to_child();
+  if (!Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  const std::string var(lm->current_text());
+  const auto        base = std::string_view(var).substr(0, var.find("___ssa_"));
+  if (!split_tuple_leaves_.contains(base)) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  std::string path;
+  Lnast_node  value;
+  bool        have_value = false;
+  while (lm->move_to_sibling()) {
+    if (lm->is_last_child()) {
+      if (Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+        value      = Lnast_node::create_ref(lm->current_text());
+        have_value = true;
+      } else if (Lnast_ntype::is_const(lm->get_raw_ntype())) {
+        value      = Lnast_node::create_const(lm->current_text());
+        have_value = true;
+      }
+      break;
+    }
+    std::string field;
+    if (Lnast_ntype::is_const(lm->get_raw_ntype())) {
+      if (auto v = Dlop::from_pyrope(lm->current_text()); v && !v->is_invalid()) {
+        field = v->to_field();
+      }
+    } else if (Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+      if (auto v = try_fold_ref(lm->current_text()); v && !v->is_invalid() && !v->has_unknowns()) {
+        field = v->to_field();
+      }
+    }
+    if (field.empty()) {
+      break;
+    }
+    if (!path.empty()) {
+      path.push_back('.');
+    }
+    path.append(field);
+  }
+  lm->restore_cursor(saved);
+  if (!have_value || path.empty()) {
+    return false;
+  }
+  const auto leaf   = absl::StrCat(base, ".", path);
+  const auto slots  = symbol_table_.tuple_slot_ref.find(var);
+  const bool routed = slots != symbol_table_.tuple_slot_ref.end() && slots->second.contains(path)
+                      && slots->second.at(path) == leaf;
+  if (!routed && !split_tuple_leaves_.at(base).contains(path)) {
+    return false;  // a field the split gave no leaf (a positional comptime entry)
+  }
+  if (!(value.is_const() && value.get_name() == "nil")) {
+    symbol_table_.field_touched.insert(Symbol_table::field_touch_key(root_lnast_->get_top_module_name(), leaf));
+  }
+  // Copied out first: the binding below re-enters constprop, which edits the map.
+  std::map<std::string, std::string> updated;
+  if (!routed && slots != symbol_table_.tuple_slot_ref.end()) {
+    updated = slots->second;
+  }
+  emit_inline_binding(leaf, value);
+  if (!routed) {
+    updated[path] = leaf;
+    symbol_table_.tuple_slot_ref.insert_or_assign(var, std::move(updated));
+  }
   return true;
 }
 
@@ -6726,15 +9508,16 @@ bool uPass_runner::try_lower_dynamic_tuple_index(const std::string& dst, const s
 }
 
 // The scalar token a type-valued generic spells when the body uses it as a
-// CONSTRUCTOR / cast (`T(a)`): a named type verbatim, a bool bind `bool`, an
-// integer envelope its `uN`/`sN` spelling. Empty when the bind is not a type
-// (constant / lambda) — those never stand in a callee slot.
+// CONSTRUCTOR / cast (`T(a)`): a named type verbatim, a Bool bind `Bool`, an
+// integer envelope its `U<N>`/`S<N>` spelling (upass::classify_typecast reads
+// it back). Empty when the bind is not a type (constant / lambda) — those
+// never stand in a callee slot.
 std::string uPass_runner::generic_cast_token(const Generic_bind& gb) {
   if (!gb.type_name.empty()) {
     return gb.type_name;
   }
   if (gb.kind == Io_kind::boolean) {
-    return "bool";
+    return "Bool";
   }
   if (!gb.max && !gb.min) {
     return {};
@@ -6750,7 +9533,7 @@ std::string uPass_runner::generic_cast_token(const Generic_bind& gb) {
       bits         = std::max(mb, nb);
     }
   }
-  return (is_signed ? "s" : "u") + std::to_string(bits);
+  return (is_signed ? "S" : "U") + std::to_string(bits);
 }
 
 // ── pipe/mod/fluid template specialization ──────────────────────────
@@ -6760,6 +9543,38 @@ void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Ln
                                      const absl::flat_hash_map<std::string, Generic_bind>* type_subst) {
   const auto type = src->get_type(src_nid);
   Lnast_nid  newn;
+  // `N.[bits]`/`.[max]`/`.[min]` of a value generic bound to a TYPED constant
+  // reads that constant's declared type (Generic_bind::decl_typed): the literal
+  // the base `ref N` becomes below would report its value width instead.
+  if (type_subst != nullptr && Lnast_ntype::is_attr_get(type)) {
+    const auto res  = src->get_first_child(src_nid);
+    const auto base = res.is_invalid() ? res : src->get_sibling_next(res);
+    const auto attr = base.is_invalid() ? base : src->get_sibling_next(base);
+    const auto it   = attr.is_invalid() || !Lnast_ntype::is_ref(src->get_type(base)) || !Lnast_ntype::is_const(src->get_type(attr))
+                          ? type_subst->end()
+                          : type_subst->find(std::string(src->get_name(base)));
+    if (it != type_subst->end() && it->second.decl_typed && src->get_sibling_next(attr).is_invalid()) {
+      const auto&         gb = it->second;
+      const auto          an = src->get_name(attr);
+      std::optional<Dlop> v;
+      if (an == "max") {
+        v = gb.decl_max;
+      } else if (an == "min") {
+        v = gb.decl_min;
+      } else if (an == "bits" && gb.decl_max && gb.decl_min) {
+        v = *Dlop::create_integer(upass::range_bits(*gb.decl_max, *gb.decl_min));
+      }
+      if (an == "max" || an == "min" || an == "bits") {
+        auto st = dst->add_child(dst_parent, Lnast_ntype::create_store());
+        if (const auto id = src->get_srcid(src_nid); id != hhds::SourceId_invalid) {
+          dst->set_srcid(st, dst->source_locator().import_from(src->source_locator(), id));
+        }
+        dst->add_child(st, Lnast_node::create_ref(src->get_name(res)));
+        dst->add_child(st, Lnast_node::create_const(v ? std::string(v->to_pyrope()) : std::string("nil")));
+        return;
+      }
+    }
+  }
   if (Lnast_ntype::is_ref(type)) {
     // Generic substitution: a body `:T` slot is a `ref T` (SSA strips io
     // type refs; only body declare/type_spec slots carry them). Replace it
@@ -6889,6 +9704,19 @@ void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Ln
             // A type/lambda/non-integer bind is not a dim: fall through to the
             // recursion so type_subst still governs (and the bad dim is
             // diagnosed downstream), never to the caller's constant.
+          } else if (Lnast::is_tmp(txt)) {
+            // `[N+1]T` lowered to template statements. A PORT's is folded under
+            // the binds here (no later pass folds a port's shape); a body
+            // declare's is computed by the clone's own prologue, where
+            // bake_decl_pre_step folds it. A caller-scope temp of the same name
+            // is unrelated either way.
+            if (type_subst != nullptr) {
+              if (auto fv = fold_template_bound(src, txt, *type_subst, 0, nullptr);
+                  fv && fv->is_just_i64() && fv->to_just_i64() > 0) {
+                dst->add_child(newn, Lnast_node::create_const("[" + std::to_string(fv->to_just_i64()) + "]"));
+                continue;
+              }
+            }
           } else if (auto fv = try_fold_ref(txt); fv && fv->is_integer() && fv->is_just_i64() && fv->to_just_i64() > 0) {
             dst->add_child(newn, Lnast_node::create_const("[" + std::to_string(fv->to_just_i64()) + "]"));
             continue;
@@ -6910,14 +9738,24 @@ void uPass_runner::copy_subtree_into(const std::shared_ptr<Lnast>& src, const Ln
 // arithmetic statement in the template's body prologue (`mult %t0, N, 4; shl
 // %t1, 1, %t0; minus %t2, %t1, 1`). Only the FIRST stmts block is scanned, and
 // only the operator set the bound desugar can produce; anything else (a call, a
-// mux, a runtime read) is not a compile-time width.
+// mux, a runtime read) is not a compile-time width. Two more prologue shapes
+// fold: a captured `comptime const` (`store(W, 4)`, emitted ahead of the bound
+// desugar, possibly after its declaration) and an integer
+// `.[bits]`/`.[max]`/`.[min]` read of a bound type generic (`T.[bits]`) or of
+// an input's declared type (`a.[bits]`).
 std::optional<Dlop> uPass_runner::fold_template_bound(const std::shared_ptr<Lnast>& tmpl, std::string_view text,
-                                                      const absl::flat_hash_map<std::string, Generic_bind>& binds, int depth) {
+                                                      const absl::flat_hash_map<std::string, Generic_bind>& binds, int depth,
+                                                      std::string* unbound) {
   if (text.empty() || text == "nil" || depth > 64) {
     return std::nullopt;
   }
   const char c0 = text.front();
   if (std::isdigit(static_cast<unsigned char>(c0)) != 0 || c0 == '-') {
+    // An index-range dimension (`100..<132`) starts with a digit too, but it
+    // is no literal: from_pyrope throws on it.
+    if (text.find("..") != std::string_view::npos) {
+      return std::nullopt;
+    }
     auto v = Dlop::from_pyrope(text);
     return (v && v->is_integer() && !v->has_unknowns()) ? std::optional<Dlop>(*v) : std::nullopt;
   }
@@ -6925,30 +9763,151 @@ std::optional<Dlop> uPass_runner::fold_template_bound(const std::shared_ptr<Lnas
     if (it->second.const_text.empty()) {
       return std::nullopt;  // a type / lambda bind is not a width
     }
-    return fold_template_bound(tmpl, it->second.const_text, binds, depth + 1);
+    return fold_template_bound(tmpl, it->second.const_text, binds, depth + 1, unbound);
   }
+  if (const auto& gens = tmpl->get_generics(); std::find(gens.begin(), gens.end(), text) != gens.end()) {
+    if (unbound != nullptr && unbound->empty()) {
+      *unbound = std::string(text);  // no explicit bind, no default, not inferred
+    }
+    return std::nullopt;
+  }
+  const auto& tio = tmpl->io_meta();
+  if (tio.find(text) != nullptr) {
+    return std::nullopt;  // a runtime port value (its only prologue store is a `__default`) is never a width
+  }
+  // The declared integer envelope (max, min) of a bound type generic or of an
+  // input port, for an attribute read.
+  const auto envelope = [&](std::string_view base) -> std::optional<std::pair<Dlop, Dlop>> {
+    if (auto it = binds.find(std::string(base)); it != binds.end()) {
+      const auto& gb = it->second;
+      if (gb.const_text.empty() && gb.type_name.empty() && gb.kind == Io_kind::integer && gb.max && gb.min) {
+        return std::pair{*gb.max, *gb.min};
+      }
+      if (gb.decl_typed && gb.decl_max && gb.decl_min) {
+        return std::pair{*gb.decl_max, *gb.decl_min};  // a constant bound from a typed one reads its declared type
+      }
+      return std::nullopt;
+    }
+    const auto* e = tio.find(base);
+    if (e == nullptr || e->kind == Io_kind::boolean || e->array_size > 0 || !unsized_array_port(*tmpl, *e, false).is_invalid()) {
+      return std::nullopt;  // an array port's deferred bound is its element's
+    }
+    if (e->has_deferred_bound()) {
+      auto mx = fold_template_bound(tmpl, e->bound_max_text, binds, depth + 1, unbound);
+      auto mn = fold_template_bound(tmpl, e->bound_min_text, binds, depth + 1, unbound);
+      return mx && mn ? std::optional<std::pair<Dlop, Dlop>>(std::pair{*mx, *mn}) : std::nullopt;
+    }
+    if (e->has_range) {
+      return std::pair{*Dlop::create_integer(e->range_max), *Dlop::create_integer(e->range_min)};
+    }
+    if (e->bits > 0) {
+      const auto b = static_cast<uint32_t>(e->bits);
+      return std::pair{upass::max_from_bits(b, e->is_signed), upass::min_from_bits(b, e->is_signed)};
+    }
+    return std::nullopt;
+  };
   for (auto top : tmpl->children(tmpl->get_root())) {
     if (!Lnast_ntype::is_stmts(tmpl->get_type(top))) {
       continue;
+    }
+    // Only a name with ONE writer folds: a captured `comptime const` computed
+    // by a `mut` updated under a `for`/`if` (`mut m = 0; for … { m += 1 }`)
+    // has its value in the later writes, not in the top-level initial store.
+    // A `%tmp` is single-assignment by construction.
+    int writers = 1;
+    if (!Lnast::is_tmp(text)) {
+      writers = 0;
+      for (auto n : tmpl->depth_preorder(top)) {
+        using N      = Lnast_ntype;
+        const auto t = tmpl->get_type(n);
+        if (N::is_stmts(t) || !N::is_stmts(tmpl->get_type(tmpl->get_parent(n)))) {
+          continue;  // only statements write
+        }
+        if (N::is_for(t)) {
+          int pos = 0;
+          for (auto c : tmpl->children(n)) {
+            if (pos++ != 1 && N::is_ref(tmpl->get_type(c)) && tmpl->get_name(c) == text) {
+              ++writers;  // a loop bind (child 1 is the iterable)
+            }
+          }
+          continue;
+        }
+        if (N::is_declare(t) || N::is_attr_set(t) || N::is_type_spec(t) || N::is_if_like(t) || N::is_while(t) || N::is_cassert(t)) {
+          continue;  // no destination
+        }
+        if (const auto dst = tmpl->get_first_child(n);
+            !dst.is_invalid() && N::is_ref(tmpl->get_type(dst)) && tmpl->get_name(dst) == text) {
+          ++writers;
+        }
+      }
+    }
+    if (writers != 1) {
+      return std::nullopt;
     }
     for (auto stmt : tmpl->children(top)) {
       const auto dst = tmpl->get_first_child(stmt);
       if (dst.is_invalid() || !Lnast_ntype::is_ref(tmpl->get_type(dst)) || tmpl->get_name(dst) != text) {
         continue;
       }
+      const auto t = tmpl->get_type(stmt);
+      using N      = Lnast_ntype;
+      if (N::is_declare(t) || N::is_attr_set(t) || N::is_type_spec(t)) {
+        continue;  // a captured `comptime const`'s declaration; its value is the store
+      }
+      if (N::is_attr_get(t)) {
+        const auto base = tmpl->get_sibling_next(dst);
+        const auto attr = base.is_invalid() ? base : tmpl->get_sibling_next(base);
+        if (attr.is_invalid() || !N::is_ref(tmpl->get_type(base)) || !N::is_const(tmpl->get_type(attr))) {
+          return std::nullopt;
+        }
+        // An untyped constant generic is as wide as its value (user ruling 6).
+        if (const auto it = binds.find(std::string(tmpl->get_name(base)));
+            it != binds.end() && !it->second.const_text.empty() && !it->second.decl_typed && tmpl->get_name(attr) == "bits") {
+          const auto v = fold_template_bound(tmpl, it->second.const_text, binds, depth + 1, unbound);
+          return v ? std::optional<Dlop>(*Dlop::create_integer(upass::value_bits(*v))) : std::nullopt;
+        }
+        const auto env = envelope(tmpl->get_name(base));
+        if (!env) {
+          return std::nullopt;
+        }
+        const auto& [mx, mn] = *env;
+        const auto an        = tmpl->get_name(attr);
+        if (an == "max") {
+          return mx;
+        }
+        if (an == "min") {
+          return mn;
+        }
+        if (an == "bits") {
+          return *Dlop::create_integer(upass::range_bits(mx, mn));
+        }
+        return std::nullopt;
+      }
+      if (N::is_func_call(t)) {
+        // `std.clog2(N)`, the one call a comptime width may use (docs 13-stdlib).
+        const auto callee = tmpl->get_sibling_next(dst);
+        const auto arg    = callee.is_invalid() ? callee : tmpl->get_sibling_next(callee);
+        if (arg.is_invalid() || !tmpl->get_sibling_next(arg).is_invalid() || !N::is_ref(tmpl->get_type(callee))
+            || tmpl->get_name(callee) != upass::std_clog2_callee || N::is_store(tmpl->get_type(arg))) {
+          return std::nullopt;
+        }
+        const auto v = fold_template_bound(tmpl, tmpl->get_name(arg), binds, depth + 1, unbound);
+        return v ? upass::std_clog2(*v) : std::nullopt;
+      }
       std::vector<Dlop> ops;
       for (auto c = tmpl->get_sibling_next(dst); !c.is_invalid(); c = tmpl->get_sibling_next(c)) {
-        auto v = fold_template_bound(tmpl, tmpl->get_name(c), binds, depth + 1);
+        auto v = fold_template_bound(tmpl, tmpl->get_name(c), binds, depth + 1, unbound);
         if (!v) {
           return std::nullopt;
         }
         ops.push_back(*v);
       }
+      if (ops.size() == 1 && N::is_store(t)) {
+        return ops[0];  // a captured `comptime const W = 4`
+      }
       if (ops.size() < 2) {
         return std::nullopt;
       }
-      const auto t    = tmpl->get_type(stmt);
-      using N         = Lnast_ntype;
       auto fold_chain = [&](auto op) {
         Dlop r = ops[0];
         for (std::size_t i = 1; i < ops.size(); ++i) {
@@ -7007,8 +9966,20 @@ uPass_runner::Spec_port uPass_runner::deferred_port_type(const std::shared_ptr<L
     if (text.empty() || text == "nil") {
       return std::nullopt;  // an unbounded side stays unbounded
     }
-    if (auto v = fold_template_bound(tmpl, text, binds); v) {
+    std::string unbound;
+    if (auto v = fold_template_bound(tmpl, text, binds, 0, &unbound); v) {
       return v;
+    }
+    if (!unbound.empty()) {
+      // Same wording as resolve_generic_binds' explicit-list miss: nothing
+      // bound, defaulted or inferred the generic this port's width needs.
+      fcall_arg_fail(span,
+                     "fcall-generic-arity",
+                     std::format("generic `{}` of `{}` is unbound and has no default (it sets the width of port `{}`)",
+                                 unbound,
+                                 callee_name,
+                                 e.name),
+                     std::format("bind it in the `<…>` list or declare a default `<{}=…>`", unbound));
     }
     const std::string msg = std::format(
         "integer type bound `{}` of port `{}` of `{}` is not a compile-time value once its generics are bound",
@@ -7022,8 +9993,8 @@ uPass_runner::Spec_port uPass_runner::deferred_port_type(const std::shared_ptr<L
         .pass     = "upass.runner",
         .message  = msg,
         .span     = span,
-        .hint = "a port bound may use literals, `comptime const`s and the lambda's own generic parameters with `+ - * / % "
-                "<< >> & | ^` only",
+        .hint = "a port bound may use literals, the lambda's own generic parameters, and `comptime const`s computed from "
+                "them with `+ - * / % << >> & | ^` and `std.clog2` only (not by a loop, an `if` or another call)",
     });
     throw std::runtime_error(msg);
   };
@@ -7061,6 +10032,8 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
     clone->add_child(st, Lnast_node::create_const("nil"));
     if (!p.type_name.empty()) {
       clone->add_child(st, Lnast_node::create_ref(p.type_name));
+    } else if (p.kind == Io_kind::boolean) {
+      clone->add_child(st, Lnast_ntype::create_prim_type_bool());
     } else {
       auto pt = clone->add_child(st, Lnast_ntype::create_prim_type_int());
       clone->add_child(pt, Lnast_node::create_const(p.max ? std::string(p.max->to_pyrope()) : std::string("nil")));
@@ -7125,7 +10098,15 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
     }
   }
   clone->set_lambda_kind(tmpl->get_lambda_kind());
+  clone->set_simulation_init(tmpl->get_simulation_init());
   clone->set_verilog_origin(tmpl->is_verilog_origin());
+  clone->set_skip_timecheck(tmpl->get_skip_timecheck());
+  // The body keeps the template's demoted SSA versions (`w__w1`, a template
+  // restored from `ln:` is re-SSA'd before it is cloned): keep what they are
+  // versions of.
+  for (const auto& [demoted, base] : tmpl->get_ssa_demoted()) {
+    clone->note_ssa_demoted(demoted, base);
+  }
   clone->set_template(false);
   clone->set_generics({});
 
@@ -7140,6 +10121,10 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
       return false;
     }
     for (auto c : clone->children(entry)) {
+      // An array port's deferred bound is its ELEMENT's (`v:[N]unsigned(bits=N)`).
+      while (Lnast_ntype::is_comp_type_array(clone->get_type(c)) && !clone->get_first_child(c).is_invalid()) {
+        c = clone->get_first_child(c);
+      }
       if (!Lnast_ntype::is_prim_type_int(clone->get_type(c))) {
         continue;
       }
@@ -7160,8 +10145,83 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
     return false;
   };
 
-  // Inject the concrete type child into each untyped fixed input port. Verbatim
-  // copy preserves the io order, so port i lines up with inject[i].
+  // Inject the concrete type child into each untyped fixed port. `inject` and
+  // `out_inject` are indexed like the template's io_meta, where an inline tuple
+  // port is FLATTENED into its dotted leaves (`t.a`, `t.b`) while the tree keeps
+  // it as ONE store: match each tree port to its io_meta slot by NAME, never by
+  // position, or every port after a tuple port takes its neighbour's type. A
+  // tuple port itself has no slot of its own and is never injected.
+  auto inject_section = [&](const Lnast_nid& tup, const std::vector<Lnast_io_entry>& entries, const std::vector<Spec_port>& specs) {
+    absl::flat_hash_map<std::string, std::size_t> slot;
+    for (std::size_t k = 0; k < entries.size() && k < specs.size(); ++k) {
+      slot.try_emplace(entries[k].name, k);
+    }
+    // A field of a tuple port keeps its generic-width bound on the nested
+    // store (`req:(addr:unsigned(bits=N), …)`): visit it under its dotted
+    // io_meta name so the in-place patch reaches it too.
+    std::vector<std::pair<Lnast_nid, std::string>> entries_todo;
+    for (auto entry : clone->children(tup)) {
+      entries_todo.emplace_back(entry, std::string{});
+    }
+    for (std::size_t w = 0; w < entries_todo.size(); ++w) {
+      const auto [entry, prefix] = entries_todo[w];
+      if (!Lnast_ntype::is_store(clone->get_type(entry))) {
+        continue;
+      }
+      auto name_n = clone->get_first_child(entry);
+      if (name_n.is_invalid()) {
+        continue;
+      }
+      const auto full = prefix + std::string(clone->get_name(name_n));
+      for (auto c : clone->children(entry)) {
+        if (Lnast_ntype::is_tuple_add(clone->get_type(c))) {
+          for (auto field : clone->children(c)) {
+            entries_todo.emplace_back(field, full + ".");
+          }
+        }
+      }
+      const auto it = slot.find(full);
+      if (it == slot.end()) {
+        continue;
+      }
+      const auto& sp = specs[it->second];
+      if (sp.array_size > 0) {
+        for (auto type : clone->children(entry)) {
+          if (!Lnast_ntype::is_comp_type_array(clone->get_type(type))) {
+            continue;
+          }
+          const auto elem = clone->get_first_child(type);
+          const auto dim  = elem.is_invalid() ? elem : clone->get_sibling_next(elem);
+          if (dim.is_invalid()) {
+            clone->add_child(type, Lnast_node::create_const(std::format("[{}]", sp.array_size)));
+          } else if (clone->get_name(dim) == "[]") {
+            clone->set_type(dim, Lnast_ntype::create_const());
+            clone->set_name(dim, std::format("[{}]", sp.array_size));
+          }
+          break;
+        }
+      }
+      if (!sp.inject || std::any_of(type_subst.begin(), type_subst.end(), [&](const auto& item) {
+            return !item.second.tuple_fields.empty() && item.second.type_name == sp.type_name;
+          })) {
+        continue;
+      }
+      if (sp.kind == Io_kind::boolean) {
+        clone->add_child(entry, Lnast_ntype::create_prim_type_bool());
+        continue;
+      }
+      if (patch_ref_bounds(entry, sp)) {
+        continue;  // rewritten in place
+      }
+      if (!sp.type_name.empty()) {
+        clone->add_child(entry, Lnast_node::create_ref(sp.type_name));
+        continue;
+      }
+      auto pt = clone->add_child(entry, Lnast_ntype::create_prim_type_int());
+      clone->add_child(pt, Lnast_node::create_const(sp.max ? std::string(sp.max->to_pyrope()) : std::string("nil")));
+      clone->add_child(pt, Lnast_node::create_const(sp.min ? std::string(sp.min->to_pyrope()) : std::string("nil")));
+    }
+  };
   auto io_n = clone->get_first_child(clone->get_root());
   if (io_n.is_invalid() || !Lnast_ntype::is_io(clone->get_type(io_n))) {
     return clone;
@@ -7170,69 +10230,29 @@ std::shared_ptr<Lnast> uPass_runner::clone_template_specialized(const std::share
   if (in_tup.is_invalid()) {
     return clone;
   }
-  std::size_t i = 0;
-  for (auto entry : clone->children(in_tup)) {
-    if (!Lnast_ntype::is_store(clone->get_type(entry))) {
-      continue;
-    }
-    auto name_n = clone->get_first_child(entry);
-    if (name_n.is_invalid() || clone->get_name(name_n) == "__empty_tuple") {
-      continue;
-    }
-    if (i < inject.size() && inject[i].inject
-        && std::none_of(
-            type_subst.begin(),
-            type_subst.end(),
-            [&](const auto& item) { return !item.second.tuple_fields.empty() && item.second.type_name == inject[i].type_name; })) {
-      if (patch_ref_bounds(entry, inject[i])) {
-        // rewritten in place
-      } else if (!inject[i].type_name.empty()) {
-        clone->add_child(entry, Lnast_node::create_ref(inject[i].type_name));
-      } else {
-        auto pt = clone->add_child(entry, Lnast_ntype::create_prim_type_int());
-        clone->add_child(pt,
-                         Lnast_node::create_const(inject[i].max ? std::string(inject[i].max->to_pyrope()) : std::string("nil")));
-        clone->add_child(pt,
-                         Lnast_node::create_const(inject[i].min ? std::string(inject[i].min->to_pyrope()) : std::string("nil")));
-      }
-    }
-    ++i;
-  }
-
+  const auto& tio = tmpl->io_meta();
+  inject_section(in_tup, tio.inputs, inject);
   // OUTPUT ports: `-> (r:T)` with T bound gets the concrete type too (the
   // outputs tuple is the io node's second tuple_add).
   if (auto out_tup = clone->get_sibling_next(in_tup); !out_tup.is_invalid()) {
-    std::size_t oi = 0;
-    for (auto entry : clone->children(out_tup)) {
-      if (!Lnast_ntype::is_store(clone->get_type(entry))) {
+    inject_section(out_tup, tio.outputs, out_inject);
+  }
+  // User ruling 2026-09-28 (34): a `mod`/`pipe` input default over a generic
+  // (`c:u8 = N * 2`) rode the template's body prologue behind the `__default`
+  // io sentinel; this specialization's binds fold it into the io slot, the
+  // constant a caller drives an omitted port with (io_port::input_default_const;
+  // check_omitted_default_fit already rejected one that does not fold).
+  if (tmpl->get_lambda_kind() != "comb") {
+    for (auto entry : clone->children(in_tup)) {
+      const auto nm = clone->get_first_child(entry);
+      const auto dv = nm.is_invalid() ? nm : clone->get_sibling_next(nm);
+      if (dv.is_invalid() || !Lnast_ntype::is_const(clone->get_type(dv)) || clone->get_name(dv) != "__default") {
         continue;
       }
-      auto name_n = clone->get_first_child(entry);
-      if (name_n.is_invalid() || clone->get_name(name_n) == "__empty_tuple") {
-        continue;
+      if (const auto v
+          = fold_template_bound(tmpl, Lnast_io_entry::default_value_name(clone->get_name(nm)), type_subst, 0, nullptr)) {
+        clone->set_name(dv, std::string(v->to_pyrope()));
       }
-      if (oi < out_inject.size() && out_inject[oi].inject
-          && std::none_of(
-              type_subst.begin(),
-              type_subst.end(),
-              [&](const auto& item) {
-                return !item.second.tuple_fields.empty() && item.second.type_name == out_inject[oi].type_name;
-              })) {
-        if (patch_ref_bounds(entry, out_inject[oi])) {
-          // rewritten in place
-        } else if (!out_inject[oi].type_name.empty()) {
-          clone->add_child(entry, Lnast_node::create_ref(out_inject[oi].type_name));
-        } else {
-          auto pt = clone->add_child(entry, Lnast_ntype::create_prim_type_int());
-          clone->add_child(
-              pt,
-              Lnast_node::create_const(out_inject[oi].max ? std::string(out_inject[oi].max->to_pyrope()) : std::string("nil")));
-          clone->add_child(
-              pt,
-              Lnast_node::create_const(out_inject[oi].min ? std::string(out_inject[oi].min->to_pyrope()) : std::string("nil")));
-        }
-      }
-      ++oi;
     }
   }
   return clone;
@@ -7280,9 +10300,15 @@ void collect_body_vars(const Lnast& ln, const Lnast_nid& nid, bool parent_makes_
   const bool is_store   = Lnast_ntype::is_store(t);
   const bool is_declare = Lnast_ntype::is_declare(t);
   const bool is_for     = Lnast_ntype::is_for(t);
-  // Child 0 of a defining statement names its target, not a read.
+  // Child 0 of a defining statement names its target, not a read. Every
+  // value-producing primitive op defines its child 0 too (`set_mask(x, x, r,
+  // v)` WRITES x: the slang bit-write lowering updates a function-local vector
+  // in place).
+  const bool value_op   = Lnast_ntype::is_primitive_op(t) && !Lnast_ntype::is_attr_set(t) && !is_store && !is_declare
+                        && !Lnast_ntype::is_stages(t) && !Lnast_ntype::is_timecheck(t) && !Lnast_ntype::is_ref(t)
+                        && !Lnast_ntype::is_const(t);
   const bool defines    = is_store || is_declare || is_call || is_for || Lnast_ntype::is_tuple_add(t) || Lnast_ntype::is_attr_set(t)
-                          || Lnast_ntype::is_tuple_get(t);
+                          || Lnast_ntype::is_tuple_get(t) || value_op;
 
   const auto target = ln.get_first_child(nid);
   const auto target_name
@@ -7290,7 +10316,7 @@ void collect_body_vars(const Lnast& ln, const Lnast_nid& nid, bool parent_makes_
   if (!target_name.empty() && !prp_is_tmp_name(target_name)) {
     if (is_declare || is_for) {
       out.declared.emplace(target_name);
-    } else if (is_store && !parent_makes_keys) {
+    } else if ((is_store || value_op) && !parent_makes_keys) {
       out.written.emplace(target_name);  // a store under a call/tuple is a key
     }
   }
@@ -7308,40 +10334,6 @@ void collect_body_vars(const Lnast& ln, const Lnast_nid& nid, bool parent_makes_
     collect_body_vars(ln, c, child_keys, out);
     ++idx;
   }
-}
-
-// The storage-class token of `name`'s declaration (`mut`, `reg`, `const`, ...),
-// or empty when the name is not declared in this tree. Shape:
-//   declare( ref(name), <type>, const(<class>) [, const(init)] )
-std::string decl_storage_class(const Lnast& ln, const Lnast_nid& nid, std::string_view name) {
-  if (nid.is_invalid()) {
-    return {};
-  }
-  if (Lnast_ntype::is_declare(ln.get_type(nid))) {
-    auto tgt = ln.get_first_child(nid);
-    if (!tgt.is_invalid() && Lnast_ntype::is_ref(ln.get_type(tgt)) && ln.get_name(tgt) == name) {
-      for (auto c : ln.children(nid)) {
-        if (Lnast_ntype::is_const(ln.get_type(c))) {
-          const auto txt = ln.get_name(c);
-          if (txt == "reg" || txt == "mut" || txt == "const" || txt == "var") {
-            return std::string(txt);
-          }
-        }
-      }
-    }
-  }
-  for (auto c : ln.children(nid)) {
-    // A nested lambda has its own scope — collect_body_vars stops there too, so
-    // letting the search descend would let an unrelated `mut acc` inside a
-    // nested comb decide the register guard for the module's own `reg acc`.
-    if (Lnast_ntype::is_func_def(ln.get_type(c))) {
-      continue;
-    }
-    if (auto r = decl_storage_class(ln, c, name); !r.empty()) {
-      return r;
-    }
-  }
-  return {};
 }
 
 // True when some `store` OUTSIDE `skip` (the loop body) writes `name`. A carry
@@ -7367,7 +10359,7 @@ bool written_outside(const Lnast& ln, const Lnast_nid& nid, const Lnast_nid& ski
   const bool child_keys = makes_store_keys(ln, nid);
   for (auto c : ln.children(nid)) {
     if (Lnast_ntype::is_func_def(ln.get_type(c))) {
-      continue;  // a nested lambda's writes are not this scope's (see decl_storage_class)
+      continue;  // a nested lambda has its own scope: its writes are not this scope's
     }
     if (written_outside(ln, c, skip, name, child_keys)) {
       return true;
@@ -7635,6 +10627,7 @@ bool subtree_has_runtime_loop_control(const Lnast& ln, const Lnast_nid& body_stm
 // loop"). The matched-filter tree is the canonical shape — `for lvl { for j in
 // 0..<(N >> (lvl+1)) … }` — where the OUTER loop must unroll (its body's inner
 // domain reads `lvl`) while each inner copy, left with a constant domain, rolls.
+// A generic bind or an integer type bound that reads them needs the unroll too.
 bool nested_loop_domain_reads_any(const Lnast& ln, const Lnast_nid& body_stmts, const std::vector<std::string>& names) {
   if (names.empty()) {
     return false;
@@ -7694,6 +10687,15 @@ bool nested_loop_domain_reads_any(const Lnast& ln, const Lnast_nid& body_stmts, 
       // level below the statement, so `any_read_tainted` (direct children only)
       // does not see it.
       if (Lnast_ntype::is_func_call(t)) {
+        // `std.clog2(x)` is comptime only (docs 04b-attributes): inside the
+        // lifted body a tainted `x` is a runtime port and the call would fail
+        // "not a compile-time value" on source that unrolls fine
+        // (`for k in 1..=8 { acc += std.clog2(k) }`).
+        if (const auto callee = ln.get_sibling_next(ln.get_first_child(stmt));
+            !callee.is_invalid() && Lnast_ntype::is_ref(ln.get_type(callee)) && ln.get_name(callee) == upass::std_clog2_callee
+            && any_read_tainted(stmt, /*skip_first=*/true)) {
+          return true;
+        }
         for (auto arg : ln.children(stmt)) {
           if (!Lnast_ntype::is_store(ln.get_type(arg))) {
             continue;
@@ -7706,6 +10708,29 @@ bool nested_loop_domain_reads_any(const Lnast& ln, const Lnast_nid& body_stmts, 
           if (!val.is_invalid() && Lnast_ntype::is_ref(ln.get_type(val)) && tainted.contains(std::string(ln.get_name(val)))) {
             return true;
           }
+        }
+      }
+      // Same rule for an integer type BOUND (`const t:unsigned(bits=i)`, the
+      // lane of `wrap a#[0..+i] = ..`): the runner bakes it where the
+      // declaration sits, so it must fold there. It hangs below the type child
+      // (child 1: `prim_type_int(max, min)`, an array's dims), out of
+      // any_read_tainted's reach.
+      if (Lnast_ntype::is_declare(t) || Lnast_ntype::is_type_spec(t)) {
+        const auto                            first = ln.get_first_child(stmt);
+        std::function<bool(const Lnast_nid&)> reads = [&](const Lnast_nid& nid) {
+          if (Lnast_ntype::is_ref(ln.get_type(nid)) && tainted.contains(std::string(ln.get_name(nid)))) {
+            return true;
+          }
+          for (auto c : ln.children(nid)) {
+            if (reads(c)) {
+              return true;
+            }
+          }
+          return false;
+        };
+        if (const auto type_nid = first.is_invalid() ? first : ln.get_sibling_next(first);
+            !type_nid.is_invalid() && reads(type_nid)) {
+          return true;
         }
       }
       // Compound statements (if / for / while …): their nested stmts blocks
@@ -7819,7 +10844,805 @@ bool later_loop_domain_reads_any(const Lnast& ln, const Lnast_nid& body_stmts, c
   return false;
 }
 
+// name -> every name its straight-line writes read (uPass_runner::Name_deps).
+using Def_use = absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>>;
+
+// The definition `nid` belongs to: its nearest enclosing lambda, or the root.
+Lnast_nid enclosing_definition(const Lnast& ln, const Lnast_nid& nid) {
+  for (auto p = ln.get_parent(nid); !p.is_invalid(); p = ln.get_parent(p)) {
+    if (Lnast_ntype::is_func_def(ln.get_type(p))) {
+      return p;
+    }
+  }
+  return ln.get_root();
+}
+
+// The declarations under `definition` (not inside a nested lambda, which has
+// its own scope): every name declared as a `wire`, as a `reg`, and with an
+// array type (`reg r:[4]u8`, also through a `type M = [4]u8` alias, itself a
+// `type` declare). Shape: declare( ref(name), <type>, const(<class>) [, init] ).
+void gather_loop_decls(const Lnast& ln, const Lnast_nid& definition, absl::flat_hash_set<std::string>& wires,
+                       absl::flat_hash_set<std::string>& regs, absl::flat_hash_set<std::string>& arrays,
+                       absl::flat_hash_set<std::string>& comptimes) {
+  absl::flat_hash_map<std::string, std::vector<std::string>> typed_as;  // type alias -> names declared with it
+  std::function<void(const Lnast_nid&)>                      walk = [&](const Lnast_nid& nid) {
+    for (auto c : ln.children(nid)) {
+      if (Lnast_ntype::is_func_def(ln.get_type(c))) {
+        continue;
+      }
+      if (Lnast_ntype::is_declare(ln.get_type(c))) {
+        const auto target = ln.get_first_child(c);
+        if (!target.is_invalid() && Lnast_ntype::is_ref(ln.get_type(target))) {
+          const std::string name(ln.get_name(target));
+          const auto        type = ln.get_sibling_next(target);
+          for (auto k = type; !k.is_invalid(); k = ln.get_sibling_next(k)) {
+            if (Lnast_ntype::is_const(ln.get_type(k))) {
+              const auto cls = ln.get_name(k);
+              if (cls == "reg") {
+                regs.emplace(name);
+              } else if (cls == "wire" || cls.starts_with("wire ")) {
+                wires.emplace(name);
+              }
+              if (cls.find("comptime") != std::string_view::npos) {
+                comptimes.emplace(name);
+              }
+              break;
+            }
+          }
+          if (!type.is_invalid() && Lnast_ntype::is_comp_type_array(ln.get_type(type))) {
+            arrays.emplace(name);
+          } else if (!type.is_invalid() && Lnast_ntype::is_ref(ln.get_type(type))) {
+            typed_as[ln.get_name(type)].emplace_back(name);
+          }
+        }
+      }
+      walk(c);
+    }
+  };
+  walk(definition);
+  std::vector<std::string> work(arrays.begin(), arrays.end());
+  while (!work.empty()) {
+    const auto alias = std::move(work.back());
+    work.pop_back();
+    if (const auto it = typed_as.find(alias); it != typed_as.end()) {
+      for (const auto& name : it->second) {
+        if (arrays.emplace(name).second) {
+          work.emplace_back(name);
+        }
+      }
+    }
+  }
+}
+
+// Whether any ref under `nid` (not inside a nested lambda) names one of `names`.
+bool subtree_reads_any(const Lnast& ln, const Lnast_nid& nid, const absl::flat_hash_set<std::string>& names) {
+  if (Lnast_ntype::is_func_def(ln.get_type(nid))) {
+    return false;
+  }
+  if (Lnast_ntype::is_ref(ln.get_type(nid)) && names.contains(ln.get_name(nid))) {
+    return true;
+  }
+  for (auto c : ln.children(nid)) {
+    if (subtree_reads_any(ln, c, names)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// The straight-line def-use of `scope`'s statements into `deps`: for each
+// statement's target, every name the statement reads (not its target, a
+// call's callee or a named actual / tuple field label: names, not reads).
+// if/match arms are straight-line; a loop body is not, since that loop may
+// roll into an instance of its own -- except a loop that always unrolls (a
+// `while`, or a body that reads a wire), whose body is straight-line again.
+// The bodies of the loops that enclose the one being planned are unrolled
+// too; they are gathered as scopes of their own.
+void gather_straight_line_deps(const Lnast& ln, const Lnast_nid& scope, const absl::flat_hash_set<std::string>& wires,
+                               Def_use& deps) {
+  std::function<void(const Lnast_nid&, bool, bool, absl::flat_hash_set<std::string>&)> reads_of
+      = [&](const Lnast_nid& nid, bool is_stmt, bool parent_keys, absl::flat_hash_set<std::string>& out) {
+          const auto t     = ln.get_type(nid);
+          const bool keys  = makes_store_keys(ln, nid);
+          int        index = 0;
+          for (auto c : ln.children(nid)) {
+            const bool label = (index == 0 && (is_stmt || (parent_keys && Lnast_ntype::is_store(t))))
+                               || (index == 1 && Lnast_ntype::is_func_call(t));
+            if (!label && Lnast_ntype::is_ref(ln.get_type(c))) {
+              out.emplace(ln.get_name(c));
+            }
+            reads_of(c, false, keys, out);
+            ++index;
+          }
+        };
+  std::function<void(const Lnast_nid&)> walk = [&](const Lnast_nid& nid) {
+    for (auto stmt : ln.children(nid)) {
+      const auto t = ln.get_type(stmt);
+      if (Lnast_ntype::is_func_def(t)) {
+        continue;
+      }
+      const bool is_loop  = Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t) || Lnast_ntype::is_rolled_for(t);
+      const bool unrolled = Lnast_ntype::is_while(t) || (Lnast_ntype::is_for(t) && subtree_reads_any(ln, stmt, wires));
+      if (Lnast_ntype::is_stmts(t) || Lnast_ntype::is_if_like(t) || unrolled) {
+        walk(stmt);  // conditions are refs, not statements: only the nested blocks count
+        continue;
+      }
+      const auto target = ln.get_first_child(stmt);
+      if (!is_loop && !target.is_invalid() && Lnast_ntype::is_ref(ln.get_type(target))) {
+        reads_of(stmt, true, false, deps[std::string(ln.get_name(target))]);
+      }
+    }
+  };
+  walk(scope);
+}
+
+// A combinational RING around a rolled loop instance: a value the loop
+// PRODUCES flows back into the value one of its inputs (`seeds`: an invariant,
+// or a carry's ordinal-0 value) takes, e.g.
+//   wire w:u16 = nil
+//   const wc = w
+//   for i in 0..<4 { ... wc ... ; pv#[(i*4)..+4] = ... }
+//   w = pv
+// Only a `wire` lets a value flow backwards in program order, so a ring path
+// crosses one. Bit-level the ring may be acyclic, and the instance can carry
+// it (graph_util::closes_loop_self_edge keeps it an ordinary external edge),
+// but the netlist then holds a word-level loop through the instance that the
+// unrolled form does not, so such a loop unrolls. `deps` are the straight-line
+// def-use maps of the definition and of the loops enclosing this one;
+// flow-insensitive, so over-reporting only costs an unrolled loop. A ring the
+// maps cannot see (through a later loop that declines to roll, or through the
+// caller of an inlined comb) still compiles rolled.
+bool loop_output_rings_back(const std::vector<const Def_use*>& deps, const absl::flat_hash_set<std::string>& wires,
+                            const std::vector<std::string>& seeds, const std::vector<std::string>& produced) {
+  const absl::flat_hash_set<std::string_view>     out(produced.begin(), produced.end());
+  std::array<absl::flat_hash_set<std::string>, 2> seen;  // [crossed a wire]
+  std::vector<std::pair<std::string, bool>>       work;
+  for (const auto& n : seeds) {
+    work.emplace_back(n, false);
+  }
+  while (!work.empty()) {
+    auto [name, crossed] = std::move(work.back());
+    work.pop_back();
+    crossed = crossed || wires.contains(name);
+    if (crossed && out.contains(name)) {
+      return true;
+    }
+    if (!seen[crossed].insert(name).second) {
+      continue;
+    }
+    for (const auto* d : deps) {
+      if (const auto it = d->find(name); it != d->end()) {
+        for (const auto& src : it->second) {
+          work.emplace_back(src, crossed);
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// Whether a carry the body reads reaches a whole-value write into a typed
+// integer (`typed`: the typed carries/finals and the body's typed locals)
+// that is not an explicit wrap/sat, by statement-order taint. Without derived
+// carry ranges (eval_carry_ranges gave up), such a write would be judged in
+// the lifted body with the carry-in at its declared type -- stricter than any
+// unrolled iteration (`cnt = cnt + x#[i]` eight times into a `u4` fits every
+// iteration, yet `u4 + 1` does not), so the loop stays unrolled.
+bool carry_feeds_range_check(const Lnast& ln, const Lnast_nid& body_stmts, const std::vector<std::string>& carries_read,
+                             absl::flat_hash_set<std::string> typed) {
+  if (carries_read.empty()) {
+    return false;
+  }
+  absl::flat_hash_set<std::string> tainted(carries_read.begin(), carries_read.end());
+  absl::flat_hash_set<std::string> narrowed;  // wrap/sat results: their store is the explicit narrowing
+  const auto                       ref_name = [&](const Lnast_nid& n) -> std::string_view {
+    return !n.is_invalid() && Lnast_ntype::is_ref(ln.get_type(n)) ? ln.get_name(n) : std::string_view{};
+  };
+  std::function<bool(const Lnast_nid&)> walk = [&](const Lnast_nid& stmts) -> bool {
+    for (auto stmt : ln.children(stmts)) {
+      const auto t = ln.get_type(stmt);
+      if (Lnast_ntype::is_func_def(t)) {
+        continue;
+      }
+      bool compound = Lnast_ntype::is_stmts(t);
+      if (compound) {
+        if (walk(stmt)) {
+          return true;
+        }
+        continue;
+      }
+      for (auto c : ln.children(stmt)) {
+        if (Lnast_ntype::is_stmts(ln.get_type(c))) {
+          compound = true;
+          if (walk(c)) {
+            return true;
+          }
+        }
+      }
+      if (compound) {
+        continue;
+      }
+      const auto dst_nid = ln.get_first_child(stmt);
+      const auto dst     = ref_name(dst_nid);
+      if (Lnast_ntype::is_declare(t)) {
+        const auto ty = dst_nid.is_invalid() ? dst_nid : ln.get_sibling_next(dst_nid);
+        if (!dst.empty() && !ty.is_invalid()
+            && (Lnast_ntype::is_prim_type_int(ln.get_type(ty)) || Lnast_ntype::is_ref(ln.get_type(ty)))) {
+          typed.emplace(dst);
+        }
+        continue;
+      }
+      if (Lnast_ntype::is_func_call(t)) {
+        // A call's result carries the taint of its arguments; a wrap/sat
+        // result is the explicit narrowing of its store.
+        const auto callee = dst_nid.is_invalid() ? dst_nid : ln.get_sibling_next(dst_nid);
+        const auto name   = ref_name(callee);
+        bool       reads  = false;
+        for (auto arg = callee.is_invalid() ? callee : ln.get_sibling_next(callee); !arg.is_invalid();
+             arg      = ln.get_sibling_next(arg)) {
+          const auto key = Lnast_ntype::is_store(ln.get_type(arg)) ? ln.get_first_child(arg) : Lnast_nid{};
+          const auto val = ref_name(key.is_invalid() ? arg : ln.get_sibling_next(key));
+          reads          = reads || (!val.empty() && tainted.contains(val));
+        }
+        if (!dst.empty()) {
+          if (reads) {
+            tainted.emplace(dst);
+          }
+          if (name == "wrap" || name == "sat") {
+            narrowed.emplace(dst);
+          }
+        }
+        continue;
+      }
+      if (dst.empty()) {
+        continue;
+      }
+      bool reads = false;
+      for (auto c = ln.get_sibling_next(dst_nid); !c.is_invalid(); c = ln.get_sibling_next(c)) {
+        const auto r = ref_name(c);
+        reads        = reads || (!r.empty() && tainted.contains(r));
+      }
+      if (!reads) {
+        continue;
+      }
+      tainted.emplace(dst);
+      // A whole-value store (`store(dst, v)`) or an op writing its result
+      // straight into the name; a field / element store is not a scalar write.
+      const bool scalar_store = !Lnast_ntype::is_store(t) || ln.get_sibling_next(ln.get_sibling_next(dst_nid)).is_invalid();
+      const auto value        = Lnast_ntype::is_store(t) ? ref_name(ln.get_sibling_next(dst_nid)) : std::string_view{};
+      if (scalar_store && typed.contains(dst) && !narrowed.contains(value)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  return walk(body_stmts);
+}
+
+// ── Plan-time carry ranges ──────────────────────────────────────────────────
+// Rolling compiles the body ONCE, with each carry entering as an input port;
+// unrolling lets upass.bitwidth see the range every iteration actually has.
+// This interval evaluation of the raw body (the same Lnast_range lattice and
+// op rules as upass.bitwidth, over a small straight-line subset) stands in for
+// the unrolled analysis at plan time: it yields, per carry, the union of the
+// values that ENTER an iteration (the lifted body seeds its carry-in port's
+// range with it, as it does for the index), and tells whether one walk over
+// that union would judge some typed write stricter than every single iteration
+// does. A nested `for` over a comptime range is iterated in place; a runtime
+// trip count (`while`) gives up; any other value it does not model (a tuple
+// op, an opaque call) is unbounded, and a carry whose union ends up unbounded
+// is simply not seeded.
+class Loop_range_eval {
+public:
+  using Env        = absl::flat_hash_map<std::string, Lnast_range>;
+  using Callee_out = std::function<std::optional<Lnast_range>(std::string_view)>;
+
+  // `elem_typed`: the ELEMENT type of each typed array (an element store is
+  // judged against it, as upass.bitwidth's check_array_elem_fit does).
+  Loop_range_eval(const Lnast& ln, Env typed, Env elem_typed, Callee_out callee_out)
+      : ln_(ln), typed_(std::move(typed)), elem_typed_(std::move(elem_typed)), callee_out_(std::move(callee_out)) {}
+
+  // Typed writes whose value left (overflow) or could not be bounded against
+  // (unknown) their declared range, over every evaluation so far.
+  absl::flat_hash_set<Lnast_nid> overflow;
+  absl::flat_hash_set<Lnast_nid> unknown;
+
+  // One pass over `stmts`: `env` in, the values at its end out; every early
+  // exit (break/continue) point is joined in. False when the budget ran out.
+  bool run(const Lnast_nid& stmts, Env& env) {
+    exits_.clear();
+    if (!eval_block(stmts, env)) {
+      return false;
+    }
+    for (const auto& x : exits_) {
+      join_into(env, x, &env);
+    }
+    return true;
+  }
+
+  static Lnast_range join(const Lnast_range& a, const Lnast_range& b) {
+    return a.is_unbounded() || b.is_unbounded() ? Lnast_range::make_unbounded() : a.join(b);
+  }
+
+private:
+  const Lnast&                                                          ln_;
+  Env                                                                   typed_;
+  Env                                                                   elem_typed_;
+  absl::flat_hash_set<std::string>                                      multi_dim_;  // body arrays of 2+ dimensions
+  Callee_out                                                            callee_out_;
+  absl::flat_hash_set<std::string>                                      narrowed_;  // wrap/sat results
+  absl::flat_hash_map<std::string, std::pair<Lnast_range, Lnast_range>> ranges_;    // `range` temps: lo, hi
+  std::vector<Env>                                                      exits_;
+  int64_t                                                               budget_ = 1 << 19;  // statement evaluations
+
+  // `pre` holds the value a path that skipped the arm keeps.
+  static void join_into(Env& acc, const Env& other, const Env* pre) {
+    for (auto& [name, r] : acc) {
+      if (const auto it = other.find(name); it != other.end()) {
+        r = join(r, it->second);
+      } else if (pre != nullptr && !pre->contains(name)) {
+        r = Lnast_range::make_unbounded();  // arm-local on one side only
+      }
+    }
+    for (const auto& [name, r] : other) {
+      if (!acc.contains(name)) {
+        const auto it = pre != nullptr ? pre->find(name) : other.end();
+        acc.emplace(name, pre != nullptr && it != pre->end() ? join(r, it->second) : Lnast_range::make_unbounded());
+      }
+    }
+  }
+
+  std::string_view ref_name(const Lnast_nid& n) const {
+    return !n.is_invalid() && Lnast_ntype::is_ref(ln_.get_type(n)) ? ln_.get_name(n) : std::string_view{};
+  }
+
+  Lnast_range val(const Lnast_nid& n, const Env& env) const {
+    if (n.is_invalid()) {
+      return Lnast_range::make_unbounded();
+    }
+    if (Lnast_ntype::is_const(ln_.get_type(n))) {
+      const auto txt = ln_.get_name(n);
+      if (txt == "true" || txt == "false") {
+        return Lnast_range::boolean();
+      }
+      if (txt.size() >= 3 && txt[0] == '0' && (txt[1] == 's' || txt[1] == 'u') && txt[2] == 'b') {
+        return Lnast_range::make_unbounded();  // a bit pattern is a force, not a value
+      }
+      const auto& v = Dlop::from_pyrope_cached(txt);
+      if (!v.is_invalid() && v.is_integer() && !v.has_unknowns() && v.get_signed_bits() <= 62) {
+        return Lnast_range::constant(v.to_just_i64());
+      }
+      return Lnast_range::make_unbounded();
+    }
+    const auto it = env.find(ref_name(n));
+    return it == env.end() ? Lnast_range::make_unbounded() : it->second;
+  }
+
+  // Width of a get_mask/set_mask window: a constant mask, or a `range` temp
+  // with constant bounds. {lo, width}.
+  std::optional<std::pair<int64_t, int64_t>> window(const Lnast_nid& mask, const Env& env) const {
+    if (const auto m = val(mask, env); m.is_constant() && m.min >= 0) {
+      const auto u = static_cast<uint64_t>(m.min);
+      return std::pair{u == 0 ? int64_t{0} : static_cast<int64_t>(std::countr_zero(u)), static_cast<int64_t>(std::popcount(u))};
+    }
+    if (const auto it = ranges_.find(ref_name(mask)); it != ranges_.end()) {
+      const auto& [lo, hi] = it->second;
+      if (lo.is_constant() && hi.is_constant() && lo.min >= 0 && hi.min >= lo.min && hi.min < 62) {
+        return std::pair{lo.min, hi.min - lo.min + 1};
+      }
+    }
+    return std::nullopt;
+  }
+
+  Lnast_range eval_op(Lnast_ntype::Lnast_ntype_int t, const std::vector<Lnast_nid>& ops, const Env& env) const {
+    using N         = Lnast_ntype;
+    const auto fold = [&](auto&& f) {
+      if (ops.empty()) {
+        return Lnast_range::make_unbounded();
+      }
+      auto r = val(ops[0], env);
+      for (std::size_t i = 1; i < ops.size(); ++i) {
+        r = f(r, val(ops[i], env));
+      }
+      return r;
+    };
+    if (N::is_plus(t)) {
+      return fold([](const Lnast_range& a, const Lnast_range& b) { return a.add(b); });
+    }
+    if (N::is_mult(t)) {
+      return fold([](const Lnast_range& a, const Lnast_range& b) { return a.mul(b); });
+    }
+    if (N::is_bit_and(t)) {
+      return fold([](const Lnast_range& a, const Lnast_range& b) { return a.band(b); });
+    }
+    if (N::is_bit_or(t)) {
+      return fold([](const Lnast_range& a, const Lnast_range& b) { return a.bor(b); });
+    }
+    if (N::is_bit_xor(t)) {
+      return fold([](const Lnast_range& a, const Lnast_range& b) { return a.bxor(b); });
+    }
+    if (N::is_bit_not(t)) {
+      if (ops.empty()) {
+        return Lnast_range::make_unbounded();
+      }
+      if (ops.size() > 1) {  // the typed `~` (ruling 26): flips the stated N bits only
+        const auto n = val(ops[1], env);
+        return n.is_constant() ? val(ops[0], env).bnot_bits(n.min) : Lnast_range::make_unbounded();
+      }
+      return val(ops[0], env).bnot();
+    }
+    if (N::is_log_and(t) || N::is_log_or(t) || N::is_log_not(t) || N::is_red_or(t) || N::is_red_and(t) || N::is_red_xor(t)
+        || N::is_eq(t) || N::is_ne(t) || N::is_lt(t) || N::is_le(t) || N::is_gt(t) || N::is_ge(t)) {
+      return Lnast_range::boolean();
+    }
+    if (ops.size() < 2) {
+      return Lnast_range::make_unbounded();
+    }
+    const auto a = val(ops[0], env);
+    const auto b = val(ops[1], env);
+    if (N::is_minus(t)) {
+      return a.sub(b);
+    }
+    if (N::is_div(t)) {
+      return a.div(b);
+    }
+    if (N::is_mod(t)) {
+      return a.mod(b);
+    }
+    if (N::is_shl(t)) {
+      return a.shl(b);
+    }
+    if (N::is_sra(t)) {
+      return a.sra(b);
+    }
+    if (N::is_sext(t)) {
+      return b.is_constant() ? Lnast_range::sext_to(b.min) : Lnast_range::make_unbounded();
+    }
+    if (N::is_get_mask(t)) {
+      const auto w = window(ops[1], env);
+      if (!w || w->second >= 62) {
+        return Lnast_range::make_unbounded();
+      }
+      auto r = Lnast_range::constant(0).join(Lnast_range::constant((int64_t{1} << w->second) - 1));
+      if (!a.is_unbounded() && a.min >= 0) {
+        r.max = std::min(r.max, a.max >> w->first);
+        if (w->first == 0 && a.max <= r.max) {
+          r.min = a.min;
+        }
+      }
+      return r;
+    }
+    if (N::is_set_mask(t)) {
+      if (const auto w = window(ops[1], env); w && !a.is_unbounded() && a.min >= 0 && w->first + w->second < 62) {
+        const int64_t m = ((int64_t{1} << w->second) - 1) << w->first;
+        return Lnast_range::constant(0).join(Lnast_range::constant(Lnast_range::ones_cover(std::max(a.max, m))));
+      }
+      if (const auto it = typed_.find(ref_name(ops[0])); it != typed_.end()) {
+        return it->second;
+      }
+    }
+    return Lnast_range::make_unbounded();
+  }
+
+  // A whole-value write of a typed name (an element write of a typed array):
+  // judge it the way upass.bitwidth will.
+  void judge(const Lnast_nid& stmt, std::string_view dst, const Lnast_range& r, std::string_view value, bool element = false) {
+    const auto& types = element ? elem_typed_ : typed_;
+    const auto  it    = types.find(dst);
+    if (it == types.end() || narrowed_.contains(value)) {
+      return;
+    }
+    if (r.is_unbounded()) {
+      unknown.insert(stmt);
+    } else if (!it->second.contains(r)) {
+      overflow.insert(stmt);
+    }
+  }
+
+  bool eval_block(const Lnast_nid& stmts, Env& env) {
+    for (auto stmt : ln_.children(stmts)) {
+      if (--budget_ < 0) {
+        return false;
+      }
+      const auto t = ln_.get_type(stmt);
+      if (Lnast_ntype::is_func_def(t) || Lnast_ntype::is_cassert(t) || Lnast_ntype::is_attr_set(t)
+          || Lnast_ntype::is_type_spec(t)) {
+        continue;
+      }
+      if (Lnast_ntype::is_stmts(t)) {
+        if (!eval_block(stmt, env)) {
+          return false;
+        }
+        continue;
+      }
+      if (Lnast_ntype::is_func_break(t) || Lnast_ntype::is_func_continue(t)) {
+        exits_.push_back(env);
+        continue;
+      }
+      if (Lnast_ntype::is_for(t)) {
+        // for(value, iterable, stmts, mode, …) over a comptime `range`: its body
+        // once per index value. Any other domain (a tuple, a runtime bound, a
+        // `ref` slot walk) is not modeled.
+        const auto var  = ln_.get_first_child(stmt);
+        const auto iter = var.is_invalid() ? var : ln_.get_sibling_next(var);
+        const auto body = iter.is_invalid() ? iter : ln_.get_sibling_next(iter);
+        const auto mode = body.is_invalid() ? body : ln_.get_sibling_next(body);
+        const auto rit  = ranges_.find(ref_name(iter));
+        if (ref_name(var).empty() || rit == ranges_.end() || body.is_invalid() || !Lnast_ntype::is_stmts(ln_.get_type(body))
+            || (!mode.is_invalid() && ln_.get_name(mode) == "ref")) {
+          return false;
+        }
+        const auto& [lo, hi] = rit->second;
+        if (!lo.is_constant() || !hi.is_constant()) {
+          return false;
+        }
+        const std::string index(ref_name(var));
+        for (int64_t x = lo.min; x <= hi.min; ++x) {
+          if (--budget_ < 0) {
+            return false;
+          }
+          env.insert_or_assign(index, Lnast_range::constant(x));
+          if (!eval_block(body, env)) {
+            return false;
+          }
+        }
+        continue;
+      }
+      if (Lnast_ntype::is_while(t) || Lnast_ntype::is_rolled_for(t)) {
+        return false;  // a runtime trip count: its iterations are not modeled
+      }
+      if (Lnast_ntype::is_if(t) || Lnast_ntype::is_unique_if(t)) {
+        // (cond, stmts, cond, stmts, …, [stmts]): every arm may run; without a
+        // trailing else the pre-if values survive too.
+        int  conds = 0;
+        int  arms  = 0;
+        Env  merged;
+        bool first = true;
+        for (auto c : ln_.children(stmt)) {
+          if (!Lnast_ntype::is_stmts(ln_.get_type(c))) {
+            ++conds;
+            continue;
+          }
+          ++arms;
+          Env arm = env;
+          if (!eval_block(c, arm)) {
+            return false;
+          }
+          if (first) {
+            merged = std::move(arm);
+            first  = false;
+          } else {
+            join_into(merged, arm, &env);
+          }
+        }
+        if (arms <= conds) {
+          join_into(merged, env, &env);
+        }
+        if (!first) {
+          env = std::move(merged);
+        }
+        continue;
+      }
+      const auto dst_nid = ln_.get_first_child(stmt);
+      const auto dst     = std::string(ref_name(dst_nid));
+      if (dst.empty()) {
+        continue;
+      }
+      std::vector<Lnast_nid> ops;
+      for (auto c = ln_.get_sibling_next(dst_nid); !c.is_invalid(); c = ln_.get_sibling_next(c)) {
+        ops.push_back(c);
+      }
+      if (Lnast_ntype::is_declare(t)) {
+        // declare(var, prim_type_int(max, min), mode[, value]): the type a
+        // later write is judged against.
+        // An array declare, `comp_type_array(…(prim_type_int(max, min)), dim)`,
+        // types its elements.
+        auto       ty    = ops.empty() ? Lnast_nid{} : ops[0];
+        const bool array = !ty.is_invalid() && Lnast_ntype::is_comp_type_array(ln_.get_type(ty));
+        while (!ty.is_invalid() && Lnast_ntype::is_comp_type_array(ln_.get_type(ty))) {
+          ty = ln_.get_first_child(ty);
+        }
+        if (array && Lnast_ntype::is_comp_type_array(ln_.get_type(ln_.get_first_child(ops[0])))) {
+          multi_dim_.insert(dst);
+        }
+        if (!ty.is_invalid() && Lnast_ntype::is_prim_type_int(ln_.get_type(ty))) {
+          const auto mx = val(ln_.get_first_child(ty), env);
+          const auto mn = ln_.get_first_child(ty).is_invalid() ? Lnast_range::make_unbounded()
+                                                               : val(ln_.get_sibling_next(ln_.get_first_child(ty)), env);
+          if (mx.is_constant() && mn.is_constant() && mn.min <= mx.min) {
+            (array ? elem_typed_ : typed_).insert_or_assign(dst, Lnast_range::constant(mn.min).join(Lnast_range::constant(mx.min)));
+          }
+        }
+        continue;
+      }
+      if (Lnast_ntype::is_store(t)) {
+        if (ops.size() == 1) {
+          const auto r = val(ops[0], env);
+          judge(stmt, dst, r, ref_name(ops[0]));
+          env.insert_or_assign(dst, r);
+        } else {
+          const std::string base(Bundle::get_first_level(dst));
+          judge(stmt, base, val(ops.back(), env), ref_name(ops.back()), /*element=*/true);
+          env.insert_or_assign(base, Lnast_range::make_unbounded());
+        }
+        continue;
+      }
+      if (Lnast_ntype::is_range(t)) {
+        // range(dst, lo, hi_inclusive); a stepped one is not modeled.
+        if (ops.size() == 2) {
+          ranges_.insert_or_assign(dst, std::pair{val(ops[0], env), val(ops[1], env)});
+        }
+        env.insert_or_assign(dst, Lnast_range::make_unbounded());
+        continue;
+      }
+      if (Lnast_ntype::is_func_call(t)) {
+        const auto callee = ops.empty() ? std::string_view{} : ref_name(ops[0]);
+        auto       r      = Lnast_range::make_unbounded();
+        if (callee == "wrap" || callee == "sat") {
+          // wrap/sat(v=…, type=<target>): the target's declared range.
+          for (std::size_t i = 1; i < ops.size(); ++i) {
+            const auto key = Lnast_ntype::is_store(ln_.get_type(ops[i])) ? ln_.get_first_child(ops[i]) : Lnast_nid{};
+            if (!key.is_invalid() && ln_.get_name(key) == "type") {
+              if (const auto it = typed_.find(ref_name(ln_.get_sibling_next(key))); it != typed_.end()) {
+                r = it->second;
+              }
+            }
+          }
+          narrowed_.insert(dst);
+        } else if (const auto out = callee.empty() ? std::nullopt : callee_out_(callee)) {
+          r = *out;
+        }
+        env.insert_or_assign(dst, r);
+        continue;
+      }
+      if (Lnast_ntype::is_tuple_get(t) && ops.size() == 2) {
+        // An element of a typed one-dimensional array: its element type bounds
+        // it, as upass.bitwidth's process_tuple_get does (every element store
+        // is held to that type).
+        const std::string arr(Bundle::get_first_level(ref_name(ops[0])));
+        if (const auto it = elem_typed_.find(arr); it != elem_typed_.end() && !multi_dim_.contains(arr)) {
+          env.insert_or_assign(dst, it->second);
+          continue;
+        }
+      }
+      env.insert_or_assign(dst, eval_op(t, ops, env));
+    }
+    return true;
+  }
+};
+
+struct Carry_ranges {
+  bool                                          ok = false;  // every carry evaluated (possibly to unbounded)
+  absl::flat_hash_map<std::string, Lnast_range> carry_in;    // the union of the values entering an iteration
+  bool rolled_stricter = false;  // one walk over carry_in rejects a typed write no single iteration does
+};
+
+// Iterate the body over its carries: exactly, one index value per iteration,
+// for a short loop; for a long one, the whole index domain at once until the
+// carry unions stop growing (or give up).
+Carry_ranges eval_carry_ranges(const Lnast& ln, const Lnast_nid& body, const std::string& ivar, int64_t first, int64_t step,
+                               uint64_t count, const Loop_range_eval::Env& base, const Loop_range_eval::Env& carry_init,
+                               const Loop_range_eval::Env& typed, const Loop_range_eval::Env& elem_typed,
+                               const Loop_range_eval::Callee_out& callee_out) {
+  Carry_ranges       out;
+  Loop_range_eval    per_iter(ln, typed, elem_typed, callee_out);
+  const int64_t      last    = static_cast<int64_t>(static_cast<__int128>(first) + static_cast<__int128>(count - 1) * step);
+  const auto         domain  = Lnast_range::constant(std::min(first, last)).join(Lnast_range::constant(std::max(first, last)));
+  auto               current = carry_init;  // what enters the next iteration
+  auto&              u       = out.carry_in;
+  constexpr uint64_t kExactIterations = 4096;
+  const auto         join_in          = [&](const Loop_range_eval::Env& in) {
+    bool grew = false;
+    for (auto& [c, r] : u) {
+      const auto joined = Loop_range_eval::join(r, in.at(c));
+      grew              = grew || joined.is_unbounded() != r.is_unbounded() || joined.min != r.min || joined.max != r.max;
+      r                 = joined;
+    }
+    return grew;
+  };
+  const auto carry_out = [&](const Loop_range_eval::Env& end) {
+    for (auto& [c, r] : current) {
+      if (const auto it = end.find(c); it != end.end()) {
+        r = it->second;
+      }
+    }
+  };
+  u = carry_init;
+  if (count <= kExactIterations) {
+    for (uint64_t k = 0; k < count; ++k) {
+      join_in(current);
+      auto env = base;
+      env.insert_or_assign(
+          ivar,
+          Lnast_range::constant(static_cast<int64_t>(static_cast<__int128>(first) + static_cast<__int128>(k) * step)));
+      for (const auto& [c, r] : current) {
+        env.insert_or_assign(c, r);
+      }
+      if (!per_iter.run(body, env)) {
+        return out;
+      }
+      carry_out(env);
+    }
+  } else {
+    // Every iteration's carry-in is some earlier iteration's carry-out.
+    bool converged = false;
+    for (int round = 0; round < 64 && !converged; ++round) {
+      auto env = base;
+      env.insert_or_assign(ivar, domain);
+      for (const auto& [c, r] : u) {
+        env.insert_or_assign(c, r);
+      }
+      if (!per_iter.run(body, env)) {
+        return out;
+      }
+      carry_out(env);
+      converged = !join_in(current);
+    }
+    if (!converged) {
+      return out;
+    }
+  }
+  // One walk over the unions, as the lifted body will judge it.
+  Loop_range_eval rolled(ln, typed, elem_typed, callee_out);
+  auto            env = base;
+  env.insert_or_assign(ivar, domain);
+  for (const auto& [c, r] : u) {
+    const auto t = typed.find(c);
+    env.insert_or_assign(c, t == typed.end() || r.is_unbounded() ? r : r.meet(t->second));
+  }
+  if (!rolled.run(body, env)) {
+    return out;
+  }
+  out.rolled_stricter = std::ranges::any_of(rolled.overflow, [&](const Lnast_nid& n) { return !per_iter.overflow.contains(n); });
+  out.ok              = true;
+  return out;
+}
+
 }  // namespace
+
+bool uPass_runner::subtree_writes_through_ref(const Lnast& ln, const Lnast_nid& nid) const {
+  if (nid.is_invalid() || Lnast_ntype::is_func_def(ln.get_type(nid))) {
+    return false;
+  }
+  if (Lnast_ntype::is_func_call(ln.get_type(nid))) {
+    const auto dst = ln.get_first_child(nid);
+    const auto fn  = dst.is_invalid() ? dst : ln.get_sibling_next(dst);
+    for (auto a = fn.is_invalid() ? fn : ln.get_sibling_next(fn); !a.is_invalid(); a = ln.get_sibling_next(a)) {
+      const auto key = Lnast_ntype::is_store(ln.get_type(a)) ? ln.get_first_child(a) : Lnast_nid{};
+      if (key.is_invalid()) {
+        continue;
+      }
+      if (ln.get_name(key) == "__ref_arg") {
+        return true;
+      }
+      if (ln.get_name(key) == call_ufcs_arg_marker) {
+        const auto callee = Lnast_ntype::is_ref(ln.get_type(fn)) ? lookup_callee(ln.get_name(fn)) : nullptr;
+        if (!callee || callee->io_meta().inputs.empty() || callee->io_meta().inputs.front().is_ref) {
+          return true;
+        }
+      }
+    }
+  }
+  for (auto c : ln.children(nid)) {
+    if (subtree_writes_through_ref(ln, c)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+uPass_runner::Loop_scope_facts& uPass_runner::loop_scope_facts(const Lnast_nid& definition) {
+  const auto& tree     = lm->get_lnast();
+  auto&       per_tree = loop_tree_facts_[tree.get()];
+  if (per_tree.tree != tree) {
+    per_tree = Loop_tree_facts{.tree = tree, .definitions = {}};
+  }
+  auto [it, fresh] = per_tree.definitions.try_emplace(definition);
+  if (fresh) {
+    gather_loop_decls(*tree, definition, it->second.wires, it->second.regs, it->second.arrays, it->second.comptimes);
+  }
+  return it->second;
+}
 
 bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string& ivar, int64_t lo, int64_t hi, int64_t step,
                                   Loop_roll_plan& out) {
@@ -7845,7 +11668,10 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
   }
   const auto count = static_cast<uint64_t>(count_wide);
 
-  const auto& ln       = *lm->get_lnast();
+  const auto& ln = *lm->get_lnast();
+  if (subtree_writes_through_ref(ln, body_stmts)) {
+    return refuse("a call writes a variable back through `ref`");
+  }
   out.has_loop_control = subtree_has_loop_control(ln, body_stmts);
   const auto loop_nid  = ln.get_parent(body_stmts);  // the `for` node: the order anchor for written_before
 
@@ -7867,13 +11693,19 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
   }
 
   // Declared-in-body names are local; the iteration variable is the index.
-  const auto is_local = [&](const std::string& n) { return declared.contains(n) || n == ivar; };
+  const auto is_local   = [&](const std::string& n) { return declared.contains(n) || n == ivar; };
+  const auto definition = enclosing_definition(ln, loop_nid);
+  auto&      facts      = loop_scope_facts(definition);
 
   for (const auto& n : written) {
     if (is_local(n)) {
       continue;
     }
-    const bool has_incoming = written_before(ln, loop_nid, n);
+    // A register always has an incoming value (its pending D, or Q when the
+    // cycle has not written it), so it is a carry even when every path writes
+    // it: a final would come back as a plain value bound to the register name,
+    // leaving the flop's D at Q.
+    const bool has_incoming = written_before(ln, loop_nid, n) || facts.regs.contains(n);
     if (!read.contains(n) && !has_incoming && !out.has_loop_control && body_must_write(ln, body_stmts, n)) {
       out.finals.emplace_back(n);
     } else {
@@ -7909,6 +11741,74 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
   if (later_loop_domain_reads_any(ln, body_stmts, produced)) {
     return refuse("a value the loop produces is used by a later comptime loop domain");
   }
+  // Loops that stay UNROLLED whatever compile.unroll says (docs
+  // 05b-statements.md "Loops and `wire`"), so the rolled and unrolled
+  // lowerings never disagree about what compiles:
+  //  * a body that writes a memory (a `reg` array): unrolled, each indexed
+  //    write stays a write port of the enclosing Memory for memory inference,
+  //    where a rolled body could only carry the whole array through every
+  //    ordinal and write it back;
+  //  * a body that reads a `wire` (prp2lnast rejects a drive): the wire is a
+  //    module-wide net whose driver may follow the loop and depend on it;
+  //  * a loop whose own output rings back into its inputs through a wire (see
+  //    loop_output_rings_back).
+  // A body with a runtime `break`/`continue` has no unrolled form (unroll_for
+  // routes it here whatever the knob says), so it stays rolled through a wire
+  // read or a ring -- a ring stays an ordinary external edge of the instance,
+  // see graph_util::closes_loop_self_edge -- and a memory write is an error.
+  const bool must_roll = out.has_loop_control && subtree_has_runtime_loop_control(ln, body_stmts, ivar);
+  for (const auto& n : produced) {
+    // A `comptime` variable is computed at compile time; a rolled body is
+    // runtime hardware (`comptime mut init:[N]u4 = nil` filled by a loop).
+    if (facts.comptimes.contains(n)) {
+      return refuse(std::format("the body writes comptime `{}`", n));
+    }
+  }
+  for (const auto& n : produced) {
+    if (!facts.regs.contains(n)) {
+      continue;
+    }
+    const auto bundle = symbol_table_.get_bundle(out.actual_names.at(n));
+    if ((bundle && bundle->get_attr("__array_size").is_integer()) || facts.arrays.contains(n)) {
+      if (must_roll) {
+        loop_fail(ln.span_of_nearest(loop_nid),
+                  "unsupported",
+                  "loop-runtime-break-memory",
+                  std::format("a loop with a runtime `break`/`continue` may not write memory `{}` (a `reg` array)", n),
+                  "such a loop stays rolled, and a rolled body cannot write a memory; write it after the loop, or make the "
+                  "exit condition comptime so the loop unrolls");
+      }
+      return refuse(std::format("the body writes memory `{}` (a reg array)", n));
+    }
+  }
+  if (!must_roll && !facts.wires.empty()) {
+    for (const auto& n : read) {
+      if (!is_local(n) && facts.wires.contains(n)) {
+        return refuse(std::format("the body reads wire `{}`", n));
+      }
+    }
+    std::vector<Lnast_nid> scopes{definition};  // the definition, then every loop enclosing this one
+    for (auto p = ln.get_parent(loop_nid); !p.is_invalid() && p != definition; p = ln.get_parent(p)) {
+      const auto t = ln.get_type(p);
+      if (Lnast_ntype::is_for(t) || Lnast_ntype::is_while(t) || Lnast_ntype::is_rolled_for(t)) {
+        scopes.emplace_back(p);
+      }
+    }
+    for (const auto& scope : scopes) {
+      if (auto [it, fresh] = facts.deps.try_emplace(scope); fresh) {
+        gather_straight_line_deps(ln, scope, facts.wires, it->second);
+      }
+    }
+    std::vector<const Name_deps*> deps;  // after every insertion: the map may rehash
+    for (const auto& scope : scopes) {
+      deps.emplace_back(&facts.deps.at(scope));
+    }
+    auto seeds = out.invariants;
+    seeds.insert(seeds.end(), out.carries.begin(), out.carries.end());
+    if (loop_output_rings_back(deps, facts.wires, seeds, produced)) {
+      return refuse("a value the loop produces reaches its own input through a wire");
+    }
+  }
   {
     // Everything that becomes an INPUT PORT of the lifted definition is runtime
     // inside it, and lift_loop_body promotes the invariants too -- not just the
@@ -7920,8 +11820,8 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     runtime_in_body.insert(runtime_in_body.end(), out.invariants.begin(), out.invariants.end());
     if (nested_loop_domain_reads_any(ln, body_stmts, runtime_in_body)) {
       return refuse(
-          "a nested loop domain or a generic `<...>` bind in the body reads the index, a carry or a loop invariant (all "
-          "runtime inside the lifted body, and both need a comptime value)");
+          "a nested loop domain, a generic `<...>` bind or an integer type bound in the body reads the index, a carry or "
+          "a loop invariant (all runtime inside the lifted body, and each needs a comptime value)");
     }
   }
 
@@ -8021,8 +11921,15 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
                 return true;
               }
               if (Lnast_ntype::is_prim_type_int(tt)) {
-                auto                max_n = tree.get_first_child(type_n);
-                auto                min_n = max_n.is_invalid() ? max_n : tree.get_sibling_next(max_n);
+                auto max_n = tree.get_first_child(type_n);
+                auto min_n = max_n.is_invalid() ? max_n : tree.get_sibling_next(max_n);
+                // A REF bound leaf is a generic-width port bound only the call's
+                // binds can fold (a template io `prim_type_int(ref %t, 0)`): it
+                // is not this variable's type, so let the fallbacks below decide.
+                if ((!max_n.is_invalid() && Lnast_ntype::is_ref(tree.get_type(max_n)))
+                    || (!min_n.is_invalid() && Lnast_ntype::is_ref(tree.get_type(min_n)))) {
+                  return false;
+                }
                 std::optional<Dlop> max;
                 std::optional<Dlop> min;
                 if (!max_n.is_invalid() && Lnast_ntype::is_const(tree.get_type(max_n))) {
@@ -8154,10 +12061,16 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     // boundary from its seed would silently truncate (design rule 11).
     return false;
   };
+  // The lifted definition is compiled on its own, so an integer boundary port
+  // needs BOTH bounds: with one side open SSA derives no width for the port and
+  // it lowers as a single bit (a bare `unsigned` declaration, or a generic
+  // bound nothing folded).
+  const auto half_open
+      = [](const Spec_port& sp) { return sp.kind != Io_kind::boolean && sp.type_name.empty() && (!sp.max || !sp.min); };
   for (const auto& n : out.carries) {
     // The flop stays in the enclosing definition. Q is an invariant input;
     // only the pending D value participates in the ordinal carry chain.
-    if (decl_storage_class(ln, ln.get_root(), n) == "reg") {
+    if (facts.regs.contains(n)) {
       out.registers.insert(n);
     }
     // A non-final variable still needs an ordinal-0 value. Conditional writes,
@@ -8169,6 +12082,9 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     if (!type_of(n, sp)) {
       return refuse(std::format("carried variable `{}` has no declared type", n));
     }
+    if (half_open(sp)) {
+      return refuse(std::format("carried variable `{}` has no bounded type", n));
+    }
     out.types[n] = sp;
   }
   for (const auto& n : out.finals) {
@@ -8176,13 +12092,17 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
     if (!type_of(n, sp)) {
       return refuse(std::format("final-only variable `{}` has no declared type", n));
     }
+    if (half_open(sp)) {
+      return refuse(std::format("final-only variable `{}` has no bounded type", n));
+    }
     out.types[n] = sp;
   }
   for (const auto& n : out.invariants) {
     Spec_port sp;
-    if (!type_of(n, sp)) {
+    if (!type_of(n, sp) || half_open(sp)) {
       // Unlike a carry, an invariant cannot widen while this loop executes.
       // Its inferred value envelope is therefore a valid boundary contract.
+      sp                 = Spec_port{};
       const auto& actual = out.actual_names.at(n);
       if (auto bundle = symbol_table_.get_bundle(actual)) {
         const auto& value = bundle->get_entry(bundle_path::of_string("0"));
@@ -8207,6 +12127,113 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
   if (constant_arithmetic
       && std::ranges::any_of(out.carries, [&](const std::string& n) { return out.types.at(n).kind != Io_kind::boolean; })) {
     return refuse("rolling would hide per-iteration range/overflow diagnostics on a bounded carry");
+  }
+  {
+    // The overflow rule must judge the rolled loop as the unrolled one would
+    // (compile.unroll must not change what compiles): seed the lifted body with
+    // each carry's range over all iterations, and keep the loop unrolled when
+    // that one walk would still be stricter than every single iteration, or
+    // when the ranges cannot be derived and a carry reaches a typed write. A
+    // body with break/continue cannot unroll (a runtime exit needs the rolled
+    // activation chain), so it rolls in every mode.
+    std::vector<std::string> carries_read;
+    for (const auto& n : out.carries) {
+      if (read.contains(n)) {
+        carries_read.emplace_back(n);
+      }
+    }
+    const auto spec_range = [](const Spec_port& sp) -> std::optional<Lnast_range> {
+      if (sp.kind == Io_kind::boolean) {
+        return Lnast_range::boolean();
+      }
+      if (sp.array_size != 0 || !sp.max || !sp.min || !sp.max->is_integer() || !sp.min->is_integer()
+          || sp.max->get_signed_bits() > 62 || sp.min->get_signed_bits() > 62) {
+        return std::nullopt;
+      }
+      return Lnast_range::constant(sp.min->to_just_i64()).join(Lnast_range::constant(sp.max->to_just_i64()));
+    };
+    // What a name holds where the loop starts: a comptime value, else the
+    // range derived for it, else its declared type.
+    const auto entry_range = [&](const std::string& n) {
+      const auto& actual = out.actual_names.at(n);
+      if (!out.registers.contains(n)) {
+        if (const auto v = symbol_table_.known_const_scalar(actual); v && v->is_integer() && v->get_signed_bits() <= 62) {
+          return Lnast_range::constant(v->to_just_i64());
+        }
+        if (const auto r = value_range_of(Lnast_node::create_ref(actual));
+            r.bounded() && r.min->get_signed_bits() <= 62 && r.max->get_signed_bits() <= 62) {
+          return Lnast_range::constant(r.min->to_just_i64()).join(Lnast_range::constant(r.max->to_just_i64()));
+        }
+      }
+      const auto t = out.types.find(n);
+      const auto r = t == out.types.end() ? std::nullopt : spec_range(t->second);
+      return r ? *r : Lnast_range::make_unbounded();
+    };
+    Loop_range_eval::Env             typed;
+    Loop_range_eval::Env             elem_typed;  // an array carry's element type
+    absl::flat_hash_set<std::string> typed_names;
+    for (const auto& [n, sp] : out.types) {
+      if (const auto r = spec_range(sp); r && sp.kind != Io_kind::boolean) {
+        typed.emplace(n, *r);
+        typed_names.emplace(n);
+      } else if (sp.array_size != 0 && sp.kind != Io_kind::boolean && sp.max && sp.min && sp.max->is_integer()
+                 && sp.min->is_integer() && sp.max->get_signed_bits() <= 62 && sp.min->get_signed_bits() <= 62) {
+        elem_typed.emplace(n, Lnast_range::constant(sp.min->to_just_i64()).join(Lnast_range::constant(sp.max->to_just_i64())));
+      }
+    }
+    Loop_range_eval::Env base;
+    for (const auto& [n, v] : out.constants) {
+      if (v.is_integer() && !v.has_unknowns() && v.get_signed_bits() <= 62) {
+        base.emplace(n, Lnast_range::constant(v.to_just_i64()));
+      }
+    }
+    for (const auto& n : out.invariants) {
+      const auto r = entry_range(n);
+      base.emplace(n, r);
+      if (!r.is_unbounded()) {
+        out.invariant_ranges.emplace(n, std::pair{r.min, r.max});
+      }
+    }
+    Loop_range_eval::Env carry_init;
+    for (const auto& n : out.carries) {
+      carry_init.emplace(n, entry_range(n));
+    }
+    const auto callee_out = [&](std::string_view callee) -> std::optional<Lnast_range> {
+      const auto c = lookup_callee(callee);
+      if (!c || c->io_meta().outputs.size() != 1) {
+        return std::nullopt;
+      }
+      const auto& o = c->io_meta().outputs.front();
+      if (o.kind != Io_kind::integer || o.array_size != 0) {
+        return std::nullopt;
+      }
+      if (o.has_range) {
+        return Lnast_range::constant(o.range_min).join(Lnast_range::constant(o.range_max));
+      }
+      if (o.bits > 0 && o.bits <= 62) {
+        return o.is_signed ? Lnast_range::sext_to(o.bits - 1)
+                           : Lnast_range::constant(0).join(Lnast_range::constant((int64_t{1} << o.bits) - 1));
+      }
+      return std::nullopt;
+    };
+    const auto cr = eval_carry_ranges(ln, body_stmts, ivar, lo, step, count, base, carry_init, typed, elem_typed, callee_out);
+    if (!out.has_loop_control) {
+      if (cr.ok && cr.rolled_stricter) {
+        return refuse("one walk of the lifted body would judge a typed write stricter than every iteration does");
+      }
+      if (!cr.ok && carry_feeds_range_check(ln, body_stmts, carries_read, std::move(typed_names))) {
+        return refuse("a carried value reaches a typed write without wrap/sat, and its per-iteration range is unknown");
+      }
+    }
+    if (cr.ok) {
+      for (const auto& [c, r] : cr.carry_in) {
+        const auto t = typed.find(c);
+        const auto s = t == typed.end() ? r : r.meet(t->second);
+        if (!s.is_unbounded()) {
+          out.carry_in_ranges.emplace(c, std::pair{s.min, s.max});
+        }
+      }
+    }
   }
 
   // The index port is signed and wide enough for every generated value (the
@@ -8260,7 +12287,7 @@ bool uPass_runner::plan_loop_roll(const Lnast_nid& body_stmts, const std::string
   return true;
 }
 
-std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts, const Loop_roll_plan& plan) {
+std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts, Loop_roll_plan& plan) {
   const auto& src  = lm->get_lnast();
   auto        body = std::make_shared<Lnast>(plan.mangled);
   auto        root = body->set_root(Lnast_ntype::create_top());
@@ -8277,19 +12304,43 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
   // a reg or a mod instance anywhere in the enclosing comb's body.
   body->set_lambda_kind(src->get_lambda_kind() == "comb" ? "comb" : "mod");
   body->set_template(false);
+  // The body's statements keep their unit's semantics: a Verilog-read unit's
+  // bare `~` is Verilog's (user ruling 2026-09-29 (44) types only Pyrope's),
+  // and `::[timecheck=false]` covers the lifted slice too.
+  body->set_verilog_origin(src->is_verilog_origin());
+  body->set_skip_timecheck(src->get_skip_timecheck());
   // The storage type has a sign bit, but the index only takes values in this
   // elaborated domain. Preserve that tighter fact for shift/range analysis.
   const auto last_index
       = static_cast<int64_t>(static_cast<__int128>(plan.first) + static_cast<__int128>(plan.count - 1) * plan.step);
   body->bw_meta().ranges[plan.ivar]
       = BitwidthEntry{.min = std::min(plan.first, last_index), .max = std::max(plan.first, last_index), .unbounded = false};
+  // Likewise each carry-in holds only what enters some iteration
+  // (plan_loop_roll's eval_carry_ranges), not all of its storage type.
+  for (const auto& [n, r] : plan.carry_in_ranges) {
+    body->bw_meta().ranges[n + std::string(kCarryInSuffix)] = BitwidthEntry{.min = r.first, .max = r.second, .unbounded = false};
+  }
+  // And each invariant only what it holds on loop entry: a NESTED loop reading
+  // the outer index would otherwise see that index port's signed storage
+  // window (`[-4, 3]`) and report a negative array index or shift amount.
+  for (const auto& [n, r] : plan.invariant_ranges) {
+    body->bw_meta().ranges[n] = BitwidthEntry{.min = r.first, .max = r.second, .unbounded = false};
+  }
 
   // One io port declaration: store(ref(name), const(nil), <type>) [+ stages].
   const auto add_port = [&](const Lnast_nid& parent, const std::string& name, const Spec_port& p, bool is_output) {
     auto st = body->add_child(parent, Lnast_ntype::create_store());
     body->add_child(st, Lnast_node::create_ref(name));
     body->add_child(st, Lnast_node::create_const("nil"));
-    if (name == kLoopValid || name == kLoopNextActive || p.kind == Io_kind::boolean) {
+    // A captured `Clock`/`Reset` input of the owner keeps its type: it is the
+    // lifted slice's implicit clock/reset too (a stateful callee in the body
+    // binds to it), not a data port a minted `reset` would then clash with.
+    const auto* owner_port = is_output ? nullptr : src->io_meta().find(name);
+    if (owner_port != nullptr && owner_port->sig == Io_sig::clock) {
+      body->add_child(st, Lnast_ntype::create_prim_type_clock());
+    } else if (owner_port != nullptr && owner_port->sig == Io_sig::reset) {
+      body->add_child(st, Lnast_ntype::create_prim_type_reset());
+    } else if (name == kLoopValid || name == kLoopNextActive || p.kind == Io_kind::boolean) {
       body->add_child(st, Lnast_ntype::create_prim_type_bool());
     } else if (!p.type_name.empty()) {
       body->add_child(st, Lnast_node::create_ref(p.type_name));
@@ -8573,6 +12624,26 @@ std::shared_ptr<Lnast> uPass_runner::lift_loop_body(const Lnast_nid& body_stmts,
     body->add_child(wb, Lnast_node::create_ref(n + std::string(kCarryOutSuffix)));
     body->add_child(wb, Lnast_node::create_ref(plan.registers.contains(n) ? n + std::string(kCarryNextSuffix) : n));
   }
+
+  // The body was copied from the enclosing definition's SSA'd tree, so it can
+  // hold private `<base>___ssa_<N>` versions -- a boundary port too, when an
+  // invariant or final is one (`mut v:u8 = 0; v = a` before the loop). The
+  // lifted definition is SSA'd again on its own, and that run demotes every
+  // private version it meets (`___ssa_<N>` -> `__w<N>`), so a port renamed
+  // there no longer matches the name the rolled call binds. Demote here, by
+  // the same rule, and have the call use the recorded port names.
+  const auto demoted = upass::demote_stale_ssa(*body, root);
+  auto&      ranges  = body->bw_meta().ranges;
+  for (const auto& [from, to] : demoted) {
+    if (plan.actual_names.contains(from)) {
+      plan.port_names.emplace(from, to);
+    }
+    if (auto it = ranges.find(from); it != ranges.end()) {
+      const auto r = it->second;
+      ranges.erase(it);
+      ranges.insert_or_assign(to, r);
+    }
+  }
   return body;
 }
 
@@ -8589,7 +12660,7 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
     const auto invalidate = [&](const std::string& n) {
       const auto& actual = plan.actual_names.at(n);
       if (const auto tit = plan.types.find(n); tit != plan.types.end() && tit->second.array_size > 0) {
-        const std::string unit{lm->get_top_module_name()};
+        const std::string unit{lm->unit_lnast()->get_top_module_name()};
         for (int64_t e = 0; e < tit->second.array_size; ++e) {
           const std::string lane = actual + "." + std::to_string(e);
           (void)symbol_table_.set(lane, Bundle::invalid_lconst);
@@ -8644,14 +12715,19 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
   }
   copy_subtree_into(src, source_body, staging, rolled, &captured);
 
+  // The lifted definition's port for a boundary name (see lift_loop_body).
+  const auto port_of = [&](const std::string& n) -> const std::string& {
+    const auto it = plan.port_names.find(n);
+    return it == plan.port_names.end() ? n : it->second;
+  };
   auto                                            lowered = staging->add_child(rolled, Lnast_ntype::create_stmts());
   std::vector<std::pair<std::string, Lnast_node>> actuals;
   for (const auto& n : plan.invariants) {
-    actuals.emplace_back(n, Lnast_node::create_ref(plan.actual_names.at(n)));
+    actuals.emplace_back(port_of(n), Lnast_node::create_ref(plan.actual_names.at(n)));
   }
   for (const auto& n : plan.carries) {
     if (plan.registers.contains(n)) {
-      actuals.emplace_back(n, Lnast_node::create_ref(plan.actual_names.at(n)));
+      actuals.emplace_back(port_of(n), Lnast_node::create_ref(plan.actual_names.at(n)));
       actuals.emplace_back(n + std::string(kCarryInSuffix), Lnast_node::create_ref("%" + plan.inst + "_" + n + "_seed"));
     } else {
       actuals.emplace_back(n + std::string(kCarryInSuffix), Lnast_node::create_ref(plan.actual_names.at(n)));
@@ -8675,7 +12751,7 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
   std::vector<std::pair<std::string, std::string>> results;
   results.reserve(plan.finals.size() + plan.carries.size());
   for (const auto& n : plan.finals) {
-    results.emplace_back(n, n);
+    results.emplace_back(n, port_of(n));
   }
   for (const auto& n : plan.carries) {
     results.emplace_back(n, n + std::string(kCarryOutSuffix));
@@ -8687,6 +12763,19 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
       auto bind = staging->add_child(lowered, Lnast_ntype::create_store());
       staging->add_child(bind, Lnast_node::create_ref(name));
       staging->add_child(bind, Lnast_node::create_ref(dst));
+    } else if (plan.registers.contains(raw_name)) {
+      // A register carry returns the flop's NEXT value, so it must reach the
+      // register through a STORE (tolg's next-state write). A tuple_get
+      // straight into the register name rebinds the name instead: the flop
+      // keeps its Q forever and a later read sees D.
+      const auto next = "%" + plan.inst + "_" + raw_name + "_next";
+      auto       pick = staging->add_child(lowered, Lnast_ntype::create_tuple_get());
+      staging->add_child(pick, Lnast_node::create_ref(next));
+      staging->add_child(pick, Lnast_node::create_ref(dst));
+      staging->add_child(pick, Lnast_node::create_const(port));
+      auto bind = staging->add_child(lowered, Lnast_ntype::create_store());
+      staging->add_child(bind, Lnast_node::create_ref(name));
+      staging->add_child(bind, Lnast_node::create_ref(next));
     } else {
       auto bind = staging->add_child(lowered, Lnast_ntype::create_tuple_get());
       staging->add_child(bind, Lnast_node::create_ref(name));
@@ -8702,7 +12791,7 @@ void uPass_runner::emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast
       // name only clears slot 0, and a later `v[3]` then constant-folds to the
       // seed (MEASURED: `y = v[0] + v[3]` after a rolled write loop lowered to
       // `tuple_get(v,0) + 0`). Every lane is runtime after the loop.
-      const std::string unit{lm->get_top_module_name()};
+      const std::string unit{lm->unit_lnast()->get_top_module_name()};
       for (int64_t e = 0; e < tit->second.array_size; ++e) {
         const std::string lane = name + "." + std::to_string(e);
         (void)symbol_table_.set(lane, Bundle::invalid_lconst);
@@ -8781,15 +12870,15 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
       return gb.type_name;
     }
     switch (gb.kind) {
-      case Io_kind::boolean: return "bool";
-      case Io_kind::string : return "string";
+      case Io_kind::boolean: return "Bool";
+      case Io_kind::string : return "String";
       case Io_kind::integer:
         if (gb.max || gb.min) {
-          return std::format("int(max={}, min={})",
+          return std::format("Signed(max={}, min={})",
                              gb.max ? std::string(gb.max->to_pyrope()) : "nil",
                              gb.min ? std::string(gb.min->to_pyrope()) : "nil");
         }
-        return "int";
+        return "Signed";
       default: return "untyped";
     }
   };
@@ -8800,16 +12889,31 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
     Generic_bind gb;
     gb.from = std::move(from);
     // Declaration defaults carry source type tokens rather than the typed
-    // temporary emitted for an explicit `<u8>` actual.
-    if (tn == "bool" || tn == "boolean") {
+    // temporary emitted for an explicit `<U8>` actual (the built-in type
+    // words, docs 07-typesystem; the old lowercase spellings are banned words
+    // the front end already rejected).
+    if (tn == "Bool") {
       gb.kind = Io_kind::boolean;
       gb.max  = *Dlop::create_integer(1);
       gb.min  = *Dlop::create_integer(0);
       return gb;
     }
-    // Width sugar `uN`/`sN`/`iN` -- the same spelling set uPass_constprop's
+    if (tn == "String") {
+      gb.kind = Io_kind::string;
+      return gb;
+    }
+    if (tn == "Unsigned") {
+      gb.kind = Io_kind::integer;
+      gb.min  = *Dlop::create_integer(0);
+      return gb;
+    }
+    if (tn == "Signed") {
+      gb.kind = Io_kind::integer;
+      return gb;
+    }
+    // Width sugar `U<N>`/`S<N>` -- the same spelling set uPass_constprop's
     // does_operand decodes. int64_t (not int) so an out-of-int spelling like
-    // `u9999999999` still lands on the diagnostic below instead of falling
+    // `U9999999999` still lands on the diagnostic below instead of falling
     // through and being substituted verbatim as a named type.
     //
     // KNOWN GAP: unlike uPass_constprop::does_operand (which decodes a type token
@@ -8822,7 +12926,7 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
     // `unresolved reference ''`. Fixing it needs the file-unit constant scope
     // seeded here (a call site is unaffected: bind_of_explicit_arg folds the ref
     // first). Compile-time error, never wrong hardware.
-    if (tn.size() > 1 && (tn.front() == 'u' || tn.front() == 'i' || tn.front() == 's')) {
+    if (tn.size() > 1 && (tn.front() == 'U' || tn.front() == 'S')) {
       int64_t    width  = 0;
       const auto parsed = std::from_chars(tn.data() + 1, tn.data() + tn.size(), width);
       if ((parsed.ec == std::errc{} || parsed.ec == std::errc::result_out_of_range) && parsed.ptr == tn.data() + tn.size()
@@ -8838,8 +12942,8 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
               "use a smaller bit width");
         }
         gb.kind = Io_kind::integer;
-        gb.max  = upass::max_from_bits(static_cast<uint32_t>(width), tn.front() != 'u');
-        gb.min  = upass::min_from_bits(static_cast<uint32_t>(width), tn.front() != 'u');
+        gb.max  = upass::max_from_bits(static_cast<uint32_t>(width), tn.front() == 'S');
+        gb.min  = upass::min_from_bits(static_cast<uint32_t>(width), tn.front() == 'S');
         return gb;
       }
     }
@@ -8980,7 +13084,31 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
       gb.kind = Io_kind::integer;
       gb.max  = *fv;  // a constant pins its own value as the type envelope (D)
       gb.min  = *fv;
+      if (!Lnast::is_tmp(s)) {
+        if (const auto df = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), s); df && df->has_type_spec) {
+          gb.decl_typed = true;
+          gb.decl_max   = df->range_max;
+          gb.decl_min   = df->range_min;
+        }
+      }
       return gb;
+    }
+    // A variable or an input/output of the caller that does not fold is a
+    // runtime value: bound as a type name it would read as nil in the callee.
+    const auto  df    = upass::decl_facts::lookup(symbol_table_, lm->get_lnast().get(), s);
+    const auto& cio   = lm->get_lnast()->io_meta();
+    const auto  is_io = [&](const std::vector<Lnast_io_entry>& es) {
+      return std::any_of(es.begin(), es.end(), [&](const Lnast_io_entry& e) { return e.name == s; });
+    };
+    const bool runtime = (df
+                          && (df->mode == upass::Mode::mut_kind || df->mode == upass::Mode::const_kind
+                              || df->mode == upass::Mode::reg_kind || df->mode == upass::Mode::wire_kind))
+                         || is_io(cio.inputs) || is_io(cio.outputs);
+    if (runtime && !Lnast::is_tmp(s)) {
+      fcall_arg_fail(call_span,
+                     "fcall-generic-runtime",
+                     std::format("{} of `{}` is `{}`, a runtime value: a generic is bound at compile time", from, callee_name, s),
+                     "bind a constant, a type or a lambda; pass a runtime value as a call argument");
     }
     return bind_of_type_name(s, std::move(from));
   };
@@ -9027,9 +13155,17 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
                         what,
                         g,
                         what),
-            "bind a type there (e.g. `f<u8>`), or use the generic only as a value/lambda in the body");
+            "bind a type there (e.g. `f<U8>`), or use the generic only as a value/lambda in the body");
       }
     }
+  };
+
+  // A generic that types a param/output (`:G`), vs one used as a value.
+  const auto is_type_generic = [&](const std::string& g) {
+    const auto in_slot = [&](const std::vector<Lnast_io_entry>& es) {
+      return std::any_of(es.begin(), es.end(), [&](const Lnast_io_entry& e) { return e.type_name == g; });
+    };
+    return in_slot(io.inputs) || in_slot(io.outputs);
   };
 
   // 1) Explicit `<…>` bindings — named and/or positional, following the same
@@ -9073,12 +13209,6 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
     // ambiguous positional bind (e.g. two free type generics `two<signed,string>`)
     // must be named `<Name=…>`. Role-matching also fixes the case where the
     // declaration order does not match the actuals' roles (`<N,T>` bound `<u4,3>`).
-    const auto is_type_generic = [&](const std::string& g) {
-      const auto in_slot = [&](const std::vector<Lnast_io_entry>& es) {
-        return std::any_of(es.begin(), es.end(), [&](const Lnast_io_entry& e) { return e.type_name == g; });
-      };
-      return in_slot(io.inputs) || in_slot(io.outputs);
-    };
     for (const auto& ga : explicit_generics) {
       if (!ga.name.empty()) {
         continue;  // named binds already applied above
@@ -9086,11 +13216,14 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
       const Generic_bind cand         = bind_of_explicit_arg(ga.value, std::format("the explicit `<…>` argument `{}`", ga.value));
       const bool         cand_is_type = cand.const_text.empty() && cand.func_name.empty();  // type bind vs value/lambda
       std::size_t        target       = gens.size();
-      // Exception 2: a bare identifier whose text matches an unbound generic name.
-      if (const auto it = std::find(gens.begin(), gens.end(), ga.value); it != gens.end()) {
-        const auto gi = static_cast<std::size_t>(it - gens.begin());
-        if (binds.count(gens[gi]) == 0u) {
-          target = gi;
+      // Exception 2: a bare identifier whose SOURCE name matches an unbound
+      // generic name (`ga.value` is frame-renamed inside an inlined body),
+      // the exact name first (see Actual::src_name).
+      for (const std::string* nm : {&ga.src_name, &ga.src_base}) {
+        const auto it = std::find(gens.begin(), gens.end(), *nm);
+        if (!nm->empty() && it != gens.end() && binds.count(*it) == 0u) {
+          target = static_cast<std::size_t>(it - gens.begin());
+          break;
         }
       }
       if (target >= gens.size()) {
@@ -9263,6 +13396,36 @@ absl::flat_hash_map<std::string, uPass_runner::Generic_bind> uPass_runner::resol
   // A generic that inference did not reach falls to its declaration default
   // (`comb addn<T, N=1>(a:T)` called `addn(a=x)` — T inferred, N defaulted).
   apply_defaults();
+  // A VALUE generic nothing bound (no `<…>` bind, no default; only a `:G`
+  // type is inferred) would read as nil in the body: a direct error at the
+  // call, as with an explicit list, naming the port whose width it sets (the
+  // deferred_port_type wording). A type generic an untyped actual left open
+  // stays open.
+  for (const auto& g : gens) {
+    if (binds.count(g) != 0u || is_type_generic(g)) {
+      continue;
+    }
+    std::string port;
+    for (const auto* es : {&io.inputs, &io.outputs}) {
+      for (const auto& e : *es) {
+        for (const auto* text : {&e.bound_max_text, &e.bound_min_text}) {
+          std::string unbound;
+          if (port.empty() && !text->empty() && *text != "nil" && !fold_template_bound(callee, *text, binds, 0, &unbound)
+              && unbound == g) {
+            port = e.name;
+          }
+        }
+      }
+    }
+    fcall_arg_fail(call_span,
+                   "fcall-generic-arity",
+                   port.empty() ? std::format("generic `{}` of `{}` is unbound and has no default", g, callee_name)
+                                : std::format("generic `{}` of `{}` is unbound and has no default (it sets the width of port `{}`)",
+                                              g,
+                                              callee_name,
+                                              port),
+                   std::format("bind it in the `<…>` list or declare a default `<{}=…>`", g));
+  }
   validate_kinds();
   return binds;
 }
@@ -9288,8 +13451,9 @@ std::shared_ptr<Lnast> uPass_runner::specialize_top_defaults() {
   // `input signed a` and reported "pass", while the same module WITHOUT the
   // generic is refused outright. Outputs are legitimately inferred from the body.
   for (const auto& e : callee->io_meta().inputs) {
-    if (e.bits > 0 || e.has_range || e.kind != Io_kind::none || e.array_size > 0 || e.is_varargs) {
-      continue;  // already concrete
+    if (e.bits > 0 || e.has_range || e.kind != Io_kind::none || e.array_size > 0 || e.is_varargs
+        || !unsized_array_port(*callee, e, false).is_invalid()) {
+      continue;  // already concrete (an array folds under the defaults while cloning)
     }
     bool resolved = false;
     if (!e.type_name.empty()) {
@@ -9308,7 +13472,7 @@ std::shared_ptr<Lnast> uPass_runner::specialize_top_defaults() {
                                  e.name,
                                  name,
                                  callee->get_lambda_kind()),
-                     "annotate the port (e.g. `a:u8`), or give the generic it is typed by a resolvable default");
+                     "annotate the port (e.g. `a:U8`), or give the generic it is typed by a resolvable default");
     }
   }
   // Generic-WIDTH ports (`a12:unsigned(bits=LANES * 4)`) are folded under the
@@ -9352,7 +13516,7 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
         bits         = std::max(mb, nb);
       }
     }
-    return (is_signed ? "s" : "u") + std::to_string(bits);
+    return (is_signed ? "S" : "U") + std::to_string(bits);
   };
 
   // The actual's declared type can come from a body declaration
@@ -9384,33 +13548,33 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
                                  label,
                                  callee_name,
                                  kind),
-                     "annotate the actual, e.g. `x:u8`");
+                     "annotate the actual, e.g. `x:U8`");
     };
     if (!av_set || !av.is_ref()) {
       fail();
     }
-    Spec_port  sp;
-    const auto an = std::string(av.get_name());
+    Spec_port   sp;
+    const auto  an = std::string(av.get_name());
+    const auto* ci = caller_input(an);
     if (auto tn = try_typename(an); !tn.empty()) {
       sp = {true, std::nullopt, std::nullopt, std::string(tn)};
       suffix.push_back(std::string(tn));
+    } else if ((ci != nullptr && ci->kind == Io_kind::boolean) || try_scalar_kind(an) == Io_kind::boolean) {
+      // A bool actual types the port `bool`, never int [0,1]: Pyrope keeps
+      // the two apart, so `if en`/`en and b` in the body stay legal.
+      sp = bool_spec_port();
+      suffix.emplace_back("Bool");
     } else if (auto dt = try_decl_type(an); dt && (dt->range_max || dt->range_min)) {
       sp = {true, dt->range_max, dt->range_min, {}};
       suffix.push_back(suffix_for(dt->range_max, dt->range_min));
-    } else if (const auto* ci = caller_input(an); ci != nullptr && (ci->bits > 0 || ci->kind == Io_kind::boolean)) {
-      if (ci->kind == Io_kind::boolean) {
-        sp = {true, *Dlop::from_pyrope("1"), *Dlop::from_pyrope("0"), {}};
-        suffix.emplace_back("bool");
-      } else if (ci->is_signed) {
+    } else if (ci != nullptr && ci->bits > 0) {
+      if (ci->is_signed) {
         sp = {true, upass::signed_max_from_bits(ci->bits), upass::signed_min_from_bits(ci->bits), {}};
-        suffix.push_back("s" + std::to_string(ci->bits));
+        suffix.push_back("S" + std::to_string(ci->bits));
       } else {
         sp = {true, upass::unsigned_max_from_bits(ci->bits), *Dlop::from_pyrope("0"), {}};
-        suffix.push_back("u" + std::to_string(ci->bits));
+        suffix.push_back("U" + std::to_string(ci->bits));
       }
-    } else if (try_scalar_kind(an) == Io_kind::boolean) {
-      sp = {true, *Dlop::from_pyrope("1"), *Dlop::from_pyrope("0"), {}};
-      suffix.emplace_back("bool");
     } else {
       fail();
     }
@@ -9428,8 +13592,8 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
       return Spec_port{true, std::nullopt, std::nullopt, gb.type_name};
     }
     if (gb.kind == Io_kind::boolean) {
-      suffix.emplace_back("bool");
-      return Spec_port{true, *Dlop::from_pyrope("1"), *Dlop::from_pyrope("0"), {}};
+      suffix.emplace_back("Bool");
+      return bool_spec_port();
     }
     if (gb.kind == Io_kind::integer && (gb.max || gb.min)) {
       suffix.push_back(suffix_for(gb.max, gb.min));
@@ -9448,18 +13612,48 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
       suffix.push_back(suffix_for(inject[i].max, inject[i].min));
       continue;
     }
-    const bool  is_generic    = is_generic_name(e.type_name);
+    const bool is_generic = is_generic_name(e.type_name);
+    // A generic-shape ARRAY port (`v:[N]u4`) is typed by its declaration: the
+    // clone folds `[N]` under the binds, so the actual is never asked.
+    const auto array_type = unsized_array_port(*callee, e, false);
     // A half-open `int(max=99)` param carries a range but bits==0; treat it as
     // already-typed too so the actual's type isn't injected over it (cat 1).
-    const bool  already_typed = !is_generic && (e.bits > 0 || e.has_range || !e.type_name.empty() || e.kind == Io_kind::boolean);
+    const bool already_typed
+        = !is_generic
+          && (e.bits > 0 || e.has_range || !e.type_name.empty() || e.kind == Io_kind::boolean || !array_type.is_invalid());
     if (already_typed) {
       inject[i].inject = false;
       if (!e.type_name.empty()) {
         suffix.push_back(e.type_name);
       } else if (e.kind == Io_kind::boolean) {
-        suffix.emplace_back("bool");
+        suffix.emplace_back("Bool");
+      } else if (!array_type.is_invalid()) {
+        if (const auto shape = array_port_shape(callee, e, false, gbinds, param_set[i] ? &param_val[i] : nullptr);
+            shape && shape->infer_lanes) {
+          inject[i].array_size = shape->lanes;
+          suffix.push_back("a" + std::to_string(shape->lanes));
+        }
+        // The element's width; fixed/generic dims keep their existing tokens.
+        auto elem = array_type;
+        while (Lnast_ntype::is_comp_type_array(callee->get_type(elem)) && !callee->get_first_child(elem).is_invalid()) {
+          elem = callee->get_first_child(elem);
+        }
+        std::optional<Dlop> emax;
+        std::optional<Dlop> emin;
+        if (const auto mx = callee->get_first_child(elem);
+            Lnast_ntype::is_prim_type_int(callee->get_type(elem)) && !mx.is_invalid()) {
+          if (auto v = Dlop::from_pyrope(callee->get_name(mx)); v->is_integer()) {
+            emax = *v;
+          }
+          if (const auto mn = callee->get_sibling_next(mx); !mn.is_invalid()) {
+            if (auto v = Dlop::from_pyrope(callee->get_name(mn)); v->is_integer()) {
+              emin = *v;
+            }
+          }
+        }
+        suffix.push_back(suffix_for(emax, emin));
       } else {
-        suffix.push_back((e.is_signed ? "s" : "u") + std::to_string(e.bits));
+        suffix.push_back((e.is_signed ? "S" : "U") + std::to_string(e.bits));
       }
       continue;
     }
@@ -9552,19 +13746,19 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
   // to one module (natural dedup keyed by name). The owning-unit prefix is kept
   // so tolg exact-matches and cross-unit names never collide.
   //
-  // Width tokens (`uN`/`sN`/`bool`) contain no `_`, so the `_`-joined readable
+  // Width tokens (`U<N>`/`S<N>`/`Bool`, the canonical type spelling) contain no `_`, so the `_`-joined readable
   // form is unambiguous for them. A NAMED-type component may contain `_` (or
   // even look like a width token), which could map two DISTINCT signatures of
   // the same template onto one name — and the name-keyed dedup would then
   // silently drop the second clone, mis-wiring that call site. So when any
   // component is not a plain width token, append a deterministic hash of the
   // exact component list (FNV-1a, NUL-free separator) to disambiguate; the
-  // common all-primitive case keeps its clean `foo__u8` name.
+  // common all-primitive case keeps its clean `foo__U8` name.
   auto is_width_token = [](const std::string& s) -> bool {
-    if (s == "bool") {
+    if (s == "Bool") {
       return true;
     }
-    if (s.size() < 2 || (s[0] != 'u' && s[0] != 's')) {
+    if (s.size() < 2 || (s[0] != 'U' && s[0] != 'S')) {
       return false;
     }
     for (std::size_t i = 1; i < s.size(); ++i) {
@@ -9583,7 +13777,7 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
   }
   // IDENTITY specialization — the clone IS the template. Three conditions, all
   // computed above: no port type is injected (every declared port was already
-  // concrete, so `inject`/`out_inject` are all `inject=false`), there is no
+  // concrete, so no type or array extent is injected), there is no
   // var-arg expansion, and every declared generic took its DECLARATION DEFAULT
   // (`from_default`, set in resolve_generic_binds::apply_defaults) rather than
   // an explicit `<…>` bind or an inferred one. The clone then differs from the
@@ -9602,7 +13796,7 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
   // the resolution target for any LATER call site that binds non-defaults.
   const bool identity_spec
       = !has_vararg && vports.empty()
-        && std::none_of(inject.begin(), inject.end(), [](const Spec_port& p) { return p.inject; })
+        && std::none_of(inject.begin(), inject.end(), [](const Spec_port& p) { return p.inject || p.array_size > 0; })
         && std::none_of(out_inject.begin(), out_inject.end(), [](const Spec_port& p) { return p.inject; })
         && std::all_of(gens.begin(), gens.end(), [&](const std::string& g) {
              const auto it = gbinds.find(g);
@@ -9644,6 +13838,9 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
   std::vector<std::pair<std::string, Lnast_node>> actuals;
   actuals.reserve(nbind + vports.size());
   for (std::size_t i = 0; i < nbind; ++i) {
+    if (!param_set[i]) {
+      continue;  // omitted: tolg drives its declared default or auto-wires it (sub_input_may_be_omitted)
+    }
     const auto binding = gbinds.find(io.inputs[i].type_name);
     if (binding == gbinds.end() || binding->second.tuple_fields.empty()) {
       actuals.emplace_back(io.inputs[i].name, param_val[i]);
@@ -9684,7 +13881,7 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
   // The specialized clone is instantiated as a Sub, so the handle's fields are
   // its declared output ports. Same reason as the declines in try_inline_func_call:
   // the runner's declared-type consumers run before tolg rebuilds the Sub.
-  stash_sub_instance_port_facts(dst_name, callee);
+  stash_sub_instance_port_facts(dst_name, callee, &out_inject);
   for (const auto& output : io.outputs) {
     const auto binding = gbinds.find(output.type_name);
     if (binding == gbinds.end()) {
@@ -9713,6 +13910,16 @@ bool uPass_runner::maybe_specialize_template_call(const std::shared_ptr<Lnast>& 
 
 // ── overload-gathering call dispatch (2f-overload) ────────────────────────────
 
+std::pair<std::string, std::string> uPass_runner::source_var_at_cursor() const {
+  // The raw name, never the inline frame's `inl<N>_x`: an inlined callee body
+  // is read in place, so its raw text is the callee's own spelling.
+  const auto raw = lm->current_raw_text();
+  if (!Lnast_ntype::is_ref(lm->get_raw_ntype()) || Lnast::is_tmp(raw)) {
+    return {};
+  }
+  return {std::string(raw), minted_ssa_base(*lm->get_lnast(), raw)};
+}
+
 bool uPass_runner::gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& actuals,
                                   std::vector<Generic_actual>& explicit_generics) {
   // Cursor MUST be on the callee ref (the func_call's 2nd child); the actuals
@@ -9730,12 +13937,17 @@ bool uPass_runner::gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& 
     }
     return {};
   };
-
   bool shape_ok = true;
   while (lm->move_to_sibling()) {
     const auto t = lm->get_raw_ntype();
     if (Lnast_ntype::is_ref(t) || Lnast_ntype::is_const(t)) {
-      actuals.push_back(Actual{.is_named = false, .key = {}, .node = lm->current_node(), .func_name = func_actual_name()});
+      auto [src_name, src_base] = source_var_at_cursor();
+      actuals.push_back(Actual{.is_named  = false,
+                               .key       = {},
+                               .node      = lm->current_node(),
+                               .func_name = func_actual_name(),
+                               .src_name  = std::move(src_name),
+                               .src_base  = std::move(src_base)});
     } else if (Lnast_ntype::is_store(t)) {
       Actual a;
       a.is_named      = true;
@@ -9808,7 +14020,8 @@ bool uPass_runner::gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& 
           break;
         }
         Generic_actual ga;
-        ga.value = std::string(lm->current_text());
+        ga.value    = std::string(lm->current_text());
+        std::tie(ga.src_name, ga.src_base) = source_var_at_cursor();
         if (lm->move_to_sibling()) {
           ga.name = std::string(lm->current_raw_text());
         }
@@ -9854,6 +14067,10 @@ bool uPass_runner::gather_actuals(bool drop_ufcs_receiver, std::vector<Actual>& 
       }
       a.func_name = func_actual_name();
       a.node      = lm->current_node();
+      if (a.is_ref_pass) {
+        // `f(ref x)`: the variable's source spelling drives name-match binding.
+        std::tie(a.src_name, a.src_base) = source_var_at_cursor();
+      }
       lm->restore_cursor(here);
       actuals.push_back(std::move(a));
     } else {
@@ -9943,7 +14160,8 @@ std::vector<std::string> uPass_runner::overload_candidates_of(std::string_view n
   return out;
 }
 
-bool uPass_runner::signature_matches(const Lnast_tree_io& io, const std::vector<Actual>& actuals, bool is_ctor_call) {
+bool uPass_runner::signature_matches(const Lnast_tree_io& io, const std::vector<Actual>& actuals,
+                                     const std::shared_ptr<Lnast>& callee) {
   // CONTRACT: an overloaded and a non-overloaded call decide "can this lambda be
   // called with these actuals?" by the SAME rules — a gathered overload only
   // adds "try the candidates first-to-last, take the first that can be called,
@@ -9974,7 +14192,6 @@ bool uPass_runner::signature_matches(const Lnast_tree_io& io, const std::vector<
   std::vector<std::pair<std::string, Lnast_node>> vararg_named;
   if (!bind_call_actuals(io,
                          actuals,
-                         is_ctor_call,
                          /*commit=*/false,
                          /*callee_name=*/{},
                          livehd::diag::Span{},
@@ -10000,35 +14217,37 @@ bool uPass_runner::signature_matches(const Lnast_tree_io& io, const std::vector<
     }
   }
 
-  // Per-arg scalar kind/range fit — the typed-param check the runner otherwise
-  // defers to downstream typecheck/bitwidth. Re-derived here so dispatch can
-  // distinguish e.g. `f(a:bool)` from `f(a:u8)`, or `f(a:u8)` from `f(a:u16)`.
-  // Skips self, the var-arg slot, and unset params; an untyped param or a
-  // not-comptime-classifiable actual is permissive (the full path / downstream
-  // remains authoritative). A typed-self structural `does` is NOT checked here
-  // (method overloads fall through to check_self_does on the chosen candidate).
+  // Per-arg scalar kind/range fit. Re-derived here so dispatch can
+  // distinguish e.g. `f(a:bool)` from `f(a:u8)`, or `f(a:u8)` from `f(a:u16)`:
+  // a candidate whose declared parameter range the actual MAY exceed cannot
+  // take the call (the same containment rule check_call_args_fit enforces on
+  // the chosen callee), so a runtime u16 skips `f(a:u8)` for `f(a:u16)`.
+  // Skips self, the var-arg slot, and unset params; an untyped param (or a
+  // generic-width one, whose bound needs the call's binds) is permissive, as
+  // is an actual that is not an integer (the kind check above decides it). A
+  // typed-self structural `does` is NOT checked here (method overloads fall
+  // through to check_self_does on the chosen candidate).
   for (std::size_t i = 0; i < nparams; ++i) {
     if ((has_vararg && i == nbind) || (has_self && i == 0) || !param_set[i]) {
       continue;
     }
     const auto& pe = io.inputs[i];
+    if (callee && is_array_port(*callee, pe, false)) {
+      if (!check_call_array_arg(callee, pe, {}, param_val[i], {}, {}, true)) {
+        return false;
+      }
+      continue;
+    }
     const auto  ak = classify(param_val[i]);
     if (pe.kind != Io_kind::none && ak != Io_kind::none && pe.kind != ak) {
       return false;  // kind mismatch (bool vs int vs string)
     }
-    if (pe.kind == Io_kind::integer && param_val[i].is_const() && (pe.has_range || (pe.bits > 0 && pe.bits < 62))) {
-      if (auto v = Dlop::from_pyrope(param_val[i].get_name()); v && v->is_integer() && !v->has_unknowns() && v->get_signed_bits() <= 62) {
-        const int64_t val = v->to_just_i64();
-        // Prefer the EXACT declared `int(min,max)` range (so adjacent windows
-        // like int(0,99) vs int(100,199) discriminate 100 correctly — a
-        // `does`-style range containment); fall back to the bits window.
-        const int64_t lo  = pe.has_range ? pe.range_min : (pe.is_signed ? -(int64_t{1} << (pe.bits - 1)) : int64_t{0});
-        const int64_t hi
-            = pe.has_range ? pe.range_max : (pe.is_signed ? (int64_t{1} << (pe.bits - 1)) - 1 : (int64_t{1} << pe.bits) - 1);
-        if (val < lo || val > hi) {
-          return false;  // argument does not fit this overload's declared range
-        }
-      }
+    if (pe.kind != Io_kind::integer) {
+      continue;
+    }
+    if (const auto declared = declared_param_range(nullptr, pe, {});
+        declared && value_range_of(param_val[i]).may_exceed(declared->first, declared->second)) {
+      return false;  // the argument may not fit this overload's declared range
     }
   }
 
@@ -10245,7 +14464,8 @@ std::vector<std::string> uPass_runner::init_candidates_of(std::string_view tn) {
   return out;
 }
 
-std::string uPass_runner::select_init_overload(const std::vector<std::string>& candidates, const std::vector<Ctor_arg>& args) {
+std::string uPass_runner::select_init_overload(const std::vector<std::string>& candidates, const std::vector<Ctor_arg>& args,
+                                               const livehd::diag::Span* span, std::string_view label) {
   // Tuple-order priority (07b-structtype.md "Lambda overloading"): first
   // candidate whose non-self formals fit the args wins. Delegates to
   // signature_matches (is_ctor_call=true) so per-arg KIND/RANGE fit — not just
@@ -10268,10 +14488,53 @@ std::string uPass_runner::select_init_overload(const std::vector<std::string>& c
     actuals.push_back(
         Actual{.is_named = false, .is_ref_pass = false, .key = {}, .node = Lnast_node::create_const("0"), .func_name = {}});
     for (const auto& a : args) {
-      actuals.push_back(Actual{.is_named = !a.key.empty(), .is_ref_pass = false, .key = a.key, .node = a.node, .func_name = {}});
+      actuals.push_back(Actual{.is_named    = !a.key.empty(),
+                               .is_ref_pass = false,
+                               .key         = a.key,
+                               .node        = a.node,
+                               .func_name   = {},
+                               .src_name    = a.src_name,
+                               .src_base    = a.src_base});
     }
-    if (signature_matches(cio, actuals, /*is_ctor_call=*/true)) {
+    if (signature_matches(cio, actuals)) {
       return fn;
+    }
+  }
+  // No overload accepts the arguments. With ONE `init` the call is held to the
+  // ordinary naming rules (qa.md Q31: `Typ2("hello", 44)` into `init(ref self,
+  // a, b)` must name its arguments): a committed bind reports the exact error,
+  // and a bind that succeeds (the probe rejected on kind/range) keeps the
+  // structural fallback.
+  if (span != nullptr && candidates.size() == 1) {
+    if (auto callee = lookup_callee(candidates.front()); callee && !callee->io_meta().inputs.empty()
+                                                          && callee->io_meta().inputs[0].name == "self") {
+      std::vector<Actual> actuals;
+      actuals.push_back(
+          Actual{.is_named = false, .is_ref_pass = false, .key = {}, .node = Lnast_node::create_const("0"), .func_name = {}});
+      for (const auto& a : args) {
+        actuals.push_back(Actual{.is_named    = !a.key.empty(),
+                                 .is_ref_pass = false,
+                                 .key         = a.key,
+                                 .node        = a.node,
+                                 .func_name   = {},
+                                 .src_name    = a.src_name,
+                                 .src_base    = a.src_base});
+      }
+      std::vector<Lnast_node>                         param_val;
+      std::vector<bool>                               param_set;
+      std::vector<std::string>                        param_func;
+      std::vector<Lnast_node>                         vararg_pos;
+      std::vector<std::pair<std::string, Lnast_node>> vararg_named;
+      bind_call_actuals(callee->io_meta(),
+                        actuals,
+                        /*commit=*/true,
+                        label,
+                        *span,
+                        param_val,
+                        param_set,
+                        param_func,
+                        vararg_pos,
+                        vararg_named);
     }
   }
   return {};
@@ -10318,8 +14581,10 @@ void uPass_runner::splice_init_call(const std::string& receiver, const std::stri
   flush_deferred_emits();
   lm->push_source(s, "", 0);
   ctor_call_pending_ = true;  // the next try_inline entry is the ctor call
+  ctor_call_args_    = args;
   process_lnast();
   ctor_call_pending_ = false;
+  ctor_call_args_.clear();
   flush_deferred_emits();
   lm->pop_source();
 
@@ -10332,7 +14597,8 @@ bool uPass_runner::try_init_construction() {
   // Cursor on a 2-child `store(x, V)`. Only the DECLARATION store may
   // construct (init runs once); pending_ctor_store_ was armed by the
   // preceding `declare`.
-  const auto saved = lm->save_cursor();
+  const auto saved     = lm->save_cursor();
+  const auto ctor_span = lm->current_span();
   if (!lm->move_to_child() || !Lnast_ntype::is_ref(lm->get_raw_ntype())) {
     lm->restore_cursor(saved);
     return false;
@@ -10443,7 +14709,7 @@ bool uPass_runner::try_init_construction() {
     return false;  // unresolved value — structural fallback
   }
 
-  const auto chosen = select_init_overload(candidates, args);
+  const auto chosen = select_init_overload(candidates, args, &ctor_span, tn);
   if (chosen.empty()) {
     return false;  // no overload fits (e.g. nil decl without a 0-arg init) — structural
   }
@@ -10457,7 +14723,8 @@ bool uPass_runner::try_construct_call() {
   // declined. When NAME is a type bundle carrying `init`, this is the
   // explicit construction form `x = T(args…)` (07-typesystem.md): bind dst
   // to T's defaults and splice init with dst as the receiver.
-  const auto saved = lm->save_cursor();
+  const auto saved     = lm->save_cursor();
+  const auto ctor_span = lm->current_span();
   if (!lm->move_to_child() || !Lnast_ntype::is_ref(lm->get_raw_ntype())) {
     lm->restore_cursor(saved);
     return false;
@@ -10477,13 +14744,18 @@ bool uPass_runner::try_construct_call() {
     lm->restore_cursor(saved);
     return false;
   }
-  // Collect args verbatim (refs/consts positional, store(key,val) named).
+  // Collect args verbatim (refs/consts positional, store(key,val) named). A
+  // positional bare variable keeps its source spelling: an explicit `T(...)`
+  // call follows naming exception 2, so `T(c, b, a)` binds init's `a`/`b`/`c`
+  // by name.
   std::vector<Ctor_arg> args;
   bool                  shape_ok = true;
   while (lm->move_to_sibling()) {
     const auto t = lm->get_raw_ntype();
     if (Lnast_ntype::is_ref(t) || Lnast_ntype::is_const(t)) {
-      args.push_back(Ctor_arg{.key = {}, .node = lm->current_node()});
+      auto [src_name, src_base] = source_var_at_cursor();
+      args.push_back(
+          Ctor_arg{.key = {}, .node = lm->current_node(), .src_name = std::move(src_name), .src_base = std::move(src_base)});
     } else if (Lnast_ntype::is_store(t)) {
       const auto here = lm->save_cursor();
       if (!lm->move_to_child()) {
@@ -10507,7 +14779,7 @@ bool uPass_runner::try_construct_call() {
   if (!shape_ok) {
     return false;
   }
-  const auto chosen = select_init_overload(candidates, args);
+  const auto chosen = select_init_overload(candidates, args, &ctor_span, tn);
   if (chosen.empty()) {
     return false;
   }
@@ -10529,10 +14801,14 @@ void uPass_runner::emit_inline_tuple_pick(const std::string& dst, const std::str
   s->add_child(root, Lnast_node::create_ref(src));
   s->add_child(root, Lnast_node::create_const(index_text));
   flush_deferred_emits();
+  // A position the compiler picked (a loop's `t[k]`, an `in` operand), never a
+  // user index: an index-range array is not rebased.
+  const bool outer_physical = std::exchange(physical_indices_, true);
   lm->push_source(s, "", 0);
   process_lnast();  // tuple_get dispatch → try_resolve_tuple_get (runtime) or constprop fold (comptime)
   flush_deferred_emits();
   lm->pop_source();
+  physical_indices_ = outer_physical;
 }
 
 void uPass_runner::emit_inline_tuple_store(const std::string& dst, const std::string& index_text, const std::string& value) {
@@ -10547,10 +14823,12 @@ void uPass_runner::emit_inline_tuple_store(const std::string& dst, const std::st
   s->add_child(root, Lnast_node::create_const(index_text));
   s->add_child(root, Lnast_node::create_ref(value));
   flush_deferred_emits();
+  const bool outer_physical = std::exchange(physical_indices_, true);  // see emit_inline_tuple_pick
   lm->push_source(s, "", 0);
   process_lnast();  // store dispatch → constprop tuple_set / write-back into dst's slot
   flush_deferred_emits();
   lm->pop_source();
+  physical_indices_ = outer_physical;
 }
 
 void uPass_runner::emit_inline_declare_typed(const std::string& name, const std::optional<Dlop>& max,
@@ -10574,6 +14852,47 @@ void uPass_runner::emit_inline_declare_typed(const std::string& name, const std:
   lm->pop_source();
 }
 
+void uPass_runner::emit_inline_declare_array(const std::string& name, const Array_port_shape& shape) {
+  if (!scratch_forest_) {
+    scratch_forest_ = hhds::Forest::create();
+  }
+  auto body = scratch_forest_->create_tree_temp("inl-decl");
+  auto s    = std::make_shared<Lnast>(body, "inl-decl");
+  auto root = s->set_root(Lnast_ntype::create_declare());
+  stamp_scratch_srcid(s, root);
+  s->add_child(root, Lnast_node::create_ref(name));
+  // comp_type_array(... elem ..., [dim]) nests outer dim first, like
+  // prp2lnast's `[2][4]u8`: the outer node's first child is the inner array.
+  std::vector<int64_t> dims{shape.lanes};
+  dims.insert(dims.end(), shape.inner_dims.begin(), shape.inner_dims.end());
+  std::vector<Lnast_nid> levels;
+  auto                   parent = root;
+  for (size_t l = 0; l < dims.size(); ++l) {
+    parent = s->add_child(parent, Lnast_ntype::create_comp_type_array());
+    levels.push_back(parent);
+  }
+  if (shape.elem_bool) {
+    s->add_child(parent, Lnast_ntype::create_prim_type_bool());
+  } else {
+    auto pt = s->add_child(parent, Lnast_ntype::create_prim_type_int());
+    s->add_child(pt, Lnast_node::create_const(std::string(shape.elem_max.to_pyrope())));
+    s->add_child(pt, Lnast_node::create_const(std::string(shape.elem_min.to_pyrope())));
+  }
+  for (size_t l = dims.size(); l-- > 0;) {
+    s->add_child(levels[l], Lnast_node::create_const(std::format("[{}]", dims[l])));
+  }
+  s->add_child(root, Lnast_node::create_const("mut"));
+  flush_deferred_emits();
+  lm->push_source(s, "", 0);
+  // A scalar-element array, never a tuple to split: the detupler must not park
+  // this declare for a replay (the scratch tree is gone by then).
+  detuple_synthetic_ = true;
+  process_lnast();  // declare dispatch → bakes the array shape (bake_decl_pre_step) and emits it for tolg
+  detuple_synthetic_ = false;
+  flush_deferred_emits();
+  lm->pop_source();
+}
+
 std::string uPass_runner::loop_inst_suffix() const {
   std::string s;
   for (const auto ordinal : loop_iter_ordinals_) {
@@ -10588,7 +14907,8 @@ bool uPass_runner::walk_loop_iteration(const std::function<void()>& emit_binds, 
     return false;  // fuel / depth guard — a non-terminating comptime loop bails (like recursion)
   }
   --inline_budget_;
-  const uint32_t iter_salt = ++inline_seq_;
+  const uint32_t iter_salt  = ++inline_seq_;
+  const auto     baked_mark = loop_baked_refs_.size();
 
   flush_deferred_emits();                            // flush outer parked writes before the iteration frame
   lm->push_iteration(iter_salt);                     // fresh salt → fresh tmp namespace + block-scope id; cursor + tag kept
@@ -10626,6 +14946,14 @@ bool uPass_runner::walk_loop_iteration(const std::function<void()>& emit_binds, 
   dispatch_to_passes(&upass::uPass::process_stmts_post);
   symbol_table_.leave_scope();  // Pop after stmts_post (see process_stmts)
   lm->pop_source();             // restore cursor (body stmts), outer salt/stack/tag
+  // The iteration is emitted: un-fold the bounds it baked into the shared body
+  // so the next iteration bakes its own (see loop_baked_refs_).
+  while (loop_baked_refs_.size() > baked_mark) {
+    const auto& b = loop_baked_refs_.back();
+    b.ln->set_name(b.nid, b.ref);
+    b.ln->set_type(b.nid, Lnast_ntype::create_ref());
+    loop_baked_refs_.pop_back();
+  }
   return true;
 }
 
@@ -10755,6 +15083,15 @@ void uPass_runner::unroll_for() {
   // The shape comes from constprop's tuple, or — for `for x in args` inside a
   // comb — from the gathered var-arg entries (which aren't a constprop tuple).
   std::optional<std::vector<std::pair<std::string, bool>>> shape = try_tuple_shape(iterable);
+  // A specialized array input has a concrete extent in io_meta, but no
+  // constprop tuple: its elements are slices of the packed runtime port.
+  const auto*                                              array_port = lm->get_lnast()->io_meta().find(iterable);
+  if (!shape && array_port && array_port->array_size > 0) {
+    shape.emplace();
+    for (int64_t i = 0; i < array_port->array_size; ++i) {
+      shape->emplace_back(std::to_string(i), true);
+    }
+  }
   if (!shape) {
     if (auto vit = vararg_bindings_.find(iterable); vit != vararg_bindings_.end()) {
       std::vector<std::pair<std::string, bool>> vshape;
@@ -10799,6 +15136,12 @@ void uPass_runner::unroll_for() {
             break;
           }
         }
+      }
+      if (!elem_dt && array_port && array_port->array_size > 0 && !array_port->elem_bool) {
+        upass::uPass::Decl_scalar_type dt;
+        dt.range_max = upass::max_from_bits(array_port->elem_bits, array_port->elem_signed);
+        dt.range_min = upass::min_from_bits(array_port->elem_bits, array_port->elem_signed);
+        elem_dt      = dt;
       }
       const bool ok = walk_loop_iteration(
           [&]() {
@@ -10939,6 +15282,7 @@ void uPass_runner::unroll_while() {
     if (++loop_iters > kMaxLoopUnroll) {
       loop_break_hit_ = saved_break;
       loop_fail(while_span(),
+                "type",
                 "loop-unbounded",
                 "comptime loop did not terminate within the unroll limit (it may never converge)",
                 "ensure the loop is comptime-bounded and its exit condition is eventually reached");
@@ -10967,6 +15311,7 @@ void uPass_runner::unroll_while() {
         loop_break_hit_ = saved_break;
         lm->restore_cursor(while_bm);  // try_fold_ref above may have moved the cursor; reset for the span
         loop_fail(while_span(),
+                  "type",
                   "loop-no-progress",
                   "comptime loop cannot terminate: its condition variables repeat with no progress toward the exit",
                   "update a condition variable each iteration so the loop can exit (e.g. add `c -= 1`)");
@@ -10984,6 +15329,7 @@ void uPass_runner::unroll_while() {
       loop_break_hit_ = saved_break;
       lm->restore_cursor(while_bm);
       loop_fail(while_span(),
+                "type",
                 "loop-unbounded",
                 "comptime loop did not terminate within the unroll budget (it may never converge)",
                 "ensure the loop is comptime-bounded and its exit condition is eventually reached");
@@ -11019,7 +15365,23 @@ void uPass_runner::run() {
     lsp_decl_hints().clear();  // LSP-side declare hints are per-run state too
   }
   const_parse_cache_.clear();
+  in_place_fold_cache_.clear();
+  any_index_mapped_   = false;
+  index_dim_reported_ = false;
+  physical_indices_   = false;
+  open_fill_arrays_.clear();
+  split_tuple_leaves_.clear();
   symbol_table_.tget_origin.clear();
+  symbol_table_.origin_poisoned.clear();
+  symbol_table_.typed_fields.clear();
+  symbol_table_.sub_output_ranges.clear();
+  symbol_table_.single_output_port.clear();
+  symbol_table_.call_result_label.clear();
+  symbol_table_.unchecked_typed.clear();
+  symbol_table_.wide_values.clear();
+  symbol_table_.instance_handles.clear();
+  symbol_table_.opaque_sub_outputs.clear();
+  symbol_table_.sub_output_names.clear();
   symbol_table_.nil_seeded.clear();
   symbol_table_.uninitialized.clear();
   symbol_table_.field_touched.clear();
@@ -11156,10 +15518,10 @@ void uPass_runner::run() {
     }
   }
 
-  // Step J — dest-walk finisher dispatch. Passes that want to inspect
-  // the freshly-built staging tree (verifier/assert cassert counts in
-  // the redesign) override walk_dest. Default no-op; today no pass
-  // uses this, but the hook is available for migration.
+  // Step J — dest-walk finisher dispatch. Passes that inspect or finish the
+  // freshly-built staging tree override walk_dest (default no-op): bitwidth
+  // writes the shape of each array its uses inferred (`mut a:[] = 0`) into
+  // the staged declaration.
   if (staging) {
     for (auto& entry : upasses) {
       entry.pass->walk_dest(staging);
@@ -11332,6 +15694,9 @@ void uPass_runner::dead_code_eliminate_staging() {
   absl::flat_hash_set<std::string_view> protected_names;
   for (const auto& e : io.inputs) {
     protected_names.insert(e.name);
+  }
+  for (const auto& name : default_value_names_) {
+    protected_names.insert(name);  // read only by a later inliner (todo 3g E)
   }
   for (const auto& e : io.outputs) {
     protected_names.insert(e.name);
@@ -11608,6 +15973,22 @@ std::string uPass_runner::detuple_text(const Lnast_nid& nid) const {
   return text;
 }
 
+// The detupled storage of an aggregate is its per-field leaf set, keyed by the
+// BASE name, while SSA re-versions the aggregate on a second whole-tuple write
+// (a typed `mut p:(..) = (a, w)` is declare-seed + init: `p` then
+// `p___ssa_1`). Every read or write of a versioned aggregate name resolves to
+// the base split; a name that is not (a version of) a split comes back as is.
+std::string uPass_runner::detuple_split_name(std::string_view var) const {
+  if (!detuple_splits_.contains(var)) {
+    if (const auto pos = var.find("___ssa_"); pos != std::string_view::npos) {
+      if (const auto base = var.substr(0, pos); detuple_splits_.contains(base)) {
+        return std::string(base);
+      }
+    }
+  }
+  return std::string(var);
+}
+
 std::optional<uPass_detuple_registry::Scalar_type> uPass_runner::detuple_scalar_type(std::string_view name) const {
   const auto bundle = symbol_table_.get_bundle(name);
   if (!bundle) {
@@ -11841,26 +16222,31 @@ bool uPass_runner::try_detuple_declare() {
         // its reset. Project per field; a ref that is not a recorded tuple
         // literal cannot be projected here, so decline the split and let the
         // ordinary aggregate machinery own (and loudly reject) it.
-        const Detuple_tuple_value* init_values = nullptr;
-        std::optional<Lnast_node>  broadcast_init;
+        std::vector<std::optional<Lnast_node>> field_inits(it->second.size());
+        std::optional<Lnast_node>              broadcast_init;
         if (!init.is_invalid()) {
           if (Lnast_ntype::is_ref(ln->get_type(init))) {
             const auto vit = detuple_tuple_values_.find(std::string(detuple_text(init)));
             if (vit == detuple_tuple_values_.end()) {
               return false;
             }
-            init_values = &vit->second;
-            if (!init_values->named && !init_values->positional.empty() && init_values->positional.size() != it->second.size()) {
-              detuple_error("tuple-assignment-shape",
-                            std::format("`{}` initializer has {} entries but type `{}` has {} fields",
-                                        var,
-                                        init_values->positional.size(),
-                                        ln->get_name(elem),
-                                        it->second.size()));
-              return true;
+            if (!detuple_project_init(var, vit->second, it->second, field_inits, ln->get_name(elem))) {
+              return true;  // reported
             }
           } else if (Lnast_ntype::is_const(ln->get_type(init))) {
             broadcast_init = Lnast_node::create_const(detuple_text(init));  // nil / scalar fill
+          }
+        }
+        // A register's reset value must fit each leaf's declared range, like
+        // a scalar `reg r:u4 = 20` (the reset was silently truncated).
+        if (mode_text == "reg" || mode_text.starts_with("reg ")) {
+          for (std::size_t i = 0; i < it->second.size(); ++i) {
+            const auto& leaf_type = it->second[i].type;
+            // A scalar fill (`= 0`) resets every leaf; only its range matters.
+            const auto& value     = broadcast_init && leaf_type.kind == upass::Kind::integer ? broadcast_init : field_inits[i];
+            if (value && !detuple_validate_scalar_store(var + "." + it->second[i].name, leaf_type, *value)) {
+              return true;  // reported
+            }
           }
         }
         // A scalar named tuple has no dimension: `memory` must stay false, or
@@ -11875,23 +16261,12 @@ bool uPass_runner::try_detuple_declare() {
         // leaves. Otherwise their reg/wire facts have no root to attach to.
         bake_decl_pre_step(/*is_declare=*/true);
         Detuple_split split{.fields = it->second, .mode = mode_text, .memory = is_array, .dimension = dim_node};
+        split.whole_bound = !init.is_invalid();  // the declaration's own initializer is the construction
         detuple_splits_.insert_or_assign(var, split);
         for (std::size_t i = 0; i < split.fields.size(); ++i) {
           const auto&               field      = split.fields[i];
           const auto                leaf       = var + "." + field.name;
-          std::optional<Lnast_node> field_init = broadcast_init;
-          if (init_values != nullptr) {
-            if (init_values->named) {
-              for (const auto& [key, value] : init_values->fields) {
-                if (key == field.name) {
-                  field_init = value;
-                  break;
-                }
-              }
-            } else if (i < init_values->positional.size()) {
-              field_init = init_values->positional[i];
-            }
-          }
+          std::optional<Lnast_node> field_init = broadcast_init ? broadcast_init : field_inits[i];
           detuple_emit_declare(leaf,
                                field.type,
                                mode_text,
@@ -11906,9 +16281,22 @@ bool uPass_runner::try_detuple_declare() {
   // Parser tuple declarations are emitted as an untyped/array-looking
   // declaration followed immediately by type_spec + shape nodes. Delay only
   // these ambiguous hardware declarations; a scalar/ordinary array is replayed
-  // unchanged as soon as the next non-shape statement arrives.
+  // unchanged as soon as the next non-shape statement arrives. A TYPED `const`
+  // tuple (its declaration is followed by the per-field `type_spec`s) binds its
+  // possibly runtime initializer once, like a `mut`, and is split the same way:
+  // otherwise a positional or call-result initializer never reaches the named
+  // fields. An untyped `const` keeps its ordinary binding.
+  const auto typed_tuple_follows = [&]() {
+    const auto next = ln->get_sibling_next(node);
+    if (next.is_invalid() || !Lnast_ntype::is_type_spec(ln->get_type(next))) {
+      return false;
+    }
+    const auto target = ln->get_first_child(next);
+    return !target.is_invalid() && Lnast_ntype::is_ref(ln->get_type(target)) && detuple_text(target).starts_with(var + ".");
+  };
   const bool hardware_mode = mode_text == "wire" || mode_text.starts_with("wire ") || mode_text == "reg"
-                             || mode_text.starts_with("reg ") || mode_text == "mut";
+                             || mode_text.starts_with("reg ") || mode_text == "mut"
+                             || (mode_text == "const" && typed_tuple_follows());
   const bool maybe_tuple
       = Lnast_ntype::is_prim_type_none(ln->get_type(type)) || Lnast_ntype::is_comp_type_array(ln->get_type(type));
   if (!hardware_mode || !maybe_tuple) {
@@ -12003,6 +16391,7 @@ bool uPass_runner::try_detuple_tuple_add() {
     if (Lnast_ntype::is_ref(ct)) {
       const std::string name{detuple_text(child)};
       tuple.positional.emplace_back(Lnast_node::create_ref(name));
+      tuple.positional_src.emplace_back(ln->get_name(child));
       if (const auto type = detuple_scalar_type(name)) {
         all_untyped_refs = false;
         // A typed tuple entry's field label stays source-spelled, while the
@@ -12019,6 +16408,7 @@ bool uPass_runner::try_detuple_tuple_add() {
       }
     } else if (Lnast_ntype::is_const(ct)) {
       tuple.positional.emplace_back(Lnast_node::create_const(detuple_text(child)));
+      tuple.positional_src.emplace_back();
       all_typed_refs  = false;
       layout_complete = false;
     } else if (Lnast_ntype::is_store(ct)) {
@@ -12155,6 +16545,219 @@ void uPass_runner::detuple_flatten_tuple_value(const std::string& rhs, const std
   }
 }
 
+bool uPass_runner::detuple_layout_is_flat(const uPass_detuple_registry::Layout& fields) {
+  return !fields.empty()
+         && std::all_of(fields.begin(), fields.end(), [](const auto& f) { return f.name.find('.') == std::string::npos; });
+}
+
+// A typed tuple constructed with UNNAMED values binds them like the arguments of
+// a call (06-functions.md "Argument naming", qa.md Q35): a bare variable whose
+// name is a field, the lone field, or a value whose type is unique among ALL the
+// fields; anything else must be named. `out` holds the fields already bound by
+// name; the unnamed values fill the rest. False when reported.
+bool uPass_runner::detuple_bind_unnamed_values(std::string_view var, std::string_view type_name, const Detuple_tuple_value& value,
+                                               const uPass_detuple_registry::Layout& fields,
+                                               std::vector<std::optional<Lnast_node>>& out) {
+  if (value.positional_src.size() != value.positional.size()) {
+    return true;
+  }
+  std::vector<bool> taken(fields.size(), false);
+  for (std::size_t i = 0; i < fields.size(); ++i) {
+    taken[i] = out[i].has_value();  // bound by name
+  }
+  const auto kind_of = [&](const Lnast_node& entry) -> upass::Kind {
+    // The same kind the call binder uses for a positional actual.
+    switch (actual_node_kind(entry)) {
+      case Io_kind::integer: return upass::Kind::integer;
+      case Io_kind::boolean: return upass::Kind::boolean;
+      default              : return upass::Kind::unknown;
+    }
+  };
+  for (std::size_t k = 0; k < value.positional.size(); ++k) {
+    std::optional<std::size_t> slot;
+    if (const auto& src = value.positional_src[k]; !src.empty()) {
+      for (std::size_t i = 0; i < fields.size(); ++i) {
+        if (!taken[i] && fields[i].name == src) {
+          slot = i;  // exception 2: a bare variable spelling a field
+          break;
+        }
+      }
+    }
+    if (!slot && fields.size() == 1 && !taken[0]) {
+      slot = 0;  // exception 1: a single field
+    }
+    if (!slot) {
+      if (const auto want = kind_of(value.positional[k]); want != upass::Kind::unknown) {
+        std::size_t count = 0;  // exception 3: the value's type is unique among ALL the fields
+        std::size_t match = 0;
+        for (std::size_t i = 0; i < fields.size(); ++i) {
+          if (fields[i].type.kind == want) {
+            match = i;
+            ++count;
+          }
+        }
+        if (count == 1 && !taken[match]) {
+          slot = match;
+        }
+      }
+    }
+    if (!slot) {
+      detuple_error("tuple-unnamed-field",
+                    std::format("an unnamed value is ambiguous in the construction of `{}`: the value must be named "
+                                "(`field=value`)",
+                                type_name.empty() ? std::string(var) : std::string(type_name)),
+                    "name the field, pass a variable whose name matches it, or give a value whose type is unique among all "
+                    "the fields");
+      return false;
+    }
+    taken[*slot] = true;
+    out[*slot]   = value.positional[k];
+  }
+  return true;
+}
+
+bool uPass_runner::detuple_project_init(std::string_view var, const Detuple_tuple_value& init,
+                                        const uPass_detuple_registry::Layout& fields, std::vector<std::optional<Lnast_node>>& out,
+                                        std::string_view type_name) {
+  out.assign(fields.size(), std::nullopt);
+  // Does `path` name a leaf, or a nested field with leaves below it?
+  auto names_field = [&](const std::string& path) {
+    return std::any_of(fields.begin(), fields.end(), [&](const auto& field) {
+      return field.name == path
+             || (field.name.starts_with(path) && field.name.size() > path.size() && field.name[path.size()] == '.');
+    });
+  };
+  // One tuple level: `prefix` is the dotted path of the (sub)tuple `value`
+  // initializes, its children are the distinct next path components of the
+  // leaves below it, in layout order.
+  std::function<bool(const Detuple_tuple_value&, const std::string&, int)> project;
+  project = [&](const Detuple_tuple_value& value, const std::string& prefix, int depth) -> bool {
+    std::vector<std::string> children;
+    std::vector<std::size_t> leaves;  // the layout leaves below `prefix`, in order
+    for (std::size_t i = 0; i < fields.size(); ++i) {
+      if (!fields[i].name.starts_with(prefix)) {
+        continue;
+      }
+      leaves.push_back(i);
+      const auto rest  = std::string_view(fields[i].name).substr(prefix.size());
+      auto       child = std::string(rest.substr(0, rest.find('.')));
+      if (std::find(children.begin(), children.end(), child) == children.end()) {
+        children.push_back(std::move(child));
+      }
+    }
+    auto bind = [&](const std::string& path, const Lnast_node& entry) -> bool {
+      for (std::size_t i = 0; i < fields.size(); ++i) {
+        if (fields[i].name == path) {
+          out[i] = entry;
+          return true;
+        }
+      }
+      // A nested field: its leaves come from a nested tuple literal, or from
+      // the leaves of an already split tuple variable. `nil` leaves them
+      // without a value, like a whole `= nil`.
+      if (entry.is_const() && (entry.get_name() == "nil" || entry.get_name() == "0sb?")) {
+        return true;
+      }
+      if (entry.is_ref()) {
+        const auto src = detuple_split_name(entry.get_name());
+        if (const auto sit = detuple_splits_.find(src); sit != detuple_splits_.end() && !sit->second.memory) {
+          // The variable must have exactly the nested field's leaves: a
+          // missing one would leave a leaf silently without a value.
+          const auto  sub_prefix = path + ".";
+          std::size_t bound      = 0;
+          bool        all_found  = true;
+          for (std::size_t i = 0; i < fields.size(); ++i) {
+            if (!fields[i].name.starts_with(sub_prefix)) {
+              continue;
+            }
+            const auto sub = fields[i].name.substr(sub_prefix.size());
+            if (std::none_of(sit->second.fields.begin(), sit->second.fields.end(), [&](const auto& f) { return f.name == sub; })) {
+              all_found = false;
+              continue;
+            }
+            out[i] = Lnast_node::create_ref(src + "." + sub);
+            ++bound;
+          }
+          if (all_found && bound == sit->second.fields.size()) {
+            return true;
+          }
+          detuple_error(
+              "tuple-assignment-shape",
+              std::format("`{}` initializer gives nested tuple field `{}` the tuple `{}` of another shape", var, path, src));
+          return false;
+        }
+      }
+      const auto nested = entry.is_ref() ? detuple_tuple_values_.find(std::string(entry.get_name())) : detuple_tuple_values_.end();
+      if (nested == detuple_tuple_values_.end() || depth > 8) {
+        detuple_error("tuple-assignment-shape",
+                      std::format("`{}` initializer gives nested tuple field `{}` a value that is not a tuple literal", var, path));
+        return false;
+      }
+      return project(nested->second, path + ".", depth + 1);
+    };
+    if (value.named) {
+      // A key names a field of this level, or, dotted (`n.x = 5`, docs
+      // 03-bundle "Dotted Field Expansion"), a field below it.
+      for (const auto& [key, entry] : value.fields) {
+        if (!names_field(prefix + key)) {
+          detuple_error("tuple-assignment-shape", std::format("`{}` initializer names unknown field `{}{}`", var, prefix, key));
+          return false;
+        }
+        if (!bind(prefix + key, entry)) {
+          return false;
+        }
+      }
+      if (value.positional.empty()) {
+        return true;
+      }
+    }
+    if (value.positional.empty()) {
+      return true;
+    }
+    // A FLAT typed tuple constructed with unnamed values binds them like the
+    // arguments of a call (see detuple_bind_unnamed_values).
+    if (prefix.empty() && depth == 0 && detuple_layout_is_flat(fields)) {
+      return detuple_bind_unnamed_values(var, type_name, value, fields, out);
+    }
+    // Positional: flat, one scalar per leaf below this level, or one entry per
+    // field of this level (a nested field takes a nested tuple). The two
+    // readings meet only when every nested field has one leaf; scalars there
+    // read flat, as they did before nested initializers existed.
+    const bool all_scalar = std::none_of(value.positional.begin(), value.positional.end(), [&](const Lnast_node& entry) {
+      return entry.is_ref()
+             && (detuple_tuple_values_.contains(std::string(entry.get_name()))
+                 || detuple_splits_.contains(detuple_split_name(entry.get_name())));
+    });
+    if (all_scalar && value.positional.size() == leaves.size()) {
+      for (std::size_t i = 0; i < leaves.size(); ++i) {
+        out[leaves[i]] = value.positional[i];
+      }
+      return true;
+    }
+    if (value.positional.size() == children.size()) {
+      for (std::size_t i = 0; i < children.size(); ++i) {
+        if (!bind(prefix + children[i], value.positional[i])) {
+          return false;
+        }
+      }
+      return true;
+    }
+    std::string what;
+    if (!prefix.empty()) {
+      what = std::format("`{}`", prefix.substr(0, prefix.size() - 1));
+    } else if (!type_name.empty()) {
+      what = std::format("type `{}`", type_name);
+    } else {
+      what = "the tuple";
+    }
+    detuple_error(
+        "tuple-assignment-shape",
+        std::format("`{}` initializer has {} entries but {} has {} fields", var, value.positional.size(), what, children.size()));
+    return false;
+  };
+  return project(init, "", 0);
+}
+
 void uPass_runner::detuple_publish_named_type(std::string_view name, std::string_view rhs) {
   if (detuple_registry_ == nullptr) {
     return;
@@ -12218,55 +16821,36 @@ std::string uPass_runner::detuple_registry_key(std::string_view type_name) const
 
 void uPass_runner::detuple_commit_pending_split(const Detuple_pending_decl& pending) {
   Detuple_split split{.fields = pending.fields, .mode = pending.mode, .memory = false};
+  split.whole_bound = pending.init_ref.has_value();  // the declaration's own initializer is the construction
   detuple_splits_.insert_or_assign(pending.name, split);
 
-  const Detuple_tuple_value* init_values = nullptr;
-  if (pending.init_ref) {
-    if (const auto it = detuple_tuple_values_.find(*pending.init_ref); it != detuple_tuple_values_.end()) {
-      init_values = &it->second;
-    }
-  }
-  auto field_exists = [&](std::string_view name) {
-    return std::any_of(split.fields.begin(), split.fields.end(), [&](const auto& field) { return field.name == name; });
-  };
   // The initializer's SHAPE must match the declared layout. Extra entries used
   // to be silently discarded (a positional `(20, 3, 7)` reset for a two-field
   // reg dropped the 7 from the netlist); the deleted whole-tree pass refused
-  // the split on any arity mismatch, keeping the aggregate error loud.
-  if (init_values != nullptr) {
-    if (!init_values->named && !init_values->positional.empty() && init_values->positional.size() != split.fields.size()) {
-      detuple_error("tuple-assignment-shape",
-                    std::format("`{}` initializer has {} entries but the tuple has {} fields",
-                                pending.name,
-                                init_values->positional.size(),
-                                split.fields.size()));
-      return;
+  // the split on any arity mismatch, keeping the aggregate error loud. A
+  // nested field takes its leaves from the nested literal.
+  std::vector<std::optional<Lnast_node>> inits(split.fields.size());
+  if (pending.init_ref) {
+    if (const auto it = detuple_tuple_values_.find(*pending.init_ref); it != detuple_tuple_values_.end()) {
+      if (!detuple_project_init(pending.name, it->second, split.fields, inits)) {
+        return;  // reported
+      }
     }
-    for (const auto& [key, value] : init_values->fields) {
-      (void)value;
-      if (!field_exists(key)) {
-        detuple_error("tuple-assignment-shape", std::format("`{}` initializer names unknown field `{}`", pending.name, key));
-        return;
+  }
+  const bool is_reg = pending.mode == "reg" || pending.mode.starts_with("reg ");
+  if (is_reg) {
+    // A register's reset value must fit each leaf's declared range, like a
+    // scalar `reg r:u4 = 20` (the reset was silently truncated).
+    for (std::size_t i = 0; i < split.fields.size(); ++i) {
+      if (inits[i] && !detuple_validate_scalar_store(pending.name + "." + split.fields[i].name, split.fields[i].type, *inits[i])) {
+        return;  // reported
       }
     }
   }
   for (std::size_t i = 0; i < split.fields.size(); ++i) {
-    const auto&               field = split.fields[i];
-    std::optional<Lnast_node> init;
-    if (init_values != nullptr) {
-      if (init_values->named) {
-        for (const auto& [key, value] : init_values->fields) {
-          if (key == field.name) {
-            init = value;
-            break;
-          }
-        }
-      } else if (i < init_values->positional.size()) {
-        init = init_values->positional[i];
-      }
-    }
-    const bool is_reg = pending.mode == "reg" || pending.mode.starts_with("reg ");
-    const auto leaf   = pending.name + "." + field.name;
+    const auto&                      field = split.fields[i];
+    const std::optional<Lnast_node>& init  = inits[i];
+    const auto                       leaf  = pending.name + "." + field.name;
     detuple_emit_declare(leaf, field.type, pending.mode, is_reg && init ? &*init : nullptr);
     // A mut tuple's initializer is an ordinary scalar assignment, not a
     // register reset. Running it through the shared pass dispatch creates
@@ -12292,22 +16876,14 @@ bool uPass_runner::try_detuple_store() {
   if (lhs.is_invalid() || !Lnast_ntype::is_ref(ln->get_type(lhs))) {
     return false;
   }
-  std::string var{detuple_text(lhs)};
   // SSA re-versions the AGGREGATE name on a second whole-tuple write
-  // (`control` -> `control___ssa_1`), but the detupled storage is the per-field
-  // leaf set, keyed by the BASE name. Without stripping the suffix the second
-  // whole-tuple assignment missed detuple_splits_ entirely and returned false,
-  // so the SHAPE CHECK below never ran: `control = (op=…, valid=…, extra=…)`
-  // silently accepted the unknown field -- and equally silently accepted a
-  // MISSING one -- while the byte-identical program at FILE scope, where
-  // nothing re-versions, reported both correctly.
-  if (!detuple_splits_.contains(var)) {
-    if (const auto pos = var.find("___ssa_"); pos != std::string::npos) {
-      if (std::string base = var.substr(0, pos); detuple_splits_.contains(base)) {
-        var = std::move(base);
-      }
-    }
-  }
+  // (`control` -> `control___ssa_1`). Without mapping it back to the base split
+  // the second whole-tuple assignment missed detuple_splits_ entirely and
+  // returned false, so the SHAPE CHECK below never ran: `control = (op=…,
+  // valid=…, extra=…)` silently accepted the unknown field -- and equally
+  // silently accepted a MISSING one -- while the byte-identical program at FILE
+  // scope, where nothing re-versions, reported both correctly.
+  std::string var = detuple_split_name(detuple_text(lhs));
   std::vector<Lnast_node> rest;
   for (auto child = ln->get_sibling_next(lhs); child.is_valid(); child = ln->get_sibling_next(child)) {
     if (Lnast_ntype::is_ref(ln->get_type(child))) {
@@ -12412,7 +16988,7 @@ bool uPass_runner::try_detuple_store() {
   }
 
   if (rest.size() == 1 && rest[0].is_ref()) {
-    const std::string rhs{rest[0].get_name()};
+    const std::string rhs = detuple_split_name(rest[0].get_name());
     if (const auto values = detuple_tuple_values_.find(rhs); values != detuple_tuple_values_.end()) {
       // Reject a SHAPE mismatch before emitting anything: extra positional
       // entries were silently discarded (netlist-proven truncation), and an
@@ -12456,6 +17032,35 @@ bool uPass_runner::try_detuple_store() {
           return true;
         }
       }
+      // The first whole-tuple store of a flat typed tuple is its CONSTRUCTION:
+      // the unnamed values bind like call arguments (qa.md Q35).
+      const bool constructing = !split_it->second.whole_bound;
+      split_it->second.whole_bound = true;
+      if (constructing && !values->second.positional.empty() && detuple_layout_is_flat(split.fields)
+          && !(values->second.named && values->second.positional.size() + values->second.fields.size() > split.fields.size())) {
+        std::vector<std::optional<Lnast_node>> bound(split.fields.size());
+        for (const auto& [key, node_value] : rhs_fields) {
+          for (std::size_t i = 0; i < split.fields.size(); ++i) {
+            if (split.fields[i].name == key) {
+              bound[i] = node_value;
+            }
+          }
+        }
+        if (!detuple_bind_unnamed_values(var, {}, values->second, split.fields, bound)) {
+          return true;  // reported
+        }
+        for (std::size_t i = 0; i < split.fields.size(); ++i) {
+          if (!bound[i]) {
+            detuple_error("tuple-assignment-shape",
+                          std::format("tuple assignment to `{}` does not provide field `{}`", var, split.fields[i].name));
+            return true;
+          }
+          const auto leaf_name = var + "." + split.fields[i].name;
+          (void)detuple_validate_scalar_store(leaf_name, split.fields[i].type, *bound[i]);
+          detuple_emit_store(leaf_name, {*bound[i]});
+        }
+        return true;
+      }
       for (std::size_t i = 0; i < split.fields.size(); ++i) {
         const auto&               field = split.fields[i];
         std::optional<Lnast_node> value;
@@ -12481,6 +17086,12 @@ bool uPass_runner::try_detuple_store() {
       return true;
     }
     if (const auto rhs_split = detuple_splits_.find(rhs); rhs_split != detuple_splits_.end()) {
+      if (rhs == var && rest[0].get_name() != detuple_text(lhs)) {
+        // An SSA carry between two versions of the same aggregate
+        // (`p = p___ssa_1`): both name the same leaves, which the versioned
+        // write already wrote. Not a user self-assignment (`p = p` still is).
+        return true;
+      }
       for (const auto& field : split.fields) {
         if (!std::any_of(rhs_split->second.fields.begin(), rhs_split->second.fields.end(), [&](const auto& rhs_field) {
               return rhs_field.name == field.name;
@@ -12503,6 +17114,19 @@ bool uPass_runner::try_detuple_store() {
       }
       return true;
     }
+  }
+
+  // A SCALAR assigned to a typed tuple with ONE field (`type Tone = (mut
+  // val:Signed = 0)`, `mut t:Tone = 5`) names no field: the single-field
+  // exception of the call naming rules (06-functions.md "Argument naming")
+  // binds it to that field. A function reference stays an error (below).
+  if (rest.size() == 1 && split.fields.size() == 1 && split.fields.front().name.find('.') == std::string::npos
+      && (rest[0].is_const() || (rest[0].is_ref() && !lookup_callee(rest[0].get_name())))) {
+    const auto& only      = split.fields.front();
+    const auto  leaf_name = var + "." + only.name;
+    (void)detuple_validate_scalar_store(leaf_name, only.type, rest[0]);
+    detuple_emit_store(leaf_name, {rest[0]});
+    return true;
   }
 
   // A bare FUNCTION REFERENCE assigned to a typed tuple (`mut y:T = my_init`)
@@ -12558,7 +17182,7 @@ bool uPass_runner::try_detuple_tuple_get() {
     }
   }
   const std::string dst_name{detuple_text(dst)};
-  const std::string src_name{detuple_text(src)};
+  const std::string src_name = detuple_split_name(detuple_text(src));
   const Lnast_node  key_node = !joined_key.empty()                      ? Lnast_node::create_const(joined_key)
                                : Lnast_ntype::is_ref(ln->get_type(key)) ? Lnast_node::create_ref(detuple_text(key))
                                                                         : Lnast_node::create_const(detuple_text(key));
@@ -12679,11 +17303,24 @@ bool uPass_runner::try_detuple_typespec() {
     parse_bound(min, scalar.min);
   }
   if (!scalar.valid()) {
-    // Keep unsupported leaves in a named type's shape so a sibling scalar
-    // cannot make a partially decoded nested field look complete.
     const auto binding = aliased_field ? nullptr : symbol_table_.get_bundle(root);
     if (binding && binding->get_mode() == upass::Mode::type_kind) {
-      detuple_predecl_fields_[root].push_back({std::string(text.substr(dot + 1)), scalar});
+      // A field typed by another NAMED tuple type (`type Outer = (inner:Inner,
+      // tag:u2)`): once `Inner` published its layout, the field contributes
+      // Inner's leaves under its own name (`inner.d`, `inner.v`).
+      const auto field = std::string(text.substr(dot + 1));
+      if (Lnast_ntype::is_ref(ln->get_type(type))) {
+        if (const auto nested = detuple_registry_->named_types.find(detuple_registry_key(detuple_text(type)));
+            nested != detuple_registry_->named_types.end()) {
+          for (const auto& leaf : nested->second) {
+            detuple_predecl_fields_[root].push_back({field + "." + leaf.name, leaf.type});
+          }
+          return false;
+        }
+      }
+      // Keep unsupported leaves in a named type's shape so a sibling scalar
+      // cannot make a partially decoded nested field look complete.
+      detuple_predecl_fields_[root].push_back({field, scalar});
     }
     return false;
   }
@@ -12775,6 +17412,12 @@ void uPass_runner::process_lnast() {
     // (the bundle mutation is the point — never dropped, classify not
     // consulted, matching the old process_verbatim path).
     case Ntype::Lnast_ntype_store:
+      if (lm->current_num_children() > 2 && (try_lower_array_index() || try_open_fill_access())) {
+        break;  // an element write, re-issued with zero-based indices
+      }
+      if (try_instance_handle_store()) {
+        break;
+      }
       if (try_detuple_store()) {
         break;
       }
@@ -12849,11 +17492,30 @@ void uPass_runner::process_lnast() {
               symbol_table_.pending_decl_facts.insert_or_assign(nkey, pd);
               symbol_table_.pending_keys_by_root[self_dst].push_back(std::move(nkey));
             }
+            if (const auto sit = symbol_table_.sub_output_ranges.find(rhs_name); sit != symbol_table_.sub_output_ranges.end()) {
+              auto ports = sit->second;  // by value: the insert below can rehash
+              symbol_table_.sub_output_ranges.insert_or_assign(self_dst, std::move(ports));
+            }
+            if (const auto so = symbol_table_.single_output_port.find(rhs_name); so != symbol_table_.single_output_port.end()) {
+              auto port = so->second;  // by value: the insert below can rehash
+              symbol_table_.single_output_port.insert_or_assign(self_dst, std::move(port));
+            }
+            if (const auto oo = symbol_table_.opaque_sub_outputs.find(rhs_name); oo != symbol_table_.opaque_sub_outputs.end()) {
+              auto ports = oo->second;  // by value: the insert below can rehash
+              symbol_table_.opaque_sub_outputs.insert_or_assign(self_dst, std::move(ports));
+            }
+            if (const auto on = symbol_table_.sub_output_names.find(rhs_name); on != symbol_table_.sub_output_names.end()) {
+              auto names = on->second;  // by value: the insert below can rehash
+              symbol_table_.sub_output_names.insert_or_assign(self_dst, std::move(names));
+            }
           }
           if (!simulation_body && !rhs_name.empty() && !symbol_table_.has_bundle(rhs_name)) {
             if (const auto function = lookup_callee(rhs_name); function && function->get_lambda_kind() == "comb") {
               symbol_table_.set(rhs_name, *Dlop::from_string(function->get_top_module_name()));
             }
+          }
+          if (simulation_body && !rhs_name.empty() && !self_dst.empty() && rhs_name != self_dst) {
+            bind_instance_handle(self_dst, rhs_name);
           }
           if (is_self) {
             livehd::diag::sink().emit(livehd::diag::Diagnostic{
@@ -12867,6 +17529,7 @@ void uPass_runner::process_lnast() {
             });
           }
         }
+        track_open_fill_array();
         // init constructor hook: the DECLARATION store of a typed var whose
         // type carries `init` (or whose value is a ref-self mod/comb) becomes
         // a defaults-bind + spliced constructor call instead of a structural
@@ -12877,7 +17540,13 @@ void uPass_runner::process_lnast() {
           // noting it first would advance stream_ssa_current_ to a phantom
           // definition every later read would dangle on.
           note_stream_ssa_definition();
+          const auto prior = runtime_tuple_prior_fields();
+          const auto fill  = array_init_prefill();
           process_drop_candidate_push(&upass::uPass::process_store, /*fold_all=*/false);
+          split_runtime_tuple_store(prior);
+          if (fill) {
+            emit_array_prefill(*fill);
+          }
         }
         // A file-level `type T=(a:A,b:B)` has now populated T's real
         // symbol-table bundle. Publish only its compact scalar layout for the
@@ -12896,9 +17565,10 @@ void uPass_runner::process_lnast() {
           lm->restore_cursor(saved);
           if (!type_name.empty() && !rhs_name.empty()) {
             detuple_publish_named_type(type_name, rhs_name);
+            inherit_alias_type(type_name, rhs_name);  // `const x = a` (ruling 38)
           }
         }
-      } else if (!try_stream_tuple_port_store()) {
+      } else if (!try_split_leaf_field_store() && !try_stream_tuple_port_store()) {
         Resolved_node rn;
         if (!resolve_node_operands(rn)) {
           rn.dst = std::make_shared<Bundle>("");
@@ -12912,7 +17582,15 @@ void uPass_runner::process_lnast() {
     // need (like type_spec/attr_set); emit verbatim, never drop. child0 is the
     // declared var (LHS, not folded); child1 the type subtree; child2 the mode
     // const; optional child3 an init value (folded if a ref).
-    case Ntype::Lnast_ntype_declare:
+    case Ntype::Lnast_ntype_declare: {
+      // An index-range / enum array dimension declares its plain extent.
+      const Index_dims_scope index_dims(*this);
+      if (!open_fill_arrays_.empty() && lm->has_child()) {
+        const auto here = lm->save_cursor();
+        lm->move_to_child();
+        open_fill_arrays_.erase(std::string(lm->current_text()));  // a new binding of the name
+        lm->restore_cursor(here);
+      }
       if (try_detuple_declare()) {
         break;
       }
@@ -13022,12 +17700,14 @@ void uPass_runner::process_lnast() {
         }
       }
       break;
+    }
 
-    // Bitwidth
-    A_OP(bit_and)
-    A_OP(bit_or)
-    A_OP(bit_not)
-    A_OP(bit_xor)
+    // Bitwidth. The bitwise ops also track which results are unsigned-typed,
+    // and `~` picks its typed form from that (user ruling 26).
+    case Ntype::Lnast_ntype_bit_and: dispatch_bitwise(PUSH_FN(bit_and)); break;
+    case Ntype::Lnast_ntype_bit_or : dispatch_bitwise(PUSH_FN(bit_or)); break;
+    case Ntype::Lnast_ntype_bit_xor: dispatch_bitwise(PUSH_FN(bit_xor)); break;
+    case Ntype::Lnast_ntype_bit_not: dispatch_bit_not(); break;
 
     // Bitwidth Insensitive Reduce
     A_OP(red_or)
@@ -13053,7 +17733,7 @@ void uPass_runner::process_lnast() {
 
     // Bit Manipulation
     A_OP(sext)
-    A_OP(set_mask)
+    case Ntype::Lnast_ntype_set_mask: process_bit_update(); break;
     case Ntype::Lnast_ntype_get_mask: process_bit_selection(); break;
     A_OP(concat)
 
@@ -13070,11 +17750,17 @@ void uPass_runner::process_lnast() {
     // body walk / epilogue). Otherwise fall back to the drop-candidate path so
     // constprop can fold built-in typecasts (int/uint/uNN/sNN) and cell-ops;
     // anything it declines stays un-folded and the statement is emitted.
-    case Ntype::Lnast_ntype_func_call:
+    case Ntype::Lnast_ntype_func_call: {
+      const auto cast = typed_cast_result();  // read before the call lowers or folds
       if (!try_lower_tuple_spread() && !try_lower_wrap_sat() && !try_lower_typecast() && !try_inline_func_call() && !try_construct_call()) {
         process_drop_candidate(&upass::uPass::process_func_call, /*fold_all=*/false);
+        note_opaque_output_read();  // a Sub call: its one output may be opaque
+      }
+      if (cast) {
+        typed_expr_types_[cast->first] = cast->second;
       }
       break;
+    }
     // does/has/case fold to a known boolean (or nil) → drop-candidate.
     A_OP(func_does)
     A_OP(func_equals)
@@ -13107,6 +17793,7 @@ void uPass_runner::process_lnast() {
         // todo_loop_cond_sub.md rule 13); until then it is unsupported.
         if (symbol_table_.uncertain_scope_count() > loop_uncertain_base_) {
           loop_fail(lm->get_lnast()->span_of(lm->get_current_nid()),
+                    "unsupported",
                     "loop-runtime-break",
                     "`break` under a runtime condition inside a comptime loop is not supported",
                     "make the break condition comptime, or restructure the loop so the exit is not data dependent");
@@ -13130,6 +17817,7 @@ void uPass_runner::process_lnast() {
         // todo_loop_cond_sub.md rule 13) can express it.
         if (symbol_table_.uncertain_scope_count() > loop_uncertain_base_) {
           loop_fail(lm->get_lnast()->span_of(lm->get_current_nid()),
+                    "unsupported",
                     "loop-runtime-continue",
                     "`continue` under a runtime condition inside a comptime loop is not supported",
                     "make the continue condition comptime, or restructure the loop so the skip is not data dependent");
@@ -13158,11 +17846,22 @@ void uPass_runner::process_lnast() {
     // A `tuple_get` on a registered var-arg with a comptime-known
     // index/name is rewritten to a direct copy (so a runtime var-arg pick
     // lowers); anything else folds/emits normally.
-    case Ntype::Lnast_ntype_tuple_get:
+    case Ntype::Lnast_ntype_tuple_get: {
+      if (try_lower_array_index() || try_open_fill_access()) {
+        break;  // re-issued with zero-based indices, or an entry of an inferred array no write reached
+      }
+      const auto [elem_dst, elem_bits] = array_elem_read_bits();  // before the node folds away
       if (!try_detuple_tuple_get() && !try_resolve_tuple_get()) {
         process_drop_candidate(&upass::uPass::process_tuple_get, /*fold_all=*/false);
+        note_opaque_output_read();
+      }
+      if (elem_bits != 0) {
+        typed_expr_types_[elem_dst] = Int_type{.bits = elem_bits};
+      } else if (!elem_dst.empty()) {
+        typed_expr_types_.erase(elem_dst);
       }
       break;
+    }
     // tuple_add is A_OP-shaped plus a runner post-step: after the dispatch
     // (constprop rebuilt dst's bundle + slot→ref map) backfill the runtime
     // slot carriers constprop drops for local/temp scalar field values — see
@@ -13423,6 +18122,7 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
   Dlop        elem_max;  // array declares: the ELEMENT envelope ([4][8]u8 → u8)
   Dlop        elem_min;
   Dlop        array_size;                        // outer declared extent (for static bounds checks)
+  bool        array_dim_pending = false;         // outer dim written but not folded yet (`[N]` before N is bound)
   Dlop        array_flat_size;                   // ALL dims multiplied ([4][8]u8 -> 32); invalid when any dim is unresolved
   upass::Kind elem_kind = upass::Kind::unknown;  // array declares: the element KIND (integer vs boolean)
   std::string type_name;
@@ -13439,6 +18139,119 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
   // the tuple-literal stamp in typecheck (`mut a:[] = nil` carries no entries).
   bool        tuple_type = false;
 
+  // 2f-type_bound — a bound may be a REF instead of a const when prp2lnast
+  // could not fold it (`:unsigned(bits=N)` with a GENERIC N, a scalar or an
+  // array element: the value only exists after specialization). Fold it here
+  // and rewrite the node IN PLACE, exactly as an `[N]` array dim is and for the
+  // same reason: the declare is copied VERBATIM into staging, so every
+  // downstream reader (tolg, prp_writer, decl_facts) takes the node's text
+  // and `Dlop::from_pyrope("N")` would silently read a character code.
+  auto bake_bound = [&](Dlop& out) {
+    if (Lnast_ntype::is_const(lm->get_raw_ntype())) {
+      if (auto v = Dlop::from_pyrope(lm->current_text()); v->is_integer()) {
+        out = *v;
+      }
+      return;
+    }
+    if (!Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+      return;  // unbounded
+    }
+    const std::string bound_ref{lm->current_text()};
+    if (auto fv = try_fold_ref(bound_ref); fv && fv->is_integer() && !fv->has_unknowns()) {
+      out = *fv;
+      if (loop_depth_ > 0) {
+        loop_baked_refs_.push_back(
+            {lm->get_lnast(), lm->get_current_nid(), std::string(lm->get_lnast()->get_name(lm->get_current_nid()))});
+      }
+      lm->get_lnast()->set_name(lm->get_current_nid(), std::string(fv->to_pyrope()));
+      lm->get_lnast()->set_type(lm->get_current_nid(), Lnast_ntype::create_const());
+    } else if (!(lm->get_lnast() && lm->get_lnast()->is_template() && !lm->in_inline_frame())) {
+      // Still a ref with the generics bound: the bound is genuinely not a
+      // compile-time value (`mut r:unsigned(bits=if runtime_s {5} else {4})`).
+      // Say so here. Without this the declare keeps an unresolved bound,
+      // decl_facts reports bits==0, and the user sees whatever downstream
+      // pass trips over it first -- for a narrowing write that was
+      // "call to undefined function 'wrap'", three passes away.
+      //
+      // Compiler temps name nothing the user wrote: a `bits=E` bound lowers to
+      // a `(1 << E) - 1` temp, and a temp DECLARATION with a deferred bound is
+      // the lane of a `wrap`/`sat` into a bit range (prp2lnast's only one).
+      const bool  lane = Lnast::is_tmp(var);
+      std::string msg;
+      if (lane) {
+        msg = "the lane width of this `wrap`/`sat` bit-range write is not a compile-time value";
+      } else if (Lnast::is_tmp(bound_ref)) {
+        msg = std::format("integer type bound of `{}` is not a compile-time value", var);
+      } else {
+        msg = std::format("integer type bound `{}` of `{}` is not a compile-time value", bound_ref, var);
+      }
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "type-bound-not-comptime",
+          .category = "type",
+          .pass     = "upass.runner",
+          .message  = std::move(msg),
+          .span     = lm->current_span(),
+          .hint     = lane ? "the bounds that set the width must fold at compile time: literals, `comptime const`s, generic "
+                             "parameters, attribute reads or the index of a loop that unrolls"
+                           : "an integer type bound must be a literal, a `comptime const`, or a generic parameter",
+      });
+    }
+  };
+  // A SCALAR named-type alias (`type PType = u10`; local OR imported
+  // `pkg.PType`): borrow the alias's declared range so `:PType` constrains
+  // width exactly like a literal `:u10`. The alias's own declare
+  // (`declare(PType, prim_type_int(max,min), 'type')`) already baked its
+  // "0"-entry envelope into PType's bundle. A TUPLE/struct named type carries
+  // fields (not a scalar "0" range) and is materialized by constprop's
+  // named-type default path instead -- its "0" entry has no decl range, so
+  // this leaves the outputs unset.
+  auto borrow_alias = [&](const std::string& type_name, Dlop& out_max, Dlop& out_min, upass::Kind& out_kind) {
+    // An integer-encoded enum (`reg st:Color`) borrows the range of its hidden
+    // encoding alias (user ruling 2026-09-28 (29)): in this unit, or in the
+    // file shell for a file-scope `const Color = enum(…)`.
+    const auto  enc   = Lnast::enum_encoding_type(type_name);
+    const auto& alias = symbol_table_.has_bundle(enc) ? enc : type_name;
+    if (alias != enc) {
+      if (const auto [owner, type_n] = lookup_file_type(enc); owner && Lnast_ntype::is_prim_type_int(owner->get_type(type_n))) {
+        const auto max_n = owner->get_first_child(type_n);
+        const auto min_n = max_n.is_invalid() ? max_n : owner->get_sibling_next(max_n);
+        if (!min_n.is_invalid()) {
+          out_max  = Dlop::from_pyrope_cached(owner->get_name(max_n));
+          out_min  = Dlop::from_pyrope_cached(owner->get_name(min_n));
+          out_kind = upass::Kind::integer;
+          return;
+        }
+      }
+    }
+    if (!symbol_table_.has_bundle(alias)) {
+      // IMPORTED alias (`x:pkg.PType`) -- resolve off the exporter's pub
+      // list/values instead (the lambda unit has no import statement).
+      Dlop imax, imin;
+      if (imported_alias_range(alias, imax, imin)) {
+        out_max  = imax;
+        out_min  = imin;
+        out_kind = upass::Kind::integer;
+        return;
+      }
+    }
+    if (auto tb = symbol_table_.get_bundle(alias);
+        tb && !tb->has_named_top() && tb->unnamed_top_count() <= 1 && tb->get_value_kind() != upass::Kind::tuple) {
+      // A genuinely SCALAR named type (not a tuple/struct — those carry
+      // fields and are materialized by constprop's named-type default path;
+      // borrowing their leaked "0"-entry kind would mis-type the var as a
+      // bare scalar, breaking `mut x:Complex = (…)`).
+      const auto& te = tb->get_entry(bundle_path::of_string("0"));
+      if (!te.decl_max.is_invalid() || !te.decl_min.is_invalid()) {
+        out_max  = te.decl_max;
+        out_min  = te.decl_min;
+        out_kind = te.kind == upass::Kind::unknown ? upass::Kind::integer : te.kind;
+      } else if (te.kind == upass::Kind::boolean || te.kind == upass::Kind::string) {
+        out_kind = te.kind;  // `type B = bool` / `type S = string`
+      }
+    }
+  };
+
   if (lm->move_to_sibling()) {  // TYPE slot
     const auto t = lm->get_raw_ntype();
     tuple_type   = Lnast_ntype::is_comp_type_tuple(t);
@@ -13453,8 +18266,7 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
       bool    flat_ok = true;  // one unresolved dim poisons the whole product
       while (Lnast_ntype::is_comp_type_array(lm->get_raw_ntype()) && lm->has_child()) {
         const auto arr_nid = lm->get_current_nid();
-        const auto elem_n  = lm->get_lnast()->get_first_child(arr_nid);
-        const auto dim_n   = elem_n.is_invalid() ? elem_n : lm->get_lnast()->get_sibling_next(elem_n);
+        const auto dim_n   = upass::array_level_dim(*lm->get_lnast(), arr_nid);
         int64_t    n       = -1;
         if (!dim_n.is_invalid()
             && (Lnast_ntype::is_const(lm->get_lnast()->get_type(dim_n)) || Lnast_ntype::is_ref(lm->get_lnast()->get_type(dim_n)))) {
@@ -13467,26 +18279,56 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
           if (auto [ptr, ec] = std::from_chars(dim.data(), dim.data() + dim.size(), parsed);
               ec == std::errc{} && ptr == dim.end() && parsed >= 0) {
             n = parsed;
-            if (depth == 0) {
-              array_size = *Dlop::create_integer(n);
-            }
-          } else if (depth == 0) {
-            if (auto fv = try_fold_ref(std::string(dim)); fv && fv->is_integer() && fv->is_just_i64() && fv->to_just_i64() > 0) {
-              // `mut v:[N]T` with a comptime-named dim: prp2lnast keeps the
-              // written text (`const '[N]'` / `ref N`), the declare is copied
-              // VERBATIM into staging, and every downstream reader takes the
-              // dim node's text — `Dlop::from_pyrope("N")` is the character
-              // code of 'N', which silently sized every `[N]` array at 78
-              // lanes. Fold it to digits IN PLACE before the verbatim copy.
-              n          = fv->to_just_i64();
-              array_size = *Dlop::create_integer(n);
-              lm->get_lnast()->set_name(dim_n, "[" + std::to_string(n) + "]");
-            }
+          } else if (auto fv = fold_frame_ref(dim); fv && fv->is_integer() && fv->is_just_i64() && fv->to_just_i64() > 0) {
+            // `mut v:[N]T` / `[N][N]T` with a comptime-named dim (`const
+            // '[N]'`), or `[N+1]T` whose expression prp2lnast lowered to
+            // statements (`ref %t`): the declare is copied VERBATIM into
+            // staging, and every downstream reader takes the dim node's text —
+            // `Dlop::from_pyrope("N")` is the character code of 'N', which
+            // silently sized every `[N]` array at 78 lanes. Fold it to digits
+            // IN PLACE, at every depth, before the verbatim copy.
+            n = fv->to_just_i64();
+            lm->get_lnast()->set_name(dim_n, "[" + std::to_string(n) + "]");
+            lm->get_lnast()->set_type(dim_n, Lnast_ntype::create_const());
+          } else if (Lnast::is_tmp(dim) && !(lm->get_lnast()->is_template() && !lm->in_inline_frame())) {
+            // `[a+1]T` over a runtime value, with any generics bound: say so
+            // here, at the declaration, instead of letting tolg name the
+            // compiler temp the expression was lowered to.
+            livehd::diag::sink().emit(livehd::diag::Diagnostic{
+                .severity = livehd::diag::Severity::error,
+                .code     = "array-dim-not-comptime",
+                .category = "type",
+                .pass     = "upass.runner",
+                .message  = std::format("the dimension of array `{}` is not a compile-time value", var),
+                .span     = lm->current_span(),
+                .hint     = "size an array with a literal, a `comptime const`, or an expression over generic parameters",
+            });
+          } else if (const auto lit = upass::array_dim_lanes(dim)) {
+            n = *lit;  // `[0x100]`, `[1_024]`
+          } else if (is_declare && !dim.empty() && !index_dim_reported_
+                     && !(lm->get_lnast()->is_template() && !lm->in_inline_frame())) {
+            // Neither a compile-time integer, an index range nor an enum type
+            // (Index_dims_scope lowered those to their extent): the array would
+            // silently have no size at all.
+            livehd::diag::sink().emit(livehd::diag::Diagnostic{
+                .severity = livehd::diag::Severity::error,
+                .code     = "array-dim-not-comptime",
+                .category = "type",
+                .pass     = "upass.runner",
+                .message  = std::format("the dimension `[{}]` of array `{}` is not a compile-time integer, an index range or "
+                                        "an enum type",
+                                        dim,
+                                        upass::Lnast_manager::user_name(var)),
+                .span     = lm->current_span(),
+                .hint     = "size an array with a literal or a `comptime const` (`[16]`), an index range (`[100..<132]`) or "
+                            "an enum type (`[State]`)",
+            });
           }
-          // A named INNER dim is deliberately NOT folded here: nothing rewrites
-          // the nested dim node, so tolg would still read the raw `[N]` text.
-          // Leaving the product unresolved keeps the two in agreement instead
-          // of publishing an extent tolg does not share.
+          if (depth == 0 && n >= 0) {
+            array_size = *Dlop::create_integer(n);
+          } else if (depth == 0 && !dim.empty()) {
+            array_dim_pending = true;
+          }
         }
         // Fail closed on an overflowing product too: `__array_flat_size` sizes
         // `concat(a)`, and a wrapped extent would relocate every lane above it.
@@ -13505,15 +18347,22 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
         elem_kind = upass::Kind::integer;
         lm->move_to_child();
         ++depth;
-        if (Lnast_ntype::is_const(lm->get_raw_ntype())) {
-          if (auto v = Dlop::from_pyrope(lm->current_text()); v->is_integer()) {
-            elem_max = *v;
-          }
+        bake_bound(elem_max);
+        if (lm->move_to_sibling()) {
+          bake_bound(elem_min);
         }
-        if (lm->move_to_sibling() && Lnast_ntype::is_const(lm->get_raw_ntype())) {
-          if (auto v = Dlop::from_pyrope(lm->current_text()); v->is_integer()) {
-            elem_min = *v;
-          }
+      } else if (Lnast_ntype::is_ref(lm->get_raw_ntype())) {
+        // `[N]Row` over a scalar alias (`type Row = u4`, or `unsigned(bits=N)`
+        // folded at the alias's own declare): the element takes the alias's
+        // envelope, so the array is as declared as `[N]u4` is.
+        borrow_alias(std::string(lm->current_text()), elem_max, elem_min, elem_kind);
+        if (elem_kind == upass::Kind::boolean) {
+          elem_max = *Dlop::create_integer(1);
+          elem_min = *Dlop::create_integer(0);
+        } else if (elem_kind != upass::Kind::integer) {
+          elem_kind = upass::Kind::unknown;
+          elem_max  = Dlop{};
+          elem_min  = Dlop{};
         }
       } else if (Lnast_ntype::is_prim_type_bool(lm->get_raw_ntype())) {
         // A bool array element has a fixed [0,1] envelope (the type node carries
@@ -13531,47 +18380,7 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
         lm->move_to_parent();
       }
     } else if (Lnast_ntype::is_prim_type_int(t)) {
-      kind            = upass::Kind::integer;
-      // 2f-type_bound — a bound may be a REF instead of a const when prp2lnast
-      // could not fold it (`:unsigned(bits=N)` with a GENERIC N: the value only
-      // exists after specialization). Fold it here and rewrite the node IN
-      // PLACE, exactly as the `[N]` array dim above does and for the same
-      // reason: the declare is copied VERBATIM into staging, so every
-      // downstream reader (tolg, prp_writer, decl_facts) takes the node's text
-      // and `Dlop::from_pyrope("N")` would silently read a character code.
-      auto bake_bound = [&](Dlop& out) {
-        if (Lnast_ntype::is_const(lm->get_raw_ntype())) {
-          if (auto v = Dlop::from_pyrope(lm->current_text()); v->is_integer()) {
-            out = *v;
-          }
-          return;
-        }
-        if (!Lnast_ntype::is_ref(lm->get_raw_ntype())) {
-          return;  // unbounded
-        }
-        const std::string bound_ref{lm->current_text()};
-        if (auto fv = try_fold_ref(bound_ref); fv && fv->is_integer() && !fv->has_unknowns()) {
-          out = *fv;
-          lm->get_lnast()->set_name(lm->get_current_nid(), std::string(fv->to_pyrope()));
-          lm->get_lnast()->set_type(lm->get_current_nid(), Lnast_ntype::create_const());
-        } else if (!(lm->get_lnast() && lm->get_lnast()->is_template() && !lm->in_inline_frame())) {
-          // Still a ref with the generics bound: the bound is genuinely not a
-          // compile-time value (`mut r:unsigned(bits=if runtime_s {5} else {4})`).
-          // Say so here. Without this the declare keeps an unresolved bound,
-          // decl_facts reports bits==0, and the user sees whatever downstream
-          // pass trips over it first -- for a narrowing write that was
-          // "call to undefined function 'wrap'", three passes away.
-          livehd::diag::sink().emit(livehd::diag::Diagnostic{
-              .severity = livehd::diag::Severity::error,
-              .code     = "type-bound-not-comptime",
-              .category = "type",
-              .pass     = "upass.runner",
-              .message  = std::format("integer type bound `{}` of `{}` is not a compile-time value", bound_ref, var),
-              .span     = lm->current_span(),
-              .hint     = "an integer type bound must be a literal, a `comptime const`, or a generic parameter",
-          });
-        }
-      };
+      kind = upass::Kind::integer;
       if (lm->move_to_child()) {  // up to two bounds; anything unresolved = unbounded
         bake_bound(decl_max);
         if (lm->move_to_sibling()) {
@@ -13585,42 +18394,7 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
       kind = upass::Kind::string;
     } else if (Lnast_ntype::is_ref(t)) {
       type_name = lm->current_text();  // named type (`x:Point`)
-      // SCALAR named-type alias (`type PType = u10`; local OR imported
-      // `pkg.PType`): borrow the alias's declared range so `:PType` constrains
-      // width exactly like a literal `:u10`. The alias's own declare
-      // (`declare(PType, prim_type_int(max,min), 'type')`) already baked its
-      // "0"-entry envelope into PType's bundle; copy it here. A TUPLE/struct
-      // named type carries fields (not a scalar "0" range) and is materialized
-      // by constprop's named-type default path instead — its "0" entry has no
-      // decl range, so this leaves decl_max/min unset and falls through.
-      if (kind == upass::Kind::unknown && decl_max.is_invalid() && decl_min.is_invalid()) {
-        if (!symbol_table_.has_bundle(type_name)) {
-          // IMPORTED alias (`x:pkg.PType`) — resolve off the exporter's pub
-          // list/values instead (the lambda unit has no import statement).
-          Dlop imax, imin;
-          if (imported_alias_range(type_name, imax, imin)) {
-            decl_max = imax;
-            decl_min = imin;
-            kind     = upass::Kind::integer;
-          }
-        }
-        if (auto tb = symbol_table_.get_bundle(type_name); kind == upass::Kind::unknown && tb && !tb->has_named_top()
-                                                           && tb->unnamed_top_count() <= 1
-                                                           && tb->get_value_kind() != upass::Kind::tuple) {
-          // A genuinely SCALAR named type (not a tuple/struct — those carry
-          // fields and are materialized by constprop's named-type default path;
-          // borrowing their leaked "0"-entry kind would mis-type the var as a
-          // bare scalar, breaking `mut x:Complex = (…)`).
-          const auto& te = tb->get_entry(bundle_path::of_string("0"));
-          if (!te.decl_max.is_invalid() || !te.decl_min.is_invalid()) {
-            decl_max = te.decl_max;
-            decl_min = te.decl_min;
-            kind     = te.kind == upass::Kind::unknown ? upass::Kind::integer : te.kind;
-          } else if (te.kind == upass::Kind::boolean || te.kind == upass::Kind::string) {
-            kind = te.kind;  // `type B = bool` / `type S = string`
-          }
-        }
-      }
+      borrow_alias(type_name, decl_max, decl_min, kind);
     }
     // prim_type_none / comp_type_*: nothing scalar to bake here (per-field
     // types of a comp_type_tuple arrive as separate dotted type_specs).
@@ -13692,7 +18466,10 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
     }
     const auto root  = Bundle::get_first_level(var);
     const auto fpath = Bundle::get_all_but_first_level(var);
-    auto       rb    = symbol_table_.get_bundle_for_write(root);
+    if (!decl_max.is_invalid() || !decl_min.is_invalid()) {
+      symbol_table_.typed_fields[root].emplace(fpath);  // a field declared with a type (`mut p:Pkt` splits into these)
+    }
+    auto rb = symbol_table_.get_bundle_for_write(root);
     if (rb && rb->has_trivial(bundle_path::of_string(fpath))) {
       Bundle::Entry fe = rb->get_entry(bundle_path::of_string(fpath));
       fe.immutable     = false;
@@ -13774,6 +18551,19 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
   // fields would corrupt the shape.
   const bool has_scalar_slot = bundle->is_empty() || bundle->has_trivial(bundle_path::of_string("0"));
   const bool has_entry_facts = kind != upass::Kind::unknown || !decl_max.is_invalid() || !decl_min.is_invalid() || comptime;
+  // A name typed by its own declaration / type_spec (a declared variable, a
+  // stamped slice or cast temp), unlike one whose envelope only rode in on a
+  // value: the typed `~` (ruling 26) reads the former only. An untyped
+  // declaration starts a new untyped binding (`const t = x` in the sibling arm
+  // of an `if` whose other arm declared `const t:u3`).
+  if (!decl_max.is_invalid() || !decl_min.is_invalid() || kind == upass::Kind::integer) {
+    declared_typed_.insert(var);  // `kind` alone: an unbounded `x:signed`
+  } else if (is_declare) {
+    declared_typed_.erase(var);
+  }
+  if (is_declare) {
+    symbol_table_.typed_fields.erase(var);  // a new binding of the name: its field declarations follow it
+  }
   if (has_scalar_slot && has_entry_facts) {
     Bundle::Entry e = bundle->get_entry(bundle_path::of_string("0"));
     e.immutable     = false;  // get_entry's missing-key sentinel is immutable; a decl entry is writable
@@ -13803,6 +18593,9 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
   }
   if (!array_size.is_invalid()) {
     bundle->set_attr("__array_size", array_size);
+  }
+  if (array_dim_pending) {
+    bundle->set_attr("__array_dim_pending", *Dlop::create_integer(1));
   }
 
   // The FLAT entry count (every dim multiplied). `__array_size` is the OUTER
@@ -13841,6 +18634,9 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
             }
             if (!decl_min.is_invalid()) {
               fe.decl_min = decl_min;
+            }
+            if (!decl_max.is_invalid() || !decl_min.is_invalid()) {
+              symbol_table_.typed_fields[root].emplace(fpath);  // `(mut a:u3 = 0)`: a declared field type
             }
             fe.comptime = fe.comptime || comptime;
             src_b->set(bundle_path::of_string(fpath), std::move(fe));
@@ -13910,9 +18706,32 @@ void uPass_runner::process_stmts() {
   dispatch_to_passes(&upass::uPass::process_stmts_pre_pop);
   emit_pop();
   dispatch_to_passes(&upass::uPass::process_stmts_post);
+  if (symbol_table_.stack.size() == 2 && lm->get_lnast().get() == root_lnast_.get()) {
+    snapshot_unit_body();  // the unit's own body block, about to close
+  }
   // Pop AFTER stmts_post so passes' tear-down hooks (e.g. constprop's pub
   // harvest, which reads the scope depth) still see the block scope active.
   symbol_table_.leave_scope();
+}
+
+void uPass_runner::snapshot_unit_body() {
+  const auto keep = [&](std::string_view name) {
+    const auto b = symbol_table_.get_bundle(name);
+    if (!b) {
+      return;
+    }
+    Body_value bv{.kind = upass::decl_facts::bundle_kind(*b)};
+    if (const auto t = b->scalar(); t && t->is_integer() && !t->has_unknowns()) {
+      bv.value = *t;
+    }
+    unit_body_values_.insert_or_assign(std::string(name), std::move(bv));
+  };
+  for (const auto& name : io_output_names_) {
+    keep(name);
+  }
+  for (const auto& name : default_value_names_) {
+    keep(name);
+  }
 }
 
 // Walk a `tick` node: (count, stmts-body). The count is evaluated ONCE, before
@@ -13965,6 +18784,7 @@ void uPass_runner::tick_uncertain_body() {
     symbol_table_.mark_current_uncertain();
     dispatch_to_passes(&upass::uPass::notify_uncertain_arm_begin);
     register_tick_body_writes();
+    check_tick_body_kinds();
     emit_subtree_verbatim();
     dispatch_to_passes(&upass::uPass::notify_uncertain_arm_end);
     symbol_table_.leave_scope();
@@ -14004,6 +18824,411 @@ void uPass_runner::register_tick_body_writes() {
   };
   walk();
 
+  lm->restore_cursor(saved);
+}
+
+void uPass_runner::bind_instance_handle(std::string_view dst, std::string_view rhs) {
+  // The bound name is a unit (`mut d = dut`), or an import binding of one:
+  // `import("unit.lam")` / `import("ln:…")` bind the tree name, `import("lg:…")`
+  // the url of a compiled library whose ports upass cannot see (a handle with
+  // no unit: nothing to check, reads stay unknown).
+  std::shared_ptr<Lnast> unit;
+  if (!symbol_table_.has_bundle(rhs)) {
+    unit = lookup_callee(rhs);
+    if (!unit || unit->io_meta().empty()) {
+      return;
+    }
+  } else if (const auto fv = try_fold_ref(rhs); fv && fv->is_string()) {
+    auto fn = fv->to_pyrope();
+    if (fn.size() >= 2 && fn.front() == '\'' && fn.back() == '\'') {
+      fn = fn.substr(1, fn.size() - 2);
+    }
+    if (!fn.starts_with("lg:")) {
+      unit = lookup_callee(fn.starts_with("ln:") ? std::string_view(fn).substr(3) : std::string_view(fn));
+      if (!unit || unit->io_meta().empty()) {
+        return;
+      }
+    }
+  } else {
+    return;
+  }
+  symbol_table_.instance_handles.insert_or_assign(std::string(dst), unit);
+  if (unit) {
+    stash_sub_instance_port_facts(dst, unit);  // `d.o` reads carry the port's declared kind/range
+  }
+}
+
+bool uPass_runner::try_instance_handle_store() {
+  if (lm->current_num_children() < 3 || symbol_table_.instance_handles.empty()) {
+    return false;
+  }
+  const auto saved = lm->save_cursor();
+  lm->move_to_child();
+  const auto hit = Lnast_ntype::is_ref(lm->current_type()) ? symbol_table_.instance_handles.find(lm->current_text())
+                                                           : symbol_table_.instance_handles.end();
+  if (hit == symbol_table_.instance_handles.end()) {
+    lm->restore_cursor(saved);
+    return false;
+  }
+  const auto [port, got] = instance_poke_operands([this] { return value_kind_of(lm->current_node()); });
+  const auto value       = lm->current_node();
+  lm->restore_cursor(saved);
+  check_instance_clock_poke(hit->second, port, got, value, /*value_is_clock=*/false, lm->current_span());
+  check_instance_poke(hit->second, port, got, value, lm->current_span());
+  emit_subtree_verbatim();  // a poke drives the port; the handle holds no field
+  return true;
+}
+
+std::pair<std::string, upass::Kind> uPass_runner::instance_poke_operands(const std::function<upass::Kind()>& value_kind) {
+  // The fields between the handle and the value name the poked input: `d.en`,
+  // or a tuple port's flattened leaf `d.cmd.op` ("cmd.op"). A computed field
+  // names no leaf ("").
+  std::string port;
+  bool        named = true;
+  lm->move_to_sibling();
+  while (true) {
+    const auto saved = lm->save_cursor();
+    if (!lm->move_to_sibling()) {
+      lm->restore_cursor(saved);
+      break;  // the cursor is on the value
+    }
+    lm->restore_cursor(saved);
+    named = named && Lnast_ntype::is_const(lm->current_type());
+    absl::StrAppend(&port, port.empty() ? "" : ".", lm->current_text());
+    lm->move_to_sibling();
+  }
+  return {named ? port : std::string{}, value_kind()};
+}
+
+void uPass_runner::check_instance_poke(const std::shared_ptr<Lnast>& unit, std::string_view port, upass::Kind got,
+                                       const Lnast_node& value, const livehd::diag::Span& span) const {
+  if (!unit || port.empty()) {
+    return;
+  }
+  const auto name = unit->get_top_module_name();
+  const auto bare = name.substr(name.rfind('.') + 1);
+  for (const auto& e : unit->io_meta().inputs) {
+    if (e.name != port || e.array_size != 0) {
+      continue;
+    }
+    if (e.sig == Io_sig::clock) {
+      continue;  // a Clock is not data: check_instance_clock_poke owns its rules
+    }
+    check_bind_kind(e, e.kind, got, bare, span);
+    // A poke binds like a call argument (ruling 1): a value whose derived
+    // range may not fit the input never narrows implicitly.
+    const auto declared = (e.kind == Io_kind::boolean || value.is_invalid()) ? std::nullopt : declared_param_range(unit, e, {});
+    const auto actual   = declared ? value_range_of(value) : Value_range{};
+    if (!actual.bounded() || !actual.may_exceed(declared->first, declared->second)) {
+      return;
+    }
+    const auto& amin     = *actual.min;
+    const auto& amax     = *actual.max;
+    const bool  disjoint = amin.gt_op(declared->second)->is_known_true() || amax.lt_op(declared->first)->is_known_true();
+    fcall_arg_fail(
+        span,
+        "fcall-arg-overflow",
+        std::format("poke of input `{}` of `{}` ({}) {} not fit its declared range [{}, {}]",
+                    e.name,
+                    bare,
+                    amin.same_repr(amax) ? std::format("value {}", amin.to_decimal_string())
+                                         : std::format("range [{}, {}]", amin.to_decimal_string(), amax.to_decimal_string()),
+                    disjoint ? "does" : "may",
+                    declared->first.to_decimal_string(),
+                    declared->second.to_decimal_string()),
+        "a poke never narrows implicitly: slice the value (`x#[0..<N]`) or `wrap` it into a typed local first",
+        "type");
+  }
+}
+
+void uPass_runner::check_instance_clock_poke(const std::shared_ptr<Lnast>& unit, std::string_view port, upass::Kind got,
+                                             const Lnast_node& value, bool value_is_clock, const livehd::diag::Span& span) const {
+  if (!unit || port.empty()) {
+    return;
+  }
+  const auto name = unit->get_top_module_name();
+  const auto bare = name.substr(name.rfind('.') + 1);
+
+  const Lnast_io_entry* e = nullptr;
+  for (const auto& in : unit->io_meta().inputs) {
+    if (in.name == port && in.array_size == 0) {
+      e = &in;
+      break;
+    }
+  }
+  // The MINTED clock/reset of a mod/pipe that declares none of that class: a
+  // Clock / Reset input like a declared one (qa.md section 6).
+  Io_sig sig = e != nullptr ? e->sig : Io_sig::none;
+  if (e == nullptr && (port == "clock" || port == "reset") && !unit->is_verilog_origin()
+      && (unit->get_lambda_kind() == "mod" || unit->get_lambda_kind() == "pipe")) {
+    const auto want = port == "clock" ? Io_sig::clock : Io_sig::reset;
+    const auto& ins = unit->io_meta().inputs;
+    if (std::none_of(ins.begin(), ins.end(), [&](const Lnast_io_entry& i) { return i.sig == want; })) {
+      sig = want;
+    }
+  }
+  const bool value_const = value.is_const();
+  if (sig == Io_sig::clock) {
+    if (value_const) {
+      fcall_arg_fail(span,
+                     "clock-bound-to-constant",
+                     std::format("the `Clock` input `{}` of `{}` can not be bound to a constant", port, bare),
+                     "a Clock is a real signal, never `1`/`true`: pass the tick's `clock` (or another Clock), or leave the input "
+                     "unbound to auto-wire it",
+                     "type");
+    }
+    if (got == upass::Kind::boolean && !value_is_clock) {
+      fcall_arg_fail(span,
+                     "clock-bound-to-bool",
+                     std::format("the `Clock` input `{}` of `{}` can not be driven by a Bool expression (a Bool is not a Clock)",
+                                 port,
+                                 bare),
+                     "a test passes a real Clock such as the tick's `clock`; a derived clock is not allowed (use an enable)",
+                     "type");
+    }
+    return;
+  }
+  if (sig == Io_sig::reset) {
+    if (e == nullptr && got == upass::Kind::integer) {  // a declared Reset is kind-checked as a Bool input
+      fcall_arg_fail(span,
+                     "fcall-arg-kind",
+                     std::format("cannot bind integer value to the `Reset` input `{}` of `{}` (a Reset is Bool-like)", port, bare),
+                     "an integer never turns into a `Bool` implicitly: write `true`/`false`, `Bool(x)` or `x != 0`",
+                     "type");
+    }
+    if (value_is_clock) {
+      fcall_arg_fail(span,
+                     "reset-bound-to-clock",
+                     std::format("cannot bind a Clock to the `Reset` input `{}` of `{}`", port, bare),
+                     "a Reset takes a Bool expression such as `clock < 2`",
+                     "type");
+    }
+    return;
+  }
+  if (value_is_clock && e != nullptr && e->kind == Io_kind::boolean) {
+    fcall_arg_fail(span,
+                   "fcall-arg-kind",
+                   std::format("cannot bind a Clock to the Bool input `{}` of `{}` (a Clock is not a Bool)", port, bare),
+                   "write a Bool expression such as `clock > 0`",
+                   "type");
+  }
+}
+
+void uPass_runner::check_tick_body_kinds() {
+  const auto saved = lm->save_cursor();
+  using K          = upass::Kind;
+  // Kinds of the names the body defines so far (statement order), and how a
+  // diagnostic names a handle read (`%t` -> `d.f`).
+  absl::flat_hash_map<std::string, K>           kinds;
+  absl::flat_hash_map<std::string, std::string> labels;
+  // Names that hold a Clock (the tick's minted `clock`, and plain copies of it):
+  // its numeric view is a debug cycle count (kind unknown, so `clock < 2` and
+  // `0x10 + clock` stay legal) but it is never a Bool or an integer condition.
+  absl::flat_hash_set<std::string> clock_names;
+  // Declared scalar kind of a typed test local (`const n:U8 = ...`).
+  absl::flat_hash_map<std::string, K> declared;
+  {
+    // The tick body's first statement declares its minted loop variable.
+    const auto s0 = lm->save_cursor();
+    if (lm->has_child()) {
+      lm->move_to_child();
+      if (Lnast_ntype::is_declare(lm->current_type()) && lm->has_child()) {
+        lm->move_to_child();
+        clock_names.emplace(lm->current_text());
+      }
+    }
+    lm->restore_cursor(s0);
+  }
+
+  using upass::op_kind::kind_name;
+  // Kind + label of the operand under the cursor.
+  const auto operand = [&]() -> std::pair<K, std::string> {
+    if (Lnast_ntype::is_const(lm->current_type())) {
+      return {value_kind_of(lm->current_node()), "<const>"};
+    }
+    const std::string nm(lm->current_text());
+    const auto        lb = labels.find(nm);
+    const std::string label(lb != labels.end() ? std::string_view(lb->second) : upass::Lnast_manager::user_name(nm));
+    if (const auto it = kinds.find(nm); it != kinds.end()) {
+      return {it->second, label};
+    }
+    return {value_kind_of(lm->current_node()), label};
+  };
+  const auto operand_is_clock = [&]() { return lm->current_node().is_ref() && clock_names.contains(std::string(lm->current_text())); };
+  const auto type_error = [&](std::string_view code, const std::string& msg, const std::string& hint) {
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{.severity = livehd::diag::Severity::error,
+                                                       .code     = std::string{code},
+                                                       .category = "type",
+                                                       .pass     = "upass.runner",
+                                                       .message  = msg,
+                                                       .span     = lm->current_span(),
+                                                       .hint     = hint});
+  };
+  // An operator node, by typecheck's own rule table: every operand must be
+  // the required kind (unknown unifies), or for `==`/`!=` share one eq_class.
+  const auto check_op = [&](const upass::op_kind::Rule& rule) {
+    lm->move_to_child();
+    const std::string        dst(lm->current_text());
+    std::vector<std::string> ops;
+    bool                     bad  = false;
+    int                      seen = -1;
+    while (lm->move_to_sibling()) {
+      const auto [k, label] = operand();
+      ops.push_back(std::format("{}:{}", label, upass::op_kind::kind_annot(k)));
+      if (k == K::unknown || k == K::nil) {
+        continue;
+      }
+      if (rule.required != K::unknown) {
+        bad |= k != rule.required;
+      } else if (const int c = upass::op_kind::eq_class(k); c >= 0 && seen >= 0 && seen != c) {
+        bad = true;
+      } else if (seen < 0) {
+        seen = c;
+      }
+    }
+    lm->move_to_parent();
+    kinds.insert_or_assign(dst, rule.result);
+    if (!bad) {
+      return;
+    }
+    const auto joined = absl::StrJoin(ops, rule.required == K::unknown ? " vs " : ", ");
+    if (rule.required == K::unknown) {
+      type_error(rule.code,
+                 std::format("`{}` requires both operands to be the same type ({})", rule.sym, joined),
+                 std::format("no implicit conversion — cast explicitly: {}", upass::kBoolIntCastHint));
+    } else {
+      type_error(rule.code,
+                 std::format("operator `{}` requires {} operands ({})", rule.sym, kind_name(rule.required), joined),
+                 rule.required == K::boolean
+                     ? std::string(upass::op_kind::kLogicalOperandHint)
+                     : std::format("no implicit conversion — cast explicitly: {}", upass::kBoolIntCastHint));
+    }
+  };
+
+  using N                     = Lnast_ntype;
+  std::function<void()> visit = [&]() {
+    const auto t = lm->current_type();
+    if (N::is_stmts(t) || N::is_if_like(t)) {
+      if (!lm->has_child()) {
+        return;
+      }
+      lm->move_to_child();
+      do {
+        if (N::is_if_like(t) && !N::is_stmts(lm->current_type())) {
+          // An if/elif condition must be boolean, as typecheck's process_if.
+          if (operand_is_clock()) {
+            type_error("cond-not-bool",
+                       "condition must be boolean, got a Clock (a Clock is not a Bool)",
+                       "a Clock's numeric view is a cycle count: compare it, e.g. `if clock > 3`");
+            continue;
+          }
+          if (const auto [k, label] = operand(); k != K::unknown && k != K::nil && k != K::boolean) {
+            type_error("cond-not-bool",
+                       std::format("condition must be boolean, got {}", kind_name(k)),
+                       k == K::integer ? "an integer is a value, not a condition — did you mean `!= 0`?"
+                                       : "compare explicitly, e.g. `if x != 0`");
+          }
+          continue;
+        }
+        visit();
+      } while (lm->move_to_sibling());
+      lm->move_to_parent();
+      return;
+    }
+    if (!lm->has_child()) {
+      return;
+    }
+    if (const auto rule = upass::op_kind::rule_of(t)) {
+      check_op(*rule);
+      return;
+    }
+    const auto nkids = lm->current_num_children();
+    lm->move_to_child();
+    const std::string dst(lm->current_text());
+    if (N::is_store(t) && nkids >= 3) {
+      // A poke `store(d, field..., v)` (the check try_instance_handle_store makes).
+      if (const auto hit = symbol_table_.instance_handles.find(dst); hit != symbol_table_.instance_handles.end()) {
+        bool       value_is_clock = false;
+        const auto [port, got]    = instance_poke_operands([&] {
+          value_is_clock = operand_is_clock();
+          return operand().first;
+        });
+        check_instance_clock_poke(hit->second,
+                                  port,
+                                  got,
+                                  Lnast_ntype::is_const(lm->current_type()) ? lm->current_node() : Lnast_node{},
+                                  value_is_clock,
+                                  lm->current_span());
+        // A tick body's own names carry no derived range: only a literal's is known.
+        check_instance_poke(hit->second,
+                            port,
+                            got,
+                            Lnast_ntype::is_const(lm->current_type()) ? lm->current_node() : Lnast_node{},
+                            lm->current_span());
+      }
+    } else if (N::is_store(t) && nkids == 2 && lm->move_to_sibling()) {
+      if (operand_is_clock()) {
+        clock_names.insert(dst);
+      }
+      auto k = operand().first;
+      if (const auto d = declared.find(dst); d != declared.end()) {
+        // A typed local binds like a call argument: a Bool never turns into an integer or the reverse.
+        if ((d->second == K::integer && k == K::boolean) || (d->second == K::boolean && k == K::integer)) {
+          type_error("type-mismatch-assign",
+                     std::format("cannot assign {} value to `{}` (it is {})", kind_name(k), upass::Lnast_manager::user_name(dst),
+                                 kind_name(d->second)),
+                     d->second == K::integer ? "a `Bool` never turns into an integer implicitly: write `U1(x)` (true == 1)"
+                                             : "an integer never turns into a `Bool` implicitly: write `x != 0` or `Bool(x)`");
+        }
+        k = d->second;
+      }
+      kinds.insert_or_assign(dst, k);
+    } else if (N::is_tuple_get(t) && nkids >= 3 && lm->move_to_sibling()) {
+      // `d.f` (or a tuple port's leaf `d.res.f`) on an instance handle: the
+      // port's declared kind.
+      const auto hit = symbol_table_.instance_handles.find(lm->current_text());
+      if (hit != symbol_table_.instance_handles.end()) {
+        std::string field;
+        while (lm->move_to_sibling()) {
+          absl::StrAppend(&field, field.empty() ? "" : ".", lm->current_text());
+        }
+        labels.insert_or_assign(dst, absl::StrCat(hit->first, ".", field));
+        if (const auto* e = hit->second ? hit->second->io_meta().find(field) : nullptr; e != nullptr && e->array_size == 0) {
+          kinds.insert_or_assign(dst,
+                                 e->sig == Io_sig::clock       ? K::unknown  // a Clock reads as a cycle count, never a Bool
+                                 : e->kind == Io_kind::boolean ? K::boolean
+                                 : e->kind == Io_kind::integer ? K::integer
+                                                               : K::unknown);
+        }
+      }
+    } else if (N::is_declare(t) && lm->move_to_sibling()) {
+      if (lm->current_type() == Lnast_ntype::Lnast_ntype_prim_type_int) {
+        declared.insert_or_assign(dst, K::integer);
+      } else if (lm->current_type() == Lnast_ntype::Lnast_ntype_prim_type_bool) {
+        declared.insert_or_assign(dst, K::boolean);
+      }
+    } else if (N::is_cassert(t)) {
+      // An assert condition in a test is a Bool (docs 09-verification): an integer is a value, not a condition.
+      if (operand_is_clock()) {
+        type_error("cond-not-bool", "assert condition must be boolean, got a Clock", "compare the Clock, e.g. `clock > 3`");
+      } else if (const auto [k, label] = operand(); k == K::integer) {
+        type_error("cond-not-bool",
+                   std::format("assert condition must be boolean, got {} (`{}`)", kind_name(k), label),
+                   "an integer is a value, not a condition — did you mean `!= 0`?");
+      }
+    } else if (N::is_func_call(t) && lm->move_to_sibling()) {
+      if (const auto cast = upass::classify_typecast(lm->current_text())) {
+        kinds.insert_or_assign(dst,
+                               cast->kind == upass::Typecast_kind::to_bool     ? K::boolean
+                               : cast->kind == upass::Typecast_kind::to_string ? K::string
+                                                                               : K::integer);
+      }
+    } else if (N::is_shl(t) || N::is_get_mask(t) || N::is_set_mask(t) || N::is_sext(t) || N::is_concat(t)) {
+      kinds.insert_or_assign(dst, K::integer);
+    }
+    lm->move_to_parent();
+  };
+  visit();
   lm->restore_cursor(saved);
 }
 

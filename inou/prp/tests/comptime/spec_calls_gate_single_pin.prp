@@ -1,0 +1,16 @@
+/*
+:name: spec_calls_gate_single_pin
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// docs 06b-instantiation.md "Basic gates": "A basic gate is an ordinary call:
+// every argument is named with the cell's LGraph pin name, unless a call naming
+// exception applies (a single-pin gate may take its value unnamed)".
+// qa.md Appendix §8: "... unless a call naming exception applies".
+// `__not` has the single pin `a` (graph/cell.cpp), so exception 1 (a single
+// parameter) lets its operand be unnamed.
+
+cassert(__not(0) == -1)
+cassert(__not(0xff) == -256)

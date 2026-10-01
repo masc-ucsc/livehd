@@ -3,8 +3,8 @@
 :type: lgraph compile
 */
 
-pub comb setmask_chain_emit(base:u4096, values:u16) -> (out:u4096) {
-  mut tmp:u4096 = base
+pub comb setmask_chain_emit(base:U4096, values:U16) -> (out:U4096) {
+  mut tmp:U4096 = base
   tmp#[3000] = values#[0]
   tmp#[3001] = values#[1]
   tmp#[3002] = values#[2]

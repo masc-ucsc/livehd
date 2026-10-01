@@ -1,0 +1,17 @@
+/*
+:name: bitrange_empty_literal
+:type: error
+:error: empty bit range
+:help: write the bounds low-to-high
+*/
+
+// `lo..<hi` excludes `hi`, so `4..<4` selects no bit at all. Literal bounds
+// fold like the inclusive form and get its checks: an empty (or descending)
+// window is a compile error, not a zero mask that downstream reports as "not
+// a contiguous bit range" (or, under `wrap`, as a width "not known at compile
+// time").
+pub comb bitrange_empty_literal(a:U8, e:U1) -> (z:U8) {
+  mut r:U8 = a
+  r#[4..<4] = e  // locate_error_here
+  z = r
+}

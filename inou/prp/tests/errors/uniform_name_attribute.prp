@@ -1,0 +1,8 @@
+/*
+:name: uniform_name_attribute
+:type: error
+:error: reserved
+:help: backticks
+*/
+const x = 1
+const r = x.[comptime] // locate_error_here

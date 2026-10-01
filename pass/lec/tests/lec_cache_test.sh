@@ -165,4 +165,33 @@ U 2
 if echo "$OUT" | grep -q "skipped: known inconclusive"; then echo "FAIL: larger budget did not re-attempt"; fail=1
 else echo "ok: a larger budget re-attempts"; fi
 
+# 11) The digest keys a register's RESET VALUE and a constant-driven output.
+#     Neither is a graph node (a constant is a pool pin), and a state cell's
+#     forward signature is its name, so both used to be invisible: after
+#     R1 == R1 was cached PROVEN, R1 vs R2 (reset 0xA vs 0xB) replayed it.
+cat > "$WORK/R1.v" <<'EOF'
+module rv(input clk, input rst, input en, input [3:0] d, output [3:0] q, output [3:0] k);
+  reg [3:0] acc;
+  always @(posedge clk) if (rst) acc <= 4'hA; else if (en) acc <= d;
+  assign q = acc;
+  assign k = 4'h5;
+endmodule
+EOF
+sed "s/4'hA;/4'hB;/" "$WORK/R1.v" > "$WORK/R2.v"
+sed "s/4'h5;/4'h6;/" "$WORK/R1.v" > "$WORK/R3.v"
+C "$WORK/R1.v" --top rv --emit-dir "lg:$WORK/R1" --workdir "$WORK/cr1"
+C "$WORK/R1.v" --top rv --emit-dir "lg:$WORK/R1b" --workdir "$WORK/cr1b"
+C "$WORK/R2.v" --top rv --emit-dir "lg:$WORK/R2" --workdir "$WORK/cr2"
+C "$WORK/R3.v" --top rv --emit-dir "lg:$WORK/R3" --workdir "$WORK/cr3"
+WDR="$WORK/wdr"; rm -rf "$WDR"; mkdir -p "$WDR"
+R() { "$LHD" lec --ref "lg:$WORK/R1" --impl "lg:$WORK/$1" --top rv --workdir "$WDR" 2>&1 | grep "^lec: '" | head -1; }
+OUT=$(R R1b)
+if ! echo "$OUT" | grep -q "PROVEN equivalent"; then echo "FAIL: reset-value self pair not proven: $OUT"; fail=1; fi
+for v in R2 R3; do
+  OUT=$(R $v)
+  if echo "$OUT" | grep -q "PROVEN equivalent\|verdict cache hit"; then
+    echo "FAIL: $v (a different reset value / output constant) replayed a cached verdict: $OUT"; fail=1
+  else echo "ok: $v re-proves (digest keys the constant)"; fi
+done
+
 exit $fail

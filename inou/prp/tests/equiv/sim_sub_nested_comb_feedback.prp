@@ -13,19 +13,19 @@
 // callee_is_pure_comb() rejects a callee containing Ntype_op::Sub and the
 // flatten is single-level non-recursive, so this nested variant still errs
 // `comb-loop-through-instance` (input `c` fed by the instance's own output).
-pub mod leaf_add::[timecheck=false](a:u8, b:u8) -> (s:u9@[]) {
+pub mod leaf_add::[timecheck=false](a:U8, b:U8) -> (s:U9@[]) {
   s = a + b
 }
 
-pub mod mid::[timecheck=false](a:u8, b:u8, c:u8, d:u8) -> (x:u9@[], y:u9@[]) {
+pub mod mid::[timecheck=false](a:U8, b:U8, c:U8, d:U8) -> (x:U9@[], y:U9@[]) {
   mut l = leaf_add::[name=u_leaf](a = a, b = b)
   x = l.s
   y = c + d
 }
 
-pub mod top::[timecheck=false](a:u8, b:u8, d:u8, topx:u8) -> (x_out:u9@[0], y_out:u9@[0]) {
-  wire x:u9
-  wire c:u8
+pub mod top::[timecheck=false](a:U8, b:U8, d:U8, topx:U8) -> (x_out:U9@[0], y_out:U9@[0]) {
+  wire x:U9
+  wire c:U8
   mut m = mid::[name=u](a = a, b = b, c = c, d = d)
   x = m.x
   c = (x#[0..=7] + topx)#[0..=7]

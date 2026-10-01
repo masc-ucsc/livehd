@@ -1,0 +1,17 @@
+/*
+:name: undefined_tuple_field_width
+:type: error
+:error: read of undefined variable 'ZZ'
+:help: declare it
+*/
+
+// Ruling 2026-09-28 #24 (clarification): reading a name with no accessible
+// declaration is a direct compile error at the read. The width bound of a
+// tuple-type FIELD is not lowered where it is written; before, an undeclared
+// `ZZ` only warned "not a compile-time value" and the field width was
+// SILENTLY dropped.
+pub comb undefined_tuple_field_width(a:U8) -> (r:U8) {
+  mut v:(x:Unsigned(bits=ZZ)) = nil  // locate_error_here
+  v.x = a
+  r = v.x
+}

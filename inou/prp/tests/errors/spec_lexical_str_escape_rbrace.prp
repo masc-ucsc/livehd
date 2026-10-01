@@ -1,0 +1,7 @@
+/*
+:name: spec_lexical_str_escape_rbrace
+:type: error
+:error: invalid escape ..[}]
+*/
+// qa.md appendix 8: "`\{`, `\}` and every other `\c` are errors".
+const s = "I have \}"   // locate_error_here

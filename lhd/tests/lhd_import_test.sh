@@ -10,7 +10,9 @@
 #     (iterate-until-converged, incl. a 3-deep import chain);
 #  3. failure modes: missing unit, true import cycle (no-progress), and a
 #     pub value that is not comptime-foldable;
-#  4. liveness: a dead-branch import of a missing unit is NOT an error.
+#  4. liveness: a dead-branch import of a missing unit is NOT an error;
+#  5. an ln: manifest carries the io metadata a pre-elaborated import needs
+#     (defaulted input, exact bounds past an i64, multi-dimensional dims).
 
 set -u
 
@@ -27,7 +29,7 @@ fail() {
 cat > "$W/explib.prp" <<'EOF'
 pub const magic = 3*4
 pub const cfg = (const gain=2, const shift=1)
-pub comb add1(a:u8) -> (r:u9) { r = a + 1 }
+pub comb add1(a:U8) -> (r:U9) { r = a + 1 }
 const local_only = 7
 EOF
 
@@ -36,7 +38,7 @@ const b = import("explib")
 cassert(b.magic == 12)
 cassert(b.cfg.gain == 2)
 const bar2 = import("ln:explib.add1")
-comb main(x:u8) -> (y:u9) {
+comb main(x:U8) -> (y:U9) {
   y = b.add1(a=x)
 }
 cassert(b.add1 equals bar2)
@@ -135,7 +137,7 @@ grep -q '"available_units":"cyc_a,cyc_b"' "$W/r6j.err" \
 
 # Non-foldable pub value: rejected when the EXPORTING file elaborates.
 # (A register read is runtime-valued at file scope — never a comptime constant.)
-printf 'reg r:u4 = 0\npub const bad = r\n' > "$W/nf.prp"
+printf 'reg r:U4 = 0\npub const bad = r\n' > "$W/nf.prp"
 "$LHD" compile "$W/nf.prp" --emit-dir ln:"$W/nf_ln/" --workdir "$W/w7" -q --result-json "$W/r7.json" 2>/dev/null
 [ $? -ne 0 ] || fail "non-foldable pub value must exit non-zero"
 grep -q 'not comptime-foldable' "$W/r7.json" || fail "expected pub-not-comptime error: $(cat "$W/r7.json")"
@@ -167,11 +169,11 @@ grep -q '"status":"pass"' "$W/r8c.json" || fail "non-imported collision should p
 
 # ── 4. mod instantiation through an import tuple → Sub instance + Verilog ────
 cat > "$W/modlib.prp" <<'EOF'
-pub mod scale(a:u8) -> (r:u9@[1]) { reg racc:u9 = 0; r = racc; racc = a + a }
+pub mod scale(a:U8) -> (r:U9@[1]) { reg racc:U9 = 0; r = racc; racc = a + a }
 EOF
 cat > "$W/modcons.prp" <<'EOF'
 const lib = import("modlib")
-mod top(x:u8) -> (y:u9@[1]) {
+mod top(x:U8) -> (y:U9@[1]) {
   y = lib.scale(a=x)
 }
 EOF
@@ -207,12 +209,12 @@ pub const k = 100
 EOF
 cat > "$W/capuse.prp" <<'EOF'
 const lib = import("caplib")
-comb outer(x:u8) -> (r:u12) {                       // NESTED comb captures lib
-  comb inner(y:u8) -> (r2:u12) { r2 = y * lib.cfg.gain + lib.cfg.offset }
+comb outer(x:U8) -> (r:U12) {                       // NESTED comb captures lib
+  comb inner(y:U8) -> (r2:U12) { r2 = y * lib.cfg.gain + lib.cfg.offset }
   r = inner(y=x)
 }
-comb apply(x:u8) -> (r:u12) { r = x * lib.cfg.gain + lib.cfg.offset }  // tuple value
-comb addk(x:u8)  -> (r:u9)  { r = x + lib.k }                          // scalar const
+comb apply(x:U8) -> (r:U12) { r = x * lib.cfg.gain + lib.cfg.offset }  // tuple value
+comb addk(x:U8)  -> (r:U9)  { r = x + lib.k }                          // scalar const
 cassert(outer(x=10) == 35)
 cassert(apply(x=2)  == 11)
 cassert(addk(x=5)   == 105)
@@ -232,4 +234,53 @@ grep -q '"status":"pass"' "$W/r10.json" || fail "2j capture same-invocation not 
   || fail "2j capture (two-invocation) failed: $(cat "$W/r12.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r12.json" || fail "2j capture two-invocation not pass: $(cat "$W/r12.json")"
 
-echo "PASS: pub/import flows (two-invocation, worst-order convergence, chain, cycle/missing/non-foldable errors, dead-branch liveness, 2j closure-capture of imported tuple)"
+# A pre-elaborated ln: import skips upass.ssa, so its manifest io_meta is all a
+# caller sees of a port: a defaulted input (`hd`), the exact bounds of a port
+# past an i64 (`wmin`/`wmax`) and the inner dims of a multi-dimensional output
+# (`dims`) must ride it, or the importer binds nothing to an omitted `b`, lets
+# a too-wide argument through, and reads a packed row as one element. The
+# importer equals the same design compiled from source (same file path, so
+# the assert messages match).
+mkdir -p "$W/iom"
+cat > "$W/iom/iolib.prp" <<'EOF'
+pub comb dflt(a:U8, b:U8 = 3) -> (y:U9) { y = a + b }
+pub comb big(a:Unsigned(max=100000000000000000000)) -> (y:Unsigned(max=100000000000000000000)) { y = a }
+pub comb grid(a:U4) -> (r:[2][4]U8) {
+  for i in 0..<2 {
+    for j in 0..<4 {
+      r[i][j] = a + i * 4 + j
+    }
+  }
+}
+EOF
+iom_use() {  # IMPORT_PREFIX W_TYPE
+  cat > "$W/iom/use.prp" <<EOF
+const dflt = import("$1iolib.dflt")
+const big = import("$1iolib.big")
+const grid = import("$1iolib.grid")
+pub mod use(x:U8, w:$2, i:U1, j:U2) -> (d:U9@[0], z:Unsigned(max=100000000000000000000)@[0], o:U8@[0], p:U8@[0]) {
+  d = dflt(a=x)
+  z = big(a=w)
+  const t = grid(a=x#[0..<4])
+  o = t[1][2]
+  p = t[i][j]
+}
+EOF
+}
+iom_use "" "Unsigned(max=100000000000000000000)"
+"$LHD" compile "$W/iom/iolib.prp" "$W/iom/use.prp" --top use --emit-dir lg:"$W/iom/lg_src" -q \
+  --result-json "$W/iom/r1.json" >/dev/null || fail "io-meta source compile failed: $(cat "$W/iom/r1.json" 2>/dev/null)"
+"$LHD" compile "$W/iom/iolib.prp" --emit-dir ln:"$W/iom/ln/" --workdir "$W/iom/w" -q \
+  --result-json "$W/iom/r2.json" >/dev/null || fail "io-meta exporter compile failed: $(cat "$W/iom/r2.json" 2>/dev/null)"
+iom_use "ln:" "Unsigned(max=100000000000000000000)"
+"$LHD" compile "$W/iom/use.prp" ln:"$W/iom/ln" --emit-dir lg:"$W/iom/lg_ln" -q --result-json "$W/iom/r3.json" >/dev/null \
+  || fail "io-meta importer over the ln: dir failed: $(cat "$W/iom/r3.json" 2>/dev/null)"
+[ "$("$LHD" tool diff "lg:$W/iom/lg_src" "lg:$W/iom/lg_ln" --structural -q)" = identical ] \
+  || fail "io-meta importer over the ln: dir differs from the source compile"
+iom_use "ln:" "Unsigned(bits=67)"
+"$LHD" compile "$W/iom/use.prp" ln:"$W/iom/ln" -q --result-json "$W/iom/r4.json" >/dev/null 2>&1 \
+  && fail "a too-wide argument into an ln:-imported port past an i64 compiled"
+grep -q 'may not fit its declared range \[0, 100000000000000000000\]' "$W/iom/r4.json" \
+  || fail "the ln: import lost the exact port bound: $(cat "$W/iom/r4.json")"
+
+echo "PASS: pub/import flows (two-invocation, worst-order convergence, chain, cycle/missing/non-foldable errors, dead-branch liveness, 2j closure-capture of imported tuple, ln: io metadata)"

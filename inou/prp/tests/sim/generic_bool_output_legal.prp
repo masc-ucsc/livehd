@@ -1,0 +1,55 @@
+/*
+:name: generic_bool_output_legal
+:type: simulation
+*/
+
+// The legal side of errors/generic_bool_output_kind.prp and of the untyped mod
+// template rule: a GENERIC output `o:T` bound to bool (explicit `<T=Bool>` or
+// inferred) and an UNTYPED mod parameter that receives a bool (`tpl(en)`) are
+// `Bool` in the specialization, never integer [0,1]. So a condition, a logical
+// op, a bool store and a bool child port all type-check (user ruling
+// 2026-09-27 (2)), and the values are right.
+
+mod pass_t<T>(a:T) -> (o:T@[0]) { o = a }
+
+mod leaf(en:Bool) -> (q:U8@[0]) {
+  q = if en { 5 } else { 3 }
+}
+
+mod tpl(en, b:Bool) -> (q:U8@[0], both:Bool@[0], same:Bool@[0]) {
+  const c = leaf(en=en)          // an untyped parameter into a bool port
+  q    = c.q
+  both = en and b                // a logical op
+  const s:Bool = en              // a bool store
+  same = s
+}
+
+pub mod generic_bool_output_legal(p:Bool, v:U4) -> (y:U4@[0], f:Bool@[0], lq:U8@[0], lb:Bool@[0], ls:Bool@[0]) {
+  const c = pass_t<T=Bool>(a=p)
+  mut acc:U4 = 0
+  if c.o { acc = v }             // a condition
+  y = acc
+  const d = pass_t(a=p)          // T inferred from the bool argument
+  f = d.o and p
+  const t = tpl(en=p, b=v != 0)
+  lq = t.q
+  lb = t.both
+  ls = t.same
+}
+
+test generic_bool_output_legal.values {
+  mut d = generic_bool_output_legal
+  mut bad = 0
+  tick 4 {
+    const p = (clock & 1) == 0
+    d.p = p
+    d.v = 9
+    step
+    if p {
+      if d.y != 9 or not d.f or d.lq != 5 or not d.lb or not d.ls { bad += 1 }
+    } else {
+      if d.y != 0 or d.f or d.lq != 3 or d.lb or d.ls { bad += 1 }
+    }
+  }
+  assert(bad == 0)
+}

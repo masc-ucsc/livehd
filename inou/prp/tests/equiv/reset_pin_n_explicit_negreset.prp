@@ -1,0 +1,28 @@
+/*
+:name: reset_pin_n_explicit_negreset
+:type: equiv
+:verilog_top: reset_pin_n_explicit_negreset
+:pyrope_top: reset_pin_n_explicit_negreset
+*/
+// User ruling 2026-09-27 (04b-attributes.md `negreset`): the `_n` suffix of a
+// reset's NAME only picks the DEFAULT polarity; an explicit
+// `negreset=true|false` always overrides it.
+//   r: `reset_pin=clr_n, negreset=false` -> active-HIGH despite the `_n`.
+//   s: `reset_pin=clr,   negreset=true`  -> active-LOW without an `_n`.
+// Today upass_tolg (finalize_regs) reads the attribute and then forces
+// `neg = true` for any reset_pin name ending in `_n`, so `r` resets while
+// `clr_n` is LOW -- the opposite of the declaration, with no diagnostic.
+// (`s` already lowers correctly.)
+// Since ruling 52 (2026-09-29) a Pyrope reset's name carries NO polarity at
+// all (only `negreset` decides), and both pins are `Reset` inputs; the pair
+// still pins that `r` is active-HIGH and `s` active-LOW.
+pub mod reset_pin_n_explicit_negreset(clk:Clock, clr_n:Reset, clr:Reset, d:U4) -> (q:U4@[0], p:U4@[0]) {
+  reg r:U4:[reset_pin=clr_n, negreset=false] = 5
+  reg s:U4:[reset_pin=clr, negreset=true] = 9
+  if d != 0 {
+    r = d
+    s = d
+  }
+  q = r
+  p = s
+}

@@ -1,0 +1,45 @@
+/*
+:name: wire_backedge_loop
+:type: simulation
+*/
+// lhdtrack suggestions2.md 1.3 (verify only): `lhd sim` was reported to read a
+// wire's back edge one cycle LATE inside a loop -- a loop that reads a `wire`
+// whose driver appears AFTER the loop. Not reproduced: a loop that reads a
+// wire stays UNROLLED (docs 05b "Loops and `wire`"), and the wire is one
+// module-wide combinational net, so every read sees THIS cycle's driver. Kept
+// as a regression so it stays that way.
+//
+// `acc` takes `w` on each iteration whose bit of `a` is set (so `y` is `a`
+// when a#[0] or a#[1] is set, else 0); `sel` XORs `u` then `w` (so `z` is
+// a ^ b). Both reads sit below the `step`: the outputs are combinational in
+// this cycle's inputs.
+mod wire_backedge_loop(a:U4, b:U4) -> (y:U4@[0], z:U4@[0]) {
+  wire w:U4 = nil
+  wire u:U4 = nil
+  mut acc:U4 = 0
+  mut sel:U4 = 0
+  for i in 0..<2 {
+    if a#[i] == 1 {
+      acc = w
+    }
+    sel = sel ^ (if i == 0 { u } else { w })
+  }
+  w = a
+  u = b
+  y = acc
+  z = sel
+}
+
+test wire_backedge_loop.same_cycle {
+  mut x = wire_backedge_loop
+  tick 5 {
+    const av = clock + 1
+    const bv = clock * 3
+    x.a = av
+    x.b = bv
+    step
+    const want_y = if (av & 3) != 0 { av } else { 0 }
+    assert(x.y == want_y, "a wire read in a loop sees this cycle's driver")
+    assert(x.z == (av ^ bv), "both wires read in the loop are this cycle's values")
+  }
+}

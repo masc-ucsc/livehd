@@ -5,7 +5,7 @@
 */
 // A comparison whose boolean result is dropped is almost always a typo for an
 // assignment or a `cassert(...)`.
-comb foo(a:u8, b:u8) -> (z:bool) {
+comb foo(a:U8, b:U8) -> (z:Bool) {
   a == b    // locate_warning_here  (did you mean `z = a == b` or `cassert`?)
   z = a != b
 }

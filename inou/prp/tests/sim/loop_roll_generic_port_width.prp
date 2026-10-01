@@ -1,0 +1,80 @@
+/*
+:name: loop_roll_generic_port_width
+:type: simulation
+:expect_instances: u_loop_0=1 u_loop_1=1 u_loop_2=1
+*/
+// lhdtrack suggestions 1.2 — a comb TEMPLATE's generic-width port read or
+// carried by a ROLLED `for` loop (the default, `compile.unroll=false`) must keep
+// its declared width on the outlined `__loop` boundary.
+//
+// The comb inliner typed a generic-width param from its ACTUAL instead of
+// folding the declared bound (`16 * N`), and gave a generic-width OUTPUT no type
+// at all. When the actual could not type it either -- an io-port actual of 62+
+// bits (its exact range is not an i64, so only `bits` was recorded) or an
+// expression actual whose temp has no declared range (`a ^ b`) -- the loop
+// roller fell back to the TEMPLATE's io declaration `prim_type_int(ref %tmp,
+// 0)` and emitted a half-open `unsigned(max=nil, min=0)` boundary port: ONE
+// bit in Verilog and in sim.
+//
+//   w: 64-bit io actual (`literal * generic`), read by the loop
+//   x: expression actuals for both generic-width ports (`a ^ b` is the one
+//      that fails today; the `sel#[..]` temp is already typed)
+//   y: generic-width OUTPUT (`bits=W`) carried across iterations
+//
+// Every lane is a distinct pattern, so a truncated port cannot reproduce the
+// OR of the selected lanes. `:expect_instances:` pins the rolled form: the
+// unrolled fallback computes the right values and must not count as a fix.
+
+comb orsel<N=1>(sel:Unsigned(bits=N), data:Unsigned(bits=16 * N)) -> (o:U16) {
+  mut acc:U16 = 0
+  for i in 0..<N {
+    if sel#[i] == 1 { acc |= data#[(i * 16)..+16] }
+  }
+  o = acc
+}
+
+comb orlane<W=1>(sel:U4, data:Unsigned(bits=4 * W)) -> (o:Unsigned(bits=W)) {
+  o = 0
+  for i in 0..<4 {
+    if sel#[i] == 1 { o |= data#[(i * W)..+W] }
+  }
+}
+
+mod loop_roll_generic_port_width(sel:U4, wide:U64, a:U32, b:U32) -> (w:U16@[0], x:U16@[0], y:U8@[0]) {
+  w = orsel<N=4>(sel=sel, data=wide)
+  x = orsel<N=2>(sel=sel#[0..<2], data=a ^ b)
+  y = orlane<W=8>(sel=sel, data=a)
+}
+
+test loop_roll_generic_port_width.full_lanes {
+  mut dut = loop_roll_generic_port_width
+
+  tick 3 {
+    dut.wide = 0x8000_0400_0020_0001
+    dut.a    = 0x8004_2001
+    dut.b    = 0x0110_0220  // a ^ b = 0x8114_2221
+    if clock == 0 {
+      dut.sel = 0ub1011
+    } elif clock == 1 {
+      dut.sel = 0ub0110
+    } else {
+      dut.sel = 0ub1111
+    }
+
+    step
+
+    if clock == 0 {
+      assert(dut.w == 0x8021, "lanes 0, 1 and 3 of the 64-bit io actual")
+      assert(dut.x == 0xA335, "both lanes of the expression actual")
+      assert(dut.y == 0xA1, "bytes 0, 1 and 3 through the generic-width output carry")
+    } elif clock == 1 {
+      assert(dut.w == 0x0420, "lanes 1 and 2 of the 64-bit io actual")
+      assert(dut.x == 0x8114, "only lane 1 of the expression actual")
+      assert(dut.y == 0x24, "bytes 1 and 2 through the generic-width output carry")
+    } else {
+      assert(dut.w == 0x8421, "all four lanes of the 64-bit io actual")
+      assert(dut.x == 0xA335, "both lanes of the expression actual")
+      assert(dut.y == 0xA5, "all four bytes through the generic-width output carry")
+    }
+  }
+}

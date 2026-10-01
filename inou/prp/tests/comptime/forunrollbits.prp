@@ -16,8 +16,8 @@
 // fcall inliner's ability to propagate a return value through a mutated
 // local — that path is currently a separate gap (see [[bit-range-lhs-landed]]).
 
-comb count_bits(x:u6) -> (n:u32) {
-  mut acc:u32 = 0
+comb count_bits(x:U6) -> (n:U32) {
+  mut acc:U32 = 0
   for i in 0..<x.[bits] {
     acc = acc + 1
   }
@@ -29,8 +29,8 @@ cassert(count_bits(1)  == 6)
 cassert(count_bits(63) == 6)
 
 // Per-iteration `i` substitution: 0+1+2+3+4+5 = 15.
-comb sum_indices(x:u6) -> (s:u32) {
-  mut acc:u32 = 0
+comb sum_indices(x:U6) -> (s:U32) {
+  mut acc:U32 = 0
   for i in 0..<x.[bits] {
     acc = acc + i
   }

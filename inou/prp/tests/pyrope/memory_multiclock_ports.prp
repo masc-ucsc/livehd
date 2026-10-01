@@ -8,8 +8,10 @@
 // tolg treated the tuple as one scalar clock and failed on the unresolved
 // tuple reference; accepting it as a single shared clock would be a silent
 // miscompile, so memory_multiclock_test.py also inspects the emitted bindings.
-mod memory_multiclock_ports(wclk:bool, r0clk:bool, r1clk:bool, we:bool, wa:u2, ra0:u2, ra1:u2, wd:u2)
-    -> (q0:u2@[], q1:u2@[]) {
+// Each port's clock is a `Clock` (a `__memory` clock, like a register's, is
+// never data, a `Reset` or a constant).
+mod memory_multiclock_ports(wclk:Clock, r0clk:Clock, r1clk:Clock, we:Bool, wa:U2, ra0:U2, ra1:U2, wd:U2)
+    -> (q0:U2@[], q1:U2@[]) {
   mut cfg = (
     const addr      = (wa, ra0, ra1),
     const bits      = 2,
@@ -18,7 +20,7 @@ mod memory_multiclock_ports(wclk:bool, r0clk:bool, r1clk:bool, we:bool, wa:u2, r
     const din       = (wd, 0, 0),
     const enable    = (we, 1, 1),
     const fwd       = false,
-    const type      = 1,
+    const `type`       = 1,
     const wensize   = 1,
     const rdport    = (0, 1, 1),
   )

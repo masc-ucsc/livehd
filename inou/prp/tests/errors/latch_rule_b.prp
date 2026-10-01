@@ -7,8 +7,8 @@
 
 // A real Q-to-D computation while transparent must still be rejected.
 // Plain hold arms are covered by equiv/latch_match_exhaustive.prp.
-pub mod latch_rule_b(en:bool) -> (q:u4@[]) {
-  reg q:u4:[latch=true]
+pub mod latch_rule_b(en:Bool) -> (q:U4@[]) {
+  reg q:U4:[latch=true]
   if en {
     wrap q = q + 1
   }

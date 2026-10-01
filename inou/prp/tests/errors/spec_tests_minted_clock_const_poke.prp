@@ -1,0 +1,30 @@
+/*
+:name: spec_tests_minted_clock_const_poke
+:type: error
+:error: (Clock|clock).*constant
+*/
+// Spec (qa.md appendix section 6): "A module with registers and no `Clock`
+// (or `Reset`) input gets one MINTED: `clock:Clock` / `reset:Reset`"; "A Clock
+// can never be bound to a constant"; "Test harnesses declare/pass a real
+// Clock (no `clk=1`)". docs 05b "Running cycles (tick)": "A harness never
+// feeds a constant to a `Clock` input (`clk=1` is an error)".
+//
+// Rule pinned: the DUT's MINTED `clock:Clock` input is a Clock like a declared
+// one, so poking a constant into it from a test (`acc.clock = 1`) is the
+// constant-clock compile error.
+
+mod spec_mcc_cnt(en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_mcc.minted_const {
+  mut acc = spec_mcc_cnt
+  tick 4 {
+    acc.clock = 1        // locate_error_here
+    acc.en    = true
+    step
+  }
+  assert(acc.q == 4)
+}

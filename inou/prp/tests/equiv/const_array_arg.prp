@@ -5,9 +5,9 @@
 :pyrope_top: const_array_arg
 */
 // Independent XOR equations for two four-column binary matrices.
-pub comb const_array_arg(data:u4) -> (result:u8) {
-  mut a:u4 = 0
-  mut b:u4 = 0
+pub comb const_array_arg(data:U4) -> (result:U8) {
+  mut a:U4 = 0
+  mut b:U4 = 0
   if data#[0] != 0 { a = a ^ 9; b = b ^ 1 }
   if data#[1] != 0 { a = a ^ 6; b = b ^ 4 }
   if data#[2] != 0 { a = a ^ 3; b = b ^ 8 }

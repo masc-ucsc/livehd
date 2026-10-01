@@ -1,0 +1,24 @@
+/*
+:name: generic_width_tuple_field
+:type: equiv
+:verilog_top: generic_width_tuple_field
+:pyrope_top: generic_width_tuple_field
+*/
+
+// Suggestions 4.6 / ruling 2026-09-27 #7: `Unsigned(bits=N)` must work on a
+// TUPLE FIELD of a port type, input and output, with N a generic of the
+// lambda. Today prp2lnast only warns ("`Unsigned(...)` bound `bits` is not a
+// compile-time value" -- help: "... not on a tuple field type or a `<…>`
+// argument") and the specialization `pick__u8_bool_N_8_*` gets 1-bit
+// `req.addr` / `r.v` ports, so the emitted Verilog keeps bit 0 only (sim and a
+// Pyrope-side LEC inline it back and look right).
+mod pick<N=4>(req:(addr:Unsigned(bits=N), wr:Bool)) -> (r:(v:Unsigned(bits=N), hit:Bool)@[0]) {
+  r.v   = if req.wr { req.addr } else { 0 }
+  r.hit = req.wr and (req.addr == 5)
+}
+
+pub mod generic_width_tuple_field(a:U8, w:Bool) -> (y:U8@[0], h:Bool@[0]) {
+  const i = pick<N=8>(req=(addr=a, wr=w))
+  y = i.r.v
+  h = i.r.hit
+}

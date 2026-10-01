@@ -141,9 +141,9 @@ assert 'objective=area' in log and 'objective=timing' not in log, log
 # path must not prevent improving a tied endpoint in the enabled section.
 d = w/'mixed'; d.mkdir()
 source = d/'mixed.prp'
-source.write_text("""mod mixed(a:u64,b:u64,c:u64,d:u64) -> (y:u1@[0],z:u1@[0]) {
-  {::[color=2, ware=false, delay=500] y = a < b }
-  {::[color=3, ware=true, delay=500] z = c < d }
+source.write_text("""mod mixed(a:U64,b:U64,c:U64,d:U64) -> (y:U1@[0],z:U1@[0]) {
+  {::[color=2, ware=false, delay=500] y = U1(a < b) }
+  {::[color=3, ware=true, delay=500] z = U1(c < d) }
 }
 """)
 j=run('synth',source,'--top','mixed.mixed','--set',f'synth.liberty={lib}',

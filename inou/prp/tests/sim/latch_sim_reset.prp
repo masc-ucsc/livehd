@@ -21,8 +21,8 @@
 // (captures 43); the closed ticks in between HOLD. Asserts observe q only at
 // closed ticks per the observation-visibility rule, except k=0 where reset —
 // not transparency — determines the value.
-pub mod lrst8(en:bool, d:u8) -> (q:u8@[0]) {
-  reg l:u8:[latch=true] = 3
+pub mod lrst8(en:Bool, d:U8) -> (q:U8@[0]) {
+  reg l:U8:[latch=true] = 3
   q = l
   if en {
     l = d

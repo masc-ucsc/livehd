@@ -9,8 +9,8 @@
 // (`acc.reset = clock < 2`). VCD (`--set sim.vcd=true`) shows the clock toggling
 // and reset/inputs as ordinary traced signals.
 
-mod counter(enable:bool) -> (value:u8@[0]) {
-  reg count:u8 = 0
+mod counter(enable:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
 
   value = count                 // combinational read of count.q -> @[0]
 
@@ -20,7 +20,7 @@ mod counter(enable:bool) -> (value:u8@[0]) {
 // Test 1: enable held high, reset asserted for the first 2 cycles. The reset
 // input zeroes `count`, so it stays 0 during the 2-cycle window and then counts
 // for the remaining cycles -> cycles - 2.
-test counter.held_high(cycles:u20=20) {
+test counter.held_high(cycles:U20=20) {
   mut acc     = counter
   mut v_final = nil
   tick cycles {

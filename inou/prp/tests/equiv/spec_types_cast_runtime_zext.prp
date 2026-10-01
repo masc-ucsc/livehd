@@ -1,0 +1,22 @@
+/*
+:name: spec_types_cast_runtime_zext
+:type: equiv
+:verilog_top: spec_types_cast_runtime_zext
+:pyrope_top: spec_types_cast_runtime_zext
+:lec_expect: refuted
+*/
+// MUTATED pair (LEC soundness): spec_types_cast_runtime with the golden's `o6`
+// ZERO-extending `b` while Pyrope's `S8(b)` sign-extends it. The emitted Verilog
+// declares `input signed [3:0] b`, the golden `input [3:0] b`: the same four
+// wires, each side extending them by its OWN sign. Native `lhd lec` used to
+// restrict the shared input to the values both signs agree on (b in [0,7]) and
+// PROVED this pair; b = 4'b1xxx is exactly where the two outputs differ, so
+// both engines must REFUTE it.
+pub comb spec_types_cast_runtime_zext(a:U4, b:S4, f:Bool) -> (o1:S4, o2:U4, o3:U1, o4:Bool, o5:U8, o6:S8) {
+  o1 = Signed(a)    // reinterpret 4 bits: 0xF -> -1
+  o2 = Unsigned(b)  // reinterpret 4 bits: -1 -> 15
+  o3 = U1(f)
+  o4 = Bool(a)      // a != 0
+  o5 = U8(a)        // zero-extend
+  o6 = S8(b)        // sign-extend (the golden zero-extends)
+}

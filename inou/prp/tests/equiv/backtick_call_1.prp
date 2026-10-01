@@ -1,0 +1,15 @@
+/*
+:name: backtick_call
+:type: lec
+:lec_top: backtick_call
+*/
+// Same design with every parameter, output, generic and named-argument key
+// escaped. `` `N` `` declared as a generic used to stay `` `N` `` while the
+// body read N ("read of undefined variable 'N'").
+comb bt_f(`x`:U4, z:U4) -> (`o`:U5) { `o` = x + `z` }
+comb bt_g<`N`=1>(x:U4) -> (o:U8) { o = `x` + N }
+pub mod backtick_call(`a`:U4, b:U4) -> (y:U5@[0], `w`:U8@[0], v:U8@[0]) {
+  y = bt_f(`z`=b, `x`=a)
+  w = bt_g<`N`=5>(`x`=`a`)
+  `v` = `bt_g`(x=b)
+}

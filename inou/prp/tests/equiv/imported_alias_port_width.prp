@@ -1,0 +1,34 @@
+/*
+:name: imported_alias_port_width
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// Suggestions 2.3 row 6b -- a SILENT miscompile: an imported SCALAR type alias
+// used as a port type through an import binding that is not the file stem,
+// in the whole-file form (`pk.Byte`) and in the single-entry form
+// (`const Nib = import(".../types.Nib")`). Today it compiles with exit 0 and
+// emits `input signed a` -- ONE signed bit instead of `[7:0]` -- because the
+// imported-alias recovery (uPass_ssa flatten_assign, runner
+// imported_alias_range) looks the dotted prefix up as a UNIT name, and nothing
+// diagnoses a port type that resolves to nothing.
+//
+// The load-bearing `Nib` check is the CHILD boundary `nib_pass` (input and
+// output typed `Nib`) fed from the explicitly typed `c:S4`: the equiv LEC
+// reconciles the width/sign of a TOP INPUT, and an unresolved TOP OUTPUT type
+// takes its driver's width, so a top `n:Nib` / `m:Nib` alone cannot tell a
+// 1-bit port from a 4-bit one (a fix of `pk.Byte` alone still REFUTES here:
+// "diff k(ref=1 impl=15) @ c=1").
+const pk  = import("imported_alias_port_width/types")
+const Nib = import("imported_alias_port_width/types.Nib")
+
+mod nib_pass(x:Nib) -> (r:Nib@[0]) {
+  r = x
+}
+
+pub mod top(a:pk.Byte, b:pk.Byte, c:S4) -> (y:pk.Byte@[], m:Nib@[], k:S4@[]) {
+  y = a ^ b
+  m = c
+  k = nib_pass(x=c)
+}

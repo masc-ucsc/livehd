@@ -17,20 +17,20 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include "abc_salt.hpp"
 #include "abc_map.hpp"
-#include "region_cache.hpp"
+#include "abc_salt.hpp"
+#include "abc_satopt.hpp"
+#include "design_prepare.hpp"
 #include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "json_util.hpp"
 #include "liberty_dff.hpp"
-#include "loop_cleanup.hpp"
 #include "memory_module.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
 #include "pass_partition.hpp"
 #include "predict_abc_size.hpp"  // sat_add
-#include "abc_satopt.hpp"
+#include "region_cache.hpp"
 #include "satopt.hpp"
 #include "ware_module.hpp"
 
@@ -646,90 +646,23 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
         .emit();
     return;
   }
-  // Copy first so selective carry expansion and mapping leave the source
-  // graph untouched. Independent loops stay compact until mapped-body stitching.
-  hhds::GraphLibrary                        occurrence_library;
-  std::vector<std::shared_ptr<hhds::Graph>> occurrence_graphs;
-  for (const auto& source : var.graphs) {
-    if (!source) {
-      continue;
-    }
-    auto  io  = source->get_io();
-    auto* lib = io ? io->get_library() : nullptr;
-    if (lib == nullptr) {
-      livehd::diag::err("pass.abc", "scratch-copy", "internal")
-          .msg("could not copy '{}' into ABC's private physical library", source->get_name())
-          .emit();
-      return;
-    }
-    // copy_from is DEFINITION-LOCAL: it never pulls in a callee, and a copied
-    // parent resolves get_subnode_graph() through the DESTINATION library only.
-    // Copy the whole callee closure (as pass/lec's copy_loop_scratch does) so a
-    // child def that `var.graphs` does not happen to list still resolves here --
-    // otherwise its instances silently become blackboxes in the mapped netlist.
-    for (const auto& graph : source->definitions().graphs()) {
-      if (occurrence_library.find_io(graph->get_name())) {
-        continue;  // shared callee already copied for an earlier source
-      }
-      if (!occurrence_library.copy_from(*lib, graph->get_name())) {
-        livehd::diag::err("pass.abc", "scratch-copy", "internal")
-            .msg("could not copy '{}' into ABC's private physical library", graph->get_name())
-            .emit();
-        return;
-      }
-      // Definition traversal visits bodies only. Preserve opaque callee IOs
-      // too, so copied macro instances can still resolve their declarations.
-      for (const auto node : graph->body().nodes()) {
-        if (livehd::graph_util::type_op_of(node) == Ntype_op::Sub && node.get_subnode_io() && !node.get_subnode_graph()) {
-          livehd::partition::resolve_or_clone_subdef(&occurrence_library, node);
-        }
-      }
-    }
-  }
-  for (const auto& source : var.graphs) {
-    auto io = source ? occurrence_library.find_io(source->get_name()) : std::shared_ptr<hhds::GraphIO>{};
-    occurrence_graphs.push_back(io ? io->get_graph() : std::shared_ptr<hhds::Graph>{});
-  }
-  // Prepare every definition in the closure, including nested loop bodies.
-  std::vector<std::shared_ptr<hhds::Graph>> scratch_graphs;
-  for (const auto gid : occurrence_library.all_gids()) {
-    if (auto graph = occurrence_library.get_graph(gid)) {
-      scratch_graphs.push_back(std::move(graph));
-    }
-  }
-  livehd::synth::Loop_preparation loops;
-  if (!livehd::synth::prepare_loop_bodies(scratch_graphs,
-                                        unroll_carry_text == "true" || unroll_carry_text == "1" || unroll_carry_text == "on",
-                                        loops)) {
+  auto prepared
+      = livehd::synth::prepare_design(var.graphs,
+                                      unroll_carry_text == "true" || unroll_carry_text == "1" || unroll_carry_text == "on",
+                                      "pass.abc");
+  if (!prepared) {
     return;
   }
-  scratch_graphs.insert(scratch_graphs.end(), loops.shared_bodies.begin(), loops.shared_bodies.end());
+  auto& occurrence_graphs = prepared->roots;
+  auto& scratch_graphs    = prepared->definitions;
+  auto& resolve_graphs    = prepared->resolve_graphs;
+  auto& loops             = prepared->loops;
   if (truthy(var.get("stats", "false"))) {
     std::print("pass.abc loops: independent={} carried={} expanded={} retained={}\n",
                loops.independent,
                loops.carried,
                loops.expanded,
                loops.independent + loops.carried - loops.expanded);
-  }
-  // Def list handed to the hierarchy walks below (size gate, decomposition).
-  // resolve_order builds its gid2graph EXCLUSIVELY from the vector it gets, so a
-  // closure-only callee missing here is a Sub the DFS cannot follow and no
-  // region is ever built for it. `occurrence_graphs` (i.e. `var.graphs`) stays
-  // FIRST because top is the first matching entry and all_gids() is name-hash
-  // order: top selection must not depend on it.
-  std::vector<std::shared_ptr<hhds::Graph>> resolve_graphs = occurrence_graphs;
-  {
-    std::unordered_set<hhds::Gid> listed;
-    for (const auto& graph : occurrence_graphs) {
-      if (graph) {
-        listed.insert(graph->get_gid());
-      }
-    }
-    for (const auto& graph : scratch_graphs) {
-      if (listed.insert(graph->get_gid()).second) {
-        resolve_graphs.push_back(graph);
-      }
-    }
   }
 
   auto top                 = std::string{var.get("top", "")};
@@ -1075,8 +1008,8 @@ void Pass_abc::work_with(Eprp_var& var, const std::function<void(livehd::abc::Ma
 
   // Dead logic first (a dead `unique if` Hotmux survives compile for its
   // obligation): it must not become a region. satopt itself is not run here:
-  // it is part of the compile graph pipeline (`lhd synth` from a source turns
-  // it on), and the mapper maps what compile produced.
+  // it runs in the compile graph pipeline only when explicitly enabled, and
+  // the mapper maps what compile produced.
   uint64_t dead_nodes = 0;
   for (const auto& graph : scratch_graphs) {
     dead_nodes += livehd::satopt::drop_dead_logic(graph.get());

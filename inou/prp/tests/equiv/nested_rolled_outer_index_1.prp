@@ -1,0 +1,25 @@
+/*
+:name: nested_rolled_outer_index_1
+:lec_grep_not: negative-shift
+*/
+// A nested ROLLED loop reads the outer index (as sim/nested_rolled_outer_index
+// does for the values). Inside the lifted inner body the outer index is an
+// invariant input port whose storage type is a signed window ([-4, 3] for
+// 0..<4), and without its entry range `r#[i*4 + j]` warned (code
+// negative-shift) "shift amount may be negative" while `v[i]` failed outright
+// with "array index is negative". `lhd lec` echoes the compile diagnostics as
+// JSON lines (with their `code`), which is what `:lec_grep_not:` reads.
+pub mod nested_rolled_outer_index(m0:U4, m1:U4, m2:U4, m3:U4) -> (o:U16@[0]) {
+  mut v:[4]U4 = 0
+  v[0] = m0
+  v[1] = m1
+  v[2] = m2
+  v[3] = m3
+  mut r:U16 = 0
+  for i in 0..<4 {
+    for j in 0..<4 {
+      r#[i*4 + j] = v[i]#[j]
+    }
+  }
+  o = r
+}

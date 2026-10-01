@@ -13,7 +13,7 @@ mod madd<T>(a:T, b:T) -> (r:T@[0]) {
   r = a ^ b
 }
 
-pub mod top(x:u8, y:u8, w:u16, v:u16) -> (s8:u8@[0], s16:u16@[0]) {
-  s8  = madd(a=x, b=y)
-  s16 = madd<u16>(a=w, b=v)
+pub mod top(x:U8, y:U8, w:U16, v:U16) -> (`s8`:U8@[0], `s16`:U16@[0]) {
+  `s8`  = madd(a=x, b=y)
+  `s16` = madd<U16>(a=w, b=v)
 }

@@ -1,0 +1,21 @@
+/*
+:name: typed_local_overflow_runtime
+:type: error
+:tolg: 1
+:error: `t` \(range \[1, 16\]\) may not fit its declared range \[0, 15\]
+:help: apply a wrap/saturate policy
+*/
+// User ruling 2026-09-27 (lhdtrack suggestions, overflow rule): an assignment
+// into a TYPED local whose right-hand side MAY leave the declared range is a
+// mandatory compile error, fixed with an explicit `wrap t = ...` or
+// `sat t = ...` (sim/wrap_typed_local.prp). With x:U4, `x + 1` spans [1, 16],
+// one past what `t:U4` holds.
+//
+// Only comptime values were checked: this compiled silently, and the local
+// never truncated -- `y` read 16 for x = 15 (and `t = x + 16` emitted
+// `y = x + 16`).
+pub mod typed_local_overflow_runtime(x:U4) -> (y:U8@[0]) {
+  mut t:U4 = 0
+  t = x + 1   // locate_error_here
+  y = t
+}

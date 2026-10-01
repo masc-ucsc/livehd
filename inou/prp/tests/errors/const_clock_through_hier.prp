@@ -1,0 +1,31 @@
+/*
+:name: const_clock_through_hier
+:type: error
+:tolg: 1
+:error: .Clock. input .clk. of .cth_mid. is bound to a constant
+:help: omit .clk.
+*/
+
+// User ruling 2026-09-28 (27): the error is a REGISTER whose actual clock
+// resolves to a constant, through the instance hierarchy too. `cth_mid` has
+// no register of its own: its `clk` reaches `cth_leaf`'s reg `r` because the
+// call omits `clk`, so the implicit-clock auto-wire drives the leaf from
+// `cth_mid`'s own `clk` (ruling 12). Binding `clk=0` at the top therefore
+// clocks `r` by a constant: the error is at this call. Since ruling 52 both
+// `clk` inputs are `Clock`s, and a Clock is never bound to a constant.
+
+mod cth_leaf(clk:Clock, d:U4) -> (q:U4@[1]) {
+  reg r:U4 = 0
+  r = d
+  q = r
+}
+
+mod cth_mid(clk:Clock, d:U4) -> (q:U4@[1]) {
+  const l = cth_leaf(d=d)   // `clk` omitted: auto-wired from cth_mid's `clk`
+  q = l.q
+}
+
+pub mod const_clock_through_hier(d:U4) -> (q:U4@[1]) {
+  const m = cth_mid(clk=0, d=d)   // locate_error_here
+  q = m.q
+}

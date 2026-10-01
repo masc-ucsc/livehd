@@ -1,0 +1,13 @@
+/*
+:name: absent_field_one_member_import
+:type: error
+:files: inou/prp/tests/imports/lib_add.prp inou/prp/tests/imports/absent_field_one_member_import.prp
+:error: unknown field `nope`
+*/
+// The one-member import namespace twin of errors/absent_field_one_field_tuple.prp:
+// lib_add exports ONE pub entry (`my_add`), so its namespace is a one-named-field
+// bundle, and reading an entry it does not export is a compile error at the
+// read (never nil, never a silent scalar fallback onto `my_add`).
+const lib = import("lib_add")
+const f = lib.nope  // locate_error_here
+cassert(lib.my_add(a=1, b=2) == 3)

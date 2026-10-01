@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <vector>
 
 namespace livehd::usyn {
@@ -10,7 +11,7 @@ namespace livehd::usyn {
 using Id = uint32_t;
 
 // The admission bound on a truth table: its inputs.
-inline constexpr uint32_t max_logical_inputs = 12;
+inline constexpr uint32_t max_logical_inputs = 16;
 
 // The table's bit i is f(x), with x[j] = (i >> j) & 1. Storage is dynamic; the
 // bounded enumerator admits at most `max_logical_inputs` logical inputs.
@@ -33,8 +34,34 @@ struct Cube {
 enum class Status { feasible, search_exhausted, unsupported, invalid };
 const char* status_name(Status status);
 
+inline constexpr uint64_t unlimited_work = std::numeric_limits<uint64_t>::max();
+
+// How a finished run depended on its initial credits (Budget::credit_floor).
+// Any initial credits it `reproduces` replay the identical run: the same
+// decisions, results and consumed work.
+struct Credit_floor {
+  uint64_t work    = 0;      // credits the run consumed
+  uint64_t floor   = 0;      // least initial credits under which the same run happens
+  bool     bound   = false;  // the run depended exactly on its initial credits
+  uint64_t credits = 0;      // those initial credits when bound; 0 otherwise
+  bool     reproduces(uint64_t initial) const { return bound ? initial == credits : initial >= floor; }
+  bool     operator==(const Credit_floor&) const = default;
+};
+
 // Deterministic work budget for prime enumeration and selection. Exhaustion is
 // never an infeasibility certificate.
+//
+// Reproduction tracking: the initial credits are `consumed + remaining`. `floor`
+// is the least initial credits under which this same run happens and `bound`
+// means the run depended exactly on its initial credits. Every decision that
+// depends on the credits records its requirement: a successful spend needs
+// initial >= consumed afterwards; a spend refused for lack of work, or a failed
+// has(), sets `bound` (so does an overdrawn absorb); a Credit_share records what
+// each of its answers needs, and absorb() lifts a slice's requirement through
+// its size rule. Code must never branch on, or size anything from, `remaining`
+// directly (reporting a consumed delta is fine). A process/time admission
+// refusal (resource_exhausted) is not a reproduction fact: such a result must
+// never be reused.
 struct Budget {
   uint64_t              remaining;
   bool                  exhausted = false;
@@ -44,7 +71,65 @@ struct Budget {
   // Work between admission checks. A check samples the process (a syscall), so
   // it stays off the per-cut path; tests shorten it to hit a cancellation.
   uint64_t              admission_interval = 262144;
-  bool                  spend(uint64_t amount = 1);
+  uint64_t              consumed           = 0;
+  uint64_t              floor              = 0;
+  bool                  bound              = false;
+  // How slice() sized this budget from its parent; absorb() reads it.
+  struct Origin {
+    uint64_t consumed = 0, remaining = 0, cap = unlimited_work, divisor = 1, reserve = 0;
+  };
+  Origin origin{};
+
+  bool         spend(uint64_t amount = 1);
+  // remaining >= amount, recorded either way (a false answer binds the run).
+  bool         has(uint64_t amount = 1);
+  bool         available(uint64_t amount = 1) { return !exhausted && has(amount); }
+  // A child of min(cap, (remaining - reserve) / divisor) credits (zero when
+  // remaining <= reserve) that shares this budget's admission cadence: it
+  // resumes the current checkpoint instead of sampling on its first spend, and
+  // inherits sticky exhaustion/refusal.
+  Budget       slice(uint64_t cap, uint64_t divisor = 1, uint64_t reserve = 0) const;
+  // Charge a finished child created by slice(). Completed work always
+  // transfers, and no admission sample is taken while unwinding; a refusal the
+  // child observed stays sticky here. The child's reproduction requirement
+  // becomes this budget's: an unbound child needs its size to stay >= its
+  // floor; a bound child needs its exact size, which a cap-limited size keeps
+  // for remaining >= reserve + divisor*cap and a remaining-limited size binds.
+  void         absorb(const Budget& child);
+  Credit_floor credit_floor() const { return {consumed, floor, bound, bound ? consumed + remaining : 0}; }
+};
+
+// min(cap, remaining / divisor) read once from `budget` and compared later, a
+// sub-cap that other work shares. Each answer records only what it needs: an
+// answer that needs the value to stay >= y needs remaining >= divisor*y at the
+// read; one that needs it to stay <= y binds the run unless cap <= y.
+class Credit_share {
+public:
+  Credit_share(Budget& budget, uint64_t cap, uint64_t divisor = 1);
+  bool     exceeds(uint64_t x);  // value > x
+  uint64_t clamp(uint64_t x);    // min(value, x)
+
+private:
+  void     at_least(uint64_t y);
+  void     at_most(uint64_t y);
+  Budget&  budget_;
+  uint64_t consumed_, cap_, divisor_, value_;
+};
+
+// A Budget::slice charged back to its parent when it goes out of scope.
+class Work_slice {
+public:
+  Work_slice(Budget& parent, uint64_t cap, uint64_t divisor = 1, uint64_t reserve = 0)
+      : parent_(parent), work(parent.slice(cap, divisor, reserve)) {}
+  ~Work_slice() { parent_.absorb(work); }
+  Work_slice(const Work_slice&)            = delete;
+  Work_slice& operator=(const Work_slice&) = delete;
+
+private:
+  Budget& parent_;
+
+public:
+  Budget work;
 };
 
 struct Form {
@@ -66,8 +151,10 @@ struct Form {
 Form make_form(const Truth_table& table, uint32_t max_literals, uint32_t max_series, Budget& budget);
 Form make_form(const Truth_table& table, const Truth_table& care, uint32_t max_literals, uint32_t max_series, Budget& budget);
 bool check_form(const Truth_table& table, const Form& form, Budget& budget);
-// Exact minimum-literal SOP (ties: fewer cubes) of a total function of at most
-// 8 inputs, over primes of at most max_series literals. `factored` also counts
+// Minimum-literal SOP (ties: fewer cubes) of a total function of at most 8
+// inputs, over primes of at most max_series literals, when the bounded
+// (20000-node) branch and bound completes; otherwise the best cover found, at
+// least as good as the greedy seed and still reported feasible. `factored` also counts
 // the literals of an algebraic factoring of that SOP -- the transistors of a
 // series-parallel pull-down network -- and checks max_literals against that
 // count instead of the SOP's. A wider table falls back to make_form.

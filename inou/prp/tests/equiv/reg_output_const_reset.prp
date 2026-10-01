@@ -1,0 +1,21 @@
+/*
+:name: reg_output_const_reset
+:type: equiv
+:verilog_top: reg_output_const_reset
+:pyrope_top: reg_output_const_reset
+*/
+
+// Ruling 2026-09-28 #24: a plain `const` with a compile-time value is a
+// comptime binding, so it may be the reset value of a `-> (reg q = RST)`
+// output register, like a literal or a `comptime const`. The reset value is
+// the const's VALUE: the body `reg` declaration used to copy the default's
+// source TEXT, so `q` silently reset to the string "RST" (`q <= ("RST")`).
+const RST = 8
+comptime const RST2 = RST - 3
+
+pub mod reg_output_const_reset(en:Bool, d:U4) -> (reg q:U4@[0] = RST, reg p:U4@[0] = RST2) {
+  if en {
+    q = d
+    p = d ^ 3
+  }
+}

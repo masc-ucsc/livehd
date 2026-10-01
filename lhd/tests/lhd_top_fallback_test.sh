@@ -78,8 +78,8 @@ grep -q 'run semdiff' "$W/mdiff.out" && fail "tool diff --match printed the semd
 # ambiguous, so neither the bare entity nor a dotted spelling with a wrong
 # file part may resolve (the fallback matches the entity of both sides — lec's
 # rule — but only when UNIQUE). The exact full name still works.
-printf 'pub comb adder(a:s8) -> (r:s9) { r = a + 1 }\n' >"$W/x.prp"
-printf 'pub comb adder(a:s8) -> (r:s9) { r = a + 2 }\n' >"$W/y.prp"
+printf 'pub comb adder(a:S8) -> (r:S9) { r = a + 1 }\n' >"$W/x.prp"
+printf 'pub comb adder(a:S8) -> (r:S9) { r = a + 2 }\n' >"$W/y.prp"
 run compile "$W/x.prp" "$W/y.prp" --emit-dir lg:"$W/amb" --workdir "$W/w4"
 "$LHD" tool tree lg:"$W/amb" --top adder >/dev/null 2>&1 && fail "ambiguous entity --top must not resolve"
 "$LHD" tool tree lg:"$W/amb" --top zzz.adder >/dev/null 2>&1 && fail "ambiguous dotted --top must not resolve"

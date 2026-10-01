@@ -1,0 +1,23 @@
+/*
+:name: spec_memory_poweron_not_reset
+:type: equiv
+:verilog_top: spec_memory_poweron_not_reset
+:pyrope_top: spec_memory_poweron_not_reset
+*/
+// SPEC (docs 08-memories.md): "A `reg` array's initializer means exactly what a
+// scalar `reg`'s does: it is the **reset value** of every entry, and it is the
+// power-on contents too (the `initial` contents -- the wrapper's `INIT` parameter /
+// a Verilog `initial` block)." and "`initial=` alone, which is then power-on
+// contents only."
+// Rule encoded here: the emitted Verilog of `reg mem:[4]U8 = 3` carries the reset
+// (driven by the module's single Reset `zap`) AND an `initial` block; the `initial`
+// block is power-on contents only, so re-reading that Verilog must not turn it
+// into a second reset. The golden declares no power-on contents (an unknown start
+// is a don't-care on the reference side), so the pair must PROVE.
+pub mod spec_memory_poweron_not_reset(ck:Clock, zap:Reset, we:Bool, a:U2, d:U8, ra:U2) -> (q:U8@[0]) {
+  reg mem:[4]U8 = 3
+  q = mem[ra]
+  if we {
+    mem[a] = d
+  }
+}

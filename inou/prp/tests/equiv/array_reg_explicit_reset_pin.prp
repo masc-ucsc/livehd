@@ -25,10 +25,10 @@
 // one cycle on both sides and the ONLY thing under test is whether the reset
 // exists at all. The second half of the fix -- the sweep counter's own clock,
 // which came out as `always @(posedge 'hx /*cgen-miss*/)` when the memory named
-// its clock too -- is covered because `clock_pin=ref clk` is spelled here and
+// its clock too -- is covered because `clock_pin=clk` is spelled here and
 // any unclocked flop in the emission would refute.
-pub mod array_reg_explicit_reset_pin::[timecheck=false](clk:u1, rst:u1, we:u1, d:u8) -> (q:u8@[]) {
-  reg mem:[1]u8:[clock_pin=ref clk, reset_pin=ref rst, ordering="old"] = 0
+pub mod array_reg_explicit_reset_pin::[timecheck=false](clk:Clock, rst:Reset, we:U1, d:U8) -> (q:U8@[]) {
+  reg mem:[1]U8:[clock_pin=clk, reset_pin=rst, ordering="old"] = 0
   q = mem[0]
   if we != 0 {
     mem[0] = d

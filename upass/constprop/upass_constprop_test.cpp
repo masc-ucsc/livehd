@@ -295,6 +295,16 @@ TEST(UpassConstprop, FoldsBitNot) {
   EXPECT_EQ(cp.get_result("a").to_just_i64(), -1);
 }
 
+TEST(UpassConstprop, FoldsTypedBitNot) {
+  ConstpropFixture  f;
+  // bit_not(2, 3) — the typed `~` of a u3 (ruling 26) flips 3 bits: 7 - 2
+  auto              op = f.add_binary_node(Lnast_ntype::create_bit_not(), "a", 2, 3);
+  TestableConstprop cp(f.lm);
+  cp.position(op);
+  cp.push_from_cursor(&uPass_constprop::process_bit_not);
+  EXPECT_EQ(cp.get_result("a").to_just_i64(), 5);
+}
+
 TEST(UpassConstprop, FoldsGetMask) {
   ConstpropFixture  f;
   // 0x12345678#[0..=7] = 0x78

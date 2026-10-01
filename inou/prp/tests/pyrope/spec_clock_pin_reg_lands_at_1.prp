@@ -1,0 +1,18 @@
+/*
+:name: spec_clock_pin_reg_lands_at_1
+:type: compile
+*/
+// SPEC (clock lane): a body register clocked through an explicit `clock_pin`
+// lands like any body register: one cycle after the inputs that drive it
+// (`f = d` is written every cycle, so `q = f` is declared @[1]).
+//   ruling 83 (qa Q28, "Uniform @[1]"): "every mod body reg lands ONE cycle
+//     after the inputs that drive it, implicit-clock and explicit
+//     clock_pin/reset_pin alike (ruling 54's "@[0] state" exemption for
+//     explicit-pin regs is REVOKED); "Clock/Reset are not part of the
+//     timecheck" only means the Clock/Reset signals themselves carry no cycle."
+// The @[0] twin is errors/spec_clock_pin_reg_lands_at_1_decl0.prp.
+pub mod spec_clock_pin_reg_lands_at_1(ca:Clock, cb:Clock, d:U8) -> (q:U8@[1]) {
+  reg f:U8:[clock_pin=ca] = 0
+  f = d
+  q = f
+}

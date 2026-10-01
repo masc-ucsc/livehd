@@ -1,0 +1,26 @@
+/*
+:name: nested_lambda_file_const
+:type: equiv
+:verilog_top: nested_lambda_file_const
+:pyrope_top: nested_lambda_file_const
+*/
+
+// Ruling 2026-09-28 #24 (revises #4), the 06-functions.md `addx1` example:
+// name lookup is lexical, and a plain `const` whose value is a compile-time
+// constant is a comptime binding, so a lambda may read a file-scope
+// `const x = 2` -- as a value in the body (`addx1`) and as a width in a
+// signature (`l:Unsigned(bits=w)`). `w` is a const computed from another
+// const: still a compile-time constant. Before the ruling this was the
+// errors/nested_lambda_file_const.prp fixture ("'x' is a runtime value of the
+// enclosing scope").
+const x = 2
+const w = x * 2
+
+comb addx1(a:U8) -> (r:U8) {
+  r = (x + a)#[0..<8]
+}
+
+pub comb nested_lambda_file_const(a:U8) -> (r:U8, l:Unsigned(bits=w)) {
+  r = addx1(a=a)
+  l = a#[0..<w]
+}

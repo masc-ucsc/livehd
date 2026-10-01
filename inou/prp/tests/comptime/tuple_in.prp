@@ -16,7 +16,7 @@ cassert(not (9 in (1, 2, 3)))
 cassert(7 in (7,))                 // single-element array
 cassert(not (7 in ()))             // empty array ⇒ always false
 
-const a:u4 = 3
+const a:U4 = 3
 cassert(a in (1, 300, 3))          // mixed integer widths are allowed
 
 cassert(2 in (const first=1, const second=2)) // names do not affect membership

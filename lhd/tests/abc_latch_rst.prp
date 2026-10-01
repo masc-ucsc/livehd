@@ -2,8 +2,8 @@
 // reset_pin/initial, which pass.abc maps onto the Liberty's clear (bits that
 // reset to 0) and preset (bits that reset to 1) latch cells, or folds into D
 // and the enable when the library has no reset latch.
-pub mod abc_latch_rst(en:bool, d:u4) -> (q:u4@[0]) {
-  reg l:u4:[latch=true] = 6
+pub mod abc_latch_rst(en:Bool, d:U4) -> (q:U4@[0]) {
+  reg l:U4:[latch=true] = 6
   if en {
     l = d
   }

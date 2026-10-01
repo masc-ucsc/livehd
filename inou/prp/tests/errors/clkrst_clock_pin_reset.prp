@@ -1,0 +1,12 @@
+/*
+:name: clkrst_clock_pin_reset
+:type: error
+:tolg: 1
+:error: register `r` names `rs` as its clock_pin, but it is a `Reset`, not a Clock
+*/
+// docs 04b: `clock_pin` names a clock; a `Reset` is not one.
+pub mod clkrst_clock_pin_reset(ck:Clock, rs:Reset, d:U8) -> (q:U8@[0]) {
+  reg r:U8:[clock_pin=rs] = 0   // locate_error_here
+  if d != 0 { r = d }
+  q = r
+}

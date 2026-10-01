@@ -12,9 +12,9 @@
 // real silicon does too) cannot be reproduced by input driving alone. The
 // replay must WARN loudly (formalfail-replay-no-refire) instead of silently
 // writing a VCD in which the assert never fires.
-pub mod freeinit_cex(clock:u1, en:u1) -> (o:u8@[0]) {
-  reg r:u8  // never written: r holds its (free) power-on value forever
-  o = r & (u8(en) | 0xfe)
+pub mod freeinit_cex(clock:Clock, en:U1) -> (o:U8@[0]) {
+  reg r:U8  // never written: r holds its (free) power-on value forever
+  o = r & (U8(en) | 0xfe)
 }
 
 formal fi.props {

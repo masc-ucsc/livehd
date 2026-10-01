@@ -1,0 +1,23 @@
+/*
+:name: spec_clock_two_resets_child_unbound
+:type: error
+:tolg: 1
+:error: 2 `Reset` inputs
+*/
+// SPEC (clock lane): a caller with two or more `Reset` inputs must bind every
+// child `Reset` input explicitly.
+//   qa.md Appendix 7: "if the caller has 2+ Clocks (or Resets), every child
+//     Clock (Reset) input must be bound explicitly (else error)."
+//   docs 04b: "A caller with two or more `Clock` (or `Reset`) inputs must bind
+//     every child `Clock` (or `Reset`) input explicitly; leaving one unbound is
+//     a compile error."
+// (The Clock half is errors/clkrst_two_clocks_child_unbound.prp.)
+mod cnt(c:Clock, r:Reset, en:Bool) -> (q:U8@[0]) {
+  reg n:U8 = 0
+  if en { wrap n = n + 1 }
+  q = n
+}
+pub mod spec_clock_two_resets_child_unbound(ck:Clock, ra:Reset, rb:Reset, en:Bool) -> (o:U8@[0]) {
+  const x = cnt(en=en)
+  o = x.q
+}

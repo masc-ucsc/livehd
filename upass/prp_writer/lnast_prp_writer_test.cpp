@@ -531,8 +531,8 @@ TEST(LnastPrpWriter, ConcatPackMakesEveryLaneUnsigned) {
   ln->add_child(concat, Lnast_node::create_const("32"));
 
   const auto output = run_and_emit(ln, {"noop"});
-  EXPECT_NE(output.find("unsigned((hi)#[0..=32]) << 32"), std::string::npos) << output;
-  EXPECT_NE(output.find("unsigned((lo)#[0..=31])"), std::string::npos) << output;
+  EXPECT_NE(output.find("Unsigned((hi)#[0..=32]) << 32"), std::string::npos) << output;
+  EXPECT_NE(output.find("Unsigned((lo)#[0..=31])"), std::string::npos) << output;
   EXPECT_EQ(output.find(" & 4294967295"), std::string::npos) << output;
 }
 
@@ -552,7 +552,7 @@ TEST(LnastPrpWriter, ConcatReplicationStaysCompact) {
   }
 
   const auto output = run_and_emit(ln, {"noop"});
-  EXPECT_NE(output.find("if unsigned((enable)#[0]) != 0"), std::string::npos) << output;
+  EXPECT_NE(output.find("if Unsigned((enable)#[0]) != 0"), std::string::npos) << output;
   EXPECT_NE(output.find("0x00000000000000003ffffffffffffffff"), std::string::npos) << output;
   EXPECT_EQ(output.find("enable <<"), std::string::npos) << output;
 }
@@ -580,7 +580,7 @@ TEST(LnastPrpWriter, ConcatDropsProvenLaneMaskAndZeroLane) {
 
   const auto output = run_and_emit(ln, {"noop"});
   EXPECT_NE(output.find("z = lo"), std::string::npos) << output;  // the whole pack IS the low lane
-  EXPECT_EQ(output.find("unsigned"), std::string::npos) << output;
+  EXPECT_EQ(output.find("Unsigned"), std::string::npos) << output;
   EXPECT_EQ(output.find("<<"), std::string::npos) << output;
 }
 

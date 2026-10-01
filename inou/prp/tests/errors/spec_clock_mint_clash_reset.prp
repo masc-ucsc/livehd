@@ -1,0 +1,19 @@
+/*
+:name: spec_clock_mint_clash_reset
+:type: error
+:tolg: 1
+:error: minting `reset:Reset` clashes with its non-Reset input `reset`
+*/
+// SPEC (clock lane): minting `reset:Reset` when a non-Reset input already
+// uses the name `reset` is a compile error.
+//   qa.md Appendix 6: "A module with registers and no `Clock` (or `Reset`) input
+//     gets one MINTED: `clock:Clock` / `reset:Reset`. If a non-Clock/non-Reset
+//     input already uses that name, it is a compile error."
+//   docs 04b: "(a non-`Reset` input named `reset`), minting is a compile error."
+// (The `clock` half is errors/clkrst_mint_collision.prp.)
+pub mod spec_clock_mint_clash_reset(clk:Clock, reset:Bool, d:U8) -> (q:U8@[0], p:Bool@[0]) {
+  reg r:U8 = 0
+  r = d
+  q = r
+  p = reset
+}

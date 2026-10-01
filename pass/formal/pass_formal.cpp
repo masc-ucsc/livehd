@@ -557,6 +557,12 @@ void Pass_formal::work(Eprp_var& var) {
         if (pr.kind != "assume") {
           continue;  // hierarchy preflight owns contract assumptions only
         }
+        if (pr.instance.empty() && pr.aclass == "input") {
+          // The root's OWN IO assume: nothing above the root binds it, and the
+          // flat pass below checks it in this very frame, so it is not a child
+          // contract of this preflight (one diagnostic, never a "child" twin).
+          continue;
+        }
         auto& st = hier_props[prop_key(occurrences[i].base_node())];
         st.node  = occurrences[i].base_node();
         ++st.total;
@@ -625,8 +631,11 @@ void Pass_formal::work(Eprp_var& var) {
     if (!active_graphs.empty() && !active_graphs.contains(std::string(g->get_name()))) {
       continue;
     }
-    // is_top: the graph is the design boundary — the explicit --top (by module
-    // name, tolerating a "unit." prefix) or, absent that, a root no Sub instantiates.
+    // is_top: the graph is a design boundary — the explicit --top (by module
+    // name, tolerating a "unit." prefix, even when something instantiates it) or
+    // any root no Sub instantiates, whether or not --top names another module:
+    // nothing above an uninstantiated root binds its inputs, so a refuted assert
+    // or plain assume there fails the build like one in the top.
     std::string_view gname       = g->get_name();
     auto             dot         = gname.rfind('.');
     std::string_view gmod        = (dot == std::string_view::npos) ? gname : gname.substr(dot + 1);
@@ -642,14 +651,9 @@ void Pass_formal::work(Eprp_var& var) {
     // `obligation` says whether a skip costs the design a kept runtime check
     // (an assert / assume / one-hot question) or is merely a diagnostic probe
     // (the vacuity sweep); only the former is counted in the summary.
-    // `skipped` (optional) tells the caller the query never ran, so it can tell
-    // that default from a real Unknown when the difference matters.
-    auto ask = [&](auto&& query, bool obligation = true, bool* skipped = nullptr) -> formal::Query_out {
+    auto ask = [&](auto&& query, bool obligation = true) -> formal::Query_out {
       if (budget.spent()) {
         budget.skipped += obligation ? 1 : 0;
-        if (skipped) {
-          *skipped = true;
-        }
         return {};
       }
       if (budget.bounded()) {
@@ -750,18 +754,16 @@ void Pass_formal::work(Eprp_var& var) {
     // self-proof). Only PROVEN assumes become hypotheses for the asserts below
     // (sound: proven facts) and are exposed to pass.abc as don't-cares.
     std::vector<hhds::Pin_class>  proven_assumes;
-    // Set when a hypothesis was ACCEPTED WITHOUT PROOF (assume_nocheck, an
-    // unreachable top IO assume, or formal.assume_check=false). Such a hypothesis
-    // can be false — or jointly contradictory — so the elisions it enables are
-    // conditional and the obligations must stay in the persisted graph for
-    // `lhd formal verify` / `lhd lec` to re-adjudicate.
+    // Set when a hypothesis was ACCEPTED WITHOUT PROOF (assume_nocheck or
+    // formal.assume_check=false). Such a hypothesis can be false — or jointly
+    // contradictory — so the elisions it enables are conditional and the
+    // obligations must stay in the persisted graph for `lhd formal verify` /
+    // `lhd lec` to re-adjudicate.
     bool                          unchecked_hypotheses = false;
     // The assume NODES stamped proven WITHOUT proof: assume_nocheck /
-    // assume_check=false, plus the selected-top IO assume (that one also carries a
-    // runtime_check, so only its `proven` stamp is a retraction concern).
-    // Individually-proven assumes are all true in the design simultaneously, so a
-    // joint contradiction can only come from this set — and only this set has to
-    // be retracted below.
+    // assume_check=false. Individually-proven assumes are all true in the design
+    // simultaneously, so a joint contradiction can only come from this set — and
+    // only this set has to be retracted below.
     std::vector<hhds::Node_class> unchecked_assume_nodes;
     for (auto& node : props) {
       auto parts = fprop_parts(node);
@@ -797,59 +799,11 @@ void Pass_formal::work(Eprp_var& var) {
         }
         continue;
       }
-      bool skipped = false;
-      auto out     = ask([&] { return prover.is_true(cond); }, /*obligation=*/true, &skipped);
-      if (skipped) {
-        // Out of budget the query never ran, so `out.stateful` is the default
-        // (false) -- NOT a classification. The branch below promotes a top assume
-        // to an active hypothesis (persisted as `proven`, consumed by LEC) on
-        // that flag alone, so classify it here from the solver-free cone walk:
-        // a state-dependent assume must stay a runtime check, never a hypothesis
-        // nothing checked. An unsupported cone counts as stateful (conservative).
-        out.stateful = prover.stateful_cone(cond);
-      }
-      if (is_top && !out.stateful && !cond.is_const()) {
-        // A selected top has no parent that can discharge a precondition over
-        // its primary IO. It is therefore an environment constraint by
-        // construction: keep it active as a hypothesis here instead of failing
-        // the build. Descendant input assumes do NOT take this path; their
-        // actual call-site bindings are checked top-rooted by verify/LEC and by
-        // the hierarchy-aware compile preflight below.
-        //
-        // Stamp BOTH, because the two attributes answer two different questions
-        // and this hypothesis needs both answers:
-        //   * `proven` is the ONLY channel that tells the persisted-graph
-        //     consumers the hypothesis is active — pass/lec/encode.cpp seeds
-        //     prop_active_assume from it, and lhd_kernel_formal counts it for the
-        //     "unchecked assume(s)" disclosure. Without it `lhd lec` compares the
-        //     FULL input space and REFUTES a design that is equivalent only under
-        //     the constraint (LEC's `assume_nocheck` spelling rule is an
-        //     ADDITIONAL entry point, not a substitute).
-        //   * `runtime_check` keeps the obligation in the emitted netlist: the
-        //     verdict was never Proven, so eliding the `assume(...)` would leave a
-        //     violating environment caught NOWHERE at compile time (unprovable
-        //     here is not an error). cgen_verilog honors the pair — a deferred
-        //     runtime check beats the `proven` stamp. Note only a VERILOG
-        //     simulation of that netlist executes it (it is emitted inside
-        //     `synthesis translate_off`); LiveHD's own simulator skips every
-        //     fproperty Sub, proven or not (inou/cgen/cgen_sim.cpp).
-        // `lhd formal verify` needs neither stamp: it re-derives this top_input
-        // class structurally (pass/lec/query occ_aclass).
-        gu::set_proven(node, gu::kFormalAssume);
-        gu::set_runtime_check(node, gu::kFormalAssume);
-        proven_assumes.push_back(cond);
-        unchecked_assume_nodes.push_back(node);  // proven WITHOUT proof -> retract on a joint contradiction
-        unchecked_hypotheses = true;
-        if (warn_assume) {
-          livehd::diag::warn("pass.formal", "formal-top-assume", "comptime")
-              .msg("top-level IO assume in '{}'{} cannot be checked; treating it as an unchecked environment constraint",
-                   g->get_name(),
-                   parts.loc.empty() ? std::string{} : " at " + parts.loc)
-              .hint("it stays active as a hypothesis for assertion verification and LEC, and as a runtime check in the netlist")
-              .emit();
-        }
-        continue;
-      }
+      // Every plain assume is an obligation (docs 05-assert), a selected-top IO
+      // one included: a top has no parent that could establish it, so over its
+      // free inputs it is refuted unless it is a tautology. The
+      // environment-contract spelling is assume_nocheck (above).
+      auto out = ask([&] { return prover.is_true(cond); });
       if (out.verdict == formal::Verdict::Proven) {
         gu::set_proven(node, gu::kFormalAssume);
         proven_assumes.push_back(cond);  // only PROVEN assumes become hypotheses (sound)

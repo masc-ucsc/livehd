@@ -7,5 +7,5 @@
 // A sized cast `uN`/`sN` is CHECKED, not truncating (07-typesystem). A
 // compile-time constant that overflows the target is a compile error — use a
 // `wrap`/`sat` prefix to drop bits intentionally (`wrap val = 0x1F0`).
-mut val:u8 = 0
-val = u8(0x1F0)
+mut val:U8 = 0
+val = U8(0x1F0)

@@ -1,0 +1,14 @@
+/*
+:name: spec_types_reserved_named_arg
+:type: error
+:error: reserved type word
+*/
+// SPEC qa.md appendix section 1: "`U<N>`/`S<N>`/`Unsigned`/`Signed`/`Bool`/`String`/`Clock`/`Reset` are RESERVED type
+// words: they cannot be declared as variable/port/parameter/field names; a variable with that spelling must be
+// backticked". Section 7: "Reserved `U<N>`/`S<N>` = `U`/`S` followed by ANY digit string (U0, U1333, U99999999),
+// reserved EVERYWHERE including after `.` (fields/attributes)."
+// Rule: a type word can not be used as a NAMED ARGUMENT (the parameter is backticked).
+comb f(`Clock`:U8) -> (o:U8) { o = `Clock` }
+pub comb spec_types_reserved_named_arg(a:U8) -> (o:U8) {
+  o = f(Clock=a)  // locate_error_here
+}

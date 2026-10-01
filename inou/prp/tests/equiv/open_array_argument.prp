@@ -1,0 +1,11 @@
+/*
+:name: open_array_argument
+:type: lec
+:lec_top: top
+*/
+pub mod top(a:U8,b:U8,c:U8) -> (x:U10@[],y:U10@[],z:U10@[],w:U10@[]) {
+  x = a + b
+  y = a + b + c
+  z = a + b
+  w = a + b + c
+}

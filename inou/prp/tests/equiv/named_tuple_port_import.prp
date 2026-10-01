@@ -1,0 +1,54 @@
+/*
+:name: named_tuple_port_import
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// Suggestions 2.3 row 6, imported half: a NAMED tuple type from another file
+// used as a PORT type -- through a whole-file import binding (`pk.Req_t`,
+// where the binding `pk` is not the file stem), through a single-entry import
+// (`const Pair_t = import(".../types.Pair_t")`), and through a local re-alias
+// of an imported type (`type Loc_t = pk.Req_t`, triage r6j); as a top input,
+// a top output written field by field, and a child input and output. All of
+// them keep the port as ONE width-less leaf (uPass_ssa flatten_assign never
+// expands a named tuple type slot, and the imported-type lookup takes the
+// dotted prefix as a UNIT name), so every field read resolves to nil. Today:
+// "upass.tolg: unresolved reference '%<tmp>' — it has no driver"; the output
+// field stores alone fail with "tuple/field store to 'q' has no hardware
+// lowering".
+//
+// The CHILD uses (`pxor`, `mkreq`, `rdreq`) are fed from explicitly typed
+// inputs so they also pin each field's WIDTH: the equiv LEC reconciles the
+// width of a TOP input, so the top `req`/`p` ports alone only pin the layout.
+const pk     = import("named_tuple_port_import/types")
+const Pair_t = import("named_tuple_port_import/types.Pair_t")
+
+type Loc_t = pk.Req_t
+
+mod pxor(p:Pair_t) -> (s:U4@[0]) {
+  s = p.lo ^ p.hi
+}
+
+mod mkreq(a:U8, d:U8) -> (q:pk.Req_t@[0]) {
+  q.addr  = a
+  q.write = true
+  q.data  = d
+}
+
+mod rdreq(r:Loc_t) -> (x:U8@[0]) {
+  x = (r.addr + r.data)#[0..<8]
+}
+
+pub mod top(req:pk.Req_t, p:Pair_t, lo:U4, hi:U4, a:U8, d:U8)
+  -> (y:U8@[], w:Bool@[], s:U4@[], `s2`:U4@[], x:U8@[], o:pk.Req_t@[]) {
+  y  = req.addr ^ req.data
+  w  = req.write
+  s  = p.lo ^ p.hi
+  `s2` = pxor(p=(lo=lo, hi=hi))
+  const m = mkreq(a=a, d=d)
+  x  = rdreq(r=m.q)
+  o.addr  = a
+  o.write = req.write
+  o.data  = d ^ a
+}

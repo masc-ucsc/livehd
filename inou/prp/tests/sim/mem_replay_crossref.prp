@@ -1,0 +1,99 @@
+/*
+:name: mem_replay_crossref
+:type: simulation
+*/
+// A same-cycle memory read that replays the cycle's earlier writes in logic
+// may itself feed another replayed access; every such use must see the
+// REPLAYED value. Same shapes as equiv/mem_replay_crossref.prp and
+// equiv/mem_replay_whole_copy.prp: after a clear, `tv` and `id` are program-order
+// reads that feed a write of `m` (data) and of `n` (address and data), a
+// partial write of `n` merges over that write, `c = m` copies the replayed
+// contents, and the valid bit `vl[ra]`, cleared in the same cycle, gates a
+// write of `dt`. The replay once read the committed values there: `kr` saw
+// the loaded 0x2a instead of 0x11, `n[1]` merged into 0x2a, `kc` read the
+// committed m[0], and `dt[0]` took tv (0x15, not 0x2d) although its valid bit
+// was cleared. The reads of the write cycle are captured into registers.
+mod mem_replay_crossref(ld:Bool, clr:Bool, w:Bool, p:Bool, cp:Bool, cap:Bool, a:U2, d:U6, ra:U2, rb:U2, x:U3) -> (kt_q:U6@[0], kr_q:U6@[0], kc_q:U6@[0], q:U6@[0], c_q:U6@[0], qd:U6@[0]) {
+  reg ix:[4]U2 = nil
+  reg m:[4]U6 = nil
+  reg n:[4]U6:[ordering="old"] = nil
+  reg c:[4]U6 = nil
+  reg vl:[4]Bool = false
+  reg dt:[4]U6:[ordering="old"] = nil
+  reg kt:U6 = 0
+  reg kr:U6 = 0
+  reg kc:U6 = 0
+
+  kt_q = kt
+  kr_q = kr
+  kc_q = kc
+
+  if ld {
+    m[a]  = d
+    ix[a] = d#[0..<2]
+  }
+  if w {
+    vl[a] = true
+  }
+  if clr {
+    ix = 1
+    m  = 0x11
+    vl = false
+  }
+  const tv = m[ra]
+  const id = ix[ra]
+  const g  = vl[ra]
+  if w {
+    m[a]  = tv
+    n[id] = tv
+  }
+  if p {
+    n[id]#[0..<3] = x
+  }
+  if g {
+    dt[ra] = tv
+  }
+  if p {
+    dt[ra]#[0..<3] = x
+  }
+  if cp {
+    c = m
+  }
+  const r  = m[a]
+  const cr = c[ra]
+  if cap {
+    kt = tv
+    kr = r
+    kc = cr
+  }
+  q   = n[rb]
+  c_q = c[rb]
+  qd  = dt[ra]
+}
+
+test mem_replay_crossref.chains {
+  mut t = mem_replay_crossref
+  tick 6 {
+    t.reset = clock < 2
+    t.ld    = clock == 2
+    t.clr   = clock == 4
+    t.w     = clock == 2 or clock == 4
+    t.p     = clock == 4
+    t.cp    = clock == 4
+    t.cap   = clock == 4
+    t.a     = if clock == 2 { 0 } else { 3 }
+    t.d     = 0x2a
+    t.ra    = 0
+    t.rb    = 1
+    t.x     = 5
+    step
+    if clock == 5 {
+      assert(t.kt_q == 0x11, "a read after the clear sees the clear")
+      assert(t.kr_q == 0x11, "a read after `m[a] = tv` sees the replayed tv")
+      assert(t.kc_q == 0x11, "the copy `c = m` stores m as the clear left it")
+      assert(t.q == 0x15, "the partial write merges over the replayed write of n[id]")
+      assert(t.c_q == 0x11, "the copy lands")
+      assert(t.qd == 0x2d, "a valid bit cleared before the read gates the data write off")
+    }
+  }
+}

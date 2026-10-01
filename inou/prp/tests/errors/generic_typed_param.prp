@@ -1,0 +1,15 @@
+/*
+:name: generic_typed_param
+:type: error
+:error: generic parameter `W` cannot declare a type \(`W:U8`\)
+:help: cassert\(W does U8\)
+*/
+
+// User ruling 2026-09-28 (19): a generic is macro substitution with no
+// constraint clause (docs 06-functions), so a typed generic parameter
+// `<W:U8>` is a compile error that points at `cassert(W does U8)`. Before the
+// ruling prp2lnast silently dropped the `:U8`: `typed_bits<W=300>` compiled
+// and `W.[bits]` read the value's width, not 8.
+
+comb typed_bits<W:U8>(x) -> (r) { r = W + x }   // locate_error_here
+cassert(typed_bits<W=300>(x=0) == 300)

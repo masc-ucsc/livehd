@@ -1,0 +1,24 @@
+// Native directed vectors for icg_cell_hier.v (the `sim` tier of
+// tests/slang_compile.sh): each `step` is one whole reference `clk` cycle.
+const dut = import("lg:icg_cell_hier")
+
+test icg_cell_hier.gate_up_and_down {
+  mut acc  = dut
+  mut i:U8 = 0
+  tick 6 {
+    acc.en = (i <= 1) or (i == 4)
+    acc.d  = 10 + i
+    step
+    mut want:U8 = 10
+    if i >= 1 {
+      want = 11
+    }
+    if i >= 4 {
+      want = 14
+    }
+    assert(acc.up == want, "UP: a gate cell's output clocks the parent's flop")
+    assert(acc.down == want, "DOWN: the gated clock reaches a child's clock port")
+    assert(acc.ctl == 10 + i, "CONTROL: the ungated flop loads every cycle")
+    i += 1
+  }
+}

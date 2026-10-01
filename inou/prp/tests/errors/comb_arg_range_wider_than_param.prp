@@ -1,0 +1,22 @@
+/*
+:name: comb_arg_range_wider_than_param
+:type: error
+:tolg: 1
+:error: argument .a. \(range \[[01], 16\]\) in call to .low4. may not fit its declared range \[0, 15\]
+:help: an argument never narrows implicitly
+*/
+// User ruling 2026-09-27: the argument check is on the actual's RANGE, not
+// only on its declared type. `x + 1` with x:U4 spans [1, 16], one past what
+// `a:U4` holds, so it is the same compile error as a u16 actual (see
+// comb_arg_wider_than_param). A value that provably fits (`x#[0..<3] + 1`,
+// [1, 8]) needs no annotation; one that may not needs an explicit
+// `wrap`/`sat` assignment into a typed variable first.
+//
+// Today this compiles silently and the inlined comb returns 16 for x = 15.
+comb low4(a:U4) -> (o:U4) {
+  o = a
+}
+
+pub mod comb_arg_range_wider_than_param(x:U4) -> (y:U8@[0]) {
+  y = low4(a=x + 1)   // locate_error_here
+}

@@ -5,11 +5,11 @@
 :pyrope_top: mix
 */
 
-const capture_val = 1
+comptime const capture_val = 1
 
-const capture_delay = 2
+comptime const capture_delay = 2
 
-pub mod mix(a:u8) -> (x:u8@[0], y:u8@[capture_delay]) {
-  x = a + capture_val
+pub mod mix(a:U8) -> (x:U8@[0], y:U8@[capture_delay]) {
+  wrap x = a + capture_val
   stage[capture_delay] y = a
 }

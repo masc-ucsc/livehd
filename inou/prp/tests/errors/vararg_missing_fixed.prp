@@ -1,0 +1,8 @@
+/*
+:name: vararg_missing_fixed
+:type: error
+:error: missing required argument `c` in call to `gg`
+*/
+
+comb gg(c:U32, ...rest) -> (r) { r = c }
+const r = gg(a=2, b=2) // locate_error_here

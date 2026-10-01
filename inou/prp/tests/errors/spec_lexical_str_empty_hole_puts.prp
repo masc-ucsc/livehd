@@ -1,0 +1,10 @@
+/*
+:name: spec_lexical_str_empty_hole_puts
+:type: error
+:error: empty interpolation hole
+*/
+// qa.md appendix 8: "`{}` inside a string is ALWAYS an error (no positional
+// placeholders, not even in puts/print)." (Q34 answer: "Always an error".)
+const x = 1
+const y = 2
+puts("a={} b={}", x, y)   // locate_error_here

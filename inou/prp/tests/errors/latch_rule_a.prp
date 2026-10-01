@@ -16,8 +16,8 @@
 // being committed. Unlike rule B above this is a REAL violation of the model's
 // precondition, so the fix is a better latch model (or an explicit refusal that
 // does not block the whole module), not a checker relaxation.
-pub mod latch_rule_a::[timecheck=false](d:u2) -> (q:u2@[]) {
-  reg state:u2:[latch=true]
+pub mod latch_rule_a::[timecheck=false](d:U2) -> (q:U2@[]) {
+  reg state:U2:[latch=true]
   q = 0ub??
   if d != state {
     state = d

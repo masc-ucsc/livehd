@@ -1,0 +1,14 @@
+/*
+:name: typeword_lowercase_field
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+// Former lowercase type spellings are ordinary identifiers (07-typesystem.md).
+pub comb typeword_lowercase_field(a:U8) -> (o:U8) {
+  const t = (const u4 = 1)
+  wrap o = a + t.`u4`
+}
+
+cassert(typeword_lowercase_field(a=3) == 4)

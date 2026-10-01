@@ -1,0 +1,27 @@
+/*
+:name: capture_fold_ref_arg
+:type: error
+:error: 's' is a runtime value of the enclosing scope; it is not visible inside lambda 'f'
+:help: pass 's' as an input
+*/
+
+// User ruling 2026-09-28 (32): an enclosing const is visible in a nested
+// lambda iff its value folds. A call that passes `m` by `ref` WRITES it, so
+// `s` depends on the call's runtime argument `a`: reading `s` in `f` is an
+// error. Before, the capture slice saw only plain assignments to `m`, so `f`
+// silently replayed `mut m:U8 = 3` alone and read s == 3 while the mod body
+// read s == 3 + a (a silent miscompile).
+comb addby(ref x:U8, by:U8) -> () {
+  wrap x = x + by
+}
+
+pub mod capture_fold_ref_arg(a:U8) -> (o:U8@[0], o2:U8@[0]) {
+  mut m:U8 = 3
+  addby(ref m, by=a)
+  const s = m
+  comb f(x:U8) -> (y:U8) {
+    wrap y = x + s  // locate_error_here
+  }
+  o  = f(x=0)
+  o2 = s
+}

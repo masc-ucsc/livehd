@@ -1,0 +1,13 @@
+/*
+:name: spec_types_specialized_name
+:type: compile
+:expect_instances: u_spec_types_specialized_name.leaf__U8*=1 u_spec_types_specialized_name.leaf__S4*=1 *=2
+*/
+// SPEC qa.md appendix section 6 (decided mechanically with the migration): "specialized module names use the
+// canonical type spelling (`foo__U8`)". Rule: a generic mod specialized on U8 / S4 is named `leaf__U8` /
+// `leaf__S4` (the instance names embed the specialized module name), never the banned `leaf__u8` spelling.
+mod leaf<T>(a:T) -> (y:T@[0]) { y = a }
+pub mod spec_types_specialized_name(x:U8, s:S4) -> (z:U8@[0], w:S4@[0]) {
+  z = leaf<T=U8>(a=x)
+  w = leaf<T=S4>(a=s)
+}

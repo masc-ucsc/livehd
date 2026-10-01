@@ -1,0 +1,13 @@
+/*
+:name: spec_lexical_str_hole_newline
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// docs 02-basics "Strings": "A raw newline inside either kind of string is a
+// syntax error (write `\n`); inside a `{...}` interpolation hole a newline is
+// ordinary whitespace."
+const n = 5
+const s = "{n +
+  1}"
+cassert(s == "6")

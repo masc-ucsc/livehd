@@ -14,8 +14,8 @@
 // used to emit `long _drv_w[] = {18446744073709551712, ...}` and fail to
 // build), and the replay must RE-FIRE the assert (wide drives ride the
 // string/from_pyrope plane, exact at any width).
-pub mod wide_cex(clock:u1, reset:u1, w:u65) -> (o:u8@[0]) {
-  reg r:u65 = 0
+pub mod wide_cex(clock:Clock, reset:Reset, w:U65) -> (o:U8@[1]) {  // `r = w`: `r` lands at @[1] (ruling 83)
+  reg r:U65 = 0
   o = r#[0..=7]
   r = w
 }

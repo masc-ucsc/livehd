@@ -44,15 +44,23 @@ bool write_file(const std::string& path, std::string_view bytes) {
 // `lhd pyrope fmt` — format Pyrope sources. inputs are opts.files[1..] (files[0]
 // is the `fmt` sub-command word). Mirrors clang-format: prints the formatted
 // source to stdout by default; -i/--inplace rewrites each file; -o/--output
-// writes to a file (one input only).
+// writes to a file (one input only). The default AI mode has no width limit and
+// no vertical alignment (stable, diff-friendly output); --mode human wraps at
+// --width and aligns.
 int run_fmt(const lhd::Options& opts) {
   std::vector<std::string> inputs(opts.files.begin() + 1, opts.files.end());
   if (inputs.empty()) {
     livehd::diag::err("lhd.pyrope.fmt", "no-input", "io")
         .msg("no input files")
-        .hint("usage: lhd pyrope fmt FILE… [-i] [-o OUT] [--indent N] [--width N] [--verify]")
+        .hint("usage: lhd pyrope fmt FILE… [-i] [-o OUT] [--mode ai|human] [--indent N] [--width N] [--verify]")
         .emit();
     return 1;
+  }
+  if (!opts.fmt_human && opts.fmt_width > 0) {
+    livehd::diag::warn("lhd.pyrope.fmt", "width-ignored", "io")
+        .msg("--width {} has no effect in ai mode (the default; no width limit)", opts.fmt_width)
+        .hint("pass --mode human to wrap at a width")
+        .emit();
   }
   if (opts.fmt_inplace && !opts.fmt_output.empty()) {
     livehd::diag::err("lhd.pyrope.fmt", "conflicting-options", "io")
@@ -77,9 +85,16 @@ int run_fmt(const lhd::Options& opts) {
       continue;
     }
 
-    char*  out     = nullptr;
-    size_t out_len = 0;
-    int rc = prpfmt_format_string(src.data(), src.size(), opts.fmt_indent, opts.fmt_width, opts.fmt_verify ? 1 : 0, &out, &out_len);
+    char*     out     = nullptr;
+    size_t    out_len = 0;
+    const int rc      = prpfmt_format_string_mode(src.data(),
+                                                  src.size(),
+                                                  opts.fmt_indent,
+                                                  opts.fmt_width,
+                                                  opts.fmt_human ? PRPFMT_HUMAN : PRPFMT_AI,
+                                                  opts.fmt_verify ? 1 : 0,
+                                                  &out,
+                                                  &out_len);
     if (rc == 2) {
       livehd::diag::err("lhd.pyrope.fmt", "parse-failed", "syntax")
           .msg("'{}' did not parse", path)
@@ -143,7 +158,8 @@ int run_style(const lhd::Options& opts) {
     return 1;
   }
   const style::Options config{opts.style_min_repeats, opts.style_max_block_statements, opts.style_max_findings};
-  int                  status = 0;
+  int                  status      = 0;
+  bool                 suggestions = false;
   for (size_t i = 1; i < opts.files.size(); ++i) {
     const auto& path = opts.files[i];
     std::string src;
@@ -207,12 +223,16 @@ int run_style(const lhd::Options& opts) {
           .attr("total_findings", std::to_string(report.total_findings))
           .attr("shown_findings", std::to_string(report.findings.size()))
           .emit();
+      suggestions |= report.total_findings > 0;
     } catch (const std::exception& e) {
       livehd::diag::err("lhd.pyrope.style", "analysis-failed", "internal").msg("'{}': {}", path, e.what()).emit();
       status = 1;
     }
   }
-  return status;
+  // Failures (1) win over suggestions (2) so scripts can tell them apart. An
+  // invalid invocation never reaches here: it is a usage error, which also
+  // exits 2 (exit_code_for).
+  return status != 0 ? status : (suggestions ? 2 : 0);
 }
 
 }  // namespace

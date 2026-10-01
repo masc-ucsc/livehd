@@ -1,0 +1,21 @@
+/*
+:name: mod_arg_wider_than_input
+:type: error
+:tolg: 1
+:error: argument .a. \(range \[0, 65535\]\) in call to .low4m. may not fit its declared range \[0, 15\]
+:help: an argument never narrows implicitly
+*/
+// User ruling 2026-09-27 (lhdtrack suggestions 1.1-d): a `mod` input narrower
+// than the actual bound to it is a compile error, exactly like a comb
+// parameter. The caller writes `low4m(a=x#[0..<4])`.
+//
+// Today this compiles silently and the design means two different things: the
+// LGraph (sim, LEC) passes all 16 bits through the instance, while the emitted
+// Verilog connects `x` to a 4-bit port and truncates.
+mod low4m(a:U4) -> (o:U4@[0]) {
+  o = a
+}
+
+pub mod mod_arg_wider_than_input(x:U16) -> (y:U16@[0]) {
+  y = low4m(a=x)   // locate_error_here
+}

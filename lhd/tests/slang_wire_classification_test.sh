@@ -96,8 +96,8 @@ echo "PASS: acyclic multi-write net stays mut (no wire over-promotion), recompil
 
 # ── (3) stateful child body built after parent → refresh the Sub loop break ────
 cat >"$W/State.prp" <<'EOF'
-pub mod State(clock:u1, d:u8) -> (q:u8@[]) {
-  reg r:u8 = 0
+pub mod State(`clock`:Clock, d:U8) -> (q:U8@[]) {
+  reg r:U8 = 0
   r = d
   q = r
 }
@@ -105,10 +105,10 @@ EOF
 cat >"$W/Top.prp" <<'EOF'
 const State = import("State.State")
 
-pub mod Top::[timecheck=false](clock:u1, a:u8, sel:u1) -> (y:u8@[]) {
-  wire q:u8 = nil
-  mut m:u8 = if sel != 0 { q } else { a }
-  mut state = State::[name=state](clock=clock, d=m)
+pub mod Top::[timecheck=false](`clock`:Clock, a:U8, sel:U1) -> (y:U8@[]) {
+  wire q:U8 = nil
+  mut m:U8 = if sel != 0 { q } else { a }
+  mut state = State::[name=state](`clock`=`clock`, d=m)
   q = state
   y = q
 }

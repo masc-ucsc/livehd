@@ -3,17 +3,17 @@
 :type: simulation
 :expect_instances: u_loop_0=2 core=1 *=3
 */
-mod loop_worker(x:u8) -> (y:u16@[0]) {
-  mut sum:u16 = 0
+mod loop_worker(x:U8) -> (y:U16@[0]) {
+  mut sum:U16 = 0
   for j in 0..<4 { sum = sum + x + j }
   y = sum
 }
 
-mod loop_hierarchy(x:u8) -> (y:u16@[0]) {
-  mut sum:u16 = 0
+mod loop_hierarchy(x:U8) -> (y:U16@[0]) {
+  mut sum:U16 = 0
   for i in 0..<2 {
     const core = loop_worker::[name=core](x=x)
-    sum = sum + core
+    wrap sum = sum + core   // core is a U16 port: the sum may not fit
   }
   y = sum
 }

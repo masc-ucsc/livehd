@@ -1,0 +1,10 @@
+/*
+:name: spec_types_cast_sized_fits
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// SPEC docs 07-typesystem "Bitwidth": "val = U8(200)  // OK: 200 fits U8, reinterprets through unchanged".
+mut val:U8 = 0
+val = U8(200)
+cassert(val == 200)

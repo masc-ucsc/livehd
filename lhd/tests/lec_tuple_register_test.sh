@@ -31,14 +31,17 @@ def run(label, source, expected):
         assert rc != 0, (label, payload)
 
 for label, edit in [('good', lambda s: s),
-                    ('missing_flush', lambda s: s.replace('reset | flush', 'reset')),
+                    ('missing_flush', lambda s: s.replace('`reset` | flush', '`reset`')),
                     ('wrong_enable', lambda s: s.replace('enable != 0', 'enable == 0')),
                     ('wrong_reset', lambda s: s.replace('= 0\n', '= 1\n'))]:
     root = work / label
     (root / 'generic_tuple_register').mkdir(parents=True)
     source = root / fixture.name
     shutil.copyfile(fixture, source)
-    (root / 'generic_tuple_register/cell.prp').write_text(edit(helper.read_text()))
+    original = helper.read_text()
+    mutated = edit(original)
+    assert label == 'good' or mutated != original, (label, 'mutation did not change the fixture')
+    (root / 'generic_tuple_register/cell.prp').write_text(mutated)
     run(label, source, 'proven' if label == 'good' else 'refuted')
 
 # A whole exported bundle must retain its specialized tuple types and state.

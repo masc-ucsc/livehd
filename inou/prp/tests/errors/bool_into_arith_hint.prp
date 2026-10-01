@@ -1,0 +1,20 @@
+/*
+:name: bool_into_arith_hint
+:type: error
+:error: operator .\^. requires integer operands
+:help: ^(?!.*(?<!Un)Signed\().*U1\(
+*/
+
+// A `Bool` in integer arithmetic is an error (no implicit bool<->int
+// conversion), and the HINT must point at the bool->bit idiom `U1(flag)`
+// (true == 1; 06-functions.md "Boolean ports"). Today it reads "cast
+// explicitly (e.g. `Signed(b)`, `Signed(true)==-1`)", steering the user to
+// `Signed(flag)`, which reinterprets true as the 1-bit signed value -1: with
+// v = 5, `v ^ Signed(true)` is -6 (every bit flips, sign-extended) while
+// `v ^ U1(true)` is 4. The :help: regex requires `U1(` AND rejects any hint
+// that still offers `Signed(` for a bool.
+
+comb bool_into_arith_hint(v:U4) -> (q:U4) {
+  const flag:Bool = v != 0
+  q = v ^ flag   // locate_error_here
+}

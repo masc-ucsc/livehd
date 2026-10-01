@@ -1,0 +1,16 @@
+/*
+:name: array_bit_assign_rolled
+:type: lec
+:lec_top: array_bit_assign_rolled
+*/
+// PYROPE-vs-PYROPE group (README "Pyrope <-> Pyrope variants"), lhdtrack
+// suggestions.md 2.2(e). This file is the REFERENCE: two rows of the pairwise
+// matrix br_arb_lru expands (upper triangle = a[j], lower triangle = ~a[i],
+// diagonal 0), written out by hand with no loop and no array.
+//   row 2: j=0,1 -> ~a[2]; j=2 -> 0; j=3 -> a[3]
+//   row 1: j=0 -> ~a[1];   j=1 -> 0; j=2 -> a[2]; j=3 -> a[3]
+pub mod array_bit_assign_rolled(a:U4) -> (q:U4@[0], r:U4@[0]) {
+  const n2 = a#[2] ^ 1
+  q = (a#[3] << 3) | (n2 << 1) | n2
+  r = (a#[3] << 3) | (a#[2] << 2) | (a#[1] ^ 1)
+}

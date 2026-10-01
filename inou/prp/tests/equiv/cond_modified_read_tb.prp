@@ -13,11 +13,11 @@ test cond_modified_read.sig {
   mut sig = 0
   tick 1000 {
     s_ = s_ * 6364136223846793005 + 1442695040888963407
-    acc.s = s_ & 0x1
+    acc.s = Bool(s_ & 0x1)
     s_ = s_ * 6364136223846793005 + 1442695040888963407
-    acc.b = s_ & 0x1
+    acc.b = Bool(s_ & 0x1)
     step
-    sig = sig * 1099511628211 + (acc.g & 0x1)
+    sig = sig * 1099511628211 + (U1(acc.g) & 0x1)
   }
   assert((sig & 0x3FFFFFFFFFFFFFFF) == 0, "signature mismatch vs iverilog golden cond_modified_read")
 }

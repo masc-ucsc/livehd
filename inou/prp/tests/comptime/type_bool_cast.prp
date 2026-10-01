@@ -1,0 +1,16 @@
+/*
+:name: type_bool_cast
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// Ruling 52 (2026-09-29, supersedes ruling 37): `Bool` is both the type name
+// and the cast `Bool(x)`; the old `bool`/`boolean` spellings are banned words
+// (errors/typeword_renamed_bool.prp, typeword_renamed_boolean.prp).
+const t:Bool = Bool(1)
+const f:Bool = Bool(0)
+cassert(t)
+cassert(not f)
+cassert(Bool(33) or false)
+cassert(U1(t) == 1)

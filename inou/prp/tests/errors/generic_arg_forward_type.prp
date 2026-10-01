@@ -1,0 +1,19 @@
+/*
+:name: generic_arg_forward_type
+:type: error
+:error: unknown type or lambda 'Pixel' in a generic argument
+:help: declare `Pixel` before
+*/
+
+// User ruling 2026-09-28 (33), call-site half: an explicit generic argument
+// names a type or lambda declared EARLIER, like a generic default
+// (errors/generic_default_forward_type.prp).
+comb pass<T>(a:T) -> (y:T) {
+  y = a
+}
+
+pub mod generic_arg_forward_type(a:U8) -> (o:U8@[0]) {
+  o = pass<T=Pixel>(a=a)  // locate_error_here
+}
+
+type Pixel = U8

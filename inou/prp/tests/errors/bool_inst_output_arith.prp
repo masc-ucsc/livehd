@@ -1,0 +1,27 @@
+/*
+:name: bool_inst_output_arith
+:type: error
+:tolg: 1
+:error: requires integer operands \(.*:Bool
+*/
+
+// User ruling 2026-09-27: a child's `Bool` OUTPUT is a bool at the call site
+// (06-functions.md: `child.flag` is typed `Bool`), so using it as an integer
+// operand needs `U1(...)`. Today the operator typecheck sees an instance
+// output (named `c.rdy` or destructured `rdy`) as kind `unknown`, so both
+// lines compile silently; the identical expression with a local `Bool` is an
+// error. This is the lhdtrack harness shape (`acc ^ dut.flag`).
+//
+// Legal spelling: `v ^ U1(c.rdy)` and `cnt ^ U1(rdy)`.
+
+mod leaf(go:Bool, n:U4) -> (rdy:Bool@[0], cnt:U4@[0]) {
+  rdy = go and n != 0
+  cnt = if go { n } else { 0 }
+}
+
+pub mod bool_inst_output_arith(v:U4) -> (q:U4@[0], r:U4@[0]) {
+  const c = leaf(go=v != 0, n=v)
+  const (rdy, cnt) = leaf(go=v == 3, n=v)
+  q = v ^ c.rdy     // locate_error_here
+  r = cnt ^ rdy     // locate_error_here
+}

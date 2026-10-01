@@ -1,0 +1,30 @@
+/*
+:name: comb_output_overflow_runtime
+:type: error
+:tolg: 1
+:error: `o` \(range \[[01], 16\]\) (does|may) not fit its declared range \[0, 15\]
+:help: (apply a wrap/saturate policy|`wrap`/`sat`)
+*/
+// A comb OUTPUT is a declared type like any other variable: `o:U4` holds
+// [0, 15], and `o = a + 1` with a:U4 can produce 16. An unannotated narrowing
+// assignment is a compile error (docs 04b "wrap and sat modifier": "Every
+// narrowing assignment must annotate locally ... at every overflow-risking
+// line"; docs 07 "The current should never exceed the constrained or a compile
+// error is generated"), so the fix is `wrap o = a + 1` or `sat o = a + 1`.
+// errors/comb_output_overflow_provable.prp is the case where every value
+// overflows; this one only MAY overflow (x = 15), which is what the docs rule
+// makes an error. Existing fixtures that rely on a silent may-overflow wrap
+// (e.g. equiv/reserved_word_signal.prp `packed = a + 1`) need a `wrap` prefix
+// when this rule lands.
+//
+// Today it compiles silently and the declared width is never applied to the
+// inlined comb: x = 15 returns 16 through an `o:U4` output, while the
+// standalone Verilog `module inc` (and the same body written as a `mod`) wraps
+// to 0.
+comb inc(a:U4) -> (o:U4) {
+  o = a + 1   // locate_error_here
+}
+
+pub mod comb_output_overflow_runtime(x:U4) -> (y:U8@[0]) {
+  y = inc(a=x)
+}

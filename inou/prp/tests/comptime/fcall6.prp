@@ -18,9 +18,9 @@ comb apply_each(ref self, f) {
 
 // Tuple type carrying `map` as a method that takes a function argument
 comptime const Triple = (
-  mut a:s32 = 0,
-  mut b:s32 = 0,
-  mut c:s32 = 0,
+  mut a:S32 = 0,
+  mut b:S32 = 0,
+  mut c:S32 = 0,
   const map = apply_each,
 )
 

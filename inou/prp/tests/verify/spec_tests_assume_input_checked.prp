@@ -1,0 +1,32 @@
+/*
+:name: spec_tests_assume_input_checked
+:type: verify
+:top_module: spec_aic_cnt
+:verify_bound: 10
+:verify_proven: 0
+:verify_refuted: 2
+:verify_replay: fired
+*/
+// Spec: ruling 58 (lhdtrack rulings 2026-09-30, REVISES ruling 36): "Every
+// plain `assume` is ALWAYS CHECKED (an obligation), in the design body and in
+// formal blocks alike ... `assume_nocheck(expr)` is the only form that
+// constrains without checking." docs 05-assert: "A refuted `assume` is a build
+// error -- it can never silently prune a real counterexample."
+//
+// Rule pinned: a plain formal-block `assume(not acc.enable)` over the top's
+// primary input is an obligation. Nothing forces a free input to hold false,
+// so the assume is REFUTED, it constrains nothing, and `count != 5` is
+// REFUTED too (the counter reaches 5). The counterexample replay re-fires the
+// refuted assume, embedded as an assert, while driving the minted reset.
+// The environment-constraint spelling is spec_tests_assume_input_env.
+pub mod spec_aic_cnt(enable:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
+  value = count
+  if enable { wrap count += 1 }
+}
+
+formal spec_aic.frozen {
+  mut acc = spec_aic_cnt
+  assume(not acc.enable)
+  assert(acc.count != 5, "frozen counter")
+}

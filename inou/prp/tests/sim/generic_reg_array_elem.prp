@@ -1,0 +1,58 @@
+/*
+:name: generic_reg_array_elem
+:type: simulation
+*/
+// lhdtrack suggestions.md 2.2(a): an ARRAY whose ELEMENT width is a generic,
+// `[N]Unsigned(bits=N)`, must lower like the literal `[4]U4` it specializes to
+// (user ruling 2026-09-27 #7: `Unsigned(bits=N)` works everywhere, array
+// elements included).
+//
+// It did not: prp2lnast only desugars a generic `bits=N` bound on a SCALAR
+// declaration type (prelower_type_bounds). Nested under `[N]` the bound was
+// dropped with a `type-bound-not-comptime` warning and the element became
+// `prim_type_int(nil, 0)`, so
+//   * `reg r:[N]Unsigned(bits=N)` -> "upass.tolg: memory 'r' element type must
+//     be a sized integer or bool";
+//   * `mut m:[N]Unsigned(bits=N)` -> "upass.tolg: array 'm' requires a sized
+//     scalar element type".
+// `reg r:[N]U4` (generic COUNT, literal element) and a scalar
+// `reg r:Unsigned(bits=N)` always worked.
+//
+// 13 needs all four bits of the N=4 binding: an element that fell back to the
+// generic's DEFAULT (N=2) reads back 1, and `s` would be 3 instead of 15.
+mod dly2<N=2>(en:Bool, d:Unsigned(bits=N)) -> (q:Unsigned(bits=N)@[0], s:Unsigned(bits=N)@[0]) {
+  reg r:[N]Unsigned(bits=N) = 0
+  if en {
+    r[1] = r[0]
+    r[0] = d
+  }
+  q = r[1]
+
+  mut m:[N]Unsigned(bits=N) = 0
+  m[0]   = d
+  m[N-1] = d ^ ((1 << N) - 1)
+  s = m[0] ^ m[N-1]              // all ones of the element width
+}
+
+pub mod generic_reg_array_elem(en:Bool, d:U4) -> (q:U4@[0], s:U4@[0]) {
+  const x = dly2<N=4>(en=en, d=d)
+  q = x.q
+  s = x.s
+}
+
+test generic_reg_array_elem.held {
+  mut dut   = generic_reg_array_elem
+  mut early = 99
+  mut s_ok  = true
+  tick 12 {
+    dut.reset = clock < 2
+    dut.en    = clock < 7
+    dut.d     = if clock < 7 { 13 } else { 5 }
+    step
+    if clock == 1 { early = dut.q }
+    if dut.s != 15 { s_ok = false }
+  }
+  assert(early == 0, "reset value of every entry")
+  assert(dut.q == 13, "two enabled stages of a u4 element, then held")
+  assert(s_ok, "mut [N]unsigned(bits=N) lanes are N bits wide")
+}

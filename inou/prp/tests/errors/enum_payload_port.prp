@@ -1,0 +1,22 @@
+/*
+:name: enum_payload_port
+:type: error
+:error: port `c` of `.*m`: type `Color` gives a port no width
+:help: an enum without payloads
+*/
+
+// User ruling 2026-09-28 (29): an enum-typed port carries the enum's integer
+// encoding. An enum with PAYLOADS (a tagged union, 03-bundle.md) has none, so
+// it cannot type a port: before, the port harvested width-less and lowered as
+// ONE SIGNED bit, silently.
+
+type Rgb = (r:U8, g:U8, b:U8)
+enum Color:Rgb = (Yellow = 0xffff00, Red = 0xff0000)
+
+mod m(c:Color) -> (o:U8@[0]) {  // locate_error_here
+  o = 1
+}
+
+pub mod enum_payload_port(x:U8) -> (y:U8@[0]) {
+  y = m(c=Color.Red)
+}

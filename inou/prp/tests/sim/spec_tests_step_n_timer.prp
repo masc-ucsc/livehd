@@ -1,0 +1,26 @@
+/*
+:name: spec_tests_step_n_timer
+:type: simulation
+*/
+// Spec: docs 05b "Test only statements": "`step [ncycles]` advances the
+// simulation one cycle (or `ncycles`)". docs 09-verification cocotb map:
+// "`await Timer(5 cycles)` | `step 5`"; "`step N` covers `await Timer(N
+// cycles)`".
+//
+// Rule pinned: a bare `step 5` in a test body (outside any tick) advances the
+// DUT five clock edges; a following `step` advances one more.
+
+mod counter(enable:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
+  value = count
+  if enable { wrap count += 1 }
+}
+
+test counter.timer {
+  mut acc = counter
+  acc.enable = true
+  step 5
+  assert(acc.value == 5, "`step 5` is five edges")
+  step
+  assert(acc.value == 6)
+}

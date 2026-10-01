@@ -2,22 +2,22 @@
 // reductions, popcount, tuple concat, and while at the top scope (the
 // upass per-op dispatch), plus a typed comb pair so lambda units flow
 // through pass.prp_writer.
-comb helper(a:u8, b:u8) -> (r:u16) { r = u16(a) + u16(b) }
+comb helper(a:U8, b:U8) -> (r:U16) { r = U16(a) + U16(b) }
 
-pub comb rich(x:u8, y:u8) -> (z:u16) {
+pub comb rich(x:U8, y:U8) -> (z:U16) {
   const nb  = ~x
   const ng  = -y
   const sx  = x#sext[0..=3]
   const tup = (const lo=x, const hi=y)
   const lo2 = tup.lo
   const hs  = helper(a=x, b=y)
-  z = u16(u8(nb & 0xff)) + u16(sx & 0xf) + u16(lo2) + hs + u16(ng + 256)
+  z = U16(U8(nb & 0xff)) + U16(sx & 0xf) + U16(lo2) + hs + U16(ng + 256)
 }
 
 const A = 0ub00000000 + 0xb5
-cassert(signed(A#&[..]) == 0)
-cassert(signed(A#|[..]) == -1)   // u1(1) reinterpreted as s1 is -1
-cassert(signed(A#^[..]) == -1)   // XOR also returns u1
+cassert(Signed(A#&[..]) == 0)
+cassert(Signed(A#|[..]) == -1)   // u1(1) reinterpreted as s1 is -1
+cassert(Signed(A#^[..]) == -1)   // XOR also returns u1
 cassert(A#+[..] == 5)
 
 mut j = 0
@@ -31,6 +31,6 @@ cassert(w == 20)
 const t3 = (...(1, 2), ...(3, 4))
 cassert(t3[3] == 4)
 
-type MyT = (mut f:u8 = 0)
+type MyT = (mut f:U8 = 0)
 mut mv:MyT = (f=1)
 cassert(mv.f == 1)

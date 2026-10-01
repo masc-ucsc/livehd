@@ -1,0 +1,20 @@
+/*
+:name: generic_arg_runtime
+:type: error
+:error: of `g` is `n`, a runtime value: a generic is bound at compile time
+:help: pass a runtime value as a call argument
+*/
+
+// Ruling 2026-09-28 #24 (clarification): a read never becomes nil. A generic
+// is bound at compile time, so binding one to a runtime value (`n` is computed
+// from the input `a`) is a direct error at the call. It used to bind `n` as a
+// type NAME, which read as nil in the callee body: the indirect upass.tolg
+// "unresolved reference 'inl1_n'" located at the callee.
+comb g<N>(x:U8) -> (y:U8) {
+  y = (x + N)#[0..<8]
+}
+
+pub comb generic_arg_runtime(a:U8) -> (o:U8) {
+  const n = a ^ 1
+  o = g<N=n>(x=a)  // locate_error_here
+}

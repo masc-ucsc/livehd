@@ -1,0 +1,12 @@
+/*
+:name: spec_memory_range_index_oob
+:type: error
+:error: out|bound|outside
+*/
+
+// SPEC (docs 08-memories.md, Array index): "mut x4:[100..<132]U3 = nil /
+// cassert(x4[100] == 0) / assert(x4[3]) // error: out of bounds index"
+// Rule encoded here: index 3 is outside the declared index range 100..<132.
+
+mut x4:[100..<132]U3 = nil
+const v = x4[3]   // locate_error_here

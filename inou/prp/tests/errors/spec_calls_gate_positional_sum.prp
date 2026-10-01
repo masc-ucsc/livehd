@@ -1,0 +1,13 @@
+/*
+:name: spec_calls_gate_positional_sum
+:type: error
+:error: must be named|ambiguous|name the argument|named|pin
+*/
+
+// qa.md Appendix §8: "`__` basic gates are ordinary calls: all arguments named
+// with the LGraph pin names (graph/cell.cpp, e.g. ... `__sum(as=.., bs=..)`
+// ...) unless a call naming exception applies; ambiguous is an error."
+// `__sum` has two pins (`as`, `bs`), so two unnamed integer operands match
+// neither by name nor by a unique type.
+
+const r = __sum(3, 4) // locate_error_here

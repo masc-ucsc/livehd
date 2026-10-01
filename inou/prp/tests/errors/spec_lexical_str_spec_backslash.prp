@@ -1,0 +1,9 @@
+/*
+:name: spec_lexical_str_spec_backslash
+:type: error
+:error: or a backslash
+*/
+// qa.md Q39 item 9 / appendix 8: "backslash inside a format spec
+// (`"{x:\x4}"`) -> error"; docs 02-basics: `const bad8 = "{num:\x41}"`.
+const num = 2
+const s = "{num:\x41}"   // locate_error_here

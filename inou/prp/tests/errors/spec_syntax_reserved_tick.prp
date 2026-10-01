@@ -1,0 +1,10 @@
+/*
+:name: spec_syntax_reserved_tick
+:type: error
+:error: 'tick' is reserved, so it cannot be a variable name
+:help: backticks
+*/
+// docs 05b-statements.md "Running cycles": "`tick` and `step` are reserved words ... so
+// `const tick = 1` and `mut step = 1` are errors; write `` `tick` `` and `` `step` `` instead."
+// (docs 15-tbd.md "Other parser rules").
+const tick = 1   // locate_error_here

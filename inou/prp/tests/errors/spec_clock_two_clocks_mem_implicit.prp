@@ -1,0 +1,18 @@
+/*
+:name: spec_clock_two_clocks_mem_implicit
+:type: error
+:tolg: 1
+:error: 2 `Clock` inputs
+*/
+// SPEC (clock lane): with two `Clock` inputs there is no implicit clock, so a
+// memory (a register array) without `clock_pin` is a compile error.
+//   qa.md Appendix 1: "Zero or one Clock input = implicit; two or more require
+//     `clock_pin=ref x`" (Appendix 6: written without `ref`)
+//   docs 04b: "Two or more `Clock` inputs leave no implicit clock: every
+//     register must name its clock with `clock_pin=x`"
+//   docs 01b: "Memories are register arrays: `reg mem:[256]U32 = 0`."
+pub mod spec_clock_two_clocks_mem_implicit(ca:Clock, cb:Clock, we:Bool, wa:U2, wd:U8, ra:U2) -> (q:U8@[0]) {
+  reg m:[4]U8 = nil
+  if we { m[wa] = wd }
+  q = m[ra]
+}

@@ -10,7 +10,7 @@
 // shadowing, which Pyrope forbids in code blocks and lambdas.
 // Doc: ../docs/docs/pyrope/04-variables.md "Variable scope".
 
-mut c:u10 = 0
+mut c:U10 = 0
 for c in 0..=9 {   // locate_error_here  (iterator `c` shadows the outer `mut c`)
   cputs("hello {c}")
 }

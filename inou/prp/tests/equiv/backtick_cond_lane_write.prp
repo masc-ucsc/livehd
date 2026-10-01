@@ -11,7 +11,7 @@
 // set_mask_base probed pin_map_ with the raw, still-quoted name, missed, and
 // substituted a 0sb? base -- dropping `addr[4:0]` under the branch. See the
 // golden .v for the full account.
-pub comb top(a_i:u10, c_i:u1) -> (o:u11) {
+pub comb top(a_i:U10, c_i:U1) -> (o:U11) {
   mut `v.addr` = 0
   mut `v.flag` = 0
   `v.addr` = a_i

@@ -214,10 +214,17 @@ LNAST_NODE( prim_type_bool, prim_type_bool )
 LNAST_NODE( comp_type_tuple, comp_type_tuple )
 LNAST_NODE( comp_type_array, comp_type_array )
 LNAST_NODE( comp_type_lambda, comp_type_lambda )
+// The `Clock` / `Reset` built-in types (docs 07-typesystem "Clock and Reset"):
+// 1-bit signals that bind BY TYPE -- a mod's single `Clock` input is its
+// implicit clock, its single `Reset` input the implicit reset, whatever their
+// names. Appended after comp_type_lambda so no existing node value shifts (a
+// saved ln: forest keeps decoding); prim_type_reset is the is_type upper bound.
+LNAST_NODE( prim_type_clock, prim_type_clock )
+LNAST_NODE( prim_type_reset, prim_type_reset )
 // Task 1t — DELETED: `prim_type_type`/`prim_type_ref` (moved into the declare
 // `mode` enum), `comp_type_mixin` (FIXME stub), `unknown_type` (folded into the
 // `prim_type_none` sentinel above), `type_def` (→ declare mode==type), and
-// `expr_type` (a named type is now a `ref` in the type slot). `comp_type_lambda`
+// `expr_type` (a named type is now a `ref` in the type slot). `prim_type_reset`
 // is now the last type node (is_type upper bound).
 // FIXME: add union
 

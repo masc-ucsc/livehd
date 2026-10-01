@@ -1,0 +1,39 @@
+/*
+:name: mem_byte_enable_loop
+:type: equiv
+:verilog_top: mem_byte_enable_loop
+:pyrope_top: mem_byte_enable_loop
+:expect_instances: *=0
+:yosys_lec_timeout: 3
+*/
+
+// lhdtrack suggestions 2.3: a byte-enable write into one memory word,
+// `mem[wa]#[(w*8)..+8] = ...`, driven by a `for` over the byte lanes. The
+// straight-line form already lowers. The ROLLED loop (default
+// `compile.unroll=false`) failed in upass.tolg with
+//   internal — memory 'mem' lowered 0 write sites but the pre-scan counted 1
+// because the loop planner carried the WHOLE memory through `__loop0` and
+// index_mem_write_sites() still counted the store left in the rolled_for's
+// reference `source_body`.
+//
+// User ruling 2026-09-27: a loop whose body writes a memory / reg array is
+// UNROLLED, not rolled; `:expect_instances: *=0` pins that (a rolled loop is
+// one `u_loop_<n>` Sub). The four byte lanes become four masked writes of
+// `mem[wa]`. A same-cycle read of the written word sees the merged value
+// (async memory, program order), as in mem_basic.
+//
+// `:yosys_lec_timeout: 3`: the lgyosys oracle cannot decide this memory pair
+// (inconclusive at its 10 s default, measured 2026-09-27); 3 s
+// keeps its bounded-miter refutation check while the native `lhd lec`
+// proof stays the gate.
+pub mod mem_byte_enable_loop(we:Bool, be:U4, wa:U2, d:U32, ra:U2) -> (q:U32@[0]) {
+  reg mem:[4]U32 = nil
+  if we {
+    for w in 0..<4 {
+      if be#[w] == 1 {
+        mem[wa]#[(w*8)..+8] = d#[(w*8)..+8]
+      }
+    }
+  }
+  q = mem[ra]
+}

@@ -78,4 +78,5 @@ cc_library(
     "const_pool_smoke",
     "latch_contract_test",
     "occurrence_materialize_test",
+    "port_reach_test",
 ]]

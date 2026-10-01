@@ -1,0 +1,28 @@
+/*
+:name: mem_pair_occurrence_order
+:type: equiv
+:verilog_top: mem_pair_occurrence_order
+:pyrope_top: mem_pair_occurrence_order
+*/
+// Two same-shape memories that the two sides list in different orders. cgen
+// emits a reset-valued memory (`mr`) inline, ahead of the memories it wraps in
+// a memory instance (`mf`), so the re-read implementation lists [mr, mf] while
+// the golden lists [mf, mr]. lhd lec used to pair same-shape memories by that
+// OCCURRENCE order alone (mem_state_key(shape, occurrence)): shape_collapse_ok
+// refused the crossed bucket, both uninitialized memories got fresh arrays, and
+// BMC refuted at step 1 with no write at all -- and a crossed pairing it did
+// accept could PROVE a real difference (equiv/mem_pair_by_name_2). Memories now
+// pair by correspondence name (cgen's `__lhdmem_h<hex>_e` storage decodes back
+// to `mr`/`mf`), with the occurrence order only for the ones a name cannot pair.
+pub mod mem_pair_occurrence_order(wf:Bool, wb:Bool, a:U2, d:U16, ra:U2) -> (qf:U16@[0], qr:U16@[0]) {
+  reg mf:[4]U16:[ordering="old"] = nil
+  reg mr:[4]U16:[ordering="old"] = 0
+  if wf {
+    mf[a] = d
+  }
+  if wb {
+    mr[a] = d
+  }
+  qf = mf[ra]
+  qr = mr[ra]
+}

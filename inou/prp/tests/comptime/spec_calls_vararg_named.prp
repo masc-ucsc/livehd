@@ -1,0 +1,19 @@
+/*
+:name: spec_calls_vararg_named
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// Named arguments not bound to fixed parameters become fields in the capture.
+comb add1(...x) -> (r) { r = x.a + x.b + x.c }
+cassert(add1(a=1, b=2, c=3) == 6)
+
+comb cnt(...x) -> (r) { r = x.[size] }
+cassert(cnt(lo=4, hi=5, middle=6, other=7) == 4)
+
+comb tag_sum(a, ...inp) -> (r) { r = a * 100 + inp.lo * 10 + inp.hi }
+cassert(tag_sum(a=1, lo=2, hi=3) == 123)
+cassert(tag_sum(hi=3, lo=2, a=1) == 123)
+const a = 4
+cassert(tag_sum(a, lo=5, hi=6) == 456)

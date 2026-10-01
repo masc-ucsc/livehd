@@ -11,7 +11,7 @@
 // are async (combinational on the current address) and see the committed
 // state only. res[N] is the N-th read port's data. Async memory reads
 // land @[0] (committed state, like a reg read).
-mod rtlmem(raddr0:u4, raddr1:u4, wraddr:u4, din0:u4, we0:bool) -> (q0:u4@[0], q1:u4@[0]) {
+mod rtlmem(raddr0:U4, raddr1:U4, wraddr:U4, din0:U4, we0:Bool) -> (q0:U4@[0], q1:U4@[0]) {
   mut mem = (
     const addr      = (raddr0, raddr1, wraddr),
     const bits      = 4,
@@ -19,7 +19,7 @@ mod rtlmem(raddr0:u4, raddr1:u4, wraddr:u4, din0:u4, we0:bool) -> (q0:u4@[0], q1
     const din       = (0, 0, din0),
     const enable    = (1, 1, we0),
     const fwd       = false,
-    const type      = 0,
+    const `type`       = 0,
     const wensize   = 1,
     const rdport    = (1, 1, 0),
   )

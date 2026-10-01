@@ -1,0 +1,33 @@
+/*
+:name: bool_port_wide_int
+:type: error
+:tolg: 1
+:error: (cannot bind integer value to input .go. of .*leaf.* \(it is boolean\)|argument .go. .*in call to .*leaf)
+:help: (Bool\(|!= 0)
+*/
+
+// User rulings 2026-09-27 (1 and 2): a WIDER integer bound to a `Bool` input
+// is a compile error; the caller writes `Bool(p)` / `p != 0` (or picks a
+// bit, `Bool(p#[0])`). Today it compiles with no diagnostic and the
+// backends DISAGREE on what it means: the emitted Verilog (`.go(p)` into a
+// 1-bit input) and `lhd sim` take bit 0 (p=2 -> go=false -> q=true), while
+// `lhd lec` on the .prp flattens the child and evaluates `not go` as `p == 0`
+// (p=2 -> q=false), so both LEC verdicts come back PROVEN on a design whose
+// netlist does something else.
+//
+// The actual breaks both the kind rule (integer into bool, the
+// bool_port_bind_*.prp message) and the argument-range rule
+// (errors/mod_arg_wider_than_input.prp: "argument `a` ... in call to `low4m`
+// may not fit ..."), so either message frame is accepted. The HINT must steer
+// to `Bool(x)` / `x != 0` (docs 04b: an integer into a bool parameter needs
+// `Bool(x)`), not only "slice it": for a bool parameter the kind check
+// runs first, or the range hint names `Bool(`.
+
+mod leaf(go:Bool) -> (idle:Bool@[0]) {
+  idle = not go
+}
+
+pub mod bool_port_wide_int(p:U4) -> (q:Bool@[0]) {
+  const c = leaf(go=p)   // locate_error_here
+  q = c.idle
+}

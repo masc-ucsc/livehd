@@ -1,0 +1,12 @@
+/*
+:name: nested_rolled_outer_index
+:type: lec
+:lec_top: nested_rolled_outer_index
+*/
+// PYROPE-vs-PYROPE group (README "Pyrope <-> Pyrope variants"). This file is
+// the REFERENCE: four nibbles packed by hand. Each
+// `nested_rolled_outer_index_<k>.prp` builds the same word another way and
+// must PROVE with no spurious diagnostic.
+pub mod nested_rolled_outer_index(m0:U4, m1:U4, m2:U4, m3:U4) -> (o:U16@[0]) {
+  o = (m3 << 12) | (m2 << 8) | (m1 << 4) | m0
+}

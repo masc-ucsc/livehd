@@ -20,9 +20,24 @@ trials -- is backend-neutral and lives in [`pass/synth`](../synth/README.md).
 | `abc_lnet.{hpp,cpp}` | Lnet → ABC: `lnet_to_abc` (object-for-object replay) and `lnet_into_logic` (a hook's cover network as SOP nodes) |
 | `abc_cells.{hpp,cpp}` | ABC mapped network → backend-neutral `Cell_netlist`; the Mio gate library as a `Cell_library` |
 | `abc_satopt.{hpp,cpp}` | `prove_const0`: the satopt mux-fact proof network swept by `&fraig`, registered as satopt's bit prover |
+| `abc_tmap.cpp` | optional `abc` technology-mapping provider for a complete logical design; owned output and mapping-only region handoff |
 
-Unate synthesis (`pass.usyn`, [`pass/usyn`](../usyn/README.md)) runs the same
-driver and ABC backend with a region hook.
+The native unate synthesis entry (`pass.usyn`,
+[`pass/usyn`](../usyn/README.md)) requests mapping through the optional
+`pass/synth/tmap.hpp` provider. `abc_tmap.cpp` registers it when this package is
+linked; the independent synthesis closure has no dependency on that registration.
+The provider maps the complete selected logical network using the mapping-only
+handoff (`strash; &get -n; &nf; &put -o`, plus applicable buffering/sizing).
+It runs no ware trials, alternate synthesis recipe, SATOPT or sequential rewrite.
+Source graphs and the USYN selection artifact remain unchanged. Refusal discards
+the private output, with time/memory/caller admission checked around tmap commands.
+The public CMOS entry uses this provider with a separate persistent mapped-region
+cache when a named workdir and `lhd.incremental=true` are supplied. Its identity
+includes the provider code, Liberty content, resolved state-cell choices and
+mapping recipe. The shared `tmap_cache` wrapper checks complete snapshot integrity
+before loading graph bodies and atomically publishes new generations. A warm hit
+restores mapped regions without starting ABC; native USYN decisions stay in their
+independent logical cache and artifact.
 
 `lhd pass abc --top <mod> lg:dir --emit-dir lg:netlist` technology-maps a
 design to a standard-cell netlist. `--emit-dir verilog:DIR` or
@@ -67,13 +82,12 @@ The body-builder hook replaces each region with an ABC-mapped netlist.
 ## SAT simplification
 
 pass.abc runs no satopt of its own: the engine
-([`pass/satopt`](../satopt/README.md)) runs in the compile step, and `lhd
-synth` compiling a Pyrope/Verilog source turns it on (`lhd synth foo.prp` is
-`lhd compile --set pass.satopt=true foo.prp` then mapping; `--set
-pass.satopt=false` disables it). An lg: input (`lhd synth lg:...`, `lhd pass
-abc|usyn`) is mapped as compiled. `abc_satopt.cpp` registers the ABC `&fraig`
-mux-fact prover that compile-time satopt uses when ABC is linked. pass.abc
-still drops dead logic from its private copy before partitioning.
+([`pass/satopt`](../satopt/README.md)) runs in the compile step only when enabled
+with `--set pass.satopt=true`. It is off by default, including for `lhd synth`
+and `lhd lec`. An lg: input (`lhd synth lg:...`, `lhd pass abc|usyn`) is mapped
+as compiled. `abc_satopt.cpp` registers the ABC `&fraig` mux-fact prover that
+compile-time satopt uses when ABC is linked. pass.abc still drops dead logic
+from its private copy before partitioning.
 
 ## Parallel synthesis
 
@@ -993,7 +1007,7 @@ A synthesis section accepts `ware=true|false` and `delay=<integer ps>` alongside
 its existing `abc='<flow>'` and `color=…` attributes:
 
 ```pyrope
-mod compare(a:u64, b:u64) -> (y:u1@[0]) {
+mod compare(a:U64, b:U64) -> (y:U1@[0]) {
   {::[color=2, ware=true, delay=500]
     y = a < b
   }

@@ -29,29 +29,29 @@
 // express one. Those live in inou/cgen/tests/comb_loop/ (Verilog). This test
 // guards the per-output-cone scheduling that breaks them.
 
-mod split2(a:u8, b:u8, c:u8, d:u8) -> (p:u9@[0], q:u9@[0]) {
+mod split2(a:U8, b:U8, c:U8, d:U8) -> (p:U9@[0], q:U9@[0]) {
   p = a + b                 // cone {a, b}
   q = c + d                 // cone {c, d}  -- disjoint from p
 }
 
-mod shared2(a:u8, b:u8, e:u8) -> (x:u10@[0], y:u10@[0]) {
+mod shared2(a:U8, b:U8, e:U8) -> (x:U10@[0], y:U10@[0]) {
   const t = a + b           // shared sub-cone
   x = t + e
   y = t + b
 }
 
-mod acc2(din:u8, en:bool) -> (sum_o:u16@[0], echo:u9@[0]) {
-  reg s:u16 = 0
+mod acc2(din:U8, en:Bool) -> (sum_o:U16@[0], echo:U9@[0]) {
+  reg s:U16 = 0
   sum_o = s                 // registered output (reads the current reg)
   echo  = din + din         // pure combinational passthrough, cone {din}
   if en { wrap s += din }
 }
 
-mod top(i0:u8, i1:u8, i2:u8, i3:u8, en:bool)
-     -> (oa:u16@[0], ob:u10@[0], oc:u9@[0], od:u9@[0]) {
-  const r1 = split2(a=i0, b=i1, c=i2, d=i3)                       // instance 1
-  const r2 = split2(a=r1.p#[0..=7], b=i2, c=r1.q#[0..=7], d=i3)   // instance 2 (shared def)
-  const sh = shared2(a=r2.p#[0..=7], b=i0, e=i1)
+mod top(in0:U8, in1:U8, in2:U8, in3:U8, en:Bool)
+     -> (oa:U16@[0], ob:U10@[0], oc:U9@[0], od:U9@[0]) {
+  const r1 = split2(a=in0, b=in1, c=in2, d=in3)                       // instance 1
+  const r2 = split2(a=r1.p#[0..=7], b=in2, c=r1.q#[0..=7], d=in3)   // instance 2 (shared def)
+  const sh = shared2(a=r2.p#[0..=7], b=in0, e=in1)
   const ac = acc2(din=r2.q#[0..=7], en=en)
   oa = ac.sum_o             // stateful
   ob = sh.x                 // shared-cone
@@ -76,10 +76,10 @@ test top.cones {
     const a2 = I2[clock]
     const a3 = I3[clock]
     const e  = EN[clock]
-    dut.i0 = a0
-    dut.i1 = a1
-    dut.i2 = a2
-    dut.i3 = a3
+    dut.in0 = a0
+    dut.in1 = a1
+    dut.in2 = a2
+    dut.in3 = a3
     dut.en = e
 
     const gp1 = a0 + a1
@@ -116,10 +116,10 @@ test top.trunc {
     const a1 = J1[clock]
     const a2 = J2[clock]
     const a3 = J3[clock]
-    dut.i0 = a0
-    dut.i1 = a1
-    dut.i2 = a2
-    dut.i3 = a3
+    dut.in0 = a0
+    dut.in1 = a1
+    dut.in2 = a2
+    dut.in3 = a3
     dut.en = false                       // accumulator frozen
 
     const gp1 = a0 + a1

@@ -1,0 +1,16 @@
+/*
+:name: spec_calls_unnamed_dot_access
+:type: error
+:error: unknown field|no field|unnamed|by position
+*/
+
+// qa.md Appendix §8: "Unnamed tuple: every field is positional, accessed only
+// by position (`t[0]`); there are no names to drop."
+// docs 03-bundle.md "Tuple and scope": `mut tup2 = (x, 4)` copies `x` as the
+// first POSITIONAL entry (`cassert(tup2[0] == 100)`); the entry has no name.
+
+const x = 100
+const tup2 = (x, 4)
+cassert(tup2[0] == 100)
+const bad = tup2.x // locate_error_here
+cassert(bad == 100)

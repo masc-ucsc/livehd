@@ -1,0 +1,29 @@
+/*
+:name: array_inferred_sibling_scopes
+:type: equiv
+:verilog_top: array_inferred_sibling_scopes
+:pyrope_top: array_inferred_sibling_scopes
+*/
+// Two arrays named `a` in sibling scopes, each inferring its shape from its own
+// uses (08-memories.md: "the maximum/minimum value on the index effectively sets
+// the size"), plus a sized `[8]U8` of the same name in a third scope.
+//
+// USED TO MISCOMPILE: upass.bitwidth keyed the inferred facts by the bare name,
+// so the `if` arm's `a` (U3 index, U8 values) was sized from the `elif` arm's
+// U1 index and U1 values -- a 2-entry U1 array (`ia < 2` asserted, `o` lost 7
+// bits) -- and the sized `[8]U8` in the `else` arm was rewritten to 2 entries.
+pub mod array_inferred_sibling_scopes(c:U2, ia:U3, va:U8, ja:U3, ib:U1, vb:U1, jb:U1) -> (o:U8@[0]) {
+  if c == 0 {
+    mut a:[] = 0
+    a[ia] = va
+    o = a[ja]
+  } elif c == 1 {
+    mut a:[] = 0
+    a[ib] = vb
+    o = a[jb]
+  } else {
+    mut a:[8]U8 = 0
+    a[ia] = va
+    o = a[ja]
+  }
+}

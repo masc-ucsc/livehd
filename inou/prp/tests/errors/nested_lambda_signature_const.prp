@@ -1,0 +1,22 @@
+/*
+:name: nested_lambda_signature_const
+:type: error
+:error: 'n' is a runtime value of the enclosing scope; it is not visible inside lambda 'low'
+:help: pass 'n' as an input of 'low'
+*/
+
+// Ruling 2026-09-28 #24 (revises 2026-09-27 #4), SIGNATURE half:
+// 06-functions.md "Only comptime bindings of the enclosing scopes are visible
+// inside a nested lambda's body and signature". A plain `const` with a
+// compile-time value may size a nested port (`const n = 3` then
+// `x:Unsigned(bits=n)`, see equiv/nested_comb_plain_const_capture.prp), but
+// `n` here is computed from the enclosing mod's RUNTIME input `a`: using it
+// as a port width of the nested `comb low` is the same error as reading it in
+// the body, located at the signature.
+pub mod top(a:U8) -> (o:U8@[0]) {
+  const n = a#[0..<2] + 1
+  comb low(x:Unsigned(bits=n)) -> (y:U8) {  // locate_error_here
+    y = x
+  }
+  o = low(x=a#[0..<3])
+}

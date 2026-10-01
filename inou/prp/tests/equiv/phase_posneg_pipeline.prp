@@ -9,9 +9,9 @@
 // value later in the same source period. Conversely, `rise` sees the `fall`
 // value committed in the preceding period. Rise and fall may sample different
 // values of d; a formal scheduler must not collapse them into one input sample.
-pub mod phase_posneg_pipeline::[timecheck=false](clk:u1, d:u4) -> (rise_o:u4@[], fall_o:u4@[]) {
-  reg rise:u4:[clock_pin=ref clk]
-  reg fall:u4:[clock_pin=ref clk, posclk=false]
+pub mod phase_posneg_pipeline::[timecheck=false](clk:Clock, d:U4) -> (rise_o:U4@[], fall_o:U4@[]) {
+  reg rise:U4:[clock_pin=clk]
+  reg fall:U4:[clock_pin=clk, posclk=false]
 
   wrap rise = fall + d
   fall = rise ^ d

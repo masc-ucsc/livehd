@@ -1,0 +1,20 @@
+/*
+:name: attr_bits_untyped_runtime
+:type: error
+:tolg: 1
+:error: `.\[bits\]` of `x` is nil: it has no declared width
+:help: declare the value with a sized type
+*/
+
+// User ruling 2026-09-27 (6): `.[bits]` of an UNTYPED runtime value is nil (a
+// `mut` bound without a type is not an alias, ruling 38), and nil drives no
+// hardware. Driving an output with it is the user's type error. Before, it was
+// the internal "upass.tolg: attribute read '.[bits]' has no hardware lowering
+// -- it should have folded during elaboration" (exit 7).
+pub mod attr_bits_untyped_runtime(c:U8, s:Bool) -> (w:U8@[0]) {
+  mut x = c
+  if s {
+    x = 3
+  }
+  w = x.[bits]  // locate_error_here
+}

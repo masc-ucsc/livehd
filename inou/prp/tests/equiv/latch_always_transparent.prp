@@ -16,7 +16,7 @@
 // combinational, and yosys rejects an always_latch that infers no latch ("No
 // latch inferred for signal ... from always_latch process"), so the miter fails
 // and there is still no round trip. It goes out as `always_comb` + blocking `=`.
-pub mod latch_always_transparent::[timecheck=false](c:u2) -> (o:u8@[]) {
-  reg o:u8:[latch=true]
+pub mod latch_always_transparent::[timecheck=false](c:U2) -> (o:U8@[]) {
+  reg o:U8:[latch=true]
   o = if c == 0 { 192 } else { 255 }
 }

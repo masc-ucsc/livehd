@@ -16,9 +16,9 @@
 // sees an early reader at all. The split must run once, against the COMPLETE
 // driver. Swapping the two write statements is the control: it was already
 // correct, and both orders must agree.
-pub comb wire_lane_written_later(a:u4, b:u4) -> (z:u8) {
-  wire w:u8
-  wire hi:u4
+pub comb wire_lane_written_later(a:U4, b:U4) -> (z:U8) {
+  wire w:U8
+  wire hi:U4
   hi = w#[4..=7]
   w#[0..=3] = a ^ hi
   w#[4..=7] = b

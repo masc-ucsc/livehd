@@ -5,8 +5,8 @@
 :error: only `mod` bodies may instantiate
 */
 
-pipe[2] mul(a:u8, b:u8) -> (c:u16) { c = a * b }
+pipe[2] mul(a:U8, b:U8) -> (c:U16) { c = a * b }
 
-comb bad(a:u8) -> (x:u16) {
+comb bad(a:U8) -> (x:U16) {
   x = mul(a=a, b=a)
 }

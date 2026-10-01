@@ -23,7 +23,7 @@ const dut = import("lg:quadratic")
 test quadratic.exhaustive {
   mut acc = dut
   tick 65536 {
-    mut x:i16 = clock - 32768
+    mut x:S16 = `clock` - 32768
     acc.x = x
     step
     assert(acc.y == x * (x + 768), "mapped quadratic mismatch")

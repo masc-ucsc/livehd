@@ -1,0 +1,13 @@
+/*
+:name: array_port_elem_read_wider
+:type: error
+:error: .lo. \(range \[0, 255\]\) may not fit its declared range \[0, 15\]
+:help: wrap/saturate
+*/
+
+// An element of an array INPUT port is as wide as its element type: `v[2]` of
+// `v:[3]U8` may not fit a u4 output, the same overflow as reading a local
+// `[3]U8` array. Port elements used to be read unbounded and never judged.
+pub mod array_port_elem_read_wider(v:[3]U8) -> (lo:U4@[0]) {
+  lo = v[2]   // locate_error_here
+}

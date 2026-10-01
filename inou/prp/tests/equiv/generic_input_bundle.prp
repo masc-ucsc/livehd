@@ -6,10 +6,10 @@
 */
 // A declared input bundle has flattened I/O leaves but no tuple constructor.
 // Forwarding it as a whole named actual must bind the specialized child.
-mod select_data<N=8>::[timecheck=false](a:u8, ctl:(valid:u1, data:u8)) -> (y:u8@[]) {
+mod select_data<N=8>::[timecheck=false](a:U8, ctl:(valid:U1, data:U8)) -> (y:U8@[]) {
   y = if ctl.valid != 0 { ctl.data } else { a }
 }
-pub mod top::[timecheck=false](a:u8, ctl:(valid:u1, data:u8)) -> (y:u8@[]) {
+pub mod top::[timecheck=false](a:U8, ctl:(valid:U1, data:U8)) -> (y:U8@[]) {
   mut selected = select_data<N=8>(a=a, ctl=ctl)
   y = selected.y
 }

@@ -4,21 +4,21 @@
 :args: gain=3 count=4
 */
 // Simulation example exercising `test name(params)` runtime parameters and the
-// `--arg key=value` binding (here via the `:args:` header tag, which the runner
-// turns into `lhd sim ... --arg gain=3 --arg count=4`). The three parameters
+// `+key=value` binding (here via the `:args:` header tag, which the runner
+// turns into `lhd sim ... +gain=3 +count=4`). The three parameters
 // cover every binding case:
 //
 //   * `base`  has a default (10) and is NOT in `:args:`  -> stays 10
-//   * `gain`  has NO default and IS set by `--arg`       -> 3 (required arg)
+//   * `gain`  has NO default and IS set by `+name=value`       -> 3 (required arg)
 //   * `count` has a default (5) but IS overwritten        -> 4 (override wins)
 //
-// A parameter with no default that is never passed via `--arg` is a hard error.
+// A parameter with no default that is never passed via `+name=value` is a hard error.
 
-mod adder(a:u8, b:u8) -> (s:u8@[0]) {
-  s = a + b
+mod adder(a:U8, b:U8) -> (s:U8@[0]) {
+  wrap s = a + b
 }
 
-test adder.params(base:u8 = 10, gain:u8, count:u8 = 5) {
+test adder.params(base:U8 = 10, gain:U8, count:U8 = 5) {
   // Accumulate `gain` into `base` for `count` cycles (adder is combinational, so
   // each `step` just re-evaluates s = a + b with the current pokes).
   mut add = adder
@@ -32,6 +32,6 @@ test adder.params(base:u8 = 10, gain:u8, count:u8 = 5) {
   // acc == base + count*gain holds for any binding of the parameters ...
   assert(acc == base + count * gain, "acc must equal base + count*gain")
   // ... and resolves to a concrete number for THIS test's bindings:
-  // base=10 (default), count=4 (override), gain=3 (--arg) -> 10 + 4*3 = 22.
+  // base=10 (default), count=4 (override), gain=3 (+gain=3) -> 10 + 4*3 = 22.
   assert(acc == 22, "base=10 default, count=4 override, gain=3 arg => 22")
 }

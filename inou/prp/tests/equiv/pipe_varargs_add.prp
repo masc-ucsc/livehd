@@ -9,7 +9,7 @@
 // whose body sums its leftovers with a `for a in args` loop. A bare `pipe` is
 // one stage of latency, so `add_all` flops its result once; `top` (a `mod`)
 // consumes it at `stage[1]` (the mod_call_pipe pattern), landing z at cycle 1.
-pipe add_all(...args) -> (r:u10) {
+pipe add_all(...args) -> (r:U10) {
   mut acc = 0
   for a in args {
     acc = acc + a
@@ -17,6 +17,6 @@ pipe add_all(...args) -> (r:u10) {
   r = acc
 }
 
-pub mod top(a:u8, b:u8, c:u8) -> (z:u10@[1]) {
-  stage[1] z = add_all(a, b, c)
+pub mod top(a:U8, b:U8, c:U8) -> (z:U10@[1]) {
+  stage[1] z = add_all(a=a, b=b, c=c)
 }

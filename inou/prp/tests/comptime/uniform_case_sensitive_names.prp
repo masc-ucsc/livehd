@@ -1,0 +1,24 @@
+/*
+:name: uniform_case_sensitive_names
+:type: comptime
+:verifier_pass: 7
+:verifier_fail: 0
+*/
+// Reserved words match by EXACT spelling: `if` needs backticks as a name but
+// the case variants `If`/`IF`/`TiCk`/`eLsE`/`In`/`TYPE` are ordinary names, and
+// so are the lowercase `clock`/`reset` (only `Clock`/`Reset` are type words).
+const If = 1
+cassert(If == 1)
+const cfg = (const IF = 2)
+cassert(cfg.IF == 2)
+comb add<TYPE>(x) -> (r) { r = x + TYPE }
+cassert(add<TYPE=6>(1) == 7)
+comb echo(In:U8) -> (eLsE:U8) { eLsE = In }
+cassert(echo(In=5) == 5)
+const methods = (const base=8, comb TiCk(self) -> (r) { r = self.base })
+cassert(methods.TiCk() == 8)
+const clock = 3
+const reset = 4
+cassert(clock + reset == 7)
+const BOOL = 9
+cassert(BOOL == 9)

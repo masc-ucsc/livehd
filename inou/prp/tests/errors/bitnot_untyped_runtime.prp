@@ -1,0 +1,15 @@
+/*
+:name: bitnot_untyped_runtime
+:type: error
+:error: `~` needs an operand of known type
+:help: give it a type
+*/
+
+// User ruling 2026-09-29 (44): a bitwise not is ambiguous unless the type is
+// known. `a + 1` is an UNTYPED runtime value (arithmetic results carry no
+// declared type), so `~(a + 1)` is a compile error: type it (`const t:U9 =
+// a + 1`) or slice it (`(a + 1)#[0..<8]`). Before, it silently meant
+// `-(a + 1) - 1`, which `wrap` then truncated.
+pub mod bitnot_untyped_runtime(a:U8) -> (o:U8@[0]) {
+  wrap o = ~(a + 1)  // locate_error_here
+}

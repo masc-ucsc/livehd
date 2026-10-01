@@ -1,0 +1,140 @@
+/*
+:name: child_clock_reset_auto_wire
+:type: simulation
+*/
+// docs 04b-attributes.md "Implicit clock and reset" (ruling 52: clocks and
+// resets bind BY TYPE): at a call site, OMITTING the child's `Clock` input or
+// its `Reset` input (any name) wires the caller's single `Clock`/`Reset` to
+// it -- the same thing that already happens when the child has no such input
+// and LiveHD mints one.
+//   * acr_minted: the caller has no Clock/Reset input, so its implicit
+//     `clock`/`reset` are minted and must reach the child's `clk`/`rst`.
+//   * acr_named:  the caller's own `clk:Clock`/`rst:Reset` are its implicit
+//     pair.
+//   * acr_docs:   ACTIVE-LOW on both sides -- the child's regs and the
+//     caller's own reg read `rst_n` with `negreset=true` (a reset name carries
+//     no polarity); the auto-wire passes the wire unchanged, so the child is
+//     reset exactly while the caller is.
+//   * mixed polarity: a reset is a RAW wire (docs 04b: the unbound input is
+//     wired to the caller's Reset); its polarity belongs to each register, so
+//     crossing polarities takes an explicit computed binding. acr_named binds
+//     the active-low child `rst_n` (q8) with `!rst`; acr_mixed binds the
+//     active-high child `rst` with `!rst_n` (q), while its auto-wired copy
+//     (qa) sees the raw active-low wire and so stays in reset while `rst_n`
+//     is high -- the auto-wire never inverts.
+// The callers with an own active-low reg also output it (`qo`), so the
+// caller's side of the polarity is checked too.
+
+mod acr_cnt(clk:Clock, rst:Reset, en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+pub mod acr_minted(en:Bool) -> (q:U8@[0]) {
+  const c = acr_cnt(en=en)
+  q = c.q
+}
+
+mod acr_cnt8(clk:Clock, rst_n:Reset, en:Bool) -> (q:U8@[0]) {
+  reg cnt:U8:[negreset=true] = 0 // clocked by `clk`, reset while `rst_n` is low
+  if en { wrap cnt = cnt + 1 }
+  q = cnt
+}
+
+pub mod acr_named(clk:Clock, rst:Reset, en:Bool) -> (q:U8@[0], q8:U8@[0]) {
+  const c = acr_cnt(en=en)
+  q = c.q
+  const c8 = acr_cnt8(rst_n=!rst, en=en)  // active-high caller `rst` into an active-low child
+  q8 = c8.q
+}
+
+pub mod acr_mixed(clk:Clock, rst_n:Reset, en:Bool) -> (q:U8@[0], qo:U8@[0], qa:U8@[0]) {
+  reg own:U8:[negreset=true] = 0 // this caller's own regs read `rst_n` active-low
+  if en { wrap own = own + 1 }
+  qo = own
+  const c = acr_cnt(rst=!rst_n, en=en)  // active-low caller `rst_n` into an active-high child
+  q = c.q
+  const a = acr_cnt(en=en)     // auto-wired: the raw wire, so held in reset while `rst_n` is high
+  qa = a.q
+}
+
+pub mod acr_docs(clk:Clock, rst_n:Reset, en:Bool) -> (q:U8@[0], qo:U8@[0]) {
+  reg own:U8:[negreset=true] = 0 // active-low, like the child
+  if en { wrap own = own + 1 }
+  qo = own
+  const c = acr_cnt8(en=en)    // `clk` and `rst_n` wired to acr_docs' own
+  q = c.q
+}
+
+test acr_minted.counts {
+  mut d = acr_minted
+  mut g = 0        // golden: the child's count after this cycle's step
+  mut bad = 0
+  tick 20 {
+    const en = (clock & 1) == 0 or clock > 12
+    d.reset = clock < 2
+    d.en    = en
+    if clock < 2 { g = 0 } elif en { g += 1 }
+    step
+    if d.q != g { bad += 1 }
+  }
+  puts("minted: g={g} bad={bad}")
+  assert(bad == 0)
+  assert(g == 13)  // it advanced: 6 even cycles in 2..12, then all 7 of 13..19
+}
+
+test acr_named.counts {
+  mut d = acr_named
+  mut g = 0
+  mut bad = 0
+  tick 20 {
+    const en = (clock & 1) == 0 or clock > 12
+    d.rst = clock < 2
+    d.en  = en
+    if clock < 2 { g = 0 } elif en { g += 1 }
+    step
+    if d.q != g { bad += 1 }
+    if d.q8 != g { bad += 1 }
+  }
+  puts("named: g={g} bad={bad}")
+  assert(bad == 0)
+  assert(g == 13)
+}
+
+test acr_docs.counts {
+  mut d = acr_docs
+  mut g = 0
+  mut bad = 0
+  tick 20 {
+    const en = (clock & 1) == 0 or clock > 12
+    d.rst_n = clock >= 2           // active-low: in reset for cycles 0 and 1
+    d.en    = en
+    if clock < 2 { g = 0 } elif en { g += 1 }
+    step
+    if d.q != g { bad += 1 }
+    if d.qo != g { bad += 1 }
+  }
+  puts("docs: g={g} bad={bad}")
+  assert(bad == 0)
+  assert(g == 13)
+}
+
+test acr_mixed.counts {
+  mut d = acr_mixed
+  mut g = 0
+  mut bad = 0
+  tick 20 {
+    const en = (clock & 1) == 0 or clock > 12
+    d.rst_n = clock >= 2           // active-low: in reset for cycles 0 and 1
+    d.en    = en
+    if clock < 2 { g = 0 } elif en { g += 1 }
+    step
+    if d.q != g { bad += 1 }
+    if d.qo != g { bad += 1 }
+    if clock >= 2 and d.qa != 0 { bad += 1 }
+  }
+  puts("mixed: g={g} bad={bad}")
+  assert(bad == 0)
+  assert(g == 13)
+}

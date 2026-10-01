@@ -10,14 +10,15 @@
 #include <print>
 #include <vector>
 
-#include "affine_amount.hpp"
-#include "arith.hpp"
 #include "absl/container/btree_map.h"
 #include "absl/container/node_hash_map.h"
+#include "affine_amount.hpp"
+#include "arith.hpp"
 #include "cell.hpp"
 #include "dlop.hpp"
 #include "node_util.hpp"
 #include "pass_partition.hpp"
+#include "source_state.hpp"
 
 namespace livehd::synth {
 namespace blast_gu = livehd::graph_util;
@@ -65,6 +66,18 @@ struct Blast_options {
   // level a computed reset crosses at.
   bool              latch_reset_low[2][3] = {{false, false, false}, {false, false, false}};
   bool              verbose        = false;
+
+  // Snapshot source semantics independently of mapping. Expanded memories use
+  // their structural memory_module attribute; other special scopes are explicit.
+  bool         capture_state     = false;
+  State_scope  state_scope       = State_scope::logic;
+  // Independent logical translation: cross all ordinary register bits/stages
+  // with semantic D, regardless of Liberty/mapping knobs. Keep special state
+  // native and carry clock/async controls in the source-state output interface.
+  // Implies capture_state; only this mode applies state_target restrictions.
+  bool         logical_state     = false;
+  State_target state_target      = State_target::cmos;
+  uint32_t     logical_max_nodes = 2000000;
 };
 
 // Sparse wiring is shared as well as Boolean cells: resolving one demanded

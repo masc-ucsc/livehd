@@ -1,0 +1,31 @@
+/*
+:name: spec_tests_reset_poke_int
+:type: error
+:error: reset
+*/
+// Spec (qa.md appendix section 6): "Reset is Bool-like: it can be computed
+// ..., the constant `false` means 'no reset', and a Bool expression is
+// assignable/bindable to a Reset without a cast (`acc.reset = clock < 2`)";
+// ruling 20 (lhdtrack rulings 2026-09-28): "Strict bool applies INSIDE `test`
+// blocks too: `d.en = true` (or `Bool(1)`)".
+//
+// Rule pinned (inference, flagged in the audit): Reset is Bool-LIKE, so the
+// strict-Bool rule covers it -- an INTEGER poked into the DUT's minted
+// `reset:Reset` (`acc.reset = 1`) needs a Bool (`true`, `Bool(x)`, `x != 0`),
+// exactly like `d.en = 1` into a `Bool` input (errors/test_bool_input_int).
+
+mod spec_rpi_cnt(en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_rpi.int_reset {
+  mut acc = spec_rpi_cnt
+  tick 4 {
+    acc.reset = 1        // locate_error_here
+    acc.en    = true
+    step
+  }
+  assert(acc.q == 0)
+}

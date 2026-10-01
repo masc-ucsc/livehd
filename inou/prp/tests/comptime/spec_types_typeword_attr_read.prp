@@ -1,0 +1,10 @@
+/*
+:name: spec_types_typeword_attr_read
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// SPEC qa.md appendix section 1: "A type word may head a suffix chain: `U8.[max]` (attribute of the type)".
+// docs 07-typesystem: "cassert(U8.[max] == 255 and S4.[min] == -8)".
+cassert(U8.[max] == 255 and S4.[min] == -8)
+cassert(U8.[bits] == 8 and S4.[max] == 7)

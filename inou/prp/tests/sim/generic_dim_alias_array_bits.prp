@@ -1,0 +1,75 @@
+/*
+:name: generic_dim_alias_array_bits
+:type: simulation
+*/
+// lhdtrack suggestions.md 2.2(e) (`m[i]#[j] = x` -> "out of bounds access ...
+// tuple of size K"). Inside a GENERIC mod, a `mut` array with a generic DIM
+// and an element spelled through a type ALIAS -- a plain, NON-generic
+// `type Row = U4`, `mut matrix:[N]Row = 0` -- was not an N-lane array in the
+// N=4 specialization: a bit assignment's read-modify-write of a row not yet
+// written read past a tuple that grows only on writes, although every index is
+// N-relative:
+//   * abits: straight-line bit assignments into rows N-2 and N-1 -> "out of
+//     bounds access: index 3 on tuple `matrix` of size 2";
+//   * aloop: the nested `for` of br_arb_lru's pairwise matrix (upper triangle
+//     copies `a`, lower triangle is the complement of the mirrored bit,
+//     diagonal 0), rolled or unrolled -> "index 2 on tuple `matrix` of size 2"
+//     and "index 3 ... of size 3".
+// With a sized element written directly (`[N]U4`), with a literal `[4]Row`
+// dim, with whole-row writes into `[N]Row`, or with `comptime const N = 4` in a
+// non-generic mod, the same code works. This is separate from the generic
+// alias BOUND (`type Row = Unsigned(bits=N)`, generic_array_type_alias.prp);
+// generic_array_bit_assign.prp's `tri` needs both.
+mod abits<N=2>(a:U4) -> (q:U4@[0], r:U4@[0]) {
+  type Row = U4
+  mut matrix:[N]Row = 0
+  matrix[N-2]#[1] = a#[3]
+  matrix[N-2]#[3] = a#[0]
+  matrix[N-1]#[0] = a#[2]
+  q = matrix[N-2]
+  r = matrix[N-1]
+}
+
+mod aloop<N=2>(a:U4) -> (q:U4@[0], r:U4@[0]) {
+  type Row = U4
+  mut matrix:[N]Row = 0
+  for i in 0..<N {
+    for j in 0..<N {
+      if i < j {
+        matrix[i]#[j] = a#[j]
+      } elif i > j {
+        matrix[i]#[j] = ~a#[i] & 1
+      }
+    }
+  }
+  q = matrix[N-2]
+  r = matrix[1]
+}
+
+pub mod generic_dim_alias_array_bits(a:U4) -> (aq:U4@[0], ar:U4@[0], tq:U4@[0], tr:U4@[0]) {
+  const x = abits<N=4>(a=a)
+  aq = x.q
+  ar = x.r
+  const t = aloop<N=4>(a=a)
+  tq = t.q
+  tr = t.r
+}
+
+test generic_dim_alias_array_bits.values {
+  mut dut = generic_dim_alias_array_bits
+  mut bad = 0
+  tick 16 {
+    dut.a = clock
+    step
+    const a0 = clock & 1
+    const a1 = (clock >> 1) & 1
+    const a2 = (clock >> 2) & 1
+    const a3 = (clock >> 3) & 1
+    if dut.aq != ((a0 << 3) | (a3 << 1)) or dut.ar != a2 { bad += 1 }
+    // row 2: j=0,1 -> ~a[2]; j=2 -> 0; j=3 -> a[3]
+    // row 1: j=0 -> ~a[1]; j=1 -> 0; j=2 -> a[2]; j=3 -> a[3]
+    if dut.tq != ((a3 << 3) | ((a2 ^ 1) << 1) | (a2 ^ 1)) { bad += 1 }
+    if dut.tr != ((a3 << 3) | (a2 << 2) | (a1 ^ 1)) { bad += 1 }
+  }
+  assert(bad == 0, "bit assignments into a generic-dim array of alias rows")
+}

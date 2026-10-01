@@ -1,0 +1,22 @@
+/*
+:name: inline_false_generic_lambda
+:type: lgraph
+:set: compile.upass.inline=false
+*/
+
+// compile.upass.inline=false: the generic `ap` is spliced (it binds `F`), and
+// the call it makes stays a Sub instance of the REAL callee (`inc`), not of the
+// frame-renamed `inl1_inc`. Same for a direct call in a spliced generic body.
+comb inc(v:U8) -> (r:U9) {
+  r = v + 1
+}
+comb ap<F>(a:U8) -> (r:U9) {
+  r = F(v=a)
+}
+comb ap2<N>(a:U8) -> (r:U10) {
+  r = inc(v=a) + N
+}
+pub comb inline_false_generic_lambda(a:U8) -> (o:U9, p:U10) {
+  o = ap<F=inc>(a)
+  p = ap2<N=1>(a)
+}

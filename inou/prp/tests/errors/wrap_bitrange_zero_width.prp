@@ -1,0 +1,21 @@
+/*
+:name: wrap_bitrange_zero_width
+:type: error
+:error: `wrap` into a destination that holds no bits
+:help: a bit range must select at least one bit
+*/
+
+// A `wrap`/`sat` into a bit range whose count only folds after elaboration
+// (here a generic bound at the call site) can still fold to 0. The front end
+// rejects the empty ranges it can fold itself (errors/bitrange_empty_literal);
+// this one is caught where the runner lowers the `wrap`, which used to decline
+// it and leave tolg to report "call to undefined function 'wrap'".
+comb put<W=1>(v:U16, r:U4) -> (o:U16) {
+  mut d:U16 = v
+  wrap d#[1..+W] = r + 9  // locate_error_here
+  o = d
+}
+
+pub mod wrap_bitrange_zero_width(v:U16, r:U4) -> (w:U16@[0]) {
+  w = put<W=0>(v = v, r = r)
+}

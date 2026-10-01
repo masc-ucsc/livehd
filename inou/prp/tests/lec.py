@@ -34,6 +34,13 @@ def run_lec(cmd, cwd=None, timeout=5, scale=None):
     # therefore remove the budget entirely -- the opposite of the check above.
     # Send whole seconds to the engine; keep the float for the outer watchdog.
     cmd = list(cmd) + ['--set', 'formal.timeout={}'.format(max(1, math.ceil(timeout)))]
+    # These gates read only the verdict. A REFUTED run otherwise compiles and
+    # runs `lhd sim` to write the counterexample VCD (seconds, against a
+    # millisecond solve); the counterexample line itself is still printed, and
+    # a REFUTED output says how to get the VCD back.
+    no_replay = not any(arg.startswith('formal.simfail_run=') for arg in cmd)
+    if no_replay:
+        cmd += ['--set', 'formal.simfail_run=false']
     watchdog = 2 * timeout * (watchdog_scale() if scale is None else scale)
     proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             start_new_session=True)
@@ -48,6 +55,9 @@ def run_lec(cmd, cwd=None, timeout=5, scale=None):
         out += ('\nFAIL: LEC outer watchdog exceeded {:g}s (internal budget {:g}s)\n'
                 .format(watchdog, timeout)).encode()
         return subprocess.CompletedProcess(cmd, 124, out)
+    if no_replay and b' REFUTED' in out:
+        out += (b'NOTE: lec.py skipped the counterexample VCD replay; add --set formal.simfail_run=true '
+                b'to the lhd lec command to write it\n')
     return subprocess.CompletedProcess(cmd, proc.returncode, out)
 
 

@@ -23,17 +23,17 @@ fail=0
 
 # ref: `s` HOLDS on the !inc path (the correct conditional-reg semantics).
 cat > "$WORK/a/m.prp" <<'EOF'
-mod m(inc:bool, val:u8) -> (out:u8@[0]) {
-  reg s:u8 = 0
-  if inc { s = s + val }
+mod m(inc:Bool, val:U8) -> (out:U8@[0]) {
+  reg s:U8 = 0
+  if inc { wrap s = s + val }
   out = s
 }
 EOF
 # impl (buggy): the un-covered path mis-writes `s = val` instead of holding.
 cat > "$WORK/b/m.prp" <<'EOF'
-mod m(inc:bool, val:u8) -> (out:u8@[0]) {
-  reg s:u8 = 0
-  if inc { s = s + val } else { s = val }
+mod m(inc:Bool, val:U8) -> (out:U8@[0]) {
+  reg s:U8 = 0
+  if inc { wrap s = s + val } else { s = val }
   out = s
 }
 EOF

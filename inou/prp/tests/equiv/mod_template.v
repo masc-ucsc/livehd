@@ -1,6 +1,6 @@
-// Golden for mod_template.prp — the specialized `inner__u8` is a 2-cycle
+// Golden for mod_template.prp — the specialized `inner__U8` is a 2-cycle
 // register delay; `top` feeds `a` through it and lands `out` at cycle 2.
-module \mod_template.inner__u8 (
+module \mod_template.inner__U8 (
   input            clock,
   input      [7:0] a,
   output reg [7:0] x
@@ -20,6 +20,6 @@ module \mod_template.top (
   output     [7:0] out
 );
 
-  \mod_template.inner__u8 u_inner (.clock(clock), .a(a), .x(out));
+  \mod_template.inner__U8 u_inner (.clock(clock), .a(a), .x(out));
 
 endmodule

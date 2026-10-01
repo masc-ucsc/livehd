@@ -185,6 +185,69 @@ else
   fi
 fi
 
+# ---- pair E: a name-bridged latch must still be RE-CHECKED ------------------
+# The impl holds the ref latch `g` one hierarchy level down (`DLX g(...)` with
+# its latch `l`, or a flat `\g.l`), which core/bus_name reads as the cell state
+# of register `g`: the bit-blast bridge TIES the impl's current state to the
+# ref's. The composed-period arm used to leave the two next states unmatched
+# (`nxt:g` ref-only, `nxt:g_l` impl-only) and excuse them as unobservable
+# one-sided state, so it assumed g == g.l, compared qg (equal by
+# construction), never re-checked g' == g.l', and PROVED a ref `g = ~d`
+# against an impl `g = d`. The fold now compares the tied next states; an
+# unmatched tied key keeps the verdict open.
+cat > "$WORK/e_ref_ok.v" <<'EOF'
+module e_gated(input clk, input en, input d, output qg);
+  logic en_l;
+  always_latch if (!clk) en_l = en;
+  wire gclk = clk & en_l;
+  logic g;
+  always_latch if (gclk) g = d;
+  assign qg = g;
+endmodule
+EOF
+sed 's/g = d;/g = ~d;/' "$WORK/e_ref_ok.v" > "$WORK/e_ref_bad.v"
+cat > "$WORK/e_hier.v" <<'EOF'
+module e_dlx(input D, input GATE, output Q);
+  reg l;
+  always_latch if (GATE) l = D;
+  assign Q = l;
+endmodule
+module e_gated(input clk, input en, input d, output qg);
+  logic en_l;
+  always_latch if (!clk) en_l = en;
+  wire gclk = clk & en_l;
+  e_dlx g(.D(d), .GATE(gclk), .Q(qg));
+endmodule
+EOF
+cat > "$WORK/e_flat.v" <<'EOF'
+module e_gated(input clk, input en, input d, output qg);
+  logic en_l;
+  always_latch if (!clk) en_l = en;
+  wire gclk = clk & en_l;
+  logic \g.l ;
+  always_latch if (gclk) \g.l = d;
+  assign qg = \g.l ;
+endmodule
+EOF
+# everdict <impl> <ref> <tag> [extra --set args] -> PROVEN | REFUTED | UNKNOWN
+everdict() {
+  local impl=$1 ref=$2 tag=$3
+  shift 3
+  $LHD lec --impl "$WORK/$impl" --ref "$WORK/$ref" --top e_gated --set formal.simfail_run=false "$@" \
+       --workdir "$WORK/q_e_$tag" 2>&1 \
+    | grep -oE "PROVEN equivalent|REFUTED \\(not equivalent\\)|UNKNOWN" | head -1 | cut -d' ' -f1
+}
+for s in hier flat; do
+  expect "E $s vs complemented ref (auto)" "$(everdict e_$s.v e_ref_bad.v ${s}_bad)" "REFUTED"
+  expect "E $s vs equal ref (auto)" "$(everdict e_$s.v e_ref_ok.v ${s}_ok)" "PROVEN"
+done
+# The induction arm alone (semdiff off, no BMC): the complemented pair must
+# stay open, and the equal pair must prove through the compared bridge.
+e_ind=(--set formal.engine=ind --set formal.semdiff=off --set formal.timeout=10)
+expect "E hier vs complemented ref (ind)" "$(everdict e_hier.v e_ref_bad.v hier_bad_ind "${e_ind[@]}")" "UNKNOWN"
+expect "E flat vs complemented ref (ind)" "$(everdict e_flat.v e_ref_bad.v flat_bad_ind "${e_ind[@]}")" "UNKNOWN"
+expect "E hier vs equal ref (ind)" "$(everdict e_hier.v e_ref_ok.v hier_ok_ind "${e_ind[@]}")" "PROVEN"
+
 if [ $fail -ne 0 ]; then echo "lec_phase_test: FAILED"; exit 1; fi
 echo "lec_phase_test: PASSED"
 exit 0

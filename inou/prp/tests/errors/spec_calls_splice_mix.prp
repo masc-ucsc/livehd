@@ -1,0 +1,14 @@
+/*
+:name: spec_calls_splice_mix
+:type: error
+:error: mix|named and unnamed|unnamed and named|unnamed and a named|named and an unnamed
+*/
+
+// qa.md Appendix §8: "Mixing a named and an unnamed splice is an error."
+// docs 03-bundle.md: `const mix1 = (...p, ...a)  // error: an unnamed and a
+// named splice`.
+
+const p = (1, 2)
+const a = (const x=1, const y=2)
+const mix1 = (...p, ...a) // locate_error_here
+cassert(mix1.x == 1)

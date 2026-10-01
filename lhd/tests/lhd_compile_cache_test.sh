@@ -24,15 +24,15 @@ fail() {
 }
 
 cat > "$W/src/leaf.prp" <<'EOF'
-pub comb add1(a:u8) -> (r:u9) { r = a + 1 }
+pub comb add1(a:U8) -> (r:U9) { r = a + 1 }
 EOF
 cat > "$W/src/side.prp" <<'EOF'
-pub comb twice(a:u8) -> (r:u9) { r = a + a }
+pub comb twice(a:U8) -> (r:U9) { r = a + a }
 EOF
 cat > "$W/src/top.prp" <<'EOF'
 const leaf = import("leaf")
 const side = import("side")
-mod top(x:u8) -> (y:u9@[]) { y = leaf.add1(a=x) }
+mod top(x:U8) -> (y:U9@[]) { y = leaf.add1(a=x) }
 EOF
 
 compile() {
@@ -223,8 +223,8 @@ has_phase "$W/damaged.json" pass.upass || fail "damaged cache did not recover th
 # importer/ancestor GraphIO. The unchanged importer must rebuild, not retain a
 # stale no-clock boundary; the final mixed result must still equal cold.
 cat > "$W/src/leaf.prp" <<'EOF'
-pub mod add1(a:u8) -> (r:u9@[1]) {
-  reg q:u9 = 0
+pub mod add1(a:U8) -> (r:U9@[1]) {
+  reg q:U9 = 0
   q = a + 2
   r = q
 }
@@ -246,8 +246,8 @@ python3 - "$W/src/top.prp" <<'PY'
 from pathlib import Path
 p = Path(__import__('sys').argv[1])
 p.write_text(p.read_text().replace(
-    "mod top(x:u8) -> (y:u9@[]) { y = leaf.add1(a=x) }",
-    "mod top(x:u8) -> (y:u9@[]) { const changed = x ^ 1; y = leaf.add1(a=changed) }"))
+    "mod top(x:U8) -> (y:U9@[]) { y = leaf.add1(a=x) }",
+    "mod top(x:U8) -> (y:U9@[]) { const changed = x ^ 1; y = leaf.add1(a=changed) }"))
 PY
 compile "$W/stateful_parent_edit.json"
 [ "$(field "$W/stateful_parent_edit.json" incremental.compile.misses)" = 1 ] \
@@ -266,15 +266,15 @@ grep -q 'input.*clock' "$W/v/"*.v || fail "restored stateful child lost the pare
 # compiler-minted clock/reset. Editing the parent must not turn that transitive
 # fact into a false direct-declaration scan over the wrapper's empty stub.
 cat > "$W/src/deep.prp" <<'EOF'
-pub mod hold(a:u8) -> (r:u9@[1]) {
-  reg q:u9 = 0
+pub mod hold(a:U8) -> (r:U9@[1]) {
+  reg q:U9 = 0
   q = a + 3
   r = q
 }
 EOF
 cat > "$W/src/leaf.prp" <<'EOF'
 const deep = import("deep")
-pub mod add1(a:u8) -> (r:u9@[1]) { r = deep.hold(a=a) }
+pub mod add1(a:U8) -> (r:U9@[1]) { r = deep.hold(a=a) }
 EOF
 compile "$W/transitive_seed.json"
 python3 - "$W/src/top.prp" <<'PY'
@@ -339,7 +339,7 @@ chmod 700 "$W/store_fail_w/incr/scopes/compile/top"
 python3 - "$W/src/top.prp" <<'PY'
 from pathlib import Path
 p = Path(__import__('sys').argv[1])
-p.write_text('mod top(x:u8) -> (y:u9@[0]) { y = x + 2 }\n')
+p.write_text('mod top(x:U8) -> (y:U9@[0]) { y = x + 2 }\n')
 PY
 compile "$W/delete.json"
 # Capture-then-grep: a pipe would take grep's exit status, so a crashing
@@ -362,8 +362,8 @@ fi
   --result-json "$W/shared_abc.json" || fail "shared-workdir abc failed"
 
 cat > "$W/src/shared_formal.prp" <<'EOF'
-mod shared_formal(sel:u3, en:bool) -> (value:u16@[0]) {
-  reg onehot:u16 = 0
+mod shared_formal(sel:U3, en:Bool) -> (value:U16@[0]) {
+  reg onehot:U16 = 0
   value = onehot
   assert((onehot & (onehot - 1)) == 0, "onehot invariant")
   if en { onehot = 1 << sel }
@@ -374,13 +374,13 @@ EOF
   --result-json "$W/shared_formal.json" || fail "shared-workdir formal failed"
 
 cat > "$W/src/shared_leaf.prp" <<'EOF'
-pub comb shared_leaf(a:u8) -> (r:u8) { r = a }
+pub comb shared_leaf(a:U8) -> (r:U8) { r = a }
 EOF
 cat > "$W/src/shared_tb.prp" <<'EOF'
 const leaf = import("shared_leaf.shared_leaf")
-test shared_tb.smoke(cycles:u20 = 1) {
+test shared_tb.smoke(cycles:U20 = 1) {
   mut dut = leaf
-  tick cycles clocks=(clock=1) {
+  tick cycles {
     dut.a = 3
     step
   }
@@ -404,22 +404,22 @@ compile "$W/post_shared.json"
 IW="$W/inlined"
 mkdir -p "$IW/src"
 cat > "$IW/src/callee.prp" <<'EOF'
-pub comb split::[timecheck=false](a:u8, b:u8, c:u8, d:u8) -> (o1:u16, o2:u16) {
+pub comb split::[timecheck=false](a:U8, b:U8, c:U8, d:U8) -> (o1:U16, o2:U16) {
   o1 = a + b
   o2 = c * d
 }
 EOF
 cat > "$IW/src/side.prp" <<'EOF'
-pub comb side(a:u8) -> (r:u8) { r = a ^ 1 }
+pub comb side(a:U8) -> (r:U8) { r = a ^ 1 }
 EOF
 cat > "$IW/src/top.prp" <<'EOF'
 const split = import("callee.split")
 const side = import("side.side")
-pub mod top::[timecheck=false](a:u8, b:u8, d:u8, bump:u8) -> (sum:u16@[], prod:u16@[]) {
-  wire back:u8 = nil
+pub mod top::[timecheck=false](a:U8, b:U8, d:U8, bump:U8) -> (sum:U16@[], prod:U16@[]) {
+  wire back:U8 = nil
   mut (o1, o2) = split(a=a, b=b, c=back, d=d)
   back = (o1 + bump) & 0xFF
-  sum = o1 + side(a=a)
+  wrap sum = o1 + side(a=a)
   prod = o2
 }
 EOF
@@ -463,23 +463,23 @@ icom "$IW/edit_cold.json" "$IW/edit_cold_lg" "$IW/edit_cold_w" --set lhd.increme
 FW="$W/fw"
 mkdir -p "$FW/src"
 cat > "$FW/src/fleaf.prp" <<'EOF'
-pub mod deferred_leaf(a:u4) -> (b:u4@[0]) {
+pub mod deferred_leaf(a:U4) -> (b:U4@[0]) {
   assert(a != 5)
-  b = a + 1
+  wrap b = a + 1
 }
 EOF
 # A third, UNRELATED unit: editing the leaf dirties the leaf and its importer,
 # so without this every unit would be dirty and the restore would take the
 # "nothing restorable" exit rather than the partial path under test.
 cat > "$FW/src/fside.prp" <<'EOF'
-pub comb fside_twice(a:u4) -> (r:u5) { r = a + a }
+pub comb fside_twice(a:U4) -> (r:U5) { r = a + a }
 EOF
 cat > "$FW/src/froot.prp" <<'EOF'
 const fleaf = import("fleaf")
 const fside = import("fside")
-mod froot(c:u4) -> (d:u4@[0], e:u5@[0]) {
+mod froot(c:U4) -> (d:U4@[0], e:U5@[0]) {
   const s = fleaf.deferred_leaf(a = 3)
-  d = s + c
+  wrap d = s + c
   e = fside.fside_twice(a = c)
 }
 EOF
@@ -634,14 +634,14 @@ cat > "$GW/src/g.prp" <<'EOF'
 pub mod madd<T>(a:T, b:T) -> (r:T@[0]) { r = a ^ b }
 EOF
 cat > "$GW/src/leaf.prp" <<'EOF'
-pub comb bump(a:u8) -> (r:u8) { wrap r = a + 1 }
+pub comb bump(a:U8) -> (r:U8) { wrap r = a + 1 }
 EOF
 cat > "$GW/src/top.prp" <<'EOF'
 const madd = import("g.madd")
 const leaf = import("leaf")
-mod top(x:u8) -> (y:u8@[0]) {
+mod top(x:U8) -> (y:U8@[0]) {
   const v = leaf.bump(a=x)
-  y = madd<u8>(a=v, b=x)
+  y = madd<U8>(a=v, b=x)
 }
 EOF
 gcompile() {  # RESULT_JSON OUTPUT_LG WORKDIR [extra options]
@@ -662,7 +662,7 @@ gcompile "$GW/mixed.json" "$GW/lg" "$GW/w"
 [ "$(field "$GW/mixed.json" incremental.compile.misses)" -ge 1 ] \
   || fail "generic-template semantic edit reported no dirty unit"
 GCAT=$("$LHD" tool cat "lg:$GW/lg" -q) || fail "could not inspect generic-template mixed output"
-grep -q 'g.madd__u8_u8' <<<"$GCAT" \
+grep -q 'g.madd__U8_U8' <<<"$GCAT" \
   || fail "generic-template mixed run did not retain the concrete specialization"
 gcompile "$GW/edit_cold.json" "$GW/edit_cold_lg" "$GW/edit_cold_w" --set lhd.incremental=false
 [ "$("$LHD" tool diff "lg:$GW/edit_cold_lg" "lg:$GW/lg" --structural -q)" = identical ] \
@@ -683,15 +683,15 @@ gcompile "$GW/edit_cold.json" "$GW/edit_cold_lg" "$GW/edit_cold_w" --set lhd.inc
 IW="$W/identity"
 mkdir -p "$IW/src"
 cat > "$IW/src/g.prp" <<'EOF'
-pub mod madd<W=8>(a:u8, b:u8) -> (r:u8@[0]) { r = (a ^ b) & ((1 << W) - 1) }
+pub mod madd<W=8>(a:U8, b:U8) -> (r:U8@[0]) { r = (a ^ b) & ((1 << W) - 1) }
 EOF
 cat > "$IW/src/leaf.prp" <<'EOF'
-pub comb bump(a:u8) -> (r:u8) { wrap r = a + 1 }
+pub comb bump(a:U8) -> (r:U8) { wrap r = a + 1 }
 EOF
 cat > "$IW/src/top.prp" <<'EOF'
 const madd = import("g.madd")
 const leaf = import("leaf")
-mod top(x:u8) -> (y:u8@[0]) {
+mod top(x:U8) -> (y:U8@[0]) {
   const v = leaf.bump(a=x)
   y = madd(a=v, b=x)
 }
@@ -750,5 +750,232 @@ PY
 icompile "$IW/heal.json" "$IW/lg" "$IW/w"
 [ "$(field "$IW/heal.json" incremental.compile.refused)" -eq 0 ] \
   || fail "scope did not heal after a refused post-merge restore"
+
+# GENERIC BINDING FLIP over a warm workdir: the caller (dirty) changes
+# `sib<W=4>` to `sib<W=5>` while the generic callee file stays clean. The clean
+# unit's cached specialization (minted by the caller's OLD binding) used to be
+# restored next to the template and shadow it, so the warm run failed with a
+# bogus "call to undefined function 'wrap'" in the unchanged callee (sim:
+# "names input '__generic_arg'") and kept failing until the workdir was wiped.
+# A restored specialization now lives only while a restored call site still
+# mints it; the template (with its generic port width) re-specializes the rest.
+# The warnings match too: wsib's `wrap` is unnecessary for W >= 5 only. After
+# the flip back to W=4 the dropped W=5 specialization's stored warning was
+# replayed with g's other trees (and stored again) although nothing emitted it.
+GW="$W/generic_flip"
+mkdir -p "$GW/src"
+cat > "$GW/src/g.prp" <<'EOF'
+pub mod sib<W=4>(a:Unsigned(bits=W * 2)) -> (y:Unsigned(bits=W)@[0]) { wrap y = a }
+pub mod wsib<W=4>(a:U5) -> (y:Unsigned(bits=W)@[0]) { wrap y = a }
+pub mod other(a:U5) -> (y:U5@[0]) { y = a }
+EOF
+cat > "$GW/src/top.prp" <<'EOF'
+const sib = import("g.sib")
+const wsib = import("g.wsib")
+const other = import("g.other")
+pub mod top(a:U8, b:U5) -> (y:U8@[0], v:U8@[0], z:U5@[0]) {
+  const s = sib<W=4>(a=a)
+  y = s.y
+  const u = wsib<W=4>(a=b)
+  v = u.y
+  const o = other(a=b)
+  z = o.y ^ 1
+}
+EOF
+gcompile() {  # RESULT_JSON OUTPUT_LG WORKDIR [extra options]
+  local result=$1 out=$2 work=$3
+  shift 3
+  "$LHD" compile "$GW/src/top.prp" --top top --emit-dir "lg:$out" --workdir "$work" \
+    -q --result-json "$result" "$@" || fail "generic-flip compile failed: $(cat "$result" 2>/dev/null)"
+}
+gflip() {  # FROM TO: rebind the caller, compile warm, compare with cold
+  python3 - "$GW/src/top.prp" "$1" "$2" <<'PY'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace(f"sib<W={sys.argv[2]}>", f"sib<W={sys.argv[3]}>"))
+PY
+  gcompile "$GW/warm_$2.json" "$GW/lg" "$GW/w"
+  [ "$(field "$GW/warm_$2.json" incremental.compile.refused)" -eq 0 ] \
+    || fail "generic-binding flip to W=$2 refused its partial restore"
+  rm -rf "$GW/cold_lg" "$GW/cold_w"
+  gcompile "$GW/cold_$2.json" "$GW/cold_lg" "$GW/cold_w" --set lhd.incremental=false
+  [ "$("$LHD" tool diff "lg:$GW/cold_lg" "lg:$GW/lg" --structural -q)" = identical ] \
+    || fail "generic-binding flip to W=$2 over a warm workdir differs from cold"
+  [ "$(field "$GW/warm_$2.json" diagnostics_count.warnings)" = "$(field "$GW/cold_$2.json" diagnostics_count.warnings)" ] \
+    || fail "generic-binding flip to W=$2: warm warnings differ from cold"
+}
+gcompile "$GW/first.json" "$GW/lg" "$GW/w"
+gflip 4 5
+gflip 5 4  # flipping back: the scope must not stay poisoned
+# The same flips with no lg: emit (the scope's own library, as `lhd sim` uses).
+vcompile() {  # VERILOG [extra options]
+  local out=$1
+  shift
+  "$LHD" compile "$GW/src/top.prp" --top top --emit verilog:"$out" -q --result-json "$GW/v.json" "$@" \
+    || fail "generic-flip verilog compile failed: $(cat "$GW/v.json" 2>/dev/null)"
+}
+vcompile "$GW/v_first.v" --workdir "$GW/wv"
+python3 - "$GW/src/top.prp" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+p.write_text(p.read_text().replace("sib<W=4>", "sib<W=5>"))
+PY
+vcompile "$GW/v_warm.v" --workdir "$GW/wv"
+vcompile "$GW/v_cold.v"
+cmp -s "$GW/v_warm.v" "$GW/v_cold.v" || fail "generic-binding flip to W=5 (no lg: emit) differs from cold"
+
+# RESTORED IO METADATA: a clean unit restored from the compact cache skips
+# upass.ssa, so a dirty caller sees exactly the io_meta the cache stored. Each
+# case edits only its caller; the warm run restores the clean callee and must
+# match a cold compile, or fail with the cold compile's error.
+#   dflt: has_default -- a caller omitting `b` bound nothing ("missing arg").
+#   big:  the exact bounds of a port past an i64 (wide_range_*): without them
+#         the port reads back as its 67-bit window and a too-wide argument
+#         compiled warm while the cold compile rejects it.
+#   grid: the inner dims of a multi-dimensional output: without them `t[i][j]`
+#         of the inlined `[2][4]U8` output read a packed row as one element.
+#         A second array inline (pick) is named `inl<N>_m` whether grid was
+#         restored converged (warm) or unrolled its loops in the splice (cold);
+#         the loop iterations used to advance N (inl10_m cold, inl2_m warm).
+MW="$W/io_meta"
+mkdir -p "$MW/src"
+cat > "$MW/src/lib.prp" <<'EOF'
+pub comb dflt(a:U8, b:U8 = 3) -> (y:U9) { y = a + b }
+pub comb big(a:Unsigned(max=100000000000000000000)) -> (y:Unsigned(max=100000000000000000000)) { y = a }
+pub comb grid(a:U4) -> (r:[2][4]U8) {
+  for i in 0..<2 {
+    for j in 0..<4 {
+      r[i][j] = a + i * 4 + j
+    }
+  }
+}
+pub comb pick(m:[2][4]U8, i:U1, j:U2) -> (y:U8) { y = m[i][j] }
+EOF
+cat > "$MW/src/tdflt.prp" <<'EOF'
+const lib = import("lib")
+pub mod tdflt(x:U8) -> (d:U9@[0]) { d = lib.dflt(a=x) }
+EOF
+cat > "$MW/src/tbig.prp" <<'EOF'
+const lib = import("lib")
+pub mod tbig(w:Unsigned(max=100000000000000000000)) -> (z:Unsigned(max=100000000000000000000)@[0]) { z = lib.big(a=w) }
+EOF
+cat > "$MW/src/tgrid.prp" <<'EOF'
+const lib = import("lib")
+pub mod tgrid(x:U4, i:U1, j:U2) -> (o:U8@[0], p:U8@[0], q:U8@[0]) {
+  const t = lib.grid(a=x)
+  o = t[1][2]
+  p = t[i][j]
+  q = lib.pick(m=t, i=i, j=j ^ 1)
+}
+EOF
+mcompile() {  # TOP RESULT_JSON OUTPUT_LG WORKDIR [extra options]
+  local top=$1 result=$2 out=$3 work=$4
+  shift 4
+  "$LHD" compile "$MW/src/$top.prp" --top "$top" --emit-dir "lg:$out" --workdir "$work" -q --result-json "$result" "$@"
+}
+medit() {  # FILE FROM TO
+  python3 - "$MW/src/$1" "$2" "$3" <<'PY'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1])
+text = p.read_text()
+assert sys.argv[2] in text, sys.argv[2]
+p.write_text(text.replace(sys.argv[2], sys.argv[3]))
+PY
+}
+mwarm_equals_cold() {  # TOP: the caller was edited; warm must restore and equal cold
+  local top=$1
+  mcompile "$top" "$MW/$top.warm.json" "$MW/lg_$top" "$MW/w_$top" \
+    || fail "$top: warm compile over a restored callee failed: $(cat "$MW/$top.warm.json" 2>/dev/null)"
+  [ "$(field "$MW/$top.warm.json" incremental.compile.hits)" -ge 1 ] || fail "$top: the clean callee was not restored"
+  [ "$(field "$MW/$top.warm.json" incremental.compile.refused)" -eq 0 ] || fail "$top: the partial restore was refused"
+  mcompile "$top" "$MW/$top.cold.json" "$MW/cold_$top" "$MW/cw_$top" --set lhd.incremental=false \
+    || fail "$top: cold compile failed: $(cat "$MW/$top.cold.json" 2>/dev/null)"
+  [ "$("$LHD" tool diff "lg:$MW/cold_$top" "lg:$MW/lg_$top" --structural -q)" = identical ] \
+    || fail "$top: warm compile over a restored callee differs from cold"
+}
+for top in tdflt tbig tgrid; do
+  mcompile "$top" "$MW/$top.first.json" "$MW/lg_$top" "$MW/w_$top" \
+    || fail "$top: first compile failed: $(cat "$MW/$top.first.json" 2>/dev/null)"
+done
+medit tdflt.prp "lib.dflt(a=x)" "lib.dflt(a=x ^ 1)"
+mwarm_equals_cold tdflt
+medit tgrid.prp "p = t[i][j]" "p = t[i][j] ^ t[0][3]"
+mwarm_equals_cold tgrid
+medit tbig.prp "(w:Unsigned(max=100000000000000000000))" "(w:Unsigned(max=100000000000000000000), k:U1)"
+mwarm_equals_cold tbig
+medit tbig.prp "(w:Unsigned(max=100000000000000000000), k:U1)" "(w:Unsigned(bits=67), k:U1)"
+mcompile tbig "$MW/tbig.wide.json" "$MW/lg_tbig" "$MW/w_tbig" && fail "a too-wide argument into a restored callee compiled warm"
+[ "$(field "$MW/tbig.wide.json" incremental.compile.hits)" -ge 1 ] || fail "tbig: the clean callee was not restored"
+mcompile tbig "$MW/tbig.wide_cold.json" "$MW/cold_tbig_wide" "$MW/cw_tbig_wide" --set lhd.incremental=false \
+  && fail "a too-wide argument compiled cold"
+[ "$(field "$MW/tbig.wide.json" error.message)" = "$(field "$MW/tbig.wide_cold.json" error.message)" ] \
+  || fail "warm and cold reject the too-wide argument differently: $(field "$MW/tbig.wide.json" error.message)"
+
+# User ruling 2026-09-28 (27): a constant that reaches a register's clock is
+# rejected warm exactly as cold. The check reads the callee's lowered body,
+# which the restore keeps; the restored unit's metadata-only LNAST has no body,
+# so a scan of it found no register and the warm compile used to pass.
+cat > "$MW/src/clklib.prp" <<'EOF'
+pub mod cleaf(clk:Clock, d:U4) -> (q:U4@[1]) {
+  reg r:U4 = 0
+  r = d
+  q = r
+}
+pub mod cmid(clk:Clock, d:U4) -> (q:U4@[1]) {
+  const l = cleaf(d=d)
+  q = l.q
+}
+EOF
+cat > "$MW/src/tclk.prp" <<'EOF'
+const cl = import("clklib")
+pub mod tclk(clk:Clock, d:U4) -> (q:U4@[1]) {
+  const m = cl.cmid(clk=clk, d=d)
+  q = m.q
+}
+EOF
+mcompile tclk "$MW/tclk.first.json" "$MW/lg_tclk" "$MW/w_tclk" \
+  || fail "tclk: first compile failed: $(cat "$MW/tclk.first.json" 2>/dev/null)"
+medit tclk.prp "cl.cmid(clk=clk" "cl.cmid(clk=0"
+mcompile tclk "$MW/tclk.const.json" "$MW/lg_tclk" "$MW/w_tclk" && fail "a constant clock into a restored callee compiled warm"
+[ "$(field "$MW/tclk.const.json" incremental.compile.hits)" -ge 1 ] || fail "tclk: the clean callee was not restored"
+mcompile tclk "$MW/tclk.cold.json" "$MW/cold_tclk" "$MW/cw_tclk" --set lhd.incremental=false \
+  && fail "a constant clock into a callee compiled cold"
+[ "$(field "$MW/tclk.const.json" error.message)" = "$(field "$MW/tclk.cold.json" error.message)" ] \
+  || fail "warm and cold reject the constant clock differently: $(field "$MW/tclk.const.json" error.message)"
+
+# A call into a RESTORED `mod` runs the call-site checks warm exactly as cold:
+# its typed output into a narrower `y`, an untyped output's derived range
+# (ruling 28), a too-wide argument (ruling 1). The restored unit has no body to
+# splice, so the runner used to stop before binding the call: every check was
+# skipped and the warm compile silently truncated.
+cat > "$MW/src/mlib.prp" <<'EOF'
+pub mod mcnt(a:U4) -> (o:U5@[0], u@[0]) {
+  o = a + 1
+  u = a + 2
+}
+EOF
+cat > "$MW/src/tmod.prp" <<'EOF'
+const ml = import("mlib")
+pub mod tmod(x:U4) -> (y:U8@[0], v:U8@[0]) {
+  const c = ml.mcnt(a=x)
+  y = c.o
+  v = c.u
+}
+EOF
+mcompile tmod "$MW/tmod.first.json" "$MW/lg_tmod" "$MW/w_tmod" \
+  || fail "tmod: first compile failed: $(cat "$MW/tmod.first.json" 2>/dev/null)"
+for edit in "y:U8@[0], v:U8@[0]|y:U4@[0], v:U8@[0]" "y:U4@[0], v:U8@[0]|y:U8@[0], v:U4@[0]" \
+  "tmod(x:U4) -> (y:U8@[0], v:U4@[0])|tmod(x:U8) -> (y:U8@[0], v:U8@[0])"; do
+  medit tmod.prp "${edit%%|*}" "${edit##*|}"
+  mcompile tmod "$MW/tmod.warm.json" "$MW/lg_tmod" "$MW/w_tmod" && fail "tmod ($edit): a call into a restored mod compiled warm"
+  [ "$(field "$MW/tmod.warm.json" incremental.compile.hits)" -ge 1 ] || fail "tmod ($edit): the clean callee was not restored"
+  mcompile tmod "$MW/tmod.cold.json" "$MW/cold_tmod" "$MW/cw_tmod" --set lhd.incremental=false \
+    && fail "tmod ($edit): the call compiled cold"
+  [ "$(field "$MW/tmod.warm.json" error.message)" = "$(field "$MW/tmod.cold.json" error.message)" ] \
+    || fail "tmod ($edit): warm and cold reject the call differently: $(field "$MW/tmod.warm.json" error.message)"
+done
 
 echo "PASS: incremental Pyrope compile cache"

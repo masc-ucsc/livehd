@@ -7,6 +7,6 @@
 // The Verilog golden uses three concurrent partial drivers that read sibling
 // slices. This independent direct expression states their settled value:
 // w[3:2]=hi, w[1]=hi[0], and w[0]=~hi[0]. Source order must not affect it.
-pub comb selfref_slice_assign::[timecheck=false](hi:u2) -> (q:u4) {
+pub comb selfref_slice_assign::[timecheck=false](hi:U2) -> (q:U4) {
   q = (hi << 2) | ((hi & 1) << 1) | ((~hi) & 1)
 }

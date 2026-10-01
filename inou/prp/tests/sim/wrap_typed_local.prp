@@ -1,0 +1,57 @@
+/*
+:name: wrap_typed_local
+:type: simulation
+*/
+// User ruling 2026-09-27 (lhdtrack suggestions, overflow rule): an assignment
+// into a TYPED local whose right-hand side may leave the declared range is a
+// compile error (errors/typed_local_overflow_runtime.prp); `wrap`/`sat` is the
+// explicit narrowing, and the declared width must then really apply. It used
+// to be a silent miscompile: `mut t:U4 = 0; t = x + 16; y = t` emitted
+// `y = x + 16`, the local never truncated.
+//
+// Every destination is U8, WIDER than the local, so the output port cannot do
+// the truncation a missing wrap would skip. `low_sum` is inlined: its local is
+// narrowed inside the caller.
+comb low_sum(a:U4, b:U4) -> (s:U8) {
+  mut t:U4 = 0
+  wrap t = a + b
+  s = t
+}
+
+mod wrap_typed_local(x:U4, z:U4) -> (y:U8@[0], y3:U8@[0], ys:U8@[0], c:U8@[0]) {
+  mut t:U4 = 0
+  wrap t = x + 16    // every value overflows: the low 4 bits are x
+  y = t
+  mut t3:U4 = 0
+  wrap t3 = x + 3    // wraps only for x >= 13
+  y3 = t3
+  mut s:U4 = 0
+  sat s = x + z
+  ys = s
+  c = low_sum(a=x, b=z)
+}
+
+test wrap_typed_local.narrows {
+  mut d = wrap_typed_local
+  tick 2 {
+    if clock == 0 {
+      d.x = 15
+      d.z = 15
+    } else {
+      d.x = 5
+      d.z = 6
+    }
+    step
+    if clock == 0 {
+      assert(d.y  == 15, "wrap: 15 + 16 = 31 keeps its low 4 bits")
+      assert(d.y3 == 2,  "wrap: 15 + 3 = 18 wraps to 2")
+      assert(d.ys == 15, "sat: 15 + 15 = 30 saturates at 15")
+      assert(d.c  == 14, "wrap in an inlined comb local: 30 wraps to 14")
+    } else {
+      assert(d.y  == 5,  "wrap: 5 + 16 = 21 keeps its low 4 bits")
+      assert(d.y3 == 8,  "wrap: 5 + 3 = 8 fits")
+      assert(d.ys == 11, "sat: 5 + 6 = 11 fits")
+      assert(d.c  == 11, "wrap in an inlined comb local: 11 fits")
+    }
+  }
+}

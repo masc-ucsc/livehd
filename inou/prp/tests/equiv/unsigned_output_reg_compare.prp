@@ -13,9 +13,9 @@
 // -count compare `cv == 255` came out as `cv == 9'shff` with `cv` declared
 // `signed [7:0]`: -1 == 255, never true, so `tc` was stuck at 0. Silent
 // miscompile -- it compiled clean and LEC refuted it.
-pub mod unsigned_output_reg_compare::[timecheck=false](clk:u1) -> (tc:u1@[], cv:u8@[]) {
-  reg cv:u8
+pub mod unsigned_output_reg_compare::[timecheck=false](clk:Clock) -> (tc:U1@[], cv:U8@[]) {
+  reg cv:U8
   tc = 0ub?
   cv = (cv + 1)#[0..=7]
-  tc = unsigned(cv == 255)
+  tc = Unsigned(cv == 255)
 }

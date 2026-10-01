@@ -6,6 +6,6 @@
 :name_match_only: false
 */
 
-pub pipe[1] passthru(a:u8) -> (o:u8) {
+pub pipe[1] passthru(a:U8) -> (o:U8) {
   o = a
 }

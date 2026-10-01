@@ -66,9 +66,9 @@ module edges (input wire clk, input wire [2:0] d_lo, input wire [2:0] d_hi,
 endmodule
 EOF
 cat > "$WORK/edges.prp" <<'EOF'
-pub mod edges::[timecheck=false](clk:u1, d_lo:u3, d_hi:u3) -> (rise_o:u3@[], fall_o:u3@[]) {
-  reg rise:u3:[clock_pin=ref clk]
-  reg fall:u3:[clock_pin=ref clk, posclk=false]
+pub mod edges::[timecheck=false](clk:Clock, d_lo:U3, d_hi:U3) -> (rise_o:U3@[], fall_o:U3@[]) {
+  reg rise:U3:[clock_pin=clk]
+  reg fall:U3:[clock_pin=clk, posclk=false]
   rise = d_lo
   fall = d_hi
   rise_o = rise
@@ -105,9 +105,9 @@ module inv (input wire clk, input wire [2:0] d, output wire [2:0] q);
 endmodule
 EOF
 cat > "$WORK/inv.prp" <<'EOF'
-pub mod inv::[timecheck=false](clk:u1, d:u3) -> (q:u3@[]) {
-  reg early:u3:[clock_pin=ref clk]
-  reg late:u3:[clock_pin=ref clk, posclk=false]
+pub mod inv::[timecheck=false](clk:Clock, d:U3) -> (q:U3@[]) {
+  reg early:U3:[clock_pin=clk]
+  reg late:U3:[clock_pin=clk, posclk=false]
   early = d
   if (early & 1) != 0 {
     late = d ^ 0ub111
@@ -120,10 +120,10 @@ EOF
 # would model, so it MUST refute — if it proves, the sample point is not being
 # honoured and the two flavours have collapsed into one.
 cat > "$WORK/inv_bad.prp" <<'EOF'
-pub mod inv::[timecheck=false](clk:u1, d:u3) -> (q:u3@[]) {
-  reg early:u3:[clock_pin=ref clk]
-  reg prev:u3:[clock_pin=ref clk]
-  reg late:u3:[clock_pin=ref clk, posclk=false]
+pub mod inv::[timecheck=false](clk:Clock, d:U3) -> (q:U3@[]) {
+  reg early:U3:[clock_pin=clk]
+  reg prev:U3:[clock_pin=clk]
+  reg late:U3:[clock_pin=clk, posclk=false]
   prev = early
   early = d
   if (prev & 1) != 0 {

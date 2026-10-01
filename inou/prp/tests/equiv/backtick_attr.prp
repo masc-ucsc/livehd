@@ -1,0 +1,12 @@
+/*
+:name: backtick_attr
+:type: lec
+:lec_top: backtick_attr
+*/
+// Reference for the backtick_attr group: module and register attributes,
+// spelled plainly.
+pub mod backtick_attr::[timecheck=false](clk:Clock, rst:Reset, d:U8) -> (q:U8@[1]) {
+  reg r:U8:[clock_pin=clk, reset_pin=rst] = 5
+  q = r
+  r = d
+}

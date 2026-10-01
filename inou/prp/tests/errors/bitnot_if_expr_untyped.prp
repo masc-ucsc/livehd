@@ -1,0 +1,17 @@
+/*
+:name: bitnot_if_expr_untyped
+:type: error
+:error: `~` needs an operand of known type: `m` is an untyped runtime value
+:help: give it a type
+*/
+
+// User rulings 2026-09-28 (38) and 2026-09-29 (44): only an alias of ONE
+// typed value inherits its type. An if-expression writes its value once per
+// arm, and here one arm is an arithmetic result (untyped, ruling 6): `m` has
+// no type, so `~m` is ambiguous. Before, the typed arm's u4 won (whichever
+// arm came first): `~m` flipped 4 bits of a value that reaches 16 and
+// `m.[max]` read 15 (a silent wrong value).
+mod bitnot_if_expr_untyped(a:U4, c:Bool) -> (o:U8@[0]) {
+  const m = if c { a } else { a + 1 }
+  wrap o = ~m  // locate_error_here
+}

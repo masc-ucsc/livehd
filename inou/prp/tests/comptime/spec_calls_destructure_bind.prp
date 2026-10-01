@@ -1,0 +1,25 @@
+/*
+:name: spec_calls_destructure_bind
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// qa.md Appendix §8 (assistant reading): "destructuring a NAMED tuple binds
+// each bare slot by name match (slot name == field name) or `slot=field`;
+// destructuring an UNNAMED tuple binds by position".
+// docs 03-bundle.md: `(c, b) = dox(a=3)  // same: order doesn't matter`;
+// `mut (b, a) = (2, 3)  // a=3, b=2 (still positional)`.
+
+const x = (const f1=10, const f2=4)
+const (f2, f1) = x                    // by name: order is irrelevant
+cassert(f1 == 10 and f2 == 4)
+
+mut (q, p) = (2, 3)                   // unnamed RHS: positional
+cassert(q == 2 and p == 3)
+
+comb dox(a) -> (b, c) { b = a + 1; c = a + 2 }
+const (c, b) = dox(a=3)
+cassert(b == 4 and c == 5)
+const (u=dox.b, v=dox.c) = dox(a=10)
+cassert(u == 11 and v == 12)

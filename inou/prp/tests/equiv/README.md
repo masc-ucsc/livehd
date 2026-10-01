@@ -14,6 +14,13 @@ pair](#two-engines-one-pair)). The golden is written by hand
 from the same specification, never generated, so it is an independent statement
 of what the design must compute.
 
+A pair whose `:type:` also carries `simulation` has its own `test` block. When
+its stem is on `_EQUIV_SIM` in `inou/prp/BUILD` (matched_filter), that block runs
+in its own target, `prp-sim-equiv-foo`, and `prp-equiv-foo` (and its `-bitfuzz`
+twin) runs only the equivalence (`--mode equiv`), so no target pays for both
+the simulation host build and the proof. (`prp-simeq-*` is a different family:
+the differential-simulation testbenches of `README_simeq.md`.)
+
 Imported helpers may live in a same-stem directory, for example
 `imported_bool_cast.prp` imports `imported_bool_cast/leaf.prp`. The automatic
 equivalence, state-matching, and Verilog round-trip targets stage those helpers;
@@ -76,6 +83,15 @@ while cgen emits `clock`, so `equiv_make` finds no matching port (the native
 engine pairs clocks semantically). Adding the oracle costs about 2s on a pair it
 proves and the full budget on one it cannot.
 
+The oracle never runs twice on the same bytes. A pair whose own `:set:` already
+asks `lhd lec` for `formal.solver=lgyosys` (lgcheck through yosys' `read_slang`,
+and it must agree) skips the separate leg; it trades the leg's `read_verilog`
+front end for `read_slang`, still an independent lowering and still strict. A
+`-bitfuzz` companion whose emitted netlist is byte-identical to the plain
+compile's (proved by redoing the plain compile) skips every lgcheck run:
+lgcheck reads only the two Verilog texts, so the plain target already checked
+those exact inputs.
+
 Because a one-sided check is exactly the kind of thing that silently becomes a
 no-op, `//inou/prp:prp-yosys-lec-oracle` is the guard on the guard: it drives
 `run_yosys_lec` over two hand-written `.v` files and requires that it still
@@ -115,7 +131,9 @@ Every tag is a `:name: value` line inside the leading `/* … */` block.
 | `:expect_instances:` | instance-count assertion — see `../sim/README.md` |
 | `:name_match_only:` | accept a STRUCTURAL state pair — see below |
 | `:yosys_lec: false` | drop the `lgyosys` oracle for this pair; say WHY in the header prose |
-| `:yosys_lec_timeout: N` | the oracle's `LGCHECK_EQUIV_TIMEOUT` in seconds (default 10; the outer wall is 3N) |
+| `:yosys_lec_timeout: N` | the oracle's `LGCHECK_EQUIV_TIMEOUT` in seconds (default 3; the outer wall is 3N) |
+| `:equiv_lec_grep: REGEX` / `:equiv_lec_grep_not: REGEX` | must (not) appear in this pair's native `lhd lec` output (repeatable); the base `:lec_grep:` tags belong to the `prp-lec-*` groups below |
+| `:lec_expect: refuted` | a MUTATED pair: the golden deliberately computes something else, so the native `lhd lec` must REFUTE it, the `lgyosys` oracle must not prove it, and the `prp-v2prp2v-*` native leg must refute too (its golden-vs-round-trip leg still proves). A regression guard for a false PROVEN, such as `spec_types_cast_runtime_zext` |
 
 ## Pyrope ↔ Pyrope variants (`prp-lec-*`)
 
@@ -186,7 +204,12 @@ lhd pass semdiff --stats --ref lg:lg1 --impl lg:lg2
 
 Every ref-side register and memory in `semdiff[stats]` must find a counterpart,
 **BY NAME** unless the fixture sets `:name_match_only: false` to accept a
-structural pair. A design with no registers and no memories has nothing to
+structural pair. `--stats` measures the hierarchy `lhd lec` compares: an
+instance whose definition the other side lacks (a helper module one front end
+flattened, a cgen `cgen_memory_*` wrapper) is dissolved into its caller first,
+exactly as lec[hier] does (`pass.semdiff.inline_absent`, on under `--stats`),
+so its state pairs where the other side holds it -- a wrapped memory pairs
+memory-to-memory. A design with no registers and no memories has nothing to
 correspond, so it is EXCLUDED from the axis by `_STATEMATCH_COMB` in
 `inou/prp/BUILD` rather than run as a silent pass (measured 2026-09-21: 190 of
 319 pairs were vacuous this way). A pair whose claim IS that no state appears

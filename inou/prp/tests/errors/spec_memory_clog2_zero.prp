@@ -1,0 +1,15 @@
+/*
+:name: spec_memory_clog2_zero
+:type: error
+:error: std\.clog2
+*/
+
+// SPEC (qa.md appendix section 5, Memories):
+//   "`std.clog2(x)` exists (comptime; ... x<=0 or runtime x is an error)."
+// SPEC (docs 04b-attributes.md): "It is comptime only; `x <= 0` or a runtime `x`
+// is a compile error."
+// Rule encoded here: x == 0 is a compile error (NOT Verilog's silent $clog2(0) == 0).
+
+comptime const depth = 0
+comptime const aw = std.clog2(depth)   // locate_error_here
+cassert(aw == 0)

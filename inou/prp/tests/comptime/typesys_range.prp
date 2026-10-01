@@ -6,31 +6,33 @@
 */
 
 // Corner cases for entry 1v (LNAST basic typesystem + min/max upass).
-// Declared-type-only policy: `.[bits]`/`.[max]`/`.[min]` derive from the
-// declared type. Un-annotated values return nil for all three.
+// Declared-type-only policy: `.[max]`/`.[min]` derive from the declared type
+// and un-annotated values return nil. `.[bits]` also derives from the declared
+// type, except that an untyped COMPTIME integer is as wide as its value (user
+// ruling 2026-09-27, docs 04b "Integer Bitwidth").
 
-// Inferred from initializer: a fits 0..3 → 2 bits unsigned.
+// Untyped comptime: no envelope, but 3 needs 2 bits.
 const a = 3
 cassert(a.[max] == nil)
 cassert(a.[min] == nil)
-cassert(a.[bits] == nil)
+cassert(a.[bits] == 2)
 
 // Inferred range from a small mut updated by constant adds.
-mut b:u10 = 1
+mut b:U10 = 1
 b = b + 1
 b = b + 1
 cassert(b == 3)
 cassert(b.[max] >= 3)
 
 // Bounded type: declared max/min envelope derives bits.
-// (`:[range=…]`/`signed(range=…)` are compile errors — see errors/readonly_attr_range.)
-const c:signed(max=15, min=0) = 5
+// (`:[range=…]`/`Signed(range=…)` are compile errors — see errors/readonly_attr_range.)
+const c:Signed(max=15, min=0) = 5
 cassert(c.[bits] == 4)
 cassert(c.[max] == 15)
 cassert(c.[min] == 0)
 
 // Bool: bits=1, max=1, min=0.
-const t:bool = true
+const t:Bool = true
 cassert(t.[bits] == 1)
 cassert(t.[max] == 1)
 cassert(t.[min] == 0)
@@ -42,7 +44,7 @@ cassert(s.[bits] == nil)
 
 // Arithmetic narrows the *effective* range to the declared type's bound,
 // not to the runtime expression's value.
-mut d:signed(max = 15) = 1
+mut d:Signed(max = 15) = 1
 d = d + 14
 cassert(d == 15)
 cassert(d.[max] == 15)

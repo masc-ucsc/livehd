@@ -1,0 +1,30 @@
+/*
+:name: spec_tests_assume_input_env
+:type: verify
+:top_module: spec_aie_cnt
+:verify_bound: 10
+:verify_proven: 1
+:verify_refuted: 0
+*/
+// Spec: docs 05-assert "Formal blocks": "`assume_nocheck(expr)` -- the explicit
+// environment constraint: a free constraint by user fiat, even over state,
+// assumed without a check and disclosed in every verdict". Ruling 58 (lhdtrack
+// rulings 2026-09-30, REVISES ruling 36): "Every plain `assume` is ALWAYS
+// CHECKED (an obligation), in the design body and in formal blocks alike ...
+// `assume_nocheck(expr)` is the only form that constrains without checking."
+//
+// Rule pinned: an environment constraint over the top's primary input is
+// spelled `assume_nocheck(not acc.enable)`; it freezes the counter without a
+// check, so `count != 5` PROVES and the run is clean. The plain `assume`
+// spelling is checked instead (spec_tests_assume_input_checked).
+pub mod spec_aie_cnt(enable:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
+  value = count
+  if enable { wrap count += 1 }
+}
+
+formal spec_aie.frozen {
+  mut acc = spec_aie_cnt
+  assume_nocheck(not acc.enable)
+  assert(acc.count != 5, "frozen counter")
+}

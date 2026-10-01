@@ -13,9 +13,9 @@ test async_reset_enable.sig {
   mut sig = 0
   tick 1000 {
     s = s * 6364136223846793005 + 1442695040888963407
-    acc.en = s & 0x1
+    acc.en = Bool(s & 0x1)
     s = s * 6364136223846793005 + 1442695040888963407
-    acc.arst = s & 0x1
+    acc.arst = Bool(s & 0x1)
     s = s * 6364136223846793005 + 1442695040888963407
     acc.d = s & 0xff
     acc.reset = clock < 4

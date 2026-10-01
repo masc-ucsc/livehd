@@ -9,7 +9,7 @@
 // const-to-ref error (non-ref `self` methods ARE callable on a type binding,
 // read-only over the defaults).
 
-type t1 = (a:u32=nil, b:string="")
+type t1 = (a:U32=nil, b:String="")
 
 comb set_b(ref self:t1) {
   self.b = "foo"

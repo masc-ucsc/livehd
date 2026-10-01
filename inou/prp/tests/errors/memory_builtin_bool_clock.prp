@@ -1,0 +1,23 @@
+/*
+:name: memory_builtin_bool_clock
+:type: error
+:tolg: 1
+:error: memory `res` names `b` as its clock_pin, but it is data, not a Clock
+*/
+// A `__memory` clock is a `Clock`, never `Bool` data (a register's rule).
+pub mod memory_builtin_bool_clock(b:Bool, we:Bool, wa:U2, wd:U8, ra:U2) -> (q:U8@[]) {
+  mut cfg = (
+    const addr      = (wa, ra),
+    const bits      = 8,
+    const size      = 4,
+    const clock_pin = b,
+    const din       = (wd, 0),
+    const enable    = (we, true),
+    const fwd       = false,
+    const `type`    = 0,
+    const wensize   = 1,
+    const rdport    = (0, 1),
+  )
+  mut res = __memory(cfg)
+  q = res[0]
+}

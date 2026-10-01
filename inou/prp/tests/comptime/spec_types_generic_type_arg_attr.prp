@@ -1,0 +1,11 @@
+/*
+:name: spec_types_generic_type_arg_attr
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// SPEC docs 07-typesystem "Built-in types" / typeword_all_positions: a type word is a generic ARGUMENT
+// (`f<U8>`, `f<T=U8>`); the lambda sees the declared type of its typed input.
+comb mx<T>(a:T) -> (o) { o = a.[max] }
+cassert(mx<T=U8>(a=1) == 255)
+cassert(mx<S4>(a=1) == 7)

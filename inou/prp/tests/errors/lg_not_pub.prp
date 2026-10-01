@@ -8,4 +8,4 @@
 // Task 2f-lg — the `lg="name"` lgraph/module-name override is pub-only; a
 // file-local (non-pub) unit has no stable export name to pin.
 
-comb my_top::[lg="chip_top"](a:u8, b:u8) -> (r:u9) { r = a + b }  // locate_error_here
+comb my_top::[lg="chip_top"](a:U8, b:U8) -> (r:U9) { r = a + b }  // locate_error_here

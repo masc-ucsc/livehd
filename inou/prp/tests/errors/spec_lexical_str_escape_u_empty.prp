@@ -1,0 +1,8 @@
+/*
+:name: spec_lexical_str_escape_u_empty
+:type: error
+:error: a code point is written
+*/
+// qa.md appendix 8: "`\u{1..6 hex}`" -- at least one hex digit, so `\u{}` is
+// an error.
+const s = "\u{}"   // locate_error_here

@@ -1,0 +1,54 @@
+/*
+:name: comb_default_call
+:type: equiv
+:verilog_top: comb_default_call
+:pyrope_top: comb_default_call
+*/
+// User ruling 2026-09-28 (39): a `comb` input default computed through a CALL
+// (`b:U8 = g(a=a)`) is re-emitted by the Pyrope writer (pass.prp_writer,
+// `--emit pyrope`) as that call expression in the regenerated signature. The
+// `prp-p2p-comb_default_call` target round-trips this file through the writer,
+// recompiles the emitted Pyrope and proves it against the golden. Before, the
+// writer failed "cannot emit Pyrope for 'comb_default_call.f': unimplemented
+// construct(s): the default of input `b` is not an expression over the inputs".
+// `k`'s default calls `g` with a constant (re-emitted as `g(a = 3)`); `n`,
+// `m` and `p` nest the call in another call, in arithmetic and after a
+// constant-argument call, and `q`'s default calls `g` on another input.
+
+comb g(a:U8) -> (o:U8) {
+  wrap o = a + 1
+}
+
+pub comb f(a:U8, b:U8 = g(a=a)) -> (o:U8) {
+  o = a ^ b
+}
+
+pub comb k(a:U8, b:U8 = g(a=3)) -> (o:U8) {
+  o = a & b
+}
+
+pub comb n(a:U8, b:U8 = g(a=g(a=a))) -> (o:U8) {
+  o = a ^ b
+}
+
+pub comb m(a:U8, b:U8 = (g(a=a) & 0x0f)) -> (o:U8) {
+  o = a ^ b
+}
+
+pub comb p(a:U8, b:U8 = g(a=3) + 1) -> (o:U8) {
+  o = a ^ b
+}
+
+pub comb q(a:U8, c:U8, b:U8 = g(a=c)) -> (o:U8) {
+  o = a ^ b
+}
+
+pub mod comb_default_call(x:U8, z:U8) -> (y:U8@[0], w:U8@[0], v:U8@[0], y1:U8@[0], y2:U8@[0], y5:U8@[0], y6:U8@[0]) {
+  y  = f(a=x)          // the default: x ^ (x + 1)
+  w  = f(a=x, b=z)
+  v  = k(a=x)          // x & 4
+  y1 = n(a=x)          // x ^ (x + 2)
+  y2 = m(a=x)          // x ^ ((x + 1) & 0x0f)
+  y5 = p(a=x)          // x ^ 5
+  y6 = q(a=x, c=z)     // x ^ (z + 1)
+}

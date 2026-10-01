@@ -1,0 +1,48 @@
+/*
+:name: generic_array_comptime_width
+:type: simulation
+*/
+// lhdtrack suggestions.md 2.2(b): the generic-width array spelled through a
+// body `comptime const W = N` -- `[W]Unsigned(bits=W)` -- failed exactly like
+// `[N]Unsigned(bits=N)` (see generic_reg_array_elem.prp): "upass.tolg: memory
+// 'r' element type must be a sized integer or bool" for the reg and "array 'm'
+// requires a sized scalar element type" for the mut. W is only known once N is
+// bound, so its element bound must be deferred like the scalar
+// `mut x:Unsigned(bits=W)` one, which always worked (user ruling 2026-09-27 #7:
+// `Unsigned(bits=N)` works everywhere).
+//
+// 13 needs all four bits of the W=N=4 binding; the default (N=2) width would
+// read back 1, and `s` would be 3 instead of 15.
+mod lanes<N=2>(en:Bool, d:Unsigned(bits=N)) -> (q:Unsigned(bits=N)@[0], s:Unsigned(bits=N)@[0]) {
+  comptime const W = N
+  reg r:[W]Unsigned(bits=W) = 0
+  if en {
+    r[W-1] = d
+  }
+  q = r[W-1]
+
+  mut m:[W]Unsigned(bits=W) = 0
+  m[0]   = d
+  m[W-1] = d ^ ((1 << W) - 1)
+  s = m[0] ^ m[W-1]              // all ones of the element width
+}
+
+pub mod generic_array_comptime_width(en:Bool, d:U4) -> (q:U4@[0], s:U4@[0]) {
+  const l = lanes<N=4>(en=en, d=d)
+  q = l.q
+  s = l.s
+}
+
+test generic_array_comptime_width.values {
+  mut dut  = generic_array_comptime_width
+  mut s_ok = true
+  tick 6 {
+    dut.reset = clock == 0
+    dut.en    = clock < 3
+    dut.d     = if clock < 3 { 13 } else { 2 }
+    step
+    if dut.s != 15 { s_ok = false }
+  }
+  assert(s_ok, "comb [W]unsigned(bits=W) lanes are W bits wide")
+  assert(dut.q == 13, "reg [W]unsigned(bits=W) lane holds a u4")
+}

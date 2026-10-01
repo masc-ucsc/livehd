@@ -1,0 +1,10 @@
+/*
+:name: spec_syntax_destructure_arity
+:type: error
+*/
+// docs 03-bundle.md (tuple on the left-hand side): "mut (c,d) = 1      // error: 2 entry tuple
+// in lhs, same in rhs". An unnamed destructuring binds by position (qa.md Appendix §8), so the
+// slot count must match the right-hand side; a scalar is not broadcast to every slot.
+mut (c, d) = 1   // locate_error_here
+cassert(c == 1)
+cassert(d == 1)

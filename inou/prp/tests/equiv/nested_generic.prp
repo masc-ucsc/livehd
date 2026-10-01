@@ -6,6 +6,6 @@
 */
 
 const parent = import("nested_generic/parent.parent")
-pub mod top(a:u8) -> (y:u8@[0]) {
+pub mod top(a:U8) -> (y:U8@[0]) {
   y = parent(a=a)
 }

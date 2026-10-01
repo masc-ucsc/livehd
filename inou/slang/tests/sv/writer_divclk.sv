@@ -1,13 +1,9 @@
-// LEC explicitly refuses flop-driven clocks, and native sim refuses to fold a
-// derived clock, so roundtrip_sim pins both clock roots structurally
-// (:verilog_re:) and keeps a refusal tripwire (:sim_unsupported:). The
-// event-level bench writer_divclk_tb.v (64 cycles against an event reference,
-// with async reset) runs only with LHD_EXTERNAL_SIM=1 (iverilog/vvp).
-// :test: roundtrip_sim
-// :verilog_re: always @\(posedge clk_i([^_[:alnum:]]|$)
-// :verilog_re: always @\(posedge div_q([^_[:alnum:]]|$)
-// :sim_unsupported: derived clock
+// :test: error
+// :error: register .state_q. is clocked by a register output \(a divided clock\): derived, inverted and muxed clocks are not supported
 // :top: divclk
+// Ruling 81 (qa Q26): Verilog clock idioms map what fits and error the rest. A
+// register used as a clock (a divided clock) is a derived clock: not supported
+// (LEC and native sim refused it as well).
 module divclk (
   input  logic       clk_i,
   input  logic       rst_ni,
@@ -19,7 +15,7 @@ module divclk (
   logic [1:0] state_q, state_d;
   logic       new_req;
 
-  // div_q is a REG used as a clock -> `clock_pin=ref div_q`.
+  // div_q is a REG used as a clock -> `clock_pin=div_q`.
   always_ff @(posedge clk_i or negedge rst_ni) begin
     if (!rst_ni) div_q <= 1'b0; else div_q <= ~div_q & (new_req | req_i);
   end

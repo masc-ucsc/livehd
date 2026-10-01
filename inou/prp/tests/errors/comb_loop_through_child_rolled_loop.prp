@@ -1,0 +1,31 @@
+/*
+:name: comb_loop_through_child_rolled_loop
+:type: error
+:tolg: 1
+:error: combinational loop
+*/
+
+// GUARD for the time-checker's per-output split of a child on a ring
+// (lhdtrack suggestions 2.1): a REAL combinational loop whose path inside the
+// child runs through a ROLLED loop must stay an error. `ch.o` is `d` plus a
+// loop-carried sum, all combinational, so `gr -> ch.d -> ch.o -> gr` has no
+// flop on it.
+//
+// The wire-level check (resolve_wire_selfref) treats a rolled loop instance
+// inside the child as opaque and does not see this ring; only the
+// time-checker, which reads the child's per-output cones through
+// graph/port_reach, catches it. A split that loses an output's cone (reads
+// it as input-independent) would let this design compile. The Moore
+// counterpart (the loop feeds a register, `o` reads the register) is legal.
+mod ch(d:U8) -> (o:U12@[0]) {
+  mut acc:U12 = d
+  for j in 0..<4 { acc = acc + j }
+  o = acc
+}
+
+pub mod top(a:U8) -> (g:U8@[0]) {
+  wire gr:U8 = nil   // locate_error_here
+  const m = ch(d=gr)
+  gr = a ^ m#[0..<8]
+  g = gr
+}

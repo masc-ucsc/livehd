@@ -1,0 +1,29 @@
+/*
+:name: spec_clock_drive_clock_port
+:type: simulation
+*/
+// SPEC (clock lane): in synthesizable logic a Clock may drive another Clock
+// port -- a child's `Clock` input bound explicitly, or a `Clock` output.
+//   qa.md Appendix 6: "In synthesizable logic a Clock may only drive clock
+//     pins, a Clock_cell (ICG gating with `en`) or another Clock port."
+//   docs 04b: "it only drives clock pins, a `Clock_cell` (clock gating), or
+//     another `Clock` port"
+mod cnt(c:Clock, en:Bool) -> (q:U8@[0]) {
+  reg n:U8 = 0
+  if en { wrap n = n + 1 }
+  q = n
+}
+pub mod spec_clock_drive_clock_port(ck:Clock, en:Bool) -> (q:U8@[0], co:Clock@[0]) {
+  const x = cnt(c=ck, en=en)
+  q  = x.q
+  co = ck
+}
+
+test spec_clock_drive_clock_port.explicit {
+  mut t = spec_clock_drive_clock_port
+  tick 5 {
+    t.en = true
+    step
+  }
+  assert(t.q == 5)
+}

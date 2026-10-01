@@ -1,0 +1,35 @@
+/*
+:name: mem_partial_write_mixed
+:type: equiv
+:verilog_top: mem_partial_write_mixed
+:pyrope_top: mem_partial_write_mixed
+*/
+// Partial writes of one memory entry at MIXED widths and at computed indices,
+// all in one cycle. Every one must land, like the golden's nonblocking slices.
+//
+// The golden is where this failed silently: the slang reader lowers an aligned
+// slice as a chunked write (a per-lane write enable) and emitted the memory's
+// lane count once, from the FIRST such slice. `[7:0]`/`[15:8]` made it two
+// 8-bit lanes, so `[3:0]` then wrote the whole low byte and `[7:4]` enabled
+// lane 1, the HIGH byte. A slice of another width now takes the
+// read-modify-write splice, which merges with the chunked writes of the cycle.
+//
+// On the Pyrope side prp2lnast lowers each index twice (once for the element
+// read of the partial write, once for its store), so the index expressions,
+// `ptr[a]` a memory read among them, must still be recognized as the SAME
+// entry: by upass.tolg, which merges the partial write with the writes before
+// it, and by the Pyrope writer, which re-emits it as `mem[i]#[..] = v`
+// (prp-p2p-*, v2prp2v).
+pub mod mem_partial_write_mixed(we:Bool, a:U2, b:U2, pa:U2, x:U8, y:U8, ra:U2) -> (q:U16@[0]) {
+  reg ptr:[4]U2:[ordering="old"] = nil
+  reg mem:[4]U16:[ordering="old"] = nil
+  ptr[pa] = b
+  if we {
+    mem[ptr[a]]#[0..<8] = x
+    mem[ptr[a]]#[8..<16] = y
+    mem[(b + 1) & 3]#[0..<4] = y#[0..<4]
+    mem[(b + 1) & 3]#[4..<8] = x#[4..<8]
+    mem[a ^ b]#[5..<11] = x#[2..<8]
+  }
+  q = mem[ra]
+}

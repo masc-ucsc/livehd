@@ -24,11 +24,11 @@
 // bit-blast yet"), so this design proves but does not yet map. When it does,
 // its netlist is comparable against this golden.
 
-pub mod top(a:u16) -> (r:u4@[0], any:u1@[0]) {
-  mut acc:u4 = 0
+pub mod top(a:U16) -> (r:U4@[0], any:U1@[0]) {
+  mut acc:U4 = 0
   for i in 0..<4 {
-    acc#[i] = unsigned(a#|[(i * 4)..=((i * 4) + 3)])
+    acc#[i] = Unsigned(a#|[(i * 4)..=((i * 4) + 3)])
   }
   r   = acc
-  any = unsigned(acc#|[0..=3])
+  any = Unsigned(acc#|[0..=3])
 }

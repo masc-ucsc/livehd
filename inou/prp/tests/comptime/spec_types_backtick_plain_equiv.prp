@@ -1,0 +1,12 @@
+/*
+:name: spec_types_backtick_plain_equiv
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// SPEC qa.md appendix section 2: "`` `foo` `` == `foo` ONLY for non-reserved words made of identifier characters".
+// Rule: a backticked non-reserved word is the same name as the bare word (both directions).
+const `foo` = 3
+const bar = 4
+cassert(foo == 3)
+cassert(`bar` == 4)

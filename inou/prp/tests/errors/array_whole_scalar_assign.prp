@@ -10,6 +10,6 @@
 // INTEGER back into the array — see comptime/array_bitview_write.prp and
 // equiv/array_bitview_runtime.prp. A BARE scalar store is not that round trip:
 // it would silently broadcast 5 into all four lanes, so it stays a type error.
-mut lanes:[4]u8 = 0
+mut lanes:[4]U8 = 0
 lanes = 5  // locate_error_here
 cputs("l0:{lanes[0]}")

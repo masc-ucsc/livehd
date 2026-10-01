@@ -1,0 +1,10 @@
+/*
+:name: spec_lexical_str_hole_one_expr
+:type: error
+:error: after the expression in a string hole
+*/
+// docs 02-basics "Strings": "A hole holds exactly one expression (`"{x y}"` is
+// an error)" (`const bad3 = "{num color}"`).
+const num = 2
+const color = 3
+const s = "{num color}"   // locate_error_here

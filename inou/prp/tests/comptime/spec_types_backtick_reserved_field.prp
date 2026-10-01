@@ -1,0 +1,14 @@
+/*
+:name: spec_types_backtick_reserved_field
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// SPEC qa.md Q32 answer: "they can do `U3` = 1111 or foo.`U33` = 333 because `whatever` allows whatever
+// they want in the identifier". Appendix section 7: "Backticks make them ordinary names anywhere".
+// Rule: a backticked reserved type word is an ordinary variable AND an ordinary field name after `.`.
+const `U3` = 1111
+mut foo = (mut `U33` = 0)
+foo.`U33` = 333
+cassert(`U3` == 1111)
+cassert(foo.`U33` == 333)

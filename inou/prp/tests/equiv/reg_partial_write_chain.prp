@@ -16,8 +16,8 @@
 // write vanished under a same-cycle entry-62 write). Fixed in
 // upass/tolg lower_set_mask: the RMW base keys off the base OPERAND's din
 // accumulator, not only the direct dst==base shape.
-pub mod top(clock:u1, reset:u1, en7:u1, en6:u1, d:u2) -> (q:u2@[0]) {
-  reg data:u8
+pub mod top(clock:Clock, reset:Reset, en7:U1, en6:U1, d:U2) -> (q:U2@[0]) {
+  reg data:U8
   if en7 != 0 {
     data#[7..=7] = d & 1
   }

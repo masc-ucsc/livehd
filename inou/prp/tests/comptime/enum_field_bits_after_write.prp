@@ -1,0 +1,28 @@
+/*
+:name: enum_field_bits_after_write
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+:verifier_include_funcs: true
+*/
+
+// A typed tuple field keeps its declared type across writes: `p.c` is a
+// `Color` (one-hot, 3 bits) whatever entry is written into it. Before, writing
+// an enum ENTRY (`p.c = Color.Red`) replaced the field's declared envelope with
+// the entry's value, so `p.c.[bits]` read the value's width (1), and after a
+// CONDITIONAL entry write it read nil: a loud upass.tolg internal error
+// ("attribute read '.[bits]' has no hardware lowering").
+enum Color = (Red, Green, Blue)
+type Pkt = (c:Color, d:U8)
+
+mod enum_field_bits_after_write(s:Bool, d:U8) -> (lw:U8@[0]) {
+  mut p:Pkt = (c = Color.Green, d = d)
+  cassert(p.c.[bits] == 3)
+  p.c = Color.Red
+  cassert(p.c.[bits] == 3)
+  if s {
+    p.c = Color.Blue
+  }
+  cassert(p.c.[bits] == 3)
+  lw = p.d
+}

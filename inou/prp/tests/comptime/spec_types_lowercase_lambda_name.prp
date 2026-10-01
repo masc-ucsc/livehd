@@ -1,0 +1,16 @@
+/*
+:name: spec_types_lowercase_lambda_name
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+// Former lowercase type spellings are ordinary identifiers (07-typesystem.md).
+comb u8(a:U8) -> (o:U8) {
+  o = a
+}
+pub comb spec_types_lowercase_lambda_name(a:U8) -> (o:U8) {
+  o = u8(a=a)
+}
+
+cassert(spec_types_lowercase_lambda_name(a=9) == 9)

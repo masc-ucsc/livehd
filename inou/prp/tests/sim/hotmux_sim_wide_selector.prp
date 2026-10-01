@@ -6,7 +6,7 @@
 // A Hotmux selector is one bit per arm, independent of the result width. The
 // simulator used to truncate this unique-if selector to the 1-bit result and
 // therefore lost every selection above arm zero.
-pub comb pick_high(sel:u4) -> (out:bool) {
+pub comb pick_high(sel:U4) -> (out:Bool) {
   out = false
   unique if sel == 0 {
     out = false

@@ -1,0 +1,21 @@
+/*
+:name: stage_multi_output_mismatch
+:type: error
+:error: over a call with several outputs needs every output to land at cycle 2
+:help: bind the call where its outputs land
+:tolg: 1
+*/
+// `stage[N]` over a call with several outputs applies the single-output rule
+// to EVERY output: a mod output lands at its declared cycle, so q1@[1] cannot
+// be picked up at cycle 2. The result used to be left undriven (tolg:
+// "unresolved reference '%t_0'"); stage_multi_output (equiv) is the legal form.
+mod two(a:U8) -> (q1:U8@[1], q2:U8@[2]) {
+  stage[1] q1 = a
+  stage[2] q2 = a
+}
+
+pub mod top(a:U8) -> (o1:U8@[2], o2:U8@[2]) {
+  stage[2] t = two(a)   // locate_error_here
+  o1 = t.q1
+  o2 = t.q2
+}

@@ -12,6 +12,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
@@ -20,8 +21,6 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-#include "hash_util.hpp"
 
 // clang-format off
 // ABC headers must stay in dependency order: abc.h defines Abc_Frame_t (used by
@@ -614,133 +613,6 @@ private:
 
 }  // namespace
 
-// ---- canonical cone digest --------------------------------------------------
-namespace {
-
-using livehd::hash_util::combine64;
-using livehd::hash_util::mix64;
-
-uint64_t hstr(uint64_t h, std::string_view s) { return mix64(livehd::hash_util::fnv1a64(s, h)); }
-
-// The bits of a term that DEFINE it, as text. Kind + sort pin the shape; the
-// leaf payloads pin the identity (a symbol is its name -- two cones over the
-// same boundary symbol are the same obligation, which is the whole point).
-//
-// Returns false when the term has NO stable identity, which makes the whole
-// cone undigestable (and so uncacheable). See the anonymous-symbol case.
-//
-// `name_seq`/`sym_ix` disambiguate symbols that SHARE a name -- see the
-// same-name case below; they must persist across one cone_digest walk.
-bool node_payload(const cvc5::Term& t, std::string& p, std::unordered_map<std::string, uint32_t>& name_seq,
-                  std::unordered_map<cvc5::Term, uint32_t>& sym_ix) {
-  p = std::to_string(static_cast<int>(t.getKind())) + "|" + t.getSort().toString();
-  switch (t.getKind()) {
-    case cvc5::Kind::CONSTANT:
-    case cvc5::Kind::VARIABLE: {
-      // An UNNAMED symbol has no identity we may persist: cvc5 prints it as
-      // "var_<id>", an allocation-order number that differs between processes.
-      // Baking that into a stored key would let two DIFFERENT cones collide on
-      // one digest and silently transfer a PROVEN -- the single failure mode
-      // this pass must never have. Refuse to digest instead; the cone is simply
-      // re-proven every run. (Same ruling as semdiff's anonymous state cells,
-      // semdiff.cpp: a per-run debug nid is not a cross-process identity.)
-      if (!t.hasSymbol()) {
-        return false;
-      }
-      // A name is NOT an identity: mkConst does not hash-cons on it, and the ind
-      // engine encodes BOTH designs with an empty prefix (query.cpp), so each
-      // side's memory read dout and comb-box output are DISTINCT symbols with
-      // the SAME name (":rd0", "cb:..."). Keying on the name alone would give
-      // DISTINCT(f(a), f(b)) -- SAT, two free vars -- the same digest as
-      // DISTINCT(f(a), f(a)) -- UNSAT -- and replay a PROVEN onto a cone nobody
-      // proved. Number the symbols within each name group, in first-encounter
-      // order of this deterministic walk: equal digests then mean the terms are
-      // equal up to a BIJECTIVE renaming inside each group, which preserves
-      // satisfiability, so a PROVEN still transfers.
-      const std::string sym = t.getSymbol();
-      auto [it, fresh]      = sym_ix.try_emplace(t, 0U);
-      if (fresh) {
-        it->second = name_seq[sym]++;
-      }
-      p += "|v:" + sym + "#" + std::to_string(it->second);
-      break;
-    }
-    case cvc5::Kind::CONST_BITVECTOR: p += "|k:" + t.getBitVectorValue(2); break;
-    case cvc5::Kind::CONST_BOOLEAN: p += t.getBooleanValue() ? "|b:1" : "|b:0"; break;
-    default: break;
-  }
-  if (t.hasOp()) {  // EXTRACT/ZERO_EXTEND/... indices are part of the operator
-    const cvc5::Op op = t.getOp();
-    for (size_t i = 0; i < op.getNumIndices(); ++i) {
-      p += "|i:" + cvc5::Op(op)[i].toString();
-    }
-  }
-  return true;
-}
-
-}  // namespace
-
-std::string cone_digest(const cvc5::Term& t) {
-  if (t.isNull()) {
-    return {};
-  }
-  // Two independent lanes -> 128 bits. A collision would silently transfer a
-  // PROVEN between two DIFFERENT obligations, so 64 bits (birthday-bound ~2^32
-  // cones) is not enough margin to rely on.
-  std::unordered_map<cvc5::Term, std::pair<uint64_t, uint64_t>> memo;
-  std::unordered_map<std::string, uint32_t>                     name_seq;  // name -> next free index
-  std::unordered_map<cvc5::Term, uint32_t>                      sym_ix;    // symbol -> its index in its name group
-  std::vector<std::pair<cvc5::Term, bool>>                      st;
-  st.emplace_back(t, false);
-  while (!st.empty()) {
-    auto entry = st.back();
-    if (memo.count(entry.first) != 0) {
-      st.pop_back();
-      continue;
-    }
-    if (!entry.second) {
-      st.back().second = true;
-      for (size_t i = 0; i < entry.first.getNumChildren(); ++i) {
-        st.emplace_back(entry.first[i], false);
-      }
-      continue;
-    }
-    st.pop_back();
-    std::string pay;
-    if (!node_payload(entry.first, pay, name_seq, sym_ix)) {
-      return {};  // no stable identity anywhere in the DAG => never cache this cone
-    }
-    uint64_t a = hstr(livehd::hash_util::kFnv1a64_offset, pay);
-    uint64_t b = hstr(0x9ae16a3b2f90404fULL, pay);
-    for (size_t i = 0; i < entry.first.getNumChildren(); ++i) {
-      const auto it = memo.find(entry.first[i]);
-      if (it == memo.end()) {
-        return {};  // cannot happen (post-order), but never hash a partial DAG
-      }
-      a = combine64(a, it->second.first);
-      b = combine64(b, it->second.second ^ 0x5851f42d4c957f2dULL);
-    }
-    memo.emplace(entry.first, std::make_pair(a, b));
-  }
-  const auto it = memo.find(t);
-  if (it == memo.end()) {
-    return {};
-  }
-  char buf[33];
-  std::snprintf(buf, sizeof buf, "%016llx%016llx", static_cast<unsigned long long>(it->second.first),
-                static_cast<unsigned long long>(it->second.second));
-  return std::string{buf, 32};
-}
-
-std::string_view cone_verdict_name(Cone_verdict v) {
-  switch (v) {
-    case Cone_verdict::Proven: return "PROVEN";
-    case Cone_verdict::Refuted: return "DIFF";
-    case Cone_verdict::Unsupported: return "unsupported";
-    default: return "unknown";
-  }
-}
-
 namespace {
 Cone_verdict prove_one(const cvc5::Term& diff, int64_t backtrack_limit, Cone_stats* st, const Cone_merge_map* merge) {
   if (diff.isNull() || !diff.getSort().isBoolean()) {
@@ -825,6 +697,16 @@ Cone_verdict abc_prove_unsat(const cvc5::Term& diff, int64_t backtrack_limit, Co
 namespace {
 constexpr size_t kRecord = 13;  // u32 index | u8 verdict | u32 pis | u32 ands
 
+// A cone ABC has not finished in this long is not easy for it (see prove_one):
+// it goes back to cvc5 and the batch moves on. A larger formal.timeout buys
+// every cone a proportionally longer stall (kConeStallShare of the deadline).
+constexpr int64_t kConeStallMs    = 250;
+constexpr int64_t kConeStallShare = 20;
+
+// The child's first record: ABC is up, so the per-cone stall clock starts now
+// rather than at fork (a loaded machine must not stall a cone before it begins).
+constexpr uint32_t kReady = 0xffffffffU;
+
 void put_u32(unsigned char* p, uint32_t v) {
   p[0] = static_cast<unsigned char>(v & 0xffU);
   p[1] = static_cast<unsigned char>((v >> 8U) & 0xffU);
@@ -851,95 +733,134 @@ std::vector<Cone_verdict> abc_prove_unsat_batch(const std::vector<cvc5::Term>& d
     return out;
   }
 
-  int fds[2];
-  if (pipe(fds) != 0) {
-    return out;
-  }
-  const pid_t pid = fork();
-  if (pid < 0) {
-    close(fds[0]);
-    close(fds[1]);
-    return out;
-  }
+  // A cone that is not easy for ABC must fall to cvc5 FAST (prove_one), but
+  // rewriting/fraiging has no clock of its own: one hard cone -- a 129-bit
+  // popcount spelled two ways, which cvc5 then proves in milliseconds -- held
+  // the child to the whole deadline and starved every cone queued behind it.
+  // So each cone also gets a stall budget (kConeStallMs, or a share of a longer
+  // deadline): on a stall the child is killed, that cone stays Unknown, and a
+  // fresh child resumes with the next.
+  const int64_t cone_ms
+      = deadline_ms > 0 ? std::min<int64_t>(deadline_ms, std::max<int64_t>(kConeStallMs, deadline_ms / kConeStallShare)) : 0;
+  const auto t0      = std::chrono::steady_clock::now();
+  auto       elapsed = [](std::chrono::steady_clock::time_point since) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - since).count();
+  };
 
-  if (pid == 0) {  // ---- child: run ABC where a clock can actually reach it ----
-    close(fds[0]);
-    // ABC chatters on stdout ("Reached global limit on conflicts..."), which
-    // would corrupt lhd's machine-readable stdout. The child has nothing else to
-    // say there; diagnostics go through the parent.
-    if (int devnull = open("/dev/null", O_WRONLY); devnull >= 0) {
-      dup2(devnull, STDOUT_FILENO);
-      close(devnull);
+  size_t next = 0;  // the first cone no child has reported yet
+  while (next < diffs.size()) {
+    int fds[2];
+    if (pipe(fds) != 0) {
+      return out;
     }
-    for (size_t i = 0; i < diffs.size(); ++i) {
-      Cone_stats         one;
-      const Cone_verdict v = prove_one(diffs[i], backtrack_limit, &one, merge);
-      unsigned char      rec[kRecord];
-      put_u32(rec, static_cast<uint32_t>(i));
-      rec[4] = static_cast<unsigned char>(v);
-      put_u32(rec + 5, static_cast<uint32_t>(one.pis));
-      put_u32(rec + 9, static_cast<uint32_t>(one.ands));
-      if (write(fds[1], rec, kRecord) != static_cast<ssize_t>(kRecord)) {
-        break;  // parent stopped listening (deadline): nothing left to report
+    const pid_t pid = fork();
+    if (pid < 0) {
+      close(fds[0]);
+      close(fds[1]);
+      return out;
+    }
+
+    if (pid == 0) {  // ---- child: run ABC where a clock can actually reach it ----
+      close(fds[0]);
+      // ABC chatters on stdout ("Reached global limit on conflicts..."), which
+      // would corrupt lhd's machine-readable stdout. The child has nothing else to
+      // say there; diagnostics go through the parent.
+      if (int devnull = open("/dev/null", O_WRONLY); devnull >= 0) {
+        dup2(devnull, STDOUT_FILENO);
+        close(devnull);
       }
+      ensure_abc_started();
+      unsigned char ready[kRecord] = {};
+      put_u32(ready, kReady);
+      if (write(fds[1], ready, kRecord) != static_cast<ssize_t>(kRecord)) {
+        _exit(0);
+      }
+      for (size_t i = next; i < diffs.size(); ++i) {
+        Cone_stats         one;
+        const Cone_verdict v = prove_one(diffs[i], backtrack_limit, &one, merge);
+        unsigned char      rec[kRecord];
+        put_u32(rec, static_cast<uint32_t>(i));
+        rec[4] = static_cast<unsigned char>(v);
+        put_u32(rec + 5, static_cast<uint32_t>(one.pis));
+        put_u32(rec + 9, static_cast<uint32_t>(one.ands));
+        if (write(fds[1], rec, kRecord) != static_cast<ssize_t>(kRecord)) {
+          break;  // parent stopped listening (deadline): nothing left to report
+        }
+      }
+      close(fds[1]);
+      _exit(0);  // never run the parent's atexit handlers / flush its buffers
     }
-    close(fds[1]);
-    _exit(0);  // never run the parent's atexit handlers / flush its buffers
-  }
 
-  // ---- parent: collect whatever lands before the deadline -------------------
-  close(fds[1]);
-  const auto    t0 = std::chrono::steady_clock::now();
-  unsigned char rec[kRecord];
-  size_t        have   = 0;
-  bool          expire = false;
-  for (;;) {
-    int wait_ms = -1;
-    if (deadline_ms > 0) {
-      const auto spent = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
-      if (spent >= deadline_ms) {
-        expire = true;
+    // ---- parent: collect whatever lands before the deadline / a stall -------
+    close(fds[1]);
+    auto          cone_t0 = std::chrono::steady_clock::now();
+    unsigned char rec[kRecord];
+    size_t        have   = 0;
+    bool          expire = false;
+    bool          stall  = false;
+    for (;;) {
+      int wait_ms = -1;
+      if (deadline_ms > 0) {
+        const auto left = deadline_ms - elapsed(t0);
+        const auto cone = cone_ms - elapsed(cone_t0);
+        if (left <= 0) {
+          expire = true;
+          break;
+        }
+        if (cone <= 0) {
+          stall = true;
+          break;
+        }
+        wait_ms = static_cast<int>(std::min(left, cone));
+      }
+      pollfd    p{fds[0], POLLIN, 0};
+      const int pr = poll(&p, 1, wait_ms);
+      if (pr == 0) {
+        continue;  // the checks above say which clock ran out
+      }
+      if (pr < 0) {
+        if (errno == EINTR) {
+          continue;
+        }
         break;
       }
-      wait_ms = static_cast<int>(deadline_ms - spent);
-    }
-    pollfd p{fds[0], POLLIN, 0};
-    const int pr = poll(&p, 1, wait_ms);
-    if (pr == 0) {
-      expire = true;
-      break;
-    }
-    if (pr < 0) {
-      if (errno == EINTR) {
+      const ssize_t n = read(fds[0], rec + have, kRecord - have);
+      if (n <= 0) {
+        next = diffs.size();  // EOF: the child finished every cone
+        break;
+      }
+      have += static_cast<size_t>(n);
+      if (have < kRecord) {
         continue;
       }
+      have               = 0;
+      const uint32_t idx = get_u32(rec);
+      if (idx == kReady) {
+        cone_t0 = std::chrono::steady_clock::now();
+        continue;
+      }
+      const auto v = static_cast<Cone_verdict>(rec[4]);
+      if (idx < out.size() && rec[4] <= static_cast<unsigned char>(Cone_verdict::Unknown)) {
+        out[idx] = v;
+      }
+      if (st != nullptr && idx < st->size()) {
+        (*st)[idx].pis  = static_cast<int>(get_u32(rec + 5));
+        (*st)[idx].ands = static_cast<int>(get_u32(rec + 9));
+      }
+      next    = static_cast<size_t>(idx) + 1;
+      cone_t0 = std::chrono::steady_clock::now();
+    }
+    close(fds[0]);
+    if (expire || stall) {
+      kill(pid, SIGKILL);
+    }
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+    }
+    if (expire || !stall) {
       break;
     }
-    const ssize_t n = read(fds[0], rec + have, kRecord - have);
-    if (n <= 0) {
-      break;  // EOF: the child finished every cone
-    }
-    have += static_cast<size_t>(n);
-    if (have < kRecord) {
-      continue;
-    }
-    have                = 0;
-    const uint32_t idx  = get_u32(rec);
-    const auto     v    = static_cast<Cone_verdict>(rec[4]);
-    if (idx < out.size() && rec[4] <= static_cast<unsigned char>(Cone_verdict::Unknown)) {
-      out[idx] = v;
-    }
-    if (st != nullptr && idx < st->size()) {
-      (*st)[idx].pis  = static_cast<int>(get_u32(rec + 5));
-      (*st)[idx].ands = static_cast<int>(get_u32(rec + 9));
-    }
-  }
-  close(fds[0]);
-  if (expire) {
-    kill(pid, SIGKILL);
-  }
-  int status = 0;
-  while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+    ++next;  // the stalled cone stays Unknown for cvc5
   }
   return out;
 }

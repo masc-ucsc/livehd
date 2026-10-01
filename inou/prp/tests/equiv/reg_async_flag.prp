@@ -10,10 +10,10 @@
 // :reset_style: header tag): the implicit reset wires asynchronously, so
 // the golden asserts the async always-block for the same counter the
 // sync-default mod_counter test checks.
-pub mod counter(enable:bool) -> (count:u8@[0]) {
-  reg count_r:u8 = 0
+pub mod counter(enable:Bool) -> (count:U8@[0]) {
+  reg count_r:U8 = 0
   if enable and count_r < 200 {
-    count_r = count_r + 1
+    wrap count_r = count_r + 1
   }
   count = count_r
 }

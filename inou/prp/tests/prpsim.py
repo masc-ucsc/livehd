@@ -76,12 +76,14 @@ def run_simulation(runner, tmp_dir, test):
     base = runner._scratch(test, 'simulation')
     for i, vector in enumerate(vectors):
         work = os.path.join(base, 'v' + str(i))
+        # sim.jobs=2: the harness already runs fixtures in parallel (bazel or a
+        # batch driver); a per-fixture fan-out of every core oversubscribes.
         cmd = [runner.lhd, 'sim', test.params['files'][0], '--workdir', work,
-               '--set', 'sim.tune.profile=off', '-q'] + runner._extra_sets(test)
+               '--set', 'sim.tune.profile=off', '--set', 'sim.jobs=2', '-q'] + runner._extra_sets(test)
         for setting in vector:
             cmd += ['--set', setting]
         for key, value in _parse_args(test):
-            cmd += ['--arg', key + '=' + value]
+            cmd += ['+' + key + '=' + value]
         run = subprocess.run(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         if run.returncode:
             print('{} - simulation - FAILED {}: rc={}'.format(name, vector, run.returncode))

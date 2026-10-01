@@ -12,7 +12,10 @@ cc_library(
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
-    deps = ["@hlop//hlop:hlop"],
+    deps = [
+        "//lnast",
+        "@hlop//hlop:hlop",
+    ],
 )
 
 # Header-only: THE attribute-name vocabulary (battr.hpp). Split out like
@@ -59,6 +62,53 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = ["@hlop//hlop:hlop"],
+)
+
+# Header-only: the unused comb-input-default prologue (default_prologue.hpp)
+# shared by upass.tolg (a comb's own module) and the runner's comb inliner (a
+# call that provides the argument), which must drop the same statements.
+cc_library(
+    name = "default_prologue_hdr",
+    hdrs = ["default_prologue.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//lnast",
+        "@abseil-cpp//absl/container:flat_hash_set",
+    ],
+)
+
+# Header-only: the call-binding rules for a callee's declared inputs
+# (clock/reset candidates, declared defaults), shared by the runner's comb
+# inliner and lnast.tolg's Sub wiring so both callee kinds agree.
+cc_library(
+    name = "io_port_rules_hdr",
+    hdrs = ["io_port_rules.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//lnast",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/container:flat_hash_set",
+        "@hlop//hlop:hlop",
+    ],
+)
+
+# Header-only: the private-SSA-version demotion (ssa_demote.hpp) shared by
+# upass.ssa and the runner's loop roller, which must rename by the same rule.
+cc_library(
+    name = "ssa_demote_hdr",
+    hdrs = ["ssa_demote.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//lnast",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/container:flat_hash_set",
+    ],
 )
 
 cc_test(

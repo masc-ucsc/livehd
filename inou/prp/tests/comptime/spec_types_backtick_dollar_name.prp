@@ -1,0 +1,10 @@
+/*
+:name: spec_types_backtick_dollar_name
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// SPEC qa.md appendix section 2: "`$` is NOT an identifier character: `foo$bar` must be written `` `foo$bar` ``."
+// Rule: the backticked form is a legal name.
+const `foo$bar` = 2
+cassert(`foo$bar` + 1 == 3)

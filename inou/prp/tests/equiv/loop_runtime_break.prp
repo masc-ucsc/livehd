@@ -14,8 +14,8 @@
 // Rolling is forced here: the lifted body returns `next_active`, realization
 // chains it between occurrences, and carried values bypass inactive lanes.
 
-pub mod top(stop:u8) -> (total:u12@[0]) {
-  mut acc:u12 = 0
+pub mod top(stop:U8) -> (total:U12@[0]) {
+  mut acc:U12 = 0
   for i in 0..<8 {
     if stop#[i] { break }
     acc = acc + 1

@@ -9,7 +9,7 @@
 // by Sum's 0 and Or's 0 -- cprop dropped the constants and forwarded `x`, so
 // the `& 0` vanished and the emitted netlist returned the comparison instead of
 // a constant 0. Zero is And's ANNIHILATOR, not its identity.
-pub comb and_zero_annihilator::[timecheck=false](sb:s2) -> (y:u16) {
+pub comb and_zero_annihilator::[timecheck=false](sb:S2) -> (y:U16) {
   y = 0ub????????????????
-  y = unsigned(sb#[0..=1] != 3) & 1 & 0
+  y = Unsigned(sb#[0..=1] != 3) & 1 & 0
 }

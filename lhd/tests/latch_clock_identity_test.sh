@@ -51,8 +51,8 @@ fail() { echo "FAIL: $*"; exit 1; }
 
 # ---- 1: active-low-enable ATTRIBUTE is refused, not silently miscompiled -----
 cat > "$W/attr.prp" <<'EOF'
-pub mod enlow(g:bool, d:u8) -> (q:u8@[0]) {
-  reg l:u8:[latch=true, enable_high=false]
+pub mod enlow(g:Bool, d:U8) -> (q:U8@[0]) {
+  reg l:U8:[latch=true, enable_high=false]
   if g {
     l = d
   }
@@ -70,8 +70,8 @@ echo "ok: enable_high=false is REFUSED with a directed diagnostic"
 # The default LEC engine must accept the matching polarity and reject its
 # port-matched opposite, so the positive check cannot pass vacuously.
 cat > "$W/ok.prp" <<'EOF'
-pub mod enlow(g:bool, d:u8) -> (q:u8@[0]) {
-  reg l:u8:[latch=true]
+pub mod enlow(g:Bool, d:U8) -> (q:U8@[0]) {
+  reg l:U8:[latch=true]
   if !g {
     l = d
   }
@@ -118,8 +118,8 @@ echo "ok: the same oracle REFUTES the flipped polarity (check 2 is not vacuous)"
 # unit-delay register and ABC's BLIF reader silently discards the .latch control
 # tokens, so letting a real latch cross into ABC would be a silent mismodel.
 cat > "$W/abc.prp" <<'EOF'
-pub mod abclatch(en:bool, a:u8, b:u8) -> (q:u8@[0]) {
-  reg l:u8:[latch=true]
+pub mod abclatch(en:Bool, a:U8, b:U8) -> (q:U8@[0]) {
+  reg l:U8:[latch=true]
   if en {
     l = a & b
   }

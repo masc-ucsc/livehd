@@ -20,8 +20,8 @@ fail() { echo "FAIL: $*"; exit 1; }
 # 1. Every field driven and consumed, at a width (u64) past the bitwidth
 #    pass's 62-bit derived-range cap: NO unset-unused-field warning.
 cat >"$W/used.prp" <<'EOF'
-pub comb used_io::[timecheck=false](io_a:u64) -> (io_o:u64) {
-  wire io:(a:u64, o:u64) = nil
+pub comb used_io::[timecheck=false](io_a:U64) -> (io_o:U64) {
+  wire io:(a:U64, o:U64) = nil
   mut w1 = 0
   io.o = io.a#[0..=63]
   w1 = io.o
@@ -39,8 +39,8 @@ echo "$OUT" | grep -q '"code":"unset-unused-field"' \
 #    names the dead field (never-touched leaves have no bundle entry — the
 #    declare-side enumeration must catch them).
 cat >"$W/dead.prp" <<'EOF'
-pub comb dead_io::[timecheck=false](io_a:u32) -> (io_o:u32) {
-  wire io:(a:u32, o:u32, dead:u16) = nil
+pub comb dead_io::[timecheck=false](io_a:U32) -> (io_o:U32) {
+  wire io:(a:U32, o:U32, dead:U16) = nil
   mut w1 = 0
   io.o = io.a#[0..=31]
   w1 = io.o

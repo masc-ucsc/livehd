@@ -8,13 +8,13 @@
 // Same hierarchy as the golden, different child body: (a & b) ^ (a | b) is a ^ b.
 // Keeping the instance on BOTH sides is what makes the pair exercise the
 // Comb_box path — a flat twin would just be inlined and prove. See the golden .v.
-pub comb collapse_comb_box_fn(a:u3, b:u3) -> (y:u3) {
+pub comb collapse_comb_box_fn(a:U3, b:U3) -> (y:U3) {
   y = a ^ b
 }
 
-pub mod collapse_comb_box::[timecheck=false](clk:u1, a:u3, b:u3) -> (q:u3@[]) {
+pub mod collapse_comb_box::[timecheck=false](clk:Clock, a:U3, b:U3) -> (q:U3@[]) {
   mut mixed = collapse_comb_box_fn::[name=u_fn](a = a, b = b)
-  reg acc:u3:[clock_pin=ref clk]
+  reg acc:U3:[clock_pin=clk]
   acc = acc ^ mixed
   q = acc
 }

@@ -34,10 +34,10 @@ cat > "$work/staged.prp" <<'EOF'
 :name: staged
 :type: simulation
 */
-mod accum(d:u8) -> (q:u8@[1]) {
-  reg state:u8 = 0
+mod accum(d:U8) -> (q:U8@[1]) {
+  reg state:U8 = 0
   q = state
-  state = d + 1
+  wrap state = d + 1
 }
 test accum.run {
   mut dut = accum

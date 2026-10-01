@@ -20,7 +20,7 @@
 // (Note: `bsz` is a comptime constant, not a runtime arg — a hardware port can't
 // drive a comptime loop bound. The "not-fully-typed size" that varies per call
 // is `b.[bits]`, which sets the block count.)
-mod blk_add(b) -> (s:u8@[0]) {
+mod blk_add(b) -> (s:U8@[0]) {
   const bsz = 4
   mut acc = 0
   for i in 0..<(b.[bits] / bsz) {
@@ -34,7 +34,7 @@ mod blk_add(b) -> (s:u8@[0]) {
 // passed through the block adder. The two nested unrolls (this loop + blk_add's
 // per call) force the loop/specialization machinery end to end. Plain `+` here
 // owns the width growth (u8 + u8 + u8 -> u10), so no Sub-boundary narrowing.
-mod csa(...args) -> (z:u10@[0]) {
+mod csa(...args) -> (z:U10@[0]) {
   mut acc = 0
   for a in args {
     acc = acc + blk_add(a)
@@ -42,6 +42,6 @@ mod csa(...args) -> (z:u10@[0]) {
   z = acc
 }
 
-pub mod top(a:u8, b:u8, c:u8) -> (z:u10@[0]) {
-  z = csa(a, b, c)
+pub mod top(a:U8, b:U8, c:U8) -> (z:U10@[0]) {
+  z = csa(a=a, b=b, c=c)
 }

@@ -23,28 +23,30 @@
 //   o_hold : partial; bits 4..=7 are never written, so they HOLD the flop q
 //   o_cond : a straight-line write then a CONDITIONAL one that must compose with
 //            it: [0..=7]=a then `if en { [8..=11]=b#[0..=3] }` -> en ? {b[3:0],a} : {q[11:8],a}
-pub mod foo(a:u8, b:u8, en:bool) -> (o_cont:u12@[0], o_over:u12@[0], o_rev:u12@[0], o_hold:u12@[0], o_cond:u12@[0]) {
-  reg x_cont:u12 = 0
+// A register written only through bit slices lands one cycle after its inputs
+// (@[1], ruling 83); the conditional write makes `x_cond` state (@[0]).
+pub mod foo(a:U8, b:U8, en:Bool) -> (o_cont:U12@[1], o_over:U12@[1], o_rev:U12@[1], o_hold:U12@[1], o_cond:U12@[0]) {
+  reg x_cont:U12 = 0
   x_cont#[0..=7]  = a
   x_cont#[8..=11] = b#[0..=3]
   o_cont = x_cont
 
-  reg x_over:u12 = 0
+  reg x_over:U12 = 0
   x_over#[0..=7]  = a
   x_over#[4..=11] = b
   o_over = x_over
 
-  reg x_rev:u12 = 0
+  reg x_rev:U12 = 0
   x_rev#[8..=11] = b#[0..=3]
   x_rev#[0..=7]  = a
   o_rev = x_rev
 
-  reg x_hold:u12 = 0
+  reg x_hold:U12 = 0
   x_hold#[0..=3]  = a#[0..=3]
   x_hold#[8..=11] = b#[0..=3]
   o_hold = x_hold
 
-  reg x_cond:u12 = 0
+  reg x_cond:U12 = 0
   x_cond#[0..=7] = a
   if en {
     x_cond#[8..=11] = b#[0..=3]

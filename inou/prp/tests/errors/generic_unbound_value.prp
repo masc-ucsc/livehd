@@ -1,0 +1,19 @@
+/*
+:name: generic_unbound_value
+:type: error
+:error: generic `N` of `g` is unbound and has no default
+:help: bind it in the `<…>` list or declare a default `<N=…>`
+*/
+
+// Ruling 2026-09-28 #24 (clarification): a read never becomes nil. A VALUE
+// generic that the call does not bind and that has no default cannot be
+// inferred (only a `:T` type generic is inferred from the actuals), so the
+// call is a direct error, as with an explicit `<…>` list. It used to leave `N`
+// unbound: the indirect upass.tolg "unresolved reference 'inl1_N'".
+comb g<N>(x:U8) -> (y:U8) {
+  y = (x + N)#[0..<8]
+}
+
+pub comb generic_unbound_value(a:U8) -> (o:U8) {
+  o = g(x=a)  // locate_error_here
+}

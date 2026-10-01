@@ -1,0 +1,62 @@
+/*
+:name: comb_tuple_out_branch
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// A typed `comb` whose TUPLE output is written WHOLE inside an `if`
+// (lhdtrack suggestions 2.3 row 9):
+//   * sel2: `r = (…)` in BOTH arms -> "output 'r.a' is never driven" (the
+//     arms came out of uPass_ssa EMPTY: copy_branch_port_aware splits only a
+//     whole-tuple copy to a TEMP (whole_port_split) and a >=3-child field
+//     store, never a direct 2-child `store(r, %tuple)` on the port prefix);
+//   * dflt: a default `r = (…)` plus an `if s { r = (…) }` override -> the
+//     override was DROPPED silently (`r.a = x` whatever `s` is).
+// The per-field spelling (`r.a = …` / `r.b = …` in each arm) always worked and
+// is kept as the control `fld`. `sel2` is also a `mod` below: the same body in
+// a mod failed identically, so "use a mod" was never a real workaround.
+comb sel2(x:U4, s:Bool) -> (r:(a:U4, b:Bool)) {
+  if s {
+    r = (a = x ^ 1, b = x == 3)
+  } else {
+    r = (a = x, b = false)
+  }
+}
+comb dflt(x:U4, s:Bool) -> (r:(a:U4, b:Bool)) {
+  r = (a = x, b = false)
+  if s {
+    r = (a = x ^ 1, b = x == 3)
+  }
+}
+comb fld(x:U4, s:Bool) -> (r:(a:U4, b:Bool)) {
+  if s {
+    r.a = x ^ 1
+    r.b = x == 3
+  } else {
+    r.a = x
+    r.b = false
+  }
+}
+mod msel2(x:U4, s:Bool) -> (r:(a:U4, b:Bool)@[0]) {
+  if s {
+    r = (a = x ^ 1, b = x == 3)
+  } else {
+    r = (a = x, b = false)
+  }
+}
+
+pub mod top(x:U4, s:Bool) -> (sa:U4@[], sb:Bool@[], da:U4@[], db:Bool@[], fa:U4@[], fb:Bool@[], ma:U4@[], mb:Bool@[]) {
+  const t0 = sel2(x, s)
+  sa = t0.a
+  sb = t0.b
+  const t1 = dflt(x, s)
+  da = t1.a
+  db = t1.b
+  const t2 = fld(x, s)
+  fa = t2.a
+  fb = t2.b
+  const t3 = msel2(x=x, s=s)
+  ma = t3.r.a
+  mb = t3.r.b
+}

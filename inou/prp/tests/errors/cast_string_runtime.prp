@@ -4,9 +4,9 @@
 :error: needs a compile-time value
 */
 
-// `string(...)` has no hardware form — a runtime signal cannot be converted to a
+// `String(...)` has no hardware form — a runtime signal cannot be converted to a
 // string. Only compile-time values may be stringified.
-comb cast_string_runtime(a:u8) -> (z:u8) {
-  mut s = string(a)
+comb cast_string_runtime(a:U8) -> (z:U8) {
+  mut s = String(a)
   z = 0
 }

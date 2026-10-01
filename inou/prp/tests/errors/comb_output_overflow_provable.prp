@@ -1,0 +1,26 @@
+/*
+:name: comb_output_overflow_provable
+:type: error
+:tolg: 1
+:error: `o` \((value 16|range \[16, 31\])\) does not fit its declared range \[0, 15\]
+:help: (apply a wrap/saturate policy|`wrap`/`sat`)
+*/
+// A comb OUTPUT is a declared type like any other variable: `o:U4` holds
+// [0, 15]. With a:U4, `a + 16` spans [16, 31], so EVERY value overflows `o`.
+// That is a compile error under any reading of the overflow rule (docs 04b
+// "wrap and sat modifier", docs 07 "The current should never exceed the
+// constrained"); upass bitwidth already reports it for a comptime value
+// ("`d` (value 32) does not fit its declared range [0, 31]"), but a runtime
+// input's range never reaches the check.
+//
+// Today it compiles silently, and the inlined comb does not even apply its
+// declared width: the emitted top is `y = x + 16` (5 bits), while the
+// standalone `module inc` computes `o = a + 0` (4 bits). The error must name
+// the user's `o`, not the inliner's `inl1_o`.
+comb inc(a:U4) -> (o:U4) {
+  o = a + 16   // locate_error_here
+}
+
+pub mod comb_output_overflow_provable(x:U4) -> (y:U8@[0]) {
+  y = inc(a=x)
+}

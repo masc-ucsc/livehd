@@ -1,0 +1,17 @@
+/*
+:name: spec_tests_tick_step_escaped
+:type: compile
+*/
+// Owner ruling 99 (spec-audit Q42): `tick` and `step` are reserved everywhere
+// (a variable, a tuple field, a field after `.`, a method name); only the
+// backticked spelling is a name.
+//
+// Rule pinned: backticked `tick`/`step` are ordinary names, also as a tuple
+// field declaration and after a dot.
+
+pub comb spec_tse(a:U8) -> (y:U8) {
+  const `tick` = 1
+  mut x = (mut `step` = 0, const `tick` = 2)
+  x.`step` = 1
+  wrap y = a + `tick` + x.`step` + x.`tick`
+}

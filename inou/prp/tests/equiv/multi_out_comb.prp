@@ -12,12 +12,12 @@
 // and tolg wired the outputs to 0sb? — a silent wrong-hardware "pass". The
 // runner now records a runtime tuple_slot_ref per scalar output so the
 // destructure resolves to the inlined wire (the same path single-output uses).
-comb dpair(x:u8) -> (s:u9, d:u9) {
+comb dpair(x:U8) -> (s:U9, d:U9) {
   s = x + 1
   d = x + 2
 }
 
-pub mod top(x:u8) -> (os:u9@[0], od:u9@[0]) {
+pub mod top(x:U8) -> (os:U9@[0], od:U9@[0]) {
   const (s, d) = dpair(x)
   os = s
   od = d

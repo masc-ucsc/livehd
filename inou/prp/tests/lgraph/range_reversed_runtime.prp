@@ -6,8 +6,8 @@
 // in Verilog, so it never fired either. range_reversed_runtime_test.sh pins a
 // reversed range returning the destination UNCHANGED (native sim) and a signed
 // guard on both endpoints; LHD_EXTERNAL_SIM=1 also checks that it fires.
-pub comb range_reversed_runtime(i:u4, j:u4, v:u32, b:u32) -> (o:u32) {
-  mut r:u32 = b
+pub comb range_reversed_runtime(i:U4, j:U4, v:U32, b:U32) -> (o:U32) {
+  mut r:U32 = b
   r#[j..=(i-1)] = v
   o = r
 }

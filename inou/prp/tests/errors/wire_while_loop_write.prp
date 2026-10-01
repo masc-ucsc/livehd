@@ -1,0 +1,33 @@
+/*
+:name: wire_while_loop_write
+:type: error
+:error: loop body may not drive wire 'back'
+:help: drive the wire outside the loop
+*/
+
+// User ruling 2026-09-27 (ruling 5), `while` spelling: a `for`/`while`/`loop`
+// body may READ a `wire` (the loop is then unrolled) but may not WRITE (drive)
+// one -- a write there adds one driver per iteration (docs 04-variables.md and
+// 05b-statements.md "Loops and `wire`"). errors/wire_loop_write.prp pins the
+// `for` spelling; this pins `while` (prp2lnast prefixes the message with
+// `loop`, and `loop { }` desugars to the same node).
+//
+// The body first READS the wire `src`. That read is legal after the ruling, so
+// the diagnostic must name the DRIVE of `back`. Before the ruling, prp2lnast
+// rejected the read:
+//   loop body may not read or write wire 'src'   (on the `const s` line)
+// The wording now that reads are legal:
+//   message: loop body may not drive wire 'back'
+//   hint:    drive the wire outside the loop; a loop body may only read a wire
+mod wire_while_loop_write(a:U8) -> (z:U8@[0]) {
+  wire src:U8 = nil
+  wire back:U8 = nil
+  mut i = 0
+  while i < 1 {
+    const s = src ^ i       // a READ of a wire: legal
+    back = s  // locate_error_here
+    i += 1
+  }
+  src = a
+  z = back
+}

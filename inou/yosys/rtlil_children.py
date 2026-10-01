@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Inspect one RTLIL module's direct children or input ports."""
 
+from __future__ import annotations
+
 import argparse
 import pathlib
 import sys

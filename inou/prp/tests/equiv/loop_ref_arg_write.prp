@@ -1,0 +1,29 @@
+/*
+:name: loop_ref_arg_write
+:type: equiv
+*/
+// A call inside a `for` body that writes a variable back through `ref`
+// (`addby(ref m, …)`, or the receiver of a `ref self` method) must carry that
+// write across iterations. The loop roller's carry analysis sees only
+// stores, so before, the rolled body had no carry for `m`: every iteration
+// read the initial 0 and `o` was the constant 0 (a silent miscompile). Such a
+// loop now unrolls.
+comb addby(ref x:U8, by:U8) -> () {
+  wrap x = x + by
+}
+comb incr(ref self:U8) -> () {
+  wrap self += 1
+}
+
+pub mod loop_ref_arg_write(a:U4) -> (o:U8@[0], p:U8@[0]) {
+  mut m:U8 = 0
+  for i in 0..<4 {
+    addby(ref m, by=U8(a#[i]))
+  }
+  o = m
+  mut n:U8 = 0
+  for i in 0..<3 {
+    n.incr()
+  }
+  p = n
+}

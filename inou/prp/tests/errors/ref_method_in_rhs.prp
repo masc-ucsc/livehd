@@ -10,5 +10,5 @@
 // (A `mod`/`pipe` whole-rhs bind stays legal — those don't mutate the caller.)
 comb set_x(ref self, x) -> (self) { self.x = x }
 
-mut a1 = (mut x:u10 = 0)
+mut a1 = (mut x:U10 = 0)
 mut a3 = a1.set_x(x=20)   // ERROR: ref-self method used in a rhs expression

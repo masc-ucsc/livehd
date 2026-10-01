@@ -3,9 +3,12 @@
 :type: equiv
 :verilog_top: reduce_wide.foo
 :pyrope_top: foo
+:yosys_lec_timeout: 2
 */
+// yosys' SAT never decides the two 129/65-bit popcount spellings (inconclusive
+// is tolerated), so its budget stays small; the native proof is the gate.
 
-pub comb foo(a:u129, b:s65) -> (parity:u1, population:u8, signed_parity:u1, signed_population:u7) {
+pub comb foo(a:U129, b:S65) -> (parity:U1, population:U8, signed_parity:U1, signed_population:U7) {
   parity = a#^[..]
   population = a#+[..]
   signed_parity = b#^[..]

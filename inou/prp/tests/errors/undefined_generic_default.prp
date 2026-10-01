@@ -1,0 +1,21 @@
+/*
+:name: undefined_generic_default
+:type: error
+:error: unknown type or lambda 'ZZ' in a generic default
+:help: declare `ZZ` before its use
+*/
+
+// Ruling 2026-09-28 #24 (clarification): reading a name with no accessible
+// declaration is a direct compile error at the read, in every context. A
+// generic default is kept as source text that the runner re-reads at each
+// call; before, an undeclared name there became nil and surfaced only as the
+// indirect upass.tolg "unresolved reference 'inl1_ZZ' ... resolved to nil".
+// User ruling 2026-09-28 (33): the error names what a generic default reads (a
+// type, lambda or comptime const declared earlier), not a variable.
+comb addn<N=ZZ>(a:U8) -> (r:U8) {  // locate_error_here
+  r = (a + N)#[0..<8]
+}
+
+pub comb undefined_generic_default(a:U8) -> (r:U8) {
+  r = addn(a=a)
+}

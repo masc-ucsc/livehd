@@ -4,8 +4,8 @@
 :error: type was removed
 */
 
-// The `uint` type was removed. Use `unsigned` (unbounded) or a sized `uN`.
+// The `uint` type was removed. Use `Unsigned` (unbounded) or a sized `U<N>`.
 
-pub comb t(a:uint) -> (r:u8) {
+pub comb t(a:uint) -> (r:U8) {
   r = 0
 }

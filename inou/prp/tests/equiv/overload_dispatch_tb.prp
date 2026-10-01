@@ -19,8 +19,8 @@ test overload_dispatch.sig {
     s = s * 6364136223846793005 + 1442695040888963407
     acc.z = s & 0xff
     step
-    sig = sig * 1099511628211 + (acc.s2 & 0x1ff)
-    sig = sig * 1099511628211 + (acc.s3 & 0x3ff)
+    sig = sig * 1099511628211 + (acc.`s2` & 0x1ff)
+    sig = sig * 1099511628211 + (acc.`s3` & 0x3ff)
   }
   assert((sig & 0x3FFFFFFFFFFFFFFF) == 1799845389047405164, "signature mismatch vs iverilog golden overload_dispatch")
 }

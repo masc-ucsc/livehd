@@ -2,6 +2,7 @@
 
 #include "upass_attributes.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -548,7 +549,31 @@ void uPass_attributes::process_attr_set() {
           if (!src.empty() && src != target && ((src_b && !src_b->get_attrs().empty()) || lookup_type_info(src) != nullptr)) {
             // Attr values ride the binding: copy the type var's attrs onto
             // the target's binding (fill-if-absent), then notify handlers.
-            if (src_b) {
+            // Bare targets only: a dotted one (`nt.n` of `reg nt:Nt`) names a
+            // field, not a varmap slot (get_bundle_for_write needs a bare var).
+            // A dotted target (`nt.n` of `reg nt:Nt` with `n:In`) takes the
+            // type's attributes under its field path on the ROOT bundle: a
+            // field typed by a type with attributes inherits them just like a
+            // bare name does (never a silent drop; owner ruling 2026-09-30).
+            if (src_b && bundle_key::find_top_dot(target) != std::string_view::npos) {
+              const auto top  = bundle_key::find_top_dot(target);
+              const auto root = std::string{target.substr(0, top)};
+              const auto fld  = std::string{target.substr(top + 1)};
+              if (auto rb = runner_st->get_bundle_for_write(root); rb) {
+                for (const auto& [k, e] : src_b->get_attrs()) {
+                  const auto dot  = k.rfind('.');
+                  const auto leaf = dot == std::string::npos ? std::string_view{k} : std::string_view{k}.substr(dot + 1);
+                  if (leaf == "vbound") {
+                    continue;
+                  }
+                  const auto path = fld;
+                  if (rb->get_attr(path, k).is_invalid()) {
+                    rb->set_attr(path, k, e.trivial);
+                  }
+                }
+              }
+            }
+            if (src_b && bundle_key::find_top_dot(target) == std::string_view::npos) {
               if (auto tb = runner_st->get_bundle_for_write(target); tb) {
                 for (const auto& [k, e] : src_b->get_attrs()) {
                   // Bind-tracking is a NAME fact of the SOURCE, never

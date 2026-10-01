@@ -15,20 +15,20 @@
 // `lane` is the interesting one: it is structurally a carry (each step reads and
 // rewrites `l`), but every step writes a bit no other step touches, which is why
 // it classifies as parallel rather than as a recurrence.
-mod loop_carry_kinds_sim(x:u4) -> (any:bool@[0], sum:u16@[0], lane:u4@[0]) {
-  mut a:bool = false
+mod loop_carry_kinds_sim(x:U4) -> (any:Bool@[0], sum:U16@[0], lane:U4@[0]) {
+  mut a:Bool = false
   for i in 0..<4 {
-    a = a or boolean(x#[i])
+    a = a or Bool(x#[i])
   }
   any = a
 
-  mut s:u16 = 0
+  mut s:U16 = 0
   for i in 0..<4 {
     s = s + x
   }
   sum = s
 
-  mut l:u4 = 0
+  mut l:U4 = 0
   for i in 0..<4 {
     l#[i] = x#[i]
   }

@@ -380,11 +380,11 @@ direct `drv.bin` runs need nothing: a driver never profiles unless it is given
   --set sim.tune.profile=off --workdir "${RUN_ROOT}/minion/SW"
 
 "${LHD}" sim "lg:${RUN_ROOT}/minion/lg" minion/sim/minion_prog_tb.prp \
-  --run-only --arg cycles=100000 --set sim.ninja=false \
+  --run-only +cycles=100000 --set sim.ninja=false \
   --set sim.init_zero=true --set sim.tune.profile=off \
   --workdir "${RUN_ROOT}/minion/SW"
 
-"${RUN_ROOT}/minion/SW/sim/drv.bin" --cycles 100000 \
+"${RUN_ROOT}/minion/SW/sim/drv.bin" +cycles=100000 \
   --result-json "${RUN_ROOT}/minion/SW/sim/direct-result.json" \
   --no-checkpoint
 ```
@@ -402,10 +402,10 @@ direct `drv.bin` runs need nothing: a driver never profiles unless it is given
   --workdir "${RUN_ROOT}/dino/SW"
 
 "${LHD}" sim "lg:${RUN_ROOT}/dino/lg" dino/sim/dino_prog_tb.prp \
-  --run-only --arg cycles=4000000 --set sim.ninja=false \
+  --run-only +cycles=4000000 --set sim.ninja=false \
   --set sim.tune.profile=off --workdir "${RUN_ROOT}/dino/SW"
 
-"${RUN_ROOT}/dino/SW/sim/drv.bin" --cycles 4000000 \
+"${RUN_ROOT}/dino/SW/sim/drv.bin" +cycles=4000000 \
   --result-json "${RUN_ROOT}/dino/SW/sim/direct-result.json" \
   --no-checkpoint
 ```
@@ -423,7 +423,7 @@ export BIN="${RUN_ROOT}/minion/SW/sim/drv.bin"
 
 taskset -c "${CPU}" perf stat -r 5 \
   -e cycles,instructions,branches,branch-misses \
-  -- "${BIN}" --cycles 100000 --no-checkpoint
+  -- "${BIN}" +cycles=100000 --no-checkpoint
 ```
 
 Then collect cache/TLB counters in a separate run so the PMU does not
@@ -432,7 +432,7 @@ multiplex too many events:
 ```bash
 taskset -c "${CPU}" perf stat -r 5 \
   -e cache-references,cache-misses,dTLB-loads,dTLB-load-misses,iTLB-loads,iTLB-load-misses \
-  -- "${BIN}" --cycles 100000 --no-checkpoint
+  -- "${BIN}" +cycles=100000 --no-checkpoint
 ```
 
 Check the `perf stat` percentage-running column. If an event is unsupported or
@@ -460,7 +460,7 @@ delta measures steady-state spin throughput rather than program execution.
 ```bash
 taskset -c "${CPU}" perf record -F 999 -g --call-graph dwarf \
   -o "${RUN_ROOT}/minion/perf.data" -- \
-  "${BIN}" --cycles 100000 --no-checkpoint
+  "${BIN}" +cycles=100000 --no-checkpoint
 
 perf report --stdio -i "${RUN_ROOT}/minion/perf.data"
 ```
@@ -938,7 +938,7 @@ so one `--set` list can be passed to both setup and run.
 
 ```bash
 # converge in a persistent workdir (repeat until the envelope says converged)
-lhd sim DUT TB --workdir P --arg cycles=N --result-json r.json
+lhd sim DUT TB --workdir P +cycles=N --result-json r.json
 # write the decision, then pin it anywhere else
 lhd sim DUT TB --workdir P --setup-only --set sim.tune.export=design.simtune.json
 lhd sim DUT TB --workdir W --set sim.tune.profile=off --set sim.tune.file=design.simtune.json
@@ -991,16 +991,16 @@ variant, on a quiet machine, serially.
    - **V1** a hand-pinned vector, e.g. V0 plus
      `--set sim.tune.dirty=on --set sim.tune.fence=0`;
    - **V2** converged: in a persistent workdir P, repeat
-     `lhd sim DUT TB --arg cycles=N --set sim.vcd=false --set sim.ninja=false --workdir P --result-json rI.json`
+     `lhd sim DUT TB +cycles=N --set sim.vcd=false --set sim.ninja=false --workdir P --result-json rI.json`
      until `sim_tune.converged` (cap it at 5 runs), recording each run's
      `inou.cgen.sim` and `sim.hostbuild` phases as the convergence cost; then
      export (§13.6) and measure V0 plus `--set sim.tune.file=F` in a fresh
      workdir.
 3. Per variant, in a fresh workdir W:
    - setup: `lhd sim DUT TB --setup-only --set sim.vcd=false <variant> --workdir W --result-json setup.json`;
-   - run: `lhd sim DUT TB --run-only --arg cycles=N --set sim.ninja=false <variant> --workdir W`,
+   - run: `lhd sim DUT TB --run-only +cycles=N --set sim.ninja=false <variant> --workdir W`,
      gated on the testbench's marker and expected checksum;
-   - exec: best of 3 `W/sim/drv.bin --cycles N`; host C++ = run - exec.
+   - exec: best of 3 `W/sim/drv.bin +cycles=N`; host C++ = run - exec.
 4. Prefer retired instructions over wall time. Each `--result-json` test row
    carries `sim_cycles`, `cpu_ns`, `cpu_cycles`, `instructions` and
    `pcore_frac`; on Apple Silicon a loaded machine moves work to efficiency

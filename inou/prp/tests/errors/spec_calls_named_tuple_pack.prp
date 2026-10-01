@@ -1,0 +1,14 @@
+/*
+:name: spec_calls_named_tuple_pack
+:type: error
+:error: bit order|named field|no bit|order
+*/
+
+// qa.md chat ruling "Named tuple order (2026-09-30): ... declaration order is
+// never observable". docs 10-internals.md: "A tuple with **two or more named
+// fields** has no bit vector, at any depth ... `const q:U8 = pt#[..]  //
+// error: two named fields have no bit order`".
+
+const pt = (const lo:U4 = 3, const hi:U4 = 1)
+const q:U8 = pt#[..] // locate_error_here
+cassert(q == 0x13)

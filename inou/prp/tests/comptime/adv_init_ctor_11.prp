@@ -11,9 +11,9 @@
 // exploding the tuple into N positional args.
 
 type Accum = (
-  mut total:signed = nil,
-  mut last:signed = nil,
-  comb init(ref self, data:[4]signed) {
+  mut total:Signed = nil,
+  mut last:Signed = nil,
+  comb init(ref self, data:[4]Signed) {
     mut acc = 0
     for e in data {
       acc = acc + e

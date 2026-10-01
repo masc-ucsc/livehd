@@ -1,0 +1,25 @@
+/*
+:name: bool_output_into_u1
+:type: error
+:tolg: 1
+:error: cannot assign boolean value to .(x|y). \(it is integer\)
+*/
+
+// User ruling 2026-09-27: a child's `Bool` output flowing into a `U1`
+// destination needs an explicit `U1(...)`, exactly like a local bool
+// ("cannot assign boolean value to `x` (it is integer)"). Today the instance
+// output's kind is `unknown` at the call site, so both the typed local and the
+// `U1` output port take it silently.
+//
+// Legal spelling: `const x:U1 = U1(c.idle)` and `y = U1(c.idle)`.
+
+mod leaf(go:Bool) -> (idle:Bool@[0]) {
+  idle = not go
+}
+
+pub mod bool_output_into_u1(v:U4) -> (q:U4@[0], y:U1@[0]) {
+  const c = leaf(go=v != 0)
+  const x:U1 = c.idle   // locate_error_here
+  q = v ^ x
+  y = c.idle            // locate_error_here
+}

@@ -40,10 +40,10 @@
 // READ carries same-address write-forwarding, so a test that reads on a writing
 // tick sees the forwarded value and passes even though the array was never
 // written. The forwarding is what hid this bug from every existing fixture.
-pub mod mwe(d:u8) -> (rd:u10@[0], qn:u8@[1], we:bool@[0]) {
-  reg st:u8 = 0                       // POSEDGE flop feeding the write cone
-  reg nf:u8:[posclk=false] = 0        // the NEGEDGE flop that engages phase 2
-  reg m:[4]u10 = nil
+pub mod mwe(d:U8) -> (rd:U10@[0], qn:U8@[1], we:Bool@[0]) {
+  reg st:U8 = 0                       // POSEDGE flop feeding the write cone
+  reg nf:U8:[posclk=false] = 0        // the NEGEDGE flop that engages phase 2
+  reg m:[4]U10 = nil
   st = d
   nf = d
   rd = m[0]

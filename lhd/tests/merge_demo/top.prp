@@ -3,6 +3,6 @@
 // adds 1, chained: y = (-x) + 1.
 const inverter = import("lg:inv")
 const add1     = import("lg:adder.adder")
-comb top(x:s8) -> (y:s9) {
+comb top(x:S8) -> (y:S9) {
   y = add1(a = inverter(a = x))
 }

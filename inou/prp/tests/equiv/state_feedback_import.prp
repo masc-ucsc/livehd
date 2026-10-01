@@ -1,0 +1,29 @@
+/*
+:name: state_feedback_import
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// A grant fed back into an IMPORTED child's STATE register is not a
+// combinational loop (lhdtrack suggestions 2.1, the exact reported shape).
+// `st.q` reads only the register `r`; `d` reaches `q` only through `r`, so the
+// ring `gr -> st.d -> r -> st.q -> gr` is cut by a flop. Before the 2.1 fix,
+// upass.tolg's time-checker modeled the Sub instance as a crossbar (every
+// input feeds every output) and refused it:
+//   upass.tolg: combinational loop in 'state_feedback_import.top'
+//
+// The child is IMPORTED on purpose: in input-file order (imports appended) the
+// importer comes BEFORE the imported unit, so a checker that reads the child's
+// per-output cones needs tolg to lower callees first (it does now); the guard
+// imports/comb_loop_import_mealy.prp keeps the unsound shortcut (treat a
+// body-less callee as having no feedthrough) from passing. The same-file
+// spelling is sim/mod_state_feedback_through_child.prp.
+const st = import("state_feedback_import/st.st")
+
+pub mod top(rst:Reset, req:U4) -> (g:U4@[0]) {
+  wire gr:U4 = nil
+  const m = st(rst=rst, en=req != 0, d=gr)
+  gr = req & ~m
+  g = gr
+}

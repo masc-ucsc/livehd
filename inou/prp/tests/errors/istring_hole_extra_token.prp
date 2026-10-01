@@ -1,0 +1,11 @@
+/*
+:name: istring_hole_extra_token
+:type: error
+:error: after the expression in a string hole
+*/
+// A hole holds ONE expression plus an optional `:spec`; tree-sitter rejects
+// the stray `b` too. A comment after the expression is not stray text (see
+// comptime/istring_hole_comments.prp).
+const a = 1
+const b = 2
+const s = "{a /* ok */ b}"  // locate_error_here

@@ -17,7 +17,7 @@ const dut = import("lg:bit_selected_clocks")
 
 test bit_selected_clocks.vector {
   mut acc = dut
-  mut cycle:u32 = 0
+  mut cycle:U32 = 0
   tick 9 {
     acc.clr_  = cycle != 0
     acc.gate  = cycle != 8

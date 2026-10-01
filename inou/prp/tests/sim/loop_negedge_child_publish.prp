@@ -1,0 +1,118 @@
+/*
+:name: loop_negedge_child_publish
+:type: simulation
+:expect_instances: u_loop*=2
+*/
+
+// A NEGEDGE-only child inside a rolled `for` body. The per-module loop-body
+// emitter defers every negedge-only child to its fall pass and reads the
+// child's outputs from `<inst>.__out`, but the deferred `__compact_advance()`
+// only records `__last_out`. With no `__compact_publish()` after it, `__out`
+// kept what the reset published: the counter read 0 forever, and so did the
+// purely combinational output `e`.
+//
+// `nx_top` has no ring at all. `nn_top` puts the child on a false wire ring
+// (why `::[timecheck=false]`: see loop_false_loop_moore_child.prp) with a
+// posedge register sampling it at the rise.
+//
+// Same values as `--set compile.unroll=true`.
+mod nx_cnt(clk:Clock, en:Bool, x:U4) -> (q:U4@[0], e:U4@[]) {
+  reg c:U4:[clock_pin=clk, posclk=false] = 0
+  q = c
+  e = x ^ 3
+  if en { wrap c += 1 }
+}
+
+pub mod nx_top(clk:Clock, en:U2, a:U8) -> (s:U8@[0], t:U8@[]) {
+  mut acc:U8  = 0
+  mut tacc:U8 = 0
+  for j in 0..<2 {
+    const c = nx_cnt(clk=clk, en=en#[j] == 1, x=a#[(j * 4)..+4])
+    wrap acc  = acc | (c.q << (j * 4))
+    wrap tacc = tacc | (c.e << (j * 4))
+  }
+  s = acc
+  t = tacc
+}
+
+mod nn_state(clk:Clock, rst:Reset, en:Bool, d:U4) -> (q:U4@[0]) {
+  reg r:U4:[clock_pin=clk, posclk=false] = 8
+  if en { r = d }
+  q = r
+}
+
+mod nn_arb::[timecheck=false](clk:Clock, rst:Reset, req:U4) -> (g:U4@[], s:U4@[]) {
+  wire gr:U4 = nil
+  const m = nn_state(clk=clk, rst=rst, en=req != 0, d=gr)
+  gr = req & ~m
+  g  = gr
+  reg sr:U4:[clock_pin=clk] = 0
+  sr = m
+  s  = sr
+}
+
+pub mod nn_top::[timecheck=false](clk:Clock, rst:Reset, req:U8) -> (g:U8@[], s:U8@[]) {
+  mut acc:U8  = 0
+  mut sacc:U8 = 0
+  for j in 0..<2 {
+    const a = nn_arb(clk=clk, rst=rst, req=req#[(j * 4)..+4])
+    wrap acc  = acc | (a.g << (j * 4))
+    wrap sacc = sacc | (a.s << (j * 4))
+  }
+  g = acc
+  s = sacc
+}
+
+test nx_top.negedge_counter_and_comb_output {
+  mut x     = nx_top
+  mut c0:U4 = 0
+  mut c1:U4 = 0
+  mut bad   = 0
+  mut seen  = 0
+  tick 8 {
+    const ev:U2 = U2((clock * 3) & 3)
+    const av:U8 = (clock * 37 + 11) & 0xFF
+    x.en = ev
+    x.a  = av
+    step
+    // each counter advanced at this period's fall
+    if ev#[0] == 1 { wrap c0 += 1 }
+    if ev#[1] == 1 { wrap c1 += 1 }
+    const sexp:U8 = (c1 << 4) | c0
+    const texp:U8 = ((av#[4..<8] ^ 3) << 4) | (av#[0..<4] ^ 3)
+    seen += 1
+    if x.s != sexp { bad += 1 }
+    if x.t != texp { bad += 1 }
+  }
+  assert(seen == 8, "the comparisons ran")
+  assert(bad == 0, "a negedge-only child in a rolled loop publishes its outputs")
+}
+
+test nn_top.ring_through_negedge_child {
+  mut x     = nn_top
+  mut r0:U4 = 8
+  mut r1:U4 = 8
+  mut bad   = 0
+  mut seen  = 0
+  tick 12 {
+    const rq:U8 = (clock * 37 + 11) & 0xFF
+    x.rst = clock < 1
+    x.req = rq
+    step
+    const q0:U4 = rq#[0..<4]
+    const q1:U4 = rq#[4..<8]
+    // `sr` sampled the child at this period's rise (it is in reset at clock 0)
+    const sexp:U8 = if clock == 0 { 0 } else { (r1 << 4) | r0 }
+    if clock != 0 {
+      // the child loads this period's grant at the fall
+      if q0 != 0 { r0 = q0 & ~r0 }
+      if q1 != 0 { r1 = q1 & ~r1 }
+    }
+    const gexp:U8 = ((q1 & ~r1) << 4) | (q0 & ~r0)
+    seen += 1
+    if x.g != gexp { bad += 1 }
+    if x.s != sexp { bad += 1 }
+  }
+  assert(seen == 12, "the comparisons ran")
+  assert(bad == 0, "the ring reads the negedge child's CURRENT register")
+}

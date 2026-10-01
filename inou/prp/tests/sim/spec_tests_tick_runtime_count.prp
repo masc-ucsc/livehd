@@ -1,0 +1,32 @@
+/*
+:name: spec_tests_tick_runtime_count
+:type: simulation
+:args: cycles=13
+*/
+// Spec: docs 05b "Running cycles (tick)": "Because `tick` takes a runtime
+// count (unlike the unrolling `for`), the cycle bound can be a test argument
+// set from outside -- the value comes from `+name=value`, or from the runner
+// when it is omitted". The test below is the docs `counter.run_for` example
+// verbatim; `:args: cycles=13` overrides the default 20 at run time.
+//
+// Rule pinned: `tick <runtime param>` runs exactly that many cycles.
+
+mod counter(enable:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
+
+  value = count                     // combinational read of count.q -> @[0]
+
+  if enable { wrap count += 1 }
+}
+
+test counter.run_for(cycles:U8=20) {
+  mut acc     = counter
+  mut v_final = nil
+  tick cycles {                       // a runtime argument sets the loop length
+    acc.enable = true
+    step
+    v_final = acc.value
+  }
+  assert(v_final == cycles, "after {cycles} enabled cycles the count must be {cycles}")
+  assert(v_final == 13)
+}

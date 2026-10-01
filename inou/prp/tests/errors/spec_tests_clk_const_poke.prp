@@ -1,0 +1,29 @@
+/*
+:name: spec_tests_clk_const_poke
+:type: error
+:error: (Clock|clock).*constant
+*/
+// Spec (qa.md appendix section 6): "Test harnesses declare/pass a real Clock
+// (no `clk=1`)"; "A Clock can never be bound to a constant". docs 05b
+// "Running cycles (tick)": "A harness never feeds a constant to a `Clock`
+// input (`clk=1` is an error); it passes a real Clock such as the tick's
+// `clock`."
+//
+// Rule pinned: inside a test, poking a constant into the DUT's `Clock` input
+// (`d.clk = 1`, the old lhdtrack harness convention) is a compile error.
+
+mod spec_ccp_cnt(clk:Clock, en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_ccp.const_clk {
+  mut d = spec_ccp_cnt
+  tick 4 {
+    d.clk = 1            // locate_error_here
+    d.en  = true
+    step
+  }
+  assert(d.q == 4)
+}

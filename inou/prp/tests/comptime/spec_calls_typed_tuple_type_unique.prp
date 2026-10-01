@@ -1,0 +1,20 @@
+/*
+:name: spec_calls_typed_tuple_type_unique
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// qa.md Q35 answer "Same rules as calls" / Appendix §8: "Typed tuple
+// construction binds with the SAME rules as calls: `const T1 = (a:String,
+// b:Signed)`, `mut x:T1 = (3, "hello")` is legal (type-unique: b=3,
+// a="hello")."
+// docs 03-bundle.md: `mut t1:T1 = (3, "hello")  // OK: each value's type is
+// unique, b=3, a="hello"`.
+
+type T1 = (a:String, b:Signed)
+mut t1:T1 = (3, "hello")
+cassert(t1.a == "hello" and t1.b == 3)
+
+mut t2:T1 = ("bye", 7)
+cassert(t2.a == "bye" and t2.b == 7)

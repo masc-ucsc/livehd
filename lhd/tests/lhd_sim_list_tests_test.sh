@@ -33,12 +33,12 @@ cat > "$W/two.prp" <<'EOF'
 :name: two
 :type: simulation
 */
-mod cnt(enable:bool) -> (value:u8@[0]) {
-  reg count:u8 = 0
+mod cnt(enable:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
   value = count
   if enable { wrap count += 1 }
 }
-test cnt.held(cycles:u20 = 20) {
+test cnt.held(cycles:U20 = 20) {
   mut acc = cnt
   mut v = 0
   tick cycles {

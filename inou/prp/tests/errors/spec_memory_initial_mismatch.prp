@@ -1,0 +1,17 @@
+/*
+:name: spec_memory_initial_mismatch
+:type: error
+:tolg: 1
+:error: initial
+*/
+
+// SPEC (docs 08-memories.md): "`initial=<contents>` (the packed contents, entry 0
+// in the low `bits`) is the same pin: next to an initializer it must spell the
+// same value, and it is a compile error otherwise."
+// Rule encoded here: `= (1, 2)` packs to 0x0201 (entry 0 in the low bits), so
+// `initial=0x0102` next to it disagrees and is a compile error.
+
+pub mod spec_memory_initial_mismatch(clk:Clock, rst:Reset, a:U1) -> (q:U8@[0]) {
+  reg mem:[2]U8:[initial=0x0102] = (1, 2)   // locate_error_here
+  q = mem[a]
+}

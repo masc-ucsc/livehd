@@ -14,7 +14,7 @@
 // Distinct from selfref_slice_assign: there several separate `assign w[i] =`
 // statements are SEQUENCED in source order; here a single whole-vector assign is
 // simply never driven at all.
-pub comb selfref_concat_assign::[timecheck=false](A:u4) -> (O:u4) {
+pub comb selfref_concat_assign::[timecheck=false](A:U4) -> (O:U4) {
   mut p = 0
   p = 0ub????
   O = (A & 1) | ((((A >> 1) & 1) ^ (p & 1)) << 1) | ((((A >> 2) & 1) ^ ((p >> 1) & 1)) << 2) | ((((A >> 3) & 1) ^ ((p >> 2) & 1)) << 3)

@@ -1,0 +1,24 @@
+/*
+:name: spec_tests_clock_after_tick
+:type: error
+:error: clock
+*/
+// Spec (qa.md appendix section 8): "`clock` outside a tick block is undefined
+// unless declared." docs 05b "Running cycles (tick)": "Outside a `tick`
+// block, `clock` is undefined unless the test declares it."
+//
+// Rule pinned: the tick's minted `clock` is scoped to that tick block; reading
+// it AFTER the block ends is an undefined read (compile error at the read).
+
+mod spec_cat_pass(a:U8) -> (o:U8@[0]) {
+  o = a
+}
+
+test spec_cat.after {
+  mut d = spec_cat_pass
+  tick 3 {
+    d.a = 1
+    step
+  }
+  assert(clock == 3)     // locate_error_here
+}

@@ -19,7 +19,7 @@
 #     (one idle-pair count per class of the root's support table);
 #   * the codegen-key check: restating the baked value is accepted, a different
 #     one is refused, build plumbing is ignored, a setup-only key is refused;
-#   * `set` is a reserved test-parameter name (it would shadow `--set`).
+#   * `+set` is independent of the driver control `--set`.
 #
 # Hermetic like the prp-sim targets: `lhd sim --setup-only`, then the host C++
 # compiler over the generated sources with the runfiles' hlop/iassert headers.
@@ -164,13 +164,13 @@ def main():
         print('FAIL: required simulator header runfiles not found')
         return 1
 
-    # ---- `set` is a reserved test-parameter name ----
+    # ---- `+set` no longer collides with the simulator --set control ----
     bad = os.path.join(tmp, 'set_param.prp')
     with open(bad, 'w') as f:
-        f.write('mod pass1(a:u8) -> (r:u8@[0]) {\n  r = a\n}\n\n'
-                'test pass1.t(set:u8 = 1) {\n  mut d = pass1\n  d.a = set\n  step\n  assert(d.r == set)\n}\n')
+        f.write('mod pass1(a:U8) -> (r:U8@[0]) {\n  r = a\n}\n\n'
+                'test pass1.t(set:U8 = 1) {\n  mut d = pass1\n  d.a = set\n  step\n  assert(d.r == set)\n}\n')
     rc, out = setup(lhd, bad, os.path.join(tmp, 'wbad'), [])
-    check(rc != 0 and 'not a usable simulation parameter name' in out, 'a test parameter named `set` is refused at setup')
+    check(rc == 0, 'a test parameter named `set` is independent of --set: ' + out)
 
     # ---- two setups: run-time random fill vs baked sim.unknown_zero=true ----
     wr, wz = os.path.join(tmp, 'wr'), os.path.join(tmp, 'wz')

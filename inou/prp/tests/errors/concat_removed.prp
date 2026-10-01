@@ -15,8 +15,8 @@
 // the migration is not a rename: `#[..]` puts entry 0 at bit 0, so the argument
 // list REVERSES. Anything mechanical that keeps the old order miscompiles
 // silently instead of failing, which is exactly what an error message is for.
-comb concat_removed() -> (z:u12) {
-  const a:u4 = 5
-  const b:u8 = 1
+comb concat_removed() -> (z:U12) {
+  const a:U4 = 5
+  const b:U8 = 1
   z = concat(a, b)   // the replacement is `(b, a)#[..]`
 }

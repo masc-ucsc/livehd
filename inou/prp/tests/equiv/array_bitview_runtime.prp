@@ -5,8 +5,8 @@
 :pyrope_top: array_bitview_runtime
 */
 
-pub comb array_bitview_runtime(idx:u2, off:u4, v:u8) -> (before_o:u8, after_o:u32, pick_o:u8) {
-  mut r:[4]u8 = 0
+pub comb array_bitview_runtime(idx:U2, off:U4, v:U8) -> (before_o:U8, after_o:U32, pick_o:U8) {
+  mut r:[4]U8 = 0
   r[0] = 0x11
   r[1] = 0x22
   r[2] = 0x33

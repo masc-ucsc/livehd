@@ -1,0 +1,28 @@
+/*
+:name: spec_calls_named_sorted_iter
+:type: comptime
+:verifier_pass: 11
+:verifier_fail: 0
+*/
+
+// qa.md chat ruling "Named tuple order (2026-09-30): sorting is right. `for`
+// and `keys()` always visit a named tuple in sorted field-name order, so prpfmt
+// may sort all-named tuple literals; declaration order is never observable."
+// docs 05b-statements.md: `const b = (const c=5, const a=1, const b=3)`,
+// `cassert(b.keys() == ('a', 'b', 'c'))`, and `for (index, i, key) in b`
+// visits a (index 0), b (index 1), c (index 2).
+
+const b = (const c=5, const a=1, const b=3)   // declaration order is irrelevant
+cassert(b.keys() == ('a', 'b', 'c'))
+
+for (index, i, key) in b {
+  cassert(i == 1 implies (index == 0 and key == 'a'))
+  cassert(i == 3 implies (index == 1 and key == 'b'))
+  cassert(i == 5 implies (index == 2 and key == 'c'))
+}
+
+mut seen = 0
+for v in (const z=1, const y=2, const x=3) {
+  seen = seen * 10 + v            // visits x, y, z -> 3, 2, 1
+}
+cassert(seen == 321)

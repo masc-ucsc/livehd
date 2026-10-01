@@ -17,7 +17,7 @@ test bitset_reg.sig {
     s = s * 6364136223846793005 + 1442695040888963407
     acc.b = s & 0xff
     s = s * 6364136223846793005 + 1442695040888963407
-    acc.en = s & 0x1
+    acc.en = Bool(s & 0x1)
     acc.reset = clock < 4
     step
     if clock >= 4 {

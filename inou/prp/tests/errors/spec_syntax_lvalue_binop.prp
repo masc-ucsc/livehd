@@ -1,0 +1,9 @@
+/*
+:name: spec_syntax_lvalue_binop
+:type: error
+:error: this cannot be assigned
+*/
+// qa.md Appendix §4: "Assignment targets: ... Errors: `f(x) = 3`, `a + b = 3`, ..." (Q20).
+mut a = 1
+mut b = 2
+a + b = 3   // locate_error_here

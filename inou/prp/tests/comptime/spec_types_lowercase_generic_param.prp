@@ -1,0 +1,16 @@
+/*
+:name: spec_types_lowercase_generic_param
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+// Former lowercase type spellings are ordinary identifiers (07-typesystem.md).
+comb f<u8>(a:U8) -> (o:U8) {
+  wrap o = a + u8
+}
+pub comb spec_types_lowercase_generic_param(a:U8) -> (o:U8) {
+  o = f<u8=1>(a=a)
+}
+
+cassert(spec_types_lowercase_generic_param(a=3) == 4)

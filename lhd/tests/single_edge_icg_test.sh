@@ -66,29 +66,30 @@ external_sim() {
     || fail "LHD_EXTERNAL_SIM is set but iverilog/vvp are not on PATH"
 }
 
-cat > "$W/icg.prp" <<'EOF'
-pub mod icgf(clk:bool, en:bool, d:u8) -> (q:u8@[1]) {
-  reg enl:bool:[latch=true]      // the enable latch, transparent on the LOW phase
-  if !clk {
-    enl = en
-  }
-  wire gclk:bool = nil
-  gclk = clk and enl             // the gated clock
-  reg f:u8:[clock_pin=ref gclk] = 0
-  q = f
-  f = d
-}
+# The design is VERILOG (slang reader): the hand-built enable latch reads the
+# clock level as data, which Pyrope's `Clock` type forbids (qa.md Appendix 6;
+# Pyrope's ICG is the Clock_cell `Clock(clock_pin=clk, enable=en)`).
+cat > "$W/icg.sv" <<'EOF'
+module icgf(input clk, input reset, input en, input [7:0] d, output [7:0] q);
+  reg enl;                              // the enable latch, transparent on the LOW phase
+  always_latch if (!clk) enl = en;
+  wire gclk = clk & enl;                // the gated clock
+  reg [7:0] f;
+  always @(posedge gclk) if (reset) f <= 0; else f <= d;
+  assign q = f;
+endmodule
 EOF
 # A REAL difference inside the same ICG structure: the gate must not mask it.
-sed 's/  f = d/  f = d + 1/' "$W/icg.prp" > "$W/icg_bad.prp"
+sed "s/else f <= d;/else f <= d + 8'd1;/" "$W/icg.sv" > "$W/icg_bad.sv"
+cmp -s "$W/icg.sv" "$W/icg_bad.sv" && fail "the icg_bad mutation did not apply"
 
 build() { # <name> <src>
   rm -rf "$W/lg_$1"
-  "$LHD" compile "$2" --top icgf --emit-dir "lg:$W/lg_$1" --workdir "$W/cw_$1" >"$W/c_$1.log" 2>&1 \
+  "$LHD" compile "$2" --reader slang --top icgf --emit-dir "lg:$W/lg_$1" --workdir "$W/cw_$1" >"$W/c_$1.log" 2>&1 \
     || { tail -5 "$W/c_$1.log"; fail "compile of $2 failed"; }
 }
-build good "$W/icg.prp"
-build bad  "$W/icg_bad.prp"
+build good "$W/icg.sv"
+build bad  "$W/icg_bad.sv"
 
 # ---- the pattern is RECOGNIZED and rewritten into an enable -----------------
 rm -rf "$W/lg_norm"

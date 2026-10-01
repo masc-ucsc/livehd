@@ -9,7 +9,7 @@
 // whose body sums its leftovers with a `for a in args` loop. Variation vs the
 // pipe test: a fixed leading operand `op` is added in too (acc starts at op).
 // Combinational (`@[0]`), so the golden is a flat adder.
-mod add_op(op:u8, ...args) -> (r:u11@[0]) {
+mod add_op(op:U8, ...args) -> (r:U11@[0]) {
   mut acc = op
   for a in args {
     acc = acc + a
@@ -17,6 +17,6 @@ mod add_op(op:u8, ...args) -> (r:u11@[0]) {
   r = acc
 }
 
-pub mod top(op:u8, a:u8, b:u8, c:u8) -> (z:u11@[0]) {
-  z = add_op(op, a, b, c)
+pub mod top(op:U8, a:U8, b:U8, c:U8) -> (z:U11@[0]) {
+  z = add_op(op=op, a=a, b=b, c=c)
 }

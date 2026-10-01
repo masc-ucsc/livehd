@@ -1,0 +1,16 @@
+/*
+:name: spec_lexical_cont_bitsel
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// qa.md appendix 3: "A new line starting with ... `#[`/`#`-selector (bit
+// select) ... continues the previous statement." docs 02-basics: "a `#` bit
+// selector (`#[0..=3]`, `#|[..]`, ...) continues the previous statement."
+const e = 0xF5
+const lo = e
+  #[0..=3]
+cassert(lo == 5)
+const r = e
+  #|[..]
+cassert(r == 1)

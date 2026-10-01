@@ -1,0 +1,6 @@
+/*
+:name: uniform_name_special
+:type: error
+:error: write other characters inside backticks
+*/
+const foo$bar = 1 // locate_error_here

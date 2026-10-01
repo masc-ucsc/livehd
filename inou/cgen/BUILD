@@ -52,6 +52,7 @@ cc_library(
     name = "sim_tune_hdrs",
     hdrs = [
         "sim_tune_rt.hpp",
+        "sim_plusargs_rt.hpp",
         "sim_tune_vector.hpp",
     ],
     copts = COPTS,
@@ -73,6 +74,7 @@ cc_library(
         exclude = [
             "cgen_salt.hpp",
             "sim_tune_rt.hpp",
+            "sim_plusargs_rt.hpp",
             "sim_tune_vector.hpp",
         ],
     ),

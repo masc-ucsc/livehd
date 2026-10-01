@@ -8,8 +8,8 @@
 // 2d-reg — the 06c `bad_mix` analog: with `=` (not `+=`) tmp is a one-stage
 // delay (stage register, sigma(q)=1); `tmp + a` then adds yesterday's a+b
 // to today's a — a cross-stage operand mix.
-pipe[1] bad_mix(a:u8, b:u8) -> (x:u10) {
-  reg tmp:u9 = 0
+pipe[1] bad_mix(a:U8, b:U8) -> (x:U10) {
+  reg tmp:U9 = 0
   tmp = a + b
   x = tmp + a
 }

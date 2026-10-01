@@ -5,10 +5,10 @@
 :verifier_fail: 0
 */
 
-const fint:signed = 0
+const fint:Signed = 0
 cassert(fint == 0)
 
-mut fbool:bool = false
+mut fbool:Bool = false
 cassert(fbool == false)
 
 comb init_empty(ref self) {

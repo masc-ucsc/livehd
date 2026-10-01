@@ -1,0 +1,22 @@
+/*
+:name: comb_arg_wider_than_param_noinline
+:type: error
+:tolg: 1
+:set: compile.upass.inline=false
+:error: argument .a. \(range \[0, 65535\]\) in call to .low4. may not fit its declared range \[0, 15\]
+:help: an argument never narrows implicitly
+*/
+// User ruling 2026-09-27: comb_arg_wider_than_param with the comb kept as its
+// own Sub instance (`compile.upass.inline=false`) instead of inlined. The
+// argument rule is a property of the call, not of the inliner, so a check
+// that lives only in the comb inliner must not satisfy this fixture.
+//
+// Today this compiles silently: the emitted Verilog connects the 16-bit `x`
+// to `module low4`'s 4-bit `a` (`.a(x)`), truncating without a diagnostic.
+comb low4(a:U4) -> (o:U4) {
+  o = a
+}
+
+pub mod comb_arg_wider_than_param_noinline(x:U16) -> (y:U16@[0]) {
+  y = low4(a=x)   // locate_error_here
+}

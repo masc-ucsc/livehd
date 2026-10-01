@@ -1,0 +1,16 @@
+/*
+:name: array_elem_store_wide
+:type: error
+:error: element of .m. \(unbounded range\) may not fit its declared range \[0, 255\]
+:help: widen the declared type
+*/
+
+// User ruling 16 for an array ELEMENT: a value too wide for any derived range
+// (a product of two u40) may not fit a u8 element, exactly like the scalar
+// `s:U8 = a * b` and the field `t.p = a * b`. It used to be skipped as
+// unbounded and truncated silently.
+pub mod array_elem_store_wide(a:U40, b:U40, i:U2) -> (q:U8@[0]) {
+  mut m:[4]U8 = 0
+  m[i] = a * b   // locate_error_here
+  q = m[0]
+}

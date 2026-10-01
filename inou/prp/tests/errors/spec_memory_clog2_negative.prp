@@ -1,0 +1,12 @@
+/*
+:name: spec_memory_clog2_negative
+:type: error
+:error: std\.clog2
+*/
+
+// SPEC (qa.md appendix section 5, Memories):
+//   "`std.clog2(x)` exists (comptime; ... x<=0 or runtime x is an error)."
+// Rule encoded here: a negative literal argument is a compile error.
+
+const aw = std.clog2(-4)   // locate_error_here
+cassert(aw == 2)

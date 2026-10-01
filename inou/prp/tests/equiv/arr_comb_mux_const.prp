@@ -9,7 +9,7 @@
 //
 // The golden drives only `arr[0]`; `arr[1]` has no driver, which in Verilog is
 // X and means "any value is acceptable". The Pyrope side starts from
-// `mut arr:[2]u1 = 0`, so its element 1 is 0. Reading `arr[sel]` at sel==1
+// `mut arr:[2]U1 = 0`, so its element 1 is 0. Reading `arr[sel]` at sel==1
 // therefore compares a committed 0 against the golden's unknown.
 //
 // That comparison SHOULD be discharged: `formal.lec.gold_x` already defaults to
@@ -30,8 +30,8 @@
 // PROVEN, so the undriven element is the ONLY remaining difference.
 // (`prp-v2prp2v-arr_comb_mux_const` passes: its original-Verilog leg never
 // commits element 1 on either side.)
-pub comb arr_comb_mux_const::[timecheck=false](sel:u1, d:u1) -> (o:u1) {
-  mut arr:[2]u1 = 0
+pub comb arr_comb_mux_const::[timecheck=false](sel:U1, d:U1) -> (o:U1) {
+  mut arr:[2]U1 = 0
   arr[0] = d          // the golden's `1 ? d : ~d` — a constant condition, so `d`
   o = arr[sel]
 }

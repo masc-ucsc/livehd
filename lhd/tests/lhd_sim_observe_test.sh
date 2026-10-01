@@ -31,9 +31,9 @@ cat > "$W/obs.prp" <<'EOF'
 :name: obs
 :type: simulation
 */
-mod sub(en:bool) -> (o:u8@[0]) { reg c:u8 = 0; o = c; if en { wrap c += 1 } }
-mod top(en:bool, din:u8) -> (fout:u8@[0], sout:u8@[0]) {
-  reg acc:u8 = 0
+mod sub(en:Bool) -> (o:U8@[0]) { reg c:U8 = 0; o = c; if en { wrap c += 1 } }
+mod top(en:Bool, din:U8) -> (fout:U8@[0], sout:U8@[0]) {
+  reg acc:U8 = 0
   if en { wrap acc += din }
   fout = acc
   sout = sub(en=en)
@@ -178,7 +178,7 @@ cat > "$W/two.prp" <<'EOF'
 :name: two
 :type: simulation
 */
-mod cnt(enable:bool) -> (value:u8@[0]) { reg count:u8 = 0; value = count; if enable { wrap count += 1 } }
+mod cnt(enable:Bool) -> (value:U8@[0]) { reg count:U8 = 0; value = count; if enable { wrap count += 1 } }
 test a.x { mut acc = cnt; tick 3 { acc.enable = true; step }; assert(true) }
 test b.y { mut acc = cnt; tick 3 { acc.enable = true; step }; assert(true) }
 EOF

@@ -131,7 +131,7 @@ try:
     source.write_text("module top(input a,b, output y); assign y = a & b; endmodule\n")
     args = [str(Path("lhd/lhd").resolve()), "synth", str(source), "--top", "top", "--workdir", str(root / "work"),
             "--set", "synth.mapper=usyn", "--set", "synth.liberty=inou/prp/tests/abc/test.lib",
-            "--set", "synth.opentimer=false", "--set", "pass.usyn.support=2", "--set", "pass.usyn.literals=8", "--set", "pass.usyn.series=2", "-q"]
+            "--set", "synth.opentimer=false", "--set", "pass.usyn.logical_inputs=2", "--set", "pass.usyn.branches=8", "--set", "pass.usyn.stack=2", "-q"]
     for label in ("cold", "warm"):
         envelope = root / (label + "-result.json")
         report = run(label, args + ["--result-json", str(envelope)], seconds=20, memory=4096)

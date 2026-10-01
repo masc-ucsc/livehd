@@ -1,0 +1,15 @@
+/*
+:name: ln_callee_output_narrow
+:type: error
+:files: inou/prp/tests/imports/ln_callee_output_narrow.prp
+:ln_files: inou/prp/tests/imports/lib_ln_scale.prp
+:error: `y` \(range \[1, 16\]\) may not fit its declared range \[0, 15\]
+*/
+// Ruling 28 through a PRE-ELABORATED `ln:` mod: the untyped output's derived
+// range [1, 16] does not fit `y:U4`. Before, the ln: call site saw no range at
+// all and the assignment compiled, truncating 16 to 0.
+const C = import("lib_ln_scale.lib_ln_cnt")
+
+pub mod ln_callee_output_narrow(x:U4) -> (y:U4@[0]) {
+  y = C(a=x).o  // locate_error_here
+}

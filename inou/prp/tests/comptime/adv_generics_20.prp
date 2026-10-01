@@ -5,16 +5,16 @@
 :verifier_fail: 0
 */
 
-// A generic binds to ANY type — `does` enumerates `boolean` as a basic type,
+// A generic binds to ANY type — `does` enumerates `Bool` as a basic type,
 // and binding is a pure type-macro expansion. So an identity generic over a
 // bool actual must round-trip the value unchanged.
 comb idg<T>(a:T) -> (r:T) { r = a }
 
 // bool round-trips through an explicit-bound generic
-cassert(idg<bool>(a=true) == true)
-cassert(idg<bool>(a=false) == false)
+cassert(idg<Bool>(a=true) == true)
+cassert(idg<Bool>(a=false) == false)
 // bool round-trips through inference
 cassert(idg(a=true) == true)
 // non-bool round-trips for contrast
-cassert(idg<u8>(a=200) == 200)
-cassert(idg(a=s8(-7)) == -7)
+cassert(idg<U8>(a=200) == 200)
+cassert(idg(a=S8(-7)) == -7)

@@ -14,44 +14,44 @@
 // All four directions in one design, so a comparison that is width-blind, or one
 // that gets a direction backwards, cannot pass:
 //
-//   narrow -> wide, signed     s3  -> s8   (sign extension: high bits = bit 2)
-//   wide   -> narrow, signed   s8  -> s3   (the value is representable in s3)
-//   narrow -> wide, unsigned   u30 -> u50  (zero extension: high bits = 0)
-//   wide   -> narrow, unsigned u50 -> u30  (the value fits in u30)
+//   narrow -> wide, signed     s3  -> S8   (sign extension: high bits = bit 2)
+//   wide   -> narrow, signed   s8  -> S3   (the value is representable in s3)
+//   narrow -> wide, unsigned   u30 -> U50  (zero extension: high bits = 0)
+//   wide   -> narrow, unsigned u50 -> U30  (the value fits in u30)
 //
 // The negative side matters as much as the positive one: `sneg` carries a
 // NEGATIVE s3 so a zero-extending comparison of a signed net shows up, and
 // `uhigh` sets a bit above 30 so a sign-extending comparison of an unsigned net
 // shows up too.
 
-pub mod top(a:s3, b:s8, c:u30, d:u50) -> (w0:s8@[], w1:s3@[], w2:u50@[], w3:u30@[], w4:s8@[], w5:u50@[]) {
+pub mod top(a:S3, b:S8, c:U30, d:U50) -> (w0:S8@[], w1:S3@[], w2:U50@[], w3:U30@[], w4:S8@[], w5:U50@[]) {
   // s3 -> s8: sign-extends. `a` is signed, so bits 3..7 are copies of bit 2.
-  mut sw:s8 = a
+  mut sw:S8 = a
   w0 = sw
 
   // s8 -> s3: narrowing. `#sext` re-reads the low 3 bits AS SIGNED, which is the
   // same value whenever b is representable in s3 — a plain `#[0..=2]` would be an
   // unsigned 0..7 slice and would not fit s3's [-4,3].
-  mut sn:s3 = b#sext[0..=2]
+  mut sn:S3 = b#sext[0..=2]
   w1 = sn
 
   // u30 -> u50: zero-extends. `c` is unsigned, so bits 30..49 are 0.
-  mut uw:u50 = c
+  mut uw:U50 = c
   w2 = uw
 
   // u50 -> u30: narrowing a value that fits.
-  mut un:u30 = d#[0..=29]
+  mut un:U30 = d#[0..=29]
   w3 = un
 
   // A NEGATIVE signed value round-tripped through the wide net: catches a
   // comparison that zero-extends a signed net.
-  const sneg:s3 = -3
-  mut   sx:s8   = sneg
+  const sneg:S3 = -3
+  mut   sx:S8   = sneg
   w4 = sx
 
   // An unsigned value with a bit ABOVE the narrow width: catches a comparison
   // that sign-extends an unsigned net (bit 29 set must NOT smear into 30..49).
-  const uhigh:u30 = 0x20000000
-  mut   ux:u50    = uhigh
+  const uhigh:U30 = 0x20000000
+  mut   ux:U50    = uhigh
   w5 = ux
 }

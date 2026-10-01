@@ -8,9 +8,9 @@
 // 2c-wire — a TYPED wire narrows its driver to the declared width (Verilog net
 // truncation), and the constraint must survive cprop's buffer collapse (O0 == O2).
 // Two consumers so the buffer cannot be trivially inlined away.
-pub comb wt(a:u8) -> (o1:u4, o2:u4) {
-  wire x:u4 = nil
+pub comb wt(a:U8) -> (o1:U4, o2:U4) {
+  wire x:U4 = nil
   o1 = x
   o2 = x ^ 0
-  x  = a
+  wrap x  = a
 }

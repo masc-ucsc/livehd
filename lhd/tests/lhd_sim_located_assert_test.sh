@@ -31,8 +31,8 @@ cat > "$W/la.prp" <<'EOF'
 :name: la
 :type: simulation
 */
-mod cnt(enable:bool) -> (value:u8@[0]) {
-  reg count:u8 = 0
+mod cnt(enable:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
   value = count
   if enable { wrap count += 1 }
 }
@@ -88,7 +88,7 @@ cat > "$W/nest.prp" <<'EOF'
 :name: nest
 :type: simulation
 */
-mod cnt(enable:bool) -> (value:u8@[0]) { reg count:u8 = 0; value = count; if enable { wrap count += 1 } }
+mod cnt(enable:Bool) -> (value:U8@[0]) { reg count:U8 = 0; value = count; if enable { wrap count += 1 } }
 test cnt.t {
   mut acc = cnt
   tick 4 { acc.enable = true; step; tick 2 { acc.enable = false; step } }
@@ -145,7 +145,7 @@ cat > "$W/un.prp" <<'EOF'
 :name: un
 :type: simulation
 */
-mod cnt(enable:bool) -> (value:u8@[0]) { reg count:u8 = 0; value = count; if enable { wrap count += 1 } }
+mod cnt(enable:Bool) -> (value:U8@[0]) { reg count:U8 = 0; value = count; if enable { wrap count += 1 } }
 test cnt.neg {
   mut acc = cnt
   mut v = 0

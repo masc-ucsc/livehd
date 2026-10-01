@@ -1,0 +1,48 @@
+/*
+:name: stage_multi_output_deficit
+:type: equiv
+:verilog_top: stage_multi_output_deficit
+:pyrope_top: stage_multi_output_deficit
+*/
+// `stage[N]` over SEVERAL values where an output lands before cycle N: each
+// output gets its own stage flops for the cycles it misses (named `t_q1`), the
+// single-output rule applied per output. Three sources:
+//   * an inlined comb's result tuple (every output at cycle 0),
+//   * a pipe[1..=3] picked at 2 (realized at its minimum, 1, plus one flop),
+//   * a mod whose outputs land at 1 and 2, picked at 2 by a
+//     `::[timecheck=false]` caller (user ruling 2026-09-28 (22)).
+// All three used to fail: tolg "unresolved reference '%t_0'" for the comb,
+// and a stage-multi-output error for the other two.
+comb two(a:U8) -> (q1:U8, q2:U8) {
+  q1 = a
+  q2 = a ^ 0x5A
+}
+
+pipe[1..=3] pp(a:U8) -> (x:U8, y:U8) {
+  x = a
+  y = a ^ 0x0F
+}
+
+mod lag::[timecheck=false](a:U8) -> (q1:U8@[1], q2:U8@[2]) {
+  stage[1] q1 = a
+  stage[2] q2 = a ^ 0x33
+}
+
+mod mid::[timecheck=false](a:U8) -> (m1:U8@[2], m2:U8@[2]) {
+  stage[2] v = lag(a)
+  m1 = v.q1
+  m2 = v.q2
+}
+
+pub mod stage_multi_output_deficit(a:U8, b:U8, c:U8)
+  -> (o1:U8@[1], o2:U8@[1], o3:U8@[2], o4:U8@[2], o5:U8@[2], o6:U8@[2]) {
+  stage[1] t = two(a)
+  o1 = t.q1
+  o2 = t.q2
+  stage[2] u = pp(b)
+  o3 = u.x
+  o4 = u.y
+  const w = mid(c)
+  o5 = w.m1
+  o6 = w.m2
+}

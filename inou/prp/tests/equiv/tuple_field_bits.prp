@@ -1,0 +1,46 @@
+/*
+:name: tuple_field_bits
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// `.[bits]`/`.[max]` of a TUPLE FIELD must read the field's DECLARED type
+// (04b-attributes.md: "a read returns the declared constraint"), both for a
+// tuple-typed PORT (`req.addr` is a u6) and for a typed local tuple
+// (lhdtrack suggestions 2.3 row 7). A bool field reads 1, like a scalar bool
+// port (`w.[bits] == 1` already folds). The read
+// lowers to `tuple_get(%t, req, 'addr')` + `attr_get(%b, %t, 'bits')`; the
+// tuple_get is rewritten into a plain `store(%t, req.addr)` (SSA port-field
+// rewrite / runner detupler), which drops the tget_origin provenance, so
+// derive_bits(%t) found no declared type and read nil -- used as a value it
+// died in tolg ("attribute read '.[bits]' has no hardware lowering"), used as
+// a width it was "nil used as an operand". A comptime const tuple
+// (`const t = (const x:U6 = 3)`) always worked. Also covered: the same read
+// on a field of a COMB's tuple INPUT (`fbits`, a separate unit with its own io
+// path) and bound to a `comptime const` (`kw`). A typed field holding a
+// NARROWER value (`w6`: u6 field, u3 value) still reads its declared width.
+comb fbits(q:(addr:U6, write:Bool, data:U8)) -> (r:U8) {
+  r = q.addr.[bits]
+}
+
+pub mod top(req:(addr:U6, write:Bool, data:U8), a:U5, b:U3)
+  -> (wa:U8@[], wd:U8@[], mw:U8@[], mx:U8@[], wx:U8@[], z:U6@[], cb:U8@[], kw:U8@[], w6:U8@[]) {
+  wa = req.addr.[bits]          // 6
+  wd = req.data.[bits]          // 8
+  mw = req.write.[bits]         // 1 (bool)
+  mx = req.addr.[max]           // 63
+  mut r:(x:U5, y:U3) = nil
+  r.x = a
+  r.y = b
+  wx = r.x.[bits]               // 5
+  mut t:Unsigned(bits=req.addr.[bits]) = req.addr
+  z = t
+  cb = fbits(q=req)             // 6: the same read through a comb's tuple INPUT
+  comptime const W = req.data.[bits]
+  kw = W                        // 8: a declared width is a comptime value
+  mut r2:(x:U6, y:Bool) = nil
+  r2.x = b
+  r2.y = true
+  w6 = r2.x.[bits]              // 6, not b's 3
+}

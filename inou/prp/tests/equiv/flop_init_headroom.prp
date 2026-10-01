@@ -18,9 +18,9 @@
 // holds, and `io_q` spuriously diverges right after reset. The shared flop
 // init must instead be built at the MIN corresponding width, each side
 // extending it per the value's signedness.
-pub mod top(clock:u1, reset:u1, io_en:u1, io_d:u1) -> (io_q:u1@[0]) {
-  reg vld:u1:[initial=0, reset_pin=ref reset, async=true]
-  reg dat:u1
+pub mod top(`clock`:Clock, `reset`:Reset, io_en:U1, io_d:U1) -> (io_q:U1@[0]) {
+  reg vld:U1:[initial=0, reset_pin=`reset`, async=true]
+  reg dat:U1
   if vld != 0 {
     dat = io_d
   }

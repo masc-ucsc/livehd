@@ -142,14 +142,14 @@ expect_clean "$W/ok.v" top "no-feedback hierarchy"
 # is the rc<128 check (a regression may legitimately re-error with the loud
 # comb-loop diagnostic, but must never die by signal).
 cat > "$W/memp.prp" <<'EOF'
-pub mod memp::[lg="memp", hdl](a:u2, en:bool, d:u8) -> (z:u8@[0]) {
-  wire io:u4
-  wire hi:u2
-  wire low:u2
+pub mod memp::[lg="memp", hdl](a:U2, en:Bool, d:U8) -> (z:U8@[0]) {
+  wire io:U4
+  wire hi:U2
+  wire low:U2
   hi  = io#[2..=3]
   low = hi & 3
   io  = low + (a << 2)
-  mut t:[4]u8 = (10,20,30,40)
+  mut t:[4]U8 = (10,20,30,40)
   if en {
     t[a] = d
   }

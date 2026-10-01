@@ -1,0 +1,28 @@
+/*
+:name: untyped_dyn_bit_writes
+:type: equiv
+:verilog_top: untyped_dyn_bit_writes
+:pyrope_top: untyped_dyn_bit_writes
+*/
+// Runtime-position bit and range writes into an UNTYPED `mut` (the shape the
+// Pyrope writer emits for a Verilog blocking write, `mut q__w2 = 0`). An
+// untyped value is an unbounded integer, so `q#[i] = e` may set any bit `i`
+// reaches. upass.tolg sized the read-modify-write to the literal's own width
+// (one bit for `0`), so the SECOND write cleared its bit with a one-bit
+// inverse mask and kept the first write's bit set: `z` came out 0x40 for 0x42
+// (silently). The RMW now widens an undeclared base to the write's reach, and
+// a base that can be negative (`-1`) keeps its sign above it.
+pub mod untyped_dyn_bit_writes(i:U3, j:U3, e:U1, f:U1, c:U3, b:U3, v:U4, w:U2) -> (z:U8@[0], r:U16@[0], sn:S16@[0]) {
+  mut q = 0
+  q#[i] = e
+  q#[j] = f
+  z = q
+  mut p = 0
+  p#[c..+4] = v
+  p#[b..+2] = w
+  r = p
+  mut s = -1
+  s#[i] = e
+  s#[j] = f
+  sn = s
+}

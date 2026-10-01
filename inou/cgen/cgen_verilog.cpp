@@ -1,6 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+#include "absl/strings/escaping.h"
 #include "cgen_verilog.hpp"
+#include "sim_program.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -1026,7 +1028,7 @@ std::string Cgen_verilog::gen_mem_wrapper(const std::string& mod_name, int n_rd,
                       j,
                       "[i*MASKSIZE +: MASKSIZE];\n");
   };
-  if (single_clock) {
+  if (single_clock && n_wr > 0) {
     s += "always @(posedge clk) begin\n";
     for (int j = 0; j < n_wr; ++j) {
       wr_body(j);
@@ -1120,6 +1122,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
   // (two tokens). Memory nodes now carry their RTL name (tolg set_name), which
   // can be a Verilog keyword or a dotted bundle-field path.
   const auto iraw  = std::string(default_instance_name(node));
+  const auto image = livehd::graph_util::memory_image_of(node);
   auto       iname = memory_instance_name(node);
 
   int n_rd_ports = 0;
@@ -1303,6 +1306,12 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
   // matrix: tolg leaves `fwd` at its provisional declare value there, and a
   // clocked bulk update is a next-state no same-cycle read observes, so that
   // cell reads the committed contents only.)
+  if (image && (!mem_update_dpin.is_invalid() || wants_read_all || !mem_reset_dpin.is_invalid())) {
+    livehd::diag::err("inou.cgen", "readmem-bulk", "unsupported")
+        .msg("externally initialized memory requires element read/write ports; bulk update/reset is unsupported")
+        .fatal();
+    return;
+  }
   if (!mem_update_dpin.is_invalid() || wants_read_all || !mem_reset_dpin.is_invalid()) {
     const bool      has_update = !mem_update_dpin.is_invalid();
     const int       lanes      = mem_wensize > 1 ? static_cast<int>(mem_wensize) : 1;  // write-enable lanes per entry
@@ -1332,6 +1341,33 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       return value.has_unknowns() || value.is_negative() || !value.is_just_i64() || value.to_just_i64() >= mem_size;
     };
     const auto unknown_entry = [&]() { return absl::StrCat(mem_bits, "'b", std::string(static_cast<size_t>(mem_bits), '?')); };
+    // Bits [lo, lo+w) of a port value read as unsigned (zero past its own
+    // width). A narrower-than-entry net must not be part-selected past its top
+    // (and a scalar not at all), and a constant is spelled as its own lane
+    // literal: a part select of a literal is not Verilog.
+    const auto lane_text     = [&](const hhds::Pin_class& pin, int lo, int w) -> std::string {
+      if (pin.is_const()) {
+        const auto& v = const_of(pin);
+        std::string b;
+        for (int i = lo + w - 1; i >= lo; --i) {
+          b += v.unknown_bit_test(i) ? 'x' : (v.bit_test(i) ? '1' : '0');
+        }
+        return absl::StrCat(w, "'b", b);
+      }
+      const auto txt = get_wire_or_const(pin, mem_bits, true);
+      const int  nb  = bits_of(pin);
+      const int  hi  = lo + w - 1;
+      if (nb > 0 && lo >= nb) {
+        return absl::StrCat(w, "'b0");  // entirely above the value
+      }
+      if (nb == 1) {
+        return w == 1 ? txt : absl::StrCat("{{", w - 1, "{1'b0}},", txt, "}");
+      }
+      if (nb > 0 && hi >= nb) {  // straddles the value's top
+        return absl::StrCat("{{", hi - nb + 1, "{1'b0}},", txt, "[", nb - 1, ":", lo, "]}");
+      }
+      return w == 1 ? absl::StrCat(txt, "[", lo, "]") : absl::StrCat(txt, "[", hi, ":", lo, "]");
+    };
     fout->append(absl::StrCat("reg [", mem_size - 1, ":0][", mem_bits - 1, ":0] ", aname, ";\n"));
     // Bind the buses to nets so whole-array and per-entry uses share the exact
     // same packed bit order (entry 0 in the low bits).
@@ -1444,30 +1480,25 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
           // module with "scalar type cannot be indexed".
           const auto en_txt  = get_wire_or_const(p.enable, static_cast<int>(lanes), true);
           const int  en_bits = p.enable.is_const() ? lanes : bits_of(p.enable);
-          const auto lane_en = [&](int l) { return en_bits == 1 ? en_txt : absl::StrCat(en_txt, "[", l, "]"); };
+          // A constant enable is resolved here: indexing a literal is not Verilog.
+          const auto lane_en = [&](int l) {
+            if (p.enable.is_const()) {
+              return std::string{"1'b1"};
+            }
+            return en_bits == 1 ? en_txt : absl::StrCat(en_txt, "[", l, "]");
+          };
 
           // The written VALUE has the same hazard: a narrower-than-mem_bits net
           // is zero-extended into the entry, so a lane ABOVE it writes zeros and
-          // a lane read out of a scalar net must not be part-selected either.
-          const auto din_txt  = get_wire_or_const(p.din, mem_bits, true);
-          const int  din_bits = p.din.is_const() ? mem_bits : bits_of(p.din);
-          const auto lane_din = [&](int l) -> std::string {
-            const int hi = (l + 1) * lane_w - 1;
-            const int lo = l * lane_w;
-            if (din_bits > 0 && lo >= din_bits) {
-              return absl::StrCat(lane_w, "'b0");  // entirely above the value
-            }
-            if (din_bits == 1) {
-              return lane_w == 1 ? din_txt : absl::StrCat("{{", lane_w - 1, "{1'b0}},", din_txt, "}");
-            }
-            if (din_bits > 0 && hi >= din_bits) {  // straddles the value's top
-              return absl::StrCat("{{", hi - din_bits + 1, "{1'b0}},", din_txt, "[", din_bits - 1, ":", lo, "]}");
-            }
-            return absl::StrCat(din_txt, "[", hi, ":", lo, "]");
-          };
+          // a lane read out of a scalar net must not be part-selected either
+          // (lane_text).
+          const auto lane_din = [&](int l) -> std::string { return lane_text(p.din, l * lane_w, lane_w); };
           for (int l = 0; l < lanes; ++l) {
             if (en_bits > 0 && l >= en_bits) {
               continue;  // this lane's enable bit is a zero-extension zero
+            }
+            if (p.enable.is_const() && !const_of(p.enable).bit_test(l)) {
+              continue;  // a constant-zero lane never writes
             }
             const int hi = (l + 1) * lane_w - 1;
             const int lo = l * lane_w;
@@ -1560,17 +1591,20 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
         // Same-cycle forwarding chain from the cell's per-(read,write) FWD /
         // UNDEF matrices (bit r*n_wr + w, graph/cell.cpp): a later write port
         // overrides an earlier one (last writer wins, matching the nonblocking
-        // storage priority above), so the chain is built w high -> low with
-        // the innermost rung being the committed read. An UNDEF rung reads x.
-        // (A whole-array `update` cell keeps its provisional matrix and reads
-        // the committed contents only -- see the routing comment above.)
-        const int r = n_rd_pos - 1;
-        int       w = n_wr_ports;
-        for (auto it = port_vector.rbegin(); it != port_vector.rend(); ++it) {
+        // storage priority above). Each rung wraps the chain built so far, so
+        // it is built w low -> high: the last write port is the outermost
+        // (first tested) rung and the committed read the innermost. An UNDEF
+        // rung reads x. (A whole-array `update` cell keeps its provisional
+        // matrix and reads the committed contents only -- see the routing
+        // comment above.)
+        const int                r = n_rd_pos - 1;
+        int                      w = -1;
+        std::vector<std::string> lane_rhs;  // per-lane chains (wensize > 1), lane 0 first
+        for (auto it = port_vector.begin(); it != port_vector.end(); ++it) {
           if (it->rdport) {
             continue;
           }
-          --w;
+          ++w;
           const int  bit = r * n_wr_ports + w;
           const bool fwd = !mem_fwd_dpin.is_invalid() && const_of(mem_fwd_dpin).bit_test(bit);
           const bool udf = !mem_undef_dpin.is_invalid() && const_of(mem_undef_dpin).bit_test(bit);
@@ -1578,21 +1612,45 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
             continue;
           }
           if (lanes > 1) {
-            livehd::diag::err("inou.cgen", "mem-inline-lanes", "unsupported")
-                .msg(
-                    "memory {} has a per-lane write enable (wensize={}) and a same-cycle collision matrix, which the "
-                    "inline reg-array emission (forced by its reset / whole-array read) does not forward per lane",
-                    debug_name(node),
-                    lanes)
-                .hint("spell `ordering=\"old\"` on the array, or drop the reset value / whole-array read")
-                .fatal();
-            return;
+            // Per-lane write enables (wensize > 1): each lane keeps its own
+            // chain, like the wrapper's FWD_BLOCK_CALC lanes -- a write port
+            // forwards only the lanes its enable bit selects.
+            if (lane_rhs.empty()) {
+              for (int l = 0; l < lanes; ++l) {
+                lane_rhs.push_back(invalid_const_addr(p.addr)
+                                       ? absl::StrCat(lane_w, "'b", std::string(static_cast<size_t>(lane_w), '?'))
+                                       : absl::StrCat(aname, "[", raddr, "][", (l + 1) * lane_w - 1, ":", l * lane_w, "]"));
+              }
+            }
+            const auto addr_hit = absl::StrCat("(", get_wire_or_const(it->addr, mem_addr_bits, true), " == ", raddr, ")");
+            for (int l = 0; l < lanes; ++l) {
+              std::string hit = addr_hit;
+              if (!it->enable.is_invalid()) {
+                if (it->enable.is_const() ? !const_of(it->enable).bit_test(l)
+                                          : (bits_of(it->enable) > 0 && l >= bits_of(it->enable))) {
+                  continue;  // this lane's enable bit is (or zero-extends to) zero
+                }
+                if (!it->enable.is_const()) {
+                  hit = absl::StrCat("(", lane_text(it->enable, l, 1), " && ", addr_hit, ")");
+                }
+              }
+              const auto val                   = udf ? absl::StrCat(lane_w, "'b", std::string(static_cast<size_t>(lane_w), '?'))
+                                                     : lane_text(it->din, l * lane_w, lane_w);
+              lane_rhs[static_cast<size_t>(l)] = absl::StrCat(hit, " ? ", val, " : ", lane_rhs[static_cast<size_t>(l)]);
+            }
+            continue;
           }
           std::string hit = absl::StrCat("(", get_wire_or_const(it->addr, mem_addr_bits, true), " == ", raddr, ")");
           if (!it->enable.is_invalid()) {
             hit = absl::StrCat("(", get_wire_or_const(it->enable, 1, true), " && ", hit, ")");
           }
           rhs = absl::StrCat(hit, " ? ", udf ? unknown_entry() : get_wire_or_const(it->din, mem_bits, true), " : ", rhs);
+        }
+        if (!lane_rhs.empty()) {
+          rhs = "{";
+          for (int l = lanes - 1; l >= 0; --l) {
+            absl::StrAppend(&rhs, "(", lane_rhs[static_cast<size_t>(l)], ")", l == 0 ? "}" : ", ");
+          }
         }
       }
       drive(get_wire_or_const(dout_dpin), rhs);
@@ -1647,11 +1705,11 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
       return;
     }
 
-    // The wrapper variants start at 1rd_1wr: a read-less memory (scan/regref
-    // observed) or a write-less one (scan/regref loaded) still instantiates
-    // the smallest variant with the dummy port tied off below.
+    // A read-less memory keeps a dummy read port for the wrapper interface.
+    // A ROM needs a true zero-write-port wrapper: a dummy write process would
+    // introduce a state clock even when the ROM only has asynchronous reads.
     const int eff_rd = n_rd_ports > 0 ? n_rd_ports : 1;
-    const int eff_wr = n_wr_ports > 0 ? n_wr_ports : 1;
+    const int eff_wr = n_wr_ports;
 
     // ware/rtl carries a fixed wrapper family; anything beyond it (e.g. a
     // many-ported register file) needs a new cgen_memory_<R>rd_<W>wr.v
@@ -1671,6 +1729,7 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     // generic O(reads*writes) forwarding ladder is dead code and can grow into
     // gigabytes of Verilog. Give the direct-read specialization its own module
     // name so it can coexist with a forwarding instance of the same shape.
+    if (image) name += "_external";
     if (!have_wrapper && no_collision_bypass) {
       name += "_nofwd";
     }
@@ -1680,7 +1739,20 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     // generate the wrapper module inline instead of `include`ing a missing file.
     // Dedup per file so two same-shape memories do not re-define the module.
     if (mem_wrappers_emitted_.insert(name).second) {
-      if (have_wrapper) {
+      if (image) {
+        auto wrapper    = gen_mem_wrapper(name, eff_rd, eff_wr, single_clock, no_collision_bypass);
+        // A macro boundary remains opaque to synthesis even without an RTL writer.
+        // Simulators ignore the attribute and execute the full behavioral model.
+        auto module_pos = wrapper.find("module ");
+        wrapper.insert(module_pos, "(* blackbox, keep *) ");
+        auto params_end = wrapper.find(")\n  (");
+        wrapper.insert(params_end, ", parameter INIT_FILE=\"\", INIT_RADIX=16");
+        auto storage_end  = wrapper.find("reg [BITS-1:0] data[SIZE-1:0];\n");
+        storage_end      += std::string_view("reg [BITS-1:0] data[SIZE-1:0];\n").size();
+        wrapper.insert(storage_end,
+                       "initial begin if (INIT_RADIX == 16) $readmemh(INIT_FILE, data); else $readmemb(INIT_FILE, data); end\n");
+        fout->prepend(wrapper);
+      } else if (have_wrapper) {
         fout->prepend(absl::StrCat("`include \"", name, ".v\" \n"));
       } else {
         fout->prepend(gen_mem_wrapper(name, eff_rd, eff_wr, single_clock, no_collision_bypass));
@@ -1724,7 +1796,9 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
           .fatal();
       return;
     }
-    if (!mem_init_dpin.is_invalid()) {
+    if (image) {
+      parameters = absl::StrCat(parameters, " ,.INIT_FILE(\"", absl::CEscape(image->path), "\") ,.INIT_RADIX(", image->radix, ")");
+    } else if (!mem_init_dpin.is_invalid()) {
       // Power-on contents ride the wrapper's INIT parameter (packed, entry 0
       // in the low BITS); only the single-clock wrappers carry it.
       if (!single_clock) {
@@ -1819,18 +1893,11 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     I(n_rd_pos == n_rd_ports);
     I(n_wr_pos == n_wr_ports);
 
-    // Tie off the dummy port of a read-less / write-less memory (dout of the
-    // dummy read port is simply left unconnected).
+    // Tie off the dummy port of a read-less memory (dout is left unconnected).
     if (n_rd_ports == 0) {
       fout->append(first_entry ? "  .rd_addr_0(1'b0)\n" : "  ,.rd_addr_0(1'b0)\n");
       first_entry = false;
       fout->append("  ,.rd_enable_0(1'b0)\n");
-    }
-    if (n_wr_ports == 0) {
-      fout->append(first_entry ? "  .wr_addr_0(1'b0)\n" : "  ,.wr_addr_0(1'b0)\n");
-      first_entry = false;
-      fout->append("  ,.wr_enable_0(1'b0)\n");
-      fout->append("  ,.wr_din_0(1'b0)\n");
     }
 
     fout->append(");\n");
@@ -2672,6 +2739,16 @@ std::string Cgen_verilog::build_simple_expr(std::shared_ptr<File_output> fout, c
         continue;
       }
       final_expr = add_expression(final_expr, txt_op, drv);
+    }
+    // ...but that signed form must not be evaluated in an ENCLOSING unsigned
+    // expression. A non-negative result (`a & (b ^ -1)` with `a` unsigned) is
+    // inlined as an unsigned operand, the enclosing `| u` then makes the whole
+    // Verilog expression unsigned, and the narrow signed constant inside
+    // (`1'sh1`, the -1) is ZERO-extended: `b ^ -1` flipped only bit 0. The
+    // argument of `$unsigned(...)` is self-determined, so the signed evaluation
+    // stays in its own context and the non-negative value zero-extends right.
+    if (mixed_signs && !operand_reads_signed(node.get_driver_pin(0))) {
+      final_expr = absl::StrCat("$unsigned(", final_expr, ")");
     }
   }
 
@@ -4523,6 +4600,9 @@ void Cgen_verilog::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
 
   hhds::Graph* g = graph.get();
   create_module_io(fout, g);
+  if (auto program = g->get_input_node().attr(livehd::attrs::simulation_init); program.has() && !program.get().empty()) {
+    fout->append("// synthesis translate_off\ninitial ", livehd::sim_ir::sv_statement(livehd::sim_ir::decode(program.get())), "// synthesis translate_on\n");
+  }
 
   reserve_instance_names(g);
   create_locals(fout, g);

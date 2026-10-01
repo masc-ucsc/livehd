@@ -12,35 +12,40 @@ load("//tools:copt_default.bzl", "COPTS")
 filegroup(
     name = "lec_query_srcs",
     srcs = [
-        "cone_abc.cpp",
         "cone_abc.hpp",
+        "cone_digest.cpp",
         "encode.cpp",
         "encode.hpp",
+        "lib_cell_prep.cpp",
+        "lib_cell_prep.hpp",
+        "observe.cpp",
+        "observe.hpp",
         "phase_sched.cpp",
         "phase_sched.hpp",
+        "property_types.hpp",
         "query.cpp",
         "query.hpp",
         "solve_stats.cpp",
         "solve_stats.hpp",
-    ],
+    ] + select({
+        "//:without_abc": ["cone_unavailable.cpp"],
+        "//conditions:default": ["cone_abc.cpp"],
+    }),
     visibility = ["//visibility:public"],
 )
 
 cc_library(
-    name = "lec_query",
+    name = "lec_encode",
     srcs = [
-        "cone_abc.cpp",
         "encode.cpp",
+        "lib_cell_prep.cpp",
         "phase_sched.cpp",
-        "query.cpp",
-        "solve_stats.cpp",
     ],
     hdrs = [
-        "cone_abc.hpp",
         "encode.hpp",
+        "lib_cell_prep.hpp",
         "phase_sched.hpp",
-        "query.hpp",
-        "solve_stats.hpp",
+        "property_types.hpp",
     ],
     copts = COPTS,
     includes = ["."],
@@ -48,12 +53,43 @@ cc_library(
     deps = [
         "//core",
         "//graph",
-        "//pass/cost:host_mem",  # fork_race: cap each racer at its share of the memory budget
-        "//pass/cprop:pass_cprop",
-        "@abc",  # vendored berkeley-abc -- the AIG/CEC engine behind lec.cones
-        "@cvc5",  # prebuilt cvc5 (combined+localized) -- the SMT backend
+        "@cvc5",
         "@hhds//hhds:graph",
     ],
+)
+
+cc_library(
+    name = "lec_query",
+    srcs = [
+        "cone_digest.cpp",
+        "observe.cpp",
+        "query.cpp",
+        "solve_stats.cpp",
+    ] + select({
+        "//:without_abc": ["cone_unavailable.cpp"],
+        "//conditions:default": ["cone_abc.cpp"],
+    }),
+    hdrs = [
+        "cone_abc.hpp",
+        "observe.hpp",
+        "query.hpp",
+        "solve_stats.hpp",
+    ],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":lec_encode",
+        "//core",
+        "//graph",
+        "//pass/cost:host_mem",  # fork_race: cap each racer at its share of the memory budget
+        "//pass/cprop:pass_cprop",
+        "@cvc5",  # prebuilt cvc5 (combined+localized) -- the SMT backend
+        "@hhds//hhds:graph",
+    ] + select({
+        "//:without_abc": [],
+        "//conditions:default": ["@abc"],
+    }),
 )
 
 # L3 plugin: pass.lec (the lec.* set-option registry + lhd lec entry point).
@@ -100,8 +136,23 @@ cc_test(
         "//pass/enableopt:pass_enableopt",
         "//pass/partition:flatten",  # transparent-hierarchy LecNames cases
         "//pass/semdiff",
+        "//pass/single_edge:pass_single_edge",  # proof_prep: the kernel's absent-hierarchy inline
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",
+    ],
+)
+
+# Bit-demand (observability) transfer functions behind the inductive miter's
+# unobservable-state reduction (observe.cpp).
+cc_test(
+    name = "observe_test",
+    size = "small",
+    srcs = ["tests/observe_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":lec_query",
+        "@cvc5",
+        "@googletest//:gtest_main",
     ],
 )
 
@@ -112,6 +163,26 @@ cc_test(
     name = "cone_abc_test",
     srcs = ["tests/cone_abc_test.cpp"],
     copts = COPTS,
+    # The ABC-free build answers every cone Unsupported (cone_unavailable_test).
+    target_compatible_with = select({
+        "//:without_abc": ["@platforms//:incompatible"],
+        "//conditions:default": [],
+    }),
+    deps = [
+        ":lec_query",
+        "@cvc5",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "cone_unavailable_test",
+    srcs = ["cone_unavailable_test.cpp"],
+    copts = COPTS,
+    target_compatible_with = select({
+        "//:without_abc": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
     deps = [
         ":lec_query",
         "@cvc5",
@@ -126,7 +197,10 @@ sh_test(
     name = "lec_cross_test",
     srcs = ["tests/lec_cross_test.sh"],
     data = ["//lhd"],
-    tags = ["no-sandbox"],  # invokes the lgcheck yosys subprocess
+    tags = [
+        "cpu:4",  # independent sections run concurrently
+        "no-sandbox",  # invokes the lgcheck yosys subprocess
+    ],
 )
 
 sh_test(
@@ -134,6 +208,16 @@ sh_test(
     srcs = ["tests/lec_phase_test.sh"],
     data = ["//lhd"],
     tags = ["no-sandbox"],  # invokes the in-process cvc5 BMC engine
+)
+
+# A reset's NAME carries no polarity (docs 04b): an active-high `if (rst_n)`
+# (sync or async) stays active-high through the slang reader, so LEC proves a
+# Pyrope `rst_n:Reset` against its twin and refutes a mutated golden.
+sh_test(
+    name = "lec_reset_n_polarity_test",
+    srcs = ["tests/lec_reset_n_polarity_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # invokes the in-process cvc5 engine
 )
 
 sh_test(
@@ -402,8 +486,32 @@ sh_test(
 )
 
 sh_test(
+    name = "lec_observe_test",
+    srcs = ["tests/lec_observe_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],  # unobservable flop bits leave the inductive obligation; live bits never false-PROVE
+)
+
+sh_test(
     name = "lec_mem_diverge_test",
     srcs = ["tests/lec_mem_diverge_test.sh"],
     data = ["//lhd"],
     tags = ["no-sandbox"],  # 2f-lec diverged-use memory collapse guard (no false PROVEN on crossed mems)
+)
+
+# One mapped netlist, one verdict. A latch enabled by a latch-based clock gate,
+# mapped by ABC (DLCLKPx1, whose gensim graph numbers its ports differently from
+# a Verilog re-read: graph/inline_sub.cpp binds a --lib model by port name) and
+# by USYN (an AND2x1 gate the phase schedule could not see through:
+# pass/lec/lib_cell_prep.cpp), proves as lg:, as Verilog and against its own
+# Verilog emission; broken twins refute against every representation, and a
+# --lib model missing a port the netlist uses refuses the run.
+sh_test(
+    name = "lib_cell_prep_test",
+    srcs = ["tests/lib_cell_prep_test.sh"],
+    data = [
+        "tests/lib_cell_prep.lib",
+        "//lhd",
+    ],
+    tags = ["no-sandbox"],  # forks the in-process cvc5 solver per def
 )

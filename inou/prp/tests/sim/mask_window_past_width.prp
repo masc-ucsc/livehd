@@ -5,9 +5,9 @@
 // A Get_mask WINDOW that reaches past the value's declared width selects the
 // value's SIGN bits, and what those are depends on the value's sign:
 //
-//   * a SIGNED source replicates its sign there, so `s#[0..=15]` on an s8 is
+//   * a SIGNED source replicates its sign there, so `s#[0..=15]` on an S8 is
 //     the sign-extended pattern;
-//   * an UNSIGNED source has zeros there, so `u#[0..=15]` on a u8 zero-fills.
+//   * an UNSIGNED source has zeros there, so `u#[0..=15]` on a U8 zero-fills.
 //
 // cgen_sim reads the two through different arms (the unsigned one takes the
 // bitfield-extract fast path; the signed one has to materialize the sign first
@@ -16,7 +16,7 @@
 // fixtures pins the out-of-width pair, and getting it wrong is silent: the
 // high half simply reads as zero.
 
-mod mask_window_past_width(s:s8, u:u8) -> (sext_bits:u16@[0], zext_bits:u16@[0], in_width:u4@[0]) {
+mod mask_window_past_width(s:S8, u:U8) -> (sext_bits:U16@[0], zext_bits:U16@[0], in_width:U4@[0]) {
   sext_bits = s#[0..=15]  // past a SIGNED width: sign bits
   zext_bits = u#[0..=15]  // past an UNSIGNED width: zeros
   in_width  = u#[4..=7]   // inside the width: a plain bitfield extract

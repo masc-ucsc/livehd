@@ -1,0 +1,14 @@
+/*
+:name: clkrst_mint_collision
+:type: error
+:tolg: 1
+:error: minting `clock:Clock` clashes with its non-Clock input `clock`
+*/
+// docs 04b: a module with registers and no `Clock` input mints
+// `clock:Clock`; a non-Clock input already named `clock` is a compile error
+// (the name alone makes no clock).
+pub mod clkrst_mint_collision(clock:U1, d:U8) -> (q:U8@[0]) {
+  reg r:U8 = 0
+  r = d
+  q = r
+}

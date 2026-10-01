@@ -69,13 +69,14 @@ void uPass_coalescer::begin_iteration() {
   }
 
   const auto& ln = lm->get_lnast();
-  if (ln && ln->is_verilog_origin()) {
+  if (ln && ln->is_timecheck_off()) {
     // Slang's flattened SSA form has many names repeated across mutually
     // exclusive scopes, but almost no two writes that this boundary-flushing
     // pass can actually coalesce. The full-unit repeat-name pre-scan therefore
     // over-approximates heavily and turns into pure park/flush work. Pyrope
-    // re-emitted from Verilog carries timecheck=false, which restores this
-    // origin bit on re-read, so the same fast path covers the round trip.
+    // re-emitted from Verilog carries `::[timecheck=false]`, so keying on it
+    // gives the round trip the same fast path. Semantics-neutral: skipping
+    // this dead-store elimination never changes the result.
     enabled = false;
     repeat_names_.clear();
     return;
@@ -261,7 +262,7 @@ void uPass_coalescer::end_run() {
   const auto& ln = lm->get_lnast();
   std::print(stderr,
              "uPass stats [coalescer]: parked={} dse_dropped={} flushed={} flush_all_calls={} flush_all_keys={} (avg "
-             "pending {:.1f}) unit={} vorigin={} enabled={}\n",
+             "pending {:.1f}) unit={} timecheck_off={} enabled={}\n",
              stat_parked,
              stat_dse_dropped,
              stat_flushed,
@@ -269,7 +270,7 @@ void uPass_coalescer::end_run() {
              stat_flush_all_keys,
              stat_flush_all_calls > 0 ? static_cast<double>(stat_flush_all_keys) / static_cast<double>(stat_flush_all_calls) : 0.0,
              ln ? ln->get_top_module_name() : "<null>",
-             ln && ln->is_verilog_origin(),
+             ln && ln->is_timecheck_off(),
              enabled);
 }
 

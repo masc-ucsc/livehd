@@ -17,8 +17,8 @@ cat > "$W/shadow.prp" <<'EOF'
 :name: shadow
 :type: simulation
 */
-mod leaf(i:u8) -> (o:u8@[0]) { o = i + 1 }
-mod top(i:u8) -> (o:u8@[0]) {
+mod leaf(i:U8) -> (o:U8@[0]) { wrap o = i + 1 }
+mod top(i:U8) -> (o:U8@[0]) {
   mut a = leaf::[name=leaf](i=i)
   mut b = leaf::[name=leaf__i2](i=a)
   o = b

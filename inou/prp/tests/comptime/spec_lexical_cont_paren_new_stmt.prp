@@ -1,0 +1,20 @@
+/*
+:name: spec_lexical_cont_paren_new_stmt
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// docs 02-basics "Newlines and spaces": "If the line starts with an
+// alphanumeric ... value or an open parenthesis (`(`), the rest of the line
+// belongs to a new statement." (docs example: `a = 1` / `+ 3` is the 1st
+// statement, `(b,c) = (1,3)` the 2nd.) A `(` line is never a call of the
+// previous line's value.
+mut (a,b,c,d) = (0,0,0,0)
+a = 1
+  + 3
+(b,c) = (1,3)
+cassert(a == 4 and b == 1 and c == 3)
+const g = 7
+d = g
+(b,c) = (5,6)
+cassert(d == 7 and b == 5 and c == 6)

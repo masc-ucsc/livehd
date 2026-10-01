@@ -1,0 +1,45 @@
+/*
+:name: spec_memory_sim_default_program
+:type: simulation
+*/
+// SPEC (qa.md appendix section 5): "Default ordering of `reg arr:[N]T` is "program";
+// `ordering` may be set to "fwd"/"none"/"old" explicitly."
+// SPEC (qa.md Q17): "Always, the Verilog and Pyrope should have the same result when
+// run with icarus and lhd sim ... Overall, we always do program order unless we
+// change the 'ordering' flag from memory explicitly".
+// Rule encoded here: under `lhd sim`, a memory with NO ordering attribute resolves
+// a same-cycle collision in program order. The design latches its own same-cycle
+// reads into registers (a testbench read after `step` only sees committed state):
+// `pre_r` (read before the write) must hold the OLD word, `post_r` (read after the
+// write) the NEW one.
+mod ord(we:Bool, wa:U2, wd:U4, ra:U2) -> (pre_q:U4@[1], post_q:U4@[1]) {
+  reg mem:[4]U4 = nil
+  reg pre_r:U4 = 0
+  reg post_r:U4 = 0
+  pre_q  = pre_r
+  post_q = post_r
+  pre_r  = mem[ra]
+  if we {
+    mem[wa] = wd
+  }
+  post_r = mem[ra]
+}
+
+test ord.program {
+  mut d    = ord
+  mut pre  = nil
+  mut post = nil
+  tick 3 {
+    d.we = clock < 2
+    d.wa = 1
+    d.wd = if clock == 0 { 3 } else { 9 }
+    d.ra = 1
+    step
+    if clock == 1 {
+      pre  = d.pre_q
+      post = d.post_q
+    }
+  }
+  assert(pre == 3, "default ordering: a read BEFORE the write sees the old word")
+  assert(post == 9, "default ordering: a read AFTER the write sees the new word")
+}

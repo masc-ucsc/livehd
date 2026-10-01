@@ -1,15 +1,14 @@
 /*
 :name: removed_spawn_statement
 :type: error
-:error: `spawn` was removed
-:help: move the body into the enclosing `test` block
+:error: expected newline or ';' to end the statement
 */
 
 // The STATEMENT form (removed_spawn.prp pins the call form). `spawn`/`join`/
 // `cancel` are gone (docs/pyrope/09-verification.md): a testbench is one
-// deterministic `tick`/`step` loop. The pinned grammar still parses the
-// statement, so the front end refuses it outright instead of minting the empty
-// sim-only comb it used to (0 errors, body never lowered).
+// deterministic `tick`/`step` loop. The pinned grammar no longer has a spawn
+// statement, so the front end refuses it as a syntax error at this line instead
+// of minting the empty sim-only comb it once did (0 errors, body never lowered).
 test spawn_removed {
   spawn job = { assert(true) }  // locate_error_here
 }

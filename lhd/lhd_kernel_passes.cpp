@@ -15,6 +15,7 @@
 #include "lhd_kernel_internal.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
+#include "proof_prep.hpp"
 #include "rapidjson/document.h"
 #include "semdiff.hpp"
 #include "str_tools.hpp"
@@ -113,11 +114,65 @@ void semdiff_command(Options& opts, Result& res) {
   // runs save, keeping the mark-in-place `match` workflow (tool grep/diff).
   const bool save = truthy("save", stats ? "0" : "1");
 
-  res.recipe_steps.emplace_back(std::format("pass.semdiff matching_names:{} state_pairing:{} hier:{} id_granularity:{}",
+  // Answer "do these designs correspond?" for the hierarchy `lhd lec` actually
+  // compares: an instance whose definition the other side lacks (a cgen memory
+  // wrapper `cgen_memory_*`, a synthesis region, a helper module one front end
+  // flattened) is dissolved into the definitions both sides keep, by the same
+  // single_edge::inline_instances_missing_from_other_side lec[hier] calls. Its
+  // state is then counted where the other side holds it -- a memory behind a
+  // wrapper pairs memory-to-memory with the other side's memory instead of
+  // reading `memories ref 0/N` while lec pairs it. The splice edits the loaded
+  // libraries, so it never meets a run that saves them (mark in place).
+  const bool inline_absent = truthy("inline_absent", stats ? "1" : "0");
+  if (inline_absent && save) {
+    throw Lhd_error{"usage",
+                    "pass semdiff: inline_absent dissolves hierarchy in the loaded libraries, which a saving run would write back",
+                    "pass --set pass.semdiff.save=0 (the --stats default), or --set pass.semdiff.inline_absent=0"};
+  }
+  absl::flat_hash_set<std::string> absorbed;  // definitions dissolved into their callers
+  if (inline_absent) {
+    // A top the sweep below would refuse is refused here too, BEFORE any
+    // splice: `side` names it in the sweep's own message. A plain --top the
+    // impl side lacks is no error there (the sweep resolves only the ref top),
+    // so it is none here either.
+    auto top_of = [](const Eprp_var& var, std::string_view want, std::string_view side) -> hhds::Graph* {
+      if (want.empty()) {
+        return nullptr;
+      }
+      std::vector<std::string> names;
+      for (const auto& g : var.graphs) {
+        if (g) {
+          names.emplace_back(g->get_name());
+        }
+      }
+      const auto name = resolve_top_name(names, want, "");  // quiet: the sweep below announces its own pick
+      for (const auto& g : var.graphs) {
+        if (g && !name.empty() && g->get_name() == name) {
+          return g.get();
+        }
+      }
+      if (!side.empty()) {
+        throw Lhd_error{"config", std::format("pass semdiff: {} top '{}' not found", side, want), ""};
+      }
+      return nullptr;
+    };
+    auto* const ref_top  = top_of(ref_var, !opts.ref_top.empty() ? opts.ref_top : opts.top, "ref");
+    auto* const impl_top = !opts.impl_top.empty() ? top_of(impl_var, opts.impl_top, "impl") : top_of(impl_var, opts.top, "");
+    const auto  ref_flat
+        = livehd::single_edge::inline_instances_missing_from_other_side({}, ref_var.graphs, impl_var.graphs, ref_top, &absorbed);
+    const auto impl_flat
+        = livehd::single_edge::inline_instances_missing_from_other_side({}, impl_var.graphs, ref_var.graphs, impl_top, &absorbed);
+    if (ref_flat + impl_flat > 0 && !opts.quiet) {
+      std::print("semdiff: inlined {} ref and {} impl instance(s) absent from the other hierarchy\n", ref_flat, impl_flat);
+    }
+  }
+
+  res.recipe_steps.emplace_back(std::format("pass.semdiff matching_names:{} state_pairing:{} hier:{} id_granularity:{}{}",
                                             o.matching_names,
                                             o.state_pairing,
                                             hier,
-                                            o.id_granularity));
+                                            o.id_granularity,
+                                            inline_absent ? " inline_absent:true" : ""));
 
   // The state-correspondence stats line — the per-def and aggregate instrument
   // for iterating on the tier-2 matcher (2f-lec two-tier correspondence).
@@ -317,7 +372,9 @@ void semdiff_command(Options& opts, Result& res) {
       dfs(top_key);
     } else {
       for (auto& [name, g] : ref_by_name) {
-        scope.push_back(name);
+        if (!absorbed.contains(std::string{g->get_name()})) {  // dissolved into the defs that call it
+          scope.push_back(name);
+        }
       }
       std::sort(scope.begin(), scope.end());
     }
@@ -556,12 +613,18 @@ void harvest_abc_incremental(Result& res) {
   if (auto inc = abc->FindMember("incremental"); inc != abc->MemberEnd() && inc->value.IsObject()) {
     res.abc_incr.present = true;
     res.abc_incr.enabled = true;
-    double v             = 0;
+    if (auto enabled = inc->value.FindMember("enabled"); enabled != inc->value.MemberEnd() && enabled->value.IsBool()) {
+      res.abc_incr.enabled = enabled->value.GetBool();
+    }
+    double v = 0;
     if (num(inc->value, "hits", v)) {
       res.abc_incr.hits = static_cast<uint64_t>(v);
     }
     if (num(inc->value, "misses", v)) {
       res.abc_incr.misses = static_cast<uint64_t>(v);
+    }
+    if (num(inc->value, "store_failed", v)) {
+      res.abc_incr.store_failed = static_cast<uint64_t>(v);
     }
     num(inc->value, "hit_ms", res.abc_incr.hit_ms);
     num(inc->value, "miss_ms", res.abc_incr.miss_ms);
@@ -858,10 +921,14 @@ void pass_command(Options& opts, Result& res) {
       labels["out"] = lg_out->path;
     }
     // QoR sidecar (2opt-freq A): default under --workdir. A stats request
-    // without a user workdir gets an ephemeral sidecar so the normal result
-    // renderer still has the structured per-color rows to print/embed.
+    // without a user workdir gets an ephemeral sidecar. A native mapper's report
+    // is written even without --stats: qor.json is embedded in the result (for
+    // mapped USYN output that is the technology-map report), while the native
+    // decision report and its artifacts survive only under a user --workdir.
     const bool        user_workdir  = !opts.workdir.empty() && !opts.workdir_scratch;
-    const std::string ephemeral_qor = opts.stats && !user_workdir ? (fs::path(workdir(opts)) / "qor.json").string() : std::string{};
+    const std::string ephemeral_qor = (opts.stats || !mapper->report.empty()) && !user_workdir
+                                          ? (fs::path(workdir(opts)) / "qor.json").string()
+                                          : std::string{};
     if (user_workdir || !ephemeral_qor.empty()) {
       labels["qor"] = ephemeral_qor.empty() ? (fs::path(opts.workdir) / "qor.json").string() : ephemeral_qor;
     }
@@ -871,14 +938,17 @@ void pass_command(Options& opts, Result& res) {
     // `lhd pass opentimer` on the same netlist can never be handed different
     // cells. Set AFTER merge_sets because `pass.abc.library` is not a user knob
     // (check_known_set_passes refuses it and names synth.liberty).
-    labels["library"] = resolve_liberty(opts);
+    const bool mapped_output = mapper_maps_cells(opts, method);
+    labels["library"] = mapped_output ? resolve_liberty(opts) : std::string{};
     if (mapper->timing_files) {
       const auto sdc         = synth_set(opts, "sdc", "");
       const auto spef        = synth_set(opts, "spef", "");
       labels["timing_files"] = labels["library"] + (sdc.empty() ? "" : "," + sdc) + (spef.empty() ? "" : "," + spef);
     }
     labels["threads"] = synth_set(opts, "threads", "0");
-    res.inputs.push_back(labels["library"]);
+    if (mapped_output) {
+      res.inputs.push_back(labels["library"]);
+    }
     if (opts.stats) {
       labels["stats"] = "true";
     }
@@ -892,9 +962,17 @@ void pass_command(Options& opts, Result& res) {
     }
     run_step(method, var, labels, opts, res);
     if (!mapper->report.empty() && user_workdir && labels.contains("qor")) {
-      const auto provenance = labels["qor"] + ".provenance";
-      if (fs::exists(provenance)) {
-        res.outputs.push_back(provenance);
+      // The provenance record, and for mapped output the separate native
+      // decision report plus its content-addressed region artifacts.
+      std::vector<std::string> sidecars{labels["qor"] + ".provenance"};
+      if (mapped_output) {
+        sidecars.push_back(labels["qor"] + "." + std::string{mapper->report} + ".json");
+        sidecars.push_back(labels["qor"] + "." + std::string{mapper->report} + ".artifacts");
+      }
+      for (const auto& sidecar : sidecars) {
+        if (fs::exists(sidecar)) {
+          res.outputs.push_back(sidecar);
+        }
       }
     }
     if (lg_out != nullptr) {
@@ -905,7 +983,9 @@ void pass_command(Options& opts, Result& res) {
       res.outputs.push_back(lg_out->path);
     }
     embed_qor_sidecar(labels, res);
-    harvest_abc_incremental(res);
+    if (mapped_output) {
+      harvest_abc_incremental(res);
+    }
     if (!ephemeral_qor.empty() && labels["qor"] == ephemeral_qor) {
       std::erase(res.outputs, ephemeral_qor);
     }

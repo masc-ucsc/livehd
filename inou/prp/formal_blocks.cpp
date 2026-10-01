@@ -13,6 +13,7 @@
 #include "prpparse/parser.hpp"
 #include "prpparse/prp_diag.hpp"
 #include "prpparse/source_buffer.hpp"
+#include "str_tools.hpp"
 
 namespace livehd::formal_blocks {
 
@@ -22,9 +23,17 @@ using prpparse::Ast;
 using prpparse::Field;
 using prpparse::Kind;
 
+// `foo` == foo when the escaped text is plain identifier characters (the
+// rule Prp2lnast::get_text applies): a node whose whole text is one such
+// escaped name reads as the bare name; any larger node is untouched.
 std::string_view text_of(std::string_view src, const Ast* n) {
-  return src.substr(n->start_byte, n->end_byte - n->start_byte);
+  return str_tools::canonical_escaped_ident(src.substr(n->start_byte, n->end_byte - n->start_byte));
 }
+
+// A dotted chain with every plain escaped segment canonicalized (`` `top`.x ``
+// -> `top.x`). A dot inside backticks belongs to its segment; a segment that
+// genuinely needs its escape keeps it (and then fails is_dotted_path).
+std::string canonical_dotted(std::string_view t) { return str_tools::canonical_escaped_path(t); }
 
 int line_of(std::string_view src, uint32_t byte) {
   return 1 + static_cast<int>(std::count(src.begin(), src.begin() + std::min<size_t>(byte, src.size()), '\n'));
@@ -90,7 +99,7 @@ struct Rewriter {
     // compiled through the REAL Pyrope pipeline, which rejects anything a comb
     // cannot do — no need to pre-restrict here.
     if (kn == "dot_expression" || kn == "member_selection") {
-      std::string_view t = text_of(src, n);
+      const std::string t = canonical_dotted(text_of(src, n));
       if (is_dotted_path(t)) {
         auto        dot  = t.find('.');
         std::string root(t.substr(0, dot));
@@ -152,9 +161,9 @@ bool parse_alias_binding(std::string_view stmt_text, absl::flat_hash_map<std::st
     error = "formal-block declarations must be alias bindings (const X = import(...) / mut X = <alias>)";
     return true;
   }
-  std::string      name(trim(t.substr(0, eq)));
+  std::string      name(str_tools::canonical_escaped_ident(trim(t.substr(0, eq))));
   std::string      target;
-  std::string_view rhs = trim(t.substr(eq + 1));
+  std::string_view rhs = str_tools::canonical_escaped_ident(trim(t.substr(eq + 1)));
   if (rhs.substr(0, 7) == "import(") {
     // import("file.mod") — the target is the imported entity (post-'.' tail).
     auto q1 = rhs.find('"');
@@ -187,7 +196,7 @@ Block build_block(std::string_view src, const std::string& path, const Ast* fnod
   Block b;
   b.line = line_of(src, fnode->start_byte);
   if (const Ast* name = find_field(fnode, Field::f_name)) {
-    b.name = std::string(text_of(src, name));
+    b.name = canonical_dotted(text_of(src, name));  // `cnt`.`bounded` == cnt.bounded
   }
   const Ast* code = find_field(fnode, Field::f_code);
   if (code == nullptr) {
@@ -221,11 +230,18 @@ Block build_block(std::string_view src, const std::string& path, const Ast* fnod
 
     // Property statement: an assert/assume/assert_always call.
     std::string callee;
-    for (char c : stext) {
-      if (std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_') {
-        callee += c;
-      } else {
-        break;
+    if (!stext.empty() && stext.front() == '`') {
+      // An escaped callee (`` `assert`(...) ``) is the same builtin.
+      if (const auto close = stext.find('`', 1); close != std::string::npos) {
+        callee = std::string(str_tools::canonical_escaped_ident(std::string_view(stext).substr(0, close + 1)));
+      }
+    } else {
+      for (char c : stext) {
+        if (std::isalnum(static_cast<unsigned char>(c)) != 0 || c == '_') {
+          callee += c;
+        } else {
+          break;
+        }
       }
     }
     const bool nocheck

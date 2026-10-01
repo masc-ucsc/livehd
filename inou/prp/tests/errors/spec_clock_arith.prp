@@ -1,0 +1,15 @@
+/*
+:name: spec_clock_arith
+:type: error
+:tolg: 1
+:error: (not a number|not data)
+*/
+// SPEC (clock lane): arithmetic on a Clock is a compile error.
+//   docs 07-typesystem two_clk example:
+//     "qb = rb + clk_a                        // error: a Clock is not a number"
+//   qa.md Appendix 1: "Clock/Reset values cannot be used in arithmetic"
+pub mod spec_clock_arith(clk_a:Clock, b:U8) -> (qb:U8@[0]) {
+  reg rb:U8 = 0
+  if b != 0 { rb = b }
+  wrap qb = rb + clk_a   // locate_error_here
+}

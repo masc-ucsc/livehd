@@ -1,0 +1,27 @@
+/*
+:name: test_param_shadows_const
+:type: error
+:error: variable shadowing: 'K' is already declared in an enclosing scope
+:help: rename the test's variable
+*/
+
+// User ruling 2026-09-28 (31): a file-scope `const` is visible in every test
+// block, so a test PARAMETER of the same name is shadowing, an error like a
+// test local (errors/test_local_shadows_file_const.prp) or a lambda input
+// (errors/io_name_shadows_const.prp). Before, the parameter silently hid the
+// file const where the test read it, while the DUT kept adding the file K.
+
+const K = 2
+
+mod dut(a:U8) -> (o:U8@[1]) {
+  reg r:U8 = 0
+  wrap r = a + K
+  o = r
+}
+
+test dut.param_hides(K:U8 = 7) {  // locate_error_here
+  mut d = dut
+  d.a = K
+  tick 2 { step }
+  assert(d.o == 7 + 2)
+}

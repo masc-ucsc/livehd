@@ -1,0 +1,68 @@
+/*
+:name: reg_array_comb_init
+:type: simulation
+*/
+// lhdtrack suggestions.md 2.2(e) / br_arb_lru: a register ARRAY whose PER-ENTRY
+// reset value is computed by a `comb` at compile time,
+//   comptime const INIT = upper_rows(size=N)
+//   reg m:[N]Unsigned(bits=N) = INIT
+// (08-memories.md: the init contents may be a `comptime`-computed initializer).
+// The scalar form of the same idiom -- br_lru_state's
+// `comptime const STORED = upper_triangle(size=N)` feeding
+// `reg wins:Unsigned(bits=N*N) = STORED` -- always worked; for an ARRAY the comb
+// result never folded to a comptime bundle and the reg was refused with
+// "upass.tolg: memory 'm' initializer must be a comptime constant or tuple
+// literal" (plus spurious `field `INIT.k` is declared but never set`
+// warnings, pinned by equiv/reg_array_comb_reset_1.prp since a sim run ignores
+// warnings). A tuple literal `(14, 12, 8, 0)` worked, and so did a comb whose
+// local is declared `comptime mut`.
+//
+// `lit` is the literal-width shape; `gen` is the generic one the report asked
+// for (it also needs the generic element width of generic_reg_array_elem.prp).
+// upper_rows(size) fills rows 0..<size of the upper-triangle mask: row i has
+// every column j > i set, so (14, 12, 8, 0) for size 4.
+comb upper_rows(size) -> (rows) {
+  mut t:[4]U4 = 0
+  for i in 0..<size {
+    t[i] = ((1 << size) - 1) & ~((1 << (i + 1)) - 1)
+  }
+  rows = t
+}
+
+mod lit(en:Bool, d:U4, s:U2) -> (q:U4@[0]) {
+  comptime const INIT = upper_rows(size=4)
+  reg m:[4]U4 = INIT
+  if en { m[s] = d }
+  q = m[s]
+}
+
+mod gen<N=2>(en:Bool, d:Unsigned(bits=N), s:U2) -> (q:Unsigned(bits=N)@[0]) {
+  comptime const INIT = upper_rows(size=N)
+  reg m:[N]Unsigned(bits=N) = INIT
+  if en { m[s] = d }
+  q = m[s]
+}
+
+pub mod reg_array_comb_init(en:Bool, d:U4, s:U2) -> (q:U4@[0], g:U4@[0]) {
+  q = lit(en=en, d=d, s=s)
+  g = gen<N=4>(en=en, d=d, s=s)
+}
+
+test reg_array_comb_init.per_entry_reset {
+  mut dut = reg_array_comb_init
+  mut bad = 0
+  tick 10 {
+    dut.reset = clock < 2 or clock == 8
+    dut.en    = clock == 6
+    dut.d     = 5
+    dut.s     = if clock >= 2 and clock < 6 { clock - 2 } else { 1 }
+    step
+    if clock >= 2 and clock < 6 {
+      const want = 15 & ~((1 << (clock - 1)) - 1)     // row clock-2 of the mask
+      if dut.q != want or dut.g != want { bad += 1 }
+    }
+    if clock == 7 and (dut.q != 5 or dut.g != 5) { bad += 1 }    // written lane 1
+    if clock == 9 and (dut.q != 12 or dut.g != 12) { bad += 1 }  // reset restores row 1
+  }
+  assert(bad == 0, "every entry resets to its own comb-computed value")
+}

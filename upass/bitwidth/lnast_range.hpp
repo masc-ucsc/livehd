@@ -150,10 +150,17 @@ struct Lnast_range {
     if (!unbounded && !b.unbounded && is_constant() && b.is_constant()) {
       return constant(min & b.min);  // single points fold exactly (any sign)
     }
-    if (unbounded || b.unbounded || min < 0 || b.min < 0) {
-      return make_unbounded();
+    // A non-negative operand bounds the result on its own: `x & y` keeps only
+    // bits x has, whatever y is (any sign, even unknown).
+    const bool a_nonneg = !unbounded && min >= 0;
+    const bool b_nonneg = !b.unbounded && b.min >= 0;
+    if (a_nonneg && b_nonneg) {
+      return bounded(0, std::min(max, b.max));
     }
-    return bounded(0, std::min(max, b.max));
+    if (a_nonneg || b_nonneg) {
+      return bounded(0, a_nonneg ? max : b.max);
+    }
+    return make_unbounded();
   }
 
   // a | b: for non-negatives, max(min_a, min_b) <= a|b <= ones-cover of the
@@ -185,6 +192,21 @@ struct Lnast_range {
       return make_unbounded();
     }
     return bounded(-max - 1, -min - 1);
+  }
+
+  // The typed `~` of an unsigned `bits`-wide value (user ruling 26): only the
+  // low `bits` bits flip, `(~x) mod 2^bits`. An operand inside [0, 2^bits - 1]
+  // (every unsigned-typed one) maps exactly to [2^bits-1-max, 2^bits-1-min];
+  // anything else lands somewhere in the window. Too wide for an i64: unbounded.
+  Lnast_range bnot_bits(int64_t bits) const noexcept {
+    if (bits <= 0 || bits >= 63) {
+      return make_unbounded();
+    }
+    const int64_t ones = (int64_t{1} << bits) - 1;
+    if (!unbounded && min >= 0 && max <= ones) {
+      return bounded(ones - max, ones - min);
+    }
+    return bounded(0, ones);
   }
 
   // ── Arithmetic ────────────────────────────────────────────────────────────
@@ -255,6 +277,16 @@ struct Lnast_range {
     if (!b.unbounded && is_constant() && b.is_constant() && b.min != 0
         && !(min == std::numeric_limits<int64_t>::min() && b.min == -1)) {
       return constant(min / b.min);  // truncated integer division, any sign
+    }
+    // A divisor range that excludes 0: truncating division is monotone in each
+    // operand over each sign region, so the extremes sit at the four corners
+    // (`u5 / 17` is [0, 1], not [0, 31]). The INT64_MIN / -1 corner overflows.
+    if (!b.unbounded && (b.min > 0 || b.max < 0)) {
+      if (min == std::numeric_limits<int64_t>::min() && b.min <= -1 && b.max >= -1) {
+        return make_unbounded();
+      }
+      const int64_t c[4] = {min / b.min, min / b.max, max / b.min, max / b.max};
+      return bounded(*std::min_element(c, c + 4), *std::max_element(c, c + 4));
     }
     int64_t m;
     if (!magnitude(m)) {

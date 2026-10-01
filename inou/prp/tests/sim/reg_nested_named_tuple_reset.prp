@@ -1,0 +1,91 @@
+/*
+:name: reg_nested_named_tuple_reset
+:type: simulation
+*/
+// A register of a NESTED tuple type resets EVERY leaf field to its
+// initializer. `reg st:T = (a=1, n=(x=5, y=2))` with `type T = (a:U4, n:In)`
+// reset only `st.a`; `st.n.x`/`st.n.y` silently came up with no reset value.
+// The inline anonymous spelling (`su`) was refused ("initializer names unknown
+// field `n`") and so was a positional nested initializer (`sp`). `sd` nests
+// three levels, `sc` takes a nested field from a typed tuple constant. `sn`
+// uses dotted keys (`n.x=12`), `sf` a flat positional initializer, and `mm`,
+// a register memory of the nested type, dotted keys for every entry's reset.
+// equiv/reg_nested_named_tuple_reset.prp proves the same design against a
+// Verilog golden.
+type In   = (x:U4, y:U2)
+type T    = (a:U4, n:In)
+type Deep = (k:U3, t:T)
+
+mod reg_nested_named_tuple_reset(we:Bool, v:U4) -> (sa:U4@[0], sx:U4@[0], sy:U2@[0], px:U4@[0], py:U2@[0], ux:U4@[0], uy:U2@[0], dk:U3@[0], dx:U4@[0], dy:U2@[0], cx:U4@[0], cy:U2@[0], nx:U4@[0], ny:U2@[0], fa:U4@[0], fx:U4@[0], ma:U4@[0], mx:U4@[0], my:U2@[0]) {
+  const inner:In = (x=11, y=3)
+  reg st:T                      = (a=1, n=(x=5, y=2))
+  reg sp:T                      = (6, (3, 1))
+  reg su:(a:U4, n:(x:U4, y:U2)) = (a=2, n=(x=9, y=3))
+  reg sd:Deep                   = (k=4, t=(a=7, n=(x=10, y=1)))
+  reg sc:T                      = (a=0, n=inner)
+  reg sn:T                      = (a=3, n.x=12, n.y=1)
+  reg sf:(a:U4, n:(x:U4, y:U2)) = (5, 8, 2)
+  reg mm:[2]T                   = (a=6, n.x=13, n.y=2)
+
+  sa = st.a
+  sx = st.n.x
+  sy = st.n.y
+  px = sp.n.x
+  py = sp.n.y
+  ux = su.n.x
+  uy = su.n.y
+  dk = sd.k
+  dx = sd.t.n.x
+  dy = sd.t.n.y
+  cx = sc.n.x
+  cy = sc.n.y
+  nx = sn.n.x
+  ny = sn.n.y
+  fa = sf.a
+  fx = sf.n.x
+  ma = mm[1].a
+  mx = mm[1].n.x
+  my = mm[1].n.y
+
+  if we {
+    st.n.x    = v
+    st.n.y    = v#[0..<2]
+    sp.n.x    = v
+    su.n.y    = v#[2..<4]
+    sd.t.n.x  = v
+    sc.n.y    = v#[1..<3]
+    sn.n.y    = v#[2..<4]
+    sf.n.x    = v
+    mm[1].a   = v
+  }
+}
+
+test reg_nested_named_tuple_reset.values {
+  mut t = reg_nested_named_tuple_reset
+  tick 6 {
+    // Written in cycle 1, then reset again in cycle 3.
+    t.reset = clock == 0 or clock == 3
+    t.we    = clock == 1
+    t.v     = 0x9
+    step
+    if clock == 0 or clock == 3 {
+      assert(t.sa == 1 and t.sx == 5 and t.sy == 2, "st: every nested leaf takes its reset value")
+      assert(t.px == 3 and t.py == 1, "sp: a positional nested initializer resets the nested leaves")
+      assert(t.ux == 9 and t.uy == 3, "su: an anonymous nested type resets the nested leaves")
+      assert(t.dk == 4 and t.dx == 10 and t.dy == 1, "sd: three levels reset")
+      assert(t.cx == 11 and t.cy == 3, "sc: a nested field initialized from a tuple constant")
+      assert(t.nx == 12 and t.ny == 1, "sn: dotted keys reset the nested leaves")
+      assert(t.fa == 5 and t.fx == 8, "sf: a flat positional initializer resets every leaf")
+      assert(t.ma == 6 and t.mx == 13 and t.my == 2, "mm: every entry of a nested-type memory resets")
+    } elif clock == 1 or clock == 2 {
+      assert(t.sa == 1 and t.sx == 9 and t.sy == 1, "st: the write lands on the nested leaves")
+      assert(t.px == 9 and t.py == 1, "sp: the write lands")
+      assert(t.ux == 9 and t.uy == 2, "su: the write lands")
+      assert(t.dk == 4 and t.dx == 9 and t.dy == 1, "sd: the write lands")
+      assert(t.cx == 11 and t.cy == 0, "sc: the write lands")
+      assert(t.nx == 12 and t.ny == 2, "sn: the write lands")
+      assert(t.fa == 5 and t.fx == 9, "sf: the write lands")
+      assert(t.ma == 9 and t.mx == 13 and t.my == 2, "mm: the write lands")
+    }
+  }
+}

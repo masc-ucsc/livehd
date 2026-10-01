@@ -9,7 +9,7 @@
 // standalone function-call statement, loop (unconditional break is the only
 // pinned unroll shape), and impl statement.
 
-comb check(a:u8) -> () {
+comb check(a:U8) -> () {
   assert(a == a)
 }
 
@@ -22,6 +22,6 @@ loop {
 }
 cassert(acc == 1)
 
-type Tr = (mut a:u8 = 0)
-type Ty = (mut b:u8 = 0)
+type Tr = (mut a:U8 = 0)
+type Ty = (mut b:U8 = 0)
 impl Tr for Ty (a = 1)

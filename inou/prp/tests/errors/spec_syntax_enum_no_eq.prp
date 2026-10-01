@@ -1,0 +1,9 @@
+/*
+:name: spec_syntax_enum_no_eq
+:type: error
+:error: expected '=' after the enum name
+*/
+// qa.md Appendix §7: "Enums: ONLY the declaration `enum E = (...)` / `enum E:T = (...)`"
+// -- an untyped enum without `=` is not a declaration form either.
+enum V7 (a, b)   // locate_error_here
+cassert(V7.a != V7.b)

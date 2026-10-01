@@ -1,0 +1,20 @@
+/*
+:name: absent_field_one_field_tuple
+:type: error
+:error: unknown field `zz`
+*/
+// Reading an absent field is a compile error (03-bundle.md; ruling 2026-09-28
+// #24: a read with no accessible declaration is an error at the read, never
+// nil). A tuple with 2+ fields always reported `unknown-field`, but one whose
+// ONLY field is named was read as a scalar by upass.constprop's field read
+// (the single-output callee fallback), so a DEAD read of an absent field
+// compiled with exit 0 (a live one failed only indirectly, `upass.tolg:
+// unresolved reference`). imports/absent_field_one_member_import.prp is the
+// one-member import namespace twin; test-block instance handles
+// (`mut d = dut; d.a = 3; d.o`) are a different thing and stay legal
+// (sim/test_read_after_tick.prp, sim/test_bare_step_multi_input.prp).
+pub comb absent_field_one_field_tuple(a:U8) -> (o:U8) {
+  const t = (const x = a)
+  const q = t.zz  // locate_error_here
+  o = a
+}

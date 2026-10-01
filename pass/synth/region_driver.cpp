@@ -801,6 +801,11 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
     return;
   }
 
+  if (opts_.admission && !opts_.admission("region-entry")) {
+    refusal_ = std::format("region '{}': caller refused mapping admission", rb.module_name);
+    return;
+  }
+
   // Source excerpts for this region's diagnostics. The srcids stamped on the
   // region's nodes resolve through the SOURCE graph's locator (which chains to
   // the library's shared srcmap), so every refusal below can print the original
@@ -1098,6 +1103,7 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
 
   // The region's logic, translated onto a backend-neutral RAW Lnet.
   Blast_options blast_options;
+  blast_options.capture_state  = static_cast<bool>(opts_.region_hook);
   blast_options.adder          = opts_.adder;
   blast_options.block_size     = opts_.block_size;
   blast_options.multiplier     = opts_.multiplier;
@@ -1184,6 +1190,10 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
     ctx.fits = [&](uint64_t rss_before, size_t done, size_t total) { return !over_budget(rb.module_name, rss_before, done, total); };
   }
   ctx.admission = [&](std::string_view stage) {
+    if (opts_.admission && !opts_.admission(stage)) {
+      refusal_ = std::format("region '{}': caller refused mapping at {}", rb.module_name, stage);
+      return false;
+    }
     const auto elapsed = since();
     if (opts_.time_budget_ms != 0 && elapsed > static_cast<double>(opts_.time_budget_ms)) {
       time_refusal_ = std::format("region '{}' took {:.0f} ms in ABC (soft limit {} ms), stopped at {}",
@@ -1213,7 +1223,9 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
       ++q.div_blackbox;  // unmapped cone: the region score is partial
     }
   }
-  // The hook sees only the Lnet: it runs with the graph lock released.
+  // The hook sees Lnet plus the owned source-state snapshot. Both can be read
+  // with the graph lock released; never dereference source HHDS handles there.
+  ctx.source_state = blast.source_state ? &*blast.source_state : nullptr;
   Region_rewrite rewrite;
   if (opts_.region_hook) {
     graph_pause.pause();

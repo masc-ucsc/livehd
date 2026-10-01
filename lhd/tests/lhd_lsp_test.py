@@ -16,14 +16,15 @@ import tempfile
 
 LHD = os.environ.get('LHD', 'lhd/lhd')
 
-GOOD = 'comb f(a:u8) -> (z:u8) { z = a }\n'
-BAD = 'comb f(a:u8 -> (z:u8) { z = a\n'  # missing ')' and '}'
+GOOD = 'comb f(a:U8) -> (z:U8) { z = a }\n'
+BAD = 'comb f(a:U8 -> (z:U8) { z = a\n'  # missing ')' and '}'
 
-# 2n Phase C: a file-scope const used inside a comb -> definition on the use
+# 2n Phase C: a file-scope comptime const used inside a comb (a comb sees only
+# comptime bindings of its enclosing scopes) -> definition on the use
 # must answer the declaration statement. The trailing tuple exercises the
-# per-field hover render (`pair : tuple(px: u1(...), py: u2(...))`).
-MULTI = ('const kk = 33\n'
-         'comb g(a:u8) -> (z:u8) {\n'
+# per-field hover render (`pair : tuple(px: U1(...), py: U2(...))`).
+MULTI = ('comptime const kk = 33\n'
+         'comb g(a:U8) -> (z:U8) {\n'
          '  z = a + kk\n'
          '}\n'
          'const pair = (const px = 1, const py = 2)\n')
@@ -32,17 +33,17 @@ MULTI = ('const kk = 33\n'
 # inferred range must be the UNION [0, 1] — not the textually-last arm's [0, 0]
 # (each arm's store REPLACES the range; the bitwidth pass range-unions across
 # the arms so a non-constant never reads as bw_min==bw_max, a fold hazard).
-MUX = ('comb m(a:u8, b:u8) -> (z:u8) {\n'
+MUX = ('comb m(a:U8, b:U8) -> (z:U8) {\n'
        '  mut sel = if a == b { 1 } else { 0 }\n'
        '  z = sel\n'
        '}\n')
 
-# A struct wire: its fields carry declared widths (pc:u64, src:u128) that the
+# A struct wire: its fields carry declared widths (pc:U64, src:U128) that the
 # root `io` never binds as a tuple bundle. Hover on a field access must report
-# the field's declared width (u64/u128) — not a bare `int`. Exercises both the
+# the field's declared width (U64/U128) — not a bare `int`. Exercises both the
 # lsp-decl-hints recovery and the >62-bit width render.
-FIELD = ('comb w(a:u64, b:u128) -> (z:u64) {\n'
-         '  wire io:(pc:u64, src:u128) = nil\n'
+FIELD = ('comb w(a:U64, b:U128) -> (z:U64) {\n'
+         '  wire io:(pc:U64, src:U128) = nil\n'
          '  io.pc = a\n'
          '  io.src = b\n'
          '  z = io.pc\n'
@@ -135,7 +136,7 @@ def main():
         fail('diagnostics did not clear after didChange fix: %r' % diag)
 
     # Hover (task 2n Phase B) on the `z` store in GOOD
-    # ('comb f(a:u8) -> (z:u8) { z = a }'): z is at line 0, character 25. The
+    # ('comb f(a:U8) -> (z:U8) { z = a }'): z is at line 0, character 25. The
     # server returns the variable's type + range and a covering range.
     send(proc, {'jsonrpc': '2.0', 'id': 6, 'method': 'textDocument/hover',
                 'params': {'textDocument': {'uri': uri},
@@ -144,13 +145,13 @@ def main():
     if not hov or 'contents' not in hov or 'range' not in hov:
         fail('hover missing contents/range on a name: %r' % hov)
     value = hov.get('contents', {}).get('value', '')
-    if 'z' not in value or 'u8' not in value:
-        fail('hover did not report z : u8: %r' % hov)
-    # z spans its full u8 range, so the render is the plain width with NO
+    if 'z' not in value or 'U8' not in value:
+        fail('hover did not report z : U8: %r' % hov)
+    # z spans its full U8 range, so the render is the plain width with NO
     # bw_min/bw_max (those appear only when the value is narrower than its type;
     # the kk and mux hovers below exercise the narrowed case).
     if 'bw_min=' in value:
-        fail('a full-range u8 should render as plain u8, not with bw_min/bw_max: %r' % hov)
+        fail('a full-range U8 should render as plain U8, not with bw_min/bw_max: %r' % hov)
     # Hover off any name (column 2, inside the `comb` keyword) -> null.
     send(proc, {'jsonrpc': '2.0', 'id': 7, 'method': 'textDocument/hover',
                 'params': {'textDocument': {'uri': uri},
@@ -217,8 +218,8 @@ def main():
              '(not a single arm value): %r' % hov)
 
     # ── struct-wire field width (regression) ────────────────────────────────
-    # `z = io.pc` on line 4: hover on `pc` (char 9) must report u64 (the field's
-    # declared width), never `int`; the wide u128 field renders too.
+    # `z = io.pc` on line 4: hover on `pc` (char 9) must report U64 (the field's
+    # declared width), never `int`; the wide U128 field renders too.
     send(proc, {'jsonrpc': '2.0', 'method': 'textDocument/didChange',
                 'params': {'textDocument': {'uri': uri, 'version': 5},
                            'contentChanges': [{'text': FIELD}]}})
@@ -227,8 +228,8 @@ def main():
                            'position': {'line': 4, 'character': 9}}})
     hov = read_response(proc, 17).get('result')
     value = (hov or {}).get('contents', {}).get('value', '')
-    if 'u64' not in value or 'int' in value:
-        fail('struct-wire field hover should report the declared width u64, not int: %r' % hov)
+    if 'U64' not in value or 'int' in value:
+        fail('struct-wire field hover should report the declared width U64, not int: %r' % hov)
 
     # ── cross-file definition through import() (2n Phase C) ─────────────────
     # A real sibling .prp on disk; the importing buffer is unsaved (didOpen

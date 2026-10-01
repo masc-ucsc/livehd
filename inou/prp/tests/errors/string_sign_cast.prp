@@ -5,4 +5,4 @@
 :help: numeric bit vector
 */
 const text='cad'
-const packed=signed(text)
+const packed=Signed(text)

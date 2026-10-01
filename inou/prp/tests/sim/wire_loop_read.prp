@@ -1,0 +1,35 @@
+/*
+:name: wire_loop_read
+:type: simulation
+:expect_instances: u_loop*=0
+*/
+
+// A `for` body READING a `wire` whose single driver comes after the loop. This
+// was errors/wire_loop_read.prp (`for-loop body may not read or write wire`);
+// under the 2026-09-27 ruling a loop body may read a wire (docs
+// 05b-statements.md "Loops and `wire`") and such a loop is UNROLLED, which
+// `:expect_instances: u_loop*=0` pins (only a runtime `break`/`continue` keeps
+// it rolled: loop_runtime_break_reads_wire.prp). Driving a wire in a loop body is
+// still an error (errors/wire_loop_write.prp).
+mod wire_loop_read(a:U8) -> (z:U10@[0]) {
+  wire back:U8 = nil
+  mut acc:U10 = 0
+  for i in 0..<4 {
+    acc = acc + back
+  }
+  back = a
+  z = acc
+}
+
+test wire_loop_read.sum {
+  mut dut  = wire_loop_read
+  mut seen = 0
+  tick 8 {
+    const av:U8 = (clock * 53 + 7) & 0xFF
+    dut.a = av
+    step
+    assert(dut.z == 4 * av, "every iteration reads the wire's driver")
+    seen += 1
+  }
+  assert(seen == 8, "the comparisons ran")
+}

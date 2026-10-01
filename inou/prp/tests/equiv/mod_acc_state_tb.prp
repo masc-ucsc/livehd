@@ -15,7 +15,7 @@ test mod_acc_state.sig {
     s = s * 6364136223846793005 + 1442695040888963407
     acc_.a = s & 0xff
     s = s * 6364136223846793005 + 1442695040888963407
-    acc_.go = s & 0x1
+    acc_.go = Bool(s & 0x1)
     acc_.reset = clock < 4
     step
     if clock >= 4 {

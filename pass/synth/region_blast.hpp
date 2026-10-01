@@ -7,6 +7,7 @@
 // the read-back needs to stitch a mapped netlist into the region body again.
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -16,6 +17,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "blast.hpp"
+#include "clock_gates.hpp"
 #include "diag.hpp"
 #include "dlop.hpp"
 #include "hhds/graph.hpp"
@@ -34,11 +36,12 @@ namespace livehd::synth {
 struct Seq_flop {
   hhds::Node_class        node;
   std::string             root;
-  int                     bits = 0;
+  int                     bits  = 0;
+  uint32_t                stage = 0;  // source pipeline stage, zero closest to D
   hhds::Pin_class         q_pin;
   hhds::Pin_class         din_drv, en_drv, rst_drv, rval_drv, clk_drv;
-  bool                    neg_reset = false;
-  bool                    neg_clock = false;
+  bool                    neg_reset   = false;
+  bool                    neg_clock   = false;
   // The register has a SYNCHRONOUS reset (`reset_pin` driven, `async` not
   // asserted): the reset is folded into the latch's D cone as
   // `rst ? rval : (en ? din : Q)` and `initial` is the RESET value, not a
@@ -46,11 +49,13 @@ struct Seq_flop {
   // whether an init must keep a native flop, and `rst_drv` is a source-side
   // handle the rewritten region no longer resolves).
   bool                    has_reset = false;
-  // The reset is ASYNCHRONOUS and the Liberty has a clear/preset flop cell for
-  // every bit's reset value: the register still crosses as a latch, but the
+  // The reset is ASYNCHRONOUS. In mapped mode the Liberty has a clear/preset
+  // flop cell for every bit's reset value; logical mode needs no cell. The
+  // register still crosses as a latch, but the
   // reset stays OUT of the D cone (D = en ? din : Q) and the read-back drives
   // the cell's asynchronous pin from `arst_src` instead. has_reset is set too
-  // (the `initial` is the reset value, never a power-on one).
+  // (the `initial` is the reset value, never a power-on one). Logical mode uses
+  // Source_state_table::controls instead of the Liberty fields below.
   bool                    async_reset = false;
   // The region-input driver the async reset traces to (through 1-bit
   // Get_mask/Sext identities and Nots), a source-side handle compared against
@@ -177,29 +182,12 @@ struct Bbox_po_target {
   int bit;
 };
 
-// A recognized latch-based clock gate, `gclk = clk & L` with `L` a latch
-// transparent while `clk` is low holding `en` -- mapped onto the Liberty's
-// integrated clock-gate cell. Its latch and AND (and the 1-bit identities
-// between them) are absorbed: neither bit-blasted nor kept native. `en`
-// crosses ABC as an extra PO (`en_po`, after the async-reset POs) so the
-// mapped logic drives the cell's enable pin; the gated clock is a PI of the
-// mapped logic (Pi_kind::icg_output, index = this gate) read back from the
-// cell's output; the cell's clock pin is the region input `clk_src`, or the
-// `parent` gate's cell output for a gate chain.
-struct Icg_gate {
-  hhds::Pin_class gclk;         // source-side AND output: the gated clock the registers' clk_drv resolve to
-  hhds::Pin_class clk_src;      // source-side reference clock: a region-input driver, or the parent gate's gclk
-  int32_t         parent = -1;  // Region_blast::icgs index of the gate driving clk_src, -1: a region input
-  hhds::Pin_class en_drv;       // source-side driver of the latched enable (bit 0 is latched)
-  int32_t         en_po  = -1;
-  std::string     name;         // the enable latch's name, for the cell instance
-  int             fanout = 0;   // crossed register bits it clocks (the drive-ladder pick)
-};
-
 struct Region_blast {
   enum class Status { blasted, refused, over_budget };
   Status                                            status = Status::blasted;
+  bool                                              logical_state = false;  // requires a logical-state writer
   Lnet                                              lnet;
+  std::optional<Source_state_table>                 source_state;
   std::vector<Seq_flop>                             flops;  // crossing registers, one per pipeline stage
   std::vector<Bbox>                                 bboxes;
   absl::flat_hash_set<hhds::Node_class>             region;             // rb.nodes
@@ -215,9 +203,9 @@ struct Region_blast {
   size_t                                            blast_total  = 0;      // nodes scheduled for blasting
   size_t                                            arst_pos     = 0;      // internal async-reset POs, after bbox_po
   std::vector<Icg_gate>                             icgs;                  // recognized clock gates (Seq_flop::icg)
-  size_t                                            icg_pos      = 0;      // ICG enable POs, after the async-reset POs
-  size_t                                            latch_pos    = 0;      // latch-cell enable/reset/D POs, after the ICG POs
-  uint64_t                                          rss_before   = 0;      // the admission baseline (0: no admission)
+  size_t                                            icg_pos    = 0;        // ICG enable POs, after the async-reset POs
+  size_t                                            latch_pos  = 0;        // latch-cell enable/reset/D POs, after the ICG POs
+  uint64_t                                          rss_before = 0;        // the admission baseline (0: no admission)
 };
 
 struct Blast_hooks {
@@ -233,8 +221,10 @@ struct Blast_hooks {
   std::function<void()> rewrite_rems;
 };
 
-// Translate one region. `options.map_register` is the region's effective
-// register mode; refusals are reported as diagnostics (status refused).
+// Translate one region. In mapped mode `options.map_register` is the region's
+// effective register mode. `logical_state` ignores all cell/mapping knobs,
+// validates the requested state target and retains a complete control interface.
+// Source/translation errors are diagnosed; resource admission returns over_budget.
 Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_options& options, const Blast_hooks& hooks);
 
 // A region that is one constant shift of a region input (or a constant) is pure

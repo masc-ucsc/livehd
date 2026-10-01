@@ -15,7 +15,7 @@ test mod_twopaths.sig {
     s = s * 6364136223846793005 + 1442695040888963407
     acc.a = s & 0xffffffff
     s = s * 6364136223846793005 + 1442695040888963407
-    acc.opt = s & 0x1
+    acc.opt = Bool(s & 0x1)
     step
     if clock >= 32 {
       sig = sig * 1099511628211 + (acc.o & 0xffffffff)

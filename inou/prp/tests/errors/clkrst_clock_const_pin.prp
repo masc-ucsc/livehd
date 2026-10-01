@@ -1,0 +1,12 @@
+/*
+:name: clkrst_clock_const_pin
+:type: error
+:tolg: 1
+:error: clocked by a constant
+*/
+// `clock_pin` names a clock signal, never a constant (docs 04b).
+pub mod clkrst_clock_const_pin(clk:Clock, a:U8) -> (q:U8@[0]) {
+  reg r:U8:[clock_pin=true] = 0
+  r = a
+  q = r
+}

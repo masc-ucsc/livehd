@@ -1,0 +1,43 @@
+/*
+:name: spec_tests_dut_clock_reads_counter
+:type: simulation
+*/
+// Spec (qa.md appendix section 6): "Clock: ... in simulation it is a CYCLE
+// counter (rising edges), so `clock < 1000` works -- but the numeric view of
+// a Clock is legal ONLY in debug contexts (test blocks, puts,
+// assert/cassert)"; "each Clock input has its own simulation counter".
+// Section 8: "the DUT instances stepped inside that tick auto-wire their
+// single Clock input to it". docs 05b "Running cycles (tick)": "`acc.y` reads
+// an output or an internal register" -- and 09b lists the minted `acc.clock`
+// among a DUT's observable signals.
+//
+// Rule pinned: a test reading the DUT's (auto-wired) Clock input sees the
+// clock's cycle count -- the same count as the tick's `clock` it is wired to
+// -- both for a declared `ck:Clock` and for a MINTED `clock:Clock`. Reads are
+// placed ABOVE the step (k edges so far in iteration k).
+
+mod spec_drc_cnt(ck:Clock, en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+mod spec_drc_min(en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_drc.reads {
+  mut d   = spec_drc_cnt
+  mut m   = spec_drc_min
+  mut bad = 0
+  tick 5 {
+    if d.ck != clock { bad += 1 }      // declared Clock input, auto-wired
+    if m.clock != clock { bad += 1 }   // minted Clock input, auto-wired
+    d.en = true
+    m.en = true
+    step
+  }
+  assert(bad == 0, "a DUT's Clock input reads as the tick's cycle count")
+}

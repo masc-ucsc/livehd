@@ -1,0 +1,24 @@
+/*
+:name: spec_lexical_str_escape_set
+:type: comptime
+:verifier_pass: 14
+:verifier_fail: 0
+*/
+// qa.md appendix 8: "String escapes (owner): exactly `\n \t \r \\ \" \' \0
+// \xNN \u{1..6 hex}` plus `` \` ``." (Q41 answer "Rust set + \`"; docs 02-basics
+// "Strings" lists the same set.) Every escape of the set decodes to its byte.
+cassert("\n" == "\x0a")
+cassert("\t" == "\x09")
+cassert("\r" == "\x0d")
+cassert("\\" == "\x5c")
+cassert("\"" == "\x22")
+cassert("\'" == "\x27")
+cassert("\`" == "\x60")
+cassert("\0" == "\x00")
+cassert("\u{41}" == "A")
+cassert("\u{000041}" == "A")
+cassert("\u{2287}" == '⊇')
+cassert("\u{1F600}" == '😀')
+const z = "a\0b"
+cassert(z.[size] == 3)
+cassert(z != "ab")

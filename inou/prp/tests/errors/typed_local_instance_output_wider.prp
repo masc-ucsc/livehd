@@ -1,0 +1,21 @@
+/*
+:name: typed_local_instance_output_wider
+:type: error
+:tolg: 1
+:error: `t` \(range \[0, 65535\]\) may not fit its declared range \[0, 15\]
+:help: apply a wrap/saturate policy
+*/
+// The overflow rule for a typed local fed by ANOTHER instance's output: the
+// read `c.o` has no range of its own, but the child's `o:U16` port bounds it,
+// so it may not fit `t:U4`. It used to compile silently (and `z` read all 16
+// bits of the child's output through the "u4" local).
+mod child(x:U16) -> (o:U16@[0]) {
+  o = x
+}
+
+pub mod typed_local_instance_output_wider(x:U16) -> (z:U16@[0]) {
+  const c = child(x=x)
+  mut t:U4 = 0
+  t = c.o   // locate_error_here
+  z = t
+}

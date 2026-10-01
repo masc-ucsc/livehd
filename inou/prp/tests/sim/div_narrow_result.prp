@@ -4,7 +4,7 @@
 */
 // Operands need a wider arithmetic carrier than the inferred result. Both
 // division and remainder must land in their result carrier before Slop_u.
-mod div_narrow_result(x:u4) -> (quotient:u1@[0], remainder:u3@[0]) {
+mod div_narrow_result(x:U4) -> (quotient:U1@[0], remainder:U3@[0]) {
   quotient = x / 8
   remainder = x % 8
 }

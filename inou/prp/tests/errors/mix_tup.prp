@@ -12,8 +12,8 @@
 // type an `init` method (see comptime/mix_tup_method.prp).
 
 type Mix_tup = (
-  mut flag:bool = false,
-  mut state:u2
+  mut flag:Bool = false,
+  mut state:U2
 )
 
 mod mix_tup_init(ref self:Mix_tup) {

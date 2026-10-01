@@ -17,13 +17,13 @@
 // one always_comb of ordered BLOCKING assignments that reads `w` before the
 // line that assigns it (verilator ALWCOMBORDER), which is not combinational at
 // all and was measured wrong on 256/256 input vectors.
-pub comb inner_x::[timecheck=false](x:u4) -> (y:u4) {
+pub comb inner_x::[timecheck=false](x:U4) -> (y:U4) {
   y = x ^ 9
 }
 
-pub comb selfref_thru_comb_sub::[timecheck=false](a:u4, b:u4) -> (z:u12) {
-  wire w:u12
-  wire hi:u4
+pub comb selfref_thru_comb_sub::[timecheck=false](a:U4, b:U4) -> (z:U12) {
+  wire w:U12
+  wire hi:U4
   hi = inner_x(x=(w#[2..=5] ^ b)).y
   w  = a | (b << 4) | (hi << 8)
   z  = w

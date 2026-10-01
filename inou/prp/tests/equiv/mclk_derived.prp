@@ -5,25 +5,27 @@
 :pyrope_top: derived
 */
 
-// Multi-clock registers with a DERIVED clock. `qa` is clocked by the default
-// `clock`; `qb` is clocked by `gclk`, an INTERNAL combinational signal (a gated
-// `clk_b & gate`) feeding the flop's `clock_pin`. Two bugs used to break this:
+// Multi-clock registers with a GATED clock. `qa` is clocked by `clock`; `qb` is
+// clocked by `gclk`, a `wire` holding the ICG `Clock(clock_pin=clk_b,
+// enable=gate)` (ruling 56: the one derived Clock; the golden spells the same
+// ICG as a latch + AND). Two bugs used to break this:
 //   1. upass/ssa did not SSA-rename the `attr_set ... clock_pin <wire>` value
 //      operand, so the clock_pin resolved to the declaration-time `gclk = 0ub?`
-//      poison instead of the live `gclk___ssa_1 = clk_b & gate` driver — the
-//      flop bound to an unknown const (cgen emitted `posedge invalid_*`).
+//      poison instead of the live `gclk___ssa_1` driver — the flop bound to an
+//      unknown const (cgen emitted `posedge invalid_*`).
 //   2. inou/cgen emitted the clock with `pin_wire_name` (dropping the `_u`
 //      unsigned suffix / not handling an inlined single-fanout clock node), so
 //      the `always @(posedge ...)` referenced an undeclared net.
 // Both are fixed; prp->verilog is LEC-equivalent to the golden below.
-mod derived(clk_b:bool, gate:bool, da:u8, db:u8) -> (qa:u8@[1], qb:u8@[1]) {
-  reg qa:u8 = 0
+mod derived(clock:Clock, clk_b:Clock, gate:Bool, da:U8, db:U8) -> (qa:U8@[1], qb:U8@[1]) {
+  reg qa:U8:[clock_pin=clock] = 0
   qa = da
-  mut gclk = clk_b and gate
+  wire gclk:Clock = nil
+  gclk = Clock(clock_pin=clk_b, enable=gate)
   // ASYNC reset, matching the golden. A SYNC reset on a GATED clock is swallowed
   // whenever the gate is low through reset (gclk never rises), so the two sides
   // could only agree by accident -- and lgcheck, which is edge-blind here, calls
   // it a difference. Async is the correct spelling for a gated flop.
-  reg qb:u8:[clock_pin=ref gclk, async=true] = 0
+  reg qb:U8:[clock_pin=gclk, async=true] = 0
   qb = db
 }

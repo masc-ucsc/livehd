@@ -5,8 +5,8 @@
 :verifier_fail: 0
 */
 
-type t1 = (a:u32=nil, b:string="")
-type t2 = (b:string="")
+type t1 = (a:U32=nil, b:String="")
+type t2 = (b:String="")
 
 comb set_string(ref self) {
   self.b = "foo"

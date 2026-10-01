@@ -45,18 +45,18 @@
 // GOLDENS: hand-written Icarus twin (design retyped from this source, never
 // LiveHD's emitter). Pure combinational, sampled after the settle.
 
-mod acell::[timecheck=false](k:u8, cinp:u32, cidx:u2) -> (a1:u16@[], ar:u16@[]) {
+mod acell::[timecheck=false](k:U8, cinp:U32, cidx:U2) -> (a1:U16@[], ar:U16@[]) {
   a1 = k + 1              // cone {k} -- this is what closes the caller's ring
-  mut carr:[4]u8
+  mut carr:[4]U8
   carr = cinp             // whole-array COMBINATIONAL write
   ar   = carr[cidx]       // cone {cinp, cidx} -- `cinp` is the one that vanishes
 }
 
-pub mod warring::[timecheck=false](x:u8, cinp:u32) -> (o1:u16@[], o2:u16@[],
-                                                       c2:u16@[]) {
+pub mod warring::[timecheck=false](x:U8, cinp:U32) -> (o1:U16@[], o2:U16@[],
+                                                       c2:U16@[]) {
   // THE RING INSTANCE: the callee's first cone feeds the address its second
   // cone reads, so the callee must be split into two groups.
-  wire fb:u2 = nil
+  wire fb:U2 = nil
   mut ir = acell(k=x, cinp=cinp, cidx=fb)
   fb = (ir.a1 + 1) & 0x3
   o1 = ir.a1
@@ -64,7 +64,7 @@ pub mod warring::[timecheck=false](x:u8, cinp:u32) -> (o1:u16@[], o2:u16@[],
 
   // CONTROL -- same definition, same array, same address VALUE, but no ring,
   // so no split. `nb` is `fb` recomputed from `x` directly.
-  wire nb:u2 = nil
+  wire nb:U2 = nil
   nb = (x + 2) & 0x3
   mut ic = acell(k=x, cinp=cinp, cidx=nb)
   c2 = ic.ar
@@ -78,14 +78,14 @@ test warring.split_callee_keeps_its_whole_array_input {
   mut bad_o2    = 0
   mut bad_agree = 0
   tick 6 {
-    mut xv:u8  = clock
-    mut cv:u32 = 0x0A0B0C0D + clock
+    mut xv:U8  = clock
+    mut cv:U32 = 0x0A0B0C0D + clock
     acc.x    = xv
     acc.cinp = cv
     step
-    mut g_a1:u16  = xv + 1
-    mut g_idx:u16 = (g_a1 + 1) & 0x3
-    mut g_ar:u16  = 0
+    mut g_a1:U16  = xv + 1
+    mut g_idx:U16 = (g_a1 + 1) & 0x3
+    mut g_ar:U16  = 0
     if g_idx == 0 {
       g_ar = cv#[0..=7]
     } elif g_idx == 1 {

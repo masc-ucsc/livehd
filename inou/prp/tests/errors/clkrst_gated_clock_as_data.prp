@@ -1,0 +1,16 @@
+/*
+:name: clkrst_gated_clock_as_data
+:type: error
+:tolg: 1
+:error: the gated clock `Clock\(clock_pin=clk, ...\)` is a `Clock`, and a Clock is not data
+*/
+// qa Appendix 6: a Clock may only drive clock pins, a Clock_cell or another
+// Clock port -- the gated Clock a `Clock(clock_pin=, enable=)` makes too, not
+// only a `Clock` input.
+pub mod clkrst_gated_clock_as_data(clk:Clock, en:Bool, x:Bool, d:U8) -> (q:U8@[1], o:Bool@[0]) {
+  const g = Clock(clock_pin=clk, enable=en)
+  reg f:U8:[clock_pin=g] = 0
+  f = d
+  q = f
+  o = g and x   // locate_error_here
+}

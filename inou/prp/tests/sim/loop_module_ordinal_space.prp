@@ -9,12 +9,12 @@
 // Sequential loops in one parent share one module-scoped occurrence ordinal
 // space. The second site continues after the first site's count.
 
-mod ordinal_step(idx:u2, x:u8, acc_in:u16) -> (acc_out:u16@[0]) {
-  acc_out = acc_in + x + idx
+mod ordinal_step(idx:U2, x:U8, acc_in:U16) -> (acc_out:U16@[0]) {
+  wrap acc_out = acc_in + x + idx
 }
 
-mod loop_module_ordinal_space(x:u8) -> (total:u16@[0]) {
-  mut acc:u16 = 0
+mod loop_module_ordinal_space(x:U8) -> (total:U16@[0]) {
+  mut acc:U16 = 0
   for i in 0..<2 {
     acc = ordinal_step::[name=head](idx=i, x=x, acc_in=acc)
   }

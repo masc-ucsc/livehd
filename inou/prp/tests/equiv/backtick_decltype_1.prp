@@ -1,0 +1,31 @@
+/*
+:name: backtick_decltype
+:type: lec
+:lec_top: backtick_decltype
+*/
+// Every sized type spelled through a BACKTICKED name. Since ruling 52
+// (2026-09-29) a backticked word is always an ordinary name, never the type
+// (`` `u4` `` is no longer u4), so the names are declared here as user type
+// aliases of the built-in types. Ports, locals, the register, the array
+// element type and the alias chain must lower exactly like the plain spelling
+// in backtick_decltype.prp.
+type `u3` = U3
+type `u4` = U4
+type `u8` = U8
+type `s6` = S6
+type `s8` = S8
+type Nib = `u4`
+
+pub mod backtick_decltype(a:`u8`, b:`s6`, en:Bool) -> (y:`u8`@[0], z:`s8`@[0], q:`u4`@[0]) {
+  const lo:`u4`    = a#[0..<4]
+  const hi:Nib    = a#[4..<8]
+  const pr:[2]`u3` = (a#[0..<3], a#[5..<8])
+  mut   acc:`s8`   = b
+  reg   r:`u4`     = 0
+  if en {
+    r = lo ^ hi
+  }
+  y = lo + hi + pr[1]
+  z = acc + 1
+  q = r
+}

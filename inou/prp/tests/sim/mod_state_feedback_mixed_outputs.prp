@@ -1,0 +1,62 @@
+/*
+:name: mod_state_feedback_mixed_outputs
+:type: simulation
+*/
+
+// Per-OUTPUT precision for a false loop through a child (lhdtrack suggestions
+// 2.1). `st2` has one Moore output (`q`, a pure register read) and one Mealy
+// output (`nx`, combinational in `d`). The caller closes its ring through `q`
+// only; `nx` is consumed outside the ring. At instance grain
+// `gr -> st2 -> gr` is a cycle; at output grain it is cut by the flop `r`.
+//
+// Before the 2.1 fix, upass.tolg's time-checker modeled the Sub as a crossbar
+// and refused it:
+//   upass.tolg: combinational loop in 'mod_state_feedback_mixed_outputs.top2'
+// A fix that only treats an ALL-Moore child as state would still refuse this
+// one (and treating the whole instance as a loop breaker would be unsound,
+// because `nx` IS combinational in `d`): each output must carry its own
+// input cone. The real-loop guard is errors/comb_loop_through_mealy_child.prp.
+mod st2(en:Bool, d:U4) -> (q:U4@[0], nx:U4@[0]) {
+  reg r:U4 = 8
+  if en { r = d }
+  q = r
+  wrap nx = d + 1
+}
+
+pub mod top2(req:U4) -> (g:U4@[0], n:U4@[0]) {
+  wire gr:U4 = nil
+  const m = st2(en=req != 0, d=gr)
+  gr = req & ~m.q
+  g = gr
+  n = m.nx
+}
+
+test top2.moore_ring_mealy_side {
+  mut dut  = top2
+  mut r:U4 = 8
+  mut bad  = 0
+  mut seen = 0
+  tick 10 {
+    mut rq:U4 = 0
+    if clock == 1 { rq = 7 }
+    if clock == 2 { rq = 15 }
+    if clock == 4 { rq = 9 }
+    if clock == 6 { rq = 14 }
+    if clock == 7 { rq = 1 }
+    dut.reset = clock == 0
+    dut.req = rq
+    if clock == 0 {
+      r = 8
+    } elif rq != 0 {
+      r = rq & ~r
+    }
+    step
+    seen = seen + 1
+    mut want_g:U4 = rq & ~r
+    mut want_n:U4 = (want_g + 1) & 15
+    if dut.g != want_g { bad = bad + 1 }
+    if dut.n != want_n { bad = bad + 1 }
+  }
+  assert(seen == 10, "the comparisons ran (guards against a vacuous pass)")
+  assert(bad == 0, "the Moore output closes the ring and the Mealy output stays correct")
+}

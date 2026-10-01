@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <span>
 #include <string>
@@ -88,6 +89,11 @@ using Body_batch_builder = std::function<void(std::span<const Region_body>)>;
 // per-def decomposition.
 enum class Flatten_mode { off, on, automatic };
 
+// A whole-design flatten partitions a scratch definition of this name in place
+// of `top` (it keeps top's IO, is the Region_body::src of top's regions, and
+// never persists). Hook callers use it to recognize regions of the design top.
+[[nodiscard]] inline std::string flatten_scratch_name(std::string_view top) { return std::string(top) + "__flatten_tmp"; }
+
 // Parse the shared `flatten` label value ("auto"|"true"|"false", plus 0/1);
 // anything else is a fatal diag under `pass` and returns off.
 [[nodiscard]] Flatten_mode parse_flatten_mode(std::string_view v, std::string_view pass);
@@ -149,10 +155,15 @@ public:
   // source, or every def) right before it is cut, with its final colors: the
   // one place a color-aware LGraph rewrite (satopt's mux facts) sees exactly
   // the regions every mapper will map.
+  // `admission` may stop collection, naming or construction. Refusal returns
+  // false; outlib can contain partial bodies and must not be published. Callers
+  // needing transactional output must use a private output library and discard
+  // it on failure. Exceptions from user callbacks are not swallowed.
   static bool build_decomposition(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, hhds::GraphLibrary* outlib,
                                   std::string_view top, bool debug_color, const livehd::partition::Body_builder& hook = {},
                                   livehd::partition::Flatten_mode flatten = livehd::partition::Flatten_mode::off,
                                   bool want_pre_bodies = false, const livehd::partition::Body_batch_builder& batch_hook = {},
                                   size_t batch_size = 64, const std::unordered_set<hhds::Gid>& preserved_defs = {},
-                                  const std::function<void(hhds::Graph*)>& prepare_src = {});
+                                  const std::function<void(hhds::Graph*)>& prepare_src = {},
+                                  const livehd::partition::Admission&      admission   = {});
 };

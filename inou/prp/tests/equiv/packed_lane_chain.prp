@@ -4,6 +4,6 @@
 :lec_top: packed_lane_chain
 */
 // Direct spelling of two packed lanes.
-pub comb packed_lane_chain(a:u4, b:u4) -> (result:u8) {
+pub comb packed_lane_chain(a:U4, b:U4) -> (result:U8) {
   result = ((a ^ b) << 4) | a
 }

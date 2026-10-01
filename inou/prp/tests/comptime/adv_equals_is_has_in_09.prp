@@ -18,9 +18,9 @@ cassert(m3 does small)
 
 // per-field type matters (07-typesystem.md lines 185-186): a string-typed
 // field is NOT a superset of an int-valued field of the same name.
-cassert((const a:string=nil, const b:signed=nil) does (const a="hello", const b=33))
-cassert(not ((const b:string=nil, const a:signed=nil) does (const a="hello", const b=33)))
+cassert((const a:String=nil, const b:Signed=nil) does (const a="hello", const b=33))
+cassert(not ((const b:String=nil, const a:Signed=nil) does (const a="hello", const b=33)))
 
 // nil rule: a non-tuple x does nil is true
-mut z:u8 = 5
+mut z:U8 = 5
 cassert(z does nil)

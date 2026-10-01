@@ -1,0 +1,20 @@
+/*
+:name: clkrst_rolled_loop_captured_reset
+:type: compile
+*/
+// A rolled `for` whose body calls a stateful mod and passes the owner's
+// `Reset` input as data: the lifted `__loopN` slice keeps that input's
+// `Reset` type, so it is the slice's implicit reset (the child's reset is
+// auto-wired to it) instead of a data port a minted `reset` clashes with.
+mod `stage`(d:U4, clear:Bool) -> (q:U4@[1]) {
+  reg r:U4 = 0
+  r = if clear { 0 } else { d }
+  q = r
+}
+pub mod clkrst_rolled_loop_captured_reset::[timecheck=false](clk:Clock, reset:Reset, a:U4) -> (o:U4@[0]) {
+  mut v:U4 = a
+  for i in 0..<3 {
+    v = `stage`(d=v, clear=reset)
+  }
+  o = v
+}

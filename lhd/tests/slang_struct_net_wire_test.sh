@@ -303,7 +303,7 @@ EOF
   --emit-dir "pyrope:$W/nonuniform_array_reset_prp" \
   --workdir "$W/w_nonuniform_array_reset" >"$W/nonuniform_array_reset.log" 2>&1 \
   || fail "compile of nonuniform_array_reset failed: $(cat "$W/nonuniform_array_reset.log")"
-grep -Fq 'reg ptr:[8]u7:[ordering="old", reset_pin=ref reset, async=true] = (0, 1, 2, 3, 4, 5, 6, 7)' \
+grep -Fq 'reg ptr:[8]U7:[ordering="old", reset_pin=`reset`, async=true] = (0, 1, 2, 3, 4, 5, 6, 7)' \
   "$W/nonuniform_array_reset_prp/nonuniform_array_reset.prp" \
   || fail "Slang did not preserve the nonuniform reset value in Pyrope"
 "$LHD" compile "$W/nonuniform_array_reset_prp/nonuniform_array_reset.prp" \

@@ -1,0 +1,10 @@
+/*
+:name: typeword_renamed_does
+:type: error
+:error: `s4` was renamed `S4`
+*/
+// A `does` operand is a type too (`x does S4`).
+pub comb typeword_renamed_does(a:U8) -> (o:U8) {
+  cassert(!(a does s4))  // locate_error_here
+  o = a
+}

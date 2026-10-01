@@ -48,7 +48,7 @@ std::vector<std::string> mint_function(bool lead) {
     ids.push_back(b.create_lnast_tmp());  // %w_1
   }
   {
-    Lnast_builder::Tmp_scope_guard g(b, "x:u8");  // type annotation must not leak into the label
+    Lnast_builder::Tmp_scope_guard g(b, "x:U8");  // type annotation must not leak into the label
     ids.push_back(b.create_lnast_tmp());          // %x_0
     ids.push_back(b.create_lnast_tmp());          // %x_1
   }

@@ -7,13 +7,13 @@
 // cycle(), which recurses into the sub; peek therefore has to snapshot/restore
 // the sub too, or the sub would double-advance. This test guards that.)
 
-mod subcnt(en:bool) -> (o:u8@[0]) {
-  reg c:u8 = 0
+mod subcnt(en:Bool) -> (o:U8@[0]) {
+  reg c:U8 = 0
   o = c
   if en { wrap c += 1 }
 }
 
-mod topcnt(en:bool) -> (o:u8@[0]) {
+mod topcnt(en:Bool) -> (o:U8@[0]) {
   o = subcnt(en=en)
 }
 

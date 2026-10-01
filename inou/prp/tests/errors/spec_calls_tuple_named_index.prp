@@ -1,0 +1,14 @@
+/*
+:name: spec_calls_tuple_named_index
+:type: error
+:error: name-access only|named tuple|by name
+*/
+
+// qa.md Appendix §8: "Named tuple: no positional fields; accessed only by name
+// (`t.a`), never `t[0]`."
+// docs 03-bundle.md: `const bad = named[0] // error: a named tuple is accessed
+// by name only`.
+
+const named = (const b = 1, const c = 2)
+const bad = named[0] // locate_error_here
+cassert(bad == 1)

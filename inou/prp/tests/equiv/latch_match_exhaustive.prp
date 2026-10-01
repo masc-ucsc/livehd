@@ -6,8 +6,8 @@
 */
 
 // The empty else is unreachable: both values of the selector write q.
-pub mod latch_match_exhaustive(sel:u1, a:u4, b:u4) -> (q:u4@[]) {
-  reg q:u4:[latch=true]
+pub mod latch_match_exhaustive(sel:U1, a:U4, b:U4) -> (q:U4@[]) {
+  reg q:U4:[latch=true]
   match sel {
     == 0 {
       q = a

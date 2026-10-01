@@ -1,0 +1,59 @@
+/*
+:name: nested_capture_scoping
+:type: equiv
+:verilog_top: nested_capture_scoping
+:pyrope_top: nested_capture_scoping
+*/
+
+// Review fixup of the ruling-4 capture (suggestions 2.3 rows 3/4/6): values a
+// nested lambda or a generic default reads must come from the binding that is
+// VISIBLE, never from a same-name binding of a closed scope, and a captured
+// value is recomputed with its own dependencies only.
+//   * `narrow` declares a u4 `Z` that closes with it; the file-scope `Z` read
+//     by `addn`'s default is u7, so N = 7 (it once folded the stale u4 range).
+//   * `G` mixes a mod-level loop and a file-scope loop: the capture slice keeps
+//     each tree's temps apart (it once copied a file-scope `N` twice and
+//     failed with a spurious redeclaration).
+//   * `Col` is a mod-local enum: a nested comb sees it (a type/enum is a
+//     comptime binding).
+//   * a named tuple type with an ARRAY field flattens exactly like the inline
+//     spelling `p:(v:[2]U4, s:S3)`.
+comptime const ROWS = 4
+mut mask = 0
+for row in 0..<ROWS {
+  mask |= 1 << row
+}
+comptime const FM = mask
+
+mod narrow(x:U8) -> (y:U8@[0]) {
+  comptime const Z:U4 = 1
+  y = (x + Z)#[0..<8]
+}
+
+comptime const Z:Unsigned(bits=7) = 100
+comb addn<N=Z.[bits]>(x:U8) -> (y:U8) {
+  y = (x + N)#[0..<8]
+}
+
+type Pack_t = (v:[2]U4, s:S3)
+
+pub mod nested_capture_scoping(a:U8, p:Pack_t) -> (o:U8@[0], q:U8@[0], r:U8@[0], e:U8@[0], lo:U4@[0], s:S3@[0]) {
+  mut mask2 = 0
+  for i in 0..<3 {
+    mask2 |= 0x10 << i
+  }
+  comptime const G = mask2 | FM
+  enum Col = (Red = 3, Green = 5)
+  comb f(x:U8) -> (y:U8) {
+    y = x ^ G ^ FM
+  }
+  comb g(x:U8) -> (y:U8) {
+    y = (x + Unsigned(Col.Green))#[0..<8]
+  }
+  o  = f(x=a)
+  q  = addn(x=a)
+  r  = narrow(x=a)
+  e  = g(x=a)
+  lo = p.v[1]
+  s  = p.s
+}

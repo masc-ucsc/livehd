@@ -1,0 +1,42 @@
+/*
+:name: array_size_inferred_and_derived
+:type: comptime
+:verifier_pass: 11
+:verifier_fail: 0
+*/
+// `.[size]` (04b-attributes.md: "Number of unnamed entries in tuple or array")
+// of a declared array, of values built from one, and of an array whose extent
+// its uses infer (08-memories.md: "the maximum/minimum value on the index
+// effectively sets the size and the default initialization is zero").
+//
+// USED TO FAIL: `.[size]` returned the declared extent for any value that
+// inherited it (`w ++ w` was 4, a copy grown by `++=` was 4), and an inferred
+// `mut a:[] = 0` read an unwritten entry below its largest index as out of
+// bounds and had the size of its written entries only.
+
+mut w:[4]U8 = 0
+const c = w ++ w
+cassert(c.[size] == 8)
+mut z = w
+z ++= (7, 8)
+cassert(z.[size] == 6)
+mut x5:[4]U3 = nil
+cassert(x5.[size] == 4)
+
+mut a:[] = 0
+a[3] = 1
+cassert(a[3] == 1 and a[2] == 0 and a[0] == 0)
+cassert(a.[size] == 4)
+const q = a[5]
+cassert(q == 0)
+cassert(a.[size] == 4)
+
+mut b:[][] = 0
+b[3][4] = 1
+cassert(b[3][4] == 1 and b[3][3] == 0)
+cassert(b[1][2] == 0)
+cassert(b.[size] == 4)
+
+mut f:[] = 5
+f[2] = 1
+cassert(f[1] == 5)

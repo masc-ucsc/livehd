@@ -26,19 +26,19 @@
 // c4/c5 rd=11 (m[0] again after flip drops). c1 reads the never-written slot
 // and is deliberately NOT checked. echo = rd + 1 combinationally throughout.
 
-mod picker::[timecheck=false](sel_next:u1, gate:u8) -> (sel:u1@[], echo:u8@[]) {
-  reg s:u1 = 0
+mod picker::[timecheck=false](sel_next:U1, gate:U8) -> (sel:U1@[], echo:U8@[]) {
+  reg s:U1 = 0
   sel  = s          // STATE-ONLY: read the FLOP q (before the write below —
                     // Pyrope read-after-write would see sel_next combinationally)
   s    = sel_next
-  echo = gate + 1   // comb in->out: the callee is MEALY, so no whole-Moore deferral
+  wrap echo = gate + 1   // comb in->out: the callee is MEALY, so no whole-Moore deferral
 }
 
-pub mod memring::[timecheck=false](d:u8, we:bool, flip:u1) -> (rd:u8@[], q_echo:u8@[], ctl:u8@[]) {
-  wire back:u8 = nil
+pub mod memring::[timecheck=false](d:U8, we:Bool, flip:U1) -> (rd:U8@[], q_echo:U8@[], ctl:U8@[]) {
+  wire back:U8 = nil
   mut (sel, echo) = picker(sel_next=flip, gate=back)
 
-  reg m:[2]u8 = nil
+  reg m:[2]U8 = nil
   if we {
     m[sel] = d
   }
@@ -48,7 +48,7 @@ pub mod memring::[timecheck=false](d:u8, we:bool, flip:u1) -> (rd:u8@[], q_echo:
   q_echo = echo
 
   // CONTROL: an ordinary flop, so a failure above is specifically the ring.
-  reg c:u8 = 0
+  reg c:U8 = 0
   c   = d
   ctl = c
 }
@@ -63,9 +63,9 @@ test memring.state_only_output_breaks_the_memory_ring {
     // c0 write 11 @0; c1 read @0; c2 write 22 @1 (sel flopped to 1 at c1's
     // edge); c3 read @1; c4 read @1 (flip already low, sel flips at the edge);
     // c5 read @0.
-    mut fv:u1   = 0
-    mut wv:bool = false
-    mut dv:u8   = 0
+    mut fv:U1   = 0
+    mut wv:Bool = false
+    mut dv:U8   = 0
     if clock == 0 {
       wv = true
       dv = 11
@@ -83,8 +83,8 @@ test memring.state_only_output_breaks_the_memory_ring {
     acc.d    = dv
     step
     seen = seen + 1
-    mut golden:u8 = 0
-    mut check:bool = false
+    mut golden:U8 = 0
+    mut check:Bool = false
     if clock == 0 {
       golden = 11
       check  = true

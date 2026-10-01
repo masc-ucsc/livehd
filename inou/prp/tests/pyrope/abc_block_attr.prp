@@ -7,7 +7,7 @@
 // region via a block attribute, with a per-region ABC flow override. The
 // annotation must never change semantics (LEC-invariant vs the plain block —
 // the companion test strips the `::[…]` line and proves equivalence).
-mod abc_block_attr(a:u8, b:u8, c:u8, s:u1) -> (x:u8@[0], y:u8@[0]) {
+mod abc_block_attr(a:U8, b:U8, c:U8, s:U1) -> (x:U8@[0], y:U8@[0]) {
   x = (a & b) | (c ^ a)
   {::[abc='strash; &get -n; &dch -f; &nf {D}; &put', color=2]
     mut t = b & c

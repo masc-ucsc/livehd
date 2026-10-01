@@ -1,0 +1,27 @@
+/*
+:name: timecheck_false_stage_mismatch
+:type: equiv
+:verilog_top: timecheck_false_stage_mismatch.top
+:pyrope_top: top
+*/
+
+// User ruling 2026-09-28 (22): `::[timecheck=false]` turns off every TIMING
+// check of its lambda, including the one that requires a `stage[N]` over a
+// `mod` call to match the callee's declared output cycle. `dly` lands its
+// output at cycle 1; `top` writes `stage[2]`, so the call is realized at its
+// declared cycle and the missing cycle is one caller-side stage flop (the rule
+// a `pipe` callee already follows: the callee contributes its declared latency,
+// the caller the rest). `o` then mixes that cycle-2 value with the cycle-0 `b`,
+// which the attribute also allows.
+//
+// Without the attribute the call is the compile error "mod call result 'x'
+// lands at its declared cycle 1 -- `stage[2]` must match it"; with it the
+// error used to stay (the attribute only switched the Verilog-origin flag on).
+mod dly(d:U4) -> (q:U4@[1]) {
+  stage[1] q = d
+}
+
+pub mod top::[timecheck=false](a:U4, b:U4) -> (o:U4@[0]) {
+  stage[2] x = dly(d=a)
+  o = x ^ b
+}

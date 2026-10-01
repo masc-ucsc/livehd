@@ -160,6 +160,13 @@ void process_import_call(Lnast_manager& lm, Symbol_table& st,
   if (text.empty()) {
     return;
   }
+  // `foo` and foo are the same identifier: canonicalize every plain path
+  // segment (prp2lnast already emits the canonical spelling; this keeps a
+  // source-spelled key from any other producer matching the canonical unit /
+  // tree / pub names). `ln:`/`lg:` name a tree/graph verbatim.
+  if (!text.starts_with("ln:") && !text.starts_with("lg:")) {
+    text = str_tools::canonical_escaped_path(text);
+  }
   auto pend = [&]() { pend_import(text); };
   auto str_const = [](std::string_view s) { return *Dlop::from_pyrope(absl::StrCat("'", s, "'")); };
   // §2 — a name provided by more than one input is ambiguous when imported
@@ -203,9 +210,23 @@ void process_import_call(Lnast_manager& lm, Symbol_table& st,
   // (07-typesystem.md). Only fires when the prefix names a loaded source unit;
   // otherwise this falls through (a dotted UNIT name still resolves via the
   // whole-namespace paths below).
-  if (const auto dot = text.rfind('.'); dot != std::string::npos) {
+  // The member is the LAST `.` segment outside backticks (`lib.`a.b`` selects
+  // member `` `a.b` ``).
+  auto last_unquoted_dot = [](std::string_view s) {
+    size_t pos    = std::string::npos;
+    bool   quoted = false;
+    for (size_t i = 0; i < s.size(); ++i) {
+      if (s[i] == '`') {
+        quoted = !quoted;
+      } else if (s[i] == '.' && !quoted) {
+        pos = i;
+      }
+    }
+    return pos;
+  };
+  if (const auto dot = last_unquoted_dot(text); dot != std::string::npos) {
     const std::string unit(text.substr(0, dot));
-    const std::string member(text.substr(dot + 1));
+    const std::string member(str_tools::canonical_escaped_ident(text.substr(dot + 1)));
     if (const auto uit = function_registry.find(unit);
         uit != function_registry.end() && uit->second->get_lambda_kind().empty()) {
       const auto&            src   = uit->second;
@@ -213,9 +234,8 @@ void process_import_call(Lnast_manager& lm, Symbol_table& st,
       // prp2lnast stamps every `pub` entry with the CANONICAL spelling, so a
       // source-spelled `import("unit.`name`")` must be canonicalized before the
       // match or an escaped pure-alnum export never resolves.
-      const auto canon_member = str_tools::canonical_escaped_ident(member);
       for (const auto& p : src->get_pub_list()) {
-        if (p.name == member || str_tools::canonical_escaped_ident(p.name) == canon_member) {
+        if (p.name == member || str_tools::canonical_escaped_ident(p.name) == member) {
           found = &p;
           break;
         }
@@ -229,6 +249,7 @@ void process_import_call(Lnast_manager& lm, Symbol_table& st,
             .category = "name",
             .pass     = "upass.call_resolver",
             .message  = std::format("`{}` is not a pub entry of unit `{}`", member, unit),
+            .span     = lm.current_span(),
             .hint     = "only `pub` file-scope entries can be imported; add `pub` to the definition or fix the name"});
         return;
       }
@@ -238,7 +259,7 @@ void process_import_call(Lnast_manager& lm, Symbol_table& st,
           return;
         }
         for (const auto& [path, val_text] : src->get_pub_values()) {
-          if ((path == member)) {
+          if (path == found->name) {
             store_trivial(dst, *Dlop::from_pyrope(val_text));
             return;
           }
@@ -248,7 +269,7 @@ void process_import_call(Lnast_manager& lm, Symbol_table& st,
       }
       // A pub lambda: bind its qualified tree name so `f(...)` dispatches to it
       // (same string the whole-namespace path binds the field to).
-      store_trivial(dst, str_const(absl::StrCat(unit, ".", member)));
+      store_trivial(dst, str_const(absl::StrCat(unit, ".", found->name)));
       return;
     }
   }

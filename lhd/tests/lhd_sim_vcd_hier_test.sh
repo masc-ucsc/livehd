@@ -5,7 +5,7 @@
 #   * one VCD carries the WHOLE design tree: the root instance's writer is shared
 #     down the sub-instances (__vcd_hier), each under a nested $scope, with the
 #     sub's io + flop state traced (not just the top's io);
-#   * a flopless wrapper whose `clock:u1` input is wired straight into its subs'
+#   * a flopless wrapper whose `clock:Clock` input is wired straight into its subs'
 #     clock ports still resolves it as THE clock (the lecfail dut-pair shape) --
 #     the waveform label is the real `clock`, never a `clock_vcd0` uniquify;
 #   * sim.vcd_fake_delay=true (default): data settles at edge+3 and any signal
@@ -38,20 +38,20 @@ cat > "$W/h.prp" <<'EOF'
 :name: h
 :type: simulation
 */
-mod leaf(clock:u1, reset:u1, en:u1) -> (value:u8@[]) {
-  reg count:u8 = 0
+mod leaf(clock:Clock, reset:Reset, en:U1) -> (value:U8@[]) {
+  reg count:U8 = 0
   value = count
-  if reset != 0 {
+  if reset {
     count = 0
   } elif en != 0 {
     wrap count += 1
   }
 }
-mod mid(clock:u1, reset:u1, en:u1) -> (value:u8@[]) {
+mod mid(clock:Clock, reset:Reset, en:U1) -> (value:U8@[]) {
   const l = leaf(clock = clock, reset = reset, en = en)
   value = l.value
 }
-mod pair(clock:u1, reset:u1, en:u1) -> (a_value:u8@[], b_value:u8@[]) {
+mod pair(clock:Clock, reset:Reset, en:U1) -> (a_value:U8@[], b_value:U8@[]) {
   a_value = mid(clock = clock, reset = reset, en = en)
   b_value = leaf(clock = clock, reset = reset, en = en)
 }
@@ -59,8 +59,7 @@ test h {
   mut p = pair
   const _drv_reset = [1, 1, 0, 0, 0, 0, 0, 0]
   tick 8 {
-    p.clock = 0
-    p.reset = _drv_reset[clock]
+    p.reset = _drv_reset[clock] != 0
     p.en    = 1
     step
   }
@@ -162,8 +161,8 @@ cat > "$W/two.prp" <<'EOF'
 :name: two
 :type: simulation
 */
-mod cnt(en:bool) -> (value:u8@[0]) {
-  reg count:u8 = 0
+mod cnt(en:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
   value = count
   if en { wrap count += 1 }
 }

@@ -1,0 +1,64 @@
+/*
+:name: fcall_arg_pun_runtime
+:type: simulation
+*/
+// 06-functions.md "Argument naming", exception 2, on RUNTIME values: a bare
+// variable whose source name matches a parameter binds to it in any order,
+// also when it is the calling lambda's own (inlined, internally renamed)
+// input, a tuple bound to a tuple-typed param, a mod's own tuple input, the
+// leading params of a var-arg callee, and a pre-loop SSA version read inside
+// a rolled loop. The callees are order-sensitive, so a declaration-order bind
+// would simulate a different value. The comptime counterpart is
+// comptime/fcall_arg_pun.prp.
+
+comb sub(a, b) -> (r) { r = a - b }
+comb sub_fwd(a, b) -> (r) { r = sub(b, a) }                  // own params, swapped
+comb subt(a:U8, b:U8) -> (r:S9) { r = a - b }                 // typed: its own module
+comb subt_fwd(a:U8, b:U8) -> (r:S9) { r = subt(b, a) }
+mod msub(a:U8, b:U8) -> (r:S9@[0]) { r = a - b }                // a mod: a Sub instance
+comb msub_fwd(a, b) -> (r) { r = msub(b, a) }
+comb vsub(a, b, ...rest) -> (r) { r = a - b + rest[0] }        // var-arg callee
+
+type Vw = (v:U8, w:U8)
+comb tsub(lo:Vw, hi:Vw) -> (r:S9) { r = hi.v - lo.v }         // two same-shape tuple params
+mod tsub_mod(lo:Vw, hi:Vw) -> (r:S9@[0]) { r = tsub(hi, lo) }   // forwards its own tuple inputs
+
+comb `step`(k, acc) -> (r) { r = acc * 2 + k }
+
+pub mod pun_top(a:U8, b:U8) -> (d:S9@[0], f:S9@[0], t:S9@[0], u:S9@[0], m:S9@[0], v:S9@[0], x:S9@[0], y:S9@[0], l:U12@[0]) {
+  d = sub(b, a)       // mod inputs punned into an inlined comb
+  f = sub_fwd(b, a)   // two levels of forwarding
+  t = subt(b, a)      // punned into a typed comb unit
+  u = subt_fwd(b, a)
+  m = msub_fwd(b, a)  // an inlined comb forwards its own params to a mod
+  v = vsub(b, a, rest = (0))   // var-arg: pun binds a, b; the var-arg is named
+  const hi = (const v = a, const w = b)
+  const lo = (const v = b, const w = a)
+  x = tsub(hi, lo)    // runtime tuples into the tuple params they name
+  y = tsub_mod(hi, lo)
+  mut k:U9 = b
+  k = k + 1           // an SSA version, read by the rolled loop below
+  mut acc:U12 = 0
+  for i in 0..<3 {
+    wrap acc = `step`(acc, k)
+  }
+  l = acc
+}
+
+test pun_top.swapped {
+  mut dut = pun_top
+  tick 1 {
+    dut.a = 200
+    dut.b = 7
+    step
+    assert(dut.d == 193)
+    assert(dut.f == 193)
+    assert(dut.t == 193)
+    assert(dut.u == 193)
+    assert(dut.m == 193)
+    assert(dut.v == 193)
+    assert(dut.x == 193)
+    assert(dut.y == 193)
+    assert(dut.l == 56)
+  }
+}

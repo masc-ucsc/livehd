@@ -1,0 +1,20 @@
+/*
+:name: spec_clock_mux
+:type: error
+:tolg: 1
+:error: (Clock|clock)
+*/
+// SPEC (clock lane): there are no clock muxes.
+//   qa.md Appendix 6: "No derived clocks / clock muxes for now (use enables)."
+//   docs 07-typesystem: "there are no derived clocks or clock muxes (use
+//     enables)."
+// `g` selects between two Clocks with a runtime condition.
+pub mod spec_clock_mux(ca:Clock, cb:Clock, sel:Bool, d:U8) -> (q:U8@[0]) {
+  mut g = ca
+  if sel {
+    g = cb
+  }
+  reg r:U8:[clock_pin=g] = 0
+  r = d
+  q = r
+}

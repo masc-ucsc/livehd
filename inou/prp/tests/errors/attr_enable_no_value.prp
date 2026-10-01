@@ -12,10 +12,12 @@
 // — a message about a signal the user never wrote. Reject it at the source,
 // where the span still points at the attribute.
 //
-// The inverse rule (`clock`/`reset` are flag-ONLY and reject a value) is in the
-// same check; attribute_clk_renamed.prp covers that direction.
-pub mod ennoval(clk:u1, rst:u1, d:u8) -> (q:u8@[]) {
-  reg r:u8:[clock_pin=ref clk, reset_pin=ref rst, enable] = 0 // locate_error_here
+// The old flag-only `clock`/`reset` attributes are gone (since ruling 52 a
+// clock or reset is declared by its type, `:Clock`/`:Reset`);
+// attribute_clk_renamed.prp and attribute_reset_vs_reset_pin.prp cover those
+// spellings.
+pub mod ennoval(clk:Clock, rst:Reset, d:U8) -> (q:U8@[]) {
+  reg r:U8:[clock_pin=clk, reset_pin=rst, enable] = 0 // locate_error_here
   r = d
   q = r
 }

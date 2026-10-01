@@ -17,7 +17,7 @@ test rt_bool_cast.sig {
     s = s * 6364136223846793005 + 1442695040888963407
     acc.b = s & 0xff
     step
-    sig = sig * 1099511628211 + (acc.zb & 0x1)
+    sig = sig * 1099511628211 + (U1(acc.zb) & 0x1)
     sig = sig * 1099511628211 + (acc.zc & 0xf)
   }
   assert((sig & 0x3FFFFFFFFFFFFFFF) == 3074296632502308104, "signature mismatch vs iverilog golden rt_bool_cast")

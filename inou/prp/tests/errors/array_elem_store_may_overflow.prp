@@ -1,0 +1,19 @@
+/*
+:name: array_elem_store_may_overflow
+:type: error
+:error: .m. \(range \[1, 16\]\) may not fit its declared range \[0, 15\]
+:help: wrap/saturate
+*/
+
+// User ruling 2026-09-27 #16 extended to array ELEMENTS: an element store
+// whose value MAY leave the element type is a compile error, like a scalar
+// typed local (errors/typed_local_overflow_runtime.prp). It used to be judged
+// only when PROVABLY out of range (errors/array_elem_overflow.prp), so
+// `m[1] = a + 1` compiled and silently dropped the carry of a = 15. An entry
+// picked with an index cannot carry `wrap`/`sat` (04b-attributes.md), so the
+// fix is a typed intermediate (`wrap v = a + 1; m[1] = v`) or a bit-select.
+pub mod array_elem_store_may_overflow(a:U4) -> (r:U4@[0]) {
+  mut m:[2]U4 = 0
+  m[1] = a + 1   // locate_error_here
+  r = m[1]
+}

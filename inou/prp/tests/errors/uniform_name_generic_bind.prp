@@ -1,0 +1,8 @@
+/*
+:name: uniform_name_generic_bind
+:type: error
+:error: reserved
+:help: backticks
+*/
+comb f<`type`>(x) -> (r) { r=x }
+const x=f<type=1>(1) // locate_error_here

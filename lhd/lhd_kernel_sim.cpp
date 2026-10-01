@@ -1459,7 +1459,7 @@ void sim_command(Options& opts, Result& res) {
     if (str_tools::ends_with(f, ".prp")) {
       sources.push_back(f);
     } else {
-      test_sel = f;
+      test_sel = str_tools::canonical_escaped_path(f);  // `cnt`.`basic` selects cnt.basic
     }
   }
   if (sources.empty()) {
@@ -1806,7 +1806,10 @@ void sim_command(Options& opts, Result& res) {
     std::ifstream     dfs(drv_cpp);
     std::stringstream dss;
     dss << dfs.rdbuf();
-    const auto driver_source         = dss.str();
+    const auto driver_source = dss.str();
+    if (!opts.sim_plusargs.empty() && driver_source.find("driver-plusarg-parser: 1") == std::string::npos) {
+      throw Lhd_error{"usage", "this simulator predates +argument support", "run again without --run-only to regenerate it"};
+    }
     const bool baked_vcd             = driver_source.find("vcd::global_timestamp") != std::string::npos;
     const bool baked_observation     = driver_source.find("hierarchical-observation: true") != std::string::npos;
     const bool baked_runtime_support = driver_source.find("runtime-control-support: true") != std::string::npos
@@ -1972,6 +1975,9 @@ void sim_command(Options& opts, Result& res) {
   // --set sim.jobs=N bounds the fan-out (0/unset = one per hardware thread).
   // Pin it to make a build-time measurement reproducible, or to leave the
   // machine usable while a big design builds. Also becomes `ninja -j`.
+  // Under `bazel test` (TEST_SRCDIR set) the default is 2: bazel already runs
+  // tests in parallel, and a per-test fan-out of every hardware thread
+  // oversubscribes the machine several times over.
   int               jobs       = 0;
   for (const auto& [k, v] : opts.sets) {
     if (k == "sim.jobs") {
@@ -1979,7 +1985,7 @@ void sim_command(Options& opts, Result& res) {
     }
   }
   if (jobs <= 0) {
-    jobs = static_cast<int>(std::thread::hardware_concurrency());
+    jobs = std::getenv("TEST_SRCDIR") != nullptr ? 2 : static_cast<int>(std::thread::hardware_concurrency());
   }
   jobs = std::clamp(jobs, 1, static_cast<int>(tus.size()));
 
@@ -2830,50 +2836,10 @@ void sim_command(Options& opts, Result& res) {
       run_args += " --query-plan " + shell_quote(query_plan_path) + " --query-json " + shell_quote(sim_query_path);
     }
   }
-  // Forward each `--arg key=value` as `--key value`, but ONLY when `key` is a
-  // parameter of a SELECTED test (`selected_params`). Two reasons:
-  //  * a key that is a driver control flag (`--arg help=1` -> `--help`, `--arg
-  //    test=x` -> `--test x`, `--arg seed=N`) would otherwise be intercepted by
-  //    the binary and silently skip / restrict the run — a false green;
-  //  * a key that is a real parameter of some test but not a selected one is
-  //    irrelevant to this run, so it is dropped silently (not forwarded).
-  // A key that is a parameter of NO test in the file (`all_params`) is a genuine
-  // typo and is warned about unconditionally (visible in JSON mode too). This
-  // restores the pre-single-driver two-layer guard. `tests` lists the SELECTED
-  // tests' parameters (generate / list_tests already filtered by `test_sel`); for
-  // --run-only re-derive them from the source.
-  if (run_only && tests.empty()) {
-    std::vector<prp_sim::Test_info> lt;
-    std::string                     lerr;
-    if (prp_sim::list_tests(file, test_sel, lt, lerr) == 0) {
-      tests = std::move(lt);
-    }
-  }
-  std::set<std::string> selected_params;
-  for (const auto& t : tests) {
-    for (const auto& p : t.params) {
-      selected_params.insert(p.name);
-    }
-  }
-  std::set<std::string> all_params = selected_params;  // == selected when no test_sel
-  if (!test_sel.empty()) {
-    std::vector<prp_sim::Test_info> allt;
-    std::string                     aerr;
-    if (prp_sim::list_tests(file, "", allt, aerr) == 0) {
-      for (const auto& t : allt) {
-        for (const auto& p : t.params) {
-          all_params.insert(p.name);
-        }
-      }
-    }
-  }
-  for (const auto& [k, v] : opts.sim_args) {
-    if (selected_params.count(k) != 0) {
-      run_args += " " + shell_quote("--" + k) + " " + shell_quote(v);
-    } else if (all_params.count(k) == 0) {
-      std::print(stderr, "lhd sim: warning: --arg {}={} matches no test parameter (ignored)\n", k, v);
-    }
-    // else: a real parameter of an unselected test — valid but not for this run.
+  // Application arguments occupy their own namespace, independent of driver
+  // controls. Preserve text and order for SV compatibility and runtime reads.
+  for (const auto& arg : opts.sim_plusargs) {
+    run_args += " " + shell_quote(arg);
   }
   // Capture the binary's STDOUT (its `puts` output + the per-test PASS/FAIL
   // verdict lines) for parsing + the pretty relay, but let its STDERR pass

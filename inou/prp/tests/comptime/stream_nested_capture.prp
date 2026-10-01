@@ -6,16 +6,18 @@
 */
 
 // A nested lambda is streamed into its own LNAST while the parent is still
-// being built. Runtime captures become hidden named inputs; declaration-point
-// constants are copied into the nested body's prologue.
-const K = 3
+// being built. It sees only the COMPTIME bindings of its enclosing scopes
+// (ruling 2026-09-27 #4): the enclosing input and `mut` are passed as explicit
+// inputs, and the declaration-point comptime constant is copied into the
+// nested body's prologue.
+comptime const K = 3
 
-comb outer(a:u8) -> (r:u10) {
-  mut bias:u8 = 2
-  comb inner(x:u8) -> (y:u10) {
-    y = x + a + bias + K
+comb outer(a:U8) -> (r:U10) {
+  mut bias:U8 = 2
+  comb inner(x:U8, base:U8, off:U8) -> (y:U10) {
+    y = x + base + off + K
   }
-  r = inner(x = 1)
+  r = inner(x = 1, base = a, off = bias)
 }
 
 cassert(outer(a = 4) == 10)

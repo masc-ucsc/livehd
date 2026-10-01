@@ -1,0 +1,42 @@
+/*
+:name: spec_clock_reset_false_child
+:type: simulation
+*/
+// SPEC (clock lane): the constant `false` bound to a `Reset` means "no reset".
+//   qa.md Appendix 6: "Reset is Bool-like: ... the constant `false` means
+//     \"no reset\""
+//   docs 04b: "A `Reset` is Bool-like. It can be computed ..., the constant
+//     `false` means no reset"
+// Child `a` is auto-wired to the caller's reset, child `b` gets `r=false`: when
+// the caller resets at cycle 5, only `a` clears.
+mod cnt(c:Clock, r:Reset, en:Bool) -> (q:U8@[0]) {
+  reg n:U8 = 0
+  if en { wrap n = n + 1 }
+  q = n
+}
+pub mod spec_clock_reset_false_child(clk:Clock, rst:Reset, en:Bool) -> (qa:U8@[0], qb:U8@[0]) {
+  const a = cnt(en=en)
+  const b = cnt(r=false, en=en)
+  qa = a.q
+  qb = b.q
+}
+
+test spec_clock_reset_false_child.no_reset {
+  mut t   = spec_clock_reset_false_child
+  mut ga  = 0
+  mut gb  = 0
+  mut bad = 0
+  tick 10 {
+    const r = clock == 5
+    t.rst = r
+    t.en  = true
+    if r { ga = 0 } else { ga += 1 }
+    gb += 1
+    step
+    if t.qa != ga { bad += 1 }
+    if t.qb != gb { bad += 1 }
+  }
+  puts("reset_false: ga={ga} gb={gb} bad={bad}")
+  assert(bad == 0)
+  assert(gb == 10)
+}

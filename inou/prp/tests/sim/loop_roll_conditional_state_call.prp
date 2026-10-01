@@ -7,18 +7,18 @@
 // module. Generated simulation must retain the loop as std::array + C++ for,
 // and skip each inactive child call with C++ if; source unrolling is not an
 // acceptable implementation of this fixture.
-mod rolled_cond_lane(a:u8) -> (q:u12@[0]) {
-  reg acc:u12 = 0
-  acc = acc + a
+mod rolled_cond_lane(a:U8) -> (q:U12@[0]) {
+  reg acc:U12 = 0
+  wrap acc = acc + a
   q = acc
 }
 
-pub mod rolled_cond_top(mask:u4, stop:u4, a:u8) -> (total:u16@[0]) {
-  mut sum:u16 = 0
+pub mod rolled_cond_top(mask:U4, stop:U4, a:U8) -> (total:U16@[0]) {
+  mut sum:U16 = 0
   for i in 0..<4 {
     if stop#[i] { break }
     if mask#[i] {
-      const q = rolled_cond_lane::[name=lane_state](a=a + i)
+      const q = rolled_cond_lane::[name=lane_state](a=(a + i)#[0..<8])
       sum = sum + q
     }
   }
@@ -35,7 +35,7 @@ test rolled_cond_top.compact_for_and_conditional_child_if {
     if clock == 1 { dut.mask = 0 }
     step
 
-    mut want:u16 = 0
+    mut want:U16 = 0
     if clock == 0 { want = 4 }
     if clock == 2 { want = 8 }
     if dut.total != want { bad = bad + 1 }

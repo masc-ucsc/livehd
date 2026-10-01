@@ -1,0 +1,7 @@
+/*
+:name: open_array_arg_bool_array
+:type: error
+:error: wrong kind
+*/
+comb sum(x:[]U8) -> (total) { total = 0; for a in x { total += a } }
+pub comb top(a:[2]Bool) -> (r) { r = sum(a) } // locate_error_here

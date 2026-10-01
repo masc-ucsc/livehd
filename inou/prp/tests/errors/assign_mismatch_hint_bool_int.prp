@@ -1,0 +1,13 @@
+/*
+:name: assign_mismatch_hint_bool_int
+:type: error
+:error: cannot assign boolean value to .x. \(it is integer\)
+:help: use a new variable, or cast explicitly: .U1\(b\).*Bool\(x\)
+*/
+
+// A bool into an integer variable (and the reverse) is the one assignment
+// mismatch a cast fixes, so its hint names both casts. The tuple/string
+// mismatches get the plain hint (assign_mismatch_hint_no_cast.prp).
+mut x:U4 = 0
+x = true  // locate_error_here
+cputs("x:{x}")

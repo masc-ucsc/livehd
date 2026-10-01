@@ -1,0 +1,16 @@
+/*
+:name: clkrst_bool_clk_is_data
+:type: compile
+*/
+// docs 04b: an input named `clk`/`rst` that is not typed `Clock`/`Reset` is
+// plain data, so binding a constant to it is legal, and a `mod` with a `Bool`
+// named `clk` still gets its own minted `clock:Clock` for its register.
+comb parity(clk:Bool, a:U8) -> (p:U8) {
+  p = a ^ U1(clk)
+}
+pub mod clkrst_bool_clk_is_data(clk:Bool, rst:U1, a:U8) -> (o:U8@[0], r:U8@[0]) {
+  o = parity(clk=true, a=a)
+  reg q:U8 = 0
+  if clk and rst == 0 { q = a }
+  r = q
+}

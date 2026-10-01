@@ -1,0 +1,18 @@
+/*
+:name: spec_types_cast_bool_from_string
+:type: comptime
+:verifier_pass: 9
+:verifier_fail: 0
+*/
+// SPEC docs 04-variables "Boolean": "String input typecase is valid, but anything different than ("0", "1",
+// "-1", "true", "TRUE", "t", "false", "FALSE", "f") raises an assertion failure." Rule: each listed string casts
+// to the Bool it spells.
+cassert(Bool("1"))
+cassert(Bool("-1"))
+cassert(Bool("true"))
+cassert(Bool("TRUE"))
+cassert(Bool("t"))
+cassert(not Bool("0"))
+cassert(not Bool("false"))
+cassert(not Bool("FALSE"))
+cassert(not Bool("f"))

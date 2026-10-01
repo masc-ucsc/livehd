@@ -3,7 +3,9 @@
 
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -11,6 +13,8 @@
 #include "bundle.hpp"
 #include "hlop/dlop.hpp"
 #include "str_tools.hpp"
+
+class Lnast;
 
 class Symbol_table {
 public:
@@ -121,6 +125,11 @@ public:
     return decl != nullptr && !stack.empty() && decl != stack.back();
   }
 
+  // True when a write to `var` here is CONDITIONAL relative to its
+  // declaration: an uncertain if-arm opened since (the temp of an `if`/`match`
+  // expression, written once per arm).
+  [[nodiscard]] bool is_conditional_write(std::string_view var) const { return crosses_uncertain_scope(find_decl_scope(var)); }
+
   bool var(std::string_view key);
   // Declaration pre-step binding: empty bundle, no "0" slot (see impl).
   bool declare_bare(std::string_view var);
@@ -147,11 +156,92 @@ public:
   // (already applied, or re-stashed): erasing a missing key is a harmless no-op.
   absl::flat_hash_map<std::string, std::vector<std::string>> pending_keys_by_root;
 
+  // The fields DECLARED with a type (a dotted declare the runner bakes: a
+  // named-type tuple split into its fields, `mut p:Pkt`), by root then field
+  // path. A value written into one keeps the declared envelope (see set);
+  // any other field envelope only rode in on a value. Transient; cleared
+  // with the stash.
+  absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> typed_fields;
+
   // Extraction origin: tuple_get dst tmp → "src.field" path. The
   // runner's declare/type_spec bake back-flows per-field declared facts to
   // the SOURCE field through this (the typed-tuple-literal lowering types
   // the extraction tmp, not the field). Transient; cleared with the stash.
   absl::flat_hash_map<std::string, std::string> tget_origin;
+  // Names whose CONDITIONAL writes (the arms of an `if`/`match` expression's
+  // temp) did not all copy one origin: none of them may record it
+  // (uPass_constprop::note_copy_origin). Transient; cleared with the stash.
+  absl::flat_hash_set<std::string>              origin_poisoned;
+
+  // Value range {min, max} of each integer OUTPUT of a Sub instance, by
+  // handle, then port (the runner's stash_sub_instance_port_facts; copied to a
+  // user-visible alias of the handle with the pending facts). A range only,
+  // never a declared type: pending_decl_facts deliberately leaves a SIGNED
+  // output unclaimed (an `unsigned(inst.sval)` reinterpret is not
+  // materialized on an instance read), yet the port still bounds the value
+  // for the overflow checks (upass.bitwidth, argument binding). Transient;
+  // cleared with the stash.
+  using Port_range = std::pair<Dlop, Dlop>;
+  absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, Port_range>> sub_output_ranges;
+  // The one output port of a SINGLE-output Sub instance, by handle (the
+  // runner's stash_sub_instance_port_facts; copied to a user-visible alias of
+  // the handle with the pending facts). The handle IS that output
+  // (06-functions: a single-output result auto-unwraps), so a cast of the bare
+  // handle reads `handle.<port>`'s declared facts. Transient; cleared with the
+  // stash.
+  absl::flat_hash_map<std::string, std::string>                                  single_output_port;
+  // The integer outputs of a Sub instance whose port DECLARES no range (an
+  // untyped `mod` output, `-> (o)`), by handle: nothing at the call site bounds
+  // what they carry, so a read of one is an unknown-range value that may not
+  // fit a narrower typed destination (user ruling 2026-09-28 (21)). The runner
+  // marks such a read in wide_values. Copied to a user-visible alias of the
+  // handle with the pending facts. Transient; cleared with the stash.
+  absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>>             opaque_sub_outputs;
+  // Every output port name (flattened, `cmd.op`) of a Sub instance, by handle:
+  // a read of any other field of the handle is absent (`unknown-field`), even
+  // where nothing reads the value. Copied to a user-visible alias of the
+  // handle with the pending facts. Transient; cleared with the stash.
+  absl::flat_hash_map<std::string, std::vector<std::string>>                     sub_output_names;
+  // How a diagnostic names a Sub call-result handle that is a compiler temp
+  // (`%y_0` for `a + cmp(a=a, b=b)`): `cmp(…).lt` (the runner's
+  // stash_sub_instance_port_facts). Transient; cleared with the stash.
+  absl::flat_hash_map<std::string, std::string>                                  call_result_label;
+  // Typed names written (upass.bitwidth) with a value whose range nothing
+  // derived (a concat awaiting its lane widths, an opaque call result): the
+  // overflow check could not judge that write, so the declared type is not a
+  // sound read range for the name any more. Consumers that bound a read by its
+  // declared type (bitwidth, the runner's wrap/sat, cast and argument checks)
+  // skip these. Base names. Transient; cleared with the stash.
+  absl::flat_hash_set<std::string>                                               unchecked_typed;
+  // Values (upass.bitwidth) whose range is unbounded because they are integers
+  // too WIDE for an i64 range (`x << n`, a u40 product, a u64): unlike a value
+  // nothing derived a range for, these may not fit any narrower typed
+  // destination or parameter. The runner adds a read of an opaque Sub output
+  // (opaque_sub_outputs), which is judged the same way. Transient; cleared
+  // with the stash.
+  absl::flat_hash_set<std::string>                                               wide_values;
+  // Test-block INSTANCE HANDLES (`mut d = dut`, bare dotted access sugar for
+  // an anonymous regref): handle name -> the unit it drives. A handle is not a
+  // tuple: its fields are the unit's ports (and, through the sim, its state), so
+  // a poke `d.en = v` is checked against the input's kind and never creates a
+  // field, and a read `d.o` is a runtime value with the port's declared facts.
+  // The runner binds them; constprop reads through them. Transient; cleared
+  // with the stash.
+  absl::flat_hash_map<std::string, std::shared_ptr<Lnast>>                       instance_handles;
+
+  // The range of instance output `path` ("handle.port"); nullptr when unknown.
+  const Port_range* sub_output_range(std::string_view path) const {
+    const auto dot = path.find('.');
+    if (dot == std::string_view::npos) {
+      return nullptr;
+    }
+    const auto h = sub_output_ranges.find(path.substr(0, dot));
+    if (h == sub_output_ranges.end()) {
+      return nullptr;
+    }
+    const auto f = h->second.find(path.substr(dot + 1));
+    return f == h->second.end() ? nullptr : &f->second;
+  }
 
   // Names whose nil initializer was SYNTHESIZED by the runner's
   // inliner (output seeds, untyped-param prologues). The typecheck rule
@@ -210,6 +300,13 @@ public:
   // stores null there). The runner rewrites `t[slot]` / `for x in t` into a
   // copy from the ref. Erased wholesale when the dst tuple is rebuilt.
   absl::flat_hash_map<std::string, std::map<std::string, std::string>> tuple_slot_ref;
+
+  // The SOURCE variable of each positional slot of a tuple literal that was a
+  // bare variable (`(b, a)`): dst tuple -> positional slot -> source name. A
+  // typed-tuple construction binds such a slot to the field it spells (naming
+  // exception 2, 06-functions.md), a fact the folded bundle no longer carries.
+  // Erased wholesale when the dst tuple is rebuilt.
+  absl::flat_hash_map<std::string, std::map<std::string, std::string>> tuple_slot_src;
 
   // Field paths explicitly READ or WRITTEN this run, keyed per unit
   // ("<unit>\t<var>.<field>"). Detupled wire/reg leaves ride plain dotted refs
@@ -289,6 +386,8 @@ private:
   // capture of outer comptime consts).
   Scope*       find_decl_scope(std::string_view var);
   const Scope* find_decl_scope(std::string_view var) const;
+  // An uncertain scope lies between the innermost scope and `decl` (exclusive).
+  bool         crosses_uncertain_scope(const Scope* decl) const;
   const Scope* find_decl_scope_read(std::string_view var) const;
 
 public:

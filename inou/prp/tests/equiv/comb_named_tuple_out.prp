@@ -1,0 +1,49 @@
+/*
+:name: comb_named_tuple_out
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// A `comb` whose output is typed with a NAMED tuple type (`-> (r:Res_t)`,
+// lhdtrack suggestions 2.3 row 9). The inline spelling
+// `-> (r:(a:U4, b:Bool))` always worked; the named one kept `r` as one
+// width-less leaf (the same root cause as a named tuple type on a mod PORT,
+// row 6: a named tuple type slot is never expanded into its fields), so:
+//   * whole write `r = (…)`         -> "output 'r' is never driven";
+//   * field writes `r.a = …`         -> "unknown field `a` on tuple `f`";
+//   * a named-type local copied out  -> "unresolved reference 't'";
+//   * the same whole write on a `mod` -> "output 'r' is never driven".
+type Res_t = (a:U4, b:Bool)
+
+comb whole(x:U4) -> (r:Res_t) {
+  r = (a = x ^ 1, b = x == 3)
+}
+comb fields(x:U4) -> (r:Res_t) {
+  r.a = x ^ 2
+  r.b = x == 1
+}
+comb viatmp(x:U4) -> (r:Res_t) {
+  mut t:Res_t = nil
+  t.a = x ^ 4
+  t.b = x == 5
+  r = t
+}
+mod mwhole(x:U4) -> (r:Res_t@[0]) {
+  r = (a = x ^ 8, b = x == 7)
+}
+
+pub mod top(x:U4) -> (wa:U4@[], wb:Bool@[], fa:U4@[], fb:Bool@[], ta:U4@[], tb:Bool@[], ma:U4@[], mb:Bool@[]) {
+  const w = whole(x)
+  wa = w.a
+  wb = w.b
+  const f = fields(x)
+  fa = f.a
+  fb = f.b
+  const t = viatmp(x)
+  ta = t.a
+  tb = t.b
+  const m = mwhole(x=x)
+  ma = m.r.a
+  mb = m.r.b
+}

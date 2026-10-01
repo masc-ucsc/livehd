@@ -1,0 +1,27 @@
+/*
+:name: tick_body_eq_class
+:type: compile
+*/
+// A `tick` body is emitted verbatim (typecheck never sees it), so the runner
+// kind-checks it with typecheck's own operator table (upass::op_kind). `==`
+// takes operands of one eq-class: integer, range and tuple share one (a scalar
+// is a 1-element flat tuple), so `d.o == t` is legal inside a `tick` exactly
+// as outside it. Before, the tick walk required the SAME kind and rejected it
+// ("`==` requires both operands to be the same type (d.o:integer vs t:tuple)").
+
+pub mod tick_body_eq_class(a:U8) -> (o:U8@[0]) {
+  o = a
+}
+
+test tick_body_eq_class.t {
+  mut d = tick_body_eq_class
+  const t = (5,)
+  d.a = 5
+  step
+  assert(d.o == t)
+  tick 2 {
+    d.a = 5
+    step
+    assert(d.o == t)
+  }
+}

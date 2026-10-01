@@ -1,0 +1,13 @@
+/*
+:name: port_named_like_module
+:type: equiv
+*/
+// User ruling 2026-09-28 (35) forbids a lambda input/output named like a
+// visible ENCLOSING const, type or lambda. A lambda does not enclose itself:
+// an output named like its own lambda (the common Verilog idiom of a port
+// named like its module) is legal, and the Verilog->Pyrope writer emits
+// exactly that shape. Before, the regenerated Pyrope of this module failed to
+// recompile with "variable shadowing: 'port_named_like_module'".
+pub comb port_named_like_module(d:U8) -> (port_named_like_module:U1) {
+  port_named_like_module = d#^[..]
+}

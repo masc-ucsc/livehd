@@ -43,13 +43,60 @@ CMDS=("" compile lec formal scan tool pyrope pass sim synth list describe versio
       "pass liberty" "pass semdiff" "pass analyze" \
       "pyrope fmt" "pyrope lsp" "formal verify" "formal lec")
 
+# Every check below reads one of ~140 distinct help invocations, most of them
+# several times. lhdc runs each distinct argument list ONCE and replays its
+# combined stdout/stderr and exit status afterwards; the distinct invocations
+# are prefetched in parallel. A -c dbg lhd spends ~1 s in dynamic-linker
+# startup per process, so this keeps the test well inside its debug budget
+# without dropping any check.
+# Start empty: a reused TEST_TMPDIR must never replay another binary's output.
+rm -rf "$W/cache"
+mkdir -p "$W/cache"
+lhdc() {
+  local key tmp
+  key=$(printf '%s\n' "$@" | cksum | tr -s ' ' '_')
+  if [ ! -f "$W/cache/$key.rc" ]; then
+    # One temporary name per writer (bash 3.2 has no $BASHPID).
+    tmp=$(mktemp "$W/cache/$key.tmp.XXXXXX") || fail "mktemp"
+    "$LHD" "$@" >"$tmp.out" 2>&1
+    echo $? >"$tmp.rc"
+    mv "$tmp.out" "$W/cache/$key.out"
+    mv "$tmp.rc" "$W/cache/$key.rc"
+    rm -f "$tmp"
+  fi
+  cat "$W/cache/$key.out"
+  return "$(cat "$W/cache/$key.rc")"
+}
+PREFETCH=()
+for mode in pretty jsonl; do
+  for X in "${CMDS[@]}"; do
+    PREFETCH+=("help $X --diag-fmt $mode" "$X --help --diag-fmt $mode")
+  done
+  for alias in lsp semdiff tools; do
+    PREFETCH+=("help $alias --diag-fmt $mode")
+  done
+  PREFETCH+=("tools --help --diag-fmt $mode")
+done
+PREFETCH+=("describe sim" "describe pyrope")
+running=0
+for line in "${PREFETCH[@]}"; do
+  # shellcheck disable=SC2086  # each line is one word-split command, like the checks
+  (set -f; lhdc $line >/dev/null) &
+  running=$((running + 1))
+  if [ "$running" -ge 8 ]; then
+    wait
+    running=0
+  fi
+done
+wait
+
 # ---------------------------------------------------------------------------
 # 1. `lhd help X` == `lhd X --help`, in BOTH render modes.
 # ---------------------------------------------------------------------------
 for mode in pretty jsonl; do
   for X in "${CMDS[@]}"; do
-    a=$("$LHD" help $X --diag-fmt $mode 2>&1); ra=$?
-    b=$("$LHD" $X --help --diag-fmt $mode 2>&1); rb=$?
+    a=$(lhdc help $X --diag-fmt $mode 2>&1); ra=$?
+    b=$(lhdc $X --help --diag-fmt $mode 2>&1); rb=$?
     [ "$ra" = "$rb" ] || fail "help '$X' ($mode): exit $ra vs $rb"
     [ "$a" = "$b" ] || fail "help '$X' ($mode): 'help X' != 'X --help'"$'\n'"help X:  $a"$'\n'"X --help: $b"
     [ "$ra" = "0" ] || fail "help '$X' ($mode): non-zero exit $ra"
@@ -62,8 +109,8 @@ done
 #    jsonl   -> one JSON object with schema_version=1
 # ---------------------------------------------------------------------------
 for X in "${CMDS[@]}"; do
-  p=$("$LHD" help $X --diag-fmt pretty 2>&1)
-  j=$("$LHD" help $X --diag-fmt jsonl 2>&1)
+  p=$(lhdc help $X --diag-fmt pretty 2>&1)
+  j=$(lhdc help $X --diag-fmt jsonl 2>&1)
   case "$p" in
     '{'*) fail "help '$X' --diag-fmt pretty leaked JSON: $p" ;;
   esac
@@ -78,7 +125,7 @@ done
 # the full topic (not a bare "usage:") so a page that collapsed to the general
 # overview (whose usage line is "usage: lhd [flags] <command>") is caught.
 for X in compile lec formal scan tool sim "pass abc" "pyrope fmt"; do
-  "$LHD" help $X --diag-fmt pretty 2>&1 | grep -qF "usage: lhd $X" \
+  lhdc help $X --diag-fmt pretty 2>&1 | grep -qF "usage: lhd $X" \
     || fail "help '$X' pretty is missing its own 'usage: lhd $X ...' line"
 done
 
@@ -91,17 +138,17 @@ for pair in "tool cat" "tool grep" "tool diff" "tool tree" \
             "pass liberty" "pass semdiff" "pass analyze" \
             "pyrope fmt" "pyrope lsp" "formal verify"; do
   # jsonl: the record's "name" is the two-word sub-command.
-  "$LHD" $pair --help --diag-fmt jsonl 2>&1 | grep -qF "\"name\":\"$pair\"" \
+  lhdc $pair --help --diag-fmt jsonl 2>&1 | grep -qF "\"name\":\"$pair\"" \
     || fail "'$pair --help' (jsonl) name is not '$pair'"
   # and it differs from the parent overview.
   parent=${pair%% *}
-  s=$("$LHD" $pair --help --diag-fmt jsonl 2>&1)
-  p=$("$LHD" $parent --help --diag-fmt jsonl 2>&1)
+  s=$(lhdc $pair --help --diag-fmt jsonl 2>&1)
+  p=$(lhdc $parent --help --diag-fmt jsonl 2>&1)
   [ "$s" != "$p" ] || fail "'$pair --help' is identical to the '$parent' overview (not specific)"
 done
 
 # The abc pretty page names abc, not just the pass overview.
-"$LHD" pass abc --help --diag-fmt pretty 2>&1 | grep -q 'lhd pass abc' \
+lhdc pass abc --help --diag-fmt pretty 2>&1 | grep -q 'lhd pass abc' \
   || fail "pass abc --help pretty is not the abc page"
 
 # Every runnable leaf has usage/flags/examples. A leaf with registered --set
@@ -113,7 +160,7 @@ OPTION_LEAVES=(compile lec "formal verify" "formal lec" sim \
 NO_OPTION_LEAVES=("pass single_edge" scan "tool cat" "tool grep" "tool diff" "tool tree" \
                   "pyrope fmt" "pyrope lsp" list describe version)
 for X in "${OPTION_LEAVES[@]}"; do
-  page=$("$LHD" help $X --diag-fmt pretty 2>&1)
+  page=$(lhdc help $X --diag-fmt pretty 2>&1)
   for sec in 'usage:' 'flags:' 'examples:' 'options ('; do
     echo "$page" | grep -qF "$sec" || fail "help '$X' is missing the '$sec' section"
   done
@@ -122,7 +169,7 @@ for X in "${OPTION_LEAVES[@]}"; do
   [ "$shown" -le 5 ] || fail "help '$X' options section lists $shown options (maximum 5)"
 done
 for X in "${NO_OPTION_LEAVES[@]}"; do
-  page=$("$LHD" help $X --diag-fmt pretty 2>&1)
+  page=$(lhdc help $X --diag-fmt pretty 2>&1)
   for sec in 'usage:' 'flags:' 'examples:'; do
     echo "$page" | grep -qF "$sec" || fail "help '$X' is missing the '$sec' section"
   done
@@ -131,24 +178,24 @@ done
 
 # `tool` is a dispatcher like `formal`; each verb has a focused page and JSON
 # record, with no flags leaking from sibling verbs.
-TOOLS=$({ "$LHD" tool --help --diag-fmt pretty; } 2>&1)
+TOOLS=$({ lhdc tool --help --diag-fmt pretty; } 2>&1)
 echo "$TOOLS" | grep -q '^subcommands:' || fail "tool family page must list its subcommands"
 for verb in cat grep diff tree; do
   echo "$TOOLS" | grep -qE "^  $verb " || fail "tool family page omits '$verb'"
 done
-CAT=$({ "$LHD" tool cat --help --diag-fmt pretty; } 2>&1)
-GREP=$({ "$LHD" tool grep --help --diag-fmt pretty; } 2>&1)
-DIFF=$({ "$LHD" tool diff --help --diag-fmt pretty; } 2>&1)
-TREE=$({ "$LHD" tool tree --help --diag-fmt pretty; } 2>&1)
+CAT=$({ lhdc tool cat --help --diag-fmt pretty; } 2>&1)
+GREP=$({ lhdc tool grep --help --diag-fmt pretty; } 2>&1)
+DIFF=$({ lhdc tool diff --help --diag-fmt pretty; } 2>&1)
+TREE=$({ lhdc tool tree --help --diag-fmt pretty; } 2>&1)
 echo "$CAT"  | grep -q -- '--invert-match' && fail "tool cat help leaked grep's --invert-match"
 echo "$CAT"  | grep -q -- '--match'        && fail "tool cat help leaked diff's --match"
 echo "$GREP" | grep -q -- '--invert-match' || fail "tool grep help omits --invert-match"
 echo "$DIFF" | grep -q -- '--match'        || fail "tool diff help omits --match"
 echo "$DIFF" | grep -q -- '--structural'   || fail "tool diff help omits --structural"
 echo "$TREE" | grep -q -- 'kind:<X>'       || fail "tool tree help omits kind selectors"
-GREPJ=$({ "$LHD" tool grep --help --diag-fmt jsonl; } 2>&1)
-DIFFJ=$({ "$LHD" tool diff --help --diag-fmt jsonl; } 2>&1)
-TREEJ=$({ "$LHD" tool tree --help --diag-fmt jsonl; } 2>&1)
+GREPJ=$({ lhdc tool grep --help --diag-fmt jsonl; } 2>&1)
+DIFFJ=$({ lhdc tool diff --help --diag-fmt jsonl; } 2>&1)
+TREEJ=$({ lhdc tool tree --help --diag-fmt jsonl; } 2>&1)
 echo "$GREPJ" | grep -q '"name":"invert-match"' || fail "tool grep JSON omits the pretty page's --invert-match"
 echo "$DIFFJ" | grep -q '"name":"match"'        || fail "tool diff JSON omits the pretty page's --match"
 echo "$DIFFJ" | grep -q '"name":"structural"'   || fail "tool diff JSON omits the pretty page's --structural"
@@ -159,19 +206,19 @@ echo "$TREEJ" | grep -q '"name":"target".*"repeatable":true' \
 # 4. `formal lec` is a behavior-preserving alias of `lec`: its help IS lec help.
 # ---------------------------------------------------------------------------
 for mode in pretty jsonl; do
-  a=$("$LHD" formal lec --help --diag-fmt $mode 2>&1)
-  b=$("$LHD" lec --help --diag-fmt $mode 2>&1)
+  a=$(lhdc formal lec --help --diag-fmt $mode 2>&1)
+  b=$(lhdc lec --help --diag-fmt $mode 2>&1)
   [ "$a" = "$b" ] || fail "formal lec --help ($mode) != lec --help ($mode)"
-  c=$("$LHD" help formal lec --diag-fmt $mode 2>&1)
+  c=$(lhdc help formal lec --diag-fmt $mode 2>&1)
   [ "$c" = "$b" ] || fail "help formal lec ($mode) != lec --help ($mode)"
 done
 
 # `formal` is a FAMILY: its page lists the subcommands and stays short, while each
 # subcommand page is its own. `formal --help` used to print the verify page
 # verbatim, so neither `verify` nor `lec` had a page of its own.
-FAM=$("$LHD" formal --help --diag-fmt pretty 2>&1)
-VER=$("$LHD" formal verify --help --diag-fmt pretty 2>&1)
-LEC=$("$LHD" formal lec --help --diag-fmt pretty 2>&1)
+FAM=$(lhdc formal --help --diag-fmt pretty 2>&1)
+VER=$(lhdc formal verify --help --diag-fmt pretty 2>&1)
+LEC=$(lhdc formal lec --help --diag-fmt pretty 2>&1)
 [ "$FAM" != "$VER" ] || fail "formal --help must not be the verify page"
 [ "$FAM" != "$LEC" ] || fail "formal --help must not be the lec page"
 [ "$VER" != "$LEC" ] || fail "formal verify --help must not be the lec page"
@@ -190,26 +237,26 @@ done
 echo "$VER" | grep -q -- '--list-tests' || fail "formal verify --help must document --list-tests"
 echo "$LEC" | grep -q -- '--list-tests' && fail "lec has no test blocks; its page must not document --list-tests"
 # an unknown subcommand is named, not silently rendered as the family page
-"$LHD" help formal bogus --diag-fmt pretty >/dev/null 2>&1 \
+lhdc help formal bogus --diag-fmt pretty >/dev/null 2>&1 \
   && fail "help formal bogus must fail"
 
 # ---------------------------------------------------------------------------
 # 5. `help sim` is the sim COMMAND, distinct from the `sim` emit-kind describe
 #    returns (the collision the jsonl help path must resolve correctly).
 # ---------------------------------------------------------------------------
-simj=$("$LHD" help sim --diag-fmt jsonl 2>&1)
+simj=$(lhdc help sim --diag-fmt jsonl 2>&1)
 echo "$simj" | grep -q 'test` blocks' || fail "help sim (jsonl) is not the sim command record"
 # The machine record must document the same probe flags as the pretty page /
 # parse_args (the jsonl record was once missing probe-from/probe-to).
 for f in probe-from probe-to vcd-from vcd-to; do
   echo "$simj" | grep -qF "\"name\":\"$f\"" || fail "sim record (jsonl) missing the --$f flag"
 done
-"$LHD" describe sim 2>&1 | grep -q 'Executable C++ simulation' \
+lhdc describe sim 2>&1 | grep -q 'Executable C++ simulation' \
   || fail "describe sim should still be the sim emit-kind record"
 # Same collision for `pyrope` (command family vs emit-kind).
-"$LHD" help pyrope --diag-fmt jsonl 2>&1 | grep -q 'developer tools' \
+lhdc help pyrope --diag-fmt jsonl 2>&1 | grep -q 'developer tools' \
   || fail "help pyrope (jsonl) is not the pyrope overview record"
-"$LHD" describe pyrope 2>&1 | grep -q 'Pyrope source' \
+lhdc describe pyrope 2>&1 | grep -q 'Pyrope source' \
   || fail "describe pyrope should still be the pyrope emit-kind record"
 
 # ---------------------------------------------------------------------------
@@ -217,8 +264,8 @@ done
 #    and neither face omits a real command (pretty & jsonl must not diverge on
 #    the command set — e.g. `formal` must appear on BOTH).
 # ---------------------------------------------------------------------------
-gp=$("$LHD" help --diag-fmt pretty 2>&1)
-gj=$("$LHD" help --diag-fmt jsonl 2>&1)
+gp=$(lhdc help --diag-fmt pretty 2>&1)
+gj=$(lhdc help --diag-fmt jsonl 2>&1)
 echo "$gp" | grep -q '^commands:' || fail "general help (pretty) is missing the 'commands:' section"
 echo "$gj" | grep -q '"commands":\[' || fail "general help (jsonl) is missing the commands array"
 for c in compile sim lec formal scan tool pyrope pass list describe version; do
@@ -226,12 +273,12 @@ for c in compile sim lec formal scan tool pyrope pass list describe version; do
   echo "$gj" | grep -qF "\"name\":\"$c\"" || fail "general help (jsonl) omits the '$c' command"
 done
 # `lhd help` and `lhd --help` are the same general page.
-[ "$("$LHD" --help --diag-fmt pretty 2>&1)" = "$gp" ] || fail "lhd --help != lhd help (general page)"
+[ "$(lhdc --help --diag-fmt pretty 2>&1)" = "$gp" ] || fail "lhd --help != lhd help (general page)"
 
 # ---------------------------------------------------------------------------
 # 7. An unknown sub-command is a clean error in both modes (non-zero, hint).
 # ---------------------------------------------------------------------------
-"$LHD" pass bogus --help --diag-fmt jsonl >"$W/o7" 2>&1 && fail "pass bogus --help must be non-zero"
+lhdc pass bogus --help --diag-fmt jsonl >"$W/o7" 2>&1 && fail "pass bogus --help must be non-zero"
 grep -q "unknown pass subcommand 'bogus'" "$W/o7" || fail "pass bogus --help: hint missing -> $(cat "$W/o7")"
 
 # ---------------------------------------------------------------------------
@@ -239,16 +286,16 @@ grep -q "unknown pass subcommand 'bogus'" "$W/o7" || fail "pass bogus --help: hi
 #    lsp -> `pyrope lsp`, semdiff -> `pass semdiff`, tools -> `tool`.
 # ---------------------------------------------------------------------------
 for mode in pretty jsonl; do
-  [ "$("$LHD" help lsp --diag-fmt $mode 2>&1)" = "$("$LHD" help pyrope lsp --diag-fmt $mode 2>&1)" ] \
+  [ "$(lhdc help lsp --diag-fmt $mode 2>&1)" = "$(lhdc help pyrope lsp --diag-fmt $mode 2>&1)" ] \
     || fail "help lsp ($mode) != help pyrope lsp"
-  [ "$("$LHD" help semdiff --diag-fmt $mode 2>&1)" = "$("$LHD" help pass semdiff --diag-fmt $mode 2>&1)" ] \
+  [ "$(lhdc help semdiff --diag-fmt $mode 2>&1)" = "$(lhdc help pass semdiff --diag-fmt $mode 2>&1)" ] \
     || fail "help semdiff ($mode) != help pass semdiff"
   # `tools` is the accepted alias for `tool`: help parity must hold on both
   # spellings, and `lhd help tools` must match `lhd tools --help`.
-  [ "$("$LHD" help tools --diag-fmt $mode 2>&1)" = "$("$LHD" help tool --diag-fmt $mode 2>&1)" ] \
+  [ "$(lhdc help tools --diag-fmt $mode 2>&1)" = "$(lhdc help tool --diag-fmt $mode 2>&1)" ] \
     || fail "help tools ($mode) != help tool"
-  a=$("$LHD" help tools --diag-fmt $mode 2>&1); ra=$?
-  b=$("$LHD" tools --help --diag-fmt $mode 2>&1); rb=$?
+  a=$(lhdc help tools --diag-fmt $mode 2>&1); ra=$?
+  b=$(lhdc tools --help --diag-fmt $mode 2>&1); rb=$?
   { [ "$a" = "$b" ] && [ "$ra" = "$rb" ] && [ "$ra" = "0" ]; } \
     || fail "help tools ($mode) != tools --help (rc $ra/$rb)"
 done

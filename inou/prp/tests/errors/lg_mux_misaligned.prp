@@ -10,8 +10,8 @@
 // mixes cycles is a COMB op over values from different stages: here a state
 // reg's q (home stage 0; the LNAST pass cannot derive it, so the LG checker
 // owns the diagnosis) added to a stage[1]-delayed value.
-mod pick(a:u8, b:u8) -> (out:u10@[1]) {
-  reg acc:u8 = 0
+mod pick(a:U8, b:U8) -> (out:U10@[1]) {
+  reg acc:U8 = 0
   acc = acc ^ a
   stage[1] bd = b
   out = acc + bd

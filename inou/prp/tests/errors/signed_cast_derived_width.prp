@@ -1,0 +1,16 @@
+/*
+:name: signed_cast_derived_width
+:type: error
+:tolg: 1
+:error: `Signed\(...\)` reinterpret needs a fully-typed input
+:help: give the operand a sized type
+*/
+// `Signed(x)` keeps x's bit width and re-reads its top bit as the sign, so x
+// must have a DECLARED width (a typed name, a bit-select). An arithmetic
+// result only has the range the bitwidth analysis derived, and that depends
+// on how tight the analysis is: `a / 17 * 17` derives [0, 255] (8 bits, so 255
+// reads as -1) while the identical `a - a % 17` derives [-16, 255] (9 bits,
+// 255 stays 255). Both used to compile to different values.
+pub mod signed_cast_derived_width(a:U8) -> (y1:S16@[0]) {
+  y1 = Signed(a / 17 * 17)   // locate_error_here
+}

@@ -11,12 +11,10 @@
 // bench-scale one (64 taps, 16-bit) is the `matched_filter` core in
 // ../lhdsuite.
 //
-// `:equiv_engine: cvc5` (lhd lec only, no yosys lgcheck): the coefficient
-// register is written only under `load`, so in yosys' miter the two sides'
-// unconstrained initial coefficient states never re-synchronize and
-// `sat -tempinduct` cannot converge — measured at induction step 106 with a
-// 14M-variable problem, still running after 6 CPU-minutes, at 4-bit widths.
-// lhd's flop-cut inductive miter pairs the registers and proves it in ms.
+// Two targets run it (inou/prp/BUILD, _EQUIV_SIM): prp-equiv-matched_filter
+// proves it against matched_filter.v (lhd lec, then the yosys cross-check,
+// which pairs the registers by name), and prp-sim-equiv-matched_filter runs
+// `test top.pulse_compression` below.
 //
 //   N taps; the return signal `x` enters one sample per cycle and walks down
 //   the tap chain (one register per tap).  Each tap multiplies its delayed
@@ -39,9 +37,9 @@ comptime const LOG2N = 3
 // `timecheck=false`: a FIR mixes delays by design — the sample register is a
 // pipeline stage (cycle 1) and the coefficient register is state (cycle 0),
 // and the product needs both. The cycle typechecker has no delay-line notion.
-mod tap::[timecheck=false](x_in:s4, c_in:s4, load:bool) -> (x_out:s4@[0], c_out:s4@[0], p:s8@[0]) {
-  reg x_r:s4 = 0
-  reg c_r:s4 = 0
+mod tap::[timecheck=false](x_in:S4, c_in:S4, load:Bool) -> (x_out:S4@[0], c_out:S4@[0], p:S8@[0]) {
+  reg x_r:S4 = 0
+  reg c_r:S4 = 0
   x_out = x_r
   c_out = c_r
   p     = x_r * c_r
@@ -49,16 +47,18 @@ mod tap::[timecheck=false](x_in:s4, c_in:s4, load:bool) -> (x_out:s4@[0], c_out:
   if load { c_r = c_in }
 }
 
-mod add_node(a:s12, b:s12) -> (s:s12@[0]) {
-  reg s_r:s12 = 0
+// `timecheck=false` here too: `s_r` is an always-written register read at
+// the `@[0]` output (a tree-level stage the cycle typechecker cannot see).
+mod add_node::[timecheck=false](a:S12, b:S12) -> (s:S12@[0]) {
+  reg s_r:S12 = 0
   s = s_r
   wrap s_r = a + b
 }
 
-pub mod top(x:s4, c_in:s4, load:bool) -> (y:s12@[0]) {
-  mut xs:s4 = x
-  mut cs:s4 = c_in
-  mut v:[N]s12 = 0
+pub mod top(x:S4, c_in:S4, load:Bool) -> (y:S12@[0]) {
+  mut xs:S4 = x
+  mut cs:S4 = c_in
+  mut v:[N]S12 = 0
   for i in 0..<N {
     const t = tap(x_in=xs, c_in=cs, load=load)
     xs   = t.x_out
@@ -78,15 +78,15 @@ pub mod top(x:s4, c_in:s4, load:bool) -> (y:s12@[0]) {
 
 test top.pulse_compression {
   mut dut = top
-  mut peak:s12      = 0
+  mut peak:S12      = 0
   mut peak_cycle    = 0
-  mut sumsq:s12     = 0
+  mut sumsq:S12     = 0
   mut early_nonzero = false
-  mut y11:s12 = 0
-  mut y16:s12 = 0
-  mut y17:s12 = 0
-  mut y19:s12 = 0
-  mut y20:s12 = 0
+  mut y11:S12 = 0
+  mut y16:S12 = 0
+  mut y17:S12 = 0
+  mut y19:S12 = 0
+  mut y20:S12 = 0
   // A test block sees no file-scope comptime constant, so N=8 / LOG2N=3 are
   // spelled out below.
   tick 40 {

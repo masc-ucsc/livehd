@@ -1,0 +1,28 @@
+/*
+:name: loop_elem_store_iteration_fit
+:type: simulation
+*/
+// User ruling 16 judges an array element store against the element type. In a
+// `for` loop it must judge each ITERATION, like the hand-unrolled code does:
+// `m[i] = (i*5) - (i*2)` stores 0, 3, 6, 9, which all fit a U4. A rolled body
+// sees `i` as its whole domain at once ([-6, 15]) and used to reject the
+// program; such a loop is unrolled instead, as for a scalar typed write.
+pub mod loop_elem_store_iteration_fit(s:U2, a:U4) -> (q:U4@[0]) {
+  mut m:[4]U4 = 0
+  for i in 0..<4 {
+    m[i] = (i * 5) - (i * 2) + (a & 0)
+  }
+  q = m[s]
+}
+
+test loop_elem_store_iteration_fit.t {
+  mut dut = loop_elem_store_iteration_fit
+  mut bad = 0
+  tick 4 {
+    dut.s = clock
+    dut.a = 7
+    step
+    if dut.q != clock * 3 { bad += 1 }
+  }
+  assert(bad == 0, "3*i in lane i")
+}

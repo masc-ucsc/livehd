@@ -1,0 +1,40 @@
+/*
+:name: bitnot_unsigned
+:type: equiv
+:verilog_top: bitnot_unsigned
+:pyrope_top: bitnot_unsigned
+*/
+// User ruling 26 (2026-09-28): `~x` on an UNSIGNED-typed operand of known
+// width N (`uN`, `Unsigned(bits=N)`, a slice `x#[..]`, a `uN(...)` cast) flips
+// its N bits -- `(2^N - 1) - x`, a `uN` result -- while a Signed (`sN`)
+// operand keeps `-x - 1`. `~(a & b)` / `~(a | b)` / `~(a ^ b)` of two unsigned
+// operands flip the WIDER operand's width. User ruling 2026-09-29 (44): an
+// UNTYPED runtime operand is a compile error (errors/bitnot_untyped_*.prp), so
+// `t` below is typed signed.
+//
+// The golden spells every width explicitly, so it states the ruling
+// independently of LiveHD. The LGraph side must keep using the existing `Not`
+// cell (plus a `Get_mask` to N bits only for an unsigned operand), so this pair
+// also checks cgen, the LEC encoding, and -- through prp-v2prp2v -- that the
+// Verilog reader and the Pyrope writer keep Verilog's `~` exact.
+pub comb bitnot_unsigned(x:U1, w:U3, r:U2, s:S4, a:U3, b:U5, big:U80)
+  -> (nx:U1, nw8:U8, nr:U1, ncast:U8, nq:U6, nbig:U80, ns:S4, nt:S5
+     , nand_o:U5, nor_o:U5, xnor_o:U5, nmix:S6, eqs:U3, fo:U1) {
+  nx     = ~x                  // u1: 0 <-> 1
+  nw8    = ~w                  // a u3 flips its own 3 bits, even into a u8
+  nr     = ~r#[1]              // a one-bit slice is a u1
+  ncast  = ~U8(w)              // the cast types it u8
+  const q:Unsigned(bits=6) = w
+  nq     = ~q
+  nbig   = ~big                // hlop-wide: 80 bits flip
+  ns     = ~s                  // signed: -s - 1
+  const t:S5 = w + 1           // a signed value
+  nt     = ~t                  // signed: -(w + 1) - 1
+  nand_o = ~(a & b)            // 31 - (a & b)
+  nor_o  = ~(a | b)
+  xnor_o = ~(a ^ b)
+  nmix   = ~(s & a)            // a signed operand keeps -v - 1
+  eqs    = (U1(~x == 1) << 2) | (U1(~w == 5) << 1) | U1(~s == -3)
+  const f:U1 = if r#[0] == 1 { ~x } else { x }   // the lhdtrack CDC toggle: no wrap
+  fo     = f
+}

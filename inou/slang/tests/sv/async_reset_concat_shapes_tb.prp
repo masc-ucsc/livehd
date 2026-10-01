@@ -6,11 +6,11 @@
 // headers.
 const dut = import("lg:async_reset_concat_shapes")
 
-test concat_shapes.reset {
+test concat_shapes.`reset` {
   mut acc = dut
   const wide_rst = 0x8123456789abcdef0123
   const data     = 0xffffffffffffffffabcd
-  mut cycle:u32 = 0
+  mut cycle:U32 = 0
   tick 4 {
     acc.rst  = cycle != 2
     acc.data = if cycle == 1 or cycle == 2 { data } else { 0 }

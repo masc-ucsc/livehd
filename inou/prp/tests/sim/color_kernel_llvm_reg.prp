@@ -5,14 +5,14 @@
 // A wide state endpoint exercises the register ABI across three packed limbs.
 // Reset, enabled capture, and hold must agree with the Slop backend while the
 // existing phase barrier retains ownership of the actual Q commit.
-pub mod llvm_reg(en:bool, d:u130) -> (q:u130@[0], lane:u2@[0]) {
-  reg state:u130 = (1 << 129) | (1 << 65) | 3
+pub mod llvm_reg(en:Bool, d:U130) -> (q:U130@[0], lane:U2@[0]) {
+  reg state:U130 = (1 << 129) | (1 << 65) | 3
   q = state
   // The planner resolves this packed field to an LSB-aligned internal value.
   // LLVM must honor that exact-use extraction inside the color, not apply the
   // concat's original [5,7) coordinates to the already narrow two-bit lane.
-  const state_lane:u2 = state#[9..=10]
-  const data_lane:u5  = d#[0..=4]
+  const state_lane:U2 = state#[9..=10]
+  const data_lane:U5  = d#[0..=4]
   lane = (data_lane, state_lane)#[5..=6]
   if en {
     state = ((d << 17) ^ (d >> 7) ^ (1 << 125))#[0..=129]

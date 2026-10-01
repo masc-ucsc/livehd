@@ -54,8 +54,8 @@ rc=0
 
 gen() { # $1 = attribute text (may be empty)
   cat >"${TMP}/m.prp" <<EOF
-pub mod m$1(clk:u1, a1:u2, a2:u2, d2:u2, a4:u2) -> (o1:u2@[], o4:u2@[]) {
-  reg mem:[4]u2$2
+pub mod m$1(clk:Clock, a1:U2, a2:U2, d2:U2, a4:U2) -> (o1:U2@[], o4:U2@[]) {
+  reg mem:[4]U2$2
   o1 = mem[a1]
   mem[a2] = d2
   o4 = mem[a4]
@@ -135,8 +135,8 @@ fi
 LIB=inou/prp/tests/abc/test.lib
 if [ -f "${LIB}" ]; then
   cat >"${TMP}/w.prp" <<'EOF'
-pub mod w(clk:u1, a:u2, d2:u2, d3:u2, ra:u2) -> (o:u2@[]) {
-  reg mem:[4]u2:[ordering="fwd"]
+pub mod w(clk:Clock, a:U2, d2:U2, d3:U2, ra:U2) -> (o:U2@[]) {
+  reg mem:[4]U2:[ordering="fwd"]
   mem[a] = d2
   mem[a] = d3
   o = mem[ra]

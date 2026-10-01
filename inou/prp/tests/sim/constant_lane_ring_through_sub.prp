@@ -7,19 +7,19 @@
 // pick.o. At bit grain it is an acyclic constant path: pick.o reads only bus[2],
 // which is tied to one. The occurrence scheduler must bind that constant lane
 // directly instead of retaining the assembled bus as its producer.
-mod pick::[timecheck=false](bus:u3) -> (o:u1@[]) {
+mod pick::[timecheck=false](bus:U3) -> (o:U1@[]) {
   o = bus#[2]
 }
 
-pub mod constant_lane_ring::[timecheck=false](d:u8) -> (o:u1@[], ctl:u8@[]) {
-  wire bus:u3 = nil
+pub mod constant_lane_ring::[timecheck=false](d:U8) -> (o:U1@[], ctl:U8@[]) {
+  wire bus:U3 = nil
   mut selected = pick(bus=bus)
   bus#[0] = selected
   bus#[1] = 0
   bus#[2] = 1
   o = selected
 
-  reg value:u8 = 0
+  reg value:U8 = 0
   value = d
   ctl = value
 }
@@ -29,7 +29,7 @@ test constant_lane_ring.constant_slice_breaks_false_port_cycle {
   mut bad_o = 0
   mut bad_ctl = 0
   tick 6 {
-    mut dv:u8 = clock + 20
+    mut dv:U8 = clock + 20
     acc.d = dv
     step
     if acc.o != 1 {

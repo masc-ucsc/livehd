@@ -1,0 +1,34 @@
+/*
+:name: generic_reg_array_ports
+:type: equiv
+:verilog_top: generic_reg_array_ports
+:pyrope_top: generic_reg_array_ports
+:lec_top: generic_reg_array_ports
+*/
+// lhdtrack L3 (suggestions 2.2(a)/(b)): a reg array whose count AND element
+// width are generics (`reg r:[N]Unsigned(bits=W)`, a shift register here) and
+// array ports of the same generic shape (`v:[N]Unsigned(bits=W)` in,
+// `o:[N]Unsigned(bits=W)` out). This file is the literal-width REFERENCE of the
+// group (two shift registers, [4]U8 and [3]U5); generic_reg_array_ports_1.prp
+// is the generic module specialized at <N=4, W=8> and <N=3, W=5>.
+// Pyrope reads are in program order: `q` and `o` read the array AFTER the
+// shift, so they see this cycle's shifted-in values.
+pub mod generic_reg_array_ports(en:Bool, d:U8, v4:[4]U8, v3:[3]U5) -> (q8:U8@[0], q5:U5@[0], o8:[4]U8@[0], o5:[3]U5@[0]) {
+  reg a:[4]U8 = 0
+  reg b:[3]U5 = 0
+  if en {
+    a[3] = a[2]
+    a[2] = a[1]
+    a[1] = a[0]
+    a[0] = d
+    b[2] = b[1]
+    b[1] = b[0]
+    b[0] = d#[0..<5]
+  }
+  q8 = a[3]
+  q5 = b[2]
+  o8 = 0
+  o5 = 0
+  for i in 0..<4 { o8[i] = v4[i] ^ a[i] }
+  for i in 0..<3 { o5[i] = v3[i] ^ b[i] }
+}

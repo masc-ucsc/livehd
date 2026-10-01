@@ -1,0 +1,13 @@
+/*
+:name: spec_types_lowercase_output_name
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+// Former lowercase type spellings are ordinary identifiers (07-typesystem.md).
+pub comb spec_types_lowercase_output_name(a:Bool) -> (bool:Bool) {
+  `bool` = a
+}
+
+cassert(spec_types_lowercase_output_name(a=true) == true)

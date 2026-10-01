@@ -8,8 +8,8 @@
 // case-sensitive, so `total` and `Total` are separate nets — but because the
 // old policy folded them, the compiler warns that the program's meaning may
 // have changed.
-comb foo(a:u8) -> (z:u8) {
-  mut total:u8 = a
-  mut Total:u8 = a + 1    // locate_warning_here  (differs only by case from `total`)
-  z = total + Total
+comb foo(a:U8) -> (z:U8) {
+  mut total:U8 = a
+  wrap mut Total:U8 = a + 1    // locate_warning_here  (differs only by case from `total`)
+  wrap z = total + Total
 }

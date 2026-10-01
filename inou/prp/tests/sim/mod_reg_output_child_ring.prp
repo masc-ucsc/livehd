@@ -1,0 +1,58 @@
+/*
+:name: mod_reg_output_child_ring
+:type: simulation
+*/
+
+// A caller ring through a child's OUTPUT-LIST register is sequential, not
+// combinational (lhdtrack suggestions 2.1). `-> (reg q:U4@[0] = 8)` is the
+// documented cycle-stable spelling of a registered output (06-functions.md
+// "Cycle rules for mod outputs"; user ruling 2026-09-27: a `reg` in a mod
+// OUTPUT list is a persistent state register). The conditional write makes it
+// a state register at its home stage `@[0]`, and its q IS the output, so the
+// fed-back `d` only reaches `q`'s NEXT value: the ring
+// `gr -> st.d -> q(flop) -> st.q -> gr` is cut by the flop.
+//
+// Before the 2.1 fix, upass.tolg's time-checker modeled a Sub instance as a
+// crossbar (every input feeds every output) and refused the design:
+//   upass.tolg: combinational loop in 'mod_reg_output_child_ring.top'
+// No `::[timecheck=false]` anywhere: the fix must accept the plain spelling.
+// The body-reg spelling is sim/mod_state_feedback_through_child.prp.
+mod st(en:Bool, d:U4) -> (reg q:U4@[0] = 8) {
+  if en { q = d }
+}
+
+pub mod top(req:U4) -> (g:U4@[0], s:U4@[0]) {
+  wire gr:U4 = nil
+  const m = st(en=req != 0, d=gr)
+  gr = req & ~m
+  g = gr
+  s = m
+}
+
+test top.reg_output_child_in_ring {
+  mut dut  = top
+  mut r:U4 = 8
+  mut bad  = 0
+  mut seen = 0
+  tick 10 {
+    mut rq:U4 = (clock * 7 + 5) & 15
+    if clock == 4 { rq = 0 }
+    if clock == 7 { rq = 0 }
+    dut.reset = clock == 0
+    dut.req = rq
+    // Golden next state: q' = (req != 0) ? (req & ~q) : q; reset forces 8.
+    if clock == 0 {
+      r = 8
+    } elif rq != 0 {
+      r = rq & ~r
+    }
+    step
+    seen = seen + 1
+    // After `step` the child's register holds q', and the grant is this
+    // cycle's (still-driven) request masked by it.
+    if dut.s != r { bad = bad + 1 }
+    if dut.g != (rq & ~r) { bad = bad + 1 }
+  }
+  assert(seen == 10, "the comparisons ran (guards against a vacuous pass)")
+  assert(bad == 0, "the output-list register loads the grant fed back through the wire")
+}

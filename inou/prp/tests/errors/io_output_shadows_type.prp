@@ -1,0 +1,14 @@
+/*
+:name: io_output_shadows_type
+:type: error
+:error: variable shadowing: 'Nib' is already declared in an enclosing scope
+:help: rename the output
+*/
+
+// User ruling 2026-09-28 (35): a lambda OUTPUT named like a visible enclosing
+// type is shadowing. Before, it compiled and the body's `Nib` meant the port.
+type Nib = U4
+
+pub mod io_output_shadows_type(a:U4) -> (Nib:U4@[0]) {  // locate_error_here
+  Nib = a
+}

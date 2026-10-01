@@ -1,0 +1,23 @@
+/*
+:name: generic_array_xfill_elem_1
+:lec_expect: proven
+*/
+// The same design under `::[timecheck=false]`, the attribute every Pyrope unit
+// regenerated from Verilog carries. That unit takes the streaming SSA path,
+// which left each element store on the raw array name while the reads used
+// the whole-array version: `o` came out all-X.
+pub mod generic_array_xfill_elem<Depth=2>::[timecheck=false](a:U32, b:U32, c:U32) -> (o:U64@[0], p:U32@[0]) {
+  mut w:[Depth]U64 = 0
+  w = 0sb?
+  mut lo = w[0]
+  lo#[0..=31] = a
+  w[0] = lo
+  mut hi = w[0]
+  hi#[32..=63] = b
+  w[0] = hi
+  mut e1 = w[1]
+  e1#[0..=31] = c
+  w[1] = e1
+  o = w[0]
+  p = w[1]#[0..=31]
+}

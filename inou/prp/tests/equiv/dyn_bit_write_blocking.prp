@@ -1,0 +1,27 @@
+/*
+:name: dyn_bit_write_blocking
+:type: equiv
+:verilog_top: dyn_bit_write_blocking
+:pyrope_top: dyn_bit_write_blocking
+*/
+// A BLOCKING runtime-position write in a combinational Verilog process
+// (`w = d; w[b] = x;`, see the golden .v). inou/slang lowered it as an
+// explicit read-modify-write, `(w & ~(mask << b)) | (x << b)`, while the
+// nonblocking form was already a range write; the `~` of that untyped runtime
+// mask is a compile error once the regenerated Pyrope is recompiled (ruling
+// 44), so prp-v2prp2v of this golden failed. Both forms now lower to the same
+// bit or range write (`w#[b] = x`, `u#[c..=(c + 3)] = v`). The golden of
+// dyn_bit_write_var is written bit by bit to stay clear of it; this one is not.
+pub mod dyn_bit_write_blocking(d:U16, b:U4, c:U3, x:U1, v:U4) -> (q:U16@[0], r:U16@[0], s:S16@[0]) {
+  mut w:U16 = d
+  w#[b] = x
+  q = w
+  mut u:U16 = d
+  u#[c..+4] = v
+  u#[b] = x
+  r = u
+  mut t:U16 = d
+  t#[c..+4] = v
+  t#[b] = x
+  s = Signed(t)
+}

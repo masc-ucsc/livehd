@@ -31,9 +31,9 @@
 // the previous commit — both are acceptable, so those ticks are not observed.
 // Schedule validated against iverilog (always_latch pair golden): q at end of
 // c0..c4 = x,5,5,77,77; asserts only at c2 and c4.
-pub mod ms8(clk:bool, d:u8) -> (q:u8@[0]) {
-  reg m:u8:[latch=true]
-  reg s:u8:[latch=true]
+pub mod ms8(clk:Bool, d:U8) -> (q:U8@[0]) {
+  reg m:U8:[latch=true]
+  reg s:U8:[latch=true]
   q = s
   if !clk {
     m = d
@@ -50,7 +50,7 @@ test ms8.one_cycle_latency {
     // c2: clk=0 slave commits 5 (assert), master opens on 77; c3: clk=1 master
     // commits 77, slave opens; c4: clk=0 slave commits 77 (assert)
     acc.clk = (clock == 1) or (clock == 3)
-    mut dv:u8 = 33
+    mut dv:U8 = 33
     if clock <= 1 {
       dv = 5
     } elif (clock == 2) or (clock == 3) {

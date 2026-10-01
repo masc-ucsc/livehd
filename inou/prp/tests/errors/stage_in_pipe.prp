@@ -5,7 +5,7 @@
 :help: stage inference
 */
 
-pipe[2] f(a:u8) -> (c:u8) {
+pipe[2] f(a:U8) -> (c:U8) {
   stage[2] x = a   // locate_error_here
   c = x
 }

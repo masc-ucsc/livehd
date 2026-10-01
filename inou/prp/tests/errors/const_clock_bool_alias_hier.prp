@@ -1,0 +1,32 @@
+/*
+:name: const_clock_bool_alias_hier
+:type: error
+:tolg: 1
+:error: input .en. of .cca_mid. is bound to a constant, which holds the clock gate of register .r. of .cca_leaf. off
+:help: pass a non-constant enable to .en.
+*/
+
+// User rulings 2026-09-28 (27)/(41) and docs 04b: a register whose clock
+// resolves to a constant is an error, traced through the instance hierarchy --
+// including a clock a constant holds off through a gate (docs 04b: "A register
+// whose clock a constant holds off through a `Clock_cell` never ticks and is
+// also a compile error"). `en=false` stops `cca_mid`'s gate, whose output
+// clocks `cca_leaf`'s `r` through an alias. The by-type `Clock`-bind check
+// does not apply (`en` is a `Bool`), so the reach-based tracing catches it.
+// (errors/const_clock_alias.prp and friends fail earlier, at the by-type
+// check, because they bind a constant to a `Clock` port.)
+mod cca_leaf(ck:Clock, d:U4) -> (q:U4@[1]) {
+  reg r:U4:[clock_pin=ck] = 0
+  r = d
+  q = r
+}
+mod cca_mid(ck:Clock, en:Bool, d:U4) -> (q:U4@[1]) {
+  const g  = Clock(clock_pin=ck, enable=en)
+  const c2 = g
+  const l  = cca_leaf(ck=c2, d=d)
+  q = l.q
+}
+pub mod const_clock_bool_alias_hier(clk:Clock, d:U4) -> (q:U4@[1]) {
+  const m = cca_mid(ck=clk, en=false, d=d)   // locate_error_here
+  q = m.q
+}

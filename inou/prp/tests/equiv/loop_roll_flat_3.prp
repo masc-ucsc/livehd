@@ -6,8 +6,8 @@
 */
 // Negative control: one lane is missing. Complete live-cone accounting and the
 // additive term multiset must reject the count mismatch before solver fallback.
-pub mod top(x:u8, y:u8) -> (z:u10@[0]) {
-  mut acc:u10 = 0
+pub mod top(x:U8, y:U8) -> (z:U10@[0]) {
+  mut acc:U10 = 0
   for i in 0..<3 {
     acc = acc + (if x > i { y } else { 0 })
   }

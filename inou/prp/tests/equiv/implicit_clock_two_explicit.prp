@@ -1,0 +1,35 @@
+/*
+:name: implicit_clock_two_explicit
+:type: equiv
+:verilog_top: implicit_clock_two_explicit
+:pyrope_top: implicit_clock_two_explicit
+*/
+// User ruling 2026-09-27 (04b "Implicit clock and reset"): two implicit-clock
+// candidates (`clock` and `clk`) are a compile error only "when a register
+// relies on the implicit one" (errors/implicit_clock_ambiguous.prp). A
+// multi-clock module that names the clock on EVERY register is legal and must
+// keep compiling to two separate clock domains: a guard against an over-eager
+// fix that errors whenever two candidate inputs exist. Both registers use the
+// single implicit reset `rst`.
+//
+// prp-equiv and prp-statematch pass today. prp-v2prp2v FAILS today ("native
+// Pyrope proof" REFUTED): the slang reader (lower_ff_process, `implicit_clk`)
+// omits `clock_pin` for ANY process clocked by an input named `clk` or
+// `clock`, so the golden reads back as two implicit-clock registers and tolg
+// binds both to the first candidate, `clock`. The same collapse happens to
+// BOTH sides of `lhd lec` (it reads Verilog with slang), which is why native
+// lec also proves a golden with the two clocks SWAPPED; only the lgyosys
+// cross-check refutes that one. Once ruling 10 lands in tolg, the reader must
+// write an explicit `clock_pin=` whenever the module has both inputs, or
+// every Verilog read of this golden becomes the ambiguous-clock error.
+// Since ruling 52 (2026-09-29) clocks bind by TYPE: both inputs are `Clock`,
+// so the module has no implicit clock and each register names its own; the
+// single `Reset` input `rst` stays the implicit reset.
+pub mod implicit_clock_two_explicit(clock:Clock, clk:Clock, rst:Reset, d:U4) -> (q:U4@[1], p:U5@[1]) {
+  reg r:U4:[clock_pin=clk] = 5
+  reg s:U5:[clock_pin=clock] = 9
+  r = d
+  s = d + 1
+  q = r
+  p = s
+}

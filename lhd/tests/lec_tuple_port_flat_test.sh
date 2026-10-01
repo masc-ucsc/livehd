@@ -23,7 +23,7 @@
 #      actually exercised, both directions)
 #   4. width-sum mismatch: correspondence declined -> UNKNOWN (unmatched cut
 #      points reported; no crash, no proof)
-#   5. nested: req:(hdr:(a:u1,b:u2), pay:u4) vs a flat 7-bit bus PROVEN
+#   5. nested: req:(hdr:(a:U1,b:U2), pay:U4) vs a flat 7-bit bus PROVEN
 #   6. sequential: bundle ports + a flop cut PROVEN (bmc engine)
 #   7. hierarchy: a PROVEN child whose ports diverge leaf<->bus is DESCENDED
 #      (0 child collapses), and the parent still ends PROVEN
@@ -40,13 +40,13 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 
 # ── designs ─────────────────────────────────────────────────────────────────
 cat > "$W/leaf.prp" <<'EOF'
-pub comb leaf(req:(a:u4,b:u8)) -> (rsp:(sum:u9,lo:u4)) {
+pub comb leaf(req:(a:U4,b:U8)) -> (rsp:(sum:U9,lo:U4)) {
   rsp.sum = req.a + req.b
   rsp.lo  = req.a
 }
 EOF
-# Flat twin. Field order convention: a:u4 declared FIRST = req's TOP 4 bits;
-# sum:u9 first = rsp's TOP 9 bits.
+# Flat twin. Field order convention: a:U4 declared FIRST = req's TOP 4 bits;
+# sum:U9 first = rsp's TOP 9 bits.
 cat > "$W/leaf_flat.sv" <<'EOF'
 module leaf(input [11:0] req, output [12:0] rsp);
   wire [3:0] a = req[11:8];
@@ -93,7 +93,7 @@ endmodule
 EOF
 # Nested bundle: hdr.a = bit 6, hdr.b = bits 5:4, pay = bits 3:0.
 cat > "$W/leaf2.prp" <<'EOF'
-pub comb leaf2(req:(hdr:(a:u1,b:u2), pay:u4)) -> (o:u7) {
+pub comb leaf2(req:(hdr:(a:U1,b:U2), pay:U4)) -> (o:U7) {
   o = (req.hdr.a << 6) | (req.hdr.b << 4) | req.pay
 }
 EOF
@@ -104,8 +104,8 @@ endmodule
 EOF
 # Sequential: bundle ports alongside a flop cut.
 cat > "$W/leafreg.prp" <<'EOF'
-pub mod leafreg(req:(a:u4,b:u8)) -> (rsp:(sum:u9,lo:u4)@[]) {
-  reg racc:u9 = 0
+pub mod leafreg(req:(a:U4,b:U8)) -> (rsp:(sum:U9,lo:U4)@[]) {
+  reg racc:U9 = 0
   rsp.sum = racc
   rsp.lo  = req.a
   racc = req.a + req.b
@@ -123,10 +123,10 @@ endmodule
 EOF
 # Hierarchy: the child's ports diverge leaf<->bus; the parent's do not.
 cat > "$W/par.prp" <<'EOF'
-pub comb kid(req:(a:u4,b:u8)) -> (s:u9) {
+pub comb kid(req:(a:U4,b:U8)) -> (s:U9) {
   s = req.a + req.b
 }
-pub comb par(x:u12) -> (y:u9) {
+pub comb par(x:U12) -> (y:U9) {
   y = kid(req.a=x#[8..=11], req.b=x#[0..=7])
 }
 EOF

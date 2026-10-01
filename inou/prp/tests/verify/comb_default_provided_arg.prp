@@ -1,0 +1,28 @@
+/*
+:name: comb_default_provided_arg
+:type: verify
+:top_module: comb_default_provided_arg
+:verify_bound: 1
+:verify_proven: 1
+:verify_refuted: 0
+*/
+// A call that PROVIDES a defaulted comb input does not take the default, so
+// the default expression -- and its side effects, here the `assert` inside
+// `chk` -- is not evaluated for that call. The inliner skipped only the final
+// `__default_b` store and still inlined `chk` (the statements computing the
+// default), so `chk`'s `a != 0` became a check of the CALLER, REFUTED at a=0
+// although this call passes `b=c`. The twin for the comb's own module is
+// comb_default_side_effect.
+comb chk(a) -> (r:U8) {
+  assert(a != 0, "the default expression's own check")
+  r = a
+}
+
+comb f(a:U8, b:U8 = chk(a=a)) -> (y:U8) {
+  y = a ^ b
+}
+
+pub mod comb_default_provided_arg(a:U8, c:U8) -> (y:U8@[0]) {
+  y = f(a=a, b=c)
+  assert((y ^ c) == a, "the provided b is the one used")
+}

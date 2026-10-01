@@ -9,6 +9,6 @@
 // the `is` infix operator, so it parses as an unexpected token). Structural
 // `does` / `equals` / `case` are the only type-comparison operators.
 
-type Foo = (a:u8 = 0)
+type Foo = (a:U8 = 0)
 const x:Foo = (a=1)
 cassert(x is Foo)

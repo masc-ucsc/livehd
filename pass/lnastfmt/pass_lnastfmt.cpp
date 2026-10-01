@@ -9,6 +9,7 @@
 #include <unordered_set>
 
 #include "perf_tracing.hpp"
+#include "str_tools.hpp"
 
 static Pass_plugin sample("Pass_lnastfmt", Pass_lnastfmt::setup);
 
@@ -136,16 +137,14 @@ static bool is_valid_ref_text(std::string_view name) {
     if (inner.empty()) {
       return false;
     }
-    bool needs_escape = false;
-    for (char ch : inner) {
-      bool plain = (ch == '_') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9');
-      if (!plain) {
-        needs_escape = true;
-        break;
-      }
-    }
-    if (!needs_escape) {
-      return false;  // pure alnum/underscore — should have been stripped
+    // The escape is needed unless the producer's canonical form would have
+    // dropped it: a plain identifier word (ASCII or non-ASCII letters) that is
+    // not a built-in type word. A backticked TYPE WORD (`U8`, `Clock`) keeps its
+    // backticks by design (str_tools::canonical_escaped_ident): the bare word is
+    // the type, the backticked one an ordinary name.
+    const auto escaped = name.substr(0, close + 1);
+    if (str_tools::canonical_escaped_ident(escaped).size() != escaped.size()) {
+      return false;  // plain word -- should have been stripped
     }
     if (tail.empty()) {
       return true;  // bare `…` escaped name
@@ -188,7 +187,9 @@ static bool is_valid_ref_text(std::string_view name) {
       start_of_segment = true;
       continue;
     }
-    bool ok = (ch == '_') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (!start_of_segment && ch >= '0' && ch <= '9');
+    // Bytes >= 0x80 are UTF-8 letters (legal identifier characters).
+    bool ok = (ch == '_') || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || static_cast<unsigned char>(ch) >= 0x80
+              || (!start_of_segment && ch >= '0' && ch <= '9');
     if (!ok) {
       return false;
     }

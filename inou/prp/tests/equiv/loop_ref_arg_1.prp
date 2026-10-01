@@ -1,0 +1,7 @@
+/*
+:name: loop_ref_arg_1
+:set: compile.unroll=true
+*/
+// HEADER-ONLY variant: the source is loop_ref_arg.prp with rolling off. A loop
+// whose body writes an outer variable through `ref` (or a `ref self` UFCS
+// call) must mean the same rolled or unrolled.

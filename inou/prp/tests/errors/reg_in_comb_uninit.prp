@@ -10,7 +10,7 @@
 //
 // The reg-in-comb check used to live ONLY on the assignment form
 // (process_lvalue_for_assign), i.e. it keyed on the INITIALIZER. An
-// uninitialized `reg r:u8` is a bare declaration_statement with no rvalue, so it
+// uninitialized `reg r:U8` is a bare declaration_statement with no rvalue, so it
 // sailed straight past and surfaced far downstream as tolg's baffling
 // "instance of clocked 'c' but 'top' has no clock to forward (needs_clock bug)"
 // — a message that names neither the reg nor the comb.
@@ -19,13 +19,13 @@
 // are `pub mod` now. A latch is spelled `reg l:T:[latch=true]`, so closing the
 // hole covers latches too.
 //
-// The initialized twin (`reg r:u8 = 0` in a comb) already errored before this
+// The initialized twin (`reg r:U8 = 0` in a comb) already errored before this
 // fix; this fixture pins the UNINITIALIZED case.
-pub mod top(a:u8) -> (q:u8@[0]) {
+pub mod top(a:U8) -> (q:U8@[0]) {
   q = c(a)
 }
-comb c(x:u8) -> (y:u8) {
-  reg r:u8
+comb c(x:U8) -> (y:U8) {
+  reg r:U8
   r = x
   y = r
 }

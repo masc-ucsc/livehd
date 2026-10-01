@@ -85,7 +85,11 @@ public:
            && v != Lnast_ntype_le && v != Lnast_ntype_ge;
   }
 
-  static constexpr bool is_type(Lnast_ntype_int v) { return v >= Lnast_ntype_prim_type_none && v <= Lnast_ntype_comp_type_lambda; }
+  static constexpr bool is_type(Lnast_ntype_int v) { return v >= Lnast_ntype_prim_type_none && v <= Lnast_ntype_prim_type_reset; }
+  // `Clock` / `Reset` (1-bit, bind by type).
+  static constexpr bool is_prim_type_clock_or_reset(Lnast_ntype_int v) {
+    return v == Lnast_ntype_prim_type_clock || v == Lnast_ntype_prim_type_reset;
+  }
   static constexpr bool is_loop_last(Lnast_ntype_int v) { return (static_cast<uint8_t>(v) & 1) != 0; }
 
   static std::string_view to_sv(Lnast_ntype_int v) { return namemap[v]; }
@@ -95,4 +99,6 @@ public:
   static_assert((static_cast<uint8_t>(Lnast_ntype_invalid) & 1) == 0);
   static_assert((static_cast<uint8_t>(Lnast_ntype_top) & 1) == 0);
   static_assert((static_cast<uint8_t>(Lnast_ntype_comp_type_lambda) & 1) == 0);
+  static_assert((static_cast<uint8_t>(Lnast_ntype_prim_type_reset) & 1) == 0);
+  static_assert(Lnast_ntype_prim_type_reset == Lnast_ntype_last_invalid - 1);
 };

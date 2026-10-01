@@ -1,0 +1,52 @@
+/*
+:name: comb_array_output
+:type: simulation
+*/
+// lhdtrack suggestions.md 2.2(d), array PORTS: a `comb` whose OUTPUT is
+// declared as an array, `-> (rows:[2]U8)` (07b-structtype's
+// `-> (r:[]Animal)`, 13-stdlib's `map`/`filter` `-> (r:[])`), could not
+// produce it:
+//   * whole: a local array stored whole, `rows = t` -> upass.typecheck
+//     assign-type-mismatch "cannot assign tuple value to `inl1_rows` (it is
+//     integer); a variable's type cannot change";
+//   * lanes: `rows = 0` followed by lane writes `rows[k] = ...` -> upass.tolg
+//     tuple-store-unsupported "tuple/field store to 'inl1_rows' has no
+//     hardware lowering".
+// The inlined copy of the output (`inl1_rows`) is typed as a scalar instead of
+// the declared `[2]U8`. The same bodies with an UNTYPED output `-> (rows)`
+// (lanes built in a local and stored whole) work, and so does a `mod` with an
+// array output (equiv/array_whole_output_store.prp).
+comb mk_whole(a:U7) -> (rows:[2]U8) {
+  mut t:[2]U8 = 0
+  t[0] = a
+  t[1] = a + 1
+  rows = t
+}
+
+comb mk_lanes(a:U7) -> (rows:[2]U8) {
+  rows = 0
+  rows[0] = a ^ 4
+  rows[1] = a + 3
+}
+
+pub mod comb_array_output(a:U7) -> (w0:U8@[0], w1:U8@[0], l0:U8@[0], l1:U8@[0]) {
+  const w = mk_whole(a=a)
+  w0 = w[0]
+  w1 = w[1]
+  const l = mk_lanes(a=a)
+  l0 = l[0]
+  l1 = l[1]
+}
+
+test comb_array_output.lanes {
+  mut dut = comb_array_output
+  mut bad = 0
+  tick 16 {
+    const a = (clock * 9) & 127        // 0, 9, ..., 126, 7: every bit toggles
+    dut.a = a
+    step
+    if dut.w0 != a or dut.w1 != a + 1 { bad += 1 }
+    if dut.l0 != (a ^ 4) or dut.l1 != a + 3 { bad += 1 }
+  }
+  assert(bad == 0, "every lane of a comb's array output")
+}

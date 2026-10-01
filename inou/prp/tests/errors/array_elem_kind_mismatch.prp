@@ -5,5 +5,5 @@
 */
 // An array element declared as an integer cannot be assigned a string value
 // (review cat 3).
-mut b:[4]u3 = (0, 0, 0, 0)
+mut b:[4]U3 = (0, 0, 0, 0)
 b[0] = "hello"

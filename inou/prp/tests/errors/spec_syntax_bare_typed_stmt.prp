@@ -1,0 +1,11 @@
+/*
+:name: spec_syntax_bare_typed_stmt
+:type: error
+:error: a declaration without '=' needs a keyword
+*/
+// qa.md Q39 item 10 / Appendix §8: "bare `value:U8` statement -> error" (no keyword, no `=`).
+// The diagnostic must point at the `value:U8` statement.
+comb spec_syntax_bare_typed_stmt(a:U8) -> (r:U8) {
+  value:U8   // locate_error_here
+  r = a
+}

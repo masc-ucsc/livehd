@@ -18,8 +18,8 @@
 // `= nil` (no reset) on purpose: the golden's rst_ni is an ordinary data input
 // driving a synchronous clear, so an implicit `reset` port here would add a
 // port the golden does not have.
-pub mod struct_top_port(clk:u1, rst_ni:u1, din:u7) -> (dout:u7@[]) {
-  reg dout_q:u7 = nil
+pub mod struct_top_port(clk:Clock, rst_ni:U1, din:U7) -> (dout:U7@[]) {
+  reg dout_q:U7 = nil
   dout = dout_q
   if rst_ni == 0 {
     dout_q = 0

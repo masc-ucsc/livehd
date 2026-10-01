@@ -1,0 +1,67 @@
+/*
+:name: comb_dead_input_omitted
+:type: simulation
+*/
+// User ruling 2026-09-28 (30): a `comb` input its body NEVER reads may be
+// omitted at a call site, whatever its name: nothing is wired into it. The
+// Pyrope that lhdtrack regenerates from Verilog keeps each module's `clk`/`rst`
+// ports even on a purely combinational `comb`, and its harnesses call the DUT
+// without them (br_enc_bin2onehot and friends):
+//   * enc: unused `clk`/`rst` and an unused data input `dbg`, called from a
+//          `mod` that declares a `rst:Reset` but no `Clock`, and from one that
+//          declares neither;
+//   * mix: a comb calling a comb, the inner one's dead inputs omitted too.
+// `clk`/`rst` of a comb are plain data `U1` (a comb cannot declare a `Clock`
+// or `Reset` input, and nothing is auto-wired into a comb):
+// omitting an input the comb READS is a missing-argument error
+// (errors/comb_reads_omitted_rst.prp). A `mod`/`pipe` callee's omitted
+// `Clock`/`Reset` still auto-wires (sim/child_clock_reset_auto_wire.prp).
+
+comb enc(clk:U1, rst:U1, dbg:U8, v:U3, en:Bool) -> (out:U8) {
+  out = if en { 1 << v } else { 0 }
+}
+
+comb mix(v:U3, rst:U1) -> (o:U8) {
+  wrap o = enc(v=v, en=true) + U8(rst)
+}
+
+pub mod comb_dead_input_omitted(rst:Reset, v:U3, en:Bool) -> (q:U8@[1], p:U8@[0], m:U8@[0]) {
+  reg r:U8 = 0
+  const e = enc(v=v, en=en)   // clk, rst and dbg omitted
+  r = e
+  q = r
+  p = e
+  m = mix(v=v, rst=U1(rst))   // the Reset as data into the comb's U1 input
+}
+
+pub mod no_clock_caller(v:U3) -> (z:U8@[0]) {
+  z = enc(v=v, en=true)     // this caller declares no clock and no reset
+}
+
+test comb_dead_input_omitted.run {
+  mut d   = comb_dead_input_omitted
+  mut bad = 0
+  tick 12 {
+    const in_rst = clock < 2
+    const v:U3   = clock & 7
+    const en     = (clock & 1) == 0
+    const oh     = if en { 1 << v } else { 0 }
+    const qg     = if in_rst { 0 } else { oh }   // what this step latches into `r`
+    d.rst = in_rst
+    d.v   = v
+    d.en  = en
+    step
+    if d.p != oh { bad += 1 }
+    if d.q != qg { bad += 1 }
+    if d.m != (1 << v) + U1(in_rst) { bad += 1 }
+  }
+  puts("bad={bad}")
+  assert(bad == 0)
+}
+
+test no_clock_caller.run {
+  mut d = no_clock_caller
+  d.v = 5
+  step
+  assert(d.z == 32)
+}

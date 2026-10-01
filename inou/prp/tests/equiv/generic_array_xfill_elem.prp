@@ -1,0 +1,42 @@
+/*
+:name: generic_array_xfill_elem
+:type: equiv
+:verilog_top: generic_array_xfill_elem
+:pyrope_top: generic_array_xfill_elem
+:lec_top: generic_array_xfill_elem
+*/
+// An array filled with `0sb?` as a WHOLE, then built element by element with
+// partial writes and read back: the shape the Verilog->Pyrope writer prints for
+// an unpacked array driven by continuous slice assigns (the golden below;
+// lhdtrack br_ram_flops' `tile_wr_data`). Two silent failures:
+//
+//  * In a GENERIC mod the default-top specialization re-runs SSA over the
+//    template's already-SSA'd body, which renames the whole-array version
+//    `w___ssa_1` to `w__w1`. upass.tolg only knew the `___ssa_` spelling, so
+//    `w__w1` stopped being a version of the array: every element read failed
+//    "unresolved reference" (and an element write had no array to land in).
+//  * Under `::[timecheck=false]` (every regenerated-from-Verilog unit, and
+//    generic_array_xfill_elem_1.prp) the streaming SSA versioned the whole
+//    store `w = 0sb?` but left each element store on the raw name `w`, so
+//    the reads (of the version) saw only the `0sb?`: the output was all-X,
+//    no diagnostic (generic_array_xfill_elem_2.prp is that half alone, not
+//    generic).
+//
+// The golden is that Verilog shape: a parameterized module, an unpacked array
+// written by continuous assigns, read whole and by slice, so prp-v2prp2v also
+// round-trips it through the regenerated (generic, timecheck=false) Pyrope.
+pub mod generic_array_xfill_elem<Depth=2>(a:U32, b:U32, c:U32) -> (o:U64@[0], p:U32@[0]) {
+  mut w:[Depth]U64 = 0
+  w = 0sb?
+  mut lo = w[0]
+  lo#[0..=31] = a
+  w[0] = lo
+  mut hi = w[0]
+  hi#[32..=63] = b
+  w[0] = hi
+  mut e1 = w[1]
+  e1#[0..=31] = c
+  w[1] = e1
+  o = w[0]
+  p = w[1]#[0..=31]
+}

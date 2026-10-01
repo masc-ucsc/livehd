@@ -1,0 +1,29 @@
+/*
+:name: packed_array_reg_ascending
+:type: equiv
+:verilog_top: packed_array_reg_ascending
+:pyrope_top: packed_array_reg_ascending
+*/
+// A runtime element write into an ASCENDING packed register array (see the
+// golden .v). inou/slang turned the array into a memory addressed by `j`, whose
+// packed view (the whole value read and written) puts entry 0 at bit 0; Verilog
+// packs element 0 of `[0:4]` in the MOST significant byte, so every element
+// write landed on the mirrored byte (iverilog differential: 81/300
+// mismatches). An ascending array now stays a flat register.
+pub mod packed_array_reg_ascending(ld:Bool, j:U3, y:U8, d:U40) -> (q:U40@[0]) {
+  reg r:U40 = 0
+  if ld {
+    r = d
+  } elif j == 0 {
+    r#[32..=39] = y
+  } elif j == 1 {
+    r#[24..=31] = y
+  } elif j == 2 {
+    r#[16..=23] = y
+  } elif j == 3 {
+    r#[8..=15] = y
+  } elif j == 4 {
+    r#[0..=7] = y
+  }
+  q = r
+}

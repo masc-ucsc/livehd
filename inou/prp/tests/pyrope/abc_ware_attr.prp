@@ -5,8 +5,8 @@
 
 // A 64-bit comparator. The section requests automatic implementation search
 // against a 500 ps timing target; neither attribute changes circuit semantics.
-mod abc_ware_attr(a:u64, b:u64) -> (y:u1@[0]) {
+mod abc_ware_attr(a:U64, b:U64) -> (y:U1@[0]) {
   {::[color=2, ware=true, delay=500]
-    y = a < b
+    y = U1(a < b)
   }
 }

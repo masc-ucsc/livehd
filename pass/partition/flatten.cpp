@@ -3,6 +3,7 @@
 #include "flatten.hpp"
 
 #include <deque>
+#include <format>
 #include <string>
 #include <vector>
 
@@ -58,6 +59,8 @@ void Flat_origin::set_color(int32_t color) const {
 
 namespace {
 
+struct Flatten_refused {};
+
 struct Port_shape {
   uint32_t bits   = 0;
   bool     unsign = false;
@@ -102,8 +105,13 @@ struct Ictx {
 class Flattener {
 public:
   Flattener(hhds::Graph* top, hhds::GraphLibrary* lib, livehd::partition::Flat_origin_map* origin, bool preserve_modules,
-            const std::unordered_set<hhds::Gid>& preserved_defs)
-      : top_(top), lib_(lib), preserve_modules_(preserve_modules), origin_(origin), preserved_defs_(preserved_defs) {}
+            const std::unordered_set<hhds::Gid>& preserved_defs, const livehd::partition::Admission& admission)
+      : top_(top)
+      , lib_(lib)
+      , preserve_modules_(preserve_modules)
+      , origin_(origin)
+      , preserved_defs_(preserved_defs)
+      , admission_(admission) {}
 
   std::shared_ptr<hhds::Graph> run(std::string_view flat_name);
 
@@ -119,10 +127,18 @@ private:
   livehd::partition::Flat_origin_map* origin_           = nullptr;
 
   const std::unordered_set<hhds::Gid>& preserved_defs_;
+  const livehd::partition::Admission&  admission_;
+  void                                 admit(std::string_view stage, uint64_t work = 1) const {
+    if (admission_ && !admission_(stage, work)) {
+      throw Flatten_refused{};
+    }
+  }
 
   // Defs on the current instantiation path — a def re-entered while still open
   // is a recursive hierarchy (would recurse forever / overflow the stack).
   absl::flat_hash_set<hhds::Gid> inline_stack_;
+  // Defs whose GraphIO check_io_port_ids already accepted.
+  absl::flat_hash_set<hhds::Gid> io_checked_;
 
   Ictx* make_ctx(hhds::Graph* src, Ictx* parent, const hhds::Node_class& inst, std::string prefix);
   void  create_nodes(Ictx* ctx);
@@ -138,7 +154,36 @@ private:
   void carry_driver_attrs(Ictx* ctx, const hhds::Pin_class& orig, const hhds::Pin_class& neo);
 };
 
+// A Sub binds its child's ports by PORT ID (in_name2pid/out_pid2name below),
+// so every input (every output) of an inlined def needs its own id. A library
+// whose decls drifted from its bodies -- a reader that only ever ADDS ports
+// put a renamed input next to the old one on the same id (the yosys reader
+// still does on a recompile into the same lg: dir) -- mapped both names to one
+// id, and the flat netlist silently differed from a fresh compile's. Refuse it.
+void check_io_port_ids(const hhds::GraphIO& gio, std::string_view instance) {
+  auto scan = [&](const auto& decls) {
+    absl::flat_hash_map<hhds::Port_id, std::string_view> owner;
+    for (const auto& d : decls) {
+      const auto [it, fresh] = owner.try_emplace(d.port_id, d.name);
+      if (!fresh) {
+        livehd::diag::err("pass.partition", "io-port-clash", "io")
+            .msg("flatten: '{}'{} declares ports '{}' and '{}' on the same port id {}: its GraphIO is out of sync with its body",
+                 std::string{gio.get_name()},
+                 instance.empty() ? std::string{} : std::format(" (instance '{}')", instance),
+                 it->second,
+                 d.name,
+                 d.port_id)
+            .hint("re-create the lg: library from source into a fresh --emit-dir lg: directory")
+            .fatal();
+      }
+    }
+  };
+  scan(gio.get_input_pin_decls());
+  scan(gio.get_output_pin_decls());
+}
+
 Ictx* Flattener::make_ctx(hhds::Graph* src, Ictx* parent, const hhds::Node_class& inst, std::string prefix) {
+  admit("flatten-make_ctx");
   auto& c        = arena_.emplace_back();
   c.src          = src;
   c.parent       = parent;
@@ -158,11 +203,16 @@ Ictx* Flattener::make_ctx(hhds::Graph* src, Ictx* parent, const hhds::Node_class
     c.synth_region_id = id.get();
   }
   if (auto gio = src->get_io()) {
+    if (io_checked_.insert(src->get_gid()).second) {  // once per def, not per instance
+      check_io_port_ids(*gio, c.prefix.empty() ? std::string_view{} : std::string_view{c.prefix}.substr(0, c.prefix.size() - 1));
+    }
     for (const auto& d : gio->get_input_pin_decls()) {
+      admit("flatten-make_ctx-step");
       c.in_name2pid[d.name]   = static_cast<uint32_t>(d.port_id);
       c.in_name2shape[d.name] = Port_shape{.bits = d.bits, .unsign = d.unsign};
     }
     for (const auto& d : gio->get_output_pin_decls()) {
+      admit("flatten-make_ctx-step");
       c.out_pid2name[static_cast<uint32_t>(d.port_id)] = d.name;
       c.out_name2shape[d.name]                         = Port_shape{.bits = d.bits, .unsign = d.unsign};
     }
@@ -186,6 +236,7 @@ Ictx* Flattener::make_ctx(hhds::Graph* src, Ictx* parent, const hhds::Node_class
 //     -1 into 2^bits-1, so a signed narrowing/widening cast through it changes
 //     the value every arithmetic consumer then reads.
 hhds::Pin_class Flattener::apply_port_shape(const hhds::Pin_class& source, const Port_shape& shape) {
+  admit("flatten-apply_port_shape");
   if (source.is_invalid() || shape.bits == 0) {
     return source;
   }
@@ -210,6 +261,7 @@ hhds::Pin_class Flattener::apply_port_shape(const hhds::Pin_class& source, const
 }
 
 void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const hhds::Node_class& neo) {
+  admit("flatten-carry_node_attrs");
   if (gu::has_name(orig)) {
     auto nm = std::string{gu::node_name_of(orig)};
     // fproperty/lgassert marker Subs pack "<kind>\x1f<loc>\x1f<msg>" into the
@@ -268,6 +320,7 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
 }
 
 void Flattener::carry_driver_attrs(Ictx* ctx, const hhds::Pin_class& orig, const hhds::Pin_class& neo) {
+  admit("flatten-carry_driver_attrs");
   if (auto b = gu::bits_of(orig); b != 0) {
     gu::set_bits(neo, b);
   }
@@ -285,7 +338,9 @@ void Flattener::carry_driver_attrs(Ictx* ctx, const hhds::Pin_class& orig, const
 }
 
 void Flattener::create_nodes(Ictx* ctx) {
+  admit("flatten-create_nodes");
   for (auto n : ctx->src->body().nodes(hhds::Node_order::forward)) {
+    admit("flatten-create_nodes-step");
     if (failed_) {
       return;
     }
@@ -342,7 +397,25 @@ void Flattener::create_nodes(Ictx* ctx) {
     if (op == Ntype_op::Sub) {
       // Body-less black box (liberty/tie cell, external IP, fproperty marker):
       // stays an opaque instance; clone its IO decl into the flat graph's lib.
+      // Admit a new opaque interface once, before its bulk clone. Repeated
+      // instances reuse its destination declaration without rescanning ports.
+      auto       child           = n.get_subnode_io();
+      const bool clone_interface = admission_ && child && !lib_->find_io(child->get_name()) && !n.get_subnode_graph();
+      if (clone_interface) {
+        for (const auto& port : child->get_input_pin_decls()) {
+          (void)port;
+          admit("flatten-opaque-port");
+        }
+        for (const auto& port : child->get_output_pin_decls()) {
+          (void)port;
+          admit("flatten-opaque-port");
+        }
+        admit("flatten-opaque-copy", 0);
+      }
       auto io = livehd::partition::resolve_or_clone_subdef(lib_, n);
+      if (clone_interface) {
+        admit("flatten-opaque-copied", 0);
+      }
       if (io) {
         // Keep the loop descriptor when there is one: dropping it would turn a
         // replicated black box into a single occurrence (a body-less loop Sub
@@ -380,6 +453,7 @@ void Flattener::create_nodes(Ictx* ctx) {
 // an invalid pin for a genuinely undriven path (dangling input / unconnected
 // port) — the caller leaves the sink unconnected, exactly like the original.
 hhds::Pin_class Flattener::resolve_driver(Ictx* ctx, const hhds::Pin_class& d) {
+  admit("flatten-resolve_driver");
   if (auto it = ctx->pin_cache.find(d); it != ctx->pin_cache.end()) {
     return it->second;
   }
@@ -408,6 +482,7 @@ hhds::Pin_class Flattener::resolve_driver(Ictx* ctx, const hhds::Pin_class& d) {
           // collide on a port -- it stays only because a Sub's port ids are
           // sparse and this map is keyed by port, not by position.
           for (const auto& in_pin : ctx->inst.inp_sorted_pins()) {
+            admit("flatten-resolve_driver-step");
             const auto in_drv = in_pin.get_driver_pin();
             ctx->inst_drivers.try_emplace(static_cast<uint32_t>(in_pin.get_port_id()), in_drv);
           }
@@ -451,6 +526,7 @@ hhds::Pin_class Flattener::resolve_driver(Ictx* ctx, const hhds::Pin_class& d) {
 // Flat driver pin behind child output port `oname` (the child body's internal
 // driver, itself resolved recursively — handles child feed-throughs and consts).
 hhds::Pin_class Flattener::resolve_output_of(Ictx* cctx, std::string_view oname) {
+  admit("flatten-resolve_output_of");
   auto opin = cctx->src->get_output_pin(std::string{oname});
   if (opin.is_invalid()) {
     return {};
@@ -474,7 +550,9 @@ hhds::Pin_class Flattener::resolve_output_of(Ictx* cctx, std::string_view oname)
 }
 
 void Flattener::wire_edges(Ictx* ctx) {
+  admit("flatten-wire_edges");
   for (auto n : ctx->src->body().nodes(hhds::Node_order::forward)) {
+    admit("flatten-wire_edges-step");
     if (failed_) {
       return;
     }
@@ -484,6 +562,7 @@ void Flattener::wire_edges(Ictx* ctx) {
     }
     auto neo = it->second;
     for (const auto& in_pin : n.inp_sorted_pins()) {
+      admit("flatten-wire_edges-step");
       auto sp = neo.create_sink_pin(in_pin.get_port_id());
       // PLURAL, not get_driver_pin(): this CLONES every in-edge of `n`, and a
       // PRESERVED compact-loop Sub reaches here (it is entered into node_map
@@ -494,6 +573,7 @@ void Flattener::wire_edges(Ictx* ctx) {
       // the flattened design then computes a different value for every carried
       // output.
       for (const auto& in_drv : in_pin.get_driver_pins()) {
+        admit("flatten-wire_edges-step");
         if (in_drv.is_const()) {
           gu::create_const(*flat_, gu::const_of(in_drv)).connect_sink(sp);
         } else {
@@ -508,11 +588,13 @@ void Flattener::wire_edges(Ictx* ctx) {
 }
 
 void Flattener::wire_top_outputs(Ictx* top_ctx) {
+  admit("flatten-wire_top_outputs");
   auto gio = top_ctx->src->get_io();
   if (!gio) {
     return;
   }
   for (const auto& decl : gio->get_output_pin_decls()) {
+    admit("flatten-wire_top_outputs-step");
     auto opin = top_ctx->src->get_output_pin(decl.name);
     if (opin.is_invalid()) {
       continue;
@@ -538,7 +620,9 @@ void Flattener::wire_top_outputs(Ictx* top_ctx) {
 // mirroring tolg/partition (readers probe every declared output; hhds find_pin
 // asserts on a pin that was never created).
 void Flattener::complete_bbox_outputs(Ictx* ctx) {
+  admit("flatten-complete_bbox_outputs");
   for (auto& [orig, neo] : ctx->node_map) {
+    admit("flatten-complete_bbox_outputs-step");
     if (gu::type_op_of(orig) != Ntype_op::Sub) {
       continue;
     }
@@ -550,9 +634,11 @@ void Flattener::complete_bbox_outputs(Ictx* ctx) {
     // the fan-out edges (which re-derive the same set once per consumer).
     absl::flat_hash_set<uint32_t> made;
     for (const auto& out_pin : neo.out_sorted_pins()) {
+      admit("flatten-complete_bbox_outputs-step");
       made.insert(static_cast<uint32_t>(out_pin.get_port_id()));
     }
     for (const auto& d : sio->get_output_pin_decls()) {
+      admit("flatten-complete_bbox_outputs-step");
       if (made.contains(static_cast<uint32_t>(d.port_id))) {
         continue;
       }
@@ -565,6 +651,7 @@ void Flattener::complete_bbox_outputs(Ictx* ctx) {
 }
 
 std::shared_ptr<hhds::Graph> Flattener::run(std::string_view flat_name) {
+  admit("flatten-run", 0);
   auto src_gio = top_->get_io();
   if (!src_gio) {
     livehd::diag::err("pass.partition", "flatten-no-io", "unsupported")
@@ -575,6 +662,7 @@ std::shared_ptr<hhds::Graph> Flattener::run(std::string_view flat_name) {
 
   auto gio = lib_->create_io(std::string{flat_name});
   for (const auto& d : src_gio->get_input_pin_decls()) {
+    admit("flatten-run-step");
     gio->add_input(d.name, d.port_id, d.loop_break);
     if (d.bits != 0) {
       gio->set_bits(d.name, d.bits);
@@ -582,6 +670,7 @@ std::shared_ptr<hhds::Graph> Flattener::run(std::string_view flat_name) {
     gio->set_unsign(d.name, d.unsign);
   }
   for (const auto& d : src_gio->get_output_pin_decls()) {
+    admit("flatten-run-step");
     gio->add_output(d.name, d.port_id, d.loop_break);
     if (d.bits != 0) {
       gio->set_bits(d.name, d.bits);
@@ -594,6 +683,7 @@ std::shared_ptr<hhds::Graph> Flattener::run(std::string_view flat_name) {
   // Stamp bits/sign on the materialized flat input pins (the decl is not
   // auto-propagated to pin attrs; every downstream reader sizes from the pin).
   for (const auto& d : src_gio->get_input_pin_decls()) {
+    admit("flatten-run-step");
     auto ip = flat_->get_input_pin(d.name);
     if (d.bits != 0) {
       gu::set_bits(ip, static_cast<int>(d.bits));
@@ -612,6 +702,7 @@ std::shared_ptr<hhds::Graph> Flattener::run(std::string_view flat_name) {
   create_nodes(top_ctx);
   if (!failed_) {
     for (auto& ctx : arena_) {
+      admit("flatten-run-step");
       wire_edges(&ctx);
       if (failed_) {
         break;
@@ -623,12 +714,14 @@ std::shared_ptr<hhds::Graph> Flattener::run(std::string_view flat_name) {
   }
   if (!failed_) {
     for (auto& ctx : arena_) {
+      admit("flatten-run-step");
       complete_bbox_outputs(&ctx);
     }
   }
   if (failed_) {
     return nullptr;
   }
+  admit("flatten-complete", 0);
   return flat;
 }
 
@@ -668,9 +761,12 @@ std::shared_ptr<hhds::GraphIO> resolve_or_clone_subdef(hhds::GraphLibrary* outli
 
 std::shared_ptr<hhds::Graph> flatten_hierarchy(hhds::Graph* top, hhds::GraphLibrary* lib, std::string_view flat_name,
                                                Flat_origin_map* origin, bool preserve_modules,
-                                               const std::unordered_set<hhds::Gid>& preserved_defs) {
-  Flattener f(top, lib, origin, preserve_modules, preserved_defs);
+                                               const std::unordered_set<hhds::Gid>& preserved_defs,
+                                               const Admission&                     admission) try {
+  Flattener f(top, lib, origin, preserve_modules, preserved_defs, admission);
   return f.run(flat_name);
+} catch (const Flatten_refused&) {
+  return nullptr;
 }
 
 }  // namespace livehd::partition

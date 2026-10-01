@@ -1,0 +1,37 @@
+/*
+:name: spec_calls_ctor_named
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// qa.md Appendix §7: "Rewrite doc examples: `Typ2("hello", 44)` -> named args;
+// ... `Bt("hello")` stays (single arg)". A constructor call binds init's
+// params under the call naming rules: all named (any order), or the single
+// non-self parameter unnamed.
+
+type Typ2 = (
+  mut s:String = "",
+  mut n:Signed = 0,
+  comb init(ref self, a, b) {
+    self.s = a
+    self.n = b
+  }
+)
+
+const t1 = Typ2(a="hello", b=44)
+cassert(t1.s == "hello" and t1.n == 44)
+const t2 = Typ2(b=7, a="x")
+cassert(t2.s == "x" and t2.n == 7)
+
+type Bt = (
+  mut c:String = "",
+  mut d = 100,
+  comb init(ref self, v) { self.c = v }
+)
+const b2 = Bt("hello")          // single non-self param: unnamed is fine
+cassert(b2.c == "hello")
+cassert(b2.d == 100)
+mut b3:Bt = "bye"               // construction value binds the single param
+cassert(b3.c == "bye")
+cassert(b3.d == 100)

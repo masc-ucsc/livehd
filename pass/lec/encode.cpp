@@ -20,7 +20,7 @@
 #include "hlop/dlop.hpp"
 #include "latch_contract.hpp"  // Design_clocks::name_looks_like_clock (the ICG clock-operand disambiguator)
 #include "node_util.hpp"
-#include "query.hpp"  // is_assume_kind -- one spelling table shared with the asserter
+#include "property_types.hpp"  // is_assume_kind -- shared with the asserter, without its query engine
 
 namespace livehd::lec {
 
@@ -804,21 +804,24 @@ Mem_sig read_mem_sig(const hhds::Node_class& node) {
 }
 
 // Stable cross-front-end correspondence key for a Memory cut. The signature is
-// reader-invariant (same RTL array -> same size/bits/ports); `occ` (running
-// count of prior same-signature memories in body().nodes(hhds::Node_order::forward) order) disambiguates
-// multiple identical memories. Both designs enumerate in the same RTL order, so
-// corresponding memories collapse to one shared array symbol. See M4 in lec.md.
-// NOTE: the key is the size×bits SHAPE + occurrence ONLY — deliberately NOT the
+// reader-invariant (same RTL array -> same size/bits/ports); the correspondence
+// NAME, or for the memories a name cannot pair `occ` (running count of prior
+// same-shape memories in walk order), disambiguates multiple identical
+// memories, so corresponding memories collapse to one shared array symbol. See
+// M4 in lec.md and query.cpp's memory-correspondence builder.
+// NOTE: the key is the size×bits SHAPE + name/occurrence ONLY — deliberately NOT the
 // read/write PORT COUNTS. The shared symbol is the memory's INITIAL CONTENTS, which
 // depend only on the array shape, not on how many ports access it. firtool unrolls a
 // dynamic write `regs[wr]<=d` into ~N const-address write ports, so the same RTL array
 // can present a very different port count across front-ends (e.g. r4w65 vs r4w2); keying
 // the init cut on port counts wrongly prevented those corresponding memories from sharing
-// one initial array (a false-refute on any uninitialized-read). Matching by shape+order
-// (both designs enumerate memories in the same RTL order) is the same premise already used
-// for flop-state correspondence; the per-design read/write topology is still honored when
-// building each side's next-state relation.
+// one initial array (a false-refute on any uninitialized-read). Matching by shape+name is
+// the same premise already used for flop-state correspondence; the per-design read/write
+// topology is still honored when building each side's next-state relation.
 std::string mem_state_key(const Mem_sig& sig, int occ) { return std::format("\x01m:{}x{}#{}", sig.size, sig.bits, occ); }
+std::string mem_state_key(const Mem_sig& sig, std::string_view name) {
+  return std::format("\x01m:{}x{}:n:{}", sig.size, sig.bits, name);
+}
 
 // Structural node identity within one design (see encode.hpp). Must stay in
 // lock-step with the encoder's pinkey convention (INVALID -> ROOT), so the
@@ -1391,9 +1394,21 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     if (mc.sig.bits <= 0 || mc.sig.size <= 0) {
       return fail("memory '" + gu::debug_name(node) + "' missing bits/size");
     }
-    std::string sg = std::to_string(mc.sig.size) + "x" + std::to_string(mc.sig.bits);  // shape only; occ matches by RTL order
-    mc.key         = mem_state_key(mc.sig, mem_occ[sg]++);
-    mc.ignored     = mem_ignored(node);
+    if (mem_keys_ != nullptr) {
+      auto kit = mem_keys_->find(box_node_key(node));
+      if (kit == mem_keys_->end()) {
+        // The builder walks the same hierarchy with the same predicate, so a
+        // miss means the walks drifted apart: an invented key could alias a
+        // different memory, so fail loudly (INCONCLUSIVE) instead.
+        return fail("memory '" + gu::debug_name(node)
+                    + "' missing from the memory-correspondence map (builder/encoder walk drift)");
+      }
+      mc.key = kit->second;
+    } else {
+      std::string sg = std::to_string(mc.sig.size) + "x" + std::to_string(mc.sig.bits);  // shape only; occ matches by walk order
+      mc.key         = mem_state_key(mc.sig, mem_occ[sg]++);
+    }
+    mc.ignored = mem_ignored(node);
     // ---- FAIL CLOSED on a memory clocked by anything but the reference clock.
     // This encoder DISCARDS a Memory's clock_pin and posclk entirely: every
     // write is modelled as landing once per step. That is right for a memory on
@@ -1489,7 +1504,9 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         } else if (pn == "reset") {
           mc.reset = driver;
         } else if (pn == "initial") {
-          mc.init = driver;  // whole-array runtime reset-value bus
+          if (!gu::memory_image_of(mc.node)) {
+            mc.init = driver;  // file preload is symbolic external state
+          }
         } else if (pn == "type") {
           if (driver.is_const()) {
             mtype = static_cast<int>(gu::const_of(driver).to_just_i64());
@@ -2153,7 +2170,12 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
               Val         ov;
               if (shared_bbox_ != nullptr) {
                 if (auto it = shared_bbox_->find(key); it != shared_bbox_->end()) {
-                  ov = it->second;
+                  ov           = it->second;
+                  // The output BITS are shared; their sign is this side's pin
+                  // (as for a top input and the Comb_box path): the union sign
+                  // would extend the same bits identically on both sides and
+                  // false-PROVE a sign-vs-zero-extension divergence downstream.
+                  ov.is_signed = !gu::is_unsign(dp);
                 }
               }
               if (ov.term.isNull()) {  // fallback (query should have pre-built it): fresh
@@ -3568,12 +3590,10 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       }
       // A Sub occurrence's path includes the site itself.  Consequently a
       // property authored in the selected root has exactly one step (the
-      // fproperty site), while a property in a child has the parent call-site
-      // step(s) followed by the fproperty site.
+      // fproperty site) and no instance path, while a property in a child has
+      // the parent call-site step(s) followed by the fproperty site.
       const auto steps = node.get_occurrence_index().path.steps();
-      if (steps.size() <= 1) {
-        out.prop_top.insert(occ);
-      } else {
+      if (steps.size() > 1) {
         // Name only the containing occurrence.  get_hier_name() includes the
         // fproperty site's packed "kind<US>loc<US>msg" name, which is useful
         // for graph debugging but is not an instance path and leaks delimiter

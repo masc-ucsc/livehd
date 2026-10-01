@@ -5,6 +5,6 @@
 // which is what the golden asserts.
 const leaf = import("leaf.leaf")
 
-pub mod parent<N=0>(a:u8) -> (y:u8@[0]) {
+pub mod parent<N=0>(a:U8) -> (y:U8@[0]) {
   y = leaf<M=N>(a=a)
 }

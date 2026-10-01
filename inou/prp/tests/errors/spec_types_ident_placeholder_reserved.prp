@@ -1,0 +1,8 @@
+/*
+:name: spec_types_ident_placeholder_reserved
+:type: error
+:error: reserved
+*/
+// SPEC docs 02-basics "Identifiers": "The bare underscore (`_`) and names matching `_[digit][alnum]*` (e.g., `_0`,
+// `_1a`, `_23abc`) are reserved for future syntax ... These unescaped names are syntax errors in every position".
+const _1a = 8  // locate_error_here

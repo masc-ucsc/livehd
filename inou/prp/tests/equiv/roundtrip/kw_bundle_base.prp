@@ -11,8 +11,8 @@
 // The base is written `` `in` `` here only because this fixture is itself
 // Pyrope source (the bare keyword would not parse); the lexer strips the
 // backticks, so the internal net name is the bare `in` the writer must escape.
-pub comb kw_bundle_base(a:u8, v:u1, r:u1) -> (o:u8, ov:u1, orr:u1) {
-  wire `in`:(ready:u1, valid:u1, bits:u8) = nil
+pub comb kw_bundle_base(a:U8, v:U1, r:U1) -> (o:U8, ov:U1, orr:U1) {
+  wire `in`:(ready:U1, valid:U1, bits:U8) = nil
   `in`.bits  = a
   `in`.valid = v
   `in`.ready = r

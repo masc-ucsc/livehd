@@ -1,0 +1,8 @@
+/*
+:name: spec_types_typeword_field_error
+:type: error
+:error: .
+*/
+// SPEC qa.md appendix section 1: "A type word may head a suffix chain: `U8.[max]` ..., `U8(x)#[0]` ...; `U8.x`
+// (field of a type) is an error." docs 07-typesystem: "const f = U8.x // error: a type has no fields".
+const f = U8.x  // locate_error_here

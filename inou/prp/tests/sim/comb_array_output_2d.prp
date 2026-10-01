@@ -1,0 +1,109 @@
+/*
+:name: comb_array_output_2d
+:type: simulation
+*/
+// MULTI-DIMENSIONAL array ports (the 2-D twin of comb_array_output and
+// array_output_port_index). An io entry described an array port by its outer
+// dimension alone (`[2][4]U8` = 2 lanes of one packed 32-bit row), so:
+//   * an inlined comb's `-> (r:[2][4]U8)` output reached its caller as two
+//     32-bit lanes: `t[1][2]` and the runtime `t[i][j]` had no element to pick
+//     ("scalar-replaced array ... currently supports one element index");
+//   * a mod's `[2][3]U8` output read back through the instance, `u[1][2]`,
+//     likewise;
+//   * a comb's `m:[2][2]U8` INPUT typed each element as a packed row, so
+//     `s = m[0][0] + ...` into a U10 was rejected as a 16-bit-lane overflow.
+// The io entry now keeps the inner dims (Lnast_io_entry::inner_dims): an
+// element is elem_bits / product(inner dims) bits and `a[i][j]` picks lane
+// i*M + j, each index checked against its own dimension.
+comb grid(a:U4) -> (r:[2][4]U8) {
+  for i in 0..<2 {
+    for j in 0..<4 {
+      r[i][j] = a + i * 4 + j
+    }
+  }
+}
+
+mod tri(a:U4) -> (r:[2][3]U8@[0]) {
+  for i in 0..<2 {
+    for j in 0..<3 {
+      r[i][j] = a * 2 + i * 3 + j
+    }
+  }
+}
+
+// A GENERIC comb's 2-D output, both dims generic: the inliner read the shape
+// of an unsized port through one dimension only, so `[N][M]U8` got no array
+// declare in the caller ("tuple/field store to 'inl1_r' has no hardware
+// lowering").
+comb ggrid<N=2, M=2>(a:U4) -> (r:[N][M]U8) {
+  for i in 0..<N {
+    for j in 0..<M {
+      r[i][j] = a + i * M + j
+    }
+  }
+}
+
+comb sum4(m:[2][2]U8) -> (s:U10) {
+  s = m[0][0] + m[0][1] + m[1][0] + m[1][1]
+}
+
+// A 2-D port bound to a 1-D port of its packed rows: row 1 of `m`, element 0
+// in the low byte. The argument check read the signed LEAF type as the row's
+// element type, so a 32-bit row of S8 elements was [-2^31, 2^31-1] and the
+// binding a false `fcall-arg-overflow` against `[2]U32`.
+mod rowpick(x:[2]U32) -> (y:U32@[0]) {
+  y = x[1]
+}
+mod srows(m:[2][4]S8) -> (y:U32@[0]) {
+  const r = rowpick::[name=rp](x=m)
+  y = r.y
+}
+
+pub mod comb_array_output_2d(a:U4, i:U1, j:U2) -> (o:U8@[0], p:U8@[0], q:U8@[0], w:U8@[0], z:U10@[0],
+    y:U32@[0], g:U8@[0], h:U8@[0]) {
+  const t = grid(a=a)
+  o = t[1][2]
+  p = t[i][j]
+  const u = tri::[name=ut](a=a)
+  q = u[1][2]
+  w = u[i][1]
+  mut m:[2][2]U8 = 0
+  m[0][0] = 1
+  m[0][1] = 2
+  m[1][0] = a
+  m[1][1] = 4
+  z = sum4(m=m)
+  mut n:[2][4]S8 = 0
+  n[1][0] = -1
+  n[1][1] = 2
+  n[1][2] = -3
+  n[1][3] = a
+  const sr = srows::[name=sr](m=n)
+  y = sr.y
+  const gt = ggrid<N=3, M=2>(a=a)
+  g = gt[2][1]
+  h = gt[j & 1][i]
+}
+
+test comb_array_output_2d.lanes {
+  mut dut = comb_array_output_2d
+  mut bad = 0
+  tick 32 {
+    const a = clock & 15
+    const i = (clock >> 4) & 1
+    const j = (clock * 3) & 3
+    dut.a = a
+    dut.i = i
+    dut.j = j
+    step
+    if dut.o != a + 6 { bad += 1 }
+    if dut.p != a + i * 4 + j { bad += 1 }
+    if dut.q != a * 2 + 5 { bad += 1 }
+    if dut.w != a * 2 + i * 3 + 1 { bad += 1 }
+    if dut.z != a + 7 { bad += 1 }
+    if dut.y != 0x00FD_02FF + a * 0x0100_0000 { bad += 1 }
+    if dut.g != a + 5 { bad += 1 }
+    if dut.h != a + (j & 1) * 2 + i { bad += 1 }
+  }
+  assert(bad == 0, "every element of a 2-D array port")
+}

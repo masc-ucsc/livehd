@@ -26,7 +26,7 @@ fail() {
 # the post-load disk recovery resolve against the cwd.
 cd "$W" || fail "cd $W"
 cat > srcmap_in.prp <<'EOF'
-mod fun1(a:u4, b:u4) -> (o:u5@[0]) {
+mod fun1(a:U4, b:U4) -> (o:U5@[0]) {
   o = a + b
 }
 EOF

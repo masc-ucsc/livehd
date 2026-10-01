@@ -1,0 +1,23 @@
+/*
+:name: obs_live_bits
+:type: lec
+:lec_top: obs_live_bits
+*/
+// The SOUNDNESS side of obs_dead_bits.prp: here the high bits of `r` are
+// never read by the output DIRECTLY, but they are observable -- bits 4..5
+// through r's own next state (the low nibble accumulates them) and bits 6..7
+// through register `s`. A variant that drops either pair must never PROVE.
+// Here (`auto`) BMC refutes from reset; the inductive engine alone, which would
+// be the one to false-PROVE after a wrong reduction, must stay UNKNOWN on the
+// same pairs (pass/lec/tests/lec_observe_test.sh checks that leg).
+pub mod obs_live_bits(en:Bool, d:U8) -> (q:U4@[0]) {
+  reg r:U8 = 0
+  reg s:U4 = 0
+  if en {
+    r = d
+  } else {
+    r#[0..<4] = (r#[0..<4] + r#[4..<6])#[0..<4]
+  }
+  s = r#[6..<8]
+  q = r#[0..<4] ^ s
+}

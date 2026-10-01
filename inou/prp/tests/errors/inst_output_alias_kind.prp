@@ -1,0 +1,21 @@
+/*
+:name: inst_output_alias_kind
+:type: error
+:tolg: 1
+:error: requires integer operands \(.*r:Bool
+*/
+// User ruling 2026-09-27 (2): a child's `Bool` output stays a bool when it is
+// first copied into a local (`const r = c.rdy`), so using that local as an
+// integer operand needs `U1(r)` -- the alias twin of bool_inst_output_arith.prp
+// (which reads `c.rdy` directly and destructures `rdy`).
+//
+// Legal spelling: `q = v ^ U1(r)`.
+mod leaf(go:Bool) -> (rdy:Bool@[0]) {
+  rdy = not go
+}
+
+pub mod inst_output_alias_kind(v:U4) -> (q:U4@[0]) {
+  const c = leaf(go=v != 0)
+  const r = c.rdy
+  q = v ^ r   // locate_error_here
+}

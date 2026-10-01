@@ -1,0 +1,61 @@
+/*
+:name: array_dim_comptime_expr
+:type: simulation
+*/
+// Related to lhdtrack suggestions.md 2.2(b): an array DIMENSION written as a
+// compile-time EXPRESSION must fold like a bare name does. The runner folded
+// only a BARE name in the OUTER dim (bake_decl_pre_step; copy_subtree_into for
+// a generic) and kept anything else as the raw text, so
+//   * `reg r:[N+1]U4` -> "upass.tolg: memory 'r' size '[N+1]' is not a
+//     positive comptime constant" -- with a body `comptime const N` AND with a
+//     generic N;
+//   * `mut t:[N*2]U4` -> "array 't' size '[N*2]' is not a positive comptime
+//     constant (a named constant must fold before lowering)";
+//   * `reg m:[N][N]U1` with a body `comptime const N` -> "memory 'm' size '[N]'
+//     is not a positive comptime constant" (a named INNER dim was never
+//     folded; the same 2-D shape with a GENERIC N already worked).
+// `comptime const W = N + 1` then `[W]U4` was the workaround.
+mod gdims<N=2>(en:Bool, d:U4) -> (q:U4@[0], s:U4@[0]) {
+  reg r:[N+1]U4 = 0
+  if en { r[N] = d }
+  q = r[N]
+
+  mut t:[N*2]U4 = 0
+  t[N*2-1] = d
+  s = t[N*2-1]
+}
+
+pub mod array_dim_comptime_expr(en:Bool, d:U4) -> (q:U4@[0], s:U4@[0], b:U1@[0], gq:U4@[0], gs:U4@[0]) {
+  comptime const N = 4
+  reg r:[N+1]U4 = 0
+  if en { r[N] = d }
+  q = r[N]
+
+  mut t:[N*2]U4 = 0
+  t[N*2-1] = d
+  s = t[7]
+
+  reg m:[N][N]U1 = 0
+  if en { m[N-1][N-1] = d#[0] }
+  b = m[3][3]
+
+  const g = gdims<N=3>(en=en, d=d)
+  gq = g.q
+  gs = g.s
+}
+
+test array_dim_comptime_expr.values {
+  mut dut  = array_dim_comptime_expr
+  mut s_ok = true
+  tick 6 {
+    dut.reset = clock == 0
+    dut.en    = clock == 1
+    dut.d     = if clock == 1 { 11 } else { 6 }
+    step
+    if dut.s != dut.d or dut.gs != dut.d { s_ok = false }
+  }
+  assert(s_ok, "t:[N*2]u4 lane 2N-1 follows d")
+  assert(dut.q == 11, "r:[N+1]u4 lane N")
+  assert(dut.b == 1, "m:[N][N]u1 lane (3,3)")
+  assert(dut.gq == 11, "generic r:[N+1]u4 lane N")
+}

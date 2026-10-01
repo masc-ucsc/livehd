@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
         threshold = [] if min_repeats is None else ["--min-repeats", str(min_repeats)]
         proc = subprocess.run([LHD, "pyrope", "style", *map(str, paths), "--diag-fmt", "json", *threshold, *flags],
                               text=True, capture_output=True, timeout=30)
-        assert proc.returncode == 0, proc.stderr
+        assert proc.returncode in (0, 2), proc.stderr
         codes = {"likely-unrolled-loop", "repeated-code"}
         if rule == "all":
             codes |= {"whole-tuple-copy", "flattened-bundle-arguments", "single-destination-conditional"}
@@ -47,6 +47,10 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
             results.append((findings, records, paths[index]))
             records = []
         assert len(results) == len(paths) and not records, proc.stderr
+        # Exit 2 iff any file reported a suggestion (scripts test `$? -ne 0`).
+        any_suggestion = any(int(r["attrs"]["total_findings"]) > 0
+                             for _, recs, _ in results for r in recs if r["code"] == "style-summary")
+        assert proc.returncode == (2 if any_suggestion else 0), (proc.returncode, proc.stderr)
         return results
 
     def run(source, *flags, **kwargs):
@@ -80,7 +84,7 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
     assert not run(source, "--min-repeats", "5")[0]
 
     # Decimal/hex spellings match by value; widths and fixed slice bounds stay.
-    scalar = "\n".join(f"const walk_{i}__w1 = unsigned(ptr#[0..=8] == {i if i < 64 else hex(i)})"
+    scalar = "\n".join(f"const walk_{i}__w1 = Unsigned(ptr#[0..=8] == {i if i < 64 else hex(i)})"
                        for i in range(60, 68)) + "\n"
     findings, _, _ = run(scalar)
     assert len(findings) == 1 and findings[0]["attrs"]["repetitions"] == "8", findings
@@ -103,22 +107,22 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
     interface_cases = []
     for kind in ("comb", "mod", "pipe[1]", "fluid"):
         timing = "@[0]" if kind == "mod" else ""
-        ports = ", ".join(f"io_foo{i}:u8" for i in range(1, 4))
+        ports = ", ".join(f"io_foo{i}:U8" for i in range(1, 4))
         inputs = "\n".join(f"const lane{i} = io_foo{i} + {i}" for i in range(1, 4))
         outputs = "\n".join(f"io_foo{i} = data#[{i}]" for i in range(1, 4))
         interface_cases.append(f"{kind} f({ports}) -> () {{\n{inputs}\n}}\n")
-        out_ports = ", ".join(f"io_foo{i}:u8{timing}" for i in range(1, 4))
-        interface_cases.append(f"{kind} f(data:u8) -> ({out_ports}) {{\n{outputs}\n}}\n")
+        out_ports = ", ".join(f"io_foo{i}:U8{timing}" for i in range(1, 4))
+        interface_cases.append(f"{kind} f(data:U8) -> ({out_ports}) {{\n{outputs}\n}}\n")
         interface_cases.append(f"{kind} f({ports}) -> () {{\nif true {{\n{inputs}\n}}\n}}\n")
     for case_source, (findings, _, _) in zip(interface_cases, run_many(interface_cases)):
         assert not findings, case_source
-    ref_ports = ", ".join(f"ref io_foo{i}:u8" for i in range(1, 4))
+    ref_ports = ", ".join(f"ref io_foo{i}:U8" for i in range(1, 4))
     assert not run(f"comb f({ref_ports}) -> () {{\n{outputs}\n}}\n")[0]
     assert not run(f"comb outer({ports}) -> () {{\ncomb inner() -> () {{\n{inputs}\n}}\n}}\n")[0]
 
     # The same port may still be indexed; its numeric suffix stays literal.
     indexed = "\n".join(f"out2#[{i}] = io_foo1#[{i}]" for i in range(3))
-    findings, _, _ = run(f"comb f(io_foo1:u8) -> (out2:u3) {{\n{indexed}\n}}\n")
+    findings, _, _ = run(f"comb f(io_foo1:U8) -> (out2:U3) {{\n{indexed}\n}}\n")
     assert len(findings) == 1 and findings[0]["code"] == "likely-unrolled-loop", findings
     assert "out2#[{p0}] = io_foo1#[{p0}]" in findings[0]["attrs"]["template"], findings
 
@@ -128,22 +132,22 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
     for prefix in ("", f"comb other({ports}) -> () {{}}\n"):
         findings, _, _ = run(prefix + f"comb f() -> () {{\n{locals_source}\n}}\n")
         assert len(findings) == 1, findings
-    findings, _, _ = run(f"comb f(data:u8=io_foo1) -> () {{\n{locals_source}\n}}\n")
+    findings, _, _ = run(f"comb f(data:U8=io_foo1) -> () {{\n{locals_source}\n}}\n")
     assert len(findings) == 1, findings
 
     # Comparing entire lambda statements must also preserve their interfaces.
-    modules = "\n".join(f"comb f{i}(io_foo{i}:u8) -> () {{}}" for i in range(1, 4))
+    modules = "\n".join(f"comb f{i}(io_foo{i}:U8) -> () {{}}" for i in range(1, 4))
     assert not run(modules)[0]
 
     # After an import, Tree-sitter may put the module body beside its lambda
     # signature. RenameTable's output adapter must still keep exact IO names.
     imported = 'const table = import("rename_table.rename_table")\n\n'
-    out_ports = ", ".join(f"io_readPorts_{i}_data:u8@[]" for i in range(3))
+    out_ports = ", ".join(f"io_readPorts_{i}_data:U8@[]" for i in range(3))
     adapter = "\n".join(f"io_readPorts_{i}_data = data#[{8*i} ..+ 8]" for i in range(3))
     for gap in (" ", " // output adapter\n"):
-        assert not run(imported + f"pub mod RenameTable(data:u24) -> ({out_ports}){gap}{{\n{adapter}\n}}\n")[0]
+        assert not run(imported + f"pub mod RenameTable(data:U24) -> ({out_ports}){gap}{{\n{adapter}\n}}\n")[0]
     assert not run(imported + f"comb f({ports}) -> () {{\n{inputs}\n}}\n")[0]
-    findings, _, _ = run(imported + f"comb f(io_foo1:u8) -> (out2:u3) {{\n{indexed}\n}}\n")
+    findings, _, _ = run(imported + f"comb f(io_foo1:U8) -> (out2:U3) {{\n{indexed}\n}}\n")
     assert len(findings) == 1 and "io_foo1#[{p0}]" in findings[0]["attrs"]["template"], findings
     # Attaching a body must not leak its ports into a following module.
     findings, _, _ = run(imported + f"comb f({ports}) -> () {{\n{inputs}\n}}\n"
@@ -166,7 +170,7 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
 
     negatives = [
         "const a0 = in0 + 1\nconst a1 = in1 - 1\nconst a2 = in2 * 1\n",
-        "const a0:u8 = in0\nconst a1:u9 = in1\nconst a2:u10 = in2\n",
+        "const a0:U8 = in0\nconst a1:U9 = in1\nconst a2:U10 = in2\n",
         "const a0 = in0\nconst a1 = in1\nconst a2 = in7\n",  # inconsistent stride
         "const a0 = alpha\nconst a1 = beta\nconst a2 = gamma\n",  # distinct external names
         'const a0 = "s0"\nconst a1 = "s1"\nconst a2 = "s2"\n',
@@ -225,8 +229,8 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
         "dst.a = src.a\nwrap dst.b = src.b\n",
         "dst.a = src.a\nsat dst.b = src.b\n",
         "dst.a = src.a\ndst.b += src.b\n",
-        "dst.a = src.a\ndst.b = unsigned(src.b)\n",
-        "dst.a = src.a\ndst.b:u8 = src.b\n",
+        "dst.a = src.a\ndst.b = Unsigned(src.b)\n",
+        "dst.a = src.a\ndst.b:U8 = src.b\n",
         "dst.a = src.a\ndst.a = src.a\n",  # duplicate
         "dst.a = src.a\ndst.a.b = src.a.b\n",  # ancestor/descendant
         "dst.a.b = src.a.b\ndst.a = src.a\n",  # reverse overlap
@@ -287,7 +291,7 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
         "if a { wrap out = x } else { wrap out = y }\n",
         "if a { wrap out = x } else { sat out = y }\n",
         "if a { out[i] = x } else { out[i] = y }\n",
-        "if a { out:u8 = x } else { out:u8 = y }\n",
+        "if a { out:U8 = x } else { out:U8 = y }\n",
         "if a { out = child(x) } else { out = y }\n",
         "if a { out = child(x).value } else { out = y }\n",
         "if a { out = child::[name=instance](x).value } else { out = y }\n",
@@ -341,7 +345,7 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
     assert [(f["code"], f["span"]["start_line"]) for f in again] == [(f["code"], f["span"]["start_line"]) for f in all_findings]
     _, _, path = run(combined, rule="all")
     proc = subprocess.run([LHD, "pyrope", "style", str(path), "--diag-fmt", "pretty"], capture_output=True, text=True)
-    assert proc.returncode == 0, proc.stderr
+    assert proc.returncode == 2, proc.stderr
     for message in ("matching field copies", "flattened named arguments", "exhaustive branches"):
         assert message in proc.stderr, proc.stderr
 
@@ -350,7 +354,7 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
     _, _, path = run(source, "--emit", f"diagnostics:{output}")
     assert any(json.loads(s)["code"] == "likely-unrolled-loop" for s in output.read_text().splitlines())
     proc = subprocess.run([LHD, "pyrope", "style", str(path), "--min-repeats", "3", "--diag-fmt", "pretty"], capture_output=True, text=True)
-    assert proc.returncode == 0 and "3 statements per copy, repeated 4 times" in proc.stderr, proc.stderr
+    assert proc.returncode == 2 and "3 statements per copy, repeated 4 times" in proc.stderr, proc.stderr
     assert "template:" in proc.stderr and "first copy" in proc.stderr, proc.stderr
     for args in [["describe", "pyrope style"], ["pyrope", "style", "--help"], ["help", "pyrope", "style"]]:
         proc = subprocess.run([LHD, *args, "--diag-fmt", "json"], capture_output=True, text=True)
@@ -368,6 +372,6 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
     # One missing file must not prevent later inputs from being checked.
     proc = subprocess.run([LHD, "pyrope", "style", str(root / "missing.prp"), str(path), "--min-repeats", "3", "--diag-fmt", "json"],
                           capture_output=True, text=True)
-    assert proc.returncode != 0 and '"likely-unrolled-loop"' in proc.stderr, proc.stderr
+    assert proc.returncode == 1 and '"likely-unrolled-loop"' in proc.stderr, proc.stderr
 
 print("Pyrope style checks passed")

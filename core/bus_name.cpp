@@ -68,4 +68,48 @@ std::optional<std::string_view> cell_state_owner(std::string_view name) {
   return owner;
 }
 
+std::optional<Memory_storage> parse_memory_storage(std::string_view name, char separator) {
+  const auto pos = name.find(memory_instance_marker);
+  if (pos == std::string_view::npos) {
+    return std::nullopt;
+  }
+  const auto hex_begin = pos + memory_instance_marker.size();
+  const auto hex_end   = name.find("_e", hex_begin);
+  if (hex_end == std::string_view::npos || hex_end == hex_begin || ((hex_end - hex_begin) & 1U) != 0) {
+    return std::nullopt;
+  }
+  auto rest = name.substr(hex_end + 2);
+  if (rest.size() > 1 && rest.front() == '_' && rest[1] >= '0' && rest[1] <= '9') {
+    const auto digits_end = rest.find_first_not_of("0123456789", 1);
+    rest                  = digits_end == std::string_view::npos ? std::string_view{} : rest.substr(digits_end);
+  }
+  if (rest.size() != 5 || (rest.front() != separator && rest.front() != '_') || rest.substr(1) != "data") {
+    return std::nullopt;
+  }
+
+  auto nibble = [](char ch) -> int {
+    if (ch >= '0' && ch <= '9') {
+      return ch - '0';
+    }
+    if (ch >= 'a' && ch <= 'f') {
+      return ch - 'a' + 10;
+    }
+    if (ch >= 'A' && ch <= 'F') {
+      return ch - 'A' + 10;
+    }
+    return -1;
+  };
+  Memory_storage out{name.substr(0, pos), {}};
+  out.source.reserve((hex_end - hex_begin) / 2);
+  for (auto i = hex_begin; i < hex_end; i += 2) {
+    const int hi = nibble(name[i]);
+    const int lo = nibble(name[i + 1]);
+    if (hi < 0 || lo < 0) {
+      return std::nullopt;
+    }
+    out.source.push_back(static_cast<char>((hi << 4) | lo));
+  }
+  return out;
+}
+
 }  // namespace livehd::bus_name

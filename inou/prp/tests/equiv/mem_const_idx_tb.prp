@@ -17,7 +17,7 @@ test mem_const_idx.sig {
     s = s * 6364136223846793005 + 1442695040888963407
     acc.b = s & 0xff
     s = s * 6364136223846793005 + 1442695040888963407
-    acc.we = s & 0x1
+    acc.we = Bool(s & 0x1)
     step
     if clock >= 32 {
       sig = sig * 1099511628211 + (acc.z & 0xff)

@@ -5,12 +5,12 @@
 :verifier_fail: 0
 */
 
-comb init_xy(ref self, x:signed, y:signed) {
+comb init_xy(ref self, x:Signed, y:Signed) {
   self._x = x
   self._y = y
 }
 
-comb get_xy(self, idx:string) -> (r) {
+comb get_xy(self, idx:String) -> (r) {
   r = match idx {
     == 'x' { self._x }
     == 'y' { self._y }
@@ -20,7 +20,7 @@ comb get_xy(self, idx:string) -> (r) {
 
 comptime const Point = (mut _x = 0, mut _y = 0, const init = init_xy, const get = get_xy)
 
-const p:Point = (1, 2)   // init runs at construction
+const p:Point = (x=1, y=2)   // init runs at construction; two Signed params: name them
 
 cassert(p.get('x') == 1)
 cassert(p.get('y') == 2)

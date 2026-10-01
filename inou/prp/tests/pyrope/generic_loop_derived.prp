@@ -16,16 +16,16 @@
 comptime const SIZE      = 8
 comptime const LOG2_SIZE = 3
 
-comb add_n<N>(x:u8) -> (y:u8) {
-  mut value:u8 = x
+comb add_n<N>(x:U8) -> (y:U8) {
+  mut value:U8 = x
   for i in 0..<N {
     value = (value + 1)#[0..=7]
   }
   y = value
 }
 
-pub comb generic_loop_derived(x:u8) -> (y:u8) {
-  mut value:u8 = x
+pub comb generic_loop_derived(x:U8) -> (y:U8) {
+  mut value:U8 = x
   for lvl in 0..<LOG2_SIZE {
     value = add_n<N=(SIZE >> (lvl + 1))>(x=value)
   }

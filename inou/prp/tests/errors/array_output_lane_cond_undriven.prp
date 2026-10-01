@@ -1,0 +1,19 @@
+/*
+:name: array_output_lane_cond_undriven
+:type: error
+:tolg: 1
+:error: lane 1 of output .v. is never driven
+:help: every bit of a value built from pieces must be driven
+*/
+
+// User ruling 15 (2026-09-27): an array output built lane by lane must drive
+// every lane on EVERY path. Lane 1 is written only when `c` holds, so on the
+// other path it stays nil: a compile error on the output's declaration, the
+// coverage rule `mut v:[N]T = nil` follows (04-variables.md). It used to count
+// as driven and silently read 0 when `c` is false.
+pub mod array_output_lane_cond_undriven(a:U4, b:U4, c:Bool) -> (v:[2]U4@[0]) {   // locate_error_here
+  v[0] = a
+  if c {
+    v[1] = b
+  }
+}

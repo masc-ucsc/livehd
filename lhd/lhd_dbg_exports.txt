@@ -1,0 +1,3 @@
+# ld64 -exported_symbols_list for -c dbg macOS builds of //lhd:lhd: export
+# NOTHING. An unoptimized lhd exports ~every weak C++ definition, and dyld
+# spent ~1 s coalescing them on every process start (0.01 s without).

@@ -1,0 +1,86 @@
+/*
+:name: mod_multi_output_landing_cycles
+:type: simulation
+*/
+
+// A caller must see EACH output of a multi-output `mod` child at that output's
+// own declared landing cycle (lhdtrack suggestions 2.1, the br_ram_flops
+// "valid at @[1], data at @[0]" note). `vld` is a 1-cycle delay of `en` (an
+// always-written reg -> a feedforward stage register, so `@[1]`); `q` is a
+// gated state register (`@[0]`). The caller re-exports both at the same
+// cycles, which is exactly right.
+//
+// Before the 2.1 fix, upass.tolg's lower_func_call stamped the declared
+// landing cycle on the Sub only for a SINGLE-output child (the multi-output
+// branch returned before `sub_time_` was set), and the time-checker kept one
+// cycle per Sub NODE, so every output of a multi-output child was seen at
+// cycle 0 and this correct design was refused:
+//   upass.tolg: 'vv' in 'mod_multi_output_landing_cycles.mtop' lands at
+//   cycle(s) (0,0) but (1,1) is declared at the interface
+// The mirror image (declaring `vv@[0]`, which must be rejected) is
+// errors/mod_multi_output_cycle_mismatch.prp; the IMPORTED-child spellings
+// are imports/mod_multi_output_landing_import.prp and
+// imports/mod_multi_output_cycle_mismatch_import.prp.
+//
+// `vv2` chains the `@[1]` output through a second 1-cycle delay and declares
+// `@[2]`: it only type-checks if the caller carries `vld`'s cycle 1 into the
+// next child, and its sim check tells a real delay from a passthrough (after
+// `step` with the inputs held, a D flop and a wire read the same value, but a
+// 2-flop chain reads the PREVIOUS cycle's `en`).
+mod dly2(en:Bool, d:U4) -> (vld:Bool@[1], q:U4@[0]) {
+  reg vr:Bool = false
+  vr = en
+  vld = vr
+  reg r:U4 = 0
+  if en { r = d }
+  q = r
+}
+
+mod dly1(en:Bool) -> (vld:Bool@[1]) {
+  reg vr:Bool = false
+  vr = en
+  vld = vr
+}
+
+pub mod mtop(en:Bool, a:U4) -> (vv:Bool@[1], vv2:Bool@[2], qq:U4@[0]) {
+  const x = dly2(en=en, d=a)
+  vv  = x.vld
+  vv2 = dly1(en=x.vld)
+  qq  = x.q
+}
+
+test mtop.each_output_at_its_cycle {
+  mut dut       = mtop
+  mut want_q:U4 = 0
+  mut prev_en   = false
+  mut bad       = 0
+  mut seen      = 0
+  tick 8 {
+    mut env   = (clock == 1) or (clock == 2) or (clock == 5)
+    mut av:U4 = clock + 3
+    dut.reset = clock == 0
+    dut.en    = env
+    dut.a     = av
+    if clock == 0 {
+      want_q = 0
+    } elif env {
+      want_q = av
+    }
+    step
+    seen = seen + 1
+    // After the edge the delay register holds this cycle's `en` (it lands one
+    // cycle after the input that produced it), and the state register holds
+    // the last enabled `a`.
+    if clock != 0 {
+      if dut.vv != env { bad = bad + 1 }
+    }
+    // The chained delay holds the PREVIOUS cycle's `en`.
+    if clock >= 2 {
+      if dut.vv2 != prev_en { bad = bad + 1 }
+    }
+    if dut.qq != want_q { bad = bad + 1 }
+    prev_en = env
+  }
+  assert(seen == 8, "the comparisons ran (guards against a vacuous pass)")
+  assert(bad == 0, "the delay outputs and the state output are all observed correctly")
+}

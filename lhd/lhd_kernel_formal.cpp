@@ -32,6 +32,7 @@
 #include "inline_sub.hpp"
 #include "latch_contract.hpp"
 #include "lhd_kernel_internal.hpp"
+#include "lib_cell_prep.hpp"
 #include "lnast.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
@@ -281,7 +282,7 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
       side_opts.top = selected_top;
     }
     lower_lnasts(side_opts, res, var, lib_path, /*need_graphs=*/true);
-    graph_pipeline_and_emits(opts, res, var, lib_path, false, /*from_source=*/kind != "ln");
+    graph_pipeline_and_emits(opts, res, var, lib_path);
   } else {
     throw Lhd_error{"usage",
                     std::format("lec accepts verilog:, lg:, pyrope:, or ln: inputs, got {}:", kind),
@@ -507,6 +508,10 @@ static void disclose_lec_helpers(livehd::lec::Query_result& r, const livehd::lec
     r.detail += r.verdict == livehd::lec::Verdict::Proven ? std::format("; PROVEN under {} input assume(s)", o.input_assumes)
                                                           : std::format("; under {} input assume(s)", o.input_assumes);
   }
+  if (o.proven_assumes > 0) {
+    r.detail += r.verdict == livehd::lec::Verdict::Proven ? std::format("; PROVEN under {} proven assume(s)", o.proven_assumes)
+                                                          : std::format("; under {} proven assume(s)", o.proven_assumes);
+  }
   if (o.unchecked_assumes > 0) {
     r.detail += r.verdict == livehd::lec::Verdict::Proven
                     ? std::format("; PROVEN under {} unchecked assume(s)", o.unchecked_assumes)
@@ -514,20 +519,37 @@ static void disclose_lec_helpers(livehd::lec::Query_result& r, const livehd::lec
   }
 }
 
-// One side's design-authored assume census. `active` is what the encoder will
-// actually ASSERT as a miter hypothesis; `undischarged` is the subset that
-// became a hypothesis without ever being PROVED, with `undischarged_loc` naming
-// the first one (see the refusal in run_lec).
-struct Design_assume_census {
-  int         active       = 0;
-  int         undischarged = 0;
-  std::string undischarged_loc;
+// One side's design-authored assumes that the encoder will actually ASSERT as a
+// miter hypothesis, mirroring pass/lec/encode.cpp's prop_active_assume rule
+// exactly:
+//   * `assume_nocheck` is an environment contract BY SPELLING — active whether
+//     or not pass.formal ran or stamped anything. This deliberately survives
+//     pass.formal RETRACTING a jointly-contradictory set (which clears
+//     `proven`): the pair must still gate this count, or o.design_assumes goes
+//     false and the hierarchy's no-solver structural-identity shortcut hands
+//     out a PROVEN that the UNSAT hypothesis set should have rejected as
+//     CONTRADICTORY.
+//   * a CHECKED `assume` needs the `proven` stamp pass.formal put on it (a
+//     proven one, or every assume under assume_check=false). One that was never
+//     proven — refuted or undecided and kept as a runtime check, in a `lg:`
+//     library fed straight to `lhd lec`, or on a side built with
+//     compile.formal.mode=none — carries no stamp, is not a hypothesis, and
+//     must not be disclosed as one either.
+//   * a `proven` of kind kFormalAssumeHier was discharged by the HIERARCHY
+//     (proven at every occurrence under the parents' bindings). The encoder
+//     does not turn that into a hypothesis for the def on its own, so it is not
+//     active here.
+// The verdict discloses the two classes apart: a checked assume pass.formal
+// proved is a PROVEN fact, while an assume_nocheck (or any assume under
+// assume_check=false) is an UNCHECKED contract.
+struct Design_assumes {
+  int proven    = 0;
+  int unchecked = 0;
 };
-
-static Design_assume_census design_assume_occurrences(hhds::Graph* top) {
-  Design_assume_census census;
+static Design_assumes design_assume_occurrences(hhds::Graph* top, bool assume_check) {
+  Design_assumes active;
   if (top == nullptr) {
-    return census;
+    return active;
   }
   for (auto node : top->occurrences().nodes(hhds::Node_order::forward)) {
     if (livehd::graph_util::type_op_of(node) != Ntype_op::Sub) {
@@ -542,53 +564,15 @@ static Design_assume_census design_assume_occurrences(hhds::Graph* top) {
     if (raw.rfind("assume\x1f", 0) != 0 && !nocheck_by_name) {
       continue;
     }
-    // Count only what the encoder will actually ASSERT, mirroring
-    // pass/lec/encode.cpp's prop_active_assume rule exactly:
-    //   * `assume_nocheck` is an environment contract BY SPELLING — active
-    //     whether or not pass.formal ran or stamped anything. This deliberately
-    //     survives pass.formal RETRACTING a jointly-contradictory set (which
-    //     clears `proven`): the pair must still gate this census, or
-    //     o.design_assumes goes false and the hierarchy's no-solver
-    //     structural-identity shortcut hands out a PROVEN that the UNSAT
-    //     hypothesis set should have rejected as CONTRADICTORY.
-    //   * a CHECKED `assume` needs the `proven` stamp pass.formal put on it
-    //     (a selected-top IO assume, or every assume under assume_check=false).
-    //     One that was never discharged — a `lg:` library fed straight to
-    //     `lhd lec`, or a side built with compile.formal.mode=none —
-    //     carries no attribute, is not a hypothesis, and must not be disclosed
-    //     as one either.
-    //   * a `proven` of kind kFormalAssumeHier was discharged by the HIERARCHY
-    //     (proven at every occurrence under the parents' bindings). The encoder
-    //     does not turn that into a hypothesis for the def on its own, so it is
-    //     neither active nor an unchecked promotion here.
     const auto base = node.base_node();
     const bool proven_hier
         = livehd::graph_util::has_proven(base) && livehd::graph_util::proven_of(base) == livehd::graph_util::kFormalAssumeHier;
     if (!nocheck_by_name && (!livehd::graph_util::has_proven(base) || proven_hier)) {
       continue;
     }
-    ++census.active;
-    // pass.formal stamps an assume BOTH `proven` and `runtime_check` in exactly
-    // ONE case: a selected-top IO `assume` it could not discharge (see
-    // pass_formal.cpp — `proven` publishes the hypothesis, `runtime_check` keeps
-    // the still-unproved obligation in the netlist). Every other stamped assume
-    // — assume_nocheck, formal.assume_check=false, a genuinely proven one —
-    // carries `proven` ALONE, so the pair is an exact "accepted without proof"
-    // discriminator on a persisted graph. An `assume_nocheck` is exempt by
-    // spelling: it is a sanctioned free contract, never the "undischarged
-    // promotion" this refusal exists for — including a retracted contradictory
-    // one, whose `runtime_check` stamp must reach pass.lec's CONTRADICTORY
-    // rejection rather than trip the wrong refusal here.
-    if (!nocheck_by_name && livehd::graph_util::has_runtime_check(node.base_node())) {
-      ++census.undischarged;
-      if (census.undischarged_loc.empty()) {
-        const auto k            = raw.find('\x1f');  // "kind\x1floc\x1fmsg"
-        const auto l            = raw.find('\x1f', k + 1);
-        census.undischarged_loc = std::string{raw.substr(k + 1, l == std::string_view::npos ? std::string_view::npos : l - k - 1)};
-      }
-    }
+    ++(nocheck_by_name || !assume_check ? active.unchecked : active.proven);
   }
-  return census;
+  return active;
 }
 
 // Bottom-up hierarchical LEC driver (formal.lec.hier=true). Build the module-def
@@ -1494,7 +1478,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // the accepted impl-side helper facts.
       o.assumptions = nullptr;
       o.assumption_key.clear();
-      o.proven_helpers = o.input_assumes = o.unchecked_assumes = 0;
+      o.proven_helpers = o.input_assumes = o.unchecked_assumes = o.proven_assumes = 0;
     }
     // Each def is LEC'd under the requested engine (formal.engine, default `auto` =
     // the ind+bmc portfolio). Honor an explicit engine so `--set formal.engine=bmc`
@@ -1819,6 +1803,13 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       // definitive. The obligations close exactly that hole. The predicate is
       // is_structural_identity (semdiff.hpp) -- the SAME one structural_identical()
       // and abc's reuse gate read, so this soundness-critical skip cannot drift.
+      // A bus_name-reconstructed pair (ref `g` vs the impl's `DFF g` / `\g.l` /
+      // `\g_cgen1.l`, state.name_reconstructed) may take the skip: the rename is
+      // only a hint, and semdiff keys each state obligation by the seed the pair
+      // matched through, so its din/enable/reset/initial are compared like any
+      // name pair's. Keyed by the raw names they were both one-sided and never
+      // checked, and swapped dins or a changed reset constant PROVED here
+      // (pass/semdiff/tests/lec_name_hint_test.sh).
       // A node-set bijection says nothing about the two INTERFACES. Two defs can
       // match structurally while declaring a top port at different widths or
       // signedness (`input signed [1:0] a` vs `input a`): the solver path
@@ -2781,6 +2772,88 @@ struct Lecfail_leaf {
   std::string type;    // declared ":u2" suffix, or "" when untyped
 };
 
+// Source paths retain backticks for emission, but graph witness keys contain
+// the decoded port names. In particular, an explicit `reset` must match the
+// trace's reset input rather than being mistaken for a minted reset.
+std::string lecfail_trace_name(std::string_view source) {
+  std::string name;
+  for (size_t i = 0; i < source.size();) {
+    if (source[i] != '`') {
+      name += source[i++];
+      continue;
+    }
+    const size_t start = i++;
+    while (i < source.size() && source[i] != '`') {
+      if (source[i] == '\\' && i + 1 < source.size()) {
+        ++i;
+      }
+      ++i;
+    }
+    if (i == source.size()) {
+      name.append(source.substr(start));
+      break;
+    }
+    ++i;
+    auto decoded = str_tools::decode_backtick_ident(source.substr(start, i - start));
+    if (decoded) {
+      name.append(*decoded, 1, decoded->size() - 2);
+    }
+  }
+  return name;
+}
+
+// Flattened wrapper ports derived from escaped names still need escaping.
+// Keep the bare flat name separately for safe prefixed stimulus-array names.
+std::string lecfail_flat_ident(std::string_view dotted, std::string_view flat) {
+  return dotted.find('`') == std::string_view::npos ? std::string(flat) : std::format("`{}`", flat);
+}
+
+// The leading type word of a declared `:T` suffix is `word` (`:Bool`,
+// `:Bool@[0]`, `:Clock`).
+bool lecfail_suffix_is(std::string_view suffix, std::string_view word) {
+  size_t p = (!suffix.empty() && suffix[0] == ':') ? 1 : 0;
+  while (p < suffix.size() && (suffix[p] == ' ' || suffix[p] == '\t')) {
+    ++p;
+  }
+  if (suffix.compare(p, word.size(), word) != 0) {
+    return false;
+  }
+  p += word.size();
+  return p == suffix.size() || (std::isalnum(static_cast<unsigned char>(suffix[p])) == 0 && suffix[p] != '_');
+}
+
+// A declared `:Bool` suffix. Bool ports are strict: the testbench declares such
+// a port `Bool`, drives it with a comparison, and casts at a binding whose other
+// side is an integer (`U1(x)` / `Bool(x)`).
+bool lecfail_is_bool_type(std::string_view suffix) { return lecfail_suffix_is(suffix, "Bool"); }
+
+// A declared `:Clock` / `:Reset` suffix (docs 07-typesystem "Clock and Reset"):
+// the wrapper keeps the type, so the port stays the implicit clock/reset it
+// binds by. A Clock is never driven from the trace (the sim clock ticks it); a
+// Reset is Bool-like, poked with a comparison.
+bool lecfail_is_clock_type(std::string_view suffix) { return lecfail_suffix_is(suffix, "Clock"); }
+bool lecfail_is_reset_type(std::string_view suffix) { return lecfail_suffix_is(suffix, "Reset"); }
+
+// The width N of a declared signed `:S<N>` suffix, else 0.
+int lecfail_signed_width(std::string_view suffix) {
+  size_t p = (!suffix.empty() && suffix[0] == ':') ? 1 : 0;
+  while (p < suffix.size() && (suffix[p] == ' ' || suffix[p] == '\t')) {
+    ++p;
+  }
+  if (p >= suffix.size() || suffix[p] != 'S') {
+    return 0;
+  }
+  int    n = 0;
+  size_t q = p + 1;
+  for (; q < suffix.size() && std::isdigit(static_cast<unsigned char>(suffix[q])) != 0; ++q) {
+    n = n * 10 + (suffix[q] - '0');
+  }
+  if (q == p + 1 || (q < suffix.size() && (std::isalnum(static_cast<unsigned char>(suffix[q])) != 0 || suffix[q] == '_'))) {
+    return 0;  // not a number, or a longer name such as a type alias `S4x`
+  }
+  return n;
+}
+
 struct Lecfail_mod {
   std::string                                      name;
   std::string                                      text;       // full module source
@@ -3263,7 +3336,7 @@ std::string lecfail_type_params(const std::string& text, const absl::flat_hash_m
     std::string raw = name + suffix;
     if (suffix.empty()) {  // untyped
       if (auto it = width_of.find(name); it != width_of.end()) {
-        raw     = name + std::format(":u{}", it->second);
+        raw     = name + std::format(":U{}", it->second);
         changed = true;
       }
     }
@@ -3573,8 +3646,17 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
     std::string decl;    // declared ":u4" suffix, "" when untyped
   };
   auto wtype = [&](const Wport& w) {
-    if (auto it = width_of.find(w.dotted); it != width_of.end()) {
-      return std::format(":u{}", it->second);
+    if (lecfail_is_bool_type(w.decl)) {
+      return std::string{":Bool"};  // the declaring side's kind; the trace carries it as 0/1
+    }
+    if (lecfail_is_clock_type(w.decl)) {
+      return std::string{":Clock"};
+    }
+    if (lecfail_is_reset_type(w.decl)) {
+      return std::string{":Reset"};
+    }
+    if (auto it = width_of.find(lecfail_trace_name(w.dotted)); it != width_of.end()) {
+      return std::format(":U{}", it->second);
     }
     // Not in the trace (the solver never constrained it): keep the DECLARED
     // type rather than defaulting to :u1, which would silently truncate.
@@ -3582,7 +3664,7 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
       const size_t at = w.decl.find("@[");
       return at == std::string::npos ? w.decl : w.decl.substr(0, at);
     }
-    return std::string{":u1"};
+    return std::string{":U1"};
   };
 
   // Union of the two tops' input LEAVES (order: impl first, then ref extras).
@@ -3618,7 +3700,7 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   // ---- build the wrapper module -------------------------------------------
   std::string sig_in;
   for (const auto& w : win) {
-    sig_in += (sig_in.empty() ? "" : ", ") + w.flat + wtype(w);
+    sig_in += (sig_in.empty() ? "" : ", ") + lecfail_flat_ident(w.dotted, w.flat) + wtype(w);
   }
   // Every `mod` output MUST declare a landing cycle, and a re-emitted `comb`
   // side carries only a type (`:u64`) — so a wrapper over a combinational DUT
@@ -3634,6 +3716,20 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   }
   // Per-LEAF actuals: a struct port is bound field by field, and a leaf the
   // wrapper does not carry (a field only the OTHER side declares) is skipped.
+  // The wrapper port takes the kind of the side that declared it first, so a
+  // side declaring the other kind gets an explicit cast (bool ports are strict).
+  absl::flat_hash_set<std::string> bool_port;   // wrapper ports declared `Bool`
+  absl::flat_hash_set<std::string> clock_port;  // wrapper ports declared `Clock`
+  absl::flat_hash_set<std::string> reset_port;  // wrapper ports declared `Reset`
+  for (const auto& w : win) {
+    if (lecfail_is_bool_type(w.decl)) {
+      bool_port.insert(w.flat);
+    } else if (lecfail_is_clock_type(w.decl)) {
+      clock_port.insert(w.flat);
+    } else if (lecfail_is_reset_type(w.decl)) {
+      reset_port.insert(w.flat);
+    }
+  }
   auto call_args = [&](const Lecfail_mod* m) {
     std::string a;
     for (const auto& lf : m->in_leaves) {
@@ -3641,7 +3737,19 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
       if (it == flat_of.end()) {
         continue;
       }
-      a += (a.empty() ? "" : ", ") + std::format("{} = {}", lf.dotted, it->second);
+      std::string actual = lecfail_flat_ident(lf.dotted, it->second);
+      const bool  sig    = lecfail_is_clock_type(lf.type) || lecfail_is_reset_type(lf.type) || clock_port.contains(it->second)
+                           || reset_port.contains(it->second);
+      if (const bool want = lecfail_is_bool_type(lf.type); !sig && want != bool_port.contains(it->second)) {
+        actual = std::format("{}({})", want ? "Bool" : "U1", actual);
+      } else if (const int sw = lecfail_signed_width(lf.type); !sig && !want && sw > 0) {
+        // The wrapper drives an integer port as the unsigned bits the trace
+        // carries; a signed port reads those bits with its own sign (LEC pairs
+        // `input [3:0] b` with `input signed [3:0] b` as one bus), so pass it
+        // the sign-extended low bits rather than an out-of-range magnitude.
+        actual = std::format("{}#sext[0..={}]", actual, sw - 1);
+      }
+      a += (a.empty() ? "" : ", ") + std::format("{} = {}", lf.dotted, actual);
     }
     return a;
   };
@@ -3681,14 +3789,15 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   // The implicit reset: a trace input named `reset` that is NOT a declared port
   // (Pyrope-origin designs drive their registers off it). An explicit reset PORT
   // is instead driven by name like any other input.
-  const bool reset_is_port  = std::any_of(win.begin(), win.end(), [](const Wport& w) { return w.dotted == "reset"; });
+  const bool reset_is_port
+      = std::any_of(win.begin(), win.end(), [](const Wport& w) { return lecfail_trace_name(w.dotted) == "reset"; });
   const bool implicit_reset = width_of.count("reset") != 0 && !reset_is_port;
 
   std::string test_text = std::format("test {} {{\n  mut _lec_dut = {}\n", test_name, wrapper);
   for (const auto& w : win) {
     std::string arr;
     for (int c = 0; c < ncyc; ++c) {
-      arr += (arr.empty() ? "" : ", ") + val_at(w.dotted, c);
+      arr += (arr.empty() ? "" : ", ") + val_at(lecfail_trace_name(w.dotted), c);
     }
     test_text += std::format("  const _drv_{} = [{}]\n", w.flat, arr);
   }
@@ -3706,10 +3815,18 @@ void emit_lecfail_witness(Options& opts, Result& res, const livehd::lec::Query_r
   // A design with NO reset at all (e.g. slang-imported, reset-less flops) gets
   // no drive — `_dut.reset` would be an unknown field and fail the replay.
   if (implicit_reset) {
-    test_text += "    _lec_dut.reset = _drv_reset[clock]\n";
+    // A minted reset is a Reset like a declared one: drive it a Bool (`!= 0`),
+    // exactly as the declared-Reset ports below, never a bare integer.
+    test_text += "    _lec_dut.`reset` = _drv_reset[`clock`] != 0\n";
   }
   for (const auto& w : win) {
-    test_text += std::format("    _lec_dut.{} = _drv_{}[clock]\n", w.flat, w.flat);
+    if (clock_port.contains(w.flat)) {
+      continue;  // a Clock is the sim clock, never poked
+    }
+    test_text += std::format("    _lec_dut.{} = _drv_{}[`clock`]{}\n",
+                             lecfail_flat_ident(w.dotted, w.flat),
+                             w.flat,
+                             bool_port.contains(w.flat) || reset_port.contains(w.flat) ? " != 0" : "");
   }
   test_text += "    step\n  }\n}\n";
 
@@ -3926,46 +4043,23 @@ void lec_command(Options& opts, Result& res) {
   // agreement (the strongest encoder check).
   livehd::lec::Lec_options o;
   o.assume_check          = assume_check;
-  // pass.formal has already proved and removed every checked child/local
-  // obligation.  What remains is active by contract (explicit nocheck,
-  // selected-top IO, or all assumptions when checking is disabled), and must
-  // constrain both the flat and hierarchical cvc5 translations.
-  const auto ref_assumes  = design_assume_occurrences(ref_g.get());
-  const auto impl_assumes = design_assume_occurrences(impl_g.get());
-  // ...with ONE exception, and it is lec-specific. pass.formal promotes an
-  // UNDISCHARGED selected-top IO `assume` to an active hypothesis because a top
-  // has no parent that could establish it. That is defensible for `lhd formal
-  // verify`: the constraint conditions that ONE design's own assertions, and
-  // every verdict line discloses it. lec is a TWO-sided obligation over SHARED
-  // inputs, so the same promotion narrows the compared input space of a miter
-  // whose OTHER side never made the claim — `--ref golden.v --impl design.prp`
-  // with `assume(a < 4)` in the impl reports "PROVEN equivalent" and exits 0 for
-  // designs that differ at every a >= 4. A false PROVEN is the one verdict a LEC
-  // tool may never hand out, and the user asked for the constraint to be CHECKED,
-  // so refuse instead of guessing — the same "refuse loudly rather than silently
-  // ignore" rule the formal-block sidecar above follows. Both sanctioned
-  // spellings still constrain the miter, they just say so in the source.
-  if (ref_assumes.undischarged > 0 || impl_assumes.undischarged > 0) {
-    const bool  on_ref  = ref_assumes.undischarged > 0;
-    const bool  on_impl = impl_assumes.undischarged > 0;
-    std::string side    = on_ref && on_impl ? "ref and impl" : (on_ref ? "ref" : "impl");
-    std::string loc     = on_ref ? ref_assumes.undischarged_loc : impl_assumes.undischarged_loc;
-    throw Lhd_error{"unsupported",
-                    std::format("lec: the {} side has {} top-level IO assume(s) that were never discharged{} — accepting "
-                                "them as miter hypotheses would restrict the compared input space without proof",
-                                side,
-                                ref_assumes.undischarged + impl_assumes.undischarged,
-                                loc.empty() ? std::string{} : " (first at " + loc + ")"),
-                    "spell it assume_nocheck (a disclosed free environment contract) or pass --set "
-                    "formal.assume_check=false: either one keeps it in force over the whole miter, on the record"};
-  }
-  o.unchecked_assumes = ref_assumes.active + impl_assumes.active;
-  o.design_assumes    = o.unchecked_assumes > 0;
-  o.assumption_key    = std::format("design:{}:{}", o.unchecked_assumes, assume_check ? 1 : 0);
-  o.engine            = label("engine", "auto");
-  o.solver            = solver;  // cvc5 | bitwuzla
-  o.gold_x            = label("gold_x", "ignore");
-  o.bound             = std::atoi(label("bound", "6").c_str());
+  // pass.formal has already proved every checked obligation it could. What is
+  // active is a proven assume or a contract (explicit nocheck, or all
+  // assumptions when checking is disabled), and must constrain both the flat
+  // and hierarchical cvc5 translations. A plain assume pass.formal did not
+  // prove -- a selected-top IO one included (docs 05-assert: every plain
+  // assume is an obligation) -- is no hypothesis: it would narrow the compared
+  // input space of a miter whose other side never made the claim.
+  const auto ref_assumes  = design_assume_occurrences(ref_g.get(), assume_check);
+  const auto impl_assumes = design_assume_occurrences(impl_g.get(), assume_check);
+  o.proven_assumes        = ref_assumes.proven + impl_assumes.proven;
+  o.unchecked_assumes     = ref_assumes.unchecked + impl_assumes.unchecked;
+  o.design_assumes        = o.proven_assumes + o.unchecked_assumes > 0;
+  o.assumption_key        = std::format("design:{}:{}", o.proven_assumes + o.unchecked_assumes, assume_check ? 1 : 0);
+  o.engine                = label("engine", "auto");
+  o.solver                = solver;  // cvc5 | bitwuzla
+  o.gold_x                = label("gold_x", "ignore");
+  o.bound                 = std::atoi(label("bound", "6").c_str());
   o.timeout
       = std::atoi(label("timeout", "120").c_str());  // bound the CLI: hard miters degrade to UNKNOWN, never freeze (0 = unbounded)
   o.witness     = label("witness", "true") != "false" && label("witness", "true") != "0";
@@ -4118,9 +4212,10 @@ void lec_command(Options& opts, Result& res) {
   // corpus. So: if EITHER side needs it, BOTH are normalized (a side with
   // nothing to lower still runs the pass; at P=1 that is a no-op for it).
   //
-  // Runs after the --lib cell models load and BEFORE canonical_digest, since a
-  // //graph-resident pass is outside //lhd:formal_salt and would otherwise let
-  // a stale cached verdict answer for a differently-timed design.
+  // Runs after the --lib cell models load and BEFORE canonical_digest: the
+  // digest does not capture this pass's timing/naming decisions (its code is
+  // salted into //lhd:formal_salt), so the verdict cache must key on the
+  // normalized graphs.
   int lec_single_edge_slots = 1;
   {
     // The design's OWN defs, not just the --lib cell models. Scanning only
@@ -4317,6 +4412,36 @@ void lec_command(Options& opts, Result& res) {
     }
     if (!tb.error.empty()) {
       throw Lhd_error{"unsupported", tb.error, tb.error_hint};
+    }
+    if (o.phase_sched && !tb.applied) {
+      // The read-only phase schedule classifies every remaining latch from its
+      // enable's STRUCTURE (`clk & en_l` = a clock-role latch). A mapped gate
+      // (`AND2x1(clk, en_l)`) is opaque to it, so one hardware latch would be a
+      // clock-role latch on a side that spells the gate natively (the RTL, a
+      // re-read Verilog netlist) and a DATA latch on a side that keeps the cell
+      // (an lg: netlist) -- two time bases, and a false REFUTED. Expose the
+      // clock-dependent single-product cells (AND/NAND/NOR/INV/...) on latch
+      // enables on both sides, symmetrically (pass/lec/lib_cell_prep.hpp).
+      // A cell whose model does not bind to it by port name refuses the run:
+      // leaving it opaque would schedule the two sides differently again.
+      size_t                    n_cells = 0;
+      std::vector<hhds::Graph*> sides{ref_g.get()};
+      if (impl_g.get() != ref_g.get()) {
+        sides.push_back(impl_g.get());
+      }
+      for (auto* side : sides) {
+        const auto cr = livehd::lec::inline_clock_latch_enable_cells(sub_lib, side, is_boxed);
+        if (!cr.error.empty()) {
+          throw Lhd_error{"unsupported",
+                          cr.error,
+                          "a --lib model must declare every port of the instance by name and width; nothing was compared"};
+        }
+        n_cells += cr.spliced;
+      }
+      if (n_cells > 0) {
+        res.recipe_steps.emplace_back(
+            std::format("pass.lec phase_sched: inlined {} clock-dependent --lib cell(s) on latch enables", n_cells));
+      }
     }
     if (tb.applied) {
       // BMC `bound` counts STEPS, and a step is now a sub-step: at P=2 the same
@@ -5154,7 +5279,8 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
     }
     return "0";
   };
-  const bool reset_is_port  = std::any_of(win.begin(), win.end(), [](const Fport& w) { return w.dotted == "reset"; });
+  const bool reset_is_port
+      = std::any_of(win.begin(), win.end(), [](const Fport& w) { return lecfail_trace_name(w.dotted) == "reset"; });
   const bool implicit_reset = width_of.count("reset") != 0 && !reset_is_port;
   if (wrap && implicit_reset) {
     // `_dut.reset` would land on the WRAPPER's implicit reset, never reaching
@@ -5168,20 +5294,29 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   const std::string wrapper = "__simfail_dut_wrap";
   const std::string inst    = "_simfail_dut";  // named so the embedded check can read into it
   auto              wtype   = [&](const Fport& w) {
-    if (auto it = width_of.find(w.dotted); it != width_of.end()) {
-      return std::format(":u{}", it->second);
+    if (lecfail_is_bool_type(w.decl)) {
+      return std::string{":Bool"};  // Bool ports are strict; the trace carries it as 0/1
+    }
+    if (lecfail_is_clock_type(w.decl)) {
+      return std::string{":Clock"};
+    }
+    if (lecfail_is_reset_type(w.decl)) {
+      return std::string{":Reset"};
+    }
+    if (auto it = width_of.find(lecfail_trace_name(w.dotted)); it != width_of.end()) {
+      return std::format(":U{}", it->second);
     }
     if (!w.decl.empty()) {
       const size_t at = w.decl.find("@[");
       return at == std::string::npos ? w.decl : w.decl.substr(0, at);
     }
-    return std::string{":u1"};
+    return std::string{":U1"};
   };
   std::string wrap_text;
   if (wrap) {
     std::string sig_in;
     for (const auto& w : win) {
-      sig_in += (sig_in.empty() ? "" : ", ") + w.flat + wtype(w);
+      sig_in += (sig_in.empty() ? "" : ", ") + lecfail_flat_ident(w.dotted, w.flat) + wtype(w);
     }
     std::string sig_out;
     std::string args;
@@ -5189,7 +5324,7 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
       sig_out += (sig_out.empty() ? "" : ", ") + n + (suf.find("@[") == std::string::npos ? suf + "@[]" : suf);
     }
     for (const auto& w : win) {
-      args += (args.empty() ? "" : ", ") + std::format("{} = {}", w.dotted, w.flat);
+      args += (args.empty() ? "" : ", ") + std::format("{} = {}", w.dotted, lecfail_flat_ident(w.dotted, w.flat));
     }
     wrap_text = std::format("mod {}({}) -> ({}) {{\n  const {} = {}({})\n", wrapper, sig_in, sig_out, inst, dut_mod, args);
     for (const auto& [n, suf] : m->outputs) {
@@ -5203,7 +5338,7 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   for (const auto& w : win) {
     std::string arr;
     for (int c = 0; c < ncyc; ++c) {
-      arr += (arr.empty() ? "" : ", ") + val_at(w.dotted, c);
+      arr += (arr.empty() ? "" : ", ") + val_at(lecfail_trace_name(w.dotted), c);
     }
     test_text += std::format("  const _drv_{} = [{}]\n", w.flat, arr);
   }
@@ -5219,10 +5354,16 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
   // (explicit port via the input loop; implicit via the trace; NONE for a
   // reset-less design — `_dut.reset` would be an unknown field).
   if (implicit_reset) {
-    test_text += "    _dut.reset = _drv_reset[clock]\n";
+    test_text += "    _dut.`reset` = _drv_reset[`clock`] != 0\n";  // a Bool, like a declared Reset
   }
   for (const auto& w : win) {
-    test_text += std::format("    _dut.{} = _drv_{}[clock]\n", w.flat, w.flat);
+    if (lecfail_is_clock_type(w.decl)) {
+      continue;  // a Clock is the sim clock, never poked
+    }
+    test_text += std::format("    _dut.{} = _drv_{}[`clock`]{}\n",
+                             lecfail_flat_ident(w.dotted, w.flat),
+                             w.flat,
+                             lecfail_is_bool_type(w.decl) || lecfail_is_reset_type(w.decl) ? " != 0" : "");
   }
   if (!embed_assert.empty()) {
     // The violated formal-block assertion, re-targeted at the instance
@@ -5277,7 +5418,7 @@ void emit_formalfail_witness(Options& opts, Result& res, const livehd::lec::Prop
       }
       chk = rebuilt;
     }
-    test_text += std::format("    if clock == {} {{\n      {}\n    }}\n", tr.diverge_cycle, chk);
+    test_text += std::format("    if `clock` == {} {{\n      {}\n    }}\n", tr.diverge_cycle, chk);
   }
   test_text += "    step\n  }\n}\n";
 
@@ -5781,6 +5922,7 @@ void formal_verify_command(Options& opts, Result& res) {
     extras = std::move(paths);
   }
   if (!block_sel.empty()) {
+    block_sel = str_tools::canonical_escaped_path(block_sel);  // `cnt`.`bounded` selects cnt.bounded
     if (!opts.formal_filter.empty() && opts.formal_filter != block_sel) {
       throw Lhd_error{
           "usage",
@@ -6069,13 +6211,73 @@ void formal_verify_command(Options& opts, Result& res) {
   absl::flat_hash_map<std::string, std::string> fb_embed;
   {
     // Design signal tables (setup-time mirror of the engine's own collection).
+    // `boolean`: a `bool` port or `reg`. The graph carries it as a 1-bit pin,
+    // so the KIND comes from the unit's LNAST (the io_meta for a port, the
+    // `declare` for a register); the monitor must declare it `bool` for a
+    // property to read it as one (`acc.en == true`, `not acc.en` -- bools are
+    // strict, no implicit u1<->bool).
     struct Sig {
       int  w;
       bool sgn;
+      bool boolean = false;
+    };
+    auto entity = [](std::string_view n) {
+      auto d = n.rfind('.');
+      return d == std::string_view::npos ? n : n.substr(d + 1);
+    };
+    // The compiled Pyrope unit of a graph, by graph name (exact, else the
+    // unique entity match: a graph keeps its `<file>.<entity>` name). A
+    // Verilog or lg: design never declares a `bool` port or register, so all
+    // its signals stay integers.
+    auto unit_lnast = [&var, &entity](std::string_view unit) -> const Lnast* {
+      const Lnast* found = nullptr;
+      int          hits  = 0;
+      for (const auto& ln : var.lnasts) {
+        if (ln == nullptr) {
+          continue;
+        }
+        const auto name = ln->get_top_module_name();
+        if (name == unit) {
+          return ln.get();
+        }
+        if (entity(name) == entity(unit)) {
+          found = ln.get();
+          ++hits;
+        }
+      }
+      return hits == 1 ? found : nullptr;
+    };
+    auto is_bool_port = [](const Lnast* ln, std::string_view port) {
+      const auto* e = ln == nullptr ? nullptr : ln->io_meta().find(port);
+      return e != nullptr && e->kind == Io_kind::boolean;
+    };
+    // The `reg x:bool` names of a def (`declare(x, prim_type_bool, 'reg')`),
+    // collected once per def graph.
+    absl::flat_hash_map<const hhds::Graph*, absl::flat_hash_set<std::string>> bool_regs_of;
+    auto is_bool_reg = [&](const hhds::Graph* def, std::string_view reg) {
+      auto [it, fresh] = bool_regs_of.try_emplace(def);
+      if (const Lnast* ln = fresh ? unit_lnast(def->get_name()) : nullptr; ln != nullptr) {
+        for (const auto& nid : ln->depth_preorder()) {
+          if (!Lnast_ntype::is_declare(ln->get_type(nid))) {
+            continue;
+          }
+          const auto var_nid  = ln->get_first_child(nid);
+          const auto type_nid = var_nid.is_invalid() ? var_nid : ln->get_sibling_next(var_nid);
+          const auto mode_nid = type_nid.is_invalid() ? type_nid : ln->get_sibling_next(type_nid);
+          if (!mode_nid.is_invalid() && Lnast_ntype::is_prim_type_bool(ln->get_type(type_nid)) && ln->get_name(mode_nid) == "reg") {
+            it->second.emplace(ln->get_name(var_nid));
+          }
+        }
+      }
+      if (const auto p = reg.find("___ssa_"); p != std::string_view::npos) {
+        reg = reg.substr(0, p);
+      }
+      return it->second.contains(reg);
     };
     absl::flat_hash_map<std::string, Sig> in_tbl, out_tbl, flop_tbl;
     {
-      auto gio = g->get_io();
+      auto        gio      = g->get_io();
+      const auto* top_unit = unit_lnast(g->get_name());
       for (const auto& d : gio->get_input_pin_decls()) {
         auto pin       = g->get_input_pin(d.name);
         int  w         = livehd::graph_util::real_width(pin, *gio, d.name);
@@ -6083,12 +6285,12 @@ void formal_verify_command(Options& opts, Result& res) {
         // module boundary. Typing an unsigned monitor input as signed would flip
         // ordered comparisons in user properties (assume(x <= 15) could hold
         // vacuously for large x).
-        in_tbl[d.name] = Sig{w == 0 ? 1 : w, !gio->is_unsign(d.name)};
+        in_tbl[d.name] = Sig{w == 0 ? 1 : w, !gio->is_unsign(d.name), is_bool_port(top_unit, d.name)};
       }
       for (const auto& d : gio->get_output_pin_decls()) {
         auto pin        = g->get_output_pin(d.name);
         int  w          = livehd::graph_util::real_width(pin, *gio, d.name);
-        out_tbl[d.name] = Sig{w == 0 ? 1 : w, !gio->is_unsign(d.name)};
+        out_tbl[d.name] = Sig{w == 0 ? 1 : w, !gio->is_unsign(d.name), is_bool_port(top_unit, d.name)};
       }
       for (auto node : g->occurrences().nodes(hhds::Node_order::forward)) {
         if (livehd::graph_util::type_op_of(node) != Ntype_op::Flop) {
@@ -6098,14 +6300,13 @@ void formal_verify_command(Options& opts, Result& res) {
         if (q.is_invalid()) {
           continue;
         }
-        int w                                                        = livehd::graph_util::real_width(q);
-        flop_tbl[livehd::lec::canon_flop_name(node.get_hier_name())] = Sig{w == 0 ? 1 : w, !livehd::graph_util::is_unsign(q)};
+        int w = livehd::graph_util::real_width(q);
+        flop_tbl[livehd::lec::canon_flop_name(node.get_hier_name())]
+            = Sig{w == 0 ? 1 : w,
+                  !livehd::graph_util::is_unsign(q),
+                  is_bool_reg(node.get_graph(), livehd::graph_util::pin_name_of(q))};
       }
     }
-    auto entity = [](std::string_view n) {
-      auto d = n.rfind('.');
-      return d == std::string_view::npos ? n : n.substr(d + 1);
-    };
     int         gen_ix   = 0;
     int         sel_hits = 0;  // blocks the selector kept (only meaningful when one was given)
     std::string all_names;     // every block name seen, for the "no such block" diagnostic
@@ -6179,11 +6380,14 @@ void formal_verify_command(Options& opts, Result& res) {
               continue;
             }
             if (auto sio = node.get_subnode_io(); sio != nullptr) {
+              const auto* sub_unit = unit_lnast(sio->get_name());
               for (const auto& d : sio->get_input_pin_decls()) {
-                sub_port_tbl[d.name] = Sig{d.bits > 0 ? static_cast<int>(d.bits) : 1, !sio->is_unsign(d.name)};
+                sub_port_tbl[d.name]
+                    = Sig{d.bits > 0 ? static_cast<int>(d.bits) : 1, !sio->is_unsign(d.name), is_bool_port(sub_unit, d.name)};
               }
               for (const auto& d : sio->get_output_pin_decls()) {
-                sub_port_tbl[d.name] = Sig{d.bits > 0 ? static_cast<int>(d.bits) : 1, !sio->is_unsign(d.name)};
+                sub_port_tbl[d.name]
+                    = Sig{d.bits > 0 ? static_cast<int>(d.bits) : 1, !sio->is_unsign(d.name), is_bool_port(sub_unit, d.name)};
               }
             }
             break;
@@ -6219,6 +6423,11 @@ void formal_verify_command(Options& opts, Result& res) {
             }
           }
           return nullptr;
+        };
+        auto is_bool_sig = [&](const std::string& sig_path) {
+          livehd::lec::Monitor::Bind probe;
+          const Sig*                 s = resolve(sig_path, inst_prefixes.front(), probe);
+          return s != nullptr && s->boolean;
         };
         // `past(x, N)` -> a HISTORY port. The property text arrives with signal
         // paths already rewritten to `__p_*` idents, so a use reads
@@ -6264,9 +6473,10 @@ void formal_verify_command(Options& opts, Result& res) {
             }
             return s;
           };
-          // The temporal vocabulary. Ports are integers (a 1-bit signal is u1),
-          // so a truth test is `!= 0` — pyrope keeps bool and int apart, and
-          // `and` is boolean-only, so each operand is a comparison.
+          // The temporal vocabulary. A monitor port is an integer (a 1-bit
+          // signal is u1) unless the design declares it `bool`, so a truth test
+          // is `!= 0` on an integer and the value itself on a bool -- pyrope
+          // keeps bool and int apart, and `and` is boolean-only.
           //
           // WINDOWS. `rose(x, 1..=10)` and friends are SVA's `##[1:10]`: they
           // look FORWARD from the property's anchor cycle. The engine only
@@ -6518,19 +6728,25 @@ void formal_verify_command(Options& opts, Result& res) {
                   // existential — the doc's OR/AND split.
                   const bool   univ     = (nm == "stable" || nm == "always");
                   std::string  acc;
+
+                  // One sample's truth: a bool signal is its own value, an
+                  // integer one is tested against 0.
+                  const bool is_bool = is_bool_sig(base_copy.path);
+                  auto       high    = [&](int dd) { return is_bool ? port(dd) : "(" + port(dd) + " != 0)"; };
+                  auto       low     = [&](int dd) { return is_bool ? "(not " + port(dd) + ")" : "(" + port(dd) + " == 0)"; };
                   for (int k = klo; k <= khi; ++k) {
                     const int   d = F - k;  // >= 0: F is the largest hi in the statement
                     std::string term;
                     if (nm == "rose") {
-                      term = std::format("(({} == 0) and ({} != 0))", port(d + 1), port(d));
+                      term = std::format("({} and {})", low(d + 1), high(d));
                     } else if (nm == "fell") {
-                      term = std::format("(({} != 0) and ({} == 0))", port(d + 1), port(d));
+                      term = std::format("({} and {})", high(d + 1), low(d));
                     } else if (nm == "stable") {
                       term = std::format("({} == {})", port(d), port(d + 1));
                     } else if (nm == "changed") {
                       term = std::format("({} != {})", port(d), port(d + 1));
                     } else {  // eventually / always: the value itself
-                      term = std::format("({} != 0)", port(d));
+                      term = is_bool ? std::format("({})", port(d)) : high(d);
                     }
                     acc = acc.empty() ? term : std::format("({} {} {})", acc, univ ? "and" : "or", term);
                   }
@@ -6627,7 +6843,8 @@ void formal_verify_command(Options& opts, Result& res) {
                 hint};
           }
           mon.binds.push_back(std::move(b));
-          ports += std::format("{}{}:{}{}", ports.empty() ? "" : ", ", in.ident, s->sgn ? "s" : "u", s->w);
+          ports += s->boolean ? std::format("{}{}:Bool", ports.empty() ? "" : ", ", in.ident)
+                              : std::format("{}{}:{}{}", ports.empty() ? "" : ", ", in.ident, s->sgn ? "S" : "U", s->w);
         }
         // Generated monitor: one statement per line; line 1 is the header, so
         // emitted statement j sits on generated line 2+j (the loc-remap key).
@@ -6641,7 +6858,7 @@ void formal_verify_command(Options& opts, Result& res) {
         // spelling is the SANCTIONED way to state an environment constraint,
         // so it is disclosed but not warned. A plain `assume` is a proof
         // obligation — checked as an assert before it is ever used.
-        std::string src      = std::format("comb __fbmon({}) -> (__fb_ok:bool) {{\n", ports);
+        std::string src      = std::format("comb __fbmon({}) -> (__fb_ok:Bool) {{\n", ports);
         int         gen_line = 2;
         for (const auto& st : blk_stmts) {
           std::string one = st.text;
@@ -6687,7 +6904,41 @@ void formal_verify_command(Options& opts, Result& res) {
         const size_t saved_sets = opts.sets.size();
         opts.sets.emplace_back("compile.formal.mode", "none");
         Eprp_var mvar;
-        load_side_graphs(opts, res, "pyrope", genp.string(), "impl", mvar);
+        try {
+          load_side_graphs(opts, res, "pyrope", genp.string(), "impl", mvar);
+        } catch (Lhd_error& e) {
+          // The monitor is generated source, so its compile diagnostics point
+          // at `__fbmon_N.prp` and its `__p_*` ports. Say which block statement
+          // failed (the generated line's source loc), in the signal names the
+          // block wrote (`__p_io_valid` -> `io.valid`; longest ident first, as
+          // one ident can prefix another).
+          std::string where;
+          const auto  gen_name = genp.filename().string();
+          for (const auto& d : std::views::reverse(livehd::diag::sink().records())) {
+            if (d.severity != livehd::diag::Severity::error || !d.span.file.ends_with(gen_name) || !d.span.start_line) {
+              continue;
+            }
+            if (const auto it = mon.line2loc.find(static_cast<int>(*d.span.start_line)); it != mon.line2loc.end()) {
+              where = std::format(" statement at {}", it->second);
+            }
+            break;
+          }
+          std::vector<const livehd::formal_blocks::Input*> named;
+          for (const auto& in : blk_inputs) {
+            named.push_back(&in);
+          }
+          std::ranges::sort(named, std::greater{}, [](const auto* in) { return in->ident.size(); });
+          for (const auto* in : named) {
+            const std::string user = in->delay > 0 ? std::format("past({}, {})", in->path, in->delay) : in->path;
+            for (size_t pos = 0; (pos = e.msg.find(in->ident, pos)) != std::string::npos; pos += user.size()) {
+              e.msg.replace(pos, in->ident.size(), user);
+            }
+          }
+          e.msg  = std::format("formal block '{}'{}: {}", blk.name, where, e.msg);
+          e.hint = std::format("{} (the block compiles into the generated monitor {})", e.hint, genp.string());
+          opts.sets.resize(saved_sets);
+          throw;
+        }
         opts.sets.resize(saved_sets);
         if (mvar.graphs.size() != 1) {
           throw Lhd_error{"internal",
@@ -6780,6 +7031,7 @@ void formal_verify_command(Options& opts, Result& res) {
             for (const auto& in : blk_inputs) {
               livehd::lec::Monitor::Bind b;
               b.ident      = in.ident;
+              b.delay      = in.delay;  // a history port (`past`, `rose`, a window) reads an EARLIER cycle here too
               const Sig* s = resolve(in.path, prefix, b);
               if (s == nullptr) {
                 throw Lhd_error{
@@ -6883,9 +7135,7 @@ void formal_verify_command(Options& opts, Result& res) {
       }
     };
     if (p.kind == "assume" && livehd::lec::is_unchecked_assume_class(p.aclass)) {
-      const char* why = p.aclass == "top_input"        ? "top-level IO assume cannot be checked; treated as assume_nocheck"
-                        : p.aclass == "check_disabled" ? "formal.assume_check=false; treated as assume_nocheck"
-                                                       : "assume_nocheck";
+      const char* why = p.aclass == "check_disabled" ? "formal.assume_check=false; treated as assume_nocheck" : "assume_nocheck";
       std::print("  assume{}{}: in force (UNCHECKED {}; verdicts are conditional and unchecked)\n", where, msg, why);
       vacuity_note();  // an env assume whose guard never holds constrains nothing
       continue;

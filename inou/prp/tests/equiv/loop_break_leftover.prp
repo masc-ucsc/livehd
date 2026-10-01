@@ -44,13 +44,13 @@
 //
 // `loop_break_leftover_1.prp` is the same design written out BY HAND with no
 // loops at all; it is LEC'd against this file.
-pub mod top(data:u16) -> (acc_o:u8@[0], r_o:u4@[0], rows_o:u4@[0], c_seen_o:u4@[0], c_o:u4@[0], pick_o:u1@[0],
-                          sel_o:u1@[0]) {
-  mut acc:u8      = 0
-  mut r_last:u4   = 0  // the outer index, carried out of the loop by hand
-  mut rows:u4     = 0
-  mut c_seen:u4   = 0  // the inner index of the last ACCEPTED cell
-  const c_kept:u4 = 9  // never written by either loop
+pub mod top(data:U16) -> (acc_o:U8@[0], r_o:U4@[0], rows_o:U4@[0], c_seen_o:U4@[0], c_o:U4@[0], pick_o:U1@[0],
+                          sel_o:U1@[0]) {
+  mut acc:U8      = 0
+  mut r_last:U4   = 0  // the outer index, carried out of the loop by hand
+  mut rows:U4     = 0
+  mut c_seen:U4   = 0  // the inner index of the last ACCEPTED cell
+  const c_kept:U4 = 9  // never written by either loop
 
   for r in 0..<4 {
     r_last = r

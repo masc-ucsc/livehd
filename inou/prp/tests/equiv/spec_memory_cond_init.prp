@@ -1,0 +1,28 @@
+/*
+:name: spec_memory_cond_init
+:type: equiv
+:verilog_top: spec_memory_cond_init
+:pyrope_top: spec_memory_cond_init
+*/
+// SPEC (docs 08-memories.md): "Comptime conditions fold before the memory is
+// built, so a conditional initializer that picks `nil` is exactly `= nil`:
+// `reg m:[4]U8 = if RST { 0 } else { nil }` with a false `RST` (a `const`, or a
+// generic bound at the call site) binds no reset, while a true `RST` gives the
+// fully reset memory."
+// Rule encoded here: the docs declaration inside a generic mod, specialized with
+// RST=false (plain memory, writes land even while `rst` is high) and RST=true
+// (parallel reset to 0 with priority over the write).
+mod cm<RST=false>(we:Bool, a:U2, d:U8, ra:U2) -> (q:U8@[0]) {
+  reg m:[4]U8 = if RST { 0 } else { nil }
+  q = m[ra]
+  if we {
+    m[a] = d
+  }
+}
+
+pub mod spec_memory_cond_init(clk:Clock, rst:Reset, we:Bool, a:U2, d:U8, ra:U2) -> (qn:U8@[0], qr:U8@[0]) {
+  const xn = cm(we=we, a=a, d=d, ra=ra)
+  const xr = cm<RST=true>(we=we, a=a, d=d, ra=ra)
+  qn = xn.q
+  qr = xr.q
+}

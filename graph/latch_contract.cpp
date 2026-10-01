@@ -36,6 +36,7 @@ namespace {
 //   EQ(x, 1)       boolean identity                 -> follow x
 //   Xor(x, 1)      canonical u1 boolean negation    -> follow x, flip parity
 //   Xor(x, 0)      boolean identity                 -> follow x
+//   Or(x, 0)      zero padding / wire buffer       -> follow x
 //   Not(x)                                          -> follow x, flip parity
 //   Get_mask/Sext  width/sign adjust (identity)     -> follow the value
 // Anything else is treated as the root. A cone we cannot decode simply resolves
@@ -138,6 +139,29 @@ Phase_t<Pin> resolve_phase(Pin p, bool stop_at_clock_cell = false) {
         continue;
       }
       break;
+    }
+
+    if (op == Ntype_op::Or) {
+      // Named wires and emitted Verilog width adjustments can leave an Or
+      // buffer between an inversion and its latch/clock. Only one live
+      // operand plus zero constants is an identity; a real OR gate stays opaque.
+      Pin  live;
+      bool identity = true;
+      for (const auto& in : gu::inp_sink_drivers(n)) {
+        if (const_is(in.driver, 0)) {
+          continue;
+        }
+        if (!live.is_invalid() || in.driver.is_const()) {
+          identity = false;
+          break;
+        }
+        live = in.driver;
+      }
+      if (!identity || live.is_invalid()) {
+        break;
+      }
+      ph.net = live;
+      continue;
     }
 
     if (op == Ntype_op::Xor) {
@@ -1631,6 +1655,24 @@ std::optional<Icg_def_match> match_icg_def(hhds::Graph* def) {
     hhds::Pin_class inner = opin.get_driver_pin();  // output pin is a sink: one driver
     inner                 = peel_width_mask(inner);  // see the helper: `(value & 1)` is a width mask, not the gate
     if (inner.is_invalid() || inner.is_const() || gu::is_graph_input_pin(inner)) {
+      continue;
+    }
+    // The CANONICAL cell: a Pyrope `Clock(clock_pin=clk, enable=en)` body is
+    // one Clock_cell on a clock input port, the enable already its `en`.
+    if (const auto cell = inner.get_master_node(); gu::type_op_of(cell) == Ntype_op::Clock_cell) {
+      const auto ref = gu::get_driver_of_sink_name(cell, "clk_ref");
+      const auto en  = gu::get_driver_of_sink_name(cell, "en");
+      const auto div = gu::get_driver_of_sink_name(cell, "div");
+      const auto inv = gu::get_driver_of_sink_name(cell, "invert");
+      if (!ref.is_invalid() && gu::is_graph_input_pin(ref) && !en.is_invalid() && (div.is_invalid() || const_is(div, 1))
+          && (inv.is_invalid() || inv.is_const())) {
+        Icg_def_match m;
+        m.clk_in      = ref;
+        m.out         = opin;
+        m.enable_cone = en;
+        m.invert      = !inv.is_invalid() && inv.is_known_true();
+        return m;
+      }
       continue;
     }
     const Phase op_ph = resolve_phase(inner);

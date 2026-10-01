@@ -15,14 +15,14 @@
 // The value side of this design (rolled and unrolled agree with 6*x+15) is
 // covered by tests/sim/loop_roll_carry.prp; what this pair pins is the PROOF
 // PATH, not the arithmetic.
-mod acc_step(idx:u4, x:u8, acc_in:u16) -> (acc_out:u16@[0]) {
-  acc_out = acc_in + x + idx
+mod acc_step(idx:U4, x:U8, acc_in:U16) -> (acc_out:U16@[0]) {
+  wrap acc_out = acc_in + x + idx
 }
 
-pub mod top(x:u8) -> (total:u16@[0]) {
-  mut acc:u16 = 0
+pub mod top(x:U8) -> (total:U16@[0]) {
+  mut acc:U16 = 0
   for i in 0..<6 {
-    const t = acc_step::[name=stage](idx=i, x=x, acc_in=acc)
+    const t = acc_step::[name=`stage`](idx=i, x=x, acc_in=acc)
     acc = t
   }
   total = acc

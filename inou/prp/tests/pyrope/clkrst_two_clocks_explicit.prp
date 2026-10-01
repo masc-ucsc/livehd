@@ -1,0 +1,18 @@
+/*
+:name: clkrst_two_clocks_explicit
+:type: compile
+*/
+// docs 04b / 07-typesystem `two_clk`: with two `Clock` inputs every register
+// names its clock (`clock_pin=x`, the signal itself, no `ref`); the single
+// `Reset` is still the implicit reset of both. User ruling 2026-09-29 (54): a
+// register clocked through an explicit `clock_pin` naming a `Clock` input is
+// ordinary state, so its outputs read at `@[0]` (lhd/tests/clkrst_binding_test
+// checks which clock each register gets).
+pub mod clkrst_two_clocks_explicit(clk_a:Clock, clk_b:Clock, rst:Reset, a:U8, b:U8) -> (qa:U8@[0], qb:U8@[0]) {
+  reg ra:U8:[clock_pin=clk_a] = 0
+  reg rb:U8:[clock_pin=clk_b] = 0
+  if a != 0 { ra = a }
+  if b != 0 { rb = b }
+  qa = ra
+  qb = rb
+}

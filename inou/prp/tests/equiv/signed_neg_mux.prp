@@ -10,6 +10,6 @@
 // Get_mask path (it re-declares an undeclared operand as signed), so the bare
 // `-x` came out right -- but putting the SAME Sum behind a mux made cgen visit
 // the Sum first, skip the re-declare, and widen -1 as +15.
-pub comb signed_neg_mux::[timecheck=false](c:u1, x:u2) -> (y:u16) {
-  y = if c != 0 { 57 } else { -x }
+pub comb signed_neg_mux::[timecheck=false](c:U1, x:U2) -> (y:U16) {
+  wrap y = if c != 0 { 57 } else { -x }
 }

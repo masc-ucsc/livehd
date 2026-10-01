@@ -10,8 +10,8 @@
 // flop. First REAL narrowing: body sigma=1 in pipe[1] => the LN-inserted
 // output flop narrows to (0,0) and realizes as a wire. The golden has
 // exactly ONE flop — a two-flop golden must NOT be equivalent.
-pub pipe[1] split(a:u8, b:u8) -> (x:u9) {
-  reg tmp:u9 = 0
+pub pipe[1] split(a:U8, b:U8) -> (x:U9) {
+  reg tmp:U9 = 0
   tmp = a + b
   x = tmp
 }

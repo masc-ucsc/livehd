@@ -13,15 +13,17 @@
 // Historical splitter boundary: the readbacks are SRA+And chains rather than
 // const-mask Get_mask slices. split_packed_selfref_wires now recognizes this
 // reader form and bounds the masked 1-bit values, so the false loop is removed.
-pub comb sim_loop_pack_shiftand::[timecheck=false](a:u2) -> (z:u3) {
-  wire pk:u3
-  wire ii:u1
-  wire vi:u1
-  wire wen:u1
+// The `~` operand is cast to `u1`: a bitwise not needs a typed operand (user
+// ruling 2026-09-29 (44)), and `(... | ...)` of `& 1` readbacks is untyped.
+pub comb sim_loop_pack_shiftand::[timecheck=false](a:U2) -> (z:U3) {
+  wire pk:U3
+  wire ii:U1
+  wire vi:U1
+  wire wen:U1
 
   ii  = a & 1
   vi  = ((pk >> 1) & 1) & ((a >> 1) & 1)
-  wen = (~(((pk >> 1) & 1) | (pk & 1))) & 1
+  wen = (~U1(((pk >> 1) & 1) | (pk & 1))) & 1
   pk  = (wen << 2) | (ii << 1) | vi
   z   = pk
 }

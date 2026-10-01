@@ -11,6 +11,10 @@
 // in upass.tolg ("field/index read of '___p_N' could not be resolved") because
 // try_rewrite_port_whole_store does not recurse into nested tuples. RED until the
 // nested whole-tuple write splits into per-leaf drives.
-pub comb top(a:u8) -> (p:(lo:(hi:u8, mid:u8), hilvl:u8)) {
-  p = (lo=(hi=a, mid=a+1), hilvl=a<<1)
+//
+// Each field is a typed destination (user ruling 2026-09-27 #16): `a+1` and
+// `a<<1` may leave a u8, so the literal narrows them explicitly (the golden's
+// 8-bit outputs drop the carry).
+pub comb top(a:U8) -> (p:(lo:(hi:U8, mid:U8), hilvl:U8)) {
+  p = (lo=(hi=a, mid=(a+1)#[0..<8]), hilvl=(a<<1)#[0..<8])
 }

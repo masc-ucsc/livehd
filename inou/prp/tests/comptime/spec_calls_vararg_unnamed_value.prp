@@ -1,0 +1,10 @@
+/*
+:name: spec_calls_vararg_unnamed_value
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+// An unnamed tuple supplied by name remains one named field in the capture.
+comb first(...x) -> (r) { r = x.x }
+cassert(first(x=(1, 2, 3)) == (1, 2, 3))

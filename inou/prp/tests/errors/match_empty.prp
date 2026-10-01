@@ -6,6 +6,6 @@
 // A `match` must have at least one arm. `else` is optional (an exhaustive
 // match needs none), but a match with zero arms is meaningless — it gets a
 // clean syntax error rather than an opaque downstream "undriven result".
-comb t(x:u2) -> (o:u8) {
+comb t(x:U2) -> (o:U8) {
   o = match x { }
 }

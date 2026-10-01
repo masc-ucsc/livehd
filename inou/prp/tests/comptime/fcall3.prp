@@ -4,9 +4,10 @@
 :verifier_pass: 1
 :verifier_fail: 0
 */
-mut b = 3
-comb fcall3(a:u3) -> (res:s4) {
-  res = a + b
+// A lambda sees only COMPTIME bindings of its enclosing scopes (ruling
+// 2026-09-27 #4): `b` must be a `comptime const` to be read in the body.
+comptime const b = 3
+comb fcall3(a:U3) -> (res:S4) {
+  wrap res = a + b
 }
-b = 100
 cassert(fcall3(a=1) == 4)

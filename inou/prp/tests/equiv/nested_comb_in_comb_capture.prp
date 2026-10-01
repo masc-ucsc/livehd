@@ -1,0 +1,33 @@
+/*
+:name: nested_comb_in_comb_capture
+:type: equiv
+:verilog_top: nested_comb_in_comb_capture
+:pyrope_top: nested_comb_in_comb_capture
+*/
+
+// Ruling 2026-09-27 #4 (suggestions 2.3 row 3, triage r3e): the comb-in-COMB
+// analog of nested_comb_comptime_capture. A `comb` nested inside a `comb`
+// sees the enclosing comb's `comptime const` bindings, as a VALUE (`x + N`)
+// and as a WIDTH (`Unsigned(bits=W)` in the nested signature and body).
+// 06-functions.md: "Only comptime bindings of the enclosing scopes are visible
+// inside a nested lambda's body and signature: `comptime const`
+// declarations, ...". A comb parent is streamed/inlined through a different
+// path than a mod parent, so it is pinned separately. Today the nested body
+// read fails in inou.prp with "read of undefined variable 'N' (not visible
+// here: declared later, out of scope, or never)".
+pub comb nested_comb_in_comb_capture(a:U8) -> (o:U8, p:U4) {
+  comptime const N = 3
+  comptime const W = N + 1
+
+  comb addn(x:U8) -> (y:U8) {
+    y = (x + N)#[0..<8]
+  }
+
+  comb low(x:U8) -> (y:Unsigned(bits=W)) {
+    const v:Unsigned(bits=W) = x#[0..<W]
+    y = v
+  }
+
+  o = addn(x=a)
+  p = low(x=a)
+}

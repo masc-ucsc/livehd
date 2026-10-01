@@ -1,0 +1,15 @@
+/*
+:name: clkrst_debug_cycle_count
+:type: compile
+*/
+// docs 07-typesystem "Clock and Reset": a Clock is not data, but its
+// simulation cycle count is readable in debug contexts -- an `assert` or a
+// `puts` inside a mod body (errors/clkrst_clock_as_data_op.prp: the same
+// comparison feeding logic is an error).
+pub mod clkrst_debug_cycle_count(c:Clock, r:Reset, en:Bool) -> (q:U8@[0]) {
+  reg cnt:U8 = 0
+  if en { wrap cnt = cnt + 1 }
+  q = cnt
+  assert(c < 100000)
+  puts("cycle {c}: cnt={cnt}")
+}

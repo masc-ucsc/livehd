@@ -630,53 +630,56 @@ TEST(CpropHotmux, UnusedOverlapSurvivesForFormal) {
   EXPECT_FALSE(hot.is_invalid());
 }
 
-// RULING (2026-09-07): identical arms collapse for a Hotmux exactly as for a
-// Mux. When every arm value AND the all-controls-zero result are the same pin,
-// the controls cannot change the output, so the cell (and the one-hot obligation
-// riding on it) is dropped rather than kept alive as a decode cone plus its own
-// ABC region. Without a default port the zero-control result is a literal 0, so
-// that shape collapses only when the shared value IS zero.
-TEST(CpropHotmux, IdenticalArmsCollapse) {
+// Equal values can collapse only after exclusivity is established. An
+// implicit zero default must also agree with the common value.
+TEST(CpropHotmux, IdenticalArmsRequireExclusivity) {
   namespace gu = livehd::graph_util;
   auto& lib    = livehd::Hhds_graph_library::instance("lgdb_cprop_hotmux_identical");
   // shared: 0 = the arms share a runtime value, 1 = they share the constant 0.
-  for (int shared : {0, 1}) {
-    for (bool fallback : {false, true}) {
-      auto io = lib.create_io(std::string{"identical_"} + (shared ? "zero" : "value") + (fallback ? "_default" : "_nodefault"));
-      io->add_input("c0", 1);
-      io->set_bits("c0", 1);
-      io->add_input("c1", 2);
-      io->set_bits("c1", 1);
-      io->add_input("v", 3);
-      io->set_bits("v", 8);
-      io->add_output("q", 4);
-      io->set_bits("q", 8);
-      auto g     = io->create_graph();
-      auto value = shared ? gu::create_const(*g, *Dlop::create_integer(0)) : g->get_input_pin("v");
+  for (bool proven : {false, true}) {
+    for (int shared : {0, 1}) {
+      for (bool fallback : {false, true}) {
+        auto io = lib.create_io(std::string{"identical_"} + (shared ? "zero" : "value") + (fallback ? "_default" : "_nodefault")
+                                + (proven ? "_proven" : "_unproven"));
+        io->add_input("c0", 1);
+        io->set_bits("c0", 1);
+        io->add_input("c1", 2);
+        io->set_bits("c1", 1);
+        io->add_input("v", 3);
+        io->set_bits("v", 8);
+        io->add_output("q", 4);
+        io->set_bits("q", 8);
+        auto g     = io->create_graph();
+        auto value = shared ? gu::create_const(*g, *Dlop::create_integer(0)) : g->get_input_pin("v");
 
-      auto hot = gu::create_typed_node(*g, Ntype_op::Hotmux, 8);
-      gu::set_ubits(hot.create_driver_pin(0), 8);
-      hot.create_sink_pin(0).connect_driver(g->get_input_pin("c0"));
-      hot.create_sink_pin(1).connect_driver(value);
-      hot.create_sink_pin(2).connect_driver(g->get_input_pin("c1"));
-      hot.create_sink_pin(3).connect_driver(value);
-      if (fallback) {
-        hot.create_sink_pin(4).connect_driver(value);
-      }
-      hot.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+        auto hot = gu::create_typed_node(*g, Ntype_op::Hotmux, 8);
+        gu::set_ubits(hot.create_driver_pin(0), 8);
+        hot.create_sink_pin(0).connect_driver(g->get_input_pin("c0"));
+        hot.create_sink_pin(1).connect_driver(value);
+        hot.create_sink_pin(2).connect_driver(g->get_input_pin("c1"));
+        hot.create_sink_pin(3).connect_driver(value);
+        if (fallback) {
+          hot.create_sink_pin(4).connect_driver(value);
+        }
+        hot.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
 
-      Cprop cp;
-      cp.do_trans(g);
+        if (proven) {
+          gu::set_proven(hot, gu::kFormalOnehot);
+        }
+        Cprop cp;
+        cp.do_trans(g);
 
-      // No default port and a non-zero shared value: the zero-control case reads
-      // 0, which the arms do not, so the cell must SURVIVE.
-      const bool collapses = fallback || shared;
-      EXPECT_EQ(hot.is_invalid(), collapses);
-      // One driver per sink pin: a graph output is driven by exactly one pin.
-      auto out_drv = g->get_output_pin("q").get_driver_pin();
-      ASSERT_FALSE(out_drv.is_invalid());
-      if (collapses) {
-        EXPECT_TRUE(out_drv == value);
+        // An unproven overlap remains observable even with equal values.
+        // No default port and a non-zero shared value: the zero-control case reads
+        // 0, which the arms do not, so the cell must SURVIVE.
+        const bool collapses = proven && (fallback || shared);
+        EXPECT_EQ(hot.is_invalid(), collapses);
+        // One driver per sink pin: a graph output is driven by exactly one pin.
+        auto out_drv = g->get_output_pin("q").get_driver_pin();
+        ASSERT_FALSE(out_drv.is_invalid());
+        if (collapses) {
+          EXPECT_TRUE(out_drv == value);
+        }
       }
     }
   }
@@ -2071,3 +2074,24 @@ TEST(CpropOpSharing, DeepCascadeHasLinearGeneratedSize) {
   EXPECT_LE(edges, 2 * depth + 3);
 }
 }  // namespace
+
+TEST(CpropMuxContextSchedule, CompileScheduleDoesNotRegrowPrunedTrees) {
+  Mux_graph  f("context_schedule", 1, 8, false, true);
+  const auto e3 = f.eq(f.controls[0], 3), e5 = f.eq(f.controls[0], 5);
+  auto       root = f.mux(e3, f.mux(e3, f.a, f.b), f.mux(e5, f.b, f.a));
+  root.connect_sink(f.graph->get_output_pin("out"));
+  const auto size = [&]() {
+    size_t nodes = 0, edges = 0;
+    for (auto n : f.graph->body().nodes()) {
+      ++nodes;
+      for ([[maybe_unused]] auto pin : n.inp_sorted_pins()) {
+        ++edges;
+      }
+    }
+    return std::pair{nodes, edges};
+  };
+  optimize_state(f.graph);
+  const auto first = size();
+  optimize_state(f.graph);
+  EXPECT_EQ(size(), first);
+}

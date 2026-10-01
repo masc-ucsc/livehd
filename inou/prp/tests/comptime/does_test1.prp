@@ -42,14 +42,14 @@ cassert(b2 does true)        // comparison result is boolean
 cassert(b1 does b2)          // bool does bool
 cassert(not (b1 does m1))    // bool does tuple → kind mismatch
 
-mut i1 = 10
-const i2 = 0
-mut i3 = -1
-cassert(i1 does i2)          // untyped ints are unbounded → superset of any int
-cassert(i1 does i3)
-cassert(i3 does 100)         // unbounded ⊇ literal [100,100]
-cassert(not (i3 does b1))    // int does bool → kind mismatch
-cassert(not (b1 does i2))    // bool does int → kind mismatch
+mut n1 = 10
+const n2 = 0
+mut n3 = -1
+cassert(n1 does n2)          // untyped ints are unbounded → superset of any int
+cassert(n1 does n3)
+cassert(n3 does 100)         // unbounded ⊇ literal [100,100]
+cassert(not (n3 does b1))    // int does bool → kind mismatch
+cassert(not (b1 does n2))    // bool does int → kind mismatch
 
 cassert(not (100 does m1))   // literal scalar (coerced to {0:100}) ⊉ named tuple
 cassert(not (m1 does 100))   // named tuple ⊉ unnamed-pos-0 literal
@@ -67,7 +67,7 @@ mut hit=0
 // Match-arm `does` lowers to a proper func_does per arm (prp2lnast), so the
 // structural + type-aware fold drives arm selection at comptime.
 match m1 {
- does (a:u32=333,b=0) { hit = 1 }   // m1.a (untyped) ⊆ u32 envelope, shape ok
+ does (a:U32=333,b=0) { hit = 1 }   // m1.a (untyped) ⊆ U32 envelope, shape ok
  else { hit = 0 }
 }
 cassert(hit==1)

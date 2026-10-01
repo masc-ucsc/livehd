@@ -30,7 +30,9 @@
 //                      body-less blackbox conservatively depends on ALL of the
 //                      instance's connected inputs.
 
+#include <functional>
 #include <memory>
+#include <optional>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
@@ -89,21 +91,50 @@ struct Def_reach {
   }
 };
 
+// A callee summary supplied by the client instead of a walk of the callee
+// body: a stored one (see stamped() below), or a conservative one for a body
+// the client cannot trust. nullopt walks the callee body as usual.
+using Callee_reach = std::function<std::optional<Def_reach>(const std::shared_ptr<hhds::Graph>&)>;
+
 // Memoized per-definition summaries. One Cache per analysis run; summaries are
 // computed on first request and reused for every instance of the same def.
 // Not thread-safe (matches the emitter's single-threaded use).
 class Cache {
 public:
+  Cache() = default;
+  // `callee` answers first at every instance splice inside a walked body (and
+  // in callee_of), never for the graph handed to of() itself. `slices` false
+  // computes the out2ins rows only (a wide packed output otherwise costs one
+  // walk per slice).
+  explicit Cache(Callee_reach callee, bool slices = true) : callee_(std::move(callee)), slices_(slices) {}
+
   // A null graph yields the empty summary, which reads as "no comb
   // dependence" — a caller holding a body-less BLACKBOX instance must apply
   // its own conservative rule (depend on everything) instead of asking here.
   const Def_reach& of(const std::shared_ptr<hhds::Graph>& g);
 
+  // The summary an INSTANCE of `g` splices: the Callee_reach answer when it
+  // gives one, else of(g).
+  const Def_reach& callee_of(const std::shared_ptr<hhds::Graph>& g);
+
 private:
+  Callee_reach callee_;
+  bool         slices_ = true;
+
   // node_hash_map: summaries are handed out by reference and must stay put
   // while later queries insert (a flat map moves values on rehash).
   absl::node_hash_map<const hhds::Graph*, Def_reach> memo_;
-  absl::flat_hash_set<const hhds::Graph*>            busy_;  // recursion guard
+  absl::node_hash_map<const hhds::Graph*, Def_reach> supplied_;  // Callee_reach answers
+  absl::flat_hash_set<const hhds::Graph*>            busy_;      // recursion guard
 };
+
+// The out2ins rows of `r`, recorded on g's input node (attrs::comb_reach), and
+// read back: nullopt when `g` carries none. Slices are not recorded.
+void                     stamp(const hhds::Graph& g, const Def_reach& r);
+std::optional<Def_reach> stamped(const hhds::Graph& g);
+
+// Every output of `g` depending on every input: the summary of a body that
+// cannot be read.
+Def_reach crossbar(const hhds::Graph& g);
 
 }  // namespace livehd::port_reach

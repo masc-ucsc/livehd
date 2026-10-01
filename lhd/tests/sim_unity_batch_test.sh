@@ -39,7 +39,7 @@ fail() {
 N=20
 {
   for k in $(seq 0 $((N - 1))); do
-    echo "pub comb leaf_$k(a:u8) -> (s:u8) {"
+    echo "pub comb leaf_$k(a:U8) -> (s:U8) {"
     echo "  s = (a + $k)#[0..=7]"
     echo "}"
   done
@@ -49,21 +49,21 @@ N=20
   for k in $(seq 0 $((N - 1))); do
     echo "const leaf_$k = import(\"leaves.leaf_$k\")"
   done
-  echo "pub comb top(x:u8) -> (o:u8) {"
-  echo "  mut i0 = leaf_0::[name=i0](a = x)"
+  echo "pub comb top(x:U8) -> (o:U8) {"
+  echo "  mut inst0 = leaf_0::[name=inst0](a = x)"
   for k in $(seq 1 $((N - 1))); do
-    echo "  mut i$k = leaf_$k::[name=i$k](a = i$((k - 1)).s)"
+    echo "  mut inst$k = leaf_$k::[name=inst$k](a = inst$((k - 1)).s)"
   done
-  echo "  o = i$((N - 1)).s"
+  echo "  o = inst$((N - 1)).s"
   echo "}"
 } > "$W/top.prp"
 
 cat > "$W/tb.prp" <<'EOF'
 const top = import("top.top")
-test top.chain(cycles:u20 = 2) {
+test top.chain(cycles:U20 = 2) {
   mut dut = top
   mut got = 0
-  tick cycles clocks=(clock=1) {
+  tick cycles {
     dut.x = 16
     step
     got = dut.o
@@ -115,8 +115,8 @@ done
 batch_obj=$(basename "$(grep -l "\"\.\./$victim_cpp\"" "$S"/unity/unity-*.cpp)" .cpp).o
 
 touch "$W/marker"
-sed -e 's/pub comb leaf_7(a:u8)/pub comb leaf_7(a:u9)/' "$W/leaves.prp" > "$W/leaves.new" && mv "$W/leaves.new" "$W/leaves.prp"
-grep -q 'leaf_7(a:u9)' "$W/leaves.prp" || fail "the interface edit did not apply (test bug)"
+sed -e 's/pub comb leaf_7(a:U8)/pub comb leaf_7(a:U9)/' "$W/leaves.prp" > "$W/leaves.new" && mv "$W/leaves.new" "$W/leaves.prp"
+grep -q 'leaf_7(a:U9)' "$W/leaves.prp" || fail "the interface edit did not apply (test bug)"
 "$LHD" sim "$W/tb.prp" --set compile.upass.inline=false --setup-only --workdir "$W/wd" >"$W/setup.log" 2>&1 \
   || { cat "$W/setup.log" >&2; fail "lhd sim --setup-only failed after the edit"; }
 [ -n "$(find "$S" -maxdepth 1 -name "$victim_cpp" -newer "$W/marker")" ] \
@@ -148,8 +148,8 @@ else
   esac
   ninja_obj=$(basename "$(grep -l "\"\.\./$victim_cpp\"" "$NS"/unity/unity-*.cpp)" .cpp).o
   [ "$ninja_obj" != ".o" ] || fail "ninja: $victim_cpp is not batched in $NS/unity (test assumption broken)"
-  sed -e 's/pub comb leaf_7(a:u9)/pub comb leaf_7(a:u10)/' "$W/leaves.prp" > "$W/leaves.new" && mv "$W/leaves.new" "$W/leaves.prp"
-  grep -q 'leaf_7(a:u10)' "$W/leaves.prp" || fail "the second interface edit did not apply (test bug)"
+  sed -e 's/pub comb leaf_7(a:U9)/pub comb leaf_7(a:U10)/' "$W/leaves.prp" > "$W/leaves.new" && mv "$W/leaves.new" "$W/leaves.prp"
+  grep -q 'leaf_7(a:U10)' "$W/leaves.prp" || fail "the second interface edit did not apply (test bug)"
   "$LHD" sim "$W/tb.prp" --set compile.upass.inline=false --setup-only --workdir "$NW" >"$W/setup_n.log" 2>&1 \
     || { cat "$W/setup_n.log" >&2; fail "lhd sim --setup-only failed after the edit (ninja leg)"; }
   # build.ninja is rewritten by the build step, not by setup: the plan below is

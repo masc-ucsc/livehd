@@ -1,0 +1,33 @@
+/*
+:name: verilog_mem_oob_write
+:type: equiv
+:verilog_top: verilog_mem_oob_write
+:pyrope_top: verilog_mem_oob_write
+*/
+
+// The Verilog out-of-range memory semantics of the golden, stated explicitly
+// in Pyrope (user ruling 2026-09-28 (22): Pyrope regenerated from Verilog must
+// spell these out, since `::[timecheck=false]` relaxes timing only).
+//
+// WRITE: an address outside the declared range writes nothing, so the store
+// is guarded by the range compare. The stored index is the in-range offset.
+//
+// READ: an out-of-range read is X in Verilog. The Verilog reader refines it
+// deterministically to what the memory hardware (and yosys' memory_map) does
+// with the address: the entry at the offset's low log2(depth) bits, `(a -
+// lo)#[0..<k]`. Any value refines X, so this .prp and the golden agree for
+// every engine (lhd lec and the yosys lgcheck oracle both prove it).
+//
+// The shape used to be a silent miscompile: the reader indexed the memory with
+// the raw `waddr - 2`, the memory kept its low address bits, and `mem[10] <= x`
+// overwrote mem[2].
+pub mod verilog_mem_oob_write::[timecheck=false](clk:Clock, we:U1, waddr:U4, raddr:U4, din:U8) -> (dout:U8@[]) {
+  reg dout:U8
+  reg mem:[8]U8:[ordering="old"]
+
+  if we != 0 and waddr >= 2 and waddr <= 9 {
+    mem[(waddr - 2)#[0..<3]] = din
+  }
+
+  dout = mem[(raddr - 2)#[0..<3]]
+}

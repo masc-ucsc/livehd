@@ -36,9 +36,9 @@
 // The companion fixture inou/prp/tests/sim/multiclock_two_domain.prp is the
 // SAME design shape WITHOUT a pre-step read, and it passes — that pair is the
 // proof that the read is what breaks it.
-pub mod pksec(clkb:bool, d:u8) -> (qa:u8@[1], qb:u8@[2]) {
-  reg a:u8 = 0
-  reg b:u8:[clock_pin=ref clkb] = 0
+pub mod pksec(clkb:Bool, d:U8) -> (qa:U8@[1], qb:U8@[2]) {
+  reg a:U8 = 0
+  reg b:U8:[clock_pin=clkb] = 0
   qa = a
   qb = b
   a  = d

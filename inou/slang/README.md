@@ -88,7 +88,7 @@ both accepted; at least one must supply sources). lhd hands the args to
 | `slang_structure.cpp` | modules, ports/io, process classification (comb/ff/async-reset), dataflow-ordered driver emission, instances, generate |
 | `slang_stmt.cpp` | statements: if, case→`if`/`unique_if`, capped slang-side loop unrolling |
 | `slang_expr.cpp` | rvalue expressions; reductions expanded inline; selects via shift+const-mask |
-| `slang_lvalue.cpp` | assignment targets: vars, packed selects (const→`set_mask`, dynamic→RMW), concat split, memory element writes |
+| `slang_lvalue.cpp` | assignment targets: vars, packed selects (const→`set_mask` mask, dynamic→`set_mask` range, clipped to the selected container), concat split, memory element writes |
 | `slang_types.cpp` | type info + the single materialize-conversion seam (`trunc_to`/`fit_wrap`/`to_pattern`) |
 | `slang_location.hpp` | slang SourceRange → diag span + hhds SourceId minting |
 | `slang_diag.hpp` | slang DiagnosticClient → LiveHD diag sink |
@@ -111,10 +111,45 @@ Key invariants the lowering maintains:
   packed slices use the same offsets as ordinary writes. A constant scalar declaration
   initializer or simple `initial q = CONST` on a register without such a reset
   becomes the implicit-module-reset value and emits `initial-without-reset`,
-  because formal equivalence can differ from reset-less hardware;
+  because formal equivalence can differ from reset-less hardware. A register
+  ARRAY's constant `initial`-block contents are power-on contents only
+  (`initial=<packed contents>` next to `= nil`, docs 08-memories), so no
+  reset is bound. Entry 0 is the element at the array's lower bound (`mem [1:4]`
+  packs `mem[1]` lowest), and each value keeps its element width and sign;
 - unpacked arrays lower to the `comp_type_array` declare + `store(mem,idx,v)`
   / `tuple_get(d,mem,idx)` memory vocabulary with `fwd=0` (Verilog
-  nonblocking reads see old contents).
+  nonblocking reads see old contents). An index whose type can leave the
+  declared range (`reg [7:0] mem [2:9]` at a 4-bit address, a depth that is not
+  a power of two, a wider address) spells the Verilog out-of-range rule out in
+  the LNAST (`build_unpacked_address`): a write sits under the range check (an
+  out-of-range write does nothing, never aliasing an entry), and the index is
+  the offset's low clog2(depth) bits, so an out-of-range read returns the entry
+  those bits select (what yosys' memory_map returns; any value refines X) and
+  0 past a depth that is not a power of two. A whole read of a packed 2-D reg
+  kept as a memory is its whole bit view (`q#[0..=N*W-1]`). The Pyrope writer
+  re-emits both as ordinary code, so regenerated Pyrope needs no Verilog
+  relaxation;
+- a runtime-position packed write (`w[b] = x`, `w[b -: 4] = v`, an element of
+  a combinational array kept as one packed bus, `arr[j][c +: 4] = v`) is a
+  range `set_mask` (`w#[lo..=hi] = v`), blocking or nonblocking. A select
+  chain flattens onto the root bus, so `resolve_packed_lvalue` records what
+  each select leaves: a dynamic element index that can leave its array guards
+  the write (Verilog writes nothing), and a part select that can leave its
+  container (a member, an element) is clipped to it (`clip_window`: only the
+  in-range bits are written, never the neighboring element's). A select of
+  the root itself needs neither unless its position can be negative: the
+  write already stops at the root's declared width. Whether a select can
+  leave is judged by its VALUE (`selector_bounds`: `k*8` of a 2-bit `k` is
+  0..24), not by its 32-bit type, so the byte-lane idiom stays one plain
+  window. Every emitted position is non-negative by construction;
+- a partial write into a variable stored as per-field leaves (a packed-struct
+  local or function local, a bundle port) splices a copy of the fields the
+  write can reach and stores those fields back (`emit_leaf_split_rmw`); the
+  whole name is a phantom nothing reads;
+- a runtime-indexed packed 2-D reg becomes a memory only when its range is
+  DESCENDING: an ascending `[0:N-1]` array packs element 0 in its most
+  significant bits, which a memory's packed view (entry 0 at bit 0) would
+  mirror, so it stays a flat register.
 
 Constant packed bit-selected clocks become named one-bit clock wires. Packed
 vectors written by these processes lower to scalar register bits, each with
@@ -195,8 +230,8 @@ Current tally (2026-06-17, 116 sources): **86 lec**, 7 verilog, 2 lnast,
 procedural writes to nets; the rest are tracked feature gaps: instance arrays,
 hierarchical punch-through references, `'bx` golden arms, dynamic
 mem-element part-selects). The 7 `verilog`-capped entries are LEC-slow or
-genuine gaps: four big-memory / wide-arith tests (`long_mem`, `long_mem3`,
-`fixme_mem_offset`, `long_nocheck_iwls_square`) and `fixme_sha256`'s wide
+genuine gaps: three big-memory / wide-arith tests (`long_mem`, `long_mem3`,
+`long_nocheck_iwls_square`) and `fixme_sha256`'s wide
 reduction are deliberately capped because LEC is slow there (the small-array
 coverage simple_rf1/rf2, tuplish, fixme_array carries the memory guarantee);
 `mem_sync_init` and `nocheck_slang_foreach` are real memory-lowering gaps.

@@ -1,0 +1,9 @@
+/*
+:name: typeword_renamed_boolean
+:type: error
+:error: `boolean` was renamed `Bool`
+*/
+// `boolean(x)` was the integer->bool cast; the cast is now `Bool(x)`.
+pub comb typeword_renamed_boolean(a:U8) -> (o:Bool) {
+  o = boolean(a)  // locate_error_here
+}

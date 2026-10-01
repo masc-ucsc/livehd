@@ -10,7 +10,7 @@
 // write. Annotate the field at the base's declaration instead.
 // Doc: ../docs/docs/pyrope/04-variables.md — tuple field name/types are
 // immutable and introduced with the tuple literal (kind keyword + type), so a
-// `a.b:u3 = ...` write has nowhere to attach the type.
+// `a.b:U3 = ...` write has nowhere to attach the type.
 
 mut a = (mut b = 1)
-a.b:u3 = 2   // locate_error_here
+a.b:U3 = 2   // locate_error_here

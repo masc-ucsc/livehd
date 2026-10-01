@@ -9,10 +9,10 @@
 // bitwidth, so after inlining + folding upass.bitwidth tracks the accumulator's
 // concrete range and reports the overflow.
 
-comb step() -> (r:s4) {
-  mut acc:s4 = 7
+comb `step`() -> (r:S4) {
+  mut acc:S4 = 7
   acc = acc + 7
   r = acc
 }
 
-mut o:s4 = step()
+mut o:S4 = `step`()

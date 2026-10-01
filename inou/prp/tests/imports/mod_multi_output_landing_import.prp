@@ -1,0 +1,27 @@
+/*
+:name: mod_multi_output_landing_import
+:type: lgraph
+:files: inou/prp/tests/imports/mod_multi_output_landing_import.prp
+*/
+// The IMPORTED spelling of sim/mod_multi_output_landing_cycles.prp (lhdtrack
+// suggestions 2.1): each output of an imported multi-output `mod` child must
+// be seen at its own declared landing cycle. `dly2.vld` is `@[1]` and
+// `dly2.q` is `@[0]`; the caller re-exports them at exactly those cycles, and
+// `vv2` chains `vld` through a second 1-cycle delay, landing at `@[2]`. The
+// design is correct and must compile.
+//
+// Before the 2.1 fix, upass.tolg keyed a Sub's landing cycle only for a
+// SINGLE-output child, so every output of the multi-output `dly2` was seen at
+// cycle 0 and this design was refused:
+//   upass.tolg: 'vv' in 'mod_multi_output_landing_import.mtop' lands at
+//   cycle(s) (0,0) but (1,1) is declared at the interface
+// The rejected mirror image is mod_multi_output_cycle_mismatch_import.prp.
+const dly2 = import("lib_multi_output_dly.dly2")
+const dly1 = import("lib_multi_output_dly.dly1")
+
+pub mod mtop(en:Bool, a:U4) -> (vv:Bool@[1], vv2:Bool@[2], qq:U4@[0]) {
+  const x = dly2(en=en, d=a)
+  vv  = x.vld
+  vv2 = dly1(en=x.vld)
+  qq  = x.q
+}

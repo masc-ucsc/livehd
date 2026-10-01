@@ -1,0 +1,11 @@
+/*
+:name: spec_types_lowercase_enum_member
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+// Former lowercase type spellings are ordinary identifiers (07-typesystem.md).
+enum E = (u8, b)
+
+cassert(E.u8 != E.b)

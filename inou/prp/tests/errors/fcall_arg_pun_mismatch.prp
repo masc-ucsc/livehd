@@ -1,0 +1,18 @@
+/*
+:name: fcall_arg_pun_mismatch
+:type: error
+:error: argument `a` must be named \(`a=...`\) in call to `sub`
+*/
+
+// 06-functions.md "Argument naming", exception 2 binds a bare variable only
+// when its SOURCE name matches a parameter. `fwd` forwards its own params `x`
+// and `y` to `sub(a, b)`: neither name matches, both params are untyped, and
+// there are two of them, so no exception applies -- the arguments must be
+// named. (The matching counterpart, `sub(b, a)` from a lambda whose params are
+// `a` and `b`, is comptime/fcall_arg_pun.prp.)
+
+comb sub(a, b) -> (r) { r = a - b }
+comb fwd(x, y) -> (r) {
+  r = sub(y, x) // locate_error_here
+}
+cassert(fwd(x = 5, y = 2) == 3)

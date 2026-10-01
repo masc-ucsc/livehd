@@ -6,7 +6,7 @@
 */
 // A bit reduction needs an integer/boolean operand. A string has no bits to
 // reduce, so `s#|[...]` is a compile error.
-comb foo() -> (z:u1) {
+comb foo() -> (z:U1) {
   const s = "hello"
   z = s#|[0..=2]   // locate_error_here
 }

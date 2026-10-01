@@ -1,0 +1,20 @@
+/*
+:name: capture_fold_reg
+:type: error
+:error: 's' is a runtime value of the enclosing scope; it is not visible inside lambda 'f'
+:help: pass 's' as an input of 'f'
+*/
+
+// User ruling 2026-09-28 (32): a `const` read from a register is a runtime
+// value even though no input feeds it (the register holds state), so a nested
+// lambda cannot read it. A fold-based capture must not replay the register's
+// declaration into the lambda (that would build a second, private register).
+pub mod capture_fold_reg(a:U8) -> (o:U8@[0]) {
+  reg r:U8 = 5
+  r = a
+  const s = r
+  comb f(x:U8) -> (y:U8) {
+    wrap y = x + s  // locate_error_here
+  }
+  o = f(x=a)
+}

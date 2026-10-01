@@ -1,0 +1,34 @@
+/*
+:name: mod_delay_child_ring_counter
+:type: error
+:tolg: 1
+:error: ^(?!.*(combinational loop|lands at)).*mixes values at different cycles
+*/
+
+// A counter whose ring closes ONLY through a child's `@[1]` output (a
+// 1-cycle delay `mod`) has no consistent cycle: every trip around
+// `gr -> dl.d -> dl.q (+1) -> gr` lands one cycle later. Without
+// `::[timecheck=false]` (user ruling 2026-09-27) it is a cycle-mix TIMING
+// error, not a combinational loop, and not a landing mismatch on `g`: the
+// cycle `g` would be reported at is an artifact of how long the checker
+// iterated (it grew with the number of UNRELATED registers, like `a`, `b`
+// and `c` here).
+mod dl(d:U4) -> (q:U4@[1]) {
+  reg r:U4 = 0
+  r = d
+  q = r
+}
+
+pub mod top(req:U4) -> (g:U4@[0], o:U4@[0]) {
+  reg a:U4 = 0
+  reg b:U4 = 0
+  reg c:U4 = 0
+  a = req
+  b = a
+  c = b
+  o = c
+  wire gr:U4 = nil
+  const m = dl(d=gr)   // locate_error_here
+  wrap gr = m + 1
+  g = gr
+}

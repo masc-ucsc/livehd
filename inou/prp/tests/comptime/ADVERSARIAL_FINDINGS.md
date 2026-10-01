@@ -23,13 +23,13 @@ sites (all in this commit's diff):
 | tuple_destructure | tuple_destruct_04 | prp2lnast destructure binds by name unless positional literal |
 | bitsel_range_onehot | bitsel_slice_12 | constprop `process_get_mask` range-BASE one-hot |
 | bitsel_sext_nonliteral | bitsel_sext_19 | prp2lnast `bit_selection_to_node` non-const sext = `sext(_,hi-lo)` |
-| implicit_cast_decl | casts_23, string_basic_18 | prp2lnast typed-decl `int()`/`string()` cast (bare/unbounded only) |
+| implicit_cast_decl | casts_23, string_basic_18 | prp2lnast typed-decl `int()`/`String()` cast (bare/unbounded only) |
 | shift_tuple_onehot | bitwise_18, int_prec_16, shifts_06 | constprop `process_shl` + typecheck `require_shift` |
 | ref_wrap_sat (partial) | ref_args_11 | lnast_manager `is_call_arg_key` (keeps wrap/sat arg keys raw thru inline) |
 | return_leak | multi_out_07 (+ new return_loop test) | prp2lnast `lower_children_range` early-return scope-rewrite; loop case via synthesized `mut` flag + break + post-loop guard |
 | range_step | range_step (+ new range_step test) | prp2lnast `binary_step_op` tier dispatch (was dropped); per-range `rng_step` attr (default 1) + `try_range`/`unroll_for` `v += step` |
 | loop_unroll | loop_break_continue, loops_while_02/13, loops_for_02, mix_loop_accum_11 (+ new loop_break_continue test) | `while true`/`loop` now lower to a recomputed `1==1` ref (const cond skipped the in-loop body fold → break mis-fired iter 1); `loop_continue_hit_` for continue; non-term signature broadened to body-written mut vars; enumerate is now the native pair form `for (index, value) in t` (`.enumerate()` dropped) |
-| string_fmt_positional | string_basic_07, string_interp_19 (DELETED) | feature DROPPED, not implemented — the positional `string("…{}…", args)` form is redundant with double-quote interpolation `"…{x:spec}…"` (which keeps the `:d`/`:b`/`:x` specs). Removed from `../docs/docs/pyrope/02-basics.md` + both tests deleted |
+| string_fmt_positional | string_basic_07, string_interp_19 (DELETED) | feature DROPPED, not implemented — the positional `String("…{}…", args)` form is redundant with double-quote interpolation `"…{x:spec}…"` (which keeps the `:d`/`:b`/`:x` specs). Removed from `../docs/docs/pyrope/02-basics.md` + both tests deleted |
 
 ### Still OPEN (30 adv tests + bit_select) — see todo/pyrope/2f-*
 
@@ -42,7 +42,7 @@ root-cause + fix-site from the diagnostic sweep:
 * **2f-arg_naming_tuple** — mix_generic_tuple_03/04, overload_18 (flattened tuple param/output regrouping + positional type elems)
 * **2f-ufcs_ref_self** — ufcs_05, ufcs_14 (copy-return self write-back suppression; const-tuple extension-method attach)
 * **2f-does_positional** — does_op_08, overload_13, equals_is_has_in_09 (positional `does`; 08/09 also need the new const/mut field syntax)
-* **2f-array_index_range** — array_basic_06 (custom-range array dims `[-4..<4]i5`)
+* **2f-array_index_range** — array_basic_06 (custom-range array dims `[-4..<4]S5`)
 * **2f-comptime_param** — comptime_param_01 (grammar: `[...]` comptime-param slot in lambda decl)
 
 Plus two non-adversarial, separately-tracked: `slang_compile-long_BTBsa`

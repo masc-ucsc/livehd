@@ -1,0 +1,14 @@
+/*
+:name: spec_calls_positional_multi
+:type: error
+:error: must be named|ambiguous|name the argument
+*/
+
+// qa.md Appendix §4: "Calls never bind by position (except: single non-self
+// parameter, a bare variable whose name matches a parameter, a type-unique
+// argument among ALL parameters, and `self`)."
+// Two untyped parameters, two literal actuals: no exception applies.
+
+comb diff(x, y) -> (r) { r = x - y }
+
+const d = diff(7, 2) // locate_error_here

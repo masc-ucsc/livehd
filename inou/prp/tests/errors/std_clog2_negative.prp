@@ -1,0 +1,20 @@
+/*
+:name: std_clog2_negative
+:type: error
+:error: std\.clog2.*positive comptime integer.*got -3
+:help: x >= 1
+*/
+
+// User ruling 2026-09-27: `std.clog2(x)` is a compile error for every x <= 0,
+// not only 0 (std_clog2_zero.prp). A negative count is a mis-computed generic
+// (`N - M` with M > N); Verilog's `$clog2` of a negative 32-bit value would
+// silently return 32. Today `std` itself is an undefined variable.
+//
+// Suggested message: "`std.clog2(x)` needs a positive comptime integer, got
+// -3", hint "`std.clog2` is Verilog `$clog2`, defined for x >= 1
+// (`std.clog2(1) == 0`)".
+
+comptime const n = 5
+comptime const m = 8
+comptime const aw = std.clog2(n - m)   // locate_error_here
+cassert(aw == 0)

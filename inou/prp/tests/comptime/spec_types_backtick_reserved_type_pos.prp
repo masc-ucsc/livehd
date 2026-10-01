@@ -1,0 +1,13 @@
+/*
+:name: spec_types_backtick_reserved_type_pos
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// SPEC qa.md appendix section 1: "a backticked reserved word is an ordinary name (never the type) in every
+// position." Rule: in a TYPE position `` x:`U4` `` names the user type `U4` (here an alias of U8), not the
+// built-in 4-bit type, so 200 fits.
+type `U4` = U8
+mut y:`U4` = 200
+cassert(y == 200)
+cassert(y.[max] == 255)

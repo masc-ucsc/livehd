@@ -14,6 +14,7 @@
 // stamped) that upass/func_extract produces for a pyrope lambda, so SSA
 // harvests io_meta from it and tolg lowers it with the exact Verilog name.
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -91,6 +92,9 @@ struct Slang_module_state {
   absl::flat_hash_map<const slang::ast::Symbol*, std::string> sym_lname_;
   absl::flat_hash_set<std::string>                            used_names_;
   absl::flat_hash_set<const slang::ast::Symbol*>              input_syms_;
+  // Inputs that could be the implicit clock (a 1-bit `clk`/`clock`); more than
+  // one makes it ambiguous (user ruling 2026-09-27 (10)).
+  int                                                         clock_candidate_inputs_ = 0;
   absl::flat_hash_set<const slang::ast::Symbol*>              output_syms_;
   // Non-bundle OUTPUT ports: the ones the body-top X-default poison-init loop
   // covers (a bundle output gets per-FIELD poison instead). The poison store is
@@ -148,19 +152,13 @@ struct Slang_module_state {
   //   <name>___q   the actual flop -- what an EDGE-PROCESS WRITE targets.
   // Maps the symbol to the flop's net name; empty for everything else.
   absl::flat_hash_map<const slang::ast::Symbol*, std::string> partial_reg_shadow_;
-  absl::flat_hash_set<const slang::ast::Symbol*>              mem_syms_;             // unpacked arrays lowered as memories
-  absl::flat_hash_set<const slang::ast::Symbol*>              mem_wensize_emitted_;  // memories whose wensize attr was emitted
-  // CLOCKED memories that already took a read-modify-write partial store, per
-  // written leaf ("" for a scalar memory's word, the field name for a tuple
-  // memory). A second one on the same leaf cannot be merged: both write ports
-  // splice into the COMMITTED word, so if they fire in the same cycle one of
-  // them is silently lost. The chunk-enable model is the only shape that
-  // merges, and it only covers aligned uniform granularity — so the second
-  // site is diagnosed instead of quietly miscompiled.
-  absl::flat_hash_map<const slang::ast::Symbol*, absl::flat_hash_set<std::string>> mem_rmw_leaf_written_;
-  absl::flat_hash_set<const slang::ast::Symbol*>                                   declared_;  // declare stmt already emitted
-  std::string                                                                      genblk_prefix_;
-  bool                                                                             module_failed_ = false;
+  absl::flat_hash_set<const slang::ast::Symbol*>              mem_syms_;  // unpacked arrays lowered as memories
+  // Memories on the chunked write-enable model -> their ONE chunk width (the
+  // wensize attr is emitted with the first chunked write).
+  absl::flat_hash_map<const slang::ast::Symbol*, int64_t>     mem_chunk_bits_;
+  absl::flat_hash_set<const slang::ast::Symbol*>              declared_;  // declare stmt already emitted
+  std::string                                                 genblk_prefix_;
+  bool                                                        module_failed_ = false;
 
   // ── per-process state ──────────────────────────────────────────────────────
   enum class Proc_kind : uint8_t { none, comb, seq };
@@ -266,10 +264,20 @@ struct Slang_module_state {
   absl::flat_hash_set<std::string>                                           emitted_tuple_types_;
   // Power-on memory contents harvested from `initial begin mem[k]=v; … end`
   // blocks (a pre-pass in lower_module, BEFORE the declares emit). Keyed by the
-  // array symbol; the inner map is index→value. declare_unpacked emits these as
-  // the reg array's declare initializer (scalar broadcast if uniform, else a
-  // tuple literal), matching the hand-written `reg t:[N]T = (…)` goldens.
-  absl::flat_hash_map<const slang::ast::Symbol*, std::map<int64_t, int64_t>> mem_init_vals_;
+  // array symbol; the inner map is entry→value, the entry being the 0-based
+  // one an access addresses (`index - lower`) and the value an SVInt of the
+  // element type (x/z-free: an unknown pattern specifies nothing). declare_unpacked emits these on
+  // a reg array as `initial=<packed contents>` next to `= nil` (power-on only:
+  // a declaration initializer would also be a reset value), and on a
+  // combinational array as its initializer (scalar broadcast if uniform, else a
+  // tuple literal).
+  absl::flat_hash_map<const slang::ast::Symbol*, std::map<int64_t, slang::SVInt>> mem_init_vals_;
+  // File preload commands retain externally writable state, including read-only RTL memories.
+  absl::flat_hash_map<const slang::ast::Symbol*, std::string> mem_init_images_;
+  absl::flat_hash_set<const slang::ast::ProceduralBlockSymbol*> plusarg_blocks_;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*> plusarg_vars_;
+  absl::flat_hash_set<const slang::ast::Expression*> readmem_calls_;
+
   // Constant scalar register initializers, from either `logic q = CONST` or a
   // simple `initial q = CONST`. A declaration carrying one causes tolg to use
   // the module's implicit reset and this value instead of reset-less X state.
@@ -477,6 +485,7 @@ private:
   absl::flat_hash_map<const slang::ast::InstanceBodySymbol*, std::string>            module_names_;
   absl::flat_hash_set<std::string>                                                   module_names_used_;
   std::vector<std::shared_ptr<Lnast>>                                                ordered_lnasts_;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*> simulation_only_vars_;
 
   // ── per-module state ───────────────────────────────────────────────────────
   // Lives in Slang_module_state (the private base) so lower_module can swap it
@@ -539,6 +548,8 @@ private:
   };
 
   // ── structure (slang_structure.cpp) ───────────────────────────────────────
+  void prepare_plusargs(const slang::ast::InstanceBodySymbol& body);
+  void hoist_plusargs(const slang::ast::RootSymbol& root);
   bool        lower_module(const slang::ast::InstanceSymbol& symbol);
   std::string module_name_of(const slang::ast::InstanceSymbol& symbol);
   void        emit_module_io(const slang::ast::InstanceSymbol& symbol, const Lnast_nid& in_tup, const Lnast_nid& out_tup);
@@ -904,38 +915,120 @@ private:
   // packed 2-D reg base (single select on a packed base).
   static const slang::ast::Expression* peel_unpacked_chain(const slang::ast::Expression&               expr,
                                                            std::vector<const slang::ast::Expression*>& sels);
-  // Linear 0-based index for a selector prefix (row-major), folding constants.
-  // Optionally return a predicate for all supplied dimensions being in range.
-  std::string build_unpacked_index(const Mem_info& mi, const std::vector<const slang::ast::Expression*>& sels,
-                                   std::string* in_range = nullptr);
+  // The element address of a selector prefix (row-major linear, 0-based,
+  // folding constants) with Verilog's out-of-range rule spelled out:
+  //  * in_range: the declared-bounds check of every selector that can cross
+  //    one ("" = provably in range, "false" = a constant out of range). A
+  //    write is emitted under it (emit_if_in_range);
+  //  * index: never negative. Out of range it is the offset's low log2(span)
+  //    bits, the entry the memory's own address decode (and yosys'
+  //    memory_map) reads, which is how a read refines Verilog's X;
+  //  * past_span: `index` may land in [span, 2^k) (a span that is not a power
+  //    of two); emit_guarded_read returns 0 there.
+  struct Unpacked_address {
+    std::string index;
+    std::string in_range;
+    int64_t     span      = 1;
+    bool        past_span = false;
+    bool        constant  = false;  // `index` is a literal
+  };
+  Unpacked_address build_unpacked_address(const Mem_info& mi, const std::vector<const slang::ast::Expression*>& sels);
+  void             emit_if_in_range(const Unpacked_address& addr, const std::function<void()>& emit);
+  std::string emit_guarded_read(const Unpacked_address& addr, int bits, const std::function<std::string(const std::string&)>& read);
   bool        current_assign_nonblocking_ = false;
 
   // A packed assignment target resolved to a single contiguous bit-slice of a
   // root variable: nested chains of `.field` / `[idx]` / `[hi:lo]` / conversion
   // on a packed (integral) root collapse to (base, low-bit offset, width).
+  // Verilog writes only the part of a select that lies inside the value it
+  // selects from, and nothing through an out-of-range element index. Flattening
+  // the chain onto one bus loses those bounds, so a dynamic select records them
+  // here and the writer spells them out (an out-of-range position never spills
+  // into the neighboring bits).
+  struct Packed_window {
+    int64_t                                    cont_const = 0;    // the container's low bit in the root (constant part)
+    std::string                                cont_dyn;          // ... and its dynamic part ("" = none)
+    int64_t                                    cont_bits = 0;     // the container's width
+    bool                                       clip_top  = true;  // false: the container is the root itself
+    std::string                                lo;                // the select's low bit, relative to the container
+    std::optional<std::pair<int64_t, int64_t>> lo_bounds;         // static range of `lo` (nullopt = unknown)
+  };
   struct Packed_lv {
     const slang::ast::ValueSymbol* base      = nullptr;
     int64_t                        const_off = 0;      // accumulated constant low-bit offset
     std::string                    dyn_off;            // accumulated dynamic low-bit offset ("" = none)
     int64_t                        width     = 0;      // selected slice width in bits
     bool                           is_signed = false;  // signedness of the selected slice
+    // Every dynamic element index on the path is in range ("" = statically
+    // always): the write lands only when this holds.
+    std::string                    in_range;
+    // The top select is a dynamic part select that may leave its container
+    // (`arr[j][c +: 4]` past the element, `w[b -: 4]` below bit 0): the writer
+    // clips the window to the container.
+    std::optional<Packed_window>   window;
+    // The root bits [reach_lo, reach_hi] the write can land on: the root,
+    // narrowed by every member or select on the path whose position is
+    // constant (a runtime select stays inside what it selects from).
+    int64_t                        reach_lo = 0;
+    int64_t                        reach_hi = -1;
   };
   // Returns false when the path touches an unpacked array or a non-resolvable
   // base (caller then falls back to the unpacked/memory path or a diagnostic).
   // static_only performs a side-effect-free query (no declarations or IR).
   bool resolve_packed_lvalue(const slang::ast::Expression& lhs, Packed_lv& out, bool static_only = false);
   void emit_packed_rmw(const Packed_lv& lv, const std::string& rhs, slang::SourceRange sr);
-  void emit_dynamic_slice_write(const std::string& base, const std::string& lo, int width, const std::string& value);
-  // Partial (bit-slice) write whose resolved root is a BUNDLE port: const
-  // offsets split per overlapped field (full cover = plain field store,
-  // partial = field-local splice); a dynamic offset reassembles the whole
-  // port, splices at the runtime position, and writes every field back.
-  void emit_bundle_port_rmw(const Packed_lv& lv, const std::string& rhs, slang::SourceRange sr);
+  // The static value range of a runtime selector (nullopt when it does not fit
+  // an int64): its type's range, narrowed through the operators whose result
+  // provably does not wrap.
+  std::optional<std::pair<int64_t, int64_t>> selector_bounds(const slang::ast::Expression& e);
+  // The mask of the runtime window [lo, hi]: a `range` temp (upass.tolg lowers
+  // a window whose `hi` is `lo` plus a constant with a constant-width mask).
+  std::string                                dynamic_mask(const std::string& lo, const std::string& hi);
+  // `base#[lo..=hi] = value` with runtime endpoints, in place.
+  void emit_dynamic_slice_write(const std::string& base, const std::string& lo, const std::string& hi, const std::string& value);
+  // `src` with bits [lo, hi] (runtime endpoints) replaced by `piece`, as a new
+  // temp: the copy-temp set_mask shape (`src` itself is not rebound).
+  std::string splice_range(const std::string& src, const std::string& lo, const std::string& hi, const std::string& piece);
+  // The same with a constant or prebuilt `mask`.
+  std::string splice_mask(const std::string& src, const std::string& mask, const std::string& piece);
+  // A runtime window `[lo, lo + width - 1]` of a `cont_bits`-bit container,
+  // clipped to it the way Verilog writes a part select: `meets` is the
+  // condition that the window touches the container ("" = always), and
+  // `lo`/`hi`/`piece` are the clipped in-container bounds (non-negative by
+  // construction) and the bits of `val` that land there. `lo_bounds` is the
+  // static range of `lo` (nullopt = unknown); a window it keeps inside the
+  // container comes back unchanged. Without `clip_top` the bits past the top
+  // are left to the destination's own width (the container is the root).
+  struct Clipped_window {
+    std::string meets, lo, hi, piece;
+  };
+  Clipped_window clip_window(const std::string& lo, int width, int64_t cont_bits, const std::string& val,
+                             const std::optional<std::pair<int64_t, int64_t>>& lo_bounds, bool clip_top = true);
+  // The runtime range a dynamic packed write lands on: bits [lo, hi] of the
+  // root, the bits of `val` written there (`val` clipped by the window), and
+  // the condition it lands under ("" = always).
+  struct Dynamic_range {
+    std::string lo, hi, piece, in_range;
+  };
+  Dynamic_range dynamic_write_range(const Packed_lv& lv, const std::string& val);
+  // `idx` (an element ordinal whose static range is `bounds`) must name one of
+  // `count` elements: returns `idx` narrowed to the ordinal width and ANDs the
+  // range check into `in_range` when the bounds do not already prove it. An
+  // index into the ROOT itself that cannot be negative needs no check: past
+  // the last element, the write already stops at the root's declared width.
+  std::string   guard_element_index(const std::string& idx, const std::optional<std::pair<int64_t, int64_t>>& bounds, int64_t count,
+                                    bool at_root, std::string& in_range);
+  // Partial (bit-slice) write whose resolved root is stored as per-field
+  // LEAVES, a BUNDLE port or a per-field struct var: const offsets split per
+  // overlapped field (full cover = plain field store, partial = field-local
+  // splice); a dynamic offset splices a copy of the fields it can reach
+  // (Packed_lv::reach_lo/hi) and writes those fields back.
+  void          emit_leaf_split_rmw(const Packed_lv& lv, const std::string& rhs, slang::SourceRange sr);
 
   // Resolve the BASE of a sub-word unpacked-array lvalue (`mem[i]`, and — for a
   // multi-dimensional array — `mem[i][j]…`) to the memory symbol it selects one
   // element of. `sels` receives the FULL outermost-first selector chain so the
-  // caller can call build_unpacked_index() once it has committed to lowering
+  // caller can call build_unpacked_address() once it has committed to lowering
   // (that call emits LNAST, so it must not run on a path that still returns
   // false). Returns nullptr unless the chain selects exactly one element of a
   // memory-represented (NOT flat-port) unpacked array or of a memory-ized

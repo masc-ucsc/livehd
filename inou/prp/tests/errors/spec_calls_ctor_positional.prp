@@ -1,0 +1,24 @@
+/*
+:name: spec_calls_ctor_positional
+:type: error
+:error: must be named|ambiguous|name the argument
+*/
+
+// qa.md Q31 answer "Errors; rewrite docs" / Appendix §7: "Positional binding:
+// multi-argument positional calls are errors unless a naming exception applies
+// ... Rewrite doc examples: `Typ2("hello", 44)` -> named args".
+// init has two UNTYPED non-self params, so neither actual is type-unique and
+// neither is a bare variable whose name matches: the explicit constructor call
+// must name its arguments.
+
+type Typ2 = (
+  mut s:String = "",
+  mut n:Signed = 0,
+  comb init(ref self, a, b) {
+    self.s = a
+    self.n = b
+  }
+)
+
+mut t = Typ2("hello", 44) // locate_error_here
+cassert(t.n == 44)

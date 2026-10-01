@@ -1,0 +1,9 @@
+/*
+:name: spec_types_ident_non_ascii_symbol
+:type: error
+:error: a name holds only letters, digits and `_`
+*/
+// SPEC qa.md Q39 item 3 / appendix section 8: "non-ASCII symbols (emoji, NBSP, ZWSP, BOM, em dash, fullwidth +,
+// ...) in names -> error in both, only letters/digits/_". docs 02-basics "Identifiers": "`$` is not an identifier
+// character, and neither is any other non-ASCII symbol (emoji, a no-break or zero-width space, `—`)".
+const a—b = 1  // locate_error_here

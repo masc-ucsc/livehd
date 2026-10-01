@@ -1,0 +1,14 @@
+/*
+:name: backtick_tuple
+:type: lec
+:lec_top: backtick_tuple
+*/
+// Mixed escaped/plain field spellings across the type, the literal and the
+// reads: all of them name the same two fields (a type field declared
+// `` `f1` `` used to stay quoted, so `.f1` / `` .`f2` `` hit "unknown field").
+const bt_pair = (`f1`:U4, f2:U4)
+pub mod backtick_tuple(a:U4, b:U4) -> (y:U4@[0], z:U4@[0]) {
+  mut t:bt_pair = (f1=a, `f2`=b)
+  y = t.`f1`
+  z = t.f2
+}

@@ -30,6 +30,10 @@
 # its gate during reset only when the coarsener split it from the flop --
 # values depended on live_words even with dirty=off.
 #
+# (Regression 3's latch RESET value has no Verilog spelling -- a reset branch
+# in an `always_latch` is data, not a latch reset -- so `lwr_icg` forces the
+# latch open through its data path instead.)
+#
 # Every budget must pass with the same per-test end_digest, with and without
 # dirty gating. The plan check guards the coverage: at live_words=1 the latch
 # update and the flop it gates must sit in DIFFERENT colors, or this test no
@@ -46,192 +50,192 @@ fail() {
   exit 1
 }
 
-# Same design as inou/prp/tests/sim/conditional_internal_icg_call.prp (kept
-# inline so this test owns its fixture).
-cat >"$work/lw_icg.prp" <<'EOF'
-mod lw_icg_cell(clk:bool, en:bool) -> (g:bool@[]) {
-  reg held:bool:[latch=true]
-  if !clk {
-    held = en
-  }
-  g = clk and held
-}
+# The ICGs are hand-built (an enable latch transparent while the clock is low,
+# ANDed with the clock -- minion's prim_clk_gate). Pyrope has no spelling for
+# a latch gated by the clock (its one gate is the `Clock(clock_pin=, enable=)`
+# Clock_cell, which has no latch), so the gate cells are imported Verilog and
+# the conditional call that activates them stays Pyrope.
+cat >"$work/lw_icg.v" <<'EOF'
+module lw_icg_cell(input clk, input en, output g);
+  reg held;
+  always_latch if (!clk) held = en;
+  assign g = clk & held;
+endmodule
 
-mod lw_icg_leaf(gclk:bool, d:u8) -> (q:u8@[]) {
-  reg acc:u8:[clock_pin=ref gclk] = 0
-  acc = acc + d
+// Hierarchical ICG (the latch in a child cell, the gated flop in a sibling
+// leaf) with CONSTANT data: only the gate's edges may advance the flop.
+module lwc_icg_leaf(input gclk, input [7:0] d, output [7:0] q);
+  reg [7:0] acc = 8'd0;
+  always @(posedge gclk) acc <= acc + d;
+  assign q = acc;
+endmodule
+
+module lwc_icg_top(input clk, input gate, input [7:0] d, output [7:0] q, output [7:0] ctl);
+  wire gclk;
+  lw_icg_cell u_cell(.clk(clk), .en(gate), .g(gclk));
+  lwc_icg_leaf u_leaf(.gclk(gclk), .d(d), .q(q));
+  reg [7:0] every = 8'd0;
+  always @(posedge clk) every <= every + d;
+  assign ctl = every;
+endmodule
+
+// tests/sim/icg_enable_sampling.prp's flat shape: the data changes only while
+// the enable is LOW, so the enable's rise is the only event that loads it.
+module lwf_icg(input clk, input ein, input [7:0] d, output [7:0] q, output [7:0] ctl);
+  reg enl;
+  always_latch if (!clk) enl = ein;
+  wire g = clk & enl;
+  reg [7:0] f = 8'd0;
+  always @(posedge g) f <= d;
+  assign q = f;
+  reg [7:0] c = 8'd0;
+  always @(posedge clk) c <= d;
+  assign ctl = c;
+endmodule
+
+// A latch forced open (`ropen` opens the gate) and a gated flop: the pulse at
+// cycle 4, with the enable low and the data constant, must advance the flop
+// through the latch's `_din`.
+module lwr_icg(input clk, input ropen, input ein, input [7:0] d, output [7:0] q);
+  reg enl;
+  always_latch if (ropen) enl = 1'b1; else if (!clk) enl = ein;
+  wire g = clk & enl;
+  reg [7:0] f = 8'd0;
+  always @(posedge g) f <= f + d;
+  assign q = f;
+endmodule
+EOF
+
+# The conditional fixture is the design of inou/prp/tests/sim/
+# conditional_internal_icg_call.prp with the Verilog gate cell. Every test
+# counts its own cycles (`i`).
+cat >"$work/lw_all.prp" <<'EOF'
+const lw_icg_cell = import("lg:lw_icg_cell")
+const lwc_icg_top = import("lg:lwc_icg_top")
+const lwf_icg     = import("lg:lwf_icg")
+const lwr_icg     = import("lg:lwr_icg")
+
+mod lw_icg_leaf(gclk:Clock, d:U8) -> (q:U8@[]) {
+  reg acc:U8:[clock_pin=gclk] = 0
+  wrap acc = acc + d
   q = acc
 }
 
-mod lw_icg_wrapper(clk:bool, gate:bool, d:u8) -> (q:u8@[]) {
-  wire gclk:bool = nil
-  gclk = lw_icg_cell(clk=clk, en=gate)
+mod lw_icg_wrapper(clk:Clock, gate:Bool, d:U8) -> (q:U8@[]) {
+  const gclk = lw_icg_cell(clk=clk, en=gate)
   q = lw_icg_leaf(gclk=gclk, d=d)
 }
 
-pub mod lw_icg_top(clk:bool, active:bool, gate:bool, d:u8) -> (q:u8@[], ctl:u8@[]) {
+pub mod lw_icg_top(clk:Clock, active:Bool, gate:Bool, d:U8) -> (q:U8@[], ctl:U8@[]) {
   q = 0
   if active {
     q = lw_icg_wrapper(clk=clk, gate=gate, d=d)
   }
 
-  reg every:u8:[clock_pin=ref clk] = 0
-  every = every + d
+  reg every:U8 = 0
+  wrap every = every + d
   ctl = every
 }
 
 test lw_icg_top.gated_state_advances_at_every_budget {
-  mut dut = lw_icg_top
-  mut bad = 0
-  mut ctl = 0
+  mut dut    = lw_icg_top
+  mut bad    = 0
+  mut ctl:U8 = 0
+  mut i:U8   = 0
   tick 5 {
-    dut.active = (clock <= 1) or (clock == 4)
+    dut.active = (i <= 1) or (i == 4)
     dut.gate = true
-    dut.d = 1 << clock
-    ctl = ctl + (1 << clock)
+    dut.d = 1 << i
+    ctl = ctl + (1 << i)
     step
 
     if dut.ctl != ctl { bad = bad + 1 }
-    mut want:u8 = 0
-    if clock == 0 { want = 1 }
-    if clock == 1 { want = 3 }
-    if clock == 4 { want = 19 }
+    mut want:U8 = 0
+    if i == 0 { want = 1 }
+    if i == 1 { want = 3 }
+    if i == 4 { want = 19 }
     if dut.q != want { bad = bad + 1 }
+    i += 1
   }
   assert(bad == 0, "ICG-gated state must advance identically at every live-word budget")
 }
-EOF
-
-# Hierarchical ICG (the latch in a child cell, the gated flop in a sibling
-# leaf) with CONSTANT data: only the gate's edges may advance the flop.
-cat >"$work/lw_icg_const.prp" <<'EOF'
-mod lwc_icg_cell(clk:bool, en:bool) -> (g:bool@[]) {
-  reg held:bool:[latch=true]
-  if !clk {
-    held = en
-  }
-  g = clk and held
-}
-
-mod lwc_icg_leaf(gclk:bool, d:u8) -> (q:u8@[]) {
-  reg acc:u8:[clock_pin=ref gclk] = 0
-  acc = acc + d
-  q = acc
-}
-
-pub mod lwc_icg_top(clk:bool, gate:bool, d:u8) -> (q:u8@[], ctl:u8@[]) {
-  wire gclk:bool = nil
-  gclk = lwc_icg_cell(clk=clk, en=gate)
-  q = lwc_icg_leaf(gclk=gclk, d=d)
-
-  reg every:u8:[clock_pin=ref clk] = 0
-  every = every + d
-  ctl = every
-}
 
 test lwc_icg_top.gate_edges_alone_advance_the_flop {
-  mut dut = lwc_icg_top
-  mut bad = 0
+  mut dut  = lwc_icg_top
+  mut bad  = 0
+  mut i:U8 = 0
   tick 8 {
-    dut.gate = (clock == 1) or (clock == 2) or (clock == 4) or (clock == 7)
+    dut.gate = (i == 1) or (i == 2) or (i == 4) or (i == 7)
     dut.d = 1
     step
 
-    if dut.ctl != clock + 1 { bad = bad + 1 }
-    mut want:u8 = 0
-    if clock >= 1 { want = 1 }
-    if clock >= 2 { want = 2 }
-    if clock >= 4 { want = 3 }
-    if clock >= 7 { want = 4 }
+    if dut.ctl != i + 1 { bad = bad + 1 }
+    mut want:U8 = 0
+    if i >= 1 { want = 1 }
+    if i >= 2 { want = 2 }
+    if i >= 4 { want = 3 }
+    if i >= 7 { want = 4 }
     if dut.q != want { bad = bad + 1 }
+    i += 1
   }
   assert(bad == 0, "a gate edge under constant data must advance the gated flop at every budget")
 }
-EOF
-
-# tests/sim/icg_enable_sampling.prp's flat shape: the data changes only while
-# the enable is LOW, so the enable's rise is the only event that loads it.
-cat >"$work/lw_icg_flat.prp" <<'EOF'
-pub mod lwf_icg(clk:bool, ein:bool, d:u8) -> (q:u8@[], ctl:u8@[]) {
-  reg enl:bool:[latch=true]
-  if !clk {
-    enl = ein
-  }
-  wire g:bool = nil
-  g = clk and enl
-  reg f:u8:[clock_pin=ref g] = 0
-  f = d
-  q = f
-
-  reg c:u8:[clock_pin=ref clk] = 0
-  c   = d
-  ctl = c
-}
 
 test lwf_icg.enable_edge_alone_loads {
-  mut dut = lwf_icg
-  mut bad = 0
+  mut dut  = lwf_icg
+  mut bad  = 0
+  mut i:U8 = 0
   tick 8 {
-    dut.ein = (clock == 2) or (clock == 4) or (clock == 5) or (clock == 7)
-    mut dv:u8 = 5
-    if (clock == 1) or (clock == 2) { dv = 7 }
-    if (clock == 3) or (clock == 4) or (clock == 5) { dv = 9 }
-    if (clock == 6) or (clock == 7) { dv = 3 }
+    dut.ein = (i == 2) or (i == 4) or (i == 5) or (i == 7)
+    mut dv:U8 = 5
+    if (i == 1) or (i == 2) { dv = 7 }
+    if (i == 3) or (i == 4) or (i == 5) { dv = 9 }
+    if (i == 6) or (i == 7) { dv = 3 }
     dut.d = dv
     step
 
     if dut.ctl != dv { bad = bad + 1 }
-    mut want:u8 = 0
-    if clock >= 2 { want = 7 }
-    if clock >= 4 { want = 9 }
-    if clock >= 7 { want = 3 }
+    mut want:U8 = 0
+    if i >= 2 { want = 7 }
+    if i >= 4 { want = 9 }
+    if i >= 7 { want = 3 }
     if dut.q != want { bad = bad + 1 }
+    i += 1
   }
   assert(bad == 0, "the latched enable rising under unchanged data must load the flop at every budget")
 }
-EOF
-
-# An ICG latch with a reset value (`= true`: reset opens the gate) and a gated
-# flop WITHOUT a reset: the reset pulse at clock 4, with the enable low and the
-# data constant, must advance the flop -- through the latch's reset `_din`.
-cat >"$work/lw_icg_reset.prp" <<'EOF'
-pub mod lwr_icg(clk:bool, ein:bool, d:u8) -> (q:u8@[]) {
-  reg enl:bool:[latch=true] = true
-  if !clk {
-    enl = ein
-  }
-  wire g:bool = nil
-  g = clk and enl
-  reg f:u8:[clock_pin=ref g] = nil
-  f = f + d
-  q = f
-}
 
 test lwr_icg.reset_opens_the_gate_at_every_budget {
-  mut dut = lwr_icg
-  mut bad = 0
+  mut dut  = lwr_icg
+  mut bad  = 0
+  mut i:U8 = 0
   tick 8 {
-    dut.reset = clock == 4
-    dut.ein = (clock == 1) or (clock == 6)
+    dut.ropen = i == 4
+    dut.ein = (i == 1) or (i == 6)
     dut.d = 1
     step
 
-    mut want:u8 = 0
-    if clock >= 1 { want = 1 }
-    if clock >= 4 { want = 2 }
-    if clock >= 6 { want = 3 }
+    mut want:U8 = 0
+    if i >= 1 { want = 1 }
+    if i >= 4 { want = 2 }
+    if i >= 6 { want = 3 }
     if dut.q != want { bad = bad + 1 }
+    i += 1
   }
-  assert(bad == 0, "the latch's reset value gates the flop identically at every budget")
+  assert(bad == 0, "the forced-open latch gates the flop identically at every budget")
 }
 EOF
+"$LHD" compile "$work/lw_icg.v" --reader slang --emit-dir lg:"$work/lg/" --workdir "$work/lgw" -q >"$work/lg.log" 2>&1 || {
+  cat "$work/lg.log" >&2
+  fail "the Verilog ICG cells did not compile"
+}
 
 run() {  # run <fixture> <tag> <extra --set args...>
   local fixture="$1"
   local tag="$2"
   shift 2
   local st=0
-  "$LHD" sim "$work/$fixture.prp" --workdir "$work/$fixture/$tag" --set sim.tune.profile=off "$@" -q \
+  "$LHD" sim lg:"$work/lg" "$work/$fixture.prp" --workdir "$work/$fixture/$tag" --set sim.tune.profile=off "$@" -q \
     >"$work/$fixture.$tag.log" 2>&1 || st=$?
   [ "$st" -eq 0 ] || {
     cat "$work/$fixture.$tag.log" >&2
@@ -322,9 +326,8 @@ if not split:
 PY
 }
 
-# All fixtures have distinct module/test names. Build them together once per
-# tune vector instead of starting a compiler and host build for each fixture.
-cat "$work/lw_icg.prp" "$work/lw_icg_const.prp" "$work/lw_icg_flat.prp" "$work/lw_icg_reset.prp" > "$work/lw_all.prp"
+# All fixtures share one testbench (distinct module/test names): one compiler
+# and host build per tune vector.
 DIRTY_ON=(--set sim.tune.dirty=on --set sim.tune.fence=16)
 # Keep power-on state deterministic for the constant-data fixtures.
 FILL=(--set sim.unknown_zero=true --set sim.init_zero=true)

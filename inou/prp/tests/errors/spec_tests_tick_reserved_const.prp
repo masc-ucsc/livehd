@@ -1,0 +1,16 @@
+/*
+:name: spec_tests_tick_reserved_const
+:type: error
+:error: tick
+*/
+// Spec: docs 05b "Running cycles (tick)": "`tick` and `step` are reserved
+// words. Like the other reserved words, they cannot be bound as a name (a
+// declaration, a parameter, or a loop variable), so `const tick = 1` and
+// `mut step = 1` are errors".
+//
+// Rule pinned: declaring a variable named `tick` is an error.
+
+pub comb spec_trc(a:U8) -> (y:U8) {
+  const tick = 1         // locate_error_here
+  y = a
+}

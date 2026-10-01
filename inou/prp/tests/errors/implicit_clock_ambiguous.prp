@@ -1,0 +1,21 @@
+/*
+:name: implicit_clock_ambiguous
+:type: error
+:tolg: 1
+:error: 2 .Clock. inputs .*no implicit clock
+:help: :\[clock_pin=
+*/
+
+// User rulings 2026-09-27 and 2026-09-29 (52): two `Clock` inputs (`clock` and
+// `clk`) leave no implicit clock, so a register that relies on it is a compile
+// error -- the twin of the `reset-ambiguous` error. Before, upass_tolg bound
+// the FIRST candidate in port order (`clock` here) with no diagnostic, so a
+// multi-clock module that forgot one `clock_pin` was silently clocked by the
+// wrong domain (lhdtrack br_ram_flops). The error points at the register that
+// relies on the implicit clock.
+
+pub mod implicit_clock_ambiguous(clock:Clock, clk:Clock, d:U4) -> (q:U4@[1]) {
+  reg r:U4 = 5   // locate_error_here
+  r = d
+  q = r
+}

@@ -1,0 +1,26 @@
+/*
+:name: spec_memory_multidim_init
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// SPEC (docs 08-memories.md): "mut b:[4][8]U8 = 13 / cassert(b[2][7] == 13)" and
+// "mut d2:[2][2] = ((1,2),(3,4)) / cassert(d2[0][0] == 1 and d2[0][1] == 2 and
+// d2[1][0] == 3 and d2[1][1] == 4) / cassert(d2[0] == (1,2) and d2[1] == (3,4))"
+// ("Pyrope supports multi-dimensional arrays, it is possible to slice the array
+// by dimension. The entries are in a row-major order.")
+// Rule encoded here: the docs examples verbatim -- a scalar broadcast fills every
+// entry of a 2-D array, a nested tuple initializes it row-major, and a single
+// index of a (comptime) `mut` 2-D array is the whole row.
+
+mut b:[4][8]U8 = 13
+cassert(b[2][7] == 13)
+
+mut d2:[2][2] = ((1,2),(3,4))
+cassert(d2[0][0] == 1 and d2[0][1] == 2 and d2[1][0] == 3 and d2[1][1] == 4)
+
+cassert(d2[0] == (1,2) and d2[1] == (3,4))
+
+b[3][1] = 7
+cassert(b[3][1] == 7 and b[3][0] == 13)

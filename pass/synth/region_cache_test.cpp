@@ -10,9 +10,11 @@
 
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "region_qor.hpp"
@@ -414,4 +416,230 @@ TEST(AbcIncr, EvidenceFollowsExactRowThroughRenameAndPrivateSnapshot) {
   ASSERT_NE(mixed.read_evidence(*new_hit.row), nullptr);
   EXPECT_EQ(*mixed.read_evidence(*old_hit.row), *q.hook_evidence);
   EXPECT_EQ(*mixed.read_evidence(*new_hit.row), *q2.hook_evidence);
+}
+
+namespace {
+
+// A wrapper-shaped region whose pre-body instantiates child REGIONS by name, as
+// the technology-map wrapper <top> instantiates <top>__c<k>. The partitioner
+// names a region's boundary ports content-stably, so an edit inside a child can
+// keep the child's module name and still change its interface: rename, re-sign
+// or re-number its one output (`Kid_out`).
+//
+//   top : z = top__c1(i = a).q ; y = top__c2(x = b).<kid_out>
+//   alt : y = top__c2(x = b).<kid_out>      (another parent of the same child)
+//   side: w = top__c1(i = c).q              (a parent of the UNCHANGED child)
+//
+// Each parent's pre-body lives in the per-generation `pre_lib` (body-less child
+// decls, like the partitioner's throwaway library); its stand-in mapped body in
+// `outlib`.
+struct Child_decls {
+  std::shared_ptr<hhds::GraphIO> c1, c2;
+};
+
+struct Parent {
+  std::shared_ptr<hhds::Graph>  pre, mapped;
+  std::vector<hhds::Node_class> nodes;
+  Region_body                   rb;
+};
+
+constexpr int kBits = 8;
+
+// top__c2's one output port, exactly as its decl declares it.
+struct Kid_out {
+  const char*   name;
+  hhds::Port_id pid;
+  bool          unsign;
+};
+
+Child_decls declare_children(hhds::GraphLibrary& pre_lib, const Kid_out& kid_out) {
+  Child_decls d;
+  d.c1 = pre_lib.create_io("top__c1");
+  d.c1->add_input("i", 1);
+  d.c1->add_output("q", 2);
+  d.c2 = pre_lib.create_io("top__c2");
+  d.c2->add_input("x", 1);
+  d.c2->add_output(kid_out.name, kid_out.pid);
+  for (auto* io : {d.c1.get(), d.c2.get()}) {
+    for (const auto& p : io->get_input_pin_decls()) {
+      io->set_bits(p.name, kBits);
+      io->set_unsign(p.name, true);
+    }
+    for (const auto& p : io->get_output_pin_decls()) {
+      io->set_bits(p.name, kBits);
+      io->set_unsign(p.name, true);
+    }
+  }
+  d.c2->set_unsign(kid_out.name, kid_out.unsign);
+  return d;
+}
+
+// One child instance: parent input -> child input port 1, the child's one
+// declared output port -> parent output.
+struct Instance {
+  const char*                           in;
+  const std::shared_ptr<hhds::GraphIO>* child;
+  const char*                           inst;
+  const char*                           out;
+};
+
+Parent make_parent(hhds::GraphLibrary& pre_lib, hhds::GraphLibrary& outlib, const std::string& module,
+                   std::initializer_list<Instance> instances) {
+  Parent p;
+  auto   pio = pre_lib.create_io("p_" + module);
+  auto   mio = outlib.create_io(module);
+  int    pid = 1;
+  for (const auto& w : instances) {
+    pio->add_input(w.in, pid);
+    mio->add_input(w.in, pid++);
+  }
+  for (const auto& w : instances) {
+    pio->add_output(w.out, pid);
+    mio->add_output(w.out, pid++);
+  }
+  p.pre = pio->create_graph();
+  for (const auto& w : instances) {
+    auto ip = p.pre->get_input_pin(w.in);
+    set_bits(ip, kBits);
+    auto sub = create_typed_node(*p.pre, Ntype_op::Sub);
+    sub.set_subnode(*w.child);
+    sub.attr(hhds::attrs::name).set(std::string{w.inst});
+    ip.connect_sink(sub.create_sink_pin(1));
+    auto sd = sub.create_driver_pin((*w.child)->get_output_pin_decls().front().port_id);
+    set_bits(sd, kBits);
+    sd.connect_sink(p.pre->get_output_pin(w.out));
+    p.nodes.push_back(sub);
+    p.rb.inputs.push_back({.name = w.in, .src_driver = ip, .bits = kBits, .sign = false});
+    p.rb.outputs.push_back({.name = w.out, .src_driver = sd, .bits = kBits, .sign = false});
+  }
+  p.pre->commit();
+
+  p.mapped = mio->create_graph();  // stand-in mapped netlist: one marker gate per output
+  for (const auto& w : instances) {
+    auto mk = create_typed_node(*p.mapped, Ntype_op::And);
+    p.mapped->get_input_pin(w.in).connect_sink(livehd::graph_util::setup_sink_pid(mk, 0));
+    auto md = mk.create_driver_pin(0);
+    set_bits(md, kBits);
+    md.connect_sink(p.mapped->get_output_pin(w.out));
+  }
+  p.mapped->commit();
+
+  p.rb.body           = p.mapped.get();
+  p.rb.src            = p.pre.get();
+  p.rb.pre_body       = p.pre.get();
+  p.rb.pre_lib        = &pre_lib;
+  p.rb.pre_name       = "p_" + module;
+  p.rb.color          = 0;
+  p.rb.module_name    = module;
+  p.rb.reuse_eligible = true;
+  p.rb.nodes          = std::span<const hhds::Node_class>(p.nodes.data(), p.nodes.size());
+  return p;
+}
+
+// One compile's worth of fresh regions, all against the same child interface.
+struct Generation {
+  hhds::GraphLibrary pre_lib, outlib;
+  Child_decls        kids;
+  Parent             top, alt, side;
+  explicit Generation(const Kid_out& kid_out)
+      : kids(declare_children(pre_lib, kid_out))
+      , top(make_parent(pre_lib, outlib, "top", {{"a", &kids.c1, "u1", "z"}, {"b", &kids.c2, "u2", "y"}}))
+      , alt(make_parent(pre_lib, outlib, "alt", {{"b", &kids.c2, "u2", "y"}}))
+      , side(make_parent(pre_lib, outlib, "side", {{"c", &kids.c1, "u3", "w"}})) {}
+  bool store(Region_cache& cache, Parent& p) { return cache.store(p.rb, pre_lib, p.rb.pre_name, Region_qor{}, "R", &outlib); }
+};
+
+bool hits(Region_cache& cache, const Parent& p) { return cache.lookup_compare(p.rb, p.pre.get(), "R").hit; }
+
+// An edit inside a child region can keep the child's module name and still
+// change its interface. The parent must miss once, and then HIT on the next
+// unchanged run: the cached pre library must not keep the child's OLD decl,
+// which the stored parent pre-body would otherwise resolve forever (the tmap
+// wrapper re-mapped on every run after an edit). A row that still depends on
+// the old interface must never hit through the refreshed decl, and the rows
+// sharing only an unchanged child keep hitting. Checked in both library modes:
+// the scoped per-cache libraries (tmap) and the process-wide singletons
+// (pass.abc), each under its own directory so no process-wide singleton is
+// shared with another test. Each mode is its own call, so a fatal ASSERT in one
+// mode returns from that mode only and the other mode still runs.
+void check_child_interface_change_in(const char* tag, const Kid_out& before, const Kid_out& after, bool scoped) {
+  SCOPED_TRACE(scoped ? "scoped libraries (tmap)" : "shared libraries (pass.abc)");
+  const std::string dir = std::string{"lgdb_child_iface_"} + tag + (scoped ? "_scoped" : "_shared");
+  std::filesystem::remove_all(dir);
+  std::filesystem::remove_all(dir + "_pre");
+  {  // cold: every parent stored against the child's first interface
+    Generation   g(before);
+    Region_cache cache(dir, 7, scoped);
+    ASSERT_TRUE(g.store(cache, g.top));
+    ASSERT_TRUE(g.store(cache, g.alt));
+    ASSERT_TRUE(g.store(cache, g.side));
+    cache.save();
+  }
+  {  // the edit: top__c2 keeps its name, changes its output's interface
+    Generation   g(after);
+    Region_cache cache(dir, 7, scoped);
+    EXPECT_FALSE(hits(cache, g.top)) << "a changed child interface must miss";
+    EXPECT_TRUE(hits(cache, g.side)) << "a parent of the unchanged child must hit";
+    ASSERT_TRUE(g.store(cache, g.top));  // refreshes the cached top__c2 decl
+    // alt's cached pre-body was built against `before`: read through the
+    // refreshed decl it could look identical, but it was never mapped for it.
+    EXPECT_FALSE(hits(cache, g.alt)) << "a row built against the old child interface must not ride the new decl";
+    EXPECT_TRUE(hits(cache, g.side)) << "the refresh must not disturb the unchanged child's rows";
+    EXPECT_TRUE(hits(cache, g.top)) << "the parent stored this run hits";
+    cache.save();
+  }
+  {  // the persisted child decl is exactly the current interface
+    hhds::GraphLibrary saved;
+    saved.load(dir + "_pre");
+    auto kid = saved.find_io("top__c2");
+    ASSERT_NE(kid, nullptr);
+    const auto& outs = kid->get_output_pin_decls();
+    ASSERT_EQ(outs.size(), 1u);
+    EXPECT_EQ(outs[0].name, after.name) << "the cached child decl follows the current interface";
+    EXPECT_EQ(outs[0].port_id, after.pid);
+    EXPECT_EQ(outs[0].unsign, after.unsign);
+    EXPECT_EQ(outs[0].bits, static_cast<uint32_t>(kBits));
+    auto same = saved.find_io("top__c1");
+    ASSERT_NE(same, nullptr);
+    EXPECT_TRUE(same->has_output("q"));
+  }
+  {  // unchanged re-run: the parent must hit now
+    Generation   g(after);
+    Region_cache cache(dir, 7, scoped);
+    auto         res = cache.lookup_compare(g.top.rb, g.top.pre.get(), "R");
+    ASSERT_TRUE(res.hit) << "the parent must hit on the next unchanged run";
+    EXPECT_TRUE(cache.reuse_hit(g.top.rb, res, &g.outlib));
+    EXPECT_TRUE(hits(cache, g.side));
+    EXPECT_FALSE(hits(cache, g.alt)) << "the stale row was dropped, not persisted under the new decl";
+    Generation old(before);
+    EXPECT_FALSE(hits(cache, old.top)) << "the old interface must not match the refreshed decl";
+  }
+}
+
+void check_child_interface_change(const char* tag, const Kid_out& before, const Kid_out& after) {
+  check_child_interface_change_in(tag, before, after, /*scoped=*/true);
+  check_child_interface_change_in(tag, before, after, /*scoped=*/false);
+}
+
+}  // namespace
+
+// A renamed boundary output.
+TEST(AbcIncr, ChildInterfaceChangeRefreshesItsDeclSoTheParentHitsAgain) {
+  check_child_interface_change("rename", {.name = "o_old", .pid = 2, .unsign = true}, {.name = "o_new", .pid = 2, .unsign = true});
+}
+
+// Same name, id and width; only the sign flips. The blackbox Sub seed folds the
+// sign, so read through the refreshed decl a stale row looks identical: only
+// the stale-row guard keeps `alt` from hitting.
+TEST(AbcIncr, ChildOutputSignOnlyChangeRefreshesItsDeclSoTheParentHitsAgain) {
+  check_child_interface_change("sign", {.name = "o", .pid = 2, .unsign = true}, {.name = "o", .pid = 2, .unsign = false});
+}
+
+// Same name, width and sign; only the numeric port id moves. The blackbox Sub
+// seed keys ports by NAME and never sees this edit: the parent misses on its
+// rewired driver pin id, and same_io_decls must see it or the persisted decl
+// keeps the old id. A stale row's Sub still drives the old id, which the
+// refreshed decl no longer declares.
+TEST(AbcIncr, ChildOutputPortIdOnlyChangeRefreshesItsDeclSoTheParentHitsAgain) {
+  check_child_interface_change("port_id", {.name = "o", .pid = 2, .unsign = true}, {.name = "o", .pid = 3, .unsign = true});
 }

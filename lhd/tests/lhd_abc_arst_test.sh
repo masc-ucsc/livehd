@@ -26,6 +26,15 @@
 # refute: a flipped reset-value bit (cvc5 on graphs) and an async reset turned
 # synchronous in the reference (lgyosys; the graph-native LEC abstracts one
 # commit per step and cannot tell async from sync at P==1).
+#
+# MAPPER=usyn runs the native USYN entry (Liberty => tmap=abc) through the
+# same cell/pin/polarity, proof and broken-twin checks. Only one claim is
+# ABC-internal: pass.abc's reset tracer follows the in-region `~rst_n` of c
+# back to rst_n and reuses the shared abc_reset_inv. USYN keeps a computed
+# async-reset control as a protected region output realized as mapped logic,
+# so there the analogue is asserted instead: one INVx1 of rst_n drives every
+# c preset pin. USYN also asserts its schema-5 decision report: one flat
+# logical region and exactly the 19 source register bits as endpoints.
 set -u
 
 MAPPER="${MAPPER:-abc}"
@@ -50,6 +59,8 @@ fail() {
 [ -f "$SRC" ] || fail "missing fixture $SRC"
 
 count() { grep -h "$2" "$1" | wc -l | tr -d ' '; }
+# cells <netlist.v>: one line per statement (a cell instance joined onto one line).
+cells() { awk 'BEGIN { RS = ";" } { gsub(/[\r\n]+/, " "); sub(/^ +/, ""); print }' "$1"; }
 
 # run_lib <tag>: synthesize, prove, and leave the netlist in $W/<tag>.
 run_lib() {
@@ -57,16 +68,37 @@ run_lib() {
   mkdir -p "$d"
   local r="$d/r.json"
   run() { "$LHD" "$@" -q --result-json "$r" > "$d/last.log" 2>&1 || fail "$tag: $* -> $(cat "$r" 2>/dev/null)"; }
-  # (everything after `--` goes to the reader, so the result options come first)
-  "$LHD" synth -q --result-json "$r" --reader slang --top "$TOP" --workdir "$d/W" --emit-dir lg:"$d/net" \
-    --emit-dir verilog:"$d/netv" --emit diagnostics:"$d/diag.jsonl" --set synth.mapper="$MAPPER" \
-    --set synth.liberty="$lib" -- "$SRC" > "$d/synth.log" 2>&1 || fail "$tag: synth -> $(cat "$r" 2>/dev/null)"
+  # The pin assertions below exercise reset tracing INSIDE a region. Pin this
+  # structural fixture to flat coloring: synthesis coloring may legally place
+  # ~rst_n in another region, where the tracer must stop at the boundary.
+  # Keep the normal default-off SATOPT policy; no cleanup pass is a prerequisite.
+  run compile "$SRC" --reader slang --top "$TOP" --emit-dir lg:"$d/ref" --workdir "$d/Wc"
+  run pass color flat --top "$TOP" lg:"$d/ref" --set color.ware_arith=false \
+    --set color.ware_cmp=false --set color.ware_shift=false --workdir "$d/Wcolor"
+  run pass "$MAPPER" --top "$TOP" lg:"$d/ref" --emit-dir lg:"$d/net" \
+    --emit-dir verilog:"$d/netv" --emit diagnostics:"$d/diag.jsonl" \
+    --set synth.liberty="$lib" --workdir "$d/W"
   ! grep -q '"reset-native"' "$d/diag.jsonl" \
     || fail "$tag: an async-reset register stayed native: $(grep '"reset-native"' "$d/diag.jsonl")"
   cat "$d/netv/"*.v > "$d/net.v"
   ! grep -q "always @" "$d/net.v" || fail "$tag: a native flop survived: $(grep 'always @' "$d/net.v")"
+  if [ "$MAPPER" = usyn ]; then
+    # The native decision report: the flat coloring gives ONE logical region,
+    # and every source register bit (15 async + 4 sync) is a crossed endpoint.
+    python3 - "$d/W/qor.json.usyn.json" > "$d/report.log" 2>&1 <<'PY' || fail "$tag: USYN report: $(cat "$d/report.log")"
+import json, sys
+r = json.load(open(sys.argv[1]))
+assert r.get('schema_version') == 5 and r.get('kind') == 'usyn', (r.get('schema_version'), r.get('kind'))
+t = r['totals']
+assert t['regions'] == 1, f"flat coloring must give one logical region: {t}"
+assert t['register_bits'] == 19 and t['eligible_endpoints'] == 19, f"expected 19 register bits: {t}"
+names = sorted(e['name'] for g in r['regions'] for e in g['endpoints'])
+want = sorted([f'{v}[{i}]' for v in 'abcs' for i in range(4)] + ['e[0]', 'e[1]', 'rst_q'])
+assert names == want, f"endpoints {names} != source registers {want}"
+PY
+  fi
   run pass liberty gensim "$lib" --emit-dir lg:"$d/models" --emit verilog:"$d/models.v" --workdir "$d/Wm"
-  run lec --impl lg:"$d/net" --ref lg:"$d/W/synth/lg" --lib lg:"$d/models" --top "$TOP" --workdir "$d/Wlec"
+  run lec --impl lg:"$d/net" --ref lg:"$d/ref" --lib lg:"$d/models" --top "$TOP" --workdir "$d/Wlec"
   grep -q '"verdict":"proven"' "$r" || fail "$tag: graph LEC did not prove: $(cat "$r")"
   { cat "$d/net.v"; echo; cat "$d/models.v"; } > "$d/impl.v"
   { cat "$SRC"; echo; cat "$d/models.v"; } > "$d/ref.v"
@@ -88,18 +120,18 @@ neg() {
       --set formal.simfail_run=false --workdir "$d/Wlec" -q --result-json "$d/r.json" > "$d/lec.log" 2>&1
   else
     { cat "$d/src.v"; echo; cat "$W/$tag/models.v"; } > "$d/ref.v"
+    # formal.bound=2 => lgcheck BMC of 2 steps past its reset window: the
+    # async-vs-sync divergence shows on the first of them, and lgcheck solves
+    # every requested depth even after a FAIL (the default 10 cost ~16 s).
+    # Refuting inside the shorter window is the same (not a weaker) claim.
     "$LHD" lec --impl verilog:"$W/$tag/impl.v" --ref verilog:"$d/ref.v" --top "$TOP" --set formal.solver=lgyosys \
-      --set formal.simfail_run=false --workdir "$d/Wlec" -q --result-json "$d/r.json" > "$d/lec.log" 2>&1
+      --set formal.simfail_run=false --set formal.bound=2 --workdir "$d/Wlec" -q --result-json "$d/r.json" > "$d/lec.log" 2>&1
   fi
   grep -q '"verdict":"refuted"' "$d/r.json" || fail "$tag/$what: broken twin was not refuted ($solver): $(cat "$d/r.json")"
 }
 
-run_lib q &
-qpid=$!
-run_lib qn &
-qnpid=$!
-wait "$qpid" || exit 1
-wait "$qnpid" || exit 1
+run_lib q || exit 1
+run_lib qn || exit 1
 
 # --- sky130-shaped: per-bit clear/preset choice and reset polarity ----------
 N="$W/q/net.v"
@@ -111,7 +143,22 @@ for b in 0 2; do grep -A5 "^DFFRx1 \\\\a\\[$b\\] (" "$N" | grep -q "RB(abc_reset
 for b in 1 3; do grep -A5 "^DFFSx1 \\\\a\\[$b\\] (" "$N" | grep -q "\.S(rst)" || fail "q: a[$b] (resets to 1 on posedge rst) must take rst on S"; done
 for b in 0 3; do grep -A5 "^DFFRx1 \\\\b\\[$b\\] (" "$N" | grep -q "RB(rst_n)" || fail "q: b[$b] (resets to 0 on negedge rst_n) must take rst_n on RB"; done
 for b in 1 2; do grep -A5 "^DFFSx1 \\\\b\\[$b\\] (" "$N" | grep -q "\.S(abc_reset_inv" || fail "q: b[$b] (resets to 1 on negedge rst_n) must take ~rst_n on S"; done
-for b in 0 1 2 3; do grep -A5 "^DFFSx1 \\\\c\\[$b\\] (" "$N" | grep -q "\.S(abc_reset_inv" || fail "q: c[$b] (reset ~rst_n traced to rst_n) must take ~rst_n on S"; done
+# c resets on the in-region wire ~rst_n: every preset pin takes ~rst_n, i.e.
+# one INVx1 whose input is rst_n drives all four S pins (both mappers).
+cf="$(grep -l "^DFFSx1 \\\\c\\[0\\] (" "$W/q/netv/"*.v | head -1)"
+[ -n "$cf" ] || fail "q: no module holds DFFSx1 c[0]"
+cpins="$(for b in 0 1 2 3; do cells "$cf" | grep "^DFFSx1 \\\\c\\[$b\\] (" | grep -o '\.S([^)]*)'; done)"
+[ "$(printf '%s\n' "$cpins" | grep -c .)" = 4 ] || fail "q: expected one DFFSx1 preset pin per c[0..3] bit in $cf, got: $(echo $cpins)"
+cs="$(printf '%s\n' "$cpins" | sort -u)"
+[ "$(printf '%s\n' "$cs" | grep -c .)" = 1 ] || fail "q: c[0..3] preset pins must share one ~rst_n driver, got: $(echo $cs)"
+cnet="${cs#.S(}"
+cnet="${cnet%)}"
+cells "$cf" | grep '^INVx1 ' | grep -F ".Y($cnet)" | grep -qF ".A(rst_n)" \
+  || fail "q: c[0..3] preset net '$cnet' must be an INVx1 of rst_n: $(cells "$cf" | grep -F ".Y($cnet)")"
+if [ "$MAPPER" = abc ]; then
+  # pass.abc's reset tracer follows ~rst_n back to rst_n: the shared inverter.
+  for b in 0 1 2 3; do grep -A5 "^DFFSx1 \\\\c\\[$b\\] (" "$N" | grep -q "\.S(abc_reset_inv" || fail "q: c[$b] (reset ~rst_n traced to rst_n) must take ~rst_n on S"; done
+fi
 [ "$(count "$N" '^INVx1 abc_reset_inv')" = 2 ] || fail "q: expected one shared reset inverter per input (rst, rst_n)"
 # The synchronizer's resets are computed in the region (a scan mux, a register):
 # mapped logic, not a region input, drives those pins.
@@ -136,16 +183,8 @@ grep -A6 "^DFFASRNx1 \\\\c\\[0\\] (" "$N" | grep -q "RESETN(rst_n)" || fail "qn:
 echo "PASS: ASAP7-shaped dual QN clear/preset cell (reset0=SETN, reset1=RESETN), cvc5 + lgyosys proven"
 
 # --- broken twins must refute --------------------------------------------------
-neg q val "s/if (rst) a <= 4'b1010;/if (rst) a <= 4'b1011;/" cvc5 &
-p1=$!
-neg qn val "s/if (!rst_n) b <= 4'b0110;/if (!rst_n) b <= 4'b0111;/" cvc5 &
-p2=$!
-neg qn sync "s/always @(posedge clk or posedge rst)/always @(posedge clk)/" lgyosys &
-p3=$!
-neg q synchro "s/if (!rst_sync_n) e <= 2'b01;/if (!rst_sync_n) e <= 2'b11;/" cvc5 &
-p4=$!
-wait "$p1" || exit 1
-wait "$p2" || exit 1
-wait "$p3" || exit 1
-wait "$p4" || exit 1
+neg q val "s/if (rst) a <= 4'b1010;/if (rst) a <= 4'b1011;/" cvc5 || exit 1
+neg qn val "s/if (!rst_n) b <= 4'b0110;/if (!rst_n) b <= 4'b0111;/" cvc5 || exit 1
+neg qn sync "s/always @(posedge clk or posedge rst)/always @(posedge clk)/" lgyosys || exit 1
+neg q synchro "s/if (!rst_sync_n) e <= 2'b01;/if (!rst_sync_n) e <= 2'b11;/" cvc5 || exit 1
 echo "PASS: flipped async reset values (cvc5, incl. the synchronizer-reset register) and an async reset made synchronous (lgyosys) all refute"

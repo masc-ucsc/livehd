@@ -1,0 +1,33 @@
+/*
+:name: spec_memory_rtl_named
+:type: equiv
+:verilog_top: spec_memory_rtl_named
+:pyrope_top: spec_memory_rtl_named
+*/
+// SPEC (docs 08-memories.md, RTL instantiation): the `__memory(...)` example
+// VERBATIM (a 2rd+1wr sync RF) and "Like every `__` cell call, it binds each
+// argument by name, and the configuration vocabulary is the per-port/config
+// subset of the LiveHD `Memory` cell sink pins, spelled **verbatim** ... `type`
+// selects async (0 ...), sync (1, one-cycle read) or array (2, unclocked) ...
+// The call returns an unnamed tuple: `res[N]` returns the data of the N-th read
+// port (in `rdport` order)."
+// SPEC (qa.md appendix section 8): "`__` basic gates are ordinary calls: all
+// arguments named with the LGraph pin names".
+// Rule encoded here: the named-argument `__memory` call with type=1 (the one-cycle
+// read flops the read data once) and fwd=false (reads see committed contents).
+pub mod spec_memory_rtl_named(clk:Clock, raddr0:U4, raddr1:U4, wraddr:U4, din0:U4, we0:Bool) -> (q0:U4@[1], q1:U4@[1]) {
+  mut res = __memory(
+    addr      = (raddr0, raddr1, wraddr),
+    bits      = 4,
+    size      = 16,
+    din       = (0, 0, din0),
+    enable    = (1, 1, we0),
+    fwd       = false,
+    `type` = 1,         // 0: async, 1: sync, 2: array
+    wensize   = 1,         // we bit (no write mask)
+    rdport    = (1, 1, 0), // 1: read port, 0: write port
+  )
+
+  q0 = res[0]
+  q1 = res[1]
+}

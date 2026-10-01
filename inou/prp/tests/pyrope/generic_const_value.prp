@@ -10,9 +10,9 @@
 // A single generic name makes the unnamed binding unambiguous per the
 // argument-naming rules. The concrete substitution (`r = a + 3`) compiles
 // green, so this file flips green exactly when constant generics land.
-comb addn<N>(a:u4) -> (r:u8) {
+comb addn<N>(a:U4) -> (r:U8) {
   r = a + N
 }
-pub comb generic_const_value(x:u4) -> (r:u8) {
+pub comb generic_const_value(x:U4) -> (r:U8) {
   r = addn<3>(a=x)
 }

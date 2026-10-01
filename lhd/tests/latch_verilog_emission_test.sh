@@ -77,8 +77,8 @@ echo "ok: yosys-importer latch round-trip LEC-proves against its source"
 # high/low: the two polarities. `low` exercises the const-0 posclk -> `!enable`
 # path, where a double negation would otherwise hide.
 cat > "$W/high.prp" <<'EOF'
-pub mod high(en:bool, d:u8) -> (q:u8@[0]) {
-  reg l:u8:[latch=true]
+pub mod high(en:Bool, d:U8) -> (q:U8@[0]) {
+  reg l:U8:[latch=true]
   if en {
     l = d
   }
@@ -87,8 +87,8 @@ pub mod high(en:bool, d:u8) -> (q:u8@[0]) {
 EOF
 
 cat > "$W/low.prp" <<'EOF'
-pub mod low(g:bool, d:u8) -> (q:u8@[0]) {
-  reg l:u8:[latch=true]
+pub mod low(g:Bool, d:U8) -> (q:U8@[0]) {
+  reg l:U8:[latch=true]
   if !g {
     l = d
   }
@@ -142,8 +142,8 @@ done
 # keeps that fact as enable=true (rather than making a missing control pin look
 # accidental), and cprop removes the state cell after folding the enable.
 cat > "$W/transparent.prp" <<'EOF'
-pub mod transparent(sel:bool, d:u8) -> (q:u8@[0]) {
-  reg l:u8:[latch=true]
+pub mod transparent(sel:Bool, d:U8) -> (q:U8@[0]) {
+  reg l:U8:[latch=true]
   l = if sel { d } else { 0 }
   q = l
 }

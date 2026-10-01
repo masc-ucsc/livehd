@@ -16,8 +16,8 @@
 // (graph/cell.cpp pid 14) is left unconnected, so the `always @(posedge)` block
 // has no reset branch at all and the array holds whatever was written during
 // reset. The packed spelling resets normally, which is the divergence.
-pub mod top(we:u1, v:u16, raddr:u2) -> (rd:u4@[0]) {
-  reg foo:[4]u4:[ordering="old"] = 0
+pub mod top(we:U1, v:U16, raddr:U2) -> (rd:U4@[0]) {
+  reg foo:[4]U4:[ordering="old"] = 0
   rd = foo[raddr]
   if we != 0 {
     foo = v

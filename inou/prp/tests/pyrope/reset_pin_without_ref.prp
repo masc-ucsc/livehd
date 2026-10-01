@@ -1,0 +1,20 @@
+/*
+:name: reset_pin_without_ref
+:type: lgraph compile
+*/
+
+// Docs 04b-attributes / 07-typesystem (ruling 52): a `*_pin` attribute names
+// its wire WITHOUT `ref` (`reset_pin=rst2`). This file was an error fixture
+// while ruling 9 made `*_pin` without `ref` an error; the docs now spell pins
+// without `ref`, so it compiles and resets `r` by `rst2`. Two `Reset` inputs
+// leave no implicit reset, so a dropped `reset_pin` would be the
+// reset-ambiguous error, not a silent reset swap.
+
+pub mod reset_pin_without_ref(rst1:Reset, rst2:Reset, d:U4) -> (q:U4@[1], p:U4@[1]) {
+  reg r:U4:[reset_pin=rst2] = 5
+  reg s:U4:[reset_pin=rst1] = 5
+  r = d
+  s = d
+  q = r
+  p = s
+}

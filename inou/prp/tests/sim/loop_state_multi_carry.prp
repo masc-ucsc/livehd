@@ -1,19 +1,19 @@
 // :name: loop_state_multi_carry
 // :type: simulation
 
-mod carry_lane(a:u8) -> (q:u16@[0]) {
-  reg acc:u16 = 0
+mod carry_lane(a:U8) -> (q:U16@[0]) {
+  reg acc:U16 = 0
   wrap acc = acc + a
   q = acc
 }
 
 // Both carried outputs consume the same stateful lane. Evaluating separate
 // output colors must not advance that lane more than once in a clock phase.
-pub mod loop_state_multi_carry(a:u8) -> (sum:u16@[0], doubled:u16@[0]) {
-  mut first:u16 = 0
-  mut second:u16 = 0
+pub mod loop_state_multi_carry(a:U8) -> (sum:U16@[0], doubled:U16@[0]) {
+  mut first:U16 = 0
+  mut second:U16 = 0
   for i in 0..<3 {
-    const value = carry_lane(a=a + i)
+    const value = carry_lane(a=(a + i)#[0..<8])
     wrap first = first + value
     wrap second = second + (value << 1)
   }

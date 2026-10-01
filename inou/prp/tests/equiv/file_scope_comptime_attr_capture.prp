@@ -1,0 +1,29 @@
+/*
+:name: file_scope_comptime_attr_capture
+:type: equiv
+:verilog_top: file_scope_comptime_attr_capture
+:pyrope_top: file_scope_comptime_attr_capture
+*/
+
+// Suggestions 2.3 rows 3/4, ruling 2026-09-27 #4: a FILE-scope comptime
+// binding is visible inside a lambda with its VALUE and its declared TYPE.
+// `Z:U6 = 0` has `.[bits] == 6` and `.[max] == 63` (from the type; the value
+// alone would give 1 / 0), and `comptime const ZB = Z.[bits]` is a comptime
+// const whose value is not a literal. Today prp2lnast's declaration-point
+// capture (capture_const_bindings_) replays only LITERAL values, untyped, so
+// inside the mod `ZB` is "read of undefined variable 'ZB'" and `Z.[bits]` is
+// nil ("nil used as an operand of a non-equality operation"); the file scope
+// itself (cassert below) sees 6. Once untyped comptime ints get value-derived
+// `.[bits]` (ruling #6) the untyped replay would silently give b + 1 here, so
+// the capture must carry the declared type (or come from the evaluated file
+// scope, as in file_scope_loop_const).
+comptime const Z:U6 = 0
+comptime const ZB = Z.[bits]
+cassert(ZB == 6)
+cassert(Z.[max] == 63)
+
+pub mod file_scope_comptime_attr_capture(b:U8) -> (s:U8@[0], t:U8@[0], m:U8@[0]) {
+  s = (b + ZB)#[0..<8]
+  t = (b + Z.[bits])#[0..<8]
+  m = (b + Z.[max])#[0..<8]
+}

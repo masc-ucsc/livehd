@@ -25,6 +25,14 @@
 #          Only needed when a pair is added or its logic/interface changes.
 #   run   (the regression): `lhd sim <name>_tb.prp` recompiles the DUT to C++
 #          and checks the baked golden. Owned by prp-simeq-<name> bazel targets.
+#
+# Bool ports are strict in a test block too (user ruling 2026-09-28 (20)): the
+# Verilog port list cannot tell a `Bool` port from a `U1`, so the kinds come
+# from the Pyrope signature; a Bool input is driven with `Bool(...)` and a Bool
+# output is hashed through `U1(...)`, the same bit either way. Clocks and resets
+# bind by TYPE (docs 07-typesystem "Clock and Reset"): the clock/reset ports are
+# the minted `clock`/`reset` or any port the Pyrope signature types `Clock` /
+# `Reset`, whatever its name.
 
 import argparse
 import glob
@@ -48,8 +56,8 @@ FILL  = 32                           # hash-skip window for a seq DUT WITHOUT a 
                                      # X in Verilog / init in the driver, so the two
                                      # agree on pure f(inputs) from cycle FILL on)
 
-CLK_NAMES = ("clock",)               # LiveHD cgen clock port name
-RST_NAMES = ("reset",)               # LiveHD cgen implicit-reset port name
+CLK_NAMES = ("clock",)               # LiveHD cgen minted clock port name
+RST_NAMES = ("reset",)               # LiveHD cgen minted implicit-reset port name
 
 
 class GenError(Exception):
@@ -140,14 +148,15 @@ def parse_verilog_ports(vpath, want=None):
     return modname, ports
 
 
-def classify(ports):
+def classify(ports, clocks=frozenset(), resets=frozenset()):
+    # `clocks`/`resets`: the Pyrope signature's `Clock`/`Reset`-typed ports.
     clk = rst = None
     data_in = []
     outs = []
     for d, w, n in ports:
-        if d == 'input' and n in CLK_NAMES and clk is None:
+        if d == 'input' and (n in CLK_NAMES or n in clocks) and clk is None:
             clk = n
-        elif d == 'input' and n in RST_NAMES and rst is None:
+        elif d == 'input' and (n in RST_NAMES or n in resets) and rst is None:
             rst = n
         elif d == 'input':
             data_in.append((n, w))
@@ -176,6 +185,68 @@ def pyrope_lambda_of(ppath, modname, default_lam):
     m = re.search(r'pub\s+(?:comb|mod|pipe)\s+([A-Za-z_]\w*)\s*::\s*\[[^\]]*lg\s*=\s*"%s"'
                   % re.escape(modname.lstrip('\\')), txt)
     return m.group(1) if m else default_lam
+
+
+def balanced_group(txt, pos):
+    # The text inside the parenthesized group opening at txt[pos] == '(' and
+    # the index past its closing ')'; None when it never closes.
+    depth = 0
+    for i in range(pos, len(txt)):
+        if txt[i] == '(':
+            depth += 1
+        elif txt[i] == ')':
+            depth -= 1
+            if depth == 0:
+                return txt[pos + 1:i], i + 1
+    return None
+
+
+def top_level_split(txt):
+    # Split a port list at the commas outside any `(...)` (`int(0, 99)`).
+    parts, depth, cur = [], 0, ""
+    for c in txt:
+        depth += (c == '(') - (c == ')')
+        if c == ',' and depth == 0:
+            parts.append(cur)
+            cur = ""
+        else:
+            cur += c
+    return parts + [cur]
+
+
+def pyrope_bool_ports(ppath, lam, word="Bool"):
+    # The ports of Pyrope lambda `lam` declared `Bool` (or `word`: `Clock`,
+    # `Reset`).
+    try:
+        txt = open(ppath).read()
+    except OSError:
+        return set()
+    m = re.search(r'\b(?:comb|mod|pipe)\s+%s\b\s*(?:::\s*\[[^\]]*\])?\s*(?=\()' % re.escape(lam), txt)
+    ins = balanced_group(txt, m.end()) if m else None
+    arrow = re.match(r'\s*->\s*(?=\()', txt[ins[1]:]) if ins else None
+    outs = balanced_group(txt, ins[1] + arrow.end()) if arrow else None
+    if not outs:
+        return set()
+    bools = set()
+
+    def collect(ports, prefix):
+        # A tuple-typed port `req:(addr:U6, write:Bool)` flattens to the
+        # Verilog leaf names (`req.write`).
+        for part in top_level_split(ports):
+            name, sep, ty = part.partition(":")
+            if not sep:
+                continue
+            name, ty = prefix + name.strip().split()[-1].strip("`"), ty.strip()
+            if ty.startswith("("):
+                tup = balanced_group(ty, 0)
+                if tup:
+                    collect(tup[0], name + ".")
+            elif re.split(r'[@=\s]', ty, maxsplit=1)[0] == word:
+                bools.add(name)
+
+    collect(ins[0], "")
+    collect(outs[0], "")
+    return bools
 
 
 # ---- emit the two testbenches -----------------------------------------------
@@ -209,7 +280,7 @@ def hash_start_of(clk, rst):
     return NRST if rst else FILL       # seq: reset window, or pipe-fill window
 
 
-def emit_verilog(base, modname, clk, rst, data_in, outs):
+def emit_verilog(base, modname, clk, rst, data_in, outs, rst_low=False):
     seq = clk is not None
     hs = hash_start_of(clk, rst)
     taken = {n for n, _ in data_in} | {n for n, _ in outs} | {"clock", "reset"}
@@ -236,9 +307,9 @@ def emit_verilog(base, modname, clk, rst, data_in, outs):
         a("  wire [%d:0] %s;" % (w - 1, n))
     conns = ["." + n + "(" + n + ")" for n, _ in data_in]
     if seq:
-        conns.append(".clock(clock)")
+        conns.append(".%s(clock)" % clk)
     if rst:
-        conns.append(".reset(reset)")
+        conns.append(".%s(reset)" % rst)
     conns += ["." + n + "(" + n + ")" for n, _ in outs]
     a("  %s %s(%s);" % (esc(modname), DUT, ", ".join(conns)))
     a("  reg [63:0] %s, %s; integer %s;" % (S, SIG, K))
@@ -248,7 +319,7 @@ def emit_verilog(base, modname, clk, rst, data_in, outs):
     for n, w in data_in:
         a("      %s=%s*A+C; %s = %s & %s;" % (S, S, n, S, mask_lit_v(w)))
     if rst:
-        a("      reset = (%s<%d) ? 1'b1 : 1'b0;" % (K, NRST))
+        a("      reset = (%s<%d) ? 1'b%d : 1'b%d;" % (K, NRST, 0 if rst_low else 1, 1 if rst_low else 0))
     if seq:
         # Full period (posedge then negedge) before sampling: a negedge-clocked
         # flop (posclk=false) only updates on the falling half, so sampling right
@@ -280,7 +351,59 @@ def mask_lit_p(w):
     return hex((1 << w) - 1) if w < 63 else None
 
 
-def emit_pyrope(base, lam, clk, rst, data_in, outs, golden):
+# The reserved type words (`U4`, `S1`, `Clock`, ...) and the banned old
+# lowercase type spellings (`u8`, `s1`, `i0`, `bool`, ...) are not names either
+# (docs 02-basics "Identifiers"): backtick them too.
+_TYPE_WORD = re.compile(r'^(?:[US][0-9]+|Unsigned|Signed|Bool|String|Clock|Reset)$')
+_BANNED = re.compile(r'^(?:[usi][0-9]+|bool|boolean|unsigned|signed|string)$')
+
+
+def pid(n):
+    # A port named like a Pyrope keyword (`in`) is backtick-escaped at use.
+    # `clock`/`reset` sit in PRP_KEYWORDS only to keep them free as binding
+    # names; they are not reserved words, so a port read stays bare.
+    reserved = n in PRP_KEYWORDS and n not in ("clock", "reset")
+    return "`%s`" % n if reserved or _TYPE_WORD.match(n) or _BANNED.match(n) else n
+
+
+def pyrope_reset_active_low(ppath, lam, rst, n_resets):
+    # A Pyrope reset NAME carries no polarity (`rst_n` is active-high unless
+    # its registers say `negreset=true`), so read the polarity off the DUT
+    # lambda's registers that use `rst`: an explicit `reset_pin=rst`, or the
+    # implicit reset when `rst` is the lambda's only `Reset` input. Active-low
+    # only when every such register sets `negreset=true`.
+    try:
+        txt = open(ppath).read()
+    except OSError:
+        return False
+    txt = re.sub(r'//[^\n]*', '', txt)
+    m = re.search(r'\b(?:comb|mod|pipe)\s+%s\b' % re.escape(lam), txt)
+    if not m:
+        return False
+    bo = txt.find('{', m.end())
+    depth, j = 0, bo
+    while 0 <= j < len(txt):
+        depth += (txt[j] == '{') - (txt[j] == '}')
+        if depth == 0:
+            break
+        j += 1
+    body = txt[m.end():j]
+    pols = []
+    for rm in re.finditer(r'\breg\s+`?\w+`?[^\n]*', body):
+        decl = rm.group(0)
+        am = re.search(r':\[([^\]]*)\]', decl)
+        attrs = am.group(1) if am else ""
+        pm = re.search(r'reset_pin\s*=\s*(?:ref\s+)?`?(\w+)`?', attrs)
+        if pm:
+            uses = pm.group(1) == rst
+        else:
+            uses = n_resets == 1 and re.search(r'=\s*(?!nil\b)\S', decl.split(']')[-1]) is not None
+        if uses:
+            pols.append(re.search(r'negreset\s*=\s*true', attrs) is not None)
+    return bool(pols) and all(pols)
+
+
+def emit_pyrope(base, lam, clk, rst, data_in, outs, golden, bools=frozenset(), rst_low=False):
     seq = clk is not None
     hs = hash_start_of(clk, rst)
     bind = uniq(lam, PRP_KEYWORDS | {n for n, _ in data_in} | {n for n, _ in outs})
@@ -306,15 +429,19 @@ def emit_pyrope(base, lam, clk, rst, data_in, outs, golden):
     for n, w in data_in:
         a("    %s = %s * %d + %d" % (S, S, A, C))
         ml = mask_lit_p(w)
-        a("    %s.%s = %s%s" % (ACC, n, S, "" if ml is None else " & " + ml))
+        drive = S if ml is None else "%s & %s" % (S, ml)
+        a("    %s.%s = %s" % (ACC, pid(n), "Bool(%s)" % drive if n in bools else drive))
     if rst:
-        a("    %s.reset = clock < %d" % (ACC, NRST))
+        # A reset is Bool-like (a `Reset` port, or the minted `reset:Reset`):
+        # poke the comparison itself.
+        a("    %s.%s = clock %s %d" % (ACC, pid(rst), ">=" if rst_low else "<", NRST))
     a("    step")
     if seq:
         a("    if clock >= %d {" % hs)
     for n, w in outs:
         ml = mask_lit_p(w)
-        val = "%s.%s" % (ACC, n) if ml is None else "(%s.%s & %s)" % (ACC, n, ml)
+        port = "U1(%s.%s)" % (ACC, pid(n)) if n in bools else "%s.%s" % (ACC, pid(n))
+        val = port if ml is None else "(%s & %s)" % (port, ml)
         a("%s%s = %s * %d + %s" % (ind, SIG, SIG, P, val))
     if seq:
         a("    }")
@@ -378,7 +505,8 @@ def process(base, equiv_dir, workdir, do_setup):
         else:
             lam = pyrope_lambda_of(ppath, cand, None)
     lam = lam or pyrope_lambda_of(ppath, modname, lambda_of(modname))
-    clk, rst, data_in, outs = classify(ports)
+    resets = pyrope_bool_ports(ppath, lam, "Reset")
+    clk, rst, data_in, outs = classify(ports, pyrope_bool_ports(ppath, lam, "Clock"), resets)
     if not outs:
         raise GenError("no output ports to hash")
     if not data_in:
@@ -386,11 +514,15 @@ def process(base, equiv_dir, workdir, do_setup):
 
     tbv = os.path.join(equiv_dir, base + "_tb.v")
     tbp = os.path.join(equiv_dir, base + "_tb.prp")
+    # A second `Reset` input (not the one the harness drives) is stimulus like
+    # any data input, and a Reset is Bool-like: poke it as a Bool.
+    bools = pyrope_bool_ports(ppath, lam) | resets
+    rst_low = rst is not None and pyrope_reset_active_low(ppath, lam, rst, len(resets))
 
     if do_setup:
-        open(tbv, "w").write(emit_verilog(base, modname, clk, rst, data_in, outs))
+        open(tbv, "w").write(emit_verilog(base, modname, clk, rst, data_in, outs, rst_low))
         golden = run_iverilog(base, vpath, tbv, workdir)
-        open(tbp, "w").write(emit_pyrope(base, lam, clk, rst, data_in, outs, golden))
+        open(tbp, "w").write(emit_pyrope(base, lam, clk, rst, data_in, outs, golden, bools, rst_low))
         pubify_equiv.pubify(ppath)          # the _tb.prp imports the DUT -> it must be `pub`
         return ("setup-ok", golden)
     else:

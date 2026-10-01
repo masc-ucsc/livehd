@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <map>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,140 @@
 #include "gtest/gtest.h"
 #include "node_util.hpp"
 #include "pass_color.hpp"
+
+TEST(PartitionAdmission, RefusalStopsConstructionAndFreshRetryPreservesConnectivity) {
+  namespace gu = livehd::graph_util;
+  hhds::GraphLibrary input;
+  auto               io = input.create_io("top");
+  io->add_input("a", 1);
+  io->add_output("y", 2);
+  io->set_bits("a", 1);
+  io->set_bits("y", 1);
+  auto graph = io->create_graph();
+  auto first = gu::create_typed_node(*graph, Ntype_op::Not, 1);
+  auto last  = gu::create_typed_node(*graph, Ntype_op::Not, 1);
+  gu::set_color(first, 1);
+  gu::set_color(last, 2);
+  graph->get_input_pin("a").connect_sink(first.create_sink_pin(0));
+  first.create_driver_pin(0).connect_sink(last.create_sink_pin(0));
+  last.create_driver_pin(0).connect_sink(graph->get_output_pin("y"));
+  const auto source_gids = input.all_gids();
+  using namespace livehd::partition;
+  for (const auto* stop : {"begin",
+                           "resolve-step",
+                           "collect-step",
+                           "name_ports-step",
+                           "forward-signature-step",
+                           "forward-signatures-done",
+                           "producer-signature-step",
+                           "producer-signatures-done",
+                           "declare_region_io-step",
+                           "emit_region_body-step",
+                           "commit",
+                           "committed",
+                           "build_top-step",
+                           "complete"}) {
+    SCOPED_TRACE(stop);
+    hhds::GraphLibrary output;
+    bool               refused   = false;
+    const Admission    admission = [&](std::string_view stage, uint64_t) {
+      EXPECT_FALSE(refused);  // a single false must stop, even if a later call would allow work
+      if (stage == stop) {
+        refused = true;
+        return false;
+      }
+      return true;
+    };
+    EXPECT_FALSE(Pass_partition::
+                     build_decomposition({graph}, &output, "top", false, {}, Flatten_mode::off, false, {}, 1, {}, {}, admission));
+    EXPECT_TRUE(refused);
+    EXPECT_EQ(input.all_gids(), source_gids);
+    EXPECT_EQ(graph->get_output_pin("y").get_driver_pin(), last.get_driver_pin(0));
+    EXPECT_EQ(last.get_sink_pin(0).get_driver_pin(), first.get_driver_pin(0));
+  }
+  hhds::GraphLibrary retry;
+  ASSERT_TRUE(Pass_partition::build_decomposition({graph}, &retry, "top", false));
+  auto result = retry.find_io("top")->get_graph();
+  ASSERT_TRUE(result);
+  EXPECT_FALSE(result->get_output_pin("y").get_driver_pin().is_invalid());
+  unsigned nots = 0;
+  for (auto gid : retry.all_gids()) {
+    auto body = retry.find_io(gid)->get_graph();
+    for (auto node : body->body().nodes()) {
+      if (gu::type_op_of(node) == Ntype_op::Not) {
+        ++nots;
+        EXPECT_FALSE(node.get_sink_pin(0).get_driver_pin().is_invalid());
+      }
+    }
+  }
+  EXPECT_EQ(nots, 2U);
+  hhds::GraphLibrary exceptional;
+  EXPECT_THROW(
+      Pass_partition::build_decomposition({graph},
+                                          &exceptional,
+                                          "top",
+                                          false,
+                                          {},
+                                          Flatten_mode::off,
+                                          false,
+                                          {},
+                                          1,
+                                          {},
+                                          {},
+                                          [](std::string_view, uint64_t) -> bool { throw std::runtime_error("caller failure"); }),
+      std::runtime_error);
+}
+
+TEST(PartitionAdmission, BuilderRefusalStopsBeforeNextRegionForSingleAndBatchHooks) {
+  namespace gu = livehd::graph_util;
+  using namespace livehd::partition;
+  for (bool single_region : {false, true}) {
+    for (bool batch : {false, true}) {
+      hhds::GraphLibrary input, output;
+      auto               io = input.create_io("top");
+      io->add_input("a", 1);
+      io->add_output("y", 2);
+      auto graph  = io->create_graph();
+      auto driver = graph->get_input_pin("a");
+      for (int i = 1; i <= 3; ++i) {
+        auto node = gu::create_typed_node(*graph, Ntype_op::Not, 1);
+        gu::set_color(node, single_region ? 1 : i);
+        driver.connect_sink(node.create_sink_pin(0));
+        driver = node.create_driver_pin(0);
+      }
+      driver.connect_sink(graph->get_output_pin("y"));
+      unsigned                 built      = 0;
+      bool                     refused    = false;
+      const Body_builder       hook       = [&](const Region_body&) { ++built; };
+      const Body_batch_builder batch_hook = [&](std::span<const Region_body> regions) { built += regions.size(); };
+      const Admission          admission  = [&](std::string_view stage, uint64_t work) {
+        EXPECT_FALSE(refused);
+        if (built) {
+          EXPECT_EQ(stage, "built");
+          EXPECT_EQ(work, 0U);
+          refused = true;
+          return false;
+        }
+        return true;
+      };
+      EXPECT_FALSE(Pass_partition::build_decomposition({graph},
+                                                       &output,
+                                                       "top",
+                                                       false,
+                                                       batch ? Body_builder{} : hook,
+                                                       Flatten_mode::off,
+                                                       true,
+                                                       batch ? batch_hook : Body_batch_builder{},
+                                                       1,
+                                                       {},
+                                                       {},
+                                                       admission));
+      EXPECT_TRUE(refused);
+      EXPECT_EQ(built, 1U);
+      EXPECT_EQ(graph->get_output_pin("y").get_driver_pin(), driver);
+    }
+  }
+}
 
 TEST(PartitionReuse, SingleVirtualFlatColorRetainsPreBodyButExplicitFlatDoesNot) {
   namespace gu = livehd::graph_util;
@@ -104,14 +239,36 @@ TEST(PartitionNames, DeepReconvergentProducerCones) {
     prev.connect_sink(g->get_output_pin("y"));
     auto&                    out = livehd::Hhds_graph_library::instance("partition_deep_dst_" + std::to_string(run));
     std::vector<std::string> names;
-    ASSERT_TRUE(Pass_partition::build_decomposition({g}, &out, "deep", false, [&](const livehd::partition::Region_body& body) {
-      for (const auto& port : body.inputs) {
-        names.push_back(port.name);
+    uint64_t                           signature_work = 0;
+    const livehd::partition::Admission admission      = [&](std::string_view stage, uint64_t work) {
+      if (stage == "forward-signature-step" || stage == "producer-signature-step") {
+        signature_work += work;
       }
-      for (const auto& port : body.outputs) {
-        names.push_back(port.name);
-      }
-    }));
+      return true;
+    };
+    ASSERT_TRUE(Pass_partition::build_decomposition(
+        {g},
+        &out,
+        "deep",
+        false,
+        [&](const livehd::partition::Region_body& body) {
+          for (const auto& port : body.inputs) {
+            names.push_back(port.name);
+          }
+          for (const auto& port : body.outputs) {
+            names.push_back(port.name);
+          }
+        },
+        livehd::partition::Flatten_mode::off,
+        false,
+        {},
+        64,
+        {},
+        {},
+        run ? admission : livehd::partition::Admission{}));
+    if (run) {
+      EXPECT_GT(signature_work, 650U);
+    }
     EXPECT_GT(names.size(), 60U);
     runs.push_back(std::move(names));
   }

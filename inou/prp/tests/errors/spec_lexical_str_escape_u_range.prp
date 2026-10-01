@@ -1,0 +1,11 @@
+/*
+:name: spec_lexical_str_escape_u_range
+:type: error
+:error: invalid escape
+*/
+// docs 02-basics "Strings": "`\u{N}`: Unicode character UTF-8 encoded, 1 to 6
+// hexadecimal digits"; qa.md Q41/appendix 8 adopt the Rust set ("`\u{1..6
+// hex}`"), where a code point above 10FFFF is an error. 110000 is not a Unicode
+// character, so the escape must be rejected (today it is accepted and the string
+// silently holds the 10 raw characters `\u{110000}`).
+const s = "\u{110000}"   // locate_error_here

@@ -1,0 +1,25 @@
+/*
+:name: spec_memory_manual_rmw_user_read
+:type: equiv
+:verilog_top: spec_memory_manual_rmw_user_read
+:pyrope_top: spec_memory_manual_rmw_user_read
+*/
+// SPEC (docs 08-memories.md, Same-cycle ordering): "Spelling the same update by
+// hand (`mut t = mem[a]; t#[..] = v; mem[a] = t`) *is* a user read and follows
+// `ordering`."
+// Rule encoded here: under ordering="old" the hand-spelled read-modify-write
+// reads the COMMITTED entry (not the whole-word write `d` placed before it), so
+// when both fire the entry becomes {committed[15:8], x} -- the earlier `d` is
+// lost. Contrast spec_memory_partial_merge_none (a real partial write merges).
+pub mod spec_memory_manual_rmw_user_read(clk:Clock, wf:Bool, we:Bool, a:U2, d:U16, x:U8, ra:U2) -> (q:U16@[0]) {
+  reg m:[4]U16:[ordering="old"] = nil
+  q = m[ra]
+  if wf {
+    m[a] = d
+  }
+  if we {
+    mut t = m[a]
+    t#[0..<8] = x
+    m[a] = t
+  }
+}

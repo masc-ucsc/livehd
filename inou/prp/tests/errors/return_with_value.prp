@@ -7,7 +7,7 @@
 // `return` is a terminator only — it never carries a value (06-functions.md
 // "Output tuple" rule 3). Assign the named output first, then `return`.
 
-comb f(a:u8) -> (r:u8) {
+comb f(a:U8) -> (r:U8) {
   return a + 1 // locate_error_here
 }
 const y = f(a=1)

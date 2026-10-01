@@ -1,0 +1,15 @@
+/*
+:name: array_arg_not_array
+:type: error
+:error: argument .v. in call to .f. is not an array: the port is declared \[4\]
+:help: pass an array of the declared length
+*/
+
+// An integer is not an array: binding a `U16` to `v:[N]U4` used to wire the
+// packed bits straight into the lanes.
+mod f<N=4>(v:[N]U4, i:U2) -> (o:U4@[0]) {
+  o = v[i]
+}
+pub mod array_arg_not_array(a:U16, i:U2) -> (o:U4@[0]) {
+  o = f<4>(v=a, i=i)   // locate_error_here
+}

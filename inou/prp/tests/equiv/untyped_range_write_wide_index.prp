@@ -1,0 +1,22 @@
+/*
+:name: untyped_range_write_wide_index
+:type: equiv
+:verilog_top: untyped_range_write_wide_index
+:pyrope_top: untyped_range_write_wide_index
+*/
+// Runtime range writes into an UNTYPED `mut` whose window can start past bit
+// 4096 (`cc` is 13 bits wide). An untyped value is an unbounded integer, so
+// upass.tolg sizes the read-modify-write to the write's reach. Past a 12-bit
+// `hi` that reach was "unknown" and the base kept its literal's width (one
+// bit for `0`): the second write cleared its window with a one-bit inverse
+// mask and kept the first write's bits (r = 0x0007 for 0x0009, silently). The
+// reach is now capped like a runtime shift's growth (4096 bits, the width a
+// bit write's one-hot mask gets), never the literal's.
+pub mod untyped_range_write_wide_index(sel:Bool, big:U13, c:U3, b:U3, v:U4, w:U2) -> (r:U16@[0]) {
+  const cc = if sel { big } else { c }
+  const bb = if sel { big } else { b }
+  mut p = 0
+  p#[cc..+4] = v
+  p#[bb..+2] = w
+  r = p#[0..=15]
+}

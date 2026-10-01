@@ -1,0 +1,14 @@
+/*
+:name: spec_calls_destructure_typed_slot
+:type: error
+:error: type|slot
+*/
+
+// qa.md Q42 answer "Never" / Appendix §8: "Destructuring slots NEVER carry
+// types: `const (a:U32, b2) = ...` and `const (lo:U4, hi:U4) = ...` are errors
+// (both parsers)."
+// docs 03-bundle.md: "A slot is a bare name or a `local = source.path` rename,
+// never a typed name: `const (a:U32, b) = r` is an error."
+
+const (a:U32, b2) = (1, 2) // locate_error_here
+cassert(a == 1)

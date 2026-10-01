@@ -1,0 +1,47 @@
+/*
+:name: generic_dim_array_runtime_rmw
+:type: simulation
+*/
+// A declared array whose extent is a generic (`[N]`) starts from its scalar
+// initializer in EVERY lane, exactly like a literal `[4]U4 = 3` one: the front
+// end cannot size `[N]` and pre-fills nothing, so the runner pre-fills the
+// lanes once the dimension folds. A runtime-row bit update (`m[i]#[j] = b`)
+// right after the initializer used to fail with "field/index read of '0'
+// could not be resolved" (lhdtrack suggestions 2.2e).
+mod rmw<N=2>(i:U2, j:U2, b:U1, s:U2) -> (q:Unsigned(bits=N)@[0], w:U4@[0], z:U4@[0]) {
+  mut m:[N]Unsigned(bits=N) = 0
+  m[i]#[j] = b
+  q = m[s]
+
+  mut f:[N]U4 = 3             // a non-zero fill
+  f[i]#[0] = b
+  w = f[s]
+
+  mut g:[N][2]U4 = 5          // two dimensions, the inner one literal
+  g[i][1] = 9
+  z = g[s][1] ^ g[s][0]
+}
+
+pub mod generic_dim_array_runtime_rmw(i:U2, j:U2, b:U1, s:U2) -> (q:U4@[0], w:U4@[0], z:U4@[0]) {
+  const x = rmw<N=4>(i=i, j=j, b=b, s=s)
+  q = x.q
+  w = x.w
+  z = x.z
+}
+
+test generic_dim_array_runtime_rmw.t {
+  mut dut = generic_dim_array_runtime_rmw
+  mut bad = 0
+  tick 16 {
+    dut.i = 2
+    dut.j = 1
+    dut.b = 1
+    dut.s = clock & 3
+    step
+    const hit = (clock & 3) == 2
+    if dut.q != (if hit { 2 } else { 0 }) { bad += 1 }
+    if dut.w != 3 { bad += 1 }                      // 3 | 1 == 3 in the hit lane too
+    if dut.z != (if hit { 9 ^ 5 } else { 0 }) { bad += 1 }
+  }
+  assert(bad == 0, "every lane starts from the initializer; the runtime row is updated")
+}

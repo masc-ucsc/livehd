@@ -2,8 +2,8 @@
 :name: packed_variable_modifiers
 :type: equiv
 */
-comb packed_variable_modifiers(a:s4, b:s4) -> (s:s8, high:s4, count:u4, parity:u1, any:u1, all:u1) {
-  mut p:[2]s4 = 0
+comb packed_variable_modifiers(a:S4, b:S4) -> (s:S8, high:S4, count:U4, parity:U1, any:U1, all:U1) {
+  mut p:[2]S4 = 0
   p[0] = a
   p[1] = b
   s = p#sext[..]

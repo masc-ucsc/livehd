@@ -1,0 +1,24 @@
+/*
+:name: memory_builtin_const_clock
+:type: error
+:tolg: 1
+:error: memory `res` \(port 0\) is clocked by a constant
+*/
+// Ruling 42: a `__memory` port clocked by a constant never ticks -- the same
+// rule as a `reg` memory's `clock_pin`. Port 0 (the write port) is live.
+pub mod memory_builtin_const_clock(clk:Clock, we:Bool, wa:U2, wd:U8, ra:U2) -> (q:U8@[]) {
+  mut cfg = (
+    const addr      = (wa, ra),
+    const bits      = 8,
+    const size      = 4,
+    const clock_pin = (true, clk),
+    const din       = (wd, 0),
+    const enable    = (we, true),
+    const fwd       = false,
+    const `type`    = 0,
+    const wensize   = 1,
+    const rdport    = (0, 1),
+  )
+  mut res = __memory(cfg)
+  q = res[0]
+}

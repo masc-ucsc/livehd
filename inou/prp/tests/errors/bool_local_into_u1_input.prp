@@ -1,0 +1,27 @@
+/*
+:name: bool_local_into_u1_input
+:type: error
+:tolg: 1
+:error: cannot bind boolean value to input .n. of .*leaf.* \(it is integer\)
+:help: U1\(
+*/
+
+// User ruling 2026-09-27 (2): a `Bool` LOCAL bound to a `U1` input of a `mod`
+// needs `U1(x)` (no implicit bool->bit conversion at a call boundary). The
+// local's kind is known here (`const flag:Bool = ...` into a `U1` local is
+// already "cannot assign boolean value to ..."), but a Sub call connects the
+// actual straight to the callee pin with no kind check, so this compiles
+// silently. bool_inst_into_u1_input.prp is the same binding from a child's
+// bool output.
+//
+// Legal spelling: `leaf(n=U1(flag))`.
+
+mod leaf(n:U1) -> (o:U1@[0]) {
+  o = n
+}
+
+pub mod bool_local_into_u1_input(v:U4) -> (q:U1@[0]) {
+  const flag:Bool = v == 3
+  const c = leaf(n=flag)   // locate_error_here
+  q = c.o
+}

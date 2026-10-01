@@ -5,9 +5,9 @@
 :pyrope_top: array_dynamic_overwrite
 */
 // A dynamic write invalidates cached constants but preserves prior copies.
-pub comb array_dynamic_overwrite(en:u1, idx:u1, value:u4) -> (current:u8, original:u8) {
-  mut data:[2]u4 = (2, 5)
-  mut snapshot:[2]u4 = 0
+pub comb array_dynamic_overwrite(en:U1, idx:U1, value:U4) -> (current:U8, original:U8) {
+  mut data:[2]U4 = (2, 5)
+  mut snapshot:[2]U4 = 0
   snapshot = data
   if en != 0 { data[idx] = value }
   current = (data[1] << 4) | data[0]

@@ -1,0 +1,30 @@
+/*
+:name: array_output_lane_undriven
+:type: error
+:tolg: 1
+:error: lane 3 of output .v. is never driven
+:help: every bit of a value built from pieces must be driven
+*/
+
+// lhdtrack suggestions.md 2.2(d) / user ruling 15 (2026-09-27): an output
+// starts as nil, so an array output may be built lane by lane with no whole
+// assignment first. 04-variables.md keeps the coverage rule for such a value:
+// "A lambda output starts as `nil`, exactly like `mut v:uN = nil`, so an
+// output can be built bit by bit without a prior whole assignment, and an
+// array output lane by lane. The same coverage rule applies: every bit must be
+// driven." (and, for `mut r:U7 = nil`: "Every bit of `r` must be driven
+// exactly once or it is a compile error").
+//
+// Here lanes 0..2 of `v` are written and lane 3 never is, so the compile must
+// fail on the declaration of `v`. Today it fails for the wrong reason
+// ("upass.tolg: array 'v' is written before it has an initializer", the
+// ruling-15 bug of sim/array_output_lane_writes.prp); once lane writes into a
+// nil output are accepted, it must not silently leave lane 3 unknown. Expected
+// diagnostic (new): message "lane 3 of output `v` is never driven", hint
+// "every bit of a value built from pieces must be driven: write `v[3]`, or
+// give `v` a whole value first", spanned on the output's declaration.
+pub mod array_output_lane_undriven(a:U4) -> (v:[4]U4@[0]) {   // locate_error_here
+  v[0] = a
+  v[1] = a ^ 1
+  v[2] = a ^ 2
+}

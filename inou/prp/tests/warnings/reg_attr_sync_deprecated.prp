@@ -1,0 +1,20 @@
+/*
+:name: reg_attr_sync_deprecated
+:type: warning
+:warning: attribute .sync. is deprecated
+:help: async=true
+*/
+
+// User ruling 2026-09-27: `async` is the canonical reset-kind attribute
+// (04b-attributes.md); the Verilog importer's inverse `sync=` is still
+// accepted, with a deprecation WARNING. Today both spellings below compile
+// silently (upass_tolg treats `sync=false` as `async=true`).
+
+pub mod reg_attr_sync_deprecated(rst2:Reset, d:U4) -> (q:U4@[1], p:U4@[1]) {
+  reg r:U4:[reset_pin=rst2, sync=false] = 5   // locate_warning_here
+  reg s:U4:[reset_pin=rst2, sync=true] = 3    // locate_warning_here
+  r = d
+  s = d
+  q = r
+  p = s
+}

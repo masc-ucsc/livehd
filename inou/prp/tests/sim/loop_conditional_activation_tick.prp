@@ -1,0 +1,98 @@
+/*
+:name: loop_conditional_activation_tick
+:type: simulation
+:expect_instances: u_loop*=2
+*/
+
+// A rolled loop of stateful children under a conditional activation. upass
+// gates the clock of a conditionally called instance with an activation
+// Clock_cell (enable = `__valid | reset`); a rolled loop commits its lanes
+// through the `<clock>__tick` word the root forwards, so the root must AND
+// that enable into the tick. Resolving the clock THROUGH the cell forwarded
+// the ungated reference tick, and every lane counted on inactive periods too.
+//
+// `ca_top`: the loop itself is the conditional instance. `cb_top`: the loop
+// sits inside a conditionally called module.
+//
+// Same values as `--set compile.unroll=true`.
+mod ca_cnt(en:Bool) -> (q:U4@[0]) {
+  reg c:U4 = 0
+  q = c
+  if en { wrap c += 1 }
+}
+
+pub mod ca_top(en:U2, active:Bool) -> (s:U8@[]) {
+  mut acc:U8 = 0
+  if active {
+    for j in 0..<2 {
+      const c = ca_cnt(en=en#[j] == 1)
+      wrap acc = acc | (c << (j * 4))
+    }
+  }
+  s = acc
+}
+
+mod cb_loop(en:U2) -> (q:U8@[0]) {
+  mut acc:U8 = 0
+  for j in 0..<2 {
+    const c = ca_cnt(en=en#[j] == 1)
+    wrap acc = acc | (c << (j * 4))
+  }
+  q = acc
+}
+
+pub mod cb_top(en:U2, active:Bool) -> (s:U8@[]) {
+  s = 0
+  if active {
+    s = cb_loop(en=en)
+  }
+}
+
+test ca_top.inactive_periods_hold_state {
+  mut x     = ca_top
+  mut c0:U4 = 0
+  mut c1:U4 = 0
+  mut bad   = 0
+  mut seen  = 0
+  tick 12 {
+    const ev:U2    = U2((clock * 3) & 3)
+    const act:Bool = (clock == 1) or (clock == 2) or (clock == 5) or (clock == 6) or (clock == 9)
+    x.en     = ev
+    x.active = act
+    step
+    // the counters commit only in active periods
+    if act {
+      if ev#[0] == 1 { wrap c0 += 1 }
+      if ev#[1] == 1 { wrap c1 += 1 }
+    }
+    const sexp:U8 = if act { (c1 << 4) | c0 } else { 0 }
+    seen += 1
+    if x.s != sexp { bad += 1 }
+  }
+  assert(seen == 12, "the comparisons ran")
+  assert(bad == 0, "a conditional rolled loop commits only while active")
+}
+
+test cb_top.inactive_periods_hold_state {
+  mut x     = cb_top
+  mut c0:U4 = 0
+  mut c1:U4 = 0
+  mut bad   = 0
+  mut seen  = 0
+  tick 12 {
+    const ev:U2    = U2((clock * 3) & 3)
+    const act:Bool = (clock == 1) or (clock == 2) or (clock == 5) or (clock == 6) or (clock == 9)
+    x.en     = ev
+    x.active = act
+    step
+    if act {
+      if ev#[0] == 1 { wrap c0 += 1 }
+      if ev#[1] == 1 { wrap c1 += 1 }
+    }
+    const sexp:U8 = if act { (c1 << 4) | c0 } else { 0 }
+    seen += 1
+    if x.s != sexp { bad += 1 }
+  }
+  assert(seen == 12, "the comparisons ran")
+  assert(bad == 0, "a rolled loop inside a conditional call commits only while active")
+}

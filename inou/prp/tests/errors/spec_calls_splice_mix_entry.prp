@@ -1,0 +1,14 @@
+/*
+:name: spec_calls_splice_mix_entry
+:type: error
+:error: mix|named and unnamed|unnamed and named|unnamed and a named|named and an unnamed
+*/
+
+// qa.md Appendix §8: "the all-named/all-unnamed rule ... Mixing a named and an
+// unnamed splice is an error."
+// docs 03-bundle.md: `const mix2 = (...p, const e=5)  // error: the result
+// mixes unnamed and named entries`.
+
+const p = (1, 2)
+const mix2 = (...p, const e=5) // locate_error_here
+cassert(mix2.e == 5)

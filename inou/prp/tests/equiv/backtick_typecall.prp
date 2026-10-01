@@ -1,0 +1,18 @@
+/*
+:name: backtick_typecall
+:type: lec
+:lec_top: backtick_typecall
+*/
+// Reference for the backtick_typecall group: `foo` and foo are the SAME
+// identifier when the escaped text is plain identifier characters, so a
+// type-call key or an attribute read spelled `` `bits` `` must mean `bits`.
+// The widths are observable through `.[bits]` (see _2, which must refute).
+pub mod backtick_typecall(a:U8) -> (y:U8@[0], w:U8@[0], z:U8@[0], v:U8@[0]) {
+  mut t:Unsigned(bits=2)          = a#[0..<2]
+  mut m:Unsigned(max=5)           = 1
+  mut s:Signed(min=-4, max=3)     = 1
+  y = t.[bits]
+  w = m.[bits]
+  z = s.[bits]
+  v = t + m
+}

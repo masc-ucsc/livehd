@@ -29,8 +29,8 @@ fail() {
 }
 
 cat >"$W/acc.prp" <<'EOF'
-mod acc(din:u8) -> (sum:u32@[0]) {
-  reg total:u32 = 0
+mod acc(din:U8) -> (sum:U32@[0]) {
+  reg total:U32 = 0
   sum = total
   wrap total = total + din
 }

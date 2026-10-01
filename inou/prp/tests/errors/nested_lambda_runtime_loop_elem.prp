@@ -1,0 +1,24 @@
+/*
+:name: nested_lambda_runtime_loop_elem
+:type: error
+:error: 'x' is a runtime value of the enclosing scope; it is not visible inside lambda 'f'
+:help: pass 'x' as an input of 'f'
+*/
+
+// Ruling 2026-09-28 #24: a loop INDEX is comptime (one value per unrolled
+// iteration), and so is the element of a comptime iterable, but the element
+// of `for x in (a, b)` is a runtime value. A nested lambda reading it is the
+// nested-runtime-capture error. It used to be passed as an implicit GENERIC,
+// which bound nil: a dead read compiled silently and a live one failed only
+// in upass.tolg ("unresolved reference ''" at the lambda).
+pub mod top(a:U8, b:U8) -> (o:U8@[0], p:U8@[0]) {
+  mut acc:[2]U8 = (0, 0)
+  for (i, x) in (a, b) {
+    comb f(q:U8) -> (r:U8) {
+      r = (q + x)#[0..<8]  // locate_error_here
+    }
+    acc[i] = f(q=1)
+  }
+  o = acc[0]
+  p = acc[1]
+}

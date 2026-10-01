@@ -1,0 +1,14 @@
+/*
+:name: type_boolean
+:type: error
+:error: `boolean` was renamed `Bool`
+*/
+
+// User rulings 2026-09-28 (37) and 2026-09-29 (52): the boolean type is `Bool`
+// (and `Bool(x)` the cast). The old lowercase spellings (`bool`, `boolean`) are
+// banned words, so `:boolean` is a clear error that names the new spelling
+// (before ruling 52 it pointed at `:bool`; before ruling 37 it was the generic
+// "`boolean` is not a type" with a hint to declare a type named `boolean`).
+pub mod type_boolean(a:boolean) -> (o:Bool@[0]) {  // locate_error_here
+  o = a
+}

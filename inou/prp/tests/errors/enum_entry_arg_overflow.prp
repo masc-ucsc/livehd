@@ -1,0 +1,23 @@
+/*
+:name: enum_entry_arg_overflow
+:type: error
+:error: argument `c` \(value 8\) in call to `m` does not fit its declared range \[0, 7\]
+:help: slice it
+*/
+
+// An enum entry passed to a port is its integer encoding (user ruling
+// 2026-09-28 (29)), so it binds like any other argument (ruling 1): `Dir.W` is
+// the one-hot 8, which a 3-bit `Color` port cannot hold. Before, nothing
+// range-checked an enum-entry actual: the Verilog drove `.c(3'h0)` while
+// `lhd sim` read 8, so the two disagreed silently.
+
+enum Color = (Red, Green, Blue)
+enum Dir   = (N, E, S, W)
+
+mod m(c:Color) -> (v:U8@[0]) {
+  v = c
+}
+
+pub mod enum_entry_arg_overflow(x:U8) -> (v:U8@[0]) {
+  v = m(c=Dir.W)  // locate_error_here
+}

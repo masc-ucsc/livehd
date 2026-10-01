@@ -26,6 +26,108 @@
 
 namespace prp_sim {
 
+// Shared application argument store. Signature defaults never mutate it.
+inline constexpr std::string_view kPlusargRuntime = R"cpp(
+#include <stdexcept>
+  static std::map<std::string, std::string> _plusargs;
+  static auto& _plusarg_tokens = __lhd_sim_args;
+  static std::set<std::string> _plusarg_flags;
+  static auto& _plusarg_consumed = __lhd_sim_arg_reads;
+  static std::map<std::string, std::string> _resolved_params;
+  static void                               _add_plusarg(const std::string& token) {
+    const auto eq  = token.find('=');
+    const auto key = token.substr(1, eq == std::string::npos ? eq : eq - 1);
+    if (key.empty()) {
+      std::fprintf(stderr, "lhd sim: expected +name[=value]\n");
+      std::exit(2);
+    }
+    _plusarg_tokens.push_back(token);
+    // First occurrence wins, including a bare flag before a valued argument.
+    if (_plusargs.emplace(key, eq == std::string::npos ? "" : token.substr(eq + 1)).second && eq == std::string::npos) {
+      _plusarg_flags.insert(key);
+    }
+  }
+  [[maybe_unused]] static bool _testplusarg(const std::string& key) {
+    _plusarg_consumed.insert(key);
+    return _plusargs.count(key) != 0;
+  }
+  [[maybe_unused]] static std::string _valueplusarg_string(const std::string& key, const std::string& fallback, bool has_default) {
+    _plusarg_consumed.insert(key);
+    const auto it = _plusargs.find(key);
+    if (it == _plusargs.end()) {
+      if (has_default) {
+        return fallback;
+      }
+      throw std::runtime_error("missing simulation argument +" + key + "=VALUE");
+    }
+    if (_plusarg_flags.count(key)) {
+      throw std::runtime_error("+" + key + " requires a value");
+    }
+    return it->second;
+  }
+  [[maybe_unused]] static long _valueplusarg(const std::string& key, long fallback, bool has_default) {
+    const auto text  = _valueplusarg_string(key, std::to_string(fallback), has_default);
+    errno            = 0;
+    char*      end   = nullptr;
+    const long value = std::strtol(text.c_str(), &end, 0);
+    if (text.empty() || end == text.c_str() || *end != '\0' || errno == ERANGE) {
+      throw std::runtime_error("+" + key + " expects an integer, got '" + text + "'");
+    }
+    return value;
+  }
+  [[maybe_unused]] static bool _valueplusarg_bool(const std::string& key, bool fallback, bool has_default) {
+    _plusarg_consumed.insert(key);
+    if (_plusarg_flags.count(key)) {
+      return true;
+    }
+    const auto value = _valueplusarg_string(key, fallback ? "true" : "false", has_default);
+    if (value == "true" || value == "1") {
+      return true;
+    }
+    if (value == "false" || value == "0") {
+      return false;
+    }
+    throw std::runtime_error("+" + key + " expects true, false, 1 or 0");
+  }
+  static std::string _argument_identity() {
+    // Length framing preserves token order, duplicates, bare flags and empty values.
+    std::string text;
+    for (const auto& token : _plusarg_tokens) {
+      text += std::to_string(token.size()) + ":" + token;
+    }
+    return text;
+  }
+  [[maybe_unused]] static std::string _checkpoint_argument_identity() {
+    std::string text  = _argument_identity();
+    text             += ";defaults:";
+    for (const auto& [key, value] : _resolved_params) {
+      text += std::to_string(key.size()) + ":" + key + std::to_string(value.size()) + ":" + value;
+    }
+    return text;
+  }
+  static std::string _argument_json() {
+    std::string text  = ",\"arguments\":[";
+    bool        first = true;
+    for (const auto& token : _plusarg_tokens) {
+      if (!first) {
+        text += ",";
+      }
+      first  = false;
+      text  += "\"" + _json_esc(token) + "\"";
+    }
+    text  += "],\"parameters\":{";
+    first  = true;
+    for (const auto& [key, value] : _resolved_params) {
+      if (!first) {
+        text += ",";
+      }
+      first  = false;
+      text  += "\"" + _json_esc(key) + "\":\"" + _json_esc(value) + "\"";
+    }
+    return text + "}";
+  }
+)cpp";
+
 inline constexpr std::string_view kTuneRuntime = R"cpp(
   // ---- sim.tune: run metrics, digests, the profile sampler ---------------------
   // Always compiled, dormant unless `--set sim.tune.profile=on`: with profiling

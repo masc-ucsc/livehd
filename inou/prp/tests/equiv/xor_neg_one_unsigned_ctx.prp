@@ -1,0 +1,17 @@
+/*
+:name: xor_neg_one_unsigned_ctx
+:type: equiv
+*/
+// A mixed-sign bitwise op with a non-negative result, inlined into an
+// UNSIGNED enclosing expression. cgen emitted `a & (x ^ -1)` in its signed form
+// (`$signed({1'b0,a}) & ($signed(..x..) ^ (1'sh1))`) and inlined it into the
+// `| (c << s)`: the unsigned `c << s` made the whole Verilog expression
+// unsigned, the 1-bit signed `-1` was ZERO-extended, and `x ^ -1` flipped only
+// bit 0 -- a SILENT miscompile of the emitted Verilog (the LGraph was right).
+// The Pyrope writer spells the regenerated `-x - 1` of Verilog's `~` as
+// `x ^ -1` (user ruling 2026-09-29 (44)), so every round trip through it hit
+// this (prp-v2prp2v-wrap_bitrange_dest, -comb_array_const_index_read).
+pub mod xor_neg_one_unsigned_ctx(a:U8, b:U3, c:U8, s:U3) -> (o:U8@[0], p:U8@[0]) {
+  wrap o = (a & ((b << s) ^ -1)) | (c << s)
+  wrap p = (a ^ ((b << s) ^ -1)) | (c << s)
+}

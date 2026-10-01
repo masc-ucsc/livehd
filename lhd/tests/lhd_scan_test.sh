@@ -26,7 +26,7 @@ grep -q '"imports":\[\]' "$W/r.json" || fail "import-free file should report an 
 
 # scan is LEXER-ONLY (no parse/elaborate — it just needs the import strings), so:
 #  (a) a file that LEXES but would not PARSE still scans cleanly (imports extracted);
-printf 'comb broken(a:u3 -> (z) {\n' > "$W/noparse.prp"
+printf 'comb broken(a:U3 -> (z) {\n' > "$W/noparse.prp"
 "$LHD" scan "$W/noparse.prp" --workdir "$W/w2" -q --result-json "$W/r2.json" 2>/dev/null \
   || fail "lexer-only scan must NOT fail on a parse-only error: $(cat "$W/r2.json" 2>/dev/null)"
 grep -q '"status":"pass"' "$W/r2.json" || fail "parse-only error should still scan pass: $(cat "$W/r2.json")"

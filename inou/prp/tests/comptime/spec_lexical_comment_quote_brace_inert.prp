@@ -1,0 +1,15 @@
+/*
+:name: spec_lexical_comment_quote_brace_inert
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+// docs 02-basics "Comments": "quotes or braces inside it do not open a string
+// or an interpolation." qa.md appendix 3: "Nothing inside a comment ever
+// affects parsing".
+const a = 1 // an " unterminated double quote and a { brace
+const b = 2 /* a ' single quote, a ` backtick and a } brace */
+const c = 3
+cassert(a == 1)
+cassert(b == 2)
+cassert(c == 3)

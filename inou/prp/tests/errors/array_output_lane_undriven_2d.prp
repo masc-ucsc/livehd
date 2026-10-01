@@ -1,0 +1,22 @@
+/*
+:name: array_output_lane_undriven_2d
+:type: error
+:tolg: 1
+:error: lane \[1\]\[1\] of output .r. is never driven
+:help: write .r\[1\]\[1\].
+*/
+
+// The multi-dimensional twin of array_output_lane_undriven: element r[1][1]
+// of a `[2][4]U8` output built lane by lane is never driven. The lanes are
+// row-major, so the diagnostic named flat lane 5 and suggested writing
+// `r[5]`, an access a 2-D output rejects ("has 2 dimension(s) but the access
+// supplies 1 index(es)"). It names the element by its indices.
+pub mod array_output_lane_undriven_2d(a:U8) -> (r:[2][4]U8@[0]) {   // locate_error_here
+  for i in 0..<2 {
+    for j in 0..<4 {
+      if i != 1 or j != 1 {
+        r[i][j] = a
+      }
+    }
+  }
+}

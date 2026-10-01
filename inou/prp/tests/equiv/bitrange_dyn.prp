@@ -10,9 +10,9 @@
 // prp2lnast keeps a `range` node (no comptime mask); tolg's
 // lower_dynamic_range_select emits `(a>>lo) & ((1<<(hi-lo+1))-1)`.
 //
-// The endpoints are `base ..= (base+len)` so `hi >= lo` always holds (the
+// The endpoints are `base..=(base+len)` so `hi >= lo` always holds (the
 // select precondition the lgassert guards), making the golden a clean,
 // edge-case-free `(a>>base) & ((1<<(len+1))-1)`.
-pub comb rsel(a:u16, base:u4, len:u3) -> (z:u16) {
-  z = a#[base ..= (base+len)]
+pub comb rsel(a:U16, base:U4, len:U3) -> (z:U16) {
+  z = a#[base..=(base+len)]
 }

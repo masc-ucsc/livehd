@@ -54,27 +54,21 @@
 //
 // The gate cell itself: a transparent-low enable latch ANDed with the clock,
 // structurally identical to core-et's `prim_clk_gate`.
-mod icg_cell(clk_i:bool, en_i:bool) -> (clk_o:bool@[]) {
-  reg enl:bool:[latch=true]  // transparent while clk_i==0, CLOSED while clk_i==1
-  if !clk_i {
-    enl = en_i
-  }
-  clk_o = clk_i and enl
+mod icg_cell(clk_i:Clock, en_i:Bool) -> (clk_o:Clock@[]) {
+  clk_o = Clock(clock_pin=clk_i, enable=en_i)  // the ICG: en_i latched while clk_i==0
 }
 
 // The def that holds both the gate cell and the flop it gates. This is the
 // graph that used to be unencodable: from the top, `gclk` is invisible.
-mod icg_leaf(clk:bool, en:bool, d:u8) -> (o:u8@[]) {
-  wire gclk:bool = nil
-  mut u_cg = icg_cell(clk_i = clk, en_i = en)
-  gclk = u_cg
-  reg f:u8:[clock_pin=ref gclk] = 0
+mod icg_leaf(clk:Clock, en:Bool, d:U8) -> (o:U8@[]) {
+  const u_cg = icg_cell(clk_i = clk, en_i = en)
+  reg f:U8:[clock_pin=u_cg.clk_o] = 0
   o = f
   f = d
 }
 
-pub mod icghier_tb(clk:bool) -> (ok:bool@[0]) {
-  reg cyc:u3:[clock_pin=ref clk] = 0
+pub mod icghier_tb(clk:Clock) -> (ok:Bool@[0]) {
+  reg cyc:U3:[clock_pin=clk] = 0
   const c  = cyc
   const en = c != 3   // the gate closes for exactly one period
   const dv = 10 + c   // ...while the data keeps moving, so a hold is visible

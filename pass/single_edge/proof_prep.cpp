@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <format>
+#include <optional>
 #include <set>
 #include <string_view>
 
@@ -41,31 +42,155 @@ int materialize_clock_cells_all(hhds::Graph* top, const std::vector<hhds::Graph*
   return n;
 }
 
+namespace {
+
+// Where one instance of a `--lib` cell is spliced from.
+//
+// An instance whose definition the design's OWN library holds is spliced from
+// THAT body, with no override: the inliner then binds it by port id through
+// the one GraphIO it was elaborated with, correct by construction. This is the
+// encoder's rule too (pass/lec/encode.cpp: an instance with a body is descended
+// into, and `sub_lib` resolves only a body-less one), so a cell means the same
+// thing whether this prep splices it or the encoder meets it later. Only a
+// BODY-LESS instance (an lg: netlist that references the cell without holding
+// it) takes the `--lib` model, bound by port name.
+//
+// Substituting the `--lib` model for a body the design carries compared the
+// model instead of the design: an lg: netlist shipped with its own bypassed
+// clock gate (`GCLK = CLK`) or its own `INVx1` spelled `Y = A` PROVED against
+// the gated RTL, because the splice silently put the correct library cell in
+// place of the design's broken one. On a Verilog side the own body IS the
+// `--lib` model (lec elaborates the netlist against the emitted models), so
+// nothing is lost there.
+//
+// NAMES are a separate matter from semantics. A correspondence key must not
+// depend on which copy of the cell carried the body, so a spliced own body's
+// one state element is named the way the `--lib` model names its own
+// (Lib_splice::state_name). The copy a Verilog netlist is elaborated with came
+// through cgen, which invents a name for the model's anonymous latch
+// (`latch_16`); carrying that one made two netlists that differ only in their
+// instance names (bit 0 held by an instance called `g[1]`) pair their latches
+// by instance name, and a no-reset BMC started them equal and REFUTED an
+// equivalent pair that the model's anonymous latch had let semdiff match.
+struct Lib_splice {
+  hhds::Graph*               body         = nullptr;  // what gets spliced (and classified): own body or --lib model
+  hhds::Graph*               override_def = nullptr;  // the inliner `def` override: the --lib model, only when body-less
+  std::optional<std::string> state_name;              // inliner `state_name`: the model's name for the one state element
+};
+
+// The one state element (flop or latch) of a cell body: its op and name.
+// `count` > 1 (or a Memory) means the body has no single state element to name.
+struct Cell_state {
+  int                        count = 0;
+  Ntype_op                   op    = Ntype_op::Invalid;
+  std::optional<std::string> name;
+};
+
+Cell_state cell_state_of(hhds::Graph* g) {
+  Cell_state s;
+  for (auto n : g->body().nodes()) {
+    const auto op = livehd::graph_util::type_op_of(n);
+    if (op == Ntype_op::Memory) {
+      s.count = 2;
+      return s;
+    }
+    if (!livehd::graph_util::is_type_flop(n) && op != Ntype_op::Latch) {
+      continue;
+    }
+    if (++s.count > 1) {
+      return s;
+    }
+    s.op = op;
+    if (livehd::graph_util::has_name(n)) {
+      s.name = std::string{livehd::graph_util::node_name_of(n)};
+    }
+  }
+  return s;
+}
+
+// The body an instance of a `--lib` cell is spliced (and classified) from.
+hhds::Graph* lib_splice_body(const hhds::Node_class& inst, const Cell_models& sub_lib) {
+  if (auto own = inst.get_subnode_graph(); own) {
+    return own.get();
+  }
+  auto it = sub_lib.find(inst.get_subnode_gid());
+  return it != sub_lib.end() ? it->second : nullptr;
+}
+
+Lib_splice lib_splice_source(const hhds::Node_class& inst, const Cell_models& sub_lib) {
+  auto        it    = sub_lib.find(inst.get_subnode_gid());
+  auto* const model = it != sub_lib.end() ? it->second : nullptr;
+  if (auto own = inst.get_subnode_graph(); own) {
+    Lib_splice src{own.get(), nullptr, std::nullopt};
+    if (model != nullptr && model != own.get()) {
+      // Same single state element on both copies: take the model's name (or
+      // its anonymity). Anything else keeps the own body's names.
+      const auto os = cell_state_of(own.get());
+      const auto ms = cell_state_of(model);
+      if (os.count == 1 && ms.count == 1 && os.op == ms.op) {
+        src.state_name = ms.name.value_or(std::string{});
+      }
+    }
+    return src;
+  }
+  if (model != nullptr) {
+    return {model, model, std::nullopt};
+  }
+  return {};
+}
+
+// The refusal for a --lib splice the inliner declined. A model override binds
+// by port NAME through the instance's own IO (graph/inline_sub.hpp), so a
+// decline means the model does not describe this instance's ports (a name the
+// model lacks, a width it states differently) or a shape the inliner cannot
+// resolve. Leaving the instance for a later pass is NOT a safe fallback: it is
+// how a model spliced by port id silently dropped a clock gate's GCLK and made
+// a netlist with a swapped or inverted gate PROVE against the correct one.
+std::string lib_splice_refusal(const hhds::Node_class& inst, const Lib_splice& src, std::string_view what) {
+  const auto why = src.override_def != nullptr ? livehd::graph_util::sub_def_port_mismatch(inst, src.override_def) : std::string{};
+  const auto sio = inst.get_subnode_io();
+  return std::format("lec: cannot splice the {} --lib cell instance '{}' (cell '{}') from its {}: {}",
+                     what,
+                     livehd::graph_util::default_instance_name(inst),
+                     sio != nullptr ? std::string{sio->get_name()} : std::string{src.body->get_name()},
+                     src.override_def != nullptr ? "--lib model" : "own definition",
+                     why.empty() ? std::string{"the inliner refused it (see the diagnostic above)"} : why);
+}
+
+}  // namespace
+
 // Clock analysis runs before the encoder's ordinary combinational --lib
 // expansion, so expose modeled gates on clock cones (and buffer/inverter chains
 // on latch enables) before scheduling edges.
-void inline_clock_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& sub_lib, hhds::Graph* graph) {
+std::string inline_clock_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& sub_lib, hhds::Graph* graph) {
   if (graph == nullptr || sub_lib.empty()) {
-    return;
+    return {};
   }
-  absl::flat_hash_set<hhds::Gid> combinational;
-  for (const auto& [gid, model] : sub_lib) {
-    if (model == nullptr) {
-      continue;
+  // Classified on the body that would be SPLICED (lib_splice_source): the
+  // design's own definition when it has one, else the --lib model. Only a Sub
+  // of a --lib cell is a candidate at all.
+  absl::flat_hash_map<hhds::Graph*, bool> pure_memo;
+  auto                                    combinational = [&](const hhds::Node_class& sub) {
+    if (!sub_lib.contains(sub.get_subnode_gid())) {
+      return false;
     }
-    bool pure = true;
-    for (auto node : model->body().nodes()) {
-      const auto op = livehd::graph_util::type_op_of(node);
-      if (livehd::graph_util::is_type_register(node) || op == Ntype_op::Memory || op == Ntype_op::Sub
-          || op == Ntype_op::Clock_cell) {
-        pure = false;
-        break;
+    auto* body = lib_splice_body(sub, sub_lib);
+    if (body == nullptr) {
+      return false;
+    }
+    auto [it, fresh] = pure_memo.try_emplace(body, true);
+    if (fresh) {
+      for (auto node : body->body().nodes()) {
+        const auto op = livehd::graph_util::type_op_of(node);
+        if (livehd::graph_util::is_type_register(node) || op == Ntype_op::Memory || op == Ntype_op::Sub
+            || op == Ntype_op::Clock_cell) {
+          it->second = false;
+          break;
+        }
       }
     }
-    if (pure) {
-      combinational.insert(gid);
-    }
-  }
+    return it->second;
+  };
   std::vector<hhds::Pin_class> pending;
   std::vector<hhds::Pin_class> latch_enables;
   for (auto node : graph->body().nodes()) {
@@ -102,7 +227,7 @@ void inline_clock_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& 
         break;
       }
       const bool is_sub = livehd::graph_util::type_op_of(node) == Ntype_op::Sub;
-      if (is_sub && !combinational.contains(node.get_subnode_gid())) {
+      if (is_sub && !combinational(node)) {
         break;
       }
       hhds::Pin_class next;
@@ -135,7 +260,7 @@ void inline_clock_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& 
       continue;
     }
     if (livehd::graph_util::type_op_of(node) == Ntype_op::Sub) {
-      if (!combinational.contains(node.get_subnode_gid())) {
+      if (!combinational(node)) {
         continue;
       }
       if (queued.insert(node.get_class_index()).second) {
@@ -151,40 +276,55 @@ void inline_clock_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& 
     }
   }
   for (const auto& cell : cells) {
-    // Explicit --lib models live outside the design library. Inline only the
-    // clock cone so phase analysis sees buffer/inverter polarity and gates.
-    if (!livehd::graph_util::inline_sub_instance(graph, cell, "pass.lec", sub_lib.at(cell.get_subnode_gid()))) {
-      return;  // leave the unresolved clock for the existing fail-closed analysis
+    // A replicated Sub stands for several occurrences and cannot be spliced;
+    // it stays an opaque clock driver, which the clock analysis refuses.
+    if (cell.is_loop_subnode()) {
+      continue;
+    }
+    // Inline only the clock cone so phase analysis sees buffer/inverter
+    // polarity and gates: from the design's own cell body when it holds one,
+    // else from the --lib model (which lives outside the design library).
+    const auto src = lib_splice_source(cell, sub_lib);
+    if (!livehd::graph_util::inline_sub_instance(graph, cell, "pass.lec", src.override_def)) {
+      return lib_splice_refusal(cell, src, "clock-cone");
     }
   }
+  return {};
 }
 
 // Stateful --lib models must contribute real state before the encoder cuts
 // flops; an opaque instance would otherwise leave unrelated free symbols.
-void inline_stateful_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& sub_lib, hhds::Graph* impl_g) {
+std::string inline_stateful_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& sub_lib, hhds::Graph* impl_g) {
   if (sub_lib.empty() || impl_g == nullptr) {
-    return;
+    return {};
   }
-  absl::flat_hash_set<hhds::Gid> stateful;
-  for (const auto& [gid, gp] : sub_lib) {
-    if (gp == nullptr) {
-      continue;
+  // Classified on the body that would be SPLICED (lib_splice_source): the
+  // design's own definition when it has one, else the --lib model.
+  absl::flat_hash_map<hhds::Graph*, bool> stateful_memo;
+  auto                                    stateful = [&](const hhds::Node_class& sub) {
+    if (!sub_lib.contains(sub.get_subnode_gid())) {
+      return false;
     }
-    for (auto dn : gp->body().nodes(hhds::Node_order::forward)) {
-      const auto op = livehd::graph_util::type_op_of(dn);
-      if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Memory) {
-        stateful.insert(gid);
-        break;
+    auto* body = lib_splice_body(sub, sub_lib);
+    if (body == nullptr) {
+      return false;
+    }
+    auto [it, fresh] = stateful_memo.try_emplace(body, false);
+    if (fresh) {
+      for (auto dn : body->body().nodes(hhds::Node_order::forward)) {
+        const auto op = livehd::graph_util::type_op_of(dn);
+        if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Memory) {
+          it->second = true;
+          break;
+        }
       }
     }
-  }
-  if (stateful.empty()) {
-    return;
-  }
+    return it->second;
+  };
   std::set<std::string>         hit;    // sorted: the message must be deterministic
   std::vector<hhds::Node_class> insts;  // collect first: never mutate while walking
   for (auto sn : impl_g->body().nodes()) {
-    if (livehd::graph_util::type_op_of(sn) != Ntype_op::Sub || stateful.count(sn.get_subnode_gid()) == 0) {
+    if (livehd::graph_util::type_op_of(sn) != Ntype_op::Sub || !stateful(sn)) {
       continue;
     }
     insts.push_back(sn);
@@ -194,7 +334,7 @@ void inline_stateful_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Graph*
   }
   const size_t n = insts.size();
   if (n == 0) {
-    return;
+    return {};
   }
   std::string names;
   for (const auto& s : hit) {
@@ -210,11 +350,18 @@ void inline_stateful_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Graph*
   // pass/abc/abc_map.cpp already names each mapped DFF instance after its source
   // register bit. Same move `inline_clock_gate_cells` makes for an ICG cell; the
   // only reason it could not reach these is that a `--lib` model is not in the
-  // impl's own graph library, hence the explicit-def overload.
+  // impl's own graph library, hence the explicit-def overload -- used ONLY for
+  // a body-less instance (lib_splice_source). An instance that carries its own
+  // body is spliced from it, never from the model.
   size_t done = 0;
   for (const auto& inst : insts) {
-    auto git = sub_lib.find(inst.get_subnode_gid());
-    if (git == sub_lib.end() || git->second == nullptr) {
+    const auto src = lib_splice_source(inst, sub_lib);
+    if (src.body == nullptr) {
+      continue;
+    }
+    // A replicated Sub stands for several occurrences and cannot be spliced:
+    // it stays a stateless blackbox, reported below (an honest UNKNOWN).
+    if (inst.is_loop_subnode()) {
       continue;
     }
     // The cell's own instance name is the ONLY meaningful name the spliced state
@@ -227,17 +374,29 @@ void inline_stateful_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Graph*
     // Only a SINGLE-flop model may take the instance name: stamping it on two
     // flops would fuse two distinct state cuts onto one key and silently drop a
     // compare point. A multi-flop cell keeps whatever the inliner produced.
-    // Counted on the MODEL (a handful of nodes), and the naming itself happens
-    // inside the inliner — re-walking the whole parent body once per instance
-    // would be quadratic on a design with thousands of mapped cells.
+    // Counted on the spliced BODY (a handful of nodes), and the naming itself
+    // happens inside the inliner — re-walking the whole parent body once per
+    // instance would be quadratic on a design with thousands of mapped cells.
+    // An own body's flop usually arrives NAMED (`x[3].flop_16`); the inliner
+    // names only an unnamed one, and core/bus_name reads the named shape.
     int model_flops = 0;
-    for (auto dn : git->second->body().nodes(hhds::Node_order::forward)) {
+    for (auto dn : src.body->body().nodes(hhds::Node_order::forward)) {
       model_flops += livehd::graph_util::is_type_flop(dn) ? 1 : 0;
     }
-    done += livehd::graph_util::inline_sub_instance(impl_g, inst, "pass.lec", git->second, model_flops == 1) ? 1 : 0;
+    if (!livehd::graph_util::inline_sub_instance(impl_g,
+                                                 inst,
+                                                 "pass.lec",
+                                                 src.override_def,
+                                                 model_flops == 1,
+                                                 /*prefix_instance=*/true,
+                                                 /*inherit_color=*/false,
+                                                 src.state_name)) {
+      return lib_splice_refusal(inst, src, "stateful");
+    }
+    ++done;
   }
   if (done == n) {
-    return;  // fully inlined: the cells are ordinary logic + flops now
+    return {};  // fully inlined: the cells are ordinary logic + flops now
   }
   livehd::diag::warn("pass.lec", "stateful-lib-cell", "unsupported")
       .msg("the impl instantiates {} STATEFUL library cell(s) ({}) — lec could inline only {} of them", n, names, done)
@@ -246,6 +405,7 @@ void inline_stateful_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Graph*
           "and the run is INCONCLUSIVE no matter the budget; re-synthesize with `--set pass.abc.register=false` to "
           "keep registers native")
       .emit();
+  return {};
 }
 
 // Bring every INTEGRATED CLOCK GATE into a body the analyses can see, across
@@ -381,10 +541,8 @@ std::pair<int, int> inline_clock_gates_and_fold(hhds::Graph* top, const std::vec
 size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& sub_lib,
                                                        const std::vector<std::shared_ptr<hhds::Graph>>&    side_graphs,
                                                        const std::vector<std::shared_ptr<hhds::Graph>>&    other_graphs,
-                                                       hhds::Graph*                                        side_g) {
-  if (side_g == nullptr) {
-    return 0;
-  }
+                                                       hhds::Graph*                                        side_g,
+                                                       absl::flat_hash_set<std::string>*                   absorbed) {
   // The defs the other side still has, by full name AND by entity tail (a
   // Pyrope graph keeps `file.entity`; the tail covers a flat Verilog side).
   absl::flat_hash_set<std::string> other_defs;
@@ -402,7 +560,10 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
   // Every definition the other side still has gets the treatment, the top
   // included: an absorbed def is inlined at ALL its sites, so a kept child may
   // hold absorbed grandchildren too.
-  std::vector<hhds::Graph*> hosts{side_g};
+  std::vector<hhds::Graph*> hosts;
+  if (side_g != nullptr) {
+    hosts.push_back(side_g);
+  }
   for (const auto& sp : side_graphs) {
     if (sp && sp.get() != side_g && other_has_def(sp->get_name()) && sub_lib.find(sp->get_gid()) == sub_lib.end()) {
       hosts.push_back(sp.get());
@@ -510,7 +671,13 @@ size_t inline_instances_missing_from_other_side(const absl::flat_hash_map<hhds::
         // one stateful def therefore share logical state names, and the encoder
         // refuses them as ambiguous rather than merging them (graph/README.md,
         // "Transparent hierarchy wrappers").
-        spliced += livehd::graph_util::inline_sub_instance(host, inst, "pass.lec") ? 1 : 0;
+        const std::string def_name{inst.get_subnode_io()->get_name()};  // `inst` is gone after the splice
+        if (livehd::graph_util::inline_sub_instance(host, inst, "pass.lec")) {
+          ++spliced;
+          if (absorbed != nullptr) {
+            absorbed->insert(def_name);
+          }
+        }
       }
       if (spliced == 0) {
         break;  // nothing inlinable left (a real blackbox): stop rather than spin
@@ -565,20 +732,40 @@ Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::v
                             std::vector<hhds::Graph*>& impl_defs, bool quiet_decline,
                             const std::function<bool(const hhds::Graph*)>& is_boxed) {
   Time_base tb;
+
   // Either input may be a mapped netlist. Expand explicit state/clock models
   // symmetrically before collecting cuts, including cells inside retained defs.
-  auto inline_lib_cells = [&](hhds::Graph* top, const std::vector<hhds::Graph*>& defs) {
-    inline_stateful_lib_cells(sub_lib, top);
-    inline_clock_lib_cells(sub_lib, top);
+  // A splice the inliner refuses (the model does not bind to the instance by
+  // port name and width) stops the run: nothing may be queried on a side whose
+  // cell semantics were not resolved.
+  auto inline_lib_cells = [&](hhds::Graph* top, const std::vector<hhds::Graph*>& defs) -> std::string {
+    auto one = [&](hhds::Graph* g) -> std::string {
+      if (auto e = inline_stateful_lib_cells(sub_lib, g); !e.empty()) {
+        return e;
+      }
+      return inline_clock_lib_cells(sub_lib, g);
+    };
+    if (auto e = one(top); !e.empty()) {
+      return e;
+    }
     for (auto* d : defs) {
       if (d != nullptr && d != top && sub_lib.find(d->get_gid()) == sub_lib.end()) {
-        inline_stateful_lib_cells(sub_lib, d);
-        inline_clock_lib_cells(sub_lib, d);
+        if (auto e = one(d); !e.empty()) {
+          return e;
+        }
       }
     }
+    return {};
   };
-  inline_lib_cells(ref, ref_defs);
-  inline_lib_cells(impl, impl_defs);
+  auto lib_error = inline_lib_cells(ref, ref_defs);
+  if (lib_error.empty()) {
+    lib_error = inline_lib_cells(impl, impl_defs);
+  }
+  if (!lib_error.empty()) {
+    tb.error      = std::move(lib_error);
+    tb.error_hint = "a --lib model must declare every port of the instance by name and width; nothing was compared";
+    return tb;
+  }
   // CLOCK-GATE CELLS first. A real design instantiates its ICG
   // (`prim_clk_gate u_cg(.clk_i(clk), .en_i(en), .clk_o(gclk));`), so the gate
   // sits one module level away and the flop's clock_pin is an opaque Sub output

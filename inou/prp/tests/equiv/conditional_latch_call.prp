@@ -7,15 +7,15 @@
 
 // Latches have no clock edge to suppress, so a conditional instance must
 // transport activation into the callee and AND it with the latch enable.
-mod inner(gate:bool, d:u8) -> (q:u8@[0]) {
-  reg l:u8:[latch=true]
+mod inner(gate:Bool, d:U8) -> (q:U8@[0]) {
+  reg l:U8:[latch=true]
   q = l
   if gate {
     l = d
   }
 }
 
-pub mod top(active:bool, gate:bool, d:u8) -> (q:u8@[0]) {
+pub mod top(active:Bool, gate:Bool, d:U8) -> (q:U8@[0]) {
   q = 0
   if active {
     q = inner(gate=gate, d=d)

@@ -9,8 +9,8 @@
 // a break, but no Sub call.  Unlike loop_cond_sub_break, the break is after the
 // current ordinal's write, so ordinal 5 contributes and ordinals 6/7 do not.
 
-mod loop_cond_break_no_sub(seed:u8, weighted:u8) -> (total:u12@[0]) {
-  mut acc:u12 = seed
+mod loop_cond_break_no_sub(seed:U8, weighted:U8) -> (total:U12@[0]) {
+  mut acc:U12 = seed
   for ordinal in 0..<8 {
     if weighted#[ordinal] {
       acc = acc + ordinal + 1

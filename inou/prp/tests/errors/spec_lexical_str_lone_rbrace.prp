@@ -1,0 +1,8 @@
+/*
+:name: spec_lexical_str_lone_rbrace
+:type: error
+:error: lone .}. in a string
+*/
+// qa.md appendix 8: "A lone `}` outside a hole is an error (write `}}`)."
+// docs 02-basics: `const bad5 = "a } b"  // error: lone }, write "a }} b"`
+const s = "a } b"   // locate_error_here

@@ -1,0 +1,24 @@
+/*
+:name: mod_arg_instance_output_wider
+:type: error
+:tolg: 1
+:error: argument .a. \(range \[0, 65535\]\) in call to .low4m. may not fit its declared range \[0, 15\]
+:help: an argument never narrows implicitly
+*/
+// User ruling 2026-09-27 (argument width), for an actual that is ANOTHER
+// instance's output: `s.o` is a u16 port, so binding it to `a:U4` is the same
+// compile error as a u16 variable (errors/mod_arg_wider_than_input.prp). The
+// read of an instance field carries no range of its own; its declared type is
+// the callee port's.
+mod src16(a:U16) -> (o:U16@[0]) {
+  o = a
+}
+
+mod low4m(a:U4) -> (o:U4@[0]) {
+  o = a
+}
+
+pub mod mod_arg_instance_output_wider(x:U16) -> (y:U16@[0]) {
+  const s = src16(a=x)
+  y = low4m(a=s.o)   // locate_error_here
+}

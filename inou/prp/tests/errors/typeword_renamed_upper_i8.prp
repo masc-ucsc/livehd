@@ -1,0 +1,11 @@
+/*
+:name: typeword_renamed_upper_i8
+:type: error
+:error: `I8` was renamed `S8`
+*/
+// `I<N>` is not a type word (only `U<N>`/`S<N>` are): a type position spelled
+// `I8` points at `S8` instead of the generic unknown-type error.
+pub comb typeword_renamed_upper_i8(a:S8) -> (o:S8) {
+  mut t:I8 = a  // locate_error_here
+  o = t
+}

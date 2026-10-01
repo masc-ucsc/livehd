@@ -1,0 +1,8 @@
+/*
+:name: spec_lexical_str_escape_u_nobrace
+:type: error
+:error: a code point is written
+*/
+// qa.md appendix 8: "`\uNNNN` without braces is an error". docs 02-basics:
+// `const bad7 = "\u2287"  // error: write "\u{2287}"`
+const s = "\u2287"   // locate_error_here

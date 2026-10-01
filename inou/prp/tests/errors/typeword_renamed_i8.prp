@@ -1,0 +1,9 @@
+/*
+:name: typeword_renamed_i8
+:type: error
+:error: `i8` was renamed `S8`
+*/
+// ruling 14: `iN` is removed; the signed sized type is `S<N>`.
+pub comb typeword_renamed_i8(a:i8) -> (o:S8) {  // locate_error_here
+  o = a
+}

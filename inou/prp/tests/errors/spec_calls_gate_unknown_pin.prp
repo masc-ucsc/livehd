@@ -1,0 +1,13 @@
+/*
+:name: spec_calls_gate_unknown_pin
+:type: error
+:error: unknown argument|unknown pin|not a pin|no such pin
+*/
+
+// qa.md Appendix §8: "`__` basic gates are ordinary calls: all arguments named
+// with the LGraph pin names (graph/cell.cpp ...)". An ordinary call with a name
+// that matches no parameter is an `unknown argument` error; graph/cell.cpp
+// names the Mux selector pin `s`, not `sel`.
+
+const r = __mux(sel=true, p1=5, p2=9) // locate_error_here
+cassert(r == 9)

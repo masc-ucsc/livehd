@@ -1,0 +1,54 @@
+/*
+:name: istring_hole_comments
+:type: comptime
+:verifier_pass: 14
+:verifier_fail: 0
+*/
+// A `{…}` interpolation hole holds code, so a comment in it is a comment: a
+// `}`, `{`, `:` or `/*` inside a `//` or (nested) `/* */` comment never closes
+// the hole, opens another, starts a format spec or swallows text. The hole's
+// end is prpparse's own (Lexer::istring_hole_end). Outside a hole, comment
+// openers are plain string text.
+comptime const n = 5
+
+const str1 = "{ /* } */ n}"
+cassert(str1 == '5')
+const str2 = "{ /* { */ n}{n}"
+cassert(str2 == '55')
+const str3 = "{n // }
+}"
+cassert(str3 == '5')
+const str4 = "{n // :b
+}"
+cassert(str4 == '5')
+const str5 = "{n // /*
+}x"
+cassert(str5 == '5x')
+const str6 = "{n /* a /* } : */ b */}y"
+cassert(str6 == '5y')
+
+// A comment-only hole (`"a{/* c */}b"`, like `"a{}b"`) is now an
+// `empty-interpolation` error (spec 2026-09-29 §8, prpparse parser_test); a
+// literal brace pair is written doubled, and a comment opener between the
+// doubled braces is plain text.
+const e1 = "a{{}}b"
+cassert(e1 == 'a{}b')
+const e2 = "a{{/* c */}}b"
+cassert(e2 == 'a{/* c */}b')
+
+// A comment after a format spec ends the spec.
+const f1 = "{n:b /* c */}"
+cassert(f1 == '101')
+const f2 = "{n:b // c
+}"
+cassert(f2 == '101')
+const f3 = "{n /* : x */ :b}"
+cassert(f3 == '101')
+
+// Comment openers outside a hole, and inside a string nested in a hole, are text.
+const t1 = "x/* {n} */y"
+cassert(t1 == 'x/* 5 */y')
+const t2 = "{"a" ++ "//2"}"
+cassert(t2 == 'a//2')
+const t3 = "{"a" ++ "/*"} // {n}"
+cassert(t3 == 'a/* // 5')

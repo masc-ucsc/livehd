@@ -59,4 +59,17 @@ void compile_cache_store_graphs(Options& opts, Result& res, const Eprp_var& var,
 // a shared emit lg: dir legitimately accumulates them across compiles.
 void compile_cache_prune_graphs(const Eprp_var& var, const Result& res, const std::string& lib_path);
 
+// The graph library's ownership record (`<lib_path>/lhd_owners.json`): per
+// design (its seed files and inputs), the modules it held live at its last save
+// into that library and its roots among them. Load (after the parse filled
+// compile_cache_prior_units) makes every recorded module a prior unit and every
+// other design's roots res.lg_foreign_claims, which the prune never deletes
+// (nor anything a surviving module instantiates). Save writes the
+// library and this design's record together, so a compile that fails in a later
+// emit still leaves the record matching what the library holds, and drops the
+// records another spelling of this design or a vanished design left. With no
+// design loaded (res.lg_owner_design empty) save is a plain library save.
+void lg_owners_load(const Options& opts, Result& res, const std::string& lib_path);
+void lg_owners_save(const Result& res, const Eprp_var& var, const std::string& lib_path);
+
 }  // namespace lhd

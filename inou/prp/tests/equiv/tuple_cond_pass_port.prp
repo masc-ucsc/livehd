@@ -1,0 +1,40 @@
+/*
+:name: tuple_cond_pass_port
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// A runtime tuple VALUE rewritten whole under control flow (equiv/
+// tuple_value_cond) is still ONE value: it can be passed whole to a
+// tuple-typed comb input and iterated. After the `if` its binding also kept
+// the whole write's scalar carrier as a slot "0", so the value looked like a
+// three-field tuple: `h(t=d)` failed with "unknown argument `t`" (no `t.0`
+// leaf) and `for f in d` read an unresolved loop variable.
+//   p -- `if` arm rewrites the literal
+//   q -- if-expression over two tuple literals
+//   r -- multi-output comb result rewritten under `if`, passed to a template
+//   k -- `for` over the merged tuple
+comb dec(x:U8) -> (a:U8, b:U8) {
+  a = x ^ 1
+  b = x
+}
+comb h(t:(a:U8, b:U8)) -> (r:U8) { wrap r = t.a + t.b }
+comb g(t) -> (r:U8) { wrap r = t.a - t.b }
+
+pub comb top(x:U8, y:U8, s:Bool) -> (p:U8, q:U8, r:U8, k:U8) {
+  mut d = (mut a=x, mut b=y)
+  if s { d = (mut a=y, mut b=x ^ 3) }
+  p = h(t=d)
+
+  const e = if s { (a=x, b=y) } else { (a=y, b=5) }
+  q = h(t=e)
+
+  mut f = dec(x=x)
+  if s { f = dec(x=y) }
+  r = g(t=f)
+
+  mut acc:U8 = 0
+  for v in d { wrap acc = acc ^ v }
+  k = acc
+}

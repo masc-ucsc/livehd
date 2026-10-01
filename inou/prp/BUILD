@@ -173,7 +173,7 @@ cc_test(
 # `--set sim.unknown_zero=true` == a generated sim.unknown_zero=true build, the
 # per-test metrics + digests of every --result-json row, profiling changes no
 # simulated value and reproduces its counts under a fixed stride, the `--set`
-# key classes, and `set` as a reserved test-parameter name. Hermetic like the
+# key classes, and independence of `+set` from `--set`. Hermetic like the
 # prp-sim targets (runfiles hlop/iassert headers + the host C++ compiler).
 sh_test(
     name = "prp-sim-tune-driver",
@@ -223,6 +223,15 @@ sh_test(
         "//tools:native_sim.py",
         "//lhd",
     ],
+)
+
+# Nested block comments / `x` == x where the fixture runner cannot look: the
+# incremental cache fingerprint, the parser-depth guard, and canonical
+# test/formal block names and selectors (no C++ build: --list-tests only).
+sh_test(
+    name = "prp-comment-backtick-smoke",
+    srcs = ["tests/comment_backtick_smoke.sh"],
+    data = ["//lhd"],
 )
 
 # Fast R5 regression: the ordinary pyrope glob above catches the pre-fix tolg
@@ -295,7 +304,10 @@ sh_test(
             "//inou/prp:tests/pyrope_test.py",
             "//inou/prp:tests/fixme/%s.prp" % base,
             "//lhd",
-        ],
+        ] + glob(
+            ["tests/fixme/%s.v" % base],  # an `:type: equiv` tracker's golden
+            allow_empty = True,
+        ),
         tags = ["fixme"],
     )
     for base in [
@@ -323,7 +335,10 @@ sh_test(
 # imports. Each test names its inputs via the `:files:` header; every .prp in
 # tests/imports/ is bundled into data so the header's repo-relative paths
 # resolve at runtime. A `lib_*.prp` is an imported dependency only (no
-# standalone target — it is meaningful only as another unit's import).
+# standalone target — it is meaningful only as another unit's import). A
+# `:ln_files:` header compiles those units into an `ln:` dir first and hands the
+# fixture that dir instead (the two-invocation flow: a concrete mod/pipe comes
+# back pre-elaborated), see prplib.py prebuild_ln_files.
 [
     sh_test(
         name = "prp-import-%s" % prp_file.split("/")[-1].split(".")[0],
@@ -429,15 +444,32 @@ cc_direct_headers(
 # high window reading earlier latches' `_din`). Kept as an empty list so the
 # next known-failing fixture has a place to land.
 _SIM_FIXME = [
-    # REFUSAL, found 2026-08-06 by differential fuzzing against Icarus. A clock
-    # gate folds or is refused according to the NAME of the port carrying the
-    # clock: `clk`/`clock`/`clk_i`/`clk2` fold, `gclk`/`gin`/`myclk`/`ck`/`clkin`
-    # are refused. The fixture instantiates two children with BYTE-IDENTICAL
-    # bodies, both handed the parent's own reference clock, differing only in
-    # port spelling. In-design controls prove a non-blessed name is fine when
-    # used DIRECTLY as a clock (only gating one is refused) and that the same
-    # gate body on a `clk`-named port folds.
-    "gate_on_named_clock_port",
+    # gate_on_named_clock_port was PROMOTED out of this list (2026-09-30): its
+    # gates are the Clock_cell `Clock(clock_pin=, enable=)` now, which folds
+    # whatever the clock port is called.
+    #
+    # PENDING a user decision (clock lane, 2026-09-30). These fixtures use the
+    # clock LEVEL as data -- a latch transparent while `clk` is high/low
+    # (`if !clk { l = d }`, the L1/L2 buffers, the ICG preview latch), an
+    # inverted gated clock -- or a second clock the testbench drives as a Bool
+    # waveform (`acc.clkb = clock == 2`). Under the `Clock` type (qa.md
+    # Appendix 6: a Clock only drives clock pins, a Clock_cell or a Clock port;
+    # no clock-as-data; no derived clocks) neither is expressible in Pyrope,
+    # and a clock_pin naming a Bool is an error. Whether a latch may be gated
+    # by a Clock, and how a test drives a second Clock (ruling 57, lane
+    # sim-multiclock), is open; the sim machinery they cover still serves
+    # Verilog-origin designs.
+    "chained_clock_gates_mixed_phase",
+    "flop_feeds_transparent_high_latch",
+    "flop_sim_negedge_sole_clock",
+    "flop_sim_peek_secondary",
+    "flop_sim_secondary_negedge",
+    "latch_gated_feedback",
+    "latch_sim_clockgate_high",
+    "latch_sim_l1_buffer",
+    "latch_sim_nonref_clock_window",
+    "latch_sim_split_child_phase",
+    "multiclock_two_domain",
 ]
 
 [
@@ -505,6 +537,12 @@ _SIM_FIXME = [
 # fired = the driven trace re-fires the assert; no-refire = the loud
 # free-initial-state warning). The replay compiles a sim driver, hence the
 # sim_runtime_hdrs data dep. Distinct `prp-verify-` prefix.
+# PENDING the clock-phase latch decision (see _SIM_FIXME): a latch transparent
+# while `clk` is low reads the Clock as data.
+_VERIFY_FIXME = [
+    "latch_negedge_enable",
+]
+
 [
     sh_test(
         name = "prp-verify-%s" % prp_file.split("/")[-1].split(".")[0],
@@ -521,6 +559,7 @@ _SIM_FIXME = [
             "//inou/prp:sim_runtime_hdrs",
             "//lhd",
         ],
+        tags = ["fixme"] if prp_file.split("/")[-1].split(".")[0] in _VERIFY_FIXME else [],
     )
     for prp_file in glob(["tests/verify/*.prp"])
 ]
@@ -600,6 +639,17 @@ _PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
 # an inconclusive or spent-budget result is tolerated (yosys' SAT does not
 # scale past small combinational logic). See tests/equiv/README.md,
 # "Two engines, one pair", and `:yosys_lec:` / `:yosys_lec_timeout:`.
+#
+# An equiv pair whose `:type:` also carries `simulation` runs its own `test`
+# block (matched_filter's directed pulse-compression check). Listed here, its
+# prp-equiv-* targets run only the equivalence (`--mode equiv`) and
+# prp-sim-equiv-<stem> below runs the simulation, so no target pays for both
+# (matched_filter: ~2.5 s of sim host build next to ~1.5 s of lec + lgcheck),
+# and the -bitfuzz twin never reruns a simulation it does not change.
+_EQUIV_SIM = [
+    "matched_filter",
+]
+
 [
     sh_test(
         name = "prp-equiv-%s%s" % (
@@ -610,16 +660,18 @@ _PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
         args = [
             "-i",
             "$(location //inou/prp:%s)" % prp_file,
-        ] + (["--bitfuzz"] if suffix else []),
+        ] + (["--bitfuzz"] if suffix else []) + (
+            ["--mode", "equiv"] if prp_file.split("/")[-1].split(".")[0] in _EQUIV_SIM else []
+        ),
         data = [
             "//inou/prp:tests/prplib.py",
             "//inou/prp:tests/lec.py",
-            # An equiv fixture may also carry `simulation` in its `:type:`
-            # (matched_filter does), and prplib then imports prpsim. Without it
-            # here the module is only found by leaking through the runfiles
-            # symlink into the source tree -- it is outside the action key, so
-            # editing prpsim.py leaves these targets falsely (cached) PASSED,
-            # and it is simply absent under a stricter sandbox.
+            # An equiv fixture may also carry `simulation` in its `:type:`, and
+            # prplib then imports prpsim. A pair on _EQUIV_SIM never gets there
+            # (`--mode equiv`), but one missing from that list still would:
+            # without the module here it is only found by leaking through the
+            # runfiles symlink into the source tree -- outside the action key,
+            # so editing prpsim.py would leave the target falsely (cached) PASSED.
             "//inou/prp:tests/prpsim.py",
             "//inou/prp:tests/pyrope_test.py",
             "//inou/prp:%s" % prp_file,
@@ -694,13 +746,13 @@ _PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
             # Phase-aware default LEC handles the promoted phase_* pairs.
             # ...and the five LEC-REFUTED trackers: these round-trip fine, so
             # the failure is a SILENT MISCOMPILE the miter catches.
-            # divided_clock_decl_order has TWO clock domains (a register clocked
-            # by another register's Q), which yosys' miter cannot decide -- the
-            # bounded check does not run to completion and the pair is
-            # INCONCLUSIVE, not refuted. What it regresses is the WRITER's
-            # declaration ordering, so its coverage lives in the round-trip
-            # combined prp-v2prp2v direction, which does run.
-            "tests/equiv/divided_clock_decl_order.prp",
+            # divided_clock_decl_order MOVED to tests/errors/ (2026-09-30):
+            # ruling 81 makes a register used as a clock a derived clock, an
+            # error in Pyrope and in the Verilog reader.
+            # bit_selected_clocks{,_1}: PENDING (clock lane, 2026-09-30) -- see
+            # the fixme list below.
+            "tests/equiv/bit_selected_clocks.prp",
+            "tests/equiv/bit_selected_clocks_1.prp",
             # comb_array_const_index_read is the same shape of exclusion: it is
             # a MEMORY design, and lgcheck's bounded miter does not run to
             # completion on it (INCONCLUSIVE, not refuted). What it regresses --
@@ -724,6 +776,30 @@ _PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
         "",
         "-bitfuzz",
     ]
+]
+
+# The simulation leg of each _EQUIV_SIM pair (see above).
+[
+    sh_test(
+        name = "prp-sim-equiv-%s" % stem,
+        srcs = ["tests/pyrope_test.py"],
+        args = [
+            "-i",
+            "$(location //inou/prp:tests/equiv/%s.prp)" % stem,
+            "--mode",
+            "simulation",
+        ],
+        data = [
+            "//inou/prp:tests/lec.py",
+            "//inou/prp:tests/prplib.py",
+            "//inou/prp:tests/prpsim.py",
+            "//inou/prp:tests/pyrope_test.py",
+            "//inou/prp:tests/equiv/%s.prp" % stem,
+            "//inou/prp:sim_runtime_hdrs",
+            "//lhd",
+        ],
+    )
+    for stem in _EQUIV_SIM
 ]
 
 # The guard on that guard: the yosys oracle TOLERATES every verdict but a
@@ -783,21 +859,30 @@ _STATEMATCH_COMB = [
     "assign_pattern",
     "backtick_cond_lane_write",
     "bit_sel_sext",
+    "bitnot_alias_typed",
+    "bitnot_dyn_slice",
     "bitrange_dyn",
     "bitrange_dyn_narrow",
+    "bitrange_one_bit",
     "bitrange_open",
     "bitsel_dyn",
     "bitsel_idx",
+    "bitset_chain_typed_unknown",
     "bitset_gap",
     "bitset_imm",
     "bitset_mut",
     "bitset_nil",
+    "bitset_runtime_index_twice",
     "bounded_while",
     "bounded_while_guard",
+    "capture_fold_const",
     "clz_nest",
     "codeblock_expr",
+    "comb_default_call",
+    "comb_named_tuple_out",
     "comb_print",
     "comb_single_out_op",
+    "comb_tuple_out_branch",
     "comptime_signed_array",
     "concat_tuple_lanes",
     "cond_modified_read",
@@ -808,19 +893,28 @@ _STATEMATCH_COMB = [
     "const_bit_select",
     "const_nil_cond_bind",
     "disabled_loop",
+    "dyn_bit_write_var",
     "dyn_tuple_idxexpr",
     "dyn_tuple_mixed",
     "dyn_tuple_mut_ro",
     "dyn_tuple_pair",
     "dyn_tuple_sel",
     "enum_expression_seed",
+    "file_scope_comptime_attr_capture",
     "folded_rotate",
     "func_ret_reused_in_loop",
     "gen_type_cast",
+    "generic_arg_postfix",
+    "generic_array_xfill_elem",
+    "generic_default_postfix",
+    "generic_default_type_shapes",
     "generic_input_bundle",
     "generic_interface_width",
+    "generic_loop_port_width",
     "generic_mod",
     "generic_top_default",
+    "generic_width_generic_arg",
+    "generic_width_tuple_field",
     "hier_value",
     "hotmux_match",
     "hotmux_match_partial",
@@ -828,6 +922,7 @@ _STATEMATCH_COMB = [
     "if_expr_rhs",
     "implies_cond",
     "implies_ops",
+    "imported_alias_port_width",
     "imported_bool_cast",
     "in_named_values",
     "inline_const_default",
@@ -847,6 +942,8 @@ _STATEMATCH_COMB = [
     "loop_invariant_version",
     "loop_rca_flat",
     "loop_reduce_or",
+    "loop_ref_arg_write",
+    "loop_ring_own_carry",
     "loop_runtime_break",
     "loop_runtime_break_nested",
     "loop_runtime_continue",
@@ -862,9 +959,19 @@ _STATEMATCH_COMB = [
     "mod_varargs_csa",
     "multi_out_comb",
     "multi_output_one_var",
+    "named_tuple_nested_type",
+    "named_tuple_port",
+    "named_tuple_port_import",
     "neg_const_fold_sum",
+    "nested_comb_comptime_capture",
+    "nested_comb_generic_capture",
+    "nested_comb_in_comb_capture",
+    "nested_comb_plain_const_capture",
     "nested_generic",
     "nested_generic_width",
+    "nested_lambda_file_const",
+    "output_port_bitset",
+    "output_tuple_leaf_bitset",
     "overload_dispatch",
     "overload_return_dispatch",
     "packed_assign",
@@ -872,6 +979,7 @@ _STATEMATCH_COMB = [
     "packed_field_partial_default",
     "packed_variable_modifiers",
     "partsel_oob_ascending",
+    "port_named_like_module",
     "range_step_value",
     "ready_signal_chain",
     "ready_signal_chain_1",
@@ -905,6 +1013,7 @@ _STATEMATCH_COMB = [
     "shift_nested_sra",
     "shift_sra_unsigned",
     "short_circuit",
+    "signed_bitset_readback",
     "signed_bitwise_mux_arm",
     "signed_divrem_mixed",
     "signed_inline_arithmetic",
@@ -922,6 +1031,7 @@ _STATEMATCH_COMB = [
     "sim_prp_packed_selfref",
     "sim_sub_nested_comb_feedback",
     "single_bit_arith",
+    "spec_types_cast_runtime_zext",
     "splice_merge",
     "split_assign_bits_width",
     "sra_const_range",
@@ -943,11 +1053,18 @@ _STATEMATCH_COMB = [
     "tup_port_comb",
     "tup_port_mod",
     "tup_port_nested",
+    "tuple_cond_pass_port",
+    "tuple_field_bits",
+    "tuple_field_cast",
     "tuple_field_instance_collision",
     "tuple_in_port",
     "tuple_out_port",
+    "tuple_value_cond",
     "type_alias_array",
     "type_bound_generic_port",
+    "typed_tuple_const_init",
+    "typed_tuple_init_read",
+    "uncertain_whole_tuple_write",
     "unsigned_slice_zext",
     "untyped_mux_cond",
     "varargs_add",
@@ -958,16 +1075,20 @@ _STATEMATCH_COMB = [
     "wire_field_const_forward",
     "wire_lane_written_later",
     "wire_typed",
+    "wrap_bitrange_comptime_count",
+    "wrap_bitrange_dest",
     "writer_bad_char",
     "writer_undefined_mux",
+    "xor_neg_one_unsigned_ctx",
 ]
 
 _STATEMATCH_FIXME = [
+    "bit_selected_clocks",  # PENDING the clock lane's ICG/bit-clock mapping (see the equiv fixme list)
+    "bit_selected_clocks_1",  # same
     "dual_async_set_reset",  # `lhd compile` refuses the .v (attr-conflict: two async rungs on one Q slot)
     "mem_const_idx",  # mems: only 0/1 paired
     "mem_fwd_selfwrite",  # ref memory vs golden two-flop representation
     "mem_pending_sync_init",  # ref memory vs golden output flop representation
-    "phase_hier_latch_neg",  # regs: only 0/1 paired
     "phase_two_clock_ports",  # regs: only 0/2 paired
     "struct_top_port",  # regs: only 0/1 paired
     "type_alias_generic_attr",  # regs: only 0/1 paired -- the reg lives in the GENERIC CHILD instance
@@ -1093,6 +1214,15 @@ _STATEMATCH_FIXME = [
         "selfref_concat_assign",  # self-referential whole-vector assign never driven
         # ── corpus-mined category tracker (2026-08-02 chimera sweep) ─────────
         "partsel_oob_ascending",  # out-of-range select on a `[0:N]` vector: negative shift, not X
+        # PENDING (clock lane, 2026-09-30): the Pyrope side clocks flops by
+        # `(clk & gate0) & gate` over `U1` data, which the `Clock` type rejects
+        # (a clock_pin names a Clock). The Pyrope form of these Verilog idioms
+        # -- a bit of a clock bus as a Clock port, the gate as
+        # `Clock(clock_pin=, enable=)` -- is ruling 81's unimplemented "map
+        # what fits" half, and a raw AND gate is not an ICG (a Clock_cell
+        # latches its enable), so the goldens change with it.
+        "bit_selected_clocks",
+        "bit_selected_clocks_1",
         # The three formal phase-scheduler trackers (phase_latch_flop_edges,
         # phase_hier_latch_neg, phase_clock_gate_chain) were PROMOTED out of
         # this list (2f-lec / 2f-latch M10): the encoder now schedules latches
@@ -1188,6 +1318,24 @@ _V2PRP2V_NATIVE_FIXME = [
     # 2026-08-02 chimera sweep: the golden does not READ (out-of-range select on
     # an ascending vector lowers to a negative shift), so neither leg can run.
     "partsel_oob_ascending",
+    # PENDING (clock lane, 2026-09-30). The emitted Pyrope does not recompile
+    # under the `Clock` type: a clock_pin must name a Clock, and a Clock is not
+    # data. Ruling 81's "map what fits" half -- the writer (and reader) turning
+    # a Verilog ICG (`clk & en`, a latch + AND gate cell) into
+    # `Clock(clock_pin=clk, enable=en)` and a bit-selected bus clock into a
+    # Clock port -- is not implemented yet:
+    "bit_selected_clocks",
+    "bit_selected_clocks_1",
+    "conditional_state_call",
+    "mclk_derived",
+    "phase_clock_gate_chain",
+    # ...an active-low (`clk | ~en`) gate cell (a Clock_cell with `invert`),
+    # which `Clock(clock_pin=, enable=)` cannot spell yet:
+    "phase_clock_gate_invert",
+    # ...and clock-phase latches (`always_latch if (!clk)`) read the Clock as
+    # data, PENDING the user decision noted at _SIM_FIXME:
+    "phase_hier_latch_neg",
+    "phase_latch_flop_edges",
 ]
 
 # Two goldens cannot be checked against their original Verilog: both available
@@ -1536,6 +1684,20 @@ _V2PRP2V_VERILOG_FIXME = [
         "mod_delay3",  # @[N] landing-cycle on a mod output
         "reg_out_feedforward",  # feedforward reg output
         "concat_array_lane",  # runtime array `concat` lane -> per-entry shift/or
+        "bitnot_unsigned",  # ruling 26 typed `~`: the writer spells each flip width
+        "verilog_bitnot_context",  # Verilog context-widened `~` through a Pyrope re-emit
+        "bitnot_roundtrip",  # untyped names, template inputs, runtime-position selects
+        "comb_default_call",  # ruling 39: a comb input default computed through a call
+        "bitnot_alias_typed",  # rulings 38/44: a `const` alias of a typed value keeps its type for `~`
+        "mem_partial_write_ordering_old",  # a memory partial write re-emits as `mem[i]#[..] = v`
+        "mem_partial_write_mixed",  # ... at a computed index, re-lowered once per read and store
+        "mem_partial_write_update",  # ... next to a reset value and a whole-array clear
+        "mem_bulk_vs_entry_order",  # whole-array stores keep their program order against entry writes
+        "mem_dynamic_splice_after_write",  # a runtime-position `mem[i]#[b] = v` re-emits as one
+        "dyn_bit_write_var",  # ... and so does a runtime-position `w#[b] = v` into a variable
+        "mem_replay_crossref",  # replayed same-cycle reads feeding later writes of other memories
+        "mem_replay_whole_copy",  # a whole-array copy of a replayed (and of an "old") memory
+        "mem_dynamic_splice_bounds",  # runtime part selects clipped to the word on both sides
     ]
 ]
 

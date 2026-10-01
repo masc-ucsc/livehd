@@ -1,29 +1,28 @@
 /*
 :name: loop_register_partial
 :type: simulation
-:expect_instances: u_loop_0=1 *=2
+:expect_instances: u_loop_0=1 *=1
 */
 // The carry begins at pending D (including a preceding write), while explicit
 // reads inside every ordinal see Q. A following partial write retains the
 // loop's updates. These distinguish all three values from an ordinary mut.
-// The other Sub is the generated bounds check on the indexed partial write.
-mod loop_register_partial(reset:bool, clock:bool, x:u4) -> (y:u16@[0]) {
-  reg word:u16 = 0x1234
-  word#[0 ..+ 8] = 0xEE
+// The loop is the only Sub: the indexed partial write's window has a constant
+// width (`..+4`), so it needs no runtime check that its range is ascending.
+mod loop_register_partial(reset:Reset, clock:Clock, x:U4) -> (y:U16@[0]) {
+  reg word:U16 = 0x1234
+  word#[0..+8] = 0xEE
   for i in 0..<2 {
-    word#[(8+i*4) ..+ 4] = (word#[0 ..+ 4] + x + i) & 15
+    word#[(8+i*4)..+4] = (word#[0..+4] + x + i) & 15
   }
-  word#[4 ..+ 4] = 0xA
+  word#[4..+4] = 0xA
   y = word
 }
 
 test loop_register_partial.current_and_pending {
   mut dut = loop_register_partial
-  dut.reset = true
-  dut.clock = false
+  dut.reset = true            // two edges in reset (a test never pokes a Clock)
   dut.x = 1
   step
-  dut.clock = true
   step
   dut.reset = false
   tick 2 {

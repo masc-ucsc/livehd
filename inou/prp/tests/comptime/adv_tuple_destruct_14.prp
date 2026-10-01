@@ -15,11 +15,13 @@ comb next_value(x) -> (x) {
   x = x + 1
 }
 
-const r = next_value(x = 41)
-cassert(r == 42)
-cassert(r.x == 42)
+const rv = next_value(x = 41)
+cassert(rv == 42)
+cassert(rv.x == 42)
 
-// A non-shared-name control in the same file (this part is correct).
+// A non-shared-name control in the same file (this part is correct). The
+// result above is not named `r`: a file-scope `const r` would be visible in
+// `inc`, and its output `r` would shadow it (user ruling 2026-09-28 (35)).
 comb inc(a) -> (r) {
   r = a + 1
 }

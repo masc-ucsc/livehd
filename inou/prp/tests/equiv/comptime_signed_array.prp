@@ -10,12 +10,12 @@
 // elements; the golden states that width directly.
 comptime const W = 4
 
-pub comb top(x:s4) -> (from_range:s4, from_bits:s4) {
-  mut range_values:[2]signed(
+pub comb top(x:S4) -> (from_range:S4, from_bits:S4) {
+  mut range_values:[2]Signed(
     min=-(1 << (W - 1)),
     max=(1 << (W - 1)) - 1,
   ) = 0
-  mut bits_values:[2]signed(bits=W) = 0
+  mut bits_values:[2]Signed(bits=W) = 0
 
   range_values[0] = x
   bits_values[1]  = x

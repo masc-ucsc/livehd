@@ -5,7 +5,7 @@
 */
 // `ref` is comb-only; a `pipe` boundary must reject a `ref` parameter.
 // (:error: regex is a placeholder — align to the real diagnostic.)
-pipe[1] p(ref a:u8) -> (o:u8) {
+pipe[1] p(ref a:U8) -> (o:U8) {
   a += 1
   o = a
 }

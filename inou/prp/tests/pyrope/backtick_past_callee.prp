@@ -1,0 +1,11 @@
+/*
+:name: backtick_past_callee
+:type: compile
+*/
+
+// `x` == x when x has only identifier characters: an escaped `past` callee
+// with a `[N]` selector is still the `past[N]` temporal builtin.
+pub mod backtick_past_callee(a:U8) -> (o:U8@[1], p:U8@[2]) {
+  o = `past`[1](a)
+  p = past[2](a)
+}

@@ -32,7 +32,7 @@ struct Entry {
                        // walks the buffer AND its imported siblings, so every
                        // entry must say which file its span lives in
   std::string name;    // source-level lexical name (SSA suffix stripped)
-  std::string render;  // hover text, e.g. "a : u8(bw_min=0, bw_max=15)"
+  std::string render;  // hover text, e.g. "a : U8(bw_min=0, bw_max=15)"
 };
 
 class Index {

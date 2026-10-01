@@ -1,0 +1,20 @@
+/*
+:name: spec_memory_enum_index_int
+:type: error
+:error: enum
+*/
+
+// SPEC (docs 08-memories.md, Array index): "mut x2:[X]U3 = nil / x2[X.t1] = 0 /
+// x2[X.t2] = 1 / x2[0]              // error: only enum index"
+// Rule encoded here: an enum-indexed array rejects a plain integer index.
+
+enum X = (
+  t1 = 0,
+  t2,
+  t3
+)
+
+mut x2:[X]U3 = nil
+x2[X.t1] = 0
+x2[X.t2] = 1
+const v = x2[0]   // locate_error_here

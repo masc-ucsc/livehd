@@ -13,14 +13,14 @@
 // binding per field (blocked on the tolg/cgen wire-leaf feedback lowering —
 // see the KNOWN OPEN comment in slang_structure.cpp lower_instance).
 // Semantically: r = {a==0, ~lzc3(a)} where lzc3 is the 4-case priority above.
-pub comb top(a:u8) -> (r:u4) {
-  mut d:u3 = 0
-  mut z:u1 = 0
-  if a & 0x80 {
+pub comb top(a:U8) -> (r:U4) {
+  mut d:U3 = 0
+  mut z:U1 = 0
+  if (a & 0x80) != 0 {
     d = 0
-  } elif a & 0x40 {
+  } elif (a & 0x40) != 0 {
     d = 1
-  } elif a & 0x20 {
+  } elif (a & 0x20) != 0 {
     d = 2
   } else {
     d = 7

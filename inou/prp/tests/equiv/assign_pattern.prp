@@ -15,7 +15,7 @@
 //   res_vld = |data
 //   res_lo  = apat_split out[0] = data[1:0]
 //   res_hi  = apat_split out[1] = data[3:2]
-comb apat_top(data:u4) -> (res_idx:u2, res_vld:u1, res_lo:u2, res_hi:u2) {
+comb apat_top(data:U4) -> (res_idx:U2, res_vld:U1, res_lo:U2, res_hi:U2) {
   // Priority encoder (LSB first), default 3 — expressed arithmetically rather
   // than as a nested if/elif chain of constants, which would trip tolg's
   // lower_if merged-mux width bug (a 1-bit mux for a 0..3 value; see
@@ -26,8 +26,8 @@ comb apat_top(data:u4) -> (res_idx:u2, res_vld:u1, res_lo:u2, res_hi:u2) {
   mut d2 = data#[2]
   mut b1 = (1 - d0) * (1 - d1)
   mut b0 = ((1 - d0) * d1) + ((1 - d0) * (1 - d1) * (1 - d2))
-  res_idx = (b1 * 2) + b0
-  res_vld = data != 0
+  wrap res_idx = (b1 * 2) + b0
+  res_vld = U1(data != 0)
   res_lo = data#[0..=1]
   res_hi = data#[2..=3]
 }

@@ -54,17 +54,17 @@
 // GOLDENS: hand-written Icarus twin (design retyped from this source, never
 // LiveHD's emitter), end-of-period sampling after both edges.
 
-mod ncell::[timecheck=false](a:u8, b:u8) -> (n1:u16@[], n2:u16@[]) {
+mod ncell::[timecheck=false](a:U8, b:U8) -> (n1:U16@[], n2:U16@[]) {
   n1 = a + 1                    // cone {a}
-  reg nf:u8:[posclk=false] = 0  // NEGEDGE state, cone {b}
+  reg nf:U8:[posclk=false] = 0  // NEGEDGE state, cone {b}
   nf = b
   n2 = nf
 }
 
-pub mod negring::[timecheck=false](x:u8) -> (o1:u16@[], o2:u16@[], c2:u16@[],
-                                             pin:u16@[], psub:u16@[]) {
+pub mod negring::[timecheck=false](x:U8) -> (o1:U16@[], o2:U16@[], c2:U16@[],
+                                             pin:U16@[], psub:U16@[]) {
   // THE RING INSTANCE: the callee's negedge din is the caller's back edge.
-  wire fb:u8 = nil
+  wire fb:U8 = nil
   mut ir = ncell(a=x, b=fb)
   fb = (ir.n1 + 3) & 0xFF
   o1 = ir.n1
@@ -72,18 +72,18 @@ pub mod negring::[timecheck=false](x:u8) -> (o1:u16@[], o2:u16@[], c2:u16@[],
 
   // CONTROL -- same definition, same value on `b`, NO ring. `nb` is `fb`
   // recomputed from `x` directly, so `c2` must equal `o2` on every cycle.
-  wire nb:u8 = nil
+  wire nb:U8 = nil
   nb = (x + 4) & 0xFF
   mut ic = ncell(a=x, b=nb)
   c2 = ic.n2
 
   // CONTROL -- a parent-side negedge flop fed by a PRIMARY INPUT.
-  reg pf1:u16:[posclk=false] = 0
+  reg pf1:U16:[posclk=false] = 0
   pf1 = x + 1
   pin = pf1
 
   // BUG -- the same parent-side negedge flop fed by the INSTANCE instead.
-  reg pf2:u16:[posclk=false] = 0
+  reg pf2:U16:[posclk=false] = 0
   pf2  = ir.n1
   psub = pf2
 }
@@ -98,11 +98,11 @@ test negring.callee_negedge_samples_the_ring_this_period {
   mut bad_psub  = 0
   mut bad_agree = 0
   tick 6 {
-    mut xv:u8 = 10 + (clock * 5)
+    mut xv:U8 = 10 + (clock * 5)
     acc.x = xv
     step
-    mut g_n1:u16 = xv + 1
-    mut g_fb:u16 = (g_n1 + 3) & 0xFF
+    mut g_n1:U16 = xv + 1
+    mut g_fb:U16 = (g_n1 + 3) & 0xFF
 
     seen = seen + 1
     if acc.o1 != g_n1 {

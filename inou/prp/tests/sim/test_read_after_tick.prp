@@ -1,0 +1,36 @@
+/*
+:name: test_read_after_tick
+:type: simulation
+*/
+// An instance handle's output is readable ANYWHERE in the test block, not
+// only inside a `tick` body: after `tick 2 { step }` the design has stepped
+// twice, and `d.o` reads what the last step settled. Before, upass modelled
+// no instance handle: the two pokes made `d` look like a 2-field tuple
+// (`en`, `a`), so the read after the tick failed "unknown field `o` on tuple
+// `d`" (inside a tick the body was emitted verbatim, which hid it).
+
+mod dut(en:Bool, a:U8) -> (o:U8@[0], seen:Bool@[0]) {
+  reg r:U8 = 0
+  reg s:Bool = false
+  o    = r      // the state before this cycle's update
+  seen = s
+  if en {
+    r = a
+    s = true
+  }
+}
+
+test dut.read_after_tick {
+  mut d = dut
+  d.en = true
+  d.a  = 5
+  tick 2 { step }
+  assert(d.o == 5)
+  assert(d.seen)
+  d.en = false
+  d.a  = 9
+  tick 1 { step }
+  const held = d.o      // `en` low: the register holds
+  assert(held == 5)
+  assert(U1(d.seen) + held == 6)
+}

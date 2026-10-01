@@ -1,0 +1,12 @@
+/*
+:name: spec_lexical_cont_has
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// docs 02-basics "Newlines and spaces": "A line that starts with `and`, `or`,
+// `implies`, `in`, `has`, `does`, `equals`, or `case` continues the previous
+// statement." (`has` is not covered by comptime/lead_word_op_cont.prp.)
+const ok = (const x=1, const y=2)
+         has "x"
+cassert(ok)

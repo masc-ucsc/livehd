@@ -155,6 +155,12 @@ public:
   // array or its concrete positional shape is unavailable.
   bool scatter_positional_array(std::string_view name, const Dlop& packed);
 
+  // Provenance of a plain copy `lhs = rhs` (Symbol_table::tget_origin).
+  void note_copy_origin(std::string_view lhs, std::string_view rhs, bool rhs_table_backed);
+  void drop_copy_origin(std::string_view lhs);
+  // `name`, or its SSA base, when it carries a declared type of its own.
+  [[nodiscard]] std::string own_declared_type_name(std::string_view name) const;
+
   static void set_function_registry(const std::vector<std::shared_ptr<Lnast>>& lnasts);
   static void clear_function_registry() noexcept { function_registry.clear(); }
 
@@ -802,7 +808,9 @@ protected:
   // to coerce a scalar into a single-positional bundle for the structural
   // (tuple) path. `bundle` is set only for real tuples.
   struct Does_operand {
-    enum class Kind : uint8_t { integer, boolean, string, tuple, nil, unknown };
+    // `clock`/`reset`: the `Clock`/`Reset` types (distinct basic types, docs
+    // 07-typesystem: `Clock does Bool` is false).
+    enum class Kind : uint8_t { integer, boolean, string, tuple, nil, unknown, clock, reset };
     Kind                          kind    = Kind::unknown;
     bool                          max_inf = false;  // envelope max is +∞
     bool                          min_inf = false;  // envelope min is −∞
@@ -854,6 +862,9 @@ protected:
 
   std::optional<Dlop>                     resolve_current_scalar() const;
   std::optional<std::vector<Call_actual>> collect_call_actuals();
+  // `std.clog2(x)`: fold Verilog `$clog2` of a positive comptime integer into
+  // `dst`; x <= 0 or a runtime x is a compile error.
+  void fold_std_clog2(std::string_view dst, const std::optional<std::vector<Call_actual>>& actuals);
 
   // Direct-cell call dispatch: `__sum(a, b)`, `__hotmux(c0, v0, c1, v1, …)`, etc.
   // Maps cell names (without the `__` prefix) to Ntype_op kernels and folds
@@ -861,6 +872,11 @@ protected:
   // dst was assigned a result; false when the fname is not a recognized
   // cell or arguments aren't comptime.
   bool try_eval_cell_call(std::string_view dst, std::string_view fname, const std::vector<Call_actual>& actuals);
+  // `__op(...)` basic gates are ordinary calls (qa.md Appendix §8): every
+  // argument is named with the cell's LGraph pin name unless a call naming
+  // exception applies (a single-pin gate, a bare variable spelling a pin).
+  // Emits the diagnostic and returns true when the call violates that.
+  bool check_gate_call_binding(std::string_view fname, const std::vector<Call_actual>& actuals);
 
   // Unlimited-sink mux / hotmux / lut cells: pins are named (`s`, `p1`, …) or
   // positional, so map each actual onto its sink pid and delegate to the

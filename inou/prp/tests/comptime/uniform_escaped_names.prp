@@ -1,0 +1,19 @@
+/*
+:name: uniform_escaped_names
+:type: comptime
+:verifier_pass: 8
+:verifier_fail: 0
+*/
+const cfg = (const `type`=1, const `IF`=2, const `if`=3, const `foo$bar`=4)
+cassert(cfg.`type` == 1)
+cassert(cfg.`IF` == 2)
+cassert(cfg.`if` == 3)
+cassert(cfg.`foo$bar` == 4)
+comb echo(`in`) -> (`else`) { `else` = `in` }
+cassert(echo(`in`=5) == 5)
+comb add<`TYPE`>(x) -> (r) { r = x + `TYPE` }
+cassert(add<`TYPE`=6>(1) == 7)
+const k = 3
+cassert(k.[`comptime`])
+const methods = (const base=8, comb `TiCk`(self) -> (r) { r = self.base })
+cassert(methods.`TiCk`() == 8)

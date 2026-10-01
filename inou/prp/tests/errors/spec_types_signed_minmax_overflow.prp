@@ -1,0 +1,9 @@
+/*
+:name: spec_types_signed_minmax_overflow
+:type: error
+:error: ^[^|]*does not fit its declared range \[20, 30\][^|]*$
+*/
+// SPEC docs 04-variables "Integer or Signed": "mut d:Signed(min=20, max=30) = nil // only values from 20 to 30
+// (both included)". Rule: 31 overflows the declared range, and the ONE diagnostic reports that range
+// (the `^[^|]*...$` pattern rejects a second, contradictory diagnostic such as "[0, 30]").
+mut d:Signed(min=20, max=30) = 31  // locate_error_here

@@ -1,0 +1,10 @@
+/*
+:name: spec_syntax_lvalue_call
+:type: error
+:error: this cannot be assigned
+*/
+// qa.md Appendix §4: "Assignment targets: names, fields, selectors, bit-selects, and tuple
+// destructuring of names `(a, b) = fcall()` (legal as a STATEMENT). Errors: `f(x) = 3`, ..." (Q20).
+comb f(x) -> (r) { r = x }
+mut x = 1
+f(x) = 3   // locate_error_here

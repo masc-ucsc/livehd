@@ -1,0 +1,15 @@
+/*
+:name: spec_lexical_cont_colon
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// qa.md appendix 3: "A new line starting with ... `:` (type annotation) ...
+// continues the previous statement." (Q3 answer: "Both continue".) docs
+// 02-basics: `mut e` NEWLINE `:U8 = 0xF5` is "same statement: `mut e:U8 = 0xF5`".
+mut e
+  :U8 = 0xF5
+cassert(e == 0xF5)
+mut f
+:U4 = 3
+cassert(f == 3)

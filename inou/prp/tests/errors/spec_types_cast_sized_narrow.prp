@@ -1,0 +1,10 @@
+/*
+:name: spec_types_cast_sized_narrow
+:type: error
+:error: does not fit the `S22` cast range
+*/
+// SPEC docs 07-typesystem "Bitwidth": "the sized `S<N>(x)`/`U<N>(x)` may widen but never drop bits -- a target
+// with fewer bits than `x` is a compile error ..., e.g. `U30(S22(x))` is fine but `S22(U30(x))` is a compile error."
+pub comb spec_types_cast_sized_narrow(x:U30) -> (o:S22) {
+  o = S22(U30(x))  // locate_error_here
+}

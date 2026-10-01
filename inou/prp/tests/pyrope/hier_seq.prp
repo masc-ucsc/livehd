@@ -17,23 +17,23 @@
 // real internal fanout, independent of frontend width/sign wrappers. Registers
 // only store (no narrowing) because runtime wrap/sat has no tolg lowering yet.
 
-mod delayer(din:u8) -> (q:u8@[1]) {
-  reg r:u8 = 0
+mod delayer(din:U8) -> (q:U8@[1]) {
+  reg r:U8 = 0
   q = r
   r = din
 }
 
-mod stage_unit(din:u8, k:u8) -> (y:u8@[2]) {
+mod stage_unit(din:U8, k:U8) -> (y:U8@[2]) {
   const m = din & k
   const n = m ^ k
   stage[1] d1 = delayer(din=m)
   stage[1] d2 = delayer(din=n)
-  reg r:u8 = 0
+  reg r:U8 = 0
   y = r
   r = d1 ^ d2
 }
 
-mod top(din:u8, k1:u8, k2:u8) -> (o:u9@[2]) {
+mod top(din:U8, k1:U8, k2:U8) -> (o:U9@[2]) {
   stage[2] a = stage_unit(din=din, k=k1)
   stage[2] b = stage_unit(din=din, k=k2)
   o = a + b

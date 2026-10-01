@@ -1,0 +1,22 @@
+/*
+:name: generic_default_method
+:type: error
+:error: unknown type or lambda 'ZZ' in a generic default
+:help: declare `ZZ` before its use
+*/
+
+// Ruling 2026-09-28 #24 (clarification): an undeclared name is a direct
+// compile error at the read in every context. A tuple METHOD is hoisted, not
+// streamed, and its signature is lowered inside the tuple literal: an
+// undeclared name in its generic default used to be silent while the generic
+// was unused (and the indirect upass.tolg "unresolved reference 'inl1_ZZ'"
+// once used).
+// User ruling 2026-09-28 (33): the error names what a generic default reads (a
+// type, lambda or comptime const declared earlier), not a variable.
+pub comb generic_default_method(a:U8) -> (o:U8) {
+  const obj = (
+    const v:U8 = 1,
+    comb get<N=ZZ>(self) -> (r:U8) { r = self.v }  // locate_error_here
+  )
+  o = obj.get()
+}

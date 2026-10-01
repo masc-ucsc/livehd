@@ -1,0 +1,34 @@
+/*
+:name: spec_calls_exceptions
+:type: comptime
+:verifier_pass: 7
+:verifier_fail: 0
+*/
+
+// qa.md Appendix §4 / §7 "Positional binding": multi-argument positional calls
+// are errors "unless a naming exception applies (name match, single non-self
+// param, argument whose type is unique among ALL params, self)".
+// docs 06-functions.md "Argument naming" lists the same four exceptions.
+
+// ---- single non-self parameter ----
+comb inc(v) -> (o) { o = v + 1 }
+cassert(inc(3) == 4)
+
+// ---- self + single non-self parameter (06-functions UFCS example) ----
+comb div(self, b) -> (r) { r = self / b }
+cassert((8).div(2) == 4)      // `b` is the single non-self parameter
+cassert(div(8, b=2) == 4)     // direct form: first positional actual -> self
+
+// ---- bare variable whose name matches a parameter (any order) ----
+comb sub(x, y) -> (r) { r = x - y }
+const y = 2
+const x = 7
+cassert(sub(y, x) == 5)
+
+// ---- type-unique among ALL parameters ----
+comb pick(a:Signed, b:String) -> (r:Signed) { r = if b == "neg" { -a } else { a } }
+cassert(pick("neg", 3) == -3)   // "neg" -> b (only String), 3 -> a (only integer)
+cassert(pick(3, "pos") == 3)
+
+// ---- all named, any order ----
+cassert(sub(y=1, x=10) == 9)

@@ -1,0 +1,11 @@
+/*
+:name: spec_types_cast_unsigned_reinterpret
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// SPEC docs 07-typesystem "Bitwidth": "The unsized `Signed(x)`/`Unsigned(x)` keep the bit width unchanged
+// (so `x` must be fully sized and `Signed(Unsigned(x)) == x`)". Rule: Unsigned(S4 -1) == 15.
+const a:S4 = -1
+cassert(Unsigned(a) == 15)
+cassert(Signed(Unsigned(a)) == a)

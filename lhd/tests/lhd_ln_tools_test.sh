@@ -95,8 +95,8 @@ grep -q '"class":"usage"' "$W/e0.json" || fail "tool with no verb must be a usag
 
 # 7. Unit-count mismatch: both unit lists named in the config error.
 cat > "$W/twolam.prp" <<'EOF'
-comb addone(a:u8) -> (z:u9) { z = a + 1 }
-comb xorit(a:u8, b:u8) -> (z:u8) { z = a ^ b }
+comb addone(a:U8) -> (z:U9) { z = a + 1 }
+comb xorit(a:U8, b:U8) -> (z:U8) { z = a ^ b }
 EOF
 "$LHD" tool diff "$W/old.prp" "$W/twolam.prp" --workdir "$W/w7" -q >"$W/e3.json" 2>/dev/null
 grep -q 'unit count mismatch' "$W/e3.json" || fail "tool diff unit mismatch must name the error: $(cat "$W/e3.json")"

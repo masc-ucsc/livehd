@@ -1,0 +1,20 @@
+/*
+:name: divided_clock_decl_order
+:type: error
+:tolg: 1
+:error: register `q` names `dclk` as its clock_pin, but it is data, not a Clock \(there are no derived clocks\)
+*/
+// A register clocked by another register's Q (a divided clock). This was the
+// equiv pair that pinned the writer's declaration order for such a clock
+// (`reg q:[clock_pin=dclk]` above `reg dclk`). Ruling 81 (qa Q26): derived
+// clocks are not supported -- in Pyrope a clock pin names a `Clock`, and a
+// register's Q is data; the Verilog twin is
+// inou/slang/tests/sv/writer_divclk.sv (a derived-clock error).
+pub mod divided_clock_decl_order::[timecheck=false](clk:Clock, d:U1) -> (q:U1@[]) {
+  reg dclk:U1 = 0ub?
+  reg q:U1:[clock_pin=dclk] = 0ub?   // locate_error_here
+  reg cnt:U2 = 0ub?
+  cnt = (cnt + 1)#[0..=1]
+  dclk = (cnt >> 1) & 1
+  q = d
+}

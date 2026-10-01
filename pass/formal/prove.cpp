@@ -269,12 +269,6 @@ std::vector<hhds::Graph*> Prover::descended() const {
   return out;
 }
 
-bool Prover::stateful_cone(const hhds::Pin_class& cond) {
-  bool st = false, unsup = false;
-  cone_info(cond, st, unsup);
-  return st || unsup;
-}
-
 // ---- Demand-driven cone encode: dpin -> Val, memoized; nullopt if unsupported.
 std::optional<Val> Prover::val_of(uint32_t scope, const hhds::Pin_class& dpin) {
   if (dpin.is_invalid()) {
@@ -540,13 +534,14 @@ std::optional<Val> Prover::encode_comb(uint32_t scope, const hhds::Node_class& n
         enc_unsupported_ = true;
         return std::nullopt;
       }
-      int  cw         = 0;
-      bool eff_signed = true;
+      // Integer equality extends each operand by its OWN sign. An unsigned
+      // peer must not turn a negative operand into its positive bit pattern.
+      const bool any_signed = std::any_of(all.begin(), all.end(), [](const auto& v) { return v.is_signed; });
+      int        cw         = 0;
       for (const auto& v : all) {
-        cw         = std::max(cw, v.width);
-        eff_signed = eff_signed && v.is_signed;
+        cw = std::max(cw, v.width + (any_signed && !v.is_signed ? 1 : 0));
       }
-      auto ext = [&](const Val& v) { return lec::fit_to(tm_, Val{v.term, v.width, eff_signed}, cw); };
+      auto ext = [&](const Val& v) { return lec::fit_to(tm_, v, cw); };
       Term acc;
       for (size_t i = 1; i < all.size(); ++i) {
         Term eq = tm_.mkTerm(Kind::EQUAL, {ext(all[0]), ext(all[i])});
@@ -939,6 +934,37 @@ Query_out Prover::is_false(const hhds::Pin_class& cond) {
   int  w      = static_cast<int>(v->term.getSort().getBitVectorSize());
   Term refute = tm_.mkTerm(Kind::DISTINCT, {v->term, bv_const(w, 0)});  // cond != 0 falsifies "always false"
   return solve(refute, n, st || enc_stateful_);
+}
+
+Query_out Prover::truth_when(const hhds::Pin_class& cond, bool truth, const std::vector<std::pair<hhds::Pin_class, bool>>& path) {
+  absl::flat_hash_set<Key> seen;
+  int                      n        = 0;
+  bool                     stateful = false, unsupported = false;
+  cone_walk(0, cond, seen, n, stateful, unsupported);
+  for (const auto& [pin, active] : path) {
+    (void)active;
+    cone_walk(0, pin, seen, n, stateful, unsupported);
+  }
+  work_ += static_cast<uint64_t>(n);
+  if (unsupported || (opts_.cone_max > 0 && n > opts_.cone_max)) {
+    return {Verdict::Unknown, stateful, {}, {}};
+  }
+  enc_unsupported_ = false;
+  enc_stateful_    = false;
+  const auto value = val_of(cond);
+  if (!value || enc_unsupported_) {
+    return {Verdict::Unknown, stateful || enc_stateful_, {}, {}};
+  }
+  Term refute = tm_.mkTerm(truth ? Kind::EQUAL : Kind::DISTINCT, {value->term, bv_const(value->width, 0)});
+  for (const auto& [pin, active] : path) {
+    const auto premise = val_of(pin);
+    if (!premise || enc_unsupported_) {
+      return {Verdict::Unknown, stateful || enc_stateful_, {}, {}};
+    }
+    auto term = tm_.mkTerm(active ? Kind::DISTINCT : Kind::EQUAL, {premise->term, bv_const(premise->width, 0)});
+    refute    = tm_.mkTerm(Kind::AND, {refute, term});
+  }
+  return solve(refute, n, stateful || enc_stateful_);
 }
 
 Query_out Prover::equal(const hhds::Pin_class& a, const hhds::Pin_class& b) {

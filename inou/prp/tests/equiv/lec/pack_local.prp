@@ -2,9 +2,9 @@
 :lec_top: pack_local
 :lec_set: formal.lec.semdiff=none formal.engine=ind
 */
-pub comb pack_local(a:u2) -> (z:u2) {
-  mut io:u4 = 0ub????
-  wire hi:u1
+pub comb pack_local(a:U2) -> (z:U2) {
+  mut io:U4 = 0ub????
+  wire hi:U1
   hi = if ((io >> 2) & 1) != 0 { 1 } else { 0 }
   io = 1 | 1 | (hi << 1) | (a << 2)
   z = io#[0..=1]

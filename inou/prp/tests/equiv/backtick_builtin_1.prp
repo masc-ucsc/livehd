@@ -1,0 +1,17 @@
+/*
+:name: backtick_builtin
+:type: lec
+:lec_top: backtick_builtin
+*/
+// `assume` == assume: the escaped builtin must still lower to an assumption
+// (it used to compare the raw callee text, so `` `assume`(...) `` became a call
+// to an undefined function). With a != 3 assumed, y = a matches the reference;
+// were the assumption dropped, a == 3 would refute. cassert/puts/print ride
+// along: each must be the builtin, not an undefined call.
+pub mod backtick_builtin(a:U4) -> (y:U4@[0]) {
+  `assume`(a != 3)
+  `cassert`(1 == 1)
+  `puts`("backtick puts")
+  `print`("backtick print")
+  y = a
+}

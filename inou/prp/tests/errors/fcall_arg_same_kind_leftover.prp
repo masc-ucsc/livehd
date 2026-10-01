@@ -1,0 +1,17 @@
+/*
+:name: fcall_arg_same_kind_leftover
+:type: error
+:error: must be named|ambiguous|name the argument|argument
+*/
+
+// Calls never bind by position (06-functions.md "Argument naming"). `b` does
+// not name a parameter of `f1`, and `f1` has two u4 parameters, so the type
+// exception cannot pick one: the call must name it. (It once bound b→c
+// because `c` was the only parameter left unset after `a` punned.)
+comb f1(a:U4, c:U4) -> (out:U4) {
+  wrap out = a - c
+}
+
+pub mod top(a:U4, b:U4) -> (o:U4@[0]) {
+  o = f1(a, b) // locate_error_here
+}

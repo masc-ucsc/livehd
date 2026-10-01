@@ -1,0 +1,11 @@
+/*
+:name: single_tuple_argument
+:type: lec
+:lec_top: top
+*/
+comb sum(x) -> (total) { total = 0; for a in x { total += a } }
+pub comb top(a:U8,b:U8,c:U8) -> (x:U10,y:U10,z:U10) {
+  x = sum(x=(a,b,c))
+  y = sum((a,b,c))
+  z = sum(a,b,c)
+}

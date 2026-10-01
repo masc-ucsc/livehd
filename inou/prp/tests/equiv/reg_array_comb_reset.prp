@@ -1,0 +1,16 @@
+/*
+:name: reg_array_comb_reset
+:type: lec
+:lec_top: reg_array_comb_reset
+*/
+// PYROPE-vs-PYROPE group (README "Pyrope <-> Pyrope variants"), lhdtrack
+// suggestions.md 2.2(e) / br_arb_lru. This file is the REFERENCE: a register
+// array whose per-entry reset is a tuple literal, the upper-triangle mask rows
+// (row i has every column j > i set). Each `reg_array_comb_reset_<k>.prp`
+// computes the same reset another way and must PROVE and compile without a
+// spurious warning.
+pub mod reg_array_comb_reset(en:Bool, d:U4, s:U2) -> (q:U4@[0]) {
+  reg m:[4]U4 = (14, 12, 8, 0)
+  if en { m[s] = d }
+  q = m[s]
+}

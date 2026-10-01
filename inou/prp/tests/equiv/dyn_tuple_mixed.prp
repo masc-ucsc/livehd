@@ -9,7 +9,7 @@
 // constant (`[a, 7, c, d]`). The constant slot becomes a constant mux arm; the
 // wire slots become wire arms. Still a comptime-known 4-entry shape, so it
 // lowers to the same balanced Hotmux.
-pub comb selm(sel:u2, a:u8, c:u8, d:u8) -> (z:u8) {
+pub comb selm(sel:U2, a:U8, c:U8, d:U8) -> (z:U8) {
   const choices = [a, 7, c, d]
   z = choices[sel]
 }

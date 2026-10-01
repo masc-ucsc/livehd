@@ -1,0 +1,18 @@
+/*
+:name: spec_syntax_generic_dotted_callee
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+// qa.md Appendix §4: "Generic calls on dotted callees are legal:
+// `prp.queue.make<T=Signed>(depth=16)`." (Q19 "Accept in both").
+// A dotted callee whose head is a namespace tuple must take explicit generics
+// exactly like the bare callee does.
+comb addk<K>(a) -> (r) { r = a + K }
+
+const ns   = (const addk = addk)
+const deep = (const inner = (const addk = addk))
+
+cassert(addk<K=3>(a=1) == 4)
+cassert(ns.addk<K=3>(a=1) == 4)
+cassert(deep.inner.addk<K=5>(a=1) == 6)

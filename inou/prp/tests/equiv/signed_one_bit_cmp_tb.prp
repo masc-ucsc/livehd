@@ -15,7 +15,7 @@ test signed_one_bit_cmp.sig {
     s = s * 6364136223846793005 + 1442695040888963407
     acc.x = s & 0xff
     step
-    sig = sig * 1099511628211 + (acc.b & 0x1)
+    sig = sig * 1099511628211 + (U1(acc.b) & 0x1)
   }
   assert((sig & 0x3FFFFFFFFFFFFFFF) == 1104349266517089973, "signature mismatch vs iverilog golden signed_one_bit_cmp")
 }

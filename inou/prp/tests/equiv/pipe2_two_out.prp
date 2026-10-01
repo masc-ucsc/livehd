@@ -6,7 +6,7 @@
 */
 
 // Two outputs: BOTH land at exactly N=2 (each gets its own output flop).
-pub pipe[2] two(a:u4, b:u4) -> (x:u8, y:u8) {
+pub pipe[2] two(a:U4, b:U4) -> (x:U8, y:U8) {
   x = a + b
   y = a & b
 }

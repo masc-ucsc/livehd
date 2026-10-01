@@ -18,13 +18,13 @@
 // 2f-latch M4. The polarity must NOT be lost by the
 // encoding: if M4 folds the enable cone wrong (the posclk double-negation
 // hazard), this refutes while latch_verify_hold still proves.
-pub mod llow_tb() -> (ok:bool@[0]) {
-  reg cyc:u3 = 0
-  reg l:u8:[latch=true]
+pub mod llow_tb() -> (ok:Bool@[0]) {
+  reg cyc:U3 = 0
+  reg l:U8:[latch=true]
   const c  = cyc
   const lq = l
   const g  = not ((c == 0) or (c == 4))   // gate LOW (open) at c==0 and c==4
-  mut dv:u8 = 42
+  mut dv:U8 = 42
   if c <= 1 {
     dv = 5
   } elif c == 2 {

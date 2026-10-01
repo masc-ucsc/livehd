@@ -18,8 +18,8 @@
 // to standard cells, and reconstructs the native Memory node, reconnected and
 // LEC-equivalent to the original. Async read (`@[0]`) keeps the cgen path on the
 // single-clock cgen_memory_1rd_1wr wrapper.
-mod abc_mem(waddr:u3, wdata:u8, we:u1, raddr:u3, mask:u8) -> (rdata:u8@[0]) {
-  reg mem:[8]u8 = 0
+mod abc_mem(waddr:U3, wdata:U8, we:U1, raddr:U3, mask:U8) -> (rdata:U8@[0]) {
+  reg mem:[8]U8 = 0
   rdata = mem[raddr] & mask     // combinational logic on the read path
   if we != 0 {
     mem[waddr] = wdata

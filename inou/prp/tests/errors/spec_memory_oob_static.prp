@@ -1,0 +1,14 @@
+/*
+:name: spec_memory_oob_static
+:type: error
+:error: out|bound|outside
+*/
+
+// SPEC (docs 08-memories.md): "mut b:[4][8]U8 = 13 / cassert(b[2][7] == 13) /
+// assert(b[2][10]) // error: `b[2][10]` does not exist (out of bounds)"
+// Rule encoded here: a constant index past the declared size of the INNER
+// dimension is a compile error.
+
+mut b:[4][8]U8 = 13
+cassert(b[2][7] == 13)
+const v = b[2][10]   // locate_error_here

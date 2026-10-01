@@ -62,14 +62,14 @@ if [ "$part" = rebuild ]; then
 # A leaf whose body can change without its ports changing, and a parent that
 # instantiates it — so the parent's object depends on the leaf's header.
 cat > "$W/leaf.prp" <<'EOF'
-pub comb leaf(a:u8, b:u8) -> (s:u8) {
+pub comb leaf(a:U8, b:U8) -> (s:U8) {
   s = (a | b)#[0..=7]
 }
 EOF
 
 cat > "$W/top.prp" <<'EOF'
 const leaf = import("leaf.leaf")
-pub comb top(x:u8, y:u8) -> (o:u8) {
+pub comb top(x:U8, y:U8) -> (o:U8) {
   mut inst = leaf::[name=inst](a = x, b = y)
   o = inst.s
 }
@@ -77,10 +77,10 @@ EOF
 
 cat > "$W/tb.prp" <<'EOF'
 const top = import("top.top")
-test top.hello(cycles:u20 = 4) {
+test top.hello(cycles:U20 = 4) {
   mut acc = top
   mut got = 0
-  tick cycles clocks=(clock=1) {
+  tick cycles {
     acc.x = 0xF0
     acc.y = 0x0F
     step
@@ -228,8 +228,8 @@ touch "$W/build-marker"
 # `-MD` depfile, which both the built-in builder and build.ninja read. If that
 # dependency is lost, header edits stop rebuilding the parent. So assert the
 # parent actually rebuilds.
-sed -e 's/b:u8/b:u7/' "$W/leaf.prp" > "$W/leaf.new" && mv "$W/leaf.new" "$W/leaf.prp"
-grep -q 'b:u7' "$W/leaf.prp" || fail "the interface edit did not apply (test bug)"
+sed -e 's/b:U8/b:U7/' "$W/leaf.prp" > "$W/leaf.new" && mv "$W/leaf.new" "$W/leaf.prp"
+grep -q 'b:U7' "$W/leaf.prp" || fail "the interface edit did not apply (test bug)"
 sed -e 's/b = y/b = y#[0..=6]/' "$W/top.prp" > "$W/top.new" && mv "$W/top.new" "$W/top.prp"
 setup
 touch "$W/build-marker"
@@ -256,18 +256,18 @@ fi
 IW="$W/identity"
 mkdir -p "$IW"
 cat > "$IW/g.prp" <<'EOF'
-pub mod madd<W=8>(a:u8, b:u8) -> (r:u8@[0]) { r = (a ^ b) & ((1 << W) - 1) }
+pub mod madd<W=8>(a:U8, b:U8) -> (r:U8@[0]) { r = (a ^ b) & ((1 << W) - 1) }
 EOF
 cat > "$IW/leaf.prp" <<'EOF'
-pub comb bump(a:u8) -> (r:u8) { wrap r = a + 1 }
+pub comb bump(a:U8) -> (r:U8) { wrap r = a + 1 }
 EOF
 cat > "$IW/tb.prp" <<'EOF'
 const madd = import("g.madd")
 const leaf = import("leaf")
-pub mod top(x:u8) -> (y:u8@[0]) {
+pub mod top(x:U8) -> (y:U8@[0]) {
   y = madd(a=leaf.bump(a=x), b=x)
 }
-test top.identity(expected:u8=3) {
+test top.identity(expected:U8=3) {
   mut dut = top
   tick 2 {
     dut.x = 1
@@ -279,7 +279,7 @@ EOF
 identity_run() {
   local tag=$1 wd=$2 expected=$3
   shift 3
-  "$LHD" sim "$IW/tb.prp" --workdir "$wd" --arg "expected=$expected" \
+  "$LHD" sim "$IW/tb.prp" --workdir "$wd" "+expected=$expected" \
     --set sim.ninja=false --set sim.tune.profile=off --result-json "$IW/$tag.json" "$@" >"$IW/$tag.log" 2>&1 \
     || { cat "$IW/$tag.log" >&2; fail "default-specialization simulation failed ($tag)"; }
 }

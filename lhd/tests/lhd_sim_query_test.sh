@@ -36,10 +36,10 @@ cat > "$W/q.prp" <<'EOF'
 :name: q
 :type: simulation
 */
-mod sub(en:bool) -> (o:u8@[0]) { reg c:u8 = 0; o = c; if en { wrap c += 1 } }
-mod top(en:bool, wa:u2, wd:u8) -> (fout:u8@[0], sout:u8@[0], rd:u8@[0]) {
-  reg acc:u8 = 0
-  reg bank:[4]u8 = nil
+mod sub(en:Bool) -> (o:U8@[0]) { reg c:U8 = 0; o = c; if en { wrap c += 1 } }
+mod top(en:Bool, wa:U2, wd:U8) -> (fout:U8@[0], sout:U8@[0], rd:U8@[0]) {
+  reg acc:U8 = 0
+  reg bank:[4]U8 = nil
   if en { wrap acc += 1; bank[wa] = wd }
   fout = acc
   rd   = bank[wa]
@@ -266,7 +266,7 @@ cat > "$W/boom.prp" <<'BOOMEOF'
 :name: boom
 :type: simulation
 */
-mod ctr(en:bool) -> (o:u8@[0]) { reg c:u8 = 0; o = c; if en { wrap c += 1 } }
+mod ctr(en:Bool) -> (o:U8@[0]) { reg c:U8 = 0; o = c; if en { wrap c += 1 } }
 test ctr.boom {
   mut a = ctr
   tick 10 { a.en = true; step; assert(a.c < 6, "counter ran away") }

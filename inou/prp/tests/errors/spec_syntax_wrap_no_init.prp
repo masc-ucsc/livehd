@@ -1,0 +1,11 @@
+/*
+:name: spec_syntax_wrap_no_init
+:type: error
+:error: need an assignment
+*/
+// qa.md Q39 item 4 / Appendix §8: "`wrap const y:U8` (no initializer) -> error"
+// ("`wrap` needs an assignment"). The diagnostic must point at the `wrap` declaration.
+comb spec_syntax_wrap_no_init(a:U8) -> (r:U8) {
+  wrap const y:U8   // locate_error_here
+  r = a
+}

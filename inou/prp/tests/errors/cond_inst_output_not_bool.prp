@@ -1,0 +1,28 @@
+/*
+:name: cond_inst_output_not_bool
+:type: error
+:tolg: 1
+:error: condition must be boolean, got integer
+*/
+
+// User ruling 2026-09-27: an instance output keeps its declared kind at the
+// call site (06-functions.md: `child.val` is a `U8`), so an INTEGER output
+// used as a condition is the same error as an integer local or port
+// (cond_port_not_bool.prp). Today the typecheck sees `c.cnt` as kind
+// `unknown` and `if c.cnt` compiles silently.
+//
+// Legal spelling: `if c.cnt != 0`.
+
+mod leaf(go:Bool, n:U4) -> (rdy:Bool@[0], cnt:U4@[0]) {
+  rdy = go and n != 0
+  cnt = if go { n } else { 0 }
+}
+
+pub mod cond_inst_output_not_bool(v:U4) -> (q:U4@[0]) {
+  const c = leaf(go=v != 0, n=v)
+  mut o:U4 = 0
+  if c.cnt {   // locate_error_here
+    o = v
+  }
+  q = o
+}

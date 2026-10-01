@@ -19,6 +19,6 @@
 //
 // The emitted file is still named `s\m.prp` (the module name verbatim) -- that
 // is what `:verilog_top:` resolves and what both harnesses open, so it stays.
-pub comb `s\m`::[timecheck=false](a:u2) -> (o:u2) {
+pub comb `s\\m`::[timecheck=false](a:U2) -> (o:U2) {
   o = (~a)#[0..=1]
 }

@@ -1,0 +1,56 @@
+/*
+:name: pipe_child_ring_timecheck_off
+:type: simulation
+*/
+
+// A `pipe[1]` child closing a caller ring (06c-pipelining.md: "any feedback
+// loop closed through a `pipe` is sequential by construction. A `mod` can
+// instantiate `pipe`s in feedback topologies without creating combinational
+// loops"). The ring still mixes the pipe's cycle-1 output with the cycle-0
+// request, so the caller opts out of timing checks with `::[timecheck=false]`,
+// the documented escape hatch that turns off ALL timing checks in its lambda
+// (user ruling 2026-09-27), including the cycle-mix check against a child's
+// declared latency.
+//
+// Before the fix, the attribute removed the combinational-loop check but not
+// the cycle-mix check, and the design was refused:
+//   upass.tolg: 'pipe_child_ring_timecheck_off.top' mixes values at different
+//   cycles ((0,0) vs (1,1)) ...
+// Without the attribute the ring must be refused with that cycle-mix error,
+// not as a combinational loop: errors/pipe_child_ring_cycle_mix.prp.
+//
+// The compiler-appended pipe flop has no reset, so the test seeds its model
+// from the first observed state instead of assuming a power-on value.
+pipe[1] st(d:U4) -> (q:U4) {
+  q = d
+}
+
+pub mod top::[timecheck=false](req:U4) -> (g:U4@[0], s:U4@[0]) {
+  wire gr:U4 = nil
+  stage[1] m = st(d=gr)
+  gr = req & ~m
+  g = gr
+  s = m
+}
+
+test top.pipe_child_in_ring {
+  mut dut        = top
+  mut prev_s:U4  = 0
+  mut bad        = 0
+  mut seen       = 0
+  tick 10 {
+    mut rq:U4 = (clock * 7 + 5) & 15
+    dut.req = rq
+    step
+    seen = seen + 1
+    // The pipe flop loaded this cycle's grant, which was the request masked by
+    // the flop's previous value; the grant now reads the new value.
+    if clock != 0 {
+      if dut.s != (rq & ~prev_s) { bad = bad + 1 }
+    }
+    if dut.g != (rq & ~dut.s) { bad = bad + 1 }
+    prev_s = dut.s
+  }
+  assert(seen == 10, "the comparisons ran (guards against a vacuous pass)")
+  assert(bad == 0, "the pipe stage closes the ring one cycle later")
+}

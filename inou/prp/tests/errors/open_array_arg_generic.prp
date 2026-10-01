@@ -1,0 +1,8 @@
+/*
+:name: open_array_arg_generic
+:type: error
+:error: has an element outside
+*/
+
+comb sum<W>(x:[]Unsigned(bits=W)) -> (r) { r = x[0] + x[1] }
+const r = sum<W=4>(1,16) // locate_error_here

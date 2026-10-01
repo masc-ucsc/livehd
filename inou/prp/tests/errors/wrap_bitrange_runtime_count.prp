@@ -1,0 +1,16 @@
+/*
+:name: wrap_bitrange_runtime_count
+:type: error
+:error: cannot apply `wrap` to a bit-range whose width is not known at compile time
+:help: constant-width destination range
+*/
+
+// `wrap`/`sat` into a bit range narrows the value to the lane's WIDTH, so the
+// width must be a compile-time value. A comptime NAME counts
+// (equiv/wrap_bitrange_comptime_count.prp); a count read from a runtime input
+// does not, and stays a compile error.
+pub mod wrap_bitrange_runtime_count(v:U16, r:U4, n:U3) -> (z:U16@[0]) {
+  mut a:U16 = v
+  wrap a#[2..+n] = r + 1  // locate_error_here
+  z = a
+}

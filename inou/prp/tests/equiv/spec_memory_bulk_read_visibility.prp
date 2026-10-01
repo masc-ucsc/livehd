@@ -1,0 +1,33 @@
+/*
+:name: spec_memory_bulk_read_visibility
+:type: equiv
+:verilog_top: spec_memory_bulk_read_visibility
+:pyrope_top: spec_memory_bulk_read_visibility
+*/
+// SPEC (docs 08-memories.md): "A user read of such a memory sees the whole-array
+// store like any other write: under `"program"` when the store precedes the read,
+// under `"fwd"` always, and never under `"old"` or `"none"`."
+// Rule encoded here (one memory per ordering, all cleared by `clr`):
+//   p  (default "program"): `pb` read BEFORE the clear -> committed,
+//                           `pa` read AFTER the clear  -> 0 when clr;
+//   f  ("fwd"):             `fb` read BEFORE the clear -> 0 when clr;
+//   o  ("old"):             `oa` read AFTER the clear  -> committed.
+pub mod spec_memory_bulk_read_visibility(clk:Clock, clr:Bool, we:Bool, a:U2, d:U8, ra:U2) -> (pb:U8@[0], pa:U8@[0], fb:U8@[0], oa:U8@[0]) {
+  reg p:[4]U8 = nil
+  reg f:[4]U8:[ordering="fwd"] = nil
+  reg o:[4]U8:[ordering="old"] = nil
+  pb = p[ra]
+  fb = f[ra]
+  if we {
+    p[a] = d
+    f[a] = d
+    o[a] = d
+  }
+  if clr {
+    p = 0
+    f = 0
+    o = 0
+  }
+  pa = p[ra]
+  oa = o[ra]
+}

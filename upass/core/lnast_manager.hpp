@@ -183,6 +183,26 @@ public:
   // from an unbound-param template walk (where nils are placeholders).
   bool in_inline_frame() const { return !active_tag_.empty(); }
 
+  // The source spelling of a variable `name` (diagnostics): an inlined
+  // callee's `<tag>o` is the user's `o`, both inside its frame and from the
+  // caller's side of the splice (the prologue binding `inl3_b`, an output read
+  // back). Inline tags are `inl<salt>_` (see make_inlined_name's callers).
+  static std::string_view user_name(std::string_view name) {
+    for (;;) {
+      std::size_t i = 3;
+      if (!name.starts_with("inl") || name.size() <= i || name[i] < '0' || name[i] > '9') {
+        return name;
+      }
+      while (i < name.size() && name[i] >= '0' && name[i] <= '9') {
+        ++i;
+      }
+      if (i + 1 >= name.size() || name[i] != '_') {
+        return name;
+      }
+      name.remove_prefix(i + 1);
+    }
+  }
+
   // A loop body retains source-local bindings when lifted. Resolve only the
   // caller-side actuals through the current inline frame.
   std::string frame_variable(std::string_view raw) const {
@@ -194,6 +214,10 @@ public:
   std::string outlining_owner() const {
     return std::string((frames_.empty() ? lnast : frames_.front().tree)->get_top_module_name());
   }
+
+  // The unit being walked (the tree its io ports belong to), even while a
+  // scratch emit or an inline frame has swapped the active read tree.
+  const std::shared_ptr<Lnast>& unit_lnast() const { return frames_.empty() ? lnast : frames_.front().tree; }
 
   // Re-enter the CURRENT tree at the CURRENT cursor under a fresh rename salt,
   // keeping the active tag — used by the runner's comptime loop unroller to

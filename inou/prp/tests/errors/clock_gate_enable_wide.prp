@@ -1,0 +1,14 @@
+/*
+:name: clock_gate_enable_wide
+:type: error
+:tolg: 1
+:error: the `enable` of `Clock\(...\)` is a 8-bit value, not a `Bool`
+*/
+// `Clock(clock_pin=, enable=)` gates on a `Bool` enable: a condition has no
+// integer truthiness.
+pub mod clock_gate_enable_wide(clk:Clock, en:U8, d:U8) -> (q:U8@[1]) {
+  const g = Clock(clock_pin=clk, enable=en)   // locate_error_here
+  reg f:U8:[clock_pin=g] = 0
+  f = d
+  q = f
+}

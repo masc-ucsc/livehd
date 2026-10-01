@@ -61,6 +61,7 @@ comb_array_const_index_read
 assign_pattern
 packed_assign
 match_no_else
+byte_lane_write
 "
 
 # Sum the declared bits of every port/net declaration in an emitted module.

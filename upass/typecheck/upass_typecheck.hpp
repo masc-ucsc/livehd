@@ -158,14 +158,36 @@ private:
           return Kind::nil;
         }
       }
+      return declared_kind(o.name);
     }
     return k;
   }
 
   // Kind of the name via the shared table (nullary control-flow checks).
   Kind kind_of(std::string_view name) const;
+  // The DECLARED kind of a name whose value carries none: an IO port (io_meta)
+  // or a Sub instance output (`c.rdy`, a destructured `rdy`). Booleans never
+  // mix with integers at a port boundary either (docs 06-functions "Boolean
+  // ports"), so the operator and store checks must see these kinds too.
+  Kind declared_kind(std::string_view name) const;
   // Kind of a ref-or-const operand under the cursor (nullary checks only).
   Kind kind_of_operand_at_cursor();
+  // True iff `name` is a `Clock`-typed input of the unit under check (docs
+  // 07-typesystem "Clock and Reset": a Clock is not data -- it only drives
+  // clock pins or another `Clock` port, never an operator or a condition).
+  bool is_clock_port(std::string_view name) const;
+  // Report `name` used as data (`what` describes the use). Returns true when
+  // it was a Clock (an error was emitted).
+  // `dst` is the op's result: a Clock operand is legal when that result only
+  // reaches debug contexts (debug_only).
+  bool reject_clock_data(std::string_view name, std::string_view what, std::string_view dst = {});
+  // docs 07-typesystem "Clock and Reset": a Clock's cycle-count view is legal
+  // in debug contexts (`assert`, `puts`). True for a compiler temp whose every
+  // consumer is an assert, a puts/print argument, or another debug-only temp.
+  bool debug_only(std::string_view name);
+  const Lnast*                                                  debug_uses_of_ = nullptr;
+  absl::flat_hash_map<std::string, std::vector<Lnast_nid>>      debug_uses_;
+  absl::flat_hash_map<std::string, bool>                        debug_memo_;
 
   // Write `k` into dst's "0" Entry (scalar slot only; tuple kinds are
   // shape-derived and never written).
@@ -175,6 +197,9 @@ private:
   // operand (the open-range `..` sentinel).
   void require_all(Kind required, Kind result, std::string_view sym, std::string_view code, Bundle& dst, upass::Src_span src,
                    bool allow_nil = false);
+  // Operator `op`'s shared rule (upass::op_kind::rule_of): require_all, or
+  // require_same for `==`/`!=`.
+  void require_rule(Lnast_ntype::Lnast_ntype_int op, Bundle& dst, upass::Src_span src, std::string_view dst_name = {});
   void require_same(Kind result, std::string_view sym, std::string_view code, Bundle& dst, upass::Src_span src);
   // `a << b`: `a` integer; `b` integer OR a tuple of bit positions (the
   // documented one-hot form `1 << (1,4,3)`). Result integer.
@@ -183,8 +208,10 @@ private:
   // tuple/array (the field-splice form). Result integer. Like require_shift,
   // the rule is not uniform over the operands, so it cannot reuse require_all.
   void require_concat(Bundle& dst, upass::Src_span src);
+  // How an operand reads in a message: `<const>`, or the field a temp read.
+  std::string_view operand_label(const upass::Operand& o) const;
   // Format "name:kind, …" for an op's operands (spanless ops localize by name).
-  std::string name_operands(upass::Src_span src) const;
+  std::string      name_operands(upass::Src_span src) const;
 
   void emit_type_error(std::string_view code, const std::string& msg, std::string_view hint = {},
                        livehd::diag::Span span = {});

@@ -21,8 +21,8 @@ test generic_mod.sig {
     s = s * 6364136223846793005 + 1442695040888963407
     acc.v = s & 0xffff
     step
-    sig = sig * 1099511628211 + (acc.s8 & 0xff)
-    sig = sig * 1099511628211 + (acc.s16 & 0xffff)
+    sig = sig * 1099511628211 + (acc.`s8` & 0xff)
+    sig = sig * 1099511628211 + (acc.`s16` & 0xffff)
   }
   assert((sig & 0x3FFFFFFFFFFFFFFF) == 3664878489717154400, "signature mismatch vs iverilog golden generic_mod")
 }

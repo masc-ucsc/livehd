@@ -11,9 +11,9 @@
 // LIVE from day one and pins the agreeing case so M5's per-(clock,edge)
 // commit-region rework cannot regress it while fixing the discriminating
 // POS->NEG direction (tests/fixme/flop_sim_posneg.prp, off-by-one today).
-pub mod np8(clk:bool, d:u8) -> (qc:u8@[1], qe:u8@[2]) {
-  reg c:u8:[clock_pin=ref clk, posclk=false] = 0
-  reg e:u8 = 0
+pub mod np8(clk:Clock, d:U8) -> (qc:U8@[1], qe:U8@[2]) {
+  reg c:U8:[clock_pin=clk, posclk=false] = 0
+  reg e:U8 = 0
   qc = c
   qe = e
   c = d
@@ -24,7 +24,7 @@ test np8.full_cycle_transfer {
   mut acc = np8
   mut prev_qc = nil
   tick 5 {
-    acc.d = 11 + (17 * clock)   // distinct value every cycle (max 79, fits u8)
+    acc.d = 11 + (17 * clock)   // distinct value every cycle (max 79, fits U8)
     step
     assert(acc.qc == 11 + (17 * clock), "negedge stage loads this tick's d at the fall")
     if clock >= 1 {

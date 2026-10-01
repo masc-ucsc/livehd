@@ -14,8 +14,8 @@
 // `w#[2..=5]` then `w#[4..=5]`: PARTIALLY overlapping, so neither write covers
 // the other — the shape a lane-union test catches and a per-write shape test
 // cannot.
-comb t(a:u2, b:u4) -> (o:u8) {
-  wire w:u8 = nil   // locate_error_here
+comb t(a:U2, b:U4) -> (o:U8) {
+  wire w:U8 = nil   // locate_error_here
   w#[2..=5] = b
   w#[4..=5] = a
   o = w

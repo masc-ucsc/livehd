@@ -1,0 +1,44 @@
+/*
+:name: spec_lexical_cont_binary_op
+:type: comptime
+:verifier_pass: 11
+:verifier_fail: 0
+*/
+// qa.md appendix 3: "A new line starting with a binary operator ...
+// continues the previous statement." docs 02-basics "Newlines and spaces":
+// "A line that starts with a binary operator (`+`, `-`, `*`, `/`, `%`, `|`,
+// `==`, `.`, ...) ... continues the previous statement."
+const a = 1
+  + 3
+cassert(a == 4)
+const b = 10
+  - 3
+cassert(b == 7)
+const c = 3
+  * 4
+cassert(c == 12)
+const d = 17
+  % 5
+cassert(d == 2)
+const e = 0x0F
+  | 0xF0
+cassert(e == 0xFF)
+const f = 2
+  == 2
+cassert(f)
+const g = 1
+  << 3
+cassert(g == 8)
+const h = 6
+  & 3
+cassert(h == 2)
+const t = (const x=5)
+const i = t
+  .x
+cassert(i == 5)
+const j = 1
+  != 2
+cassert(j)
+const k = 3
+  <= 3
+cassert(k)

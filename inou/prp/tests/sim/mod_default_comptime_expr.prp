@@ -1,0 +1,93 @@
+/*
+:name: mod_default_comptime_expr
+:type: simulation
+*/
+// User ruling 2026-09-28 (34): a `mod`/`pipe` input default may be ANY
+// expression that folds to a compile-time constant -- the caller drives the
+// omitted port with that constant (06-functions.md). Covered spellings:
+//   * a generic and an expression over it (`b = N`, `c = N * 2`,
+//     `d = std.clog2(N)`): folded per specialization, so `m<N=8>` differs;
+//   * a `comptime const`, its attribute read and arithmetic (`W.[bits]`,
+//     `W * 3 + 1`);
+//   * an enum entry of two `enum` statements, a one-hot one (`Hue`, it was the
+//     removed `const Hue = enum(...)` expression form; Hue.Blue == 4) and one
+//     with explicit values (`Mode`);
+//   * the same on a `pipe` input;
+//   * anything else the compiler folds (`fold`, no generics): a `comptime
+//     const` computed by a comb call (`K`) or read from a tuple (`T.b`), a
+//     comb call with constant arguments (`inc(a=3)`), an attribute read of an
+//     earlier input (`a.[bits]`), and `if` expressions over a `comptime const`
+//     and over a generic (`gif`).
+// A default over a RUNTIME input's value (`b:U8 = a + 1`) stays an error
+// (errors/mod_default_runtime_input.prp), and so does one that does not fold
+// (errors/mod_default_not_comptime_call.prp). Before, every spelling but a
+// literal, a `comptime const` expression and an `enum` statement entry failed
+// "the default of `b` must be a literal or a compile-time integer", and a
+// comb call, a tuple read or an `if` failed "must be a compile-time constant".
+
+comptime const W = 5
+enum Hue = (Red, Green, Blue)
+enum Mode = (Off = 0, Slow = 1, Fast = 3)
+
+mod m<N=4>(a:U8, b:U8 = N, c:U8 = N * 2, d:U8 = std.clog2(N), e:U8 = W.[bits], f:U8 = Hue.Blue,
+           g:Mode = Mode.Fast, h:U8 = W * 3 + 1) -> (o:U8@[0], bo:U8@[0], co:U8@[0], dd:U8@[0], eo:U8@[0], fo:U8@[0],
+                                                   go:U8@[0], ho:U8@[0]) {
+  o  = a
+  bo = b
+  co = c
+  dd = d
+  eo = e
+  fo = f
+  go = g
+  ho = h
+}
+
+pipe[1] addk(a:U8, k:U8 = W * 3) -> (o:U8) {
+  wrap o = a + k
+}
+
+comb inc(a:U8) -> (o:U8) {
+  wrap o = a + 1
+}
+comptime const K = inc(a=6)                 // 7
+comptime const T = (const a = 3, const b = 9)
+
+mod fold(a:U8, b:U8 = K, c:U8 = T.b, d:U8 = inc(a=3), e:U8 = a.[bits], f:U8 = if W > 3 { 2 } else { 5 })
+    -> (o:U8@[0]) {
+  wrap o = a + b + c + d + e + f
+}
+
+mod gif<N=3>(a:U8, b:U8 = if N > 2 { 7 } else { 9 }) -> (o:U8@[0]) {
+  wrap o = a + b
+}
+
+pub mod mod_default_comptime_expr(x:U8) -> (st0:U8@[0], st1:U8@[0], st2:U8@[0], p:U8@[1], fo:U8@[0], g5:U8@[0], g1:U8@[0]) {
+  const r4 = m(a=x)              // N=4: b=4, c=8, d=2, e=3, f=4, g=3, h=16
+  const r8 = m<N=8>(a=x)         // N=8: b=8, c=16, d=3
+  wrap st0 = r4.o + r4.bo + r4.co + r4.dd
+  wrap st1 = r4.eo + r4.fo + r4.go + r4.ho
+  wrap st2 = r8.o + r8.bo + r8.co + r8.dd
+  stage[1] pk = addk(a=x)        // k = 15
+  p = pk
+  fo = fold(a=x)                 // x + 7 + 9 + 4 + 8 + 2
+  g5 = gif<N=5>(a=x)             // x + 7
+  g1 = gif<N=1>(a=x)             // x + 9
+}
+
+test mod_default_comptime_expr.run {
+  mut d   = mod_default_comptime_expr
+  mut bad = 0
+  tick 6 {
+    const x:U8 = clock + 10
+    d.x = x
+    step
+    if d.st0 != x + 4 + 8 + 2 { bad += 1 }
+    if d.st1 != 3 + 4 + 3 + 16 { bad += 1 }
+    if d.st2 != x + 8 + 16 + 3 { bad += 1 }
+    if d.p != x + 15 { bad += 1 }
+    if d.fo != x + 30 { bad += 1 }
+    if d.g5 != x + 7 or d.g1 != x + 9 { bad += 1 }
+  }
+  puts("bad={bad}")
+  assert(bad == 0)
+}

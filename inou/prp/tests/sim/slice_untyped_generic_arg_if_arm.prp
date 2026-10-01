@@ -1,0 +1,47 @@
+/*
+:name: slice_untyped_generic_arg_if_arm
+:type: simulation
+*/
+// The if-arm twin of sim/slice_untyped_generic_arg.prp (lhdtrack suggestions
+// 2.3 row 15). A bit slice `v#[lo..+4]` always has 4 bits. An untyped binding
+// of it, or the slice passed directly, must count as typed when it is the
+// actual of a type-generic `<T>` mod. Outside an `if` this already worked.
+// Inside an arm the slice's temp got no width: the typespec that carries the
+// width is refused in an uncertain scope, and so is a `const` taking a width
+// from its value. The call then died with "argument `a` to template
+// `flip_lane` has no declared type". That happened for a constant start
+// (`v#[4..+4]`) as well as a runtime one (`v#[s..+4]`).
+
+mod flip_lane<T>(a:T) -> (o:T@[0]) {
+  o = a ^ 1
+}
+
+mod slice_untyped_generic_arg_if_arm(v:U16, s:U4, c:Bool) -> (k:U4@[0], m:U4@[0], n:U4@[0]) {
+  k = 0
+  m = 0
+  n = 0
+  if c {
+    const x = v#[s..+4]         // runtime start, bound to an untyped const
+    k = flip_lane(a=x)
+    const y = v#[4..+4]         // constant start, bound to an untyped const
+    m = flip_lane(a=y)
+    n = flip_lane(a=v#[s..+4])  // runtime start, passed directly
+  }
+}
+
+test slice_untyped_generic_arg_if_arm.arm {
+  mut dut = slice_untyped_generic_arg_if_arm
+  tick 2 {
+    dut.v = 0xABCD
+    dut.s = 8
+    dut.c = clock == 0
+    step
+    if clock == 0 {
+      assert(dut.k == 0xA, "v#[8..+4] = 0xB, ^ 1")
+      assert(dut.m == 0xD, "v#[4..+4] = 0xC, ^ 1")
+      assert(dut.n == 0xA, "v#[8..+4] = 0xB, ^ 1")
+    } else {
+      assert(dut.k == 0 and dut.m == 0 and dut.n == 0, "the arm is not taken")
+    }
+  }
+}

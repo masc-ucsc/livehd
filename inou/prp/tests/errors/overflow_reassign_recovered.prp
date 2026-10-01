@@ -7,6 +7,6 @@
 // Every typed write must fit the declared envelope, even if a later write
 // brings the final value back in range.
 
-mut acc:u4 = 0
+mut acc:U4 = 0
 acc = acc + 20
 acc = 0

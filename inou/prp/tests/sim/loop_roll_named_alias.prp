@@ -6,9 +6,9 @@
 // The lifted definition cannot refer to a source-unit alias. The roller must
 // resolve Word to its concrete scalar range at the synthetic boundary.
 
-type Word = u12
+type Word = U12
 
-mod loop_roll_named_alias(x:u8) -> (z:u12@[0]) {
+mod loop_roll_named_alias(x:U8) -> (z:U12@[0]) {
   mut acc:Word = 0
   for i in 0..<5 {
     acc = acc + x

@@ -1,0 +1,22 @@
+/*
+:name: loop_runtime_break_memory
+:type: error
+:error: a loop with a runtime `break`/`continue` may not write memory `m`
+:help: such a loop stays rolled, and a rolled body cannot write a memory
+*/
+
+// A loop that writes a memory (a `reg` array) is unrolled so each indexed
+// write stays a write port of the memory (user ruling 2026-09-27). A runtime
+// `break`/`continue` leaves a loop no unrolled form, and a rolled body cannot
+// write a memory, so the two together are an error that names the memory.
+// It used to die inside tolg ("memory lowered 0 write sites but the pre-scan
+// counted 1"), and then with the misleading "`break` under a runtime condition
+// inside a comptime loop is not supported".
+mod loop_runtime_break_memory(a:U8, lim:U8, we:Bool) -> (z:U8@[0]) {
+  reg m:[4]U8 = 0
+  for i in 0..<4 {  // locate_error_here
+    if a == i { break }
+    if we { m[i] = a }
+  }
+  z = m[lim#[0..<2]]
+}

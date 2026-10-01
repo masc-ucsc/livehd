@@ -366,6 +366,11 @@ struct Proofs {
 };
 
 void optimize(hhds::Graph& g, Node mem, Memory_satopt& stats, Memory_queries& queries, Profile profile) {
+  // A loader addresses the declared storage independently of functional RTL.
+  // Compaction would require rewriting that external address/data contract.
+  if (gu::memory_image_of(mem)) {
+    return;
+  }
   std::map<int, Pin>                globals;
   std::map<int, std::map<int, Pin>> blocks;
   for (const auto& in_pin : mem.inp_sorted_pins()) {

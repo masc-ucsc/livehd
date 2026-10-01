@@ -2,16 +2,16 @@
 :name: regref_deep
 :type: simulation
 */
-mod counter(en:bool) -> (o:u8@[0]) {
-  reg c:u8 = 0
+mod counter(en:Bool) -> (o:U8@[0]) {
+  reg c:U8 = 0
   if en { wrap c += 1 }
   o = c
 }
-mod middle(en:bool) -> (o:u8@[0]) {
+mod middle(en:Bool) -> (o:U8@[0]) {
   const child = counter(en)
   o = child
 }
-mod outer(en:bool) -> (o:u8@[0]) {
+mod outer(en:Bool) -> (o:U8@[0]) {
   const branch = middle(en)
   o = branch
 }

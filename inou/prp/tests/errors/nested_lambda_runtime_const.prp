@@ -1,0 +1,21 @@
+/*
+:name: nested_lambda_runtime_const
+:type: error
+:error: 'n' is a runtime value of the enclosing scope; it is not visible inside lambda 'addn'
+:help: pass 'n' as an input of 'addn'
+*/
+
+// Ruling 2026-09-28 #24 (revises 2026-09-27 #4): a nested lambda may read an
+// enclosing plain `const` only when its value is a compile-time constant
+// (`const n = 3` is visible, see equiv/nested_comb_plain_const_capture.prp).
+// `n` here is computed from the enclosing mod's RUNTIME input `a`, so it is a
+// runtime value: reading it in the nested `comb addn` is a compile error that
+// says why and how to fix it (never a hidden closure input, never the generic
+// undefined-read "declare it with `mut`/`const`/`reg` before use").
+pub mod top(a:U8) -> (o:U8@[0]) {
+  const n = a ^ 3
+  comb addn(x:U8) -> (y:U8) {
+    y = (x + n)#[0..<8]  // locate_error_here
+  }
+  o = addn(x=a)
+}

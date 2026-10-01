@@ -5,4 +5,4 @@
 :help: uniform latency
 */
 
-pipe[2] f(a:u8) -> (c:u8@[2]) { c = a }   // locate_error_here
+pipe[2] f(a:U8) -> (c:U8@[2]) { c = a }   // locate_error_here

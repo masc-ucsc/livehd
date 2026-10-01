@@ -1,0 +1,22 @@
+/*
+:name: spec_calls_ctor_tuple_positional
+:type: error
+:error: must be named|ambiguous|name the argument|constructor|init
+*/
+
+// qa.md Q31 answer "Errors; rewrite docs": "Tuple-literal construction
+// `("hello", 44)` into an init with 2 untyped params is also an error."
+// Appendix §7: "`mut y:Typ2 = ("hello", 44)` with a 2-untyped-param init is an
+// error (rewrite)".
+
+type Typ2 = (
+  mut s:String = "",
+  mut n:Signed = 0,
+  comb init(ref self, a, b) {
+    self.s = a
+    self.n = b
+  }
+)
+
+mut y:Typ2 = ("hello", 44) // locate_error_here
+cassert(y.n == 44)

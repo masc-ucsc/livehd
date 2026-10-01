@@ -1,0 +1,39 @@
+/*
+:name: verilog_mem_oob_depth
+:type: equiv
+:verilog_top: verilog_mem_oob_depth
+:pyrope_top: verilog_mem_oob_depth
+:yosys_lec: false
+*/
+
+// The Verilog out-of-range memory semantics of the golden for a depth that is
+// not a power of two, stated explicitly in Pyrope (user ruling 2026-09-28
+// (22); see verilog_mem_oob_write for the power-of-two case).
+//
+// WRITE: an address outside [5:130] writes nothing, so the store is guarded by
+// the range compare. The stored index is the in-range offset.
+//
+// READ: an out-of-range read is X in Verilog. The Verilog readers refine it to
+// the entry at the offset's low 7 bits, `(a - 5)#[0..<7]`, and to 0 when those
+// bits land past the last entry (126, 127): deterministic, and the same in
+// sim, cgen and lhd lec.
+//
+// `:yosys_lec: false`: yosys' memory_map leaves those two read-mux leaves
+// undriven, and lgcheck cannot prove the 0 refinement of an undriven gold
+// value (it spends its whole budget and ends inconclusive). lhd lec proves the
+// pair in well under a second, memory paired with memory.
+pub mod verilog_mem_oob_depth::[timecheck=false](clk:Clock, we:U1, waddr:U8, raddr:U8, din:U4) -> (dout:U4@[]) {
+  reg dout:U4
+  reg mem:[126]U4:[ordering="old"]
+
+  if we != 0 and waddr >= 5 and waddr <= 130 {
+    mem[(waddr - 5)#[0..<7]] = din
+  }
+
+  const ri = (raddr - 5)#[0..<7]
+  if ri < 126 {
+    dout = mem[ri]
+  } else {
+    dout = 0
+  }
+}

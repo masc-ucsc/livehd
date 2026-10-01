@@ -54,6 +54,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   src.attr(la::native_comb_boundary).set(la::native_comb_boundary_t::value_type{});
   src.attr(la::place).set(Ann_place{1.0F, 2.0F, 3.0F, 4.0F});
   src.attr(la::coloring_info).set(std::string{"info_blob"});
+  src.attr(la::simulation_init).set(std::string{"simulation_init_blob"});
   src.attr(la::proven).set(uint32_t{3});
   src.attr(la::runtime_check).set(uint32_t{5});
   src.attr(la::memory_async_reset).set(uint32_t{1});
@@ -67,8 +68,9 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   src.attr(la::aggregate_extent).set(uint32_t{32});
   src.attr(la::lut).set(std::string{"1010"});
   src.attr(la::legalize_inlined).set(std::string{"callee.split"});
+  src.attr(la::comb_reach).set(std::string{"s 0 1\no 2 0\n"});
   gu::set_match(src, 9);  // the NODE overload of the dual-role `match`
-  static_assert(kNodeTagsStamped == 24, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
+  static_assert(kNodeTagsStamped == 26, "a node-kind tag was added to LIVEHD_FOR_EACH_ATTR_TAG: stamp and check it here");
 
   gu::carry_node_attrs(src, dst);
 
@@ -83,6 +85,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   EXPECT_TRUE(dst.attr(la::place).has());
   EXPECT_EQ(dst.attr(la::place).get(), Ann_place(1.0F, 2.0F, 3.0F, 4.0F));
   EXPECT_EQ(dst.attr(la::coloring_info).get(), "info_blob");
+  EXPECT_EQ(dst.attr(la::simulation_init).get(), "simulation_init_blob");
   EXPECT_EQ(dst.attr(la::proven).get(), 3u);
   EXPECT_EQ(dst.attr(la::runtime_check).get(), 5u);
   EXPECT_EQ(dst.attr(la::memory_async_reset).get(), 1u);
@@ -96,6 +99,7 @@ TEST(AttrCarry, EveryNodeAttributeSurvivesARebuild) {
   EXPECT_EQ(dst.attr(la::aggregate_extent).get(), 32u);
   EXPECT_EQ(dst.attr(la::lut).get(), "1010");
   EXPECT_EQ(dst.attr(la::legalize_inlined).get(), "callee.split");
+  EXPECT_EQ(dst.attr(la::comb_reach).get(), "s 0 1\no 2 0\n");
   EXPECT_EQ(gu::match_of(dst), 9u) << "node-level match (semdiff stamps it, lhd tool reads it) must ride the node";
 }
 
@@ -149,4 +153,5 @@ TEST(AttrCarry, AbsentAttributesAreNotMaterialized) {
   EXPECT_FALSE(dst.attr(la::proven).has());
   EXPECT_FALSE(dst.attr(la::lut).has());
   EXPECT_FALSE(dst.attr(la::coloring_info).has());
+  EXPECT_FALSE(dst.attr(la::simulation_init).has());
 }

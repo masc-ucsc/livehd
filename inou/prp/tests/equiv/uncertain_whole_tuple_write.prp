@@ -1,0 +1,23 @@
+/*
+:name: uncertain_whole_tuple_write
+:type: equiv
+:verilog_top: uncertain_whole_tuple_write
+:pyrope_top: uncertain_whole_tuple_write
+*/
+
+// A WHOLE-tuple write inside a runtime `if` arm: every field becomes a mux
+// between the arm's value and the value before the `if`, even when both are
+// comptime constants and even for a ONE-field tuple. This used to be an
+// errors/ fixture pinning a loud refusal ("no driver" / "no hardware
+// lowering") over an older silent miscompile: `Symbol_table::leave_scope` took
+// its scalar fast path on `is_scalar()` (`fields_.size() <= 1` for a one-field
+// tuple), the invalidation landed on the absent unnamed slot "0", and `p.a`
+// folded to the arm's 5. The value now splits into per-field leaves that the
+// arm merge muxes (lhdtrack suggestions 2.3 r9b), so the program is legal.
+pub comb uncertain_whole_tuple_write(c:Bool) -> (o:U8) {
+  mut p = (mut a=1)
+  if c {
+    p = (mut a=5)
+  }
+  o = p.a
+}

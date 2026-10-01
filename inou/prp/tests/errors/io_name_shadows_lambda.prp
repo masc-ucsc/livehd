@@ -1,0 +1,16 @@
+/*
+:name: io_name_shadows_lambda
+:type: error
+:error: variable shadowing: 'inc' is already declared in an enclosing scope
+:help: rename the input
+*/
+
+// User ruling 2026-09-28 (35): a lambda INPUT named like a visible enclosing
+// lambda is shadowing.
+comb inc(x:U8) -> (y:U9) {
+  y = x + 1
+}
+
+pub mod io_name_shadows_lambda(inc:U8) -> (o:U9@[0]) {  // locate_error_here
+  o = inc
+}

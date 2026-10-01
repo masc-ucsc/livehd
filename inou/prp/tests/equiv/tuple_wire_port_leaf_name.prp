@@ -7,7 +7,7 @@
 // REGRESSION — a body tuple `wire` whose NAME equals a PORT FIELD's name.
 //
 // upass.detuple runs BEFORE the SSA I/O flattening, so a nested port is still
-// spelled with a bare name token per level: `inp:(bits:(vec:u1))` is
+// spelled with a bare name token per level: `inp:(bits:(vec:U1))` is
 //   store(ref 'inp','nil', tuple_add(store(ref 'bits','nil',
 //                                    tuple_add(store(ref 'vec','nil',TYPE)))))
 // The use-site scan that gates the struct-wire/reg split counted that
@@ -17,8 +17,8 @@
 // shape-tuple_add / bare-type_spec skips the scan already had. A Chisel or
 // slang re-emit hits this constantly (an `io_..._exceptionVec` port leaf next
 // to an internal `exceptionVec` bundle), so it is not an exotic shape.
-pub comb tuple_wire_port_leaf_name(inp:(bits:(vec:u1)), a:u1, b:u1) -> (o:u2) {
-  wire vec:(hi:u1, lo:u1) = nil
+pub comb tuple_wire_port_leaf_name(inp:(bits:(vec:U1)), a:U1, b:U1) -> (o:U2) {
+  wire vec:(hi:U1, lo:U1) = nil
   vec.hi = a & inp.bits.vec
   vec.lo = b
   o = (vec.hi << 1) | vec.lo

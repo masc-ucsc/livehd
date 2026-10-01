@@ -1,0 +1,20 @@
+/*
+:name: spec_calls_tuple_type_single_field
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// docs 03-bundle.md: "A typed tuple construction binds its values like a call
+// binds arguments: `type T1 = (a:String, b:Signed)`". tree-sitter-pyrope
+// grammar.js parses a ONE-field tuple type `(val:Signed)` exactly like the
+// two-field one: `(tuple item: (typed_field identifier: val type: Signed))`.
+// A one-field tuple type must therefore declare the field `val`, not read a
+// variable `val`.
+
+type Tone = (val:Signed)
+mut n:Tone = (val=3)
+cassert(n.val == 3)
+type Two = (a:String, b:Signed)
+mut m:Two = (a="x", b=4)
+cassert(m.b == 4)

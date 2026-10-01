@@ -1,0 +1,16 @@
+/*
+:name: std_clog2_zero
+:type: error
+:error: std\.clog2.*positive comptime integer.*got 0
+:help: x >= 1
+*/
+
+// User ruling 2026-09-27: `std.clog2(x)` is Verilog `$clog2` for x >= 1
+// (`std.clog2(1) == 0`); `x <= 0` is a compile error, not a silent 0 (which is
+// what `$clog2(0)` returns). A zero usually means an empty memory or a
+// mis-bound generic, and a 0-bit index would hide it. Today `std` itself is an
+// undefined variable.
+
+comptime const depth = 0
+comptime const aw = std.clog2(depth)   // locate_error_here
+cassert(aw == 0)

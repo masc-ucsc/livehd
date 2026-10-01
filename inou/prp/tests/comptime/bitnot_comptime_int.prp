@@ -1,0 +1,22 @@
+/*
+:name: bitnot_comptime_int
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// User ruling 2026-09-29 (44): `~x` needs a known type, but a COMPILE-TIME
+// untyped integer safely infers as an integer, so `~5` and `const k = 5; ~k`
+// stay legal as a signed integer: `~x == -x - 1`. A typed comptime value
+// follows its type (`k3:U3` flips its 3 bits). The runtime counterpart is the
+// error in errors/bitnot_untyped_runtime.prp.
+cassert(~5 == -6)
+const k = 5
+cassert(~k == -6)
+comptime const m = 7
+cassert(~m == -8)
+cassert(~0 == -1)
+const k3:U3 = 5
+cassert(~k3 == 2)
+const n = k + 2
+cassert(~n == -8)

@@ -1,0 +1,10 @@
+/*
+:name: elif_init_capture_before_decl
+:type: error
+:error: read of undefined variable 'later'
+*/
+
+if true {
+  comb read() -> (r) { r = later } // locate_error_here
+  cassert(read() == 3)
+} elif const later = 3; false { }

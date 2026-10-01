@@ -1,0 +1,52 @@
+/*
+:name: tuple_field_cast
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// Sized/reinterpret casts over a TUPLE FIELD and over an untyped alias of a
+// PORT (lhdtrack suggestions 2.3 row 8). `U1(x)` is the explicit bool->bit
+// conversion, and `Unsigned(bool)`/`uN(bool)` keep true as 1 (07-typesystem).
+// `U1(w)` on a `w:Bool` port always worked; the same cast over
+// `req.write` (a bool field of a tuple port), over a typed local tuple field,
+// or over `const c = w` failed with "call to undefined function 'u1'" (and
+// `Unsigned(req.write)` with "reinterpret needs a fully-typed input"): the
+// operand is a compiler temp `%t = req.write` whose binding carries none of
+// the source's declared facts (io ports are not table-backed and the
+// tuple_get->store rewrite drops tget_origin), so try_lower_typecast declined
+// and the call fell through to tolg as an unknown function. Also covered: an
+// untyped alias of an INTEGER scalar port (`y6`) and a bool field of a COMB's
+// tuple INPUT (`fcast`, a separate unit with its own io path). A TYPED copy of
+// a narrower port (`y8`, `y9`, and the tuple field `y10`) is the opposite case:
+// its own declared width and sign decide the reinterpret, never the source's
+// (the provenance that makes the untyped aliases work once leaked into them).
+comb fcast(q:(addr:U6, write:Bool, data:U8)) -> (r:U1) {
+  r = U1(q.write)
+}
+
+pub mod top(req:(addr:U6, write:Bool, data:U8), w:Bool, a:U6, s:Bool, n4:U4, `s4`:S4)
+  -> (y0:U1@[], y1:U8@[], y2:U1@[], y3:U1@[], y4:U8@[], y5:U1@[], y6:U8@[], y7:U1@[],
+      y8:S8@[], y9:U8@[], y10:S6@[]) {
+  y0 = U1(req.write)            // bool field of a tuple port
+  y1 = U8(req.addr)             // int field of a tuple port (widening)
+  y2 = Unsigned(req.write)      // reinterpret of a bool field
+  const c = w
+  y3 = U1(c)                    // untyped alias of a scalar bool port
+  mut r:(x:U6, b:Bool) = nil
+  r.x = a
+  r.b = s
+  y4 = U8(r.x)                  // int field of a typed local tuple
+  y5 = U1(r.b)                  // bool field of a typed local tuple
+  const ai = a
+  y6 = U8(ai)                   // untyped alias of a scalar INTEGER port
+  y7 = fcast(q=req)             // bool field of a comb's tuple INPUT
+  mut c8:U8 = n4
+  y8 = Signed(c8)               // c8's own 8 bits: never negative
+  mut d8:S8 = `s4`
+  y9 = Unsigned(d8)             // the 8-bit two's-complement pattern
+  mut r2:(x:U6, b:Bool) = nil
+  r2.x = n4
+  r2.b = w
+  y10 = Signed(r2.x)            // a 6-bit reinterpret of the u6 field
+}

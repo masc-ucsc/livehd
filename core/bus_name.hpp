@@ -72,4 +72,22 @@ struct Piece {
 // `r_cgen<N>`; that emission-only suffix is removed as well.
 [[nodiscard]] std::optional<std::string_view> cell_state_owner(std::string_view name);
 
+// cgen emits a stateful Memory through a wrapper instance whose name carries
+// the source Memory name hex-encoded byte by byte, `__lhdmem_h<hex>_e` (a plain
+// identifier in both Verilog and RTLIL, so a dotted tuple-field name survives
+// the round trip). A declaration uniquifier `_<digits>` may follow `_e`. The
+// memory's STATE is the wrapper's storage `<inst><separator>data`, or, for an
+// inline packed memory, the one register `<inst>_data`.
+inline constexpr std::string_view memory_instance_marker = "__lhdmem_h";
+
+struct Memory_storage {
+  std::string_view prefix;  // the hierarchy above the wrapper, ending in its separator (may be empty)
+  std::string      source;  // the decoded source Memory name
+};
+
+// Decode a cgen memory STATE name (either storage spelling above) back to the
+// source Memory it realizes; nullopt for any other name. `separator` is the
+// hierarchy separator in `name`, as in parse_bus_piece.
+[[nodiscard]] std::optional<Memory_storage> parse_memory_storage(std::string_view name, char separator = '.');
+
 }  // namespace livehd::bus_name

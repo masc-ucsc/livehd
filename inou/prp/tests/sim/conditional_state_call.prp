@@ -5,13 +5,13 @@
 
 // A conditional stateful call must not advance the child's state while its
 // arm is inactive, and its raw output must remain hidden by the caller merge.
-mod conditional_state_inner(a:u8) -> (out:u8@[0]) {
-  reg q:u8 = 0
+mod conditional_state_inner(a:U8) -> (out:U8@[0]) {
+  reg q:U8 = 0
   q = q ^ a
   out = q
 }
 
-pub mod conditional_state_top(en:bool, a:u8) -> (out:u8@[0]) {
+pub mod conditional_state_top(en:Bool, a:U8) -> (out:U8@[0]) {
   out = 0
   if en {
     out = conditional_state_inner(a)

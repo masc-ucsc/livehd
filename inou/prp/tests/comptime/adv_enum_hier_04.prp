@@ -7,8 +7,8 @@
 
 // Doc 03-bundle.md: enum union (|) and membership (in) on a hierarchical enum.
 enum Animal = (
-  bird   = enum(eagle, parrot),
-  mammal = enum(rat, human)
+  bird   = (eagle, parrot),
+  mammal = (rat, human)
 )
 
 const human_rat = Animal.mammal.rat | Animal.mammal.human

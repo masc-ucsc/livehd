@@ -1,0 +1,30 @@
+/*
+:name: mem_replay_whole_copy
+:type: equiv
+:verilog_top: mem_replay_whole_copy
+:pyrope_top: mem_replay_whole_copy
+*/
+// A whole-array copy `n = m` stores the value of m's whole-array read. Under
+// the default program ordering that read replays the entry write before it,
+// and the copy must store the REPLAYED contents (it once stored m's committed
+// contents: a silent miscompile). Under ordering="old" (`o`) the whole-array
+// read replays nothing and is the committed contents; the copy `k = o` used to
+// point at a deleted passthrough and failed to compile ("invalid
+// Get_mask/Set_mask operands"). `n` and `k` read in program order, so `r` and
+// `ro` see the copy of this cycle.
+pub mod mem_replay_whole_copy(w:Bool, cp:Bool, a:U2, d:U6, rb:U2) -> (r:U6@[0], ro:U6@[0]) {
+  reg m:[4]U6 = nil
+  reg o:[4]U6:[ordering="old"] = nil
+  reg n:[4]U6 = nil
+  reg k:[4]U6 = nil
+  if w {
+    m[a] = d
+    o[a] = d
+  }
+  if cp {
+    n = m
+    k = o
+  }
+  r  = n[rb]
+  ro = k[rb]
+}

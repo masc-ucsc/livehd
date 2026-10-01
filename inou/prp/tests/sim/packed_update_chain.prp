@@ -29,11 +29,11 @@
 // would pass if both were wrong in the same way. `ctl` is a plain register that
 // never touches a set_mask, so a failure below is specifically the packed
 // assembly.
-pub mod packer(a:u4, b:u4, c:u4) -> (wq:u12@[1], mq:u12@[1], ctl:u4@[1]) {
+pub mod packer(a:U4, b:U4, c:U4) -> (wq:U12@[1], mq:U12@[1], ctl:U4@[1]) {
   // THE CLASS UNDER TEST: a net ASSEMBLED from three disjoint bit fields. Each
   // write refines the same single driver (the Verilog `assign w[3:0]=a; assign
   // w[7:4]=b;` shape), so this is one driver, not three.
-  wire w:u12 = nil
+  wire w:U12 = nil
   w#[0..=3]  = a
   w#[4..=7]  = b
   w#[8..=11] = c
@@ -41,14 +41,14 @@ pub mod packer(a:u4, b:u4, c:u4) -> (wq:u12@[1], mq:u12@[1], ctl:u4@[1]) {
   // CONTROL CARRIER: the identical assembly through a `mut`, which SSA already
   // made acyclic. It has always worked, so a divergence between wq and mq is
   // the wire lowering and nothing else.
-  mut m:u12 = 0
+  mut m:U12 = 0
   m#[0..=3]  = a
   m#[4..=7]  = b
   m#[8..=11] = c
 
-  reg rw:u12 = 0
-  reg rm:u12 = 0
-  reg rc:u4  = 0
+  reg rw:U12 = 0
+  reg rm:U12 = 0
+  reg rc:U4  = 0
   rw  = w
   rm  = m
   rc  = a
@@ -64,9 +64,9 @@ test packer.wire_and_mut_assemble_alike {
   mut bad_wire = 0
   mut bad_ctl  = 0
   tick 8 {
-    mut av:u4 = clock & 0xF
-    mut bv:u4 = (clock + 5) & 0xF
-    mut cv:u4 = (clock * 3) & 0xF
+    mut av:U4 = clock & 0xF
+    mut bv:U4 = (clock + 5) & 0xF
+    mut cv:U4 = (clock * 3) & 0xF
     acc.a = av
     acc.b = bv
     acc.c = cv

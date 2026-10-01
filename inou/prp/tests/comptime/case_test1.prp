@@ -21,7 +21,9 @@ match const t = m2; t {
  case (a=true,b=0sb?) { hit = if t.a { b+100 } else { b-100 } }
  else                 { cassert(false) }
 }
-cassert(t == nil)  // t was in local match scope
+// The initializer is out of scope; this is a fresh binding.
+const t = 7
+cassert(t == 7)
 cassert(hit == 1052)
 
 cassert((a=1,3,2)  case (3,a=0sb?,2))

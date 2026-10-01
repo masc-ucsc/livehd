@@ -1,0 +1,13 @@
+/*
+:name: spec_calls_tuple_mixed
+:type: error
+:error: mix|named and unnamed|unnamed and named|all-named
+*/
+
+// qa.md Appendix §8: "TUPLES ARE EITHER ALL-NAMED OR ALL-UNNAMED (new rule;
+// tuples mixing named and unnamed entries are an ERROR)".
+// docs 03-bundle.md: `mut c = (1, const d=4)  // error: mixes an unnamed entry
+// and a named one`.
+
+mut c = (1, const d=4) // locate_error_here
+cassert(c.d == 4)

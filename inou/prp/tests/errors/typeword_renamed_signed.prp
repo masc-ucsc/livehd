@@ -1,0 +1,9 @@
+/*
+:name: typeword_renamed_signed
+:type: error
+:error: `signed` was renamed `Signed`
+*/
+// The sign reinterpret is `Signed(x)`.
+pub comb typeword_renamed_signed(a:U8) -> (o:S8) {
+  o = signed(a)  // locate_error_here
+}

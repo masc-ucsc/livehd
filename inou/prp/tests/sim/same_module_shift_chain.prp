@@ -22,13 +22,13 @@
 // happened (one emitted class, three bound objects) is invisible here and
 // needs a generated-structure test on the lhd/tests side; `:expect_instances:`
 // counts LGraph Subs, not emitted C++ classes.
-mod stage8(d:u8) -> (q:u8@[1]) {
-  reg r:u8 = 0
+mod stage8(d:U8) -> (q:U8@[1]) {
+  reg r:U8 = 0
   q = r
   r = d
 }
 
-pub mod chain3(d:u8) -> (q1:u8@[1], q2:u8@[2], q3:u8@[3]) {
+pub mod chain3(d:U8) -> (q1:U8@[1], q2:U8@[2], q3:U8@[3]) {
   mut a = stage8(d)
   mut b = stage8(d=a)
   mut c = stage8(d=b)
@@ -43,7 +43,7 @@ test chain3.delay3 {
   mut e2  = 0
   mut e3  = 0
   tick 8 {
-    const dv = 7 + (13 * clock)   // distinct every cycle (max 98, fits u8)
+    const dv = 7 + (13 * clock)   // distinct every cycle (max 98, fits U8)
     acc.d = dv
     // Golden non-blocking shift: each stage takes its predecessor's OLD value.
     e3 = e2

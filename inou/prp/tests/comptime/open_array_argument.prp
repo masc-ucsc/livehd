@@ -1,0 +1,32 @@
+/*
+:name: open_array_argument
+:type: comptime
+:verifier_pass: 15
+:verifier_fail: 0
+*/
+
+comb sum(x:[]U8) -> (total) { total = 0; for a in x { total += a } }
+cassert(sum(x=(1,2)) == 3)
+cassert(sum((1,2,3)) == 6)
+cassert(sum(1,2,3,4) == 10)
+cassert(sum(7) == 7)
+cassert(sum(()) == 0)
+cassert(sum(8,9) == 17)
+
+comb count(x:[]U8) -> (n) { n = x.[size] }
+cassert(count(1,2) == 2)
+cassert(count(1,2,3,4) == 4)
+mut a:[3]U8 = (1,2,3)
+cassert(sum(a) == 6)
+cassert(count(a) == 3)
+
+comb fallback(x) -> (r) { r = 1000 }
+const choose = [sum,fallback]
+cassert(choose(1,2) == 3)
+cassert(choose(1,256) == 1000)
+cassert(choose(1,true) == 1000)
+
+comb generic<W>(x:[]Unsigned(bits=W)) -> (r) { r = x[0] + x[1] }
+cassert(generic<W=4>(1,15) == 16)
+comb relay(x) -> (r) { r = sum(x) }
+cassert(relay(1,2,3) == 6)

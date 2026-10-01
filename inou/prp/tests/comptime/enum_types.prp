@@ -5,18 +5,18 @@
 :verifier_fail: 0
 */
 
-comb robot_charge(self) -> (s:string) { s = "robot charge" }
-comb person_consume(self) -> (s:string) { s = "person consume" }
-comb cyborg_consume(self) -> (s:string) { s = "cyborg consume" }
-comb cyborg_charge(self) -> (s:string) { s = "cyborg charge" }
-comb potato_consume(self) -> (s:string) { s = "potato consume" }
+comb robot_charge(self) -> (s:String) { s = "robot charge" }
+comb person_consume(self) -> (s:String) { s = "person consume" }
+comb cyborg_consume(self) -> (s:String) { s = "cyborg consume" }
+comb cyborg_charge(self) -> (s:String) { s = "cyborg charge" }
+comb potato_consume(self) -> (s:String) { s = "potato consume" }
 
 comptime const Robot = (const charge = robot_charge)
 comptime const Person = (const consume = person_consume)
 comptime const Cyborg = (const consume = cyborg_consume, const charge = cyborg_charge)
 comptime const Potato = (const consume = potato_consume)
 
-comb nourish(x) -> (r:string) {
+comb nourish(x) -> (r:String) {
   cassert((x does Person) or (x does Robot))
   r = match x {
     does Person { x.consume() }

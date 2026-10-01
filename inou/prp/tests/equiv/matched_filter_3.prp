@@ -11,9 +11,9 @@ comptime const LOG2N = 3
 // `timecheck=false`: a FIR mixes delays by design — the sample register is a
 // pipeline stage (cycle 1) and the coefficient register is state (cycle 0),
 // and the product needs both. The cycle typechecker has no delay-line notion.
-mod tap::[timecheck=false](x_in:s4, c_in:s4, load:bool) -> (x_out:s4@[0], c_out:s4@[0], p:s8@[0]) {
-  reg x_r:s4 = 0
-  reg c_r:s4 = 0
+mod tap::[timecheck=false](x_in:S4, c_in:S4, load:Bool) -> (x_out:S4@[0], c_out:S4@[0], p:S8@[0]) {
+  reg x_r:S4 = 0
+  reg c_r:S4 = 0
   x_out = x_r
   c_out = c_r
   p     = x_r * c_r
@@ -21,16 +21,18 @@ mod tap::[timecheck=false](x_in:s4, c_in:s4, load:bool) -> (x_out:s4@[0], c_out:
   if load { c_r = c_in }
 }
 
-mod add_node(a:s12, b:s12) -> (s:s12@[0]) {
-  reg s_r:s12 = 0
+// `timecheck=false` here too: `s_r` is an always-written register read at
+// the `@[0]` output (a tree-level stage the cycle typechecker cannot see).
+mod add_node::[timecheck=false](a:S12, b:S12) -> (s:S12@[0]) {
+  reg s_r:S12 = 0
   s = s_r
   wrap s_r = a + b
 }
 
-pub mod top(x:s4, c_in:s4, load:bool) -> (y:s12@[0]) {
-  mut xs:s4 = x
-  mut cs:s4 = c_in
-  mut v:[N]s12 = 0
+pub mod top(x:S4, c_in:S4, load:Bool) -> (y:S12@[0]) {
+  mut xs:S4 = x
+  mut cs:S4 = c_in
+  mut v:[N]S12 = 0
   for i in 0..<N {
     const t = tap(x_in=xs, c_in=cs, load=load)
     xs   = t.x_out

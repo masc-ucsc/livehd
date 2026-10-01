@@ -1,0 +1,24 @@
+/*
+:name: int_inst_output_logical_op
+:type: error
+:tolg: 1
+:error: operator .and. requires boolean operands \(.*:integer
+*/
+
+// User ruling 2026-09-27 (2): a child's INTEGER output keeps its declared kind
+// at the call site (06-functions.md: `child.val` is a `U8`), so it is not a
+// logical operand -- the mirror of bool_inst_output_arith.prp (a bool output
+// in arithmetic). Today the operator typecheck sees `l.c` as kind `unknown`
+// and `b and l.c` compiles silently; the same expression with a typed local
+// `const lc:U4 = l.c` is an error.
+//
+// Legal spelling: `q = b and l.c != 0`.
+
+mod leaf(v:U4) -> (c:U4@[0]) {
+  c = v
+}
+
+pub mod int_inst_output_logical_op(v:U4, b:Bool) -> (q:Bool@[0]) {
+  const l = leaf(v=v)
+  q = b and l.c   // locate_error_here
+}

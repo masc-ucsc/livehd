@@ -5,6 +5,6 @@
 :set: compile.formal.mode=none
 */
 // Sign extension must agree with explicit fill or native signed arithmetic.
-comb widen(x:u64) -> (r:u64) {
+comb widen(x:U64) -> (r:U64) {
   r = x#sext[0..=31]
 }

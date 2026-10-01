@@ -8,8 +8,8 @@
 // Task 1p — an untyped `pipe` input is a deferred template, not a
 // definition-time error. The error is the UNTYPED actual (the literal `7`)
 // feeding the template boundary at the call site (decision 4).
-pipe[2] f(a) -> (c:u8) { c = a }
+pipe[2] f(a) -> (c:U8) { c = a }
 
-mod top() -> (z:u8@[2]) {
+mod top() -> (z:U8@[2]) {
   stage[2] z = f(7)
 }

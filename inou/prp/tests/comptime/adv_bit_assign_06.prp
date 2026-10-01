@@ -9,8 +9,8 @@
 // FINDING: LHS single-bit assign t#[i]=1 inside a for-loop INSIDE a comb
 // body is dropped (returns 0). The identical loop works at top level, and
 // non-loop bit writes inside a comb work; only loop+function drops them.
-comb build_ones(n:u4) -> (r:u8) {
-  mut t:u8 = nil
+comb build_ones(n:U4) -> (r:U8) {
+  mut t:U8 = nil
   t#[0..=7] = 0
   for i in 0..<n {
     t#[i] = 1

@@ -1,0 +1,143 @@
+/*
+:name: loop_body_reads_wire
+:type: simulation
+:expect_instances: u_loop*=0 *=5
+*/
+
+// lhdtrack suggestions 2.3: a loop body that READS a `wire`. Before the
+// ruling below, prp2lnast refused every such read with
+//   for-loop body may not read or write wire 'back'   (wire-in-loop)
+// (`loop body may not ...` for a `while`).
+// User ruling 2026-09-27: a READ of a wire inside a for/while/loop body is
+// legal, and such a loop is UNROLLED rather than rolled. `:expect_instances:`
+// pins that: a rolled loop is a `u_loop_<n>` Sub, and the 5 instances are the
+// five shape modules the top calls.
+// A WRITE (drive) of a wire inside a loop body stays an error
+// (errors/wire_loop_write.prp, errors/wire_while_loop_write.prp,
+// errors/wire_loop_local_decl.prp).
+//
+// Five shapes, each checked against an independent model in the test:
+//   * lbw_after: the wire's only driver comes AFTER the loop.
+//   * lbw_before: the wire is driven BEFORE the loop (effectively a value).
+//   * lbw_while: lbw_after spelled with a `while` loop.
+//   * lbw_ring: the br_flow_xbar_rr shape. The loop reads the wire, and the
+//     same loop's output drives it. Word-level that is a ring; bit-level it is
+//     acyclic (lane i reads `w`, `pv` never does).
+//   * lbw_nested: the exact lhdtrack br_flow_xbar_rr spelling -- an INNER loop
+//     reads the wire directly and the OUTER index; both levels unroll.
+// No `::[timecheck=false]` is needed: once unrolled the rings are bit-level
+// acyclic. Before this ruling the workaround was `const wc = w` before the
+// loop (still legal, and it keeps the loop rolled -- see
+// loop_ring_nested_outer_index.prp); that hoisted form with
+// `--set compile.unroll=true` simulates these same values today.
+mod lbw_after(a:U8) -> (z:U10@[0]) {
+  wire back:U8 = nil
+  mut acc:U10 = 0
+  for i in 0..<4 {
+    acc = acc + (back ^ i)     // read before the driver below
+  }
+  back = a
+  z = acc
+}
+
+mod lbw_before(b:U8) -> (y:U4@[0]) {
+  wire early:U8 = nil
+  early = b
+  mut s:U4 = 0
+  for i in 0..<4 {
+    s = s + early#[(i * 2)..+2]
+  }
+  y = s
+}
+
+mod lbw_while(a:U8) -> (z:U10@[0]) {
+  wire back:U8 = nil
+  mut acc:U10 = 0
+  mut i = 0
+  while i < 4 {
+    acc = acc + (back ^ i)     // a `while` body reads the wire too
+    i += 1
+  }
+  back = a
+  z = acc
+}
+
+mod lbw_ring(b:U16, sel:U8) -> (o:U4@[0]) {
+  wire w:U16 = nil
+  mut r:U4 = 0
+  mut pv:U16 = 0
+  for i in 0..<4 {
+    r#[i] = w#[sel#[(i * 2)..+2] * 4 + i]
+    pv#[(i * 4)..+4] = b#[(i * 4)..+4] ^ 0x5
+  }
+  w = pv
+  o = r
+}
+
+mod lbw_nested(b:U16, sel:U8) -> (o:U4@[0]) {
+  wire w:U16 = nil
+  mut r:U4 = 0
+  mut pv:U16 = 0
+  for i in 0..<4 {
+    mut lr:U4 = 0
+    for j in 0..<4 {
+      lr#[j] = w#[j * 4 + i]   // the INNER loop reads the wire and the outer index
+    }
+    r#[i] = lr#[sel#[(i * 2)..+2]]
+    pv#[(i * 4)..+4] = b#[(i * 4)..+4] ^ 0x5
+  }
+  w = pv
+  o = r
+}
+
+pub mod loop_body_reads_wire(a:U8, b:U16, sel:U8)
+    -> (z:U10@[0], y:U4@[0], zw:U10@[0], o:U4@[0], on:U4@[0]) {
+  z  = lbw_after(a=a)
+  y  = lbw_before(b=b#[0..<8])
+  zw = lbw_while(a=a)
+  o  = lbw_ring(b=b, sel=sel)
+  on = lbw_nested(b=b, sel=sel)
+}
+
+test loop_body_reads_wire.values {
+  mut x    = loop_body_reads_wire
+  mut seen = 0
+  mut badz = 0
+  mut bady = 0
+  mut badw = 0
+  mut bado = 0
+  mut badn = 0
+  tick 16 {
+    const av:U8  = (clock * 37 + 11) & 0xFF
+    const bv:U16 = (clock * 40503 + 12345) & 0xFFFF
+    const sv:U8  = (clock * 97 + 5) & 0xFF
+    x.a   = av
+    x.b   = bv
+    x.sel = sv
+    step
+    seen += 1
+
+    const zexp = (av ^ 0) + (av ^ 1) + (av ^ 2) + (av ^ 3)
+    if x.z != zexp { badz += 1 }
+    if x.zw != zexp { badw += 1 }
+
+    const yexp = (bv & 3) + ((bv >> 2) & 3) + ((bv >> 4) & 3) + ((bv >> 6) & 3)
+    if x.y != yexp { bady += 1 }
+
+    // w == b ^ 0x5555; lane i picks bit (sel_i*4 + i) of it
+    const wv:U16 = bv ^ 0x5555
+    const e0:U1 = (wv >> ((sv & 3) * 4 + 0)) & 1
+    const e1:U1 = (wv >> (((sv >> 2) & 3) * 4 + 1)) & 1
+    const e2:U1 = (wv >> (((sv >> 4) & 3) * 4 + 2)) & 1
+    const e3:U1 = (wv >> (((sv >> 6) & 3) * 4 + 3)) & 1
+    const oexp:U4 = (e3 << 3) | (e2 << 2) | (e1 << 1) | e0
+    if x.o != oexp { bado += 1 }
+    if x.on != oexp { badn += 1 }
+  }
+  assert(seen == 16, "the comparisons ran")
+  assert(badz == 0, "a wire driven after the loop is read by every iteration")
+  assert(bady == 0, "a wire driven before the loop is read by every iteration")
+  assert(badw == 0, "a while body reads the wire too")
+  assert(bado == 0, "the loop reads the wire its own output drives (bit-level acyclic)")
+  assert(badn == 0, "an inner loop reads the wire and the outer index")
+}

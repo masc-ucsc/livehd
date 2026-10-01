@@ -7,6 +7,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "cprop.hpp"
+#include "cprop_muxctx.hpp"
 #include "cprop_value.hpp"
 
 namespace {
@@ -24,11 +25,6 @@ struct Value_equal {
   bool operator()(const Pin& a, const Pin& b) const {
     return a == b || (a.is_const() && b.is_const() && gu::const_of(a).same_repr(gu::const_of(b)));
   }
-};
-
-struct Decode {
-  Pin     selector;
-  int64_t value = 0;
 };
 
 // The ONE consumer of `node`, or nothing when it has zero or several. hhds
@@ -62,6 +58,7 @@ class Mux_sharing {
     size_t              candidate;
     std::vector<Target> targets;
     Pin                 active;
+    livehd::muxctx::Path_facts facts;
   };
   struct Group {
     Pin              value;
@@ -75,64 +72,10 @@ class Mux_sharing {
   Pin                                                           one;
   std::vector<Candidate>                                        candidates;
   absl::flat_hash_map<hhds::Class_index, size_t>                candidate_ids;
-  absl::flat_hash_map<hhds::Class_index, std::optional<Decode>> decodes;
   absl::flat_hash_map<hhds::Class_index, size_t>                value_ids;
   absl::flat_hash_map<Pin, size_t, Value_hash, Value_equal>     values;
 
-  std::optional<Decode> decode(Pin control) {
-    auto [it, fresh] = decodes.try_emplace(control.get_class_index());
-    if (!fresh) {
-      return it->second;
-    }
-    const auto node = control.get_master_node();
-    if (control.is_const() || gu::type_op_of(node) != Ntype_op::EQ) {
-      return {};
-    }
-    const auto edges = node.inp_pins_snapshot();
-    // EQ is a SINGLE-BANK commutative cell, so its two operands each own a
-    // sink pid -- 0 and 1 -- rather than sharing pin 0 (graph/cell.hpp's ONE
-    // DRIVER PER SINK PIN block). Requiring BOTH on pid 0 made this decode
-    // unsatisfiable, silently disabling the whole mux-chain decode rather than
-    // miscompiling. Check the BANK, which is 0 for every EQ operand and is
-    // what "these are the two compared values" actually means.
-    if (edges.size() != 2 || Ntype::sink_bank(Ntype_op::EQ, edges[0].get_port_id()) != 0
-        || Ntype::sink_bank(Ntype_op::EQ, edges[1].get_port_id()) != 0) {
-      return {};
-    }
-    auto a = edges[0].get_driver_pin();
-    auto b = edges[1].get_driver_pin();
-    if (a.is_const()) {
-      std::swap(a, b);
-    }
-    if (a.is_const() || !b.is_const()) {
-      return {};
-    }
-    const auto& c = gu::const_of(b);
-    if (c.has_unknowns() || !c.is_just_i64()) {
-      return {};
-    }
-    // EQ compares LGraph integer VALUES. The same selector cannot equal two
-    // distinct integers; no bit-vector truncation or signed cast is assumed.
-    it->second = Decode{a, c.to_just_i64()};
-    return it->second;
-  }
-
-  bool exclusive(const Candidate& c) {
-    if (gu::proven_of(c.node) == gu::kFormalOnehot) {
-      return true;
-    }
-    Pin                          selector;
-    absl::flat_hash_set<int64_t> constants;
-    for (const auto& [control, value] : c.arms) {
-      (void)value;
-      auto d = decode(control);
-      if (!d || (!selector.is_invalid() && selector != d->selector) || !constants.insert(d->value).second) {
-        return false;
-      }
-      selector = d->selector;
-    }
-    return !selector.is_invalid();
-  }
+  bool exclusive(const Candidate& c) { return livehd::muxctx::exclusive(c.node); }
 
   size_t value_id(Pin p) {
     auto [it, fresh] = value_ids.try_emplace(p.get_class_index(), 0);
@@ -471,7 +414,7 @@ class Mux_sharing {
       return;
     }
     std::vector<Visit> visits{
-        {root_id, {}, one}
+        {root_id, {}, one, {}}
     };
     std::vector<Group>                  groups;
     absl::flat_hash_map<size_t, size_t> group_ids;
@@ -486,7 +429,7 @@ class Mux_sharing {
         auto child = candidate_ids.find(p.get_master_node().get_class_index());
         if (!p.is_const() && child != candidate_ids.end() && candidates[child->second].parent == id) {
           targets.push_back({visits.size(), true});
-          visits.push_back({child->second, {}, {}});
+          visits.push_back({child->second, {}, {}, {}});
         } else {
           ++terminals;
           auto [it, fresh] = group_ids.try_emplace(value_id(p), groups.size());
@@ -559,21 +502,37 @@ class Mux_sharing {
       return;
     }
 
+    const livehd::muxctx::Decode condition = [&](const Pin& p) {
+      return livehd::muxctx::compute_condition(
+          p,
+          [](const Pin& q) -> std::optional<livehd::muxctx::Bool_condition> { return livehd::muxctx::Bool_condition{q, true}; },
+          boolean_fact);
+    };
     for (size_t i = 0; i < visits.size(); ++i) {
       auto&            visit = visits[i];
       const auto&      c     = candidates[visit.candidate];
       std::vector<Pin> controls;
       for (const auto& [control, value] : c.arms) {
         (void)value;
-        controls.push_back(boolean(control));
+        const auto known = visit.facts.truth(control, condition);
+        controls.push_back(known ? (*known ? one : zero) : boolean(control));
       }
       const auto fallback = negate(disjunction(controls));
       controls.push_back(fallback);
       for (size_t j = 0; j < controls.size(); ++j) {
-        const auto active = conjunction(visit.active, controls[j]);
+        auto facts = visit.facts;
+        if (j < c.arms.size()) {
+          facts.assume(c.arms[j].first, true, condition);
+        } else {
+          for (const auto& arm : c.arms) {
+            facts.assume(arm.first, false, condition);
+          }
+        }
+        const auto active = facts.reachable() ? conjunction(visit.active, controls[j]) : zero;
         const auto target = visit.targets[j];
         if (target.internal) {
           visits[target.index].active = active;
+          visits[target.index].facts  = facts;
         } else {
           groups[target.index].conditions.push_back(active);
         }

@@ -1,0 +1,65 @@
+/*
+:name: bitset_runtime_index_twice
+:type: equiv
+:verilog_top: bitset_runtime_index_twice
+:pyrope_top: bitset_runtime_index_twice
+*/
+
+// SILENT miscompile (found while validating lhdtrack suggestions 2.3 row 1;
+// NOT one of the triaged rows): two RUNTIME-index single-bit writes in a row
+// into a variable whose starting value is a CONSTANT (`= 0`, `= 0x5A`) or nil
+// (`q#[i] = e` then `q#[j] = f`). The second write must clear bit j of the
+// first result, i.e. AND it with `~(1 << j)`. Observed today: the emitted
+// logic ANDs with `(1 << j) ^ 1` (cgen prints `(shl_j ^ (2'sh1))` where
+// `~shl_j` is expected), so with i=1, j=0, e=1, f=0 the result `z` is 0
+// instead of 2. The LGraph is already wrong (`lhd lec` on the .prp refutes).
+// A constant-index write followed by a runtime one is right, and the same
+// pair of runtime writes over a RUNTIME base (`mut r:U8 = a`) is right: it
+// stays here as the control `c`.
+//   z -- `mut q:U8 = 0`,    writes at i then j
+//   y -- `mut p:U8 = 0x5A`, writes at i then j (the base need not be zero)
+//   n -- `mut m:U2 = nil`,  writes at k then 1-k (together they cover m)
+//   c -- control: runtime base
+//   sz/sn -- `mut sq:S8 = -1`, a NEGATIVE constant base: its literal is one
+//            signed bit, so the writes kept only bit 0; `sq < 0` also needs
+//            the result to stay signed
+//   sx -- `mut so:S8 = -3`, a single write
+//   wz/wn -- `mut sw:S8 = x4` with `x4:S4`: a NARROWER signed runtime base
+//            widens by its sign, not with zeros
+pub mod bitset_runtime_index_twice(i:U3, j:U3, e:U1, f:U1, a:U8, k:U1, g:U1, h:U1, x4:S4)
+  -> (z:U8@[0], y:U8@[0], n:U2@[0], c:U8@[0], sz:S8@[0], sn:Bool@[0], sx:S8@[0], wz:S8@[0], wn:Bool@[0]) {
+  mut q:U8 = 0
+  q#[i] = e
+  q#[j] = f
+  z = q
+
+  mut p:U8 = 0x5A
+  p#[i] = e
+  p#[j] = f
+  y = p
+
+  mut m:U2 = nil
+  m#[k]     = g
+  m#[1 - k] = h
+  n = m
+
+  mut r:U8 = a
+  r#[i] = e
+  r#[j] = f
+  c = r
+
+  mut sq:S8 = -1
+  sq#[i] = e
+  sq#[j] = f
+  sz = sq
+  sn = sq < 0
+
+  mut so:S8 = -3
+  so#[i] = e
+  sx = so
+
+  mut sw:S8 = x4
+  sw#[i] = e
+  wz = sw
+  wn = sw < 0
+}

@@ -1,0 +1,21 @@
+/*
+:name: undefined_generic_arg
+:type: error
+:error: unknown type or lambda 'ZZ' in a generic argument
+:help: declare `ZZ` before its use
+*/
+
+// Ruling 2026-09-28 #24 (clarification): reading a name with no accessible
+// declaration is a direct compile error at the read. A call-site generic bind
+// passes a bare name through for the runner to bind; before, an undeclared
+// name became nil and surfaced only as the indirect upass.tolg "unresolved
+// reference 'inl1_ZZ'".
+// User ruling 2026-09-28 (33): the error names what a generic argument reads (a
+// type, lambda or comptime const declared earlier), not a variable.
+comb addn<N=1>(a:U8) -> (r:U8) {
+  r = (a + N)#[0..<8]
+}
+
+pub comb undefined_generic_arg(a:U8) -> (r:U8) {
+  r = addn<N=ZZ>(a=a)  // locate_error_here
+}

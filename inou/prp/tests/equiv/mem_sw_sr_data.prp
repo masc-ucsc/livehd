@@ -10,9 +10,9 @@
 // `lhd compile mem_sw_sr_data.v --emit-dir pyrope:` output (headers added):
 // reg array with ordering="old" (no write->read forwarding) + registered rdata
 // reproduces read-first exactly, and the round trip PROVES.
-pub mod mem_sw_sr_data::[timecheck=false](clk:u1, we:u1, waddr:u2, wdata:u2, raddr:u2) -> (rdata:u2@[]) {
-  reg rdata:u2
-  reg mem:[4]u2:[ordering="old"]
+pub mod mem_sw_sr_data::[timecheck=false](clk:Clock, we:U1, waddr:U2, wdata:U2, raddr:U2) -> (rdata:U2@[]) {
+  reg rdata:U2
+  reg mem:[4]U2:[ordering="old"]
   if we != 0 {
     mem[waddr] = wdata
   }

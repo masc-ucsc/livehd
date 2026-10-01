@@ -4,5 +4,5 @@
 :error: a function call cannot be used as a type
 :help: explicit generic parameters
 */
-type Param_type = (mut xx:s8=0)
-const a:Param_type(string) = (mut xx=3)
+type Param_type = (mut xx:S8=0)
+const a:Param_type(String) = (mut xx=3)

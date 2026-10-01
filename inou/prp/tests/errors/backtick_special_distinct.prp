@@ -1,0 +1,12 @@
+/*
+:name: backtick_special_distinct
+:type: error
+:error: read of undefined variable
+*/
+// The backtick rule drops the quotes ONLY for plain identifier characters:
+// `v[0]` is a distinct, escaped name, never an index into v. Reading it
+// without declaring it is an undefined read even though v exists.
+pub comb backtick_special_distinct(a:U4) -> (y:U4) {
+  const v = (a, a)
+  y = `v[0]` // locate_error_here
+}

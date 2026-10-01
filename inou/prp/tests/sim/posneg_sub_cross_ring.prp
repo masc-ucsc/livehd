@@ -19,13 +19,13 @@
 // pre-rise makes qn lag a full period; an A->B->A repair evaluates a mix twice
 // and double-adds d. Each lands on a different exact value, and the golden
 // model below tracks the correct one (rise first, then fall, within a period).
-comb mix(x:u8, y:u8) -> (z:u8) {
+comb mix(x:U8, y:U8) -> (z:U8) {
   wrap z = x + y
 }
 
-pub mod xring(d:u8) -> (qp:u8@[0], qn:u8@[0]) {
-  reg p:u8 = 0
-  reg n:u8:[posclk=false] = 0
+pub mod xring(d:U8) -> (qp:U8@[0], qn:U8@[0]) {
+  reg p:U8 = 0
+  reg n:U8:[posclk=false] = 0
   qp = p
   qn = n
   mut fwd = mix(x=p, y=d)   // POS->NEG: the fall must see this period's post-rise p
@@ -39,7 +39,7 @@ test xring.both_windows {
   mut pg = 0
   mut ng = 0
   tick 8 {
-    const dv = 11 + (17 * clock)   // distinct every cycle (max 130, fits u8)
+    const dv = 11 + (17 * clock)   // distinct every cycle (max 130, fits U8)
     acc.d = dv
     // One period: the rise commits p from the OLD n, then the fall commits n
     // from the JUST-committed p. Program order below mirrors exactly that.

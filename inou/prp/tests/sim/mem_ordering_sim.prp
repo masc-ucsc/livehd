@@ -37,21 +37,21 @@
 // read-modify-write chain (a write whose data depends on an earlier read of the
 // same memory) simulates as legal hardware rather than being mis-scheduled as a
 // combinational cycle — the reason `m_rmw` is in this fixture at all.
-mod ord_sim(wa:u2, wd:u4, ra:u2) -> (o_old:u4@[0], f_pre:u4@[0], p_pre:u4@[0], p_post:u4@[0], n_clean:u4@[0], rmw_pre:u4@[0], rmw_post:u4@[0]) {
-  reg m_old:[4]u4:[ordering="old"] = 0
+mod ord_sim(wa:U2, wd:U4, ra:U2) -> (o_old:U4@[0], f_pre:U4@[0], p_pre:U4@[0], p_post:U4@[0], n_clean:U4@[0], rmw_pre:U4@[0], rmw_post:U4@[0]) {
+  reg m_old:[4]U4:[ordering="old"] = 0
   o_old      = m_old[wa]
   m_old[wa]  = wd
 
-  reg m_fwd:[4]u4:[ordering="fwd"] = 0
+  reg m_fwd:[4]U4:[ordering="fwd"] = 0
   f_pre      = m_fwd[wa]        // read BEFORE the write: fwd is position-blind
   m_fwd[wa]  = wd
 
-  reg m_prog:[4]u4:[ordering="program"] = 0
+  reg m_prog:[4]U4:[ordering="program"] = 0
   p_pre      = m_prog[wa]       // read BEFORE the write -> old
   m_prog[wa] = wd
   p_post     = m_prog[wa]       // read AFTER the write  -> new
 
-  reg m_none:[4]u4:[ordering="none"] = 0
+  reg m_none:[4]U4:[ordering="none"] = 0
   m_none[wa] = wd
   n_clean    = m_none[ra]       // a DIFFERENT address: no collision, so defined
 
@@ -59,9 +59,9 @@ mod ord_sim(wa:u2, wd:u4, ra:u2) -> (o_old:u4@[0], f_pre:u4@[0], p_pre:u4@[0], p
   // an earlier read of the same memory. That is legal hardware (the read takes
   // the array, not the write's data), but it is a false combinational cycle for
   // any codegen that stages the write before the read it feeds on.
-  reg m_rmw:[4]u4:[ordering="program"] = 0
+  reg m_rmw:[4]U4:[ordering="program"] = 0
   const seen = m_rmw[wa]        // read BEFORE the write -> the committed value
-  mut nxt:u4 = 0
+  mut nxt:U4 = 0
   wrap nxt   = seen + 1
   m_rmw[wa]  = nxt              // ... which then drives the write
   rmw_pre  = seen

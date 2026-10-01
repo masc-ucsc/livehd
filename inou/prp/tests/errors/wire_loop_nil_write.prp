@@ -1,0 +1,22 @@
+/*
+:name: wire_loop_nil_write
+:type: error
+:error: for-loop body may not drive wire 'back'
+:help: drive the wire outside the loop
+*/
+
+// User ruling 2026-09-27 (ruling 5): a loop body may READ a `wire` but not
+// WRITE one. `= nil` only forward-declares a wire declared in the body itself;
+// on a wire declared outside the loop it is a write like any other. It used to
+// slip past the check (the single-driver count skips a `wire w = nil`
+// forward-declare), so the loop rolled with `back` as a loop output and the
+// compile failed with `unresolved reference back___ssa_1`, while the same file
+// under `--set compile.unroll=true` compiled.
+mod wire_loop_nil_write(a:U8) -> (z:U8@[0]) {
+  wire back:U8 = nil
+  for i in 0..<1 {
+    back = nil  // locate_error_here
+  }
+  back = a
+  z = back
+}

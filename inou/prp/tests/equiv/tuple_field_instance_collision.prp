@@ -4,15 +4,15 @@
 :verilog_top: tuple_field_instance_collision
 :pyrope_top: tuple_field_instance_collision
 */
-comb field_collision_child(a:u8) -> (rdata:u8, regOut:(value:u8)) {
+comb field_collision_child(a:U8) -> (rdata:U8, regOut:(value:U8)) {
   rdata = a
   regOut.value = a
 }
 
 // Field labels must not type the later instance or inherit the earlier local's range.
-pub comb tuple_field_instance_collision(a:u8) -> (y:u8, z:u8, q:u8) {
-  const narrow:u1 = 1
-  wire io:(mtopi:u8, narrow:u8, `a.b`:u8) = nil
+pub comb tuple_field_instance_collision(a:U8) -> (y:U8, z:U8, q:U8) {
+  const narrow:U1 = 1
+  wire io:(mtopi:U8, narrow:U8, `a.b`:U8) = nil
   const value = io.mtopi
   mut mtopi = field_collision_child::[name=mtopi](a=value)
   io.mtopi = a

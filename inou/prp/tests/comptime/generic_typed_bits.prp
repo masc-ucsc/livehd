@@ -1,0 +1,32 @@
+/*
+:name: generic_typed_bits
+:type: parsing lnast comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// `.[bits]` of a generic is the `.[bits]` of what it substitutes (docs
+// 06-functions: "attribute queries on a generic are exactly as legal as on the
+// substituted entity"; user rulings 2026-09-27 (6) and 2026-09-28 (19)).
+//   - bound to a LITERAL or an untyped comptime value: value-derived (13 -> 4);
+//   - bound to a TYPED comptime constant: that constant's declared type, as
+//     `W.[bits]` itself reads (U8 -> 8), for an explicit binding and for a
+//     declaration default alike.
+// A generic cannot declare a type of its own (`<W:U8>` is an error, see
+// errors/generic_typed_param.prp).
+
+comptime const t:U8 = 13
+cassert(t.[bits] == 8)
+
+comb bits_of<W>(x) -> (r) { r = W.[bits] + x }
+cassert(bits_of<W=13>(x=0) == 4)    // a literal: its value's width
+cassert(bits_of<W=t>(x=0) == 8)     // the typed constant: its declared U8
+
+comptime const t6:Unsigned(bits=6) = 2
+cassert(bits_of<W=t6>(x=0) == 6)
+
+comb bits_def<W=t>(x) -> (r) { r = W.[bits] + x }
+cassert(bits_def(x=0) == 8)         // the default names the typed constant
+
+comptime const u = 13
+cassert(bits_of<W=u>(x=0) == 4)     // an untyped comptime: value-derived

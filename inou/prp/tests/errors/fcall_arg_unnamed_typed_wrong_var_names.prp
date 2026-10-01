@@ -8,9 +8,9 @@
 // bind to when both formals have the same type. Bare variables can omit argument
 // names only when the variable names match the formal parameter names.
 
-comb method(a:u16, b:u16) -> (r:u17) { r = a + b }
+comb method(a:U16, b:U16) -> (r:U17) { r = a + b }
 
-const in1:u16 = 1
-const in2:u16 = 2
+const in1:U16 = 1
+const in2:U16 = 2
 
 cassert(method(in1, in2) == 3) // locate_error_here

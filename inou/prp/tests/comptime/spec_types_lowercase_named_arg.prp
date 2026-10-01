@@ -1,0 +1,14 @@
+/*
+:name: spec_types_lowercase_named_arg
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+// Former lowercase type spellings are ordinary identifiers (07-typesystem.md).
+comb f(`i32`:U8) -> (o:U8) { o = `i32` }
+pub comb spec_types_lowercase_named_arg(a:U8) -> (o:U8) {
+  o = f(i32=a)
+}
+
+cassert(spec_types_lowercase_named_arg(a=7) == 7)

@@ -11,18 +11,18 @@ pub mod add_node<T>::[timecheck=false](a:T, b:T) -> (s:T@[0]) {
   s = s_r
   wrap s_r = a + b
 }
-pub mod multiply<FAST=false>::[timecheck=false](a:u8) -> (s:u8@[0]) {
+pub mod multiply<FAST=false>::[timecheck=false](a:U8) -> (s:U8@[0]) {
   s = if FAST { a ^ 3 } else { a }
 }
-pub mod top::[timecheck=false](a:u8, b:u8) -> (s:u8@[0]) {
+pub mod top::[timecheck=false](a:U8, b:U8) -> (s:U8@[0]) {
   const mul = multiply<FAST=true>(a=a)
-  s = add_node<u8>(a=mul, b=b)
+  s = add_node<U8>(a=mul, b=b)
 }
-pub mod signed_chain::[timecheck=false](a:s4, b:s4) -> (s:s10@[0]) {
-  const first = add_node<s10>(a=a, b=b)
-  const second = add_node<s10>(a=first, b=first)
-  const third = add_node<s10>(a=second, b=second)
-  s = add_node<s10>(a=third, b=third)
+pub mod signed_chain::[timecheck=false](a:S4, b:S4) -> (s:S10@[0]) {
+  const first = add_node<S10>(a=a, b=b)
+  const second = add_node<S10>(a=first, b=first)
+  const third = add_node<S10>(a=second, b=second)
+  s = add_node<S10>(a=third, b=third)
 }
 PRP
 "$LHD" compile "$W/templates.prp" --emit-dir "ln:$W/library" --workdir "$W/export"
@@ -37,14 +37,14 @@ grep -q '"verdict":"proven".*"bounded":false' "$W/signed_chain.json"
 cat > "$W/consumer.prp" <<'PRP'
 const lib = import("templates")
 const add = import("templates.add_node")
-pub mod consumer::[timecheck=false](a:u8, b:u8) -> (s:u8@[0]) {
+pub mod consumer::[timecheck=false](a:U8, b:U8) -> (s:U8@[0]) {
   const mul = lib.multiply(a=a)
-  s = add<u8>(a=mul, b=b)
+  s = add<U8>(a=mul, b=b)
 }
 PRP
 cat > "$W/reference.prp" <<'PRP'
-pub mod consumer::[timecheck=false](a:u8, b:u8) -> (s:u8@[0]) {
-  reg s_r:u8 = 0
+pub mod consumer::[timecheck=false](a:U8, b:U8) -> (s:U8@[0]) {
+  reg s_r:U8 = 0
   s = s_r
   wrap s_r = a + b
 }

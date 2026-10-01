@@ -31,10 +31,14 @@ computed forward once, with a bounded representation size.
 ## Mux sharing
 
 `cprop_opshare.cpp` factors private same-shape operators out of binary muxes
-before region sharing. Operand banks retain their arity and multiplicity;
+before region sharing. Exclusive Hotmux groups use the same shape matcher,
+retain the original outer controls/default, and use proven subset controls for
+operand Hotmuxes. An inactive group evaluates an original operand vector,
+avoiding newly introduced zero divisors. Operand banks retain their arity and multiplicity;
 positional parameters (mask, extension position, reduction count and Concat
-lane widths) must agree. Fresh operand muxes are unstamped: bitwidth unions
-their full signed/unsigned ranges afterwards. The retained output still has
+lane widths) must agree. Fresh operand muxes receive a lossless union carrier only when every operand
+realization is known; otherwise bitwidth unions their full signed/unsigned
+ranges afterwards. The retained output still has
 the original observation boundary. Cprop must be followed by bitwidth before
 finite-width simulation, emission or LEC; a result hint is not a truncation
 operator in cprop's integer algebra.
@@ -50,8 +54,21 @@ unknown literals and latch-Q operands. Its worklist uses pin generations and
 a graph-size work/edge budget; operand sorting has its usual logarithmic cost.
 Index sharing currently requires a structurally proven in-range selector:
 the runtime's invalid result, cprop's zero and LEC's last-arm out-of-range
-behavior need reconciliation before general indexed sharing. Hotmux operator
-sharing is still pending. Existing mux-region grouping below is independent.
+behavior need reconciliation before general indexed sharing. Hotmux groups require matching result realizations. Existing mux-region
+grouping below is independent.
+
+`cprop_muxctx.cpp` prunes disjoint private selection regions before operator
+sharing. Its iterative walk stores at most 16 equality/disequality facts per
+path; copied sibling snapshots provide rollback. It changes only the relevant
+data edge or disables an exclusive Hotmux control, never globally replacing a
+value from a contextual fact. Named/shared/state/check/color boundaries stop
+the walk. Boolean data becomes 0/1 only from structural bool01 evidence.
+The region predicate emitter also consults these facts to avoid contradictory
+paths without expanding a shared predicate DAG into a sum of products.
+
+Exclusive Hotmux CSE sorts complete control/value pairs and retains a separate
+default and proof distinction. Runtime-check cells and unproven Hotmuxes do not
+participate. Even equal data cannot erase an unproven overlap obligation.
 
 `cprop_mux.cpp` groups repeated data values across binary `Mux` and exclusive
 `Hotmux` regions. With exactly two values, it first plans a predicate over the

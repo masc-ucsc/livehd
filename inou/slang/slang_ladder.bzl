@@ -39,7 +39,6 @@ SLANG_LADDER = {
     "latch": "lec",  # PROMOTED 2f-latch M0/M1 (was fixme_latch, tier "error"): the FIXTURE was wrong —
                      # `output q` is a net, procedurally written inside always_latch. Fixed to
                      # `output logic q`; M1 then fixed cgen's undeclared-enable emission, so it LECs.
-    "fixme_mem_offset": "verilog",  # capped: 46-entry array, slow memory LEC
     "fixme_multiport": "lec",
     "nlatch": "lec",  # PROMOTED with latch above (transparent-LOW twin) — the polarity the lgyosys
                       # bounded miter actually discriminates, so its round-trip LEC is not vacuous.
@@ -92,6 +91,8 @@ SLANG_LADDER = {
     "long_shared_ports": "lec",
     "loop_in_lg": "lec",
     "loop_in_lg2": "lec",
+    "mem_neg_offset": "lec",  # [-3:4] index range at a signed index: out-of-range writes are dropped, never aliased
+    "mem_offset": "lec",  # [5:36] index range + 7-bit addresses: out-of-range writes are dropped, never aliased
     "mem_reset": "lec",
     "mem_sync_init": "verilog",  # initial-block ROM contents lower correctly in LNAST (init tuple) but the read-only `mut` array zero-fills in tolg instead of becoming a Memory with INIT
     "mismatch": "lec",

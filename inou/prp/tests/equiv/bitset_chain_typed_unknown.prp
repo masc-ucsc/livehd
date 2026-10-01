@@ -1,0 +1,32 @@
+/*
+:name: bitset_chain_typed_unknown
+:type: equiv
+:verilog_top: bitset_chain_typed_unknown
+:pyrope_top: bitset_chain_typed_unknown
+*/
+
+// The shape Pyrope regenerated from a Verilog priority encoder takes
+// (lhdtrack br_arb_multi_rr, br_enc_priority_encoder.prp): a typed u62
+// seeded with X, then a chain of untyped copies each setting one more bit.
+// Every bit lands inside the declared 62 bits, so the chain's range stays
+// [0, 2^62-1] and fits `out:U62`.
+//
+// upass.bitwidth reads range bounds back through a check that only accepted
+// values of at most 62 SIGNED bits, i.e. below 2^61. A u62 value with bit 61
+// set (and the `1 << 61` mask that sets it) is past that, so the chain went
+// unbounded and the store into `out` failed ruling 21:
+//   `out` (unbounded range) may not fit its declared range [0, 2^62-1]
+pub mod bitset_chain_typed_unknown::[timecheck=false](a:U62, b:U2) -> (out:U62@[]) {
+  mut out_internal:U62 = 0
+  out_internal = 0sb?
+  mut out_internal__w1 = out_internal
+  out_internal__w1#[0..=59] = a#[0..=59]
+  const t1 = b & 1
+  mut out_internal__w2 = out_internal__w1
+  out_internal__w2#[60] = Unsigned(t1) & 1
+  const t2 = (b >> 1) & 1
+  mut out_internal__w3 = out_internal__w2
+  out_internal__w3#[61] = Unsigned(t2) & 1
+  const out__w1 = out_internal__w3
+  out = out__w1
+}

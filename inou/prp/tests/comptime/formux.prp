@@ -5,7 +5,7 @@
 :verifier_fail: 0
 */
 
-comb code1(cond1:bool, cond2:bool, a:u32, b:u32, c:u32) -> (res:u32) {
+comb code1(cond1:Bool, cond2:Bool, a:U32, b:U32, c:U32) -> (res:U32) {
   mut res = a
   unique if cond1 {
     res = b
@@ -14,12 +14,12 @@ comb code1(cond1:bool, cond2:bool, a:u32, b:u32, c:u32) -> (res:u32) {
   } // no res in else
 }
 
-comb code2(cond1:bool, cond2:bool, a:u32, c:u32, b:u32) -> (res:u32) {
+comb code2(cond1:Bool, cond2:Bool, a:U32, c:U32, b:U32) -> (res:U32) {
   // RTL equivalent — one (control, value) pair per arm
-  const s0 = cond2 and !cond1
-  const s1 = cond1
-  const s2 = !cond1 and !cond2
-  mut res = __hotmux(p0=s0, p1=c, p2=s1, p3=b, p4=s2, p5=a)
+  const sel0 = cond2 and !cond1
+  const sel1 = cond1
+  const sel2 = !cond1 and !cond2
+  mut res = __hotmux(p0=sel0, p1=c, p2=sel1, p3=b, p4=sel2, p5=a)
   // Priority makes the controls one-hot for all four condition combinations.
 }
 

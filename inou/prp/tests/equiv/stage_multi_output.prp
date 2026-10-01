@@ -1,0 +1,29 @@
+/*
+:name: stage_multi_output
+:type: equiv
+:verilog_top: stage_multi_output
+:pyrope_top: stage_multi_output
+*/
+// `stage[N]` over a call with SEVERAL outputs: every output lands at cycle N
+// (a mod's declared @[2] outputs, a pipe[2]'s outputs), so the name binds the
+// instance's port tuple with no extra flop and `t.q1`/`u.y` read the ports.
+// Before, the multi-output result was left undriven (tolg: "unresolved
+// reference '%t_0'"); a mismatched pick is errors/stage_multi_output_mismatch.
+mod two(a:U8) -> (q1:U8@[2], q2:U8@[2]) {
+  stage[2] q1 = a
+  stage[2] q2 = a ^ 0x5A
+}
+
+pipe[2] p2(a:U8) -> (x:U8, y:U8) {
+  x = a
+  y = a ^ 0x0F
+}
+
+pub mod stage_multi_output(a:U8, b:U8) -> (o1:U8@[2], o2:U8@[2], o3:U8@[2], o4:U8@[2]) {
+  stage[2] t = two(a)
+  stage[2] u = p2(b)
+  o1 = t.q1
+  o2 = t.q2
+  o3 = u.x
+  o4 = u.y
+}

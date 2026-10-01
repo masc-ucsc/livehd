@@ -3,13 +3,13 @@
 :type: simulation
 :expect_instances: u_loop_*=3 *=3
 */
-comb accumulate(x:u8) -> (y:u16) {
+comb accumulate(x:U8) -> (y:U16) {
   comptime const OFFSET = 9
-  mut acc:u16 = x
+  mut acc:U16 = x
   for i in 0..<4 { acc = acc + x + OFFSET }
   y = acc
 }
-mod loop_inlined_capture(x:u8) -> (y:u16@[0]) {
+mod loop_inlined_capture(x:U8) -> (y:U16@[0]) {
   const a = accumulate(x=x)
   const b = accumulate(x=x ^ 3)
   y = a + b

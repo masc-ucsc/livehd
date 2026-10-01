@@ -1,0 +1,23 @@
+/*
+:name: mem_two_same_shape
+:type: equiv
+:verilog_top: mem_two_same_shape
+:pyrope_top: mem_two_same_shape
+:equiv_lec_grep_not: tier-2 unpaired state
+*/
+// Two memories of the SAME shape (4 x u4), no reset, one shared output. The
+// golden writes both from a for-loop (a whole-array update once read); the
+// round trip keeps each behind cgen's reversible wrapper `__lhdmem_h<hex>_e`.
+// Shape cannot tell the two apart (two per shape per side) and neither can
+// structure (same write inputs, same output), so semdiff must pair them
+// memory-to-memory by the DECODED cgen name -- `:equiv_lec_grep_not:` fails the pair
+// when either memory is left unpaired.
+pub mod mem_two_same_shape(clk:Clock, we:Bool, wa:U2, wd:U4, ra:U2) -> (q:U4@[0]) {
+  reg ma:[4]U4 = nil
+  reg mb:[4]U4 = nil
+  q = ma[ra] ^ ((mb[ra] & 0x3) << 2)
+  if we {
+    ma[wa] = wd
+    mb[wa] = wd ^ 0xF
+  }
+}

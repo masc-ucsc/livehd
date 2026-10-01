@@ -4,8 +4,8 @@
 :expect_instances: u_loop_0=1 *=1
 */
 // A trip count above the old 1024 limit must still use one compact instance.
-pub mod loop_roll_large_domain(x:u16) -> (value:u16@[0]) {
-  mut acc:u16 = x
+pub mod loop_roll_large_domain(x:U16) -> (value:U16@[0]) {
+  mut acc:U16 = x
   for i in 0..<1025 { acc = acc ^ i }
   value = acc
 }

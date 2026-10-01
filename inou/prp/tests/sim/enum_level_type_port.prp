@@ -1,0 +1,56 @@
+/*
+:name: enum_level_type_port
+:type: simulation
+*/
+// User ruling 2026-09-28 (29): an enum with an INTEGER level type numbers its
+// entries SEQUENTIALLY (03-bundle.md "Enumerate": an explicit value resets the
+// sequence), and a port, a `reg` or a local of the enum is that level type.
+// The level type may be spelled any way an integer type can: `U8`,
+// `Unsigned(bits=4)`, or a `type` alias of one (through another alias too).
+//   * `Op:Unsigned(bits=4)`: a=0, b=1, c=2 -> a 4-bit port;
+//   * `Cmd:Nib2` (Nib2 = Nib = U4): x=0, y=5, z=6 -> a 4-bit port;
+//   * `Lvl:U8`: lo=0, mid=1, hi=2 -> an 8-bit port.
+// Before, only a `UN`/`SN` level spelled literally was an integer level: the
+// others numbered one-hot (Op.c == 4) and their ports lowered as ONE SIGNED
+// bit, so the value crossing them was silently wrong.
+
+type Nib  = U4
+type Nib2 = Nib
+enum Op:Unsigned(bits=4) = (a, b, c)
+enum Cmd:Nib2 = (x, y = 5, z)
+enum Lvl:U8 = (lo, mid, hi)
+
+mod pick(o:Op, c:Cmd, l:Lvl) -> (ov:U8@[0], cv:U8@[0], lv:U8@[0], ow:U8@[0], cw:U8@[0], lw:U8@[0], isc:Bool@[0]) {
+  ov  = o
+  cv  = c
+  lv  = l
+  ow  = o.[bits]
+  cw  = c.[bits]
+  lw  = l.[bits]
+  isc = o == Op.c
+}
+
+pub mod enum_level_type_port(s:Bool) -> (ov:U8@[0], cv:U8@[0], lv:U8@[0], ow:U8@[0], cw:U8@[0], lw:U8@[0], isc:Bool@[0]) {
+  const k = pick(o = if s { Op.c } else { Op.b }, c = if s { Cmd.z } else { Cmd.x }, l = Lvl.hi)
+  ov  = k.ov
+  cv  = k.cv
+  lv  = k.lv
+  ow  = k.ow
+  cw  = k.cw
+  lw  = k.lw
+  isc = k.isc
+}
+
+test enum_level_type_port.run {
+  mut t   = enum_level_type_port
+  mut bad = 0
+  t.s = true
+  step
+  if t.ov != 2 or t.cv != 6 or t.lv != 2 or not t.isc { bad += 1 }
+  if t.ow != 4 or t.cw != 4 or t.lw != 8 { bad += 1 }
+  t.s = false
+  step
+  if t.ov != 1 or t.cv != 0 or t.isc { bad += 1 }
+  puts("bad={bad}")
+  assert(bad == 0)
+}

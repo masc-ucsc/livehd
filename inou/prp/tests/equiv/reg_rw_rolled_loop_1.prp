@@ -1,0 +1,10 @@
+/*
+:name: reg_rw_rolled_loop_1
+:set: compile.unroll=true
+:lec_expect: proven
+*/
+// HEADER-ONLY variant: the source is reg_rw_rolled_loop.prp with rolling off.
+// The rolled reference (seven compact `u_loop_*` instances, the nested inner
+// loop included) and this unrolled build must be the same design; before the
+// register-carry fix the rolled side kept `___next_r = r` and this pair
+// REFUTED.

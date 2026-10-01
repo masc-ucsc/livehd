@@ -9,6 +9,7 @@
 #include <format>
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <tuple>
 
@@ -657,6 +658,21 @@ TEST(Semdiff, EscapedVerilogStateNameUsesCanonicalIdentity) {
   EXPECT_EQ(0U, r.state.b_unpaired);
 }
 
+// cgen's reversible memory wrapper storage (`__lhdmem_h<hex>_e.data`, or the
+// inline `_e_data` register) names its source state: it pairs by NAME with the
+// golden's `mem`, with no structural signature needed.
+TEST(Semdiff, CgenMemoryStorageNamePairsWithItsSource) {
+  auto a = build_pipe2("lgdb_semdiff_cgenmem_a", "mem", "lane.mem");
+  auto b = build_pipe2("lgdb_semdiff_cgenmem_b", "__lhdmem_h6d656d_e.data", "lane.__lhdmem_h6d656d_e_data");
+
+  livehd::semdiff::Semdiff_options options;
+  options.matching_names = true;
+  auto r                 = livehd::semdiff::structural_match(a.get(), b.get(), options);
+  EXPECT_EQ(2U, r.state.name_pairs);
+  EXPECT_EQ(0U, r.state.a_unpaired);
+  EXPECT_EQ(0U, r.state.b_unpaired);
+}
+
 // A `__flat___` instance component is not logical hierarchy (graph/README.md):
 // foo.__flat___region.bar.x names the same state as foo.bar.x, while an
 // ordinary `region` level is a different name.
@@ -915,6 +931,145 @@ TEST(Semdiff, BusBitNamesReaggregateWithoutProvenance) {
   }
 }
 
+// Two one-bit registers driving q1/q2: `gname` latches input a and `hname`
+// input b (crossed when `swap`). `g_init` optionally ties an initial (reset)
+// constant to the first one. The state names are what the test varies: `g`
+// on the ref, `g.l` / `g_cgen1.l` (core/bus_name cell_state_owner) on the impl.
+std::shared_ptr<hhds::Graph> build_named_regs(const std::string& dir, const std::string& gname, const std::string& hname, bool swap,
+                                              std::optional<int64_t> g_init = std::nullopt) {
+  auto& lib = livehd::Hhds_graph_library::instance(dir);
+  auto  gio = lib.create_io("t");
+  gio->add_input("a", 1);
+  gio->add_input("b", 2);
+  gio->add_output("q1", 3);
+  gio->add_output("q2", 4);
+  auto g  = gio->create_graph();
+  auto mk = [&](const std::string& nm, const char* din, const char* out, std::optional<int64_t> init) {
+    auto f = create_typed_node(*g, Ntype_op::Flop);
+    f.set_name(nm);
+    g->get_input_pin(din).connect_sink(setup_sink_pid(f, 3));  // din
+    if (init) {
+      livehd::graph_util::create_const(*g, *Dlop::create_integer(*init)).connect_sink(setup_sink_pid(f, 1));  // initial
+    }
+    auto q = f.create_driver_pin(0);
+    livehd::graph_util::set_bits(q, 1);
+    livehd::graph_util::set_pin_name(q, nm);
+    q.connect_sink(g->get_output_pin(out));
+  };
+  mk(gname, swap ? "b" : "a", "q1", g_init);
+  mk(hname, swap ? "a" : "b", "q2", std::nullopt);
+  return g;
+}
+
+// A bus_name-reconstructed pair (`g` vs the read-back cell state `g.l`) is a
+// HINT, so its din/initial obligation must still be checked. The obligations
+// used to be keyed by the RAW names (`n:g` vs `n:g.l`): both one-sided, both
+// skipped, while the renamed key made the pair a certain tier-1 match and the
+// node sets a bijection. Swapped dins, or a different reset constant, then
+// read as structurally identical and lec's no-solver skip PROVED them.
+TEST(Semdiff, ReconstructedStateNameKeepsItsObligation) {
+  livehd::semdiff::Semdiff_options o;
+  o.matching_names = true;
+  int k            = 0;
+  for (const auto& [gl, hl] : std::initializer_list<std::pair<const char*, const char*>>{
+           {      "g.l",       "h.l"},
+           {"g_cgen1.l", "h_cgen2.l"}
+  }) {
+    const auto dir = [&](std::string_view tag) { return std::format("lgdb_semdiff_recon_{}_{}", tag, k); };
+    auto       ref = build_named_regs(dir("ref"), "g", "h", false);
+    auto       ok  = build_named_regs(dir("ok"), gl, hl, false);
+    auto       sw  = build_named_regs(dir("sw"), gl, hl, true);
+    ++k;
+
+    auto rok = livehd::semdiff::structural_match(ref.get(), ok.get(), o);
+    EXPECT_EQ(2U, rok.state.name_pairs) << gl;
+    EXPECT_EQ(2U, rok.state.name_reconstructed) << gl;
+    EXPECT_EQ(0U, rok.cut_violated) << gl;
+    EXPECT_EQ(0U, rok.cut_unknown) << gl;
+    EXPECT_TRUE(livehd::semdiff::is_structural_identity(rok)) << gl;  // a VERIFIED hint stays fast
+    EXPECT_TRUE(livehd::semdiff::structural_identical(ref.get(), ok.get(), o)) << gl;
+
+    auto rsw = livehd::semdiff::structural_match(ref.get(), sw.get(), o);
+    EXPECT_EQ(2U, rsw.state.name_reconstructed) << gl;
+    EXPECT_EQ(0U, rsw.a_unmatched) << gl;  // the node sets alone cannot see the swap...
+    EXPECT_EQ(0U, rsw.b_unmatched) << gl;
+    EXPECT_EQ(2U, rsw.cut_violated) << gl;  // ...the paired obligations do
+    ASSERT_EQ(2U, rsw.cut_violations.size()) << gl;
+    std::vector<std::string> v = rsw.cut_violations;
+    std::sort(v.begin(), v.end());
+    EXPECT_EQ(v[0], std::format("n:g <-> n:g [n:{}]", gl));  // names the ref key AND the impl's own cell
+    EXPECT_FALSE(livehd::semdiff::is_structural_identity(rsw)) << gl;
+    EXPECT_FALSE(livehd::semdiff::structural_identical(ref.get(), sw.get(), o)) << gl;
+  }
+
+  // Same structure, same names, only the reset constant differs.
+  auto ref0 = build_named_regs("lgdb_semdiff_recon_init_ref", "g", "h", false, 0);
+  auto ok0  = build_named_regs("lgdb_semdiff_recon_init_ok", "g.l", "h.l", false, 0);
+  auto bad1 = build_named_regs("lgdb_semdiff_recon_init_bad", "g.l", "h.l", false, 1);
+  EXPECT_TRUE(livehd::semdiff::structural_identical(ref0.get(), ok0.get(), o));
+  auto rb = livehd::semdiff::structural_match(ref0.get(), bad1.get(), o);
+  EXPECT_EQ(2U, rb.state.name_pairs);
+  EXPECT_EQ(1U, rb.cut_violated);
+  EXPECT_FALSE(livehd::semdiff::is_structural_identity(rb));
+  EXPECT_FALSE(livehd::semdiff::structural_identical(ref0.get(), bad1.get(), o));
+}
+
+// The physical-name bridge (aggregate provenance on one side only: the direct
+// Pyrope graph vs its Verilog read-back) pairs `bank.e0` with `bank.e0` by a
+// token, while each side's raw key differs (`n:bank` from aggregate_origin vs
+// `n:bank.e0`). Its obligations must follow the token, or two lanes whose dins
+// were swapped by the emitter match with nothing checked.
+TEST(Semdiff, PhysicalBridgePairKeepsItsObligation) {
+  auto make = [](const std::string& dir, bool keep_provenance, bool swap) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+    auto  gio = lib.create_io("m");
+    gio->add_input("d0", 1);
+    gio->add_input("d1", 2);
+    gio->add_output("q0", 3);
+    gio->add_output("q1", 4);
+    auto g = gio->create_graph();
+    for (int lane = 0; lane < 2; ++lane) {
+      const auto canonical = std::format("bank.e{}", lane);
+      const auto spelled   = keep_provenance ? canonical : std::format("`{}`", canonical);
+      auto       flop      = create_typed_node(*g, Ntype_op::Flop);
+      flop.set_name(spelled);
+      g->get_input_pin((lane == 0) != swap ? "d0" : "d1").connect_sink(setup_sink_pid(flop, 3));
+      auto q = flop.create_driver_pin(0);
+      livehd::graph_util::set_bits(q, 8);
+      livehd::graph_util::set_pin_name(q, spelled);
+      q.connect_sink(g->get_output_pin(lane == 0 ? "q0" : "q1"));
+      if (keep_provenance) {
+        flop.attr(livehd::attrs::aggregate_origin).set("bank");
+        flop.attr(livehd::attrs::aggregate_source_index).set(lane);
+        flop.attr(livehd::attrs::aggregate_lane_ordinal).set(lane);
+        flop.attr(livehd::attrs::aggregate_bit_offset).set(lane * 8);
+        flop.attr(livehd::attrs::aggregate_bit_width).set(8);
+        flop.attr(livehd::attrs::aggregate_extent).set(2);
+      }
+    }
+    return g;
+  };
+  auto ref = make("lgdb_semdiff_physob_ref", true, false);
+  auto ok  = make("lgdb_semdiff_physob_ok", false, false);
+  auto sw  = make("lgdb_semdiff_physob_sw", false, true);
+
+  livehd::semdiff::Semdiff_options o;
+  o.matching_names = true;
+  auto rok         = livehd::semdiff::structural_match(ref.get(), ok.get(), o);
+  EXPECT_EQ(1U, rok.state.name_pairs);  // the bridged aggregate
+  EXPECT_EQ(0U, rok.state.name_reconstructed);
+  EXPECT_EQ(0U, rok.cut_violated);
+  EXPECT_EQ(0U, rok.cut_unknown);
+  EXPECT_TRUE(livehd::semdiff::is_structural_identity(rok));
+
+  auto rsw = livehd::semdiff::structural_match(ref.get(), sw.get(), o);
+  EXPECT_EQ(0U, rsw.a_unmatched);
+  EXPECT_EQ(0U, rsw.b_unmatched);
+  EXPECT_EQ(2U, rsw.cut_violated);
+  EXPECT_FALSE(livehd::semdiff::is_structural_identity(rsw));
+  EXPECT_FALSE(livehd::semdiff::structural_identical(ref.get(), sw.get(), o));
+}
+
 TEST(Semdiff, SroaStructArrayLeavesReaggregateForNamePairing) {
   auto make = [](const std::string& dir, bool split) {
     auto& lib = livehd::Hhds_graph_library::instance(dir);
@@ -1139,6 +1294,43 @@ TEST(Semdiff, StatePairingMemoryWidthMismatchRefuses) {
   auto r           = livehd::semdiff::structural_match(a.get(), b.get(), o);
 
   EXPECT_EQ(0U, r.state.full_pairs);
+}
+
+// Every memory PORT feeds the tier-2 signature: port k's pins sit at
+// k*Memory_port_stride + role, so a second write port's data must count too.
+// Two renamed memories that differ only in what their port 1 writes are
+// different state and must stay unpaired; the same pair with equal ports pairs.
+TEST(Semdiff, StatePairingMemorySecondPortCounts) {
+  auto two_port = [](const std::string& dir, const std::string& nm, const std::string& port1_din) {
+    auto& lib = livehd::Hhds_graph_library::instance(dir);
+    auto  gio = lib.create_io("m");
+    gio->add_input("d0", 1);
+    gio->add_input("d1", 2);
+    gio->add_output("q", 3);
+    auto g = gio->create_graph();
+    auto m = create_typed_node(*g, Ntype_op::Memory);
+    g->get_input_pin("d0").connect_sink(setup_sink_pid(m, 4));
+    g->get_input_pin(port1_din).connect_sink(setup_sink_pid(m, Ntype::Memory_port_stride + 4));
+    auto q = m.create_driver_pin(0);
+    livehd::graph_util::set_bits(q, 8);
+    livehd::graph_util::set_pin_name(q, nm);
+    q.connect_sink(g->get_output_pin("q"));
+    return g;
+  };
+  livehd::semdiff::Semdiff_options o;
+  o.matching_names = true;
+  o.state_pairing  = true;
+
+  auto a      = two_port("lgdb_semdiff_mp_a", "ma", "d1");
+  auto same   = two_port("lgdb_semdiff_mp_b", "mx", "d1");
+  auto paired = livehd::semdiff::structural_match(a.get(), same.get(), o);
+  EXPECT_EQ(1U, paired.state.full_pairs);
+
+  auto differ   = two_port("lgdb_semdiff_mp_c", "mx", "d0");
+  auto unpaired = livehd::semdiff::structural_match(a.get(), differ.get(), o);
+  EXPECT_EQ(0U, unpaired.state.full_pairs);
+  EXPECT_EQ(1U, unpaired.state.a_unpaired);
+  EXPECT_EQ(1U, unpaired.state.b_unpaired);
 }
 
 // Caller-supplied seed pairs (lec.match) are tier-1 anchors: the seeded pair

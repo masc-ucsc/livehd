@@ -1,0 +1,32 @@
+/*
+:name: pipe_child_ring_cycle_mix
+:type: error
+:tolg: 1
+:error: ^(?!.*combinational loop).*mixes values at different cycles
+*/
+
+// 06c-pipelining.md: "any feedback loop closed through a `pipe` is sequential
+// by construction. A `mod` can instantiate `pipe`s in feedback topologies
+// without creating combinational loops." A `pipe` has no input-to-output
+// combinational path, so the ring `gr -> st -> m -> gr` is NOT a combinational
+// loop. It does mix the pipe's cycle-1 output with the cycle-0 request, so
+// without `::[timecheck=false]` (the documented escape hatch, user ruling
+// 2026-09-27; sim/pipe_child_ring_timecheck_off.prp) it is a cycle-mix TIMING
+// error.
+//
+// Before the 2.1 fix, upass.tolg's time-checker modeled the Sub as a crossbar
+// and reported a FALSE combinational loop instead:
+//   upass.tolg: combinational loop in 'pipe_child_ring_cycle_mix.top'
+// The :error: regex rejects ANY emitted 'combinational loop' (the harness
+// joins every error message with ' || '), so a partial fix that still
+// reports the false loop next to the cycle mix stays red.
+pipe[1] st(d:U4) -> (q:U4) {
+  q = d
+}
+
+pub mod top(req:U4) -> (g:U4@[0]) {
+  wire gr:U4 = nil
+  stage[1] m = st(d=gr)
+  gr = req & ~m   // locate_error_here
+  g = gr
+}

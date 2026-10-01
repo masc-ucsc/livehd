@@ -1,0 +1,20 @@
+// Imported by mod_multi_output_cycle_mismatch_import.prp and
+// mod_multi_output_landing_import.prp. `dly2` is a MULTI-output mod whose
+// outputs land at DIFFERENT cycles: `vld` is a 1-cycle delay of `en` (an
+// always-written reg, a feedforward stage, so `@[1]`) and `q` is a gated state
+// register (`@[0]`). `dly1` is the single-output 1-cycle delay used to chain
+// `vld` one more cycle.
+pub mod dly2(en:Bool, d:U4) -> (vld:Bool@[1], q:U4@[0]) {
+  reg vr:Bool = false
+  vr = en
+  vld = vr
+  reg r:U4 = 0
+  if en { r = d }
+  q = r
+}
+
+pub mod dly1(en:Bool) -> (vld:Bool@[1]) {
+  reg vr:Bool = false
+  vr = en
+  vld = vr
+}

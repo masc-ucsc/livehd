@@ -1,0 +1,9 @@
+/*
+:name: spec_calls_vararg_positional
+:type: error
+:error: must be named
+*/
+
+// A capture accepts named leftovers, not positional tuple shorthand.
+comb add1(...x) -> (r) { r = 100 }
+const s = add1(1, 2, 3) // locate_error_here

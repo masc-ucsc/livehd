@@ -15,8 +15,8 @@
 //   we_b -> r = bdata   (higher priority)
 //   we_a -> r = adata
 //   none -> HOLD
-pub mod regfile(we_a:bool, we_b:bool, adata:u8, bdata:u8) -> (q:u8@[0]) {
-  reg r:u8 = 0
+pub mod regfile(we_a:Bool, we_b:Bool, adata:U8, bdata:U8) -> (q:U8@[0]) {
+  reg r:U8 = 0
   if we_b {
     r = bdata
   } elif we_a {

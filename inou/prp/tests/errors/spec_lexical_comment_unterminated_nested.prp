@@ -1,0 +1,11 @@
+/*
+:name: spec_lexical_comment_unterminated_nested
+:type: error
+:error: unterminated block comment
+*/
+// qa.md appendix 3: "Nested block comments: `/* a /* b */ c */` is one
+// comment." So the inner close below does not end the outer comment and the
+// file ends inside it.
+const a = 1
+/* a /* b */ still inside the outer comment: locate_error_here
+const b = 2

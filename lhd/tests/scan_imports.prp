@@ -2,6 +2,6 @@
 const b = import("some/bar")
 const f = import("xxx/zzz/yyy.foo")
 
-comb top(a:u3) -> (z:u4) {
+comb top(a:U3) -> (z:U4) {
   z = a + 1
 }

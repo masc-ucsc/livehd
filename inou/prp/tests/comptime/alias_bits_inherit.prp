@@ -1,0 +1,33 @@
+/*
+:name: alias_bits_inherit
+:type: comptime
+:verifier_pass: 8
+:verifier_fail: 0
+:verifier_include_funcs: true
+*/
+
+// User ruling 2026-09-28 (38): an UNTYPED `const` alias of a typed value
+// inherits the declared type for attribute reads -- `const x = a` with `a:U8`
+// has `x.[bits] == 8`, whether `a` is a port, a typed local, a bit slice or a
+// signed value. An arithmetic result stays untyped (ruling 6): `a + 1` has a
+// nil `.[bits]`. Before, the alias read as an untyped runtime value and every
+// attribute read was nil (the `x.[bits] == 8` cassert failed at tolg).
+mod alias_bits_inherit(a:U8, s:S4) -> (o:U8@[0]) {
+  const x = a
+  cassert(x.[bits] == 8)
+  cassert(x.[max] == 255 and x.[min] == 0)
+  const y = a + 1
+  cassert(y.[bits] == nil)
+  const z = s
+  cassert(z.[bits] == 4)
+  cassert(z.[min] == -8)
+  mut l:U5 = a#[0..<5]
+  const la = l
+  cassert(la.[bits] == 5)
+  const sl = a#[2..<5]
+  const w = sl
+  cassert(w.[bits] == 3)
+  const x2 = x
+  cassert(x2.[bits] == 8)
+  o = x
+}

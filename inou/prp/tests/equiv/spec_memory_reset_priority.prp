@@ -1,0 +1,21 @@
+/*
+:name: spec_memory_reset_priority
+:type: equiv
+:verilog_top: spec_memory_reset_priority
+:pyrope_top: spec_memory_reset_priority
+*/
+// SPEC (docs 08-memories.md): "The reset is **parallel**: while the reset is
+// asserted every entry is restored to its initializer in one cycle ... Reset has
+// priority over program writes and over a whole-array update, which are suppressed
+// for as long as the reset is held, and a suppressed write is not forwarded to a
+// same-cycle read: a read during reset returns the committed contents."
+// Rule encoded here: `q` reads AFTER the write (default "program" ordering), so it
+// forwards `d` on a collision -- except while `rst` is asserted, when the write is
+// dropped and `q` is the committed word; one reset cycle restores all 4 entries to 5.
+pub mod spec_memory_reset_priority(clk:Clock, rst:Reset, we:Bool, a:U2, d:U8, ra:U2) -> (q:U8@[0]) {
+  reg mem:[4]U8 = 5
+  if we {
+    mem[a] = d
+  }
+  q = mem[ra]
+}

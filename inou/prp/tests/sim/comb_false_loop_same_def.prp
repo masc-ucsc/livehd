@@ -26,15 +26,15 @@
 // carries exactly these two annotations for exactly this reason.
 // STATUS: LIVE. The values pin canonical-kernel reuse with per-occurrence
 // bindings and scheduling.
-comb split(a:u8, b:u8, c:u8, d:u8) -> (o1:u16, o2:u16) {
+comb split(a:U8, b:U8, c:U8, d:U8) -> (o1:U16, o2:U16) {
   o1 = a + b      // cone {a, b} only
   o2 = c * d      // cone {c, d} only
 }
 
-pub mod twosite::[timecheck=false](a:u8, b:u8, d:u8, bump:u8, fc:u8)
-             -> (sum_loop:u16@[], prod_loop:u16@[], sum_free:u16@[], prod_free:u16@[]) {
+pub mod twosite::[timecheck=false](a:U8, b:U8, d:U8, bump:U8, fc:U8)
+             -> (sum_loop:U16@[], prod_loop:U16@[], sum_free:U16@[], prod_free:U16@[]) {
   // SITE 1 — the caller closes a ring around the instance.
-  wire back:u8 = nil
+  wire back:U8 = nil
   mut (o1, o2) = split(a=a, b=b, c=back, d=d)
   back = (o1 + bump) & 0xFF
 
@@ -42,10 +42,10 @@ pub mod twosite::[timecheck=false](a:u8, b:u8, d:u8, bump:u8, fc:u8)
   // here, so this site must not inherit site 1's interleave.
   mut (fo1=o1, fo2=o2) = split(a=b, b=a, c=fc, d=d)
 
-  reg rsl:u16 = 0
-  reg rpl:u16 = 0
-  reg rsf:u16 = 0
-  reg rpf:u16 = 0
+  reg rsl:U16 = 0
+  reg rpl:U16 = 0
+  reg rsf:U16 = 0
+  reg rpf:U16 = 0
   rsl = o1
   rpl = o2
   rsf = fo1
@@ -63,21 +63,21 @@ test twosite.both_sites_agree {
   mut bad_free = 0
   mut bad_ctl  = 0
   tick 6 {
-    mut av:u8    = 10 + clock
-    mut bv:u8    = 20 + (clock * 2)
-    mut dv:u8    = 3 + clock
-    mut bumpv:u8 = 7
-    mut fcv:u8   = 4 + clock
+    mut av:U8    = 10 + clock
+    mut bv:U8    = 20 + (clock * 2)
+    mut dv:U8    = 3 + clock
+    mut bumpv:U8 = 7
+    mut fcv:U8   = 4 + clock
     acc.a    = av
     acc.b    = bv
     acc.d    = dv
     acc.bump = bumpv
     acc.fc   = fcv
     step
-    mut g_o1:u16   = av + bv
-    mut g_back:u8  = (g_o1 + bumpv) & 0xFF
-    mut g_o2:u16   = g_back * dv
-    mut g_fo2:u16  = fcv * dv
+    mut g_o1:U16   = av + bv
+    mut g_back:U8  = (g_o1 + bumpv) & 0xFF
+    mut g_o2:U16   = g_back * dv
+    mut g_fo2:U16  = fcv * dv
     seen = seen + 1
     if acc.prod_loop != g_o2 {
       bad_loop = bad_loop + 1

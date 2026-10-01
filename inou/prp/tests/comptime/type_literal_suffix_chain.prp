@@ -1,0 +1,18 @@
+/*
+:name: type_literal_suffix_chain
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+// docs 07-typesystem: a type expression can head a suffix chain. A size-only
+// `Unsigned(...)`/`Signed(...)` call (every argument `bits=`/`max=`/`min=`)
+// is a TYPE literal, not a cast, so it reads like `U4` or a `type` alias
+// (it used to fold to nil).
+cassert(U4.[max] == 15)
+type T = Unsigned(bits=4)
+cassert(T.[max] == 15)
+cassert(Unsigned(bits=4).[max] == 15)
+cassert(Signed(bits=4).[min] == -8)
+cassert(Unsigned(max=100).[bits] == 7)
+const x:U8 = 3
+cassert(x does Unsigned(bits=8))

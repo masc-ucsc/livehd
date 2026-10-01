@@ -84,7 +84,18 @@ const uPass_attributes::Type_info* uPass_attributes::lookup_type_info_bundle(std
   if (runner_st == nullptr) {
     return nullptr;
   }
-  const auto f = upass::decl_facts::lookup(*runner_st, lm ? lm->get_lnast().get() : nullptr, var);
+  const auto* ln = lm ? lm->get_lnast().get() : nullptr;
+  auto        f  = upass::decl_facts::lookup(*runner_st, ln, var);
+  // A field read through a compiler temp (`%t = req.addr` for
+  // `req.addr.[bits]`) is typed by the field it read: follow the extraction
+  // origin when the temp has no declared facts of its own.
+  if ((!f || !f->has_type_spec) && Lnast::is_tmp(var)) {
+    if (const auto oit = runner_st->tget_origin.find(std::string(var)); oit != runner_st->tget_origin.end()) {
+      if (auto of = upass::decl_facts::lookup(*runner_st, ln, oit->second); of && of->has_type_spec) {
+        f = std::move(of);
+      }
+    }
+  }
   if (!f) {
     return nullptr;
   }
@@ -129,6 +140,14 @@ std::optional<Dlop> uPass_attributes::resolve_value(std::string_view var) const 
   auto it = tmp_fold.find(std::string{var});
   if (it != tmp_fold.end() && !it->second.is_invalid()) {
     return it->second;
+  }
+  // A LITERAL base (`13.[bits]`, or the constant a template clone substituted
+  // for a generic's name) is its own value. A name never starts with a digit.
+  const auto digit_at = [&](std::size_t i) { return i < var.size() && std::isdigit(static_cast<unsigned char>(var[i])) != 0; };
+  if (digit_at(0) || (!var.empty() && (var.front() == '-' || var.front() == '+') && digit_at(1))) {
+    if (const auto& v = Dlop::from_pyrope_cached(var); !v.is_invalid() && v.is_integer()) {
+      return v;
+    }
   }
   return std::nullopt;
 }
@@ -232,15 +251,21 @@ std::optional<Dlop> uPass_attributes::derive_bits(std::string_view base, std::st
   std::optional<Dlop> min_v = lookup_attr_value(base, "min");
   if (max_v && min_v && max_v->is_integer() && min_v->is_integer()) {
     // Derive bits from the bound Consts directly (handles >64-bit, no to_i).
-    // get_signed_bits() is the SIGNED width; for an unsigned range (min ≥ 0) drop the
-    // sign bit, for a signed range take the widest signed bound.
-    int64_t bits;
-    if (!min_v->is_negative()) {
-      bits = static_cast<int64_t>(max_v->get_payload_bits());
-    } else {
-      bits = std::max<int64_t>(max_v->get_signed_bits(), min_v->get_signed_bits());
+    return *Dlop::create_integer(upass::range_bits(*max_v, *min_v));
+  }
+  // User ruling 2026-09-27 (6): an UNTYPED COMPTIME integer (a `comptime
+  // const`, a const with a known value, a generic bound to a constant) is as
+  // wide as its VALUE: the minimal width that holds it, like a range pinned to
+  // that one value (13 -> 4, 0 -> 1, -4 -> 3). An untyped runtime value has no
+  // width and stays nil, and a TYPED value keeps its declared width even when
+  // that is unbounded (`:signed` reads nil). (lookup_type_info returns a
+  // scratch slot that derive_comptime reuses: read it first.)
+  const auto* ti    = lookup_type_info(base);
+  const bool  typed = ti != nullptr && ti->has_type_spec;
+  if (const auto ct = derive_comptime(base, base); !typed && ct && !ct->is_known_zero()) {
+    if (const auto v = resolve_value(base); v && v->is_integer() && !v->has_unknowns()) {
+      return *Dlop::create_integer(upass::value_bits(*v));
     }
-    return *Dlop::create_integer(bits);
   }
   return std::nullopt;
 }
@@ -540,8 +565,8 @@ void uPass_attributes::read_scalar_type_at_cursor(Numeric_kind& kind, uint32_t& 
         bits = static_cast<uint32_t>(std::max<int64_t>(range_max->get_signed_bits(), range_min->get_signed_bits()));
       }
     }
-  } else if (Lnast_ntype::is_prim_type_bool(t)) {
-    kind         = Numeric_kind::boolean;
+  } else if (Lnast_ntype::is_prim_type_bool(t) || Lnast_ntype::is_prim_type_clock_or_reset(t)) {
+    kind         = Numeric_kind::boolean;  // `Clock`/`Reset`: 1-bit, Bool-shaped
     is_real_type = true;
   } else if (Lnast_ntype::is_prim_type_string(t)) {
     kind         = Numeric_kind::string;

@@ -1,0 +1,8 @@
+/*
+:name: spec_types_banned_tuple_field_type
+:type: error
+:error: `bool` was renamed `Bool`
+*/
+// Undeclared lowercase type/cast spellings must name their replacement (07-typesystem.md).
+// Rule: an undeclared old spelling in the TYPE of a tuple field declaration is an error.
+const t = (const a:bool = true)  // locate_error_here

@@ -1,0 +1,23 @@
+/*
+:name: generic_mod_arg_wider_than_input
+:type: error
+:tolg: 1
+:error: argument .a. \(range \[0, 65535\]\) in call to .lowgm. may not fit its declared range \[0, 15\]
+:help: an argument never narrows implicitly
+*/
+// User ruling 2026-09-27, the exact shape of lhdtrack suggestions 1.1-d: a
+// GENERIC `mod` input `a:Unsigned(bits=N)` specialized with N=4 is [0, 15], so
+// a u16 actual is a compile error. The caller writes
+// `lowgm<N=4>(a=x#[0..<4])`.
+//
+// Today `lhd sim` returned 0x1234 for x = 0x1234 (the LGraph folds the
+// pass-through without the port width) while the emitted Verilog instantiates
+// `lowgm__...` with `input [3:0] a` and returns 4: Pyrope and its own Verilog
+// disagreed, and LEC refuted the Pyrope against a golden that truncates.
+mod lowgm<N=2>(a:Unsigned(bits=N)) -> (o:Unsigned(bits=N)@[0]) {
+  o = a
+}
+
+pub mod generic_mod_arg_wider_than_input(x:U16) -> (y:U16@[0]) {
+  y = lowgm<N=4>(a=x)   // locate_error_here
+}

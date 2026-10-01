@@ -1,0 +1,53 @@
+/*
+:name: generic_reg_array_loop_init
+:type: simulation
+*/
+// Found with lhdtrack suggestions.md 2.2 (generic-width arrays, br_arb_lru's
+// per-row reset): the documented per-entry reset idiom (08-memories.md, "a
+// `comptime`-computed initializer variable (filled by a loop)")
+//   comptime mut init:[N]U4 = nil
+//   for i in 0..<N { init[i] = ... }
+//   reg m:[N]U4 = init
+// failed inside a GENERIC mod with "upass.tolg: unresolved reference 'init' --
+// it has no driver". The same code with a literal `[4]` dim, in the generic
+// mod or in a plain one, always worked (equiv/mem_comptime_init.prp), and so
+// did `comptime mut init:[N]U4 = 0`. It is the generic `[N]` dim of the
+// comptime array TOGETHER with its `= nil` initializer that loses it (a
+// literal `[4]` dim with `= nil` works; `reg m:[4]U4 = init` with
+// `init:[N]U4 = nil` still fails). Probably the same gap as
+// generic_dim_mut_array_lanes.prp: a generic-dim array is not a declared
+// array before the fold.
+//
+// Row i of the reset value is the upper-triangle mask: every column j > i set,
+// so (14, 12, 8, 0) for N=4.
+mod lru<N=2>(en:Bool, d:U4, s:U2) -> (q:U4@[0]) {
+  comptime mut init:[N]U4 = nil
+  for i in 0..<N {
+    init[i] = ((1 << N) - 1) & ~((1 << (i + 1)) - 1)
+  }
+  reg m:[N]U4 = init
+  if en { m[s] = d }
+  q = m[s]
+}
+
+pub mod generic_reg_array_loop_init(en:Bool, d:U4, s:U2) -> (q:U4@[0]) {
+  q = lru<N=4>(en=en, d=d, s=s)
+}
+
+test generic_reg_array_loop_init.per_entry_reset {
+  mut dut = generic_reg_array_loop_init
+  mut bad = 0
+  tick 10 {
+    dut.reset = clock < 2 or clock == 8
+    dut.en    = clock == 6
+    dut.d     = 5
+    dut.s     = if clock >= 2 and clock < 6 { clock - 2 } else { 1 }
+    step
+    if clock >= 2 and clock < 6 {
+      if dut.q != (15 & ~((1 << (clock - 1)) - 1)) { bad += 1 }   // row clock-2
+    }
+    if clock == 7 and dut.q != 5 { bad += 1 }     // written lane 1
+    if clock == 9 and dut.q != 12 { bad += 1 }    // reset restores row 1
+  }
+  assert(bad == 0, "every entry resets to its own loop-computed value")
+}

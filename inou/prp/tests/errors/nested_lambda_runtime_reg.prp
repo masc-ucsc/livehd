@@ -1,0 +1,22 @@
+/*
+:name: nested_lambda_runtime_reg
+:type: error
+:error: 'r' is a runtime value of the enclosing scope; it is not visible inside lambda 'addr'
+:help: pass 'r' as an input of 'addr'
+*/
+
+// Ruling 2026-09-27 #4 (suggestions 2.3 row 3): a nested lambda sees only
+// COMPTIME bindings of its enclosing scopes. 06-functions.md: "Reading an
+// enclosing runtime binding — a `const`, `mut`, `reg`, `wire`, or input ...
+// from a nested lambda is a compile error: pass the value as an input".
+// Reading the enclosing mod's REGISTER `r` (state) inside the nested
+// `comb addr` must be that error. Today it compiles with exit 0: `r` becomes
+// a hidden closure input and the design silently computes `a + r`.
+pub mod top(a:U8) -> (o:U8@[0]) {
+  reg r:U8 = 0
+  r = a
+  comb addr(x:U8) -> (y:U8) {
+    y = (x + r)#[0..<8]  // locate_error_here
+  }
+  o = addr(x=a)
+}

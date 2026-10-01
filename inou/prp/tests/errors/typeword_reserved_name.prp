@@ -1,0 +1,12 @@
+/*
+:name: typeword_reserved_name
+:type: error
+:error: reserved type word
+*/
+// docs 02-basics "Identifiers": `U<N>`, `S<N>`, `Unsigned`, `Signed`, `Bool`,
+// `String`, `Clock`, `Reset` are reserved: a bare one is always the type, so it
+// can not name a variable (`` `U4` `` can, typeword_backtick_names.prp).
+pub comb typeword_reserved_name(a:U8) -> (o:U8) {
+  const U4 = 3  // locate_error_here
+  o = a
+}

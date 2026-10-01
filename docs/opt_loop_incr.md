@@ -57,7 +57,8 @@ One scope per (design, option context) under the user's `--workdir`:
     pyrope/unit_NNNN.prp    a byte copy of each source file
     ln/unit_NNNN/           its parsed LNAST, in a compact serialized form
     lg/                     the whole post-pipeline graph library
-    lg/graph_inventory.json one row per graph: name, interface, body digest, owner
+    lg/graph_inventory.json one row per graph: name, interface, body digest, owner;
+                            and each runner-minted tree's minters
 ```
 
 Two things about that layout are worth stating plainly.
@@ -453,7 +454,28 @@ periodic stress runs; it is recorded with the rest of the target selection in
   dirty graph masquerade as belonging to a clean unit.
 - **Ghost pruning must be manifest-scoped.** A shared `lg:` output directory
   legitimately accumulates definitions from other compiles. Only definitions
-  *this* compile's units used to own may be deleted.
+  *this* compile's units used to own may be deleted. What a design owns in a
+  library is recorded WITH the library (`<lib>/lhd_owners.json`, per design —
+  its sorted seed files and inputs, however the command line spells them —
+  the modules it held live at its last save and its roots among them, written
+  in the same step as the save), so a compile that failed after saving, or one
+  whose manifest a failed edit republished, still knows its leftovers. Another
+  design's root is never deleted, and neither is a leftover that any surviving
+  module of the library still instantiates (a kept leftover binding a changed
+  interface is refused, never rewired); any other recorded module is
+  prunable. Claiming every module another design once held instead pinned
+  modules its tops no longer reach and locked both designs out. A partial restore replaces only the modules it restores, and
+  refuses when one differs from the destination's declarations.
+- **A generation restores only its own design.** `graph_inventory.json` marks
+  the modules the storing compile held (`design`); a generation stored from a
+  shared library also snapshots other designs' modules, and restoring one (or
+  swapping the whole cached directory in) would silently revert whatever that
+  design rebuilt since. Such a generation never takes the directory-swap fast
+  path.
+- **A specialization belongs to its call sites.** A generic `mod`'s
+  specialization (or a lifted loop body) is restored only while a restored,
+  clean tree still mints it (`mints` in `graph_inventory.json`); a dirty
+  caller that rebinds a generic re-specializes from the template.
 
 ---
 
@@ -462,7 +484,7 @@ periodic stress runs; it is recorded with the rest of the target selection in
 | | |
 |---|---|
 | implementation | `lhd/lhd_compile_cache.cpp`, driven from `lhd/lhd_kernel_compile.cpp` (`compile_sources`) |
-| acceptance tests | `lhd/tests/lhd_compile_cache_test.sh` — gating and telemetry, exact comment-only reuse, semantic invalidation (including a manufactured digest collision that the exact tree compare must still reject), context mismatch, cache damage as a refused cold miss, `store_failed` as a hard failure, structural warm≡cold over a mixed dirty cone, ghost-definition pruning, shared-workdir coexistence, diagnostic replay |
+| acceptance tests | `lhd/tests/lhd_compile_cache_test.sh` — gating and telemetry, exact comment-only reuse, semantic invalidation (including a manufactured digest collision that the exact tree compare must still reject), context mismatch, cache damage as a refused cold miss, `store_failed` as a hard failure, structural warm≡cold over a mixed dirty cone, ghost-definition pruning, shared-workdir coexistence, diagnostic replay, generic-binding flips, restored io metadata; `lhd/tests/lhd_lg_reuse_io_test.sh` — shared `lg:` dirs (ownership record, reference-aware prune, stale-instance refusal on a partial restore) |
 | benchmark harness | `../lhdsuite/bench/matrix.sh` — one row per (phase, mode) into `bench/ledger.jsonl` |
 | sim tune store (I14) | `<workdir>/incr/scopes/sim/<scope>/tune.jsonl`, beside the compile scope; outside every generation key (only the resolved vector reaches the color root's key) — [`simopt.md`](simopt.md) §13 |
 | live scoreboard | [`current_opt_loop_incr.html`](current_opt_loop_incr.html), rendered from the ledger |

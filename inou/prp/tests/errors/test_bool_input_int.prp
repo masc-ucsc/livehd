@@ -1,0 +1,34 @@
+/*
+:name: test_bool_input_int
+:type: error
+:error: cannot bind integer value to input .en. of .dut. \(it is boolean\)
+:help: (Bool\(|\btrue\b)
+*/
+
+// User ruling 2026-09-28 (20): strict bool (ruling 2) applies INSIDE `test`
+// blocks too. Poking an integer into a `Bool` input of an instance handle
+// (`d.en = 1`) is the same error as binding it at a call site
+// (errors/bool_port_bind_literal.prp): the testbench writes `d.en = true` (or
+// `Bool(1)`). This is the lhdtrack generated-testbench shape. Before, upass
+// emitted a `tick` body verbatim (it had no model of an instance handle), so
+// the poke compiled and `lhd sim` quietly drove a 1.
+//
+// Legal spelling: `d.en = true`.
+
+mod dut(en:Bool, a:U8) -> (o:U8@[0]) {
+  reg r:U8 = 0
+  if en { r = a }
+  o = r
+}
+
+test dut.poke_int {
+  mut d = dut
+  mut last = 0
+  tick 3 {
+    d.en = 1   // locate_error_here
+    d.a  = 5
+    step
+    last = d.o
+  }
+  assert(last == 5)
+}

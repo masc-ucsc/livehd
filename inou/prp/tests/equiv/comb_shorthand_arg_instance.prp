@@ -1,0 +1,19 @@
+/*
+:name: comb_shorthand_arg_instance
+:type: equiv
+:pyrope_top: top
+:verilog_top: top
+:set: compile.upass.inline=false
+*/
+// A fully typed comb kept as a Sub instance (inline=false) must bind a
+// same-name shorthand argument by NAME, never by position
+// (06-functions.md "Argument naming"): `g(a=x, b)` once failed with "binds
+// input 'a' more than once" and `g(b, a)` silently swapped the ports.
+comb g(a:U2, b:U2) -> (out:U4) {
+  out = (a << 2) | b
+}
+
+pub mod top(a:U2, b:U2, x:U2) -> (mixed:U4@[0], swapped:U4@[0]) {
+  mixed   = g(a=x, b)
+  swapped = g(b, a)
+}

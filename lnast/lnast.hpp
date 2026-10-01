@@ -168,60 +168,93 @@ struct Lnast_bitwidth_meta {
 // parameter when their kinds make the mapping unique. `none` = untyped (the
 // param must then be named unless it is the only argument).
 enum class Io_kind : uint8_t { none, integer, boolean, string };
+// The signal class of a `Clock`/`Reset`-typed input (docs 07-typesystem "Clock
+// and Reset"): clocks and resets bind BY TYPE, never by name. Such a port is a
+// 1-bit Io_kind::boolean (a `Reset` is Bool-like; a `Clock` is a 1-bit signal
+// that only drives clock pins), so every width/kind path treats it as a `Bool`
+// port and only the binding rules (implicit clock/reset, call-site auto-wire)
+// read `sig`.
+enum class Io_sig : uint8_t { none, clock, reset };
 
 struct Lnast_io_entry {
-  std::string name        = {};  // field name, no $ / % prefix
-  int32_t     bits        = 0;   // 0 = unknown / infer from context
-  bool        is_signed   = true;
-  bool        is_ref      = false;  // input declared with `ref` → write-back on inline
+  std::string                           name           = {};  // field name, no $ / % prefix
+  int32_t                               bits           = 0;   // 0 = unknown / infer from context
+  bool                                  is_signed      = true;
+  bool                                  is_ref         = false;  // input declared with `ref` → write-back on inline
   // Input declared with `...` (var-args, `comb foo(...rest)`). The
   // marker rides the io store's default-value slot as `const "..."` (mirroring
   // the `ref` sentinel) and is harvested here by the SSA upass. A var-arg
   // param gathers every actual not consumed by a fixed leading param into one
   // synthesized tuple at the call site (the comb inliner) and flags the lambda
   // as a not-fully-typed template (func_extract).
-  bool        is_varargs  = false;
-  Io_kind     kind        = Io_kind::none;  // scalar kind from the param's prim_type
+  bool                                  is_varargs     = false;
+  Io_kind                               kind           = Io_kind::none;  // scalar kind from the param's prim_type
   // Pipe stages annotation (outputs of a `pipe` func_def only).
   // From the trailing `stages(min,max)` io node: min 0 = absent (comb/mod),
   // max 0 with min>0 = unconstrained (bare `pipe`). The LN pipe upass keys
   // its output-flop insertion off these; the declared range rides verbatim
   // (LG pass1 narrows by sigma later, never here).
-  int32_t     stages_min  = 0;
-  int32_t     stages_max  = 0;
+  int32_t                               stages_min     = 0;
+  int32_t                               stages_max     = 0;
   // Declared NAMED type of the param (`self:t1` → "t1"); empty when
   // untyped or annotated with a primitive type. The inliner's typed-self
   // `does`-check keys off inputs[0].type_name.
-  std::string type_name   = {};
+  std::string                           type_name      = {};
   // Declared `int(min,max)` range when the param's type pins explicit bounds
   // (`a:int(min=0,max=99)`). Drives overload dispatch: the candidate whose range
   // CONTAINS the argument is selected (a `does`-style range containment), which a
   // power-of-two `bits` window cannot express. has_range=false → use `bits`.
-  bool        has_range   = false;
-  int64_t     range_min   = 0;
-  int64_t     range_max   = 0;
+  bool                                  has_range      = false;
+  int64_t                               range_min      = 0;
+  int64_t                               range_max      = 0;
+  // The same exact bounds when they do NOT fit an i64 (a 62+-bit unsigned or
+  // 63+-bit signed port), where has_range stays false and `bits` alone is only
+  // the power-of-two window: `unsigned(max=10**20)` must not read back as its
+  // 67-bit window's max. Both set or neither. Recomputed by every upass_ssa run;
+  // the compile cache and the ln: manifest persist it for a restored unit.
+  std::optional<Dlop>                   wide_range_min = {};
+  std::optional<Dlop>                   wide_range_max = {};
   // Input declared with a DEFAULT value (`comb f(in1:u4, in2=3)`, todo 3g E).
-  // The default expression is lowered as a body-prologue `store(name, expr)`
-  // (self-contained, so it survives func_extract and evaluates in param-tuple
-  // scope); this flag (from the io store's `__default` sentinel slot) lets the
-  // comb inliner (a) not error when the arg is omitted and (b) skip the
-  // prologue store when the arg IS provided so the actual wins. Comb-only.
-  bool        has_default = false;
+  // The default expression is lowered as a body-prologue store into the
+  // default_value_name() local, never into the port itself (self-contained, so
+  // it survives func_extract and evaluates in param-tuple scope). The port is
+  // what the body reads: the unit's own module drives it from its input, and
+  // only the comb inliner, at a call that OMITS the arg, binds the port from
+  // that local. This flag (from the io store's `__default` sentinel slot) lets
+  // the inliner (a) not error when the arg is omitted and (b) skip the
+  // prologue store when the arg IS provided. Comb-only.
+  bool                                  has_default    = false;
+  [[nodiscard]] static std::string      default_value_name(std::string_view param) { return std::format("__default_{}", param); }
+  // The input whose default_value_name() `local` is (empty when it is not one).
+  [[nodiscard]] static std::string_view default_value_param(std::string_view local) {
+    constexpr std::string_view prefix = "__default_";
+    return local.starts_with(prefix) ? local.substr(prefix.size()) : std::string_view{};
+  }
   // Array-typed port (`a:[N]T`): the port is the PACKED bus of N lanes
   // (`bits` = N*elem_bits, unsigned); lnast.tolg registers an element view for
   // it so `a[i]` reads/writes lower like a body `mut` array. 0 = not an array.
-  int64_t     array_size  = 0;
-  int32_t     elem_bits   = 0;
-  bool        elem_signed = false;
+  int64_t              array_size     = 0;
+  int32_t              elem_bits      = 0;
+  bool                 elem_signed    = false;
+  bool                 elem_bool      = false;  // retain Bool versus U1 across packed array ports
+  // The dimensions below the outer one of a MULTI-dimensional array port
+  // (`r:[2][4]u8`: array_size 2, inner_dims {4}, elem_bits 32 = one packed
+  // row), outermost first; empty for a one-dimensional port. The leaf element
+  // is elem_bits / product(inner_dims) bits wide and elem_signed.
+  std::vector<int64_t> inner_dims     = {};
   // 2f-generic_port_width — an integer port bound prp2lnast could not fold
   // (`a:unsigned(bits=N * 4)` on a GENERIC lambda): the RAW TEXT of each
   // prim_type_int bound leaf (a `%tmp` ref defined by the body prologue, a
   // generic name, or a literal such as `0`/`nil`), set only when at least one
   // side is a ref. `bits`/`has_range` stay 0/false (never a silent 1-bit port);
   // the specializer folds these once the generics are bound.
-  std::string bound_max_text = {};
-  std::string bound_min_text = {};
-  [[nodiscard]] bool has_deferred_bound() const noexcept { return !bound_max_text.empty() || !bound_min_text.empty(); }
+  std::string          bound_max_text = {};
+  std::string          bound_min_text = {};
+  [[nodiscard]] bool   has_deferred_bound() const noexcept { return !bound_max_text.empty() || !bound_min_text.empty(); }
+  // `Clock`/`Reset`-typed port (kind stays boolean, see Io_sig).
+  Io_sig               sig            = Io_sig::none;
+  [[nodiscard]] bool   is_clock() const noexcept { return sig == Io_sig::clock; }
+  [[nodiscard]] bool   is_reset() const noexcept { return sig == Io_sig::reset; }
 };
 struct Lnast_tree_io {
   std::vector<Lnast_io_entry> inputs;
@@ -246,9 +279,19 @@ struct Lnast_tree_io {
       }
       name_index_valid_ = true;
     }
-    const auto it = name_index_.find(name);
+    auto it = name_index_.find(name);
     if (it == name_index_.end()) {
-      return nullptr;
+      // A port named by a backticked type word keeps its quotes in LNAST
+      // (`` `U8` `` is a name, `U8` the type) while the GraphIO port and
+      // every canonicalized lookup spell it bare: both spellings name it.
+      if (name.size() >= 2 && name.front() == '`' && name.back() == '`') {
+        it = name_index_.find(name.substr(1, name.size() - 2));
+      } else if (!name.empty()) {
+        it = name_index_.find(absl::StrCat("`", name, "`"));
+      }
+      if (it == name_index_.end()) {
+        return nullptr;
+      }
     }
     if (it->second < inputs.size()) {
       return &inputs[it->second];
@@ -310,7 +353,7 @@ private:
   // stages_min>0 — a mod output legitimately stamps stages(0,0) or
   // stages(nil,nil) and a mod tree must not be mistaken for a pipe.
   std::string                                      lambda_kind_;
-  bool                                             verilog_origin_ = false;  // set by the native slang reader
+  bool                                             verilog_origin_ = false;  // read by inou.slang (see is_verilog_origin)
   // Transient handoff from uPass_ssa to the shared runner. The source body is
   // structurally reusable, but it contains straight-line scalar redefinitions
   // whose output names must be versioned while streaming. This is deliberately
@@ -320,6 +363,14 @@ private:
   // transient runner state (like stream_ssa_): serialized LNASTs already
   // contain the emitted SSA names and must not stream-version again.
   absl::flat_hash_set<std::string>                 stream_ssa_names_;
+  // `<base>__w<N>` names upass::demote_stale_ssa minted in THIS tree for a
+  // private SSA version of `<base>`, mapped to `<base>`. A source-authored
+  // `x__w2` is never in it, so the runner can recover a demoted version's
+  // source name (argument-naming exception 2) without mistaking a user
+  // identifier for one, and upass.tolg can see that `w__w1` is a version of
+  // array `w`. It names nodes of the post-upass body, so the compile cache and
+  // the ln: manifest persist it with that body.
+  absl::flat_hash_map<std::string, std::string>    ssa_demoted_;
   // Explicit lgraph/module name (`pub comb f::[lg="name"]`). Empty ⇒ the
   // artifact keeps the mangled `<file>.<entity>` (top_module_name). Stamped by
   // func_extract from the file-level pub entry's `lg`. tolg uses this as the
@@ -357,14 +408,15 @@ private:
   // converged, but those units still need their first tolg lowering. Cached
   // units already have their final graph in the library and skip tolg.
   bool                                             graph_restored_  = false;
-  // todo/ 1s subtask E — when set, uPass_timecheck skips this tree. Stamped on
-  // by inou.slang on every tree it produces (the direct SV reader lowers
-  // sequential `always` as comb and predates the timing conventions, so a
-  // generated `mod` would otherwise fail the timecheck before 2s improves
-  // unit-shape inference). In-memory only (sibling to lambda_kind_); the ln:
-  // reload re-derives lambda_kind, and slang output is comb, so the reload path
-  // is naturally timecheck-free without serializing this flag.
-  bool                                             skip_timecheck_  = false;
+  // The trees whose call sites minted this runner-spawned specialization
+  // (pass.upass records every minter, a deduplicated re-mint included); empty
+  // for every other tree. The compile cache keeps a restored specialization
+  // only while a restored minter still calls it. In-memory only.
+  std::vector<std::string>                         minters_;
+  // `::[timecheck=false]` on this lambda (func_extract / a streamed lambda),
+  // or a tree inou.slang produced: the TIMING checks are off (see
+  // is_timecheck_off). Persisted by the compile cache and the ln: manifest.
+  bool                                             skip_timecheck_ = false;
   // DCE mark-only mode: dead statement class-indices for the CURRENT body
   // (see is_dce_dead above). In-memory only — lg-only flows drop the LNAST
   // after tolg, and any body swap invalidates the ids.
@@ -378,7 +430,7 @@ private:
   std::vector<std::string>                         imported_packages_;        // `pkg.PARAM` provenance imports
   bool                                             is_package_unit_ = false;  // pub-comptime-const namespace unit
   absl::flat_hash_map<std::string, std::string>    package_const_exprs_;      // const name → defining-expr pyrope text
-  absl::flat_hash_map<std::string, std::string>    package_const_types_;      // const name → type text (u5/s10)
+  absl::flat_hash_map<std::string, std::string>    package_const_types_;      // const name → type text (U5/S10)
   absl::flat_hash_map<std::string, std::string>    io_type_names_;            // port name → imported alias text
   // Generic type parameters (`<T, U>`) recorded by func_extract from
   // the func_def generics child (a seam: the per-`T` body substitution lands
@@ -483,6 +535,15 @@ public:
   // separately-built Lnast.
   void replace_body(const std::shared_ptr<Lnast>& staging);
 
+  std::string get_simulation_init() const {
+    const auto root = get_root();
+    if (root.is_invalid()) {
+      return {};
+    }
+    const auto value = root.attr(lnast_attrs::simulation_init);
+    return value.has() ? value.get() : std::string{};
+  }
+  void      set_simulation_init(const std::string& program) { get_root().attr(lnast_attrs::simulation_init).set(program); }
   Lnast_nid get_root() const { return tree_->get_root_node(); }
 
   // ── navigation forwarders (operate on Node_class internally) ────────────
@@ -597,19 +658,47 @@ public:
   std::string_view get_lambda_kind() const noexcept { return lambda_kind_; }
   void             set_lambda_kind(std::string_view kind) { lambda_kind_ = kind; }
 
-  // ── Verilog-origin marker. Set by the native slang reader. A Verilog
-  // `always_ff` reg is a 1-cycle STATE element (its q reads at the current
-  // cycle), never a pyrope feedforward `@[stage]` reg — so tolg's staging
-  // analysis must NOT charge the +1 pipeline crossing on these flops (that
-  // would falsely flag a concat/OR of a registered field with a comb field as
-  // "mixes values at different cycles"). In-memory only (sibling to
-  // lambda_kind_); propagated on clone.
+  // ── Origin and timing flags (user ruling 2026-09-28 (22)). Two flags with
+  // two meanings; every consumer must pick the right one:
+  //  * verilog_origin -- the unit was READ FROM VERILOG by the native slang
+  //    reader. An internal flag no Pyrope source can set; it selects the
+  //    Verilog SEMANTICS the reader's LNAST relies on, e.g. raw-bit storage of
+  //    a signed element and of a reg initializer, Verilog widths for a concat
+  //    destination, lane or bit-select of a named bundle, an unresolved read
+  //    that wires X, no runtime array bounds assert, clock/reset ports never
+  //    auto-wired, a constant clock tie-off, parameter provenance, the writer's
+  //    lambda kind and generic header (grep is_verilog_origin for the full
+  //    list). Pyrope regenerated from such a unit does NOT inherit it, so
+  //    prp_writer spells those semantics out.
+  //  * skip_timecheck (`::[timecheck=false]`; inou.slang stamps it unless
+  //    `compile.slang.timecheck=true`) -- TIMING only: the landing-cycle /
+  //    cycle-mix / `stage[N]` checks (including a `stage[N]` over a pipe/mod
+  //    call), the same-cycle wire-ring (combinational loop) check, an undriven
+  //    wire reading X, and every plain `reg` being cycle-0 state.
+  // is_timecheck_off() is the TIMING test (either flag): a Verilog-read unit
+  // needs those relaxations as semantics (a Verilog flop is state) even when
+  // the slang knob re-enables upass/timecheck, which keys on skip_timecheck
+  // alone.
+  // A performance fast path meant for generated SSA-shaped code may key on
+  // is_timecheck_off() too, as long as the result is the same either way.
+  // In-memory; propagated on clone and persisted by the compile cache and the
+  // ln: manifest.
   bool                                    is_verilog_origin() const noexcept { return verilog_origin_; }
   void                                    set_verilog_origin(bool v) { verilog_origin_ = v; }
+  bool                                    is_timecheck_off() const noexcept { return verilog_origin_ || skip_timecheck_; }
   bool                                    needs_stream_ssa() const noexcept { return stream_ssa_; }
   void                                    set_stream_ssa(bool v) noexcept { stream_ssa_ = v; }
   const absl::flat_hash_set<std::string>& stream_ssa_names() const noexcept { return stream_ssa_names_; }
   void set_stream_ssa_names(absl::flat_hash_set<std::string> names) { stream_ssa_names_ = std::move(names); }
+  void note_ssa_demoted(std::string demoted, std::string base) {
+    ssa_demoted_.insert_or_assign(std::move(demoted), std::move(base));
+  }
+  // The base a demoted SSA version was minted for, or "" (see ssa_demoted_).
+  std::string_view ssa_demoted_base(std::string_view name) const {
+    const auto it = ssa_demoted_.find(name);
+    return it == ssa_demoted_.end() ? std::string_view{} : std::string_view{it->second};
+  }
+  const absl::flat_hash_map<std::string, std::string>& get_ssa_demoted() const noexcept { return ssa_demoted_; }
 
   // ── explicit lgraph/module name override (`::[lg="name"]`; see 2f-lg) ──────
   std::string_view get_lg_name() const noexcept { return lg_name_; }
@@ -664,7 +753,14 @@ public:
   bool is_graph_restored() const noexcept { return graph_restored_; }
   void set_graph_restored(bool v) noexcept { graph_restored_ = v; }
 
-  // ── timecheck suppression (todo/ 1s subtask E; stamped by inou.slang) ─────
+  const std::vector<std::string>& get_minters() const noexcept { return minters_; }
+  void                            add_minter(std::string_view name) {
+    if (std::find(minters_.begin(), minters_.end(), name) == minters_.end()) {
+      minters_.emplace_back(name);
+    }
+  }
+
+  // ── `::[timecheck=false]` (also stamped by inou.slang); see is_timecheck_off
   bool get_skip_timecheck() const noexcept { return skip_timecheck_; }
   void set_skip_timecheck(bool t) noexcept { skip_timecheck_ = t; }
 
@@ -821,6 +917,14 @@ public:
   // path — no string resolve, no per-char scan. Equivalent to
   // is_tmp(get_name(nid)) but cheaper.
   static bool is_tmp(int32_t name_id) { return name_id < 0; }
+
+  // User ruling 2026-09-28 (29): the integer encoding of an `enum NAME = (…)`
+  // (an unsigned integer as wide as its widest entry value) rides a hidden
+  // scalar type alias that prp2lnast declares next to it,
+  // `declare(__enum_NAME, prim_type_int(max, min), 'type')`, so a port, `reg`
+  // or local typed `:NAME` finds a width the way `type Byte = u8` gives one.
+  static std::string enum_encoding_type(std::string_view enum_name) { return std::format("__enum_{}", enum_name); }
+  static bool        is_enum_encoding_type(std::string_view name) { return name.starts_with("__enum_"); }
 
   // Stable id of the statement "shape" around a tmp ref: FNV-1a over the
   // parent's node type name plus every *other* child's leaf kind+text.

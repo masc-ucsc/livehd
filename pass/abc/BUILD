@@ -84,6 +84,24 @@ cc_library(
 )
 
 cc_test(
+    name = "abc_tmap_test",
+    srcs = ["abc_tmap_test.cpp"],
+    copts = COPTS,
+    data = ["//inou/prp:abc_tests"],
+    deps = [
+        ":pass_abc",
+        "//core",
+        "//graph",
+        "//pass/partition:flatten",
+        "//pass/synth",
+        "//pass/usyn:usyn_semantic",
+        "//pass/usyn:usyn_logic",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:core",
+    ],
+)
+
+cc_test(
     name = "abc_map_test",
     srcs = ["abc_map_test.cpp"],
     copts = COPTS,

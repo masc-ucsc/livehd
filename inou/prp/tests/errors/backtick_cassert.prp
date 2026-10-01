@@ -1,0 +1,10 @@
+/*
+:name: backtick_cassert
+:type: error
+:error: comptime cassert is false
+*/
+// `cassert` == cassert: an escaped builtin callee is still the elaboration
+// check, so a false condition must fail the compile (it used to be compared by
+// its raw spelling and fall through as an ordinary, undefined call).
+const z = 3
+`cassert`(z == 5) // locate_error_here

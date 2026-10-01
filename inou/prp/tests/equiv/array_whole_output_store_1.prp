@@ -1,0 +1,20 @@
+/*
+:name: array_whole_output_store_1
+:lec_grep_not: unset-unused-field
+*/
+// The lanes are built in a local array and published with ONE whole-array
+// store, `o = t`. That is equivalent (it proves today), but upass.constprop
+// warned (code unset-unused-field) "field `o.1` is declared but never set and
+// never used": its record_field_write returns early for a store whose path has
+// no `.`, so only lane 0 of the output was marked as set. Every lane of an
+// array written by a whole-array store is set. (The same early return makes a
+// rolled loop that carries an array warn "field `m__carry_out.K` ..."; see
+// array_bit_assign_rolled_1.prp.) `lhd lec` echoes both sides' compile
+// diagnostics as JSON lines (with their `code`), which is what
+// `:lec_grep_not:` reads.
+pub mod array_whole_output_store(a:U7) -> (o:[2]U8@[0]) {
+  mut t:[2]U8 = 0
+  t[0] = a
+  t[1] = a + 1
+  o = t
+}

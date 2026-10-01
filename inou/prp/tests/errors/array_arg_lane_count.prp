@@ -1,0 +1,18 @@
+/*
+:name: array_arg_lane_count
+:type: error
+:error: argument .v. in call to .pick. has 4 lanes: the port is declared \[6\]
+:help: pass an array of the declared length
+*/
+
+// User ruling 1 (2026-09-27) for an ARRAY argument: the actual must have the
+// declared number of lanes. A `[4]U8` bound to `v:[6]U8` used to be silently
+// zero-extended into lanes 4 and 5 (and a longer one truncated).
+mod pick(v:[6]U8, i:U3) -> (o:U8@[0]) {
+  o = v[i]
+}
+pub mod array_arg_lane_count(a:U8, i:U3) -> (o:U8@[0]) {
+  mut t:[4]U8 = 0
+  t[3] = a
+  o = pick(v=t, i=i)   // locate_error_here
+}

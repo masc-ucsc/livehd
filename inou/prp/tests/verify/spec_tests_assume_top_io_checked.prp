@@ -1,0 +1,27 @@
+/*
+:name: spec_tests_assume_top_io_checked
+:type: verify
+:top_module: spec_atc_cnt
+:verify_bound: 10
+:verify_proven: 0
+:verify_refuted: 2
+*/
+// Spec: ruling 58 (lhdtrack rulings 2026-09-30, REVISES ruling 36): "Every
+// plain `assume` is ALWAYS CHECKED (an obligation), in the design body and in
+// formal blocks alike". docs 05-assert "Where an `assume` can be discharged":
+// "At the top module, the inputs are the design boundary, so there is nothing
+// left to constrain them: the assume is reported refuted and the build fails
+// (`assume-refuted`)."
+//
+// Rule pinned: a design-body `assume(not enable)` over the selected top's
+// primary input is checked like any assume -- never an unchecked environment
+// constraint. It is REFUTED, so it prunes nothing and the design's own
+// `count != 5` is REFUTED too. (No replay tag: `lhd sim` does not execute
+// design-body properties, docs 05-assert.)
+pub mod spec_atc_cnt(enable:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
+  value = count
+  assume(not enable)
+  assert(count != 5, "frozen counter")
+  if enable { wrap count += 1 }
+}

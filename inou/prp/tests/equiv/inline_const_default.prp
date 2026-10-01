@@ -11,13 +11,13 @@
 // emitted hardware; the sim fixture pins the value, because pass.lec
 // concretizes an unknown to 0 and cannot see the defect on its own.
 
-comb inner(rs:u5) -> (sel:u3) {
+comb inner(rs:U5) -> (sel:U3) {
   sel = 0
   if rs != 0 {
     sel = 2
   }
 }
 
-pub comb inline_const_default(rs:u5) -> (o:u3) {
+pub comb inline_const_default(rs:U5) -> (o:U3) {
   o = inner(rs=rs).sel
 }

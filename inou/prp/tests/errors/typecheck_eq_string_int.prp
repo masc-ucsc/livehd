@@ -7,5 +7,5 @@
 // `==` between a string and a non-string is a type error (no implicit
 // conversion). Doc: ../docs/docs/pyrope/02-basics.md (int vs string compare).
 
-mut s:string = "hi"
+mut s:String = "hi"
 mut b = s == 3

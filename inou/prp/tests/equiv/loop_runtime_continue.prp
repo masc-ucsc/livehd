@@ -7,8 +7,8 @@
 
 // Runtime continue disables only the remainder of the current occurrence. It
 // does not clear next_active, so every later iteration still executes.
-pub mod top(skip:u8) -> (total:u4@[0]) {
-  mut acc:u4 = 0
+pub mod top(skip:U8) -> (total:U4@[0]) {
+  mut acc:U4 = 0
   for i in 0..<8 {
     if skip#[i] { continue }
     acc = acc + 1

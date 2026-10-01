@@ -1,0 +1,123 @@
+/*
+:name: loop_stateful_child_under_parent
+:type: simulation
+:expect_instances: u_loop*=2
+*/
+
+// lhdtrack suggestions 1.3 / 2.3 (br_flow_xbar_rr): a ROLLED `for` loop that
+// instantiates a STATEFUL child, one hierarchy level below the simulated top.
+// `lsc_top` simulated on its own is fine; under a parent it is not.
+//
+// The root's colour plan crosses into `lsc_top` and drives its compact loop
+// directly, forwarding the loop's `clock__tick` guard from the loop's clock
+// driver. That driver is a graph input of the NESTED module, but its port id
+// was looked up in the ROOT module's io table (cgen_sim.cpp input_field), so
+// the forwarded tick named some other root field, or none:
+//   * lsc_parent: the clock is threaded down explicitly (`clk=clk`). The
+//     port order is deliberate: `lsc_top.clk` has the port id of
+//     `lsc_parent.rst`, so the tick named the root's reset
+//       -> "no member named 'rst__tick' in '..._lsc_parent::In'"
+//     (with `clk` first in both modules the ids coincide and it works by
+//     accident; with `clk` last it names nothing, as below).
+//   * lsc_parent_noclk: the loop module has no clock port, the child's
+//     implicit clock is minted up the hierarchy and has no root counterpart
+//       -> "no member named '__tick' in '..._lsc_parent_noclk::In'"
+//     (a dbg build aborts on `I(!field.empty())` in cgen_sim.cpp instead).
+// The lhdtrack repro tied the child clock to a constant (`clk=1`), which is
+// now a compile error (user ruling 2026-09-27); it was incidental.
+//
+// `:expect_instances: u_loop*=2`: one rolled `j` loop per loop module (the
+// bug lives only on the rolled path).
+//
+// Same values as the hand-unrolled design and as `--set compile.unroll=true`
+// (which passes today).
+mod lsc_cnt(rst:Reset, en:Bool) -> (q:U4@[0]) {
+  reg c:U4 = 0
+  q = c
+  if en { wrap c += 1 }
+}
+
+mod lsc_top(rst:Reset, clk:Clock, en:U2) -> (q:U8@[0]) {
+  mut acc:U8 = 0
+  for j in 0..<2 {
+    const c = lsc_cnt(rst=rst, en=en#[j] == 1)
+    acc#[(j * 4)..+4] = c
+  }
+  q = acc
+}
+
+pub mod lsc_parent(clk:Clock, rst:Reset) -> (s:U8@[0]) {
+  reg t:U2 = 0
+  wrap t += 1
+  s = lsc_top(clk=clk, rst=rst, en=t)
+}
+
+// Same shape with NO clock port on the loop module: the child's implicit
+// clock is minted up the hierarchy.
+mod lsc_top_noclk(rst:Reset, en:U2) -> (q:U8@[0]) {
+  mut acc:U8 = 0
+  for j in 0..<2 {
+    const c = lsc_cnt(rst=rst, en=en#[j] == 1)
+    acc#[(j * 4)..+4] = c
+  }
+  q = acc
+}
+
+pub mod lsc_parent_noclk(rst:Reset) -> (s:U8@[0]) {
+  reg t:U2 = 0
+  wrap t += 1
+  s = lsc_top_noclk(rst=rst, en=t)
+}
+
+test lsc_parent.counts {
+  mut x = lsc_parent
+  mut c0:U4 = 0
+  mut c1:U4 = 0
+  mut t:U2  = 0
+  mut seen  = 0
+  mut bad   = 0
+  tick 8 {
+    x.rst = clock < 2
+    step
+    // golden mirror: phase register `t`, lane 0 counts on t[0], lane 1 on t[1]
+    if clock < 2 {
+      c0 = 0
+      c1 = 0
+      t  = 0
+    } else {
+      if t#[0] == 1 { wrap c0 += 1 }
+      if t#[1] == 1 { wrap c1 += 1 }
+      wrap t += 1
+    }
+    seen += 1
+    if x.s != ((c1 << 4) | c0) { bad += 1 }
+  }
+  assert(seen == 8, "the comparisons ran")
+  assert(bad == 0, "each loop lane's counter ticks once per cycle")
+}
+
+test lsc_parent_noclk.counts {
+  mut x = lsc_parent_noclk
+  mut c0:U4 = 0
+  mut c1:U4 = 0
+  mut t:U2  = 0
+  mut seen  = 0
+  mut bad   = 0
+  tick 8 {
+    x.rst = clock < 2
+    step
+    if clock < 2 {
+      c0 = 0
+      c1 = 0
+      t  = 0
+    } else {
+      if t#[0] == 1 { wrap c0 += 1 }
+      if t#[1] == 1 { wrap c1 += 1 }
+      wrap t += 1
+    }
+    seen += 1
+    if x.s != ((c1 << 4) | c0) { bad += 1 }
+  }
+  assert(seen == 8, "the comparisons ran")
+  assert(bad == 0, "each loop lane's counter ticks once per cycle")
+}

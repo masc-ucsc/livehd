@@ -1,0 +1,20 @@
+/*
+:name: spec_memory_size_attr_nil
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// SPEC (docs 04b-attributes.md): "`size`: Number of unnamed entries in tuple or
+// array (0 if no unnamed entries)".
+// SPEC (docs 08-memories.md): "reg mem2:[16]S8 = nil      // mem 16 entry, NO reset
+// (uninitialized, type S8)" -- a `nil` initializer leaves the CONTENTS undefined,
+// not the declared shape.
+// Rule encoded here: a declared `[4]U3` array has 4 entries whatever its
+// initializer (`= 0` or `= nil`).
+
+mut x6:[4]U3 = 0
+cassert(x6.[size] == 4)
+
+mut x5:[4]U3 = nil
+cassert(x5.[size] == 4)

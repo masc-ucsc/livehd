@@ -10,8 +10,8 @@ mkdir -p "$W/wd"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 cat >"$W/split.prp" <<'EOF'
-mod split(sel:u3, en:bool) -> (value:u16@[0]) {
-  reg onehot:u16 = 0
+mod split(sel:U3, en:Bool) -> (value:U16@[0]) {
+  reg onehot:U16 = 0
   value = onehot
   assert((onehot & (onehot - 1)) == 0, "onehot invariant")
   if en {

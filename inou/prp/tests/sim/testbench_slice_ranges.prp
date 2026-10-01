@@ -1,0 +1,48 @@
+/*
+:name: testbench_slice_ranges
+:type: simulation
+*/
+
+// A bit select written in a `test` block goes through the testbench
+// evaluator (inou/prp/prp_sim.cpp eval_bit_select), not through the design
+// lowering. It knew `lo..=hi` and `lo..<hi` but read `lo..+n` (n bits
+// starting at lo) as `lo..=n`: `v#[0..+4]` returned 5 bits, `v#[4..+4]` one
+// bit, and `v#[8..+4]` failed the driver generation with "bit select range
+// must be ascending and non-negative". Every spelling below must select
+// exactly the bits the source means, on a DUT output and on a test-local
+// value alike. The `..<`, `..=` and single-bit selects are controls.
+//
+// Whether the select is a range is decided by its RANGE OPERATOR, as in the
+// design lowering: `x#[2 + 1]` is bit 3 (its operands were taken as two range
+// bounds), and literal arithmetic folds in a bound. `..=hi` / `..<hi` start
+// at bit 0.
+mod slice_src(a:U16) -> (o:U16@[0]) {
+  o = a
+}
+
+test slice_src.plus_ranges_are_exact {
+  mut x    = slice_src
+  mut seen = 0
+  tick 4 {
+    // bit 4 and bit 12 set in every value, so an extra bit shows up
+    const av:U16 = 0x5A3C + clock * 0x0101
+    x.a = av
+    step
+    seen += 1
+    assert(x.o#[0..+4] == (av & 0xF), "o#[0..+4] is bits 0..=3")
+    assert(x.o#[4..+4] == ((av >> 4) & 0xF), "o#[4..+4] is bits 4..=7")
+    assert(x.o#[8..+4] == ((av >> 8) & 0xF), "o#[8..+4] is bits 8..=11")
+    assert(x.o#[12..+4] == ((av >> 12) & 0xF), "o#[12..+4] is bits 12..=15")
+    assert(x.o#[2..+1] == ((av >> 2) & 1), "o#[2..+1] is bit 2")
+    assert(av#[4..+8] == ((av >> 4) & 0xFF), "a test-local value slices the same way")
+    // controls (already right)
+    assert(x.o#[4..<8] == ((av >> 4) & 0xF))
+    assert(x.o#[4..=7] == ((av >> 4) & 0xF))
+    assert(x.o#[5] == ((av >> 5) & 1))
+    assert(x.o#[2 + 1] == ((av >> 3) & 1), "o#[2 + 1] is bit 3")
+    assert(x.o#[(2 * 2)..+4] == ((av >> 4) & 0xF), "a folded lower bound")
+    assert(x.o#[..=3] == (av & 0xF), "o#[..=3] is bits 0..=3")
+    assert(x.o#[..<4] == (av & 0xF), "o#[..<4] is bits 0..=3")
+  }
+  assert(seen == 4, "the comparisons ran")
+}

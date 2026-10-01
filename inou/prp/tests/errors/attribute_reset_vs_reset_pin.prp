@@ -1,13 +1,14 @@
 /*
 :name: attribute_reset_vs_reset_pin
 :type: error
-:error: does not take a value
-:help: reset_pin=ref
+:error: there is no .reset. attribute: a reset is declared by its type
+:help: reset_pin=
 */
 
-// `reset` (like `clock`) is a flag-only signal classification
-// (`rst::[reset]`). With `=value` the user almost surely meant the
-// per-register pin override `reset_pin=ref <wire>`.
+// There is no `reset` (or `clock`) attribute: since ruling 52 a reset is
+// declared by its TYPE (`rst:Reset`), not by a `rst::[reset]` classification.
+// With `=value` the user almost surely meant the per-register pin override
+// `reset_pin=<wire>`.
 
 mut rst = false
-reg r:u8:[reset=ref rst] = 0  // locate_error_here
+reg r:U8:[reset=ref rst] = 0  // locate_error_here

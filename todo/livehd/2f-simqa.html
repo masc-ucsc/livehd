@@ -126,10 +126,11 @@ product's correctness gates.</p>
   deliverables the plan names because nothing existing covers them:</p>
 
 <ul>
-<li><strong>Memory preload.</strong> There is no mechanism today for loading firmware
-  into a simulated memory — pokes are port-only. Deliver one: e.g.
-  <code>sim.meminit=&lt;mem&gt;=&lt;file.hex&gt;</code> reusing the checkpoint
-  <code>$readmemh</code> codec, or documented initial-checkpoint injection.</li>
+<li><strong>Memory preload.</strong> Deliver the first-class
+  <code>std.readmemh</code> / imported <code>$readmemh</code> path in
+  <a href="2m-readmemh.html">2m-readmemh</a>. Its simulation image must also
+  preserve the memory's external-initialization contract through synthesis;
+  initial-checkpoint injection can remain a harness technique.</li>
 <li><strong>Signal-name mapping.</strong> A published-VCD-name → catalog-name map per
   core, with a reported mapping-coverage percentage. lhd names can be synthetic
   (<code>memory_60</code>), carry <code>__in.</code> aliases, or lose flattened comb

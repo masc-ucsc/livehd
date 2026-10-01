@@ -1,0 +1,57 @@
+/*
+:name: mem_replay_crossref
+:type: equiv
+:verilog_top: mem_replay_crossref
+:pyrope_top: mem_replay_crossref
+*/
+// A same-cycle memory read that replays the cycle's earlier writes in logic
+// (a user read of a memory with a whole-array store, a partial write's
+// old-value read) may itself feed another replayed access: the data or the
+// address of a later write, or the old value a later partial write merges
+// into. Every such use must see the REPLAYED value, whatever order the reads
+// are lowered in. The replay once moved each read's consumers as it was built,
+// so a chain built after an earlier read's replay still read that read's
+// committed value (a silent miscompile: `r`, `q` and the stored contents).
+//
+// * `tv`, `id`: program-order reads after a clear of their memory.
+// * `m[a] = tv`: a write whose data is a replayed read; `r` replays it.
+// * `n[id] = tv`: address and data from replayed reads of other memories.
+// * `n[id]#[0..<3] = x`: a partial write merging over that write.
+// * `vl`/`dt`: a valid bit cleared on `clr` gates a data write (its enable is
+//   a replayed read), then a partial write merges over it.
+// `n` and `dt` are ordering="old", so `q` and `qd` read the committed contents.
+pub mod mem_replay_crossref(w:Bool, clr:Bool, p:Bool, a:U2, ra:U2, rb:U2, x:U3) -> (t:U6@[0], r:U6@[0], q:U6@[0], qd:U6@[0]) {
+  reg ix:[4]U2 = nil
+  reg m:[4]U6 = nil
+  reg n:[4]U6:[ordering="old"] = nil
+  reg vl:[4]Bool = nil
+  reg dt:[4]U6:[ordering="old"] = nil
+  if w {
+    vl[a] = true
+  }
+  if clr {
+    ix = 1
+    m  = 0x11
+    vl = false
+  }
+  const tv = m[ra]
+  const id = ix[ra]
+  const g  = vl[ra]
+  if w {
+    m[a]  = tv
+    n[id] = tv
+  }
+  if p {
+    n[id]#[0..<3] = x
+  }
+  if g {
+    dt[ra] = tv
+  }
+  if p {
+    dt[ra]#[0..<3] = x
+  }
+  t  = tv
+  r  = m[rb]
+  q  = n[rb]
+  qd = dt[rb]
+}

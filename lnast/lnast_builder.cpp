@@ -190,6 +190,17 @@ std::string Lnast_builder::create_bit_not_stmts(std::string_view var_name) {
   return emit_unary_result(Lnast_ntype::create_bit_not(), var_name);
 }
 
+std::string Lnast_builder::create_bit_not_stmts(std::string_view var_name, int bits) {
+  if (var_name.empty()) {
+    return "";
+  }
+  I(bits > 0);
+
+  auto res_var = emit_binary_result(Lnast_ntype::create_bit_not(), var_name, std::to_string(bits));
+  note_unsigned_bits(res_var, bits);
+  return res_var;
+}
+
 std::string Lnast_builder::create_log_not_stmts(std::string_view var_name) {
   if (var_name.empty()) {
     return "";

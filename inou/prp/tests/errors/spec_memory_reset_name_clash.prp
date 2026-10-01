@@ -1,0 +1,23 @@
+/*
+:name: spec_memory_reset_name_clash
+:type: error
+:tolg: 1
+:error: reset
+*/
+
+// SPEC (docs 08-memories.md): an initialized `reg` array "mints a `reset:Reset`
+// input when the module declares none (a non-`Reset` input already named `reset`
+// is then a compile error)."
+// SPEC (qa.md appendix section 6): "A module with registers and no `Clock` (or
+// `Reset`) input gets one MINTED: `clock:Clock` / `reset:Reset`. If a
+// non-Clock/non-Reset input already uses that name, it is a compile error."
+// Rule encoded here: the memory needs a reset, the module has no Reset input, and
+// a Bool data input already owns the name `reset`.
+
+pub mod spec_memory_reset_name_clash(clk:Clock, reset:Bool, a:U2, d:U8) -> (q:U8@[0]) {   // locate_error_here
+  reg mem:[4]U8 = 0
+  q = mem[a]
+  if reset {
+    mem[a] = d
+  }
+}

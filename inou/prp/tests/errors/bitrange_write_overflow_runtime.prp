@@ -1,0 +1,16 @@
+/*
+:name: bitrange_write_overflow_runtime
+:type: error
+:error: does not fit the 1-bit destination slice
+:help: select 1 bits
+*/
+
+// A bit write at a RUNTIME position has the same no-implicit-truncation rule
+// as a constant one (bitrange_write_overflow): the lane is still one bit wide,
+// so a u4 source must be narrowed explicitly (`b#[0]`, or `wrap`). It used to
+// compile and keep only the low bit, which made `wrap r#[i] = b` a no-op.
+pub comb bitrange_write_overflow_runtime(b:U4, i:U3) -> (z:U8) {
+  mut r:U8 = 0
+  r#[i] = b  // locate_error_here
+  z = r
+}

@@ -6,12 +6,12 @@
 :compile_top: leaf
 */
 
-pub mod leaf<N=1>(a:u8) -> (y:u8@[]) {
-  reg value:u8 = nil
+pub mod leaf<N=1>(a:U8) -> (y:U8@[]) {
+  reg value:U8 = nil
   wrap value = a + N
   y = value
 }
-pub mod select<FAST=false>(a:u8) -> (y:u8@[]) {
+pub mod select<FAST=false>(a:U8) -> (y:U8@[]) {
   if FAST { y = leaf<N=2>(a=a) }
   else { y = leaf(a=a) }
 }

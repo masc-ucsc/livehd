@@ -3,8 +3,8 @@
 :type: compile
 */
 // A constant store to a wire-bundle field must retain its driver during folding.
-comb wire_field_const_store(i:u4) -> (out:u8) {
-  wire io:(a:u8, o:u8) = nil
+comb wire_field_const_store(i:U4) -> (out:U8) {
+  wire io:(a:U8, o:U8) = nil
   io.a = 3
   io.o = io.a + 1
   out = io.o + i

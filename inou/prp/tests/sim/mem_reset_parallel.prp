@@ -3,7 +3,7 @@
 :type: simulation
 */
 // A `reg` ARRAY's initializer is its RESET value, exactly like a scalar reg's
-// (`reg m:[4]u4 = 7` ≡ every entry resets to 7), and the reset is PARALLEL:
+// (`reg m:[4]U4 = 7` ≡ every entry resets to 7), and the reset is PARALLEL:
 // every entry is restored in ONE cycle of reset through the memory's
 // whole-array reset pin. These two tests pin that timing — the design is
 // identical, only the length of the reset pulse differs, and both restore the
@@ -11,8 +11,8 @@
 //
 // (`= nil` would mean NO reset value at all: no reset is bound. See
 // ../equiv/mem_ordering_old.prp.)
-mod arr(we:bool, waddr:u2, din:u4, raddr:u2) -> (o:u4@[0]) {
-  reg m:[4]u4:[ordering="old"] = 7
+mod arr(we:Bool, waddr:U2, din:U4, raddr:U2) -> (o:U4@[0]) {
+  reg m:[4]U4:[ordering="old"] = 7
   o = m[raddr]
   if we { m[waddr] = din }
 }

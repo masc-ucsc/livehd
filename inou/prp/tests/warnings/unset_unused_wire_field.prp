@@ -10,8 +10,8 @@
 // 62-bit derived-range cap — neither may warn (they are read and written; the
 // runner/constprop field-touched record is what proves it). The never-touched
 // `dead` leaf is the true positive: declared, never set, never used.
-pub comb wide_io::[timecheck=false](io_a:u64) -> (io_o:u64) {
-  wire io:(a:u64, o:u64, dead:u16) = nil   // locate_warning_here
+pub comb wide_io::[timecheck=false](io_a:U64) -> (io_o:U64) {
+  wire io:(a:U64, o:U64, dead:U16) = nil   // locate_warning_here
   mut w1 = 0
   io.o = io.a#[0..=63]
   w1 = io.o

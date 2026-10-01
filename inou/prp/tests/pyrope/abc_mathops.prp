@@ -9,19 +9,19 @@
 // signed divisor narrower than its dividend. Division must preserve the complete
 // operands until after computing the quotient.
 //
-// Widths are deliberately small (u4/s4, n:u2): the cvc5 LEC of a bit-blasted
+// Widths are deliberately small (u4/s4, n:U2): the cvc5 LEC of a bit-blasted
 // array multiplier scales steeply with operand width, and these widths still
 // exercise every feature/plumbing path above. The exhaustive multiplier/shifter
 // math over wider operands is proven separately by //pass/abc:abc_arith_test.
-mod abc_mathops(a:u4, b:u4, c:s4, e:s4, cw:s8, n:u2) -> (mul:u8@[0], muls:s8@[0], mul3:u12@[0],
-                                                          srl:u4@[0], sra:s4@[0],
-                                                          dv:u4@[0], dvs:s4@[0], dwide:s8@[0]) {
+mod abc_mathops(a:U4, b:U4, c:S4, e:S4, cw:S8, n:U2) -> (mul:U8@[0], muls:S8@[0], mul3:U12@[0],
+                                                          srl:U4@[0], sra:S4@[0],
+                                                          dv:U4@[0], dvs:S4@[0], dwide:S8@[0]) {
   mul   = a * b
   muls  = c * e
   mul3  = a * b * a
   srl   = a >> n
   sra   = c >> n
   dv    = a / b
-  dvs   = c / e
-  dwide = cw / e
+  wrap dvs   = c / e
+  wrap dwide = cw / e
 }

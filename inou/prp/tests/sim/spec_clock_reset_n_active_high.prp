@@ -1,0 +1,36 @@
+/*
+:name: spec_clock_reset_n_active_high
+:type: simulation
+*/
+// SPEC (clock lane): reset polarity comes ONLY from `negreset=true`; a `_n`
+// name suffix means nothing, so `rst_n:Reset` without `negreset` is
+// ACTIVE-HIGH.
+//   qa.md Q23 answer: "No, only negreset"
+//   qa.md Appendix 6: "Reset polarity comes ONLY from `negreset=true`; a `_n`
+//     name suffix has no meaning."
+//   docs 04b: "The reset's name carries no polarity (`rst_n` is active-high
+//     without `negreset=true`)"
+// `rst_n` is driven HIGH at cycles 0,1 and 7 (reset) and low otherwise
+// (counting). An active-low reading would hold the counter at 0 almost always.
+pub mod spec_clock_reset_n_active_high(clk:Clock, rst_n:Reset, en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_clock_reset_n_active_high.high_resets {
+  mut t   = spec_clock_reset_n_active_high
+  mut g   = 0
+  mut bad = 0
+  tick 12 {
+    const r = clock < 2 or clock == 7
+    t.rst_n = r
+    t.en    = true
+    if r { g = 0 } else { g += 1 }
+    step
+    if t.q != g { bad += 1 }
+  }
+  puts("reset_n: g={g} bad={bad}")
+  assert(bad == 0)
+  assert(g == 4)
+}

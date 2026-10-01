@@ -1,0 +1,31 @@
+/*
+:name: enum_const_capture
+:type: equiv
+:verilog_top: enum_const_capture
+:pyrope_top: enum_const_capture
+*/
+
+// Ruling 2026-09-28 #24: a plain `const` bound to an enum entry is a
+// compile-time constant, so a lambda may read it -- the FSM idiom
+// `const START = St.Run` as a register's reset value, and a comb reading
+// `const dflt = Color.Green`. The lambda recomputes the const from the
+// enclosing declarations; the enums it reads must be replayed FIRST (the
+// replay used to read `St` before re-declaring it: upass.tolg "unresolved
+// reference '%cap0_START_0' ... resolved to nil").
+enum St = (Idle = 1, Run = 2, Done = 3)
+const START = St.Run
+enum Color = (Red = 1, Green = 2, Blue = 3)
+const dflt = Color.Green
+
+comb pick(x:Bool) -> (o:Color) {
+  o = if x { dflt } else { Color.Red }
+}
+
+pub mod enum_const_capture(go:Bool, sel:Bool) -> (s:St@[0], c:Color@[0]) {
+  reg st:St = START
+  if go {
+    st = St.Done
+  }
+  s = st
+  c = pick(x=sel)
+}

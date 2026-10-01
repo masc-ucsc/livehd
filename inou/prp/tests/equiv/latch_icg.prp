@@ -25,8 +25,8 @@
 // Under 2f-latch M4 the ICG is folded into a clock-enable on the driven flops as
 // a BOTH-SIDES normalization (never a one-sided abstraction). Nobody proves ICGs
 // in industry practice; they normalize them away.
-pub mod icg(clk:bool, en:bool) -> (gclk:bool@[0]) {
-  reg enl:bool:[latch=true]
+pub mod icg(clk:Bool, en:Bool) -> (gclk:Bool@[0]) {
+  reg enl:Bool:[latch=true]
   if !clk {
     enl = en
   }

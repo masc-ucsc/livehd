@@ -107,7 +107,7 @@ PY
 # array-element kind change — constprop check_field_store_kind, reached after
 # the tuple_set sibling walk leaves the cursor invalid (the original report).
 cat > arr_kind.prp <<'EOF'
-mut a:[4]u4 = nil
+mut a:[4]U4 = nil
 a[0] = 1
 a[1] = true
 EOF
@@ -115,7 +115,7 @@ check_code arr_kind.prp assign-type-mismatch 3
 
 # scalar kind change — typecheck emit_type_error (was an empty default span).
 cat > scalar_kind.prp <<'EOF'
-mut a:u4 = nil
+mut a:U4 = nil
 a = 1
 a = true
 EOF
@@ -123,7 +123,7 @@ check_code scalar_kind.prp assign-type-mismatch 3
 
 # self-assignment — runner, a Diagnostic that omitted .span entirely.
 cat > self_assign.prp <<'EOF'
-mut a:u4 = 3
+mut a:U4 = 3
 a = a
 EOF
 check_code self_assign.prp irrelevant-assignment 2

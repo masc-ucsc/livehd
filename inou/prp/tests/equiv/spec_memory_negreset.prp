@@ -1,0 +1,20 @@
+/*
+:name: spec_memory_negreset
+:type: equiv
+:verilog_top: spec_memory_negreset
+:pyrope_top: spec_memory_negreset
+*/
+// SPEC (docs 08-memories.md): "The reset is **parallel** ... through the memory's
+// whole-array reset (`async=true` makes it asynchronous; the polarity is the
+// register's `negreset`, see [Attributes])."
+// SPEC (qa.md appendix section 6): "Reset polarity comes ONLY from
+// `negreset=true`; a `_n` name suffix has no meaning."
+// Rule encoded here: `negreset=true` on a memory declaration makes its reset
+// active-LOW: the entries reset to 9 while `nr` is 0; writes land while `nr` is 1.
+pub mod spec_memory_negreset(clk:Clock, nr:Reset, we:Bool, a:U2, d:U8, ra:U2) -> (q:U8@[0]) {
+  reg mem:[4]U8:[negreset=true] = 9
+  q = mem[ra]
+  if we {
+    mem[a] = d
+  }
+}

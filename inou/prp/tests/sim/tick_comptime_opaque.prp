@@ -40,8 +40,8 @@
 // fails at RUNTIME reporting the true `got=4`, rather than folding to 0 and
 // silently passing — which is what happened before the fix.
 
-mod counter8(en:bool) -> (v:u8@[0]) {
-  reg c:u8 = 0
+mod counter8(en:Bool) -> (v:U8@[0]) {
+  reg c:U8 = 0
   v = c
   if en { wrap c += 1 }
 }
@@ -153,10 +153,10 @@ test counter8.zero_trip_keeps_outer_value {
 // B8 — the runtime-count end of R0: the count is not even a literal.
 //
 // Same lone literal write as B6, but the trip count is a test parameter. With
-// the default cycles=4 the runtime value is 7; run with `--arg cycles=0` and it
+// the default cycles=4 the runtime value is 7; run with `+cycles=0` and it
 // is 5. That the SAME source text yields either value depending on a runtime
 // argument is precisely why R0 refuses to reason about the count at all.
-test counter8.runtime_trip_count(cycles:u20 = 4) {
+test counter8.runtime_trip_count(cycles:U20 = 4) {
   mut acc     = counter8
   mut rt_trip = 5
 

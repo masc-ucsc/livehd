@@ -1,0 +1,27 @@
+/*
+:name: spec_calls_ref_named
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// qa.md Appendix §4: calls bind by name; the grammar's `arg_assignment`
+// (tree-sitter-pyrope grammar.js) takes `name = ref x`. docs 06-functions.md
+// "Pass by reference": "The `ref` keyword must be explicit in the lambda input
+// definition but also in the lambda call." Named `ref` actuals bind by name in
+// any order; a single `ref` parameter binds unnamed (exception 1).
+
+comb bump(ref p, ref q) -> () {
+  p += 1
+  q += 10
+}
+
+mut x = 0
+mut y = 0
+bump(q=ref y, p=ref x)
+cassert(x == 1 and y == 10)
+
+comb inc1(ref a) -> () { a += 1 }
+mut z = 3
+inc1(ref z)
+cassert(z == 4)

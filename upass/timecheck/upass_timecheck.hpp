@@ -31,7 +31,9 @@
 //
 // Runs on each extracted pipe/mod tree AFTER the main runner walk and BEFORE
 // uPass_pipe inserts the pipe output flop (the body sigma must not include
-// it). Ungated by toln so the LSP pipeline gets the located diagnostics.
+// it). Ungated by toln so the LSP pipeline gets the located diagnostics. A
+// `::[timecheck=false]` (Verilog-origin) lambda is skipped: the attribute turns
+// off every timing check in it.
 class uPass_timecheck {
 public:
   using Registry = std::vector<std::shared_ptr<Lnast>>;

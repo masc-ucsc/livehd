@@ -1,0 +1,21 @@
+/*
+:name: mod_default_generic_runtime_input
+:type: error
+:error: the default of `b` reads the runtime input `a`
+:help: compile-time
+*/
+
+// User ruling 2026-09-28 (34): a `mod`/`pipe` default over a GENERIC folds per
+// specialization, but one that also reads another input's VALUE is still not
+// a compile-time constant (errors/mod_default_runtime_input.prp is the
+// generic-less form). Before, the generic sent the default to the body
+// prologue ahead of the check, so it compiled silently whenever every call
+// passed `b` (and failed with a misleading overflow when the value was wide).
+
+mod m<N=2>(a:U8, b:U16 = a + N) -> (o:U16@[0]) {  // locate_error_here
+  wrap o = a + b
+}
+
+pub mod mod_default_generic_runtime_input(x:U8) -> (y:U16@[0]) {
+  y = m(a=x, b=3)
+}

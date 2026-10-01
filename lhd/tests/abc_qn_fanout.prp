@@ -5,8 +5,8 @@
 // resetless_sync) stays on the x1 base rung. The D input comes straight from a
 // port: under a QN cell that is the one place the D-side inversion has nothing
 // to absorb into, so exactly one inverter cell is expected there.
-pub mod abc_qn_fanout(clk:u1, d:u1, x:u20) -> (q:u20@[]) {
-  reg state:u1:[clock_pin=ref clk] = nil
+pub mod abc_qn_fanout(clk:Clock, d:U1, x:U20) -> (q:U20@[]) {
+  reg state:U1:[clock_pin=clk] = nil
   state = d
-  q = if state != 0 { ~x } else { x }
+  wrap q = if state != 0 { ~x } else { x }
 }

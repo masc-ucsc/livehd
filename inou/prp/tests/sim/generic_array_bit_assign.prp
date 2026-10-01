@@ -1,0 +1,89 @@
+/*
+:name: generic_array_bit_assign
+:type: simulation
+*/
+// lhdtrack suggestions.md 2.2(e): a bit assignment into one element of an
+// array whose element width is generic, `m[i]#[j] = x`, must behave like the
+// same code with literal widths (which always worked).
+//   * tri: the element spelled through a generic alias (`type Row =
+//     Unsigned(bits=N)`, `mut matrix:[N]Row`) inside a nested `for`.
+//     upass.constprop reported "out of bounds access: index k on tuple
+//     `matrix` of size k" once per row (rolled or unrolled). Fixing the alias
+//     bound (generic_array_type_alias.prp) alone does NOT cure it: the same
+//     error comes with a SIZED alias (`type Row = U4`). A `[N]`-dim mut array
+//     of alias rows is not a declared array for upass.constprop, so a bit
+//     assignment's read-modify-write of a row not yet written reads past a
+//     tuple that grows only on writes (isolated in
+//     generic_dim_alias_array_bits.prp; the constant-index form of the same
+//     gap with plain `[N]U4` rows is generic_dim_mut_array_lanes.prp). tri
+//     needs both fixes.
+//   * rbits: bit writes into two lanes of a `reg m:[N]Unsigned(bits=N)`,
+//     outside any loop, two of them into the SAME row (a bit write must keep
+//     the row's other bits) -- "memory 'm' element type must be a sized
+//     integer or bool" (see generic_reg_array_elem.prp).
+//
+// tri is the pairwise-matrix expansion br_arb_lru needs: the upper triangle
+// copies `a`, the lower triangle is the complement of the mirrored bit, the
+// diagonal stays 0.
+mod tri<N=2>(a:Unsigned(bits=N)) -> (q:Unsigned(bits=N)@[0], r:Unsigned(bits=N)@[0]) {
+  type Row = Unsigned(bits=N)
+  mut matrix:[N]Row = 0
+  for i in 0..<N {
+    for j in 0..<N {
+      if i < j {
+        matrix[i]#[j] = a#[j]
+      } elif i > j {
+        matrix[i]#[j] = ~a#[i] & 1
+      }
+    }
+  }
+  q = matrix[N-2]
+  r = matrix[1]
+}
+
+mod rbits<N=2>(en:Bool, a:Unsigned(bits=N)) -> (q:Unsigned(bits=N)@[0], r:Unsigned(bits=N)@[0]) {
+  reg m:[N]Unsigned(bits=N) = 0
+  if en {
+    m[1]#[N-2] = a#[0]
+    m[1]#[0]   = a#[1]
+    m[N-2]#[1] = a#[1]
+  }
+  q = m[1]
+  r = m[N-2]
+}
+
+pub mod generic_array_bit_assign(en:Bool, a:U4) -> (q:U4@[0], r:U4@[0], mq:U4@[0], mr:U4@[0]) {
+  const t = tri<N=4>(a=a)
+  q = t.q
+  r = t.r
+  const b = rbits<N=4>(en=en, a=a)
+  mq = b.q
+  mr = b.r
+}
+
+test generic_array_bit_assign.values {
+  mut dut = generic_array_bit_assign
+  mut bad = 0
+  mut mq  = 99
+  mut mr  = 99
+  tick 16 {
+    dut.reset = clock == 0
+    dut.a     = clock
+    dut.en    = clock == 3 or clock == 12   // a = 0ub0011, then a = 0ub1100
+    step
+    const a  = clock
+    const a1 = (a >> 1) & 1
+    const a2 = (a >> 2) & 1
+    const a3 = (a >> 3) & 1
+    // row 2: j=0,1 -> ~a[2]; j=2 -> 0; j=3 -> a[3]
+    const eq = (a3 << 3) | ((a2 ^ 1) << 1) | (a2 ^ 1)
+    // row 1: j=0 -> ~a[1]; j=1 -> 0; j=2 -> a[2]; j=3 -> a[3]
+    const er = (a3 << 3) | (a2 << 2) | (a1 ^ 1)
+    if dut.q != eq or dut.r != er { bad += 1 }
+    if clock == 8 { mq = dut.mq ; mr = dut.mr }
+  }
+  assert(bad == 0, "tri: every row of the expanded matrix")
+  assert(mq == 0ub0101, "rbits: m[1] bits 2,0 <- a[0],a[1]")
+  assert(mr == 0ub0010, "rbits: m[2] bit 1 <- a[1]")
+  assert(dut.mq == 0 and dut.mr == 0, "rbits: rewritten with a = 0ub1100")
+}

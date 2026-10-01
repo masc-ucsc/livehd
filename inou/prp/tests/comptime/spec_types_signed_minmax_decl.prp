@@ -1,0 +1,10 @@
+/*
+:name: spec_types_signed_minmax_decl
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// SPEC qa.md appendix section 1: "`Unsigned`, `Signed` (with constraints: `Unsigned(bits=N, max=.., min=..)`,
+// `Signed(bits=N)`)"; docs 04-variables: "mut d:Signed(min=20, max=30) = nil // only values from 20 to 30".
+mut d:Signed(min=20, max=30) = 25
+cassert(d.[max] == 30 and d.[min] == 20)

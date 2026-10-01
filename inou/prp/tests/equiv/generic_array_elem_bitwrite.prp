@@ -1,0 +1,25 @@
+/*
+:name: generic_array_elem_bitwrite
+:type: equiv
+:verilog_top: generic_array_elem_bitwrite
+:pyrope_top: generic_array_elem_bitwrite
+*/
+// lhdtrack L3 (suggestions 2.2(c)): bit and slice writes into an element of a
+// mut array whose element width is a generic, with RUNTIME element and bit
+// indices (`m[i]#[j] = x`, `m[i ^ 1]#[(k*4)..+4] = d`), the array arriving
+// and leaving through generic-shaped array ports (`v:[N]Unsigned(bits=W)`,
+// `-> (o:[N]Unsigned(bits=W))`). Specialized at <N=4, W=8> and <N=4, W=4>;
+// the second write never overlaps the first entry (i ^ 1 != i).
+mod rw<N=4, W=4>(i:Unsigned(bits=2), j:Unsigned(bits=2), x:U1, k:U1, d:U8, v:[N]Unsigned(bits=W)) -> (o:[N]Unsigned(bits=W)@[0]) {
+  mut m:[N]Unsigned(bits=W) = v
+  m[i]#[j] = x
+  m[i ^ 1]#[(k*4)..+4] = d#[0..<4]
+  o = m
+}
+
+pub mod generic_array_elem_bitwrite(i:U2, j:U2, x:U1, k:U1, d:U8, v:[4]U8, w:[4]U4) -> (o8:[4]U8@[0], o4:[4]U4@[0]) {
+  const a = rw<N=4, W=8>(i=i, j=j, x=x, k=k, d=d, v=v)
+  const b = rw<N=4, W=4>(i=i, j=j, x=x, k=0, d=d, v=w)
+  o8 = a.o
+  o4 = b.o
+}

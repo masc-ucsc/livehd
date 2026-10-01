@@ -1,0 +1,20 @@
+/*
+:name: spec_memory_ordering_fwd
+:type: equiv
+:verilog_top: spec_memory_ordering_fwd
+:pyrope_top: spec_memory_ordering_fwd
+*/
+// SPEC (qa.md appendix section 5): "`ordering` may be set to "fwd"/"none"/"old"
+// explicitly." (qa.md Q17: "... from program (default) to 'fwd' or 'none' or 'old'").
+// SPEC (docs 08-memories.md): "`"fwd"`: pure transparency -- every read of an
+// address written this cycle returns the new data, regardless of the read's
+// textual position".
+// Rule encoded here: under ordering="fwd" a read placed BEFORE the write still
+// returns the new data on an address collision.
+pub mod spec_memory_ordering_fwd(clk:Clock, we:Bool, wa:U2, wd:U4, ra:U2) -> (pre:U4@[0]) {
+  reg mem:[4]U4:[ordering="fwd"] = nil
+  pre = mem[ra]
+  if we {
+    mem[wa] = wd
+  }
+}

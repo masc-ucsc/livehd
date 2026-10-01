@@ -84,7 +84,7 @@ run compile lg:"$D/re" --top "$TOP" --emit-dir verilog:"$D/rev" --workdir "$D/w8
 NV=$(ls "$D/netv/"*.v | wc -l | tr -d ' ')
 [ "$NV" = "1" ] || fail "expected exactly one netlist .v, got $NV"
 grep -hq "NAND2x1\|NOR2x1\|INVx1\|XOR2x1\|BUFx1" "$D/netv/"*.v || fail "no standard cells in the flat netlist"
-# hier_seq's `reg r:u8 = 0` requests Pyrope's implicit SYNCHRONOUS reset. That
+# hier_seq's `reg r:U8 = 0` requests Pyrope's implicit SYNCHRONOUS reset. That
 # reset is a D-cone mux (reset has priority over the enable), so pass.abc folds
 # it into the latch and every one of the six 8-bit registers (delayer.r x4,
 # stage_unit.r x2) maps to plain DFFx1 cells named after the register under
@@ -163,13 +163,13 @@ echo "PASS: registers keep their hierarchical names through the flat tech-map (L
 # (0xa5) so a dropped literal cannot coincide with a correct one.
 FIX3="$W/abc_flat_const_port.prp"
 cat > "$FIX3" <<'EOF'
-mod const_port_sub(din:u8, sel:u8) -> (q:u8@[1]) {
-  reg r:u8 = 0
+mod const_port_sub(din:U8, sel:U8) -> (q:U8@[1]) {
+  reg r:U8 = 0
   q = r
   r = din ^ sel
 }
 
-mod top(din:u8) -> (o:u8@[1]) {
+mod top(din:U8) -> (o:U8@[1]) {
   stage[1] a = const_port_sub(din=din, sel=0xa5)
   o = a
 }

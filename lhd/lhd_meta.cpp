@@ -17,7 +17,7 @@ namespace lhd {
 namespace {
 
 constexpr std::string_view kJsonPassUsyn
-    = R"json({"schema_version":1,"name":"pass usyn","description":"Unate synthesis: a domino-gate LUT cover of every region (transistor proxy under a domino depth requirement), handed to ABC for technology mapping only (abc=tmap) or the pass.abc flow (abc=opt); a region the cover cannot handle takes the ABC flow. Persistent reuse follows lhd.incremental.","inputs":["lg"],"outputs":["lg","verilog"],"examples":["lhd pass usyn lg:design --top top --set synth.liberty=cells.lib --emit-dir lg:net --workdir W","lhd synth design.v --top top --set synth.mapper=usyn --set synth.liberty=cells.lib --workdir W"]})json";
+    = R"json({"schema_version":1,"name":"pass usyn","description":"Native register-rooted XAG synthesis with bounded endpoint selection and residual rewriting/resubstitution. target=cmos preserves original state. tmap=none emits logical CMOS without Liberty; tmap=abc (default) requests only technology mapping from an optional provider. USYN invokes no ABC synthesis or SATOPT and has no ABC fallback. Logical and optional mapped-region reuse follow lhd.incremental with a named workdir; changing Liberty or mapping policy preserves native logical reuse.","inputs":["lg"],"outputs":["lg","verilog"],"examples":["lhd pass usyn lg:design --top top --set pass.usyn.tmap=none --emit-dir lg:net --workdir W","lhd synth design.v --top top --set synth.mapper=usyn --set synth.liberty=cells.lib --workdir W"]})json";
 
 constexpr std::string_view kSteps
     = R"json(["compile verilog","compile pyrope","synth","sim","lec","formal verify","formal lec","scan","tool","pass","pyrope fmt","pyrope lsp","pyrope style"])json";
@@ -27,7 +27,7 @@ constexpr std::string_view kErrorClasses
     = R"json(["usage","syntax","internal","equiv_fail","signal","timeout","missing_file","config","dependency","unsupported","assert","compile"])json";
 
 constexpr std::string_view kJsonSynthCommand
-    = R"json({"schema_version":1,"name":"synth","description":"One-shot synthesis flow over ONE in-memory design: compile (Pyrope/(System)Verilog sources and/or ln:/lg: IR, as `lhd compile`) -> optional pass.color reduce (synth.reduce=false by default; experimental synthesis-time reduction that can degrade QoR) -> pass.color synth (always; per-(def,color) regions keep a big design inside ABC's memory budget and are what incremental reuse is keyed on \u2014 other colorings are the manual `lhd pass color <alg>` + `lhd pass abc` steps) -> pass.abc tech-map (or pass.usyn when synth.mapper=usyn) -> pass.opentimer STA (synth.opentimer=true). --top is resolved once (a bare entity is enough). ONE Liberty (synth.liberty, default $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib) feeds both abc and opentimer. --workdir is optional: with one, <workdir>/synth/ keeps lg/ (compiled design), net/ (mapped netlist), qor.json and timing.json, and the compile + <mapper>_cache (abc_cache / usyn_cache) + sta_cache incremental tiers are live (lhd.incremental, default true; false = honest cold run, same outputs); without one the flow runs in a scratch dir and only the emits and the printed report survive. An lg: input is never rewritten. The result envelope's `qor` member is {kind:synth, abc:<abc-map>, sta:<sta>}; with synth.mapper=usyn it also carries usyn:<the pass.usyn cover report (per-region cover and ABC hand-off), also written as <qor>.usyn.json>. --stats adds the per-color rows of both","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"emit-dir","type":"lg:DIR/ (mapped netlist; relocates <workdir>/synth/net) | verilog:DIR/ | report:DIR/ (qor.json + timing.json)"},{"name":"emit","type":"verilog:PATH (mapped netlist)"},{"name":"stats","type":"flag"},{"name":"reader","type":"enum","values":["slang"],"default":"slang"},{"name":"set","type":"synth.flag=value | abc.flag=value | pass.usyn.flag=value | color.flag=value | opentimer.flag=value | compile.<pass>.flag=value","repeatable":true},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","report"],"examples":["lhd synth cpu.prp --top Cpu --workdir W","lhd synth cpu.prp --top Cpu --workdir W --stats --result-json r.json","lhd synth lg:cpu_lg --top Cpu --emit-dir lg:net --emit-dir report:rep","lhd synth cpu.prp --top Cpu --set synth.liberty=cells.lib --set synth.opentimer=false","lhd synth cpu.prp --top Cpu --workdir W --set lhd.incremental=false","lhd synth cpu.sv --top cpu --set abc.adder=cla --emit verilog:net.v","lhd synth cpu.sv --top cpu --set synth.mapper=usyn --set synth.liberty=cells.lib --workdir W"]})json";
+    = R"json({"schema_version":1,"name":"synth","description":"One-shot synthesis: compile sources or ln:/lg: IR -> optional color reduce -> color synth -> selected mapper -> optional OpenTimer STA. synth.mapper=abc selects ABC synthesis; synth.mapper=usyn selects native register-rooted XAG synthesis with optional mapping-only ABC handoff. pass.usyn.tmap=none emits complete logical CMOS with original registers, needs no Liberty, and skips STA; an explicit synth.opentimer=true is rejected in that mode. Mapped output uses synth.liberty (otherwise $HAGENT_TECH_DIR/sky130_fd_sc_hd__tt_025C_1v80.lib) for mapping and STA. --workdir keeps compiled lg/, output net/, and reports under synth/. Compile, ABC-mapper, native USYN logical and mapped-region, and STA reuse obey lhd.incremental. Without --workdir only requested emits and the printed report survive. Input lg: is never rewritten. qor contains kind=synth, abc (abc-map or technology-map; null for logical-only), optional sta, and for USYN the native decision report under usyn (also <qor>.usyn.json). USYN counts describe definition regions, not physical instance totals. --stats adds region estimates and mapping/timing rows. pass.satopt is off by default; explicit user settings are preserved.","args":{"required":[{"name":"files","type":"path[] and/or ln:DIR|lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"workdir","type":"path"},{"name":"emit-dir","type":"lg:DIR/ (logical or mapped netlist) | verilog:DIR/ | report:DIR/"},{"name":"emit","type":"verilog:PATH (logical or mapped netlist)"},{"name":"stats","type":"flag"},{"name":"reader","type":"enum","values":["slang"],"default":"slang"},{"name":"set","type":"synth.flag=value | abc.flag=value | pass.usyn.flag=value | color.flag=value | opentimer.flag=value | compile.<pass>.flag=value","repeatable":true},{"name":"result-json","type":"path"}]},"inputs":["pyrope","verilog","ln","lg"],"outputs":["lg","verilog","report"],"examples":["lhd synth cpu.prp --top Cpu --workdir W","lhd synth cpu.prp --top Cpu --workdir W --stats --result-json r.json","lhd synth lg:cpu_lg --top Cpu --emit-dir lg:net --emit-dir report:rep","lhd synth cpu.prp --top Cpu --set synth.liberty=cells.lib --set synth.opentimer=false","lhd synth cpu.prp --top Cpu --workdir W --set lhd.incremental=false","lhd synth cpu.sv --top cpu --set abc.adder=cla --emit verilog:net.v","lhd synth cpu.sv --top cpu --set synth.mapper=usyn --set synth.liberty=cells.lib --workdir W","lhd synth cpu.sv --top cpu --set synth.mapper=usyn --set pass.usyn.tmap=none --emit verilog:logical.v"]})json";
 
 void print_json_line(std::string_view s) {
   std::fwrite(s.data(), 1, s.size(), stdout);
@@ -578,7 +578,7 @@ int describe_command(const Options& opts) {
   }
   if (name == "semdiff" || name == "pass semdiff") {
     print_json_line(
-        R"json({"schema_version":1,"name":"pass semdiff","description":"Structural diff/match (a structural LEC), a `pass` subcommand: structural_match(ref, impl) marks corresponding nodes/driver-pins of both lg: libraries with a shared `match` attribute (0 = no counterpart) and saves both back in place. v1 marks lg: libraries, so both sides must be lg:DIR (compile sources to lg: first). Inspect the diff with `lhd tool grep match=0 lg:impl` or visualize it with `lhd tool diff lg:ref lg:impl --match`. --stats prints the aggregate node/register/memory match report (a design health check: it implies matching_names + state_pairing; an explicit --set of any of those wins). hier defaults true (sweep every def in --top's subtree; --set pass.semdiff.hier=0 compares one top pair). Knobs are --set pass.semdiff.* (matching_names | state_pairing | hier | dump_state | id_granularity=pair|region)","args":{"required":[{"name":"impl","type":"lg:DIR"},{"name":"ref","type":"lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"stats","type":"flag (aggregate node/register/memory match report)"},{"name":"set","type":"pass.semdiff.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass semdiff --ref lg:gold --impl lg:opt --top adder","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder --stats","lhd pass semdiff --ref lg:gold --impl lg:opt --set pass.semdiff.matching_names=true","lhd tool diff lg:gold lg:opt --match"]})json");
+        R"json({"schema_version":1,"name":"pass semdiff","description":"Structural diff/match (a structural LEC), a `pass` subcommand: structural_match(ref, impl) marks corresponding nodes/driver-pins of both lg: libraries with a shared `match` attribute (0 = no counterpart) and saves both back in place. v1 marks lg: libraries, so both sides must be lg:DIR (compile sources to lg: first). Inspect the diff with `lhd tool grep match=0 lg:impl` or visualize it with `lhd tool diff lg:ref lg:impl --match`. --stats prints the aggregate node/register/memory match report (a design health check of the hierarchy lec compares: it implies matching_names + state_pairing + inline_absent, which first dissolves each instance whose def the other side lacks -- a cgen memory wrapper, a synthesis region -- as lec[hier] does, and it saves nothing; an explicit --set of any of those wins). hier defaults true (sweep every def in --top's subtree; --set pass.semdiff.hier=0 compares one top pair). Knobs are --set pass.semdiff.* (matching_names | state_pairing | inline_absent | hier | dump_state | id_granularity=pair|region)","args":{"required":[{"name":"impl","type":"lg:DIR"},{"name":"ref","type":"lg:DIR"}],"optional":[{"name":"impl-top","type":"string"},{"name":"ref-top","type":"string"},{"name":"top","type":"string"},{"name":"stats","type":"flag (aggregate node/register/memory match report)"},{"name":"set","type":"pass.semdiff.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass semdiff --ref lg:gold --impl lg:opt --top adder","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder --stats","lhd pass semdiff --ref lg:gold --impl lg:opt --set pass.semdiff.matching_names=true","lhd tool diff lg:gold lg:opt --match"]})json");
     return 0;
   }
   if (name == "compile" || name == "compile verilog" || name == "compile pyrope") {
@@ -617,12 +617,12 @@ int describe_command(const Options& opts) {
   }
   if (name == "pyrope fmt") {
     print_json_line(
-        R"json({"schema_version":1,"name":"pyrope fmt","description":"Format Pyrope source (a clang-format for Pyrope): the prpfmt formatter walks the tree-sitter-pyrope grammar and re-emits standardized Pyrope (indentation, spacing, alignment, smart wrapping). Prints to stdout by default; -i/--inplace rewrites each file; -o/--output writes one file. No result envelope (the output is the formatted source). Exit 0 ok; 1 if any file failed to parse, failed --verify, or could not be read/written","args":{"required":[{"name":"files","type":"path[]","positional":true}],"optional":[{"name":"inplace","type":"flag","aliases":["-i"]},{"name":"output","type":"path","aliases":["-o"]},{"name":"indent","type":"int","default":2},{"name":"width","type":"int","default":132},{"name":"verify","type":"flag"}]},"inputs":["pyrope"],"outputs":["stdout","pyrope"],"examples":["lhd pyrope fmt foo.prp","lhd pyrope fmt -i foo.prp bar.prp","lhd pyrope fmt foo.prp --indent 2 -o foo.fmt.prp"]})json");
+        R"json({"schema_version":1,"name":"pyrope fmt","description":"Format Pyrope source (a clang-format for Pyrope): the prpfmt formatter walks the tree-sitter-pyrope grammar and re-emits standardized Pyrope (indentation, spacing). Two layouts: --mode ai (the default) has no width limit and no vertical alignment, so edits stay local in diffs; --mode human wraps at --width and aligns repeated shapes (--width in ai mode warns and has no effect). Prints to stdout by default; -i/--inplace rewrites each file; -o/--output writes one file. No result envelope (the output is the formatted source). Exit 0 ok; 1 if any file failed to parse, failed --verify, or could not be read/written","args":{"required":[{"name":"files","type":"path[]","positional":true}],"optional":[{"name":"inplace","type":"flag","aliases":["-i"]},{"name":"output","type":"path","aliases":["-o"]},{"name":"mode","type":"enum","values":["ai","human"],"default":"ai"},{"name":"indent","type":"int","default":2},{"name":"width","type":"int (--mode human only)","default":132},{"name":"verify","type":"flag"}]},"inputs":["pyrope"],"outputs":["stdout","pyrope"],"examples":["lhd pyrope fmt foo.prp","lhd pyrope fmt -i foo.prp bar.prp","lhd pyrope fmt foo.prp --mode human --width 100 -o foo.fmt.prp"]})json");
     return 0;
   }
   if (name == "pyrope style") {
     print_json_line(
-        R"json({"schema_version":1,"name":"pyrope style","description":"Find repetition, whole-tuple copy candidates, flattened bundle arguments, and single-destination conditionals using Tree-sitter, without compiling or resolving imports. Reports likely unrolled loops when numeric literals and identifier indices follow affine progressions. Skips damaged sequences in partial code. Advisory only; no rewrites. Findings and summary use the diagnostics stream, with rule-specific attrs, source spans, and related locations. Exit 0 for findings or partial parses; 1 for input/parser failures","args":{"required":[{"name":"files","type":"path[]","positional":true}],"optional":[{"name":"min-repeats","type":"int","default":7,"min":3,"max":1000000},{"name":"max-block-statements","type":"int","default":128,"min":1,"max":4096},{"name":"max-findings","type":"int","default":20,"min":1,"max":1000000}]},"inputs":["pyrope"],"outputs":["diagnostics"],"examples":["lhd pyrope style foo.prp","lhd pyrope style foo.prp --diag-fmt pretty","lhd pyrope style foo.prp --emit diagnostics:style.jsonl"]})json");
+        R"json({"schema_version":1,"name":"pyrope style","description":"Find repetition, whole-tuple copy candidates, flattened bundle arguments, and single-destination conditionals using Tree-sitter, without compiling or resolving imports. Reports likely unrolled loops when numeric literals and identifier indices follow affine progressions. Skips damaged sequences in partial code. Advisory only; no rewrites. Findings and summary use the diagnostics stream, with rule-specific attrs, source spans, and related locations. Exit 0 when clean (including partial parses without findings); 2 when any suggestion is reported (usage errors also exit 2); 1 for input/parser failures (wins over 2)","args":{"required":[{"name":"files","type":"path[]","positional":true}],"optional":[{"name":"min-repeats","type":"int","default":7,"min":3,"max":1000000},{"name":"max-block-statements","type":"int","default":128,"min":1,"max":4096},{"name":"max-findings","type":"int","default":20,"min":1,"max":1000000}]},"inputs":["pyrope"],"outputs":["diagnostics"],"examples":["lhd pyrope style foo.prp","lhd pyrope style foo.prp --diag-fmt pretty","lhd pyrope style foo.prp --emit diagnostics:style.jsonl"]})json");
     return 0;
   }
   if (name == "pyrope lsp" || name == "lsp") {
@@ -636,7 +636,7 @@ int describe_command(const Options& opts) {
     return 0;
   }
   if (name == "pass") {
-    print_json_line(R"json({"schema_version":1,"name":"pass","description":"Run a single graph pass over lg: inputs. Subcommands: color <alg> (acyclic|synth|path|mincut|flat|reduce node coloring/rewrite), partition (region->module Sub split), single_edge (edge normalization: latches/negedge -> posedge flops, verification only), satopt (bounded proof-backed logic simplification, committed), abc (combinational ABC tech-map), usyn (unate synthesis: domino LUT cover handed to ABC), opentimer (OpenTimer STA on a tech-mapped module -> timing.json), formal (single-design property checks: proven obligations marked in place; `lhd describe \"pass formal\"`), liberty gensim <file.lib> (Liberty -> sim models), semdiff (structural diff/match of two lg: libraries via --ref/--impl; `lhd describe \"pass semdiff\"`), analyze (read-only structural diagnosis: comb loops, clock endpoints, coloring validity)","args":{"required":[{"name":"subcommand","type":"enum","values":["color","partition","single_edge","satopt","abc","usyn","opentimer","formal","liberty","semdiff","analyze"]},{"name":"inputs","type":"lg:DIR","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"ref","type":"lg:DIR (semdiff)"},{"name":"impl","type":"lg:DIR (semdiff)"}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass abc --top m lg:dir --emit-dir lg:net","lhd pass liberty gensim sky130.lib --emit-dir lg:models","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder"]})json");
+    print_json_line(R"json({"schema_version":1,"name":"pass","description":"Run a single graph pass over lg: inputs. Subcommands: color <alg> (acyclic|synth|path|mincut|flat|reduce node coloring/rewrite), partition (region->module Sub split), single_edge (edge normalization: latches/negedge -> posedge flops, verification only), satopt (bounded proof-backed logic simplification, committed), abc (combinational ABC tech-map), usyn (native register-rooted synthesis with optional tmap), opentimer (OpenTimer STA on a tech-mapped module -> timing.json), formal (single-design property checks: proven obligations marked in place; `lhd describe \"pass formal\"`), liberty gensim <file.lib> (Liberty -> sim models), semdiff (structural diff/match of two lg: libraries via --ref/--impl; `lhd describe \"pass semdiff\"`), analyze (read-only structural diagnosis: comb loops, clock endpoints, coloring validity)","args":{"required":[{"name":"subcommand","type":"enum","values":["color","partition","single_edge","satopt","abc","usyn","opentimer","formal","liberty","semdiff","analyze"]},{"name":"inputs","type":"lg:DIR","positional":true,"repeatable":true}],"optional":[{"name":"top","type":"string"},{"name":"emit-dir","type":"lg:DIR/"},{"name":"ref","type":"lg:DIR (semdiff)"},{"name":"impl","type":"lg:DIR (semdiff)"}]},"inputs":["lg"],"outputs":["lg"],"examples":["lhd pass color acyclic --top m lg:dir","lhd pass abc --top m lg:dir --emit-dir lg:net","lhd pass liberty gensim sky130.lib --emit-dir lg:models","lhd pass semdiff --ref lg:gold --impl lg:opt --top adder"]})json");
     return 0;
   }
   if (name == "pass usyn") {
@@ -761,7 +761,7 @@ void print_general_help() {
       "               lhd synth lg:cpu_lg --top Cpu --emit-dir lg:net --stats\n"
       "  sim        build + run a C++ simulation of a Pyrope design's `test` blocks (dynamic verify)\n"
       "               lhd sim foo.prp                  # build + run every test block\n"
-      "               lhd sim foo.prp my_test --arg n=4\n"
+      "               lhd sim foo.prp my_test +n=4\n"
       "  lec        logic equivalence (LEC): verilog:/pyrope:/ln:/lg: sides, --set formal.solver picks the\n"
       "               backend — cvc5 (default, in-process) | bitwuzla | lgyosys (yosys/lgcheck)\n"
       "               lhd lec --impl impl.prp --ref ref.v\n"
@@ -829,7 +829,7 @@ int help_pyrope(const std::string& sub) {
         "  --max-findings N          highest-ranked findings across all rules per file (default 20)\n"
         "  --diag-fmt pretty|json    human text or JSONL on stderr (auto by default)\n"
         "  --emit diagnostics:PATH  write structured findings and summary to PATH\n\n"
-        "exit: 0 including suggestions/partial parses; 1 for input or parser failures\n"
+        "exit: 0 no suggestions; 2 suggestions reported (or a usage error); 1 input or parser failures (wins over 2)\n"
         "Repetition limits: contiguous copies within a scope, consistent numeric/identifier-index strides;\n"
         "no arbitrary renaming, statement reordering, semantic proof, or automatic refactoring.\n");
     return 0;
@@ -839,22 +839,25 @@ int help_pyrope(const std::string& sub) {
         "lhd pyrope fmt — format Pyrope source (a clang-format for Pyrope, via prpfmt)\n"
         "\n"
         "usage: lhd pyrope fmt FILE… [flags]\n"
-        "  Re-emits standardized Pyrope (indentation, spacing, alignment, smart wrapping)\n"
-        "  by walking the tree-sitter-pyrope grammar. Prints to stdout by default.\n"
+        "  Re-emits standardized Pyrope (indentation, spacing) by walking the\n"
+        "  tree-sitter-pyrope grammar. Prints to stdout by default.\n"
         "\n"
         "flags:\n"
-        "  -i, --inplace     rewrite each input file in place (unchanged files are left alone)\n"
-        "  -o, --output FILE write to FILE instead of stdout (a single input file)\n"
-        "      --indent N    spaces per indent level (default 2)\n"
-        "      --width N     wrap column / max line width (default 132)\n"
-        "      --verify      re-parse the formatted output and warn (exit 1) if it no longer parses\n"
+        "  -i, --inplace          rewrite each input file in place (unchanged files are left alone)\n"
+        "  -o, --output FILE      write to FILE instead of stdout (a single input file)\n"
+        "      --mode ai|human    ai (default): no width limit, no vertical alignment (diff-friendly);\n"
+        "                         human: wrap at --width and align repeated shapes\n"
+        "      --indent N         spaces per indent level (default 2)\n"
+        "      --width N          wrap column / max line width, --mode human only (default 132;\n"
+        "                         warns and has no effect in ai mode)\n"
+        "      --verify           re-parse the formatted output and warn (exit 1) if it no longer parses\n"
         "\n"
         "exit: 0 ok; 1 if any file failed to parse, failed --verify, or could not be read/written\n"
         "\n"
         "examples:\n"
-        "  lhd pyrope fmt foo.prp                 # print formatted foo.prp to stdout\n"
+        "  lhd pyrope fmt foo.prp                 # print formatted foo.prp to stdout (ai mode)\n"
         "  lhd pyrope fmt -i foo.prp bar.prp      # reformat both files in place\n"
-        "  lhd pyrope fmt foo.prp --indent 2 -o foo.fmt.prp\n");
+        "  lhd pyrope fmt foo.prp --mode human --width 100 -o foo.fmt.prp\n");
     return 0;
   }
   if (sub == "lsp") {
@@ -888,7 +891,7 @@ int help_pyrope(const std::string& sub) {
       "\n"
       "examples:\n"
       "  lhd pyrope fmt -i foo.prp\n"
-      "  lhd pyrope fmt foo.prp --indent 2 --width 100\n"
+      "  lhd pyrope fmt foo.prp --mode human --width 100\n"
       "  lhd pyrope lsp\n");
   return 0;
 }
@@ -1046,12 +1049,11 @@ int help_pass(const std::string& sub) {
         "equivalent for emits, simulation, LEC and synthesis. The input lg: is never\n"
         "rewritten; --emit-dir lg:/verilog: receives the optimized design.\n"
         "Compile step only: --set pass.satopt=true (default false) runs it after\n"
-        "cprop/bitwidth, before pass.formal. `lhd synth`/`lhd lec` compiling a\n"
-        "Pyrope/Verilog source turn it on (`lhd synth foo.prp` == `lhd compile --set\n"
-        "pass.satopt=true foo.prp` then mapping); an lg:/ln: input is taken as\n"
-        "compiled. An explicit --set pass.satopt=true|false always wins.\n"
+        "cprop/bitwidth, before pass.formal. It is off by default for every command,\n"
+        "including `lhd synth` and `lhd lec`, for source and compiled inputs.\n"
+        "Enable it with --set pass.satopt=true or invoke `lhd pass satopt` directly.\n"
         "pass.satopt.stages picks the searches: none, default, all, or a list of\n"
-        "constants, equiv, complement, odc, hotmux, memory, resub, simp_ctrl\n"
+        "constants, equiv, complement, odc, muxtree, share, hotmux, memory, resub, simp_ctrl\n"
         "(default: every stage).\n"
         "One deterministic budget bounds a run: pass.satopt.work, .queries, .budget_k,\n"
         "  .cone_max, .samples and .time_ms (a wall-clock backstop, 0 = off); out of\n"
@@ -1116,15 +1118,16 @@ int help_pass(const std::string& sub) {
   }
   if (sub == "usyn") {
     std::print(
-        "lhd pass usyn — unate synthesis: a domino-gate LUT cover handed to ABC\n"
-        "usage: lhd pass usyn lg:DIR --top M --set synth.liberty=cells.lib --emit-dir lg:OUT --workdir W\n"
+        "lhd pass usyn — native register-rooted XAG synthesis\n"
+        "usage: lhd pass usyn lg:DIR --top M --set pass.usyn.tmap=none --emit-dir lg:OUT --workdir W\n"
         "\n"
-        "Every region is covered by domino gates over dual-rail inputs (support/literals/series limits;\n"
-        "static LUTs where no domino gate builds a function), minimizing a transistor proxy under a domino\n"
-        "depth requirement. The cover then goes to ABC: technology mapping only (abc=tmap, the default) or the pass.abc\n"
-        "flow (abc=opt); abc=only skips the cover. A region the cover cannot handle takes the\n"
-        "ordinary ABC flow. State and latency are preserved; check equivalence with `lhd lec`.\n"
-        "The fused command selects this pass with --set synth.mapper=usyn; abc.* tuning is inherited.\n");
+        "Whole-cone endpoint selection precedes bounded residual rewriting/resubstitution and one feedback round.\n"
+        "Gate limits are logical_inputs/stack/branches; cut_inputs controls the larger analysis window.\n"
+        "CMOS output preserves original state. tmap=none needs no Liberty or ABC; tmap=abc (default)\n"
+        "uses the optional provider for technology mapping only and requires synth.liberty.\n"
+        "USYN runs no SATOPT or generic ABC synthesis and has no ABC fallback. Old cover options are rejected.\n"
+        "The fused command uses synth.mapper=usyn; logical-only output skips STA. ABC options are not inherited.\n"
+        "Logical and mapped-region reuse follow lhd.incremental; physical DominoLatch output remains deferred.\n");
     return print_options_section({"pass.usyn."});
   }
   if (sub == "abc") {
@@ -1343,7 +1346,7 @@ constexpr std::string_view kJsonPassAnalyze
     = R"json({"schema_version":1,"name":"pass analyze","description":"Read-only structural diagnosis over a whole lg: library: combinational loops (classified by what sits on the cycle), clock endpoints per state element, and Color_acyclic partitioning validity. Reports every finding in every definition as JSONL on stdout, never fails fast, transforms nothing (--emit-dir lg: is refused). --set pass.analyze.checks=loops,clocks,colors picks a subset; pass.analyze.strict=true exits non-zero on any finding; pass.analyze.verbose=true reports every state element","args":{"required":[{"name":"inputs","type":"lg:DIR","positional":true}],"optional":[{"name":"top","type":"string"},{"name":"set","type":"pass.analyze.flag=value","repeatable":true}]},"inputs":["lg"],"outputs":[],"examples":["lhd pass analyze --top m lg:dir","lhd pass analyze lg:dir --set pass.analyze.checks=loops --set pass.analyze.strict=true"]})json";
 
 constexpr std::string_view kJsonSimCommand
-    = R"json({"schema_version":1,"name":"sim","description":"Build and run a C++ simulation of a Pyrope design's `test` blocks (dynamic verify): the DUT lowers to a Slop<N> struct (inou.cgen.sim, over ../hlop) and ONE C++ driver holding every test block is host-compiled and run — each test's asserts are checked by running, not formally. Positionals are the .prp source(s) — the LAST holds the `test` blocks — plus, as in `lhd compile`, any ln:DIR (pre-elaborated units) or lg:DIR (pre-compiled libraries) the testbench imports, so a design compiled once simulates without re-reading its sources. A lone non-path positional selects a single test; each `test name(params)` parameter becomes a --<name> flag on the generated binary","args":{"required":[{"name":"file","type":"path (.prp)","positional":true}],"optional":[{"name":"ir-inputs","type":"ln:DIR|lg:DIR","positional":true,"repeatable":true},{"name":"test","type":"string","positional":true},{"name":"arg","type":"key=value","repeatable":true},{"name":"seed","type":"int"},{"name":"list-tests","type":"flag"},{"name":"setup-only","type":"flag"},{"name":"run-only","type":"flag"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"},{"name":"restart-cycle","type":"int"},{"name":"vcd-from","type":"int"},{"name":"vcd-to","type":"int"},{"name":"vcd-on-fail","type":"flag"},{"name":"vcd-fail-window","type":"int"},{"name":"list-signals","type":"flag"},{"name":"probe","type":"SIG,..."},{"name":"probe-from","type":"int"},{"name":"probe-to","type":"int"},{"name":"break-when","type":"SIG OP VALUE"},{"name":"query","type":"path|-|json"},{"name":"set","type":"sim.flag=value","repeatable":true}]},"inputs":["pyrope","ln","lg"],"outputs":["sim"],"examples":["lhd sim foo.prp","lhd sim foo.prp --list-tests","lhd sim foo.prp my_test --arg n=4","lhd sim dut.prp tb.prp","lhd sim ln:dut_lns/ tb.prp","lhd sim lg:dut_lgs/ tb.prp","lhd sim foo.prp --set sim.vcd=true","lhd sim foo.prp --workdir W --set sim.tune.profile=on","lhd sim foo.prp my_test --query q.json --result-json r.json"]})json";
+    = R"json({"schema_version":1,"name":"sim","description":"Build and run a C++ simulation of a Pyrope design's `test` blocks (dynamic verify): the DUT lowers to a Slop<N> struct (inou.cgen.sim, over ../hlop) and ONE C++ driver holding every test block is host-compiled and run — each test's asserts are checked by running, not formally. Positionals are the .prp source(s) — the LAST holds the `test` blocks — plus, as in `lhd compile`, any ln:DIR (pre-elaborated units) or lg:DIR (pre-compiled libraries) the testbench imports, so a design compiled once simulates without re-reading its sources. A lone non-path positional selects a single test; each `test name(params)` parameter becomes a +<name>=VALUE flag on the generated binary","args":{"required":[{"name":"file","type":"path (.prp)","positional":true}],"optional":[{"name":"ir-inputs","type":"ln:DIR|lg:DIR","positional":true,"repeatable":true},{"name":"test","type":"string","positional":true},{"name":"+name[=value]","type":"simulation argument","repeatable":true},{"name":"arg","type":"key=value (legacy alias)","repeatable":true},{"name":"seed","type":"int"},{"name":"list-tests","type":"flag"},{"name":"setup-only","type":"flag"},{"name":"run-only","type":"flag"},{"name":"workdir","type":"path"},{"name":"result-json","type":"path"},{"name":"restart-cycle","type":"int"},{"name":"vcd-from","type":"int"},{"name":"vcd-to","type":"int"},{"name":"vcd-on-fail","type":"flag"},{"name":"vcd-fail-window","type":"int"},{"name":"list-signals","type":"flag"},{"name":"probe","type":"SIG,..."},{"name":"probe-from","type":"int"},{"name":"probe-to","type":"int"},{"name":"break-when","type":"SIG OP VALUE"},{"name":"query","type":"path|-|json"},{"name":"set","type":"sim.flag=value","repeatable":true}]},"inputs":["pyrope","ln","lg"],"outputs":["sim"],"examples":["lhd sim foo.prp","lhd sim foo.prp --list-tests","lhd sim foo.prp my_test +n=4","lhd sim dut.prp tb.prp","lhd sim ln:dut_lns/ tb.prp","lhd sim lg:dut_lgs/ tb.prp","lhd sim foo.prp --set sim.vcd=true","lhd sim foo.prp --workdir W --set sim.tune.profile=on","lhd sim foo.prp my_test --query q.json --result-json r.json"]})json";
 
 constexpr std::string_view kJsonList
     = R"json({"schema_version":1,"name":"list","description":"Enumerate the CLI vocabulary as one JSON line (options also honors --diag-fmt pretty). Patterns: steps | emit-kinds | error-classes | options [REGEX] | log-channels","args":{"required":[{"name":"pattern","type":"enum","values":["steps","emit-kinds","error-classes","options","log-channels"],"positional":true}],"optional":[{"name":"regex","type":"string (options name filter)","positional":true}]},"examples":["lhd list options 'cgen\\..*'","lhd list log-channels"]})json";
@@ -1762,16 +1765,17 @@ int help_command(const Options& opts) {
                "  each `test`'s asserts are checked dynamically (by running), not formally. An\n"
                "  optional second positional selects a single test by name.\n"
                "\n"
-               "  Each `test name(params)` parameter becomes a `--<name>` flag on the generated\n"
+               "  Each `test name(params)` parameter becomes a `+<name>=VALUE` flag on the generated\n"
                "  binary (defaulting to its signature default; a parameter with no default is\n"
                "  required). The binary also accepts `--list-tests`, `--test NAME`, `--seed N`\n"
-               "  (hlop PRNG seed), and `--help`. `--arg key=value` / `--seed N` here are forwarded\n"
+               "  (hlop PRNG seed), and `--help`. `+key=value` / `--seed N` here are forwarded\n"
                "  to it, and the built binary can be re-run directly with those flags.\n"
                "\n"
                "flags:\n"
                "  --list-tests         list the design's tests + parameters, then exit (no build; JSON or\n"
                "                       a human listing per --diag-fmt)\n"
-               "  --arg key=value      bind a test runtime parameter, forwarded as `--key value` (repeatable)\n"
+               "  +key[=value]         supply a simulation argument (repeatable; first occurrence wins)\n"
+               "  --arg key=value      compatibility alias for +key=value\n"
                "  --seed N             PRNG seed forwarded to the driver (else it keeps its default)\n"
                "  --result-json PATH   (global) the result envelope gains a per-test `tests` array (status,\n"
                "                       cycle, located failing assert) for tooling\n"
@@ -1798,7 +1802,7 @@ int help_command(const Options& opts) {
                "  lhd sim foo.prp                                # build + run every test in foo.prp\n"
                "  lhd sim foo.prp --list-tests                   # enumerate the tests + params as JSON\n"
                "  lhd sim foo.prp my_test                        # run just the `my_test` block\n"
-               "  lhd sim foo.prp my_test --arg n=4              # bind the test parameter n=4\n"
+               "  lhd sim foo.prp my_test +n=4              # bind the test parameter n=4\n"
                "  lhd sim foo.prp my_test --seed 42             # reproducible randomized run\n"
                "  lhd sim foo.prp --result-json r.json           # envelope + per-test located-failure array\n"
                "  lhd sim foo.prp --set sim.vcd=true             # also dump a VCD per test\n"
@@ -1817,7 +1821,7 @@ int help_command(const Options& opts) {
   }
   if (topic == "synth") {
     std::print("{}",
-               "lhd synth — one-shot synthesis: compile -> optional reduce -> color synth -> abc tech-map -> opentimer STA\n"
+               "lhd synth — compile -> optional reduce -> color synth -> selected mapper -> optional STA\n"
                "\n"
                "usage: lhd synth [--top M] [--workdir W] <file.prp|file.sv|lg:DIR|ln:DIR ...> [--emit-dir lg:NET] [--stats]\n"
                "  The five manual steps over ONE in-memory design:\n"
@@ -1829,20 +1833,27 @@ int help_command(const Options& opts) {
                "  --top is resolved once (a bare entity name is enough; a sole module needs none), the\n"
                "  coloring never touches an lg: input (it happens in memory), and ONE Liberty feeds both\n"
                "  abc and opentimer. Other colorings are the manual steps, not a synth knob.\n"
+               "  synth.mapper=usyn selects native register-rooted XAG synthesis; pass.usyn.tmap=abc\n"
+               "  (default) uses ABC only for mapping. pass.usyn.tmap=none needs no Liberty and skips STA.\n"
+               "  Logical CMOS retains original state; explicitly requesting STA on it is an error.\n"
+               "  Tune USYN with pass.usyn.*; ABC options are not inherited. SATOPT defaults off.\n"
                "\n"
                "  --workdir is optional. With one, <workdir>/synth/ keeps:\n"
                "    lg/          the compiled design   (`lhd lec --ref lg:W/synth/lg ...` pairs against it)\n"
-               "    net/         the mapped netlist    (--emit-dir lg: relocates it instead)\n"
+               "    net/         logical/mapped output (--emit-dir lg: relocates it instead)\n"
                "    qor.json     pass.abc QoR          timing.json  pass.opentimer critical path\n"
                "  and the incremental tiers are live: the compile cache and <workdir>/abc_cache reuse\n"
                "  everything unchanged since the last run (lhd.incremental, default true; =false is an\n"
                "  honest cold run with byte-identical outputs). Without --workdir the flow runs in a\n"
                "  scratch dir: only --emit-dir lg:/verilog:/report: and the printed report survive.\n"
+               "  Native USYN logical and mapped-region reuse follow lhd.incremental independently.\n"
                "\n"
                "report:\n"
                "  default   one abc-map line (regions, gates, area, max delay, max region depth) + the STA critical path\n"
-               "  --stats   plus one row per (definition, color) from abc and from opentimer (resynth=1|0)\n"
+               "  USYN      selected endpoint/cell counts, optional tmap summary, optional STA\n"
+               "  --stats   region estimates and mapping/timing rows; USYN counts are definition counts\n"
                "  --result-json: the envelope's `qor` member is {kind:\"synth\", abc:{...}, sta:{...}}, plus\n"
+               "  USYN adds qor.usyn; qor.abc is technology-map when mapped, null when logical-only.\n"
                "  `phases` (per-step ms) and `incremental.{compile,abc}` (hits/misses/ms per reuse tier);\n"
                "  --stats also prints those as `incremental[stats]:` + `phases[stats]:` rows\n"
                "\n"

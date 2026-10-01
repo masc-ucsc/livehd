@@ -3,15 +3,15 @@
 :type: simulation
 */
 
-mod conditional_latch_inner(gate:bool, d:u8) -> (q:u8@[0]) {
-  reg l:u8:[latch=true]
+mod conditional_latch_inner(gate:Bool, d:U8) -> (q:U8@[0]) {
+  reg l:U8:[latch=true]
   q = l
   if gate {
     l = d
   }
 }
 
-pub mod conditional_latch_top(active:bool, gate:bool, d:u8) -> (q:u8@[0]) {
+pub mod conditional_latch_top(active:Bool, gate:Bool, d:U8) -> (q:U8@[0]) {
   q = 0
   if active {
     q = conditional_latch_inner(gate=gate, d=d)

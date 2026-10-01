@@ -27,9 +27,10 @@
 {
   const xx = 3
 
-  mut a = (xx, const xx = 44, const foo = 55)
-  // Decision 1: drop `(3, 44, 55)` cross-match — named slots stay named.
-  cassert(a == (xx, xx=44, foo=55))
+  mut a = (const xx = 44, const foo = 55)
+  // Decision 1: drop `(3, 44, 55)` cross-match — named slots stay named (and a
+  // tuple never mixes a positional `xx` with the named ones).
+  cassert(a == (xx=44, foo=55))
   cassert(xx == 3)
 }
 

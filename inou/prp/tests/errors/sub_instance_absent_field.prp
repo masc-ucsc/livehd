@@ -1,0 +1,21 @@
+/*
+:name: sub_instance_absent_field
+:type: error
+:error: unknown field `zz` on instance `c`
+:help: the instance's fields are its outputs: o
+*/
+
+// Ruling 24: a read with no declaration is an error AT the read, in every
+// context. A `mod` instance's fields are its outputs, so `c.zz` is absent even
+// when nothing uses it. Before, this dead read compiled with exit 0 (a live
+// one failed only later, in tolg: "instance result has no output named zz").
+
+mod inc(a:U8) -> (o:U8@[0]) {
+  wrap o = a + 1
+}
+
+pub mod sub_instance_absent_field(x:U8) -> (y:U8@[0]) {
+  const c = inc(a=x)
+  const q = c.zz   // locate_error_here
+  y = c.o
+}

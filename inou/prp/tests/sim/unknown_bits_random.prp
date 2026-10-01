@@ -14,14 +14,14 @@
 // Color_plan::runtime_random (which gates quiescence detection) would be a lie.
 // The stability assert below is the deterministic half of the contract.
 
-pub mod unknown_bits_random(a:u64) -> (r:u64@[0]) {
-  mut c:u64 = 0sb?
+pub mod unknown_bits_random(a:U64) -> (r:U64@[0]) {
+  mut c:U64 = 0sb?
   r = a ^ c
 }
 
 test unknown_bits_random.drawn_once {
   mut dut       = unknown_bits_random
-  mut first:u64 = 0
+  mut first:U64 = 0
   mut stable    = true
   tick 8 {
     dut.a = 0

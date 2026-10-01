@@ -1,0 +1,11 @@
+/*
+:name: spec_types_signed_bits_comptime
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// SPEC docs 07-typesystem "Bitwidth": "comptime const K = 4 / mut x:Signed(bits=K) = 0 // same range as S4 /
+// cassert(x.[bits] == 4 and x.[min] == -8 and x.[max] == 7)".
+comptime const K = 4
+mut x:Signed(bits=K) = 0
+cassert(x.[bits] == 4 and x.[min] == -8 and x.[max] == 7)

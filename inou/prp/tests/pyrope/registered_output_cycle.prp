@@ -4,7 +4,7 @@
 */
 // A state register declared in the output interface homes at the same sigma
 // cycle as its din. The output annotation must not charge a second crossing.
-pub mod top(enable:bool) -> (reg count:u8@[0]) {
+pub mod top(enable:Bool) -> (reg count:U8@[0]) {
   if enable {
     wrap count += 1
   }

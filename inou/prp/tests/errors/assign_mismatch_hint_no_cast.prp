@@ -1,0 +1,17 @@
+/*
+:name: assign_mismatch_hint_no_cast
+:type: error
+:error: cannot assign (tuple|integer) value to .(d|s). \(it is (integer|string)\)
+:help: ^(?!.*(cast|[Bb]ool))use a new variable
+*/
+
+// A variable's type cannot change. The hint offers a bool<->integer cast only
+// when the two kinds ARE bool and integer (assign_mismatch_hint_bool_int.prp);
+// an integer into a tuple or a string has no cast to offer, so both hints here
+// are the plain "use a new variable" (the negative lookahead rejects any hint
+// that mentions a cast or a bool).
+mut d = 2
+d = (d, 60)  // locate_error_here
+
+mut s:String = "x"
+s = 3

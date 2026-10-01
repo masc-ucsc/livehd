@@ -410,7 +410,7 @@ convergence is still L7.
      is 242.
 
   Note the tree moved *toward* drivability in the `68afbda` regeneration:
-  `Alu.io_in_bits` used to be a flat `u543` and is now a nested tuple mirroring
+  `Alu.io_in_bits` used to be a flat `U543` and is now a nested tuple mirroring
   the Verilog `struct packed`. That makes the two language sides agree on port
   shape — which is what makes one driver serve both — but limit (1) means the
   newly-exposed leaves still cannot be poked.
@@ -497,7 +497,7 @@ convergence is still L7.
   in Verilog:
 
   ```pyrope
-  pub mod DiffExtInstrCommit::[timecheck=false](clock:u1, enable:u1, io:u322) -> () {
+  pub mod DiffExtInstrCommit::[timecheck=false](clock:U1, enable:U1, io:U322) -> () {
   }
   ```
 

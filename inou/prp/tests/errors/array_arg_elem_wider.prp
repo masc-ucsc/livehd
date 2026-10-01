@@ -1,0 +1,19 @@
+/*
+:name: array_arg_elem_wider
+:type: error
+:error: argument .v. \(elements in \[0, 255\]\) in call to .f. may not fit its declared element range \[0, 15\]
+:help: an argument never narrows implicitly
+*/
+
+// User ruling 1 (2026-09-27) for an ARRAY argument: each element of the actual
+// must fit the declared element type. A `[4]U8` bound to `v:[N]U4` used to
+// compile and truncate the packed bus at the instance boundary, so lane 1 read
+// the high nibble of lane 0.
+mod f<N=4>(v:[N]U4, i:U2) -> (o:U4@[0]) {
+  o = v[i]
+}
+pub mod array_arg_elem_wider(a:U8, i:U2) -> (o:U4@[0]) {
+  mut t:[4]U8 = 0
+  t[0] = a
+  o = f<4>(v=t, i=i)   // locate_error_here
+}

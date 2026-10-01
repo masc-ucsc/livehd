@@ -1,0 +1,21 @@
+/*
+:name: spec_lexical_str_single_quote_raw
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+// docs 02-basics "Strings": "Single quote does not have escape character" and
+// "Pyrope allows string interpolation only when double quote is used". So in a
+// single-quoted string a backslash, `{`, `}` and `{}` are plain text (the
+// escape, empty-hole and lone-brace errors are double-quote rules).
+const a = 'a } b'
+const b = '{}'
+const c = 'x\{y'
+const d = 'a\qb'
+const e = 'line\nstill'
+cassert(a.[size] == 5)
+cassert(b.[size] == 2)
+cassert(c.[size] == 4)
+cassert(d.[size] == 4)
+cassert(e.[size] == 11)
+cassert(b == "{{}}")

@@ -5,7 +5,7 @@
 :pyrope_top: fun3
 */
 
-pub comb fun3(a:u3, b:u7, cond:boolean) -> (res:u4) {
+pub comb fun3(a:U3, b:U7, cond:Bool) -> (res:U4) {
   if cond {
     res = a + 1
   }else{

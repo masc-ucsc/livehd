@@ -1,0 +1,12 @@
+/*
+:name: spec_types_lowercase_type_alias_name
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+// Former lowercase type spellings are ordinary identifiers (07-typesystem.md).
+type bool = U1
+
+mut v:bool = 1
+cassert(v == 1 and v.[bits] == 1)

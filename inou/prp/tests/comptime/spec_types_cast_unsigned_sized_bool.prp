@@ -1,0 +1,9 @@
+/*
+:name: spec_types_cast_unsigned_sized_bool
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// SPEC docs 04-variables "Boolean": "`Unsigned(b)` and `U<num>(b)` also preserve true as `1`".
+cassert(Unsigned(true) == 1)
+cassert(U8(true) == 1)

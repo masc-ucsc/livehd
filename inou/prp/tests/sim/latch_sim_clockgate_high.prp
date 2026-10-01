@@ -33,9 +33,9 @@
 // The `qf` assert is the NON-VACUITY CONTROL: the posedge flop on the same
 // clock does commit, so a failure here is specifically the latch's gate, not a
 // dead testbench.
-pub mod lclkhi(clk:bool, d:u8) -> (q:u8@[0], qf:u8@[1]) {
-  reg l:u8:[latch=true]
-  reg f:u8:[clock_pin=ref clk] = 0
+pub mod lclkhi(clk:Bool, d:U8) -> (q:U8@[0], qf:U8@[1]) {
+  reg l:U8:[latch=true]
+  reg f:U8:[clock_pin=clk] = 0
   q  = l
   qf = f
   if clk {

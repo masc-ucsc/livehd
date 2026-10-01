@@ -1,0 +1,14 @@
+/*
+:name: spec_types_lowercase_i0_name
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+// Former lowercase type spellings are ordinary identifiers (07-typesystem.md).
+pub comb spec_types_lowercase_i0_name(a:U8) -> (o:U8) {
+  mut i0 = a
+  o = i0
+}
+
+cassert(spec_types_lowercase_i0_name(a=9) == 9)

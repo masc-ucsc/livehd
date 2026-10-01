@@ -1,0 +1,18 @@
+/*
+:name: array_port_dim_not_comptime
+:type: error
+:error: the dimension of array port .v. of .* is not a compile-time constant
+:help: size a port with a literal
+*/
+
+// An array port sized by a runtime value (`[a]`) has no compile-time shape. It
+// used to compile with exit 0 into a ONE-bit signed port (`input signed v`)
+// that silently dropped every lane.
+mod pick<N=2>(a:U4, v:[a]U4) -> (o:U4@[0]) {
+  o = v[0]
+}
+pub mod array_port_dim_not_comptime(a:U4) -> (r:U4@[0]) {
+  mut v:[4]U4 = 0
+  v[0] = a
+  r = pick<N=3>(a=a, v=v)   // locate_error_here
+}

@@ -1,0 +1,49 @@
+/*
+:name: generic_mem_byte_lanes
+:type: equiv
+:verilog_top: generic_mem_byte_lanes
+:pyrope_top: generic_mem_byte_lanes
+:lec_top: generic_mem_byte_lanes
+*/
+// lhdtrack L3: reg MEMORIES written one byte lane at a time
+// (`mem[a]#[lo..<hi] = v`, lowered to a read-modify-write of the entry), at
+// two shapes (2 x u16, 4 x u24). This file is the literal-width REFERENCE of
+// the group; generic_mem_byte_lanes_1.prp is the same design with the depth
+// and entry width taken from generics, specialized at both shapes.
+//   * `o*` (ordering="old"): every lane written in one cycle lands (the
+//     old-value read of a lane write forwards the lanes written before it)
+//     and a read sees the committed entry.
+//   * `p*` (ordering="program", the default): the read placed BEFORE the lane
+//     writes (qb) sees the committed entry, the read AFTER them (qa) the
+//     merged next value.
+pub mod generic_mem_byte_lanes(we:Bool, a:U2, d:U24, be:U3, ra:U2)
+  -> (qo2:U16@[0], qb2:U16@[0], qa2:U16@[0], qo3:U24@[0], qb3:U24@[0], qa3:U24@[0]) {
+  reg o2:[2]U16:[ordering="old"] = 0
+  reg p2:[2]U16 = 0
+  reg o3:[4]U24:[ordering="old"] = 0
+  reg p3:[4]U24 = 0
+  qb2 = p2[ra#[0]]
+  qb3 = p3[ra]
+  if we {
+    if be#[0] == 1 {
+      o2[a#[0]]#[0..<8] = d#[0..<8]
+      p2[a#[0]]#[0..<8] = d#[0..<8]
+      o3[a]#[0..<8]     = d#[0..<8]
+      p3[a]#[0..<8]     = d#[0..<8]
+    }
+    if be#[1] == 1 {
+      o2[a#[0]]#[8..<16] = d#[8..<16]
+      p2[a#[0]]#[8..<16] = d#[8..<16]
+      o3[a]#[8..<16]     = d#[8..<16]
+      p3[a]#[8..<16]     = d#[8..<16]
+    }
+    if be#[2] == 1 {
+      o3[a]#[16..<24] = d#[16..<24]
+      p3[a]#[16..<24] = d#[16..<24]
+    }
+  }
+  qo2 = o2[ra#[0]]
+  qa2 = p2[ra#[0]]
+  qo3 = o3[ra]
+  qa3 = p3[ra]
+}

@@ -1,0 +1,15 @@
+/*
+:name: spec_types_cast_range_tuple
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+// SPEC docs 04-variables "Basic types" / "Range": "Range type cast from integers use the same one-hot encoding.
+// It is not possible to type cast from tuple to range, but it is possible from range to tuple." and the examples
+// "cassert(range(0ub01_1100) == 2..=4)", "cassert((1,2,3) == tuple(1..=3))",
+// "cassert(tuple(0..=10 step  2) == ( 0,2,4,6,8,10))".
+// NOTE: the lowercase `range`/`tuple` cast spelling is an open question (qa.md section 1 capitalizes every
+// built-in type; Q15 lists no Range type).
+cassert(range(0ub01_1100) == 2..=4)
+cassert((1,2,3) == tuple(1..=3))
+cassert(tuple(0..=10 step 2) == (0,2,4,6,8,10))

@@ -1,0 +1,19 @@
+/*
+:name: spec_memory_two_resets_no_pin
+:type: error
+:tolg: 1
+:error: [Rr]eset
+*/
+
+// SPEC (docs 08-memories.md): "With two or more `Reset` inputs in the module
+// itself, name the reset with `reset_pin=`."
+// SPEC (qa.md appendix section 1): "Zero or one Clock input = implicit; two or more
+// require `clock_pin=ref x` (same for Reset/`reset_pin`)."
+// Rule encoded here: an initialized memory in a module with TWO Reset inputs and
+// no `reset_pin=` is a compile error (the implicit reset is ambiguous).
+
+pub mod spec_memory_two_resets_no_pin(clk:Clock, ra_rst:Reset, rb:Reset, a:U2, d:U8) -> (q:U8@[0]) {
+  reg mem:[4]U8 = 0
+  q = mem[a]
+  mem[a] = d
+}

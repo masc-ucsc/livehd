@@ -1,0 +1,9 @@
+/*
+:name: spec_lexical_str_spec_brace
+:type: error
+:error: expected a format spec after
+*/
+// docs 02-basics "Strings": "a format style after the `:` ... holds no brace"
+// (`"{x:{}}"` is an error).
+const x = 2
+const s = "{x:{}}"   // locate_error_here

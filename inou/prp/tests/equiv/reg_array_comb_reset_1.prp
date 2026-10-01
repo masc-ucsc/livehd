@@ -1,0 +1,35 @@
+/*
+:name: reg_array_comb_reset_1
+:lec_grep_not: unset-unused-field
+*/
+// The per-entry reset computed at compile time by a `comb` that fills an
+// ordinary local array in a loop and returns it whole:
+//   comptime const INIT = upper_rows(size=4)
+//   reg m:[4]U4 = INIT
+// (08-memories.md: the init contents may be a `comptime`-computed
+// initializer). Today it does not compile: "upass.tolg: memory 'm' initializer
+// must be a comptime constant or tuple literal" (the comb's array result never
+// folds to a comptime bundle; the value side is sim/reg_array_comb_init.prp).
+// This variant also pins the WARNINGS the same compile printed, 9 of them,
+// code unset-unused-field: "field `INIT.1..3` / `inl1_rows.1..3` /
+// `inl1_t.1..3` is declared but never set and never used" -- every one of
+// those lanes is set. (`rows = t` is a whole-array store like
+// array_whole_output_store_1.prp; `inl1_t.1` of an inlined comb's local array
+// is reported even in loop-free code.) A comb whose local is declared
+// `comptime mut t:[4]U4 = nil` proves with no warning today. `lhd lec` echoes
+// both sides' compile diagnostics as JSON lines (with their `code`), which is
+// what `:lec_grep_not:` reads.
+comb upper_rows(size) -> (rows) {
+  mut t:[4]U4 = 0
+  for i in 0..<size {
+    t[i] = ((1 << size) - 1) & ~((1 << (i + 1)) - 1)
+  }
+  rows = t
+}
+
+pub mod reg_array_comb_reset(en:Bool, d:U4, s:U2) -> (q:U4@[0]) {
+  comptime const INIT = upper_rows(size=4)
+  reg m:[4]U4 = INIT
+  if en { m[s] = d }
+  q = m[s]
+}

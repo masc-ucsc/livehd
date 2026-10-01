@@ -15,8 +15,8 @@
 // __memory(cfg) takes the Memory cell pins verbatim, so it can drive a real
 // wensize-wide enable.
 //
-// wensize=2 over u8 gives two 4-bit lanes: lane 0 is bits 0..3, lane 1 is 4..7.
-mod wen_sim(wa:u2, wd:u8, we:u2, ra:u2) -> (q:u8@[0]) {
+// wensize=2 over U8 gives two 4-bit lanes: lane 0 is bits 0..3, lane 1 is 4..7.
+mod wen_sim(wa:U2, wd:U8, we:U2, ra:U2) -> (q:U8@[0]) {
   mut cfg = (
     const addr    = (ra, wa),
     const bits    = 8,
@@ -24,7 +24,7 @@ mod wen_sim(wa:u2, wd:u8, we:u2, ra:u2) -> (q:u8@[0]) {
     const din     = (0, wd),
     const enable  = (1, we),
     const fwd     = false,
-    const type    = 0,
+    const `type`     = 0,
     const wensize = 2,
     const rdport  = (1, 0),
   )

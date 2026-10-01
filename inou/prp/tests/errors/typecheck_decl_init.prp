@@ -6,8 +6,8 @@
 */
 
 // A typed variable declaration's literal initializer must match its declared
-// scalar type: `c` is declared `bool`, so the integer initializer `10` is a
+// scalar type: `c` is declared `Bool`, so the integer initializer `10` is a
 // type error (bool/int/string are distinct, no implicit conversion). This is
-// the same check as a function parameter `comb f(c:bool = 10)`.
+// the same check as a function parameter `comb f(c:Bool = 10)`.
 
-mut c:bool = 10   // locate_error_here
+mut c:Bool = 10   // locate_error_here

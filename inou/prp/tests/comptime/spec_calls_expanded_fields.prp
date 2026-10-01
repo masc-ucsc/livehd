@@ -1,0 +1,18 @@
+/*
+:name: spec_calls_expanded_fields
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// docs 06-functions.md "Argument naming": "Structured tuple parameters can be
+// supplied either as one tuple value or as expanded dotted fields":
+// `pick(ar=(x=1, y=5), cond=true)` and `pick(ar.x=1, ar.y=5, cond=true)` are
+// the same binding.
+
+comb pick(ar:(x:U3, y:S4), cond:Bool) -> (res:S5) {
+  res = if cond { ar.x + 1 } else { ar.y - 1 }
+}
+
+cassert(pick(ar=(x=1, y=5), cond=true) == 2)
+cassert(pick(ar.x=1, ar.y=5, cond=false) == 4)

@@ -1,0 +1,21 @@
+/*
+:name: verilog_mem_init_bounds
+:type: equiv
+:verilog_top: verilog_mem_init_bounds
+:pyrope_top: verilog_mem_init_bounds
+*/
+
+// The golden's `initial` blocks as power-on contents (docs 08-memories:
+// `initial=<packed contents>`, entry 0 in the low bits, next to `= nil`, which
+// binds no reset). `mem [1:4]` is a 4-entry memory whose entry 0 is `mem[1]`;
+// the 128-bit entries are 2^64-1, 1, 2^63 and 2^64, each zero-extended.
+pub mod verilog_mem_init_bounds(clk:Clock, we:Bool, wa:U2, ra:U2, d:U8, dw:U128) -> (q:U8@[0], qw:U128@[0]) {
+  reg mem:[4]U8:[ordering="old", initial=0x281e140a] = nil
+  reg wide:[4]U128:[ordering="old", initial=0x1000000000000000000000000000000008000000000000000000000000000000000000000000000010000000000000000ffffffffffffffff] = nil
+  q  = mem[ra]
+  qw = wide[ra]
+  if we {
+    mem[wa]  = d
+    wide[wa] = dw
+  }
+}

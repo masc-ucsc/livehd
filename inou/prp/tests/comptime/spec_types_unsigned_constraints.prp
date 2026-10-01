@@ -1,0 +1,9 @@
+/*
+:name: spec_types_unsigned_constraints
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// SPEC qa.md appendix section 1: "`Unsigned(bits=N, max=.., min=..)`" (a bits AND a max constraint together).
+mut c:Unsigned(bits=8, max=200) = 0
+cassert(c.[max] == 200 and c.[min] == 0)

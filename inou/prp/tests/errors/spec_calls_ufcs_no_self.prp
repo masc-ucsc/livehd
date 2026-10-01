@@ -1,0 +1,13 @@
+/*
+:name: spec_calls_ufcs_no_self
+:type: error
+:error: self|UFCS|method
+*/
+
+// docs 06-functions.md: "The UFCS form is valid ONLY when the lambda declares
+// `self`: calling a self-less lambda as `x.f(args)` is a compile error (use the
+// direct form)." (`const t1 = (8).div2(b=2)  // error: div2 has no self`)
+
+comb div2(a, b) -> (r) { r = a / b }
+
+const t1 = (8).div2(b=2) // locate_error_here

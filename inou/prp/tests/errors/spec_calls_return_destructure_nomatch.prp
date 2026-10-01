@@ -1,0 +1,16 @@
+/*
+:name: spec_calls_return_destructure_nomatch
+:type: error
+:error: not a field|no field|unknown field|does not match|match|output
+*/
+
+// docs 06-functions.md "Binding return values": "destructure into names that
+// **match the output names**, or rename a slot explicitly (`x=two.p1`). A slot
+// that matches no output is a compile error ... There is **no mapping by
+// position**": `const (x, y) = two(a=100, b=50)  // ERROR: x/y do not match
+// p1/p2 (no by-order)`.
+
+comb two(a:Signed, b:Signed) -> (p1:Signed, p2:Signed) { p1 = a; p2 = b }
+
+const (x, y) = two(a=100, b=50) // locate_error_here
+cassert(x == 100)

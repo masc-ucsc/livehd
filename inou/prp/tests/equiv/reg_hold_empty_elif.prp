@@ -15,8 +15,8 @@
 //   taken  -> pcr = tgt
 //   stall  -> HOLD  (empty arm)
 //   else   -> pcr = nx
-pub mod pcunit(taken:bool, stall:bool, tgt:u8, nx:u8) -> (pc:u8@[0]) {
-  reg pcr:u8 = 0
+pub mod pcunit(taken:Bool, stall:Bool, tgt:U8, nx:U8) -> (pc:U8@[0]) {
+  reg pcr:U8 = 0
   if taken {
     pcr = tgt
   } elif stall {

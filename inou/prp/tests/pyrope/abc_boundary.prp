@@ -8,8 +8,8 @@
 // sees `t` as a load-free output and keeps the smallest NAND; sized against
 // what lies beyond the partition -- eight sink pins in block 2 -- it must
 // take the stronger drive. The annotation never changes semantics.
-mod abc_boundary(a:u1, b:u1, c:u8) -> (y:u8@[0]) {
-  mut t:u1 = 0
+mod abc_boundary(a:U1, b:U1, c:U8) -> (y:U8@[0]) {
+  mut t:U1 = 0
   {::[color=1]
     wrap t = ~(a & b)
   }

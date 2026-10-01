@@ -1,0 +1,21 @@
+/*
+:name: nested_lambda_runtime_mut
+:type: error
+:error: 'm' is a runtime value of the enclosing scope; it is not visible inside lambda 'addm'
+:help: pass 'm' as an input of 'addm'
+*/
+
+// Ruling 2026-09-27 #4 (suggestions 2.3 row 3): a nested lambda sees only
+// COMPTIME bindings of its enclosing scopes. 06-functions.md: "Reading an
+// enclosing runtime binding — a `const`, `mut`, `reg`, `wire`, or input ...
+// from a nested lambda is a compile error: pass the value as an input".
+// Reading the enclosing mod's runtime `mut m` inside the nested `comb addm`
+// must be that error. Today it compiles with exit 0: `m` becomes a hidden
+// closure input and the design silently computes `a + (a ^ 1)`.
+pub mod top(a:U8) -> (o:U8@[0]) {
+  mut m:U8 = a ^ 1
+  comb addm(x:U8) -> (y:U8) {
+    y = (x + m)#[0..<8]  // locate_error_here
+  }
+  o = addm(x=a)
+}

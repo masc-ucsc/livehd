@@ -1,0 +1,11 @@
+/*
+:name: clkrst_clock_as_data_cast
+:type: error
+:tolg: 1
+:error: a Clock is not data
+*/
+// docs 07-typesystem "Clock and Reset": a Clock is not data, `U1(clk)` is a
+// compile error.
+pub mod clkrst_clock_as_data_cast(clk:Clock, a:U8) -> (o:U8@[0]) {
+  wrap o = a + U1(clk)
+}

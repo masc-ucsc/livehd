@@ -10,7 +10,7 @@
 //
 // Two regressions are locked in here:
 //   1. `cputs("{t}")` wrongly reported a multi-element comptime tuple as
-//      "not comptime-known" — the `string(...)`/interpolation cast now
+//      "not comptime-known" — the `String(...)`/interpolation cast now
 //      stringifies a tuple to its Pyrope textual form.
 //   2. A comparison with an EMPTY tuple folded to "unknown" (silently never
 //      discharged) — an empty bundle is now treated as the empty tuple, so

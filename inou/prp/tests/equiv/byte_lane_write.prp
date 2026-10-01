@@ -1,0 +1,25 @@
+/*
+:name: byte_lane_write
+:type: equiv
+:verilog_top: byte_lane_write
+:pyrope_top: byte_lane_write
+*/
+// The byte-lane write idiom `w[k*8 +: 8] <= byte_i` (see the golden .v). Its
+// index is a 32-bit expression, so judged by its TYPE the window could leave
+// the vector, and inou/slang clipped it: typed clip muxes made the window width
+// a runtime value (two barrel shifters, 3-4x the gates and 4-6x the depth of
+// the plain write). inou/slang now bounds a selector by its value (`k*8` is
+// 0..24) and never clips a window at the top of the root itself, whose
+// declared width already drops those bits; upass.tolg lowers a constant-width
+// window with a constant mask. lhd/tests/width_scoreboard pins the emitted
+// size.
+pub mod byte_lane_write(k:U2, we:Bool, byte_i:U8, v:U32) -> (q:U32@[0], c:U32@[0]) {
+  reg w:U32 = 0
+  if we {
+    w#[(k * 8)..+8] = byte_i
+  }
+  q = w
+  mut cv:U32 = v
+  cv#[(k * 8)..+8] = byte_i
+  c = cv
+}

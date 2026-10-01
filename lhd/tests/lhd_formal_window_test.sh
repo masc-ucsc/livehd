@@ -39,10 +39,10 @@ fail() {
 # Exactly-two is what makes the directional claims below decidable — a window
 # that includes cycle 2 must hold and one that excludes it must refute.
 cat >"$W/dly2.prp" <<'EOF'
-pub mod dly2(req:u1) -> (ack:u1@[], nrst:u1@[]) {
-  reg r1:u1 = 0
-  reg r2:u1 = 0
-  reg seen:u1 = 0
+pub mod dly2(req:U1) -> (ack:U1@[], nrst:U1@[]) {
+  reg r1:U1 = 0
+  reg r2:U1 = 0
+  reg seen:U1 = 0
   ack  = r2
   r2   = r1
   r1   = req

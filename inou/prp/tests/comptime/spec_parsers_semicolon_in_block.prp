@@ -1,0 +1,22 @@
+/*
+:name: spec_parsers_semicolon_in_block
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// docs 02-basics "Semicolons": "In Pyrope, a semicolon (`;`) has the same
+// meaning as a newline."
+// qa.md chat ruling "Parser consistency: lhd (prpparse) and the tree-sitter
+// grammar must be consistent."
+//
+// Inside a block, a `;` right after another statement terminator is just one
+// more line end, exactly as at the top level (`const a = 1;; const b = 2`).
+// The comptime harness also formats this file (`lhd pyrope fmt`, the
+// tree-sitter grammar), so both parsers must accept it.
+comb f(a:U8) -> (r:U9) {
+  mut t:U9 = a;;
+  t = t + 1;
+  ;
+  r = t
+}
+cassert(f(a=3) == 4)

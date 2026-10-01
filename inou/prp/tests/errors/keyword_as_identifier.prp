@@ -12,8 +12,8 @@
 // Verilog signal named `in`/`reg` is just as ordinary, so this is what someone
 // hand-writing the Pyrope for an imported design reaches for first. The
 // diagnostic has to name the word and show the escape.
-pub mod repro(a:u8) -> (o:u8@[0]) {
-  reg stage:[2]u8 = 0
+pub mod repro(a:U8) -> (o:U8@[0]) {
+  reg stage:[2]U8 = 0
 
   stage[0] = a
   o = stage[1]

@@ -6,13 +6,17 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <deque>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <print>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
@@ -20,7 +24,9 @@
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
 #include "lhd.hpp"
+#include "lhd_prp_import.hpp"
 #include "node_util.hpp"
+#include "prp2lnast.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -160,6 +166,64 @@ bool append_lg_slice_content(std::string& buf, const std::string& dir, const std
   } catch (...) {
     return false;  // any library/load hiccup: the whole-dir hash still works
   }
+}
+
+// The on-disk Pyrope import closure of the `.prp` files in `seeds` (path, the
+// bytes already read): each file's import strings come from the lexer (what
+// `lhd scan` reports) and resolve with the compile driver's own
+// importer-relative resolver (lhd_prp_import.hpp), to a fixpoint. A file the
+// command line already names is not repeated, and every file is read once.
+// Rows are (logical import name, path, bytes), sorted by name then path; only
+// the name and the bytes are hashed, never the path. A file that does not lex
+// contributes no imports: the compile reports it.
+struct Prp_import_row {
+  std::string name;
+  std::string path;
+  std::string bytes;
+};
+std::vector<Prp_import_row> prp_import_closure(const std::vector<std::pair<std::string, std::string>>& seeds) {
+  import_detail::Resolver                                 resolver;
+  std::set<std::string>                                   visited;  // absolute paths
+  std::vector<std::pair<std::string, const std::string*>> pending;  // path, its bytes
+  std::deque<Prp_import_row>                              found;    // stable: `pending` points into it
+  for (const auto& [path, bytes] : seeds) {
+    if (visited.insert(import_detail::abspath_of(path)).second) {
+      pending.emplace_back(path, &bytes);
+    }
+  }
+  while (!pending.empty()) {
+    const auto [importer, bytes] = std::move(pending.back());
+    pending.pop_back();
+    std::vector<std::string> imports;
+    try {
+      imports = Prp2lnast::scan_imports(importer, *bytes);
+    } catch (...) {
+      continue;
+    }
+    const auto dir = import_detail::dir_of(importer);
+    for (const auto& raw : imports) {
+      if (raw.starts_with("lg:") || raw.starts_with("ln:")) {
+        continue;  // artifact imports are not source files
+      }
+      for (const auto& name : import_detail::candidates(raw)) {
+        auto path = resolver.find(dir, name);
+        if (path.empty()) {
+          continue;
+        }
+        if (visited.insert(import_detail::abspath_of(path)).second) {
+          auto  content = livehd::file_utils::read_file(path);
+          auto& row     = found.emplace_back(Prp_import_row{name, path, content ? std::move(*content) : std::string{}});
+          pending.emplace_back(row.path, &row.bytes);
+        }
+        break;
+      }
+    }
+  }
+  std::vector<Prp_import_row> closure(std::make_move_iterator(found.begin()), std::make_move_iterator(found.end()));
+  std::sort(closure.begin(), closure.end(), [](const Prp_import_row& x, const Prp_import_row& y) {
+    return std::tie(x.name, x.path) < std::tie(y.name, y.path);
+  });
+  return closure;
 }
 
 // SOURCE_DATE_EPOCH (reproducible-builds.org): the only timestamp the kernel
@@ -395,6 +459,72 @@ bool write_pretty_abc_map(const rapidjson::Value& d, bool stats) {
   return true;
 }
 
+bool write_pretty_usyn(const rapidjson::Value& d, bool stats) {
+  const auto totals = d.FindMember("totals");
+  if (totals == d.MemberEnd() || !totals->value.IsObject()) {
+    return false;
+  }
+  double regions = 0, registers = 0, endpoints = 0, cells = 0;
+  json_num(totals->value, "regions", regions);
+  json_num(totals->value, "register_bits", registers);
+  json_num(totals->value, "eligible_endpoints", endpoints);
+  json_num(totals->value, "selected_cells", cells);
+  std::print("  qor: usyn '{}' ({}): {:.0f} definition region(s), {:.0f} register bits, {:.0f} endpoints, {:.0f} selected cells\n",
+             json_str(d, "top"),
+             json_str(d, "output"),
+             regions,
+             registers,
+             endpoints,
+             cells);
+  if (stats) {
+    if (auto rows = d.FindMember("regions"); rows != d.MemberEnd() && rows->value.IsArray()) {
+      for (const auto& row : rows->value.GetArray()) {
+        if (!row.IsObject()) {
+          continue;
+        }
+        double before = 0, after = 0;
+        if (auto c = row.FindMember("before"); c != row.MemberEnd() && c->value.IsObject()) {
+          json_num(c->value, "total", before);
+        }
+        if (auto c = row.FindMember("after"); c != row.MemberEnd() && c->value.IsObject()) {
+          json_num(c->value, "total", after);
+        }
+        std::print("  usyn[stats]: module='{}' estimated_cost={:.0f}->{:.0f}\n", json_str(row, "module"), before, after);
+      }
+    }
+  }
+  return true;
+}
+
+bool write_pretty_tmap(const rapidjson::Value& d, bool stats) {
+  const auto rows = d.FindMember("regions");
+  if (rows == d.MemberEnd() || !rows->value.IsArray()) {
+    return false;
+  }
+  // Definition counts are not instance-weighted physical area or design timing.
+  std::print("  qor: technology-map '{}' provider={}: {} definition region(s)\n",
+             json_str(d, "top"),
+             json_str(d, "provider"),
+             rows->value.Size());
+  if (stats) {
+    for (const auto& row : rows->value.GetArray()) {
+      if (!row.IsObject()) {
+        continue;
+      }
+      double gates = 0, area = 0, depth = 0;
+      json_num(row, "gates", gates);
+      json_num(row, "area", area);
+      json_num(row, "logic_depth", depth);
+      std::print("  tmap[stats]: module='{}' gates={:.0f} area={:.2f} logic_depth={:.0f}\n",
+                 json_str(row, "module"),
+                 gates,
+                 area,
+                 depth);
+    }
+  }
+  return true;
+}
+
 void write_pretty_qor(const std::string& qor_json, bool stats) {
   rapidjson::Document d;
   d.Parse(qor_json.data(), qor_json.size());
@@ -405,13 +535,21 @@ void write_pretty_qor(const std::string& qor_json, bool stats) {
       rendered = write_pretty_sta(d, stats);
     } else if (kind == "abc-map") {
       rendered = write_pretty_abc_map(d, stats);
+    } else if (kind == "usyn") {
+      rendered = write_pretty_usyn(d, stats);
+    } else if (kind == "technology-map") {
+      rendered = write_pretty_tmap(d, stats);
     } else if (kind == "synth") {
-      // `lhd synth`: the abc-map summary, then the STA report (absent when
-      // synth.opentimer=false). Each sub-report renders exactly as its pass's
-      // own envelope would, so the one-shot and the manual steps read alike.
+      // Logical selection, optional mapping and optional STA have separate
+      // reports. Render each just as its standalone pass would.
       rendered = true;
+      if (auto u = d.FindMember("usyn"); u != d.MemberEnd() && u->value.IsObject()) {
+        rendered = write_pretty_usyn(u->value, stats) && rendered;
+      }
       if (auto a = d.FindMember("abc"); a != d.MemberEnd() && a->value.IsObject()) {
-        rendered = write_pretty_abc_map(a->value, stats) && rendered;
+        const bool mapped = json_str(a->value, "kind") == "technology-map" ? write_pretty_tmap(a->value, stats)
+                                                                           : write_pretty_abc_map(a->value, stats);
+        rendered          = mapped && rendered;
       }
       if (auto s = d.FindMember("sta"); s != d.MemberEnd() && s->value.IsObject()) {
         rendered = write_pretty_sta(s->value, stats) && rendered;
@@ -626,48 +764,53 @@ std::string compute_run_id(const Options& opts) {
   // lg: side is read only from its (per-side) top down, so its hash covers
   // just that slice; every other input — including --lib model libraries,
   // which the proof flattens through — is read whole and hashes whole. The
-  // per-side top is part of every impl/ref row (a file-typed side proves a
-  // different obligation under a different --impl-top).
+  // per-side top and the side's role are part of every impl/ref row (a
+  // file-typed side proves a different obligation under a different
+  // --impl-top, and swapping --impl and --ref is a different proof).
   struct Run_input {
     std::string path;
+    std::string role;  // "impl"/"ref" for a lec side, "" otherwise
     std::string kind;  // impl/ref side kind: "lg" enables slice hashing
     std::string top;
   };
   std::vector<Run_input> inputs;
   for (const auto& f : opts.files) {
-    inputs.push_back({f, "", ""});
+    inputs.push_back({f, "", "", ""});
   }
   for (const auto& in : opts.ins) {
-    inputs.push_back({in.path, "", ""});
+    inputs.push_back({in.path, "", "", ""});
   }
   for (const auto& in : opts.in_dirs) {
-    inputs.push_back({in.path, "", ""});
+    inputs.push_back({in.path, "", "", ""});
   }
   for (const auto& l : opts.libs) {
-    inputs.push_back({l.path, "", ""});
+    inputs.push_back({l.path, "", "", ""});
   }
   if (!opts.impl_path.empty()) {
-    inputs.push_back({opts.impl_path, opts.impl_kind, opts.impl_top.empty() ? opts.top : opts.impl_top});
+    inputs.push_back({opts.impl_path, "impl", opts.impl_kind, opts.impl_top.empty() ? opts.top : opts.impl_top});
   }
   if (!opts.ref_path.empty()) {
-    inputs.push_back({opts.ref_path, opts.ref_kind, opts.ref_top.empty() ? opts.top : opts.ref_top});
+    inputs.push_back({opts.ref_path, "ref", opts.ref_kind, opts.ref_top.empty() ? opts.top : opts.ref_top});
   }
   std::sort(inputs.begin(), inputs.end(), [](const Run_input& a, const Run_input& b) {
-    return std::tie(a.path, a.kind, a.top) < std::tie(b.path, b.kind, b.top);
+    return std::tie(a.path, a.role, a.kind, a.top) < std::tie(b.path, b.role, b.kind, b.top);
   });
 
   // Hash input BYTES only (ordinal-separated), never the path strings: the
   // same sources under a different sandbox/exec-root path must produce the
   // same run_id (future_cli.md: no absolute path leaks into an artifact).
-  // Each row is ordinal + per-side top + a mode tag (lgslice/dir/file), so
-  // slice, whole-dir and file byte streams can never alias each other.
+  // Each row is ordinal + role + per-side top + a mode tag (lgslice/dir/file),
+  // so slice, whole-dir and file byte streams can never alias each other.
+  std::vector<std::pair<std::string, std::string>> prp_seeds;  // the named .prp files and their bytes
   for (size_t idx = 0; idx < inputs.size(); ++idx) {
-    const auto& [f, kind, eff_top]  = inputs[idx];
-    buf                            += '|';
-    buf                            += std::format("{}", idx);
-    buf                            += '\0';
-    buf                            += std::format("top={}", eff_top);
-    buf                            += '\0';
+    const auto& [f, role, kind, eff_top]  = inputs[idx];
+    buf                                  += '|';
+    buf                                  += std::format("{}", idx);
+    buf                                  += '\0';
+    buf                                  += std::format("role={}", role);
+    buf                                  += '\0';
+    buf                                  += std::format("top={}", eff_top);
+    buf                                  += '\0';
     if (fs::is_directory(f)) {
       // Slice only a true lg: side: an ln:/pyrope: DIRECTORY side may share
       // its db dir with a (stale) graph library, but lec reads the sources.
@@ -684,8 +827,24 @@ std::string compute_run_id(const Options& opts) {
     } else {
       buf += "file";
       buf += '\0';
-      append_file_content(buf, f);
+      // A missing file appends nothing: the run itself reports missing_file.
+      if (auto content = livehd::file_utils::read_file(f)) {
+        buf += *content;
+        if (f.ends_with(".prp")) {
+          prp_seeds.emplace_back(f, std::move(*content));
+        }
+      }
     }
+  }
+
+  // A Pyrope source reads the files its imports resolve to (transitively),
+  // so their bytes are inputs of the run just like the named files.
+  for (const auto& row : prp_import_closure(prp_seeds)) {
+    buf += "|import";
+    buf += '\0';
+    buf += row.name;
+    buf += '\0';
+    buf += row.bytes;
   }
 
   return std::format("{:016x}", lh::woothash64(buf.data(), buf.size(), 1021));

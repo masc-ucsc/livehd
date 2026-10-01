@@ -1,0 +1,24 @@
+/*
+:name: spec_clock_test_clock_outside_tick
+:type: error
+:error: clock
+*/
+// SPEC (clock lane): each `tick` block mints `clock:Clock`; outside a tick
+// block `clock` is undefined unless the test declares it.
+//   qa.md Appendix 8: "Test clock: each `tick` block gets a MINTED
+//     `clock:Clock` ... `clock` outside a tick block is undefined unless
+//     declared."
+//   docs 05b: "Outside a `tick` block, `clock` is undefined unless the test
+//     declares it."
+mod dut(en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test dut.outside {
+  mut d = dut
+  d.en = true
+  step
+  assert(clock == 1)   // locate_error_here
+}

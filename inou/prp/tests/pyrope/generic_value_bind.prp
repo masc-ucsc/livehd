@@ -19,27 +19,27 @@ comptime const SIZE = 8
 comptime const FLAG = true
 comptime const NAME = 'hi'
 
-comb add_n<N>(x:u8) -> (y:u8) {
-  mut value:u8 = x
+comb add_n<N>(x:U8) -> (y:U8) {
+  mut value:U8 = x
   for i in 0..<N {
     value = (value + 1)#[0..=7]
   }
   y = value
 }
 
-comb scale<K>(x:u8) -> (y:u8) {
+comb scale<K>(x:U8) -> (y:U8) {
   y = (x + K)#[0..=7]
 }
 
-comb pick<B>(x:u8) -> (y:u8) {
+comb pick<B>(x:U8) -> (y:U8) {
   y = if B { x } else { 0 }
 }
 
-comb tag<S>(x:u8) -> (y:u8) {
+comb tag<S>(x:U8) -> (y:U8) {
   y = if S == 'hi' { x } else { 0 }
 }
 
-pub comb generic_value_bind(x:u8) -> (a:u8, b:u8, c:u8, d:u8, e:u8, f:u8) {
+pub comb generic_value_bind(x:U8) -> (a:U8, b:U8, c:U8, d:U8, e:U8, f:U8) {
   comptime const LOCAL = 3
 
   a = add_n<N=SIZE>(x=x)            // named file-scope comptime const

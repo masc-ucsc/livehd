@@ -44,8 +44,8 @@ EOF
 
 cat > "$W/blocked.prp" <<'EOF'
 const p = import("pkg")
-pub mod blocked(a:u4) -> (o:u4@[]) {
-  o = a + p.K
+pub mod blocked(a:U4) -> (o:U4@[]) {
+  wrap o = a + p.K
 }
 EOF
 
@@ -53,12 +53,12 @@ EOF
 # to have anything to rename: a nested-if write followed by an unconditional
 # one is the shape that keeps `v___ssa_1` (a single flat if is renamed away).
 cat > "$W/victim.prp" <<'EOF'
-pub mod victim(a:u4, b:u4, s:u1, t:u1) -> (o:u4@[], q:u4@[]) {
+pub mod victim(a:U4, b:U4, s:U1, t:U1) -> (o:U4@[], q:U4@[]) {
   mut v__w1 = b
   mut v = a
   if s != 0 { if t != 0 { v = v + 1 } }
   v = v + 3
-  o = v
+  wrap o = v
   q = v__w1
 }
 EOF

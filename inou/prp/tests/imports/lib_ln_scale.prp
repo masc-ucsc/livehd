@@ -1,0 +1,12 @@
+// Imported PRE-ELABORATED (through an `ln:` dir, see the `:ln_files:` fixtures
+// ln_callee_*.prp): concrete `mod`s come back with only their manifest
+// interface. `lib_ln_scale` has a typed output; `lib_ln_cnt` an untyped one
+// whose range its body derives (ruling 28: [1, 16]) and a bool one.
+pub mod lib_ln_scale(a:U4) -> (o:U6@[0]) {
+  o = a * 4
+}
+
+pub mod lib_ln_cnt(a:U4) -> (o@[0], z@[0]) {
+  o = a + 1
+  z = a == 0
+}

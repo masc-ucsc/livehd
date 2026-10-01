@@ -1,0 +1,32 @@
+/*
+:name: comb_default_two_defaults
+:type: verify
+:top_module: comb_default_two_defaults
+:verify_bound: 1
+:verify_proven: 1
+:verify_refuted: 2
+*/
+// A call that provides SOME defaulted comb inputs still evaluates the defaults
+// it omits, side effects included: each call below takes exactly one default,
+// and only that default's `assert` (inside `chk`) may be checked. The inliner
+// once dropped every check of the default prologue as soon as one argument was
+// provided, so y1/y2 lost their obligations (0 refuted) and y3 its proof.
+//   y1 -- b's default chk(a=a) is taken: a != 0 is REFUTED at a=0
+//   y2 -- c's default chk(a=b) is taken with b=d: d != 0 is REFUTED at d=0
+//   y3 -- c's default is taken with b=d|1: d|1 != 0 is PROVEN
+// A check of a default the call does NOT take (c's in y1, b's in y2/y3) must
+// not appear: it would add a refuted obligation (a != 0 again).
+comb chk(a) -> (r:U8) {
+  assert(a != 0, "the default expression's own check")
+  r = a
+}
+
+comb f(a:U8, b:U8 = chk(a=a), c:U8 = chk(a=b)) -> (y:U8) {
+  y = a ^ b ^ c
+}
+
+pub mod comb_default_two_defaults(a:U8, d:U8) -> (y1:U8@[0], y2:U8@[0], y3:U8@[0]) {
+  y1 = f(a=a, c=d)
+  y2 = f(a=a, b=d)
+  y3 = f(a=a, b=d | 1)
+}

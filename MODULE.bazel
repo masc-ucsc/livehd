@@ -101,7 +101,7 @@ git_repository(
 # hlop (Dlop value type + slop/dlop execution layer)
 git_repository(
     name = "hlop",
-    commit = "2e4e41297f996c789a21198569fd356b1a9eab67",
+    commit = "3cb472a8dd1f60b993523a82ae4aacbf71d6689f",
     remote = "https://github.com/masc-ucsc/hlop.git",
 )
 # For local co-development swap the git_repository above for:
@@ -132,7 +132,7 @@ http_archive(
 # HHDS (plain git repo — see the iassert/hlop note above)
 git_repository(
     name = "hhds",
-    commit = "83cb51175803943ed3273f049deb41152d85ecab",
+    commit = "06816267200151b7d2df1882c4dae8c35f33612e",
     remote = "https://github.com/masc-ucsc/hhds.git",
 )
 # For local co-development swap the git_repository above for:
@@ -158,26 +158,25 @@ http_archive(
 # LiveHD's core diag.hpp / parser.hpp); see //packages:prpparse.BUILD.
 # To bump the pin, recompute integrity via:
 #   curl -sL https://github.com/masc-ucsc/tree-sitter-pyrope/archive/<commit>.zip | openssl dgst -sha256 -binary | base64
-# Pinned to 3609d517 ("fx prp fmt"); parser and formatter share this archive.
-#
-# The co-development swap to the local ../tree-sitter-pyrope checkout is OVER:
-# the grammar work is pushed, so this is the pinned archive again and livehd is
-# self-contained (a fresh clone builds with no sibling checkout). To swap back
-# for parser co-development, replace the http_archive with:
-#   new_local_repository(
-#       name = "prpparse",
-#       build_file = "//packages:prpparse.BUILD",
-#       path = "../tree-sitter-pyrope/prpparse",
-#   )
-# ...and remember the build then depends on that working tree. @tree_sitter_pyrope
-# below unzips the SAME archive, so both blocks move together.
+# The pinned archive (pin cca9f54e; parser and formatter share it) keeps
+# livehd self-contained: a fresh clone builds with no sibling checkout. For
+# parser co-development the http_archive is swapped for a new_local_repository
+# on the ../tree-sitter-pyrope working tree, and the build then depends on that
+# tree. @tree_sitter_pyrope below unzips the SAME archive, so both blocks swap
+# together.
 http_archive(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    integrity = "sha256-QPqRtnx/TCV10urgDdgOHBym4FS2Ke8AxLEDwhvzeZ0=",  # 3609d517 (same archive as @tree_sitter_pyrope below)
-    strip_prefix = "tree-sitter-pyrope-3609d5173d55e82432dd37ffffec5f422f7898eb/prpparse",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/3609d5173d55e82432dd37ffffec5f422f7898eb.zip"],
+    integrity = "sha256-wyLllOvhwli77wmTKnEjXUvLN0Yn0GsRiLY1zdSkgFQ=",
+    strip_prefix = "tree-sitter-pyrope-cca9f54ef805acdbca55bdbf79c2ddfda398e53a/prpparse",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/cca9f54ef805acdbca55bdbf79c2ddfda398e53a.zip"],
 )
+# For local co-development swap the http_archive above for:
+# new_local_repository(
+#     name = "prpparse",
+#     build_file = "//packages:prpparse.BUILD",
+#     path = "../tree-sitter-pyrope/prpparse",
+# )
 
 # tree-sitter runtime — the incremental-parsing C library (libtree-sitter).
 # Only the Pyrope *formatter* (`lhd pyrope fmt`, @tree_sitter_pyrope//:prpfmt)
@@ -209,11 +208,11 @@ http_archive(
 http_archive(
     name = "tree_sitter_pyrope",
     build_file = "//packages:prpfmt.BUILD",
-    integrity = "sha256-QPqRtnx/TCV10urgDdgOHBym4FS2Ke8AxLEDwhvzeZ0=",
-    strip_prefix = "tree-sitter-pyrope-3609d5173d55e82432dd37ffffec5f422f7898eb",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/3609d5173d55e82432dd37ffffec5f422f7898eb.zip"],
+    integrity = "sha256-wyLllOvhwli77wmTKnEjXUvLN0Yn0GsRiLY1zdSkgFQ=",
+    strip_prefix = "tree-sitter-pyrope-cca9f54ef805acdbca55bdbf79c2ddfda398e53a",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/cca9f54ef805acdbca55bdbf79c2ddfda398e53a.zip"],
 )
-# LOCAL OVERRIDE for prpfmt co-development — swap the http_archive above for:
+# For local co-development swap the http_archive above for:
 # new_local_repository(
 #     name = "tree_sitter_pyrope",
 #     build_file = "//packages:prpfmt.BUILD",

@@ -1,0 +1,51 @@
+/*
+:name: comb_untyped_param_bits_wide
+:type: simulation
+*/
+// lhdtrack suggestions 1.1/1.2 (item 1.1-e): `.[bits]` of an UNTYPED inlined
+// comb parameter bound to a wide typed actual. "A parameter with no declared
+// type takes the argument's type" (docs 06-functions "Argument types"), so
+// `.[bits]` is the actual's declared width.
+//
+// The inliner adopts that type through the actual's declared RANGE. An io
+// port whose range bound is not an i64 recorded only `bits`, so nothing was
+// adopted and `.[bits]` reached tolg unfolded: "attribute read '.[bits]' has
+// no hardware lowering -- it should have folded during elaboration". The
+// cliff is 62 bits unsigned (U61 works) and 63 bits signed (S62 works); the
+// U61 and S62 lanes are the controls. Each failing lane fails on its own.
+//
+// The generic-width twin (a declared `Unsigned(bits=16 * N)` bound) is
+// sim/comb_param_bits_wide_actual.prp.
+comb nb(data) -> (o:U8) {
+  o = data.[bits]
+}
+
+mod comb_untyped_param_bits_wide(w61:Unsigned(bits=61), w62:Unsigned(bits=62), w64:U64,
+    v62:Signed(bits=62), v63:Signed(bits=63), v64:S64)
+  -> (p61:U8@[0], p62:U8@[0], p64:U8@[0], q62:U8@[0], q63:U8@[0], q64:U8@[0]) {
+  p61 = nb(data=w61)
+  p62 = nb(data=w62)
+  p64 = nb(data=w64)
+  q62 = nb(data=v62)
+  q63 = nb(data=v63)
+  q64 = nb(data=v64)
+}
+
+test comb_untyped_param_bits_wide.widths {
+  mut d = comb_untyped_param_bits_wide
+  tick 1 {
+    d.w61 = 1
+    d.w62 = 2
+    d.w64 = 3
+    d.v62 = -1
+    d.v63 = -2
+    d.v64 = -3
+    step
+    assert(d.p61 == 61, "untyped param, unsigned(bits=61) actual (control)")
+    assert(d.p62 == 62, "untyped param, unsigned(bits=62) actual")
+    assert(d.p64 == 64, "untyped param, u64 actual")
+    assert(d.q62 == 62, "untyped param, signed(bits=62) actual (control)")
+    assert(d.q63 == 63, "untyped param, signed(bits=63) actual")
+    assert(d.q64 == 64, "untyped param, s64 actual")
+  }
+}

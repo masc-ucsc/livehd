@@ -1,0 +1,11 @@
+/*
+:name: spec_lexical_cont_at_line
+:type: error
+:error: a line cannot start with '@'
+*/
+// qa.md Q39 item 6 / appendix 8: "a line starting with `@` (also inside an if
+// condition) -> error". docs 02-basics: "A timing read `@[N]` is not an
+// operator: it stays on the line of its name".
+const x1 = 1
+if x1
+@[1] == 1 { }   // locate_error_here

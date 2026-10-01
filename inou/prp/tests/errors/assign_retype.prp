@@ -8,9 +8,9 @@
 // A type cast on the lvalue of a plain assignment is illegal: it would
 // silently re-type an already-declared variable. The type belongs at the
 // declaration; an intentional narrowing write must spell out `wrap`/`sat`
-// so the overflow behaviour is explicit (`wrap c:u4 = 4`).
+// so the overflow behaviour is explicit (`wrap c:U4 = 4`).
 // Without this check, prp2lnast emitted a stray stmts-level `type_spec`
 // that rebound `c`'s type behind the user's back.
 
-mut c:u8 = nil
-c:u4 = 4   // locate_error_here
+mut c:U8 = nil
+c:U4 = 4   // locate_error_here

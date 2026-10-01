@@ -11,7 +11,12 @@ cc_library(
     includes = ["."],
     visibility = ["//visibility:public"],
     deps = [
+        "//core",
         "//lnast",
+        # A defaulted comb input's prologue is not the module's hardware.
+        "//upass/core:default_prologue_hdr",
+        # The Verilog reader's implicit-clock convention (verilog_clock_name).
+        "//upass/core:io_port_rules_hdr",
         # The emitter's reserved-word escape set IS the parser's keyword table
         # (prpparse/prp_keywords.def) — see is_pyrope_reserved_ident.
         "@prpparse//:prp_keywords",

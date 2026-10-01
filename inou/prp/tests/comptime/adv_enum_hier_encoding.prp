@@ -7,15 +7,15 @@
 // 03-bundle.md:604-657 — hierarchical enum: a child keeps the parent's bits
 // (child encoding = parent_bits | new_bit). Verbatim doc example + in/union.
 enum Animal = (
-  bird   = enum(eagle, parrot),
-  mammal = enum(rat, human)
+  bird   = (eagle, parrot),
+  mammal = (rat, human)
 )
-cassert(u8(Animal.bird)         == 0ub000001)
-cassert(u8(Animal.bird.eagle)   == 0ub000011)
-cassert(u8(Animal.bird.parrot)  == 0ub000101)
-cassert(u8(Animal.mammal)       == 0ub001000)
-cassert(u8(Animal.mammal.rat)   == 0ub011000)
-cassert(u8(Animal.mammal.human) == 0ub101000)
+cassert(U8(Animal.bird)         == 0ub000001)
+cassert(U8(Animal.bird.eagle)   == 0ub000011)
+cassert(U8(Animal.bird.parrot)  == 0ub000101)
+cassert(U8(Animal.mammal)       == 0ub001000)
+cassert(U8(Animal.mammal.rat)   == 0ub011000)
+cassert(U8(Animal.mammal.human) == 0ub101000)
 const human_rat = Animal.mammal.rat | Animal.mammal.human
 cassert(Animal.mammal     in human_rat)
 cassert(Animal.mammal.rat in human_rat)

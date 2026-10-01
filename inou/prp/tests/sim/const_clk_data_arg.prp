@@ -1,0 +1,45 @@
+/*
+:name: const_clk_data_arg
+:type: simulation
+:set: compile.upass.inline=false
+*/
+// User ruling 2026-09-28 (27), ruling 52 (clocks bind BY TYPE): a value named
+// `clk`/`clock` that is not typed `Clock` is just data. Binding a constant to
+// an input with that name is NOT an error; binding one to a `Clock` input is
+// (errors/clkrst_const_into_clock.prp).
+//   * cda_add:  a `comb` that reads its `clk` as a data bit.
+//   * cda_pass: a `mod` whose `clk` input clocks nothing (no regs).
+// Before the fix the cda_pass call failed "clock input `clk` of `cda_pass` is
+// bound to a constant" because any clk/clock-NAMED input counted as a clock.
+// A comb call is inlined by default and never reaches that check, so this
+// runs compile.upass.inline=false: cda_add stays an instance too (its Verilog
+// ties `.clk(1'h0)`), which failed the same way before the fix.
+
+comb cda_add(clk:U1, a:U4) -> (y:U5) {
+  y = a + clk
+}
+
+mod cda_pass(clk:U1, a:U4) -> (o:U4@[0]) {
+  o = a
+}
+
+pub mod const_clk_data_arg(a:U4) -> (y0:U5@[0], y1:U5@[0], p:U4@[0]) {
+  y0 = cda_add(clk=0, a=a)
+  y1 = cda_add(clk=1, a=a)
+  const c = cda_pass(clk=1, a=a)
+  p = c.o
+}
+
+test const_clk_data_arg.values {
+  mut d = const_clk_data_arg
+  mut bad = 0
+  tick 16 {
+    d.a = clock
+    step
+    if d.y0 != clock { bad += 1 }
+    if d.y1 != clock + 1 { bad += 1 }
+    if d.p != clock { bad += 1 }
+  }
+  puts("bad={bad}")
+  assert(bad == 0)
+}

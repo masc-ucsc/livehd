@@ -1,0 +1,32 @@
+/*
+:name: spec_tests_reset_from_bool
+:type: simulation
+*/
+// Spec (qa.md appendix section 6): "Reset is Bool-like ... a Bool expression is
+// assignable/bindable to a Reset without a cast (`acc.reset = clock < 2`)";
+// section 6: "A module with registers and no `Clock` (or `Reset`) input gets
+// one MINTED: `clock:Clock` / `reset:Reset`." docs 05b "Running cycles (tick)"
+// `counter.with_reset` example, verbatim below: "cycles 0,1 held in reset;
+// counting starts at cycle 2" and `assert(acc.value == 6)`.
+//
+// Rule pinned: in a test, the DUT's MINTED `reset:Reset` is driven from a Bool
+// expression over the tick's clock with no cast, and the numeric view
+// `clock < 2` is not folded (appendix 6: "upass must not fold `clock < N`").
+
+mod counter(enable:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
+
+  value = count                     // combinational read of count.q -> @[0]
+
+  if enable { wrap count += 1 }
+}
+
+test counter.with_reset {
+  mut acc = counter
+  tick 8 {
+    acc.enable = true
+    acc.reset  = clock < 2     // cycles 0,1 held in reset; counting starts at cycle 2
+    step
+  }
+  assert(acc.value == 6)       // counted only on cycles 2..7
+}

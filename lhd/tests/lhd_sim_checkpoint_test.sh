@@ -30,13 +30,13 @@ cat > "$W/ck.prp" <<'EOF'
 :name: ck
 :type: simulation
 */
-mod sub(en:bool) -> (o:u8@[0]) { reg c:u8 = 0; o = c; if en { wrap c += 1 } }
-mod top(en:bool, din:u8, inp:u80) -> (sout:u8@[0], fout:u8@[0], mout:u10@[0]) {
-  reg acc:u8 = 0
+mod sub(en:Bool) -> (o:U8@[0]) { reg c:U8 = 0; o = c; if en { wrap c += 1 } }
+mod top(en:Bool, din:U8, inp:U80) -> (sout:U8@[0], fout:U8@[0], mout:U10@[0]) {
+  reg acc:U8 = 0
   if en { wrap acc += din }
   fout = acc
   sout = sub(en=en)
-  reg arr:[8]u10 = nil
+  reg arr:[8]U10 = nil
   arr  = inp
   mout = arr[0]
 }

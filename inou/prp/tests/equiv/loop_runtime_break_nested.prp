@@ -7,8 +7,8 @@
 
 // Nested rolling gives each inner loop an independent activation chain; break
 // terminates only that inner occurrence sequence.
-pub mod top(stop:u8) -> (total:u4@[0]) {
-  mut acc:u4 = 0
+pub mod top(stop:U8) -> (total:U4@[0]) {
+  mut acc:U4 = 0
   for outer in 0..<2 {
     for i in 0..<4 {
       const bit = outer * 4 + i

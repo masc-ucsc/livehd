@@ -15,6 +15,7 @@
 #include <format>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -456,7 +457,9 @@ void mirror_log_to_stderr(const std::string& log_path) {
 }
 
 std::string map_diag_category(std::string_view cat) {
-  if (cat == "syntax" || cat == "name" || cat == "type" || cat == "bitwidth") {
+  // A source-level design error: a timing mistake (`time`: a combinational
+  // loop, a cycle mix, a landing-cycle mismatch) is the user's, like a type one.
+  if (cat == "syntax" || cat == "name" || cat == "type" || cat == "bitwidth" || cat == "time") {
     return "syntax";
   }
   if (cat == "missing_file" || cat == "usage" || cat == "config" || cat == "unsupported") {
@@ -595,6 +598,27 @@ Lhd_error step_failure(const std::exception_ptr& ep, std::string_view method) {
   }
 }
 
+// A step failure whose diagnostic category folds to `internal` although the
+// cause is the lg: library's STATE, not a livehd bug: a GraphIO whose declared
+// ports drifted from its body (an lg: dir an add-only lowering or reader
+// wrote), which pass.partition and the flattener refuse. Report it as the
+// config error it is (exit 4). Keyed by pass and code, never by category:
+// mapping `io` to config would reclassify every other io diagnostic. The
+// message must be the record's own, so a failure raised another way keeps its
+// class even when such a record precedes it.
+void remap_library_state_failure(Lhd_error& e) {
+  const auto& recs = livehd::diag::sink().records();
+  for (auto it = recs.rbegin(); it != recs.rend(); ++it) {
+    if (it->severity != livehd::diag::Severity::error) {
+      continue;
+    }
+    if (it->pass == "pass.partition" && (it->code == "io-port-clash" || it->code == "io-pin-unnamed") && it->message == e.msg) {
+      e.cls = "config";
+    }
+    return;
+  }
+}
+
 }  // namespace
 
 // Run one registered EPRP method synchronously, stdout captured to a log.
@@ -633,6 +657,7 @@ void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict&
   }
   if (failure) {
     auto e = step_failure(failure, method);
+    remap_library_state_failure(e);
     point_error_at_step_log(e, opts, log);
     throw e;
   }
@@ -643,6 +668,7 @@ void run_step(std::string_view method, Eprp_var& var, const Eprp_var::Eprp_dict&
   // check kept as a runtime check.
   if (livehd::diag::sink().has_halting_errors()) {
     auto e = classify_engine_failure(std::format("{} reported errors", method));
+    remap_library_state_failure(e);
     point_error_at_step_log(e, opts, log);
     throw e;
   }
@@ -737,6 +763,20 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
   merge_sets(opts, method, labels);
   // No satopt labels: satopt runs only in the compile graph pipeline, and a
   // mapper maps what compile produced.
+}
+
+bool mapper_maps_cells(const Options& opts, std::string_view method) {
+  if (method != "pass.usyn") {
+    return true;
+  }
+  Eprp_var::Eprp_dict labels;
+  merge_sets(opts, method, labels);
+  const auto it = labels.find("tmap");
+  const auto mode = it == labels.end() ? std::string_view{"abc"} : std::string_view{it->second};
+  if (mode != "none" && mode != "abc") {
+    throw Lhd_error{"usage", "pass.usyn.tmap expects none|abc", ""};
+  }
+  return mode != "none";
 }
 
 // Validate every --set/--config entry against the live registry: a typo'd
@@ -868,14 +908,16 @@ void check_known_set_passes(const Options& opts) {
                                   "pass.usyn, pass.opentimer and `lhd synth`)",
                                   value)};
     }
-    if (pass == "pass.usyn" && (flag == "timing_files" || flag == "invocation_context")) {
-      // INTERNAL kernel-plumbed labels (synth.liberty/sdc/spef and the lhd
-      // invocation record). synth_command overwrites them after merge_sets, so a
-      // user --set silently did nothing; refuse it and name the real spelling.
+    if (pass == "pass.usyn" && (flag == "timing_files" || flag == "invocation_context" || flag == "cache_dir")) {
+      // INTERNAL kernel-plumbed labels (synth.liberty/sdc/spef, the lhd
+      // invocation record and the persistent cache root). A user --set either
+      // did nothing or bypassed the one lhd.incremental switch; refuse it and
+      // name the real spelling.
       throw Lhd_error{"usage",
                       std::format("--set/--config 'pass.usyn.{}' is INTERNAL", flag),
-                      flag == "timing_files"
-                          ? "the timing environment comes from --set synth.liberty / synth.sdc / synth.spef"
+                      flag == "timing_files" ? "the timing environment comes from --set synth.liberty / synth.sdc / synth.spef"
+                      : flag == "cache_dir"
+                          ? "the logical/tmap cache lives under a named --workdir and follows --set lhd.incremental=true|false"
                           : "the invocation record is captured by the lhd kernel, not by a --set"};
     }
     if (pass == "compile.yosys" && flag == "liberty") {
@@ -1237,15 +1279,9 @@ Options library_model_opts(const Options& opts) {
   return model_opts;
 }
 
-bool satopt_during_compile(const Options& opts, bool from_source) {
-  // satopt is part of the compile graph pipeline only. `lhd synth` and `lhd
-  // lec` compiling a Pyrope/Verilog SOURCE default it on, so `lhd synth
-  // foo.prp` is `lhd compile --set pass.satopt=true foo.prp` then mapping; an
-  // lg:/ln: input is taken as compiled. An explicit setting always wins.
-  if (const auto value = satopt_setting(opts)) {
-    return *value;
-  }
-  return from_source && (opts.command == "synth" || opts.command == "lec");
+bool satopt_during_compile(const Options& opts) {
+  // Proof-backed simplification is opt-in for every command and input kind.
+  return satopt_setting(opts).value_or(false);
 }
 
 bool compile_unroll_requested(const Options& opts) {
@@ -1408,15 +1444,33 @@ struct Manifest_unit {
 void write_io_entry(std::ofstream& ofs, const Lnast_io_entry& e) {
   ofs << "{\"n\":\"" << json_escape_min(e.name) << "\",\"b\":" << e.bits << ",\"s\":" << (e.is_signed ? 1 : 0)
       << ",\"r\":" << (e.is_ref ? 1 : 0) << ",\"v\":" << (e.is_varargs ? 1 : 0) << ",\"k\":" << static_cast<int>(e.kind)
-      << ",\"smin\":" << e.stages_min << ",\"smax\":" << e.stages_max << ",\"t\":\"" << json_escape_min(e.type_name)
-      << "\",\"hr\":" << (e.has_range ? 1 : 0) << ",\"rmin\":" << e.range_min << ",\"rmax\":"
+      << ",\"sg\":" << static_cast<int>(e.sig) << ",\"smin\":" << e.stages_min << ",\"smax\":" << e.stages_max << ",\"t\":\""
+      << json_escape_min(e.type_name) << "\",\"hr\":" << (e.has_range ? 1 : 0) << ",\"rmin\":" << e.range_min << ",\"rmax\":"
       << e.range_max
       // has_default and the array-port view (`a:[N]T`) are as load-bearing as
       // the width: lnast.tolg builds its element view from array_size alone, so
       // dropping these three here silently re-lowers `a[i]` against the raw
       // packed bus on any unit restored from an ln: manifest.
       << ",\"hd\":" << (e.has_default ? 1 : 0) << ",\"as\":" << e.array_size << ",\"eb\":" << e.elem_bits
-      << ",\"es\":" << (e.elem_signed ? 1 : 0) << "}";
+      << ",\"es\":" << (e.elem_signed ? 1 : 0) << ",\"ebool\":" << (e.elem_bool ? 1 : 0);
+  // The exact bounds of a port past an i64, the inner dims of a
+  // multi-dimensional array port and a generic port's deferred bound texts: a
+  // pre-elaborated import skips upass.ssa, so a caller reads them from here.
+  if (e.wide_range_min && e.wide_range_max) {
+    ofs << ",\"wmin\":\"" << json_escape_min(e.wide_range_min->to_pyrope()) << "\",\"wmax\":\""
+        << json_escape_min(e.wide_range_max->to_pyrope()) << '"';
+  }
+  if (!e.inner_dims.empty()) {
+    ofs << ",\"dims\":[";
+    for (size_t i = 0; i < e.inner_dims.size(); ++i) {
+      ofs << (i ? "," : "") << e.inner_dims[i];
+    }
+    ofs << ']';
+  }
+  if (e.has_deferred_bound()) {
+    ofs << ",\"bmax\":\"" << json_escape_min(e.bound_max_text) << "\",\"bmin\":\"" << json_escape_min(e.bound_min_text) << '"';
+  }
+  ofs << "}";
 }
 
 void write_unit_meta(std::ofstream& ofs, const Lnast& ln) {
@@ -1467,6 +1521,19 @@ void write_unit_meta(std::ofstream& ofs, const Lnast& ln) {
       first = false;
       ofs << "{\"n\":\"" << json_escape_min(name) << "\",\"mn\":" << e.min << ",\"mx\":" << e.max
           << ",\"u\":" << (e.unbounded ? 1 : 0) << "}";
+    }
+    ofs << "]";
+  }
+  if (const auto& demoted = ln.get_ssa_demoted(); !demoted.empty()) {
+    const std::map<std::string, std::string> ordered(demoted.begin(), demoted.end());  // deterministic manifest
+    ofs << ",\"ssa_demoted\":[";
+    bool first = true;
+    for (const auto& [name, base] : ordered) {
+      if (!first) {
+        ofs << ',';
+      }
+      first = false;
+      ofs << "{\"n\":\"" << json_escape_min(name) << "\",\"b\":\"" << json_escape_min(base) << "\"}";
     }
     ofs << "]";
   }
@@ -1580,6 +1647,7 @@ void save_ln_dir(Options& opts, Result& res, const std::vector<std::shared_ptr<L
     ln->export_into(*forest);
     std::ostringstream oss;
     ln->dump(oss);  // hash the canonical text form (deterministic)
+    oss << ln->get_simulation_init();
     Manifest_unit u;
     u.name           = name;
     u.hash           = hash_bytes(oss.str());
@@ -1652,6 +1720,7 @@ void restore_unit_meta(const rapidjson::Value& u, Lnast& ln) {
       x.is_ref      = e.HasMember("r") && e["r"].GetInt() != 0;
       x.is_varargs  = e.HasMember("v") && e["v"].GetInt() != 0;
       x.kind        = e.HasMember("k") ? static_cast<Io_kind>(e["k"].GetInt()) : Io_kind::none;
+      x.sig         = e.HasMember("sg") ? static_cast<Io_sig>(e["sg"].GetInt()) : Io_sig::none;
       x.stages_min  = e.HasMember("smin") ? e["smin"].GetInt() : 0;
       x.stages_max  = e.HasMember("smax") ? e["smax"].GetInt() : 0;
       x.type_name   = e.HasMember("t") ? e["t"].GetString() : "";
@@ -1662,6 +1731,24 @@ void restore_unit_meta(const rapidjson::Value& u, Lnast& ln) {
       x.array_size  = e.HasMember("as") ? e["as"].GetInt64() : 0;
       x.elem_bits   = e.HasMember("eb") ? e["eb"].GetInt() : 0;
       x.elem_signed = e.HasMember("es") && e["es"].GetInt() != 0;
+      x.elem_bool   = e.HasMember("ebool") && e["ebool"].GetInt() != 0;
+      if (e.HasMember("wmin") && e["wmin"].IsString() && e.HasMember("wmax") && e["wmax"].IsString()) {
+        const auto wmin = Dlop::from_pyrope(e["wmin"].GetString());
+        const auto wmax = Dlop::from_pyrope(e["wmax"].GetString());
+        if (wmin && wmax && wmin->is_integer() && wmax->is_integer()) {
+          x.wide_range_min = *wmin;
+          x.wide_range_max = *wmax;
+        }
+      }
+      if (e.HasMember("dims") && e["dims"].IsArray()) {
+        for (const auto& d : e["dims"].GetArray()) {
+          if (d.IsInt64()) {
+            x.inner_dims.push_back(d.GetInt64());
+          }
+        }
+      }
+      x.bound_max_text = e.HasMember("bmax") && e["bmax"].IsString() ? e["bmax"].GetString() : "";
+      x.bound_min_text = e.HasMember("bmin") && e["bmin"].IsString() ? e["bmin"].GetString() : "";
       out.push_back(std::move(x));
     }
   };
@@ -1698,6 +1785,20 @@ void restore_unit_meta(const rapidjson::Value& u, Lnast& ln) {
     }
     ln.set_pub_values(std::move(values));
   }
+  if (u.HasMember("ssa_demoted") && u["ssa_demoted"].IsArray()) {
+    for (const auto& e : u["ssa_demoted"].GetArray()) {
+      if (e.IsObject() && e.HasMember("n") && e["n"].IsString() && e.HasMember("b") && e["b"].IsString()) {
+        ln.note_ssa_demoted(e["n"].GetString(), e["b"].GetString());
+      }
+    }
+  }
+}
+
+// True when `ln` was read from Pyrope source: its root's location names a
+// `.prp` file. Only the Verilog reader mints a verilog_origin unit.
+static bool unit_source_is_pyrope(const Lnast& ln) {
+  const auto root = ln.get_root();
+  return !root.is_invalid() && ln.span_of(root).file.ends_with(".prp");
 }
 
 // Load every unit of an `ln:` directory. The units share the loaded forest.
@@ -1741,7 +1842,8 @@ std::vector<std::shared_ptr<Lnast>> load_ln_dir(const std::string& dir) {
     // A Verilog-read tree keeps Verilog semantics across the ln: round-trip
     // (e.g. open output ports are legal — see the tolg undriven/unresolved
     // origin gate), so a reloaded forest stays lenient.
-    if (u.HasMember("verilog_origin") && u["verilog_origin"].IsBool() && u["verilog_origin"].GetBool()) {
+    const bool verilog_origin = u.HasMember("verilog_origin") && u["verilog_origin"].IsBool() && u["verilog_origin"].GetBool();
+    if (verilog_origin && !unit_source_is_pyrope(*ln)) {
       ln->set_verilog_origin(true);
     }
     if (u.HasMember("pub") && u["pub"].IsArray()) {
@@ -1752,6 +1854,14 @@ std::vector<std::shared_ptr<Lnast>> load_ln_dir(const std::string& dir) {
       }
     }
     restore_unit_meta(u, *ln);  // io_meta/bw_meta (empty on adopt) for import reuse
+    if (verilog_origin && !ln->is_verilog_origin()) {
+      // An older lhd also set verilog_origin on a hand-written
+      // `::[timecheck=false]` Pyrope unit: before skip_timecheck split off, the
+      // one flag was the timing opt-out too. Pyrope source is never Verilog, so
+      // restore what the flag meant there, the timing opt-out, and none of the
+      // Verilog semantics (raw-bit storage, the reader's explicit `~` widths, …).
+      ln->set_skip_timecheck(true);
+    }
     // Concrete stateful bodies are already elaborated, including SSA and
     // width narrowing. Rewalking them on the ln:-only path can reinterpret
     // their private temporaries. Templates still need call-site elaboration.

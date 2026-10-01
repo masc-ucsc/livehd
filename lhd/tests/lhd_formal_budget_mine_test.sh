@@ -33,8 +33,8 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 #    confirms the run does NOT spend timeout PER hard obligation.
 # ---------------------------------------------------------------------------
 cat >"$W/hard2.prp" <<'EOF'
-mod hard2(a:u32, b:u32, c:u32, en:bool) -> (o:u8@[0]) {
-  reg acc:u8 = 0
+mod hard2(a:U32, b:U32, c:U32, en:Bool) -> (o:U8@[0]) {
+  reg acc:U8 = 0
   o = acc
   assert(a + b == b + a, "easy")
   assert((a * b) * ((a * c) + 1) == (a * a * b * c) + (a * b), "distrib1")
@@ -115,9 +115,9 @@ echo "ok: spec_mining_timeout named the toxic obligation core"
 #     step pins the primary reset input deasserted, disclosed as "reset deasserted").
 # ---------------------------------------------------------------------------
 cat >"$W/twin_ok.prp" <<'EOF'
-mod twin_ok(enable:bool) -> (value:u8@[0]) {
-  reg a:u8 = 0
-  reg b:u8 = 0
+mod twin_ok(enable:Bool) -> (value:U8@[0]) {
+  reg a:U8 = 0
+  reg b:U8 = 0
   value = a
   assert(a == b, "twins equal")
   if enable {
@@ -139,9 +139,9 @@ echo "ok: true twin invariant proven unbounded (primary-reset pinning disclosed)
 # 3b. Soundness: an unequal-reset twin is REFUTED — induction never proves it.
 # ---------------------------------------------------------------------------
 cat >"$W/twin_bad.prp" <<'EOF'
-mod twin_bad(enable:bool) -> (value:u8@[0]) {
-  reg a:u8 = 0
-  reg b:u8 = 1
+mod twin_bad(enable:Bool) -> (value:U8@[0]) {
+  reg a:U8 = 0
+  reg b:U8 = 1
   value = a
   assert(a == b, "twins differ from reset")
   if enable {

@@ -1,17 +1,26 @@
 /*
 :name: tuple_simple2
 :type: parsing lnast comptime
-:verifier_pass: 3
+:verifier_pass: 5
 :verifier_fail: 0
 */
 
 mut t = (1,2)
 
-t = (...t, ...(b=3,44))
+t = (...t, ...(3,44))
 
-cassert(t[0] == 1 and t[1]==2 and t.b==3 and t[2]==44)
+cassert(t[0] == 1 and t[1]==2 and t[2]==3 and t[3]==44)
 
-cassert(t == (1,2,b=3,44))
+cassert(t == (1,2,3,44))
+
+// named splices merge by field name (a named and an unnamed splice is an error)
+mut n = (const b=3)
+
+n = (...n, ...(const c=44))
+
+cassert(n.b==3 and n.c==44)
+
+cassert(n == (b=3,c=44))
 
 mut x = ()
 
@@ -19,5 +28,5 @@ x = (1,2,3,7)
 
 x[3] = 44
 
-// x!=t because t is named b=3
-cassert(x != t and x[3] == 44)
+// x!=n because n is named
+cassert(x != n and x[3] == 44)

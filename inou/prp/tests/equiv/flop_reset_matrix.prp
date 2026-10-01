@@ -29,26 +29,32 @@
 //
 // Both `reset` and `reset_n` are declared EXPLICIT module parameters, and
 // every reg (including the plain sync/async-posedge ones) carries an
-// explicit `reset_pin=ref …`: once any reset-shaped name (`reset_n`) exists
+// explicit `reset_pin=…`: once any reset-shaped name (`reset_n`) exists
 // in the design, `upass.tolg`'s implicit-reset bind-before-mint picks the
 // FIRST such candidate name for every reg that has no override — it does not
 // know a second, differently-polarized explicit input is meant to stay
 // separate — so leaving any reg on the implicit path here would silently
 // rebind it onto `reset_n` too and drop the `reset` port entirely.
-pub mod matrix(reset:bool, reset_n:bool, en:bool) -> (q_pp:u8@[0], q_pn:u8@[0], q_ps:u8@[0], q_np:u8@[0], q_nn:u8@[0], q_ns:u8@[0]) {
-  reg r_pp:u8:[async=true, reset_pin=ref reset]                 = 1  // posedge clk, async posedge reset
-  reg r_pn:u8:[async=true, reset_pin=ref reset_n]               = 2  // posedge clk, async negedge reset_n
-  reg r_ps:u8:[reset_pin=ref reset]                             = 3  // posedge clk, sync reset
-  reg r_np:u8:[posclk=false, async=true, reset_pin=ref reset]   = 4  // negedge clk, async posedge reset
-  reg r_nn:u8:[posclk=false, async=true, reset_pin=ref reset_n] = 5  // negedge clk, async negedge reset_n
-  reg r_ns:u8:[posclk=false, reset_pin=ref reset]               = 6  // negedge clk, sync reset
+//
+// Since ruling 52 (2026-09-29) resets bind by TYPE: both inputs are `Reset`,
+// so there is no implicit reset and every reg must name its `reset_pin`
+// anyway. A reset's NAME carries no polarity any more, so the two
+// active-low flops say `negreset=true` explicitly (the `_n` suffix used to
+// flip it).
+pub mod matrix(reset:Reset, reset_n:Reset, en:Bool) -> (q_pp:U8@[0], q_pn:U8@[0], q_ps:U8@[0], q_np:U8@[0], q_nn:U8@[0], q_ns:U8@[0]) {
+  reg r_pp:U8:[async=true, reset_pin=reset]                 = 1  // posedge clk, async posedge reset
+  reg r_pn:U8:[async=true, reset_pin=reset_n, negreset=true] = 2  // posedge clk, async negedge reset_n
+  reg r_ps:U8:[reset_pin=reset]                             = 3  // posedge clk, sync reset
+  reg r_np:U8:[posclk=false, async=true, reset_pin=reset]   = 4  // negedge clk, async posedge reset
+  reg r_nn:U8:[posclk=false, async=true, reset_pin=reset_n, negreset=true] = 5  // negedge clk, async negedge reset_n
+  reg r_ns:U8:[posclk=false, reset_pin=reset]               = 6  // negedge clk, sync reset
 
-  if en and r_pp < 200 { r_pp = r_pp + 1 }
-  if en and r_pn < 200 { r_pn = r_pn + 1 }
-  if en and r_ps < 200 { r_ps = r_ps + 1 }
-  if en and r_np < 200 { r_np = r_np + 1 }
-  if en and r_nn < 200 { r_nn = r_nn + 1 }
-  if en and r_ns < 200 { r_ns = r_ns + 1 }
+  if en and r_pp < 200 { wrap r_pp = r_pp + 1 }
+  if en and r_pn < 200 { wrap r_pn = r_pn + 1 }
+  if en and r_ps < 200 { wrap r_ps = r_ps + 1 }
+  if en and r_np < 200 { wrap r_np = r_np + 1 }
+  if en and r_nn < 200 { wrap r_nn = r_nn + 1 }
+  if en and r_ns < 200 { wrap r_ns = r_ns + 1 }
 
   q_pp = r_pp
   q_pn = r_pn

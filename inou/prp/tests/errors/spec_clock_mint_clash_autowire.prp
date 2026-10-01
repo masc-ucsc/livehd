@@ -1,0 +1,25 @@
+/*
+:name: spec_clock_mint_clash_autowire
+:type: error
+:tolg: 1
+:error: minting `clock:Clock` clashes with its non-Clock input `clock`
+*/
+// SPEC (clock lane): a caller that must MINT its clock to auto-wire a child's
+// unbound `Clock` input clashes with a non-Clock input already named `clock`.
+//   qa.md Appendix 7: "an unbound child `Clock`/`Reset` input is auto-wired to
+//     the caller's single Clock/Reset (minting it in the caller if needed)"
+//   qa.md Appendix 6: "If a non-Clock/non-Reset input already uses that name,
+//     it is a compile error."
+//   docs 04b: "A module also mints one when an instance in it needs its clock
+//     (or reset) auto-wired ... If a non-`Clock` input is already named
+//     `clock` ..., minting is a compile error."
+mod cnt(c:Clock, en:Bool) -> (q:U8@[0]) {
+  reg n:U8 = 0
+  if en { wrap n = n + 1 }
+  q = n
+}
+pub mod spec_clock_mint_clash_autowire(clock:Bool, en:Bool) -> (o:U8@[0], p:Bool@[0]) {
+  const x = cnt(en=en)
+  o = x.q
+  p = clock
+}

@@ -6,11 +6,11 @@
 */
 
 const Rgb = (
-  mut c:u24,
+  mut c:U24,
   comb init(ref self, c) { self.c = c }
 )
 
-const Color = enum(
+enum Color = (
   Yellow:Rgb = 0xff_ff_00,
   Red:Rgb = 0xff____0000,   // ___ have no meaning, just nicer formatting (not this one)
   Green = Rgb(0x00FF00), // alternative

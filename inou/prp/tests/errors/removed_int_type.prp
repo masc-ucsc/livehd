@@ -4,8 +4,8 @@
 :error: type was removed
 */
 
-// The `int` type was removed. Use `signed` (unbounded) or a sized `sN`.
+// The `int` type was removed. Use `Signed` (unbounded) or a sized `S<N>`.
 
-pub comb t(a:int) -> (r:u8) {
+pub comb t(a:int) -> (r:U8) {
   r = 0
 }

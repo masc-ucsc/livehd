@@ -1,0 +1,22 @@
+/*
+:name: spec_memory_reset_by_type
+:type: equiv
+:verilog_top: spec_memory_reset_by_type
+:pyrope_top: spec_memory_reset_by_type
+*/
+// SPEC (docs 08-memories.md): "an initialized `reg` array binds the module's
+// [implicit reset] -- its single `Reset` input, whatever its name ... The memory
+// is clocked the same way: by the module's single `Clock` input ... The binding is
+// by type (`Clock`/`Reset`), never by name."
+// SPEC (qa.md appendix section 1): "Clock/Reset bind by TYPE ... registers bind
+// implicitly to the module's single Clock/Reset input (any name)."
+// Rule encoded here: an initialized memory in a module whose only Clock is `ck`
+// and only Reset is `zap` is clocked by `ck` and reset by `zap` (no minted
+// clock/reset). A data input named `rst` is plain data (used as a write enable).
+pub mod spec_memory_reset_by_type(ck:Clock, zap:Reset, rst:Bool, a:U2, d:U8, ra:U2) -> (q:U8@[0]) {
+  reg mem:[4]U8 = 3
+  q = mem[ra]
+  if rst {
+    mem[a] = d
+  }
+}

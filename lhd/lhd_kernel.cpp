@@ -102,7 +102,10 @@ void init_engine() {
   for (const auto& it : Pass_plugin::get_registry()) {
     it.second();
   }
+#if LIVEHD_WITH_ABC
+  // The optional Yosys integration links ABC through its own kernel.
   setup_inou_yosys();
+#endif
 }
 
 std::vector<Set_option> list_set_options() {
@@ -111,9 +114,9 @@ std::vector<Set_option> list_set_options() {
   out.push_back(Set_option{"pass.satopt",
                            "pass.satopt",
                            "false",
-                           "Enable proof-backed logic simplification in the compile step. Default false; on for `lhd synth` "
-                           "and `lhd lec` compiling a Pyrope/Verilog source (an lg:/ln: input is taken as compiled). An "
-                           "explicit true/false always wins. pass.satopt.stages narrows the searches (default: all)."});
+                           "Enable proof-backed logic simplification in the compile step. Default false for every command, "
+                           "including synthesis and LEC. Explicit true/false overrides the default. "
+                           "pass.satopt.stages narrows the searches when enabled (default: all)."});
   for (const auto& sp : kSetPasses) {
     if (sp.list == Set_pass::List::none) {
       continue;  // legacy alias spelling: accepted by --set, never listed

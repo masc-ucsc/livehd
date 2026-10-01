@@ -1,0 +1,31 @@
+/*
+:name: comb_loop_import_mealy
+:type: error
+:tolg: 1
+:files: inou/prp/tests/imports/comb_loop_import_mealy.prp
+:error: combinational loop
+*/
+// GUARD for the false-loop fix of equiv/state_feedback_import.prp (lhdtrack
+// suggestions 2.1): the fix must stay SOUND when the child is lowered AFTER
+// its caller. `:files:` names only the importer, so importer-directory
+// discovery appends lib_comb_loop_mealy.prp after `top`. Here the child's `q`
+// IS combinational in `d` (`q = r ^ d`), so the ring
+// `gr -> st.d -> st.q -> gr` is a REAL combinational loop.
+//
+// Before the 2.1 fix tolg lowered `top` FIRST and only the crossbar SCC caught
+// it ("combinational loop in 'comb_loop_import_mealy.top'"): the per-output
+// cone walk (graph/split_selfref.cpp sub_output_deps) treats a not-yet-lowered,
+// body-less callee as an opaque boundary with NO feedthrough. tolg now lowers
+// callees first, so the wire-level check reports it ("combinational loop
+// through wire 'gr'"); a child still waiting to be lowered stays a crossbar.
+// A fix that trusted per-output deps of an unlowered callee would compile this
+// design silently. The same-file spelling is
+// errors/comb_loop_through_mealy_child.prp.
+const st = import("lib_comb_loop_mealy.st")
+
+pub mod top(req:U4) -> (g:U4@[0]) {
+  wire gr:U4 = nil   // locate_error_here
+  const m = st(en=req != 0, d=gr)
+  gr = req & ~m
+  g = gr
+}

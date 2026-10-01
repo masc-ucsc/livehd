@@ -15,6 +15,6 @@
 comb f<N>(a:N) -> (r:N) {
   r = a
 }
-pub comb top(x:u8) -> (r:u8) {
+pub comb top(x:U8) -> (r:U8) {
   r = f<3>(a=x)
 }

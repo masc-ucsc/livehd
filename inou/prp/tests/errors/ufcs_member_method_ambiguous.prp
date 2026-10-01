@@ -1,0 +1,9 @@
+/*
+:name: ufcs_member_method_ambiguous
+:type: error
+:error: ambiguous dotted call.*read
+*/
+
+comb read(self) -> (r) { r = 1 }
+const ns = (const base = 2, comb read(self) -> (r) { r = self.base })
+const value = ns.read() // locate_error_here

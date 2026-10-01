@@ -14,6 +14,8 @@
 #   pass liberty gensim test.lib --emit-dir lg:models
 #   pass <mapper> --emit-dir lg:net              (bit-blast mult/sra/div)
 #   lhd lec --impl lg:net --ref lg:re --lib lg:models   (complete hierarchy)
+#   MAPPER=abc: + a non-default adder (pass.abc.adder=cska), lec --lib
+#   MAPPER=usyn: + pass usyn --set pass.usyn.tmap=none, lec without --lib
 #
 # Coverage: unsigned + signed + n-ary multiply (array multiplier), logical +
 # arithmetic right shift (barrel shifter), and unsigned + signed division.
@@ -25,9 +27,12 @@
 set -u
 
 # One script, both technology mappers: MAPPER=abc (default) runs `lhd pass abc`
-# and MAPPER=usyn runs `lhd pass usyn`. Every claim below is mapper-agnostic
-# (equivalence, netlist shape, option handling); lhd/tests/BUILD generates the
-# `_usyn` twin from this same file.
+# and MAPPER=usyn runs `lhd pass usyn`; lhd/tests/BUILD generates the `_usyn`
+# twin from this same file. The mapped-hierarchy equivalence, the mapped divider
+# and the no---lib control hold for both. The non-default adder leg is ABC-only
+# (pass.abc.adder is an ABC-flow ware option that pass.usyn does not have); the
+# USYN leg instead proves its logical tmap=none output (no Liberty, no cells)
+# equivalent without --lib and checks that the removed option is refused.
 MAPPER="${MAPPER:-abc}"
 case "$MAPPER" in
   abc | usyn) ;;
@@ -64,6 +69,10 @@ REGIONS=$(grep -oE '[A-Za-z0-9_.]+__c[0-9]+' "$W/re/library.txt" | sort -u)
   --workdir "$W/w3" --result-json "$W/r.json" 2>"$W/abc.err" || fail "pass "$MAPPER" -> $(cat "$W/r.json" 2>/dev/null)"
 if grep -q '"code":"div-blackbox"' "$W/abc.err"; then fail "divider was not mapped"; fi
 ls "$W/net"/graph_* >/dev/null 2>&1 || fail "no mapped netlist emitted"
+# Structural: the partition twin holds the three dividers, the mapped netlist none.
+[ -n "$("$LHD" tool grep kind=div lg:"$W/re" 2>/dev/null)" ] || fail "the partition twin lost its dividers"
+divs="$("$LHD" tool grep kind=div lg:"$W/net" 2>/dev/null)"
+[ -z "$divs" ] || fail "divider was not mapped: $divs"
 
 # Ware extraction introduces new native module boundaries, so anonymous color
 # port names can differ from the unextracted partition twin. Compare through
@@ -74,12 +83,32 @@ run lec --impl lg:"$W/net" --ref lg:"$W/re" --lib lg:"$W/models" --top "$TOP" --
 grep -q '"verdict":"proven"' "$W/r.json" \
   || fail "default LEC did not prove mapped hierarchy with --lib models: $(cat "$W/r.json")"
 
-# A non-default adder still proves equivalent (the multiplier's partial-product
-# additions use pass.abc.adder).
-rm -rf "$W/net_cska"
-run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_cska" --set synth.liberty="$LIB" --set adder=cska \
-  --workdir "$W/w6"
-run lec --impl lg:"$W/net_cska" --ref lg:"$W/re" --lib lg:"$W/models" --top "$TOP" --workdir "$W/wlec_cska"
+if [ "$MAPPER" = abc ]; then
+  # A non-default adder still proves equivalent (the multiplier's partial-product
+  # additions use pass.abc.adder).
+  rm -rf "$W/net_cska"
+  run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_cska" --set synth.liberty="$LIB" --set adder=cska \
+    --workdir "$W/w6"
+  run lec --impl lg:"$W/net_cska" --ref lg:"$W/re" --lib lg:"$W/models" --top "$TOP" --workdir "$W/wlec_cska"
+else
+  # Native logical CMOS output (tmap=none): the XAG expansion of mult/sra/div
+  # has no Liberty cells, so it proves equivalent WITHOUT --lib.
+  rm -rf "$W/net_none"
+  run pass usyn --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_none" --set pass.usyn.tmap=none --workdir "$W/w6"
+  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if (d["schema_version"],d["kind"],d["tmap"],d["output"])==(5,"usyn","none","logical-cmos") else 1)' \
+    "$W/w6/qor.json" || fail "usyn tmap=none: qor.json is not the schema-5 logical-cmos decision report"
+  divs="$("$LHD" tool grep kind=div lg:"$W/net_none" 2>/dev/null)"
+  [ -z "$divs" ] || fail "tmap=none kept a native divider: $divs"
+  run lec --impl lg:"$W/net_none" --ref lg:"$W/re" --top "$TOP" --workdir "$W/wlec_none"
+  grep -q '"verdict":"proven"' "$W/r.json" \
+    || fail "usyn tmap=none LEC did not prove the logical hierarchy: $(cat "$W/r.json")"
+  # The ABC adder option is gone from pass.usyn: a usage error (exit 2).
+  rc=0
+  "$LHD" pass usyn --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_cska" --set synth.liberty="$LIB" --set adder=cska \
+    --workdir "$W/w7" -q --result-json "$W/rr.json" 2>/dev/null || rc=$?
+  [ "$rc" = 2 ] || fail "usyn: removed option --set adder=cska exited $rc (expected usage error 2)"
+  grep -q "unknown flag 'adder'" "$W/rr.json" || fail "usyn: --set adder=cska: no unknown-flag diagnostic: $(cat "$W/rr.json")"
+fi
 
 # Negative control: the cell models are load-bearing. Without --lib the netlist's
 # blackbox cell Subs are unresolved, so lec must NOT prove equivalence — a sound
@@ -92,4 +121,4 @@ if "$LHD" lec --impl lg:"$W/net" --ref lg:"$W/re" --top "$TOP" \
   fail "lec proved equivalence with no --lib (unresolved cells must not vacuously pass)"
 fi
 
-echo "PASS: pass.abc mult/sra/div mapped, all lhd-lec-equivalent (signed + unsigned)"
+echo "PASS: pass.$MAPPER mult/sra/div mapped, all lhd-lec-equivalent (signed + unsigned)"

@@ -27,7 +27,7 @@
 // prp-v2prp2v-selfref_wire is the load-bearing half: it reads the golden BACK
 // through the Verilog front end, which is where the defect lived.
 
-pub comb selfref_wire(a:u4) -> (y:u4) {
-  mut b:u1 = a#[0..=0]
+pub comb selfref_wire(a:U4) -> (y:U4) {
+  mut b:U1 = a#[0..=0]
   y = (b << 3) | (b << 2) | (b << 1) | b
 }

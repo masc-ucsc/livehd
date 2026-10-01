@@ -6,12 +6,12 @@
 */
 
 // Task 1p — a var-args `comb` is INLINED at the call site: the leftover
-// actuals gather into `x` and `x[i]` resolves to the i-th actual. The golden
+// named actuals gather into `x` and are read by field name. The golden
 // is the equivalent fixed-arity adder.
 comb add1(...x) -> (r) {
-  r = x[0] + x[1] + x[2]
+  r = x.a + x.b + x.c
 }
 
-pub comb top(a:u8, b:u8, c:u8) -> (z:u9) {
-  z = add1(a, b, c)
+pub comb top(a:U8, b:U8, c:U8) -> (z:U9) {
+  wrap z = add1(a=a, b=b, c=c)
 }

@@ -9,13 +9,13 @@
 // cycle, so the dirty-on run still costs real CPU (the tuner's quality gate
 // needs >= 0.2 s) while being several times cheaper per cycle. The tuner must
 // profile it, trial dirty=on and keep it (lhd/tests/sim_tune_profile_test.sh
-// runs it for millions of cycles through `--arg cycles=N`; the default keeps
+// runs it for millions of cycles through `+cycles=N`; the default keeps
 // the prp-sim target short).
 
-mod tune_idle_tables(we:bool, waddr:u4, wdata:u32) -> (hash:u32@[0]) {
-  reg tab:[16]u32 = 0
+mod tune_idle_tables(we:Bool, waddr:U4, wdata:U32) -> (hash:U32@[0]) {
+  reg tab:[16]U32 = 0
 
-  mut h:u32 = 0x811C_9DC5
+  mut h:U32 = 0x811C_9DC5
   for round in 0..<4 {
     for i in 0..<16 {
       wrap h = ((h ^ tab[i]) * 0x0100_0193) + round
@@ -26,10 +26,10 @@ mod tune_idle_tables(we:bool, waddr:u4, wdata:u32) -> (hash:u32@[0]) {
   if we { tab[waddr] = wdata }
 }
 
-test tune_idle_tables.run(cycles:u32 = 1000) {
+test tune_idle_tables.run(cycles:U32 = 1000) {
   mut dut      = tune_idle_tables
   mut last     = 0
-  mut x:u32    = 1
+  mut x:U32    = 1
   tick cycles {
     dut.we    = (clock & 0xFFFF) == 0xFFFF
     dut.waddr = (clock >> 16) & 0xF

@@ -1,0 +1,16 @@
+/*
+:name: tuple_field_store_expr_overflow
+:type: error
+:error: .p\.x. \(range \[0, 30\]\) may not fit its declared range \[0, 15\]
+:help: wrap/saturate
+*/
+
+// User ruling 16 for a typed tuple FIELD whose value is an EXPRESSION: the sum
+// of two u4 may not fit the u4 field. Only a typed NAME on the right
+// (`p.x = b8`) was judged; `p.x = a + b` compiled and the u8 reader got the
+// untruncated sum (the field's own type was lost once the field was written).
+pub mod tuple_field_store_expr_overflow(a:U4, b:U4) -> (y:U8@[0]) {
+  mut p:(x:U4, z:U4) = (x=0, z=0)
+  p.x = a + b   // locate_error_here
+  y = p.x
+}

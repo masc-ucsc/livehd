@@ -8,6 +8,6 @@
 // Any call to a name that is not a defined pipe/mod/comb or a built-in cast is a
 // hard error (it used to silently wire the outputs to nil).
 
-pub comb t(a:u8) -> (r:u8) {
+pub comb t(a:U8) -> (r:U8) {
   r = no_such_fn(a)
 }

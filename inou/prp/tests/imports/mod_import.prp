@@ -14,6 +14,6 @@
 // importer-directory discovery, mirroring a single-file `lhd compile`.
 const RegFile = import("lib_regfile.lib_regfile")
 
-pub mod mod_import(clock:u1, wen:u1, wdata:u8) -> (rdata:u8@[]) {
+pub mod mod_import(clock:Clock, wen:U1, wdata:U8) -> (rdata:U8@[]) {
   rdata = RegFile(clock=clock, wen=wen, wdata=wdata)
 }

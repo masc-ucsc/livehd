@@ -8,9 +8,9 @@
 // an enabled write, and unselected entries hold. `all_data` reads the whole
 // bank so a partially restored array cannot hide in an unread entry.
 pub mod top::[timecheck=false](
-  clock:u1, reset:u1, we:u1, waddr:u2, data:u8, raddr:u2
-) -> (q:u8@[], all_data:u32@[]) {
-  reg bank:[4]u8:[ordering="old", reset_pin=ref reset, async=true] = 0
+  clock:Clock, reset:Reset, we:U1, waddr:U2, data:U8, raddr:U2
+) -> (q:U8@[], all_data:U32@[]) {
+  reg bank:[4]U8:[ordering="old", reset_pin=reset, async=true] = 0
   q = bank[raddr]
   all_data = bank#[..]
   if we != 0 { bank[waddr] = data }

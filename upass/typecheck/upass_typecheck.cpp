@@ -8,6 +8,8 @@
 #include "diag.hpp"
 #include "hlop/dlop.hpp"
 #include "lnast.hpp"
+#include "op_kind_rules.hpp"
+#include "range_bits.hpp"
 
 // Registered once here (static-init at link time; alwayslink keeps it alive).
 // depends_on {"attributes"} so the resolver runs attributes first.
@@ -23,36 +25,14 @@ std::string_view ssa_base(std::string_view name) {
   }
   return name;
 }
+
+// The bool<->integer hint (upass::kBoolIntCastHint) after an operator's lead-in.
+std::string cast_hint() { return std::format("no implicit conversion — cast explicitly: {}", upass::kBoolIntCastHint); }
 }  // namespace
 
-const char* uPass_typecheck::kind_name(Kind k) {
-  switch (k) {
-    case Kind::integer: return "integer";
-    case Kind::boolean: return "boolean";
-    case Kind::string : return "string";
-    case Kind::range  : return "range";
-    case Kind::tuple  : return "tuple";
-    case Kind::nil    : return "nil";
-    default           : return "unknown";
-  }
-}
+const char* uPass_typecheck::kind_name(Kind k) { return upass::op_kind::kind_name(k).data(); }
 
-int uPass_typecheck::eq_class(Kind k) {
-  // Equality classes. `bool` and `string` are distinct (no implicit
-  // conversion — `bool == int` and `string == int` are errors). int/range/tuple
-  // share a class: a scalar is a 1-element flat tuple and a range compares to
-  // its flat-tuple expansion, so `1 == (1,)` and `2..=4 == (2,3,4)` are legal.
-  // unknown/nil: no class (check skipped). (Assignment uses exact-kind equality,
-  // not this coarse class — a var's type cannot change, even int↔tuple.)
-  switch (k) {
-    case Kind::integer:
-    case Kind::range  :
-    case Kind::tuple  : return 0;
-    case Kind::boolean: return 1;
-    case Kind::string : return 2;
-    default           : return -1;
-  }
-}
+int uPass_typecheck::eq_class(Kind k) { return upass::op_kind::eq_class(k); }
 
 uPass_typecheck::Kind uPass_typecheck::seed_kind_from_const(std::string_view t) {
   // optable.md §Inference: literal text → kind. (The runner's operand
@@ -80,22 +60,7 @@ uPass_typecheck::Kind uPass_typecheck::seed_kind_from_const(std::string_view t) 
   return Kind::unknown;
 }
 
-uPass_typecheck::Kind uPass_typecheck::kind_of_bundle(const Bundle& b) {
-  // Shape FIRST: a multi-entry / named-field bundle is a tuple regardless of
-  // what field 0's entry-kind says (constprop copies field entries wholesale,
-  // so `(a<b, a>b)`'s slot 0 carries the lt tmp's boolean kind — that
-  // describes the FIELD, not the bundle). Then the bundle-level value kind
-  // (producer-stamped; covers 0/1-entry tuples the shape can't express).
-  // Last, the "0" Entry's kind (declared by the runner's bake or preserved
-  // through value writes).
-  if (b.has_named_top() || b.unnamed_top_count() > 1) {
-    return Kind::tuple;
-  }
-  if (b.get_value_kind() != Kind::unknown) {
-    return b.get_value_kind();
-  }
-  return b.get_entry(bundle_path::of_string("0")).kind;
-}
+uPass_typecheck::Kind uPass_typecheck::kind_of_bundle(const Bundle& b) { return upass::decl_facts::bundle_kind(b); }
 
 uPass_typecheck::Kind uPass_typecheck::kind_of(std::string_view name) const {
   if (name.empty() || runner_st == nullptr) {
@@ -111,17 +76,14 @@ uPass_typecheck::Kind uPass_typecheck::kind_of(std::string_view name) const {
   // `if en { … }` on a `u1` port used to slip through the condition check that
   // the identical `mut en:u1` local trips. decl_facts is the single source of
   // truth for "what was `name` declared as" — ask it before giving up.
-  const auto f = upass::decl_facts::lookup(*runner_st, lm ? lm->get_lnast().get() : nullptr, name);
-  if (!f) {
+  return declared_kind(name);
+}
+
+uPass_typecheck::Kind uPass_typecheck::declared_kind(std::string_view name) const {
+  if (name.empty() || runner_st == nullptr) {
     return Kind::unknown;
   }
-  switch (upass::decl_facts::io_kind_from_num(f->kind, f->range_max || f->range_min)) {
-    case Io_kind::boolean: return Kind::boolean;
-    case Io_kind::string : return Kind::string;
-    case Io_kind::integer: return Kind::integer;
-    case Io_kind::none   : break;
-  }
-  return Kind::unknown;
+  return upass::decl_facts::operand_kind(*runner_st, lm ? lm->get_lnast().get() : nullptr, name);
 }
 
 void uPass_typecheck::set_dst_kind(Bundle& dst, Kind k) {
@@ -164,6 +126,132 @@ void uPass_typecheck::emit_type_error(std::string_view code, const std::string& 
   });
 }
 
+bool uPass_typecheck::is_clock_port(std::string_view name) const {
+  if (name.empty() || lm == nullptr) {
+    return false;
+  }
+  const auto ln = lm->get_lnast();
+  if (!ln || ln->is_verilog_origin()) {
+    return false;  // Verilog has no Clock type: its clk is stamped by name and may be data
+  }
+  const auto* pe = ln->io_meta().find(name);
+  return pe != nullptr && pe->is_clock();
+}
+
+bool uPass_typecheck::debug_only(std::string_view name) {
+  if (name.empty() || !Lnast::is_tmp(name) || lm == nullptr) {
+    return false;
+  }
+  const auto ln = lm->get_lnast();
+  if (!ln) {
+    return false;
+  }
+  if (debug_uses_of_ != ln.get()) {
+    // Every READ of a name, by its consuming node: an occurrence that is not
+    // the destination (first child) of a value-producing node.
+    debug_uses_of_ = ln.get();
+    debug_uses_.clear();
+    debug_memo_.clear();
+    for (const auto& n : ln->depth_preorder()) {
+      const auto k = Lnast_nid(n);
+      if (!Lnast_ntype::is_ref(ln->get_type(k))) {
+        continue;
+      }
+      const auto parent = ln->get_parent(k);
+      if (parent.is_invalid()) {
+        continue;
+      }
+      const auto pt       = ln->get_type(parent);
+      const bool is_first = ln->get_first_child(parent) == k;
+      const bool reads_first
+          = Lnast_ntype::is_cassert(pt) || Lnast_ntype::is_if_like(pt) || Lnast_ntype::is_while(pt) || Lnast_ntype::is_stmts(pt);
+      if (is_first && !reads_first) {
+        continue;  // the definition
+      }
+      debug_uses_[std::string(ln->get_name(k))].push_back(parent);
+    }
+  }
+  if (const auto it = debug_memo_.find(name); it != debug_memo_.end()) {
+    return it->second;
+  }
+  debug_memo_[std::string(name)] = false;  // a cycle is not debug-only
+  const auto it = debug_uses_.find(name);
+  if (it == debug_uses_.end()) {
+    return false;  // unread: nothing proves it debug-only
+  }
+  bool ok = true;
+  for (const auto& use : it->second) {
+    const auto t = ln->get_type(use);
+    if (Lnast_ntype::is_cassert(t)) {
+      continue;
+    }
+    const auto dst = ln->get_first_child(use);
+    if (Lnast_ntype::is_func_call(t)) {
+      const auto callee = dst.is_invalid() ? dst : ln->get_sibling_next(dst);
+      const auto cname  = callee.is_invalid() ? std::string_view{} : ln->get_name(callee);
+      if (cname == "puts" || cname == "print" || cname == "assert" || cname == "cover") {
+        continue;
+      }
+      if ((cname == "String" || cname == "__fmt") && !dst.is_invalid() && debug_only(ln->get_name(dst))) {
+        continue;
+      }
+      ok = false;
+      break;
+    }
+    const bool value_op = Lnast_ntype::is_plus(t) || Lnast_ntype::is_minus(t) || Lnast_ntype::is_mult(t) || Lnast_ntype::is_div(t)
+                          || Lnast_ntype::is_mod(t) || Lnast_ntype::is_eq(t) || Lnast_ntype::is_ne(t) || Lnast_ntype::is_lt(t)
+                          || Lnast_ntype::is_le(t) || Lnast_ntype::is_gt(t) || Lnast_ntype::is_ge(t) || Lnast_ntype::is_log_and(t)
+                          || Lnast_ntype::is_log_or(t) || Lnast_ntype::is_log_not(t) || Lnast_ntype::is_bit_and(t)
+                          || Lnast_ntype::is_bit_or(t) || Lnast_ntype::is_bit_xor(t) || Lnast_ntype::is_bit_not(t)
+                          || Lnast_ntype::is_get_mask(t) || Lnast_ntype::is_store(t);
+    if (value_op && !dst.is_invalid() && debug_only(ln->get_name(dst))) {
+      continue;
+    }
+    ok = false;
+    break;
+  }
+  debug_memo_[std::string(name)] = ok;
+  return ok;
+}
+
+bool uPass_typecheck::reject_clock_data(std::string_view name, std::string_view what, std::string_view dst) {
+  if (!is_clock_port(name)) {
+    return false;
+  }
+  if (debug_only(dst)) {
+    return false;  // the debug cycle-count view (`assert(clk < 1000)`)
+  }
+  emit_type_error("clock-as-data",
+                  std::format("`{}` is a `Clock`, and a Clock is not data ({})", upass::Lnast_manager::user_name(name), what),
+                  "a Clock only drives register clock pins (`clock_pin=clk`) or a child's `Clock` input; use an enable "
+                  "for clock-dependent logic");
+  return true;
+}
+
+void uPass_typecheck::require_rule(Lnast_ntype::Lnast_ntype_int op, Bundle& dst, upass::Src_span src, std::string_view dst_name) {
+  const auto r = upass::op_kind::rule_of(op);
+  if (!r) {
+    return;
+  }
+  for (const auto& o : src) {
+    if (reject_clock_data(o.name, std::format("operator `{}`", r->sym), dst_name)) {
+      set_dst_kind(dst, r->result);
+      return;
+    }
+    if (is_clock_port(o.name)) {
+      // The debug cycle-count view (`assert(clk < 1000)`): a Clock reads as
+      // its cycle count there, so the Bool kind rule does not apply.
+      set_dst_kind(dst, r->result);
+      return;
+    }
+  }
+  if (r->required == Kind::unknown) {
+    require_same(r->result, r->sym, r->code, dst, src);
+  } else {
+    require_all(r->required, r->result, r->sym, r->code, dst, src);
+  }
+}
+
 void uPass_typecheck::require_all(Kind required, Kind result, std::string_view sym, std::string_view code, Bundle& dst,
                                   upass::Src_span src, bool allow_nil) {
   bool has_nil = false;
@@ -186,14 +274,30 @@ void uPass_typecheck::require_all(Kind required, Kind result, std::string_view s
                                 "are allowed)",
                                 sym));
   } else if (bad) {
-    std::string_view hint = (required == Kind::boolean)
-                                ? "logical ops need boolean operands; use `&`/`|`/`^` for bitwise integers"
-                                : "no implicit conversion — cast explicitly (e.g. `signed(b)`, `signed(true)==-1`)";
+    const std::string hint = required == Kind::boolean ? std::string(upass::op_kind::kLogicalOperandHint) : cast_hint();
     emit_type_error(code,
                     std::format("operator `{}` requires {} operands ({})", sym, kind_name(required), name_operands(src)),
                     hint);
   }
   set_dst_kind(dst, result);
+}
+
+// How an operand reads in a message: a literal is `<const>`, a compiler temp
+// that read a field (`c.rdy`, `t.f`) names that field, a call-result temp
+// names the call (`cmp(…).lt`), and an inlined callee's `inl3_x` is its `x`.
+std::string_view uPass_typecheck::operand_label(const upass::Operand& o) const {
+  if (o.name.empty()) {
+    return "<const>";
+  }
+  if (runner_st != nullptr && Lnast::is_tmp(o.name)) {
+    if (const auto it = runner_st->tget_origin.find(o.name); it != runner_st->tget_origin.end()) {
+      return upass::Lnast_manager::user_name(it->second);
+    }
+    if (const auto it = runner_st->call_result_label.find(o.name); it != runner_st->call_result_label.end()) {
+      return it->second;
+    }
+  }
+  return upass::Lnast_manager::user_name(o.name);
 }
 
 // Format the operands as "name:kind, name:kind" so an op with no source span
@@ -204,7 +308,7 @@ std::string uPass_typecheck::name_operands(upass::Src_span src) const {
     if (!ops.empty()) {
       ops += ", ";
     }
-    ops += absl::StrCat(o.name.empty() ? "<const>" : o.name, ":", kind_name(kind_of_operand(o)));
+    ops += absl::StrCat(operand_label(o), ":", upass::op_kind::kind_annot(kind_of_operand(o)));
   }
   return ops;
 }
@@ -234,7 +338,7 @@ void uPass_typecheck::require_shift(std::string_view sym, Bundle& dst, upass::Sr
   } else if (bad) {
     emit_type_error("type-mismatch-arith",
                     std::format("operator `{}` requires integer operands ({})", sym, name_operands(src)),
-                    "no implicit conversion — cast explicitly (e.g. `signed(b)`, `signed(true)==-1`)");
+                    cast_hint());
   }
   set_dst_kind(dst, Kind::integer);
 }
@@ -261,8 +365,8 @@ void uPass_typecheck::require_concat(Bundle& dst, upass::Src_span src) {
   // `unsigned(b)`/`signed(b)` through a get_mask, and the bit-select handler
   // wraps the value in exactly such a one-lane concat (upass_runner.cpp,
   // "bitsel-pack"). Rejecting a boolean lane there made that cast IMPOSSIBLE to
-  // write: the hint below says «cast explicitly (e.g. `unsigned(b)`)», and the
-  // cast lands right back here -- a circular diagnostic. The runner already
+  // write: the hint below offers a bool->int cast, and the cast lands right
+  // back here -- a circular diagnostic. The runner already
   // treats the case as legal ("a bool operand always fits") and emits a 1-bit
   // mask for it. A MULTI-lane packing keeps the strict no-bool<->int rule.
   const bool single_lane = src.size() <= 2;
@@ -285,9 +389,9 @@ void uPass_typecheck::require_concat(Bundle& dst, upass::Src_span src) {
   } else if (bad) {
     emit_type_error("type-mismatch-concat",
                     std::format("`concat` requires integer lanes ({})", name_operands(src)),
-                    "a lane is an integer bit window (an ordered positional tuple/array lane splices its fields) — "
-                    "no implicit conversion, "
-                    "cast explicitly (e.g. `unsigned(b)`)");
+                    std::format("a lane is an integer bit window (an ordered positional tuple/array lane splices its "
+                                "fields) — no implicit conversion, cast explicitly: {}",
+                                upass::kBoolIntCastHint));
   }
   set_dst_kind(dst, Kind::integer);
 }
@@ -322,11 +426,9 @@ void uPass_typecheck::require_same(Kind result, std::string_view sym, std::strin
         if (!ops.empty()) {
           ops += " vs ";
         }
-        ops += absl::StrCat(o.name.empty() ? "<const>" : o.name, ":", kind_name(kind_of_operand(o)));
+        ops += absl::StrCat(operand_label(o), ":", upass::op_kind::kind_annot(kind_of_operand(o)));
       }
-      emit_type_error(code,
-                      std::format("`{}` requires both operands to be the same type ({})", sym, ops),
-                      "no implicit conversion — cast explicitly (e.g. `signed(b)`/`unsigned(b)`, `x == false`)");
+      emit_type_error(code, std::format("`{}` requires both operands to be the same type ({})", sym, ops), cast_hint());
     }
   }
   set_dst_kind(dst, result);
@@ -348,7 +450,13 @@ upass::Vote uPass_typecheck::process_store(std::string_view dst_name, Bundle& ds
   if (rhs == Kind::nil) {
     return Vote::keep;  // `= nil` neither establishes nor changes the kind
   }
-  const Kind cur = kind_of_bundle(dst);
+  Kind cur = kind_of_bundle(dst);
+  if (cur == Kind::unknown) {
+    // An OUTPUT port's declared kind rides io_meta, never its bundle, yet it is
+    // a typed destination like a typed local: a `u1` output takes no bool and
+    // a `bool` output no bit.
+    cur = declared_kind(ssa_base(dst_name));
+  }
   // "an unset/nil scalar destination does not infer a new tuple shape
   // from a tuple RHS": a never-typed dst whose current VALUE is the nil it
   // was initialized with cannot become an aggregate. The runner's inliner
@@ -406,12 +514,16 @@ upass::Vote uPass_typecheck::process_store(std::string_view dst_name, Bundle& ds
         return Vote::keep;
       }
     }
+    // The cast advice only exists between bool and integer; a tuple or string
+    // mismatch has no cast to offer.
+    const bool bool_int = (rhs == Kind::boolean && cur == Kind::integer) || (rhs == Kind::integer && cur == Kind::boolean);
     emit_type_error("assign-type-mismatch",
                     std::format("cannot assign {} value to `{}` (it is {}); a variable's type cannot change",
                                 kind_name(rhs),
-                                dst_name,
+                                upass::Lnast_manager::user_name(dst_name),
                                 kind_name(cur)),
-                    "use a new variable, or cast explicitly (e.g. `signed(x)`/`unsigned(x)`)");
+                    bool_int ? std::format("use a new variable, or cast explicitly: {}", upass::kBoolIntCastHint)
+                             : std::string{"use a new variable"});
   }
   return Vote::keep;
 }
@@ -429,6 +541,9 @@ void uPass_typecheck::process_if() {
   }
   do {
     if (!Lnast_ntype::is_stmts(get_raw_ntype())) {
+      if (Lnast_ntype::is_ref(get_raw_ntype()) && reject_clock_data(current_text(), "an `if` condition")) {
+        continue;
+      }
       Kind k = kind_of_operand_at_cursor();
       if (k == Kind::nil) {
         emit_type_error("nil-operand",
@@ -532,9 +647,7 @@ void uPass_typecheck::process_range() {
   move_to_parent();
   (void)has_nil;
   if (bad) {
-    emit_type_error("type-mismatch-range",
-                    "operator `..=` requires integer operands",
-                    "no implicit conversion — cast explicitly (e.g. `signed(b)`, `signed(true)==-1`)");
+    emit_type_error("type-mismatch-range", "operator `..=` requires integer operands", cast_hint());
   }
   if (!dst_name.empty() && runner_st != nullptr) {
     if (auto b = runner_st->get_bundle_for_write(dst_name); b) {
@@ -554,36 +667,36 @@ livehd::diag::Span uPass_typecheck::span_from_nid(const Lnast_nid& nid) const {
 
 // ── arithmetic / bitwise / shift: int operands → int (NO bool) ──────────────
 // clang-format off
-upass::Vote uPass_typecheck::process_plus(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "+", "type-mismatch-arith", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_minus(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "-", "type-mismatch-arith", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_mult(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "*", "type-mismatch-arith", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_div(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "/", "type-mismatch-arith", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_mod(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "%", "type-mismatch-arith", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_bit_and(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "&", "type-mismatch-arith", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_bit_or(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "|", "type-mismatch-arith", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_bit_xor(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "^", "type-mismatch-arith", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_bit_not(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "~", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_plus(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_plus, dst, src, dst_name); return Vote::keep; }
+upass::Vote uPass_typecheck::process_minus(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_minus, dst, src, dst_name); return Vote::keep; }
+upass::Vote uPass_typecheck::process_mult(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_mult, dst, src, dst_name); return Vote::keep; }
+upass::Vote uPass_typecheck::process_div(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_div, dst, src, dst_name); return Vote::keep; }
+upass::Vote uPass_typecheck::process_mod(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_mod, dst, src, dst_name); return Vote::keep; }
+upass::Vote uPass_typecheck::process_bit_and(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_bit_and, dst, src, dst_name); return Vote::keep; }
+upass::Vote uPass_typecheck::process_bit_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_bit_or, dst, src, dst_name); return Vote::keep; }
+upass::Vote uPass_typecheck::process_bit_xor(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_bit_xor, dst, src, dst_name); return Vote::keep; }
+upass::Vote uPass_typecheck::process_bit_not(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_bit_not, dst, src, dst_name); return Vote::keep; }
 upass::Vote uPass_typecheck::process_shl(std::string_view, Bundle& dst, upass::Src_span src) { require_shift("<<", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_sra(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, ">>", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_sra(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_sra, dst, src, dst_name); return Vote::keep; }
 
 // ── logical keywords: bool operands → bool (NO int — use `&`/`|`) ────────────
-upass::Vote uPass_typecheck::process_log_and(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::boolean, Kind::boolean, "and", "type-mismatch-logical", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_log_or(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::boolean, Kind::boolean, "or", "type-mismatch-logical", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_log_not(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::boolean, Kind::boolean, "not", "type-mismatch-logical", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_log_and(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_log_and, dst, src, dst_name); return Vote::keep; }
+upass::Vote uPass_typecheck::process_log_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_log_or, dst, src, dst_name); return Vote::keep; }
+upass::Vote uPass_typecheck::process_log_not(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_log_not, dst, src, dst_name); return Vote::keep; }
 
 // ── reductions / popcount: integer operand → unsigned integer ──────────────
-upass::Vote uPass_typecheck::process_red_or(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "|", "type-mismatch-arith", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_red_and(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "&", "type-mismatch-arith", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_red_xor(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "^", "type-mismatch-arith", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_popcount(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::integer, "#+", "type-mismatch-arith", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_red_or(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_red_or, dst, src, dst_name); return Vote::keep; }
+upass::Vote uPass_typecheck::process_red_and(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_red_and, dst, src, dst_name); return Vote::keep; }
+upass::Vote uPass_typecheck::process_red_xor(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_red_xor, dst, src, dst_name); return Vote::keep; }
+upass::Vote uPass_typecheck::process_popcount(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_popcount, dst, src, dst_name); return Vote::keep; }
 
 // ── comparison: eq/ne same-class → bool; ordering int → bool ────────────────
-upass::Vote uPass_typecheck::process_eq(std::string_view, Bundle& dst, upass::Src_span src) { require_same(Kind::boolean, "==", "type-mismatch-eq", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_ne(std::string_view, Bundle& dst, upass::Src_span src) { require_same(Kind::boolean, "!=", "type-mismatch-eq", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_lt(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::boolean, "<", "type-mismatch-compare", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_le(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::boolean, "<=", "type-mismatch-compare", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_gt(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::boolean, ">", "type-mismatch-compare", dst, src); return Vote::keep; }
-upass::Vote uPass_typecheck::process_ge(std::string_view, Bundle& dst, upass::Src_span src) { require_all(Kind::integer, Kind::boolean, ">=", "type-mismatch-compare", dst, src); return Vote::keep; }
+upass::Vote uPass_typecheck::process_eq(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_eq, dst, src, dst_name); return Vote::keep; }
+upass::Vote uPass_typecheck::process_ne(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_ne, dst, src, dst_name); return Vote::keep; }
+upass::Vote uPass_typecheck::process_lt(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_lt, dst, src, dst_name); return Vote::keep; }
+upass::Vote uPass_typecheck::process_le(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_le, dst, src, dst_name); return Vote::keep; }
+upass::Vote uPass_typecheck::process_gt(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_gt, dst, src, dst_name); return Vote::keep; }
+upass::Vote uPass_typecheck::process_ge(std::string_view dst_name, Bundle& dst, upass::Src_span src) { require_rule(Lnast_ntype::Lnast_ntype_ge, dst, src, dst_name); return Vote::keep; }
 
 // ── bit manipulation / type-id: result kind only (operands not kind-checked) ─
 upass::Vote uPass_typecheck::process_sext(std::string_view, Bundle& dst, upass::Src_span) { set_dst_kind(dst, Kind::integer); return Vote::keep; }

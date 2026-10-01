@@ -19,8 +19,8 @@
 // `timecheck=false` (the spelling the writer emits for a Verilog-origin unit)
 // is load-bearing: it turns the coalescer off, and the coalescer's park/flush
 // happened to re-emit the seed store and mask the drop on a plain Pyrope unit.
-pub mod array_quoted_dotted_name::[timecheck=false](idx:u7, v:u1, en:u1) -> (o:u1@[], p:u1@[]) {
-  mut `d.valid`:[128]u1 = 0
+pub mod array_quoted_dotted_name::[timecheck=false](idx:U7, v:U1, en:U1) -> (o:U1@[], p:U1@[]) {
+  mut `d.valid`:[128]U1 = 0
   `d.valid`[3] = v
   if en != 0 {
     `d.valid`[idx] = v

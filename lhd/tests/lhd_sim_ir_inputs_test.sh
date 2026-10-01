@@ -43,8 +43,8 @@ fail() {
 
 # ---- fixtures: a clocked DUT and a testbench that imports it -----------------
 cat > "$W/dut.prp" <<'EOF'
-pub mod cnt(enable:bool) -> (value:u8@[0]) {
-  reg count:u8 = 0
+pub mod cnt(enable:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
   value = count
   if enable { wrap count += 1 }
 }
@@ -57,12 +57,12 @@ EOF
 tb() {  # tb <import-string> <outfile>
   cat > "$2" <<EOF
 const dutmod = import("$1")
-test dutmod.held(cycles:u20 = 20) {
+test dutmod.held(cycles:U20 = 20) {
   mut acc = dutmod
   mut v = 0
   tick cycles {
     acc.enable = true
-    acc.reset  = clock < 2
+    acc.reset = clock < 2
     step
     v = acc.value
   }

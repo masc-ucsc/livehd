@@ -1,0 +1,33 @@
+/*
+:name: spec_clock_rst_bool_is_data
+:type: simulation
+*/
+// SPEC (clock lane): name-based binding is REMOVED -- an input named `rst`
+// that is not typed `Reset` is plain data and never resets a register.
+//   qa.md Appendix 1: "Name-based binding (clk/clock/rst/reset) is REMOVED."
+//   docs 04b: "There is no name-based binding: an input named `clk`, `clock`,
+//     `rst` or `reset` that is not typed `Clock`/`Reset` (a `Bool`, a `U1`) is
+//     plain data."
+// `rst` is held true the whole run and also read as data (`p`); the counter
+// must still count every cycle (its reset is the minted `reset:Reset`, never
+// driven here).
+pub mod spec_clock_rst_bool_is_data(clk:Clock, rst:Bool, en:Bool) -> (q:U8@[0], p:Bool@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+  p = rst
+}
+
+test spec_clock_rst_bool_is_data.not_a_reset {
+  mut t = spec_clock_rst_bool_is_data
+  mut last = 0
+  tick 8 {
+    t.rst = true
+    t.en  = true
+    step
+    last = t.q
+  }
+  puts("rst_bool: q={last}")
+  assert(t.p == true)
+  assert(last == 8)
+}

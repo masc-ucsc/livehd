@@ -8,21 +8,21 @@
 // the call tree carries both a register and a memory one level down. Widths are
 // chosen so nothing narrows (runtime wrap/sat has no tolg lowering yet).
 
-mod regs(din:u8) -> (q:u8@[1]) {
-  reg r:u8 = 0
+mod regs(din:U8) -> (q:U8@[1]) {
+  reg r:U8 = 0
   q = r
   r = din
 }
 
-mod ram(waddr:u3, wdata:u8, we:u1, raddr:u3) -> (rdata:u8@[0]) {
-  reg mem:[8]u8 = 0
+mod ram(waddr:U3, wdata:U8, we:U1, raddr:U3) -> (rdata:U8@[0]) {
+  reg mem:[8]U8 = 0
   rdata = mem[raddr]
   if we != 0 {
     mem[waddr] = wdata
   }
 }
 
-mod top(din:u8, waddr:u3, wdata:u8, we:u1, raddr:u3) -> (q:u8@[1], rdata:u8@[0]) {
+mod top(din:U8, waddr:U3, wdata:U8, we:U1, raddr:U3) -> (q:U8@[1], rdata:U8@[0]) {
   stage[1] u_regs = regs(din=din)
   const u_ram = ram(waddr=waddr, wdata=wdata, we=we, raddr=raddr)
   q     = u_regs

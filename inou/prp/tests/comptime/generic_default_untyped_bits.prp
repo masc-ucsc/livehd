@@ -1,0 +1,24 @@
+/*
+:name: generic_default_untyped_bits
+:type: parsing lnast comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// User ruling 2026-09-27 (6) + the postfix generic-argument default: a
+// declaration default `<N=Z.[bits]>` over an UNTYPED `comptime const` folds to
+// the value's width (13 -> 4, -4 -> 3) where the lambda is declared, the same
+// value upass.attributes gives `Z.[bits]` in a body. Before, the front end only
+// folded `.[bits]` of a TYPED comptime const, and the untyped one reached tolg
+// as an unresolved reference `Z.[bits]`.
+
+comptime const Z = 13
+comb width_of<N=Z.[bits]>(x) -> (r) { r = N + x }
+cassert(width_of(x=0) == 4)
+
+comb width_of_p<N=(Z.[bits])>(x) -> (r) { r = N + x }
+cassert(width_of_p(x=1) == 5)
+
+comptime const NEG = -4
+comb width_neg<N=NEG.[bits]>(x) -> (r) { r = N + x }
+cassert(width_neg(x=0) == 3)

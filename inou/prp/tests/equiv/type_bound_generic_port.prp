@@ -5,13 +5,13 @@
 :verilog_top: top
 */
 // 2f-type_bound — a generic width on a PORT type. A generic parameter is a
-// comptime input, so `unsigned(bits=N)` on a port of the generic lambda itself
+// comptime input, so `Unsigned(bits=N)` on a port of the generic lambda itself
 // resolves at specialization exactly like a body declaration does; the golden
 // pins the port at eight bits (it lowered as `input a`, ONE bit, with only a
 // warning before generic port bounds were deferred into the body prologue).
-mod m<N=8>(a:unsigned(bits=N)) -> (y:u8@[]) {
+mod m<N=8>(a:Unsigned(bits=N)) -> (y:U8@[]) {
   y = a
 }
-pub mod top(a:u8) -> (y:u8@[]) {
+pub mod top(a:U8) -> (y:U8@[]) {
   y = m<N=8>(a=a)
 }

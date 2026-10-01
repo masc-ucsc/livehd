@@ -1,0 +1,12 @@
+/*
+:name: spec_syntax_tick_step_lambda_name
+:type: error
+:error: 'step' is reserved, so it cannot be a name
+:help: backticks
+*/
+// Owner ruling 99 (spec-audit Q42): `tick`/`step` are reserved everywhere,
+// also as a lambda or method name ("no special thing for methods"): write
+// comb `step`(...).
+comb step(k:U8) -> (r:U8) {   // locate_error_here
+  r = k
+}

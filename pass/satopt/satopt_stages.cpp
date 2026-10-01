@@ -14,6 +14,8 @@
 #include "satopt_ctrl.hpp"
 #include "satopt_memory.hpp"
 #include "satopt_mux.hpp"
+#include "satopt_muxtree.hpp"
+#include "satopt_share.hpp"
 #include "satopt_sweep.hpp"
 
 namespace livehd::satopt {
@@ -65,6 +67,8 @@ std::string_view stage_name(Stage s) {
     case Stage::complement: return "complement";
     case Stage::odc: return "odc";
     case Stage::hotmux: return "hotmux";
+    case Stage::muxtree   : return "muxtree";
+    case Stage::share     : return "share";
     case Stage::memory: return "memory";
     case Stage::resub: return "resub";
     case Stage::simp_ctrl: return "simp_ctrl";
@@ -285,6 +289,8 @@ std::optional<Stage_set> parse_stages(std::string_view text, Profile profile, st
                                        Stage::equiv,
                                        Stage::complement,
                                        Stage::odc,
+                                       Stage::muxtree,
+                                       Stage::share,
                                        Stage::hotmux,
                                        Stage::memory,
                                        Stage::resub,
@@ -429,7 +435,9 @@ Report run(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, const Option
       case Stage::equiv:
       case Stage::complement:
       case Stage::odc:
-      case Stage::resub: return applicable.values;
+      case Stage::resub     :
+      case Stage::share     : return applicable.values;
+      case Stage::muxtree   :
       case Stage::hotmux    : return applicable.muxes;
       case Stage::memory: return applicable.memory;
       case Stage::simp_ctrl: return applicable.selects || applicable.memory;
@@ -472,6 +480,8 @@ Report run(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, const Option
       case Stage::odc: sweep_values(graphs, Sweep::odc, opts.profile, opts.cache_dir, r, meter); break;
       case Stage::resub: sweep_values(graphs, Sweep::resub, opts.profile, opts.cache_dir, r, meter); break;
       case Stage::simp_ctrl: simplify_controls(graphs, r, meter); break;
+      case Stage::muxtree   : simplify_mux_contexts(graphs, r, meter); break;
+      case Stage::share     : share_operators(graphs, r, meter); break;
       case Stage::hotmux:
         for (const auto& g : graphs) {
           if (!g) {

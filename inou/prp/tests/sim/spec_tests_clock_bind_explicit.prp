@@ -1,0 +1,28 @@
+/*
+:name: spec_tests_clock_bind_explicit
+:type: simulation
+*/
+// Spec (qa.md appendix section 6): "Test harnesses declare/pass a real Clock
+// (no `clk=1`)". docs 05b "Running cycles (tick)": "A harness never feeds a
+// constant to a `Clock` input (`clk=1` is an error); it passes a real Clock
+// such as the tick's `clock`."
+//
+// Rule pinned: binding the tick's minted `clock` EXPLICITLY to the DUT's Clock
+// input (`d.clk = clock`) is legal and clocks the DUT exactly like the
+// implicit auto-wire.
+
+mod spec_cbe_cnt(clk:Clock, en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_cbe.explicit {
+  mut d = spec_cbe_cnt
+  tick 4 {
+    d.clk = clock            // pass the real (minted) Clock
+    d.en  = true
+    step
+  }
+  assert(d.q == 4)
+}

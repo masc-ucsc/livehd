@@ -7,7 +7,7 @@
 // iteration reads an earlier value, so it is a final-only output sourced from
 // the last occurrence rather than a carry with an undriven seed.
 
-mod loop_roll_final_only(x:u8) -> (z:u9@[0]) {
+mod loop_roll_final_only(x:U8) -> (z:U9@[0]) {
   for i in 0..<4 {
     z = x + i
   }

@@ -1,0 +1,13 @@
+/*
+:name: spec_types_lowercase_param_name
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+// Former lowercase type spellings are ordinary identifiers (07-typesystem.md).
+pub comb spec_types_lowercase_param_name(s20:U8) -> (o:U8) {
+  o = s20
+}
+
+cassert(spec_types_lowercase_param_name(s20=7) == 7)

@@ -1,8 +1,11 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <functional>
 #include <memory>
+#include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "hhds/graph.hpp"
@@ -32,7 +35,10 @@ struct uPass_tolg {
   // sign + the implicit clock when the tree, or transitively any callee,
   // holds state). Idempotent. MUST run for every lnast before any run() so
   // Sub instances can bind callee GraphIOs regardless of build order
-  // (mirrors the yosys two-pass build).
+  // (mirrors the yosys two-pass build). The GraphIO ends up declaring exactly
+  // this module's ports, as in a fresh library: a port an earlier compile left
+  // in a reused lg: library, or an absorbed lg: module the source redefines,
+  // is dropped; the gid and an unchanged leading run of ports are kept.
   static void register_io(const std::shared_ptr<Lnast>& lnast, std::string_view lib_path, const Registry& registry);
 
   // Phase 0 — cross-unit `lg="name"` (2f-lg) collision check. Two units that
@@ -41,7 +47,50 @@ struct uPass_tolg {
   // GraphIO (find_io reuses it) and emit a broken double-driven module. Fatal
   // diagnostic on collision. MUST run before the register_io() loop. Idempotent
   // and cheap (linear scan); callable from any tolg orchestration site.
+  //
+  // It also STARTS the lowering pass: it records every unit of `registry` that
+  // run() will lower (all but restored ones) as pending, and run() retires each
+  // one once its body is final. run()'s combinational-loop checks read a
+  // child's comb reach (the record run() leaves on every body it finishes, or
+  // the body itself) only when the child is not pending, so a driver that calls
+  // run() without this call first inherits the previous pass's pending set.
   static void detect_lg_collisions(const Registry& registry);
+
+  // register_io refuses (`stale-instance`) an interface change that would
+  // silently rewire a module it does not rebuild: one the library already
+  // holds, that no unit of `registry` owns (`unit` or `unit.<x>`), and whose
+  // Sub binds a connected port id that now names another port.
+  //
+  // `units` = this compile scope's PREVIOUS generation (the compile cache
+  // manifest). A module only such a unit owns is a leftover of a unit the edit
+  // dropped from the import closure, which the kernel prunes right after
+  // lowering unless something live still instantiates it. Its stale instance
+  // is therefore deferred: check_leftover_instances, run after the prune,
+  // refuses it only when the module survived. Call after detect_lg_collisions
+  // (which clears the set and the deferred refusals) and before register_io.
+  static void set_prior_units(const std::vector<std::string>& units);
+  static void check_leftover_instances();
+
+  // Where the library's modules came from, for the `stale-instance` hint:
+  // `input_dirs` are the lg: INPUT dirs absorbed into the working library, and
+  // `absorbed` maps a module whose body one of them supplied to that dir; any
+  // other module was already in the working library, which the user knows as
+  // `working_lib` ("" when it is internal scratch). Optional -- without it the
+  // hint names both kinds of dir. Call after detect_lg_collisions (which
+  // clears it), like set_prior_units.
+  static void set_library_origins(std::string working_lib, std::vector<std::string> input_dirs,
+                                  std::vector<std::pair<std::string, std::string>> absorbed);
+
+  // `registry` reordered callee-first (a DFS post-order over the call graph;
+  // units sharing a graph name stay together, in registry order). Lowering in
+  // this order gives every caller the finished bodies of its children, which
+  // run()'s combinational-loop checks read through (a caller ring through a
+  // child's register is sequential, a ring through a Mealy output is a loop).
+  // A child lowered later (another order, an instantiation cycle) is still
+  // checked soundly, as an instance whose every input feeds every output.
+  // `follow` (optional) restricts the edges to the callees it accepts; the
+  // rest keep their registry order.
+  static Registry lowering_order(const Registry& registry, const std::function<bool(const Lnast&)>& follow = {});
 
   // Phase 3: refresh Sub loop-break classification bottom-up and gate
   // conditionally activated instance clocks after every phase-2 body exists.

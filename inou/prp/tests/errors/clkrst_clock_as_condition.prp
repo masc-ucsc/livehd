@@ -1,0 +1,12 @@
+/*
+:name: clkrst_clock_as_condition
+:type: error
+:tolg: 1
+:error: a Clock is not data \(an `if` condition\)
+*/
+pub mod clkrst_clock_as_condition(clk:Clock, a:U8) -> (o:U8@[0]) {
+  o = 0
+  if clk {
+    o = a
+  }
+}

@@ -1,0 +1,31 @@
+/*
+:name: const_clock_forwarded
+:type: error
+:tolg: 1
+:error: .Clock. input .ck. of .cfw_mid. is bound to a constant
+:help: omit .ck. to wire the caller's implicit clock
+*/
+
+// User rulings 2026-09-28 (27) and 2026-09-29 (52): whether an input is a
+// clock is decided by its TYPE, not its name. `ck` is not named clk/clock and
+// `cfw_mid` declares no register, but it forwards its `ck:Clock` to
+// `cfw_leaf`'s `wclk`, the clock_pin of reg `r`. Binding `ck=1` at the top
+// would clock `r` by a constant: a Clock is never bound to a constant, so the
+// error is at the call. Before the fix nothing was reported (only an input the
+// callee's OWN regs name was checked).
+
+mod cfw_leaf(wclk:Clock, d:U4) -> (q:U4@[1]) {
+  reg r:U4:[clock_pin=wclk] = 0
+  r = d
+  q = r
+}
+
+mod cfw_mid(ck:Clock, d:U4) -> (q:U4@[1]) {
+  const l = cfw_leaf(wclk=ck, d=d)
+  q = l.q
+}
+
+pub mod const_clock_forwarded(d:U4) -> (q:U4@[1]) {
+  const m = cfw_mid(ck=1, d=d)   // locate_error_here
+  q = m.q
+}

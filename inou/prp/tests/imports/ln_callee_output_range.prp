@@ -1,0 +1,20 @@
+/*
+:name: ln_callee_output_range
+:type: lgraph
+:files: inou/prp/tests/imports/ln_callee_output_range.prp
+:ln_files: inou/prp/tests/imports/lib_ln_scale.prp
+*/
+// The legal half of ln_callee_overflow: a PRE-ELABORATED `ln:` mod's untyped
+// output carries the range its body derived ([1, 16], ruling 28) and its bool
+// output stays a bool (ruling 2), exactly as for a source callee. `y:U8`
+// needs no `wrap`, and `c.z` drives an `if` and a `Bool` output directly.
+const C = import("lib_ln_scale.lib_ln_cnt")
+
+pub mod ln_callee_output_range(x:U4) -> (y:U8@[0], w:Bool@[0]) {
+  const c = C(a=x)
+  y = c.o
+  w = false
+  if c.z {
+    w = true
+  }
+}

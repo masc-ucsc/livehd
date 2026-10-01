@@ -1,0 +1,15 @@
+/*
+:name: spec_calls_gate_runtime
+:type: equiv
+:verilog_top: spec_calls_gate_runtime
+:pyrope_top: spec_calls_gate_runtime
+*/
+// qa.md Appendix §8: "`__` basic gates are ordinary calls: all arguments named
+// with the LGraph pin names (graph/cell.cpp, e.g. `__mux(s=cond, p1=b, p2=a)`".
+// docs 02-basics.md "Basic gates": "These basic gates are also directly
+// accesible"; docs 06b-instantiation.md uses them on runtime values
+// (`mut res2:S4 = __mux(s=cond, p1=b, p2=a)`: `p2` when `s` is true).
+// A named basic-gate call on RUNTIME operands must lower to the cell.
+pub comb spec_calls_gate_runtime(c:Bool, a:U8, b:U8) -> (o:U8) {
+  o = __mux(s=c, p1=b, p2=a)
+}

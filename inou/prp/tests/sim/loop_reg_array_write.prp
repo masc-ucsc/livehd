@@ -1,0 +1,214 @@
+/*
+:name: loop_reg_array_write
+:type: simulation
+:expect_instances: u_loop*=1
+*/
+
+// lhdtrack suggestions 2.3: a `reg` ARRAY (a memory) WRITTEN inside a `for`
+// body. With the default rolled lowering (`compile.unroll=false`) the loop
+// planner classified `r` as a register CARRY and lifted the body into
+// `__loop0`; tolg's memory pre-scan (index_mem_write_sites) still counted the
+// indexed store left in the rolled_for `source_body`, so the compile died with
+//   upass.tolg: internal — memory 'r' lowered 0 write sites but the pre-scan
+//   counted 1                                       (lrw_lanes, lrw_bytes)
+//   ... lowered 1 write sites but the pre-scan counted 2   (lrw_shift)
+//
+// User ruling 2026-09-27: a loop whose body WRITES a memory / reg array is
+// UNROLLED, not rolled. `:expect_instances: u_loop*=1` pins that: a rolled
+// loop is one `u_loop_<n>` Sub per module, and the ONLY loop allowed to stay
+// rolled is lrw_sum's, which merely READS its reg array (the control: a fix
+// that unrolls every loop touching a memory reports 0; a loop planner that
+// still rolls a writing loop reports 2+). `*` is not pinned: today a rolled
+// read of `r[i]` also adds an `array index out of range at ...` check Sub.
+//
+// Same values as `--set compile.unroll=true` (which passes today).
+
+// Every lane written from the loop index; the reads come AFTER the writes, so
+// default `ordering="program"` forwards this cycle's write (with the inputs
+// held after `step` that is the committed value too).
+mod lrw_lanes(en:Bool, d:U4) -> (q0:U4@[0], q3:U4@[0]) {
+  reg r:[4]U4 = 0
+  for i in 0..<4 {
+    if en {
+      r[i] = d ^ i
+    }
+  }
+  q0 = r[0]
+  q3 = r[3]
+}
+
+// A shift register written by a DESCENDING loop that also reads the array:
+// under `ordering="program"` each `r[2 - i]` read happens before that entry
+// is overwritten, so it sees the committed value. The outputs read the
+// committed contents (placed before the writes).
+mod lrw_shift(en:Bool, d:U4) -> (q0:U4@[0], q1:U4@[0], q2:U4@[0], q3:U4@[0]) {
+  reg r:[4]U4 = 0
+  q0 = r[0]
+  q1 = r[1]
+  q2 = r[2]
+  q3 = r[3]
+  if en {
+    for i in 0..<3 {
+      r[3 - i] = r[2 - i]
+    }
+    r[0] = d
+  }
+}
+
+// The lhdtrack byte-enable spelling (value twin of equiv/mem_byte_enable_loop):
+// a loop over the byte lanes writes slices of ONE word, so the unrolled body
+// is up to four partial writes of `mem[wa]` in the same cycle that must merge.
+mod lrw_bytes(we:Bool, be:U4, wa:U2, d:U32, ra:U2) -> (q:U32@[0]) {
+  reg mem:[4]U32 = 0
+  if we {
+    for w in 0..<4 {
+      if be#[w] == 1 {
+        mem[wa]#[(w * 8)..+8] = d#[(w * 8)..+8]
+      }
+    }
+  }
+  q = mem[ra]
+}
+
+// Control: a loop that only READS a reg array is not covered by the ruling and
+// compiles rolled today (one `u_loop_0`).
+mod lrw_sum(en:Bool, a:U2, d:U4) -> (q:U6@[0]) {
+  reg r:[4]U4 = 0
+  if en {
+    r[a] = d
+  }
+  mut s:U6 = 0
+  for i in 0..<4 {
+    s = s + r[i]
+  }
+  q = s
+}
+
+test lrw_lanes.lanes {
+  mut dut = lrw_lanes
+  mut seen = 0
+  tick 4 {
+    dut.reset = clock == 0
+    dut.en    = clock != 2
+    dut.d     = 5 + clock
+    step
+    if clock == 1 {
+      assert(dut.q0 == 6, "lane 0 stores d ^ 0")
+      assert(dut.q3 == 5, "lane 3 stores d ^ 3 (6 ^ 3 == 5)")
+      seen += 1
+    } elif clock == 2 {
+      assert(dut.q0 == 6, "en low: lane 0 holds the cycle-1 value")
+      assert(dut.q3 == 5, "en low: lane 3 holds the cycle-1 value")
+      seen += 1
+    } elif clock == 3 {
+      assert(dut.q0 == 8, "lane 0 stores d ^ 0")
+      assert(dut.q3 == 11, "lane 3 stores d ^ 3 (8 ^ 3 == 11)")
+      seen += 1
+    }
+  }
+  assert(seen == 3, "the comparisons ran")
+}
+
+test lrw_shift.shifts {
+  mut dut = lrw_shift
+  mut st0:U4 = 0      // golden mirror of the four entries
+  mut st1:U4 = 0
+  mut st2:U4 = 0
+  mut st3:U4 = 0
+  mut seen = 0
+  mut bad  = 0
+  tick 8 {
+    dut.reset = clock == 0
+    dut.en    = clock != 4
+    dut.d     = clock + 1
+    step
+    if clock == 0 {
+      st0 = 0
+      st1 = 0
+      st2 = 0
+      st3 = 0
+    } elif clock != 4 {
+      st3 = st2
+      st2 = st1
+      st1 = st0
+      st0 = clock + 1
+    }
+    seen += 1
+    if dut.q0 != st0 { bad += 1 }
+    if dut.q1 != st1 { bad += 1 }
+    if dut.q2 != st2 { bad += 1 }
+    if dut.q3 != st3 { bad += 1 }
+  }
+  assert(seen == 8, "the comparisons ran")
+  assert(bad == 0, "the loop shifts every committed entry up by one")
+}
+
+test lrw_bytes.bytes {
+  mut dut = lrw_bytes
+  mut m0:U32 = 0     // golden mirror of the four words
+  mut m1:U32 = 0
+  mut m2:U32 = 0
+  mut m3:U32 = 0
+  mut seen = 0
+  mut bad  = 0
+  tick 16 {
+    const wav:U2 = (clock * 3 + 1) & 3
+    const rav:U2 = (clock >> 1) & 3
+    const bev:U4 = (clock * 7 + 3) & 0xF
+    const dv:U32 = (clock * 0x9E3779B1 + 0x12345678) & 0xFFFFFFFF
+    const wev    = (clock != 0) and (clock != 9)
+    dut.reset = clock == 0
+    dut.we    = wev
+    dut.be    = bev
+    dut.wa    = wav
+    dut.d     = dv
+    dut.ra    = rav
+    step
+    const mk:U32 = ((bev & 1) * 0xFF) | (((bev >> 1) & 1) * 0xFF00)
+                 | (((bev >> 2) & 1) * 0xFF0000) | (((bev >> 3) & 1) * 0xFF000000)
+    const km:U32 = mk ^ 0xFFFFFFFF
+    if wev {
+      if wav == 0 {
+        m0 = (m0 & km) | (dv & mk)
+      } elif wav == 1 {
+        m1 = (m1 & km) | (dv & mk)
+      } elif wav == 2 {
+        m2 = (m2 & km) | (dv & mk)
+      } else {
+        m3 = (m3 & km) | (dv & mk)
+      }
+    }
+    mut exp:U32 = m3
+    if rav == 0 { exp = m0 } elif rav == 1 { exp = m1 } elif rav == 2 { exp = m2 }
+    seen += 1
+    if dut.q != exp { bad += 1 }
+  }
+  assert(seen == 16, "the comparisons ran")
+  assert(bad == 0, "the unrolled byte lanes merge into one word per cycle")
+}
+
+test lrw_sum.sums {
+  mut dut = lrw_sum
+  mut m0:U4 = 0      // golden mirror of the four entries
+  mut m1:U4 = 0
+  mut m2:U4 = 0
+  mut m3:U4 = 0
+  mut seen = 0
+  mut bad  = 0
+  tick 10 {
+    const av:U2 = (clock * 3 + 1) & 3
+    const dv:U4 = (clock * 5 + 7) & 0xF
+    dut.reset = clock == 0
+    dut.en    = (clock != 0) and (clock != 6)
+    dut.a     = av
+    dut.d     = dv
+    step
+    if (clock != 0) and (clock != 6) {
+      if av == 0 { m0 = dv } elif av == 1 { m1 = dv } elif av == 2 { m2 = dv } else { m3 = dv }
+    }
+    seen += 1
+    if dut.q != m0 + m1 + m2 + m3 { bad += 1 }
+  }
+  assert(seen == 10, "the comparisons ran")
+  assert(bad == 0, "the rolled read loop sums the committed entries")
+}

@@ -5,11 +5,11 @@
 :verifier_fail: 0
 */
 
-// `bool(x)`/`boolean(x)` on an integer is `x != 0` (NOT restricted to 0/1 —
-// 04-variables.md `boolean(33)` is true); a bool operand is identity. An
+// `Bool(x)` on an integer is `x != 0` (NOT restricted to 0/1 —
+// 04-variables.md `Bool(33)` is true); a bool operand is identity. An
 // undefined/nil operand is a compile error (see errors/cast_bool_undefined).
-cassert(bool(33)   == true)
-cassert(bool(0)    == false)
-cassert(bool(-1)   == true)
-cassert(boolean(1) == true)
-cassert(bool(true) == true)
+cassert(Bool(33)   == true)
+cassert(Bool(0)    == false)
+cassert(Bool(-1)   == true)
+cassert(Bool(1) == true)
+cassert(Bool(true) == true)

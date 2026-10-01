@@ -22,8 +22,8 @@
 // the `wrap` load-bearing: a 5-bit index must truncate into a 4-bit register.
 // With the width dropped, nothing truncated.
 
-pub mod top<REGS32=false>(index:u5) -> (value:u5@[]) {
-  reg decoded:unsigned(bits=if REGS32 { 5 } else { 4 }) = nil
+pub mod top<REGS32=false>(index:U5) -> (value:U5@[]) {
+  reg decoded:Unsigned(bits=if REGS32 { 5 } else { 4 }) = nil
   wrap decoded = index
   value = decoded
 }

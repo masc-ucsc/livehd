@@ -1,0 +1,21 @@
+/*
+:name: spec_clock_pin_bool_input
+:type: error
+:tolg: 1
+:error: (not a Clock|not a `Clock`|must name a `?Clock|no derived clocks)
+*/
+// SPEC (clock lane): `clock_pin=x` must name a Clock (a `Clock` input or a
+// Clock_cell output); a `Bool` data input is not a clock.
+//   docs 04b: "A `Clock` is never bound to a constant, so `clock_pin` always
+//     names a `Clock` signal."
+//   docs 04b register attributes: "`clock_pin`: the clock signal
+//     (`clock_pin=clk2`, a `Clock`, never a constant)"
+//   docs 04b: "There is no name-based binding: an input named `clk` ... that is
+//     not typed `Clock`/`Reset` (a `Bool`, a `U1`) is plain data."
+//   ruling 55: "`clock_pin=x` must name a CLOCK: a Clock input or a
+//     `Clock_cell` output."
+pub mod spec_clock_pin_bool_input(clk:Clock, b:Bool, d:U8) -> (q:U8@[0]) {
+  reg r:U8:[clock_pin=b] = 0   // locate_error_here
+  if d != 0 { r = d }   // a hold path: keeps the timecheck out of the way
+  q = r
+}

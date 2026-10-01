@@ -1,0 +1,14 @@
+/*
+:name: spec_calls_self_named
+:type: error
+:error: `self` cannot be passed
+*/
+
+// docs 06-functions.md "Argument naming": "`self` is always bound positionally
+// -- by the value before the dot in a UFCS call, or by the first positional
+// actual in a direct call -- and is never named at the call site."
+// (UFCS example: `const t3 = div(self=8, b=2)  // error: `self` cannot be named`)
+
+comb div(self, b) -> (r) { r = self / b }
+
+const t3 = div(self=8, b=2) // locate_error_here

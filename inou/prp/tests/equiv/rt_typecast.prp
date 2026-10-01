@@ -7,13 +7,13 @@
 
 // Runtime (non-comptime) scalar typecasts lowered to hardware. Each cast feeds
 // arithmetic so the LEC pins the VALUE semantics, not just the result bits:
-//   * int(bool)/s8(bool) → 1-bit SIGNED: true = -1, false = 0  (sign-extend)
-//   * u8(bool)/uint(bool) → unsigned bit: true = 1, false = 0   (zero-extend)
-//   * int(x)/u8(x) on an integer that provably FITS → value-preserving
-pub comb rt_typecast(a:u8, b:u8, c:u4) -> (zi:s4, zu:u4, zs:s4, zc:u8, zd:s8) {
-  zi = signed(a < b) + 1   // signed(true)=-1 → 0 ; signed(false)=0 → 1
-  zu = u8(a < b) + 1    // u8(true)=1   → 2 ; u8(false)=0  → 1
-  zs = s8(a < b) + 2    // s8(true)=-1  → 1 ; s8(false)=0  → 2
-  zc = u8(c) + 1        // u8(c)=c (u4 fits u8) → c+1
-  zd = unsigned(c) - 3       // unsigned(c)=c (u4 non-neg) → c-3
+//   * int(bool)/S8(bool) → 1-bit SIGNED: true = -1, false = 0  (sign-extend)
+//   * U8(bool)/uint(bool) → unsigned bit: true = 1, false = 0   (zero-extend)
+//   * int(x)/U8(x) on an integer that provably FITS → value-preserving
+pub comb rt_typecast(a:U8, b:U8, c:U4) -> (zi:S4, zu:U4, zs:S4, zc:U8, zd:S8) {
+  zi = Signed(a < b) + 1   // Signed(true)=-1 → 0 ; Signed(false)=0 → 1
+  zu = U8(a < b) + 1    // U8(true)=1   → 2 ; U8(false)=0  → 1
+  zs = S8(a < b) + 2    // S8(true)=-1  → 1 ; S8(false)=0  → 2
+  zc = U8(c) + 1        // U8(c)=c (u4 fits u8) → c+1
+  zd = Unsigned(c) - 3       // Unsigned(c)=c (u4 non-neg) → c-3
 }

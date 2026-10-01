@@ -13,14 +13,14 @@
 // The helper is named `pack`, not `concat`: `concat` is now a reserved
 // builtin (the bit-concatenation op), so a user lambda may not take that name.
 // What this test is about is unchanged -- the uninitialized accumulator read.
-comb pack(...a)->(res:unsigned) {
+comb pack(...a)->(res:Unsigned) {
   for x in a {
      res <<= x.[bits]   // locate_error_here  (reads uninitialized res)
      res  |= x
   }
 }
 
-const b:u4 = 3
-const c:u8 = 0xAA
+const b:U4 = 3
+const c:U8 = 0xAA
 
-const x = pack(b,c)
+const x = pack(a=(b, c))

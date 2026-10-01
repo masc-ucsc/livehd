@@ -1,0 +1,33 @@
+/*
+:name: child_clock_const_bind
+:type: error
+:tolg: 1
+:error: .Clock. input .clk. of .ccb_cnt. is bound to a constant
+:help: omit .clk.
+*/
+
+// User rulings 2026-09-27 (12), 2026-09-28 (27) and 2026-09-29 (52) (04b-attributes.md
+// "Implicit clock and reset"): a `Clock` is never bound to a constant; omitting
+// the child's clock wires the caller's implicit clock. `clk:Clock` is ccb_cnt's
+// implicit clock, so `ccb_cnt(clk=1, ...)` (the old lhdtrack harness
+// convention) would clock its register `c` by a constant. Before,
+// it compiled silently and the two backends disagreed: the emitted Verilog
+// ties `.clk(1'h1)`, so `always @(posedge clk)` never fires (what LEC and
+// Verilator see), while `lhd sim` treats every clock port as the ideal `step`
+// clock and the counter counts. (A `clk` that is not typed `Clock` is plain
+// data: sim/const_clk_data_arg.prp.)
+//
+// The message names the port ("`Clock` input `clk` of `ccb_cnt` is bound to a
+// constant"); the hint must name the port ("omit `clk` to wire the caller's
+// implicit clock").
+
+mod ccb_cnt(clk:Clock, rst:Reset, en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+pub mod child_clock_const_bind(rst:Reset, en:Bool) -> (q:U8@[0]) {
+  const c = ccb_cnt(clk=1, rst=rst, en=en)   // locate_error_here
+  q = c.q
+}

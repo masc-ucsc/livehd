@@ -10,7 +10,7 @@
 // so this is legal Pyrope). With the runner-owned scope-aware symbol table
 // each arm's `t` resolves to its own bundle, so this must compile clean.
 
-comb pick(c: bool) -> (o1: u8, o2: bool) {
+comb pick(c: Bool) -> (o1: U8, o2: Bool) {
   o1 = 0
   o2 = false
   if c {

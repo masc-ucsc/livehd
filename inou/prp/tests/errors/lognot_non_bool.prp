@@ -1,0 +1,12 @@
+/*
+:name: lognot_non_bool
+:type: error
+:error: operator `not` requires boolean operands
+*/
+
+// User ruling 2026-09-29 (44): logical `!x` / `not x` needs a `Bool` operand;
+// on an integer (here a u8 port) it is a compile error -- write `x == 0`, or
+// `x#[0] == 0` for one bit.
+pub mod lognot_non_bool(a:U8) -> (o:Bool@[0]) {
+  o = !a  // locate_error_here
+}

@@ -1,0 +1,15 @@
+/*
+:name: spec_lexical_str_doubled_braces
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+// qa.md Q8 answer "`{{` is literal" and appendix 3: "in "..." strings, `{{`
+// and `}}` are escaped literal braces (`"{{x}}"` is the text `{x}`)". docs
+// 02-basics: `cassert("{{{num}}}" == '{2}')`.
+const num = 2
+cassert("{{num}}" == '{num}')
+cassert("{{{num}}}" == '{2}')
+cassert("a }} b" == 'a } b')
+cassert("x{{" == 'x{')
+cassert("{{}}" == '{}')

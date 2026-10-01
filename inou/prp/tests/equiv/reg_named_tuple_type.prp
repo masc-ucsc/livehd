@@ -10,10 +10,10 @@
 // `reg instr:Decode` stayed a whole-tuple aggregate and its field writes reached
 // tolg as multi-element stores ("tuple/field store to 'instr' has no hardware
 // lowering") -- even though the byte-equivalent ANONYMOUS spelling
-// `reg instr:(add:bool, rd:u5)` split into per-field flops just fine.
-type Decode = (add:bool, rd:u5)
+// `reg instr:(add:Bool, rd:U5)` split into per-field flops just fine.
+type Decode = (add:Bool, rd:U5)
 
-pub mod reg_named_tuple_type(clk:u1, resetn:bool, opcode:u2, rd:u5) -> (add:bool@[], dest:u5@[]) {
+pub mod reg_named_tuple_type(clk:Clock, resetn:Bool, opcode:U2, rd:U5) -> (add:Bool@[], dest:U5@[]) {
   reg instr:Decode = nil
   instr.add = resetn and (opcode == 0)
   instr.rd  = rd

@@ -1,0 +1,16 @@
+/*
+:name: bitnot_bool
+:type: error
+:error: operator .~. requires integer operands
+:help: U1\(
+*/
+
+// User ruling 2026-09-29 (44): `~x` needs an operand of known INTEGER type. A
+// `Bool` is typed, just not an integer, so the operator typecheck reports it
+// with the bool->bit hint (`U1(flag)`, or `!flag` for a logical not). Before,
+// the `~` rule fired first and called the declared bool "an untyped runtime
+// value", hinting to give it a type or slice it.
+comb bitnot_bool(v:U4) -> (q:U4) {
+  const flag:Bool = v != 0
+  q = v ^ ~flag  // locate_error_here
+}

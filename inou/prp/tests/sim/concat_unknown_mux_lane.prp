@@ -9,8 +9,8 @@
 // the Hotmux and Concat lane both carry the declared one-bit payload. cprop
 // must not turn that headroom into a second data bit and violate the Concat
 // lane-width contract.
-pub comb concat_unknown_mux_lane(sel:u2) -> (z:u2) {
-  mut hi:u1 = 0ub?
+pub comb concat_unknown_mux_lane(sel:U2) -> (z:U2) {
+  mut hi:U1 = 0ub?
   match sel {
     == 0 {
       hi = 0
@@ -21,7 +21,7 @@ pub comb concat_unknown_mux_lane(sel:u2) -> (z:u2) {
     else {
     }
   }
-  const lo:u1 = 1
+  const lo:U1 = 1
   z = (lo, hi)#[..]
 }
 

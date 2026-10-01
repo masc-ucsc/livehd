@@ -1,0 +1,30 @@
+/*
+:name: spec_tests_clk_true_poke
+:type: error
+:error: (Clock|clock).*constant
+*/
+// Spec (qa.md appendix section 6): "Test harnesses declare/pass a real Clock
+// (no `clk=1`)"; "A Clock can never be bound to a constant"; "Clock and Reset
+// are distinct basic types (`Clock does Bool` is false)". docs 05b "Running
+// cycles (tick)": "A harness never feeds a constant to a `Clock` input
+// (`clk=1` is an error); it passes a real Clock such as the tick's `clock`."
+//
+// Rule pinned: poking the Bool constant `true` into the DUT's `Clock` input
+// inside a test is the same constant-clock error as `d.clk = 1` (the old
+// harness convention spelled with a Bool).
+
+mod spec_ctp_cnt(clk:Clock, en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_ctp.true_clk {
+  mut d = spec_ctp_cnt
+  tick 4 {
+    d.clk = true         // locate_error_here
+    d.en  = true
+    step
+  }
+  assert(d.q == 4)
+}

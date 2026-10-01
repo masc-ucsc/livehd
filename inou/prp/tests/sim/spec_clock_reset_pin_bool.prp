@@ -1,0 +1,37 @@
+/*
+:name: spec_clock_reset_pin_bool
+:type: simulation
+*/
+// SPEC (clock lane): a Reset is Bool-like -- a `Bool` expression binds to
+// `reset_pin` without a cast.
+//   qa.md Appendix 6: "Reset is Bool-like: it can be computed (`rst or
+//     soft_rst`, synchronizers), ... and a Bool expression is
+//     assignable/bindable to a Reset without a cast"
+//   docs 04b: "a `Bool` expression binds to a `Reset` input or to `reset_pin`
+//     without a cast."
+//   docs 04b register attributes: "`reset_pin`: the reset signal
+//     (`reset_pin=rst2`, a `Reset` or a `Bool` expression)"
+// `c` is reset by the Bool data input `soft` (not by the module Reset `rst`).
+pub mod spec_clock_reset_pin_bool(clk:Clock, rst:Reset, soft:Bool, en:Bool) -> (q:U8@[0]) {
+  reg c:U8:[reset_pin=soft] = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_clock_reset_pin_bool.soft_resets {
+  mut t   = spec_clock_reset_pin_bool
+  mut g   = 0
+  mut bad = 0
+  tick 12 {
+    const s = clock < 2 or clock == 6
+    t.rst  = false
+    t.soft = s
+    t.en   = true
+    if s { g = 0 } else { g += 1 }
+    step
+    if t.q != g { bad += 1 }
+  }
+  puts("reset_pin_bool: g={g} bad={bad}")
+  assert(bad == 0)
+  assert(g == 5)
+}

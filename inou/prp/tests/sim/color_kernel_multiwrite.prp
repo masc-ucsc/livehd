@@ -7,19 +7,19 @@
 // occurrence-wide schedule must emit one canonical kernel and bind it twice.
 // Both results cross color boundaries into state, so the kernel changed-mask
 // has two ABI write bits whose canonical order must match each bound object.
-mod pair(x:u8) -> (lo:u8@[0], hi:u8@[0]) {
+mod pair(x:U8) -> (lo:U8@[0], hi:U8@[0]) {
   const base = x * 3
-  lo = base + 1
-  hi = lo + 8
+  wrap lo = base + 1
+  wrap hi = lo + 8
 }
 
-pub mod kernel_multiwrite(d:u8, e:u8) -> (a_lo:u8@[1], a_hi:u8@[1], b_lo:u8@[1], b_hi:u8@[1], a_zero:u1@[1]) {
+pub mod kernel_multiwrite(d:U8, e:U8) -> (a_lo:U8@[1], a_hi:U8@[1], b_lo:U8@[1], b_hi:U8@[1], a_zero:U1@[1]) {
   const a = pair(d)
   const b = pair(e)
-  reg ar0:u8 = 0
-  reg ar1:u8 = 0
-  reg br0:u8 = 0
-  reg br1:u8 = 0
+  reg ar0:U8 = 0
+  reg ar1:U8 = 0
+  reg br0:U8 = 0
+  reg br1:U8 = 0
   ar0 = a.lo
   ar1 = a.hi
   br0 = b.lo
@@ -28,7 +28,7 @@ pub mod kernel_multiwrite(d:u8, e:u8) -> (a_lo:u8@[1], a_hi:u8@[1], b_lo:u8@[1],
   a_hi = ar1
   b_lo = br0
   b_hi = br1
-  a_zero = ar0 == 0
+  a_zero = U1(ar0 == 0)
 }
 
 test kernel_multiwrite.changed_mask_order {
@@ -42,6 +42,6 @@ test kernel_multiwrite.changed_mask_order {
     assert(dut.a_hi == ((dv * 3) + 9) & 0xFF)
     assert(dut.b_lo == (((dv + 5) * 3) + 1) & 0xFF)
     assert(dut.b_hi == (((dv + 5) * 3) + 9) & 0xFF)
-    assert(dut.a_zero == (dut.a_lo == 0))
+    assert(dut.a_zero == U1(dut.a_lo == 0))
   }
 }

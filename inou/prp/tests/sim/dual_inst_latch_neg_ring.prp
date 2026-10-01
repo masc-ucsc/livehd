@@ -31,7 +31,7 @@
 //
 //     ea1 = f + n  ->  lo (transparent while !glow)  ->  ba  ->  duo.j1  ->  ea2
 //
-// The bit-level DAG is acyclic -- `e1` reads only {i1,i2} and `e2` only {j1,j2}
+// The bit-level DAG is acyclic -- `e1` reads only {in1,in2} and `e2` only {j1,j2}
 // -- so the ring is false at every instant, open latch or closed.
 //
 // The latch enable is a top-level INPUT. A latch enable driven by a FLOP is
@@ -53,31 +53,31 @@
 // c=1..3 and 24 through c=5..6. `ra` and `ctl` move every cycle.
 
 // Two INDEPENDENT output cones. Instantiated twice below.
-mod duo::[timecheck=false](i1:u8, i2:u8, j1:u8, j2:u8)
-                        -> (e1:u16@[], e2:u16@[]) {
-  e1 = i1 + i2      // cone {i1, i2}
+mod duo::[timecheck=false](in1:U8, in2:U8, j1:U8, j2:U8)
+                        -> (e1:U16@[], e2:U16@[]) {
+  e1 = in1 + in2      // cone {in1, in2}
   e2 = j1 * j2      // cone {j1, j2}
 }
 
 // `::[timecheck=false]` + `@[]` outputs: upass.tolg treats a Sub as ONE atomic
 // node in its acyclicity check, so an instance-level ring is refused there
 // before any backend sees it. Same annotations minion's generated Pyrope uses.
-pub mod duotop::[timecheck=false](f:u8, gsel:u8, n:u8, glow:bool)
-     -> (ra:u16@[], rb:u16@[], nq:u16@[], ctl:u32@[]) {
+pub mod duotop::[timecheck=false](f:U8, gsel:U8, n:U8, glow:Bool)
+     -> (ra:U16@[], rb:U16@[], nq:U16@[], ctl:U32@[]) {
   // INSTANCE A -- inside the ring. The result is kept as a named instance
   // result (not destructured) because the SAME definition is instantiated again
   // below and both sites need distinct local names for `e1`/`e2`.
-  wire ba:u8 = nil
-  mut ia = duo(i1=f, i2=n, j1=ba, j2=gsel)
-  wire ea1:u16 = nil
-  wire ea2:u16 = nil
+  wire ba:U8 = nil
+  mut ia = duo(in1=f, in2=n, j1=ba, j2=gsel)
+  wire ea1:U16 = nil
+  wire ea2:U16 = nil
   ea1 = ia.e1
   ea2 = ia.e2
 
   // THE FALSE EDGE, through an ACTIVE-LOW transparent latch: the caller feeds
   // the first cone's output into the input the second cone needs. `lo`'s data
   // never depends on `lo`, so this is not a real loop.
-  reg lo:u8:[latch=true] = 0
+  reg lo:U8:[latch=true] = 0
   if !glow {
     lo = (ea1 + 1) & 0xFF
   }
@@ -87,12 +87,12 @@ pub mod duotop::[timecheck=false](f:u8, gsel:u8, n:u8, glow:bool)
   rb = ea2
 
   // INSTANCE B -- SAME definition, no ring at all. The control.
-  mut ib = duo(i1=n, i2=gsel, j1=f, j2=n)
+  mut ib = duo(in1=n, in2=gsel, j1=f, j2=n)
   ctl = ib.e1 + ib.e2
 
   // A NEGEDGE flop sampling the ring output: the fall must see the value the
   // rise settled, so `nq` tracks `rb` in the SAME period.
-  reg nf:u16:[posclk=false] = 0
+  reg nf:U16:[posclk=false] = 0
   nf = ea2
   nq = nf
 }
@@ -104,12 +104,12 @@ test duotop.two_instances_one_ring {
   mut bad_rb   = 0
   mut bad_nq   = 0
   mut bad_ctl  = 0
-  mut g_lo:u16 = 0             // the active-low latch's state, across ticks
+  mut g_lo:U16 = 0             // the active-low latch's state, across ticks
   tick 8 {
-    mut fv:u8   = 4 + clock
-    mut gv:u8   = 2 + clock
-    mut nv:u8   = 9 + clock
-    mut lowv:bool = (clock == 2) or (clock == 3) or (clock == 6)
+    mut fv:U8   = 4 + clock
+    mut gv:U8   = 2 + clock
+    mut nv:U8   = 9 + clock
+    mut lowv:Bool = (clock == 2) or (clock == 3) or (clock == 6)
     acc.glow = lowv
     acc.f    = fv
     acc.gsel = gv
@@ -117,12 +117,12 @@ test duotop.two_instances_one_ring {
     step
     // The golden, in the only order that exists: instance A's first cone, then
     // the caller's latch, then instance A's second cone.
-    mut g_ea1:u16 = fv + nv
+    mut g_ea1:U16 = fv + nv
     if not lowv {
       g_lo = (g_ea1 + 1) & 0xFF
     }
-    mut g_ea2:u16 = g_lo * gv
-    mut g_ctl:u32 = (nv + gv) + (fv * nv)
+    mut g_ea2:U16 = g_lo * gv
+    mut g_ctl:U32 = (nv + gv) + (fv * nv)
 
     seen = seen + 1
     if acc.ra != g_ea1 {

@@ -1,6 +1,6 @@
 /*
 */
-comb reductions(a:u9, b:s8) -> (parity:u1, population:u4, signed_parity:u1, signed_population:u4) {
+comb reductions(a:U9, b:S8) -> (parity:U1, population:U4, signed_parity:U1, signed_population:U4) {
   parity = a#^[..]
   population = a#+[..]
   signed_parity = b#^[1..=7]

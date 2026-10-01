@@ -1,0 +1,16 @@
+/*
+:name: spec_clock_bool_cast
+:type: error
+:tolg: 1
+:error: a Clock is not data
+*/
+// SPEC (clock lane): a Clock is not data; converting it to a Bool is an error
+// (the `U1(clk)` rule; `Clock does Bool` is false).
+//   qa.md Appendix 6: "`U1(clk)` / clock-as-data is an error."
+//   qa.md Appendix 6: "Clock and Reset are distinct basic types (`Clock does
+//     Bool` is false)."
+//   docs 07-typesystem: "arithmetic on it or a conversion such as `U1(clk)` is
+//     a compile error."
+pub mod spec_clock_bool_cast(clk:Clock, a:U8) -> (o:Bool@[0]) {
+  o = Bool(clk)   // locate_error_here
+}

@@ -22,8 +22,8 @@
 // error — "nil" is the explicit NO-reset marker the slang reader stamps on
 // every latch declare, so nothing is being dropped there (that exemption is
 // what keeps the six live latch equiv goldens compiling).
-pub mod ldrop(en:bool, d:u8, ck2:bool) -> (q:u8@[0]) {
-  reg l:u8:[latch=true, clock_pin=ck2, posclk=false, initial=3]
+pub mod ldrop(en:Bool, d:U8, ck2:Clock) -> (q:U8@[0]) {
+  reg l:U8:[latch=true, clock_pin=ck2, posclk=false, initial=3]
   if en {
     l = d
   }

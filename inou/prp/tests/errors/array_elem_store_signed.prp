@@ -1,0 +1,14 @@
+/*
+:name: array_elem_store_signed
+:type: error
+:error: element of .m. \(range \[0, 15\]\) may not fit its declared range \[-8, 7\]
+*/
+
+// A u4 value may not fit an s4 element (15 reads back as -1), exactly like the
+// scalar `mut m:S4 = a`. The raw-bit-pattern allowance is for Verilog memories
+// (the reader stores raw bits and sign-extends on read), not Pyrope code.
+pub mod array_elem_store_signed(a:U4, s:U2) -> (y:S8@[0]) {
+  mut m:[4]S4 = 0
+  m[0] = a   // locate_error_here
+  y = m[s]
+}

@@ -1,0 +1,38 @@
+/*
+:name: nested_comb_comptime_capture
+:type: equiv
+:verilog_top: nested_comb_comptime_capture
+:pyrope_top: nested_comb_comptime_capture
+*/
+
+// Ruling 2026-09-27 (suggestions 2.3 row 3): a lambda nested inside a `mod`
+// sees the enclosing mod's `comptime const` bindings -- as a VALUE (`x + N`)
+// and as a WIDTH (`Unsigned(bits=W)` in the signature and the body), from a
+// nested `comb` and from a nested `mod`. 06-functions.md: "Visible comptime
+// bindings from enclosing scopes, including imports and `comptime const`
+// declarations, are available lexically inside the lambda body and
+// signature." Today every body read fails in inou.prp with "read of undefined
+// variable 'N'": a nested lambda streams into its own LNAST and
+// capture_const_bindings_ only records FILE-scope (conditional_depth_ == 0)
+// comptime values.
+pub mod nested_comb_comptime_capture(a:U8) -> (o:U8@[0], p:U4@[0], q:U8@[0]) {
+  comptime const N = 3
+  comptime const W = N + 1
+
+  comb addn(x:U8) -> (y:U8) {
+    y = (x + N)#[0..<8]
+  }
+
+  comb low(x:U8) -> (y:Unsigned(bits=W)) {
+    const v:Unsigned(bits=W) = x#[0..<W]
+    y = v
+  }
+
+  mod xorn(x:U8) -> (y:U8@[0]) {
+    y = x ^ (N * 5)
+  }
+
+  o = addn(x=a)
+  p = low(x=a)
+  q = xorn(x=a)
+}

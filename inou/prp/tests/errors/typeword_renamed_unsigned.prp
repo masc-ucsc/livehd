@@ -1,0 +1,9 @@
+/*
+:name: typeword_renamed_unsigned
+:type: error
+:error: `unsigned` was renamed `Unsigned`
+*/
+// The constrained integer type is `Unsigned(bits=N)`.
+pub comb typeword_renamed_unsigned(a:unsigned(bits=10)) -> (o:Unsigned(bits=10)) {  // locate_error_here
+  o = a
+}

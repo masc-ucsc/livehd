@@ -1,0 +1,26 @@
+/*
+:name: mod_untyped_output_narrow
+:type: error
+:tolg: 1
+:error: `y` \(range \[1, 16\]\) may not fit its declared range \[0, 15\]
+:help: (wrap|sat)
+*/
+
+// User ruling 2026-09-28 (28): the untyped output of a fully typed `mod` has
+// the range its body derives -- `cnt`'s `o` is `a + 1` over a `U4`, [1, 16] --
+// and a call site that stores it into a narrower typed destination is the
+// ruling-21 may-not-fit error, now naming that range instead of an unbounded
+// one (sim/mod_untyped_output_range.prp is the legal side). A one-output call
+// read directly is the same value.
+//
+// Legal spellings: `wrap y = c.o`, a wider `y`, or a typed `cnt` output.
+
+mod cnt(a:U4) -> (o@[0]) {
+  o = a + 1
+}
+
+pub mod mod_untyped_output_narrow(x:U4, z:U4) -> (y:U4@[0], v:U4@[0]) {
+  const c = cnt(a=x)
+  y = c.o          // locate_error_here
+  v = cnt(a=z)     // locate_error_here
+}

@@ -1,0 +1,55 @@
+/*
+:name: array_output_port_index
+:type: simulation
+*/
+// lhdtrack suggestions.md 2.2(d), OUTPUT side: a child's ARRAY output read
+// back by index at the call site.
+//   * ONE output: the call binds the destination to that output directly
+//     (06-functions.md "Binding return values"), so `x[3]` is lane 3 of the
+//     child's `v`. It failed with "upass.tolg: instance result has no output
+//     named '3'" -- the index was taken as an output NAME -- for a plain
+//     `[4]U4` port and for a generic `[N]U4` one alike.
+//   * SEVERAL outputs: `m.v[3]` is lane 3 of output `v`. It failed with
+//     "upass.tolg: unresolved reference '%...' -- it has no driver".
+// `const w:[4]U4 = x` followed by `w[3]` was the only working spelling.
+mod lanes(a:U4) -> (v:[4]U4@[0]) {
+  v = 0
+  for i in 0..<4 {
+    v[i] = a ^ i
+  }
+}
+mod lanes2(a:U4) -> (v:[4]U4@[0], p:U4@[0]) {
+  v = 0
+  for i in 0..<4 {
+    v[i] = a ^ (i + 8)
+  }
+  p = a ^ 15
+}
+mod glanes<N=2>(a:U4) -> (v:[N]U4@[0]) {
+  v = 0
+  for i in 0..<N {
+    v[i] = a ^ (i + 4)
+  }
+}
+
+pub mod array_output_port_index(a:U4) -> (y:U4@[0], z:U4@[0], t:U4@[0], p:U4@[0]) {
+  const x = lanes(a=a)
+  y = x[3]
+  const g = glanes<N=4>(a=a)
+  z = g[2]
+  const m = lanes2(a=a)
+  t = m.v[3]
+  p = m.p
+}
+
+test array_output_port_index.lanes {
+  mut dut = array_output_port_index
+  mut ok  = true
+  tick 16 {
+    dut.a = clock
+    step
+    if dut.y != (clock ^ 3) or dut.z != (clock ^ 6) { ok = false }
+    if dut.t != (clock ^ 11) or dut.p != (15 - clock) { ok = false }
+  }
+  assert(ok, "lane k of a child's array output")
+}

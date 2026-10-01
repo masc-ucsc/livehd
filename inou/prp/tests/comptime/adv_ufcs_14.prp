@@ -10,7 +10,7 @@
 // the function to a NON-EXISTENT field — `t1.double = t1_do_double` — is a
 // compile error: a tuple has no `double` field and `t1` is const; UFCS on the
 // free name is the supported form.)
-const t1 = (mut a:u32 = 0)
+const t1 = (mut a:U32 = 0)
 
 comb t1_do_double(ref self) { self.a *= 2 }
 

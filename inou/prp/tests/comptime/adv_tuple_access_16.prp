@@ -6,7 +6,7 @@
 */
 
 // Mutate a named field through a string selector, then read it back.
-type Person = (name:string = "", mut age:u32 = 0)
+type Person = (name:String = "", mut age:U32 = 0)
 mut a = (
   ,mut one:Person = (name = "one", age = 0)
   ,mut two:Person = (name = "two", age = 0)

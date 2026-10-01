@@ -32,6 +32,10 @@
 #             message) is then required, so a newly supported schedule fails
 #             until it gets a _tb.prp. An optional `<stem>_tb.v` event-level
 #             bench runs under iverilog/vvp only when LHD_EXTERNAL_SIM is set.
+#   sim     - the roundtrip_sim checks on the Verilog LiveHD emits for the
+#             fixture itself, with no Pyrope round trip: for a design whose
+#             Pyrope form is not expressible yet (a hand-built latch ICG, until
+#             the writer maps it to `Clock(clock_pin=, enable=)`, ruling 81).
 # Per-fixture headers (auto mode): `// :test: <tier>`, `// :top: <module>`,
 # `// :lec_timeout: <seconds>` and `// :lec_solver: <name>` (lec tiers:
 # runs `lhd lec --set formal.solver=<name>`; lgyosys cross-checks with lgcheck
@@ -270,6 +274,10 @@ CHECK
       fi
       tail -1 "$wd"/check.log
       fi
+      ;;
+    sim)
+      run_verilog_tier "$f" "$base" "$wd" || return 1
+      run_roundtrip_sim "$f" "$base" "$wd" || return 1
       ;;
     error)
       local compile_status=0

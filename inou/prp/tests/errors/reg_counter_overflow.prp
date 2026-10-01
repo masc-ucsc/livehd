@@ -1,0 +1,18 @@
+/*
+:name: reg_counter_overflow
+:type: error
+:tolg: 1
+:error: `cnt` \(range \[1, 256\]\) may not fit its declared range \[0, 255\]
+:help: apply a wrap/saturate policy
+*/
+// User ruling 2026-09-27 (lhdtrack suggestions, overflow rule), docs 04b "wrap
+// and sat modifier": a `reg cnt:U8` may hold any value in 0..=255, so
+// `cnt + 1` may reach 256 and `cnt += 1` is a compile error. The counter idiom
+// is `wrap cnt += 1` (255 rolls over to 0) or `sat cnt += 1`.
+pub mod reg_counter_overflow(en:Bool) -> (q:U8@[0]) {
+  reg cnt:U8 = 0
+  if en {
+    cnt += 1   // locate_error_here
+  }
+  q = cnt
+}

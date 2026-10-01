@@ -14,6 +14,6 @@ mod madd<T>(a:T, b:T) -> (r:T@[0]) {
   r = a ^ b
 }
 
-pub mod top(x:u8, y:u8) -> (s:u8@[0]) {
-  s = madd<u8>(a=x)   // locate_error_here  (required `b` omitted)
+pub mod top(x:U8, y:U8) -> (s:U8@[0]) {
+  s = madd<U8>(a=x)   // locate_error_here  (required `b` omitted)
 }

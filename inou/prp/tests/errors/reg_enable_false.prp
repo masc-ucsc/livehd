@@ -11,8 +11,8 @@
 //
 // The companion positive case (`:[enable]` / `enable=true` = always update, the
 // Flop default) is reg_enable_const in tests/pyrope.
-pub mod enfalse(clk:u1, rst:u1, d:u8) -> (q:u8@[]) {
-  reg r:u8:[clock_pin=ref clk, reset_pin=ref rst, enable=false] = 0
+pub mod enfalse(clk:Clock, rst:Reset, d:U8) -> (q:U8@[]) {
+  reg r:U8:[clock_pin=clk, reset_pin=rst, enable=false] = 0
   r = d
   q = r
 }

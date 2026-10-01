@@ -1,0 +1,29 @@
+/*
+:name: spec_memory_enum_index
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// SPEC (docs 08-memories.md, Array index): "Array index by default are unsigned
+// integers, but the index can be constrained with tuples or by requiring an
+// enumerate." -- example (verbatim):
+//   enum X = ( t1 = 0, t2, t3 )
+//   mut x2:[X]U3 = nil
+//   x2[X.t1] = 0
+//   x2[X.t2] = 1
+// Rule encoded here: an array sized/indexed by an enum type (`[X]U3`) has one entry
+// per enum entry and is written and read through the enum entries.
+
+enum X = (
+  t1 = 0, // sequential enum, not one hot enum (explicit assign)
+  t2,
+  t3
+)
+
+mut x2:[X]U3 = 0   // docs: `= nil`; 0 here so `.[size]` does not depend on how nil arrays report it
+x2[X.t1] = 0
+x2[X.t2] = 1
+cassert(x2[X.t1] == 0)
+cassert(x2[X.t2] == 1)
+cassert(x2.[size] == 3)   // one entry per enum entry (t1, t2, t3)

@@ -1,21 +1,28 @@
 /*
 :name: adv_tuple_concat_op
 :type: comptime
-:verifier_pass: 6
+:verifier_pass: 7
 :verifier_fail: 0
 */
 // `a ++ b` is the tuple-concat (splice) operator: an alias for `(...a, ...b)`.
 // Field names and positions are preserved, and named-field order does not
 // matter for equality.
-const a = (1, const foo=2)
-const b = (3, const bar=4)
+// A tuple is all-named or all-unnamed (03-bundle.md), so unnamed tuples append
+// in order and named tuples merge by field name.
+const a = (1, 2)
+const b = (3, 4)
 
 const x = a ++ b
 const y = (...a, ...b)
 
 cassert(x == y)
-cassert(x == (1, 3, foo=2, bar=4))
-cassert(x == (1, bar=4, foo=2, 3))
+cassert(x == (1, 2, 3, 4))
+
+const na = (const foo=2)
+const nb = (const bar=4)
+const nx = na ++ nb
+cassert(nx == (foo=2, bar=4))
+cassert(nx == (bar=4, foo=2))
 
 // chained concat (same associative operator) left-folds
 const c = (5, 6)

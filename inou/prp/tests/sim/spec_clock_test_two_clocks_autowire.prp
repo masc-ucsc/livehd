@@ -1,0 +1,41 @@
+/*
+:name: spec_clock_test_two_clocks_autowire
+:type: simulation
+*/
+// SPEC (clock lane): each `tick` block mints ONE `clock:Clock`, and every
+// unbound `Clock` input of a DUT stepped in that tick is auto-wired to it (the
+// test is a caller with a single Clock).
+//   qa.md Appendix 8: "Test clock: each `tick` block gets a MINTED
+//     `clock:Clock` ... the DUT instances stepped inside that tick auto-wire
+//     their single Clock input to it"
+//   qa.md Appendix 7: "an unbound child `Clock`/`Reset` input is auto-wired to
+//     the caller's single Clock/Reset"
+//   docs 05b "Running cycles": "The DUT instances stepped inside the tick
+//     auto-wire their unbound `Clock` input to it, like any instance whose
+//     caller has a single Clock."
+// CONTRADICTION NOTE: the Q38 option text says instead "A DUT with 2+ Clocks
+// needs explicit Clocks declared in the test and bound by name" (then this
+// test must be a compile error). Either way both clocks may not silently stay
+// still. This fixture encodes the docs 05b reading.
+pub mod spec_clock_test_two_clocks_autowire(clk_a:Clock, clk_b:Clock, rst:Reset, a:U8, b:U8) -> (qa:U8@[0], qb:U8@[0]) {
+  reg ra:U8:[clock_pin=clk_a] = 0
+  reg rb:U8:[clock_pin=clk_b] = 0
+  if a != 0 { ra = a }
+  if b != 0 { rb = b }
+  qa = ra
+  qb = rb
+}
+
+test spec_clock_test_two_clocks_autowire.both_tick {
+  mut t   = spec_clock_test_two_clocks_autowire
+  mut bad = 0
+  tick 4 {
+    t.rst = false
+    t.a   = 3 + clock
+    t.b   = 7 + clock
+    step
+    if t.qa != 3 + clock { bad += 1 }
+    if t.qb != 7 + clock { bad += 1 }
+  }
+  assert(bad == 0)
+}

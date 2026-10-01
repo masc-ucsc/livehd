@@ -1,0 +1,20 @@
+/*
+:name: spec_memory_ordering_old
+:type: equiv
+:verilog_top: spec_memory_ordering_old
+:pyrope_top: spec_memory_ordering_old
+*/
+// SPEC (qa.md appendix section 5): "`ordering` may be set to "fwd"/"none"/"old"
+// explicitly."
+// SPEC (docs 08-memories.md): "`"old"`: nothing forwards, and the read is still
+// defined -- every read of an address written this cycle returns the committed
+// (pre-write) contents, whatever its textual position."
+// Rule encoded here: under ordering="old" a read placed AFTER the write returns
+// the committed word, never the new data.
+pub mod spec_memory_ordering_old(clk:Clock, we:Bool, wa:U2, wd:U4, ra:U2) -> (post:U4@[0]) {
+  reg mem:[4]U4:[ordering="old"] = nil
+  if we {
+    mem[wa] = wd
+  }
+  post = mem[ra]
+}

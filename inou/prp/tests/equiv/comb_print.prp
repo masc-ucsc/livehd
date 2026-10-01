@@ -4,11 +4,11 @@
 :pyrope_top: outer
 :verilog_top: comb_print.outer
 */
-comb hello(x:u4) -> (y:u5) {
+comb hello(x:U4) -> (y:U5) {
   puts("hello {x}")
   print("tail {x}")
   y = x + 1
 }
-mod outer(x:u4) -> (y:u5@[0]) {
+mod outer(x:U4) -> (y:U5@[0]) {
   y = hello(x)
 }

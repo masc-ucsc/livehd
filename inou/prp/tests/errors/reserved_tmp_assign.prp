@@ -11,7 +11,7 @@
 // rename, `___6` was silently swept into the compiler-temp namespace and
 // aliased an internally-minted temp.)
 
-pub comb sb(a:u64) -> (z:u64) {
+pub comb sb(a:U64) -> (z:U64) {
   ___6 = a & 1   // locate_error_here
   z = ___6
 }

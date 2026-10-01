@@ -1,0 +1,69 @@
+/*
+:name: mod_untyped_output_range
+:type: simulation
+*/
+// User ruling 2026-09-28 (28), refining ruling 21: a FULLY TYPED (non-template)
+// `mod`/`pipe` has its own module, so an UNTYPED output of it carries the range
+// its body derives, and a call site is checked against THAT range: `cnt`'s `o`
+// is `a + 1` over a `U4`, i.e. [1, 16], which fits a `U8` (and a `U5`) with no
+// `wrap`. Only a template's output (an untyped input or generics) stays an
+// unknown range at the call site (errors/unknown_range_typed_dest.prp), and a
+// range the destination may not hold is still the may-not-fit error
+// (errors/mod_untyped_output_narrow.prp).
+//
+// A range derived from another instance's output composes (`dbl`), and it
+// does not depend on the order the units are walked in: pass.upass elaborates
+// a mod/pipe callee before its callers (imports/mod_untyped_output_import.prp
+// lists the importer first). Before, every such read failed "`y` (unbounded
+// range) may not fit its declared range [0, 255]".
+//
+// An untyped output that holds a BOOL (`big`'s `o`) stays a bool, exactly like
+// a typed `o:Bool` one: a condition, a `Bool` destination and `and`/`not`
+// take it, and arithmetic needs `U1(…)` (errors/mod_untyped_output_bool_arith.prp).
+
+mod cnt(a:U4) -> (o@[0]) {
+  o = a + 1
+}
+
+mod dbl(a:U4) -> (o@[0]) {
+  const c = cnt(a=a)
+  o = c.o * 2         // [2, 32]: derived from cnt's derived range
+}
+
+mod big(a:U4) -> (o@[0], e@[0]) {
+  o = a > 3
+  e = a == 0
+}
+
+pub mod mod_untyped_output_range(x:U4, z:U4) -> (y:U8@[0], v:U5@[0], w:U8@[0], s:U8@[0], b:Bool@[0], n:U2@[0]) {
+  const c = cnt(a=x)
+  y = c.o             // [1, 16] into a U8
+  v = cnt(a=z)        // a one-output call read directly: [1, 16] into a U5
+  const l = dbl(a=z)
+  w = l.o             // [2, 32] into a U8
+  s = l.o + c.o       // [3, 48]
+  const g = big(a=x)
+  b = g.o and !g.e    // bool outputs
+  n = 0
+  if g.o { n = 1 + U1(g.e) }
+}
+
+test mod_untyped_output_range.run {
+  mut d   = mod_untyped_output_range
+  mut bad = 0
+  tick 16 {
+    const x:U4 = clock & 15
+    const z:U4 = 15 - x
+    d.x = x
+    d.z = z
+    step
+    if d.y != x + 1 { bad += 1 }
+    if d.v != z + 1 { bad += 1 }
+    if d.w != (z + 1) * 2 { bad += 1 }
+    if d.s != (z + 1) * 2 + x + 1 { bad += 1 }
+    if d.b != (x > 3) { bad += 1 }
+    if d.n != (if x > 3 { 1 } else { 0 }) { bad += 1 }
+  }
+  puts("bad={bad}")
+  assert(bad == 0)
+}

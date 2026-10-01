@@ -1,0 +1,17 @@
+/*
+:name: spec_calls_gate_positional
+:type: error
+:error: must be named|ambiguous|name the argument|named|pin
+*/
+
+// qa.md Q37 answer: "it is a function call, so they should be all named unless
+// we can match using the same rules that we do for function calls (no
+// difference here). If ambigous, error like in other function calls."
+// Appendix §8: "`__` basic gates are ordinary calls: all arguments named with
+// the LGraph pin names ... ambiguous is an error."
+// `__mux(cond, b, a)`: three unnamed actuals, no naming exception applies.
+
+const cond = true
+const b = 5
+const a = 9
+const r = __mux(cond, b, a) // locate_error_here

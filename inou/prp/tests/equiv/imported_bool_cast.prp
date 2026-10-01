@@ -6,7 +6,7 @@
 */
 
 const leaf = import("imported_bool_cast/leaf.leaf")
-pub mod top(a:bool) -> (y:u1@[]) {
+pub mod top(a:Bool) -> (y:U1@[]) {
   const child = leaf(a=a)
-  y = unsigned(child.flag)
+  y = Unsigned(child.flag)
 }

@@ -1,0 +1,26 @@
+/*
+:name: enum_one_hot_too_wide
+:type: error
+:error: one-hot enum `Wide` needs more than 63 bits \(entry `e63`\)
+:help: integer level type
+*/
+
+// A default enum is ONE-HOT (03-bundle.md, user ruling 2026-09-28 (29)): one
+// bit per entry. The 64th entry's bit no longer fits the integer encoding;
+// before, its value wrapped (e63 negative, e64.. aliasing e0..), so
+// `c == Wide.e69` was true for e5 in simulation and in Verilog. An integer
+// level type (`enum Wide:U8 = (…)`) numbers the entries sequentially instead.
+
+enum Wide = (  // locate_error_here
+  e0 , e1 , e2 , e3 , e4 , e5 , e6 , e7 , e8 , e9 ,
+  e10, e11, e12, e13, e14, e15, e16, e17, e18, e19,
+  e20, e21, e22, e23, e24, e25, e26, e27, e28, e29,
+  e30, e31, e32, e33, e34, e35, e36, e37, e38, e39,
+  e40, e41, e42, e43, e44, e45, e46, e47, e48, e49,
+  e50, e51, e52, e53, e54, e55, e56, e57, e58, e59,
+  e60, e61, e62, e63, e64
+)
+
+pub mod enum_one_hot_too_wide(c:Wide) -> (o:Bool@[0]) {
+  o = c == Wide.e64
+}

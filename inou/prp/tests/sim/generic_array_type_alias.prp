@@ -1,0 +1,64 @@
+/*
+:name: generic_array_type_alias
+:type: simulation
+*/
+// lhdtrack suggestions.md 2.2(c): a body type alias over a generic width,
+// `type Row = Unsigned(bits=N)`, is N bits wherever it is used -- as a scalar
+// type and as an array element (`[N]Row`), for `mut` and for `reg` (user
+// ruling 2026-09-27 #7: `Unsigned(bits=N)` works everywhere, type aliases
+// included).
+//
+// The alias statement lowered as `declare(Row, prim_type_int(nil, 0), type)`:
+// process_type_statement never deferred the generic bound, it only warned
+// `type-bound-not-comptime`, so Row was an UNBOUNDED unsigned:
+//   * `mut x:Row` lost its width, and `wrap x = ...` failed with "call to
+//     undefined function 'wrap'";
+//   * `reg r:[N]Row` -> "memory 'r' element type must be a sized integer or
+//     bool"; `mut m:[N]Row` -> "array 'm' requires a sized scalar element type"
+//     (the report said the `mut` form worked; it did not).
+// A non-generic `type Row = U4` always worked.
+//
+// `w` is (2d mod 16) >> 1: a Row wider than 4 bits keeps the carry (d=13 ->
+// 13, not 5), the default N=2 keeps only 2 bits (d=13 -> 1).
+mod rows<N=2>(en:Bool, d:Unsigned(bits=N)) -> (q:Unsigned(bits=N)@[0], s:Unsigned(bits=N)@[0], w:Unsigned(bits=N)@[0]) {
+  type Row = Unsigned(bits=N)
+
+  mut x:Row = 0
+  wrap x = d + d
+  w = x >> 1
+
+  reg r:[N]Row = 0
+  if en {
+    r[1] = d
+  }
+  q = r[1]
+
+  mut m:[N]Row = 0
+  m[0]   = d
+  m[N-1] = d ^ ((1 << N) - 1)
+  s = m[0] ^ m[N-1]              // all ones of the element width
+}
+
+pub mod generic_array_type_alias(en:Bool, d:U4) -> (q:U4@[0], s:U4@[0], w:U4@[0]) {
+  const x = rows<N=4>(en=en, d=d)
+  q = x.q
+  s = x.s
+  w = x.w
+}
+
+test generic_array_type_alias.values {
+  mut dut  = generic_array_type_alias
+  mut s_ok = true
+  mut w_ok = true
+  tick 6 {
+    dut.reset = clock == 0
+    dut.en    = clock < 3
+    dut.d     = if clock < 3 { 13 } else { 2 + clock }
+    step
+    if dut.s != 15 { s_ok = false }
+    if dut.w != ((dut.d + dut.d) & 15) >> 1 { w_ok = false }
+  }
+  assert(s_ok, "mut [N]Row lanes are N bits wide")
+  assert(w_ok, "scalar Row wraps at N=4 bits")
+  assert(dut.q == 13, "reg [N]Row lane holds a u4")
+}

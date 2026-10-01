@@ -1,0 +1,13 @@
+/*
+:name: obs_dead_bits_1
+:lec_grep: observability: 8 unobservable state bit
+*/
+// Same-width registers, zeros in the dead bits: r's high nibble and all of s
+// (4 + 4 bits) are freed and uncompared.
+pub mod obs_dead_bits(en:Bool, d:U8) -> (q:U4@[0]) {
+  reg r:U8 = 0
+  reg s:U4 = 0
+  if en { r = d & 0x0F }
+  s = 0
+  q = r#[0..<4]
+}

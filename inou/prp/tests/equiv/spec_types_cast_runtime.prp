@@ -1,0 +1,19 @@
+/*
+:name: spec_types_cast_runtime
+:type: equiv
+:verilog_top: spec_types_cast_runtime
+:pyrope_top: spec_types_cast_runtime
+*/
+// SPEC qa.md appendix section 1: "Casts/conversions use the type names: `U1(flag)`, `U8(x)`, `S8(x)`,
+// `Unsigned(x)`, `Signed(x)`, `Bool(x)`, `String(x)`." docs 07-typesystem "Bitwidth": the unsized
+// `Signed(x)`/`Unsigned(x)` reinterpret keeping the width; the sized `S<N>(x)`/`U<N>(x)` may widen;
+// `Bool(x)` on an integer is `x != 0`; `U1(b)` maps true to 1.
+// Rule: the capitalized casts lower to the right RUNTIME hardware (String has no hardware form).
+pub comb spec_types_cast_runtime(a:U4, b:S4, f:Bool) -> (o1:S4, o2:U4, o3:U1, o4:Bool, o5:U8, o6:S8) {
+  o1 = Signed(a)    // reinterpret 4 bits: 0xF -> -1
+  o2 = Unsigned(b)  // reinterpret 4 bits: -1 -> 15
+  o3 = U1(f)
+  o4 = Bool(a)      // a != 0
+  o5 = U8(a)        // zero-extend
+  o6 = S8(b)        // sign-extend
+}

@@ -1,0 +1,20 @@
+/*
+:name: initializer_scope_runtime
+:type: lec
+:lec_top: top
+*/
+
+// Initializer scopes preserve outer writes and runtime expression results.
+pub mod top(x:U4, en:Bool) -> (a:U4@[], b:U4@[], c:U4@[], d:U4@[]) {
+  mut acc:U4 = 0
+  if const v = x; en { acc = v } else { acc = v ^ 1 }
+  a = acc
+  match const v = x; v {
+    == 0 { acc = 2 }
+    == 1 { acc = 3 }
+    else { acc = v }
+  }
+  b = acc
+  c = if const v = x; en { v ^ 2 } else { v ^ 3 }
+  d = match const v = x; v { == 0 { 5 } else { v } }
+}

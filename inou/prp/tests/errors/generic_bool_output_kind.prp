@@ -1,0 +1,22 @@
+/*
+:name: generic_bool_output_kind
+:type: error
+:tolg: 1
+:error: (operator .\^. requires integer operands \(v:integer, c\.o:Bool\)|cannot assign boolean value to .q. \(it is integer\))
+*/
+
+// User ruling 2026-09-27 (2): a `Bool` instance output never mixes with
+// integers, also when the callee's output type is a GENERIC bound to bool
+// (`o:T`, T=bool explicitly or inferred from the argument). The call-site
+// facts once read such an output as integer [0,1], so both lines below
+// compiled silently while `if c.o` / `c.o and p` were rejected
+// (sim/generic_bool_output_legal.prp covers the legal uses).
+
+mod pass_t<T>(a:T) -> (o:T@[0]) { o = a }
+
+pub mod generic_bool_output_kind(p:Bool, v:U4) -> (y:U4@[0], q:U1@[0]) {
+  const c = pass_t<T=Bool>(a=p)
+  y = v ^ c.o      // locate_error_here
+  const d = pass_t(a=p)
+  q = d.o          // locate_error_here
+}

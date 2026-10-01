@@ -45,8 +45,8 @@ const r_in_f = 9
             in (1, 2, 3)
 cassert(r_in_f == false)
 
-const r_does = u8
-            does u4
+const r_does = U8
+            does U4
 cassert(r_does == true)
 
 const r_eq = 5

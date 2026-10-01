@@ -29,21 +29,21 @@
 //        point of having both. A concat result is non-negative BY CONSTRUCTION
 //        (every lane masks into its own window, so no lane's sign can escape),
 //        so `s9` is a container, not a reinterpretation: `ws` is `wu`, not the
-//        sign-extension of bit 8. Pyrope is value-based here — `const s:s9 = a`
-//        for an `a:u9` keeps `a`'s value, it does not re-read its top bit as a
+//        sign-extension of bit 8. Pyrope is value-based here — `const s:S9 = a`
+//        for an `a:U9` keeps `a`'s value, it does not re-read its top bit as a
 //        sign — and a design that read `zs` back as negative would refute.
 //
 //   nest `concat(concat(h,l), c)` == `concat(h,l,c)`. Nesting is legal because
 //        the inner result's width is its lane sum by construction (7 bits), so
 //        the inner temp needs no user-written declaration to be a lane.
 //
-//   kz   the width is the lane's DECLARED type, never its VALUE: `k:u4` holds
+//   kz   the width is the lane's DECLARED type, never its VALUE: `k:U4` holds
 //        1, and the lane is still FOUR bits (`4'b0001`), not the one bit the
 //        value needs. Sized by value it would be `{1'b1, c}` — a 3-bit answer
 //        in a 6-bit port, i.e. every bit above `c` shifted.
 //
 //   sx   the signedness CONTRAST, and the reason the bundle carries a signed
-//        field. `l:s3` used as a VALUE sign-extends (sx is `l` in 9 bits); the
+//        field. `l:S3` used as a VALUE sign-extends (sx is `l` in 9 bits); the
 //        same `l` used as a concat LANE contributes exactly its own 3-bit
 //        two's-complement window and never reaches past it (bits [4:2] of zu).
 //        An emitter that sign-extended a signed lane would keep sx right and
@@ -69,13 +69,13 @@
 // is in upass/prp_writer: bind each lane to a typed name and type the
 // destination. The two forward directions (`prp-equiv-`, `prp-statematch-`) are
 // green.
-pub comb top(p:(hi:u4, lo:s3), c:u2) -> (zu:u9, zs:s9, wu:u12, ws:s12, nest:u9, kz:u6, sx:s9) {
-  const h:u4 = p.hi
-  const l:s3 = p.lo
-  const k:u4 = 1     // value needs 1 bit; the LANE is the declared 4
+pub comb top(p:(hi:U4, lo:S3), c:U2) -> (zu:U9, zs:S9, wu:U12, ws:S12, nest:U9, kz:U6, sx:S9) {
+  const h:U4 = p.hi
+  const l:S3 = p.lo
+  const k:U4 = 1     // value needs 1 bit; the LANE is the declared 4
 
-  const packed_u:u9 = (c, l, h)#[..]   // 4+3+2 = 9
-  const packed_s:s9 = (c, l, h)#[..]   // same entries, signed destination
+  const packed_u:U9 = (c, l, h)#[..]   // 4+3+2 = 9
+  const packed_s:S9 = (c, l, h)#[..]   // same entries, signed destination
 
   zu   = packed_u
   zs   = packed_s

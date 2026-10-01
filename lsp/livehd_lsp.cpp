@@ -1415,17 +1415,17 @@ void handle_hover(const rapidjson::Document& req) {
     if (io_hit != nullptr) {
       render = tok.name + " : ";
       if (io_hit->kind == Io_kind::boolean) {
-        render += "bool";
+        render += io_hit->sig == Io_sig::clock ? "Clock" : io_hit->sig == Io_sig::reset ? "Reset" : "Bool";
       } else if (io_hit->kind == Io_kind::string) {
-        render += "string";
+        render += "String";
       } else if (io_hit->bits > 0) {
-        render += io_hit->is_signed ? 's' : 'u';
+        render += io_hit->is_signed ? 'S' : 'U';
         render += std::to_string(io_hit->bits);
         if (io_hit->has_range) {
           render += "(bw_min=" + std::to_string(io_hit->range_min) + ", bw_max=" + std::to_string(io_hit->range_max) + ")";
         }
       } else {
-        render += "int";
+        render += "Signed";
       }
       rsl = tok.line0;
       rsc = tok.scol0;

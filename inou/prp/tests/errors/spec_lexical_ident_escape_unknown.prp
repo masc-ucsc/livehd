@@ -1,0 +1,8 @@
+/*
+:name: spec_lexical_ident_escape_unknown
+:type: error
+:error: invalid escape ..q
+*/
+// qa.md appendix 8: "`\{`, `\}` and every other `\c` are errors. Same escapes
+// inside backticked identifiers."
+const `a\qb` = 1   // locate_error_here

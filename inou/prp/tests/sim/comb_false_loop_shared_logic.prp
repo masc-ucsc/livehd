@@ -29,21 +29,21 @@
 // carries exactly these two annotations for exactly this reason.
 // STATUS: LIVE. It pins one producer-owned slot for a value consumed by two
 // colors across a hierarchy boundary.
-comb sharer(a:u8, b:u8, c:u8) -> (o1:u16, o2:u16) {
+comb sharer(a:U8, b:U8, c:U8) -> (o1:U16, o2:U16) {
   // ONE shared cone read by BOTH outputs.
-  mut mid:u16 = (a + b) & 0xFF
+  mut mid:U16 = (a + b) & 0xFF
   o1 = mid + 1
   o2 = mid + c    // ... and this one also depends on the caller's back edge
 }
 
-pub mod shtop::[timecheck=false](a:u8, b:u8, bump:u8) -> (q1:u16@[], q2:u16@[]) {
-  wire back:u8 = nil
+pub mod shtop::[timecheck=false](a:U8, b:U8, bump:U8) -> (q1:U16@[], q2:U16@[]) {
+  wire back:U8 = nil
   mut (o1, o2) = sharer(a=a, b=b, c=back)
   // THE FALSE EDGE: only o2 depends on it. o1 and the shared `mid` do not.
   back = (o1 + bump) & 0xFF
 
-  reg r1:u16 = 0
-  reg r2:u16 = 0
+  reg r1:U16 = 0
+  reg r2:U16 = 0
   r1 = o1
   r2 = o2
   q1 = r1
@@ -56,17 +56,17 @@ test shtop.shared_cone_survives_the_partition_boundary {
   mut bad_ctl = 0
   mut bad_fed = 0
   tick 6 {
-    mut av:u8    = 10 + clock
-    mut bv:u8    = 20 + (clock * 2)
-    mut bumpv:u8 = 7
+    mut av:U8    = 10 + clock
+    mut bv:U8    = 20 + (clock * 2)
+    mut bumpv:U8 = 7
     acc.a    = av
     acc.b    = bv
     acc.bump = bumpv
     step
-    mut g_mid:u16  = (av + bv) & 0xFF
-    mut g_o1:u16   = g_mid + 1
-    mut g_back:u8  = (g_o1 + bumpv) & 0xFF
-    mut g_o2:u16   = g_mid + g_back
+    mut g_mid:U16  = (av + bv) & 0xFF
+    mut g_o1:U16   = g_mid + 1
+    mut g_back:U8  = (g_o1 + bumpv) & 0xFF
+    mut g_o2:U16   = g_mid + g_back
     seen = seen + 1
     if acc.q1 != g_o1 {
       bad_ctl = bad_ctl + 1

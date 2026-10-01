@@ -653,6 +653,11 @@ std::vector<std::shared_ptr<hhds::Graph>> build_memory_modules(const std::vector
       }
     }
     for (const auto& mem : memories) {
+      // An external loader can supply every bit, even with no functional writer.
+      // Preserve the native macro boundary; never specialize it to the image.
+      if (gu::memory_image_of(mem)) {
+        continue;
+      }
       // Assign the fallback before either realization can clone/re-number it.
       if (!gu::has_name(mem)) {
         mem.attr(hhds::attrs::name).set(gu::default_instance_name(mem));

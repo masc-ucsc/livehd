@@ -1,0 +1,101 @@
+/*
+:name: tuple_value_cond
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// SILENT miscompiles (found under lhdtrack suggestions 2.3 row 9): a runtime
+// TUPLE VALUE (untyped `mut`, a multi-output comb result, an if-expression)
+// that is conditionally reassigned WHOLE. The
+// shape is fixed, only the field values are runtime, so each field must mux.
+// Constprop instead forwarded the arm-local field refs past the `if`:
+//   * p: `mut d = (…)` then `if s { d = (…) }` -> the else side was an
+//     undriven X (`mux = 65'sb1???…`);
+//   * q: `mut e = dec(x)` then `if s { e = dec(x ^ 2) }` -> same;
+//   * r: `const f = if s { f1 } else { f0 }` -> always f0 (the `if` arms were
+//     emptied and `f.a` folded to the else value).
+// A DECLARED tuple (`mut d:(a:U4, b:Bool)`) is detupled and always worked; it
+// stays as the control `c`. Comptime fields are values too: a constant
+// initializer (`k`), a constant arm of an elif if-expression (`g`), an elif
+// chain of whole writes with the fields in another order (`e`), a field
+// write after a conditional whole write (`h`), and a comptime field write
+// before one (`m`) each once read an undriven X or failed with "unresolved
+// reference" / "tuple/field store ... has no hardware lowering".
+comb dec(x:U4) -> (a:U4, b:Bool) {
+  a = x ^ 1
+  b = x == 3
+}
+
+pub mod top(x:U4, s:Bool, t:Bool)
+  -> (pa:U4@[], pb:Bool@[], qa:U4@[], qb:Bool@[], ra:U4@[], rb:Bool@[], ca:U4@[], cb:Bool@[],
+      ka:U4@[], kb:Bool@[], ga:U4@[], gb:Bool@[], ea:U4@[], eb:Bool@[], ha:U4@[], hb:U4@[],
+      ma:U4@[], mb:U4@[]) {
+  mut d = (mut a:U4 = x ^ 1, mut b:Bool = x == 3)
+  if s {
+    d = (mut a:U4 = x ^ 3, mut b:Bool = x == 1)
+  }
+  pa = d.a
+  pb = d.b
+
+  mut e = dec(x)
+  if s {
+    e = dec(x ^ 2)
+  }
+  qa = e.a
+  qb = e.b
+
+  const f0 = dec(x)
+  const f1 = dec(x ^ 2)
+  const f = if s { f1 } else { f0 }
+  ra = f.a
+  rb = f.b
+
+  mut c:(a:U4, b:Bool) = nil
+  c.a = x ^ 1
+  c.b = x == 3
+  if s {
+    c = (a = x ^ 3, b = x == 1)
+  }
+  ca = c.a
+  cb = c.b
+
+  mut k = (mut a:U4 = 5, mut b:Bool = true)
+  if s {
+    k = (mut a:U4 = x, mut b:Bool = x == 2)
+  }
+  ka = k.a
+  kb = k.b
+
+  const g1 = (mut a:U4 = 1, mut b:Bool = false)
+  const g = if s { g1 } elif t { f1 } else { f0 }
+  ga = g.a
+  gb = g.b
+
+  mut e2 = (mut a:U4 = x, mut b:Bool = s)
+  if s {
+    e2 = (mut a:U4 = 9, mut b:Bool = t)
+  } elif t {
+    e2 = (mut b:Bool = false, mut a:U4 = x ^ 7)
+  }
+  ea = e2.a
+  eb = e2.b
+
+  mut h = (mut a:U4 = x, mut b:U4 = 2)
+  if s {
+    h = (mut a:U4 = 7, mut b:U4 = x)
+  }
+  if t {
+    h.a = 9
+  }
+  ha = h.a
+  hb = h.b
+
+  mut m = (mut a:U4 = 5, mut b:U4 = 6)
+  m.a = 7
+  if s {
+    m = (mut a:U4 = x, mut b:U4 = x ^ 5)
+  }
+  ma = m.a
+  mb = m.b
+}

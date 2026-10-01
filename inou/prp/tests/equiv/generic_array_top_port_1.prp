@@ -1,0 +1,12 @@
+/*
+:name: generic_array_top_port_1
+*/
+// Generic element AND count, `v:[N]Unsigned(bits=N)` with N=4 by default. It
+// failed with top-untyped-port "input `v` of top `...` has no declared type --
+// a `mod` boundary needs an explicit width": specialize_top_defaults accepted
+// an array port only when its io entry already had array_size > 0, and neither
+// the `[N]` dim nor the `bits=N` element bound was folded under the defaults.
+pub mod generic_array_top_port<N=4>(v:[N]Unsigned(bits=N)) -> (lo:Unsigned(bits=N)@[0], hi:Unsigned(bits=N)@[0]) {
+  lo = v[0]
+  hi = v[N-1]
+}

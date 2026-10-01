@@ -41,31 +41,31 @@
 // (bus[7:0] = x+1, fb = x+4, bus[15:8] = (x+4)^0x5A.)
 
 // Two independent cones landing in two SLICES of ONE output port.
-mod pack::[timecheck=false](a:u8, b:u8) -> (bus:u16@[]) {
-  wire w:u16 = nil
+mod pack::[timecheck=false](a:U8, b:U8) -> (bus:U16@[]) {
+  wire w:U16 = nil
   w#[0..=7]  = (a + 1) & 0xFF     // low slice: cone {a}
   w#[8..=15] = b ^ 0x5A           // high slice: cone {b}
   bus = w
 }
 
-pub mod slicering::[timecheck=false](x:u8, d:u8) -> (o:u16@[], ctl:u16@[],
-                                                     tick_ok:u16@[]) {
+pub mod slicering::[timecheck=false](x:U8, d:U8) -> (o:U16@[], ctl:U16@[],
+                                                     tick_ok:U16@[]) {
   // THE SLICE RING: the caller feeds the LOW slice back into the input the
   // HIGH slice needs. No slice depends on itself.
-  wire fb:u8 = nil
+  wire fb:U8 = nil
   mut bus = pack(a=x, b=fb)
   fb = (bus#[0..=7] + 3) & 0xFF
   o  = bus
 
   // CONTROL: the identical ring with NO instance -- a local `wire` whose two
   // slices are written from each other. This shape already works.
-  wire lw:u16 = nil
+  wire lw:U16 = nil
   lw#[0..=7]  = (x + 1) & 0xFF
   lw#[8..=15] = ((lw#[0..=7] + 3) & 0xFF) ^ 0x5A
   ctl = lw
 
   // CONTROL: an ordinary flop, so a failure is never a dead testbench.
-  reg cr:u8 = 0
+  reg cr:U8 = 0
   cr      = d
   tick_ok = cr
 }
@@ -78,17 +78,17 @@ test slicering.slice_cones_split_across_an_instance {
   mut bad_tick = 0
   mut bad_agree = 0
   tick 6 {
-    mut xv:u8 = 10 + clock
-    mut dv:u8 = 40 + clock
+    mut xv:U8 = 10 + clock
+    mut dv:U8 = 40 + clock
     acc.x = xv
     acc.d = dv
     step
     // Golden, in the only order that exists: low slice, then the caller's back
     // edge, then the high slice.
-    mut g_lo:u16 = (xv + 1) & 0xFF
-    mut g_fb:u16 = (g_lo + 3) & 0xFF
-    mut g_hi:u16 = g_fb ^ 0x5A
-    mut g_bus:u16 = (g_hi * 256) + g_lo
+    mut g_lo:U16 = (xv + 1) & 0xFF
+    mut g_fb:U16 = (g_lo + 3) & 0xFF
+    mut g_hi:U16 = g_fb ^ 0x5A
+    mut g_bus:U16 = (g_hi * 256) + g_lo
 
     seen = seen + 1
     if acc.tick_ok != dv {

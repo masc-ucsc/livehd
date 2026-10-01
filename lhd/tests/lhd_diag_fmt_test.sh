@@ -19,7 +19,7 @@ fail() {
 }
 
 cat >"$W/bad.prp" <<'EOF'
-comb f(a:u8) -> (y:u8) {
+comb f(a:U8) -> (y:U8) {
   y = a + undefined_var
 }
 EOF
@@ -60,5 +60,22 @@ grep -q '"schema_version":1' "$W/r5.json" || fail "--result-json must stay JSON:
 # 6. A malformed value is a usage error (parse-time, envelope on stdout).
 "$LHD" compile "$PRP" --diag-fmt bogus -q 2>/dev/null >"$W/r6.json"
 grep -q '"class":"usage"' "$W/r6.json" || fail "--diag-fmt bogus must be a usage error: $(cat "$W/r6.json")"
+
+# 7. A fatal comptime-loop diagnostic keeps its category in the result's error
+#    class: a loop LiveHD cannot lower yet is `unsupported`, never `internal`
+#    (the upass loop failure aborts the walk with a throw, and an unmapped
+#    category used to fold to `internal`).
+cat >"$W/loop.prp" <<'EOF'
+mod loop_break_mem(a:U8, lim:U8, we:Bool) -> (z:U8@[0]) {
+  reg m:[4]U8 = 0
+  for i in 0..<4 {
+    if a == i { break }
+    if we { m[i] = a }
+  }
+  z = m[lim#[0..<2]]
+}
+EOF
+"$LHD" compile "$W/loop.prp" --workdir "$W/w7" -q 2>/dev/null >"$W/r7.json" && fail "loop.prp must fail"
+grep -q '"class":"unsupported"' "$W/r7.json" || fail "a comptime-loop failure must be class unsupported: $(cat "$W/r7.json")"
 
 echo "PASS: --diag-fmt auto|json|pretty"

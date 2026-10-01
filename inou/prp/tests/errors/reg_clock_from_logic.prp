@@ -2,22 +2,17 @@
 :name: reg_clock_from_logic
 :type: error
 :tolg: 1
-:error: not a clock operation
+:error: `clk` is a `Clock`, and a Clock is not data \(operator `\^`\)
 */
-//
-// Clock-whitelist REFUSAL tracker. Moved out of tests/equiv 2026-08-08: there
-// is no equivalence to check, the module does not compile — so it belongs in
-// the errors tier, where the refusal itself is the assertion.
-// FIXME tracker -- a flop clocked by a data-merging op.
-// `wire gclk = clk ^ inv; always @(posedge gclk)` is the standard programmable-
-// polarity clock idiom (Xilinx RAM128X1D uses exactly it; an AES core hits the same
-// guard via `or`). v2prp faithfully emits `reg q:[clock_pin=ref gclk]` with
-// `gclk = clk ^ inv`, but tolg's clock whitelist admits only gating (`clk and en`)
-// and inversion (`not clk`), so reloading that Pyrope raises an INTERNAL error.
-// `clk ^ inv` is exactly "clk, optionally inverted" -- the whitelist should take it.
-pub mod reg_clock_from_logic::[timecheck=false](clk:u1, inv:u1, d:u1) -> (q:u1@[]) {
-  reg q:u1:[clock_pin=ref gclk]
-  wire gclk:u1
-  gclk = clk ^ inv
+// A flop clocked by a data-merging op. `wire gclk = clk ^ inv; always
+// @(posedge gclk)` is the programmable-polarity clock idiom (Xilinx RAM128X1D
+// uses exactly it). Ruling 81 (qa Q26): derived, inverted and muxed clocks are
+// not supported -- the only derived clock is the gate `Clock(clock_pin=clk,
+// enable=en)` -- so in Pyrope, where `clk` is a `Clock`, the XOR is a
+// clock-as-data error.
+pub mod reg_clock_from_logic::[timecheck=false](clk:Clock, inv:Bool, d:U1) -> (q:U1@[]) {
+  reg q:U1:[clock_pin=gclk] = 0
+  wire gclk:Bool = nil
+  gclk = clk ^ inv   // locate_error_here
   q = d
 }

@@ -14,10 +14,10 @@
 //
 // A method is still fine: `x.concat(…)` has a receiver and is never
 // intercepted. Only this top-level source-named shape is an error.
-comb concat(a:u3, b:u4) -> (res:u7) {
+comb concat(a:U3, b:U4) -> (res:U7) {
   res = a
 }
 
-comb top(i:u3, j:u4) -> (o:u7) {
+comb top(i:U3, j:U4) -> (o:U7) {
   o = concat(i, j)
 }

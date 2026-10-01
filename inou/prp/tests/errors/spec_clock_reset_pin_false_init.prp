@@ -1,0 +1,16 @@
+/*
+:name: spec_clock_reset_pin_false_init
+:type: error
+:tolg: 1
+:error: (nil|reset)
+*/
+// SPEC (clock lane): `reset_pin=false` means no reset, so the register must be
+// initialized with `nil`.
+//   docs 04b register attributes: "`reset_pin=false` means no reset (the
+//     register must then be initialized with `nil`)"
+//   docs 04b: "reg counter5:U32:[reset_pin=false]=nil // OK, no reset"
+pub mod spec_clock_reset_pin_false_init(clk:Clock, rst:Reset, d:U8) -> (q:U8@[0]) {
+  reg r:U8:[reset_pin=false] = 5   // locate_error_here
+  r = d
+  q = r
+}

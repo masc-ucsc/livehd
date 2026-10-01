@@ -1,0 +1,42 @@
+/*
+:name: wrap_bitrange_dest
+:type: equiv
+:verilog_top: wrap_bitrange_dest
+:pyrope_top: wrap_bitrange_dest
+*/
+
+// A `wrap`/`sat` write into a BIT-RANGE destination. The policy narrows the
+// value to the selected lane, so all it needs is the lane's WIDTH; the lane's
+// position may move. Every form below was rejected with "cannot apply `wrap`
+// to a bit-range whose width is not known at compile time", because only a
+// literal `lo..=hi` folded to a constant mask:
+//   z -- a literal exclusive range `acc#[4..<8]`
+//   w -- a moving window `b#[(j*4)..+4]` in a loop: the start is the loop
+//        index, the width is the literal count 4
+//   s -- `sat` into a literal count range `c#[8..+4]`
+//   d -- `wrap` into ONE bit at a runtime position `e#[x]`: the lane is one
+//        bit wide wherever it lands
+//   t -- `sat` into one runtime-positioned bit `f#[x]` (any nonzero -> 1)
+pub mod wrap_bitrange_dest(v:U16, r:U4, x:U4) -> (z:U16@[0], w:U16@[0], s:U16@[0], d:U16@[0], t:U16@[0]) {
+  mut acc:U16 = v
+  wrap acc#[4..<8] = r + 1
+  z = acc
+
+  mut b:U16 = v
+  for j in 0..<4 {
+    wrap b#[(j*4)..+4] = x + j
+  }
+  w = b
+
+  mut c:U16 = v
+  sat c#[8..+4] = r + x
+  s = c
+
+  mut e:U16 = v
+  wrap e#[x] = r + 1
+  d = e
+
+  mut f:U16 = v
+  sat f#[x] = r
+  t = f
+}

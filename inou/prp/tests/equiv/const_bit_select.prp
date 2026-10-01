@@ -25,8 +25,8 @@
 // FIXED (2026-07-01) in inou/cgen/cgen_verilog.cpp: the Get_mask handler now
 // folds a const `a` operand via `Dlop::get_mask_op(mask)` and emits the resulting
 // literal (`5'shf`) instead of `(const)[range]`. Guards prp-equiv-const_bit_select.
-pub comb top(sel:u1, b:s9) -> (o:u4) {
-  mut cur:s9 = 0sb1????????
+pub comb top(sel:U1, b:S9) -> (o:U4) {
+  mut cur:S9 = 0sb1????????
   if sel!=0 {
     o = cur#[12..=15]
   } else {

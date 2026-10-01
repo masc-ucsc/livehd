@@ -1,0 +1,25 @@
+/*
+:name: bool_port_bind_literal
+:type: error
+:tolg: 1
+:error: cannot bind integer value to input .go. of .*leaf.* \(it is boolean\)
+:help: (Bool\(|\btrue\b)
+*/
+
+// User ruling 2026-09-27 (2): an integer LITERAL is an integer, so `1` bound
+// to a `Bool` input is the same error as a `U1` signal (bool_port_bind_u1.prp):
+// the caller writes `true`. This is the lhdtrack harness shape
+// (`dut(go=1, ...)`), and a fix that exempts constants from the kind check
+// would pass every other bool_port_bind_* fixture. Today it compiles
+// silently.
+//
+// Legal spelling: `leaf(go=true, n=n)`.
+
+mod leaf(go:Bool, n:U4) -> (q:U4@[0]) {
+  q = if go { n } else { 0 }
+}
+
+pub mod bool_port_bind_literal(n:U4) -> (q:U4@[0]) {
+  const c = leaf(go=1, n=n)   // locate_error_here
+  q = c.q
+}

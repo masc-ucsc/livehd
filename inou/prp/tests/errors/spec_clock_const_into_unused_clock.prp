@@ -1,0 +1,19 @@
+/*
+:name: spec_clock_const_into_unused_clock
+:type: error
+:tolg: 1
+:error: `Clock` input `c` of `leaf` is bound to a constant
+*/
+// SPEC (clock lane): binding a constant to a `Clock` input is ALWAYS an error,
+// even when no register of the callee reads that clock.
+//   qa.md Appendix 6: "A Clock can never be bound to a constant"
+//   docs 04b: "Binding a constant to a `Clock` is always a compile error: ...
+//     a call that binds a constant to a `Clock` input, whether or not a
+//     register reads that clock."
+mod leaf(c:Clock, a:U8) -> (o:U8@[0]) {
+  o = a
+}
+pub mod spec_clock_const_into_unused_clock(a:U8) -> (o:U8@[0]) {
+  const x = leaf(c=true, a=a)
+  o = x.o
+}

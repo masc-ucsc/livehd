@@ -4,7 +4,7 @@
 :pyrope_top: foo
 :verilog_top: signed_divrem_mixed.foo
 */
-comb foo(a:s5, b:u3, c:u5, d:s3) -> (q:s6, r:s5, qr:s7, rr:s6) {
+comb foo(a:S5, b:U3, c:U5, d:S3) -> (q:S6, r:S5, qr:S7, rr:S6) {
   q = a / b
   r = a % b
   qr = c / d

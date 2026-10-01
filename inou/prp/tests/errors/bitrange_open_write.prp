@@ -9,8 +9,8 @@
 // span from (the destination's declared width is not tracked per name in tolg),
 // so it is rejected rather than silently dropping/extending bits. The READ form
 // `a#[k..]` IS supported; give the write an explicit upper bound instead.
-comb f(b:u8) -> (z:u8) {
-  mut r:u8 = 0
+comb f(b:U8) -> (z:U8) {
+  mut r:U8 = 0
   r#[3..] = b   // locate_error_here
   z = r
 }

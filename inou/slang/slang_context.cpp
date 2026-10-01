@@ -31,6 +31,7 @@ void Slang_context::process_root(const slang::ast::RootSymbol& root) {
   for (auto inst : root.topInstances) {
     lower_module(*inst);
   }
+  hoist_plusargs(root);
   emit_package_units();  // one namespace .prp per referenced package (pub comptime consts)
 }
 
@@ -114,7 +115,7 @@ void Slang_context::emit_package_units() {
       if (t.isIntegral()) {
         auto ti = tinfo(t);
         if (!(ti.bits == 32 && ti.is_signed)) {  // skip the plain-`int` default
-          pi.type = absl::StrCat(ti.is_signed ? "s" : "u", ti.bits);
+          pi.type = absl::StrCat(ti.is_signed ? "S" : "U", ti.bits);
         }
       }
     }

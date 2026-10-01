@@ -17,8 +17,8 @@
 //
 //   _1  the same body over 1..<5 — a REFUTATION, under both semdiff settings
 //   _2  the same source against itself — the M6 recurrence certificate
-pub mod top(x:u8) -> (z:u16@[0]) {
-  mut acc:u16 = 0
+pub mod top(x:U8) -> (z:U16@[0]) {
+  mut acc:U16 = 0
   for i in 0..<4 {
     acc = acc + x + i
   }

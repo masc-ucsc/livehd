@@ -1,0 +1,11 @@
+/*
+:name: typeword_renamed_u8_type
+:type: error
+:error: `u8` was renamed `U8`
+*/
+// docs 07-typesystem "Built-in types": the built-in type names are capitalized
+// and the old lowercase spellings are banned words, not aliases. A type
+// position spelled `u8` names the new spelling.
+pub comb typeword_renamed_u8_type(a:u8) -> (o:U8) {  // locate_error_here
+  o = a
+}

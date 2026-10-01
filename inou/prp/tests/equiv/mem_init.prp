@@ -8,10 +8,10 @@
 // 2f-mem_multidim — per-entry reset contents: a reg array with a tuple
 // initializer re-loads (1,2,3,4) while `reset` is held, every entry in ONE
 // cycle exactly like a scalar reg (the memory's whole-array reset pin); reads
-// during reset return the committed contents. The declared `reset:bool` is
+// during reset return the committed contents. The declared `reset:Bool` is
 // bound here; a module that declares none has one minted for it (see
 // mem_init_tuple.prp).
-pub mod mem_init(reset:bool, raddr:u2) -> (q:u8@[0]) {
-  reg mem:[4]u8 = (1, 2, 3, 4)
+pub mod mem_init(reset:Reset, raddr:U2) -> (q:U8@[0]) {
+  reg mem:[4]U8 = (1, 2, 3, 4)
   q = mem[raddr]
 }

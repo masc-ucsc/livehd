@@ -14,8 +14,8 @@
 // The golden intentionally keeps the `always @(*)` + BLOCKING `=` spelling —
 // that covers yosys/slang latch INFERENCE from the non-always_latch form
 // (latch_hold_basic covers the LRM `always_latch` + `<=` spelling).
-pub mod latch8(en:bool, d:u8) -> (q:u8@[0]) {
-  reg l:u8:[latch=true]
+pub mod latch8(en:Bool, d:U8) -> (q:U8@[0]) {
+  reg l:U8:[latch=true]
   q = l
   if en {
     l = d

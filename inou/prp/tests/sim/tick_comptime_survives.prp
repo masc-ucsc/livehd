@@ -36,7 +36,7 @@
 // is what made a testbench `assert` fold against a stale initializer (lhdsuite
 // fixme issue 2).
 
-mod passthru(d:u8) -> (q:u8@[0]) { q = d }
+mod passthru(d:U8) -> (q:U8@[0]) { q = d }
 
 // A1 — a variable the tick never writes is not poisoned by the tick existing.
 //

@@ -1,0 +1,132 @@
+/*
+:name: fcall_arg_pun
+:type: comptime
+:verifier_pass: 19
+:verifier_fail: 0
+*/
+
+// 06-functions.md "Argument naming", exception 2: a positional actual that is
+// a bare variable whose name matches a parameter binds to THAT parameter, in
+// any order. The match is on the SOURCE name, so it holds when the variable is
+// the calling lambda's OWN parameter (renamed internally when the body is
+// inlined), in a recursive call, between lambdas that share parameter names,
+// and for a reassigned `mut` (an SSA version internally). It also holds for a
+// var-arg callee (the var-arg itself is named: `rest = (100)`), a tuple-typed param, and an explicit constructor call, the
+// paths that otherwise bind in declaration order. Every callee is
+// order-sensitive (`-`, `*` + `+`) so a positional (declaration-order) bind
+// would fold to a different value. The fixture's 'after format' run guards
+// prpfmt's `f(a=a)` -> `f(a)` shorthand.
+
+// ---- direct: file-scope variables, swapped order ----
+// (file-scope names are not reused inside any lambda below: a comptime
+// file-scope binding is visible in every lambda body, so a local of the same
+// name would be shadowing)
+comb diff(x, y) -> (r) { r = x - y }
+const x = 7
+const y = 2
+cassert(diff(y, x) == 5)
+
+comb sub(a, b) -> (r) { r = a - b }
+
+// ---- a lambda body passes its own params (swapped) to another lambda ----
+comb sub_fwd(a, b) -> (r) { r = sub(b, a) }
+cassert(sub_fwd(a = 9, b = 4) == 5)
+
+// ---- two levels of forwarding, params declared in the other order ----
+comb sub_fwd2(b, a) -> (r) { r = sub_fwd(b, a) }
+cassert(sub_fwd2(a = 10, b = 1) == 9)
+
+// ---- one punned actual mixed with a named one ----
+comb mac(v, k, c) -> (r) { r = v * k + c }
+comb mac3(c, v) -> (r) { r = mac(k = 3, c, v) }
+cassert(mac3(v = 5, c = 1) == 16)
+
+// ---- nested lambda definition with the same param names ----
+comb outer(a, b) -> (r) {
+  comb inner(a, b) -> (r) { r = a - b }
+  r = inner(b, a)
+}
+cassert(outer(a = 9, b = 4) == 5)
+
+// ---- recursion: unchanged params forward by pun, the changing one is named ----
+comb tree_sum(v, lo, hi) -> (r) {
+  if lo == hi {
+    r = v[lo]
+  } else {
+    const mid = (lo + hi) / 2
+    r = tree_sum(hi = mid, lo, v) + tree_sum(hi, lo = mid + 1, v)
+  }
+}
+cassert(tree_sum(v = (1, 2, 3, 4, 5), lo = 0, hi = 4) == 15)
+cassert(tree_sum(v = (10, 20, 30), lo = 1, hi = 2) == 50)
+
+// ---- a reassigned mut puns by its source name (file scope and in a body) ----
+comb gap(p, q) -> (r) { r = q - p }
+mut p = 1
+p = p + 2
+const q = 10
+cassert(gap(q, p) == 7)
+
+comb dist(lo, hi) -> (r) { r = hi - lo }
+comb span(n) -> (r) {
+  mut lo = 1
+  lo = lo + 2
+  const hi = n
+  r = dist(hi, lo)
+}
+cassert(span(n = 10) == 7)
+
+// ---- generic arguments follow the same rule from an inlined body ----
+comb pick<A, B>(v) -> (r) { r = v * A + B }
+comb pick_local(v) -> (r) {
+  const A = 10
+  const B = 3
+  r = pick<B, A>(v)
+}
+cassert(pick_local(v = 2) == 23)
+
+// ---- a lambda-local variable (not a param) forwarded by pun ----
+comb sub_local(n) -> (r) {
+  const b = n
+  const a = 20
+  r = sub(b, a)
+}
+cassert(sub_local(n = 6) == 14)
+
+// ---- a var-arg callee: the pun binds m, n; the var-arg is named ----
+comb vmix(m, n, ...rest) -> (r) { r = m * 10 + n + rest[0] }
+comb vmix_fwd(n, m) -> (r) { r = vmix(n, m, rest = (100)) }
+cassert(vmix_fwd(m = 3, n = 4) == 134)
+comb vmix_named(n, m) -> (r) { r = vmix(n = n, m = m, rest = (100)) } // prpfmt: vmix(n, m, rest = (100))
+cassert(vmix_named(m = 3, n = 4) == 134)
+
+// ---- two same-shape tuple params: a tuple variable binds the one it names ----
+type Pt = (col:S8, row:S8)
+comb dx(src:Pt, dst:Pt) -> (r:S10) { r = dst.col - src.col }
+comb dx_fwd(src:Pt, dst:Pt) -> (r:S10) { r = dx(dst, src) }
+const dst:Pt = (col = 5, row = 0)
+const src:Pt = (col = 1, row = 0)
+cassert(dx(dst, src) == 4)
+cassert(dx(src, dst) == 4)
+cassert(dx_fwd(dst = dst, src = src) == 4)
+
+// ---- an explicit constructor call binds init's params by name ----
+comb init_rg(ref self, rd:U8, gn:U8) {
+  self.r = rd
+  self.g = gn
+}
+type Rg = (mut r:U8 = 0, mut g:U8 = 0, const init = init_rg)
+comb rg_sum(gn, rd) -> (o) {
+  const t = Rg(gn, rd)
+  o = t.r * 100 + t.g
+}
+cassert(rg_sum(rd = 5, gn = 9) == 509)
+const gn = 9
+const rd = 5
+mut rg = Rg(gn, rd)
+cassert(rg.r == 5 and rg.g == 9)
+
+// ---- the exact name wins: a param spelled like an SSA version ----
+comb wsub(val__w1, k) -> (r) { r = val__w1 - k }
+comb wsub_fwd(k, val__w1) -> (r) { r = wsub(k, val__w1) }
+cassert(wsub_fwd(k = 2, val__w1 = 9) == 7)

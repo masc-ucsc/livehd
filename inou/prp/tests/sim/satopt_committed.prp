@@ -7,17 +7,17 @@
 // (todo/livehd/2s-satopt A): a select proven never true is tied off and a mux
 // arm proven constant when selected is rebuilt. The simulated values must not
 // change.
-pub comb never_true(x:u8, a:u8, b:u8) -> (out:u8) {
+pub comb never_true(x:U8, a:U8, b:U8) -> (out:U8) {
   out = if x == x + 1 { a } else { b }
 }
 
-pub comb arm_zero(x:u8, a:u8) -> (out:u8) {
+pub comb arm_zero(x:U8, a:U8) -> (out:U8) {
   out = if x == 0 { x } else { a }
 }
 
 test never_true.keeps_the_else_arm {
   mut dut = never_true
-  mut x:u8 = 0
+  mut x:U8 = 0
   tick 256 {
     dut.x = x
     dut.a = 5
@@ -30,7 +30,7 @@ test never_true.keeps_the_else_arm {
 
 test arm_zero.reads_the_same_values {
   mut dut = arm_zero
-  mut x:u8 = 0
+  mut x:U8 = 0
   tick 4 {
     dut.x = x
     dut.a = 5

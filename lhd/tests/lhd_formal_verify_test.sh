@@ -7,10 +7,10 @@
 #     the bound, per-assert, with a per-cycle depth in the table;
 #   * a reachable violation is REFUTED at its cycle with the per-cycle input
 #     trace, carries the user message, and fails the run (exit != 0);
-#   * assume discipline: child/local `assume` is a prove-then-use obligation; a
-#     selected-top IO assume has no parent that could discharge it, so it warns
-#     and stays active with assume_nocheck semantics. `assume_nocheck` is the
-#     explicit free UNCHECKED environment constraint
+#   * assume discipline: every plain `assume` is a prove-then-use obligation,
+#     a selected-top IO one included (it has no parent that could discharge
+#     it, so over free inputs it REFUTES). `assume_nocheck` is the only
+#     free UNCHECKED environment constraint
 #     (disclosed; the fcore spelling assume_nocheck_formal also warns);
 #     assume_nocheck_synth is invisible to verify;
 #   * per-obligation timeout isolation: a hard obligation goes UNKNOWN on its
@@ -49,11 +49,11 @@ verify() {
 #    driving input trace and the user message.
 # ---------------------------------------------------------------------------
 cat >"$W/cnt.prp" <<'EOF'
-mod cnt(enable:bool) -> (value:u8@[0]) {
-  reg count:u8 = 0
-  reg par:bool = false
+mod cnt(enable:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
+  reg par:Bool = false
   value = count
-  assert(u1(par) == count#[0])
+  assert(U1(par) == count#[0])
   assert(count != 5, "counter hit 5")
   if enable {
     wrap count += 1
@@ -82,8 +82,8 @@ grep -q 'REFUTED at cycle 7' "$OUT" || fail "formal.bound=10 must reach the cycl
 #    now also refutes honestly).
 # ---------------------------------------------------------------------------
 cat >"$W/cnt_assume.prp" <<'EOF'
-mod cnt(enable:bool) -> (value:u8@[0]) {
-  reg count:u8 = 0
+mod cnt(enable:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
   value = count
   assume(count < 5)
   assert(count != 5, "counter hit 5")
@@ -111,8 +111,8 @@ grep -q 'cnt_assume.prp:5.*PROVEN' "$OUT" || fail "the assume must still constra
 # 2a. A TRUE state invariant assume PROVES (here: inductively) and is disclosed
 #     as used; the run stays green.
 cat >"$W/wrap_assume.prp" <<'EOF'
-mod wrapcnt(enable:bool) -> (value:u8@[0]) {
-  reg count:u8 = 0
+mod wrapcnt(enable:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
   value = count
   assume(count <= 5)
   assert(count != 7, "never 7")
@@ -120,7 +120,7 @@ mod wrapcnt(enable:bool) -> (value:u8@[0]) {
     if count == 5 {
       count = 0
     } else {
-      count += 1
+      wrap count += 1
     }
   }
 }
@@ -131,17 +131,19 @@ grep -q 'assume at.*wrap_assume.prp:4.*PROVEN' "$OUT" || fail "the true state as
 grep -q 'checked assume(s): 1 proven (used)' "$OUT" || fail "the headline must disclose the proven assume: $(cat "$OUT")"
 
 # ---------------------------------------------------------------------------
-# 2b. A selected-top INPUT assume has no parent/call site that can prove it.
-#     It warns, remains active, and is reported with assume_nocheck semantics.
-#     The explicit sanctioned form — a formal-block assume_nocheck — is a free env
-#     constraint in force at EVERY cycle, reset prologue included (SVA
-#     semantics): the block's assert_always is checked during the prologue too,
-#     so without prologue coverage it would run unconstrained and false-refute
-#     at cycle 0.
+# 2b. A selected-top INPUT assume has no parent/call site that can prove it, and
+#     a plain assume is ALWAYS checked (docs 05-assert): over a free input it
+#     REFUTES at the compile gate (assume-refuted) and in verify, and the refute
+#     hints at assume_nocheck. It never becomes a hypothesis, so the companion
+#     assert_always refutes too. The sanctioned environment constraint -- a
+#     design-body or formal-block assume_nocheck -- is a free constraint in
+#     force at EVERY cycle, reset prologue included (SVA semantics): the
+#     assert_always is checked during the prologue too, so without prologue
+#     coverage it would run unconstrained and false-refute at cycle 0.
 # ---------------------------------------------------------------------------
 cat >"$W/always_env.prp" <<'EOF'
-mod always_env(a:u8, en:bool) -> (o:u8@[0]) {
-  reg acc:u8 = 0
+mod always_env(a:U8, en:Bool) -> (o:U8@[0]) {
+  reg acc:U8 = 0
   o = acc
   assume(a < 4)
   assert_always(a != 200, "env bound")
@@ -150,19 +152,26 @@ mod always_env(a:u8, en:bool) -> (o:u8@[0]) {
   }
 }
 EOF
-# The compile gate warns and retains the top IO assumption; verify uses it to
-# prove the companion assert_always.
 verify always_env always_env_gate --top always_env --set formal.bound=4
-[ "$RC" -eq 0 ] || fail "a top-level IO assume must remain active and prove the constrained assert (got rc=$RC): $(cat "$OUT")"
-grep -q 'formal-top-assume' "$OUT" || fail "the compile gate must warn that a top IO assume cannot be checked: $(cat "$OUT")"
-grep -q 'in force (UNCHECKED top-level IO assume cannot be checked; treated as assume_nocheck' "$OUT" \
-  || fail "verify must disclose the top IO assumption as active and unchecked: $(cat "$OUT")"
-grep -q 'assert_always.*PROVEN' "$OUT" || fail "the top IO assume must constrain the companion assert: $(cat "$OUT")"
+[ "$RC" -ne 0 ] || fail "a plain top-level IO assume is checked and must refute (got rc=0): $(cat "$OUT")"
+grep -q 'formal-top-assume' "$OUT" && fail "a top IO assume is no longer an unchecked constraint: $(cat "$OUT")"
+grep -q 'assume-refuted' "$OUT" || fail "the compile gate must refute the checked top IO assume: $(cat "$OUT")"
+grep -q 'assume at.*always_env.prp:4.*REFUTED at cycle' "$OUT" \
+  || fail "verify must report the checked top IO assume REFUTED: $(cat "$OUT")"
+grep -q 'spell it assume_nocheck' "$OUT" || fail "the refuted top IO assume must hint at assume_nocheck: $(cat "$OUT")"
+grep -q "assert_always.*'env bound'.*REFUTED" "$OUT" \
+  || fail "a refuted assume must not constrain the companion assert: $(cat "$OUT")"
+# The design-body environment contract: assume_nocheck constrains without a check.
+sed 's/  assume(a < 4)/  assume_nocheck(a < 4)/' "$W/always_env.prp" >"$W/always_env_nock.prp"
+verify always_env_nock always_env_nock --top always_env --set formal.bound=4
+[ "$RC" -eq 0 ] || fail "a design-body assume_nocheck must constrain the companion assert (got rc=$RC): $(cat "$OUT")"
+grep -q 'in force (UNCHECKED assume_nocheck' "$OUT" || fail "the nocheck constraint must be disclosed as UNCHECKED: $(cat "$OUT")"
+grep -q 'assert_always.*PROVEN' "$OUT" || fail "the design-body assume_nocheck must prove the assert_always: $(cat "$OUT")"
 # The sanctioned spelling: a formal-block assume_nocheck. In force at every
 # cycle, prologue included, so the block's assert_always proves.
 cat >"$W/always_env2.prp" <<'EOF'
-mod always_env2(a:u8, en:bool) -> (o:u8@[0]) {
-  reg acc:u8 = 0
+mod always_env2(a:U8, en:Bool) -> (o:U8@[0]) {
+  reg acc:U8 = 0
   o = acc
   if en {
     wrap acc += 1
@@ -201,8 +210,8 @@ grep -q 'under 1 UNCHECKED assume(s)' "$OUT" || fail "the headline must disclose
 #    UNKNOWN fails while easy obligations still prove independently.
 # ---------------------------------------------------------------------------
 cat >"$W/hard.prp" <<'EOF'
-mod hard(a:u32, b:u32, c:u32, en:bool) -> (o:u8@[0]) {
-  reg acc:u8 = 0
+mod hard(a:U32, b:U32, c:U32, en:Bool) -> (o:U8@[0]) {
+  reg acc:U8 = 0
   o = acc
   assert(a + b == b + a, "easy")
   assert((a * b) * ((a * c) + 1) == (a * a * b * c) + (a * b), "distrib")
@@ -231,7 +240,7 @@ grep -q "'distrib'.*UNKNOWN (solver gave up at cycle" "$OUT" || fail "the hard o
 # 4. No obligations: UNKNOWN with an explicit note — never a vacuous PASS.
 # ---------------------------------------------------------------------------
 cat >"$W/noprops.prp" <<'EOF'
-comb pass_through(a:u8) -> (x:u8) {
+comb pass_through(a:U8) -> (x:U8) {
   x = a
 }
 EOF
@@ -248,7 +257,7 @@ grep -qi 'unknown' "$OUT" || fail "removed option did not produce a usage diagno
 # ---------------------------------------------------------------------------
 # 6. V2 formal blocks: a sidecar .prp with `formal name.dotted { ... }` blocks
 #    binding the design through a file-scope import alias. The parity block
-#    (with a u1() cast and a #[0] bit-select through the rewrite) proves; the
+#    (with a U1() cast and a #[0] bit-select through the rewrite) proves; the
 #    speculative block refutes at its exact cycle; rows carry the ORIGINAL
 #    sidecar file:line plus the block name; --formal <glob> selects blocks;
 #    an unresolvable signal path is a clean usage error.
@@ -258,7 +267,7 @@ const top = import("cnt.cnt")
 
 formal cnt.parity {
   mut acc = top
-  assert(u1(acc.par) == acc.count#[0], "parity tracks bit0")
+  assert(U1(acc.par) == acc.count#[0], "parity tracks bit0")
 }
 
 formal cnt.speculative {
@@ -278,6 +287,21 @@ OUT="$W/blocks_filter.out"
 grep -q '\[cnt.parity\]' "$OUT" || fail "--formal must keep the selected block: $(cat "$OUT")"
 grep -q '\[cnt.speculative\]' "$OUT" && fail "--formal must exclude the unselected block: $(cat "$OUT")"
 
+# `foo` == foo for plain identifier text: an escaped alias, an escaped path
+# segment and an escaped `assert` callee are the same names in a block (the
+# text-level alias rewrite used to see only the raw spelling).
+cat >"$W/esc.verify.prp" <<'EOF'
+const `top` = import("cnt.cnt")
+
+formal cnt.escaped {
+  mut `acc` = `top`
+  `assert`(U1(`acc`.par) == acc.`count`#[0], "escaped parity")
+}
+EOF
+OUT="$W/blocks_escaped.out"
+"$LHD" formal verify "$W/cnt.prp" "$W/esc.verify.prp" --top cnt --formal 'cnt.escaped' --set formal.bound=10 >"$OUT" 2>&1
+grep -q 'esc.verify.prp:5.*\[cnt.escaped\].*PROVEN' "$OUT" || fail "escaped-name block assert must prove: $(cat "$OUT")"
+
 cat >"$W/bad.verify.prp" <<'EOF'
 const top = import("cnt.cnt")
 formal cnt.bad {
@@ -293,13 +317,13 @@ grep -q "signal path 'nonexistent_signal' does not resolve" "$OUT" || fail "unre
 
 # A block assume_nocheck over an INPUT is the env-constraint spelling: freezing
 # enable proves count!=5 (same design whose unconstrained run refutes it at
-# cycle 7 in case 1). A plain `assume(acc.enable == 0)` would REFUTE instead —
-# nothing forces a free input to hold 0 (pinned in the cnt.frozen_checked run).
+# cycle 7 in case 1). A plain `assume(not acc.enable)` would REFUTE instead —
+# nothing forces a free input to hold false (pinned in the cnt.frozen_checked run).
 cat >"$W/frozen.verify.prp" <<'EOF'
 const top = import("cnt.cnt")
 formal cnt.frozen {
   mut acc = top
-  assume_nocheck(acc.enable == 0)
+  assume_nocheck(not acc.enable)
   assert(acc.count != 5, "frozen counter")
 }
 EOF
@@ -314,7 +338,7 @@ cat >"$W/frozen_checked.verify.prp" <<'EOF'
 const top = import("cnt.cnt")
 formal cnt.frozen_checked {
   mut acc = top
-  assume(acc.enable == 0)
+  assume(not acc.enable)
   assert(acc.count != 5, "frozen counter")
 }
 EOF
@@ -395,7 +419,7 @@ grep -q "'shadow2'.*PROVEN" "$OUT" || fail "the plain nocheck constraint must pr
 #     asserts.
 # ---------------------------------------------------------------------------
 cat >"$W/alu.prp" <<'AEOF'
-pub comb aluop(op:u8, x:u8, y:u8) -> (r:u8) {
+pub comb aluop(op:U8, x:U8, y:U8) -> (r:U8) {
   r = if op == 0x17 { (x + y) & 0xff } elif op == 0x07 { (x - y) & 0xff } else { 0 }
 }
 AEOF
@@ -477,14 +501,14 @@ grep -q "'ADDW is the sum'.*PROVEN" "$OUT" || fail "a healthy sibling block must
 #     module the top does not instantiate is a clean usage error.
 # ---------------------------------------------------------------------------
 cat >"$W/hier.prp" <<'HEOF'
-mod leafcnt(en:bool) -> (v:u4@[0]) {
-  reg c:u4 = 0
+mod leafcnt(en:Bool) -> (v:U4@[0]) {
+  reg c:U4 = 0
   v = c
   if en {
     wrap c += 1
   }
 }
-mod duo(e0:bool, e1:bool) -> (s:u5@[0]) {
+mod duo(e0:Bool, e1:Bool) -> (s:U5@[0]) {
   const a = leafcnt(en = e0)
   const b = leafcnt(en = e1)
   s = a + b
@@ -526,7 +550,7 @@ cat >"$W/leafports.verify.prp" <<'HEOF'
 const sub = import("hier.leafcnt")
 formal leaf.ports {
   mut acc = sub
-  assume_nocheck(acc.en == 0)
+  assume_nocheck(not acc.en)
   assert(acc.c == 0 and acc.v == 0, "frozen leaf pins register and port at 0")
 }
 HEOF
@@ -642,7 +666,7 @@ OUT="$W/blockfail.out"
 "$LHD" formal verify "$W/hier.prp" "$W/hier_bad.verify.prp" --top duo \
    --workdir "$WD2" --set formal.simfail_run=false >"$OUT" 2>&1
 [ -s "$WD2/simfail_duo_sum.prp" ] || fail "block refutation must write simfail_duo_sum.prp: $(cat "$OUT")"
-grep -q 'if clock == ' "$WD2/simfail_duo_sum.prp" || fail "embedded check must target the violating cycle: $(cat "$WD2/simfail_duo_sum.prp")"
+grep -q 'if `clock` == ' "$WD2/simfail_duo_sum.prp" || fail "embedded check must target the violating cycle: $(cat "$WD2/simfail_duo_sum.prp")"
 grep -q 'assert(_dut.s != 2, "both leaves advanced")' "$WD2/simfail_duo_sum.prp" || fail "the failing block assertion must be embedded over _dut paths: $(cat "$WD2/simfail_duo_sum.prp")"
 
 # ---------------------------------------------------------------------------
@@ -654,7 +678,7 @@ grep -q 'assert(_dut.s != 2, "both leaves advanced")' "$WD2/simfail_duo_sum.prp"
 #     design above is stateful, which is why this never showed up here.
 # ---------------------------------------------------------------------------
 cat >"$W/combdut.prp" <<'EOF'
-pub comb combdut(a:u8) -> (r:u8) {
+pub comb combdut(a:U8) -> (r:U8) {
   r = a
 }
 EOF
@@ -783,11 +807,11 @@ grep -q "lec: 'cnt.cnt' PROVEN equivalent" "$W/flec.out" || fail "formal lec mus
 #    to 200) is Houdini-dropped and keeps its BOUNDED verdict. Sound both ways.
 # ---------------------------------------------------------------------------
 cat >"$W/ladder.prp" <<'EOF'
-mod cnt2(enable:bool) -> (value:u8@[0]) {
-  reg count:u8 = 0
-  reg par:bool = false
+mod cnt2(enable:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
+  reg par:Bool = false
   value = count
-  assert(u1(par) == count#[0], "parity")
+  assert(U1(par) == count#[0], "parity")
   assert(count != 200, "bounded only")
   if enable {
     wrap count += 1
@@ -821,7 +845,7 @@ grep -q "'bounded only'\": PROVEN to cycle 7 (bounded)" "$OUT" || fail "a non-in
 #    witness stays consistent with the guard the obligation now carries.
 # ---------------------------------------------------------------------------
 cat >"$W/guarded.prp" <<'EOF'
-mod guarded(a:u8, b:u8) -> (o:u8@[0]) {
+mod guarded(a:U8, b:U8) -> (o:U8@[0]) {
   o = a
   if a < 4 {
     if b < 4 {
@@ -854,7 +878,7 @@ done
 #     satisfy the guard (a < 4). A counterexample with a >= 4 means the guard
 #     was dropped and the run refuted for the wrong reason.
 cat >"$W/guarded_bad.prp" <<'EOF'
-mod guarded_bad(a:u8) -> (o:u8@[0]) {
+mod guarded_bad(a:U8) -> (o:U8@[0]) {
   o = a
   if a < 4 {
     assert(a > 2, "false under its own guard")
@@ -872,7 +896,7 @@ CEX=$(grep -oE 'counterexample: a=[0-9]+' "$OUT" | head -1 | grep -oE '[0-9]+$')
 #     its guard holds. Dropping the guard here makes `a < 3` an unconditional
 #     environment constraint, which PROVES the assert below — a false PROVEN.
 cat >"$W/guarded_assume.prp" <<'EOF'
-mod guarded_assume(a:u8) -> (o:u8@[0]) {
+mod guarded_assume(a:U8) -> (o:U8@[0]) {
   if a >= 100 {
     assume(a < 3)
   }
@@ -898,7 +922,7 @@ grep -q "must NOT be provable" "$OUT" || fail "the refutation must name the asse
 #     answer would flip with whichever strategy wins the ind/bmc race.
 # ---------------------------------------------------------------------------
 cat >"$W/vacuity.prp" <<'EOF'
-mod vacuity(a:u8) -> (o:u8@[0]) {
+mod vacuity(a:U8) -> (o:U8@[0]) {
   o = a
   if a > 200 and a < 100 {
     assert(a == 7, "dead guard")
@@ -942,8 +966,8 @@ PYEOF
 #      `vacuous_guard` survives the serialize_verify/deserialize_verify codec —
 #      an unserialized field is silently lost and the parent sees false.
 cat >"$W/vacuity_deep.prp" <<'EOF'
-mod vacuity_deep(enable:bool) -> (value:u8@[0]) {
-  reg count:u8 = 0
+mod vacuity_deep(enable:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
   value = count
   if count == 5 {
     assert(count != 6, "live but deep")
@@ -988,12 +1012,15 @@ grep -q "VACUOUS: its" "$OUT" || fail "vacuous_guard was LOST across the verify 
 #      NESTED guard kept only the LSB of the outer one. `flags | 0x2` is always
 #      nonzero, so the first must PROVE; the second is a false PROVEN detector —
 #      the clamped guard `(flags|2)[0] & d` never checks flags==0, where the
-#      property is false, so it must REFUTE.
+#      property is false, so it must REFUTE. A condition is a `Bool` in source
+#      (Pyrope rejects an integer one with cond-not-bool, and slang lowers a
+#      Verilog multi-bit test to `!= 0`), so both spell the test `!= 0` over the
+#      multi-bit value: the verdicts still pin the nested-guard encoding.
 cat >"$W/widecond.prp" <<'EOF'
-mod widecond(flags:u8, d:bool) -> (o:u8@[0]) {
+mod widecond(flags:U8, d:Bool) -> (o:U8@[0]) {
   o = flags
-  if flags | 0x2 {
-    assert(flags | 0x4, "multi-bit cond under a multi-bit guard")
+  if (flags | 0x2) != 0 {
+    assert((flags | 0x4) != 0, "multi-bit cond under a multi-bit guard")
   }
 }
 EOF
@@ -1001,9 +1028,9 @@ verify widecond widecond --top widecond --set formal.bound=2
 [ "$RC" -eq 0 ] || fail "a multi-bit assert condition must not be truncated to its LSB: $(cat "$OUT")"
 
 cat >"$W/widecond_bad.prp" <<'EOF'
-mod widecond_bad(flags:u8, d:bool) -> (o:u8@[0]) {
+mod widecond_bad(flags:U8, d:Bool) -> (o:U8@[0]) {
   o = flags
-  if flags | 0x2 {
+  if (flags | 0x2) != 0 {
     if d {
       assert(flags#[0] == 1, "false on even flags")
     }
@@ -1021,7 +1048,7 @@ verify widecond_bad widecond_bad --top widecond_bad --set formal.bound=2
 #      formal block with contradictory nocheck constraints beside a live-guard
 #      design assert.
 cat >"$W/contra_guard.prp" <<'EOF'
-mod contra_guard(a:u8) -> (o:u8@[0]) {
+mod contra_guard(a:U8) -> (o:U8@[0]) {
   o = a
   if a < 4 {
     assert(a < 10, "live guard")
@@ -1047,7 +1074,7 @@ grep -q "VACUOUS: its" "$OUT" && fail "a LIVE guard must not be called dead just
 #      with BOTH a dead branch and a reachable violation must report the
 #      violation (equiv_fail), not an `unsupported` dead-branch complaint.
 cat >"$W/vac_and_refute.prp" <<'EOF'
-mod vac_and_refute(a:u8) -> (o:u8@[0]) {
+mod vac_and_refute(a:U8) -> (o:U8@[0]) {
   o = a
   if a > 200 and a < 100 {
     assert(a == 7, "dead")
@@ -1064,7 +1091,7 @@ grep -q "reachable property violation" "$OUT" \
 #      compile tier skips assumes, and the two tiers must agree on whether the
 #      same source is clean. The assert alongside it keeps the run decidable.
 cat >"$W/vac_assume.prp" <<'EOF'
-mod vac_assume(a:u8) -> (o:u8@[0]) {
+mod vac_assume(a:U8) -> (o:U8@[0]) {
   o = a
   if a > 200 and a < 100 {
     assume(a < 3)
@@ -1088,8 +1115,8 @@ PYEOF
 #      (nocheck) assumes are contradictory: the parent must name the block, not
 #      blame the design.
 cat >"$W/blk.prp" <<'EOF'
-mod blk(enable:bool) -> (value:u8@[0]) {
-  reg count:u8 = 0
+mod blk(enable:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
   value = count
   if enable { wrap count += 1 }
 }
@@ -1123,11 +1150,11 @@ grep -q "contradictory assume set in the design" "$OUT" \
 #     but replay must still import the original design directly: the absence
 #     of formalfail_prp below checks that route independently of writer support.
 cat >"$W/stp.prp" <<'EOF'
-pub mod stp(clock:u1, reset:u1, io:(valid:u1, bits:(x:u4, y:u3))) -> (o:u8@[]) {
-  reg cnt:u8:[reset_pin=ref reset] = 0
+pub mod stp(`clock`:Clock, `reset`:Reset, io:(valid:U1, bits:(x:U4, y:U3))) -> (o:U8@[]) {
+  reg cnt:U8:[reset_pin=`reset`] = 0
   o = cnt
-  const pc:u4 = io.bits.x#+[..]
-  if io.valid { cnt = (cnt + pc + io.bits.y)#[0..=7] }
+  const pc:U4 = io.bits.x#+[..]
+  if io.valid != 0 { cnt = (cnt + pc + io.bits.y)#[0..=7] }
 }
 
 const stpm = import("stp.stp")
@@ -1148,7 +1175,7 @@ grep -q 'mod __simfail_dut_wrap(' "$WD3/simfail_stp_bound.prp" \
   || fail "a struct port needs the flattening wrapper: $(cat "$WD3/simfail_stp_bound.prp")"
 grep -q 'io.bits.x = io__bits__x' "$WD3/simfail_stp_bound.prp" \
   || fail "the wrapper must bind the struct port per LEAF: $(cat "$WD3/simfail_stp_bound.prp")"
-grep -q '_dut.io__bits__x = _drv_io__bits__x\[clock\]' "$WD3/simfail_stp_bound.prp" \
+grep -q '_dut.io__bits__x = _drv_io__bits__x\[`clock`\]' "$WD3/simfail_stp_bound.prp" \
   || fail "the test must poke the flat leaf ports: $(cat "$WD3/simfail_stp_bound.prp")"
 grep -q 'assert(_dut.o != 3' "$WD3/simfail_stp_bound.prp" \
   || fail "the embedded check must read the output the WRAPPER re-exposes, not through the instance: $(cat "$WD3/simfail_stp_bound.prp")"

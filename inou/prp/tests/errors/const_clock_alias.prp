@@ -1,0 +1,32 @@
+/*
+:name: const_clock_alias
+:type: error
+:tolg: 1
+:error: .Clock. input .ck. of .cca_mid. is bound to a constant
+:help: omit .ck. to wire the caller's implicit clock
+*/
+
+// User ruling 2026-09-28 (27): the error follows the register's ACTUAL clock.
+// `cca_mid` forwards its `ck` to the leaf through a plain copy (`const c2 =
+// ck`), and the leaf's `clk` is the implicit clock of its reg `r`, so the top's
+// `ck=0` clocks `r` by a constant. Before the fix only a forward spelled as the
+// input's own name was traced and this compiled silently to `.ck(1'h0)`.
+// Since ruling 52 clocks bind by TYPE: `ck` is a `Clock`, and a Clock is never
+// bound to a constant, so the error is at the binding itself.
+
+mod cca_leaf(clk:Clock, d:U4) -> (q:U4@[1]) {
+  reg r:U4 = 0
+  r = d
+  q = r
+}
+
+mod cca_mid(ck:Clock, d:U4) -> (q:U4@[1]) {
+  const c2 = ck
+  const l = cca_leaf(clk=c2, d=d)
+  q = l.q
+}
+
+pub mod const_clock_alias(d:U4) -> (q:U4@[1]) {
+  const m = cca_mid(ck=0, d=d)   // locate_error_here
+  q = m.q
+}

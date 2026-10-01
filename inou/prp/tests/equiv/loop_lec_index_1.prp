@@ -13,8 +13,8 @@
 //   semdiff=structural  the no-solver shortcut — which must NOT match the
 //                       lifted body (`:lec_grep_not:`), since the bodies differ
 //                       only in a value semdiff cannot see structurally
-pub mod top(x:u8) -> (z:u16@[0]) {
-  mut acc:u16 = 0
+pub mod top(x:U8) -> (z:U16@[0]) {
+  mut acc:U16 = 0
   for i in 1..<5 {
     acc = acc + x + i
   }

@@ -1,0 +1,12 @@
+/*
+:name: spec_lexical_nested_comment
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// qa.md appendix 3: "Nested block comments: `/* a /* b */ c */` is one
+// comment." docs 02-basics "Comments": "Block comments nest".
+// If the inner close ended the comment, `v = 2 */` below would be live code.
+mut v = 1
+/* outer /* inner */ v = 2 */
+cassert(v == 1)

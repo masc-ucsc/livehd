@@ -21,7 +21,7 @@ const y = 5
 cassert(mix(a = x, b = y) == 45)
 cassert(mix(b = y, a = x) == 45)
 
-comb typed(n:u8, flag:bool) -> (r) {
+comb typed(n:U8, flag:Bool) -> (r) {
   if flag {
     r = n + 1
   } else {

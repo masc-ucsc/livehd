@@ -1,0 +1,64 @@
+/*
+:name: output_port_bitset
+:type: equiv
+:verilog_top: output_port_bitset
+:pyrope_top: output_port_bitset
+*/
+
+// A bit-range / bit-index WRITE straight into an OUTPUT port with no
+// whole-value assignment first (lhdtrack suggestions 2.3 row 1). An output
+// starts as nil exactly like `mut v:uN = nil` (04-variables: "declare a
+// destination and assign bits explicitly"), so the first `out#[..] = x` seeds
+// the bits it does not cover (user ruling 2026-09-27: output ports start as
+// nil). Today every form below fails in upass.tolg with "unresolved reference
+// 'y' — it has no driver" ('word', 'rev', ... once the comb is removed):
+// set_mask_base seeds a nil base only for names in scalar_decl_ (mut/const
+// declares), and an output port never enters it.
+//   word  -- two constant ranges assemble the whole output
+//   rev   -- a `for` loop writes one bit per iteration (loop index)
+//   mixed -- single bits and a range, written out of order
+//   rt    -- a RUNTIME-index write after a constant-range partial write (a
+//            runtime-index FIRST write needs a second runtime write to cover
+//            the other bits, and that pair is miscompiled on its own today:
+//            see bitset_runtime_index_twice)
+//   sw    -- the same shape on a `comb` output (`swap.y`)
+//   wgt/wp1 -- the bit-assembled output READ BACK in the same module
+//   sg/sgy  -- a comb output read back inside the comb (`swapg.g`)
+// The read-backs pin the output's width and signedness: the first write once
+// built on a 64-bit signed `0sb?` seed, so `word > 100` saw sign-filled X bits.
+comb swap(x:U8) -> (y:U8) {
+  y#[0..<4] = x#[4..<8]
+  y#[4..<8] = x#[0..<4]
+}
+
+comb swapg(x:U8) -> (y:U8, g:Bool) {
+  y#[0..<4] = x#[4..<8]
+  y#[4..<8] = x#[0..<4]
+  g = y > 100
+}
+
+pub mod output_port_bitset(a:U4, b:U4, c:U4, d:U8, s:U1, t:U1, g:U4, i:U2, e:U1)
+  -> (word:U8@[0], rev:U4@[0], mixed:U4@[0], rt:U4@[0], sw:U8@[0], wgt:Bool@[0], wp1:U9@[0],
+      sg:Bool@[0], sgy:U8@[0]) {
+  word#[0..<4] = a
+  word#[4..<8] = b
+  wgt = word > 100
+  wp1 = word + 1
+
+  for j in 0..<4 {
+    rev#[j] = c#[3 - j]
+  }
+
+  mixed#[3]     = t
+  mixed#[1..=2] = a#[0..=1]
+  mixed#[0]     = s
+
+  rt#[0..<4] = g
+  rt#[i]     = e
+
+  sw = swap(x=d)
+
+  const r = swapg(x=d)
+  sg  = r.g
+  sgy = r.y
+}

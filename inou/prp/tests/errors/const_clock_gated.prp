@@ -1,0 +1,25 @@
+/*
+:name: const_clock_gated
+:type: error
+:tolg: 1
+:error: `Clock` input .clk. of .ccg_leaf. is bound to a constant: a Clock is never bound to a constant
+*/
+
+// User ruling 2026-09-28 (27) and docs 04b: a clock gated by a Clock_cell is
+// still a Clock, and binding a constant to a `Clock` input is always an error.
+// `ccg_leaf` clocks `r` by the gate `Clock(clock_pin=clk, enable=en)`;
+// `clk=false` would hold it at 0 whatever `en` does, so `r` would never tick.
+// (A constant `en` held at 0 is caught by the reach-based check,
+// errors/const_clock_bool_alias_hier.prp.)
+
+mod ccg_leaf(clk:Clock, en:Bool, d:U4) -> (q:U4@[1]) {
+  const g = Clock(clock_pin=clk, enable=en)
+  reg r:U4:[clock_pin=g] = 0
+  r = d
+  q = r
+}
+
+pub mod const_clock_gated(en:Bool, d:U4) -> (q:U4@[1]) {
+  const l = ccg_leaf(clk=false, en=en, d=d)   // locate_error_here
+  q = l.q
+}

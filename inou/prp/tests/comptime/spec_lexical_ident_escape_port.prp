@@ -1,0 +1,19 @@
+/*
+:name: spec_lexical_ident_escape_port
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// qa.md appendix 8: "Same escapes inside backticked identifiers"; docs
+// 02-basics "Identifiers": "any nonempty sequence of characters between
+// backticks can form a valid identifier ... The identifier uses the same escape
+// sequence as strings." A port whose backticked name holds an escape is the
+// SAME name when the body spells it the same way.
+comb f(`i\x41`:U8) -> (r:U8) {
+  r = `i\x41`
+}
+cassert(f(3) == 3)
+comb g(a:U8) -> (`o\`p`:U8) {
+  `o\`p` = a
+}
+cassert(g(4) == 4)

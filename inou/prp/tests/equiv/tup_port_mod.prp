@@ -8,7 +8,7 @@
 // Tuple-typed MOD ports: the `@[0]` landing-cycle annotation rides the WHOLE
 // tuple output port and SSA propagates it to each flattened leaf (combinational
 // feedthrough), so it lowers like the hand-flattened twin.
-mod f(ar:(x:u8, y:u8)) -> (p:(q:u9, r:u8)@[0]) {
+mod f(ar:(x:U8, y:U8)) -> (p:(q:U9, r:U8)@[0]) {
   p.q = ar.x + ar.y
   p.r = ar.x
 }

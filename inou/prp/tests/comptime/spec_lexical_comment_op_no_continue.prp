@@ -1,0 +1,18 @@
+/*
+:name: spec_lexical_comment_op_no_continue
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+// docs 02-basics "Comments": "Nothing inside a comment affects parsing: an
+// operator inside a comment does not continue a statement". qa.md appendix 3:
+// "Nothing inside a comment ever affects parsing (continuation, strings,
+// interpolation holes)."
+const a = 1 // trailing +
+const b = 2 /* trailing + */
+const c = 3
+/* + */ const d = 4
+cassert(a == 1)
+cassert(b == 2)
+cassert(c == 3)
+cassert(d == 4)

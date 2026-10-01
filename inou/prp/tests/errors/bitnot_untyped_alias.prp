@@ -1,0 +1,15 @@
+/*
+:name: bitnot_untyped_alias
+:type: error
+:error: `~` needs an operand of known type
+:help: give it a type
+*/
+
+// User ruling 2026-09-29 (44): naming an untyped runtime value does not type
+// it -- `const t = a + 1` is still untyped (ruling 38 types only a plain alias
+// of a typed value, errors/../comptime/alias_bits_inherit.prp), so `~t` is the
+// same compile error as `~(a + 1)`.
+pub mod bitnot_untyped_alias(a:U8) -> (o:U8@[0]) {
+  const t = a + 1
+  wrap o = ~t  // locate_error_here
+}

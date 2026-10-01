@@ -1,0 +1,24 @@
+/*
+:name: spec_memory_default_program
+:type: equiv
+:verilog_top: spec_memory_default_program
+:pyrope_top: spec_memory_default_program
+*/
+// SPEC (qa.md appendix section 5, Memories): "Default ordering of `reg arr:[N]T`
+// is "program"; `ordering` may be set to "fwd"/"none"/"old" explicitly."
+// SPEC (qa.md Q10): "Program order; fix goldens -- Default ordering is "program"
+// as documented".
+// SPEC (docs 08-memories.md): "By default, same-cycle accesses resolve in
+// **program order** ... a read placed before a write sees the old contents, a
+// read placed after it sees the new value".
+// Rule encoded here: a `reg` array with NO `ordering` attribute behaves as
+// "program" -- `pre` (before the write) is the committed word, `post` (after the
+// write) forwards `wd` when the addresses collide.
+pub mod spec_memory_default_program(clk:Clock, we:Bool, wa:U2, wd:U4, ra:U2) -> (pre:U4@[0], post:U4@[0]) {
+  reg mem:[4]U4 = nil
+  pre = mem[ra]
+  if we {
+    mem[wa] = wd
+  }
+  post = mem[ra]
+}

@@ -20,9 +20,9 @@
 // fixture is the RUNTIME twin, and it covers BOTH array storage classes,
 // which reach upass.tolg as two different things:
 //
-//   * `reg stages:[4]u8`  -- one Memory cell. The splice packs the cell's
+//   * `reg stages:[4]U8`  -- one Memory cell. The splice packs the cell's
 //     whole-array `read_all` bus.
-//   * `mut lanes:[3]u8`   -- an Array_scalar_view: a single packed comb bus.
+//   * `mut lanes:[3]U8`   -- an Array_scalar_view: a single packed comb bus.
 //
 // In BOTH the packed bus already holds entry 0 in the LOW element window, and
 // entry 0 is also the LOW end of the packed word, so the splice is a COPY of
@@ -51,14 +51,14 @@
 //
 // `rw`/`cw` exist only for those asserts; once proven they are dead and
 // swept, so the netlist that reaches the LEC is the pure packing one.
-pub mod top(inp:u8, p:u8, q:u8) -> (regw:u40@[0], combw:u24@[0]) {
-  reg stages:[4]u8:[ordering="old"]
+pub mod top(inp:U8, p:U8, q:U8) -> (regw:U40@[0], combw:U24@[0]) {
+  reg stages:[4]U8:[ordering="old"]
   stages[0] = inp
   stages[1] = stages[0]
   stages[2] = stages[1]
   stages[3] = stages[2]
 
-  mut lanes:[3]u8 = 0
+  mut lanes:[3]U8 = 0
   lanes[0] = inp
   lanes[1] = p
   lanes[2] = q
@@ -72,13 +72,13 @@ pub mod top(inp:u8, p:u8, q:u8) -> (regw:u40@[0], combw:u24@[0]) {
   // The same layout written one range at a time. Every bit is driven exactly
   // once and no packing appears, so this is an independent statement of where
   // each entry lands.
-  mut rw:u40 = 0
+  mut rw:U40 = 0
   rw#[0..=7]   = inp
   rw#[8..=15]  = stages[0]
   rw#[16..=23] = stages[1]
   rw#[24..=31] = stages[2]
   rw#[32..=39] = stages[3]
-  mut cw:u24 = 0
+  mut cw:U24 = 0
   cw#[0..=7]   = lanes[0]
   cw#[8..=15]  = lanes[1]
   cw#[16..=23] = lanes[2]

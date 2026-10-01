@@ -1,0 +1,14 @@
+/*
+:name: clkrst_clock_in_bool_wire
+:type: error
+:tolg: 1
+:error: `clk` is a `Clock`, and a Clock is not data
+*/
+// A `wire` of another type stores a Clock as data (an untyped or `Clock` wire
+// is an alias that carries the Clock on).
+pub mod clkrst_clock_in_bool_wire(clk:Clock, d:U8) -> (q:U8@[1]) {
+  wire w:Bool = clk   // locate_error_here
+  reg f:U8:[clock_pin=w] = 0
+  f = d
+  q = f
+}

@@ -21,9 +21,9 @@
 
 const m = import("lib_tuple_port")
 
-pub comb top(op:u4, arg:u4, s:u1) -> (o:u8) {
+pub comb top(op:U4, arg:U4, s:U1) -> (o:U8) {
   mut u = m.dec::[name=u](cmd = (op = op, arg = arg))
-  mut res:u8 = 0
+  mut res:U8 = 0
   if s != 0 {
     res = (u.ctrl.legal << 6) | (u.ctrl.sel << 4) | u.ctrl.imm
   }

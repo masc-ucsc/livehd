@@ -3,7 +3,7 @@
 :type: equiv
 */
 // The signed width alias and its canonical spelling must agree.
-pub comb foo(a:s32, b:u3) -> (r_or:s34, r_and:s34, r_xor:s34) {
+pub comb foo(a:S32, b:U3) -> (r_or:S34, r_and:S34, r_xor:S34) {
   r_or = a + b#|[1..]
   r_and = a + b#&[1..]
   r_xor = a + b#^[1..]

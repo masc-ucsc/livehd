@@ -1,0 +1,8 @@
+/*
+:name: spec_types_cast_int_bad_string
+:type: error
+:error: U8
+*/
+// SPEC docs 04-variables "Integer or Signed": "Integer typecast accepts strings as input. The string must be a
+// valid formatted Pryope number or an assertion is raised." Rule: U8("abc") is an error (not a silent nil).
+const y = U8("abc")  // locate_error_here

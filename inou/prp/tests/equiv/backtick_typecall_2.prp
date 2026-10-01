@@ -1,0 +1,17 @@
+/*
+:name: backtick_typecall
+:type: lec
+:lec_top: backtick_typecall
+:lec_expect: refuted
+*/
+// Observability guard: a DIFFERENT escaped width must refute, so _1 proving
+// is evidence that `` `bits` `` set the width (not that widths are invisible).
+pub mod backtick_typecall(a:U8) -> (y:U8@[0], w:U8@[0], z:U8@[0], v:U8@[0]) {
+  mut t:Unsigned(`bits`=3)        = a#[0..<2]
+  mut m:Unsigned(`max`=5)         = 1
+  mut s:Signed(`min`=-4, `max`=3) = 1
+  y = t.[`bits`]
+  w = m.[`bits`]
+  z = s.[`bits`]
+  v = t + m
+}

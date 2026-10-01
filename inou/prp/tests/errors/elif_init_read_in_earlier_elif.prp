@@ -1,0 +1,11 @@
+/*
+:name: elif_init_read_in_earlier_elif
+:type: error
+:error: read of undefined variable 'later'
+*/
+
+mut total = 0
+if false { total = 1 }
+elif true { total = later } // locate_error_here
+elif const later = 3; false { total = 2 }
+cassert(total == 3)

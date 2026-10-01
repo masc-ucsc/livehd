@@ -7,8 +7,8 @@
 
 // Width-contract fixture: clock/reset/comparison are u1, a four-arm selector
 // is u2, and the selected data remains exactly u3.
-pub mod lesssign_u1_mux::[timecheck=false](clk:u1, reset:u1, sel:u2, d0:u3, d1:u3, d2:u3, d3:u3) -> (q:u3@[], zero:u1@[]) {
-  reg state:u3:[initial=0, reset_pin=ref reset, clock_pin=ref clk]
+pub mod lesssign_u1_mux::[timecheck=false](clk:Clock, reset:Reset, sel:U2, d0:U3, d1:U3, d2:U3, d3:U3) -> (q:U3@[], zero:U1@[]) {
+  reg state:U3:[initial=0, reset_pin=reset, clock_pin=clk]
   state = match sel {
     == 0 { d0 }
     == 1 { d1 }
@@ -16,5 +16,5 @@ pub mod lesssign_u1_mux::[timecheck=false](clk:u1, reset:u1, sel:u2, d0:u3, d1:u
     else { d3 }
   }
   q = state
-  zero = state == 0
+  zero = U1(state == 0)
 }

@@ -1,0 +1,21 @@
+/*
+:name: spec_calls_gate_named
+:type: comptime
+:verifier_pass: 8
+:verifier_fail: 0
+*/
+
+// qa.md Appendix §8: "`__` basic gates are ordinary calls: all arguments named
+// with the LGraph pin names (graph/cell.cpp, e.g. `__mux(s=cond, p1=b, p2=a)`,
+// `__sum(as=.., bs=..)`, `__shl(a=.., b=..)`, `__get_mask(a=.., mask=..)`)".
+// docs 06b-instantiation.md "Basic gates": `__mux(s=cond, p1=f, p2=t)`: `t`
+// when `s` is true, `f` otherwise.
+
+cassert(__mux(s=true, p1=5, p2=9) == 9)
+cassert(__mux(s=false, p1=5, p2=9) == 5)
+cassert(__mux(p2=9, s=true, p1=5) == 9)       // named pins bind in any order
+cassert(__sum(`as`=(1, 2), bs=(1)) == 2)
+cassert(__shl(a=1, b=3) == 8)
+cassert(__get_mask(a=0xab, mask=0xf0) == 0xa)
+cassert(__or(`as`=(0x55, 0xaa)) == 0xff)
+cassert(__not(a=0) == -1)

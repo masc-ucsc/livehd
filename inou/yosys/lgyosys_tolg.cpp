@@ -82,12 +82,16 @@ static absl::flat_hash_set<std::string> cell_port_outputs;
 
 typedef std::pair<const RTLIL::Wire*, int> Wire_bit;
 
-static absl::flat_hash_map<const RTLIL::Wire*, hhds::Pin_class>              wire2pin;
-static absl::flat_hash_map<const RTLIL::Cell*, hhds::Node_class>             cell2node;
-static absl::flat_hash_map<const RTLIL::Wire*, std::vector<hhds::Pin_class>> partially_assigned;
-static absl::flat_hash_map<const RTLIL::Wire*, std::vector<int>>             partially_assigned_bits;
-static absl::flat_hash_map<const RTLIL::Wire*, std::vector<int>>             partially_assigned_fwd;
-static absl::flat_hash_set<hhds::Class_index>                                explicit_pin_signs;
+static absl::flat_hash_map<const RTLIL::Wire*, hhds::Pin_class>               wire2pin;
+static absl::flat_hash_map<const RTLIL::Cell*, hhds::Node_class>              cell2node;
+static absl::flat_hash_map<const RTLIL::Wire*, std::vector<hhds::Pin_class>>  partially_assigned;
+static absl::flat_hash_map<const RTLIL::Wire*, std::vector<int>>              partially_assigned_bits;
+static absl::flat_hash_map<const RTLIL::Wire*, std::vector<int>>              partially_assigned_fwd;
+static absl::flat_hash_set<hhds::Class_index>                                 explicit_pin_signs;
+// Per $mem/$mem_v2 cell, per read port: the Mux resolve_memory put after the
+// read data to return 0 past a depth that is not a power of two (invalid when
+// the port cannot get there). process_cells wires its select from the address.
+static absl::flat_hash_map<const RTLIL::Cell*, std::vector<hhds::Node_class>> mem_rd_past_depth;
 
 static std::vector<const RTLIL::Wire*> pending_outputs;
 
@@ -854,6 +858,29 @@ static hhds::Pin_class get_partial_dpin(hhds::Graph* g, const RTLIL::Wire* wire)
   return or_dpin;
 }
 
+// The address bits a memory of `depth` entries decodes: clog2(depth).
+static int memory_index_bits(int64_t depth) {
+  int k = 0;
+  while ((int64_t{1} << k) < depth) {
+    ++k;
+  }
+  return k;
+}
+
+// $mem/$mem_v2 port addresses are ABSOLUTE (the declared Verilog index) and
+// OFFSET is the index of entry 0 (`reg [1:0] mem [5:50]` -> 5). True when
+// `addr - OFFSET` of an ABITS-wide address can land past a depth that is not a
+// power of two, i.e. on no entry at all.
+static bool memory_read_can_pass_depth(const RTLIL::Cell* cell) {
+  const int64_t depth  = cell->getParam(ID::SIZE).as_int();
+  const int64_t abits  = cell->getParam(ID::ABITS).as_int();
+  const int64_t offset = cell->hasParam(ID::OFFSET) ? cell->getParam(ID::OFFSET).as_int(true) : 0;
+  if ((int64_t{1} << memory_index_bits(depth)) == depth) {
+    return false;
+  }
+  return offset != 0 || abits >= 63 || (int64_t{1} << abits) > depth;
+}
+
 static hhds::Node_class resolve_memory(hhds::Graph* g, RTLIL::Cell* cell) {
   auto node = create_typed_node(*g, Ntype_op::Memory);
   set_loc(node, cell->get_src_attribute());
@@ -868,10 +895,22 @@ static hhds::Node_class resolve_memory(hhds::Graph* g, RTLIL::Cell* cell) {
 
   uint32_t bits = cell->getParam(ID::WIDTH).as_int();
 
+  const bool past_depth = memory_read_can_pass_depth(cell);
+  auto&      rd_zero    = mem_rd_past_depth[cell];
+  rd_zero.assign(rdports, hhds::Node_class{});
   for (uint32_t rdport = 0; rdport < rdports; rdport++) {
     RTLIL::SigSpec ss   = cell->getPort("\\RD_DATA").extract(rdport * bits, bits);
     auto           dpin = node.create_driver_pin(static_cast<hhds::Port_id>(wrports + rdport));
     set_bits(dpin, bits);
+    if (past_depth) {
+      // An out-of-range read is X; past the last entry the refinement is 0
+      // (the slang reader's choice too), so no engine reads a missing entry.
+      auto zero_mux = create_typed_node(*g, Ntype_op::Mux, bits);
+      setup_sink_by_name(zero_mux, "p1").connect_driver(create_const(*g, *Dlop::create_integer(0)));
+      setup_sink_by_name(zero_mux, "p2").connect_driver(dpin);
+      rd_zero[rdport] = zero_mux;
+      dpin            = zero_mux.create_driver_pin(0);
+    }
 
     uint32_t offset = 0;
     for (auto& chunk : ss.chunks()) {
@@ -2890,6 +2929,51 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         }
       }
 
+      // Port addresses are ABSOLUTE and OFFSET is the index of entry 0, while
+      // the Memory cell is 0-based. yosys widens ABITS until OFFSET + SIZE - 1
+      // fits, and a negative OFFSET comes with a two's-complement address
+      // (`mem [-3:4]`, signed 4-bit index: OFFSET=-3, ABITS=4, -3 is 13), so
+      // an address is decoded modulo 2^ABITS, like yosys' own memory_map:
+      // `(addr - OFFSET) mod 2^ABITS` is the entry, in range iff < SIZE. Every
+      // port addresses that offset cut to the clog2(depth) bits the cell
+      // decodes (the entry memory_map picks, which is what an out-of-range read
+      // refines X to).
+      const int64_t offset     = cell->hasParam(ID::OFFSET) ? cell->getParam(ID::OFFSET).as_int(true) : 0;
+      const int     index_bits = memory_index_bits(depth);
+      const auto    lt_node    = [&](hhds::Pin_class a, hhds::Pin_class b) {
+        auto lt = create_typed_node(*g, Ntype_op::LT, 1);
+        setup_sink_by_name(lt, "as").connect_driver(a);
+        setup_sink_by_name(lt, "bs").connect_driver(b);
+        return lt.create_driver_pin(0);
+      };
+      const auto int_const  = [&](int64_t v) { return create_const(*g, *Dlop::create_integer(v)); };
+      // `(addr - OFFSET) mod 2^bits` (the low bits survive the Sum's wrap).
+      const auto offset_low = [&](hhds::Pin_class addr, int bits) {
+        if (offset == 0 && abits <= bits) {
+          return addr;
+        }
+        if (bits == 0) {
+          return int_const(0);
+        }
+        if (offset != 0) {
+          auto sum = create_typed_node(*g, Ntype_op::Sum, static_cast<int32_t>(abits) + 1);
+          setup_sink_by_name(sum, "as").connect_driver(addr);
+          setup_sink_by_name(sum, "bs").connect_driver(int_const(offset));
+          auto sum_dpin = sum.create_driver_pin(0);
+          set_sign(sum_dpin);
+          explicit_pin_signs.insert(sum_dpin.get_class_index());
+          addr = sum_dpin;
+        }
+        auto low = create_typed_node(*g, Ntype_op::And, bits);
+        livehd::graph_util::setup_sink_pid(low, 0).connect_driver(addr);
+        livehd::graph_util::setup_sink_pid(low, 0).connect_driver(create_const(*g, *Dlop::get_mask_value(bits)));
+        auto low_dpin = low.create_driver_pin(0);
+        set_ubits(low_dpin, bits);
+        explicit_pin_signs.insert(low_dpin.get_class_index());
+        return low_dpin;
+      };
+      const auto mem_index = [&](hhds::Pin_class addr) { return offset_low(addr, index_bits); };
+
       for (int i = 0; i < wrports; i++) {
         auto port_n = i * static_cast<int>(Ntype::Memory_port_stride);
         livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(10 + port_n))
@@ -2899,24 +2983,22 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
 
         auto wr_addr_dpin = create_pick_concat_dpin(g, cell->getPort(ID::WR_ADDR).extract(i * abits, abits), false);
         auto wr_en_dpin   = create_pick_concat_dpin(g, cell->getPort(ID::WR_EN).extract(i * width, width), false);
-        if (depth < (1u << abits)) {
-          // $mem semantics drop out-of-range writes (Verilog OOB array write
-          // is a no-op), but the cgen memory model's addr port is only
-          // log2(SIZE) wide, so a wider address would alias in-range words.
-          // Gate the per-bit enables with (addr < depth). Exact-width
-          // memories (2^abits == depth) skip this entirely.
-          auto lt_node = create_typed_node(*g, Ntype_op::LT, 1);
-          setup_sink_by_name(lt_node, "as").connect_driver(wr_addr_dpin);
-          setup_sink_by_name(lt_node, "bs").connect_driver(create_const(*g, *Dlop::create_integer(depth)));
-
+        // $mem semantics drop an out-of-range write (a Verilog out-of-range
+        // array write is a no-op), but the cell decodes only the low index
+        // bits, so such a write would alias an in-range entry. Gate the
+        // per-bit enables with the modular range check above; an address
+        // space of exactly SIZE entries needs none.
+        if (abits >= 63 || (int64_t{1} << abits) > static_cast<int64_t>(depth)) {
           auto en_mux = create_typed_node(*g, Ntype_op::Mux, width);
-          setup_sink_by_name(en_mux, "s").connect_driver(lt_node.create_driver_pin(0));
+          setup_sink_by_name(en_mux, "s")
+              .connect_driver(lt_node(offset_low(wr_addr_dpin, static_cast<int>(abits)), int_const(static_cast<int64_t>(depth))));
           setup_sink_by_name(en_mux, "p1").connect_driver(create_const(*g, *Dlop::create_integer(0)));
           setup_sink_by_name(en_mux, "p2").connect_driver(wr_en_dpin);
           wr_en_dpin = en_mux.create_driver_pin(0);
         }
         livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(4 + port_n)).connect_driver(wr_en_dpin);
-        livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(0 + port_n)).connect_driver(wr_addr_dpin);
+        livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(0 + port_n))
+            .connect_driver(mem_index(wr_addr_dpin));
         livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(2 + port_n))
             .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::WR_CLK).extract(i, 1), false));
       }
@@ -2926,8 +3008,26 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
             .connect_driver(create_const(*g, *Dlop::create_integer(1)));
         livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(4 + port_n))
             .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::RD_EN).extract(i, 1), false));
-        livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(0 + port_n))
-            .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::RD_ADDR).extract(i * abits, abits), false));
+        const auto rd_index = mem_index(create_pick_concat_dpin(g, cell->getPort(ID::RD_ADDR).extract(i * abits, abits), false));
+        livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(0 + port_n)).connect_driver(rd_index);
+        if (const auto& zero_mux = mem_rd_past_depth[cell].at(static_cast<size_t>(i)); !zero_mux.is_invalid()) {
+          auto sel = lt_node(rd_index, int_const(static_cast<int64_t>(depth)));
+          if (rd_clke) {
+            // A clocked read port registers its data (Memory type=1): select
+            // with the address sampled at the same edge, held while RD_EN is low.
+            auto sel_ff = create_typed_node(*g, Ntype_op::Flop, 1);
+            if (!param_bit(ID::RD_CLK_POLARITY, i)) {
+              setup_sink_by_name(sel_ff, "posclk").connect_driver(int_const(0));
+            }
+            setup_sink_by_name(sel_ff, "clock_pin")
+                .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::RD_CLK).extract(i, 1), false));
+            setup_sink_by_name(sel_ff, "enable")
+                .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::RD_EN).extract(i, 1), false));
+            setup_sink_by_name(sel_ff, "din").connect_driver(sel);
+            sel = sel_ff.create_driver_pin(0);
+          }
+          setup_sink_by_name(zero_mux, "s").connect_driver(sel);
+        }
         livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(2 + port_n))
             .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::RD_CLK).extract(i, 1), false));
       }
@@ -3213,6 +3313,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         driver_names.clear();
         wire2pin.clear();
         cell2node.clear();
+        mem_rd_past_depth.clear();
         partially_assigned.clear();
         partially_assigned_bits.clear();
         partially_assigned_fwd.clear();
@@ -3263,6 +3364,7 @@ struct Yosys2lg_Pass : public Yosys::Pass {
         driver_names.clear();
         wire2pin.clear();
         cell2node.clear();
+        mem_rd_past_depth.clear();
         partially_assigned.clear();
         explicit_pin_signs.clear();
         picks.clear();

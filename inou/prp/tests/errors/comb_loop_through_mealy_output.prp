@@ -1,0 +1,29 @@
+/*
+:name: comb_loop_through_mealy_output
+:type: error
+:tolg: 1
+:error: combinational loop
+*/
+
+// GUARD for the per-output false-loop fix of
+// sim/mod_state_feedback_mixed_outputs.prp (lhdtrack suggestions 2.1). The
+// child is the same mixed Moore/Mealy `st2`, but here the caller closes its
+// ring through the MEALY output `nx = d + 1`, which is combinational in `d`:
+// `gr -> st2.d -> st2.nx -> gr` is a REAL combinational loop. A fix that
+// treats any child holding state (or with at least one Moore output) as a
+// loop breaker would compile this silently; each output must carry its own
+// input cone.
+mod st2(en:Bool, d:U4) -> (q:U4@[0], nx:U4@[0]) {
+  reg r:U4 = 8
+  if en { r = d }
+  q = r
+  wrap nx = d + 1
+}
+
+pub mod top2(req:U4) -> (g:U4@[0], s:U4@[0]) {
+  wire gr:U4 = nil   // locate_error_here
+  const m = st2(en=req != 0, d=gr)
+  gr = req & ~m.nx
+  g = gr
+  s = m.q
+}

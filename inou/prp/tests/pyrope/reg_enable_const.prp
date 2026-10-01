@@ -14,8 +14,12 @@
 // can never update, reg_enable_false) and the flag-only `:[enable]` (names no
 // signal at all, attr_enable_no_value). The signal-valued form is
 // tests/equiv/reg_enable_attr.prp.
-pub mod reg_enable_const(clk:u1, rst:u1, d:u8) -> (q:u8@[]) {
-  reg r:u8:[clock_pin=ref clk, reset_pin=ref rst, enable=true] = 0
+//
+// A pin takes the signal directly (docs 04b `clock_pin=clk`); the old
+// `clock_pin=ref clk` spelling is an error (ruling 82,
+// errors/pin_attr_ref_removed.prp).
+pub mod reg_enable_const(clk:Clock, rst:Reset, d:U8) -> (q:U8@[]) {
+  reg r:U8:[clock_pin=clk, reset_pin=rst, enable=true] = 0
   r = d
   q = r
 }

@@ -10,13 +10,13 @@
 // reg's comp_type_array (dims + element envelope) from the initializer and
 // materializes the literal, so it lowers to a memory exactly like the typed
 // form.
-pub mod mcii(reset:bool, i:u1, j:u1) -> (z:u4@[0]) {
-  comptime mut iv:[2][2]u4 = nil
+pub mod mcii(reset:Reset, i:U1, j:U1) -> (z:U4@[0]) {
+  comptime mut iv:[2][2]U4 = nil
   for a in 0..<2 {
     for b in 0..<2 {
       iv[a][b] = a * 2 + b + 1   // ((1,2),(3,4))
     }
   }
-  reg t = iv                     // no type — inferred [2][2]u4
+  reg t = iv                     // no type — inferred [2][2]U4
   z = t[i][j]
 }

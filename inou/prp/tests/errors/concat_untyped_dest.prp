@@ -10,7 +10,7 @@
 // leaves the width implicit gives a later reader nothing to check the layout
 // against. `w` here is an untyped local, so there is no declared width to
 // compare the 12-bit result to.
-comb concat_untyped_dest(a:u4, b:u8) -> (z:u12) {
+comb concat_untyped_dest(a:U4, b:U8) -> (z:U12) {
   const w = (b, a)#[..]
   z = w
 }

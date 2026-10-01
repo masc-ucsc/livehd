@@ -1,0 +1,15 @@
+/*
+:name: spec_syntax_generic_dotted_import
+:type: comptime
+:files: inou/prp/tests/imports/lib_spec_syntax_generic_dotted.prp inou/prp/tests/imports/spec_syntax_generic_dotted_import.prp
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// qa.md Appendix §4: "Generic calls on dotted callees are legal:
+// `prp.queue.make<T=Signed>(depth=16)`." (Q19 "Accept in both"; docs 13-stdlib.md
+// uses exactly this namespace.member<generic>(...) shape).
+const lib  = import("lib_spec_syntax_generic_dotted")
+const addk = import("lib_spec_syntax_generic_dotted.addk")
+
+cassert(addk<K=3>(a=1) == 4)       // bare callee (control)
+cassert(lib.addk<K=3>(a=1) == 4)   // dotted callee: namespace.member<generic>(...)

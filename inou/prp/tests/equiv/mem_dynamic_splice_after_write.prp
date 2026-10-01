@@ -1,0 +1,65 @@
+/*
+:name: mem_dynamic_splice_after_write
+:type: equiv
+:verilog_top: mem_dynamic_splice_after_write
+:pyrope_top: mem_dynamic_splice_after_write
+*/
+// A partial write at a RUNTIME bit position after another write of the same
+// memory word in one cycle: the golden is where the bug lived. The slang reader
+// spliced a Verilog `mem[a][b] <= x` / `mem[a][c*4 +: 4] <= v` with plain bit
+// logic around a read of the COMMITTED word, so an earlier full (`mf`) or
+// chunked (`mc`) write of the word in the same cycle was silently lost, and a
+// second partial write (`ms`) was refused ("unsupported-mem-partial-write").
+// The dynamic splice is now the same read -> range set_mask -> store chain as
+// Pyrope's `mem[a]#[b..+4] = v`, which merges with the earlier writes of the
+// cycle. `mr` (reset value) and `me` (a clear arm) keep the exclusive
+// `if (reset) .. else mem[a][b] <= x` shapes.
+//
+// The Pyrope writer printed a runtime-position bit write as the bare copy
+// `x = x`, dropping it; the prp-p2p round trip of this fixture pins the
+// memory form (equiv/dyn_bit_write_var the variable form).
+
+pub mod mem_dynamic_splice_after_write(wf:Bool, wc:Bool, wb:Bool, ws:Bool, clr1:Bool, a:U2, j:U2, d:U16, b:U4, c:U2, e:U3, x:U1, v:U4, ra:U2) -> (qf:U16@[0], qc:U16@[0], qs:U16@[0], qr:U16@[0], qe:U16@[0]) {
+  reg mr:[4]U16:[ordering="old"] = 0
+  reg mf:[4]U16:[ordering="old"] = nil
+  reg mc:[4]U16:[ordering="old"] = nil
+  reg ms:[4]U16:[ordering="old"] = nil
+  reg me:[4]U16:[ordering="old"] = nil
+
+  if wf {
+    mf[a] = d
+  }
+  if wb {
+    mf[a]#[b] = x
+  }
+
+  if wc {
+    mc[a]#[8..<16] = d#[8..<16]
+  }
+  if wb {
+    mc[a]#[(c * 4)..+4] = v
+  }
+
+  if ws {
+    ms[a]#[b] = x
+  }
+  if wb {
+    ms[a]#[e..+4] = v
+  }
+
+  if wb {
+    mr[a]#[b] = x
+  }
+
+  if clr1 {
+    me[j] = 0
+  } elif wb {
+    me[a]#[b] = x
+  }
+
+  qf = mf[ra]
+  qc = mc[ra]
+  qs = ms[ra]
+  qr = mr[ra]
+  qe = me[ra]
+}

@@ -1,0 +1,20 @@
+/*
+:name: spec_clock_mem_pin_bool_input
+:type: error
+:tolg: 1
+:error: (not a Clock|not a `Clock`|must name a `?Clock|no derived clocks)
+*/
+// SPEC (clock lane): a memory's `clock_pin` names a Clock like a register's;
+// a `Bool` data input is not a clock.
+//   docs 04b memory attributes: "`clock_pin`: Optional clock pin
+//     (`clock_pin=clk2`), the module's implicit clock by default."
+//   docs 04b: "A `Clock` is never bound to a constant, so `clock_pin` always
+//     names a `Clock` signal." / "an input named `clk` ... that is not typed
+//     `Clock`/`Reset` (a `Bool`, a `U1`) is plain data."
+//   ruling 55: "`clock_pin=x` must name a CLOCK: a Clock input or a
+//     `Clock_cell` output."
+pub mod spec_clock_mem_pin_bool_input(clk:Clock, b:Bool, we:Bool, wa:U2, wd:U8, ra:U2) -> (q:U8@[0]) {
+  reg m:[4]U8:[clock_pin=b] = nil   // locate_error_here
+  if we { m[wa] = wd }
+  q = m[ra]
+}

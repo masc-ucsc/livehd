@@ -11,7 +11,7 @@
 //   - higher-rank (3-D) vector with row-major flatten check
 //   - read-back of a single element after partial-row write
 
-mut grid:[3][3]u8 = 0
+mut grid:[3][3]U8 = 0
 
 // Partial-row write: write a whole row from a tuple-iteration source.
 mut col = 0
@@ -38,7 +38,7 @@ for r in 0..<3 {
 cassert(sum == 60)  // 10+20+30 only
 
 // 3-D vector: row-major flatten test. Index linearly via i*P*Q + j*Q + k.
-mut cube:[2][2][2]u8 = 0
+mut cube:[2][2][2]U8 = 0
 mut n = 1
 for i in 0..<2 {
   for j in 0..<2 {

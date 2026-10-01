@@ -1,0 +1,11 @@
+/*
+:name: spec_syntax_enum_typed_no_eq
+:type: error
+:error: expected '=' after the enum name
+*/
+// qa.md Appendix §4: "Enums require `=`: `enum E = (a, b)`, `enum E:U8 = (a, b)`.
+// `enum E:U8 (a, b)` (no `=`) is an error." (Q18 "Reject (use `=`)";
+// docs 03-bundle.md: `enum V6:U8 (a, b)   // error: missing '='`).
+// The diagnostic must point at the enum declaration itself.
+enum V6:U8 (a, b)   // locate_error_here
+cassert(V6.a != V6.b)

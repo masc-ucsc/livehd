@@ -17,7 +17,7 @@
 #include "encode.hpp"  // livehd::lec::Val + exported helpers (fit_to/flop_state_key)
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
-#include "query.hpp"  // livehd::lec::Verdict
+#include "property_types.hpp"  // livehd::lec::Verdict, independent of the relational query engine
 
 namespace livehd::formal {
 
@@ -107,6 +107,9 @@ public:
   // cond is treated as "true" iff non-zero (matches assert / bool semantics).
   Query_out is_true(const hhds::Pin_class& cond);
   Query_out is_false(const hhds::Pin_class& cond);
+  // Query-local path implication; these premises never become hypotheses for
+  // a later query. Truth means nonzero, including wide/signed selectors.
+  Query_out truth_when(const hhds::Pin_class& cond, bool truth, const std::vector<std::pair<hhds::Pin_class, bool>>& path);
   // a == b across their common (max) width.
   Query_out equal(const hhds::Pin_class& a, const hhds::Pin_class& b);
   // at-most-one-bit-set ((sel & (sel-1)) == 0): the Hotmux selector obligation.
@@ -161,14 +164,6 @@ public:
   // Re-arm the per-query wall cap (Prove_options::timeout_ms) between queries, so
   // a caller holding a TOTAL budget can hand each query only what is left of it.
   void set_timeout_ms(int ms) { opts_.timeout_ms = ms; }
-
-  // Solver-free: does cond's cone cut a Flop/Memory? The same deterministic
-  // cone walk that classifies a query's `Query_out::stateful`, without
-  // encoding or solving, for a caller that skipped the query (e.g. out of
-  // budget) but still needs the classification. Conservative: a cone the
-  // encoder cannot handle (an undescended Sub, Fflop, Latch) answers true,
-  // since a Sub may hide state.
-  bool stateful_cone(const hhds::Pin_class& cond);
 
   // Every definition a query so far descended into (descend_subs), once each.
   std::vector<hhds::Graph*> descended() const;

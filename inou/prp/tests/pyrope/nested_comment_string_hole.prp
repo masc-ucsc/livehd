@@ -1,0 +1,19 @@
+/*
+:name: nested_comment_string_hole
+:type: compile
+*/
+
+// A block comment inside a string interpolation hole is a comment, not part of
+// the hole: a `}` or `:` inside it must not close the hole or start a format
+// spec, and block comments NEST (`/* a /* b */ c */` is one comment).
+const v = 3
+const str1 = "{v /* } */}"
+cassert(str1 == "3")
+const str2 = "<{v /* /* x */ } */}>"
+cassert(str2 == "<3>")
+const str3 = "{v /* a /* :b */ c */}"
+cassert(str3 == "3")
+const str4 = "{ /* { */ v}"
+cassert(str4 == "3")
+const str5 = "{v /* x */}"
+cassert(str5 == "3")

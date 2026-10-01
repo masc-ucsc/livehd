@@ -26,10 +26,10 @@ for i in 0..<5 { if i == 2 { continue }; s = s + i }
 cassert(s == 8)             // 0+1+3+4
 
 // continue in a `while`
-mut s2 = 0
+mut sum2 = 0
 mut j = 0
-while j < 5 { j += 1; if j == 3 { continue }; s2 = s2 + j }
-cassert(s2 == 1 + 2 + 4 + 5)
+while j < 5 { j += 1; if j == 3 { continue }; sum2 = sum2 + j }
+cassert(sum2 == 1 + 2 + 4 + 5)
 
 // late-flipping exit flag must NOT trip the non-termination check
 mut done = false

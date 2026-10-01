@@ -10,7 +10,7 @@
 // kinds drive the upass per-op dispatch (red_*, popcount, tuple_concat,
 // while) when this file is re-used by the lhd pyrope re-emission test.
 
-comb addsmall(x:u4, y:u4) -> (r:u8) { r = u8(x) + u8(y) }
+comb addsmall(x:U4, y:U4) -> (r:U8) { r = U8(x) + U8(y) }
 
 const A = 0ub00000000 + 0xb5
 const r_and = A#&[..]
@@ -50,6 +50,6 @@ unique if A#[0] == 1 {
 const s = addsmall(x=3, y=4)
 cassert(s == 7)
 
-type MyT = (mut f:u8 = 0)
+type MyT = (mut f:U8 = 0)
 mut mv:MyT = (f=1)
 cassert(mv.f == 1)

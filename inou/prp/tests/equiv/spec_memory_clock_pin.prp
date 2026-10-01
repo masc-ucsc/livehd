@@ -1,0 +1,23 @@
+/*
+:name: spec_memory_clock_pin
+:type: equiv
+:verilog_top: spec_memory_clock_pin
+:pyrope_top: spec_memory_clock_pin
+*/
+// SPEC (docs 08-memories.md): "The memory is clocked the same way: by the module's
+// single `Clock` input (minted as `clock:Clock` when there is none) unless
+// `clock_pin=` names another."
+// SPEC (qa.md appendix section 6): "`clock_pin=x` / `reset_pin=x` take the signal
+// directly -- no `ref`".
+// Rule encoded here: with two Clock inputs, `clock_pin=cb` (no `ref`) clocks the
+// memory `mb` on `cb` and `clock_pin=ca` clocks `ma` on `ca`.
+pub mod spec_memory_clock_pin(ca:Clock, cb:Clock, we:Bool, a:U2, d:U8, ra:U2) -> (qa:U8@[0], qb:U8@[0]) {
+  reg ma:[4]U8:[clock_pin=ca] = nil
+  reg mb:[4]U8:[clock_pin=cb] = nil
+  qa = ma[ra]
+  qb = mb[ra]
+  if we {
+    ma[a] = d
+    mb[a] = d
+  }
+}

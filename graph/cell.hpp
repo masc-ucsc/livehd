@@ -5,7 +5,9 @@
 #include <cassert>
 #include <charconv>
 #include <cstdint>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/strings/str_cat.h"
@@ -444,5 +446,40 @@ public:
       return Ntype_op::Invalid;
     }
     return it->second;
+  }
+
+  // True when `name` spells a sink pin of `op` (a banked operand's short form
+  // `a`/`b` also counts for its `as`/`bs` bank). Unlike get_sink_pid this never
+  // asserts on a name that is not a pin, so a user-written `__op(pin=...)` can
+  // be validated with it.
+  static bool is_sink_name(Ntype_op op, std::string_view name) {
+    if (op == Ntype_op::Invalid || op >= Ntype_op::Last_invalid || name.empty()) {
+      return false;
+    }
+    const auto& names = name2pid[static_cast<std::size_t>(op)];
+    if (names.contains(name)) {
+      return true;
+    }
+    return is_banked_sink_op(op) && (name == "a" || name == "b") && names.contains(absl::StrCat(name, "s"));
+  }
+
+  // True when `op` has exactly ONE sink pin, so its operand needs no name.
+  static bool has_single_sink(Ntype_op op) {
+    return op != Ntype_op::Invalid && op < Ntype_op::Last_invalid && ntype2single_input[static_cast<std::size_t>(op)];
+  }
+
+  // The sink pins of `op` in pid order, for diagnostics.
+  static std::vector<std::string> sink_names(Ntype_op op) {
+    std::vector<std::string> out;
+    if (op == Ntype_op::Invalid || op >= Ntype_op::Last_invalid) {
+      return out;
+    }
+    for (hhds::Port_id pid = 0; pid < Memory_port_stride; ++pid) {
+      const auto& n = sink_pid2name[pid][static_cast<std::size_t>(op)];
+      if (n != "invalid") {
+        out.push_back(n);
+      }
+    }
+    return out;
   }
 };

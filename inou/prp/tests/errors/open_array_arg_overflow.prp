@@ -1,0 +1,8 @@
+/*
+:name: open_array_arg_overflow
+:type: error
+:error: has an element outside
+*/
+
+comb sum(x:[]U8) -> (total) { total = 0; for a in x { total += a } }
+const r = sum(1,256) // locate_error_here

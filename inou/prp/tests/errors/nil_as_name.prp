@@ -1,0 +1,13 @@
+/*
+:name: nil_as_name
+:type: error
+:error: 'nil' is reserved, so it cannot be a variable name
+:help: wrap it in backticks
+*/
+
+// `nil` is a keyword constant, like `true`/`false`: binding it as a name used
+// to assign into a constant and silently drop the value (`o` read 0).
+pub comb nil_as_name(a:U8) -> (o:U8) {
+  const nil = a
+  o = nil
+}

@@ -1,0 +1,11 @@
+/*
+:name: spec_types_unsigned_min_attr
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// SPEC docs 04-variables "Integer or Signed": "`Unsigned`: the same as `Signed(min=0)` -- a de-facto unsigned
+// integer." Rule: a bare `Unsigned` declaration (and the bare type word) carries min == 0.
+mut b:Unsigned = 3
+cassert(b.[min] == 0)
+cassert(Unsigned.[min] == 0)

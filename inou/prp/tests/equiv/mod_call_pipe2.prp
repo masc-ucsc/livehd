@@ -5,10 +5,10 @@
 :pyrope_top: top
 */
 
-pipe[1..=10] mul(a:u16, b:u16) -> (c:u32) { c = a * b }
-// mod_call_pipe.prp has: comb mul(a:u16, b:u16) -> (c:u32) { c = a * b }
+pipe[1..=10] mul(a:U16, b:U16) -> (c:U32) { c = a * b }
+// mod_call_pipe.prp has: comb mul(a:U16, b:U16) -> (c:U32) { c = a * b }
 
-pub mod top(in1:u16, in2:u16) -> (out:u32@[3]) {
+pub mod top(in1:U16, in2:U16) -> (out:U32@[3]) {
   stage[3] out = mul(a=in1, b=in2)
   //out = tmp
 }

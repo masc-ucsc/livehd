@@ -10,6 +10,6 @@
 // literal Verilog shape is NOT actually cyclic). FIXED (2026-06-30): the
 // self-referencing packed array now splits into per-element wire leaf nets, so
 // prp-v2prp2v-array_selfref PROVES equivalent (see the .v header for the fix).
-pub comb top(a_0:u2, a_1:u2) -> (z:u2) {
+pub comb top(a_0:U2, a_1:U2) -> (z:U2) {
   z = a_0 ^ a_1
 }

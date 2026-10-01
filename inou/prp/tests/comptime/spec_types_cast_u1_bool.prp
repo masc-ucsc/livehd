@@ -1,0 +1,10 @@
+/*
+:name: spec_types_cast_u1_bool
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// SPEC qa.md appendix section 1: "Casts/conversions use the type names: `U1(flag)`, ...". docs 04-variables
+// "Boolean": "The idiomatic bool->bit conversion is `U1(b)`". Rule: U1(true)==1, U1(false)==0.
+cassert(U1(true) == 1)
+cassert(U1(false) == 0)

@@ -1,0 +1,10 @@
+/*
+:name: clkrst_clock_as_data_op
+:type: error
+:tolg: 1
+:error: a Clock is not data \(operator `and`\)
+*/
+// ... and so is any operator on it.
+pub mod clkrst_clock_as_data_op(clk:Clock, a:U8) -> (o:Bool@[0]) {
+  o = clk and (a != 0)
+}

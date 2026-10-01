@@ -18,19 +18,19 @@
 // dependency counter unsatisfied and the accumulator color never fires (sum
 // freezes). The 2-on/2-off enable pattern makes either failure a different
 // exact final sum than the golden mirror.
-mod cond_inner(a:u8) -> (out:u8@[0]) {
-  reg q:u8 = 0
+mod cond_inner(a:U8) -> (out:U8@[0]) {
+  reg q:U8 = 0
   q = q ^ a
   out = q
 }
 
-pub mod cond_accum_top(en:bool, a:u8) -> (sum:u8@[0], cur:u8@[0]) {
-  mut v:u8 = 0
+pub mod cond_accum_top(en:Bool, a:U8) -> (sum:U8@[0], cur:U8@[0]) {
+  mut v:U8 = 0
   if en {
     v = cond_inner(a)
   }
   cur = v
-  reg acc:u8 = 0
+  reg acc:U8 = 0
   wrap acc = acc + v
   sum = acc
 }

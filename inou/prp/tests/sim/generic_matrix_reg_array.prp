@@ -1,0 +1,115 @@
+/*
+:name: generic_matrix_reg_array
+:type: simulation
+*/
+// lhdtrack suggestions.md 2.2 -- the br_arb_lru goal: an N x N pairwise
+// priority matrix kept as a REGISTER ARRAY of rows, `reg ...:[N]Unsigned(bits=N)`,
+// updated and expanded with per-element bit assignments `m[i]#[j] = ...` inside
+// nested `for` loops, instead of one packed `Unsigned(bits=N*N)`.
+//
+// Both modules below are the same least-recently-granted state; the output is
+// the full matrix, row-major (bit i*N+j is 1 when requester i beats j; the
+// lower triangle is the complement of the upper one, the diagonal is 0).
+// `lru_packed` is the form lhdtrack's cleaned br_lru_state_internal.prp had to
+// use and compiles today; it is the golden. `lru_rows` is the form it should be
+// able to use. It stores the COMPLEMENT (`loses`) so its reset value is a plain
+// 0 (reg_array_comb_init.prp covers a per-entry reset).
+//
+// `lru_rows` did not compile: the generic element width was dropped ("memory
+// 'loses' element type must be a sized integer or bool", 2.2a), and a `reg`
+// array written inside a rolled `for` was an internal error ("memory ... lowered
+// 0 write sites but the pre-scan counted ..."); such a loop is unrolled (user
+// ruling 2026-09-27 #15). With `type Row = Unsigned(bits=N)` elements the bit
+// assignments reported "out of bounds access: index k on tuple `matrix` of size
+// k" instead (2.2e).
+
+comb upper_triangle(size) -> (mask) {
+  mut m = 0
+  for row in 0..<size {
+    m |= (((1 << size) - 1) & ~((1 << (row + 1)) - 1)) << (row * size)
+  }
+  mask = m
+}
+
+mod lru_packed<N=2>(update:Bool, grant:Unsigned(bits=N)) -> (state:Unsigned(bits=N*N)@[0]) {
+  comptime const STORED = upper_triangle(size=N)
+  reg wins:Unsigned(bits=N*N) = STORED
+  mut next_wins = wins
+  if update {
+    for i in 0..<N {
+      next_wins#[(i*N)..+N] = if grant#[i] == 1 { 0 } else { wins#[(i*N)..+N] | grant }
+    }
+  }
+  wins = next_wins & STORED
+
+  mut matrix:Unsigned(bits=N*N) = 0
+  for i in 0..<N {
+    for j in 0..<N {
+      if i < j {
+        matrix#[i*N + j] = wins#[i*N + j]
+      } elif i > j {
+        matrix#[i*N + j] = ~wins#[j*N + i] & 1
+      }
+    }
+  }
+  state = matrix
+}
+
+mod lru_rows<N=2>(update:Bool, grant:Unsigned(bits=N)) -> (state:Unsigned(bits=N*N)@[0]) {
+  // loses[i]#[j], j > i: requester i LOSES to requester j (the rest stays 0).
+  reg loses:[N]Unsigned(bits=N) = 0
+  if update {
+    for i in 0..<N {
+      for j in 0..<N {
+        if j > i {
+          if grant#[i] == 1 {
+            loses[i]#[j] = 1          // a granted requester loses to everyone
+          } elif grant#[j] == 1 {
+            loses[i]#[j] = 0          // everyone beats a granted requester
+          }
+        }
+      }
+    }
+  }
+
+  mut matrix:[N]Unsigned(bits=N) = 0
+  for i in 0..<N {
+    for j in 0..<N {
+      if i < j {
+        matrix[i]#[j] = ~loses[i]#[j] & 1
+      } elif i > j {
+        matrix[i]#[j] = loses[j]#[i]
+      }
+    }
+  }
+  mut s:Unsigned(bits=N*N) = 0
+  for i in 0..<N {
+    s#[(i*N)..+N] = matrix[i]
+  }
+  state = s
+}
+
+pub mod generic_matrix_reg_array(update:Bool, grant:U4) -> (packed:U16@[0], rows:U16@[0]) {
+  packed = lru_packed<N=4>(update=update, grant=grant)
+  rows   = lru_rows<N=4>(update=update, grant=grant)
+}
+
+test generic_matrix_reg_array.same_state {
+  mut dut  = generic_matrix_reg_array
+  mut bad  = 0
+  mut seen = 0
+  tick 40 {
+    dut.reset  = clock == 0
+    dut.update = (clock % 3) != 2
+    dut.grant  = if clock % 5 == 4 { 0ub0110 } else { 1 << ((clock * 7 + (clock >> 2)) % 4) }
+    step
+    if dut.packed != dut.rows { bad += 1 }
+    // hand-derived: the reset matrix, then requester 3 (clock 1: no change)
+    // and requester 1 (clock 3) granted
+    if clock == 1 and dut.rows != 0x08CE { bad += 1 }
+    if clock == 3 and dut.rows != 0x2A0E { bad += 1 }
+    seen |= dut.packed ^ 0x08CE        // bits that ever left the reset matrix
+  }
+  assert(bad == 0, "array-of-rows matrix == packed matrix every cycle")
+  assert(seen != 0, "the matrix left its reset value")
+}

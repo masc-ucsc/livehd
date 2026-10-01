@@ -1,0 +1,21 @@
+/*
+:name: spec_parsers_paren_after_typed_decl
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// docs 02-basics "Newlines and spaces": "If the line starts with an
+// alphanumeric ... value or an open parenthesis (`(`), the rest of the line
+// belongs to a new statement."
+// qa.md chat ruling "Parser consistency: lhd (prpparse) and the tree-sitter
+// grammar must be consistent."
+//
+// The `(` line below is a destructuring statement of its own, also right after
+// a declaration whose type could take a `(...)` constraint (`mut x:U8`). The
+// comptime harness checks this file twice: as written, and after
+// `lhd pyrope fmt` (built on the tree-sitter grammar), so the formatted text
+// must keep the two statements apart.
+mut r = 0
+mut x:U8
+(r, x) = (1, 2)
+cassert(r == 1 and x == 2)

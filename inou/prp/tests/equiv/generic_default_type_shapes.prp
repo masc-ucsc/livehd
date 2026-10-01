@@ -1,0 +1,41 @@
+/*
+:name: generic_default_type_shapes
+:type: equiv
+:verilog_top: generic_default_type_shapes
+:pyrope_top: generic_default_type_shapes
+*/
+
+// 06-functions.md: "A declared default may be a type", and `Unsigned(bits=W)`
+// is valid wherever a type is. A generic DEFAULT is re-read by name at each
+// call, so every name it reads must be declared (ruling 2026-09-28 #24) --
+// but a constrained type's keys (`bits=`, `max=`, `min=`) and a tuple type's
+// field names are not reads. Checking them as reads made each default below
+// a bogus "read of undefined variable 'bits'/'min'/'hi'".
+const K = 4
+
+comb low<T=Unsigned(bits=K)>(a:U8) -> (r:T) {  // the default types the output
+  r = a#[0..<4]
+}
+
+comb neg<T=Signed(max=7, min=-8)>(a:S4) -> (r:T) {  // inferred: T is s4
+  r = a
+}
+
+comb hi<T=(lo:U4, hi:U4)>(a:T) -> (r:U4) {  // inferred from the tuple actual
+  r = a.hi
+}
+
+mod wide<W=8>(a:Unsigned(bits=W)) -> (o:Unsigned(bits=W)@[0]) {
+  // A nested lambda's default reads the enclosing generic W.
+  comb pass<T=Unsigned(bits=W)>(x:Unsigned(bits=W)) -> (r:T) {
+    r = x
+  }
+  o = pass(x=a)
+}
+
+pub mod generic_default_type_shapes(a:U8, s:S4) -> (l:U4@[0], n:S4@[0], h:U4@[0], w:U8@[0]) {
+  l = low(a=a)
+  n = neg(a=s)
+  h = hi(a=(lo=a#[0..<4], hi=a#[4..<8]))
+  w = wide(a=a)
+}

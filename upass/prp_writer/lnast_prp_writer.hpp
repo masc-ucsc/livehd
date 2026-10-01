@@ -63,6 +63,10 @@ public:
   // one of them becomes a file-top `const X = import("X.X")` so the cross-module
   // call resolves on re-compile.  Owned by the pass; must outlive write_all().
   void set_known_modules(const std::unordered_set<std::string>* m) { known_modules_ = m; }
+  // The TEMPLATE units this run does not write (pass.prp_writer drops an
+  // unelaborated template): an input default that calls one has no spelling
+  // the emitted file can resolve (render_port_default).
+  void set_unemitted_modules(const std::unordered_set<std::string>* m) { unemitted_modules_ = m; }
   // The names (last `.`-component) of every module emitted in this run.  A
   // func_call whose callee is one of these is a real submodule instantiation, so
   // the writer annotates it with `::[name=<lhs>]` to preserve the bound
@@ -76,6 +80,16 @@ public:
   // to these are sink-instance statements, not value-producing assignments.
   // Owned by the pass; must outlive write_all().
   void set_sink_modules(const std::unordered_set<std::string>* m) { sink_modules_ = m; }
+  // Verilog-origin `Clock`-class inputs that must print as DATA (`:U1`) even
+  // though their own body uses them only as a clock: a Clock is not data and
+  // there are no derived clocks (docs 07-typesystem), so every net a call
+  // connects agrees -- a clock passed into a child's data input (an ICG's
+  // `clk`, a `ca` the child never names `clk`) keeps the caller's port data,
+  // and a child clock fed from data (a gated net) becomes data too. Keys are
+  // clock_port_key(unit, port). Computed over ALL units by clock_data_ports.
+  void set_clock_data_ports(const absl::flat_hash_set<std::string>* m) { clock_data_ports_ = m; }
+  [[nodiscard]] static std::string                      clock_port_key(std::string_view unit, std::string_view port);
+  [[nodiscard]] static absl::flat_hash_set<std::string> clock_data_ports(const std::vector<std::shared_ptr<Lnast>>& units);
 
 private:
   std::ostream&             os;
@@ -209,7 +223,8 @@ private:
   void      write_tuple_concat();
   // Renders a tuple_add node in EXPRESSION position (no LHS child) as a Pyrope
   // tuple literal `(v0, v1, …)` — used for a memory declare's initializer.
-  void      write_tuple_literal();
+  // `raw_bits` > 0 prints each element through render_raw_value.
+  void      write_tuple_literal(int raw_bits = 0);
   void      write_attr_set();
   void      write_delay_assign();
 
@@ -274,13 +289,20 @@ private:
   std::string                                  render_timecheck_suffix(Lnast_nid check) const;
 
   // Serialises a type node (cursor must sit on the type child) into a Pyrope
-  // type suffix without moving the cursor: "" for prim_type_none, "bool",
-  // "string", or "int"/"uN"/"sN" reconstructed from a prim_type_int range.
+  // type suffix without moving the cursor: "" for prim_type_none, "Bool",
+  // "String", "Clock", "Reset", or "Signed"/"U<N>"/"S<N>" reconstructed from a
+  // prim_type_int range.
   std::string                           render_type();
   // Same, but on an explicit node id (used by the io-port walk, which navigates
   // the tree directly rather than through the shared cursor). Also handles
   // comp_type_array -> "[N]T".
   std::string                           render_type_at(Lnast_nid type_nid);
+  // The element width W of a Verilog-read array type whose signed `sW`
+  // element render_type_at spells as its raw `uW` storage, else 0.
+  int                                   raw_elem_bits(Lnast_nid type_nid);
+  // A value stored into that raw storage: a negative integer constant prints
+  // as its `bits`-wide pattern (`-3` into u8 -> 253), anything else as is.
+  std::string                           render_raw_value(Lnast_nid nid, int bits);
   // Scalar UNSIGNED widths (`a_i:u52` -> 52) of ports (recorded as the signature
   // prints) and of `uN`-declared body variables (recorded by the pre-walk), so a
   // mask that selects every bit of one can be dropped as a no-op. Only `uN`: on
@@ -321,9 +343,26 @@ private:
   // emit_module_header (slang io node) and write_func_def (pyrope lambda
   // signature).  is_output adds the `@[N]` landing-cycle annotation on a `mod`.
   void        emit_port_group(Lnast_nid tup_nid, bool is_output, bool is_mod);
+  // ` = <expr>` for a defaulted comb input, from its body-prologue default
+  // store; empty when the input has none (see definition).
+  std::string render_port_default(std::string_view raw_port);
+  // `callee(k = v, …)` of a default's call (render_port_default): its
+  // arguments render like any operand, a nested default call included.
+  std::string render_default_call(Lnast_nid call);
   // True if the module body declares state (a `reg`/`latch` declare, anywhere
-  // in the stmts subtree) — selects `mod` over `comb`.
+  // in the stmts subtree) — selects `mod` over `comb`. The default-only
+  // prologue of a defaulted comb input (default_prologue_) is not hardware of
+  // the module: a call there is the default's expression, not an instance.
   bool        body_has_state(Lnast_nid stmts_nid) const;
+
+  // The default-only prologue statements (upass::unused_default_prologue class
+  // indices) of the module being written; see body_has_state.
+  absl::flat_hash_set<int64_t> default_prologue_;
+
+  // The single-use call temps a default being rendered spells inline, by name
+  // -> their func_call (render_value renders a read of one as the call).
+  absl::flat_hash_map<std::string, Lnast_nid> default_calls_;
+
   // The lambda name to emit: the last `.`-component of the top module name
   // (e.g. "trivial_if.fun3" -> "fun3"), so the generated identifier is a plain
   // Pyrope name (no dotted/escaped identifier the re-compile leg would reject).
@@ -396,12 +435,14 @@ private:
   // Set of all module names emitted in this run (see set_known_modules); a
   // func_call callee in this set is emitted as a file-top import.
   const std::unordered_set<std::string>*        known_modules_{nullptr};
+  const std::unordered_set<std::string>*        unemitted_modules_{nullptr};  // see set_unemitted_modules
   // Set of every module name emitted in this run, tail-keyed (see
   // set_instantiated_modules); a func_call to one of these is a real submodule
   // instantiation and the writer emits a `::[name=<lhs>]` call-site
   // instance-name annotation.
   const std::unordered_set<std::string>*        instantiated_modules_{nullptr};
   const std::unordered_set<std::string>*        sink_modules_{nullptr};
+  const absl::flat_hash_set<std::string>*       clock_data_ports_{nullptr};
   // Distinct func_call callee names seen in this unit (populated in scan_node).
   absl::flat_hash_set<std::string>              func_call_callees_;
   // Import-const alias per callee module name, used when the natural import name
@@ -432,14 +473,14 @@ private:
   // skips re-emitting a folded attr that occurs deeper than the top-level body
   // (e.g. a memory's `mem.[wensize]=N` written inside the always block).
   absl::flat_hash_set<std::string>                                   folded_keys_;
-  // Body nets a reg binds as its clock/reset pin (`reg q:[clock_pin=ref <net>]`).
+  // Body nets a reg binds as its clock/reset pin (`reg q:[clock_pin=<net>]`).
   // A derived clock (`gclk = clk_b & gate`) is an internal combinational signal:
   // the declare-first hoist would emit the reg ahead of `<net>`'s driver, so the
   // `ref` would resolve to the net's pre-driver value (the `clock_pin '0'`
   // tolg error). write_module makes each such net POSITION-INDEPENDENT — a
   // `wire` pre-declare when its single driver allows it, otherwise a minted
   // `wire <net>__pinw` alias assigned the net's final value at the region end
-  // (the attr rewritten to `ref <net>__pinw`); the names are stripped (post-SSA).
+  // (the attr rewritten to `<net>__pinw`); the names are stripped (post-SSA).
   absl::flat_hash_set<std::string>                                   pin_dep_nets_;
   // EVERY body net read as the ref value of a folded attribute, for ANY key (a
   // superset of pin_dep_nets_, which covers only the `_pin` keys whose driver is
@@ -475,6 +516,17 @@ private:
   // slang attr vocabulary to the Pyrope source one: initial->init,
   // sync->async with the value inverted, everything else verbatim).
   void        collect_folded_attrs(Lnast_nid stmts_nid);
+  // Clocks and resets bind BY TYPE in Pyrope (docs 07-typesystem "Clock and
+  // Reset"): decide, per `Clock`/`Reset`-class input (io_meta sig; a Verilog
+  // unit's clk/rst were stamped by upass.ssa), whether the signature prints it
+  // `:Clock`/`:Reset` (clock_reset_port_type_) or keeps its data type because
+  // the body also reads it as data -- then every register that relied on it as
+  // the implicit clock/reset gets an explicit `clock_pin=`/`reset_pin=`
+  // (implicit_pin_inject_, by emitted reg name) so no clock is minted.
+  void        plan_clock_reset_ports(Lnast_nid stmts_nid, bool is_mod);
+  absl::flat_hash_map<std::string, std::string> clock_reset_port_type_;  // raw port name -> "Clock"/"Reset"
+  absl::flat_hash_set<std::string>              clock_copy_nets_;        // nets carrying a clock into a clock pin
+  absl::flat_hash_map<std::string, std::string> implicit_pin_inject_;    // emitted reg name -> "clock_pin=x, …"
   // Render an attr value leaf (const text or ref name) to Pyrope source.
   std::string render_attr_value(Lnast_nid value_nid) const;
 
@@ -583,6 +635,17 @@ private:
   std::vector<Lnast_nid>                 set_mask_nodes_;                             // every set_mask, same range-mask resolution
   std::vector<std::pair<Lnast_nid, int>> tuple_get_nodes_;                            // every tuple_get + its pre-order index
   std::vector<std::pair<Lnast_nid, int>> store_nodes_;                                // every store + its pre-order index
+  // Element stores (`store(mem, i.., v)`) by the name of their value `v`.
+  absl::flat_hash_map<std::string, Lnast_nid>    element_store_by_value_;
+  // Constant-mask get_masks by the name of their source (the first one).
+  absl::flat_hash_map<std::string, Lnast_nid>    const_get_mask_by_source_;
+  // The store that closes a memory PARTIAL write `mem[i]#[..] = v` whose
+  // read-modify-write this set_mask is (element read -> set_mask -> [full-width
+  // get_mask] -> store back to the same element), or invalid. See the
+  // definition.
+  Lnast_nid                                      mem_partial_write_store(Lnast_nid set_mask_nid) const;
+  // Operands `a` and `b` hold the same value (see the definition).
+  bool                                           same_operand(Lnast_nid a, Lnast_nid b, int budget = 8) const;
   // Module-instance results (`mut inst = Mod(args)`), stripped names: their output
   // ports may print with dot notation `inst.port` (instead of `inst["port"]`).
   absl::flat_hash_set<std::string>       instance_results_;
@@ -675,7 +738,20 @@ private:
   // frame is what overflowed a 512 KiB worker stack on CVA6.
   std::string        render_infix_rhs(Lnast_nid def, Lnast_ntype::Lnast_ntype_int t, std::string_view sym, bool operand_ctx);
   std::string        render_get_mask_rhs(Lnast_nid c0, bool operand_ctx);
+  // The position operand when `mask` is the one-bit `1 << pos` a runtime or
+  // named bit index lowers to (`a#[i]`), else invalid.
+  Lnast_nid          single_bit_mask_pos(Lnast_nid mask) const;
   std::string        render_concat_rhs(Lnast_nid c0, bool operand_ctx);
+  // `~x` under user ruling 26 (the re-read flips an unsigned-typed operand's
+  // own width): the typed bit_not(x, N) and the plain `-x - 1` are each spelled
+  // so the recompile computes the same value. See the definition.
+  std::string        render_bit_not_rhs(Lnast_nid c0, bool operand_ctx);
+  // The width of `n` when it is a NAME whose emitted declaration printed
+  // `:uN` (and is read by that name, not inlined), else 0.
+  int                emitted_ubits_of_name(Lnast_nid n) const;
+  // The window width when `n` is a folded get_mask that prints as a slice
+  // (`x#[lo..=hi]`, a uN on re-read), else 0.
+  int                renders_as_slice_bits(Lnast_nid n) const;
   std::string        render_tuple_get_rhs(Lnast_nid c0);
   // `(s)` when a loose (infix / unary) spelling sits as an operand of another
   // operator, else `s` unchanged -- parens only where precedence needs them.
@@ -694,7 +770,15 @@ private:
   int                x_poison_width(Lnast_nid val_nid) const;
   // Names whose EMITTED declaration (port signature or `:T` suffix) states the
   // width, so a width-taking `0sb?` re-parses to the same value.
-  absl::flat_hash_set<std::string> typed_emitted_;
+  absl::flat_hash_set<std::string>      typed_emitted_;
+  // ...and, of those, the ones printed `:uN`: N. What the recompile types the
+  // name as, which is what a `~` of it flips (user ruling 26) -- unlike
+  // port_bits_, which also holds widths the output never prints (a compiler
+  // temp's type_spec, a value-stmt def).
+  absl::flat_hash_map<std::string, int> emitted_ubits_;
+  // Record that `name`'s emitted declaration prints the type `type_txt`
+  // (`alias_ubits` is the N of the uN a named type alias `type_txt` stands for).
+  void                                  note_emitted_type(std::string_view name, std::string_view type_txt, int alias_ubits = 0);
 
   // ── Utilities ────────────────────────────────────────────────────────────
   // True for a compiler SSA temp: a raw `%`-prefixed name (or legacy `___`

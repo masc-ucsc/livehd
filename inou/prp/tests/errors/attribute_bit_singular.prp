@@ -7,5 +7,5 @@
 
 // Singular/plural near-miss of a built-in attribute name.
 
-mut x:u8 = 1
+mut x:U8 = 1
 const b = x.[bit]  // locate_error_here

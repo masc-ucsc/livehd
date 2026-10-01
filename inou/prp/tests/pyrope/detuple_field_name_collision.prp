@@ -10,10 +10,10 @@
 // tuple, rejecting its split: "cannot assign tuple value to `resp` (it is
 // integer); a variable's type cannot change".  All fields are driven so no `wire`
 // is left undriven.
-pub comb detuple_field_name_collision(a:u8, b:u8, v:u1, w:u1) -> (o1:u8, o2:u8, o3:u1, o4:u8, o5:u1) {
-  wire io:(resp:u8, req:u8, other:u8) = nil
-  wire resp:(valid:u1, bits:u8) = nil
-  wire req:(valid:u1, bits:u8) = nil
+pub comb detuple_field_name_collision(a:U8, b:U8, v:U1, w:U1) -> (o1:U8, o2:U8, o3:U1, o4:U8, o5:U1) {
+  wire io:(resp:U8, req:U8, other:U8) = nil
+  wire resp:(valid:U1, bits:U8) = nil
+  wire req:(valid:U1, bits:U8) = nil
   io.resp  = a
   io.req   = b
   io.other = a ^ b

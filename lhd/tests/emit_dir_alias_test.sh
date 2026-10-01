@@ -25,11 +25,11 @@ rc=0
 fail() { echo "FAIL: $*"; rc=1; }
 
 cat > "$W/lib_thing.prp" <<'EOF'
-pub mod thing(a:u8) -> (o:u8@[0]) { o = a }
+pub mod thing(a:U8) -> (o:U8@[0]) { o = a }
 EOF
 cat > "$W/use.prp" <<'EOF'
 const lib_thing = import("lib_thing")
-pub mod use_top(a:u8) -> (o:u8@[0]) { o = lib_thing.thing(a=a).o }
+pub mod use_top(a:U8) -> (o:U8@[0]) { o = lib_thing.thing(a=a).o }
 EOF
 
 # The input library the aliasing runs would clobber.

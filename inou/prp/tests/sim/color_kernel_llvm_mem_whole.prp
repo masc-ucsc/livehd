@@ -7,13 +7,13 @@
 // callbacks; the legacy direct-color backend does not yet satisfy the existing
 // mem_whole registered-read assertion, so this regression does not disguise
 // that independent issue as an LLVM failure.
-mod llvm_mem_whole(inp:u80, idx:u3, cinp:u80, cidx:u3) -> (r:u10@[0], allout:u80@[0], cr:u10@[0], call:u80@[0]) {
-  reg arr:[8]u10 = nil
+mod llvm_mem_whole(inp:U80, idx:U3, cinp:U80, cidx:U3) -> (r:U10@[0], allout:U80@[0], cr:U10@[0], call:U80@[0]) {
+  reg arr:[8]U10 = nil
   arr = inp
   r = arr[idx]
   allout = arr
 
-  mut carr:[8]u10
+  mut carr:[8]U10
   carr = cinp
   cr = carr[cidx]
   call = carr

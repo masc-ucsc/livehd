@@ -13,7 +13,7 @@
 // struct net differently from its store (flat store vs bundle-leaf reads) and
 // folded to the leaves' 0-init. Semantically the golden forwards in_valid and
 // ctrl.rfWen (= in_bits bit 10) through a pass-through submodule.
-pub comb top(in_valid:u1, in_bits:u20) -> (out_valid:u1, out_r:u8) {
+pub comb top(in_valid:U1, in_bits:U20) -> (out_valid:U1, out_r:U8) {
   out_valid = in_valid
   out_r = (in_bits >> 10) & 1
 }

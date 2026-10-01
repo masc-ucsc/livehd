@@ -1,0 +1,11 @@
+/*
+:name: spec_types_generic_unsigned_bits_arg
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// SPEC docs 07-typesystem "Bitwidth": "`Unsigned(bits=N)` ... valid wherever a type is: ... generic arguments
+// (`<T=Unsigned(bits=W)>`)".
+comb bw<T>(a:T) -> (o) { o = a.[bits] }
+comptime const W = 6
+cassert(bw<T=Unsigned(bits=W)>(a=1) == 6)

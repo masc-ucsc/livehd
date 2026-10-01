@@ -35,21 +35,21 @@
 // exactly this reason.
 //
 // STATUS: LIVE. The values pin the non-flattened occurrence-wide schedule.
-comb split(a:u8, b:u8, c:u8, d:u8) -> (o1:u16, o2:u16) {
+comb split(a:U8, b:U8, c:U8, d:U8) -> (o1:U16, o2:U16) {
   o1 = a + b      // cone {a, b} only
   o2 = c * d      // cone {c, d} only
 }
 
-pub mod ftop::[timecheck=false](a:u8, b:u8, d:u8, bump:u8) -> (sum:u16@[], prod:u16@[]) {
-  wire back:u8 = nil
+pub mod ftop::[timecheck=false](a:U8, b:U8, d:U8, bump:U8) -> (sum:U16@[], prod:U16@[]) {
+  wire back:U8 = nil
   mut (o1, o2) = split(a=a, b=b, c=back, d=d)
   // THE FALSE EDGE: the caller feeds o1 back into the input o2 needs. o1 does
   // not depend on `c`, so a correct schedule exists — it just is not the
   // all-inputs-then-all-outputs atomic call.
   back = (o1 + bump) & 0xFF
 
-  reg rs:u16 = 0
-  reg rp:u16 = 0
+  reg rs:U16 = 0
+  reg rp:U16 = 0
   rs   = o1
   rp   = o2
   sum  = rs
@@ -62,10 +62,10 @@ test ftop.false_loop_values {
   mut bad_sum  = 0
   mut bad_prod = 0
   tick 6 {
-    mut av:u8   = 10 + clock
-    mut bv:u8   = 20 + (clock * 2)
-    mut dv:u8   = 3 + clock
-    mut bumpv:u8 = 7
+    mut av:U8   = 10 + clock
+    mut bv:U8   = 20 + (clock * 2)
+    mut dv:U8   = 3 + clock
+    mut bumpv:U8 = 7
     acc.a    = av
     acc.b    = bv
     acc.d    = dv
@@ -73,9 +73,9 @@ test ftop.false_loop_values {
     step
     // Golden, evaluated in the only order that exists: o1 first, then the
     // caller's `back`, then o2.
-    mut g_o1:u16 = av + bv
-    mut g_back:u8 = (g_o1 + bumpv) & 0xFF
-    mut g_o2:u16 = g_back * dv
+    mut g_o1:U16 = av + bv
+    mut g_back:U8 = (g_o1 + bumpv) & 0xFF
+    mut g_o2:U16 = g_back * dv
     seen = seen + 1
     if acc.sum != g_o1 {
       bad_sum = bad_sum + 1

@@ -9,9 +9,9 @@
 // equality). Exact type, superset receiver, and a narrower integer field all
 // pass; both call forms (UFCS + direct positional) bind the same way.
 
-type t1 = (a:u32=nil, b:string="")
-type t3 = (a:u32=nil, b:string="", c:bool=false)  // superset of t1
-type tn = (a:u8=nil, b:string="")                 // a:u8 range ⊆ a:u32
+type t1 = (a:U32=nil, b:String="")
+type t3 = (a:U32=nil, b:String="", c:Bool=false)  // superset of t1
+type tn = (a:U8=nil, b:String="")                 // a:U8 range ⊆ a:U32
 
 comb set_b(ref self:t1) {
   self.b = "foo"

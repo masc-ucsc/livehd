@@ -11,32 +11,32 @@
 // temporaries. This file exercises that handoff with no instance boundary to
 // hide behind.
 //
-// THE SHAPE. `s1` fans out to two consumers and `s2` fans out to two consumers,
+// THE SHAPE. `st1` fans out to two consumers and `st2` fans out to two consumers,
 // so both are MFFC roots — the boundaries are exactly where a value must
 // survive from one color into the next. `tap1`/`tap2` publish those
 // boundary values as outputs, so a handoff that dropped or recomputed one shows
 // up as a wrong number rather than as a silently different schedule.
 //
 // The point is that these values remain correct under any legal coarsening.
-pub mod handoff(a:u8, b:u8, c:u8) -> (out:u16@[1], tap1:u16@[1], tap2:u16@[1]) {
+pub mod handoff(a:U8, b:U8, c:U8) -> (out:U16@[1], tap1:U16@[1], tap2:U16@[1]) {
   // Boundary 1: read by BOTH branches below -> fanout 2 -> its own partition.
-  mut s1:u16 = (a + b) & 0xFF
+  mut st1:U16 = (a + b) & 0xFF
 
-  mut lhs:u16 = s1 + c
-  mut rhs:u16 = s1 ^ 0x5A
+  mut lhs:U16 = st1 + c
+  mut rhs:U16 = st1 ^ 0x5A
 
   // Boundary 2: same story one level down.
-  mut s2:u16 = (lhs + rhs) & 0xFFF
+  mut st2:U16 = (lhs + rhs) & 0xFFF
 
-  mut tail:u16 = (s2 * 3) & 0xFFF
-  mut side:u16 = (s2 + a) & 0xFFF
+  mut tail:U16 = (st2 * 3) & 0xFFF
+  mut side:U16 = (st2 + a) & 0xFFF
 
-  reg ro:u16 = 0
-  reg r1:u16 = 0
-  reg r2:u16 = 0
+  reg ro:U16 = 0
+  reg r1:U16 = 0
+  reg r2:U16 = 0
   ro = (tail + side) & 0xFFF
-  r1 = s1
-  r2 = s2
+  r1 = st1
+  r2 = st2
   out  = ro
   tap1 = r1
   tap2 = r2
@@ -49,20 +49,20 @@ test handoff.values_cross_every_boundary {
   mut bad_tap1 = 0
   mut bad_tap2 = 0
   tick 8 {
-    mut av:u8 = 10 + clock
-    mut bv:u8 = 20 + (clock * 3)
-    mut cv:u8 = 5 + clock
+    mut av:U8 = 10 + clock
+    mut bv:U8 = 20 + (clock * 3)
+    mut cv:U8 = 5 + clock
     acc.a = av
     acc.b = bv
     acc.c = cv
     step
-    mut g_s1:u16   = (av + bv) & 0xFF
-    mut g_lhs:u16  = g_s1 + cv
-    mut g_rhs:u16  = g_s1 ^ 0x5A
-    mut g_s2:u16   = (g_lhs + g_rhs) & 0xFFF
-    mut g_tail:u16 = (g_s2 * 3) & 0xFFF
-    mut g_side:u16 = (g_s2 + av) & 0xFFF
-    mut g_out:u16  = (g_tail + g_side) & 0xFFF
+    mut g_s1:U16   = (av + bv) & 0xFF
+    mut g_lhs:U16  = g_s1 + cv
+    mut g_rhs:U16  = g_s1 ^ 0x5A
+    mut g_s2:U16   = (g_lhs + g_rhs) & 0xFFF
+    mut g_tail:U16 = (g_s2 * 3) & 0xFFF
+    mut g_side:U16 = (g_s2 + av) & 0xFFF
+    mut g_out:U16  = (g_tail + g_side) & 0xFFF
     seen = seen + 1
     if acc.tap1 != g_s1 {
       bad_tap1 = bad_tap1 + 1

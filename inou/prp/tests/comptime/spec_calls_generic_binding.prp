@@ -1,0 +1,23 @@
+/*
+:name: spec_calls_generic_binding
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// docs 06-functions.md: generic call-site bindings follow the argument naming
+// rules: `cassert(addk<U8>(a=3) == 4)  // K defaults to 1 (single unnamed
+// binding is unambiguous -> T)`, `cassert(addk<T=U8, K=10>(a=3) == 13)`, and
+// "a bound identifier whose name matches the generic's name" binds by name.
+
+comb addk<T, K=1>(a:T) -> (r) { r = a + K }
+cassert(addk<U8>(a=3) == 4)
+cassert(addk<T=U8, K=10>(a=3) == 13)
+
+comb lin<A, B>(v) -> (r) { r = v * A + B }
+comb lin_local(v) -> (r) {
+  const A = 10
+  const B = 3
+  r = lin<B, A>(v)            // A, B bind by name match, not by position
+}
+cassert(lin_local(v=2) == 23)

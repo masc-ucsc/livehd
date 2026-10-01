@@ -4,4 +4,4 @@
 :error: recursive enum payloads are not supported
 :help: finite nested enum
 */
-const Expr = enum(value:signed, add:(Expr,Expr))
+enum Expr = (value:Signed, add:(Expr,Expr))

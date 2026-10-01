@@ -9,7 +9,7 @@
 // an inline anonymous tuple type with an `init` comb. Construction must run
 // init(ref constructed, 0), so the field becomes 0 + 1 == 1.
 mut constructed:(
-  mut field:u32,
+  mut field:U32,
   comb init(ref self, v) { self.field = v + 1 }
 ) = 0
 cassert(constructed.field == 1)

@@ -1,0 +1,7 @@
+// Imported helper for ../state_feedback_import.prp: a Moore child. `q` is a
+// pure read of the register `r`; `d` and `en` only reach `r`'s next state.
+pub mod st(rst:Reset, en:Bool, d:U4) -> (q:U4@[0]) {
+  reg r:U4:[reset_pin=rst] = 8
+  if en { r = d }
+  q = r
+}

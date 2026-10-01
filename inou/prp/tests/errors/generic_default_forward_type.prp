@@ -1,0 +1,20 @@
+/*
+:name: generic_default_forward_type
+:type: error
+:error: unknown type or lambda 'Pixel' in a generic default
+:help: declare `Pixel` before
+*/
+
+// User ruling 2026-09-28 (33): a generic default (or a call-site generic
+// argument) names a type or lambda DECLARED EARLIER -- declare before use. The
+// error stays, but it says what is wrong (a type/lambda not declared yet), not
+// the variable wording "read of undefined variable 'Pixel'".
+comb pass<T=Pixel>(a:T) -> (y:T) {  // locate_error_here
+  y = a
+}
+
+type Pixel = U8
+
+pub mod generic_default_forward_type(a:U8) -> (o:U8@[0]) {
+  o = pass(a=a)
+}

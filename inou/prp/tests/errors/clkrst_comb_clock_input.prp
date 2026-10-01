@@ -1,0 +1,12 @@
+/*
+:name: clkrst_comb_clock_input
+:type: error
+:error: a comb holds no state and can not declare a Clock input
+*/
+// docs 04b: a `comb` can not declare a `Clock` or `Reset` input.
+comb gate(c:Clock, a:U8) -> (p:U8) {  // locate_error_here
+  p = a
+}
+pub comb clkrst_comb_clock_input(a:U8) -> (o:U8) {
+  o = a
+}

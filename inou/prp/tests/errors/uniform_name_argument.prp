@@ -1,0 +1,8 @@
+/*
+:name: uniform_name_argument
+:type: error
+:error: reserved
+:help: backticks
+*/
+comb f(`in`) -> (r) { r = `in` }
+const x = f(in=1) // locate_error_here

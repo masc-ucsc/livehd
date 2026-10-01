@@ -24,8 +24,8 @@
 //     (not triggered here: the din/enable muxes have fanout >= 2).
 //   * width inflation: a u8 latch declares `reg [8:0] l` (general signed
 //     magnitude+1 cgen convention, flops too — cosmetic today).
-pub mod lhold8(en:bool, d:u8) -> (q:u8@[0]) {
-  reg l:u8:[latch=true]
+pub mod lhold8(en:Bool, d:U8) -> (q:U8@[0]) {
+  reg l:U8:[latch=true]
   if en {
     l = d
   }

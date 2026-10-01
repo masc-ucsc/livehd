@@ -1,0 +1,24 @@
+/*
+:name: reg_array_init_overflow
+:type: error
+:error: element of .m. \(value 20\) does not fit its declared range \[0, 15\]
+:help: widen the declared type of the elements
+*/
+
+// User ruling 16: a register's initial (reset) value is a write into its
+// declared type, and a `reg` array's per-entry initializer writes every
+// element. A comptime entry of 20 into a u4 element used to be truncated to 4
+// silently (the reset value became 4).
+comb rows(size) -> (r) {
+  mut t:[4]U8 = 0
+  for i in 0..<size {
+    t[i] = 20 + i
+  }
+  r = t
+}
+pub mod reg_array_init_overflow(d:U4, s:U2) -> (q:U4@[1]) {
+  comptime const INIT = rows(size=4)
+  reg m:[4]U4 = INIT   // locate_error_here
+  m[s] = d
+  q = m[s]
+}

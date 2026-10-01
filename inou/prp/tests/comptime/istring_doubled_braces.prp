@@ -1,0 +1,19 @@
+/*
+:name: istring_doubled_braces
+:type: comptime
+:verifier_pass: 7
+:verifier_fail: 0
+*/
+// docs 02-basics "Strings": in a double-quoted string a doubled brace is ONE
+// literal brace (`{{` is `{`, `}}` is `}`), so `"{{num}}"` is the text `{num}`
+// (no interpolation) and `"{{{num}}}"` wraps an interpolation in literal
+// braces. `\{` is not an escape. The escape set is \n \t \r \\ \" \' \` \0
+// \xNN \u{N}.
+const num = 2
+cassert("I have {{num}}" == 'I have {num}')
+cassert("{{{num}}}" == '{2}')
+cassert("a }} b" == 'a } b')
+cassert("x{{" == 'x{')
+cassert("\u{41}\x42" == 'AB')
+cassert("it\'s" == "it's")
+cassert("a\`b" == 'a`b')

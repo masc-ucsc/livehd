@@ -1,0 +1,9 @@
+/*
+:name: vararg_positional_no_overload
+:type: error
+:error: no overload of `choose` matches the call
+*/
+comb capture(...rest) -> (r) { r = 100 }
+comb fixed(a, b) -> (r) { r = a + b }
+const choose = [capture, fixed]
+const r = choose(1,2,3) // locate_error_here

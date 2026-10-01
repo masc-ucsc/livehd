@@ -1,0 +1,10 @@
+/*
+:name: typeword_renamed_generic
+:type: error
+:error: `u8` was renamed `U8`
+*/
+// A generic argument names a type with the capitalized word (`f<U8>`).
+comb pass<T>(a:T) -> (y:T) { y = a }
+pub comb typeword_renamed_generic(a:U8) -> (o:U8) {
+  o = pass<u8>(a)  // locate_error_here
+}

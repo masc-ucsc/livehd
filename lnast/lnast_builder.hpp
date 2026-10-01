@@ -109,6 +109,10 @@ public:
   // current `idx_stmts`, returning the result ref's lname for the cases that
   // produce a value.
   std::string create_bit_not_stmts(std::string_view var_name);
+  // `~var` flipping exactly `bits` bits: the TYPED LNAST `bit_not(dst, var,
+  // bits)` (user ruling 26), an unsigned `bits`-wide result whatever `var`'s
+  // own type. The untyped form above is `-var - 1`.
+  std::string create_bit_not_stmts(std::string_view var_name, int bits);
   std::string create_log_not_stmts(std::string_view var_name);
 
   std::string create_sext_stmts(std::string_view a_var, std::string_view b_var);

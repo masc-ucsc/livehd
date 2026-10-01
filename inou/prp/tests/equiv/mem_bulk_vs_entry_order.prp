@@ -1,0 +1,101 @@
+/*
+:name: mem_bulk_vs_entry_order
+:type: equiv
+:verilog_top: mem_bulk_vs_entry_order
+:pyrope_top: mem_bulk_vs_entry_order
+*/
+// Ruling 45: a whole-array store (`mem = v`) and a per-entry write of the same
+// cycle resolve in PROGRAM ORDER, like any two writes (docs 08-memories, "last
+// write wins"). The per-entry write used to win whatever the order, with only a
+// `memory-update-and-write` warning, so `ec` kept 0xffff-style entries through a
+// later clear. Both orders, plain (`= nil`) and reset-valued (`= 0`) memories,
+// whole-entry and partial (`#[..]`) writes:
+//
+// * `ec`: entry write, then clear -- the clear wins.
+// * `ce`: clear, then entry write -- the entry write wins.
+// * `rl`: reset value; entry write, runtime whole-array load, entry write.
+// * `pc`: whole-entry and lane write, then clear -- the clear wins over both.
+// * `cp`: reset value; entry write, clear, lane write -- the lane lands on the
+//   cleared entry.
+// * `pr` (default program ordering): each user read sees the writes before it
+//   in program order, the whole-array clear included (m1/m2/m3).
+// * `pf` (ordering="fwd"): the read, placed before every write, sees the entry
+//   as the whole cycle leaves it.
+// The ordering="old" reads see the committed contents.
+pub mod mem_bulk_vs_entry_order(wf:Bool, clr:Bool, we:Bool, ld:Bool, a:U2, d:U16, x:U8, z:U64, ra:U2) -> (ec_q:U16@[0], ce_q:U16@[0], rl_q:U16@[0], pc_q:U16@[0], cp_q:U16@[0], m1:U16@[0], m2:U16@[0], m3:U16@[0], f:U16@[0]) {
+  reg ec:[4]U16:[ordering="old"] = nil
+  reg ce:[4]U16:[ordering="old"] = nil
+  reg rl:[4]U16:[ordering="old"] = 0
+  reg pc:[4]U16:[ordering="old"] = nil
+  reg cp:[4]U16:[ordering="old"] = 0
+  reg pr:[4]U16 = nil
+  reg pf:[4]U16:[ordering="fwd"] = nil
+
+  f = pf[ra]
+
+  if wf {
+    ec[a] = d
+  }
+  if clr {
+    ec = 0
+  }
+
+  if clr {
+    ce = 0
+  }
+  if wf {
+    ce[a] = d
+  }
+
+  if wf {
+    rl[a] = d
+  }
+  if ld {
+    rl = z
+  }
+  if we {
+    rl[ra] = x
+  }
+
+  if wf {
+    pc[a] = d
+  }
+  if we {
+    pc[a]#[0..<8] = x
+  }
+  if clr {
+    pc = 0
+  }
+
+  if wf {
+    cp[a] = d
+  }
+  if clr {
+    cp = 0
+  }
+  if we {
+    cp[a]#[8..<16] = x
+  }
+
+  if wf {
+    pr[a] = d
+    pf[a] = d
+  }
+  m1 = pr[ra]
+  if clr {
+    pr = 0
+    pf = 0
+  }
+  m2 = pr[ra]
+  if we {
+    pr[a]#[8..<16] = x
+    pf[a]#[8..<16] = x
+  }
+  m3 = pr[ra]
+
+  ec_q = ec[ra]
+  ce_q = ce[ra]
+  rl_q = rl[ra]
+  pc_q = pc[ra]
+  cp_q = cp[ra]
+}

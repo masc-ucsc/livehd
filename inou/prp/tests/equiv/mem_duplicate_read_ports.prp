@@ -4,10 +4,10 @@
 :lec_top: mem_duplicate_read_ports
 */
 // One async read port, with its value reused twice.
-mod mem_duplicate_read_ports(waddr:u2, wdata:u8, we:u1, raddr:u2) -> (result:u8@[0]) {
-  reg mem:[4]u8 = 0
+mod mem_duplicate_read_ports(waddr:U2, wdata:U8, we:U1, raddr:U2) -> (result:U8@[0]) {
+  reg mem:[4]U8 = 0
   const rd = mem[raddr]
-  result = rd ^ (rd << 1)
+  wrap result = rd ^ (rd << 1)
   if we != 0 {
     mem[waddr] = wdata
   }

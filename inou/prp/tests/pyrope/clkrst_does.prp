@@ -1,0 +1,18 @@
+/*
+:name: clkrst_does
+:type: compile
+*/
+// docs 07-typesystem "Clock and Reset": `Clock` and `Reset` are distinct basic
+// types (`Clock does Bool` is false), and a `Reset` is Bool-like in use (a
+// computed reset, `if rst`) without being a `Bool`.
+pub mod clkrst_does(clk:Clock, rst:Reset, soft:Bool, a:U8) -> (o:U8@[0], busy:Bool@[0]) {
+  cassert(!(Clock does Bool))
+  cassert(clk does Clock and !(clk does Reset))
+  cassert(rst does Reset and !(rst does Bool))
+  cassert(!(a does Clock))
+  o = a
+  busy = rst or soft
+  if rst {
+    o = 0
+  }
+}

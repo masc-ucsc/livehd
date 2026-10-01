@@ -7,7 +7,7 @@
 
 // Runtime (non-comptime) signed `sat`: clamp an 8-bit input to [-8, 7]. The
 // value can over- and under-flow, so two comparisons + muxes, then the clamped
-// low bits are re-signed (sext) to the s4 result.
-pub comb rt_sat_s(a:s8) -> (z:s4) {
+// low bits are re-Signed (sext) to the s4 result.
+pub comb rt_sat_s(a:S8) -> (z:S4) {
   sat z = a
 }

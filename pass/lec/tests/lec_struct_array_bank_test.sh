@@ -6,8 +6,8 @@ LHD=lhd/lhd
 W="${TEST_TMPDIR:-/tmp/lec_struct_array_bank_$$}"
 mkdir -p "$W"
 cat > "$W/bank.prp" <<'PRP'
-pub mod array_field::[timecheck=false](clock:u1, reset:u1, a:u8, b:u8, sel:u1) -> (y:u8@[0]) {
-  reg bank_bits_data:[2]u8:[ordering="old"]
+pub mod array_field::[timecheck=false](`clock`:Clock, `reset`:U1, a:U8, b:U8, sel:U1) -> (y:U8@[0]) {
+  reg bank_bits_data:[2]U8:[ordering="old"]
   y = bank_bits_data[sel]
   bank_bits_data[0] = a
   bank_bits_data[1] = b

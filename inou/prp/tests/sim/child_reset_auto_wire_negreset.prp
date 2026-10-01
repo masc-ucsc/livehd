@@ -1,0 +1,38 @@
+/*
+:name: child_reset_auto_wire_negreset
+:type: simulation
+*/
+
+// User rulings 2026-09-27 (11) and (12), ruling 52 (by type): an omitted
+// child `Reset` input is auto-wired to the caller's implicit reset, and a
+// reset's name carries no polarity (only each register's `negreset=` does).
+// `rnr_cnt`'s `rst_n` is active-HIGH (its reg says `negreset=false`), so the
+// caller's active-high `rst` must reach it as is: the auto-wire connects the
+// raw wire (docs 04b), never an inverted one chosen by the `_n` name.
+
+mod rnr_cnt(clk:Clock, rst_n:Reset, en:Bool) -> (q:U8@[0]) {
+  reg c:U8:[negreset=false] = 7
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+pub mod child_reset_auto_wire_negreset(clk:Clock, rst:Reset, en:Bool) -> (q:U8@[0]) {
+  const c = rnr_cnt(en=en)
+  q = c.q
+}
+
+test child_reset_auto_wire_negreset.counts {
+  mut d = child_reset_auto_wire_negreset
+  mut g = 7
+  mut bad = 0
+  tick 12 {
+    d.rst = clock < 2
+    d.en  = true
+    if clock < 2 { g = 7 } else { g += 1 }
+    step
+    if d.q != g { bad += 1 }
+  }
+  puts("negreset: g={g} bad={bad}")
+  assert(bad == 0)
+  assert(g == 17)
+}

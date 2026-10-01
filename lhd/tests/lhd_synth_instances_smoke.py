@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-"""Shared definitions, occurrence specialization, and incremental source edits."""
+"""Shared definitions, occurrence specialization, and incremental source edits.
+
+USYN with a Liberty library runs native logical selection and then the separate
+ABC technology map (pass.usyn.tmap=abc, the default). The fused envelope keeps
+the schema-5 native decision report under qor.usyn (regions, cache counters,
+per-region cache_key/artifact) and the technology-map report under qor.abc.
+The logical cache lives in <workdir>/usyn_cache, the mapping cache beside it.
+"""
 import json
 import os
 from pathlib import Path
@@ -73,12 +80,56 @@ if per_occurrence:
              "--set", "pass.color.synth.flop_to_flop=false"]
 
 
+def keys(report):
+    return {row["module"]: row["cache_key"] for row in report["regions"]}
+
+
+def costs(report):
+    return {row["module"]: row["after"]["total"] for row in report["regions"]}
+
+
+def decisions(report):
+    # A content-addressed frozen artifact plus the region name identifies one decision.
+    return {(row["module"], row["artifact"]["path"]) for row in report["regions"]}
+
+
+def summary(report):
+    return [(row["module"], row["cache_reused"], row["cache_key"][:16], row["artifact"]["path"][-24:])
+            for row in report["regions"]]
+
+
+def mapped(value):
+    rows = value["qor"]["abc"]["regions"]
+    return {"gates": sum(row["gates"] for row in rows), "area": round(sum(row["area"] for row in rows), 6)}
+
+
 def synth(label, directory):
     value = run(label, base + ["--workdir", str(directory), "--emit", "verilog:" + str(root / (label + ".v"))])
-    report = value["qor"]["usyn"]
+    report, mapping = value["qor"]["usyn"], value["qor"]["abc"]
     # Synthesis proves nothing itself: prove() below is the separate `lhd lec`.
-    rows = report["regions_searched"] + [row["decision"] for row in report["regions_reused"]]
-    assert rows and all(row["status"] == "abc_tmap" for row in rows), (label, report)
+    # With Liberty, native selection is followed by the separate technology map.
+    assert (report["schema_version"], report["kind"], report["target"], report["tmap"], report["output"]) == (
+        5, "usyn", "cmos", "abc", "mapped-cmos"), (label, report)
+    assert mapping["kind"] == "technology-map" and mapping["provider"] == "abc" and mapping["regions"], (label, mapping)
+    assert mapping["incremental"]["enabled"] and mapping["incremental"]["regions"] == len(mapping["regions"]), (label, mapping)
+    rows = report["regions"]
+    assert rows and report["totals"]["regions"] == len(rows) and len(keys(report)) == len(rows), (label, report)
+    assert all(row.get("artifact", {}).get("path") for row in rows), (label, rows)
+    cache = report["cache"]
+    hits = sum(row["cache_reused"] for row in rows)
+    assert cache["enabled"] and (cache["invalid"], cache["refused"], cache["store_failures"]) == (0, 0, 0), (label, cache)
+    assert (cache["reused"], cache["misses"], cache["stored"]) == (hits, len(rows) - hits, len(rows) - hits), (label, cache)
+    for row in rows:
+        entry = directory / "usyn_cache" / (row["cache_key"] + ".usyn-cache")
+        assert entry.is_file(), (label, row["module"], entry)
+    return value, report
+
+
+def cold_run(label, directory):
+    value, report = synth(label, directory)
+    assert not any(row["cache_reused"] for row in report["regions"]), (label, report["cache"])
+    assert report["cache"]["replayed_search_work"] == 0, (label, report["cache"])
+    assert value["qor"]["abc"]["incremental"]["hits"] == 0, (label, value["qor"]["abc"]["incremental"])
     return value, report
 
 
@@ -90,29 +141,46 @@ def prove(label, directory):
 
 work = root / "incremental"
 write_design()
-cold, cold_report = synth("cold", work)
-assert cold_report["regions_searched"], cold_report
-assert (len(cold_report["regions_searched"]) + len(cold_report["regions_reused"]) > 1) == (per_definition or per_occurrence), cold_report
+cold, cold_report = cold_run("cold", work)
+assert (len(cold_report["regions"]) > 1) == (per_definition or per_occurrence), cold_report["regions"]
 prove("cold-oracle", work)
 for label in ("warm1", "warm2", "comment"):
     if label == "comment":
         source.write_text(source.read_text() + "// comment without semantic change\n")
-    _, report = synth(label, work)
-    assert report["regions_reused"] and not report["regions_searched"], (label, report)
+    value, report = synth(label, work)
+    # Every region replays its stored decision under the cold identity.
+    assert all(row["cache_reused"] for row in report["regions"]), (label, report["cache"])
+    assert keys(report) == keys(cold_report) and decisions(report) == decisions(cold_report), (label, report["regions"])
+    assert costs(report) == costs(cold_report), (label, costs(report), costs(cold_report))
+    assert report["cache"]["replayed_search_work"] > 0, (label, report["cache"])
+    tmap = value["qor"]["abc"]["incremental"]
+    assert tmap["hits"] == tmap["regions"] and tmap["misses"] == 0, (label, tmap)
     assert (root / (label + ".v")).read_bytes() == (root / "cold.v").read_bytes(), label
 write_design(edited=True)
 edited, edited_report = synth("edited", work)
-assert edited_report["regions_searched"], edited_report
-# A semantic edit invalidates the only virtual-flat color in the default case.
-# Definition boundaries and occurrence colors leave unchanged regions reusable.
-assert bool(edited_report["regions_reused"]) == (per_definition or per_occurrence), edited_report
-if per_definition:
-    assert any(row["region"] != row["cached_region"] for row in edited_report["regions_reused"]), edited_report
+# The edited definition is searched again under a new identity.
+assert edited_report["cache"]["misses"], edited_report["cache"]
+assert set(keys(edited_report).values()) - set(keys(cold_report).values()), (keys(edited_report), keys(cold_report))
 prove("edited-oracle", work)
 fresh = root / "fresh"
-fresh_value, fresh_report = synth("fresh", fresh)
+fresh_value, fresh_report = cold_run("fresh", fresh)
 prove("fresh-oracle", fresh)
-# Reusing unchanged regions must yield the same mapped design as a fresh run.
-assert ({k: edited["qor"]["abc"]["total"][k] for k in ("gates", "area")}
-        == {k: fresh_value["qor"]["abc"]["total"][k] for k in ("gates", "area")}), (edited["qor"], fresh_value["qor"])
+# Reusing unchanged regions must yield the same design as a fresh run.
+assert costs(edited_report) == costs(fresh_report), (costs(edited_report), costs(fresh_report))
+assert mapped(edited) == mapped(fresh_value), (edited["qor"]["abc"], fresh_value["qor"]["abc"])
+# A semantic edit invalidates the only virtual-flat color in the default case.
+# Definition boundaries and occurrence colors leave unchanged regions reusable.
+evidence = ("edited", summary(edited_report), "cold", summary(cold_report), edited_report["cache"])
+reused = [row for row in edited_report["regions"] if row["cache_reused"]]
+if per_occurrence:
+    # Only the `left` occurrence was edited: a color whose name and frozen
+    # decision match the cold run must replay the cold cache entry.
+    untouched = [row for row in edited_report["regions"] if (row["module"], row["artifact"]["path"]) in decisions(cold_report)]
+    assert untouched, evidence
+    assert all(row["cache_reused"] and row["cache_key"] == keys(cold_report)[row["module"]] for row in untouched), evidence
+assert bool(reused) == (per_definition or per_occurrence), evidence
+if per_definition:
+    # The unedited FLIP=0 specialization is renamed once the FLIP=1 one
+    # appears; its decision must still come from the cold entry.
+    assert any(row["module"] not in keys(cold_report) for row in reused), evidence
 print("shared-instance synthesis and independent flat-oracle LEC passed:", root)

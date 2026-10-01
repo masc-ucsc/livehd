@@ -1,0 +1,12 @@
+/*
+:name: spec_types_reserved_field_assign_dot
+:type: error
+:error: reserved type word
+*/
+// SPEC qa.md appendix section 1: "`U<N>`/`S<N>`/`Unsigned`/`Signed`/`Bool`/`String`/`Clock`/`Reset` are RESERVED type
+// words: they cannot be declared as variable/port/parameter/field names; a variable with that spelling must be
+// backticked". Section 7: "Reserved `U<N>`/`S<N>` = `U`/`S` followed by ANY digit string (U0, U1333, U99999999),
+// reserved EVERYWHERE including after `.` (fields/attributes)."
+// Rule (qa.md Q32 answer): `foo.U33 = 333` is an error; only foo.`U33` = 333 is legal.
+mut foo = (mut `U33` = 0)
+foo.U33 = 333  // locate_error_here

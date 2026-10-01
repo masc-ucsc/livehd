@@ -7,6 +7,6 @@
 // buffer tree grown from the input keeps under pass.abc's max_fanout (16).
 // lhd/tests/lhd_abc_boundary_test.sh maps it and counts the buffers, and
 // derives a dont_use twin of the library's buffer from it.
-mod abc_pi_fanout(en:u1, d:u64) -> (y:u64@[0]) {
+mod abc_pi_fanout(en:U1, d:U64) -> (y:U64@[0]) {
   y = if en != 0 { d } else { 0 }
 }

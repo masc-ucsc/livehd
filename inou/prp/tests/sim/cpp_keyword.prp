@@ -3,14 +3,14 @@
 :type: simulation
 */
 
-pub mod top(clk:u1, a:bool) -> (xor:bool@[]) {
-  reg xor:bool = nil
+pub mod top(clk:Clock, a:Bool) -> (xor:Bool@[]) {
+  reg xor:Bool = nil
   xor = a
 }
 test keyword.emit {
   mut dut = top
-  mut expected:bool = false
-  tick 4 clocks=(clk=1) {
+  mut expected:Bool = false
+  tick 4 {
     expected = not expected
     dut.a = expected
     step

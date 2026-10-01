@@ -17,8 +17,8 @@
 // `--set sim.unknown_zero=true`. The run is several thousand cycles long so a
 // `--set sim.tune.profile=on` run of this driver samples real pairs.
 
-mod unknown_tb_literal_once(a:u64) -> (r:u64@[0], total:u64@[0]) {
-  reg acc:u64 = 0
+mod unknown_tb_literal_once(a:U64) -> (r:U64@[0], total:U64@[0]) {
+  reg acc:U64 = 0
 
   r     = a
   total = acc
@@ -28,8 +28,8 @@ mod unknown_tb_literal_once(a:u64) -> (r:u64@[0], total:u64@[0]) {
 
 test unknown_tb_literal_once.drawn_once {
   mut dut        = unknown_tb_literal_once
-  mut first:u64  = 0
-  mut second:u64 = 0
+  mut first:U64  = 0
+  mut second:U64 = 0
   mut stable     = true
   tick 4096 {
     dut.a = 0ub????????????????????????????????????????????????????????????????  // a TESTBENCH literal

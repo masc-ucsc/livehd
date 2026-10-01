@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <deque>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -15,6 +16,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/container/node_hash_map.h"
 #include "diag.hpp"
 #include "lnast.hpp"
 #include "lnast_builder.hpp"
@@ -25,6 +27,20 @@ namespace prpparse {
 class Parser;
 struct Diag;
 }  // namespace prpparse
+
+// Names a statement WRITES and READS, for the nested-lambda capture slice
+// (Prp2lnast::plan_streamed_captures).
+struct Prp_stmt_rw {
+  absl::flat_hash_set<std::string> writes;
+  absl::flat_hash_set<std::string> reads;
+  absl::flat_hash_set<std::string> declares;  // the statement opens the name's scope (no earlier writer is it)
+  absl::flat_hash_set<std::string> callees;   // the callee names of the calls it makes
+  // Never replayed: a lambda definition, or a `type`/`enum` declaration (a
+  // hoisted comptime entity the nested lambda already sees; its name is in
+  // `declared_type`).
+  bool                             opaque = false;
+  std::string                      declared_type;
+};
 
 class Prp2lnast {
 protected:
@@ -130,7 +146,7 @@ protected:
   // when they differ it reports and aborts (does not return).
   void check_decl_init_kind(std::string_view name, const Lnast_node& value, TSNode inner_type, const TSNode& anchor) const;
 
-  // Primitive type token (`u32`/`s8`/`i4`/`signed`/`unsigned`/`bool`/`string`)
+  // Primitive type token (`u32`/`s8`/`signed`/`unsigned`/`bool`/`string`)
   // as it appears in does/equals/case operand
   // position (plain `identifier` there — the grammar's *_type nodes only
   // exist in type contexts).
@@ -140,11 +156,14 @@ protected:
   // `declare(tmp, prim_type_int(max,min), 'type')` and returns the tmp ref; a
   // bare type-token identifier returns a ref WITHOUT registering a read site
   // (constprop decodes the name to kind+envelope; a real variable of that
-  // name — e.g. `i2` — still wins because the fold consults the symbol
+  // name — e.g. `u2` — still wins because the fold consults the symbol
   // table / type-info first). Anything else falls through to expr_to_node.
+  std::optional<Lnast_node> int_type_literal(TSNode n);
   Lnast_node          does_operand_to_node(TSNode n);
-  // Fold the integer-only expression subset admitted by integer type bounds.
-  // Names resolve through the already-seen comptime-const bindings, so a type
+  // Fold the integer-only expression subset admitted by integer type bounds,
+  // generic defaults and statically known declaration values. Names resolve
+  // through the visible bindings (Binding::int_value; `Z.[bits]` through
+  // Binding::range; `cfg.w` through a file-scope comptime tuple), so a type
   // such as `signed(bits=W)` or `signed(max=(1 << W)-1)` is canonicalized
   // before uPass consumes its prim_type_int(max,min) node.
   std::optional<Dlop> resolve_type_int_value(TSNode n) const;
@@ -160,6 +179,17 @@ protected:
   // statements have to precede the `declare` that consumes them, and
   // rewrite_decls_to_declare merges a CONTIGUOUS attr_set/type_spec run.
   void                prelower_type_bounds(TSNode type_cast_node);
+  // Same, for the TYPE node itself (a `f<T=unsigned(bits=N)>` argument). An
+  // array type recurses into its element and prelowers each dimension that is
+  // an expression this front end cannot fold (see prelowered_array_dims_).
+  void                prelower_int_type_bounds(TSNode ty);
+  // The dimension node of an `array_length` slot: the prelowered ref, the
+  // folded `[n]`, or the written text (a bare name the runner folds).
+  Lnast_node          array_dim_to_node(TSNode len);
+  // The expression of an `array_length` slot that has to be lowered to
+  // statements to fold (`[N+1]` over a generic); null for an empty slot, a
+  // bare name, a range, or an expression that folds here.
+  TSNode              prelowerable_array_dim(TSNode len) const;
   // One `<head>(%tmp, l, r)` statement; returns the fresh %tmp ref.
   Lnast_node          emit_bound_binop(Lnast_ntype::Lnast_ntype_int head, const Lnast_node& l, const Lnast_node& r);
 
@@ -191,17 +221,17 @@ protected:
   // read time (→ scope resolution); the func_call callee name uses
   // `create_ref` directly, so builtins like `cputs` are never recorded. Runs
   // on the producer tree, after the LNAST is built.
-  void check_undefined_reads() const;
+  void        check_undefined_reads() const;
   // 2c-wire — enforce the single-driver net rules on every `wire` declaration:
   // exactly one driver (one assignment, or one if/match that covers every path);
   // a second driver, an undriven wire, or an incompletely-driven wire are errors.
   // Runs on the pre-elaborate tree (before lnastfmt drops a dead first write).
-  void check_wire_drivers() const;
-  void check_wire_scope(const Lnast_nid& node) const;
+  void        check_wire_drivers() const;
+  void        check_wire_scope(const Lnast_nid& node) const;
   // Names readable anywhere regardless of program order: function names
   // (func_def) and type/enum declarations — comptime entities, forward
   // references allowed.
-  void collect_hoisted_names(const Lnast_nid& node, absl::flat_hash_set<std::string>& hoisted) const;
+  static void collect_hoisted_names(const Lnast& ln, const Lnast_nid& node, absl::flat_hash_set<std::string>& hoisted);
 
   // LNAST output. `builder` co-owns `lnast` and is the canonical home for
   // the current `idx_stmts` cursor, tmp-ref minting, and frontend-agnostic
@@ -255,25 +285,30 @@ protected:
   // lexically: declarations at/before `before` in `scope`, then outward
   // through the enclosing frames (a func_def boundary switches to its
   // params/outputs + enclosing comptime bindings only).
+  enum class Generic_read : uint8_t { none, default_value, argument };
   struct Read_site {
-    std::string name;
+    std::string  name;
     // Captured diagnostic span of the read (start/end byte + 1-based line/col),
     // taken at record time. Streaming (2f-stream) resets the parse arena between
     // top-level constructs, so the originating TSNode (Ast*) does NOT outlive the
     // walk — the undefined-read check runs afterward and emits from these fields.
-    uint32_t    start_byte = 0, end_byte = 0;
-    uint32_t    start_line = 0, start_col = 0, end_line = 0, end_col = 0;
-    Lnast_nid   scope;
-    Lnast_nid   before;
+    uint32_t     start_byte = 0, end_byte = 0;
+    uint32_t     start_line = 0, start_col = 0, end_line = 0, end_col = 0;
+    Lnast_nid    scope;
+    Lnast_nid    before;
     // A named-type reference (`x:T`, `x:[N]T`) routed through the same
     // visibility check as value reads — an undefined type errors, while hoisted
     // types, forward refs, generic params, and imports resolve normally. Only
     // the error wording differs (unknown-type vs undefined-read).
-    bool        is_type = false;
+    bool         is_type = false;
     // A free-function call CALLEE (`foo(...)`, not a method/UFCS, not a
     // built-in). Validated like a read so a never-defined callee errors; only
     // the wording differs (undefined-call).
-    bool        is_call = false;
+    bool         is_call = false;
+    // A read in a generic default or a call-site generic argument, which
+    // names a type, lambda or comptime const declared EARLIER (user ruling
+    // 2026-09-28 (33)); only the wording differs (unknown-generic-name).
+    Generic_read generic = Generic_read::none;
   };
   std::vector<Read_site>                                                        read_sites_;
   // Per-scope (stmts node) declaration index: name -> EARLIEST child position that
@@ -281,8 +316,15 @@ protected:
   // Built once in check_undefined_reads so read_is_visible resolves a frame in
   // O(1) — `earliest_decl_idx <= boundary_idx` — instead of scanning the scope's
   // siblings up to the read per read (which was O(reads * scope) on big scopes).
+  // Source order also matters: elif headers are emitted before ALL arm bodies,
+  // so their IR positions alone would expose a later initializer to an earlier
+  // arm. A zero source offset leaves unlocated/generated declarations unchanged.
+  struct Read_declaration {
+    int      index;
+    uint32_t start_byte;
+  };
   // Keyed by the scope node (hhds::Node_class is abseil-hashable).
-  mutable absl::flat_hash_map<Lnast_nid, absl::flat_hash_map<std::string, int>> read_scope_decls_;
+  mutable absl::flat_hash_map<Lnast_nid, absl::flat_hash_map<std::string, Read_declaration>> read_scope_decls_;
   // Child position of each direct child of a stmts scope (the boundary nodes
   // read_is_visible compares against). Built in the same walk.
   mutable absl::flat_hash_map<Lnast_nid, int>                                   read_child_index_;
@@ -293,24 +335,29 @@ protected:
   // loop var, which `lhd sim` reports as "collides with a test parameter".
   absl::flat_hash_set<Lnast_nid>                                                tick_loop_var_decls_;
   // Names that behave as declarations at the root stmts of a directly
-  // streamed lambda: its io/generic names plus closure values inserted in the
-  // body prologue.  A file wrapper leaves this empty.
+  // streamed lambda: its io/generic names plus the comptime captures its body
+  // prologue declares.  A file wrapper leaves this empty.
   absl::flat_hash_set<std::string>                                              streamed_scope_names_;
-  absl::flat_hash_set<std::string>                                              streamed_lexical_names_;
 
   struct Destination_state {
     std::shared_ptr<Lnast>                                                lnast;
     Lnast_builder                                                         builder;
     std::vector<Read_site>                                                read_sites;
-    absl::flat_hash_map<Lnast_nid, absl::flat_hash_map<std::string, int>> read_scope_decls;
+    absl::flat_hash_map<Lnast_nid, absl::flat_hash_map<std::string, Read_declaration>> read_scope_decls;
     absl::flat_hash_map<Lnast_nid, int>                                   read_child_index;
     absl::flat_hash_set<Lnast_nid>                                        tick_loop_var_decls;
+    absl::flat_hash_set<Lnast_nid>                                        decl_shape_seed_stores;
     absl::flat_hash_set<std::string>                                      streamed_scope_names;
-    absl::flat_hash_set<std::string>                                      streamed_lexical_names;
+    absl::node_hash_map<Lnast_nid, Prp_stmt_rw>                           capture_rw;
   };
-  std::vector<Destination_state> destination_stack_;
+  std::vector<Destination_state>              destination_stack_;
+  // The current tree's capture_rw: the read/write sets of the statements a
+  // capture slice already scanned. A complete statement never changes, except a
+  // call patch_streamed_capture_calls extends (it clears the cache). A node map:
+  // a slice holds pointers to the entries while it adds more.
+  absl::node_hash_map<Lnast_nid, Prp_stmt_rw> capture_rw_;
 
-  void push_streamed_destination(std::string_view name, std::string_view kind, bool verilog_origin, std::string_view lg_name);
+  void push_streamed_destination(std::string_view name, std::string_view kind, bool timecheck_off, std::string_view lg_name);
   std::shared_ptr<Lnast> pop_streamed_destination();
   void                   finalize_current_lnast();
   // True iff `rs.name` is visible at the recorded site (see Read_site).
@@ -331,15 +378,36 @@ protected:
   // Read_site so check_undefined_reads validates that the type symbol exists
   // (an undefined `:potato` errors; hoisted/forward/generic/import names pass).
   void record_type_name_read(const TSNode& type_node);
+  // Record every name the expression `e` reads as a value Read_site (see
+  // identifier_to_node), for an expression that is NOT lowered where it is
+  // written: a generic default or a call-site generic bind that the runner
+  // re-reads by name, a port or tuple-field width bound that does not fold. An
+  // undeclared name there is then an undefined-read at the read instead of a
+  // nil the runner binds or a dropped width (ruling 2026-09-28 #24).
+  void record_name_reads(TSNode e, Generic_read generic = Generic_read::none);
+  // A value Read_site for identifier `id` (canonical `name`) at the current
+  // builder position, or against streamed_scope_names_ when `no_frame`.
+  void push_read_site(TSNode id, std::string name, bool no_frame, Generic_read generic = Generic_read::none);
+  // Lowering the signature of a streamed lambda: it has no stmts frame yet, so
+  // a read resolves against streamed_scope_names_ (see read_is_visible).
+  bool is_streamed_signature() const;
+  // What a CST expression reads, for the checks that inspect an expression
+  // without lowering it (record_name_reads, is_comptime_expression,
+  // comptime_default_node). `names` are the identifiers read as VALUES: a field
+  // name after a dot, an attribute name, a named-argument / attribute /
+  // assignment key, the declared name of a tuple-TYPE field, a callee and the
+  // `std` of `std.<member>` are not. A lambda literal is not entered.
+  struct Expr_reads {
+    std::vector<TSNode> names;
+    std::vector<TSNode> callees;  // the callee of every call
+    std::vector<TSNode> lambdas;  // lambda literals
+  };
+  Expr_reads expr_reads(TSNode e, bool enter_attribute_reads) const;
 
-  // Stack of "formal parameter widths in scope" — pushed by process_lambda_statement
-  // before emitting the body, popped after. Each frame maps a typed argument
-  // name (`x:u6`, `y:s8`, …) to its declared bits. parse_int_const consults
-  // this so `for i in 0..<x.[bits]` can unroll at parse time even though
-  // `x.[bits]` isn't a literal in the source — the producer knows the width
-  // from the formal-parameter type. Outer frames are visible to inner scopes
-  // (lexical lookup); inner frames shadow on name collision.
-  std::vector<absl::flat_hash_map<std::string, int64_t>> param_bits_stack_;
+  // A type position spelled `I<N>` (the removed signed sized spelling, `S<N>`
+  // replaced it): a tailored rename hint.
+  void check_type_name_spelling(const TSNode& node) const;
+  void report_removed_int_type(livehd::diag::Span span, std::string_view text) const;
 
   // Top
   void process_description();
@@ -414,6 +482,9 @@ protected:
   // bundle field keeps the source method name.
   void                                  process_lambda_statement_named(TSNode n, std::string_view hoist_name);
   void                                  process_enum_assignment(TSNode n);
+  // `std` is the built-in namespace: a lambda, type, enum or import alias of
+  // that name is an error at its declaration (`name` is its name node).
+  void                                  reject_std_declaration(TSNode name, std::string_view what);
   // One parsed entry of an enum definition (either source form).
   struct Enum_entry {
     std::string name;
@@ -422,6 +493,15 @@ protected:
     bool        has_type  = false;
     bool        has_value = false;
   };
+  // The entries of an `enum NAME = (…)` statement's `values` tuple.
+  void        parse_enum_statement_entries(TSNode values, std::vector<Enum_entry>& entries);
+  // The ordinal rule of payload-less entries (03-bundle.md "Enumerate"): true
+  // (a sequence each explicit value resets) when some entry has an explicit
+  // value, false (one-hot) when none has. A nested `enum(…)` entry is one-hot
+  // hierarchical, never an ordinal seed. Shared by lower_enum_def and
+  // enum_entry_value so the two never number an entry differently.
+  static bool enum_entries_sequential(const std::vector<Enum_entry>& entries);
+
   // Shared lowering for `enum NAME[:T] = (…)` and `const NAME = enum(…)`.
   // Emits one value-carrier bundle per entry — the auto/explicit ordinal
   // (one-hot when no entry is explicit, sequential otherwise; 03-bundle.md
@@ -437,8 +517,36 @@ protected:
   // parent carrier is the children bundle plus a `__enumval` attr holding the
   // parent's own encoding (its bare bit, for int()/==/in). `bit_counter` is
   // shared across the whole tree (nullptr starts a fresh top-level counter).
-  Lnast_node lower_enum_def(std::string_view enum_name, TSNode enum_level_type, const std::vector<Enum_entry>& entries,
-                            int64_t parent_bits = 0, int* bit_counter = nullptr);
+  //
+  // `enc` (optional) collects the value range of every entry, hierarchical
+  // nodes included (see Enum_encoding).
+  struct Enum_encoding {
+    std::optional<Dlop> min;
+    std::optional<Dlop> max;
+    bool                known = true;  // false: a payload entry, or a value that does not fold here
+    void                add(const std::optional<Dlop>& v) {
+      if (!v || !v->is_integer() || v->has_unknowns()) {
+        known = false;
+        return;
+      }
+      if (!min || v->lt_op(*min)->is_known_true()) {
+        min = *v;
+      }
+      if (!max || v->gt_op(*max)->is_known_true()) {
+        max = *v;
+      }
+    }
+  };
+  //
+  // A one-hot enum needs one bit per node; at most kMaxOneHotEnumBits fit the
+  // integer encoding (`loc` anchors the error past that).
+  Lnast_node lower_enum_def(std::string_view enum_name, TSNode enum_level_type, const std::vector<Enum_entry>& entries, TSNode loc,
+                            int64_t parent_bits = 0, int* bit_counter = nullptr, Enum_encoding* enc = nullptr);
+  // Declare the hidden integer encoding alias (Lnast::enum_encoding_type) of
+  // enum `enum_name` from the range `lower_enum_def` collected into `enc`;
+  // nothing for a payload enum. Shared by `enum NAME = (…)` and
+  // `const NAME = enum(…)`.
+  void       emit_enum_encoding_alias(std::string_view enum_name, TSNode enum_level_type, const Enum_encoding& enc, TSNode loc);
   // Parse the `enum(...)` argument list into Enum_entry rows (shared by the
   // `const X = enum(...)` expression path and nested hierarchical entries).
   void       parse_enum_definition_entries(TSNode enum_def_node, std::vector<Enum_entry>& entries);
@@ -447,6 +555,15 @@ protected:
   void       expand_enum_spread(TSNode operand, std::vector<Enum_entry>& entries);
   void       process_type_statement(TSNode n);
   void       process_import_statement(TSNode n);
+
+  static constexpr int kMaxOneHotEnumBits = 63;
+
+  // Whether a type (an enum's level type, or an entry's type) is an INTEGER
+  // type: `uN`/`sN`, `unsigned`/`signed`/`uint` with or without a constraint
+  // (`unsigned(bits=4)`), or a visible `type X = …` alias of one. nullopt when
+  // it is not (a payload type); else its folded (max, min), when it folds here.
+  using Int_type_range = std::optional<std::pair<Dlop, Dlop>>;
+  std::optional<Int_type_range> int_type_of(TSNode type_or_cast) const;
 
   // `pub` exports + the `import` builtin.
   // check_pub_value_decl: a `pub` value declaration must be file-scope `const`.
@@ -461,12 +578,46 @@ protected:
   // lower_import_call: validate + lower the expression form `import("unit")`.
   void                       lower_import_call(TSNode call_node, TSNode arg_tuple, const Lnast_node& target);
 
-  void process_test_statement(TSNode n);
-  void process_spawn_statement(TSNode n);
-  void process_impl_statement(TSNode n);
+  void     process_test_statement(TSNode n);
+  unsigned simulation_test_depth_ = 0;
+  void     process_spawn_statement(TSNode n);
+  void     process_impl_statement(TSNode n);
 
   // Expressions: returns an Lnast_node (ref or const) naming the result
   Lnast_node expr_to_node(TSNode n);
+  // The default of an io entry kept in its slot (an output's, a mod/pipe
+  // input's). A streamed lambda's signature has no statement frame, so there
+  // the default must be a comptime_default_node.
+  Lnast_node io_default_to_node(TSNode def, TSNode param);
+  // A default with no statement position to be computed in (the io slot of a
+  // streamed signature, the reset value of a `-> (reg q)` output): a literal,
+  // or a value that folds to a compile-time integer here. Anything else is an
+  // undefined-read (a name nothing declares) or default-not-comptime.
+  Lnast_node comptime_default_node(TSNode def, TSNode param);
+  // User ruling 2026-09-28 (34): a `mod`/`pipe` default is a compile-time
+  // constant, so reading another (runtime) input of the same lambda as a
+  // VALUE is default-not-comptime. An attribute read (`a.[bits]`) is comptime.
+  void       check_default_reads_no_input(TSNode def, TSNode param);
+  // Whether the default `def` of an INPUT rides the body prologue (the
+  // `__default` io sentinel plus `store(__default_<in>, def)`) instead of the
+  // io slot: every `comb` default, and a `mod`/`pipe` default that does not
+  // fold here (a generic, a comptime const, a comb call, an if-expression, an
+  // attribute read of an input: ruling 34) -- the unit's own walk folds it
+  // (a template's specialization once the generics are bound) and pass.upass
+  // writes the constant back into the io slot, or reports default-not-comptime.
+  bool       input_default_in_prologue(TSNode def, std::string_view lambda_kind, bool is_io_output, bool is_vararg);
+
+  // The compile-time constant a default folds to HERE, without lowering
+  // anything: a literal, a foldable integer expression (resolve_type_int_value)
+  // or an enum entry. nullopt when it needs statements to compute.
+  std::optional<Lnast_node> front_end_default_value(TSNode def);
+
+  // The integer encoding of entry `entry` of a visible `enum NAME = (…)`
+  // statement or `const NAME = enum(…)` binding (`Color.Green` as a comptime
+  // default), assigned exactly as lower_enum_def does. nullopt for a payload or
+  // hierarchical enum, or an explicit value that does not fold here.
+  std::optional<Dlop> enum_entry_value(std::string_view enum_name, std::string_view entry);
+
   Lnast_node binary_expr_to_node(TSNode n);
   Lnast_node unary_expr_to_node(TSNode n);
   Lnast_node if_expr_to_node(TSNode n, bool need_result = true);
@@ -481,12 +632,33 @@ protected:
   // `get_mask` / `set_mask`: a `Dlop` when both range endpoints are
   // integer-literal (encoded as a bitmask via `Dlop::get_mask_value`), or a
   // ref to a freshly-emitted `range` / `shl` LNAST stmt for dynamic cases.
-  Lnast_node compute_bit_mask_ref(TSNode sel_node);
+  Lnast_node compute_bit_mask_ref(TSNode sel_node, int* const_width = nullptr);
   Lnast_node emit_range_node(const Lnast_node& start, const Lnast_node& end);
+
+  // The number of bits a `#[...]` select covers when compute_bit_mask_ref could
+  // not fold it (a bound is a NAME, not a literal): a const when the bounds
+  // fold through visible compile-time names, else a ref to the statements
+  // computing it, for the runner to fold. nullopt for an open range or a width
+  // that reads a runtime value.
+  std::optional<Lnast_node> bit_range_lane_width(TSNode sel_node);
+
   Lnast_node attribute_read_to_node(TSNode n);
   Lnast_node dot_expression_to_node(TSNode n);
   Lnast_node function_call_expr_to_node(TSNode n);
   Lnast_node interpolated_string_to_node(TSNode n);
+  // A double-quoted string body split into pieces: literal text (escapes
+  // decoded; a hole with no expression — `{}` or `{/* c */}` — stays literal
+  // text with its comments removed) or one `{expr[:spec]}` hole. The holes are
+  // found with prpparse's own hole scanner (Lexer::istring_hole_end), so a
+  // `}`/`{`/`:`/`/*` inside a comment, nested string or backtick name in a hole
+  // never ends it, opens another, or starts a format spec.
+  struct Istring_piece {
+    std::string text;  // literal (when !is_hole)
+    TSNode      expr{};
+    std::string spec;  // format spec without the `:` (may be empty)
+    bool        is_hole = false;
+  };
+  std::vector<Istring_piece> istring_pieces(TSNode n) const;
   Lnast_node tuple_to_node(TSNode n, bool is_square, bool field_types_on_target = false);
   Lnast_node identifier_to_node(TSNode n, bool for_lvalue);
   Lnast_node constant_text_to_node(std::string_view text);
@@ -501,12 +673,21 @@ protected:
   // The inner `tuple` node when `type_cast_node`'s type is a tuple SHAPE.
   TSNode               tuple_type_inner(TSNode type_cast_node) const;
   void                 emit_attribute_list(const Lnast_node& target, TSNode attribute_list_node);
+  // Rulings on one attribute's value: `sync` is deprecated, a runtime `*_pin`
+  // value needs `ref`. `rv` is null for a flag-only attribute.
+  void                 check_attribute_value(TSNode item, std::string_view key, TSNode rv) const;
   // Catch typical attribute-name mistakes (`initial`→`init`, `clk`→`clock_pin`,
   // `bit`→`bits`, …) at parse time with a targeted hint. `has_value` is true
   // when the attribute carries `=value` — it disambiguates `[clock=x]` (meant
   // `clock_pin`) from the valid flag-only classification `clk::[clock]`.
   void                 reject_common_mistakes_attr_name(TSNode node, std::string_view name, bool has_value) const;
   void                 emit_type_expr(const Lnast_nid& type_index, TSNode type_node);
+  // A bare built-in type word (`U8`, `Signed`, `Bool`, `Clock`, ...) as a type
+  // child of `parent` (no constraint tuple); `anchor` locates a width error.
+  void                 emit_bare_type_word(const Lnast_nid& parent, std::string_view word, TSNode anchor);
+  // A bare type word used as a VALUE (`(a=U8, b=S20)`, `U8.[max]`): a
+  // type-mode declare of a tmp, returned as a ref.
+  Lnast_node           type_word_value(TSNode n, std::string_view word);
   // Comptime vector/matrix dimension extraction for a type_cast whose `type`
   // field is an `array_type` chain (e.g. `:[N][M]T`). Returns dims outer→inner
   // when every dimension is an integer-literal length; empty otherwise.
@@ -558,21 +739,6 @@ protected:
   // ranges, descending ranges and non-literal depths are compile errors.
   std::pair<int64_t, int64_t> parse_pipe_depth(TSNode pipe_lambda_node);
 
-  // File-/body-scope `const NAME = <compile-time integer expression>` bindings,
-  // recorded as the declaration is lowered (process_lvalue_for_assign scalar
-  // branch). Lets integer type bounds and `@[NAME]`/`stage[NAME]`/`pipe[NAME]`
-  // timing slots accept a compile-time-resolvable const in place of a literal.
-  // No-shadowing is already enforced, so a name is unambiguous along the
-  // visible chain; a later binding may overwrite an earlier same-name one.
-  //
-  // ALSO tracks `mut NAME = <compile-time integer expression>` with
-  // declaration-time-capture semantics: record on the `mut` decl, UPDATE on a
-  // later statement-level plain write of another resolvable expression, and
-  // ERASE on any other write (runtime rhs, compound op, or any write inside an
-  // if/for/while/match/lambda body — see conditional_depth_). A timing slot then
-  // resolves the value that was statically known AT THE LAMBDA DECLARATION
-  // POINT; a mut that has since gone runtime is erased and the slot errors.
-  absl::flat_hash_map<std::string, int64_t>                  const_int_bindings_;
   // 2f-type_bound — max/min for an integer type bound this front end cannot
   // fold to a constant, most importantly a GENERIC width:
   //   mod m<N=5>(…) { reg r:unsigned(bits=N) = nil … }
@@ -590,14 +756,19 @@ protected:
     Lnast_node max{Lnast_node::create_invalid()};
     Lnast_node min{Lnast_node::create_invalid()};
   };
-  absl::flat_hash_map<uint32_t, Prelowered_bounds>           prelowered_int_bounds_;
+  absl::flat_hash_map<uint32_t, Prelowered_bounds> prelowered_int_bounds_;
+  // Array dimensions written as an expression that does not fold here
+  // (`[N+1]`, `[N*2]` with a generic N), keyed by the `array_length` start
+  // byte: the ref to the statements prelower_int_type_bounds emitted. The
+  // runner folds the ref in place like an integer bound (bake_decl_pre_step).
+  absl::flat_hash_map<uint32_t, Lnast_node>        prelowered_array_dims_;
   // Constraint tuples prelower_type_bounds actually examined. A PORT/return
   // type, a tuple field type and a `f<signed(bits=N)>` generic argument have no
   // statement position to desugar an unfoldable bound into, so prelowering
   // never runs there. Without this the "not a compile-time value" error fired
   // at those sites too and turned `mod m<N=8>(a:unsigned(bits=N))` -- which
   // used to compile -- into a hard error.
-  absl::flat_hash_set<uint32_t>                              prelower_visited_;
+  absl::flat_hash_set<uint32_t>                    prelower_visited_;
   // 2f-generic_port_width — PORT/return types of a GENERIC lambda whose integer
   // bound does not fold (`mod m<N=1>(a:unsigned(bits=N * 4))`). The signature
   // is lowered before the body stmts frame exists, so the desugar cannot be
@@ -610,10 +781,14 @@ protected:
     TSNode    type_cast;
     Lnast_nid store;  // io `store(ref name, default, prim_type_int(max,min)[, stages])`
   };
-  std::vector<Pending_port_bound>                            pending_port_bounds_;
-  bool                                                       lambda_has_generics_ = false;  // lowering a generic lambda's signature
-  bool                                                       int_type_has_unfoldable_bound(TSNode type_node) const;
-  void                                                       flush_deferred_port_bounds();
+  std::vector<Pending_port_bound>               pending_port_bounds_;
+  bool                                          lambda_has_generics_ = false;  // lowering a generic lambda's signature
+  bool                                          int_type_has_unfoldable_bound(TSNode type_node) const;
+  // The innermost element of an array type (`[N][M]unsigned(bits=N)` ->
+  // `unsigned(bits=N)`); any other type node is returned as is.
+  TSNode                                        array_elem_type(TSNode type_node) const;
+  void                                          flush_deferred_port_bounds();
+  void                                          defer_port_bound(TSNode type_cast, const Lnast_nid& store);
   // 2c-wire — declarations whose INLINE TUPLE type made emit_type_spec emit a
   // shape-seeding `store(<name>, %tuple_tmp)`. That store carries the TYPE's
   // field layout, not a user assignment, but it is structurally identical to
@@ -624,17 +799,253 @@ protected:
   // It also MASKED the opposite check: such a wire never driven at all looked
   // driven once, so `wire-undriven` could not fire for a tuple-typed wire.
   // Names are discounted by exactly ONE seed; two real assignments still count 2.
-  absl::flat_hash_set<std::string>                           decl_shape_seed_targets_;
-  // Compact declaration-point closure environment.  These maps are updated
-  // only by unconditional outer-scope writes (the same rule as
-  // const_int_bindings_) and let a streamed lambda write its capture prologue
-  // before its body without first materializing/copying a func_def tree.
-  absl::flat_hash_map<std::string, std::string>              capture_const_bindings_;
-  absl::flat_hash_map<std::string, std::string>              capture_import_bindings_;
-  absl::flat_hash_set<std::string>                           streamed_function_names_;
-  // Keyed "<defining scope unit>\n<entity>" (see streamed_actuals_key):
-  // sibling scopes may each define a same-named helper with different capture
-  // lists, and a bare-name key let one scope's actuals ride the other's calls.
+  // Keyed by the seed STORE node, and checked only against the scope that holds
+  // it: a name-keyed set let a typed tuple `k` in one lambda hide a real
+  // rebind of an unrelated `k` elsewhere in the file.
+  absl::flat_hash_set<Lnast_nid>                decl_shape_seed_stores_;
+  // File-scope import bindings (`const pk = import("unit")`, `import "unit" as
+  // pk`): replayed at the top of every streamed lambda, which has no enclosing
+  // tree to read them from.
+  absl::flat_hash_map<std::string, std::string> capture_import_bindings_;
+  absl::flat_hash_set<std::string>              streamed_function_names_;
+
+  // ── Nested-lambda capture (rulings 2026-09-27 #4 and 2026-09-28 #24,
+  //    06-functions.md) ────────────────────────────────────────────────────
+  // Name lookup is lexical, but a nested lambda sees only the COMPTIME
+  // bindings of its enclosing scopes: `comptime const`, a plain `const` whose
+  // value is a compile-time constant (`const x = 2`, `const w = N * 4`, see
+  // is_comptime_expression), the generics of an enclosing lambda, imports,
+  // types and lambdas. Reading an enclosing RUNTIME binding (input/output, a
+  // `const` computed from a runtime value, `mut`, `reg`, `wire`) from a nested
+  // lambda is a compile error: the value must be passed as an input.
+  //
+  // One frame per lexical scope being lowered: frame 0 is the file scope, a
+  // lambda pushes a BOUNDARY frame (its generics, inputs and outputs) and every
+  // block body a plain frame, so a declaration is forgotten when its scope
+  // closes. A read resolves innermost-first; crossing a boundary frame before
+  // the declaring frame is found makes it a capture.
+  //
+  // How a capture gets its value into a STREAMED lambda (its own LNAST):
+  //   * comptime const -- the statements that compute it (its declaration plus
+  //     whatever earlier statements of the enclosing trees it depends on: a
+  //     file-scope `mut` + `for`, a `comptime const W = N + 1`, ...) are copied
+  //     into the lambda's body prologue, so the lambda computes exactly the
+  //     value, and the declared type, the enclosing scope computes. Runtime
+  //     names and temps the copy writes are renamed private.
+  //   * enclosing generic / loop index -- per-specialization values: they
+  //     become IMPLICIT generics of the lambda, bound `<G=G>` at every call in
+  //     the enclosing scope, so each specialization of the parent binds its own.
+  enum class Bind_kind : uint8_t { runtime, comptime, generic };
+  // What this front end knows statically about a binding. Kept ON the binding,
+  // so it closes with its scope and a later same-name binding never reads a
+  // stale value:
+  //   * int_value -- a `const NAME = <compile-time integer expression>`, or a
+  //     `mut` with declaration-time-capture semantics (recorded on the decl,
+  //     UPDATED by a later statement-level plain write of another resolvable
+  //     expression, ERASED by any other write: a runtime rhs, a compound op, or
+  //     any write inside an if/for/while/match/lambda body, see
+  //     conditional_depth_). Integer type bounds and `@[NAME]`/`stage[NAME]`/
+  //     `pipe[NAME]` timing slots read it (resolve_cycle_value).
+  //   * range -- the declared (max, min) of a binding with an integer type
+  //     whose bounds fold (`Z:u6`, `Z:unsigned(bits=5)`, an `a:u8` input), so
+  //     an attribute read (`<N=Z.[bits]>`, `const W = a.[bits]`) folds at the
+  //     declaration.
+  //   * fold_const -- a plain `const` this front end did not prove comptime
+  //     (user ruling 2026-09-28 (32), fold-based capture): like a comptime
+  //     const, a nested lambda that reads it replays its computation, and it
+  //     is visible there iff that replay reaches no runtime root (an input or
+  //     output, a `reg`/`wire`, a runtime loop value, a `mod`/`pipe`
+  //     instance), i.e. iff its value folds to a compile-time constant.
+  //   * replayable -- a `mut`/`const`, whose declaring and writing statements
+  //     a capture replay may copy. Every other runtime binding is a root.
+  //   * decl_depth -- conditional_depth_ at the declaration: a later write at
+  //     the SAME depth is an unconditional statement of the binding's own
+  //     scope and keeps int_value; a deeper one (an if/loop body) erases it.
+  struct Binding {
+    Bind_kind                            kind;
+    std::optional<int64_t>               int_value;
+    std::optional<std::pair<Dlop, Dlop>> range;
+    bool                                 typed{false};  // declared with a type (`range` is its folded integer bounds)
+    bool                                 fold_const{false};
+    bool                                 replayable{false};
+    // Bound to an UNNAMED tuple literal (`const t = (1, 2)`): a destructuring
+    // of it binds by position (qa.md: named-vs-unnamed is a property of the
+    // value, not of its spelling), and a rename slot against it is an error.
+    bool                                 unnamed_tuple{false};
+    uint32_t                             decl_depth{0};
+  };
+  // Whether a nested lambda may see `b`: a comptime binding, or a fold_const
+  // (decided by its slice, see visible_in_lambda).
+  static bool binding_visible_in_lambda(const Binding& b) { return b.kind == Bind_kind::comptime || b.fold_const; }
+  struct Capture_frame {
+    bool                                          lambda_boundary{false};
+    bool                                          streamed{false};  // boundary of a streamed lambda
+    // A `test` block's scope: no lambda (its reads are unrestricted), but a
+    // local re-declaring a visible enclosing comptime binding is shadowing.
+    bool                                          test_scope{false};
+    std::string                                   lambda_name;  // diagnostics (the test name for a test_scope)
+    absl::flat_hash_map<std::string, Binding>     names;
+    std::vector<std::string>                      implicit_generics;  // boundary: enclosing generics it reads
+    // Boundary: enclosing comptime consts / fold_consts computed from an
+    // enclosing RUNTIME value (-> that value), which a replay cannot
+    // recompute. A streamed lambda fills it when it plans its prologue; a
+    // lambda kept as a func_def decides each fold_const at its first read
+    // (fold_decided).
+    absl::flat_hash_map<std::string, std::string> uncapturable;
+    absl::flat_hash_set<std::string>              fold_decided;
+    // The enum declarations of this scope, in SOURCE ORDER, re-lowered into the
+    // prologue of every streamed lambda nested in it: an enum is a comptime
+    // bundle whose entries a body reads (`Color.Green`), and the streamed
+    // lambda has no enclosing tree to read it from. The CST clones live in
+    // retained_arena_ for the same parse_next lifetime reason as
+    // const_rvalue_nodes_.
+    std::vector<TSNode>                           enum_decls;
+    // The named lambdas declared in this scope -> true for a `comb`. A call
+    // to a comb with comptime arguments is a comptime value; a `mod`/`pipe`
+    // call is an instance, a runtime value (see is_comptime_expression).
+    absl::flat_hash_map<std::string, bool>        lambdas;
+    // The `type`/`enum` names declared in this scope (check_signature_shadow).
+    absl::flat_hash_set<std::string>              types;
+
+    // The scalar INTEGER type aliases of this scope (`type Nib = u4`, `type W
+    // = unsigned(bits=N)`) -> their (max, min) when it folds here; an enum
+    // level type spelled through one is an integer level (int_type_of).
+    absl::flat_hash_map<std::string, std::optional<std::pair<Dlop, Dlop>>> int_type_aliases;
+  };
+  std::vector<Capture_frame> capture_frames_{1};
+  // What the destructuring statement being lowered knows about its right-hand
+  // side (set by process_assignment around process_lvalue_for_assign).
+  // `legacy`: a call or tuple literal (rename slots keep the call-prefix form
+  // `(x=f.a) = (f(), g())`). `rooted`: any other value (a variable, a field):
+  // a rename slot's path starts at the value's own fields. `unnamed_var`: a
+  // variable bound to an unnamed tuple; a rename slot against it is an error.
+  enum class Destructure_rhs : uint8_t { legacy, rooted, unnamed_var };
+  Destructure_rhs destructure_rhs_{Destructure_rhs::legacy};
+  class [[nodiscard]] Capture_frame_guard {
+  public:
+    Capture_frame_guard(std::vector<Capture_frame>& frames, Capture_frame frame) : frames_(frames) {
+      frames_.emplace_back(std::move(frame));
+    }
+    ~Capture_frame_guard() { frames_.pop_back(); }
+    Capture_frame_guard(const Capture_frame_guard&)            = delete;
+    Capture_frame_guard& operator=(const Capture_frame_guard&) = delete;
+
+  private:
+    std::vector<Capture_frame>& frames_;
+  };
+  // Initializer bindings live only through their if/elif/else, match or while.
+  // Use a constant-true if scope so outer writes take the normal merge path.
+  class [[nodiscard]] Initializer_scope_guard {
+  public:
+    Initializer_scope_guard(Prp2lnast& lower, TSNode n);
+    ~Initializer_scope_guard();
+    Initializer_scope_guard(const Initializer_scope_guard&)            = delete;
+    Initializer_scope_guard& operator=(const Initializer_scope_guard&) = delete;
+
+  private:
+    Prp2lnast&                         lower_;
+    const Lnast*                      destination_;
+    std::optional<Capture_frame_guard> capture_;
+  };
+  struct Capture_lookup {
+    Bind_kind             kind;
+    size_t                frame;              // the declaring frame
+    std::optional<size_t> innermost_crossed;  // innermost lambda boundary between the read and `frame`
+    const Binding*        binding;
+  };
+  Binding&                      note_binding(std::string_view name, Bind_kind kind);
+  std::optional<Capture_lookup> lookup_capture(std::string_view name) const;
+  Binding*                      find_binding(std::string_view name);
+  // Report a read of an enclosing RUNTIME binding from a nested lambda, or of
+  // an enclosing comptime const the lambda cannot capture (see uncapturable).
+  void                          check_capture_read(std::string_view name, const TSNode& at) const;
+  // check_capture_read + make an enclosing generic an implicit generic of every
+  // streamed lambda the read crosses.
+  void                          note_capture_read(std::string_view name, const TSNode& at);
+  void                          note_implicit_generic(const Capture_lookup& hit, std::string_view name);
+  // Whether the enclosing binding `hit` is visible where it is looked up: a
+  // comptime binding, or a fold_const whose value folds there (ruling
+  // 2026-09-28 (32); a fold_const read directly from a test block is).
+  bool                          visible_in_lambda(std::string_view name, const Capture_lookup& hit);
+  // A declaration in a nested lambda (or a test block) of a name an enclosing
+  // scope binds visibly: that binding is visible (and replayed) here, so this
+  // is shadowing, which Pyrope forbids.
+  void                          check_capture_shadow(std::string_view name, const TSNode& at);
+  // User ruling 2026-09-28 (35): a lambda input/output/generic (and ruling
+  // (31) a test parameter) named like a visible enclosing const, type or
+  // lambda is shadowing. Runs while the signature is lowered (the lambda's
+  // boundary frame, or the test's frame, is the innermost).
+  void                          check_signature_shadow(std::string_view name, const TSNode& at, std::string_view role);
+  // Rvalue tmps that carry a comptime entity (an import namespace, an enum
+  // type, a lambda value): a plain `const` bound to one is a comptime binding.
+  absl::flat_hash_set<std::pair<const Lnast*, std::string>> comptime_rvalue_tmps_;
+  void                                                      note_comptime_rvalue(const Lnast_node& tmp);
+  bool                                                      is_comptime_rvalue(const Lnast_node& value) const;
+  // True when the initializer `e` of a plain `const` is a compile-time
+  // constant, which makes the const a comptime binding (ruling 2026-09-28 #24).
+  bool                                                      is_comptime_expression(TSNode e) const;
+  // The named lambda `name` resolves to, innermost scope first: a comb.
+  bool                                                      resolves_to_comb(std::string_view name) const;
+  // A bare NAMED lambda (`comb`/`mod`/`pipe` declared in an enclosing scope)
+  // read as an operand value. Every lambda call needs parentheses
+  // (06-functions.md), so `f == 3` is an error: write `f() == 3`.
+  void                                                      check_lambda_used_as_value(TSNode operand);
+  // A call a capture replay may copy (the value it computes is comptime when
+  // its arguments are): a comb, a type cast, a `std` function, a lambda value.
+  // A `mod`/`pipe` (or unknown) callee is an instance, a runtime root.
+  bool                                                      callee_is_replayable(std::string_view callee) const;
+  // (max, min) of an integer type whose bounds fold here (see Binding::range).
+  std::optional<std::pair<Dlop, Dlop>>                      folded_int_type_range(TSNode ty) const;
+
+  // Streamed-lambda prologue plan, computed before the signature (it can make
+  // the lambda generic) and emitted once the body stmts exist.
+  struct Capture_copy {
+    std::shared_ptr<Lnast> src;
+    Lnast_nid              nid;
+    size_t                 depth;  // destination_stack_ index of `src`
+  };
+  struct Capture_plan {
+    std::vector<Capture_copy>                                  stmts;  // program order
+    // Per destination depth: the private names of the runtime names/temps the
+    // copied statements write.
+    std::vector<absl::flat_hash_map<std::string, std::string>> rename;
+    std::vector<std::string>                                   seeds;  // the comptime names made visible
+    // The seeds whose value this front end folded (an untyped comptime
+    // integer): bound to it, never replayed (see plan_streamed_captures).
+    std::vector<std::pair<std::string, int64_t>>               values;
+  };
+  Capture_plan plan_streamed_captures(TSNode lambda_node, TSNode code);
+  void         emit_capture_plan(const Capture_plan& plan, const Lnast_nid& body_idx);
+  // The statements a capture replay may copy: every statement visible at the
+  // cursor of each enclosing tree (destination_stack_, depth = its index)
+  // and, with `include_current`, of the tree being lowered (depth =
+  // destination_stack_.size(), for a lambda kept as a func_def in it).
+  struct Capture_visible {
+    struct Stmt {
+      Lnast_nid nid;
+      size_t    depth;
+    };
+    std::vector<Stmt>                stmts;  // program order, outermost tree first
+    std::vector<const Prp_stmt_rw*>  rws;    // nullptr: never replayed (a lambda, a type)
+    absl::flat_hash_set<std::string> type_names;
+  };
+  Capture_visible   collect_capture_visible(bool include_current);
+  // The backward capture slice of `seeds` over `vis`: which statements a
+  // replay copies (the returned mask). A seed whose computation reaches a
+  // runtime root lands in `uncapturable` (seed -> root) and is sliced out; the
+  // enclosing generics the copies read land in `generics`. The `by_value`
+  // names are bound to their folded value, never recomputed.
+  std::vector<bool> slice_captures(const Capture_visible& vis, const std::vector<std::string>& seeds,
+                                   const absl::flat_hash_set<std::string>&        by_value,
+                                   absl::flat_hash_map<std::string, std::string>& uncapturable,
+                                   std::vector<std::string>&                      generics) const;
+  // A read of a fold_const `name` from a lambda kept as a func_def (no
+  // streamed plan): decide it now, into that lambda's `uncapturable`.
+  void              resolve_kept_lambda_fold_const(std::string_view name, const Capture_lookup& hit);
+
+  // Implicit-generic binds of each streamed lambda, keyed "<defining scope
+  // unit>\n<entity>" (see streamed_actuals_key): sibling scopes may each define
+  // a same-named helper with different captures.
   absl::flat_hash_map<std::string, std::vector<std::string>> streamed_capture_actuals_;
   static std::string streamed_actuals_key(std::string_view scope_unit, std::string_view callee);
   void               append_streamed_capture_actuals(const Lnast_nid& fcall, std::string_view callee);
@@ -650,29 +1061,15 @@ protected:
   // (below) so it survives the streaming arena reset between constructs — the
   // spread can be in a LATER top-level statement than the const.
   absl::flat_hash_map<std::string, TSNode> const_rvalue_nodes_;
-  // Declaration-point capture environment for streamed lambdas, in SOURCE
-  // ORDER.  Enum values are bundles (not scalar capture_const_bindings_), so
-  // the compact source declaration is retained and re-lowered into each
-  // streamed destination's prologue; const tuple/string rvalues replay through
-  // const_rvalue_nodes_ (keyed by `name`).  One ordered list for both kinds:
-  // a const tuple may read an earlier enum entry (and an enum spread an
-  // earlier const), so the prologue must reproduce declaration order — an
-  // absl-map iteration emitted reads before their producers.  The CST clones
-  // live in retained_arena_ for the same parse_next lifetime reason as
-  // const_rvalue_nodes_.
-  struct Capture_stmt {
-    bool        is_enum{false};
-    std::string name;    // const rvalue name (empty for an enum)
-    TSNode      node{};  // retained enum declaration (unused for a const)
-  };
-  std::vector<Capture_stmt> capture_stmt_order_;
-  bool                      replaying_capture_enum_{false};
+  // True while an enclosing scope's enum declaration (Capture_frame::enum_decls)
+  // is re-lowered into a streamed lambda's prologue.
+  bool                                     replaying_capture_enum_{false};
   // Persistent arena holding the cloned `const_rvalue_nodes_` RHS subtrees. The
   // streaming parser recycles its own arena per construct (2f-stream), so any
   // CST node a later statement still needs is cloned here instead, keyed off the
   // same `prp_buf` bytes (which outlive the parse). Small: only const string /
   // tuple rvalues that an `enum(...)` spread might reference.
-  prpparse::Ast_arena       retained_arena_;
+  prpparse::Ast_arena                      retained_arena_;
 
   // Functions (comb/mod/pipe) declared with a `ref` parameter (e.g. `ref self`).
   // Such a call mutates the caller, so using its RESULT in a right-hand-side
@@ -683,10 +1080,17 @@ protected:
   absl::flat_hash_set<std::string> ref_param_funcs_;
   // First call (anywhere in `n`) to a `ref`-param function, else a null node.
   TSNode                           find_ref_param_call(TSNode n) const;
+  // A UFCS call `x.f(…)` writes its receiver back when `f` takes `ref self`;
+  // a callee this front end does not know (a tuple method, a lambda declared
+  // later) may, so it counts as a write too.
+  bool                             ufcs_writes_receiver(std::string_view callee) const;
+  // A call writes `name` (a `ref` actual, a `ref self` receiver): the value is
+  // no longer statically known (Binding::int_value).
+  void                             note_call_write(std::string_view name);
 
   // Nesting depth of conditional / loop / nested-lambda bodies currently being
   // lowered. >0 means writes are not unconditional statement-level writes, so
-  // they must not record or update const_int_bindings_ (a conditional re-bind
+  // they must not record or update a Binding::int_value (a conditional re-bind
   // makes a mut runtime-valued). Bumped via a Conditional_scope RAII guard
   // around if/for/while/match arm bodies and lambda bodies.
   uint32_t conditional_depth_ = 0;
@@ -702,6 +1106,12 @@ protected:
   // implicit `clock` loop variable, a name their source never declares.
   bool in_tick_statement_ = false;
 
+  // docs 05b: exactly one `step` per tick iteration. The tick body's stmts node
+  // and the number of `step`s written directly in it (steps in an `if` arm are
+  // alternatives, not an extra edge, so only the body's own level is counted).
+  Lnast_nid tick_body_idx_;
+  uint32_t  tick_direct_steps_ = 0;
+
   struct Conditional_scope {
     uint32_t* d;
     explicit Conditional_scope(uint32_t* dd) : d(dd) { ++*d; }
@@ -712,9 +1122,17 @@ protected:
 
   // Resolve a timing-index CST node to a compile-time integer: a `constant`
   // node parses via Dlop::from_pyrope (is_integer + is_i); an `identifier`
-  // node looks up const_int_bindings_; anything else is std::nullopt (the
+  // node reads its visible Binding::int_value; anything else is std::nullopt (the
   // caller emits its own "literal or compile-time constant" diagnostic).
-  std::optional<int64_t> resolve_cycle_value(TSNode n) const;
+  std::optional<int64_t>     resolve_cycle_value(TSNode n) const;
+  // The Binding::int_value of the binding identifier `id` reads (a read of an
+  // enclosing runtime binding from a nested lambda is reported, see
+  // capture_frames_).
+  std::optional<int64_t>     visible_const_int(TSNode id) const;
+  // A comptime const `n` reads whose value this front end did not fold (it is
+  // computed by a loop, an `if`, a call...), for a diagnostic that says so
+  // instead of asking for the comptime const it already is.
+  std::optional<std::string> unfolded_comptime_read(TSNode n) const;
 
   struct Call_arg {
     bool        is_assign = false;
@@ -749,13 +1167,26 @@ protected:
   // is legal; otherwise a type on a re-assignment is rejected. When set, the
   // scalar leaf lowers the value through a `wrap|sat(v=…, type=<lhs>)` library
   // call before the store (replaces the old attr_set(wrap) tag).
+  // `rvalue_comptime` says the initializer is a compile-time constant
+  // (is_comptime_expression): a plain `const` it declares is a comptime binding.
   Lnast_node process_lvalue_for_assign(TSNode lvalue, const Lnast_node& rvalue, TSNode decl_node, TSNode type_cast_node,
                                        bool rhs_is_fcall = false, std::string_view rhs_fcall_name = {},
                                        std::string_view overflow_kind = {}, bool rhs_name_bindable = false,
-                                       std::optional<int64_t> resolved_rvalue_int = std::nullopt);
+                                       std::optional<int64_t> resolved_rvalue_int = std::nullopt, bool rvalue_comptime = false);
 
   // Helpers
+  // Source text of a node, with a whole-node plain escaped identifier
+  // canonicalized (`` `foo` `` -> `foo`, `` `foo[bar]` `` kept): `foo` == foo.
   std::string_view        get_text(const TSNode& n) const;
+  // Decoded backtick names (`` `d\\e` `` is the identifier `d\e`: a backtick
+  // name reads the string escapes). A deque, so a returned view stays valid.
+  mutable std::deque<std::string> decoded_names_;
+  // The exact source bytes (no canonicalization). Only for KEYWORD-literal
+  // tests on an identifier node: an escaped keyword (`` `true` ``) is an
+  // ordinary name, never the literal it spells.
+  std::string_view        get_raw_text(const TSNode& n) const {
+    return text_between(ts_node_start_byte(n), ts_node_end_byte(n));
+  }
   static std::string_view trim(std::string_view s);
   std::string_view        text_between(uint32_t start, uint32_t end) const;
 

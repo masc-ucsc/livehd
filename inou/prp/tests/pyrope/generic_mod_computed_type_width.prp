@@ -13,9 +13,9 @@ comptime const SW = W + LOG
 mod add<T>::[timecheck=false](a:T, b:T) -> (s:T@[0]) {
   reg r:T = 0
   s = r
-  r = (a + b)#[0..=(a.[bits] - 1)]
+  wrap r = (a + b)#[0..=(a.[bits] - 1)]
 }
 
-pub mod top(x:s5, y:s5) -> (z:s5@[0]) {
-  z = add<signed(bits=SW)>(a=x, b=y)
+pub mod top(x:S5, y:S5) -> (z:S5@[0]) {
+  z = add<Signed(bits=SW)>(a=x, b=y)
 }

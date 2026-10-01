@@ -77,6 +77,52 @@ std::string canon(const std::string& p) {
   return ec ? p : c.lexically_normal().string();
 }
 
+// True when `a` and `b` are the same directory or one lies inside the other.
+bool paths_nest(const std::string& a, const std::string& b) {
+  const auto ca     = fs::path(canon(a));
+  const auto cb     = fs::path(canon(b));
+  const auto inside = [](const fs::path& outer, const fs::path& inner) {
+    return std::mismatch(outer.begin(), outer.end(), inner.begin(), inner.end()).first == outer.end();
+  };
+  return inside(ca, cb) || inside(cb, ca);
+}
+
+// Drop what an earlier `lhd synth` left under <root> so a reused --workdir
+// runs exactly like a fresh one: the compiled library, the default netlist dir
+// <root>/net (a run whose --emit-dir lg: relocates the netlist would otherwise
+// leave an earlier run's netlist of an older design there), and every sidecar
+// a mapper or STA run writes next to qor.json (an earlier run's timing.json or
+// mapper report must never be declared, embedded or exported as this run's).
+// The netlist dir is purged again right before the mapper fills it, wherever
+// --emit-dir lg: puts it. An lg: input that lives under <root>/net (re-mapping
+// an earlier run's netlist) is read by the compile first, so that dir is left
+// alone here. The incremental caches live outside <root>.
+void purge_synth_products(const std::string& root, const std::string& lg_dir, const std::vector<std::string>& lg_inputs) {
+  std::error_code ec;
+  fs::remove_all(lg_dir, ec);
+  if (ec) {
+    throw Lhd_error{"config", std::format("could not clear {}: {}", lg_dir, ec.message()), "check --workdir permissions"};
+  }
+  const std::string        qor = root + "/qor.json";
+  std::vector<std::string> stale{qor, qor + ".provenance", root + "/timing.json"};
+  const std::string        net = root + "/net";
+  if (std::none_of(lg_inputs.begin(), lg_inputs.end(), [&](const std::string& in) { return paths_nest(in, net); })) {
+    stale.push_back(net);
+  }
+  for (const auto& m : kMappers) {
+    if (!m.report.empty()) {
+      stale.push_back(std::format("{}.{}.json", qor, m.report));
+      stale.push_back(std::format("{}.{}.artifacts", qor, m.report));
+    }
+  }
+  for (const auto& p : stale) {
+    fs::remove_all(p, ec);
+    if (ec) {
+      throw Lhd_error{"config", std::format("could not clear {}: {}", p, ec.message()), "check --workdir permissions"};
+    }
+  }
+}
+
 }  // namespace
 
 // `--set synth.<flag>` value, else `def` (kSynthSetOptions validated the name).
@@ -131,10 +177,14 @@ void synth_command(Options& opts, Result& res) {
   // ---- the synth.* knobs --------------------------------------------------
   // (`pass.abc.library` is refused for every command by check_known_set_passes:
   // synth.liberty is the one spelling, so no two Liberty readers can disagree.)
-  const std::string liberty       = resolve_liberty(opts);
   const auto*       mapper        = find_mapper(synth_set(opts, "mapper", "abc"));  // validated by check_known_set_passes
   const auto        mapper_method = std::string{mapper->method};
-  const bool        run_sta       = truthy(synth_set(opts, "opentimer", "true"));
+  const bool        mapped_output = mapper_maps_cells(opts, mapper_method);
+  const std::string liberty       = mapped_output ? resolve_liberty(opts) : std::string{};
+  const bool        run_sta       = mapped_output && truthy(synth_set(opts, "opentimer", "true"));
+  if (!mapped_output && truthy(synth_set(opts, "opentimer", ""))) {
+    throw Lhd_error{"usage", "logical-only USYN cannot run OpenTimer", "use tmap=abc or synth.opentimer=false"};
+  }
   const bool        run_reduce    = truthy(synth_set(opts, "reduce", "false"));
   const std::string sdc           = synth_set(opts, "sdc", "");
   const std::string spef          = synth_set(opts, "spef", "");
@@ -147,7 +197,9 @@ void synth_command(Options& opts, Result& res) {
       extra.push_back(spef);
     }
     check_inputs_exist(extra);
-    res.inputs.push_back(liberty);
+    if (!liberty.empty()) {
+      res.inputs.push_back(liberty);
+    }
     for (const auto& f : extra) {
       res.inputs.push_back(f);
     }
@@ -182,6 +234,34 @@ void synth_command(Options& opts, Result& res) {
   // sources, ln:, lg: and mixed linking all go through compile_command, and so
   // does the compile cache (a warm run restores the library generation into
   // the dir). The user's own emits are held back: they describe the NETLIST.
+  //
+  // <root>/lg is rebuilt from scratch every run. A compile MERGES into an
+  // existing lg: library (a shared emit dir keeps other compiles' modules), so
+  // a previous run's library would leak into this one. tolg now re-declares a
+  // module's GraphIO exactly as the source does, but what is left still
+  // matters:
+  //   - a module the source no longer defines stays in the library and in the
+  //     design this flow loads below: a Verilog compile never prunes one, and
+  //     a Pyrope compile prunes only the leftovers of its own cache scope;
+  //   - such a leftover still instantiating a module whose ports this run
+  //     changes makes tolg refuse the compile (`stale-instance`);
+  //   - the yosys reader still only ADDS ports, so renaming a top input
+  //     `a` -> `a2` keeps both declared on one port id (pass.partition then
+  //     refuses the library with `io-port-clash`);
+  //   - the stale sidecars and <root>/net go with it (purge_synth_products).
+  // Purging before the compile leaves the incremental
+  // tiers intact: the compile cache restores its generation into the empty
+  // dir (materialize_artifact_files clones each file on macOS and copies it
+  // elsewhere, so <root>/lg never shares storage with the cache and removing
+  // it never touches the cache), and the region caches live outside <root>.
+  //
+  // Cost: a warm all-clean run re-materializes the generation every time (the
+  // total-restore fast path skips that only while <root>/lg still matches it).
+  // On a 302-graph design (macOS clonefile) that is ~10-25 ms more in
+  // compile.cache.lg_artifact of a ~240 ms warm synth; elsewhere it is a full
+  // data copy. Purging only off the fast path needs compile_sources' own
+  // decision, which is not known here before the sources are parsed.
+  purge_synth_products(root, lg_dir, ir.lg_dirs);
   const std::vector<Typed_path> user_emits     = opts.emits;
   const std::vector<Typed_path> user_emit_dirs = opts.emit_dirs;
   opts.emits.clear();
@@ -222,9 +302,7 @@ void synth_command(Options& opts, Result& res) {
   // inside pass.abc's memory admission and what its incremental reuse is keyed
   // on. The colors live on the in-memory graphs only — <root>/lg is NOT
   // rewritten: the coloring is seeded and deterministic, pass.abc digests
-  // region CONTENT, and on a warm compile <root>/lg is hardlinked from the
-  // compile cache's generation, so an in-place save would write through into
-  // the cache.
+  // region CONTENT, and <root>/lg stays exactly the compile's output.
   if (run_reduce) {
     Eprp_var::Eprp_dict labels;
     labels["seed"]      = opts.seed;
@@ -294,9 +372,8 @@ void synth_command(Options& opts, Result& res) {
     labels["qor"]     = qor_path;
     // synth.threads is the shared ABC worker limit for every command.
     labels["threads"] = synth_set(opts, "threads", "0");
-    // Both mappers expose ABC's mapping labels: `abc.*` tuning survives a bare
-    // `--set synth.mapper=` switch, and an explicit `pass.usyn.*` wins. The
-    // rule lives in merge_mapper_sets so `lhd pass <mapper>` answers the same.
+    // Each mapper receives its own labels. Native USYN does not inherit
+    // ABC optimization settings; standalone dispatch uses the same rule.
     merge_mapper_sets(opts, mapper_method, labels);
     labels["library"] = liberty;  // synth.liberty is the one spelling (pass.abc.library is refused)
     if (mapper->timing_files) {
@@ -320,22 +397,26 @@ void synth_command(Options& opts, Result& res) {
       res.outputs.push_back(qor_path);
     }
   }
-  const std::string abc_qor               = slurp_json(qor_path);
-  // The mapper's own report (pass.usyn: the per-region cover and hand-off).
+  const std::string abc_qor         = mapped_output ? slurp_json(qor_path) : std::string{};
+  // The mapper's own report (USYN endpoint selection and residual optimization).
   const bool        has_report      = !mapper->report.empty();
   const std::string report_path     = has_report ? std::format("{}.{}.json", qor_path, mapper->report) : std::string{};
   const std::string provenance_path = qor_path + ".provenance";
+  const std::string artifact_path   = mapper_method == "pass.usyn" ? qor_path + ".usyn.artifacts" : std::string{};
   const std::string mapper_qor      = has_report ? slurp_json(report_path) : std::string{};
   if (user_workdir && !mapper_qor.empty()) {
     res.outputs.push_back(report_path);
     res.outputs.push_back(provenance_path);
+    if (!artifact_path.empty()) {
+      res.outputs.push_back(artifact_path);
+    }
   }
 
-  // The mapped netlist, as pass.abc left it in the out library (in memory).
+  // The selected logical or mapped netlist in the output library (in memory).
   Eprp_var net;
   load_lg_into_var(net_dir, net);
   if (net.graphs.empty()) {
-    throw Lhd_error{"internal", "pass.abc produced an empty netlist library", ""};
+    throw Lhd_error{"internal", mapper_method + " produced an empty netlist library", ""};
   }
 
   // ---- 4. STA -----------------------------------------------------------------
@@ -372,10 +453,10 @@ void synth_command(Options& opts, Result& res) {
 
   // ---- reports ----------------------------------------------------------------
   // The envelope's "qor" member: {kind:"synth", abc:<abc-map>, sta:<sta>} (plus
-  // the mapper's own report under its name, e.g. usyn:<cover report>) —
+  // the mapper's own report under its name, e.g. usyn:<decision report>) —
   // each sub-report byte-identical to what its pass alone embeds, so a
-  // consumer keyed on `qor.abc.total` / `qor.sta.designs` reads the one-shot
-  // and the manual steps alike.
+  // consumer checks each report kind before reading its fields. USYN mapping
+  // uses technology-map; logical-only output has abc:null and no STA report.
   res.qor_json = std::format(R"({{"schema_version":1,"kind":"synth","top":"{}","abc":{}{}{}}})",
                              json_escape_min(top),
                              abc_qor.empty() ? std::string{"null"} : abc_qor,
@@ -388,7 +469,9 @@ void synth_command(Options& opts, Result& res) {
     // --workdir to keep them in (or a build system that declares outputs).
     ensure_dir(report_emit->path);
     std::error_code ec;
-    for (const auto& src : {qor_path, timing_path, report_path}) {
+    // A logical-only run does not produce timing: never export a timing.json
+    // left by an earlier mapped run in the same workdir.
+    for (const auto& src : {qor_path, run_sta ? timing_path : std::string{}, report_path}) {
       if (src.empty()) {
         continue;
       }
@@ -402,14 +485,17 @@ void synth_command(Options& opts, Result& res) {
       }
       res.outputs.push_back(dst);
     }
-    if (has_report && fs::exists(provenance_path)) {
-      const auto dst = fs::path(report_emit->path) / fs::path(provenance_path).filename();
+    for (const auto& archive : {provenance_path, artifact_path}) {
+      if (!has_report || archive.empty() || !fs::exists(archive)) {
+        continue;
+      }
+      const auto dst = fs::path(report_emit->path) / fs::path(archive).filename();
       // Replace the whole archive: leaving older blobs would misrepresent its
       // bounded content and could conceal missing files in the new capture.
-      if (canon(dst.string()) != canon(provenance_path)) {
+      if (canon(dst.string()) != canon(archive)) {
         fs::remove_all(dst, ec);
         if (!ec) {
-          fs::copy(provenance_path, dst, fs::copy_options::recursive, ec);
+          fs::copy(archive, dst, fs::copy_options::recursive, ec);
         }
       }
       if (ec) {

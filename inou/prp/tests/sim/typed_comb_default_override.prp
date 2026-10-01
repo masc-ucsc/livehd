@@ -1,0 +1,56 @@
+/*
+:name: typed_comb_default_override
+:type: simulation
+*/
+// lhdtrack suggestions 4.5 (item 4.5b): a FULLY TYPED comb with a CONSTANT
+// input default (`b:U8=3`) must honor an argument the caller PROVIDES. The
+// default is a body-prologue `store(b, 3)` that the inliner skips when the
+// call passes `b`; but a fully typed comb is a standalone unit, so upass
+// constprop folded that store into `a + 3` BEFORE any caller inlined it, and
+// every call then silently used the default (y_const and y_port were x + 3).
+//
+// Controls that already worked: the omitted-argument call (y_omit), the
+// untyped twin `comb f(a, b=3)` (u_const), and a typed EXPRESSION default
+// (`b:U8=a ^ 0xf`, e_omit / e_port), which constprop cannot fold away.
+comb add_dflt(a:U8, b:U8=3) -> (r:U9) { r = a + b }
+comb add_expr(a:U8, b:U8=a ^ 0xf) -> (r:U9) { r = a + b }
+comb add_untyped(a, b=3) -> (r) { r = a + b }
+
+mod typed_comb_default_override(x:U8, z:U8)
+  -> (y_omit:U9@[0], y_const:U9@[0], y_port:U9@[0], u_const:U9@[0], e_omit:U9@[0], e_port:U9@[0]) {
+  y_omit  = add_dflt(a=x)          // default: x + 3
+  y_const = add_dflt(a=x, b=5)     // provided literal: x + 5
+  y_port  = add_dflt(a=x, b=z)     // provided runtime value: x + z
+  u_const = add_untyped(a=x, b=5)  // untyped twin: x + 5
+  e_omit  = add_expr(a=x)          // expression default: x + (x ^ 15)
+  e_port  = add_expr(a=x, b=z)     // provided: x + z
+}
+
+test typed_comb_default_override.provided_wins {
+  mut d = typed_comb_default_override
+  tick 2 {
+    if clock == 0 {
+      d.x = 7
+      d.z = 6
+    } else {
+      d.x = 200
+      d.z = 100
+    }
+    step
+    if clock == 0 {
+      assert(d.y_omit  == 10, "omitted b takes the default 3")
+      assert(d.y_const == 12, "provided literal b=5 wins over the default")
+      assert(d.y_port  == 13, "provided runtime b=z wins over the default")
+      assert(d.u_const == 12, "untyped twin with b=5")
+      assert(d.e_omit  == 15, "expression default b = 7 ^ 15 = 8")
+      assert(d.e_port  == 13, "provided b=z wins over the expression default")
+    } else {
+      assert(d.y_omit  == 203, "omitted b takes the default 3")
+      assert(d.y_const == 205, "provided literal b=5 wins over the default")
+      assert(d.y_port  == 300, "provided runtime b=z wins over the default")
+      assert(d.u_const == 205, "untyped twin with b=5")
+      assert(d.e_omit  == 399, "expression default b = 200 ^ 15 = 199")
+      assert(d.e_port  == 300, "provided b=z wins over the expression default")
+    }
+  }
+}

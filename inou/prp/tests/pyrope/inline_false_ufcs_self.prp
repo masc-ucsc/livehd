@@ -1,0 +1,14 @@
+/*
+:name: inline_false_ufcs_self
+:type: lgraph
+:set: compile.upass.inline=false
+*/
+
+// compile.upass.inline=false keeps `twice` a Sub instance; the UFCS receiver
+// `a` of `a.twice()` drives its `self` input.
+comb twice(self:U8) -> (r:U9) {
+  r = self + self
+}
+pub comb inline_false_ufcs_self(a:U8) -> (o:U9) {
+  o = a.twice()
+}

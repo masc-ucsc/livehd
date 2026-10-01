@@ -7,12 +7,12 @@
 // ICG leaves the low latch open: clock level is not a compile-time constant,
 // but the low/high data windows can never be open together. Reset is expressed
 // as data/control muxes, as in the imported core.
-pub mod gated_feedback(clk:bool, run:bool, clear:bool, d:u8) -> (low:u8@[], high:u8@[], sampled:u8@[1], observed:u8@[]) {
-  reg gate:bool:[latch=true] = nil
-  reg lo:u8:[latch=true] = nil
-  reg hi:u8:[latch=true] = nil
-  reg sample:u8:[clock_pin=ref clk] = 0
-  reg observer:u8:[clock_pin=ref clk, posclk=false] = 0
+pub mod gated_feedback(clk:Bool, run:Bool, clear:Bool, d:U8) -> (low:U8@[], high:U8@[], sampled:U8@[1], observed:U8@[]) {
+  reg gate:Bool:[latch=true] = nil
+  reg lo:U8:[latch=true] = nil
+  reg hi:U8:[latch=true] = nil
+  reg sample:U8:[clock_pin=clk] = 0
+  reg observer:U8:[clock_pin=clk, posclk=false] = 0
   const shared_next = (hi + 1) & 255
   if not clk {
     gate = run
@@ -38,7 +38,7 @@ pub mod gated_feedback(clk:bool, run:bool, clear:bool, d:u8) -> (low:u8@[], high
 
 test gated_feedback.reset_and_pause {
   mut acc = gated_feedback
-  mut expected:u8 = 0
+  mut expected:U8 = 0
   tick 14 {
     const clearing = (clock < 2) or (clock == 8)
     const running = (clock < 5) or (clock >= 10)
@@ -65,11 +65,11 @@ test gated_feedback.reset_and_pause {
 // The alternating edge/settle sequence: each low latch sees the newly
 // committed negedge flop, and each high latch sees the newly committed
 // posedge flop. A posedge reader samples the preceding low window.
-pub mod alternating_phases(clk:bool, d:u8) -> (fall_q:u8@[], low_q:u8@[], rise_q:u8@[], high_q:u8@[]) {
-  reg falling:u8:[clock_pin=ref clk, posclk=false] = 0
-  reg low_latch:u8:[latch=true] = 0
-  reg rising:u8:[clock_pin=ref clk] = 0
-  reg high_latch:u8:[latch=true] = 0
+pub mod alternating_phases(clk:Bool, d:U8) -> (fall_q:U8@[], low_q:U8@[], rise_q:U8@[], high_q:U8@[]) {
+  reg falling:U8:[clock_pin=clk, posclk=false] = 0
+  reg low_latch:U8:[latch=true] = 0
+  reg rising:U8:[clock_pin=clk] = 0
+  reg high_latch:U8:[latch=true] = 0
   falling = d
   if not clk {
     low_latch = falling
@@ -86,7 +86,7 @@ pub mod alternating_phases(clk:bool, d:u8) -> (fall_q:u8@[], low_q:u8@[], rise_q
 
 test alternating_phases.edge_then_settle {
   mut acc = alternating_phases
-  mut previous:u8 = 0
+  mut previous:U8 = 0
   tick 6 {
     const next_value = 11 + (17 * clock)
     acc.d = next_value

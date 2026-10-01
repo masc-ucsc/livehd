@@ -11,4 +11,4 @@
 // `my_top`), NOT `chip_top`. The equiv check proves that the (inert-lg) artifact
 // is logically `a + b` regardless of the golden's independent module name.
 
-pub comb my_top(a:u8, b:u8) -> (r:u9) { r = a + b }
+pub comb my_top(a:U8, b:U8) -> (r:U9) { r = a + b }

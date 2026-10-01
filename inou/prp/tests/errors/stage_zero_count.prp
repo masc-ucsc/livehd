@@ -5,7 +5,7 @@
 :help: plain assignment for a same-cycle value
 */
 
-mod f(a:u8) -> (x:u8@[1]) {
+mod f(a:U8) -> (x:U8@[1]) {
   stage[0] t = a   // locate_error_here
   x = t
 }

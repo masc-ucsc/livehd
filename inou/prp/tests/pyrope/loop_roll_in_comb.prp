@@ -15,19 +15,19 @@
 // Eligibility needs a DECLARED type on the carry: `mut acc = 0` (untyped) has
 // no width contract, declines the roll and source-unrolls instead -- which is
 // why the untyped loop_accum.prp fixture never caught this.
-comb add4(x:u8) -> (y:u8) {
+comb add4(x:U8) -> (y:U8) {
   y = (x + 4)#[0..=7]
 }
 
-pub comb loop_roll_in_comb(x:u8) -> (y:u8, z:u8) {
-  mut value:u8 = x
+pub comb loop_roll_in_comb(x:U8) -> (y:U8, z:U8) {
+  mut value:U8 = x
   for i in 0..<3 {
     value = (value + 1)#[0..=7]
   }
   y = value
 
   // Same shape, but the body calls a comb: the lifted body instantiates it.
-  mut chained:u8 = x
+  mut chained:U8 = x
   for j in 0..<3 {
     chained = add4(x=chained)
   }

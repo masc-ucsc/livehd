@@ -13,8 +13,8 @@
 // the same reason as async_reset_enable: yosys read_verilog's proc_arst
 // cannot peel a compound async guard (hard proc_dff "Multiple edge sensitive
 // events" error), so lgcheck can never read the golden directly.
-pub mod pipe(rst_n:bool, clr:bool, en:bool, d:u8) -> (q:u8@[0]) {
-  reg r:u8 = 0
+pub mod `pipe`(rst_n:Reset, clr:Bool, en:Bool, d:U8) -> (q:U8@[0]) {
+  reg r:U8:[negreset=true] = 0
   if !rst_n or clr {
     r = 0
   } elif en {

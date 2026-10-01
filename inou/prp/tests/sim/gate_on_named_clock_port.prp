@@ -3,54 +3,19 @@
 :type: simulation
 */
 
-// A clock gate is folded or refused according to the NAME of the port carrying
-// the clock. `regate` and `regate_clk` below have byte-identical bodies -- one
-// AND, one flop -- and both are instantiated with this module's own reference
-// clock wired straight to the port. The only difference is that one port is
-// spelled `clk` and the other `gclk`, and that decides whether the design
-// compiles:
+// A clock gate folds whatever the NAME of the port carrying the clock (clocks
+// bind by type, docs 07-typesystem). `regate` and `regate_clk` below have
+// byte-identical bodies -- one `Clock(clock_pin=, enable=)` gate, one flop --
+// and both are handed this module's own reference clock. Found by
+// differential fuzzing against Icarus, 2026-08-06, when the NAME decided it: a
+// gate on a port spelled `clk`, `clock`, `clk_i` or `clk2` folded, one on
+// `gclk`, `gin`, `myclk`, `ck` or `clkin` was refused (`flop ... has a derived
+// clock inou.cgen.sim cannot fold into a commit guard`).
 //
-//     module `gate_on_named_clock_port.regate`: flop `flop_28:f` has a derived
-//     clock inou.cgen.sim cannot fold into a commit guard
-//
-// Found by differential fuzzing against Icarus, 2026-08-06.
-//
-// MEASURED NAME SWEEP -- same child, same body, only the port name changed:
-//
-//     clk  clock  clk_i  clk2   -> folds
-//     gclk  gin  myclk  ck  clkin -> refused
-//
-// So the accepted set is a spelling list, not a property of the circuit. `clk2`
-// folds while `clkin` does not, which is the tell that this is lexical.
-//
-// WHY THE CHILD CASE IS THE UNAMBIGUOUS ONE. At the top level one could argue an
-// undriven `bool` input is not knowably a clock. Here there is no such
-// ambiguity: the PARENT wires its own reference clock into the port, so the
-// clock's identity is established by the instantiation, and the two sibling
-// instances differ in nothing else. This is also the ordinary case for imported
-// Verilog, where clock ports are named `gclk`, `core_clk`, `aclk`, `ck` at least
-// as often as `clk`. (The same refusal does reproduce with a non-blessed name on
-// a TOP-level port; the child form is asserted here because it admits no other
-// reading.)
-//
-// TWO CONTROLS, IN THE DESIGN. Both pass today, and each removes one
-// alternative explanation:
-//
-//   * `qdirect` -- a child that uses a `gclk`-named port DIRECTLY as its flop's
-//     clock, no gate. Correct, so a non-blessed port name is perfectly usable AS
-//     a clock; it is only GATING one that is refused. That asymmetry is the
-//     sharpest statement of the bug.
-//   * `qnamed` -- the same gate body with the port spelled `clk`. Correct, so
-//     the gate shape, the hierarchy crossing and the enable schedule are all
-//     fine.
-//
-// `qany == qnamed` is therefore the whole bug in one comparison: two children
-// with identical bodies, fed the same clock and the same enable, must agree.
-//
-// Measured neighbours, so the diagnosis is not a guess: a two-boundary gate
-// CHAIN (parent gates, child re-gates, grandchild clocked from it) compiles and
-// is correct as soon as the ports are spelled `clk` -- so chained hierarchical
-// gating itself works, and the name is the only obstacle.
+// TWO CONTROLS, IN THE DESIGN: `qdirect` (a child that uses a `gclk` port
+// DIRECTLY as its flop's clock, no gate) and `qnamed` (the same gate body with
+// the port spelled `clk`). `qany == qnamed` is the property: two children with
+// identical bodies, fed the same clock and the same enable, agree.
 //
 // GOLDENS -- hand-written Icarus twin (all four modules retyped from this
 // source, never LiveHD's emitter), enables changed while the clock is LOW:
@@ -58,35 +23,33 @@
 //     c       : 0   1   2   3   4   5
 //     qdirect : 10  15  20  25  30  35     (ungated: loads every period)
 //     qnamed  : 10  15  15  15  30  30     (gated: holds while e is low)
-//     qany    : 10  15  15  15  30  30     (identical body, refused today)
+//     qany    : 10  15  15  15  30  30     (identical body, another port name)
 
-// CONTROL -- a non-blessed port name used DIRECTLY as a clock. Fine.
-mod direct(gclk:bool, d:u8) -> (o:u8@[]) {
-  reg f:u8:[clock_pin=ref gclk] = 0
+// CONTROL -- a port not spelled `clk`, used DIRECTLY as a clock.
+mod direct(gclk:Clock, d:U8) -> (o:U8@[]) {
+  reg f:U8:[clock_pin=gclk] = 0
   f = d
   o = f
 }
 
-// CONTROL -- gating a port spelled `clk`. Fine.
-mod regate_clk(clk:bool, e:bool, d:u8) -> (o:u8@[]) {
-  wire g:bool = nil
-  g = clk and e
-  reg f:u8:[clock_pin=ref g] = 0
+// CONTROL -- gating a port spelled `clk`.
+mod regate_clk(clk:Clock, e:Bool, d:U8) -> (o:U8@[]) {
+  const g = Clock(clock_pin=clk, enable=e)
+  reg f:U8:[clock_pin=g] = 0
   f = d
   o = f
 }
 
-// THE BUG -- byte-identical body, port spelled `gclk`. Refused.
-mod regate(gclk:bool, e:bool, d:u8) -> (o:u8@[]) {
-  wire g:bool = nil
-  g = gclk and e
-  reg f:u8:[clock_pin=ref g] = 0
+// The byte-identical body, port spelled `gclk`: it must gate the same way.
+mod regate(gclk:Clock, e:Bool, d:U8) -> (o:U8@[]) {
+  const g = Clock(clock_pin=gclk, enable=e)
+  reg f:U8:[clock_pin=g] = 0
   f = d
   o = f
 }
 
-pub mod nametop(clk:bool, e:bool, d:u8) -> (qdirect:u8@[], qnamed:u8@[],
-                                            qany:u8@[], ctl:u8@[]) {
+pub mod nametop(clk:Clock, e:Bool, d:U8) -> (qdirect:U8@[], qnamed:U8@[],
+                                            qany:U8@[], ctl:U8@[]) {
   // All three children are handed THIS module's reference clock, unmodified.
   mut a = direct(gclk=clk, d=d)
   qdirect = a
@@ -97,7 +60,7 @@ pub mod nametop(clk:bool, e:bool, d:u8) -> (qdirect:u8@[], qnamed:u8@[],
 
   // CONTROL: a flop on the ungated reference clock, so a failure is never a
   // dead testbench.
-  reg cr:u8 = 0
+  reg cr:U8:[clock_pin=clk] = 0
   cr  = d
   ctl = cr
 }
@@ -110,13 +73,13 @@ test nametop.a_gate_folds_regardless_of_the_clock_ports_name {
   mut bad_ctl    = 0
   mut bad_any    = 0
   mut bad_agree  = 0
-  mut g_gated:u16 = 0
+  mut g_gated:U16 = 0
   tick 6 {
     // Enables move only while the clock is LOW -- the discipline every gated
     // fixture here follows; an enable racing the clock rise is the glitch
     // hazard a real ICG interposes a latch for.
-    mut ev:bool = (clock <= 1) or (clock == 4)
-    mut dv:u8   = 10 + (clock * 5)
+    mut ev:Bool = (clock <= 1) or (clock == 4)
+    mut dv:U8   = 10 + (clock * 5)
     acc.e = ev
     acc.d = dv
     step

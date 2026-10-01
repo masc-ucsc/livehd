@@ -1,0 +1,13 @@
+/*
+:name: pin_attr_ref_removed
+:type: error
+:error: `clock_pin` takes the signal directly: `ref` is not allowed here
+*/
+// Ruling 82 (qa Q27): `clock_pin=ref x` / `reset_pin=ref x` is a compile
+// error; the Clock/Reset types make `ref` unnecessary (a pin is always a
+// connection, docs 04b `clock_pin=clk2`, qa.md Appendix 6 "no `ref`").
+pub mod pin_attr_ref_removed(clk:Clock, d:U8) -> (q:U8@[1]) {
+  reg r:U8:[clock_pin=ref clk] = 0   // locate_error_here
+  r = d
+  q = r
+}

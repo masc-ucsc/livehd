@@ -1,0 +1,46 @@
+/*
+:name: struct_dyn_write_blocking
+:type: equiv
+:verilog_top: struct_dyn_write_blocking
+:pyrope_top: struct_dyn_write_blocking
+*/
+// Runtime-position BLOCKING writes into a packed-struct variable (see the
+// golden .v). inou/slang stores such a variable as one leaf per field, so it
+// has no flat net; the write went to that phantom whole name, tolg wired it to
+// nothing ("unresolved ref") and the write was silently lost (`q = d`, 130/300
+// iverilog mismatches). A constant select below a member's element
+// (`s.arr[1][1:0]`) was lost the same way. The reader now splices a copy of the
+// fields the write can reach and stores those fields back; a write into one
+// member rewrites only that member, so `qu`'s field `f` keeps its single
+// driver.
+//
+// This reference spells the member window with a wider temp, like
+// partsel_clip_write: `g#[c..+4]` never leaves `g`, and the kept slice is the
+// member.
+pub mod struct_dyn_write_blocking(b:U5, x:U1, c:U3, y:U4, j:U3, z:U4, d:U32)
+  -> (q:U32@[0], qf:U32@[0], qu:U32@[0]) {
+  // Fields, MSB first: f [31:24], g [23:16], h [15:12], arr [11:0] (arr[k] at 4k).
+  mut w:U32 = d
+  w#[b] = x
+  mut g:U11 = w#[16..=23]
+  g#[c..+4] = y
+  w#[16..=23] = g#[0..=7]
+  if j < 3 {
+    w#[(j * 4)..+4] = z
+  }
+  w#[4..=5] = z#[0..=1]
+  q = w
+
+  mut t:U32 = d
+  t#[b] = 1
+  mut tg:U11 = t#[16..=23]
+  tg#[c..+4] = y
+  t#[16..=23] = tg#[0..=7]
+  qf = t
+
+  mut ug:U11 = d#[16..=23]
+  ug#[c..+4] = y
+  mut u:U32 = d
+  u#[16..=23] = ug#[0..=7]
+  qu = u
+}

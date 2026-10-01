@@ -25,6 +25,16 @@ cc_library(
     alwayslink = True,  # ensures the static plugin_bitwidth registration fires
 )
 
+# Header-only: the Lnast_range value-range lattice, shared with the loop
+# roller's plan-time carry ranges (upass/runner) without linking the plugin.
+cc_library(
+    name = "lnast_range_hdr",
+    hdrs = ["lnast_range.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+)
+
 # Header-only utility: pure wrap/saturate narrowing math. Lives in
 # upass/bitwidth/ per the LiveHD docs ("max/min-dependent operations
 # live in bitwidth") but exposed as a separate target so consumers like

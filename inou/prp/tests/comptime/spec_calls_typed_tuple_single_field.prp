@@ -1,0 +1,21 @@
+/*
+:name: spec_calls_typed_tuple_single_field
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// qa.md Appendix §8: "Where a named tuple is expected (call arguments,
+// construction of a typed tuple), names may be dropped under the call naming
+// rules (bare variable whose name matches, single field, type-unique value,
+// self)." A single-field typed tuple may take its value unnamed.
+// (docs 06-functions.md: `const T1 = (mut a:U32 = 0)`, `mut x:T1 = (a=3)` is
+// the named spelling.)
+
+type Tone = (mut val:Signed = 0)
+mut n:Tone = (val=3)
+cassert(n.val == 3)
+mut t:Tone = 5
+cassert(t.val == 5)
+mut u:Tone = (7)
+cassert(u.val == 7)

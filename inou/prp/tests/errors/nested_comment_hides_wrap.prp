@@ -1,0 +1,12 @@
+/*
+:name: nested_comment_hides_wrap
+:type: error
+:error: may not fit its declared range
+*/
+
+// `/* /* */ wrap // */` is ONE nested comment, so no `wrap` applies to the
+// assignment below it and the overflowing narrow must still be reported.
+pub comb nested_comment_hides_wrap(a:U8, b:U8) -> (r:U8) {
+  /* /* */ wrap // */
+  r = a + b
+}

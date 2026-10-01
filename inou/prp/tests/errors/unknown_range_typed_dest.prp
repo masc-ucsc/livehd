@@ -1,0 +1,35 @@
+/*
+:name: unknown_range_typed_dest
+:type: error
+:tolg: 1
+:error: `y` \(unbounded range\) may not fit its declared range \[0, 15\]
+:help: (wrap|sat)
+*/
+
+// User ruling 2026-09-28 (21): a right-hand side whose range is UNKNOWN (an
+// untyped `mod` template's output: its range is whatever the specialization
+// happens to derive, never a promise) is 'may not fit' a narrower typed
+// destination -- the same mandatory error as a known range that may overflow
+// (errors/typed_local_overflow_runtime.prp). The fix is a `wrap`/`sat`
+// assignment or typing the callee's output. Before, `inc`'s output came back
+// 9 bits wide ([1, 256]) and the emitted Verilog silently truncated it into
+// the 4-bit `y`, and the typed local `t` never truncated at all. A call read
+// directly (`v = inc(a=x)`: a one-output callee's result IS its output) is the
+// same value.
+//
+// Legal spellings: `wrap y = c.o`, or `mod inc(a) -> (o:U4@[0])`.
+
+mod inc(a) -> (o@[0]) {
+  o = a + 1
+}
+
+pub mod unknown_range_typed_dest(x:U8, z:U8) -> (y:U4@[0], w:U8@[0], v:U4@[0]) {
+  const c = inc(a=x)
+  y = c.o   // locate_error_here
+  v = inc(a=z)   // locate_error_here
+
+  const c2 = inc(a=z)
+  mut t:U4 = 0
+  t = c2.o   // locate_error_here
+  w = t
+}

@@ -1,0 +1,30 @@
+/*
+:name: spec_clock_const_into_bool_clk
+:type: compile
+*/
+// SPEC (clock lane): a `Bool` input is data whatever its name, so binding a
+// constant to a `Bool` input named `clk` is legal (only a `Clock` input may
+// never take a constant). The docs 04b `top` example minus its two error lines.
+//   docs 04b: "A `Bool` input is data whatever its name, so binding a constant
+//     to it is legal."
+//   docs 04b: "p  = parity(clk=true, a=c.q)                   // OK, a constant
+//     into a data input"
+//   docs 04b: "const d = cnt8(rst_n=rst or soft_rst, en=en)   // OK, a computed
+//     reset; 'core_clk' auto-wired"
+mod cnt8(core_clk:Clock, rst_n:Reset, en:Bool) -> (q:U8@[0]) {
+  reg cnt:U8:[negreset=true] = 0 // clocked by 'core_clk', reset while 'rst_n' is low
+  if en { wrap cnt = cnt + 1 }
+  q = cnt
+}
+
+comb parity(clk:Bool, a:U8) -> (p:U8) {
+  p = a ^ U1(clk)                  // 'clk' is Bool data: the name makes no clock
+}
+
+pub mod top(clk:Clock, rst:Reset, soft_rst:Bool, en:Bool) -> (q:U8@[0], q2:U8@[0], p:U8@[0]) {
+  const c = cnt8(en=en)                          // OK, 'core_clk'/'rst_n' wired to 'clk'/'rst'
+  const d = cnt8(rst_n=rst or soft_rst, en=en)   // OK, a computed reset; 'core_clk' auto-wired
+  p  = parity(clk=true, a=c.q)                   // OK, a constant into a data input
+  q  = c.q
+  q2 = d.q
+}

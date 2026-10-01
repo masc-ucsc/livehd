@@ -14,5 +14,5 @@
 //  is shadowed by an earlier unbalanced `)`; this is the first standalone test
 //  of the bit-range-index diagnostic.)
 
-mut a:u8 = 0
+mut a:U8 = 0
 a#[1,4] = 1   // locate_error_here

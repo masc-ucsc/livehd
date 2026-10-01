@@ -1,0 +1,21 @@
+/*
+:name: spec_calls_tuple_access
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+*/
+
+// qa.md Appendix §8: "Unnamed tuple: every field is positional, accessed only
+// by position (`t[0]`) ... Named tuple: ... accessed only by name (`t.a`)".
+// docs 03-bundle.md: named fields "are accessed by name only (`t.a` or
+// `t['a']`, never `t[0]`)"; `cassert(u has 1)` for an unnamed tuple.
+
+const b = (const f1=3, const f2=4)
+cassert(b.f1 == 3 and b.f2 == 4)
+cassert(b['f2'] == 4)
+cassert(b has 'f1')
+
+const u = (10, 20)
+cassert(u[0] == 10 and u[1] == 20)
+cassert(u has 1)
+cassert(not (u has 2))

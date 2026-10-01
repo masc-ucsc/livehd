@@ -1,0 +1,12 @@
+/*
+:name: spec_syntax_destructure_rename_unnamed
+:type: error
+:error: zzz
+*/
+// qa.md Appendix §8: "Unnamed tuple: every field is positional, accessed only by position
+// (`t[0]`); there are no names to drop." and "destructuring an UNNAMED tuple binds by position".
+// A rename slot that names a field of an unnamed RHS names nothing (reading an absent field is
+// a compile error, errors/absent_field_one_field_tuple.prp); it must not silently bind slot 0.
+const t = (1, 2)
+const (x=t.zzz) = t   // locate_error_here
+cassert(x == 1)

@@ -1,0 +1,17 @@
+/*
+:name: clkrst_const_into_clock
+:type: error
+:tolg: 1
+:error: `Clock` input `c` of `cnt` is bound to a constant
+*/
+// docs 04b: binding a constant to a `Clock` input is always a compile error
+// (clkrst_bool_clk_is_data.prp: a constant into a `Bool` named clk is legal).
+mod cnt(c:Clock, en:Bool) -> (q:U8@[0]) {
+  reg r:U8 = 0
+  if en { wrap r = r + 1 }
+  q = r
+}
+pub mod clkrst_const_into_clock(en:Bool) -> (o:U8@[0]) {
+  const x = cnt(c=true, en=en)
+  o = x.q
+}

@@ -4,6 +4,6 @@
 // unit is elaborate-able with no call site, so with no `--top` the kernel picks
 // it as the default-top candidate — while the importer's defaulted call site
 // identity-specializes it under the same name.
-pub mod lib_generic_default<W=8>(a:u8) -> (y:u8@[]) {
+pub mod lib_generic_default<W=8>(a:U8) -> (y:U8@[]) {
   y = (a + W)#[0..=7]
 }

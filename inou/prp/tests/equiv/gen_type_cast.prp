@@ -16,14 +16,14 @@
 // Body references of a generic name are broken across the board — the type
 // annotation form `mut tmp:T = a` fails too (unknown-type; tracked separately
 // by //inou/prp:prp-tbd-generic_body_type). Once body binding substitutes the
-// concrete entity, `widen<u8>(a)` is `u32(u8(a)) + 1` == `a + 1` (32-bit) —
+// concrete entity, `widen<U8>(a)` is `U32(U8(a)) + 1` == `a + 1` (32-bit) —
 // proven equivalent to the golden below (validated by LEC against the
-// `mut tmp:u8 = a; r = u32(tmp) + 1` form).
+// `mut tmp:U8 = a; r = U32(tmp) + 1` form).
 
-comb widen<T>(a:T) -> (r:u32) {
-  r = u32(T(a)) + 1
+comb widen<T>(a:T) -> (r:U32) {
+  r = U32(T(a)) + 1
 }
 
-pub comb top(x:u8) -> (r:u32) {
-  r = widen<u8>(a=x)
+pub comb top(x:U8) -> (r:U32) {
+  r = widen<U8>(a=x)
 }

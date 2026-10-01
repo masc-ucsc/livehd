@@ -11,9 +11,9 @@
 // named tuple type is split into per-field leaves. It used to come from
 // upass.typecheck here and ONLY here, because a type whose fields carry
 // DEFAULTS failed to split at all (2f-defaulted_tuple) -- the byte-equivalent
-// `type Point = (x:u8, y:u8)` already reported the message below. Now that
+// `type Point = (x:U8, y:U8)` already reported the message below. Now that
 // defaulted and plain types split alike, both spellings report identically.
 
-type Point = (x:u8 = nil, y:u8 = nil)
+type Point = (x:U8 = nil, y:U8 = nil)
 mut t:Point = (x=1, y=2)
 t = (y=5, z=9) // locate_error_here

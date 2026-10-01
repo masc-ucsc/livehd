@@ -1,0 +1,11 @@
+/*
+:name: dotted_call_runtime
+:type: lec
+:lec_top: top
+*/
+
+pub mod top(x:U8) -> (a:U8@[], b:U8@[], c:U8@[]) {
+  wrap a = x + 3
+  wrap b = x + 5
+  wrap c = x + 7
+}

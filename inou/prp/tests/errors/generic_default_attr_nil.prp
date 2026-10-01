@@ -1,0 +1,19 @@
+/*
+:name: generic_default_attr_nil
+:type: error
+:error: default `Z\.\[bits\]` of generic `N` does not fold to a compile-time integer
+:help: declared without bounds
+*/
+
+// User ruling 2026-09-27 (6): `.[bits]` of an UNTYPED comptime integer is
+// value-derived, but a TYPED one keeps its declared type, and `Z:Unsigned`
+// declares no width: `Z.[bits]` is nil (the body read agrees). A generic
+// default that reads it cannot fold. It once reached the runner as a bogus
+// type name, and a cassert over the call result then passed whatever it
+// compared against.
+
+comptime const Z:Unsigned = 13
+cassert(Z.[bits] == nil)
+
+comb width_of<N=Z.[bits]>(x) -> (r) { r = N + x }   // locate_error_here
+cassert(width_of(x=0) == 7)

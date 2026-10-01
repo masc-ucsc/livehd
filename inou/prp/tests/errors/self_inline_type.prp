@@ -8,7 +8,7 @@
 // Task 1k — only NAMED self types are supported: an inline tuple type on
 // `self` would flatten it into dotted io leaves and break method binding.
 
-comb set_b(ref self:(a:u32=nil, b:string="")) {
+comb set_b(ref self:(a:U32=nil, b:String="")) {
   self.b = "foo"
 }
 

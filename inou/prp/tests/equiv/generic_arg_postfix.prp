@@ -1,0 +1,35 @@
+/*
+:name: generic_arg_postfix
+:type: equiv
+:verilog_top: generic_arg_postfix
+:pyrope_top: generic_arg_postfix
+*/
+
+// Ruling 2026-09-27 (suggestions 2.3 row 2 / 4.7): a generic argument may be a
+// POSTFIX value form written without parentheses -- an attribute query
+// `f<N=x.[bits]>` / `f<N=x.[max]>` or a dotted field `f<N=cfg.w>` -- on a
+// `mod` callee, on a `comb` callee, and inside a `const` declaration.
+// (Operator expressions such as `<N=(W*2)>` still need parentheses; that half
+// is not pinned here.) Today prpparse's try_generic_call parses each binding
+// with parse_type(), which stops at `.[`: the list does not close, the `<` is
+// re-read as a comparison and the statement fails with "expected newline or
+// ';' to end the statement". `<N=(a.[bits])>` already works, so only the parse
+// (and prp2lnast lowering an attribute_read generic argument) is missing.
+comptime const cfg = (const w = 5)
+
+mod low<N=1>(x:U8) -> (y:Unsigned(bits=N)@[0]) {
+  y = x#[0..<N]
+}
+
+comb addn<N=1>(x:U8) -> (y:U8) {
+  y = (x + N)#[0..<8]
+}
+
+pub mod generic_arg_postfix(a:U6, b:U8) -> (r:U6@[0], s:U8@[0], m:U8@[0], t:U8@[0], u:U5@[0]) {
+  r = low<N=a.[bits]>(x=b)         // mod callee: N = 6
+  s = addn<N=a.[bits]>(x=b)        // comb callee: b + 6
+  m = addn<N=a.[max]>(x=b)         // b + 63
+  const v = addn<N=b.[bits]>(x=b)  // declaration form: b + 8
+  t = v
+  u = low<N=cfg.w>(x=b)            // dotted field (already parses): N = 5
+}

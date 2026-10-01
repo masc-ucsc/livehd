@@ -5,6 +5,6 @@
 :set: compile.formal.mode=none
 */
 // Sign extension must agree with explicit fill or native signed arithmetic.
-comb cmp(x:u32, y:u32) -> (r:bool) {
+comb cmp(x:U32, y:U32) -> (r:Bool) {
   r = (x#sext[0..=31]) < (y#sext[0..=31])
 }

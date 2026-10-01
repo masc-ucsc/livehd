@@ -130,9 +130,9 @@ expect_accepted() {
 # path between them. Structurally identical to the `samephase` rejection above
 # except for the phases, which is exactly what rule C must key on.
 cat > "$W/ms.prp" <<'PRP'
-pub mod ms8(clk:bool, d:u8) -> (q:u8@[0]) {
-  reg m:u8:[latch=true]
-  reg s:u8:[latch=true]
+pub mod ms8(clk:Bool, d:U8) -> (q:U8@[0]) {
+  reg m:U8:[latch=true]
+  reg s:U8:[latch=true]
   if !clk { m = d }
   if clk  { s = m }
   q = s
@@ -144,9 +144,9 @@ expect_accepted ms "master/slave (opposite phases)" "$W/ms.prp"
 # on the SAME phase. Accepting this would mean rule C is blind; rejecting the
 # pair above would mean it is indiscriminate. Only one verdict each is correct.
 cat > "$W/ms_same.prp" <<'PRP'
-pub mod ms8(clk:bool, d:u8) -> (q:u8@[0]) {
-  reg m:u8:[latch=true]
-  reg s:u8:[latch=true]
+pub mod ms8(clk:Bool, d:U8) -> (q:U8@[0]) {
+  reg m:U8:[latch=true]
+  reg s:U8:[latch=true]
   if clk { m = d }
   if clk { s = m }
   q = s

@@ -1,0 +1,35 @@
+/*
+:name: generic_mem_byte_lanes_1
+:lec_expect: proven
+*/
+// The generic spelling of generic_mem_byte_lanes: `reg m:[1 << A]Unsigned(bits=L*8)`
+// (depth AND entry width from generics) with the byte-lane writes in a `for`
+// over the L lanes, specialized at <A=1, L=2> and <A=2, L=3>.
+mod lanes<A=1, L=2>(we:Bool, a:Unsigned(bits=A), d:Unsigned(bits=L*8), be:Unsigned(bits=L), ra:Unsigned(bits=A))
+  -> (qo:Unsigned(bits=L*8)@[0], qb:Unsigned(bits=L*8)@[0], qa:Unsigned(bits=L*8)@[0]) {
+  reg old:[1 << A]Unsigned(bits=L*8):[ordering="old"] = 0
+  reg prog:[1 << A]Unsigned(bits=L*8) = 0
+  qb = prog[ra]
+  if we {
+    for w in 0..<L {
+      if be#[w] == 1 {
+        old[a]#[(w*8)..+8]  = d#[(w*8)..+8]
+        prog[a]#[(w*8)..+8] = d#[(w*8)..+8]
+      }
+    }
+  }
+  qo = old[ra]
+  qa = prog[ra]
+}
+
+pub mod generic_mem_byte_lanes(we:Bool, a:U2, d:U24, be:U3, ra:U2)
+  -> (qo2:U16@[0], qb2:U16@[0], qa2:U16@[0], qo3:U24@[0], qb3:U24@[0], qa3:U24@[0]) {
+  const x = lanes<A=1, L=2>(we=we, a=a#[0], d=d#[0..<16], be=be#[0..<2], ra=ra#[0])
+  const y = lanes<A=2, L=3>(we=we, a=a, d=d, be=be, ra=ra)
+  qo2 = x.qo
+  qb2 = x.qb
+  qa2 = x.qa
+  qo3 = y.qo
+  qb3 = y.qb
+  qa3 = y.qa
+}

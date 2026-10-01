@@ -35,7 +35,7 @@ cassert(z == 300)
 cassert(z.[potato] == nil)
 cassert(z.[debug] and z.[_foo] and z.[foo])
 
-sat z:u4 = 3000
+sat z:U4 = 3000
 cassert(z == 15)
 cassert(z.[debug] and z.[_foo] and z.[foo])
 

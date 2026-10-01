@@ -7,10 +7,13 @@
 
 // REGISTERED whole-array: the whole `arr` is registered from one bus each cycle
 // (`arr = inp`, the cell's clocked `update` pin), read whole (`allout = arr`, the
-// async `read_all` output) and per-entry with a runtime index (`arr[idx]`).
-pub mod regarr(inp:u80, idx:u3) -> (r:u10@[0], allout:u80@[0]) {
-  reg arr:[8]u10 = nil
-  arr = inp
+// async `read_all` output) and per-entry with a runtime index (`arr[idx]`). The
+// reads come BEFORE the store, so under the default program ordering they see
+// the committed contents, like the nonblocking golden; placed after it they
+// would see this cycle's `inp`.
+pub mod regarr(inp:U80, idx:U3) -> (r:U10@[0], allout:U80@[0]) {
+  reg arr:[8]U10 = nil
   r = arr[idx]
   allout = arr
+  arr = inp
 }

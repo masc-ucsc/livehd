@@ -1,0 +1,9 @@
+/*
+:name: spec_types_cast_int_from_string
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// SPEC docs 04-variables "Integer or Signed": "Integer typecast accepts strings as input. The string must be a
+// valid formatted Pryope number or an assertion is raised."
+cassert(U8("12") == 12)

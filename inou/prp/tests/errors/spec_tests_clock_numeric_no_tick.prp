@@ -1,0 +1,24 @@
+/*
+:name: spec_tests_clock_numeric_no_tick
+:type: error
+:error: clock
+*/
+// Spec (qa.md appendix section 8): "`clock` outside a tick block is undefined
+// unless declared." docs 05b "Running cycles (tick)": "Outside a `tick`
+// block, `clock` is undefined unless the test declares it."
+//
+// Rule pinned: a test with NO tick block at all (only bare `step`s) has no
+// minted clock; reading `clock` there is an undefined read.
+
+mod spec_cnn_cnt(en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_cnn.no_tick {
+  mut d = spec_cnn_cnt
+  d.en = true
+  step 3
+  assert(d.q == clock)   // locate_error_here
+}

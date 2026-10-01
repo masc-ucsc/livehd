@@ -1,0 +1,18 @@
+/*
+:name: spec_lexical_comment_line_keeps_continuation
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// qa.md appendix 3: "Nothing inside a comment ever affects parsing
+// (continuation, ...)"; tree-sitter test/corpus/continuation_lines.txt
+// "division after a comment line continues the expression": a comment line
+// between a statement and its operator-led continuation is transparent.
+const a = 10
+// a comment line between the statement and its continuation
+  / 2
+cassert(a == 5)
+const b = 10
+/* a /* nested */ block comment line */
+  - 4
+cassert(b == 6)

@@ -1,0 +1,19 @@
+/*
+:name: spec_parsers_fmt_sort_named_args
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+// qa.md chat ruling "Named tuple order (2026-09-30): sorting is right. `for`
+// and `keys()` always visit a named tuple in sorted field-name order, so
+// prpfmt may sort all-named tuple literals; declaration order is never
+// observable."
+//
+// The comptime harness checks this file as written and again after
+// `lhd pyrope fmt`, which sorts the all-named argument list and the all-named
+// tuple value below (`(z=1, a=2)` -> `(a=2, z=1)`); the results must not change.
+comb pick(t, k:U4) -> (r:U8) { r = t.a*16 + t.z + k }
+comb lin(z:U8, a:U8) -> (r:U10) { r = z*2 + a }
+cassert(pick(t=(z=1, a=2), k=0) == 0x21)
+cassert(pick(k=3, t=(z=4, a=1)) == 0x17)
+cassert(lin(z=9, a=2) == 20)

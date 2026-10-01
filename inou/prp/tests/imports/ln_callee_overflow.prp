@@ -1,0 +1,19 @@
+/*
+:name: ln_callee_overflow
+:type: error
+:files: inou/prp/tests/imports/ln_callee_overflow.prp
+:ln_files: inou/prp/tests/imports/lib_ln_scale.prp
+:error: `y` \(range \[0, 63\]\) may not fit its declared range \[0, 31\]
+:help: wrap
+*/
+// A call into a PRE-ELABORATED `ln:` mod gets the same call-site checks as a
+// call into a source mod (rulings 1, 16, 21, 28): its typed `o:U6` output does
+// not fit `y:U5`. Before, the runner never bound `S(a=x)` to the ln: callee
+// (the pre-elaborated unit was not "inlinable", so the call bailed out before
+// its binding), no port fact reached `c.o`, and `y` was silently truncated.
+const S = import("lib_ln_scale.lib_ln_scale")
+
+pub mod ln_callee_overflow(x:U4) -> (y:U5@[0]) {
+  const c = S(a=x)
+  y = c.o  // locate_error_here
+}

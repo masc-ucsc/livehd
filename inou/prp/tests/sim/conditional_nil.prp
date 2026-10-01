@@ -6,23 +6,23 @@
 // Give memory a known value before reset: an uninitialized memory must retain
 // it, while the ZERO=true variation must reset it. No random power-on value
 // is assumed, and the same assertions exercise both nil spellings.
-mod explicit_nil(clk:u1, reset:bool, address:u2, we:bool, data:u8) -> (value:u8@[]) {
-  reg memory:[4]u8:[ordering="old"] = nil
+mod explicit_nil(clk:Clock, reset:Reset, address:U2, we:Bool, data:U8) -> (value:U8@[]) {
+  reg memory:[4]U8:[ordering="old"] = nil
   if we { memory[address] = data }
   value = memory[address]
 }
 
-mod conditional_memory<ZERO=false>(clk:u1, reset:bool, address:u2, we:bool, data:u8) -> (value:u8@[]) {
-  reg memory:[4]u8:[ordering="old"] = if ZERO { 0 } else { nil }
+mod conditional_memory<ZERO=false>(clk:Clock, reset:Reset, address:U2, we:Bool, data:U8) -> (value:U8@[]) {
+  reg memory:[4]U8:[ordering="old"] = if ZERO { 0 } else { nil }
   if we { memory[address] = data }
   value = memory[address]
 }
 
-mod conditional_false(clk:u1, reset:bool, address:u2, we:bool, data:u8) -> (value:u8@[]) {
+mod conditional_false(clk:Clock, reset:Reset, address:U2, we:Bool, data:U8) -> (value:U8@[]) {
   value = conditional_memory<ZERO=false>(clk=clk, reset=reset, address=address, we=we, data=data)
 }
 
-mod conditional_true(clk:u1, reset:bool, address:u2, we:bool, data:u8) -> (value:u8@[]) {
+mod conditional_true(clk:Clock, reset:Reset, address:U2, we:Bool, data:U8) -> (value:U8@[]) {
   value = conditional_memory<ZERO=true>(clk=clk, reset=reset, address=address, we=we, data=data)
 }
 
@@ -30,7 +30,7 @@ mod conditional_true(clk:u1, reset:bool, address:u2, we:bool, data:u8) -> (value
 test conditional_nil.explicit_holds {
   mut dut = explicit_nil
   mut cycle = 0
-  tick 8 clocks=(clk=1) {
+  tick 8 {
     dut.address = 2
     dut.data = 0xa5
     dut.we = cycle == 1
@@ -48,7 +48,7 @@ test conditional_nil.explicit_holds {
 test conditional_nil.disabled_holds {
   mut dut = conditional_false
   mut cycle = 0
-  tick 8 clocks=(clk=1) {
+  tick 8 {
     dut.address = 2
     dut.data = 0xa5
     dut.we = cycle == 1
@@ -66,7 +66,7 @@ test conditional_nil.disabled_holds {
 test conditional_nil.enabled_clears {
   mut dut = conditional_true
   mut cycle = 0
-  tick 8 clocks=(clk=1) {
+  tick 8 {
     dut.address = 2
     dut.data = 0xa5
     dut.we = cycle == 1

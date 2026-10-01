@@ -1,0 +1,58 @@
+/*
+:name: spec_tests_fifo_producer_consumer
+:type: simulation
+*/
+// Spec: docs 09-verification "Concurrency without threads": "a test is a single
+// `tick`/`step` loop, and each concurrent 'task' is just an `if`-block in that
+// loop. The one `step` per iteration is the shared yield point". The test
+// below is the docs `fifo.producer_consumer` example verbatim (only the DUT
+// is written here: a 4-entry FIFO whose full/empty/dout are register-driven,
+// as the docs text assumes).
+//
+// Rule pinned: two `if`-block "tasks" sharing test `mut`s around one `step`
+// push 0..9 through the FIFO in order and both finish inside the bound.
+
+mod Fifo(push:Bool, pop:Bool, din:U8) -> (full:Bool@[0], empty:Bool@[0], dout:U8@[0]) {
+  reg m:[4]U8 = 0
+  reg rd:U2 = 0
+  reg wr:U2 = 0
+  reg cnt:U3 = 0
+  full  = cnt == 4
+  empty = cnt == 0
+  dout  = m[rd]
+  const do_push = push and cnt != 4
+  const do_pop  = pop and cnt != 0
+  if do_push {
+    m[wr] = din
+    wrap wr = wr + 1
+  }
+  if do_pop { wrap rd = rd + 1 }
+  if do_push and not do_pop {
+    wrap cnt = cnt + 1
+  } elif do_pop and not do_push {
+    wrap cnt = cnt - 1
+  }
+}
+
+test fifo.producer_consumer {
+  mut dut  = Fifo
+  mut sent = 0                 // next value to push
+  mut got  = 0                 // next value to expect
+
+  tick 1000 {
+    // producer task: push while there is room and data left to send
+    dut.push = not dut.full and sent < 10
+    if dut.push { dut.din = sent }
+
+    // consumer task: pop whenever data is available
+    dut.pop = not dut.empty
+    if dut.pop { assert(dut.dout == got, "FIFO out of order") }
+
+    step                       // the one shared yield: both tasks advance
+
+    if dut.push { sent = sent + 1 }
+    if dut.pop  { got  = got  + 1 }
+    if sent == 10 and got == 10 { break }
+  }
+  assert(sent == 10 and got == 10, "producer/consumer did not finish in 1000 cycles")
+}

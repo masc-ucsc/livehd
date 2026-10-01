@@ -1,0 +1,21 @@
+/*
+:name: bool_port_arith_mix
+:type: error
+:tolg: 1
+:error: operator .\^. requires integer operands \(.*p:Bool
+*/
+
+// User ruling 2026-09-27: a `Bool` PORT is as strict as a local bool -- using
+// it as an integer operand needs `U1(p)`. The same expression with a local
+// `const w:Bool` is already rejected ("operator `^` requires integer operands
+// (v:unknown, w:Bool)"), but the operator typecheck reads an operand's kind
+// from its bundle only, and an IO port has none (its declared type rides
+// io_meta), so `v ^ p` compiled silently and lowered `p` as a 1-bit integer.
+// The 2026-09-07 fix made `if <int port>` an error (cond_port_not_bool.prp);
+// the binary operators still skip port kinds.
+//
+// Legal spelling: `q = v ^ U1(p)`.
+
+pub mod bool_port_arith_mix(p:Bool, v:U4) -> (q:U4@[0]) {
+  q = v ^ p   // locate_error_here
+}

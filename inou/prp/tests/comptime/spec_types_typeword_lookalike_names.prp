@@ -1,0 +1,17 @@
+/*
+:name: spec_types_typeword_lookalike_names
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// SPEC qa.md appendix section 7: "Reserved `U<N>`/`S<N>` = `U`/`S` followed by ANY digit string"; the other
+// type words are whole words. grammar test/corpus/type_words.txt "words that only look like type words are
+// names". Rule: U8x, Ux, S_0, BOOL, Uint8, Strings, Clocks are ordinary names.
+const U8x = 1
+const Ux = 2
+const S_0 = 3
+const BOOL = 4
+const Uint8 = 5
+const Strings = 6
+const Clocks = 7
+cassert(U8x + Ux + S_0 + BOOL + Uint8 + Strings + Clocks == 28)

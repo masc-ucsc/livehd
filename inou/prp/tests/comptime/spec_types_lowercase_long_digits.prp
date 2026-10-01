@@ -1,0 +1,11 @@
+/*
+:name: spec_types_lowercase_long_digits
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+// Former lowercase type spellings are ordinary identifiers (07-typesystem.md).
+const u99999999 = 1
+
+cassert(u99999999 == 1)

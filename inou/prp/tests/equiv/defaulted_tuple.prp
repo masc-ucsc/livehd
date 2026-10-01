@@ -5,8 +5,8 @@
 :pyrope_top: top
 */
 
-type Decode = (mut add:bool = nil, mut sub:bool = nil, mut rd:u5 = nil)
-pub mod top(clk:u1, resetn:bool, opcode:u2, rd:u5) -> (add:bool@[], sub:bool@[], dest:u5@[]) {
+type Decode = (mut add:Bool = nil, mut sub:Bool = nil, mut rd:U5 = nil)
+pub mod top(clk:Clock, resetn:Bool, opcode:U2, rd:U5) -> (add:Bool@[], sub:Bool@[], dest:U5@[]) {
   reg instr:Decode = nil
   instr.add = resetn and (opcode == 0)
   instr.sub = resetn and (opcode == 1)

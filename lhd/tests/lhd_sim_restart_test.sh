@@ -29,9 +29,9 @@ cat > "$W/cr.prp" <<'EOF'
 :name: cr
 :type: simulation
 */
-mod cnt(enable:bool, clkb:bool) -> (value:u8@[0], bvalue:u8@[1]) {
-  reg count:u8 = 0
-  reg b:u8:[clock_pin=ref clkb] = 0
+mod cnt(enable:Bool, clkb:Bool) -> (value:U8@[0], bvalue:U8@[1]) {
+  reg count:U8 = 0
+  reg b:U8:[clock_pin=clkb] = 0
   value = count
   bvalue = b
   if enable { wrap count += 1 }

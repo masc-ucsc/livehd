@@ -1,0 +1,31 @@
+/*
+:name: test_bool_output_arith
+:type: error
+:error: operator .\+. requires integer operands \(.*:Bool
+:help: U1\(
+*/
+
+// User ruling 2026-09-28 (20): strict bool (ruling 2) applies INSIDE `test`
+// blocks too. A `Bool` OUTPUT read through an instance handle (`d.f`) is a
+// boolean in the testbench exactly as `c.f` is at a call site
+// (errors/bool_inst_output_arith.prp), so using it as an integer operand
+// needs `U1(d.f)`. Before, upass emitted a `tick` body verbatim and never
+// typed an instance-handle read, so the sum compiled.
+//
+// Legal spelling: `got = U1(d.f) + 1`.
+
+mod dut(a:U8) -> (f:Bool@[0], o:U8@[0]) {
+  f = a != 0
+  o = a
+}
+
+test dut.flag_arith {
+  mut d = dut
+  mut got = 0
+  tick 3 {
+    d.a = 5
+    step
+    got = d.f + 1   // locate_error_here
+  }
+  assert(got == 2)
+}

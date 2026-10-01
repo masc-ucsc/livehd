@@ -1,0 +1,9 @@
+/*
+:name: generic_array_top_port_2
+*/
+// Generic count, literal element, `v:[N]U4`: failed the same way as _1 -- the
+// `[N]` dim alone left the top's io entry width-less.
+pub mod generic_array_top_port<N=4>(v:[N]U4) -> (lo:U4@[0], hi:U4@[0]) {
+  lo = v[0]
+  hi = v[N-1]
+}

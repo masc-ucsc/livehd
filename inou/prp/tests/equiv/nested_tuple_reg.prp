@@ -24,8 +24,8 @@
 //     split's field names are the JOINED paths, so neither matched. Both
 //     handlers now join the leading const keys.
 
-pub mod nested_tuple_reg(clock:u1, a:u1, b:u1) -> (y:u1@[], z:u1@[]) {
-  reg ctl:(ex:(aa:u1, bb:u1), wb:(cc:u1)) = nil
+pub mod nested_tuple_reg(clock:Clock, a:U1, b:U1) -> (y:U1@[], z:U1@[]) {
+  reg ctl:(ex:(aa:U1, bb:U1), wb:(cc:U1)) = nil
   ctl.ex.aa = a
   ctl.ex.bb = b
   ctl.wb.cc = a & b

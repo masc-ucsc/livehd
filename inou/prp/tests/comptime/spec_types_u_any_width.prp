@@ -1,0 +1,10 @@
+/*
+:name: spec_types_u_any_width
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// SPEC qa.md appendix section 1: "`U<N>` (unsigned N bits, e.g. U1, U8, U32, U1333)".
+const x:U1333 = 1
+cassert(x.[bits] == 1333)
+cassert(U1333.[max] == (1 << 1333) - 1)

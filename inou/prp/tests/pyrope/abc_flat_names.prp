@@ -12,13 +12,13 @@
 // anonymous per-bit __rinit/__r/g<id> flops: the LEC leans on that name
 // correspondence.
 
-mod holder(din:u8) -> (q:u8@[1]) {
-  reg r:u8
+mod holder(din:U8) -> (q:U8@[1]) {
+  reg r:U8
   q = r
   r = din
 }
 
-mod top(din:u8, k1:u8, k2:u8) -> (o:u9@[1]) {
+mod top(din:U8, k1:U8, k2:U8) -> (o:U9@[1]) {
   stage[1] a = holder(din=din & k1)
   stage[1] b = holder(din=din | k2)
   o = a + b

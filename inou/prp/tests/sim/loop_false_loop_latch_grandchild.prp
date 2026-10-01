@@ -1,0 +1,86 @@
+/*
+:name: loop_false_loop_latch_grandchild
+:type: simulation
+:expect_instances: u_loop*=1
+*/
+
+// The false-ring arbiter of loop_false_loop_moore_child.prp, whose child also
+// forwards a grandchild's LATCH (`p`), sampled by a register in the arbiter.
+// Inside a rolled loop body a kernel reads a latch Q as its current-period
+// transparency value, so while `len` is high `p` is combinational in the
+// child's inputs: the child is Mealy, and only its register output `q` may be
+// pre-bound. Splicing the grandchild's summary with the latch counted as a
+// state cut (graph/port_reach's rule) classified the child Moore, pre-bound
+// `p` from last period's `__out`, and `sr` captured the latch one period late.
+//
+// Same values as `--set compile.unroll=true`.
+mod lx_leaf(len:Bool, x:U4) -> (q:U4@[]) {
+  reg h:U4:[latch=true] = 0
+  if len {
+    h = x
+  }
+  q = h
+}
+
+mod lx_state(rst:Reset, en:Bool, d:U4, len:Bool, x:U4) -> (q:U4@[0], p:U4@[]) {
+  reg r:U4:[reset_pin=rst] = 8
+  if en { r = d }
+  q = r
+  const l = lx_leaf(len=len, x=x)
+  p = l
+}
+
+mod lx_arb::[timecheck=false](rst:Reset, req:U4, len:Bool) -> (g:U4@[], s:U4@[]) {
+  wire gr:U4 = nil
+  const m = lx_state(rst=rst, en=req != 0, d=gr, len=len, x=req)
+  gr = req & ~m.q
+  g  = gr
+  reg sr:U4 = 0
+  sr = m.p
+  s  = sr
+}
+
+pub mod lx_top::[timecheck=false](rst:Reset, req:U8, len:Bool) -> (g:U8@[], s:U8@[]) {
+  mut acc:U8  = 0
+  mut sacc:U8 = 0
+  for j in 0..<2 {
+    const a = lx_arb(rst=rst, req=req#[(j * 4)..+4], len=len)
+    wrap acc  = acc | (a.g << (j * 4))
+    wrap sacc = sacc | (a.s << (j * 4))
+  }
+  g = acc
+  s = sacc
+}
+
+test lx_top.latched_value_is_current {
+  mut x     = lx_top
+  mut r0:U4 = 8
+  mut r1:U4 = 8
+  mut h:U8  = 0
+  mut bad   = 0
+  mut seen  = 0
+  tick 10 {
+    const rq:U8   = (clock * 37 + 11) & 0xFF
+    const lv:Bool = (clock == 0) or (clock == 1) or (clock == 4) or (clock == 7)
+    x.len = lv
+    x.rst = clock < 1
+    x.req = rq
+    step
+    const q0:U4 = rq#[0..<4]
+    const q1:U4 = rq#[4..<8]
+    // transparent while `len` is high: `sr` sampled THIS period's value (it is
+    // in reset at clock 0)
+    if lv { h = rq }
+    const sexp:U8 = if clock == 0 { 0 } else { h }
+    if clock != 0 {
+      if q0 != 0 { r0 = q0 & ~r0 }
+      if q1 != 0 { r1 = q1 & ~r1 }
+    }
+    const gexp:U8 = ((q1 & ~r1) << 4) | (q0 & ~r0)
+    seen += 1
+    if x.g != gexp { bad += 1 }
+    if x.s != sexp { bad += 1 }
+  }
+  assert(seen == 10, "the comparisons ran")
+  assert(bad == 0, "a register behind the child's latch output sees the open latch")
+}

@@ -1,0 +1,19 @@
+/*
+:name: mod_string_arg
+:type: error
+:error: cannot bind string value to input `a` of `m` \(it is integer\)
+:help: a string never turns into an integer
+*/
+
+// A string bound to an integer input is an error at every call site, a `mod`
+// instance's included (a `comb`'s already failed in its inlined prologue), and
+// for a test poke `d.a = "hi"`. Before, `m(a="hi")` compiled with exit 0.
+
+mod m(a:U8) -> (o:U8@[0]) {
+  o = a
+}
+
+pub mod mod_string_arg(x:U8) -> (z:U8@[0]) {
+  const c = m(a="hi")   // locate_error_here
+  z = c.o
+}

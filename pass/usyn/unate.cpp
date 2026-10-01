@@ -29,7 +29,7 @@ bool covers(const Cube& c, uint32_t v) { return (v & c.care) == c.ones; }
 
 Truth_table::Truth_table(uint32_t n, bool value) : inputs(n) {
   if (n > max_logical_inputs) {
-    throw std::invalid_argument("unate truth table exceeds supported 12 inputs");
+    throw std::invalid_argument("unate truth table exceeds supported 16 inputs");
   }
   const uint32_t bits = uint32_t{1} << n;
   words.assign((bits + 63) / 64, value ? ~uint64_t{0} : 0);
@@ -72,11 +72,101 @@ bool Budget::spend(uint64_t amount) {
   }
   checkpoint_work -= std::min(checkpoint_work, amount);
   if (exhausted || amount > remaining) {
-    exhausted = true;
+    exhausted = bound = true;  // refused for lack of work: only these credits refuse here
     return false;
   }
   remaining -= amount;
+  consumed  += amount;
+  floor      = std::max(floor, consumed);
   return true;
+}
+
+bool Budget::has(uint64_t amount) {
+  if (amount > remaining) {
+    bound = true;
+    return false;
+  }
+  floor = std::max(floor, consumed + amount);
+  return true;
+}
+
+Credit_share::Credit_share(Budget& budget, uint64_t cap, uint64_t divisor)
+    : budget_(budget)
+    , consumed_(budget.consumed)
+    , cap_(cap)
+    , divisor_(divisor)
+    , value_(std::min(cap, budget.remaining / divisor)) {}
+
+void Credit_share::at_least(uint64_t y) {
+  if (y) {  // y <= value_ <= remaining / divisor at the read
+    budget_.floor = std::max(budget_.floor, consumed_ + divisor_ * y);
+  }
+}
+
+void Credit_share::at_most(uint64_t y) {
+  if (cap_ > y) {  // only fewer credits keep a remaining-limited value this low
+    budget_.bound = true;
+  }
+}
+
+bool Credit_share::exceeds(uint64_t x) {
+  if (value_ > x) {
+    at_least(x + 1);
+    return true;
+  }
+  at_most(x);
+  return false;
+}
+
+uint64_t Credit_share::clamp(uint64_t x) {
+  if (value_ >= x) {
+    at_least(x);
+    return x;
+  }
+  at_least(value_);
+  at_most(value_);
+  return value_;
+}
+
+Budget Budget::slice(uint64_t cap, uint64_t divisor, uint64_t reserve) const {
+  const auto part = remaining > reserve ? (remaining - reserve) / divisor : 0;
+  Budget     child{std::min(cap, part)};
+  child.admission          = admission;
+  child.admission_interval = admission_interval;
+  child.checkpoint_work    = checkpoint_work;
+  child.exhausted          = exhausted;
+  child.resource_exhausted = resource_exhausted;
+  // An inherited exhaustion is this budget's (already recorded) fact.
+  child.bound              = exhausted;
+  child.origin             = {consumed, remaining, cap, divisor, reserve};
+  return child;
+}
+
+void Budget::absorb(const Budget& child) {
+  // Reproduce the slice decision first: the child's size under other credits
+  // is min(cap, (remaining' - reserve) / divisor) at the same consumption.
+  const auto& o    = child.origin;
+  const auto  part = o.remaining > o.reserve ? (o.remaining - o.reserve) / o.divisor : 0;
+  const auto  need = [&](uint64_t size) { return size ? o.consumed + o.reserve + o.divisor * size : 0; };
+  if (!child.bound) {
+    floor = std::max(floor, need(child.floor));
+  } else if (o.cap <= part) {
+    floor = std::max(floor, need(o.cap));
+  } else {
+    bound = true;
+  }
+  const auto spent = child.consumed;
+  if (spent > remaining) {
+    exhausted = bound = true;
+  }
+  const auto charged  = std::min(remaining, spent);
+  remaining          -= charged;
+  consumed           += charged;
+  floor               = std::max(floor, consumed);
+  checkpoint_work     = child.checkpoint_work;
+  if (child.resource_exhausted) {
+    exhausted = resource_exhausted = true;
+  }
 }
 
 Form make_form(const Truth_table& table, uint32_t max_literals, uint32_t max_series, Budget& budget) {

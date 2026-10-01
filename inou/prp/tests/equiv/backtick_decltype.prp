@@ -1,0 +1,26 @@
+/*
+:name: backtick_decltype
+:type: lec
+:lec_top: backtick_decltype
+*/
+// Reference for the backtick_decltype group: a type reached through a
+// backticked NAME behaves like the built-in type EVERYWHERE, including
+// declaration annotations, ports, register/array element types and a `type`
+// alias. _1 spells every sized type through backticked user type aliases
+// (`` type `u4` = U4 ``; a backticked word is a plain name since ruling 52)
+// and must prove equivalent.
+type Nib = U4
+
+pub mod backtick_decltype(a:U8, b:S6, en:Bool) -> (y:U8@[0], z:S8@[0], q:U4@[0]) {
+  const lo:U4     = a#[0..<4]
+  const hi:Nib    = a#[4..<8]
+  const pr:[2]U3  = (a#[0..<3], a#[5..<8])
+  mut   acc:S8    = b
+  reg   r:U4      = 0
+  if en {
+    r = lo ^ hi
+  }
+  y = lo + hi + pr[1]
+  z = acc + 1
+  q = r
+}

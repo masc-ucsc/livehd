@@ -9,8 +9,8 @@
 #   * the body traces a toggling clock, advances a period counter, and exposes the
 #     instance API (step()/__in/__out); reset is NOT a synthetic waveform;
 #   * the driver binds a ref per cell OUTSIDE the loop, drives, steps, reads;
-#   * a `tick` body with no `step`, >1 clock, an output poke, or an unknown field
-#     is rejected at setup with a clear message.
+#   * a `tick` body with no `step`, a removed `clocks=`/`resets=` clause, an
+#     output poke, or an unknown field is rejected at setup with a clear message.
 
 set -u
 
@@ -29,17 +29,17 @@ cat > "$W/cr.prp" <<'EOF'
 :name: cr
 :type: simulation
 */
-mod cnt(enable:bool) -> (value:u8@[0]) {
-  reg count:u8 = 0
+mod cnt(enable:Bool) -> (value:U8@[0]) {
+  reg count:U8 = 0
   value = count
   if enable { wrap count += 1 }
 }
-test cnt.t(cycles:u20 = 20) {
+test cnt.t(cycles:U20 = 20) {
   mut acc = cnt
   mut v = 0
-  tick cycles clocks=(clock=1) {
+  tick cycles {
     acc.enable = true
-    acc.reset  = clock < 2     // reset is just a poked input
+    acc.reset = clock < 2    // reset is just a poked input
     step
     v = acc.value
   }
@@ -82,15 +82,6 @@ grep -q 'acc.peek('                            "$DRV" && fail "peek() is removed
 [ "$(grep -n 'auto& __ref[0-9]* = acc\.' "$DRV" | tail -1 | cut -d: -f1)" -lt \
   "$(grep -n 'for (; clock <' "$DRV" | head -1 | cut -d: -f1)" ] \
   || fail "ref bindings are not hoisted above the tick loop"
-# `clocks=(clock=1)` sets the VCD time ratio + the clock's name on the instance.
-# The ratio is a general EXPRESSION (it may name a test parameter), so it lowers
-# through Slop rather than as a bare C literal — match the value, not the shape.
-# A small decimal literal ALWAYS lowers as create_integer(N) now (literal_val),
-# and the per-cycle from_pyrope("1") parse it replaced measured 2.5% of dino
-# simulation — so pin the emitted form, not just the value, or that cost can
-# come back green.
-grep -q '__clk_ratio = (unsigned)(.*create_integer(1)' "$DRV" || fail "driver did not set the clock ratio to 1"
-grep -q '__clk_name = "clock"'           "$DRV" || fail "driver did not set the clock name"
 
 # ---- error cases rejected at setup -------------------------------------------
 # $1 = statements inside the test, $2 = expected message fragment, $3 = label
@@ -100,7 +91,7 @@ expect_err() {
 :name: bad
 :type: simulation
 */
-mod cnt(enable:bool) -> (value:u8@[0]) { reg count:u8 = 0; value = count; if enable { wrap count += 1 } }
+mod cnt(enable:Bool) -> (value:U8@[0]) { reg count:U8 = 0; value = count; if enable { wrap count += 1 } }
 test cnt.t {
   mut acc = cnt
   mut v = 0
@@ -114,13 +105,10 @@ EOF
   echo "$out" | grep -q "$2" || fail "$3 lacked '$2': $out"
 }
 expect_err '  tick 4 { acc.enable = true; v = acc.value }'           'must advance the clock with' 'tick body with no step'
-# A second `clocks=` entry is rejected because a tick has ONE loop counter --
-# NOT because LiveHD is single-clock. Multi-clock designs simulate as of
-# 2f-latch M6 (drive the second clock as an input; see
-# inou/prp/tests/sim/multiclock_two_domain.prp). The message must say so, or a
-# user works around a limitation that no longer exists.
-expect_err '  tick 4 clocks=(a=1, b=2) { acc.enable = true; step }'  'ONE loop counter'            'two clocks'
-expect_err '  tick 4 clocks=(a=1, b=2) { acc.enable = true; step }'  'NOT a multi-clock limitation' 'two clocks (points at the supported form)'
+# A tick takes only a cycle count (owner ruling 75): the `clocks=`/`resets=`
+# clauses are gone, and the parser says so.
+expect_err '  tick 4 clocks=(a=1, b=2) { acc.enable = true; step }'  'clauses were removed'        'tick clocks clause'
+expect_err '  tick 4 resets=(r=2) { acc.enable = true; step }'       'clauses were removed'        'tick resets clause'
 expect_err '  tick 4 { acc.value = 1; step }'                        'cannot drive output'         'drive an output'
 expect_err '  tick 4 { acc.nope = 1; step }'                         'unknown field'               'drive an unknown field'
 
@@ -131,8 +119,8 @@ cat > "$W/coll.prp" <<'EOF'
 :name: coll
 :type: simulation
 */
-mod cnt(enable:bool) -> (value:u8@[0]) { reg count:u8 = 0; value = count; if enable { wrap count += 1 } }
-test cnt.t(clock:u8 = 3) {
+mod cnt(enable:Bool) -> (value:U8@[0]) { reg count:U8 = 0; value = count; if enable { wrap count += 1 } }
+test cnt.t(clock:U8 = 3) {
   mut acc = cnt
   tick 4 { acc.enable = true; step }
   assert(clock == clock)
@@ -148,7 +136,7 @@ cat > "$W/stepn.prp" <<'EOF'
 :name: stepn
 :type: simulation
 */
-mod cnt(enable:bool) -> (value:u8@[0]) { reg count:u8 = 0; value = count; if enable { wrap count += 1 } }
+mod cnt(enable:Bool) -> (value:U8@[0]) { reg count:U8 = 0; value = count; if enable { wrap count += 1 } }
 test cnt.t {
   mut acc = cnt
   mut v = 0
@@ -158,8 +146,11 @@ test cnt.t {
 EOF
 "$LHD" sim "$W/stepn.prp" --setup-only --workdir "$W/stepn" -q >/dev/null 2>&1 \
   || fail "step N failed to set up"
-# The bound is a general expression (same lowering as the clock ratio), so match
-# the loop shape plus the folded count — see the __clk_ratio check above.
+# The bound is a general EXPRESSION (it may name a test parameter), so it lowers
+# through Slop rather than as a bare C literal. A small decimal literal ALWAYS
+# lowers as create_integer(N) (literal_val), and the per-cycle from_pyrope("3")
+# parse it replaced cost 2.5% of dino simulation -- so pin the emitted form, not
+# just the value, or that cost can come back green.
 grep -q 'for (long _s = 0; _s < (long)(.*create_integer(3)' "$W"/stepn/sim/drv.cpp || fail "step N did not emit a count loop"
 
 echo "PASS: lhd sim instance/step model (clock waveform, reset-as-input, hoisted sigref/regref)"

@@ -8,14 +8,14 @@
 // Typesystem redesign: `.[sign]` is a derived read (signed ⇔ declared min < 0),
 // computed from the type — never a stored attribute.
 
-const a:u8 = 5
+const a:U8 = 5
 cassert(!a.[sign])      // unsigned → not signed
 
-const b:s4 = -1
+const b:S4 = -1
 cassert(b.[sign])        // signed → signed
 
-const c:bool = true
-cassert(!c.[sign])       // a bool is the hardware u1 (true == 1) → not signed
+const c:Bool = true
+cassert(!c.[sign])       // a bool is the hardware U1 (true == 1) → not signed
 
-const d:u3 = 2
+const d:U3 = 2
 cassert(!d.[sign])

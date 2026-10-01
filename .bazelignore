@@ -6,3 +6,4 @@ sim_cpu
 tmp*
 verif*
 tmp
+repros

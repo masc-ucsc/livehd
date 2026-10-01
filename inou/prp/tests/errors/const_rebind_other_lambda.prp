@@ -1,0 +1,22 @@
+/*
+:name: const_rebind_other_lambda
+:type: error
+:error: rebind
+:help: single assignment
+*/
+
+// A typed tuple declaration (`const k:(…) = …`) emits a shape-seed store that
+// the single-bind count discounts. The discount belongs to THAT declaration's
+// scope: keyed by the bare name, the seed of `k` in `f1` hid the real rebind
+// of an unrelated `k` in the top, which then compiled as last-write-wins.
+comb f1(a:U6, w:Bool) -> (o:U6) {
+  const k:(addr:U6, write:Bool) = (a, w)
+  o = k.addr
+}
+
+pub comb const_rebind_other_lambda(a:U6, w:Bool) -> (o:U6, p:U6) {
+  const k = a  // locate_error_here
+  k = a ^ 1
+  o = k
+  p = f1(a=a, w=w)
+}

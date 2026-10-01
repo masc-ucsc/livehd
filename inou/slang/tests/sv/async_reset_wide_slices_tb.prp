@@ -5,12 +5,12 @@
 // ASYNCHRONOUS is pinned by the fixture's :verilog_re:/:verilog_not_re: headers.
 const dut = import("lg:async_reset_wide_slices")
 
-test wide_slices.reset {
+test wide_slices.`reset` {
   mut acc = dut
   const rst_val = (0xfffffffff << 36) | 0x123456789
   const first   = (3 << 36) | 4
   const second  = (5 << 36) | 6
-  mut cycle:u32 = 0
+  mut cycle:U32 = 0
   tick 4 {
     acc.rst = cycle == 1 or cycle == 2
     acc.d   = if cycle < 2 { first } else { second }

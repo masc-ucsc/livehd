@@ -1,0 +1,24 @@
+/*
+:name: clock_pin_const_bind
+:type: error
+:tolg: 1
+:error: .Clock. input .wclk. of .leaf. is bound to a constant
+:help: omit .wclk. to wire the caller's implicit clock
+*/
+
+// User rulings 2026-09-27 (12) and 2026-09-29 (52): a `Clock` input tied to a
+// constant is a compile error. A clock is any input typed `Clock`, whatever
+// its name: `wclk` below is `r`'s `clock_pin`. Before the fix this
+// compiled, and the backends disagreed: the Verilog ties `.wclk(1'h1)` so
+// `always @(posedge wclk)` never fires, while `lhd sim` stepped the reg.
+
+mod leaf(wclk:Clock, d:U4) -> (q:U4@[]) {
+  reg r:U4:[clock_pin=wclk] = 0
+  wrap r = r + d
+  q = r
+}
+
+pub mod clock_pin_const_bind(d:U4) -> (q:U4@[]) {
+  const l = leaf(wclk=1, d=d)   // locate_error_here
+  q = l.q
+}

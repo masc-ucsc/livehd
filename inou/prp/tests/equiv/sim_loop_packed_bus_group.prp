@@ -13,9 +13,9 @@
 // slice readers ONE level (onto the `<< 4` group shl), but that group still
 // contains both the read field (addr) and the written field (rdata), so the
 // word-level cycle survives and cgen.sim names the shl as the back-edge.
-pub comb sim_loop_packed_bus_group::[timecheck=false](lo:u4, ren:u1, addr:u2, x:u32) -> (z:u8) {
-  wire bus:u15
-  wire rdata:u8
+pub comb sim_loop_packed_bus_group::[timecheck=false](lo:U4, ren:U1, addr:U2, x:U32) -> (z:U8) {
+  wire bus:U15
+  wire rdata:U8
   rdata = (x >> (bus#[12..=13] * 8))#[0..=7]
   bus = lo | (((ren << 10) | (addr << 8) | rdata) << 4)
   z = bus#[4..=11]

@@ -1,0 +1,8 @@
+// :name: readmem_filename
+// :type: error
+// :error: requires one nonempty comptime string filename
+// :help: reg mem
+pub mod readmem_filename(file:U8, addr:U2) -> (data:U8@[]) {
+  reg mem:[4]U8 = std.readmemh(file)
+  data = mem[addr]
+}

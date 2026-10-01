@@ -6,9 +6,9 @@
 */
 // Same Pyrope reference as async_reset_concat.prp, paired with the NVDLA
 // concatenation spelling so both Verilog forms run through the native reader.
-pub mod async_reset_concat(clk:u1, clr_:u1, d:u1) -> (q:u1@[]) {
-  reg q:u1:[clock_pin=ref clk, reset_pin=ref clr_, async=true, negreset=true] = 0
-  reg d0:u1:[clock_pin=ref clk, reset_pin=ref clr_, async=true, negreset=true] = 0
+pub mod async_reset_concat(clk:Clock, clr_:Reset, d:U1) -> (q:U1@[]) {
+  reg q:U1:[clock_pin=clk, reset_pin=clr_, async=true, negreset=true] = 0
+  reg d0:U1:[clock_pin=clk, reset_pin=clr_, async=true, negreset=true] = 0
   q = d0
   d0 = d
 }

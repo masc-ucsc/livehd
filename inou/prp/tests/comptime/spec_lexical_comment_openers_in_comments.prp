@@ -1,0 +1,14 @@
+/*
+:name: spec_lexical_comment_openers_in_comments
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// qa.md 2 (chat ruling) "Scanner: nothing inside a comment may affect
+// parsing": a line-comment opener inside a block comment does not hide the
+// block close, and a block opener inside a line comment opens nothing.
+mut v = 1 /* // */ + 1
+// /*
+mut w = 2
+cassert(v == 2)
+cassert(w == 2)

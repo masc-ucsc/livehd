@@ -11,4 +11,4 @@
 // bind is ambiguous and must be named (`<T1=signed, T2=string>`).
 
 comb two<T1,T2>(a:T1, b:T2) -> (c:T1) { c = a }
-cassert(two<signed,string>(a=7, b="x") == 7)   // locate_error_here
+cassert(two<Signed,String>(a=7, b="x") == 7)   // locate_error_here

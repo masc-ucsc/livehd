@@ -5,11 +5,11 @@
 :verifier_fail: 0
 */
 
-comb fcall1(a:u3, b:u7, cond:bool) -> (res:s4) {
+comb fcall1(a:U3, b:U7, cond:Bool) -> (res:S4) {
   if cond {
-    res = a + 1
+    wrap res = a + 1
   }else{
-    res = b#[0..<4]
+    res = b#sext[0..<4]
   }
 }
 

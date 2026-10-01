@@ -6,13 +6,13 @@
 // cycle, so no state and no color is ever idle; the tuner must profile it,
 // find the activity high and converge on the default vector with ZERO trials
 // (lhd/tests/sim_tune_profile_test.sh runs it for millions of cycles through
-// `--arg cycles=N`; the default keeps the prp-sim target short).
+// `+cycles=N`; the default keeps the prp-sim target short).
 
-mod tune_lfsr(salt:u32) -> (out:u32@[0]) {
-  reg a:u32 = 1
-  reg b:u32 = 0x1234_5678
-  reg c:u32 = 0xDEAD_BEEF
-  reg d:u32 = 0x0BAD_F00D
+mod tune_lfsr(salt:U32) -> (out:U32@[0]) {
+  reg a:U32 = 1
+  reg b:U32 = 0x1234_5678
+  reg c:U32 = 0xDEAD_BEEF
+  reg d:U32 = 0x0BAD_F00D
 
   out = a ^ b ^ c ^ (d ^ salt)
 
@@ -22,11 +22,11 @@ mod tune_lfsr(salt:u32) -> (out:u32@[0]) {
   d = (d >> 1) ^ (if d#[0] == 1 { 0xE000_0005 } else { 0 })
 }
 
-test tune_lfsr.run(cycles:u32 = 1000) {
+test tune_lfsr.run(cycles:U32 = 1000) {
   mut dut   = tune_lfsr
   mut fold  = 0
   mut first = nil
-  mut x:u32 = 1
+  mut x:U32 = 1
   tick cycles {
     dut.salt = 0
     step

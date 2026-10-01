@@ -31,8 +31,8 @@ WORK="${TEST_TMPDIR:-/tmp/lectrust}"; mkdir -p "$WORK"; fail=0
 # never sees two `mod top` definitions.
 leaf() {  # $1 = dir
   cat > "$1/leaf.prp" <<'EOF'
-pub mod leaf(g:u1, d:u8) -> (q:u8@[]) {
-  reg ql:u8:[latch=true]
+pub mod leaf(g:U1, d:U8) -> (q:U8@[]) {
+  reg ql:U8:[latch=true]
   if g == 1 {
     ql = d
   }
@@ -45,7 +45,7 @@ leaf "$WORK/base"; leaf "$WORK/rdiff"
 # base: o = leaf(d=p); r = p ^ s   (r is combinational, OUTSIDE the leaf)
 cat > "$WORK/base/top.prp" <<'EOF'
 const leaf = import("leaf.leaf")
-pub mod top(g:u1, p:u8, s:u8) -> (o:u8@[], r:u8@[]) {
+pub mod top(g:U1, p:U8, s:U8) -> (o:U8@[], r:U8@[]) {
   mut u = leaf::[name=u](g = g, d = p)
   o = u
   r = p ^ s
@@ -54,7 +54,7 @@ EOF
 # rdiff: a REAL divergence OUTSIDE the leaf (r = p & s instead of p ^ s)
 cat > "$WORK/rdiff/top.prp" <<'EOF'
 const leaf = import("leaf.leaf")
-pub mod top(g:u1, p:u8, s:u8) -> (o:u8@[], r:u8@[]) {
+pub mod top(g:U1, p:U8, s:U8) -> (o:U8@[], r:U8@[]) {
   mut u = leaf::[name=u](g = g, d = p)
   o = u
   r = p & s

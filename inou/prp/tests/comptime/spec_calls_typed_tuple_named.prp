@@ -1,0 +1,27 @@
+/*
+:name: spec_calls_typed_tuple_named
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// qa.md Appendix §8: "Named tuple: ... Where a named tuple is expected (call
+// arguments, construction of a typed tuple), names may be dropped under the
+// call naming rules (bare variable whose name matches, single field,
+// type-unique value, self)."
+// docs 07-typesystem.md: `mut b:T1 = (a="hello", 3)  // OK: 3 binds to b by
+// type`, `mut c1:T1 = (b=3, a="hello") // OK: named values bind by name, in
+// any order`.
+
+type T1 = (a:String, b:Signed)
+mut b1:T1 = (a="hello", 3)
+cassert(b1.a == "hello" and b1.b == 3)
+mut c1:T1 = (b=3, a="hello")
+cassert(c1.a == "hello" and c1.b == 3)
+
+// bare variables whose names match the fields bind by name (any order)
+type T3 = (a:Signed, b:Signed)
+const b = 20
+const a = 10
+mut d1:T3 = (b, a)
+cassert(d1.a == 10 and d1.b == 20)

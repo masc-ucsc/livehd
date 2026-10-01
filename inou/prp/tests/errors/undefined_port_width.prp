@@ -1,0 +1,15 @@
+/*
+:name: undefined_port_width
+:type: error
+:error: read of undefined variable 'ZZ'
+:help: declare it
+*/
+
+// Ruling 2026-09-28 #24 (clarification): reading a name with no accessible
+// declaration is a direct compile error at the read. A port width bound that
+// does not fold is not lowered where it is written, so nothing recorded the
+// read: an undeclared `ZZ` only warned "not a compile-time value" and the
+// width was SILENTLY dropped (the port compiled as the full 8-bit argument).
+pub comb undefined_port_width(a:Unsigned(bits=ZZ)) -> (r:U8) {  // locate_error_here
+  r = a
+}

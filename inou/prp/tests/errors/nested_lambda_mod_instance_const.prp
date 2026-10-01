@@ -1,0 +1,31 @@
+/*
+:name: nested_lambda_mod_instance_const
+:type: error
+:error: 's' is a runtime value of the enclosing scope; it is not visible inside lambda 'f'
+:help: pass 's' as an input of 'f'
+*/
+
+// Ruling 2026-09-28 #24: a `const` computed by a `comb` call with comptime
+// arguments is a compile-time constant, but one computed by a `mod` call is an
+// instance output, a runtime value. The callee resolves LEXICALLY: `g` in
+// `top` is the stateful `mod g`, even though an unrelated scope (`other`)
+// declares a `comb g`. A file-wide set of comb names used to make `s`
+// comptime here, so the nested `mod f` silently got its own copy of the
+// accumulator instance.
+pub mod other(a:U8) -> (o:U8@[0]) {
+  comb g(q:U8) -> (r:U8) { r = (q + 2)#[0..<8] }
+  o = g(q=a)
+}
+
+pub mod top(a:U8) -> (o:U8@[0]) {
+  mod g(q:U8) -> (r:U8@[0]) {
+    reg t:U8 = 0
+    t = (t + q)#[0..<8]
+    r = t
+  }
+  const s = g(q=3)
+  mod f(z:U8) -> (w:U8@[0]) {
+    w = (z + s)#[0..<8]  // locate_error_here
+  }
+  o = f(z=a)
+}

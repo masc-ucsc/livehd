@@ -1,0 +1,59 @@
+/*
+:name: generic_comb_wrap_output
+:type: simulation
+*/
+// lhdtrack suggestions 1.1 (item 1.1-c): `wrap`/`sat` into an output whose
+// width is a generic expression of an inlined `comb`. The inliner left a
+// generic-width output untyped, so the wrap/sat lowering found no width and
+// the call leaked to tolg as "call to undefined function 'inl1_wrap'". The
+// literal-typed comb (`inc4`, the control) and the `mod` spelling worked.
+//
+// Every destination is U8, WIDER than the comb output, so the mod's own output
+// port cannot truncate a missing wrap: an unwrapped `a + 1` would read 16 / 64
+// here, not 0.
+comb inc<N=2>(a:Unsigned(bits=N)) -> (o:Unsigned(bits=N)) {
+  wrap o = a + 1
+}
+
+comb incs<N=2>(a:Unsigned(bits=N)) -> (o:Unsigned(bits=N)) {
+  sat o = a + 1
+}
+
+comb inc4(a:U4) -> (o:U4) {
+  wrap o = a + 1
+}
+
+mod generic_comb_wrap_output(x:U4, y:U6) -> (o4:U8@[0], o6:U8@[0], st4:U8@[0], st6:U8@[0], c4:U8@[0]) {
+  o4 = inc<N=4>(a=x)
+  o6 = inc<N=6>(a=y)
+  st4 = incs<N=4>(a=x)
+  st6 = incs<N=6>(a=y)
+  c4 = inc4(a=x)
+}
+
+test generic_comb_wrap_output.wraps {
+  mut d = generic_comb_wrap_output
+  tick 2 {
+    if clock == 0 {
+      d.x = 15
+      d.y = 62
+    } else {
+      d.x = 6
+      d.y = 63
+    }
+    step
+    if clock == 0 {
+      assert(d.o4 == 0, "wrap: 15 + 1 wraps to 0 in 4 bits")
+      assert(d.o6 == 63, "wrap: 62 + 1 = 63 fits in 6 bits")
+      assert(d.st4 == 15, "sat: 15 + 1 saturates at 15 in 4 bits")
+      assert(d.st6 == 63, "sat: 62 + 1 = 63 fits in 6 bits")
+      assert(d.c4 == 0, "control: literal-typed u4 output wraps to 0")
+    } else {
+      assert(d.o4 == 7, "wrap: 6 + 1 = 7")
+      assert(d.o6 == 0, "wrap: 63 + 1 wraps to 0 in 6 bits")
+      assert(d.st4 == 7, "sat: 6 + 1 = 7")
+      assert(d.st6 == 63, "sat: 63 + 1 saturates at 63 in 6 bits")
+      assert(d.c4 == 7, "control: 6 + 1 = 7")
+    }
+  }
+}

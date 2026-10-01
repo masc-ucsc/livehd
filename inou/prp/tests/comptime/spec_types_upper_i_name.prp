@@ -1,0 +1,11 @@
+/*
+:name: spec_types_upper_i_name
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// SPEC qa.md appendix section 1: RESERVED type words are `U<N>`/`S<N>`/Unsigned/Signed/Bool/String/Clock/Reset;
+// section 7: BANNED words are the LOWERCASE `u8`, `s20`, `i32` (any u/s/i + digits) ... . `I<N>` is removed
+// (not reserved, not banned). Rule probed: an uppercase `I8` is an ordinary name.
+const I8 = 3
+cassert(I8 == 3)

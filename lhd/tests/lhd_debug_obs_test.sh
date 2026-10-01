@@ -21,8 +21,8 @@ fail() {
 
 # 1. --dump lg on a two-lambda design: both graphs land on stderr, sorted.
 cat > "$W/twog.prp" <<'EOF'
-comb addone(a:u8) -> (z:u9) { z = a + 1 }
-comb xorit(a:u8, b:u8) -> (z:u8) { z = a ^ b }
+comb addone(a:U8) -> (z:U9) { z = a + 1 }
+comb xorit(a:U8, b:U8) -> (z:U8) { z = a ^ b }
 EOF
 "$LHD" compile "$W/twog.prp" --emit-dir lg:"$W/lgs/" --dump lg \
   --workdir "$W/w_dump" 2>"$W/dump.err" >/dev/null || fail "--dump lg compile failed"

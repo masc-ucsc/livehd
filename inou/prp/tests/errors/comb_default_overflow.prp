@@ -1,0 +1,18 @@
+/*
+:name: comb_default_overflow
+:type: error
+:tolg: 1
+:error: `b` \(value 300\) does not fit its declared range \[0, 255\]
+:help: apply a wrap/saturate policy
+*/
+// User ruling 2026-09-27 (overflow rule): an input default is bound to the
+// input at every call that omits it, so it must fit the input's declared type
+// like any typed assignment. The diagnostic names the input `b`, not the
+// compiler's default-value local or an inliner name.
+comb add_dflt(a:U8, b:U8=300) -> (r:U9) {   // locate_error_here
+  r = a + b
+}
+
+pub mod comb_default_overflow(x:U8) -> (y:U9@[0]) {
+  y = add_dflt(a=x)
+}

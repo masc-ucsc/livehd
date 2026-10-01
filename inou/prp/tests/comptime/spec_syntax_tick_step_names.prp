@@ -1,0 +1,25 @@
+/*
+:name: spec_syntax_tick_step_names
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+// Owner ruling 99 (spec-audit Q42): "`tick` and `step` are reserved keywords, not allowed unless
+// backticks are used (no special thing for methods and variables overall)". They are reserved
+// EVERYWHERE, like `U8`: a variable, a tuple field, a field after `.`, a lambda or method name.
+// The backticked `` `tick` `` / `` `step` `` is an ordinary name in every one of those positions
+// (the error twins are errors/spec_syntax_tick_step_*.prp).
+const `tick` = 1
+const `step` = 2
+mut x = (mut `step` = 0, mut `tick` = 3)
+x.`step` = 1
+const Cnt = (
+  mut c:U8 = 0,
+  comb `step`(self) -> (r:U8) { r = self.c + 1 }
+)
+mut k:Cnt = (c = 4)
+
+cassert(`tick` == 1 and `step` == 2)
+cassert(x.`step` == 1)
+cassert(x.`tick` == 3)
+cassert(k.`step`() == 5)

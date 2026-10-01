@@ -1,0 +1,14 @@
+/*
+:name: spec_types_reserved_field_read_dot
+:type: error
+:error: reserved type word
+*/
+// SPEC qa.md appendix section 1: "`U<N>`/`S<N>`/`Unsigned`/`Signed`/`Bool`/`String`/`Clock`/`Reset` are RESERVED type
+// words: they cannot be declared as variable/port/parameter/field names; a variable with that spelling must be
+// backticked". Section 7: "Reserved `U<N>`/`S<N>` = `U`/`S` followed by ANY digit string (U0, U1333, U99999999),
+// reserved EVERYWHERE including after `.` (fields/attributes)."
+// Rule: after `.` a bare `U8` is not a field name (write t.`U8`).
+pub comb spec_types_reserved_field_read_dot(a:U8) -> (o:U8) {
+  const t = (const `U8` = 1)
+  wrap o = a + t.U8  // locate_error_here
+}

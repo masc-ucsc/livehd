@@ -9,7 +9,7 @@
 // and none-defaulted is ../equiv/reg_named_tuple_type.prp.
 //
 // Root cause is in prp2lnast, not the detupler: a mixed type is lowered with
-// too little information to describe. For `(mut flag:bool = false, mut state:u2)`
+// too little information to describe. For `(mut flag:Bool = false, mut state:U2)`
 // the LNAST is
 //     tuple_add %T, store(ref 'flag', const 'false'), ref 'state'
 //     type_spec %tmp : prim_type_bool       <- `flag`'s type, on an ANONYMOUS temp
@@ -24,9 +24,9 @@
 // and silently drop the field. Failing to compile is the safe direction; the fix
 // is to make prp2lnast emit the per-field type_specs uniformly.
 
-type D = (mut flag:bool = false, mut state:u2)
+type D = (mut flag:Bool = false, mut state:U2)
 
-pub mod mixed_defaulted_tuple_type(clk:u1, f:bool, s:u2) -> (of:bool@[], os:u2@[]) {
+pub mod mixed_defaulted_tuple_type(clk:Clock, f:Bool, s:U2) -> (of:Bool@[], os:U2@[]) {
   reg r:D = nil
   r.flag  = f
   r.state = s

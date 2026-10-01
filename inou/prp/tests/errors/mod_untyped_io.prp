@@ -9,8 +9,8 @@
 // a deferred template, specialized per call site on the actual's DECLARED type
 // (decision 4). What IS an error is feeding an UNTYPED actual (here the bare
 // literal `3`) into that boundary — a hardware port needs an explicit width.
-mod f(a) -> (x:u8@[0]) { x = a }
+mod f(a) -> (x:U8@[0]) { x = a }
 
-mod top() -> (z:u8@[0]) {
+mod top() -> (z:U8@[0]) {
   z = f(3)
 }

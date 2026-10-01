@@ -1,0 +1,45 @@
+/*
+:name: nested_rolled_outer_index
+:type: simulation
+:expect_instances: u_loop*=2
+*/
+// A NESTED rolled loop that reads the OUTER loop's index. Inside the lifted
+// inner body that index is a loop invariant, an input port whose storage type
+// is only a SIGNED window around the outer domain (`i` in 0..<4 is an S3 port,
+// [-4, 3]). Without its entry range the inner body judged the port by that
+// window: `v[i]` was the hard error "array index is negative (range [-4, 3])"
+// and `r#[i*4 + j]` warned "shift amount may be negative". The lifted body
+// now carries each invariant's value range on entry (lift_loop_body), exactly
+// as it does for the index and the carry-ins.
+//
+// `:expect_instances: u_loop*=2` keeps both loops rolled (an unrolled copy
+// would never see the lifted port).
+pub mod nested_rolled_outer_index(m0:U4, m1:U4, m2:U4, m3:U4) -> (o:U16@[0]) {
+  mut v:[4]U4 = 0
+  v[0] = m0
+  v[1] = m1
+  v[2] = m2
+  v[3] = m3
+  mut r:U16 = 0
+  for i in 0..<4 {
+    for j in 0..<4 {
+      r#[i*4 + j] = v[i]#[j]
+    }
+  }
+  o = r
+}
+
+test nested_rolled_outer_index.lanes {
+  mut dut = nested_rolled_outer_index
+  mut bad = 0
+  tick 16 {
+    const x = (clock * 40503 + 12345) & 0xFFFF
+    dut.m0 = x & 15
+    dut.m1 = (x >> 4) & 15
+    dut.m2 = (x >> 8) & 15
+    dut.m3 = (x >> 12) & 15
+    step
+    if dut.o != x { bad += 1 }
+  }
+  assert(bad == 0, "row i of the rolled nest reads v[i]")
+}

@@ -1,0 +1,36 @@
+/*
+:name: spec_memory_generic_array_port
+:type: equiv
+:verilog_top: spec_memory_generic_array_port
+:pyrope_top: spec_memory_generic_array_port
+*/
+// SPEC (qa.md appendix section 5): "Generic-width arrays (`reg r:[N]Unsigned(bits=W)`,
+// array ports of generics) ... are supported".
+// SPEC (docs 07-typesystem.md): "mod sel<N=4, W=8>(v:[N]Unsigned(bits=W),
+// i:Unsigned(bits=std.clog2(N))) -> (y:Unsigned(bits=W)@[0]) { y = v[i] }"
+// Rule encoded here: an array INPUT port `v:[N]Unsigned(bits=W)` (docs `sel`,
+// verbatim) and an array OUTPUT port `o:[N]Unsigned(bits=W)` of a generic mod,
+// each specialized at <N=4, W=8> and <N=2, W=5> (power-of-two counts, so every
+// index value is in range).
+mod sel<N=4, W=8>(v:[N]Unsigned(bits=W), i:Unsigned(bits=std.clog2(N)))
+  -> (y:Unsigned(bits=W)@[0]) {
+  y = v[i]
+}
+
+mod rev<N=4, W=8>(v:[N]Unsigned(bits=W)) -> (o:[N]Unsigned(bits=W)@[0]) {
+  o = 0
+  for k in 0..<N {
+    o[k] = v[N - 1 - k]
+  }
+}
+
+pub mod spec_memory_generic_array_port(v4:[4]U8, ix4:U2, v2:[2]U5, ix2:U1) -> (y8:U8@[0], y5:U5@[0], o8:[4]U8@[0], o5:[2]U5@[0]) {
+  const sa = sel(v=v4, i=ix4)
+  const sb = sel<N=2, W=5>(v=v2, i=ix2)
+  const ra = rev(v=v4)
+  const rb = rev<N=2, W=5>(v=v2)
+  y8 = sa.y
+  y5 = sb.y
+  o8 = ra.o
+  o5 = rb.o
+}

@@ -1,0 +1,25 @@
+/*
+:name: capture_fold_input_loop
+:type: error
+:error: 's' is a runtime value of the enclosing scope; it is not visible inside lambda 'f'
+:help: pass 's' as an input of 'f'
+*/
+
+// User ruling 2026-09-28 (32): an enclosing `const` is visible inside a nested
+// lambda only when its value FOLDS to a compile-time constant. `s` counts the
+// set bits of the input `a`, so it depends on a runtime value: reading it in
+// the nested comb is a compile error at the read (never nil, never a hidden
+// input). Its constant-folding twin is equiv/capture_fold_const.prp.
+pub mod capture_fold_input_loop(a:U4) -> (o:U8@[0]) {
+  mut m = 0
+  for i in 0..<4 {
+    if a#[i] == 1 {
+      m += 1
+    }
+  }
+  const s = m
+  comb f(x:U8) -> (y:U8) {
+    wrap y = x + s  // locate_error_here
+  }
+  o = f(x=a)
+}

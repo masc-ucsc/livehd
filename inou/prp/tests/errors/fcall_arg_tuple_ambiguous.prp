@@ -1,0 +1,17 @@
+/*
+:name: fcall_arg_tuple_ambiguous
+:type: error
+:error: argument `src` must be named \(`src=...`\) in call to `dx`
+*/
+
+// 06-functions.md "Argument naming": a positional tuple argument binds a
+// tuple-typed parameter by name (exception 2) or when its shape fits exactly
+// one parameter (exception 3). `dx` has two parameters of the same tuple type
+// and neither variable name matches, so the call is ambiguous and must name its
+// arguments. (The punned `dx(dst, src)` is in comptime/fcall_arg_pun.prp.)
+
+type Pt = (col:S8, row:S8)
+comb dx(src:Pt, dst:Pt) -> (r:S10) { r = dst.col - src.col }
+const p0:Pt = (col = 1, row = 0)
+const p1:Pt = (col = 5, row = 0)
+cassert(dx(p0, p1) == 4) // locate_error_here

@@ -6,11 +6,11 @@
 */
 
 // A function parameter's literal default must match its declared scalar type:
-// `b` is declared `bool`, so an integer default `3` is a type error — exactly
-// like the variable form `mut b:bool = 3`. bool/int/string are distinct with no
-// implicit conversion. Use `b:bool = true` (or cast).
+// `b` is declared `Bool`, so an integer default `3` is a type error — exactly
+// like the variable form `mut b:Bool = 3`. bool/int/string are distinct with no
+// implicit conversion. Use `b:Bool = true` (or cast).
 
-comb f1(a:u32 = nil, b:bool = 3) -> (r:u7 = nil) {   // locate_error_here
+comb f1(a:U32 = nil, b:Bool = 3) -> (r:U7 = nil) {   // locate_error_here
   if b {
     r = a + 1
   }

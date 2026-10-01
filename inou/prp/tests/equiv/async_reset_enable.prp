@@ -14,8 +14,8 @@
 // equiv_slang (not equiv): yosys read_verilog's proc_arst cannot peel the
 // compound guard either, and there it is a HARD proc_dff error ("Multiple
 // edge sensitive events"), so lgcheck can never read the golden directly.
-pub mod pipe(en:bool, arst:bool, d:u8) -> (q:u8@[0]) {
-  reg r:u8 = 0
+pub mod `pipe`(en:Bool, arst:Bool, d:U8) -> (q:U8@[0]) {
+  reg r:U8 = 0
   if arst {
     r = 0
   } elif en {

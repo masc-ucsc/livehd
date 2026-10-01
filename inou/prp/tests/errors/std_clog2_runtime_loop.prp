@@ -1,0 +1,19 @@
+/*
+:name: std_clog2_runtime_loop
+:type: error
+:tolg: 1
+:error: std\.clog2.*not a compile-time value
+*/
+
+// `std.clog2(x)` is comptime only (docs 04b-attributes). In a loop body the
+// index is comptime (the loop unrolls for it), but a runtime input mixed into
+// the argument still makes it a runtime value: a compile error, not a
+// priority encoder.
+
+pub mod std_clog2_runtime_loop(a:U8) -> (y:U8@[0]) {
+  mut acc:U8 = 0
+  for k in 1..=4 {
+    acc = acc + std.clog2(k + a)   // locate_error_here
+  }
+  y = acc
+}

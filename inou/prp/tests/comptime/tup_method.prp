@@ -6,13 +6,13 @@
 */
 
 mut p1 = (
-  mut found_once:bool = false,
+  mut found_once:Bool = false,
   comb call(ref self, a) -> (result) {
     self.found_once or= (a == 0)
     result = a + 1
   },
   comb call2(self, a) -> (result) { // no ref, read-only method
-    result = a + u1(self.found_once)  // u1(true)==1, so `+ u1(found)` adds 1 when found (was `- int(true)`)
+    result = a + U1(self.found_once)  // U1(true)==1, so `+ U1(found)` adds 1 when found (was `- int(true)`)
   }
 )
 

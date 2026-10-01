@@ -1,0 +1,11 @@
+/*
+:name: spec_types_unsigned_negative
+:type: error
+:error: does not fit its declared range
+*/
+// SPEC docs 04-variables "Integer or Signed": "`Unsigned`: the same as `Signed(min=0)` -- a de-facto unsigned
+// integer" and "mut b:Unsigned = nil // only positive values"; docs 07-typesystem "Bitwidth": "when the current
+// range of a right-hand side may fall outside the constrained range of its typed destination (above `max` or
+// below `min`), the assignment is a mandatory compile error unless it carries `wrap` or `sat`."
+// Rule: a negative value into a bare `Unsigned` is a compile error.
+const b:Unsigned = -1  // locate_error_here

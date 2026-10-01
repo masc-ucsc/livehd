@@ -1,0 +1,11 @@
+/*
+:name: spec_syntax_destructure_in_expr
+:type: error
+:error: destructuring assignment
+*/
+// qa.md Appendix §7: "ERRORS: ... destructuring inside an expression or init clause
+// (`const q = ((a, b) = g())`, `if (a, b) = f(); a {}`)" (Q29, item 4).
+comb g() -> (a, b) { a = 1; b = 2 }
+mut a = 0
+mut b = 0
+const q = ((a, b) = g())   // locate_error_here

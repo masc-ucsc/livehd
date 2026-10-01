@@ -43,9 +43,9 @@ trap 'rm -rf "$W"' EXIT
 fail() { echo "FAIL: $*"; exit 1; }
 
 # The DUT: minion's prim_rf_1r1w_diff_preview reduced to its smallest reproducing
-# parameterization. A transparent-low LATCH -> NEGEDGE flop -> POSEDGE array
-# write (the M10 phase-schedule chain), an indexed part-select write, and the
-# UNALIGNED ROTATING READ that is the actual trigger.
+# parameterization. A NEGEDGE flop -> POSEDGE array write (the M10
+# phase-schedule chain), an indexed part-select write, and the UNALIGNED
+# ROTATING READ that is the actual trigger.
 cat > "$W/rf.sv" <<'EOF'
 module rf_dut #(
   parameter int unsigned RWidth  = 4,
@@ -66,13 +66,11 @@ module rf_dut #(
   logic [WWidth-1:0]   wr_data_del_q;
   logic [R2WRatio-1:0] wr_data_en_1p_q;
 
-  /* verilator lint_off COMBDLY */
-  /* verilator lint_off NOLATCH */
-  always_latch begin
-    if (!clk) wr_data_en_1p_q = wr_data_en_1p_next_i;
-  end
-  /* verilator lint_on NOLATCH */
-  /* verilator lint_on COMBDLY */
+  // The real module holds this enable in a transparent-low latch on `clk`.
+  // The bisect above found the latch irrelevant to the bug, and a latch whose
+  // enable is the clock reads the Clock as data, which the generated Pyrope
+  // cannot express (qa.md Appendix 6), so the enable is a plain wire here.
+  assign wr_data_en_1p_q = wr_data_en_1p_next_i;
 
   always_ff @(negedge clk) begin
     for (int j = 0; j < R2WRatio; j++)
@@ -149,14 +147,16 @@ echo "ok: the generated Pyrope is LEC-equivalent to the Verilog it came from"
 #    spell the unknown DATA result directly instead.
 # ---------------------------------------------------------------------------
 cat > "$W/unknown_addr.prp" <<'EOF'
-pub mod unknown_addr(inp:u80) -> (r:u10@[0]) {
-  reg arr:[8]u10 = nil
-  arr = inp
+pub mod unknown_addr(inp:U80) -> (r:U10@[0]) {
+  reg arr:[8]U10 = nil
   // This read is intentionally dead. After cprop removes its consumer, cgen
   // must not emit an assignment to an undeclared implicit arr_dout_N net.
-  mut dead:u10 = arr[1]
-  mut idx:u3 = 0ub???
+  mut dead:U10 = arr[1]
+  mut idx:U3 = 0ub???
+  // Both reads precede the store: in program order a read after `arr = inp`
+  // would see `inp` instead of reading the memory.
   r = arr[idx]
+  arr = inp
 }
 EOF
 

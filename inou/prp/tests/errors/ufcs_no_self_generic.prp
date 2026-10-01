@@ -1,0 +1,9 @@
+/*
+:name: ufcs_no_self_generic
+:type: error
+:error: does not declare `self`.*cannot be called as a method
+*/
+
+comb addk1<K>(a) -> (r) { r = a + K }
+mut foo = 3
+const c1:U8 = foo.addk1<K=3>(a=1) // locate_error_here

@@ -55,11 +55,11 @@
 // `clk` is the flops' clock, not a data input, so every stimulus value is a pure
 // function of an explicitly-initialized counter. The u3 wrap makes the schedule
 // cyclic, which is what lets these obligations prove without a deep unroll.
-pub mod negen_tb(clk:bool) -> (ok:bool@[0]) {
-  reg cyc:u3:[clock_pin=ref clk] = 0
-  reg lat:bool:[latch=true]                        // transparent while clk==0 -> CLOSED while clk==1
-  reg armed:bool:[clock_pin=ref clk] = false
-  reg nf:u8:[clock_pin=ref clk, posclk=false] = 0  // NEGEDGE flop, latch-qualified enable
+pub mod negen_tb(clk:Bool) -> (ok:Bool@[0]) {
+  reg cyc:U3:[clock_pin=clk] = 0
+  reg lat:Bool:[latch=true]                        // transparent while clk==0 -> CLOSED while clk==1
+  reg armed:Bool:[clock_pin=clk] = false
+  reg nf:U8:[clock_pin=clk, posclk=false] = 0  // NEGEDGE flop, latch-qualified enable
   const c   = cyc
   const lq  = lat
   const aq  = armed

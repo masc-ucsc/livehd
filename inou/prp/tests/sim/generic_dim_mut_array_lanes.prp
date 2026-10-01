@@ -1,0 +1,61 @@
+/*
+:name: generic_dim_mut_array_lanes
+:type: simulation
+*/
+// lhdtrack suggestions.md 2.2(e) (`m[i]#[j] = x` -> "out of bounds access ...
+// tuple of size K"). Inside a GENERIC mod, a `mut` array whose DIM is the
+// generic, `mut m:[N]U4 = 0`, is not an N-lane array for upass.constprop while
+// N is still unknown: it behaves as a tuple that grows only with the lanes
+// already written, and a CONSTANT index past them is reported as out of bounds
+// before the body is ever specialized with N=4:
+//   * lanes: `r = m[2]` after only `m[1]` was written -> "out of bounds
+//     access: index 2 on tuple `m` of size 2";
+//   * bits:  the read-modify-write of `matrix[2]#[3] = ...` after only row 1
+//     was written -> "index 2 on tuple `matrix` of size 2".
+// Both are in range for every N this template is called with (N=4). The
+// element is a sized `U4` (no generic width, no alias, no loop). The same
+// bodies with N-relative indices (`m[N-2]`) compile, and so do they with
+// `comptime const N = 4` in a non-generic mod or with a literal `[4]` dim.
+// The generics have NO default on purpose: the only specialization is the
+// caller's N=4, so there is no default N for which these indices are invalid.
+// (Through an alias element the array fails even with N-relative indices:
+// generic_dim_alias_array_bits.prp.)
+mod lanes<N>(a:U4) -> (q:U4@[0], r:U4@[0]) {
+  mut m:[N]U4 = 0
+  m[1] = a
+  q = m[1]
+  r = m[2]            // never written: keeps the `= 0` initializer
+}
+
+mod bits<N>(a:U4) -> (q:U4@[0], r:U4@[0]) {
+  mut matrix:[N]U4 = 0
+  matrix[1]#[2] = a#[0]
+  matrix[1]#[0] = a#[1]
+  matrix[2]#[3] = a#[2]
+  q = matrix[1]
+  r = matrix[2]
+}
+
+pub mod generic_dim_mut_array_lanes(a:U4) -> (lq:U4@[0], lr:U4@[0], bq:U4@[0], br:U4@[0]) {
+  const l = lanes<N=4>(a=a)
+  lq = l.q
+  lr = l.r
+  const b = bits<N=4>(a=a)
+  bq = b.q
+  br = b.r
+}
+
+test generic_dim_mut_array_lanes.values {
+  mut dut = generic_dim_mut_array_lanes
+  mut bad = 0
+  tick 16 {
+    dut.a = clock
+    step
+    const a0 = clock & 1
+    const a1 = (clock >> 1) & 1
+    const a2 = (clock >> 2) & 1
+    if dut.lq != clock or dut.lr != 0 { bad += 1 }
+    if dut.bq != ((a0 << 2) | a1) or dut.br != (a2 << 3) { bad += 1 }
+  }
+  assert(bad == 0, "every lane of a generic-dim mut array, written or not")
+}

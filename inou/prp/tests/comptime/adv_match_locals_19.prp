@@ -19,5 +19,7 @@ match const c = chosen(); c {
   else           { cassert(false) }
 }
 cassert(idx == 1)
-cassert(c == nil)
+// The initializer is out of scope; this is a fresh binding.
+const c = 7
+cassert(c == 7)
 cassert(chosen() == Color.Green)

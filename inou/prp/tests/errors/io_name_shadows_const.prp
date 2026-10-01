@@ -1,0 +1,16 @@
+/*
+:name: io_name_shadows_const
+:type: error
+:error: variable shadowing: 'W' is already declared in an enclosing scope
+:help: rename the input
+*/
+
+// User ruling 2026-09-28 (35): a lambda INPUT named like a visible enclosing
+// file-scope const is shadowing, an error like a lambda-local `const W`
+// (errors/nested_lambda_const_shadow.prp). Before, the input silently hid the
+// file const inside the body.
+const W = 4
+
+pub mod io_name_shadows_const(W:U8) -> (o:U8@[0]) {  // locate_error_here
+  o = W
+}

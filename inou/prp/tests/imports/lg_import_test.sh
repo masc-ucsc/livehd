@@ -22,7 +22,7 @@ endmodule
 EOF
 cat > "$W/lg_use.prp" <<'EOF'
 const addsub = import("lg:addsub")
-mod lg_use_top(a:u8, b:u8) -> (o:u9@[0]) {
+mod lg_use_top(a:U8, b:U8) -> (o:U9@[0]) {
   o = addsub(a=a, b=b).add
 }
 EOF
@@ -33,18 +33,18 @@ endmodule
 EOF
 cat > "$W/notfound.prp" <<'EOF'
 const nope = import("lg:does_not_exist")
-mod nf_top(a:u8) -> (o:u8@[0]) { o = nope(a=a).z }
+mod nf_top(a:U8) -> (o:U8@[0]) { o = nope(a=a).z }
 EOF
 cat > "$W/badport.prp" <<'EOF'
 const addsub = import("lg:addsub")
-mod bp_top(a:u8, b:u8) -> (o:u9@[0]) { o = addsub(a=a, zzz=b).add }
+mod bp_top(a:U8, b:U8) -> (o:U9@[0]) { o = addsub(a=a, zzz=b).add }
 EOF
 cat > "$W/plib.prp" <<'EOF'
-pub mod prp_add::[lg="prp_add"](a:u8, b:u8) -> (s:u9@[0]) { s = a + b }
+pub mod prp_add::[lg="prp_add"](a:U8, b:U8) -> (s:U9@[0]) { s = a + b }
 EOF
 cat > "$W/prp_use.prp" <<'EOF'
 const prp_add = import("lg:plib.prp_add")
-mod prp_use_top(a:u8, b:u8) -> (o:u9@[0]) { o = prp_add(a=a, b=b).s }
+mod prp_use_top(a:U8, b:U8) -> (o:U9@[0]) { o = prp_add(a=a, b=b).s }
 EOF
 
 # ---- 1. slang producer: compile add_sub.v into an lgdb ----------------------

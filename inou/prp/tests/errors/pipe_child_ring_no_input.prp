@@ -1,0 +1,27 @@
+/*
+:name: pipe_child_ring_no_input
+:type: error
+:tolg: 1
+:error: ^(?!.*(combinational loop|lands at)).*mixes values at different cycles
+*/
+
+// A ring closed ONLY through a `pipe[1]` child's output, with no outside
+// input on it, has no consistent cycle: every trip around
+// `gr -> st.d -> st.q (+1) -> gr` lands one cycle later. It is not a
+// combinational loop (the pipe registers its output), so without
+// `::[timecheck=false]` (user ruling 2026-09-27) it is a cycle-mix TIMING
+// error, like errors/pipe_child_ring_cycle_mix.prp, where an outside input
+// makes the mix visible at a single cell. Here no cell sees two cycles: the
+// time-checker's cycle fixpoint never settles, and that is the error. The
+// `@[]` output declares no landing cycle, so nothing else would catch it.
+pipe[1] st(d:U4) -> (q:U4) {
+  q = d
+}
+
+pub mod top(req:U4) -> (g:U4@[], r:U4@[]) {
+  wire gr:U4 = nil
+  stage[1] m = st(d=gr)   // locate_error_here
+  gr = m ^ 0xF
+  g = gr
+  r = req
+}

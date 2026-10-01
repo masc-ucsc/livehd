@@ -3,42 +3,52 @@
 #include <algorithm>
 #include <regex>
 #include <string>
-#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "gtest/gtest.h"
 #include "lhd.hpp"
 #include "lhd_kernel_internal.hpp"
 
-// satopt runs only in the compile graph pipeline: on by default for synth and
-// lec compiling a Pyrope/Verilog SOURCE, off for every lg:/ln: input and every
-// other command; an explicit pass.satopt always wins. Mappers get no satopt
-// labels (they map what compile produced).
+// satopt is opt-in for every command. An explicit pass.satopt always wins;
+// mappers get no satopt labels (they map what compile produced).
+TEST(LhdOptions, NativeUsynMappingCapabilitiesAndSeparateOptions) {
+  lhd::Options opts;
+  EXPECT_TRUE(lhd::mapper_maps_cells(opts, "pass.usyn"));
+  opts.sets.emplace_back("pass.usyn.tmap", "none");
+  EXPECT_FALSE(lhd::mapper_maps_cells(opts, "pass.usyn"));
+  EXPECT_TRUE(lhd::mapper_maps_cells(opts, "pass.abc"));
+  opts.sets.emplace_back("pass.abc.flow", "resyn2");
+  Eprp_var::Eprp_dict labels;
+  lhd::merge_mapper_sets(opts, "pass.usyn", labels);
+  EXPECT_FALSE(labels.contains("flow"));
+  EXPECT_EQ(labels.at("tmap"), "none");
+  opts.sets.emplace_back("pass.usyn.tmap", "opt");
+  EXPECT_THROW(lhd::mapper_maps_cells(opts, "pass.usyn"), lhd::Lhd_error);
+}
+
 TEST(LhdOptions, SatoptCommandDefaultsAndExplicitOverrides) {
-  for (const auto& [command, subcommand, from_source] : std::vector<std::tuple<std::string, std::string, bool>>{
-           {"compile",       "",  true},
-           {    "sim",       "",  true},
-           { "formal", "verify",  true},
-           {    "lec",       "",  true},
-           {    "lec",       "", false},
-           {  "synth",       "",  true},
-           {  "synth",       "", false},
-           {   "pass",    "abc", false},
-           {   "pass",   "usyn", false}
+  for (const auto& [command, subcommand] : std::vector<std::pair<std::string, std::string>>{
+           {"compile",       ""},
+           {    "sim",       ""},
+           { "formal", "verify"},
+           {    "lec",       ""},
+           {  "synth",       ""},
+           {   "pass",    "abc"},
+           {   "pass",   "usyn"}
   }) {
     lhd::Options opts;
     opts.command = command;
     if (!subcommand.empty()) {
       opts.files.push_back(subcommand);
     }
-    SCOPED_TRACE(command + " " + subcommand + (from_source ? " source" : " ir"));
-    const bool by_default = from_source && (command == "synth" || command == "lec");
+    SCOPED_TRACE(command + " " + subcommand);
     EXPECT_FALSE(lhd::satopt_setting(opts).has_value());
-    EXPECT_EQ(lhd::satopt_during_compile(opts, from_source), by_default);
+    EXPECT_FALSE(lhd::satopt_during_compile(opts));
     for (const auto value : {"false", "true"}) {
       opts.sets.emplace_back("pass.satopt", value);
       EXPECT_EQ(lhd::satopt_setting(opts), std::string_view{value} == "true");
-      EXPECT_EQ(lhd::satopt_during_compile(opts, from_source), std::string_view{value} == "true");
+      EXPECT_EQ(lhd::satopt_during_compile(opts), std::string_view{value} == "true");
       if (command == "synth" || command == "pass") {
         Eprp_var::Eprp_dict labels;
         lhd::merge_mapper_sets(opts, subcommand == "usyn" ? "pass.usyn" : "pass.abc", labels);

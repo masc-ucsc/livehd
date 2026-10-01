@@ -1,0 +1,20 @@
+/*
+:name: clock_pin_without_ref
+:type: lgraph compile
+*/
+
+// Docs 04b-attributes / 07-typesystem (ruling 52): a `*_pin` attribute names
+// its wire WITHOUT `ref` (`clock_pin=clk2`). This file was an error fixture
+// while ruling 9 made `*_pin` without `ref` an error; the docs now spell pins
+// without `ref`, so it compiles and clocks `r` by `clk2`. Two `Clock` inputs
+// leave no implicit clock, so a dropped `clock_pin` would be the
+// clock-ambiguous error, not a silent clock swap.
+
+pub mod clock_pin_without_ref(clk1:Clock, clk2:Clock, d:U4) -> (q:U4@[1], p:U4@[1]) {
+  reg r:U4:[clock_pin=clk2] = 5
+  reg s:U4:[clock_pin=clk1] = 5
+  r = d
+  s = d
+  q = r
+  p = s
+}

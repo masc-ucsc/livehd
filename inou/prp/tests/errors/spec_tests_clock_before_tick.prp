@@ -1,0 +1,26 @@
+/*
+:name: spec_tests_clock_before_tick
+:type: error
+:error: clock
+*/
+// Spec (qa.md appendix section 8): "`clock` outside a tick block is undefined
+// unless declared." docs 05b "Running cycles (tick)": "Outside a `tick`
+// block, `clock` is undefined unless the test declares it."
+//
+// Rule pinned: a test that reads `clock` BEFORE its `tick` block (and never
+// declares a `clock`) reads an undefined name -- a compile error at the read
+// (ruling 24: an undefined read is a direct compile error, never nil).
+
+mod spec_cbt_pass(a:U8) -> (o:U8@[0]) {
+  o = a
+}
+
+test spec_cbt.before {
+  mut d = spec_cbt_pass
+  d.a = clock            // locate_error_here
+  tick 2 {
+    d.a = 1
+    step
+  }
+  assert(d.o == 1)
+}

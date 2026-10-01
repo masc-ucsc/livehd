@@ -11,12 +11,12 @@
 // comparators exercise the subtractor path of the same adder framework. The
 // shifts (`shc` constant amount, `shv` runtime amount) exercise the
 // combinational SHL bit-blast (constant re-wiring + runtime barrel shifter).
-mod abc_arith(a:u4, b:u4, c:u4, d:u2) -> (sum:u5@[0], sum3:u6@[0], lt:u1@[0], gt:u1@[0], eq:u1@[0], shc:u7@[0], shv:u7@[0]) {
+mod abc_arith(a:U4, b:U4, c:U4, d:U2) -> (sum:U5@[0], sum3:U6@[0], lt:U1@[0], gt:U1@[0], eq:U1@[0], shc:U7@[0], shv:U7@[0]) {
   sum  = a + b
   sum3 = a + b + c
-  lt   = a < b
-  gt   = a > b
-  eq   = a == b
+  lt   = U1(a < b)
+  gt   = U1(a > b)
+  eq   = U1(a == b)
   shc  = a << 3
   shv  = a << d
 }

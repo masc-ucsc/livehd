@@ -1,0 +1,23 @@
+/*
+:name: comb_arg_wider_than_param
+:type: error
+:tolg: 1
+:error: argument .a. \(range \[0, 65535\]\) in call to .low4. may not fit its declared range \[0, 15\]
+:help: an argument never narrows implicitly
+*/
+// User ruling 2026-09-27 (lhdtrack suggestions 1.1-d): an argument whose
+// type or range may not fit the parameter's declared type is a compile error,
+// for `comb` and `mod`, generic or not -- the same rule as an overflowing
+// assignment (docs 04b "wrap and sat modifier", docs 06 "Argument types").
+// The caller narrows on purpose: `low4(a=x#[0..<4])`.
+//
+// Today this compiles silently and the inlined comb passes all 16 bits of `x`
+// through its `U4` parameter (and its `U4` output): 0x1234 comes back as
+// 0x1234, while the standalone Verilog `module low4` has a 4-bit port.
+comb low4(a:U4) -> (o:U4) {
+  o = a
+}
+
+pub mod comb_arg_wider_than_param(x:U16) -> (y:U16@[0]) {
+  y = low4(a=x)   // locate_error_here
+}

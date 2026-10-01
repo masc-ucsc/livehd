@@ -1,0 +1,9 @@
+/*
+:name: spec_types_cast_string
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// SPEC docs 04-variables "String": "Use `String(value)` to render an integer as decimal text."
+const value = 123
+cassert(String(value) == "123")

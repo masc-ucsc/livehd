@@ -1,0 +1,27 @@
+/*
+:name: spec_memory_generic_ram
+:type: equiv
+:verilog_top: spec_memory_generic_ram
+:pyrope_top: spec_memory_generic_ram
+*/
+// SPEC (qa.md appendix section 5): "Generic-width arrays (`reg r:[N]Unsigned(bits=W)`,
+// array ports of generics) ... are supported".
+// SPEC (docs 08-memories.md): "The entry type and size may be generic, and so may
+// array ports. The index width of an `N`-entry memory is `std.clog2(N)`" -- the
+// `ram<N=16, W=8>` example below is copied VERBATIM from the docs.
+// Rule encoded here: a `reg mem:[N]Unsigned(bits=W)` memory with a
+// `std.clog2(N)`-wide address, specialized at the defaults and at <N=8, W=4>.
+// `= 0` gives a parallel reset (docs: "restored to its initializer in one cycle").
+mod ram<N=16, W=8>(addr:Unsigned(bits=std.clog2(N)), din:Unsigned(bits=W), we:Bool) -> (dout:Unsigned(bits=W)@[0]) {
+  reg mem:[N]Unsigned(bits=W) = 0
+
+  dout = mem[addr]            // read before the write: old contents
+  if we { mem[addr] = din }
+}
+
+pub mod spec_memory_generic_ram(clk:Clock, rst:Reset, a16:U4, d8:U8, we1:Bool, a8:U3, d4:U4, we2:Bool) -> (q8:U8@[0], q4:U4@[0]) {
+  const r1 = ram(addr=a16, din=d8, we=we1)
+  const r2 = ram<N=8, W=4>(addr=a8, din=d4, we=we2)
+  q8 = r1.dout
+  q4 = r2.dout
+}

@@ -7,7 +7,7 @@
 // BUG (read-before-write) variant without a loop: the same rule applies to a
 // plain `comb` body. `res <<= 4` reads `res` before it is ever written, and an
 // arithmetic/shift op on a nil (uninitialized) operand is a compile error.
-comb f()->(res:unsigned) {
+comb f()->(res:Unsigned) {
   res <<= 4
   res  |= 3
 }

@@ -189,6 +189,14 @@ struct coloring_info_t {
 };
 inline constexpr coloring_info_t coloring_info{};
 
+// Serialized simulation-only initialization program (core/sim_program.hpp),
+// stored on the module input node. It has no circuit-net references.
+struct simulation_init_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr simulation_init_t simulation_init{};
+
 // Newline-separated, sorted names of callee definitions whose bodies
 // pass.legalize dissolved into this graph while repairing a false hierarchy
 // loop.  The compile cache reads the attribute back from the serialized graph
@@ -200,6 +208,18 @@ struct legalize_inlined_t {
   using storage    = hhds::flat_storage;
 };
 inline constexpr legalize_inlined_t legalize_inlined{};
+
+// On a definition's input node: the combinational output -> input port reach
+// of the body lnast.tolg lowered (graph/port_reach.hpp, port_reach::stamp /
+// port_reach::stamped). Recorded once, when tolg finishes the body, and it
+// persists with it, so a caller's loop check reads the same summary whether
+// this body was just lowered or restored, already optimized, from the compile
+// cache (an optimization can drop a dependence the lowered body still has).
+struct comb_reach_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr comb_reach_t comb_reach{};
 
 // Per-node / per-pin structural-correspondence id (pass/semdiff, task
 // 2f-semdiff). Two corresponding nodes across a ref/impl pair share one id; a
@@ -369,7 +389,11 @@ inline constexpr Attr_kind attr_kind<hier_color_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<coloring_info_t> = Attr_kind::node;
 template <>
+inline constexpr Attr_kind attr_kind<simulation_init_t> = Attr_kind::node;
+template <>
 inline constexpr Attr_kind attr_kind<legalize_inlined_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<comb_reach_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<proven_t> = Attr_kind::node;
 template <>
@@ -415,7 +439,9 @@ inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
   X(native_comb_boundary)           \
   X(hier_color)                     \
   X(coloring_info)                  \
+  X(simulation_init)                \
   X(legalize_inlined)               \
+  X(comb_reach)                     \
   X(match)                          \
   X(proven)                         \
   X(runtime_check)                  \

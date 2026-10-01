@@ -1,0 +1,25 @@
+/*
+:name: spec_clock_test_const_clock
+:type: error
+:error: (Clock|clock).*constant
+*/
+// SPEC (clock lane): a test harness never feeds a constant to a `Clock` input.
+//   qa.md Appendix 6: "Test harnesses declare/pass a real Clock (no `clk=1`)"
+//   docs 05b "Running cycles": "A harness never feeds a constant to a `Clock`
+//     input (`clk=1` is an error); it passes a real Clock such as the tick's
+//     `clock`."
+mod dut(clk:Clock, en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test dut.const_clock {
+  mut d = dut
+  tick 4 {
+    d.clk = true   // locate_error_here
+    d.en  = true
+    step
+  }
+  assert(d.q == 4)
+}

@@ -1,0 +1,10 @@
+/*
+:name: spec_lexical_str_escape_lbrace
+:type: error
+:error: invalid escape ..[{]
+*/
+// qa.md appendix 8: "`\{`, `\}` and every other `\c` are errors" (appendix 7:
+// "literal braces ONLY via `{{` / `}}`; `\{` and `\}` are NOT escapes").
+// docs 02-basics: `const bad6 = "I have \{num\}"  // error: not escapes`
+const num = 2
+const s = "I have \{num"   // locate_error_here

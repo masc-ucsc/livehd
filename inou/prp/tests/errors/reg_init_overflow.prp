@@ -1,0 +1,15 @@
+/*
+:name: reg_init_overflow
+:type: error
+:error: .m. \(value 20\) does not fit its declared range \[0, 15\]
+:help: widen the declared type
+*/
+
+// User ruling 16: a register's initial (reset) value is a write into its
+// declared type, like `mut m:U4 = 20` (an error). `reg m:U4 = 20` used to be
+// truncated to a reset value of 4 silently.
+pub mod reg_init_overflow(d:U4) -> (q:U4@[0]) {
+  reg m:U4 = 20   // locate_error_here
+  m = d
+  q = d
+}

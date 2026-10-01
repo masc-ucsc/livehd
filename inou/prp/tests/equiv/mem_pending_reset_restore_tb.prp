@@ -17,7 +17,7 @@ test mem_pending_reset_restore.sig {
     s = s * 6364136223846793005 + 1442695040888963407
     acc.i = s & 0x1
     s = s * 6364136223846793005 + 1442695040888963407
-    acc.we = s & 0x1
+    acc.we = Bool(s & 0x1)
     acc.reset = clock < 4
     step
     if clock >= 4 {

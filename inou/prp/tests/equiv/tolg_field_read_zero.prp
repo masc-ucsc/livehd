@@ -6,7 +6,7 @@
 */
 //
 // FIXED 2026-07-29 -- prp_writer DROPPED an array's type and contents.
-// The emitted Pyrope said `mut mem = 0`: both the `[2]u4` array type and the
+// The emitted Pyrope said `mut mem = 0`: both the `[2]U4` array type and the
 // `initial` block's element values were gone. tolg then met the runtime index
 // `mem[sel]` on a base that resolved to the scalar constant 0 and aborted with
 // "field/index read of '0' could not be resolved". 4 corpus files.
@@ -24,10 +24,10 @@
 // is_comptime_init, since moving a value-dependent init above its definition
 // would read an undefined name.
 //
-// Not array-specific and not slang-specific: a nested `mut t:u8 = 7` lost its
+// Not array-specific and not slang-specific: a nested `mut t:U8 = 7` lost its
 // width the same way, in Pyrope-source input too.
-pub comb tolg_field_read_zero::[timecheck=false](sel:u1, en:u1) -> (out:u4) {
-  mut mem:[2]u4 = (1, 2)
+pub comb tolg_field_read_zero::[timecheck=false](sel:U1, en:U1) -> (out:U4) {
+  mut mem:[2]U4 = (1, 2)
   out = 0
   if en != 0 {
     out = mem[sel]

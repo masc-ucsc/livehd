@@ -13,9 +13,9 @@ test reg_hold_empty_elif.sig {
   mut sig = 0
   tick 1000 {
     s = s * 6364136223846793005 + 1442695040888963407
-    acc.taken = s & 0x1
+    acc.taken = Bool(s & 0x1)
     s = s * 6364136223846793005 + 1442695040888963407
-    acc.stall = s & 0x1
+    acc.stall = Bool(s & 0x1)
     s = s * 6364136223846793005 + 1442695040888963407
     acc.tgt = s & 0xff
     s = s * 6364136223846793005 + 1442695040888963407

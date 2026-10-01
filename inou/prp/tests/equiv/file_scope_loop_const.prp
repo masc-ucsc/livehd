@@ -1,0 +1,52 @@
+/*
+:name: file_scope_loop_const
+:type: equiv
+:verilog_top: file_scope_loop_const
+:pyrope_top: file_scope_loop_const
+*/
+
+// Suggestions 2.3 row 4: a `comptime const` whose value a FILE-scope `mut`
+// computed under a `for` loop (FILE_INIT, a register reset value) or under an
+// `if` (FILE_XOR, a plain value), read inside a `mod`. Today this is a SILENT
+// miscompile (exit 0): prp2lnast's declaration-point capture for streamed
+// lambdas (capture_const_bindings_) records `mask = 0` / `pick = 1` and
+// ignores the writes made under the loop/if (conditional_depth_ > 0), so the
+// mod gets FILE_INIT = 0 and FILE_XOR = 1, while the file scope itself
+// (cassert below) sees the right values. The same loop INSIDE the mod body
+// (INIT, register `r`) folds correctly and stays as the control.
+comptime const N = 4
+
+mut mask = 0
+for row in 0..<N {
+  mask |= 1 << row
+}
+comptime const FILE_INIT = mask   // 0x0F
+
+mut pick = 1
+if N == 4 {
+  pick = 0x30
+}
+comptime const FILE_XOR = pick    // 0x30
+
+cassert(FILE_INIT == 0x0F)
+cassert(FILE_XOR == 0x30)
+
+pub mod file_scope_loop_const(rst:Reset, en:Bool, d:U8) -> (q:U8@[0], p:U8@[0], v:U8@[0]) {
+  mut acc = 0
+  for i in 0..<8 {
+    if i % 2 == 0 {
+      acc |= 1 << i
+    }
+  }
+  comptime const INIT = acc       // 0x55
+
+  reg r:U8:[reset_pin = rst] = INIT
+  reg s:U8:[reset_pin = rst] = FILE_INIT
+  if en {
+    r = d
+    s = d
+  }
+  q = r
+  p = s
+  v = d ^ FILE_XOR
+}

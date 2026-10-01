@@ -1,0 +1,35 @@
+/*
+:name: spec_clock_mint_reset_in_test
+:type: simulation
+*/
+// SPEC (clock lane): a module with registers and no Clock/Reset input gets
+// `clock:Clock` / `reset:Reset` MINTED, and a test drives the minted Reset
+// with a Bool expression (no cast).
+//   qa.md Appendix 6: "A module with registers and no `Clock` (or `Reset`) input
+//     gets one MINTED: `clock:Clock` / `reset:Reset`."
+//   qa.md Appendix 6: "a Bool expression is assignable/bindable to a Reset
+//     without a cast (`acc.reset = clock < 2`)."
+// The reset pulses at cycles 0,1 and again at 9 (a `clock < 2` folded as
+// always-true would hold the counter at 0 forever).
+pub mod spec_clock_mint_reset_in_test(en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_clock_mint_reset_in_test.minted {
+  mut t   = spec_clock_mint_reset_in_test
+  mut g   = 0
+  mut bad = 0
+  tick 14 {
+    const r = clock < 2 or clock == 9
+    t.reset = r
+    t.en    = true
+    if r { g = 0 } else { g += 1 }
+    step
+    if t.q != g { bad += 1 }
+  }
+  puts("minted: g={g} bad={bad}")
+  assert(bad == 0)
+  assert(g == 4)
+}

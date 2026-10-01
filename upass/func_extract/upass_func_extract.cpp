@@ -196,6 +196,15 @@ struct Lambda_extractor {
         dst->set_template(true);
         return;
       }
+      for (auto lvl = type_n; !lvl.is_invalid() && Lnast_ntype::is_comp_type_array(dst->get_type(lvl));) {
+        const auto elem = dst->get_first_child(lvl);
+        const auto dim  = elem.is_invalid() ? elem : dst->get_sibling_next(elem);
+        if (dim.is_invalid() || dst->get_name(dim) == "[]") {
+          dst->set_template(true);
+          return;
+        }
+        lvl = elem;
+      }
     }
   }
 
@@ -500,7 +509,16 @@ struct Lambda_extractor {
       move_to_parent();
       return;
     }
-    const auto func_kind = std::string(current_text());
+    const auto func_kind     = std::string(current_text());
+    // `::[timecheck=false]` on THIS lambda: prp2lnast hangs a marker const off
+    // the kind node (lambda_timecheck_false_marker there).
+    bool       timecheck_off = false;
+    if (lm->has_child()) {
+      const auto saved = lm->save_cursor();
+      move_to_child();
+      timecheck_off = Lnast_ntype::is_const(lm->current_type()) && current_text() == "__timecheck_false";
+      lm->restore_cursor(saved);
+    }
 
     // prp2lnast leaves a compact declaration/hash marker in the source-unit
     // wrapper after streaming the real body directly into a sibling Lnast.
@@ -528,10 +546,12 @@ struct Lambda_extractor {
     auto new_lnast = std::make_shared<Lnast>(extracted_name);
     new_lnast->set_lambda_kind(func_kind);
     if (const auto& file_ln = lm->get_lnast(); file_ln) {
-      // Carry HDL provenance (a v2prp `::[hdl]` unit, or any verilog-origin
-      // source) onto the extracted per-lambda Lnast so tolg's reg-timing treats
-      // its plain regs as always_ff state, not pyrope feedforward stages.
+      // Carry the source's Verilog origin, and the TIMING opt-out (this
+      // lambda's own `::[timecheck=false]`, or an enclosing one) onto the
+      // extracted per-lambda Lnast. The attribute relaxes timing only (user
+      // ruling 2026-09-28 (22)): it never makes a Pyrope lambda Verilog-origin.
       new_lnast->set_verilog_origin(file_ln->is_verilog_origin());
+      new_lnast->set_skip_timecheck(file_ln->get_skip_timecheck() || timecheck_off);
       for (const auto& p : file_ln->get_pub_list()) {
         if (p.name == func_name && !p.lg.empty()) {
           new_lnast->set_lg_name(p.lg);

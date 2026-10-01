@@ -1,0 +1,17 @@
+/*
+:name: spec_types_reserved_loop_var
+:type: error
+:error: reserved type word
+*/
+// SPEC qa.md appendix section 1: "`U<N>`/`S<N>`/`Unsigned`/`Signed`/`Bool`/`String`/`Clock`/`Reset` are RESERVED type
+// words: they cannot be declared as variable/port/parameter/field names; a variable with that spelling must be
+// backticked". Section 7: "Reserved `U<N>`/`S<N>` = `U`/`S` followed by ANY digit string (U0, U1333, U99999999),
+// reserved EVERYWHERE including after `.` (fields/attributes)."
+// Rule: a LOOP VARIABLE can not be named with a type word.
+pub comb spec_types_reserved_loop_var(a:U8) -> (o:U8) {
+  mut acc:U8 = 0
+  for S1 in 0..<3 {  // locate_error_here
+    wrap acc = acc + a
+  }
+  o = acc
+}

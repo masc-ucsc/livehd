@@ -1,0 +1,19 @@
+/*
+:name: spec_memory_initial_same_ok
+:type: equiv
+:verilog_top: spec_memory_initial_same_ok
+:pyrope_top: spec_memory_initial_same_ok
+*/
+// SPEC (docs 08-memories.md): "`initial=<contents>` (the packed contents, entry 0
+// in the low `bits`) is the same pin: next to an initializer it must spell the
+// same value" -- and the initializer "is the **reset value** of every entry, and
+// it is the power-on contents too".
+// Rule encoded here: `initial=0x0201` next to `= (1, 2)` spells the SAME value
+// (entry 0 = 1 in the low byte), so it compiles and is the reset/power-on value.
+pub mod spec_memory_initial_same_ok(clk:Clock, rst:Reset, we:Bool, a:U1, d:U8, ra:U1) -> (q:U8@[0]) {
+  reg mem:[2]U8:[initial=0x0201] = (1, 2)
+  q = mem[ra]
+  if we {
+    mem[a] = d
+  }
+}

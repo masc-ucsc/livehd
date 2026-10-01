@@ -5,7 +5,7 @@
 */
 
 // Same checked-cast rule for a RUNTIME operand: a u16 cannot provably fit a u8,
-// so `u8(a)` is a compile error — use `wrap`/`sat` to drop bits.
-comb cast_overflow_runtime(a:u16) -> (z:u8) {
-  z = u8(a)
+// so `U8(a)` is a compile error — use `wrap`/`sat` to drop bits.
+comb cast_overflow_runtime(a:U16) -> (z:U8) {
+  z = U8(a)
 }

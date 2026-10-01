@@ -4,7 +4,7 @@
 :warning: unused
 */
 // Reading a variable and discarding the value has no effect.
-comb foo(a:u8) -> (z:u8) {
+comb foo(a:U8) -> (z:U8) {
   a    // locate_warning_here  (bare read, value discarded)
   z = a
 }

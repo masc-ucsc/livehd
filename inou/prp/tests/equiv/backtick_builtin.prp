@@ -1,0 +1,11 @@
+/*
+:name: backtick_builtin
+:type: lec
+:lec_top: backtick_builtin
+:lec_set: formal.assume_check=false
+*/
+// Reference for the backtick_builtin group: the design spells out the a==3
+// case that _1 excludes with an escaped `` `assume` ``.
+pub mod backtick_builtin(a:U4) -> (y:U4@[0]) {
+  y = if a == 3 { 0 } else { a }
+}

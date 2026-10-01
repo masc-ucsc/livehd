@@ -11,7 +11,7 @@
 // layout by selecting fields as separate lanes. These two outputs prove that
 // dotted field lanes retain their DECLARED widths and that changing their
 // explicit order changes the packed layout.
-pub comb top(p:(hi:u4, lo:s3), c:u2) -> (zt:u9, zd:u9) {
+pub comb top(p:(hi:U4, lo:S3), c:U2) -> (zt:U9, zd:U9) {
   zt = (c, p.hi, p.lo)#[..]   // lo in [8:6], hi in [5:2]
   zd = (c, p.lo, p.hi)#[..]   // hi in [8:5], lo in [4:2]
 }

@@ -51,10 +51,10 @@ head -1 "$W/unused.txt" | grep -q '^/' && fail "unused entries must be cwd-relat
 #    the emits), so nothing is ever prunable -> empty list even for a file
 #    nothing imports.
 cat > "$W/used.prp" <<'EOF'
-comb used(a:u8) -> (z:u9) { z = a + 1 }
+comb used(a:U8) -> (z:U9) { z = a + 1 }
 EOF
 cat > "$W/extra.prp" <<'EOF'
-comb extra(a:u8) -> (z:u8) { z = a ^ 3 }
+comb extra(a:U8) -> (z:U8) { z = a ^ 3 }
 EOF
 "$LHD" compile "$W/used.prp" "$W/extra.prp" --unused-inputs "$W/unused_prp.txt" \
   --workdir "$W/w_prp" -q >/dev/null 2>&1 || fail "pyrope --unused-inputs compile failed"

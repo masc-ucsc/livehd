@@ -1,0 +1,15 @@
+/*
+:name: typed_local_dynamic_slice_wider
+:type: error
+:tolg: 1
+:error: `t` \(range \[0, 15\]\) may not fit its declared range \[0, 7\]
+:help: apply a wrap/saturate policy
+*/
+// The overflow rule for a runtime-positioned bit window: `x#[i..<(i+4)]` is
+// always four bits wide, so it may not fit `t:U3`. It used to compile silently
+// (the window's width was known to the lowering but not to the range check).
+pub mod typed_local_dynamic_slice_wider(x:U16, i:U3) -> (y:U16@[0]) {
+  mut t:U3 = 0
+  t = x#[i..<(i+4)]   // locate_error_here
+  y = t
+}

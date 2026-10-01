@@ -11,7 +11,7 @@ import signal
 import subprocess
 import sys
 
-from lec import run_lec, verdict as lec_verdict
+from lec import run_lec, final_verdict as final_lec_verdict, verdict as lec_verdict
 
 class PrpTest:
     """
@@ -264,7 +264,7 @@ class PrpRunner:
         # bazel-builds and runs them. Exit 0 = every assert held. No --workdir:
         # the generated bazel module then lands in an OS-temp dir (outside the
         # repo), so a later `bazel build //...` here never sweeps it.
-        cmd = [self.lhd, 'sim']
+        cmd = [self.lhd, 'sim', '--set', 'sim.jobs=2']
         cmd += test.params['files']
         return cmd
 
@@ -316,6 +316,13 @@ class PrpRunner:
         name = test.params['name']
         if not errors:
             print('{} - error - FAILED: expected a compile error, none was emitted'.format(name))
+            print(log.decode('utf-8', 'ignore'))
+            return 1
+        # A compile error exits non-zero CLEANLY in every build mode: an error
+        # followed by the kernel's crash banner is a compiler bug, even though the
+        # diagnostic reached the sink first.
+        if b'FATAL signal' in log:
+            print('{} - error - FAILED: the compiler crashed after reporting the error'.format(name))
             print(log.decode('utf-8', 'ignore'))
             return 1
 
@@ -455,6 +462,41 @@ class PrpRunner:
         return re.findall(r'^\s*module\s+\\?([^\s(]+)', text, re.M)
 
     @staticmethod
+    def _module_text(vpath, top):
+        # The text of module `top` (up to its `endmodule`), '' when absent.
+        try:
+            with open(vpath) as f:
+                text = f.read()
+        except OSError:
+            return ''
+        m = re.search(r'^\s*module\s+\\?' + re.escape(top) + r'[\s(#;]', text, re.M)
+        if not m:
+            return ''
+        end = text.find('endmodule', m.end())
+        return text[m.start():end if end >= 0 else len(text)]
+
+    @staticmethod
+    def _minted_clock_reset(impl, impl_top, gold, gold_top):
+        # (minted, sibling) when the generated `impl_top` has an input `clock`
+        # (`reset`) the golden never names, and also an input the golden DOES
+        # have whose name looks like a clock (reset): the Pyrope port was left
+        # data and the implicit one got minted beside it.
+        impl_txt = PrpRunner._module_text(impl, impl_top)
+        gold_txt = PrpRunner._module_text(gold, gold_top)
+        if not impl_txt or not gold_txt:
+            return None
+        head = impl_txt.split(');', 1)[0]
+        ins = re.findall(r'\binput\b(?:\s+(?:signed|wire|logic))*\s*(?:\[[^\]]*\]\s*)?\\?([A-Za-z_][\w$.]*)', head)
+        gold_ids = set(re.findall(r'[A-Za-z_][\w$]*', re.sub(r'//[^\n]*|/\*.*?\*/', ' ', gold_txt, flags=re.S)))
+        for minted, looks in (('clock', r'cl(oc)?k'), ('reset', r'(rst|reset)')):
+            if minted not in ins or minted in gold_ids:
+                continue
+            for other in ins:
+                if other != minted and other in gold_ids and re.search(looks, other, re.I):
+                    return (minted, other)
+        return None
+
+    @staticmethod
     def _verilog_top_module(vpath):
         # Name (unescaped) of the first module declared in a verilog file.
         mods = PrpRunner._verilog_modules(vpath)
@@ -531,31 +573,81 @@ class PrpRunner:
                 print('{} - equiv - FAILED: {} generated modules {}; set :pyrope_top:'.format(name, len(gen_mods), gen_mods))
                 return 1
 
+        # A MINTED `clock`/`reset` next to a clk/rst the golden also has is the
+        # one mistyping LEC cannot see: a Pyrope `clk:Bool` (not `:Clock`) is
+        # data, the module mints `clock`, and LEC's single time base proves the
+        # pair anyway. Clocks and resets bind BY TYPE (docs 04b), so flag it.
+        minted = self._minted_clock_reset(impl, pyrope_top, gold_abs, verilog_top)
+        if minted:
+            print('{} - equiv - FAILED: the Pyrope module MINTED `{}` while the golden has none, next to `{}`, '
+                  'which the golden has: type that port `:{}` (clocks and resets bind by type, docs 04b)'.format(
+                      name, minted[0], minted[1], 'Clock' if minted[0] == 'clock' else 'Reset'))
+            return 1
+
         # Every equivalence pair uses native Slang and the default LEC solver.
+        # A -bitfuzz netlist identical to the plain one leaves nothing new for
+        # lgcheck (it reads the two Verilog TEXTS and takes no bitfuzz flag):
+        # the plain target runs every yosys-side check on these same bytes, so
+        # this variant keeps only the fuzzed native proof.
+        plain_twin = self._bitfuzz_matches_plain(tmp_dir, test, impl, safe_name)
+        extra_sets = self._extra_sets(test)
+        if plain_twin:
+            extra_sets = self._without_setting(extra_sets, 'formal.solver')
         lec_cmd = [self.lhd, 'lec', '--impl', 'verilog:' + impl, '--ref', 'verilog:' + gold,
                    '--impl-top', pyrope_top, '--ref-top', verilog_top,
-                   '--workdir', os.path.join(odir, 'w_lec')] + self.lec_satopt_args() + self._extra_sets(test) + self.equiv_set_args()
+                   '--workdir', os.path.join(odir, 'w_lec')] + self.lec_satopt_args() + extra_sets + self.equiv_set_args()
         lec = run_lec(lec_cmd, cwd=tmp_dir, timeout=20)
         ltxt = lec.stdout.decode('utf-8', 'ignore')
+        # `:lec_expect: refuted` marks a MUTATED pair: the golden deliberately
+        # computes something else, and the claim is that both engines see it.
+        expect = (test.params.get('lec_expect') or 'proven').strip().lower()
+        if expect not in ('proven', 'refuted'):
+            print('{} - equiv - FAILED: :lec_expect: {} is not one of proven|refuted'.format(name, expect))
+            return 1
         # Hierarchical LEC may retain an intermediate collapsed-box UNKNOWN in
         # the successful flat retry's detail. Judge the final top-level line;
         # PASS(n) is a real bounded pass, not an inconclusive result.
-        lec_ok = lec_verdict(lec) == 'proven'
-        if not lec_ok:
-            print('{} - equiv - FAILED: lhd lec did not PROVE (our own corpus must be decidable by '
-                  'our own engine; verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
-            print(ltxt)
+        if expect == 'refuted':
+            lec_ok = lec.returncode == 10 and ' REFUTED ' in final_lec_verdict(ltxt)
+            if not lec_ok:
+                print('{} - equiv - FAILED: lhd lec did not REFUTE a pair marked :lec_expect: refuted '
+                      '(rc={}; verilog_top:{} pyrope_top:{})'.format(name, lec.returncode, verilog_top, pyrope_top))
+                print(ltxt)
+        else:
+            lec_ok = lec_verdict(lec) == 'proven'
+            if not lec_ok:
+                print('{} - equiv - FAILED: lhd lec did not PROVE (our own corpus must be decidable by '
+                      'our own engine; verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
+                print(ltxt)
 
         if not lec_ok:
             return 1
+
+        # `:equiv_lec_grep:` / `:equiv_lec_grep_not:` (repeatable) pin HOW this
+        # Verilog pair was proven. Their own names: the base `:lec_grep:` tags
+        # belong to the Pyrope-vs-Pyrope prp-lec groups (prplec.py).
+        for tag, want in (('equiv_lec_grep', True), ('equiv_lec_grep_not', False)):
+            for pat in (p for p in test.multi.get(tag, []) if p.strip()):
+                if bool(re.search(pat, ltxt)) != want:
+                    print('{} - equiv - FAILED: the lec output {} :{}: {}'.format(
+                        name, 'never matched' if want else 'matched', tag, pat))
+                    print(ltxt)
+                    return 1
 
         # The SECOND, independent opinion on the same pair (`:yosys_lec: false`
-        # opts a pair out). See run_yosys_lec.
-        if self.run_yosys_lec(test, impl, pyrope_top, gold_abs, verilog_top, odir):
+        # opts a pair out). See run_yosys_lec. Not twice: a pair whose `lhd lec`
+        # already ran lgcheck (`:set: formal.solver=lgyosys`, which must agree),
+        # or a -bitfuzz netlist the plain target already cross-checked.
+        if plain_twin:
+            print('{} - lgyosys - skipped (bitfuzz impl.v is byte-identical to the plain compile, '
+                  'whose target runs the same cross-check)'.format(name))
+        elif 'formal.solver=lgyosys' in self._extra_sets(test):
+            print('{} - lgyosys - skipped (formal.solver=lgyosys: lhd lec already ran lgcheck on this pair)'.format(name))
+        elif self.run_yosys_lec(test, impl, pyrope_top, gold_abs, verilog_top, odir, expect):
             return 1
 
-        print('{} - equiv - success (lhd lec; verilog_top:{} pyrope_top:{})'.format(
-            name, verilog_top, pyrope_top))
+        print('{} - equiv - success (lhd lec {}; verilog_top:{} pyrope_top:{})'.format(
+            name, expect, verilog_top, pyrope_top))
         return 0
 
     # ── the yosys/lgcheck cross-oracle (`lgyosys`) ───────────────────────────
@@ -591,8 +683,33 @@ class PrpRunner:
                 return os.path.abspath(lgcheck), os.path.abspath(cand)
         return os.path.abspath(lgcheck), None
 
-    def run_yosys_lec(self, test, impl, impl_top, gold, gold_top, odir):
-        """yosys `equiv` on (generated verilog, golden verilog). 1 only on REFUTED."""
+    def _bitfuzz_matches_plain(self, tmp_dir, test, impl, safe_name):
+        """-bitfuzz only: is this compile's impl.v byte-identical to the plain compile's?
+
+        The plain compile is redone here to PROVE it (a ~20 ms compile against a
+        yosys run of 0.2 s to the whole budget); a fuzzed netlist that differs
+        keeps every check.
+        """
+        yosys_leg = str(test.params.get('yosys_lec', 'true')).strip().lower() not in ('false', 'off', '0', 'no')
+        if not self.equiv_sets or not (yosys_leg or 'formal.solver=lgyosys' in self._extra_sets(test)):
+            return False  # nothing yosys-side to skip
+        fuzzed, self.equiv_sets = self.equiv_sets, []
+        try:
+            base_odir = os.path.join(tmp_dir, 'tmp_equiv_plain_' + safe_name)
+            base, _ = self._emit_combined_verilog(tmp_dir, self.lhd_equiv(test, base_odir), base_odir, safe_name, 'impl')
+        finally:
+            self.equiv_sets = fuzzed
+        if base is None:
+            return False
+        with open(base, 'rb') as a, open(impl, 'rb') as b:
+            return a.read() == b.read()
+
+    def run_yosys_lec(self, test, impl, impl_top, gold, gold_top, odir, expect='proven'):
+        """yosys `equiv` on (generated verilog, golden verilog). 1 only on a verdict against `expect`.
+
+        A `:lec_expect: refuted` pair fails only if yosys PROVES it: the native
+        lec refuted it, so a proof means one of the two engines is wrong.
+        """
         name = test.params['name']
         if str(test.params.get('yosys_lec', 'true')).strip().lower() in ('false', 'off', '0', 'no'):
             # An opted-out pair states WHY in its header (X-semantics the yosys
@@ -611,7 +728,7 @@ class PrpRunner:
         # by default: a pair this oracle cannot decide quickly it will not decide
         # at all, and the native proof above is the gate that must hold.
         try:
-            budget = max(1, int(str(test.params.get('yosys_lec_timeout', 10)).strip()))
+            budget = max(1, int(str(test.params.get('yosys_lec_timeout', 3)).strip()))
         except ValueError:
             print('{} - lgyosys - FAILED: :yosys_lec_timeout: must be an integer'.format(name))
             return 1
@@ -647,6 +764,15 @@ class PrpRunner:
         # strategy ran out of budget or the bounded miter found nothing),
         # 5 setup failure (a side yosys could not read, no yosys, ...), 124 a
         # killed run. Only 1 is a disproof.
+        if rc == 1 and expect == 'refuted':
+            print('{} - lgyosys - refuted (yosys equiv agrees)'.format(name))
+            return 0
+        if rc == 0 and expect == 'refuted':
+            print('{} - lgyosys - FAILED: yosys PROVED the pair the native lec REFUTED '
+                  '(impl_top:{} ref_top:{}); one of the two engines is wrong'.format(name, impl_top, gold_top))
+            print(text)
+            return 1
+
         if rc == 1:
             print('{} - lgyosys - FAILED: yosys REFUTED the pair the native lec PROVED '
                   '(impl_top:{} ref_top:{}); one of the two engines is wrong'.format(name, impl_top, gold_top))
@@ -879,7 +1005,7 @@ class PrpRunner:
         replay = test.params.get('verify_replay', '')
         if replay:
             tb = simfail_tests[0] if simfail_tests else os.path.join(tmp_dir, wd, 'simfail_missing.prp')
-            rcmd = [self.lhd, 'sim', test.params['files'][0], tb, '--workdir', wd + '_sim']
+            rcmd = [self.lhd, 'sim', test.params['files'][0], tb, '--workdir', wd + '_sim', '--set', 'sim.jobs=2']
             rproc = subprocess.Popen(rcmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             try:
                 rlog_b, _ = rproc.communicate()
@@ -1321,7 +1447,33 @@ class PrpRunner:
                                 label='comptime after format')
         return rc
 
+    def prebuild_ln_files(self, tmp_dir, test: PrpTest):
+        """`:ln_files: a.prp b.prp` — compile these units into an `ln:` dir
+        FIRST (their own `lhd compile --emit-dir ln:`), then hand the fixture's
+        compile that dir (`ln:<dir>`) instead of their sources. That is the
+        two-invocation import flow: a concrete `mod`/`pipe` comes back
+        PRE-ELABORATED (pass.upass reuses it as-is and resolves callers through
+        its manifest io_meta), which a same-invocation `:files:` list never
+        exercises."""
+        spec = test.params.get('ln_files')
+        if not spec:
+            return 0
+        ln_dir = self._scratch(test, 'lnlib', '_ln')
+        cmd = [self.lhd, 'compile'] + spec.split()
+        cmd += ['--emit-dir', 'ln:{}/'.format(ln_dir), '--workdir', self._scratch(test, 'lnlib'), '-q']
+        proc = subprocess.run(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        if proc.returncode != 0:
+            print('{} - ln_files - FAILED: building the ln: dir failed'.format(test.params['name']))
+            print(proc.stdout.decode('utf-8', 'ignore'))
+            return 1
+        test.params['files'] = test.params['files'] + ['ln:' + ln_dir]
+        return 0
+
     def run(self, tmp_dir, test: PrpTest):
+
+        rc = self.prebuild_ln_files(tmp_dir, test)
+        if rc:
+            return rc
 
         # KNOWN GAP (deliberately left as-is): with a multi-mode `:type:` (e.g.
         # `:type: parsing lnast comptime`) each mode ASSIGNS rc, so an earlier

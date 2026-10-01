@@ -11,9 +11,9 @@
 // `sa | 2'sb11` is -1. The literal-width convention marks the bitwise carrier
 // signed whenever an operand can be negative, so widening the selected arm to
 // the 16-bit output sign-extends instead of zero-filling it.
-pub comb signed_bitwise_mux_arm::[timecheck=false](c:u1, sa:s3, sb:s2) -> (y:u16) {
+pub comb signed_bitwise_mux_arm::[timecheck=false](c:U1, sa:S3, sb:S2) -> (y:U16) {
   y = 0ub????????????????
-  mut _mux_1:s16 = if c != 0 { sa#[0..=2]#sext[0..=2]#[0..=15]#sext[0..=15] } else { sb#[0..=1]#sext[0..=1]#[0..=15]#sext[0..=15] }
-  mut _mux_2:s16 = if c != 0 { (sa#[0..=2]#sext[0..=2] | (-1))#[0..=15]#sext[0..=15] } else { _mux_1#[0..=15]#sext[0..=15] }
+  mut _mux_1:S16 = if c != 0 { sa#[0..=2]#sext[0..=2]#[0..=15]#sext[0..=15] } else { sb#[0..=1]#sext[0..=1]#[0..=15]#sext[0..=15] }
+  mut _mux_2:S16 = if c != 0 { (sa#[0..=2]#sext[0..=2] | (-1))#[0..=15]#sext[0..=15] } else { _mux_1#[0..=15]#sext[0..=15] }
   y = _mux_2#[0..=15]
 }

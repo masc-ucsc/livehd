@@ -1,0 +1,72 @@
+/*
+:name: reg_nested_named_tuple_reset
+:type: equiv
+:verilog_top: reg_nested_named_tuple_reset
+:pyrope_top: reg_nested_named_tuple_reset
+*/
+// A register of a NESTED tuple type resets EVERY leaf field to its initializer.
+// With a named type (`reg st:T = (a=1, n=(x=5, y=2))`, `type T = (a:U4, n:In)`)
+// only `st.a` got its reset value and `st.n.x`/`st.n.y` silently had none:
+// the initializer's nested entry `n=(..)` never matched the split's dotted
+// leaves `n.x`/`n.y`. The inline anonymous spelling of the same shape was
+// refused ("initializer names unknown field `n`"), and a positional nested
+// initializer was refused as having too few entries.
+//
+// * `st`: named type, named nested initializer.
+// * `sp`: named type, positional nested initializer.
+// * `su`: inline anonymous nested type.
+// * `sd`: three levels, the middle one a named type.
+// * `sc`: a nested field initialized from a typed tuple constant.
+// * `sn`: dotted keys (`n.x=12`, docs 03-bundle "Dotted Field Expansion").
+// * `sf`: inline anonymous nested type, flat positional initializer (one
+//   entry per leaf).
+// The golden spells each leaf register with its Pyrope field name.
+type In   = (x:U4, y:U2)
+type T    = (a:U4, n:In)
+type Deep = (k:U3, t:T)
+
+pub mod reg_nested_named_tuple_reset(we:Bool, v:U4) -> (sa:U4@[0], sx:U4@[0], sy:U2@[0], pa:U4@[0], px:U4@[0], py:U2@[0], ua:U4@[0], ux:U4@[0], uy:U2@[0], dk:U3@[0], da:U4@[0], dx:U4@[0], dy:U2@[0], cx:U4@[0], cy:U2@[0], na:U4@[0], nx:U4@[0], ny:U2@[0], fa:U4@[0], fx:U4@[0], fy:U2@[0]) {
+  const inner:In = (x=11, y=3)
+  reg st:T                          = (a=1, n=(x=5, y=2))
+  reg sp:T                          = (6, (3, 1))
+  reg su:(a:U4, n:(x:U4, y:U2))     = (a=2, n=(x=9, y=3))
+  reg sd:Deep                       = (k=4, t=(a=7, n=(x=10, y=1)))
+  reg sc:T                          = (a=0, n=inner)
+  reg sn:T                          = (a=3, n.x=12, n.y=1)
+  reg sf:(a:U4, n:(x:U4, y:U2))     = (5, 8, 2)
+
+  sa = st.a
+  sx = st.n.x
+  sy = st.n.y
+  pa = sp.a
+  px = sp.n.x
+  py = sp.n.y
+  ua = su.a
+  ux = su.n.x
+  uy = su.n.y
+  dk = sd.k
+  da = sd.t.a
+  dx = sd.t.n.x
+  dy = sd.t.n.y
+  cx = sc.n.x
+  cy = sc.n.y
+  na = sn.a
+  nx = sn.n.x
+  ny = sn.n.y
+  fa = sf.a
+  fx = sf.n.x
+  fy = sf.n.y
+
+  if we {
+    st.n.x   = v
+    st.n.y   = v#[0..<2]
+    sp.a     = v
+    sp.n.y   = v#[2..<4]
+    su.n.x   = v
+    sd.k     = v#[0..<3]
+    sd.t.n.x = v
+    sc.n.y   = v#[1..<3]
+    sn.n.y   = v#[2..<4]
+    sf.n.x   = v
+  }
+}

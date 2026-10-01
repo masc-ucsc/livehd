@@ -14,7 +14,7 @@
 // exactly one graph per module.
 const Gen = import("lib_generic_default.lib_generic_default")
 
-pub mod generic_default_import(a:u8) -> (y:u8@[]) {
+pub mod generic_default_import(a:U8) -> (y:U8@[]) {
   mut i = Gen::[name=i](a = a)
   y = i.y
 }

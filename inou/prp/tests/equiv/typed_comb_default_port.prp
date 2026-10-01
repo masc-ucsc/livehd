@@ -1,0 +1,16 @@
+/*
+:name: typed_comb_default_port
+:type: equiv
+:verilog_top: add_dflt
+:pyrope_top: add_dflt
+*/
+// User ruling 2026-09-27 (lhdtrack suggestions 4.5b clarification): only a comb
+// with an UNTYPED input (or generics) is a template. A FULLY TYPED comb with a
+// defaulted input stays a normal unit -- its own module, usable as the top --
+// and `b` is a real INPUT PORT: the default applies only at a call site that
+// omits `b` (sim/typed_comb_default_override.prp covers both call shapes).
+//
+// It used to lose the port: the unit's own walk folded the body-prologue
+// default `b = 3` into `r = a + 3`, so the emitted `module add_dflt` never
+// read `b` (and every inlined caller that provided `b` got `a + 3` too).
+comb add_dflt(a:U8, b:U8=3) -> (r:U9) { r = a + b }

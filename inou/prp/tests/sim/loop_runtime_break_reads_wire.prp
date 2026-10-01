@@ -1,0 +1,45 @@
+/*
+:name: loop_runtime_break_reads_wire
+:type: simulation
+:expect_instances: u_loop*=1
+*/
+
+// User ruling 2026-09-27 (ruling 5): a loop body may READ a `wire`, and such a
+// loop is unrolled -- except when a RUNTIME `break`/`continue` leaves it no
+// unrolled form (unroll_for routes it to the rolled form whatever
+// compile.unroll says). The read must stay legal there too, so the loop keeps
+// rolling with the wire as an ordinary loop input (`u_loop*=1`). Refusing to
+// roll it failed with the misleading
+//   `break` under a runtime condition inside a comptime loop is not supported
+// while the same loop reading a hoisted `const wc = w` compiled.
+// `w` is driven AFTER the loop, so the read is position independent.
+pub mod loop_runtime_break_reads_wire(stop:U8, a:U4) -> (total:U12@[0]) {
+  wire w:U4 = nil
+  mut acc:U12 = 0
+  for i in 0..<8 {
+    if stop#[i] { break }
+    acc = acc + w
+  }
+  w = a
+  total = acc
+}
+
+test loop_runtime_break_reads_wire.values {
+  mut x    = loop_runtime_break_reads_wire
+  mut seen = 0
+  mut bad  = 0
+  tick 18 {
+    // bit k of stop is the lowest set bit (none when k == 8), so the loop adds
+    // `a` exactly k times
+    const k       = clock % 9
+    const sv:U8   = ((1 << k) | ((clock * 91) << (k + 1))) & 0xFF
+    const av:U4   = (clock * 7 + 3) & 0xF
+    x.stop = sv
+    x.a    = av
+    step
+    seen += 1
+    if x.total != av * k { bad += 1 }
+  }
+  assert(seen == 18, "the comparisons ran")
+  assert(bad == 0, "every iteration before the break reads the wire driven after the loop")
+}

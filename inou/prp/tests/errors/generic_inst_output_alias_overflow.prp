@@ -1,0 +1,21 @@
+/*
+:name: generic_inst_output_alias_overflow
+:type: error
+:tolg: 1
+:error: .y. \(range \[0, 255\]\) may not fit its declared range \[0, 15\]
+*/
+// Overflow-lane follow-up (user ruling 2026-09-27, 16): a GENERIC-width
+// instance output (`o:Unsigned(bits=N)`, N=8 at this call) read through a
+// local alias (`const o = c.o`) still carries the u8 range, so storing it into
+// the u4 output `y` is the may-overflow error the caller fixes with `wrap`.
+// Before, the specialized child's output read as unbounded and `y = o`
+// compiled silently, truncating in the emitted Verilog.
+mod pass_n<N>(a:Unsigned(bits=N)) -> (o:Unsigned(bits=N)@[0]) {
+  o = a
+}
+
+pub mod generic_inst_output_alias_overflow(x:U8) -> (y:U4@[0]) {
+  const c = pass_n<N=8>(a=x)
+  const o = c.o
+  y = o   // locate_error_here
+}

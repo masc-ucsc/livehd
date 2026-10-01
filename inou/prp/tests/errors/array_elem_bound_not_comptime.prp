@@ -1,0 +1,21 @@
+/*
+:name: array_elem_bound_not_comptime
+:type: error
+:error: integer type bound .* is not a compile-time value
+:help: literal, a .comptime const., or a generic parameter
+*/
+// lhdtrack suggestions.md 2.2 -- the ILLEGAL half of generic-width array
+// elements (the legal half is ../sim/generic_reg_array_elem.prp). An ARRAY
+// ELEMENT bound must be a compile-time value exactly like a scalar one
+// (../errors/type_bound_not_comptime.prp): here it is a RUNTIME input.
+//
+// Nested under `[2]` the bound was never desugared: prp2lnast only WARNED
+// `type-bound-not-comptime` and emitted an unbounded `prim_type_int(nil, 0)`
+// element, so the file compiled with exit 0 and no error at all -- while the
+// scalar `mut m:Unsigned(bits=w)` reports "integer type bound `...` of `m` is
+// not a compile-time value" on its declaration line.
+pub mod top(a:U4, w:U3) -> (q:U4@[0]) {
+  mut m:[2]Unsigned(bits=w) = 0 // locate_error_here
+  m[0] = a
+  q = m[0]
+}

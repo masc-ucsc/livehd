@@ -11,18 +11,18 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 SW="$W/slots"
 mkdir -p "$SW"
 cat > "$SW/top.prp" <<'EOF'
-pub comb top(a:u8, b:u8, c:u8) -> (x:u8, y:u8) {
-  wire p:u8 = a ^ b
-  wire q:u8 = p & c
-  wire r:u8 = q | a
-  wire s:u8 = r ^ b
+pub comb top(a:U8, b:U8, c:U8) -> (x:U8, y:U8) {
+  wire p:U8 = a ^ b
+  wire q:U8 = p & c
+  wire r:U8 = q | a
+  wire s:U8 = r ^ b
   x = s ^ c
-  wire t:u8 = a | c
-  wire u:u8 = t & b
-  wire v:u8 = u ^ c
+  wire t:U8 = a | c
+  wire u:U8 = t & b
+  wire v:U8 = u ^ c
   y = v ^ a
 }
-test top.check(expected:u8=94) {
+test top.check(expected:U8=94) {
   mut dut = top
   tick 2 {
     dut.a = 37
@@ -37,13 +37,13 @@ EOF
 slot_run() {
   local tag=$1 wd=$2 expected=$3
   shift 3
-  "$LHD" sim "$SW/top.prp" --workdir "$wd" --arg "expected=$expected" \
+  "$LHD" sim "$SW/top.prp" --workdir "$wd" "+expected=$expected" \
     --set sim.tune.profile=off --set sim.tune.live_words=1 "$@" >"$SW/$tag.log" 2>&1 \
     || { cat "$SW/$tag.log" >&2; fail "stable boundary allocation failed ($tag)"; }
 }
 slot_run cold "$SW/w" 94
 cp "$SW/w/sim/top.top.color-layout.txt" "$SW/before.layout"
-sed 's/wire r:u8 = q | a/wire r:u8 = (q | a) ^ (b \& c)/' "$SW/top.prp" > "$SW/top.new"
+sed 's/wire r:U8 = q | a/wire r:U8 = (q | a) ^ (b \& c)/' "$SW/top.prp" > "$SW/top.new"
 mv "$SW/top.new" "$SW/top.prp"
 slot_run edit "$SW/w" 4
 python3 - "$SW/before.layout" "$SW/w/sim/top.top.color-layout.txt" <<'PYCODE' || fail "live slot addresses moved"

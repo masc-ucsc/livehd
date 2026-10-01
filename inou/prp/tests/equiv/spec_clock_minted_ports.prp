@@ -1,0 +1,19 @@
+/*
+:name: spec_clock_minted_ports
+:type: equiv
+:verilog_top: spec_clock_minted_ports
+:pyrope_top: spec_clock_minted_ports
+*/
+// SPEC (clock lane): a module with registers and no `Clock`/`Reset` input gets
+// `clock:Clock` / `reset:Reset` MINTED (the emitted interface carries them by
+// those names); the minted reset is active-high (no `negreset`), and in
+// synthesis a Clock is a 1-bit signal.
+//   qa.md Q24 answer: "Mint clock:Clock/reset:Reset"
+//   qa.md Appendix 6: "A module with registers and no `Clock` (or `Reset`) input
+//     gets one MINTED: `clock:Clock` / `reset:Reset`." / "Clock: in
+//     synthesis/LEC a Clock is a 1-bit signal"
+pub mod spec_clock_minted_ports(en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 3
+  if en { wrap c = c + 1 }
+  q = c
+}

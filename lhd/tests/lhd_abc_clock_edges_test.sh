@@ -18,9 +18,9 @@ else
   echo "note: external-simulator leg skipped (set LHD_EXTERNAL_SIM=1)"
 fi
 cat > "$W/edges.prp" <<'PRP'
-pub mod edges::[timecheck=false](clk:u1, d:u3) -> (q:u3@[]) {
-  reg early:u3:[clock_pin=ref clk]
-  reg late:u3:[clock_pin=ref clk, posclk=false]
+pub mod edges::[timecheck=false](clk:Clock, d:U3) -> (q:U3@[]) {
+  reg early:U3:[clock_pin=clk]
+  reg late:U3:[clock_pin=clk, posclk=false]
   early = d
   if (early & 1) != 0 { late = d ^ 0ub111 }
   q = late ^ early

@@ -5,8 +5,8 @@
 :pyrope_top: top
 */
 
-pub mod top(clk:u1, request:bool) -> (now:bool@[], delayed:bool@[]) {
-  reg flags:(active:bool, delayed:bool) = nil
+pub mod top(clk:Clock, request:Bool) -> (now:Bool@[], delayed:Bool@[]) {
+  reg flags:(active:Bool, delayed:Bool) = nil
   flags.active = false
   flags.delayed = flags.active
   if request { flags.active = true }

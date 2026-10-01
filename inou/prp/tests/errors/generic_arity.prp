@@ -13,4 +13,4 @@
 // error, exercised in errors/generic_unnamed.prp.)
 
 comb two<T1,T2>(a:T1, b:T2) -> (c:T1) { c = a }
-cassert(two<T1=signed>(a=7, b="x") == 7)
+cassert(two<T1=Signed>(a=7, b="x") == 7)

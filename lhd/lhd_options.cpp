@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "lhd.hpp"
+#include "str_tools.hpp"
 
 namespace lhd {
 
@@ -514,7 +515,8 @@ Options parse_args(int argc, char** argv) {
       opts.ref_kind = tp.kind;
       opts.ref_path = tp.path;
     } else if (a == "--formal") {  // formal verify / lec: fnmatch glob over formal-block dotted names
-      opts.formal_filter = need_value(a, i, argc, argv);
+      // Block names are canonical (`cnt`.`bounded` == cnt.bounded), so is the glob.
+      opts.formal_filter = str_tools::canonical_escaped_path(need_value(a, i, argc, argv));
     } else if (a == "--impl-top") {
       opts.impl_top = need_value(a, i, argc, argv);
     } else if (a == "--ref-top") {
@@ -552,7 +554,7 @@ Options parse_args(int argc, char** argv) {
                         std::format("--arg expects key=value, got '{}'", v),
                         "e.g. `lhd sim foo.prp foo.bar --arg max_cycles=30`"};
       }
-      opts.sim_args.emplace_back(v.substr(0, eq), v.substr(eq + 1));
+      opts.sim_plusargs.emplace_back("+" + v);
     } else if (a == "--restart-cycle") {  // `sim`: resume from the nearest checkpoint <= N
       opts.sim_restart_cycle = parse_nonneg(a, need_value(a, i, argc, argv));
     } else if (a == "--vcd-from") {  // `sim`: trace VCD starting at cycle N (restart to N first)
@@ -601,6 +603,12 @@ Options parse_args(int argc, char** argv) {
       opts.fmt_inplace = true;
     } else if (a == "-o" || a == "--output") {  // `pyrope fmt`: write to a file instead of stdout
       opts.fmt_output = need_value(a, i, argc, argv);
+    } else if (a == "--mode") {  // `pyrope fmt`: layout mode
+      const auto v = std::string{need_value(a, i, argc, argv)};
+      if (v != "ai" && v != "human") {
+        throw Lhd_error{"usage", std::format("--mode expects ai or human, got '{}'", v), ""};
+      }
+      opts.fmt_human = v == "human";
     } else if (a == "--indent" || a == "--width") {  // `pyrope fmt`: indent size / wrap column
       auto   v        = std::string{need_value(a, i, argc, argv)};
       size_t consumed = 0;
@@ -643,6 +651,11 @@ Options parse_args(int argc, char** argv) {
       opts.fmt_verify = true;
     } else if (a == "-h" || a == "--help") {
       want_help = true;  // resolved after the loop, once the command word is known
+    } else if (opts.command == "sim" && a.starts_with("+")) {
+      if (a.size() == 1 || a[1] == '=') {
+        throw Lhd_error{"usage", "simulation arguments require +name or +name=value", "e.g. +cycles=10000000"};
+      }
+      opts.sim_plusargs.emplace_back(a);
     } else if (!a.empty() && a[0] == '-') {
       throw Lhd_error{"usage",
                       std::format("unknown option '{}'", a),

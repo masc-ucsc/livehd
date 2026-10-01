@@ -2,8 +2,8 @@
 // A low mask that covers the full magnitude of an unsigned computed value is
 // an identity, even though the LGraph carrier includes one extra sign bit.
 
-pub comb setmask_identity(a:u95, b:u95) -> (y:u95) {
-  mut packed:u95 = 0
+pub comb setmask_identity(a:U95, b:U95) -> (y:U95) {
+  mut packed:U95 = 0
   packed#[0..=94] = a | b
   y = packed
 }
@@ -11,12 +11,12 @@ pub comb setmask_identity(a:u95, b:u95) -> (y:u95) {
 // These survive cprop intentionally, so cgen_sim must lower their known
 // contiguous masks directly to HLOP's range operations (without constructing
 // the 128-bit mask at runtime).
-pub comb setmask_ranges(base:u128, value:u32) -> (written:u128, cleared:u128) {
-  mut w:u128 = base
+pub comb setmask_ranges(base:U128, value:U32) -> (written:U128, cleared:U128) {
+  mut w:U128 = base
   w#[64..=95] = value
   written = w
 
-  mut c:u128 = base
+  mut c:U128 = base
   c#[64..=95] = 0
   cleared = c
 }

@@ -1,0 +1,16 @@
+/*
+:name: spec_reg_bitslice_lands_at_1_decl0
+:type: error
+:tolg: 1
+:error: 'q' in .* lands at cycle\(s\) \(1,1\) but \(0,0\) is declared
+*/
+// SPEC (clock lane): a body register written only through a bit slice lands
+// one cycle after its inputs, so declaring its reader @[0] is an error (the
+// passing twin is pyrope/spec_reg_bitslice_lands_at_1.prp).
+//   ruling 83 (qa Q28): "A reg written only through a bit slice landing at
+//     @[0] is a BUG."
+pub mod spec_reg_bitslice_lands_at_1_decl0(clk:Clock, x:U4) -> (q:U8@[0]) {
+  reg r:U8 = 0   // locate_error_here
+  r#[0..<4] = x
+  q = r
+}

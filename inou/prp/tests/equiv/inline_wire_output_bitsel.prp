@@ -21,13 +21,13 @@
 //   e  folded to the constant 1 with NO diagnostic at all.
 // In minion that was `ex_dcache_req.addr` (every dcache request address) and
 // `addr_msb_err`.
-comb sub_alu(in1:u64, in2:u64) -> (out:u64, adder_out:u64) {
-  wire adder_out:u64
+comb sub_alu(in1:U64, in2:U64) -> (out:U64, adder_out:U64) {
+  wire adder_out:U64
   adder_out = (in1 + in2)#[0..=63]
   out = in1 ^ in2
 }
 
-pub comb inline_wire_output_bitsel(a:u64, b:u64) -> (x:u48, e:u1, y:u64) {
+pub comb inline_wire_output_bitsel(a:U64, b:U64) -> (x:U48, e:U1, y:U64) {
   const alu = sub_alu(in1 = a, in2 = b)
   x = alu.adder_out#[0..=47]
   e = 0

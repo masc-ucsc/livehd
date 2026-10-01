@@ -20,11 +20,11 @@
 // producing a misleading `combinational-loop` error instead of a real
 // diagnostic (2f-latch M0 replaces the diagnostic, M5 implements latch sim;
 // tracked by tests/fixme/latch_sim_hold.prp and friends).
-pub mod mixed8(clk:bool, en:bool, d:u8) -> (q:u8@[1]) {
-  reg l:u8:[latch=true]
-  reg f:u8
+pub mod mixed8(clk:Clock, en:Bool, d:U8) -> (q:U8@[1]) {
+  reg l:U8:[latch=true]
+  reg f:U8
   q = f     // f is written UNCONDITIONALLY below, so it classifies as a
-  if en {   // pipeline stage and its read lands at @[1] (hence q:u8@[1])
+  if en {   // pipeline stage and its read lands at @[1] (hence q:U8@[1])
     l = d
   }
   f = l

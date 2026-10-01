@@ -1,0 +1,18 @@
+/*
+:name: spec_calls_splice_unnamed
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// qa.md Appendix §8: "Splice `x = (...foo, ...bar)` concatenates: unnamed ++
+// unnamed appends".
+// docs 03-bundle.md: `assert((...p, ...q) == (1,2,3,4))  // unnamed splices
+// append in order`, `assert((...p, 5) == (1,2,5))`.
+
+const p = (1, 2)
+const q = (3, 4)
+cassert((...p, ...q) == (1, 2, 3, 4))
+cassert((...p, 5) == (1, 2, 5))
+const pq = (...q, ...p)
+cassert(pq[0] == 3 and pq[3] == 2)

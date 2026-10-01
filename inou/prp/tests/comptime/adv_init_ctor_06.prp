@@ -6,24 +6,24 @@
 */
 
 // Overloaded init dispatched by argument KIND (bool vs int). An int actual
-// must skip the `b:bool` overload and bind init_from_int. Per docs
+// must skip the `b:Bool` overload and bind init_from_int. Per docs
 // (07b-structtype.md coercion polymorphism + 06-functions overload rules),
-// the bool overload's `b:bool` param rejects an int, so `= 99` -> init_from_int.
+// the bool overload's `b:Bool` param rejects an int, so `= 99` -> init_from_int.
 // Dispatch runs the per-arg kind/range fit (select_init_overload delegates to
-// signature_matches), so the int skips the `b:bool` overload.
+// signature_matches), so the int skips the `b:Bool` overload.
 
-comb init_from_bool(ref self, b:bool) {
+comb init_from_bool(ref self, b:Bool) {
   self.tag = 1
   self.kind = "bool"
 }
-comb init_from_int(ref self, n:signed) {
+comb init_from_int(ref self, n:Signed) {
   self.tag = n
   self.kind = "int"
 }
 
 type Cell = (
-  mut tag:signed = nil,
-  mut kind:string = "",
+  mut tag:Signed = nil,
+  mut kind:String = "",
   const init = [init_from_bool, init_from_int]
 )
 

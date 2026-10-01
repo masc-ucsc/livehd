@@ -1,0 +1,17 @@
+/*
+:name: clkrst_two_clocks_child_unbound
+:type: error
+:tolg: 1
+:error: 2 `Clock` inputs .*no implicit clock
+*/
+// A caller with two `Clock` inputs must bind every child `Clock` input: an
+// omitted one has no implicit clock to auto-wire.
+mod cnt(c:Clock, en:Bool) -> (q:U8@[0]) {
+  reg r:U8 = 0
+  if en { wrap r = r + 1 }
+  q = r
+}
+pub mod clkrst_two_clocks_child_unbound(ca:Clock, cb:Clock, en:Bool) -> (o:U8@[0]) {
+  const x = cnt(en=en)
+  o = x.q
+}

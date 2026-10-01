@@ -5,4 +5,4 @@
 :help: drop the
 */
 
-mod f(a:u8@[1]) -> (x:u8@[0]) { x = a }   // locate_error_here
+mod f(a:U8@[1]) -> (x:U8@[0]) { x = a }   // locate_error_here

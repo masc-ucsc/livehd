@@ -1,0 +1,27 @@
+/*
+:name: comb_default_side_effect
+:type: verify
+:top_module: comb_default_side_effect
+:verify_bound: 1
+:verify_proven: 1
+:verify_refuted: 0
+*/
+// A comb input DEFAULT (`b:U8 = chk(a=a)`) is evaluated only where a call
+// OMITS the argument. The comb's OWN module reads `b` from its input port, so
+// the default expression -- and its side effects, here the `assert` inside
+// `chk` -- is not part of that module. The default is lowered as a body
+// prologue that the unit keeps alive (a later inliner reads it), and tolg used
+// to lower that whole prologue into the standalone module too: `chk`'s
+// `a != 0` then became a check of this module, REFUTED at a=0 although nothing
+// in it uses the default. Only the comb's own assert may be checked here.
+// (`chk` takes an untyped input, so it is a template with no module of its
+// own: its assert exists only where the default is inlined.)
+comb chk(a) -> (r:U8) {
+  assert(a != 0, "the default expression's own check")
+  r = a
+}
+
+pub comb comb_default_side_effect(a:U8, b:U8 = chk(a=a)) -> (y:U8) {
+  y = a ^ b
+  assert((y ^ b) == a, "the comb's own check")
+}

@@ -1,0 +1,246 @@
+/*
+:name: bitnot_unsigned
+:type: simulation
+*/
+// User ruling 26 (2026-09-28): `~x` on an UNSIGNED-typed operand of known
+// width N -- a `UN`, an `Unsigned(bits=N)`, a bit slice `x#[..]`, a `UN(...)`
+// cast -- flips its N bits: `~x == (2^N - 1) - x`, a `UN` result (U1: 0<->1).
+// A signed (`SN`) operand keeps `~x == -x - 1`; an untyped runtime one is a
+// compile error (user ruling 2026-09-29 (44)), a comptime integer is -x - 1. The negated
+// bitwise forms (nand/nor/xnor, written `~(a & b)`, `~(a | b)`, `~(a ^ b)`)
+// flip the WIDER operand's width when both operands are unsigned; a signed or
+// untyped operand keeps `-v - 1`.
+//
+// Before the ruling every layer read `~x` as `-x - 1`: `~x` of a `U1` was
+// [-2, -1], so the lhdtrack CDC toggle `const f:U1 = if c { ~x } else { x }`
+// failed the overflow rule, and `~x == 1` was false for x == 0.
+
+mod bitnot_unsigned(x:U1, w:U3, r:U2, s:S4, a:U3, b:U5, big:U80, c:Bool)
+  -> ( nx:U1@[0], nw:U3@[0], nw8:U8@[0], nr:U1@[0], ncast:U8@[0], nq:U6@[0]
+     , nbig:U80@[0], ns:S4@[0], nt:S5@[0], nand_o:U5@[0], nor_o:U5@[0]
+     , xnor_o:U5@[0], nmix:S6@[0], fo:U1@[0], eqs:U3@[0]) {
+  nx     = ~x                  // U1: 0 <-> 1
+  nw     = ~w                  // 7 - w
+  nw8    = ~w                  // still 7 - w: a U3 flips its own 3 bits
+  nr     = ~r#[1]              // a one-bit slice is a U1
+  ncast  = ~U8(w)              // the cast types it U8: 255 - w
+  const q:Unsigned(bits=6) = w
+  nq     = ~q                  // 63 - w
+  nbig   = ~big                // 2^80 - 1 - big
+  ns     = ~s                  // signed: -s - 1
+  const t:S5 = w + 1           // a signed value (an untyped one is an error, ruling 44)
+  nt     = ~t                  // signed: -(w + 1) - 1
+  nand_o = ~(a & b)            // 31 - (a & b): the wider unsigned operand
+  nor_o  = ~(a | b)            // 31 - (a | b)
+  xnor_o = ~(a ^ b)            // 31 - (a ^ b)
+  nmix   = ~(s & a)            // a signed operand keeps -v - 1
+
+  const f:U1 = if c { ~x } else { x }   // fits U1, no wrap
+  fo = f
+
+  // The rule is the same in a compare (not only at an assignment).
+  eqs = (U1(~x == 1) << 2) | (U1(~w == 5) << 1) | U1(~s == -3)
+
+  // ...and at comptime.
+  const k:U3 = 2
+  cassert(~k == 5)
+  const j = 2
+  cassert(~j == -3)
+  const k1:U1 = 0
+  cassert(~k1 == 1)
+}
+
+test bitnot_unsigned.values {
+  mut d = bitnot_unsigned
+  mut g_nx:U1     = 0
+  mut g_nw:U3     = 0
+  mut g_nw8:U8    = 0
+  mut g_nr:U1     = 0
+  mut g_ncast:U8  = 0
+  mut g_nq:U6     = 0
+  mut g_nbig:U80  = 0
+  mut g_ns:S4     = 0
+  mut g_nt:S5     = 0
+  mut g_nand:U5   = 0
+  mut g_nor:U5    = 0
+  mut g_xnor:U5   = 0
+  mut g_nmix:S6   = 0
+  mut g_fo:U1     = 0
+  mut g_eqs:U3    = 0
+  mut h_nx:U1     = 0
+  mut h_nr:U1     = 0
+  mut h_ns:S4     = 0
+  mut h_fo:U1     = 0
+  tick 1 {
+    d.x   = 0
+    d.w   = 2
+    d.r   = 1          // bit 1 is 0
+    d.s   = 2
+    d.a   = 3
+    d.b   = 6
+    d.big = 0x1234
+    d.c   = true
+    step
+    g_nx    = d.nx
+    g_nw    = d.nw
+    g_nw8   = d.nw8
+    g_nr    = d.nr
+    g_ncast = d.ncast
+    g_nq    = d.nq
+    g_nbig  = d.nbig
+    g_ns    = d.ns
+    g_nt    = d.nt
+    g_nand  = d.nand_o
+    g_nor   = d.nor_o
+    g_xnor  = d.xnor_o
+    g_nmix  = d.nmix
+    g_fo    = d.fo
+    g_eqs   = d.eqs
+  }
+  tick 1 {
+    d.x   = 1
+    d.w   = 7
+    d.r   = 2          // bit 1 is 1
+    d.s   = -8
+    d.a   = 0
+    d.b   = 0
+    d.big = 0
+    d.c   = false
+    step
+    h_nx = d.nx
+    h_nr = d.nr
+    h_ns = d.ns
+    h_fo = d.fo
+  }
+  assert(g_nx == 1, "~x of a u1 0 is 1")
+  assert(g_nw == 5, "~w of a u3 2 is 5")
+  assert(g_nw8 == 5, "a u3 flips 3 bits even into a u8")
+  assert(g_nr == 1, "~r#[1] flips one bit")
+  assert(g_ncast == 253, "~u8(w) flips 8 bits")
+  assert(g_nq == 61, "~q of an unsigned(bits=6) flips 6 bits")
+  assert(g_nbig == 0xFFFF_FFFF_FFFF_FFFF_EDCB, "a u80 flips 80 bits")
+  assert(g_ns == -3, "~s of an s4 is -s - 1")
+  assert(g_nt == -4, "~t of a signed value is -t - 1")
+  assert(g_nand == 29, "~(a & b) flips the wider unsigned width")
+  assert(g_nor == 24, "~(a | b) flips the wider unsigned width")
+  assert(g_xnor == 26, "~(a ^ b) flips the wider unsigned width")
+  assert(g_nmix == -3, "a signed operand keeps -v - 1")
+  assert(g_fo == 1, "the toggle flips a u1")
+  assert(g_eqs == 7, "the compares see the ruling-26 values")
+  assert(h_nx == 0, "~x of a u1 1 is 0")
+  assert(h_nr == 0, "~r#[1] of a set bit is 0")
+  assert(h_ns == 7, "~s of -8 is 7")
+  assert(h_fo == 1, "the toggle passes x through when c is false")
+  // The test block is Pyrope too: the same rule for its own values.
+  mut un = 2
+  assert(~g_nx == 0, "~ of a u1 test local")
+  assert(~g_nw == 2, "~ of a u3 test local")
+  assert(~g_ncast#[0..<4] == 2, "~ of a 4-bit slice")
+  assert(~U8(g_nw) == 250, "~ of a u8 cast")
+  assert(~g_ns == 2, "~ of a signed test local")
+  assert(~un == -3, "~ of an untyped test local")
+}
+
+// Operands typed by what they read: an element of a `[4]UN` array (constant
+// or runtime index, a reg array too), a one-bit select at a runtime or named
+// position. A `const` bound WITHOUT a type to a typed value has that value's
+// type (user ruling 2026-09-28 (38)), and that is decided per declaration
+// (sibling `if` arms may declare the same name with different types).
+const K:U3 = 2
+
+mod bitnot_elems(w:U3, a:U4, i:U2, c:Bool)
+  -> ( e1:U3@[0], e2:U3@[0], ab:U1@[0], ak:U1@[0], fk:U1@[0], lsum:U2@[0]
+     , sc1:S5@[0], sc2:S5@[0], tog:U1@[0]) {
+  mut arr:[4]U3 = (1, 2, 3, 4)
+  arr[1] = w
+  e1  = ~arr[1]                 // 7 - w
+  e2  = ~arr[i]                 // 7 - arr[i]
+  ab  = ~a#[i]                  // bit i flipped
+  const k = 2
+  ak  = ~a#[k]
+  const f1:U1 = if c { ~a#[k] } else { a#[k] }   // no wrap: a U1 toggle
+  fk  = f1
+  mut acc:U2 = 0
+  for kk in 0..<2 {
+    acc += ~a#[kk]              // each term is 0 or 1
+  }
+  lsum = acc
+  mut v1:S5 = 0
+  mut v2:S5 = 0
+  if c {
+    const t:U3 = w
+    v1 = ~t                     // typed here: 7 - w
+    const q = w#[0..<2]
+    v2 = ~q                     // an alias of a 2-bit slice here: 3 - q
+  } else {
+    const t = w#[0..<2]
+    v1 = ~t                     // a 2-bit alias here
+    const q:U3 = w
+    v2 = ~q                     // typed here
+  }
+  sc1 = v1
+  sc2 = v2
+  reg flags:[4]U1 = 0
+  const nf:U1 = if c { ~flags[i] } else { flags[i] }   // no wrap
+  flags[i] = nf
+  tog = nf
+}
+
+test bitnot_elems.values {
+  mut d = bitnot_elems
+  mut g_e1:U3   = 0
+  mut g_e2:U3   = 0
+  mut g_ab:U1   = 0
+  mut g_ak:U1   = 0
+  mut g_fk:U1   = 0
+  mut g_lsum:U2 = 0
+  mut g_sc1:S5  = 0
+  mut g_sc2:S5  = 0
+  mut h_sc1:S5  = 0
+  mut h_sc2:S5  = 0
+  mut h_tog:U1  = 0
+  tick 1 {
+    d.w = 2
+    d.a = 0ub0101       // bit 1 is 0, bit 2 is 1
+    d.i = 1
+    d.c = true
+    step
+    g_e1   = d.e1
+    g_e2   = d.e2
+    g_ab   = d.ab
+    g_ak   = d.ak
+    g_fk   = d.fk
+    g_lsum = d.lsum
+    g_sc1  = d.sc1
+    g_sc2  = d.sc2
+  }
+  tick 1 {
+    d.c = false
+    step
+    h_sc1 = d.sc1
+    h_sc2 = d.sc2
+    h_tog = d.tog
+  }
+  assert(g_e1 == 5, "~arr[1] of a [4]u3 holding 2 is 5")
+  assert(g_e2 == 5, "~arr[i] with i == 1")
+  assert(g_ab == 1, "~a#[i] flips one bit")
+  assert(g_ak == 0, "~a#[k] of a set bit")
+  assert(g_fk == 0, "the named-position toggle")
+  assert(g_lsum == 1, "~a#[kk] in a loop: bits 0 and 1 of 0ub0101 flip to 0 and 1")
+  assert(g_sc1 == 5, "the arm that declares t:u3")
+  assert(g_sc2 == 1, "the arm whose q aliases a 2-bit slice")
+  assert(h_sc1 == 1, "the arm whose t aliases a 2-bit slice")
+  assert(h_sc2 == 5, "the arm that declares q:u3")
+  assert(h_tog == 1, "flags[1] was toggled to 1 in the first cycle")
+  // The same rule for the test's own values: parentheses, bitwise
+  // expressions, `Unsigned(bits=N)` locals and file-scope consts.
+  mut ua:U3 = 3
+  mut ub:U5 = 6
+  mut uq:Unsigned(bits=6) = 2
+  assert(~(ua & ub) == 29, "~ of a bitwise and of test locals: the wider width")
+  assert(~(ua | ub) == 24, "~ of a bitwise or of test locals")
+  assert(~uq == 61, "~ of an unsigned(bits=6) test local")
+  assert(~K == 5, "~ of a file-scope const:u3")
+  assert(~(g_e1) == 2, "~ in parentheses")
+  assert(~(ua & 3) == -4, "a literal operand is untyped")
+}

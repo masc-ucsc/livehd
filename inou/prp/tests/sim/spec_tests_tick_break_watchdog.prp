@@ -1,0 +1,47 @@
+/*
+:name: spec_tests_tick_break_watchdog
+:type: simulation
+*/
+// Spec: docs 05b "Running cycles (tick)": "The `N` bound doubles as a
+// watchdog: a `break` stops the loop early once a runtime condition holds,
+// while `N` guarantees the test can never spin forever." The test is the
+// docs `runner.until_done` example (with `r.start = clock == 0`, a one-cycle
+// start pulse on cycle 0); `runner` is a small down-counter written for it.
+//
+// Rule pinned: `break` leaves the tick at the first cycle `done` holds (well
+// before the 100-cycle bound), and `clock == 0` is true only in the first
+// iteration.
+
+mod runner(start:Bool, len:U8) -> (done:Bool@[0]) {
+  reg left:U8 = 0
+  reg busy:Bool = false
+  reg fin:Bool = false
+  done = fin
+  if start {
+    left = len
+    busy = true
+    fin  = false
+  } elif busy {
+    if left == 1 {
+      busy = false
+      fin  = true
+    }
+    wrap left = left - 1
+  }
+}
+
+test runner.until_done {
+  mut r          = runner
+  mut done_final = false
+  mut cycles     = 0
+  tick 100 {                       // watchdog bound: never spin forever
+    r.start = clock == 0           // one-cycle start pulse on cycle 0
+    r.len   = 5
+    step
+    cycles += 1
+    done_final = r.done
+    if r.done { break }
+  }
+  assert(done_final, "runner never reached Done within 100 cycles")
+  assert(cycles == 6, "load at cycle 0, five countdown cycles, then break")
+}

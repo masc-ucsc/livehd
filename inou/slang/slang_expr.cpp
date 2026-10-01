@@ -669,6 +669,16 @@ std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang
 
   auto name = lname_of(sym);
 
+  // A whole read of a packed 2-D reg the reader keeps as a MEMORY (it is also
+  // read at a runtime index) is its PACKED value in Verilog. Spell that out as
+  // the whole bit view, so every consumer (and the Pyrope regenerated from this
+  // unit, `q#[0..=N*W-1]`) sees one N*W-bit integer, never the array shape.
+  if (packed_mem_regs_.contains(&sym)) {
+    if (auto mit = mem_info_.find(&sym); mit != mem_info_.end() && mit->second.size > 0) {
+      return builder_.create_get_mask_stmts(name, mask_text(static_cast<int>(mit->second.size * mit->second.elem_bits)));
+    }
+  }
+
   if (input_syms_.contains(&sym) || reg_syms_.contains(&sym) || proc_blocking_written_.contains(&sym)) {
     return name;
   }
@@ -719,10 +729,13 @@ std::string Slang_context::lower_unary(const slang::ast::UnaryExpression& expr) 
       return fit_wrap(neg, ti.bits, ti.is_signed);
     }
     case UnaryOperator::BitwiseNot: {
-      auto v   = to_int_value(lower_rvalue(operand));
-      auto neg = builder_.create_bit_not_stmts(v);
-      // signed stays in range (~v == -v-1); unsigned needs the pattern wrap
-      return ti.is_signed ? neg : trunc_to(neg, ti.bits);
+      // A signed `~` is -v-1, exact at any width once sign extension has run.
+      // An unsigned one flips exactly the expression's CONTEXT width (`y8 = ~x1`
+      // is 8'hFF for x1 == 0): the typed LNAST `~` states that width, so the
+      // result never depends on how a later reader types `v` (user ruling 26
+      // flips only an unsigned operand's OWN width).
+      auto v = to_int_value(lower_rvalue(operand));
+      return ti.is_signed ? builder_.create_bit_not_stmts(v) : builder_.create_bit_not_stmts(v, std::max(ti.bits, 1));
     }
     case UnaryOperator::LogicalNot: {
       auto v = lower_rvalue(operand);
@@ -919,8 +932,9 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
     case BinaryOperator::BinaryOr  : return fit_wrap(builder_.create_bit_or_stmts({lhs, rhs}), ti.bits, ti.is_signed);
     case BinaryOperator::BinaryXor : return fit_wrap(builder_.create_bit_xor_stmts(lhs, rhs), ti.bits, ti.is_signed);
     case BinaryOperator::BinaryXnor: {
-      auto x = builder_.create_bit_not_stmts(builder_.create_bit_xor_stmts(lhs, rhs));
-      return ti.is_signed ? x : trunc_to(x, ti.bits);
+      // Same split as a unary `~`: the unsigned form flips the context width.
+      auto x = builder_.create_bit_xor_stmts(lhs, rhs);
+      return ti.is_signed ? builder_.create_bit_not_stmts(x) : builder_.create_bit_not_stmts(x, std::max(ti.bits, 1));
     }
     case BinaryOperator::Equality  : return mark_bool(builder_.create_eq_stmts(lhs, rhs));
     case BinaryOperator::Inequality: return mark_bool(builder_.create_ne_stmts(lhs, rhs));
@@ -1409,11 +1423,13 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
       if (base_sym != nullptr && !flat_port_syms_.contains(base_sym)) {
         auto mit = mem_info_.find(base_sym);
         if (mit != mem_info_.end() && mit->second.is_tuple && sels.size() == mit->second.rank()) {
-          const auto& mi    = mit->second;
+          const auto  mi    = mit->second;  // a COPY: lowering a selector can rehash mem_info_
           const auto& field = ma.member.as<slang::ast::FieldSymbol>();
           if (const auto* f = find_tuple_field(mi, field.name)) {
-            auto idx = build_unpacked_index(mi, sels);
-            auto d   = emit_field_read_chain(lname_of(*base_sym), idx, f->name);
+            const auto addr = build_unpacked_address(mi, sels);
+            auto       d    = emit_guarded_read(addr, f->bits, [&](const std::string& idx) {
+              return emit_field_read_chain(lname_of(*base_sym), idx, f->name);
+            });
             return f->is_signed ? builder_.create_sext_stmts(d, std::to_string(f->bits - 1)) : d;
           }
         }
@@ -1733,6 +1749,10 @@ std::string Slang_context::lower_call(const slang::ast::CallExpression& expr) {
   if (expr.isSystemCall()) {
     auto name = expr.getSubroutineName();
     auto args = expr.arguments();
+    if (name == "$test$plusargs" || name == "$value$plusargs") {
+      emit_unsupported(expr.sourceRange, "plusarg-placement", "plusarg reads require a simulation-only initial block and cannot affect hardware");
+      return "0";
+    }
     if ((name == "$signed" || name == "$unsigned") && args.size() == 1) {
       const auto& a  = *args[0];
       auto        ai = tinfo(*a.type);

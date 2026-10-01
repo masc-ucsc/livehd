@@ -1,0 +1,32 @@
+/*
+:name: std_clog2_values
+:type: parsing lnast comptime
+:verifier_pass: 11
+:verifier_fail: 0
+*/
+
+// User ruling 2026-09-27: `std.clog2(x)` is a built-in with Verilog `$clog2`
+// semantics (ceil(log2(x)) for x >= 1, so clog2(1) == 0), comptime only, in
+// the built-in `std` namespace (no import). Today `std` is an undefined
+// variable ("read of undefined variable 'std'"), so designs carry an extra
+// generic plus a cassert for every select/count width.
+//
+// Expected values: `(x - 1).bit_length()` for x >= 1, i.e. $clog2.
+
+cassert(std.clog2(1) == 0)
+cassert(std.clog2(2) == 1)
+cassert(std.clog2(3) == 2)
+cassert(std.clog2(13) == 4)
+cassert(std.clog2(16) == 4)
+cassert(std.clog2(17) == 5)
+cassert(std.clog2(1 << 40) == 40)
+cassert(std.clog2((1 << 40) + 1) == 41)
+
+// A comptime name and a type bound work like a literal. `.[bits]` is the width
+// of the VALUE, clog2 the width of an index into that many entries.
+comptime const D = 16
+cassert(std.clog2(D) == 4)
+cassert(D.[bits] == 5)
+
+const idx:Unsigned(bits=std.clog2(13)) = 12
+cassert(idx.[bits] == 4)

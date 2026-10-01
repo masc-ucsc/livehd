@@ -2,6 +2,9 @@
 
 #include "inline_sub.hpp"
 
+#include <algorithm>
+#include <format>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -13,6 +16,7 @@
 #include "hhds/attrs/name.hpp"
 #include "hhds/attrs/srcid.hpp"
 #include "node_util.hpp"
+#include "sim_program.hpp"
 
 namespace livehd::graph_util {
 
@@ -21,42 +25,52 @@ namespace {
 class Sub_inliner {
 public:
   Sub_inliner(hhds::Graph* parent, const hhds::Node_class& inst, std::string_view from_pass, hhds::Graph* def = nullptr,
-              bool name_state = false, bool prefix_instance = true, bool inherit_color = false)
+              bool name_state = false, bool prefix_instance = true, bool inherit_color = false,
+              const std::optional<std::string>& state_name = std::nullopt)
       : parent_(parent)
       , inst_(inst)
       , from_pass_(from_pass)
       , def_(def)
       , name_state_(name_state)
       , prefix_instance_(prefix_instance)
-      , inherit_color_(inherit_color) {}
+      , inherit_color_(inherit_color)
+      , state_name_(state_name) {}
 
   bool run();
 
 private:
-  hhds::Graph*     parent_;
-  hhds::Node_class inst_;
-  std::string_view from_pass_;
+  hhds::Graph*               parent_;
+  hhds::Node_class           inst_;
+  std::string_view           from_pass_;
   // Explicit body, for an instance whose def is NOT in the parent's own graph
   // library (a `lec --lib` cell model lives in a side library, so
   // get_subnode_graph() is null for it). nullptr = resolve the ordinary way.
-  hhds::Graph*     def_             = nullptr;
+  hhds::Graph*               def_             = nullptr;
   // Name an UNNAMED spliced state node after the instance (see the header): a
   // cell model's internal flop carries no name attr, so the cut would otherwise
   // be keyed on a synthesized net name that corresponds to nothing.
-  bool             name_state_      = false;
+  bool                       name_state_      = false;
   // False drops a NAMED instance's component too; an unnamed or `__flat___*`
   // instance adds none either way (logical_instance_prefix).
-  bool             prefix_instance_ = true;
-  bool             inherit_color_   = false;
-  hhds::Graph*     child_           = nullptr;
-  std::string      prefix_;
+  bool                       prefix_instance_ = true;
+  bool                       inherit_color_   = false;
+  // Replaces the body's own name on every spliced flop/latch (see the header):
+  // non-empty is prefixed like any name, empty leaves the node unnamed.
+  std::optional<std::string> state_name_;
+  hhds::Graph*               child_ = nullptr;
+  std::string                prefix_;
 
   absl::flat_hash_map<hhds::Node_class, hhds::Node_class> node_map_;   // child node -> parent clone
   absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class>   pin_cache_;  // child driver -> parent driver
   absl::flat_hash_map<std::string, uint32_t>              in_name2pid_;
   absl::flat_hash_map<uint32_t, std::string>              out_pid2name_;
+  absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class>   fit_source_;  // fit_boundary driver -> the driver it fits
   bool                                                    failed_ = false;
 
+  void                          fit_boundary();
+  [[nodiscard]] hhds::Pin_class add_fit(const hhds::Pin_class& driver, int bits, bool is_signed);
+  [[nodiscard]] bool            fit_loops_back(hhds::Pin_class src, const hhds::Pin_class& sink) const;
+  [[noreturn]] void             report_cycle(const hhds::Pin_class& at);
   void                          create_nodes();
   void                          wire_edges();
   void                          rewire_instance_outputs();
@@ -68,7 +82,14 @@ private:
 };
 
 void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Node_class& neo) {
-  if (has_name(orig)) {
+  const auto op = type_op_of(orig);
+  if (state_name_.has_value() && (is_type_flop(orig) || op == Ntype_op::Latch)) {
+    if (!state_name_->empty()) {
+      neo.attr(hhds::attrs::name).set(prefix_ + *state_name_);
+    } else if (name_state_ && is_type_flop(neo) && !prefix_.empty()) {
+      neo.attr(hhds::attrs::name).set(prefix_.substr(0, prefix_.size() - 1));
+    }
+  } else if (has_name(orig)) {
     auto nm = std::string{node_name_of(orig)};
     // fproperty/lgassert marker Subs pack "<kind>\x1f<loc>\x1f<msg>" into the name
     // attr; a prefix would corrupt the kind field (cgen/pass.formal parse it up to
@@ -141,6 +162,146 @@ void Sub_inliner::carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pi
   if (auto o = orig.attr(livehd::attrs::pin_offset); o.has()) {
     neo.attr(livehd::attrs::pin_offset).set(o.get());
   }
+}
+
+// Spell every unfit connection as the fit its port performs (inline_sub.hpp,
+// Sub port boundary), in the PARENT and before anything is cloned, so the
+// splice below reads the fitted value through ordinary parent nodes. Outputs
+// go first: an instance output that feeds one of the instance's own inputs is
+// then read through its output fit, which the input check sees as the driver
+// it really is.
+void Sub_inliner::fit_boundary() {
+  const auto gio = child_->get_io();
+
+  // An output crosses TWO declarations, exactly as cgen spells it: the
+  // callee's port, then the parent net the instance output drives (the
+  // instance pin's own stamp; bitwidth seeds it from the port, so the two
+  // normally agree). When that net is no wider than the port, only its low
+  // bits survive and the port leaves those untouched, so the net alone decides.
+  struct Out_fit {
+    hhds::Pin_class                   drv;    // the instance's output driver pin
+    std::vector<std::pair<int, bool>> steps;  // (bits, signed), applied in order
+  };
+  std::vector<Out_fit> out_fits;
+  for (auto drv : inst_.out_sorted_pins()) {  // only outputs somebody reads
+    const auto oit = out_pid2name_.find(static_cast<uint32_t>(drv.get_port_id()));
+    if (oit == out_pid2name_.end()) {
+      continue;
+    }
+    const auto opin  = child_->get_output_pin(oit->second);
+    const auto inner = opin.is_invalid() ? hhds::Pin_class{} : opin.get_driver_pin();  // an output pin is a sink: one driver
+    if (inner.is_invalid()) {
+      continue;
+    }
+    const int  bits      = sub_port_width(opin, *gio, oit->second);
+    const bool is_signed = !gio->is_unsign(oit->second);
+    const int  net_bits  = bits_of(drv);
+    const bool net_sign  = !is_unsign(drv);
+    Out_fit    f{drv, {}};
+    if (net_bits != 0 && net_bits <= bits) {
+      if (!driver_fits_port(inner, net_bits, net_sign)) {
+        f.steps.emplace_back(net_bits, net_sign);
+      }
+    } else {
+      const bool port_step = !driver_fits_port(inner, bits, is_signed);
+      if (port_step) {
+        f.steps.emplace_back(bits, is_signed);
+      }
+      // A wider net extends the port's value by the port's sign.
+      if (net_bits != 0
+          && (port_step ? !range_fits_port(bits, is_signed, net_bits, net_sign) : !driver_fits_port(inner, net_bits, net_sign))) {
+        f.steps.emplace_back(net_bits, net_sign);
+      }
+    }
+    if (!f.steps.empty()) {
+      out_fits.push_back(std::move(f));
+    }
+  }
+  for (const auto& f : out_fits) {
+    std::vector<hhds::Pin_class> readers;  // collect first: the rewire edits this fanout
+    for (const auto& e : f.drv.out_edges()) {
+      readers.push_back(e.sink);
+    }
+    auto fitted = f.drv;
+    for (const auto& [bits, is_signed] : f.steps) {
+      fitted = add_fit(fitted, bits, is_signed);
+    }
+    for (const auto& sink : readers) {
+      sink.del_sink(f.drv);
+      fitted.connect_sink(sink);
+    }
+  }
+
+  // An input the child never reads needs no fit: nothing observes it.
+  absl::flat_hash_map<uint32_t, std::string_view> in_pid2name;
+  for (const auto& [name, pid] : in_name2pid_) {
+    in_pid2name.emplace(pid, name);
+  }
+  struct In_fit {
+    hhds::Pin_class driver;
+    hhds::Pin_class sink;  // the instance's input sink pin
+    int             bits;
+    bool            is_signed;
+  };
+  std::vector<In_fit> in_fits;
+  for (auto sink : inst_.inp_sorted_pins()) {
+    const auto nit = in_pid2name.find(static_cast<uint32_t>(sink.get_port_id()));
+    if (nit == in_pid2name.end()) {
+      continue;
+    }
+    const auto ipin = child_->get_input_pin(std::string{nit->second});
+    if (ipin.is_invalid() || !ipin.has_sink()) {
+      continue;
+    }
+    const int  bits      = sub_port_width(ipin, *gio, nit->second);
+    const bool is_signed = !gio->is_unsign(nit->second);
+    for (auto driver : sink.get_driver_pins()) {
+      if (!driver_fits_port(driver, bits, is_signed)) {
+        in_fits.push_back(In_fit{driver, sink, bits, is_signed});
+      }
+    }
+  }
+  for (const auto& f : in_fits) {
+    const auto fitted = add_fit(f.driver, f.bits, f.is_signed);
+    f.sink.del_sink(f.driver);
+    fitted.connect_sink(f.sink);
+  }
+}
+
+// One fit node in the parent, colored like a clone of the body would be.
+hhds::Pin_class Sub_inliner::add_fit(const hhds::Pin_class& driver, int bits, bool is_signed) {
+  auto fitted = fit_to_port(*parent_, driver, bits, is_signed);
+  if (inherit_color_ && has_color(inst_)) {
+    set_color(fitted.get_master_node(), color_of(inst_));
+  }
+  fit_source_.emplace(fitted, driver);
+  return fitted;
+}
+
+// Does `src` reach `sink` back through fit nodes only? A feed-through cycle
+// (`y = a` in the child, the parent wiring inst.y back into inst.a) is caught
+// by resolve_driver's alias walk, but once fit_boundary put a fit on that loop
+// the walk stops at the fit's driver, and rewiring inst.y's reader -- the fit
+// itself -- to that driver would close a silent combinational self-loop.
+bool Sub_inliner::fit_loops_back(hhds::Pin_class src, const hhds::Pin_class& sink) const {
+  const auto target = sink.get_master_node();
+  for (auto it = fit_source_.find(src); it != fit_source_.end(); it = fit_source_.find(src)) {
+    if (src.get_master_node() == target) {
+      return true;
+    }
+    src = it->second;
+  }
+  return false;
+}
+
+void Sub_inliner::report_cycle(const hhds::Pin_class& at) {
+  failed_ = true;
+  livehd::diag::err(from_pass_, "inline-cycle", "unsupported")
+      .msg("inline: combinational feed-through cycle through instance '{}' at '{}{}'",
+           default_instance_name(inst_),
+           prefix_,
+           wire_name(at))
+      .fatal();
 }
 
 void Sub_inliner::create_nodes() {
@@ -238,14 +399,7 @@ hhds::Pin_class Sub_inliner::resolve_driver(const hhds::Pin_class& d) {
       break;
     }
     if (!seen.insert(cur).second) {
-      livehd::diag::err(from_pass_, "inline-cycle", "unsupported")
-          .msg("inline: combinational feed-through cycle through instance '{}' at '{}{}'",
-               default_instance_name(inst_),
-               prefix_,
-               wire_name(cur))
-          .fatal();
-      failed_ = true;
-      return {};
+      report_cycle(cur);
     }
     path.push_back(cur);
     if (cur.is_const()) {
@@ -357,6 +511,9 @@ void Sub_inliner::rewire_instance_outputs() {
       continue;  // a driver port with no decl: nothing on the child side to bind
     }
     if (auto src = resolve_output_of(oit->second); !src.is_invalid()) {
+      if (fit_loops_back(src, sink)) {
+        report_cycle(src);
+      }
       rewires.emplace_back(src, sink);
     }
     // An undriven child output leaves the reader unconnected -- exactly what the
@@ -398,13 +555,40 @@ bool Sub_inliner::run() {
         .fatal();
     return false;
   }
-  for (const auto& d : gio->get_input_pin_decls()) {
-    in_name2pid_[d.name] = static_cast<uint32_t>(d.port_id);
-  }
-  for (const auto& d : gio->get_output_pin_decls()) {
-    out_pid2name_[static_cast<uint32_t>(d.port_id)] = d.name;
+  // The two maps are keyed by the INSTANCE's port ids (its sink/driver pins)
+  // and name the CHILD's ports. For the instance's own definition that is one
+  // GraphIO, so the ids coincide. An override `def_` is a different GraphIO
+  // that may number the same ports differently (a --lib cell model against the
+  // library copy the instance was elaborated with), so it is bound by NAME
+  // through the instance's IO -- checked before anything is mutated.
+  auto iio = inst_.get_subnode_io();
+  if (def_ != nullptr && iio.get() != gio.get()) {
+    if (const auto why = sub_def_port_mismatch(inst_, def_); !why.empty()) {
+      livehd::diag::err(from_pass_, "inline-port-mismatch", "unsupported")
+          .msg("inline: instance '{}' does not bind to the definition '{}' by port name: {}",
+               default_instance_name(inst_),
+               child_->get_name(),
+               why)
+          .hint("the override would rewire the instance's edges onto other ports; nothing was spliced")
+          .emit();
+      return false;
+    }
+    for (const auto& d : gio->get_input_pin_decls()) {
+      in_name2pid_[d.name] = static_cast<uint32_t>(iio->get_input_port_id(d.name));
+    }
+    for (const auto& d : iio->get_output_pin_decls()) {
+      out_pid2name_[static_cast<uint32_t>(d.port_id)] = d.name;
+    }
+  } else {
+    for (const auto& d : gio->get_input_pin_decls()) {
+      in_name2pid_[d.name] = static_cast<uint32_t>(d.port_id);
+    }
+    for (const auto& d : gio->get_output_pin_decls()) {
+      out_pid2name_[static_cast<uint32_t>(d.port_id)] = d.name;
+    }
   }
 
+  fit_boundary();
   create_nodes();
   if (!failed_) {
     wire_edges();
@@ -415,15 +599,128 @@ bool Sub_inliner::run() {
   if (failed_) {
     return false;
   }
+  if (const auto program = child_->get_input_node().attr(livehd::attrs::simulation_init);
+      program.has() && !program.get().empty()) {
+    auto metadata = parent_->get_input_node().attr(livehd::attrs::simulation_init);
+    auto combined = metadata.has() && !metadata.get().empty()
+                        ? livehd::sim_ir::decode(metadata.get())
+                        : livehd::sim_ir::Node{"seq", "", 0, false, {}};
+    combined.kids.push_back(livehd::sim_ir::decode(program.get()));
+    metadata.set(livehd::sim_ir::encode(combined));
+  }
   inst_.del_node();  // its edges go with it; everything it carried is now inline
   return true;
 }
 
 }  // namespace
 
+int sub_port_width(const hhds::Pin_class& port, const hhds::GraphIO& io, std::string_view name) {
+  return std::max(1, bits_of(port, io, name));
+}
+
+bool driver_fits_port(const hhds::Pin_class& driver, int bits, bool is_signed) {
+  if (driver.is_const()) {
+    const auto& value = const_of(driver);
+    if (value.is_nil()) {
+      return true;
+    }
+    return is_signed ? value.get_signed_bits() <= bits : !value.is_negative() && value.get_payload_bits() <= bits;
+  }
+  int  dbits   = bits_of(driver);
+  bool dsigned = !is_unsign(driver);
+  if (is_graph_input_pin(driver)) {
+    const auto io = driver.get_graph()->get_io();
+    if (io == nullptr) {
+      return true;
+    }
+    dbits   = sub_port_width(driver, *io, driver.get_pin_name());
+    dsigned = !io->is_unsign(driver.get_pin_name());
+  } else if (dbits == 0) {
+    // An unstamped Sub output is as wide as the callee realizes that port.
+    const auto sub = driver.get_master_node();
+    const auto io  = type_op_of(sub) == Ntype_op::Sub ? sub.get_subnode_io() : nullptr;
+    if (io == nullptr) {
+      return true;
+    }
+    for (const auto& decl : io->get_output_pin_decls()) {
+      if (decl.port_id == driver.get_port_id()) {
+        const auto callee = sub.get_subnode_graph();
+        dbits
+            = callee ? sub_port_width(callee->get_output_pin(decl.name), *io, decl.name) : std::max(1, static_cast<int>(decl.bits));
+        dsigned = !decl.unsign;
+        break;
+      }
+    }
+    if (dbits == 0) {
+      return true;
+    }
+  }
+  return range_fits_port(dbits, dsigned, bits, is_signed);
+}
+
+bool range_fits_port(int dbits, bool dsigned, int bits, bool is_signed) {
+  if (dsigned) {
+    return is_signed && dbits <= bits;
+  }
+  return dbits <= (is_signed ? bits - 1 : bits);
+}
+
+hhds::Pin_class fit_to_port(hhds::Graph& graph, const hhds::Pin_class& driver, int bits, bool is_signed) {
+  if (is_signed) {
+    auto sext = create_typed_node(graph, Ntype_op::Sext);
+    driver.connect_sink(setup_sink_pid(sext, 0));
+    create_const(graph, *Dlop::create_integer(bits)).connect_sink(setup_sink_pid(sext, 1));  // the KEPT bit count
+    auto fitted = sext.create_driver_pin(0);
+    set_sbits(fitted, bits);
+    return fitted;
+  }
+  auto fitted = create_get_mask(graph, driver, 0, bits).create_driver_pin(0);
+  set_ubits(fitted, bits);
+  return fitted;
+}
+
+std::string sub_def_port_mismatch(const hhds::Node_class& inst, hhds::Graph* def) {
+  const auto dio = def != nullptr ? def->get_io() : nullptr;
+  if (dio == nullptr) {
+    return "the definition has no declared IO";
+  }
+  const auto iio = inst.get_subnode_io();
+  if (iio == nullptr) {
+    return "the instance declares no IO to bind by name";
+  }
+  if (iio.get() == dio.get()) {
+    return {};  // the instance's own definition
+  }
+  auto width_differs = [](uint32_t a, uint32_t b) { return a != 0 && b != 0 && a != b; };
+  for (const auto& d : iio->get_input_pin_decls()) {
+    if (!dio->has_input(d.name)) {
+      return std::format("input '{}' of the instance is not an input of '{}'", d.name, dio->get_name());
+    }
+    if (const auto b = dio->get_bits(d.name); width_differs(d.bits, b)) {
+      return std::format("input '{}' is {} bit(s) on the instance but {} on '{}'", d.name, d.bits, b, dio->get_name());
+    }
+  }
+  for (const auto& d : iio->get_output_pin_decls()) {
+    if (!dio->has_output(d.name)) {
+      return std::format("output '{}' of the instance is not an output of '{}'", d.name, dio->get_name());
+    }
+    if (const auto b = dio->get_bits(d.name); width_differs(d.bits, b)) {
+      return std::format("output '{}' is {} bit(s) on the instance but {} on '{}'", d.name, d.bits, b, dio->get_name());
+    }
+  }
+  // An input the definition reads but the instance cannot drive would float.
+  // A definition-only OUTPUT is harmless: nothing on the instance can read it.
+  for (const auto& d : dio->get_input_pin_decls()) {
+    if (!iio->has_input(d.name)) {
+      return std::format("'{}' reads input '{}', which the instance does not declare", dio->get_name(), d.name);
+    }
+  }
+  return {};
+}
+
 bool inline_sub_instance(hhds::Graph* parent, const hhds::Node_class& inst, std::string_view from_pass, hhds::Graph* def,
-                         bool name_state, bool prefix_instance, bool inherit_color) {
-  Sub_inliner s(parent, inst, from_pass, def, name_state, prefix_instance, inherit_color);
+                         bool name_state, bool prefix_instance, bool inherit_color, const std::optional<std::string>& state_name) {
+  Sub_inliner s(parent, inst, from_pass, def, name_state, prefix_instance, inherit_color, state_name);
   return s.run();
 }
 

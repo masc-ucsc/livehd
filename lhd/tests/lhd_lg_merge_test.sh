@@ -23,11 +23,11 @@ fail() {
 
 # Signed I/O (Pyrope's default): the Sub output wires cleanly through cgen.
 cat > "$W/foo.prp" <<'EOF'
-pub comb foo(a:s8) -> (r:s9) { r = a + 1 }
+pub comb foo(a:S8) -> (r:S9) { r = a + 1 }
 EOF
 cat > "$W/bar.prp" <<'EOF'
 const f = import("lg:foo.foo")
-comb bar(x:s8) -> (y:s9) {
+comb bar(x:S8) -> (y:S9) {
   y = f(a=x)
 }
 EOF

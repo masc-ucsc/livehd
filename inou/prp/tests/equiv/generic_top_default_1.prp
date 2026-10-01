@@ -7,6 +7,6 @@
 */
 
 // A parameter-free implementation of the generic top with its default N=3.
-pub mod generic_top_default(a:u8) -> (y:u9@[0]) {
+pub mod generic_top_default(a:U8) -> (y:U9@[0]) {
   y = a + 3
 }

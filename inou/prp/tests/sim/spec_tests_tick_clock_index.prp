@@ -1,0 +1,36 @@
+/*
+:name: spec_tests_tick_clock_index
+:type: simulation
+*/
+// Spec (qa.md appendix section 8, "Test clock"): "each `tick` block gets a
+// MINTED `clock:Clock` ... Its counter is the tick's cycle index (0-based) and
+// `step` advances it." docs 05b "Running cycles (tick)": "it is `0` in the
+// first iteration and each `step` advances it."
+//
+// Rule pinned: read BEFORE the step, `clock` is 0 in the first iteration and
+// grows by exactly one per iteration (0, 1, 2, ... N-1). The test has no DUT
+// of its own besides a trivial pass-through so the tick has something to step.
+
+mod spec_tci_pass(a:U8) -> (o:U8@[0]) {
+  o = a
+}
+
+test spec_tci.index {
+  mut d     = spec_tci_pass
+  mut iters = 0
+  mut bad   = 0
+  mut first = 99
+  mut last  = 99
+  tick 6 {
+    if iters == 0 { first = clock }
+    if clock != iters { bad += 1 }   // pre-step: the 0-based cycle index
+    last = clock
+    d.a = 1
+    step
+    iters += 1
+  }
+  assert(first == 0, "the minted clock must start at 0")
+  assert(last == 5, "the last iteration of `tick 6` is cycle 5")
+  assert(bad == 0, "clock must equal the iteration index before the step")
+  assert(iters == 6)
+}

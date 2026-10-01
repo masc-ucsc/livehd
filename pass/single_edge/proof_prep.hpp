@@ -35,13 +35,27 @@ using Cell_models = absl::flat_hash_map<hhds::Gid, hhds::Graph*>;
 // every def. Returns the number recognized.
 int materialize_clock_cells_all(hhds::Graph* top, const std::vector<hhds::Graph*>& defs);
 
+// Both `--lib` splices below take an instance of a `--lib` cell from the body
+// the ENCODER would use for it: the design's own definition when the design's
+// library holds one (spliced by id through its own IO, correct by
+// construction; on a Verilog side this is the elaborated copy of the model),
+// and the `--lib` model only for a BODY-LESS instance, bound by port NAME
+// through the instance's IO (graph/inline_sub.hpp). Putting the model in place
+// of a body the design carries would compare the model, not the design (an lg:
+// netlist with its own bypassed clock gate PROVED against the gated RTL). Each
+// returns "" on success, or the refusal for the first instance that cannot be
+// spliced (a model lacking a port or stating a width differently): the caller
+// must NOT query, since leaving that cell for a later pass is how an id-bound
+// splice once dropped a clock gate's output and PROVED a netlist with a
+// swapped gate.
+
 // Inline the COMBINATIONAL `--lib` cells on clock cones, so phase analysis sees
 // buffer/inverter polarity and gates instead of an opaque cell.
-void inline_clock_lib_cells(const Cell_models& sub_lib, hhds::Graph* graph);
+[[nodiscard]] std::string inline_clock_lib_cells(const Cell_models& sub_lib, hhds::Graph* graph);
 
 // Inline STATEFUL `--lib` cells (mapped DFFs), so their state is real body state
 // the flop cut can correspond, named after the instance for single-flop models.
-void inline_stateful_lib_cells(const Cell_models& sub_lib, hhds::Graph* impl_g);
+[[nodiscard]] std::string inline_stateful_lib_cells(const Cell_models& sub_lib, hhds::Graph* impl_g);
 
 // Inline integrated clock gates across `top` and each def and fold the gated
 // clock into a flop enable where that is a pure P=1 retype. Returns {cells
@@ -55,11 +69,13 @@ std::pair<int, int> inline_clock_gates_and_fold(hhds::Graph* top, const std::vec
 // flat view into region modules the RTL never had): inline, into each def the
 // other side still has, every instance whose definition the other side lacks,
 // so both sides expose comparable machine state under their hierarchical names.
-// Returns the number of instances spliced.
+// `side_g` (the side's top, or nullptr) is a host even when the other side
+// names its top differently. Returns the number of instances spliced, and adds
+// to `absorbed` the name of each definition an instance of which was spliced.
 size_t inline_instances_missing_from_other_side(const Cell_models&                               sub_lib,
                                                 const std::vector<std::shared_ptr<hhds::Graph>>& side_graphs,
-                                                const std::vector<std::shared_ptr<hhds::Graph>>& other_graphs,
-                                                hhds::Graph*                                     side_g);
+                                                const std::vector<std::shared_ptr<hhds::Graph>>& other_graphs, hhds::Graph* side_g,
+                                                absl::flat_hash_set<std::string>* absorbed = nullptr);
 
 // Outcome of prepare_time_base. Nothing here throws: each caller decides what a
 // decline or an error means for it (`lhd lec` refuses; the publication gate
@@ -80,6 +96,7 @@ struct Time_base {
 // Put `ref` and `impl` into one single-edge time base, symmetrically:
 //   1. inline stateful and clock-cone `--lib` cells on each top and each def
 //      that is not itself a `--lib` model (models are shared by both sides);
+//      a splice the model cannot bind by port name sets `error`;
 //   2. recognize clock-gate cells as `Clock_cell` on BOTH sides (a gate seen on
 //      one side only would compare a Clock_cell against a Sub);
 //   3. inline+fold the remaining gates into flop enables, dropping any def that

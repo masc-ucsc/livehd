@@ -6,4 +6,4 @@
 
 // A boolean cast of an undefined (`?`) value has no boolean meaning
 // (04-variables.md: int→boolean asserts on undefined/nil). Compare explicitly.
-cassert(bool(0sb?) == true)
+cassert(Bool(0sb?) == true)

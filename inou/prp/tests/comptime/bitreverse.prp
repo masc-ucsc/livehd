@@ -7,11 +7,11 @@
 
 // Phase 8 typesystem: `.[bits]` is declared-type-driven, so the
 // reverse helpers take concrete widths. Untyped operands have nil
-// bits and can't drive the loop bound; reads on `:uN`/`:sN`-typed
+// bits and can't drive the loop bound; reads on `:UN`/`:SN`-typed
 // values give the declared width.
 
-comb sreverse(x:s6) -> (total:s6) {
-  mut t:s6 = nil
+comb sreverse(x:S6) -> (total:S6) {
+  mut t:S6 = nil
   //cputs("serverse: x has {x:b} bits={x.[bits]}")
   for i in 0..<x.[bits] {
     t#[i] = x#[x.[bits]-1-i]
@@ -19,8 +19,8 @@ comb sreverse(x:s6) -> (total:s6) {
   }
   total = t
 }
-comb reverse(x) -> (total:u6) {
-  mut t:u6 = 0 // zero-extend when the input is narrower than the result
+comb reverse(x) -> (total:U6) {
+  mut t:U6 = 0 // zero-extend when the input is narrower than the result
   //cputs("reverse: x has {x:b}")
   for i in 0..<x.[bits] {
     t#[i] = x#[x.[bits]-1-i]
@@ -29,20 +29,20 @@ comb reverse(x) -> (total:u6) {
   total = t
 }
 
-mut x0:u6 = 0ub00010110
+mut x0:U6 = 0ub00010110
 cassert(x0.[bits] == 6)
 cputs("reverse(x={x0:b}):{reverse(x0):b}")
 cassert(reverse(x0) == 0ub011010, "reverse(0ub00010110) should bit-reverse to 0ub011010") // leading zeros do not affect bits
-cassert(sreverse(x0) == 0ub011010, "sreverse(x0) should equal unsigned 0ub011010")
-cassert(sreverse(x0) == 0sb011010)
+cassert(sreverse(x0#sext[0..=5]) == 0ub011010, "sreverse(x0) should equal unsigned 0ub011010")
+cassert(sreverse(x0#sext[0..=5]) == 0sb011010)
 
-const x1:u6 = 0ub1011
+const x1:U6 = 0ub1011
 cassert(x1.[bits] == 6)
 cputs("reverse({x1}:b)={reverse(x1):b}")
 cassert(reverse(x1) == 0ub0110100, "reverse(x1) where x1=0ub001011")
-cassert(sreverse(x1) == 0sb110100)
+cassert(sreverse(x1#sext[0..=5]) == 0sb110100)
 
-mut x2:s4 = 0sb1011 // negative number
+mut x2:S4 = 0sb1011 // negative number
 cassert(x2.[bits] == 4)
 cputs("reverse({x2})={reverse(x2)}")
 cassert(reverse(x2) == 0ub01101)

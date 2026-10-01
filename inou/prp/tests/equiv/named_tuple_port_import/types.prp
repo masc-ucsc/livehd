@@ -1,0 +1,4 @@
+// Imported helper for ../named_tuple_port_import.prp: public named tuple
+// types used as PORT types by the importer.
+pub type Req_t = (addr:U8, write:Bool, data:U8)
+pub type Pair_t = (lo:U4, hi:U4)

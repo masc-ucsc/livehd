@@ -11,8 +11,8 @@
 // handle" is the whole `c = f(args)`, not just the call. A destructure can skip an input-matching candidate whose outputs do not bind.
 // A whole-result binding accepts multiple outputs as a named tuple.
 
-comb mk_one(a:signed) -> (r:signed)          { r = a }
-comb mk_two(a:signed) -> (p1:signed, p2:signed) { p1 = a ; p2 = a + 1 }
+comb mk_one(a:Signed) -> (r:Signed)          { r = a }
+comb mk_two(a:Signed) -> (p1:Signed, p2:Signed) { p1 = a ; p2 = a + 1 }
 
 const mk  = [mk_one, mk_two]   // single-output first
 const rev = [mk_two, mk_one]   // multi-output first

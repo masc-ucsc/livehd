@@ -1,0 +1,46 @@
+/*
+:name: capture_fold_ref_write
+:type: comptime
+:verifier_pass: 6
+:verifier_fail: 0
+:verifier_include_funcs: true
+*/
+
+// User ruling 2026-09-28 (32): capture is fold-based. A write through a `ref`
+// argument (`addby(ref m, by=2)`) or a `ref self` method (`m.incr()`) is a
+// write of `m` like an assignment: the value the enclosing scope computes
+// (and a nested lambda replays) includes it. Before, only plain assignments
+// counted: `s` kept the stale declaration value (3) for integer type bounds
+// and in nested lambdas while the scope itself computed 5/7 (a silent
+// miscompile, at file scope and in a mod body alike).
+comb addby(ref x:U8, by:U8) -> () {
+  wrap x = x + by
+}
+comb incr(ref self:U8) -> () {
+  wrap self += 1
+}
+
+mut fm:U8 = 3
+addby(ref fm, by=2)
+const fs = fm
+cassert(fs == 5)
+comb ff() -> (r:U8) {
+  r = fs
+}
+cassert(ff().r == 5)
+
+pub mod capture_fold_ref_write(a:U8) -> (o:U8@[0], p:U8@[0]) {
+  mut m:U8 = 3
+  addby(ref m, by=2)
+  m.incr()
+  const s = m + 1
+  cassert(s == 7)
+  const w:Unsigned(bits=s) = 0
+  cassert(w.[bits] == 7)
+  comb f() -> (r:U8) {
+    cassert(s == 7)
+    r = s
+  }
+  o = f().r
+  wrap p = a + s
+}

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <filesystem>
 #include <format>
 #include <limits>
 #include <map>
@@ -13,6 +14,7 @@
 #include <span>
 #include <unordered_map>
 
+#include "hlop/memory_init.hpp"
 #include "battr.hpp"  // is_builtin_attr_name (reject `x.bits` for `x.[bits]`)
 #include "cell.hpp"
 #include "decl_facts.hpp"  // lookup() recovers the reinterpret input's declared width
@@ -539,6 +541,13 @@ void uPass_constprop::check_unsigned_positive_overflow(std::string_view lhs, con
   if (umax.is_invalid()) {
     return;
   }
+  // A raised floor (`Signed(min=20, max=30)`) is not the plain [0, max]
+  // unsigned declaration this check words its error for: leave it to the
+  // bitwidth pass, which reports the one true declared range.
+  if (const auto f = upass::decl_facts::lookup(st(), lm ? lm->get_lnast().get() : nullptr, lhs);
+      f && f->range_min && f->range_min->is_positive()) {
+    return;
+  }
   const auto delta = value.sub_op(umax);
   if (!delta || delta->is_invalid() || delta->has_unknowns() || delta->is_known_zero() || !delta->is_positive()) {
     return;
@@ -593,7 +602,7 @@ void uPass_constprop::check_field_store_kind(std::string_view field_key, const D
                                       "(a variable's type cannot change)",
                                       field_key),
               .span     = lm->current_span(),
-              .hint     = "cast the boolean explicitly, e.g. `u1(v)` or `unsigned(v)`",
+              .hint     = "cast the boolean explicitly, e.g. `U1(v)`",
           });
           return;
         }
@@ -699,6 +708,9 @@ void uPass_constprop::record_field_write(std::string_view dst_name, upass::Src_s
       return;  // nil store: declaration seed, not a set
     }
   }
+  // Keyed by the UNIT the sweep reports for: an inline frame or a scratch
+  // emit (the inliner's bindings) swaps the active tree, not the unit.
+  const auto  unit = lm->unit_lnast()->get_top_module_name();
   std::string path(dst_name);
   for (size_t i = 0; i + 1 < src.size(); ++i) {  // leading operands are selectors
     const auto& sel = src[i];
@@ -713,9 +725,17 @@ void uPass_constprop::record_field_write(std::string_view dst_name, upass::Src_s
     path += sv->to_field();
   }
   if (path.find('.') == std::string::npos) {
-    return;  // scalar store — not a field write
+    // A WHOLE-value store of an aggregate (`o = t` of an array, a rolled
+    // loop's `m__carry_out = m`) sets every field the value carries; a
+    // scalar store is not a field write at all.
+    if (src.size() == 1 && val.bundle && !val.bundle->is_scalar()) {
+      for (const auto& [k, e] : val.bundle->non_attr_entries()) {
+        st().field_touched.insert(Symbol_table::field_touch_key(unit, path + "." + k));
+      }
+    }
+    return;
   }
-  st().field_touched.insert(Symbol_table::field_touch_key(lm->get_top_module_name(), path));
+  st().field_touched.insert(Symbol_table::field_touch_key(unit, path));
 }
 
 // HLOP reductions return Boolean values. Pyrope bit operations expose an
@@ -758,6 +778,29 @@ upass::Vote uPass_constprop::process_store(std::string_view dst_name, Bundle& ds
   // position-independent runtime, resolved to the buffered net by tolg).
   const auto dst_mode = decl_mode_of(dst_name);
   if (dst_mode == upass::Mode::reg_kind || dst_mode == upass::Mode::wire_kind) {
+    // A constant index past a `reg` array's declared extent is the same static
+    // error as for a `mut` one (process_tuple_set), never a dropped write.
+    if (src.size() == 2) {
+      const auto& ix = src.front();
+      const auto  v = ix.name.empty() ? (ix.bundle ? ix.bundle->scalar() : std::nullopt)
+                                      : (st().has_trivial(ix.name) ? std::optional<Dlop>(st().get_trivial(ix.name)) : std::nullopt);
+      if (const auto root = st().get_bundle(dst_name); v && v->is_just_i64() && root && !root->get_attr("__elem_max").is_invalid()
+                                                       && root->get_attr("__array_size").is_just_i64()) {
+        const int64_t pos  = v->to_just_i64();
+        const int64_t size = root->get_attr("__array_size").to_just_i64();
+        if (size > 0 && (pos < 0 || pos >= size)) {
+          livehd::diag::sink().emit(livehd::diag::Diagnostic{
+              .severity = livehd::diag::Severity::error,
+              .code     = "array-index-out-of-range",
+              .category = "type",
+              .pass     = "upass.constprop",
+              .message  = std::format("Pyrope array index {} is outside [0, {}) for `{}`", pos, size, dst_name),
+              .span     = lm->current_span(),
+              .hint     = "use an index within the array's declared extent",
+          });
+        }
+      }
+    }
     return classify_vote();
   }
   if (src.size() <= 1) {
@@ -766,6 +809,87 @@ upass::Vote uPass_constprop::process_store(std::string_view dst_name, Bundle& ds
     process_tuple_set();
   }
   return classify_vote();
+}
+
+// A copy whose source has no table binding of its own carries none of the
+// source's declared facts: io ports are never table-backed, and a tuple-PORT
+// field read arrives already rewritten to `store(%t, req.addr)` (uPass_ssa).
+// Record where the copy came from, exactly as a tuple_get does, and forward an
+// origin along a copy chain (`const q = inst.o`), so `u1(req.write)`,
+// `req.addr.[bits]` or `const c = w; u1(c)` read the declared type through the
+// tget_origin hop. Only an UNTYPED destination takes an origin: a typed one
+// (`mut m:s8 = b`, a typed tuple leaf `r.x = a`) converts the value to its own
+// type, and a reinterpret cast or `.[bits]` of it must read that type, never
+// the source's -- so a copy OF a typed name (`%t = r.x`) takes that name
+// itself as its origin. A user variable's stale origin is dropped on a copy
+// from anything else; a compiler temp has one definition, except the temp of
+// an `if`/`match` expression, written once per arm: a CONDITIONAL write keeps
+// an origin only while every arm copies the same name (Symbol_table::
+// origin_poisoned).
+void uPass_constprop::note_copy_origin(std::string_view lhs, std::string_view rhs, bool rhs_table_backed) {
+  if (!Lnast::is_tmp(lhs) && !own_declared_type_name(lhs).empty()) {
+    drop_copy_origin(lhs);
+    return;
+  }
+  std::string origin;
+  if (const auto it = st().tget_origin.find(std::string(rhs)); it != st().tget_origin.end()) {
+    origin = it->second;
+  } else if (!Lnast::is_tmp(rhs) && !rhs.starts_with("___")) {
+    origin = own_declared_type_name(rhs);
+  }
+  if (origin.empty()) {
+    if (const auto& unit = lm->unit_lnast(); !rhs_table_backed && unit && unit->io_meta().find(rhs) != nullptr) {
+      origin = std::string(rhs);
+    }
+  }
+  if (origin.empty()) {
+    drop_copy_origin(lhs);
+    return;
+  }
+  if (st().is_conditional_write(lhs)) {
+    // A variable's value before the `if` is another arm; a temp has none.
+    const auto it = st().tget_origin.find(std::string(lhs));
+    if (st().origin_poisoned.contains(lhs) || (it == st().tget_origin.end() ? !Lnast::is_tmp(lhs) : it->second != origin)) {
+      drop_copy_origin(lhs);  // arms disagree
+      return;
+    }
+  } else {
+    st().origin_poisoned.erase(std::string(lhs));
+  }
+  st().tget_origin.insert_or_assign(std::string(lhs), std::move(origin));
+}
+
+// A USER variable's copy origin dies with any write that is not a provenance
+// copy (a constant, an expression, a typed destination). The SSA base name is
+// dropped too: lane-width lookups fall back from `m___ssa_2` to `m`.
+void uPass_constprop::drop_copy_origin(std::string_view lhs) {
+  if (st().is_conditional_write(lhs)) {
+    // One arm writes something else: no later arm restores an origin.
+    st().origin_poisoned.emplace(lhs);
+    st().tget_origin.erase(std::string(lhs));
+  }
+  if (Lnast::is_tmp(lhs) || lhs.starts_with("___")) {
+    return;
+  }
+  st().tget_origin.erase(std::string(lhs));
+  if (const auto p = lhs.find("___ssa_"); p != std::string_view::npos) {
+    st().tget_origin.erase(std::string(lhs.substr(0, p)));
+  }
+}
+
+std::string uPass_constprop::own_declared_type_name(std::string_view name) const {
+  const auto* unit  = lm->unit_lnast().get();
+  auto        typed = [&](std::string_view n) {
+    const auto f = upass::decl_facts::lookup(st(), unit, n);
+    return f && f->has_type_spec;
+  };
+  if (typed(name)) {
+    return std::string(name);
+  }
+  if (const auto p = name.find("___ssa_"); p != std::string_view::npos && typed(name.substr(0, p))) {
+    return std::string(name.substr(0, p));
+  }
+  return {};
 }
 
 void uPass_constprop::process_assign() {
@@ -803,7 +927,14 @@ void uPass_constprop::process_assign() {
       auto slots                                 = it->second;
       st().tuple_slot_ref[std::string(lhs_text)] = std::move(slots);
     }
+    // The same for the source names of bare-variable slots (a tuple TYPE's
+    // typed-only fields, `type T = (a:String, b:Signed)`, are such slots).
+    if (auto it = st().tuple_slot_src.find(std::string(current_text())); it != st().tuple_slot_src.end()) {
+      auto srcs                                  = it->second;
+      st().tuple_slot_src[std::string(lhs_text)] = std::move(srcs);
+    }
     auto rhs_bundle = current_bundle();
+    note_copy_origin(lhs_text, current_text(), rhs_bundle != nullptr);
     if (rhs_bundle) {
       // A set_mask over an array's packed bit view produces a scalar SSA temp,
       // followed by `store(array, temp)`. Preserve the destination's typed
@@ -846,14 +977,33 @@ void uPass_constprop::process_assign() {
         if (const auto nt = decl_type_name_of(lhs_text); !nt.empty()) {
           auto base = st().get_bundle(nt);
           if (base && base.get() != rhs_bundle.get() && !base->non_attr_entries().empty()) {
+            // A typed-only field (`type T = (a:String, b:Signed)`) is a POSITIONAL
+            // slot of the type's bundle whose name only survives as the source
+            // spelling of its declaring ref (Symbol_table::tuple_slot_src). A
+            // positional init value needs those names to bind like a call
+            // argument, so name the slots when the init carries positions.
+            std::map<std::string, std::string> slot_names;
+            const auto rhs_tops           = rhs_bundle->top_levels();
+            const bool init_has_positions = std::any_of(rhs_tops.begin(), rhs_tops.end(), [](const auto& tl) { return tl.pos >= 0; });
+            if (init_has_positions) {
+              if (const auto it = st().tuple_slot_src.find(nt); it != st().tuple_slot_src.end()) {
+                slot_names = it->second;
+              }
+            }
+            const auto slot_name_of = [&](std::string_view key) -> std::string {
+              const auto it = slot_names.find(std::string(key));
+              return it == slot_names.end() ? std::string(key) : it->second;
+            };
             auto merged = std::make_shared<Bundle>(std::string(lhs_text));
             for (const auto& [bk, bep] : base->non_attr_entries()) {
-              merged->set(bundle_path::of_string(bk), bep);  // the named type's default fields/values
+              merged->set(bundle_path::of_string(slot_name_of(bk)), bep);  // the named type's default fields/values
             }
             std::vector<std::string> base_named;  // canonical-order named slots
             for (const auto& tl : base->top_levels()) {
               if (tl.pos < 0) {
                 base_named.emplace_back(tl.name);
+              } else if (const auto name = slot_name_of(std::to_string(tl.pos)); name != std::to_string(tl.pos)) {
+                base_named.push_back(name);
               }
             }
             auto overlay = [&](const std::string& key, const Bundle::Entry& value) {
@@ -875,7 +1025,12 @@ void uPass_constprop::process_assign() {
               entry.comptime = entry.comptime || declared.comptime;
               merged->set(path, std::move(entry));
             };
-            size_t pidx = 0;
+            // Named init fields overlay by name; the positional ones bind like the
+            // arguments of a call (06-functions.md "Argument naming", qa.md Q35):
+            // a bare variable spelling a field, the lone field, or a value whose
+            // type is unique among ALL the fields -- anything else must be named.
+            std::vector<std::pair<std::size_t, Bundle::Entry>> positional;  // (position, value)
+            absl::flat_hash_set<std::string>                          bound;       // fields already bound by name
             for (const auto& [rk, rep] : rhs_bundle->non_attr_entries()) {
               bool numeric = !rk.empty();
               for (char ch : rk) {
@@ -884,15 +1039,87 @@ void uPass_constprop::process_assign() {
                   break;
                 }
               }
-              if (numeric) {  // positional init entry → bind to next named slot
-                if (pidx < base_named.size()) {
-                  overlay(base_named[pidx], rep);
-                  ++pidx;
-                } else {
-                  overlay(rk, rep);
-                }
+              if (numeric) {
+                positional.emplace_back(std::stoul(rk), rep);
               } else {  // named init field → overlay by name
                 overlay(rk, rep);
+                bound.insert(std::string(Bundle::get_first_level(rk)));
+              }
+            }
+            if (!positional.empty() && base_named.empty()) {
+              // A base with no named fields (`type T = (1, 2)`): bind by order.
+              std::size_t pidx = 0;
+              for (const auto& [pos, rep] : positional) {
+                if (pidx < base_named.size()) {
+                  overlay(base_named[pidx++], rep);
+                } else {
+                  overlay(std::to_string(pos), rep);
+                }
+              }
+            } else if (!positional.empty()) {
+              std::sort(positional.begin(), positional.end(), [](const auto& l, const auto& r) { return l.first < r.first; });
+              const auto field_kind = [&](const std::string& f) { return merged->get_entry(bundle_path::of_string(f)).kind; };
+              // An UNTYPED field could take any value, so no value is type-unique.
+              const bool untyped = std::any_of(base_named.begin(), base_named.end(), [&](const std::string& f) {
+                return field_kind(f) == upass::Kind::unknown;
+              });
+              const auto src_of = [&](std::size_t pos) -> std::string {
+                const auto it = st().tuple_slot_src.find(std::string(current_text()));
+                if (it == st().tuple_slot_src.end()) {
+                  return {};
+                }
+                const auto sit = it->second.find(std::to_string(pos));
+                return sit == it->second.end() ? std::string{} : sit->second;
+              };
+              const auto value_kind = [&](const Bundle::Entry& e) {
+                if (e.kind != upass::Kind::unknown) {
+                  return e.kind;
+                }
+                if (e.trivial.is_string()) {
+                  return upass::Kind::string;
+                }
+                if (e.trivial.is_bool()) {
+                  return upass::Kind::boolean;
+                }
+                return e.trivial.is_integer() ? upass::Kind::integer : upass::Kind::unknown;
+              };
+              const auto fail = [&](const std::string& why) {
+                livehd::diag::sink().emit(livehd::diag::Diagnostic{
+                    .severity = livehd::diag::Severity::error,
+                    .code     = "tuple-unnamed-field",
+                    .category = "name",
+                    .pass     = "upass.constprop",
+                    .message  = std::format("{} in the construction of `{}`: the value must be named (`field=value`)", why, nt),
+                    .span     = lm->current_span(),
+                    .hint     = "name the field, pass a variable whose name matches it, or give a value whose type "
+                                "is unique among all the fields",
+                });
+                throw std::runtime_error("tuple-unnamed-field");
+              };
+              for (const auto& [pos, rep] : positional) {
+                std::string target;
+                if (const auto src = src_of(pos); !src.empty() && !bound.contains(src)
+                                                  && std::find(base_named.begin(), base_named.end(), src) != base_named.end()) {
+                  target = src;  // exception 2: a bare variable spelling a field
+                } else if (base_named.size() == 1 && !bound.contains(base_named.front())) {
+                  target = base_named.front();  // exception 1: a single field
+                } else if (const auto k = value_kind(rep); k != upass::Kind::unknown && !untyped) {
+                  std::size_t count = 0;  // exception 3: the value's type is unique among ALL the fields
+                  for (const auto& f : base_named) {
+                    if (field_kind(f) == k) {
+                      target = f;
+                      ++count;
+                    }
+                  }
+                  if (count != 1 || bound.contains(target)) {
+                    target.clear();
+                  }
+                }
+                if (target.empty()) {
+                  fail(base_named.size() == 1 ? "too many values" : "an unnamed value is ambiguous");
+                }
+                overlay(target, rep);
+                bound.insert(target);
               }
             }
             st().set(lhs_text, merged);
@@ -1012,6 +1239,7 @@ void uPass_constprop::process_assign() {
       st().set(lhs_text, Symbol_table::invalid_lconst);
     }
   } else if (is_type(Lnast_ntype::Lnast_ntype_const)) {
+    drop_copy_origin(lhs_text);
     Dlop v = current_pyrope_value();
     // Named-type skeleton materialization for a `nil` initializer.
     // `mut w:tn = nil` (tn = (a:u8=nil, b:string="")) should leave w carrying
@@ -1368,7 +1596,23 @@ upass::Vote uPass_constprop::process_bit_or(std::string_view dst_name, Bundle& d
 
 upass::Vote uPass_constprop::process_bit_not(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   (void)dst;
-  return push_unary(dst_name, src, [](Dlop& r) { r = r.not_op(); });
+  // The typed form bit_not(x, N) (user ruling 26, an unsigned-typed operand)
+  // flips only the low N bits; the plain form is -x - 1.
+  int bits = 0;
+  if (src.size() > 1) {
+    const Dlop n = operand_value(src[1]);
+    if (!n.is_integer() || n.has_unknowns() || !n.is_just_i64() || n.to_just_i64() <= 0
+        || n.to_just_i64() > std::numeric_limits<int>::max()) {
+      return classify_vote();
+    }
+    bits = static_cast<int>(n.to_just_i64());
+  }
+  return push_unary(dst_name, src, [bits](Dlop& r) {
+    r = r.not_op();
+    if (bits > 0) {
+      r = r.get_mask_op_opt(0, bits);
+    }
+  });
 }
 
 upass::Vote uPass_constprop::process_bit_xor(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
@@ -2050,7 +2294,7 @@ void uPass_constprop::process_stmts_post() {
     // store/tuple_get hooks) — because the bundle entries cannot answer alone:
     // a runtime store leaves an invalid trivial behind, and the derived bw
     // range (kept below as an extra suppressor) bails out past 62 bits.
-    const auto unit = std::string(lm->get_top_module_name());
+    const auto unit = std::string(lm->unit_lnast()->get_top_module_name());
     const auto touched
         = [&](const std::string& path) { return st().field_touched.contains(Symbol_table::field_touch_key(unit, path)); };
     const auto emit_unset_unused = [&](const std::string& path, const std::string& var) {
@@ -2256,6 +2500,7 @@ upass::Vote uPass_constprop::process_tuple_add(std::string_view dst_name, Bundle
   // Loop-migration (Step 1): rebuild dst's slot→ref map from scratch (the
   // bundle is rebuilt from the entries below).
   st().tuple_slot_ref.erase(dvar);
+  st().tuple_slot_src.erase(dvar);
 
   // When a field is itself a NESTED sub-tuple ref (`p = (lo=q, …)` where `q`
   // is a tuple), its bundle is copied under the field key, but `q`'s runtime
@@ -2287,11 +2532,13 @@ upass::Vote uPass_constprop::process_tuple_add(std::string_view dst_name, Bundle
   // the bundle slot so downstream method dispatch (x.method(...) where
   // method is a tuple field) can look it up via tuple_get + fcall.
   auto try_store_fn_name = [&](std::string_view key, std::string_view ref_text) -> bool {
-    std::string qualified = std::string(lm->get_top_module_name()) + "." + std::string(ref_text);
-    if (!function_registry.count(qualified)) {
+    // A field may refer to an enclosing/file-scope function, not just one
+    // declared inside this module. Use the same lexical lookup as a call.
+    const auto fn = upass::call_resolver::lookup_callee(function_registry, ref_text, lm->get_top_module_name());
+    if (!fn) {
       return false;
     }
-    bundle->set(bundle_path::of_string(key), *Dlop::from_string(qualified));
+    bundle->set(bundle_path::of_string(key), *Dlop::from_string(fn->get_top_module_name()));
     return true;
   };
 
@@ -2304,6 +2551,15 @@ upass::Vote uPass_constprop::process_tuple_add(std::string_view dst_name, Bundle
     } else if (is_type(Lnast_ntype::Lnast_ntype_ref)) {
       auto       slot = std::to_string(unnamed_pos);
       const auto txt  = current_text();
+      if (const auto raw = lm->current_raw_text(); !Lnast::is_tmp(raw)) {
+        // The source spelling (never an inline frame's `inl<N>_x`, nor the SSA
+        // version suffix) of a bare-variable slot.
+        std::string src_var(raw);
+        if (const auto ssa = src_var.find("___ssa_"); ssa != std::string::npos) {
+          src_var.resize(ssa);
+        }
+        st().tuple_slot_src[dvar][slot] = std::move(src_var);
+      }
       if (!try_store_fn_name(slot, txt)) {
         // A parenthesized scalar `(expr)` lowers to a 1-element tuple_add. When
         // the element is an attributes-pass cross-pass fold (an `is`/`.[comptime]`
@@ -2506,6 +2762,22 @@ upass::Vote uPass_constprop::process_tuple_concat(std::string_view dst_name, Bun
       move_to_parent();
       return classify_vote();  // error reported; leave dst unresolved
     }
+    // A tuple is all-named or all-unnamed (03-bundle.md): splicing a named and
+    // an unnamed tuple (`(...p, ...a)`, `(...p, const e=5)`, `p ++ a`) is an
+    // error. A template body folds with unbound params, so stay quiet there.
+    if (!in_template_body() && acc->has_named_top() && acc->has_unnamed_top()) {
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "tuple-concat-mixed",
+          .category = "type",
+          .pass     = "upass.constprop",
+          .message  = "a splice cannot mix named and unnamed tuples: the result must be all-named or all-unnamed",
+          .span     = std::move(concat_span),
+          .hint     = "splice only unnamed tuples together, or only named tuples together",
+      });
+      move_to_parent();
+      return classify_vote();  // error reported; leave dst unresolved
+    }
     // Carry this operand's runtime slot-refs into the result (named keys as-is,
     // positional keys offset by `base`). Read from the local-built map too so a
     // self-splice `acc = (...acc, …)` sees acc's prior runtime fields.
@@ -2590,24 +2862,30 @@ static bool has_first_level_shape(const std::shared_ptr<Bundle const>& b) {
   return b->has_named_top() || b->has_unnamed_top();
 }
 
-// Decode a primitive type token (`u32`/`s8`/`i4`/`signed`/`unsigned`/
-// `bool`/`string`) in `does`/`equals`/`case` operand
-// position to its kind+envelope. prp2lnast leaves these as a bare ref (no read
-// site) precisely so this decode can run. Returns nullopt for any other name.
+// Decode a primitive type token (`U32`/`S8`/`Signed`/`Unsigned`/`Bool`/
+// `String`) in `does`/`equals`/`case` operand position to its kind+envelope.
+// prp2lnast leaves these as a bare ref (no read site) precisely so this decode
+// can run. Returns nullopt for any other name. The built-in type words are
+// reserved, so no variable can share the spelling (a backticked `` `U8` ``
+// name keeps its backticks in the LNAST).
 std::optional<uPass_constprop::Does_operand> uPass_constprop::decode_prim_type_token(std::string_view name) {
   Does_operand op;
-  if (name == "bool") {
+  if (name == "Bool") {
     op.kind = Does_operand::Kind::boolean;
     op.min  = *Dlop::create_integer(0);
     op.max  = *Dlop::create_integer(1);
     return op;
   }
-  if (name == "string") {
+  if (name == "String") {
     op.kind = Does_operand::Kind::string;
     return op;
   }
-  const bool is_u = (name == "uint" || name == "unsigned");
-  const bool is_s = (name == "signed" || name == "int" || name == "integer");
+  if (name == "Clock" || name == "Reset") {
+    op.kind = name == "Clock" ? Does_operand::Kind::clock : Does_operand::Kind::reset;
+    return op;
+  }
+  const bool is_u = (name == "Unsigned");
+  const bool is_s = (name == "Signed");
   if (is_u || is_s) {
     op.kind    = Does_operand::Kind::integer;
     op.max_inf = true;  // unsized → unbounded above
@@ -2618,12 +2896,12 @@ std::optional<uPass_constprop::Does_operand> uPass_constprop::decode_prim_type_t
     }
     return op;
   }
-  // Width sugar `u<N>` / `s<N>` / `i<N>`: bounds from the bit count.
-  if (name.size() >= 2 && (name[0] == 'u' || name[0] == 's' || name[0] == 'i')
+  // Width sugar `U<N>` / `S<N>`: bounds from the bit count.
+  if (name.size() >= 2 && name.size() <= 10 && (name[0] == 'U' || name[0] == 'S')
       && std::all_of(name.begin() + 1, name.end(), [](unsigned char ch) { return std::isdigit(ch); })) {
     const int n        = std::stoi(std::string(name.substr(1)));
     op.kind            = Does_operand::Kind::integer;
-    const bool sugar_s = (name[0] != 'u');
+    const bool sugar_s = (name[0] == 'S');
     op.max             = upass::max_from_bits(static_cast<uint32_t>(n), sugar_s);
     op.min             = upass::min_from_bits(static_cast<uint32_t>(n), sugar_s);
     return op;
@@ -2713,6 +2991,11 @@ std::optional<uPass_constprop::Does_operand> uPass_constprop::resolve_does_opera
     if (auto t = decode_prim_type_token(name)) {
       return t;
     }
+  }
+  // A `Clock`/`Reset` input is its own basic type, not a Bool.
+  if (const auto* pe = lm->get_lnast()->io_meta().find(name); pe != nullptr && pe->sig != Io_sig::none) {
+    op.kind = pe->sig == Io_sig::clock ? Does_operand::Kind::clock : Does_operand::Kind::reset;
+    return op;
   }
   if (bundle_is_tuple) {
     op.kind   = Does_operand::Kind::tuple;
@@ -2834,8 +3117,8 @@ std::optional<bool> uPass_constprop::scalar_does(const Does_operand& a, const Do
   if (a.kind != b.kind) {
     return false;
   }
-  if (a.kind == Kind::string || a.kind == Kind::boolean) {
-    return true;  // same basic type of boolean/string → true
+  if (a.kind == Kind::string || a.kind == Kind::boolean || a.kind == Kind::clock || a.kind == Kind::reset) {
+    return true;  // same basic type of boolean/string/Clock/Reset → true
   }
   // Both integer: envelope superset `a.max>=b.max and a.min<=b.min`, with
   // ±∞ flags short-circuiting the finite Dlop compares.
@@ -3521,6 +3804,64 @@ bool uPass_constprop::try_eval_mux_cell_call(std::string_view dst, std::string_v
 // in a 3-bit window).
 static bool concat_lane_fits(const Dlop& v, int bits) { return v.get_payload_bits() <= bits; }
 
+bool uPass_constprop::check_gate_call_binding(std::string_view fname, const std::vector<Call_actual>& actuals) {
+  if (fname.size() < 3 || fname[0] != '_' || fname[1] != '_') {
+    return false;
+  }
+  const auto nop = Ntype::get_op(fname.substr(2));
+  // Only the pin-addressed gates: `__memory(cfg)` takes one config tuple, and
+  // the other `__` callees (`__fmt`, `__readmemh`, ...) are compiler intrinsics.
+  if (nop == Ntype_op::Invalid || nop == Ntype_op::Memory || nop == Ntype_op::Sub || nop == Ntype_op::IO
+      || nop == Ntype_op::AttrSet) {
+    return false;
+  }
+  const auto pins = Ntype::sink_names(nop);
+  std::string list;
+  for (const auto& pin : pins) {
+    list += list.empty() ? pin : ", " + pin;
+  }
+  for (const auto& a : actuals) {
+    if (a.is_named) {
+      if (Ntype::is_sink_name(nop, a.name)
+          || (Ntype::is_unlimited_sink(nop) && !a.name.empty() && a.name.find_first_not_of("0123456789") == std::string::npos)) {
+        continue;
+      }
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "fcall-unknown-arg",
+          .category = "name",
+          .pass     = "upass.constprop",
+          .message  = std::format("unknown argument `{}` in call to `{}`: not a pin of the cell", a.name, fname),
+          .span     = lm->current_span(),
+          .hint     = std::format("the pins of `{}` are {} (graph/cell.cpp)", fname, list),
+      });
+      return true;
+    }
+    // Positional: the naming exceptions are a single-pin gate, or a bare
+    // variable whose name is a pin. (Type-unique matching needs declared types.)
+    if (Ntype::has_single_sink(nop) && actuals.size() == 1) {
+      continue;
+    }
+    if (!a.var_name.empty() && Ntype::is_sink_name(nop, a.var_name)) {
+      continue;
+    }
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = "fcall-unnamed-arg",
+        .category = "name",
+        .pass     = "upass.constprop",
+        .message  = std::format("every argument of the basic gate `{}` must be named with its pin name ({}): an unnamed "
+                                "argument is ambiguous",
+                                fname,
+                                list),
+        .span     = lm->current_span(),
+        .hint     = std::format("write `{}({}=...)`; a gate is an ordinary call", fname, pins.empty() ? "pin" : pins.front()),
+    });
+    return true;
+  }
+  return false;
+}
+
 bool uPass_constprop::try_eval_cell_call(std::string_view dst, std::string_view fname, const std::vector<Call_actual>& actuals) {
   // `__name(...)` direct cell-op call. Strip the `__` prefix and dispatch
   // against the Ntype_op kernel set. Operands are positional and follow the
@@ -3798,6 +4139,52 @@ void uPass_constprop::process_import_call(const std::string& dst) {
       dst);
 }
 
+void uPass_constprop::fold_std_clog2(std::string_view dst, const std::optional<std::vector<Call_actual>>& actuals) {
+  // `std.clog2(x)` (docs 13-stdlib "Built-in `std` namespace"): Verilog
+  // `$clog2`, the smallest n with (1 << n) >= x, so std.clog2(1) == 0. Comptime
+  // only: it sizes types, it is not a priority encoder.
+  const auto fail = [&](std::string_view code, std::string msg, std::string_view hint) {
+    livehd::diag::sink().emit(livehd::diag::Diagnostic{
+        .severity = livehd::diag::Severity::error,
+        .code     = std::string{code},
+        .category = "type",
+        .pass     = "upass.constprop",
+        .message  = std::move(msg),
+        .span     = lm->current_span(),
+        .hint     = std::string{hint},
+    });
+  };
+  if (!actuals.has_value() || actuals->size() != 1 || (*actuals)[0].is_named || (*actuals)[0].is_bundle) {
+    fail("std-clog2-arity", "`std.clog2(x)` takes exactly one positional argument", "write `std.clog2(N)`");
+    return;
+  }
+  const auto& a = (*actuals)[0];
+  if (a.value.is_invalid()) {
+    // An unbound generic of a template body is not a value yet; the call is
+    // judged again where the body is realized.
+    if (in_template_body() && !lm->in_inline_frame()) {
+      return;
+    }
+    const auto what = a.var_name.empty() || Lnast::is_tmp(a.var_name)
+                          ? std::string{"the argument"}
+                          : std::format("`{}`", upass::Lnast_manager::user_name(a.var_name));
+    fail("std-clog2-not-comptime",
+         std::format("`std.clog2(x)` needs a positive comptime integer; {} is not a compile-time value", what),
+         "`std.clog2` sizes types at compile time: size from a literal, a `comptime const`, or a generic parameter");
+    return;
+  }
+  const auto& x = a.value;
+  const auto  r = upass::std_clog2(x);
+  if (!r) {
+    fail("std-clog2-domain",
+         std::format("`std.clog2(x)` needs a positive comptime integer, got {}",
+                     x.is_integer() ? x.to_decimal_string() : x.to_pyrope()),
+         "`std.clog2` is Verilog `$clog2`, defined for x >= 1 (`std.clog2(1) == 0`)");
+    return;
+  }
+  store_trivial(dst, *r);
+}
+
 void uPass_constprop::process_func_call() {
   // Layout: ref(dst), ref(func_name), (const|ref)(arg)...
   // Now strictly the ref-form (built-in typecast callables and user funcs).
@@ -3893,6 +4280,38 @@ void uPass_constprop::process_func_call() {
 
   auto actuals = collect_call_actuals();
 
+  if (fname == "__readmemh" || fname == "__readmemb") {
+    if (!actuals || actuals->size() != 2 || (*actuals)[0].is_named || (*actuals)[0].is_bundle || !(*actuals)[0].value.is_string()
+        || !(*actuals)[1].value.is_string() || (*actuals)[0].value.to_string().empty()) {
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "readmem-filename",
+          .category = "type",
+          .pass     = "upass.constprop",
+          .message  = "std.readmemh/readmemb requires one nonempty comptime string filename",
+          .span     = lm->current_span(),
+          .hint     = "use reg mem:[DEPTH]uWIDTH = std.readmemh(\"image.hex\")",
+      });
+    } else {
+      auto path = std::filesystem::path((*actuals)[0].value.to_string());
+      if (path.is_relative()) {
+        const auto source = hlop::memory_image((*actuals)[1].value.to_string());
+        I(source.has_value());
+        path = std::filesystem::path(source->path) / path;
+      }
+      path = std::filesystem::absolute(path).lexically_normal();
+      store_trivial(dst, *Dlop::create_string(hlop::memory_image_command(fname == "__readmemh" ? 16 : 2, path.string())));
+    }
+    move_to_parent();
+    return;
+  }
+
+  if (fname == upass::std_clog2_callee) {
+    fold_std_clog2(dst, actuals);
+    move_to_parent();
+    return;
+  }
+
   // String-interpolation format directive `__fmt(value, 'spec')`: render
   // `value` per a std::format-style presentation spec (b/o/x/X/d) into a
   // string Dlop. Emitted by prp2lnast for `"{expr:spec}"` chunks and then
@@ -3916,10 +4335,95 @@ void uPass_constprop::process_func_call() {
     return;
   }
 
+  // docs 04-variables "Range": `tuple(range)` materializes the range as an
+  // unnamed tuple; `range(int)` decodes a one-hot integer (bit i set <=> i is
+  // in the range; a uniform stride is a stepped range). A tuple cannot be cast
+  // to a range, and `range` takes exactly one integer.
+  if (fname == "range" || fname == "tuple") {
+    const auto cast_error = [&](std::string msg, std::string hint) {
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "range-tuple-cast",
+          .category = "type",
+          .pass     = "upass.constprop",
+          .message  = std::move(msg),
+          .span     = lm->current_span(),
+          .hint     = std::move(hint),
+      });
+    };
+    if (!actuals.has_value() || actuals->size() != 1 || (*actuals)[0].is_named) {
+      if (actuals.has_value()) {
+        cast_error(std::format("`{}(...)`: typecast not allowed with {} arguments", fname, actuals->size()),
+                   fname == "range" ? "`range(x)` takes one one-hot integer" : "`tuple(x)` takes one range or tuple");
+      }
+      move_to_parent();
+      return;
+    }
+    const auto  arg = (*actuals)[0];
+    const auto  src = arg.var_name.empty() ? nullptr : st().get_bundle(arg.var_name);
+    const bool  src_is_range = src && !src->get_attr("rng_s").is_invalid();
+    if (fname == "tuple") {
+      if (src_is_range) {
+        auto nb = std::make_shared<Bundle>(dst);
+        for (const auto& [k, ep] : src->non_attr_entries()) {
+          nb->set(bundle_path::of_string(k), ep.trivial);
+        }
+        if (nb->unnamed_top_count() > 0) {
+          nb->set_value_kind(upass::Kind::tuple);
+          st().set(dst, nb);
+        }
+      } else if (src && is_tuple_shaped(src)) {
+        st().set(dst, src);
+      } else if (!arg.value.is_invalid()) {
+        store_trivial(dst, arg.value);
+      }
+      move_to_parent();
+      return;
+    }
+    // range(int)
+    if (src_is_range) {
+      st().set(dst, src);  // already a range
+    } else if (src && is_tuple_shaped(src)) {
+      cast_error("`range(...)`: a tuple cannot be cast to a range",
+                 "only an integer (one-hot encoding) casts to a range; write the range `a..=b` directly");
+    } else if (!arg.value.is_invalid()) {
+      const Dlop& v = arg.value;
+      if (!v.is_integer() || v.has_unknowns() || v.is_negative() || v.is_known_zero()) {
+        cast_error(std::format("`range({})`: needs a positive one-hot integer", v.to_pyrope()),
+                   "a range casts from a non-negative integer whose set bits are the range's elements (`0ub01_1100` is `2..=4`)");
+      } else {
+        std::vector<int64_t> bits;
+        const int            width = v.get_signed_bits() + 1;
+        for (int i = 0; i < width && width <= 4096; ++i) {
+          if (v.bit_test(i)) {
+            bits.push_back(i);
+          }
+        }
+        const int64_t step    = bits.size() > 1 ? bits[1] - bits[0] : 1;
+        bool          uniform = !bits.empty();
+        for (size_t i = 1; i < bits.size(); ++i) {
+          uniform = uniform && (bits[i] - bits[i - 1] == step);
+        }
+        if (!uniform) {
+          cast_error(std::format("`range({})`: the set bits do not form a range", v.to_pyrope()),
+                     "a one-hot integer is a range only when its set bits are evenly spaced");
+        } else {
+          st().set(dst, make_range_bundle(dst, *Dlop::create_integer(bits.front()), *Dlop::create_integer(bits.back()), *Dlop::create_integer(step)));
+        }
+      }
+    }
+    move_to_parent();
+    return;
+  }
+
   // Direct cell-op call: `__sum(a, b)`, `__hotmux(c0, v0, c1, v1, …)`, … —
   // every Ntype_op cell can surface in Pyrope as `__name(...)` and gets
   // folded here when all actuals are comptime-known. See cell.hpp for the
   // canonical names.
+  if (actuals.has_value() && check_gate_call_binding(fname, *actuals)) {
+    move_to_parent();
+    return;
+  }
   if (actuals.has_value() && try_eval_cell_call(dst, fname, *actuals)) {
     move_to_parent();
     return;
@@ -4047,7 +4551,45 @@ void uPass_constprop::process_func_call() {
     if (args.size() != 1) {
       return;
     }  // unsupported arity
-    Dlop v = to_scalar(args.front());
+    // docs 04-variables "Boolean": a string input is valid only for ("0", "1",
+    // "-1", "true", "TRUE", "t", "false", "FALSE", "f"); anything else raises
+    // an assertion failure. "Integer or Signed": the string must be a validly
+    // formatted Pyrope number, or an assertion is raised.
+    const bool arg_is_string = args.front().is_string();
+    Dlop       v;
+    if (arg_is_string && kind == Cast::to_bool) {
+      const std::string text = strip_pyrope_quotes(args.front().to_pyrope());
+      if (text == "1" || text == "-1" || text == "true" || text == "TRUE" || text == "t") {
+        v = *Dlop::create_bool(true);
+      } else if (text == "0" || text == "false" || text == "FALSE" || text == "f") {
+        v = *Dlop::create_bool(false);
+      } else {
+        livehd::diag::sink().emit(livehd::diag::Diagnostic{
+            .severity = livehd::diag::Severity::error,
+            .code     = "cast-bad-string",
+            .category = "type",
+            .pass     = "upass.constprop",
+            .message  = std::format("`{}(\"{}\")`: the string is not a boolean spelling", fname, text),
+            .span     = lm->current_span(),
+            .hint     = "a string casts to Bool only as \"0\", \"1\", \"-1\", \"true\", \"TRUE\", \"t\", \"false\", \"FALSE\" or \"f\"",
+        });
+        return;
+      }
+    } else {
+      v = to_scalar(args.front());
+    }
+    if (arg_is_string && (kind == Cast::to_sized) && (v.is_invalid() || v.is_string())) {
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "cast-bad-string",
+          .category = "type",
+          .pass     = "upass.constprop",
+          .message  = std::format("`{}({})`: the string is not a valid Pyrope number", fname, args.front().to_pyrope()),
+          .span     = lm->current_span(),
+          .hint     = "an integer cast of a string needs a validly formatted Pyrope number (e.g. \"12\", \"0x1f\")",
+      });
+      return;
+    }
     if (v.is_invalid()) {
       return;
     }
@@ -4102,7 +4644,7 @@ void uPass_constprop::process_func_call() {
               .pass     = "upass.constprop",
               .message  = std::format("`{}(...)` reinterpret needs a fully-typed input (a known bit width)", fname),
               .span     = lm->current_span(),
-              .hint     = "give the operand a sized type (`:uN`/`:sN`) before reinterpreting its sign",
+              .hint     = "give the operand a sized type (`:U<N>`/`:S<N>`) before reinterpreting its sign",
           });
           return;
         }
@@ -4155,7 +4697,7 @@ void uPass_constprop::process_func_call() {
                                       tmin.to_decimal_string(),
                                       tmax.to_decimal_string()),
               .span     = lm->current_span(),
-              .hint     = "a sized cast (`uN`/`sN`) is checked, not truncating; use a `wrap` or `sat` "
+              .hint     = "a sized cast (`U<N>`/`S<N>`) is checked, not truncating; use a `wrap` or `sat` "
                           "prefix to drop bits intentionally",
           });
           return;  // dst left unbound (the call site is now an error)
@@ -4286,6 +4828,15 @@ void uPass_constprop::process_tuple_get() {
     return;  // no field — nothing to propagate
   }
 
+  // A test-block instance handle (`mut d = dut`; Symbol_table::instance_handles)
+  // is not a tuple: `d.o` reads the design at run time. Nothing folds, and a
+  // name that is not a port may still be its state (`d.r`), which the sim
+  // driver resolves. The runner stashed the ports' declared facts.
+  if (st().instance_handles.contains(src)) {
+    move_to_parent();
+    return;
+  }
+
   // Range-indexed tuple_get on a string folds inline (`x[1..=2]` / `x[1..]`).
   // Same path also handles integer source for bit-slicing (`b[0..<4]`):
   // detect: exactly one field operand which is a ref bound by a prior
@@ -4380,16 +4931,57 @@ void uPass_constprop::process_tuple_get() {
     if (key.size() > src.size() + 1) {
       check_nested_tuple_access(src, key.substr(src.size() + 1));  // the field path, sans "src."
     }
-    // Feeds the unset-unused-field warning ("was read" evidence).
-    st().field_touched.insert(Symbol_table::field_touch_key(lm->get_top_module_name(), key));
+    // Feeds the unset-unused-field warning ("was read" evidence), keyed by
+    // the UNIT the sweep reports for (an inline frame reads its callee tree).
+    st().field_touched.insert(Symbol_table::field_touch_key(lm->unit_lnast()->get_top_module_name(), key));
   }
 
   // For a NAMED access, capture src's bundle so we can tell "absent named field
-  // on a resolved multi-field tuple → nil" apart from the single-output-callee
-  // scalar fallback further below.
-  const auto src_bundle = (first_captured && !first_is_index) ? st().get_bundle(src) : nullptr;
-  const bool named_field_absent
-      = src_bundle && !src_bundle->is_empty() && !src_bundle->is_scalar() && !src_bundle->has_top_named(first_seg);
+  // on a resolved tuple" apart from the single-output-callee scalar fallback
+  // further below. A bundle with a NAMED top-level field is a tuple even when
+  // that is its only field (`(const x = a)`, a one-member import namespace):
+  // its absent fields are absent. A single-output callee result is
+  // positional, never named.
+  const auto src_bundle         = (first_captured && !first_is_index) ? st().get_bundle(src) : nullptr;
+  const bool named_field_absent = src_bundle && !src_bundle->is_empty() && (!src_bundle->is_scalar() || src_bundle->has_named_top())
+                                  && !src_bundle->has_top_named(first_seg);
+
+  // A Sub instance result (`const c = inc(a=x)`) holds no value here, but its
+  // fields are exactly the callee's outputs (Symbol_table::sub_output_names):
+  // any other name is absent at the read, even where nothing uses the value.
+  if (first_captured && !first_is_index && !named_field_absent) {
+    // A field names an output, a tuple output's leaf (`out.tag`) or a level
+    // above flattened leaves (`cmd` of `cmd.op`).
+    const auto dotted_prefix = [](std::string_view outer, std::string_view inner) {
+      return inner.size() > outer.size() && inner.starts_with(outer) && inner[outer.size()] == '.';
+    };
+    // sub_output_names are unquoted; a field spelled by a backticked type
+    // word (`` c.`S4` ``) names the output `S4`.
+    std::string_view fseg = first_seg;
+    if (fseg.size() >= 2 && fseg.front() == '`' && fseg.back() == '`') {
+      fseg = fseg.substr(1, fseg.size() - 2);
+    }
+    if (const auto on = st().sub_output_names.find(src);
+        on != st().sub_output_names.end() && std::none_of(on->second.begin(), on->second.end(), [&](const std::string& o) {
+          return o == fseg || dotted_prefix(fseg, o) || dotted_prefix(o, fseg);
+        })) {
+      std::string outs;
+      for (const auto& o : on->second) {
+        outs += outs.empty() ? o : ", " + o;
+      }
+      livehd::diag::sink().emit(livehd::diag::Diagnostic{
+          .severity = livehd::diag::Severity::error,
+          .code     = "unknown-field",
+          .category = "type",
+          .pass     = "upass.constprop",
+          .message  = std::format("unknown field `{}` on instance `{}`", first_seg, src_raw.empty() ? src : src_raw),
+          .span     = lm->current_span(),
+          .hint     = std::format("the instance's fields are its outputs: {}", outs),
+      });
+      store_trivial(dst, *Dlop::nil());
+      return;
+    }
+  }
 
   // Enum entry read (`Mammal.rat`, `Color.Red`): alias the CARRIER bundle —
   // its `__enumentry` identity attr is what enum-aware `in` / `string()` /
@@ -4419,10 +5011,16 @@ void uPass_constprop::process_tuple_get() {
       const auto fpath = std::string_view(key).substr(src.size() + 1);
       // An extracted scalar keeps resolved field attributes when it is later
       // aliased. Copy inherited user metadata first, then field overrides.
+      // An array's SHAPE attrs (`__array_size`, `__elem_max`, ...) describe the
+      // aggregate, never one of its scalars: an element read that carried them
+      // looked like a shape-only array to later packing/typespec checks.
       if (auto db = st().get_bundle_for_write(dst); db) {
         for (const auto& [attr, entry] : sb->get_attrs()) {
           const auto prefix = Bundle::get_all_but_last_level(attr);
           const auto name   = Bundle::get_last_level(attr);
+          if (battr::is_array_shape_attr(name)) {
+            continue;
+          }
           if (prefix.empty() && (!battr::is_builtin_attr_name(name) || battr::is_sticky(name))) {
             if (db->get_attr(name).is_invalid()) {
               db->set_attr(name, entry.trivial);
@@ -4475,7 +5073,7 @@ void uPass_constprop::process_tuple_get() {
     }
   } else if (named_field_absent) {
     // Reading a named field that does not exist on a resolved
-    // multi-field tuple is a COMPILE ERROR (03-bundle.md; `has` is the sanctioned
+    // tuple is a COMPILE ERROR (03-bundle.md; `has` is the sanctioned
     // existence probe, not `field == nil`). `src_bundle` is the authoritative
     // field-set: it carries every declared field — including typed-but-nil ones
     // materialized from a `:type` declaration (see the named-type skeleton copy
@@ -4544,21 +5142,19 @@ void uPass_constprop::check_tuple_access(const std::string& base, const std::str
     return;
   }
   auto base_b = st().get_bundle(base);
-  // Skip unless the base shape is resolved: a null/empty bundle means the
-  // shape isn't built yet at this point in the walk (flagging now would be a
-  // false positive); a bare scalar is `x[0]` sugar / a single-output fallback.
-  if (!base_b || base_b->is_empty() || base_b->is_scalar()) {
+  if (!base_b) {
     return;
-  }
-  const size_t n_unnamed = base_b->unnamed_top_count();
-  const size_t n_named   = base_b->named_top_count();
-  if (n_unnamed == 0 && n_named == 0) {
-    return;  // no resolved top-level fields — nothing to check
   }
   int idx      = 0;
   auto [p, ec] = std::from_chars(seg.data(), seg.data() + seg.size(), idx);
   if (ec != std::errc{}) {
     return;  // unparseable index — skip
+  }
+  if (!base_b->get_attr("__elem_max").is_invalid() && !base_b->get_attr("__array_dim_pending").is_invalid()) {
+    // A DECLARED array whose extent does not fold yet (`mut m:[N]u4 = 0` in a
+    // generic template, before N is bound): its lanes are not the entries
+    // written so far, so there is nothing to check until the dim folds.
+    return;
   }
   const auto& declared_size = base_b->get_attr("__array_size");
   if (!base_b->get_attr("__elem_max").is_invalid() && declared_size.is_just_i64() && declared_size.to_just_i64() > 0) {
@@ -4575,6 +5171,19 @@ void uPass_constprop::check_tuple_access(const std::string& base, const std::str
       });
     }
     return;
+  }
+  // Any other value: skip unless its shape is resolved. A null/empty bundle
+  // means the shape isn't built yet at this point in the walk (flagging now
+  // would be a false positive); a bare scalar is `x[0]` sugar / a
+  // single-output fallback. A DECLARED array (above) is judged by its declared
+  // extent whatever it holds -- a `reg` array's lanes are not entries here.
+  if (base_b->is_empty() || base_b->is_scalar()) {
+    return;
+  }
+  const size_t n_unnamed = base_b->unnamed_top_count();
+  const size_t n_named   = base_b->named_top_count();
+  if (n_unnamed == 0 && n_named == 0) {
+    return;  // no resolved top-level fields — nothing to check
   }
   // Positional access is valid ONLY for unnamed entries: a named tuple is
   // name-access only (`(b=1, c=2)[0]` is an error — use `.b`).

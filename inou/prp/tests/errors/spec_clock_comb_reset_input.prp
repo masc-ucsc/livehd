@@ -1,0 +1,16 @@
+/*
+:name: spec_clock_comb_reset_input
+:type: error
+:error: a comb holds no state and can not declare a Reset input
+*/
+// SPEC (clock lane): a `comb` can not declare a `Reset` input.
+//   qa.md Appendix 7: "A `comb` cannot have Clock/Reset inputs."
+//   docs 04b: "A `comb` holds no state and can not declare a `Clock` or `Reset`
+//     input (a compile error)"
+// (The Clock half is errors/clkrst_comb_clock_input.prp.)
+comb clr(r:Reset, a:U8) -> (y:U8) {  // locate_error_here
+  y = a
+}
+pub comb spec_clock_comb_reset_input(a:U8) -> (o:U8) {
+  o = a
+}

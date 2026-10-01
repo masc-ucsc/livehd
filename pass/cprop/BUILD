@@ -59,3 +59,15 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+cc_test(
+    name = "cprop_muxctx_test",
+    srcs = ["cprop_muxctx_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":pass_cprop",
+        "//graph",
+        "//pass/lec:lec_query",
+        "@googletest//:gtest_main",
+    ],
+)

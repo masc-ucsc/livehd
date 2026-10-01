@@ -52,9 +52,9 @@ fail() {
 
 # ---- fixtures ---------------------------------------------------------------
 cat > "$W/plain.prp" <<'EOF'
-pub mod plain8(d:u8) -> (q:u8@[1]) {
-  reg f:u8 = 0
-  reg g:u8 = 0
+pub mod plain8(d:U8) -> (q:U8@[1]) {
+  reg f:U8 = 0
+  reg g:U8 = 0
   q = g
   g = f
   f = d
@@ -62,8 +62,8 @@ pub mod plain8(d:u8) -> (q:u8@[1]) {
 EOF
 
 cat > "$W/lat.prp" <<'EOF'
-pub mod lat8(en:bool, d:u8) -> (q:u8@[0]) {
-  reg l:u8:[latch=true]
+pub mod lat8(en:Bool, d:U8) -> (q:U8@[0]) {
+  reg l:U8:[latch=true]
   q = l
   if en {
     l = d
@@ -72,9 +72,9 @@ pub mod lat8(en:bool, d:u8) -> (q:u8@[0]) {
 EOF
 
 cat > "$W/neg.prp" <<'EOF'
-pub mod neg8(d:u8) -> (q:u8@[1]) {
-  reg a:u8 = 0
-  reg b:u8:[posclk=false] = 0
+pub mod neg8(d:U8) -> (q:U8@[1]) {
+  reg a:U8 = 0
+  reg b:U8:[posclk=false] = 0
   q = b
   b = a
   a = d
@@ -178,18 +178,19 @@ echo "ok: a negedge design normalizes to posedge flops plus a phase divider"
 #
 # The shape: a transparent-LOW latch closes at the clock's RISE, and a POSEDGE
 # flop samples at that same rise.
-cat > "$W/l1.prp" <<'EOF'
-pub mod l1(clk:bool, d:u8) -> (q:u8@[1]) {
-  reg ll:u8:[latch=true]
-  reg f:u8:[clock_pin=ref clk] = 0
-  q = f
-  if !clk {
-    ll = d
-  }
-  f = ll
-}
+# (Verilog: a latch gated by the clock level reads the Clock as data, which
+# Pyrope's `Clock` type forbids.)
+cat > "$W/l1.sv" <<'EOF'
+module l1(input clk, input reset, input [7:0] d, output [7:0] q);
+  reg [7:0] ll, f;
+  always_latch if (!clk) ll = d;
+  always @(posedge clk) if (reset) f <= 0; else f <= ll;
+  assign q = f;
+endmodule
 EOF
-compile_lg l1 l1
+rm -rf "$W/lg_l1"
+"$LHD" compile "$W/l1.sv" --reader slang --top l1 --emit-dir "lg:$W/lg_l1" --workdir "$W/cw_l1" >"$W/c_l1.log" 2>&1 \
+  || { tail -5 "$W/c_l1.log"; fail "compile of l1.sv failed"; }
 rm -rf "$W/lg_l1_out"
 out="$("$LHD" pass single_edge --top l1 "lg:$W/lg_l1" --emit-dir "lg:$W/lg_l1_out" \
        --workdir "$W/pw_l1" 2>&1)"
@@ -204,9 +205,9 @@ echo "ok: a coincident-edge latch/flop pair is refused with a named diagnostic"
 # exactly that shape — keyed on the slot instead of the commit CLASS, rule 4
 # would reject it and take a live fixture down with it.
 cat > "$W/mix.prp" <<'EOF'
-pub mod mix8(clk:bool, en:bool, d:u8) -> (q:u8@[1]) {
-  reg l:u8:[latch=true]
-  reg f:u8 = 0
+pub mod mix8(clk:Clock, en:Bool, d:U8) -> (q:U8@[1]) {
+  reg l:U8:[latch=true]
+  reg f:U8 = 0
   q = f
   if en {
     l = d
@@ -230,9 +231,9 @@ echo "ok: a data-gated latch feeding a flop is still accepted (rule 4 is keyed o
 # semantics, and turning a correct verdict into an unsupported exit is a
 # regression, not fail-closed.
 cat > "$W/twoclk.prp" <<'EOF'
-pub mod twoclk(clk:bool, clkb:bool, d:u8) -> (qa:u8@[1], qb:u8@[2]) {
-  reg ra:u8:[clock_pin=ref clk] = 0
-  reg rb:u8:[clock_pin=ref clkb] = 0
+pub mod twoclk(clk:Clock, clkb:Clock, d:U8) -> (qa:U8@[1], qb:U8@[2]) {
+  reg ra:U8:[clock_pin=clk] = 0
+  reg rb:U8:[clock_pin=clkb] = 0
   qa = ra
   qb = rb
   ra = d
@@ -251,10 +252,10 @@ echo "ok: a second clock domain with no known ratio is skipped, not slotted and 
 # ...but a second clock domain that ALSO holds a latch cannot be skipped (the
 # encoder would refuse the Latch cell), so there it must fail closed loudly.
 cat > "$W/twoclk_lat.prp" <<'EOF'
-pub mod tcl(clk:bool, clkb:bool, en:bool, d:u8) -> (qa:u8@[1], ql:u8@[0]) {
-  reg ra:u8:[clock_pin=ref clk] = 0
-  reg rb:u8:[clock_pin=ref clkb] = 0
-  reg l:u8:[latch=true]
+pub mod tcl(clk:Clock, clkb:Clock, en:Bool, d:U8) -> (qa:U8@[1], ql:U8@[0]) {
+  reg ra:U8:[clock_pin=clk] = 0
+  reg rb:U8:[clock_pin=clkb] = 0
+  reg l:U8:[latch=true]
   qa = rb
   ql = l
   ra = d
@@ -280,19 +281,20 @@ echo "ok: a second clock domain that also holds a latch fails closed with a name
 # constrain EVERY step, and historically wrapping one silently freed the
 # mid-period steps — a FALSE REFUTED factory).
 #
-# A selected-top input assume has no parent that can discharge it. It therefore
-# warns and remains active with assume_nocheck semantics. What this case pins is
-# that the constraint is period-independent: it stays in force at every P=2
-# microstep while assertions are observed only at settled period boundaries.
+# The environment constraint is spelled assume_nocheck: a plain assume is always
+# checked (docs 05-assert), and over a free top input it would refute. What this
+# case pins is that the constraint is period-independent: it stays in force at
+# every P=2 microstep while assertions are observed only at settled period
+# boundaries.
 cat > "$W/asm.prp" <<'EOF'
-pub mod asm_tb(sel:bool) -> (ok:bool@[0]) {
-  reg cyc:u3 = 0
-  reg a:u8 = 0
-  reg b:u8:[posclk=false] = 0     // negedge stage: this is what forces P=2
+pub mod asm_tb(sel:Bool) -> (ok:Bool@[0]) {
+  reg cyc:U3 = 0
+  reg a:U8 = 0
+  reg b:U8:[posclk=false] = 0     // negedge stage: this is what forces P=2
   const c  = cyc
   const aq = a
   const bq = b
-  assume(!sel, "the environment never asserts sel")
+  assume_nocheck(!sel)  // the environment never asserts sel
   a = if sel { 200 } else { 11 + (16 * c) }
   b = aq
   wrap cyc += 1
@@ -304,18 +306,16 @@ EOF
 out="$("$LHD" formal verify "$W/asm.prp" --top asm_tb --workdir "$W/aw" \
         --set formal.bound=12 --set formal.simfail_run=false 2>&1)"
 rc=$?
-[ "$rc" -eq 0 ] || { echo "$out" | tail -6; fail "the top IO assume must remain active and prove the P=2 assertions (rc=$rc)"; }
+[ "$rc" -eq 0 ] || { echo "$out" | tail -6; fail "the top IO assume_nocheck must remain active and prove the P=2 assertions (rc=$rc)"; }
 grep -q "pass.single_edge slots:2" <<<"$out" \
   || fail "the assume fixture did not reach P=2, so it pins nothing about normalization"
-grep -q "formal-top-assume" <<<"$out" \
-  || { echo "$out" | tail -6; fail "the selected-top IO assume must emit its cannot-check warning"; }
-grep -q "in force (UNCHECKED top-level IO assume cannot be checked; treated as assume_nocheck" <<<"$out" \
-  || { echo "$out" | tail -6; fail "the top IO assume must be disclosed as active under P=2"; }
-echo "ok: the top IO assume stays active at every P=2 microstep"
+grep -q "in force (UNCHECKED assume_nocheck" <<<"$out" \
+  || { echo "$out" | tail -6; fail "the top IO assume_nocheck must be disclosed as active under P=2"; }
+echo "ok: the top IO assume_nocheck stays active at every P=2 microstep"
 
 # NON-VACUITY: the fixture's asserts are not self-satisfying -- without the
 # assume the design still REFUTES (now for the assert, not the assume check).
-grep -v 'assume(!sel' "$W/asm.prp" > "$W/asm_novac.prp"
+grep -v 'assume_nocheck(!sel' "$W/asm.prp" > "$W/asm_novac.prp"
 out="$("$LHD" formal verify "$W/asm_novac.prp" --top asm_tb --workdir "$W/awv" \
         --set formal.bound=12 --set formal.simfail_run=false 2>&1)"
 grep -q "REFUTED" <<<"$out" \

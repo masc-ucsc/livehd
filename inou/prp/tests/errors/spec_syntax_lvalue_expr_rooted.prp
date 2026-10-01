@@ -1,0 +1,10 @@
+/*
+:name: spec_syntax_lvalue_expr_rooted
+:type: error
+:error: this cannot be assigned
+*/
+// qa.md Appendix §7: "Destructuring: ... ERRORS: ... targets rooted at a call/expression
+// (`f(x).a = 3`, `(a+b).c = 3`)." (Q29, item 5).
+mut a = (mut c = 1)
+mut b = (mut c = 2)
+(a + b).c = 3   // locate_error_here

@@ -1,0 +1,36 @@
+/*
+:name: spec_tests_tick_clock_per_tick
+:type: simulation
+*/
+// Spec (qa.md Q38 answer): "Each tick gets a minted clock:Clock"; appendix
+// section 8: "each `tick` block gets a MINTED `clock:Clock` ... Its counter is
+// the tick's cycle index (0-based)".
+//
+// Rule pinned: the counter belongs to ONE tick block, so a second sequential
+// `tick` in the same test mints a fresh `clock` that starts again at 0 (the
+// DUT state itself carries over: the counter keeps counting).
+
+mod spec_tcp_cnt(en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_tcp.two_ticks {
+  mut d      = spec_tcp_cnt
+  mut first2 = 99
+  mut bad    = 0
+  tick 3 {
+    if clock > 2 { bad += 1 }
+    d.en = true
+    step
+  }
+  tick 4 {
+    if first2 == 99 { first2 = clock }
+    d.en = true
+    step
+  }
+  assert(first2 == 0, "the second tick's minted clock must restart at 0")
+  assert(bad == 0)
+  assert(d.q == 7, "DUT state carries across ticks: 3 + 4 enabled cycles")
+}

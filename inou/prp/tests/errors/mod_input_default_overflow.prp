@@ -1,0 +1,21 @@
+/*
+:name: mod_input_default_overflow
+:type: error
+:error: the default of input `b` of `m` \(value 300\) does not fit its declared range \[0, 255\]
+:help: change the default, or widen the input's type
+*/
+
+// A `mod`/`pipe` input default drives the Sub port from each call that omits
+// it, so it binds like an argument: the overflow rule of rulings 1/16 holds
+// (a `comb` default is checked the same way, in its inlined prologue). Before,
+// the omitted `b` was wired as `.b(8'h2c)` -- 300 silently truncated to 44 --
+// while the explicit `m(a=a, b=300)` was already an error.
+
+mod m(a:U8, b:U8 = 300) -> (o:U8@[0]) {
+  wrap o = a + b
+}
+
+pub mod mod_input_default_overflow(a:U8) -> (o:U8@[0]) {
+  const k = m(a=a)   // locate_error_here
+  o = k.o
+}

@@ -1,0 +1,19 @@
+/*
+:name: generic_name_shadows_const
+:type: error
+:error: variable shadowing: 'N' is already declared in an enclosing scope
+:help: rename the generic
+*/
+
+// User ruling 2026-09-28 (35): a lambda GENERIC named like a visible
+// enclosing file-scope const is shadowing. Before, the generic silently hid
+// the file const inside the body.
+const N = 4
+
+comb addn<N>(a:U8) -> (y:U8) {  // locate_error_here
+  wrap y = a + N
+}
+
+pub mod generic_name_shadows_const(a:U8) -> (o:U8@[0]) {
+  o = addn<N=2>(a=a)
+}

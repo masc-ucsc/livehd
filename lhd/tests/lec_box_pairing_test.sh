@@ -47,14 +47,14 @@ module top(input [31:0] d, output [3:0] q);
 endmodule
 EOF
 cat > "$W/comb.prp" <<'EOF'
-pub comb bp_lane_parity(a:u8) -> (p:u1) {
+pub comb bp_lane_parity(a:U8) -> (p:U1) {
   p = a#[0] ^ a#[1] ^ a#[2] ^ a#[3] ^ a#[4] ^ a#[5] ^ a#[6] ^ a#[7]
 }
-pub comb top(d:u32) -> (q:u4) {
-  mut p3 = bp_lane_parity::[name=u3](a = (d >> 24) & 0xff)
-  mut p2 = bp_lane_parity::[name=u2](a = (d >> 16) & 0xff)
-  mut p1 = bp_lane_parity::[name=u1](a = (d >> 8) & 0xff)
-  mut p0 = bp_lane_parity::[name=u0](a = d & 0xff)
+pub comb top(d:U32) -> (q:U4) {
+  mut p3 = bp_lane_parity::[name=`u3`](a = (d >> 24) & 0xff)
+  mut p2 = bp_lane_parity::[name=`u2`](a = (d >> 16) & 0xff)
+  mut p1 = bp_lane_parity::[name=`u1`](a = (d >> 8) & 0xff)
+  mut p0 = bp_lane_parity::[name=`u0`](a = d & 0xff)
   q = (p3 << 3) | (p2 << 2) | (p1 << 1) | p0
 }
 EOF
@@ -81,17 +81,17 @@ module top(input clock, input reset, input [31:0] d, output [31:0] q);
 endmodule
 EOF
 cat > "$W/state.prp" <<'EOF'
-pub mod bp_lane_acc(a:u8) -> (s:u8@[0]) {
-  reg acc:u8 = 0
+pub mod bp_lane_acc(a:U8) -> (s:U8@[0]) {
+  reg acc:U8 = 0
   s = acc
   wrap acc = acc + a
 }
-pub mod top(d:u32) -> (q:u32@[0]) {
-  mut s3 = bp_lane_acc::[name=u3](a = (d >> 24) & 0xff)
-  mut s2 = bp_lane_acc::[name=u2](a = (d >> 16) & 0xff)
-  mut s1 = bp_lane_acc::[name=u1](a = (d >> 8) & 0xff)
-  mut s0 = bp_lane_acc::[name=u0](a = d & 0xff)
-  q = (s3 << 24) | (s2 << 16) | (s1 << 8) | s0
+pub mod top(d:U32) -> (q:U32@[0]) {
+  mut `s3` = bp_lane_acc::[name=`u3`](a = (d >> 24) & 0xff)
+  mut `s2` = bp_lane_acc::[name=`u2`](a = (d >> 16) & 0xff)
+  mut `s1` = bp_lane_acc::[name=`u1`](a = (d >> 8) & 0xff)
+  mut `s0` = bp_lane_acc::[name=`u0`](a = d & 0xff)
+  q = (`s3` << 24) | (`s2` << 16) | (`s1` << 8) | `s0`
 }
 EOF
 # Anonymous variant: names cannot pair (.v ua* vs .prp dst-vars s0..s3), so the
@@ -102,7 +102,7 @@ EOF
 # test, the .v names are DELIBERATELY crossed against the lanes: lane k is
 # spelled ua(3-k), so ua0 (lane 3) sorts against s0 (lane 0) -> the collapsed
 # parent spuriously refutes -> the flat confirmation must rescue it.
-sed -e 's/::\[name=u[0-3]\]//' "$W/state.prp" > "$W/state_anon.prp"
+sed -e 's/::\[name=`u[0-3]`\]//' "$W/state.prp" > "$W/state_anon.prp"
 sed -e 's/ u0(/ ua3(/' -e 's/ u1(/ ua2(/' -e 's/ u2(/ ua1(/' -e 's/ u3(/ ua0(/' "$W/state.v" > "$W/state_anon.v"
 # Anonymous variant with a REAL bug (lane 0 input inverted).
 sed 's/(a = d & 0xff)/(a = (d \& 0xff) ^ 1)/' "$W/state_anon.prp" > "$W/state_anon_bug.prp"
@@ -173,11 +173,11 @@ echo "PASS(state_anon_bug): real stateful bug still REFUTED through the flat con
 # An inlined child definition still exists in the library. It must not become
 # a one-sided box merely because its definition name matches on both sides.
 cat > "$W/inline_box.prp" <<'EOF'
-pub comb helper(a:u8) -> (y:u8) {
+pub comb helper(a:U8) -> (y:U8) {
   y = a ^ 0x5a
 }
-pub mod inline_box(a:u8) -> (y:u8@[1]) {
-  reg q:u8 = 0
+pub mod inline_box(a:U8) -> (y:U8@[1]) {
+  reg q:U8 = 0
   q = helper(a)
   y = q
 }

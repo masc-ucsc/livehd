@@ -8,8 +8,8 @@
 // Task 1k — typed self is a structural `does` check: every field of the
 // declared self type must exist on the receiver. t2 lacks `a`.
 
-type t1 = (a:u32=nil, b:string="")
-type t2 = (b:string="")
+type t1 = (a:U32=nil, b:String="")
+type t2 = (b:String="")
 
 comb set_b(ref self:t1) {
   self.b = "foo"

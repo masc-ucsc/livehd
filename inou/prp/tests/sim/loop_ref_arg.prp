@@ -1,0 +1,40 @@
+/*
+:name: loop_ref_arg
+:type: simulation
+*/
+// A loop body whose only write to an outer variable is a call writing it back
+// through `ref` (`addby(ref m, ...)`), or its UFCS form on a `ref self` comb
+// (`n.bump(...)`). The rolled loop got no carry for `m`, so `s` simulated as a
+// constant 0. Such a loop now stays unrolled (see equiv/loop_ref_arg, whose
+// _1 variant proves rolled == unrolled).
+comb addby(ref x:U8, by:U8) -> () {
+  wrap x = x + by
+}
+comb bump(ref self:U8, by:U8) -> () {
+  wrap self = self + by
+}
+mod loop_ref_arg(a:U4, b:U4) -> (s:U8@[0], t:U8@[0]) {
+  mut m:U8 = 0
+  for i in 0..<4 {
+    addby(ref m, by=U8(a#[i]))
+  }
+  s = m
+  mut n:U8 = 3
+  for i in 0..<4 {
+    n.bump(by=U8(b#[i]) << i)
+  }
+  t = n
+}
+
+test loop_ref_arg.sum {
+  mut dut = loop_ref_arg
+  mut ok  = true
+  tick 16 {
+    dut.a = clock
+    dut.b = 15 - clock
+    step
+    const ones = (clock & 1) + ((clock >> 1) & 1) + ((clock >> 2) & 1) + ((clock >> 3) & 1)
+    if dut.s != ones or dut.t != 18 - clock { ok = false }
+  }
+  assert(ok, "a `ref` write inside a loop body must reach the variable")
+}

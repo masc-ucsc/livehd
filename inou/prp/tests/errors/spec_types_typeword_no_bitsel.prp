@@ -1,0 +1,8 @@
+/*
+:name: spec_types_typeword_no_bitsel
+:type: error
+:error: .
+*/
+// SPEC grammar test/corpus/type_words.txt "Type word: a type word takes no bit selection" (qa.md Q21 allows only
+// `U8.[max]` and `U8(x)#[0]`: the bit select applies to a CAST RESULT, not to the bare type word).
+const f = U8#[0]  // locate_error_here

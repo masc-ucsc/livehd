@@ -1,0 +1,14 @@
+/*
+:name: std_clog2_runtime
+:type: error
+:tolg: 1
+:error: std\.clog2.*not a compile-time value
+*/
+
+// User ruling 2026-09-27: `std.clog2(x)` is comptime only -- it sizes types,
+// it is not a priority encoder. A runtime argument is a compile error that
+// names the argument; today `std` itself is an undefined variable.
+
+pub mod std_clog2_runtime(a:U8) -> (y:U8@[0]) {
+  y = std.clog2(a)   // locate_error_here
+}

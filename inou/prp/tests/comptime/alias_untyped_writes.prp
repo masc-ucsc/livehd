@@ -1,0 +1,36 @@
+/*
+:name: alias_untyped_writes
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+:verifier_include_funcs: true
+*/
+
+// User rulings 2026-09-27 (6) and 2026-09-28 (38): a value is typed only by a
+// declaration (or as an alias of ONE typed value). None of these is typed, so
+// each range attribute is nil:
+//   * an if-expression with an untyped arm (the typed arm's U4 used to win,
+//     `m.[max]` read 15 while m reaches 16);
+//   * an untyped tuple field after an untyped write (the envelope an EARLIER
+//     slice write rode in with came back: `t.a.[bits]` read 3 for a value that
+//     reaches 24);
+// while a field the tuple's TYPE declares keeps its type across writes.
+type Pkt = (c:U3, d:U8)
+
+mod alias_untyped_writes(a:U4, c:Bool, x:U8, y:U4) -> (o:U8@[0], q:U8@[0], r:U8@[0]) {
+  const m = if c { a } else { a + 1 }
+  cassert(m.[bits] == nil)
+  cassert(m.[max] == nil)
+  mut t = (mut a = 0)
+  t.a = x#[0..<3]
+  t.a = y + 9
+  cassert(t.a.[bits] == nil)
+  mut p:Pkt = (c = 1, d = x)
+  p.c = y#[0..<2]
+  cassert(p.c.[bits] == 3)
+  p.c = 4
+  cassert(p.c.[bits] == 3)
+  o = m
+  q = t.a
+  r = p.d
+}

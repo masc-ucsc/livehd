@@ -1,0 +1,18 @@
+/*
+:name: typed_local_wide_overflow
+:type: error
+:tolg: 1
+:error: `t` \(unbounded range\) may not fit its declared range \[0, 255\]
+:help: apply a wrap/saturate policy
+*/
+// User ruling 2026-09-27 (overflow rule) for a right-hand side too WIDE for
+// any derived range: `x << n` with n:U8 may shift x up by 255 bits. That may
+// not fit `t:U8` either, so it is the same mandatory error as a known range
+// that may overflow (errors/typed_local_overflow_runtime.prp). It used to
+// compile silently: the typed local never truncated, and `y` read the whole
+// shifted value.
+pub mod typed_local_wide_overflow(x:U4, n:U8) -> (y:U16@[0]) {
+  mut t:U8 = 0
+  t = x << n   // locate_error_here
+  y = t
+}

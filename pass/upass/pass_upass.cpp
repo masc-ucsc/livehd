@@ -18,8 +18,10 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "diag.hpp"
+#include "io_port_rules.hpp"
 #include "log.hpp"           // LHD_LOG developer tracing on the "upass" channel
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
+#include "range_bits.hpp"
 #include "str_tools.hpp"
 #include "upass_attributes.hpp"  // NOLINT: ensures plugin "attributes" is linked
 #include "upass_bitwidth.hpp"    // NOLINT: ensures plugin "bitwidth" is linked
@@ -105,6 +107,106 @@ int parse_expected_count(const upass::Options_map& opts, std::string_view key) {
     return -1;
   }
   return value;
+}
+
+// User ruling 2026-09-28 (28): a FULLY TYPED `mod`/`pipe` is one module, so
+// the KIND and range its body derived for an UNTYPED scalar output (the walk's
+// value kind, and upass.bitwidth's bw_meta published as the walk ended)
+// become that output's type. Every caller walked after it (the queue walks
+// such a callee first) checks its call sites against that range instead of an
+// unknown one (ruling 21), and lnast.tolg declares the port that wide, so a
+// parent reads the width its child really has. A bool output stays a bool
+// (strict bool, ruling 2): its [0,1] range never makes it an integer. A
+// template's specialization keeps its outputs untyped (per call site), and an
+// output nothing bounded (or of any other kind) stays opaque.
+void export_derived_output_ranges(Lnast& ln, const uPass_runner& runner) {
+  const auto kind = ln.get_lambda_kind();
+  if (ln.is_template() || !ln.get_minters().empty() || (kind != "mod" && kind != "pipe")) {
+    return;
+  }
+  const auto& ranges = ln.bw_meta().ranges;
+  for (auto& e : ln.io_meta().outputs) {
+    if ((e.kind != Io_kind::none && e.kind != Io_kind::integer) || e.bits != 0 || e.has_range || e.wide_range_min
+        || e.has_deferred_bound() || !e.type_name.empty() || e.array_size != 0 || e.elem_bits != 0) {
+      continue;  // typed, or not a scalar
+    }
+    const auto vk = runner.value_kind(e.name);
+    if (vk == upass::Kind::boolean) {
+      e.kind = Io_kind::boolean;  // exactly what upass.ssa harvests for `o:bool`
+      continue;
+    }
+    const auto it = ranges.find(e.name);
+    if (vk != upass::Kind::integer || it == ranges.end() || it->second.is_unbounded()) {
+      continue;
+    }
+    const auto& r = it->second;
+    e.kind        = Io_kind::integer;
+    e.has_range   = true;
+    e.range_min   = r.min;
+    e.range_max   = r.max;
+    e.is_signed   = r.min < 0;
+    e.bits
+        = static_cast<int32_t>(std::max<int64_t>(1, upass::range_bits(*Dlop::create_integer(r.max), *Dlop::create_integer(r.min))));
+  }
+}
+
+// User ruling 2026-09-28 (34): a `mod`/`pipe` input default that did not fold
+// in the front end (a `comptime const`, a comb call, an if-expression, an
+// attribute read of an input, a generic's expression) rode the body prologue
+// as `store(__default_<in>, …)`. The unit's own walk folded it (a template's
+// specialization once its generics are bound); its value replaces the
+// `__default` io sentinel, the constant every caller drives an omitted port
+// with (io_port::input_default_const, lnast.tolg). A default that does not
+// fold, or does not fit the input's type, is an error here, once per unit.
+void export_folded_input_defaults(Lnast& ln, const uPass_runner& runner) {
+  const auto kind = ln.get_lambda_kind();
+  if (ln.is_template() || (kind != "mod" && kind != "pipe")) {
+    return;
+  }
+  const auto name = ln.get_top_module_name();
+  auto       bare = name.substr(name.rfind('.') == std::string_view::npos ? 0 : name.rfind('.') + 1);
+  if (const auto mark = bare.find("__"); !ln.get_minters().empty() && mark != std::string_view::npos && mark > 0) {
+    bare = bare.substr(0, mark);  // a specialization: the lambda as the user wrote it (`m`, not `m__u8_N_3`)
+  }
+  for (const auto& e : ln.io_meta().inputs) {
+    if (!e.has_default) {
+      continue;
+    }
+    const auto slot = upass::io_port::input_default_slot(&ln, e);
+    if (slot.is_invalid() || !Lnast_ntype::is_const(ln.get_type(slot)) || ln.get_name(slot) != "__default") {
+      continue;
+    }
+    const auto v = runner.comptime_value(Lnast_io_entry::default_value_name(e.name));
+    if (!v) {
+      livehd::diag::err("pass.upass", "default-not-comptime", "type")
+          .at(ln.span_of_nearest(slot))
+          .msg("the default of input `{}` of `{}` is not a compile-time constant", e.name, bare)
+          .hint(
+              "a `mod`/`pipe` input default must fold to a compile-time constant: a literal, a generic, a `comptime "
+              "const`, an attribute read, an enum entry, or a comb call or expression over them")
+          .fatal();
+    }
+    std::optional<std::pair<Dlop, Dlop>> declared;  // (min, max)
+    if (e.kind == Io_kind::integer && e.array_size == 0 && e.has_range) {
+      declared = std::pair{*Dlop::create_integer(e.range_min), *Dlop::create_integer(e.range_max)};
+    } else if (e.kind == Io_kind::integer && e.array_size == 0 && e.bits > 0) {
+      const auto w = static_cast<uint32_t>(e.bits);
+      declared     = std::pair{upass::min_from_bits(w, e.is_signed), upass::max_from_bits(w, e.is_signed)};
+    }
+    if (declared && (v->lt_op(declared->first)->is_known_true() || v->gt_op(declared->second)->is_known_true())) {
+      livehd::diag::err("pass.upass", "fcall-arg-overflow", "type")
+          .at(ln.span_of_nearest(slot))
+          .msg("the default of input `{}` of `{}` (value {}) does not fit its declared range [{}, {}]",
+               e.name,
+               bare,
+               v->to_decimal_string(),
+               declared->first.to_decimal_string(),
+               declared->second.to_decimal_string())
+          .hint("a default binds like an argument and never narrows implicitly: change the default, or widen the input's type")
+          .fatal();
+    }
+    ln.set_name(slot, std::string(v->to_pyrope()));
+  }
 }
 }  // namespace
 
@@ -526,6 +628,16 @@ void Pass_upass::work(Eprp_var& var) {
     var.lnasts = std::move(ordered);
   }
 
+  // User ruling 2026-09-28 (28): the untyped output of a fully typed `mod`/
+  // `pipe` carries the range its body derives (the callee's bw_meta), and a
+  // caller's walk checks the call site against it -- so walk each such callee
+  // before its callers, whatever the declaration order. Other callees keep
+  // their queue order (a comb is inlined from whichever body is registered).
+  var.lnasts = uPass_tolg::lowering_order(var.lnasts, [](const Lnast& callee) {
+    const auto kind = callee.get_lambda_kind();
+    return !callee.is_template() && (kind == "mod" || kind == "pipe");
+  });
+
   if (up.upass_order.empty()) {
     uPass_verifier::finalize_aggregate();
     return;
@@ -570,10 +682,12 @@ void Pass_upass::work(Eprp_var& var) {
   // dedup below DROP the only tree that can actually lower — the template mints
   // no GraphIO (upass_tolg::register_io) and the call would then bind nothing.
   // The top-specialization below re-inserts its own name for the same reason.
-  absl::flat_hash_set<std::string> seen_module_names;
+  // Each name maps to the queued tree that holds it, so a deduplicated re-mint
+  // can still record its minter on the kept specialization.
+  absl::flat_hash_map<std::string, Lnast*> seen_module_names;
   for (const auto& ln : var.lnasts) {
     if (ln && !ln->is_template()) {
-      seen_module_names.insert(std::string(ln->get_top_module_name()));
+      seen_module_names.try_emplace(std::string(ln->get_top_module_name()), ln.get());
     }
   }
 
@@ -597,10 +711,15 @@ void Pass_upass::work(Eprp_var& var) {
       specializer.set_function_registry(function_registry);
       ln              = specializer.specialize_top_defaults();
       var.lnasts[idx] = ln;
+      // Minted by the design itself (minter ""), not by a call site, and it
+      // REPLACED its template: the compile cache must not restore this unit
+      // around a dirty caller, which may need the template to mint another
+      // specialization.
+      ln->add_minter("");
       // The specialized top REPLACES the template in-place under the same name;
       // record it so a call site that also identity-specializes this module does
       // not append a second, duplicate unit with that name.
-      seen_module_names.insert(std::string(ln->get_top_module_name()));
+      seen_module_names.try_emplace(std::string(ln->get_top_module_name()), ln.get());
       if (up.run_ssa) {
         uPass_ssa::run(ln, &var.lnasts, up.stream_ssa);
       }
@@ -665,7 +784,8 @@ void Pass_upass::work(Eprp_var& var) {
     if (is_function_body && !up.verifier_include_funcs) {
       order.erase(std::remove(order.begin(), order.end(), "verifier"), order.end());
     }
-    // In auto mode the coalescer disables itself for Verilog-origin SSA trees.
+    // In auto mode the coalescer disables itself for generated SSA trees
+    // (Verilog-read, or Pyrope regenerated from Verilog: `::[timecheck=false]`).
     // Remove it before constructing the runner as well: leaving the disabled
     // plugin in the dispatch vector still made every generated operation pay a
     // virtual call (millions per large module). An explicit coalescer setting
@@ -678,7 +798,7 @@ void Pass_upass::work(Eprp_var& var) {
     if (!coalescer_auto) {
       coalescer_auto = str_tools::ascii_fold(coalescer_opt->second) == "auto";
     }
-    if (ln->is_verilog_origin() && coalescer_auto) {
+    if (ln->is_timecheck_off() && coalescer_auto) {
       order.erase(std::remove(order.begin(), order.end(), "coalescer"), order.end());
     }
     auto runner = uPass_runner(lm, order, up.pass_options);
@@ -715,6 +835,8 @@ void Pass_upass::work(Eprp_var& var) {
     if (is_template) {
       continue;  // drop a template's standalone staging + spurious specializations
     }
+    export_derived_output_ranges(*ln, runner);
+    export_folded_input_defaults(*ln, runner);
     auto new_lnasts = runner.take_new_lnasts();
     for (const auto& new_ln : new_lnasts) {
       // A runner-spawned tree (a specialized pipe/mod/fluid template
@@ -724,9 +846,16 @@ void Pass_upass::work(Eprp_var& var) {
       // an identical signature minted from another call site (any tree) yields
       // the same mangled name — keep the first, the call resolves to it. O(1)
       // membership test (insert.second is false when the name is already queued).
-      if (!seen_module_names.insert(std::string(new_ln->get_top_module_name())).second) {
+      // Every minter is recorded, the deduplicated ones included: the compile
+      // cache keeps a restored specialization only while one of them is kept.
+      const auto [seen, fresh] = seen_module_names.try_emplace(std::string(new_ln->get_top_module_name()), new_ln.get());
+      if (!fresh) {
+        if (seen->second != nullptr && !seen->second->get_minters().empty()) {
+          seen->second->add_minter(ln->get_top_module_name());
+        }
         continue;
       }
+      new_ln->add_minter(ln->get_top_module_name());
       if (up.run_ssa) {
         uPass_ssa::run(new_ln, &var.lnasts, up.stream_ssa);
       }
@@ -779,7 +908,9 @@ void Pass_upass::work(Eprp_var& var) {
       uPass_tolg::register_io(ln, "lgdb_tolg", var.lnasts);
     }
     std::vector<std::shared_ptr<hhds::Graph>> lowered;
-    for (const auto& ln : var.lnasts) {
+    // Callees lower first, so a caller's combinational-loop checks read its
+    // children's finished bodies (the order lhd's lower_lnasts uses).
+    for (const auto& ln : uPass_tolg::lowering_order(var.lnasts)) {
       auto g = uPass_tolg::run(ln, "lgdb_tolg", var.lnasts, up.reset_style);
       if (g) {
         // Same rule as lhd's lower_lnasts: tolg replaces a same-named body and

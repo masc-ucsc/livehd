@@ -14,9 +14,8 @@
 //                           sim.checkpoint*, sim.tune.profile*); a codegen key
 //                           (sim.tune.dirty, ...) is accepted only when it
 //                           restates the value the binary was generated with.
-//                           Repeatable, applied in argv order; `set` is therefore
-//                           a reserved test-parameter name.
-//   * `--<param> N`         bind a `test name(params)` parameter (per test)
+//                           Repeatable, applied in argv order.
+//   * `+<param>=VALUE`         bind a `test name(params)` parameter (per test)
 //   * `--help` / `-h`       usage
 // Values are bound at RUN time (argv), never baked in, so one built binary can be
 // re-run with any test selection / parameters / seed.

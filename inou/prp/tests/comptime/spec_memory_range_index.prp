@@ -1,0 +1,26 @@
+/*
+:name: spec_memory_range_index
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+
+// SPEC (docs 08-memories.md, Array index): "Array index by default are unsigned
+// integers, but the index can be constrained with tuples or by requiring an
+// enumerate." -- "mut x3:[-8..<7]U3 = nil  // accept signed values /
+// mut x4:[100..<132]U3 = nil / cassert(x4[100] == 0) / assert(x4[3]) // error:
+// out of bounds index"
+// Rule encoded here: an array declared over an index RANGE has exactly the entries
+// of that range (`[100..<132]` is 32 entries, the first one indexed 100), and a
+// signed range (`[-8..<7]`) accepts negative indices. (Initialized with 0 instead
+// of the docs' `nil` so the rule does not depend on how a nil entry reads.)
+
+mut x4:[100..<132]U3 = 0
+cassert(x4.[size] == 32)
+x4[131] = 5
+cassert(x4[131] == 5 and x4[100] == 0)
+
+mut x3:[-8..<7]U3 = 0
+x3[-8] = 3
+cassert(x3[-8] == 3)
+cassert(x3.[size] == 15)

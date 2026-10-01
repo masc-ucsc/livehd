@@ -1,0 +1,27 @@
+/*
+:name: spec_tests_int_condition
+:type: error
+:error: (Bool|bool)
+*/
+// Spec: docs 05b-statements "if": "a condition is a Bool: `if a` is an
+// error"; ruling 20 (lhdtrack rulings 2026-09-28): "Strict bool applies
+// INSIDE `test` blocks too".
+//
+// Rule pinned: inside a test's tick, branching on an INTEGER instance output
+// (`if d.o { ... }` with `o:U8`) is the same "condition must be Bool" error as
+// in a design body (write `if d.o != 0`).
+
+mod spec_ic_pass(a:U8) -> (o:U8@[0]) {
+  o = a
+}
+
+test spec_ic.int_cond {
+  mut d    = spec_ic_pass
+  mut hits = 0
+  tick 3 {
+    d.a = 5
+    step
+    if d.o { hits += 1 }   // locate_error_here
+  }
+  assert(hits == 3)
+}

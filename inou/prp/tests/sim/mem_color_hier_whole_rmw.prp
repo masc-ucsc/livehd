@@ -8,10 +8,10 @@
 // must observe committed storage without depending combinationally on the
 // whole-array update cone. That cone deliberately reads the same array, so
 // confusing the two enable pins manufactures a read -> update -> read cycle.
-mod hier_mem_leaf(en:u1) -> (q:u4@[0]) {
-  reg words:[4]u4:[ordering="old"] = 0
+mod hier_mem_leaf(en:U1) -> (q:U4@[0]) {
+  reg words:[4]U4:[ordering="old"] = 0
   const old = words[0]
-  mut next:u16 = words
+  mut next:U16 = words
   wrap next#[0..=3] = old + 1
   if en != 0 {
     words = next
@@ -19,7 +19,7 @@ mod hier_mem_leaf(en:u1) -> (q:u4@[0]) {
   q = words[0]
 }
 
-pub mod hier_mem_top(en:u1) -> (q:u4@[0]) {
+pub mod hier_mem_top(en:U1) -> (q:U4@[0]) {
   mut leaf = hier_mem_leaf(en=en)
   q = leaf.q
 }

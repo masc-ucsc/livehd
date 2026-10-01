@@ -1,0 +1,22 @@
+/*
+:name: spec_memory_nil_no_reset
+:type: equiv
+:verilog_top: spec_memory_nil_no_reset
+:pyrope_top: spec_memory_nil_no_reset
+*/
+// SPEC (docs 08-memories.md): "Spell `= nil` (or `= 0sb?`) for an array with no
+// reset value at all: no reset is bound and the contents are undefined until
+// written".  (docs line: "reg mem2:[16]S8 = nil      // mem 16 entry, NO reset")
+// Rule encoded here: two memories, one `= nil` and one `= 0sb?`, in a module with
+// NO Reset input: neither binds a reset, so no `reset:Reset` is minted (the golden
+// has no reset port) and every write lands.
+pub mod spec_memory_nil_no_reset(clk:Clock, we:Bool, a:U2, d:S8, ra:U2) -> (q1:S8@[0], q2:S8@[0]) {
+  reg m1:[4]S8 = nil
+  reg m2:[4]S8 = 0sb?
+  q1 = m1[ra]
+  q2 = m2[ra]
+  if we {
+    m1[a] = d
+    m2[a] = d
+  }
+}

@@ -12,8 +12,8 @@
 // uncertain-scope count against the count at loop-iteration entry instead, so
 // only uncertainty the BODY introduces counts.
 
-mod loop_comptime_break_under_runtime_if(c:bool, x:u8) -> (z:u12@[0]) {
-  mut acc:u12 = 0
+mod loop_comptime_break_under_runtime_if(c:Bool, x:U8) -> (z:U12@[0]) {
+  mut acc:U12 = 0
   if c {
     for i in 0..<8 {
       if i == 3 { break }

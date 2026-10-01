@@ -1,0 +1,82 @@
+/*
+:name: shl_not_wide_amount
+:type: equiv simulation
+:verilog_top: shl_not_wide_amount
+:pyrope_top: shl_not_wide_amount
+*/
+// A one-hot mask `1 << k` whose AMOUNT is wider than, or reaches past, the
+// result: `v & ~(1 << k)` clears bit k, and a k at or past the result width
+// clears nothing. The amount's range (a u32, or the 32-bit Verilog index
+// `i*4 + j`) has no materializable upper corner, and pass.bitwidth once
+// DROPPED those corners, sizing the shift from its operand alone: `1 << k`
+// became ONE bit, the flip cleared bit 0 for every k, and `o[i*4+j] = x`
+// (the slang reader's lowering of a runtime bit write) wrote bit 0.
+//
+// Every spelling of the flip is here, in the comb and the registered context:
+//   c1  the untyped `^ -1` flip (what the Pyrope writer emits for Verilog `~`)
+//   c2  a typed `~` of the mask sliced to the result width
+//   c3  a typed `~` of a mask wider than the result (u64 carrier, u8 amount)
+//   c4  a runtime bit write (set or clear) at a 32-bit position
+//   c5  c1 through a comb call
+//   q   c2 through a register
+//   c6  constant amounts past the width (cprop folds them): clears nothing
+// The golden spells each in 16-bit Verilog context; `c4` is the always-block
+// bit write whose slang lowering hit the bug.
+comb clr_bit(v:U16, k:U32) -> (o:U16) {
+  o = (v & ((1 << k) ^ -1))#[0..=15]
+}
+
+pub mod shl_not_wide_amount(k:U32, k8:U8, i:U2, j:U2, x:U1, v:U16) -> (
+  c1:U16@[0], c2:U16@[0], c3:U16@[0], c4:U16@[0], c5:U16@[0], c6:U16@[0], q:U16@[1]
+) {
+  c1 = (v & ((1 << k) ^ -1))#[0..=15]
+
+  const m16 = (1 << k)#[0..<16]
+  c2 = v & ~m16
+
+  const m64 = (1 << k8)#[0..<64]
+  c3 = (v & ~m64)#[0..=15]
+
+  const b   = ((i * 4) + j)#[0..=31]
+  const m32 = (1 << b)#[0..<32]
+  c4 = ((v & ~m32) | ((x & 1) << b))#[0..=15]
+
+  c5 = clr_bit(v = v, k = k)
+
+  comptime const far = 40
+  c6 = (v & ~((1 << 20)#[0..<16]) & ((1 << far) ^ -1))#[0..=15]
+
+  reg r:U16 = nil
+  q = r
+  r = v & ~m16
+}
+
+test shl_not_wide_amount.sweep {
+  mut d = shl_not_wide_amount
+  const ks = [0, 1, 7, 8, 15, 16, 17, 31, 32, 63, 64, 255, 256, 4095, 4096, 4097, 65536, 0x80000001, 0xFFFFFFFF]
+  const k8 = [0, 1, 7, 8, 15, 16, 17, 31, 32, 63, 64, 255, 0, 255, 0, 1, 0, 1, 255]
+  const bi = [0, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1]
+  const bj = [0, 1, 2, 3, 0, 1, 2, 3, 1, 2, 3, 0, 2, 3, 0, 1, 3, 0, 1]
+  const bx = [0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 0, 0, 1, 1]
+  const e1 = [0xFFFE, 0xFFFD, 0xFF7F, 0xFEFF, 0x7FFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF]
+  const e3 = [0xFFFE, 0xFFFD, 0xFF7F, 0xFEFF, 0x7FFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFFE, 0xFFFF, 0xFFFE, 0xFFFD, 0xFFFE, 0xFFFD, 0xFFFF]
+  tick 19 {
+    d.k  = ks[clock]
+    d.k8 = k8[clock]
+    d.i  = bi[clock]
+    d.j  = bj[clock]
+    d.x  = bx[clock]
+    d.v  = 0xFFFF
+    step
+    assert(d.c1 == e1[clock])
+    assert(d.c2 == e1[clock])
+    assert(d.c3 == e3[clock])
+    assert(d.c5 == e1[clock])
+    assert(d.c6 == 0xFFFF)
+    const pos = bi[clock] * 4 + bj[clock]
+    const want4 = if bx[clock] == 1 { 0xFFFF } else { 0xFFFF - (1 << pos) }
+    assert(d.c4 == want4)
+    // `step` clocked the register with this cycle's inputs.
+    assert(d.q == e1[clock])
+  }
+}

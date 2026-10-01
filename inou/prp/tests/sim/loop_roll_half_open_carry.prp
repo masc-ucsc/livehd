@@ -1,0 +1,36 @@
+/*
+:name: loop_roll_half_open_carry
+:type: simulation
+*/
+// lhdtrack suggestions 1.1/1.2 (planner guard): a `for` loop kept ROLLED (the
+// default, `compile.unroll=false`) is outlined into a `__loop` definition that
+// is compiled on its own, so every boundary port needs a BOUNDED type. A carry
+// declared with one open bound (`Signed(max=65535)`: no `min`) used to become a
+// `prim_type_int(65535, nil)` boundary port; with one side open no width is
+// derived for the port, and the generated sim driver did not even compile. The
+// roller now declines such a loop (it unrolls), so the value is right.
+mod loop_roll_half_open_carry(a:U16, sel:U4) -> (o:U16@[0]) {
+  mut acc:Signed(max=65535) = 0
+  for i in 0..<4 {
+    if sel#[i] == 1 { acc |= a#[(i * 4)..+4] << (i * 4) }
+  }
+  o = acc#[0..<16]    // explicit width: `acc` has no lower bound
+}
+
+test loop_roll_half_open_carry.lanes {
+  mut d = loop_roll_half_open_carry
+  tick 2 {
+    d.a = 0xA5C3
+    if clock == 0 {
+      d.sel = 0xf
+    } else {
+      d.sel = 0ub1010
+    }
+    step
+    if clock == 0 {
+      assert(d.o == 0xA5C3, "every nibble selected")
+    } else {
+      assert(d.o == 0xA0C0, "nibbles 1 and 3 selected")
+    }
+  }
+}

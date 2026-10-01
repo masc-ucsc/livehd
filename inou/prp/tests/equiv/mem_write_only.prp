@@ -11,8 +11,8 @@
 // attach reads (a `pub` reg silences the warning entirely). The memory still
 // lowers — cgen ties off the smallest wrapper's dummy read port — so the
 // netlist keeps the state element.
-pub mod wro(a:u8, i:u2, p:u8) -> (z:u8@[0]) {
-  reg t:[4]u8 = nil
+pub mod wro(a:U8, i:U2, p:U8) -> (z:U8@[0]) {
+  reg t:[4]U8 = nil
   t[i] = a
   z = p
 }

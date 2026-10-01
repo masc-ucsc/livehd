@@ -1,0 +1,32 @@
+/*
+:name: loop_bounded_carry
+:type: simulation
+:expect_instances: u_loop_0=1 *=1
+*/
+// The overflow rule on a loop carry: `cnt:U4` accumulates one bit per
+// iteration, so the unrolled ranges are [0,1] .. [0,8] and every write fits.
+// The loop still rolls: the lifted body sees the carry-in range the iterations
+// really have ([0, 7]), not the whole U4, so it does not report `U4 + 1`.
+// Legality must be the same with and without compile.unroll
+// (errors/rolled_loop_carry_overflow.prp is the other half).
+pub mod loop_bounded_carry(x:U8) -> (y:U8@[0]) {
+  mut cnt:U4 = 0
+  for i in 0..<8 {
+    cnt = cnt + x#[i]
+  }
+  y = cnt
+}
+
+test loop_bounded_carry.popcount {
+  mut d = loop_bounded_carry
+  tick 1 {
+    d.x = 0xFF
+    step
+    assert(d.y == 8, "eight set bits")
+  }
+  tick 1 {                // one `step` per tick iteration
+    d.x = 0x5A
+    step
+    assert(d.y == 4, "four set bits")
+  }
+}

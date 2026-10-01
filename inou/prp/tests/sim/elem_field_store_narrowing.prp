@@ -1,0 +1,43 @@
+/*
+:name: elem_field_store_narrowing
+:type: simulation
+*/
+// User ruling 2026-09-27 #16 extended to array ELEMENTS and TUPLE FIELDS
+// (errors/array_elem_store_may_overflow.prp,
+// errors/tuple_field_store_may_overflow.prp): the explicit narrowings must
+// really narrow. A field takes the prefix itself (`wrap t.x = b`); an element
+// takes a typed intermediate (`wrap v = …; m[i] = v`) or a bit-select, since an
+// entry picked with an index cannot carry the prefix (errors/wrap_indexed_entry.prp).
+// Every output is U8, WIDER than the U4 destinations, so the ports cannot do
+// the truncation a dropped narrowing would skip.
+pub mod elem_field_store_narrowing(a:U4, b:U8) -> (m0:U8@[0], m1:U8@[0], tx:U8@[0], ty:U8@[0]) {
+  mut m:[2]U4 = 0
+  mut v:U4 = 0
+  wrap v = a + 1     // 15 + 1 wraps to 0
+  m[0] = v
+  m[1] = b#[0..<4]   // bit-select: the low nibble
+  m0 = m[0]
+  m1 = m[1]
+
+  mut t:(x:U4, y:U4) = (x=0, y=0)
+  wrap t.x = b       // the low nibble
+  sat  t.y = b       // clamps at 15
+  tx = t.x
+  ty = t.y
+}
+
+test elem_field_store_narrowing.values {
+  mut dut = elem_field_store_narrowing
+  mut bad = 0
+  tick 16 {
+    const av = 15 - clock
+    const bv = (clock * 37 + 11) & 255
+    dut.a = av
+    dut.b = bv
+    step
+    if dut.m0 != ((av + 1) & 15) { bad += 1 }
+    if dut.m1 != (bv & 15) or dut.tx != (bv & 15) { bad += 1 }
+    if dut.ty != (if bv > 15 { 15 } else { bv }) { bad += 1 }
+  }
+  assert(bad == 0, "every narrowed element and field")
+}

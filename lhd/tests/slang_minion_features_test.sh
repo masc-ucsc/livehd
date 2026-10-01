@@ -292,9 +292,10 @@ ${LHD} lec --impl pyrope:"$W/substruct_unpack_prp/substruct_unpack.prp" \
   || fail "packed-substruct leaf split is not equivalent to the Verilog source"
 echo "PASS: packed-substruct leaf split explicitly selects each field"
 
-# A dynamic packed-lvalue splice uses unbounded SHL/OR internally, but the
-# declared packed base is a real language precision boundary. Keep the final
-# low-64 selection explicit before the value reaches the register mux.
+# A dynamic packed-lvalue update is a range write on the declared packed base
+# (`next#[idx*4] = bit`), bounded by the base by construction -- never an
+# unbounded SHL/OR splice that would need a low-64 selection before it reaches
+# the register mux.
 cat >"$W/dynamic_packed_write.sv" <<'EOF'
 module dynamic_packed_write (
   input  logic        clk_i,
@@ -316,8 +317,8 @@ ${LHD} compile "$W/dynamic_packed_write.sv" --reader slang --top dynamic_packed_
   --emit-dir pyrope:"$W/dynamic_packed_write_prp/" \
   --workdir "$W/dynamic_packed_write_w" -q \
   || fail "dynamic packed-lvalue lowering failed"
-if ! grep -q '#\[0\.\.=63\]' "$W/dynamic_packed_write_prp/dynamic_packed_write.prp"; then
-  fail "dynamic packed-lvalue update omitted its declared-width boundary"
+if grep -q '<<' "$W/dynamic_packed_write_prp/dynamic_packed_write.prp"; then
+  fail "dynamic packed-lvalue update is an unbounded shift splice, not a range write"
 fi
 ${LHD} lec --impl pyrope:"$W/dynamic_packed_write_prp/dynamic_packed_write.prp" \
   --ref verilog:"$W/dynamic_packed_write.sv" --top dynamic_packed_write \
@@ -542,8 +543,8 @@ echo "PASS: unique-case-arm struct writes lower (pre-declared leaves, no in-arm 
 # arm, `lsb + 1` becomes a two-bit adder and 4'h6 increments to 4'h3. This is
 # the inc_wrap_rbox_ptrs shape used by intpipe_csr_msgs.
 cat >"$W/guarded_inc.prp" <<'EOF'
-pub comb guarded_inc(a:u5, m:u4) -> (o:u4) {
-  mut lsb:u4 = a#[0..=3]
+pub comb guarded_inc(a:U5, m:U4) -> (o:U4) {
+  mut lsb:U4 = a#[0..=3]
   if lsb == m {
     lsb = 0
   } else {
@@ -646,8 +647,8 @@ echo "PASS: uncertain packed-field writes preserve definite siblings"
 # implementation-only hierarchical box input in Minion's preview register
 # files.
 cat >"$W/clocked_child.prp" <<'EOF'
-pub mod clocked_child(clk:u1, d_i:u1) -> (q_o:u1@[]) {
-  reg q:u1
+pub mod clocked_child(clk:Clock, d_i:U1) -> (q_o:U1@[]) {
+  reg q:U1
   q = d_i
   q_o = q
 }
@@ -655,7 +656,7 @@ EOF
 cat >"$W/clocked_parent.prp" <<'EOF'
 const clocked_child = import("clocked_child.clocked_child")
 
-pub mod clocked_parent(rf_clk_i:u1, d_i:u1) -> (q_o:u1@[]) {
+pub mod clocked_parent(rf_clk_i:Clock, d_i:U1) -> (q_o:U1@[]) {
   mut u_child = clocked_child::[name=u_child](clk=rf_clk_i, d_i=d_i)
   q_o = u_child.q_o
 }

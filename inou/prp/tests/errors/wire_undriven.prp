@@ -6,7 +6,7 @@
 
 // 2c-wire — an undriven wire (declared with `= nil`, never assigned) is a
 // compile error: a `wire` must have exactly one driver.
-comb t(a:u8) -> (o:u8) {
+comb t(a:U8) -> (o:U8) {
   wire w = nil   // locate_error_here
   o = w + 1
 }

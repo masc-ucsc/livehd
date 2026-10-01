@@ -3,6 +3,31 @@
 `lhd` is the stateless driver for compile, simulation, equivalence, and synthesis.
 Use `lhd help` or `lhd describe <command>` for the command's accepted arguments.
 
+## ABC-free build
+
+The normal build retains ABC for alternative synthesis and optional services.
+Build the same CLI without those dependencies with:
+
+```
+bazel build -c opt --define=livehd_abc=false //lhd
+bazel test -c opt --define=livehd_abc=false //lhd/tests:lhd_usyn_noabc_smoke
+./bazel-bin/lhd/lhd synth design.v --top top --set synth.mapper=usyn --set pass.usyn.tmap=none --emit verilog:logical.v
+```
+
+This configuration omits the ABC mapper/tmap provider, ABC-backed Liberty model
+generation, and Yosys integration (whose kernel links ABC). Native Slang/Pyrope
+compilation, USYN logical synthesis, and CVC5 remain available. The optional ABC
+cone accelerator returns `Unsupported` for every obligation, leaving those
+obligations with CVC5. No missing accelerator can produce a proven cut.
+`pass.satopt` stays off unless explicitly enabled.
+
+`python3 scripts/check_usyn_noabc.py --mode opt` runs the stronger removal gate:
+it copies current sources to a disposable directory, removes `pass/abc`, its
+package files and the ABC repository declaration, audits the configured `lhd`
+dependency closure, and builds/runs the CLI smoke test there. The checkout stays
+unchanged; the fixture and test evidence are retained. This explicit build gate
+is outside the default test suite.
+
 ## Formal regression policy
 
 Ordinary regressions use `lhd lec` with the default solver and native Slang
@@ -60,6 +85,21 @@ The old spellings are rename errors: `sim.color_dirty` -> `sim.tune.dirty`
 -> `sim.tune.backend`. A test or benchmark that needs checkpoints, random `?`
 fill, or a fixed generated tree across runs in one workdir pins
 `--set sim.tune.profile=off`. The full guide is `docs/simopt.md` §13.
+
+## Pyrope formatter
+
+```sh
+./bazel-bin/lhd/lhd pyrope fmt file.prp                          # AI layout to stdout
+./bazel-bin/lhd/lhd pyrope fmt -i file.prp                       # rewrite in place
+./bazel-bin/lhd/lhd pyrope fmt file.prp --mode human --width 100 # wrapped, aligned
+```
+
+`pyrope fmt` embeds prpfmt (`prpfmt_format_string_mode`). The default
+`--mode ai` has no width limit and no vertical alignment, so an edit changes
+only the lines it touches; `--mode human` wraps at `--width` (default 132) and
+aligns consecutive same-kind assignments. `--indent` applies to both modes;
+`--width` in AI mode has no effect and warns (`width-ignored`). `--verify`
+re-parses the output.
 
 ## Pyrope style suggestions
 
@@ -143,9 +183,11 @@ and rule-specific `attrs`. `-q` suppresses stderr while
 preserving the declared diagnostics file. There is no stdout result envelope.
 
 Syntax errors produce a `partial-analysis` warning; intact sequences are still
-checked, and error-containing statements break candidate sequences. Suggestions
-and partial parses exit zero. Input or parser infrastructure failures exit
-nonzero; later files are still checked.
+checked, and error-containing statements break candidate sequences. Exit status:
+0 when no file reports a suggestion (a partial parse alone stays 0), 2 when any
+suggestion is reported, and 1 for input or parser infrastructure failures (1 wins
+over 2); later files are still checked. An invalid invocation is a usage error,
+which also exits 2. A script can test `$? -ne 0`.
 
 The repetition detector does not match reordered or scattered statements, arbitrary
 identifier renamings, or irregular iteration progressions. It does not merge

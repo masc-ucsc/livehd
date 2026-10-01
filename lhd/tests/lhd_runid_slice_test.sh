@@ -17,16 +17,16 @@ mkdir -p "$W"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 cat > "$W/des.prp" <<'EOF'
-pub comb kid(a:u4) -> (o:u5) {
+pub comb kid(a:U4) -> (o:U5) {
   o = a + 1
 }
 
-pub comb par(a:u4) -> (o:u6) {
+pub comb par(a:U4) -> (o:U6) {
   o = kid(a=a) + 1
 }
 EOF
 cat > "$W/orphan.prp" <<'EOF'
-pub comb orphan(a:u4) -> (o:u5) {
+pub comb orphan(a:U4) -> (o:U5) {
   o = a + 2
 }
 EOF

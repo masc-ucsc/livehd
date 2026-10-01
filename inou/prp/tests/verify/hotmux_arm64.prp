@@ -27,7 +27,7 @@
 // instead of materialising a wide one-hot constant.
 // This is deliberately combinational: the regression is the 65-bit Hotmux arm
 // selector, so registers and four identical BMC frames only add solver work.
-pub comb hotmux_arm64(idx:u7) -> (o:u7) {
+pub comb hotmux_arm64(idx:U7) -> (o:U7) {
   mut v = 0
   match idx#[0..=6] {
     == 0 {

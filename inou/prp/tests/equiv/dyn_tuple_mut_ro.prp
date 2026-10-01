@@ -10,9 +10,9 @@
 // lowers to the balanced Hotmux. (A runtime-indexed WRITE to a non-array tuple
 // has no hardware lowering and errors at the store, so an all-constant tuple
 // reaching the dynamic-index lowering cannot be hiding a dropped write.) A
-// runtime-indexed `mut` *array* (`mut t:[4]u8`) still becomes a Memory cell —
+// runtime-indexed `mut` *array* (`mut t:[4]U8`) still becomes a Memory cell —
 // see mem_mut_array.
-pub comb msel(sel:u2) -> (z:u8) {
+pub comb msel(sel:U2) -> (z:U8) {
   mut choices = (5, 6, 7, 8)
   z = choices[sel]
 }

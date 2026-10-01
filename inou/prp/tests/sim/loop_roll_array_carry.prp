@@ -5,8 +5,8 @@
 */
 // Array carries use the same default compact representation as scalar carries.
 // The second Sub is the bounds-check assertion in the shared loop body.
-pub mod loop_roll_array_carry(x:u8) -> (first:u8@[0], last:u8@[0]) {
-  mut values:[4]u8 = 0
+pub mod loop_roll_array_carry(x:U8) -> (first:U8@[0], last:U8@[0]) {
+  mut values:[4]U8 = 0
   for i in 0..<4 { values[i] = x ^ i }
   first = values[0]
   last = values[3]

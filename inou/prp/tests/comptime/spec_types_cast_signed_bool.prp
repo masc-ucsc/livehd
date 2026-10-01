@@ -1,0 +1,11 @@
+/*
+:name: spec_types_cast_signed_bool
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+// SPEC docs 04-variables "Boolean": "An explicit `Signed(b)` or `S<num>(b)` cast deliberately reinterprets
+// that single bit as signed, so true becomes the one-bit signed all-ones value `-1`."
+cassert(Signed(true) == -1)
+cassert(S8(true) == -1)
+cassert(1 == (Signed(false) + 1))

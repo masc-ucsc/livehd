@@ -1,0 +1,47 @@
+/*
+:name: array_port_dim_expr
+:type: simulation
+*/
+// An array PORT's dimension may be any compile-time value: a literal, a
+// visible `comptime const` (`[W]`), or an expression over the lambda's
+// generics and comptime consts (`[N+1]`, `[C+M]`). The expression form used to
+// harvest a width-less port -- cgen emitted `input signed v`, ONE bit, with
+// exit 0 -- and so did a plain `[W]` on a non-generic lambda; every lane but
+// bit 0 was silently dropped.
+comptime const W = 4
+comptime const C = 3
+
+mod pick_expr<N=2>(v:[N+1]U4) -> (o:[N+1]U4@[0]) {
+  o = v
+}
+mod pick_named(v:[W]U4) -> (o:[W]U4@[0]) {
+  o = v
+}
+mod pick_mixed<M=1>(v:[C+M]U4) -> (o:U4@[0]) {
+  o = v[C]
+}
+
+pub mod array_port_dim_expr(a:U4, b:U4) -> (r:U4@[0], s:U4@[0], t:U4@[0]) {
+  mut v:[4]U4 = 0
+  v[0] = a
+  v[3] = b
+  const p:[4]U4 = pick_expr<N=3>(v=v)
+  r = p[3] ^ p[0]
+  const q:[4]U4 = pick_named(v=v)
+  s = q[3]
+  t = pick_mixed<M=1>(v=v)
+}
+
+test array_port_dim_expr.t {
+  mut dut = array_port_dim_expr
+  mut bad = 0
+  tick 6 {
+    dut.a = 1
+    dut.b = 9 + clock
+    step
+    if dut.r != (9 + clock) ^ 1 { bad += 1 }
+    if dut.s != 9 + clock { bad += 1 }
+    if dut.t != 9 + clock { bad += 1 }
+  }
+  assert(bad == 0, "every lane crosses a port sized by an expression")
+}

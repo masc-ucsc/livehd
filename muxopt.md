@@ -1,13 +1,118 @@
 # muxopt — mux-tree optimization TODO
 
 Goal: close useful gaps in cprop and satopt, using Yosys and mux-tree research
-as references. This is an implementation plan, not a claim that the proposed
-rewrites are implemented or that downstream synthesis cannot recover them.
+as references. This document tracks implemented rewrites, remaining semantic
+blockers, and broader validation still needed.
 
-Reviewed against the working tree on 2026-09-25. Checked items have implementation
-or validation evidence below; unchecked items remain pending.
+Reviewed against the working tree on 2026-09-26. The review below supersedes
+older progress notes. Checked items have implementation or validation evidence;
+unchecked acceptance/benchmark items are not a claim that the core rewrite is absent.
 
-## Implementation progress (2026-09-25)
+## Review and implementation (2026-09-26)
+
+The proposal was **partially implemented**, with several stale unchecked items.
+The LT/GT synthesis and Word_sim fixes, reusable Boolean decoder (also used by
+enableopt), bool-safe XOR inversion, and bounded binary/index operator matcher
+were already present. A3's select-tree implementation was also present.
+
+This review adds:
+
+| Area | Current implementation and scope |
+|---|---|
+| A1 exclusive Hotmux operator groups | Same-shape, disjoint buckets reuse the binary matcher. Groups may include the explicit default. Original outer controls/default remain; inner controls are proven-exclusive subsets. An inactive inner group selects one original operand vector rather than manufacturing a zero divisor. Named/shared/colored/checked operators are rejected. |
+| A2 structural context | `cprop_muxctx.cpp`: iterative disjoint private binary/exclusive regions; at most 16 integer equality/disequality facts per path; sibling snapshots; edge-local bypass and structural bool01 data substitution. Wide truth never implies value 1. Named/shared/state/check/color boundaries remain opaque. Runs before A1. |
+| A4 Hotmux CSE | Sort complete control/value pairs only after exclusivity is established; retain default and producer generations, distinguish proof metadata, retain existing naming/color policy, and reject runtime checks. |
+| B1 `muxtree` | New satopt stage after `odc`: at most four ancestor facts, simulation restricted to matching columns, no nomination from empty contexts, and query-local `Prover::truth_when`. Targets private binary selects and exclusive Hotmux controls. A contextual true Hotmux control stays intact; only its other controls can be disabled, preserving global exclusivity. |
+| B2 `share` | New stage after `muxtree`: Mult/Div/Rem and variable shifts, existing operand matcher and lossless-carrier guard. Initial all-use support is exactly one binary-mux data use; every other use rejects the operator. Proves complete activations exclusive, caps pair attempts at 32 previous candidates and dependency walks at 256 pins, and checks both activations and operands for cycles. Multiple-use activation unions remain an extension. |
+
+Both new SAT stages use the normal work/query/cone budgets and report/CLI stage
+selection. They conservatively rerun their bounded searches, like `simp_ctrl`;
+no contextual proof rows are persisted, so graph edits, profile changes, and
+cold/warm runs cannot reuse stale contextual assumptions. Persistent proof-row
+reuse and an aggressive profitability option are not implemented.
+
+Two correctness discrepancies were found and corrected:
+
+- Formal's EQ encoder still applied unsigned coercion to mixed-sign operands,
+  although LEC had been fixed. It now compares integer values with each operand's
+  own extension and unsigned headroom. A signed four-bit value cannot equal 15.
+- The old all-equal Hotmux fold deliberately discarded an unproven overlap
+  obligation, contrary to this proposal and the shared-profile rule. It now
+  requires established exclusivity. The regression covers both proven collapse
+  and unproven preservation; equal data alone is not a proof of exclusivity.
+
+Remaining semantic/integration blockers:
+
+- **General index muxes:** cprop/Verilog zero, LEC last-arm fallback, and native
+  invalid-result behavior still disagree outside the explicit arm range. The
+  structural in-range guard remains mandatory; this review does not choose a
+  new language-level out-of-range contract.
+- **B3 synthesis assumptions:** there is still no public synthesis-profile caller
+  on the private mapping copy, nor an assumption-only provenance representation.
+  Stamping reusable source graphs `kFormalOnehot` would be unsound. B3 remains a
+  design/integration task, independent of the shared-profile improvements.
+- **Unproven Hotmux sharing:** overlap checks and priority behavior remain
+  observable; these cells are excluded rather than assigned a false proof.
+
+Remaining acceptance work includes external QoR sweeps, wider backend/width
+coverage, multi-use activation unions, and persistent contextual proof reuse.
+The paired Set_mask special case remains separate because it also handles
+shared-arm lane factoring outside A1's removable-private-operator contract.
+
+Executable review regressions: `cprop_muxctx_test` (contexts/CSE/obligations),
+`cprop_opshare_test` (nine additional Hotmux symbolic proofs), `prove_test`
+(mixed-sign equality), `satopt_muxtree_test` (contexts/Unknown/budgets), and
+`satopt_share_test` (cross-region arithmetic, all-use and cycle guards).
+`inou/prp/tests/equiv/lec/muxopt_context.v` and its header-only `_1.v` select
+`muxtree,share` for source-to-output validation. Current-run evidence is under `/tmp/livehd-muxopt-review-20260926/`.
+
+### Current validation and measured tradeoff
+
+- Nineteen focused targets passed in optimized mode (0.3–4.5 seconds each).
+  The corresponding debug checks passed (0.5–27.2 seconds), including a rerun
+  after giving the Hotmux test's setup proof the same resource floor used by
+  production satopt. All remain below the 20-second opt / 60-second dbg limits.
+- `prplec.py muxopt_context.v -v`: **Proven**. Both `muxtree` and `share`
+  nominate, prove and apply one rewrite. `muxtree` uses 369 work units and
+  `share` 366 on the debug source fixture. Native simulation of the optimized
+  graph passes all 32 directed vectors. Emitted-Verilog roundtrip: **Proven**.
+- The existing width pair passes 48 native vectors per source; `_1.v` is
+  **Proven**, while the intentionally incorrect `_2.v` remains **Refuted**.
+- Both ABC-mapped baseline and optimized netlists prove equivalent to the
+  source with models from `lhd pass liberty gensim test.lib`. These gate-level
+  multiplier proofs took longer than the unit checks and are not timing tests.
+- One serial, matched-library microbenchmark uses `inou/prp/tests/abc/test.lib`,
+  ABC, the default timing constraints, and the new source fixture. It compares
+  satopt disabled with only `muxtree,share` enabled, so it isolates those stages;
+  both sides include the current cprop implementation. Mapped area falls from
+  **2752 to 1559** (43.4%) and gates from **860 to 502**, but full-design STA
+  delay **regresses from 2.7 to 3.1 ns** (14.8%). This is a concrete area/delay
+  tradeoff, not a claim of general QoR improvement or physical signoff.
+- Each synthesis variant runs cold and twice warm without rebuilding. The
+  second warm results and actual `synthesis_invocation.wall_ms` are retained
+  in the JSON files (the external memory-monitor loop has sampling overhead).
+  Both new stages have identical work/verdict/application rows cold and warm.
+  Full command lines are in `qor-runs.json`; source hashes, the dirty patch and
+  tool/library identities are saved alongside it.
+
+Reproduce the new checks with:
+
+```sh
+bazel test -c dbg //pass/cprop:cprop_muxctx_test //pass/cprop:cprop_opshare_test \
+  //pass/formal:prove_test //pass/satopt:satopt_muxtree_test \
+  //pass/satopt:satopt_share_test --test_output=errors
+# Repeat with -c opt to check the optimized runtime budget.
+python3 inou/prp/tests/prplec.py inou/prp/tests/equiv/lec/muxopt_context.v -v
+lhd compile inou/prp/tests/equiv/lec/muxopt_context.v --top top \
+  --set pass.satopt=true --set pass.satopt.stages=muxtree,share \
+  --workdir W --emit verilog:optimized.v --result-json result.json
+```
+
+The full repository suite and external logikbench/dino/lhdtrack QoR sweeps were
+not run. The older checklist retains those broader acceptance items.
+
+
+## Historical implementation progress (2026-09-25)
 
 - Binary operator sharing and structurally in-range index sharing are implemented
   in `pass/cprop/cprop_opshare.cpp`. General index sharing and Hotmux operator
@@ -227,12 +332,11 @@ not guaranteed for standalone cprop, and there is no whole-graph fixed point.
   operands, negative and wide constants, and explicit `Get_mask`/`Sext`.
   Compare native simulation, emitted Verilog and LEC, so the same encoder bug
   cannot validate both sides unnoticed.
-- [ ] Complete the variadic backend audit. EQ Verilog/native emission and
-  native/Verilog LT/GT are fixed and tested above. The synthesis blaster still
-  retains only the last operand of each LT/GT bank; Word_sim refuses banks
-  with multiple operands. Fix and test those before declaring the complete
-  A1 banked-operator whitelist validated across backends.
-- [ ] Define a reusable operand-shape descriptor and bounded private-region
+- [x] Complete the variadic backend audit. EQ Verilog/native emission and
+  native/Verilog LT/GT are fixed and tested above. The synthesis blaster and Word_sim now compare every cross-bank pair;
+  `blast_compare_smoke` and `satopt_sim_test` cover these implementations.
+  Formal mixed-sign EQ was additionally corrected during this review.
+- [x] Define a reusable operand-shape descriptor and bounded private-region
   ownership walk. Keep pass-local state out of persistent graph attributes.
 - [ ] Audit pass ordering with `split_selfref`'s Get_mask distribution,
   `cprop_lowlane`, bitwidth rewrites and pack canonicalization. Check the actual
@@ -312,16 +416,17 @@ implementation leaves these cells untouched.
 
 - [x] Implement binary sharing and operand-shape matching with the A0 width
   policy. Full A0/A1 acceptance still requires the pending integration checks.
-- [ ] Add index muxes, then exclusive Hotmux groups/defaults as separate steps.
+- [x] Add structurally in-range index muxes and exclusive Hotmux groups/defaults.
+- [ ] Resolve general index fallback semantics before extending range support.
 - [ ] Fold the existing paired `Set_mask` rule into the engine only after its
   regressions pass; preserve the separate one-arm lane-update optimization.
-- [ ] Use deterministic shape buckets, not overlapping `(shared driver)`
+- [x] Use deterministic shape buckets, not overlapping `(shared driver)`
   buckets that omit no-common-operand opportunities. Bound pairing/search;
   a global optimal grouping is not required.
-- [ ] A committed rewrite strictly reduces distinct non-mux operator count.
+- [x] A committed rewrite strictly reduces distinct non-mux operator count.
   Track generated mux/control nodes and edges separately. Requeue only newly
   exposed private operand muxes, with ownership/generation checks.
-- [ ] Charge operand visits and emitted edges to a pass-wide budget. State
+- [x] Charge operand visits and emitted edges to a pass-wide budget. State
   sorting/hash and large-integer costs explicitly. Operator-count descent
   proves termination, not O(V+E) total work.
 
@@ -340,26 +445,26 @@ Extract reusable boolean/value facts and rollback into a helper such as
 state-specific reasoning wholesale. Its current walker also traverses `Or`,
 `Set_mask` and `Concat` and reasons from flop-enable clauses.
 
-- [ ] Walk disjoint private binary-Mux/exclusive-Hotmux data regions iteratively.
+- [x] Walk disjoint private binary-Mux/exclusive-Hotmux data regions iteratively.
   Stop at shared nodes, checks, colors and state boundaries. Prune only the
   relevant parent edge; never globally replace a value from a path-local fact.
-- [ ] Track zero/nonzero boolean conditions through `decode_bool_condition`;
+- [x] Track zero/nonzero boolean conditions through `decode_bool_condition`;
   extend it for `Xor(b,1)` only when `b` is structurally bool01.
-- [ ] Add exact selector equalities/disequalities from binary `EQ(sel,k)`.
+- [x] Add exact selector equalities/disequalities from binary `EQ(sel,k)`.
   `sel == k` decides other constant comparisons; `sel != k` only rules out
   that value. Cap stored facts at 16 per path, counting disequalities too.
   Roll back sibling facts and stop adding facts at the cap without guessing.
-- [ ] For binary muxes, the then edge supplies `sel != 0`, the else edge
+- [x] For binary muxes, the then edge supplies `sel != 0`, the else edge
   `sel == 0`. For exclusive Hotmuxes, an arm supplies its true control and
   default traversal supplies all controls false, subject to the fact budget.
   Index-mux path inference is a later extension requiring exact index rules.
-- [ ] Bypass a private mux whose selector is decided. Prune exclusive Hotmux
+- [x] Bypass a private mux whose selector is decided. Prune exclusive Hotmux
   arms under the same guards; leave unproven Hotmux controls/checks intact.
-- [ ] Replace a data occurrence of a known bool01 base with 0/1. Correct
+- [x] Replace a data occurrence of a known bool01 base with 0/1. Correct
   example: `mux(s, B, s) -> mux(s, B, 1)` for bool01 `s`;
   `mux(s, s, B) -> mux(s, 0, B)` on the else edge. Nonzero does not imply 1
   for a wide selector, so do not substitute its data value from truth alone.
-- [ ] Let mux-region predicate construction consult the same facts to avoid
+- [x] Let mux-region predicate construction consult the same facts to avoid
   building contradictory paths (`s & !s`, `EQ(x,3) & EQ(x,5)`). Retain shared
   predicate DAGs; do not enumerate paths into a sum of products.
 
@@ -396,14 +501,14 @@ with saved commands/results before using them as acceptance evidence.
 
 ## A4. Boolean inversion and Hotmux CSE
 
-- [ ] Share A2's bool01-safe `Xor(s,1)` decoding with scalar mux inversion.
+- [x] Share A2's bool01-safe `Xor(s,1)` decoding with scalar mux inversion.
   `Not(s)` is `-(s+1)`; for bool01 `s` it is never zero and is not logical
   inversion. For arbitrary integers it can be zero (`s == -1`).
-- [ ] Add a canonical pair-order-independent CSE key only for exclusive
+- [x] Add a canonical pair-order-independent CSE key only for exclusive
   Hotmuxes. Current `cse_pass` sorts by `sink_bank`; for positional Hotmux
   pins that retains original pair order. Sort whole `(control,value)` pairs,
   never controls and values independently; keep default distinct.
-- [ ] Include every relevant attribute/proof/check distinction and preserve
+- [x] Include every relevant attribute/proof/check distinction and preserve
   CSE's naming/color policy. Reject unproven/check-bearing cells. Do not erase
   an exclusivity obligation while merging an ordinary value node.
 
@@ -412,36 +517,36 @@ unproven overlaps and incompatible metadata do not merge unsafely.
 
 # Part B — satopt: bounded proofs and contextual sharing
 
-## B1. Context-aware select constants: proposed `muxtree` stage
+## B1. Context-aware select constants: `muxtree` stage
 
 Depends on A2's region/fact primitives and measurements. Proposed position:
 before `hotmux` in the existing fixed stage order, after the earlier value/ODC
 stages (B2 would follow B1). Explicit stage selection remains supported.
 
-- [ ] Target binary-Mux selects and exclusive-Hotmux controls inside private
+- [x] Target binary-Mux selects and exclusive-Hotmux controls inside private
   regions. Form a boolean path predicate `P` from at most four ancestor facts.
   Dropping additional conjuncts weakens the premise and is conservative;
   record the exact premise used. Include Hotmux default conditions correctly.
-- [ ] Word_sim nominates a constant only using columns satisfying `P`.
+- [x] Word_sim nominates a constant only using columns satisfying `P`.
   Conflicting samples reject it; zero matching samples are not evidence of
   constancy. Initially skip those candidates or make a separately budgeted
   reachability query. Simulation never establishes the rewrite.
-- [ ] Prove `P -> (sel == 0)` or `P -> (sel != 0)` for a binary mux.
+- [x] Prove `P -> (sel == 0)` or `P -> (sel != 0)` for a binary mux.
   The latter does not require `sel == 1`. Use a dedicated contextual query or
   a query-local implication expression; current `Prover::is_true` accepts a
   pin, not an arbitrary formula. Never leak path assumptions to later queries.
-- [ ] On Proven, rewrite only the observed parent edge/owned region, following
+- [x] On Proven, rewrite only the observed parent edge/owned region, following
   A2's guards. Unknown, Refuted, unsupported cones and budget exhaustion do
   not rewrite. Record counterexamples for later nominations.
-- [ ] Defer unproven Hotmuxes initially. Any extension must preserve every
+- [x] Defer unproven Hotmuxes initially. Any extension must preserve every
   control and check cone: a contextual fact cannot globally tie a control.
   Existing `apply_selects` ties controls using **global** proofs; it cannot be
   reused unchanged for this purpose.
-- [ ] Include the target, premise, region exits, profile, graph identity and
+- [ ] Persist contextual proof rows keyed by the target, premise, region exits, profile, graph identity and
   proof options in cache identity. Invalidate/rebuild prover and simulation
   state after mutations; no stale proofs after rewiring or pin reuse.
-- [ ] Wire stage enumeration, parsing, defaults, ordering, budgets, reports and
-  cache serialization. Report candidates, rejects, queries, proven/refuted/
+- [x] Wire stage enumeration, parsing, defaults, ordering, budgets, reports and
+  report serialization. Persistent proof rows are not written. Report candidates, rejects, queries, proven/refuted/
   unknown, applied, budget skips, work and node changes.
 
 Acceptance: correlated but structurally undecided selects, wide selectors,
@@ -451,33 +556,33 @@ incremental gain over A2 and ABC separately. `all_regions=false` is useful only
 where color information exists; do not enable a cross-color filter in an
 uncolored compile flow and silently filter out every candidate.
 
-## B2. Sharing operators under exclusive activations: proposed `share` stage
+## B2. Sharing operators under exclusive activations: `share` stage
 
 Depends on A1's shape/width policy and B1's bounded contextual infrastructure.
 This covers operators whose consumers are in different mux regions, beyond
 A1's common-mux pattern. Initial stage position: after `muxtree`, before
 `hotmux`, with normal satopt budget accounting.
 
-- [ ] Collect **all** uses of each candidate output, including graph outputs,
+- [x] Collect **all** uses of each candidate output, including graph outputs,
   state updates, named/opaque consumers and checks. Derive an activation that
-  over-approximates every observable use. OR multiple supported path conditions;
-  an unsupported use rejects the candidate. Exclusivity of only one use is
+  over-approximates every observable use. The initial implementation accepts exactly one binary-mux data use;
+  multiple or unsupported uses reject the candidate. Activation unions are deferred. Exclusivity of only one use is
   insufficient.
-- [ ] Bucket compatible shapes and bound pair attempts, fanout walks and
+- [x] Bucket compatible shapes and bound pair attempts, fanout walks and
   activation DAG size. On a walk cap, reject or conservatively treat the
   operator as always active; never drop an unvisited use.
-- [ ] Nominate when simulation sees no overlap; prove
+- [x] Nominate when simulation sees no overlap; prove
   `are_exclusive({act1, act2})`. Both-false behavior is unobserved only after
   the all-use analysis above and the common invalid-evaluation guards.
-- [ ] Replace paired operands with `mux(act1, Q_j, P_j)` and rewire the owned
+- [x] Replace paired operands with `mux(act1, Q_j, P_j)` and rewire the owned
   consumers to one shared operator. Recheck actual removed/added nodes.
-- [ ] Prevent cycles through **both controls and operands**. Neither selected
+- [x] Prevent cycles through **both controls and operands**. Neither selected
   activation nor any new operand dependency may reach either replaced output.
   A bounded reachability check can establish this; a bare topological-number
   comparison is not sufficient. Reject unsupported cyclic regions.
-- [ ] Reuse width, metadata, check, state and color guards from A1. Aggressive
+- [x] Reuse width, metadata, check, state and color guards from A1. Aggressive
   mode relaxes profitability filters only, never correctness guards.
-- [ ] Treat width thresholds as tunable LiveHD heuristics: initially consider
+- [x] Treat width thresholds as tunable LiveHD heuristics: initially consider
   `Mult`/`Div`/`Rem` at width >=4, variable `SHL`/`SRA` at width >=8, and an
   operand-width ratio <=2. These are not a verified exact copy of Yosys policy.
 - [ ] Add proposed option `pass.satopt.share.aggressive` only with parser/help,
@@ -541,11 +646,11 @@ Keep B3 independent of A1–B2; it is not a prerequisite for shared-profile gain
 
 For every implementation step:
 
-- [ ] Run relevant unit tests: `//pass/cprop:cprop_test`,
+- [x] Run relevant unit tests: `//pass/cprop:cprop_test`,
   `//pass/bitwidth:bitwidth_test`, `//pass/enableopt:enableopt_test`, and
   `//pass/lec:query_test`; add the affected satopt and CLI suites for Part B.
   Keep each test under 20 seconds opt / 60 seconds dbg.
-- [ ] Add small repository-owned fixtures and require explicit Proven LEC
+- [x] Add small repository-owned fixtures and require explicit Proven LEC
   verdicts for them. Also check structure and obligations: equivalence alone
   does not show the optimization fired or that a runtime check survived.
 - [ ] Save before/after non-mux operator, total-node, mux/control and edge counts,
@@ -567,6 +672,7 @@ For every implementation step:
   during a measurement sweep; after a rebuild, run warm commands twice and
   report the second warm result because code salts invalidate caches.
 
-The progress section records completed validation. General index behavior,
-Hotmux operator sharing, A2/A4 and B1–B3, remaining A3 acceptance coverage and
-QoR remain pending; unit proofs alone do not complete the proposal.
+The 2026-09-26 review records the implemented subset and remaining blockers.
+General index semantics, B3, broader activation unions, persistent contextual
+proof reuse and full QoR/backend acceptance remain pending. Unit proofs alone
+do not complete the proposal.

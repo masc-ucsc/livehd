@@ -1,0 +1,16 @@
+/*
+:name: spec_lexical_ident_escape_decoded
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// docs 02-basics "Identifiers": "The identifier uses the same escape sequence
+// as strings" (qa.md appendix 8: "Same escapes inside backticked
+// identifiers"), and "`foo` and foo are the same name only when foo is a
+// non-reserved word made of identifier characters" (qa.md appendix 2). The
+// escapes are DECODED, so `c\u{41}` and `d\x41` name the identifier-character
+// words cA and dA: the same names as the bare spellings.
+const `c\u{41}` = 6
+cassert(cA == 6)
+const `d\x41` = 7
+cassert(`dA` == 7)

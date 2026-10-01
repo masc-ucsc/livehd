@@ -2,22 +2,22 @@
 :name: loop_fused_state
 :type: simulation
 */
-mod fused_state_lane(a:u8) -> (q:u16@[0]) {
-  reg acc:u16 = 0
+mod fused_state_lane(a:U8) -> (q:U16@[0]) {
+  reg acc:U16 = 0
   wrap acc = acc + a
   q = acc
 }
 
-mod loop_fused_state(a:u8) -> (first:u16@[0], second:u16@[0]) {
-  mut x:u16 = 0
+mod loop_fused_state(a:U8) -> (first:U16@[0], second:U16@[0]) {
+  mut x:U16 = 0
   for i in 0..<3 {
-    const value = fused_state_lane(a=a + i)
+    const value = fused_state_lane(a=(a + i)#[0..<8])
     wrap x = x + value
   }
   first = x
-  mut y:u16 = 0
+  mut y:U16 = 0
   for i in 0..<3 {
-    const value = fused_state_lane(a=a + i + 1)
+    const value = fused_state_lane(a=(a + i + 1)#[0..<8])
     wrap y = y + value
   }
   second = y

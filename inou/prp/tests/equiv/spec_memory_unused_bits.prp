@@ -1,0 +1,21 @@
+/*
+:name: spec_memory_unused_bits
+:type: equiv
+:verilog_top: spec_memory_unused_bits
+:pyrope_top: spec_memory_unused_bits
+*/
+// SPEC (qa.md section 2, chat rulings, Memories): "Memory bits that are never read
+// AND never written may be removed as an optimization. The same applies to register
+// bits." (qa.md Q12: "it is never read AND never writen. Whenever we have the chance
+// of removing, we can do it.")
+// Rule encoded here: bits [15:4] of every entry of `m` are never written and never
+// read, so they are removable. The pair proves either way (the bits are
+// unobservable); the optimization itself is visible only in the emitted memory
+// width (BITS=4 instead of 16), checked by hand in the audit, not by this harness.
+pub mod spec_memory_unused_bits(clk:Clock, we:Bool, a:U2, x:U4, ra:U2) -> (q:U4@[0]) {
+  reg m:[4]U16 = nil
+  q = m[ra]#[0..<4]
+  if we {
+    m[a]#[0..<4] = x
+  }
+}

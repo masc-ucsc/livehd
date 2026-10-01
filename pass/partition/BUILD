@@ -56,6 +56,17 @@ cc_library(
 )
 
 cc_test(
+    name = "flatten_test",
+    srcs = ["flatten_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":flatten",
+        "//graph",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "pass_partition_test",
     srcs = ["pass_partition_test.cpp"],
     copts = COPTS,

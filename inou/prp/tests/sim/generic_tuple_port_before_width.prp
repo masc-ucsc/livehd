@@ -1,0 +1,109 @@
+/*
+:name: generic_tuple_port_before_width
+:type: simulation
+:expect_instances: u_loop_0=2
+*/
+// An inline TUPLE port declared before a generic-width port. Specializing a
+// generic lambda types each port from a list built over io_meta, where a tuple
+// port is flattened into its leaves (`t.a`, `t.b`). The clone then applied that
+// list by counting the tree's io entries, where the tuple is a single entry.
+// Every port after the tuple was therefore shifted by one: the generic-width
+// port got no type and lowered as 1 bit, and the next port took that port's
+// width.
+//
+// What went wrong in each case:
+//  * mod `gmin`: `sel` came out `input signed sel` (1 bit) and `d` came out
+//    [3:0]. The untyped `y` took N*16 bits.
+//  * mod `gmout`: `o:Unsigned(bits=N * 2)` came out 8 bits instead of 16.
+//  * comb `gtin`: its private inline clone typed the untyped `y` with `d`'s
+//    N*4 bits. The rolled loop that reads `y` then lifted `y` as an 8-bit port
+//    and dropped bit 12.
+//  * comb `gtout`: the untyped `q` took `o`'s 8 bits and was carried through a
+//    rolled loop at that width.
+//
+// The same shapes with the tuple port declared LAST always worked, so they are
+// not tested here. `:expect_instances: u_loop_0=2` pins the `gmin` and `gtin`
+// loops ROLLED, so their boundary ports are what the asserts exercise.
+
+mod gmin<N=2>(t:(a:U4, b:U4), sel:Unsigned(bits=N), d:Unsigned(bits=N * 16), y) -> (o:U16@[0], w:U8@[0], sw:U8@[0], yw:U8@[0]) {
+  mut acc:U16 = 0
+  for i in 0..<N {
+    if sel#[i] == 1 { acc |= d#[(i * 16)..+16] }
+  }
+  o  = acc ^ t.b ^ y
+  w  = d.[bits]
+  sw = sel.[bits]
+  yw = y.[bits]
+}
+
+mod gmout<N=8>(a:Unsigned(bits=N)) -> (p:(x:U4, y:U4)@[0], o:Unsigned(bits=N * 2)@[0]) {
+  p.x = a#[0..<4]
+  p.y = a#[4..<8]
+  o   = (a << N) | a
+}
+
+comb gtin<N=2>(t:(a:U4, b:U4), d:Unsigned(bits=N * 4), y, sel:U4) -> (o:U16, w:U8) {
+  mut acc:U16 = 0
+  for i in 0..<4 {
+    if sel#[i] == 1 { acc |= y << i }
+  }
+  o = acc ^ d ^ t.b
+  w = d.[bits]
+}
+
+comb gtout<N=2>(d:Unsigned(bits=N * 4)) -> (p:(a:U4, b:U4), o:Unsigned(bits=N * 4), q) {
+  p.a = 1
+  p.b = 2
+  o   = d
+  q   = 0
+  for i in 0..<4 {
+    q = q | (d << (i * 4))
+  }
+}
+
+mod generic_tuple_port_before_width(x:U4, s:U4, d:U64, e:U8, v:Unsigned(bits=13), h:U16)
+  -> (mo:U16@[0], mw:U8@[0], ms:U8@[0], my:U8@[0], ox:U4@[0], oo:U16@[0], co:U16@[0], cw:U8@[0], qo:U8@[0], qq:U24@[0], qp:U4@[0]) {
+  const t  = (const a=x, const b=x)
+  const m1 = gmin<N=4>(t=t, sel=s, d=d, y=h)
+  mo = m1.o
+  mw = m1.w
+  ms = m1.sw
+  my = m1.yw
+
+  const m2 = gmout<N=8>(a=e)
+  ox = m2.p.x
+  oo = m2.o
+
+  const c1 = gtin<N=2>(t=t, d=e, y=v, sel=s)
+  co = c1.o
+  cw = c1.w
+
+  const c2 = gtout<N=2>(d=e)
+  qo = c2.o
+  qq = c2.q
+  qp = c2.p.b
+}
+
+test generic_tuple_port_before_width.ports {
+  mut dut = generic_tuple_port_before_width
+  tick 1 {
+    dut.x = 0xF
+    dut.s = 0ub1111
+    dut.d = 0x8000_0400_0020_0001
+    dut.e = 0xAB
+    dut.v = 0x1000  // only bit 12 is set
+    dut.h = 0x0100
+    step
+    assert(dut.mo == 0x852E, "mod: all four 16-bit lanes of d, ^ t.b ^ y")
+    assert(dut.mw == 64, "mod: d is unsigned(bits=N * 16) with N=4")
+    assert(dut.ms == 4, "mod: sel is unsigned(bits=N) with N=4")
+    assert(dut.my == 16, "mod: the untyped y takes the u16 actual's type")
+    assert(dut.ox == 0xB, "mod: tuple output leaf")
+    assert(dut.oo == 0xABAB, "mod: o is unsigned(bits=N * 2) with N=8")
+    assert(dut.co == 0xF0A4, "comb: bit 12 of the untyped y survives the rolled loop")
+    assert(dut.cw == 8, "comb: d is unsigned(bits=N * 4) with N=2")
+    assert(dut.qo == 0xAB, "comb: o is unsigned(bits=N * 4) with N=2")
+    assert(dut.qq == 0xABBBB, "comb: the untyped q keeps every bit through the loop")
+    assert(dut.qp == 2, "comb: tuple output leaf")
+  }
+}

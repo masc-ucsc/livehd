@@ -2,326 +2,380 @@
 #include "pass_usyn.hpp"
 
 #include <algorithm>
-#include <array>
 #include <charconv>
+#include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <print>
+#include <set>
 
-#include "abc_map.hpp"  // Map_options
-#include "diag.hpp"
-#include "evidence.hpp"
-#include "json_util.hpp"
-#include "pass_abc.hpp"
+#include "artifact.hpp"
+#include "design_synth.hpp"
+#include "graph_library_singleton.hpp"
+#include "host_mem.hpp"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/Support/SHA256.h"
+#include "native_report.hpp"
 #include "provenance.hpp"
-#include "usyn_region.hpp"
+#include "resource_budget.hpp"
+#include "tmap.hpp"
 #include "usyn_salt.hpp"
 
 static Pass_plugin plugin("pass_usyn", Pass_usyn::setup);
 
-void Pass_usyn::setup() {
-  Eprp_method m("pass.usyn",
-                "Unate synthesis: cover every region with the fewest domino gates (static LUTs where no domino gate "
-                "builds a function), then hand the cover to ABC (technology mapping only, or the pass.abc flow)",
-                &Pass_usyn::work);
-  Pass_abc::add_mapping_labels(m);
-  // The cover's ABC hand-off never takes the size tier: an over-large region
-  // is already covered, and the tier's plain `&nf` would discard the cover's
-  // structure the full flow keeps (abc_cleanup.md step 8).
-  m.labels.erase("large_ge");
-  m.add_label_optional("large_ge", "inclusive synthesis-GE threshold for large_flow (0, the pass.usyn default, disables it)", "0");
-  m.add_label_optional("support", "Maximum inputs of one domino gate or LUT (2..8)", "6");
-  m.add_label_optional("literals", "Maximum factored pull-down literals of one domino gate (2..4096)", "16");
-  m.add_label_optional("series", "Maximum literals in one product term, i.e. series stack depth (2..32)", "4");
-  m.add_label_optional("domino_overhead",
-                       "transistors of a domino gate besides its factored pull-down literals (precharge, foot, keeper, "
-                       "output inverter)",
-                       "5");
-  m.add_label_optional("cmos_factor", "static CMOS transistors per factored literal of a non-unate LUT", "2");
-  m.add_label_optional("static_overhead", "transistors of a static LUT besides its literals (output inverter)", "2");
-  m.add_label_optional("nonunate_penalty", "multiplier on a non-unate (static) LUT's transistors", "2");
-  m.add_label_optional("cover_cuts", "priority cuts kept per node (1..64)", "12");
-  m.add_label_optional("domino_levels",
-                       "an output buildable in at most this many chained domino gates must be built so (2 = one cycle, a "
-                       "gate per half); deeper outputs only minimize transistors; 0 ignores depth",
-                       "2");
-  m.add_label_optional("depth_slack",
-                       ">= 0 also requires every deeper output at its minimum domino depth plus this many levels "
-                       "(depth-optimal, then area recovery); -1 leaves deeper outputs to transistor count only",
-                       "0");
-  m.add_label_optional("duplicate",
-                       "false = never compute logic twice: a gate absorbs a multi-reader node only when all its readers "
-                       "are inside it (reconvergent fan-out), otherwise the node is a gate output",
-                       "false");
-  m.add_label_optional("cover_memories", "false leaves blasted memory regions (register files) to the pass.abc flow", "false");
-  m.add_label_optional("fanout_boundary",
-                       "a node with at least this many sinks is always a LUT boundary, never replicated inside its "
-                       "readers' LUTs (0: the cost decides)",
-                       "0");
-  m.add_label_optional("abc",
-                       "hand-off to ABC: tmap (the cover network, gates as minimum SOPs, technology-mapped only), opt (that "
-                       "network through the full pass.abc flow), only (no cover: the original region logic through the "
-                       "pass.abc flow)",
-                       "tmap");
-  m.add_label_optional("fallback",
-                       "true: a region the cover cannot build (node limit, budget, infeasible cover) is mapped by the "
-                       "pass.abc flow; false: it is an error, so every non-memory region is the cover, technology-mapped",
-                       "false");
-  m.add_label_optional("ware_trials",
-                       "true: pass.abc's ware trials re-map each arithmetic ware region under alternative architectures "
-                       "(re-running this mapper) and keep the best",
-                       "false");
-  m.add_label_optional("recovery_rounds", "Exact-area recovery sweeps of the cover (0..8; 0 disables)", "2");
-  m.add_label_optional("max_nodes",
-                       "Maximum source objects (blasted Lnet gates, then hashed source nodes) admitted to the cover (larger "
-                       "regions use the ABC flow)",
-                       "2000000");
-  m.add_label_optional("timing_files", "INTERNAL common Liberty/SDC/SPEF environment from synth.*", "");
-  m.add_label_optional("invocation_context", "INTERNAL kernel invocation and observed input provenance", "");
-  register_pass(m);
-}
-
 namespace {
+// Keep old spellings registered only to produce directed migration errors.
+constexpr std::string_view obsolete[]
+    = {"support",          "literals",   "series",        "domino_overhead", "cmos_factor", "static_overhead",
+       "nonunate_penalty", "cover_cuts", "domino_levels", "depth_slack",     "duplicate",   "cover_memories",
+       "fanout_boundary",  "abc",        "fallback",      "recovery_rounds", "flow",        "area_flow",
+       "large_flow",       "large_ge",   "ware_trials",   "unroll_carry"};
+
 template <typename T>
-bool number(std::string_view text, T& value) {
+bool parse(std::string_view text, T& value) {
   const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
   return error == std::errc{} && end == text.data() + text.size();
 }
 
-bool read_options(const Eprp_var& var, livehd::usyn::Search_options& options) {
-  auto&      recipe = options.recipe;
-  const auto flag   = [&](std::string_view label, const char* dflt, bool& out) {
-    const auto v = std::string{var.get_stage(label, dflt)};
-    out          = v == "true" || v == "1";
-    return v == "true" || v == "false" || v == "1" || v == "0";
+struct Options {
+  livehd::usyn::Design_options design;
+  livehd::synth::Tmap_options  mapping;
+  std::string                  tmap = "abc";
+  uint64_t                     work = 4000000000;
+};
+
+bool read_options(const Eprp_var& var, Options& options) {
+  for (const auto key : obsolete) {
+    if (!var.get_stage(key, "").empty()) {
+      livehd::diag::err("pass.usyn", "obsolete-option", "syntax")
+          .msg("pass.usyn.{} belongs to the replaced whole-region cover", key)
+          .hint(
+              "use logical_inputs, stack, branches, cut_inputs and clock_phases; tmap=none|abc selects optional mapping; use "
+              "pass.abc for ABC synthesis")
+          .emit();
+      return false;
+    }
+  }
+  const auto read
+      = [&](std::string_view key, const char* fallback, auto& value) { return parse(var.get_stage(key, fallback), value); };
+  const auto flag = [&](std::string_view key, bool& value) {
+    const auto text = var.get_stage(key, "true");
+    value           = text == "true" || text == "1" || text == "on";
+    return value || text == "false" || text == "0" || text == "off";
   };
-  auto& cc = options.cover_cost;
-  if (!number(var.get_stage("recovery_rounds", "2"), options.recovery_rounds) || options.recovery_rounds > 8
-      || !number(var.get_stage("max_nodes", "2000000"), options.max_nodes) || options.max_nodes == 0
-      || !number(var.get_stage("support", "6"), recipe.support) || recipe.support < 2 || recipe.support > 8
-      || !number(var.get_stage("literals", "16"), recipe.literals) || recipe.literals < 2 || recipe.literals > 4096
-      || !number(var.get_stage("series", "4"), recipe.series) || recipe.series < 2 || recipe.series > 32
-      || !number(var.get_stage("domino_overhead", "5"), cc.domino_overhead) || !number(var.get_stage("cmos_factor", "2"), cc.cmos_factor)
-      || !number(var.get_stage("static_overhead", "2"), cc.static_overhead)
-      || !number(var.get_stage("nonunate_penalty", "2"), cc.nonunate_penalty) || cc.domino_overhead > 1000
-      || cc.cmos_factor > 100 || cc.static_overhead > 1000 || cc.nonunate_penalty > 100
-      || !number(var.get_stage("cover_cuts", "12"), options.cover_cuts) || options.cover_cuts == 0 || options.cover_cuts > 64
-      || !number(var.get_stage("domino_levels", "2"), options.domino_levels) || options.domino_levels > 64
-      || !number(var.get_stage("fanout_boundary", "0"), options.fanout_boundary) || !flag("duplicate", "false", options.duplicate)
-      || !flag("cover_memories", "false", options.cover_memories) || !flag("fallback", "false", options.fallback)
-      || !number(var.get_stage("depth_slack", "0"), options.depth_slack) || options.depth_slack < -1 || options.depth_slack > 64) {
+  auto& logical           = options.design.logical;
+  auto& endpoint          = logical.endpoint;
+  auto& residual          = logical.residual;
+  options.tmap            = var.get_stage("tmap", "abc");
+  options.mapping.library = var.get_stage("library", "");
+  const auto target       = var.get_stage("target", "cmos");
+  if (target != "cmos") {
+    livehd::diag::err("pass.usyn", "unsupported-target", "unsupported")
+        .msg("USYN currently emits target=cmos; physical DominoLatch emission is not implemented")
+        .emit();
     return false;
   }
-  using Abc_mode = livehd::usyn::Search_options::Abc_mode;
-  const auto abc = std::string{var.get_stage("abc", "tmap")};
-  if (abc == "tmap") {
-    options.abc_mode = Abc_mode::tmap;
-  } else if (abc == "opt") {
-    options.abc_mode = Abc_mode::opt;
-  } else if (abc == "only") {
-    options.abc_mode = Abc_mode::only;
-  } else {
+  const auto flatten = var.get_stage("flatten", "auto");
+  if (flatten != "auto" && flatten != "true" && flatten != "false") {
     return false;
   }
+  options.design.flatten = flatten == "auto"   ? livehd::partition::Flatten_mode::automatic
+                           : flatten == "true" ? livehd::partition::Flatten_mode::on
+                                               : livehd::partition::Flatten_mode::off;
+  if ((options.tmap != "none" && options.tmap != "abc") || !read("logical_inputs", "8", endpoint.gates.logical_inputs)
+      || !read("stack", "4", endpoint.gates.stack) || !read("branches", "10", endpoint.gates.branches)
+      || !read("cut_inputs", "16", endpoint.window.inputs) || !read("window_nodes", "100000", endpoint.window.nodes)
+      || !read("clock_phases", "2", endpoint.clock_phases) || !read("boundaries", "32", endpoint.boundaries)
+      || !read("divisor_partitions", "32", endpoint.divisor_partitions) || !read("care_phases", "16", endpoint.care_phases)
+      || !read("local_divisors", "32", endpoint.local_divisors) || !read("local_candidates", "64", endpoint.local_candidates)
+      || !read("max_nodes", "2000000", logical.max_nodes) || logical.max_nodes == 0 || !read("work", "4000000000", options.work)
+      || options.work == 0 || !read("endpoint_work", "16000000", logical.endpoint_work) || logical.endpoint_work == 0
+      || !read("pair_candidates", "32", logical.pair_candidates) || logical.pair_candidates > 4096
+      || !read("pair_trials", "64", logical.pair_trials) || !logical.pair_trials || logical.pair_trials > 4096
+      || !read("pair_choices", "4", logical.pair_choices) || logical.pair_choices > 8
+      || !read("pair_inputs", "16", logical.pair_inputs) || logical.pair_inputs == 0 || logical.pair_inputs > 16
+      || !read("pair_work", "16000000", logical.pair_work) || logical.pair_work == 0
+      || !read("static_and", "2", endpoint.cost.static_and) || !read("static_xor", "4", endpoint.cost.static_xor)
+      || !read("static_not", "1", endpoint.cost.static_not) || !read("residual_inputs", "8", residual.resub_inputs)
+      || !read("residual_divisors", "32", residual.divisors) || !read("residual_inserted", "2", residual.inserted)
+      || !read("residual_depth_slack", "0", residual.depth_slack)
+      || !read("memory_budget_mb", "16384", options.mapping.memory_budget_mb) || options.mapping.memory_budget_mb <= 0
+      || !read("time_budget_ms", "0", options.mapping.time_budget_ms) || !read("delay", "0", options.mapping.delay_ps)
+      || !std::isfinite(options.mapping.delay_ps) || options.mapping.delay_ps < 0 || !flag("residual", logical.optimize_residual)
+      || !flag("feedback", logical.feedback) || !flag("fast_accept", endpoint.fast_accept)
+      || !livehd::usyn::valid_endpoint_options(endpoint) || !livehd::usyn::valid_residual_options(residual)) {
+    return false;
+  }
+  options.design.max_source_nodes = logical.max_nodes;
+  options.design.cache.directory  = std::string(var.get_stage("cache_dir", ""));
+  if (!options.design.cache.directory.empty()) {
+    options.mapping.cache_directory = (options.design.cache.directory / "tmap").string();
+  }
+  options.design.cache.context
+      = std::to_string(options.mapping.memory_budget_mb) + "/" + std::to_string(options.mapping.time_budget_ms);
+  endpoint.cost_nodes = logical.max_nodes;
+  residual.max_nodes  = logical.max_nodes;
   return true;
 }
 
-// Rows whose region carries `"status":"<status>"`.
-uint64_t count_status(const std::vector<std::string>& rows, std::string_view status) {
-  const auto tag = std::format(R"("status":"{}")", status);
-  return std::count_if(rows.begin(), rows.end(), [&](const std::string& r) { return r.find(tag) != std::string::npos; });
-}
-
-// Sum one numeric field over the rows (region JSON is flat for these keys).
-double sum_field(const std::vector<std::string>& rows, std::string_view key) {
-  double     total = 0;
-  const auto tag   = std::format("\"{}\":", key);
-  for (const auto& row : rows) {
-    const auto pos = row.find(tag);
-    if (pos != std::string::npos) {
-      total += std::strtod(row.c_str() + pos + tag.size(), nullptr);
-    }
+void write_file(const std::filesystem::path& path, const std::string& contents) {
+  const auto    temporary = std::filesystem::path(path.string() + ".tmp");
+  std::ofstream file(temporary);
+  file << contents << '\n';
+  file.close();
+  if (!file) {
+    std::error_code ec;
+    std::filesystem::remove(temporary, ec);
+    livehd::diag::err("pass.usyn", "report-write", "io").msg("cannot write {}", path.string()).fatal();
   }
-  return total;
+  std::filesystem::rename(temporary, path);
 }
 }  // namespace
 
+void Pass_usyn::setup() {
+  Eprp_method m("pass.usyn", "Native register-rooted XAG synthesis with optional technology mapping", &Pass_usyn::work);
+  m.add_label_optional("tmap", "Optional technology mapping: none (logical CMOS, no Liberty) or abc (mapping only)", "abc");
+  m.add_label_optional("target", "Output target; currently cmos retains original state", "cmos");
+  m.add_label_optional("logical_inputs", "Maximum logical inputs of one selected gate, counting Q/!Q once (1..16)", "8");
+  m.add_label_optional("stack", "Maximum series stack of a selected gate", "4");
+  m.add_label_optional("branches", "Maximum factored parallel discharge width of a selected gate", "10");
+  m.add_label_optional("cut_inputs", "Analysis-window inputs (1..16), independent of gate legality", "16");
+  m.add_label_optional("window_nodes", "Maximum nodes in an endpoint analysis window", "100000");
+  m.add_label_optional("clock_phases", "Selected domino structure: one or two phases; CMOS output adds no phase state", "2");
+  m.add_label_optional("boundaries", "Retained endpoint frontier (1..4096); up to 12x+2 bounded move trials", "32");
+  m.add_label_optional("divisor_partitions", "New functional-divisor partitions (0 disables, up to 4096)", "32");
+  m.add_label_optional("care_phases", "Input-phase trials for divisor care completions (0 disables, up to 64)", "16");
+  m.add_label_optional("local_divisors", "Existing divisors retained for local endpoint search (1..256)", "32");
+  m.add_label_optional("local_candidates", "Witness-guided divisor-set trials per endpoint (0 disables, up to 4096)", "64");
+  m.add_label_optional("fast_accept",
+                       "Stop after a competitive full-cone result; false continues bounded improvement search",
+                       "true");
+  m.add_label_optional("max_nodes", "Source-definition and per-region logical/emission node admission limit", "2000000");
+  m.add_label_optional("work",
+                       "Deterministic work limit: the structural allowance (preparation, partitioning, translation, "
+                       "each region's import, identity selection and freeze, emission) and, separately, the search "
+                       "remainder shared by region searches in order",
+                       "4000000000");
+  m.add_label_optional("endpoint_work", "Maximum search work per endpoint", "16000000");
+  m.add_label_optional("pair_candidates", "Shared endpoint pairs retained per sharing snapshot (0 disables, up to 4096)", "32");
+  m.add_label_optional("pair_trials", "Maximum pair trials including affected revisits and admission failures (1..4096)", "64");
+  m.add_label_optional("pair_choices",
+                       "Pair alternatives per endpoint and alternate code trials per partition (0 disables, up to 8)",
+                       "4");
+  m.add_label_optional("pair_inputs", "Maximum joint independent support for a pair trial (1..16)", "16");
+  m.add_label_optional("pair_work", "Maximum work for coordinated pair reselection per region", "16000000");
+  m.add_label_optional("static_and", "Positive static AND cost proxy", "2");
+  m.add_label_optional("static_xor", "Positive static XOR cost proxy", "4");
+  m.add_label_optional("static_not", "Positive static inverter cost proxy", "1");
+  m.add_label_optional("residual", "Run one native residual cleanup/rewrite/resubstitution round", "true");
+  m.add_label_optional("feedback", "Reconsider affected endpoints once after residual optimization", "true");
+  m.add_label_optional("residual_inputs", "Maximum independent inputs of a residual resubstitution window", "8");
+  m.add_label_optional("residual_divisors", "Maximum residual resubstitution divisors", "32");
+  m.add_label_optional("residual_inserted", "Maximum inserted nodes in a residual replacement (0..2)", "2");
+  m.add_label_optional("residual_depth_slack", "Allowed residual depth increase", "0");
+  m.add_label_optional("flatten", "Hierarchy policy: auto follows coloring, true flattens, false preserves hierarchy", "auto");
+  m.add_label_optional("delay", "Optional tmap timing target in ps (0: none)", "0");
+  m.add_label_optional("memory_budget_mb", "Invocation memory-growth admission limit in MiB", "16384");
+  m.add_label_optional("time_budget_ms", "Invocation wall-time admission limit (0: unlimited)", "0");
+  m.add_label_optional("threads", "INTERNAL shared worker setting; USYN currently serializes synthesis", "1");
+  m.add_label_optional("library", "INTERNAL Liberty from synth.liberty; required only for tmap=abc", "");
+  m.add_label_optional("out", "Output graph-library directory", "");
+  m.add_label_optional("qor", "Output report path", "");
+  m.add_label_optional("cache_dir", "INTERNAL logical/tmap cache root; controlled by workdir and lhd.incremental", "");
+  m.add_label_optional("timing_files", "INTERNAL timing input provenance", "");
+  m.add_label_optional("invocation_context", "INTERNAL kernel invocation and observed input provenance", "");
+  for (const auto key : obsolete) {
+    m.add_label_optional(std::string{key}, "DEPRECATED obsolete cover option; emits a migration diagnostic", "");
+  }
+  register_pass(m);
+}
+
 void Pass_usyn::work(Eprp_var& var) {
-  namespace fs = std::filesystem;
-  livehd::usyn::Search_options search;
-  if (!read_options(var, search)) {
-    livehd::diag::err("pass.usyn", "invalid-search-options", "syntax")
-        .msg(
-            "invalid cover options; expected support=2..8, literals=2..4096, series=2..32, recovery_rounds=0..8, "
-            "cover_cuts=1..64, domino_levels=0..64, depth_slack=-1..64, max_nodes>0, duplicate/cover_memories/fallback=true|false "
-            "and abc=tmap|opt|only")
+  namespace fs   = std::filesystem;
+  namespace usyn = livehd::usyn;
+  Options options;
+  if (!read_options(var, options)) {
+    if (!livehd::diag::sink().has_halting_errors()) {
+      livehd::diag::err("pass.usyn", "invalid-options", "syntax")
+          .msg("invalid native USYN limits, flags or tmap mode")
+          .hint("logical_inputs/cut_inputs=1..16, clock_phases=1|2, positive work/node/cost limits, tmap=none|abc")
+          .emit();
+    }
+    return;
+  }
+  if (options.tmap != "none" && !livehd::synth::has_tmap_provider(options.tmap)) {
+    livehd::diag::err("pass.usyn", "tmap-unavailable", "unsupported")
+        .msg("technology-mapping provider '{}' is unavailable in this build", options.tmap)
+        .hint("use pass.usyn.tmap=none for the complete logical CMOS result")
         .emit();
     return;
   }
-  // Reports sit next to the QoR file (or the netlist). A statistics-only run
-  // (no out/qor) keeps them in a private scratch directory.
-  const auto output = std::string(var.get("out", ""));
-  const auto qor    = std::string(var.get("qor", ""));
-  fs::path   scratch;
-  auto       base = !qor.empty() ? qor : output;
-  if (base.empty()) {
-    auto pattern = (fs::temp_directory_path() / "livehd-usyn-XXXXXX").string();
-    if (!mkdtemp(pattern.data())) {
-      livehd::diag::err("pass.usyn", "scratch-create", "io").msg("cannot create a synthesis scratch directory").fatal();
-      return;
+  const auto                   requested_top = var.get("top", "");
+  std::shared_ptr<hhds::Graph> top;
+  for (const auto& graph : var.graphs) {
+    if (graph && (requested_top.empty() || graph->get_name() == requested_top)) {
+      top = graph;
+      break;
     }
-    scratch = pattern;
-    base    = (scratch / "qor.json").string();
   }
-  struct Scratch_guard {
+  if (!top) {
+    livehd::diag::err("pass.usyn", "no-top", "unsupported").msg("source top '{}' not found", requested_top).emit();
+    return;
+  }
+  const auto output = std::string{var.get("out", "")};
+  auto       base   = std::string{var.get("qor", "")};
+  struct Scratch {
     fs::path path;
-    ~Scratch_guard() {
+    ~Scratch() {
       if (!path.empty()) {
-        std::error_code error;
-        fs::remove_all(path, error);
+        std::error_code ec;
+        fs::remove_all(path, ec);
       }
     }
-  } scratch_guard{scratch};
+  } scratch;
+  if (base.empty()) {
+    if (!output.empty()) {
+      base = output + ".qor.json";
+    } else {
+      auto pattern = (fs::temp_directory_path() / "livehd-usyn-XXXXXX").string();
+      if (!mkdtemp(pattern.data())) {
+        livehd::diag::err("pass.usyn", "scratch-create", "io").msg("cannot create report scratch directory").fatal();
+      }
+      scratch.path = pattern;
+      base         = (scratch.path / "qor.json").string();
+    }
+  }
   fs::create_directories(fs::absolute(base).parent_path());
   const auto provenance_path = fs::path(base + ".provenance");
-  const auto report_path     = base + ".usyn.json";
   {
-    std::error_code error;
-    fs::remove_all(provenance_path, error);  // archive_provenance needs a fresh directory
+    std::error_code ec;
+    fs::remove_all(provenance_path, ec);
   }
-  const auto provenance = livehd::usyn::archive_provenance(provenance_path,
-                                                            var.get("invocation_context", ""),
-                                                            std::to_string(livehd::usyn::kUsynSrcSalt));
-
-  std::vector<std::string> reports;
-  std::vector<std::string> reused_reports;
-  const auto&              recipe = search.recipe;
-  Pass_abc::work_with(var, [&](livehd::abc::Map_options& opts) {
-    // One synthesis tree at a time. This deliberately OVERRIDES synth.threads:
-    // the region loop owns the process-memory budget the cover draws on.
-    opts.threads = 1;
-    // A ware trial re-maps a whole region (re-running the cover) and keeps
-    // whichever stitched result is best: it would re-decide the region.
-    opts.ware_trials        = var.get_stage("ware_trials", "false") == "true";
-    opts.region_hook_recipe = std::format("{}lnet-cover-v7:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
-                                          opts.ware_trials ? "wt-" : "",
-                                          std::array{"tmap", "opt", "only"}[static_cast<int>(search.abc_mode)],
-                                          livehd::usyn::kUsynSrcSalt,
-                                          recipe.support,
-                                          recipe.literals,
-                                          recipe.series,
-                                          search.cover_cost.domino_overhead,
-                                          search.cover_cost.cmos_factor,
-                                          search.cover_cost.static_overhead,
-                                          search.cover_cost.nonunate_penalty,
-                                          search.cover_cuts,
-                                          search.domino_levels,
-                                          search.fanout_boundary,
-                                          search.depth_slack,
-                                          std::string{search.duplicate ? "dup" : "nodup"} + (search.cover_memories ? "" : "-nomem"),
-                                          search.max_nodes,
-                                          search.recovery_rounds);
-    opts.region_hook = [&](const livehd::synth::Lnet& net, const livehd::synth::Region_ctx& ctx) {
-      std::string report;
-      auto        rewrite = livehd::usyn::rewrite_region(net, ctx, search, report);
-      rewrite.evidence    = livehd::usyn::pack_evidence(report);
-      std::print("[pass.usyn] {}\n", report);
-      reports.push_back(std::move(report));
-      return rewrite;
-    };
-    opts.evidence_valid = [](std::string_view cached_region, std::string_view evidence) {
-      return livehd::usyn::valid_evidence(evidence, cached_region);
-    };
-    opts.evidence_replay = [&](std::string_view region, std::string_view cached_region, std::string_view evidence) {
-      reused_reports.push_back(livehd::usyn::replay_evidence(region, cached_region, evidence));
-    };
-  });
-  if (livehd::diag::sink().has_halting_errors()) {
+  const auto provenance
+      = usyn::archive_provenance(provenance_path, var.get("invocation_context", ""), std::to_string(usyn::kUsynSrcSalt));
+  const auto start   = std::chrono::steady_clock::now();
+  const auto elapsed = [&] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count(); };
+  usyn::Resource_budget resources;
+  resources.entry_bytes         = livehd::cost::process_footprint_bytes();
+  resources.growth_limit_bytes  = livehd::cost::budget_bytes(options.mapping.memory_budget_mb);
+  resources.process_limit_bytes = livehd::cost::configured_budget_bytes();
+  resources.time_limit_ms       = options.mapping.time_budget_ms;
+  usyn::Budget work{options.work};
+  work.admission = [&] { return resources.admit(elapsed(), livehd::cost::process_footprint_bytes()); };
+  auto selected  = usyn::synthesize_cmos_design(top, options.design, work);
+  if (!selected.design) {
+    livehd::diag::err("pass.usyn", "synthesis-refused", "unsupported")
+        .msg("native synthesis failed: {}{}", selected.reason, resources.reason.empty() ? "" : "; " + resources.reason)
+        .emit();
     return;
   }
-  const auto    count = [&](std::string_view status) { return count_status(reports, status); };
-  std::ofstream report(report_path);
-  report << std::format(
-      R"({{"schema_version":4,"kind":"usyn","abc":"{}","recipe":{{"support":{},"literals":{},"series":{}}},"totals":{{"regions":{},"abc_tmap":{},"abc_opt":{},"abc_only":{},"abc_fallback":{},"reused":{},"cover_ms":{:.1f},)"
-      R"("domino":{},"nonunate":{},"aliases":{},"cover_cost":{},"domino_cost":{},"nonunate_cost":{},"domino_literals":{},"flow_cost":{},"domino_in2":{},"domino_in3":{},"domino_in4":{},"domino_in5":{},"domino_in6":{},"domino_in7":{},"domino_in8":{},"domino_s1":{},"domino_s2":{},"domino_s3":{},"domino_s4":{},"domino_s5":{},"domino_s6":{},"outputs_shallow":{},"outputs_deep":{},"outputs_wire":{},"covered_nodes":{},"replicated_nodes":{}}},"regions_searched":[)",
-      std::array{"tmap", "opt", "only"}[static_cast<int>(search.abc_mode)],
-      recipe.support,
-      recipe.literals,
-      recipe.series,
-      reports.size() + reused_reports.size(),
-      count("abc_tmap"),
-      count("abc_opt"),
-      count("abc_only"),
-      count("abc_fallback"),
-      reused_reports.size(),
-      sum_field(reports, "cover_ms"),
-      sum_field(reports, "domino"),
-      sum_field(reports, "nonunate"),
-      sum_field(reports, "aliases"),
-      sum_field(reports, "cover_cost"),
-      sum_field(reports, "domino_cost"),
-      sum_field(reports, "nonunate_cost"),
-      sum_field(reports, "domino_literals"),
-      sum_field(reports, "flow_cost"),
-      sum_field(reports, "domino_in2"),
-      sum_field(reports, "domino_in3"),
-      sum_field(reports, "domino_in4"),
-      sum_field(reports, "domino_in5"),
-      sum_field(reports, "domino_in6"),
-      sum_field(reports, "domino_in7"),
-      sum_field(reports, "domino_in8"),
-      sum_field(reports, "domino_s1"),
-      sum_field(reports, "domino_s2"),
-      sum_field(reports, "domino_s3"),
-      sum_field(reports, "domino_s4"),
-      sum_field(reports, "domino_s5"),
-      sum_field(reports, "domino_s6"),
-      sum_field(reports, "outputs_shallow"),
-      sum_field(reports, "outputs_deep"),
-      sum_field(reports, "outputs_wire"),
-      sum_field(reports, "covered_nodes"),
-      sum_field(reports, "replicated_nodes"));
-  for (size_t i = 0; i < reports.size(); ++i) {
-    report << (i ? "," : "") << reports[i];
+  std::unique_ptr<livehd::synth::Mapped_design> mapped;
+  if (options.tmap != "none") {
+    options.mapping.admission = [&](std::string_view) { return work.admission(); };
+    auto result               = livehd::synth::technology_map(options.tmap, selected.design->top, options.mapping);
+    if (!result.design) {
+      livehd::diag::err("pass.usyn", "tmap-refused", "unsupported").msg("technology mapping failed: {}", result.reason).emit();
+      return;
+    }
+    mapped = std::move(result.design);
   }
-  report << "],\"regions_reused\":[";
-  for (size_t i = 0; i < reused_reports.size(); ++i) {
-    report << (i ? "," : "") << reused_reports[i];
-  }
-  report << std::format(R"(],"provenance":{{"directory":"{}","capture":{}}}}})",
-                        livehd::json_util::escape(provenance_path.filename().string()),
-                        provenance)
-         << "\n";
-  report.close();
-  if (!report) {
-    livehd::diag::err("pass.usyn", "report-write", "io").msg("cannot write {}", report_path).fatal();
+  if (!work.admission()) {
+    livehd::diag::err("pass.usyn", "publication-refused", "unsupported").msg("{}", resources.reason).emit();
     return;
   }
-  std::print("[pass.usyn] {} region(s): {} tmap, {} opt, {} only, {} ABC fallback, {} reused\n",
-             reports.size() + reused_reports.size(),
-             count("abc_tmap"),
-             count("abc_opt"),
-             count("abc_only"),
-             count("abc_fallback"),
-             reused_reports.size());
-  std::print("[pass.usyn] cover: {} domino + {} non-unate LUT(s), cost {} (domino {}, non-unate {}; area-flow cover {}); "
-             "domino inputs 2..6: {}/{}/{}/{}/{}; outputs <= {} levels: {}, deeper: {}, wires: {}; replicated nodes {} of {}\n",
-             sum_field(reports, "domino"),
-             sum_field(reports, "nonunate"),
-             sum_field(reports, "cover_cost"),
-             sum_field(reports, "domino_cost"),
-             sum_field(reports, "nonunate_cost"),
-             sum_field(reports, "flow_cost"),
-             sum_field(reports, "domino_in2"),
-             sum_field(reports, "domino_in3"),
-             sum_field(reports, "domino_in4"),
-             sum_field(reports, "domino_in5"),
-             sum_field(reports, "domino_in6"),
-             search.domino_levels ? search.domino_levels : 2,
-             sum_field(reports, "outputs_shallow"),
-             sum_field(reports, "outputs_deep"),
-             sum_field(reports, "outputs_wire"),
-             sum_field(reports, "replicated_nodes"),
-             sum_field(reports, "covered_nodes"));
+  const auto artifact_path = fs::path(base + ".usyn.artifacts");
+  fs::create_directories(artifact_path);
+  std::vector<std::string> artifact_paths;
+  usyn::Artifact_limits    artifact_limits;
+  artifact_limits.nodes         = options.design.logical.max_nodes;
+  artifact_limits.formula_nodes = options.design.logical.endpoint.functions.max_formula_nodes;
+  for (size_t i = 0; i < selected.design->regions.size(); ++i) {
+    const auto& region = selected.design->regions[i];
+    auto        artifact
+        = usyn::serialize_artifact(region.module_name, livehd::synth::State_target::cmos, region.selected, work, artifact_limits);
+    if (artifact.status != usyn::Status::feasible) {
+      livehd::diag::err("pass.usyn", "artifact-refused", "unsupported").msg("{}: {}", region.module_name, artifact.reason).emit();
+      return;
+    }
+    // Content-addressed files keep a previous report's artifacts intact when
+    // a later invocation fails before publishing its new report.
+    if (!work.spend(artifact.bytes.size())) {
+      livehd::diag::err("pass.usyn", "artifact-refused", "unsupported").msg("artifact publication budget").emit();
+      return;
+    }
+    llvm::SHA256 hash;
+    hash.update(llvm::StringRef(artifact.bytes));
+    std::string    digest;
+    constexpr char hex[] = "0123456789abcdef";
+    for (const auto byte : hash.final()) {
+      digest += hex[byte >> 4];
+      digest += hex[byte & 15];
+    }
+    const auto    path      = artifact_path / (digest + ".usyn");
+    const auto    temporary = fs::path(path.string() + ".tmp");
+    std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
+    file.write(artifact.bytes.data(), static_cast<std::streamsize>(artifact.bytes.size()));
+    file.close();
+    if (!file) {
+      std::error_code ec;
+      fs::remove(temporary, ec);
+      livehd::diag::err("pass.usyn", "artifact-write", "io").msg("cannot write {}", path.string()).fatal();
+    }
+    fs::rename(temporary, path);
+    artifact_paths.push_back((artifact_path.filename() / path.filename()).generic_string());
+  }
+  if (!work.admission()) {
+    livehd::diag::err("pass.usyn", "publication-refused", "unsupported").msg("{}", resources.reason).emit();
+    return;
+  }
+  const auto report = usyn::native_report(*selected.design,
+                                          options.design,
+                                          options.tmap,
+                                          elapsed(),
+                                          resources.peak_bytes,
+                                          provenance_path.filename().string(),
+                                          provenance,
+                                          artifact_paths);
+  write_file(base + ".usyn.json", report);
+  write_file(base, mapped ? usyn::mapping_report(*mapped, options.tmap, options.mapping.library) : report);
+  {
+    // The new report is published: drop artifacts that only earlier reports
+    // referenced, so a copied archive holds exactly this report's regions.
+    std::set<std::string> published;
+    for (const auto& relative : artifact_paths) {
+      published.insert(fs::path(relative).filename().string());
+    }
+    std::error_code ec;
+    for (fs::directory_iterator it(artifact_path, ec), end; !ec && it != end; it.increment(ec)) {
+      const auto name = it->path().filename().string();
+      if (it->is_regular_file() && it->path().extension() == ".usyn" && !published.contains(name)) {
+        std::error_code remove_ec;
+        fs::remove(it->path(), remove_ec);
+      }
+    }
+  }
+  if (!output.empty()) {
+    auto& destination = livehd::Hhds_graph_library::instance(output);
+    auto& source      = mapped ? mapped->library : selected.design->library;
+    if (std::find_if(var.graphs.begin(),
+                     var.graphs.end(),
+                     [&](const auto& g) { return g && g->get_io()->get_library() == &destination; })
+        != var.graphs.end()) {
+      livehd::diag::err("pass.usyn", "output-is-input", "io")
+          .msg("USYN output library must differ from the source library")
+          .fatal();
+    }
+    for (const auto gid : destination.all_gids()) {
+      destination.delete_graphio(destination.find_io(gid));
+    }
+    if (!livehd::copy_with_callees(destination, source, top->get_name())) {
+      livehd::diag::err("pass.usyn", "publish-failed", "internal").msg("could not publish USYN output").fatal();
+    }
+  }
+  std::print("[pass.usyn] native synthesis: {} region(s), target=cmos, tmap={}, {:.1f} ms\n",
+             selected.design->regions.size(),
+             options.tmap,
+             elapsed());
 }

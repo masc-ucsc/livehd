@@ -201,6 +201,226 @@ for variant in impl bad; do
 done
 echo "PASS: memory word/bit correspondence proves, corrupted write refutes"
 
+# A golden RTL array is `mem[<word>][<bit>]` after `memory`, while cgen keeps
+# the same memory as the reversible wrapper `__lhdmem_h<hex>_e.data` or, for an
+# inline packed memory, one `__lhdmem_h<hex>_e_data` bus. A rolled loop replica
+# `u_loop_<n>__li<k>.<inst>` is the unrolled `<inst>__li<k>`. Each form must be
+# paired (stage 1r) and proven; a corrupted write must still refute.
+python3 - "$W" <<'PYRTL_NAMES'
+from pathlib import Path
+import sys
+w = Path(sys.argv[1])
+ports = "input clk, we, input [1:0] wa, ra, input [7:0] d, output [7:0] y"
+(w / "rtl_names_ref.v").write_text(f"""
+module rtl_names({ports});
+  reg [7:0] mem [0:3];
+  always @(posedge clk) if (we) mem[wa] <= d;
+  assign y = mem[ra];
+endmodule
+""")
+(w / "rtl_names_wrap.v").write_text(f"""
+module rtl_names({ports});
+  array_memory __lhdmem_h6d656d_e (clk, we, wa, ra, d, y);
+endmodule
+module array_memory({ports});
+  reg [7:0] data [0:3];
+  always @(posedge clk) if (we) data[wa] <= d;
+  assign y = data[ra];
+endmodule
+""")
+for variant, value in (("inline", "d"), ("bad", "d ^ 8'h01")):
+    (w / f"rtl_names_{variant}.v").write_text(f"""
+module rtl_names({ports});
+  reg [31:0] __lhdmem_h6d656d_e_data;
+  always @(posedge clk) if (we) __lhdmem_h6d656d_e_data[wa*8 +: 8] <= {value};
+  assign y = __lhdmem_h6d656d_e_data[ra*8 +: 8];
+endmodule
+""")
+# The renamed pairs feed induction-only engines (no base case), so a power-on
+# mismatch must stay unpaired: same writes, word 0 initialized 1 vs 9.
+(w / "init_names_ref.v").write_text(f"""
+module init_names({ports});
+  reg [7:0] mem [0:3];
+  initial begin mem[0] = 8'd1; mem[1] = 8'd2; mem[2] = 8'd3; mem[3] = 8'd4; end
+  always @(posedge clk) if (we) mem[wa] <= d;
+  assign y = mem[ra];
+endmodule
+""")
+for variant, word0 in (("inline", 1), ("bad", 9)):
+    (w / f"init_names_{variant}.v").write_text(f"""
+module init_names({ports});
+  reg [31:0] __lhdmem_h6d656d_e_data;
+  initial __lhdmem_h6d656d_e_data = {{8'd4, 8'd3, 8'd2, 8'd{word0}}};
+  always @(posedge clk) if (we) __lhdmem_h6d656d_e_data[wa*8 +: 8] <= d;
+  assign y = __lhdmem_h6d656d_e_data[ra*8 +: 8];
+endmodule
+""")
+# A one-bit view of an LFSR hides its state from the plain proof: the replica
+# registers must be paired before induction can close.
+# A hand-written golden bank keeps one flop per word (`mem0`..`mem3`); the
+# memory's word w pairs with `mem<w>` (glued lane, as pass/lec pairs banks).
+(w / "bank_names_ref.v").write_text(f"""
+module bank_names({ports});
+  reg [7:0] mem0, mem1, mem2, mem3;
+  always @(posedge clk) if (we) case (wa)
+    2'd0: mem0 <= d;
+    2'd1: mem1 <= d;
+    2'd2: mem2 <= d;
+    default: mem3 <= d;
+  endcase
+  assign y = ra == 2'd0 ? mem0 : ra == 2'd1 ? mem1 : ra == 2'd2 ? mem2 : mem3;
+endmodule
+""")
+for variant, value in (("wrap", "d"), ("bad", "d ^ 8'h01")):
+    (w / f"bank_names_{variant}.v").write_text(f"""
+module bank_names({ports});
+  array_memory __lhdmem_h6d656d_e (clk, we, wa, ra, d, y);
+endmodule
+module array_memory({ports});
+  reg [7:0] data [0:3];
+  always @(posedge clk) if (we) data[wa] <= {value};
+  assign y = data[ra];
+endmodule
+""")
+lane = """
+module lane(input clk, input d, output q);
+  reg [7:0] acc;
+  always @(posedge clk) acc <= {acc[6:0], acc[7] ^ acc[5] ^ d};
+  assign q = ^acc;
+endmodule
+"""
+top = "module loop_names(input clk, input d0, d1, output q0, q1);"
+(w / "loop_names_ref.v").write_text(lane + top + """
+  lane lane__li0 (clk, d0, q0);
+  lane lane__li1 (clk, d1, q1);
+endmodule
+""")
+for variant, second in (("impl", "d1"), ("bad", "~d1")):
+    (w / f"loop_names_{variant}.v").write_text(lane + f"""
+module body(input clk, input d, output q);
+  lane lane (clk, d, q);
+endmodule
+{top}
+  body u_loop_0__li0 (clk, d0, q0);
+  body u_loop_0__li1 (clk, {second}, q1);
+endmodule
+""")
+PYRTL_NAMES
+# Two cases at a time, like the blocks above (each is one lgcheck/yosys run).
+set -- rtl_names:wrap rtl_names:inline rtl_names:bad bank_names:wrap bank_names:bad loop_names:impl loop_names:bad \
+  init_names:inline init_names:bad
+while [ "$#" -gt 0 ]; do
+  batch="$1 ${2:-}"
+  shift
+  [ "$#" -eq 0 ] || shift
+  for case in $batch; do
+    top=${case%%:*}
+    variant=${case##*:}
+    mkdir -p "$W/${top}_$variant"
+    (cd "$W/${top}_$variant" && LGCHECK_EQUIV_TIMEOUT="$LGCHECK_BUDGET" "$LGCHECK" \
+      --yosys "$YOSYS_ABS" --top "$top" \
+      --reference "$W/${top}_ref.v" --implementation "$W/${top}_$variant.v") \
+      >"$W/${top}_$variant.log" 2>&1 &
+    eval "${top}_${variant}_pid=$!"
+  done
+  for case in $batch; do
+    top=${case%%:*}
+    variant=${case##*:}
+    eval "wait \"\${${top}_${variant}_pid}\""
+    rc=$?
+    if [ "$variant" = bad ]; then
+      [ "$rc" -eq 1 ] || { cat "$W/${top}_$variant.log"; fail "$top: corrupted state update or power-on value was not refuted"; }
+    else
+      [ "$rc" -eq 0 ] || { cat "$W/${top}_$variant.log"; fail "$top ($variant): state correspondence was not proven"; }
+      grep -q '^1r.Successfully matched' "$W/${top}_$variant.log" || fail "$top ($variant) did not exercise state-name recovery"
+    fi
+  done
+done
+echo "PASS: RTL array, flop bank, cgen wrapper/inline memory and rolled-loop replica names pair; corrupted updates and power-on values refute"
+
+# Stages 1..1c and 4 pair state by NAME (equiv_make) or by STRUCTURE
+# (equiv_struct) and prove it with induction-only engines, which ASSUME every
+# pair equal at power-on and unroll through unpaired state as if a clock edge
+# had set it. A pair that starts apart must fall through to the bounded miter:
+# a same-named register initialized 1 vs 9 (stage 1, and 1c for its
+# clk2fflogic model) and a cgen wrapper memory whose word 0 starts 1 vs 9,
+# which equiv_struct merges with the golden array (stage 1m), must refute. So
+# must a RENAMED register (`r` vs `s`, on no pair; only `q = r + 1` is) that
+# starts 1 vs 9: the stage's base case from power-on sees it. The same
+# power-on values still prove.
+python3 - "$W" <<'PYPOWER_ON'
+from pathlib import Path
+import sys
+w = Path(sys.argv[1])
+for variant, value in (("ref", 1), ("impl", 1), ("bad", 9)):
+    (w / f"flop_init_{variant}.v").write_text(f"""
+module flop_init(input clk, input [3:0] d, output [3:0] q);
+  reg [3:0] r = 4'd{value};
+  always @(posedge clk) r <= d;
+  assign q = r;
+endmodule
+""")
+for variant, reg, value in (("ref", "r", 1), ("impl", "s", 1), ("bad", "s", 9)):
+    (w / f"rename_init_{variant}.v").write_text(f"""
+module rename_init(input clk, input [3:0] d, output [3:0] q);
+  reg [3:0] {reg} = 4'd{value};
+  always @(posedge clk) {reg} <= d;
+  assign q = {reg} + 4'd1;
+endmodule
+""")
+ports = "input clk, we, input [1:0] wa, ra, input [7:0] d, output [7:0] y"
+(w / "wrap_init_ref.v").write_text(f"""
+module wrap_init({ports});
+  reg [7:0] mem [0:3];
+  initial begin mem[0] = 8'd1; mem[1] = 8'd2; mem[2] = 8'd3; mem[3] = 8'd4; end
+  always @(posedge clk) if (we) mem[wa] <= d;
+  assign y = mem[ra];
+endmodule
+""")
+for variant, word0 in (("wrap", 1), ("bad", 9)):
+    (w / f"wrap_init_{variant}.v").write_text(f"""
+module wrap_init({ports});
+  array_memory __lhdmem_h6d656d_e (clk, we, wa, ra, d, y);
+endmodule
+module array_memory({ports});
+  reg [7:0] data [0:3];
+  initial begin data[0] = 8'd{word0}; data[1] = 8'd2; data[2] = 8'd3; data[3] = 8'd4; end
+  always @(posedge clk) if (we) data[wa] <= d;
+  assign y = data[ra];
+endmodule
+""")
+PYPOWER_ON
+# Two cases at a time, like the blocks above (each is one lgcheck/yosys run).
+set -- flop_init:impl flop_init:bad wrap_init:wrap wrap_init:bad rename_init:impl rename_init:bad
+while [ "$#" -gt 0 ]; do
+  batch="$1 ${2:-}"
+  shift
+  [ "$#" -eq 0 ] || shift
+  for case in $batch; do
+    top=${case%%:*}
+    variant=${case##*:}
+    mkdir -p "$W/${top}_$variant"
+    (cd "$W/${top}_$variant" && LGCHECK_EQUIV_TIMEOUT="$LGCHECK_BUDGET" "$LGCHECK" \
+      --yosys "$YOSYS_ABS" --top "$top" \
+      --reference "$W/${top}_ref.v" --implementation "$W/${top}_$variant.v") \
+      >"$W/${top}_$variant.log" 2>&1 &
+    eval "${top}_${variant}_pid=$!"
+  done
+  for case in $batch; do
+    top=${case%%:*}
+    variant=${case##*:}
+    eval "wait \"\${${top}_${variant}_pid}\""
+    rc=$?
+    if [ "$variant" = bad ]; then
+      [ "$rc" -eq 1 ] || { cat "$W/${top}_$variant.log"; fail "$top: a power-on mismatch was proven by a stage that assumes paired state starts equal"; }
+      grep -q 'power-on value' "$W/${top}_$variant.log" || fail "$top (bad) did not exercise the power-on check"
+    else
+      [ "$rc" -eq 0 ] || { cat "$W/${top}_$variant.log"; fail "$top ($variant): equal power-on values were not proven"; }
+    fi
+  done
+done
+echo "PASS: same-named, structurally merged and renamed state starting at different power-on values refutes; equal values prove"
+
 # An expensive correspondence guess must leave time for another strategy.
 # The fake solver isolates scheduling: the first attempt would outlast the
 # whole three-second budget; the next attempt returns an explicit proof. The
@@ -211,7 +431,10 @@ case "$*" in
   *"write_json lgcheck_clock_domains.json"*)
     echo '{"modules":{"gold":{},"gate":{}}}' >lgcheck_clock_domains.json ;;
   *"write_verilog trace1.v"*) exec sleep 4 ;;
-  *"select -set state_outputs"*) echo 'Equivalence successfully proven!' ;;
+  *"select -set state_outputs"*)
+    # the pairs a real 1n dumps before proving (nothing paired here)
+    echo '{"modules":{"equiv":{}}}' >lgcheck1n_pairs.json
+    echo 'Equivalence successfully proven!' ;;
 esac
 exit 0
 SHSTRATEGY

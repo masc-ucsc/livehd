@@ -2,14 +2,14 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # `lhd sim` runtime test parameters: each `test name(params)` parameter becomes
-# a `--<name>` flag on the generated driver (bound at run time, not baked in),
+# a `+<name>=VALUE` flag on the generated driver (bound at run time, not baked in),
 # alongside `--seed` and `--help`. This test drives only `lhd sim --setup-only`
 # (no nested bazel / host compiler needed) and asserts on the generated driver
 # source + the diagnostics, covering:
-#   * a valid parameter generates a `--<name>` flag, `--seed`/`--help`, and the
+#   * a valid parameter generates a `+<name>=VALUE` flag, `--seed`/`--help`, and the
 #     validating numeric parsers (`_to_i64`/`_to_u64`);
 #   * a parameter name that is unsafe as a C++ identifier / collides with a
-#     reserved driver flag is rejected at setup with a clear message
+#     reserved C++ runtime name is rejected at setup with a clear message
 #     (C++ keyword, `argc`, leading-underscore, backtick — review #1-#5);
 #   * `lhd sim --seed <non-numeric>` is a CLI usage error (review #8).
 
@@ -30,8 +30,8 @@ cat > "$W/good.prp" <<'EOF'
 :name: good
 :type: simulation
 */
-mod nn(a:u8) -> (s:u8@[0]) { s = a }
-test nn.t(cycles:u20 = 20) {
+mod nn(a:U8) -> (s:U8@[0]) { s = a }
+test nn.t(cycles:U20 = 20) {
   mut acc = nn
   mut v = 0
   tick cycles { acc.a = 1; step; v = acc.s }
@@ -41,7 +41,7 @@ EOF
 "$LHD" sim "$W/good.prp" --setup-only --workdir "$W/good" -q >/dev/null 2>&1 \
   || fail "valid parameterized test failed to set up"
 # One driver per design (drv.cpp) holds every `test` block; each `test`-parameter
-# is bound from the central `--<name>` arg map inside its run function.
+# is bound from the central `+<name>=VALUE` arg map inside its run function.
 DRV="$W/good/sim/drv.cpp"
 [ -f "$DRV" ] || fail "expected driver not generated: $DRV"
 grep -q '_args.find("cycles")' "$DRV" || fail "driver does not bind the cycles parameter"
@@ -64,7 +64,7 @@ reject_param() {
 :name: bad
 :type: simulation
 */
-mod nn(a:u8) -> (s:u8@[0]) { s = a }
+mod nn(a:U8) -> (s:U8@[0]) { s = a }
 test nn.t($decl) {
   mut acc = nn
   mut v = 0
@@ -80,18 +80,18 @@ EOF
   # errors on its own would make every case below pass vacuously.
   # Two rejection paths, both explanatory, and which one fires depends on the
   # name: a Pyrope RESERVED WORD (`test`) is refused at parse time by the
-  # backtick rule ("`test` is a reserved word, so it cannot be a parameter
+  # backtick rule ("'test' is reserved, so it cannot be a parameter
   # name"), while every other unusable name reaches the simulation-parameter
   # check. Each case names the layer it expects, so relaxing one does not
   # silently accept the wrong diagnostic for the others.
   echo "$out" | grep -qE "$want" \
     || fail "rejection of $label lacked the explanatory message: $out"
 }
-reject_param 'default:u8 = 2' 'C++ keyword'
-reject_param 'argc:u8 = 2'    'main argument argc'
-reject_param '_seed:u8 = 2'   'leading-underscore driver-local collision'
-reject_param 'test:u8 = 2'    'reserved --test selector flag' 'is a reserved word'
-reject_param '`my param`:u8 = 2' 'backtick-escaped identifier'
+reject_param 'default:U8 = 2' 'C++ keyword'
+reject_param 'argc:U8 = 2'    'main argument argc'
+reject_param '_seed:U8 = 2'   'leading-underscore driver-local collision'
+reject_param 'test:U8 = 2'    'Pyrope reserved test keyword' 'is reserved, so it cannot be a parameter name'
+reject_param '`my param`:U8 = 2' 'backtick-escaped identifier'
 
 # ---- `--list-tests` emits the dotted name + params as JSON (no build) ---------
 LT="$("$LHD" sim "$W/good.prp" --list-tests --diag-fmt jsonl 2>/dev/null | head -1)" \

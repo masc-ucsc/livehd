@@ -18,7 +18,7 @@
 
 const pick3_t = import("lib_pick3.pick3")
 
-pub mod import_alias_sub_instance(x:u4, y:u4) -> (r1:u5@[], r2:u5@[], r3:u1@[]) {
+pub mod import_alias_sub_instance(x:U4, y:U4) -> (r1:U5@[], r2:U5@[], r3:U1@[]) {
   mut pick3 = pick3_t::[name=pick3](a = x, b = y)
   r1 = pick3.o1
   r2 = pick3.o2

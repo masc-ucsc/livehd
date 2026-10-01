@@ -17,8 +17,8 @@
 //
 // Each output below folded to the `x` arm before the fix (`ack`/`req` dropped
 // entirely).  A no-type-annotation variable is the whole point — do NOT "fix"
-// this test by adding `:u1`, which is itself one of the maskers.
-pub comb top(ack:u1, req:u1, x:u4, y:u4) -> (sel:u4, sel2:u4, sel3:u4) {
+// this test by adding `:U1`, which is itself one of the maskers.
+pub comb top(ack:U1, req:U1, x:U4, y:U4) -> (sel:U4, sel2:U4, sel3:U4) {
   // the minimal case: an untyped COPY of a runtime input (no operator at all)
   mut cond = ack
   sel = if cond != 0 { x } else { y }

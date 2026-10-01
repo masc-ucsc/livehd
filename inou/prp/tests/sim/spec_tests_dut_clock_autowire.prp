@@ -1,0 +1,30 @@
+/*
+:name: spec_tests_dut_clock_autowire
+:type: simulation
+*/
+// Spec (qa.md appendix section 8): "the DUT instances stepped inside that tick
+// auto-wire their single Clock input to it". docs 05b "Running cycles (tick)":
+// "The DUT instances stepped inside the tick auto-wire their unbound `Clock`
+// input to it, like any instance whose caller has a single Clock."
+//
+// Rule pinned: a DUT whose single Clock input has an arbitrary name (`ck`,
+// binding is by TYPE, section 1/6) and that the test never binds is clocked
+// by the tick's minted clock: its register advances once per `step`.
+
+mod spec_dca_cnt(ck:Clock, en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_dca.autowire {
+  mut d   = spec_dca_cnt
+  mut bad = 0
+  tick 5 {
+    d.en = true
+    step
+    if d.q != clock + 1 { bad += 1 }   // post-step: one edge per iteration so far
+  }
+  assert(bad == 0, "the unbound `ck:Clock` must follow the tick's clock")
+  assert(d.q == 5)
+}

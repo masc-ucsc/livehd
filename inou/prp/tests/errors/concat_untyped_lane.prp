@@ -11,7 +11,7 @@
 // same value at different widths. Sizing the window from the value would let a
 // later change to `u` silently shift every lane above it, so this is refused
 // rather than guessed.
-comb concat_untyped_lane(b:u8) -> (z:u11) {
+comb concat_untyped_lane(b:U8) -> (z:U11) {
   const u = 0ub101
   z = (b, u)#[..]
 }

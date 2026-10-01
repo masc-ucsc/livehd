@@ -1,0 +1,31 @@
+/*
+:name: bool_inst_into_u1_input
+:type: error
+:tolg: 1
+:error: cannot bind boolean value to input .n. of .*leaf.* \(it is integer\)
+:help: U1\(
+*/
+
+// User ruling 2026-09-27 (2): a child's `Bool` OUTPUT bound to a `U1` INPUT of
+// another `mod` needs `U1(x)` -- the mirror of bool_port_bind_u1.prp (a u1
+// into a bool input). Today the instance output's kind is `unknown` at the
+// call site and a Sub call connects the actual straight to the callee pin
+// with no kind check, so this compiles silently.
+//
+// Suggested message: "cannot bind boolean value to input `n` of `leaf` (it is
+// integer)", hint naming `U1(x)`.
+// Legal spelling: `leaf(n=U1(s.b))`.
+
+mod leaf(n:U1) -> (o:U1@[0]) {
+  o = n
+}
+
+mod src(v:U4) -> (b:Bool@[0]) {
+  b = v == 3
+}
+
+pub mod bool_inst_into_u1_input(v:U4) -> (q:U1@[0]) {
+  const s = src(v=v)
+  const c = leaf(n=s.b)   // locate_error_here
+  q = c.o
+}

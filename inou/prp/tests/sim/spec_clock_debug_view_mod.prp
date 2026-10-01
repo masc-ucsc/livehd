@@ -1,0 +1,29 @@
+/*
+:name: spec_clock_debug_view_mod
+:type: simulation
+*/
+// SPEC (clock lane): the numeric view of a Clock (its simulation cycle count)
+// is legal in debug contexts: `puts` and `assert` inside a `mod` body.
+//   qa.md Appendix 6: "in simulation it is a CYCLE counter (rising edges), so
+//     `clock < 1000` works -- but the numeric view of a Clock is legal ONLY in
+//     debug contexts (test blocks, puts, assert/cassert)."
+//   docs 07-typesystem cnt8 example:
+//     "puts(\"cycle {c}: cnt={cnt}\")           // OK: debug-only cycle count of 'c'"
+//   ruling 55: "`assert(clk < 1000)` / `puts(\"{c}\")` in a mod body are LEGAL."
+pub mod spec_clock_debug_view_mod(c:Clock, r:Reset, en:Bool) -> (q:U8@[0]) {
+  reg cnt:U8 = 0
+  if en { wrap cnt = cnt + 1 }
+  q = cnt
+  puts("cycle {c}: cnt={cnt}")
+  assert(c < 1000)
+}
+
+test spec_clock_debug_view_mod.runs {
+  mut t = spec_clock_debug_view_mod
+  tick 6 {
+    t.r  = clock < 1
+    t.en = true
+    step
+  }
+  assert(t.q == 5)
+}

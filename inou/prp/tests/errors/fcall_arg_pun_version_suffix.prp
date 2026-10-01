@@ -1,0 +1,18 @@
+/*
+:name: fcall_arg_pun_version_suffix
+:type: error
+:error: argument `a` must be named \(`a=...`\) in call to `sub`
+*/
+
+// 06-functions.md "Argument naming", exception 2 binds a bare variable only
+// when its name matches a parameter. `a__w2` is a legal identifier of its own
+// (the compiler's SSA versions use the same `__w<N>` spelling in generated
+// Pyrope), so it must not bind to `a`, nor `b__w1` to `b`: both params are
+// untyped, so no exception applies and the arguments must be named. (A param
+// spelled `val__w1` matched by a variable `val__w1` is in
+// comptime/fcall_arg_pun.prp.)
+
+comb sub(a, b) -> (r) { r = a - b }
+const b__w1 = 4
+const a__w2 = 9
+cassert(sub(b__w1, a__w2) == 5) // locate_error_here

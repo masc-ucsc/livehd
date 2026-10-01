@@ -1,0 +1,48 @@
+/*
+:name: std_clog2_widths
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// `std.clog2(x)` (docs 04b-attributes "Integer Bitwidth"): Verilog `$clog2`,
+// comptime only, `std` a built-in namespace (no import). Covered: a port type
+// of a generic mod (`i:Unsigned(bits=std.clog2(N))`), a generic bind
+// (`leaf<A=(std.clog2(D))>`), a `comptime const` inside a mod, and a `for`
+// loop whose body calls `std.clog2` of the index. The loop used to be lifted
+// into a rolled instance whose index is a runtime port, so the call failed
+// "`k` is not a compile-time value" on source that unrolls fine.
+
+comptime const D = 13
+
+mod pick<N=4>(v:U16, i:Unsigned(bits=std.clog2(N))) -> (o:U1@[0], iw:U8@[0]) {
+  o  = (v >> i)#[0]
+  iw = i.[bits]                    // clog2(N)
+}
+
+mod leaf<A=3>(x:Unsigned(bits=A)) -> (y:Unsigned(bits=A)@[0], w:U8@[0]) {
+  y = x
+  w = A
+}
+
+pub mod top(a:U8, v:U16, i:U4, s:U3) -> (y:U4@[0], w:U8@[0], o:U1@[0], iw:U8@[0], z:U8@[0], r:U8@[0]) {
+  const l = leaf<A=(std.clog2(D))>(x=a#[0..<4])   // A == 4
+  y = l.y
+  w = l.w
+  const p = pick<N=D>(v=v, i=i)                    // 4-bit index
+  o  = p.o
+  iw = p.iw
+  mut acc:U8 = 0
+  for k in 1..=8 {
+    acc = acc + std.clog2(k)                       // 0+1+2+2+3+3+3+3 == 17
+  }
+  comptime const AW = std.clog2(D * 2)             // clog2(26) == 5
+  z = acc + AW                                     // 22
+  mut sel:U8 = 0
+  for k in 1..=7 {
+    if s == k {
+      sel = std.clog2(k * 3)                       // 2,3,4,4,4,5,5
+    }
+  }
+  r = sel
+}

@@ -13,16 +13,16 @@
 // (`ensure_ready_impl`) recurses the address cone with no on-stack guard, so
 // the word-level cycle makes it recurse forever -> stack overflow instead of
 // the loud combinational-loop diagnostic.
-pub mod sim_loop_mem_prefetch::[timecheck=false](a:u2, en:bool, d:u8) -> (z:u8@[0]) {
-  wire io:u4
-  wire hi:u2
-  wire low:u2
+pub mod sim_loop_mem_prefetch::[timecheck=false](a:U2, en:Bool, d:U8) -> (z:U8@[0]) {
+  wire io:U4
+  wire hi:U2
+  wire low:U2
 
   hi  = io#[2..=3]        // reads only io[3:2] == a
   low = hi & 3            // == a
   io  = low + (a << 2)    // Sum pack, no carries: io == {a, low}
 
-  mut t:[4]u8 = (10,20,30,40)
+  mut t:[4]U8 = (10,20,30,40)
   if en {
     t[a] = d
   }

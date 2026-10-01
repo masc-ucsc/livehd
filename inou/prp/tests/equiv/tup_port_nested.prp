@@ -8,7 +8,7 @@
 // NESTED tuple ports flatten recursively: `ar.inner.a`, `p.s.n` are 2-level
 // dotted leaves. The body's chained field reads (tuple_get of tuple_get) and
 // multi-field writes (store(p,'s','n',v)) all rewrite to the full dotted leaf.
-comb f(ar:(x:u8, inner:(a:u8, b:u8))) -> (p:(q:u9, s:(m:u8, n:u9))) {
+comb f(ar:(x:U8, inner:(a:U8, b:U8))) -> (p:(q:U9, s:(m:U8, n:U9))) {
   p.q   = ar.x + ar.inner.a
   p.s.m = ar.inner.b
   p.s.n = ar.x + ar.inner.b

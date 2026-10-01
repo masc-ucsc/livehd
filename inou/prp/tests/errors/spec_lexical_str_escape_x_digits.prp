@@ -1,0 +1,8 @@
+/*
+:name: spec_lexical_str_escape_x_digits
+:type: error
+:error: takes exactly two hex digits
+*/
+// qa.md appendix 8: "`\xNN`"; docs 02-basics: "`\xNN`: hexadecimal 8 bit
+// character (2 digits)". A single hex digit is an error.
+const s = "\x4"   // locate_error_here

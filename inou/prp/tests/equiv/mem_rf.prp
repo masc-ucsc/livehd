@@ -9,8 +9,8 @@
 // 1a-mem — register-file shape: one conditional write port, two read ports
 // (one Memory cell; read port N's data rides driver pid n_wr_ports+N).
 // Async memory reads land @[0] (committed state, like a reg read).
-mod rf(waddr:u3, din:u4, we:bool, ra0:u3, ra1:u3) -> (q0:u4@[0], q1:u4@[0]) {
-  reg r:[8]u4 = nil
+mod rf(waddr:U3, din:U4, we:Bool, ra0:U3, ra1:U3) -> (q0:U4@[0], q1:U4@[0]) {
+  reg r:[8]U4 = nil
   if we {
     r[waddr] = din
   }

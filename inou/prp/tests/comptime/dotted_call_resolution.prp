@@ -1,0 +1,45 @@
+/*
+:name: dotted_call_resolution
+:type: comptime
+:verifier_pass: 12
+:verifier_fail: 0
+*/
+
+comb addk1<K=3>(a) -> (r) { r = a + K }
+comb addk2<K=3>(self, a) -> (r) { r = a + K }
+mut foo = 3
+const c2:U8 = foo.addk2<K=3>(a=1)
+cassert(c2 == 4)
+cassert((3).addk2<K=3>(a=1) == 4)
+
+// Member lookup is independent of the self-less external function's name.
+const ns1 = (const addk1 = addk1)
+cassert(ns1.addk1<K=3>(a=1) == 4)
+cassert(ns1.addk1(a=1) == 4)
+// No field addk2: the external self function receives ns1.
+cassert(ns1.addk2<K=3>(a=1) == 4)
+
+const renamed = (const other = addk1)
+const deep = (const inner = renamed)
+cassert(renamed.other<K=5>(a=1) == 6)
+cassert(deep.inner.other<K=7>(a=1) == 8)
+
+// A member with the same spelling can name a different lambda.
+comb local_add<K>(a) -> (r) { r = a + K + 10 }
+const distinct = (const addk1 = local_add)
+cassert(distinct.addk1<K=3>(a=1) == 14)
+cassert(addk1<K=3>(a=1) == 4)
+
+const ns = (mut foo = 4)
+cassert(foo != ns.foo)
+
+// A field method declaring self binds its tuple, with generic metadata present.
+const methods = (
+  const base = 10,
+  comb local<K>(self, a) -> (r) { r = self.base + a + K }
+)
+cassert(methods.local<K=3>(a=1) == 14)
+
+// A differently named external alias still requires and binds self.
+const alias = addk2
+cassert(foo.alias<K=4>(a=1) == 5)

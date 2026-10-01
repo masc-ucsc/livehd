@@ -7,6 +7,6 @@
 // Today LiveHD cannot lower it (pass.lnastfmt: "ref text 'past[2]' is not a
 // valid identifier"; bare past(a) gives upass.tolg "no hardware lowering yet").
 // Tagged `fixme`: fails by design until the temporal library is implemented.
-mod temporal_past(a:u8) -> (out:u8@[2]) {
+mod temporal_past(a:U8) -> (out:U8@[2]) {
   out = past[2](a)
 }

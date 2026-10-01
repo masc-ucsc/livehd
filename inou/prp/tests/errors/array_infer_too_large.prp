@@ -1,0 +1,17 @@
+/*
+:name: array_infer_too_large
+:type: error
+:error: would infer more than 65536 entries
+:help: declare its size
+:tolg: 1
+*/
+// An inferred memory is as large as its widest index (08-memories.md), but not
+// past 65536 entries: a U20 index would otherwise size a 2^20-entry memory
+// (gigabytes of compile memory) from an innocuous program.
+pub mod array_infer_too_large(clk:Clock, we:Bool, wa:U20, d:U8, ra:U20) -> (q:U8@[0]) {
+  reg mem:[] = 0   // locate_error_here
+  q = mem[ra]
+  if we {
+    mem[wa] = d
+  }
+}

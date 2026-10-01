@@ -107,6 +107,35 @@ everything the encoder needs.
   verdict-cache key; neither trustworthy ⇒ **inconclusive**. The per-query `formal.timeout`
   bounds each worker, so a hard miter self-limits and the portfolio degrades to
   inconclusive rather than hanging.
+- **Observability: unobservable flop bits leave the obligation** (`observe.cpp`,
+  single-step inductive miter; `LEC_OBS_OFF=1` disables, `LEC_DUMP_OBS=1` lists
+  the kept bits). A flop bit is observable iff it reaches a compared obligation
+  that is not a candidate cut's next state -- a primary output, a box input, a
+  property, a memory port/next state, another cut's (bridged) next state --
+  through combinational logic and other observable flop bits. After both sides
+  are encoded, a backward bit-demand fixpoint over the cvc5 terms (exact for
+  slices, concat, extensions, bitwise logic including the bits a constant
+  AND/OR operand forces, comptime shifts/ITE conditions folded by a ground
+  evaluator; a low prefix for add/sub/mul; every bit for anything else) finds,
+  per name-paired cut present on both sides, the positions `keep` either side
+  observes (joint: a kept bit's next state is compared on BOTH sides, so it is
+  demanded on both). The cut's unkept bits then leave the induction hypothesis
+  AND the step: the wider side (impl on a tie) is **re-encoded** with a current
+  state whose unkept bits are fresh symbols, and only the kept next-state bits
+  are compared. The analysis only proposes the relation; every remaining
+  obligation is solved, so a wrong proposal can cost a proof but never make one
+  (and the relation is weaker than full equality, so it is initially true
+  whenever full equality is). A narrower flop pairs with a wider one on the low
+  (shared) bits when nothing reads the wider side's upper bits; a demand above
+  the narrow width keeps the whole cut. Cuts tied by a bridge (bit-blast,
+  packed/scalar, memory bank) and pipelined flops keep full width. The verdict
+  detail says `observability: N unobservable state bit(s) of K cut(s) left out
+  of the obligation {...}`. Motivating case: bedrock's upper-triangle LRU
+  matrix (`br_lru_state_internal`), whose reference flop keeps a lower triangle
+  nothing reads while an idiomatic implementation stores zeros there. Tests:
+  `tests/lec_observe_test.sh` (dead bits prove, live bits never prove under
+  `ind` and refute under `auto`), `tests/observe_test.cpp`,
+  `inou/prp/tests/equiv/obs_{dead,live}_bits*`.
 - **Register-cone decomposition** (`formal.lec.cones`, default on): the classical
   compare-point method (van Eijk's register correspondence; "compare points" in
   Formality/Conformal). Cutting at name-matched registers already makes each
@@ -138,7 +167,11 @@ everything the encoder needs.
   unbounded — an 8-bit multiplier-reassociation miter of ~1k AIG nodes takes ~40s
   at *any* conflict limit), so the pass runs in a **forked child under a deadline**
   carved out of `formal.timeout`, streaming each verdict back as it lands; a cone the
-  deadline cuts off simply stays with cvc5.
+  deadline cuts off simply stays with cvc5. One cone may also stall the child for at
+  most max(250 ms, 1/20 of the deadline), counted from when ABC is up in the child:
+  it is then killed, that cone stays with cvc5, and a fresh child resumes with the
+  next, so one hard cone (a wide popcount spelled two ways, which cvc5 proves in
+  milliseconds) cannot starve every cone queued behind it.
 - **The cone cache** (`--workdir`, with the verdict cache): each cone is keyed by
   `cone_digest` — a 128-bit structural hash of its obligation term — and every
   PROVEN digest is persisted in `formal_cache.json` (`"cones": [...]`, salt-gated
@@ -216,13 +249,30 @@ everything the encoder needs.
   (a replayed hint whose solve does not end Proven is cleared, so the next
   run pairs fresh); `validate_uncertain_pairs`'s collision guards walk the
   full hierarchy, since the miter cuts flops at every descended level.
+  After the strict and the width-blind rounds, a third **reset-agnostic**
+  round retries the residue (registers only) with the reset value out of the
+  kind and every graph input that reaches a reset pin (either side) out of the
+  fan-in anchors, ignoring a cell's own self-loop: it pairs a Verilog
+  `if (rst) q <= K` (an init-less flop with the reset in its data path) with a
+  Pyrope `reg q:[reset_pin=rst] = K`. It admits a pair only when the REF cell
+  has no init (or the same one); `validate_uncertain_pairs` accepts an
+  init-less ref cell against any impl init under `gold_x=ignore`, since an
+  init-less reference power-on value is a don't-care the relation may choose
+  equal to the impl's.
   Unpaired state is reported with the reason (ambiguous bucket / kind-init
-  mismatch / no full match). Memory pairs are name-free (shape+occurrence),
-  so tier-2 never aliases them. Regression:
+  mismatch / no full match). Memories pair through their own shape-keyed
+  correspondence (below), so tier-2 never aliases them. Regression:
   `lhd/tests/lec_state_pairing_test.sh`.
 - **Memory**: `Memory` cells → SMT **theory of arrays**. Corresponding memories
-  (matched by signature + `forward_class()` occurrence via `mem_state_key()`)
-  collapse to **one shared array symbol**; `dout = select(array, addr)`,
+  (matched by shape, then by correspondence NAME -- the hier name, with cgen's
+  `__lhdmem_h<hex>_e` wrapper storage decoded back to it -- when that name is
+  unique in the shape bucket on both sides, else by occurrence order among the
+  memories a name cannot pair; `mem_state_key()`, built once per query and handed
+  to the encoder by `set_mem_keys`) collapse to **one shared array symbol**.
+  Occurrence order alone crossed two same-shape memories the front-ends list in
+  different orders, pairing them against the name correspondence flops use (a
+  false REFUTE, or a PROVEN under the crossed correspondence when that pair was
+  accepted; `equiv/mem_pair_by_name_2`); `dout = select(array, addr)`,
   next-state `array' = store(array, addr, din)` applied in port order. Read ports
   need no explicit cross-design pairing — `select` at a shared array + equal
   addresses makes douts correspond via the compared (name-matched) outputs; only
@@ -268,14 +318,7 @@ everything the encoder needs.
   a QN cell is modeled `Flop(Not(D))` so the model's state IS the pin the
   netlist observes -- `Not(Flop(D))` shared the complement and refuted every
   resetless register read before its first write on ASAP7 only. Regression:
-  `lhd/tests/lhd_lec_membank_test.sh`. A cell model read back inline leaves
-  its state one segment below the cell (`<mem>._mem[i][b].flop_16`); the
-  alias drops that segment both behind cgen's hex `__lhdmem_h..._e` wrapper
-  AND on a memory module instance that kept its source name (the `lhd synth`
-  netlist of bedrock br_ram_flops: `\gen_row_0_gen_col_0_br_ram_flops_tile.mem `
-  of a `cgen_memory_*_blasted` module). Missing the latter left all 4096
-  ASAP7 storage cells unpaired and false-REFUTED an unwritten read
-  (`inou/prp/tests/equiv/lec/mem_bank_cell*`).
+  `lhd/tests/lhd_lec_membank_test.sh`.
 - **Hierarchy**: a **combinational** `Sub` whose def is supplied via `lhd lec
   --lib lg:DIR` is **flattened inline** (def encoded with inputs bound to the
   instance's input Vals, outputs wired onto its output pins) — the prime use is
@@ -283,6 +326,26 @@ everything the encoder needs.
   gensim` models. Unresolved / stateful / too-deep `Sub`s become a sound
   **blackbox** (inputs = compare points, outputs = free symbols shared across the
   designs by the box-correspondence key below).
+- **Port boundary** (query.cpp `unfit_sub_ports`): cgen and cgen_sim realize a
+  Sub port at its DECLARED width and sign, so a driver whose range does not fit
+  the port is truncated or reinterpreted at the boundary, while the occurrence
+  view and every inliner thread the sink straight to the leaf driver. Front ends
+  insert those masks, so only a malformed port (a width-less rolled-loop carry
+  fed 32 bits) is affected: `prove_equal` copies that side into private scratch
+  and spells each such boundary as the `Get_mask`/`Sext` the connection performs
+  before anything inlines it, and again after compact-loop materialization.
+  `LEC_DUMP_FIT=1` lists each fit. The kernel's asymmetric-hierarchy inline
+  (`inline_instances_missing_from_other_side`) dissolves instances BEFORE
+  pass/lec sees them, so the splice keeps the same fit itself:
+  `graph_util::inline_sub_instance` spells an unfit input as the callee port
+  performs it and an unfit output as the callee port and then the parent net
+  (`driver_fits_port`/`fit_to_port`, graph/inline_sub.hpp, shared with the fit
+  above). A `Sext` fit keeps the port's whole width (its `b` is the kept bit
+  COUNT). An output's two steps (port, then net) apply per instance in the
+  splice, and here as the port step per definition plus the net step per
+  instance; both give the same value. Regressions: query_test
+  `AbsentHierarchyInlineKeepsTheSubPortFit`, `SignedPortFitKeepsItsWholeWidth`,
+  `InstanceOutputNetStepIsKeptByBothBoundaryViews`; graph inline_sub_test.
 - **Box correspondence** (query.cpp builder, `Encoder::set_box_keys`): every Sub
   the encoder will treat as a box is enumerated ONCE per design (the encoder's
   own hierarchical walk + blackbox predicate) and keyed `defname#tag`. `tag` is
@@ -419,6 +482,21 @@ reset_pin, 8 pipe_min, 9 pipe_max`. `next = enable ? din : q` (enable false =
 hold); `reset_pin` active → `q' = initial` (default 0); `pipe_min`>1 models an
 N-deep shift register (N state vars). Output `q = driver_pin(0)`.
 
+**Async and sync reset are equivalent to LEC (ruling, 2026-09-28).** The cycle
+model observes state only after a clock update: an asserted reset sets the
+NEXT state to `initial` whether `async` is set or not, and the intra-cycle
+window where an async reset already forces `q` before the edge is not modeled
+(a Memory `reset` / `memory_async_reset` likewise). So a design whose async
+reset a reader demoted to sync -- slang demotes a golden async MEMORY reset --
+is PROVEN against its async twin, and LEC neither models intra-cycle async
+reset nor turns a reader-demoted reset UNKNOWN. `async` matters only in a
+step that is not the flop's own edge -- the phase schedule's microsteps and an
+explicit multi-clock commit, where an async reset overrides although the flop's
+clock does not commit and a sync one waits for it (encode.cpp). Under one clock
+with one step per edge the two are the same. The yosys oracle (`lgcheck`, async2sync) does see that window, so
+`equiv/async_mem_reset_demoted` stays a `fixme` tracker that fails only
+through its lgyosys leg while the native LEC proves it.
+
 **Memory (`Ntype_op::Memory`)** → SMT theory of arrays. **16-pin port stride**
 (`Ntype::Memory_port_stride`): port *k*'s pins are at `pid + 16*k`
 (`get_sink_name` does `pid % 16`); per-port logical pins `0 addr, 2 clock_pin,
@@ -510,7 +588,12 @@ logic). It is **never** on the production trust path. Rule of thumb: the
 blows up (memory / register-file equivalence is SAT-hard for bit-blasting;
 cvc5 uses bit-vector + array reasoning and reachable-state unrolling);
 `formal.solver=lgyosys` for Verilog-in-hand and gate-level netlists. lgcheck
-runs `equiv_make` + `equiv_simple` + `equiv_induct`, then a **bounded miter**
+runs `equiv_make` + `equiv_simple` + `equiv_induct` (induction with no base
+case, so each such proof counts only when the power-on state agrees:
+`inou/yosys/power_on.py` rejects a paired register that starts at a different
+`init` than its gold counterpart, and when some initialized state is on no
+pair, a bounded `sat` of the stage's own `equiv_miter` from the power-on values
+must cover the induction window), then a **bounded miter**
 of `LGCHECK_BMC_STEPS` steps (default 6 when lgcheck runs standalone) whose
 counterexample lands in lgcheck's `lgcheck_bmc.log`; the per-step log is the
 `lec.lgcheck` entry under `--workdir` (rewritten on every run, never appended).
@@ -567,7 +650,7 @@ Two shapes matter when reading one:
   Pyrope and inlined, with ref-side name clashes renamed to `lecref_*`; that form
   is self-contained but cannot follow an edit to the original.
 - **Struct ports are driven per leaf.** A test can only poke a named top-level
-  port, so `io:(valid:u1, bits:(x:u4))` becomes the flat wrapper ports
+  port, so `io:(valid:U1, bits:(x:U4))` becomes the flat wrapper ports
   `io__valid` / `io__bits__x`, rebuilt into the struct at each call site
   (`io.bits.x = io__bits__x`). A leaf only one side declares appears on the
   wrapper and is bound only on that side.

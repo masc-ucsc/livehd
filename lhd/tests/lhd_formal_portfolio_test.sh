@@ -30,9 +30,9 @@ fail() { echo "FAIL: $*"; exit 1; }
 #     REFUTED with a per-cycle input trace.
 # --------------------------------------------------------------------------
 cat >"$W/portfolio.prp" <<'EOF'
-mod portfolio(enable:bool) -> (value:u8@[0]) {
-  reg a:u8 = 0
-  reg b:u8 = 0
+mod portfolio(enable:Bool) -> (value:U8@[0]) {
+  reg a:U8 = 0
+  reg b:U8 = 0
   value = a
   assert(a == b, "twin counters stay equal")
   assert(a != 5, "counter hit five")
@@ -68,9 +68,9 @@ grep -q 'counter hit five.*REFUTED at cycle 7' "$OUT" || fail "engine=bmc must a
 #    exits clean. The ind-first strategy settles it definitively and cancels the
 #    sibling (disclosed in the detail).
 cat >"$W/inv.prp" <<'EOF'
-mod inv(enable:bool) -> (value:u8@[0]) {
-  reg a:u8 = 0
-  reg b:u8 = 0
+mod inv(enable:Bool) -> (value:U8@[0]) {
+  reg a:U8 = 0
+  reg b:U8 = 0
   value = a
   assert(a == b, "twins equal forever")
   if enable {

@@ -1,0 +1,16 @@
+/*
+:name: nested_method_runtime_capture
+:type: error
+:error: 'b' is a runtime value of the enclosing scope; it is not visible inside lambda 'get'
+:help: pass 'b' as an input of 'get'
+*/
+
+// Ruling 2026-09-28 #24: a tuple METHOD is a nested lambda too, so reading the
+// enclosing mod's runtime input `b` in its body is the nested-runtime-capture
+// error. The error used to be reported and then the compiler crashed
+// (SIGSEGV, exit 1) unwinding through the tuple literal: the body's suspended
+// in-flight name scopes were not restored on the error path.
+pub mod nested_method_runtime_capture(a:U8, b:U8) -> (r:U8@[0]) {
+  mut obj = (mut v:U8 = 1, comb get(self) -> (r:U8) { r = (self.v + b)#[0..<8] })  // locate_error_here
+  r = obj.get()
+}

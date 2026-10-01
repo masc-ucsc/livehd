@@ -1,0 +1,32 @@
+/*
+:name: spec_tests_step_read_placement
+:type: simulation
+*/
+// Spec: docs 05b "Running cycles (tick)": "Read the DUT *below* the `step`: a
+// read placed above it observes what the previous `step` settled, not the
+// inputs driven by the statements just above it, so for an output that
+// depends combinationally on those inputs the two placements differ by a
+// cycle." 05b "Test only statements": "One `step` is settle -> commit ->
+// settle ... the second is why a read placed immediately after it sees
+// post-edge values."
+//
+// Rule pinned: for a purely combinational output `o = a + 1`, a read ABOVE the
+// step sees the previous iteration's drive, a read BELOW sees this one's.
+
+mod spec_srp_inc(a:U8) -> (o:U9@[0]) {
+  o = a + 1
+}
+
+test spec_srp.placement {
+  mut d   = spec_srp_inc
+  mut bad = 0
+  tick 5 {
+    d.a = 10 + clock
+    const above = d.o              // what the previous step settled
+    step
+    const below = d.o              // this cycle's drive, settled
+    if clock > 0 and above != 10 + clock { bad += 1 }   // previous a (= 10+clock-1) plus 1
+    if below != 11 + clock { bad += 1 }
+  }
+  assert(bad == 0)
+}

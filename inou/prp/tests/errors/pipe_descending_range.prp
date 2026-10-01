@@ -5,4 +5,4 @@
 :help: ascends
 */
 
-pipe[3..=2] g(a:u8) -> (c:u8) { c = a }   // locate_error_here
+pipe[3..=2] g(a:U8) -> (c:U8) { c = a }   // locate_error_here

@@ -1,0 +1,28 @@
+/*
+:name: spec_calls_overload_vararg
+:type: comptime
+:verifier_pass: 9
+:verifier_fail: 0
+*/
+
+// An unconstrained capture accepts arbitrary named arguments. Overloads try
+// candidates in order, with the same binding rules as direct calls.
+comb add1(...x) -> (r) { r = 100 }
+comb add2(a, b, c) -> (r) { r = a + b + c }
+const add = [add1, add2]
+
+cassert(add1(a=1, b=2, c=3) == 100)
+cassert(add(a=1, b=2, c=3) == 100)
+cassert(add(x=(1, 2)) == 100)
+cassert(add() == 100)
+
+const fixed_first = [add2, add1]
+cassert(fixed_first(a=1, b=2, c=3) == 6)
+cassert(fixed_first(extra=4) == 100)
+
+// The capture does not supply a missing fixed parameter.
+comb gg(c:U32, ...rest) -> (r) { r = c }
+const required_first = [gg, add1]
+cassert(gg(c=3, a=2, b=2) == 3)
+cassert(required_first(c=3, a=2, b=2) == 3)
+cassert(required_first(a=2, b=2) == 100)

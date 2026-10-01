@@ -1,0 +1,10 @@
+/*
+:name: spec_calls_vararg_named_tuple
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+// Naming an argument x does not bind the capture x itself: it creates x.x.
+comb add1(...x) -> (r) { r = x.x.a + x.x.b }
+cassert(add1(x=(const a=1, const b=2)) == 3)

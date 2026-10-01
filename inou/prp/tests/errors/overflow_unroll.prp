@@ -9,7 +9,7 @@
 // upass.bitwidth then tracks acc's range climbing to 20, which does not fit
 // u4 [0, 15].
 
-mut acc:u4 = 0
+mut acc:U4 = 0
 for i in 0..<4 {
   acc = acc + 5
 }

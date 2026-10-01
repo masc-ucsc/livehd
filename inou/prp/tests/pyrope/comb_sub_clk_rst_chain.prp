@@ -1,0 +1,43 @@
+/*
+:name: comb_sub_clk_rst_chain
+:type: lgraph
+:set: compile.upass.inline=false
+*/
+// User ruling 2026-09-28 (30) under compile.upass.inline=false, where a fully
+// typed `comb` stays a Sub instance: a comb input its body never reads may be
+// omitted (whatever its name) and its port is tied off; a comb's `clk`/`rst`
+// are plain data, never auto-wired (sim/comb_dead_input_omitted.prp covers
+// the inlined build).
+//   * `dd`'s clk/rst are never read: DEAD, tied off. Its caller `cc` asks no
+//     clock/reset of `mm`; before, it did, and tolg failed "instance of clocked
+//     'cc' but 'mm' has no clock to forward (needs_clock bug)".
+//   * `enc`'s are dead too: the `pub comb` top `penc` gains no minted
+//     `clock`/`reset` port (the inlined build has none).
+//   * `rd` READS its reset: every caller passes it as data (`crst` its own
+//     `rst`, `mm` its active-low `rst_n` converted).
+
+comb dd(clk:U1, rst:U1, a:U8) -> (o:U8) {
+  o = a
+}
+comb cc(a:U8) -> (o:U8) {
+  o = dd(a=a)
+}
+
+comb enc(clk:U1, rst:U1, v:U3) -> (out:U8) {
+  out = 1 << v
+}
+pub comb penc(v:U3) -> (o:U8) {
+  o = enc(v=v)
+}
+
+comb rd(clk:U1, rst:U1, a:U8) -> (o:U8) {
+  o = if rst != 0 { 0 } else { a }
+}
+comb crst(rst:U1, a:U8) -> (o:U8) {
+  o = rd(rst=rst, a=a)
+}
+
+pub mod mm(clk:U1, rst_n:U1, a:U8) -> (z:U8@[0], w:U8@[0]) {
+  z = cc(a=a)
+  w = crst(rst=rst_n ^ 1, a=a)
+}

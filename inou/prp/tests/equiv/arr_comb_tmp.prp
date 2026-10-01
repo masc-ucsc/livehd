@@ -25,8 +25,8 @@
 // VACUOUS PROVEN — only the yosys-referenced lgcheck flows (equiv, v2prp2v) saw the
 // bug at all. A PROVEN means nothing unless the comparison is sensitive to the
 // signal in question.
-pub comb arr_comb_tmp::[timecheck=false](sel:u1, d:u1) -> (o:u1) {
-  mut arr:[2]u1 = 0
+pub comb arr_comb_tmp::[timecheck=false](sel:U1, d:U1) -> (o:U1) {
+  mut arr:[2]U1 = 0
   o = 0ub?
   arr[0] = d
   arr[1] = (~d) & 1

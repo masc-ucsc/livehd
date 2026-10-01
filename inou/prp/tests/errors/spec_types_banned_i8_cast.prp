@@ -1,0 +1,10 @@
+/*
+:name: spec_types_banned_i8_cast
+:type: error
+:error: `i8` was renamed `S8`
+*/
+// Undeclared lowercase type/cast spellings must name their replacement (07-typesystem.md).
+// Rule: the removed `iN` spelling used as a CAST (`i8(x)`) is an error naming S<N>.
+pub comb spec_types_banned_i8_cast(a:U4) -> (o:S8) {
+  o = i8(a)  // locate_error_here
+}

@@ -1,0 +1,22 @@
+/*
+:name: spec_syntax_destructure_by_name
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+// qa.md Appendix §8: "destructuring a NAMED tuple binds each bare slot by name match (slot
+// name == field name) or `slot=field`; destructuring an UNNAMED tuple binds by position".
+// docs 03-bundle.md "Named-tuple destructuring": `(c, b) = dox(a=3)` is the same as `(b, c) = ...`.
+comb dox(a) -> (b, c) { b = a + 1; c = a + 2 }
+
+mut b = 0
+mut c = 0
+(c, b) = dox(a=10)                        // named RHS: order is irrelevant
+const t = (const q = 1, const p = 2)
+const (p, q) = t                          // named literal RHS: by name too
+mut (e, d) = (2, 3)                       // unnamed RHS: by position
+
+cassert(b == 11 and c == 12)
+cassert(p == 2 and q == 1)
+cassert(e == 2)
+cassert(d == 3)

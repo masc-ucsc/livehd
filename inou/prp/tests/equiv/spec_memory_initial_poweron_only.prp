@@ -1,0 +1,22 @@
+/*
+:name: spec_memory_initial_poweron_only
+:type: equiv
+:verilog_top: spec_memory_initial_poweron_only
+:pyrope_top: spec_memory_initial_poweron_only
+*/
+// SPEC (docs 08-memories.md): "`initial=<contents>` (the packed contents, entry 0
+// in the low `bits`) is the same pin ... Spell `= nil` (or `= 0sb?`) for an array
+// with no reset value at all: no reset is bound and the contents are undefined
+// until written -- or given by `initial=` alone, which is then power-on contents
+// only."
+// Rule encoded here: `initial=` with `= nil` gives power-on contents and binds NO
+// reset (no Reset input is minted). The golden has no power-on value at all (an
+// unknown start is a don't-care on the reference side), so the pair proves iff
+// the implementation never re-initializes the memory after power-on.
+pub mod spec_memory_initial_poweron_only(ck:Clock, we:Bool, a:U2, d:U8, ra:U2) -> (q:U8@[0]) {
+  reg mem:[4]U8:[initial=0x04030201] = nil
+  q = mem[ra]
+  if we {
+    mem[a] = d
+  }
+}

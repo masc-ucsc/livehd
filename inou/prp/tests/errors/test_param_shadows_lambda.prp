@@ -1,0 +1,21 @@
+/*
+:name: test_param_shadows_lambda
+:type: error
+:error: variable shadowing: 'test_param_shadows_lambda' is already declared in an enclosing scope
+:help: rename the test parameter: the enclosing lambda 'test_param_shadows_lambda' is visible
+*/
+
+// User rulings 2026-09-28 (31) and (35): a test parameter follows the lambda
+// signature rule, so one named like a visible file-scope const, type or
+// LAMBDA is shadowing. Before, a parameter named like the DUT silently
+// rebound `mut d = <dut>` to the integer parameter.
+mod test_param_shadows_lambda(a:U4) -> (o:U4@[0]) {
+  o = a
+}
+
+test test_param_shadows_lambda.t(test_param_shadows_lambda:U8 = 7) {  // locate_error_here
+  mut d = test_param_shadows_lambda
+  d.a = 3
+  step
+  assert(d.o == 3)
+}

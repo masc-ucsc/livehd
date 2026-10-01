@@ -6,7 +6,7 @@
 // REFERENCE, and every `array_vs_packed_reg_<N>.prp` beside it is LEC'd
 // against it.
 //
-// THE CLAIM: a `[4]u4` register array and a `u16` register carrying the same
+// THE CLAIM: a `[4]U4` register array and a `u16` register carrying the same
 // four fields packed row-major (entry k at bits [4k..4k+3]) are the SAME
 // DESIGN. Nothing about the choice of spelling may change what the hardware
 // computes -- the array form exists so the simulator can keep a compact
@@ -19,8 +19,8 @@
 // path from the ordinary per-entry read/write ports -- and it is the shape a
 // Verilog `reg [3:0] foo [3:0]` import produces. The packed variant is the
 // spelling that path has to stay equivalent to.
-pub mod top(we:u1, v:u16) -> (e0:u4@[0], e1:u4@[0], e2:u4@[0], e3:u4@[0]) {
-  reg foo:[4]u4:[ordering="old"] = 0
+pub mod top(we:U1, v:U16) -> (e0:U4@[0], e1:U4@[0], e2:U4@[0], e3:U4@[0]) {
+  reg foo:[4]U4:[ordering="old"] = 0
   e0 = foo[0]
   e1 = foo[1]
   e2 = foo[2]

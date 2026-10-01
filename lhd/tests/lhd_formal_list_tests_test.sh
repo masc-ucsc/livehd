@@ -31,8 +31,8 @@ fail() {
 # (mode 0 vs mode 1) — legal because each block is its own test — so a run that
 # leaked one block's assume into the other would go UNKNOWN and be visible here.
 cat >"$W/alu.prp" <<'EOF'
-mod alu(mode:bool, a:u8, b:u8) -> (y:u9@[0]) {
-  y = if mode { u9(a) + u9(b) } else { u9(a) - u9(b) }
+mod alu(mode:Bool, a:U8, b:U8) -> (y:U9@[0]) {
+  wrap y = if mode { U9(a) + U9(b) } else { U9(a) - U9(b) }
 }
 EOF
 
@@ -66,7 +66,7 @@ echo "$LT" | grep -q '"assumes":1'       || fail "--list-tests JSON missing the 
 # ...even when the DESIGN does not COMPILE: listing parses the block sources and
 # stops there — it never elaborates or lowers the design (nor calls a solver).
 cat >"$W/broken.prp" <<'EOF'
-mod broken(a:u8) -> (y:u8) {
+mod broken(a:U8) -> (y:U8) {
   y = this_identifier_does_not_exist
 }
 EOF

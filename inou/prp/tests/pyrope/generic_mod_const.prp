@@ -12,17 +12,17 @@
 // template exercise the collision path; the body substitutes the concrete
 // constant / lambda (todo 3g A/F).
 
-comb inc(v:u8) -> (o:u9) { o = v + 1 }
-comb dec(v:u8) -> (o:u9) { o = v - 1 }
+comb inc(v:U8) -> (o:U9) { o = v + 1 }
+comb dec(v:U8) -> (o:U9) { wrap o = v - 1 }
 
-mod addk<N>(a:u8) -> (r:u9@[0]) {
+mod addk<N>(a:U8) -> (r:U9@[0]) {
   r = a + N
 }
-mod applymod<G>(a:u8) -> (r:u9@[0]) {
+mod applymod<G>(a:U8) -> (r:U9@[0]) {
   r = G(v=a)
 }
 
-pub mod top(x:u8) -> (p:u9@[0], q:u9@[0], s:u9@[0], t:u9@[0]) {
+pub mod top(x:U8) -> (p:U9@[0], q:U9@[0], s:U9@[0], t:U9@[0]) {
   p = addk<3>(a=x)
   q = addk<5>(a=x)
   s = applymod<inc>(a=x)

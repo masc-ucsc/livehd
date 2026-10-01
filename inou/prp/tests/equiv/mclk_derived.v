@@ -13,9 +13,12 @@ module \mclk_derived.derived (
   output reg [7:0] qb
 );
 
-  // gclk is a DERIVED clock: an internal combinational signal, not a port.
+  // gclk is a GATED clock: an ICG (enable latched while clk_b is low), the
+  // Pyrope side's `Clock(clock_pin=clk_b, enable=gate)`.
+  reg  gate_l;
+  always_latch if (!clk_b) gate_l = gate;
   wire gclk;
-  assign gclk = clk_b & gate;
+  assign gclk = clk_b & gate_l;
 
   always @(posedge clock) if (reset) qa <= 8'd0; else qa <= da;
   // ASYNC reset on the gated flop, deliberately. A SYNCHRONOUS reset on a GATED

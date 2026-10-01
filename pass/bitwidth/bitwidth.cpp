@@ -557,8 +557,29 @@ void Bitwidth::process_shl(hhds::Node_class& node, Inp_pins& inp_edges) {
   // NOT max<<nmax / min<<nmin, which leaves a negative `min` at min<<nmin and so
   // under-estimates the (more negative) true lower bound for signed inputs.
   const Dlop corners[4] = {*max.shl_op(n_hi), *max.shl_op(n_lo), *min.shl_op(n_hi), *min.shl_op(n_lo)};
-  Dlop       lo         = may_be_negative ? zero : corners[0];
-  Dlop       hi         = lo;
+  // An amount that reaches far past any real width (a 32-bit Verilog index
+  // expression, `1 << (b - 1)`) has no usable envelope: a corner Dlop cannot
+  // materialize comes back nil. Keep the carrier its producer sized, the bits
+  // its consumers read, as process_sra does for a possibly negative count.
+  // Dropping the nil corners instead collapsed `1 << n` to the operand's one
+  // bit, so a runtime bit write landed only at bit 0.
+  const bool unbounded  = std::any_of(std::begin(corners), std::end(corners), [](const Dlop& c) { return !c.is_integer(); });
+  if (unbounded) {
+    auto           output = node.create_driver_pin(0);
+    const auto     bits   = bits_of(output);
+    Bitwidth_range fallback;
+    if (bits <= 0) {
+      fallback.set_sbits_range(0);  // no carrier: "could not bound"
+    } else if (livehd::graph_util::is_unsign(output)) {
+      fallback.set_ubits_range(bits);
+    } else {
+      fallback.set_sbits_range(bits);
+    }
+    adjust_bw(output, fallback);
+    return;
+  }
+  Dlop lo = may_be_negative ? zero : corners[0];
+  Dlop hi = lo;
   for (const auto& c : corners) {
     if (c.lt_op(lo)->is_known_true()) {
       lo = c;
@@ -1325,13 +1346,16 @@ void Bitwidth::process_sext(hhds::Node_class& node, Inp_pins& inp_edges) {
   {
     auto b = wire_it->second.get_sbits();
     if (b <= sign_max) {
-      sign_max = b;
-      // live-reconnect each consumer to the Sext source; del_node bulk-drops
-      // node's edges (no per-edge find). connect only grows the source/sink.
-      for (const auto& sink : consumer_sinks(node)) {  // snapshot: the loop rewires what it walks
-        sink.connect_driver(inp_edges[0].get_driver_pin());
+      sign_max         = b;
+      const auto sinks = consumer_sinks(node);  // snapshot: the loop rewires what it walks
+      if (!livehd::graph_util::closes_loop_self_edge(inp_edges[0].get_driver_pin(), sinks)) {
+        // live-reconnect each consumer to the Sext source; del_node bulk-drops
+        // node's edges (no per-edge find). connect only grows the source/sink.
+        for (const auto& sink : sinks) {
+          sink.connect_driver(inp_edges[0].get_driver_pin());
+        }
+        node.del_node();
       }
-      node.del_node();
     }
   }
 
@@ -1343,9 +1367,13 @@ void Bitwidth::process_sext(hhds::Node_class& node, Inp_pins& inp_edges) {
   auto wire_op   = type_op_of(wire_node);
   if (wire_op == Ntype_op::Sext || wire_op == Ntype_op::And) {
     if (wire_it->second.get_sbits() <= sign_max) {
+      const auto sinks = consumer_sinks(node);  // snapshot: the loop rewires what it walks
+      if (livehd::graph_util::closes_loop_self_edge(wire_dpin, sinks)) {
+        return;
+      }
       // live-reconnect each consumer to wire_dpin; del_node bulk-drops node's
       // edges (no per-edge find).
-      for (const auto& sink : consumer_sinks(node)) {  // snapshot: the loop rewires what it walks
+      for (const auto& sink : sinks) {
         sink.connect_driver(wire_dpin);
       }
       node.del_node();
@@ -1393,7 +1421,12 @@ void Bitwidth::process_assignment_or(hhds::Node_class& node, Inp_pins& inp_edges
   // Reconnect each consumer to the single input, then let del_node bulk-drop
   // node's edges (no per-edge find). The consumer list is SNAPSHOTTED: the
   // reconnect mutates the same storage a live fan-out walk would be reading.
-  for (const auto& sink : consumer_sinks(node)) {
+  const auto sinks = consumer_sinks(node);
+  if (livehd::graph_util::closes_loop_self_edge(inp_edges[0].get_driver_pin(), sinks)) {
+    adjust_bw(node.create_driver_pin(0), it->second);  // the buffer on a ring closing over a compact loop stays
+    return;
+  }
+  for (const auto& sink : sinks) {
     inp_edges[0].get_driver_pin().connect_sink(sink);
   }
   node.del_node();
@@ -2222,6 +2255,9 @@ void Bitwidth::remove_mask_identities(hhds::Graph* g) {
       // rather than deleted: the refusal is conservative (at worst a missed
       // mask removal), and dropping it would change which cells this pass
       // rewrites, which is not what a data-structure migration is for.
+      if (livehd::graph_util::closes_loop_self_edge(source, edge.sink)) {
+        safe = false;  // a ring closing over a compact loop keeps its mask
+      }
       if (const auto consumer_node = edge.sink.get_master_node(); !consumer_node.is_invalid()) {
         const auto consumer_op   = type_op_of(consumer_node);
         const auto consumer_bank = Ntype::sink_bank(consumer_op, edge.sink.get_port_id());

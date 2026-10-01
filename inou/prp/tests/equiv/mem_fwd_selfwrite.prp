@@ -3,7 +3,11 @@
 :type: equiv
 :verilog_top: mem_fwd_selfwrite.rf
 :pyrope_top: rf
+:equiv_lec_grep: (?m)^lec: '[^']+' PROVEN equivalent
 */
+// `:equiv_lec_grep:` pins the UNBOUNDED proof: a fall back to a bounded PASS(n)
+// means the flop-bank bridge of pass/lec/query.cpp (the golden's per-word flops
+// vs the memory) stopped pairing.
 
 // MEMORY vs FLOP-ARRAY+MUX, with a FORWARDING read of a SELF-WRITTEN array.
 //
@@ -31,8 +35,8 @@
 // unpaired), and the miter refutes on the FREE INITIAL VALUE instead of on the
 // forwarding logic -- measured. Clearing every entry on both sides makes the
 // post-reset state concrete, so the comparison is about behaviour.
-pub mod rf(rst:bool, a:u4, wsel:u1, rsel:u1, we:bool) -> (z:u4@[0]) {
-  reg t:[2]u4
+pub mod rf(rst:Bool, a:U4, wsel:U1, rsel:U1, we:Bool) -> (z:U4@[0]) {
+  reg t:[2]U4
   if rst {
     t[0] = 0
     t[1] = 0

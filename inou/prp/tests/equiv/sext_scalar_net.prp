@@ -16,7 +16,7 @@
 //
 // Largest single blocker in the tmp/chimera sweep. Sext now asks decl_bits_of()
 // how the operand was declared and drops a select that covers the whole net.
-pub comb sext_scalar_net::[timecheck=false](a:u4, b:s4) -> (y:u8) {
+pub comb sext_scalar_net::[timecheck=false](a:U4, b:S4) -> (y:U8) {
   y = 0ub????????
-  y = (unsigned(a == 0)#sext[0..=0] + b#[0..=3]#sext[0..=3])#[0..=7]
+  y = (Unsigned(a == 0)#sext[0..=0] + b#[0..=3]#sext[0..=3])#[0..=7]
 }

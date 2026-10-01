@@ -1,0 +1,22 @@
+/*
+:name: generic_comb_arg_wider_than_param
+:type: error
+:tolg: 1
+:error: argument .a. \(range \[0, 65535\]\) in call to .lowg. may not fit its declared range \[0, 15\]
+:help: an argument never narrows implicitly
+*/
+// User ruling 2026-09-27 (lhdtrack suggestions 1.1): the generic twin of
+// comb_arg_wider_than_param. `a:Unsigned(bits=N)` with N=4 declares [0, 15]
+// once the generic is bound, so a u16 actual is too wide -- the declared
+// bound is what counts, never the actual's width. The caller writes
+// `lowg<N=4>(a=x#[0..<4])`.
+//
+// Today the inliner types the param FROM THE ACTUAL (16 bits) instead of the
+// folded bound, and compiles silently.
+comb lowg<N=2>(a:Unsigned(bits=N)) -> (o:Unsigned(bits=N)) {
+  o = a
+}
+
+pub mod generic_comb_arg_wider_than_param(x:U16) -> (y:U16@[0]) {
+  y = lowg<N=4>(a=x)   // locate_error_here
+}

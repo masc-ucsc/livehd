@@ -15,10 +15,10 @@
 //     Hotmux selector — which `pass.formal` then reported as an overlapping
 //     `unique if`/`match`, failing this compile outright.
 
-pub comb branch_unknown_cond(a:u4) -> (r:u4, s:u4) {
-  mut c:u1 = 0sb?
+pub comb branch_unknown_cond(a:U4) -> (r:U4, s:U4) {
+  mut c:U1 = 0sb?
 
-  mut x:u4 = 0
+  mut x:U4 = 0
   if c != 0 {
     x = a
   } else {
@@ -26,7 +26,7 @@ pub comb branch_unknown_cond(a:u4) -> (r:u4, s:u4) {
   }
   r = x
 
-  mut y:u4 = 0
+  mut y:U4 = 0
   match c {
     == 0 { y = 5 }
     == 1 { y = 6 }

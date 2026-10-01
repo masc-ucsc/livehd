@@ -1,0 +1,54 @@
+/*
+:name: capture_fold_const
+:type: equiv
+*/
+// User ruling 2026-09-28 (32): capture visibility is FOLD-BASED and the same
+// in every scope -- file scope, `comb`, `mod`, `pipe`. An enclosing `const`
+// is visible inside a nested lambda iff its value there folds to a
+// compile-time constant: `mut m = 3; const s = m + 1` in a mod body is 4, a
+// const accumulated by a loop over constants is its folded sum. Before, only
+// file scope tracked a `mut`'s value (a mod/comb body counted as a
+// conditional), and a const computed through a loop was a runtime value in
+// every scope: each read below was "'s' is a runtime value of the enclosing
+// scope". The input-dependent counterparts stay errors
+// (errors/capture_fold_input_loop.prp, errors/capture_fold_reg.prp).
+mut acc = 0
+for i in 0..<4 {
+  acc += i
+}
+const FS = acc  // 6
+
+comb addfs(x:U8) -> (y:U8) {
+  wrap y = x + FS
+}
+
+comb outer(a:U8) -> (r:U8) {
+  mut q = 2
+  const w = q * 5  // 10
+  comb inner(x:U8) -> (y:U8) {
+    wrap y = x + w
+  }
+  r = inner(x=a)
+}
+
+pub mod capture_fold_const(a:U8) -> (o1:U8@[0], o2:U8@[0], o3:U8@[0], o4:U8@[0]) {
+  mut m = 3
+  const s = m + 1  // 4
+  comb adds(x:U8) -> (y:U8) {
+    wrap y = x + s
+  }
+  o1 = adds(x=a)
+
+  mut t = 0
+  for i in 0..<3 {
+    t += i * 2
+  }
+  const u = t + 1  // 7
+  comb addu(x:U8) -> (y:U8) {
+    wrap y = x + u
+  }
+  o2 = addu(x=a)
+
+  o3 = addfs(x=a)
+  o4 = outer(a=a)
+}

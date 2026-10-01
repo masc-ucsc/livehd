@@ -9,8 +9,8 @@
 // is still a driver: pairing it with a second assignment is the same
 // double-drive as two unconditional writes. The whole `if`/`match` construct
 // counts as ONE driver, so this shape has two.
-comb t(a:u8, b:u8, c:bool) -> (o:u8) {
-  wire w:u8 = nil   // locate_error_here
+comb t(a:U8, b:U8, c:Bool) -> (o:U8) {
+  wire w:U8 = nil   // locate_error_here
   if c {
     w = a
   }

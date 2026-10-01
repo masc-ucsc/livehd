@@ -4,5 +4,5 @@
 :error: undefined function.*saturate
 :help: check the spelling
 */
-mut x:u8 = 0
-const y = saturate(v=300, type=x) // locate_error_here
+mut x:U8 = 0
+const y = saturate(v=300, `type`=x) // locate_error_here

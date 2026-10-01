@@ -13,6 +13,6 @@
 // high product bits (the ones that were silently zeroed) observable at `y`.
 // Exercised by lhd/tests/lhd_abc_arith_test.sh with a mapped-netlist LEC
 // against the partition twin as the oracle.
-mod abc_constmul(a:u8, b:u8) -> (y:u8@[0]) {
+mod abc_constmul(a:U8, b:U8) -> (y:U8@[0]) {
   y = ((a + b) * 342) >> 10
 }

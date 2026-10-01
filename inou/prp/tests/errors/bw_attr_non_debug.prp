@@ -9,5 +9,5 @@
 // branching on the running range would not converge (the next elaboration
 // may compute a different legal range and silently change the circuit).
 
-mut x:u8 = 30
+mut x:U8 = 30
 if x.[bw_max] != 30 { x = 30 } else { x = 40 }  // locate_error_here

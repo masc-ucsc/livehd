@@ -1,8 +1,8 @@
 // Reset is synchronous data-path behavior; the register has no specified
 // power-on value. ABC may choose a concrete latch init internally, but pass.abc
 // must not materialize that optimization choice in the mapped netlist.
-pub mod abc_resetless_sync(clk:u1, rst:u1, d:u4) -> (q:u4@[1]) {
-  reg state:u4:[clock_pin=ref clk] = nil
+pub mod abc_resetless_sync(clk:Clock, rst:U1, d:U4) -> (q:U4@[1]) {
+  reg state:U4:[clock_pin=clk] = nil
   q = state
   state = if rst != 0 { 0 } else { d ^ 0ub1010 }
 }

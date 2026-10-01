@@ -34,15 +34,21 @@ inline bool is_builtin_function(std::string_view name) {
   }
   static constexpr std::string_view names[] = {
       // verification (`requires`/`ensures` were removed — use assume/assert)
-      "assert", "cassert", "assume", "assert_always",
+      "assert",
+      "cassert",
+      "assume",
+      "assert_always",
       // debug / string output (`format` was REMOVED: it never had an
-      // implementation in any context -- use `string(...)` to convert and
+      // implementation in any context -- use `String(...)` to convert and
       // `puts`/`print` to emit)
-      "cputs", "puts", "print",
+      "cputs",
+      "puts",
+      "print",
       // compilation / directives
       "import",
       // overflow policies (also usable as `wrap x = …` statements)
-      "wrap", "sat",
+      "wrap",
+      "sat",
       // bit concatenation — `concat(a, b, c)`, argument 0 the MOST significant
       // lane. Call-shaped but never a real call: prp2lnast rewrites it into the
       // n-ary LNAST `concat` node (a func_call would lose the lane order, and
@@ -66,20 +72,34 @@ inline bool is_builtin_function(std::string_view name) {
 }
 
 // True iff `name` is a REMOVED scalar cast/type keyword — `int`/`integer`/
-// `uint`. These were dropped in favor of `signed`/`unsigned` (explicit sign
+// `uint`. These were dropped in favor of `Signed`/`Unsigned` (explicit sign
 // intent); a use must report a tailored "removed" diagnostic, not be treated as
 // a valid built-in. NOT a member of is_type_cast_callee below.
 inline bool is_removed_int_keyword(std::string_view t) { return t == "int" || t == "integer" || t == "uint"; }
 
-// Built-in scalar type constructors usable as casts: `unsigned`/`signed`/
-// `bool`/`boolean`/`string` and the sized forms `uN`/`sN`/`iN`. (`int`/`uint`/
-// `integer` were REMOVED — see is_removed_int_keyword.) Mirrors
-// Prp2lnast::is_prim_type_token, kept here so the whitelist is whole.
+// The removed signed sized spelling `iN` (`i8`, `i32`): `S<N>` replaced it.
+// As an ordinary declared name it remains legal.
+inline bool is_removed_sized_int_type(std::string_view t) {
+  return t.size() >= 2 && t[0] == 'i' && std::all_of(t.begin() + 1, t.end(), [](unsigned char ch) { return std::isdigit(ch); });
+}
+
+// Built-in scalar type constructors usable as casts (docs 07-typesystem
+// "Built-in types": the type name is also the cast): `Unsigned`/`Signed`/
+// `Bool`/`String` and the sized forms `U<N>`/`S<N>` (`U1(flag)`, `S8(x)`).
+// `Clock`/`Reset` are types but NOT casts (a Clock is never made from data; a
+// Bool binds to a Reset without a cast). The old lowercase spellings (`u8`,
+// `boolean`, `unsigned`, ...) are ordinary names; the front end suggests the
+// new spelling only for unresolved uses (str_tools::renamed_type_spelling).
 inline bool is_type_cast_callee(std::string_view t) {
-  if (t == "unsigned" || t == "signed" || t == "bool" || t == "boolean" || t == "string") {
+  if (t == "Unsigned" || t == "Signed" || t == "Bool" || t == "String") {
     return true;
   }
-  return t.size() >= 2 && (t[0] == 'u' || t[0] == 's' || t[0] == 'i')
+  // docs 04-variables "Range": the lowercase `range(int)` (one-hot decode) and
+  // `tuple(range)` conversions.
+  if (t == "range" || t == "tuple") {
+    return true;
+  }
+  return t.size() >= 2 && (t[0] == 'U' || t[0] == 'S')
          && std::all_of(t.begin() + 1, t.end(), [](unsigned char ch) { return std::isdigit(ch); });
 }
 
@@ -109,6 +129,17 @@ inline uint64_t past_builtin_delay(std::string_view name) {
   return n;  // N==0 (`past[0]`) is not a delay: reported as an undefined call
 }
 
+// The built-in `std` namespace (docs 13-stdlib "Built-in `std` namespace"):
+// visible in every file with no `import`, and not a value. `std.<member>(...)`
+// lowers to a call of the qualified name `std.<member>`, folded by upass.
+inline constexpr std::string_view std_namespace = "std";
+
+// True iff `member` is a function of the built-in `std` namespace.
+inline bool is_std_member(std::string_view member) {
+  // `clog2`: Verilog `$clog2` (comptime only).
+  return member == "clog2" || member == "readmemh" || member == "readmemb" || member == "testplusarg" || member == "valueplusarg";
+}
+
 // True iff `name` is any compiler-provided callee (function, type cast, or the
 // `past[N]` temporal builtin).
 inline bool is_builtin_callee(std::string_view name) {
@@ -130,7 +161,7 @@ inline bool is_builtin_callee(std::string_view name) {
 //     not call-site interceptions; `mod wrap(...)` is a legal module name.
 //   * `__`-prefixed cell intrinsics — emitted by the cellmap/lowering libraries,
 //     which legitimately define them.
-//   * type casts (`u8`, `signed`, …) — rejected earlier, as parse-level types.
+//   * type casts (`U8`, `Signed`, …) — reserved type words, rejected by the parser.
 //   * methods: `t.concat = comb(...)` is fine, because a call WITH a receiver
 //     (`x.concat(a)`) is never intercepted.
 inline bool is_reserved_lambda_name(std::string_view name) {

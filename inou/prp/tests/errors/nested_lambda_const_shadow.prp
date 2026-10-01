@@ -1,0 +1,19 @@
+/*
+:name: nested_lambda_const_shadow
+:type: error
+:error: variable shadowing: 'x' is already declared in an enclosing scope
+:help: the enclosing comptime 'x' is visible inside lambda 'nested_lambda_const_shadow'
+*/
+
+// Ruling 2026-09-28 #24: name lookup is lexical and a plain `const` with a
+// compile-time value is visible inside a lambda, so a lambda-local `const x`
+// shadows the file-scope `x` -- an error, as for any shadowing in Pyrope,
+// with the same wording as every other shadowing error of the front end (not
+// the "redeclaration of variable 'x' in the same scope" the lambda's replayed
+// capture used to produce).
+const x = 2
+
+pub comb nested_lambda_const_shadow(a:U8) -> (r:U8) {
+  const x = 5  // locate_error_here
+  r = (a + x)#[0..<8]
+}

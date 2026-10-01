@@ -1,0 +1,22 @@
+/*
+:name: spec_memory_bitwrite_runtime
+:type: equiv
+:verilog_top: spec_memory_bitwrite_runtime
+:pyrope_top: spec_memory_bitwrite_runtime
+*/
+// SPEC (qa.md appendix section 5): "bit/slice writes into array elements
+// (`m[i]#[j] = x`) are supported (memories may use write masks)."
+// SPEC (qa.md Q40 / section 8): "Memories: per-bit (1-bit lane) write masks are OK
+// for runtime/unaligned partial writes."
+// SPEC (docs 08-memories.md): "a runtime position such as `mem[a]#[k]` needs
+// single-bit lanes".
+// Rule encoded here: a `reg` array element takes a single-bit write at a RUNTIME
+// element index `i` AND a RUNTIME bit position `j`; every other bit of the entry
+// (and every other entry) keeps its value.
+pub mod spec_memory_bitwrite_runtime(clk:Clock, rst:Reset, we:Bool, i:U2, j:U3, x:U1, ra:U2) -> (q:U8@[0]) {
+  reg m:[4]U8 = 0
+  q = m[ra]
+  if we {
+    m[i]#[j] = x
+  }
+}

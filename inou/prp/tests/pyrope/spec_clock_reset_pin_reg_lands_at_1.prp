@@ -1,0 +1,16 @@
+/*
+:name: spec_clock_reset_pin_reg_lands_at_1
+:type: compile
+*/
+// SPEC (clock lane): a body register reset through an explicit `reset_pin`
+// lands like any body register: one cycle after the inputs that drive it.
+//   ruling 83 (qa Q28, "Uniform @[1]"): "every mod body reg lands ONE cycle
+//     after the inputs that drive it, implicit-clock and explicit
+//     clock_pin/reset_pin alike"
+//   docs 04b: "Two or more `Reset` inputs likewise require `reset_pin=x`."
+// The @[0] twin is errors/spec_clock_reset_pin_reg_lands_at_1_decl0.prp.
+pub mod spec_clock_reset_pin_reg_lands_at_1(ck:Clock, ra:Reset, rb:Reset, d:U8) -> (q:U8@[1]) {
+  reg f:U8:[reset_pin=ra] = 0
+  f = d
+  q = f
+}

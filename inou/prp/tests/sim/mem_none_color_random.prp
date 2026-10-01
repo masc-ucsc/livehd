@@ -7,12 +7,12 @@
 // `last` makes that draw observable without asserting a particular random
 // value; the lhd-side structure/runtime test compares complete traces across
 // worker counts and seeds.
-pub mod random_color_mem(clk:bool, a:u1, d:u8) -> (q:u8@[]) {
-  reg mem:[2]u8:[ordering="none"] = 0
+pub mod random_color_mem(clk:Clock, a:U1, d:U8) -> (q:U8@[]) {
+  reg mem:[2]U8:[ordering="none"] = 0
   mem[a] = d
   q = mem[a]
 
-  reg last:u8:[clock_pin=ref clk] = 0
+  reg last:U8:[clock_pin=clk] = 0
   last = q
 }
 

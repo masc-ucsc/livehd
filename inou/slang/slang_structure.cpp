@@ -16,6 +16,7 @@
 
 #include "bus_name.hpp"
 #include "dlop.hpp"
+#include "hlop/memory_init.hpp"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/Lookup.h"
 #include "slang/ast/Statement.h"
@@ -789,17 +790,17 @@ struct Array_range_write_collector : public slang::ast::ASTVisitor<Array_range_w
 // sub-word write one of two ways: a per-chunk write ENABLE (uniform,
 // chunk-aligned slices — the SRAM byte-enable idiom), or a read-modify-write
 // splice that writes the whole word back. Two RMW splices to one CLOCKED memory
-// cannot both stand: each reads the COMMITTED word, so whichever write port wins
-// a same-cycle collision discards the other's bits, and `lower_mem_element_*`
-// refuses the second one outright. A flat flop bus has no such problem — the
-// splices are Set_masks that compose — so an array carrying that shape must
-// simply not become a memory.
+// are correct (upass.tolg replays the earlier writes of the cycle into each
+// splice's read-back, so they merge in program order), but each is a whole-word
+// write port plus that replay logic, where a flat flop bus composes the
+// splices as plain Set_masks. So an array carrying two or more splices stays a
+// flop bus: a representation choice, not a correctness requirement.
 //
 // Per symbol: how many sub-word writes CANNOT be a per-chunk enable (dynamic
 // in-word position, or a width that does not divide and align the word), plus
 // the set of widths of the ones that can. Two non-chunk writes are two RMW
-// splices into one word -- the refused shape. Two chunk writes of DIFFERENT
-// widths are equally unrepresentable: a memory carries ONE `wensize`.
+// splices into one word. Two chunk writes of DIFFERENT widths are
+// unrepresentable: a memory carries ONE `wensize`.
 struct Sub_word_write_collector : public slang::ast::ASTVisitor<Sub_word_write_collector, slang::ast::VisitFlags::AllGood> {
   struct Shape {
     int                          non_chunk = 0;
@@ -1246,6 +1247,40 @@ bool visit_generate_scope(const slang::ast::Symbol& member, Fn&& fn) {
   return false;
 }
 
+// A memory's `initial` block contents as the packed `initial=` literal (docs
+// 08-memories: entry 0 in the low `bits`): entry k fills bits [k*bits,
+// (k+1)*bits), each value resized to `bits` by its OWN sign, and an entry the
+// block never wrote is 0. Built as hex in one linear pass: a Dlop shift/or per
+// entry is quadratic in the memory's size.
+std::string packed_mem_contents(const std::map<int64_t, slang::SVInt>& vals, int64_t size, int bits) {
+  const int64_t         total = size * bits;
+  std::vector<uint64_t> words(static_cast<size_t>((total + 63) / 64), 0);
+  for (const auto& [k, v] : vals) {
+    if (k < 0 || k >= size) {
+      continue;  // out of the declared range: a Verilog write that does nothing
+    }
+    const auto      entry = v.resize(static_cast<slang::bitwidth_t>(bits));
+    const uint64_t* raw   = entry.getRawPtr();
+    for (int b = 0; b < bits; ++b) {
+      if (((raw[b / 64] >> (b % 64)) & 1) != 0) {
+        const int64_t pos                     = k * bits + b;
+        words[static_cast<size_t>(pos / 64)] |= uint64_t{1} << (pos % 64);
+      }
+    }
+  }
+  static constexpr char kHex[] = "0123456789abcdef";
+  std::string           hex;
+  for (int64_t nib = (total + 3) / 4 - 1; nib >= 0; --nib) {
+    const int64_t pos   = nib * 4;
+    const auto    digit = (words[static_cast<size_t>(pos / 64)] >> (pos % 64)) & 0xF;
+    if (hex.empty() && digit == 0) {
+      continue;
+    }
+    hex.push_back(kHex[digit]);
+  }
+  return hex.empty() ? "0" : "0x" + hex;
+}
+
 }  // namespace
 
 // Fold a constant expression, chasing constant net/var drivers. firtool factors
@@ -1411,6 +1446,10 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
           }
         } else {
           input_syms_.insert(internal);
+          if ((internal->name == "clk" || internal->name == "clock") && slang::ast::ValueSymbol::isKind(internal->kind)
+              && internal->as<slang::ast::ValueSymbol>().getType().getBitWidth() <= 1) {
+            ++clock_candidate_inputs_;
+          }
         }
         if (is_flat_array) {
           flat_port_syms_.insert(internal);
@@ -1645,7 +1684,7 @@ std::optional<std::string> Slang_context::port_dim_alias(const slang::ast::PortS
   // .second its `uN` print text. The max is emitted as the declare's
   // prim_type_int bound, which is where every consumer reads the range from; it
   // is never packed into a single "MAX|MIN" string.
-  referenced_pkg_types_[pkg_name][alias]  = {mask_text(bits), absl::StrCat("u", bits)};
+  referenced_pkg_types_[pkg_name][alias]  = {mask_text(bits), absl::StrCat("U", bits)};
   // the driving param itself also exports (`pub comptime const SEL_W = 4`
   // next to `pub type SEL_W_T = u4`) — width provenance reads best in pairs
   referenced_pkg_params_[pkg_name][ident] = const_text(cv->integer());
@@ -1880,6 +1919,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   }
 
   emit_module_io(symbol, in_tup, out_tup);
+  prepare_plusargs(*body);
   // Every classification pre-scan runs BEFORE the first expression lowers:
   // is_scalar_struct_var memoizes over the port/reg sets and struct_use_.
   Loop_control_usage loop_usage;
@@ -2067,7 +2107,8 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       }
       if (member.kind == slang::ast::SymbolKind::ProceduralBlock
           && member.as<slang::ast::ProceduralBlockSymbol>().procedureKind == slang::ast::ProceduralBlockKind::Initial) {
-        collect_initial_values(member.as<slang::ast::ProceduralBlockSymbol>().getBody());
+        if (!plusarg_blocks_.contains(&member.as<slang::ast::ProceduralBlockSymbol>()))
+          collect_initial_values(member.as<slang::ast::ProceduralBlockSymbol>().getBody());
       }
     }
   };
@@ -2182,7 +2223,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       // a reset/init bus to hang the reset on. With per-entry writes alone the
       // reset is silently DROPPED — measured: PMAEntryHandleModule,
       // RegCacheAgeTimer_1 and RobEnqPtrWrapper all LEC-REFUTED that way, and a
-      // 4-line `reg m:[4]u8:[initial=0, reset_pin=ref rst, async=true]` loses its
+      // 4-line `reg m:[4]u8:[initial=0, reset_pin=rst, async=true]` loses its
       // reset today with no diagnostic at all. Such arrays stay a flat flop bus,
       // which does reset correctly, until the memory lowering grows a reset for
       // the per-port shape.
@@ -2239,7 +2280,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
           continue;
         }
         // Lane k is memory ADDRESS k, i.e. declared index `lo + k`
-        // (build_unpacked_index addresses an element as `index - lower` in both
+        // (build_unpacked_address addresses an element as `index - lower` in both
         // range directions). Its home in the packed word is `k*w` only when the
         // outer range DESCENDS; an ascending `[0:N-1]` puts index `lo + k` at
         // `(upper - index)*w = (n-1-k)*w`, so the pattern would come out
@@ -2301,8 +2342,13 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
       if (auto it = sub_word_widths.find(sym); it != sub_word_widths.end() && it->second.unrepresentable_as_memory()) {
         continue;  // mixed sub-word write shapes: see Sub_word_write_collector
       }
+      // So must an ASCENDING `[0:N-1]` array: Verilog packs its element 0 in
+      // the MOST significant bits, while a memory's packed view (the whole
+      // value read and written) puts entry 0 at bit 0, so memory-izing it
+      // mirrored every element access against the whole value.
       if (reg_syms_.contains(sym) && !output_syms_.contains(sym) && !array_range_written.contains(sym)
-          && !array_pattern_loaded.contains(sym) && !bit_regs_.contains(sym) && is_packed_2d_array(sym->getType(), n, w, sg, lo)) {
+          && !array_pattern_loaded.contains(sym) && !bit_regs_.contains(sym) && is_packed_2d_array(sym->getType(), n, w, sg, lo)
+          && sym->getType().getCanonicalType().as<slang::ast::PackedArrayType>().range.isDescending()) {
         packed_mem_regs_.insert(sym);
       }
     }
@@ -2327,8 +2373,9 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
     // whose interaction with a second driver is a separate question. A plain
     // packed OUTPUT PORT is in scope (`output logic [31:0] q;` + `assign
     // q[7:0] = d;` + an always_ff over the rest is the same shape, and just as
-    // wrong when it is one register) — the port itself becomes the composite,
-    // so it needs no `mut` declare, only the seed. The two output shapes that
+    // wrong when it is one register) — the port itself becomes the composite
+    // (a `wire`, see declare_reg), so it needs no `mut` declare, only the
+    // seed. The two output shapes that
     // mint a `<port>_q` shadow of their OWN are excluded above and below.
     const auto& ty = vs.getType();
     if (!ty.isIntegral() || latch_syms_.contains(sym) || bundle_port_info_.contains(sym) || struct_var_info_.contains(sym)
@@ -2477,6 +2524,58 @@ void Slang_context::collect_initial_values(const slang::ast::Statement& stmt) {
     case StatementKind::Block              : collect_initial_values(stmt.as<slang::ast::BlockStatement>().body); return;
     case StatementKind::ExpressionStatement: {
       const auto& e = stmt.as<slang::ast::ExpressionStatement>().expr;
+      if (e.kind == ExpressionKind::Call) {
+        const auto& call = e.as<slang::ast::CallExpression>();
+        const auto  name = call.isSystemCall() ? call.getSubroutineName() : std::string_view{};
+        if (name == "$readmemh" || name == "$readmemb") {
+          auto args = call.arguments();
+          auto bad  = [&] {
+            emit_unsupported(e.sourceRange,
+                             "readmem-unsupported",
+                             "$readmemh/$readmemb requires a constant filename and a whole zero-based, one-dimensional integral "
+                             "memory; bounds and mixed initializers are unsupported");
+          };
+          if (args.size() != 2) {
+            bad();
+            return;
+          }
+          // Slang binds an output argument as a synthetic assignment to an
+          // EmptyArgument RHS. The memory itself is its lvalue, not the wrapper.
+          const auto* memory = args[1];
+          if (memory->kind == ExpressionKind::Assignment) {
+            memory = &memory->as<slang::ast::AssignmentExpression>().left();
+          }
+          if (memory->kind != ExpressionKind::NamedValue) {
+            bad();
+            return;
+          }
+          const auto& sym      = memory->as<slang::ast::NamedValueExpression>().symbol;
+          const auto& type     = sym.getType().getCanonicalType();
+          auto        filename = try_eval(*args[0]);
+          if (!filename || (!filename->isString() && !filename->isInteger())
+              || type.kind != SymbolKind::FixedSizeUnpackedArrayType) {
+            bad();
+            return;
+          }
+          if (filename->isInteger() && filename->integer().hasUnknown()) {
+            bad();
+            return;
+          }
+          auto        text  = filename->convertToStr();
+          const auto& array = type.as<slang::ast::FixedSizeUnpackedArrayType>();
+          if (!text.isString() || text.str().empty() || text.str().find('\0') != std::string::npos || array.range.lower() != 0
+              || !array.elementType.isIntegral() || array.elementType.isStruct() || array.elementType.isPackedUnion()
+              || sym.getInitializer() != nullptr || mem_init_images_.contains(&sym) || mem_init_vals_.contains(&sym)) {
+            bad();
+            return;
+          }
+          // SV filenames retain runtime-cwd semantics, unlike source-relative Pyrope calls.
+          mem_init_images_[&sym] = hlop::memory_image_command(name == "$readmemh" ? 16 : 2, text.str());
+          reg_syms_.insert(&sym);
+          readmem_calls_.insert(&e);
+        }
+        return;
+      }
       if (e.kind != ExpressionKind::Assignment) {
         return;
       }
@@ -2506,9 +2605,32 @@ void Slang_context::collect_initial_values(const slang::ast::Statement& stmt) {
       }
       const auto* sym = &es.value().as<slang::ast::NamedValueExpression>().symbol;
       auto        idx = try_eval_int(es.selector());
-      auto        val = try_eval_int(as.right());
-      if (idx && val && *idx >= 0) {
-        mem_init_vals_[sym][*idx] = *val;
+      auto        val = try_eval(as.right());
+      if (mem_init_images_.contains(sym)) {
+        emit_unsupported(e.sourceRange, "readmem-mixed-init", "file preload cannot be mixed with indexed initial assignments");
+        return;
+      }
+      // Keyed by the memory ENTRY, the way every access site addresses it
+      // (build_unpacked_address: `index - lower`), so `mem [1:4]` fills entry 0
+      // from `mem[1]`. The value keeps its SVInt (the RHS is already converted
+      // to the element type): an int64 loses the sign of a wide unsigned value
+      // and cannot hold one of 2^64 or more.
+      int64_t lower = 0;
+      if (const auto& ct = sym->getType().getCanonicalType(); ct.kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
+        lower = ct.as<slang::ast::FixedSizeUnpackedArrayType>().range.lower();
+      } else {
+        int64_t n  = 0;
+        int     w  = 0;
+        bool    sg = false;
+        if (!is_packed_2d_array(sym->getType(), n, w, sg, lower)) {
+          lower = 0;
+        }
+      }
+      // A non-constant write is dropped (the initial-ignored warning on the
+      // block says so), and an x/z pattern is "no specified power-on value"
+      // (see the scalar harvest).
+      if (idx && val && val->isInteger() && !val->integer().hasUnknown()) {
+        mem_init_vals_[sym][*idx - lower] = val->integer();
       }
       return;
     }
@@ -2613,7 +2735,7 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
   // Peel every unpacked dim (outermost first): a multi-dim `T m [A][B]`
   // linearizes to a 1-D memory of A*B elements of T (row-major, innermost dim
   // contiguous); access sites fold the full `m[i][j]` selector chain into one
-  // linear index (build_unpacked_index).
+  // linear index (build_unpacked_address).
   std::vector<Mem_info::Dim> dims;
   const slang::ast::Type*    ep = &ct;
   while (ep->getCanonicalType().kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
@@ -2650,6 +2772,10 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
   // by Verilog -> Pyrope state correspondence. Multi-dimensional arrays always
   // take the linearized memory path.
   const bool flat_io_port = flat_port_syms_.contains(&sym);
+  if (flat_io_port && mem_init_images_.contains(&sym)) {
+    emit_unsupported(sym.location, "readmem-array-port", "file preload requires a local memory, not a flattened array port");
+    return false;
+  }
   if (dims.size() == 1 && (flat_io_port || (!is_reg && !has_init)) && flat_bits > 0 && flat_bits <= 65536) {
     if (has_init) {
       // The flat branch has no INIT representation (the Memory branch below is
@@ -2782,19 +2908,38 @@ bool Slang_context::declare_unpacked(const slang::ast::ValueSymbol& sym, bool is
   emit_prim_type_int(tidx, ei.bits, ei.is_signed);
   ln.add_child(tidx, Lnast_node::create_const(absl::StrCat("[", mi.size, "]")));
   ln.add_child(didx, Lnast_node::create_const(is_reg ? "reg" : "mut"));
-  // Power-on contents from an `initial` block: a uniform fill becomes a scalar
-  // broadcast (`= 3`); a per-entry fill a tuple literal (`= (1,2,3,4)`), index
-  // order with un-written entries defaulting to 0.  Absent → `nil` (reg only).
-  if (auto iit = mem_init_vals_.find(&sym); iit != mem_init_vals_.end() && !iit->second.empty()) {
-    const auto& vals    = iit->second;
-    const bool  uniform = std::all_of(vals.begin(), vals.end(), [&](const auto& kv) { return kv.second == vals.begin()->second; });
-    if (uniform && static_cast<int64_t>(vals.size()) == mi.size) {
-      ln.add_child(didx, Lnast_node::create_const(absl::StrCat(vals.begin()->second)));
+  // Power-on contents from an `initial` block. On a REGISTER array they are
+  // NOT its declaration initializer: that is the reset value too (docs
+  // 08-memories), so re-reading lhd's own `initial` block would mint a reset
+  // the source never had. They ride `initial=<packed contents>` next to
+  // `= nil` instead -- power-on contents only, no reset bound. A combinational
+  // array has no reset, so its contents stay the initializer: a uniform fill
+  // is a scalar broadcast (`= 3`), a per-entry fill a tuple literal
+  // (`= (1,2,3,4)`), index order with un-written entries defaulting to 0. A
+  // `$readmem` image is a startup command, never a reset value.
+  if (auto image = mem_init_images_.find(&sym); image != mem_init_images_.end()) {
+    ln.add_child(didx, Lnast_node::create_const(Dlop::create_string(image->second)->to_pyrope()));
+  } else if (auto iit = mem_init_vals_.find(&sym); iit != mem_init_vals_.end() && !iit->second.empty() && is_reg) {
+    auto aidx = builder_.add_child(Lnast_ntype::create_attr_set());
+    ln.add_child(aidx, Lnast_node::create_ref(name));
+    ln.add_child(aidx, Lnast_node::create_const("initial"));
+    ln.add_child(aidx, Lnast_node::create_const(packed_mem_contents(iit->second, mi.size, ei.bits)));
+    ln.add_child(didx, Lnast_node::create_const("nil"));
+  } else if (iit != mem_init_vals_.end() && !iit->second.empty()) {
+    const auto& vals = iit->second;
+    const bool  uniform
+        = std::all_of(vals.begin(), vals.end(), [&](const auto& kv) { return exactlyEqual(kv.second, vals.begin()->second); });
+    // Every entry written, none outside [0, size): the map's keys are sorted
+    // and unique, so its size and its two ends say so.
+    const bool every
+        = static_cast<int64_t>(vals.size()) == mi.size && vals.begin()->first == 0 && vals.rbegin()->first == mi.size - 1;
+    if (uniform && every) {
+      ln.add_child(didx, Lnast_node::create_const(const_text(vals.begin()->second)));
     } else {
       auto vidx = ln.add_child(didx, Lnast_ntype::create_tuple_add());
       for (int64_t k = 0; k < mi.size; ++k) {
         auto vit = vals.find(k);
-        ln.add_child(vidx, Lnast_node::create_const(absl::StrCat(vit != vals.end() ? vit->second : int64_t{0})));
+        ln.add_child(vidx, Lnast_node::create_const(vit != vals.end() ? const_text(vit->second) : "0"));
       }
     }
   } else if (is_reg) {
@@ -2908,6 +3053,7 @@ bool Slang_context::is_packed_2d_array(const slang::ast::Type& type, int64_t& si
 // State regs declare once at module start, output regs included (ports sit
 // in declared_ from the io emission, hence the dedicated reg_declared_ set).
 void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
+  if (plusarg_vars_.contains(&sym)) return;
   if (reg_declared_.contains(&sym)) {
     return;
   }
@@ -3048,23 +3194,14 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
         clear_pending_loc();
         return;
       }
-      // Power-on contents from an `initial` block (same shape as declare_unpacked):
-      // uniform fill -> scalar broadcast, per-entry fill -> tuple literal, else nil.
+      // Power-on contents from an `initial` block: `initial=` next to `= nil`,
+      // power-on only (see declare_unpacked).
+      ln.add_child(didx, Lnast_node::create_const("nil"));
       if (auto iit = mem_init_vals_.find(&sym); iit != mem_init_vals_.end() && !iit->second.empty()) {
-        const auto& vals = iit->second;
-        const bool  uniform
-            = std::all_of(vals.begin(), vals.end(), [&](const auto& kv) { return kv.second == vals.begin()->second; });
-        if (uniform && static_cast<int64_t>(vals.size()) == mi.size) {
-          ln.add_child(didx, Lnast_node::create_const(absl::StrCat(vals.begin()->second)));
-        } else {
-          auto vidx = ln.add_child(didx, Lnast_ntype::create_tuple_add());
-          for (int64_t k = 0; k < mi.size; ++k) {
-            auto vit = vals.find(k);
-            ln.add_child(vidx, Lnast_node::create_const(absl::StrCat(vit != vals.end() ? vit->second : int64_t{0})));
-          }
-        }
-      } else {
-        ln.add_child(didx, Lnast_node::create_const("nil"));  // no power-on contents
+        auto aidx = builder_.add_child(Lnast_ntype::create_attr_set());
+        ln.add_child(aidx, Lnast_node::create_ref(name));
+        ln.add_child(aidx, Lnast_node::create_const("initial"));
+        ln.add_child(aidx, Lnast_node::create_const(packed_mem_contents(iit->second, mi.size, w)));
       }
       clear_pending_loc();
       return;
@@ -3107,9 +3244,10 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
     wire_split_tmp_[&sym] = tmp;
     builder_.create_declare_stmts(tmp, "mut", int_max_str(ti.bits, ti.is_signed), int_min_str(ti.bits, ti.is_signed));
     builder_.create_assign_stmts(tmp, name);
-    if (!output_syms_.contains(&sym)) {
-      builder_.create_declare_stmts(composite, "wire", int_max_str(ti.bits, ti.is_signed), int_min_str(ti.bits, ti.is_signed));
-    }
+    // An OUTPUT port composite is a `wire` too (like a wire-classified output,
+    // see the wouts declare): the edge process reads it before its end-of-module
+    // bridge, and only a wire makes that forward read legal Pyrope.
+    builder_.create_declare_stmts(composite, "wire", int_max_str(ti.bits, ti.is_signed), int_min_str(ti.bits, ti.is_signed));
   }
   // M7 bridge: tuple output leaves driven combinationally from the shadow
   // reg's q (order-free — a reg read by name is its committed value).
@@ -3130,6 +3268,7 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
 }
 
 void Slang_context::declare_value_symbol(const slang::ast::ValueSymbol& sym, bool force_reg) {
+  if (plusarg_vars_.contains(&sym)) return;
   if (force_reg || reg_syms_.contains(&sym)) {
     declare_reg(sym);
     return;
@@ -3385,7 +3524,7 @@ bool Slang_context::struct_port_bundle_ok(const slang::ast::Type& t) {
     // includes a multi-dim packed array, a packed array-of-struct, and a
     // packed union: each rides as a single WIDE leaf (its flat bit width) —
     // in-leaf selects stay field-relative slices and partial writes splice
-    // via emit_bundle_port_rmw's per-leaf set_mask, so no new lowering is
+    // via emit_leaf_split_rmw's per-leaf set_mask, so no new lowering is
     // needed. The point of NOT demoting the whole port over one such field:
     // a packed port is one pid, and writing field X while reading a DISJOINT
     // field Y then looks like a same-cycle self-loop — the false ring that
@@ -4078,7 +4217,7 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
 
         case SymbolKind::Variable: {
           const auto& vs = member.as<slang::ast::VariableSymbol>();
-          if (vs.getInitializer() != nullptr && !reg_init_vals_.contains(&vs)) {
+          if (vs.getInitializer() != nullptr && !reg_init_vals_.contains(&vs) && !plusarg_vars_.contains(&vs)) {
             emit_warning(slang::SourceRange(vs.location, vs.location),
                          "var-init-ignored",
                          "unsupported",
@@ -4878,8 +5017,8 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
 
   // ── edge-sensitivity nets are wires ────────────────────────────────────────
   // A DERIVED net named in an always_ff edge list (`negedge rst_int_ni`, a
-  // gated clock) becomes a reg ATTR reference (`reset_pin=ref net`,
-  // `clock_pin=ref net`). Attr semantics are net-like — the ref must bind the
+  // gated clock) becomes a reg ATTR reference (`reset_pin=net`,
+  // `clock_pin=net`). Attr semantics are net-like — the ref must bind the
   // RESOLVED value, never an SSA version. As a `mut` the net carries a poison
   // store plus its driver store, and the attr ref downstream binds the FIRST
   // version — prim_rst_sync's reset_pin resolved to the poison and the flop
@@ -5745,6 +5884,7 @@ void Slang_context::lower_continuous_assign(const slang::ast::ContinuousAssignSy
 static bool is_reset_like_name(std::string_view nm) { return str_tools::is_reset_like_name(nm); }
 
 void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) {
+  if (plusarg_blocks_.contains(&pbs)) return;
   using slang::ast::ProceduralBlockKind;
   using slang::ast::TimingControlKind;
 
@@ -5754,7 +5894,50 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
   unroll_budget_ = options_.unroll_limit;
 
   switch (pbs.procedureKind) {
-    case ProceduralBlockKind::Initial:
+    case ProceduralBlockKind::Initial: {
+      struct Check : slang::ast::ASTVisitor<Check, slang::ast::VisitFlags::AllGood> {
+        Slang_context& ctx;
+        explicit Check(Slang_context& ctx) : ctx(ctx) {}
+        void handle(const slang::ast::AssignmentExpression& assignment) {
+          // A system task's output-argument wrapper is not a second initializer.
+          if (assignment.right().kind == ExpressionKind::EmptyArgument) {
+            return;
+          }
+          const auto* symbol = lhs_base_symbol(assignment.left());
+          if (symbol && ctx.mem_init_images_.contains(symbol)) {
+            ctx.emit_unsupported(assignment.sourceRange,
+                                 "readmem-mixed-init",
+                                 "file preload cannot be mixed with other initial assignments to the memory");
+          }
+          visitDefault(assignment);
+        }
+        void handle(const slang::ast::CallExpression& call) {
+          const auto name = call.isSystemCall() ? call.getSubroutineName() : std::string_view{};
+          if ((name == "$readmemh" || name == "$readmemb") && !ctx.readmem_calls_.contains(&call)) {
+            ctx.emit_unsupported(call.sourceRange, "readmem-placement", "file preload must be an unconditional initial statement");
+          }
+          visitDefault(call);
+        }
+      } check(*this);
+      pbs.getBody().visit(check);
+      std::function<bool(const slang::ast::Statement&)> handled = [&](const slang::ast::Statement& stmt) {
+        if (stmt.kind == StatementKind::Block) {
+          return handled(stmt.as<slang::ast::BlockStatement>().body);
+        }
+        if (stmt.kind == StatementKind::List) {
+          for (const auto* child : stmt.as<slang::ast::StatementList>().list) {
+            if (!handled(*child)) {
+              return false;
+            }
+          }
+          return true;
+        }
+        return stmt.kind == StatementKind::ExpressionStatement
+               && readmem_calls_.contains(&stmt.as<slang::ast::ExpressionStatement>().expr);
+      };
+      if (handled(pbs.getBody())) {
+        return;
+      }
       // Constant scalar-register and memory-element initialization was
       // harvested before declarations. Other initial-block behavior remains
       // outside this synthesis reader.
@@ -5764,6 +5947,7 @@ void Slang_context::lower_process(const slang::ast::ProceduralBlockSymbol& pbs) 
           "unsupported",
           "only supported constant register/memory initialization is preserved; other initial-block statements are ignored");
       return;
+    }
     case ProceduralBlockKind::Final     : return;
     case ProceduralBlockKind::AlwaysComb: lower_comb_process(pbs.getBody()); return;
     case ProceduralBlockKind::AlwaysLatch:
@@ -6768,9 +6952,10 @@ void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std
     }
     emit_attr(target.name, "reset_pin", reset_ref, true);
     emit_attr(target.name, "sync", async ? "false" : "true", false);
-    if (!edge_pos) {
-      emit_attr(target.name, "negreset", "true", false);
-    }
+    // The polarity the reader RECOGNISED (the guard / edge), always explicit:
+    // left unset, tolg's Verilog-origin `_n` naming default would turn an
+    // active-high `if (rst_n)` into an active-low reset (LEC false PROVEN).
+    emit_attr(target.name, "negreset", edge_pos ? "false" : "true", false);
   }
 }
 
@@ -6896,9 +7081,12 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
     proc_kind_ = Proc_kind::none;
     return;
   }
-  const bool negedge = clock.edge == slang::ast::EdgeKind::NegEdge;
-  const bool implicit_clk
-      = !selected_clock && !negedge && input_syms_.contains(clk_sym) && (clk_sym->name == "clk" || clk_sym->name == "clock");
+  const bool negedge      = clock.edge == slang::ast::EdgeKind::NegEdge;
+  // The implicit clock is the module's ONE clock-candidate input (a 1-bit `clk`
+  // or `clock`; user ruling 2026-09-27 (10)). With both declared it is
+  // ambiguous, so every process names its clock explicitly.
+  const bool implicit_clk = !selected_clock && !negedge && input_syms_.contains(clk_sym)
+                            && (clk_sym->name == "clk" || clk_sym->name == "clock") && clock_candidate_inputs_ <= 1;
 
   Write_collector wc;
   wc.skip_loop_controls = true;

@@ -6,14 +6,15 @@
 */
 
 // A whole-array `update` (`arr = inp`) COEXISTING with a per-entry write
-// (`arr[waddr] = wdata` under `we`). The per-entry write OVERRIDES the bulk
-// update for the entry it touches (priority: per-port write > update).
-pub mod coexist(inp:u80, waddr:u3, wdata:u10, we:bool, idx:u3) -> (r:u10@[0], allout:u80@[0]) {
-  reg arr:[8]u10 = nil
+// (`arr[waddr] = wdata` under `we`). The per-entry write comes later in program
+// order, so it wins for the entry it touches (mem_bulk_vs_entry_order has the
+// other order). The reads come first and see the committed contents.
+pub mod coexist(inp:U80, waddr:U3, wdata:U10, we:Bool, idx:U3) -> (r:U10@[0], allout:U80@[0]) {
+  reg arr:[8]U10 = nil
+  r = arr[idx]
+  allout = arr
   arr = inp
   if we {
     arr[waddr] = wdata
   }
-  r = arr[idx]
-  allout = arr
 }

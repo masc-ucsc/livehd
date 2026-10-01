@@ -1,0 +1,21 @@
+/*
+:name: generic_width_unbound
+:type: error
+:error: generic .N. of .grow. is unbound and has no default \(it sets the width of port .a.\)
+:help: declare a default
+*/
+
+// A generic-WIDTH port (`a:Unsigned(bits=N)`) whose generic has no default and
+// no `<N=...>` bind. N is a value generic that sets a port width, so it is not
+// inferred from the actual's type. The width is unknown, and the call must name
+// the generic that is missing. It used to be reported as "integer type bound
+// `max` of port `a` of `grow` is not a compile-time value once its generics are
+// bound", which blames the bound expression rather than the missing bind.
+
+comb grow<N>(a:Unsigned(bits=N)) -> (o:U16) {
+  o = a + 1
+}
+
+mod generic_width_unbound(x:U8) -> (o:U16@[0]) {
+  o = grow(a=x)  // locate_error_here
+}

@@ -1,0 +1,11 @@
+/*
+:name: typeword_clock_cast
+:type: error
+:error: `Clock\(\.\.\.\)` is not a cast
+*/
+// `Clock` is a type but not a cast: a Clock is never made from data (docs
+// 07-typesystem "Clock and Reset": no derived clocks).
+pub comb typeword_clock_cast(a:Bool) -> (o:Bool) {
+  const c = Clock(a)  // locate_error_here
+  o = a
+}

@@ -1,0 +1,15 @@
+/*
+:name: spec_calls_typed_tuple_same_type
+:type: error
+:error: must be named|ambiguous|name the|named
+*/
+
+// qa.md Appendix §8: "Typed tuple construction binds with the SAME rules as
+// calls ... Positional values for two untyped or same-typed fields are an
+// error."
+// docs 03-bundle.md: `mut t2:T2 = (1, 2)  // error: two Signed fields, name
+// them`.
+
+type T2 = (a:Signed, b:Signed)
+mut t2:T2 = (1, 2) // locate_error_here
+cassert(t2.a == 1)

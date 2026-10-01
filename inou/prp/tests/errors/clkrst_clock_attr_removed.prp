@@ -1,0 +1,12 @@
+/*
+:name: clkrst_clock_attr_removed
+:type: error
+:error: there is no `clock` attribute
+:help: declare the input `:Clock`
+*/
+// docs 04b: a clock or reset is declared with the `Clock`/`Reset` TYPE, not
+// by a `clock`/`reset` classification attribute.
+pub mod clkrst_clock_attr_removed(c:Bool, a:U8) -> (o:U8@[0]) {
+  const k::[clock] = c  // locate_error_here
+  o = a
+}

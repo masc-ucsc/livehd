@@ -276,7 +276,7 @@ formal alu.word_sext {
 // the subtractor is src1 + ~src2 + 1 over 65 bits: carry-out == no-borrow.
 formal alu.sub_borrow {
   mut acc = sub
-  assert(u1(acc.io_sub#[64]) == u1(acc.io_src#[0..=63] >= acc.io_src#[64..=127]),
+  assert(U1(acc.io_sub#[64]) == U1(acc.io_src#[0..=63] >= acc.io_src#[64..=127]),
          "subtractor carry-out == unsigned no-borrow")
 }
 ```

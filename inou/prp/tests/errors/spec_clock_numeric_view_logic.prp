@@ -1,0 +1,18 @@
+/*
+:name: spec_clock_numeric_view_logic
+:type: error
+:tolg: 1
+:error: a Clock is not data
+*/
+// SPEC (clock lane): the numeric view of a Clock (`clock < N`) is legal ONLY
+// in debug contexts (test blocks, puts, assert/cassert); in synthesizable
+// logic it is an error.
+//   qa.md Appendix 6: "the numeric view of a Clock is legal ONLY in debug
+//     contexts (test blocks, puts, assert/cassert). In synthesizable logic a
+//     Clock may only drive clock pins, a Clock_cell ... or another Clock port."
+pub mod spec_clock_numeric_view_logic(c:Clock, a:U8) -> (o:U8@[0]) {
+  o = 0
+  if c < 3 {   // locate_error_here
+    o = a
+  }
+}

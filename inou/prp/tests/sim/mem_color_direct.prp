@@ -8,12 +8,12 @@
 // array object as a scalar state-Q boundary. The existing mem_ordering_sim
 // fixture retains the harder program-order read-modify-write fallback until
 // read ports become independent plan sites.
-pub mod memcolor(wa:u2, wd:u8) -> (qo:u8@[0], qf:u8@[0]) {
-  reg oldm:[4]u8:[ordering="old"] = 0
+pub mod memcolor(wa:U2, wd:U8) -> (qo:U8@[0], qf:U8@[0]) {
+  reg oldm:[4]U8:[ordering="old"] = 0
   qo = oldm[wa]
   oldm[wa] = wd
 
-  reg fwdm:[4]u8:[ordering="fwd"] = 0
+  reg fwdm:[4]U8:[ordering="fwd"] = 0
   fwdm[wa] = wd
   qf = fwdm[wa]
 }

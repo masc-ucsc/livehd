@@ -241,6 +241,8 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
         case 9 : return "size";     // comptime x 1
         case 10: return "rdport";   // comptime x n_ports (1 rd, 0 wr)
         case 11:
+          // A string command (hlop::memory_image) instead denotes a startup
+          // file preload and externally initialized state, NEVER reset bits.
           return "initial";  // comptime x 1 -- contents (entry 0 in the low `bits`,
                              // row-major); a reg array with a bound reset restores
                              // it in ONE cycle through the `reset` pin (14) below

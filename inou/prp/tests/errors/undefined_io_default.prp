@@ -1,0 +1,18 @@
+/*
+:name: undefined_io_default
+:type: error
+:error: read of undefined variable 'ZZ'
+:help: declare it
+*/
+
+// Ruling 2026-09-28 #24 (clarification): reading a name with no accessible
+// declaration is a direct compile error at the read. A `mod` input default
+// stays in the io slot of the streamed signature, which has no statement
+// frame; any name there used to crash the compiler (SIGSEGV).
+mod addb(a:U8, b:U8 = ZZ) -> (r:U8@[0]) {  // locate_error_here
+  r = (a + b)#[0..<8]
+}
+
+pub mod undefined_io_default(a:U8) -> (r:U8@[0]) {
+  r = addb(a=a, b=a)
+}

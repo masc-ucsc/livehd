@@ -1,0 +1,13 @@
+/*
+:name: spec_calls_tuple_bare_named_field
+:type: error
+:error: kind|keyword|const|mut|declar
+*/
+
+// docs 03-bundle.md "Tuple mutability": "A named tuple field is a declaration,
+// so it must use a kind keyword: `(mut a=3)` or `(const a=3)`. Bare `(a=3)` is
+// valid as a function-call argument and as the value for an explicitly typed
+// construction, but not as a standalone tuple field declaration."
+
+const t = (a=3, b=4) // locate_error_here
+cassert(t.a == 3)

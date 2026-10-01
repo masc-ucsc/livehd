@@ -1,0 +1,22 @@
+/*
+:name: mod_default_runtime_input
+:type: error
+:error: the default of `b` reads the runtime input `a`
+:help: compile-time
+*/
+
+// User ruling 2026-09-28 (34): a `mod`/`pipe` input default must FOLD to a
+// compile-time constant -- the caller drives the omitted port with it, and a
+// module port cannot be driven from another port of the same instance. A
+// literal, a generic, a `comptime const`, an attribute read or an enum entry
+// (and arithmetic over them) are all legal (sim/mod_default_comptime_expr.prp);
+// an expression over a runtime input is not. (A `comb` default may read an
+// earlier input: the comb inlines, 06-functions.md.)
+
+mod m(a:U8, b:U8 = a + 1) -> (o:U8@[0]) {   // locate_error_here
+  wrap o = a + b
+}
+
+pub mod mod_default_runtime_input(x:U8) -> (y:U8@[0]) {
+  y = m(a=x)
+}

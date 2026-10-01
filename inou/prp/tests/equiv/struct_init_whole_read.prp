@@ -18,8 +18,8 @@
 // through its leaves, so the initializer must split whenever the var is
 // bundle-declared. Semantically the module forwards element 1's fields:
 // out = {foldpc, ev, instr} of cfVec[1].
-pub mod top(clock:u1, reset:u1,
-            io_cfVec_0_valid:u1, io_cfVec_0_bits:u14,
-            io_cfVec_1_valid:u1, io_cfVec_1_bits:u14) -> (io_out:u14@[]) {
+pub mod top(clock:U1, reset:U1,
+            io_cfVec_0_valid:U1, io_cfVec_0_bits:U14,
+            io_cfVec_1_valid:U1, io_cfVec_1_bits:U14) -> (io_out:U14@[]) {
   io_out = io_cfVec_1_bits
 }

@@ -40,7 +40,7 @@ def simulate(lhd, source, top, vectors, work):
                     "--set", "compile.formal.mode=none", "--emit-dir", "lg:" + str(graph),
                     "--workdir", str(work / "compile"), "-q"], check=True)
     lines = [f'const dut = import("lg:{top}")', 'test directed.values {',
-             '  mut acc = dut', '  mut cycle:u32 = 0',
+             '  mut acc = dut', '  mut cycle:U32 = 0',
              f'  tick {len(vectors)} {{']
     inputs = {}
     for index, vector in enumerate(vectors):

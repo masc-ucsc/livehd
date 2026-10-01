@@ -10,7 +10,7 @@
 // with no numeric envelope) reports `bits == nil`. (The `.[typename]`
 // attribute was removed — task 1f-is_typename.)
 
-type complex_t = (a:u32 = nil, b:string = "hello")
+type complex_t = (a:U32 = nil, b:String = "hello")
 
 const g:complex_t = (a=7, b="hi")
 cassert(g.a.[bits]   == 32)
@@ -20,7 +20,7 @@ cassert(g.b.[bits]   == nil)         // string field — no numeric envelope
 cassert(g.[bits]     == nil)         // poisoned by the string field
 cassert(g.[size]     == 0)
 
-const p:u8:[debug="trace", owner="alu"] = 42
+const p:U8:[debug="trace", owner="alu"] = 42
 cassert(p.[bits]  == 8)
 cassert(p.[debug] == "trace")
 cassert(p.[owner] == "alu")

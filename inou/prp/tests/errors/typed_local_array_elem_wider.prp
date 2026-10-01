@@ -1,0 +1,17 @@
+/*
+:name: typed_local_array_elem_wider
+:type: error
+:tolg: 1
+:error: `t` \(range \[0, 65535\]\) may not fit its declared range \[0, 15\]
+:help: apply a wrap/saturate policy
+*/
+// The overflow rule for a typed local fed by an array element at a runtime
+// index: the element type (u16) bounds the read, so it may not fit `t:U4`. It
+// used to compile silently, with `z` reading the whole 16-bit element.
+pub mod typed_local_array_elem_wider(x:U16, i:U2) -> (z:U16@[0]) {
+  mut arr:[4]U16 = (1, 2, 3, 4)
+  arr[0] = x
+  mut t:U4 = 0
+  t = arr[i]   // locate_error_here
+  z = t
+}

@@ -16,24 +16,24 @@ mkdir -p "$W"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 cat >"$W/ref_sub.prp" <<'EOF'
-pub comb sub(a:u8) -> (o:u8) {
+pub comb sub(a:U8) -> (o:U8) {
   assume_nocheck(a < 4)
   o = a
 }
 EOF
 cat >"$W/impl_sub.prp" <<'EOF'
-pub comb sub(a:u8) -> (o:u8) {
+pub comb sub(a:U8) -> (o:U8) {
   assume_nocheck(a < 4)
   o = a & 3
 }
 EOF
 cat >"$W/ref_top.prp" <<'EOF'
 const ref_sub = import("ref_sub")
-pub comb ref_top(a:u8) -> (o:u8) { o = ref_sub.sub(a=a).o }
+pub comb ref_top(a:U8) -> (o:U8) { o = ref_sub.sub(a=a).o }
 EOF
 cat >"$W/impl_top.prp" <<'EOF'
 const impl_sub = import("impl_sub")
-pub comb impl_top(a:u8) -> (o:u8) { o = impl_sub.sub(a=a).o }
+pub comb impl_top(a:U8) -> (o:U8) { o = impl_sub.sub(a=a).o }
 EOF
 
 if ! "$LHD" lec --ref "$W/ref_top.prp" --impl "$W/impl_top.prp" \
@@ -63,16 +63,16 @@ grep -q 'REFUTED' "$W/plain.out" \
   || { cat "$W/plain.out" >&2; fail "the no-assumption mismatch did not report REFUTED"; }
 echo "PASS: removing the assumption exposes the mismatch"
 
-# A CHECKED `assume` on a selected-top input is a different animal from the
-# assume_nocheck contract above. pass.formal cannot discharge it (a top has no
-# parent that could bind it) and promotes it to an active hypothesis anyway, so
-# that `lhd formal verify` can condition the design's OWN assertions on it. lec's
-# obligation is TWO-sided over SHARED inputs: taking the unproved promotion would
-# narrow the miter of a comparison whose ref never made the claim — `o = a & 3`
-# vs `o = a` differ at every a >= 4 and would come back "PROVEN equivalent" with
-# exit 0. lec must refuse instead, and name the spellings that DO constrain it.
+# A plain `assume` on a selected-top input is a different animal from the
+# assume_nocheck contract above: every plain assume is CHECKED (docs
+# 05-assert), and over a free top input it refutes -- pass.formal reports
+# assume-refuted and it never becomes a hypothesis. lec's obligation is
+# TWO-sided over SHARED inputs: taking an unproved claim would narrow the miter
+# of a comparison whose ref never made it -- `o = a & 3` vs `o = a` differ at
+# every a >= 4 and would come back "PROVEN equivalent" with exit 0. lec must
+# compare the full input space instead and REFUTE.
 cat >"$W/uncheckable.prp" <<'EOF'
-pub comb dut(a:u8) -> (o:u8) {
+pub comb dut(a:U8) -> (o:U8) {
   assume(a < 4)
   o = a & 3
 }
@@ -85,15 +85,29 @@ EOF
 if "$LHD" lec --ref "$W/golden.v" --impl "$W/uncheckable.prp" --top dut \
      --workdir "$W/uncheckable_w" >"$W/uncheckable.out" 2>&1; then
   cat "$W/uncheckable.out" >&2
-  fail "an undischarged top IO assume must never become a LEC hypothesis"
+  fail "a refuted top IO assume must never become a LEC hypothesis"
 fi
-grep -q 'never discharged' "$W/uncheckable.out" \
-  || { cat "$W/uncheckable.out" >&2; fail "the refusal must say the assume was never discharged"; }
+grep -q '"code":"assume-refuted"' "$W/uncheckable.out" \
+  || { cat "$W/uncheckable.out" >&2; fail "the plain top IO assume must be checked and refuted"; }
 grep -q 'assume_nocheck' "$W/uncheckable.out" \
-  || { cat "$W/uncheckable.out" >&2; fail "the refusal must name the sanctioned spelling"; }
-echo "PASS: lec refuses an undischarged top IO assume instead of proving under it"
+  || { cat "$W/uncheckable.out" >&2; fail "the refute must name the sanctioned spelling"; }
+grep -q "^lec: .* REFUTED" "$W/uncheckable.out" \
+  || { cat "$W/uncheckable.out" >&2; fail "lec must compare the full input space and refute"; }
+# The same on the --ref side, which is lowered FIRST: its assume-refuted is a
+# deferred error (it fails the run) and must not abort the impl side's
+# lowering before lec has compared the two.
+if "$LHD" lec --ref "$W/uncheckable.prp" --impl "$W/golden.v" --top dut \
+     --workdir "$W/uncheckable_ref_w" >"$W/uncheckable_ref.out" 2>&1; then
+  cat "$W/uncheckable_ref.out" >&2
+  fail "a refuted top IO assume on the ref side must never become a LEC hypothesis"
+fi
+grep -q '"code":"assume-refuted"' "$W/uncheckable_ref.out" \
+  || { cat "$W/uncheckable_ref.out" >&2; fail "the ref side's plain top IO assume must be checked and refuted"; }
+grep -q "^lec: .* REFUTED" "$W/uncheckable_ref.out" \
+  || { cat "$W/uncheckable_ref.out" >&2; fail "lec must compare the full input space and refute with the assume on the ref side"; }
+echo "PASS: lec checks a plain top IO assume instead of proving under it (either side)"
 
-# ...and the refusal is about the missing DISCLOSURE, not about assumptions in
+# ...and the refute is about the missing CONTRACT, not about assumptions in
 # lec: either sanctioned spelling of the same constraint still narrows the miter
 # and proves it (a & 3 == a for every a < 4).
 sed 's/assume(/assume_nocheck(/' "$W/uncheckable.prp" >"$W/contracted.prp"
@@ -117,7 +131,7 @@ echo "PASS: both sanctioned spellings still constrain the miter"
 # two explicit constraints whose conjunction is empty may not be laundered by
 # the hierarchy's no-solver structural-identity shortcut.
 cat >"$W/contra_top.prp" <<'EOF'
-pub comb contra_top(a:u8) -> (o:u8) {
+pub comb contra_top(a:U8) -> (o:U8) {
   assume_nocheck(a < 4)
   assume_nocheck(a >= 4)
   o = a

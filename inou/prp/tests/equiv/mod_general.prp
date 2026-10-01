@@ -22,7 +22,7 @@
 // where truncated and floored disagree, and it is invisible in the other two.
 // There is ONE op and no unsigned flavour: every LNAST/LGraph value is signed
 // and unsigned is just the non-negative subset.
-pub comb foo(a:u8, b:u8, s:s8) -> (rr:u8, r5:u3, rs:s8) {
+pub comb foo(a:U8, b:U8, s:S8) -> (rr:U8, r5:U3, rs:S8) {
   rr = a % b     // RUNTIME divisor  (was `mod-runtime-divisor`)
   r5 = a % 5     // non-power-of-two (was `mod-unsupported-divisor`)
   rs = s % 8     // possibly-NEGATIVE dividend (was `mod-signed-dividend`)

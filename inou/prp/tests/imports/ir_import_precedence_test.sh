@@ -38,19 +38,19 @@ mkdir -p "$W/main" "$W/altln" "$W/altlg"
 
 # The importer, plus the sibling definition importer-directory discovery finds.
 cat > "$W/main/lib_thing.prp" <<'EOF'
-pub mod thing(a:u8) -> (o:u8@[0]) { o = a }
+pub mod thing(a:U8) -> (o:U8@[0]) { o = a }
 EOF
 cat > "$W/main/use.prp" <<'EOF'
 const lib_thing = import("lib_thing")
-pub mod use_top(a:u8) -> (o:u32@[0]) { o = lib_thing.thing(a=a).o }
+pub mod use_top(a:U8) -> (o:U32@[0]) { o = lib_thing.thing(a=a).o }
 EOF
 
 # Same unit name, deliberately different definitions, built into IR artifacts.
 cat > "$W/altln/lib_thing.prp" <<'EOF'
-pub mod thing(a:u8) -> (o:u16@[0]) { o = a }
+pub mod thing(a:U8) -> (o:U16@[0]) { o = a }
 EOF
 cat > "$W/altlg/lib_thing.prp" <<'EOF'
-pub mod thing(a:u8) -> (o:u32@[0]) { o = a }
+pub mod thing(a:U8) -> (o:U32@[0]) { o = a }
 EOF
 
 $LHD compile "$W/altln/lib_thing.prp" --emit-dir "ln:$W/LN" --workdir "$W/w_ln" -q \

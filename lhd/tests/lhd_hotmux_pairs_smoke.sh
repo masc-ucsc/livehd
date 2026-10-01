@@ -30,10 +30,10 @@ endmodule
 VERILOG
 "$LHD" lec --impl "lg:$W/lg" --ref "verilog:$W/ref.v" --impl-top pairs.dec --ref-top dec --workdir "$W/lec"
 # Overlapping controls that CAN change the result must reach pass.formal. The
-# arms differ on purpose: identical arms collapse in cprop (see the ruling
-# below), which would take the obligation with them.
+# arms differ here; identical arms keep the obligation too (see the ruling
+# below).
 cat > "$W/overlap.prp" <<'PRP'
-pub comb overlap(x:u2, a:u8, b:u8) -> (res:u8) {
+pub comb overlap(x:U2, a:U8, b:U8) -> (res:U8) {
   mut res = a
   unique if x == 0 { res = a }
   elif x < 2 { res = b }
@@ -47,7 +47,7 @@ grep -q 'onehot-violated' "$W/overlap.jsonl"
 
 # The same exclusivity contract applies to match.
 cat > "$W/overlap_match.prp" <<'PRP'
-pub comb overlap_match(x:u2, a:u8, b:u8, c:u8) -> (res:u8) {
+pub comb overlap_match(x:U2, a:U8, b:U8, c:U8) -> (res:U8) {
   mut res = a
   match x {
     == 1 { res = a }
@@ -63,23 +63,23 @@ if "$LHD" compile "$W/overlap_match.prp" --workdir "$W/overlap-match" \
 fi
 grep -q 'onehot-violated' "$W/overlap-match.jsonl"
 
-# RULING: identical arms collapse, for a Hotmux exactly as for a Mux. An overlap
-# that CANNOT change the result is not worth a decode cone plus its own ABC
-# region, so cprop drops the cell and the one-hot obligation goes with it. This
-# is the same design as overlap.prp above with one value instead of two: it must
-# compile clean, report nothing, and leave no hotmux behind.
+# RULING (muxopt.md, pass/cprop/README.md): equal data alone is not a proof of
+# exclusivity, so identical arms do NOT erase an unproven `unique if` overlap.
+# This is overlap.prp above with one value instead of two: the one-hot
+# obligation survives cprop and the compile must still report the overlap.
 cat > "$W/identical.prp" <<'PRP'
-pub comb identical(x:u2, a:u8) -> (res:u8) {
+pub comb identical(x:U2, a:U8) -> (res:U8) {
   mut res = a
   unique if x == 0 { res = a }
   elif x < 2 { res = a }
 }
 PRP
-"$LHD" compile "$W/identical.prp" --workdir "$W/identical" \
-    --emit "diagnostics:$W/identical.jsonl" --emit-dir "lg:$W/identical-lg"
-! grep -q 'onehot' "$W/identical.jsonl"
-"$LHD" tool cat "lg:$W/identical-lg" --diag-fmt pretty > "$W/identical.txt"
-! grep -q 'hotmux' "$W/identical.txt"
+if "$LHD" compile "$W/identical.prp" --workdir "$W/identical" \
+    --emit "diagnostics:$W/identical.jsonl" --emit-dir "lg:$W/identical-lg"; then
+  echo 'overlapping identical-arm controls unexpectedly compiled' >&2
+  exit 1
+fi
+grep -q 'onehot-violated' "$W/identical.jsonl"
 
 # Exercise the same value/default selection in both generated simulators.
 sed 's/hotmux_unique.dec/pairs.dec/' inou/prp/tests/equiv/hotmux_unique_tb.prp > "$W/pairs_tb.prp"

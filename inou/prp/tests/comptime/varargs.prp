@@ -5,18 +5,17 @@
 :verifier_fail: 0
 */
 
-// Task 1p — var-args `comb` templates inline at the call site. The leftover
-// actuals gather into the var-arg param: positional → `args[i]`, named →
-// `args.NAME`. The count is comptime-known, so indexed/named reads fold.
+// Ordinary tuple parameters accept positional tuple shorthand; trailing
+// captures accept named leftovers. Both inline at the call site.
 
-comb add1(...x) -> (r) { r = x[0] + x[1] + x[2] }        // all-positional var-args
-comb g(base, ...rest) -> (r) { r = base + rest[0] + rest[1] }  // fixed leading + var-args tail
+comb add1(x) -> (r) { r = x[0] + x[1] + x[2] }        // ordinary tuple argument
+comb g(base, ...rest) -> (r) { r = base + rest.lo + rest.hi }  // fixed leading + var-args tail
 comb ff(...args) -> (r) { r = args.lo + args.hi }        // named leftovers
-comb h(...xs) -> (r) { r = xs[0] }                       // variable gather count
+comb h(xs) -> (r) { r = xs[0] }                       // variable tuple length
 
 const a = add1(1, 2, 3)
 cassert(a == 6)
-const b = g(10, 20, 30)
+const b = g(base=10, lo=20, hi=30)
 cassert(b == 60)
 const c = ff(lo=4, hi=5)
 cassert(c == 9)

@@ -1,0 +1,16 @@
+/*
+:name: spec_syntax_destructure_decl
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// qa.md Appendix §7: "Destructuring: legal = ... declarations `const (a=f.xx, b=f.yy) = f()`,
+// `const (p1, p2) = two(...)`." (Q29 item 2).
+comb f() -> (xx, yy) { xx = 1; yy = 2 }
+comb two(a) -> (p1, p2) { p1 = a; p2 = a + 1 }
+
+const (a=f.xx, b=f.yy) = f()
+const (p1, p2) = two(a=5)
+
+cassert(a == 1 and b == 2)
+cassert(p1 == 5 and p2 == 6)

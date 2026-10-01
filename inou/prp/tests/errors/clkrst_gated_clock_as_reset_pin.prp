@@ -1,0 +1,14 @@
+/*
+:name: clkrst_gated_clock_as_reset_pin
+:type: error
+:tolg: 1
+:error: the gated clock `Clock\(clock_pin=clk, ...\)` is a `Clock` used as a register reset
+*/
+// docs 04b: `reset_pin` takes a `Reset` or a `Bool`, never a `Clock` -- a gated
+// one included.
+pub mod clkrst_gated_clock_as_reset_pin(clk:Clock, en:Bool, d:U8) -> (q:U8@[1]) {
+  const g = Clock(clock_pin=clk, enable=en)
+  reg f:U8:[clock_pin=g, reset_pin=g] = 0   // locate_error_here
+  f = d
+  q = f
+}

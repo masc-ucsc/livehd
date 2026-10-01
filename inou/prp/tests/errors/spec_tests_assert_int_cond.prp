@@ -1,0 +1,27 @@
+/*
+:name: spec_tests_assert_int_cond
+:type: error
+:error: (boolean|Bool)
+*/
+// Spec: docs 09-verification "Edge-sensitive reads": "work anywhere a boolean
+// is expected: a wait's `if` or an `assert`"; docs 04-variables "Boolean":
+// "Booleans can not mix with integers in expressions unless there is an
+// explicit typecast"; ruling 20: "Strict bool applies INSIDE `test` blocks
+// too".
+//
+// Rule pinned: an `assert` condition in a test is a Bool; asserting an
+// INTEGER instance output (`assert(d.o)` with `o:U8`) is an error (write
+// `assert(d.o != 0)`).
+
+mod spec_aic_pass(a:U8) -> (o:U8@[0]) {
+  o = a
+}
+
+test spec_aic.assert_int {
+  mut d = spec_aic_pass
+  tick 3 {
+    d.a = 5
+    step
+    assert(d.o)          // locate_error_here
+  }
+}

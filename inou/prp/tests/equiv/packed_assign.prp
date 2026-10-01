@@ -18,8 +18,8 @@
 // (which uses yosys read_verilog) and is reproduced instead
 // by prp-yvr-packed_assign (the yosys-verilog read fails outright). `--reader
 // slang` and `--reader yosys-slang` read the `'{...}` pattern fine.
-pub comb pa(sel:u2) -> (z:u4) {
-  mut g:[4]u4 = (0, 0, 0, 0)   // mut-array init must be comptime; fill at runtime
+pub comb pa(sel:U2) -> (z:U4) {
+  mut g:[4]U4 = (0, 0, 0, 0)   // mut-array init must be comptime; fill at runtime
   g[0] = 1
   g[1] = 8
   g[2] = 4

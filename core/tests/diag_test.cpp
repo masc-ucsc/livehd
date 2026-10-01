@@ -21,7 +21,7 @@ Diagnostic make_error() {
                     .code     = "range-fit",
                     .category = "type",
                     .pass     = "upass.attributes",
-                    .message  = "value -1 does not fit unsigned type u8 [0,255]",
+                    .message  = "value -1 does not fit unsigned type U8 [0,255]",
                     .hint     = "use an explicit bit-select e#[0..=7]"};
 }
 

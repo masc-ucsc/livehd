@@ -1,0 +1,24 @@
+/*
+:name: spec_parsers_fmt_shorthand_safe
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+// qa.md Q1 (prpfmt same-name shorthand `f(x=x)` -> `f(x)`): "Keep it, make it
+// safe -- Shorten only when the callee is a local, non-overloaded, non-self
+// lambda that declares that parameter; treat a shorthand item as named (key =
+// its name) when sorting."
+//
+// The comptime harness checks this file as written and again after
+// `lhd pyrope fmt`, so every call below must mean the same thing after the
+// formatter shortens (`m(b=b, a=a)` -> `m(a, b)`) or keeps (`one(y=y)`, whose
+// callee has no `y`) the arguments. The results are order-sensitive.
+comb m(a:U4, b:U4) -> (r:U8) { r = a*16 + b }
+comb one(x:U4) -> (r:U4) { r = x }
+const a:U4 = 1
+const b:U4 = 2
+const x:U4 = 5
+cassert(m(b=b, a=a) == 0x12)
+cassert(m(a=b, b=a) == 0x21)
+cassert(m(b=b, a=3) == 0x32)
+cassert(one(x=x) == 5)

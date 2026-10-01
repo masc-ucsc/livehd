@@ -1,0 +1,36 @@
+/*
+:name: spec_tests_clock_debug_view
+:type: simulation
+*/
+// Spec (qa.md appendix section 6): "the numeric view of a Clock is legal ONLY
+// in debug contexts (test blocks, puts, assert/cassert)"; "upass must not fold
+// `clock < N` (debug-only reads are not u1-range values)". docs 05b "Running
+// cycles (tick)": "A test is a debug context, so the numeric view of `clock`
+// is legal there: use it in `puts`, `assert`, and to drive inputs".
+//
+// Rule pinned: inside a tick the minted `clock` may be printed, asserted on,
+// compared (`==`, `>=`) and used as a data value (`acc.din = clock`), and
+// none of those comparisons is folded as if `clock` were a 1-bit value.
+
+mod spec_cdv_acc(din:U8) -> (sum:U32@[0]) {
+  reg total:U32 = 0
+  sum = total
+  wrap total = total + din
+}
+
+test spec_cdv.debug_view {
+  mut acc  = spec_cdv_acc
+  mut hits = 0
+  mut big  = 0
+  tick 12 {
+    puts("cycle {clock}")
+    assert(clock < 12, "clock is the 0-based cycle index")
+    if clock == 9 { hits += 1 }       // not folded: 9 > 1-bit range
+    if clock >= 3 { big += 1 }        // not folded to false
+    acc.din = clock                    // numeric view drives a data input
+    step
+  }
+  assert(hits == 1)
+  assert(big == 9)
+  assert(acc.sum == 66)                // 0 + 1 + ... + 11
+}

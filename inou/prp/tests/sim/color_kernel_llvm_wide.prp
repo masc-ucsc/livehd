@@ -4,7 +4,7 @@
 */
 // A 130-bit boundary forces three packed ABI limbs. Keep high bits live across
 // arithmetic, shifts, and bitwise operations so truncation to uint64_t fails.
-pub mod llvm_wide(d:u130, e:u130) -> (result:u130@[0]) {
+pub mod llvm_wide(d:U130, e:U130) -> (result:U130@[0]) {
   const rotated = (d << 79) | (d >> 51)
   result = ((rotated + e) ^ (e << 113))#[0..=129]
 }

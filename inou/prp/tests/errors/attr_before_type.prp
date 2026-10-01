@@ -4,9 +4,9 @@
 :error: end the statement
 */
 
-// A write-side attribute bracket comes AFTER the type: `p:u8:[debug="x"]`.
-// The old `p::[debug="x"] :u8` ordering no longer parses; without this check
-// the recovery would silently drop the `:u8` type.
+// A write-side attribute bracket comes AFTER the type: `p:U8:[debug="x"]`.
+// The old `p::[debug="x"] :U8` ordering no longer parses; without this check
+// the recovery would silently drop the `:U8` type.
 
-const p::[debug="trace"] :u8 = 42 // locate_error_here
+const p::[debug="trace"] :U8 = 42 // locate_error_here
 cassert(p == 42)

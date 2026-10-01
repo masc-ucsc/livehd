@@ -1,0 +1,26 @@
+/*
+:name: generic_inst_output_local_wider
+:type: error
+:tolg: 1
+:error: argument .a. \(range \[0, 255\]\) in call to .low4m. may not fit its declared range \[0, 15\]
+:help: an argument never narrows implicitly
+*/
+// Overflow-lane follow-up (user rulings 2026-09-27, 1 and 16): an instance
+// output copied into a local keeps the callee port's declared range, also when
+// that port is GENERIC-width (`o:Unsigned(bits=N)`) -- its range is the one this
+// call's binds give it (N=8 -> [0, 255]). The destructured `o` below is a u8,
+// so binding it to `a:U4` is the same compile error as a u8 variable
+// (errors/mod_arg_instance_output_wider.prp). Before, the specialized child's
+// output read as unbounded and the argument check had nothing to judge.
+mod pass_n<N>(a:Unsigned(bits=N)) -> (o:Unsigned(bits=N)@[0]) {
+  o = a
+}
+
+mod low4m(a:U4) -> (o:U4@[0]) {
+  o = a
+}
+
+pub mod generic_inst_output_local_wider(x:U8) -> (y:U4@[0]) {
+  const (o) = pass_n<N=8>(a=x)
+  y = low4m(a=o)   // locate_error_here
+}

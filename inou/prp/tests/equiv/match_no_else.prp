@@ -10,7 +10,7 @@
 // unreachable don't-care: the Hotmux simply carries no trailing default port,
 // and the all-controls-zero case (which cannot happen here) reads 0.
 // This is LEC-equivalent to the explicit four-way case in the golden Verilog.
-pub comb msel(x:u2, a:u8, b:u8, c:u8, d:u8) -> (res:u8) {
+pub comb msel(x:U2, a:U8, b:U8, c:U8, d:U8) -> (res:U8) {
   res = match x {
     == 0 { a }
     == 1 { b }

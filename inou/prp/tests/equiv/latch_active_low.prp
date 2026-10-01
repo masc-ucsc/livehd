@@ -20,8 +20,8 @@
 // disagreement between the two is the "posclk double-negation" miscompile that a
 // symmetric before/after gate cannot see (hence the cross-model gating rule).
 // This pair is the regression guard for that change.
-pub mod llow8(clk:bool, d:u8) -> (q:u8@[0]) {
-  reg l:u8:[latch=true]
+pub mod llow8(clk:Bool, d:U8) -> (q:U8@[0]) {
+  reg l:U8:[latch=true]
   if !clk {
     l = d
   }

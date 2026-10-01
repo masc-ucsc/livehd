@@ -1,0 +1,37 @@
+/*
+:name: spec_clock_debug_view_no_fold
+:type: simulation
+*/
+// SPEC (clock lane): the numeric view of a Clock is its CYCLE COUNT and must
+// not be folded from the 1-bit view (`clock < 3` is not always true).
+//   qa.md Appendix 6: "upass must not fold `clock < N` (debug-only reads are
+//     not u1-range values)."
+//   qa.md Q25 answer: "you can compare `clock < 1000` but this a
+//     debug/simulation thing only (but it can not be optimized away in upass as
+//     always true because u1)."
+//   qa.md Appendix 8: "Test clock: each `tick` block gets a MINTED
+//     `clock:Clock`. Its counter is the tick's cycle index (0-based)"
+// The tick's minted `clock:Clock` read in the test (a debug context): `early`
+// must be true on cycles 0..2 only. Folded as always-true it would disagree
+// with the DUT counter from cycle 3 on. (A design-body `assert(c < 3)` can not
+// pin this: `lhd sim` does not run design-body asserts yet, docs 05-assert.)
+pub mod spec_clock_debug_view_no_fold(c:Clock, en:Bool) -> (q:U8@[0]) {
+  reg cnt:U8 = 0
+  if en { wrap cnt = cnt + 1 }
+  q = cnt
+}
+
+test spec_clock_debug_view_no_fold.counts {
+  mut t    = spec_clock_debug_view_no_fold
+  mut bad  = 0
+  mut late = 0
+  tick 8 {
+    t.en = true
+    const early = clock < 3
+    if !early { late += 1 }
+    step
+    if early != (t.q < 4) { bad += 1 }   // after step k the counter is k+1
+  }
+  assert(bad == 0)
+  assert(late == 5)
+}

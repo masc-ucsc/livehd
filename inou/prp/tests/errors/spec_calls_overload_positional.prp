@@ -1,0 +1,19 @@
+/*
+:name: spec_calls_overload_positional
+:type: error
+:error: ambiguous|must be named|no lambda|no overload|no candidate|name
+*/
+
+// docs 06-functions.md: a call through an overload set "can accept" a
+// candidate "using the SAME argument rules as a direct call (so same-kind
+// positional args must still be named); if no candidate matches it is a
+// compile error".
+// docs 07b-structtype.md: `const bad = f1(1, 2) // error: untyped positional
+// arguments are ambiguous`.
+
+comb f1_ab(a, b) -> (r) { r = a + b + 100 }
+comb f1_xy(x, y) -> (r) { r = x + y + 200 }
+const f1 = [f1_ab, f1_xy]
+
+cassert(f1(a=1, b=2) == 103)
+const bad = f1(1, 2) // locate_error_here

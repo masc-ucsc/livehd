@@ -12,11 +12,11 @@
 // bitwidth's per-var write-site map (note_write_site), which lets even the
 // end_run deferred envelope check point at the offending store line.
 
-mut v8:s8 = -1
+mut v8:S8 = -1
 const ones = v8 | 0xff
 
-//mut c_ok:u8 = nil
+//mut c_ok:U8 = nil
 //wrap c_ok = ones
 //cassert(c_ok == 255)
 
-const c:u8 = ones  // locate_error_here
+const c:U8 = ones  // locate_error_here

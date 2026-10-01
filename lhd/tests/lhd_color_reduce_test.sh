@@ -27,7 +27,7 @@ run() { "$LHD" "$@" -q --result-json "$W/r.json" || fail "$* -> $(cat "$W/r.json
 # Three copies of the same 6-node cone on distinct inputs. The cone is bigger
 # than the min_nodes floor (4) and repeats exactly min_count (3) times.
 cat > "$W/red3.prp" <<'EOF'
-mod top(a:u8, b:u8, c:u8, d:u8, e:u8, f:u8) -> (x:u8@[0], y:u8@[0], z:u8@[0]) {
+mod top(a:U8, b:U8, c:U8, d:U8, e:U8, f:U8) -> (x:U8@[0], y:U8@[0], z:U8@[0]) {
   wrap x = ((a ^ b) + (a & b)) ^ (a | b)
   wrap y = ((c ^ d) + (c & d)) ^ (c | d)
   wrap z = ((e ^ f) + (e & f)) ^ (e | f)
@@ -63,7 +63,7 @@ echo "PASS: reduce is idempotent"
 # except for one literal collapse to one def with a const input port, each site
 # feeding its own value -- and the function is untouched.
 cat > "$W/redc.prp" <<'EOF'
-mod top(a:u8, b:u8, c:u8, d:u8, e:u8, f:u8) -> (x:u8@[0], y:u8@[0], z:u8@[0]) {
+mod top(a:U8, b:U8, c:U8, d:U8, e:U8, f:U8) -> (x:U8@[0], y:U8@[0], z:U8@[0]) {
   wrap x = ((a ^ b) + (a & b)) ^ (a | 12)
   wrap y = ((c ^ d) + (c & d)) ^ (c | 13)
   wrap z = ((e ^ f) + (e & f)) ^ (e | 14)

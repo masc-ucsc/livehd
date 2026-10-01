@@ -15,8 +15,8 @@
 // Every check below is a value that does NOT fit 64 bits, so each one fails on
 // the old plane and passes on this one.
 
-pub mod wide_reg(clk:bool, din:u97, we:bool) -> (dout:u97@[0], low:u32@[0]) {
-  reg r:u97 = 0
+pub mod wide_reg(clk:Clock, din:U97, we:Bool) -> (dout:U97@[0], low:U32@[0]) {
+  reg r:U97 = 0
   dout = r
   low  = r@[0]#[0..=31]
   if we { r = din }
@@ -27,7 +27,7 @@ pub mod wide_reg(clk:bool, din:u97, we:bool) -> (dout:u97@[0], low:u32@[0]) {
 // (it would read back only the low half) and cannot compare it either.
 test wide_reg.roundtrip {
   mut acc = wide_reg
-  mut got:u97 = 0
+  mut got:U97 = 0
   tick 4 {
     acc.we  = true
     acc.din = 0x1_0000_0000_0000_0000_0000_1234
@@ -45,8 +45,8 @@ test wide_reg.roundtrip {
 // a shift moves bits ABOVE 64 and they are still there afterwards.
 test wide_reg.arithmetic {
   mut acc = wide_reg
-  mut shifted:u97 = 0
-  mut summed:u97  = 0
+  mut shifted:U97 = 0
+  mut summed:U97  = 0
   tick 2 {
     acc.we  = true
     acc.din = 1
@@ -65,10 +65,10 @@ test wide_reg.arithmetic {
 test wide_reg.mixed_widths {
   mut acc = wide_reg
   mut lo = 0
-  mut hi:u97 = 0
+  mut hi:U97 = 0
   tick 2 {
     acc.we  = true
-    acc.din = 0x1_0000_0000_0000_0000_ABCD_0001  // bit 96 is the top bit of u97
+    acc.din = 0x1_0000_0000_0000_0000_ABCD_0001  // bit 96 is the top bit of U97
     step
     lo = acc.low
     hi = acc.dout
@@ -92,7 +92,7 @@ test wide_reg.bit_select {
     acc.we  = true
     acc.din = 0x1_DEAD_BEEF_0000_0000_0000_0007
     step
-    top = acc.dout#[96..=96]     // the top bit of u97
+    top = acc.dout#[96..=96]     // the top bit of U97
     mid = acc.dout#[64..=79]     // a field straddling the old 64-bit boundary
     bit = acc.dout#[2]           // a single bit, no range
   }

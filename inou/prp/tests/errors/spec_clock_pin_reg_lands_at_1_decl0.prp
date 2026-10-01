@@ -1,0 +1,16 @@
+/*
+:name: spec_clock_pin_reg_lands_at_1_decl0
+:type: error
+:tolg: 1
+:error: 'q' in .* lands at cycle\(s\) \(1,1\) but \(0,0\) is declared
+*/
+// SPEC (clock lane): an explicit `clock_pin` does not make a body register
+// cycle-0 state: `f = d` lands at @[1], so declaring `q` @[0] is an error
+// (the passing twin is pyrope/spec_clock_pin_reg_lands_at_1.prp).
+//   ruling 83 (qa Q28): "ruling 54's "@[0] state" exemption for explicit-pin
+//     regs is REVOKED"
+pub mod spec_clock_pin_reg_lands_at_1_decl0(ca:Clock, cb:Clock, d:U8) -> (q:U8@[0]) {
+  reg f:U8:[clock_pin=ca] = 0   // locate_error_here
+  f = d
+  q = f
+}

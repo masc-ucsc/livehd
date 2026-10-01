@@ -1,0 +1,11 @@
+/*
+:name: spec_types_typeword_cast_bitsel
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// SPEC qa.md appendix section 1: "`U8(x)#[0]` (bit-select of a cast result)". docs 04-variables:
+// "cassert(U8(6)#[1] == 1)"; docs 07-typesystem: "mut x:U8 = 0x0F / cassert(U8(x)#[0] == 1)".
+mut x:U8 = 0x0F
+cassert(U8(x)#[0] == 1)
+cassert(U8(6)#[1] == 1)

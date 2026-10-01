@@ -1,0 +1,31 @@
+/*
+:name: spec_tests_tick_two_steps
+:type: error
+:error: step
+*/
+// Spec: docs 05b "Running cycles (tick)": "`tick N { stmts }   // run up to N
+// cycles; one `step` (clock edge) per iteration`"; "Each `tick` iteration is
+// **one cycle**"; "there is exactly one `step` per iteration". qa.md appendix
+// section 8: the tick's minted clock "counter is the tick's cycle index
+// (0-based) and `step` advances it"; section 6: in simulation a Clock "is a
+// CYCLE counter (rising edges)".
+//
+// Rule pinned: a tick iteration with TWO `step`s is rejected (it would run 2N
+// edges for `tick N`, and the minted `clock` -- one count per iteration --
+// would stop matching the number of rising edges).
+
+mod spec_tts_cnt(en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_tts.two_steps {
+  mut d = spec_tts_cnt
+  tick 4 {
+    d.en = true
+    step
+    step                 // locate_error_here
+  }
+  assert(d.q == 4)
+}

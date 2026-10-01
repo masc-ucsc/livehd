@@ -1,0 +1,7 @@
+// Imported by comb_loop_import_mealy.prp: a MEALY child. `q` depends on `d`
+// combinationally (through the xor), not only through the register `r`.
+pub mod st(en:Bool, d:U4) -> (q:U4@[0]) {
+  reg r:U4 = 8
+  if en { r = d }
+  q = r ^ d
+}

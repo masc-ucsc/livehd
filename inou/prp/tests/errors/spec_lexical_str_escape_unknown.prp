@@ -1,0 +1,8 @@
+/*
+:name: spec_lexical_str_escape_unknown
+:type: error
+:error: invalid escape ..q
+*/
+// qa.md appendix 8: "`\{`, `\}` and every other `\c` are errors". docs
+// 02-basics: "Any other `\c` is an error."
+const s = "a\qb"   // locate_error_here

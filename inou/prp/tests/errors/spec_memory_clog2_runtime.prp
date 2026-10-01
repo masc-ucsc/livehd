@@ -1,0 +1,15 @@
+/*
+:name: spec_memory_clog2_runtime
+:type: error
+:tolg: 1
+:error: std\.clog2
+*/
+
+// SPEC (qa.md appendix section 5, Memories):
+//   "`std.clog2(x)` exists (comptime; ... x<=0 or runtime x is an error)."
+// Rule encoded here: a RUNTIME argument (a mod input) is a compile error; clog2
+// sizes types, it is not a priority encoder.
+
+pub mod spec_memory_clog2_runtime(n:U8) -> (w:U8@[0]) {
+  w = std.clog2(n)   // locate_error_here
+}

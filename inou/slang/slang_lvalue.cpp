@@ -6,6 +6,9 @@
 // member access, concatenation (MSB-first split of the RHS), memory element
 // write - instead of a fixed three-case switch.
 
+#include <algorithm>
+#include <bit>
+
 #include "absl/strings/str_cat.h"
 #include "slang/ast/ASTVisitor.h"
 #include "slang/ast/expressions/AssignmentExpressions.h"
@@ -56,7 +59,135 @@ struct Self_field_read_collector : public slang::ast::ASTVisitor<Self_field_read
     visitDefault(ma);
   }
 };
+
+// `if in_range { ... }` around every statement emitted while it lives; nothing
+// when `in_range` is empty (an address that is always in range).
+class If_in_range {
+public:
+  If_in_range(Lnast_builder& b, const std::string& in_range) : b_(b), open_(!in_range.empty()) {
+    if (open_) {
+      auto guard = b_.create_if_stmt(false);
+      b_.add_if_cond(guard, in_range);
+      b_.push_stmts(b_.add_if_stmts(guard));
+    }
+  }
+  ~If_in_range() {
+    if (open_) {
+      b_.pop_stmts();
+    }
+  }
+  If_in_range(const If_in_range&)            = delete;
+  If_in_range& operator=(const If_in_range&) = delete;
+
+private:
+  Lnast_builder& b_;
+  bool           open_;
+};
+
+// `bounds` of `v` mapped through `bias + sign * v` (sign = +1 or -1).
+std::optional<std::pair<int64_t, int64_t>> affine_bounds(const std::optional<std::pair<int64_t, int64_t>>& bounds, int64_t bias,
+                                                         int sign) {
+  if (!bounds) {
+    return std::nullopt;
+  }
+  return sign > 0 ? std::pair{bias + bounds->first, bias + bounds->second} : std::pair{bias - bounds->second, bias - bounds->first};
+}
+
+// `bounds` scaled by a positive `stride` (nullopt on overflow).
+std::optional<std::pair<int64_t, int64_t>> scaled_bounds(const std::optional<std::pair<int64_t, int64_t>>& bounds, int64_t stride) {
+  std::pair<int64_t, int64_t> out;
+  if (!bounds || __builtin_mul_overflow(bounds->first, stride, &out.first)
+      || __builtin_mul_overflow(bounds->second, stride, &out.second)) {
+    return std::nullopt;
+  }
+  return out;
+}
 }  // namespace
+
+// A Verilog index is often a 32-bit expression over a narrow variable (`k*8`,
+// `{k, 3'b000}`, `b - 1`), so its type alone puts the position far past what
+// it selects on either side. Every subexpression is computed exactly, then
+// kept only when it fits its own type (a result that may wrap takes the whole
+// type range).
+std::optional<std::pair<int64_t, int64_t>> Slang_context::selector_bounds(const slang::ast::Expression& e) {
+  using slang::ast::BinaryOperator;
+  using Bounds    = std::pair<__int128, __int128>;
+  const auto bits = static_cast<int64_t>(e.type->getBitWidth());
+  if (!e.type->isIntegral() || bits <= 0 || bits >= 62) {
+    return std::nullopt;
+  }
+  const Bounds full = e.type->isSigned() ? Bounds{-(__int128{1} << (bits - 1)), (__int128{1} << (bits - 1)) - 1}
+                                         : Bounds{0, (__int128{1} << bits) - 1};
+  const auto   sub  = [&](const slang::ast::Expression& x) -> std::optional<Bounds> {
+    if (auto b = selector_bounds(x)) {
+      return Bounds{b->first, b->second};
+    }
+    return std::nullopt;
+  };
+  const auto exact = [&]() -> std::optional<Bounds> {
+    if (auto c = try_eval_int(e)) {
+      return Bounds{*c, *c};
+    }
+    switch (e.kind) {
+      case ExpressionKind::Conversion   : return sub(e.as<slang::ast::ConversionExpression>().operand());
+      case ExpressionKind::ConditionalOp: {
+        const auto& ce = e.as<slang::ast::ConditionalExpression>();
+        const auto  l  = sub(ce.left());
+        const auto  r  = sub(ce.right());
+        if (!l || !r) {
+          return std::nullopt;
+        }
+        return Bounds{std::min(l->first, r->first), std::max(l->second, r->second)};
+      }
+      case ExpressionKind::Concatenation: {
+        // MSB operand first; each lands as its bit pattern.
+        Bounds acc{0, 0};
+        for (const auto* op : e.as<slang::ast::ConcatenationExpression>().operands()) {
+          const auto w = static_cast<int64_t>(op->type->getBitWidth());
+          auto       b = sub(*op);
+          if (!b || b->first < 0) {
+            b = Bounds{0, (__int128{1} << w) - 1};
+          }
+          acc = {(acc.first << w) | b->first, (acc.second << w) | b->second};
+        }
+        return acc;
+      }
+      case ExpressionKind::BinaryOp: {
+        const auto& bo = e.as<slang::ast::BinaryExpression>();
+        const auto  l  = sub(bo.left());
+        const auto  r  = sub(bo.right());
+        if (!l || !r) {
+          return std::nullopt;
+        }
+        const bool const_amount = r->first == r->second && r->first >= 0 && r->first < 62;
+        switch (bo.op) {
+          case BinaryOperator::Add     : return Bounds{l->first + r->first, l->second + r->second};
+          case BinaryOperator::Subtract: return Bounds{l->first - r->second, l->second - r->first};
+          case BinaryOperator::Multiply: {
+            const auto p = {l->first * r->first, l->first * r->second, l->second * r->first, l->second * r->second};
+            return Bounds{std::min(p), std::max(p)};
+          }
+          case BinaryOperator::LogicalShiftLeft:
+          case BinaryOperator::ArithmeticShiftLeft:
+            if (!const_amount) {
+              return std::nullopt;
+            }
+            return Bounds{l->first * (__int128{1} << r->first), l->second * (__int128{1} << r->first)};
+          case BinaryOperator::LogicalShiftRight:
+          case BinaryOperator::ArithmeticShiftRight:
+            if (!const_amount || l->first < 0) {
+              return std::nullopt;
+            }
+            return Bounds{l->first >> r->first, l->second >> r->first};
+          default: return std::nullopt;
+        }
+      }
+      default: return std::nullopt;
+    }
+  }();
+  const auto out = exact && exact->first >= full.first && exact->second <= full.second ? *exact : full;
+  return std::pair{static_cast<int64_t>(out.first), static_cast<int64_t>(out.second)};
+}
 
 void Slang_context::note_write(const slang::ast::Symbol& sym, bool nonblocking, slang::SourceLocation loc) {
   if (proc_kind_ == Proc_kind::none) {
@@ -256,32 +387,35 @@ bool Slang_context::lower_unpacked_zero_fill(const slang::ast::Expression& raw_l
     return true;
   }
 
-  std::string base_index = "0";
+  Unpacked_address addr;
+  addr.index = "0";
   if (!whole) {
-    base_index = build_unpacked_index(mi, sels);
+    addr = build_unpacked_address(mi, sels);
     if (suffix_count != 1) {
-      base_index = builder_.create_mult_stmts(base_index, std::to_string(suffix_count));
+      addr.index = builder_.create_mult_stmts(addr.index, std::to_string(suffix_count));
     }
   }
 
   const auto name = write_target_of(*base_sym);
   auto&      ln   = *builder_.lnast;
-  for (int64_t off = 0; off < suffix_count; ++off) {
-    std::string idx = base_index;
-    if (off != 0) {
-      idx = base_index == "0" ? std::to_string(off) : builder_.create_plus_stmts(base_index, std::to_string(off));
-    }
-    if (mi.is_tuple) {
-      for (const auto& field : mi.fields) {
-        emit_field_store(name, idx, field.name, "0");
+  emit_if_in_range(addr, [&]() {
+    for (int64_t off = 0; off < suffix_count; ++off) {
+      std::string idx = addr.index;
+      if (off != 0) {
+        idx = addr.index == "0" ? std::to_string(off) : builder_.create_plus_stmts(addr.index, std::to_string(off));
       }
-    } else {
-      auto st = builder_.add_child(Lnast_ntype::create_store());
-      ln.add_child(st, Lnast_node::create_ref(name));
-      builder_.add_value_child_pub(st, idx);
-      builder_.add_value_child_pub(st, "0");
+      if (mi.is_tuple) {
+        for (const auto& field : mi.fields) {
+          emit_field_store(name, idx, field.name, "0");
+        }
+      } else {
+        auto st = builder_.add_child(Lnast_ntype::create_store());
+        ln.add_child(st, Lnast_node::create_ref(name));
+        builder_.add_value_child_pub(st, idx);
+        builder_.add_value_child_pub(st, "0");
+      }
     }
-  }
+  });
   return true;
 }
 
@@ -712,12 +846,13 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
         if (base_sym != nullptr && !flat_port_syms_.contains(base_sym)) {
           auto mit = mem_info_.find(base_sym);
           if (mit != mem_info_.end() && mit->second.is_tuple && sels.size() == mit->second.rank()) {
-            const auto& mi    = mit->second;
+            const auto  mi    = mit->second;  // a COPY: lowering a selector can rehash mem_info_
             const auto& field = ma.member.as<slang::ast::FieldSymbol>();
             if (const auto* f = find_tuple_field(mi, field.name)) {
-              auto idx = build_unpacked_index(mi, sels);
+              const auto addr = build_unpacked_address(mi, sels);
               note_write(*base_sym, current_assign_nonblocking_, lhs.sourceRange.start());
-              emit_field_store(write_target_of(*base_sym), idx, f->name, to_pattern(to_int_value(rhs), f->bits, f->is_signed));
+              const auto val = to_pattern(to_int_value(rhs), f->bits, f->is_signed);
+              emit_if_in_range(addr, [&]() { emit_field_store(write_target_of(*base_sym), addr.index, f->name, val); });
               return;
             }
           }
@@ -1013,31 +1148,65 @@ bool Slang_context::assign_bundle_port_whole_value(const slang::ast::ValueSymbol
   return true;
 }
 
-// M7: partial (bit-slice) write on a BUNDLE port, already collapsed to
-// (base, offset, width) by resolve_packed_lvalue. Constant offsets split the
-// span per overlapped field (full cover = plain leaf store, partial cover =
-// set_mask on the field leaf — the same shape the struct-var leaf branch
-// emits). A dynamic offset reassembles the whole port, splices at the runtime
-// position, and writes every field back (rare; correctness over beauty).
-void Slang_context::emit_bundle_port_rmw(const Packed_lv& lv, const std::string& rhs, slang::SourceRange sr) {
-  const auto& sym = *lv.base;
-  auto        it  = bundle_port_info_.find(&sym);
-  if (it == bundle_port_info_.end()) {
+// A partial (bit-slice) write whose root is stored as per-field LEAVES has no
+// flat net to set_mask: an M7 BUNDLE port, or a per-field struct var (whose
+// flat name is a phantom nothing reads -- a write to it was silently lost).
+// The chain is already collapsed to (base, offset, width) by
+// resolve_packed_lvalue. Constant offsets split the span per overlapped field
+// (full cover = plain leaf store, partial cover = splice of the field leaf --
+// the same shape the struct-var leaf branch emits). A dynamic offset splices
+// a copy of the fields the write can reach and writes those fields back:
+// rewriting the others too would give them another driver.
+void Slang_context::emit_leaf_split_rmw(const Packed_lv& lv, const std::string& rhs, slang::SourceRange sr) {
+  const auto& sym  = *lv.base;
+  const auto* port = bundle_port_of(sym);
+  const auto  sit  = struct_var_info_.find(&sym);
+  if (port == nullptr && sit == struct_var_info_.end()) {
     return;  // caller guards; defensive
   }
-  const auto fields = it->second.fields;  // copy: builder calls can rehash the map
-  auto       base   = bundle_port_body_base(sym);
-  auto       val    = to_pattern(rhs, static_cast<int>(lv.width), lv.is_signed);
+  // Copies: builder calls below can rehash both maps.
+  const bool is_port    = port != nullptr;
+  const auto fields     = is_port ? port->fields : sit->second.fields;
+  const bool is_tuple   = !is_port && sit->second.is_tuple;
+  const auto base       = is_port ? bundle_port_body_base(sym) : lname_of(sym);
+  const auto rbase      = is_port ? bundle_port_read_base(sym) : base;
+  auto       val        = to_pattern(rhs, static_cast<int>(lv.width), lv.is_signed);
+  const auto read_field = [&](const Struct_info::Field& f) {
+    return is_tuple ? read_struct_field_get(rbase, f.name) : read_leaf(absl::StrCat(rbase, ".", f.name));
+  };
+  const auto store_field = [&](const Struct_info::Field& f, const std::string& v) {
+    if (is_tuple) {
+      emit_struct_field_set(base, f.name, v);  // tuple field store
+    } else {
+      emit_leaf_store(absl::StrCat(base, ".", f.name), v);
+    }
+  };
 
   if (!lv.dyn_off.empty()) {
-    auto        bi       = tinfo(sym.getType());
-    auto        cur_p    = to_pattern(read_bundle_port_whole(sym), bi.bits, false);
-    std::string shamt    = lv.const_off == 0 ? lv.dyn_off : builder_.create_plus_stmts(lv.dyn_off, std::to_string(lv.const_off));
-    auto        sel_mask = builder_.create_shl_stmts(mask_text(static_cast<int>(lv.width)), shamt);
-    auto        keep     = builder_.create_bit_and_stmts(cur_p, builder_.create_bit_not_stmts(sel_mask));
-    auto        ins      = builder_.create_shl_stmts(val, shamt);
-    auto        next     = builder_.create_bit_or_stmts({keep, ins});
-    assign_bundle_port_whole_value(sym, next, sr.start());  // note_write inside
+    std::vector<Struct_info::Field> reached;
+    std::string                     cur;  // the reached fields, at their root offsets
+    for (const auto& f : fields) {
+      if (f.off > lv.reach_hi || f.off + f.bits - 1 < lv.reach_lo) {
+        continue;
+      }
+      auto placed = to_pattern(read_field(f), f.bits, f.is_signed);
+      if (f.off != 0) {
+        placed = builder_.create_shl_stmts(placed, std::to_string(f.off));
+      }
+      cur = cur.empty() ? placed : builder_.create_bit_or_stmts({cur, placed});
+      reached.push_back(f);
+    }
+    if (reached.empty()) {
+      return;
+    }
+    const auto dr = dynamic_write_range(lv, val);
+    note_write(sym, current_assign_nonblocking_, sr.start());
+    If_in_range lands(builder_, dr.in_range);
+    const auto  next = splice_range(cur, dr.lo, dr.hi, dr.piece);
+    for (const auto& f : reached) {
+      auto fv = extract_field(next, f.off, f.bits);
+      store_field(f, f.is_signed ? builder_.create_sext_stmts(fv, std::to_string(f.bits - 1)) : fv);
+    }
     return;
   }
 
@@ -1065,12 +1234,16 @@ void Slang_context::emit_bundle_port_rmw(const Packed_lv& lv, const std::string&
       if (lv.width > ov_bits) {
         part = trunc_to(part, ov_bits);
       }
-      auto fv = f.is_signed ? builder_.create_sext_stmts(part, std::to_string(f.bits - 1)) : part;
-      emit_leaf_store(absl::StrCat(base, ".", f.name), fv);
+      store_field(f, f.is_signed ? builder_.create_sext_stmts(part, std::to_string(f.bits - 1)) : part);
       continue;
     }
     std::string sel_mask = rel == 0 ? mask_text(ov_bits) : std::string(Dlop::get_mask_value(rel + ov_bits - 1, rel)->to_pyrope());
-    builder_.create_set_mask_stmts(absl::StrCat(base, ".", f.name), sel_mask, part);
+    if (is_tuple) {
+      // A tuple field has no in-place bit write: splice a copy of it.
+      store_field(f, fit_wrap(splice_mask(to_pattern(read_field(f), f.bits, f.is_signed), sel_mask, part), f.bits, f.is_signed));
+    } else {
+      builder_.create_set_mask_stmts(absl::StrCat(base, ".", f.name), sel_mask, part);
+    }
   }
 }
 
@@ -1166,21 +1339,31 @@ const slang::ast::Expression* Slang_context::peel_unpacked_chain(const slang::as
   return e;
 }
 
-// Linear 0-based element index of a full-depth selector chain: row-major
-// accumulate `acc = acc*width_k + (sel_k - lower_k)`, folding while every term
-// is a compile-time constant. A Mem_info without dims (memory-ized packed reg)
-// is a single dim {lower, size}.
-std::string Slang_context::build_unpacked_index(const Mem_info& mi, const std::vector<const slang::ast::Expression*>& sels,
-                                                std::string* in_range) {
-  auto check = [&](const std::string& condition) {
-    if (in_range) {
-      *in_range = in_range->empty() ? condition : builder_.create_log_and_stmts(*in_range, condition);
-    }
+// Linear 0-based element address of a selector prefix (all of the dims for
+// an element access): row-major accumulate `acc = acc*width_k + (sel_k -
+// lower_k)`, folding while every term is a compile-time constant. A Mem_info
+// without dims (memory-ized packed reg) is a single dim {lower, size}.
+//
+// A selector whose TYPE reaches past its dim's declared bounds makes the
+// access a possible Verilog out-of-range one (1800 7.4.6: a write does
+// nothing, a read returns X). The address then carries that range check and
+// an index cut to the low bits that address the span, so it is never negative
+// (see Unpacked_address). The check is the Verilog semantics spelled out in
+// the LNAST: the lowered memory cannot see it (it keeps the low address bits,
+// so an unguarded `mem[10] <= x` of `mem [2:9]` would overwrite mem[2]), and
+// the Pyrope regenerated from this LNAST states it as a guard.
+Slang_context::Unpacked_address Slang_context::build_unpacked_address(const Mem_info&                                   mi,
+                                                                      const std::vector<const slang::ast::Expression*>& sels) {
+  Unpacked_address addr;
+  bool             never = false;  // a constant selector outside its dim
+  auto             check = [&](const std::string& condition) {
+    addr.in_range = addr.in_range.empty() ? condition : builder_.create_log_and_stmts(addr.in_range, condition);
   };
   std::optional<int64_t> cacc = 0;  // constant accumulator while it stays foldable
   std::string            dacc;      // otherwise the accumulated expression
   for (size_t k = 0; k < sels.size(); ++k) {
-    const auto d = mi.dims.empty() ? Mem_info::Dim{mi.lower, mi.size} : mi.dims[k];
+    const auto d  = mi.dims.empty() ? Mem_info::Dim{mi.lower, mi.size} : mi.dims[k];
+    addr.span    *= d.width;
     if (k > 0) {
       if (cacc) {
         *cacc *= d.width;
@@ -1189,18 +1372,24 @@ std::string Slang_context::build_unpacked_index(const Mem_info& mi, const std::v
       }
     }
     if (auto ci = try_eval_int(*sels[k])) {
-      if (*ci < d.lower || *ci - d.lower >= d.width) {
-        check("false");
-      }
+      never = never || *ci < d.lower || *ci - d.lower >= d.width;
       if (cacc) {
         *cacc += *ci - d.lower;
       } else if (*ci != d.lower) {
         dacc = builder_.create_plus_stmts(dacc, std::to_string(*ci - d.lower));
       }
     } else {
-      auto v = to_int_value(lower_rvalue(*sels[k]));
-      if (in_range != nullptr) {  // `check` is a no-op without it; skip the compare nodes too
+      auto       v     = to_int_value(lower_rvalue(*sels[k]));
+      const auto ti    = tinfo(*sels[k]->type);
+      // The selector's own type bounds its value; only a bound it can cross
+      // needs a compare (an exact-width `[0:2^k-1]` index needs none).
+      const bool below = ti.is_signed ? d.lower > -(int64_t{1} << std::min(ti.bits - 1, 62)) : d.lower > 0;
+      const bool above = ti.bits - (ti.is_signed ? 1 : 0) >= 63
+                         || d.lower + d.width - 1 < (int64_t{1} << (ti.bits - (ti.is_signed ? 1 : 0))) - 1;
+      if (below) {
         check(builder_.create_ge_stmts(v, std::to_string(d.lower)));
+      }
+      if (above) {
         check(builder_.create_lt_stmts(v, std::to_string(d.lower + d.width)));
       }
       if (d.lower != 0) {
@@ -1214,7 +1403,62 @@ std::string Slang_context::build_unpacked_index(const Mem_info& mi, const std::v
       }
     }
   }
-  return cacc ? std::to_string(*cacc) : dacc;
+  if (never) {
+    addr.in_range = "false";
+  }
+  // The index an out-of-range access lands on: the low bits addressing the
+  // span, like the memory's own address decode.
+  int abits = 0;
+  while ((int64_t{1} << abits) < addr.span) {
+    ++abits;
+  }
+  if (cacc) {
+    const int64_t low = *cacc & ((int64_t{1} << abits) - 1);  // two's complement: the low bits of a negative offset
+    addr.index        = std::to_string(low);
+    addr.past_span    = low >= addr.span;
+    addr.constant     = true;
+    return addr;
+  }
+  if (addr.in_range.empty()) {
+    addr.index = dacc;  // provably inside the declared bounds
+    return addr;
+  }
+  addr.index     = abits == 0 ? std::string("0") : trunc_to(dacc, abits);
+  addr.past_span = (int64_t{1} << abits) != addr.span;
+  return addr;
+}
+
+// Emit `emit` (the stores of a write) under the address check: nothing for a
+// constant out-of-range address, `if in_range { ... }` for a runtime one.
+void Slang_context::emit_if_in_range(const Unpacked_address& addr, const std::function<void()>& emit) {
+  if (addr.in_range == "false") {
+    return;  // Verilog drops an out-of-range write
+  }
+  If_in_range guard(builder_, addr.in_range);
+  emit();
+}
+
+// Read one element through `read(index)`. An out-of-range read is X in
+// Verilog; the refinement is the element the low address bits select (what
+// the memory hardware and yosys' memory_map return, so every engine agrees),
+// and 0 when those bits land past a span that is not a power of two.
+std::string Slang_context::emit_guarded_read(const Unpacked_address& addr, int bits,
+                                             const std::function<std::string(const std::string&)>& read) {
+  if (!addr.past_span) {
+    return read(addr.index);
+  }
+  if (addr.constant) {
+    return "0";  // a constant index past the span
+  }
+  // declare + store, like prp2lnast's `mut t:uN = 0`: tolg lowers no value
+  // from a `mut` declare's init child, so an init-only 0 would leave the mux's
+  // false arm undriven (cgen X, lhd lec 0).
+  auto result = fresh_local("oob_read");
+  builder_.create_declare_stmts(result, "mut", mask_text(bits), "0");
+  builder_.create_assign_stmts(result, "0");
+  If_in_range guard(builder_, builder_.create_lt_stmts(addr.index, std::to_string(addr.span)));
+  builder_.create_assign_stmts(result, read(addr.index));
+  return result;
 }
 
 // Unpacked-array (memory) element access (2s-D). Reads lower to
@@ -1240,11 +1484,10 @@ std::string Slang_context::lower_unpacked_read(const slang::ast::Expression& exp
     emit_unsupported(expr.sourceRange, "unsupported-array-read", "unpacked array read on an unsupported base");
     return "0";
   }
-  const auto  mi = mit->second;
-  std::string in_range;
-  auto        idx          = build_unpacked_index(mi, sels, sels.size() < mi.rank() ? &in_range : nullptr);
-  const auto  mem_name     = write_target_of(*base_sym);
-  auto        read_element = [&](const std::string& index) {
+  const auto mi           = mit->second;
+  const auto addr         = build_unpacked_address(mi, sels);
+  const auto mem_name     = write_target_of(*base_sym);
+  auto       read_element = [&](const std::string& index) {
     if (mi.is_tuple) {
       std::string acc;
       for (const auto& f : mi.fields) {
@@ -1267,7 +1510,7 @@ std::string Slang_context::lower_unpacked_read(const slang::ast::Expression& exp
     return tmp;
   };
   if (sels.size() == mi.rank()) {
-    auto value = read_element(idx);
+    auto value = emit_guarded_read(addr, mi.elem_bits, read_element);
     return mi.elem_signed ? builder_.create_sext_stmts(value, std::to_string(mi.elem_bits - 1)) : value;
   }
 
@@ -1283,34 +1526,34 @@ std::string Slang_context::lower_unpacked_read(const slang::ast::Expression& exp
     emit_unsupported(expr.sourceRange, "array-value-too-wide", "unpacked array value exceeds 65536 bits");
     return "0";
   }
-  idx = builder_.create_mult_stmts(idx, std::to_string(count));
-  std::vector<Lnast_builder::Concat_lane>                        lanes;
-  std::function<void(const slang::ast::Type&, int64_t, int64_t)> gather = [&](const auto& type, int64_t offset, int64_t stride) {
-    const auto& ct = type.getCanonicalType();
-    if (ct.kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
-      const auto& arr  = ct.template as<slang::ast::FixedSizeUnpackedArrayType>();
-      stride          /= arr.range.width();
-      for (int64_t k = 0; k < arr.range.width(); ++k) {
-        auto lane = arr.range.isDescending() ? arr.range.width() - 1 - k : k;
-        gather(arr.elementType, offset + lane * stride, stride);
+  auto gather_value = [&]() {
+    const auto                              idx = builder_.create_mult_stmts(addr.index, std::to_string(count));
+    std::vector<Lnast_builder::Concat_lane> lanes;
+    std::function<void(const slang::ast::Type&, int64_t, int64_t)> gather = [&](const auto& type, int64_t offset, int64_t stride) {
+      const auto& ct = type.getCanonicalType();
+      if (ct.kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
+        const auto& arr  = ct.template as<slang::ast::FixedSizeUnpackedArrayType>();
+        stride          /= arr.range.width();
+        for (int64_t k = 0; k < arr.range.width(); ++k) {
+          auto lane = arr.range.isDescending() ? arr.range.width() - 1 - k : k;
+          gather(arr.elementType, offset + lane * stride, stride);
+        }
+      } else {
+        auto index = offset == 0 ? idx : builder_.create_plus_stmts(idx, std::to_string(offset));
+        lanes.push_back({read_element(index), mi.elem_bits});
       }
-    } else {
-      auto index = offset == 0 ? idx : builder_.create_plus_stmts(idx, std::to_string(offset));
-      lanes.push_back({read_element(index), mi.elem_bits});
-    }
+    };
+    gather(*expr.type, 0, count);
+    return builder_.create_concat_stmts(lanes);
   };
-  gather(*expr.type, 0, count);
-  auto value = builder_.create_concat_stmts(lanes);
-  if (in_range.empty()) {
-    return value;
+  if (addr.in_range.empty()) {
+    return gather_value();
   }
+  // An out-of-range row reads X. The element reads sit under the check too, so
+  // none of them addresses past the memory.
   auto result = fresh_local("array_value");
   builder_.create_declare_stmts(result, "mut", mask_text(static_cast<int>(count * mi.elem_bits)), "0", "0sb?");
-  auto guard = builder_.create_if_stmt(false);
-  builder_.add_if_cond(guard, in_range);
-  builder_.push_stmts(builder_.add_if_stmts(guard));
-  builder_.create_assign_stmts(result, value);
-  builder_.pop_stmts();
+  emit_if_in_range(addr, [&]() { builder_.create_assign_stmts(result, gather_value()); });
   return result;
 }
 
@@ -1333,9 +1576,9 @@ void Slang_context::lower_unpacked_write(const slang::ast::Expression& lhs, cons
     emit_unsupported(lhs.sourceRange, "unsupported-array-write", "unpacked array write on an unsupported base");
     return;
   }
-  const auto& mi = mit->second;
+  const auto mi = mit->second;  // a COPY: lowering a selector can rehash mem_info_
 
-  auto idx = build_unpacked_index(mi, sels);
+  const auto addr = build_unpacked_address(mi, sels);
 
   // Struct-element memory whole-element write `mem[idx] <= rhs`: decompose into
   // one field store per field. `rhs` is the packed element value (whatever its
@@ -1345,9 +1588,11 @@ void Slang_context::lower_unpacked_write(const slang::ast::Expression& lhs, cons
     note_write(*base_sym, current_assign_nonblocking_, lhs.sourceRange.start());
     auto p        = to_pattern(to_int_value(rhs), mi.elem_bits, false);
     auto mem_name = write_target_of(*base_sym);
-    for (const auto& f : mi.fields) {
-      emit_field_store(mem_name, idx, f.name, extract_field(p, f.off, f.bits));
-    }
+    emit_if_in_range(addr, [&]() {
+      for (const auto& f : mi.fields) {
+        emit_field_store(mem_name, addr.index, f.name, extract_field(p, f.off, f.bits));
+      }
+    });
     return;
   }
 
@@ -1355,17 +1600,19 @@ void Slang_context::lower_unpacked_write(const slang::ast::Expression& lhs, cons
 
   note_write(*base_sym, current_assign_nonblocking_, lhs.sourceRange.start());
 
-  auto& ln = *builder_.lnast;
-  auto  st = builder_.add_child(Lnast_ntype::create_store());
-  ln.add_child(st, Lnast_node::create_ref(write_target_of(*base_sym)));
-  builder_.add_value_child_pub(st, idx);
-  builder_.add_value_child_pub(st, val);
+  emit_if_in_range(addr, [&]() {
+    auto& ln = *builder_.lnast;
+    auto  st = builder_.add_child(Lnast_ntype::create_store());
+    ln.add_child(st, Lnast_node::create_ref(write_target_of(*base_sym)));
+    builder_.add_value_child_pub(st, addr.index);
+    builder_.add_value_child_pub(st, val);
+  });
 }
 
 // The BASE of a sub-word element write (`mem[addr]`, `mem[r][c]`, …) resolved to
 // its memory. Uses the same peel_unpacked_chain walk as the read side, so a
 // MULTI-dimensional array is handled exactly like a one-dimensional one: the
-// linearizing index math lives in build_unpacked_index and is emitted by the
+// linearizing index math lives in build_unpacked_address and is emitted by the
 // caller (this function is on paths that still return false, so it must not
 // emit LNAST).
 const slang::ast::ValueSymbol* Slang_context::resolve_mem_element_base(const slang::ast::Expression&               base,
@@ -1486,6 +1733,20 @@ bool Slang_context::lower_mem_element_bitslice_write(const slang::ast::Expressio
   const int64_t wensize = word_bits / width;  // number of write-enable chunks
   const int64_t chunk   = *lo_bit / width;    // which chunk this write targets
 
+  // ONE granularity per memory: the wensize attr is emitted once and every
+  // chunk index counts in units of the first chunked write's width, so a slice
+  // of another width (`[3:0]` next to `[15:8]`) would enable the wrong lane. It
+  // takes the read-modify-write splice instead. A whole-word slice is a plain
+  // write under any granularity.
+  bool first_chunked = false;
+  if (wensize > 1) {
+    const auto [cit, fresh] = mem_chunk_bits_.try_emplace(mem_sym, width);
+    if (!fresh && cit->second != width) {
+      return false;
+    }
+    first_chunked = fresh;
+  }
+
   // Position the chunk data within the full word (the other chunks are
   // don't-care — their write-enable bit is 0). din is the full element width.
   auto        val = to_pattern(rhs, static_cast<int>(width), ti.is_signed);
@@ -1493,8 +1754,7 @@ bool Slang_context::lower_mem_element_bitslice_write(const slang::ast::Expressio
   din             = to_pattern(to_int_value(din), word_bits, false);
 
   // Emit the per-memory wensize attr once (consumed by tolg's finalize_mems).
-  if (wensize > 1 && !mem_wensize_emitted_.contains(mem_sym)) {
-    mem_wensize_emitted_.insert(mem_sym);
+  if (first_chunked) {
     auto& ln   = *builder_.lnast;
     auto  aidx = builder_.add_child(Lnast_ntype::create_attr_set());
     ln.add_child(aidx, Lnast_node::create_ref(write_target_of(*mem_sym)));
@@ -1504,16 +1764,18 @@ bool Slang_context::lower_mem_element_bitslice_write(const slang::ast::Expressio
 
   // Memory write port: store(mem, addr, din, chunk). The extra chunk child
   // (D+2 store children) marks a chunked write to tolg.
-  auto idx = build_unpacked_index(mi, sels);
+  const auto addr = build_unpacked_address(mi, sels);
   note_write(*mem_sym, current_assign_nonblocking_, lhs.sourceRange.start());
-  auto& ln = *builder_.lnast;
-  auto  st = builder_.add_child(Lnast_ntype::create_store());
-  ln.add_child(st, Lnast_node::create_ref(write_target_of(*mem_sym)));
-  builder_.add_value_child_pub(st, idx);
-  builder_.add_value_child_pub(st, din);
-  if (wensize > 1) {
-    builder_.add_value_child_pub(st, std::to_string(chunk));
-  }
+  emit_if_in_range(addr, [&]() {
+    auto& ln = *builder_.lnast;
+    auto  st = builder_.add_child(Lnast_ntype::create_store());
+    ln.add_child(st, Lnast_node::create_ref(write_target_of(*mem_sym)));
+    builder_.add_value_child_pub(st, addr.index);
+    builder_.add_value_child_pub(st, din);
+    if (wensize > 1) {
+      builder_.add_value_child_pub(st, std::to_string(chunk));
+    }
+  });
   return true;
 }
 
@@ -1532,18 +1794,14 @@ bool Slang_context::lower_mem_element_bitslice_write(const slang::ast::Expressio
 //  * a struct-element (TUPLE) memory. Its storage is the per-field arrays
 //    detuple splits out, so the write is decomposed per OVERLAPPED field: a
 //    fully covered field is a plain field store, a partially covered one a
-//    field-local splice. Only the partial cover reads back, so writes that land
-//    on DIFFERENT fields of one entry in the same cycle all survive; two
-//    same-cycle PARTIAL writes to one field would not (before this
+//    field-local splice. Only the partial cover reads back (before this
 //    decomposition existed, the whole write was dropped instead).
 //  * a CLOCKED scalar memory whose position the wensize path above could not
 //    take: a DYNAMIC one (`useful[i][decrBit] <= 0` — no constant chunk to
 //    enable) or a constant slice whose width does not divide the element word
-//    evenly, or is not chunk-aligned. Its read returns last cycle's COMMITTED
-//    word, which is exactly what a nonblocking partial write must preserve for
-//    the untouched bits — correct for one write per word per cycle. Two
-//    same-cycle partial writes to one word need the chunk-enable model, and
-//    that model is what the aligned uniform-granularity case above uses.
+//    evenly, is not chunk-aligned, or differs from the memory's chunk width.
+//    Either position is the partial-write chain upass.tolg merges with every
+//    earlier write of the cycle.
 bool Slang_context::lower_mem_element_splice_write(const slang::ast::Expression& lhs, const std::string& rhs) {
   using slang::ast::RangeSelectionKind;
 
@@ -1615,13 +1873,17 @@ bool Slang_context::lower_mem_element_splice_write(const slang::ast::Expression&
 
   // Dynamic in-word low-bit offset. Mirrors resolve_packed_lvalue's normalize,
   // which a memory-element base makes unreachable on the packed path.
+  // `lo_bounds` is its static range from the selector's type.
+  std::optional<std::pair<int64_t, int64_t>> lo_bounds;
   auto offset_of = [&](const slang::ast::Expression& sel, int64_t wdown, int64_t wup) -> std::string {
     auto v = to_int_value(lower_rvalue(sel));
     if (range.isDescending()) {
       int64_t bias = range.lower() + (wdown - 1);
+      lo_bounds    = affine_bounds(selector_bounds(sel), -bias, 1);
       return bias == 0 ? v : builder_.create_minus_stmts(v, std::to_string(bias));
     }
     int64_t bias = range.upper() - (wup - 1);
+    lo_bounds    = affine_bounds(selector_bounds(sel), bias, -1);
     return builder_.create_minus_stmts(std::to_string(bias), v);
   };
   std::string dyn_lo;
@@ -1641,52 +1903,43 @@ bool Slang_context::lower_mem_element_splice_write(const slang::ast::Expression&
       }
     }
     if (stride != 1) {
-      dyn_lo = builder_.create_mult_stmts(dyn_lo, std::to_string(stride));
+      dyn_lo    = builder_.create_mult_stmts(dyn_lo, std::to_string(stride));
+      lo_bounds = scaled_bounds(lo_bounds, stride);
     }
   }
 
   // Linear element index, computed once for the read(s) and the store(s). Every
   // early return is behind us, so emitting LNAST is safe from here on.
-  auto  idx      = build_unpacked_index(mi, sels);
-  auto  val      = to_pattern(rhs, width, ti.is_signed);
-  auto& ln       = *builder_.lnast;
-  auto  mem_name = write_target_of(*mem_sym);
+  const auto addr     = build_unpacked_address(mi, sels);
+  const auto idx      = addr.index;
+  auto       val      = to_pattern(rhs, width, ti.is_signed);
+  auto&      ln       = *builder_.lnast;
+  auto       mem_name = write_target_of(*mem_sym);
 
   // set_mask(%new, src, mask, value) — the copy-temp shape (dst != src) tolg
   // lowers without rebinding `src`, which here is a read temp, not a variable.
-  auto splice_const = [&](const std::string& src, int64_t lo, int bits, const std::string& piece) {
+  // It is the read -> set_mask -> store chain upass.tolg recognizes as a
+  // partial write: the read sees the writes of the cycle before it, so any
+  // number of partial writes to one entry merge in program order.
+  auto splice = [&](const std::string& src, const std::string& mask, const std::string& piece) {
     auto dst = builder_.create_lnast_tmp();
     auto sm  = builder_.add_child(Lnast_ntype::create_set_mask());
     ln.add_child(sm, Lnast_node::create_ref(dst));
     builder_.add_value_child_pub(sm, src);
-    builder_.add_value_child_pub(sm, lo == 0 ? mask_text(bits) : std::string(Dlop::get_mask_value(lo + bits - 1, lo)->to_pyrope()));
+    builder_.add_value_child_pub(sm, mask);
     builder_.add_value_child_pub(sm, piece);
     return dst;
   };
-
-  // A read-back on a CLOCKED memory reads the COMMITTED word, so two such
-  // partial stores into the same leaf cannot be merged — whichever write port
-  // wins the same-cycle collision discards the other's bits. Diagnose the
-  // second site rather than emit hardware that loses a write. A combinational
-  // array is exempt: tolg keeps it as a packed bus, so successive splices
-  // chain in program order.
-  const bool clocked   = reg_syms_.contains(mem_sym) && !blocking_values_.contains(mem_sym);
-  auto       claim_rmw = [&](std::string_view leaf) {
-    if (!clocked || mem_rmw_leaf_written_[mem_sym].insert(std::string(leaf)).second) {
-      return true;
-    }
-    emit_unsupported(lhs.sourceRange,
-                     "unsupported-mem-partial-write",
-                     absl::StrCat("a second read-modify-write partial store to memory '",
-                                  mem_sym->name,
-                                  leaf.empty() ? "" : absl::StrCat(".", leaf),
-                                  "' cannot be merged with the first"),
-                     "make every partial write of this memory a chunk-aligned slice of one uniform width, so they "
-                     "lower to per-chunk write enables instead");
-    return false;
+  auto splice_const = [&](const std::string& src, int64_t lo, int bits, const std::string& piece) {
+    return splice(src, lo == 0 ? mask_text(bits) : std::string(Dlop::get_mask_value(lo + bits - 1, lo)->to_pyrope()), piece);
   };
 
   note_write(*mem_sym, current_assign_nonblocking_, lhs.sourceRange.start());
+  if (addr.in_range == "false") {
+    return true;  // Verilog drops an out-of-range write
+  }
+  // The read-back and the store both sit under the address check.
+  If_in_range in_range(builder_, addr.in_range);
 
   // Struct-element memory: split the constant slice across every OVERLAPPED
   // field leaf (a slice may cross field boundaries), the same decomposition the
@@ -1706,46 +1959,51 @@ bool Slang_context::lower_mem_element_splice_write(const slang::ast::Expression&
         emit_field_store(mem_name, idx, f.name, piece);  // full cover: no read-back
         continue;
       }
-      if (!claim_rmw(f.name)) {
-        return true;  // diagnosed
-      }
       auto cur = emit_field_read_chain(mem_name, idx, f.name);
       emit_field_store(mem_name, idx, f.name, splice_const(cur, rel, ov_bits, piece));
     }
     return true;
   }
 
-  // A constant slice covering the whole element word is a plain element store —
-  // no read-back, which is what a single-write-port `arr[r][c][0]` unrolls to.
-  std::string next;
-  if (lo_bit && width == mi.elem_bits) {
-    next = val;
-  } else {
-    if (!claim_rmw("")) {
-      return true;  // diagnosed
-    }
+  auto store = [&](const std::string& value) {
+    auto st = builder_.add_child(Lnast_ntype::create_store());
+    ln.add_child(st, Lnast_node::create_ref(mem_name));
+    builder_.add_value_child_pub(st, idx);
+    builder_.add_value_child_pub(st, value);
+  };
+  // The entry's current word, the read-back of a splice.
+  auto read_entry = [&]() {
     auto tg  = builder_.add_child(Lnast_ntype::create_tuple_get());
     auto cur = builder_.create_lnast_tmp();
     ln.add_child(tg, Lnast_node::create_ref(cur));
     ln.add_child(tg, Lnast_node::create_ref(mem_name));
     builder_.add_value_child_pub(tg, idx);
     builder_.note_unsigned_bits(cur, mi.elem_bits);
-    auto cur_p = to_pattern(cur, mi.elem_bits, false);
-    if (lo_bit) {
-      next = splice_const(cur_p, *lo_bit, width, val);
-    } else {
-      auto sel_mask = builder_.create_shl_stmts(mask_text(width), dyn_lo);
-      auto keep     = builder_.create_bit_and_stmts(cur_p, builder_.create_bit_not_stmts(sel_mask));
-      auto ins      = builder_.create_shl_stmts(val, dyn_lo);
-      next          = builder_.create_bit_or_stmts({keep, ins});
-    }
-    next = trunc_to(next, mi.elem_bits);
+    return to_pattern(cur, mi.elem_bits, false);
+  };
+
+  // A constant slice covering the whole element word is a plain element store —
+  // no read-back, which is what a single-write-port `arr[r][c][0]` unrolls to.
+  if (lo_bit) {
+    store(width == mi.elem_bits ? val : trunc_to(splice_const(read_entry(), *lo_bit, width, val), mi.elem_bits));
+    return true;
   }
 
-  auto st = builder_.add_child(Lnast_ntype::create_store());
-  ln.add_child(st, Lnast_node::create_ref(mem_name));
-  builder_.add_value_child_pub(st, idx);
-  builder_.add_value_child_pub(st, next);
+  // A runtime position is an inclusive `range(lo, hi)` mask: the same chain as
+  // the constant one, so it merges just the same.
+  auto range_splice = [&](const std::string& lo, const std::string& hi, const std::string& piece) {
+    auto sel      = builder_.add_child(Lnast_ntype::create_range());
+    auto range_id = builder_.create_lnast_tmp();
+    ln.add_child(sel, Lnast_node::create_ref(range_id));
+    builder_.add_value_child_pub(sel, lo);
+    builder_.add_value_child_pub(sel, hi);
+    store(trunc_to(splice(read_entry(), range_id, piece), mi.elem_bits));
+  };
+  // Verilog writes only the bits of the part select inside the word (see
+  // clip_window): the emitted range is inside the word by construction.
+  const auto  win = clip_window(dyn_lo, width, mi.elem_bits, val, lo_bounds);
+  If_in_range meets(builder_, win.meets);
+  range_splice(win.lo, win.hi, win.piece);
   return true;
 }
 
@@ -1814,29 +2072,27 @@ void Slang_context::flat_port_write(const slang::ast::ElementSelectExpression& e
     return;
   }
 
-  // dynamic element index: read-modify-write with shifts (const set_mask only).
-  auto cur_p = to_pattern(to_int_value(read_symbol(*base_sym, es.value().sourceRange)), flat_bits, false);
-  auto idx   = to_int_value(lower_rvalue(es.selector()));
+  // Dynamic element index: a range write of the element's lane, blocking or
+  // not. An index past the array writes nothing.
+  const auto& sel    = es.selector();
+  auto        idx    = to_int_value(lower_rvalue(sel));
+  auto        bounds = selector_bounds(sel);
   if (mi.descending) {
     if (mi.lower != 0) {
       idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
     }
+    bounds = affine_bounds(bounds, -mi.lower, 1);
   } else {
-    idx = builder_.create_minus_stmts(std::to_string(mi.upper), idx);
+    idx    = builder_.create_minus_stmts(std::to_string(mi.upper), idx);
+    bounds = affine_bounds(bounds, mi.upper, -1);
   }
-  std::string shamt = mi.elem_bits != 1 ? builder_.create_mult_stmts(idx, std::to_string(mi.elem_bits)) : idx;
-  if (current_assign_nonblocking_) {
-    note_write(*base_sym, true, es.sourceRange.start());
-    emit_dynamic_slice_write(base_name, shamt, mi.elem_bits, val);
-    return;
-  }
-  auto sel_mask = builder_.create_shl_stmts(mask_text(mi.elem_bits), shamt);
-  auto keep     = builder_.create_bit_and_stmts(cur_p, builder_.create_bit_not_stmts(sel_mask));
-  auto ins      = builder_.create_shl_stmts(val, shamt);
-  auto next     = builder_.create_bit_or_stmts({keep, ins});
-  next          = trunc_to(next, flat_bits);
+  std::string in_range;
+  idx     = guard_element_index(idx, bounds, mi.size, /*at_root=*/true, in_range);
+  auto lo = mi.elem_bits != 1 ? builder_.create_mult_stmts(idx, std::to_string(mi.elem_bits)) : idx;
+  auto hi = mi.elem_bits != 1 ? builder_.create_plus_stmts(lo, std::to_string(mi.elem_bits - 1)) : lo;
   note_write(*base_sym, current_assign_nonblocking_, es.sourceRange.start());
-  builder_.create_assign_stmts(base_name, next);
+  If_in_range guard(builder_, in_range);
+  emit_dynamic_slice_write(base_name, lo, hi, val);
 }
 
 // A select/member chain bottoms out in a named variable for the
@@ -1878,8 +2134,12 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
       out.base      = &sym;
       out.const_off = 0;
       out.dyn_off.clear();
+      out.in_range.clear();
+      out.window.reset();
       out.width     = ti.bits;
       out.is_signed = ti.is_signed;
+      out.reach_lo  = 0;
+      out.reach_hi  = ti.bits - 1;
       return true;
     }
 
@@ -1892,7 +2152,8 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
       if (ma.member.kind != slang::ast::SymbolKind::Field || !ma.value().type->isIntegral()) {
         return false;
       }
-      if (!resolve_packed_lvalue(ma.value(), out, static_only)) {
+      // A member of a clipped part select has no single position.
+      if (!resolve_packed_lvalue(ma.value(), out, static_only) || out.window) {
         return false;
       }
       const auto& field  = ma.member.as<slang::ast::FieldSymbol>();
@@ -1900,6 +2161,10 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
       out.const_off     += static_cast<int64_t>(field.bitOffset);  // field offset within its struct
       out.width          = ti.bits;
       out.is_signed      = ti.is_signed;
+      if (out.dyn_off.empty()) {
+        out.reach_lo = std::max(out.reach_lo, out.const_off);
+        out.reach_hi = std::min(out.reach_hi, out.const_off + ti.bits - 1);
+      }
       return true;
     }
 
@@ -1924,20 +2189,30 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
           out.base       = fsym;
           out.const_off  = 0;
           out.dyn_off.clear();
+          out.in_range.clear();
+          out.window.reset();
           out.width       = mi.elem_bits;
           out.is_signed   = mi.elem_signed;
+          out.reach_lo    = 0;
+          out.reach_hi    = mi.size * mi.elem_bits - 1;
           const auto& sel = lhs.as<slang::ast::ElementSelectExpression>().selector();
           if (auto ci = try_eval_int(sel)) {
             out.const_off = (mi.descending ? *ci - mi.lower : mi.upper - *ci) * mi.elem_bits;
+            out.reach_lo  = out.const_off;
+            out.reach_hi  = out.const_off + mi.elem_bits - 1;
           } else {
-            auto idx = to_int_value(lower_rvalue(sel));
+            auto idx    = to_int_value(lower_rvalue(sel));
+            auto bounds = selector_bounds(sel);
             if (mi.descending) {
               if (mi.lower != 0) {
                 idx = builder_.create_minus_stmts(idx, std::to_string(mi.lower));
               }
+              bounds = affine_bounds(bounds, -mi.lower, 1);
             } else {
-              idx = builder_.create_minus_stmts(std::to_string(mi.upper), idx);
+              idx    = builder_.create_minus_stmts(std::to_string(mi.upper), idx);
+              bounds = affine_bounds(bounds, mi.upper, -1);
             }
+            idx         = guard_element_index(idx, bounds, mi.size, /*at_root=*/true, out.in_range);
             out.dyn_off = mi.elem_bits != 1 ? builder_.create_mult_stmts(idx, std::to_string(mi.elem_bits)) : idx;
           }
           return true;
@@ -1959,7 +2234,8 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
           }
         }
       }
-      if (!resolve_packed_lvalue(base, out, static_only)) {
+      // A select of a clipped part select has no single position.
+      if (!resolve_packed_lvalue(base, out, static_only) || out.window) {
         return false;
       }
 
@@ -1967,27 +2243,42 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
       int  stride = base_ty.isPackedArray() ? static_cast<int>(base_ty.getArrayElementType()->getBitWidth()) : 1;
       auto ti     = tinfo(*lhs.type);
 
-      // local low-bit offset within `base`, in element units (const and/or dynamic)
-      std::optional<int64_t> const_low;
-      std::string            dyn_low;
-      auto                   normalize = [&](const slang::ast::Expression& idx,
-                                             int64_t                       width_down,
-                                             int64_t                       width_up) -> std::pair<std::optional<int64_t>, std::string> {
+      // local low-bit offset within `base`, in element units (const and/or
+      // dynamic), and the static range of a dynamic one
+      std::optional<int64_t>                     const_low;
+      std::string                                dyn_low;
+      std::optional<std::pair<int64_t, int64_t>> low_bounds;
+      auto normalize = [&](const slang::ast::Expression& idx, int64_t width_down, int64_t width_up) {
         if (auto ci = try_eval_int(idx)) {
           int64_t bottom = range.isDescending() ? (*ci - range.lower() - (width_down - 1)) : (range.upper() - *ci - (width_up - 1));
-          return {bottom, {}};
+          const_low      = bottom;
+          return;
         }
         auto v = to_int_value(lower_rvalue(idx));  // settle the selector to an int (match the rvalue select path)
         if (range.isDescending()) {
           int64_t bias = range.lower() + (width_down - 1);
-          return {std::nullopt, bias == 0 ? v : builder_.create_minus_stmts(v, std::to_string(bias))};
+          dyn_low      = bias == 0 ? v : builder_.create_minus_stmts(v, std::to_string(bias));
+          low_bounds   = affine_bounds(selector_bounds(idx), -bias, 1);
+          return;
         }
         int64_t bias = range.upper() - (width_up - 1);
-        return {std::nullopt, builder_.create_minus_stmts(std::to_string(bias), v)};
+        dyn_low      = builder_.create_minus_stmts(std::to_string(bias), v);
+        low_bounds   = affine_bounds(selector_bounds(idx), bias, -1);
       };
 
+      // `base` is the root variable itself (not a member or an element of it)
+      const auto* root = &base;
+      while (root->kind == ExpressionKind::Conversion) {
+        root = &root->as<slang::ast::ConversionExpression>().operand();
+      }
+      const bool    whole_root = root->kind == ExpressionKind::NamedValue || root->kind == ExpressionKind::HierarchicalValue;
+      const int64_t count      = static_cast<int64_t>(range.width());  // elements of `base`
       if (lhs.kind == ExpressionKind::ElementSelect) {
-        std::tie(const_low, dyn_low) = normalize(lhs.as<slang::ast::ElementSelectExpression>().selector(), 1, 1);
+        normalize(lhs.as<slang::ast::ElementSelectExpression>().selector(), 1, 1);
+        if (!dyn_low.empty()) {
+          // an index past `base` writes nothing
+          dyn_low = guard_element_index(dyn_low, low_bounds, count, whole_root, out.in_range);
+        }
       } else {
         const auto& rs   = lhs.as<slang::ast::RangeSelectExpression>();
         auto        kind = rs.getSelectionKind();
@@ -2001,9 +2292,9 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
         } else {
           int64_t w = ti.bits / stride;
           if (kind == RangeSelectionKind::IndexedUp) {
-            std::tie(const_low, dyn_low) = normalize(rs.left(), 1, w);
+            normalize(rs.left(), 1, w);
           } else {
-            std::tie(const_low, dyn_low) = normalize(rs.left(), w, 1);
+            normalize(rs.left(), w, 1);
           }
         }
       }
@@ -2014,10 +2305,29 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
       }
       if (!dyn_low.empty()) {
         std::string term = stride == 1 ? dyn_low : builder_.create_mult_stmts(dyn_low, std::to_string(stride));
-        out.dyn_off      = out.dyn_off.empty() ? term : builder_.create_plus_stmts(out.dyn_off, term);
+        // A runtime part select that may leave `base` keeps the container, so
+        // the writer can clip the window to it. When `base` is the root
+        // itself, only a window that can start below bit 0 needs that: the
+        // write already stops at the root's declared width.
+        const auto  term_bounds     = scaled_bounds(low_bounds, stride);
+        const bool  may_be_negative = !term_bounds || term_bounds->first < 0;
+        const bool  may_pass_top    = !term_bounds || term_bounds->second + ti.bits > count * stride;
+        if (lhs.kind == ExpressionKind::RangeSelect && (may_be_negative || (may_pass_top && !whole_root))) {
+          out.window = Packed_window{.cont_const = out.const_off,
+                                     .cont_dyn   = out.dyn_off,
+                                     .cont_bits  = count * stride,
+                                     .clip_top   = !whole_root,
+                                     .lo         = term,
+                                     .lo_bounds  = term_bounds};
+        }
+        out.dyn_off = out.dyn_off.empty() ? term : builder_.create_plus_stmts(out.dyn_off, term);
       }
       out.width     = ti.bits;
       out.is_signed = ti.is_signed;
+      if (out.dyn_off.empty()) {
+        out.reach_lo = std::max(out.reach_lo, out.const_off);
+        out.reach_hi = std::min(out.reach_hi, out.const_off + ti.bits - 1);
+      }
       return true;
     }
 
@@ -2052,12 +2362,13 @@ void Slang_context::emit_packed_rmw(const Packed_lv& lv, const std::string& rhs,
     }
     return;
   }
-  // M7: a partial write whose resolved root is a BUNDLE port has no flat net
-  // to set_mask — split/splice on the field leaves instead. Every packed
-  // lvalue chain on a bundle port (`resp.f = v`, `resp.f[3:0] = v`,
-  // `resp[10:3] = v`, dynamic-index forms) funnels through here.
-  if (bundle_port_of(*lv.base) != nullptr) {
-    emit_bundle_port_rmw(lv, rhs, sr);
+  // M7: a partial write whose resolved root is a BUNDLE port, or a per-field
+  // struct var, has no flat net to set_mask — split/splice on the field
+  // leaves instead. Every packed lvalue chain on such a root (`resp.f = v`,
+  // `resp.f[3:0] = v`, `resp[10:3] = v`, `s.arr[j][1:0] = v`, dynamic-index
+  // forms) that assign_to's field shortcuts do not take funnels through here.
+  if (bundle_port_of(*lv.base) != nullptr || struct_var_info_.contains(lv.base)) {
+    emit_leaf_split_rmw(lv, rhs, sr);
     return;
   }
 
@@ -2090,47 +2401,160 @@ void Slang_context::emit_packed_rmw(const Packed_lv& lv, const std::string& rhs,
     return;
   }
 
-  if (current_assign_nonblocking_) {
-    // Pending writes supply untouched bits; RHS/index reads still observe Q.
-    auto shamt = lv.const_off == 0 ? lv.dyn_off : builder_.create_plus_stmts(lv.dyn_off, std::to_string(lv.const_off));
-    note_write(*lv.base, true, sr.start());
-    emit_dynamic_slice_write(base_name, shamt, static_cast<int>(lv.width), val);
+  // A runtime position is a range write, blocking or nonblocking: pending
+  // writes supply the untouched bits, and RHS/index reads still observe Q.
+  const auto dr = dynamic_write_range(lv, val);
+  note_write(*lv.base, current_assign_nonblocking_, sr.start());
+  const auto bi = tinfo(lv.base->getType());
+  if (!current_assign_nonblocking_ && bi.is_signed && !flat_port_syms_.contains(lv.base)) {
+    // A signed local declares no range (declare_value_symbol) and every store
+    // to it is fit_wrap'd, so the write splices a copy of its bit pattern and
+    // stores the sign-extended word back.
+    auto        cur_p = to_pattern(read_symbol(*lv.base, sr), bi.bits, true);
+    If_in_range lands(builder_, dr.in_range);
+    builder_.create_assign_stmts(base_name, fit_wrap(splice_range(cur_p, dr.lo, dr.hi, dr.piece), bi.bits, true));
     return;
   }
-  // Dynamic offset: tolg requires const set_mask masks, so lower an explicit
-  // read-modify-write with shifts (and/or/shl) on the full base.
-  auto bi = tinfo(lv.base->getType());
-  if (flat_port_syms_.contains(lv.base)) {
-    const auto& mi = mem_info_.at(lv.base);
-    bi.bits        = static_cast<int>(mi.size * mi.elem_bits);
-    bi.is_signed   = false;
-  }
-  auto cur   = read_symbol(*lv.base, sr);
-  auto cur_p = to_pattern(cur, bi.bits, bi.is_signed);
-
-  std::string shamt    = lv.const_off == 0 ? lv.dyn_off : builder_.create_plus_stmts(lv.dyn_off, std::to_string(lv.const_off));
-  auto        sel_mask = builder_.create_shl_stmts(mask_text(static_cast<int>(lv.width)), shamt);
-  auto        keep     = builder_.create_bit_and_stmts(cur_p, builder_.create_bit_not_stmts(sel_mask));
-  auto        ins      = builder_.create_shl_stmts(val, shamt);
-  auto        next     = builder_.create_bit_or_stmts({keep, ins});
-  // SHL is unbounded in LNAST/LGraph, while a dynamic packed-lvalue update is
-  // still constrained to the declared packed base. Make that language-level
-  // precision boundary explicit before a later conditional/register merge.
-  next                 = trunc_to(next, bi.bits);
-  if (bi.is_signed) {
-    next = builder_.create_sext_stmts(next, std::to_string(bi.bits - 1));
-  }
-  note_write(*lv.base, current_assign_nonblocking_, sr.start());
-  builder_.create_assign_stmts(base_name, next);
+  If_in_range lands(builder_, dr.in_range);
+  emit_dynamic_slice_write(base_name, dr.lo, dr.hi, dr.piece);
 }
 
-void Slang_context::emit_dynamic_slice_write(const std::string& base, const std::string& lo, int width, const std::string& value) {
-  auto  hi       = width == 1 ? lo : builder_.create_plus_stmts(lo, std::to_string(width - 1));
-  auto& ln       = *builder_.lnast;
-  auto  range    = builder_.add_child(Lnast_ntype::create_range());
-  auto  range_id = builder_.create_lnast_tmp();
-  ln.add_child(range, Lnast_node::create_ref(range_id));
+std::string Slang_context::dynamic_mask(const std::string& lo, const std::string& hi) {
+  auto& ln    = *builder_.lnast;
+  auto  range = builder_.add_child(Lnast_ntype::create_range());
+  auto  rid   = builder_.create_lnast_tmp();
+  ln.add_child(range, Lnast_node::create_ref(rid));
   builder_.add_value_child_pub(range, lo);
   builder_.add_value_child_pub(range, hi);
-  builder_.create_set_mask_stmts(base, range_id, value);
+  return rid;
+}
+
+std::string Slang_context::splice_range(const std::string& src, const std::string& lo, const std::string& hi,
+                                        const std::string& piece) {
+  return splice_mask(src, dynamic_mask(lo, hi), piece);
+}
+
+std::string Slang_context::splice_mask(const std::string& src, const std::string& mask, const std::string& piece) {
+  auto& ln  = *builder_.lnast;
+  auto  dst = builder_.create_lnast_tmp();
+  auto  sm  = builder_.add_child(Lnast_ntype::create_set_mask());
+  ln.add_child(sm, Lnast_node::create_ref(dst));
+  builder_.add_value_child_pub(sm, src);
+  builder_.add_value_child_pub(sm, mask);
+  builder_.add_value_child_pub(sm, piece);
+  return dst;
+}
+
+Slang_context::Dynamic_range Slang_context::dynamic_write_range(const Packed_lv& lv, const std::string& val) {
+  const auto offset = [&](int64_t c, const std::string& d) {
+    if (d.empty()) {
+      return std::to_string(c);
+    }
+    return c == 0 ? d : builder_.create_plus_stmts(d, std::to_string(c));
+  };
+  const auto width = static_cast<int>(lv.width);
+  if (!lv.window) {
+    auto lo = offset(lv.const_off, lv.dyn_off);
+    auto hi = width == 1 ? lo : builder_.create_plus_stmts(lo, std::to_string(width - 1));
+    return {.lo = lo, .hi = hi, .piece = val, .in_range = lv.in_range};
+  }
+  const auto& w    = *lv.window;
+  const auto  win  = clip_window(w.lo, width, w.cont_bits, val, w.lo_bounds, w.clip_top);
+  const auto  cont = offset(w.cont_const, w.cont_dyn);
+  auto        in   = lv.in_range;
+  if (!win.meets.empty()) {
+    in = in.empty() ? win.meets : builder_.create_log_and_stmts(in, win.meets);
+  }
+  if (cont == "0") {
+    return {.lo = win.lo, .hi = win.hi, .piece = win.piece, .in_range = in};
+  }
+  auto lo = builder_.create_plus_stmts(cont, win.lo);
+  auto hi = win.hi == win.lo ? lo : builder_.create_plus_stmts(cont, win.hi);
+  return {.lo = lo, .hi = hi, .piece = win.piece, .in_range = in};
+}
+
+Slang_context::Clipped_window Slang_context::clip_window(const std::string& lo, int width, int64_t cont_bits,
+                                                         const std::string&                                val,
+                                                         const std::optional<std::pair<int64_t, int64_t>>& lo_bounds,
+                                                         bool                                              clip_top) {
+  auto       hi              = width == 1 ? lo : builder_.create_plus_stmts(lo, std::to_string(width - 1));
+  const auto top             = cont_bits - 1;
+  const bool may_be_negative = !lo_bounds || lo_bounds->first < 0;
+  const bool may_pass_top    = clip_top ? !lo_bounds || lo_bounds->second + width - 1 > top : !lo_bounds || lo_bounds->second > top;
+  if (!may_be_negative && !may_pass_top) {
+    return {.meets = "", .lo = lo, .hi = hi, .piece = val};
+  }
+  // Verilog writes only the bits of a part select inside its container: a
+  // window that misses it writes nothing, one running past bit W-1 drops its
+  // top bits, and one starting below bit 0 (`m[i][b -: 4]` with b < 3) drops
+  // the value's low `-lo` bits. Spell that out: the write is guarded by the
+  // window meeting the container, and its bounds are clipped to narrow typed
+  // values, so the range is inside the container by construction (Pyrope,
+  // which the writer emits, has no out-of-range write). Without `clip_top`
+  // only `lo` is kept inside: the destination's width drops the rest.
+  const int pos_bits = std::max(1, static_cast<int>(std::bit_width(static_cast<uint64_t>(top))));
+  const int hi_bits  = clip_top ? pos_bits : std::max(1, static_cast<int>(std::bit_width(static_cast<uint64_t>(top + width - 1))));
+
+  // `mut t:u<bits> = seed; if cond { t = alt }`: a typed mux temp, the
+  // lower_conditional_expr shape.
+  auto clip = [&](const std::string& seed, int bits, const std::string& cond, const std::string& alt) {
+    auto t = fresh_local("clip");
+    builder_.create_declare_stmts(t, "mut", int_max_str(bits, false), int_min_str(bits, false));
+    builder_.create_assign_stmts(t, seed);
+    auto guard = builder_.create_if_stmt(false);
+    builder_.add_if_cond(guard, cond);
+    builder_.push_stmts(builder_.add_if_stmts(guard));
+    builder_.create_assign_stmts(t, alt);
+    builder_.pop_stmts();
+    return t;
+  };
+  std::string meets;  // the window meets the container (only the checks the bounds leave open)
+  if (!lo_bounds || lo_bounds->first + width - 1 < 0) {
+    meets = builder_.create_ge_stmts(hi, "0");
+  }
+  if (!lo_bounds || lo_bounds->second > top) {
+    auto below_top = builder_.create_le_stmts(lo, std::to_string(top));
+    meets          = meets.empty() ? below_top : builder_.create_log_and_stmts(meets, below_top);
+  }
+  auto lo_c  = trunc_to(lo, pos_bits);
+  auto hi_c  = width == 1 ? lo_c : trunc_to(hi, hi_bits);
+  auto piece = val;
+  if (width > 1 && may_be_negative) {
+    // -lo is in [1, width - 1] when the window starts below bit 0 and meets
+    // the container: keep just those bits, so the shift amount is non-negative.
+    auto below = builder_.create_lt_stmts(lo, "0");
+    auto drop  = trunc_to(builder_.create_minus_stmts("0", lo), std::max(1, std::bit_width(static_cast<unsigned>(width - 1))));
+    lo_c       = clip(lo_c, pos_bits, below, "0");
+    piece      = clip(val, width, below, builder_.create_sra_stmts(val, drop));
+  }
+  if (width > 1 && may_pass_top && clip_top) {
+    hi_c = clip(hi_c, pos_bits, builder_.create_gt_stmts(hi, std::to_string(top)), std::to_string(top));
+  }
+  return {.meets = meets, .lo = lo_c, .hi = hi_c, .piece = piece};
+}
+
+std::string Slang_context::guard_element_index(const std::string& idx, const std::optional<std::pair<int64_t, int64_t>>& bounds,
+                                               int64_t count, bool at_root, std::string& in_range) {
+  const bool may_be_negative = !bounds || bounds->first < 0;
+  const bool may_pass_top    = !bounds || bounds->second > count - 1;
+  if (!may_be_negative && (!may_pass_top || at_root)) {
+    return idx;
+  }
+  std::string ok;
+  if (may_be_negative) {
+    ok = builder_.create_ge_stmts(idx, "0");
+  }
+  if (may_pass_top) {
+    auto le = builder_.create_le_stmts(idx, std::to_string(count - 1));
+    ok      = ok.empty() ? le : builder_.create_log_and_stmts(ok, le);
+  }
+  in_range = in_range.empty() ? ok : builder_.create_log_and_stmts(in_range, ok);
+  // Under the check the ordinal fits its own width, so the position computed
+  // from it is non-negative by construction.
+  return trunc_to(idx, std::max(1, static_cast<int>(std::bit_width(static_cast<uint64_t>(count - 1)))));
+}
+
+void Slang_context::emit_dynamic_slice_write(const std::string& base, const std::string& lo, const std::string& hi,
+                                             const std::string& value) {
+  builder_.create_set_mask_stmts(base, dynamic_mask(lo, hi), value);
 }

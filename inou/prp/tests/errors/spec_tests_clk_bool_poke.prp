@@ -1,0 +1,29 @@
+/*
+:name: spec_tests_clk_bool_poke
+:type: error
+:error: Clock
+*/
+// Spec (qa.md appendix section 6): "Test harnesses declare/pass a real Clock
+// (no `clk=1`)"; "Clock and Reset are distinct basic types (`Clock does Bool`
+// is false)"; "No derived clocks / clock muxes for now". docs 05b "Running
+// cycles (tick)": "it passes a real Clock such as the tick's `clock`."
+//
+// Rule pinned: a test may not synthesize a clock waveform from a Bool
+// expression (`d.clk = (clock & 1) == 0`) -- a Bool is not a Clock; the test
+// passes the tick's real `clock` (or leaves the input unbound to auto-wire).
+
+mod spec_cbp_cnt(clk:Clock, en:Bool) -> (q:U8@[0]) {
+  reg c:U8 = 0
+  if en { wrap c = c + 1 }
+  q = c
+}
+
+test spec_cbp.bool_clk {
+  mut d = spec_cbp_cnt
+  tick 8 {
+    d.clk = (clock & 1) == 0   // locate_error_here
+    d.en  = true
+    step
+  }
+  assert(d.q == 8)
+}

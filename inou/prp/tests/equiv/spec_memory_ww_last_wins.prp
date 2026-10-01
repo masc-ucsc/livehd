@@ -1,0 +1,26 @@
+/*
+:name: spec_memory_ww_last_wins
+:type: equiv
+:verilog_top: spec_memory_ww_last_wins
+:pyrope_top: spec_memory_ww_last_wins
+*/
+// SPEC (docs 08-memories.md, Same-cycle ordering table, write-write row):
+//   "| `a2 == a3` (write-write) | undefined | `d3` commits (last write wins) |
+//    undefined | `d3` commits (last write wins) |"  (columns none/old/fwd/program)
+// Rule encoded here: two same-cycle writes to one address commit the LATER one
+// under "program" (the default, memory `p`) and under "old" (memory `o`). The
+// reads sit before the writes, so both return the committed word.
+pub mod spec_memory_ww_last_wins(clk:Clock, w1:Bool, a1:U2, d1:U4, w2:Bool, a2:U2, d2:U4, ra:U2) -> (qp:U4@[0], qo:U4@[0]) {
+  reg p:[4]U4 = nil
+  reg o:[4]U4:[ordering="old"] = nil
+  qp = p[ra]
+  qo = o[ra]
+  if w1 {
+    p[a1] = d1
+    o[a1] = d1
+  }
+  if w2 {
+    p[a2] = d2
+    o[a2] = d2
+  }
+}

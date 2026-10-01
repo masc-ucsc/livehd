@@ -1,0 +1,40 @@
+/*
+:name: test_reads_file_const
+:type: simulation
+*/
+// Ruling 2026-09-28 (24) + 09-verification.md: a file-scope constant-valued
+// `const` is lexically visible everywhere, `test` blocks included, and so is a
+// `comptime const`. Before, `lhd compile` accepted this file but `lhd sim`
+// failed to build its generated driver: "drv.cpp: error: use of undeclared
+// identifier 'K'" -- the driver generator emitted the name without the value.
+// The driver replays a file const's right-hand side against FILE scope only.
+// A test LOCAL or PARAMETER named like a file const is shadowing, an error
+// (errors/test_local_shadows_file_const.prp, and user ruling 2026-09-28 (31):
+// errors/test_param_shadows_const.prp -- the parameter used to hide `K` here).
+
+const K = 2
+comptime const M = K * 3
+const T = (const lo = 1, const hi = 9)
+
+mod dut(a:U8) -> (o:U8@[1]) {
+  reg r:U8 = 0
+  wrap r = a + K
+  o = r
+}
+
+test dut.reads_file_const {
+  mut d = dut
+  d.a = 3
+  tick 2 { step }
+  assert(d.o == 3 + K)
+  assert(d.o + M == 11)
+  mut acc = 0
+  tick M {
+    d.a = K
+    step
+    acc += d.o - T.lo
+  }
+  puts("acc={acc}")
+  assert(acc == M * (K + K - T.lo))
+  assert(T.hi == 9)
+}

@@ -7,8 +7,8 @@
 // clock with `step`, and peeks `sum`. A test-local golden value mirrors the
 // accumulated total so the end-of-sim `assert` is self-checking.
 
-mod accumulator(din:u8) -> (sum:u32@[0]) {
-  reg total:u32 = 0
+mod accumulator(din:U8) -> (sum:U32@[0]) {
+  reg total:U32 = 0
 
   sum = total                   // combinational read of total.q -> @[0]
 

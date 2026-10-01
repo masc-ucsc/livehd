@@ -7,9 +7,9 @@
 // iteration pokes this cycle's bit, advances one clock with `step`, and peeks
 // the count. A test-local golden model mirrors the detector.
 
-mod seq_detect(din:bool) -> (count:u8@[0]) {
-  reg prev:bool = false
-  reg cnt:u8    = 0
+mod seq_detect(din:Bool) -> (count:U8@[0]) {
+  reg prev:Bool = false
+  reg cnt:U8    = 0
 
   count = cnt                       // combinational read of cnt.q -> @[0]
 

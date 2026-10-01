@@ -1,0 +1,12 @@
+/*
+:name: clkrst_clock_alias_data
+:type: error
+:tolg: 1
+:error: `clk` is a `Clock`, and a Clock is not data
+*/
+// docs 07-typesystem: a copy of a Clock is the same Clock, so logic over an
+// alias (or over a bit of it) is still a Clock used as data.
+pub mod clkrst_clock_alias_data(clk:Clock, a:U8) -> (o:U8@[0]) {
+  const c2 = clk
+  o = a ^ U8(c2#[0])   // locate_error_here
+}

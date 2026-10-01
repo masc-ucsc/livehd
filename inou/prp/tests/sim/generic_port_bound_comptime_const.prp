@@ -1,0 +1,47 @@
+/*
+:name: generic_port_bound_comptime_const
+:type: simulation
+*/
+// A generic-width port bound that mixes a generic with a file-scope `comptime
+// const` (`unsigned(bits=N * W)`), or that reads another port's declared width
+// (`Unsigned(bits=a.[bits] * 2)`). The specializer folds each bound under the
+// call's generic binds, both when a comb is inlined and when a mod is
+// specialized. The captured `store(W, 4)` in the lambda's body prologue and the
+// `a.[bits]` attribute read did not fold, so both calls were refused with
+// `type-bound-not-comptime`, even though that error's hint lists `comptime
+// const`s as allowed.
+
+comptime const W = 4
+
+comb cw<N=2>(a:Unsigned(bits=N * W)) -> (o:U8) {
+  o = a.[bits]
+}
+
+mod mw<N=2>(a:Unsigned(bits=N * W)) -> (o:U8@[0]) {
+  o = a.[bits]
+}
+
+comb dbl<N=2>(a:Unsigned(bits=N)) -> (o:Unsigned(bits=a.[bits] * 2)) {
+  o = a * a
+}
+
+mod generic_port_bound_comptime_const(x:U16, y:U4) -> (b1:U8@[0], b2:U8@[0], sq:U8@[0], sw:U8@[0]) {
+  b1 = cw<N=3>(a=x#[0..<12])
+  b2 = mw<N=4>(a=x)
+  const r = dbl<N=4>(a=y)
+  sq = r
+  sw = r.[bits]
+}
+
+test generic_port_bound_comptime_const.widths {
+  mut dut = generic_port_bound_comptime_const
+  tick 1 {
+    dut.x = 0x1234
+    dut.y = 15
+    step
+    assert(dut.b1 == 12, "comb: unsigned(bits=N * W), N=3, W=4")
+    assert(dut.b2 == 16, "mod: unsigned(bits=N * W), N=4, W=4")
+    assert(dut.sq == 225, "comb: 15 * 15 into unsigned(bits=a.[bits] * 2)")
+    assert(dut.sw == 8, "comb: the output is a.[bits] * 2 = 8 bits")
+  }
+}

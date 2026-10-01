@@ -6,13 +6,14 @@
 */
 
 // 2d-reg — per-reg flop-attr overrides beat the upass.reset_style flag
-// (default sync): `sync=false` selects an asynchronous reset and
-// `reset_pin=ref rst_n` binds the declared active-low input (the `_n`
-// suffix flips negreset), so no implicit reset input is minted.
-pub mod blink(rst_n:bool, en:bool) -> (q:u8@[0]) {
-  reg r:u8:[sync=false, reset_pin=ref rst_n] = 5
+// (default sync): `async=true` selects an asynchronous reset and
+// `reset_pin=rst_n` binds the declared `Reset` input, active-low
+// through `negreset=true` (a reset's name carries no polarity since
+// ruling 52), so no implicit reset input is minted.
+pub mod blink(rst_n:Reset, en:Bool) -> (q:U8@[0]) {
+  reg r:U8:[async=true, reset_pin=rst_n, negreset=true] = 5
   if en and r < 200 {
-    r = r + 1
+    wrap r = r + 1
   }
   q = r
 }

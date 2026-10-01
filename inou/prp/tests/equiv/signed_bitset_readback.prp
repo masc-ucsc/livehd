@@ -1,0 +1,41 @@
+/*
+:name: signed_bitset_readback
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// A bit write into a SIGNED variable changes bits of a signed value: reading
+// the variable back must see it as its declared type. Constant-position
+// writes (runtime-position ones already re-sign their result) produced the
+// unsigned bit pattern, so every comparison below saw a non-negative value,
+// and a write into the sign bit of an initialized local failed with "`v`
+// (range [0, 255]) may not fit its declared range [-128, 127]".
+//   o/y  -- an s8 OUTPUT assembled from two nibbles (outputs start as nil)
+//   n    -- the same on a `mut n:S8 = nil` local
+//   z    -- `mut v:S8 = 0`, then only the sign bit is written
+//   w    -- a narrower signed base (`c:S4`) keeps its sign extension above
+//           the written bit
+//   k    -- a negative constant base keeps its upper ones
+pub comb top(a:U4, b:U4, c:S4, e:U1) -> (o:S8, y:Bool, n:Bool, z:S8, w:S8, k:Bool) {
+  o#[0..<4] = a
+  o#[4..<8] = b
+  y = o < 0
+
+  mut m:S8 = nil
+  m#[0..<4] = a
+  m#[4..<8] = b
+  n = m < -64
+
+  mut v:S8 = 0
+  v#[7] = e
+  z = v
+
+  mut u:S8 = c
+  u#[0] = e
+  w = u
+
+  mut q:S8 = -1
+  q#[0..<4] = a
+  k = q < -8
+}

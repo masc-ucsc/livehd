@@ -17,20 +17,20 @@ mkdir -p "$W"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 cat >"$W/rca_assumed.prp" <<'EOF'
-comb full_adder(a:bool, b:bool, carry_in:bool) -> (result:u2) {
-  const ai = u1(a)
-  const bi = u1(b)
-  const ci = u1(carry_in)
+comb full_adder(a:Bool, b:Bool, carry_in:Bool) -> (result:U2) {
+  const ai = U1(a)
+  const bi = U1(b)
+  const ci = U1(carry_in)
   const sum = ai ^ bi ^ ci
   const carry_out = (ai & bi) | (ai & ci) | (bi & ci)
   result = sum | (carry_out << 1)
 }
 
-comb rca(a:u4, b:u4, carry_in:bool) -> (sum:u5) {
-  const lane0 = full_adder(a=bool(a#[0]), b=bool(b#[0]), carry_in=carry_in)
-  const lane1 = full_adder(a=bool(a#[1]), b=bool(b#[1]), carry_in=(lane0 & 2) != 0)
-  const lane2 = full_adder(a=bool(a#[2]), b=bool(b#[2]), carry_in=(lane1 & 2) != 0)
-  const lane3 = full_adder(a=bool(a#[3]), b=bool(b#[3]), carry_in=(lane2 & 2) != 0)
+comb rca(a:U4, b:U4, carry_in:Bool) -> (sum:U5) {
+  const lane0 = full_adder(a=Bool(a#[0]), b=Bool(b#[0]), carry_in=carry_in)
+  const lane1 = full_adder(a=Bool(a#[1]), b=Bool(b#[1]), carry_in=(lane0 & 2) != 0)
+  const lane2 = full_adder(a=Bool(a#[2]), b=Bool(b#[2]), carry_in=(lane1 & 2) != 0)
+  const lane3 = full_adder(a=Bool(a#[3]), b=Bool(b#[3]), carry_in=(lane2 & 2) != 0)
 
   sum = (lane0 & 1)
       | ((lane1 & 1) << 1)
@@ -39,15 +39,15 @@ comb rca(a:u4, b:u4, carry_in:bool) -> (sum:u5) {
       | ((lane3 & 2) << 3)
 }
 
-pub comb rca_top(a:u4, b:u4, carry_in:bool) -> (sum:u5) {
+pub comb rca_top(a:U4, b:U4, carry_in:Bool) -> (sum:U5) {
   assume_nocheck(carry_in)
   sum = rca(a=a, b=b, carry_in=carry_in)
 }
 EOF
 
 cat >"$W/plus_one.prp" <<'EOF'
-pub comb plus_one(a:u4, b:u4, carry_in:bool) -> (sum:u5) {
-  sum = u5(a) + u5(b) + 1
+pub comb plus_one(a:U4, b:U4, carry_in:Bool) -> (sum:U5) {
+  sum = U5(a) + U5(b) + 1
 }
 EOF
 
@@ -55,7 +55,7 @@ cat >"$W/rca_assumed.verify.prp" <<'EOF'
 const top = import("rca_assumed.rca_top")
 formal carry_in_one {
   mut acc = top
-  assert(acc.sum == u5(acc.a) + u5(acc.b) + 1, "RCA matches hard-coded +1")
+  assert(acc.sum == U5(acc.a) + U5(acc.b) + 1, "RCA matches hard-coded +1")
 }
 EOF
 

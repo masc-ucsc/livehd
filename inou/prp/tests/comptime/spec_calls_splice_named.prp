@@ -1,0 +1,21 @@
+/*
+:name: spec_calls_splice_named
+:type: comptime
+:verifier_pass: 3
+:verifier_fail: 0
+*/
+
+// qa.md Appendix §8: "named ++ named merges (overlapping names are an error, as
+// today)".
+// docs 03-bundle.md: `const ccat1 = (...a, ...b)` ==
+// `(const a=1, const b=2, const c=3)`; a same-named nested tuple merges its
+// subfields recursively.
+
+const a = (mut a=1, mut b=2)
+const b = (const c=3)
+const ccat1 = (...a, ...b)
+cassert(ccat1 == (const a=1, const b=2, const c=3))
+const ccat2 = (...a, const d=20, ...b)
+cassert(ccat2.d == 20 and ccat2.c == 3 and ccat2.a == 1)
+const deep = (...(const cfg=(const lo=2), const c=3), ...(const cfg=(const hi=20), const d=30))
+cassert(deep.cfg.lo == 2 and deep.cfg.hi == 20 and deep.d == 30)

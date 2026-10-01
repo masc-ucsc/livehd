@@ -1,0 +1,18 @@
+/*
+:name: spec_tests_tick_outside_test
+:type: error
+:error: tick
+*/
+// Spec: docs 05b "Running cycles (tick)": "That is what `tick` does -- a
+// **non-unrolling**, cycle-driven loop usable only inside `test`"; 09
+// status table: "`tick N { }` | `test` only".
+//
+// Rule pinned: a `tick` loop in a design body (here a `mod`) is an error.
+
+pub mod spec_tot(a:U8) -> (o:U8@[0]) {
+  mut s:U8 = 0
+  tick 3 {               // locate_error_here
+    wrap s = s + a
+  }
+  o = s
+}

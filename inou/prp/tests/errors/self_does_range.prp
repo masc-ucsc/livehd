@@ -9,8 +9,8 @@
 // range is NOT contained in the self type's declared range is rejected
 // (u32 receiver field on a u8 declared field).
 
-type t1 = (a:u8=nil, b:string="")
-type tw = (a:u32=nil, b:string="")
+type t1 = (a:U8=nil, b:String="")
+type tw = (a:U32=nil, b:String="")
 
 comb set_b(ref self:t1) {
   self.b = "foo"

@@ -1,0 +1,48 @@
+/*
+:name: comptime_int_bits_value
+:type: parsing lnast comptime
+:verifier_pass: 9
+:verifier_fail: 0
+*/
+
+// User ruling 2026-09-27 (04b-attributes.md "Integer Bitwidth"): `.[bits]` of
+// an UNTYPED COMPTIME integer is derived from its VALUE -- the minimal width
+// that holds it (13 -> 4, 0 -> 1, a negative value -> its signed width,
+// -4 -> 3). A typed value keeps its declared width, and an untyped RUNTIME
+// value still reads nil (phase2_attr_bits.prp). Today the untyped comptime
+// read is nil, so `N.[bits] == 4` is a false cassert and `W.[bits] + x` on a
+// generic is a nil-operand error.
+//
+// The expected widths are the compiler's own `bits` of a range holding
+// exactly that value: `Unsigned(max=13)` -> 4, `Signed(min=-4, max=-4)` -> 3,
+// `Signed(min=-5, max=-5)` -> 4, `Signed(min=-1, max=-1)` -> 1,
+// `Unsigned(max=16)` -> 5 (all discharge today).
+
+comptime const N = 13
+cassert(N.[bits] == 4)
+
+comptime const zero = 0
+cassert(zero.[bits] == 1)
+
+comptime const one = 1
+cassert(one.[bits] == 1)
+
+comptime const sixteen = 16
+cassert(sixteen.[bits] == 5)
+
+comptime const neg4 = -4
+cassert(neg4.[bits] == 3)
+
+comptime const neg1 = -1
+cassert(neg1.[bits] == 1)
+
+comptime const neg5 = -5
+cassert(neg5.[bits] == 4)
+
+// A TYPED comptime keeps its declared width, not the value's.
+comptime const typed:U8 = 13
+cassert(typed.[bits] == 8)
+
+// A generic parameter is a comptime binding too.
+comb bits_of<W>(x) -> (r) { r = W.[bits] + x }
+cassert(bits_of<W=13>(x=0) == 4)

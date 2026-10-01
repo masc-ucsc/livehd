@@ -1,0 +1,26 @@
+/*
+:name: spec_memory_bitwrite_generic
+:type: equiv
+:verilog_top: spec_memory_bitwrite_generic
+:pyrope_top: spec_memory_bitwrite_generic
+*/
+// SPEC (qa.md section 2, chat rulings, Memories): "Bit writes into generic-width
+// array elements (`m[i]#[j]`) are supported; memory write masks are allowed."
+// SPEC (qa.md appendix section 5): "Generic-width arrays (`reg r:[N]Unsigned(bits=W)`,
+// ...) and bit/slice writes into array elements (`m[i]#[j] = x`) are supported".
+// Rule encoded here: a single-bit write at runtime (i, j) into a GENERIC
+// `reg r:[N]Unsigned(bits=W)` memory, specialized at <N=4, W=8> and <N=2, W=4>.
+mod bw<N=4, W=8>(we:Bool, i:Unsigned(bits=std.clog2(N)), j:Unsigned(bits=std.clog2(W)), x:U1, ra:Unsigned(bits=std.clog2(N))) -> (q:Unsigned(bits=W)@[0]) {
+  reg r:[N]Unsigned(bits=W) = 0
+  q = r[ra]
+  if we {
+    r[i]#[j] = x
+  }
+}
+
+pub mod spec_memory_bitwrite_generic(clk:Clock, rst:Reset, we:Bool, ia:U2, ja:U3, ib:U1, jb:U2, x:U1, ra:U2, rb:U1) -> (qa:U8@[0], qb:U4@[0]) {
+  const ba = bw(we=we, i=ia, j=ja, x=x, ra=ra)
+  const bb = bw<N=2, W=4>(we=we, i=ib, j=jb, x=x, ra=rb)
+  qa = ba.q
+  qb = bb.q
+}

@@ -18,6 +18,6 @@
 // (Per-field writes `p.first=1; p.second=2` fail the same way today.) Fix is to
 // split a whole-tuple write to a tuple-typed output into per-leaf drives in
 // upass.detuple or tolg's output binding. Pairs with C.
-pub comb top(c:bool) -> (p:(first:u8, second:u8)) {
+pub comb top(c:Bool) -> (p:(first:U8, second:U8)) {
   p = (first=1, second=2)
 }

@@ -1,0 +1,43 @@
+/*
+:name: generic_loop_port_width
+:type: equiv
+:pyrope_top: top
+:verilog_top: top
+*/
+// lhdtrack suggestions 1.1/1.2 -- generic-width ports of a comb TEMPLATE
+// crossing a ROLLED loop boundary (the default, `compile.unroll=false`), checked
+// on the EMITTED Verilog (the sim twin is sim/loop_roll_generic_port_width.prp).
+// The inliner typed a generic-width param from its actual instead of folding
+// the declared bound (and left a generic-width output untyped); when the actual
+// could not supply a range (an io port of 62+ bits, or an expression temp with
+// no declared range) the roller read the template's `prim_type_int(ref %tmp, 0)`
+// and gave the lifted `__loop` a ONE-bit `data` / `o__carry_in` port. LEC
+// refuted it: x(ref=254 impl=0), y(ref=255 impl=1) @ a=255, b=1, sel=1.
+//
+//   w: `Unsigned(bits=16 * N)` with a 64-bit io actual, read by the loop
+//   x: an expression actual `a ^ b` (32 bits: the 62-bit threshold of the io
+//      path does not apply; its temp simply has no declared range) plus a
+//      bit-select actual for the generic-width `sel`
+//   y: `-> (o:Unsigned(bits=W))` carried across iterations
+//
+// No state: the stem belongs in `_STATEMATCH_COMB` (inou/prp/BUILD).
+comb orsel<N=1>(sel:Unsigned(bits=N), data:Unsigned(bits=16 * N)) -> (o:U16) {
+  mut acc:U16 = 0
+  for i in 0..<N {
+    if sel#[i] == 1 { acc |= data#[(i * 16)..+16] }
+  }
+  o = acc
+}
+
+comb orlane<W=1>(sel:U4, data:Unsigned(bits=4 * W)) -> (o:Unsigned(bits=W)) {
+  o = 0
+  for i in 0..<4 {
+    if sel#[i] == 1 { o |= data#[(i * W)..+W] }
+  }
+}
+
+pub mod top(sel:U4, wide:U64, a:U32, b:U32) -> (w:U16@[0], x:U16@[0], y:U8@[0]) {
+  w = orsel<N=4>(sel=sel, data=wide)
+  x = orsel<N=2>(sel=sel#[0..<2], data=a ^ b)
+  y = orlane<W=8>(sel=sel, data=a)
+}

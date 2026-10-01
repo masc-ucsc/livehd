@@ -1,0 +1,100 @@
+/*
+:name: bool_port_boundary
+:type: simulation
+*/
+// User ruling 2026-09-27: `foo:Bool` is a legal port at every level (the top
+// included) and bool/int never mix implicitly, so a correct design converts
+// at EVERY boundary: `Bool(bit)` into a bool input, `U1(flag)` wherever a
+// bool output or bool port meets arithmetic or a U1 port, and plain
+// bool<->bool everywhere else.
+//
+// Today `U1(x)` of a PURE ALIAS fails with "call to undefined function 'u1'
+// -- no such pipe/mod/comb or built-in cast": a destructured output
+// (`const (rdy, cnt) = leaf(...)` then `U1(rdy)`) or `const r = <Bool port>`
+// then `U1(r)`. The cast resolver finds declared facts only for a declared
+// variable or a `inst.out` temp, and an untyped alias has none, so the cast
+// survives to tolg. `U1(inst.rdy)` on a named instance and `U1(a and b)`
+// already work. sim/single_output_instance_cast.prp covers the instance-alias
+// shapes with the same root cause; this fixture adds the bool-PORT alias.
+
+mod leaf(go:Bool, n:U4) -> (rdy:Bool@[0], cnt:U4@[0]) {
+  rdy = go and n != 0
+  cnt = if go { n } else { 0 }
+}
+
+pub mod bool_port_boundary(v:U8, en:Bool) -> (sum:U8@[0], flag:Bool@[0], lo:U1@[0], eb:U1@[0]) {
+  const inst       = leaf(go=en and Bool(v#[0]), n=v#[4..<8])   // bool in: Bool and Bool(bit)
+  const (rdy, cnt) = leaf(go=Bool(v#[1]), n=v#[4..<8])          // destructured outputs
+  sum  = (cnt << 2) + (U1(inst.rdy) << 1) + U1(rdy)                // bool out -> arithmetic
+  flag = rdy or inst.rdy                                             // bool out -> bool port
+  lo   = U1(rdy)                                                     // bool out -> U1 port
+  const en_a = en                                                    // alias of a bool PORT
+  eb   = U1(en_a)                                                    // bool port -> U1 port
+}
+
+test bool_port_boundary.convert {
+  mut d = bool_port_boundary
+  mut st1:U8 = 0
+  mut f1 = false
+  mut l1:U1 = 0
+  mut e1:U1 = 0
+  mut st2:U8 = 0
+  mut f2 = true
+  mut e2:U1 = 1
+  mut st3:U8 = 0
+  mut f3 = true
+  mut l3:U1 = 1
+  mut e3:U1 = 0
+  mut st4:U8 = 0
+  mut f4 = false
+  mut l4:U1 = 1
+  tick 1 {
+    d.v  = 0x53        // n=5, bit1=1, bit0=1
+    d.en = true
+    step
+    st1 = d.sum
+    f1 = d.flag
+    l1 = d.lo
+    e1 = d.eb
+  }
+  tick 1 {
+    d.v  = 0x51        // n=5, bit1=0, bit0=1; en=false gates inst
+    d.en = false
+    step
+    st2 = d.sum
+    f2 = d.flag
+    e2 = d.eb
+  }
+  tick 1 {
+    d.v  = 0x03        // n=0: both rdy are false even with go set
+    d.en = true
+    step
+    st3 = d.sum
+    f3 = d.flag
+    l3 = d.lo
+    e3 = d.eb
+  }
+  tick 1 {
+    d.v  = 0xF1        // n=15, bit1=0, bit0=1: only the named instance is ready
+    d.en = true
+    step
+    st4 = d.sum
+    f4 = d.flag
+    l4 = d.lo
+  }
+  puts("st1={st1} f1={f1} l1={l1} e1={e1} st2={st2} f2={f2} e2={e2} st3={st3} f3={f3} l3={l3} e3={e3} st4={st4} f4={f4} l4={l4}")
+  assert(st1 == 23)     // (5<<2) + (1<<1) + 1
+  assert(f1)
+  assert(l1 == 1)
+  assert(e1 == 1)      // en=true
+  assert(st2 == 0)      // inst gated off by en, destructured go=false -> cnt=0
+  assert(not f2)
+  assert(e2 == 0)      // en=false
+  assert(st3 == 0)      // n=0 -> cnt=0, both rdy false
+  assert(not f3)
+  assert(l3 == 0)
+  assert(e3 == 1)
+  assert(st4 == 2)      // cnt=0 (go=false), inst.rdy=1
+  assert(f4)
+  assert(l4 == 0)
+}

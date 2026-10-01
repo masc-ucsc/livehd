@@ -6,12 +6,12 @@
 */
 
 // Division result fits into typed destinations (range-fit check).
-// `(-9)/3 == -3` clearly fits s3 (range -4..3). The plain `d == -3`
+// `(-9)/3 == -3` clearly fits S3 (range -4..3). The plain `d == -3`
 // cassert proves the value is really -3.
-const a:u8 = 200 / 2
-const b:s4 = (-14) / 2
-const c:u1 = 5 / 5
-const d:s3 = (-9) / 3
+const a:U8 = 200 / 2
+const b:S4 = (-14) / 2
+const c:U1 = 5 / 5
+const d:S3 = (-9) / 3
 
 cassert(a == 100)
 cassert(b == -7)

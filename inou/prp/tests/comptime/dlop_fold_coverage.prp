@@ -39,13 +39,13 @@ const bn = ~b            // not -> -244
 cassert(b == 0xf3)
 cassert(bn == -244)
 
-// ---- bit-select / mask / extend (width-pinned u8) ----
-const v:u8 = 0ub1010_1100      // 0xac
+// ---- bit-select / mask / extend (width-pinned U8) ----
+const v:U8 = 0ub1010_1100      // 0xac
 const lo = v#[0..=3]           // get_mask low nibble  -> 0xc (12)
 const hi = v#[4..=7]           // get_mask high nibble -> 0xa (10), compressed to LSB
 cassert(lo == 12 and hi == 10)
 
-mut w:u8 = 0
+mut w:U8 = 0
 w#[0..=3] = 0xe                // set_mask low nibble  -> 0x0e
 w#[4..=7] = 0x5                // set_mask high nibble -> 0x5e (94)
 cassert(w == 0x5e)

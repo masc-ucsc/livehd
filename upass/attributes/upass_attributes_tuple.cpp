@@ -211,6 +211,13 @@ std::optional<Dlop> uPass_attributes::derive_aggregate_size(std::string_view bas
   // separately by .[fields]; a named-only or empty tuple has size zero.
   if (runner_st != nullptr && bundle_key::is_single_level(base)) {
     if (const auto b = runner_st->get_bundle(base); b) {
+      // A DECLARED array has at least its declared (outer) extent whatever it
+      // holds: `mut x:[4]U3 = nil` leaves the contents undefined, not the
+      // shape. A value built from one (`x ++ x`, a copy grown by `++=`) still
+      // carries the declared attr, so its own entries win when there are more.
+      const auto& declared_attr = b->get_attr("__array_size");
+      const auto  declared      = declared_attr.is_just_i64() ? declared_attr.to_just_i64() : int64_t{0};
+
       const auto& start = b->get_attr("rng_s");
       const auto& end   = b->get_attr("rng_e");
       const auto& step  = b->get_attr("rng_step");
@@ -220,7 +227,16 @@ std::optional<Dlop> uPass_attributes::derive_aggregate_size(std::string_view bas
         return span.is_negative() ? *Dlop::create_integer(0) : *span.div_op(step)->add_op(*Dlop::create_integer(1));
       }
       if (!b->is_scalar() || b->get_value_kind() == upass::Kind::tuple) {
-        return *Dlop::create_integer(static_cast<int64_t>(b->unnamed_top_count()));
+        // An array whose extent its uses infer (`mut a:[] = 0; a[3] = v`) is
+        // as large as its largest position so far, written or not.
+        int64_t entries = static_cast<int64_t>(b->unnamed_top_count());
+        for (const auto& tl : b->top_levels()) {
+          entries = std::max<int64_t>(entries, tl.pos + 1);
+        }
+        return *Dlop::create_integer(std::max(declared, entries));
+      }
+      if (declared > 0) {
+        return *Dlop::create_integer(declared);
       }
     }
   }

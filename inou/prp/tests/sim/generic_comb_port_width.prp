@@ -1,0 +1,114 @@
+/*
+:name: generic_comb_port_width
+:type: simulation
+:expect_instances: u_loop_0=1 u_loop_1=1 u_loop_2=1
+*/
+// lhdtrack suggestions 1.1: a generic `comb` whose PORT widths depend on the
+// generic (`pm:Unsigned(bits=N * N)`) is inlined, not specialized like a `mod`.
+// The inlined parameter must take the width the FOLDED generic bound gives it,
+// never the width of whatever the caller happened to pass.
+//
+// * g8 / gd: a 64-bit parameter read inside a rolled `for` (the default,
+//   `compile.unroll=false`). The inliner adopted the actual's type, found none
+//   for a 62+-bit io port (its range is not an i64), and the loop roller then
+//   built the lifted `__loop` body's `pm` port from the TEMPLATE's
+//   `prim_type_int(ref %tmp, 0)` -- ONE bit -- so every lane above 0 read 0
+//   (g8 was 1, not 0xff). gd binds N only through the default `<N=8>`.
+// * g4: the same with a 16-bit EXPRESSION actual (`p4 | q4`): no declared type
+//   to adopt, so the port was 1 bit even though it is narrow.
+// * wb: `a.[bits]` of `a:Unsigned(bits=N)` with N=4 and a NARROWER U2 actual
+//   was 2 (the actual's width), not the declared 4.
+// * sc / sg / sm / sr: an argument WIDER than the parameter is a compile error
+//   (user ruling 2026-09-27, see errors/*_arg_wider_than_*.prp); the caller
+//   slices explicitly. That spelling must keep compiling for a plain comb, a
+//   generic comb and a mod, and each lane must land where it was sliced from.
+//   An expression that provably fits (sr: `w16#[0..<3] + 1`, [1, 8] into a
+//   U4) needs no slice at all.
+//
+// `:expect_instances:` pins the three `for` loops (g4, g8, gd) ROLLED: the
+// unrolled fallback computes the right values and must not count as a fix.
+comb pick<N=2>(req:Unsigned(bits=N), pm:Unsigned(bits=N * N)) -> (grant:Unsigned(bits=N)) {
+  mut can:Unsigned(bits=N) = 0
+  for i in 0..<N {
+    can#[i] = pm#[i * N + i]
+  }
+  grant = req & can
+}
+
+comb dflt<N=8>(req:Unsigned(bits=N), pm:Unsigned(bits=N * N)) -> (grant:Unsigned(bits=N)) {
+  mut can:Unsigned(bits=N) = 0
+  for i in 0..<N {
+    can#[i] = pm#[i * N + i]
+  }
+  grant = req & can
+}
+
+comb width<N=2>(a:Unsigned(bits=N)) -> (w:U8) {
+  w = a.[bits]
+}
+
+comb pass4(a:U4) -> (o:U4) {
+  o = a
+}
+
+comb passg<N=2>(a:Unsigned(bits=N)) -> (o:Unsigned(bits=N)) {
+  o = a
+}
+
+mod passm(a:U4) -> (o:U4@[0]) {
+  o = a
+}
+
+mod generic_comb_port_width(r4:U4, p4:U16, q4:U16, r8:U8, p8:U64, x:U2, w16:U16)
+  -> (g4:U4@[0], g8:U8@[0], gd:U8@[0], wb:U8@[0], sc:U4@[0], sg:U4@[0], sm:U4@[0], sr:U4@[0]) {
+  g4 = pick<N=4>(req=r4, pm=p4 | q4)
+  g8 = pick<N=8>(req=r8, pm=p8)
+  gd = dflt(req=r8, pm=p8)
+  wb = width<N=4>(a=x)
+  sc = pass4(a=w16#[4..<8])
+  sg = passg<N=4>(a=w16#[8..<12])
+  sm = passm(a=w16#[12..<16])
+  sr = pass4(a=w16#[0..<3] + 1)
+}
+
+test generic_comb_port_width.lanes {
+  mut d = generic_comb_port_width
+  tick 2 {
+    if clock == 0 {
+      d.r4  = 0xf
+      d.p4  = 0x8400                   // diagonal bits 10 and 15 -> lanes 2 and 3
+      d.q4  = 0x0021                   // diagonal bits 0 and 5   -> lanes 0 and 1
+      d.r8  = 0xff
+      d.p8  = 0x8040_2010_0804_0201    // every diagonal bit i*8+i
+      d.x   = 1
+      d.w16 = 0x1234
+    } else {
+      d.r4  = 0xa
+      d.p4  = 0x8000                   // lane 3 only
+      d.q4  = 0x0020                   // lane 1 only
+      d.r8  = 0xf0
+      d.p8  = 0x8000_2000_0000_0000    // lanes 5 and 7
+      d.x   = 3
+      d.w16 = 0xc6a9
+    }
+    step
+    if clock == 0 {
+      assert(d.g4 == 0xf, "N=4 grant through an expression actual")
+      assert(d.g8 == 0xff, "N=8 grant through a 64-bit actual")
+      assert(d.gd == 0xff, "N=8 (default) grant through a 64-bit actual")
+      assert(d.sc == 3, "w16#[4..<8] through a sliced plain-comb argument")
+      assert(d.sg == 2, "w16#[8..<12] through a sliced generic-comb argument")
+      assert(d.sm == 1, "w16#[12..<16] through a sliced mod argument")
+      assert(d.sr == 5, "w16#[0..<3] + 1 = 4 + 1 fits a u4 parameter")
+    } else {
+      assert(d.g4 == 0xa, "lanes 1 and 3 of the expression actual")
+      assert(d.g8 == 0xa0, "lanes 5 and 7 of the 64-bit actual")
+      assert(d.gd == 0xa0, "lanes 5 and 7 of the 64-bit actual (default N)")
+      assert(d.sc == 0xa, "w16#[4..<8] through a sliced plain-comb argument")
+      assert(d.sg == 6, "w16#[8..<12] through a sliced generic-comb argument")
+      assert(d.sm == 0xc, "w16#[12..<16] through a sliced mod argument")
+      assert(d.sr == 2, "w16#[0..<3] + 1 = 1 + 1 fits a u4 parameter")
+    }
+    assert(d.wb == 4, "a:unsigned(bits=N) with N=4 is 4 bits wide, whatever the actual")
+  }
+}

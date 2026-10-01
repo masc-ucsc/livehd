@@ -36,6 +36,7 @@ sh_library(
     ],
     data = [
         "clock_domains.py",
+        "power_on.py",
         "rtlil_children.py",
         "rtlil_split_port_adapter.py",
         "//ware:cgen_memory_rtl",

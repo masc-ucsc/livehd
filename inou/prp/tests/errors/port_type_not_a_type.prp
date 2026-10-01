@@ -1,0 +1,16 @@
+/*
+:name: port_type_not_a_type
+:type: error
+:error: `Nope_t` is not a type
+:help: declare it with `type Nope_t
+*/
+
+// Suggestions 2.3 row 6b: a PORT type that names no declared type must be the
+// same compile error a typed local already gets (`mut a:Nope_t = b` ->
+// "`Nope_t` is not a type (no such `type`/`enum` is declared or in scope)").
+// Today the port slot is never checked: `top` compiles with exit 0 and cgen
+// emits `input signed a` -- a ONE-bit signed port -- which is also how every
+// unresolved imported alias (imported_alias_port_width) silently shrank.
+pub mod top(a:Nope_t, b:U8) -> (y:U8@[]) {  // locate_error_here
+  y = a ^ b
+}

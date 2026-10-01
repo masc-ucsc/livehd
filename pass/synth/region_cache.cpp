@@ -55,16 +55,69 @@ bool parse_hex64(std::string_view text, uint64_t& value) {
   return ec == std::errc{} && ptr == text.data() + text.size();
 }
 
-// Re-declare a Sub's child def (`cio`) into `dst` if absent, cloning its IO
+// True when `cio` owns REAL logic, not just an IO shell. A Liberty/DFF cell decl
+// (and the empty placeholder recreate_child_decl leaves behind) has no body
+// node; abc_map's shared input-bit splitter def does. The two must be carried
+// through the cache differently: a cell is re-declared, a bodied helper def has
+// to be COPIED with its body or the reused region reads undriven bits.
+bool has_body_logic(const hhds::GraphIO& cio) {
+  auto g = const_cast<hhds::GraphIO&>(cio).get_graph();
+  if (!g) {
+    return false;
+  }
+  for ([[maybe_unused]] auto n : g->body().nodes()) {
+    return true;
+  }
+  return false;
+}
+
+// Exact decl equality, in declaration order: every port's name, port id,
+// loop_break, width and sign -- everything recreate_child_decl clones. Not a
+// hash and not a cache key: it only decides whether a stored decl is still the
+// one the fresh pre-body resolves against.
+bool same_io_decls(const hhds::GraphIO& a, const hhds::GraphIO& b) {
+  auto same = [](const std::vector<hhds::GraphIO::DeclaredIoPin>& x, const std::vector<hhds::GraphIO::DeclaredIoPin>& y) {
+    return std::equal(x.begin(), x.end(), y.begin(), y.end(), [](const auto& p, const auto& q) {
+      return p.name == q.name && p.port_id == q.port_id && p.loop_break == q.loop_break && p.bits == q.bits && p.unsign == q.unsign;
+    });
+  };
+  return same(a.get_input_pin_decls(), b.get_input_pin_decls()) && same(a.get_output_pin_decls(), b.get_output_pin_decls());
+}
+
+// What recreate_child_decl does with a decl already present under the name.
+enum class Existing_decl {
+  keep,     // find-or-skip: shared across parents, or a real bodied def -- never clobber
+  refresh,  // replace an IO-only decl whose interface differs from `cio`
+};
+
+// Re-declare a Sub's child def (`cio`) into `dst`, cloning its IO
 // (names/widths/signs/port-ids/loop_break) -- never a copy_from (which asserts on
 // a body-less decl). `with_body` mints an empty body: REQUIRED in a cache library
 // so the decl survives the save/load round-trip, but OMITTED for an output netlist
 // library where a body-less blackbox is what the fresh mapping (blackbox_io)
 // produces -- so a reused cell decl is byte-for-byte what a cold map would emit.
-void recreate_child_decl(hhds::GraphLibrary& dst, const hhds::GraphIO& cio, bool with_body) {
+//
+// `Existing_decl::refresh` is for the cached PRE library only (see
+// copy_pre_children): a same-named child whose interface changed must not keep
+// its old decl, or every cached parent pre-body that instantiates it resolves
+// the old ports and never compares equal again. A decl with body logic is never
+// replaced (it is not a placeholder this cache minted). The replacement reuses
+// the deleted name's gid (GraphLibrary::create_io), so every cached Sub that
+// references the child keeps resolving. Returns true iff an existing decl was
+// REPLACED (the caller must then distrust other rows that resolve it).
+bool recreate_child_decl(hhds::GraphLibrary& dst, const hhds::GraphIO& cio, bool with_body,
+                         Existing_decl existing_decl = Existing_decl::keep) {
   std::string cname{cio.get_name()};
-  if (dst.find_io(cname) != nullptr) {
-    return;  // already present (shared across parents, or a real bodied def) -- never clobber
+  bool        replaced = false;
+  if (auto existing = dst.find_io(cname)) {
+    if (existing_decl == Existing_decl::keep || same_io_decls(*existing, cio) || has_body_logic(*existing)) {
+      return false;
+    }
+    if (incr_debug()) {
+      std::print("[abc-incr] REFRESH child decl {} -- interface changed\n", cname);
+    }
+    dst.delete_graphio(existing);
+    replaced = true;
   }
   auto io = dst.create_io(cname);
   for (const auto& p : cio.get_input_pin_decls()) {
@@ -84,22 +137,7 @@ void recreate_child_decl(hhds::GraphLibrary& dst, const hhds::GraphIO& cio, bool
   if (with_body) {
     io->create_graph()->commit();  // empty body: persists across the cache save/load
   }
-}
-
-// True when `cio` owns REAL logic, not just an IO shell. A Liberty/DFF cell decl
-// (and the empty placeholder recreate_child_decl leaves behind) has no body
-// node; abc_map's shared input-bit splitter def does. The two must be carried
-// through the cache differently: a cell is re-declared, a bodied helper def has
-// to be COPIED with its body or the reused region reads undriven bits.
-bool has_body_logic(const hhds::GraphIO& cio) {
-  auto g = const_cast<hhds::GraphIO&>(cio).get_graph();
-  if (!g) {
-    return false;
-  }
-  for ([[maybe_unused]] auto n : g->body().nodes()) {
-    return true;
-  }
-  return false;
+  return replaced;
 }
 
 }  // namespace
@@ -281,6 +319,10 @@ Region_cache::Compare_result Region_cache::lookup_compare(const livehd::partitio
     if (!cached_pre) {
       continue;
     }
+    if (!row.stored_this_run && instantiates_refreshed_child(cached_pre.get())) {
+      dbg("cached pre-body instantiates a child whose interface changed this run");
+      continue;
+    }
     if (!cross_name) {
       // Exact comparison below matches named IO, while replace_body_from
       // installs the pin table by numeric port id. Equal names/logic alone
@@ -406,6 +448,20 @@ Region_cache::Compare_result Region_cache::lookup_compare(const livehd::partitio
 // those decls) is present on the fresh side but absent on the cached side, a false
 // cut_violated on every recompile. The children are IO-only decls (cheap); a Sub
 // keyed by its stable subgraph NAME then resolves identically on both sides.
+//
+// A child that keeps its name but changes its interface (a region whose
+// boundary port was renamed or resized by an edit) REFRESHES its decl here.
+// Keeping the old decl made the just-stored parent's cached pre-body resolve
+// the OLD ports -- a structural mismatch against every later unchanged run, so
+// the parent missed (and was re-mapped) forever. The library holds one decl per
+// name and every fresh parent resolves the current interface, so a row still
+// built against the old one could not hit through the old decl either. It must
+// not hit through the NEW one: its Sub pins (widths, port ids) were mapped for
+// a boundary the decl no longer describes, and the blackbox compare reads the
+// Sub's port names and widths from the decl. So the refreshed name is recorded
+// and every row this run did not store that instantiates it is refused by
+// lookup_compare and dropped before persisting. An unchanged child (equal decl)
+// is left untouched, so the rows sharing it keep hitting.
 void Region_cache::copy_pre_children(const livehd::partition::Region_body& rb, hhds::GraphLibrary& src_pre_lib) {
   if (rb.pre_body == nullptr) {
     return;
@@ -425,8 +481,51 @@ void Region_cache::copy_pre_children(const livehd::partition::Region_body& rb, h
       continue;
     }
     if (auto cio = n.get_subnode_io()) {
-      recreate_child_decl(l, *cio, /*with_body=*/true);  // empty body: survives cache save/load
+      // Empty body: survives cache save/load. Refresh: see above.
+      if (recreate_child_decl(l, *cio, /*with_body=*/true, Existing_decl::refresh)) {
+        refreshed_children_.emplace(cio->get_name());
+      }
     }
+  }
+}
+
+bool Region_cache::instantiates_refreshed_child(hhds::Graph* pre) const {
+  if (pre == nullptr || refreshed_children_.empty()) {
+    return false;
+  }
+  for (auto n : pre->body().nodes()) {
+    if (gu::type_op_of(n) != Ntype_op::Sub) {
+      continue;
+    }
+    if (auto cio = n.get_subnode_io(); cio && refreshed_children_.contains(cio->get_name())) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void Region_cache::drop_rows_on_refreshed_children() {
+  if (refreshed_children_.empty()) {
+    return;
+  }
+  // Only rows loaded from disk can predate a refresh: everything this run
+  // stored resolved the same (current) child interfaces as its fresh side.
+  std::vector<std::string> stale;
+  for (const auto& [name, row] : rows_) {
+    if (row.stored_this_run) {
+      continue;
+    }
+    auto pio = cached_pre_lib().find_io(row.pre);
+    auto pre = pio ? pio->get_graph() : nullptr;
+    if (pre && instantiates_refreshed_child(pre.get())) {
+      stale.push_back(name);
+    }
+  }
+  for (const auto& name : stale) {
+    if (incr_debug()) {
+      std::print("[abc-incr] DROP {} -- cached pre-body instantiates a child whose interface changed\n", name);
+    }
+    rows_.erase(name);
   }
 }
 
@@ -522,7 +621,8 @@ bool Region_cache::store(const livehd::partition::Region_body& rb, hhds::GraphLi
   row.digest0      = digest.h0;
   row.digest1      = digest.h1;
   row.digest_valid = digest.valid;
-  row.in_outlib    = true;  // body still only in `outlib`; save() flushes it
+  row.in_outlib       = true;  // body still only in `outlib`; save() flushes it
+  row.stored_this_run = true;
 
   rows_[rb.module_name] = std::move(row);
   const auto& stored    = rows_.at(rb.module_name);
@@ -540,9 +640,10 @@ bool Region_cache::store_pre(const livehd::partition::Region_body& rb, hhds::Gra
   }
   copy_pre_children(rb, pre_lib);
   Row row;
-  row.module = rb.module_name;
-  row.pre    = std::string{pre_name};
-  row.recipe = std::string{recipe};
+  row.module          = rb.module_name;
+  row.pre             = std::string{pre_name};
+  row.recipe          = std::string{recipe};
+  row.stored_this_run = true;
   const auto digest
       = livehd::semdiff::canonical_digest(rb.pre_body, {}, livehd::semdiff::Sub_fold::interface, /*matching_io_names=*/false);
   row.digest0      = digest.h0;
@@ -713,6 +814,7 @@ void Region_cache::save_to(const std::string& directory, bool strict) {
     return;
   }
   freeze_pending();
+  drop_rows_on_refreshed_children();  // never persist a row the refreshed decls would misread
   std::vector<const std::string*> keys;
   keys.reserve(rows_.size());
   for (const auto& [k, v] : rows_) {

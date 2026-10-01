@@ -1,0 +1,10 @@
+/*
+:name: spec_types_upper_i_cast
+:type: error
+:error: I8
+*/
+// SPEC qa.md section 2 (chat ruling): "No I<N>: there is no integer type `I<N>`; only `U<N>` and `S<N>`."
+// qa.md appendix section 1: "REMOVED: `I<N>`/`iN` (use `S<N>`)". Rule: `I8(x)` is not a cast.
+pub comb spec_types_upper_i_cast(a:U4) -> (o:S8) {
+  o = I8(a)  // locate_error_here
+}

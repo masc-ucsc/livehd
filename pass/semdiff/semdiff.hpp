@@ -96,6 +96,12 @@ struct State_stats {
   uint32_t name_pairs     = 0;                      // tier-1: state_key 1:1 across the sides
   uint32_t a_name_grouped = 0, b_name_grouped = 0;  // key on both sides but colliding within one
   uint32_t seed_pairs     = 0;                      // caller-supplied seed_pairs that resolved (anchored) a cell pair
+  // Tier-1 keys that matched across the sides only because a bus_name
+  // reconstruction rewrote one side's key (`x[i]` bits regrouped as `x`, or a
+  // lone `x.flop_16` / `x_cgen1.l` renamed `x`). Such a pair is a naming HINT:
+  // its compare-point obligation is keyed by the shared seed, so the
+  // structural match re-verifies it (see build_sides), never trusts it.
+  uint32_t name_reconstructed = 0;
   uint32_t full_pairs     = 0;                      // tier-2 full-match pairs (state_pairing)
   // Memory subset of the pair counts (a_mems/b_mems are the memory subset of the
   // TOTALS). regs-vs-mems is the split a design health check reports, and only
@@ -123,6 +129,7 @@ struct State_stats {
     a_name_grouped   += o.a_name_grouped;
     b_name_grouped   += o.b_name_grouped;
     seed_pairs       += o.seed_pairs;
+    name_reconstructed += o.name_reconstructed;
     full_pairs       += o.full_pairs;
     name_pairs_mem   += o.name_pairs_mem;
     full_pairs_mem   += o.full_pairs_mem;
@@ -165,9 +172,13 @@ struct Match_result {
   // consults bsig. Callers that read a full match as a PROOF (pass/lec's no-solver
   // skip) MUST additionally require cut_violated == 0 && cut_unknown == 0.
   //
-  // A compare point is a name-paired state cell, a graph output, or (matching_names)
+  // A compare point is a seeded state cell, a graph output, or (matching_names)
   // a name-paired cut Sub. Its inputs are folded with the forward pass's own operand
-  // rule and compared pairwise across the sides.
+  // rule and compared pairwise across the sides. A state cell's obligation is keyed
+  // by the SEED its signatures were built on (a name, a bus_name-reconstructed name,
+  // a physical-name bridge, a tier-2 or a caller-seeded pair), never by its raw
+  // name: the two must agree, or a pair the node set matched through the shared
+  // seed would have two one-sided obligations and neither would be checked.
   uint32_t                 cut_obligations = 0;  // compare points checked
   uint32_t                 cut_discharged  = 0;  // ... proven equal
   uint32_t                 cut_violated    = 0;  // ... proven DIFFERENT (a real diff the node set hides)
@@ -198,7 +209,11 @@ struct Match_result {
 //     rewiring between same-named compare points must be ruled out here, and
 //   * the correspondence is CERTAIN -- no speculative tier-2 full-match pair and
 //     no caller-seeded pair carried the match (full_pairs == 0 && seed_pairs == 0);
-//     the spec self-certifies only the unbounded inductive proof, never these, and
+//     the spec self-certifies only the unbounded inductive proof, never these. A
+//     bus_name-reconstructed name pair (name_reconstructed) is NOT excluded: the
+//     naming standard fixes that correspondence (lec's bit-blast bridge ties the
+//     same two cells), and its obligation, keyed by the shared seed, is checked
+//     above like any name pair's, so a wrong hint is a cut_violated, and
 //   * something was actually matched (a_matched > 0). Every clause above is an
 //     `== 0` test, so TWO EMPTY GRAPHS satisfied all of them and came back
 //     "identical" -- which let lec's no-solver skip report PROVEN, cached as
@@ -267,9 +282,12 @@ Match_result structural_match(hhds::Graph* a, hhds::Graph* b, const Semdiff_opti
 // A process-independent 128-bit structural digest of a module def: op kinds,
 // pin widths, connectivity (commutative-normalized within each sink port,
 // operand hashes sorted — the pass/submatch canonical form), constant values,
-// IO names/widths/signs/port-bindings, and state-cell hierarchical names — the
-// same name-based correspondence basis lec proofs rest on, so a digest-equal
-// pair soundly transfers a verdict.
+// IO names/widths/signs/port-bindings and output drivers, and state-cell
+// hierarchical names plus each state cell's operands (its compare-point
+// obligation: din, enable, reset, the reset/initial constant) — the same
+// name-based correspondence basis lec proofs rest on, so a digest-equal pair
+// soundly transfers a verdict. A state operand or an output driver with no
+// forward signature leaves the def undigestable (valid=false).
 //
 // HIERARCHICAL (Merkle): a Sub whose body `resolve` can produce folds the
 // CHILD'S digest, recursively (bottom-up over the instance DAG) — an edited

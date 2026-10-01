@@ -12,12 +12,12 @@ EOF
 python3 pass/usyn/compare.py "$W/shared.v" --top shared \
   --liberty inou/prp/tests/abc/timing.lib --workdir "$W/comparison" \
   --lhd lhd/lhd --monitor pass/usyn/measure_synth --delay 120 \
-  --usyn-set support=2 --usyn-set literals=8 --usyn-set series=2
+  --usyn-set logical_inputs=2 --usyn-set branches=8 --usyn-set stack=2 --residual-ablation
 # The ordinary fused command differs only in its mapper and output directory.
 for mapper in usyn abc; do
   pass/usyn/measure_synth --archive "$W/fused-$mapper-measurement" --seconds 30 --memory-mb 4096 -- \
     lhd/lhd synth "$W/shared.v" --top shared --set "synth.mapper=$mapper" \
-    --set synth.liberty=inou/prp/tests/abc/timing.lib --set abc.delay=120 \
+    --set synth.liberty=inou/prp/tests/abc/timing.lib --set "pass.$mapper.delay=120" \
     --workdir "$W/fused-$mapper" --emit "verilog:$W/fused-$mapper.v" \
     --result-json "$W/fused-$mapper.json" -q || { cat "$W/fused-$mapper-measurement/command.log" "$W/fused-$mapper.json"; exit 1; }
 done
@@ -33,7 +33,7 @@ import sys
 work = Path(sys.argv[1])
 root = work / 'comparison'
 report = json.loads((root / 'comparison.json').read_text())
-for mapper in ('usyn', 'abc'):
+for mapper in ('usyn-selection', 'usyn-residual', 'usyn', 'abc'):
     result = report['results'][mapper]
     assert result['lec']['verdict'] == 'proven', result
     assert result['lec']['solver'] == 'cvc5', result
@@ -45,6 +45,8 @@ for mapper in ('usyn', 'abc'):
     assert timing[0]['constraints_complete'], timing
     assert result['mapping_measurement']['reason'] == 'completed', result
     assert Path(result['netlist']).is_file(), result
+    if mapper not in ("usyn", "abc"):
+        continue
     fused = work / f'fused-{mapper}/synth'
     assert (fused / 'net/library.txt').is_file(), fused
     assert (fused / 'timing.json').is_file(), fused
@@ -54,11 +56,57 @@ for mapper in ('usyn', 'abc'):
     assert qor['regions'] and all(row['budget'] == 120 for row in qor['regions']), qor
 usyn = json.loads((root / 'usyn/qor.json.usyn.json').read_text())
 # Equivalence is the separate `lhd lec` step above; synthesis itself proves nothing.
-rows = usyn['regions_searched']
-assert rows and all(r['status'] == 'abc_tmap' for r in rows), rows
-assert usyn['totals']['abc_tmap'] == len(rows) and usyn['totals']['domino'] > 0, usyn['totals']
-assert usyn['recipe']['support'] == 2 and all(r['domino_in3'] == 0 for r in rows), rows
+assert usyn['algorithm'] == 'register-rooted-xag-v1' and usyn['tmap'] == 'abc', usyn
+assert usyn['totals']['eligible_endpoints'] == 0, usyn['totals']
+assert usyn['constraints']['logical_inputs'] == 2 and usyn['constraints']['branches'] == 8, usyn
+assert report['schema_version'] == 2 and report['residual_ablation'], report
+assert report['mapping_delay_ps'] == 120 and report['compile_settings'] == [], report
+for label, flags in [('usyn-selection', ('false', 'false')), ('usyn-residual', ('true', 'false')), ('usyn', ('true', 'true'))]:
+    row = report['results'][label]
+    assert (row['usyn_overrides']['residual'], row['usyn_overrides']['feedback']) == flags, row
+    native = row['native']
+    assert native['scope'] == 'definition-regions', native
+    assert set(native['estimated_cost']) == {'before', 'after_pairs', 'after_residual', 'after'}, native
+    assert native['estimated_cost']['after']['total'] <= native['estimated_cost']['before']['total'], native
+commands = json.loads((root / 'commands.json').read_text())
+for command in commands:
+    result = json.loads((root / (command['label'] + '.result.json')).read_text())
+    assert not any('satopt' in step for step in result['recipe']), result
 override = json.loads((work / 'override/synth/qor.json').read_text())
 assert override['regions'] and all(row['budget'] == 160 for row in override['regions']), override
 print('PASS: standalone comparison and fused synth.mapper switch')
+PY
+# A failed native variant must not suppress the ABC baseline or its report.
+cat >"$W/extra.v" <<'EXTRA'
+module unused_unit(input a, output y);
+assign y = a;
+endmodule
+EXTRA
+cat >"$W/shared.sdc" <<'SDC'
+create_clock -name virtual -period 20
+set_input_delay -clock virtual 0 [all_inputs]
+set_output_delay -clock virtual 0 [all_outputs]
+SDC
+if python3 pass/usyn/compare.py "$W/shared.v" --source-extra "$W/extra.v" --top shared \
+  --liberty inou/prp/tests/abc/timing.lib --sdc "$W/shared.sdc" --workdir "$W/refused" \
+  --lhd lhd/lhd --monitor pass/usyn/measure_synth --usyn-set work=1; then
+  echo "FAIL: refused native synthesis must make the comparison fail"
+  exit 1
+fi
+python3 - "$W/refused" <<'PY'
+import json
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+report = json.loads((root / 'comparison.json').read_text())
+assert len(report['sources']) == 2 and report['sdc']['sha256'], report
+assert report['results']['usyn']['status'] == 'failed', report
+assert report['results']['usyn']['failed_stage'] == 'usyn', report
+assert report['results']['abc']['status'] == 'completed', report
+assert report['results']['abc']['lec']['verdict'] == 'proven', report
+commands = json.loads((root / 'commands.json').read_text())
+assert report['sources'][1]['path'] in commands[0]['argv'], commands[0]
+sta = next(command for command in commands if command['label'] == 'abc-sta')
+assert report['sdc']['path'] in sta['argv'], sta
+print('PASS: failed variants retain evidence and continue the comparison')
 PY

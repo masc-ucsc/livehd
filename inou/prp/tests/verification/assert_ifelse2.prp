@@ -9,7 +9,7 @@
 // internal cassert now counts per call-site instantiation (runner emits the
 // body as real IR) rather than being deduped to once-per-source.
 
-comb pick_max(a:u32, b:u32) -> (x:u32) {
+comb pick_max(a:U32, b:U32) -> (x:U32) {
   cassert(a != b)
 
   if a < b {

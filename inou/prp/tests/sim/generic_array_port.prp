@@ -1,0 +1,68 @@
+/*
+:name: generic_array_port
+:type: simulation
+*/
+// lhdtrack suggestions.md 2.2(d): ARRAY ports of a generic `mod` whose shape
+// uses the generic. The port type is the authority: `[N]` and `bits=N` fold
+// under the call's binds exactly like a generic-width scalar port
+// (`a:Unsigned(bits=N)`) does (user ruling 2026-09-27 #7).
+//
+// INPUT. Called with a body array actual (`mut v:[4]U4`) the call was refused
+// with "argument `v` to template `...` has no declared type -- a `mod` boundary
+// needs an explicit width":
+//   * `v:[N]Unsigned(bits=N)` -- prp2lnast dropped the element bound AND kept
+//     the dim as the raw text `[N]`, so upass.ssa harvested a width-less port;
+//   * `v:[N]U4` -- the literal element did not help: the `[N]` dim alone left
+//     the io entry with bits == 0 / array_size == 0, so the specializer took
+//     the port as untyped and asked the ACTUAL for a type, which a body array
+//     does not answer.
+// OUTPUT. `-> (v:[N]Unsigned(bits=N))` failed in the child with "array 'v'
+// requires a sized scalar element type" (the element bound was dropped).
+// Non-generic `[4]U4` ports, and `[N]U4` bound to a caller INPUT array, worked.
+mod pick<N=2>(v:[N]Unsigned(bits=N)) -> (lo:Unsigned(bits=N)@[0], hi:Unsigned(bits=N)@[0]) {
+  lo = v[0]
+  hi = v[N-1]
+}
+mod pick4<N=2>(v:[N]U4) -> (lo:U4@[0], hi:U4@[0]) {
+  lo = v[0]
+  hi = v[N-1]
+}
+mod spread<N=2>(a:Unsigned(bits=N)) -> (v:[N]Unsigned(bits=N)@[0]) {
+  v = 0
+  for i in 0..<N {
+    v[i] = a ^ i
+  }
+}
+
+pub mod generic_array_port(a:U4, b:U4, c:U4, d:U4) -> (lo:U4@[0], hi:U4@[0], lo4:U4@[0], hi4:U4@[0], sp:U4@[0]) {
+  mut v:[4]U4 = 0
+  v[0] = a
+  v[1] = b
+  v[2] = c
+  v[3] = d
+  const p = pick<N=4>(v=v)
+  lo = p.lo
+  hi = p.hi
+  const p4 = pick4<N=4>(v=v)
+  lo4 = p4.lo
+  hi4 = p4.hi
+  const s = spread<N=4>(a=a)
+  const sw:[4]U4 = s             // the lane read that already worked (see array_output_port_index.prp)
+  sp = sw[3]
+}
+
+test generic_array_port.lanes {
+  mut dut = generic_array_port
+  mut ok  = true
+  tick 6 {
+    dut.a = 9 + clock
+    dut.b = 1
+    dut.c = 2
+    dut.d = 15 - clock
+    step
+    if dut.lo != 9 + clock or dut.hi != 15 - clock { ok = false }
+    if dut.lo4 != 9 + clock or dut.hi4 != 15 - clock { ok = false }
+    if dut.sp != ((9 + clock) ^ 3) { ok = false }
+  }
+  assert(ok, "lane 0 and lane N-1 of [N]unsigned(bits=N) / [N]u4 ports")
+}

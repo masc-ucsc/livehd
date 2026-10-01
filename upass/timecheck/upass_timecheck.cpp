@@ -559,7 +559,9 @@ void uPass_timecheck::run(const std::shared_ptr<Lnast>& lnast, const Registry& r
     return;
   }
   if (lnast->get_skip_timecheck()) {
-    return;  // todo/ 1s subtask E — inou.slang suppresses timechecks on its mods
+    // `::[timecheck=false]`, or a Verilog-read unit (inou.slang stamps it
+    // unless `compile.slang.timecheck=true` asks to keep these checks).
+    return;
   }
   const auto kind = lnast->get_lambda_kind();
   if (kind != "pipe" && kind != "mod") {

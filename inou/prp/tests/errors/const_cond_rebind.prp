@@ -10,8 +10,8 @@
 // with a second one is a rebind. The whole `if`/`match` counts as ONE, so this
 // shape has two. Caught here because the comptime `vbound` tally in
 // upass.attributes only sees comptime-decided writes.
-comb t(a:u8, b:u8, c:bool) -> (o:u8) {
-  const w:u8 = nil   // locate_error_here
+comb t(a:U8, b:U8, c:Bool) -> (o:U8) {
+  const w:U8 = nil   // locate_error_here
   if c {
     w = a
   }

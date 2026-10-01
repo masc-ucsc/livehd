@@ -37,14 +37,14 @@ has_inst() { grep -Eq '^'"$2"'[[:space:]]+\\?[A-Za-z_]' "$1"; }
 
 # ── (1)+(2) cross-unit comb with an AGGREGATE output ─────────────────────────
 cat >"$W/xu_leaf.prp" <<'EOF'
-pub comb xu_leaf(io_in:u8) -> (io_out:(data:u3, hi:u1)) {
+pub comb xu_leaf(io_in:U8) -> (io_out:(data:U3, hi:U1)) {
   io_out.data = io_in#[0..=2]
   io_out.hi   = io_in#[3]
 }
 EOF
 cat >"$W/xu_top.prp" <<'EOF'
 const xu_leaf = import("xu_leaf.xu_leaf")
-pub mod xu_top(io_a:u8) -> (io_r:u3@[]) {
+pub mod xu_top(io_a:U8) -> (io_r:U3@[]) {
   mut inst = xu_leaf::[name=inst](io_in = io_a)
   io_r = inst.io_out.data
 }
@@ -64,13 +64,13 @@ echo "PASS(2): cross-unit callee stayed a Sub instance"
 # Guards the other half: steering runtime calls away from the splice must not
 # break comptime evaluation across an import (casserts, const folding).
 cat >"$W/cu_leaf.prp" <<'EOF'
-pub comb cu_leaf(a:u8) -> (r:u9) {
+pub comb cu_leaf(a:U8) -> (r:U9) {
   r = a + 1
 }
 EOF
 cat >"$W/cu_top.prp" <<'EOF'
 const cu_leaf = import("cu_leaf.cu_leaf")
-pub comb cu_top(x:u8) -> (o:u9) {
+pub comb cu_top(x:U8) -> (o:U9) {
   comptime const k = cu_leaf(a=41)
   cassert(k == 42)
   o = cu_leaf(a=x)

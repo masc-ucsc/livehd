@@ -7,6 +7,6 @@
 :help: declare a default or select a concrete caller
 */
 
-pub mod generic_top_required<N>(a:u8) -> (y:u9@[0]) {
+pub mod generic_top_required<N>(a:U8) -> (y:U9@[0]) {
   y = a + N
 }

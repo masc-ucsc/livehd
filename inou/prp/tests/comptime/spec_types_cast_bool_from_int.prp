@@ -1,0 +1,12 @@
+/*
+:name: spec_types_cast_bool_from_int
+:type: comptime
+:verifier_pass: 4
+:verifier_fail: 0
+*/
+// SPEC docs 07-typesystem "Bitwidth": "`Bool(x)` on an integer, is `x != 0` (so `Bool(33)` is true; for one
+// bit, `Bool(v#[3])` or `v#[3] == 1`)". docs 04-variables: "`Bool(0)==false`, and `Bool(1)==true`".
+cassert(Bool(33))
+cassert(Bool(0) == false)
+cassert(Bool(1) == true)
+cassert(Bool(0x8#[3]) and 0x8#[3] == 1)

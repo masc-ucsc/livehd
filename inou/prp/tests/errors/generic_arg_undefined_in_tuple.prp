@@ -1,0 +1,21 @@
+/*
+:name: generic_arg_undefined_in_tuple
+:type: error
+:error: unknown type or lambda 'ZZ' in a generic argument
+:help: declare `ZZ` before its use
+*/
+
+// Ruling 2026-09-28 #24 (clarification): an undeclared name is a direct
+// compile error at the read in every context. A call-site generic bind inside
+// a tuple literal was not recorded as a read, so `ZZ` bound nil: the indirect
+// upass.tolg "unresolved reference 'inl1_ZZ' ... resolved to nil".
+// User ruling 2026-09-28 (33): the error names what a generic argument reads (a
+// type, lambda or comptime const declared earlier), not a variable.
+comb addn<N=1>(a:U8) -> (r:U8) {
+  r = (a + N)#[0..<8]
+}
+
+pub comb generic_arg_undefined_in_tuple(a:U8) -> (o:U8) {
+  const t = (const v = addn<N=ZZ>(a=a))  // locate_error_here
+  o = t.v
+}

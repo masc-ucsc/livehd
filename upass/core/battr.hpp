@@ -26,7 +26,17 @@ inline constexpr std::string_view debug{"_debug"};         // canonical sticky s
 // via Bundle::canon_attr). No per-entry bit, no separate sticky map — and
 // since '_' sorts apart from letter-named attrs under Canonical_less, the
 // sticky subset is one contiguous run per level.
-inline constexpr bool is_sticky(std::string_view attr_name) { return !attr_name.empty() && attr_name.front() == '_'; }
+// The runner's INTERNAL array shape facts (`__array_size`, `__elem_max`, ...,
+// baked by an array declare) are not sticky despite the leading '_': they
+// describe the declared aggregate, never a value computed from it. Propagated,
+// they made a scalar derived from an array (`b = if q#[..] == 0 {1} else {0}`)
+// look like a declared `[1]` array to bitwidth's element checks.
+inline constexpr bool is_array_shape_attr(std::string_view attr_name) {
+  return attr_name.starts_with("__array_") || attr_name.starts_with("__elem_");
+}
+inline constexpr bool is_sticky(std::string_view attr_name) {
+  return !attr_name.empty() && attr_name.front() == '_' && !is_array_shape_attr(attr_name);
+}
 
 // The canonical set of BUILT-IN attribute names (Category A/B/C). A name here is
 // a `.[name]` attribute, never a tuple/struct dot-field — used both to decide

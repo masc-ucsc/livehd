@@ -1,0 +1,20 @@
+/*
+:name: spec_memory_reset_pin
+:type: equiv
+:verilog_top: spec_memory_reset_pin
+:pyrope_top: spec_memory_reset_pin
+*/
+// SPEC (docs 08-memories.md): "... or the signal named by `reset_pin=my_rst` (no
+// `ref`: a `_pin` is always a connection) ... With two or more `Reset` inputs in
+// the module itself, name the reset with `reset_pin=`."
+// SPEC (qa.md appendix section 6): "`clock_pin=x` / `reset_pin=x` take the signal
+// directly -- no `ref`".
+// Rule encoded here: with two Reset inputs, `reset_pin=rb` (no `ref`) on a memory
+// declaration picks `rb`; `ra_rst` resets nothing.
+pub mod spec_memory_reset_pin(clk:Clock, ra_rst:Reset, rb:Reset, we:Bool, a:U2, d:U8, ra:U2) -> (q:U8@[0]) {
+  reg mem:[4]U8:[reset_pin=rb] = 7
+  q = mem[ra]
+  if we {
+    mem[a] = d
+  }
+}

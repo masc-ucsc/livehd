@@ -1,0 +1,9 @@
+/*
+:name: spec_types_string_type_decl
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// SPEC qa.md appendix section 1: "`Bool`, `String`" are the built-in type words (was `string`).
+const s:String = "abc"
+cassert(s == "abc")

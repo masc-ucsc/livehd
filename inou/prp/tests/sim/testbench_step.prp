@@ -20,8 +20,8 @@
 // the computed `din` -- i.e. a one-shot next-state override. That is why `c = 42`
 // followed by one `step` reads back 43 and not 42: the increment ran on the
 // forced value.
-mod cnt(en:bool) -> (v:u8@[0]) {
-  reg c:u8 = 0
+mod cnt(en:Bool) -> (v:U8@[0]) {
+  reg c:U8 = 0
   v = c
   if en { wrap c += 1 }
 }

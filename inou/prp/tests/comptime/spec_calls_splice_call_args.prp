@@ -1,0 +1,17 @@
+/*
+:name: spec_calls_splice_call_args
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// docs 03-bundle.md: "Because `...` splices fields at its position, it can also
+// insert in the middle of a literal and add arguments to a function call":
+// `cassert(foo(a=1, ...rest) == 6)   // same as foo(a=1, b=2, c=3)`.
+// qa.md Appendix §8: the argument list is a named tuple; named ++ named merges.
+
+comb foo(a, b, c) -> (r) { r = a * 100 + b * 10 + c }
+
+const rest = (const b=2, mut c=3)
+cassert(foo(a=1, ...rest) == 123)
+cassert(foo(...rest, a=4) == 423)

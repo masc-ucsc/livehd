@@ -1,0 +1,17 @@
+/*
+:name: spec_calls_name_match_dotted
+:type: error
+:error: must be named|ambiguous|name the argument
+*/
+
+// qa.md Appendix §4: the name exception is "a bare variable whose name matches
+// a parameter". docs 06-functions.md: "The calling expression is a variable
+// whose name matches a parameter name (`fcall(a)` matches a parameter named
+// `a`)." A field read `s.x` is not a bare variable, so it does not pun the
+// parameter `x`.
+
+comb sub(x, y) -> (r) { r = x - y }
+
+const s = (const y=2, const x=7)
+const d = sub(s.y, s.x) // locate_error_here
+cassert(d == 5)

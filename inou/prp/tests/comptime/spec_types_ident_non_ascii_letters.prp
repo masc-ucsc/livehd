@@ -1,0 +1,12 @@
+/*
+:name: spec_types_ident_non_ascii_letters
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// SPEC qa.md appendix section 2: "identifier characters (letters incl. non-ASCII, digits, underscore)"; docs
+// 02-basics "Identifiers": "followed by letters (non-ASCII letters included), digits, or underscores".
+const café = 1
+const 名前 = 2
+const Ωmega = 3
+cassert(café + 名前 + Ωmega == 6)

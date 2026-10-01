@@ -1,0 +1,14 @@
+/*
+:name: spec_syntax_stage_timed_noinit
+:type: parsing
+*/
+// qa.md Q39 item 7 / Appendix §8: "`stage[1] out@[4]` (timed stage decl, no initializer)
+// -> LEGAL in both, like `mut y:U8` / `stage out`." (docs 15-tbd.md "Other parser rules":
+// "`stage[1] out@[4]` with no initializer is legal").
+pipe add(a:U32, b:U32) -> (c:U32) { wrap c = a + b }
+
+mod spec_syntax_stage_timed_noinit(in1:U32, in2:U32) -> (out:U32@[1]) {
+  stage[1] res@[1]
+  res = add(a=in1, b=in2)
+  out = res
+}

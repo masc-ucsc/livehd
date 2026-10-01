@@ -1,0 +1,36 @@
+/*
+:name: mod_delay_child_ring_cycle_mix
+:type: error
+:tolg: 1
+:error: ^(?!.*combinational loop).*mixes values at different cycles
+*/
+
+// A caller ring through a child's REGISTER is not a combinational loop
+// (lhdtrack suggestions 2.1): `st1.q` reads only the register `r`, so the ring
+// `gr -> st1.d -> r -> st1.q -> gr` is cut by a flop. But `st1` declares its
+// output at `@[1]` (an always-written reg is a feedforward stage), so inside
+// the caller `m` lands one cycle after `gr` while `gr = req & ~m` needs it at
+// cycle 0. Mod register classification is unchanged (user ruling 2026-09-27),
+// so this is a cycle-mix TIMING error; the escape hatch is
+// `::[timecheck=false]` on the caller (sim/mod_delay_child_ring_timecheck_off.prp).
+//
+// Before the 2.1 fix, upass.tolg's time-checker modeled the Sub as a crossbar
+// and reported a FALSE combinational loop instead:
+//   upass.tolg: combinational loop in 'mod_delay_child_ring_cycle_mix.rtop'
+// The :error: regex rejects ANY emitted 'combinational loop' (the harness
+// joins every error message with ' || '), so a partial fix that still
+// reports the false loop next to the cycle mix stays red.
+// Once the loop check follows the child's per-output cones, the remaining
+// diagnostic is the cycle mix at the operation that combines the two cycles.
+mod st1(d:U4) -> (q:U4@[1]) {
+  reg r:U4 = 8
+  r = d
+  q = r
+}
+
+pub mod rtop(req:U4) -> (g:U4@[0]) {
+  wire gr:U4 = nil
+  const m = st1(d=gr)
+  gr = req & ~m   // locate_error_here
+  g = gr
+}

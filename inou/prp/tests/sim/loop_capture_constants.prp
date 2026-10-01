@@ -5,14 +5,14 @@
 */
 // Two nested loop bodies plus the generated bounds-check assertion. Captured width and domain constants must stay local
 // constants, and must not prevent either loop from remaining compact.
-mod loop_capture_constants(x:u8) -> (total:u16@[0]) {
+mod loop_capture_constants(x:U8) -> (total:U16@[0]) {
   comptime const OUTER = 3
   comptime const INNER = 4
   comptime const DATA_BITS = 8
-  mut acc:u16 = x
+  mut acc:U16 = x
   for i in 0..<OUTER {
     for j in 0..<INNER {
-      acc = acc + x#[(j*2) ..+ 2] + DATA_BITS
+      acc = acc + x#[(j*2)..+2] + DATA_BITS
     }
   }
   total = acc

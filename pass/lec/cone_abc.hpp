@@ -64,7 +64,9 @@ Cone_verdict abc_prove_unsat(const cvc5::Term& diff, int64_t backtrack_limit, Co
 // it lands, so a deadline kill keeps every cone proven so far. The returned
 // vector is index-aligned with `diffs`; cones the child never reached come back
 // as Unknown, which callers must treat as "not proven" -- i.e. the obligation
-// stays. deadline_ms <= 0 means no clock (the child still isolates ABC).
+// stays. deadline_ms <= 0 means no clock (the child still isolates ABC). Under
+// a clock, one cone that stalls past a slice of the deadline is abandoned to
+// cvc5 and the batch resumes after it, so a hard cone cannot starve the rest.
 //
 // Falls back to reporting everything Unknown if the fork fails: losing the
 // optimization is always preferable to losing the bound.

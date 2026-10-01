@@ -7,7 +7,7 @@
 
 // A named scalar alias passed through a generic must preserve the input
 // width for a.[bits] and for the specialized module's ports.
-type Elem_T = s4
+type Elem_T = S4
 
 mod add<T>::[timecheck=false](a:T, b:T) -> (y:T@[0]) {
   reg y_r = 0
@@ -16,6 +16,6 @@ mod add<T>::[timecheck=false](a:T, b:T) -> (y:T@[0]) {
   y_r = full#[0..=(a.[bits] - 1)]
 }
 
-pub mod type_alias_generic_attr::[timecheck=false](a:s4, b:s4) -> (y:s4@[0]) {
+pub mod type_alias_generic_attr::[timecheck=false](a:S4, b:S4) -> (y:S4@[0]) {
   y = add<Elem_T>(a=a, b=b)
 }

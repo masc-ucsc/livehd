@@ -1,0 +1,27 @@
+/*
+:name: test_bare_step_multi_input
+:type: simulation
+*/
+// A bare `step` (no enclosing `tick`) after poking TWO OR MORE inputs of a
+// comb instance, then reading its output. Before, the pokes made the handle
+// `d` look like a tuple of its INPUTS, so `d.out` failed "unknown field `out`
+// on tuple `d`" -- while the same test with ONE poked input passed by luck
+// (a one-field bundle was read through the scalar fallback). An instance
+// handle is not a tuple: its fields are the unit's ports.
+
+comb add3(a:U8, b:U8, c:U8) -> (out:U8) {
+  wrap out = a + b + c
+}
+
+test add3.bare_step {
+  mut d = add3
+  d.a = 3
+  d.b = 4
+  d.c = 5
+  step
+  assert(d.out == 12)
+  d.c = 250
+  step
+  const got = d.out
+  assert(got == 1)     // 3 + 4 + 250 wraps at 8 bits
+}

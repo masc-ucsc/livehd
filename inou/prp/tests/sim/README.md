@@ -62,7 +62,7 @@ writes, it is one cycle behind. Put such reads below the `step`.
 | `accumulator.prp` | running-sum            | `accum.sum`                             | `tick N`, changing input |
 | `fsm_runner.prp`  | Idle→Run→Done FSM      | `runner.until_done`, `runner.watchdog`  | `tick { break }`, `tick N` watchdog |
 | `seq_detect.prp`  | "11" sequence detector | `detect.stream`                         | `tick N`, streamed pattern, golden |
-| `test_args.prp`   | adder                  | `adder.params`                          | `test name(params)` + `--arg`, default/required/override |
+| `test_args.prp`   | adder                  | `adder.params`                          | `test name(params)` + `+name=value`, default/required/override |
 | `tick_comptime_survives.prp` | passthru    | 2 blocks                                | what stays **comptime** across a `tick` (see below) |
 | `tick_comptime_opaque.prp`   | up-counter  | 7 blocks                                | what a `tick` must make **opaque** (see below) |
 | `loop_cond_sub_break.prp` | conditional add/xor lanes | `loop_cond_sub_break.branch_vectors` | source `for`, pre-call `break`, runtime-conditional Sub calls, runtime `tick` break |
@@ -133,10 +133,10 @@ same lone, unconditional literal write under three different counts:
 |---|---|---|
 | `lone_literal_write_still_opaque` | literal `4` | 7 |
 | `zero_trip_keeps_outer_value`     | literal `0` | 5 |
-| `runtime_trip_count`              | `--arg cycles=N` | 7 for N>0, **5 for N=0** |
+| `runtime_trip_count`              | `+cycles=N` | 7 for N>0, **5 for N=0** |
 
 The last one is the argument for R0 in one line: identical source text yields
-`rt_trip=7` by default and `rt_trip=5` under `--arg cycles=0`. Do not
+`rt_trip=7` by default and `rt_trip=5` under `+cycles=0`. Do not
 reintroduce a "literal count >= 1 is foldable" special case — the middle row is
 the counterexample.
 
@@ -159,22 +159,22 @@ was silently dropped on the way to LNAST while `prp_sim.cpp`'s independent CST
 walk still executed it, so a testbench `assert` folded against the stale
 initializer of the variable it captured (lhdsuite fixme issue 2).
 
-## Runtime parameters (`test name(params)` + `--arg`)
+## Runtime parameters (`test name(params)` + `+name=value`)
 
-A `test` may declare runtime parameters — `test add.checked(base:u32=10, gain:u32)`
+A `test` may declare runtime parameters — `test add.checked(base:U32=10, gain:U32)`
 — that drive the DUT, size a `tick` loop, or seed a model (see
 [Testing](../../../../../docs/docs/pyrope/05b-statements.md#testing-test)). A
 parameter with a default is optional; one with no default (or `=nil`) is
-required. Bind them on the command line with `--arg name=value` (repeatable),
+required. Bind them on the command line with `+name=value` (repeatable),
 which wins over the default; a required parameter left unset is an error, never
 a silent `0`:
 
 ```bash
-lhd sim test_args.prp adder.params --arg gain=3 --arg count=4
+lhd sim test_args.prp adder.params +gain=3 +count=4
 ```
 
 In a `:type: simulation` test the bindings come from the `:args: k=v k=v` header
-tag (the runner forwards each as `--arg k=v`).
+tag (the runner forwards each as `+k=v`).
 
 ## Running
 

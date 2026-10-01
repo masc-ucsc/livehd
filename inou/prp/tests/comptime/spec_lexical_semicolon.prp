@@ -1,0 +1,10 @@
+/*
+:name: spec_lexical_semicolon
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// docs 02-basics "Semicolons": "a semicolon (`;`) has the same meaning as a
+// newline." (`const a = 1 ; const b = 2`)
+const a = 1 ; const b = 2
+cassert(a == 1) ; cassert(b == 2)

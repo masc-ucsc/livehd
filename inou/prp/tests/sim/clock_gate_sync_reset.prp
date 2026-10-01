@@ -1,0 +1,33 @@
+/*
+:name: clock_gate_sync_reset
+:type: simulation
+*/
+// A SYNC reset of a register on a gated clock lands only on an edge the gate
+// lets through (docs 04b "Implicit clock and reset"), as in the emitted
+// Verilog (`always @(posedge gclk) if (rst) ...`) and in LEC. lhd sim used to
+// apply it while the gate was closed. An ASYNC reset lands regardless.
+pub mod clock_gate_sync_reset(clk:Clock, rst:Reset, en:Bool, d:U8) -> (q:U8@[1], a:U8@[1]) {
+  const gclk = Clock(clock_pin=clk, enable=en)
+  reg r:U8:[clock_pin=gclk] = 0
+  reg ra:U8:[clock_pin=gclk, async=true] = 0
+  r  = d
+  ra = d
+  q  = r
+  a  = ra
+}
+
+test clock_gate_sync_reset.t {
+  mut t = clock_gate_sync_reset
+  mut i:U8 = 0
+  tick 6 {
+    t.rst = i == 3 or i == 5
+    t.en  = i < 2 or i == 5
+    t.d   = 5
+    step
+    if i == 1 or i == 2 { assert(t.q == 5 and t.a == 5, "loaded while the gate is open") }
+    if i == 3 or i == 4 { assert(t.q == 5, "a sync reset waits for a gated edge") }
+    if i >= 3 { assert(t.a == 0, "an async reset lands with the gate closed") }
+    if i == 5 { assert(t.q == 0, "a sync reset on an open gate") }
+    i += 1
+  }
+}

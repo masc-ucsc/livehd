@@ -1,0 +1,22 @@
+/*
+:name: nested_lambda_runtime_input
+:type: error
+:error: 'b' is a runtime value of the enclosing scope; it is not visible inside lambda 'addb'
+:help: pass 'b' as an input of 'addb'
+*/
+
+// Ruling 2026-09-27 (suggestions 2.3 row 3): a nested lambda sees only
+// COMPTIME bindings of its enclosing scopes (comptime const, generics,
+// imports, types, lambdas). 06-functions.md: "Runtime `const`, `mut`, and
+// `reg` declarations from enclosing lambda scopes are not visible inside a
+// nested lambda unless passed as normal inputs". Reading the enclosing mod's
+// RUNTIME input `b` inside the nested `comb addb` must be a compile error that
+// tells the user to pass it as an input. Today it compiles with exit 0:
+// prp2lnast turns `b` into a hidden closure input (streamed_lexical_names_)
+// and the design silently computes `a + b`.
+pub mod top(a:U8, b:U8) -> (o:U8@[0]) {
+  comb addb(x:U8) -> (y:U8) {
+    y = (x + b)#[0..<8]  // locate_error_here
+  }
+  o = addb(x=a)
+}

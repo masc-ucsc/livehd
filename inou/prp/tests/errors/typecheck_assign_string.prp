@@ -5,7 +5,7 @@
 */
 
 // Assigning an integer to an explicitly string-typed variable is an
-// implicit-conversion error (zero implicit conversions). Cast with `string(..)`.
+// implicit-conversion error (zero implicit conversions). Cast with `String(..)`.
 
-mut s:string = "x"
+mut s:String = "x"
 s = 3

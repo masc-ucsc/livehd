@@ -6,8 +6,8 @@
 */
 
 // Two arms do not cover a two-bit selector: retain the real hold path.
-pub mod latch_match_partial(sel:u2, a:u4, b:u4) -> (q:u4@[]) {
-  reg state:u4:[latch=true]
+pub mod latch_match_partial(sel:U2, a:U4, b:U4) -> (q:U4@[]) {
+  reg state:U4:[latch=true]
   match sel {
     == 0 { state = a }
     == 1 { state = b }

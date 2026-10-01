@@ -1,0 +1,8 @@
+/*
+:name: spec_lexical_str_spec_no_expr
+:type: error
+:error: expected an expression before the format spec
+*/
+// qa.md Q9 answer "Error in both" and appendix 3: "`"{:b}"` (format spec with
+// no expression) is a syntax error."
+const s = "{:b}"   // locate_error_here

@@ -1,0 +1,51 @@
+/*
+:name: reg_tuple_field_bit_write
+:type: equiv
+:verilog_top: reg_tuple_field_bit_write
+:pyrope_top: reg_tuple_field_bit_write
+*/
+// Several bit writes to ONE field of a tuple-typed register in one cycle must
+// all land, like the same writes to a plain `reg` (`w` below). They silently
+// kept only the last one: `st.a#[1] = ..` read the field `st.a` into a temp
+// (the field's Q) and rebuilt the whole field from it, so the write of bit 0
+// before it was lost. A partial write of a register field now splices into the
+// field's pending value, exactly like `w#[1] = ..` does. A plain read of the
+// field (`z`) still sees Q.
+//
+// `nt` covers a field of a nested tuple type, a runtime bit position and a
+// wrapped range.
+// `nt.n.y` is written only through a bit slice, unconditionally, so it lands
+// one cycle after its input (`y` @[1], ruling 83); the other fields have a
+// conditional write, a hold path, and stay state (@[0]).
+type In = (x:U4, y:U2)
+type Nt = (c:U4, n:In)
+
+pub mod reg_tuple_field_bit_write(v:U4, d:U4, i:U2, e:U2) -> (q:U2@[0], p:U2@[0], c:U4@[0], x:U4@[0], y:U2@[1], z:U4@[0]) {
+  reg st:(a:U2, b:U2) = (a=0, b=0)
+  reg w:U2 = 0
+  reg nt:Nt = nil
+  if v#[0] == 1 {
+    st.a#[0] = d#[0]
+    w#[0]    = d#[0]
+    nt.c#[0] = d#[0]
+  }
+  if v#[1] == 1 {
+    st.a#[1] = d#[1]
+    w#[1]    = d#[1]
+    nt.c#[i] = d#[3]
+  }
+  if v#[2] == 1 {
+    wrap nt.n.x#[1..=2] = e + 1
+  }
+  nt.n.x#[3] = d#[1]
+  nt.n.y#[1] = e#[0]
+  z = nt.c
+  if v#[3] == 1 {
+    nt.n.x#[0] = d#[2]
+  }
+  q = st.a
+  p = w
+  c = nt.c
+  x = nt.n.x
+  y = nt.n.y
+}

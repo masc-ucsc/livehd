@@ -158,8 +158,8 @@ fi
 # 5) The verify side: its own codec (Verify_result, a DIFFERENT serializer from
 #    Query_result), its own print site, and the formal_report.json member.
 cat > "$W/hard.prp" <<'EOF'
-mod hard(a:u32, b:u32, en:bool) -> (o:u8@[0]) {
-  reg acc:u8 = 0
+mod hard(a:U32, b:U32, en:Bool) -> (o:U8@[0]) {
+  reg acc:U8 = 0
   o = acc
   assert(a + b == b + a, "commutes")
   if en { wrap acc += 1 }

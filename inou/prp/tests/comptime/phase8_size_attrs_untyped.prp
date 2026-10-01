@@ -5,17 +5,18 @@
 :verifier_fail: 0
 */
 
-// Phase 8 — an untyped literal has a known value but no envelope. The
-// envelope only appears once a concrete type pins it (e.g. via a typed
-// copy).
+// Phase 8 — an untyped literal has a known value but no envelope: `.[max]`
+// and `.[min]` read nil until a concrete type pins them (e.g. via a typed
+// copy). `.[bits]` of an untyped COMPTIME integer is its value's width (user
+// ruling 2026-09-27, docs 04b "Integer Bitwidth": 3 -> 2 bits).
 
 const k = 3
-cassert(k.[bits] == nil)
+cassert(k.[bits] == 2)
 cassert(k.[max]  == nil)
 cassert(k.[min]  == nil)
 cassert(k == 3)
 
-const k2:u8 = k
+const k2:U8 = k
 cassert(k2.[bits] == 8)
 cassert(k2.[min]  == 0)
 cassert(k2.[max]  == 255)

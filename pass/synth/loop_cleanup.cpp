@@ -172,21 +172,31 @@ std::shared_ptr<hhds::Graph> extract_parallel_data(const std::shared_ptr<hhds::G
 
 bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs,
                          const absl::flat_hash_set<hhds::Node_class>&     expanded_instances,
-                         const absl::flat_hash_set<hhds::Gid>&            parallel_defs) {
+                         const absl::flat_hash_set<hhds::Gid>& parallel_defs, std::string_view from_pass,
+                         Preparation_budget* budget) {
   namespace gu = livehd::graph_util;
   std::unordered_set<hhds::Gid>                            visited;
   std::function<bool(const std::shared_ptr<hhds::Graph>&)> visit = [&](const auto& graph) {
+    if (!admit_preparation(budget, "loop-cleanup")) {
+      return false;
+    }
     if (!visited.insert(graph->get_gid()).second) {
       return true;
     }
     std::vector<hhds::Node_class> instances;
     for (const auto node : graph->body().nodes()) {
+      if (!admit_preparation(budget, "loop-scan")) {
+        return false;
+      }
       if (gu::type_op_of(node) == Ntype_op::Sub && node.get_subnode_graph()) {
         instances.push_back(node);
       }
     }
     bool changed = false;
     for (const auto& inst : instances) {
+      if (!admit_preparation(budget, "loop-instance")) {
+        return false;
+      }
       auto child = inst.get_subnode_graph();
       if (!visit(child)) {
         return false;
@@ -203,7 +213,13 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
       if (info.has() && info.get().find("region_opts") != std::string::npos) {
         continue;
       }
-      if (!gu::inline_sub_instance(graph.get(), inst, "pass.abc", nullptr, false, true, true)) {
+      if (!admit_preparation(budget, "loop-inline", 0)) {
+        return false;
+      }
+      if (!gu::inline_sub_instance(graph.get(), inst, from_pass, nullptr, false, true, true)) {
+        return false;
+      }
+      if (!admit_preparation(budget, "loop-inlined", 0)) {
         return false;
       }
       changed = true;
@@ -215,17 +231,29 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
       // fold too; bodies whose inputs remain dynamic still map once for reuse.
       bool specialized;
       do {
+        if (!admit_preparation(budget, "loop-specialize", 0)) {
+          return false;
+        }
         Cprop{true}.do_trans(graph);
         Bitwidth{3}.do_trans(graph);
         Cprop{true}.do_trans(graph);
         Bitwidth{3}.do_trans(graph);
+        if (!admit_preparation(budget, "loop-specialized", 0)) {
+          return false;
+        }
         std::vector<hhds::Node_class> constant_patterns;
         for (const auto node : graph->body().nodes()) {
+          if (!admit_preparation(budget, "loop-scan")) {
+            return false;
+          }
           auto child = gu::type_op_of(node) == Ntype_op::Sub ? node.get_subnode_graph() : nullptr;
           if (!child || (!livehd::color::is_pattern_def_name(child->get_name()) && !parallel_defs.contains(child->get_gid()))) {
             continue;
           }
           for (const auto& in_pin : node.inp_sorted_pins()) {
+            if (!admit_preparation(budget, "loop-pin")) {
+              return false;
+            }
             const auto in_drv = in_pin.get_driver_pin();
             if (in_drv.is_const()) {
               constant_patterns.push_back(node);
@@ -235,7 +263,13 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
         }
         specialized = !constant_patterns.empty();
         for (const auto& inst : constant_patterns) {
-          if (!gu::inline_sub_instance(graph.get(), inst, "pass.abc", nullptr, false, true, true)) {
+          if (!admit_preparation(budget, "loop-inline", 0)) {
+            return false;
+          }
+          if (!gu::inline_sub_instance(graph.get(), inst, from_pass, nullptr, false, true, true)) {
+            return false;
+          }
+          if (!admit_preparation(budget, "loop-inlined", 0)) {
             return false;
           }
         }
@@ -252,14 +286,21 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
 }
 }  // namespace
 
-bool prepare_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, bool unroll_carry, Loop_preparation& result) {
+bool prepare_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, bool unroll_carry, Loop_preparation& result,
+                         std::string_view from_pass, Preparation_budget* budget) {
   result = {};
+  if (!admit_preparation(budget, "loops", 0)) {
+    return false;
+  }
   absl::flat_hash_set<hhds::Gid> parallel_defs;
   if (unroll_carry) {
     absl::flat_hash_map<hhds::Gid, absl::flat_hash_set<hhds::Port_id>> carry_ports, index_ports;
     absl::flat_hash_map<hhds::Gid, std::shared_ptr<hhds::Graph>>       bodies;
     for (const auto& graph : graphs) {
       for (auto node : graph->body().nodes()) {
+        if (!admit_preparation(budget, "loop-scan")) {
+          return false;
+        }
         if (!node.is_loop_subnode() || !node.get_subnode_graph()) {
           continue;
         }
@@ -284,10 +325,16 @@ bool prepare_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
       }
     }
     for (const auto& [gid, ports] : carry_ports) {
+      if (!admit_preparation(budget, "loop-extract", 0)) {
+        return false;
+      }
       if (auto shared = extract_parallel_data(bodies.at(gid), ports, index_ports[gid])) {
         parallel_defs.insert(shared->get_gid());
         result.preserved_defs.insert(shared->get_gid());
         result.shared_bodies.push_back(std::move(shared));
+      }
+      if (!admit_preparation(budget, "loop-extracted", 0)) {
+        return false;
       }
     }
   }
@@ -295,17 +342,23 @@ bool prepare_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
   for (const auto& graph : graphs) {
     std::vector<hhds::Node_class> loops;
     for (const auto node : graph->body().nodes()) {
+      if (!admit_preparation(budget, "loop-scan")) {
+        return false;
+      }
       if (node.is_loop_subnode()) {
         loops.push_back(node);
       }
     }
     // Preserve the source module's ordinal naming while expanding selected sites.
     for (auto it = loops.rbegin(); it != loops.rend(); ++it) {
+      if (!admit_preparation(budget, "loop-validate", 0)) {
+        return false;
+      }
       const auto group = it->subnode_group();
       try {
         group.validate();
       } catch (const std::exception& e) {
-        livehd::diag::err("pass.abc", "replica-expand", "internal")
+        livehd::diag::err(from_pass, "replica-expand", "internal")
             .msg("invalid compact loop '{}': {}", livehd::graph_util::default_instance_name(*it), e.what())
             .emit();
         return false;
@@ -317,14 +370,28 @@ bool prepare_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
         result.preserved_defs.insert(it->get_subnode_gid());
         continue;
       }
+      if (!admit_preparation(budget, "loop-materialize", 0)) {
+        return false;
+      }
       std::vector<hhds::Node_class> replicas;
-      if (!livehd::graph_util::materialize_occurrence(graph.get(), *it, "pass.abc", &replicas)) {
+      if (!livehd::graph_util::materialize_occurrence(graph.get(), *it, from_pass, &replicas)) {
+        return false;
+      }
+      if (!admit_preparation(budget, "loop-materialized", 0)) {
         return false;
       }
       expanded_instances.insert(replicas.begin(), replicas.end());
       ++result.expanded;
     }
   }
-  return cleanup_loop_bodies(graphs, expanded_instances, parallel_defs);
+  if (!admit_preparation(budget, "loops-prepared", 0)) {
+    return false;
+  }
+  // Without materialization there are no expanded instances to inline or
+  // specialize. The source definition closure was already scanned above.
+  if (expanded_instances.empty()) {
+    return true;
+  }
+  return cleanup_loop_bodies(graphs, expanded_instances, parallel_defs, from_pass, budget);
 }
 }  // namespace livehd::synth

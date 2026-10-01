@@ -1,0 +1,20 @@
+/*
+:name: spec_memory_multidim_partial_index
+:type: error
+:tolg: 1
+:error: dimension
+*/
+
+// SPEC (docs 08-memories.md): "A multi-dimensional memory lowers to one flat
+// memory with **row-major** addressing ..., and every access must supply one index
+// per dimension."
+// Rule encoded here: a READ of a `reg` [4][8] memory with a single runtime index
+// (a whole row) is a compile error.
+
+pub mod spec_memory_multidim_partial_index(clk:Clock, we:Bool, wi:U2, wj:U3, d:U8, ri:U2) -> (q:[8]U8@[0]) {
+  reg b:[4][8]U8 = nil
+  if we {
+    b[wi][wj] = d
+  }
+  q = b[ri]   // locate_error_here
+}

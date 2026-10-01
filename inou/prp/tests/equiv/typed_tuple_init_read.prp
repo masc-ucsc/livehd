@@ -1,0 +1,50 @@
+/*
+:name: typed_tuple_init_read
+:type: equiv
+:verilog_top: top
+:pyrope_top: top
+*/
+
+// A TYPED local tuple declared WITH an initializer and then read field by
+// field. The declare+init counts as a repeated definition of `p`, so uPass_ssa
+// rebuilds and renames the later reads to `p___ssa_1`, while the runner's
+// detupler split the declaration/init onto the leaves `p.addr`/`p.write` and
+// never maps `p___ssa_1` back to them -> "unresolved reference '%py_0'"
+// (found under lhdtrack suggestions 2.3 row 8). The `= nil` + per-field-write
+// spelling does not version `p` and always worked (control `q`). Both
+// initializer spellings are legal: positional, like 04-variables'
+// `reg flags:(active:Bool, delayed:Bool) = (false, false)`, and named, since
+// 03-bundle.md allows a bare `(addr=…)` "as the value for an explicitly typed
+// construction". A multi-output call result as the initializer (`c`) fails
+// the same way ("unresolved reference '%cy_0'"). The `const` twin is
+// typed_tuple_const_init. A conditional whole reassign of the initialized
+// tuple (`u`) must not read the SSA carry between its versions as a user
+// self-assignment ("`u.write` is assigned to itself").
+comb pr(x:U6) -> (addr:U6, write:Bool) {
+  addr  = x ^ 5
+  write = x == 7
+}
+
+pub mod top(a:U6, w:Bool, s:Bool) -> (py:Bool@[], pz:U6@[], ny:Bool@[], nz:U6@[], qy:Bool@[], qz:U6@[],
+                                      cy:Bool@[], cz:U6@[], uy:Bool@[], uz:U6@[]) {
+  mut p:(addr:U6, write:Bool) = (a, w)
+  py = p.write
+  pz = p.addr
+  mut n:(addr:U6, write:Bool) = (addr = a ^ 1, write = not w)
+  ny = n.write
+  nz = n.addr
+  mut q:(addr:U6, write:Bool) = nil
+  q.addr  = a ^ 2
+  q.write = w
+  qy = q.write
+  qz = q.addr
+  mut c:(addr:U6, write:Bool) = pr(x=a)
+  cy = c.write
+  cz = c.addr
+  mut u:(addr:U6, write:Bool) = (a, w)
+  if s {
+    u = (a ^ 1, not w)
+  }
+  uy = u.write
+  uz = u.addr
+}

@@ -32,10 +32,9 @@
 // foldable gate lands on the write enable (gating the enable rather than
 // skipping the staged write, so the read port's same-address forwarding stays
 // consistent with what actually lands).
-pub mod memg(clk:bool, en:bool, a:u2, d:u8, we:bool) -> (rd:u8@[0], ctl:u8@[1]) {
-  wire g:bool = nil
-  g = clk and en
-  reg m:[4]u8:[clock_pin=ref g] = nil
+pub mod memg(clk:Clock, en:Bool, a:U2, d:U8, we:Bool) -> (rd:U8@[0], ctl:U8@[1]) {
+  const g = Clock(clock_pin=clk, enable=en)
+  reg m:[4]U8:[clock_pin=g] = nil
   if we {
     m[a] = d
   }
@@ -43,7 +42,7 @@ pub mod memg(clk:bool, en:bool, a:u2, d:u8, we:bool) -> (rd:u8@[0], ctl:u8@[1]) 
 
   // CONTROL: a flop on the UNGATED reference clock, so a failure on `rd` is
   // specifically the memory's clock and not a dead testbench.
-  reg c:u8:[clock_pin=ref clk] = 0
+  reg c:U8:[clock_pin=clk] = 0
   c   = d
   ctl = c
 }
@@ -56,8 +55,8 @@ test memg.gated_memory_holds_while_the_gate_is_closed {
   tick 6 {
     // c0 write 11 @0 with the gate OPEN; c1 present 22 @0 with the gate CLOSED
     // (must not land); c2 read @0; c3 write 33 @1 open; c4 read @0; c5 read @1.
-    mut av:u2   = 0
-    mut dv:u8   = 0
+    mut av:U2   = 0
+    mut dv:U8   = 0
     mut wev     = false
     mut env     = true
     if clock == 0 {

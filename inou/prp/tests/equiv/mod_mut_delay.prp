@@ -5,12 +5,12 @@
 :pyrope_top: f
 */
 
-// Task 1r/1q — a `mut` integer is captured at the lambda declaration point and
-// resolves the `@[runtime_delay]` landing-cycle slot. Here runtime_delay==2 at
-// the point `f` is declared, so `@[runtime_delay]` is the depth-2 stage's
-// landing cycle. `stage[2] x = a` delivers `a` two cycles later (a depth-2
-// shift register).
-mut runtime_delay = 2
-pub mod f(a:u8) -> (x:u8@[runtime_delay]) {
+// Task 1r/1q — a file-scope comptime integer resolves the `@[runtime_delay]`
+// landing-cycle slot: `@[runtime_delay]` is the depth-2 stage's landing cycle.
+// `stage[2] x = a` delivers `a` two cycles later (a depth-2 shift register).
+// (A lambda sees only COMPTIME bindings of its enclosing scopes -- ruling
+// 2026-09-27 #4 -- so a file-scope `mut` is no longer readable here.)
+comptime const runtime_delay = 2
+pub mod f(a:U8) -> (x:U8@[runtime_delay]) {
   stage[2] x = a
 }

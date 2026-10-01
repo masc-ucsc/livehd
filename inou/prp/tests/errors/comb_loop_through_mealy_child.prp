@@ -1,0 +1,26 @@
+/*
+:name: comb_loop_through_mealy_child
+:type: error
+:tolg: 1
+:error: combinational loop
+*/
+
+// GUARD for the false-loop fix of sim/mod_state_feedback_through_child.prp
+// (lhdtrack suggestions 2.1): a REAL combinational loop through a child must
+// stay an error. Here the child's `q = r ^ d` is combinational in `d`, so
+// feeding the caller's `gr` back into `d` closes `gr -> st.d -> st.q -> gr`
+// with no flop on the path. The child is in the SAME file, so it is lowered
+// before its caller; the imported (caller-first) spelling is
+// imports/comb_loop_import_mealy.prp.
+mod st(en:Bool, d:U4) -> (q:U4@[0]) {
+  reg r:U4 = 8
+  if en { r = d }
+  q = r ^ d
+}
+
+pub mod top(req:U4) -> (g:U4@[0]) {
+  wire gr:U4 = nil   // locate_error_here
+  const m = st(en=req != 0, d=gr)
+  gr = req & ~m
+  g = gr
+}

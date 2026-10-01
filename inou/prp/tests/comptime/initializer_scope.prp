@@ -1,0 +1,52 @@
+/*
+:name: initializer_scope
+:type: parsing lnast comptime
+:verifier_pass: 12
+:verifier_fail: 0
+*/
+
+// Writes escape the initializer's scope; its declarations do not.
+mut total = 0
+if const local = 3; local > 2 { total = local }
+cassert(total == 3)
+if const local = 4; false { total = 99 }
+elif local == 4 { total += local }
+else { total = 99 }
+cassert(total == 7)
+if false { total = 99 }
+elif const local = 2; false { total = 99 }
+else { total += local }
+cassert(total == 9)
+
+const selected = if const local = 5; true { local + 1 } else { 0 }
+cassert(selected == 6)
+const matched = match const local = 2; local { == 2 { local * 3 } else { 0 } }
+cassert(matched == 6)
+
+while mut local = 0; local < 3 { total += local; local += 1 }
+cassert(total == 12)
+while mut local = 0; true {
+  local += 1
+  if local == 2 { break }
+  total += local
+}
+cassert(total == 13)
+
+// An assignment in the header updates an existing binding.
+match total = 2; total { == 2 { total += 3 } }
+cassert(total == 5)
+if total = 7; total == 7 { total += 1 }
+cassert(total == 8)
+while total = 0; total < 2 { total += 1 }
+cassert(total == 2)
+
+// A subsequent declaration is fresh, including in a lambda body.
+const local = 17
+cassert(local == 17)
+comb scoped() -> (r) {
+  r = 0
+  if const n = 4; true { r = n }
+  const n = 5
+  r += n
+}
+cassert(scoped() == 9)

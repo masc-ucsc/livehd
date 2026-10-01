@@ -1,0 +1,20 @@
+/*
+:name: const_clock_reg_local
+:type: error
+:tolg: 1
+:error: register .r. of .const_clock_reg_local. is clocked by a constant
+*/
+
+// User ruling 2026-09-28 (27): a register whose clock resolves to a constant
+// is a compile error -- a constant never ticks, so the emitted Verilog
+// (`always @(posedge 1'h0)`) never updates `r` while `lhd sim` would step it.
+// Here the constant is local: `clock_pin=k` with `const k = 0`. Before the
+// fix the error read "reg 'r' names clock_pin '0' but ... has no such
+// input/wire" (constprop had already folded `k`), which blames the name.
+
+pub mod const_clock_reg_local(d:U4) -> (q:U4@[1]) {
+  const k = 0
+  reg r:U4:[clock_pin=k] = 0   // locate_error_here
+  r = d
+  q = r
+}

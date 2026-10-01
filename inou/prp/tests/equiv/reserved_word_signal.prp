@@ -17,6 +17,6 @@
 // an escaped `\packed ` port; an adversarial sweep of 17 keywords — packed, bit,
 // byte, int, shortint, longint, void, automatic, static, unique, priority,
 // interface, modport, package, program, time, real — all verified escaped).
-pub comb top(a:u8) -> (packed:u8) {
-  packed = a + 1
+pub comb top(a:U8) -> (packed:U8) {
+  wrap packed = a + 1
 }

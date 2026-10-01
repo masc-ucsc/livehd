@@ -4,7 +4,7 @@
 # Regression for the cvc5 LEC "phantom headroom bit" false REFUTE (the
 # DelayNWithValid shape from the XiangShan Backend verification sweep): when the
 # same flop is declared WIDER on one side (cgen's signed spare-bit convention,
-# `reg [1:0]` holding a u1 value) than on the other (`u1`), the shared power-on
+# `reg [1:0]` holding a u1 value) than on the other (`U1`), the shared power-on
 # state symbol must be built at the MIN corresponding width and EXTENDED on the
 # wide side (pass/lec/query.cpp fw/add_flops + encode.cpp seed_state). Sharing
 # at the MAX width instead leaves the wide reg's headroom bit free with no
@@ -58,10 +58,10 @@ end
 endmodule
 EOF
 cat >"$W/neg_wide.prp" <<'EOF'
-pub mod top(clock:u1, reset:u1, io_en:u1) -> (io_q:u1@[0]) {
-  reg cnt:u1:[initial=0, reset_pin=ref reset, async=true]
+pub mod top(`clock`:Clock, `reset`:Reset, io_en:U1) -> (io_q:U1@[0]) {
+  reg cnt:U1:[initial=0, reset_pin=`reset`, async=true]
   if io_en != 0 {
-    cnt = cnt + 1
+    wrap cnt = cnt + 1
   }
   io_q = 0
 }

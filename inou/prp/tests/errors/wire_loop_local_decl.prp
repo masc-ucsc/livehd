@@ -1,0 +1,34 @@
+/*
+:name: wire_loop_local_decl
+:type: error
+:error: for-loop body may not drive wire 'w'
+:help: drive the wire outside the loop
+*/
+
+// lhdtrack suggestions 2.3 / user ruling 2026-09-27 (ruling 5): a loop body may
+// READ a `wire` (the loop is then unrolled), but it may not WRITE (drive) one.
+// `wire w:U8 = a ^ i` is "declare and drive in one statement" (docs
+// 04-variables.md), so declaring a wire INSIDE the body drives it once per
+// iteration and stays an error, exactly like writing an enclosing wire
+// (errors/wire_loop_write.prp, docs 05b-statements.md "Loops and `wire`").
+//
+// The body first READS the enclosing wire `back`. That read is legal after the
+// ruling, so the diagnostic must name the DRIVE of `w` on its own line, not the
+// read. Before the ruling, prp2lnast rejected the read instead:
+//   for-loop body may not read or write wire 'back'   (on the `const b` line)
+// The wording now that reads are legal:
+//   message: for-loop body may not drive wire 'w'
+//   hint:    drive the wire outside the loop; a loop body may only read a wire
+// (a `while`/`loop` body says `loop body may not drive wire ...`, see
+// errors/wire_while_loop_write.prp).
+mod wire_loop_local_decl(a:U8) -> (z:U10@[0]) {
+  wire back:U8 = nil
+  mut acc:U10 = 0
+  for i in 0..<4 {
+    const b = back          // a READ of an enclosing wire: legal
+    wire w:U8 = a ^ i  // locate_error_here
+    acc = acc + (w & b)
+  }
+  back = a
+  z = acc
+}

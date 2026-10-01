@@ -7,6 +7,7 @@
 
 #include "query.hpp"
 
+#include <format>
 #include <memory>
 #include <set>
 #include <stdexcept>
@@ -26,6 +27,7 @@
 #include "inline_sub.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
+#include "proof_prep.hpp"
 #include "semdiff.hpp"
 
 using namespace livehd;
@@ -188,8 +190,10 @@ std::shared_ptr<hhds::Graph> build_active_loop(hhds::GraphLibrary& lib, uint64_t
   return top;
 }
 
+// `carry_bits` is the DECLARED carry-in port width (0 = width-less). The
+// carry-out stays 17 bits, so a narrower carry-in truncates at the port.
 std::shared_ptr<hhds::Graph> build_indexed_carry_loop(hhds::GraphLibrary& lib, int64_t first, uint64_t count,
-                                                      bool observe_plain_output = false) {
+                                                      bool observe_plain_output = false, uint32_t carry_bits = 17) {
   auto body_io = lib.create_io("indexed_body");
   body_io->add_input("index", 0);
   body_io->add_input("x", 1);
@@ -199,6 +203,7 @@ std::shared_ptr<hhds::Graph> build_indexed_carry_loop(hhds::GraphLibrary& lib, i
     body_io->set_bits(name, 17);
     body_io->set_unsign(name, true);
   }
+  body_io->set_bits("carry", carry_bits);
   if (observe_plain_output) {
     body_io->add_output("body_value", 4);
     body_io->set_bits("body_value", 17);
@@ -256,6 +261,115 @@ std::shared_ptr<hhds::Graph> build_indexed_carry_loop(hhds::GraphLibrary& lib, i
   }
   loop.subnode_group().validate();
   return top;
+}
+
+// A plain (non-loop) instance `u` of `narrow_callee`, whose input `a` is
+// declared `in_bits` wide (0 = width-less, a scalar in cgen and cgen_sim) and
+// `in_unsigned`; the callee passes `a` straight to its 17-bit output `y`. The
+// top feeds `a` from an 8-bit input `x` (`x_unsigned`) and drives `result` from
+// `y`. `in_bits < 0` builds the flat reference instead, with no instance:
+// `result = x#[0..<-in_bits]`.
+std::shared_ptr<hhds::Graph> build_port_fit_top(hhds::GraphLibrary& lib, int in_bits, bool in_unsigned = true,
+                                                bool x_unsigned = true) {
+  auto top_io = lib.create_io("port_fit_top");
+  top_io->add_input("x", 0);
+  top_io->set_bits("x", 8);
+  top_io->set_unsign("x", x_unsigned);
+  top_io->add_output("result", 1);
+  top_io->set_bits("result", 17);
+  top_io->set_unsign("result", true);
+  if (in_bits < 0) {
+    auto top  = top_io->create_graph();
+    auto mask = graph_util::create_get_mask(*top, top->get_input_pin("x"), 0, -in_bits);
+    graph_util::set_ubits(mask.create_driver_pin(0), -in_bits);
+    mask.create_driver_pin(0).connect_sink(top->get_output_pin("result"));
+    return top;
+  }
+
+  auto callee_io = lib.create_io("narrow_callee");
+  callee_io->add_input("a", 0);
+  callee_io->set_bits("a", static_cast<uint32_t>(in_bits));
+  callee_io->set_unsign("a", in_unsigned);
+  callee_io->add_output("y", 1);
+  callee_io->set_bits("y", 17);
+  callee_io->set_unsign("y", in_unsigned);
+  auto callee = callee_io->create_graph();
+  callee->get_input_pin("a").connect_sink(callee->get_output_pin("y"));
+
+  auto top = top_io->create_graph();
+  auto sub = graph_util::create_typed_node(*top, Ntype_op::Sub);
+  sub.set_name("u");
+  sub.set_subnode(callee_io);
+  top->get_input_pin("x").connect_sink(livehd::graph_util::setup_sink_pid(sub, 0));
+  auto y = sub.create_driver_pin(1);
+  graph_util::set_bits(y, 17);
+  if (in_unsigned) {
+    graph_util::set_unsign(y);
+  } else {
+    graph_util::set_sign(y);
+  }
+  y.connect_sink(top->get_output_pin("result"));
+  return top;
+}
+
+// `result = u.y` where the callee `net_callee` forwards its unsigned 8-bit `a`
+// to its unsigned 8-bit `y`, but the instance pin `u.y` -- the parent net cgen
+// declares for it -- is stamped 8 bits `net_signed`. The 17-bit `result` then
+// reads that net: sign-extended when it is signed, as the netlist's Verilog
+// does (`wire signed [7:0] u_y; assign result = u_y;`).
+std::shared_ptr<hhds::Graph> build_net_fit_top(hhds::GraphLibrary& lib, bool net_signed) {
+  auto callee_io = lib.create_io("net_callee");
+  callee_io->add_input("a", 0);
+  callee_io->add_output("y", 1);
+  for (const auto* p : {"a", "y"}) {
+    callee_io->set_bits(p, 8);
+    callee_io->set_unsign(p, true);
+  }
+  auto callee = callee_io->create_graph();
+  callee->get_input_pin("a").connect_sink(callee->get_output_pin("y"));
+
+  auto top_io = lib.create_io("port_fit_top");
+  top_io->add_input("x", 0);
+  top_io->set_bits("x", 8);
+  top_io->set_unsign("x", true);
+  top_io->add_output("result", 1);
+  top_io->set_bits("result", 17);
+  top_io->set_unsign("result", true);
+  auto top = top_io->create_graph();
+  auto sub = graph_util::create_typed_node(*top, Ntype_op::Sub);
+  sub.set_name("u");
+  sub.set_subnode(callee_io);
+  top->get_input_pin("x").connect_sink(graph_util::setup_sink_pid(sub, 0));
+  auto y = sub.create_driver_pin(1);
+  if (net_signed) {
+    graph_util::set_sbits(y, 8);
+  } else {
+    graph_util::set_ubits(y, 8);
+  }
+  y.connect_sink(top->get_output_pin("result"));
+  return top;
+}
+
+// The flat `result = x` sign-extended from bit 7 (`x_signed`) or zero-extended.
+std::shared_ptr<hhds::Graph> build_net_fit_ref(hhds::GraphLibrary& lib, bool x_signed) {
+  auto io = lib.create_io("port_fit_top");
+  io->add_input("x", 0);
+  io->set_bits("x", 8);
+  io->set_unsign("x", true);
+  io->add_output("result", 1);
+  io->set_bits("result", 17);
+  io->set_unsign("result", true);
+  auto ref = io->create_graph();
+  if (!x_signed) {
+    ref->get_input_pin("x").connect_sink(ref->get_output_pin("result"));
+    return ref;
+  }
+  auto sext = graph_util::create_typed_node(*ref, Ntype_op::Sext);
+  ref->get_input_pin("x").connect_sink(graph_util::setup_sink_pid(sext, 0));
+  graph_util::create_const(*ref, *Dlop::create_integer(8)).connect_sink(graph_util::setup_sink_pid(sext, 1));
+  graph_util::set_sbits(sext.create_driver_pin(0), 17);
+  sext.create_driver_pin(0).connect_sink(ref->get_output_pin("result"));
+  return ref;
 }
 
 }  // namespace
@@ -618,6 +732,159 @@ TEST(CombEquiv, IndexedCarryDescriptorMismatchFallsBackAndRefutes) {
   EXPECT_EQ(result.verdict, Verdict::Refuted) << result.detail;
   EXPECT_EQ(result.detail.find("loop certificate:"), std::string::npos) << result.detail;
   EXPECT_TRUE(result.loop_certificates.empty());
+}
+
+// A carry-in port narrower than the carry-out that feeds it truncates the
+// carry at every ordinal in cgen and cgen_sim; a width-less port is a scalar.
+// The occurrence view threads the carry straight to the previous ordinal's
+// 17-bit output, so LEC used to prove the width-less loop equal to the full
+// 17-bit one: a false PROVEN against the netlist's own emitted Verilog.
+TEST(CombEquiv, LoopCarryInIsTruncatedToItsDeclaredPortWidth) {
+  hhds::GraphLibrary wide_lib;
+  hhds::GraphLibrary widthless_lib;
+  hhds::GraphLibrary scalar_lib;
+  auto               wide      = build_indexed_carry_loop(wide_lib, 0, 4);
+  auto               widthless = build_indexed_carry_loop(widthless_lib, 0, 4, false, 0);
+  auto               scalar    = build_indexed_carry_loop(scalar_lib, 0, 4, false, 1);
+
+  lec::Lec_options options;
+  options.engine = "ind";
+  auto refuted   = lec::prove_equal(wide.get(), widthless.get(), options);
+  EXPECT_EQ(refuted.verdict, Verdict::Refuted) << refuted.detail;
+
+  auto proven = lec::prove_equal(scalar.get(), widthless.get(), options);
+  EXPECT_EQ(proven.verdict, Verdict::Proven) << proven.detail;
+}
+
+// The same boundary through a PLAIN instance -- the rolled loop above once
+// materialized into ordinary Subs. The occurrence view threads `a` straight to
+// the 8-bit `x`, so without the fit a width-less `a` was proved equal to an
+// 8-bit one while the netlist's own Verilog keeps one bit.
+TEST(CombEquiv, PlainSubInputIsTruncatedToItsDeclaredPortWidth) {
+  hhds::GraphLibrary wide_lib;
+  hhds::GraphLibrary widthless_lib;
+  hhds::GraphLibrary scalar_lib;
+  auto               wide      = build_port_fit_top(wide_lib, 8);
+  auto               widthless = build_port_fit_top(widthless_lib, 0);
+  auto               scalar    = build_port_fit_top(scalar_lib, 1);
+
+  lec::Lec_options options;
+  options.engine = "ind";
+  auto refuted   = lec::prove_equal(wide.get(), widthless.get(), options);
+  EXPECT_EQ(refuted.verdict, Verdict::Refuted) << refuted.detail;
+
+  auto proven = lec::prove_equal(scalar.get(), widthless.get(), options);
+  EXPECT_EQ(proven.verdict, Verdict::Proven) << proven.detail;
+}
+
+// A same-width connection that changes the sign is a reinterpretation too: a
+// signed 8-bit `x` into an unsigned 8-bit port reads 0..255 (cgen declares the
+// port `input [7:0] a`), and an unsigned one into a signed port reads -128..127.
+TEST(CombEquiv, SubPortSignIsReinterpretedAtTheBoundary) {
+  hhds::GraphLibrary masked_lib;
+  hhds::GraphLibrary to_unsigned_lib;
+  hhds::GraphLibrary to_signed_lib;
+  auto               masked      = build_port_fit_top(masked_lib, -8, true, false);
+  auto               to_unsigned = build_port_fit_top(to_unsigned_lib, 8, true, false);
+  auto               to_signed   = build_port_fit_top(to_signed_lib, 8, false, true);
+
+  lec::Lec_options options;
+  options.engine = "ind";
+  auto proven    = lec::prove_equal(masked.get(), to_unsigned.get(), options);
+  EXPECT_EQ(proven.verdict, Verdict::Proven) << proven.detail;
+
+  auto refuted = lec::prove_equal(masked.get(), to_signed.get(), options);
+  EXPECT_EQ(refuted.verdict, Verdict::Refuted) << refuted.detail;
+}
+
+// The Sext a signed port performs keeps the port's whole width: `x` read
+// through a signed 8-bit port is exactly `x` sign-extended from bit 7.
+TEST(CombEquiv, SignedPortFitKeepsItsWholeWidth) {
+  hhds::GraphLibrary ref_lib;
+  hhds::GraphLibrary to_signed_lib;
+  auto               ref_io = ref_lib.create_io("port_fit_top");
+  ref_io->add_input("x", 0);
+  ref_io->set_bits("x", 8);
+  ref_io->set_unsign("x", true);
+  ref_io->add_output("result", 1);
+  ref_io->set_bits("result", 17);
+  ref_io->set_unsign("result", true);
+  auto ref  = ref_io->create_graph();
+  auto sext = graph_util::create_typed_node(*ref, Ntype_op::Sext);
+  ref->get_input_pin("x").connect_sink(graph_util::setup_sink_pid(sext, 0));
+  graph_util::create_const(*ref, *Dlop::create_integer(8)).connect_sink(graph_util::setup_sink_pid(sext, 1));
+  graph_util::set_sbits(sext.create_driver_pin(0), 17);
+  sext.create_driver_pin(0).connect_sink(ref->get_output_pin("result"));
+  auto to_signed = build_port_fit_top(to_signed_lib, 8, false, true);
+
+  lec::Lec_options options;
+  options.engine = "ind";
+  auto proven    = lec::prove_equal(ref.get(), to_signed.get(), options);
+  EXPECT_EQ(proven.verdict, Verdict::Proven) << proven.detail;
+}
+
+// `lhd lec` first dissolves every instance whose definition the other side
+// lacks (single_edge::inline_instances_missing_from_other_side, the call
+// lhd_kernel_formal makes), so prove_equal never sees that boundary: the
+// splice itself must keep the fit. A width-less `a` keeps one bit of the 8-bit
+// `x` -- the netlist's own Verilog does -- so the flat 8-bit reference refutes
+// and the flat 1-bit one proves. The splice used to thread `x` straight
+// through and PROVE the 8-bit reference.
+TEST(CombEquiv, AbsentHierarchyInlineKeepsTheSubPortFit) {
+  for (const auto& [keep, expect] : {
+           std::pair{8, Verdict::Refuted},
+           std::pair{1,  Verdict::Proven}
+  }) {
+    SCOPED_TRACE(keep);
+    hhds::GraphLibrary                              ref_lib;
+    hhds::GraphLibrary                              impl_lib;
+    auto                                            ref  = build_port_fit_top(ref_lib, -keep);
+    auto                                            impl = build_port_fit_top(impl_lib, 0);
+    const std::vector<std::shared_ptr<hhds::Graph>> ref_graphs{ref};
+    std::vector<std::shared_ptr<hhds::Graph>>       impl_graphs;
+    for (const auto& g : impl->definitions().graphs()) {
+      impl_graphs.push_back(g);
+    }
+    ASSERT_EQ(single_edge::inline_instances_missing_from_other_side({}, impl_graphs, ref_graphs, impl.get()), 1U);
+
+    lec::Lec_options options;
+    options.engine = "ind";
+    auto result    = lec::prove_equal(ref.get(), impl.get(), options);
+    EXPECT_EQ(result.verdict, expect) << result.detail;
+  }
+}
+
+// An instance output crosses TWO declarations: the callee's port, then the
+// parent net the instance pin is stamped with. A signed net reinterprets the
+// unsigned port's 0..255 as -128..127, so the 17-bit reader sign-extends it.
+// The hierarchical proof (fit_sub_port_widths) and the kernel's absent-def
+// splice (inline_sub) must both apply that net step, and agree.
+TEST(CombEquiv, InstanceOutputNetStepIsKeptByBothBoundaryViews) {
+  for (const bool net_signed : {true, false}) {
+    for (const bool inline_first : {false, true}) {
+      SCOPED_TRACE(std::format("net_signed={} inline_first={}", net_signed, inline_first));
+      hhds::GraphLibrary ref_lib;
+      hhds::GraphLibrary wrong_lib;
+      hhds::GraphLibrary impl_lib;
+      auto               ref   = build_net_fit_ref(ref_lib, net_signed);
+      auto               wrong = build_net_fit_ref(wrong_lib, !net_signed);
+      auto               impl  = build_net_fit_top(impl_lib, net_signed);
+      if (inline_first) {
+        std::vector<std::shared_ptr<hhds::Graph>> impl_graphs;
+        for (const auto& g : impl->definitions().graphs()) {
+          impl_graphs.push_back(g);
+        }
+        ASSERT_EQ(single_edge::inline_instances_missing_from_other_side({}, impl_graphs, {ref}, impl.get()), 1U);
+      }
+
+      lec::Lec_options options;
+      options.engine = "ind";
+      auto proven    = lec::prove_equal(ref.get(), impl.get(), options);
+      EXPECT_EQ(proven.verdict, Verdict::Proven) << proven.detail;
+      auto refuted = lec::prove_equal(wrong.get(), impl.get(), options);
+      EXPECT_EQ(refuted.verdict, Verdict::Refuted) << refuted.detail;
+    }
+  }
 }
 
 TEST(CombEquiv, ZeroCountObservedPlainOutputIsRejectedBeforeCertification) {

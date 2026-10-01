@@ -1,0 +1,36 @@
+/*
+:name: spec_clock_gate_clock_cell
+:type: simulation
+*/
+// SPEC (clock lane): a Clock may be GATED (Clock_cell, ICG with an `enable`)
+// and the gated clock drives a register's clock pin.
+//   qa.md Appendix 6: "A Clock can never be bound to a constant and can never
+//     be modified except through Clock_cell." / "In synthesizable logic a Clock
+//     may only drive clock pins, a Clock_cell (ICG gating with `en`) or another
+//     Clock port."
+//   ruling 56 (audit Q1): "gated clock = `gclk = Clock(clock_pin=c, enable=e)`
+//     (named args) lowered to the ICG/clock-gate cell"
+//   ruling 83 (Q28): a mod body reg lands one cycle after the inputs that
+//     drive it (`f = d` is written every cycle): `q` is declared @[1].
+pub mod spec_clock_gate_clock_cell(clk:Clock, en:Bool, d:U8) -> (q:U8@[1]) {
+  const g = Clock(clock_pin=clk, enable=en)
+  reg f:U8:[clock_pin=g] = 0
+  f = d
+  q = f
+}
+
+test spec_clock_gate_clock_cell.holds_while_gated {
+  mut t = spec_clock_gate_clock_cell
+  mut i:U8 = 0
+  tick 4 {
+    t.en = i <= 1
+    mut dv:U8 = 5
+    if i == 1 { dv = 6 } elif i == 2 { dv = 99 } elif i == 3 { dv = 77 }
+    t.d = dv
+    step
+    if i >= 1 {
+      assert(t.q == 6, "gated: holds after en drops")
+    }
+    i += 1
+  }
+}

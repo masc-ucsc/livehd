@@ -1,0 +1,91 @@
+/*
+:name: loop_ring_hidden_from_planner
+:type: simulation
+:expect_instances: u_loop*=3
+*/
+
+// Siblings of loop_ring_through_own_carry.prp (lhdtrack suggestions 1.3a-x):
+// a `wire` ring that closes through a ROLLED loop's own output. The roll
+// planner unrolls such a loop when it can see the ring in the loop's own
+// definition (uPass_runner::plan_loop_roll, loop_output_rings_back); these two
+// shapes hide it, so the loop stays rolled:
+//   * lrh_later: the ring runs through a LATER loop that declines to roll
+//     (`cp` has no declared type), so its unrolled copy is plain logic;
+//   * lrh_call: the rolled loop sits in a comb, and the ring is in the CALLER
+//     that inlines it.
+// Once cprop/bitwidth fold the wire's buffer, the loop instance's output would
+// drive its own invariant input, and a self-edge on a loop Sub IS a carry
+// (hhds Subnode_group::carries): both died with
+//   error[internal]: Subnode_group::validate: carry input needs one self-edge
+//   and one external initial driver
+// The folds now keep that buffer (graph_util::closes_loop_self_edge).
+// `:expect_instances: u_loop*=3` keeps the loops rolled (lrh_later's, the one
+// in lrh_lanes' own module, and its copy inlined into lrh_call), so the fixture
+// keeps exercising that path. `::[timecheck=false]`: see
+// loop_ring_nested_outer_index.prp. Same values as `--set compile.unroll=true`.
+mod lrh_later::[timecheck=false](b:U16, sel:U8) -> (o:U4@[0]) {
+  wire w:U16 = nil
+  const wc = w
+  mut r:U4 = 0
+  mut pv:U16 = 0
+  for i in 0..<4 {
+    r#[i] = wc#[sel#[(i * 2)..+2] * 4 + i]
+    pv#[(i * 4)..+4] = b#[(i * 4)..+4] ^ 0x5
+  }
+  mut cp = 0
+  for k in 0..<1 {
+    cp = pv
+  }
+  w = cp
+  o = r
+}
+
+comb lrh_lanes(b:U16, s:U16, sel:U8) -> (o:U4, p:U16) {
+  mut r:U4 = 0
+  mut pv:U16 = 0
+  for i in 0..<4 {
+    r#[i] = s#[sel#[(i * 2)..+2] * 4 + i]
+    pv#[(i * 4)..+4] = b#[(i * 4)..+4] ^ 0x5
+  }
+  o = r
+  p = pv
+}
+
+mod lrh_call::[timecheck=false](b:U16, sel:U8) -> (o:U4@[0]) {
+  wire w:U16 = nil
+  const res = lrh_lanes(b=b, s=w, sel=sel)
+  w = res.p
+  o = res.o
+}
+
+pub mod loop_ring_hidden_from_planner(b:U16, sel:U8) -> (ol:U4@[0], oc:U4@[0]) {
+  ol = lrh_later(b=b, sel=sel)
+  oc = lrh_call(b=b, sel=sel)
+}
+
+test loop_ring_hidden_from_planner.values {
+  mut x    = loop_ring_hidden_from_planner
+  mut seen = 0
+  mut badl = 0
+  mut badc = 0
+  tick 16 {
+    const bv:U16 = (clock * 40503 + 12345) & 0xFFFF
+    const sv:U8  = (clock * 97 + 5) & 0xFF
+    x.b   = bv
+    x.sel = sv
+    step
+    seen += 1
+    // w == b ^ 0x5555; lane i picks bit (sel_i*4 + i) of it
+    const wv:U16 = bv ^ 0x5555
+    const e0:U1 = (wv >> ((sv & 3) * 4 + 0)) & 1
+    const e1:U1 = (wv >> (((sv >> 2) & 3) * 4 + 1)) & 1
+    const e2:U1 = (wv >> (((sv >> 4) & 3) * 4 + 2)) & 1
+    const e3:U1 = (wv >> (((sv >> 6) & 3) * 4 + 3)) & 1
+    const oexp:U4 = (e3 << 3) | (e2 << 2) | (e1 << 1) | e0
+    if x.ol != oexp { badl += 1 }
+    if x.oc != oexp { badc += 1 }
+  }
+  assert(seen == 16, "the comparisons ran")
+  assert(badl == 0, "a ring through a later unrolled loop reads the rolled loop's output")
+  assert(badc == 0, "a ring through the caller of an inlined comb reads the rolled loop's output")
+}

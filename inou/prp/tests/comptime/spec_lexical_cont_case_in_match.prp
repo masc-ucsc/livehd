@@ -1,0 +1,19 @@
+/*
+:name: spec_lexical_cont_case_in_match
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// qa.md appendix 3: "`case` (word operator -- ALWAYS continues)"; docs
+// 02-basics: "`case` always continues, even though it is also the `match` arm
+// keyword." So inside a match arm body a line starting with `case` right after
+// an expression continues that expression; it is not a new arm.
+const t = (const a=1, const b=3)
+match t {
+  case (a=1) {
+    const q = t
+      case (b=3)
+    cassert(q)
+  }
+  else { }
+}

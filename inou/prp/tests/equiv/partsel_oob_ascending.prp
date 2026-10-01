@@ -23,6 +23,6 @@
 // handing upass.bitwidth a negative shift.
 //
 // Corpus: tmp/chimera vloghammer partsel_00093 / _00403 / _00716.
-pub comb partsel_oob_ascending::[timecheck=false](a:u25, s:u3) -> (y:u4) {
+pub comb partsel_oob_ascending::[timecheck=false](a:U25, s:U3) -> (y:U4) {
   y = 0ub????
 }

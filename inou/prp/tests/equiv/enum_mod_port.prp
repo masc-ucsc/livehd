@@ -1,0 +1,62 @@
+/*
+:name: enum_mod_port
+:type: equiv
+:verilog_top: enum_mod_port
+:pyrope_top: enum_mod_port
+*/
+// User ruling 2026-09-28 (29): an ENUM-typed `mod`/`pipe` port carries the
+// enum's own value encoding, an UNSIGNED integer as wide as its widest entry
+// value needs. A default enum is one-hot (03-bundle.md: the first entry sets
+// bit 0, ...), so `Dir` (4 entries) is a 4-bit port and `Dir.N` is 0b0001; an
+// enum with explicit values numbers sequentially, so `Color` (widest entry 4)
+// is a 3-bit port. A second default enum, `Hue` (it used to be spelled with
+// the expression form `const Hue = enum(…)`, removed in 2026-09), is one-hot
+// with 3 bits. That holds for an input, an output and a `reg` of the
+// type, and for the emitted Verilog ports of the top (the golden declares them
+// `[2:0]` / `[3:0]`).
+//
+// Before, an enum-typed port lowered to ONE SIGNED bit (`input signed c`):
+// each call drove `.c(1'sh0)`, `c == Color.Green` was never true, and only LEC
+// saw it (REFUTED, g0 ref=1 impl=0; `lhd sim` kept the full value).
+
+enum Color = (Red = 1, Green = 2, Blue = 4)
+enum Dir = (N, E, S, W)
+enum Hue = (Red, Green, Blue)
+
+mod m(c:Color) -> (g:Bool@[0], v:U8@[0]) {
+  g = c == Color.Green
+  v = c
+}
+
+mod is_blue(h:Hue) -> (b:Bool@[0]) {
+  b = h == Hue.Blue
+}
+
+mod turn(d:Dir) -> (o:Dir@[0]) {
+  o = Dir.N
+  if d == Dir.N {
+    o = Dir.E
+  } elif d == Dir.E {
+    o = Dir.S
+  } elif d == Dir.S {
+    o = Dir.W
+  }
+}
+
+pub mod enum_mod_port(c:Color, d:Dir, h:Hue) -> (g0:Bool@[0], g1:Bool@[0], v0:U8@[0], gc:Bool@[0], t:Dir@[0], q:Dir@[1],
+                                                  hb:Bool@[0]) {
+  const r0 = m(c=Color.Green)
+  const r1 = m(c=Color.Blue)
+  const r2 = m(c=c)
+  g0 = r0.g
+  g1 = r1.g
+  v0 = r1.v
+  gc = r2.g
+  const tr = turn(d=d)
+  t = tr.o
+  reg st:Dir = Dir.S
+  st = tr.o
+  q = st
+  const ib = is_blue(h=h)
+  hb = ib.b
+}

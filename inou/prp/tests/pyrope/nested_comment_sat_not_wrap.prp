@@ -1,0 +1,12 @@
+/*
+:name: nested_comment_sat_not_wrap
+:type: compile
+*/
+
+// `sat /* /* */ wrap // */ r = …` saturates: the `wrap` is inside a nested
+// comment. (A non-nesting comment strip read it as `wrap`.)
+const a:U8 = 200
+const b:U8 = 100
+mut r:U8 = 0
+sat /* /* */ wrap // */ r = a + b
+cassert(r == 255)

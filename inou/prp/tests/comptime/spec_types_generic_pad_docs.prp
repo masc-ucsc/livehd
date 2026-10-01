@@ -1,0 +1,11 @@
+/*
+:name: spec_types_generic_pad_docs
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// SPEC docs 04-variables "Integer or Signed": "comb pad<N=8>(a:Unsigned(bits=N)) -> (y:Unsigned(bits=N+1)) { y = a }".
+// Rule: a generic width in port types works with the default and an explicit N.
+comb pad<N=8>(a:Unsigned(bits=N)) -> (y:Unsigned(bits=N+1)) { y = a }
+cassert(pad<N=4>(a=15) == 15)
+cassert(pad(a=200) == 200)

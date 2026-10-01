@@ -1,0 +1,17 @@
+/*
+:name: clkrst_reset_into_clock_input
+:type: error
+:tolg: 1
+:error: `Clock` input `c` of `cnt` is bound to `rs`, which is a `Reset`, not a Clock
+*/
+// docs 04b: `Clock` and `Reset` are distinct types -- they never swap at a
+// call site.
+mod cnt(c:Clock, r:Reset, en:Bool) -> (q:U8@[0]) {
+  reg n:U8 = 0
+  if en { wrap n = n + 1 }
+  q = n
+}
+pub mod clkrst_reset_into_clock_input(ck:Clock, rs:Reset, en:Bool) -> (o:U8@[0]) {
+  const x = cnt(c=rs, r=ck, en=en)   // locate_error_here
+  o = x.q
+}

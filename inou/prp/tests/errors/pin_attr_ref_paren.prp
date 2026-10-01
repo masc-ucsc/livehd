@@ -1,0 +1,11 @@
+/*
+:name: pin_attr_ref_paren
+:type: error
+:error: `clock_pin` takes the signal directly: `ref` is not allowed here
+*/
+// Ruling 82: `clock_pin=ref x` is an error, parenthesized too.
+pub mod pin_attr_ref_paren(clk:Clock, d:U8) -> (q:U8@[1]) {
+  reg f:U8:[clock_pin=(ref clk)] = 0   // locate_error_here
+  f = d
+  q = f
+}

@@ -228,7 +228,7 @@ LIB="$T/abc_icg_qn.lib"
   || { tail -5 "$W/gensim.log"; fail "3c: gensim"; }
 { cat "$W"/netv/*.v; echo; cat "$W/models.v"; } > "$W/mix_impl.v"
 { cat "$T/abc_icg_mix.v"; echo; cat "$W/models.v"; } > "$W/mix_ref.v"
-sed "s/if (!rst_n) b <= 4'b0110;/if (!rst_n) b <= 4'b0111;/" "$W/mix_ref.v" > "$W/mix_ref_b.v"
+sed "s/if (!rst_n) b <= 2'b10;/if (!rst_n) b <= 2'b11;/" "$W/mix_ref.v" > "$W/mix_ref_b.v"
 cmp -s "$W/mix_ref.v" "$W/mix_ref_b.v" && fail "3d: twin unchanged"
 expect 3c_icg_negedge_netlist proven "$W/mix_impl.v" "$W/mix_ref.v" abc_icg_mix
 expect 3d_icg_negedge_netlist_mutant refuted "$W/mix_impl.v" "$W/mix_ref_b.v" abc_icg_mix

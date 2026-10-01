@@ -19,6 +19,6 @@ const desc = match chosen {
 
 cassert(desc == "m:Mode.Manual")
 cassert(chosen == Mode.Manual)
-cassert(string(chosen) == "Mode.Manual")
+cassert(String(chosen) == "Mode.Manual")
 cassert(Mode("Off") == Mode.Off)
-cassert(u8(Mode.Auto) == 0ub001)
+cassert(U8(Mode.Auto) == 0ub001)

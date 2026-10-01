@@ -61,7 +61,59 @@ namespace {
 
 namespace gu = livehd::graph_util;
 
+// Internal unwind only: callback exceptions and graph failures propagate.
+// The caller owns and discards partial output after cooperative refusal.
+struct Admission_refused {};
+
+void check_admission(const livehd::partition::Admission& admission, std::string_view stage, uint64_t work = 1) {
+  if (admission && !admission(stage, work)) {
+    throw Admission_refused{};
+  }
+}
+
 using livehd::color::Union_find;  // region = connected component of same color
+
+// A graph-IO pin is named by looking its port id up in the GraphIO decls, so
+// every declared port needs its own id. Every GraphIO creator hands out unique
+// ids, but a library whose decls drifted from its body -- an lg: dir written by
+// a lowering that only ever ADDED ports, where a renamed input landed next to
+// the old one on the same id -- reached pin_name_of with an unnamed pin: its
+// assert in dbg, an empty name that crashed pass.abc (SIGSEGV) in opt. Refuse
+// such a def with a diagnostic before any pin is named.
+void check_io_decls(const hhds::GraphIO& gio, std::string_view top) {
+  absl::flat_hash_map<hhds::Port_id, std::string_view> owner;
+  auto                                                 scan = [&](const auto& decls) {
+    for (const auto& d : decls) {
+      const auto [it, fresh] = owner.try_emplace(d.port_id, d.name);
+      if (!fresh) {
+        livehd::diag::err("pass.partition", "io-port-clash", "io")
+            .msg("'{}' declares ports '{}' and '{}' on the same port id {}: its GraphIO is out of sync with its body",
+                 top,
+                 it->second,
+                 d.name,
+                 d.port_id)
+            .hint("re-create the lg: library from source into a fresh --emit-dir lg: directory")
+            .fatal();
+      }
+    }
+  };
+  scan(gio.get_input_pin_decls());
+  scan(gio.get_output_pin_decls());
+}
+
+// pin_name_of for a graph-IO pin whose name the caller must have: a missing
+// declared name is a diagnostic, never pin_name_of's dbg assert or an empty name.
+std::string graph_io_pin_name(const hhds::Pin_class& pin, std::string_view top) {
+  if (!pin.attr(livehd::attrs::pin_name).has() && pin.get_pin_name().empty()) {
+    livehd::diag::err("pass.partition", "io-pin-unnamed", "io")
+        .msg("'{}' wires graph-IO port id {} that its GraphIO does not declare: its GraphIO is out of sync with its body",
+             top,
+             pin.get_port_id())
+        .hint("re-create the lg: library from source into a fresh --emit-dir lg: directory")
+        .fatal();
+  }
+  return std::string{gu::pin_name_of(pin)};
+}
 
 std::string sanitize(std::string_view s) {
   std::string out;
@@ -140,7 +192,8 @@ uint64_t producer_shape(const hhds::Pin_class& pin) {
 // ports can tie on it and the "tied outputs are interchangeable" premise in
 // name_ports stops holding. name_ports refuses region reuse on any such port.
 absl::flat_hash_map<hhds::Pin_class, uint64_t> producer_signatures(const std::vector<hhds::Pin_class>&   roots,
-                                                                   absl::flat_hash_set<hhds::Pin_class>* coarse = nullptr) {
+                                                                   absl::flat_hash_set<hhds::Pin_class>* coarse,
+                                                                   const livehd::partition::Admission&   admission) {
   absl::flat_hash_map<hhds::Pin_class, uint32_t> indegree;
   absl::flat_hash_map<hhds::Pin_class, uint64_t> resolved;
   std::vector<hhds::Pin_class>                   reachable;
@@ -155,36 +208,44 @@ absl::flat_hash_map<hhds::Pin_class, uint64_t> producer_signatures(const std::ve
     return it;
   };
   for (const auto& root : roots) {
+    check_admission(admission, "producer-signature-step");
     add(root);
   }
   for (size_t i = 0; i < reachable.size(); ++i) {
+    check_admission(admission, "producer-signature-step");
     const auto pin = reachable[i];
     if (resolved.contains(pin)) {
       continue;
     }
     for (const auto& in_pin : pin.get_master_node().inp_sorted_pins()) {
+      check_admission(admission, "producer-signature-step");
       // PLURAL, and it must stay in lockstep with the decrement below: a compact
       // loop's carry-in sink holds TWO drivers, and counting it once left the
       // second driver with no indegree entry, never enqueued, and therefore
       // never `resolved` -- which the operand fold below would then throw on.
       for (const auto& in_drv : in_pin.get_driver_pins()) {
+        check_admission(admission, "producer-signature-step");
         ++add(in_drv)->second;
       }
     }
   }
   std::vector<hhds::Pin_class> ready;
   for (const auto& pin : reachable) {
+    check_admission(admission, "producer-signature-step");
     if (indegree.at(pin) == 0) {
       ready.push_back(pin);
     }
   }
   for (size_t i = 0; i < ready.size(); ++i) {
+    check_admission(admission, "producer-signature-step");
     const auto pin = ready[i];
     if (resolved.contains(pin)) {
       continue;
     }
     for (const auto& in_pin : pin.get_master_node().inp_sorted_pins()) {
+      check_admission(admission, "producer-signature-step");
       for (const auto& in_drv : in_pin.get_driver_pins()) {  // mirrors the build above
+        check_admission(admission, "producer-signature-step");
         auto it = indegree.find(in_drv);
         I(it != indegree.end() && it->second > 0);
         if (--it->second == 0) {
@@ -194,6 +255,7 @@ absl::flat_hash_map<hhds::Pin_class, uint64_t> producer_signatures(const std::ve
     }
   }
   for (const auto& [pin, degree] : indegree) {
+    check_admission(admission, "producer-signature-step");
     if (degree != 0 && !resolved.contains(pin)) {
       resolved.emplace(pin, sig_mix(producer_shape(pin), 0x9e37U));
       if (coarse != nullptr) {
@@ -202,6 +264,7 @@ absl::flat_hash_map<hhds::Pin_class, uint64_t> producer_signatures(const std::ve
     }
   }
   for (auto it = ready.rbegin(); it != ready.rend(); ++it) {
+    check_admission(admission, "producer-signature-step");
     if (resolved.contains(*it)) {
       continue;
     }
@@ -213,12 +276,14 @@ absl::flat_hash_map<hhds::Pin_class, uint64_t> producer_signatures(const std::ve
     absl::flat_hash_map<int, std::vector<uint64_t>> by_bank;
     bool                                            tainted = false;
     for (const auto& in_pin : it->get_master_node().inp_sorted_pins()) {
+      check_admission(admission, "producer-signature-step");
       const auto bank = static_cast<int>(Ntype::sink_bank(gu::type_op_of(in_pin.get_master_node()), in_pin.get_port_id()));
       // PLURAL reader: a compact loop's carry-in sink legitimately holds TWO
       // drivers (seed + previous ordinal). `get_driver_pin()` returns only the
       // first, so it silently dropped one operand out of the signature -- the
       // shape that shipped as a miscompile in pass/partition/flatten.cpp.
       for (const auto& in_drv : in_pin.get_driver_pins()) {
+        check_admission(admission, "producer-signature-step");
         by_bank[bank].push_back(resolved.at(in_drv));
         tainted = tainted || (coarse != nullptr && coarse->contains(in_drv));
       }
@@ -233,7 +298,7 @@ absl::flat_hash_map<hhds::Pin_class, uint64_t> producer_signatures(const std::ve
 }
 
 template <typename Fn>
-void each_fwd_child(const hhds::Node_class& consumer, Fn&& fn) {
+void each_fwd_child(const hhds::Node_class& consumer, const livehd::partition::Admission& admission, Fn&& fn) {
   // The node's CONNECTED DRIVER PINS, which is exactly what the old out_edges()
   // walk reconstructed by hand: it visited every fan-out EDGE and kept the first
   // one per driver port, so a driver reaching 12k sinks cost 12k edge decodes
@@ -243,16 +308,18 @@ void each_fwd_child(const hhds::Node_class& consumer, Fn&& fn) {
   // and then the port-sorted pin chain. The dedup vector is deleted, not
   // replaced.
   for (const auto& out_pin : consumer.out_sorted_pins()) {
+    check_admission(admission, "forward-signature-step");
     fn(out_pin);
   }
 }
 
-uint64_t fwd_local_sig(const hhds::Pin_class& driver) {
+uint64_t fwd_local_sig(const hhds::Pin_class& driver, const livehd::partition::Admission& admission) {
   // A driver's USES are a multiset: the out-edge walk order is storage order,
   // not a contract, and the combiner already folds the count in.
   constexpr uint64_t   kSeed = 0x84222325cbf29ce4ULL;
   hhds::Field_combiner uses;
   for (const auto& e : driver.out_edges()) {
+    check_admission(admission, "forward-signature-step");
     const auto& snk = e.sink;
     uint64_t    u;
     if (gu::is_graph_output_pin(snk)) {
@@ -266,7 +333,9 @@ uint64_t fwd_local_sig(const hhds::Pin_class& driver) {
         u = sig_mix(u, static_cast<uint64_t>(snk.get_port_id()));
         hhds::Field_combiner cin;
         for (const auto& in_pin : cm.inp_sorted_pins()) {
+          check_admission(admission, "forward-signature-step");
           for (const auto& in_drv : in_pin.get_driver_pins()) {  // plural: see the carry-in note above
+            check_admission(admission, "forward-signature-step");
             if (in_drv.is_const()) {
               cin.add(sig_mix(sig_str(sig_mix(kSeed, 5), gu::const_of(in_drv).serialize()),
                               static_cast<uint64_t>(in_pin.get_port_id())));
@@ -278,7 +347,7 @@ uint64_t fwd_local_sig(const hhds::Pin_class& driver) {
         // cyclic tail. Port ids retain useful discrimination without walking
         // back around the cycle.
         hhds::Field_combiner outs;
-        each_fwd_child(cm, [&](const auto& child) { outs.add(static_cast<uint64_t>(child.get_port_id())); });
+        each_fwd_child(cm, admission, [&](const auto& child) { outs.add(static_cast<uint64_t>(child.get_port_id())); });
         u = sig_mix(u, outs.value());
       }
     }
@@ -287,12 +356,14 @@ uint64_t fwd_local_sig(const hhds::Pin_class& driver) {
   return sig_mix(kSeed, uses.value());
 }
 
-uint64_t fwd_resolved_sig(const hhds::Pin_class& driver, const absl::flat_hash_map<hhds::Pin_class, uint64_t>& resolved) {
+uint64_t fwd_resolved_sig(const hhds::Pin_class& driver, const absl::flat_hash_map<hhds::Pin_class, uint64_t>& resolved,
+                          const livehd::partition::Admission& admission) {
   // A driver's USES are a multiset: the out-edge walk order is storage order,
   // not a contract, and the combiner already folds the count in.
   constexpr uint64_t   kSeed = 0x84222325cbf29ce4ULL;
   hhds::Field_combiner uses;
   for (const auto& e : driver.out_edges()) {
+    check_admission(admission, "forward-signature-step");
     const auto& snk = e.sink;
     uint64_t    u;
     if (gu::is_graph_output_pin(snk)) {
@@ -306,7 +377,9 @@ uint64_t fwd_resolved_sig(const hhds::Pin_class& driver, const absl::flat_hash_m
         cnode          = sig_mix(cnode, static_cast<uint64_t>(snk.get_port_id()));
         hhds::Field_combiner cin;
         for (const auto& in_pin : cm.inp_sorted_pins()) {
+          check_admission(admission, "forward-signature-step");
           for (const auto& in_drv : in_pin.get_driver_pins()) {  // plural: see the carry-in note above
+            check_admission(admission, "forward-signature-step");
             if (in_drv.is_const()) {
               cin.add(sig_mix(sig_str(sig_mix(kSeed, 5), gu::const_of(in_drv).serialize()),
                               static_cast<uint64_t>(in_pin.get_port_id())));
@@ -315,7 +388,7 @@ uint64_t fwd_resolved_sig(const hhds::Pin_class& driver, const absl::flat_hash_m
         }
         cnode = sig_mix(cnode, cin.value());
         hhds::Field_combiner outs;
-        each_fwd_child(cm, [&](const auto& child) {
+        each_fwd_child(cm, admission, [&](const auto& child) {
           auto it = resolved.find(child);
           I(it != resolved.end());
           outs.add(it->second);
@@ -335,18 +408,22 @@ uint64_t fwd_resolved_sig(const hhds::Pin_class& driver, const absl::flat_hash_m
 // recursion failure modes of the old implementation: a cycle and a path beyond
 // the depth cap each propagated `truncated` to every ancestor and disabled all
 // memoization, producing an exponential walk on the CDC designs.
-absl::flat_hash_map<hhds::Pin_class, uint64_t> fwd_cone_signatures(const std::vector<hhds::Pin_class>& roots) {
+absl::flat_hash_map<hhds::Pin_class, uint64_t> fwd_cone_signatures(const std::vector<hhds::Pin_class>& roots,
+                                                                   const livehd::partition::Admission& admission) {
   absl::flat_hash_map<hhds::Pin_class, uint32_t> indegree;
   std::vector<hhds::Pin_class>                   reachable;
   reachable.reserve(roots.size());
   for (const auto& root : roots) {
+    check_admission(admission, "forward-signature-step");
     if (indegree.try_emplace(root, 0).second) {
       reachable.push_back(root);
     }
   }
   for (size_t i = 0; i < reachable.size(); ++i) {
+    check_admission(admission, "forward-signature-step");
     const auto driver = reachable[i];
     for (const auto& e : driver.out_edges()) {
+      check_admission(admission, "forward-signature-step");
       const auto& snk = e.sink;
       if (gu::is_graph_output_pin(snk)) {
         continue;
@@ -355,7 +432,7 @@ absl::flat_hash_map<hhds::Pin_class, uint64_t> fwd_cone_signatures(const std::ve
       if (gu::has_name(cm)) {
         continue;
       }
-      each_fwd_child(cm, [&](const auto& child) {
+      each_fwd_child(cm, admission, [&](const auto& child) {
         auto [it, inserted] = indegree.try_emplace(child, 0);
         ++it->second;
         if (inserted) {
@@ -368,13 +445,16 @@ absl::flat_hash_map<hhds::Pin_class, uint64_t> fwd_cone_signatures(const std::ve
   std::vector<hhds::Pin_class> ready;
   ready.reserve(reachable.size());
   for (const auto& pin : reachable) {
+    check_admission(admission, "forward-signature-step");
     if (indegree.find(pin)->second == 0) {
       ready.push_back(pin);
     }
   }
   for (size_t i = 0; i < ready.size(); ++i) {
+    check_admission(admission, "forward-signature-step");
     const auto driver = ready[i];
     for (const auto& e : driver.out_edges()) {
+      check_admission(admission, "forward-signature-step");
       const auto& snk = e.sink;
       if (gu::is_graph_output_pin(snk)) {
         continue;
@@ -383,7 +463,7 @@ absl::flat_hash_map<hhds::Pin_class, uint64_t> fwd_cone_signatures(const std::ve
       if (gu::has_name(cm)) {
         continue;
       }
-      each_fwd_child(cm, [&](const auto& child) {
+      each_fwd_child(cm, admission, [&](const auto& child) {
         auto it = indegree.find(child);
         I(it != indegree.end());
         I(it->second > 0);
@@ -397,12 +477,14 @@ absl::flat_hash_map<hhds::Pin_class, uint64_t> fwd_cone_signatures(const std::ve
   absl::flat_hash_map<hhds::Pin_class, uint64_t> resolved;
   resolved.reserve(indegree.size());
   for (const auto& [pin, degree] : indegree) {
+    check_admission(admission, "forward-signature-step");
     if (degree != 0) {
-      resolved.emplace(pin, fwd_local_sig(pin));
+      resolved.emplace(pin, fwd_local_sig(pin, admission));
     }
   }
   for (auto it = ready.rbegin(); it != ready.rend(); ++it) {
-    resolved[*it] = fwd_resolved_sig(*it, resolved);
+    check_admission(admission, "forward-signature-step");
+    resolved[*it] = fwd_resolved_sig(*it, resolved, admission);
   }
   return resolved;
 }
@@ -446,7 +528,7 @@ public:
   Partitioner(hhds::Graph* g, hhds::GraphLibrary* outlib, std::string top, bool debug_color,
               livehd::partition::Body_builder hook = {}, bool flatten = false, bool fuse_colors = false,
               bool want_pre_bodies = false, livehd::partition::Body_batch_builder batch_hook = {}, size_t batch_size = 64,
-              bool skip_single_pre = false)
+              bool skip_single_pre = false, livehd::partition::Admission admission = {})
       : g_(g)
       , outlib_(outlib)
       , top_(std::move(top))
@@ -457,7 +539,8 @@ public:
       , build_pre_(want_pre_bodies)
       , skip_single_pre_(skip_single_pre)
       , batch_hook_(std::move(batch_hook))
-      , batch_size_(std::max<size_t>(1, batch_size)) {}
+      , batch_size_(std::max<size_t>(1, batch_size))
+      , admission_(std::move(admission)) {}
 
   bool run();
   void report_stats();
@@ -497,6 +580,8 @@ private:
   std::vector<Pending_body> pending_;
   size_t                    batch_size_ = 64;
   void                      flush_batch();
+  livehd::partition::Admission admission_;
+  void                         admit(std::string_view stage, uint64_t work = 1) const { check_admission(admission_, stage, work); }
 
   // collect()-only state: the union-find over node handles and the rep -> dense
   // region index map (ONE entry per region). Both are freed at the end of
@@ -603,6 +688,7 @@ private:
 };
 
 void Partitioner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Node_class& neo, hhds::GraphLibrary* dst_lib) {
+  admit("carry_node_attrs");
   if (gu::has_name(orig)) {
     neo.attr(hhds::attrs::name).set(std::string{gu::node_name_of(orig)});
   }
@@ -636,6 +722,7 @@ void Partitioner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
 }
 
 void Partitioner::carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pin_class& neo) {
+  admit("carry_driver_attrs");
   if (auto b = gu::bits_of(orig); b != 0) {
     gu::set_bits(neo, b);
   }
@@ -652,7 +739,11 @@ void Partitioner::carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pi
 }
 
 bool Partitioner::collect() {
+  admit("collect", 0);
   auto gio = g_->get_io();
+  if (gio) {
+    check_io_decls(*gio, top_);
+  }
 
   // Regions = connected components of same-color partitionable nodes. Color 0
   // (NO_COLOR) means the node was never colored — either no `pass.color` ran, or
@@ -668,6 +759,7 @@ bool Partitioner::collect() {
   absl::flat_hash_map<int, hhds::Node_class> color_anchor;
 
   for (auto n : g_->body().nodes(hhds::Node_order::forward)) {
+    admit("collect-step");
     if (!is_partitionable(n)) {
       continue;
     }
@@ -689,6 +781,7 @@ bool Partitioner::collect() {
       }
     }
     for (const auto& e : n.out_edges()) {
+      admit("collect-step");
       auto sn = e.sink.get_master_node();
       if (is_partitionable(sn) && node_color_of(sn) == c) {
         uf_.merge(n, sn);
@@ -708,6 +801,7 @@ bool Partitioner::collect() {
   // Region membership + color; dense region indices are minted here, in
   // forward_class first-encounter order (deterministic).
   for (auto n : g_->body().nodes(hhds::Node_order::forward)) {
+    admit("collect-step");
     if (!is_partitionable(n)) {
       continue;
     }
@@ -722,10 +816,12 @@ bool Partitioner::collect() {
   // are private copies: only their in-region edges use the local copy.
   absl::flat_hash_map<int, uint32_t> color_region;
   for (uint32_t r = 0; r < region_color_.size(); ++r) {
+    admit("collect-step");
     color_region[region_color_[r]] = r;
   }
   region_ctrl_.resize(region_nodes_.size(), false);
   for (auto node : g_->body().nodes(hhds::Node_order::forward)) {
+    admit("collect-step");
     auto attr = node.attr(livehd::attrs::ctrl_members);
     if (!attr.has()) {
       continue;
@@ -733,6 +829,7 @@ bool Partitioner::collect() {
     std::istringstream colors(attr.get());
     int                c;
     while (colors >> c) {
+      admit("collect-step");
       auto [it, added] = color_region.try_emplace(c, region_nodes_.size());
       if (added) {
         region_nodes_.emplace_back();
@@ -751,9 +848,11 @@ bool Partitioner::collect() {
   absl::flat_hash_map<hhds::Node_class, uint32_t> rank;
   uint32_t                                        ordinal = 0;
   for (auto n : g_->body().nodes(hhds::Node_order::forward)) {
+    admit("collect-step");
     rank[n] = ordinal++;
   }
   for (uint32_t r = 0; r < region_nodes_.size(); ++r) {
+    admit("collect-step");
     if (region_ctrl_[r]) {
       std::sort(region_nodes_[r].begin(), region_nodes_[r].end(), [&](const auto& a, const auto& b) {
         return rank.at(a) < rank.at(b);
@@ -771,16 +870,20 @@ bool Partitioner::collect() {
 
   // Classify edges against full membership, not just single-color ownership.
   for (uint32_t r = 0; r < nregions; ++r) {
+    admit("collect-step");
     absl::flat_hash_set<hhds::Node_class> local;
     if (region_ctrl_[r]) {
       local.insert(region_nodes_[r].begin(), region_nodes_[r].end());
     }
     for (auto n : region_nodes_[r]) {
+      admit("collect-step");
       for (const auto& in_pin : n.inp_sorted_pins()) {
+        admit("collect-step");
         // PLURAL: this rebuilds CONNECTIVITY, so a dropped driver is a lost edge
         // in the reconstructed region -- the same defect shape that shipped in
         // pass/partition/flatten.cpp. A compact loop's carry-in has two.
         for (const auto& in_drv : in_pin.get_driver_pins()) {
+          admit("collect-step");
           auto dn   = in_drv.get_master_node();
           auto spid = in_pin.get_port_id();
           if (in_drv.is_const()) {
@@ -794,8 +897,8 @@ bool Partitioner::collect() {
               const_edges_[r].push_back(ConstEdge{in_drv, n, spid});
             }
           } else if (gu::is_graph_input_pin(in_drv)) {
-            // pin_name_of resolves the graph input's declared port name directly.
-            ensure_input_port(r, in_drv, SinkRef{n, spid}, /*from_primary=*/true, std::string{gu::pin_name_of(in_drv)});
+            // The graph input's declared port name (a diagnostic when undeclared).
+            ensure_input_port(r, in_drv, SinkRef{n, spid}, /*from_primary=*/true, graph_io_pin_name(in_drv, top_));
           } else if (is_partitionable(dn)) {
             auto rd = region_idx(dn);
             if (rd == r || local.contains(dn)) {
@@ -816,6 +919,7 @@ bool Partitioner::collect() {
   // Primary outputs.
   if (gio) {
     for (const auto& decl : gio->get_output_pin_decls()) {
+      admit("collect-step");
       auto opin = g_->get_output_pin(decl.name);
       if (opin.is_invalid()) {
         continue;
@@ -832,7 +936,7 @@ bool Partitioner::collect() {
         if (d.is_const()) {
           top_outputs_.push_back(OutWire{decl.name, OutWire::Const, {}, {}, d});
         } else if (gu::is_graph_input_pin(d)) {
-          top_outputs_.push_back(OutWire{decl.name, OutWire::Primary, {}, std::string{gu::pin_name_of(d)}, {}});
+          top_outputs_.push_back(OutWire{decl.name, OutWire::Primary, {}, graph_io_pin_name(d, top_), {}});
         } else if (is_partitionable(dn)) {
           ensure_output_port(d);
           top_outputs_.push_back(OutWire{decl.name, OutWire::Region, d, {}, {}});
@@ -850,6 +954,7 @@ bool Partitioner::collect() {
 }
 
 void Partitioner::name_ports() {
+  admit("name_ports", 0);
   // in_index_ is collect()'s dedup table; the port sorts below invalidate its
   // indices and nothing reads it after collect -- drop it, don't rebuild it.
   in_index_.clear();
@@ -861,23 +966,32 @@ void Partitioner::name_ports() {
   std::vector<hhds::Pin_class> fwd_roots;
   size_t                       fwd_root_count = 0;
   for (const auto& ports : module_inputs_) {
+    admit("name_ports-step");
     fwd_root_count += ports.size();
   }
   fwd_roots.reserve(fwd_root_count);
   for (const auto& ports : module_inputs_) {
+    admit("name_ports-step");
     for (const auto& port : ports) {
+      admit("name_ports-step");
       fwd_roots.push_back(port.driver);
     }
   }
-  const auto fwd_memo       = fwd_cone_signatures(fwd_roots);
+  admit("forward-signatures", 0);
+  const auto fwd_memo = fwd_cone_signatures(fwd_roots, admission_);
+  admit("forward-signatures-done", 0);
   auto       producer_roots = fwd_roots;
   for (const auto& ports : module_outputs_) {
+    admit("name_ports-step");
     for (const auto& port : ports) {
+      admit("name_ports-step");
       producer_roots.push_back(port.driver);
     }
   }
   absl::flat_hash_set<hhds::Pin_class> sig_coarse;  // signature is only op/width/sign (cyclic residue)
-  const auto                           sig_memo = producer_signatures(producer_roots, &sig_coarse);
+  admit("producer-signatures", 0);
+  const auto sig_memo = producer_signatures(producer_roots, &sig_coarse, admission_);
+  admit("producer-signatures-done", 0);
 
   // A boundary port becomes a wire in the region module; it must not collide
   // with a recreated internal node's name. The classic failure is a flop whose
@@ -892,10 +1006,12 @@ void Partitioner::name_ports() {
   // no longer take an input port's name -- the previous per-loop pristine
   // copies let `input x` and `output x` coexist in one module.
   for (uint32_t r = 0; r < static_cast<uint32_t>(region_nodes_.size()); ++r) {
+    admit("name_ports-step");
     const auto&                      nodes = region_nodes_[r];
     absl::flat_hash_set<std::string> used;
     used.reserve(nodes.size());
     for (const auto& n : nodes) {
+      admit("name_ports-step");
       // Reserve the name cgen will ACTUALLY emit for this node, which is its
       // user name OR — when unnamed — the synthetic `<type>_<nid>`
       // (default_instance_name). Reserving only user-named nodes let an unnamed
@@ -953,6 +1069,7 @@ void Partitioner::name_ports() {
       absl::flat_hash_map<hhds::Pin_class, uint64_t> psig;
       psig.reserve(ports.size());
       for (auto& p : ports) {
+        admit("name_ports-step");
         psig[p.driver] = sig_mix(sig_of(p.driver), fwd_sig_of(p.driver));
       }
       // Sort by the content signature (nid-free, reproducible) so the port_id
@@ -984,12 +1101,14 @@ void Partitioner::name_ports() {
       // can tie on it and the tiebreak that orders them is this-run arbitrary.
       // Refuse reuse for those, inputs and outputs alike.
       for (size_t i = 0; i < ports.size(); ++i) {
+        admit("name_ports-step");
         if (sig_coarse.contains(ports[i].driver) || (i > 0 && psig[ports[i].driver] == psig[ports[i - 1].driver])) {
           region_reuse_ok_[r] = 0;
           break;
         }
       }
       for (auto& p : ports) {
+        admit("name_ports-step");
         std::string base;
         if (p.from_primary && !p.primary_name.empty()) {
           base = p.primary_name;  // declared IO name: already stable
@@ -1002,6 +1121,7 @@ void Partitioner::name_ports() {
         std::string nm = base;
         int         k  = 1;
         while (used.contains(nm)) {
+          admit("name_ports-step");
           nm = base + "_" + std::to_string(k++);
         }
         used.insert(nm);
@@ -1014,6 +1134,7 @@ void Partitioner::name_ports() {
       absl::flat_hash_map<hhds::Pin_class, uint64_t> psig;
       psig.reserve(ports.size());
       for (auto& p : ports) {
+        admit("name_ports-step");
         psig[p.driver] = sig_of(p.driver);
       }
       std::sort(ports.begin(), ports.end(), [&](const OutputPort& a, const OutputPort& b) {
@@ -1030,12 +1151,14 @@ void Partitioner::name_ports() {
       // orders them is this-run arbitrary, which would let a cached body be
       // stitched back by name onto swapped ports.
       for (const auto& p : ports) {
+        admit("name_ports-step");
         if (sig_coarse.contains(p.driver)) {
           region_reuse_ok_[r] = 0;
           break;
         }
       }
       for (size_t i = 0; i < ports.size(); ++i) {
+        admit("name_ports-step");
         std::string base;
         if (auto pn = gu::pin_name_of(ports[i].driver); !pn.empty()) {
           base = std::string{pn};  // named wire/register: already stable
@@ -1059,6 +1182,7 @@ void Partitioner::name_ports() {
         std::string nm = base;
         int         k  = 1;
         while (used.contains(nm)) {
+          admit("name_ports-step");
           nm = base + "_" + std::to_string(k++);
         }
         used.insert(nm);
@@ -1070,14 +1194,17 @@ void Partitioner::name_ports() {
 }
 
 std::vector<uint32_t> Partitioner::ordered_regions() {
+  admit("ordered_regions", 0);
   // min-nid is precomputed in one pass over the membership vectors: computing it
   // inside the sort comparator re-walked whole regions O(R log R) times, which on
   // a multi-million-node def is minutes of pure comparator time.
   std::vector<uint32_t> regs(region_nodes_.size());
   std::vector<uint64_t> min_nid(region_nodes_.size(), std::numeric_limits<uint64_t>::max());
   for (uint32_t r = 0; r < static_cast<uint32_t>(region_nodes_.size()); ++r) {
+    admit("ordered_regions-step");
     regs[r] = r;
     for (const auto& n : region_nodes_[r]) {
+      admit("ordered_regions-step");
       min_nid[r] = std::min<uint64_t>(min_nid[r], n.get_debug_nid());
     }
   }
@@ -1127,6 +1254,7 @@ static std::shared_ptr<hhds::GraphIO> clone_subnode_decl(hhds::GraphLibrary* dst
 }
 
 int Partitioner::port_bits(const InputPort& p) const {
+  admit("port_bits");
   if (auto b = gu::bits_of(p.driver); b != 0) {
     return b;
   }
@@ -1138,6 +1266,7 @@ int Partitioner::port_bits(const InputPort& p) const {
     return 0;
   }
   for (const auto& d : src_gio->get_input_pin_decls()) {
+    admit("port_bits-step");
     if (d.name == p.primary_name) {
       return static_cast<int>(d.bits);
     }
@@ -1149,9 +1278,11 @@ int Partitioner::port_bits(const InputPort& p) const {
 // Shared by the mapped-module shell on outlib_ and the pre-body's scratch lib,
 // so both carry byte-identical port names/widths/signs.
 std::shared_ptr<hhds::GraphIO> Partitioner::declare_region_io(uint32_t r, hhds::GraphLibrary* dst_lib, const std::string& name) {
+  admit("declare_region_io", 0);
   auto          gio = dst_lib->create_io(name);
   hhds::Port_id pid = 1;
   for (auto& p : module_inputs_[r]) {
+    admit("declare_region_io-step");
     gio->add_input(p.name, pid++);
     if (auto b = port_bits(p); b != 0) {
       gio->set_bits(p.name, static_cast<uint32_t>(b));
@@ -1159,6 +1290,7 @@ std::shared_ptr<hhds::GraphIO> Partitioner::declare_region_io(uint32_t r, hhds::
     gio->set_unsign(p.name, gu::is_unsign(p.driver));
   }
   for (auto& p : module_outputs_[r]) {
+    admit("declare_region_io-step");
     gio->add_output(p.name, pid++);
     if (auto b = gu::bits_of(p.driver); b != 0) {
       gio->set_bits(p.name, static_cast<uint32_t>(b));
@@ -1174,7 +1306,9 @@ std::shared_ptr<hhds::GraphIO> Partitioner::declare_region_io(uint32_t r, hhds::
 // signed/8-bit region boundary would otherwise read as unsigned/1-bit. Mirrors
 // tolg. Inputs only: the output port is a SINK (its sign lives on the GraphIO).
 void Partitioner::stamp_region_input_pins(uint32_t r, hhds::Graph* body) {
+  admit("stamp_region_input_pins", 0);
   for (auto& p : module_inputs_[r]) {
+    admit("stamp_region_input_pins-step");
     auto ip = body->get_input_pin(p.name);
     if (auto b = port_bits(p); b != 0) {
       gu::set_bits(ip, b);
@@ -1192,8 +1326,10 @@ void Partitioner::stamp_region_input_pins(uint32_t r, hhds::Graph* body) {
 void Partitioner::emit_region_body(uint32_t r, hhds::Graph* body, hhds::GraphLibrary* dst_lib,
                                    const std::vector<hhds::Node_class>& rnodes, const std::vector<IntEdge>& redges,
                                    const std::vector<ConstEdge>& rconsts, bool decl_only_subs) {
+  admit("emit_region_body", 0);
   absl::flat_hash_map<hhds::Node_class, hhds::Node_class> node_map;
   for (const auto& n : rnodes) {
+    admit("emit_region_body-step");
     auto op  = gu::type_op_of(n);
     auto neo = gu::create_typed_node(*body, op);
     if (op == Ntype_op::Sub && n.get_subnode_io()) {
@@ -1239,6 +1375,7 @@ void Partitioner::emit_region_body(uint32_t r, hhds::Graph* body, hhds::GraphLib
 
   // Internal edges.
   for (const auto& e : redges) {
+    admit("emit_region_body-step");
     auto dp = driver_pin(e.driver);
     auto sp = node_map[e.snode].create_sink_pin(e.spid);
     dp.connect_sink(sp);
@@ -1249,6 +1386,7 @@ void Partitioner::emit_region_body(uint32_t r, hhds::Graph* body, hhds::GraphLib
   // shared constant.
   absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class> const_map;
   for (const auto& e : rconsts) {
+    admit("emit_region_body-step");
     auto it = const_map.find(e.cdriver);
     if (it == const_map.end()) {
       it = const_map.emplace(e.cdriver, gu::create_const(*body, gu::const_of(e.cdriver))).first;
@@ -1259,8 +1397,10 @@ void Partitioner::emit_region_body(uint32_t r, hhds::Graph* body, hhds::GraphLib
   // Boundary inputs. The sink lists are dead after this loop (build_top reads
   // only name/driver/from_primary); free them region by region.
   for (auto& p : module_inputs_[r]) {
+    admit("emit_region_body-step");
     auto ipin = body->get_input_pin(p.name);
     for (const auto& s : p.sinks) {
+      admit("emit_region_body-step");
       auto sp = node_map[s.node].create_sink_pin(s.pid);
       ipin.connect_sink(sp);
     }
@@ -1269,6 +1409,7 @@ void Partitioner::emit_region_body(uint32_t r, hhds::Graph* body, hhds::GraphLib
   }
   // Boundary outputs.
   for (const auto& p : module_outputs_[r]) {
+    admit("emit_region_body-step");
     auto dp = driver_pin(p.driver);
     dp.connect_sink(body->get_output_pin(p.name));
   }
@@ -1279,6 +1420,7 @@ void Partitioner::emit_region_body(uint32_t r, hhds::Graph* body, hhds::GraphLib
   // never created. Width/sign come from the child decl; ports wired above keep
   // their carried attrs.
   for (const auto& n : rnodes) {
+    admit("emit_region_body-step");
     if (gu::type_op_of(n) != Ntype_op::Sub) {
       continue;
     }
@@ -1289,6 +1431,7 @@ void Partitioner::emit_region_body(uint32_t r, hhds::Graph* body, hhds::GraphLib
     }
     auto& made = sub_outs_made[n];
     for (const auto& d : sio->get_output_pin_decls()) {
+      admit("emit_region_body-step");
       if (made.contains(static_cast<uint32_t>(d.port_id))) {
         continue;
       }
@@ -1309,11 +1452,14 @@ void Partitioner::emit_region_body(uint32_t r, hhds::Graph* body, hhds::GraphLib
 // port lists).
 hhds::Graph* Partitioner::build_pre_body_into(uint32_t r, hhds::GraphLibrary& dst_lib, const std::string& name,
                                               const std::vector<hhds::Node_class>& rnodes) {
+  admit("build_pre_body_into", 0);
   auto gio  = declare_region_io(r, &dst_lib, name);
   auto body = gio->create_graph();
   stamp_region_input_pins(r, body.get());
   emit_region_body(r, body.get(), &dst_lib, rnodes, internal_edges_[r], const_edges_[r], /*decl_only_subs=*/true);
+  admit("commit", 0);
   body->commit();
+  admit("committed", 0);
   internal_edges_[r].clear();
   internal_edges_[r].shrink_to_fit();
   const_edges_[r].clear();
@@ -1322,6 +1468,7 @@ hhds::Graph* Partitioner::build_pre_body_into(uint32_t r, hhds::GraphLibrary& ds
 }
 
 void Partitioner::build_module(uint32_t r) {
+  admit("build_module", 0);
   int         color = region_color_[r];
   std::string name  = std::format("{}__c{}", top_, color);
   // Disambiguate if this color has multiple regions.
@@ -1329,6 +1476,7 @@ void Partitioner::build_module(uint32_t r) {
     int         suffix = 1;
     std::string base   = name;
     while (outlib_->find_io(name)) {
+      admit("build_module-step");
       name = std::format("{}_r{}", base, suffix++);
     }
   }
@@ -1350,9 +1498,11 @@ void Partitioner::build_module(uint32_t r) {
     rb.module_name    = name;
     rb.reuse_eligible = (r < region_reuse_ok_.size()) ? (region_reuse_ok_[r] != 0) : true;
     for (auto& p : module_inputs_[r]) {
+      admit("build_module-step");
       rb.inputs.push_back({p.name, p.driver, port_bits(p), !gu::is_unsign(p.driver)});
     }
     for (auto& p : module_outputs_[r]) {
+      admit("build_module-step");
       rb.outputs.push_back({p.name, p.driver, gu::bits_of(p.driver), !gu::is_unsign(p.driver)});
     }
     // rb.nodes is a non-owning span: the storage must outlive the synchronous
@@ -1381,8 +1531,12 @@ void Partitioner::build_module(uint32_t r) {
       pending_.push_back({body, std::move(rnodes), std::move(pre_lib), std::move(rb)});
       return;
     }
+    admit("builder", 0);
     hook_(rb);
+    admit("built", 0);
+    admit("commit", 0);
     body->commit();
+    admit("committed", 0);
     return;
   }
 
@@ -1395,7 +1549,9 @@ void Partitioner::build_module(uint32_t r) {
   auto redges  = std::move(internal_edges_[r]);
   auto rconsts = std::move(const_edges_[r]);
   emit_region_body(r, body.get(), outlib_, rnodes, redges, rconsts, /*decl_only_subs=*/false);
+  admit("commit", 0);
   body->commit();
+  admit("committed", 0);
 }
 
 // Whole-design flatten, single region: the region IS the design. Emit it
@@ -1406,10 +1562,12 @@ void Partitioner::build_module(uint32_t r) {
 // collision renaming is bypassed on purpose (internal child nodes are
 // instance-path-prefixed by the flattener and cannot collide with port names).
 void Partitioner::build_module_as_top(uint32_t r) {
+  admit("build_module_as_top", 0);
   auto src_gio   = g_->get_io();
   auto gio       = outlib_->create_io(top_);
   module_gio_[r] = gio;
   for (const auto& decl : src_gio->get_input_pin_decls()) {
+    admit("build_module_as_top-step");
     gio->add_input(decl.name, decl.port_id, decl.loop_break);
     if (decl.bits != 0) {
       gio->set_bits(decl.name, decl.bits);
@@ -1417,6 +1575,7 @@ void Partitioner::build_module_as_top(uint32_t r) {
     gio->set_unsign(decl.name, decl.unsign);
   }
   for (const auto& decl : src_gio->get_output_pin_decls()) {
+    admit("build_module_as_top-step");
     gio->add_output(decl.name, decl.port_id, decl.loop_break);
     if (decl.bits != 0) {
       gio->set_bits(decl.name, decl.bits);
@@ -1429,6 +1588,7 @@ void Partitioner::build_module_as_top(uint32_t r) {
   // build_module/build_top: the decl is not auto-propagated to pin attrs and
   // every reader sizes from the pin).
   for (const auto& decl : src_gio->get_input_pin_decls()) {
+    admit("build_module_as_top-step");
     auto ip = body->get_input_pin(decl.name);
     if (decl.bits != 0) {
       gu::set_bits(ip, static_cast<int>(decl.bits));
@@ -1439,6 +1599,7 @@ void Partitioner::build_module_as_top(uint32_t r) {
   // With one region there is no other region to drive a boundary port, so
   // every input port must come from a primary input.
   for (const auto& p : module_inputs_[r]) {
+    admit("build_module_as_top-step");
     if (!p.from_primary) {
       livehd::diag::err("pass.partition", "flatten-input", "internal")
           .msg("flatten: single-region input port unexpectedly driven by a non-primary pin in '{}'", top_)
@@ -1456,9 +1617,11 @@ void Partitioner::build_module_as_top(uint32_t r) {
     rb.module_name    = top_;
     rb.reuse_eligible = (r < region_reuse_ok_.size()) ? (region_reuse_ok_[r] != 0) : true;
     for (const auto& p : module_inputs_[r]) {
+      admit("build_module_as_top-step");
       rb.inputs.push_back({p.primary_name, p.driver, port_bits(p), !gu::is_unsign(p.driver)});
     }
     for (const auto& ow : top_outputs_) {
+      admit("build_module_as_top-step");
       if (ow.kind == OutWire::Region) {
         rb.outputs.push_back({ow.oname, ow.driver, gu::bits_of(ow.driver), !gu::is_unsign(ow.driver)});
       }
@@ -1479,9 +1642,13 @@ void Partitioner::build_module_as_top(uint32_t r) {
       rb.pre_lib  = &pre_lib;
     }
     if (batch_hook_) {
+      admit("builder", 0);
       batch_hook_(std::span<const livehd::partition::Region_body>(&rb, 1));
+      admit("built", 0);
     } else {
+      admit("builder", 0);
       hook_(rb);
+      admit("built", 0);
     }
   } else {
     // Same consume-and-free as build_module: with one region these tables ARE
@@ -1498,7 +1665,9 @@ void Partitioner::build_module_as_top(uint32_t r) {
   // hook and twin shapes (the wrapper used to wire these; there is no wrapper).
   emit_top_passthrough_outputs(body.get());
 
+  admit("commit", 0);
   body->commit();
+  admit("committed", 0);
 }
 
 // The single-region "as top" construction (primary IO + top_outputs_), shared by
@@ -1508,8 +1677,10 @@ void Partitioner::build_module_as_top(uint32_t r) {
 void Partitioner::emit_region_body_as_top(uint32_t r, hhds::Graph* body, hhds::GraphLibrary* dst_lib,
                                           const std::vector<hhds::Node_class>& rnodes, const std::vector<IntEdge>& redges,
                                           const std::vector<ConstEdge>& rconsts, bool decl_only_subs) {
+  admit("emit_region_body_as_top", 0);
   absl::flat_hash_map<hhds::Node_class, hhds::Node_class> node_map;
   for (const auto& n : rnodes) {
+    admit("emit_region_body_as_top-step");
     auto op  = gu::type_op_of(n);
     auto neo = gu::create_typed_node(*body, op);
     if (op == Ntype_op::Sub && n.get_subnode_io()) {
@@ -1541,11 +1712,13 @@ void Partitioner::emit_region_body_as_top(uint32_t r, hhds::Graph* body, hhds::G
   };
 
   for (const auto& e : redges) {
+    admit("emit_region_body_as_top-step");
     driver_pin(e.driver).connect_sink(node_map[e.snode].create_sink_pin(e.spid));
   }
   // One recreated const per source pin (see build_module).
   absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class> const_map;
   for (const auto& e : rconsts) {
+    admit("emit_region_body_as_top-step");
     auto cit = const_map.find(e.cdriver);
     if (cit == const_map.end()) {
       cit = const_map.emplace(e.cdriver, gu::create_const(*body, gu::const_of(e.cdriver))).first;
@@ -1553,14 +1726,17 @@ void Partitioner::emit_region_body_as_top(uint32_t r, hhds::Graph* body, hhds::G
     cit->second.connect_sink(node_map[e.snode].create_sink_pin(e.spid));
   }
   for (auto& p : module_inputs_[r]) {
+    admit("emit_region_body_as_top-step");
     auto ipin = body->get_input_pin(p.primary_name);
     for (const auto& s : p.sinks) {
+      admit("emit_region_body_as_top-step");
       ipin.connect_sink(node_map[s.node].create_sink_pin(s.pid));
     }
     p.sinks.clear();
     p.sinks.shrink_to_fit();
   }
   for (const auto& ow : top_outputs_) {
+    admit("emit_region_body_as_top-step");
     if (ow.kind == OutWire::Region) {
       driver_pin(ow.driver).connect_sink(body->get_output_pin(ow.oname));
     }
@@ -1570,6 +1746,7 @@ void Partitioner::emit_region_body_as_top(uint32_t r, hhds::Graph* body, hhds::G
   // build_module; "has an edge" is exact here because every created driver pin
   // above is immediately connected).
   for (const auto& n : rnodes) {
+    admit("emit_region_body_as_top-step");
     if (gu::type_op_of(n) != Ntype_op::Sub) {
       continue;
     }
@@ -1583,9 +1760,11 @@ void Partitioner::emit_region_body_as_top(uint32_t r, hhds::Graph* body, hhds::G
     // edge of every output and inserting its port repeatedly.
     absl::flat_hash_set<uint32_t> made;
     for (const auto& out_pin : neo.out_sorted_pins()) {
+      admit("emit_region_body_as_top-step");
       made.insert(static_cast<uint32_t>(out_pin.get_port_id()));
     }
     for (const auto& d : sio->get_output_pin_decls()) {
+      admit("emit_region_body_as_top-step");
       if (made.contains(static_cast<uint32_t>(d.port_id))) {
         continue;
       }
@@ -1600,7 +1779,9 @@ void Partitioner::emit_region_body_as_top(uint32_t r, hhds::Graph* body, hhds::G
 // Outputs driven directly by a primary input or a constant (they bypass the
 // region entirely). Applied to both the mapped body and the pre-body.
 void Partitioner::emit_top_passthrough_outputs(hhds::Graph* body) {
+  admit("emit_top_passthrough_outputs", 0);
   for (const auto& ow : top_outputs_) {
+    admit("emit_top_passthrough_outputs-step");
     if (ow.kind == OutWire::Const) {
       gu::create_const(*body, gu::const_of(ow.cdriver)).connect_sink(body->get_output_pin(ow.oname));
     } else if (ow.kind == OutWire::Primary) {
@@ -1614,9 +1795,11 @@ void Partitioner::emit_top_passthrough_outputs(hhds::Graph* body) {
 // compare artifact for a single-region def.
 hhds::Graph* Partitioner::build_pre_body_as_top(uint32_t r, hhds::GraphLibrary& dst_lib, const std::string& name,
                                                 const std::vector<hhds::Node_class>& rnodes) {
+  admit("build_pre_body_as_top", 0);
   auto src_gio = g_->get_io();
   auto gio     = dst_lib.create_io(name);
   for (const auto& decl : src_gio->get_input_pin_decls()) {
+    admit("build_pre_body_as_top-step");
     gio->add_input(decl.name, decl.port_id, decl.loop_break);
     if (decl.bits != 0) {
       gio->set_bits(decl.name, decl.bits);
@@ -1624,6 +1807,7 @@ hhds::Graph* Partitioner::build_pre_body_as_top(uint32_t r, hhds::GraphLibrary& 
     gio->set_unsign(decl.name, decl.unsign);
   }
   for (const auto& decl : src_gio->get_output_pin_decls()) {
+    admit("build_pre_body_as_top-step");
     gio->add_output(decl.name, decl.port_id, decl.loop_break);
     if (decl.bits != 0) {
       gio->set_bits(decl.name, decl.bits);
@@ -1632,6 +1816,7 @@ hhds::Graph* Partitioner::build_pre_body_as_top(uint32_t r, hhds::GraphLibrary& 
   }
   auto body = gio->create_graph();
   for (const auto& decl : src_gio->get_input_pin_decls()) {
+    admit("build_pre_body_as_top-step");
     auto ip = body->get_input_pin(decl.name);
     if (decl.bits != 0) {
       gu::set_bits(ip, static_cast<int>(decl.bits));
@@ -1640,7 +1825,9 @@ hhds::Graph* Partitioner::build_pre_body_as_top(uint32_t r, hhds::GraphLibrary& 
   }
   emit_region_body_as_top(r, body.get(), &dst_lib, rnodes, internal_edges_[r], const_edges_[r], /*decl_only_subs=*/true);
   emit_top_passthrough_outputs(body.get());
+  admit("commit", 0);
   body->commit();
+  admit("committed", 0);
   internal_edges_[r].clear();
   internal_edges_[r].shrink_to_fit();
   const_edges_[r].clear();
@@ -1649,9 +1836,11 @@ hhds::Graph* Partitioner::build_pre_body_as_top(uint32_t r, hhds::GraphLibrary& 
 }
 
 void Partitioner::build_top(const std::vector<uint32_t>& regs) {
+  admit("build_top", 0);
   auto src_gio = g_->get_io();
   auto tgio    = outlib_->create_io(top_);
   for (const auto& decl : src_gio->get_input_pin_decls()) {
+    admit("build_top-step");
     tgio->add_input(decl.name, decl.port_id, decl.loop_break);
     if (decl.bits != 0) {
       tgio->set_bits(decl.name, decl.bits);
@@ -1659,6 +1848,7 @@ void Partitioner::build_top(const std::vector<uint32_t>& regs) {
     tgio->set_unsign(decl.name, decl.unsign);
   }
   for (const auto& decl : src_gio->get_output_pin_decls()) {
+    admit("build_top-step");
     tgio->add_output(decl.name, decl.port_id, decl.loop_break);
     if (decl.bits != 0) {
       tgio->set_bits(decl.name, decl.bits);
@@ -1672,6 +1862,7 @@ void Partitioner::build_top(const std::vector<uint32_t>& regs) {
   // re-consume this wrapper (pass.abc re-mapping a netlist, cgen) size a port
   // from the PIN attr — without it an 8-bit input reads as 1 bit.
   for (const auto& decl : src_gio->get_input_pin_decls()) {
+    admit("build_top-step");
     auto ip = t->get_input_pin(decl.name);
     if (decl.bits != 0) {
       gu::set_bits(ip, static_cast<int>(decl.bits));
@@ -1683,6 +1874,7 @@ void Partitioner::build_top(const std::vector<uint32_t>& regs) {
   std::vector<hhds::Node_class>                                  sub_of(module_gio_.size());
   std::vector<absl::flat_hash_map<std::string, hhds::Pin_class>> sub_out_pin(module_gio_.size());
   for (const auto& r : regs) {
+    admit("build_top-step");
     auto gio = module_gio_[r];
     auto sub = gu::create_typed_node(*t, Ntype_op::Sub);
     sub.set_subnode(gio);
@@ -1724,7 +1916,9 @@ void Partitioner::build_top(const std::vector<uint32_t>& regs) {
 
   // Wire each module's input ports.
   for (const auto& r : regs) {
+    admit("build_top-step");
     for (const auto& p : module_inputs_[r]) {
+      admit("build_top-step");
       // The sub's GraphIO input port already carries the width+sign (create_io
       // above); cgen declares the port from there and sizes the connecting wire
       // from the driver. `bits`/`signed` are driver-pin properties, so do NOT
@@ -1740,6 +1934,7 @@ void Partitioner::build_top(const std::vector<uint32_t>& regs) {
 
   // Wire the new top's primary outputs.
   for (const auto& ow : top_outputs_) {
+    admit("build_top-step");
     auto out_sink = t->get_output_pin(ow.oname);
     if (ow.kind == OutWire::Region) {
       get_sub_out(ow.driver).connect_sink(out_sink);
@@ -1750,7 +1945,9 @@ void Partitioner::build_top(const std::vector<uint32_t>& regs) {
     }
   }
 
+  admit("commit", 0);
   t->commit();
+  admit("committed", 0);
 }
 
 // Group regions by color and report the per-region interface signature so a
@@ -1758,38 +1955,46 @@ void Partitioner::build_top(const std::vector<uint32_t>& regs) {
 // can be pinpointed. Module-per-region keeps the rebuild correct regardless,
 // but a mismatch means the color pass violated "same id => identical region".
 void Partitioner::diagnose_colors() {
+  admit("diagnose_colors", 0);
   absl::flat_hash_map<int, std::vector<uint32_t>> by_color;
   for (uint32_t r = 0; r < static_cast<uint32_t>(region_nodes_.size()); ++r) {
+    admit("diagnose_colors-step");
     by_color[region_color_[r]].push_back(r);
   }
   auto sig = [&](uint32_t r) {
     std::vector<int> in_w;
     std::vector<int> out_w;
     for (auto& p : module_inputs_[r]) {
+      admit("diagnose_colors-step");
       in_w.push_back(gu::bits_of(p.driver));
     }
     for (auto& p : module_outputs_[r]) {
+      admit("diagnose_colors-step");
       out_w.push_back(gu::bits_of(p.driver));
     }
     std::sort(in_w.begin(), in_w.end());
     std::sort(out_w.begin(), out_w.end());
     std::string s = "in[";
     for (int w : in_w) {
+      admit("diagnose_colors-step");
       s += std::to_string(w) + ",";
     }
     s += "] out[";
     for (int w : out_w) {
+      admit("diagnose_colors-step");
       s += std::to_string(w) + ",";
     }
     s += "]";
     return s;
   };
   for (auto& [color, regions] : by_color) {
+    admit("diagnose_colors-step");
     if (regions.size() < 2) {
       continue;
     }
     std::string first = sig(regions.front());
     for (size_t i = 1; i < regions.size(); ++i) {
+      admit("diagnose_colors-step");
       std::string s = sig(regions[i]);
       if (s != first) {
         std::print(
@@ -1806,24 +2011,32 @@ void Partitioner::diagnose_colors() {
 }
 
 void Partitioner::flush_batch() {
+  admit("flush_batch", 0);
   if (!pending_.empty()) {
     std::vector<livehd::partition::Region_body> batch;
     batch.reserve(pending_.size());
     for (auto& p : pending_) {
+      admit("flush_batch-step");
       // Move, not copy: the port vectors are the bulk of a Region_body and the
       // pending entry is dropped below. The node span, pre-body and pre-lib all
       // point at storage Pending_body still owns, so the view stays valid.
       batch.push_back(std::move(p.region));
     }
+    admit("builder", 0);
     batch_hook_(batch);
+    admit("built", 0);
     for (const auto& p : pending_) {
+      admit("flush_batch-step");
+      admit("commit", 0);
       p.body->commit();
+      admit("committed", 0);
     }
     pending_.clear();
   }
 }
 
 bool Partitioner::run() {
+  admit("run", 0);
   if (!collect()) {
     return false;
   }
@@ -1848,6 +2061,7 @@ bool Partitioner::run() {
   }
   name_ports();
   for (const auto& r : regs) {
+    admit("run-step");
     build_module(r);
     if (pending_.size() >= batch_size_) {
       flush_batch();
@@ -1881,10 +2095,11 @@ void Partitioner::report_stats() {
 // single-module top yields just itself. Returns the top graph (nullptr if not
 // found); `top` is filled in when it was empty.
 hhds::Graph* resolve_order(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, std::string& top,
-                           std::vector<hhds::Graph*>& order) {
+                           std::vector<hhds::Graph*>& order, const livehd::partition::Admission& admission = {}) {
   hhds::Graph*                                 g = nullptr;
   absl::flat_hash_map<hhds::Gid, hhds::Graph*> gid2graph;
   for (const auto& sp : graphs) {
+    check_admission(admission, "resolve-step");
     if (!sp) {
       continue;
     }
@@ -1905,6 +2120,7 @@ hhds::Graph* resolve_order(const std::vector<std::shared_ptr<hhds::Graph>>& grap
       return;
     }
     for (auto n : gg->body().nodes(hhds::Node_order::forward)) {
+      check_admission(admission, "resolve-step");
       if (gu::is_type_sub(n)) {
         auto it = gid2graph.find(n.get_subnode_gid());
         if (it != gid2graph.end()) {
@@ -1914,6 +2130,7 @@ hhds::Graph* resolve_order(const std::vector<std::shared_ptr<hhds::Graph>>& grap
     }
     order.push_back(gg);
   };
+  check_admission(admission, "resolve", 0);
   dfs(g);
   return g;
 }
@@ -1989,11 +2206,13 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
                                          std::string_view top_in, bool debug_color, const livehd::partition::Body_builder& hook,
                                          livehd::partition::Flatten_mode flatten, bool want_pre_bodies,
                                          const livehd::partition::Body_batch_builder& batch_hook, size_t batch_size,
-                                         const std::unordered_set<hhds::Gid>& preserved_defs,
-                                         const std::function<void(hhds::Graph*)>&  prepare_src) {
+                                         const std::unordered_set<hhds::Gid>&     preserved_defs,
+                                         const std::function<void(hhds::Graph*)>& prepare_src,
+                                         const livehd::partition::Admission&      admission) try {
+  check_admission(admission, "begin", 0);
   std::string               top{top_in};
   std::vector<hhds::Graph*> order;
-  auto*                     g = resolve_order(graphs, top, order);
+  auto*                     g = resolve_order(graphs, top, order, admission);
   if (g == nullptr) {
     livehd::diag::err("pass.partition", "no-top", "unsupported")
         .msg("partition: top module '{}' not found in the input library", top)
@@ -2003,6 +2222,7 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
 
   if (flatten_resolved(g, flatten)) {
     for (auto* def : order) {
+      check_admission(admission, "definition-step");
       if (def == g
           || (!def->get_input_node().attr(livehd::attrs::memory_module).has()
               && !def->get_input_node().attr(livehd::attrs::ware_module).has() && !preserved_defs.contains(def->get_gid()))) {
@@ -2023,7 +2243,8 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
                                batch_hook,
                                batch_size,
                                preserved_defs,
-                               prepare_src)) {
+                               prepare_src,
+                               admission)) {
         return false;
       }
       if (auto a = def->get_input_node().attr(livehd::attrs::ware_module); a.has()) {
@@ -2039,24 +2260,29 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
     std::shared_ptr<hhds::Graph> flat_holder;
     std::string                  flat_name;
     if (order.size() > 1) {
-      flat_name   = top + "__flatten_tmp";
-      flat_holder = livehd::partition::flatten_hierarchy(g, outlib, flat_name, nullptr, true, preserved_defs);
+      flat_name   = livehd::partition::flatten_scratch_name(top);
+      check_admission(admission, "flatten", 0);
+      flat_holder = livehd::partition::flatten_hierarchy(g, outlib, flat_name, nullptr, true, preserved_defs, admission);
       if (!flat_holder) {
-        return false;  // diag already emitted
+        return false;  // shape diagnostic or cooperative refusal; no further callbacks
       }
+      check_admission(admission, "flattened", 0);
       flat_src = flat_holder.get();
     }
     if (preserved_defs.contains(g->get_gid())) {
       // A shared loop implementation is one synthesis unit, including ordinary
       // helpers flattened into it. Do not resurrect their former color cuts.
       for (auto node : flat_src->body().nodes()) {
+        check_admission(admission, "definition-step");
         if (is_partitionable(node)) {
           livehd::graph_util::set_color(node, 1);
         }
       }
     }
     if (prepare_src) {
+      check_admission(admission, "prepare-source", 0);
       prepare_src(flat_src);
+      check_admission(admission, "prepared-source", 0);
     }
     Partitioner p(flat_src,
                   outlib,
@@ -2068,7 +2294,8 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
                   want_pre_bodies,
                   batch_hook,
                   batch_size,
-                  /*skip_single_pre=*/flatten_single_module(g, flatten));
+                  /*skip_single_pre=*/flatten_single_module(g, flatten),
+                  admission);
     bool        ok = p.run();
     if (ok) {
       if (auto a = g->get_input_node().attr(livehd::attrs::ware_module); a.has()) {
@@ -2082,13 +2309,17 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
       outlib->delete_graph(flat_holder);
       outlib->delete_graphio(flat_name);
     }
+    check_admission(admission, "complete", 0);
     return ok;
   }
 
   const bool fuse_colors = coloring_packed(g);
   for (auto* def : order) {
+    check_admission(admission, "definition-step");
     if (prepare_src) {
+      check_admission(admission, "prepare-source", 0);
       prepare_src(def);
+      check_admission(admission, "prepared-source", 0);
     }
     Partitioner p(def,
                   outlib,
@@ -2099,7 +2330,9 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
                   fuse_colors || preserved_defs.contains(def->get_gid()),
                   want_pre_bodies,
                   batch_hook,
-                  batch_size);
+                  batch_size,
+                  /*skip_single_pre=*/false,
+                  admission);
     if (!p.run()) {
       return false;
     }
@@ -2110,7 +2343,10 @@ bool Pass_partition::build_decomposition(const std::vector<std::shared_ptr<hhds:
       outlib->find_io(def->get_name())->get_graph()->get_input_node().attr(livehd::attrs::memory_module).set(1);
     }
   }
+  check_admission(admission, "complete", 0);
   return true;
+} catch (const Admission_refused&) {
+  return false;
 }
 
 livehd::partition::Flatten_mode livehd::partition::parse_flatten_mode(std::string_view v, std::string_view pass) {
@@ -2231,7 +2467,7 @@ void Pass_partition::partition(Eprp_var& var) {
       if (order.size() > 1 && lib != nullptr) {
         // Scratch def in the graph's OWN library: stats mode never saves it,
         // and it is deleted right after (same lifecycle as the emit path).
-        flat_name   = t + "__flatten_tmp";
+        flat_name   = livehd::partition::flatten_scratch_name(t);
         flat_holder = livehd::partition::flatten_hierarchy(g, lib, flat_name);
         if (!flat_holder) {
           return;  // diag already emitted

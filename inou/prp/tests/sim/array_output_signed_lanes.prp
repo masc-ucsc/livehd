@@ -1,0 +1,37 @@
+/*
+:name: array_output_signed_lanes
+:type: simulation
+*/
+// An array OUTPUT with SIGNED elements built lane by lane (ruling 15). Lane 0
+// used to be judged as the whole packed port -- an UNSIGNED [0, 65535] -- so
+// any negative value there was a false "may not fit its declared range"
+// overflow; every lane is an element of its own type.
+mod mk(a:S8) -> (r:[2]S8@[0]) {
+  r[1] = a
+  r[0] = -3
+}
+comb mkc(a:S8) -> (r:[2]S8) {
+  r[1] = -4
+  r[0] = a
+}
+
+pub mod array_output_signed_lanes(a:S8) -> (o0:S8@[0], o1:S8@[0], c0:S8@[0], c1:S8@[0]) {
+  const m:[2]S8 = mk(a=a)
+  o0 = m[0]
+  o1 = m[1]
+  const k:[2]S8 = mkc(a=a)
+  c0 = k[0]
+  c1 = k[1]
+}
+
+test array_output_signed_lanes.t {
+  mut dut = array_output_signed_lanes
+  mut bad = 0
+  tick 6 {
+    dut.a = clock - 3
+    step
+    if dut.o0 != -3 or dut.o1 != clock - 3 { bad += 1 }
+    if dut.c0 != clock - 3 or dut.c1 != -4 { bad += 1 }
+  }
+  assert(bad == 0, "signed lanes of an array output")
+}

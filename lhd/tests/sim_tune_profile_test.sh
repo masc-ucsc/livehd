@@ -186,7 +186,7 @@ if selected profile; then
 # ---- 1. idle tables converge within 2 runs (L1 default -> L2 judged) ------------
 I="$W/idle"
 for i in 1 2; do
-  sim "$W/idle$i.json" "$IDLE" --workdir "$I" --arg cycles="$N_IDLE" || fail "idle run $i failed: $(cat "$W/idle$i.json")"
+  sim "$W/idle$i.json" "$IDLE" --workdir "$I" +cycles="$N_IDLE" || fail "idle run $i failed: $(cat "$W/idle$i.json")"
   echo "idle run $i: $(tune "$W/idle$i.json" note)"
 done
 [ "$(tune "$W/idle1.json" profiling)" = "true" ] || fail "run 1 did not profile"
@@ -204,7 +204,7 @@ esac
 [ "$(tune "$W/idle2.json" verdict.oracle)" = "equal" ] || fail "L2 oracle: $(tune "$W/idle2.json" verdict)"
 [ "$(tune "$W/idle2.json" converged)" = "true" ] || fail "idle design not converged after 2 runs: $(tune "$W/idle2.json" note)"
 # Converged: reused with no sampling; dirty=on from the store.
-sim "$W/idle4.json" "$IDLE" --workdir "$I" --arg cycles=1000 || fail "idle run 4 failed"
+sim "$W/idle4.json" "$IDLE" --workdir "$I" +cycles=1000 || fail "idle run 4 failed"
 [ "$(tune "$W/idle4.json" profiling)" = "false" ] || fail "a converged auto workdir must not profile"
 [ "$(tune "$W/idle4.json" applied.dirty)" = "on" ] || fail "the converged decision is not applied: $(tune "$W/idle4.json" note)"
 [ "$(tune "$W/idle4.json" source.dirty)" = "store" ] || fail "source must be store: $(tune "$W/idle4.json" source)"
@@ -221,7 +221,7 @@ if selected profile; then
 touch "$W/idle.marker"
 sleep 1
 lines_before=$(wc -l <"$STORE")
-sim "$W/idle_obs.json" "$IDLE" --workdir "$I" --arg cycles=1000 --list-signals || fail "--list-signals failed: $(cat "$W/idle_obs.json")"
+sim "$W/idle_obs.json" "$IDLE" --workdir "$I" +cycles=1000 --list-signals || fail "--list-signals failed: $(cat "$W/idle_obs.json")"
 [ "$(tune "$W/idle_obs.json" reason)" = "observation" ] || fail "--list-signals must keep the tuner off"
 [ "$(tune "$W/idle_obs.json" applied.dirty)" = "on" ] || fail "an observation run must build the tuned vector: $(tune "$W/idle_obs.json" note)"
 [ "$(tune "$W/idle_obs.json" source.dirty)" = "store" ] || fail "an observation run reads the store's decision"
@@ -260,7 +260,7 @@ if selected lfsr; then
 # ---- 3. an LFSR descends to L0 with one trial, then regenerates nothing ------------
 L="$W/lfsr"
 for i in 1 2; do
-  sim "$W/lfsr$i.json" "$LFSR" --workdir "$L" --arg cycles="$N_LFSR" || fail "lfsr run $i failed: $(cat "$W/lfsr$i.json")"
+  sim "$W/lfsr$i.json" "$LFSR" --workdir "$L" +cycles="$N_LFSR" || fail "lfsr run $i failed: $(cat "$W/lfsr$i.json")"
   echo "lfsr run $i: $(tune "$W/lfsr$i.json" note)"
 done
 [ "$(tune "$W/lfsr1.json" stats.qualifies)" = "true" ] || fail "lfsr run 1 is a smoke run (raise SIM_TUNE_LFSR_CYCLES): $(tune "$W/lfsr1.json" stats)"
@@ -287,7 +287,7 @@ if tune "$W/lfsr2.json" note | grep -q "no retained incumbent tree"; then
 fi
 touch "$W/lfsr.marker"
 sleep 1
-sim "$W/lfsr3.json" "$LFSR" --workdir "$L" --arg cycles=1000 || fail "lfsr run 3 failed"
+sim "$W/lfsr3.json" "$LFSR" --workdir "$L" +cycles=1000 || fail "lfsr run 3 failed"
 [ "$(tune "$W/lfsr3.json" profiling)" = "false" ] || fail "a converged LFSR workdir must not profile"
 [ "$(tune "$W/lfsr3.json" applied.vector)" = "$LFSR_KEPT" ] || fail "the converged LFSR must run the verdict's vector ($LFSR_KEPT)"
 changed=$(find "$L/sim" -maxdepth 1 \( -name '*.cpp' -o -name '*.hpp' \) -newer "$W/lfsr.marker" | head -5)
@@ -300,16 +300,16 @@ if selected lfsr; then
 # The LFSR tree holds the vector section 3 converged on.
 BAKED=on OTHER=off
 [ "$LFSR_KEPT" = "$L0" ] && BAKED=off OTHER=on
-sim "$W/ro_bad.json" "$LFSR" --workdir "$L" --run-only --arg cycles=1000 --set sim.tune.dirty=$OTHER \
+sim "$W/ro_bad.json" "$LFSR" --workdir "$L" --run-only +cycles=1000 --set sim.tune.dirty=$OTHER \
   && fail "--run-only with a different sim.tune.dirty must fail"
 grep -q '"class":"usage"' "$W/ro_bad.json" || fail "codegen mismatch: wrong error class $(cat "$W/ro_bad.json")"
-sim "$W/ro_ok.json" "$LFSR" --workdir "$L" --run-only --arg cycles=1000 --set sim.tune.dirty=$BAKED \
+sim "$W/ro_ok.json" "$LFSR" --workdir "$L" --run-only +cycles=1000 --set sim.tune.dirty=$BAKED \
   || fail "--run-only with the baked sim.tune.dirty must pass: $(cat "$W/ro_ok.json") $(cat "$W/ro_ok.json.err")"
 fi
 
 if selected lfsr; then
 # ---- 7. a direct drv.bin profiling run is ingested by the next lhd call -----------
-"$L/sim/drv.bin" --set sim.tune.profile=on --cycles 1000 >/dev/null || fail "direct drv.bin run failed"
+"$L/sim/drv.bin" --set sim.tune.profile=on +cycles=1000 >/dev/null || fail "direct drv.bin run failed"
 ls "$L"/sim/tune_runs/*.json >/dev/null 2>&1 || fail "a direct profiling drv.bin wrote no raw run file"
 before=$(records "$(store_of "$L")" run)
 sim "$W/lfsr4.json" "$LFSR" --workdir "$L" --setup-only || fail "setup after a direct run failed"
@@ -318,7 +318,7 @@ ls "$L"/sim/tune_runs/*.json >/dev/null 2>&1 && fail "the raw run file was not c
 grep -q '"src":"direct"' "$(store_of "$L")" || fail "the direct run is not marked src=direct"
 # ... but ONLY into its own design's store: another design sharing the workdir
 # discards it (caching-retention:F4) instead of converging on its stats.
-"$L/sim/drv.bin" --set sim.tune.profile=on --cycles 1000 >/dev/null || fail "direct drv.bin run 2 failed"
+"$L/sim/drv.bin" --set sim.tune.profile=on +cycles=1000 >/dev/null || fail "direct drv.bin run 2 failed"
 sim "$W/foreign.json" "$IDLE" --workdir "$L" --setup-only || fail "a second design's setup in the workdir failed"
 ls "$L"/sim/tune_runs/*.json >/dev/null 2>&1 && fail "the foreign raw run file was left behind"
 tune "$W/foreign.json" note | grep -q "discarded raw run file" || fail "the foreign run was not discarded: $(tune "$W/foreign.json" note)"
@@ -333,7 +333,7 @@ fi
 if selected pins; then
 # ---- 4. an explicit --set freezes its knob ------------------------------------------
 P="$W/pin"
-sim "$W/pin.json" "$IDLE" --workdir "$P" --arg cycles="$N_IDLE" --set sim.tune.profile=on --set sim.tune.dirty=off \
+sim "$W/pin.json" "$IDLE" --workdir "$P" +cycles="$N_IDLE" --set sim.tune.profile=on --set sim.tune.dirty=off \
   || fail "pinned run failed: $(cat "$W/pin.json")"
 [ "$(tune "$W/pin.json" profiling)" = "true" ] || fail "profile=on must profile"
 [ "$(tune "$W/pin.json" source.dirty)" = "explicit" ] || fail "an explicit knob's source must be explicit"
@@ -346,7 +346,7 @@ if selected pins; then
 # ---- 5. off / incremental=false read and write nothing -----------------------------
 for how in "sim.tune.profile=off" "lhd.incremental=false"; do
   d="$W/off_${how%%=*}"
-  sim "$W/off.json" "$LFSR" --workdir "$d" --arg cycles=1000 --set "$how" || fail "$how run failed: $(cat "$W/off.json")"
+  sim "$W/off.json" "$LFSR" --workdir "$d" +cycles=1000 --set "$how" || fail "$how run failed: $(cat "$W/off.json")"
   [ "$(tune "$W/off.json" enabled)" = "false" ] || fail "$how must disable the tuner"
   [ "$(tune "$W/off.json" profiling)" = "false" ] || fail "$how must not profile"
   [ -e "$d/incr/scopes/sim" ] && fail "$how created a tune store"
@@ -358,14 +358,14 @@ fi
 if selected unknown_zero; then
 # ---- 8. explicit sim.unknown_zero reaches drv.bin (options-ux:F1) ------------------
 cat >"$W/uz.prp" <<'PRP'
-pub mod uz(a:u64) -> (r:u64@[0]) {
-  mut c:u64 = 0sb?
+pub mod uz(a:U64) -> (r:U64@[0]) {
+  mut c:U64 = 0sb?
   r = a ^ c
 }
 
 test uz.show {
   mut dut       = uz
-  mut first:u64 = 0
+  mut first:U64 = 0
   tick 8 {
     dut.a = 0
     step
@@ -400,16 +400,16 @@ fi
 if selected stale; then
 # ---- 9. pins make a pending trial stale ----------------------------------------------
 T="$W/stale"
-sim "$W/st1.json" "$IDLE" --workdir "$T" --arg cycles="$N_IDLE" || fail "stale run 1 failed"
+sim "$W/st1.json" "$IDLE" --workdir "$T" +cycles="$N_IDLE" || fail "stale run 1 failed"
 [ "$(tune "$W/st1.json" pending)" = "$L2" ] || fail "stale run 1 must propose L2: $(tune "$W/st1.json" note)"
 # A run that will not profile (auto + explicit checkpoint settings) never applies
 # the pending trial: it would run an unverified vector unjudged (policy:F4).
-sim "$W/st1b.json" "$IDLE" --workdir "$T" --arg cycles=1000 --set sim.checkpoint_every=100000 || fail "checkpoint run failed"
+sim "$W/st1b.json" "$IDLE" --workdir "$T" +cycles=1000 --set sim.checkpoint_every=100000 || fail "checkpoint run failed"
 [ "$(tune "$W/st1b.json" trial)" = "null" ] || fail "a non-profiled run applied the pending trial: $(tune "$W/st1b.json" note)"
 [ "$(tune "$W/st1b.json" applied.vector)" = "$L1" ] || fail "a non-profiled run must build the incumbent"
 [ "$(tune "$W/st1b.json" pending)" = "$L2" ] || fail "the trial must stay pending"
 [ "$(records "$(store_of "$T")" attempt)" = "0" ] || fail "a non-profiled run charged an attempt"
-sim "$W/st2.json" "$IDLE" --workdir "$T" --arg cycles="$N_IDLE" --set sim.tune.fence=16 || fail "stale run 2 failed"
+sim "$W/st2.json" "$IDLE" --workdir "$T" +cycles="$N_IDLE" --set sim.tune.fence=16 || fail "stale run 2 failed"
 [ "$(tune "$W/st2.json" trial)" = "null" ] || fail "a trial moving a pinned knob was applied: $(tune "$W/st2.json" note)"
 [ "$(tune "$W/st2.json" applied.fence)" = "16" ] && [ "$(tune "$W/st2.json" source.fence)" = "explicit" ] \
   || fail "the explicit pin must win: $(tune "$W/st2.json" source)"
@@ -422,7 +422,7 @@ if selected exhaustion; then
 # ---- 10. incomparable trials converge instead of looping (policy:F1) ------------------
 V="$W/vary"
 for i in 1 2 3 4 5; do
-  sim "$W/vary$i.json" "$IDLE" --workdir "$V" --arg cycles=$((N_IDLE + i)) || fail "vary run $i failed: $(cat "$W/vary$i.json")"
+  sim "$W/vary$i.json" "$IDLE" --workdir "$V" +cycles=$((N_IDLE + i)) || fail "vary run $i failed: $(cat "$W/vary$i.json")"
   echo "vary run $i: $(tune "$W/vary$i.json" note)"
 done
 [ "$(tune "$W/vary2.json" verdict.result)" = "abandoned" ] || fail "an incomparable trial must be abandoned"
@@ -438,28 +438,28 @@ fi
 if selected crash; then
 # ---- 11. a crashing trial binary is reverted, then banned (caching-retention:F2) -----
 C="$W/crash"
-sim "$W/cr0.json" "$IDLE" --workdir "$C" --arg cycles="$N_IDLE" || fail "crash run 0 failed"
+sim "$W/cr0.json" "$IDLE" --workdir "$C" +cycles="$N_IDLE" || fail "crash run 0 failed"
 [ "$(tune "$W/cr0.json" pending)" = "$L2" ] || fail "crash run 0 must propose L2"
 for k in 1 2; do
   sim "$W/cr${k}a.json" "$IDLE" --workdir "$C" --setup-only || fail "crash setup $k failed"
   [ "$(tune "$W/cr${k}a.json" trial.vector)" = "$L2" ] || fail "setup $k must apply the L2 trial: $(tune "$W/cr${k}a.json" note)"
-  sim "$W/cr${k}b.json" "$IDLE" --workdir "$C" --run-only --set sim.compile_only=true --arg cycles="$N_IDLE" \
+  sim "$W/cr${k}b.json" "$IDLE" --workdir "$C" --run-only --set sim.compile_only=true +cycles="$N_IDLE" \
     || fail "crash build $k failed: $(cat "$W/cr${k}b.json")"
   printf '#!/bin/sh\nkill -SEGV $$\n' >"$C/sim/drv.bin" # stands in for a trial-vector miscompile that crashes
   chmod +x "$C/sim/drv.bin"
-  sim "$W/cr${k}c.json" "$IDLE" --workdir "$C" --run-only --arg cycles="$N_IDLE" && fail "the crashing trial run must fail"
+  sim "$W/cr${k}c.json" "$IDLE" --workdir "$C" --run-only +cycles="$N_IDLE" && fail "the crashing trial run must fail"
   [ "$(tune "$W/cr${k}c.json" verdict.result)" = "run-failed" ] || fail "crash $k: $(tune "$W/cr${k}c.json" note)"
   if cow; then
     tune "$W/cr${k}c.json" note | grep -q "reverted to the retained incumbent tree" \
       || fail "crash $k was not reverted (copy-on-write is available in $W): $(tune "$W/cr${k}c.json" note)"
   else
     tune "$W/cr${k}c.json" note | grep -q "no retained incumbent tree" || fail "crash $k did not report the no-CoW fallback"
-    sim "$W/cr${k}_closed.json" "$IDLE" --workdir "$C" --run-only --arg cycles=1000 \
+    sim "$W/cr${k}_closed.json" "$IDLE" --workdir "$C" --run-only +cycles=1000 \
       && fail "the failed trial without a retained tree must refuse --run-only"
     [ "$(row "$W/cr${k}_closed.json" verdict)" != "pass" ] || fail "closed trial reported a passing test"
     grep -q '"class":"usage"' "$W/cr${k}_closed.json" || fail "closed trial must require a setup"
   fi
-  sim "$W/cr${k}d.json" "$IDLE" --workdir "$C" --arg cycles="$N_IDLE" || fail "the incumbent after crash $k failed"
+  sim "$W/cr${k}d.json" "$IDLE" --workdir "$C" +cycles="$N_IDLE" || fail "the incumbent after crash $k failed"
   [ "$(tune "$W/cr${k}d.json" applied.vector)" = "$L1" ] || fail "after crash $k the incumbent must run"
   echo "crash $k: $(tune "$W/cr${k}c.json" note) || next: $(tune "$W/cr${k}d.json" note)"
 done
@@ -474,7 +474,7 @@ mkdir -p "$W/edit_src"
 cp "$IDLE" "$W/edit_src/tune_idle_tables.prp"
 ED="$W/edit_src/tune_idle_tables.prp"
 E="$W/edit"
-sim "$W/ed1.json" "$ED" --workdir "$E" --arg cycles="$N_IDLE" || fail "edit run 1 failed"
+sim "$W/ed1.json" "$ED" --workdir "$E" +cycles="$N_IDLE" || fail "edit run 1 failed"
 [ "$(tune "$W/ed1.json" pending)" = "$L2" ] || fail "edit run 1 must propose L2"
 S1=$(jget "$E/sim/tune_applied.json" structure)
 python3 - "$ED" <<'PY' || fail "could not edit the design"
@@ -488,13 +488,13 @@ sim "$W/ed2.json" "$ED" --workdir "$E" --setup-only || fail "edit setup failed"
 [ "$(tune "$W/ed2.json" trial.vector)" = "$L2" ] || fail "the edit setup must apply the trial"
 S2=$(jget "$E/sim/tune_applied.json" structure)
 { [ -n "$S1" ] && [ -n "$S2" ] && [ "$S1" != "$S2" ]; } || fail "the edit did not change the structure ($S1 / $S2)"
-sim "$W/ed3.json" "$ED" --workdir "$E" --run-only --arg cycles="$N_IDLE" || fail "edit trial run failed"
+sim "$W/ed3.json" "$ED" --workdir "$E" --run-only +cycles="$N_IDLE" || fail "edit trial run failed"
 tune "$W/ed3.json" note | grep -q "reverted to the retained incumbent tree" && fail "the pre-edit tree was swapped in"
 [ "$(jget "$E/sim/tune_applied.json" structure)" = "$S2" ] || fail "the tree no longer holds the edited design"
 # The abandoned trial could not be swapped back (the retained clone was the
 # pre-edit design), so its tree is marked closed: a --run-only refuses it
 # (lifecycle:R2-1) instead of running an unjudged vector as the incumbent ...
-sim "$W/ed4.json" "$ED" --workdir "$E" --run-only --arg cycles="$N_IDLE" \
+sim "$W/ed4.json" "$ED" --workdir "$E" --run-only +cycles="$N_IDLE" \
   && fail "a --run-only of a trial tree closed without a swap must be refused: $(tune "$W/ed4.json" note)"
 grep -q '"class":"usage"' "$W/ed4.json" || fail "the closed trial tree: not a usage error $(cat "$W/ed4.json")"
 [ "$(jget "$E/sim/tune_applied.json" closed)" = "abandoned" ] || fail "the unswapped trial tree is not marked closed"
@@ -502,7 +502,7 @@ grep -q '"class":"usage"' "$W/ed4.json" || fail "the closed trial tree: not a us
 sim "$W/ed5.json" "$ED" --workdir "$E" --setup-only || fail "edit re-setup failed"
 [ "$(tune "$W/ed5.json" applied.vector)" = "$L1" ] || fail "the re-setup must build the incumbent: $(tune "$W/ed5.json" note)"
 [ "$(jget "$E/sim/tune_applied.json" structure)" = "$S2" ] || fail "the re-setup did not build the edited design"
-sim "$W/ed6.json" "$ED" --workdir "$E" --run-only --arg cycles="$N_IDLE" || fail "edit run-only failed"
+sim "$W/ed6.json" "$ED" --workdir "$E" --run-only +cycles="$N_IDLE" || fail "edit run-only failed"
 [ "$(last "$(store_of "$E")" run structure)" = "$S2" ] || fail "--run-only ran a stale design"
 [ "$(last "$(store_of "$E")" run vector)" = "$L1" ] || fail "--run-only did not run the incumbent"
 fi
@@ -511,9 +511,9 @@ if selected trial_gate; then
 # ---- 13. a fast trial run is judged on the trial gate (policy:F2) ----------------------
 F="$W/fast"
 N_FAST="${SIM_TUNE_FAST_CYCLES:-1500000}"
-sim "$W/fa1.json" "$IDLE" --workdir "$F" --arg cycles="$N_FAST" || fail "fast run 1 failed"
+sim "$W/fa1.json" "$IDLE" --workdir "$F" +cycles="$N_FAST" || fail "fast run 1 failed"
 if [ "$(tune "$W/fa1.json" stats.qualifies)" = "true" ]; then
-  sim "$W/fa2.json" "$IDLE" --workdir "$F" --arg cycles="$N_FAST" || fail "fast run 2 failed"
+  sim "$W/fa2.json" "$IDLE" --workdir "$F" +cycles="$N_FAST" || fail "fast run 2 failed"
   case "$(tune "$W/fa2.json" verdict.result)" in
     accepted | rejected) ;;
     *) fail "the fast trial was not judged: $(tune "$W/fa2.json" note)" ;;
@@ -533,17 +533,17 @@ if selected closed; then
 # No retained incumbent (a host without copy-on-write, a clone of another
 # design, a failed swap): stood in for by deleting the retained clone.
 N="$W/noret"
-sim "$W/nr1.json" "$IDLE" --workdir "$N" --arg cycles="$N_IDLE" || fail "noret run 1 failed"
+sim "$W/nr1.json" "$IDLE" --workdir "$N" +cycles="$N_IDLE" || fail "noret run 1 failed"
 [ "$(tune "$W/nr1.json" pending)" = "$L2" ] || fail "noret run 1 must propose L2"
 sim "$W/nr2.json" "$IDLE" --workdir "$N" --setup-only || fail "noret setup failed"
 [ "$(tune "$W/nr2.json" trial.vector)" = "$L2" ] || fail "noret setup must apply the trial"
 rm -rf "$N"/sim_tune/v-*
 # other arguments: no comparable baseline -> abandoned, and nothing to swap back
-sim "$W/nr3.json" "$IDLE" --workdir "$N" --run-only --arg cycles=$((N_IDLE + 7)) || fail "noret trial run failed"
+sim "$W/nr3.json" "$IDLE" --workdir "$N" --run-only +cycles=$((N_IDLE + 7)) || fail "noret trial run failed"
 [ "$(tune "$W/nr3.json" verdict.result)" = "abandoned" ] || fail "noret trial: $(tune "$W/nr3.json" note)"
 [ "$(jget "$N/sim/tune_applied.json" closed)" = "abandoned" ] || fail "the unswapped abandoned tree is not marked closed"
 for mode in auto off; do
-  sim "$W/nr4$mode.json" "$IDLE" --workdir "$N" --run-only --arg cycles=1000 --set sim.tune.profile=$mode \
+  sim "$W/nr4$mode.json" "$IDLE" --workdir "$N" --run-only +cycles=1000 --set sim.tune.profile=$mode \
     && fail "--run-only ($mode) ran a closed trial tree: $(tune "$W/nr4$mode.json" note)"
   grep -q '"class":"usage"' "$W/nr4$mode.json" || fail "closed trial tree ($mode): not a usage error $(cat "$W/nr4$mode.json")"
   python3 - "$W/nr4$mode.json" "$L2" <<'PY' || fail "the refusal must name the vector and the result: $(cat "$W/nr4$mode.json")"
@@ -556,7 +556,7 @@ done
 [ "$(records "$(store_of "$N")" attempt)" = "1" ] || fail "a refused --run-only charged an attempt"
 sim "$W/nr5.json" "$IDLE" --workdir "$N" --setup-only || fail "noret re-setup failed"
 [ "$(tune "$W/nr5.json" applied.vector)" = "$L1" ] || fail "the re-setup must rebuild the incumbent"
-sim "$W/nr6.json" "$IDLE" --workdir "$N" --run-only --arg cycles=1000 || fail "--run-only after the re-setup failed"
+sim "$W/nr6.json" "$IDLE" --workdir "$N" --run-only +cycles=1000 || fail "--run-only after the re-setup failed"
 [ "$(jget "$N/sim/tune_applied.json" trial)" = "false" ] || fail "the rebuilt tree is labeled a trial"
 fi
 
@@ -567,10 +567,10 @@ if selected divergence; then
 # runs the real trial binary, then rewrites its raw record: another end-state
 # digest and 1 ms of CPU (below the trial gate's 20 ms).
 D="$W/diverge"
-sim "$W/dv1.json" "$IDLE" --workdir "$D" --arg cycles="$N_IDLE" || fail "diverge run 1 failed"
+sim "$W/dv1.json" "$IDLE" --workdir "$D" +cycles="$N_IDLE" || fail "diverge run 1 failed"
 [ "$(tune "$W/dv1.json" pending)" = "$L2" ] || fail "diverge run 1 must propose L2"
 sim "$W/dv2.json" "$IDLE" --workdir "$D" --setup-only || fail "diverge setup failed"
-sim "$W/dv2b.json" "$IDLE" --workdir "$D" --run-only --set sim.compile_only=true --arg cycles="$N_IDLE" \
+sim "$W/dv2b.json" "$IDLE" --workdir "$D" --run-only --set sim.compile_only=true +cycles="$N_IDLE" \
   || fail "diverge build failed: $(cat "$W/dv2b.json")"
 mv "$D/sim/drv.bin" "$D/sim/drv.real"
 cat >"$D/sim/drv.bin" <<SH
@@ -590,7 +590,7 @@ exit \$rc
 SH
 chmod +x "$D/sim/drv.bin"
 rm -rf "$D"/sim_tune/v-* # and no retained incumbent: the tree stays, closed
-simd "$W/dv3.json" "$IDLE" --workdir "$D" --run-only --arg cycles="$N_IDLE" && fail "a diverging trial must fail the run"
+simd "$W/dv3.json" "$IDLE" --workdir "$D" --run-only +cycles="$N_IDLE" && fail "a diverging trial must fail the run"
 echo "diverge: $(tune "$W/dv3.json" note)"
 [ "$(tune "$W/dv3.json" stats.judgeable)" = "false" ] || fail "the tampered trial run must be below the trial gate"
 [ "$(tune "$W/dv3.json" verdict.result)" = "divergence" ] || fail "a short diverging trial must be a divergence: $(tune "$W/dv3.json" note)"
@@ -601,23 +601,23 @@ grep '"code":"sim-tune-divergence"' "$W/dv3.json.err" | grep -q "incumbent resto
 grep '"code":"sim-tune-divergence"' "$W/dv3.json.err" | grep -q "set aside" || fail "the divergence diag must say the tree was set aside"
 [ -e "$D/sim/drv.bin" ] && fail "the diverging binary was left in the tree"
 [ "$(jget "$D/sim/tune_applied.json" closed)" = "divergence" ] || fail "the diverged tree is not marked closed"
-sim "$W/dv4.json" "$IDLE" --workdir "$D" --run-only --arg cycles=1000 && fail "--run-only of a diverged tree must be refused"
+sim "$W/dv4.json" "$IDLE" --workdir "$D" --run-only +cycles=1000 && fail "--run-only of a diverged tree must be refused"
 grep -q '"class":"usage"' "$W/dv4.json" || fail "diverged tree: not a usage error $(cat "$W/dv4.json")"
 grep -q "diverged" "$W/dv4.json" || fail "the refusal must say the tree diverged"
-sim "$W/dv5.json" "$IDLE" --workdir "$D" --arg cycles=1000 || fail "a full run after the divergence failed"
+sim "$W/dv5.json" "$IDLE" --workdir "$D" +cycles=1000 || fail "a full run after the divergence failed"
 [ "$(tune "$W/dv5.json" applied.vector)" = "$L1" ] || fail "after the divergence the incumbent must be rebuilt"
 fi
 
 if selected resetup; then
 # ---- 16. a setup whose tree holds the open trial keeps the attempt (R2-4) ----------------
 R="$W/resetup"
-sim "$W/rs1.json" "$IDLE" --workdir "$R" --arg cycles="$N_IDLE" || fail "resetup run 1 failed"
+sim "$W/rs1.json" "$IDLE" --workdir "$R" +cycles="$N_IDLE" || fail "resetup run 1 failed"
 [ "$(tune "$W/rs1.json" pending)" = "$L2" ] || fail "resetup run 1 must propose L2"
 sim "$W/rs2.json" "$IDLE" --workdir "$R" --setup-only || fail "resetup setup 1 failed"
 sim "$W/rs3.json" "$IDLE" --workdir "$R" --setup-only || fail "resetup setup 2 failed"
 [ "$(tune "$W/rs3.json" trial.vector)" = "$L2" ] || fail "a repeated --setup-only must keep building the trial: $(tune "$W/rs3.json" note)"
 [ "$(tune "$W/rs3.json" verdict)" = "null" ] || fail "a repeated --setup-only closed the attempt: $(tune "$W/rs3.json" verdict)"
-sim "$W/rs4.json" "$IDLE" --workdir "$R" --run-only --arg cycles="$N_IDLE" || fail "resetup run-only failed"
+sim "$W/rs4.json" "$IDLE" --workdir "$R" --run-only +cycles="$N_IDLE" || fail "resetup run-only failed"
 case "$(tune "$W/rs4.json" verdict.result)" in
   accepted | rejected) ;;
   *) fail "the trial set up twice was not judged by its run: $(tune "$W/rs4.json" note)" ;;
@@ -625,11 +625,11 @@ esac
 [ "$(records "$(store_of "$R")" attempt)" = "1" ] || fail "two setups of one trial charged $(records "$(store_of "$R")" attempt) attempts"
 # --setup-only then a FULL run: the full run judges the trial its setup applied.
 R2="$W/resetup_full"
-sim "$W/rs5.json" "$IDLE" --workdir "$R2" --arg cycles="$N_IDLE" || fail "resetup_full run 1 failed"
+sim "$W/rs5.json" "$IDLE" --workdir "$R2" +cycles="$N_IDLE" || fail "resetup_full run 1 failed"
 [ "$(tune "$W/rs5.json" pending)" = "$L2" ] || fail "resetup_full run 1 must propose L2"
 sim "$W/rs6.json" "$IDLE" --workdir "$R2" --setup-only || fail "resetup_full setup failed"
 [ "$(tune "$W/rs6.json" trial.vector)" = "$L2" ] || fail "the setup must apply the L2 trial"
-sim "$W/rs7.json" "$IDLE" --workdir "$R2" --arg cycles="$N_IDLE" || fail "resetup_full full run failed"
+sim "$W/rs7.json" "$IDLE" --workdir "$R2" +cycles="$N_IDLE" || fail "resetup_full full run failed"
 [ "$(tune "$W/rs7.json" trial.vector)" = "$L2" ] || fail "the full run after --setup-only must run the trial"
 case "$(tune "$W/rs7.json" verdict.result)" in
   accepted | rejected) ;;
@@ -642,7 +642,7 @@ if selected exhaustion; then
 # ---- 17. `on` re-opens an exhausted vector once, then converges (R2-3) -------------------
 # Continues section 10's workdir, where `auto` exhausted L2 after 2 attempts.
 for i in 6 7 8 9 10 11; do
-  sim "$W/vary$i.json" "$IDLE" --workdir "$V" --arg cycles=$((N_IDLE + i)) --set sim.tune.profile=on \
+  sim "$W/vary$i.json" "$IDLE" --workdir "$V" +cycles=$((N_IDLE + i)) --set sim.tune.profile=on \
     || fail "vary run $i (on) failed: $(cat "$W/vary$i.json")"
   echo "vary run $i (on): $(tune "$W/vary$i.json" note)"
 done
@@ -670,7 +670,7 @@ fi
 if selected lfsr; then
 # ---- 18. a --run-only of another design's tree (R2-5) ----------------------------------
 # Section 7 left the IDLE design's tree in the LFSR workdir.
-simd "$W/ro_foreign.json" "$LFSR" --workdir "$L" --run-only --arg cycles=1000 || fail "the foreign --run-only failed"
+simd "$W/ro_foreign.json" "$LFSR" --workdir "$L" --run-only +cycles=1000 || fail "the foreign --run-only failed"
 [ "$(tune "$W/ro_foreign.json" source.dirty)" = "built" ] || fail "a foreign tree must not be reported as the store's: $(tune "$W/ro_foreign.json" note)"
 [ "$(tune "$W/ro_foreign.json" profiling)" = "false" ] || fail "a foreign tree must not be profiled"
 tune "$W/ro_foreign.json" note | grep -q "generated for tune_idle_tables" || fail "the note must name the tree's design"

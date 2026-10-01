@@ -5,7 +5,7 @@
 :pyrope_top: bounded_while_guard
 */
 // Independent first-set priority and sum of visited positions.
-pub comb bounded_while_guard(num:u8) -> (count:u3, total:u5, skipped:u3) {
+pub comb bounded_while_guard(num:U8) -> (count:U3, total:U5, skipped:U3) {
   count = 6
   for k in 0..<4 {
     if num#[5-k] != 0 { count = 5-k }

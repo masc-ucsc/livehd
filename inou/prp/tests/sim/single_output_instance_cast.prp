@@ -1,0 +1,76 @@
+/*
+:name: single_output_instance_cast
+:type: simulation
+*/
+// Built-in scalar casts (`U1(x)`, `UN(x)`, `Unsigned(x)`) of a value that
+// comes out of a `mod` INSTANCE (lhdtrack suggestions 2.3 row 11). A
+// single-output call auto-unwraps (06-functions.md) and a bare read of the
+// bound instance (`y = t`, `if t`) works, but a cast of the same value
+// reached upass.tolg as "call to undefined function 'u1'" (or, for
+// `Unsigned`, "reinterpret needs a fully-typed input"):
+//   b -- `U1(t)` of a bare single-output instance handle
+//   w -- `U6(inc(a=x))`, a cast of a chained call
+//   v -- the same inside an expression
+//   n -- `Unsigned(t)` of the bare handle (bool -> 1-bit unsigned)
+//   c -- `Unsigned(inc(a=x))` of a chained call
+//   k -- `U1(q)` of a named alias `const q = nz(..).o`
+//   m -- `U1(r)` of a declared `mut r:Bool` assigned from `t.o`
+//   d -- `U1(o)` of a bool output bound by destructuring `const (o, p) = ..`
+//   e -- `U5(p)` of an integer output bound the same way
+// uPass_runner::try_lower_typecast only finds declared facts for a declared
+// variable or for a tuple_get temp (`t.o`); for the bare handle, a chained
+// call, or an alias it has no range, declines, and the func_call survives to
+// tolg. The same casts spelled on `.o` (`U1(t.o)`) always worked.
+
+mod nz<N=4>(a:Unsigned(bits=N)) -> (o:Bool@[0]) {
+  o = a != 0
+}
+
+mod inc(a:U4) -> (o:U5@[0]) {
+  o = a + 1
+}
+
+mod two(a:U4) -> (o:Bool@[0], p:U3@[0]) {
+  o = a == 5
+  p = a#[0..<3]
+}
+
+mod single_output_instance_cast(x:U4)
+  -> (b:U1@[0], w:U6@[0], v:U3@[0], n:U1@[0], c:U5@[0], k:U1@[0], m:U1@[0], d:U1@[0], e:U5@[0]) {
+  const t = nz<N=4>(a=x)
+  b = U1(t)
+  w = U6(inc(a=x))
+  v = U2(nz<N=4>(a=x)) + U1(t)
+  n = Unsigned(t)
+  c = Unsigned(inc(a=x))
+
+  const q = nz<N=4>(a=x).o
+  k = U1(q)
+
+  mut r:Bool = false
+  r = t.o
+  m = U1(r)
+
+  const (o, p) = two(a=x)
+  d = U1(o)
+  e = U5(p)
+}
+
+test single_output_instance_cast.values {
+  mut dut = single_output_instance_cast
+  tick 4 {
+    dut.x = clock * 5              // 0, 5, 10, 15
+    step
+    const nonzero = if clock == 0 { 0 } else { 1 }
+    const is5     = if clock == 1 { 1 } else { 0 }
+    assert(dut.b == nonzero)
+    assert(dut.w == clock * 5 + 1)
+    assert(dut.v == 2 * nonzero)
+    assert(dut.n == nonzero)
+    assert(dut.c == clock * 5 + 1)
+    assert(dut.k == nonzero)
+    assert(dut.m == nonzero)
+    assert(dut.d == is5)
+    assert(dut.e == ((clock * 5) & 7))
+  }
+}

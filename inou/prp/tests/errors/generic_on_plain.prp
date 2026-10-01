@@ -7,5 +7,5 @@
 
 // 2f-generics — `<…>` at a call site is only meaningful on a generic lambda.
 
-comb f(a:u8, b:u8) -> (r) { r = a + b }
-cassert(f<u8>(a=1, b=2) == 3)
+comb f(a:U8, b:U8) -> (r) { r = a + b }
+cassert(f<U8>(a=1, b=2) == 3)

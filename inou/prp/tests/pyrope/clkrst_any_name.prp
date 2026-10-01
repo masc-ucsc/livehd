@@ -1,0 +1,13 @@
+/*
+:name: clkrst_any_name
+:type: compile
+*/
+// docs 04b "Implicit clock and reset": clocks and resets bind BY TYPE. The
+// single `Clock` input is the implicit clock and the single `Reset` input the
+// implicit reset, whatever their names; a reset is active-high unless the
+// register sets `negreset=true` (a `_n` name carries no polarity).
+pub mod clkrst_any_name(core_clk:Clock, my_rst:Reset, en:Bool, d:U8) -> (q:U8@[0]) {
+  reg r:U8 = 0
+  if en { r = d }
+  q = r
+}

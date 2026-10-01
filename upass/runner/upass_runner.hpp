@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <functional>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -15,6 +16,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "decl_facts.hpp"
 #include "hlop/dlop.hpp"
 #include "lnast.hpp"
 #include "lnast_manager.hpp"
@@ -117,6 +119,20 @@ public:
   std::shared_ptr<Lnast>              take_staging() { return std::move(staging); }
   std::vector<std::shared_ptr<Lnast>> take_new_lnasts() override { return std::move(new_lnasts); }
 
+  // What the walk left on one of this unit's output ports / default-value
+  // locals as its body ended (snapshot_unit_body): the value kind typecheck
+  // stamped on its last write, and the compile-time value when it folded.
+  // pass.upass reads them after run() to export a mod's untyped outputs
+  // (ruling 28) and its folded input defaults (ruling 34).
+  upass::Kind value_kind(std::string_view name) const {
+    const auto it = unit_body_values_.find(name);
+    return it == unit_body_values_.end() ? upass::Kind::unknown : it->second.kind;
+  }
+  std::optional<Dlop> comptime_value(std::string_view name) const {
+    const auto it = unit_body_values_.find(name);
+    return it == unit_body_values_.end() ? std::nullopt : it->second.value;
+  }
+
   // toln:0 && tolg:0 (diagnostics-only runs, e.g. the LSP): skip building the
   // staging tree entirely. The walk still dispatches every pass (all
   // diagnostics, symbol-table state, io/bw side-channels are unchanged) but
@@ -124,10 +140,6 @@ public:
   // nothing downstream consumes the rewritten LNAST. Default on. Must stay on
   // for the func_extract pre-loop and whenever take_staging() is consumed.
   void set_materialize(bool m) { materialize_ = m; }
-
-  // Declared OUTPUT-port facts for a call that lowers to a Sub instance rather
-  // than an inline splice (see the definition).
-  void stash_sub_instance_port_facts(std::string_view handle, const std::shared_ptr<Lnast>& callee);
 
   // Named-constant provenance (the Pyrope counterpart of inou.slang's
   // `preserve_param_provenance`): materialize a folded `pkg.PARAM` read as the
@@ -189,6 +201,8 @@ protected:
     bool        pattern{false};
   };
   absl::flat_hash_map<std::string, Parsed_const> const_parse_cache_;
+  // has_in_place_type_folds per inlined callee tree. Cleared per run().
+  absl::flat_hash_map<const Lnast*, bool>        in_place_fold_cache_;
 
   // Perf: pre-cached subsets of `upasses`.
   //   fold_capable_passes — passes that override fold_ref(). try_fold_ref
@@ -334,6 +348,10 @@ protected:
   // Returns the first non-nullopt result from any pass's fold_ref(name).
   std::optional<Dlop> try_fold_ref(std::string_view name);
 
+  // A comptime name's value, also through the active inline frame's binding
+  // of it (an array dimension's `N` / `LO` inside an inlined body).
+  [[nodiscard]] std::optional<Dlop> fold_frame_ref(std::string_view name) const;
+
   // Shared-ST reads: the comb-call inliner uses these to introspect
   // state it can't see through scalar fold_ref. try_bundle_fields returns the
   // flat comptime-const fields behind a bundle ref (for tuple actuals);
@@ -466,6 +484,44 @@ protected:
   // Register every name a tick body stores to as an uncertain write, without
   // folding the body. Cursor-neutral.
   void register_tick_body_writes();
+  // Strict bool (user ruling 2026-09-28 (20)) over a tick body, which is
+  // emitted verbatim: a kind walk in statement order that reports what
+  // typecheck and the call-site argument check would -- a poke of the wrong
+  // kind into an instance input (`d.en = 1`), a bool operand where an operator
+  // needs an integer or the reverse (`d.f + 1`), a non-bool condition.
+  // Cursor-neutral.
+  void check_tick_body_kinds();
+  // A test block's `mut d = <unit>` (Symbol_table::instance_handles): record
+  // the handle and its ports' declared facts. `dst` is the handle's name,
+  // `rhs` the bound name.
+  void bind_instance_handle(std::string_view dst, std::string_view rhs);
+  // A poke `store(d, field..., value)` into an instance handle: kind-checked
+  // against the input like a call-site argument, then emitted verbatim (a
+  // handle has no fields to write). False when the store is not one.
+  bool try_instance_handle_store();
+
+  // With the cursor on a poke's handle child: the poked input (the fields up
+  // to the value, dot-joined; "" when one is computed) and `value_kind()` of
+  // the value, which the cursor is left on.
+  std::pair<std::string, upass::Kind> instance_poke_operands(const std::function<upass::Kind()>& value_kind);
+  // The call-argument rules for a poke of `value` (kind `got`) into input
+  // `port` of `unit`: the kind rule, and the overflow rule when `value` (an
+  // invalid node skips it) has a derived range.
+  void check_instance_poke(const std::shared_ptr<Lnast>& unit, std::string_view port, upass::Kind got, const Lnast_node& value,
+                           const livehd::diag::Span& span) const;
+  // The Clock/Reset rules of a poke (docs 05b "Running cycles", qa.md section 6):
+  // a `Clock` input (declared, or the minted `clock`) takes only a real Clock --
+  // never a constant (`value` is a literal) and never a Bool expression; a
+  // `Bool` input never takes a Clock (`value_is_clock`); the minted `reset` is
+  // Bool-like, so an integer needs a Bool. Fatal on a violation.
+  void check_instance_clock_poke(const std::shared_ptr<Lnast>& unit, std::string_view port, upass::Kind got, const Lnast_node& value,
+                                 bool value_is_clock, const livehd::diag::Span& span) const;
+
+  // After a tuple_get or a Sub call: a read of an opaque Sub output
+  // (Symbol_table::opaque_sub_outputs) -- `c.o`, or the call result itself
+  // when the callee has one output -- joins wide_values, so a typed
+  // destination it reaches is the ruling-21 may-not-fit error.
+  void note_opaque_output_read();
   // Re-walk ONE loop iteration. Precondition: the read cursor is on the loop's
   // body `stmts` node. Opens a fresh iteration scope (fresh salt + staging/pass
   // block scope), invokes `emit_binds` to bind the iteration variable(s) into
@@ -529,6 +585,11 @@ protected:
   // give a for-loop iteration variable a declared type when its tuple element is
   // a typed runtime ref (var-arg ports), so a nested specialization can type it.
   void emit_inline_declare_typed(const std::string& name, const std::optional<Dlop>& max, const std::optional<Dlop>& min);
+  // `declare(name, [N]elem, mut)` for an inlined comb's ARRAY port (`v:[4]u8`,
+  // `-> (r:[N]unsigned(bits=N))`), so the tagged copy keeps the declared array
+  // shape instead of its packed width.
+  struct Array_port_shape;
+  void emit_inline_declare_array(const std::string& name, const Array_port_shape& shape);
 
   // ── comb-call inliner ────────────────────────────────────────────────
   // Called from process_lnast's func_call case. If the callee resolves to a
@@ -610,6 +671,14 @@ protected:
   absl::flat_hash_set<std::string>                                                  stream_port_in_leaf_;
   absl::flat_hash_set<std::string>                                                  stream_port_out_leaf_;
   absl::flat_hash_set<std::string>                                                  io_output_names_;
+  // The TOP unit's Lnast_io_entry::default_value_name() locals (one per
+  // defaulted input): hardware-less, but kept like an output so a later
+  // inliner of the materialized body still finds each default.
+  absl::flat_hash_set<std::string>                                                  default_value_names_;
+  // The calls (func_call class indices of the source tree) in a TOP `comb`
+  // unit's default-only prologue (`b:u8 = g(a=a)`): kept as calls in its own
+  // walk (user ruling 2026-09-28 (39)), see try_inline_func_call.
+  absl::flat_hash_set<int64_t>                                                      default_prologue_calls_;
   // 1i-inline — the `inl<N>_<port>` locals an inlined `comb` frame mints for
   // the CALLEE's output ports. io_output_names_ holds only the TOP unit's own
   // ports (initialize_stream_port_abi), and an inlined output is declared with
@@ -625,6 +694,14 @@ protected:
   bool                                          is_inline_output_driver(std::string_view name) const;
   absl::flat_hash_set<std::string>              stream_port_prefix_;
   absl::flat_hash_map<std::string, std::string> stream_port_alias_;
+
+  // value_kind / comptime_value: filled as the unit's own body block closes.
+  struct Body_value {
+    upass::Kind         kind{upass::Kind::unknown};
+    std::optional<Dlop> value;
+  };
+  absl::flat_hash_map<std::string, Body_value> unit_body_values_;
+  void                                         snapshot_unit_body();
 
   struct Stream_ssa_def {
     std::string source;
@@ -646,6 +723,10 @@ protected:
     bool                                            named{false};
     std::vector<std::pair<std::string, Lnast_node>> fields;
     std::vector<Lnast_node>                         positional;
+    // Parallel to `positional`: the SOURCE spelling of a bare-variable entry
+    // (`(b, a)` -> "b", "a"), empty for a constant. A typed-tuple construction
+    // binds such an entry to the field it spells (call naming exception 2).
+    std::vector<std::string>                        positional_src;
   };
   struct Detuple_pending_decl {
     Lnast_nid                      nid;
@@ -660,6 +741,9 @@ protected:
     std::string                    mode;
     bool                           memory{false};
     Lnast_node                     dimension{Lnast_node::create_invalid()};
+    // The first whole-tuple store is the CONSTRUCTION (its unnamed values bind
+    // like call arguments); later whole-tuple stores are plain assignments.
+    bool                           whole_bound{false};
   };
   struct Detuple_index_alias {
     std::string memory;
@@ -707,6 +791,7 @@ protected:
   bool        try_detuple_tuple_get();
   bool        try_detuple_typespec();
   std::string detuple_text(const Lnast_nid& nid) const;
+  std::string detuple_split_name(std::string_view var) const;
   std::string detuple_registry_key(std::string_view type_name) const;
   void        detuple_commit_pending_split(const Detuple_pending_decl& pending);
   bool        detuple_finalize_pending_decl();
@@ -719,6 +804,22 @@ protected:
   // same list it went in as.
   void        detuple_flatten_tuple_value(const std::string& rhs, const std::string& prefix,
                                           std::vector<std::pair<std::string, Lnast_node>>& out, int depth = 0);
+  // A declaration's tuple INITIALIZER projected onto its split leaves: out[i]
+  // is the value of fields[i] (nullopt: none). A NESTED field takes its leaves
+  // from a nested tuple literal, named (`n=(x=5, y=2)`) or positional, from a
+  // split tuple variable of the same shape, or from dotted keys (`n.x=5`); a
+  // flat positional initializer gives one entry per leaf. Returns false after
+  // reporting a shape mismatch (an unknown field, a wrong arity, a nested
+  // field given a scalar). `type_name` names the declared type in the arity
+  // error, when there is one.
+  bool detuple_project_init(std::string_view var, const Detuple_tuple_value& init, const uPass_detuple_registry::Layout& fields,
+                            std::vector<std::optional<Lnast_node>>& out, std::string_view type_name = {});
+  // A flat layout (no nested field): the one the unnamed-value binding handles.
+  static bool detuple_layout_is_flat(const uPass_detuple_registry::Layout& fields);
+  // Binds the UNNAMED values of a typed tuple construction like the arguments of
+  // a call; `out` holds the fields already bound by name. False when reported.
+  bool detuple_bind_unnamed_values(std::string_view var, std::string_view type_name, const Detuple_tuple_value& value,
+                                   const uPass_detuple_registry::Layout& fields, std::vector<std::optional<Lnast_node>>& out);
   std::optional<uPass_detuple_registry::Scalar_type> detuple_scalar_type(std::string_view name) const;
   void detuple_emit_declare(std::string_view name, const uPass_detuple_registry::Scalar_type& type, std::string_view mode,
                             const Lnast_node* init = nullptr, const Lnast_node* dimension = nullptr);
@@ -733,11 +834,20 @@ protected:
   // before a dotted access chain. Record only the structural alias and delay
   // materialization until a scalar leaf is selected.
   bool                       try_stream_tuple_port_alias_store();
+  // Cursor on a just-dispatched 2-child store. A runtime tuple VALUE bound to
+  // a variable that can be rewritten under control flow gets one scalar leaf
+  // per runtime field, so its field reads merge per leaf (see definition).
+  std::optional<std::vector<std::string>> runtime_tuple_prior_fields() const;
+  void split_runtime_tuple_store(const std::optional<std::vector<std::string>>& prior);
   // Cursor on a >=3-child store. Rewrites a static tuple-output field write
   // into a scalar dotted-leaf binding and dispatches that synthesized binding
   // through every enabled pass. False means the ordinary tuple-set path owns
   // the statement (non-port, dynamic path, input write, or malformed node).
   bool                       try_stream_tuple_port_store();
+  bool                       try_split_leaf_field_store();
+  // Tuple values (by SSA base name) split_runtime_tuple_store gave scalar
+  // leaves, and the fields that have one.
+  absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> split_tuple_leaves_;
   // Assign the current value-producing statement's output version before
   // dispatch. Passes continue to see source names; only the emitted LNAST uses
   // these scalar SSA names.
@@ -803,9 +913,22 @@ protected:
     Io_kind             kind       = Io_kind::none;
     // An ARRAY carry (`mut v:[N]T`): the boundary port is declared `[N]T` too
     // (comp_type_array over the element range in max/min); lnast.tolg lowers
-    // such a port as the packed bus plus the lane view. 0 = scalar.
+    // such a port as the packed bus plus the lane view. Also supplies an
+    // inferred [] input extent when specializing a hardware call. 0 = scalar.
     int64_t             array_size = 0;
   };
+  // An injected scalar `bool` port; the [0,1] envelope stays for range readers.
+  static Spec_port bool_spec_port() {
+    Spec_port sp{true, *Dlop::create_integer(1), *Dlop::create_integer(0), {}};
+    sp.kind = Io_kind::boolean;
+    return sp;
+  }
+  // Declared OUTPUT-port facts for a call that lowers to a Sub instance rather
+  // than an inline splice (see the definition). `out_inject` (indexed like the
+  // callee's outputs) carries a specialized template's generic-width outputs
+  // folded under this call's binds; the template's own io_meta has no bound.
+  void stash_sub_instance_port_facts(std::string_view handle, const std::shared_ptr<Lnast>& callee,
+                                     const std::vector<Spec_port>* out_inject = nullptr);
 
   // ── generic `<T,…>` per-call-site binding (2f-generics) ──────────────────
   // One resolved binding per generic name: pure type-macro expansion — the
@@ -823,6 +946,13 @@ protected:
     // `kind`/`max`/`min` still carry its envelope (so a constant bound into a
     // type slot has a width — todo 3g D). Never inferred (explicit/default only).
     std::string                    const_text = {};
+    // A constant bound FROM a typed comptime constant (`f<N=W>` with `comptime
+    // const W:u8 = 13`): W's declared envelope. An attribute query on a generic
+    // reads the substituted ENTITY (docs 06-functions), so `N.[bits]` is 8 as
+    // `W.[bits]` is, not the value width of the literal 13 (user ruling 6).
+    bool                           decl_typed = false;
+    std::optional<Dlop>            decl_max   = {};
+    std::optional<Dlop>            decl_min   = {};
     // A LAMBDA-valued generic (`f<inc>`): the bound callee name, registered in
     // func_param_bindings_ so a body call `F(v)` dispatches to it (todo 3g A).
     std::string                    func_name  = {};
@@ -835,9 +965,13 @@ protected:
   // One explicit `<…>` argument at a call site. `value` is the bound entity's
   // text (a type ref / tmp, a constant, or a lambda name); `name` is set for a
   // NAMED bind (`f<T=u8>`, todo 3g C) and empty for a positional one.
+  // `src_name`/`src_base` are a bare identifier's SOURCE spelling (see
+  // Actual::src_name).
   struct Generic_actual {
-    std::string value = {};
-    std::string name  = {};
+    std::string value    = {};
+    std::string name     = {};
+    std::string src_name = {};
+    std::string src_base = {};
   };
   // Explicit `<…>` bindings (positional and/or named) win; otherwise each
   // generic is inferred from the DECLARED types of the actuals at its `:T`
@@ -849,6 +983,196 @@ protected:
       const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io, const std::vector<Lnast_node>& param_val,
       const std::vector<bool>& param_set, std::size_t nbind, const std::vector<Generic_actual>& explicit_generics,
       const std::string& callee_name, const livehd::diag::Span& call_span);
+
+  // User ruling 2026-09-27 (lhdtrack suggestions 1.1-d): an argument never
+  // narrows implicitly. Every provided actual must fit its parameter's
+  // DECLARED type (a plain, generic-width or type-generic `:T` integer range)
+  // — the overflow rule of a typed assignment — for every callee kind, so it
+  // runs once, before the call splits into its inline / Sub / specialize
+  // lowering. A wider integer bound to a `bool` input is the same error, and so
+  // is an actual too wide for any derived range (`x << n`). An untyped
+  // parameter takes the actual's type (no check). Fatal `fcall-arg-overflow`.
+  void check_call_args_fit(const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io, const std::vector<Lnast_node>& param_val,
+                           const std::vector<bool>& param_set, std::size_t nbind,
+                           const absl::flat_hash_map<std::string, Generic_bind>& gbinds, std::string_view callee_name,
+                           const livehd::diag::Span& call_span);
+  // An omitted `mod`/`pipe` input's declared default drives the port from the
+  // call site, so it must fit the input like an actual would. Fatal
+  // `fcall-arg-overflow` (or `fcall-arg-kind` for an integer into a `bool`).
+  static void check_omitted_default_fit(const std::shared_ptr<Lnast>& callee, const Lnast_io_entry& e,
+                                        const absl::flat_hash_map<std::string, Generic_bind>& gbinds, std::string_view bare,
+                                        const livehd::diag::Span& call_span);
+  // The declared [min, max] of input `e` once `gbinds` are bound: a plain
+  // integer range, a folded generic-width bound, a `:T` bound to an integer
+  // type, or [0, 1] for a bool. nullopt = untyped (it takes the actual's type)
+  // or a bound that does not fold here.
+  [[nodiscard]] static std::optional<std::pair<Dlop, Dlop>> declared_param_range(
+      const std::shared_ptr<Lnast>& callee, const Lnast_io_entry& e, const absl::flat_hash_map<std::string, Generic_bind>& gbinds);
+  // The declared shape of a one-dimensional ARRAY port once `gbinds` are
+  // bound: its lane count and element envelope, from a `[4]u8` io entry or
+  // from the template's declared `[N]unsigned(bits=N)` type folded under the
+  // binds. An open outer dimension retains its element envelope and takes
+  // its lane count from `actual` when supplied. nullopt for a scalar port or
+  // a shape whose declared element bounds do not fold here.
+  struct Array_port_shape {
+    int64_t              lanes{0};
+    bool                 infer_lanes{false};  // [] input: each call supplies the extent
+    Dlop                 elem_min;  // the LEAF element's range (`[2][4]u8`: a u8)
+    Dlop                 elem_max;
+    bool                 elem_bool{false};
+    std::vector<int64_t> inner_dims;  // below `lanes`, outermost first (Lnast_io_entry::inner_dims)
+  };
+  [[nodiscard]] std::optional<Array_port_shape> array_port_shape(const std::shared_ptr<Lnast>& callee, const Lnast_io_entry& e,
+                                                                 bool                                                  output,
+                                                                 const absl::flat_hash_map<std::string, Generic_bind>& gbinds,
+                                                                 const Lnast_node* actual = nullptr);
+  // What the overflow checks know about a value: whether it is an integer and,
+  // if so, the may-hold range {min, max} (an integer literal exactly, else its
+  // bitwidth-derived range, else a Sub output port's range, else its declared
+  // type). An integer too wide for a derived range (`x << n`) is unbounded; a
+  // bool, string, tuple, a bit-pattern literal (force semantics) or a value
+  // nothing derived a range for is not judged here (the kind checks own it).
+  struct Value_range {
+    bool                integer{false};
+    std::optional<Dlop> min;
+    std::optional<Dlop> max;
+    [[nodiscard]] bool  bounded() const { return min.has_value() && max.has_value(); }
+    // True when some value of this integer may fall outside [dmin, dmax]. A
+    // value too wide for a derived range may not fit any range an i64 holds;
+    // against a wider one it cannot be judged.
+    [[nodiscard]] bool  may_exceed(const Dlop& dmin, const Dlop& dmax) const {
+      if (!integer) {
+        return false;
+      }
+      if (!bounded()) {
+        return dmax.get_signed_bits() <= 62 && dmin.get_signed_bits() <= 62;
+      }
+      return max->gt_op(dmax)->is_known_true() || min->lt_op(dmin)->is_known_true();
+    }
+  };
+  Value_range value_range_of(const Lnast_node& v) const;
+  // The kind of a call actual: a literal's, the value's own, or the declared
+  // kind of an IO port / Sub instance output. `unknown` when nothing says.
+  upass::Kind value_kind_of(const Lnast_node& v) const;
+  // User ruling 2026-09-27 (2): booleans never mix with integers at a call
+  // boundary. A bit, a bit-select or a literal bound to a `bool` input needs
+  // `boolean(x)`; a bool bound to an integer input needs `u1(x)`. Fatal
+  // `fcall-arg-kind`; runs for every callee kind (inline, Sub, specialize).
+  void        check_call_arg_kind(const Lnast_io_entry& e, const absl::flat_hash_map<std::string, Generic_bind>& gbinds,
+                                  const Lnast_node& actual, std::string_view callee, const livehd::diag::Span& call_span) const;
+  // The kind rule itself: `got` bound to an input declared `want`.
+  static void check_bind_kind(const Lnast_io_entry& e, Io_kind want, upass::Kind got, std::string_view callee,
+                              const livehd::diag::Span& call_span);
+  // Whether a Sub-instance call may omit input `e`: lnast.tolg drives it from
+  // its declared default or auto-wires the caller's clock/reset (ruling 12).
+  bool        sub_input_may_be_omitted(const std::shared_ptr<Lnast>& callee, const Lnast_io_entry& e) const;
+  // `mut m:[N]T = v` whose extent the front end could not fold (a generic or
+  // named `[N]`): it pre-filled nothing, so the store of `v` would leave a bare
+  // scalar where N lanes belong. At that store (the cursor), the lanes to
+  // pre-fill with `v` once the store is processed; nullopt otherwise.
+  struct Array_prefill {
+    std::string          var;
+    std::string          value;
+    std::vector<int64_t> dims;  // outermost first
+  };
+  [[nodiscard]] std::optional<Array_prefill> array_init_prefill() const;
+  void                                       emit_array_prefill(const Array_prefill& fill);
+
+  // An array dimension that is not a plain extent (08-memories.md "Array
+  // index"): an index range (`[100..<132]` is 32 entries whose first index is
+  // 100, `[-8..<7]` takes signed indices) or an enum type (`[X]`, one entry per
+  // entry of `X`, indexed only by those entries). The array itself is a plain
+  // zero-based `[lanes]` array: the declaration is lowered to that extent
+  // (Index_dims_scope) and every index is checked and rebased at its access
+  // (try_lower_array_index), so nothing downstream sees the index map.
+  struct Array_index_dim {
+    int64_t     lanes = 0;
+    int64_t     lo    = 0;  // index (enum value) of the first entry
+    std::string enum_type;  // non-empty: indexed only by the entries of this enum
+  };
+  // The index map of dimension text `dim_txt` (`[…]`), nullopt for a plain
+  // extent or a dim that does not resolve. An enum whose entries are not
+  // numbered consecutively (a default one-hot enum) sets `*why` instead.
+  [[nodiscard]] std::optional<Array_index_dim> array_index_dim(std::string_view dim_txt, std::string* why) const;
+  // The index map of a dimension written as a `range` value `name` (a range
+  // whose bounds prp2lnast could not fold), nullopt when it is not one.
+  [[nodiscard]] std::optional<Array_index_dim> range_value_dim(std::string_view name) const;
+  // Cursor at a declare: while the declare is processed, each index-range /
+  // enum dimension reads as its plain `[lanes]` extent (bake, staging, tolg);
+  // on exit the dim text is restored for a re-walk and the declared array
+  // records its index map (`__array_lo<k>`, `__array_n<k>`, `__array_enum<k>`)
+  // on its binding, so a copy or a comb argument keeps it.
+  class Index_dims_scope {
+  public:
+    explicit Index_dims_scope(uPass_runner& r);
+    ~Index_dims_scope();
+    Index_dims_scope(const Index_dims_scope&)            = delete;
+    Index_dims_scope& operator=(const Index_dims_scope&) = delete;
+
+  private:
+    struct Level {
+      Lnast_nid       dim;
+      std::string     text;  // the dim as written
+      Array_index_dim map;
+      bool            is_ref = false;  // a `range` value ref, not const text
+    };
+    uPass_runner&          r_;
+    std::shared_ptr<Lnast> ln_;  // the tree holding the declare (the renamed dims)
+    std::string            var_;
+    std::vector<Level>     levels_;  // outermost first; one per comp_type_array level
+    bool                   mapped_ = false;
+  };
+  // Cursor at a store (`store(a, i…, v)`) or tuple_get (`tuple_get(d, a, i…)`)
+  // of an array with an index map: check every index (an enum dimension takes
+  // only entries of its enum, a known index must be inside the range) and
+  // re-issue the access with zero-based indices. False when there is nothing
+  // to rebase (the caller processes the node as usual).
+  bool try_lower_array_index();
+  // Some array of this unit has an index map (a cheap filter before the
+  // bundle read of every element access).
+  bool any_index_mapped_{false};
+  // Index_dims_scope already reported the declaration's dimension.
+  bool index_dim_reported_{false};
+  // Set while an access is re-issued with zero-based indices (and while the
+  // physical per-lane pre-fill or a compiler-picked position runs): those
+  // indices are never rebased again.
+  bool physical_indices_{false};
+
+  // `mut a:[] = 0` (every dimension inferred from its uses, 08-memories.md):
+  // the array's name -> its initializer's fill value. A constant read of an
+  // entry no write reached is that fill (the extent grows with the indices
+  // that reach it), until a runtime-index write: the runner then no longer
+  // knows which entries a write reached.
+  absl::flat_hash_map<std::string, std::string> open_fill_arrays_;
+  // Cursor at a whole store `store(a, v)`: drop `a`'s fill, and record it anew
+  // when the store is the initializer of such an array.
+  void                                          track_open_fill_array();
+  // Cursor at a store (`store(a, i…, v)`) or tuple_get (`tuple_get(d, a, i…)`)
+  // of such an array: a runtime-index write ends the fill; a constant read of
+  // an entry no write reached becomes `d = fill`. True when it emitted that.
+  bool                                          try_open_fill_access();
+
+  // Does `tmpl` hold a type bound or an array dimension that
+  // bake_decl_pre_step folds IN PLACE (`unsigned(bits=x.[bits])`, `[N]T`)? An
+  // inline of such a callee must walk a private copy (try_inline_func_call).
+  bool has_in_place_type_folds(const Lnast& tmpl);
+  // Every dimension of an array port of template `callee` must fold under
+  // `gbinds` (`v:[N+1]u4`), or the specialization would harvest a width-less
+  // port. Fatal `array-port-dim-not-comptime` at the call.
+  void check_array_port_dims(const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io,
+                             const absl::flat_hash_map<std::string, Generic_bind>& gbinds, std::string_view callee_name,
+                             const livehd::diag::Span& call_span) const;
+  // Ruling 1 for an ARRAY input (`v:[4]u4`, `v:[N]unsigned(bits=N)`): the
+  // actual must be an array of the declared length whose element type fits the
+  // declared element (`fcall-arg-shape` / `fcall-arg-overflow`). An actual of
+  // unknown fixed shape is not judged. Open inputs validate each captured
+  // element. Probe mode returns false instead of emitting a diagnostic.
+  bool check_call_array_arg(const std::shared_ptr<Lnast>& callee, const Lnast_io_entry& e,
+                            const absl::flat_hash_map<std::string, Generic_bind>& gbinds, const Lnast_node& actual,
+                            std::string_view callee_name, const livehd::diag::Span& call_span, bool probe = false);
+  // The declared facts of `name`, or, for a tuple_get temp (`child.o`, `t.f`,
+  // which has no type of its own), of the field it was read from.
+  std::optional<upass::decl_facts::Facts> operand_decl_facts(std::string_view name) const;
 
   bool maybe_specialize_template_call(const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io,
                                       const std::vector<Lnast_node>& param_val, const std::vector<bool>& param_set,
@@ -865,7 +1189,9 @@ protected:
   // replaced by the `vports` concrete ports and the body is prefixed with a
   // `vname = (port…)` reconstruction so the existing tuple/for machinery lowers.
   // `out_inject` mirrors `inject` for the OUTPUT ports (`-> (r:T)` with T
-  // bound); `type_subst` rewrites body `ref <generic>` type slots to the
+  // bound). Both are indexed like `tmpl->io_meta()` (inline tuple ports
+  // flattened to dotted leaves); a tree port is matched to its slot by name.
+  // `type_subst` rewrites body `ref <generic>` type slots to the
   // bound concrete type during the copy (declare/type_spec `:T` uses — SSA
   // strips io type refs, so only body slots need it).
   std::shared_ptr<Lnast> clone_template_specialized(const std::shared_ptr<Lnast>& tmpl, const std::string& mangled,
@@ -874,10 +1200,11 @@ protected:
                                                     const absl::flat_hash_map<std::string, Generic_bind>& type_subst);
   // 2f-generic_port_width — fold a deferred port bound of `tmpl` (a `%tmp`
   // defined by its straight-line body prologue, a generic name, or a literal)
-  // under `binds`. nullopt = not a compile-time integer.
+  // under `binds`. nullopt = not a compile-time integer; `unbound` (when set)
+  // receives the first generic of `tmpl` the bound needs but `binds` lacks.
   [[nodiscard]] static std::optional<Dlop> fold_template_bound(const std::shared_ptr<Lnast>& tmpl, std::string_view text,
                                                                const absl::flat_hash_map<std::string, Generic_bind>& binds,
-                                                               int depth = 0);
+                                                               int depth = 0, std::string* unbound = nullptr);
   // Concrete port type of an io entry with has_deferred_bound(); a side that
   // does not fold is a fatal `type-bound-not-comptime`.
   [[nodiscard]] Spec_port deferred_port_type(const std::shared_ptr<Lnast>& tmpl, const Lnast_io_entry& e,
@@ -912,6 +1239,10 @@ protected:
   struct Ctor_arg {
     std::string key;
     Lnast_node  node{Lnast_node::create_invalid()};
+    // An explicit `T(x)` call's positional bare variable: its source spelling
+    // (Actual::src_name/src_base), so the init call binds it by name.
+    std::string src_name = {};
+    std::string src_base = {};
   };
   // Called from process_lnast's 2-child `store` case BEFORE the normal
   // assign dispatch. Recognizes the construction forms on `store(x, V)`:
@@ -937,7 +1268,8 @@ protected:
                                             const std::vector<Ctor_arg>& args);
   // Selects the first init overload (tuple order) whose non-self formals
   // match the args (by count; named keys must all exist). Empty when none.
-  std::string              select_init_overload(const std::vector<std::string>& candidates, const std::vector<Ctor_arg>& args);
+  std::string              select_init_overload(const std::vector<std::string>& candidates, const std::vector<Ctor_arg>& args,
+                                                const livehd::diag::Span* span = nullptr, std::string_view label = {});
   // Collects the init candidates recorded on type bundle `tn`: the single
   // `init` function-name string or the `init.N` overload list, tuple order.
   std::vector<std::string> init_candidates_of(std::string_view tn);
@@ -952,7 +1284,17 @@ protected:
     std::string key;
     Lnast_node  node{Lnast_node::create_invalid()};
     std::string func_name;  // non-empty: this actual is a function value (closure)
+    // A positional bare-variable actual's SOURCE name (never the inline frame's
+    // `inl<N>_x`), and the variable it versions when that name is a
+    // compiler-minted SSA version (else empty): naming exception 2 binds it to
+    // the parameter it spells, the exact name first, even when `node` carries
+    // the renamed form (a param of the inlined caller).
+    std::string src_name;
+    std::string src_base;
   };
+  // The source spelling of the bare-variable actual at the cursor, as
+  // Actual::{src_name, src_base}; both empty for a const or a tmp.
+  std::pair<std::string, std::string> source_var_at_cursor() const;
   // Walk the func_call actuals (cursor MUST be on the callee ref — the call's
   // 2nd child). Fills `actuals` (positional / named / ref-pass) and the
   // explicit `<…>` generic refs, honoring the UFCS-receiver drop. Saves and
@@ -973,10 +1315,17 @@ protected:
   // positional `f(t)`). A Sub-bound callee (mod/pipe, or a comb kept as an
   // instance under inline=false) must then re-emit the call with the dotted
   // NAMED binding — the source spelling names no leaf port tolg could wire.
-  bool bind_call_actuals(const Lnast_tree_io& io, const std::vector<Actual>& actuals, bool is_ctor_call, bool commit,
+  bool bind_call_actuals(const Lnast_tree_io& io, const std::vector<Actual>& actuals, bool commit,
                          std::string_view callee_name, const livehd::diag::Span& call_span, std::vector<Lnast_node>& param_val,
                          std::vector<bool>& param_set, std::vector<std::string>& param_func, std::vector<Lnast_node>& vararg_pos,
                          std::vector<std::pair<std::string, Lnast_node>>& vararg_named, bool* out_tuple_expanded = nullptr);
+  // docs 04b: a `mod`/`pipe` child with no declared `Clock` (`Reset`) input
+  // has one MINTED (`clock`/`reset`), which a caller may bind by that name
+  // (a two-clock caller must). bind_call_actuals accepts such a named actual
+  // only while bind_minted_ok_ is set (the callee is a mod/pipe), collecting
+  // it into bind_minted_actuals_ for the Sub call tolg wires.
+  bool                                            bind_minted_ok_ = false;
+  std::vector<std::pair<std::string, Lnast_node>> bind_minted_actuals_;
   // A gathered lambda set `const add = [f1, f2]` folds (constprop) to a bundle
   // of qualified function-name strings under numeric keys "0","1",… — the same
   // shape `init` overloads use. Returns those names in tuple order (only the
@@ -992,7 +1341,8 @@ protected:
   // it must be re-derived here to choose among candidates). Used ONLY to pick
   // among gathered candidates; the winner still runs the full bind path, which
   // remains the authority for diagnostics.
-  bool                     signature_matches(const Lnast_tree_io& io, const std::vector<Actual>& actuals, bool is_ctor_call);
+  bool signature_matches(const Lnast_tree_io& io, const std::vector<Actual>& actuals,
+                         const std::shared_ptr<Lnast>& callee = nullptr);
   // The RETURN half of the overload-dispatch callability test (so "can handle"
   // means the WHOLE `c = f(b)` would be valid, not just the call side): true iff
   // candidate `io`'s OUTPUTS can bind to how the call's result is consumed at the
@@ -1028,6 +1378,10 @@ protected:
   // admits a const receiver on `ref self` (the constructor is the one legal
   // writer of a const).
   bool                             ctor_call_pending_ = false;
+  // Armed with ctor_call_pending_: the constructor args' source spellings, in
+  // order. The synthesized call's refs carry the caller's renamed text, so the
+  // ctor bind takes Ctor_arg::src_name/src_base from here instead.
+  std::vector<Ctor_arg>            ctor_call_args_;
 
   // Resolves a (possibly unqualified) callee name to a registry body. Tries
   // the bare name, then the unique "<module>.<name>" suffix match.
@@ -1084,8 +1438,68 @@ protected:
   // const bitmask in pyrope form (tolg's Get_mask requires a const/range mask).
   // Used by runtime `wrap` to keep the low N bits (zero-extended) of `value`.
   void process_bit_selection();
-  bool try_lower_tuple_spread();
+  // set_mask counterpart of process_bit_selection's closed-range mask (below).
+  void process_bit_update();
+
+  // `~x` (user ruling 26): an UNSIGNED-typed operand of known width N flips
+  // its N bits, so the node is re-issued in its typed LNAST form
+  // `bit_not(dst, x, N)`; a signed or untyped one stays `-x - 1`. The one
+  // decision point every consumer reads. See the definition.
+  void dispatch_bit_not();
+  // A bitwise and/or/xor, recording whether its result is unsigned-typed (every
+  // operand is: the widest width), so nand/nor/xnor `~(a & b)` follow the rule.
+  void dispatch_bitwise(upass::Push_method fn);
+  // The declared integer type of a value (user rulings 26, 38, 44): its sign,
+  // its width and, when the declaration pins them, its exact bounds.
+  struct Int_type {
+    bool     is_signed{false};
+    uint32_t bits{0};
+    Dlop     max;  // invalid: only the width is known
+    Dlop     min;
+  };
+  // The integer type `name` has by its OWN declaration or producer, or nullopt
+  // for an untyped value (see the definition).
+  [[nodiscard]] std::optional<Int_type>                         typed_int_of(std::string_view name) const;
+  // {dst, type} when the func_call under the cursor is a typecast whose result
+  // has a declared integer type (`uN(x)`/`sN(x)`, `unsigned(x)`/`signed(x)` of a
+  // typed x), else nullopt.
+  [[nodiscard]] std::optional<std::pair<std::string, Int_type>> typed_cast_result() const;
+  // User ruling 2026-09-28 (38): an untyped `const` alias of a typed value
+  // (`const x = a`) takes the value's declared type.
+  void                                                          inherit_alias_type(const std::string& dst, const std::string& src);
+  // {dst, W} for the tuple_get under the cursor: W is the element width when
+  // it reads ONE element of a declared one-dimensional unsigned array
+  // (`arr[i]` of `[N]uW`, a reg/memory array, an array port), else 0.
+  [[nodiscard]] std::pair<std::string, uint32_t>                array_elem_read_bits() const;
+  // Whether `mask_raw`, the mask of the get_mask statement `stmt`, is the
+  // single-bit `1 << pos` a runtime or named index lowers to (`a#[i]`, `a#[k]`).
+  [[nodiscard]] bool                         is_single_bit_mask(const Lnast_nid& stmt, std::string_view mask_raw);
+  // Result temp -> its integer type: a `~` of a typed operand, a bitwise
+  // and/or/xor over typed operands (unsigned when all are), a sized or
+  // sign cast (none of them has a declared type of its own when it folds at
+  // comptime), a one-bit select at a runtime or named position, an element
+  // read of an unsigned array.
+  absl::flat_hash_map<std::string, Int_type> typed_expr_types_;
+  // Names typed by their OWN declaration or type_spec (bake_decl_pre_step, a
+  // bit-select's envelope stamp), or an untyped `const` alias of a typed value
+  // (ruling 38, inherit_alias_type) -- not other names whose envelope rode in
+  // on a value (`mut t = x#[..]` leaves `t` untyped). An untyped declaration of
+  // the name drops it again: a sibling scope may reuse a name (no shadowing, so
+  // two live bindings never share one).
+  absl::flat_hash_set<std::string>           declared_typed_;
+
+  // The const bitmask of a CLOSED range ref with concrete non-negative bounds
+  // (`a#[S..=S]`, `a#[K..+1]` with comptime-named bounds); nullopt otherwise.
+  std::optional<std::string> closed_range_mask(std::string_view range_name) const;
+  bool                       try_lower_tuple_spread();
   void emit_inline_get_mask(const std::string& dst, const Lnast_node& value, const std::string& mask_text);
+
+  // Width of a bit-select range whose ENDS are runtime but whose span is not:
+  // `v#[s..+4]` lowers to `plus(%p, s, 4); minus(%m, %p, 1); range(%r, s, %m)`,
+  // and hi - lo folds to 3 for every `s`. `stmt` is the get_mask statement and
+  // `mask_raw` its (un-renamed) range operand; nullopt when the span is not a
+  // compile-time constant.
+  std::optional<int64_t> runtime_range_width(const Lnast_nid& stmt, std::string_view mask_raw);
 
   // Runtime `bool(x)` == `(x != 0)`: emit `ne(dst, value, 0)` so the passes run
   // (typecheck stamps the boolean result kind).
@@ -1140,10 +1554,17 @@ protected:
   void report_cond_nil(std::string_view which);
 
   // Monotonic per-run counter giving each inline call site a unique rename
-  // tag/salt. Cross-pass idempotence is a documented follow-up. Also used
-  // per comptime loop iteration (unroll_for/unroll_while) so each iteration's
+  // salt. Cross-pass idempotence is a documented follow-up. Also used per
+  // comptime loop iteration (unroll_for/unroll_while) so each iteration's
   // re-walk gets a fresh tmp-rename namespace + block-scope id.
   uint32_t                                      inline_seq_{0};
+  // Numbers the `inl<N>_` rename TAG of each inline call site, apart from the
+  // salts: the tag names hardware (an inlined array local becomes memory
+  // `inl<N>_m`), so it must not depend on how many loop iterations an earlier
+  // callee's body took to unroll -- a callee still unconverged (a cold compile)
+  // unrolls its loops inside the splice, a converged one (restored warm) no
+  // longer has any.
+  uint32_t                                      inline_tag_seq_{0};
   // Comptime loop unroll state. loop_break_hit_ is set by a `func_break`
   // reached on a comptime-taken path during a loop body re-walk; the unroller
   // checks it after each iteration and stops. loop_depth_ counts active
@@ -1156,6 +1577,18 @@ protected:
   // start of each iteration (walk_loop_iteration).
   bool                                          loop_continue_hit_{false};
   int                                           loop_depth_{0};
+  // A deferred type bound the bake folded IN PLACE on its source node while a
+  // loop body is walked, with the ref it held. The unroller re-walks the SAME
+  // body nodes every iteration, so walk_loop_iteration restores its own
+  // iteration's entries once that iteration is emitted: otherwise every later
+  // iteration reads the first one's value (`const t:unsigned(bits=i)`, the lane
+  // of `wrap a#[0..+i] = ..`).
+  struct Loop_baked_ref {
+    std::shared_ptr<Lnast> ln;
+    Lnast_nid              nid;
+    std::string            ref;
+  };
+  std::vector<Loop_baked_ref>                   loop_baked_refs_;
   // 0-based iteration ordinal of every unroll currently in flight (outermost
   // first), maintained alongside loop_depth_. `loop_inst_suffix()` renders it as
   // the `__li<ordinal>` tag stamped on the instances a body copy creates: one
@@ -1250,12 +1683,22 @@ protected:
     bool        has_loop_control = false;  // body owns break/continue and needs activation roles
 
     absl::flat_hash_map<std::string, std::string> actual_names;  // body-local name -> enclosing binding
+    // Boundary names the lifted definition spells differently (filled by
+    // lift_loop_body; see emit_rolled_loop_call's port_of): a body-local
+    // private SSA version.
+    absl::flat_hash_map<std::string, std::string>                 port_names;
     std::vector<std::pair<std::string, Dlop>>     constants;     // copied values, never boundary ports
     std::vector<std::string>                    invariants;
     std::vector<std::string>                    carries;
     absl::flat_hash_set<std::string>              registers;  // separate invariant Q and carried D
     std::vector<std::string>                    finals;  // must-written, no incoming ordinal-0 value
     absl::flat_hash_map<std::string, Spec_port> types;   // boundary name -> declared type
+    // Carry -> {min, max} of the values that enter an iteration (seeds the
+    // lifted body's carry-in range; see plan_loop_roll).
+    absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>> carry_in_ranges;
+    // Invariant -> {min, max} of the value it holds where the loop starts (an
+    // enclosing rolled loop's index is only a signed storage window otherwise).
+    absl::flat_hash_map<std::string, std::pair<int64_t, int64_t>> invariant_ranges;
   };
 
   // Suffixes for the two compiler-owned ports a carry needs. The body is copied
@@ -1272,14 +1715,35 @@ protected:
   // Returns false (with a debug-log reason) to fall back to unrolling.
   bool plan_loop_roll(const Lnast_nid& body_stmts, const std::string& ivar, int64_t lo, int64_t hi, int64_t step,
                       Loop_roll_plan& out);
+  // A call under `nid` writes a variable back through `ref`: a `ref x` actual,
+  // or the receiver of a `ref self` method (or of a callee that does not
+  // resolve here). The roll plan's carry analysis sees only stores.
+  bool subtree_writes_through_ref(const Lnast& ln, const Lnast_nid& nid) const;
 
   // Builds the lifted definition: io ports from the plan, the body copied
   // verbatim between a carry-seeding prologue and a carry-writeback epilogue.
-  std::shared_ptr<Lnast> lift_loop_body(const Lnast_nid& body_stmts, const Loop_roll_plan& plan);
+  // Records in plan.port_names every boundary it had to rename.
+  std::shared_ptr<Lnast> lift_loop_body(const Lnast_nid& body_stmts, Loop_roll_plan& plan);
 
   // Emits one explicit rolled_for node containing the surviving source body
   // and the hidden Sub-call/result transport consumed by tolg.
   void emit_rolled_loop_call(const Loop_roll_plan& plan, const Lnast_nid& source_body);
+
+  // What plan_loop_roll consults about ONE definition (a lambda, or the root)
+  // for every loop in it, built once per definition instead of once per loop.
+  // A name declared in several sibling scopes lands in every class it is
+  // declared with, which keeps the planner conservative.
+  using Name_deps = absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>>;
+  struct Loop_scope_facts {
+    absl::flat_hash_set<std::string> wires;      // declared `wire`
+    absl::flat_hash_set<std::string> regs;       // declared `reg`
+    absl::flat_hash_set<std::string> arrays;     // declared with an array type (also via a `type` alias)
+    absl::flat_hash_set<std::string> comptimes;  // declared `comptime` (never a carry of a rolled body)
+    // Straight-line def-use (name -> every name its writes read), per scope:
+    // the definition's own statements, and the body of each enclosing loop.
+    absl::flat_hash_map<Lnast_nid, Name_deps> deps;
+  };
+  Loop_scope_facts& loop_scope_facts(const Lnast_nid& definition);
 
   // Post-walk DCE: scans the freshly-built staging tree, drops definition
   // statements (assign / tuple_add / attr_set / etc.) whose dst name is
@@ -1293,6 +1757,14 @@ protected:
 
 private:
   using Pass_method = void (upass::uPass::*)();
+
+  // loop_scope_facts' cache: source tree -> definition -> facts. `tree` pins
+  // the tree so its address cannot be reused by another while cached.
+  struct Loop_tree_facts {
+    std::shared_ptr<Lnast>                            tree;
+    absl::flat_hash_map<Lnast_nid, Loop_scope_facts> definitions;
+  };
+  absl::flat_hash_map<const Lnast*, Loop_tree_facts> loop_tree_facts_;
 
   // Dispatches `fn` across every registered pass so they can update their
   // internal state (symbol tables, etc.) from the current read cursor. The

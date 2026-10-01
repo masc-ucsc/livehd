@@ -1,0 +1,26 @@
+/*
+:name: const_clock_default
+:type: error
+:tolg: 1
+:error: .clk. is a .Clock.: a Clock is never bound to a constant
+:help: drive it from a .Clock. input
+*/
+
+// User ruling 2026-09-28 (27): a register whose clock resolves to a constant
+// is a compile error, whatever supplies the constant. `ccd_leaf` declares a
+// constant default for its clock `clk`, so a call that omits `clk` takes the
+// default (a declared default beats the implicit-clock auto-wire) and `r`
+// never ticks. Before the fix only an explicit constant actual was checked.
+// Since ruling 52 `clk` is a `Clock`, and a Clock is never bound to a
+// constant: the constant default itself is the error.
+
+mod ccd_leaf(clk:Clock = 0, d:U4) -> (q:U4@[1]) {  // locate_error_here
+  reg r:U4 = 0
+  r = d
+  q = r
+}
+
+pub mod const_clock_default(d:U4) -> (q:U4@[1]) {
+  const l = ccd_leaf(d=d)
+  q = l.q
+}

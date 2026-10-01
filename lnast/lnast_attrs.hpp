@@ -25,6 +25,12 @@
 
 namespace lnast_attrs {
 
+struct simulation_init_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr simulation_init_t simulation_init{};
+
 struct lnast_name_t {
   using value_type = int32_t;
   using storage    = hhds::flat_storage;
@@ -36,6 +42,10 @@ inline constexpr lnast_name_t lnast_name{};
 }  // namespace lnast_attrs
 
 namespace hhds {
+template <>
+[[nodiscard]] inline std::string attr_tag_name<lnast_attrs::simulation_init_t>() {
+  return "lnast_attrs::simulation_init";
+}
 
 template <>
 [[nodiscard]] inline std::string attr_tag_name<lnast_attrs::lnast_name_t>() {

@@ -5,7 +5,7 @@
 # pass and the compile opt-in rewrite the graph, the result stays equivalent
 # (whole-design LEC against the unoptimized compile), a second run is a no-op,
 # proofs are reused under one workdir, stages select the searches, and synthesis
-# runs the same engine on its private copy.
+# opts into the same compile-time engine.
 set -euo pipefail
 LHD="${LHD:-lhd/lhd}"
 W="$(mktemp -d)"
@@ -29,12 +29,14 @@ run compile "$SRC" --top top --workdir "$W/default" --emit-dir lg:"$W/original" 
 run compile "$SRC" --top top --set pass.satopt=true --workdir "$W/explicit" \
   --emit-dir lg:"$W/compiled" --result-json "$W/compile-on.json"
 lec "$W/original" "$W/compiled" compiled
-# LEC takes loaded lg: sides as compiled (no satopt by default); source sides
-# compile with satopt on, like `lhd synth`.
+# LEC leaves satopt disabled for both source and compiled sides by default;
+# explicit opt-in still optimizes both source sides.
 run lec --ref lg:"$W/original" --impl lg:"$W/compiled" --top instance_out_struct_ident.top \
   --workdir "$W/lec-default" --result-json "$W/lec-default.json"
 run formal lec --ref pyrope:"$SRC" --impl pyrope:"$SRC" --top top \
   --workdir "$W/lec-source" --result-json "$W/lec-source.json"
+run formal lec --ref pyrope:"$SRC" --impl pyrope:"$SRC" --top top --set pass.satopt=true \
+  --workdir "$W/lec-source-on" --result-json "$W/lec-source-on.json"
 
 # Standalone: the input lg: is left alone, the optimized design goes to lg:.
 run pass satopt lg:"$W/original" --workdir "$W/prepared" --top top --emit-dir lg:"$W/standalone" \
@@ -92,8 +94,9 @@ cat > "$W/satopt-off.toml" <<'EOF'
 [pass]
 satopt = false
 EOF
-for mode in on off explicit; do
+for mode in on off explicit default-synth; do
   extra=()
+  [[ "$mode" != on ]] || extra+=(--set pass.satopt=true)
   [[ "$mode" != off ]] || extra+=(--set pass.satopt=false)
   [[ "$mode" != explicit ]] || extra+=(--config "$W/satopt-off.toml" --set pass.satopt=true)
   run synth "$SRC" --top top --set synth.liberty="$LIB" --set synth.opentimer=false \
@@ -101,13 +104,13 @@ for mode in on off explicit; do
     --workdir "$W/$mode" --result-json "$W/$mode.json"
 done
 run pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/model-work"
-for mode in on off explicit; do
+for mode in on off explicit default-synth; do
   run lec --impl lg:"$W/$mode-mapped" --ref lg:"$W/original" --lib lg:"$W/models" --set pass.satopt=false \
     --top instance_out_struct_ident.top --set formal.timeout=60 \
     --workdir "$W/lec-$mode"
 done
 run synth "$SRC" --top top --set synth.liberty="$LIB" --set synth.opentimer=false \
-  --set synth.threads=1 --workdir "$W/on" --result-json "$W/warm.json"
+  --set pass.satopt=true --set synth.threads=1 --workdir "$W/on" --result-json "$W/warm.json"
 # Synthesis of an lg: input maps what compile produced: no satopt by default.
 run synth lg:"$W/original" --top instance_out_struct_ident.top --set synth.liberty="$LIB" --set synth.opentimer=false \
   --set synth.threads=1 --workdir "$W/lgin" --result-json "$W/lgin.json"
@@ -136,7 +139,7 @@ control_stages = data('ctrl')['satopt']['stages']
 assert control_stages['simp_ctrl']['state'] == 'completed', control_stages
 assert all(s['state'] == 'disabled' for k, s in control_stages.items() if k != 'simp_ctrl'), control_stages
 assert 'satopt' not in data('default')
-for name, runs in (('lec-default', 0), ('lec-source', 2)):
+for name, runs in (('lec-default', 0), ('lec-source', 0), ('lec-source-on', 2)):
     result = data(name)
     assert result['lec']['verdict'] == 'proven', name
     assert satopt_steps(name) == runs, result['recipe']
@@ -153,16 +156,15 @@ comment = data('edit-comment').get('satopt')
 assert comment is None or comment['stages']['hotmux']['reused'] == comment['stages']['hotmux']['proven'] > 0, comment
 semantic = data('edit-semantic')['satopt']['stages']['hotmux']
 assert semantic['reused'] == 0 and semantic['proven'] > 0, semantic
-# `lhd synth foo.prp` is `lhd compile --set pass.satopt=true` then mapping:
-# satopt runs in synth's compile step (every stage) and reports in the
-# result's "satopt" member; the mapper runs no satopt of its own.
+# Explicit opt-in runs every stage in synth's compile step and reports in
+# the result's "satopt" member; the mapper runs no satopt of its own.
 for name in ('on', 'explicit'):
     assert satopt_steps(name) == 1, data(name)['recipe']
     stages = data(name)['satopt']['stages']
     assert not any(s['state'] == 'disabled' for s in stages.values()), stages
     assert sum(s['applied'] for s in stages.values()) > 0, stages
     assert 'satopt' not in data(name)['qor'].get('abc', {}), name
-for name in ('off', 'lgin'):
+for name in ('off', 'default-synth', 'lgin'):
     assert satopt_steps(name) == 0, data(name)['recipe']
     assert 'satopt' not in data(name), name
 assert data('warm')['incremental']['abc']['hits'] > 0

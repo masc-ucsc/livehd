@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -172,11 +173,11 @@ namespace str_tools {
 }
 
 // Canonical cross-frontend module identity. Pyrope graph names include a file
-// prefix and primitive template widths (`file.foo__u8_bool`), while an
+// prefix and primitive template widths (`file.foo__U8_Bool`), while an
 // elaborated Verilog frontend exposes the same definition as `foo`.
 // The result is always a subview of `name`, so the scan runs on string_views
 // and allocates exactly once, on return (callers key maps with std::string).
-// The uPass mangling this parses is minted in upass_runner (`<base>__uN_sN_bool`
+// The uPass mangling this parses is minted in upass_runner (`<base>__U<N>_S<N>_Bool`
 // primitive specializations); named/generic-value specializations stay distinct.
 [[nodiscard]] inline std::string canonical_entity_name(std::string_view name) {
   const auto dot    = name.rfind('.');
@@ -190,8 +191,10 @@ namespace str_tools {
   while (pos < entity.size()) {
     const auto end   = entity.find('_', pos);
     const auto token = entity.substr(pos, end == std::string_view::npos ? std::string_view::npos : end - pos);
-    bool       width = token == "bool";
-    if (!width && token.size() >= 2 && (token.front() == 'u' || token.front() == 's')) {
+    // Canonical `U<N>`/`S<N>`/`Bool` tokens (the lowercase spellings are the
+    // pre-migration names an old library may still carry).
+    bool       width = token == "Bool" || token == "bool";
+    if (!width && token.size() >= 2 && (token.front() == 'U' || token.front() == 'S' || token.front() == 'u' || token.front() == 's')) {
       width = std::all_of(token.begin() + 1, token.end(), [](unsigned char ch) { return std::isdigit(ch); });
     }
     if (!width) {
@@ -205,10 +208,65 @@ namespace str_tools {
   return std::string(entity);
 }
 
+// A Pyrope built-in TYPE WORD (docs 07-typesystem "Built-in types"): `U<N>` /
+// `S<N>` (`U` or `S` followed by one or more ASCII digits: `U1`, `U8`, `S20`),
+// `Unsigned`, `Signed`, `Bool`, `String`, `Clock`, `Reset`. They are reserved:
+// a bare one is always the type (or its cast), never a name. Mirrors prpparse
+// token.hpp is_type_word (the lexer's reserved-word test) exactly.
+[[nodiscard]] inline bool is_pyrope_type_word(std::string_view s) {
+  if (s.size() >= 2 && (s[0] == 'U' || s[0] == 'S')) {
+    bool digits = true;
+    for (size_t i = 1; i < s.size() && digits; ++i) {
+      digits = s[i] >= '0' && s[i] <= '9';
+    }
+    if (digits) {
+      return true;
+    }
+  }
+  return s == "Unsigned" || s == "Signed" || s == "Bool" || s == "String" || s == "Clock" || s == "Reset";
+}
+
+// The former lowercase type spellings (docs 07-typesystem "Built-in types"):
+// `u`/`s`/`i` followed by digits (`u8`, `s4`, `i32`), `bool`, `boolean`,
+// `unsigned`, `signed`, `string`. Returns the new spelling a diagnostic names
+// (`u8` -> `U8`, `i32` -> `S32`, `boolean` -> `Bool`), or "" when `s` is not a
+// former type spelling. These are ordinary names now: diagnose a rename only
+// after lookup fails, never reject a declaration just for using one of them.
+[[nodiscard]] inline std::string renamed_type_spelling(std::string_view s) {
+  if (s.size() >= 2 && (s[0] == 'u' || s[0] == 's' || s[0] == 'i')) {
+    bool digits = true;
+    for (size_t i = 1; i < s.size() && digits; ++i) {
+      digits = s[i] >= '0' && s[i] <= '9';
+    }
+    if (digits) {
+      return std::string(1, s[0] == 'u' ? 'U' : 'S') + std::string(s.substr(1));
+    }
+  }
+  if (s == "bool" || s == "boolean") {
+    return "Bool";
+  }
+  if (s == "unsigned") {
+    return "Unsigned";
+  }
+  if (s == "signed") {
+    return "Signed";
+  }
+  if (s == "string") {
+    return "String";
+  }
+  return {};
+}
+
 // Canonical spelling of a Pyrope escaped identifier: `` `name` `` -> `name`
-// when the inner text is a plain alnum/underscore word that does not start with
-// a digit; anything else (a name that genuinely needs the quotes, e.g.
+// when the inner text is a plain identifier word (letters -- including non-ASCII
+// UTF-8 letters --, digits, underscore) that does not start with a digit;
+// anything else (a name that genuinely needs the quotes, e.g.
 // `` `a.b` ``) is returned untouched. The result is a subview of `name`.
+//
+// A backticked TYPE WORD (`` `U4` ``, `` `Clock` ``) keeps its backticks: it is
+// a plain name, never the type, and the bare `U4` means the type, so the two
+// spellings must stay distinct names (docs 02-basics "Identifiers"). Code
+// generators strip the backticks (Verilog sees `U4`).
 //
 // This is the ONE definition. It is shared because producer and consumer must
 // agree exactly: prp2lnast stamps declarations, refs and `pub` entries with the
@@ -221,16 +279,157 @@ namespace str_tools {
     auto inner = name.substr(1, name.size() - 2);
     bool ok    = !inner.empty();
     for (char ch : inner) {
-      if (!(ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9'))) {
+      // A byte >= 0x80 is part of a UTF-8 letter: the Pyrope lexer accepts the
+      // same bytes in a bare identifier (grammar: [\p{L}][\p{L}\p{Nd}_$]*), so
+      // `` `é` `` and `é` must name the same thing.
+      if (!(ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')
+            || static_cast<unsigned char>(ch) >= 0x80)) {
         ok = false;
         break;
       }
     }
-    if (ok && !(inner[0] >= '0' && inner[0] <= '9')) {
+    if (ok && !(inner[0] >= '0' && inner[0] <= '9') && !is_pyrope_type_word(inner)) {
       return inner;  // substring view of `name` (same backing buffer)
     }
   }
   return name;
+}
+
+// Decode the string escapes of ONE backtick identifier token `` `...` `` (docs
+// 02-basics "Identifiers": a backtick name uses the string escapes -- `\\`,
+// `\``, `\n`, `\t`, `\r`, `\"`, `\'`, `\0`, `\xNN`, `\u{N..}`), keeping the
+// surrounding backticks: `` `d\\e` `` -> `` `d\e` ``. nullopt when `tok` is not
+// exactly one backtick token (an unescaped inner backtick) or an escape is
+// malformed (the lexer already rejected those).
+[[nodiscard]] inline std::optional<std::string> decode_backtick_ident(std::string_view tok) {
+  if (tok.size() < 2 || tok.front() != '`' || tok.back() != '`') {
+    return std::nullopt;
+  }
+  const auto  inner = tok.substr(1, tok.size() - 2);
+  std::string out   = "`";
+  const auto  hexv  = [](char c) -> int {
+    if (c >= '0' && c <= '9') {
+      return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+      return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+      return c - 'A' + 10;
+    }
+    return -1;
+  };
+  for (size_t i = 0; i < inner.size(); ++i) {
+    const char c = inner[i];
+    if (c == '`') {
+      return std::nullopt;
+    }
+    if (c != '\\') {
+      out.push_back(c);
+      continue;
+    }
+    if (++i >= inner.size()) {
+      return std::nullopt;
+    }
+    switch (inner[i]) {
+      case '\\': out.push_back('\\'); break;
+      case '`' : out.push_back('`'); break;
+      case '"' : out.push_back('"'); break;
+      case '\'': out.push_back('\''); break;
+      case 'n' : out.push_back('\n'); break;
+      case 't' : out.push_back('\t'); break;
+      case 'r' : out.push_back('\r'); break;
+      case '0' : out.push_back('\0'); break;
+      case 'x' : {
+        if (i + 2 >= inner.size() || hexv(inner[i + 1]) < 0 || hexv(inner[i + 2]) < 0) {
+          return std::nullopt;
+        }
+        out.push_back(static_cast<char>(hexv(inner[i + 1]) * 16 + hexv(inner[i + 2])));
+        i += 2;
+        break;
+      }
+      case 'u': {
+        if (i + 1 >= inner.size() || inner[i + 1] != '{') {
+          return std::nullopt;
+        }
+        const auto close = inner.find('}', i + 2);
+        if (close == std::string_view::npos || close == i + 2 || close - (i + 2) > 6) {
+          return std::nullopt;
+        }
+        uint32_t cp = 0;
+        for (size_t k = i + 2; k < close; ++k) {
+          const int h = hexv(inner[k]);
+          if (h < 0) {
+            return std::nullopt;
+          }
+          cp = cp * 16 + static_cast<uint32_t>(h);
+        }
+        if (cp < 0x80) {
+          out.push_back(static_cast<char>(cp));
+        } else if (cp < 0x800) {
+          out.push_back(static_cast<char>(0xC0 | (cp >> 6)));
+          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else if (cp < 0x10000) {
+          out.push_back(static_cast<char>(0xE0 | (cp >> 12)));
+          out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else if (cp <= 0x10FFFF) {
+          out.push_back(static_cast<char>(0xF0 | (cp >> 18)));
+          out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+          out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+          out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else {
+          return std::nullopt;
+        }
+        i = close;
+        break;
+      }
+      default: return std::nullopt;
+    }
+  }
+  out.push_back('`');
+  return out;
+}
+
+// The inverse for an emitter: the inner text of a backtick name with `\` and
+// `` ` `` escaped (a Verilog escaped id `d\e` is written `` `d\\e` ``).
+[[nodiscard]] inline std::string escape_backtick_inner(std::string_view inner) {
+  std::string out;
+  out.reserve(inner.size());
+  for (const char c : inner) {
+    if (c == '\\' || c == '`') {
+      out.push_back('\\');
+    }
+    out.push_back(c);
+  }
+  return out;
+}
+
+// canonical_escaped_ident applied to every `.`-separated segment of a dotted
+// name (`` `cnt`.`basic` `` -> `cnt.basic`), so a test/formal block name and a
+// user selector compare equal however each spelled its plain segments. A dot
+// inside backticks belongs to its segment; a segment that genuinely needs its
+// escape (`` `a b` ``) keeps it.
+[[nodiscard]] inline std::string canonical_escaped_path(std::string_view path) {
+  std::string out;
+  size_t      pos = 0;
+  while (pos <= path.size()) {
+    size_t end    = pos;
+    bool   quoted = false;
+    while (end < path.size() && (quoted || path[end] != '.')) {
+      if (path[end] == '`') {
+        quoted = !quoted;
+      }
+      ++end;
+    }
+    out.append(canonical_escaped_ident(path.substr(pos, end - pos)));
+    if (end >= path.size()) {
+      break;
+    }
+    out += '.';
+    pos = end + 1;
+  }
+  return out;
 }
 
 }  // namespace str_tools

@@ -1,0 +1,19 @@
+/*
+:name: spec_types_banned_lookalike_names
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// SPEC qa.md appendix section 7: banned = "`u8`, `s20`, `i32` (any u/s/i + digits), `bool`, `boolean`,
+// `unsigned`, `signed`, `string`" (whole words). grammar test/corpus/banned_words.txt "words that only look
+// like old spellings are names". Rule: u8x, u_8, bool2, booleans, unsigned_v, strings, u, s, i are names.
+const u8x = 1
+const u_8 = 2
+const bool2 = 3
+const booleans = 4
+const unsigned_v = 5
+const strings = 6
+const u = 7
+const s = 8
+const i = 9
+cassert(u8x + u_8 + bool2 + booleans + unsigned_v + strings + u + s + i == 45)

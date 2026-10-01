@@ -10,9 +10,9 @@
 // CONDITION, so it emitted `unique if  {\n}`: no condition and no body. That
 // does not re-parse ("expected '{'"), so the v -> prp -> v round trip died at
 // re-read. The arm's statements belong at THIS level, unconditionally.
-pub mod case_default_only::[timecheck=false](clk:u1, a:u2) -> (o:u4@[]) {
+pub mod case_default_only::[timecheck=false](clk:Clock, a:U2) -> (o:U4@[]) {
   mut r = 0
-  reg o:u4
+  reg o:U4
   r = 0
   o = r
 }

@@ -4,8 +4,8 @@
 // may retime, so the AIG stays honest -- from the read-back swapping the mapped
 // NAND2 root for its inverting twin (test_qn.lib's AND2x1). Either way the
 // netlist holds one AND2x1 feeding the DFFNx1 and no inverter.
-pub mod abc_qn_twin(clk:u1, a:u1, b:u1) -> (q:u1@[1]) {
-  reg state:u1:[clock_pin=ref clk] = nil
+pub mod abc_qn_twin(clk:Clock, a:U1, b:U1) -> (q:U1@[1]) {
+  reg state:U1:[clock_pin=clk] = nil
   q = state
   state = if (a & b) != 0 { 0 } else { 1 }
 }

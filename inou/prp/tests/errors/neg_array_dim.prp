@@ -1,11 +1,12 @@
 /*
 :name: neg_array_dim
 :type: error
-:error: array index is negative
-:help: must be >= 0
+:error: outside the index range
+:help: declared index range
 */
-// A negative array dimension is not allowed: `[-4..<4]` would make the low slots
-// have negative indices, and any `bw_min < 0` in an index is a compile error.
-// The bitwidth pass rejects the negative index when the array is written.
-mut a:[-4..<4]s5 = nil
+// An array declared over a negative index range takes signed indices
+// (08-memories.md "Array index": `mut x3:[-8..<7]U3 = nil`), so `a[-4]` is
+// its first entry -- but an index below the range is still out of bounds.
+mut a:[-4..<4]S5 = nil
 a[-4] = 3
+a[-5] = 3   // locate_error_here

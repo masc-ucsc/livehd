@@ -1,0 +1,42 @@
+/*
+:name: loop_ring_own_carry
+:type: equiv
+:verilog_top: loop_ring_own_carry
+:pyrope_top: loop_ring_own_carry
+*/
+
+// Compile/LEC twin of sim/loop_ring_through_own_carry.prp (lhdtrack
+// suggestions 1.3): a `wire` ring that closes through the SAME rolled loop's
+// own carry (`pv` carry-out -> `w` -> `wc` -> an invariant input of the same
+// loop). Bit-level it is acyclic: lane i reads `wc`, and `pv` never does.
+// The sim fixture only runs `lhd sim`; this one pins the `lhd compile` path,
+// which died at a DIFFERENT call site (pass.formal) with
+//   error[internal]: Subnode_group::validate: carry input needs one self-edge
+//   and one external initial driver
+// A fix limited to inou.cgen.sim occurrence materialization leaves this red.
+// Either fix is acceptable (materialize the ring, or refuse to roll the loop),
+// so there is no `:expect_instances:` pin.
+//
+// `const wc = w` keeps the loop rolled: under user ruling 2026-09-27 a loop
+// body that reads a `wire` NAME directly is unrolled (docs 05b-statements.md
+// "Loops and `wire`"), and the unroll decision must key on that direct read,
+// not on dataflow through `wc`. `::[timecheck=false]` is the documented escape
+// hatch while upass.tolg still treats a rolled-loop Sub as atomic (the 2.1
+// false-loop lane); it must keep compiling once that lands.
+// With `--set compile.unroll=true` it is PROVEN today (native lec and lgyosys).
+pub mod loop_ring_own_carry::[timecheck=false](b:U16, sel:U8) -> (o:U4@[0]) {
+  wire w:U16 = nil
+  const wc = w
+  mut r:U4 = 0
+  mut pv:U16 = 0
+  for i in 0..<4 {
+    mut lr:U4 = 0
+    for j in 0..<4 {
+      lr#[j] = wc#[j * 4 + i]
+    }
+    r#[i] = lr#[sel#[(i * 2)..+2]]
+    pv#[(i * 4)..+4] = b#[(i * 4)..+4] ^ 0x5
+  }
+  w = pv
+  o = r
+}

@@ -25,16 +25,16 @@
 // Values verified against Icarus (see the header of the equivalent .v used
 // offline): the latch and the flop each gate one cycle, so q holds at BOTH
 // c=2 (enable drops via the LATCH) and c=3 (via the FLOP).
-pub mod negen8(clk:bool, g:bool, wen:bool, arm:bool, d:u8) -> (q:u8@[0]) {
-  reg lat:bool:[latch=true]                        // transparent: open while g is 0
+pub mod negen8(clk:Clock, g:Bool, wen:Bool, arm:Bool, d:U8) -> (q:U8@[0]) {
+  reg lat:Bool:[latch=true]                        // transparent: open while g is 0
   if !g {
     lat = wen
   }
-  reg armed:bool = false                           // POSEDGE flop: puts the AND in `stale`
+  reg armed:Bool = false                           // POSEDGE flop: puts the AND in `stale`
   armed = arm
-  wire en:bool = nil
+  wire en:Bool = nil
   en = lat and armed                               // the cone phase 2 used to drop
-  reg nf:u8:[clock_pin=ref clk, posclk=false] = 0  // NEGEDGE flop, latch-qualified
+  reg nf:U8:[clock_pin=clk, posclk=false] = 0  // NEGEDGE flop, latch-qualified
   if en {
     nf = d
   }
@@ -49,10 +49,10 @@ test negen8.latch_qualified_negedge_enable {
     // c2: latch reopens on wen=0                 -> enable drops via the LATCH
     // c3: latch open on wen=1 but disarmed       -> enable drops via the FLOP
     // c4: both high again                        -> load 13
-    mut gv:bool = false
-    mut wv:bool = true
-    mut av:bool = true
-    mut dv:u8   = 42
+    mut gv:Bool = false
+    mut wv:Bool = true
+    mut av:Bool = true
+    mut dv:U8   = 42
     if clock == 1 {
       gv = true
       wv = false

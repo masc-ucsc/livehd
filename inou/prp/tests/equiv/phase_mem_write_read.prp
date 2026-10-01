@@ -9,9 +9,9 @@
 // registered read samples on fall. The falling read must see a write committed
 // earlier in the same source period. Keeping the array tiny makes BMC and
 // memory-correspondence retries cheap.
-pub mod phase_mem_write_read::[timecheck=false](clk:u1, we:u1, wa:u1, wd:u2, ra:u1) -> (q:u2@[]) {
-  reg mem:[2]u2:[ordering="old", clock_pin=ref clk]
-  reg q:u2:[clock_pin=ref clk, posclk=false]
+pub mod phase_mem_write_read::[timecheck=false](clk:Clock, we:U1, wa:U1, wd:U2, ra:U1) -> (q:U2@[]) {
+  reg mem:[2]U2:[ordering="old", clock_pin=clk]
+  reg q:U2:[clock_pin=clk, posclk=false]
   if we != 0 {
     mem[wa] = wd
   }

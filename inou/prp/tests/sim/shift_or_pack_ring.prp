@@ -54,33 +54,33 @@
 // (o[15:0] = 3x, o[31:16] = ((3x & 0xFF) + 5 + 7).)
 
 // ONE input, ONE output. Two independent cones inside.
-mod packer::[timecheck=false](i:u16) -> (o:u32@[]) {
-  wire lo_in:u8 = nil
-  wire hi_in:u8 = nil
+mod packer::[timecheck=false](i:U16) -> (o:U32@[]) {
+  wire lo_in:U8 = nil
+  wire hi_in:U8 = nil
   lo_in = i#[0..=7]
   hi_in = i#[8..=15]
-  wire p_lo:u16 = nil
-  wire p_hi:u16 = nil
+  wire p_lo:U16 = nil
+  wire p_hi:U16 = nil
   p_lo = (lo_in * 3) & 0xFFFF     // cone {i[7:0]}  -> lands in o[15:0]
   p_hi = (hi_in + 7) & 0xFFFF     // cone {i[15:8]} -> lands in o[31:16]
   o = (p_hi << 16) | p_lo         // SHIFT+OR assembly, not a bit-range write
 }
 
-pub mod packtop::[timecheck=false](x:u8, d:u8) -> (out:u32@[], loc:u32@[],
-                                                   ctl:u16@[]) {
+pub mod packtop::[timecheck=false](x:U8, d:U8) -> (out:U32@[], loc:U32@[],
+                                                   ctl:U16@[]) {
   // THE RING: the caller feeds the callee's LOW output slice back into the
   // input its HIGH output slice reads. Neither slice depends on itself.
-  wire iw:u16 = nil
+  wire iw:U16 = nil
   mut o = packer(i=iw)
   iw#[0..=7]  = x
   iw#[8..=15] = (o#[0..=7] + 5) & 0xFF
   out = o
 
   // CONTROL: the identical ring with NO instance in it. Correct today.
-  wire liw:u16 = nil
-  wire lo:u32  = nil
-  wire l_lo:u16 = nil
-  wire l_hi:u16 = nil
+  wire liw:U16 = nil
+  wire lo:U32  = nil
+  wire l_lo:U16 = nil
+  wire l_hi:U16 = nil
   l_lo = ((liw#[0..=7]) * 3) & 0xFFFF
   l_hi = ((liw#[8..=15]) + 7) & 0xFFFF
   lo   = (l_hi << 16) | l_lo
@@ -89,7 +89,7 @@ pub mod packtop::[timecheck=false](x:u8, d:u8) -> (out:u32@[], loc:u32@[],
   loc = lo
 
   // CONTROL: an ordinary flop, so a failure is never a dead testbench.
-  reg cr:u8 = 0
+  reg cr:U8 = 0
   cr  = d
   ctl = cr
 }
@@ -102,17 +102,17 @@ test packtop.one_port_in_one_port_out_slice_cones {
   mut bad_out   = 0
   mut bad_agree = 0
   tick 6 {
-    mut xv:u8 = 10 + clock
-    mut dv:u8 = 40 + clock
+    mut xv:U8 = 10 + clock
+    mut dv:U8 = 40 + clock
     acc.x = xv
     acc.d = dv
     step
     // Golden, in the only order that exists: the low cone, then the caller's
     // back edge, then the high cone.
-    mut g_lo:u32  = (xv * 3) & 0xFFFF
-    mut g_ihi:u32 = ((g_lo & 0xFF) + 5) & 0xFF
-    mut g_hi:u32  = (g_ihi + 7) & 0xFFFF
-    mut g_out:u32 = (g_hi * 65536) + g_lo
+    mut g_lo:U32  = (xv * 3) & 0xFFFF
+    mut g_ihi:U32 = ((g_lo & 0xFF) + 5) & 0xFF
+    mut g_hi:U32  = (g_ihi + 7) & 0xFFFF
+    mut g_out:U32 = (g_hi * 65536) + g_lo
 
     seen = seen + 1
     if acc.ctl != dv {

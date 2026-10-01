@@ -12,16 +12,16 @@
 // each ordinal.  The comptime break is before the calls and makes the final two
 // source iterations unreachable.
 
-mod add_term(x:u8, ordinal:u4) -> (term:u9@[0]) {
+mod add_term(x:U8, ordinal:U4) -> (term:U9@[0]) {
   term = x + ordinal
 }
 
-mod xor_term(x:u8, ordinal:u4) -> (term:u9@[0]) {
+mod xor_term(x:U8, ordinal:U4) -> (term:U9@[0]) {
   term = x ^ ordinal
 }
 
-mod loop_cond_sub_break(x:u8, choose_add:u8) -> (total:u12@[0]) {
-  mut acc:u12 = 0
+mod loop_cond_sub_break(x:U8, choose_add:U8) -> (total:U12@[0]) {
+  mut acc:U12 = 0
   for ordinal in 0..<8 {
     if ordinal == 6 { break }
 

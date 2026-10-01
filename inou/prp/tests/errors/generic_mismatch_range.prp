@@ -8,4 +8,4 @@
 // agree: u8 and u16 are different bindings for one `X`.
 
 comb f<X>(a:X, b:X) -> (r) { r = a + b }
-cassert(f(a=u8(1), b=u16(2)) == 3)
+cassert(f(a=U8(1), b=U16(2)) == 3)

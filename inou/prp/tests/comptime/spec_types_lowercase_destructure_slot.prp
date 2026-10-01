@@ -1,0 +1,11 @@
+/*
+:name: spec_types_lowercase_destructure_slot
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+// Former lowercase type spellings are ordinary identifiers (07-typesystem.md).
+const (s1, b) = (1, 2)
+
+cassert(s1 == 1 and b == 2)

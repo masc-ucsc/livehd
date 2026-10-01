@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
 #include "memory_module.hpp"   // livehd::synth::Memory_fold
 #include "pass_partition.hpp"  // livehd::partition::Region_body
@@ -66,6 +67,11 @@ public:
     // library, because the copy into the cache library is deferred to save()
     // (see store()). Never persisted -- a loaded row's body is in lib().
     bool                               in_outlib    = false;
+    // Stored by THIS run (store/store_pre): its cached pre-body's Sub child
+    // decls are the ones this run declared. A row loaded from disk is only
+    // trusted while none of the child decls its pre-body instantiates has been
+    // refreshed (see copy_pre_children). Never persisted.
+    bool                               stored_this_run = false;
     std::shared_ptr<const std::string> evidence;
     std::string                        evidence_file;
     uint64_t                           evidence_bytes = 0, evidence_hash = 0;
@@ -195,7 +201,19 @@ private:
   // get_subnode_io()). Without it the structural compare's IO signature is
   // asymmetric cached-vs-fresh -> spurious cut_violated. `src_pre_lib` is the
   // partitioner's throwaway lib holding the fresh pre-body. No-op if rb.pre_body null.
+  // A same-named child whose interface changed REPLACES its stale decl (same
+  // gid) and is recorded in refreshed_children_.
   void copy_pre_children(const livehd::partition::Region_body& rb, hhds::GraphLibrary& src_pre_lib);
+
+  // Child decl names whose cached_pre_lib() decl this run replaced. The library
+  // holds one decl per name, so a row loaded from disk whose pre-body
+  // instantiates one of them was built against an interface the library no
+  // longer holds: reading it through the new decl would compare a body under a
+  // boundary it was never mapped for. Such a row never hits (lookup_compare)
+  // and is not persisted (drop_rows_on_refreshed_children).
+  absl::flat_hash_set<std::string> refreshed_children_;
+  [[nodiscard]] bool               instantiates_refreshed_child(hhds::Graph* pre) const;
+  void                             drop_rows_on_refreshed_children();
 
   // Copy the MAPPED body's leaf-cell Sub child decls (liberty/DFF cells, declared
   // into `outlib` only lazily on a MISS by abc_map's blackbox_io) into lib() next

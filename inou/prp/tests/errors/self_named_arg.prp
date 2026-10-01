@@ -8,7 +8,7 @@
 // Task 1k — `self` binds only as the first positional actual (the UFCS
 // receiver or the direct form's first argument); `self=` is rejected.
 
-type t1 = (a:u32=nil, b:string="")
+type t1 = (a:U32=nil, b:String="")
 
 comb set_b(ref self:t1) {
   self.b = "foo"

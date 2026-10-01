@@ -1,0 +1,14 @@
+/*
+:name: array_dim_not_comptime
+:type: error
+:error: the dimension of array .m. is not a compile-time value
+:help: size an array with a literal
+*/
+
+// An array extent written as an expression over a RUNTIME value has no
+// compile-time size. The diagnostic names the array; it used to name the
+// compiler temp the expression was lowered to (`size '%m_0'`).
+pub mod array_dim_not_comptime(a:U4) -> (r:U4@[0]) {
+  mut m:[a + 1]U4 = 0   // locate_error_here
+  r = m[0]
+}

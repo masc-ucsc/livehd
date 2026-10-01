@@ -1,0 +1,14 @@
+/*
+:name: bitnot_dyn_slice
+:type: equiv
+*/
+// User ruling 2026-09-29 (44): a bit slice is unsigned-typed at its width, so
+// `~` flips its bits. A slice at a RUNTIME position has a constant width when
+// its bounds differ by a constant, however the bound is spelled:
+// `(b*4)..=((b*4)+3)` is 4 bits like `(b*4)..+4`. Before, the `..=` spelling
+// lowered each `b*4` separately, the width was not recognized, and `~` of the
+// slice was the "untyped runtime value" error.
+pub comb bitnot_dyn_slice(a:U16, b:U2) -> (r:U4, q:U4) {
+  r = ~a#[(b*4)..=((b*4)+3)]
+  q = ~a#[(b*4)..+4]
+}

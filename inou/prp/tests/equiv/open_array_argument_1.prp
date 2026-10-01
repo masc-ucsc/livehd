@@ -1,0 +1,13 @@
+/*
+:name: open_array_argument
+:type: lec
+:lec_top: top
+*/
+comb sum(x:[]U8) -> (total) { total = 0; for a in x { total += a } }
+mod module_sum(x:[]U8) -> (total:U10@[]) { total = 0; for a in x { total += a } }
+pub mod top(a:U8,b:U8,c:U8) -> (x:U10@[],y:U10@[],z:U10@[],w:U10@[]) {
+  x = sum(a,b)
+  y = sum(x=(a,b,c))
+  z = module_sum(a,b)
+  w = module_sum((a,b,c))
+}

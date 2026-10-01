@@ -23,37 +23,32 @@
 
 // The gate CELL: transparent-low enable latch feeding the AND — prim_clk_gate's
 // shape, one definition away from the state it gates.
-mod gcell(clk:bool, en:bool) -> (g:bool@[]) {
-  reg enl:bool:[latch=true]
-  if !clk {
-    enl = en
-  }
-  g = clk and enl
+mod gcell(clk:Clock, en:Bool) -> (g:Clock@[]) {
+  g = Clock(clock_pin=clk, enable=en)   // the ICG (ruling 56)
 }
 
 // The stateful callee. `echo` is a pure comb passthrough of `x` (the fed-back
 // output, NOT a state read); `y` only feeds the gated register.
-mod gated_echo::[timecheck=false](clk:bool, en:bool, x:u8, y:u8) -> (echo:u8@[], cnt:u8@[]) {
-  echo = x + 1
-  wire g:bool = nil
-  g = gcell(clk=clk, en=en)
-  reg f:u8:[clock_pin=ref g] = 0
+mod gated_echo::[timecheck=false](clk:Clock, en:Bool, x:U8, y:U8) -> (echo:U8@[], cnt:U8@[]) {
+  wrap echo = x + 1
+  const gc = gcell(clk=clk, en=en)
+  reg f:U8:[clock_pin=gc.g] = 0
   f   = y
   cnt = f
 }
 
-pub mod gexp::[timecheck=false](clk:bool, en:bool, a:u8) -> (q_echo:u8@[], q_cnt:u8@[], ctl:u8@[]) {
+pub mod gexp::[timecheck=false](clk:Clock, en:Bool, a:U8) -> (q_echo:U8@[], q_cnt:U8@[], ctl:U8@[]) {
   // The ring: echo -> back -> y. FALSE, because echo's cone inside the callee
   // is {x} and y only feeds state — but `echo` is not a state read, so the
   // ONLY repair on offer is inlining the callee, gate cell and all.
-  wire back:u8 = nil
+  wire back:U8 = nil
   mut (echo, cnt) = gated_echo(clk=clk, en=en, x=a, y=back)
   back   = (echo + 3) & 0xFF
   q_echo = echo
   q_cnt  = cnt
 
   // CONTROL: a flop on the UNGATED reference clock.
-  reg c:u8:[clock_pin=ref clk] = 0
+  reg c:U8:[clock_pin=clk] = 0
   c   = a
   ctl = c
 }
@@ -64,11 +59,11 @@ test gexp.inlined_callee_gate_still_folds {
   mut bad_echo = 0
   mut bad_cnt  = 0
   mut bad_ctl  = 0
-  mut golden:u8 = 0
+  mut golden:U8 = 0
   tick 6 {
     // c0,c1 open -> load; c2,c3 closed -> HOLD; c4 reopens -> load; c5 holds.
     acc.en = (clock <= 1) or (clock == 4)
-    mut av:u8 = 10 + clock
+    mut av:U8 = 10 + clock
     acc.a = av
     step
     if (clock <= 1) or (clock == 4) {

@@ -25,7 +25,7 @@ cat > "$W/bug.prp" <<'EOF'
 :name: bug
 :type: simulation
 */
-mod cnt(enable:bool) -> (value:u8@[0]) { reg count:u8 = 0; value = count; if enable { wrap count += 1 } }
+mod cnt(enable:Bool) -> (value:U8@[0]) { reg count:U8 = 0; value = count; if enable { wrap count += 1 } }
 test cnt.bug {
   mut acc = cnt
   mut v = 0

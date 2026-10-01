@@ -1,0 +1,10 @@
+/*
+:name: spec_types_does_envelope
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+// SPEC docs 04-variables "Integer or Signed": "So `U32 does U16` is true (U32s range covers U16s) but
+// `U16 does U32` is false."
+cassert(U32 does U16)
+cassert(!(U16 does U32))

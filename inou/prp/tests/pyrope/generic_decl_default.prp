@@ -14,6 +14,6 @@
 comb addn<T, N=1>(a:T) -> (r:T) {
   r = a
 }
-pub comb generic_decl_default(x:u8) -> (r:u8) {
-  r = addn<u8>(a=x)
+pub comb generic_decl_default(x:U8) -> (r:U8) {
+  r = addn<U8>(a=x)
 }

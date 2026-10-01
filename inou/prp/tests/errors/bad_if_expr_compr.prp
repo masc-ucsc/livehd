@@ -7,6 +7,6 @@
 // en!=0 or en==0 is valid
 // if en!=0 { d } else {0}
 
-mod bad_if_expr_compr(en:u1, d:u64) -> (y:u64@[0]) {
+mod bad_if_expr_compr(en:U1, d:U64) -> (y:U64@[0]) {
   y = if en { d } else { 0 } // locate_error_here
 }

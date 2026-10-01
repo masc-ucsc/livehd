@@ -6,7 +6,7 @@
 */
 // A bare arithmetic expression at statement position computes a value that is
 // never used. The program still compiles (the warning does not abort it).
-comb foo(a:u8, b:u8) -> (z:u8) {
+comb foo(a:U8, b:U8) -> (z:U8) {
   a + 1    // locate_warning_here  (result discarded — useless)
-  z = a + b
+  wrap z = a + b
 }

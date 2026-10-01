@@ -4,6 +4,6 @@
 :verilog_top: in_named_values.p
 :pyrope_top: p
 */
-pub comb p(x:u4, y:u4) -> (hit:bool) {
+pub comb p(x:U4, y:U4) -> (hit:Bool) {
   hit = x in (const a=1, y, const c=3)
 }

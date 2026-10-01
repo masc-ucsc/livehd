@@ -1,0 +1,9 @@
+/*
+:name: spec_calls_vararg_named_leftover
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+
+comb vsum(a, ...rest) -> (r) { r = a + rest.extra + rest.other }
+cassert(vsum(a=1, extra=2, other=5) == 8)

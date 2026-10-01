@@ -56,6 +56,18 @@ const Symbol_table::Scope* Symbol_table::find_decl_scope(std::string_view var) c
   return nullptr;
 }
 
+bool Symbol_table::crosses_uncertain_scope(const Scope* decl) const {
+  if (stack.empty()) {
+    return false;
+  }
+  for (const auto* s = stack.back(); s != nullptr && s != decl; s = s->parent) {
+    if (s->uncertain_cond) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const Symbol_table::Scope* Symbol_table::find_decl_scope_read(std::string_view var) const {
   if (stack.empty()) {
     return nullptr;
@@ -199,8 +211,18 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
         // s6-typed param bound to an s4 actual keeps its declared s6 — the
         // actual's envelope rode the value copy). Fill-if-unset only applies
         // when the NAME never declared the fact.
-        const bool  need_decl
-            = scalar_ok
+        // The temp of an `if`/`match` expression (bound outside the uncertain
+        // arm) is written once per arm, so its envelope rode in on the first
+        // arm's value and is not a declaration: it survives only while every
+        // arm's value carries the same one (`if c { a } else { a + 1 }` has no
+        // type).
+        const auto  same_bound
+            = [](const Dlop& a, const Dlop& b) { return a.is_invalid() ? b.is_invalid() : !b.is_invalid() && a.is_known_eq(b); };
+        const bool arms_disagree = scalar_ok && Lnast::is_tmp(var) && crosses_uncertain_scope(target)
+                                   && (!oe.decl_max.is_invalid() || !oe.decl_min.is_invalid())
+                                   && !(same_bound(oe.decl_max, ne.decl_max) && same_bound(oe.decl_min, ne.decl_min));
+        const bool need_decl
+            = scalar_ok && !arms_disagree
               && ((!oe.decl_max.is_invalid() && (ne.decl_max.is_invalid() || !oe.decl_max.is_known_eq(ne.decl_max)))
                   || (!oe.decl_min.is_invalid() && (ne.decl_min.is_invalid() || !oe.decl_min.is_known_eq(ne.decl_min))));
         // A CONDITIONAL (if-arm) write must not have its value's ridden decl
@@ -208,8 +230,12 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
         // force (`x = v#[0..=2]`) would type an undeclared `mut x` as u3 and a
         // sibling arm's wider legal write then fails the declared-fit check.
         // Under uncertainty, strip a ridden envelope the name never declared.
-        const bool drop_ridden_decl = scalar_ok && in_uncertain_scope() && oe.decl_max.is_invalid() && oe.decl_min.is_invalid()
-                                      && (!ne.decl_max.is_invalid() || !ne.decl_min.is_invalid());
+        // A `const` declared inside the arm has its single write here, so no
+        // sibling arm can widen it; one declared outside (the temp of an
+        // `if`/`match` expression) is written once per arm.
+        const bool drop_ridden_decl
+            = scalar_ok && in_uncertain_scope() && (old->get_mode() != upass::Mode::const_kind || crosses_uncertain_scope(target))
+              && oe.decl_max.is_invalid() && oe.decl_min.is_invalid() && (!ne.decl_max.is_invalid() || !ne.decl_min.is_invalid());
         // CONST-ness is likewise a NAME fact: `o = <const temp>` must not make
         // the (never-const-declared) target single-bind — a later legal write
         // (e.g. a partial `o#[lo..=hi] = v` on an output port) would trip the
@@ -229,7 +255,8 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
             need_attrs.emplace_back(k, fe.trivial);
           }
         }
-        if (need_mode || need_tn || need_decl || need_kind || drop_ridden_decl || drop_ridden_mode || !need_attrs.empty()) {
+        if (need_mode || need_tn || need_decl || need_kind || drop_ridden_decl || arms_disagree || drop_ridden_mode
+            || !need_attrs.empty()) {
           if (bundle.use_count() > 1) {
             bundle = std::make_shared<Bundle>(*bundle);
           }
@@ -244,18 +271,23 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
           if (need_tn) {
             bundle->set_type_name(old->get_type_name());
           }
-          if (need_decl || need_kind || drop_ridden_decl) {
+          if (need_decl || need_kind || drop_ridden_decl || arms_disagree) {
             Bundle::Entry e = bundle->get_entry(bundle_path::of_string("0"));
             e.immutable     = false;
-            if (!oe.decl_max.is_invalid()) {
-              e.decl_max = oe.decl_max;  // declared envelope: old wins
-            } else if (drop_ridden_decl) {
-              e.decl_max = Bundle::invalid_lconst;  // conditional write: the value's envelope is not a declaration
-            }
-            if (!oe.decl_min.is_invalid()) {
-              e.decl_min = oe.decl_min;
-            } else if (drop_ridden_decl) {
+            if (arms_disagree) {
+              e.decl_max = Bundle::invalid_lconst;
               e.decl_min = Bundle::invalid_lconst;
+            } else {
+              if (!oe.decl_max.is_invalid()) {
+                e.decl_max = oe.decl_max;  // declared envelope: old wins
+              } else if (drop_ridden_decl) {
+                e.decl_max = Bundle::invalid_lconst;  // conditional write: the value's envelope is not a declaration
+              }
+              if (!oe.decl_min.is_invalid()) {
+                e.decl_min = oe.decl_min;
+              } else if (drop_ridden_decl) {
+                e.decl_min = Bundle::invalid_lconst;
+              }
             }
             if (oe.kind != upass::Kind::unknown) {
               e.kind = oe.kind;
@@ -270,7 +302,24 @@ bool Symbol_table::set(std::string_view key, std::shared_ptr<Bundle> bundle) {
     var_bundle = unshare_for_write(it->second);
   }
 
-  var_bundle->set(bundle_path::of_string(field), bundle);
+  // A value written into a field DECLARED with a type keeps the declared
+  // envelope, like a whole-bundle write keeps the name's (above): an enum
+  // entry (`p.c = Color.Red`) is a scalar bundle with no envelope of its own,
+  // and grafting it dropped `c:Color`'s type, so `p.c.[bits]` read the VALUE's
+  // width (1). Only a declaration counts (typed_fields): an envelope that rode
+  // in on an earlier value (`t.a = x#[0..<3]`) is the value's, never the
+  // field's.
+  const auto          fpath = bundle_path::of_string(field);
+  const Bundle::Entry old_e = var_bundle->get_entry(fpath);
+  var_bundle->set(fpath, bundle);
+  if ((!old_e.decl_max.is_invalid() || !old_e.decl_min.is_invalid()) && var_bundle->has_trivial(fpath)) {
+    if (const auto tf = typed_fields.find(var); tf != typed_fields.end() && tf->second.contains(field)) {
+      Bundle::Entry e = var_bundle->get_entry(fpath);
+      e.decl_max      = old_e.decl_max;
+      e.decl_min      = old_e.decl_min;
+      var_bundle->set(fpath, std::move(e));
+    }
+  }
 
   return true;
 }

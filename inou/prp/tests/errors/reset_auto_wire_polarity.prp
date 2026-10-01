@@ -1,0 +1,33 @@
+/*
+:name: reset_auto_wire_polarity
+:type: error
+:tolg: 1
+:error: cannot gate the conditional call to .rap_mix.: the regs on its reset input .rst_n. read it with both polarities
+:help: give the regs on .rst_n. one polarity
+*/
+
+// docs 04b: an omitted child reset is auto-wired as the RAW wire -- its
+// polarity is each register's (`negreset=`), so regs that disagree are legal
+// on an unconditional call. A CONDITIONAL call gates the child's clock and
+// keeps it open while the child's reset is asserted, which needs one assertion
+// level: here one reg reads `rst_n` active-low (`negreset=true`) and the other
+// active-high (`negreset=false`).
+
+mod rap_mix(clk:Clock, rst_n:Reset, en:Bool) -> (q:U8@[0]) {
+  reg a:U8:[negreset=true] = 1
+  reg b:U8:[negreset=false] = 2
+  if en {
+    wrap a = a + 1
+    wrap b = b + 1
+  }
+  wrap q = a + b
+}
+
+pub mod reset_auto_wire_polarity(clk:Clock, rst:Reset, en:Bool, go:Bool) -> (q:U8@[0]) {
+  mut v:U8 = 0
+  if go {
+    const c = rap_mix(en=en)   // locate_error_here
+    v = c.q
+  }
+  q = v
+}

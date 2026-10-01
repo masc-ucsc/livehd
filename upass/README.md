@@ -193,9 +193,34 @@ never rewrites a node. Running inside the walk lets it observe every store
 **before DCE** — the init value of a typed declaration lives in a separate
 `store` node that DCE removes when the var is unused, so a post-DCE pass
 would miss overflow on a dead comptime const. The `bitwidth-overflow`
-compile error ("does not fit"; signedness-aware, wrap/sat-exempt,
-scalars-only today) is emitted **at the offending node**. Ranges live on the
-binding's Entry (`bw_max`/`bw_min`) with a write-through to
+compile error is emitted **at the offending node** whenever a TYPED
+destination (a declared local/`reg`, an inlined param/output typespec, or the
+unit's own port) does not CONTAIN the right-hand side's range: "does not fit"
+when every value overflows, "may not fit" when only some may, and "may not
+fit" for a value too WIDE for an i64 range (`x << n`, a U40 product, a U64:
+`Symbol_table::wide_values`; wrap/sat-exempt, scalars-only today). A read with
+no derived range takes its declared type as its range (an input port, a
+register read). That is sound because every write into a typed name is
+judged, except one whose range nothing derived (a generic's comptime bind, an
+opaque call result): such a name joins `Symbol_table::unchecked_typed`, and
+its type is no longer used as its read range (here, nor by the runner's
+wrap/sat, cast and argument checks). An untyped name takes the range of its
+value and is never checked; a compiler temp falls back to the structural
+envelope its producer stamped (a bit-select's width, a cast's type), a Sub
+instance output to its port type, an array element to its element type. A
+write that does not fit leaves its destination holding the declared range, so
+one overflow is reported once. An uncertain `if` merges each written var's
+arms with its pre-`if` range, and every arm after the first starts from the
+pre-`if` range (inside a loop body a name is not SSA-renamed per arm). A
+rolled loop's lifted body is checked like any body, carries included, and
+legality must not depend on `compile.unroll`: the roller evaluates the body's
+ranges per iteration at plan time (`eval_carry_ranges`, the same lattice) and
+seeds each carry-in port with the union of the values that enter an
+iteration, as it does for the index. It keeps the loop unrolled when that one
+walk would still judge a typed write stricter than every iteration does, or
+when the ranges cannot be derived and a carry reaches a typed write without
+wrap/sat; a loop with break/continue cannot unroll and always rolls. Ranges
+live on the binding's Entry (`bw_max`/`bw_min`) with a write-through to
 `lnast->bw_meta()` for `lnast_to_lgraph`; `bits`/`sign` derive on demand,
 never stored. Wrap/sat narrowing math lives here (attributes keeps only the
 policy bit).
@@ -255,15 +280,56 @@ designs are checked with LGraph LEC when this boundary changes.
 
 upass owns Pyrope's basic typesystem. The rules are **declaration-driven**: a
 value's size envelope and nominal identity come from the declared type (or a
-literal's implied type), never from the value itself.
+literal's implied type). The one exception is `.[bits]` of an untyped
+comptime integer, which is derived from its value (below).
 
 - **Size envelope (`bits`/`max`/`min`)** comes from the declared type:
-  `:uN`/`:sN` set width and range; `:bool` is the hardware u1 envelope
-  (`min=0, max=1, bits=1`, never signed); `:string` has no numeric envelope
+  `:U<N>`/`:S<N>` set width and range; `:Bool` is the hardware U1 envelope
+  (`min=0, max=1, bits=1`, never signed); `:String` has no numeric envelope
   (reads `nil`).
   When only `max`/`min` (or `range=lo..=hi`) is pinned, `bits` derives on
   demand. Unannotated → all three read `nil`; a bare `true`/`false` literal
-  is auto-typed `:bool`.
+  is auto-typed `:Bool`.
+- **Untyped comptime integers** (user ruling 2026-09-27 (6)): `.[bits]` of an
+  untyped comptime integer (a `comptime const`, a const whose value is known,
+  a generic bound to a literal) is the minimal width holding its value
+  (`13 -> 4`, `0 -> 1`, a negative value -> its signed width, `-4 -> 3`);
+  `.[max]`/`.[min]` stay `nil`. A typed value keeps its declared width, even
+  unbounded (`Z:Unsigned` reads `nil`), and so does a generic bound to a typed
+  constant (`f<N=W>` with `W:U8` reads 8). An untyped runtime value reads
+  `nil`. `upass::value_bits` / `upass::range_bits` (`core/range_bits.hpp`) are
+  the two formulas; the attributes pass, the runner's template-bound fold and
+  prp2lnast's generic-default fold all call them.
+- **`std.clog2(x)`**: the built-in `std` namespace needs no import. prp2lnast
+  lowers `std.<member>(args)` to a call of `std.clog2`. An unknown member, a
+  bare `std` read, a lambda/type/enum/import alias named `std`, and a
+  `std.<member>` call where a local `std` hides the namespace are errors.
+  `upass::std_clog2` (`core/range_bits.hpp`) is Verilog `$clog2` for `x >= 1`
+  and has three consumers: constprop's fold (an error for `x <= 0`, a
+  non-integer, or a runtime `x`), the runner's template port-bound fold
+  (`Unsigned(bits=std.clog2(N))` on a generic port), and prp2lnast's
+  type-bound fold (type bounds and generic defaults).
+- **Typed `~`** (user ruling 2026-09-28 (26)): `~x` on an UNSIGNED-typed
+  operand of width N flips those N bits (`(2^N - 1) - x`, a U<N>); on a signed
+  or untyped one it is `-x - 1`. Unsigned-typed means typed by a declaration
+  or type_spec of its own (a variable/port/reg declared with an unsigned type
+  -- N is its `.[bits]`, so `Unsigned(max=5)` flips 3 bits -- a slice
+  `x#[..]` at any position, a `U<N>(...)` cast temp, an element read `arr[i]` of
+  a one-dimensional `[N]U<W>` array, a tuple field or instance output whose
+  entry carries a U<N>), or a `~`/`&`/`|`/`^` over such values. A NAME bound
+  without a type (`const t = x#[..]`, `mut m = w`) is untyped even when its
+  value is typed (`declared_typed_`, dropped again by an untyped declaration
+  in a sibling scope); an untyped template-comb input takes its argument's
+  type in each specialization, as its `.[bits]` does. The runner makes the
+  choice once (`dispatch_bit_not`) and re-issues the node in the TYPED LNAST
+  form `bit_not(dst, x, N)`; constprop, bitwidth and the loop planner read N
+  off the node, tolg lowers it to the existing `Not` plus a `Get_mask` of N
+  bits (no new cell), and prp_writer spells it back (`~x` only when x's
+  emitted declaration prints `:U<N>`, else `~x#[0..=N-1]`). A Verilog-read unit
+  is never retyped: inou.slang already emits the typed form at Verilog's
+  context width for an unsigned result and the plain `-x - 1` for a signed
+  one. Test blocks (inou/prp/prp_sim.cpp) apply the same rule to their own
+  locals, file consts, DUT fields, casts, slices and bitwise expressions.
 - **Aggregates have no `.[bits]`** — only scalars. Per-field `t.a.[bits]`
   resolves when the field carries a typed annotation.
 - **`size` is cardinality, not bit width** (`tup.[size]` = entry count,
@@ -346,8 +412,8 @@ uncertain-arm marking at the if dispatch.
 - **Name facts vs value facts.** Declared identity (mode, type_name, kind,
   decl envelope, residual attrs incl. bind-tracking) rides the NAME: slot
   replacement preserves it, with the declared facts WINNING over anything
-  riding in on the incoming value bundle (an s6-typed param bound to an s4
-  actual keeps its declared s6). Values and derived ranges ride the VALUE.
+  riding in on the incoming value bundle (an S6-typed param bound to an S4
+  actual keeps its declared S6). Values and derived ranges ride the VALUE.
 
 ## 4. Inline (runner virtual-splice)
 
@@ -362,6 +428,33 @@ time), and caps recursion depth per callee. `Lnast_manager` frames
 `___N` tmps collision-free. Vararg callees resolve `args[i]`/`args.NAME`
 directly; pipe/mod templates specialize per signature into a `Sub` (task
 1p). Passes are unaware they are inside an inline.
+
+Each inlined param and output is typed from its declaration: a literal type
+as written, a generic-WIDTH bound (`a:Unsigned(bits=N * 4)`) folded under
+the call's generic binds exactly like a mod specialization (never the
+actual's width), and an untyped param adopts the actual's declared type (an
+io port's exact range, also past an i64). A bound folds literals, generics,
+captured `comptime const`s and `a.[bits|max|min]` of an input's declared
+type; a generic it needs that nothing binds, defaults or infers is
+`fcall-generic-arity`. Specialized clones match each io port to its io_meta
+slot by NAME (a tuple port is flattened there into its leaves).
+
+A defaulted comb input (`b:U8=3`) does not make the comb a template: only an
+untyped input or a generic does. Its default is a body-prologue store into
+the `Lnast_io_entry::default_value_name()` local (`__default_b`), never into
+the port. The comb's own module reads port `b` (the local is dead there, but
+the standalone walk keeps its store like an output driver, so the published
+body still carries it); the inliner skips that store for a PROVIDED `b` and,
+for an omitted one, walks it and binds `b` from the local. A unit restored
+without SSA re-harvests `has_default` from the io node's `__default` slot.
+
+Every call checks its actuals against the parameters' DECLARED types once,
+before it splits into inline / Sub / specialize (`check_call_args_fit`): an
+argument never narrows implicitly (`fcall-arg-overflow`, "argument `a`
+(range [0, 65535]) in call to `low4` may not fit its declared range
+[0, 15]"), and a wider integer into a `Bool` input is the same error. The
+overload probe (`signature_matches`) applies the same containment, so a
+runtime `U16` skips `f(a:U8)` for `f(a:U16)` instead of erroring.
 
 ## 5. Bundle
 

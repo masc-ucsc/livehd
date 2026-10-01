@@ -30,10 +30,20 @@ enum class Stage : uint8_t {
   memory,      // memory-port simplification
   resub,       // bounded simulation-guided resubstitution (experimental)
   simp_ctrl,   // small-support Boolean resynthesis of one-bit controls
+  muxtree,     // private mux selects constant under bounded ancestor contexts
+  share,       // arithmetic under proven exclusive complete activations
 };
-inline constexpr size_t                         kStageCount = 8;
-inline constexpr std::array<Stage, kStageCount> kStageOrder{
-    Stage::constants, Stage::equiv, Stage::complement, Stage::odc, Stage::hotmux, Stage::memory, Stage::resub, Stage::simp_ctrl};
+inline constexpr size_t                         kStageCount = 10;
+inline constexpr std::array<Stage, kStageCount> kStageOrder{Stage::constants,
+                                                            Stage::equiv,
+                                                            Stage::complement,
+                                                            Stage::odc,
+                                                            Stage::muxtree,
+                                                            Stage::share,
+                                                            Stage::hotmux,
+                                                            Stage::memory,
+                                                            Stage::resub,
+                                                            Stage::simp_ctrl};
 [[nodiscard]] std::string_view stage_name(Stage s);
 
 class Stage_set {

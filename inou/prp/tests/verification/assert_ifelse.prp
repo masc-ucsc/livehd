@@ -3,7 +3,7 @@
 :type: parsing lnast upass
 */
 
-comb pick_max(a:u32, b:u32) -> (x:u32) {
+comb pick_max(a:U32, b:U32) -> (x:U32) {
   assert(a != b)
 
   x = match (a<b, a>b) {

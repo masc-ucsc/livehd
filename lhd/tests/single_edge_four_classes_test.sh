@@ -50,13 +50,12 @@
 #      second half, three refutations are also what a normalizer that mangles
 #      every design produces).
 #
-# The design is written in PYROPE with explicit `clock_pin=ref clk`, which is
-# the only way to get a genuinely clock-GATED latch whose gate net is the same
-# net the flops run on. Driving it through the yosys reader instead does produce
-# the four classes, but that reader names registers `$procdff$32` / `n12` with
-# numbering that shifts between two variants of the same design, so the state
-# pairing cannot match them and every LEC comes back as a per-side free-constant
-# CEX — a property of the reader, not of the slot table.
+# The design is VERILOG read by the slang reader: a latch whose gate is the
+# clock level reads the Clock as data, which Pyrope's `Clock` type forbids
+# (qa.md Appendix 6), and slang keeps the register names, so the state pairing
+# matches them across variants. (The yosys reader names registers
+# `$procdff$32` / `n12` with numbering that shifts between two variants of the
+# same design, so every LEC would come back as a per-side free-constant CEX.)
 
 set -u
 
@@ -79,42 +78,41 @@ fail() {
 }
 
 # ---- the four-class design --------------------------------------------------
-gen() { # <file> <transparent-low-gate> <negedge-flop-attrs> <transparent-high-gate>
+gen() { # <file> <transparent-low-gate> <negedge-flop-edge> <transparent-high-gate>
   cat > "$1" <<EOF
-pub mod four8(clk:bool, d:u8) -> (qp:u8@[1], qn:u8@[1], qh:u8@[0], ql:u8@[0]) {
-  reg rp:u8:[clock_pin=ref clk] = 0
-  reg rn:u8:[clock_pin=ref clk$3] = 0
-  reg lh:u8:[latch=true]
-  reg ll:u8:[latch=true]
-  qp = rp
-  qn = rn
-  qh = lh
-  ql = ll
-  rp = d
-  rn = d
-  if $4 { lh = d }
-  if $2 { ll = d }
-}
+module four8(input clk, input reset, input [7:0] d, output [7:0] qp, output [7:0] qn,
+             output [7:0] qh, output [7:0] ql);
+  reg [7:0] rp, rn, lh, ll;
+  always @(posedge clk) if (reset) rp <= 0; else rp <= d;
+  always @($3 clk) if (reset) rn <= 0; else rn <= d;
+  always_latch if ($4) lh = d;
+  always_latch if ($2) ll = d;
+  assign qp = rp;
+  assign qn = rn;
+  assign qh = lh;
+  assign ql = ll;
+endmodule
 EOF
 }
 
 #   base:    ll on !clk (transparent LOW), rn negedge, lh on clk (transparent HIGH)
-gen "$W/four.prp"   '!clk' ', posclk=false' 'clk'
+gen "$W/four.sv"    '!clk' 'negedge' 'clk'
 #   m_latch: the two LATCH classes collapsed (transparent-low written high)
-gen "$W/m_latch.prp" 'clk'  ', posclk=false' 'clk'
+gen "$W/m_latch.sv" 'clk'  'negedge' 'clk'
 #   m_flop:  the two FLOP classes collapsed (negedge written posedge)
-gen "$W/m_flop.prp"  '!clk' ''               'clk'
+gen "$W/m_flop.sv"  '!clk' 'posedge' 'clk'
 #   m_swap:  the transparent-HIGH latch moved onto the other latch's phase
-gen "$W/m_swap.prp"  '!clk' ', posclk=false' '!clk'
+gen "$W/m_swap.sv"  '!clk' 'negedge' '!clk'
 
 # An equivalent rewrite: structurally different (so the structural-identity
 # shortcut cannot answer it), semantically identical. The VACUITY GUARD.
-sed 's/^  rp = d$/  rp = (d + 7) - 7/' "$W/four.prp" > "$W/four_equiv.prp"
+sed "s/else rp <= d;/else rp <= (d + 8'd7) - 8'd7;/" "$W/four.sv" > "$W/four_equiv.sv"
+cmp -s "$W/four.sv" "$W/four_equiv.sv" && fail "the vacuity-guard rewrite did not apply"
 
 build() { # <name>
   rm -rf "$W/lg_$1"
-  "$LHD" compile "$W/$1.prp" --top four8 --emit-dir "lg:$W/lg_$1" --workdir "$W/cw_$1" \
-    >"$W/c_$1.log" 2>&1 || { tail -5 "$W/c_$1.log"; fail "compile of $1.prp failed"; }
+  "$LHD" compile "$W/$1.sv" --reader slang --top four8 --emit-dir "lg:$W/lg_$1" --workdir "$W/cw_$1" \
+    >"$W/c_$1.log" 2>&1 || { tail -5 "$W/c_$1.log"; fail "compile of $1.sv failed"; }
 }
 for m in four four_equiv m_latch m_flop m_swap; do build "$m"; done
 

@@ -1,0 +1,44 @@
+/*
+:name: mem_partial_write_update
+:type: equiv
+:verilog_top: mem_partial_write_update
+:pyrope_top: mem_partial_write_update
+*/
+// Partial writes to one memory entry in one cycle merge in every shape the
+// memory takes, next to the two neighbours of lhdtrack suggestions2.md 1.2
+// (see mem_partial_write_ordering_old):
+//
+// * `mr` has a reset value, so cgen emits it as an inline reg array with its
+//   own same-cycle forwarding chain. Four byte lanes are four partial writes.
+// * `mu` also takes a whole-array clear. A clear and a lane write in the same
+//   cycle used to write the PRE-clear entry back on the untouched lanes: the
+//   old-value read of a partial write skipped the bulk update. The lane
+//   writes come after the clear in program order, so the entry is the cleared
+//   word with the new lanes (mem_bulk_vs_entry_order has both orders).
+// * `mp` keeps the default program ordering and has a reset value: `f` reads
+//   after two whole-entry writes, so it forwards the LAST one that hits. The
+//   inline chain tested the earliest write first (the Verilog read the first
+//   write of two to one address).
+pub mod mem_partial_write_update(we:Bool, clr:Bool, a:U2, d:U32, be:U4, wf:Bool, b:U2, e:U32, ra:U2) -> (q:U32@[0], u:U32@[0], f:U32@[0]) {
+  reg mr:[4]U32:[ordering="old"] = 0
+  reg mu:[4]U32:[ordering="old"] = nil
+  reg mp:[4]U32 = 0
+  if clr {
+    mu = 0
+  }
+  if we {
+    for w in 0..<4 {
+      if be#[w] == 1 {
+        mr[a]#[(w * 8)..+8] = d#[(w * 8)..+8]
+        mu[a]#[(w * 8)..+8] = d#[(w * 8)..+8]
+      }
+    }
+    mp[a] = d
+  }
+  if wf {
+    mp[b] = e
+  }
+  q = mr[ra]
+  u = mu[ra]
+  f = mp[ra]
+}

@@ -1,0 +1,63 @@
+/*
+:name: generic_mem_lanes_two_sizes
+:type: simulation
+*/
+// lhdtrack L3: one generic module with byte-lane writes into reg memories
+// whose depth and entry width are generics (`reg m:[1 << A]Unsigned(bits=L*8)`),
+// specialized at TWO shapes in one design (see
+// equiv/generic_mem_byte_lanes*.prp for the proofs).
+//
+// The simulator failed to BUILD it: cgen_sim emits an ordering="program"
+// memory's forwarding prefix as a namespace-scope `__<member>_fwd_upto` array,
+// and the two specializations (each with a `prog` memory, 2 and 3 read ports)
+// redefined it with different types in the one driver translation unit.
+//
+// Values: lanes written in one cycle all land ("old" and "program" alike),
+// the other lanes of the entry are kept.
+mod lanes<A=1, L=2>(we:Bool, a:Unsigned(bits=A), d:Unsigned(bits=L*8), be:Unsigned(bits=L), ra:Unsigned(bits=A))
+  -> (qo:Unsigned(bits=L*8)@[0], qa:Unsigned(bits=L*8)@[0]) {
+  reg old:[1 << A]Unsigned(bits=L*8):[ordering="old"] = 0
+  reg prog:[1 << A]Unsigned(bits=L*8) = 0
+  if we {
+    for w in 0..<L {
+      if be#[w] == 1 {
+        old[a]#[(w*8)..+8]  = d#[(w*8)..+8]
+        prog[a]#[(w*8)..+8] = d#[(w*8)..+8]
+      }
+    }
+  }
+  qo = old[ra]
+  qa = prog[ra]
+}
+
+pub mod generic_mem_lanes_two_sizes(we:Bool, a:U2, d:U24, be:U3, ra:U2)
+  -> (qo2:U16@[0], qa2:U16@[0], qo3:U24@[0], qa3:U24@[0]) {
+  const x = lanes<A=1, L=2>(we=we, a=a#[0], d=d#[0..<16], be=be#[0..<2], ra=ra#[0])
+  const y = lanes<A=2, L=3>(we=we, a=a, d=d, be=be, ra=ra)
+  qo2 = x.qo
+  qa2 = x.qa
+  qo3 = y.qo
+  qa3 = y.qa
+}
+
+test generic_mem_lanes_two_sizes.merge {
+  mut dut = generic_mem_lanes_two_sizes
+  mut bad = 0
+  tick 6 {
+    dut.reset = clock == 0
+    dut.we    = clock >= 1 and clock <= 3
+    dut.a     = 3
+    dut.ra    = 3
+    dut.d     = if clock == 1 { 0x112233 } elif clock == 2 { 0xaabbcc } else { 0x445566 }
+    dut.be    = if clock == 1 { 0ub111 } elif clock == 2 { 0ub101 } else { 0ub010 }
+    step
+    // entry 3 (entry 1 of the 2-deep memory) after this cycle's writes
+    const e3 = if clock == 0 { 0 } elif clock == 1 { 0x112233 } elif clock == 2 { 0xaa22cc } else { 0xaa55cc }
+    const e2 = e3 & 0xffff
+    if clock >= 1 {
+      if dut.qo3 != e3 or dut.qa3 != e3 { bad += 1 }
+      if dut.qo2 != e2 or dut.qa2 != e2 { bad += 1 }
+    }
+  }
+  assert(bad == 0, "every lane written in a cycle lands, the others are kept")
+}

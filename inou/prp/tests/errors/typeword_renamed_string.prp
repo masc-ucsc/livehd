@@ -1,0 +1,9 @@
+/*
+:name: typeword_renamed_string
+:type: error
+:error: `string` was renamed `String`
+*/
+pub comb typeword_renamed_string(a:U8) -> (o:U8) {
+  const s:string = "x"  // locate_error_here
+  o = a
+}

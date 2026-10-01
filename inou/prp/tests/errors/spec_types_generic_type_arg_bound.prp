@@ -1,0 +1,10 @@
+/*
+:name: spec_types_generic_type_arg_bound
+:type: error
+:error: does not fit its declared range \[0, 15\]
+*/
+// SPEC docs 07-typesystem "Built-in types": a type word is a generic argument (`f<T=U4>`); docs 07 "Bitwidth":
+// "Binding an argument to a typed input follows the same overflow rule as an assignment, for comb and mod,
+// generic or not". Rule: `pass<T=U4>` binds T to U4, so a 100 argument into `a:T` overflows.
+comb pass<T>(a:T) -> (y:T) { y = a }
+const r = pass<T=U4>(a=100)  // locate_error_here

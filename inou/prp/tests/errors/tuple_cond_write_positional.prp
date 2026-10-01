@@ -1,0 +1,20 @@
+/*
+:name: tuple_cond_write_positional
+:type: error
+:error: cannot be merged across the .if.
+:help: name the fields
+*/
+
+// A conditional whole write of an untyped tuple merges every field with its
+// value before the `if`. Named fields get per-field storage (see
+// equiv/tuple_value_cond), but a compile-time POSITIONAL field keeps folding
+// from its binding, so its pre-`if` value has no storage to merge with: the
+// `!s` path used to read an undriven X (`o = s ? x : X`), silently. It is
+// refused until positional fields get the same storage.
+pub comb tuple_cond_write_positional(x:U4, y:U4, s:Bool) -> (o:U4) {
+  mut t = (5, 6)
+  if s {
+    t = (x, y)  // locate_error_here
+  }
+  o = t[0]
+}

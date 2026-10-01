@@ -24,19 +24,19 @@
 // carries exactly these two annotations for exactly this reason.
 // STATUS: LIVE. This is the sharpest false-loop fixture because a bogus boundary
 // value becomes visible one cycle later through persistent state.
-mod statesplit::[timecheck=false](a:u8, b:u8, c:u8) -> (o1:u16@[], o2:u16@[]) {
+mod statesplit::[timecheck=false](a:U8, b:U8, c:U8) -> (o1:U16@[], o2:U16@[]) {
   o1 = a + b        // pure comb passthrough, cone {a,b}
-  reg acc:u16 = 0
+  reg acc:U16 = 0
   acc = c + 1       // state fed ONLY by the caller's back edge
   o2  = acc
 }
 
-pub mod sttop::[timecheck=false](a:u8, b:u8, bump:u8) -> (q_pass:u16@[], q_state:u16@[]) {
-  wire back:u8 = nil
+pub mod sttop::[timecheck=false](a:U8, b:U8, bump:U8) -> (q_pass:U16@[], q_state:U16@[]) {
+  wire back:U8 = nil
   mut (o1, o2) = statesplit(a=a, b=b, c=back)
   back = (o1 + bump) & 0xFF
 
-  reg rp:u16 = 0
+  reg rp:U16 = 0
   rp     = o1
   q_pass = rp
   q_state = o2
@@ -47,17 +47,17 @@ test sttop.stateful_callee_keeps_one_state {
   mut seen = 0
   mut bad_ctl   = 0
   mut bad_state = 0
-  mut prev_back:u16 = 0
+  mut prev_back:U16 = 0
   tick 6 {
-    mut av:u8    = 10 + clock
-    mut bv:u8    = 20 + (clock * 2)
-    mut bumpv:u8 = 7
+    mut av:U8    = 10 + clock
+    mut bv:U8    = 20 + (clock * 2)
+    mut bumpv:U8 = 7
     acc.a    = av
     acc.b    = bv
     acc.bump = bumpv
     step
-    mut g_o1:u16  = av + bv
-    mut g_back:u16 = (g_o1 + bumpv) & 0xFF
+    mut g_o1:U16  = av + bv
+    mut g_back:U16 = (g_o1 + bumpv) & 0xFF
     seen = seen + 1
     if acc.q_pass != g_o1 {
       bad_ctl = bad_ctl + 1

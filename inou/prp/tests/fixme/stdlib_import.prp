@@ -7,6 +7,6 @@
 // "unit `stdlib_import` is blocked on unresolved import(s): \"prp\"" (import-no-progress).
 // Tagged `fixme`: fails by design until the standard library is implemented.
 const prp = import("prp")
-pub comb stdlib_import(a:u8) -> (r:u8) {
+pub comb stdlib_import(a:U8) -> (r:U8) {
   r = prp.plus(a, 1)
 }

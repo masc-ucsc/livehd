@@ -5,19 +5,19 @@
 :verifier_fail: 0
 */
 
-// String->number parsing now rides on the sized casts (`uN`/`sN`); `int`/`uint`
-// were removed (`signed`/`unsigned` are sign reinterprets and need bit-typed input).
-cassert(3 == s8("3"))
-cassert(s8("-4") == -4)
+// String->number parsing now rides on the sized casts (`UN`/`SN`); `int`/`uint`
+// were removed (`Signed`/`Unsigned` are sign reinterprets and need bit-typed input).
+cassert(3 == S8("3"))
+cassert(S8("-4") == -4)
 
-cassert(string(1+2) == "3")
-const v = u32("33")
+cassert(String(1+2) == "3")
+const v = U32("33")
 cassert(v == 33)
 
-cassert(u8("0ub010101") == 0ub10101)
+cassert(U8("0ub010101") == 0ub10101)
 
-cassert(s8("-1") == -1)
+cassert(S8("-1") == -1)
 
-cassert(string("hello ", "world ", 4) == string(string("hello"), string(" world "), string(4)) == "hello world 4")
+cassert(String("hello ", "world ", 4) == String(String("hello"), String(" world "), String(4)) == "hello world 4")
 
-cassert(u8("0xFF") == 255)
+cassert(U8("0xFF") == 255)

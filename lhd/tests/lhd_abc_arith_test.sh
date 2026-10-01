@@ -10,9 +10,11 @@
 #   prp -> lg -> pass color synth
 #   pass partition --emit-dir lg:re   (the original-logic twin)
 #   pass liberty gensim test.lib --emit-dir lg:models   (cell behavioural models)
-#   for adder in rca, cska, cla (+ a non-default block_size):
-#       pass <mapper> --set pass.<mapper>.adder=<a> [--set pass.<mapper>.block_size=<n>] -> lg:net
+#   MAPPER=abc: for adder in rca, cska, cla (+ a non-default block_size):
+#       pass abc --set pass.abc.adder=<a> [--set pass.abc.block_size=<n>] -> lg:net
 #       lhd lec --impl lg:net --ref lg:re --lib lg:models   (per region)
+#   MAPPER=usyn: pass usyn (default; residual=false) -> lg:net, lec --lib
+#       as above; pass usyn --set pass.usyn.tmap=none -> lec without --lib
 #
 # lec flattens the netlist's blackbox standard-cell `Sub` instances inline by
 # resolving them against the `--lib` cell-model library (their name-hash gids
@@ -26,9 +28,15 @@
 set -u
 
 # One script, both technology mappers: MAPPER=abc (default) runs `lhd pass abc`
-# and MAPPER=usyn runs `lhd pass usyn`. Every claim below is mapper-agnostic
-# (equivalence, netlist shape, option handling); lhd/tests/BUILD generates the
-# `_usyn` twin from this same file.
+# and MAPPER=usyn runs `lhd pass usyn`; lhd/tests/BUILD generates the `_usyn`
+# twin from this same file. The equivalence claims (every mapped region, the
+# no---lib control, the constant-operand multiply) hold for both. Adder
+# architecture selection (adder/block_size) is an ABC-flow ware option: native
+# USYN rebuilds the arithmetic as its own XAG and has no such knob, so the USYN
+# leg instead proves the arithmetic equivalent under its native optimizer
+# settings (default, residual round off) and its logical tmap=none output,
+# checks that a bare `--set` abbreviation resolves to pass.usyn, and that the
+# removed ABC options are refused as usage errors.
 MAPPER="${MAPPER:-abc}"
 case "$MAPPER" in
   abc | usyn) ;;
@@ -81,18 +89,74 @@ map_and_lec() {
   # the netlist really is a standard-cell netlist (Sub instances of Liberty cells)
   ls "$W/net_$tag"/graph_* >/dev/null 2>&1 || fail "$tag: no mapped netlist emitted"
   lec_regions "$W/net_$tag" "$tag"
-  echo "LEC PASS (lhd lec): adder=$adder block_size=$bstag"
+  if [ "$MAPPER" = abc ]; then
+    echo "LEC PASS (lhd lec): adder=$adder block_size=$bstag"
+  else
+    echo "LEC PASS (lhd lec): usyn $bstag"
+  fi
 }
 
-# Default (rca; block_size ignored). Fully-qualified flag.
-map_and_lec rca default --set pass.$MAPPER.adder=rca
-# Carry-skip, auto block_size and an explicit one.
-map_and_lec cska auto --set pass.$MAPPER.adder=cska
-map_and_lec cska 4 --set pass.$MAPPER.adder=cska --set pass.$MAPPER.block_size=4
-# Carry-lookahead, auto and explicit. Also exercise the 2h-set_path abbreviation
-# (`--set adder=cla` after `pass <mapper>` resolves to pass.abc.adder).
-map_and_lec cla auto --set adder=cla
-map_and_lec cla 3 --set pass.$MAPPER.adder=cla --set pass.$MAPPER.block_size=3
+# usyn_report_field <workdir> <python-expr over d> : print one field of the
+# schema-5 native decision report (`<qor>.usyn.json`, written for any tmap).
+usyn_report_field() {
+  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' \
+    "$1/qor.json.usyn.json" "$2" || fail "unreadable USYN report $1/qor.json.usyn.json"
+}
+
+if [ "$MAPPER" = abc ]; then
+  # Default (rca; block_size ignored). Fully-qualified flag.
+  map_and_lec rca default --set pass.$MAPPER.adder=rca
+  # Carry-skip, auto block_size and an explicit one.
+  map_and_lec cska auto --set pass.$MAPPER.adder=cska
+  map_and_lec cska 4 --set pass.$MAPPER.adder=cska --set pass.$MAPPER.block_size=4
+  # Carry-lookahead, auto and explicit. Also exercise the 2h-set_path abbreviation
+  # (`--set adder=cla` after `pass <mapper>` resolves to pass.abc.adder).
+  map_and_lec cla auto --set adder=cla
+  map_and_lec cla 3 --set pass.$MAPPER.adder=cla --set pass.$MAPPER.block_size=3
+  NET_CTRL="$W/net_rca_default"
+else
+  # Default native flow (tmap=abc: the selected logical network is only
+  # technology-mapped). The report describes a mapped CMOS output.
+  map_and_lec usyn default
+  [ "$(usyn_report_field "$W/wa_usyn_default" 'd["schema_version"],d["kind"],d["tmap"],d["output"]')" \
+    = "(5, 'usyn', 'abc', 'mapped-cmos')" ] \
+    || fail "usyn default: report is not a schema-5 mapped-cmos decision report: $(head -c 400 "$W/wa_usyn_default/qor.json.usyn.json")"
+  # Residual round off: the unoptimized native XAG expansion of the adders and
+  # comparators is itself equivalent, and the option is honored (no residual
+  # rewrite/resubstitution win, cost unchanged by the round). Also exercise the
+  # 2h-set_path abbreviation: bare `--set stack=3` after `pass usyn` resolves to
+  # pass.usyn.stack and reaches the reported gate constraints.
+  map_and_lec usyn nores --set pass.usyn.residual=false --set stack=3
+  [ "$(usyn_report_field "$W/wa_usyn_nores" 'd["constraints"]["stack"]')" = 3 ] \
+    || fail "usyn: bare --set stack=3 did not resolve to pass.usyn.stack"
+  [ "$(usyn_report_field "$W/wa_usyn_nores" '[(r["residual"]["rewrite_wins"]+r["residual"]["resub_wins"],r["before"]["total"]-r["after_residual"]["total"]) for r in d["regions"]]' \
+    | tr -d ' ')" = "[(0,0)]" ] \
+    || fail "usyn: pass.usyn.residual=false still ran the residual round"
+  # Logical CMOS output (tmap=none): no Liberty and no mapped cells, so the
+  # native output proves equivalent WITHOUT --lib.
+  rm -rf "$W/net_usyn_none"
+  run pass usyn --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_usyn_none" --set pass.usyn.tmap=none --workdir "$W/wa_usyn_none"
+  [ "$(usyn_report_field "$W/wa_usyn_none" 'd["tmap"],d["output"]')" = "('none', 'logical-cmos')" ] \
+    || fail "usyn tmap=none: report is not logical-cmos"
+  for r in $REGIONS; do
+    run lec --impl lg:"$W/net_usyn_none" --ref lg:"$W/re" --top "$r" --workdir "$W/wlec_usyn_none"
+  done
+  echo "LEC PASS (lhd lec): usyn tmap=none logical output, no --lib"
+  # The ABC adder-architecture options are gone from pass.usyn: a usage error
+  # (exit 2) naming the flag, with no netlist emitted.
+  for opt in pass.usyn.adder=rca block_size=4; do
+    rm -rf "$W/net_usyn_removed"
+    rc=0
+    "$LHD" pass usyn --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_usyn_removed" --set synth.liberty="$LIB" \
+      --set "$opt" --workdir "$W/wa_usyn_removed" -q --result-json "$W/rr.json" 2>/dev/null || rc=$?
+    [ "$rc" = 2 ] || fail "usyn: removed option --set $opt exited $rc (expected usage error 2)"
+    flag="${opt%%=*}"
+    grep -q "unknown flag '${flag#pass.usyn.}'" "$W/rr.json" \
+      || fail "usyn: removed option --set $opt: no unknown-flag diagnostic: $(cat "$W/rr.json")"
+    [ ! -e "$W/net_usyn_removed" ] || fail "usyn: removed option --set $opt still emitted a netlist"
+  done
+  NET_CTRL="$W/net_usyn_default"
+fi
 
 # Control: the PROVEN results are load-bearing on the cell models. Without
 # --lib, the netlist's blackbox cell `Sub`s are unresolved, so lec must NOT
@@ -101,12 +165,16 @@ map_and_lec cla 3 --set pass.$MAPPER.adder=cla --set pass.$MAPPER.block_size=3
 # can neither prove nor refute), which exits 0 unless strict — so run the
 # control strict, where any non-Proven outcome is a hard failure exit.
 one_region=$(echo "$REGIONS" | head -1)
-if "$LHD" lec --impl lg:"$W/net_rca_default" --ref lg:"$W/re" --top "$one_region" \
+if "$LHD" lec --impl lg:"$NET_CTRL" --ref lg:"$W/re" --top "$one_region" \
     --workdir "$W/wlec_nolib" -q --result-json "$W/rn.json" 2>/dev/null; then
   fail "lec proved equivalence with no --lib (unresolved cells must not vacuously pass)"
 fi
 
-echo "PASS: pass.abc adders (rca/cska/cla) all lhd-lec-equivalent to original arithmetic"
+if [ "$MAPPER" = abc ]; then
+  echo "PASS: pass.abc adders (rca/cska/cla) all lhd-lec-equivalent to original arithmetic"
+else
+  echo "PASS: pass.usyn arithmetic (mapped, residual off, tmap=none) all lhd-lec-equivalent to original arithmetic"
+fi
 
 # ---------------------------------------------------------------------------
 # Constant-operand multiply (const-mult miscompile regression): a Mult fed by a
@@ -132,4 +200,4 @@ CREGIONS=$(grep -oE '^graph_io [0-9]+ [A-Za-z0-9_.]+' "$C/re/library.txt" | awk 
 for r in $CREGIONS; do
   run lec --impl lg:"$C/net" --ref lg:"$C/re" --lib lg:"$W/models" --top "$r" --workdir "$C/wlec"
 done
-echo "PASS: pass.abc constant-operand multiply lhd-lec-equivalent (no const0 collapse)"
+echo "PASS: pass.$MAPPER constant-operand multiply lhd-lec-equivalent (no const0 collapse)"

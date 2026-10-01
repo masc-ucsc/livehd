@@ -1,0 +1,32 @@
+/*
+:name: single_tuple_argument
+:type: comptime
+:verifier_pass: 13
+:verifier_fail: 0
+*/
+
+comb sum(x) -> (total) { total = 0; for a in x { total += a } }
+cassert(sum(x=(1,2,3)) == 6)
+cassert(sum((1,2,3)) == 6)
+cassert(sum(1,2,3) == 6)
+comb typed(x:[3]U8) -> (total) { total = 0; for a in x { total += a } }
+cassert(typed(x=(1,2,3)) == 6)
+cassert(typed((1,2,3)) == 6)
+cassert(typed(1,2,3) == 6)
+
+comb capture(...rest) -> (r) { r = 100 }
+const choose = [capture, sum]
+cassert(choose(1,2,3) == 6)
+cassert(choose((1,2,3)) == 6)
+cassert(choose(a=1,b=2,c=3) == 100)
+
+comb scalar(x:U8) -> (r) { r = x }
+const typed_first = [scalar, sum]
+cassert(typed_first(1,2,3) == 6)
+
+comb method(self, x) -> (r) { r = self + sum(x) }
+cassert((4).method(1,2,3) == 10)
+comb nested(x) -> (r) { r = x[0][1] + x[1] }
+cassert(nested((1,2),3) == 5)
+const ns = (const sum = sum)
+cassert(ns.sum(1,2,3) == 6)

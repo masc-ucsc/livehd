@@ -13,7 +13,7 @@
 //   - __mux (not __hotmux) compared against unique-if to confirm both fold
 
 // Single-arm unique if (no elif). When cond is false, res keeps init.
-comb code_single(cond:bool, a:u32, b:u32) -> (res:u32) {
+comb code_single(cond:Bool, a:U32, b:U32) -> (res:U32) {
   mut res = a
   unique if cond {
     res = b
@@ -24,7 +24,7 @@ cassert(code_single(cond=true, a=100, b=200) == 200)
 cassert(code_single(cond=false, a=100, b=200) == 100)
 
 // Three-arm unique if with default else (mutually exclusive guaranteed).
-comb code_three(c0:bool, c1:bool, c2:bool, a:u8, b:u8, c:u8, d:u8) -> (res:u8) {
+comb code_three(c0:Bool, c1:Bool, c2:Bool, a:U8, b:U8, c:U8, d:U8) -> (res:U8) {
   mut res = d
   unique if c0 {
     res = a

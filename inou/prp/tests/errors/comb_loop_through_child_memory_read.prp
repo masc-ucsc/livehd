@@ -1,0 +1,30 @@
+/*
+:name: comb_loop_through_child_memory_read
+:type: error
+:tolg: 1
+:error: combinational loop
+*/
+
+// GUARD for the time-checker's per-output split of a child on a ring
+// (lhdtrack suggestions 2.1): a REAL combinational loop through a child's
+// ASYNC memory read must stay an error. `mm.o = mem[a]` is combinational in
+// the read address `a`, and the caller feeds `o` back into `a`, so
+// `a -> mm.a -> mem -> mm.o -> a` has no flop on it (the stored contents
+// are state, the address decode is not).
+//
+// The wire-level check (resolve_wire_selfref) cuts every memory and does
+// not see this ring; only the time-checker, which reads the child's
+// per-output cones through graph/port_reach (a memory JOINS its read
+// address into its read data), catches it.
+mod mm(wen:Bool, waddr:U2, wdata:U4, a:U2) -> (o:U4@[0]) {
+  reg mem:[4]U4 = 0
+  if wen { mem[waddr] = wdata }
+  o = mem[a]
+}
+
+pub mod top(wen:Bool, waddr:U2, wdata:U4, a0:U2) -> (o:U4@[0]) {
+  wire a:U2 = nil   // locate_error_here
+  const m = mm(wen=wen, waddr=waddr, wdata=wdata, a=a)
+  a = m#[0..<2] ^ a0
+  o = m
+}

@@ -2,6 +2,8 @@
 // integrated clock-gate cell (lhd_abc_icg_test.sh), and the registers they
 // clock: plain, asynchronous-reset (clear and preset bits), negedge, and on a
 // gate chained off another gate.
+// Two-bit datapaths retain carry/borrow and both reset values while bounding
+// the independent clock-aware miter cost in debug builds.
 
 // prim_clk_gate shape: event-control latch, the scan input forces the clock on
 module abc_icg_prim(input clk_i, input en_i, input scan, output clk_o);
@@ -25,33 +27,33 @@ module abc_icg_cell(input CLK, input E, input TE, output GCLK);
   assign GCLK = CLK & q;
 endmodule
 
-module abc_icg_mix(input clk, input rst_n, input en0, input en1, input en2, input en3, input scan, input [3:0] d,
-                   output [3:0] qa, output [3:0] qb, output [3:0] qc, output [3:0] qd, output [3:0] qe, output [3:0] qf);
+module abc_icg_mix(input clk, input rst_n, input en0, input en1, input en2, input en3, input scan, input [1:0] d,
+                   output [1:0] qa, output [1:0] qb, output [1:0] qc, output [1:0] qd, output [1:0] qe, output [1:0] qf);
   wire g0, g1, g2, g3;
   abc_icg_prim  u0(.clk_i(clk), .en_i(en0 & en2), .scan(scan), .clk_o(g0));
   abc_icg_latch u1(.clk(clk), .en(en1), .gclk(g1));
   abc_icg_latch u2(.clk(g0), .en(en3 ^ en1), .gclk(g2));  // a chain: gated off g0
   abc_icg_cell  u3(.CLK(clk), .E(en3), .TE(1'b0), .GCLK(g3));
 
-  reg [3:0] a;  // a plain register on a gated clock
+  reg [1:0] a;  // a plain register on a gated clock
   always @(posedge g0) a <= a + d;
 
-  reg [3:0] b;  // an async-reset register (clear + preset bits) on a gated clock
+  reg [1:0] b;  // an async-reset register (clear + preset bits) on a gated clock
   always @(posedge g1 or negedge rst_n)
-    if (!rst_n) b <= 4'b0110;
+    if (!rst_n) b <= 2'b10;
     else b <= b ^ d;
 
-  reg [3:0] c;  // ungated
+  reg [1:0] c;  // ungated
   always @(posedge clk) c <= c + a;
 
-  reg [3:0] e;  // on the chained gate
+  reg [1:0] e;  // on the chained gate
   always @(posedge g2) e <= e - d;
 
-  reg [3:0] f;  // negedge register on a gated clock
+  reg [1:0] f;  // negedge register on a gated clock
   always @(negedge g1) f <= f ^ b;
 
-  reg [3:0] h;  // on the ICG-style cell
-  always @(posedge g3) h <= {h[2:0], d[0] ^ c[3]};
+  reg [1:0] h;  // on the ICG-style cell
+  always @(posedge g3) h <= {h[0], d[0] ^ c[1]};
 
   assign qa = a;
   assign qb = b;

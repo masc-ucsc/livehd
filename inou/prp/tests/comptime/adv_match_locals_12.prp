@@ -23,4 +23,6 @@ match const t = b_val(); t {
   else { cassert(false) }
 }
 cassert(r2 == 200)
-cassert(t == nil)
+// The initializer is out of scope; this is a fresh binding.
+const t = 7
+cassert(t == 7)

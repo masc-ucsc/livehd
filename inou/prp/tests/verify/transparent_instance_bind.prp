@@ -13,13 +13,13 @@
 // as PROVEN. Bound by the physical occurrence path, `x.q` is the lane's own
 // port, which always equals `acc`: REFUTED at cycle 2, reported as
 // [lane.qacc@__flat___a].
-pub mod lane(d0:u8) -> (q:u8@[1]) {
-  reg acc:u8 = 0
+pub mod lane(d0:U8) -> (q:U8@[1]) {
+  reg acc:U8 = 0
   q = acc
   acc = d0
 }
 
-pub mod top(d0:u8) -> (q:u8@[1]) {
+pub mod top(d0:U8) -> (q:U8@[1]) {
   const __flat___a = lane(d0 = d0 ^ 0x55)
   wrap q = __flat___a + 1
 }

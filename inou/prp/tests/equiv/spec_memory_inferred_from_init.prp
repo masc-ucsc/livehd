@@ -1,0 +1,20 @@
+/*
+:name: spec_memory_inferred_from_init
+:type: equiv
+:verilog_top: spec_memory_inferred_from_init
+:pyrope_top: spec_memory_inferred_from_init
+*/
+// SPEC (docs 08-memories.md, Reset and initialization example):
+//   "reg mem:[] = (0,1,2,3,4,5,6,7)" ... "assert(mem[7] == 7) // OK, not checked
+//   during reset"
+// SPEC (docs 08-memories.md): "the arrays and async memories can be inferred
+// automatically."
+// Rule encoded here: `reg mem:[] = (0,1,2,3,4,5,6,7)` infers an 8-entry memory
+// whose reset (and power-on) contents are entry k = k.
+pub mod spec_memory_inferred_from_init(clk:Clock, rst:Reset, we:Bool, a:U3, d:U3, ra:U3) -> (q:U3@[0]) {
+  reg mem:[] = (0,1,2,3,4,5,6,7)
+  q = mem[ra]
+  if we {
+    mem[a] = d
+  }
+}

@@ -10,10 +10,10 @@
 // accumulator in one always_comb block even with intervening tag reads.
 // The independent oracle is required: native Slang can merge the illegal
 // overlapping procedural drivers back into the intended packed update.
-pub mod packed_slice_updates::[timecheck=false](clock:u1, reset:u1, wake:u16, data:u96) -> (q:u96@[]) {
-  reg dep:u96:[initial=0, reset_pin=ref reset, async=true]
+pub mod packed_slice_updates::[timecheck=false](clock:Clock, reset:Reset, wake:U16, data:U96) -> (q:U96@[]) {
+  reg dep:U96:[initial=0, reset_pin=reset, async=true]
   const q__w1 = dep
-  if not (reset != 0) {
+  if not reset {
     if ((wake >> 15) & 1) != 0 {
       dep#[90..=95] = data#[90..=95] ^ data#[0..=5]
     } elif dep#[90..=95] != 0 {

@@ -1,0 +1,16 @@
+/*
+:name: spec_calls_named_order_eq
+:type: comptime
+:verifier_pass: 2
+:verifier_fail: 0
+*/
+
+// qa.md chat ruling "Named tuple order (2026-09-30): ... declaration order is
+// never observable". docs 03-bundle.md: a named tuple's fields "relative order
+// carries no meaning ... reordering the fields never changes a program."
+// Two named tuples that differ only in declaration order are the same value.
+
+const t1 = (const a=1, const b=2)
+const t2 = (const b=2, const a=1)
+cassert(t1 == t2)
+cassert(t1.keys() == t2.keys())

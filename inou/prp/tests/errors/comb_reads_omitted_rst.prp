@@ -1,0 +1,23 @@
+/*
+:name: comb_reads_omitted_rst
+:type: error
+:error: missing required argument `rst` in call to `clr`
+:help: provide the argument
+*/
+
+// User ruling 2026-09-28 (30): in a `comb`, `clk`/`rst` are just DATA names
+// (a comb holds no state), so nothing auto-wires a caller's clock or reset
+// into a comb. A comb input its body never reads may be omitted at a call
+// (sim/comb_dead_input_omitted.prp); omitting one it READS -- `clr` reads
+// `rst` -- is the ordinary missing-argument error, whatever the caller
+// declares. Before, the caller's `rst` was silently wired in (and an
+// active-low `rst_n` caller drove `!rst_n`). Legal: `clr(rst=rst, a=a)`.
+// (A `mod`/`pipe` callee still auto-wires an omitted clock/reset, ruling 12.)
+
+comb clr(rst:U1, a:U8) -> (o:U8) {
+  o = if rst != 0 { 0 } else { a }
+}
+
+pub mod comb_reads_omitted_rst(rst:U1, a:U8) -> (z:U8@[0]) {
+  z = clr(a=a)   // locate_error_here
+}

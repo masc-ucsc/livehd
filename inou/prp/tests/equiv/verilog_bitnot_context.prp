@@ -1,0 +1,25 @@
+/*
+:name: verilog_bitnot_context
+:type: equiv
+:verilog_top: verilog_bitnot_context
+:pyrope_top: verilog_bitnot_context
+*/
+// The Pyrope twin of verilog_bitnot_context.v: Verilog's `~` flips the bits of
+// the operand extended to the expression's CONTEXT width, so every widened `~`
+// is spelled here at that width -- a `U8(...)` cast or a `#[0..<N]` slice types
+// the operand `uN`, and ruling 26 then flips exactly N bits. A signed operand
+// keeps `-x - 1`, which sign extension already makes exact at any width.
+pub comb verilog_bitnot_context(x1:U1, a4:U4, b4:U4, c2:U2, `s4`:S4)
+  -> (y8:U8, z8:U8, e1:U1, e2:U1, e3:U1, cat:U6, xn8:U8, sy8:S8, su8:U8, m8:U8) {
+  y8  = ~U8(x1)
+  z8  = ~a4#[0..<8]
+  e1  = U1(~x1 == 1)
+  e2  = U1(~a4 == 0xF)
+  e3  = U1(~U8(a4) == 0xF0)
+  const na4:U4 = ~a4
+  cat = (c2, na4)#[..]
+  xn8 = ~(U8(a4) ^ U8(b4))
+  sy8 = ~`s4`
+  wrap su8 = ~`s4`
+  wrap m8  = ~U8(a4) + 1
+}

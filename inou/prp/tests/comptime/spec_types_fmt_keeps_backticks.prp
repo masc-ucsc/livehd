@@ -1,0 +1,18 @@
+/*
+:name: spec_types_fmt_keeps_backticks
+:type: comptime
+:verifier_pass: 1
+:verifier_fail: 0
+*/
+// SPEC qa.md appendix section 8: "a backticked banned/reserved word (`u8`, `bool`, `U8`, `_0`, `_`) is an
+// ordinary name; prpfmt must KEEP the backticks on them (stripping only applies to non-reserved, non-banned
+// names)." Rule: the comptime harness re-checks this file after `lhd pyrope fmt`; a stripped backtick turns
+// each name into a banned/reserved-word error.
+const `u8` = 1
+const `bool` = 2
+const `U8` = 3
+const `_0` = 4
+const `Clock` = 5
+const `i32` = 6
+const `_` = 7
+cassert(`u8` + `bool` + `U8` + `_0` + `Clock` + `i32` + `_` == 28)

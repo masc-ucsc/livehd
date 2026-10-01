@@ -1,0 +1,103 @@
+/*
+:name: enum_port_values
+:type: simulation
+*/
+// User ruling 2026-09-28 (29): an ENUM-typed `mod`/`pipe` port (and a `reg` of
+// an enum type) is an UNSIGNED integer as wide as the enum's value encoding
+// needs, and it carries the entry values unchanged:
+//   * `Dir`: a default enum, ONE-HOT (03-bundle.md): N=1, E=2, S=4, W=8 -> 4 bits;
+//   * `Seq`: explicit values number sequentially: a=0, b=5, c=6 -> 3 bits;
+//   * `Animal`: hierarchical, one bit per node (bird=0b000001, bird.parrot=
+//     0b000101, mammal.human=0b101000) -> 6 bits;
+//   * `Hue`: a second default one-hot enum (it was the removed expression
+//     form `const Hue = enum(…)`, now an error): Red=1, Blue=4 -> 3 bits.
+// The values cross an input, an output and a register, and `.[bits]` of each
+// port (and of a local typed with the enum) is the encoding's width. Before,
+// every enum port was ONE SIGNED bit, so only the low bit crossed
+// (equiv/enum_mod_port.prp is the LEC side).
+
+enum Dir = (N, E, S, W)
+enum Seq = (a, b=5, c)
+enum Animal = (
+  ,bird  =(,eagle, ,parrot)
+  ,mammal=(,rat  , ,human )
+)
+enum Hue = (Red, Green, Blue)
+
+mod pass_dir(d:Dir) -> (o:Dir@[0], w:U8@[0]) {
+  o = d
+  w = d.[bits]
+}
+
+mod pass_hue(h:Hue) -> (o:Hue@[0], w:U8@[0], lw:U8@[0]) {
+  o = h
+  w = h.[bits]
+  mut l:Hue = Hue.Green
+  lw = l.[bits]
+}
+
+mod pick(s:Seq, an:Animal) -> (hi:Bool@[0], hum:Bool@[0], bird:Bool@[0], sv:U8@[0], av:U8@[0], sw:U8@[0], aw:U8@[0]) {
+  hi   = s == Seq.c
+  hum  = an == Animal.mammal.human
+  bird = an == Animal.bird.parrot
+  sv   = s
+  av   = an
+  sw   = s.[bits]
+  aw   = an.[bits]
+}
+
+pub mod enum_port_values(sel:U2) -> (dv:U8@[0], dw:U8@[0], q:U8@[1], hi:Bool@[0], hum:Bool@[0], bird:Bool@[0],
+                                     sv:U8@[0], av:U8@[0], sw:U8@[0], aw:U8@[0], hv:U8@[0], hw:U8@[0]) {
+  mut d:Dir = Dir.N
+  if sel == 1 {
+    d = Dir.E
+  } elif sel == 2 {
+    d = Dir.S
+  } elif sel == 3 {
+    d = Dir.W
+  }
+  const p = pass_dir(d=d)
+  dv = p.o
+  dw = p.w
+  reg st:Dir = Dir.W
+  st = p.o
+  q = st
+
+  const k = pick(s = if sel == 0 { Seq.c } else { Seq.b }, an = if sel == 0 { Animal.mammal.human } else { Animal.bird.parrot })
+  hi   = k.hi
+  hum  = k.hum
+  bird = k.bird
+  sv   = k.sv
+  av   = k.av
+  sw   = k.sw
+  aw   = k.aw
+
+  const ph = pass_hue(h = if sel == 2 { Hue.Blue } else { Hue.Red })
+  hv = ph.o
+  wrap hw = ph.w + ph.lw
+}
+
+test enum_port_values.run {
+  mut t   = enum_port_values
+  mut bad = 0
+  tick 8 {
+    const sel:U2 = clock & 3
+    const want   = 1 << sel      // the one-hot Dir entry `sel` picks
+    t.sel = sel
+    step
+    if t.dv != want { bad += 1 }
+    if t.dw != 4 { bad += 1 }
+    if t.q != want { bad += 1 }   // what this step latched
+    if sel == 0 {
+      if not t.hi or not t.hum or t.bird { bad += 1 }
+      if t.sv != 6 or t.av != 40 { bad += 1 }
+    } else {
+      if t.hi or t.hum or not t.bird { bad += 1 }
+      if t.sv != 5 or t.av != 5 { bad += 1 }
+    }
+    if t.sw != 3 or t.aw != 6 { bad += 1 }
+    if t.hv != (if sel == 2 { 4 } else { 1 }) or t.hw != 6 { bad += 1 }
+  }
+  puts("bad={bad}")
+  assert(bad == 0)
+}

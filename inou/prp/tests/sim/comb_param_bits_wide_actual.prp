@@ -1,0 +1,45 @@
+/*
+:name: comb_param_bits_wide_actual
+:type: simulation
+*/
+// lhdtrack suggestions 1.1/1.2 (item 1.1-e): `.[bits]` of an INLINED comb
+// parameter with a generic-WIDTH declared type, seen without any loop.
+//
+// `data:Unsigned(bits=16 * N)` must take the FOLDED declared bound whatever
+// the actual is -- a 64-bit io port, a NARROWER 62-bit one, or an expression
+// temp with no declared range (`a ^ b`, and a narrower 16-bit one). The
+// inliner typed the param from its actual instead, found no range for a
+// 62+-bit io port or an expression temp, and `.[bits]` reached tolg unfolded:
+// "attribute read '.[bits]' has no hardware lowering". All four lanes failed
+// the same way, each on its own. g62 and gn tell the declared bound (64, 32)
+// apart from the actual's width (62, 16), so adopting the actual's width is
+// not a fix.
+//
+// The UNTYPED-param twin (`comb nb(data)`, which adopts the actual's type) is
+// sim/comb_untyped_param_bits_wide.prp.
+comb gb<N=1>(data:Unsigned(bits=16 * N)) -> (o:U8) {
+  o = data.[bits]
+}
+
+mod comb_param_bits_wide_actual(d62:Unsigned(bits=62), d64:U64, a:U32, b:U32)
+  -> (g64:U8@[0], g62:U8@[0], gx:U8@[0], gn:U8@[0]) {
+  g64 = gb<N=4>(data=d64)
+  g62 = gb<N=4>(data=d62)
+  gx  = gb<N=2>(data=a ^ b)
+  gn  = gb<N=2>(data=a#[0..<16] ^ b#[0..<16])
+}
+
+test comb_param_bits_wide_actual.widths {
+  mut d = comb_param_bits_wide_actual
+  tick 1 {
+    d.d62 = 2
+    d.d64 = 3
+    d.a   = 4
+    d.b   = 5
+    step
+    assert(d.g64 == 64, "unsigned(bits=16 * N), N=4, u64 actual")
+    assert(d.g62 == 64, "unsigned(bits=16 * N), N=4, NARROWER u62 actual")
+    assert(d.gx  == 32, "unsigned(bits=16 * N), N=2, expression actual")
+    assert(d.gn  == 32, "unsigned(bits=16 * N), N=2, NARROWER 16-bit expression actual")
+  }
+}

@@ -1,0 +1,80 @@
+/*
+:name: wrap_bitrange_comptime_count
+:type: equiv
+:verilog_top: wrap_bitrange_comptime_count
+:pyrope_top: wrap_bitrange_comptime_count
+*/
+
+// A `wrap`/`sat` write into a BIT-RANGE destination whose width is counted by
+// a compile-time NAME rather than a literal. All of these were rejected with
+// "cannot apply `wrap` to a bit-range whose width is not known at compile
+// time", because only a literal bound folded to a lane width (the sibling
+// equiv/wrap_bitrange_dest.prp covers the literal forms):
+//   z -- a file-scope `comptime const` count, `a#[2..+N]`
+//   s -- `sat` into `c#[lo..=hi]` with two local comptime consts
+//   y -- a count computed by a CALL (`comptime const k = inc(1)`), which only
+//        folds after elaboration, in an exclusive range `b#[3..<(k + 3)]`
+//   w -- a GENERIC count, `d#[1..+W]` inside `put<W=4>`
+//   f -- a from-zero range `e#[..<k]`
+//   g -- a LOOP INDEX count, `ga#[(i*4)..+i]`: the loop unrolls (a rolled body
+//        would make `i` a runtime port) and every iteration bakes its own lane
+//        width -- the unroller re-walks one body, and a bound the first
+//        iteration folded in place used to stick for all of them
+//   h -- an attribute read of a runtime input, `ha#[2..+x.[bits]]` (every
+//        attribute read is comptime)
+//   m -- the same per-iteration bake for a typed local, `t:Unsigned(bits=i)`
+//        then `wrap t = ..`: a sticky first-iteration width silently cut every
+//        lane to one bit
+comptime const N = 3
+
+comb inc(x) -> (y) {
+  y = x + 1
+}
+
+comb put<W=1>(v:U16, r:U4) -> (o:U16) {
+  mut d:U16 = v
+  wrap d#[1..+W] = r + 9
+  o = d
+}
+
+pub mod wrap_bitrange_comptime_count(v:U16, r:U4, x:U3)
+    -> (z:U16@[0], s:U16@[0], y:U16@[0], w:U16@[0], f:U16@[0], g:U16@[0], h:U16@[0], m:U16@[0]) {
+  mut a:U16 = v
+  wrap a#[2..+N] = r + 1
+  z = a
+
+  comptime const lo = 4
+  comptime const hi = 6
+  mut c:U16 = v
+  sat c#[lo..=hi] = r + 5
+  s = c
+
+  comptime const k = inc(1)
+  mut b:U16 = v
+  wrap b#[3..<(k + 3)] = r + r
+  y = b
+
+  w = put<W=4>(v = v, r = r)
+
+  mut e:U16 = v
+  wrap e#[..<k] = r + 3
+  f = e
+
+  mut ga:U16 = v
+  for i in 1..=3 {
+    wrap ga#[(i*4)..+i] = r + 13
+  }
+  g = ga
+
+  mut ha:U16 = v
+  wrap ha#[2..+x.[bits]] = r + 6
+  h = ha
+
+  mut ma:U16 = v
+  for i in 1..=3 {
+    mut t:Unsigned(bits=i) = 0
+    wrap t = r + 11
+    ma#[(i*4)..+i] = t
+  }
+  m = ma
+}

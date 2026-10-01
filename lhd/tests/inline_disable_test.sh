@@ -36,14 +36,14 @@ has_inst() { grep -Eq '^'"$2"'[[:space:]]+\\?[A-Za-z_]' "$1"; }
 # ── Design: a leaf comb, a comb that calls a comb, and a top that calls both,
 #    all with RUNTIME arguments (the module inputs) — the hardware path. ────────
 cat >"$W/dut.prp" <<'EOF'
-comb addone(a:u8) -> (r:u8) {
-  r = a + 1
+comb addone(a:U8) -> (r:U8) {
+  wrap r = a + 1
 }
-comb twice(a:u8) -> (r:u8) {
-  r = addone(a) + addone(a)   // comb calls comb
+comb twice(a:U8) -> (r:U8) {
+  wrap r = addone(a) + addone(a)   // comb calls comb
 }
-pub comb top(x:u8, y:u8) -> (o:u8) {
-  o = addone(x) + twice(y)
+pub comb top(x:U8, y:U8) -> (o:U8) {
+  wrap o = addone(x) + twice(y)
 }
 EOF
 
@@ -84,8 +84,8 @@ echo "PASS(3): instanced == flattened (default LEC)"
 
 # A single-level instance (no mixed-depth hierarchy) is also cvc5-PROVEN.
 cat >"$W/simple.prp" <<'EOF'
-comb addone(a:u8) -> (r:u8) { r = a + 1 }
-pub comb simple_top(x:u8) -> (o:u8) { o = addone(x) }
+comb addone(a:U8) -> (r:U8) { wrap r = a + 1 }
+pub comb simple_top(x:U8) -> (o:U8) { o = addone(x) }
 EOF
 "$LHD" compile "$W/simple.prp" --top simple_top  \
   --emit-dir "lg:$W/son/" --workdir "$W/sonw" -q >/dev/null 2>&1 || fail "simple inline=true compile failed"
@@ -105,9 +105,9 @@ echo "PASS(3b): single-level instanced == flattened (cvc5)"
 # runtime call and one const call to `addone`, exactly ONE instance appears and
 # the const call collapses into a literal in the datapath.
 cat >"$W/mix.prp" <<'EOF'
-comb addone(a:u8) -> (r:u8) { r = a + 1 }
-pub comb mix(x:u8) -> (o:u8) {
-  o = addone(x) + addone(3)
+comb addone(a:U8) -> (r:U8) { wrap r = a + 1 }
+pub comb mix(x:U8) -> (o:U8) {
+  wrap o = addone(x) + addone(3)
 }
 EOF
 "$LHD" compile "$W/mix.prp" --top mix --set compile.upass.inline=false \
@@ -119,12 +119,12 @@ echo "PASS(4): const-argument comb call still folds at the default (1 instance, 
 
 # ── (5) overload dispatch (no Sub form) still inlines ─────────────────────────
 cat >"$W/ov.prp" <<'EOF'
-comb add2(a:u8, b:u8)       -> (r:u9)  { r = a + b }
-comb add3(a:u8, b:u8, c:u8) -> (r:u10) { r = a + b + c }
-pub comb ov(x:u8, y:u8, z:u8) -> (s2:u9, s3:u10) {
+comb add2(a:U8, b:U8)       -> (r:U9)  { r = a + b }
+comb add3(a:U8, b:U8, c:U8) -> (r:U10) { r = a + b + c }
+pub comb ov(x:U8, y:U8, z:U8) -> (sum2:U9, sum3:U10) {
   const add = [add2, add3]
-  s2 = add(a=x, b=y)
-  s3 = add(a=x, b=y, c=z)
+  sum2 = add(a=x, b=y)
+  sum3 = add(a=x, b=y, c=z)
 }
 EOF
 "$LHD" compile "$W/ov.prp" --top ov \
@@ -138,12 +138,12 @@ echo "PASS(5): overload dispatch still inlines"
 
 # ── (6) a comb may NOT instantiate a mod ──────────────────────────────────────
 cat >"$W/neg.prp" <<'EOF'
-mod counter(d:u8) -> (q:u8@[1]) {
-  reg m:u8 = 0
+mod counter(d:U8) -> (q:U8@[1]) {
+  reg m:U8 = 0
   q = m
   m = d
 }
-pub comb badtop(x:u8) -> (o:u8) {
+pub comb badtop(x:U8) -> (o:U8) {
   o = counter(x)
 }
 EOF

@@ -1,0 +1,57 @@
+/*
+:name: comb_array_port_inline
+:type: simulation
+*/
+// An INLINED comb (a template: generic, or with an untyped input) keeps each
+// array port an array. Its `[N]Unsigned(bits=N)` input used to be typed as a
+// SCALAR of the element's width once the element bound was folded ("cannot
+// assign tuple value to `inl1_v` (it is integer)"); a literal `[2]U4` input
+// took its packed width and failed the same way; and a generic-width array
+// OUTPUT was declared with no shape at all.
+comb pick<N=2>(v:[N]Unsigned(bits=N)) -> (lo:Unsigned(bits=N), hi:Unsigned(bits=N)) {
+  lo = v[0]
+  hi = v[N - 1]
+}
+comb swap(v:[2]U4, x) -> (r:[2]U4) {
+  r[0] = v[1]
+  r[1] = v[0] ^ x
+}
+comb fill<N=2>(x) -> (r:[N]Unsigned(bits=N)) {
+  r[0] = x
+  r[1] = x ^ 1
+  r[2] = x ^ 2
+  r[3] = x ^ 3
+}
+
+pub mod comb_array_port_inline(a:U4, b:U4) -> (lo:U4@[0], hi:U4@[0], st0:U4@[0], st1:U4@[0], f3:U4@[0]) {
+  mut v:[4]U4 = 0
+  v[0] = a
+  v[3] = b
+  const p = pick<N=4>(v=v)
+  lo = p.lo
+  hi = p.hi
+
+  mut w:[2]U4 = 0
+  w[0] = a
+  w[1] = b
+  const q:[2]U4 = swap(v=w, x=a)
+  st0 = q[0]
+  st1 = q[1]
+
+  const f:[4]U4 = fill<N=4>(x=b)
+  f3 = f[3]
+}
+
+test comb_array_port_inline.t {
+  mut dut = comb_array_port_inline
+  mut bad = 0
+  tick 8 {
+    dut.a = 3 + clock
+    dut.b = 15 - clock
+    step
+    if dut.lo != 3 + clock or dut.hi != 15 - clock { bad += 1 }
+    if dut.st0 != 15 - clock or dut.st1 != 0 { bad += 1 }
+    if dut.f3 != (15 - clock) ^ 3 { bad += 1 }
+  }
+  assert(bad == 0, "array ports of inlined combs")
+}

@@ -796,6 +796,14 @@ bool Cprop::collapse_forward_for_pin(hhds::Node_class& node, hhds::Pin_class new
   livehd::graph_util::Edge_vec outs(out_view.begin(), out_view.end());
 
   for (const auto& out : outs) {
+    // A ring that closes over a compact loop keeps this node: forwarding would
+    // make the loop's output drive its own input, which reads as a carry.
+    if (livehd::graph_util::closes_loop_self_edge(new_dpin, out.sink)) {
+      return false;
+    }
+  }
+
+  for (const auto& out : outs) {
     // Parallel-edge refusal: if new_dpin ALREADY drives this consumer sink,
     // the reconnect needs a second parallel edge -- and hhds overflow-mode
     // sink storage is a set that silently DEDUPS it, so the consumer would
@@ -870,12 +878,10 @@ void Cprop::try_collapse_forward(hhds::Node_class& node, Inp_pins& inp_edges_ord
   }
 
   if (op == Ntype_op::Mux || op == Ntype_op::Hotmux) {
-    // Identical arms make the selector irrelevant, for a Hotmux as much as for a
-    // Mux: an overlap that cannot change the result is not worth a decode cone
-    // plus its own ABC region. (That shape is exactly an always-open latch
-    // enable -- `case(c) 2'd0: e<=1; default: e<=1;` -- and keeping the Hotmux
-    // alive to carry a one-hot obligation about it left the latch in the design
-    // on the reference side only.) The obligation is dropped with the cell.
+    // Equal values do not discharge an observable one-hot obligation.
+    if (op == Ntype_op::Hotmux && !livehd::muxctx::exclusive(node)) {
+      return;
+    }
     if (inp_edges_ordered.size() <= 1) {
       livehd::cprop_value::retire(node);
       return;
@@ -2957,7 +2963,10 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
   // and the inner mask only rewrites bits >= n). The logical-NOT lowering
   // And(Not(And(x,1)),1) is this shape once the And masks canonicalize to
   // Get_mask. Rewiring the Not to y is only safe when this node is the Not's
-  // sole consumer -- any other reader may observe bits >= n.
+  // sole consumer -- any other reader may observe bits >= n. The rewire
+  // changes the Not's value above bit n, so its facts are forgotten first: CSE
+  // already keyed the Not by its OLD input, and a later twin Not(Get_mask(y, ..))
+  // (e.g. `~t` and `~u8(t)` of one slice) must not merge into the rewired one.
   {
     const int m_w = low_mask_width(mask_const);
     if (m_w > 0 && !a_pin.is_const() && !is_graph_input_pin(a_pin)) {
@@ -2973,6 +2982,7 @@ bool Cprop::scalar_get_mask(hhds::Node_class& node) {
               if (!y.is_invalid() && !same_pin(y, a_pin)) {  // a self-feeding Not must stay
                 auto not_sink = find_sink_pin(not_node, "a");
                 if (!not_sink.is_invalid()) {
+                  livehd::cprop_value::forget(a_pin);
                   not_sink.del_sink();
                   y.connect_sink(not_sink);
                   if (!inner.has_out_edges()) {
@@ -3139,7 +3149,8 @@ void Cprop::cse_pass(const std::vector<hhds::Node_class>& order) {
     remember_node(node);
     livehd::cprop_profile::Timer timer(livehd::cprop_profile::cse);
     const auto                   op = type_op_of(node);
-    if (!is_computed_comb_op(op) || op == Ntype_op::LUT || !node.has_out_edges()) {
+    if (!is_computed_comb_op(op) || op == Ntype_op::LUT || !node.has_out_edges() || gu::has_runtime_check(node)
+        || (op == Ntype_op::Hotmux && !livehd::muxctx::exclusive(node))) {
       continue;
     }
     Key key;
@@ -3158,7 +3169,35 @@ void Cprop::cse_pass(const std::vector<hhds::Node_class>& order) {
     if (!usable || key.second.empty()) {
       continue;
     }
-    std::sort(key.second.begin(), key.second.end());
+    if (op == Ntype_op::Hotmux) {
+      // Whole pairs commute only with established exclusivity. Keep default,
+      // pair association, producer generations and proof provenance distinct.
+      using Pair = std::array<std::tuple<uint64_t, uint64_t>, 2>;
+      std::vector<Pair> pairs;
+      for (size_t i = 0; i + 1 < key.second.size(); i += 2) {
+        const auto& [cp, ci, cg] = key.second[i];
+        const auto& [vp, vi, vg] = key.second[i + 1];
+        if (cp != i || vp != i + 1) {
+          usable = false;
+          break;
+        }
+        pairs.push_back({
+            {{ci, cg}, {vi, vg}}
+        });
+      }
+      if (!usable) {
+        continue;
+      }
+      std::sort(pairs.begin(), pairs.end());
+      for (size_t i = 0; i < pairs.size(); ++i) {
+        for (size_t j = 0; j < 2; ++j) {
+          key.second[2 * i + j] = {2 * i + j, std::get<0>(pairs[i][j]), std::get<1>(pairs[i][j])};
+        }
+      }
+      key.second.emplace_back(std::numeric_limits<uint32_t>::max(), gu::has_proven(node), gu::proven_of(node));
+    } else {
+      std::sort(key.second.begin(), key.second.end());
+    }
     auto [it, inserted] = seen.try_emplace(std::move(key), Entry{node, generation(node)});
     if (inserted) {
       continue;
@@ -3376,6 +3415,7 @@ void Cprop::do_trans(const std::shared_ptr<hhds::Graph>& g) {
     canonicalize_concat_pack(current_graph, *it);
   }
   vectorize_bit_muxes();
+  livehd::muxctx::prune(*current_graph, decode_bool_condition, is_bool01);
   mux_op_share_pass();
   mux_share_pass();
   vectorize_bit_reductions();

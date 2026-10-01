@@ -9,7 +9,7 @@
 // for its unknown bits. Interpolating it is legal at elaboration time; the
 // unknown bits render as `?`.
 
-mut foo:u4 = 0
+mut foo:U4 = 0
 foo = 0sb?
 
 cassert("{foo:b}" == "????")
@@ -17,7 +17,7 @@ cputs("foo:{foo:b}")
 
 // `:h`/`:x`/`:X` group four bits per digit, `:o` three: a digit covering ANY
 // unknown bit has no value, so it renders `?` (Verilog's `%h` convention).
-mut m:u8 = 0ub1010??01
+mut m:U8 = 0ub1010??01
 
 cassert("{m:b}" == "1010??01")
 cassert("{m:x}" == "a?")

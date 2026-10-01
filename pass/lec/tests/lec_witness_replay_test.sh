@@ -54,8 +54,8 @@ module mini(input clock, input reset, output [7:0] o);
 endmodule
 EOF
 cat > "$WORK/mini_bug.prp" <<'EOF'
-pub mod mini(clock:u1, reset:u1) -> (o:u8@[]) {
-  reg cnt:u8:[reset_pin=ref reset] = 0
+pub mod mini(`clock`:Clock, `reset`:Reset) -> (o:U8@[]) {
+  reg cnt:U8:[reset_pin=`reset`] = 0
   o = cnt
   cnt = (cnt + 2)#[0..=7]
 }
@@ -66,19 +66,19 @@ EOF
 # host clang builds the replay needs). Start it now so it overlaps the mini
 # chain; every assertion about it still runs in this shell, after the wait.
 cat > "$WORK/simpl.prp" <<'EOF'
-pub mod dut(clock:u1, reset:u1, io:(valid:u1, bits:(x:u4, y:u3, only_impl:u2))) -> (o:u8@[]) {
-  reg cnt:u8:[reset_pin=ref reset] = 0
+pub mod dut(`clock`:Clock, `reset`:Reset, io:(valid:U1, bits:(x:U4, y:U3, only_impl:U2))) -> (o:U8@[]) {
+  reg cnt:U8:[reset_pin=`reset`] = 0
   o = cnt
-  const pc:u4 = io.bits.x#+[..]
-  if io.valid { cnt = (cnt + pc + io.bits.y + io.bits.only_impl)#[0..=7] }
+  const pc:U4 = io.bits.x#+[..]
+  if io.valid != 0 { cnt = (cnt + pc + io.bits.y + io.bits.only_impl)#[0..=7] }
 }
 EOF
 cat > "$WORK/sref.prp" <<'EOF'
-pub mod dut(clock:u1, reset:u1, io:(valid:u1, bits:(x:u4, y:u3))) -> (o:u8@[]) {
-  reg cnt:u8:[reset_pin=ref reset] = 0
+pub mod dut(`clock`:Clock, `reset`:Reset, io:(valid:U1, bits:(x:U4, y:U3))) -> (o:U8@[]) {
+  reg cnt:U8:[reset_pin=`reset`] = 0
   o = cnt
-  const pc:u4 = io.bits.x#+[..]
-  if io.valid { cnt = (cnt + pc + io.bits.y + 1)#[0..=7] }
+  const pc:U4 = io.bits.x#+[..]
+  if io.valid != 0 { cnt = (cnt + pc + io.bits.y + 1)#[0..=7] }
 }
 EOF
 WT="$WORK/wt"

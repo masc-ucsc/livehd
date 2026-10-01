@@ -101,8 +101,8 @@ always_latch if (clear_pair) low_q = 0; else if (!clk && en) low_q = high_q;
 always_latch if (clear_pair) high_q = 0; else if (clk && en) high_q = d;
 always_ff @(negedge clk) captured <= high_q;
 endmodule
-''', '''    dut.en = (clock % 2) == 0
-    dut.clear_pair = clock == 0
+''', '''    dut.en = U1((clock % 2) == 0)
+    dut.clear_pair = U1(clock == 0)
     dut.d = 100 + clock''', '''    const count = if clock < 2 { 0 } else { 100 + clock - (clock % 2) }
     assert(dut.high_q == count, "high window tracks data only when enabled")
     assert(dut.low_q == count, "low window settles after the fall and holds when disabled")
@@ -135,8 +135,8 @@ end
 always_latch if (clear_latch) rise_latch = 7; else if (en) rise_latch = rise_q;
 always_latch if (en_q) fall_latch = fall_q;
 endmodule
-''', '''    dut.clear_latch = clock == 4
-    dut.en = (clock % 2) == 0
+''', '''    dut.clear_latch = U1(clock == 4)
+    dut.en = U1((clock % 2) == 0)
     dut.d = 100 + clock''', '''    const held = 100 + (clock - (clock % 2))
     const held_rise = if (clock == 4) or (clock == 5) { 7 } else { held }
     assert(dut.rise_q == 100 + clock, "posedge register commits")
@@ -223,12 +223,12 @@ lane bus(.a({5'd11, 16'b0, selected}), .b({5'd19, 16'b0, selected}), .sel(idle),
 assign attrs = packed_req[84:80];
 endmodule
 ''', '''    dut.req = 1
-    dut.idle = u1((clock & 1) == 0)
+    dut.idle = U1((clock & 1) == 0)
     dut.addr = if (clock & 2) == 0 { 0x80000004 } else { 0x10000004 }''', '''    const expected = if (clock & 2) == 0 { 0x80000004 } else { 0x10000004 }
-    assert(dut.ready == u1((clock & 1) == 0))
+    assert(dut.ready == U1((clock & 1) == 0))
     assert(dut.selected == expected)
     assert(dut.captured == expected)
-    assert(dut.cacheable == u1((clock & 2) == 0))
+    assert(dut.cacheable == U1((clock & 2) == 0))
     assert(dut.attrs == if (clock & 1) == 0 { 11 } else { 19 })''', '''
   for (unsigned c = 0; c < 8; ++c) {
     dut.req = 1;
@@ -272,13 +272,13 @@ end
 always_ff @(posedge clk) previous<=selected;
 endmodule
 ''', '''    dut.req = 1
-    dut.idle = u1((clock & 1) == 0)
+    dut.idle = U1((clock & 1) == 0)
     dut.addr = if (clock & 2) == 0 { 0x80000004 } else { 0x10000004 }''', '''    const expected = if (clock & 2) == 0 { 0x80000004 } else { 0x10000004 }
-    assert(dut.response.ready == u1((clock & 1) == 0))
+    assert(dut.response.ready == U1((clock & 1) == 0))
     assert(dut.response.valid == 1)
     assert(dut.cfg_width == 64)
     assert(dut.selected == expected)
-    assert(dut.cacheable == u1((clock & 2) == 0))''', '''
+    assert(dut.cacheable == U1((clock & 2) == 0))''', '''
   for (unsigned c = 0; c < 8; ++c) {
     dut.req = 1;
     dut.idle = (c & 1) == 0;
@@ -327,7 +327,7 @@ assign link.data = data;
 consumer sink(.clk(clk), .response(link), .request(request), .captured(captured));
 assign link.ready = ready && request;
 endmodule
-''', '''    dut.ready = u1((clock & 1) == 0)
+''', '''    dut.ready = U1((clock & 1) == 0)
     dut.valid = 1
     dut.data = 200 + clock''', '''    assert(dut.request == 1)
     assert(dut.captured == 200 + (clock & 6))''', '''
@@ -347,7 +347,7 @@ assign q = stages[1];
 assign live = stages[0];
 assign stages[0] = data;
 endmodule
-''', '''    dut.rst = u1(clock == 0)
+''', '''    dut.rst = U1(clock == 0)
     dut.data = 200 + clock''', '''    assert(dut.live == 200 + clock)
     assert(dut.q == if clock == 0 { 0 } else { 200 + clock })''', '''
   for (unsigned c = 0; c < 8; ++c) {
@@ -367,7 +367,7 @@ always_comb begin
  for (int i=0; i<2; ++i) q |= (is_zero(data[i*8+:8]) != 0);
 end
 endmodule
-''', '''    dut.data = if (clock & 1) == 0 { 0x1200 } else { 0x1234 }''', '''    assert(dut.q == u1((clock & 1) == 0))''', '''
+''', '''    dut.data = if (clock & 1) == 0 { 0x1200 } else { 0x1234 }''', '''    assert(dut.q == U1((clock & 1) == 0))''', '''
   for (unsigned c = 0; c < 8; ++c) {
     dut.data = (c & 1) == 0 ? 0x1200 : 0x1234;
     dut.eval(); dut.clk = 1; dut.eval(); dut.clk = 0; dut.eval();
@@ -391,7 +391,7 @@ always_ff @(posedge clk or posedge rst)
  end
 assign q = mem_q[addr].data;
 endmodule
-''', '''    dut.rst = u1(clock == 0)
+''', '''    dut.rst = U1(clock == 0)
     dut.addr = clock & 7
     dut.data = 200 + clock''', '''    assert(dut.q == if clock == 0 { 0 } else { 200 + clock })''', '''
   for (unsigned c = 0; c < 8; ++c) {
@@ -416,7 +416,7 @@ always_ff @(posedge clk) begin
 end
 assign q = mem_q[addr[2]][addr[1:0]].data;
 endmodule
-''', '''    dut.rst = u1(clock == 0)
+''', '''    dut.rst = U1(clock == 0)
     dut.addr = clock & 7
     dut.data = 200 + clock''', '''    assert(dut.q == if clock == 0 { 0 } else { 200 + clock })''', '''
   for (unsigned c = 0; c < 8; ++c) {

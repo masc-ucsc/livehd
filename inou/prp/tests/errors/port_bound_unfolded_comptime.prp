@@ -1,0 +1,20 @@
+/*
+:name: port_bound_unfolded_comptime
+:type: error
+:error: bound `bits` reads comptime const `W`, whose value is computed by statements
+:help: size it with a literal, a generic parameter
+*/
+
+// A port width must be known where the port is declared. `W` is a comptime
+// const, but a loop computes it, and a signature bound is folded at the
+// declaration: that is a compile error. It used to be a warning that lowered
+// the port UNBOUNDED (and asked for "a comptime const", which W already is).
+comptime const N = 4
+mut m = 0
+for i in 0..<N {
+  m += 1
+}
+comptime const W = m
+pub mod top(x:U8) -> (y:Unsigned(bits=W)@[0]) {  // locate_error_here
+  wrap y = x
+}

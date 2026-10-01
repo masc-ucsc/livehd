@@ -12,7 +12,7 @@
 // `p.q`,`p.r` AND rewrites the body field read/write to those leaves, so no
 // tuple_* node referencing a port survives into tolg. The golden declares the
 // same escaped dotted ports; LEC pins the datapath value.
-comb f(ar:(x:u8, y:u8)) -> (p:(q:u9, r:u8)) {
+comb f(ar:(x:U8, y:U8)) -> (p:(q:U9, r:U8)) {
   p.q = ar.x + ar.y
   p.r = ar.x
 }

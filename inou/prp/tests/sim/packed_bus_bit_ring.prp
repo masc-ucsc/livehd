@@ -28,21 +28,21 @@
 // resp[1] = bit1 of ((cnt<<1)|req[1]) = cnt&1 = (c+2)&1.
 //   req(c) = (go(c) << 1) | ((c+2) & 1)
 
-mod deva::[timecheck=false](req:u8) -> (resp:u8@[]) {
-  reg cnt:u7 = 1
-  cnt  = cnt + 1
+mod deva::[timecheck=false](req:U8) -> (resp:U8@[]) {
+  reg cnt:U7 = 1
+  wrap cnt  = cnt + 1
   resp = (cnt << 1) | ((req >> 1) & 1)
 }
 
-mod devb::[timecheck=false](resp:u8, go:u1) -> (req:u8@[]) {
-  reg v:u1 = 0
+mod devb::[timecheck=false](resp:U8, go:U1) -> (req:U8@[]) {
+  reg v:U1 = 0
   v   = go
   req = (v << 1) | ((resp >> 1) & 1)
 }
 
-pub mod bitring::[timecheck=false](go:u1, d:u8) -> (q_resp:u8@[], q_req:u8@[], ctl:u8@[]) {
-  wire req_w:u8  = nil
-  wire resp_w:u8 = nil
+pub mod bitring::[timecheck=false](go:U1, d:U8) -> (q_resp:U8@[], q_req:U8@[], ctl:U8@[]) {
+  wire req_w:U8  = nil
+  wire resp_w:U8 = nil
   mut resp_v = deva(req=req_w)
   mut req_v  = devb(resp=resp_w, go=go)
   resp_w = resp_v
@@ -51,7 +51,7 @@ pub mod bitring::[timecheck=false](go:u1, d:u8) -> (q_resp:u8@[], q_req:u8@[], c
   q_req  = req_v
 
   // CONTROL: a plain flop, so a failure above is specifically the bus ring.
-  reg c:u8 = 0
+  reg c:U8 = 0
   c   = d
   ctl = c
 }
@@ -63,19 +63,19 @@ test bitring.packed_buses_thread_at_bit_level {
   mut bad_req  = 0
   mut bad_ctl  = 0
   tick 6 {
-    mut gv:u1 = 0
+    mut gv:U1 = 0
     if clock == 1 or clock == 2 or clock == 4 {
       gv = 1
     }
-    mut dv:u8 = 10 + clock
+    mut dv:U8 = 10 + clock
     acc.go = gv
     acc.d  = dv
     step
     seen = seen + 1
     // end-of-tick: cnt has incremented to clock+2, v holds gv.
-    mut cntv:u8 = clock + 2
-    mut g_resp:u8 = ((cntv << 1) & 0xFF) | gv
-    mut g_req:u8  = (gv << 1) | (cntv & 1)
+    mut cntv:U8 = clock + 2
+    mut g_resp:U8 = ((cntv << 1) & 0xFF) | gv
+    mut g_req:U8  = (gv << 1) | (cntv & 1)
     if acc.q_resp != g_resp {
       bad_resp = bad_resp + 1
     }

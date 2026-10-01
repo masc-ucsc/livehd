@@ -1,0 +1,17 @@
+/*
+:name: bitrange_window_overflow_runtime
+:type: error
+:error: does not fit the 4-bit destination slice
+:help: select 4 bits
+*/
+
+// A moving window `r#[(j*4)..+4]` has a runtime position but a constant
+// 4-bit lane, so a 5-bit sum must be narrowed explicitly (`wrap`, as in
+// equiv/wrap_bitrange_dest) instead of being truncated silently.
+pub comb bitrange_window_overflow_runtime(a:U4, b:U4) -> (z:U8) {
+  mut r:U8 = 0
+  for j in 0..<2 {
+    r#[(j*4)..+4] = a + b  // locate_error_here
+  }
+  z = r
+}

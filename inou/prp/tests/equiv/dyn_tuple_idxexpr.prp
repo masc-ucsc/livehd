@@ -8,8 +8,8 @@
 // The index may be a runtime EXPRESSION, not just a bare signal: `choices[sel+1]`
 // computes `sel+1` first, then selects. (This exercises the deferred-emit flush
 // so the computed index is materialized before the Hotmux compares reference
-// it.) With sel:u1 the index is 1 or 2, so z is element 1 (b) or 2 (c).
-pub comb selx(sel:u1, a:u8, b:u8, c:u8) -> (z:u8) {
+// it.) With sel:U1 the index is 1 or 2, so z is element 1 (b) or 2 (c).
+pub comb selx(sel:U1, a:U8, b:U8, c:U8) -> (z:U8) {
   const choices = [a, b, c]
   z = choices[sel + 1]
 }

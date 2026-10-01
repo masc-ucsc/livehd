@@ -1,0 +1,18 @@
+/*
+:name: tuple_field_store_may_overflow
+:type: error
+:error: .t\.x. \(range \[0, 255\]\) may not fit its declared range \[0, 15\]
+:help: wrap/saturate
+*/
+
+// User ruling 2026-09-27 #16 extended to TUPLE FIELDS: a field is a typed
+// destination (04b-attributes.md lists "a tuple field"), so a store whose
+// value may leave the field's type is a compile error. `t.x = b` with b:U8
+// used to compile silently and keep only b's low nibble; `wrap t.x = b` (the
+// prefix attaches to a dotted field) is the explicit narrowing.
+pub mod tuple_field_store_may_overflow(a:U4, b:U8) -> (q:U4@[0]) {
+  mut t:(x:U4, y:U4) = (x=0, y=0)
+  t.x = b        // locate_error_here
+  t.y = a
+  q = t.x ^ t.y
+}

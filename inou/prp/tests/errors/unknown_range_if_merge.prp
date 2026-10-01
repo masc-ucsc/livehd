@@ -1,0 +1,41 @@
+/*
+:name: unknown_range_if_merge
+:type: error
+:tolg: 1
+:error: \(unbounded range\) may not fit its declared range \[0, 15\]
+:help: (wrap|sat)
+*/
+// User ruling 2026-09-28 (21): an unknown range (an untyped `mod` output,
+// errors/unknown_range_typed_dest.prp) into a typed destination is a
+// may-not-fit error, and it must survive an if/match merge. upass.bitwidth
+// keeps "too wide / unknown" as a per-name LAST-WRITER flag
+// (Symbol_table::wide_values), so a bounded write in a later arm used to erase
+// it: the unknown value in a THEN arm (y0, y1), a match arm (y2) or a pre-if
+// value one arm keeps (y3) reached the typed `U4` and silently truncated
+// (`mux[3:0] = c_o[8:0]`), while the same value in the ELSE arm was caught.
+// The merge now records per arm whether each write left the name wide, and
+// commits it wide when any arm did, or when the pre-if value survives on some
+// path and was wide. y4 is the older gap for a genuinely wide value (a u64
+// `w * w` in a THEN arm), which predates ruling 21 and closed with it.
+
+mod inc(a) -> (o@[0]) {
+  o = a + 1
+}
+
+pub mod unknown_range_if_merge(x:U8, w:U64, s:Bool, m:U2) -> (y0:U4@[0], y1:U4@[0], y2:U4@[0], y3:U4@[0], y4:U4@[0]) {
+  const c = inc(a=x)
+
+  y0 = if s { c.o } else { 0 }   // locate_error_here
+
+  mut t = 0
+  if s { t = c.o } else { t = 1 }
+  y1 = t   // locate_error_here
+
+  y2 = match m { == 0 { c.o } else { 1 } }   // locate_error_here
+
+  mut u = c.o
+  if s { u = 1 }
+  y3 = u   // locate_error_here
+
+  y4 = if s { w * w } else { 0 }   // locate_error_here
+}

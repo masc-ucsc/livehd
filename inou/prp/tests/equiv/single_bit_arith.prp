@@ -21,8 +21,8 @@
 // (`io_instruction[31]`) + replication — a different LNAST path that does not
 // hit the shift/mask datapath.
 
-pub comb sb(io_instruction:u64) -> (io_sextImm:u64) {
-  mut _mux_10:u64 = 0
+pub comb sb(io_instruction:U64) -> (io_sextImm:U64) {
+  mut _mux_10:U64 = 0
   mut s = (io_instruction >> 31) & 1
   if io_instruction#[0..=6] == 111 {
   }
