@@ -640,6 +640,26 @@ sh_test(
 # todo/livehd/2f-latch M9 — Clock_cell recognition at the Sub boundary: the
 # cases INLINING structurally cannot cover (a TRUSTED gate, a MEMORY clock, and
 # an enable that is a CONE rather than a bare port).
+# The cycle-provenance comparator's helpers, pinned against the bash `local`
+# trap: bash expands every word of a `local` command before performing any of
+# its assignments, so `local top="$1" d="$OUTROOT/$top/..."` leaves $top unset
+# and `set -u` kills the helper on every row -- while each row still PRINTS,
+# with a blank column that reads as "measured, nothing odd". That silently
+# invalidated a full 11-row evidence table. Needs no lhd or yosys: it sources
+# the script for its functions only (PROC_IFX_LIB_ONLY=1).
+sh_test(
+    name = "proc_ifx_compare_helper_test",
+    size = "small",
+    srcs = ["proc_ifx_compare_helper_test.sh"],
+    data = [
+        # inou_yosys_read.ys is needed because the comparator derives its
+        # plain-proc variant from it at startup -- so this test also pins that
+        # the `proc -ifx` -> `proc` substitution still matches the real script.
+        "//inou/yosys:inou_yosys_scripts",
+        "//scripts:cycle_provenance_tools",
+    ],
+)
+
 sh_test(
     name = "clock_cell_test",
     size = "large",

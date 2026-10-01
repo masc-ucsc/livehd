@@ -4,9 +4,10 @@
 # `inou_yosys_read.ys` runs `proc -ifx` instead of `proc`, deliberately: the
 # comment there says proc_rmdead's BitPatternPool fragments into millions of
 # cubes on wide casex/casez decoders and effectively hangs.  But proc_rmdead is
-# ALSO what prunes the unreachable "no branch matched" arm of a FULL case, and
-# without that pruning the arm survives as `Y = sel ? a : Y` -- a self-
-# referencing mux, i.e. a logic loop that was never in the RTL.
+# ALSO what prunes the "no branch matched" arm of a full case, and without that
+# pruning the arm survives as `Y = sel ? a : Y` -- a self-referencing mux, which
+# yosys `scc` reports as a logic loop.  Whether that arm is SPURIOUS or is the
+# intended X behaviour is NOT settled by this script; see below.
 #
 # Measured on txfma_e5: `proc -ifx` -> 1 SCC (two pmuxtree muxes on
 # elxd_res_f5a_h, a 1-bit-selector case covering both 1'b0 and 1'b1, so FULL);
@@ -68,7 +69,12 @@ elaborate() {  # <top> <tag> <script-or-empty> -> echoes "<sccs> <seconds>"
 # the plain-proc graph is also put through pass.lean. --recipe O0 is mandatory:
 # the default is O1 and would re-run pass.cprop, making this a different test
 # from the one it claims to be.
-lean_on_plain() {  # <top> -> EMITS | CYCLE | TIMEOUT | ERR:<codes> | no-lg
+# NAMING. A zero exit from pass.lean proves the CERTIFICATE TEXT WAS EMITTED.
+# It is NOT "Lean accepted": no `lake build`, no checkDesign, no simulator run
+# has happened at this point.  The 122-CORE-ET / 30-CVA6 milestone needs that
+# later pipeline acceptance, so this column is deliberately called CERT_EMIT.
+lean_on_plain() {  # <top> -> CERT-EMITTED | CYCLE | NEEDS-SINGLE-EDGE
+                   #          | PLAIN-COMPILE-FAIL:<code> | TIMEOUT | ERR:<codes>
   # ONE NAME PER `local`.  Bash expands every word of a `local` command BEFORE
   # performing any of its assignments, so `local top="$1" d="$OUTROOT/$top/..."`
   # expands $top while it is still unset -- which under `set -u` aborts the
@@ -77,15 +83,32 @@ lean_on_plain() {  # <top> -> EMITS | CYCLE | TIMEOUT | ERR:<codes> | no-lg
   # lhd/tests/proc_ifx_compare_helper_test.sh.
   local top="$1"
   local d="$OUTROOT/$top/plain"
-  [[ -d "$d/lg" ]] || { echo "no-lg"; return; }
+  # The plain-proc ELABORATION can itself fail -- measured: intpipe_csr_file and
+  # minion_dcache_top both abort with latch-contract rule C under plain proc
+  # while compiling cleanly under -ifx, because proc_dlatch infers a real
+  # $dlatch where -ifx left a comb self-loop.  That is a compile result, not a
+  # pass.lean result, and must never be reported as one.
+  if [[ ! -d "$d/lg" ]] || [[ -z "$(ls -A "$d/lg" 2>/dev/null)" ]]; then
+    local code
+    code="$(grep -oP '"code":"\K[^"]*' "$d/compile.log" 2>/dev/null | sort -u | paste -sd, -)"
+    echo "PLAIN-COMPILE-FAIL:${code:-unknown}"
+    return
+  fi
   timeout "$TIMEOUT" "$LHD" compile "lg:$d/lg" --top "$top" --recipe O0 \
     --workdir "$d/lean_w" --emit-dir "lean:$d/lean" \
     --set formal.lean.mode=verified_compiler --set formal.lean.strict=true \
     > "$d/lean.log" 2>&1
   local rc=$?
-  if   [[ $rc -eq 0 ]]; then echo "EMITS"
+  if   [[ $rc -eq 0 ]]; then echo "CERT-EMITTED"
   elif [[ $rc -eq 124 ]]; then echo "TIMEOUT"
   elif grep -qiE "combinational cycle|back edge|self-dependency" "$d/lean.log"; then echo "CYCLE"
+  elif grep -qE "unsupported certificate op \`latch\`|NEGEDGE flop" "$d/lean.log"; then
+    # This comparator runs pass.lean straight off the LGraph and SKIPS
+    # pass.single_edge, which is what normalizes latches and negedge state away.
+    # A stateful wrapper therefore refuses here for a reason that has nothing to
+    # do with the lowering under test.  Report it as unmeasured and validate via
+    # run_coreet_module_lean.sh with YOSYS_SCRIPT instead.
+    echo "NEEDS-SINGLE-EDGE"
   else echo "ERR:$(grep -oP '"code":"\K[^"]*' "$d/lean.log" | sort -u | paste -sd, -)"
   fi
 }
@@ -97,7 +120,7 @@ if [[ "${PROC_IFX_LIB_ONLY:-0}" == "1" ]]; then
 fi
 
 blank_rows=0
-printf '%-26s %10s %8s %10s %8s %-10s %s\n' MODULE IFX_SCC IFX_S PLAIN_SCC PLAIN_S LEAN_PLAIN EVIDENCE
+printf '%-26s %8s %7s %9s %7s %-26s %s\n' MODULE IFX_SCC IFX_S PLAIN_SCC PLAIN_S CERT_EMIT EVIDENCE
 for TOP in "$@"; do
   mkdir -p "$OUTROOT/$TOP"
   COREET_ROOT="$COREET_ROOT" "$ROOT/scripts/coreet_filelist.sh" "$TOP" "$OUTROOT/$TOP/$TOP.f" \
@@ -117,11 +140,11 @@ for TOP in "$@"; do
   # A BLANK field is the failure mode that invalidated an entire table once: the
   # helper died, its capture was empty, and the row still printed as if it had
   # been measured.  Never emit a blank; make it loud instead.
-  if [[ -z "${l// }" ]]; then
+  if [[ -z "${l// }" ]]; then  # a blank CERT_EMIT field is never acceptable
     l="HELPER-FAILED"
     blank_rows=$((blank_rows + 1))
   fi
-  printf '%-26s %10s %8s %10s %8s %-10s %s\n' "$TOP" "$a" "$as" "$b" "$bs" "$l" "$v"
+  printf '%-26s %8s %7s %9s %7s %-26s %s\n' "$TOP" "$a" "$as" "$b" "$bs" "$l" "$v"
 done
 
 if [[ "$blank_rows" -gt 0 ]]; then

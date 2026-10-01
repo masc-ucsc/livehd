@@ -18,12 +18,18 @@
 # requires a nonblank verdict.
 set -u
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SCRIPT="$ROOT/../scripts/proc_ifx_scc_compare.sh"
-[ -r "$SCRIPT" ] || SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/proc_ifx_scc_compare.sh"
-[ -r "$SCRIPT" ] || { echo "FAIL: cannot find proc_ifx_scc_compare.sh"; exit 1; }
+# Under bazel the script arrives through runfiles (//scripts:cycle_provenance_tools);
+# run by hand it is found relative to this file.
+SCRIPT=""
+for c in "${TEST_SRCDIR:-}/_main/scripts/proc_ifx_scc_compare.sh" \
+         "${TEST_SRCDIR:-}/scripts/proc_ifx_scc_compare.sh" \
+         "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)/scripts/proc_ifx_scc_compare.sh" \
+         "scripts/proc_ifx_scc_compare.sh"; do
+  if [ -r "$c" ]; then SCRIPT="$c"; break; fi
+done
+[ -n "$SCRIPT" ] || { echo "FAIL: cannot find proc_ifx_scc_compare.sh"; exit 1; }
 
-OUTDIR="${OUTDIR:-$(cd "$(dirname "$SCRIPT")/.." && pwd)/generated/tests/proc_ifx_helper}"
+OUTDIR="${OUTDIR:-${TEST_TMPDIR:-$(cd "$(dirname "$SCRIPT")/.." && pwd)/generated/tests}/proc_ifx_helper}"
 rm -rf "$OUTDIR"; mkdir -p "$OUTDIR"
 
 # Source for the helpers only -- no sweep, no lhd, no yosys.
@@ -38,11 +44,16 @@ LHD=/bin/true
 export PROC_IFX_LIB_ONLY OUTROOT LHD
 . "$SCRIPT" || { echo "FAIL: sourcing the script errored"; exit 1; }
 
+# Sourcing derives the plain-proc script from the real inou_yosys_read.ys and
+# hard-fails if `proc -ifx` is no longer there to substitute, so reaching this
+# line also means that substitution still matches the shipped script.
+echo "ok: the proc -ifx -> proc substitution still applies to inou_yosys_read.ys"
+
 type lean_on_plain >/dev/null 2>&1 || { echo "FAIL: lean_on_plain not defined"; exit 1; }
 type elaborate     >/dev/null 2>&1 || { echo "FAIL: elaborate not defined"; exit 1; }
 
 # No lg/ directory exists for this module, so the helper must return its
-# defined "no-lg" sentinel. Before the fix it died on the unbound $top instead.
+# defined compile-failure sentinel. Before the fix it died on the unbound $top.
 out="$(lean_on_plain fake_module_with_no_lg 2>"$OUTDIR/stderr.txt")"
 rc=$?
 
@@ -50,7 +61,15 @@ if grep -q "unbound variable" "$OUTDIR/stderr.txt"; then
   echo "FAIL: the bash local-expansion trap is back:"; sed 's/^/    /' "$OUTDIR/stderr.txt"; exit 1
 fi
 [ -n "$out" ] || { echo "FAIL: helper returned a BLANK verdict (rc=$rc) -- a blank table column reads as 'measured, nothing odd'"; exit 1; }
-[ "$out" = "no-lg" ] || { echo "FAIL: expected 'no-lg' for a module with no graph, got '$out'"; exit 1; }
+# The sentinel must say COMPILE, not anything that could be read as a pass.lean
+# verdict: the plain-proc elaboration really can fail on its own (measured:
+# intpipe_csr_file and minion_dcache_top abort with latch-contract rule C under
+# plain proc while compiling cleanly under -ifx), and reporting that as a Lean
+# result would misattribute it.
+case "$out" in
+  PLAIN-COMPILE-FAIL:*) ;;
+  *) echo "FAIL: expected a PLAIN-COMPILE-FAIL:* sentinel for a module with no graph, got '$out'"; exit 1 ;;
+esac
 echo "ok: lean_on_plain returns '$out' instead of dying on an unbound variable"
 
 echo "PASS: proc_ifx_compare_helper_test"

@@ -948,3 +948,124 @@ COREET_TOP=intpipe_mul_div_top LEAN_MODE=verified_compiler RUN_LEAN=false RUN_LE
   STOP_AFTER=lean OUT=/tmp/pb/intpipe_mul_div_top scripts/run_coreet_module_lean.sh
 python3 pass/lean/scripts/direct_sweep.py --out SWEEP.tsv --max-rec-depth 20000000 /tmp/pb
 ```
+
+## 11. Cycle provenance: where the gated modules' comb cycle comes from
+
+Eleven CORE-ET modules were gated on a word-level combinational cycle that
+`pass.lean` refuses. The TSV carried `origin unestablished` for all of them and
+step 6 was blocked on not knowing. This section records what was measured.
+
+**The first stage that holds the cycle, for the txfma family, is yosys process
+lowering — and specifically our own `inou_yosys_read.ys`.** It runs
+
+```
+proc -ifx
+```
+
+and yosys's own documentation for that flag reads: *"This option is passed
+through to proc_mux. **proc_rmdead is not executed in -ifx mode**"*, where
+`proc_rmdead` *"identifies unreachable branches in decision trees and removes
+them."* Without it the "no branch matched → hold previous value" arm of a full
+case survives, and `pmuxtree` builds `Y = sel ? a : Y`. On `txfma_e5` the SCC is
+two `$auto$pmuxtree.cc:65:recursive_mux_generator` muxes on `elxd_res_f5a_h`
+(`txfma_e5.sv:49`), whose case covers both values of a **1-bit** selector:
+
+```systemverilog
+case (nshc_f5a_h)
+  1'b0: elxd_res_f5a_h = elxd_add_f5a_h;
+  1'b1: elxd_res_f5a_h = elxd_add_m1_f5a_h;
+endcase            // full in 2-state terms, but no default
+```
+
+`txfma_e5` and `txfma_f2` were read end to end: both are strictly feed-forward
+and no net reads its own value, so the loop is not written in the RTL.
+
+### The measurement
+
+`scripts/proc_ifx_scc_compare.sh`, logs under `generated/provenance/cycle11/`
+(git-ignored; regenerate with the command in "Reproducing" below). SCC counts
+are `yosys read_rtlil <pp-mem.il>; scc` on the RTLIL the read script dumps.
+
+| module | SCC `-ifx` | SCC plain `proc` | cert emitted on the plain graph |
+|---|---|---|---|
+| txfma_f0 | 16 | 0 | yes |
+| txfma_f2 | 2 | 0 | yes |
+| txfma_f3 | 14 | 0 | yes |
+| txfma_f5 | 1 | 0 | yes |
+| txfma_e5 | 1 | 0 | yes |
+| txfma_f6 | 6 | 0 | yes |
+| txfmaexp_top | 1 | 0 | yes |
+| txfmafrac_top | 39 | 0 | not measured — needs `pass.single_edge` |
+| txfma_top | 40 | 0 | not measured — needs `pass.single_edge` |
+| intpipe_csr_file | 0 | 0 | plain proc FAILS TO COMPILE (latch-contract C) |
+| minion_dcache_top | 0 | 0 | plain proc FAILS TO COMPILE (latch-contract C) |
+
+### What this does and does not establish
+
+It establishes a **lowering differential**: the SCC is retained under `-ifx` and
+removed when `proc_rmdead` runs.
+
+It does **not** establish which 4-state/X semantics is faithful. yosys documents
+`-ifx` as the Verilog *simulation* behaviour for undefined conditions, and these
+RTL files deliberately suppress `CASEINCOMPLETE`
+(`txfma_e5.sv:14`), so the hold arm may be what the author intended under X. The
+Lean model is 2-state, so plain `proc` may well be sound on the model domain —
+but that needs the defined-input equivalence gate, not this table.
+
+"Cert emitted" above means **`pass.lean` exited 0 and wrote certificate text**.
+It is *not* `lake build` / `checkDesign` / simulator acceptance. The 122-CORE-ET
+and 30-CVA6 milestones require that later pipeline acceptance; emission alone
+does not count toward them.
+
+### Globally replacing `proc -ifx` with `proc` is NOT safe
+
+Two independent measurements say so, and both are reasons the flag exists:
+
+* **Termination.** `intpipe_decode` under `-ifx`: 0 SCCs in ~1 s. Under plain
+  `proc`: 100% CPU with RSS 1.58 → 1.94 → 2.36 GB over 40 s, still climbing when
+  killed. The read script's wide-decoder warning is current, not stale.
+* **Compilability.** `intpipe_csr_file` and `minion_dcache_top` compile cleanly
+  under `-ifx` and **fail** under plain `proc` with `latch-contract` rule C
+  (simultaneously-transparent pair) — `proc_dlatch` infers a real `$dlatch`
+  where `-ifx` left a comb self-loop. Both already had 0 SCCs under `-ifx`, so
+  plain proc costs them everything and buys them nothing.
+
+### The shape of a selective fix (NOT yet implemented)
+
+The two populations are disjoint: every module that needs `proc_rmdead` has a
+non-zero SCC count under `-ifx`, and every module where `proc_rmdead` is harmful
+has zero. So escalation can be driven by the SCC count:
+
+1. First lowering is always `proc -ifx` — unchanged default, unchanged X policy.
+2. Run `scc`. Zero ⇒ done; never escalate. This is what keeps `intpipe_decode`,
+   `intpipe_csr_file` and `minion_dcache_top` on today's path.
+3. Non-zero ⇒ retry **that module** with plain `proc`, in a **fresh process**
+   and under an **external** time and RSS bound. In-process retry cannot
+   recover from a `proc_rmdead` OOM.
+4. The retry may still time out — a top containing both a retained SCC and a
+   wide decoder can hit the expensive path legitimately. Timeout/refusal stays a
+   valid outcome; "auto always succeeds" would be false.
+5. A mode knob (`ifx` | `plain` | `auto`) logging the selected path, both SCC
+   counts, and the retry budget/exit. **`ifx` stays the default** until
+   defined-input equivalence is established.
+
+Until that gate passes, the usable milestone is explicit `plain` mode on the
+seven measured txfma modules, via `YOSYS_SCRIPT`. `intpipe_csr_file` and
+`minion_dcache_top` are separate causes and must not be counted as rescued by
+this fallback; `txfmafrac_top`/`txfma_top` need the full runner before any claim.
+
+### Reproducing
+
+```bash
+scripts/proc_ifx_scc_compare.sh txfma_e5 intpipe_csr_file          # the differential
+scripts/cycle_provenance.sh    txfma_e5                            # stage-by-stage
+bazel test //lhd/tests:proc_ifx_compare_helper_test                # pins the comparator helpers
+YOSYS_SCRIPT=$PWD/generated/provenance/cycle11/read_plain_proc.ys \
+  COREET_TOP=txfma_e5 STOP_AFTER=lean scripts/run_coreet_module_lean.sh
+```
+
+Two traps that silently invalidate results here, both handled in the scripts and
+both hit during this work: `write_rtlil pp-mem.il` is a **relative** path and
+yosys is linked *into* `lhd`, so the dump lands in `lhd`'s CWD, not `--workdir`;
+and `lhd compile lg:` defaults to recipe **O1**, which runs `pass.cprop`, so a
+"raw graph" column without an explicit `--recipe O0` is a second cprop column.

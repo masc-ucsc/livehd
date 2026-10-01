@@ -100,12 +100,15 @@ printf '// Empty anchor. Real CORE-ET sources arrive via yosys.filelist_file.\n'
   echo "STOP_AFTER=$STOP_AFTER"
   # YOSYS_SCRIPT swaps inou_yosys_read.ys for a variant, and the one that
   # matters is `proc` instead of `proc -ifx`: -ifx skips proc_rmdead, which is
-  # what prunes the unreachable hold arm of a FULL case, and without it that arm
-  # survives as `Y = sel ? a : Y` -- a logic loop that was never in the RTL and
-  # that gates seven txfma_* modules.  It is NOT a safe global default: -ifx
-  # also sets proc_mux's X policy, and the read script documents proc_rmdead
-  # blowing up on wide casex/casez decoders.  Measured per module under
-  # generated/provenance/.
+  # what prunes the unreachable hold arm of a full case.  MEASURED: the RTLIL
+  # SCC is RETAINED under -ifx and REMOVED by proc_rmdead/plain proc on seven
+  # txfma_* modules.  That is a lowering differential and nothing more -- it
+  # does not establish which 4-state/X semantics is faithful, since yosys
+  # documents -ifx as the simulation behaviour for undefined conditions and
+  # these files deliberately suppress CASEINCOMPLETE.  It is NOT a safe global
+  # default: measured, plain proc blows up on intpipe_decode (2.4 GB and
+  # climbing at kill) which has 0 SCCs under -ifx anyway.  See
+  # generated/provenance/ and pass/lean/DIRECTION2_RESULTS.md.
   echo "YOSYS_SCRIPT=${YOSYS_SCRIPT:-<default inou_yosys_read.ys>}"
 } > "$LOG_DIR/preflight.log"
 

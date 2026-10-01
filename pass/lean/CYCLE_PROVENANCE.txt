@@ -1,0 +1,31 @@
+# Cycle provenance for the 11 cycle-gated CORE-ET modules.
+#
+# Produced by: scripts/proc_ifx_scc_compare.sh <the 11 modules below>
+# SCC columns: `yosys read_rtlil <pp-mem.il>; scc` on the RTLIL that
+# inou_yosys_read.ys dumps, elaborated once under the shipped `proc -ifx` and
+# once under plain `proc`.  *_S columns are elaboration wall seconds.
+#
+# CERT_EMIT is pass.lean EXIT 0 ON THE PLAIN-PROC GRAPH -- certificate text was
+# written.  It is NOT lake build / checkDesign / simulator acceptance, and does
+# NOT count toward the 122-CORE-ET milestone.
+#
+# EVIDENCE wording is deliberately neutral: this is a LOWERING DIFFERENTIAL.  It
+# does not establish which 4-state/X semantics is faithful -- yosys documents
+# -ifx as the simulation behaviour for undefined conditions, and these RTL files
+# deliberately suppress CASEINCOMPLETE.
+#
+# Full discussion, including why plain proc is NOT a safe global default:
+# pass/lean/DIRECTION2_RESULTS.md section 11.
+
+MODULE                      IFX_SCC   IFX_S PLAIN_SCC PLAIN_S CERT_EMIT                  EVIDENCE
+txfma_f0                         16       0         0       1 CERT-EMITTED               SCC retained by -ifx; removed by proc_rmdead/plain proc
+txfma_f2                          2       8         0       8 CERT-EMITTED               SCC retained by -ifx; removed by proc_rmdead/plain proc
+txfma_f3                         14       1         0       0 CERT-EMITTED               SCC retained by -ifx; removed by proc_rmdead/plain proc
+txfma_f5                          1       0         0       0 CERT-EMITTED               SCC retained by -ifx; removed by proc_rmdead/plain proc
+txfma_e5                          1       0         0       1 CERT-EMITTED               SCC retained by -ifx; removed by proc_rmdead/plain proc
+txfma_f6                          6       0         0       0 CERT-EMITTED               SCC retained by -ifx; removed by proc_rmdead/plain proc
+txfmafrac_top                    39     111         0     111 NEEDS-SINGLE-EDGE          SCC retained by -ifx; removed by proc_rmdead/plain proc
+txfma_top                        40     155         0     154 NEEDS-SINGLE-EDGE          SCC retained by -ifx; removed by proc_rmdead/plain proc
+txfmaexp_top                      1       2         0       1 CERT-EMITTED               SCC retained by -ifx; removed by proc_rmdead/plain proc
+intpipe_csr_file                  0      20         0      21 PLAIN-COMPILE-FAIL:latch-contract no RTLIL SCC under either lowering
+minion_dcache_top                 0      67         0      65 PLAIN-COMPILE-FAIL:latch-contract no RTLIL SCC under either lowering
