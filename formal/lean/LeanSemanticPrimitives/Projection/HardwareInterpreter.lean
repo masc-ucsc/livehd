@@ -81,6 +81,10 @@ private def andCode     : Int := Int.ofNat (opCode .Op_And)
 private def orCode      : Int := Int.ofNat (opCode .Op_Or)
 private def sraCode     : Int := Int.ofNat (opCode .Op_SRA)
 private def getMaskCode : Int := Int.ofNat (opCode .Op_GetMask)
+private def xorCode     : Int := Int.ofNat (opCode .Op_Xor)
+private def notCode     : Int := Int.ofNat (opCode .Op_Not)
+-- `opCode` ignores the payload, so any witness names the same code
+private def sumCode     : Int := Int.ofNat (opCode (.Op_Sum 0))
 
 def hwS : SProgram where
   entry := "main"
@@ -188,7 +192,14 @@ def hwS : SProgram where
                   (C "opSra" [R "w", R "deps", R "env", R "n"])
                 (.ite (P .eqI [R "code", .lit (.int getMaskCode)])
                   (C "opGetMask" [R "w", R "deps", R "env", R "n"])
-                  (P .bvMk [R "w", int 0])))))] },
+                (.ite (P .eqI [R "code", .lit (.int xorCode)])
+                  (C "opXor" [R "w", R "deps", R "env", R "n"])
+                (.ite (P .eqI [R "code", .lit (.int notCode)])
+                  (C "opNot" [R "w", R "deps", R "env", R "n"])
+                (.ite (P .eqI [R "code", .lit (.int sumCode)])
+                  -- the ONLY operator that reads the opcode payload
+                  (C "opSum" [R "w", R "pay", R "deps", R "env", R "n"])
+                  (P .bvMk [R "w", int 0])))))))) ] },
 
   -- Op_And: resize the FIRST operand to the node width, fold the rest in
   -- unchanged.  Mirrors `eval_op` exactly; see `OperatorBridge.evalOp_And_cons`.
@@ -218,6 +229,48 @@ def hwS : SProgram where
                  [ P .tl [R "deps"], R "env", R "n"
                  , P .bvOr [R "w", R "acc", C "slot" [R "env", R "n", P .hd [R "deps"]]]
                  , R "w" ]) },
+
+  -- Op_Xor: Op_Or's shape with `xor` (`OperatorBridge.evalOp_Xor_fold`).
+  { name := "opXor", params := ["w", "deps", "env", "n"], inline := true
+  , body := C "foldXor" [R "deps", R "env", R "n", P .bvMk [R "w", int 0], R "w"] },
+
+  { name := "foldXor", params := ["deps", "env", "n", "acc", "w"], inline := true
+  , body := .ite (P .isNil [R "deps"]) (R "acc")
+              (C "foldXor"
+                 [ P .tl [R "deps"], R "env", R "n"
+                 , P .bvXor [R "w", R "acc", C "slot" [R "env", R "n", P .hd [R "deps"]]]
+                 , R "w" ]) },
+
+  -- Op_Not is strictly unary.
+  { name := "opNot", params := ["w", "deps", "env", "n"], inline := true
+  , body := P .bvNot [R "w", C "slot" [R "env", R "n", P .hd [R "deps"]]] },
+
+  -- Op_Sum: the first `k` operands are ADDED and the rest SUBTRACTED, all
+  -- through `bv_uint`, with the node width applied ONCE at the end -- so the
+  -- truncation is of the sum, not of each term.  `k` is the opcode payload and
+  -- therefore static, so both walks unroll.
+  { name := "opSum", params := ["w", "pay", "deps", "env", "n"], inline := true
+  , body := P .bvMk
+              [ R "w"
+              , P .subI [ C "sumAdds" [R "pay", R "deps", R "env", R "n"]
+                        , C "sumSubs" [R "pay", R "deps", R "env", R "n"] ] ] },
+
+  { name := "sumAdds", params := ["k", "deps", "env", "n"], inline := true
+  , body := .ite (P .isNil [R "deps"]) (int 0)
+              (.ite (P .eqI [R "k", int 0]) (int 0)
+                 (P .addI
+                    [ P .bvUint [C "slot" [R "env", R "n", P .hd [R "deps"]]]
+                    , C "sumAdds"
+                        [P .subI [R "k", int 1], P .tl [R "deps"], R "env", R "n"] ])) },
+
+  { name := "sumSubs", params := ["k", "deps", "env", "n"], inline := true
+  , body := .ite (P .isNil [R "deps"]) (int 0)
+              (.ite (P .eqI [R "k", int 0])
+                 (P .addI
+                    [ P .bvUint [C "slot" [R "env", R "n", P .hd [R "deps"]]]
+                    , C "sumSubs" [int 0, P .tl [R "deps"], R "env", R "n"] ])
+                 (C "sumSubs"
+                    [P .subI [R "k", int 1], P .tl [R "deps"], R "env", R "n"])) },
 
   -- Op_SRA and Op_GetMask are binary and delegate directly; the operand order
   -- is the pinned model's (`eval_op .. w [a, b]`).
@@ -392,6 +445,59 @@ private def or3D : DesignCert where
   runHw or3D (allEdges or3D) #[mk_bv 4 t.1, mk_bv 4 t.2.1, mk_bv 4 t.2.2] tinySt
     == refOf or3D (allEdges or3D) #[mk_bv 4 t.1, mk_bv 4 t.2.1, mk_bv 4 t.2.2] tinySt)
 
+/-! ### Batch 2 operators: `Op_Xor`, `Op_Not`, `Op_Sum` -/
+
+#guard [(5,3),(12,10),(0,15),(8,1),(15,15)].all (fun p => binOK .Op_Xor p.1 p.2)
+
+-- `Op_Xor` is zero-seeded and folds EVERY operand, so a three-input node is
+-- again not `Op_And`'s shape
+private def xor3D : DesignCert where
+  sources  := #[.input 0 4, .input 1 4, .input 2 4]
+  nodes    := #[{ op := .Op_Xor, width := 4, deps := #[0, 1, 2] }]
+  outputs  := #[{ slot := 3, width := 4 }]
+  flops    := #[]
+  memories := #[]
+
+#guard [(1,2,4),(8,4,2),(0,0,0),(15,15,15)].all (fun t =>
+  runHw xor3D (allEdges xor3D) #[mk_bv 4 t.1, mk_bv 4 t.2.1, mk_bv 4 t.2.2] tinySt
+    == refOf xor3D (allEdges xor3D) #[mk_bv 4 t.1, mk_bv 4 t.2.1, mk_bv 4 t.2.2] tinySt)
+
+-- `Op_Not` is strictly unary
+private def notD : DesignCert where
+  sources  := #[.input 0 4]
+  nodes    := #[{ op := .Op_Not, width := 4, deps := #[0] }]
+  outputs  := #[{ slot := 1, width := 4 }]
+  flops    := #[]
+  memories := #[]
+
+#guard [0,1,5,8,15].all (fun a =>
+  runHw notD (allEdges notD) #[mk_bv 4 a] tinySt
+    == refOf notD (allEdges notD) #[mk_bv 4 a] tinySt)
+
+-- `Op_Sum`'s PAYLOAD is the partition point: `n_add` operands are added and the
+-- REST subtracted.  All three settings over the same two operands agree with
+-- the reference…
+#guard [(3,5),(15,15),(0,1),(9,9)].all (fun p => binOK (.Op_Sum 2) p.1 p.2)
+#guard [(3,5),(15,15),(0,1),(9,9)].all (fun p => binOK (.Op_Sum 1) p.1 p.2)
+#guard [(3,5),(15,15),(0,1),(9,9)].all (fun p => binOK (.Op_Sum 0) p.1 p.2)
+
+-- …and these are the vectors that say the partition is real rather than
+-- symmetric.  On (3, 5): both added is 8; the second subtracted is 3-5 = -2;
+-- both subtracted is -8.  A payload that failed to survive encoding would
+-- collapse these three to one answer.
+#guard (interpretDesign (binD (.Op_Sum 2)) (allEdges (binD (.Op_Sum 2)))
+          (binIn 3 5) tinySt).outputs == #[mk_bv 4 8]
+#guard (interpretDesign (binD (.Op_Sum 1)) (allEdges (binD (.Op_Sum 1)))
+          (binIn 3 5) tinySt).outputs == #[mk_bv 4 14]
+#guard (interpretDesign (binD (.Op_Sum 0)) (allEdges (binD (.Op_Sum 0)))
+          (binIn 3 5) tinySt).outputs == #[mk_bv 4 8]
+
+-- WIDTH TRUNCATION IS OF THE SUM, applied once at the end by `mk_bv`: 15 + 15
+-- is 30, which is 14 at width 4 -- not a saturation and not a per-term wrap.
+#guard (interpretDesign (binD (.Op_Sum 2)) (allEdges (binD (.Op_Sum 2)))
+          (binIn 15 15) tinySt).outputs == #[mk_bv 4 14]
+#guard binOK (.Op_Sum 2) 15 15
+
 -- SRA IS ARITHMETIC, and this is the vector that says so: 0b1000 is -8 at
 -- width 4, so shifting right by one gives -4 = 0b1100, not the 0b0100 a
 -- LOGICAL shift would give.
@@ -503,11 +609,13 @@ to keep growing. -/
 private def binR (o : LGraphOp) : Program :=
   match projectDesign (binD o) with | .ok p => p | .error _ => ⟨[], 0⟩
 
-#guard [LGraphOp.Op_Or, .Op_SRA, .Op_GetMask].all
-         (fun o => (projectDesign (binD o)).toOption.isSome)
+private def b12Ops : List LGraphOp :=
+  [.Op_Or, .Op_SRA, .Op_GetMask, .Op_Xor, .Op_Not, .Op_Sum 2, .Op_Sum 1, .Op_Sum 0]
+
+#guard b12Ops.all (fun o => (projectDesign (binD o)).toOption.isSome)
 
 -- no design tag survives, for any of them
-#guard [LGraphOp.Op_Or, .Op_SRA, .Op_GetMask].all (fun o =>
+#guard b12Ops.all (fun o =>
   [tagDesign, tagSrcInput, tagSrcConst, tagNode, tagOp, tagOutput].all
     (fun t => t ∉ tagsIn (binR o)))
 
@@ -537,8 +645,16 @@ private partial def primsOf : Term → List Prim
 #guard (((binR .Op_SRA).funs.map (fun fd => primsOf fd.body)).flatten).contains Prim.bvSra
 #guard (((binR .Op_GetMask).funs.map (fun fd => primsOf fd.body)).flatten).contains Prim.bvGetMask
 #guard (((binR .Op_Or).funs.map (fun fd => primsOf fd.body)).flatten).contains Prim.bvOr
-#guard [LGraphOp.Op_Or, .Op_SRA, .Op_GetMask].all (fun o =>
+#guard b12Ops.all (fun o =>
   !(((binR o).funs.map (fun fd => primsOf fd.body)).flatten).contains Prim.eqI)
+
+-- batch 2, at the primitive level
+#guard (((binR .Op_Xor).funs.map (fun fd => primsOf fd.body)).flatten).contains Prim.bvXor
+#guard (((binR .Op_Not).funs.map (fun fd => primsOf fd.body)).flatten).contains Prim.bvNot
+-- `Op_Sum` residualizes to integer arithmetic over `bvUint`, then one `bvMk`
+#guard (((binR (.Op_Sum 1)).funs.map (fun fd => primsOf fd.body)).flatten).contains Prim.bvUint
+#guard (((binR (.Op_Sum 1)).funs.map (fun fd => primsOf fd.body)).flatten).contains Prim.subI
+#guard (((binR (.Op_Sum 1)).funs.map (fun fd => primsOf fd.body)).flatten).contains Prim.bvMk
 
 -- the two `ite`s left in the sequential residual are the reset and enable
 -- tests, which are genuinely runtime conditions; the combinational design has

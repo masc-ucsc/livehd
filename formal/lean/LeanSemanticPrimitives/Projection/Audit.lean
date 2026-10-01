@@ -106,6 +106,14 @@ namespace Projection
 #print axioms evalOpCert_Or
 #print axioms evalOpCert_SRA
 #print axioms evalOpCert_GetMask
+-- Phase 3 batch 2: Op_Xor, Op_Not, Op_Sum
+#print axioms evalOp_Xor_fold
+#print axioms evalOp_Xor_two
+#print axioms evalOp_Not
+#print axioms evalOp_Sum
+#print axioms evalOpCert_Xor
+#print axioms evalOpCert_Not
+#print axioms evalOpCert_Sum
 #print axioms srcFlopNext_eq
 -- multi-clock: the shared semantics, and conservativity
 #print axioms Compiler.interpretDesign_allEdges

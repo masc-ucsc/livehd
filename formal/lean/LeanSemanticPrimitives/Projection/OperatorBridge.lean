@@ -146,6 +146,42 @@ theorem evalOpCert_SRA (w : Nat) (l : List BV) :
 theorem evalOp_GetMask (w : Nat) (a m : BV) :
     eval_op .Op_GetMask w [a, m] = bv_get_mask w a m := rfl
 
+/-! ### Batch 2: `Op_Xor`, `Op_Not`, `Op_Sum`
+
+`Op_Xor` is `Op_Or`'s shape with `xor`: zero-seeded, folding EVERY operand.
+`Op_Not` is strictly unary.  `Op_Sum` carries its split point as the OPCODE
+PAYLOAD -- `n_add` operands are added and the REST subtracted, all through
+`bv_uint`, with the node width applied once at the end by `mk_bv`.  So the
+truncation is of the SUM, not of each term. -/
+
+theorem evalOp_Xor_fold (w : Nat) (args : List BV) :
+    eval_op .Op_Xor w args
+      = args.foldl (fun acc b => bv_bitwise w (fun x y => xor x y) acc b) (mk_bv w 0) := rfl
+
+theorem evalOp_Xor_two (w : Nat) (a b : BV) :
+    eval_op .Op_Xor w [a, b]
+      = bv_bitwise w (fun x y => xor x y)
+          (bv_bitwise w (fun x y => xor x y) (mk_bv w 0) a) b := rfl
+
+theorem evalOpCert_Xor (w : Nat) (l : List BV) :
+    eval_op_cert .Op_Xor w (l.map CertVal.bv) = .bv (eval_op .Op_Xor w l) :=
+  eval_op_cert_bv .Op_Xor w l (fun _ => ⟨by simp, by simp, by simp⟩)
+
+theorem evalOp_Not (w : Nat) (a : BV) : eval_op .Op_Not w [a] = bv_not w a := rfl
+
+theorem evalOpCert_Not (w : Nat) (l : List BV) :
+    eval_op_cert .Op_Not w (l.map CertVal.bv) = .bv (eval_op .Op_Not w l) :=
+  eval_op_cert_bv .Op_Not w l (fun _ => ⟨by simp, by simp, by simp⟩)
+
+theorem evalOp_Sum (nAdd w : Nat) (args : List BV) :
+    eval_op (.Op_Sum nAdd) w args
+      = mk_bv w (((args.map bv_uint).take nAdd).sum
+                 - ((args.map bv_uint).drop nAdd).sum) := rfl
+
+theorem evalOpCert_Sum (nAdd w : Nat) (l : List BV) :
+    eval_op_cert (.Op_Sum nAdd) w (l.map CertVal.bv) = .bv (eval_op (.Op_Sum nAdd) w l) :=
+  eval_op_cert_bv (.Op_Sum nAdd) w l (fun _ => ⟨by simp, by simp, by simp⟩)
+
 theorem evalOpCert_GetMask (w : Nat) (l : List BV) :
     eval_op_cert .Op_GetMask w (l.map CertVal.bv) = .bv (eval_op .Op_GetMask w l) :=
   eval_op_cert_bv .Op_GetMask w l (fun _ => ⟨by simp, by simp, by simp⟩)
