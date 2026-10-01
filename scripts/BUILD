@@ -21,6 +21,8 @@ filegroup(
         "lean_local_lake.sh",
         "lec_gate_verdict.sh",
         "proc_ifx_scc_compare.sh",
+        "lgraph_scc.py",
+        "lgraph_cycle_stages.sh",
     ],
     visibility = ["//visibility:public"],
 )

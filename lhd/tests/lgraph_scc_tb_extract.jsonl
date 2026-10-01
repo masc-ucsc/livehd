@@ -1,0 +1,242 @@
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 1664, "kind": "and", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:377", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 1668, "kind": "or", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:376", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 1732, "kind": "and", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:413", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 1872, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:546", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 1892, "kind": "and", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:564", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 1896, "kind": "and", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:564", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 1956, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:626", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 1960, "kind": "and", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:626", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 2032, "kind": "not", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:652", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 2052, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:661", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 2056, "kind": "not", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:661", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 2060, "kind": "and", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:661", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 2104, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/tech_generic/prim_rf_1r1w_diff_preview/rtl/prim_rf_1r1w_diff_preview.sv:59", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 2272, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/tech_generic/prim_rf_1r1w_diff_preview/rtl/prim_rf_1r1w_diff_preview.sv:76", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 2292, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/tech_generic/prim_rf_1r1w_diff_preview/rtl/prim_rf_1r1w_diff_preview.sv:76", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 2332, "kind": "shl", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:259", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 2400, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:274", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 2404, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:274", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 2408, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:274", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 2448, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:274", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 2520, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/tech_generic/prim_rf_1r1w_diff_preview/rtl/prim_rf_1r1w_diff_preview.sv:76", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 2556, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/tech_generic/prim_rf_1r1w_diff_preview/rtl/prim_rf_1r1w_diff_preview.sv:76", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 2576, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/tech_generic/prim_rf_1r1w_diff_preview/rtl/prim_rf_1r1w_diff_preview.sv:76", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 2588, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/tech_generic/prim_rf_1r1w_diff_preview/rtl/prim_rf_1r1w_diff_preview.sv:76", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 2592, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/tech_generic/prim_rf_1r1w_diff_preview/rtl/prim_rf_1r1w_diff_preview.sv:76", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 8624, "kind": "mux", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 17928, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:623", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 18120, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:546", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 18124, "kind": "eq", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:546", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 18188, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:378", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 18196, "kind": "eq", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:378", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 18304, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:263", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 18396, "kind": "mux", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/tech_generic/prim_rf_1r1w_diff_preview/rtl/prim_rf_1r1w_diff_preview.sv:59", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 18400, "kind": "eq", "name": null, "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/tech_generic/prim_rf_1r1w_diff_preview/rtl/prim_rf_1r1w_diff_preview.sv:59", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 18576, "kind": "memory", "name": "buffer_pc", "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/minion/frontend/rtl/minion_frontend_thread_buffer.sv:102", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 18584, "kind": "memory", "name": "u_inst_data.rf_q", "color": null, "match": null, "src": "../../../../../../core-et/hw/ip/tech_generic/prim_rf_1r1w_diff_preview/rtl/prim_rf_1r1w_diff_preview.sv:25", "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 19100, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 19220, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 19476, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 19504, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 19512, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 19520, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 19660, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 19664, "kind": "sum", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 19672, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 19916, "kind": "eq", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 19920, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 19924, "kind": "and", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 19928, "kind": "sra", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 19932, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 20072, "kind": "sext", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 20076, "kind": "eq", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 20080, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 20088, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 20196, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 20688, "kind": "and", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 20692, "kind": "sra", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 20988, "kind": "sext", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 21392, "kind": "sext", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 21552, "kind": "sext", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 21632, "kind": "sext", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 21672, "kind": "sext", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 21692, "kind": "sext", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 41320, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 41324, "kind": "and", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 81856, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 81860, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 82000, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 82004, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 82288, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 82292, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 82296, "kind": "and", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 82300, "kind": "sra", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 82304, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 82728, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 82792, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 83816, "kind": "or", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 83820, "kind": "get_mask", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "node", "mod": "minion_frontend_thread_buffer", "nid": 89964, "kind": "mux", "name": null, "color": null, "match": null, "src": null, "partitionable": true}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 18576, "name": null, "bits": 49, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 18576, "name": null, "bits": 49, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 18576, "name": null, "bits": 49, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 18576, "name": null, "bits": 49, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 18576, "name": null, "bits": 49, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 18584, "name": null, "bits": 256, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 18584, "name": null, "bits": 256, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 20692, "name": null, "bits": 3, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 21392, "name": null, "bits": 32, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 20688, "name": null, "bits": 3, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 2332, "name": "buffer_word_en[15:8]", "bits": 8, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 20988, "name": null, "bits": 8, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 2520, "name": "auto$bmuxmap.cc:84:execute$832[511:480]", "bits": 32, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 2448, "name": null, "bits": 8, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 21552, "name": null, "bits": 32, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 2400, "name": null, "bits": 8, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 2556, "name": "auto$bmuxmap.cc:84:execute$849[255:224]", "bits": 32, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 2404, "name": null, "bits": 8, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 21632, "name": null, "bits": 32, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 2576, "name": "auto$bmuxmap.cc:84:execute$858[127:96]", "bits": 32, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 2408, "name": null, "bits": 8, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 21672, "name": null, "bits": 32, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 2588, "name": "auto$bmuxmap.cc:84:execute$863[63:32]", "bits": 32, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 21692, "name": null, "bits": 32, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 2592, "name": null, "bits": 32, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 18304, "name": "u_inst_data.wr_en_i", "bits": 8, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 2272, "name": null, "bits": 32, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 82292, "name": null, "bits": 9, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 2292, "name": "f6_buffer_inst_data", "bits": 32, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 82300, "name": null, "bits": 1, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 20072, "name": null, "bits": 2, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 82296, "name": null, "bits": 1, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 2052, "name": null, "bits": 2, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 82304, "name": null, "bits": 2, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 20080, "name": null, "bits": 3, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 18400, "name": null, "bits": 1, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 20076, "name": null, "bits": 1, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 82288, "name": null, "bits": 2, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 2056, "name": null, "bits": 1, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 18396, "name": null, "bits": 1, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 20088, "name": null, "bits": 2, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 20196, "name": null, "bits": 2, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 2060, "name": "f6_inst_rvc", "bits": 1, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 2104, "name": null, "bits": 256, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 19660, "name": null, "bits": 2, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 41320, "name": null, "bits": 257, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 1956, "name": null, "bits": 5, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 41324, "name": null, "bits": 1, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 19672, "name": null, "bits": 6, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 19664, "name": null, "bits": 5, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 1960, "name": null, "bits": 5, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 17928, "name": "f6_buffer_ptr_next", "bits": 5, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 19920, "name": null, "bits": 6, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 19928, "name": null, "bits": 1, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 19924, "name": null, "bits": 1, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 8624, "name": null, "bits": 1, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 19932, "name": null, "bits": 2, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 82792, "name": null, "bits": 2, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 19916, "name": null, "bits": 1, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 83820, "name": null, "bits": 3, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 2032, "name": "f6_last_from_buffer", "bits": 1, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 19504, "name": null, "bits": 2, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 83816, "name": null, "bits": 256, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 1892, "name": null, "bits": 1, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 19512, "name": null, "bits": 2, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 1896, "name": null, "bits": 1, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 19520, "name": null, "bits": 2, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 1664, "name": null, "bits": 1, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 19100, "name": null, "bits": 2, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 1668, "name": null, "bits": 1, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 82004, "name": null, "bits": 2, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 18196, "name": null, "bits": 1, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 82000, "name": null, "bits": 2, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 18188, "name": "f0_req_buffer", "bits": 1, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 19220, "name": null, "bits": 2, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 1732, "name": "f0_buffer_pc_en[1]", "bits": 1, "signed": true, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 81860, "name": null, "bits": 2, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 18124, "name": null, "bits": 1, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 81856, "name": null, "bits": 2, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 18120, "name": null, "bits": 1, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 19476, "name": null, "bits": 2, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 1872, "name": null, "bits": 49, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 82728, "name": null, "bits": 50, "signed": false, "match": null}
+{"t": "pin", "mod": "minion_frontend_thread_buffer", "nid": 89964, "name": null, "bits": 50, "signed": false, "match": null}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "memory_18584:u_inst_data.rf_q.p1", "to": "sext_21392.p0", "bits": 256}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "sext_21392.p0", "to": "mux_2520.p2", "bits": 32}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_2520.auto$bmuxmap.cc:84:execute$832[511:480]", "to": "sext_21552.p0", "bits": 32}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "sext_21552.p0", "to": "mux_2556.p2", "bits": 32}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_2556.auto$bmuxmap.cc:84:execute$849[255:224]", "to": "sext_21632.p0", "bits": 32}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "sext_21632.p0", "to": "mux_2576.p2", "bits": 32}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_2576.auto$bmuxmap.cc:84:execute$858[127:96]", "to": "sext_21672.p0", "bits": 32}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "sext_21672.p0", "to": "mux_2588.p2", "bits": 32}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_2588.auto$bmuxmap.cc:84:execute$863[63:32]", "to": "sext_21692.p0", "bits": 32}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "sext_21692.p0", "to": "mux_2592.p2", "bits": 32}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_2592.p0", "to": "mux_2272.p2", "bits": 32}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_2272.p0", "to": "mux_2292.p2", "bits": 32}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_2292.f6_buffer_inst_data", "to": "sext_20072.p0", "bits": 32}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "sext_20072.p0", "to": "mux_2052.p1", "bits": 2}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_2052.p0", "to": "get_mask_20080.p0", "bits": 2}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_20080.p0", "to": "eq_20076.p0", "bits": 3}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "eq_20076.p0", "to": "not_2056.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "not_2056.p0", "to": "get_mask_20088.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_20088.p0", "to": "and_2060.f6_inst_rvc", "bits": 2}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "and_2060.f6_inst_rvc", "to": "get_mask_19660.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_19660.p0", "to": "mux_1956.p0", "bits": 2}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_1956.p0", "to": "get_mask_19672.p0", "bits": 5}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_19672.p0", "to": "sum_19664.p0", "bits": 6}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "sum_19664.p0", "to": "and_1960.p0", "bits": 5}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "and_1960.p0", "to": "mux_17928.p1", "bits": 5}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_17928.f6_buffer_ptr_next", "to": "get_mask_19920.p0", "bits": 5}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_19920.p0", "to": "sra_19928.p0", "bits": 6}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "sra_19928.p0", "to": "and_19924.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "and_19924.p0", "to": "get_mask_19932.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_19932.p0", "to": "eq_19916.p0", "bits": 2}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "eq_19916.p0", "to": "not_2032.f6_last_from_buffer", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "not_2032.f6_last_from_buffer", "to": "get_mask_19504.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_19504.p0", "to": "and_1892.p0", "bits": 2}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "and_1892.p0", "to": "get_mask_19512.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_19512.p0", "to": "and_1896.p0", "bits": 2}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "and_1896.p0", "to": "get_mask_19520.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_19520.p0", "to": "and_1664.p0", "bits": 2}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "and_1664.p0", "to": "get_mask_19100.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_19100.p0", "to": "or_1668.p0", "bits": 2}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "or_1668.p0", "to": "get_mask_82004.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_82004.p0", "to": "eq_18196.p0", "bits": 2}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "eq_18196.p0", "to": "get_mask_82000.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_82000.p0", "to": "mux_18188.f0_req_buffer", "bits": 2}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_18188.f0_req_buffer", "to": "get_mask_19220.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_19220.p0", "to": "and_1732.f0_buffer_pc_en[1]", "bits": 2}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "and_1732.f0_buffer_pc_en[1]", "to": "get_mask_81860.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_81860.p0", "to": "eq_18124.p0", "bits": 2}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "eq_18124.p0", "to": "get_mask_81856.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_81856.p0", "to": "mux_18120.p0", "bits": 2}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_18120.p0", "to": "get_mask_19476.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_19476.p0", "to": "mux_1872.p0", "bits": 2}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_1872.p0", "to": "get_mask_82728.p0", "bits": 49}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_82728.p0", "to": "mux_89964.p2", "bits": 50}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_89964.p0", "to": "memory_18576:buffer_pc.p20", "bits": 50}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "memory_18576:buffer_pc.p2", "to": "sra_20692.p0", "bits": 49}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "sra_20692.p0", "to": "and_20688.p0", "bits": 3}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "and_20688.p0", "to": "shl_2332.p1", "bits": 3}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "shl_2332.buffer_word_en[15:8]", "to": "sext_20988.p0", "bits": 8}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "sext_20988.p0", "to": "mux_2448.p2", "bits": 8}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_2448.p0", "to": "mux_2400.p2", "bits": 8}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_2400.p0", "to": "mux_2404.p2", "bits": 8}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_2404.p0", "to": "mux_2408.p2", "bits": 8}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_2408.p0", "to": "mux_18304.p1", "bits": 8}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_18304.u_inst_data.wr_en_i", "to": "get_mask_82292.p0", "bits": 8}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_82292.p0", "to": "sra_82300.p0", "bits": 9}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "sra_82300.p0", "to": "and_82296.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "and_82296.p0", "to": "get_mask_82304.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_82304.p0", "to": "eq_18400.p0", "bits": 2}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "eq_18400.p0", "to": "get_mask_82288.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_82288.p0", "to": "mux_18396.p0", "bits": 2}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_18396.p0", "to": "get_mask_20196.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_20196.p0", "to": "mux_2104.p0", "bits": 2}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_2104.p0", "to": "get_mask_41320.p0", "bits": 256}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_41320.p0", "to": "and_41324.p0", "bits": 257}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "and_41324.p0", "to": "mux_8624.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "mux_8624.p0", "to": "get_mask_82792.p0", "bits": 1}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_82792.p0", "to": "get_mask_83820.p0", "bits": 2}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "get_mask_83820.p0", "to": "or_83816.p0", "bits": 3}
+{"t": "edge", "mod": "minion_frontend_thread_buffer", "from": "or_83816.p0", "to": "memory_18584:u_inst_data.rf_q.p3", "bits": 256}

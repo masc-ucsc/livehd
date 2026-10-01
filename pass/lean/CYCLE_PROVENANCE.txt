@@ -29,3 +29,117 @@ txfma_top                        40     155         0     154 NEEDS-SINGLE-EDGE 
 txfmaexp_top                      1       2         0       1 CERT-EMITTED               SCC retained by -ifx; removed by proc_rmdead/plain proc
 intpipe_csr_file                  0      20         0      21 PLAIN-COMPILE-FAIL:latch-contract no RTLIL SCC under either lowering
 minion_dcache_top                 0      67         0      65 PLAIN-COMPILE-FAIL:latch-contract no RTLIL SCC under either lowering
+
+
+###############################################################################
+# PART 2.  The six modules still gated by a combinational cycle at HEAD
+###############################################################################
+#
+# Produced by: scripts/proc_ifx_scc_compare.sh <the six modules below>
+# Columns as in Part 1.  Preserved: generated/provenance/cycle6/.
+#
+# MODULE                      IFX_SCC   IFX_S PLAIN_SCC PLAIN_S CERT_EMIT                  EVIDENCE
+# minion_frontend_thread_buffer     0       4         0       5 PLAIN-COMPILE-FAIL:latch-contract no RTLIL SCC under either lowering
+# intpipe_csr_file                  0      20         0      20 PLAIN-COMPILE-FAIL:latch-contract no RTLIL SCC under either lowering
+# minion_frontend                   0      17 no-il(124)    1800 PLAIN-COMPILE-FAIL:unknown ?
+# minion_dcache_top                 0      65         0      64 PLAIN-COMPILE-FAIL:latch-contract no RTLIL SCC under either lowering
+# txfma_top                        40     146         0     145 NEEDS-SINGLE-EDGE          SCC retained by -ifx; removed by proc_rmdead/plain proc
+# txfmafrac_top                    39     106         0     104 NEEDS-SINGLE-EDGE          SCC retained by -ifx; removed by proc_rmdead/plain proc
+#
+# Two CLASSES, and the first one is new:
+#
+#   A. post-RTLIL  (minion_frontend_thread_buffer, intpipe_csr_file,
+#      minion_frontend, minion_dcache_top).  ZERO RTLIL SCCs under `proc -ifx`.
+#      WHAT THAT DOES AND DOES NOT SHOW: zero RTLIL SCCs is NECESSARY evidence
+#      that the cycle pass.lean reports is introduced AFTER the dumped RTLIL.
+#      It is NOT proof that the RTL and the LGraph differ semantically -- yosys
+#      `scc` and pass.lean's walk are different questions over different
+#      graphs, and a dependency one models at port granularity the other may
+#      model at cell granularity.  Establishing which happened needs the LGraph
+#      itself; see Part 3.
+#      Plain `proc` is NOT an escape for this class: three of the four fail the
+#      latch contract under it and minion_frontend did not finish in 1800 s.
+#
+#   B. -ifx hold arm  (txfma_top, txfmafrac_top).  The Part 1 mechanism: the
+#      SCC is present in the -ifx RTLIL and absent under plain proc.  Both
+#      refuse here for NEEDS-SINGLE-EDGE, so this comparator does not measure
+#      them end to end; selective plain-proc escalation is a separate fix.
+
+
+###############################################################################
+# PART 3.  minion_frontend_thread_buffer -- where the cycle enters, and what it is
+###############################################################################
+#
+# The smallest Class-A repro.  pass.lean refuses it with
+#
+#   COMBINATIONAL CYCLE: node n_1664 (and_1664) reads n_19520 (get_mask_19520)
+#
+# Produced by: scripts/lgraph_cycle_stages.sh minion_frontend_thread_buffer
+#              (dumps each stage with `lhd tool cat --target all --max 0` and
+#               reports it with scripts/lgraph_scc.py).
+# Preserved: generated/provenance/cycle_stages/minion_frontend_thread_buffer/.
+#
+# MODULE                         STAGE          BUILD_RC DUMP_RC   SCC_LEAN  SCC_LEANMEM  SCC_NONE
+# minion_frontend_thread_buffer  s0_yosys2lg          0       0          1            0        17
+# minion_frontend_thread_buffer  s1_cprop             0       0          1            0        17
+# minion_frontend_thread_buffer  s2_singleedge        0       0          1            0        18
+#
+#   s0_yosys2lg    recipe O0 -- straight out of the yosys reader, NO cprop
+#   s1_cprop       recipe O1 -- what the normal route calls lgdb_raw
+#   s2_singleedge  pass.single_edge output -- what pass.lean consumes
+#   SCC_LEAN       pass.lean's cut: driver is a graph input, a const or a flop
+#   SCC_LEANMEM    the same, ALSO cutting Memory read outputs
+#   SCC_NONE       no cell kind cut (the loop-last cells show as self-loops)
+#
+# MEASURED, at all three stages:
+#   * exactly ONE combinational SCC under pass.lean's own cut rule, and
+#     s2 contains the exact back edge pass.lean names:
+#       get_mask_19520.p0 -> and_1664.p0   (1b)
+#     with both endpoints inside the component (18548 / 15859 / 15829 members).
+#   * ZERO SCCs once Memory read outputs are also cut -- so EVERY cycle in the
+#     component passes through a Memory node's read output.
+#   * cprop and pass.single_edge neither create nor remove it.  It is present
+#     in the very first LGraph the reader produces.
+#   * the two memories, from the dumped RTLIL (s0_yosys2lg.cwd/pp-mem.il):
+#       \buffer_pc          WIDTH 49  SIZE 2  RD_PORTS 5  WR_PORTS 2
+#                           RD_CLK_ENABLE 5'11000  RD_TRANSPARENCY_MASK 10'1111000000
+#       \u_inst_data.rf_q   WIDTH 256 SIZE 2  RD_PORTS 2  WR_PORTS 1
+#                           RD_CLK_ENABLE 2'00     RD_TRANSPARENCY_MASK 2'00
+#   * the shortest cycle through each memory LEAVES on a read-data driver pin
+#     and RE-ENTERS on a WRITE-port pin, never on a read port's `addr`:
+#       memory_18584.p1 (read data) ... or_83816.p0 -> memory_18584.p3   = port 0 `din`
+#       memory_18576.p5 (read data) ... mux_89964.p0 -> memory_18576.p20 = port 1 `enable`
+#     (Memory sink pid = port * Ntype::Memory_port_stride + offset; offset
+#      0 addr, 3 din, 4 enable -- graph/cell.cpp.)
+#
+# CLASSIFICATION: a LOWERING/TRAVERSAL DEFECT, and specifically a dependency-
+# GRANULARITY one.  Not a genuine RTL loop, not a packed aggregate
+# self-reference, not a latch artifact.
+#
+#   `reachable_topo_order` (pass_lean.cpp) models a Memory cell as ONE atomic
+#   node, so any path from ANY read output back to ANY write-port pin is a back
+#   edge.  The real dependency is per port, and the certificate builder this
+#   walk feeds ALREADY knows it: `cert_memory_expand` composes a read's base
+#   image from `build_chain(fwd_ords)` -- the FORWARDED write ports only -- and
+#   gives a SYNCHRONOUS read port a register SOURCE (`s.<reg_field>`, source
+#   kind 2) rather than any function of this cycle's inputs.
+#
+#   For \u_inst_data.rf_q the forwarding matrix is 2'00: no read port sees that
+#   write port's data in the same cycle, so the measured read->din path is not
+#   a dependency the certificate has.  For \buffer_pc the cycle leaves on
+#   driver pid 5, which with WR_PORTS 2 is read ordinal 3 -- one of the two
+#   ports RD_CLK_ENABLE 5'11000 marks SYNCHRONOUS, i.e. a registered output.
+#
+#   The IR agrees: `Ntype_op::Memory = 41` is an ODD slot, and bit 0 IS
+#   `is_loop_last` (graph/cell.hpp, with a static_assert).  hhds documents its
+#   topological traversals as breaking the combinational cycle at exactly those
+#   nodes.  pass.lean's walk is the one consumer that bypasses `forward_class`
+#   for a hand-rolled DFS (its own comment says so), and it is the one that
+#   treats a Memory as combinational.
+#
+# WHAT IS STILL OPEN.  This part identifies the mechanism; it does not yet fix
+# it.  The fix must be generic (a per-port dependency model, not a special
+# case), must keep refusing a cycle that closes through a FORWARDED write port
+# -- which is a real combinational path -- and needs a minimized RTL fixture
+# plus a mutation-sensitive differential or LEC gate before the other three
+# Class-A modules are re-run.

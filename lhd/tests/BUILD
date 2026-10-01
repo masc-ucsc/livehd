@@ -691,6 +691,24 @@ sh_test(
 # that every accepted row carries its evidence, that superseded rows name
 # their follow-up run, and that no absolute paths or trailing whitespace leak
 # into committed data.
+# The combinational-cycle CLASSIFIER, not a cycle fix.  scripts/lgraph_scc.py is
+# only useful if "SCCS=0" means there is no cycle, so every path that could drop
+# an edge in silence is covered here: an endpoint that names no node, the
+# plain-text truncation notice `lhd tool cat` prints at --max, a pin record whose
+# width contradicts its edges.  Each case kills exactly one guard; the committed
+# lgraph_scc_tb_extract.jsonl is a real extract of a
+# minion_frontend_thread_buffer dump, so the endpoint FORMAT is pinned against
+# real data rather than against a fixture someone wrote to match the parser.
+sh_test(
+    name = "lgraph_scc_test",
+    size = "small",
+    srcs = ["lgraph_scc_test.sh"],
+    data = [
+        "lgraph_scc_tb_extract.jsonl",
+        "//scripts:cycle_provenance_tools",
+    ],
+)
+
 sh_test(
     name = "census_consistency_test",
     size = "small",
