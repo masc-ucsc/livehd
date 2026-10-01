@@ -174,6 +174,8 @@ inductive Prim where
   -- one per pinned `LGraphModel` function, never one per LGraph OPERATOR: the
   -- operator's operand fold lives in the interpreter, where it is static
   | bvSra | bvGetMask
+  -- the SIGNED reading of a bit vector; `bv_uint` has `bvUint` already
+  | bvSint
   deriving DecidableEq, Inhabited, Repr
 
 /-- Arity of a primitive.  `evalPrim` rejects any other operand count, so this is
@@ -195,6 +197,7 @@ def Prim.arity : Prim → Nat
   | .bvResize                             => 2   -- width, a
   | .bvSra                                => 3   -- width, x, shamt
   | .bvGetMask                            => 3   -- width, x, mask
+  | .bvSint                               => 1   -- x
 
 /-! ## Terms -/
 

@@ -89,6 +89,11 @@ private def eqCode      : Int := Int.ofNat (opCode .Op_EQ)
 private def rorCode     : Int := Int.ofNat (opCode .Op_Ror)
 private def muxBoolCode : Int := Int.ofNat (opCode .Op_MuxBool)
 private def muxNCode    : Int := Int.ofNat (opCode .Op_MuxN)
+private def ultCode     : Int := Int.ofNat (opCode .Op_ULT)
+private def ugtCode     : Int := Int.ofNat (opCode .Op_UGT)
+private def sltCode     : Int := Int.ofNat (opCode .Op_SLT)
+private def sgtCode     : Int := Int.ofNat (opCode .Op_SGT)
+private def sextCode    : Int := Int.ofNat (opCode .Op_Sext)
 
 def hwS : SProgram where
   entry := "main"
@@ -211,7 +216,17 @@ def hwS : SProgram where
                   (C "opMuxBool" [R "w", R "deps", R "env", R "n"])
                 (.ite (P .eqI [R "code", .lit (.int muxNCode)])
                   (C "opMuxN" [R "w", R "deps", R "env", R "n"])
-                  (P .bvMk [R "w", int 0])))))))))))) ] },
+                (.ite (P .eqI [R "code", .lit (.int ultCode)])
+                  (C "opCmp" [R "w", R "deps", R "env", R "n", bool false, bool false])
+                (.ite (P .eqI [R "code", .lit (.int ugtCode)])
+                  (C "opCmp" [R "w", R "deps", R "env", R "n", bool false, bool true])
+                (.ite (P .eqI [R "code", .lit (.int sltCode)])
+                  (C "opCmp" [R "w", R "deps", R "env", R "n", bool true, bool false])
+                (.ite (P .eqI [R "code", .lit (.int sgtCode)])
+                  (C "opCmp" [R "w", R "deps", R "env", R "n", bool true, bool true])
+                (.ite (P .eqI [R "code", .lit (.int sextCode)])
+                  (C "opSext" [R "w", R "deps", R "env", R "n"])
+                  (P .bvMk [R "w", int 0]))))))))))))))))) ] },
 
   -- Op_And: resize the FIRST operand to the node width, fold the rest in
   -- unchanged.  Mirrors `eval_op` exactly; see `OperatorBridge.evalOp_And_cons`.
@@ -346,6 +361,43 @@ def hwS : SProgram where
                     (C "muxPick"
                        [ R "w", P .tl [R "args"], R "env", R "n", R "sel"
                        , P .addI [R "k", int 1] ])) },
+
+  -- The four comparisons differ along exactly two STATIC axes: which reading
+  -- of the bits (`signed`: 0 unsigned, 1 signed) and which way round
+  -- (`swap`: 0 for LT, 1 for GT).  There is no "greater" primitive -- GT is LT
+  -- with the operands exchanged, which is how the pinned model writes it too.
+  -- Both axes come from the opcode, so both are decided during specialization
+  -- and the residual holds one comparison.
+  { name := "opCmp", params := ["w", "deps", "env", "n", "signed", "swap"], inline := true
+  , body := .ite (C "cmpLt"
+                    [ R "signed", R "swap"
+                    , C "slot" [R "env", R "n", P .hd [R "deps"]]
+                    , C "slot" [R "env", R "n", P .hd [P .tl [R "deps"]]] ])
+              (P .bvMk [R "w", int 1])
+              (P .bvMk [R "w", int 0]) },
+
+  { name := "cmpLt", params := ["signed", "swap", "a", "b"], inline := true
+  , body := .ite (R "signed")
+              (.ite (R "swap")
+                    (P .ltI [P .bvSint [R "b"], P .bvSint [R "a"]])
+                    (P .ltI [P .bvSint [R "a"], P .bvSint [R "b"]]))
+              (.ite (R "swap")
+                    (P .ltI [P .bvUint [R "b"], P .bvUint [R "a"]])
+                    (P .ltI [P .bvUint [R "a"], P .bvUint [R "b"]])) },
+
+  -- Op_Sext: operands are [a, amount], and sign extension IS "truncate to the
+  -- low `n` bits, then read those bits as SIGNED" -- `bv_sint (bv_resize n a)`.
+  -- The pinned body spells that out as a power/mod/sign formula; nothing here
+  -- re-derives it, and `OperatorBridge.evalOp_Sext` carries the obligation.
+  -- `n = 0` needs no special case: `bv_resize 0` has width 0 and `bv_sint` of a
+  -- width-0 vector is 0, which is the pinned answer.
+  { name := "opSext", params := ["w", "deps", "env", "n"], inline := true
+  , body := P .bvMk
+              [ R "w"
+              , P .bvSint
+                  [ P .bvResize
+                      [ P .bvUint [C "slot" [R "env", R "n", P .hd [P .tl [R "deps"]]]]
+                      , C "slot" [R "env", R "n", P .hd [R "deps"]] ] ] ] },
 
   -- Op_SRA and Op_GetMask are binary and delegate directly; the operand order
   -- is the pinned model's (`eval_op .. w [a, b]`).
@@ -653,6 +705,66 @@ private def muxNIn (s a b c : Int) : Array BV :=
 #guard (interpretDesign muxND (allEdges muxND) (muxNIn 3 7 8 9) tinySt).outputs == #[mk_bv 4 0]
 #guard (interpretDesign muxND (allEdges muxND) (muxNIn 15 7 8 9) tinySt).outputs == #[mk_bv 4 0]
 
+/-! ### Batch 4 operators: the comparisons and `Op_Sext` -/
+
+private def cmpOps : List LGraphOp := [.Op_ULT, .Op_UGT, .Op_SLT, .Op_SGT]
+
+#guard cmpOps.all (fun o =>
+  [(8,1),(1,8),(8,8),(15,0),(0,15),(7,8),(8,7)].all (fun q => binOK o q.1 q.2))
+
+private def cmpOut (o : LGraphOp) (a b : Int) : Array BV :=
+  (interpretDesign (binD o) (allEdges (binD o)) (binIn a b) tinySt).outputs
+
+-- SIGNED AND UNSIGNED DIVERGE, and this is the table that pins it.  At width
+-- 4, `8` is `0b1000`: 8 unsigned, -8 signed.  Each row is the SAME bits read
+-- two ways, and both operand orders are covered so a swapped comparison cannot
+-- hide.
+#guard cmpOut .Op_ULT 8 1 == #[mk_bv 4 0]   -- 8 < 1 unsigned: no
+#guard cmpOut .Op_SLT 8 1 == #[mk_bv 4 1]   -- -8 < 1 signed:  yes
+#guard cmpOut .Op_ULT 1 8 == #[mk_bv 4 1]   -- 1 < 8 unsigned: yes
+#guard cmpOut .Op_SLT 1 8 == #[mk_bv 4 0]   -- 1 < -8 signed:  no
+#guard cmpOut .Op_UGT 8 1 == #[mk_bv 4 1]   -- 8 > 1 unsigned: yes
+#guard cmpOut .Op_SGT 8 1 == #[mk_bv 4 0]   -- -8 > 1 signed:  no
+#guard cmpOut .Op_UGT 1 8 == #[mk_bv 4 0]   -- 1 > 8 unsigned: no
+#guard cmpOut .Op_SGT 1 8 == #[mk_bv 4 1]   -- 1 > -8 signed:  yes
+
+-- equality is not strictly less-than, in either reading
+#guard cmpOut .Op_ULT 8 8 == #[mk_bv 4 0]
+#guard cmpOut .Op_SLT 8 8 == #[mk_bv 4 0]
+#guard cmpOut .Op_UGT 8 8 == #[mk_bv 4 0]
+#guard cmpOut .Op_SGT 8 8 == #[mk_bv 4 0]
+
+/-- `Op_Sext` takes `[a, amount]`: sign-extend the low `n = amount` bits of
+`a`, then wrap to the NODE width. -/
+private def sextD (w : Nat) : DesignCert where
+  sources  := #[.input 0 4, .input 1 4]
+  nodes    := #[{ op := .Op_Sext, width := w, deps := #[0, 1] }]
+  outputs  := #[{ slot := 2, width := w }]
+  flops    := #[]
+  memories := #[]
+
+private def sextOut (w : Nat) (a amt : Int) : Array BV :=
+  (interpretDesign (sextD w) (allEdges (sextD w)) (binIn a amt) tinySt).outputs
+
+#guard [(3,4),(8,4),(5,0),(5,2),(6,2),(0,4),(15,4),(15,1)].all (fun q =>
+  runHw (sextD 4) (allEdges (sextD 4)) (binIn q.1 q.2) tinySt
+    == refOf (sextD 4) (allEdges (sextD 4)) (binIn q.1 q.2) tinySt)
+
+#guard sextOut 4 3 4 == #[mk_bv 4 3]    -- POSITIVE: low 4 bits of 3 is 3, sign bit clear
+#guard sextOut 4 8 4 == #[mk_bv 4 8]    -- NEGATIVE: 0b1000 is -8, which is 8 at width 4
+#guard sextOut 4 5 0 == #[mk_bv 4 0]    -- n = 0 is ZERO, whatever `a` holds
+#guard sextOut 4 8 0 == #[mk_bv 4 0]
+-- n SMALLER than the operand's width: only the low n bits are read, and their
+-- own top bit is the sign.  0b0101 at n=2 is 0b01 = 1; 0b0110 at n=2 is
+-- 0b10 = -2, which is 14 at width 4.
+#guard sextOut 4 5 2 == #[mk_bv 4 1]
+#guard sextOut 4 6 2 == #[mk_bv 4 14]
+-- OUTPUT TRUNCATION, applied after the extension: 5 sign-extended at n=4 is
+-- still 5, and 5 at the node's width 2 is 1.
+#guard sextOut 2 5 4 == #[mk_bv 2 1]
+#guard runHw (sextD 2) (allEdges (sextD 2)) (binIn 5 4) tinySt
+         == refOf (sextD 2) (allEdges (sextD 2)) (binIn 5 4) tinySt
+
 -- SRA IS ARITHMETIC, and this is the vector that says so: 0b1000 is -8 at
 -- width 4, so shifting right by one gives -4 = 0b1100, not the 0b0100 a
 -- LOGICAL shift would give.
@@ -847,6 +959,33 @@ private def or4D : DesignCert where
 
 #guard cnt muxND .tl == cnt or4D .tl
 #guard cnt muxND .hd == cnt or4D .hd
+/-! ### Batch 4: the residual criterion
+
+Same rule as batch 3 -- the certificate's structure must be gone, the
+hardware's conditionals may remain.  The comparisons leave exactly one `ltI`
+each, which is the comparison the operator IS. -/
+
+#guard (cmpOps ++ [LGraphOp.Op_Sext]).all
+         (fun o => tagsIn (projOf (binD o)) == [tagState])
+#guard tagsIn (projOf (sextD 4)) == [tagState]
+
+-- one comparison per node, for all four
+#guard cmpOps.all (fun o => cnt (binD o) .ltI == 1)
+
+-- The sharpest check available that signed and unsigned really take DIFFERENT
+-- paths: an unsigned comparison must not reach `bv_sint` at all, and a signed
+-- one must not reach `bv_uint`.  The residual shows exactly that
+-- complementarity, so the two readings cannot have been conflated.
+#guard cnt (binD .Op_ULT) .bvUint == 2 && cnt (binD .Op_ULT) .bvSint == 0
+#guard cnt (binD .Op_UGT) .bvUint == 2 && cnt (binD .Op_UGT) .bvSint == 0
+#guard cnt (binD .Op_SLT) .bvSint == 2 && cnt (binD .Op_SLT) .bvUint == 0
+#guard cnt (binD .Op_SGT) .bvSint == 2 && cnt (binD .Op_SGT) .bvUint == 0
+
+-- `Op_Sext` reads its amount unsigned and the truncated operand SIGNED, once
+-- each: the composition `bv_sint (bv_resize n a)` and nothing else
+#guard cnt (sextD 4) .bvSint == 1
+#guard cnt (sextD 4) .bvUint == 1
+#guard cnt (sextD 4) .bvMk   == 1
 
 -- batch 2, at the primitive level
 #guard (((binR .Op_Xor).funs.map (fun fd => primsOf fd.body)).flatten).contains Prim.bvXor

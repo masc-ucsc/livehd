@@ -71,6 +71,11 @@ any of these. -/
     evalPrim .bvGetMask [.int (Int.ofNat w), encBV a, encBV m]
       = .ok (encBV (bv_get_mask w a m)) := rfl
 
+/-- The SIGNED reading, delegating to the pinned `bv_sint`.  `Op_SLT`/`Op_SGT`
+and `Op_Sext` all need it, and none of them re-derives sign conversion. -/
+@[simp] theorem prim_bvSint (a : BV) :
+    evalPrim .bvSint [encBV a] = .ok (.int (bv_sint a)) := rfl
+
 /-! ## Derived tests
 
 `bv_nonzero` is a `Bool` in the hardware model and has no primitive of its own,
@@ -232,6 +237,67 @@ theorem evalOp_MuxN_cons (w : Nat) (sel : BV) (args : List BV) :
 theorem evalOpCert_MuxN (w : Nat) (l : List BV) :
     eval_op_cert .Op_MuxN w (l.map CertVal.bv) = .bv (eval_op .Op_MuxN w l) :=
   eval_op_cert_bv .Op_MuxN w l (fun _ => ⟨by simp, by simp, by simp⟩)
+
+/-! ### Batch 4: the comparisons, and `Op_Sext`
+
+UNSIGNED and SIGNED comparison are different operators over the same bits, and
+the difference is the whole point of having four of them: at width 4, `8` is
+`0b1000`, which is 8 unsigned and -8 signed.  So `Op_ULT 8 1` is false while
+`Op_SLT 8 1` is true.  `Op_UGT`/`Op_SGT` are the same tests with the operands
+the other way round -- there is no separate "greater" primitive. -/
+
+theorem evalOp_ULT (w : Nat) (a b : BV) :
+    eval_op .Op_ULT w [a, b] = mk_bv w (if bv_uint a < bv_uint b then 1 else 0) := rfl
+
+theorem evalOp_UGT (w : Nat) (a b : BV) :
+    eval_op .Op_UGT w [a, b] = mk_bv w (if bv_uint a > bv_uint b then 1 else 0) := rfl
+
+theorem evalOp_SLT (w : Nat) (a b : BV) :
+    eval_op .Op_SLT w [a, b] = mk_bv w (if bv_sint a < bv_sint b then 1 else 0) := rfl
+
+theorem evalOp_SGT (w : Nat) (a b : BV) :
+    eval_op .Op_SGT w [a, b] = mk_bv w (if bv_sint a > bv_sint b then 1 else 0) := rfl
+
+theorem evalOpCert_ULT (w : Nat) (l : List BV) :
+    eval_op_cert .Op_ULT w (l.map CertVal.bv) = .bv (eval_op .Op_ULT w l) :=
+  eval_op_cert_bv .Op_ULT w l (fun _ => ⟨by simp, by simp, by simp⟩)
+
+theorem evalOpCert_UGT (w : Nat) (l : List BV) :
+    eval_op_cert .Op_UGT w (l.map CertVal.bv) = .bv (eval_op .Op_UGT w l) :=
+  eval_op_cert_bv .Op_UGT w l (fun _ => ⟨by simp, by simp, by simp⟩)
+
+theorem evalOpCert_SLT (w : Nat) (l : List BV) :
+    eval_op_cert .Op_SLT w (l.map CertVal.bv) = .bv (eval_op .Op_SLT w l) :=
+  eval_op_cert_bv .Op_SLT w l (fun _ => ⟨by simp, by simp, by simp⟩)
+
+theorem evalOpCert_SGT (w : Nat) (l : List BV) :
+    eval_op_cert .Op_SGT w (l.map CertVal.bv) = .bv (eval_op .Op_SGT w l) :=
+  eval_op_cert_bv .Op_SGT w l (fun _ => ⟨by simp, by simp, by simp⟩)
+
+/-- **`Op_Sext` IS a composition of two pinned helpers**, and this is the
+theorem that says so.  Its pinned body is an inline power/mod/sign formula, but
+that formula is exactly `bv_sint` applied to `bv_resize`: truncating to the low
+`n` bits and then READING THOSE BITS AS SIGNED is what sign extension is.
+
+So nothing re-derives the formula -- `I_hw` emits `bv_sint (bv_resize n a)` and
+this theorem carries the obligation.  The `n = 0` case needs no special
+handling either: `bv_resize 0` has width 0 and `bv_sint` of a width-0 vector is
+0, which is the pinned answer.
+
+Not `rfl`, and the reason is one step of arithmetic: the pinned body takes
+`bv_uint a % 2 ^ n` once, while `bv_uint (bv_resize n a)` takes it twice.
+`Int.emod_emod` closes exactly that gap. -/
+theorem evalOp_Sext (w : Nat) (a amount : BV) :
+    eval_op .Op_Sext w [a, amount]
+      = mk_bv w (bv_sint (bv_resize (bv_uint amount).toNat a)) := by
+  simp only [eval_op, bv_sint, bv_resize, bv_uint, mk_bv, Int.emod_emod]
+  split
+  · simp_all
+  · split <;> rfl
+
+theorem evalOpCert_Sext (w : Nat) (l : List BV) :
+    eval_op_cert .Op_Sext w (l.map CertVal.bv) = .bv (eval_op .Op_Sext w l) :=
+  eval_op_cert_bv .Op_Sext w l (fun _ => ⟨by simp, by simp, by simp⟩)
 
 theorem evalOpCert_GetMask (w : Nat) (l : List BV) :
     eval_op_cert .Op_GetMask w (l.map CertVal.bv) = .bv (eval_op .Op_GetMask w l) :=
