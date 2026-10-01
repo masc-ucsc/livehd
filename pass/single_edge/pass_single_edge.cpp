@@ -214,6 +214,39 @@ std::optional<int64_t> mem_sink_const(const hhds::Node_class& n, hhds::Port_id r
   return v.to_just_i64();
 }
 
+// A memory port's role and, for a read port, its TIMING: write(0),
+// async read(1), sync read(2) -- Ntype::Memory_rdport_*.
+//
+// Every site here used to ask `is_read && me.type != 1`, i.e. it answered a
+// PER-PORT question with the cell-global `type`. That works only while all
+// read ports agree. On a memory whose reads MIX clocked and unclocked (the
+// importer now records type=3), the global answer is wrong for some port: it
+// would treat the clocked read-data registers as combinational and leave them
+// UNSLOTTED, committing on every sub-step -- precisely the lowering this pass
+// exists never to emit.
+enum class Mem_port_timing { Write, AsyncRead, SyncRead, Bad };
+
+Mem_port_timing mem_port_timing(const hhds::Node_class& n, hhds::Port_id port) {
+  const auto stride = Ntype::Memory_port_stride;
+  const auto pid_rd = Ntype::get_sink_pid(Ntype_op::Memory, "rdport");
+  // An absent `rdport` reads as a write port, which is what the pin's default
+  // has always meant.
+  const auto v = mem_sink_const(n, static_cast<hhds::Port_id>(port * stride + pid_rd))
+                     .value_or(Ntype::Memory_rdport_write);
+  switch (v) {
+    case Ntype::Memory_rdport_write: return Mem_port_timing::Write;
+    case Ntype::Memory_rdport_async: return Mem_port_timing::AsyncRead;
+    case Ntype::Memory_rdport_sync: return Mem_port_timing::SyncRead;
+    default: return Mem_port_timing::Bad;
+  }
+}
+
+// Does this port COMMIT state on a clock edge? Writes and synchronous reads do
+// (a sync read owns a read-data register); an asynchronous read does not.
+bool mem_port_commits(const hhds::Node_class& n, hhds::Port_id port) {
+  return mem_port_timing(n, port) != Mem_port_timing::AsyncRead;
+}
+
 struct Plan {
   std::vector<Element>            elems;
   std::vector<Mem_element>        mems;
@@ -483,13 +516,55 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_cloc
       // treating 24 as "not 1" would leave the two clocked read-data registers
       // unslotted -- committing on every sub-step -- which is precisely the
       // wrong lowering this pass exists never to emit.
-      if (me.type != 0 && me.type != 1) {
+      if (me.type != Ntype::Memory_type_async && me.type != Ntype::Memory_type_sync
+          && me.type != Ntype::Memory_type_mixed) {
         plan.code = "memory-type-unsupported";
-        plan.why  = std::format("memory `{}` has type={} (not async 0 / sync 1 / array 2): its read ports mix "
-                                "clocked and unclocked reads, which the Memory cell's one global `type` cannot "
-                                "represent",
+        plan.why  = std::format("memory `{}` has type={}, which is not async 0 / sync 1 / array 2 / mixed 3",
                                 label_of(n), me.type);
         return plan;
+      }
+      // The cell-global `type` must AGREE with the ports -- the same check
+      // pass.lean makes. Accepting 3 on its own would let a disagreement
+      // through, and accepting 0/1 without it would let a per-port regression
+      // hide behind a uniform-looking scalar. A port whose `rdport` is not one
+      // of write/async/sync is refused rather than guessed.
+      {
+        size_t n_sync  = 0;
+        size_t n_async = 0;
+        // Ports are discovered from the edges, as everywhere else here: the
+        // cell carries no port count and the map is sparse.
+        std::set<hhds::Port_id> seen_ports;
+        for (const auto& e : n.inp_edges()) {
+          seen_ports.insert(static_cast<hhds::Port_id>(e.sink.get_port_id() / stride));
+        }
+        for (auto p : seen_ports) {
+          switch (mem_port_timing(n, p)) {
+            case Mem_port_timing::SyncRead: ++n_sync; break;
+            case Mem_port_timing::AsyncRead: ++n_async; break;
+            case Mem_port_timing::Write: break;
+            case Mem_port_timing::Bad:
+              plan.code = "memory-type-unsupported";
+              plan.why  = std::format("memory `{}` port {} has an rdport value that is not "
+                                      "write(0) / async read(1) / sync read(2)",
+                                      label_of(n), static_cast<int>(p));
+              return plan;
+          }
+        }
+        const char* mismatch = nullptr;
+        if (me.type == Ntype::Memory_type_sync && n_async != 0) {
+          mismatch = "type=1 (sync) but some read port is asynchronous";
+        } else if (me.type == Ntype::Memory_type_async && n_sync != 0) {
+          mismatch = "type=0 (async) but some read port is synchronous";
+        } else if (me.type == Ntype::Memory_type_mixed && (n_sync == 0 || n_async == 0)) {
+          mismatch = "type=3 (mixed) but the read ports do not actually differ";
+        }
+        if (mismatch != nullptr) {
+          plan.code = "memory-type-unsupported";
+          plan.why  = std::format("memory `{}`: the cell-global type disagrees with the per-port timing: {} "
+                                  "({} async, {} sync)",
+                                  label_of(n), mismatch, n_async, n_sync);
+          return plan;
+        }
       }
       const auto posclk = mem_sink_const(n, pid_posclk).value_or(1);
       if (posclk == Ntype::Memory_posclk_mixed) {
@@ -510,16 +585,14 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_cloc
       // read), and the reader excludes it from the polarity vote for the same
       // reason. Treating that constant as a second clock net refused every one
       // of the 17 register-file blocks this lowering exists for.
-      const auto pid_rd = Ntype::get_sink_pid(Ntype_op::Memory, "rdport");
       std::vector<std::pair<hhds::Port_id, lc::Commit_class>> per_port;
       for (const auto& e : n.inp_edges()) {
         if (e.sink.get_port_id() % stride != pid_clk || e.driver.is_invalid()) {
           continue;
         }
-        const auto port    = static_cast<hhds::Port_id>(e.sink.get_port_id() / stride);
-        const bool is_read = mem_sink_const(n, port * stride + pid_rd).value_or(0) != 0;
-        if (is_read && me.type != 1) {
-          continue;  // async read: no commit, no edge
+        const auto port = static_cast<hhds::Port_id>(e.sink.get_port_id() / stride);
+        if (!mem_port_commits(n, port)) {
+          continue;  // async read: no commit, no edge, and its RD_CLK must not vote
         }
         // A committing port whose clock is a CONSTANT is not clocked at all: it
         // is a level-sensitive write, i.e. a LATCH ARRAY (yosys emits core-et's
@@ -702,7 +775,6 @@ bool check_rule4(const Plan& plan, bool quiet) {
       continue;
     }
     const auto stride  = Ntype::Memory_port_stride;
-    const auto pid_rd  = Ntype::get_sink_pid(Ntype_op::Memory, "rdport");
     const auto pid_en  = Ntype::get_sink_pid(Ntype_op::Memory, "enable");
     const auto pid_ad  = Ntype::get_sink_pid(Ntype_op::Memory, "addr");
     const auto pid_din = Ntype::get_sink_pid(Ntype_op::Memory, "din");
@@ -718,8 +790,7 @@ bool check_rule4(const Plan& plan, bool quiet) {
           continue;
         }
         const auto p       = static_cast<hhds::Port_id>(raw / stride);
-        const bool is_read = mem_sink_const(me.node, p * stride + pid_rd).value_or(0) != 0;
-        if (is_read && me.type != 1) {
+        if (!mem_port_commits(me.node, static_cast<hhds::Port_id>(p))) {
           continue;  // an async read commits nothing
         }
         comb_state_reach(e.driver, hit);
@@ -1379,7 +1450,6 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
   {
     const auto stride     = Ntype::Memory_port_stride;
     const auto pid_en     = Ntype::get_sink_pid(Ntype_op::Memory, "enable");
-    const auto pid_rd     = Ntype::get_sink_pid(Ntype_op::Memory, "rdport");
     const auto pid_clk    = Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin");
     const auto pid_posclk = Ntype::get_sink_pid(Ntype_op::Memory, "posclk");
     for (const auto& me : plan.mems) {
@@ -1406,8 +1476,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       for (const auto p : ports) {
         // `rdport` absent reads as a write port, exactly as pass.lean's walk
         // defaults it (Memory_port_info::rdport = false).
-        const bool is_read = mem_sink_const(me.node, p * stride + pid_rd).value_or(0) != 0;
-        if (is_read && me.type != 1) {
+        if (!mem_port_commits(me.node, static_cast<hhds::Port_id>(p))) {
           continue;  // async read: combinational, nothing commits
         }
         const auto en_pid  = static_cast<hhds::Port_id>(p * stride + pid_en);
