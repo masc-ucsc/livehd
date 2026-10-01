@@ -885,13 +885,44 @@ def main() -> int:
         capture_output=True, text=True).stdout.strip())
     # The toolchain is part of the experiment: a Lean or Lake upgrade can change
     # what elaborates, and TOOL_FILES cannot see outside the repository.
-    try:
-        cfg["lake_version"] = subprocess.run(
-            [LAKE, "--version"], capture_output=True, text=True, timeout=60).stdout.strip()
-    except Exception:  # noqa: BLE001
-        cfg["lake_version"] = "unknown"
-    tc = ROOT / "formal" / "lean" / "lean-toolchain"
+    #
+    # Probed with cwd=LEAN_DIR, which is where the probes actually run.  elan
+    # selects a toolchain from the nearest `lean-toolchain`, and the repository
+    # ROOT has none -- asking there answered with elan's DEFAULT (4.34.1) while
+    # every worker ran under the pinned 4.31.0.  The sidecar then carried a
+    # version that had executed nothing, and since `--resume` authenticates
+    # against the sidecar, two runs on different toolchains could have been
+    # merged as one experiment.
+    def _probe(args):
+        """The version, or "unknown" -- and "unknown" is never good enough for a
+        canonical run.  A nonzero exit or empty output means the toolchain was
+        not identified, and two DIFFERENT failed probes both record "unknown",
+        so resume would happily match them and merge the runs."""
+        try:
+            r = subprocess.run(args, cwd=LEAN_DIR, capture_output=True, text=True, timeout=120)
+            if r.returncode != 0:
+                return "unknown"
+            text = (r.stdout + r.stderr).strip()
+            return text.splitlines()[0] if text else "unknown"
+        except Exception:  # noqa: BLE001
+            return "unknown"
+
+    cfg["lake_version"] = _probe([LAKE, "--version"])
+    cfg["lean_version"] = _probe([LAKE, "env", "lean", "--version"])
+    tc = LEAN_DIR / "lean-toolchain"
     cfg["lean_toolchain"] = tc.read_text().strip() if tc.is_file() else "unknown"
+
+    if a.manifest:
+        unidentified = [k for k in ("lake_version", "lean_version", "lean_toolchain")
+                        if cfg[k] == "unknown"]
+        if unidentified:
+            # NOT waived by --allow-dirty: that flag concedes an unreproducible
+            # worktree, which is a different thing from not knowing which
+            # compiler produced the rows.
+            print(f"REFUSING a manifest run: toolchain not identified ({', '.join(unidentified)}). "
+                  f"A canonical result must name the compiler that produced it, and 'unknown' "
+                  f"is a value two different failures share.", file=sys.stderr)
+            return 2
 
     if a.manifest and cfg["worktree_dirty"] and not a.allow_dirty:
         # A canonical run must be reproducible from a commit.  TOOL_FILES covers

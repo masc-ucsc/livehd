@@ -38,8 +38,19 @@ def {m}_designCert : DesignCert := {{ sources := #[], nodes := #[], outputs := #
 {salt}
 """
 
+# A CWD-SENSITIVE stand-in for lake. It answers `--version` differently
+# depending on the directory it is invoked from, which is exactly how elan
+# behaves: it picks a toolchain from the nearest `lean-toolchain`, and the
+# repository root has none. A version probe run from the wrong directory
+# therefore reports a toolchain that executed nothing.
 STUB = r'''#!/usr/bin/env python3
 import pathlib, re, sys, time, os
+if "--version" in sys.argv:
+    here = pathlib.Path.cwd()
+    where = "LEANDIR" if (here / "lean-toolchain").is_file() else "ROOT"
+    what = "lean" if "lean" in sys.argv else "lake"
+    print(f"{what}-version-from-{where}")
+    raise SystemExit(0)
 probe = pathlib.Path(sys.argv[-1])
 delay = float(os.environ.get("STUB_DELAY", "0"))
 if delay:
@@ -279,6 +290,36 @@ def main() -> int:
               p.returncode == 0 and len(final) == len(blocks)
               and all(r["verdict"] == "agree" for r in final),
               f"resume completed the run to {len(final)} rows", f, p.stderr[-300:])
+
+        # 13b. the toolchain the sidecar records must be the one the probes use
+        ver_out = tmp / "ver.tsv"
+        sweep(tmp, man, cdir, ver_out)
+        vcfg = json.loads((tmp / "ver.tsv.meta.json").read_text())["config"]
+        check("toolchain_from_leandir",
+              vcfg.get("lake_version") == "lake-version-from-LEANDIR"
+              and vcfg.get("lean_version") == "lean-version-from-LEANDIR",
+              f"versions probed where the probes run, not from the repo root "
+              f"(lake={vcfg.get('lake_version')!r} lean={vcfg.get('lean_version')!r})", f,
+              json.dumps(vcfg, indent=2)[:400])
+        check("toolchain_recorded",
+              bool(vcfg.get("lean_toolchain")) and vcfg["lean_toolchain"] != "unknown",
+              f"lean_toolchain={vcfg.get('lean_toolchain')!r}", f)
+
+        # 13c. a failed version probe refuses a canonical run outright
+        badver = tmp / "fake_lake_badver"
+        badver.write_text(STUB.replace('print(f"{what}-version-from-{where}")\n    raise SystemExit(0)',
+                                       'raise SystemExit(3)'))
+        badver.chmod(0o755)
+        bp = subprocess.run(
+            [sys.executable, str(SWEEP), "--certs", str(cdir), "--manifest", str(man),
+             "--out", str(tmp / "badver.tsv"), "--jobs", "1", "--timeout", "60",
+             "--allow-dirty"],
+            cwd=ROOT, env=dict(os.environ, LAKE=str(badver)),
+            capture_output=True, text=True, timeout=180)
+        check("version_probe_failure_refused",
+              bp.returncode != 0 and "toolchain not identified" in bp.stderr,
+              "a nonzero version probe refuses, and --allow-dirty does not waive it", f,
+              bp.stderr[-250:])
 
         # 14a. a canonical run from a dirty worktree refuses without --allow-dirty
         dirty_out = tmp / "dirty.tsv"
