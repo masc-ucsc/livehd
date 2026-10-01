@@ -832,7 +832,7 @@ what a genuine tool bug reports.  Since the sweeps classify on that JSON, "this
 design is outside the model, here is why" and "pass.lean fell over" were the same
 row.  Now: `exit_code 7`, `class "unsupported"`, `errors 1`.
 
-### The eleven cycles, diagnosed: none is dissolvable, and the budget was never the limit
+### The eleven cycles: what the current resolver does, and what is still unknown
 
 Step 1 turned nine hangs into named refusals; step 2 added two more. All eleven
 were then diagnosed with `LIVEHD_SIM_SPLIT_DEBUG=1`. Three of the plan's
@@ -852,7 +852,9 @@ nothing rewired on pass 1 means every reader was refused up front, which is a
 missing rule or a genuine self-dependency, never a budget running down. It now
 reports rounds actually run, and points at the debug knob.
 
-**The population splits in two, and neither half is a split_selfref bug.**
+**The population splits in two by HOW the current resolver stops.** That is a
+statement about the resolver's reach, not about whether either half is
+dissolvable in principle -- origin is unestablished for all eleven.
 
 *Four designs where the CURRENT resolver cannot dissolve the cycle.* `txfma_f0`
 (15 on-stack hits cascading into 90 unresolved reads) and `txfma_f5` (4 -> 12)
@@ -877,9 +879,14 @@ i.e. entirely below the sign position, so the rule needed is a pure pass-through
 (bit `i` of `Sext(a, n)` is `a[i]` for `i < n`), guarded to stay below both the
 sign position and the operand's own width so the zero-fill-vs-sign-fill question
 cannot arise. Adding it moved the deepest refusal from 6 to 7 and turned
-on-stack hits from **0 to 8**: the missing rule had been *masking* a genuine
-self-dependency. The rule is a real improvement and it unblocks nothing -- it
-converts "no rule" into a proof that there is nothing to dissolve.
+on-stack hits from **0 to 8**: with the rule in place the resolver descends past
+the `Sext` and then re-encounters a slice already on its own resolution path, so
+the previous "no rule for this op" refusal was standing in front of a
+self-dependency *in the post-cprop graph* that the resolver now reaches and
+reports. The rule is a real improvement to the resolver's reach, and it unblocks
+no module: it replaces an unimplemented-op refusal with a specific one, and says
+nothing about whether that dependency is inherent to the design or introduced by
+lowering.
 
 *Seven designs where it never engages at all* (origin likewise unestablished). `txfma_top`, `txfmaexp_top`,
 `txfma_e5`, `txfma_f6`, `intpipe_csr_file`, `minion_dcache_top`, `txfmafrac_top`
