@@ -610,6 +610,56 @@ theorem mk_bv_toInt_zext {wy w : Nat} (y : BitVec wy) (hw : w ≤ wy) :
       show (2:Int) ^ w = ((2 ^ w : Nat) : Int) from by simp,
       ← Int.natCast_emod, ← Int.natCast_emod, Nat.mod_mod]
 
+/-- The saturation guard in `bv_sra` is value-preserving, at `bvenc` arguments.
+
+`bv_sra` short-circuits once the amount reaches the SOURCE width, so `2 ^ k` is
+never built for a `k` that is a value rather than a width -- the three CORE-ET
+designs that fail without the guard carry 33-bit amount operands, so `k` reaches
+~8.6e9 and the power is unconstructible while the answer is immediate.
+
+Stated at `bvenc` because that is what both bridges apply it to, and because the
+bounds come straight from `BitVec.toInt_lt` / `BitVec.le_toInt`: for
+`k ≥ wa`, a non-negative `toInt` is `< 2^(wa-1) ≤ 2^k` so the quotient is `0`,
+and a negative one is `≥ -2^(wa-1) > -2^k` so the floor quotient is `-1`. -/
+theorem bv_sra_guard_eq {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
+    bv_sra w (bvenc a) (bvenc b) = mk_bv w (a.toInt / (2 : Int) ^ b.toNat) := by
+  have hw : (bvenc a).width = wa := rfl
+  have hk : (bv_uint (bvenc b)).toNat = b.toNat := by rw [bv_uint_bvenc]; simp
+  unfold bv_sra
+  rw [bv_sint_bvenc]
+  simp only [hw, hk]
+  split
+  · next hge =>
+    have hlt : a.toInt < 2 ^ (wa - 1) := BitVec.toInt_lt
+    have hge' : -2 ^ (wa - 1) ≤ a.toInt := BitVec.le_toInt a
+    have hpow : (2 : Int) ^ (wa - 1) ≤ 2 ^ b.toNat :=
+      pow_le_pow_right₀ (by norm_num) (by omega)
+    rcases Nat.eq_zero_or_pos wa with h0 | hpos
+    · -- `BitVec 0` has a single element, so `toInt = 0` and both sides are 0.
+      subst h0
+      have hn : a.toNat = 0 := by have := a.isLt; omega
+      have h0i : a.toInt = 0 := by simp [BitVec.toInt, hn]
+      simp [h0i]
+    · rw [if_neg (by omega)]
+      rcases Int.lt_or_le a.toInt 0 with hneg | hnn
+      · -- negative: the FLOOR quotient of a value in [-2^k, 0) is -1.
+        -- `omega` does not reason about division by a symbolic power, so shift
+        -- the numerator by one multiple of the divisor and use the fact that
+        -- the shifted value lands in [0, 2^k).
+        rw [if_neg (by omega)]
+        congr 1
+        have hpos2 : (0 : Int) < 2 ^ b.toNat := by positivity
+        have hlo : -(2 ^ b.toNat : Int) ≤ a.toInt := by omega
+        have hstep : (a.toInt + 2 ^ b.toNat * 1) / 2 ^ b.toNat
+                   = a.toInt / 2 ^ b.toNat + 1 :=
+          Int.add_mul_ediv_left _ _ (by omega)
+        have hzero : (a.toInt + 2 ^ b.toNat * 1) / 2 ^ b.toNat = 0 :=
+          Int.ediv_eq_zero_of_lt (by omega) (by omega)
+        omega
+      · -- non-negative and below 2^k, so the quotient is 0
+        rw [if_pos hnn, Int.ediv_eq_zero_of_lt hnn (by omega)]
+  · rfl
+
 theorem sra_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) (hw : w ≤ wa) :
     eval_op LGraphOp.Op_SRA w [bvenc a, bvenc b]
       = bvenc (bv_zext (sem_sra a b) : BitVec w) := by
@@ -617,8 +667,7 @@ theorem sra_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) (hw : w ≤ w
     unfold sem_sra
     rw [BitVec.toInt_sshiftRight, Int.shiftRight_eq_div_pow]; norm_num
   show bv_sra w (bvenc a) (bvenc b) = _
-  unfold bv_sra
-  rw [bv_sint_bvenc, bv_uint_bvenc]
+  rw [bv_sra_guard_eq]
   show mk_bv w (a.toInt / (2:Int) ^ b.toNat) = bvenc (bv_zext (sem_sra a b) : BitVec w)
   rw [← hsra]
   exact mk_bv_toInt_zext (sem_sra a b) hw
@@ -633,12 +682,32 @@ theorem bv_bit_mk_bv_general {w i : Nat} (V : Int) (hi : i < w) :
   unfold bv_bit bv_uint mk_bv
   rw [Int.emod_emod_of_dvd _ (dvd_refl _), Nat.shiftRight_eq_div_pow, ← testBit_div_mod]
 
+/-- Once the shift amount reaches the result width, `2 ^ k` is already a multiple
+of `2 ^ w`, so the masked product was zero anyway.  This is what makes the SHL
+guard VALUE-PRESERVING: it exists only to stop Lean materialising `2 ^ k` for an
+astronomical `k`, and changes no result. -/
+theorem mk_bv_mul_two_pow_ge {w k : Nat} (A : Int) (hk : w ≤ k) :
+    mk_bv w (A * 2 ^ k) = mk_bv w 0 := by
+  apply mk_bv_eq_of_emod
+  rw [show (A * 2 ^ k : Int) = (A * 2 ^ (k - w)) * 2 ^ w from by
+        rw [mul_assoc, ← pow_add]; congr 2; omega]
+  simp
+
+/-- The guarded SHL fold term equals the unguarded one it replaced. -/
+theorem shl_guard_eq {w : Nat} (A k : Int) :
+    mk_bv w (if k.toNat ≥ w then 0 else A * 2 ^ k.toNat)
+      = mk_bv w (A * 2 ^ k.toNat) := by
+  split
+  · next h => exact (mk_bv_mul_two_pow_ge A (by omega)).symm
+  · rfl
+
 theorem shl_bridge {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
     eval_op LGraphOp.Op_SHL w [bvenc a, bvenc b]
       = bvenc ((bv_zext a : BitVec w) <<< b.toNat) := by
   show bv_bitwise w (fun x y => xor x y) (mk_bv w 0)
-        (mk_bv w (bv_uint (bvenc a) * 2 ^ (bv_uint (bvenc b)).toNat)) = _
-  rw [bv_uint_bvenc, bv_uint_bvenc]
+        (mk_bv w (if (bv_uint (bvenc b)).toNat ≥ w then 0
+                  else bv_uint (bvenc a) * 2 ^ (bv_uint (bvenc b)).toNat)) = _
+  rw [shl_guard_eq, bv_uint_bvenc, bv_uint_bvenc]
   apply bv_bitwise_eq
   intro i hi
   rw [bv_bit_mk_bv_zero, Bool.false_xor, bv_bit_mk_bv_general _ hi]
@@ -723,8 +792,7 @@ theorem sra_bridge_sext {wa wb w : Nat} (a : BitVec wa) (b : BitVec wb) :
     unfold sem_sra
     rw [BitVec.toInt_sshiftRight, Int.shiftRight_eq_div_pow]; norm_num
   show bv_sra w (bvenc a) (bvenc b) = _
-  unfold bv_sra
-  rw [bv_sint_bvenc, bv_uint_bvenc]
+  rw [bv_sra_guard_eq]
   show mk_bv w (a.toInt / (2:Int) ^ b.toNat) = bvenc (bv_sext (sem_sra a b) : BitVec w)
   rw [← hsra]
   unfold bv_sext
@@ -741,14 +809,29 @@ theorem sext_bridge {wa wam w : Nat} (a : BitVec wa) (amt : BitVec wam) (hamt : 
     eval_op LGraphOp.Op_Sext w [bvenc a, bvenc amt] = bvenc (bv_sext a : BitVec w) := by
   have hcert : eval_op LGraphOp.Op_Sext w [bvenc a, bvenc amt] = mk_bv w (bv_sint (bvenc a)) := by
     simp only [eval_op, bv_uint_bvenc]
-    rw [show (Int.ofNat amt.toNat).toNat = wa from by simp [hamt]]
+    rw [show (Int.ofNat amt.toNat).toNat = wa from by simp [hamt],
+        show (bvenc a).width = wa from rfl]
+    rcases Nat.eq_zero_or_pos wa with h0 | hpos
+    · -- width 0: the only value is 0 and its sign extension is 0, so the
+      -- `n = 0` guard agrees with `bv_sint` rather than bypassing it.
+      subst h0
+      have hn : a.toNat = 0 := by have := a.isLt; omega
+      rw [if_pos rfl]
+      unfold bv_sint
+      simp [bv_uint_bvenc, hn]
+    -- `n = wa = a.width` is the EQUALITY boundary: sign extension, not the
+    -- zero-extending `n > a.width` arm.
+    rw [if_neg (by omega), if_neg (by omega)]
     have hu : Int.ofNat a.toNat % (2:Int) ^ wa = Int.ofNat a.toNat := by
       apply Int.emod_eq_of_lt (Int.natCast_nonneg _)
       rw [show (2:Int) ^ wa = ((2 ^ wa : Nat) : Int) from by simp, Nat.cast_lt]
       exact a.isLt
     rw [hu]
     unfold bv_sint
-    rw [show (bvenc a).width = wa from rfl, bv_uint_bvenc]
+    -- `bv_sint` carries its OWN zero-width guard, so discharge that one too:
+    -- the eval_op side's `n = 0` arm is already gone, and the two must agree.
+    rw [show (bvenc a).width = wa from rfl, bv_uint_bvenc,
+        if_neg (show ¬ (wa = 0) by omega)]
     simp only [apply_ite (mk_bv w)]
   rw [hcert, bv_sint_bvenc]
   unfold bv_sext
@@ -1149,7 +1232,9 @@ theorem sext_bridge_low {wa wam w : Nat} (a : BitVec wa) (amt : BitVec wam)
     eval_op LGraphOp.Op_Sext w [bvenc a, bvenc amt] = bvenc (bv_sext a : BitVec w) := by
   have hcert : eval_op LGraphOp.Op_Sext w [bvenc a, bvenc amt] = mk_bv w (Int.ofNat a.toNat) := by
     simp only [eval_op, bv_uint_bvenc]
-    rw [show (Int.ofNat amt.toNat).toNat = w from by simp [hamt]]
+    rw [show (Int.ofNat amt.toNat).toNat = w from by simp [hamt],
+        show (bvenc a).width = wa from rfl,
+        if_neg (show ¬ (w > wa) by omega)]
     by_cases hw : w = 0
     · subst hw; apply mk_bv_eq_of_emod; simp
     · rw [if_neg hw]

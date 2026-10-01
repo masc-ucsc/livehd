@@ -76,12 +76,17 @@ def reqV (w : Nat) : List BV → BV
   | []        => mk_bv w 1
   | a :: rest => mk_bv w (if reqTail a rest then 1 else 0)
 
-/-- `Op_SHL`: XOR-fold of `a * 2^b` over the shift operands. -/
+/-- `Op_SHL`: XOR-fold of `a * 2^b` over the shift operands.
+
+Mirrors `eval_op Op_SHL` exactly, INCLUDING its saturation at the result width:
+an amount `≥ w` contributes zero.  Stated here rather than delegating to
+`eval_op`, so `rshl_eval` stays an independent local proof. -/
 def rshlV (w : Nat) : List BV → BV
   | []       => mk_bv w 0
   | a :: bs  => bs.foldl (fun acc b =>
       bv_bitwise w (fun x y => xor x y) acc
-        (mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat))) (mk_bv w 0)
+        (mk_bv w (if (bv_uint b).toNat ≥ w then 0
+                  else bv_uint a * (2 : Int) ^ (bv_uint b).toNat))) (mk_bv w 0)
 
 def rnotV (w : Nat) (a : BV) : BV := mk_bv w (bits_to_int w fun i => ! bv_bit a i)
 
@@ -110,6 +115,11 @@ rather than a bit-blast.  (The strictly stronger bit-level characterisation
 def rsextV (w : Nat) (a amt : BV) : BV :=
   let n := (bv_uint amt).toNat
   if n = 0 then mk_bv w 0
+  -- n STRICTLY greater than a.width: the sign bit at n-1 cannot be set, so this
+  -- is zero extension.  Equivalent to the general formula, but it avoids
+  -- `mk_bv n`, whose modulus is `2 ^ n` for an `n` that is a VALUE.  Equality
+  -- keeps sign extension: a = mk_bv 4 (-1), n = 4, w = 8 is 255, not 15.
+  else if n > a.width then mk_bv w (bv_uint a)
   else mk_bv w (bv_sint (mk_bv n (bv_uint a)))
 
 def rgetMaskV (w : Nat) (a m : BV) : BV := bv_get_mask w a m

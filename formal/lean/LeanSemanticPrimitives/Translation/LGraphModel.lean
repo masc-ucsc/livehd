@@ -99,8 +99,28 @@ def bv_sint (x : BV) : Int :=
   if w = 0 then 0
   else if u < (2 ^ (w - 1) : Int) then u else u - (2 ^ w : Int)
 
+/-- Arithmetic shift right.
+
+The shift amount SATURATES AT THE SOURCE WIDTH `x.width`, not at the result
+width `w`.  `sem_sra` (SemanticPrimitives.lean:53) is `x.sshiftRight`, which
+shifts `x` at ITS OWN width and only then widens -- `sra_bridge` truncates with
+`bv_zext` when `w ≤ wa`, `sra_bridge_sext` sign-extends otherwise.  Bounding at
+`w` instead would keep shifting for amounts in `[x.width, w)` whenever `w > wa`
+and disagree with both bridges.
+
+The guard is not a semantic change: `BitVec.sshiftRight` is already total and
+saturating, so for `k ≥ x.width` the answer IS all sign bits.  What it avoids is
+`2 ^ k` for a `k` that is a VALUE rather than a width -- the three CORE-ET
+designs that fail without it carry 33-bit amount operands, so `k` reaches ~8.6e9
+and the power is unconstructible while the mathematical answer is immediate. -/
 def bv_sra (w : Nat) (x shamt : BV) : BV :=
-  mk_bv w (bv_sint x / (2 ^ (bv_uint shamt).toNat : Int))
+  let k := (bv_uint shamt).toNat
+  if k ≥ x.width then
+    -- all sign bits: 0 for non-negative (and for the zero-width degenerate
+    -- case, where `bv_sint` is 0), -1 for negative.
+    mk_bv w (if x.width = 0 then 0 else if bv_sint x ≥ 0 then 0 else -1)
+  else
+    mk_bv w (bv_sint x / (2 ^ k : Int))
 
 def bv_sdiv (w : Nat) (a b : BV) : BV :=
   mk_bv w
@@ -178,8 +198,14 @@ def denote_op : LGraphOp → Nat → List BV → BV
     mk_bv w (if args.all fun b => bv_uint b = bv_uint a then 1 else 0)
   | LGraphOp.Op_SHL, w, []         => mk_bv w 0
   | LGraphOp.Op_SHL, w, (a :: bs)  =>
+    -- Saturates at the RESULT width: `shl_bridge` shifts `(zext a : BitVec w)`,
+    -- and `_ <<< k = 0` for `k ≥ w`.  (SRA saturates at the SOURCE width
+    -- instead -- see `bv_sra`.)  Per fold term, since each operand carries its
+    -- own amount.
     bs.foldl (fun acc b =>
-      bv_bitwise w (fun x y => xor x y) acc (mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat)))
+      bv_bitwise w (fun x y => xor x y) acc
+        (mk_bv w (if (bv_uint b).toNat ≥ w then 0
+                  else bv_uint a * (2 : Int) ^ (bv_uint b).toNat)))
       (mk_bv w 0)
   | LGraphOp.Op_SRA, w, [a, b]     => bv_sra w a b
   | LGraphOp.Op_MuxBool, w, [sel, false_v, true_v] =>
@@ -191,6 +217,14 @@ def denote_op : LGraphOp → Nat → List BV → BV
   | LGraphOp.Op_Sext, w, [a, amount] =>
     let n := (bv_uint amount).toNat
     if n = 0 then mk_bv w 0
+    else if n > a.width then
+      -- STRICTLY greater, and the strictness is load-bearing.  For n > a.width,
+      -- `bv_uint a < 2^a.width ≤ 2^(n-1)`, so the sign bit at `n-1` is clear and
+      -- the result is plain zero extension -- equivalent to the formula below,
+      -- but without constructing `2 ^ n` for an `n` that is a VALUE.
+      -- At n = a.width the sign bit CAN be set and sign extension still applies:
+      -- a = mk_bv 4 (-1), n = 4, w = 8 gives 255 here and 15 under `≥`.
+      mk_bv w (bv_uint a)
     else
       let u := bv_uint a % (2 ^ n : Int)
       if u < (2 ^ (n - 1) : Int) then mk_bv w u
@@ -234,8 +268,14 @@ def eval_op : LGraphOp → Nat → List BV → BV
     mk_bv w (if args.all fun b => bv_uint b = bv_uint a then 1 else 0)
   | LGraphOp.Op_SHL, w, []         => mk_bv w 0
   | LGraphOp.Op_SHL, w, (a :: bs)  =>
+    -- Saturates at the RESULT width: `shl_bridge` shifts `(zext a : BitVec w)`,
+    -- and `_ <<< k = 0` for `k ≥ w`.  (SRA saturates at the SOURCE width
+    -- instead -- see `bv_sra`.)  Per fold term, since each operand carries its
+    -- own amount.
     bs.foldl (fun acc b =>
-      bv_bitwise w (fun x y => xor x y) acc (mk_bv w (bv_uint a * (2 : Int) ^ (bv_uint b).toNat)))
+      bv_bitwise w (fun x y => xor x y) acc
+        (mk_bv w (if (bv_uint b).toNat ≥ w then 0
+                  else bv_uint a * (2 : Int) ^ (bv_uint b).toNat)))
       (mk_bv w 0)
   | LGraphOp.Op_SRA, w, [a, b]     => bv_sra w a b
   | LGraphOp.Op_MuxBool, w, [sel, false_v, true_v] =>
@@ -247,6 +287,14 @@ def eval_op : LGraphOp → Nat → List BV → BV
   | LGraphOp.Op_Sext, w, [a, amount] =>
     let n := (bv_uint amount).toNat
     if n = 0 then mk_bv w 0
+    else if n > a.width then
+      -- STRICTLY greater, and the strictness is load-bearing.  For n > a.width,
+      -- `bv_uint a < 2^a.width ≤ 2^(n-1)`, so the sign bit at `n-1` is clear and
+      -- the result is plain zero extension -- equivalent to the formula below,
+      -- but without constructing `2 ^ n` for an `n` that is a VALUE.
+      -- At n = a.width the sign bit CAN be set and sign extension still applies:
+      -- a = mk_bv 4 (-1), n = 4, w = 8 gives 255 here and 15 under `≥`.
+      mk_bv w (bv_uint a)
     else
       let u := bv_uint a % (2 ^ n : Int)
       if u < (2 ^ (n - 1) : Int) then mk_bv w u
