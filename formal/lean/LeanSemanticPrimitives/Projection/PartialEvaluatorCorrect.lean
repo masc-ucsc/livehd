@@ -2803,6 +2803,354 @@ theorem PValOK_functional {ρr : Env} : ∀ {pv : PVal} {u v : Val},
       subst hu1; subst hv1
       rw [PValOK_functional ha ha', PValOK_functional hb hb']
 
+/-! #### Reconstructing a prepared run
+
+The soundness direction of the structural rules runs BACKWARDS through a peel:
+it holds a run of the RETAINED component and has to produce a run of the whole
+operand, because it is the operand that `PResSound` speaks about.
+
+What makes that free is the discard guard itself.  A discarded component is
+`total`, and a total result prepares to NO bindings, so putting the operand's
+package back adds nothing to run: the reconstructed run ends in the very same
+residual environment and at the very same fuel.  Its VALUE still has to come
+from somewhere, and that is scopedness.  Computation-freeness and
+in-scope-ness, both, exactly as the guard says -- and this is the first place
+the two are used for different jobs in the same step. -/
+
+theorem prepare_total_binds : ∀ {r : PRes}, r.total = true → (prepare r).binds = []
+  | .stat _,            _ => rfl
+  | .code (.var _),     _ => rfl
+  | .code (.lit _),     h => by simp [PRes.total] at h
+  | .code (.letIn _ _), h => by simp [PRes.total] at h
+  | .code (.ite _ _ _), h => by simp [PRes.total] at h
+  | .code (.prim _ _),  h => by simp [PRes.total] at h
+  | .code (.ctorT _ _), h => by simp [PRes.total] at h
+  | .code (.caseT _ _), h => by simp [PRes.total] at h
+  | .code (.call _ _),  h => by simp [PRes.total] at h
+  | .lets _ _,          h => by simp [PRes.total] at h
+  | .cons a b,          h => by
+      simp only [PRes.total, Bool.and_eq_true] at h
+      have ha := prepare_total_binds h.1
+      have hb := prepare_total_binds h.2
+      cases hpa : prepare a with
+      | mk abs av =>
+        cases hpb : prepare b with
+        | mk bbs bv =>
+          rw [hpa] at ha
+          rw [hpb] at hb
+          simp only at ha hb
+          subst ha
+          subst hb
+          simp [prepare, hpa, hpb]
+
+theorem PValOK_shift1_inv {ρ : Env} {u : Val} : ∀ {pv : PVal} {w : Val},
+    PValOK (u :: ρ) (PVal.shift 1 pv) w → PValOK ρ pv w
+  | .stat _,   _, h => h
+  | .dyn k,    _, h => by
+      have h' : (u :: ρ)[k + 1]? = some _ := h
+      show ρ[k]? = some _
+      simpa using h'
+  | .cons _ _, _, h => by
+      obtain ⟨x, y, he, ha, hb⟩ := h
+      exact ⟨x, y, he, PValOK_shift1_inv ha, PValOK_shift1_inv hb⟩
+
+/-- The converse of `PValOK_EvalLets`: a shifted value denoted the same thing
+before the bindings ran.  Used to pull a component's value back OUT from under
+the other component's bindings. -/
+theorem PValOK_EvalLets_inv {P : Program} :
+    ∀ {ρ ρ' : Env} {bs : List Term} {pv : PVal} {w : Val},
+      EvalLets P ρ bs ρ' → PValOK ρ' (PVal.shift bs.length pv) w → PValOK ρ pv w
+  | _, _,  [],      _,  _, h, hv => by cases h; simpa using hv
+  | _, ρ', e :: es, pv, w, h, hv => by
+      cases h with
+      | cons he ht =>
+          have hstep : PValOK ρ' (PVal.shift es.length (PVal.shift 1 pv)) w := by
+            rw [PVal.shift_add]
+            simpa [Nat.add_comm] using hv
+          exact PValOK_shift1_inv (PValOK_EvalLets_inv ht hstep)
+
+/-- A prepared cons run splits into its components' runs.  Needed for `consP`,
+where BOTH components are retained. -/
+theorem prepare_cons_split {Pr : Program} {m : Nat} :
+    ∀ {a b : PRes} {ρ ρp : Env} {d : Val},
+      EvalLetsAt m Pr ρ (prepare (.cons a b)).binds ρp →
+      PValOK ρp (prepare (.cons a b)).value d →
+      ∃ x y ρa ρb,
+        d = .cons x y ∧
+        EvalLetsAt m Pr ρ (prepare a).binds ρa ∧ PValOK ρa (prepare a).value x ∧
+        EvalLetsAt m Pr ρ (prepare b).binds ρb ∧ PValOK ρb (prepare b).value y := by
+  intro a b ρ ρp d hl hv
+  cases hpa : prepare a with
+  | mk abs av =>
+    cases hpb : prepare b with
+    | mk bbs bv =>
+      cases abs with
+      | nil =>
+          simp only [prepare, hpa, hpb] at hl hv
+          obtain ⟨x, y, he, hx, hy⟩ := hv
+          exact ⟨x, y, ρ, ρp, he, .nil,
+                 PValOK_EvalLets_inv (EvalLetsAt_toEvalLets hl) hx, hl, hy⟩
+      | cons ah at' =>
+        cases bbs with
+        | nil =>
+            simp only [prepare, hpa, hpb] at hl hv
+            obtain ⟨x, y, he, hx, hy⟩ := hv
+            exact ⟨x, y, ρp, ρ, he, hl, hx, .nil,
+                   PValOK_EvalLets_inv (EvalLetsAt_toEvalLets hl) hy⟩
+        | cons bh bt =>
+            -- the fallback: the whole cons was bound, so its `toCode` DID run
+            -- and `prepare_peel` reads each component's package out of that run
+            simp only [prepare, hpa, hpb] at hl hv
+            cases hl with
+            | cons he ht =>
+              cases ht
+              simp only [PValOK] at hv
+              cases hv
+              cases m with
+              | zero => simp [PRes.toCode, evalFuel] at he
+              | succ mq =>
+                simp only [PRes.toCode, evalFuel] at he
+                cases hx : evalFuel mq Pr ρ (PRes.toCode a) with
+                | outOfFuel   => simp [evalFuelList, hx] at he
+                | typeError _ => simp [evalFuelList, hx] at he
+                | value x =>
+                  cases hy : evalFuel mq Pr ρ (PRes.toCode b) with
+                  | outOfFuel   => simp [evalFuelList, hx, hy] at he
+                  | typeError _ => simp [evalFuelList, hx, hy] at he
+                  | value y =>
+                    simp only [evalFuelList, hx, hy, evalPrim] at he
+                    cases he
+                    obtain ⟨ρa, hla, hva⟩ := prepare_peel a mq ρ x hx
+                    obtain ⟨ρb, hlb, hvb⟩ := prepare_peel b mq ρ y hy
+                    rw [hpa] at hla hva
+                    rw [hpb] at hlb hvb
+                    exact ⟨x, y, ρa, ρb, rfl,
+                           EvalLetsAt_mono (Nat.le_succ mq) hla, hva,
+                           EvalLetsAt_mono (Nat.le_succ mq) hlb, hvb⟩
+
+/-- Putting a cons back together when the component NOT given is total, and so
+contributes no bindings: the run is unchanged, and only the discarded value has
+to be supplied.  Both orientations, because `hd` discards the tail and `tl` the
+head. -/
+theorem prepare_cons_join_right {Pr : Program} {m : Nat} {a b : PRes} {ρ ρp : Env}
+    {x y : Val}
+    (hbt : b.total = true)
+    (hla : EvalLetsAt m Pr ρ (prepare a).binds ρp)
+    (hxa : PValOK ρp (prepare a).value x)
+    (hyb : PValOK ρ (prepare b).value y) :
+    EvalLetsAt m Pr ρ (prepare (.cons a b)).binds ρp ∧
+      PValOK ρp (prepare (.cons a b)).value (.cons x y) := by
+  have hb00 : (prepare b).binds = [] := prepare_total_binds hbt
+  cases hpa : prepare a with
+  | mk abs av =>
+    cases hpb : prepare b with
+    | mk bbs bv =>
+      rw [hpa] at hla hxa
+      rw [hpb] at hyb hb00
+      have hb0 : bbs = [] := hb00
+      subst hb0
+      cases abs with
+      | nil =>
+          cases hla
+          simp only [prepare, hpa, hpb]
+          exact ⟨.nil, x, y, rfl, by simpa using hxa, hyb⟩
+      | cons ah at' =>
+          simp only [prepare, hpa, hpb]
+          exact ⟨hla, x, y, rfl, hxa,
+                 PValOK_EvalLets (EvalLetsAt_toEvalLets hla) hyb⟩
+
+theorem prepare_cons_join_left {Pr : Program} {m : Nat} {a b : PRes} {ρ ρp : Env}
+    {x y : Val}
+    (hat : a.total = true)
+    (hlb : EvalLetsAt m Pr ρ (prepare b).binds ρp)
+    (hyb : PValOK ρp (prepare b).value y)
+    (hxa : PValOK ρ (prepare a).value x) :
+    EvalLetsAt m Pr ρ (prepare (.cons a b)).binds ρp ∧
+      PValOK ρp (prepare (.cons a b)).value (.cons x y) := by
+  have ha00 : (prepare a).binds = [] := prepare_total_binds hat
+  cases hpa : prepare a with
+  | mk abs av =>
+    cases hpb : prepare b with
+    | mk bbs bv =>
+      rw [hpa] at hxa ha00
+      rw [hpb] at hlb hyb
+      have ha0 : abs = [] := ha00
+      subst ha0
+      simp only [prepare, hpa, hpb]
+      exact ⟨hlb, x, y, rfl,
+             PValOK_EvalLets (EvalLetsAt_toEvalLets hlb) hxa, hyb⟩
+
+/-! #### Peels, reflected
+
+Each peel, read backwards: from a run of the RETAINED result, a run of the whole
+operand, in the SAME residual environment and at the same fuel.  That identity
+of environments is the whole content -- it is what says the structural rule
+costs the residual nothing. -/
+
+theorem peelHd_run_inv {Pr : Program} {m : Nat} :
+    ∀ {r r' : PRes} {ρ ρp : Env} {d : Val},
+      peelHd r = some r' →
+      PRes.Scoped ρ.length r →
+      EvalLetsAt m Pr ρ (prepare r').binds ρp →
+      PValOK ρp (prepare r').value d →
+      ∃ y, EvalLetsAt m Pr ρ (prepare r).binds ρp ∧
+           PValOK ρp (prepare r).value (.cons d y) := by
+  intro r
+  induction r with
+  | stat w =>
+      intro r' ρ ρp d hp _ hl hv
+      cases w with
+      | cons a b =>
+          simp only [peelHd] at hp
+          cases hp
+          cases hl
+          have hd : a = d := hv
+          subst hd
+          exact ⟨b, .nil, rfl⟩
+      | int _ | bool _ | nil | ctor _ _ => simp [peelHd] at hp
+  | code c => intro r' ρ ρp d hp _ _ _; cases c <;> simp [peelHd] at hp
+  | cons a b _ _ =>
+      intro r' ρ ρp d hp hsc hl hv
+      simp only [peelHd] at hp
+      split at hp
+      next hbt =>
+        cases hp
+        obtain ⟨_, hbsc⟩ := hsc
+        obtain ⟨_, hbv⟩ := prepare_scoped hbsc
+        have hb0 : (prepare b).binds = [] := prepare_total_binds hbt
+        rw [hb0] at hbv
+        obtain ⟨y, hy⟩ := PValOK_of_Scoped (ρ := ρ) (by simpa using hbv)
+        obtain ⟨hjl, hjv⟩ := prepare_cons_join_right hbt hl hv hy
+        exact ⟨y, hjl, hjv⟩
+      next => simp at hp
+  | lets bs rr ih =>
+      intro r' ρ ρp d hp hsc hl hv
+      simp only [peelHd, Option.map_eq_some_iff] at hp
+      obtain ⟨a', hp', hr'⟩ := hp
+      subst hr'
+      obtain ⟨_, hrsc⟩ := hsc
+      simp only [prepare] at hl hv
+      obtain ⟨ρ1, hl1, hl2⟩ := EvalLetsAt_split bs hl
+      have hlen : ρ1.length = ρ.length + bs.length := EvalLetsAt_length hl1
+      obtain ⟨y, hj1, hj2⟩ := ih hp' (by rw [hlen]; exact hrsc) hl2 hv
+      exact ⟨y, by simp only [prepare]; exact EvalLetsAt_append hl1 hj1,
+             by simp only [prepare]; exact hj2⟩
+
+theorem peelTl_run_inv {Pr : Program} {m : Nat} :
+    ∀ {r r' : PRes} {ρ ρp : Env} {d : Val},
+      peelTl r = some r' →
+      PRes.Scoped ρ.length r →
+      EvalLetsAt m Pr ρ (prepare r').binds ρp →
+      PValOK ρp (prepare r').value d →
+      ∃ x, EvalLetsAt m Pr ρ (prepare r).binds ρp ∧
+           PValOK ρp (prepare r).value (.cons x d) := by
+  intro r
+  induction r with
+  | stat w =>
+      intro r' ρ ρp d hp _ hl hv
+      cases w with
+      | cons a b =>
+          simp only [peelTl] at hp
+          cases hp
+          cases hl
+          have hd : b = d := hv
+          subst hd
+          exact ⟨a, .nil, rfl⟩
+      | int _ | bool _ | nil | ctor _ _ => simp [peelTl] at hp
+  | code c => intro r' ρ ρp d hp _ _ _; cases c <;> simp [peelTl] at hp
+  | cons a b _ _ =>
+      intro r' ρ ρp d hp hsc hl hv
+      simp only [peelTl] at hp
+      split at hp
+      next hat =>
+        cases hp
+        obtain ⟨hasc, _⟩ := hsc
+        obtain ⟨_, hav⟩ := prepare_scoped hasc
+        have ha0 : (prepare a).binds = [] := prepare_total_binds hat
+        rw [ha0] at hav
+        obtain ⟨x, hx⟩ := PValOK_of_Scoped (ρ := ρ) (by simpa using hav)
+        obtain ⟨hjl, hjv⟩ := prepare_cons_join_left hat hl hv hx
+        exact ⟨x, hjl, hjv⟩
+      next => simp at hp
+  | lets bs rr ih =>
+      intro r' ρ ρp d hp hsc hl hv
+      simp only [peelTl, Option.map_eq_some_iff] at hp
+      obtain ⟨a', hp', hr'⟩ := hp
+      subst hr'
+      obtain ⟨_, hrsc⟩ := hsc
+      simp only [prepare] at hl hv
+      obtain ⟨ρ1, hl1, hl2⟩ := EvalLetsAt_split bs hl
+      have hlen : ρ1.length = ρ.length + bs.length := EvalLetsAt_length hl1
+      obtain ⟨x, hj1, hj2⟩ := ih hp' (by rw [hlen]; exact hrsc) hl2 hv
+      exact ⟨x, by simp only [prepare]; exact EvalLetsAt_append hl1 hj1,
+             by simp only [prepare]; exact hj2⟩
+
+theorem peelIsNil_run_inv {Pr : Program} {m : Nat} :
+    ∀ {r r' : PRes} {ρ ρp : Env} {d : Val},
+      peelIsNil r = some r' →
+      PRes.Scoped ρ.length r →
+      EvalLetsAt m Pr ρ (prepare r').binds ρp →
+      PValOK ρp (prepare r').value d →
+      ∃ u, EvalLetsAt m Pr ρ (prepare r).binds ρp ∧
+           PValOK ρp (prepare r).value u ∧ evalPrim .isNil [u] = .ok d := by
+  intro r
+  induction r with
+  | stat w =>
+      intro r' ρ ρp d hp _ hl hv
+      cases w with
+      | nil =>
+          simp only [peelIsNil] at hp
+          cases hp
+          cases hl
+          have hd : Val.bool true = d := hv
+          subst hd
+          exact ⟨.nil, .nil, rfl, rfl⟩
+      | cons a b =>
+          simp only [peelIsNil] at hp
+          cases hp
+          cases hl
+          have hd : Val.bool false = d := hv
+          subst hd
+          exact ⟨.cons a b, .nil, rfl, rfl⟩
+      | int _ | bool _ | ctor _ _ => simp [peelIsNil] at hp
+  | code c => intro r' ρ ρp d hp _ _ _; cases c <;> simp [peelIsNil] at hp
+  | cons a b _ _ =>
+      intro r' ρ ρp d hp hsc hl hv
+      simp only [peelIsNil] at hp
+      split at hp
+      next hab =>
+        cases hp
+        cases hl
+        have hd : Val.bool false = d := hv
+        subst hd
+        simp only [Bool.and_eq_true] at hab
+        obtain ⟨hat, hbt⟩ := hab
+        obtain ⟨hasc, hbsc⟩ := hsc
+        obtain ⟨_, hav⟩ := prepare_scoped hasc
+        obtain ⟨_, hbv⟩ := prepare_scoped hbsc
+        have ha0 : (prepare a).binds = [] := prepare_total_binds hat
+        have hb0 : (prepare b).binds = [] := prepare_total_binds hbt
+        rw [ha0] at hav
+        rw [hb0] at hbv
+        obtain ⟨x, hx⟩ := PValOK_of_Scoped (ρ := ρ) (by simpa using hav)
+        obtain ⟨y, hy⟩ := PValOK_of_Scoped (ρ := ρ) (by simpa using hbv)
+        have hla : EvalLetsAt m Pr ρ (prepare a).binds ρ := by rw [ha0]; exact .nil
+        obtain ⟨hjl, hjv⟩ := prepare_cons_join_right hbt hla hx hy
+        exact ⟨.cons x y, hjl, hjv, rfl⟩
+      next => simp at hp
+  | lets bs rr ih =>
+      intro r' ρ ρp d hp hsc hl hv
+      simp only [peelIsNil, Option.map_eq_some_iff] at hp
+      obtain ⟨a', hp', hr'⟩ := hp
+      subst hr'
+      obtain ⟨_, hrsc⟩ := hsc
+      simp only [prepare] at hl hv
+      obtain ⟨ρ1, hl1, hl2⟩ := EvalLetsAt_split bs hl
+      have hlen : ρ1.length = ρ.length + bs.length := EvalLetsAt_length hl1
+      obtain ⟨u, hj1, hj2, hj3⟩ := ih hp' (by rw [hlen]; exact hrsc) hl2 hv
+      exact ⟨u, by simp only [prepare]; exact EvalLetsAt_append hl1 hj1,
+             by simp only [prepare]; exact hj2, hj3⟩
+
 /-! Accessors named to match `PResOK`'s, so `h.statEq` / `h.codeEval` read the
 same in both directions and dot notation picks the right one by type.  They are
 theorems now rather than projections; `prepare_peel` is what recovers them. -/
@@ -3018,6 +3366,141 @@ theorem mixTerms_sound_code {A Pr reqs n mr} (h : SOK A Pr reqs n mr) :
       EvalList (eraseProgram A) ρs (eraseList ts) ds :=
   fun Δ env ts rs rq ρr ρs ds hc hmix hev =>
     PResSoundAll_evalFuelList (mixTerms_sound_all h Δ env ts rs rq ρr ρs hc hmix) hev
+
+/-! ## Structural answers, backwards
+
+The mirror of `primStruct_ok`.  Here the guard earns its keep: a discarded
+component has to be shown not to have mattered, and that is two separate facts.
+It is `total`, so it contributed no bindings and the operand's run is the
+retained one unchanged (`peel*_run_inv`); and it is in SCOPE, so it denotes a
+value at all, which is what lets the operand's source term be given a value to
+agree with. -/
+
+theorem peelHd_sound {A Pr mr ρr ρs} {r₀ r : PRes} {t : ATerm} {ρp : Env} {d : Val}
+    (hp : peelHd r₀ = some r)
+    (hs : PResSound A Pr mr ρr ρs r₀ t)
+    (hsc : PRes.Scoped ρr.length r₀)
+    (hl : EvalLetsAt mr Pr ρr (prepare r).binds ρp)
+    (hv : PValOK ρp (prepare r).value d) :
+    Eval (eraseProgram A) ρs (.prim .hd [erase t]) d := by
+  obtain ⟨y, hjl, hjv⟩ := peelHd_run_inv hp hsc hl hv
+  exact .prim (.cons (hs ρp (.cons d y) hjl hjv) .nil) rfl
+
+theorem peelTl_sound {A Pr mr ρr ρs} {r₀ r : PRes} {t : ATerm} {ρp : Env} {d : Val}
+    (hp : peelTl r₀ = some r)
+    (hs : PResSound A Pr mr ρr ρs r₀ t)
+    (hsc : PRes.Scoped ρr.length r₀)
+    (hl : EvalLetsAt mr Pr ρr (prepare r).binds ρp)
+    (hv : PValOK ρp (prepare r).value d) :
+    Eval (eraseProgram A) ρs (.prim .tl [erase t]) d := by
+  obtain ⟨x, hjl, hjv⟩ := peelTl_run_inv hp hsc hl hv
+  exact .prim (.cons (hs ρp (.cons x d) hjl hjv) .nil) rfl
+
+theorem peelIsNil_sound {A Pr mr ρr ρs} {r₀ r : PRes} {t : ATerm} {ρp : Env} {d : Val}
+    (hp : peelIsNil r₀ = some r)
+    (hs : PResSound A Pr mr ρr ρs r₀ t)
+    (hsc : PRes.Scoped ρr.length r₀)
+    (hl : EvalLetsAt mr Pr ρr (prepare r).binds ρp)
+    (hv : PValOK ρp (prepare r).value d) :
+    Eval (eraseProgram A) ρs (.prim .isNil [erase t]) d := by
+  obtain ⟨u, hjl, hjv, hpr⟩ := peelIsNil_run_inv hp hsc hl hv
+  exact .prim (.cons (hs ρp u hjl hjv) .nil) hpr
+
+theorem primStruct_sound {A Pr mr ρr ρs} {p : Prim} {rs : List PRes} {ts : List ATerm}
+    {r : PRes} {ρp : Env} {d : Val}
+    (hps : primStruct p rs = some r)
+    (hall : PResSoundAll A Pr mr ρr ρs rs ts)
+    (hsc : PRes.ScopedList ρr.length rs)
+    (hl : EvalLetsAt mr Pr ρr (prepare r).binds ρp)
+    (hv : PValOK ρp (prepare r).value d) :
+    Eval (eraseProgram A) ρs (.prim p (eraseList ts)) d := by
+  cases p with
+  | addI | subI | mulI | divI | modI | ltI | leI | eqI | andB | orB | notB
+  | eqV | mkCtorP | ctorTagP | ctorFieldsP | bvMk | bvWidth | bvUint | bvBit
+  | bvAnd | bvOr | bvXor | bvNot | bvResize => simp [primStruct] at hps
+  | consP =>
+      cases rs with
+      | nil => simp [primStruct] at hps
+      | cons ra rest =>
+        cases rest with
+        | nil => simp [primStruct] at hps
+        | cons rb rest2 =>
+          cases rest2 with
+          | cons _ _ => simp [primStruct] at hps
+          | nil =>
+            cases hall with
+            | cons hA ht =>
+              cases ht with
+              | cons hB hn =>
+                cases hn
+                simp only [eraseList]
+                cases ra with
+                | stat a =>
+                  cases rb with
+                  | stat b =>
+                      -- both static: the answer is a VALUE and each operand
+                      -- denotes its own half with no bindings at all
+                      simp only [primStruct] at hps
+                      cases hps
+                      have hd : Val.cons a b = d := hv
+                      subst hd
+                      exact .prim (.cons (hA ρr a .nil rfl)
+                                    (.cons (hB ρr b .nil rfl) .nil)) rfl
+                  | code _ | cons _ _ | lets _ _ =>
+                      simp only [primStruct] at hps
+                      cases hps
+                      obtain ⟨x, y, ρa, ρb, he, hla, hxa, hlb, hyb⟩ :=
+                        prepare_cons_split hl hv
+                      subst he
+                      exact .prim (.cons (hA ρa x hla hxa)
+                                    (.cons (hB ρb y hlb hyb) .nil)) rfl
+                | code _ | cons _ _ | lets _ _ =>
+                    simp only [primStruct] at hps
+                    cases hps
+                    obtain ⟨x, y, ρa, ρb, he, hla, hxa, hlb, hyb⟩ :=
+                      prepare_cons_split hl hv
+                    subst he
+                    exact .prim (.cons (hA ρa x hla hxa)
+                                  (.cons (hB ρb y hlb hyb) .nil)) rfl
+  | hd =>
+      cases rs with
+      | nil => simp [primStruct] at hps
+      | cons r₀ rest =>
+        cases rest with
+        | cons _ _ => simp [primStruct] at hps
+        | nil =>
+          cases hall with
+          | cons hA ht =>
+            cases ht
+            simp only [primStruct] at hps
+            simp only [eraseList]
+            exact peelHd_sound hps hA hsc.1 hl hv
+  | tl =>
+      cases rs with
+      | nil => simp [primStruct] at hps
+      | cons r₀ rest =>
+        cases rest with
+        | cons _ _ => simp [primStruct] at hps
+        | nil =>
+          cases hall with
+          | cons hA ht =>
+            cases ht
+            simp only [primStruct] at hps
+            simp only [eraseList]
+            exact peelTl_sound hps hA hsc.1 hl hv
+  | isNil =>
+      cases rs with
+      | nil => simp [primStruct] at hps
+      | cons r₀ rest =>
+        cases rest with
+        | cons _ _ => simp [primStruct] at hps
+        | nil =>
+          cases hall with
+          | cons hA ht =>
+            cases ht
+            simp only [primStruct] at hps
+            simp only [eraseList]
+            exact peelIsNil_sound hps hA hsc.1 hl hv
 
 /-! ## Alternatives, backwards -/
 

@@ -130,5 +130,15 @@ namespace Projection
 #print axioms peelTl_ok
 #print axioms peelIsNil_ok
 #print axioms primStruct_ok
+#print axioms prepare_total_binds
+#print axioms PValOK_EvalLets_inv
+#print axioms prepare_cons_split
+#print axioms prepare_cons_join_right
+#print axioms prepare_cons_join_left
+#print axioms peelHd_run_inv
+#print axioms peelTl_run_inv
+#print axioms peelIsNil_run_inv
+#print axioms mixTerms_sound_all
+#print axioms primStruct_sound
 
 end Projection
