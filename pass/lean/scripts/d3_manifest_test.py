@@ -60,6 +60,19 @@ def make_sweep(tmp: pathlib.Path, modules) -> pathlib.Path:
     return p
 
 
+def header_digest(path: pathlib.Path) -> str:
+    """The `target30_sha256=` the manifest stamped into cva6_30.tsv's header.
+
+    Read back from the FILE rather than trusted from the return value: the
+    header is what a later reader joins against, so a return value that did not
+    reach the file would be a silent inconsistency.
+    """
+    for line in path.read_text().splitlines():
+        if line.startswith("#") and "target30_sha256=" in line:
+            return line.split("target30_sha256=", 1)[1].strip()
+    return ""
+
+
 def expect_error(name, fn, note) -> bool:
     try:
         fn()
@@ -160,23 +173,44 @@ def main() -> int:
             print(f"ok   frozen_missing_cert      {victim} kept as an explicit "
                   f"cert_available=0 row, no stale metadata")
 
+        # --- CVA6: duplicate module rows in emit.tsv --------------------------
+        de = tmp / "de"
+        de.mkdir()
+        plan_de = make_plan(de, blocks)
+        certs_de = make_corpus(de, blocks[:5])
+        et = certs_de.parent / "emit.tsv"
+        et.write_text(et.read_text() + f"{blocks[0]}\tEMITTED\t10\t100\t0\t0\n")
+        if not expect_error("cva6_duplicate_emit",
+                            lambda: dm.cva6_manifests(certs_de, de, False, plan_de),
+                            "a duplicated emit.tsv row makes the size metadata ambiguous"):
+            failures.append("cva6_duplicate_emit")
+
         # --- CVA6: a certificate whose bytes changed --------------------------
         ch = tmp / "ch"
         ch.mkdir()
         plan_ch = make_plan(ch, blocks)
         certs_ch = make_corpus(ch, blocks[:35])
-        dm.cva6_manifests(certs_ch, ch, False, plan_ch)
+        res_before = dm.cva6_manifests(certs_ch, ch, False, plan_ch)
+        before_digest = res_before["target30_digest"]
+        before_header = header_digest(ch / "cva6_30.tsv")
         before = list(csv.DictReader(
             (l for l in (ch / "cva6_30.tsv").open() if not l.startswith("#")), delimiter="\t"))
+        if before_header != before_digest:
+            print(f"FAIL cert_changed             header digest {before_header[:12]} != "
+                  f"returned {before_digest[:12]} before the change")
+            failures.append("cert_changed_header_before")
+
         tgt = before[0]["block"]
         f = certs_ch / f"{tgt}_gate_Lgraph.lean"
         f.write_text(f.read_text() + "\n-- regenerated\n")
+
         res2 = dm.cva6_manifests(certs_ch, ch, False, plan_ch)
         after = list(csv.DictReader(
             (l for l in (ch / "cva6_30.tsv").open() if not l.startswith("#")), delimiter="\t"))
         b0 = next(r for r in before if r["block"] == tgt)
         a0 = next(r for r in after if r["block"] == tgt)
         frozen_txt = (ch / "cva6_30_frozen.tsv").read_text()
+
         if a0["sha256"] == b0["sha256"]:
             print("FAIL cert_changed             cva6_30.tsv still shows the old hash")
             failures.append("cert_changed")
@@ -188,11 +222,24 @@ def main() -> int:
             print(f"ok   cert_changed             current hash updated "
                   f"({b0['sha256'][:8]} -> {a0['sha256'][:8]}), freeze keeps history")
 
-        # the target-30 digest must move with the content
-        if res2["target30_digest"] == res.get("target30_digest"):
-            pass  # different fixtures; not comparable
-        print("ok   target30_digest           recorded per run "
-              f"({res2['target30_digest'][:16]}...)")
+        # The digest must MOVE with the content -- same fixture, before vs after.
+        if res2["target30_digest"] == before_digest:
+            print(f"FAIL target30_digest_moves    digest unchanged "
+                  f"({before_digest[:12]}) after a certificate was rewritten")
+            failures.append("target30_digest_moves")
+        else:
+            print(f"ok   target30_digest_moves    {before_digest[:12]} -> "
+                  f"{res2['target30_digest'][:12]} after the rewrite")
+
+        # ...and the value written into the file must match the value returned.
+        after_header = header_digest(ch / "cva6_30.tsv")
+        if after_header != res2["target30_digest"]:
+            print(f"FAIL target30_digest_header   header {after_header[:12]} != "
+                  f"returned {res2['target30_digest'][:12]}")
+            failures.append("target30_digest_header")
+        else:
+            print(f"ok   target30_digest_header   cva6_30.tsv header matches the "
+                  f"returned digest ({after_header[:12]})")
 
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
