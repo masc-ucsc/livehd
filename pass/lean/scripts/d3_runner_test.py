@@ -321,6 +321,63 @@ def main() -> int:
               "a nonzero version probe refuses, and --allow-dirty does not waive it", f,
               bp.stderr[-250:])
 
+        # 13d. a shared/external Lean build root refuses a canonical run
+        #
+        # This is the failure that voided the first pilot: `.lake` was a symlink
+        # into another worktree, which rebuilt CompileDesign.olean fourteen
+        # minutes into the run. Source-level digests saw nothing.
+        import importlib.util as _ilu
+        _spec = _ilu.spec_from_file_location("d3_sweep_mod", SWEEP)
+        d3mod = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(d3mod)
+
+        real_lake = d3mod.LEAN_DIR / ".lake"
+        ext, why = d3mod.build_root_is_external()
+        check("build_root_local", not ext,
+              f"this worktree's build root is local: {d3mod.build_root()}", f, why)
+
+        # simulate the shared layout: move .lake aside and symlink it elsewhere
+        shadow = tmp / "shared_lake"
+        shadow.mkdir()
+        moved = False
+        try:
+            real_lake.rename(tmp / "real_lake")
+            real_lake.symlink_to(shadow)
+            moved = True
+            ext2, why2 = d3mod.build_root_is_external()
+            dp2 = subprocess.run(
+                [sys.executable, str(SWEEP), "--certs", str(cdir), "--manifest", str(man),
+                 "--out", str(tmp / "shared.tsv"), "--jobs", "1", "--timeout", "60",
+                 "--allow-dirty"],
+                cwd=ROOT, env=dict(os.environ, LAKE=str(stub)),
+                capture_output=True, text=True, timeout=180)
+            check("external_build_root_refused",
+                  ext2 and dp2.returncode != 0 and "build root is shared" in dp2.stderr,
+                  "a symlinked build root refuses a canonical run", f, dp2.stderr[-250:])
+        finally:
+            if moved:
+                real_lake.unlink()
+                (tmp / "real_lake").rename(real_lake)
+        check("build_root_restored", not d3mod.build_root_is_external()[0],
+              "the real build root was restored after the test", f)
+
+        # 13e. artifact digest moves when a loaded .olean changes
+        base = (d3mod.build_root() / "build" / "lib" / "lean"
+                / "LeanSemanticPrimitives" / "Compiler")
+        victim_olean = base / "D3Harness.olean"
+        before_dig = d3mod.artifact_digest()
+        keep_bytes = victim_olean.read_bytes()
+        try:
+            victim_olean.write_bytes(keep_bytes + b"\x00")
+            after_dig = d3mod.artifact_digest()
+        finally:
+            victim_olean.write_bytes(keep_bytes)
+        check("artifact_digest_drift", before_dig != after_dig,
+              f"touching a loaded .olean moves the digest "
+              f"({before_dig[:12]} -> {after_dig[:12]})", f)
+        check("artifact_digest_stable", d3mod.artifact_digest() == before_dig,
+              "and restoring the bytes restores the digest", f)
+
         # 14a. a canonical run from a dirty worktree refuses without --allow-dirty
         dirty_out = tmp / "dirty.tsv"
         env = dict(os.environ, LAKE=str(stub))

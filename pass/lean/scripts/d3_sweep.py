@@ -395,6 +395,46 @@ TOOL_FILES = [
 ]
 
 
+# The compiled artifacts the probes actually load.  `tool_digest` hashes SOURCE,
+# which is not enough: a shared `.lake` let another worktree rebuild
+# `CompileDesign.olean` fourteen minutes into a run while this branch's source
+# sat unchanged, so every source-level guard reported "same tooling" while the
+# compiler under test was swapped.  Hash what gets loaded.
+CRITICAL_OLEANS = ["CompileDesign", "D3Harness", "ReifyGen", "Reify", "Runtime",
+                   "DesignCert", "ResidualIR", "ResidualSemantics",
+                   "CompileOp", "CompileGraph"]
+
+
+def build_root() -> pathlib.Path:
+    return (LEAN_DIR / ".lake").resolve()
+
+
+def build_root_is_external() -> tuple:
+    """(external, why).  A build root outside this worktree is shared state, and
+    shared mutable state is what invalidated the first pilot."""
+    lake = LEAN_DIR / ".lake"
+    if lake.is_symlink():
+        return True, f"{lake} is a symlink to {lake.resolve()}"
+    try:
+        build_root().relative_to(ROOT.resolve())
+    except ValueError:
+        return True, f"{build_root()} is outside the worktree {ROOT.resolve()}"
+    return False, ""
+
+
+def artifact_digest() -> str:
+    """Digest of the compiled closure the probes load."""
+    base = build_root() / "build" / "lib" / "lean" / "LeanSemanticPrimitives" / "Compiler"
+    h = hashlib.sha256()
+    for m in CRITICAL_OLEANS:
+        f = base / f"{m}.olean"
+        try:
+            h.update(f"{m}:".encode() + hashlib.sha256(f.read_bytes()).digest())
+        except OSError:
+            h.update(f"{m}:<missing>".encode())
+    return h.hexdigest()
+
+
 def tool_digest() -> str:
     h = hashlib.sha256()
     for f in TOOL_FILES:
@@ -869,7 +909,12 @@ def main() -> int:
             tn = tier_of(t.nodes)
             if tn not in best or _as_int(t.nodes) > _as_int(best[tn].nodes):
                 best[tn] = t
-        targets = [best[k] for k in sorted(best)]
+        # In TIER order, smallest first.  `sorted` over tier NAMES is alphabetical
+        # -- "mid" < "small" < "tiny" -- so at jobs=1 the largest design ran first
+        # and two cheap results sat behind it for 46 minutes, leaving an
+        # interrupted run with nothing to show.
+        rank = {name: i for i, (name, _, _) in enumerate(TIERS)}
+        targets = [best[k] for k in sorted(best, key=lambda n: rank.get(n, len(TIERS)))]
     if a.limit:
         targets = targets[: a.limit]
     if not targets:
@@ -923,6 +968,18 @@ def main() -> int:
                   f"A canonical result must name the compiler that produced it, and 'unknown' "
                   f"is a value two different failures share.", file=sys.stderr)
             return 2
+
+    external, why = build_root_is_external()
+    cfg["build_root"] = str(build_root())
+    cfg["build_root_external"] = external
+    cfg["artifact_digest"] = artifact_digest()
+
+    if a.manifest and external:
+        print(f"REFUSING a manifest run: the Lean build root is shared or outside this "
+              f"worktree ({why}). Another worktree can rebuild an .olean mid-run, and a "
+              f"source-level digest cannot see it -- that is how a pilot got three rows "
+              f"from two different compilers.", file=sys.stderr)
+        return 2
 
     if a.manifest and cfg["worktree_dirty"] and not a.allow_dirty:
         # A canonical run must be reproducible from a commit.  TOOL_FILES covers
@@ -1068,6 +1125,9 @@ def main() -> int:
              "targets": len(targets), "updated": time.strftime("%Y-%m-%d %H:%M:%S")},
             indent=2) + "\n")
 
+    baseline_artifacts = cfg["artifact_digest"]
+    aborted = False
+
     checkpoint()
     with concurrent.futures.ThreadPoolExecutor(max_workers=a.jobs) as ex:
         futs = {ex.submit(run_one, t, a.samples, a.timeout, a.native): t for t in todo}
@@ -1093,6 +1153,20 @@ def main() -> int:
             print(f"[{i}/{len(todo)}] {r['target_key']:<44} {r['verdict']:<13} "
                   f"{r.get('wall_s','')}s rss={r.get('max_rss_kb','?')}kB "
                   f"{r.get('detail','')[:60]}", file=sys.stderr, flush=True)
+            # After EVERY module: did the compiled closure move underneath us?
+            now = artifact_digest()
+            if now != baseline_artifacts:
+                aborted = True
+                _SHUTDOWN.set()
+                print(f"\nABORTING: the Lean build artifacts changed mid-run "
+                      f"({baseline_artifacts[:16]} -> {now[:16]}). Rows already written "
+                      f"are preserved, but this run is NOT a single experiment and must "
+                      f"not be reported as one.", file=sys.stderr, flush=True)
+                with lock:
+                    cfg["artifact_digest_end"] = now
+                    cfg["aborted_artifact_drift"] = True
+                    checkpoint()
+                break
 
     checkpoint()
     print(f"\nwrote {out_path} ({len(rows)} rows) and {meta_path.name}", file=sys.stderr)
