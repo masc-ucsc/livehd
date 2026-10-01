@@ -168,7 +168,11 @@ rc=$?
   --emit-dir "lean:$T/lean" --set formal.lean.mode=verified_compiler \
   --set formal.lean.max_nodes=1 > "$T/lean_refuse.log" 2>&1
 if [ $? -eq 0 ]; then
-  echo "note: the refusal probe did not refuse; stale-metadata check SKIPPED"
+  # Not SKIPPED: if the probe stops refusing, the stale-file property was never
+  # exercised at all, and a silent skip would report that as a pass forever.
+  echo "FAIL: the max_nodes=1 refusal probe SUCCEEDED, so the stale-sidecar"
+  echo "      property was not tested. Pick a probe that still refuses."
+  rc=1
 elif [ -r "$IOJ" ]; then
   echo "FAIL: a refused REGENERATION left the previous run's sidecar in place"
   echo "      (a driver would read it as describing the current certificate)"
@@ -196,8 +200,13 @@ endmodule
 EOF
 "$LHD" compile verilog "$T/trailing.v" --top trailing_unused --reader yosys-slang   --workdir "$T/tw" --emit-dir "lg:$T/tlg" > "$T/t_compile.log" 2>&1   && "$LHD" compile "lg:$T/tlg" --top trailing_unused --workdir "$T/tlw"        --emit-dir "lean:$T/tlean" --set formal.lean.mode=verified_compiler        > "$T/t_lean.log" 2>&1
 if [ $? -ne 0 ]; then
-  echo "note: the trailing-unused fixture did not emit; that sub-check is SKIPPED"
-  grep -oP '"message":"\K[^"]{0,100}' "$T/t_lean.log" | head -1 | sed 's/^/      /'
+  # Not SKIPPED: this fixture is the ONLY coverage of a trailing unused input,
+  # which is the case the interior clock hole cannot exercise. Losing it
+  # silently would leave runtime_input_arity untested at its boundary.
+  echo "FAIL: the trailing-unused fixture did not emit, so runtime_input_arity"
+  echo "      coverage for a TRAILING unused port was lost"
+  grep -oP '"message":"\K[^"]{0,120}' "$T/t_lean.log" | head -1 | sed 's/^/      /'
+  rc=1
 else
   TJ="$T/tlean/trailing_unused_io.json"
   TJ="$TJ" python3 - <<'PYTRAIL'

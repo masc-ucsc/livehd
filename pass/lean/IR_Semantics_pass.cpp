@@ -85,8 +85,15 @@ void emit(const Design_scan& scan) {
       uint32_t k = 0;
       for (const auto& kv : ctx.input_field) {
         if (auto it = ctx.input_source_id.find(kv.first); it != ctx.input_source_id.end()) {
+          // An input with no recorded width is an internal invariant
+          // violation. Publishing width 0 would hand a driver a port it
+          // cannot drive and look like data rather than a bug.
           const auto wit = ctx.input_width.find(kv.first);
-          io_inputs.push_back({kv.first, k, wit == ctx.input_width.end() ? 0 : wit->second});
+          if (wit == ctx.input_width.end()) {
+            fatal(ctx, "internal: primary input `" + kv.first + "` has no recorded width, so the IO metadata "
+                       "would publish width 0");
+          }
+          io_inputs.push_back({kv.first, k, wit->second});
           input_ordinal[it->second] = k++;
         }
       }
@@ -530,7 +537,15 @@ void emit(const Design_scan& scan) {
       const std::string io_path = lean_path.substr(0, lean_path.rfind("_Lgraph.lean")) + "_io.json";
       const std::string io_tmp  = io_path + ".tmp";
       std::ofstream iofs(io_tmp, std::ios::trunc);
-      if (iofs.is_open()) {
+      // FAIL CLOSED on the artifact that was asked for. The sidecar is
+      // non-semantic -- it is no part of compileDesign_correct -- but a
+      // verified-compiler run that reports success while silently producing no
+      // metadata leaves an external driver with a certificate it cannot name
+      // the ports of. That is a generation failure, not a detail.
+      if (!iofs.is_open()) {
+        fatal(ctx, "could not open the IO metadata file " + io_tmp);
+      }
+      {
         // Mirrors core/diag.cpp's json_escape (which lives in an anonymous
         // namespace and cannot be reused). Quote and backslash are not enough:
         // every control character below 0x20 needs an escape, or one odd signal
@@ -601,10 +616,16 @@ void emit(const Design_scan& scan) {
           iofs << (i ? ",\n    " : "\n    ") << "{\"name\": \"" << esc(io_clocks[i]) << "\", \"ordinal\": " << i << "}";
         }
         iofs << (io_clocks.empty() ? "" : "\n  ") << "]\n}\n";
+        iofs.flush();
+        if (!iofs) {
+          iofs.close();
+          std::remove(io_tmp.c_str());
+          fatal(ctx, "could not write the IO metadata file " + io_tmp);
+        }
         iofs.close();
         if (std::rename(io_tmp.c_str(), io_path.c_str()) != 0) {
-          livehd::diag::warn("pass.lean", "write-failed", "io").msg("could not rename {}", io_tmp).emit();
           std::remove(io_tmp.c_str());
+          fatal(ctx, "could not rename the IO metadata file " + io_tmp + " to " + io_path);
         }
       }
     }
