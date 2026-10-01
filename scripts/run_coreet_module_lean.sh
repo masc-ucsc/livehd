@@ -98,6 +98,15 @@ printf '// Empty anchor. Real CORE-ET sources arrive via yosys.filelist_file.\n'
   echo "OUT=$OUT"; echo "RUN_LEC_GATE=$RUN_LEC_GATE"; echo "RUN_LEAN=$RUN_LEAN"
   echo "LEAN_EMIT_CERT=$EMIT_CERT"; echo "LEAN_EMIT_FAST_BRIDGE=$EMIT_FAST_BRIDGE"
   echo "STOP_AFTER=$STOP_AFTER"
+  # YOSYS_SCRIPT swaps inou_yosys_read.ys for a variant, and the one that
+  # matters is `proc` instead of `proc -ifx`: -ifx skips proc_rmdead, which is
+  # what prunes the unreachable hold arm of a FULL case, and without it that arm
+  # survives as `Y = sel ? a : Y` -- a logic loop that was never in the RTL and
+  # that gates seven txfma_* modules.  It is NOT a safe global default: -ifx
+  # also sets proc_mux's X policy, and the read script documents proc_rmdead
+  # blowing up on wide casex/casez decoders.  Measured per module under
+  # generated/provenance/.
+  echo "YOSYS_SCRIPT=${YOSYS_SCRIPT:-<default inou_yosys_read.ys>}"
 } > "$LOG_DIR/preflight.log"
 
 # ---------------------------------------------------------------------------
@@ -119,6 +128,7 @@ printf '// Empty anchor. Real CORE-ET sources arrive via yosys.filelist_file.\n'
   --emit-dir lg:"$LG_RAW" \
   --set yosys.filelist_file="$FILELIST" \
   --set yosys.setundef=zero \
+  ${YOSYS_SCRIPT:+--set yosys.script="$YOSYS_SCRIPT"} \
   ${YOSYS_MEMORY_MODE:+--set yosys.memory_mode="$YOSYS_MEMORY_MODE"} \
   -- --ignore-assertions --relax-enum-conversions --allow-use-before-declare \
   > "$LOG_DIR/lhd_compile.log" 2>&1

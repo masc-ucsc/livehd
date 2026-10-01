@@ -57,3 +57,10 @@ difftest_*/
 # absolute machine-specific paths -- tracking them would bake in one machine
 # and go stale against upstream core-et without anything noticing.
 generated/core-et/patched_src/
+
+# Cycle-provenance evidence (scripts/cycle_provenance.sh,
+# scripts/proc_ifx_scc_compare.sh): per-module lgdb directories, RTLIL dumps and
+# yosys/lhd logs, several GB per sweep. Kept ON DISK as the evidence trail --
+# the CONCLUSIONS belong in pass/lean/GATED_MODULES.tsv and
+# pass/lean/DIRECTION2_RESULTS.md, which are tracked.
+generated/provenance/
