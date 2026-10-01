@@ -239,6 +239,9 @@ _RSS_STOP = threading.Event()
 # memory and time and keeps no row; it is worth it only when exceeding the
 # budget would hurt someone else on a shared machine.
 _RSS_KILL = threading.Event()
+# Set once the executor has drained, so the sampler can retire instead of
+# sampling an empty process tree forever.
+_WORK_DONE = threading.Event()
 _RSS_PEAK = {"kb": 0, "cap_kb": 0, "tripped_at_kb": 0, "kill_kb": 0, "killed_at_kb": 0}
 _RSS_LOCK = threading.Lock()
 _PAGE_KB = os.sysconf("SC_PAGE_SIZE") // 1024
@@ -285,7 +288,20 @@ def _descendants(root: int) -> set:
     return out
 
 
+# TEST SEAM.  A sequence of aggregate readings, consumed one per sample, so a
+# monitor regression can pin an exact ORDER of crossings rather than racing a
+# real process.  It replaces the MEASUREMENT, so a manifest run refuses outright
+# when it is set -- the same rule as `D3_ARTIFACT_DIR`.
+_TEST_RSS_SEQ = [int(x) for x in
+                 (os.environ.get("D3_TEST_RSS_SEQ") or "").replace(" ", "").split(",")
+                 if x] or None
+
+
 def _aggregate_rss_kb() -> int:
+    if _TEST_RSS_SEQ:
+        # The last value repeats, so a sequence does not have to predict exactly
+        # how many samples a run will take.
+        return _TEST_RSS_SEQ.pop(0) if len(_TEST_RSS_SEQ) > 1 else _TEST_RSS_SEQ[0]
     """Resident total of THIS run's process tree, plus any marked stragglers.
 
     The union matters in both directions: the ppid walk catches a grandchild
@@ -297,6 +313,7 @@ def _aggregate_rss_kb() -> int:
     """
     pids = _descendants(os.getpid()) | set(_marked_pids())
     return _rss_kb_of(os.getpid()) + sum(_rss_kb_of(pid) for pid in pids)
+
 
 
 def _rss_monitor(cap_kb: int, interval: float = 5.0, kill_kb: int = 0) -> None:
@@ -317,7 +334,19 @@ def _rss_monitor(cap_kb: int, interval: float = 5.0, kill_kb: int = 0) -> None:
             _RSS_STOP.set()
             _reap_all()
             return
-        if _RSS_STOP.is_set():
+        if _RSS_STOP.is_set() and not kill_kb:
+            # Only when NO hard limit is armed.  Returning here unconditionally
+            # is what let the SOFT cap silently end the HARD monitor: the cap
+            # trips, the next sample sees `_RSS_STOP` already set, the thread
+            # returns, and the probe that the hard limit exists to stop then
+            # grows unwatched.  Measured once, for real: the cap tripped at
+            # 18,002,680 kB and `vpu_mask` went on to 19,048,836 kB, past a
+            # 19,000,000 kB hard limit, with nothing sampling.
+            return
+        if _WORK_DONE.is_set():
+            # Nothing left to watch.  Without this the thread would keep
+            # sampling after the executor drained, which is harmless but means
+            # the sidecar's peak can keep moving after the last row is in.
             return
         if cap_kb and total >= cap_kb:
             with _RSS_LOCK:
@@ -327,7 +356,8 @@ def _rss_monitor(cap_kb: int, interval: float = 5.0, kill_kb: int = 0) -> None:
                   f"finish", file=sys.stderr)
             _RSS_STOP.set()
             # Deliberately NOT a return when a hard limit is armed: the probe
-            # already running is the one that can still cross it.
+            # already running is the one that can still cross it, and it is
+            # precisely the case the hard limit was added for.
             if not kill_kb:
                 return
         time.sleep(interval)
@@ -1254,6 +1284,15 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
+    if _TEST_RSS_SEQ and a.manifest:
+        # It replaces the MEASUREMENT the memory budget is enforced from, so a
+        # canonical run must never see it -- a sweep that believes a scripted
+        # sequence is not measuring this machine at all.
+        print("REFUSING a manifest run: D3_TEST_RSS_SEQ is set, which replaces the "
+              "aggregate RSS measurement with a scripted sequence. It exists for the "
+              "monitor regressions and can never produce evidence.", file=sys.stderr)
+        return 2
+
     out_path = pathlib.Path(a.out)
     meta_path = out_path.with_suffix(out_path.suffix + ".meta.json")
     manifest_digest = ""
@@ -1717,6 +1756,8 @@ def main() -> int:
             print(f"[{i}/{len(todo)}] {r['target_key']:<44} {r['verdict']:<13} "
                   f"{r.get('wall_s','')}s rss={r.get('max_rss_kb','?')}kB "
                   f"{r.get('detail','')[:60]}", file=sys.stderr, flush=True)
+
+    _WORK_DONE.set()
 
     if aborted:
         print(f"wrote {out_path} ({len(rows)} rows) and {meta_path.name} "

@@ -269,6 +269,48 @@ def main() -> int:
               "and this case ran with the SOFT cap disabled, so the hard limit "
               "is demonstrably what acted (case 8 covers soft-stop-only)")
 
+        # ---- 8d. the hard monitor SURVIVES the soft cap -----------------------
+        # The regression for the bug that cost a real pilot: the soft cap tripped,
+        # the next sample saw _RSS_STOP already set and the sampler thread
+        # returned, so the hard limit stopped watching. vpu_mask then grew from
+        # 18,002,680 kB to 19,048,836 kB -- past a 19,000,000 kB hard limit --
+        # with nothing sampling, and had to be killed by hand.
+        #
+        # The sequence is the whole point: cross SOFT, stay below HARD for at
+        # least one sample (this is where the old code returned), then cross
+        # HARD. Against the old loop the final crossing is never observed and
+        # nothing is ever rss_killed.
+        out8d = tmp / "o8d.tsv"
+        d8d = run(tmp, cdir, out8d,
+                  ["--order-by", str(tbl), "--jobs", "1",
+                   "--max-aggregate-rss-kb", "1000", "--kill-over-rss-kb", "5000"],
+                  env_extra={"STUB_DELAY": "3", "D3_RSS_INTERVAL": "0.05",
+                             "D3_TEST_RSS_SEQ": "10,1500,2000,2500,9000"})
+        rows8d = {r["module"]: r for r in rt.rows_of(out8d)}
+        k8d = {m for m, r in rows8d.items() if r["run_status"] == "rss_killed"}
+        check("hard_survives_soft_cap",
+              d8d.returncode == 0 and len(k8d) >= 1
+              and "reached the cap" in d8d.stderr and "HARD limit" in d8d.stderr,
+              f"soft cap tripped first, then the hard limit still fired: {sorted(k8d)}",
+              d8d.stderr[-900:])
+        m8d = json.loads((out8d.with_suffix(".tsv.meta.json")).read_text())
+        check("hard_survives_soft_cap_order",
+              0 < m8d["aggregate_rss_tripped_kb"] < m8d["aggregate_rss_killed_kb"],
+              f"and in that order: soft at {m8d['aggregate_rss_tripped_kb']}, "
+              f"hard at {m8d['aggregate_rss_killed_kb']}")
+
+        # ---- 8e. the scripted sampler can never reach a canonical run ---------
+        d8e = subprocess.run(
+            [sys.executable, str(SWEEP), "--certs", str(cdir), "--manifest", str(tbl),
+             "--out", str(tmp / "o8e.tsv"), "--allow-dirty"],
+            cwd=ROOT, env=dict(os.environ, LAKE=str(tmp / "fake_lake"),
+                               D3_TEST_RSS_SEQ="1,2,3"),
+            capture_output=True, text=True, timeout=120)
+        check("rss_seam_refused_on_manifest",
+              d8e.returncode == 2 and "D3_TEST_RSS_SEQ" in d8e.stderr,
+              "a manifest run refuses the scripted RSS sampler outright",
+              d8e.stderr[-300:])
+
         # ---- 8c. direct lean and `lake env lean` agree on every gate ----------
         # The two invocation forms must differ ONLY in process count. Measured on
         # three real certificates the output is byte-identical; this pins the
