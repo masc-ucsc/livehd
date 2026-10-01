@@ -637,9 +637,18 @@ sh_test(
     data = ["//lhd"],
 )
 
-# todo/livehd/2f-latch M9 — Clock_cell recognition at the Sub boundary: the
-# cases INLINING structurally cannot cover (a TRUSTED gate, a MEMORY clock, and
-# an enable that is a CONE rather than a bare port).
+# The CORE-ET LEC gate decision. The gate used to exit only on the literal text
+# REFUTED, so UNKNOWN, a solver timeout, a crashed run and a MISSING verdict all
+# printed "inconclusive; not fatal" and continued -- with LEC_STRICT=true too,
+# so strict mode gated nothing while reading in the logs as though it had. Runs
+# against fixtures; needs no solver.
+sh_test(
+    name = "lec_gate_verdict_test",
+    size = "small",
+    srcs = ["lec_gate_verdict_test.sh"],
+    data = ["//scripts:cycle_provenance_tools"],
+)
+
 # The cycle-provenance comparator's helpers, pinned against the bash `local`
 # trap: bash expands every word of a `local` command before performing any of
 # its assignments, so `local top="$1" d="$OUTROOT/$top/..."` leaves $top unset
@@ -660,6 +669,9 @@ sh_test(
     ],
 )
 
+# todo/livehd/2f-latch M9 — Clock_cell recognition at the Sub boundary: the
+# cases INLINING structurally cannot cover (a TRUSTED gate, a MEMORY clock, and
+# an enable that is a CONE rather than a bare port).
 sh_test(
     name = "clock_cell_test",
     size = "large",

@@ -80,6 +80,23 @@ void load_side_graphs(Options& opts, Result& res, const std::string& kind, const
           {     "top",                          opts.top.empty() ? std::string{"-auto-top"} : opts.top},
           {"frontend", opts.reader == "yosys-verilog" ? std::string{"verilog"} : std::string{"slang"}},
       };
+      // Trailing `-- <flags>` must reach THIS read too. Without it a reference
+      // that needs -I, --relax-enum-conversions or --ignore-assertions cannot
+      // elaborate at all, and the side simply fails -- which is what the
+      // CORE-ET LEC gate hit: `lhd lec --ref verilog:raw_<top>.sv -- -I <dir>`
+      // ran `read_slang --top <top> --no-proc <file>` with none of the flags,
+      // so every reference with an `include died. Same '\x1f' joining as
+      // lhd_kernel_compile.cpp, which inou_yosys_api splits on.
+      if (!opts.raw_args.empty()) {
+        std::string joined;
+        for (const auto& arg : opts.raw_args) {
+          if (!joined.empty()) {
+            joined += '\x1f';
+          }
+          joined += arg;
+        }
+        labels["slang_flags"] = joined;
+      }
       run_step("inou.yosys.tolg", var, labels, opts, res);
     } else {
       if (kind == "pyrope") {

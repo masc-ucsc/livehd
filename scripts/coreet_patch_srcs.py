@@ -167,8 +167,14 @@ def patch_file(rel, idents, coreet_root):
            f"// sha256(source): {hashlib.sha256(''.join(original).encode()).hexdigest()[:16]}\n"
            "// change: pure reorder, declaration moved above first use --\n"
            f"//         {'; '.join(moved)}\n"
-           "// reason: SystemVerilog requires declaration before use; slang enforces it,\n"
-           "//         Verilator does not.  This is an original-repo-class defect.\n")
+           # No continuation line may BEGIN with the word "verilator": verilator
+           # reads the first token of a comment as a pragma, so a wrapped line
+           # starting "Verilator does not..." is rejected as
+           # BADVLTPRAGMA and the file will not elaborate under CORE-ET's own
+           # DV flow. Keep the word mid-line.
+           "// reason: SystemVerilog requires declaration before use. slang enforces\n"
+           "//         this; the Verilator-based flow does not, so it is an\n"
+           "//         original-repo-class defect.\n")
     with open(out, "w") as f:
         f.write(hdr + body)
     print(f"{rel}\n  -> {out}\n     {'; '.join(moved)}")

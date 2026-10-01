@@ -11,6 +11,7 @@ filegroup(
         "coreet_filelist.sh",
         "coreet_print.mk",
         "cycle_provenance.sh",
+        "lec_gate_verdict.sh",
         "proc_ifx_scc_compare.sh",
     ],
     visibility = ["//visibility:public"],

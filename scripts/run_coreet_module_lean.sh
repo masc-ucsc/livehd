@@ -189,13 +189,18 @@ if [[ "$RUN_LEC_GATE" == "true" ]]; then
     -- "${ref_slang[@]}" \
     > "$LOG_DIR/lec_gate.log" 2>&1
   lec_status=$?
-  lec_verdict="$(grep -oP '"status":"\K[^"]*' "$LOG_DIR/lec_gate.json" 2>/dev/null | tail -1)"
-  echo "lec gate exit=$lec_status verdict=${lec_verdict:-unknown}"
-  if grep -qi 'REFUTED' "$LOG_DIR/lec_gate.log" 2>/dev/null; then
-    echo "FATAL: LEC gate REFUTED -- the LGraph does not match the RTL; do NOT generate" >&2
-    exit 4
-  fi
-  [[ "$lec_status" -eq 0 ]] || echo "  (LEC gate inconclusive; recorded, not fatal -- set LEC_STRICT=true to harden)"
+  # The decision lives in scripts/lec_gate_verdict.sh so it can be tested
+  # against PROVEN / REFUTED / UNKNOWN fixtures without a solver.
+  #
+  # This gate used to exit only on the literal text REFUTED: UNKNOWN, a solver
+  # timeout, a crashed run and a MISSING verdict all printed a note and
+  # continued, INCLUDING under LEC_STRICT=true -- so strict mode gated nothing.
+  # Strict now requires an explicit proven verdict AND exit 0. Non-strict
+  # behaviour is unchanged.
+  "$SCRIPT_DIR/lec_gate_verdict.sh" "$lec_status" "$LOG_DIR/lec_gate.json" \
+      "$LOG_DIR/lec_gate.log" "$LEC_STRICT"
+  gate_rc=$?
+  [[ "$gate_rc" -eq 0 ]] || exit "$gate_rc"
 fi
 [[ "$STOP_AFTER" == "lec" ]] && exit 0
 
