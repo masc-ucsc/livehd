@@ -1188,3 +1188,55 @@ One `lake build` ran through the shared tree before the isolation was in place
 and overwrote that worktree's oleans. Nothing there was deleted and its sources
 are untouched; a `lake build` in that worktree restores them. It was left for
 its owner rather than changed from here.
+
+## 12. CORE-ET direct-simulator census: 105 of 122
+
+`scripts/coreet_d2_census.sh`. **Accepted** means every generation gate 0,
+`checkDesign` ACCEPTED, and **4 `runDirect` cycles actually executed** — not
+certificate emission, and not residual-compiler theorem elaboration, which is a
+stronger separate gate (`scripts/lean_validate.sh`, §11).
+
+| run | accepted | note |
+|---|---|---|
+| `2fc1f784a` baseline, 122 modules | 102 | provisional provenance (see below) |
+| `recovery_kill143`, 4 modules | +1 | `txfma_f1` |
+| `zeronode_validation`, 2 modules | +2 | `null_vpu`, `minion_dcache_texsend` |
+| **total** | **105 / 122** | |
+
+Three of those 105 were never real failures:
+
+* `txfma_f1` was recorded `compile=143` — **SIGTERM from my own mis-targeted
+  kill**, not a design failure. It generates cleanly and accepts with 4 cycles.
+* `null_vpu` and `minion_dcache_texsend` were refused by a `nodes > 0` static
+  gate. Both are legitimate zero-node designs (all-constant sources, every
+  output resolving to a valid source slot). The gate was the defect; it is now
+  structural reference validation (`pass/lean/scripts/cert_shape_check.py`).
+
+### The 17 that remain, as clusters
+
+Patching these one module at a time would be wasted effort — they fall into
+eight groups, and each group has one cause.
+
+| cluster | modules | cause |
+|---|---|---|
+| **unresolved split-selfref cycle** | `intpipe_csr_file`, `minion_dcache_top`, `txfma_top`, `txfmafrac_top` | `pass.lean` refuses a surviving word-level comb cycle |
+| **memory `type=24`, mixed sync/async reads** | `core_top`, `minion_frontend`, `minion_frontend_thread_buffer` | `RD_CLK_ENABLE` collapsed into the cell-global `type` |
+| **latch-array memory** | `vpu_ctrl`, `vpu_rf` | write port clock resolves to a constant (level-sensitive write) |
+| **multi-phase / multi-clock refusal** | `intpipe_top` (coincident commit edges), `vpu_lane` (negedge flop), `vpu_txfma_trans_top` (latch enable) | genuine `pass.single_edge` contract limits |
+| **bad default parameter** | `txfma_adder` | `parameter int unsigned Width = 0` elaborated as a top |
+| **upstream frontend** | `txfma_top_fake` | yosys-slang `Feature unimplemented at slang_frontend.cc:1254` |
+| **RTL↔LGraph mismatch** | `txfmaexp_top` | 7/2980 differential vectors differ under **both** lowerings (§11) |
+| **timeout at 45 min** | `minion_top`, `vpu_top` | generation does not finish |
+
+`core_top`, `minion_dcache_top` and `minion_top` had all been recorded as
+`compile=143` in the baseline — kill contamination. Rerun serially, they land
+in the `type=24`, split-selfref and timeout clusters respectively. Their
+baseline rows were misattributed, not merely noisy.
+
+### Provenance
+
+The baseline run is **provisional, not authoritative**: generation was
+interrupted (see `generated/census_d2/INCIDENTS.md`) and aggregated later at a
+different commit under `--resume-across-commit`, with `runner` and `lhd` hashes
+verified unchanged. Its gate results are usable; a clean single-commit run is
+what should eventually be cited. The two follow-up runs are clean.
