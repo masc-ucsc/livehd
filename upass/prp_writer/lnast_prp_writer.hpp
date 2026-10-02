@@ -568,6 +568,7 @@ private:
   // clock-net store of a single-use `bit_and` temp tree (the reader's 1-bit
   // `& 1` mask included) over exactly ONE Clock input and data enables.
   struct Clock_gate {
+    std::string            output;   // the net carrying the gated clock
     std::string            clock;    // the gated Clock input
     std::vector<Lnast_nid> enables;  // the enable operands
     std::vector<Lnast_nid> ands;     // the folded `bit_and` temps

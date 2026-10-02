@@ -324,6 +324,9 @@ void comb_reach(const hhds::Pin_class& start, const hhds::Node_class& hold_owner
   std::vector<hhds::Pin_class>           work{start};
   const bool                             has_owner = !hold_owner.is_invalid();
   const auto                             owner_q   = has_owner ? hold_owner.get_driver_pin(0) : hhds::Pin_class{};
+  if (has_owner && !owner_q.is_invalid() && start.get_class_index() == owner_q.get_class_index()) {
+    return;  // an unwritten latch holds its Q directly; no transparent update
+  }
 
   while (!work.empty()) {
     auto p = work.back();

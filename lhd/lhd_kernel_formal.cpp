@@ -1059,14 +1059,14 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       }
       if (gu::is_graph_input_pin(cr.net)) {
         const std::string port{gu::pin_name_of(cr.net)};
-        std::string       base;
+        std::string       root_name;
         if (auto* r = forest.find(canon(cr.net.get_graph()->get_name()), port)) {
-          base = *r;
+          root_name = *r;
         } else if (pname == canonical_top_name) {
-          base = port;  // a top port IS a root
+          root_name = port;  // a top port IS a root
         }
-        if (base.empty() || gu::bits_of(cr.net) <= 1) {
-          return base;
+        if (root_name.empty() || gu::bits_of(cr.net) <= 1) {
+          return root_name;
         }
         // A BIT of a clock BUS. control_root follows the bit select to the
         // WHOLE input, so without this `.a(clks[0]), .b(clks[1])` gave both
@@ -1083,12 +1083,12 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
           // Bit 0, or the bus forwarded from its LSB (a multi-bit port): the
           // port's bit k is the root's bit k, which the phase schedule appends.
           // A root that already names a bit cannot absorb another one.
-          return gu::bits_of(d) > 1 && base.back() == ']' ? std::string{} : base;
+          return gu::bits_of(d) > 1 && root_name.back() == ']' ? std::string{} : root_name;
         }
-        if (gu::bits_of(d) > 1 || base.back() == ']') {
+        if (gu::bits_of(d) > 1 || root_name.back() == ']') {
           return "";  // an offset multi-bit slice, or a bit of a bit: unmapped
         }
-        return base + "[" + std::to_string(cb->second) + "]";
+        return root_name + "[" + std::to_string(cb->second) + "]";
       }
       if (cr.net.is_const()) {
         return "";

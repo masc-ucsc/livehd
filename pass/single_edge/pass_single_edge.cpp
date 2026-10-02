@@ -1064,26 +1064,12 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     if (!plan.ref_clk_pin.is_invalid()) {
       plan.ref_clk_pin.connect_sink(gu::setup_sink_by_name(ph, "clock_pin"));
     }
-    // Reset the divider with the DESIGN's own reset, copied off a state element
-    // that already has one. Without it the phase starts wherever the BMC's
-    // after_reset prologue leaves it: that engine deliberately discards flop
-    // `initial` values (a free start is the sound over-approximation), and a
-    // free phase lets the solver choose the WRONG sub-step parity, which makes
-    // the period-boundary guard fire mid-period and refute an equivalent
-    // design. pass/lec/query.cpp also keeps this one key's init as a documented
-    // exception (graph_util::is_single_edge_phase_key) so a design with no
-    // reset port is covered too — belt and braces, deliberately.
-    for (const auto& e : plan.elems) {
-      auto rp = sink_driver(e.node, "reset_pin");
-      if (rp.is_invalid()) {
-        continue;
-      }
-      rp.connect_sink(gu::setup_sink_by_name(ph, "reset_pin"));
-      if (auto nr = sink_driver(e.node, "negreset"); !nr.is_invalid()) {
-        nr.connect_sink(gu::setup_sink_by_name(ph, "negreset"));
-      }
-      break;
-    }
+    // This divider describes the time base, independently of the design's
+    // resets. Copying one state element's reset here changes the phase when
+    // that reset is folded into mapped latch logic on the other side of LEC.
+    // The encoder preserves this synthetic key's concrete initial value
+    // (graph_util::is_single_edge_phase_key), including during after_reset,
+    // so both designs advance through the same slots throughout the prologue.
     // P == 2: next = !phase (a 1-bit counter). P > 2 is refused above.
     auto nxt = gu::create_typed_node(*g, Ntype_op::Not);
     phq.connect_sink(livehd::graph_util::setup_sink_pid(nxt, 0));

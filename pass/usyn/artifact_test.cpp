@@ -626,7 +626,7 @@ TEST_F(Artifact, ValidChecksumsCannotBypassVersionEnumLengthOrSemanticValidation
   const auto saved = serialize_artifact("r", State_target::cmos, region, work);
   ASSERT_EQ(saved.status, Status::feasible) << saved.reason;
   // Fixed schema prefix: magic/version, string length and "r", target enum.
-  for (const auto [offset, value] : std::vector<std::pair<size_t, uint32_t>>{
+  for (const auto& [offset, value] : std::vector<std::pair<size_t, uint32_t>>{
            { 0,          0},
            { 4,        999},
            { 8, 0xffffffff},
@@ -648,7 +648,7 @@ TEST_F(Artifact, ValidChecksumsCannotBypassVersionEnumLengthOrSemanticValidation
   ASSERT_TRUE(baseline.region);
   const auto constant_offset = saved.bytes.find(region.source.sources[0].initial.value.serialize());
   ASSERT_NE(constant_offset, std::string::npos);
-  for (const auto [offset, byte] : std::vector<std::pair<size_t, char>>{
+  for (const auto& [offset, byte] : std::vector<std::pair<size_t, char>>{
            {    constant_offset, char(127)},
            {constant_offset + 1, char(128)},
            {constant_offset + 3,   char(0)}

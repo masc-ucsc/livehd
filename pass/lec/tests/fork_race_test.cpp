@@ -161,7 +161,9 @@ TEST(ForkRace, DeadlineKillTakesTheRacersGrandchildren) {
     const pid_t g = ::fork();
     if (g == 0) {
       const pid_t me = ::getpid();
-      (void)::write(p[1], &me, sizeof me);
+      if (::write(p[1], &me, sizeof me) != static_cast<ssize_t>(sizeof me)) {
+        ::_exit(1);
+      }
       ::sleep(30);
       ::_exit(0);
     }
@@ -193,7 +195,9 @@ TEST(ForkRace, RacersDieWithTheirParent) {
     ::close(p[0]);
     auto run = [&p](int i) -> int {
       const pid_t me = ::getpid();
-      (void)::write(p[1], &me, sizeof me);
+      if (::write(p[1], &me, sizeof me) != static_cast<ssize_t>(sizeof me)) {
+        ::_exit(1);
+      }
       ::sleep(30);
       return i;
     };

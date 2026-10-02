@@ -2242,7 +2242,7 @@ void Lnast_prp_writer::write_module() {
     // divided clock).  Declares go out lowest-depth first.
     absl::flat_hash_map<std::string, int> pin_state_depth;
     absl::flat_hash_set<std::string>      pin_state_names;
-    for (const auto& nm : pin_dep_nets_) {
+    for (const auto& nm : folded_attr_refs_) {
       if (state_decl_pre.count(nm) != 0u) {
         pin_state_names.insert(nm);
       }
@@ -3360,8 +3360,13 @@ absl::flat_hash_map<int64_t, Lnast_prp_writer::Clock_gate> Lnast_prp_writer::clo
           it->second = Lnast_nid{};  // several defs: not a temp tree
         }
       }
-    } else if (Lnast_ntype::is_store(t) && is_clock_copy(u, nid, nets)) {
-      stores.push_back(nid);
+    } else if (Lnast_ntype::is_store(t)) {
+      const auto dst = u.get_first_child(nid);
+      const auto arg = dst.is_invalid() ? dst : u.get_sibling_next(dst);
+      if (!arg.is_invalid() && u.is_last_child(arg) && Lnast_ntype::is_ref(u.get_type(dst))
+          && Lnast_ntype::is_ref(u.get_type(arg))) {
+        stores.push_back(nid);
+      }
     }
   }
   struct Enable_latch {
@@ -3415,6 +3420,7 @@ absl::flat_hash_map<int64_t, Lnast_prp_writer::Clock_gate> Lnast_prp_writer::clo
   }
   for (const auto& store : stores) {
     Clock_gate                            g;
+    g.output = u.get_name(u.get_first_child(store));
     bool                                  ok   = true;
     std::function<void(std::string_view)> flat = [&](std::string_view tmp) {
       const auto it = ands.find(tmp);
@@ -3457,7 +3463,12 @@ absl::flat_hash_map<int64_t, Lnast_prp_writer::Clock_gate> Lnast_prp_writer::clo
           enable = it->second.value;
         }
       }
-      gates.emplace(store.get_class_index().value, std::move(g));
+      // A standalone ICG has no downstream clock pin to seed its output.
+      // Its absorbed low-transparent latch establishes the clock role. A
+      // bare AND feeding data still needs a downstream clock use.
+      if (nets.contains(g.output) || !g.latch_nodes.empty()) {
+        gates.emplace(store.get_class_index().value, std::move(g));
+      }
     }
   }
   return gates;
@@ -3575,9 +3586,11 @@ Lnast_prp_writer::Clock_port_plan Lnast_prp_writer::clock_data_ports(const std::
     std::string an;
     Lnast*      b;
     std::string bn;
+    bool        copy = false;
   };
   std::vector<Connection>                                             connections;
   absl::flat_hash_map<const Lnast*, absl::flat_hash_set<std::string>> latch_enables;
+  absl::flat_hash_map<const Lnast*, absl::flat_hash_set<std::string>> gate_outputs;
   for (const auto& up : units) {
     if (!up || !up->is_verilog_origin()) {
       continue;
@@ -3601,7 +3614,7 @@ Lnast_prp_writer::Clock_port_plan Lnast_prp_writer::clock_data_ports(const std::
       const auto arg = dst.is_invalid() ? dst : u->get_sibling_next(dst);
       if (Lnast_ntype::is_store(t) && !arg.is_invalid() && u->is_last_child(arg) && Lnast_ntype::is_ref(u->get_type(dst))
           && Lnast_ntype::is_ref(u->get_type(arg))) {
-        connections.push_back({u, std::string(u->get_name(dst)), u, std::string(u->get_name(arg))});
+        connections.push_back({u, std::string(u->get_name(dst)), u, std::string(u->get_name(arg)), true});
       } else if (Lnast_ntype::is_attr_set(t) && !arg.is_invalid() && u->get_name(arg) == "enable"
                  && latches.contains(std::string(u->get_name(dst)))) {
         const auto value = u->get_sibling_next(arg);
@@ -3638,8 +3651,14 @@ Lnast_prp_writer::Clock_port_plan Lnast_prp_writer::clock_data_ports(const std::
       if (a.contains(c.an)) {
         changed |= b.insert(c.bn).second;
       }
-      if (b.contains(c.bn)) {
+      // Copies propagate clock demand toward their source. Only a recognized
+      // gate propagates a clock type outward without a consumer: copying a
+      // clock input to an ordinary data output must remain a data read.
+      if (b.contains(c.bn) && (!c.copy || gate_outputs[c.b].contains(c.bn))) {
         changed |= a.insert(c.an).second;
+      }
+      if (c.copy && gate_outputs[c.b].contains(c.bn)) {
+        changed |= gate_outputs[c.a].insert(c.an).second;
       }
     }
     for (const auto& up : units) {
@@ -3653,6 +3672,8 @@ Lnast_prp_writer::Clock_port_plan Lnast_prp_writer::clock_data_ports(const std::
           = clock_gates(*u, stmts, nets, [&](std::string_view p) { return nets.contains(p) || latch_enables[u].contains(p); });
       for (const auto& [_, gate] : gates) {
         changed |= nets.insert(gate.clock).second;
+        changed |= nets.insert(gate.output).second;
+        changed |= gate_outputs[u].insert(gate.output).second;
       }
     }
   }

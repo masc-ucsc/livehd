@@ -210,9 +210,11 @@ case_mix() {
   if [ "$tag" = q ]; then
     q_clean "$d"
     if [ "$MAPPER" = abc ]; then
-      # a and p2 (enable clk), plus r and s: the reader folds their resets into D
-      # and an enable (`rst | clk`, `!rst_n | !clk`) that is mapped logic, active high
-      [ "$(count "$N" '^DLXTPx1 ')" = 16 ] || fail "q: expected 16 DLXTPx1 (a, p2, r, s), got $(grep -c '^DLXTPx1 ' "$N")"
+      # a and p2 use plain high-enable cells. The reader preserves r and s's
+      # resets, so their bits use the library's clear/preset cells.
+      [ "$(count "$N" '^DLXTPx1 ')" = 8 ] || fail "q: expected 8 DLXTPx1 (a, p2), got $(grep -c '^DLXTPx1 ' "$N")"
+      [ "$(count "$N" '^DLRTPx1 ')" = 4 ] && [ "$(count "$N" '^DLSTPx1 ')" = 4 ] \
+        || fail "q: r and s must use 4 clear and 4 preset latch cells"
       # b and p1 (enable !clk): the active-low cell, its GATE_N straight from clk
       [ "$(count "$N" '^DLXTNx1 ')" = 8 ] || fail "q: expected 8 DLXTNx1 (b, p1), got $(grep -c '^DLXTNx1 ' "$N")"
       [ "$(grep -A3 '^DLXTNx1 ' "$N" | grep -c '\.GATE_N(clk)')" = 8 ] || fail "q: the active-low cells must take clk natively"
@@ -224,8 +226,10 @@ case_mix() {
     wait_all "$p1" "$p2" || exit 1
   else
     if [ "$MAPPER" = abc ]; then
-      [ "$(count "$N" '^DHLx1 ')" = 16 ] || fail "qn: expected 16 DHLx1 (a, p2, r, s), got $(grep -c '^DHLx1 ' "$N")"
-      [ "$(count "$N" '^DLLNx1 ')" = 8 ] || fail "qn: expected 8 DLLNx1 (b, p1), got $(grep -c '^DLLNx1 ' "$N")"
+      # With no reset cells, r and s fold reset into their data and enable,
+      # retaining the source enable's natural polarity.
+      [ "$(count "$N" '^DHLx1 ')" = 12 ] || fail "qn: expected 12 DHLx1 (a, p2, r), got $(grep -c '^DHLx1 ' "$N")"
+      [ "$(count "$N" '^DLLNx1 ')" = 12 ] || fail "qn: expected 12 DLLNx1 (b, p1, s), got $(grep -c '^DLLNx1 ' "$N")"
       # the QN-only low latch stores !D: each takes an inverter on D (or its folded D PO)
       [ "$(grep -c '__dinv' "$N")" -ge 8 ] || fail "qn: the QN latch cells of b and p1 must have their D inverted"
     fi

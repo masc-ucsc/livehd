@@ -219,7 +219,7 @@ two-phase covers remain supported after that fast path. The default strategy is
 therefore whole-cone analysis first, selective removal
 second, and generic optimization of the surviving residual third. Cut enumeration
 remains a bounded source of alternative boundaries within that strategy.</p>
-<p><strong>Status: implementation in progress, 2026-09-27.</strong> Independent
+<p><strong>Status: implementation in progress, 2026-10-02.</strong> Independent
 Boolean/XAG utilities, bounded endpoint selection, residual XAG optimization and
 logical CMOS expansion are connected by an independent logical-region pipeline
 with one affected-endpoint feedback round. A callable native CMOS design driver
@@ -964,6 +964,31 @@ prerequisite to functional search.</li>
   explicit outcomes, and measured wins/failures are reported without inventing
   a QoR threshold before a baseline exists. Physical timing claims require the
   separate physical backend and timing contract.</li>
+  </ul>
+</li>
+<li id="n"><strong>N — ASAP7 evaluation against ABC in ../lhdtrack.</strong>
+  <ul>
+  <li>Goal: the lhdtrack Verilog evaluation (<code>../lhdtrack/flows/syn_lhd_verilog_usyn.py</code>,
+  <code>lec_netlist_verilog_usyn.py</code>, <code>_no_satopt</code> variants; <code>techs = ["sky130","asap7"]</code>
+  in <code>lhdtrack.toml</code>) compares <code>synth.mapper=usyn</code> (CMOS, <code>tmap=abc</code>) with
+  <code>synth.mapper=abc</code> on ASAP7: same sources, the one merged ASAP7 Liberty, same SDC period, OpenSTA
+  timing of the emitted netlist, independent LEC. Last ASAP7 pages (<code>../lhdtrack/target/eval-2026092*.html</code>)
+  predate the 2026-09-27 option/report migration; the newest dated 2026-09-25.</li>
+  <li><strong>Blocker — flow is stale against J.</strong> <code>../lhdtrack/flows/syn_lhd_verilog.py</code> (lines ~122-127)
+  reads the USYN report and requires <code>usyn["abc"] == "tmap"</code>, recording <code>pass.usyn.abc</code>. Schema-5
+  reports carry <code>tmap</code> (<code>none|abc</code>), and <code>abc</code> is now an obsolete option that gives a
+  migration error. Update the flow to read <code>tmap</code>, require <code>tmap=abc</code> and <code>output=mapped-cmos</code>,
+  record <code>pass.usyn.tmap</code>, and confirm the report path/name it opens still matches what
+  <code>pass_usyn.cpp</code> writes (<code>&lt;output&gt;.qor.json</code> / region reports). Check any other
+  <code>pass.usyn.*</code> overrides it passes against the current option list.</li>
+  <li>Run one small ASAP7 case end to end (synth, emit, OpenSTA, LEC), then the full set. Retain failed variants,
+  record mapped area, timing completeness, runtime, memory and LEC verdict per row; LEC timeouts (multipliers, CRC32 in the
+  2026-09-27 baseline) stay explicit rows, not omissions.</li>
+  <li>Also run the three-configuration residual ablation (selection, plus residual, plus feedback) on the ASAP7 set;
+  this is K's measured-benefit gate, using lhdtrack as the corpus owner (inputs stay external to LiveHD scripts).</li>
+  <li>Not required: DOMINO emission, domino Liberty (<a href="domino.html">domino</a> P3-P6), or any 2u search tier still
+  pending. Gate: an ASAP7 report page with USYN and ABC rows for the same tests, none silently dropped, with the
+  Liberty and SDC digests recorded; no QoR threshold is set before that baseline exists.</li>
   </ul>
 </li>
 </ul>
