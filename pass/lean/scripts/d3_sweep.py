@@ -324,6 +324,32 @@ def _aggregate_rss_kb() -> int:
 
 
 
+def _positive_finite(text: str) -> float:
+    """A sample interval must be a finite positive number.
+
+    Rejected rather than clamped: zero or a negative turns the sampler into a
+    busy loop that pins a core and floods /proc, and NaN makes every `sleep`
+    comparison false in ways that are hard to attribute later.  `inf` would
+    sleep forever, silently disabling the limit the caller asked for -- the
+    worst of the four, because the run looks guarded and is not.
+    """
+    try:
+        v = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a number")
+    if v != v:
+        raise argparse.ArgumentTypeError("NaN is not a usable sample interval")
+    if v == float("inf") or v == float("-inf"):
+        raise argparse.ArgumentTypeError(
+            "an infinite sample interval would disable the limit while the run "
+            "still appears to be guarded")
+    if v <= 0:
+        raise argparse.ArgumentTypeError(
+            f"{v} is not positive; zero or negative turns the sampler into a busy "
+            f"loop rather than sampling faster")
+    return v
+
+
 def _rss_monitor(cap_kb: int, interval: float = 5.0, kill_kb: int = 0) -> None:
     """Sample the aggregate and act on the two caps.
 
@@ -339,7 +365,11 @@ def _rss_monitor(cap_kb: int, interval: float = 5.0, kill_kb: int = 0) -> None:
     A smaller interval narrows the window but cannot close it.  Only a kernel
     mechanism (cgroup v2 `memory.max`) enforces continuously.
     """
-    interval = float(os.environ.get("D3_RSS_INTERVAL") or interval)
+    # NO environment override.  `D3_RSS_INTERVAL` used to be honoured here while
+    # the sidecar recorded `--rss-sample-seconds`, so a run could sample at 0.05 s
+    # and certify 5.0 -- and the scheduler tests, which set that variable, were
+    # certifying the mismatch. The interval now comes from the CLI alone, so the
+    # recorded value IS the effective value. Tests pass --rss-sample-seconds.
     while not _SHUTDOWN.is_set() and not _RSS_KILL.is_set():
         total = _aggregate_rss_kb()
         with _RSS_LOCK:
@@ -1337,7 +1367,7 @@ def main() -> int:
                          "0 disables. A running target is never killed by this, so "
                          "at --jobs 1 with one target it has no effect. Logged once, "
                          "at the first crossing.")
-    ap.add_argument("--rss-sample-seconds", type=float, default=5.0,
+    ap.add_argument("--rss-sample-seconds", type=_positive_finite, default=5.0,
                     help="how often the aggregate RSS sampler runs. Smaller tightens "
                          "the advisory hard limit at the cost of more /proc reads; it "
                          "cannot make the limit exact.")
@@ -1480,6 +1510,12 @@ def main() -> int:
         "max_aggregate_rss_kb": a.max_aggregate_rss_kb,
         "kill_over_rss_kb": a.kill_over_rss_kb,
         "rss_sample_seconds": a.rss_sample_seconds,
+        # The EFFECTIVE interval, because nothing else can change it: there is no
+        # environment override. A reader can take this as what actually ran.
+        "rss_sample_seconds_effective": a.rss_sample_seconds,
+        # Machine-readable provenance for `max_rss_kb` on an rss_killed row.
+        # `detail` says the same thing in prose, but prose is not checkable.
+        "rss_killed_max_rss_source": "sampled-aggregate-lower-bound",
         # Both caps are SAMPLED: they bound sustained memory, not instantaneous
         # peaks.  Recorded so a reader of these rows knows which guarantee applies.
         "rss_enforcement": "sampled-advisory",

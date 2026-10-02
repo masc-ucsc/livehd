@@ -211,8 +211,9 @@ def main() -> int:
         # the queue is still draining when it does.
         out8 = tmp / "o8.tsv"
         d8 = run(tmp, cdir, out8,
-                 ["--order-by", str(tbl), "--jobs", "1", "--max-aggregate-rss-kb", "1"],
-                 env_extra={"STUB_DELAY": "0.6", "D3_RSS_INTERVAL": "0.05"})
+                 ["--order-by", str(tbl), "--jobs", "1", "--max-aggregate-rss-kb", "1",
+                  "--rss-sample-seconds", "0.05"],
+                 env_extra={"STUB_DELAY": "0.6"})
         rows8 = {r["module"]: r for r in rt.rows_of(out8)}
         stopped = {m for m, r in rows8.items() if r["run_status"] == "deferred"}
         check("rss_stop_defers_queued", d8.returncode == 0 and len(stopped) >= 1,
@@ -235,8 +236,9 @@ def main() -> int:
         out8b = tmp / "o8b.tsv"
         d8b = run(tmp, cdir, out8b,
                   ["--order-by", str(tbl), "--jobs", "1",
-                   "--max-aggregate-rss-kb", "0", "--kill-over-rss-kb", "1"],
-                  env_extra={"STUB_DELAY": "3", "D3_RSS_INTERVAL": "0.05"})
+                   "--max-aggregate-rss-kb", "0", "--kill-over-rss-kb", "1",
+                    "--rss-sample-seconds", "0.05"],
+                  env_extra={"STUB_DELAY": "3"})
         rows8b = {r["module"]: r for r in rt.rows_of(out8b)}
         killed = {m for m, r in rows8b.items() if r["run_status"] == "rss_killed"}
         check("hard_kill_terminates_running", d8b.returncode == 0 and len(killed) >= 1,
@@ -284,8 +286,9 @@ def main() -> int:
         out8d = tmp / "o8d.tsv"
         d8d = run(tmp, cdir, out8d,
                   ["--order-by", str(tbl), "--jobs", "1",
-                   "--max-aggregate-rss-kb", "1000", "--kill-over-rss-kb", "5000"],
-                  env_extra={"STUB_DELAY": "3", "D3_RSS_INTERVAL": "0.05",
+                   "--max-aggregate-rss-kb", "1000", "--kill-over-rss-kb", "5000",
+                    "--rss-sample-seconds", "0.05"],
+                  env_extra={"STUB_DELAY": "3", 
                              "D3_TEST_RSS_SEQ": "10,1500,2000,2500,9000"})
         rows8d = {r["module"]: r for r in rt.rows_of(out8d)}
         k8d = {m for m, r in rows8d.items() if r["run_status"] == "rss_killed"}
@@ -448,8 +451,9 @@ def main() -> int:
         out8i = tmp / "o8i.tsv"
         d8i = run(tmp, cdir, out8i,
                   ["--order-by", str(tbl), "--jobs", "1",
-                   "--max-aggregate-rss-kb", "1000", "--kill-over-rss-kb", "9000"],
-                  env_extra={"STUB_DELAY": "3", "D3_RSS_INTERVAL": "0.05",
+                   "--max-aggregate-rss-kb", "1000", "--kill-over-rss-kb", "9000",
+                    "--rss-sample-seconds", "0.05"],
+                  env_extra={"STUB_DELAY": "3", 
                              "D3_TEST_RSS_SEQ": "10,1500,2000,2500,3000"})
         n_soft = sum(1 for l in d8i.stderr.splitlines() if "reached the cap" in l)
         check("soft_cap_logs_once", d8i.returncode == 0 and n_soft == 1,
@@ -474,8 +478,9 @@ def main() -> int:
         out8j = tmp / "o8j.tsv"
         d8j = run(tmp, cdir, out8j,
                   ["--order-by", str(tbl), "--jobs", "1",
-                   "--max-aggregate-rss-kb", "0", "--kill-over-rss-kb", "5000"],
-                  env_extra={"STUB_DELAY": "3", "D3_RSS_INTERVAL": "0.05",
+                   "--max-aggregate-rss-kb", "0", "--kill-over-rss-kb", "5000",
+                    "--rss-sample-seconds", "0.05"],
+                  env_extra={"STUB_DELAY": "3", 
                              "D3_TEST_RSS_SEQ": "10,1000,7777"})
         rows8j = {r["module"]: r for r in rt.rows_of(out8j)}
         killed = {m for m, r in rows8j.items() if r["run_status"] == "rss_killed"}
@@ -499,11 +504,82 @@ def main() -> int:
 
         # ---- 8k. the sampler interval is configurable -------------------------
         check("rss_sample_seconds_recorded",
-              m8j["scheduling"].get("rss_sample_seconds") == 5.0
+              m8j["scheduling"].get("rss_sample_seconds") == 0.05
+              and m8j["scheduling"].get("rss_sample_seconds_effective") == 0.05
               and m8j["scheduling"].get("rss_enforcement") == "sampled-advisory",
               "the sidecar records the sample interval and that enforcement is "
               "SAMPLED-ADVISORY, not a guarantee",
               str(m8j["scheduling"])[:300])
+
+        # ---- 8l. the RECORDED interval is the EFFECTIVE interval --------------
+        # The bug this replaces: `_rss_monitor` honoured a D3_RSS_INTERVAL
+        # environment variable while the sidecar recorded --rss-sample-seconds.
+        # A run could therefore sample at 0.05 s and certify 5.0 -- and these very
+        # tests, which set that variable, were certifying the mismatch.
+        src = (HERE / "d3_sweep.py").read_text()
+        body = src.split("def _rss_monitor")[1].split("\ndef ")[0]
+        check("no_env_interval_override", "os.environ" not in body,
+              "_rss_monitor reads no environment variable for its interval, so the "
+              "CLI value is its only source")
+
+        # Behavioural proof, not just a source grep. With a 3 s CLI interval and a
+        # ~1 s stub the sampler gets at most one sample, so the scripted sequence
+        # never reaches its 9999 entry and nothing is killed. Were the env var
+        # honoured (0.001 s) it would reach it immediately and kill. The outcome
+        # therefore discriminates the two.
+        out8l = tmp / "o8l.tsv"
+        d8l = run(tmp, cdir, out8l,
+                  ["--order-by", str(tbl), "--jobs", "1",
+                   "--max-aggregate-rss-kb", "0", "--kill-over-rss-kb", "5000",
+                   "--rss-sample-seconds", "3"],
+                  env_extra={"STUB_DELAY": "1", "D3_RSS_INTERVAL": "0.001",
+                             "D3_TEST_RSS_SEQ": "10,10,10,10,10,10,10,9999"})
+        rows8l = {r["module"]: r for r in rt.rows_of(out8l)}
+        k8l = {m for m, r in rows8l.items() if r["run_status"] == "rss_killed"}
+        m8l = json.loads((out8l.with_suffix(".tsv.meta.json")).read_text())
+        # The discriminator is the observed PEAK, not merely the absence of a kill.
+        # The scripted sequence is 10 x7 then 9999. At the 3 s CLI interval a ~1 s
+        # stub yields one or two samples, so the peak stays at 10; were the 0.001 s
+        # environment value honoured the sampler would consume the whole sequence
+        # within milliseconds and the peak would be 9999. An earlier version of
+        # this check only asserted "nothing was killed", which passed against the
+        # old code too and therefore proved nothing.
+        peak8l = m8l["aggregate_rss_peak_kb"]
+        check("inherited_env_cannot_alter_sampling",
+              d8l.returncode == 0 and not k8l and peak8l < 5000,
+              f"an inherited D3_RSS_INTERVAL does not speed up sampling: observed "
+              f"peak {peak8l} stayed far below the 9999 the sequence ends on, so the "
+              f"3 s CLI interval governed (killed: {sorted(k8l)})",
+              d8l.stderr[-400:])
+        # `.get` deliberately: a MISSING field must be a clean FAIL, not a KeyError
+        # that aborts the suite and leaves later assertions unrun -- which is
+        # exactly what a falsification run produced before this change.
+        check("sidecar_interval_is_effective",
+              m8l["scheduling"].get("rss_sample_seconds") == 3.0
+              and m8l["scheduling"].get("rss_sample_seconds_effective") == 3.0,
+              "and the sidecar records 3.0 as both requested and effective, with no "
+              "third value possible", str(m8l["scheduling"])[:200])
+
+        # ---- 8m. the interval is validated -----------------------------------
+        for bad, why in (("0", "zero busy-loops"), ("-1", "negative busy-loops"),
+                         ("nan", "NaN breaks every sleep comparison"),
+                         ("inf", "infinite silently disables the limit"),
+                         ("abc", "not a number")):
+            rbad = subprocess.run(
+                [sys.executable, str(SWEEP), "--certs", str(cdir), "--out",
+                 str(tmp / "o8m.tsv"), "--rss-sample-seconds", bad],
+                cwd=ROOT, capture_output=True, text=True, timeout=60)
+            check(f"reject_interval_{bad}",
+                  rbad.returncode != 0 and "--rss-sample-seconds" in rbad.stderr,
+                  f"--rss-sample-seconds {bad} rejected ({why})", rbad.stderr[-160:])
+
+        # ---- 8n. killed-row RSS provenance is machine-readable ---------------
+        check("killed_rss_source_machine_readable",
+              m8j["scheduling"].get("rss_killed_max_rss_source")
+              == "sampled-aggregate-lower-bound",
+              "the sidecar states the killed row's max_rss provenance as a FIELD, "
+              "not only as prose in `detail`",
+              str(m8j["scheduling"].get("rss_killed_max_rss_source")))
 
         # ---- 9. the descendant walk sees a grandchild the marker misses -------
         spec2 = importlib.util.spec_from_file_location("d3_sweep", SWEEP)
