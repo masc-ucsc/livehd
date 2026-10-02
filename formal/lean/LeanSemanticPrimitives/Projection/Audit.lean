@@ -19,6 +19,8 @@ import LeanSemanticPrimitives.Projection.SimulatorContract
 import LeanSemanticPrimitives.Projection.OperatorBridge
 -- Phase 4's theorems live here; auditing them needs the module in scope
 import LeanSemanticPrimitives.Projection.HardwareInterpreter
+-- Phase 4 (reordered from Phase 8): the generic surface-semantics layer
+import LeanSemanticPrimitives.Projection.SurfaceSemantics
 
 namespace Projection
 
@@ -204,5 +206,28 @@ namespace Projection
 #print axioms peelIsNil_run_inv
 #print axioms mixTerms_sound_all
 #print axioms primStruct_sound
+
+-- Surface semantics (generic, hardware-independent).  `SEval_sound` transfers a
+-- named-syntax derivation to the resolved de Bruijn program; `Eval_det` is what
+-- turns such a transfer into the forward direction of an adequacy `iff`.
+#print axioms Surface.idxOf_slookup
+#print axioms Surface.resolveFuns_get
+#print axioms Surface.resolveAlts_findAlt
+#print axioms Surface.resolveProgram_funs
+#print axioms Surface.SEval_sound
+#print axioms Surface.SEvalList_sound
+#print axioms Surface.Eval_det
+#print axioms Surface.EvalList_det
+#print axioms Surface.SEval_ite_of_bool
+#print axioms Surface.SEval_switch_of_tag
+#print axioms Surface.SEval_hd
+#print axioms Surface.SEval_tl
+#print axioms Surface.SEval_consP
+#print axioms Surface.SEval_isNil_nil
+#print axioms Surface.SEval_isNil_cons
+#print axioms Surface.SEval_call1
+#print axioms Surface.SEval_call2
+#print axioms Surface.SEval_call3
+#print axioms Surface.SEval_call4
 
 end Projection

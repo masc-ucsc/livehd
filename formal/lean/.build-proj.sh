@@ -29,6 +29,7 @@ MODULES=(
   Projection/BindingTime
   Projection/Encoding
   Projection/Surface
+  Projection/SurfaceSemantics
   Projection/BTA
   Projection/PartialEvaluator
   Projection/MixProgram
