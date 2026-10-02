@@ -95,6 +95,13 @@ NONTERMINAL_SCHEDULER_STATUSES = {"deferred", "rss_killed", "timeout"}
 # is the diagnosis.
 FATAL_RUN_STATUSES = {"fatal_cleanup"}
 
+# `--prove`: run the last-mile proof probe instead of the plain sim probe.
+# OFF by default, because the proof probe imports Mathlib (~6.9 GB against the
+# sim probe's ~1.5 GB) and because `proof` must stay `na` for every design not
+# actually checked -- an unattempted gate is not a failed one, and neither is a
+# passed one.
+PROVE = False
+
 # ---------------------------------------------------------------------------
 # Child lifetime.
 #
@@ -759,6 +766,25 @@ def d3_residual : ResidualProgram :=
 #eval Compiler.D3.report "{m}" {m}_designCert d3_fast d3_residual {samples}
 """
 
+# `--prove` only.  Imports `ReifyProof`, which imports the Mathlib-bearing
+# `CompileDesign` because that is where `compileAndRun_correct` lives -- so a
+# proof probe costs ~6.9 GB where a sim probe costs ~1.5 GB.  That is the whole
+# reason this is a separate head rather than always-on.
+PROVE_HEAD = """import LeanSemanticPrimitives.Compiler.ReifyProof
+import LeanSemanticPrimitives.Compiler.D3Harness
+"""
+
+# `d3_proof_gate` audits the axioms and prints the gate line in ONE elaboration,
+# so the line cannot appear for a theorem that failed the audit.  Lean keeps
+# elaborating after an error, so a separate print would still have run.
+PROVE_TAIL = """
+reify_design {m}_designCert as d3_fast
+
+prove_reified {m}_designCert as d3_fast
+audit_axioms d3_fast.eq_compileAndRun
+d3_proof_gate d3_fast.correct
+"""
+
 
 class Target:
     """One row of a target manifest, resolved to a certificate on disk.
@@ -941,6 +967,9 @@ TOOL_FILES = [
     ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/CompileGraphDefs.lean",
     ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/CompileOpDefs.lean",
     ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/CompileDesign.lean",
+    # The proof generator. Only `--prove` loads it, but it is part of the
+    # harness's identity either way: a change to it changes what `proof=1` means.
+    ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/ReifyProof.lean",
     ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/ResidualSemantics.lean",
     ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/Runtime.lean",
     ROOT / "formal/lean/LeanSemanticPrimitives/Compiler/DesignCert.lean",
@@ -960,7 +989,7 @@ TOOL_FILES = [
 # mid-run, which is exactly when a run SHOULD abort.
 CRITICAL_OLEANS = ["CompileDesignDefs", "CompileGraphDefs", "CompileOpDefs",
                    "CompileDesign", "CompileGraph", "CompileOp",
-                   "D3Harness", "ReifyGen", "Reify", "Runtime",
+                   "D3Harness", "ReifyGen", "Reify", "ReifyProof", "Runtime",
                    "DesignCert", "ResidualIR", "ResidualSemantics"]
 
 
@@ -1093,6 +1122,12 @@ def make_probe(cert: pathlib.Path, m: str, samples: int) -> str:
     drops `<m>_step_correct` and the trailing `<m>_residual`/`#print axioms`,
     all of which this probe replaces or does not need.
     """
+    return _cert_body(cert, PROBE_HEAD) + PROBE_TAIL.format(m=m, samples=samples)
+
+
+def _cert_body(cert: pathlib.Path, head: str) -> str:
+    """Shared by both probe builders, so they cannot trim the certificate
+    differently and compare results that came from different text."""
     body = []
     for line in cert.read_text(encoding="utf-8", errors="replace").splitlines():
         if line.startswith("theorem "):
@@ -1126,7 +1161,64 @@ def make_probe(cert: pathlib.Path, m: str, samples: int) -> str:
             continue
         break
 
-    return PROBE_HEAD + "\n".join(body) + PROBE_TAIL.format(m=m, samples=samples)
+    return head + "\n".join(body)
+
+
+def make_proof_probe(cert: pathlib.Path, m: str) -> str:
+    """The last-mile proof, in its OWN file and its OWN process.
+
+    SEPARATE ON PURPOSE.  In one process a failed `prove_reified` or a failed
+    `audit_axioms` puts `error:` in the log and a nonzero exit on the run, and
+    `extract_gates` reads both as `clean_exit = False` -- so an executable design
+    that genuinely passed cert..agree would be relabelled a `typecheck` failure
+    by a proof that did not work out.  `proof` is the LAST gate and must not be
+    able to retract an earlier one.
+    """
+    return _cert_body(cert, PROVE_HEAD) + PROVE_TAIL.format(m=m)
+
+
+PROOF_GATE_RE = r"^D3GATE proof=1 thm=(\S+) axioms=(.*)$"
+
+
+def extract_proof_gate(row, out: str, rc, expect_module=None) -> None:
+    """Credit `proof` from the SEPARATE proof probe.  Writes nothing else.
+
+    Three outcomes, kept apart because they mean different things:
+
+      `na` -- not attempted.  No `--prove`, or the executable probe did not
+              reach `agree`, so there was nothing worth proving about.  An
+              unattempted gate is not a failed one.
+      `0`  -- attempted and did not come back clean.
+      `1`  -- the marker is present exactly once AND the probe exited 0.
+
+    The marker is emitted by `d3_proof_gate`, which audits the axioms and prints
+    in ONE elaboration, so it cannot appear for a theorem resting on `sorryAx`
+    or on `native_decide`'s `ofReduceBool`.  `rc == 0` is required on top of
+    that, because Lean keeps elaborating after an error: a LATER failure in the
+    file would leave the marker printed and the exit code nonzero.
+    """
+    if rc is None:
+        row["proof"] = "na"
+        return
+    # The last gate rests on the others: proving a theorem about a design whose
+    # simulation disagreed would be a claim about the wrong thing.
+    if row.get("agree") != 1:
+        row["proof"] = "na"
+        return
+    hits = re.findall(PROOF_GATE_RE, out, re.M)
+    if rc != 0 or len(hits) != 1:
+        row["proof"] = "0"
+        why = ("proof probe exited {}".format(rc) if rc != 0
+               else "{} proof markers in the log, expected exactly 1".format(len(hits)))
+        row["detail"] = (row.get("detail") or "") + ("; " if row.get("detail") else "") + why
+        return
+    thm, axioms = hits[0]
+    if expect_module is not None and not thm.startswith("d3_fast"):
+        # The marker must name the theorem this probe generated.
+        row["proof"] = "0"
+        row["detail"] = (row.get("detail") or "") + f"; proof marker names {thm!r}"
+        return
+    row["proof"] = "1"
 
 
 ERR_RE = re.compile(r"^(?:[^\s:]+:\d+:\d+: )?error: (.*)$")
@@ -1312,8 +1404,28 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
             row["wall_s"] = "0.00"
             return row
     cg_peak, cg_oom, cg_leaked = 0, False, False
+    proof_out, proof_rc = "", None
     try:
         out, rc = run_group(cmd, LEAN_DIR, timeout, env=penv)
+        if PROVE and not native and rc == 0 and not _SHUTDOWN.is_set():
+            # A SECOND process, so a failed proof cannot put `error:` in the
+            # executable probe's log or a nonzero exit on its run -- either of
+            # which `extract_gates` reads as `clean_exit = False` and turns into
+            # a `typecheck` failure for a design that passed cert..agree.
+            # Inside the same cgroup, so the memory cap still governs it; that
+            # makes `cgroup_peak_kb` the max over BOTH stages, which is what the
+            # cap is protecting anyway.
+            pprobe = probe_dir / f"{m}.proof.lean"
+            pprobe.write_text(make_proof_probe(cert, m), encoding="utf-8")
+            ptv = log_dir / f"{m}.proof.time"
+            pcmd = ([LEAN_BIN, str(pprobe)] if LEAN_BIN
+                    else [LAKE, "env", "lean", str(pprobe)])
+            if pathlib.Path("/usr/bin/time").exists():
+                pcmd = ["/usr/bin/time", "-v", "-o", str(ptv)] + pcmd
+            if cg is not None:
+                pcmd = [sys.executable, str(CGEXEC_PATH), str(cg.path)] + pcmd
+            proof_out, proof_rc = run_group(pcmd, LEAN_DIR, timeout, env=penv)
+            (log_dir / f"{m}.proof.log").write_text(proof_out, encoding="utf-8")
     finally:
         if cg is not None:
             # Read BEFORE destroying -- the counters vanish with the directory.
@@ -1465,6 +1577,10 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         return row
 
     extract_gates(row, out, rc, timeout, expect_module=m, expect_samples=samples)
+    # STRICTLY after `extract_gates`, and it only ever writes `row["proof"]`.
+    # `proof` is the last gate: it can be 0 on a design whose earlier gates are
+    # all 1, and it can never pull an earlier gate down.
+    extract_proof_gate(row, proof_out, proof_rc, expect_module=m)
     if rc == 124:
         # After `extract_gates`, which writes `detail` and the raw gates.
         _mark_timeout(row, timeout)
@@ -1809,6 +1925,13 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true",
                     help="print the selected targets IN RUN ORDER and exit, "
                          "writing nothing")
+    ap.add_argument("--prove", action="store_true",
+                    help="after a target reaches `agree`, run a SECOND probe that "
+                         "generates and kernel-checks the last-mile theorem "
+                         "`d3_fast.correct` and audits its axioms. Off by default: "
+                         "it imports Mathlib (~6.9 GB against the sim probe's "
+                         "~1.5 GB), and `proof` must stay `na` wherever it was "
+                         "not attempted")
     ap.add_argument("--native", action="store_true",
                     help="run the UNMODIFIED certificate: compilesOk by native_decide + axioms")
     a = ap.parse_args()
@@ -2075,7 +2198,12 @@ def main() -> int:
             return 2
 
     external, why = build_root_is_external()
+    global PROVE
+    PROVE = bool(a.prove)
     cfg["runner_selftest"] = bool(a.runner_selftest)
+    # SEMANTIC, not scheduling: a `--prove` run and a plain one are different
+    # experiments, so they must not resume into or merge with one another.
+    cfg["prove"] = bool(a.prove)
     if a.runner_selftest:
         # Branded in the metadata rather than forbidden: the drift regressions
         # must exercise the manifest path.  The brand is what stops the result

@@ -57,6 +57,8 @@ SEMANTIC_KEYS = [
     "lake", "build_root", "build_root_external",
     "worktree_head", "worktree_dirty",
     "runner_selftest",                      # must be identical AND false
+    "prove",                                # a proof run and a plain one are
+                                            # different experiments
 ]
 
 # Present only on a run that aborted on artifact drift.  Classified so the
@@ -92,6 +94,7 @@ PRESENCE_RULES = {
     "build_root": "nonempty", "build_root_external": "present",
     "worktree_head": "nonempty", "worktree_dirty": "present",
     "runner_selftest": "present",
+    "prove": "present",
 }
 
 
