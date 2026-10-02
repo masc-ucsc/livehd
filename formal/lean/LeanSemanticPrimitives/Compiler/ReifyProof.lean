@@ -481,6 +481,28 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
       let locs : Array Ident := names
       tacs := tacs.push (← `(tactic|
         generalize (($(envN k)).push $pushV) = $(envN (k+1)):ident at $[$locs:ident]* ⊢))
+      -- BOUNDED CONTEXT.  `generalize ... at` transports the live facts, but it
+      -- does not DISCARD the ones it replaced: measured, a 48-binding walk whose
+      -- live set is 1 at every step still ended with 296 hypotheses in scope.
+      -- Every context-scanning tactic in the remaining steps then pays for them.
+      --
+      -- So drop, at the end of each step, exactly what the invariant at step k+1
+      -- does not mention: this step's `hv`, its size fact, its two source
+      -- agreements, the produced-slot facts it just superseded, and finally the
+      -- environment itself.  `e0` and `hsz0` are NOT dropped -- every fact is
+      -- stated relative to `e0`, and the source-agreement side conditions read
+      -- `hsz0` to the very end.  Dependents are listed before their dependencies
+      -- so `clear` never has to refuse.
+      let mut dead : Array Ident := #[hvN]
+      if k > 0 then
+        for (sl, _) in live[k-1]! do
+          dead := dead.push (bFact k sl)
+        dead := dead.push (szN k)
+      dead := dead.push (agN k)
+      dead := dead.push (agmN k)
+      if k > 0 then
+        dead := dead.push (envN k)
+      tacs := tacs.push (← `(tactic| clear $[$dead:ident]*))
     -- close
     let anonCtor : Array Term ← termSlots.toArray.mapM fun p =>
       let (sl, isMem) := p
