@@ -534,8 +534,19 @@ minion_dcache_top                 0      67         0      65 PLAIN-COMPILE-FAIL
 #     `const_bits` column so the census can normalise exactly; a width it
 #     cannot state exactly is "?" and refuses the SCC.
 #   * Op_Sext at output width w > n subtracts 2^n from a value whose bit n-1
-#     is set, so "the amount equals the input width" does NOT make it the
-#     identity. Ring pass-throughs are accepted only at proven widths.
+#     is set, so "the amount equals the input width" does NOT make it value
+#     preserving. Ring pass-throughs are accepted only at proven widths.
+#
+# WHAT THE PASS-THROUGH TEST PROVES, precisely: `bv_uint(out) == bv_uint(a)`,
+# the NUMERIC VALUE, not the width. A zero extension from 2 bits to 3
+# preserves bv_uint and is accepted, so the step is not a no-op. That is
+# sufficient here, because reachability depends only on values -- but it means
+# A REWRITE THAT BYPASSES SUCH A STEP MUST RE-ESTABLISH THE NODE'S OUTPUT
+# WIDTH at the bypass point. Deleting a `get_mask(a,-1)` that widened 2 bits
+# to 3 and wiring the 2-bit source straight through changes every downstream
+# operator that reads a width -- Op_Sext's sign position, Op_MuxN's selector
+# index, the next bv_resize -- though no value moved. The census does not
+# check that, and cannot: it is an obligation on the rewrite.
 #
 # THIS CORPUS CANNOT VALIDATE ANY OF THAT, which is worth recording. Every
 # ring here has predicates both exhaustive and mutually exclusive, so

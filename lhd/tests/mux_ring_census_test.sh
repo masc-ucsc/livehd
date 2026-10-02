@@ -196,17 +196,37 @@ run unknown_w2.jsonl
 want "NOT-ELIGIBLE eq_constant_width_unknown" "a '?' constant width"
 
 # --------------------------------------------------------------------------
-# 9. the metadata itself: absent or misaligned is UNSOUND, not a verdict.
+# 9. the metadata itself: absent, misaligned or malformed is UNSOUND, not a
+#    verdict.
+#
+#    The ABSENT case is built on `neg_alias` -- a LIVE ring -- on purpose.
+#    Stripped of const_bits, a reader that tolerates the absence and falls
+#    back to comparing the raw integer finds `-1` equal to nothing in [0,4),
+#    calls the ring dead, and returns a wrong ELIGIBLE.  Built on a ring that
+#    is genuinely dead, the same tolerance would return the RIGHT answer and
+#    the case would only be testing a diagnostic string.
 # --------------------------------------------------------------------------
-sed 's/,"const_bits":[^}]*}/}/' "$TD/full_p1.jsonl" > "$TD/nocb.jsonl"
+sed 's/,"const_bits":[^}]*}/}/' "$TD/neg_alias.jsonl" > "$TD/nocb.jsonl"
 run nocb.jsonl
-[ "$RC" -eq 3 ] || fail "a dump with no const_bits column must exit 3, got $RC"
+[ "$RC" -eq 3 ] || fail "a dump with no const_bits column must exit 3, got $RC ($(verdict))"
 echo "$REPORT" | grep -q "no .const_bits. column" || fail "no const_bits: no diagnostic -- $REPORT"
 sed 's/"consts":"p0=3","const_bits":"p0=2"/"consts":"p0=3","const_bits":"p2=2"/' \
   "$TD/full_p1.jsonl" > "$TD/badcb.jsonl"
 run badcb.jsonl
 [ "$RC" -eq 3 ] || fail "misaligned const_bits must exit 3, got $RC"
 echo "$REPORT" | grep -q "not .*aligned" || fail "misaligned const_bits: no diagnostic -- $REPORT"
+
+# 9b. a width that is not a usable number.  0 and negative matter as much as
+#     garbage: they would reach `norm`/`low_mask` and make an EMPTY value
+#     domain, i.e. a predicate nothing satisfies -- the wrong-YES direction.
+for bad in x 0 -2; do
+  sed 's/"const_bits":"p0=2"/"const_bits":"p0='"$bad"'"/' "$TD/full_p1.jsonl" \
+    > "$TD/badw.jsonl"
+  run badw.jsonl
+  [ "$RC" -eq 3 ] || fail "const width '$bad' must exit 3, got $RC ($(verdict))"
+done
+echo "$REPORT" | grep -qE "not positive|neither an integer" \
+  || fail "a malformed const width produced no diagnostic -- $REPORT"
 
 # --------------------------------------------------------------------------
 # 10. SEXT.  Op_Sext at output width w > n subtracts 2^n from a value whose

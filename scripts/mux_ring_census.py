@@ -9,8 +9,8 @@ contain a mux" does NOT make that true of the other 38, and this script is what
 turns the candidate into a count.  An SCC is ELIGIBLE when all of:
 
   R1  its in-SCC edges form ONE simple ring.
-  R2  every ring member is a `mux`, or a pass-through PROVED to be the exact
-      bitvector identity at its actual widths.
+  R2  every ring member is a `mux`, or a pass-through PROVED to preserve
+      bv_uint -- the NUMERIC VALUE, not the width.  See "what R2 proves".
   R3  every ring edge enters a mux DATA pin, never a selector pin, and every
       non-feedback arm and every selector is driven from OUTSIDE the SCC.
   R4  every ring mux's selector resolves to an equality predicate, or an OR of
@@ -48,10 +48,22 @@ exactly when `bv_uint(selector) == pid - 1`.  That is where mux polarity comes
 from: it is read off the pin index, never off a name.  Op_MuxBool (chosen when
 there are 2 arms and a 1-bit selector) agrees: p1 on 0, p2 on nonzero.
 
+WHAT R2 PROVES, and what it does not.  A pass-through is accepted when
+`bv_uint(out) == bv_uint(a)` -- the numeric value survives the step.  That is
+NOT the same as the step being a no-op: a zero extension from 2 bits to 3
+preserves bv_uint while changing the BitVec type, and this accepts it.  So a
+future rewrite that bypasses or deletes such a step MUST re-establish the
+node's own OUTPUT WIDTH at the bypass point.  Dropping a `get_mask(a,-1)` that
+widened 2 bits to 3 and wiring the 2-bit source straight through changes every
+downstream operator that reads a width -- `Op_Sext`'s sign position,
+`Op_MuxN`'s selector index, the next `bv_resize` -- even though no VALUE moved.
+This census decides reachability, which depends only on values; preserving
+widths is the rewrite's obligation, not something measured here.
+
 Pass-throughs are accepted only with their exact width conditions; see
 `step_mask`.  The headline trap is Op_Sext (LGraphModel.lean:191): at output
-width w > n it subtracts 2^n from a value whose bit n-1 is set, so it is NOT
-the identity, and "the amount equals the input width" is not enough to accept
+width w > n it subtracts 2^n from a value whose bit n-1 is set, so bv_uint is
+NOT preserved, and "the amount equals the input width" is not enough to accept
 it.
 
 ================================ FAIL-CLOSED ==============================
@@ -146,7 +158,21 @@ def load_node_consts(path):
                 value = int(vtxt, 0)
             except ValueError:
                 raise L.Unsound(f"{path}:{lineno} const {ve!r} is not an integer literal")
-            width = None if btxt == "?" else int(btxt)
+            if btxt == "?":
+                width = None            # stated-as-unknown: refuse at the use site
+            else:
+                # Anything else must be a usable width.  Letting a non-integer
+                # through would surface as a traceback, and 0 or a negative
+                # would reach `norm`/`low_mask` and silently produce an empty
+                # value domain -- i.e. a predicate nothing can satisfy, which
+                # is the wrong-YES direction.
+                if not btxt.lstrip("-").isdigit():
+                    raise L.Unsound(f"{path}:{lineno} const width {be!r} is neither "
+                                    f"an integer nor '?'")
+                width = int(btxt)
+                if width < 1:
+                    raise L.Unsound(f"{path}:{lineno} const width {be!r} is not positive; "
+                                    f"a constant is compared at a width of at least 1")
             out[r["nid"]][vlabel].append((value, width))
     if not saw_column:
         raise L.Unsound(f"{path} declares no node with a const_bits column")
@@ -209,9 +235,11 @@ class Resolver:
         """-> (driver_of_a, mask) when `bv_uint(out) == bv_uint(a) & mask`,
         else None (meaning: this node is a root, not a pass-through).
 
-        `mask` is an int; it is never None, so a caller wanting strict identity
-        asks for `mask == low_mask(bits(a))`.  Every case states the widths it
-        depends on -- that is the whole point of this function."""
+        `mask` is an int; it is never None, so a caller wanting value
+        preservation asks for `mask == low_mask(bits(a))`.  Note what that
+        does and does not say: it is a statement about bv_uint, so a step that
+        WIDENS (a zext) qualifies.  Every case states the widths it depends on
+        -- that is the whole point of this function."""
         w = self.out_bits(nid)
 
         if kind == "get_mask":
@@ -327,8 +355,8 @@ class Resolver:
             if not a:
                 raise Refuse("selector_or_empty")
             if len(a) == 1:
-                if not self.identity_step(nid, kind):
-                    raise Refuse("selector_or_not_identity")
+                if not self.value_preserving_step(nid, kind):
+                    raise Refuse("selector_or_not_value_preserving")
                 return self.resolve_pred(a[0], depth + 1)
             out = []
             for d in a:
@@ -336,15 +364,16 @@ class Resolver:
             return out
 
         if kind in ("get_mask", "and", "sext"):
-            if not self.identity_step(nid, kind):
-                raise Refuse("selector_%s_not_identity" % kind)
+            if not self.value_preserving_step(nid, kind):
+                raise Refuse("selector_%s_not_value_preserving" % kind)
             return self.resolve_pred(self.step_mask(nid, kind)[0], depth + 1)
 
         raise Refuse("selector_not_eq_or_or_of_eq:" + kind)
 
-    def identity_step(self, nid, kind):
-        """True when this node is the exact bitvector identity on its operand
-        -- the mask covers every bit the operand can set."""
+    def value_preserving_step(self, nid, kind):
+        """True when `bv_uint(out) == bv_uint(a)`: the mask covers every bit
+        the operand can set.  The OUTPUT WIDTH may still differ (a zext passes
+        this), which is why the rewrite note in the module docstring exists."""
         step = self.step_mask(nid, kind)
         if step is None:
             return False
@@ -355,7 +384,11 @@ class Resolver:
 
 # --------------------------------------------------------------------------
 def check_ring_member(rv, nid, in_pin):
-    """R2 for a non-mux ring member: the EXACT identity, at real widths."""
+    """R2 for a non-mux ring member: bv_uint preserved, at real widths.
+
+    A ring member only has to carry the VALUE around the ring for the
+    reachability question to be answered.  Width preservation is the separate
+    obligation a rewrite inherits -- see the module docstring."""
     kind = rv.nodes[nid]["kind"]
     if kind not in ("sext", "get_mask", "and", "or"):
         raise Refuse("ring_member_not_mux_or_passthrough:" + kind)
@@ -364,9 +397,9 @@ def check_ring_member(rv, nid, in_pin):
         raise Refuse("ring_%s_not_a_passthrough" % kind)
     if step[0][0] == "node" and in_pin != "p0":
         raise Refuse("ring_%s_feedback_on_non_data_pin" % kind)
-    if not rv.identity_step(nid, kind):
-        raise Refuse("ring_%s_not_identity" % kind)
-    return "%s(identity)" % kind
+    if not rv.value_preserving_step(nid, kind):
+        raise Refuse("ring_%s_not_value_preserving" % kind)
+    return "%s(value-preserving)" % kind
 
 
 def domain_ok(rbits, cap):

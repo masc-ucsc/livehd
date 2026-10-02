@@ -288,36 +288,7 @@ std::string tool_pin_label(const hhds::Pin_class& pin, bool is_sink) {
   return pn.empty() ? std::format("p{}", pin.get_port_id()) : std::string{pn};
 }
 
-// Every CONSTANT feeding a node's sink pins, as `<pin>=<value>`.
-//
-// A constant driver is a pin on hhds' CONST_NODE, which the iterators SKIP --
-// so it has no node record and appears in no edge record, and the dump showed
-// the shape of a design but none of its literals. For a packed bit-field cycle
-// that is the whole question: `sra`/`shl` shift amounts and a `get_mask` mask
-// ARE the field intervals, and without them one can see that two words feed
-// each other but not whether they touch the same bits.
-std::string tool_node_consts(const hhds::Node_class& node) {
-  namespace gu = livehd::graph_util;
-  std::string out;
-  for (const auto& e : node.inp_edges()) {
-    if (e.driver.is_invalid() || !gu::is_const_pin(e.driver)) {
-      continue;
-    }
-    // By pid, for the reason spelled out above tool_endpoint_name: on a sink
-    // pin, `pin_name_of` can return the node's OUTPUT name, which would label
-    // two different constant operands identically.
-    std::string label = std::format("p{}", e.sink.get_port_id());
-    auto v = gu::hydrate_const(e.driver);
-    if (!out.empty()) {
-      out += ",";
-    }
-    out += label + "=" + v.to_pyrope();
-  }
-  return out;
-}
-
-// The WIDTH of every constant feeding a node's sink pins, positionally aligned
-// with `consts` -- same loop, same order, same labels.
+// The WIDTH a single CONSTANT operand is compared at.
 //
 // WHY A WIDTH IS NEEDED AT ALL.  `consts` prints a VALUE, and a value alone
 // does not determine what the design computes with it.  `Op_EQ` compares
@@ -386,17 +357,46 @@ std::string tool_const_width_str(const hhds::Pin_class& pin) {
   return std::to_string(intrinsic());
 }
 
-std::string tool_node_const_bits(const hhds::Node_class& node) {
+// Every CONSTANT feeding a node's sink pins: `consts` as `<pin>=<value>` and
+// `const_bits` as `<pin>=<width>`.
+//
+// A constant driver is a pin on hhds' CONST_NODE, which the iterators SKIP --
+// so it has no node record and appears in no edge record, and the dump showed
+// the shape of a design but none of its literals.  For a packed bit-field
+// cycle that is the whole question: `sra`/`shl` shift amounts and a `get_mask`
+// mask ARE the field intervals, and without them one can see that two words
+// feed each other but not whether they touch the same bits.
+//
+// ONE traversal produces BOTH columns, positionally aligned by construction.
+//
+// They used to be two functions each walking `inp_edges()`.  Even walking the
+// same container the same way, that is two orders, and a consumer cannot
+// detect a permutation of them: a variadic sink carries several constants
+// under ONE label (`p0=1,p0=2`), so comparing labels entry by entry passes
+// while the widths belong to the wrong values.  Emitting both from one loop
+// removes the possibility rather than checking for it.
+struct Tool_consts {
+  std::string values;   // `consts`:     p0=3,p2=-1
+  std::string widths;   // `const_bits`: p0=2,p2=1
+};
+
+Tool_consts tool_node_consts(const hhds::Node_class& node) {
   namespace gu = livehd::graph_util;
-  std::string out;
+  Tool_consts out;
   for (const auto& e : node.inp_edges()) {
     if (e.driver.is_invalid() || !gu::is_const_pin(e.driver)) {
       continue;
     }
-    if (!out.empty()) {
-      out += ",";
+    // By pid, for the reason spelled out above tool_endpoint_name: on a sink
+    // pin, `pin_name_of` can return the node's OUTPUT name, which would label
+    // two different constant operands identically.
+    const auto label = std::format("p{}", e.sink.get_port_id());
+    if (!out.values.empty()) {
+      out.values += ",";
+      out.widths += ",";
     }
-    out += std::format("p{}={}", e.sink.get_port_id(), tool_const_width_str(e.driver));
+    out.values += label + "=" + gu::hydrate_const(e.driver).to_pyrope();
+    out.widths += label + "=" + tool_const_width_str(e.driver);
   }
   return out;
 }
@@ -415,9 +415,8 @@ Tool_record tool_node_record(hhds::Graph* g, const hhds::Node_class& node) {
   r.cols.emplace_back("src", tool_node_src(g, node));
   r.cols.emplace_back("partitionable", livehd::color::is_partitionable(node) ? "1" : "0");
   auto cs = tool_node_consts(node);
-  r.cols.emplace_back("consts", cs.empty() ? std::string{"nil"} : cs);
-  auto cb = tool_node_const_bits(node);
-  r.cols.emplace_back("const_bits", cb.empty() ? std::string{"nil"} : cb);
+  r.cols.emplace_back("consts", cs.values.empty() ? std::string{"nil"} : cs.values);
+  r.cols.emplace_back("const_bits", cs.widths.empty() ? std::string{"nil"} : cs.widths);
   return r;
 }
 
