@@ -880,31 +880,179 @@ below are what justify the milestone's proof being worth writing.  The theorem
 (`projectDesign_correct`) is not yet written; these are `#guard`s, and the
 distinction is the one `SHARED_SEMANTICS.md` and Gate 0 already draw. -/
 
-/-- What `I_hw`'s unchecked reads ASSUME about the runtime vectors.
+/-! ## Milestone 2, item 1: what `I_hw` actually supports
+
+Two predicates, deliberately separate.  `SupportedByProjection` is about the
+CERTIFICATE alone and is decided once; `RuntimeSized` is about the three vectors
+a particular step is handed.  Mixing them would make a design-level fact look
+like a per-cycle obligation, and vice versa.
+
+NEITHER IS "PROJECTABLE".  `SupportedByProjection D` says every feature of `D`
+has an implementation -- the same thing the operator census measures statically.
+It does NOT say `projectDesign D` succeeds: that additionally needs the
+specializer's fuel to suffice, which is a property of the run and not of the
+design, and which the theorems below therefore take as a separate hypothesis
+rather than fold in. -/
+
+/-- The source forms `srcVal` evaluates.
+
+`memImg` and `memConst` are NOT among them, and this is the one place that
+matters: `srcVal` answers both with `mk_bv 0 0`, which is defined and WRONG
+rather than a refusal.  `memConst` in particular is a ROM -- a combinational
+table with no entry in `RuntimeState.mems` at all -- so a design can have
+`D.memories = #[]` and still contain one.  Memory-freeness does not exclude it;
+only this does. -/
+def SourceSupported : Compiler.SourceDesc → Bool
+  | .input _ _            => true
+  | .const _ _            => true
+  | .flopQ _ _            => true
+  | .flopQAsync _ _ _ _ _ => true
+  | .memImg _ _ _         => false
+  | .memConst _ _ _       => false
+
+/-- The node operators `applyOp` dispatches on: the seventeen the CORE-ET
+census finds, and no others.  `Op_Const` is absent because a constant is a
+SOURCE, never a node op -- which is why the census finds it in zero node
+positions.  Everything else falls through to `applyOp`'s catch-all, which
+answers `mk_bv w 0`; that agrees with `eval_op`'s own catch-all, so the two do
+not DISAGREE, but neither refuses, which is exactly why this predicate has to
+be a hypothesis rather than an afterthought. -/
+def OpSupported : LGraphOp → Bool
+  | .Op_And     | .Op_Or   | .Op_Xor  | .Op_Not  | .Op_Sum _ => true
+  | .Op_EQ      | .Op_Ror  | .Op_MuxBool | .Op_MuxN         => true
+  | .Op_SHL     | .Op_SRA  | .Op_Sext | .Op_GetMask         => true
+  | .Op_ULT     | .Op_UGT  | .Op_SLT   | .Op_SGT            => true
+  | _                                                       => false
+
+/-- Everything about the CERTIFICATE that `I_hw` relies on.
+
+`wf` is the SHARED well-formedness predicate, not a local restatement:
+`DesignCertWF` already says dependencies name strictly earlier slots and that
+outputs, flop pins and memory images name real slots, which is precisely the
+"valid references" half.  Widths need no condition -- `bv_resize` and `mk_bv`
+are total at every width -- so none is invented here. -/
+structure SupportedByProjection (D : Compiler.DesignCert) : Prop where
+  /-- dependency ordering and slot ranges, from the shared checker -/
+  wf         : Compiler.DesignCert.DesignCertWF D
+  /-- `StateRel`/`ResultRel` admit no memory-bearing state yet (Phase 7) -/
+  memFree    : D.memories = #[]
+  /-- no `memImg`/`memConst` source; see `SourceSupported` -/
+  sources    : ∀ sd ∈ D.sources.toList, SourceSupported sd = true
+  /-- every node operator has an `applyOp` case -/
+  ops        : ∀ c ∈ D.nodes.toList, OpSupported c.op = true
+  /-- every flop commits on a DECLARED clock, so `fires` is not reading past
+  the edge vector.  The memory analogue is vacuous under `memFree`. -/
+  flopClocks : ∀ f ∈ D.flops, f.clock < D.clocks.size
+
+/-- How far into the input vector a source reads.  `flopQAsync` reads TWO
+vectors: its stored value from the state and its reset from the INPUTS. -/
+def SourceInputBound : Compiler.SourceDesc → Nat → Prop
+  | .input idx _,            n => idx < n
+  | .flopQAsync _ _ ri _ _,  n => ri < n
+  | _,                       _ => True
+
+instance : ∀ sd n, Decidable (SourceInputBound sd n)
+  | .input _ _, _            => inferInstanceAs (Decidable (_ < _))
+  | .const _ _, _            => inferInstanceAs (Decidable True)
+  | .flopQ _ _, _            => inferInstanceAs (Decidable True)
+  | .flopQAsync _ _ _ _ _, _ => inferInstanceAs (Decidable (_ < _))
+  | .memImg _ _ _, _         => inferInstanceAs (Decidable True)
+  | .memConst _ _ _, _       => inferInstanceAs (Decidable True)
+
+/-- …and how far into the flop-state vector. -/
+def SourceFlopBound : Compiler.SourceDesc → Nat → Prop
+  | .flopQ idx _,            n => idx < n
+  | .flopQAsync idx _ _ _ _, n => idx < n
+  | _,                       _ => True
+
+instance : ∀ sd n, Decidable (SourceFlopBound sd n)
+  | .input _ _, _            => inferInstanceAs (Decidable True)
+  | .const _ _, _            => inferInstanceAs (Decidable True)
+  | .flopQ _ _, _            => inferInstanceAs (Decidable (_ < _))
+  | .flopQAsync _ _ _ _ _, _ => inferInstanceAs (Decidable (_ < _))
+  | .memImg _ _ _, _         => inferInstanceAs (Decidable True)
+  | .memConst _ _ _, _       => inferInstanceAs (Decidable True)
+
+/-- What `I_hw`'s unchecked reads assume about the three vectors of ONE step.
 
 `nthD` has no bounds check: an out-of-range read is `hd nil`, a type error, not
 a default.  `interpretDesign` is total exactly where `I_hw` is not -- `fires`
-reads an undeclared ordinal as `false` -- so the two agree only where these
-hold.  Stated now, and not discovered later inside an adequacy proof, because
-the edge vector is the THIRD such vector and the third place the assumption
-would otherwise be silent.
+reads an undeclared ordinal as `false`, and `Array.getElem?` defaults -- so the
+two agree only where these hold.  Stated as a hypothesis, never discovered
+inside a proof.
 
-`edgesSized` is `RuntimeSemWF.edgesSized` in d2's checker and `flopClocks` /
-`memClocks` are `DesignSemWF`'s; the checker itself is not ported here, so these
-are carried as hypotheses.  They are also exactly the hypotheses
-`interpretDesign_allEdges` takes. -/
-structure RuntimeSized (D : Compiler.DesignCert) (e : Compiler.ClockEdges) : Prop where
-  edgesSized : D.clocks.size ≤ e.size
-  flopClocks : ∀ f ∈ D.flops, f.clock < D.clocks.size
-  memClocks  : ∀ m ∈ D.memories, m.clock < D.clocks.size
+`edges` is `RuntimeSemWF.edgesSized` in d2's checker; the checker is not ported
+here, so it is carried. -/
+structure RuntimeSized (D : Compiler.DesignCert) (e : Compiler.ClockEdges)
+    (i : Compiler.RuntimeInput) (s : Compiler.RuntimeState) : Prop where
+  edges      : D.clocks.size ≤ e.size
+  inputs     : ∀ sd ∈ D.sources.toList, SourceInputBound sd i.size
+  stateReads : ∀ sd ∈ D.sources.toList, SourceFlopBound sd s.flops.size
+  /-- `flopNext` reads the old value of flop `idx` for every flop in the design -/
+  flopsSized : D.flops.size ≤ s.flops.size
 
-/-- The all-fire stimulus satisfies the sizing half for any declared design. -/
-theorem RuntimeSized_allEdges {D : Compiler.DesignCert}
-    (hf : ∀ f ∈ D.flops, f.clock < D.clocks.size)
-    (hm : ∀ m ∈ D.memories, m.clock < D.clocks.size) :
-    RuntimeSized D (Compiler.allEdges D) :=
-  { edgesSized := by simp [Compiler.allEdges_size]
-    flopClocks := hf, memClocks := hm }
+/-- The all-fire stimulus satisfies the edge half for any supported design. -/
+theorem RuntimeSized_allEdges_edges {D : Compiler.DesignCert} :
+    D.clocks.size ≤ (Compiler.allEdges D).size := by
+  simp [Compiler.allEdges_size]
+
+/-- A supported design's clock ordinals are in range, so `interpretDesign`'s
+conservativity hypotheses are discharged by support alone. -/
+theorem SupportedByProjection.conservative {D : Compiler.DesignCert}
+    (h : SupportedByProjection D) (i : Compiler.RuntimeInput) (s : Compiler.RuntimeState) :
+    Compiler.interpretDesign D (Compiler.allEdges D) i s
+      = Compiler.interpretDesignLegacy D i s :=
+  Compiler.interpretDesign_allEdges D h.flopClocks
+    (by intro m hm; rw [h.memFree] at hm; simp at hm) i s
+
+/-! ### The predicate is satisfiable, and it bites
+
+Both shared fixtures satisfy it, and a design differing only by an unsupported
+feature does not.  Without the negative controls a predicate like this can be
+accidentally vacuous or accidentally universal and nobody notices. -/
+
+namespace SupportCheck
+open Compiler Projection.Acceptance
+
+theorem tiny_supported : SupportedByProjection tinyD where
+  wf := ⟨DesignCert.depsBounded_of_bool tinyD (by decide),
+         by refine ⟨?_, ?_, ?_⟩ <;>
+            simp [tinyD, DesignCert.numSlots]⟩
+  memFree := rfl
+  sources := by decide
+  ops := by decide
+  flopClocks := by decide
+
+theorem seq_supported : SupportedByProjection seqD where
+  wf := ⟨DesignCert.depsBounded_of_bool seqD (by decide),
+         by refine ⟨?_, ?_, ?_⟩ <;>
+            simp [seqD, DesignCert.numSlots]⟩
+  memFree := rfl
+  sources := by decide
+  ops := by decide
+  flopClocks := by decide
+
+-- NEGATIVE CONTROL 1: a ROM source.  `D.memories` is still empty, so
+-- memory-freeness does NOT catch it -- `SourceSupported` is what does.
+private def romD : DesignCert :=
+  { tinyD with sources := tinyD.sources.push (.memConst 2 4 #[0, 1, 2, 3]) }
+
+#guard romD.memories == #[]
+example : ¬ (∀ sd ∈ romD.sources.toList, SourceSupported sd = true) := by decide
+
+-- NEGATIVE CONTROL 2: an operator with no `applyOp` case
+private def divD : DesignCert :=
+  { tinyD with nodes := #[{ op := .Op_UDiv, width := 4, deps := #[0, 1] }] }
+
+example : ¬ (∀ c ∈ divD.nodes.toList, OpSupported c.op = true) := by decide
+
+-- …and the supported operators really are the seventeen, no more
+example : OpSupported .Op_GetMask = true := by decide
+example : OpSupported (.Op_Const 0) = false := by decide
+example : OpSupported .Op_Sub = false := by decide
+example : OpSupported .Op_MemRead = false := by decide
+
+end SupportCheck
 
 def projectDesign (D : Compiler.DesignCert) : Except MixError Program :=
   mixDriver 20000 200 hwAP [encDesign D]

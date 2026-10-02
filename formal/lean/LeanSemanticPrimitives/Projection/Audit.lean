@@ -17,6 +17,8 @@ import LeanSemanticPrimitives.Projection.PartialEvaluatorCorrect
 import LeanSemanticPrimitives.Projection.SecondProjection
 import LeanSemanticPrimitives.Projection.SimulatorContract
 import LeanSemanticPrimitives.Projection.OperatorBridge
+-- Phase 4's theorems live here; auditing them needs the module in scope
+import LeanSemanticPrimitives.Projection.HardwareInterpreter
 
 namespace Projection
 
@@ -143,6 +145,10 @@ namespace Projection
 #print axioms evalOpCert_Sext
 -- Phase 3, last operator: Op_SHL
 #print axioms prim_bvShl
+-- Phase 4 item 1: the support predicate
+#print axioms Hw.SupportCheck.tiny_supported
+#print axioms Hw.SupportCheck.seq_supported
+#print axioms Hw.SupportedByProjection.conservative
 #print axioms evalOp_SHL_nil
 #print axioms evalOp_SHL_cons
 #print axioms evalOpCert_SHL
