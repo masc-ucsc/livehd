@@ -534,6 +534,38 @@ def main() -> int:
                   f"(proof={pk[0]['proof_max_rss_source'] if pk else None!r})",
                   str(pk[:1])[:300])
 
+            # ---- the proof stage REFUSES to launch after a hard trip -----------
+            # Deterministic via the between-stages seam, because the real window
+            # -- sim exited, proof not yet registered -- is microseconds wide and
+            # a scripted sampler cannot be aimed at it.
+            r = run(["--enforce", "cgroup", "--kill-over-rss-kb", "900000",
+                     "--prove"],
+                    env_extra={"ALLOC_MB": "16",
+                               "D3_TEST_KILL_BETWEEN_STAGES": "aaa_gate"},
+                    out="hy_between.tsv", timeout=180)
+            bt = (rt.rows_of(tmp / "hy_between.tsv")
+                  if (tmp / "hy_between.tsv").is_file() else [])
+            check("proof_refused_after_hard_trip",
+                  bt and bt[0]["proof"] == "na"
+                  and "not attempted" in bt[0]["detail"]
+                  and "not launching the proof stage" in r.stderr,
+                  f"a hard trip between the stages stops the proof launching, and "
+                  f"the row says NOT ATTEMPTED rather than failed "
+                  f"(proof={bt[0]['proof'] if bt else None!r})",
+                  str(bt[:1])[:400] or r.stderr[-400:])
+            check("proof_refusal_keeps_executable_gates",
+                  bt and all(bt[0][g] == "1" for g in
+                             ("cert", "compile", "reify", "typecheck", "sim",
+                              "checker", "agree")),
+                  "while the sim stage's cert..agree are kept: they were earned "
+                  "before the budget was reached", str(bt[:1])[:300])
+            check("proof_refusal_wrote_no_proof_artifacts",
+                  not list((rd_b / "logs").glob("*.proof.log"))
+                  if (rd_b := run_dir_of(r.stderr)) and (rd_b / "logs").is_dir()
+                  else False,
+                  "and no proof probe ran at all -- no proof log was written",
+                  str(rd_b))
+
             # ---- a measured peak survives a row that turns into runner_error ------
             # Three ways the semantic row can become unusable AFTER the kernel's
             # accounting was read successfully. The reading is gone once the

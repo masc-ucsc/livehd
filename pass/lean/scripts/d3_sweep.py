@@ -324,6 +324,12 @@ def _descendants(root: int) -> set:
 # monitor regression can pin an exact ORDER of crossings rather than racing a
 # real process.  It replaces the MEASUREMENT, so a manifest run refuses outright
 # when it is set -- the same rule as `D3_ARTIFACT_DIR`.
+# Trip the hard limit BETWEEN the sim and proof stages, which is the one window
+# a scripted RSS sequence cannot target reliably: the sampler runs on its own
+# clock and the gap between the stages is microseconds.  Names the module whose
+# probe the trip should follow.
+_TEST_KILL_BETWEEN_STAGES = os.environ.get("D3_TEST_KILL_BETWEEN_STAGES") or ""
+
 _TEST_RSS_SEQ = [int(x) for x in
                  (os.environ.get("D3_TEST_RSS_SEQ") or "").replace(" ", "").split(",")
                  if x] or None
@@ -1215,7 +1221,7 @@ PROOF_THEOREM = "d3_fast.correct"
 
 
 def extract_proof_gate(row, out: str, rc, expect_module=None, oom: bool = False,
-                       sampled_kill_kb: int = 0) -> None:
+                       sampled_kill_kb: int = 0, refused: str = "") -> None:
     """Credit `proof` from the SEPARATE proof probe.  Writes nothing else.
 
     Three outcomes, kept apart because they mean different things:
@@ -1247,6 +1253,15 @@ def extract_proof_gate(row, out: str, rc, expect_module=None, oom: bool = False,
     """
     if rc is None:
         row["proof"] = "na"
+        if refused:
+            # NOT ATTEMPTED, and the row says why.  `0` would be a claim that the
+            # proof was tried and did not come back clean; nothing ran at all, so
+            # nothing is known about the theorem either way.  The distinction
+            # matters because `0` invites a reader to think the theorem is in
+            # doubt, and it is not -- it is simply unexamined.
+            row["detail"] = ((row.get("detail") or "")
+                             + ("; " if row.get("detail") else "")
+                             + f"proof not attempted: {refused}")
         return
     # The last gate rests on the others: proving a theorem about a design whose
     # simulation disagreed would be a claim about the wrong thing.
@@ -1483,6 +1498,7 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
             return row
     cg_peak, cg_oom, cg_leaked = 0, False, False
     proof_out, proof_rc = "", None
+    proof_refused = ""
     sim_oom, sim_peak = False, None
     try:
         out, rc = run_group(cmd, LEAN_DIR, timeout, env=penv)
@@ -1495,8 +1511,32 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
         _pre = dict(row)
         if PROVE and not native and rc == 0 and not _SHUTDOWN.is_set():
             extract_gates(_pre, out, rc, timeout, expect_module=m, expect_samples=samples)
-        if (PROVE and not native and rc == 0 and not _SHUTDOWN.is_set()
-                and _pre.get("agree") == 1):
+        if _TEST_KILL_BETWEEN_STAGES == m:
+            # The seam fires exactly where the race lives: after the sim stage
+            # has exited and before the proof stage exists to be reaped.
+            _RSS_PEAK["killed_at_kb"] = _RSS_PEAK.get("killed_at_kb") or 1
+            _RSS_KILL.set()
+            _RSS_STOP.set()
+        # `_RSS_KILL` as well as `_SHUTDOWN`.  The hard monitor sets `_RSS_KILL`,
+        # sets `_RSS_STOP`, reaps, and then RETURNS -- the thread is gone.  Trip
+        # it in the window between the sim stage exiting and the proof stage's
+        # process group being registered and `_reap_all` finds nothing to kill,
+        # no monitor remains, and the proof probe would launch UNGUARDED: a
+        # ~6.9 GB Mathlib import against a budget that has already been declared
+        # exceeded.  Nor would it be caught afterwards -- if it exited 0,
+        # `proof_sampled_kill` is false, because nothing killed it.
+        # `_RSS_STOP` is refused too: the soft cap exists to stop ADDING load,
+        # and a proof stage is new load for a target whose sim is already done.
+        want_proof = (PROVE and not native and rc == 0 and not _SHUTDOWN.is_set()
+                      and _pre.get("agree") == 1)
+        if want_proof and (_RSS_KILL.is_set() or _RSS_STOP.is_set()):
+            proof_refused = ("the aggregate RSS hard limit was reached before the "
+                             "proof stage could launch" if _RSS_KILL.is_set() else
+                             "the aggregate RSS cap latched before the proof stage "
+                             "could launch")
+            print(f"d3_sweep: not launching the proof stage for {m}: "
+                  f"{proof_refused}", file=sys.stderr)
+        elif want_proof:
             # Read the cgroup's OOM state BEFORE the proof stage, so a proof-stage
             # kill can be told apart from a sim-stage one.  Without this the two
             # share a cgroup and a proof OOM would come back as `rss_killed` for
@@ -1747,7 +1787,8 @@ def run_one(target: Target, samples: int, timeout: int, native: bool, baseline: 
     # all 1, and it can never pull an earlier gate down.
     extract_proof_gate(row, proof_out, proof_rc, expect_module=m, oom=proof_oom,
                        sampled_kill_kb=(_RSS_PEAK["killed_at_kb"]
-                                        if proof_sampled_kill else 0))
+                                        if proof_sampled_kill else 0),
+                       refused=proof_refused)
     if rc == 124:
         # After `extract_gates`, which writes `detail` and the raw gates.
         _mark_timeout(row, timeout)
@@ -2152,6 +2193,13 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
+    if _TEST_KILL_BETWEEN_STAGES and a.manifest:
+        # Same reasoning as the scripted sampler below: it fabricates the budget
+        # state the scheduler acts on, so a canonical run must never see it.
+        print("REFUSING a manifest run: D3_TEST_KILL_BETWEEN_STAGES is set, which "
+              "fabricates a hard-limit trip. It exists for the guard regressions "
+              "and can never produce evidence.", file=sys.stderr)
+        return 2
     if _TEST_RSS_SEQ and a.manifest:
         # It replaces the MEASUREMENT the memory budget is enforced from, so a
         # canonical run must never see it -- a sweep that believes a scripted

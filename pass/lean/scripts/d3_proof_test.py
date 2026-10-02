@@ -168,6 +168,23 @@ def main() -> int:
               "an oom_kill event outranks the sampled guard", r["detail"])
         intact(r, "proof_oom_over_sampled")
 
+        # ---- 3a2. refused-before-launch is NOT ATTEMPTED, not failed ----------
+        # The race: the hard monitor sets _RSS_KILL, reaps, and RETURNS. Trip it
+        # between the sim stage exiting and the proof stage being registered and
+        # `_reap_all` finds nothing, no monitor remains, and the proof would
+        # launch unguarded -- then exit 0, so nothing downstream would notice.
+        r = agree_row()
+        sweep.extract_proof_gate(r, "", None, expect_module="tima_adder",
+                                 refused="the aggregate RSS hard limit was reached "
+                                         "before the proof stage could launch")
+        check("refused_launch_is_na_not_zero",
+              r["proof"] == "na" and "not attempted" in r["detail"]
+              and "hard limit" in r["detail"],
+              "a proof that never launched is `na` with the reason, not `0`: "
+              "`0` would read as the theorem being in doubt when it is simply "
+              "unexamined", r["detail"])
+        intact(r, "refused_launch")
+
         # ---- 3b. the schema carries the proof stage's own figures -------------
         for c in ("sim_max_rss_kb", "sim_user_s", "sim_sys_s", "sim_wall_s",
                   "proof_max_rss_kb", "proof_max_rss_source",
