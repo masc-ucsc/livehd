@@ -1464,6 +1464,7 @@ sh_test(
     srcs = ["lhd_tool_test.sh"],
     data = _FLOW_DATA + [
         "part_hier.v",
+        "tool_sink_pins.v",
         "tree_hier.prp",
     ],
 )

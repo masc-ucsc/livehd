@@ -220,13 +220,30 @@ bool tool_match_all(const Tool_record& r, const std::vector<Tool_filter>& filter
   return true;
 }
 
-std::string tool_endpoint_name(const hhds::Pin_class& pin) {
+// `is_sink` is NOT cosmetic.  `pin_name_of` reads the `pin_name` attribute, and
+// on a SINK pin of a node whose OUTPUT carries a name it returns that output's
+// name -- so `mux_158740`'s selector edge printed as
+// `mux_158740.txfma0_f3.f3_32csa.a_i[51:24]` while its two data arms printed as
+// `p1` and `p2`.  Three different sink pins, one of them wearing the driver's
+// label, and the port id -- the only thing that says selector-vs-arm -- gone.
+// Worse, it collides: the same string is also the driver endpoint of that node,
+// so an edge in and an edge out are indistinguishable by endpoint.
+//
+// A sink is therefore ALWAYS `p<port_id>`.  The pid is the ground truth
+// (`graph/cell.cpp` documents the operand layout per op), and a label that
+// cannot be wrong beats one that is occasionally prettier.  A driver keeps its
+// name: there it is the pin's own, and `scripts/lgraph_scc.py` cross-checks it
+// against the `pin` records.
+std::string tool_endpoint_name(const hhds::Pin_class& pin, bool is_sink) {
   namespace gu = livehd::graph_util;
   if (gu::is_graph_input_pin(pin) || gu::is_graph_output_pin(pin)) {
     return std::format("${}", pin.get_pin_name());
   }
   auto node = pin.get_master_node();
-  auto pn   = gu::pin_name_of(pin);
+  if (is_sink) {
+    return std::format("{}.p{}", gu::debug_name(node), pin.get_port_id());
+  }
+  auto pn = gu::pin_name_of(pin);
   if (pn.empty()) {
     return std::format("{}.p{}", gu::debug_name(node), pin.get_port_id());
   }
@@ -261,7 +278,12 @@ std::string tool_match_str(const hhds::Pin_class& pin) {
   return gu::has_match(pin) ? std::to_string(gu::match_of(pin)) : std::string{"nil"};
 }
 
-std::string tool_pin_label(const hhds::Pin_class& pin) {
+// Same split as tool_endpoint_name, and for the same reason: on a sink pin
+// `pin_name_of` may hand back the node's OUTPUT name.
+std::string tool_pin_label(const hhds::Pin_class& pin, bool is_sink) {
+  if (is_sink) {
+    return std::format("p{}", pin.get_port_id());
+  }
   auto pn = livehd::graph_util::pin_name_of(pin);
   return pn.empty() ? std::format("p{}", pin.get_port_id()) : std::string{pn};
 }
@@ -281,8 +303,10 @@ std::string tool_node_consts(const hhds::Node_class& node) {
     if (e.driver.is_invalid() || !gu::is_const_pin(e.driver)) {
       continue;
     }
-    auto pn = gu::pin_name_of(e.sink);
-    std::string label = pn.empty() ? std::format("p{}", e.sink.get_port_id()) : std::string{pn};
+    // By pid, for the reason spelled out above tool_endpoint_name: on a sink
+    // pin, `pin_name_of` can return the node's OUTPUT name, which would label
+    // two different constant operands identically.
+    std::string label = std::format("p{}", e.sink.get_port_id());
     auto v = gu::hydrate_const(e.driver);
     if (!out.empty()) {
       out += ",";
@@ -323,7 +347,7 @@ void tool_pin_records(const hhds::Node_class& node, std::vector<Tool_record>& ou
     }
     Tool_record r;
     r.type  = 'p';
-    r.ident = tool_endpoint_name(pin);
+    r.ident = tool_endpoint_name(pin, /*is_sink=*/false);
     r.cols.emplace_back("nid", std::to_string(static_cast<uint64_t>(node.get_debug_nid())));
     r.cols.emplace_back("name", pn.empty() ? std::string{"nil"} : std::string{pn});
     int32_t b = gu::bits_of(pin);
@@ -334,19 +358,45 @@ void tool_pin_records(const hhds::Node_class& node, std::vector<Tool_record>& ou
   }
 }
 
+void tool_edge_record(const hhds::Edge_class& e, std::vector<Tool_record>& out) {
+  namespace gu = livehd::graph_util;
+  std::string from = tool_endpoint_name(e.driver, /*is_sink=*/false);
+  std::string to   = tool_endpoint_name(e.sink, /*is_sink=*/true);
+  int32_t     b    = gu::bits_of(e.driver);
+  Tool_record r;
+  r.type  = 'e';
+  r.ident = std::format("{} -> {}  ({}b)", from, to, b);
+  r.cols.emplace_back("from", from);
+  r.cols.emplace_back("to", to);
+  r.cols.emplace_back("bits", b != 0 ? std::to_string(b) : std::string{"nil"});
+  out.push_back(std::move(r));
+}
+
+// Edges are emitted from the DRIVER's side, once per driver node -- so an edge
+// is in the dump only if `forward_class()` yields its driver.  Two driver kinds
+// it never yields:
+//
+//   * hhds' CONST_NODE.  Covered by the `consts` column on the SINK's node
+//     record (see tool_node_consts).
+//   * a GRAPH INPUT.  Covered by nothing, until now: on txfmafrac_top the dump
+//     carried 78 edges INTO `$output` pins and exactly ZERO out of a `$input`,
+//     so 223 operand pins -- every primary input's fanout -- read as having no
+//     driver at all.  An SCC report survives that (a graph input is a cut
+//     anyway), which is why it went unnoticed; anything that asks what an
+//     operand IS does not.
+//
+// So a node also emits the subset of its INPUT edges whose driver is a graph
+// input.  That subset is disjoint from every node's out_edges(), so nothing is
+// emitted twice.
 void tool_edge_records(const hhds::Node_class& node, std::vector<Tool_record>& out) {
   namespace gu = livehd::graph_util;
   for (const auto& e : node.out_edges()) {
-    std::string from = tool_endpoint_name(e.driver);
-    std::string to   = tool_endpoint_name(e.sink);
-    int32_t     b    = gu::bits_of(e.driver);
-    Tool_record r;
-    r.type  = 'e';
-    r.ident = std::format("{} -> {}  ({}b)", from, to, b);
-    r.cols.emplace_back("from", from);
-    r.cols.emplace_back("to", to);
-    r.cols.emplace_back("bits", b != 0 ? std::to_string(b) : std::string{"nil"});
-    out.push_back(std::move(r));
+    tool_edge_record(e, out);
+  }
+  for (const auto& e : node.inp_edges()) {
+    if (!e.driver.is_invalid() && gu::is_graph_input_pin(e.driver)) {
+      tool_edge_record(e, out);
+    }
   }
 }
 
@@ -507,20 +557,20 @@ void tool_cat_all_pretty(hhds::Graph* g, const std::vector<Tool_filter>& filters
       // driver-pin property; see graph/node_util.hpp set_bits). Read the driver.
       int32_t b = gu::bits_of(e.driver);
       if (!take(std::format("    .{}  bits={}{}  <- {}",
-                            tool_pin_label(e.sink),
+                            tool_pin_label(e.sink, /*is_sink=*/true),
                             b != 0 ? std::to_string(b) : std::string{"nil"},
                             gu::is_unsign(e.driver) ? "" : " signed",
-                            tool_endpoint_name(e.driver)))) {
+                            tool_endpoint_name(e.driver, /*is_sink=*/false)))) {
         return;
       }
     }
     for (const auto& e : node.out_edges()) {
       int32_t b = gu::bits_of(e.driver);
       if (!take(std::format("    .{}  bits={}{}  -> {}",
-                            tool_pin_label(e.driver),
+                            tool_pin_label(e.driver, /*is_sink=*/false),
                             b != 0 ? std::to_string(b) : std::string{"nil"},
                             gu::is_unsign(e.driver) ? "" : " signed",
-                            tool_endpoint_name(e.sink)))) {
+                            tool_endpoint_name(e.sink, /*is_sink=*/true)))) {
         return;
       }
     }

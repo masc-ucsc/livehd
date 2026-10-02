@@ -134,4 +134,75 @@ grep -q '"color":null' "$W/j.out" || fail "jsonl must render an unset color as n
 P cat lg:"$W/lg2" --top "$TOP" --target node --max 2 >"$W/m.out" || fail "tool cat --max nonzero"
 grep -q 'truncated at --max 2' "$W/m.out" || fail "--max must print a truncation footer: $(cat "$W/m.out")"
 
+# 11. ENDPOINT LABELLING.  An edge endpoint is `<debug_name>.<pin>`, and the
+#     `<pin>` half used to come from `pin_name_of` on BOTH sides.  On a sink pin
+#     of a node whose OUTPUT carries a name, that returns the output's name --
+#     so a named mux printed its selector and both data arms under one label,
+#     the same string it printed as its DRIVER endpoint.  Three distinct
+#     operands collapsed onto one token, and the port id -- the only thing that
+#     says selector-vs-arm -- was gone.
+#
+#     `tool_sink_pins.v` is built to show it: `named_mux_q` is a named mux with
+#     a selector and two arms, one sibling mux carries a CONSTANT arm (the
+#     default branch), and every data input traces back to a primary input.
+"$LHD" compile verilog lhd/tests/tool_sink_pins.v --top tool_sink_pins \
+  --reader yosys-verilog --recipe O1 --emit-dir lg:"$W/slg" --workdir "$W/sw" \
+  -q --result-json "$W/sr.json" 2>/dev/null \
+  || fail "compile tool_sink_pins.v -> lg failed: $(cat "$W/sr.json")"
+
+J cat lg:"$W/slg" --top tool_sink_pins --target all --max 0 >"$W/sp.jsonl" \
+  || fail "tool cat tool_sink_pins (jsonl) nonzero"
+P cat lg:"$W/slg" --top tool_sink_pins --target all --max 0 >"$W/sp.pretty" \
+  || fail "tool cat tool_sink_pins (pretty) nonzero"
+
+# The node under test is found by its PIN NAME, never by a hardcoded nid.
+mnid=$(sed -nE 's/^\{"t":"pin".*"nid":([0-9]+),"name":"named_mux_q".*/\1/p' "$W/sp.jsonl" | head -1)
+[ -n "$mnid" ] || fail "fixture did not produce a mux whose output pin is named named_mux_q"
+
+# 11a. its SINK endpoints are port ids, all three distinct.
+sinks=$(sed -nE 's/^.*"to":"mux_'"$mnid"'\.([^"]*)".*/\1/p' "$W/sp.jsonl" | sort -u)
+[ "$(echo "$sinks" | wc -l)" -eq 3 ] \
+  || fail "named mux must have 3 DISTINCT sink endpoint labels, got: $(echo $sinks)"
+for want in p0 p1 p2; do
+  echo "$sinks" | grep -qx "$want" || fail "named mux sink labels must include $want, got: $(echo $sinks)"
+done
+# 11b. and none of them wears the DRIVER's name -- that is the collision.
+grep -q '"to":"mux_'"$mnid"'\.named_mux_q"' "$W/sp.jsonl" \
+  && fail "a sink endpoint printed the driver pin name (named_mux_q): the port id is lost"
+
+# 11c. the DRIVER endpoint keeps its real name.
+grep -q '"from":"mux_'"$mnid"'\.named_mux_q"' "$W/sp.jsonl" \
+  || fail "the driver endpoint must keep the pin name named_mux_q"
+
+# 11d. pretty output carries the same split: `<-` lines by port id, `->` by name.
+awk '/^  mux_'"$mnid"'$/{f=1;next} /^  [a-z]/{f=0} f' "$W/sp.pretty" >"$W/sp.mux" \
+  || fail "could not slice the named mux out of the pretty dump"
+for want in p0 p1 p2; do
+  grep -qE "^    \.$want  bits=[0-9]+  <- " "$W/sp.mux" \
+    || fail "pretty sink line .$want missing for the named mux: $(cat "$W/sp.mux")"
+done
+grep -qE "^    \.named_mux_q  bits=[0-9]+  -> " "$W/sp.mux" \
+  || fail "pretty driver line must keep the pin name: $(cat "$W/sp.mux")"
+grep -qE "^    \.named_mux_q  bits=[0-9]+  <- " "$W/sp.mux" \
+  && fail "a pretty SINK line printed the driver pin name"
+
+# 11e. constant operands are labelled by port id too -- `consts` had the same
+#      lossy label, which would have merged two constants on one node.
+sed -nE 's/^.*"consts":"([^"]*)".*/\1/p' "$W/sp.jsonl" | tr ',' '\n' | sed -E 's/=.*//' \
+  | sort -u >"$W/sp.clabels"
+grep -qvE '^p[0-9]+$' "$W/sp.clabels" \
+  && fail "every consts label must be p<port_id>, got: $(tr '\n' ' ' <"$W/sp.clabels")"
+grep -q '"consts":"p1=' "$W/sp.jsonl" \
+  || fail "the constant default arm must appear as a p1 const operand"
+
+# 11f. edges are emitted from the DRIVER side, once per driver node -- and
+#      `forward_class()` yields neither CONST_NODE nor a GRAPH INPUT.  The
+#      constants are covered by `consts`; the graph inputs were covered by
+#      nothing, so every primary input's fanout was missing from the dump.
+for pi in sel a b c; do
+  grep -q '"from":"\$'"$pi"'"' "$W/sp.jsonl" \
+    || fail "no edge is emitted out of graph input \$$pi -- primary-input fanout is missing"
+done
+grep -q '"to":"\$q"' "$W/sp.jsonl" || fail "the graph output \$q must still be an edge sink"
+
 echo "PASS: lhd tool cat/grep/diff/tree (lg path)"
