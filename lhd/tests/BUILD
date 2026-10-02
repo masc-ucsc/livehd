@@ -1125,6 +1125,23 @@ sh_test(
     tags = ["no-sandbox"],  # invokes the host iverilog/vvp
 )
 
+# The ICG enable latch BEHIND A WRAPPER. single_edge_icg_test covers the latch
+# driving the gate directly; real RTL puts the gate in its own module, so after
+# inlining the enable arrives as `zext(en_latch)` and the bypass -- which
+# tested only the immediate master node -- left the consumer on the latch Q,
+# one cycle stale once the latch is retyped. Needs verilator for its semantic
+# legs and the differential harness for the comparison.
+sh_test(
+    name = "single_edge_icg_wrapped_en_test",
+    size = "large",
+    srcs = ["single_edge_icg_wrapped_en_test.sh"],
+    data = [
+        "//lhd",
+        "//scripts:cycle_provenance_tools",
+    ],
+    tags = ["no-sandbox"],  # invokes the host verilator
+)
+
 sh_test(
     name = "single_edge_four_classes_test",
     size = "large",

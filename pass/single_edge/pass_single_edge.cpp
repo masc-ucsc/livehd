@@ -154,21 +154,134 @@ void refuse(bool quiet, std::string_view code, const std::string& msg, std::stri
 //
 // ONE helper for flops and memories, on purpose: a parity or a bypass decided in
 // two places is how the two drift.
+// This codebase's canonical BOOLEAN pin: 1 bit, or 2 bits unsigned -- "one
+// magnitude bit plus the spare sign" (graph/split_selfref.cpp:685), the same
+// predicate the memory planner applies to an ICG enable below. Width 0 means
+// UNKNOWN, not boolean, and is refused.
+bool is_boolean_pin(const hhds::Pin_class& p) {
+  if (p.is_invalid()) {
+    return false;
+  }
+  const auto b = gu::bits_of(p);
+  return b == 1 || (b == 2 && gu::is_unsign(p));
+}
+
+// A NON-TRUNCATING zero extension between the latch Q and the gate:
+// `Get_mask(x, -1)`, LiveHD's canonical zext idiom (cprop.cpp:852). Returns x,
+// or an invalid pin when this is not provably that.
+//
+// WHY THE WIDTH CHECK AND NOT JUST THE MASK. `Op_GetMask` has its OWN result
+// width and truncates to it (`bv_get_mask w a m = mk_bv w (...)`,
+// Translation/LGraphModel.lean:121), so a -1 mask alone does not make the node
+// value-preserving: a result narrower than its source drops the high bits, and
+// `nonzero` is not preserved by that. Both widths must be known and the result
+// must be at least as wide as the source.
+//
+// WHY NOT A PARTIAL MASK. `Get_mask(x, m)` for m != -1 SELECTS bits, so it can
+// turn a nonzero value into zero -- substituting the latch's arm would then
+// enable on a different condition entirely. A `Not` inverts. Neither is
+// recognized, so an unsupported shape keeps today's behaviour rather than
+// acquiring a bypass nothing justifies.
+hhds::Pin_class zext_source(const hhds::Pin_class& p) {
+  auto n = p.get_master_node();
+  if (gu::type_op_of(n) != Ntype_op::Get_mask) {
+    return {};
+  }
+  hhds::Pin_class a;
+  int             n_val   = 0;
+  int             n_mask  = 0;
+  bool            all_ones = false;
+  for (const auto& e : n.inp_edges()) {
+    if (e.driver.is_invalid()) {
+      return {};
+    }
+    switch (e.sink.get_port_id()) {
+      case 0:  // `a`
+        a = e.driver;
+        ++n_val;
+        break;
+      case 2: {  // `mask`
+        ++n_mask;
+        if (gu::is_const_pin(e.driver)) {
+          auto v = gu::hydrate_const(e.driver);
+          all_ones = !v.has_unknowns() && v.is_just_i64() && v.to_just_i64() == -1;
+        }
+        break;
+      }
+      default: return {};
+    }
+  }
+  if (n_val != 1 || n_mask != 1 || !all_ones || a.is_invalid()) {
+    return {};
+  }
+  const auto src_b = gu::bits_of(a);
+  const auto res_b = gu::bits_of(p);
+  if (src_b == 0 || res_b == 0 || res_b < src_b) {
+    return {};  // unknown width, or a TRUNCATING result: not a zero extension
+  }
+  return a;
+}
+
 void bypass_enable_latches(std::vector<hhds::Pin_class>& ens) {
   for (auto& en : ens) {
     if (en.is_invalid() || gu::is_const_pin(en) || gu::is_graph_input_pin(en)) {
       continue;
     }
-    auto dn = en.get_master_node();
-    if (gu::type_op_of(dn) != Ntype_op::Latch) {
-      continue;
-    }
-    auto arm = lc::latch_transparent_arm(dn);
-    if (arm.is_invalid()) {
-      arm = gu::get_driver_of_sink_name(dn, "din");  // raw D/EN shape
-    }
-    if (!arm.is_invalid()) {
-      en = arm;
+    // DESCEND a bounded chain of zero-extensions first. This used to test only
+    // the IMMEDIATE master node, so an enable reaching the gate through a
+    // widening wrapper was not recognized as a latch at all and kept its Q --
+    // the very L1 error the comment above describes, just one node further
+    // away.
+    //
+    // The wrapper is not exotic: it is what the reader emits when the enable
+    // crosses a module boundary, which is how every real ICG is written
+    // (core-et's `prim_clk_gate`, whose `clk_o = clk_i & en_latch` becomes
+    // `And(zext(clk), zext(en_latch))` once inlined).
+    //
+    // OBSERVED on txfmafrac_top at 02f7f0d92, as one traced consumer chain
+    // rather than a count: the normalized netlist drives
+    // `get_mask_188480_u = {1'b0, cgate_txfma0_ctrl_frf.en_latch}` and uses it
+    // as the enable of `txfma0_f0.ehi_ea_en_f0a_h` and its siblings, while the
+    // pre-normalization netlist clocks those same flops on
+    // `ctrl_frf_clk = zext(txfma_clk) & get_mask_188480_u`. That module reports
+    // 13 latches retyped, 124 gated-clock flops and 140 gates folded (the fold
+    // count includes memory ports); how many of those take this path is not
+    // established here. A 3142-vector differential of the normalized netlist
+    // against the original RTL mismatched on 3141 vectors while the
+    // pre-normalization netlist passed all 3142.
+    //
+    // Dropping the wrapper is safe for what an enable is USED for: the flop
+    // path ANDs the terms and forces the result to 1 bit, and the memory path
+    // re-checks booleanness and fails closed. It cannot turn a passing memory
+    // into a refusal either -- the arm of an accepted (1- or 2-bit) zext is
+    // narrower still, and a wider wrapper is already refused there today.
+    auto cur     = en;
+    bool wrapped = false;
+    for (int depth = 0; depth < 4 && !cur.is_invalid(); ++depth) {
+      auto dn = cur.get_master_node();
+      if (gu::type_op_of(dn) == Ntype_op::Latch) {
+        auto arm = lc::latch_transparent_arm(dn);
+        if (arm.is_invalid()) {
+          arm = gu::get_driver_of_sink_name(dn, "din");  // raw D/EN shape
+        }
+        // THROUGH A WRAPPER the substitution must also survive the latch's own
+        // D->Q width conversion, which the direct case never had to think
+        // about because there was no conversion to drop. Require BOTH sides to
+        // be the canonical boolean and the arm to be no wider than the Q: a
+        // wider D is truncated by the latch, so handing the gate the untruncated
+        // arm would enable on a different value. The DIRECT path keeps its
+        // existing behaviour unchanged -- this is a precondition on the new
+        // capability, not a new restriction on the shipped one.
+        if (wrapped && !(is_boolean_pin(cur) && is_boolean_pin(arm) && gu::bits_of(arm) <= gu::bits_of(cur))) {
+          break;
+        }
+        if (!arm.is_invalid()) {
+          en = arm;
+        }
+        break;
+      }
+      cur     = zext_source(cur);
+      wrapped = true;
     }
   }
 }
