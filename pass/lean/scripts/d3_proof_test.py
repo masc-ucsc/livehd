@@ -102,6 +102,22 @@ def main() -> int:
     check("seg_refused_for_legacy_reifier", _legacy_refused,
           "a legacy probe with a segment size raises rather than dropping it")
 
+    # The option only affects the PROOF stage, so the CLI must refuse every way
+    # of asking for it without one, rather than accepting it and doing nothing.
+    for _label, _extra in (("no_prove", ["--reifier", "named"]),
+                           ("legacy_reifier", ["--prove"]),
+                           ("negative", ["--reifier", "named", "--prove"])):
+        _size = "-1" if _label == "negative" else "16"
+        _p = subprocess.run(
+            [sys.executable, str(SWEEP), "--certs", str(tmp), "--out",
+             str(tmp / f"refuse_{_label}.tsv"), "--only", "^nothing$",
+             "--proof-segment-size", _size] + _extra,
+            capture_output=True, text=True)
+        check(f"seg_cli_refuses_{_label}",
+              _p.returncode == 2 and not (tmp / f"refuse_{_label}.tsv").exists(),
+              f"--proof-segment-size {_size} with {' '.join(_extra)} exits 2 and writes nothing",
+              f"rc={_p.returncode} err={_p.stderr.strip()[:200]}")
+
     class _A:
         manifest = ""
         samples = 32

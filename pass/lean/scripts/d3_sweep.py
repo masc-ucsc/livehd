@@ -2575,6 +2575,11 @@ def main() -> int:
     if a.proof_segment_size < 0:
         print("REFUSING: --proof-segment-size must be >= 0.", file=sys.stderr)
         return 2
+    if a.proof_segment_size and not a.prove:
+        print("REFUSING: --proof-segment-size without --prove. Segmentation only "
+              "affects the proof stage, which this run would not execute, so the "
+              "option would be accepted and silently do nothing.", file=sys.stderr)
+        return 2
     if a.proof_segment_size and a.reifier != "named":
         print("REFUSING: --proof-segment-size requires --reifier named. The legacy "
               "reifier proves through `prove_reified`, which has no segmented path, "
