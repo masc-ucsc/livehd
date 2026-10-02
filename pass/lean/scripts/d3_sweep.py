@@ -1426,6 +1426,11 @@ def main() -> int:
         "order_by": a.order_by,
         "order_by_digest": (hashlib.sha256(pathlib.Path(a.order_by).read_bytes()).hexdigest()
                             if a.order_by else ""),
+        # Recorded so a merge can DOCUMENT which selection controls differed
+        # between stages instead of inferring it from the selection digest alone.
+        "only": a.only,
+        "limit": a.limit,
+        "one_per_tier": bool(a.one_per_tier),
         "defer_over_rss_kb": a.defer_over_rss_kb,
         "max_aggregate_rss_kb": a.max_aggregate_rss_kb,
         "kill_over_rss_kb": a.kill_over_rss_kb,
