@@ -116,4 +116,22 @@ theorem bindAgreeMem_push {env : SlotEnv} (v : CertVal) (j : Nat) (val : Int →
     refMem (env.push v) j = val := by
   rw [refMem_push_lt env v j hj]; exact h
 
+/-- `flopNext` IS `flopNextV` applied to the operands read out of the
+environment.
+
+The bridge the generated walk needs: it lets a flop's next value be stated in
+terms of named per-binding values, exactly as a combinational output is, instead
+of re-deriving reset priority and polarity on the fast side where they could
+disagree. -/
+theorem flopNext_eq (env : SlotEnv) (s : RuntimeState) (idx : Nat)
+    (f : ResidualFlopUpdate) :
+    flopNext env s idx f
+      = flopNextV f.width (refBV env f.din) (f.enable.map (refBV env))
+          (f.resetPin.map (refBV env)) f.resetValue f.resetActiveLow (s.flops[idx]?) := by
+  -- The two bodies are the SAME expression once the options are resolved, so
+  -- each case closes by `rfl`.  `simp` normalises the two `if`s differently and
+  -- leaves a goal that looks like real content but is not.
+  obtain ⟨w, din, en, rst, rv, ral⟩ := f
+  cases rst <;> cases en <;> rfl
+
 end Compiler

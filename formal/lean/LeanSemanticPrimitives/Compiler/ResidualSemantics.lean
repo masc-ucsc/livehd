@@ -212,6 +212,34 @@ def runBindings (bs : List ResidualBinding) (env : SlotEnv) : SlotEnv :=
   | []      => env
   | b :: bs => runBindings bs (env.push (denoteExpr env b.rhs))
 
+/-- Flop next value, at the VALUE level: every operand already read.
+
+Factored out so one definition carries the sequential semantics and both
+`flopNext` (which reads operands out of a `SlotEnv`) and a generated fast
+function (which names them) are that same definition applied to different
+arguments.  Two spellings of reset priority is how the two drift apart.
+
+All six behaviours live here and nowhere else:
+  * RESET HAS PRIORITY over enable -- the reset test is the outer `if`;
+  * polarity is explicit, `resetActiveLow` flipping the sense of the pin;
+  * `resetValue` is loaded, not assumed zero, and `mk_bv w` truncates it;
+  * enable absent means always enabled;
+  * enable false RETAINS the old state, with `mk_bv w 0` only when the index is
+    absent -- a missing index is not the same as a zero flop;
+  * enable true writes `bv_resize w din`. -/
+def flopNextV (w : Nat) (din : BV) (en : Option BV) (rst : Option BV)
+    (resetValue : Int) (resetActiveLow : Bool) (old : Option BV) : BV :=
+  let inReset : Bool :=
+    match rst with
+    | none    => false
+    | some rv => let b := bv_nonzero rv
+                 if resetActiveLow then !b else b
+  if inReset then mk_bv w resetValue
+  else
+    let e : Bool := match en with | none => true | some ev => bv_nonzero ev
+    if e then bv_resize w din
+    else old.getD (mk_bv w 0)
+
 /-- Flop next value.  RESET HAS PRIORITY over enable; polarity is explicit;
 `resetValue` is loaded rather than assumed zero. All three are exactly what the
 manual emitter got wrong (it read 3 of a Flop's 8 pins with no `else`). -/
