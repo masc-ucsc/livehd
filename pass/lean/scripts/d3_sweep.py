@@ -1923,12 +1923,14 @@ def extract_gates(row, out, rc, timeout, expect_module=None, expect_samples=None
             row[g] = 0
         row["detail"] = detail
 
-    if "reify_design: compileDesign refused" in out:
+    if "compileDesign refused" in out:
         only_cert("compileDesign refused the certificate")
         return
 
     shape = _one(r"^D3GATE module=\S+ (.*)$", out)
-    emitted = _one(r"^reify_design: \S+ emitted, \d+ sources, (\d+) bindings$", out)
+    # either reifier: the two emit the same line shape on purpose, so the gate
+    # does not have to know which mode the run is in.
+    emitted = _one(r"^reify_design(?:_named)?: \S+ emitted, \d+ sources, (\d+) bindings$", out)
     clean_exit = rc == 0 and not ERR_RE.search(out) and "error:" not in out
 
     if shape is None:
@@ -1964,7 +1966,8 @@ def extract_gates(row, out, rc, timeout, expect_module=None, expect_samples=None
                   "this log does not describe this certificate")
         return
     if emitted is not None:
-        em = re.search(r"^reify_design: \S+ emitted, (\d+) sources, (\d+) bindings$", out, re.M)
+        em = re.search(r"^reify_design(?:_named)?: \S+ emitted, (\d+) sources, (\d+) bindings$",
+                       out, re.M)
         if em and (em.group(1) != shape_fields.get("sources")
                    or em.group(2) != shape_fields.get("bindings")):
             only_cert(f"reifier reported {em.group(1)} sources/{em.group(2)} bindings "

@@ -214,8 +214,12 @@ def elabReifyDesignNamed : CommandElab := fun stx => do
           Compiler.RuntimeResult :=
         { outputs := #[$outs,*],
           nextState := { flops := #[$flops,*], mems := #[] } }))
+    -- EXACTLY the shape `reify_design` reports: the sweep's gate parser reads
+    -- this line for the `compile` and `reify` gates and cross-checks the two
+    -- counts against the probe's own shape line. A different wording here reads
+    -- as "the reifier never ran".
     logInfo m!"reify_design_named: {f} emitted, {nsrc} sources, \
-      {R.bindings.size} named value(s), {R.flopUpdates.size} flop(s)"
+      {R.bindings.size} bindings"
   | _ => throwUnsupportedSyntax
 
 /-- `reify_design <designCert> as <name>` -/

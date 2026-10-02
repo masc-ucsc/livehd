@@ -234,6 +234,23 @@ def main() -> int:
               "the gate in the named proof probe names exactly the theorem the "
               "runner credits")
 
+        # Both reifiers must report in the SAME line shape, or the gate parser
+        # reads a named run as "the reifier never ran" and zeroes compile/reify.
+        # That is exactly what the first guarded named run did.
+        import re as _re
+        _pat = r"^reify_design(?:_named)?: \S+ emitted, \d+ sources, (\d+) bindings$"
+        for mode in ("legacy", "named"):
+            probe = sweep.make_probe(CERT, "tima_adder", 32, reifier=mode)
+            tok = "reify_design_named" if mode == "named" else "reify_design"
+            check(f"gate_line_shape_{mode}",
+                  _re.search(sweep.PROOF_GATE_RE, "") is None and tok in probe,
+                  f"the {mode} probe calls {tok}")
+        check("gate_regex_accepts_both",
+              _re.match(_pat, "reify_design: x emitted, 3 sources, 4 bindings") is not None
+              and _re.match(_pat, "reify_design_named: x emitted, 3 sources, 4 bindings")
+                  is not None,
+              "and the gate parser accepts either reifier's emitted line")
+
         # ---- 4. Lean: the audit must REFUSE sorryAx and ofReduceBool ----------
         if not CERT.is_file():
             check("lean_cases", False, f"certificate not found at {CERT}")
