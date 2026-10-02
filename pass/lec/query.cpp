@@ -12500,14 +12500,34 @@ static Verify_result prove_properties_impl(hhds::Graph* design, const Lec_option
               pr.instance = pit->second;
             }
           }
-          // Only for a property in the DESIGN. A sidecar formal block is its
-          // own monitor graph, so the walk would stop at the monitor boundary
-          // and report the expression size with no state -- left unmeasured.
           if (mon == nullptr) {
             if (auto cit = eo.prop_cone.find(ob.k.occ); cit != eo.prop_cone.end()) {
               pr.cone_nodes = cit->second.nodes;
               pr.cone_state = cit->second.state;
             }
+          } else if (auto cit = eo.prop_cone_inputs.find(ob.k.occ); cit != eo.prop_cone_inputs.end()) {
+            // A sidecar block is its own monitor graph, so its own cone stops
+            // at the bind boundary. Continue in the DESIGN: each monitor input
+            // the property reaches is a bind, so seed from the signal behind
+            // it and walk once, which counts shared logic only once.
+            std::vector<hhds::Occurrence_pin> seeds;
+            int                               prim_inputs = 0;
+            for (const auto& ident : cit->second) {
+              for (const auto& b : mon->binds) {
+                if (b.ident != ident) {
+                  continue;
+                }
+                if (b.src == Monitor::Bind::Src::input) {
+                  ++prim_inputs;  // a primary input is its own cone
+                } else if (auto sit = e.cone_seed.find(b.key); sit != e.cone_seed.end()) {
+                  seeds.push_back(sit->second);
+                }
+                break;
+              }
+            }
+            const auto cs = cone_over(seeds);
+            pr.cone_nodes = cs.nodes + prim_inputs;
+            pr.cone_state = cs.state;
           }
           if (mon != nullptr) {
             pr.block = mon->block;

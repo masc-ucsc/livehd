@@ -95,6 +95,12 @@ struct Encoded {
     int state = 0;
   };
   absl::flat_hash_map<int, Cone_stats>  prop_cone;
+  // Graph-input names each property's cone reaches. For a monitor graph these
+  // are the bind idents, so the caller can continue the walk in the design.
+  absl::flat_hash_map<int, std::vector<std::string>> prop_cone_inputs;
+  // Signal name (port or flop state key) -> the pin that drives it, so a
+  // caller can seed a COI walk from a name.
+  absl::flat_hash_map<std::string, hhds::Occurrence_pin> cone_seed;
 
   // M4 memory state. Each Memory cell is cut like a Flop: its current contents
   // are an SMT array symbol (shared across the two designs by mem_state_key, so
@@ -304,6 +310,10 @@ std::string    mem_state_key(const Mem_sig& sig, std::string_view name);
 // emit current/next state under one key) and prove_equal (to share the
 // current-state symbol across the two designs). See M2 in lec.md.
 std::string flop_state_key(const hhds::Graph& g, const hhds::Node_class& node);
+
+// COI over a set of seed pins: one shared walk, so logic common to two seeds
+// is counted once.
+Encoded::Cone_stats cone_over(const std::vector<hhds::Occurrence_pin>& seeds);
 
 // Canonicalize a flop's hierarchical name so a HIERARCHICAL stage register on
 // one side pairs with a FLATTENED reimplementation on the other. CIRCT/firtool
