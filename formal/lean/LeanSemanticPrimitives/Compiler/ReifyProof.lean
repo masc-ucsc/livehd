@@ -70,6 +70,7 @@ emitting a weaker theorem.
 -/
 import LeanSemanticPrimitives.Compiler.CompileDesign
 import LeanSemanticPrimitives.Compiler.ReifyGen
+import LeanSemanticPrimitives.Compiler.Reify
 
 open Lean Elab Command Meta
 
@@ -195,6 +196,75 @@ private def qBindings (bs : Array ResidualBinding) : MetaM Term := do
   let xs ← bs.mapM qBinding
   `(#[$xs,*])
 
+/-- The VALUE-level right-hand side of a binding, written against named earlier
+values rather than an environment lookup.
+
+A source slot `j` becomes `refBV e0 j` (or `refMem e0 j`), and a produced slot
+becomes `<F>.val<k> e0` -- a NAME, not the value's expansion.  That is the whole
+point: inlining instead would duplicate a re-read binding at every consumer, so a
+diamond's value tree grows with the graph's reconvergence rather than its size.
+
+The positional memory/bit-vector split comes from `exprRefsTyped`'s rule, applied
+per constructor here. -/
+def valRef (base : Name) (nsrc : Nat) (isMem : Bool) (r : ResidualRef) : MetaM Term :=
+  if r < nsrc then
+    let e0 := mkIdent (Name.mkSimple "e0")
+    if isMem then `(refMem $e0 $(quote r)) else `(refBV $e0 $(quote r))
+  else
+    let nm := mkIdent (base ++ Name.mkSimple s!"val{r - nsrc}")
+    let e0 := mkIdent (Name.mkSimple "e0")
+    `($nm $e0)
+
+private def valRefs (base : Name) (nsrc : Nat) (rs : Array ResidualRef) : MetaM Term := do
+  let args ← rs.mapM (valRef base nsrc false)
+  `([$args,*])
+
+/-- Fail LOUDLY, by construction: this match is total over `ResidualExpr`, so a
+constructor added later is a compile error in this file rather than a silent gap
+inside a generated proof. -/
+private def valSyntax (base : Name) (nsrc : Nat) : ResidualExpr → MetaM Term
+  | .rsum w n a     => do `(Residual.rsumV $(quote w) $(quote n) $(← valRefs base nsrc a))
+  | .rmult w a      => do `(Residual.rmultV $(quote w) $(← valRefs base nsrc a))
+  | .rand w a       => do `(Residual.randV $(quote w) $(← valRefs base nsrc a))
+  | .rorBits w a    => do `(Residual.rorBitsV $(quote w) $(← valRefs base nsrc a))
+  | .rxor w a       => do `(Residual.rxorV $(quote w) $(← valRefs base nsrc a))
+  | .rredOr w a     => do `(Residual.rredOrV $(quote w) $(← valRefs base nsrc a))
+  | .req w a        => do `(Residual.reqV $(quote w) $(← valRefs base nsrc a))
+  | .rshl w a       => do `(Residual.rshlV $(quote w) $(← valRefs base nsrc a))
+  | .rmuxN w a      => do `(Residual.rmuxNV $(quote w) $(← valRefs base nsrc a))
+  | .rnot w a       => do `(Residual.rnotV $(quote w) $(← valRef base nsrc false a))
+  | .rult w a b     => do `(Residual.rultV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false b))
+  | .rugt w a b     => do `(Residual.rugtV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false b))
+  | .rslt w a b     => do `(Residual.rsltV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false b))
+  | .rsgt w a b     => do `(Residual.rsgtV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false b))
+  | .rsra w a b     => do `(Residual.rsraV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false b))
+  | .rsext w a m    => do `(Residual.rsextV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false m))
+  | .rgetMask w a m => do `(Residual.rgetMaskV $(quote w) $(← valRef base nsrc false a) $(← valRef base nsrc false m))
+  | .rmux w s f t   => do
+      `(Residual.rmuxV $(quote w) $(← valRef base nsrc false s) $(← valRef base nsrc false f)
+         $(← valRef base nsrc false t))
+  | .rmemRead w m a e => do
+      `(Residual.rmemReadV $(quote w) $(← valRef base nsrc true m) $(← valRef base nsrc false a)
+         $(← valRef base nsrc false e))
+  | .rmemWrite m a d e => do
+      `(Residual.rmemWriteV $(← valRef base nsrc true m) $(← valRef base nsrc false a)
+         $(← valRef base nsrc false d) $(← valRef base nsrc false e))
+  | .rmemWriteBE w bw m a d be => do
+      `(Residual.rmemWriteBEV $(quote w) $(← valRef base nsrc true m) $(← valRef base nsrc false a)
+         $(← valRef base nsrc false d) $(← valRef base nsrc false be) $(quote bw))
+
+/-- How a slot is written in terms of the named values, at an EXPLICIT
+environment rather than the `e0` the value definitions bind.
+
+The definitions are parameterised over `e0`; a theorem statement about a
+particular `i`/`st` has to apply them to that design's actual source
+environment, or the term mentions a variable the statement never bound. -/
+def valRefAt (base : Name) (nsrc : Nat) (r : ResidualRef) (env : Term) : MetaM Term :=
+  if r < nsrc then `(refBV $env $(quote r))
+  else
+    let nm := mkIdent (base ++ Name.mkSimple s!"val{r - nsrc}")
+    `($nm $env)
+
 end ReifyProof
 
 open ReifyProof
@@ -264,6 +334,80 @@ def elabProveReified : CommandElab := fun stx => do
         rw [$eqNm:ident i st]
         exact Compiler.compileAndRun_correct $d $okNm i st))
     logInfo m!"prove_reified: {corNm} proved, {R.bindings.size} bindings"
+  | _ => throwUnsupportedSyntax
+
+/-- `emit_binding_values <designCert> as <reifiedDef>` — one named value per
+binding, plus the `<F>.vals` equation tying the reified definition to them.
+
+Increment 2 of the opt-in incremental path. It emits NO walk and proves nothing
+about `denoteResidual`; `prove_reified` is untouched and remains how every design
+is actually proved. What this establishes is the half the walk will need on the
+FAST side: that the reified let-chain equals a result built from named, opaque
+per-binding values.
+
+One definition per binding, each referring to earlier ones BY NAME. Inlining
+would duplicate a re-read binding at every consumer, so on a diamond the value
+tree would grow with the graph's reconvergence instead of its size — which is the
+cost the incremental walk exists to avoid, reappearing on the other side.
+
+FAILS LOUDLY rather than degrading: a design with flops or memory updates is
+refused here with a message naming what is missing, instead of emitting a weaker
+equation that silently covers only the outputs. -/
+syntax (name := emitBindingValues) "emit_binding_values " ident " as " ident : command
+
+@[command_elab emitBindingValues]
+def elabEmitBindingValues : CommandElab := fun stx => do
+  match stx with
+  | `(command| emit_binding_values $d:ident as $f:ident) => do
+    let R ← liftTermElabM do
+      let dExpr ← Term.elabTerm d none
+      let cert ← unsafe evalExpr DesignCert (mkConst ``DesignCert) dExpr
+      match compileDesign cert with
+      | .error _ => throwError "emit_binding_values: compileDesign refused {d}"
+      | .ok R    => pure R
+    if !R.flopUpdates.isEmpty || !R.memoryUpdates.isEmpty then
+      throwError "emit_binding_values: {d} has {R.flopUpdates.size} flop update(s) and \
+        {R.memoryUpdates.size} memory update(s); this increment emits values for the \
+        COMBINATIONAL result only. Refusing rather than emitting an equation that \
+        covers the outputs and silently omits the sequential next state."
+    let nsrc := R.sources.size
+    let base := f.getId
+    -- one definition per binding, in order, each naming its predecessors
+    for k in [0 : R.bindings.size] do
+      let b := R.bindings[k]!
+      let nm := mkIdent (base ++ Name.mkSimple s!"val{k}")
+      let rhs ← liftTermElabM (ReifyProof.valSyntax base nsrc b.rhs)
+      let e0b := mkIdent (Name.mkSimple "e0")
+      match b.ty with
+      | .bv _    => elabCommand (← `(command| def $nm ($e0b : Compiler.SlotEnv) : BV := $rhs))
+      | .mem _ _ => elabCommand (← `(command| def $nm ($e0b : Compiler.SlotEnv) : Int → BV := $rhs))
+    -- the fast side, in terms of those names
+    -- the theorem's own binders, raw so the generated body can mention them
+    let iId  := mkIdent (Name.mkSimple "i")
+    let stId := mkIdent (Name.mkSimple "st")
+    let envT ← liftTermElabM `(Compiler.sourceEnvArr ($d).sources $iId $stId)
+    let outs : Array Term ← R.outputs.mapM fun o => do
+      let v ← liftTermElabM (ReifyProof.valRefAt base nsrc o.slot envT)
+      `(bv_resize $(quote o.width) $v)
+    -- every value definition, so the fast side can be matched against them.
+    -- NOTE this one proof is NOT incremental: unfolding all of them reproduces
+    -- the inlined tree, at the same cost as today's single `simp`. It is the
+    -- CONNECTION lemma, proved once; the walk that follows uses only the names.
+    let valIds ← (Array.ofFn (n := R.bindings.size) (fun k => k.val)).mapM fun k => do
+      let vid := mkIdent (base ++ Name.mkSimple s!"val{k}")
+      `(Lean.Parser.Tactic.simpLemma| $vid:ident)
+    let eqNm := mkIdent (base ++ `vals)
+    elabCommand (← `(command|
+      theorem $eqNm : ∀ ($iId : Compiler.RuntimeInput) ($stId : Compiler.RuntimeState),
+          $f $iId $stId =
+          { outputs := #[$outs,*],
+            nextState := { flops := #[], mems := #[] } } := by
+        intro $iId $stId
+        simp [$f:ident, $d:ident, $(mkIdent ``Compiler.refBV_sourceEnv):ident,
+              $(mkIdent ``Compiler.refMem_sourceEnv):ident,
+              $(mkIdent ``CertVal.asBV):ident, $(mkIdent ``CertVal.asMem):ident,
+              $valIds,*]))
+    logInfo m!"emit_binding_values: {R.bindings.size} value(s) emitted, {eqNm} proved"
   | _ => throwUnsupportedSyntax
 
 /-- `audit_axioms <thm>` — FAIL the build unless `<thm>`'s axiom set is within
