@@ -37,6 +37,16 @@
       "name": "G6 narrow before validating",
       "old": "      if (wb64 <= 0 || n64 <= 0 || n64 > wb64 || k64 < 0 || k64 > wb64 || k64 > wb64 - n64) {",
       "new": "      if (wb64 <= 0 || static_cast<int>(n64) + static_cast<int>(k64) > static_cast<int>(wb64)) {"
+    },
+    {
+      "name": "S1 the rewrite reads the field one bit too high",
+      "old": "      auto res = resolve(resolve, wd, k, k + n, 0);",
+      "new": "      auto res = resolve(resolve, wd, k + 1, k + n + 1, 0);"
+    },
+    {
+      "name": "S2 the rewrite keeps one extra sign bit",
+      "old": "      auto res = resolve(resolve, wd, k, k + n, 0);",
+      "new": "      auto res = resolve(resolve, wd, k, k + n - 1, 0);"
     }
   ]
 }

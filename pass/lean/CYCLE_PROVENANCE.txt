@@ -368,9 +368,44 @@ minion_dcache_top                 0      67         0      65 PLAIN-COMPILE-FAIL
 # *** reference too would make the encoder happy by reusing the transformation
 # *** under test on both sides of the comparison, which validates nothing.
 #
-# Until the RTL side is settled by INDEPENDENT evidence, emit / checkDesign /
-# runDirect were deliberately NOT run for intpipe_csr_file and the coverage
-# ledger is unchanged at 109/122.
+# INDEPENDENT SEMANTIC EVIDENCE FOR THE REWRITE (SplitSelfrefSemantics).
+#
+# The LEC cannot supply it for intpipe_csr_file, and transforming the reference
+# too would reuse the transformation under test on both sides. So the rewrite is
+# checked on a small instance of the same shape instead:
+#
+#   * the fixture graph is evaluated BEFORE and AFTER the rewrite, over all 256
+#     inputs, and must give the same value for both packed words;
+#   * both are compared against a closed-form golden derived from the fixture's
+#     PARAMETERS -- it never looks at a graph;
+#   * the evaluator is fixed-width BITVECTOR arithmetic: every result truncated
+#     to its node's declared width, sign extension explicit, and SRA taken from
+#     the operand's declared sign bit rather than host bit 63.  It never calls
+#     `resolve`, `footprint`, or anything the rewrite uses.
+#
+#   Preserved: generated/provenance/signed_reader_gate/verdict.txt
+#
+#   NON-VACUOUS, which is the part that matters. Two mutants make the rewrite
+#   SUCCEED but be WRONG -- reading the field one bit too high, and keeping one
+#   extra sign bit -- and BOTH are killed by this oracle alone. Every structural
+#   guard test passes under them.
+#
+#   WHAT IT DOES NOT PROVE. One small instance of the shape, not
+#   intpipe_csr_file. It says the rewrite preserves meaning on a graph with
+#   these fields and widths; it says nothing about the 35k-node module.
+#
+#   NO SEMANTIC CONTROL FOR THE OVERLAPPING CASE, deliberately. Two earlier
+#   attempts were wrong: "it does not settle" is simply false (A[16,24) =
+#   B[16,24) = A[16,24) has a consistent solution and the iteration finds it),
+#   and "its fixed point is not unique" is not what a cyclic RTL equation means
+#   either. Overlap is decided STRUCTURALLY, by the refusal cases that assert
+#   the pass's own on-stack diagnostic. Iteration is used only on the DISJOINT
+#   fixture, whose bit-level dependency graph is acyclic, so its equations have
+#   exactly one solution.
+#
+# Until the RTL side is settled for the MODULE, emit / checkDesign / runDirect
+# were deliberately NOT run for intpipe_csr_file and the coverage ledger is
+# unchanged at 109/122.
 #
 # ONE DEFECT FIXED ALONG THE WAY.  The whole trace above was invisible: the
 # `split[dbg]` prints went to STDOUT, which `lhd` owns for its structured

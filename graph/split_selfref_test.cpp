@@ -37,6 +37,10 @@
 #include "node_util.hpp"
 #include <unistd.h>
 
+#include <cstdint>
+#include <map>
+#include <set>
+
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -262,6 +266,10 @@ struct PairOpts {
 struct PairFixture {
   std::shared_ptr<hhds::Graph> g;
   hhds::Node_class             rdB;  // the Sext reading wordB -- the node under test
+  // The two packed words, by id. Recovering them by "sort every Or's debug id"
+  // would silently pick a different node the moment the fixture gains one.
+  uint64_t                     id_a = 0;
+  uint64_t                     id_b = 0;
 };
 
 // `wbits` is each packed word's width; kB+n past it is the out-of-range case.
@@ -383,7 +391,7 @@ PairFixture build_pair(const char* dir, const char* name, int n, int kA, int pA,
   fromA.connect_sink(wordB.create_sink_pin(0));
 
   wA.connect_sink(g->get_output_pin("y"));
-  return {g, rdB};
+  return {g, rdB, static_cast<uint64_t>(wordA.get_debug_nid()), static_cast<uint64_t>(wordB.get_debug_nid())};
 }
 
 // Does the reader still read through the SRA? After a dissolve its port-0
@@ -577,3 +585,293 @@ TEST(SplitSelfrefSignedReader, PartialMaskOnTheConsumerStillDissolves) {
   auto f = build_pair("lgdb_sr_mask", "mask", 8, 16, 0, 0, 16, 48, o);
   expect_dissolved(f, "the consumer's mask does not affect the read");
 }
+
+// ---------------------------------------------------------------------------
+// AN INDEPENDENT SEMANTIC GATE FOR THE REWRITE.
+//
+// Everything above checks STRUCTURE: which reads were rewired, which refused.
+// Structure is not meaning. This evaluates the graph BEFORE and AFTER
+// `split_packed_selfref_wires` over every input and requires the same answer,
+// and checks both against a closed-form golden derived from the fixture's
+// PARAMETERS rather than from the graph.
+//
+// WHAT MAKES IT INDEPENDENT. `eval_node` walks the graph op by op from the
+// semantics in graph/cell.hpp. It never calls `resolve`, `footprint` or
+// anything else the rewrite uses, and the golden never looks at a graph at all.
+// The before-graph is CYCLIC, so it is evaluated the way hardware settles it --
+// iterate to a fixed point and fail if it does not converge. That is also what
+// makes the overlapping case meaningful: a genuine bit loop does NOT converge,
+// and the test says so.
+//
+// WHAT IT DOES NOT PROVE. This is one small instance of the shape, not
+// intpipe_csr_file. It says the rewrite preserves meaning on a graph with these
+// fields and these widths; it says nothing about the 35k-node module, whose own
+// RTL evidence is still open (pass/lean/CYCLE_PROVENANCE.txt part 5).
+namespace {
+
+// Fixed-width BITVECTOR evaluation. LGraph operators are fixed-width; host
+// `int64_t` is not. Signed shifts of negative values are undefined, a host `>>`
+// uses bit 63 rather than the operand's declared sign bit, and nothing is
+// truncated to the pin that carries it. So every value here is a `uint64_t`
+// masked to its node's declared width, and sign extension is explicit.
+constexpr uint64_t kBad = ~uint64_t{0};  // "not evaluable" sentinel
+
+uint64_t wmask(int bits) {
+  return (bits <= 0 || bits >= 64) ? ~uint64_t{0} : ((uint64_t{1} << bits) - 1);
+}
+
+uint64_t trunc_to(uint64_t v, int bits) { return v & wmask(bits); }
+
+// Interpret `v`'s low `bits` as two's complement and sign-extend to 64.
+uint64_t sext_from(uint64_t v, int bits) {
+  if (bits <= 0 || bits >= 64) {
+    return v;
+  }
+  const uint64_t m = uint64_t{1} << (bits - 1);
+  return ((v & wmask(bits)) ^ m) - m;
+}
+
+// A node's declared output width, from the pin that carries it.
+int node_bits(const hhds::Node_class& n) {
+  for (auto e : n.out_edges()) {
+    const int b = livehd::graph_util::bits_of(e.driver);
+    if (b > 0) {
+      return b;
+    }
+  }
+  return 64;
+}
+
+uint64_t op_value(const hhds::Node_class& n, uint64_t x, const std::map<uint64_t, uint64_t>& prev) {
+  namespace gu  = livehd::graph_util;
+  const int  nw = node_bits(n);
+  auto       rd = [&](const hhds::Pin_class& p, int* out_bits) -> uint64_t {
+    if (out_bits != nullptr) {
+      *out_bits = p.is_invalid() ? 0 : gu::bits_of(p);
+    }
+    if (p.is_invalid()) {
+      return kBad;
+    }
+    if (gu::is_const_pin(p)) {
+      auto c = gu::hydrate_const(p);
+      return c.is_just_i64() ? static_cast<uint64_t>(c.to_just_i64()) : kBad;
+    }
+    if (gu::is_graph_input_pin(p)) {
+      return x;
+    }
+    auto it = prev.find(static_cast<uint64_t>(p.get_master_node().get_debug_nid()));
+    return it == prev.end() ? uint64_t{0} : it->second;
+  };
+  auto in = [&](uint32_t pid) {
+    for (auto e : n.inp_edges()) {
+      if (static_cast<uint32_t>(e.sink.get_port_id()) == pid) {
+        return e.driver;
+      }
+    }
+    return hhds::Pin_class{};
+  };
+  auto shift_amount = [&](const hhds::Pin_class& p, int64_t* out) {
+    if (p.is_invalid() || !gu::is_const_pin(p)) {
+      return false;
+    }
+    auto c = gu::hydrate_const(p);
+    if (!c.is_just_i64()) {
+      return false;
+    }
+    *out = c.to_just_i64();
+    return *out >= 0 && *out < 64;
+  };
+
+  switch (gu::type_op_of(n)) {
+    case Ntype_op::Or:
+    case Ntype_op::And: {
+      const bool is_or = gu::type_op_of(n) == Ntype_op::Or;
+      bool       first = true;
+      uint64_t   acc   = 0;
+      for (auto e : n.inp_edges()) {
+        if (static_cast<uint32_t>(e.sink.get_port_id()) != 0) {
+          continue;
+        }
+        int            ob = 0;
+        const uint64_t v  = rd(e.driver, &ob);
+        if (v == kBad) {
+          return kBad;
+        }
+        const uint64_t vt = trunc_to(v, ob > 0 ? ob : 64);
+        acc               = first ? vt : (is_or ? (acc | vt) : (acc & vt));
+        first             = false;
+      }
+      return first ? uint64_t{0} : trunc_to(acc, nw);
+    }
+    case Ntype_op::SHL: {
+      int            ob = 0;
+      const uint64_t a0 = rd(in(0), &ob);
+      int64_t        sh = 0;
+      if (a0 == kBad || !shift_amount(in(1), &sh)) {
+        return kBad;
+      }
+      return trunc_to(trunc_to(a0, ob > 0 ? ob : 64) << sh, nw);
+    }
+    case Ntype_op::SRA: {
+      int            ob = 0;
+      const uint64_t a0 = rd(in(0), &ob);
+      int64_t        sh = 0;
+      if (a0 == kBad || !shift_amount(in(1), &sh)) {
+        return kBad;
+      }
+      // ARITHMETIC, from the OPERAND's declared sign bit -- not bit 63.
+      const int64_t sv = static_cast<int64_t>(sext_from(a0, ob > 0 ? ob : 64));
+      return trunc_to(static_cast<uint64_t>(sv >> sh), nw);
+    }
+    case Ntype_op::Sext: {
+      int            ob = 0;
+      const uint64_t a0 = rd(in(0), &ob);
+      int64_t        nb = 0;
+      if (a0 == kBad || !shift_amount(in(1), &nb) || nb <= 0) {
+        return kBad;
+      }
+      return trunc_to(sext_from(a0, static_cast<int>(nb)), nw);
+    }
+    case Ntype_op::Get_mask: {
+      int            ob = 0;
+      const uint64_t a0 = rd(in(0), &ob);
+      auto           md = in(2);
+      if (a0 == kBad || md.is_invalid() || !gu::is_const_pin(md)) {
+        return kBad;
+      }
+      auto mc = gu::hydrate_const(md);
+      if (mc.is_just_i64() && mc.to_just_i64() == -1) {
+        return trunc_to(trunc_to(a0, ob > 0 ? ob : 64), nw);  // to-unsigned
+      }
+      auto [lo, hi] = mc.get_mask_range();
+      if (lo < 0 || hi <= lo || hi > 63) {
+        return kBad;
+      }
+      return trunc_to((a0 >> lo) & wmask(hi - lo), nw);
+    }
+    default: return kBad;
+  }
+}
+
+// Solve the fixture's equations by iteration.
+//
+// JUSTIFIED ONLY FOR THIS FIXTURE, and only for the DISJOINT one: its bit-level
+// dependency graph is acyclic (that is the measured property these cases are
+// about), so the equations have exactly one solution and the iteration computes
+// it. That is a statement about this graph, not a definition of what a cyclic
+// RTL equation means -- settling or not settling proves nothing in general, and
+// the refusal cases are decided structurally, not here.
+bool settle(hhds::Graph* g, uint64_t x, uint64_t init, std::map<uint64_t, uint64_t>* out) {
+  std::vector<hhds::Node_class> nodes;
+  for (auto nd : g->fast_class()) {
+    nodes.push_back(nd);
+  }
+  std::map<uint64_t, uint64_t> prev;
+  for (auto& nd : nodes) {
+    prev[static_cast<uint64_t>(nd.get_debug_nid())] = trunc_to(init, node_bits(nd));
+  }
+  for (int round = 0; round < 64; ++round) {
+    std::map<uint64_t, uint64_t> cur;
+    for (auto& nd : nodes) {
+      const uint64_t v                               = op_value(nd, x, prev);
+      cur[static_cast<uint64_t>(nd.get_debug_nid())] = (v == kBad) ? uint64_t{0} : v;
+    }
+    if (cur == prev) {
+      *out = cur;
+      return true;
+    }
+    prev = std::move(cur);
+  }
+  return false;
+}
+
+}  // namespace
+
+// The golden, in closed form, from the fixture's PARAMETERS -- not from any
+// graph. The fixture is:
+//     wordA = fromB | off(a0) | off(a1)      fromB = (B[kB +: n] signed) << pA
+//     wordB = off(b0) | fromA                fromA = (A[kA +: n] signed) << pB
+// With disjoint fields the system settles in one pass: whatever A takes from B
+// comes from B's OFF-cycle fields, and vice versa. `off(at)` is (x & 0xFF) << at.
+namespace {
+
+uint64_t golden_disjoint(uint64_t x, int n, int kA, int pA, int kB, int pB, int a0, int a1, int b0,
+                         uint64_t* out_b) {
+  const uint64_t ox    = x & 0xFF;
+  auto           field = [&](uint64_t w, int k) {  // signed n-bit field at offset k
+    return sext_from(w >> k, n);
+  };
+  // to-unsigned of a signed n-bit field is exactly its low n bits: the result
+  // is non-negative and bit n is 0. Masking to n+1 instead KEEPS the
+  // sign-extended bit n, which is where this golden first disagreed with the
+  // graph -- at x=128, the first input whose field is negative.
+  auto zext = [&](uint64_t v) { return v & wmask(n); };
+
+  // round 0: both words from their off-cycle fields only
+  uint64_t wa = (ox << a0) | (ox << a1);
+  uint64_t wb = (ox << b0);
+  // settle
+  for (int i = 0; i < 8; ++i) {
+    const uint64_t na = (zext(field(wb, kB)) << pA) | (ox << a0) | (ox << a1);
+    const uint64_t nb = (ox << b0) | (zext(field(wa, kA)) << pB);
+    if (na == wa && nb == wb) {
+      break;
+    }
+    wa = na;
+    wb = nb;
+  }
+  *out_b = wb;
+  return wa;
+}
+
+}  // namespace
+
+// THE GATE. Same graph, evaluated before and after the rewrite, over every
+// input, and both compared against the closed-form golden.
+TEST(SplitSelfrefSemantics, DisjointRewritePreservesEveryValue) {
+  auto f = build_pair("lgdb_sem_ok", "semok", /*n=*/8, /*kA=*/16, /*pA=*/0, /*kB=*/0, /*pB=*/16, /*wbits=*/48);
+  // the two packed words, found by op rather than by remembering node ids
+  const uint64_t ida = f.id_a;
+  const uint64_t idb = f.id_b;
+
+  std::vector<std::pair<uint64_t, uint64_t>> before;
+  for (uint64_t x = 0; x < 256; ++x) {
+    std::map<uint64_t, uint64_t> z, o;
+    ASSERT_TRUE(settle(f.g.get(), x, 0, &z)) << "the DISJOINT fixture must settle: x=" << x;
+    ASSERT_TRUE(settle(f.g.get(), x, ~uint64_t{0}, &o)) << "the DISJOINT fixture must settle: x=" << x;
+    // Unique fixed point: a disjoint pack is a FUNCTION of its inputs, so where
+    // it starts cannot matter. This is the property the rewrite relies on.
+    ASSERT_EQ(z[ida], o[ida]) << "disjoint word A is not input-determined at x=" << x;
+    ASSERT_EQ(z[idb], o[idb]) << "disjoint word B is not input-determined at x=" << x;
+    before.emplace_back(z[ida], z[idb]);
+  }
+
+  ASSERT_GT(split_packed_selfref_wires(f.g.get()), 0);
+
+  for (uint64_t x = 0; x < 256; ++x) {
+    std::map<uint64_t, uint64_t> st;
+    ASSERT_TRUE(settle(f.g.get(), x, 0, &st)) << "after the rewrite: x=" << x;
+    EXPECT_EQ(st[ida], before[x].first) << "word A changed value at x=" << x;
+    EXPECT_EQ(st[idb], before[x].second) << "word B changed value at x=" << x;
+  }
+
+  // ...and both agree with a model that never saw the graph. The off-cycle
+  // placements come from build_pair's `park` helper: for pA=0 (field [0,9))
+  // they are 16 and 24, and for pB=16 (field [16,25)) the first gap is 0.
+  for (uint64_t x = 0; x < 256; ++x) {
+    uint64_t gb = 0;
+    const uint64_t ga = golden_disjoint(x, 8, 16, 0, 0, 16, 16, 24, 0, &gb);
+    EXPECT_EQ(before[x].first, ga) << "word A disagrees with the closed-form golden at x=" << x;
+    EXPECT_EQ(before[x].second, gb) << "word B disagrees with the closed-form golden at x=" << x;
+  }
+}
+
+// NO SEMANTIC CONTROL FOR THE OVERLAPPING CASE, deliberately.
+//
+// An earlier version asserted that the overlapping fixture "does not settle",
+// then that its fixed point was not unique. Neither is what a cyclic RTL
+// equation means, and the first was simply false -- it settles, because
+// A[16,24) = B[16,24) = A[16,24) has a consistent solution and the iteration
+// finds it. Overlap is decided STRUCTURALLY by the already-armed refusal cases
+// above, which assert the pass's own on-stack diagnostic. This oracle covers
+// the DISJOINT, bit-acyclic case, where iteration is justified.
