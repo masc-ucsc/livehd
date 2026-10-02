@@ -1,0 +1,30 @@
+/*
+:name: state_window_valid_next
+:type: equiv
+:verilog_top: state_window_valid_next
+:pyrope_top: state_window_valid_next
+:equiv_lec_grep: (?m)^lec: '[^']+' PROVEN equivalent
+:equiv_lec_grep: state window\(s\): narrower flop paired with the live slice
+*/
+// Two state windows at once (suggestions6 1.5): bedrock br_delay_valid_next
+// (Width=4, NumStages=1). The golden's `stage_valid_next[1:0]` and
+// `stage[1:0][3:0]` flops hold entry 0 (the inputs) only as wires, so only
+// bit 1 and bits 7:4 are live. The Pyrope keeps a 1-bit `valid_next` and a
+// 4-bit unreset `data`. Before state windows the explicit pairing of these
+// flops (formal.lec.match) was a false REFUTED -- BMC seeded the unreset
+// 8-bit flop as the zero-extension of the 4-bit one -- and the automatic one
+// stopped at a bounded PASS(6).
+pub mod state_window_valid_next(clk:Clock, `in`:U4, in_valid_next:U1, rst:U1) -> (out:U4@[], out_stages:U8@[], out_valid_next:U1@[], out_valid_next_stages:U2@[]) {
+  reg valid_next:U1:[reset_pin=rst] = 0
+  reg data:U4 = nil
+
+  valid_next = in_valid_next
+  if valid_next != 0 {
+    data = `in`
+  }
+
+  out_valid_next = valid_next
+  out = data
+  out_valid_next_stages = (in_valid_next, valid_next)#[..]
+  out_stages = (`in`, data)#[..]
+}

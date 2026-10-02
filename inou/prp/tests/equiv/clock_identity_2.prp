@@ -1,0 +1,10 @@
+/*
+:name: clock_identity_2
+*/
+// Same synchronizer as clock_identity.prp with the reset typed as a plain U1
+// data input bound through `reset_pin=`: Reset vs U1 must not matter to LEC.
+pub mod clock_identity(dst_clk:Clock, dst_rst:U1, src_bit:U1, src_clk:Clock) -> (dst_bit:U1@[]) {
+  reg sync:U2:[clock_pin=dst_clk, reset_pin=dst_rst] = 0
+  wrap sync = (sync << 1) | src_bit
+  dst_bit = sync#[1]
+}

@@ -1,0 +1,25 @@
+// suggestions6 1.2 #2: a Bool `mut` (or a loop-local Bool `const`) was
+// re-emitted with an integer seed (`mut ok = 0` then `ok = true`), which the
+// recompile rejects: "cannot assign boolean value to `ok` (it is integer)".
+pub mod writer_bool_temps(a:U4) -> (o2:U4@[], o3:U4@[], o4:U1@[]) {
+  // A loop-local Bool const whose value is an if-expression of comparisons.
+  mut t2:U4 = 0
+  for i in 0..<4 {
+    const b = if i == 0 { a#[0] != 0 } else { a#[i] == 0 }
+    t2#[i] = U1(not b)
+  }
+  o2 = t2
+  // ... with a Bool literal arm and an open-ended slice.
+  mut t3:U4 = 0
+  for i in 0..<4 {
+    const b = if i == 3 { false } else { a#[(i + 1)..] != 0 }
+    t3#[i] = U1(b)
+  }
+  o3 = t3
+  // A Bool `mut` accumulated across loop iterations.
+  mut ok = true
+  for i in 0..<4 {
+    ok = ok and a#[i] == 1
+  }
+  o4 = U1(ok)
+}

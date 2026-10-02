@@ -101,6 +101,14 @@ struct Query_result {
   bool packed_scalar_step_proven = false;
   bool packed_scalar_base_proven = false;
 
+  // The INDUCTION-STEP counterexample (inputs, then `| state: ...`) that kept a
+  // weaker-than-unbounded verdict from being an unbounded proof: the auto
+  // portfolio fell back to a bounded PASS or INCONCLUSIVE while the ind leg
+  // found a step CEX from an arbitrary state. The state is what a reader needs
+  // to tell an unreachable corner (fix: a proven `assume` over that state) from
+  // a real bug (suggestions6 1.6). Empty otherwise.
+  std::string step_cex;
+
   // Structured, uncapped counterexample trace for witness reproduction (empty
   // unless a BMC REFUTE built one). See Witness_trace.
   Witness_trace trace;

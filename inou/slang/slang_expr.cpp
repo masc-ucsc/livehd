@@ -1027,6 +1027,27 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
 }
 
 std::string Slang_context::lower_conditional_expr(const slang::ast::ConditionalExpression& expr) {
+  // As with a procedural if, an elaboration-time condition selects one arm.
+  // Lowering a dead arm can create invalid bit ranges (parameterized TLBs use
+  // negative indices only in configurations where that arm is absent).
+  bool known     = true;
+  bool take_left = true;
+  for (const auto& c : expr.conditions) {
+    if (c.pattern != nullptr) {
+      known = false;
+      break;
+    }
+    const auto value = try_eval(*c.expr);
+    if (!value || !value->isInteger() || value->integer().hasUnknown()) {
+      known = false;
+      break;
+    }
+    take_left &= value->isTrue();
+  }
+  if (known) {
+    const auto ti = tinfo(*expr.type);
+    return fit_wrap(to_int_value(lower_rvalue(take_left ? expr.left() : expr.right())), ti.bits, ti.is_signed);
+  }
   std::string cond;
   for (const auto& c : expr.conditions) {
     if (c.pattern != nullptr) {
@@ -1387,8 +1408,14 @@ std::string Slang_context::lower_concat(const slang::ast::ConcatenationExpressio
   lanes.reserve(ops.size());
 
   for (const auto* op : ops) {
-    const auto& e  = *op;
-    auto        oi = tinfo(*e.type);
+    const auto& e = *op;
+    // A zero-count replication contributes no bits, including when wrapped
+    // in another concatenation. tinfo intentionally clamps nonnumeric/zero
+    // widths to one, so discard this legal empty SV lane before that mapping.
+    if (e.type->getBitWidth() == 0) {
+      continue;
+    }
+    auto oi = tinfo(*e.type);
     // A Concat lane is an IR precision boundary: its driver must already fit
     // the source operand's self-determined window. `fit_wrap` both truncates an
     // unsigned/unbounded expression and restores a signed operand's top-bit

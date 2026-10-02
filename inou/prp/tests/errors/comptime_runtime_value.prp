@@ -1,0 +1,14 @@
+/*
+:name: comptime_runtime_value
+:type: error
+:tolg: 1
+:error: declared comptime but its value is not known at compile time
+:help: drop `comptime`
+*/
+// Docs 04b: a `comptime` variable must be compile-time known, or a compile
+// error is generated. `a` is a runtime input, so `k` cannot be comptime.
+pub comb f(a:U4) -> (o:U5) {
+  comptime const k = a + 1  // locate_error_here
+  comptime const j = 3
+  o = k + j
+}

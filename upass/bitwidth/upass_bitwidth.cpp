@@ -10,6 +10,7 @@
 #include <string_view>
 
 #include "array_dim.hpp"
+#include "bundle_key.hpp"
 #include "decl_facts.hpp"
 #include "diag.hpp"
 #include "lnast.hpp"
@@ -238,7 +239,7 @@ Lnast_range uPass_bitwidth::read_range(std::string_view name) const {
 // ── Writes ───────────────────────────────────────────────────────────────────
 
 void uPass_bitwidth::write_bw(std::string_view name, Bundle& dst, Lnast_range r, bool replace, Unbounded why) {
-  if (name.empty() || name.find('.') != std::string_view::npos) {
+  if (name.empty() || !bundle_key::is_single_level(name)) {
     return;  // scalar names only (per-field ranges are a follow-up)
   }
   // A write that does not fit is reported once; the destination then holds
@@ -248,6 +249,9 @@ void uPass_bitwidth::write_bw(std::string_view name, Bundle& dst, Lnast_range r,
     r = *env;
   }
   note_pre_if_range(name);
+  if (!guard_stack_.empty()) {
+    retire_guards(name);  // the guard spoke of the value `name` held before
+  }
 
   // Narrow-vs-replace against what the bundle already holds.
   const auto& e0  = dst.get_entry(bundle_path::of_string("0"));
@@ -338,6 +342,12 @@ void uPass_bitwidth::clear_range(std::string_view name) {
     }
   }
   lm->get_lnast()->bw_meta().ranges.erase(std::string(name));
+  if (Lnast::is_tmp(name)) {
+    cleared_tmps_.emplace(name);
+  }
+  if (!guard_stack_.empty()) {
+    retire_guards(name);
+  }
 }
 
 // ── If-arm value-range merge ─────────────────────────────────────────────────
@@ -369,6 +379,9 @@ void uPass_bitwidth::note_pre_if_range(std::string_view name) {
         before->max       = it->second.max;
         before->unbounded = false;
       }
+    }
+    if (Lnast::is_tmp(name) && !cleared_tmps_.contains(name) && !lm->get_lnast()->bw_meta().ranges.contains(std::string(name))) {
+      f.fresh_tmps.emplace(name);
     }
     f.pre_if.emplace(std::string(name), *before);
     if (before->is_unbounded() && name_is_wide(name)) {
@@ -423,7 +436,47 @@ void uPass_bitwidth::notify_uncertain_arm_begin() {
     }
   }
   arm_write_stack_.emplace_back();
+  guard_stack_.emplace_back(std::move(pending_guards_));
+  pending_guards_.clear();
   ++f.uncertain_arms;
+}
+
+void uPass_bitwidth::notify_arm_guard(std::string_view cond, bool negated) {
+  const auto it = cmp_facts_.find(cond);
+  if (it == cmp_facts_.end()) {
+    return;
+  }
+  const auto& f = it->second;
+  // not(big > small) == small >= big; not(big >= small) == small > big.
+  pending_guards_.push_back(negated ? Order_fact{.big = f.small, .small = f.big, .strict = !f.strict} : f);
+}
+
+void uPass_bitwidth::note_order_fact(std::string_view dst, upass::Src_span src, bool swap, bool strict) {
+  if (dst.empty() || src.size() != 2 || src[0].name.empty() || src[1].name.empty()) {
+    return;  // only an ordering between two named values narrows anything
+  }
+  const auto& big   = swap ? src[1] : src[0];
+  const auto& small = swap ? src[0] : src[1];
+  cmp_facts_.insert_or_assign(std::string(dst),
+                              Order_fact{.big = std::string(big.name), .small = std::string(small.name), .strict = strict});
+}
+
+std::optional<bool> uPass_bitwidth::guard_orders(std::string_view big, std::string_view small) const {
+  std::optional<bool> out;
+  for (const auto& frame : guard_stack_) {
+    for (const auto& g : frame) {
+      if (g.big == big && g.small == small) {
+        out = out.value_or(false) || g.strict;
+      }
+    }
+  }
+  return out;
+}
+
+void uPass_bitwidth::retire_guards(std::string_view name) {
+  for (auto& frame : guard_stack_) {
+    std::erase_if(frame, [&](const Order_fact& g) { return g.big == name || g.small == name; });
+  }
 }
 
 void uPass_bitwidth::notify_uncertain_arm_end() {
@@ -432,6 +485,9 @@ void uPass_bitwidth::notify_uncertain_arm_end() {
   }
   const auto arm = std::move(arm_write_stack_.back());
   arm_write_stack_.pop_back();
+  if (!guard_stack_.empty()) {
+    guard_stack_.pop_back();
+  }
   auto& f = if_merge_stack_.back();
   for (const auto& [var, r] : arm) {
     const auto it    = f.arm_union.find(var);
@@ -456,7 +512,11 @@ void uPass_bitwidth::notify_if_merge_end(bool all_paths_covered) {
     // on some path, so the union also takes that value's range — unbounded
     // when it is unknown, which renders as the declared type envelope (or
     // `int`), never a stale narrow / spurious-constant range.
-    const bool covered = all_paths_covered && f.arm_writes.at(var) == f.uncertain_arms;
+    // A fresh result temp (a `match` expression has no `else`) is covered
+    // too: no path keeps a pre-if value it never had (suggestions6 1.8: the
+    // match EXPRESSION used to skip the overflow check its arms deserve).
+    const bool all_arms = f.arm_writes.at(var) == f.uncertain_arms;
+    const bool covered  = all_arms && (all_paths_covered || f.fresh_tmps.contains(var));
     if (covered) {
       commit_merged(var, arm_union, f.arm_wide.contains(var));
       continue;
@@ -499,7 +559,7 @@ std::optional<Lnast_range> uPass_bitwidth::port_envelope_of(std::string_view bas
 
 std::optional<Lnast_range> uPass_bitwidth::decl_envelope_of(std::string_view name) const {
   const std::string_view base = ssa_base_name(name);
-  if (base.find('.') != std::string_view::npos || runner_st == nullptr) {
+  if (!bundle_key::is_single_level(base) || runner_st == nullptr) {
     return std::nullopt;
   }
   // The unit's own ports skip the declare bake; their declared type rides
@@ -543,7 +603,7 @@ std::optional<Lnast_range> uPass_bitwidth::declared_type_of(std::string_view nam
   }
   // Flattened tuple-port reads are scalar operands too. Their declared
   // envelope lives on the leaf, not on the tuple's scalar slot zero.
-  if (base.find('.') != std::string_view::npos) {
+  if (!bundle_key::is_single_level(base)) {
     return declared_field_type_of(base);
   }
   return decl_envelope_of(base);
@@ -585,12 +645,12 @@ std::optional<Lnast_range> uPass_bitwidth::check_declared_fit(std::string_view n
   // carries rode in on an earlier value (e.g. a bit-select force's `uW`
   // typespec on one if-arm), and a sibling arm's wider legal write must not be
   // judged against it. The BASE name's own check still runs at the merged write.
-  const auto env = base.find('.') == std::string_view::npos ? declared_type_of(base) : declared_field_type_of(base);
+  const auto env = bundle_key::is_single_level(base) ? declared_type_of(base) : declared_field_type_of(base);
   if (!env) {
     // No two-sided envelope; a one-sided floor (`Unsigned` == `Signed(min=0)`,
     // `Signed(min=-5)`) is still a promise: "above `max` or below `min`" is a
     // compile error (docs 07-typesystem "Bitwidth").
-    if (const auto floor = base.find('.') == std::string_view::npos ? declared_floor_of(base) : std::nullopt;
+    if (const auto floor = bundle_key::is_single_level(base) ? declared_floor_of(base) : std::nullopt;
         floor && !r.is_unbounded() && r.min < *floor) {
       livehd::diag::sink().emit(livehd::diag::Diagnostic{
           .severity = livehd::diag::Severity::error,
@@ -864,7 +924,7 @@ upass::Vote uPass_bitwidth::process_store(std::string_view dst_name, Bundle& dst
   if (dst_name.empty() || src.empty()) {
     return Vote::keep;
   }
-  if (dst_name.find('.') != std::string_view::npos) {
+  if (!bundle_key::is_single_level(dst_name)) {
     // A typed tuple FIELD (`t.x = v`) is a typed destination like a scalar
     // (user ruling 16); its range is not tracked (per-field ranges are a
     // follow-up), only the fit is judged.
@@ -963,7 +1023,15 @@ upass::Vote uPass_bitwidth::process_plus(std::string_view dst_name, Bundle& dst,
 upass::Vote uPass_bitwidth::process_minus(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
   note_affine(dst_name, src, -1);
   if (src.size() < 2) { return stamp_arith(dst_name, dst, Lnast_range::make_unbounded(), src); }
-  return stamp_arith(dst_name, dst, range_of_operand(src[0]).sub(range_of_operand(src[1])), src);
+  auto r = range_of_operand(src[0]).sub(range_of_operand(src[1]));
+  // Inside `if a > b` (or `a >= b`), `a - b` is at least 1 (0).
+  if (src.size() == 2 && !r.is_unbounded() && !src[0].name.empty() && !src[1].name.empty()) {
+    if (const auto strict = guard_orders(src[0].name, src[1].name)) {
+      r.min = std::max<int64_t>(r.min, *strict ? 1 : 0);
+      if (r.max < r.min) { r.max = r.min; }
+    }
+  }
+  return stamp_arith(dst_name, dst, r, src);
 }
 
 upass::Vote uPass_bitwidth::process_mult(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
@@ -1053,16 +1121,24 @@ upass::Vote uPass_bitwidth::process_bit_not(std::string_view dst_name, Bundle& d
 // Logical ops / reductions / comparisons — result is always boolean.
 upass::Vote uPass_bitwidth::process_log_and(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
 upass::Vote uPass_bitwidth::process_log_or(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
-upass::Vote uPass_bitwidth::process_log_not(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
+upass::Vote uPass_bitwidth::process_log_not(std::string_view dst_name, Bundle& dst, upass::Src_span src) {
+  if (src.size() == 1 && !src[0].name.empty()) {
+    if (const auto it = cmp_facts_.find(src[0].name); it != cmp_facts_.end()) {
+      const auto f = it->second;  // not(big > small) == small >= big
+      cmp_facts_.insert_or_assign(std::string(dst_name), Order_fact{.big = f.small, .small = f.big, .strict = !f.strict});
+    }
+  }
+  return stamp(dst_name, dst, Lnast_range::boolean());
+}
 upass::Vote uPass_bitwidth::process_red_or(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::unsigned_bit()); }
 upass::Vote uPass_bitwidth::process_red_and(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::unsigned_bit()); }
 upass::Vote uPass_bitwidth::process_red_xor(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::unsigned_bit()); }
 upass::Vote uPass_bitwidth::process_ne(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
 upass::Vote uPass_bitwidth::process_eq(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
-upass::Vote uPass_bitwidth::process_lt(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
-upass::Vote uPass_bitwidth::process_le(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
-upass::Vote uPass_bitwidth::process_gt(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
-upass::Vote uPass_bitwidth::process_ge(std::string_view dst_name, Bundle& dst, upass::Src_span) { return stamp(dst_name, dst, Lnast_range::boolean()); }
+upass::Vote uPass_bitwidth::process_lt(std::string_view dst_name, Bundle& dst, upass::Src_span src) { note_order_fact(dst_name, src, /*swap=*/true, /*strict=*/true); return stamp(dst_name, dst, Lnast_range::boolean()); }
+upass::Vote uPass_bitwidth::process_le(std::string_view dst_name, Bundle& dst, upass::Src_span src) { note_order_fact(dst_name, src, /*swap=*/true, /*strict=*/false); return stamp(dst_name, dst, Lnast_range::boolean()); }
+upass::Vote uPass_bitwidth::process_gt(std::string_view dst_name, Bundle& dst, upass::Src_span src) { note_order_fact(dst_name, src, /*swap=*/false, /*strict=*/true); return stamp(dst_name, dst, Lnast_range::boolean()); }
+upass::Vote uPass_bitwidth::process_ge(std::string_view dst_name, Bundle& dst, upass::Src_span src) { note_order_fact(dst_name, src, /*swap=*/false, /*strict=*/false); return stamp(dst_name, dst, Lnast_range::boolean()); }
 // clang-format on
 
 // popcount (`a#+[..]`) — set-bit count, not boolean. Always in
@@ -1376,7 +1452,7 @@ void uPass_bitwidth::process_tuple_get() {
   if (!idx.empty()) {
     note_inferred_access(src, idx, nullptr);
   }
-  if (dst.empty() || dst.find('.') != std::string::npos) {
+  if (dst.empty() || !bundle_key::is_single_level(dst)) {
     return;  // scalar reads only
   }
   std::optional<Lnast_range> r;
@@ -1428,7 +1504,7 @@ void uPass_bitwidth::process_declare() {
   // 0), mut)`): its envelope is kept here, because a later runtime store into
   // the field re-points the field's binding at the stored value.
   std::optional<Lnast_range> field_env;
-  if (typed && var.find('.') != std::string::npos && Lnast_ntype::is_prim_type_int(get_raw_ntype()) && move_to_child()) {
+  if (typed && !bundle_key::is_single_level(var) && Lnast_ntype::is_prim_type_int(get_raw_ntype()) && move_to_child()) {
     Dlop mx;
     Dlop mn;
     if (Lnast_ntype::is_const(get_raw_ntype())) {
@@ -1841,7 +1917,7 @@ void uPass_bitwidth::process_type_spec() {
   }
   move_to_parent();
 
-  if (var.empty() || var.find('.') != std::string::npos || !dmax || !dmin) {
+  if (var.empty() || !bundle_key::is_single_level(var) || !dmax || !dmin) {
     return;
   }
   if (!runner_st->has_known(var)) {

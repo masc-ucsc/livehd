@@ -1,0 +1,27 @@
+/*
+:name: reset_auto_wire_minted
+:type: warning
+:warning: auto-wired to the minted `reset`
+:help:    bind it explicitly
+*/
+// The silent wrong-checksum trap (lhdtrack suggestions6 1.3): the harness has a
+// DATA input `rst:U1`, so it declares no Reset and LiveHD mints `reset:Reset`
+// for its registers. The child's `rst:Reset` is left unbound in the call, so it
+// auto-wires to that minted `reset` -- not to the harness's `rst`. A test that
+// drives `acc.rst` then never resets the child.
+mod child(clk:Clock, rst:Reset, d:U4) -> (q:U4@[]) {
+  reg r:U4 = 0
+  r = d
+  q = r
+}
+
+pub mod harness(rst:U1, d:U4) -> (q:U4@[]) {
+  reg seen:U4 = 0
+  const c = child(d=d)    // locate_warning_here  (child rst <- minted reset, not the data `rst`)
+  if rst != 0 {
+    seen = 0
+  } else {
+    seen = c
+  }
+  q = seen
+}

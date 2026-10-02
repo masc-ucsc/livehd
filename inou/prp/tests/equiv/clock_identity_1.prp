@@ -1,0 +1,13 @@
+/*
+:name: clock_identity_1
+:lec_expect: refuted
+*/
+// Same synchronizer as clock_identity.prp, clocked by the WRONG clock input.
+// Each design alone has ONE clock, so a per-design "multi-clock?" decision
+// encoded both as "every step is an edge" and PROVED them equal; the clock
+// identity check compares the two designs' clock inputs (suggestions6 1.1).
+pub mod clock_identity(dst_clk:Clock, dst_rst:Reset, src_bit:U1, src_clk:Clock) -> (dst_bit:U1@[]) {
+  reg sync:U2:[clock_pin=src_clk, reset_pin=dst_rst] = 0
+  wrap sync = (sync << 1) | src_bit
+  dst_bit = sync#[1]
+}

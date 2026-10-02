@@ -153,6 +153,20 @@ int main(int argc, char** argv) {
   if (res.status == "pass" && sink.has_errors()) {
     mark_failed(res, lhd::classify_engine_failure("diagnostics reported errors"));
   }
+  if (res.status != "pass" && res.error_category.empty()) {
+    // The category of the diagnostic the summary reports (the same message),
+    // so `error[bitwidth]` is not printed as `error[syntax]`. Looked up BEFORE
+    // the synthesized `run-failed` record below: that one echoes a kernel
+    // failure's message with a class-derived category, and a kernel failure
+    // keeps an empty category (its class is what the summary prints).
+    const auto& recs = sink.records();
+    for (auto it = recs.rbegin(); it != recs.rend(); ++it) {
+      if (it->severity == livehd::diag::Severity::error && it->message == res.error_message) {
+        res.error_category = it->category;
+        break;
+      }
+    }
+  }
   // A kernel-level failure (a thrown Lhd_error, or any std::exception the
   // catches above classified) never went through the diagnostics sink, so the
   // envelope and the pretty header would report "0 errors" for a run that

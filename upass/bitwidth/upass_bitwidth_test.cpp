@@ -239,6 +239,21 @@ TEST(BitwidthIntegration, ConstAssign) {
   EXPECT_EQ(it->second.max, 3);
 }
 
+TEST(BitwidthIntegration, QuotedScalarReassignment) {
+  auto       ln    = make_simple_assign("`status.mode`", "3", true);
+  const auto stmts = ln->get_first_child(ln->get_root());
+  const auto store = ln->add_child(stmts, Lnast_ntype::create_store());
+  ln->add_child(store, Lnast_node::create_ref("`status.mode`"));
+  ln->add_child(store, Lnast_node::create_const("0"));
+  run_bw(ln);
+  const auto& ranges = ln->bw_meta().ranges;
+  const auto  it     = ranges.find("`status.mode`");
+  ASSERT_NE(it, ranges.end());
+  EXPECT_FALSE(it->second.unbounded);
+  EXPECT_EQ(it->second.min, 0);
+  EXPECT_EQ(it->second.max, 0);
+}
+
 // Test: plus c = 3 + 5 → bw_meta["c"] should be constant(8)
 TEST(BitwidthIntegration, PlusTwoConsts) {
   auto ln = make_plus("c", "3", "5", true, true);

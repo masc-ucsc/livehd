@@ -81,21 +81,14 @@ public:
   // to these are sink-instance statements, not value-producing assignments.
   // Owned by the pass; must outlive write_all().
   void set_sink_modules(const std::unordered_set<std::string>* m) { sink_modules_ = m; }
-  // Verilog-origin `Clock`-class inputs that must print as DATA (`:U1`) even
-  // though their own body uses them only as a clock: a Clock is not data and
-  // there are no derived clocks (docs 07-typesystem), so every net a call
-  // connects agrees -- a clock passed into a child's data input (an ICG's
-  // `clk`, a `ca` the child never names `clk`) keeps the caller's port data,
-  // and a child clock fed from data (a gated net) becomes data too. Keys are
-  // clock_port_key(unit, port). Computed over ALL units by clock_data_ports,
-  // which first promotes scalar wrapper inputs connected to physical clocks
-  // (`promoted`) and propagates that type through unused forwarding
-  // interfaces. The plan is an OVERLAY: the units' io_meta is never written
-  // (an emitter must not change the IR later passes and emits read), so every
-  // writer test of a Clock input goes through is_clock_input.
+  // Clock connectivity and ports to promote or print as data, computed over
+  // all emitted units. This overlay preserves io_meta: emitting source must
+  // not change the IR consumed by other passes. Physical clock connections
+  // propagate through forwarding wrappers, child ports, and recognized ICGs.
   struct Clock_port_plan {
+    absl::flat_hash_map<std::string, absl::flat_hash_set<std::string>> nets;
     absl::flat_hash_set<std::string> data;      // Clock-class inputs printed as data
-    absl::flat_hash_set<std::string> promoted;  // unmarked scalar inputs printed as Clock
+    absl::flat_hash_set<std::string>                                   promoted;  // unmarked scalar ports printed as Clock
   };
   void                                 set_clock_data_ports(const Clock_port_plan* m) { clock_data_ports_ = m; }
   [[nodiscard]] static std::string     clock_port_key(std::string_view unit, std::string_view port);
@@ -171,6 +164,18 @@ private:
   absl::flat_hash_map<std::string, size_t>         def_idx_;
   absl::flat_hash_map<std::string, size_t>         read_idx_;
   std::vector<std::pair<std::string, std::string>> file_imports_;  // (alias, import path), source order
+  // Body names EVERY def of which is a boolean (`true`/`false`, a comparison, a
+  // logical op, or a copy of another such name). A value-less declare or a
+  // hoisted seed of one is spelled `= false`: a `= 0` seed pins the name to an
+  // integer and the boolean def then fails the re-read's kind check.
+  absl::flat_hash_set<std::string>                 bool_names_;
+  void                                             compute_bool_names(Lnast_nid stmts_nid);
+  // A value-less file-scope `const` whose single value arrives as a LATER store
+  // prints as one `comptime const X = v` declaration; the store is then
+  // skipped (keyed by class index, see emits_nothing_stmt).
+  absl::flat_hash_set<int64_t>                     merged_decl_stores_;
+  // True when any ref in this unit other than `except` reads `name`.
+  bool                                             unit_reads_name(std::string_view name, Lnast_nid except) const;
 
   // ── Cursor helpers ───────────────────────────────────────────────────────
   bool                         move_to_child();
@@ -329,6 +334,12 @@ private:
   // and silently narrow it. This map is consulted ONLY for a single-index
   // element read (`arr[i]`), where every element is exactly one uW.
   absl::flat_hash_map<std::string, int> array_elem_bits_;
+  struct Array_write_shape {
+    size_t rank;
+    int    bits;
+  };
+  absl::flat_hash_map<std::string, Array_write_shape> array_write_shapes_;
+  absl::flat_hash_map<std::string, int64_t>           array_write_lanes_;
   void                                  note_port_width(std::string_view name, std::string_view type_txt);
   bool                                  is_whole_width_mask(Lnast_nid src, int lo, int hi) const;
   static std::string                    fmt_bit_range(std::string_view s, int lo, int hi);
@@ -549,6 +560,7 @@ private:
   // store prints the Clock_cell `Clock(clock_pin=clk, enable=en)`
   // (clock_gate_store_). A Clock input that clocks a register and is ALSO
   // read as data is reported in clock_as_data_.
+  static absl::flat_hash_set<std::string> clock_live_values(const Lnast& u, Lnast_nid stmts);
   void plan_clock_reset_ports(Lnast_nid stmts_nid, bool is_mod);
   // A Verilog clock gate `wire gclk = clk & en` feeding a clock pin: a
   // clock-net store of a single-use `bit_and` temp tree (the reader's 1-bit
@@ -557,6 +569,7 @@ private:
     std::string            clock;    // the gated Clock input
     std::vector<Lnast_nid> enables;  // the enable operands
     std::vector<Lnast_nid> ands;     // the folded `bit_and` temps
+    std::vector<Lnast_nid> latch_nodes;  // enable latch absorbed into Clock(...)
   };
   // The clock gates of `u` below `stmts`, by store def-key (get_class_index).
   [[nodiscard]] static absl::flat_hash_map<int64_t, Clock_gate> clock_gates(const Lnast& u, Lnast_nid stmts,

@@ -385,8 +385,18 @@ static std::string lec_pair_cache_key(const livehd::semdiff::Canonical_digest& d
   for (const auto& [mk, mv] : o.uncertain_match) {
     um_pairs.push_back(mk + "=" + mv);
   }
+  std::vector<std::string> mem_pairs;
+  mem_pairs.reserve(o.mem_match.size());
+  for (const auto& [mk, mv] : o.mem_match) {
+    mem_pairs.push_back(mk + "=" + mv);
+  }
+  // ignore_memory / trust / mem_match / ignore_assumes change WHAT is claimed
+  // (a boxed memory, an assumed-equal leaf, a memory pairing, dropped design
+  // assumptions), so a verdict obtained under one setting must never replay
+  // under another.
   return std::format(
-      "{:016x}{:016x}:{:016x}{:016x}|e={};gx={};b={};dc={};ph={};rc={};r={};m=[{}];um=[{}];c=[{}];ac={};da={};a={};sv={}",
+      "{:016x}{:016x}:{:016x}{:016x}|e={};gx={};b={};dc={};ph={};rc={};r={};m=[{}];um=[{}];c=[{}];ac={};da={};a={};sv={};"
+      "im=[{}];t=[{}];mm=[{}];ia={}",
       dref.h0,
       dref.h1,
       dimpl.h0,
@@ -404,7 +414,22 @@ static std::string lec_pair_cache_key(const livehd::semdiff::Canonical_digest& d
       o.assume_check ? 1 : 0,
       o.design_assumes ? 1 : 0,
       o.assumption_key,
-      o.solver);
+      o.solver,
+      sorted_join(o.ignore_memory),
+      sorted_join(o.trust),
+      sorted_join(mem_pairs),
+      o.ignore_assumes ? 1 : 0);
+}
+
+// The detail of a verdict-cache hit. Names the matched digests (ref:impl,
+// before the option segment of `ckey`) so a hit is auditable: it can only
+// replay a verdict for these exact graphs.
+static std::string lec_cache_hit_detail(const std::string& ckey, const livehd::formal::Cached_verdict& hit) {
+  return std::format("verdict cache hit on ref:impl digests {} with identical options (was {} in {}ms: {})",
+                     ckey.substr(0, ckey.find('|')),
+                     hit.engine,
+                     hit.elapsed_ms,
+                     hit.detail);
 }
 
 // Entity tail of a full graph name ("file.entity" -> "entity"): the pair-hint
@@ -490,6 +515,199 @@ static void lec_store_pair_hint(livehd::formal::Verdict_cache* vcache, const std
     ph.pairs.push_back(p);
   }
   vcache->set_pair_hint(entity, std::move(ph));
+}
+
+// The state one def's proof could not correspond, for the result JSON (before
+// this it was only in a lec.log the size of the design). Built from what the
+// tier-2 pairing already computed: semdiff's unpaired cells ("name (reason)")
+// plus every injected uncertain pair the verdict did NOT use (the uncertain
+// discipline dropped it). Each cell carries its declared width, and the
+// suggestion re-offers the dropped pairs, then pairs same-width cells by name
+// similarity -- a hint for the user to try as formal.lec.match, never assumed
+// by the prover.
+struct Lec_state_report {
+  std::vector<Result::Lec_verdict::Unpaired_state> cells;
+  std::vector<std::pair<std::string, std::string>> suggested;  // {ref, impl}
+};
+
+static std::vector<std::string> lec_state_name_tokens(std::string_view n) {
+  std::vector<std::string> out;
+  std::string              cur;
+  auto                     flush = [&]() {
+    // Register-naming noise carries no correspondence evidence.
+    if (!cur.empty() && cur != "q" && cur != "d" && cur != "r" && cur != "reg" && cur != "ff") {
+      out.push_back(cur);
+    }
+    cur.clear();
+  };
+  for (char c : n) {
+    if (c == '_' || c == '.' || c == '[' || c == ']') {
+      flush();
+    } else {
+      cur.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    }
+  }
+  flush();
+  return out;
+}
+
+// A state name's token sets (leaf name, full path), built once per cell: the
+// pairing below scores every ref x impl pair.
+struct Lec_state_name_tokens {
+  std::set<std::string> leaf, full;
+  explicit Lec_state_name_tokens(std::string_view n) {
+    const auto d  = n.rfind('.');
+    const auto lt = lec_state_name_tokens(d == std::string_view::npos ? n : n.substr(d + 1));
+    const auto ft = lec_state_name_tokens(n);
+    leaf.insert(lt.begin(), lt.end());
+    full.insert(ft.begin(), ft.end());
+  }
+};
+
+static double lec_state_name_score(const Lec_state_name_tokens& a, const Lec_state_name_tokens& b) {
+  auto jaccard = [](const std::set<std::string>& sx, const std::set<std::string>& sy) {
+    if (sx.empty() || sy.empty()) {
+      return 0.0;
+    }
+    size_t inter = 0;
+    for (const auto& t : sx) {
+      inter += sy.count(t);
+    }
+    return static_cast<double>(inter) / static_cast<double>(sx.size() + sy.size() - inter);
+  };
+  // The leaf name decides; the full path only breaks ties.
+  return jaccard(a.leaf, b.leaf) + 0.01 * jaccard(a.full, b.full);
+}
+
+static Lec_state_report lec_unpaired_state_report(const std::string& def, hhds::Graph* ref, hhds::Graph* impl,
+                                                  const std::vector<std::string>&                         ref_unpaired,
+                                                  const std::vector<std::string>&                         impl_unpaired,
+                                                  const std::vector<std::pair<std::string, std::string>>& injected,
+                                                  const std::vector<std::pair<std::string, std::string>>& used) {
+  Lec_state_report rep;
+  auto             widths = [](hhds::Graph* g) {
+    absl::flat_hash_map<std::string, int64_t> w;
+    if (g == nullptr) {
+      return w;
+    }
+    for (auto node : g->grouped_hierarchy().nodes()) {
+      const auto op = livehd::graph_util::type_op_of(node);
+      if (op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Memory) {
+        // Keyed like the engine keys state: an inlined instance's flop spells
+        // its path with escaped dots, semdiff's report without.
+        w.emplace(livehd::lec::canon_flop_name(node.get_hier_name()),
+                  static_cast<int64_t>(livehd::graph_util::bits_of(node.get_driver_pin(0))));
+      }
+    }
+    return w;
+  };
+  const auto ref_w  = widths(ref);
+  const auto impl_w = widths(impl);
+  auto       add    = [&](const char* side, const std::string& name, const std::string& reason) {
+    const auto& wm = std::string_view{side} == "ref" ? ref_w : impl_w;
+    auto        it = wm.find(livehd::lec::canon_flop_name(name));
+    rep.cells.push_back({def, side, name, reason, it == wm.end() ? 0 : it->second});
+  };
+  // semdiff spells a cell "name (reason)".
+  auto split_reason = [](const std::string& s) -> std::pair<std::string, std::string> {
+    if (s.size() > 3 && s.back() == ')') {
+      if (const auto p = s.rfind(" ("); p != std::string::npos) {
+        return {s.substr(0, p), s.substr(p + 2, s.size() - p - 3)};
+      }
+    }
+    return {s, "no full match"};
+  };
+  for (const auto& s : ref_unpaired) {
+    auto [n, why] = split_reason(s);
+    add("ref", n, why);
+  }
+  for (const auto& s : impl_unpaired) {
+    auto [n, why] = split_reason(s);
+    add("impl", n, why);
+  }
+  std::set<std::pair<std::string, std::string>> dropped;
+  for (const auto& p : injected) {
+    if (std::find(used.begin(), used.end(), p) == used.end()) {
+      dropped.insert(p);
+      add("ref", p.first, std::format("uncertain pair with impl '{}' dropped (did not validate)", p.second));
+      add("impl", p.second, std::format("uncertain pair with ref '{}' dropped (did not validate)", p.first));
+    }
+  }
+  // Greedy pairing, best evidence first. A dropped uncertain pair ranks above
+  // any name guess: semdiff matched its full signature, and the uncertain
+  // discipline drops EVERY pair when any one of them fails, so a dropped pair
+  // is not known to be wrong. Name guesses need equal widths.
+  struct Cand {
+    double      score;
+    std::string r, i;
+  };
+  std::vector<Cand> cands;
+  for (const auto& [r, i] : dropped) {
+    cands.push_back({2.0, r, i});
+  }
+  std::vector<Lec_state_name_tokens> toks;
+  toks.reserve(rep.cells.size());
+  for (const auto& c : rep.cells) {
+    toks.emplace_back(c.name);
+  }
+  for (size_t ri = 0; ri < rep.cells.size(); ++ri) {
+    const auto& rc = rep.cells[ri];
+    if (rc.side != "ref" || rc.bits <= 0) {
+      continue;
+    }
+    for (size_t ii = 0; ii < rep.cells.size(); ++ii) {
+      const auto& ic = rep.cells[ii];
+      if (ic.side != "impl" || ic.bits != rc.bits || dropped.contains({rc.name, ic.name})) {
+        continue;
+      }
+      if (const double s = lec_state_name_score(toks[ri], toks[ii]); s > 0) {
+        cands.push_back({s, rc.name, ic.name});
+      }
+    }
+  }
+  std::stable_sort(cands.begin(), cands.end(), [](const Cand& a, const Cand& b) { return a.score > b.score; });
+  absl::flat_hash_set<std::string> taken_r, taken_i;
+  for (const auto& c : cands) {
+    if (taken_r.contains(c.r) || taken_i.contains(c.i)) {
+      continue;
+    }
+    taken_r.insert(c.r);
+    taken_i.insert(c.i);
+    rep.suggested.emplace_back(c.r, c.i);
+  }
+  return rep;
+}
+
+static std::string lec_match_string(const std::vector<std::pair<std::string, std::string>>& pairs) {
+  std::string s;
+  for (const auto& [r, i] : pairs) {
+    s += std::format("{}{}={}", s.empty() ? "" : ",", r, i);
+  }
+  return s;
+}
+
+// One human line per def plus the result-JSON fields.
+static void lec_publish_state_reports(Result& res, const std::map<std::string, Lec_state_report>& reports) {
+  std::vector<std::pair<std::string, std::string>> all;
+  for (const auto& [def, rep] : reports) {
+    if (rep.cells.empty()) {
+      continue;
+    }
+    std::string ref_s, impl_s;
+    for (const auto& c : rep.cells) {
+      auto& s  = c.side == "ref" ? ref_s : impl_s;
+      s       += std::format("{}{}:{}", s.empty() ? "" : ", ", c.name, c.bits);
+    }
+    std::print(
+        "lec: '{}' unpaired state (limits the proof): ref{{{}}} impl{{{}}}{}\n",
+        def,
+        ref_s,
+        impl_s,
+        rep.suggested.empty() ? std::string{} : std::format("; try --set formal.lec.match={}", lec_match_string(rep.suggested)));
+    res.lec.unpaired_state.insert(res.lec.unpaired_state.end(), rep.cells.begin(), rep.cells.end());
+    all.insert(all.end(), rep.suggested.begin(), rep.suggested.end());
+  }
+  res.lec.suggested_match = lec_match_string(all);
 }
 
 // Disclose helper-conditioned lec verdicts. NOTHING in the driver sets these
@@ -1379,7 +1597,9 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       parents[c].push_back(p);
     }
   }
-  auto run_def = [&](size_t def_ix) {
+  // Per def, under report_mutex: the state each def's proof could not pair.
+  std::map<std::string, Lec_state_report> state_reports;
+  auto                                    run_def = [&](size_t def_ix) {
     if (settled[def_ix]) {
       return;  // definitively decided in an earlier round — do not re-solve
     }
@@ -1657,7 +1877,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         bounded_proof[def_ix] = hit->bounded ? 1 : 0;
         cr.engine             = "cache";
         cr.elapsed_ms         = 0;
-        cr.detail             = std::format("verdict cache hit (was {} in {}ms: {})", hit->engine, hit->elapsed_ms, hit->detail);
+        cr.detail             = lec_cache_hit_detail(ckey, *hit);
         proven[def_ix]        = 1;
         by_cache[def_ix]      = 1;
         ++cache_count;
@@ -1717,8 +1937,10 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
     // (state_pairing): its full-match signature pass pairs the state cells
     // tier-1 names left unmatched, and the surviving pairs are injected as
     // UNCERTAIN correspondence (2f-lec discipline enforced inside prove_equal).
-    const bool want_pairing    = o.state_pairing && !pairs_from_hint;
-    auto       has_direct_loop = [](hhds::Graph* graph) {
+    const bool               want_pairing = o.state_pairing && !pairs_from_hint;
+    // semdiff's still-unpaired state, kept past its scope for the result report.
+    std::vector<std::string> state_unpaired_ref, state_unpaired_impl;
+    auto                     has_direct_loop = [](hhds::Graph* graph) {
       if (graph == nullptr) {
         return false;
       }
@@ -1794,6 +2016,10 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       }
       auto            m  = livehd::semdiff::structural_match(ref_by_name[name], impl_by_name[name], so);
       const long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+      if (want_pairing) {
+        state_unpaired_ref  = m.a_state_unpaired;
+        state_unpaired_impl = m.b_state_unpaired;
+      }
       // 2f-lec diverged-use guard: memories semdiff flagged as genuinely diverged
       // (kind/init mismatch or no counterpart) must not be force-collapsed.
       o.mem_diverged.clear();
@@ -2282,7 +2508,11 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         }
         // Strategy hint keyed by entity NAME so it survives the design edit
         // that misses the digest-keyed verdict cache.
-        vcache->set_hint(name, {r.engine, r.split_used, ms});
+        // A bounded pass is not a winning strategy (it is what auto falls back
+        // to when induction does not close), so never record it as one.
+        if (!r.bounded) {
+          vcache->set_hint(name, {r.engine, r.split_used, ms});
+        }
         // A PASS obtained WITH uncertain pairs validates them: persist as the
         // entity-keyed pair hint so warm runs inject them without re-running
         // the signature pass.
@@ -2304,6 +2534,22 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
         // the next run re-derives the pairing fresh.
         vcache->clear_pair_hint(name);
       }
+    }
+    // What failed to pair, whenever the def ended weaker than an unbounded
+    // PROVEN (a re-tried def overwrites its earlier round's report).
+    {
+      Lec_state_report rep;
+      if (r.verdict == Verdict::Unknown || (r.verdict == Verdict::Proven && r.bounded)) {
+        rep = lec_unpaired_state_report(name,
+                                        ref_by_name[name],
+                                        impl_by_name[name],
+                                        state_unpaired_ref,
+                                        state_unpaired_impl,
+                                        o.uncertain_match,
+                                        r.uncertain_pairs_used);
+      }
+      std::lock_guard report_lock(report_mutex);
+      state_reports[name] = std::move(rep);
     }
     // Scheduler bookkeeping: a Proven or Refuted verdict is DEFINITIVE, so later
     // rounds skip this def; an Unknown stays unsettled and is re-tried with a
@@ -2754,6 +3000,7 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       *cvc5_hot = std::move(cvc5_by_def);
     }
   }
+  lec_publish_state_reports(res, state_reports);
   return top_result;
 }
 
@@ -4623,7 +4870,8 @@ void lec_command(Options& opts, Result& res) {
     // scope — flattened child flops are 3a-synth territory). The uncertain
     // discipline lives inside prove_equal; this path has no digest cache, so
     // the pairs only shape the solve.
-    bool pairs_from_hint = false;
+    bool                     pairs_from_hint = false;
+    std::vector<std::string> flat_unpaired_ref, flat_unpaired_impl;  // for the result's state report
     if (o.state_pairing) {
       if (vcache != nullptr) {
         if (auto ph = vcache->pair_hint(lec_entity_of(impl_g->get_name())); ph.has_value()) {
@@ -4637,10 +4885,12 @@ void lec_command(Options& opts, Result& res) {
       }
       if (!pairs_from_hint) {
         livehd::semdiff::Semdiff_options so;
-        so.matching_names = true;
-        so.state_pairing  = true;
-        so.seed_pairs     = o.match;
-        auto m            = livehd::semdiff::structural_match(ref_g.get(), impl_g.get(), so);
+        so.matching_names  = true;
+        so.state_pairing   = true;
+        so.seed_pairs      = o.match;
+        auto m             = livehd::semdiff::structural_match(ref_g.get(), impl_g.get(), so);
+        flat_unpaired_ref  = m.a_state_unpaired;
+        flat_unpaired_impl = m.b_state_unpaired;
         // 2f-lec diverged-use guard: keep genuinely-diverged memories uncollapsed.
         o.mem_diverged.clear();
         o.mem_diverged.insert(o.mem_diverged.end(), m.a_mem_diverged.begin(), m.a_mem_diverged.end());
@@ -4731,7 +4981,7 @@ void lec_command(Options& opts, Result& res) {
           r.verdict    = livehd::lec::Verdict::Proven;
           r.bounded    = hit->bounded;
           r.engine     = "cache";
-          r.detail     = hit->detail.empty() ? "verdict cache hit" : hit->detail;
+          r.detail     = lec_cache_hit_detail(flat_ckey, *hit);
           r.elapsed_ms = 0;
           std::print("lec: '{}' PROVEN (cache)\n", impl_g->get_name());
           settled_by_cache = true;
@@ -4839,7 +5089,9 @@ void lec_command(Options& opts, Result& res) {
         if (flat_cacheable && !flat_ckey.empty()) {
           vcache->insert(flat_ckey, {r.engine, r.detail, ms, r.bounded});  // definitive Proven only (rule F)
         }
-        vcache->set_hint(std::string{impl_g->get_name()}, {r.engine, r.split_used, ms});
+        if (!r.bounded) {  // a bounded pass is a fallback, not a winning strategy
+          vcache->set_hint(std::string{impl_g->get_name()}, {r.engine, r.split_used, ms});
+        }
         lec_store_pair_hint(vcache.get(), lec_entity_of(impl_g->get_name()), r.uncertain_pairs_used);
       } else if (r.verdict == livehd::lec::Verdict::Unknown && r.witness.empty() && flat_cacheable && !flat_ckey.empty()) {
         // Witness-free Unknown: ledger the attempt (a witness-carrying partial-miter
@@ -4850,6 +5102,17 @@ void lec_command(Options& opts, Result& res) {
         // not end Proven is stale — drop it so the next run pairs fresh.
         vcache->clear_pair_hint(lec_entity_of(impl_g->get_name()));
       }
+    }
+    if (r.verdict == livehd::lec::Verdict::Unknown || (r.verdict == livehd::lec::Verdict::Proven && r.bounded)) {
+      std::map<std::string, Lec_state_report> reports;
+      reports[std::string{impl_g->get_name()}] = lec_unpaired_state_report(std::string{impl_g->get_name()},
+                                                                           ref_g.get(),
+                                                                           impl_g.get(),
+                                                                           flat_unpaired_ref,
+                                                                           flat_unpaired_impl,
+                                                                           o.uncertain_match,
+                                                                           r.uncertain_pairs_used);
+      lec_publish_state_reports(res, reports);
     }
     lec_store_cones(vcache.get(), r);
     if (vcache != nullptr) {
@@ -4954,11 +5217,25 @@ void lec_command(Options& opts, Result& res) {
   std::print("lec: '{}' {} ({})\n", impl_g->get_name(), verdict, r.detail);
   // The same three states, machine-readable: `status`/exit code alone cannot
   // tell a proof from a solver give-up (see Result::Lec_verdict).
-  res.lec = {.present = true,
-             .verdict = lec_known ? (lec_equiv ? "proven" : "refuted") : "unknown",
-             .solver  = o.solver,
-             .bounded = lec_equiv && r.bounded,
-             .bound   = lec_equiv && r.bounded ? static_cast<int64_t>(o.bound) : int64_t{0}};
+  res.lec.present = true;
+  res.lec.verdict = lec_known ? (lec_equiv ? "proven" : "refuted") : "unknown";
+  res.lec.solver  = o.solver;
+  res.lec.bounded = lec_equiv && r.bounded;
+  res.lec.bound   = lec_equiv && r.bounded ? static_cast<int64_t>(o.bound) : int64_t{0};
+  if (r.verdict == livehd::lec::Verdict::Refuted || (lec_equiv && !r.bounded)) {
+    // The state report explains a WEAK verdict; a definitive one needs none
+    // (a child def's report can survive into a top that still proved).
+    res.lec.unpaired_state.clear();
+    res.lec.suggested_match.clear();
+  } else if (!r.step_cex.empty()) {
+    // Why the proof stopped short of unbounded: the induction step diverges from
+    // this ARBITRARY state. Print it apart from the detail so the state reads at
+    // a glance (suggestions6 1.6).
+    res.lec.induction_cex = r.step_cex;
+    std::print("  induction step fails from an arbitrary state (may be unreachable): {}\n", r.step_cex);
+    std::print("  hint: if that state is unreachable, state the invariant with `assume(...)` on the register(s); a proven "
+               "assume becomes an induction hypothesis\n");
+  }
   // The witness names the diverging COMMON outputs; print it on Refuted AND on the
   // Unknown-because-incomplete-correspondence case (where a matched-portion diff is
   // still the actionable iteration signal), not only on a clean Refuted.
@@ -5133,10 +5410,14 @@ void lec_command(Options& opts, Result& res) {
                                      ? std::format("equivalent for {} cycles (bounded; deeper cycles not checked)", lg_cycles)
                                      : std::string{"equivalent"};
 
-  std::print("lec cross-check: engine={} -> {}; lgcheck -> {}\n",
-             o.engine,
-             lec_known ? (lec_equiv ? "equivalent" : "different") : "unknown",
-             lg_verdict);
+  // Spell the native leg's bound too: "equivalent" next to a bounded lgcheck
+  // line read as the stronger of the two answers when it was the weaker.
+  const std::string native_verdict = !lec_known   ? std::string{"unknown"}
+                                     : !lec_equiv ? std::string{"different"}
+                                     : r.bounded
+                                         ? std::format("equivalent for {} cycles (bounded; deeper cycles not checked)", o.bound)
+                                         : std::string{"equivalent"};
+  std::print("lec cross-check: engine={} -> {}; lgcheck -> {}\n", o.engine, native_verdict, lg_verdict);
 
   // Cross-checking supplies an additional oracle, never a replacement for a
   // missing native proof. UNKNOWN and setup failures are not counterexamples.

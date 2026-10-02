@@ -71,7 +71,8 @@ emitter's netlist.
 - Delete modules that elaborate to nothing: assertion-only checkers
   (`*_checks_*`, `*_intg`, `*_impl`), `br_misc_unused`/`tieoff` sinks, and the
   calls that fed them. Ports that only fed those checks (typically `clk`/`rst`
-  on combinational children) go too; keep them on the external top.
+  on combinational children) go too, and so do the unused `clk`/`rst` of a
+  purely combinational external top (see "Interfaces").
 - Inline trivial helpers (one-hot mux, bin/onehot encoders, a 1-stage delay,
   popcount of a 1-bit value) where a loop, reduction, or one register says the
   same thing more clearly. Keep a helper module when it has a real name in the
@@ -84,7 +85,8 @@ emitter's netlist.
 
 **Interfaces and bundles**
 
-- Preserve the external top-level interface exactly: port names, widths, and
+- Preserve the external top-level interface exactly (one exception below):
+  port names, widths, and
   types, including `U1` ports a generated harness drives with integers. Convert
   to `Bool` right inside the top (`pop_ready == 1`, `U1(flag)`). Built-in
   type names are capitalized (`U8`, `S4`, `Bool`, `Unsigned(bits=N)`); the
@@ -94,6 +96,19 @@ emitter's netlist.
   backticks when used as names. Physical clock ports must have type `Clock`;
   correcting an old data-typed clock is a required semantic repair. Preserve
   its physical name and width, and wire it consistently through the harness.
+  Retyping a `U1` clock as `Clock` can make a design multi-clock (two `Clock`
+  inputs): from then on every register needs `clock_pin=` (see "State").
+- A **purely combinational external top** (an emitted `mod` whose `clk`/`rst`
+  drive no state) becomes a `comb` WITHOUT those ports. Do not keep them as
+  unused `Clock`/`Reset` on a `mod`, nor as `clk:U1, rst:U1` data on a `comb` (a
+  `comb` cannot take `Clock`/`Reset`). An unconnected clock or reset is not an
+  equivalence difference: `lhd lec` proves the `comb` against the Verilog that
+  still declares them. The generated lhdtrack harness binds only the ports the
+  Pyrope DUT declares, so regenerate it from the cleaned signature (`lhdtrack
+  import seed <test>` rewrites a harness that still carries the generated
+  marker) or drop those arguments by hand in a hand-adjusted one.
+- A port name that is a reserved word keeps its backticks (`` `stage` ``,
+  `` `in` ``); the emitter writes them and a rewrite must not drop them.
 - Intermediate interfaces may change. Pass related ports as tuples instead of
   escaped flattened arguments (`` `io_in.control.enable`=enable ``); reuse an
   existing tuple directly (`child(io_in=next_stage)`) or construct a named one
@@ -121,6 +136,9 @@ emitter's netlist.
   `comptime const` before using it inside a `<...>` generic argument.
 - Build a vector bit by bit in a typed local (`mut v:U16 = 0; v#[i] = ...`),
   then assign the output once.
+- A concatenation needs a typed destination: `const w:U12 = (a, b)#[..]` or a
+  typed output. An untyped `const w = (a, b)#[..]` is rejected ("assigned a
+  concat but has no declared type").
 - Use `if` expressions when every branch selects one destination's value
   (`x = if a { b } elif c { d } else { e }`). Preserve priority with
   `if`/`elif`; use `match` only when its parallel, mutually exclusive
@@ -143,7 +161,10 @@ emitter's netlist.
 - Declare reset value and pin with the register:
   `reg last:U16:[reset_pin=rst] = 0x8000` (sync, active-high by default;
   `negreset=true`, `async=true` otherwise; a reset's name, `_n` included,
-  carries no polarity). Replace the emitter's
+  carries no polarity). `reset_pin`/`clock_pin` NAME a signal (a
+  `Reset`/`Clock` or a `U1`/`Bool` net, `rst:U1` included): an expression
+  such as `reset_pin=rst != 0` is a compile error; name a computed reset
+  first (`const any_rst = rst or soft`). Replace the emitter's
   `reg q___q` + `if rst {...} elif en {...}` with that plus `if en { q = d }`.
   Keep reset-dependent logic that does more than assign a reset value.
 - A reset value must be comptime. Compute a structured one with a `comb`
@@ -172,6 +193,14 @@ emitter's netlist.
   is rejected ("mixes values at different cycles"); the generated lhdtrack
   harnesses do exactly that, so on an external top declare such an output
   `@[]` and say why in a comment.
+- The declared landing cycle of an external top output is part of its
+  interface, like its name and width. Keep the emitted annotation unless the
+  rewrite gives the output a fixed, verified cycle. Tightening `@[]` to `@[0]`
+  is allowed when the top and its harness still compile (the harness then
+  checks that claim); `@[1]` on an output the harness reads in the same cycle
+  is not. Never loosen a declared `@[N]` to `@[]`, and do not move an output
+  into or out of a `reg` output list. List every landing-cycle change in the
+  report.
 
 **Configuration**
 

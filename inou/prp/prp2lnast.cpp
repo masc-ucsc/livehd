@@ -4999,10 +4999,10 @@ std::vector<Prp2lnast::Call_arg> Prp2lnast::collect_call_args(TSNode arg_tuple) 
         if (!ts_node_is_null(id)) {
           // Canonicalize so a keyword-escaped call-site key (`` `in` = x ``)
           // matches the parameter DECLARATION, which is stored unescaped (`in`).
-          arg.assign_key = std::string(canonical_escaped_ident(trim(get_text(id))));
+          arg.assign_key = str_tools::canonical_escaped_path(trim(get_text(id)));
         }
       } else {
-        arg.assign_key = std::string(canonical_escaped_ident(trim(get_text(lv))));
+        arg.assign_key = str_tools::canonical_escaped_path(trim(get_text(lv)));
       }
 
       if (arg.assign_key.empty()) {
@@ -11009,9 +11009,10 @@ void Prp2lnast::emit_arg_type(const Lnast_nid& assign_parent, TSNode type_node) 
 // Ruling 2026-09-27 #8 (04b-attributes.md): `async` is the canonical
 // reset-kind attribute -- `sync=` is still accepted, with a deprecation
 // warning. A `*_pin` attribute CONNECTS a wire (docs 04b "Attributes"): it
-// takes the signal directly (`clock_pin=clk2`, `reset_pin=rst or soft_rst`);
-// the older `ref` spelling is an error (ruling 82: the Clock/Reset types make
-// it unnecessary). A `Clock` is never bound to a constant: a constant
+// takes the signal directly (`clock_pin=clk2`, `reset_pin=any_rst`); the older
+// `ref` spelling is an error (ruling 82: the Clock/Reset types make it
+// unnecessary), and so is an expression (`reset_pin=rst or soft_rst`, user
+// ruling 2026-10-01: name a computed reset first). A `Clock` is never bound to a constant: a constant
 // `clock_pin` is reported by upass.tolg (`clock-const`), where every front
 // end's constant clock lands.
 void Prp2lnast::check_attribute_value(TSNode item, std::string_view key, TSNode rv) const {
@@ -11034,6 +11035,42 @@ void Prp2lnast::check_attribute_value(TSNode item, std::string_view key, TSNode 
                    "syntax",
                    std::format("`{}` takes the signal directly: `ref` is not allowed here", key),
                    std::format("drop the `ref`: write `{}={}`", key, trim(get_text(ts_node_named_child(r, 0)))));
+    } else {
+      // User ruling 2026-10-01: a pin NAMES a signal (a `Clock`/`Reset`, a
+      // `U1`/`Bool` net, a field of one, or a constant such as `false` = no
+      // reset; a per-port memory pin is a tuple of those), never an expression
+      // (`reset_pin=rst != 0`). A computed reset gets a name first.
+      const std::function<TSNode(TSNode)> find_expr = [&](TSNode node) -> TSNode {
+        const std::string_view t(ts_node_type(node));
+        if (t == "identifier" || t == "constant" || t == "integer_literal" || t == "bool_literal") {
+          return TSNode{};
+        }
+        if (t == "dot_expression" || t == "paren_group" || t == "tuple") {
+          for (uint32_t i = 0; i < ts_node_named_child_count(node); ++i) {
+            if (const auto e = find_expr(ts_node_named_child(node, i)); !ts_node_is_null(e)) {
+              return e;
+            }
+          }
+          return TSNode{};
+        }
+        return node;
+      };
+      if (const auto e = find_expr(rv); !ts_node_is_null(e)) {
+        const bool clock = key == "clock_pin";
+        report_error(rv,
+                     "pin-attr-expression",
+                     "syntax",
+                     std::format("`{}` must name a {} signal, not an expression: `{}`",
+                                 key,
+                                 clock ? "`Clock`" : "`Reset`, `U1` or `Bool`",
+                                 trim(get_text(rv))),
+                     clock ? std::string("name a `Clock` input, a child's `Clock` output, or a gated clock "
+                                         "(`const gclk = Clock(clock_pin=clk, enable=en)`, then `clock_pin=gclk`)")
+                           : std::format("give the reset a name first (`const soft_rst = {}`) and write "
+                                         "`reset_pin=soft_rst`; for an active-low reset name the input and set "
+                                         "`negreset=true`",
+                                         trim(get_text(rv))));
+      }
     }
   }
   if (key == "sync") {

@@ -1,0 +1,16 @@
+/*
+:name: pin_attr_expression
+:type: error
+:error: `reset_pin` must name a `Reset`, `U1` or `Bool` signal, not an expression
+:help: give the reset a name first
+*/
+
+// User ruling 2026-10-01: a `*_pin` attribute NAMES a signal -- a `Reset` or
+// `Clock`, a `U1`/`Bool` net, or a constant (`reset_pin=false`, no reset) --
+// never an expression. `rst` is already a U1, so `reset_pin=rst` is the
+// spelling; a computed reset is named first (`const r = rst != 0`).
+pub mod pin_attr_expression(clk:Clock, rst:U1, d:U4) -> (q:U4@[]) {
+  reg x:U4:[reset_pin=rst != 0] = 0  // locate_error_here
+  x = d
+  q = x
+}

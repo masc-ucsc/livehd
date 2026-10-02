@@ -1,0 +1,27 @@
+/*
+:name: comptime_modifier_order
+:type: comptime
+:verifier_pass: 5
+:verifier_fail: 0
+*/
+
+// `comptime` modifies `const`/`mut` in either order (owner ruling 2026-10-01):
+// `const comptime N` is `comptime const N` and `mut comptime n` is
+// `comptime mut n`; `lhd pyrope fmt` prints the `comptime`-first spelling.
+// suggestions6 1.2 #1: the prp writer used to emit `const comptime ONE = 0`,
+// which then failed to parse ("'comptime' is reserved").
+
+const comptime ONE = 0x100
+comptime const TWO = 0x200
+pub const comptime W:U16 = 0x300
+
+mut comptime n = 1
+n = n + ONE
+comptime mut m = 1
+m = m + ONE
+
+cassert(ONE == 0x100)
+cassert(TWO == ONE * 2)
+cassert(W == ONE + TWO)
+cassert(n == 0x101)
+cassert(m == n)

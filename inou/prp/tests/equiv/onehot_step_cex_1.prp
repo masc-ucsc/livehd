@@ -1,0 +1,16 @@
+/*
+:name: onehot_step_cex_1
+:lec_grep: induction step fails from an arbitrary state
+:lec_grep: state: last=0
+:lec_grep_not: PROVEN equivalent
+*/
+// No invariant: the designs agree on every reachable state, but the induction
+// step diverges from the unreachable last=0, and LEC must say so (the state,
+// not just "bounded").
+pub mod onehot_step_cex(clk:Clock, rst:Reset, req:U4) -> (grant:U4@[0]) {
+  reg last:U4 = 1
+  if req != 0 {
+    last = ((last << 1) | (last >> 3))#[0..<4]
+  }
+  grant = req & last
+}

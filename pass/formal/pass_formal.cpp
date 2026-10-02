@@ -409,6 +409,7 @@ void Pass_formal::work(Eprp_var& var) {
       int              proven    = 0;
       bool             unchecked = false;
       bool             failed    = false;
+      bool             child     = false;  // reached below the root (an instance path), i.e. under a parent binding
     };
     // hhds::Node_class hashes and compares on raw_nid ALONE (nids are per-body
     // and start small, so two module bodies collide routinely). Every other user
@@ -566,6 +567,7 @@ void Pass_formal::work(Eprp_var& var) {
         auto& st = hier_props[prop_key(occurrences[i].base_node())];
         st.node  = occurrences[i].base_node();
         ++st.total;
+        st.child |= !pr.instance.empty();
         if (livehd::lec::is_unchecked_assume_class(pr.aclass)) {
           st.unchecked = true;
           continue;
@@ -593,7 +595,7 @@ void Pass_formal::work(Eprp_var& var) {
         }
       }
     }
-    std::vector<hhds::Node_class> discharged;
+    std::vector<std::pair<hhds::Node_class, bool>> discharged;  // (node, proven only under a parent binding)
     for (const auto& [key, st] : hier_props) {
       const auto it           = design_occ.find(key);
       const int  design_total = (it == design_occ.end()) ? st.total : it->second;
@@ -601,7 +603,7 @@ void Pass_formal::work(Eprp_var& var) {
       // proven here. Fewer means some parent outside the preflight roots still
       // binds this contract, so the obligation is NOT discharged for the design.
       if (st.total > 0 && st.proven == st.total && st.total == design_total && !st.unchecked && !st.failed) {
-        discharged.push_back(st.node);
+        discharged.emplace_back(st.node, st.child);
       }
     }
     // MARK, do not delete. The discharged contract is recorded on the node as
@@ -617,8 +619,16 @@ void Pass_formal::work(Eprp_var& var) {
     // below must skip these nodes: proving them again in module isolation --
     // where the parent's binding is absent -- would stamp a runtime_check on
     // top of the proof and un-elide the check it just discharged.
-    for (auto& node : discharged) {
-      gu::set_proven(node, gu::kFormalAssumeHier);
+    //
+    // A ROOT's OWN assume (every occurrence has an empty instance path) has no
+    // parent binding: the preflight proved it over the root's free inputs from
+    // its initial state, which is exactly the frame a module-alone LEC or verify
+    // starts from. So it is a plain proven invariant (kFormalAssume) and LEC may
+    // use it as a hypothesis -- the way a cleanup states "this state register is
+    // one-hot" instead of copying a reference's unreachable corner case
+    // (suggestions6 1.6). Stamping it Hier made LEC drop a proven fact.
+    for (auto& [node, child] : discharged) {
+      gu::set_proven(node, child ? gu::kFormalAssumeHier : gu::kFormalAssume);
       hier_discharged.insert(prop_key(node));
     }
   }
@@ -775,6 +785,9 @@ void Pass_formal::work(Eprp_var& var) {
         continue;
       }
       if (hier_discharged.contains(prop_key(node))) {
+        if (gu::has_proven(node) && gu::proven_of(node) == gu::kFormalAssume) {
+          proven_assumes.push_back(cond);  // a root-own invariant the preflight proved: a sound hypothesis
+        }
         // Discharged top-rooted, at every occurrence, by the preflight above.
         // Neither re-proved here (the binding that proved it is in the parent,
         // not in this module) nor used as a hypothesis for this module's own

@@ -1,0 +1,15 @@
+/*
+:name: style_single_destination_match
+:type: style
+:style: single-destination-conditional
+:message: match arms each assign
+:help: wrap r = match
+*/
+// A `match` whose arms each only assign the same name (here with the same `wrap`)
+// is a `match` expression.
+pub comb f(a:U8, b:U8, op:U1) -> (r:U8) {
+  match op {  // locate_style_single-destination-conditional
+    == 0 { wrap r = a + b }
+    == 1 { wrap r = a - b }
+  }
+}

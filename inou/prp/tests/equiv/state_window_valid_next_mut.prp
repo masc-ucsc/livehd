@@ -1,0 +1,23 @@
+/*
+:name: state_window_valid_next_mut
+:type: equiv
+:verilog_top: state_window_valid_next_mut
+:pyrope_top: state_window_valid_next_mut
+:lec_expect: refuted
+*/
+// MUTATED twin of state_window_valid_next: `data` loads every cycle instead of
+// only while `valid_next` is set. A state window pairs the 4-bit `data` with
+// the live slice of the golden's 8-bit stage flop, and that pairing must not
+// hide a real difference: this pair has to REFUTE.
+pub mod state_window_valid_next_mut(clk:Clock, `in`:U4, in_valid_next:U1, rst:U1) -> (out:U4@[], out_stages:U8@[], out_valid_next:U1@[], out_valid_next_stages:U2@[]) {
+  reg valid_next:U1:[reset_pin=rst] = 0
+  reg data:U4 = nil
+
+  valid_next = in_valid_next
+  data = `in`
+
+  out_valid_next = valid_next
+  out = data
+  out_valid_next_stages = (in_valid_next, valid_next)#[..]
+  out_stages = (`in`, data)#[..]
+}

@@ -1,0 +1,17 @@
+// suggestions6 1.2 #3: the writer unrolls this loop, and the slice
+// `high#[(i + 1)..]` is EMPTY on the last trip (i == 3 on a 4-bit `high`). It
+// was printed `high#[4..<4]`, which the recompile rejects ("empty bit range is
+// not allowed"); an empty window is the value 0.
+pub mod writer_empty_range_unrolled(clk:Clock, rst:Reset, req:U4) -> (grant:U4@[]) {
+  reg last:U4 = 8
+  mut mask:U4 = 0
+  for i in 0..<4 {
+    mask#[i] = last#|[i..]
+  }
+  const high = req & ~mask
+  for i in 0..<4 {
+    const blocked = if i == 0 { high#[1..] != 0 } elif mask#[i] == 1 { req#[0..<i] != 0 or high#[(i + 1)..] != 0 } else { high#[0..<i] != 0 }
+    grant#[i] = U1(req#[i] == 1 and not blocked)
+  }
+  if req != 0 { last = grant }
+}

@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "default_prologue.hpp"
+#include "file_name.hpp"  // livehd::unit_file_stem -- the file an import names
 #include "io_port_rules.hpp"
 #include "range_bits.hpp"
 #include "str_tools.hpp"
@@ -459,6 +460,11 @@ std::string Lnast_prp_writer::decl_prefix(std::string_view lhs) {
 // register named `stage` (bedrock's br_delay_valid) emits `stage[0] = a`, which
 // re-parses as a `stage[N]` pipelining declaration ("expected an expression").
 static bool is_pyrope_reserved_ident(std::string_view s) {
+  // Pyrope reserves `_` and `_` followed only by digits for placeholders.
+  // They remain valid Verilog signal and packed-struct field names.
+  if (!s.empty() && s.front() == '_' && s.find_first_not_of("0123456789", 1) == std::string_view::npos) {
+    return true;
+  }
   // clang-format off: the `#include` inside the braced list makes clang-format
   // break the hand-added words one per line, which buries them.
   static const absl::flat_hash_set<std::string_view> kw = {
@@ -1074,7 +1080,12 @@ void Lnast_prp_writer::write_module_imports() {
     // `file.entity` and needs no suffix; a slang-origin unit is the bare module
     // name and its file holds a lambda of the same name (`m` -> `m.m`). Getting
     // this wrong grows the path one level per round trip.
-    const std::string path         = dot == std::string::npos ? imp.module_name + "." + imp.module_name : imp.module_name;
+    // The FILE component is the stem pass.prp_writer actually wrote: a unit name
+    // past the file-name cap lands in a shortened `<head>_<sha256>.prp`, and an
+    // import of the long spelling never resolves on recompile.
+    const std::string file  = dot == std::string::npos ? imp.module_name : imp.module_name.substr(0, dot);
+    const std::string ent   = dot == std::string::npos ? imp.module_name : imp.module_name.substr(dot + 1);
+    const std::string path  = livehd::unit_file_stem(file) + "." + ent;
     import_alias_[imp.call_name]   = alias;
     import_alias_[imp.module_name] = alias;
     lines.emplace_back("const " + quote_module_path(alias) + " = import(\"" + escape_string(path) + "\")\n");
@@ -1452,6 +1463,18 @@ void Lnast_prp_writer::write_module() {
     // Inline single-use reader temps at their read (_b2i → unsigned(cond),
     // _mux → the conditional expression, __wN SSA copies → their value).
     analyze_expr_inlines(io_nid, stmts_nid);
+    // A recognized clock gate must reach write_store, which spells the
+    // Clock construction. Inlining its SSA alias as an ordinary expression
+    // would resurrect the illegal raw `clk & enable` data operation.
+    for (const auto& [name, fi] : fold_info_) {
+      if (!fi.def_node.is_invalid() && clock_gate_store_.contains(fi.def_node.get_class_index().value)) {
+        foldable_.erase(name);
+        foldable_id_.erase(fi.name_id);
+        value_inline_.erase(strip_prefix(name));
+        bool_inline_.erase(strip_prefix(name));
+        folded_node_.erase(fi.def_node.get_class_index().value);
+      }
+    }
     // Pre-declare body `mut` vars that are WRITTEN but have no `declare` node.
     // Their first write would otherwise emit `mut X` inside whatever (possibly
     // nested) scope it lands in; a later write in a SIBLING scope then references
@@ -1813,6 +1836,7 @@ void Lnast_prp_writer::write_module() {
       };
       scan(scan, stmts_nid, true);
       def_count_ = def_count;  // write_declare needs it (a stored `const` declare is a `mut`)
+      compute_bool_names(stmts_nid);
       // Position every top-level statement in EMIT order, so a name's single store
       // can be checked to precede every read of it.  Body emit order is: the
       // hoisted prologue (mut seeds + wire pre-declares, incl. the pin wires),
@@ -2083,7 +2107,8 @@ void Lnast_prp_writer::write_module() {
         if (!decl.ty.empty()) {
           os << ":" << decl.ty;
         }
-        os << " = " << (decl.init.empty() ? (decl.ty == "Bool" ? "false" : "0") : decl.init) << "\n";
+        const bool is_bool = decl.ty == "Bool" || (decl.ty.empty() && bool_names_.contains(nm));
+        os << " = " << ((decl.init.empty() || (is_bool && decl.init == "0")) ? (is_bool ? "false" : "0") : decl.init) << "\n";
         declared_.insert(nm);
       }
       // Hoist nested `wire` declares to the function top as a bare `wire X:T`
@@ -2997,8 +3022,7 @@ void Lnast_prp_writer::emit_port_group(Lnast_nid tup_nid, bool is_output, bool i
       // A port whose SV dim named a package param prints the imported alias
       // (`cmd:vpu_defs_pkg.VPU_FCMD_SZ_T`) instead of the concretized `u7`.
       bool emitted_type = false;
-      if (const auto cit = is_output ? clock_reset_port_type_.end() : clock_reset_port_type_.find(lnast->get_name(name_nid));
-          cit != clock_reset_port_type_.end()) {
+      if (const auto cit = clock_reset_port_type_.find(lnast->get_name(name_nid)); cit != clock_reset_port_type_.end()) {
         // A `Clock`/`Reset` input (plan_clock_reset_ports): the type word is
         // what binds it as the implicit clock/reset on the recompile.
         print(":");
@@ -3291,6 +3315,55 @@ absl::flat_hash_map<int64_t, Lnast_prp_writer::Clock_gate> Lnast_prp_writer::clo
       stores.push_back(nid);
     }
   }
+  struct Enable_latch {
+    std::string            gate;
+    Lnast_nid              value;
+    unsigned               writes        = 0;
+    bool                   low           = false;
+    bool                   reset         = false;
+    bool                   unconditional = false;
+    std::vector<Lnast_nid> definitions;
+  };
+  absl::flat_hash_map<std::string, Enable_latch> enable_latches;
+  for (const auto& name : upass::io_port::latch_names(u, stmts)) {
+    enable_latches.try_emplace(name);
+  }
+  for (const auto& n : u.depth_preorder(stmts)) {
+    const auto dst = u.get_first_child(n);
+    if (dst.is_invalid()) {
+      continue;
+    }
+    const auto it = enable_latches.find(std::string(u.get_name(dst)));
+    if (it == enable_latches.end()) {
+      continue;
+    }
+    auto& latch = it->second;
+    if (Lnast_ntype::is_store(u.get_type(n)) || Lnast_ntype::is_declare(u.get_type(n)) || Lnast_ntype::is_attr_set(u.get_type(n))) {
+      latch.definitions.push_back(n);
+    }
+    const auto arg = u.get_sibling_next(dst);
+    if (arg.is_invalid()) {
+      continue;
+    }
+    if (Lnast_ntype::is_store(u.get_type(n)) && u.is_last_child(arg)) {
+      ++latch.writes;
+      latch.value         = arg;
+      latch.unconditional = u.get_parent(n) == stmts;
+    } else if (Lnast_ntype::is_attr_set(u.get_type(n))) {
+      const auto val = u.get_sibling_next(arg);
+      if (val.is_invalid()) {
+        continue;
+      }
+      const auto key = u.get_name(arg);
+      if (key == "enable") {
+        latch.gate = u.get_name(val);
+      } else if (key == "enable_high" || key == "posclk") {
+        latch.low = u.get_name(val) == "false" || u.get_name(val) == "0";
+      } else if (key == "reset_pin" || key == "initial") {
+        latch.reset = true;
+      }
+    }
+  }
   for (const auto& store : stores) {
     Clock_gate                            g;
     bool                                  ok   = true;
@@ -3319,10 +3392,99 @@ absl::flat_hash_map<int64_t, Lnast_prp_writer::Clock_gate> Lnast_prp_writer::clo
     };
     flat(u.get_name(u.get_sibling_next(u.get_first_child(store))));
     if (ok && !g.clock.empty()) {
+      // Clock(...) already contains the low-transparent enable latch. Feed
+      // its original D, not that latch's Q: otherwise Verilog re-emission
+      // inserts two serial latches open in the same phase.
+      for (auto& enable : g.enables) {
+        if (!Lnast_ntype::is_ref(u.get_type(enable))) {
+          continue;
+        }
+        const auto it = enable_latches.find(std::string(u.get_name(enable)));
+        if (it != enable_latches.end() && it->second.gate == g.clock && it->second.low && !it->second.reset
+            && it->second.writes == 1 && it->second.unconditional) {
+          if (refs[u.get_name(enable)] == static_cast<int>(it->second.definitions.size()) + 1) {
+            g.latch_nodes.insert(g.latch_nodes.end(), it->second.definitions.begin(), it->second.definitions.end());
+          }
+          enable = it->second.value;
+        }
+      }
       gates.emplace(store.get_class_index().value, std::move(g));
     }
   }
   return gates;
+}
+
+// Observable value closure for clock-use classification. The writer drops
+// unused value cones (including RTL lint sinks); those cones must not demote
+// the physical clock that happens to occur in them. Calls, state, attributes
+// and control predicates remain roots, so this is deliberately conservative.
+absl::flat_hash_set<std::string> Lnast_prp_writer::clock_live_values(const Lnast& u, Lnast_nid stmts) {
+  absl::flat_hash_set<std::string>                           live;
+  absl::flat_hash_map<std::string, std::vector<std::string>> deps;
+  for (const auto& e : u.io_meta().outputs) {
+    live.insert(e.name);
+  }
+  std::function<void(Lnast_nid, std::vector<std::string>&)> refs = [&](auto n, auto& into) {
+    if (Lnast_ntype::is_ref(u.get_type(n))) {
+      into.emplace_back(u.get_name(n));
+      return;
+    }
+    for (auto c = u.get_first_child(n); !c.is_invalid(); c = u.get_sibling_next(c)) {
+      refs(c, into);
+    }
+  };
+  std::function<void(Lnast_nid)> scan = [&](auto n) {
+    const auto t   = u.get_type(n);
+    const auto dst = u.get_first_child(n);
+    if (Lnast_ntype::is_ref(t)) {
+      live.insert(std::string(u.get_name(n)));
+      return;
+    }
+    if (Lnast_ntype::is_func_call(t)) {
+      std::vector<std::string> call_refs;
+      refs(n, call_refs);
+      live.insert(call_refs.begin(), call_refs.end());
+      return;
+    }
+    if (Lnast_prp_writer::defines_child0(t) && !Lnast_ntype::is_func_call(t) && !Lnast_ntype::is_attr_set(t) && !dst.is_invalid()
+        && Lnast_ntype::is_ref(u.get_type(dst))) {
+      const std::string name(u.get_name(dst));
+      auto&             values = deps[name];
+      for (auto c = u.get_sibling_next(dst); !c.is_invalid(); c = u.get_sibling_next(c)) {
+        refs(c, values);
+      }
+      if (name.find('.') != std::string::npos) {
+        live.insert(name);
+      }  // aggregate updates stay conservative
+      if (Lnast_ntype::is_declare(t)) {
+        const auto ty   = u.get_sibling_next(dst);
+        const auto mode = ty.is_invalid() ? ty : u.get_sibling_next(ty);
+        if (!mode.is_invalid() && (u.get_name(mode) == "latch" || u.get_name(mode).starts_with("reg"))) {
+          live.insert(name);
+        }
+      }
+      return;
+    }
+    for (auto c = u.get_first_child(n); !c.is_invalid(); c = u.get_sibling_next(c)) {
+      scan(c);
+    }
+  };
+  if (!stmts.is_invalid()) {
+    scan(stmts);
+  }
+  std::vector<std::string> work(live.begin(), live.end());
+  while (!work.empty()) {
+    auto name = std::move(work.back());
+    work.pop_back();
+    if (const auto it = deps.find(name); it != deps.end()) {
+      for (const auto& dep : it->second) {
+        if (live.insert(dep).second) {
+          work.push_back(dep);
+        }
+      }
+    }
+  }
+  return live;
 }
 
 Lnast_prp_writer::Clock_port_plan Lnast_prp_writer::clock_data_ports(const std::vector<std::shared_ptr<Lnast>>& units) {
@@ -3356,6 +3518,110 @@ Lnast_prp_writer::Clock_port_plan Lnast_prp_writer::clock_data_ports(const std::
     return e != nullptr && e->array_size == 0
            && (e->sig == Io_sig::clock || promoted.contains(clock_port_key(u->get_top_module_name(), port)));
   };
+  // Infer physical clock connectivity before classifying data reads. Clock
+  // uses may cross an output (an ICG or a pass-through wrapper), aliases and
+  // several input bindings. Keep this writer-only overlay out of the IR.
+  struct Connection {
+    Lnast*      a;
+    std::string an;
+    Lnast*      b;
+    std::string bn;
+  };
+  std::vector<Connection>                                             connections;
+  absl::flat_hash_map<const Lnast*, absl::flat_hash_set<std::string>> latch_enables;
+  for (const auto& up : units) {
+    if (!up || !up->is_verilog_origin()) {
+      continue;
+    }
+    auto*      u       = up.get();
+    const auto stmts   = u->get_sibling_next(u->get_first_child(u->get_root()));
+    auto&      nets    = plan.nets[std::string(u->get_top_module_name())];
+    nets               = upass::io_port::clock_nets(*u, stmts);
+    const auto latches = upass::io_port::latch_names(*u, stmts);
+    for (const auto& e : u->io_meta().inputs) {
+      if (e.sig == Io_sig::clock) {
+        nets.insert(e.name);
+      }
+    }
+    if (stmts.is_invalid()) {
+      continue;
+    }
+    for (const auto& n : u->depth_preorder(stmts)) {
+      const auto t   = u->get_type(n);
+      const auto dst = u->get_first_child(n);
+      const auto arg = dst.is_invalid() ? dst : u->get_sibling_next(dst);
+      if (Lnast_ntype::is_store(t) && !arg.is_invalid() && u->is_last_child(arg) && Lnast_ntype::is_ref(u->get_type(dst))
+          && Lnast_ntype::is_ref(u->get_type(arg))) {
+        connections.push_back({u, std::string(u->get_name(dst)), u, std::string(u->get_name(arg))});
+      } else if (Lnast_ntype::is_attr_set(t) && !arg.is_invalid() && u->get_name(arg) == "enable"
+                 && latches.contains(std::string(u->get_name(dst)))) {
+        const auto value = u->get_sibling_next(arg);
+        if (!value.is_invalid() && Lnast_ntype::is_ref(u->get_type(value))) {
+          latch_enables[u].insert(std::string(u->get_name(value)));
+        }
+      } else if (Lnast_ntype::is_func_call(t) && !arg.is_invalid()) {
+        const auto cit = by_name.find(std::string(u->get_name(arg)));
+        if (cit == by_name.end()) {
+          continue;
+        }
+        auto* child = cit->second;
+        if (child->io_meta().outputs.size() == 1) {
+          connections.push_back({u, std::string(u->get_name(dst)), child, child->io_meta().outputs.front().name});
+        }
+        for (auto a = u->get_sibling_next(arg); !a.is_invalid(); a = u->get_sibling_next(a)) {
+          if (!Lnast_ntype::is_store(u->get_type(a))) {
+            continue;
+          }
+          const auto f = u->get_first_child(a);
+          const auto v = f.is_invalid() ? f : u->get_sibling_next(f);
+          if (!v.is_invalid() && Lnast_ntype::is_ref(u->get_type(v))) {
+            connections.push_back({u, std::string(u->get_name(v)), child, std::string(u->get_name(f))});
+          }
+        }
+      }
+    }
+  }
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (const auto& c : connections) {
+      auto& a = plan.nets[std::string(c.a->get_top_module_name())];
+      auto& b = plan.nets[std::string(c.b->get_top_module_name())];
+      if (a.contains(c.an)) {
+        changed |= b.insert(c.bn).second;
+      }
+      if (b.contains(c.bn)) {
+        changed |= a.insert(c.an).second;
+      }
+    }
+    for (const auto& up : units) {
+      if (!up || !up->is_verilog_origin()) {
+        continue;
+      }
+      auto*      u     = up.get();
+      auto&      nets  = plan.nets[std::string(u->get_top_module_name())];
+      const auto stmts = u->get_sibling_next(u->get_first_child(u->get_root()));
+      const auto gates
+          = clock_gates(*u, stmts, nets, [&](std::string_view p) { return nets.contains(p) || latch_enables[u].contains(p); });
+      for (const auto& [_, gate] : gates) {
+        changed |= nets.insert(gate.clock).second;
+      }
+    }
+  }
+  for (const auto& up : units) {
+    if (!up || !up->is_verilog_origin()) {
+      continue;
+    }
+    const auto& nets    = plan.nets[std::string(up->get_top_module_name())];
+    const auto  promote = [&](const auto& ports) {
+      for (const auto& e : ports) {
+        if (e.bits == 1 && e.array_size == 0 && e.sig == Io_sig::none && nets.contains(e.name)) {
+          promoted.insert(clock_port_key(up->get_top_module_name(), e.name));
+        }
+      }
+    };
+    promote(up->io_meta().inputs);
+    promote(up->io_meta().outputs);
+  }
   for (const auto& up : units) {
     if (!up || (up->is_template() && !up->is_verilog_origin())) {
       continue;
@@ -3368,8 +3634,18 @@ Lnast_prp_writer::Clock_port_plan Lnast_prp_writer::clock_data_ports(const std::
     // Data reads of a Clock input (not a `*_pin` value, not a copy into a clock
     // net, not a call actual), and the call bindings -- the same walk
     // plan_clock_reset_ports makes.
-    const auto nets  = upass::io_port::clock_nets(*u, stmts);
-    const auto gates = clock_gates(*u, stmts, nets, [&](std::string_view p) { return clock_in(u, p); });
+    const auto                                     live    = clock_live_values(*u, stmts);
+    const auto                                     latches = upass::io_port::latch_names(*u, stmts);
+    auto&                                          nets_of = plan.nets[std::string(u->get_top_module_name())];
+    if (!u->is_verilog_origin()) {
+      // The connectivity overlay above covers Verilog-origin units only; a
+      // Pyrope-origin unit still needs its own clock nets, here and in
+      // plan_clock_reset_ports (which trusts this entry once it exists).
+      const auto own = upass::io_port::clock_nets(*u, stmts);
+      nets_of.insert(own.begin(), own.end());
+    }
+    const auto& nets  = nets_of;
+    const auto  gates = clock_gates(*u, stmts, nets, [&](std::string_view p) { return clock_in(u, p); });
     absl::flat_hash_map<int64_t, std::string_view> gate_and;  // a gate's `bit_and` -> its clock
     for (const auto& [_, g] : gates) {
       for (const auto& a : g.ands) {
@@ -3378,6 +3654,11 @@ Lnast_prp_writer::Clock_port_plan Lnast_prp_writer::clock_data_ports(const std::
     }
     std::function<void(Lnast_nid, bool)> walk = [&](Lnast_nid n, bool not_data) {
       const auto t = u->get_type(n);
+      const auto first = u->get_first_child(n);
+      if (defines_child0(t) && !Lnast_ntype::is_func_call(t) && !first.is_invalid() && Lnast_ntype::is_ref(u->get_type(first))
+          && !live.contains(std::string(u->get_name(first)))) {
+        return;
+      }
       if (Lnast_ntype::is_store(t) && is_clock_copy(*u, n, nets)) {
         reads[u].insert(std::string(u->get_name(u->get_sibling_next(u->get_first_child(n)))));
         return;
@@ -3403,7 +3684,9 @@ Lnast_prp_writer::Clock_port_plan Lnast_prp_writer::clock_data_ports(const std::
       if (Lnast_ntype::is_attr_set(t)) {
         const auto tgt = u->get_child(n);
         const auto key = tgt.is_invalid() ? tgt : u->get_sibling_next(tgt);
-        if (!key.is_invalid() && u->get_name(key).ends_with("_pin")) {
+        if (!key.is_invalid()
+            && (u->get_name(key).ends_with("_pin")
+                || (u->get_name(key) == "enable" && latches.contains(std::string(u->get_name(tgt)))))) {
           return;
         }
       }
@@ -3428,7 +3711,7 @@ Lnast_prp_writer::Clock_port_plan Lnast_prp_writer::clock_data_ports(const std::
         }
       }
       for (auto c = u->get_child(n); !c.is_invalid(); c = u->get_sibling_next(c)) {
-        walk(c, not_data || call);
+        walk(c, not_data || call || (c == first && defines_child0(t)));
       }
     };
     walk(stmts, false);
@@ -3447,7 +3730,9 @@ Lnast_prp_writer::Clock_port_plan Lnast_prp_writer::clock_data_ports(const std::
   // A port prints `:Clock` iff it is a Clock-class input not demoted here (a
   // Pyrope-origin unit's declared type always stands).
   const auto printable = [&](const Lnast* u, std::string_view port) {
-    return clock_in(u, port) && !data.contains(clock_port_key(u->get_top_module_name(), port));
+    const auto it             = plan.nets.find(std::string(u->get_top_module_name()));
+    const bool internal_clock = u->io_meta().find(port) == nullptr && it != plan.nets.end() && it->second.contains(port);
+    return (clock_in(u, port) || internal_clock) && !data.contains(clock_port_key(u->get_top_module_name(), port));
   };
   // An unmarked scalar 1-bit input the overlay may promote to Clock.
   const auto promotable = [&](const Lnast* u, std::string_view port) {
@@ -3524,7 +3809,13 @@ void Lnast_prp_writer::plan_clock_reset_ports(Lnast_nid stmts_nid, bool is_mod) 
   for (const auto* e : ports) {
     port_names.insert(e->name);
   }
-  const auto nets = upass::io_port::clock_nets(*lnast, stmts_nid);
+  const auto live       = clock_live_values(*lnast, stmts_nid);
+  const auto latches    = upass::io_port::latch_names(*lnast, stmts_nid);
+  const auto found_nets = clock_data_ports_ == nullptr ? nullptr : [&]() -> const absl::flat_hash_set<std::string>* {
+    const auto it = clock_data_ports_->nets.find(std::string(lnast->get_top_module_name()));
+    return it == clock_data_ports_->nets.end() ? nullptr : &it->second;
+  }();
+  const auto nets = found_nets ? *found_nets : upass::io_port::clock_nets(*lnast, stmts_nid);
   for (const auto& n : nets) {
     clock_copy_nets_.insert(strip_prefix(n));
   }
@@ -3538,6 +3829,9 @@ void Lnast_prp_writer::plan_clock_reset_ports(Lnast_nid stmts_nid, bool is_mod) 
     });
     for (const auto& [_, g] : clock_gate_store_) {
       gated.insert(g.clock);
+      for (const auto& n : g.latch_nodes) {
+        folded_node_.insert(n.get_class_index().value);
+      }
       for (const auto& a : g.ands) {
         gate_and.emplace(a.get_class_index().value, g.clock);
         folded_node_.insert(a.get_class_index().value);  // spelled by the gate's store
@@ -3546,6 +3840,11 @@ void Lnast_prp_writer::plan_clock_reset_ports(Lnast_nid stmts_nid, bool is_mod) 
   }
   std::function<void(Lnast_nid, bool, std::string_view)> walk = [&](Lnast_nid n, bool not_data, std::string_view in) {
     const auto t = lnast->get_type(n);
+    const auto first = lnast->get_first_child(n);
+    if (defines_child0(t) && !Lnast_ntype::is_func_call(t) && !first.is_invalid() && Lnast_ntype::is_ref(lnast->get_type(first))
+        && !live.contains(std::string(lnast->get_name(first)))) {
+      return;
+    }
     if (Lnast_ntype::is_store(t) && is_clock_copy(*lnast, n, nets)) {
       return;  // `assign clock = clk_i` feeds a clock net: a clock use
     }
@@ -3566,7 +3865,9 @@ void Lnast_prp_writer::plan_clock_reset_ports(Lnast_nid stmts_nid, bool is_mod) 
     if (Lnast_ntype::is_attr_set(t)) {
       const auto tgt = lnast->get_child(n);
       const auto key = tgt.is_invalid() ? tgt : lnast->get_sibling_next(tgt);
-      if (!key.is_invalid() && lnast->get_name(key).ends_with("_pin")) {
+      if (!key.is_invalid()
+          && (lnast->get_name(key).ends_with("_pin")
+              || (lnast->get_name(key) == "enable" && latches.contains(std::string(lnast->get_name(tgt)))))) {
         pins[lnast->get_name(tgt)].insert(lnast->get_name(key));
         return;  // the value is a connection, not a data read
       }
@@ -3592,10 +3893,17 @@ void Lnast_prp_writer::plan_clock_reset_ports(Lnast_nid stmts_nid, bool is_mod) 
       in = lnast->get_name(dst);
     }
     for (auto c = lnast->get_child(n); !c.is_invalid(); c = lnast->get_sibling_next(c)) {
-      walk(c, not_data || call, in);  // a call actual binds a port (a Clock may drive a child's Clock)
+      walk(c,
+           not_data || call || (c == first && defines_child0(t)),
+           in);  // a call actual binds a port (a Clock may drive a child's Clock)
     }
   };
   walk(stmts_nid, false, {});
+  for (const auto& e : lnast->io_meta().outputs) {
+    if (effective_sig(e) == Io_sig::clock) {
+      clock_reset_port_type_[e.name] = "Clock";
+    }
+  }
   for (const auto sig : {Io_sig::clock, Io_sig::reset}) {
     std::vector<const Lnast_io_entry*> of;
     for (const auto* e : ports) {
@@ -3746,6 +4054,12 @@ void Lnast_prp_writer::collect_folded_attrs(Lnast_nid stmts_nid) {
     }
 
     auto var0 = std::string(strip_prefix(lnast->get_name(var_nid)));
+    if (key == "wensize") {
+      const auto lanes = Dlop::from_pyrope(val);
+      if (lanes && lanes->is_just_i64() && lanes->to_just_i64() > 0) {
+        array_write_lanes_[var0] = lanes->to_just_i64();
+      }
+    }
     folded_keys_.insert(var0 + "\x01" + key);  // record (var,orig-key) for write_attr_set skip
 
     if (key == "sync") {
@@ -4267,10 +4581,12 @@ void Lnast_prp_writer::write_declare() {
     declared_.insert(lhs);
     return;
   }
+  const Lnast_nid decl_nid = cur;
   if (!move_to_child()) {
     return;
   }
-  auto lhs = strip_prefix(current_text());  // ref(var)
+  const Lnast_nid var_nid = cur;
+  auto            lhs     = strip_prefix(current_text());  // ref(var)
   // The hidden encoding alias of an `enum` (Lnast::enum_encoding_type) is
   // compiler-made: the enum statement declares it again when this is re-read.
   if (Lnast::is_enum_encoding_type(lhs)) {
@@ -4346,6 +4662,53 @@ void Lnast_prp_writer::write_declare() {
 
   const bool has_value = move_to_sibling();  // optional inline init
 
+  // A value-less `const` (the qualifier is `const` or `const comptime`). Pyrope
+  // spells the modifier FIRST, and a const binds exactly once, so:
+  //  * file scope, value in a LATER plain store (`comptime const M = (1, 2)`
+  //    reaches here as declare + `store(M, %t)`): print ONE `comptime const M =
+  //    v` and skip the store. The generic path printed `const comptime M = 0`
+  //    then `M = tM` -- a reserved word as the name AND an assignment to a const.
+  //  * NO def at all and no reader in this unit: constprop folded the value into
+  //    every use and dropped its store, so the declaration is dead. Printing it
+  //    gave `const comptime ONE = 0` -- a value that is WRONG for any reader.
+  if (!has_value && kw.starts_with("const") && !is_pub_export(lhs)) {
+    const auto canonical = kw.find("comptime") == std::string::npos ? std::string("const") : std::string("comptime const");
+    if (file_level_) {
+      for (auto s = lnast->get_sibling_next(decl_nid); !s.is_invalid(); s = lnast->get_sibling_next(s)) {
+        if (!Lnast_ntype::is_store(lnast->get_type(s))) {
+          continue;
+        }
+        const auto s0 = lnast->get_child(s);
+        if (s0.is_invalid() || !Lnast_ntype::is_ref(lnast->get_type(s0)) || strip_prefix(lnast->get_name(s0)) != lhs) {
+          continue;
+        }
+        const auto val = lnast->get_sibling_next(s0);
+        if (val.is_invalid() || !lnast->is_last_child(val)) {
+          break;  // an indexed/field store: keep the generic shape
+        }
+        move_to_parent();
+        merged_decl_stores_.insert(s.get_class_index().value);
+        print(canonical);
+        print(" ");
+        print(lhs);
+        if (!type_suffix.empty()) {
+          note_emitted_type(lhs, type_suffix);
+          print(":");
+          print(type_suffix);
+        }
+        print(" = ");
+        print(render_value(val, /*operand_ctx=*/false));
+        return;
+      }
+    }
+    const auto dc = def_count_.find(std::string(lhs));
+    if ((dc == def_count_.end() || dc->second == 0) && !unit_reads_name(lhs, var_nid)) {
+      declared_.erase(std::string(lhs));
+      move_to_parent();
+      return;
+    }
+  }
+
   // A REDUNDANT declaration: `mut`/`const` only (never a `reg`/`wire`/`latch`,
   // whose declaration IS the storage element), untyped (the def carries no width
   // pin), value-less or a plain const seed, and superseded by a real def that
@@ -4405,6 +4768,12 @@ void Lnast_prp_writer::write_declare() {
     type_suffix = "Clock";
   }
 
+  // prp2lnast records the qualifier as `const comptime` / `mut comptime`; Pyrope's
+  // canonical spelling puts the modifier FIRST (`const comptime X` re-reads as
+  // a declaration of a variable named `comptime`).
+  if (const auto cp = kw.find(" comptime"); cp != std::string::npos) {
+    kw = "comptime " + kw.substr(0, cp) + kw.substr(cp + 9);
+  }
   print(kw);
   print(" ");
   print(lhs);
@@ -4436,6 +4805,9 @@ void Lnast_prp_writer::write_declare() {
       write_tuple_literal(raw_bits);  // memory init: a bare tuple_add (no LHS child)
     } else if (auto sh = x_poison_shorthand(cur, lhs); !sh.empty()) {
       print(sh);  // the declared width is right here: `mut x:u48 = 0sb?`
+    } else if (type_suffix.empty() && current_ntype() == Lnast_ntype::Lnast_ntype_const && current_text() == "0"
+               && bool_names_.contains(std::string(lhs))) {
+      print("false");  // a seed of a boolean-valued name (see bool_names_)
     } else {
       print(render_raw_value(cur, raw_bits));
     }
@@ -4447,9 +4819,88 @@ void Lnast_prp_writer::write_declare() {
     // bare form (no initializer = no reset pin).  A `wire` that already has a
     // store driver is single-driver: a `= 0` here would make it multi-driven, so
     // emit the bare `wire X:T` and let the body store be its sole driver.
-    print(type_suffix == "Bool" ? " = false" : " = 0");
+    const bool is_bool = type_suffix == "Bool" || (type_suffix.empty() && bool_names_.contains(std::string(lhs)));
+    print(is_bool ? " = false" : " = 0");
   }
   move_to_parent();
+}
+
+bool Lnast_prp_writer::unit_reads_name(std::string_view name, Lnast_nid except) const {
+  for (const auto& n : lnast->depth_preorder(lnast->get_root())) {
+    const auto nid = Lnast_nid(n);
+    if (nid == except || !Lnast_ntype::is_ref(lnast->get_type(nid))) {
+      continue;
+    }
+    const auto r = strip_prefix(lnast->get_name(nid));
+    if (r == name || (r.size() > name.size() && r.starts_with(name) && r[name.size()] == '.')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Boolean-valued names (see bool_names_): a least fixpoint over every def in the
+// body, any scope. A name qualifies only when ALL of its defs are boolean, so a
+// Verilog-origin net written both `a == b` and `0` keeps its integer seed.
+void Lnast_prp_writer::compute_bool_names(Lnast_nid stmts_nid) {
+  using N = Lnast_ntype;
+  bool_names_.clear();
+  absl::flat_hash_map<std::string, std::vector<Lnast_nid>> defs;
+  // Every statement def under `n`, any depth. A rolled_for's lowering payload
+  // (the lifted `__loopN` call and its carry-out stores) is never printed -- the
+  // writer re-emits the retained source loop -- so its defs do not count.
+  auto collect = [&](auto&& self, Lnast_nid n) -> void {
+    const bool rolled = N::is_rolled_for(lnast->get_type(n));
+    size_t     index  = 0;
+    for (auto c = lnast->get_child(n); !c.is_invalid(); c = lnast->get_sibling_next(c), ++index) {
+      if (rolled && index == lnast_rolled_for::lowering_payload) {
+        continue;
+      }
+      const auto t = lnast->get_type(c);
+      if (defines_child0(t) && !N::is_declare(t) && lnast->get_type(n) == N::Lnast_ntype_stmts) {
+        if (const auto c0 = lnast->get_child(c); !c0.is_invalid() && N::is_ref(lnast->get_type(c0))) {
+          defs[std::string(strip_prefix(lnast->get_name(c0)))].push_back(c);
+        }
+      }
+      self(self, c);
+    }
+  };
+  collect(collect, stmts_nid);
+  auto bool_def = [&](Lnast_nid def) {
+    switch (lnast->get_type(def)) {
+      case N::Lnast_ntype_eq     :
+      case N::Lnast_ntype_ne     :
+      case N::Lnast_ntype_lt     :
+      case N::Lnast_ntype_le     :
+      case N::Lnast_ntype_gt     :
+      case N::Lnast_ntype_ge     :
+      case N::Lnast_ntype_log_and:
+      case N::Lnast_ntype_log_or :
+      case N::Lnast_ntype_log_not: return true;
+      case N::Lnast_ntype_store  : {
+        const auto val = lnast->get_sibling_next(lnast->get_child(def));
+        if (val.is_invalid() || !lnast->is_last_child(val)) {
+          return false;
+        }
+        const auto vt = lnast->get_type(val);
+        if (N::is_const(vt)) {
+          const auto txt = lnast->get_name(val);
+          return txt == "true" || txt == "false";
+        }
+        return N::is_ref(vt) && bool_names_.contains(std::string(strip_prefix(lnast->get_name(val))));
+      }
+      default: return false;
+    }
+  };
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (const auto& [nm, ds] : defs) {
+      if (!bool_names_.contains(nm) && std::all_of(ds.begin(), ds.end(), bool_def)) {
+        bool_names_.insert(nm);
+        changed = true;
+      }
+    }
+  }
 }
 
 // File-local: parse a const's text (decimal, or 0x… hex, with optional sign)
@@ -4933,6 +5384,25 @@ void Lnast_prp_writer::note_port_width(std::string_view name, std::string_view t
   // whole-array width is deliberately NOT entered in port_bits_ (see the
   // array_elem_bits_ note in the header).
   if (type_txt.size() > 3 && type_txt.front() == '[') {
+    size_t rank   = 0;
+    size_t offset = 0;
+    while (offset < type_txt.size() && type_txt[offset] == '[') {
+      const auto close = type_txt.find(']', offset);
+      if (close == std::string_view::npos) {
+        break;
+      }
+      ++rank;
+      offset = close + 1;
+    }
+    if (offset + 1 < type_txt.size() && (type_txt[offset] == 'U' || type_txt[offset] == 'S')) {
+      const auto width = type_txt.substr(offset + 1);
+      if (width.size() <= 6 && std::all_of(width.begin(), width.end(), [](unsigned char c) { return c >= '0' && c <= '9'; })) {
+        const int bits = std::stoi(std::string(width));
+        if (bits > 0) {
+          array_write_shapes_[std::string(name)] = {rank, bits};
+        }
+      }
+    }
     const auto close = type_txt.find(']');
     if (close != std::string_view::npos && close + 2 < type_txt.size() && type_txt[close + 1] == 'U') {
       const auto dim    = type_txt.substr(1, close - 1);
@@ -5255,6 +5725,37 @@ void Lnast_prp_writer::write_store() {
   }
   auto      lhs   = std::string(strip_prefix(current_text()));
   Lnast_nid first = cur;
+  // The reader's masked-memory protocol is store(mem, indices..., aligned
+  // data, chunk). The trailing chunk is NOT another tuple index or the value.
+  // Recover a bit-view write, selecting that same lane from the aligned data.
+  if (const auto shape = array_write_shapes_.find(lhs); shape != array_write_shapes_.end()) {
+    std::vector<Lnast_nid> args;
+    for (auto a = lnast->get_sibling_next(first); !a.is_invalid(); a = lnast->get_sibling_next(a)) {
+      args.push_back(a);
+    }
+    const auto lanes = array_write_lanes_.find(lhs);
+    if (lanes != array_write_lanes_.end() && args.size() == shape->second.rank + 2) {
+      const auto chunk = Lnast_ntype::is_const(lnast->get_type(args.back())) ? Dlop::from_pyrope(lnast->get_name(args.back()))
+                                                                             : decltype(Dlop::from_pyrope("")){};
+      if (!chunk || !chunk->is_just_i64() || chunk->to_just_i64() < 0 || chunk->to_just_i64() >= lanes->second
+          || shape->second.bits % lanes->second != 0) {
+        unimplemented_.push_back(std::format("masked memory write to `{}` has an unsupported chunk or lane width", lhs));
+        move_to_parent();
+        return;
+      }
+      const int   width  = shape->second.bits / lanes->second;
+      const int   lo     = chunk->to_just_i64() * width;
+      std::string target = lhs;
+      for (size_t i = 0; i < shape->second.rank; ++i) {
+        target += "[" + render_value(args[i], false) + "]";
+      }
+      print(std::format("{} = {}",
+                        fmt_bit_range(target, lo, lo + width - 1),
+                        fmt_bit_range(render_value(args[shape->second.rank], true), lo, lo + width - 1)));
+      move_to_parent();
+      return;
+    }
+  }
   // A Verilog clock gate into a clock net (plan_clock_reset_ports) spells the
   // Clock_cell: `gclk = Clock(clock_pin=clk, enable=en)`. A Clock_cell enable
   // is a 1-bit value; a wider operand gates on its bit 0 (the 1-bit net the
@@ -7746,6 +8247,18 @@ std::string Lnast_prp_writer::render_get_mask_rhs(Lnast_nid c0, bool operand_ctx
   const auto lo  = lnast->get_sibling_next(src);
   const auto hi  = lnast->get_sibling_next(lo);
   I(!lo.is_invalid());
+  // An EMPTY window (`hi <= lo`, both literal) selects no bit: its value is 0.
+  // An unrolled loop produces one from a source slice that is legal at every
+  // trip but the last (`x#[(i + 1)..]` on a 4-bit `x` at i == 3), and the
+  // spelled `x#[4..<4]` is a parse error ("empty bit range is not allowed").
+  if (!hi.is_invalid() && lnast->get_type(lo) == Lnast_ntype::Lnast_ntype_const
+      && lnast->get_type(hi) == Lnast_ntype::Lnast_ntype_const) {
+    const auto l = parse_int_const(lnast->get_name(lo));
+    const auto h = parse_int_const(lnast->get_name(hi));
+    if (l && h && *h <= *l) {
+      return "0";
+    }
+  }
   const auto  value = render_value(src, true);
   std::string expr;
   if (hi.is_invalid()) {
@@ -8022,6 +8535,9 @@ bool Lnast_prp_writer::emits_nothing_stmt(Lnast_nid nid) const {
   }
   if (t == Lnast_ntype::Lnast_ntype_type_spec) {
     return true;  // folded into a declaration
+  }
+  if (merged_decl_stores_.contains(nid.get_class_index().value)) {
+    return true;  // printed as its `comptime const X = v` declaration (write_declare)
   }
   if (drops_as_import_residue(nid)) {
     return true;  // an elaborated `const X = import("…")` — the header re-emits it

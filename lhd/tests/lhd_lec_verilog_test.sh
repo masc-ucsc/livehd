@@ -374,7 +374,7 @@ for code in 0 1 2 99; do
     [ "$rc" -ne 0 ] || fail "undecided crosscheck passed"
     verdict=unknown
   fi
-  grep -q "\"crosscheck\":{\"solver\":\"lgyosys\",\"verdict\":\"$verdict\",\"exit_code\":$code}" "$W/crosscheck_$code.json" \
+  grep -q "\"crosscheck\":{\"solver\":\"lgyosys\",\"verdict\":\"$verdict\",\"exit_code\":$code,\"bounded\":false}" "$W/crosscheck_$code.json" \
     || fail "independent crosscheck verdict missing from JSON"
 done
 
@@ -428,7 +428,7 @@ for control in short late silent; do
     --set formal.solver=lgyosys --set formal.bound=7 --workdir "$wd" \
     --result-json "$W/crosscheck_$control.json" >"$W/crosscheck_$control.log" 2>&1 \
     && fail "incomplete lgcheck window ($control) passed"
-  grep -q '"crosscheck":{"solver":"lgyosys","verdict":"unknown","exit_code":2}' "$W/crosscheck_$control.json" \
+  grep -q '"crosscheck":{"solver":"lgyosys","verdict":"unknown","exit_code":2,"bounded":false}' "$W/crosscheck_$control.json" \
     || fail "incomplete lgcheck window ($control) was not unknown: $(cat "$W/crosscheck_$control.json")"
 done
 [ "$(ls "$W/crosscheck_bounded_7/logs/"*_lhd_lec_lgcheck.log | wc -l)" -eq 1 ] \

@@ -96,7 +96,9 @@ fill, or a fixed generated tree across runs in one workdir pins
 
 `pyrope fmt` embeds prpfmt (`prpfmt_format_string_mode`). The default
 `--mode ai` has no width limit and no vertical alignment, so an edit changes
-only the lines it touches; `--mode human` wraps at `--width` (default 132) and
+only the lines it touches -- except that an `if`/`elif`/`else` expression chain
+longer than the default 132 columns wraps between its branches (the Human
+layout); `const comptime` prints as `comptime const`; `--mode human` wraps at `--width` (default 132) and
 aligns consecutive same-kind assignments. `--indent` applies to both modes;
 `--width` in AI mode has no effect and warns (`width-ignored`). `--verify`
 re-parses the output.
@@ -170,6 +172,11 @@ The additional rules are enabled by default and do not use `--min-repeats`:
   preserving branch order. Missing `else`, `unique if`, initializer clauses,
   declarations, branch-local calculations, calls in branch values, indexed
   destinations, compound assignments, and `wrap`/`sat` are excluded.
+  A standalone `match` whose arms (and optional `else`) each contain one such
+  assignment is flagged the same way, suggesting `dst = match ... { == V { value } ... }`.
+  A `match` is always exhaustive, so it needs no `else`; unlike `if`, its arms may
+  carry a `wrap`/`sat` modifier as long as every arm uses the same one
+  (`wrap r = match ...`).
 
 - **`hardcoded-reset`** finds an `if PORT { reg = CONST }` clear (the clearing arm
   may also be the `else`; `PORT`, `!PORT`, `not PORT`, `~PORT`, `PORT == 0|1` and

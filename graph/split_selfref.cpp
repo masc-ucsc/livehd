@@ -1072,7 +1072,7 @@ static bool sub_closure_is_comb(const std::shared_ptr<hhds::Graph>& cg, Sub_comb
 // body-less black box yields an empty set, i.e. a boundary -- which is exactly
 // how every Sub used to be treated.
 using Sub_dep_key   = std::pair<hhds::Gid, uint32_t>;
-using Sub_dep_cache = absl::flat_hash_map<Sub_dep_key, absl::flat_hash_set<uint32_t>>;
+using Sub_dep_cache = Comb_dependency_cache;
 
 static absl::flat_hash_set<uint32_t> sub_output_deps(const hhds::Node_class& inst, uint32_t out_pid, Sub_dep_cache& cache) {
   absl::flat_hash_set<uint32_t> res;
@@ -1163,14 +1163,41 @@ static absl::flat_hash_set<uint32_t> sub_output_deps(const hhds::Node_class& ins
   return res;
 }
 
-bool comb_pin_depends_on(const hhds::Pin_class& driver, const hhds::Node_class& target) {
+bool comb_pin_depends_on(const hhds::Pin_class& driver, const hhds::Node_class& target, Comb_dependency_cache* dependencies) {
   if (driver.is_invalid() || target.is_invalid() || driver.is_const() || is_graph_input_pin(driver)) {
     return false;
   }
+  // Restrict the precise backward walk to the target's parent-level fanout.
+  // Treating each Sub as a crossbar is conservative here: absence proves
+  // independence, while a possible path still needs the pin-accurate callee
+  // check below. Without this filter a split wire in Backend repeatedly scans
+  // large child output cones that cannot possibly reach this target.
+  absl::flat_hash_set<hhds::Node_class> candidates;
+  std::vector<hhds::Node_class> forward{target};
+  while (!forward.empty()) {
+    const auto n = forward.back();
+    forward.pop_back();
+    if (n.is_invalid() || (n != target && is_type_register(n)) || !candidates.insert(n).second) {
+      continue;
+    }
+    for (auto out : n.out_sorted_pins()) {
+      for (const auto& edge : out.out_edges()) {
+        const auto next = edge.sink.get_master_node();
+        if (!next.is_invalid() && type_op_of(next) != Ntype_op::IO) {
+          forward.push_back(next);
+        }
+      }
+    }
+  }
+  if (!candidates.contains(driver.get_master_node())) {
+    return false;
+  }
+
   // A PIN worklist, not a node one: crossing a Sub depends on WHICH output pin
   // the walk arrived through, and dedup must therefore be per pin.
   absl::flat_hash_set<hhds::Pin_class> seen;
-  Sub_dep_cache                        dep_cache;
+  Sub_dep_cache                        local_dependencies;
+  auto&                                dep_cache = dependencies ? *dependencies : local_dependencies;
   std::vector<hhds::Pin_class>         work{driver};
   while (!work.empty()) {
     auto d = work.back();
@@ -1179,7 +1206,7 @@ bool comb_pin_depends_on(const hhds::Pin_class& driver, const hhds::Node_class& 
       continue;
     }
     auto n = d.get_master_node();
-    if (n.is_invalid()) {
+    if (n.is_invalid() || !candidates.contains(n)) {
       continue;
     }
     if (n == target) {
@@ -1218,7 +1245,7 @@ bool comb_pin_depends_on(const hhds::Pin_class& driver, const hhds::Node_class& 
 static Split_result split_packed_selfref_wires_body(hhds::Graph* g, int max_depth,
                                                     const absl::flat_hash_set<hhds::Node_class>* scoped_cycle,
                                                     const hhds::Node_class* scoped_buffer, const hhds::Pin_class* scoped_driver,
-                                                    int max_rounds = 16) {
+                                                    int max_rounds = 16, Comb_dependency_cache* dependencies = nullptr) {
   // Iterate to a fixpoint. Each pass defers its rewrites to the end, so a reader
   // whose value depends on ANOTHER reader (nested slice-of-slice packing, e.g.
   // Phr's io bundle read as `io#[..]#[..]`) can only resolve one nesting level per
@@ -1227,7 +1254,8 @@ static Split_result split_packed_selfref_wires_body(hhds::Graph* g, int max_dept
   for (; r.rounds < max_rounds; ++r.rounds) {
     const int n  = split_selfref_pass(g, r.unresolved, r.stop_reasons, max_depth, scoped_cycle);
     r.total     += n;
-    if (scoped_buffer != nullptr && scoped_driver != nullptr && n > 0 && !comb_pin_depends_on(*scoped_driver, *scoped_buffer)) {
+    if (scoped_buffer != nullptr && scoped_driver != nullptr && n > 0
+        && !comb_pin_depends_on(*scoped_driver, *scoped_buffer, dependencies)) {
       ++r.rounds;
       r.fixpoint = true;
       break;
@@ -1686,6 +1714,7 @@ struct Split_job {
   const hhds::Node_class*                      scoped_buffer = nullptr;
   const hhds::Pin_class*                       scoped_driver = nullptr;
   int                                          max_rounds    = 16;
+  Comb_dependency_cache*                       dependencies  = nullptr;
   Split_result                                 result;
   std::exception_ptr                           error;  // rethrown on the CALLER's thread after the join
 };
@@ -1700,7 +1729,8 @@ void* split_worker(void* arg) {
                                                   job->scoped_cycle,
                                                   job->scoped_buffer,
                                                   job->scoped_driver,
-                                                  job->max_rounds);
+                                                  job->max_rounds,
+                                                  job->dependencies);
   } catch (...) {
     job->error = std::current_exception();
   }
@@ -1712,7 +1742,8 @@ void* split_worker(void* arg) {
 // shallow result rather than running the deep guard on a stack too small to hold
 // it.
 bool run_deep_on_big_stack(hhds::Graph* g, Split_result& out, const absl::flat_hash_set<hhds::Node_class>* scoped_cycle,
-                           const hhds::Node_class* scoped_buffer, const hhds::Pin_class* scoped_driver, int max_rounds = 16) {
+                           const hhds::Node_class* scoped_buffer, const hhds::Pin_class* scoped_driver, int max_rounds = 16,
+                           Comb_dependency_cache* dependencies = nullptr) {
   pthread_attr_t attr;
   if (pthread_attr_init(&attr) != 0) {
     return false;
@@ -1722,6 +1753,7 @@ bool run_deep_on_big_stack(hhds::Graph* g, Split_result& out, const absl::flat_h
                 .scoped_buffer = scoped_buffer,
                 .scoped_driver = scoped_driver,
                 .max_rounds    = max_rounds,
+                .dependencies  = dependencies,
                 .result        = {},
                 .error         = {}};
   pthread_t tid{};
@@ -1814,7 +1846,7 @@ static int split_packed_cycle_slices(hhds::Graph* g) {
 }
 
 int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, const hhds::Pin_class& driver,
-                              const std::vector<hhds::Node_class>& early_readers) {
+                              const std::vector<hhds::Node_class>& early_readers, Comb_dependency_cache* dependencies) {
   // Guard BEFORE the trace: debug_name() dereferences the handle, so tracing an
   // invalid buffer/driver would crash exactly the runs that turned tracing on.
   if (g == nullptr || buffer.is_invalid() || driver.is_invalid() || early_readers.empty()) {
@@ -1913,12 +1945,12 @@ int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, co
     std::print("split[wire]: ancestors={} scoped={}\n", ancestors.size(), scoped_cycle.size());
   }
 
-  Split_result r = split_packed_selfref_wires_body(g, kSplitInlineDepth, &scoped_cycle, &buffer, &driver);
+  Split_result r = split_packed_selfref_wires_body(g, kSplitInlineDepth, &scoped_cycle, &buffer, &driver, 16, dependencies);
   if ((r.stop_reasons & kStopDepth) != 0) {
     Split_result deep;
-    if (run_deep_on_big_stack(g, deep, &scoped_cycle, &buffer, &driver)) {
-      deep.total  += r.total;
-      deep.rounds += r.rounds;
+    if (run_deep_on_big_stack(g, deep, &scoped_cycle, &buffer, &driver, 16, dependencies)) {
+      deep.total   += r.total;
+      deep.rounds  += r.rounds;
       r            = deep;
     }
   }

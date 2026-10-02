@@ -290,6 +290,38 @@ with tempfile.TemporaryDirectory(prefix="lhd_style_", dir=os.environ.get("TEST_T
     assert f["span"]["start_line"] == 1 and f["span"]["end_line"] == 9, f
     assert "branch order" in f["hint"], f
     assert len(run("if select { out = a + 1; } else { /* gap */ out = b - 1; }\n", rule=conditional_rule)[0]) == 1
+    # A `match` is always exhaustive, so no `else` is needed; arms may share one wrap/sat.
+    match_source = "match op {\n == 0 { wrap r = a + b }\n == 1 { wrap r = a - b }\n}\n"
+    findings, _, _ = run(match_source, rule=conditional_rule)
+    assert len(findings) == 1, findings
+    f = findings[0]
+    assert f["attrs"]["destination"] == "r" and f["attrs"]["branch_count"] == "2", f
+    assert f["span"]["start_line"] == 1 and f["span"]["end_line"] == 4, f
+    assert "wrap r = match" in f["hint"] and "arm order" in f["hint"], f
+    for positive in [
+        "match op { == 0 { r = a } == 1 { r = b } }\n",
+        "match op { == 0 { r = a } else { r = b } }\n",
+        "match op { == 0 { out.v = a } == 1 { out.v = b } == 2 { out.v = c } else { out.v = d } }\n",
+        "match op { == 0 { sat r = a } == 1 { sat r = b } }\n",
+    ]:
+        assert len(run(positive, rule=conditional_rule)[0]) == 1, positive
+    match_negatives = [
+        "match op { == 0 { r = a } }\n",  # one arm
+        "match op { == 0 { r = a } == 1 { s = b } }\n",  # different destinations
+        "match op { == 0 { wrap r = a } == 1 { r = b } }\n",  # mixed modifiers
+        "match op { == 0 { wrap r = a } == 1 { sat r = b } }\n",
+        "match op { == 0 { r = a; r = b } == 1 { r = c } }\n",
+        "match op { == 0 { const t = a; r = t } == 1 { r = b } }\n",
+        "match op { == 0 { r += a } == 1 { r += b } }\n",
+        "match op { == 0 { r = child(a) } == 1 { r = b } }\n",
+        "match op { == 0 { r[i] = a } == 1 { r[i] = b } }\n",
+        "match const c = op; c { == 0 { r = a } == 1 { r = b } }\n",
+        "r = match op { == 0 { a } == 1 { b } }\n",  # already an expression
+        "wrap r = match op { == 0 { a } == 1 { b } }\n",
+    ]
+    for case_source, (findings, _, _) in zip(match_negatives, run_many(match_negatives, rule=conditional_rule)):
+        assert not findings, case_source
+    assert run("// prp-style-allow single-destination-conditional\n" + match_source, rule=conditional_rule)[0] == []
     # Hand-written resets: an input used only as a reset should be a structural
     # reset_pin (hardcoded-reset) and typed Reset (reset-port-type).
     hard, rtype = "hardcoded-reset", "reset-port-type"

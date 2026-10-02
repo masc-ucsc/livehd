@@ -318,6 +318,12 @@ std::optional<Val> flop_initial(cvc5::TermManager& tm, const hhds::Occurrence_no
 // prove_equal uses the same count for its reset-prologue power-on policy.
 std::optional<std::string> flop_clock_input(const hhds::Occurrence_node& node);
 
+// Distinct clock INPUT names (flop_clock_input) over every flop of `g`'s
+// instance tree, not descending a def in `collapse_defs` (a proven box models
+// its own state). The cross-design clock-identity check in prove_equal compares
+// these sets: see Encoder::set_force_multi_clock.
+absl::flat_hash_set<std::string> design_clock_inputs(hhds::Graph* g, const absl::flat_hash_map<std::string, bool>* collapse_defs);
+
 // Extend (sign/zero per v.is_signed) or truncate `v` to exactly `width` bits.
 cvc5::Term fit_to(cvc5::TermManager& tm, const Val& v, int width);
 
@@ -441,6 +447,16 @@ public:
   // output, and a one-sided \x04 output would gate lec to Unknown).
   void set_emit_props(bool on) { emit_props_ = on; }
 
+  // CLOCK IDENTITY ACROSS THE MITER (suggestions6 1.1). The encoder decides
+  // "multi-clock" (each flop commits on a detected edge of its own clock input)
+  // from THIS design's flops alone, so two single-clock designs whose flops sit
+  // on DIFFERENT clock inputs both encoded "one step = one commit" and a flop
+  // moved from `dst_clk` to `src_clk` was PROVEN. prove_equal sets this when the
+  // union of both sides' clock inputs -- restricted to names that are inputs on
+  // BOTH designs, so a renamed single clock (`clk` vs Pyrope's minted `clock`)
+  // stays one clock -- holds two or more names.
+  void set_force_multi_clock(bool on) { force_multi_clock_ = on; }
+
   // The 4-microstep FORMAL PHASE SCHEDULE (2f-lec / 2f-latch M10). `plan` is
   // read-only metadata built once per design by plan_phases(); `microstep`
   // selects which batch COMMITS in this encode (0 close_low, 1 rise,
@@ -526,6 +542,7 @@ private:
   const Io_name_map<cvc5::Term>*                       memory_x_state_ = nullptr;
   bool                                                x_dontcare_    = false;  // ref-side X = don't-care (lec.gold_x=ignore)
   bool                                                emit_props_ = false;  // emit fproperty conds as \x04prop: outputs (2f-verify)
+  bool                                                force_multi_clock_ = false;  // see set_force_multi_clock
   const absl::flat_hash_set<std::string>*             port_taps_  = nullptr;  // sub instances whose ports get \x05tap: outputs
   const Phase_plan*                                   phase_plan_ = nullptr;  // 4-microstep schedule (M10); null = legacy
   int                microstep_ = -1;  // which batch commits; <0 = single-step (see set_phase_plan)

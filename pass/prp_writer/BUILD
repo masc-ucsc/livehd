@@ -15,6 +15,7 @@ cc_library(
         "//core:file_name",
         "//pass/common:pass",
         "//upass/prp_writer:upass_prp_writer",
+        "@abseil-cpp//absl/container:flat_hash_set",
     ],
     alwayslink = True,
 )

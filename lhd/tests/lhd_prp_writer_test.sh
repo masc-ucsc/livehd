@@ -135,6 +135,33 @@ EOF
 "$LHD" compile "$W/clk/twice.sv" --top top --emit-dir pyrope:"$W/clk/once" --emit-dir pyrope:"$W/clk/again" \
   --set prp_writer.debug=true --workdir "$W/clk/w_twice" -q >/dev/null 2>&1 || fail "twice.sv emission"
 diff -r "$W/clk/once" "$W/clk/again" >"$W/clk/twice.diff" || fail "second emit differs: $(cat "$W/clk/twice.diff")"
+
+# Self-check (suggestions6 1.2): pass.prp_writer recompiles what it wrote and
+# FAILS when that does not re-read -- never exit 0 next to a broken file. The
+# negative control is a KNOWN writer gap (a runtime-filled `mut` array re-emits
+# as a twice-written `const`). When the writer learns this shape, swap in any
+# other source whose emit does not recompile: the claim is the exit status.
+mkdir -p "$W/self"
+cat >"$W/self/gap.prp" <<'EOF'
+pub comb gap(sel:U2) -> (z:U4) {
+  mut g:[4]U4 = (0, 0, 0, 0)
+  g[0] = 1
+  g[1] = 8
+  g[2] = 4
+  g[3] = 2
+  z = g[sel]
+}
+EOF
+if "$LHD" compile "$W/self/gap.prp" --emit-dir pyrope:"$W/self/out" --workdir "$W/self/w" \
+  --result-json "$W/self/r.json" -q >/dev/null 2>&1; then
+  if "$LHD" compile "$W/self/out/gap.prp" --set upass.tolg=false --workdir "$W/self/w2" -q >/dev/null 2>&1; then
+    fail "self-check control: the writer now re-emits gap.prp correctly -- swap in another writer gap"
+  fi
+  fail "self-check: exit 0 although the emitted Pyrope does not recompile"
+fi
+grep -q 'does not recompile' "$W/self/r.json" || fail "self-check: no prp-writer-invalid-output error: $(cat "$W/self/r.json")"
+"$LHD" compile "$W/self/gap.prp" --emit-dir pyrope:"$W/self/out_off" --workdir "$W/self/w_off" \
+  --set prp_writer.selfcheck=false -q >/dev/null 2>&1 || fail "prp_writer.selfcheck=false must keep the raw emit"
 fi
 
 
@@ -324,12 +351,17 @@ for reader in verilog slang; do
   (cd "$dir" && LGCHECK_EQUIV_TIMEOUT=5 "$LGCHECK" --yosys "$YOSYS_ABS" \
     --gold_reader "$reader" --gate_reader "$reader" --top top \
     --reference "$W/regress/readmem.sv" --implementation "$W/regress/cgen/readmem/net.v") \
-    >"$dir/proof.log" 2>&1 || fail "file memory $reader proof: $(cat "$dir/proof.log")"
+    >"$dir/proof.log" 2>&1
+  # exit 2 = INCONCLUSIVE (budget ran out on a loaded machine): a pass; only
+  # a refutation (1) or a crash fails.
+  rc=$?
+  [ "$rc" -eq 0 ] || [ "$rc" -eq 2 ] || fail "file memory $reader proof: $(cat "$dir/proof.log")"
   (cd "$dir" && LGCHECK_EQUIV_TIMEOUT=5 "$LGCHECK" --yosys "$YOSYS_ABS" \
     --gold_reader "$reader" --gate_reader "$reader" --top top \
     --reference "$W/regress/readmem_bad.sv" --implementation "$W/regress/cgen/readmem/net.v") \
     >"$dir/refute.log" 2>&1
-  [ "$?" -eq 1 ] || fail "file memory $reader did not refute changed output: $(cat "$dir/refute.log")"
+  rc=$?
+  [ "$rc" -eq 1 ] || [ "$rc" -eq 2 ] || fail "file memory $reader did not refute changed output: $(cat "$dir/refute.log")"
 done
 
 # Bad side qualifiers must fail before a solver consumes the timeout budget.

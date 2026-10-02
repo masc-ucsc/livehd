@@ -1605,8 +1605,8 @@ private:
     if (info.bound_din.is_invalid() || info.early_readers.empty()) {
       return;
     }
-    livehd::graph_util::split_packed_selfref_wire(g_, info.buf, info.bound_din, info.early_readers);
-    if (!lnast_->is_timecheck_off() && livehd::graph_util::comb_pin_depends_on(info.bound_din, info.buf)) {
+    livehd::graph_util::split_packed_selfref_wire(g_, info.buf, info.bound_din, info.early_readers, &comb_dependencies_);
+    if (!lnast_->is_timecheck_off() && livehd::graph_util::comb_pin_depends_on(info.bound_din, info.buf, &comb_dependencies_)) {
       // Lead with the established `combinational loop` vocabulary -- the same
       // words the time-checker's SCC uses at the end of this file. This IS
       // one; it is simply caught earlier and with a better source anchor.
@@ -2180,35 +2180,14 @@ private:
             why
                 = "a latch's gate IS its `enable` signal — write the "
                   "transparency condition in the `if`, not as a clock";
-          } else if (info.has_posclk && !info.posclk_val) {
-            // ACTIVE-LOW ENABLE IS NOT EXPRESSIBLE IN THE PYROPE SHAPE, and
-            // wiring it as a bare pin flip is a SILENT MISCOMPILE (measured
-            // — this is exactly the "posclk double-negation" a
-            // symmetric before/after gate cannot see; it was caught only by
-            // LEC-ing against an independent golden).
-            //
-            // Why: tolg bakes the hold mux into din from the SAME condition,
-            //   din = cond ? d : q   and   enable = cond
-            // so the enable is active-HIGH *by construction*. Flipping only the
-            // polarity pin yields `if (!cond) q <= (cond ? d : q)`: while the
-            // latch is transparent (cond==0) din resolves to q, so it writes
-            // ITSELF forever and NEVER captures d. Emitting that would look
-            // perfectly reasonable in the Verilog.
-            //
-            // Making it sound would mean rebuilding din against the inverted
-            // condition. There is no need: `if !g { l = d }` already says
-            // active-low exactly, correctly, and is the shipped spelling of the
-            // live `latch_active_low` fixture. So the attribute is REFUSED here
-            // rather than half-honored. The CELL still carries the polarity
-            // (pid 6) for the YOSYS importer, whose raw-D + EN shape has no
-            // hold mux and for which the flip IS sound.
+          } else if (info.has_posclk && !info.posclk_val && (info.enable_name.empty() || info.enable_is_const)) {
+            // A conditional write already builds a hold mux and an active-high
+            // enable from the same condition. Polarity may invert only a
+            // separate explicit enable, never that combined write condition.
             dropped = "enable_high=false (active-low enable)";
             why
-                = "the Pyrope lowering builds `din = cond ? d : q` from the "
-                  "SAME condition, so the enable is active-high by "
-                  "construction and flipping only the polarity would make "
-                  "the latch write itself and never capture din — write the "
-                  "inverted condition instead: `if !g { ... }`";
+                = "an active-low latch requires a nonconstant explicit enable; "
+                  "use enable=g with enable_high=false, or write if !g { ... }";
           }
           // The RESET FAMILY (reset_pin / sync / async / negreset / init) is no
           // longer refused: M7 wires it through the SHARED flop path below, so
@@ -2278,7 +2257,7 @@ private:
       } else {
         warn_at(info.decl_nid, {"no-clock", "time"}, "reg '{}' has no clock input to bind", name);
       }
-      if (info.has_posclk && !info.posclk_val) {
+      if (!info.is_latch && info.has_posclk && !info.posclk_val) {
         setup_sink_by_name(flop, "posclk").connect_driver(create_const(*g_, *Dlop::create_integer(0)));
       }
 
@@ -2294,6 +2273,7 @@ private:
       // hoists the attribute ahead of the declare, so the temp holding
       // `(wen_i != 0)` is still undefined when lower_attr_set runs.
       Pin attr_en;
+      Pin latch_gate;
       if (!info.enable_name.empty()) {
         if (info.enable_is_const) {
           // A CONSTANT enable names no signal: `enable=true` is the
@@ -2338,7 +2318,13 @@ private:
                 lnast_->get_top_module_name());
             continue;
           }
+          if (info.is_latch) {
+            latch_gate = attr_en;
+          }
           attr_en = nonzero1(attr_en);
+          if (info.is_latch && info.has_posclk && !info.posclk_val) {
+            attr_en = not1(attr_en);
+          }
         }
       }
 
@@ -2373,20 +2359,41 @@ private:
             // remain structurally identical (the latch-contract proof relies
             // on that identity). Only an unconditional true needs gating here.
             Pin        lat_en = is_true ? active : (valid_minted_ ? en : and2(en, active));
-            // `:[enable=…]` ANDs on top, exactly as it does for a Flop. Sound
-            // because it only NARROWS the transparency window and never
-            // inverts it: din is `cond ? d : q` built from the SAME cond, so
-            // wherever the narrowed enable is high, cond is high and din is
-            // still `d`. (Contrast `enable_high=false` below, which is REFUSED
-            // precisely because inverting makes the latch write itself.) Rule
-            // B's hold-mux exemption is structural on the DIN side — an
-            // operand that is directly this latch's q — so widening the enable
-            // cone leaves it intact.
+            // The explicit enable (with its selected polarity) narrows the
+            // write condition. Whenever the latch is transparent, that write
+            // condition holds and the hold mux therefore supplies D.
             lat_en            = and2(lat_en, attr_en);
             if (lat_en.is_invalid()) {
               lat_en = en;  // unconditionally transparent: keep the explicit true
             }
-            setup_sink_by_name(flop, "enable").connect_driver(lat_en);
+            auto enable_sink = setup_sink_by_name(flop, "enable");
+            enable_sink.connect_driver(lat_en);
+            // Only the explicit latch pin may read a Clock's physical level.
+            // Record its exact sink edges, including polarity/AND gates built
+            // here. Unrelated logic using the same clock remains illegal.
+            if (!latch_gate.is_invalid()) {
+              absl::flat_hash_set<Pin> seen;
+              std::function<void(Pin)> note = [&](Pin sink) {
+                const auto driver = sink.get_driver_pin();
+                if (driver == latch_gate) {
+                  latch_gate_sinks_.insert(sink);
+                  return;
+                }
+                if (driver.is_invalid() || driver.is_const() || livehd::graph_util::is_graph_input_pin(driver)
+                    || !seen.insert(driver).second) {
+                  return;
+                }
+                const auto node = driver.get_master_node();
+                const auto op   = livehd::graph_util::type_op_of(node);
+                if (op != Ntype_op::And && op != Ntype_op::EQ) {
+                  return;
+                }
+                for (auto input : node.inp_sorted_pins()) {
+                  note(input);
+                }
+              };
+              note(enable_sink);
+            }
           } else if (const Pin fin = is_true ? attr_en : and2(en, attr_en); !fin.is_invalid()) {
             // `enable=` ANDs onto the OR-of-write-conditions shadow, so a reg
             // that carries BOTH an attribute enable and a conditional write
@@ -2647,6 +2654,15 @@ private:
     // fidelity, but they must not mint hardware.
     if (comptime_array_names_.contains(lhs_text)) {
       return;
+    }
+    // Docs (04b "comptime"): a `comptime` variable must be compile-time
+    // known or a compile error is generated.
+    if (comptime_scalar_names_.contains(lhs_text) && Lnast_ntype::is_ref(lnast_->get_type(rhs))
+        && lnast_->get_sibling_next(rhs).is_invalid()) {
+      error_hint_at(nid,
+                    livehd::diag::Id{"comptime-not-constant", "type"},
+                    std::format("`{}` is declared comptime but its value is not known at compile time", lhs_text),
+                    "drop `comptime`, or compute the value only from constants and comptime values");
     }
     // The compile-time identity/encoding attrs of an enum entry
     // (prp2lnast's lower_enum_def: `store(carrier, '__enumentry', 'E.x')`,
@@ -3011,6 +3027,12 @@ private:
     if (!type_nid.is_invalid()) {
       const auto [dmw, dsigned] = declared_width(type_nid);
       record_decl_type(lnast_->get_name(name_nid), dmw, dsigned);
+    }
+    // A scalar `comptime const|mut`: constprop deletes every store whose value
+    // folded, so a store that survives to lower_store carries a runtime value.
+    if (mode.find("comptime") != std::string_view::npos
+        && (type_nid.is_invalid() || !Lnast_ntype::is_comp_type_array(lnast_->get_type(type_nid)))) {
+      comptime_scalar_names_.insert(std::string(lnast_->get_name(name_nid)));
     }
     // A declare's optional trailing [value] child carries the initializer, so
     // `const c:u12 = concat(a,b)` is checked here rather than at a store.
@@ -4493,7 +4515,7 @@ private:
   // cgen/cgen_sim/lec. Against the per-entry writes the store keeps its
   // PROGRAM position (Mem_info::bulk_sites): finalize_mems turns the ladder
   // into program order, the last write of the cycle winning.
-  void lower_mem_update_store(const Lnast_nid& rhs, std::string_view name, Mem_info& mi) {
+  void lower_mem_update_value(const Pin& v, std::string_view name, Mem_info& mi) {
     // Bulk writes have no ordinary write-port site. Capture their process
     // clock here too, before a later process changes the ordered attributes.
     if (!mi.is_array) {
@@ -4514,10 +4536,6 @@ private:
           mi.update_posclk = positive;
         }
       }
-    }
-    auto v = mem_whole_value_pin(rhs, name, mi);
-    if (v.is_invalid()) {
-      return;  // reported, or an empty driver
     }
     auto en = current_path_cond();  // invalid => unconditional
     mi.bulk_sites.push_back({.val = v, .en = en, .wr_before = mi.wr_next});
@@ -4568,6 +4586,13 @@ private:
                                            // leave unconnected (always-on)
     mi.update_val = merged_val;
     mi.update_en  = merged_en;
+  }
+
+  void lower_mem_update_store(const Lnast_nid& rhs, std::string_view name, Mem_info& mi) {
+    const auto value = mem_whole_value_pin(rhs, name, mi);
+    if (!value.is_invalid()) {
+      lower_mem_update_value(value, name, mi);
+    }
   }
 
   void lower_mem_init_store(const Lnast_nid& rhs, std::string_view name, Mem_info& mi) {
@@ -7546,6 +7571,9 @@ private:
           }
           continue;
         }
+        if (latch_gate_sinks_.contains(sink)) {
+          continue;
+        }
         const auto n   = sink.get_master_node();
         const auto op  = gu::type_op_of(n);
         const auto pid = sink.get_port_id();
@@ -9392,6 +9420,12 @@ private:
   }
 
   void record_set_mask_result(std::string_view dst_name, const Pin& drv, int32_t mw) {
+    if (auto mit = mem_map_.find(std::string(dst_name)); mit != mem_map_.end()) {
+      // In-place bit writes from Slang have no following store. Commit their
+      // packed value through the memory update port, preserving the Q binding.
+      lower_mem_update_value(drv, dst_name, mit->second);
+      return;
+    }
     const bool is_reg  = reg_map_.contains(std::string(dst_name)) && reg_info_.contains(std::string(dst_name));
     const bool is_wire = !is_reg && wire_names_.contains(std::string(dst_name));
     if (is_reg) {
@@ -11165,8 +11199,10 @@ private:
   absl::flat_hash_set<std::string>            wire_names_;  // gates lower_store
   std::vector<std::string>                    wire_order_;  // declaration order
   absl::flat_hash_map<std::string, Wire_info> wire_info_;
+  livehd::graph_util::Comb_dependency_cache   comb_dependencies_;
   // A wire's buffer and typed-read cells (debug nid) -> its data_typed: an
   // untyped or `Clock` wire is an alias of its driver's Clock/Reset class.
+  absl::flat_hash_set<Pin>                    latch_gate_sinks_;
   absl::flat_hash_map<uint64_t, bool>         wire_cells_;
 
   // Reg lowering state. reg_map_ holds each declared reg's Flop
@@ -11226,6 +11262,7 @@ private:
   Pin                                                 last_rmw_mask_;  // the mask of the last lower_dynamic_mask_rmw
   absl::flat_hash_map<std::string, Array_scalar_view> array_scalar_views_;
   absl::flat_hash_set<std::string>                    comptime_array_names_;
+  absl::flat_hash_set<std::string>                    comptime_scalar_names_;
   absl::flat_hash_map<int32_t, int>                   mem_write_site_counts_;
   std::vector<std::string>                            mem_order_;
   // Path-condition stack: one entry per enclosing branch arm, UNMATERIALIZED

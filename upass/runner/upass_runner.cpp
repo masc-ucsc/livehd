@@ -6402,6 +6402,63 @@ bool uPass_runner::sub_input_may_be_omitted(const std::shared_ptr<Lnast>& callee
   return (upass::io_port::is_clock_candidate(e) || upass::io_port::is_reset_candidate(e)) && !lm->get_lnast()->is_verilog_origin();
 }
 
+void uPass_runner::warn_auto_wire_to_minted(const std::shared_ptr<Lnast>& callee, const Lnast_io_entry& e, std::string_view bare,
+                                            const livehd::diag::Span& call_span) const {
+  const bool is_clock = upass::io_port::is_clock_candidate(e);
+  if (!callee || (!is_clock && !upass::io_port::is_reset_candidate(e))
+      || upass::io_port::declares_input_default(callee.get(), e)) {
+    return;
+  }
+  const auto caller = lm->get_lnast();
+  if (!caller || caller->is_verilog_origin() || lm->in_inline_frame()) {
+    return;
+  }
+  const auto  want = is_clock ? Io_sig::clock : Io_sig::reset;
+  const auto& ins  = caller->io_meta().inputs;
+  if (std::any_of(ins.begin(), ins.end(), [&](const Lnast_io_entry& i) { return i.sig == want; })) {
+    return;  // the caller's own declared Clock/Reset is what auto-wires: no mint
+  }
+  static const absl::flat_hash_set<std::string_view> clock_names{"clk", "clock", "clk_i", "clk_in"};
+  static const absl::flat_hash_set<std::string_view> reset_names{
+      "rst", "reset", "rst_n", "reset_n", "rstn", "resetn", "rst_i", "rst_ni", "arst", "arst_n", "srst", "srst_n"};
+  const auto&       conventional = is_clock ? clock_names : reset_names;
+  const std::string minted       = is_clock ? "clock" : "reset";
+  // A data input spelled exactly `clock`/`reset` collides with the mint itself:
+  // that is its own compile error, not this warning.
+  const auto data = std::find_if(ins.begin(), ins.end(), [&](const Lnast_io_entry& i) {
+    return i.sig == Io_sig::none && i.name != minted && (i.name == e.name || conventional.contains(i.name));
+  });
+  if (data == ins.end()) {
+    return;
+  }
+  const auto caller_name = caller->get_top_module_name();
+  const auto caller_bare = caller_name.substr(caller_name.rfind('.') + 1);
+  livehd::diag::sink().emit(livehd::diag::Diagnostic{
+      .severity = livehd::diag::Severity::warning,
+      .code     = is_clock ? "clock-auto-wire-minted" : "reset-auto-wire-minted",
+      .category = "time",
+      .pass     = "upass.runner",
+      .message  = std::format("the `{}` input `{}` of `{}` is auto-wired to the minted `{}` of `{}`, not to its data input `{}`; "
+                              "nothing drives `{}` unless the caller of `{}` sets it",
+                              is_clock ? "Clock" : "Reset",
+                              e.name,
+                              bare,
+                              minted,
+                              caller_bare,
+                              data->name,
+                              minted,
+                              caller_bare),
+      .span     = call_span,
+      .hint     = is_clock ? std::format("bind it explicitly, or declare `{}:Clock` in `{}` so it is the clock", data->name, caller_bare)
+                           : std::format("bind it explicitly (`{}=Bool({})` for an integer `{}`), or declare `{}:Reset` in `{}`",
+                                         e.name,
+                                         data->name,
+                                         data->name,
+                                         data->name,
+                                         caller_bare),
+  });
+}
+
 void uPass_runner::check_call_args_fit(const std::shared_ptr<Lnast>& callee, const Lnast_tree_io& io,
                                        const std::vector<Lnast_node>& param_val, const std::vector<bool>& param_set,
                                        std::size_t nbind, const absl::flat_hash_map<std::string, Generic_bind>& gbinds,
@@ -6411,6 +6468,7 @@ void uPass_runner::check_call_args_fit(const std::shared_ptr<Lnast>& callee, con
   for (std::size_t i = 0; i < nbind && i < io.inputs.size() && i < param_val.size(); ++i) {
     if (!param_set[i]) {
       check_omitted_default_fit(callee, io.inputs[i], gbinds, bare, call_span);
+      warn_auto_wire_to_minted(callee, io.inputs[i], bare, call_span);
       continue;
     }
     if (param_val[i].is_invalid()) {
@@ -18128,6 +18186,29 @@ void uPass_runner::bake_decl_pre_step(bool is_declare) {
       }
     }
     if (!symbol_table_.has_bundle(alias)) {
+      // A FILE-SCOPE scalar alias (`type Addr = U5` next to the mod): the unit
+      // has no binding for it, only the file shell's declare. Without these
+      // facts a `reg r:Addr` had no envelope, so `wrap r += 1` could not lower
+      // ("call to undefined function 'wrap'", suggestions6 1.7).
+      if (const auto [owner, type_n] = lookup_file_type(alias); owner) {
+        const auto tt = owner->get_type(type_n);
+        if (Lnast_ntype::is_prim_type_int(tt)) {
+          const auto max_n = owner->get_first_child(type_n);
+          const auto min_n = max_n.is_invalid() ? max_n : owner->get_sibling_next(max_n);
+          if (!min_n.is_invalid()) {
+            out_max  = Dlop::from_pyrope_cached(owner->get_name(max_n));
+            out_min  = Dlop::from_pyrope_cached(owner->get_name(min_n));
+            out_kind = upass::Kind::integer;
+            return;
+          }
+        } else if (Lnast_ntype::is_prim_type_bool(tt)) {
+          out_kind = upass::Kind::boolean;
+          return;
+        } else if (Lnast_ntype::is_prim_type_string(tt)) {
+          out_kind = upass::Kind::string;
+          return;
+        }
+      }
       // IMPORTED alias (`x:pkg.PType`) -- resolve off the exporter's pub
       // list/values instead (the lambda unit has no import statement).
       Dlop imax, imin;
@@ -19351,6 +19432,9 @@ void uPass_runner::process_if() {
     bool last_was_cond       = false;
     bool already_matched     = false;  // a *previous* arm already fired
     bool any_prior_uncertain = false;  // some earlier cond folded to neither true nor false
+    // The ref of every condition seen so far (the last one is the current
+    // arm's): what holds on an arm's path, for notify_arm_guard.
+    std::vector<std::string> cond_refs;
 
     auto cond_value = [this]() -> std::optional<Dlop> {
       if (lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_const) {
@@ -19413,6 +19497,16 @@ void uPass_runner::process_if() {
         }
         if (uncertain) {
           next_block_uncertain_ = true;  // The arm's stmts scope gets mark_current_uncertain
+          // An arm's own condition holds on its path (a trailing else has
+          // none); every earlier condition of the chain is false there.
+          const std::size_t own = is_trailing_else ? cond_refs.size() : cond_refs.size() - 1;
+          for (std::size_t i = 0; i < cond_refs.size(); ++i) {
+            if (!cond_refs[i].empty()) {
+              for (auto& e : upasses) {
+                e.pass->notify_arm_guard(cond_refs[i], /*negated=*/i != own);
+              }
+            }
+          }
           dispatch_to_passes(&upass::uPass::notify_uncertain_arm_begin);
         }
         process_lnast();
@@ -19438,6 +19532,7 @@ void uPass_runner::process_if() {
       last_cond_true        = val.has_value() && !val->is_invalid() && !val_is_nil && val->is_known_true();
       last_cond_false       = val.has_value() && !val->is_invalid() && !val_is_nil && val->is_known_false();
       last_was_cond         = true;
+      cond_refs.emplace_back(lm->get_raw_ntype() == Lnast_ntype::Lnast_ntype_ref ? std::string(lm->current_text()) : std::string{});
       if (!last_cond_true && !last_cond_false) {
         any_prior_uncertain = true;
       }

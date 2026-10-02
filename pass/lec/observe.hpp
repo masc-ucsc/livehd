@@ -146,6 +146,15 @@ struct Obs_plan {
 absl::flat_hash_map<std::string, Obs_plan> plan_observability(const Encoded& re, const Encoded& ie,
                                                               const std::vector<Obs_candidate>& cands);
 
+// ONE side's demanded current-state bits of the flop cuts `keys` (every key
+// must have its current state in e.inputs[key] and its next state in
+// e.outputs["\x01nxt:" + key], same width; others are skipped). Roots are
+// every obligation of the side except those keys' own next states; a demanded
+// bit of a key demands the same bit of its next state (the fixpoint). A bit
+// absent from the result can never reach an output of this side. Used to place
+// a narrower flop's bits inside a wider counterpart (query.cpp state windows).
+absl::flat_hash_map<std::string, Bit_set> state_bit_demand(const Encoded& e, const std::vector<std::string>& keys);
+
 // `v` (width v.width) with every bit NOT in `keep` replaced by a fresh symbol
 // named `<tag>` + position. Bits in `keep` must be < v.width.
 Val free_unkept_bits(cvc5::TermManager& tm, const Val& v, int width, const std::vector<int>& keep, const std::string& tag);

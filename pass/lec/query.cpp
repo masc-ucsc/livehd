@@ -620,6 +620,7 @@ std::string serialize_result(const Query_result& r) {
   put_i64(b, r.solve_ms);  // best-effort tail: solver-only budget accounting
   b.push_back(static_cast<char>(r.packed_scalar_step_proven ? 1 : 0));
   b.push_back(static_cast<char>(r.packed_scalar_base_proven ? 1 : 0));
+  put_str(b, r.step_cex);  // best-effort tail: the induction-step CEX behind a weak verdict
   return b;
 }
 
@@ -904,6 +905,7 @@ bool deserialize_result(std::string_view b, Query_result& r) {
     r.packed_scalar_base_proven = b.front() != 0;
     b.remove_prefix(1);
   }
+  (void)get_str(b, r.step_cex);  // best-effort tail (mirror serialize)
   return true;
 }
 
@@ -1498,6 +1500,9 @@ Query_result make_inconclusive(const Query_result& ind, const Query_result& bmc,
   if (ind.verdict == Verdict::Refuted && !ind.witness.empty()) {
     r.witness = ind.witness;
   }
+  if (ind.verdict != Verdict::Proven && !ind.witness.empty()) {
+    r.step_cex = ind.witness;
+  }
   // Propagate the best-available correspondence info for iteration (not a witness).
   const Query_result& src  = (!ind.unmatched_ref.empty() || !ind.unmatched_impl.empty()) ? ind : bmc;
   r.unmatched_ref          = src.unmatched_ref;
@@ -1515,11 +1520,14 @@ Query_result make_inconclusive(const Query_result& ind, const Query_result& bmc,
 // labelled bounded), not inconclusive. Deeper-than-bound cycles are out of scope
 // by design (see todo/livehd/2d-cex_debug, lec). An inductive FULL proof, if found,
 // already won earlier in the race; this is the fallback when ind is Unknown.
-bool try_bounded_proven(const Query_result& bmc, Query_result& out) {
+bool try_bounded_proven(const Query_result& bmc, Query_result& out, const Query_result* ind = nullptr) {
   if (bmc.verdict != Verdict::Proven || bmc.output_checks <= 0) {
     return false;  // Unknown, or vacuous (no outputs compared) -> not a PASS
   }
   out         = bmc;
+  if (ind != nullptr && ind->verdict == Verdict::Unknown && !ind->witness.empty()) {
+    out.step_cex = ind->witness;  // why the proof stopped at the bound (see Query_result::step_cex)
+  }
   out.engine  = "bmc";
   out.bounded = true;  // qualifier: the CLI reports a bounded proof INCONCLUSIVE
   out.detail  = "auto: bmc BOUNDED-Proven (no CEX up to bound " + std::to_string(bmc.checked_steps) + ", "
@@ -1626,7 +1634,7 @@ Query_result run_auto_sequential(hhds::Graph* ref, hhds::Graph* impl, const Lec_
     return ps;
   }
   Query_result bp;
-  if (try_bounded_proven(rb, bp)) {  // bp is a copy of rb, so it already carries rb.cvc5
+  if (try_bounded_proven(rb, bp, &ri)) {  // bp is a copy of rb, so it already carries rb.cvc5
     bp.elapsed_ms  = now_ms(t0);
     bp.cvc5       += ri.cvc5;
     bp.solve_ms   += ri.solve_ms;
@@ -2107,13 +2115,11 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     if (hr.engine == "bmc" && hr.verdict == Verdict::Refuted) {
       trusted = true;
     }
-    if (hr.engine == "bmc" && !trusted && !hr.packed_scalar_base_proven) {
-      Query_result bounded;
-      if (try_bounded_proven(hr, bounded)) {
-        hr      = std::move(bounded);
-        trusted = true;
-      }
-    }
+    // A bounded BMC pass from the hint does NOT settle: the hint is keyed by
+    // entity NAME, so it survives an edit that makes the design inductively
+    // provable. Accepting the bounded verdict here would replay the previous
+    // design's WEAKER outcome (bounded=6) onto a design the unhinted portfolio
+    // proves unbounded -- the verdict would depend on workdir history.
     if (trusted) {
       hr.detail    = "auto: strategy hint tried " + hr.engine + " first and settled; " + hr.detail;
       hr.cvc5     += carried;
@@ -2165,7 +2171,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
       return ps;
     }
     Query_result bp;
-    if (try_bounded_proven(rb, bp)) {  // bp copies rb, so rb.cvc5 is already in it
+    if (try_bounded_proven(rb, bp, &ri)) {  // bp copies rb, so rb.cvc5 is already in it
       bp.elapsed_ms  = ri.elapsed_ms + rb.elapsed_ms;
       bp.cvc5       += ri.cvc5;
       bp.cvc5       += carried;
@@ -2277,7 +2283,7 @@ Query_result run_auto_portfolio(hhds::Graph* ref, hhds::Graph* impl, const Lec_o
     return with(std::move(ps));
   }
   Query_result bp;
-  if (try_bounded_proven(race.results[1], bp)) {
+  if (try_bounded_proven(race.results[1], bp, &race.results[0])) {
     bp.elapsed_ms = now_ms(t0);
     return with(std::move(bp));
   }
@@ -3204,6 +3210,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
         Query_result bp;
         if (try_bounded_proven(rf, bp)) {
+          bp.step_cex = r.step_cex;  // the speculative portfolio's ind leg is the one that saw the step CEX
           bp.detail = "pair-free BMC from reset/no-reset initialization (dropped " + tag + "): " + bp.detail;
           return bp;
         }
@@ -3357,6 +3364,36 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
   }
   const Io_name_map<bool>* collapse_ptr = collapse_defs.empty() ? nullptr : &collapse_defs;
+
+  // CLOCK IDENTITY (suggestions6 1.1): see Encoder::set_force_multi_clock. A
+  // clock name counts only when BOTH designs have an input of that name, so a
+  // single clock spelled `clk` on one side and `clock` on the other stays one
+  // clock. The port's TYPE (Clock/Reset vs U1) plays no part: it is the net.
+  bool force_multi_clock = false;
+  {
+    auto in_names = [](hhds::Graph* g) {
+      absl::flat_hash_set<std::string> names;
+      for (const auto& d : g->get_io()->get_input_pin_decls()) {
+        names.insert(std::string(d.name));
+      }
+      return names;
+    };
+    const auto ref_in  = in_names(ref);
+    const auto impl_in = in_names(impl);
+    const auto ref_ck  = design_clock_inputs(ref, collapse_ptr);
+    const auto impl_ck = design_clock_inputs(impl, collapse_ptr);
+    if (ref_ck != impl_ck) {
+      absl::flat_hash_set<std::string> common;
+      for (const auto* ck : {&ref_ck, &impl_ck}) {
+        for (const auto& n : *ck) {
+          if (ref_in.contains(n) && impl_in.contains(n)) {
+            common.insert(n);
+          }
+        }
+      }
+      force_multi_clock = common.size() >= 2;
+    }
+  }
   if (std::getenv("LEC_DUMP_COLLAPSE") != nullptr) {
     // Debug-only: the expanded collapse set and each side's entity resolution
     // for it, then (scan_boxes below) every Sub instance's box decision.
@@ -4508,6 +4545,135 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     return true;
   };
 
+  // ── State windows: a narrower flop paired with a SLICE of a wider one ──────
+  // Two state cuts that share a key (same name, or paired by formal.lec.match /
+  // a tier-2 pair) but differ in width are otherwise aligned at bit 0: the
+  // shared symbol is the narrow value and the wide side holds its extension.
+  // That is right for cgen's spare sign bit, but wrong when the narrow flop is
+  // the LIVE SLICE of the wide one -- the reference keeps a packed
+  // `stages[N:0]` register whose entry 0 is the input and is never stored
+  // (bedrock br_delay, br_delay_valid_next), the cleaned design keeps only the
+  // stored entries. Offset 0 then compares the wrong bits: BMC seeds the
+  // unreset wide flop as zext(narrow) and REFUTES a correct pair, induction
+  // never closes.
+  // So: encode the wide side alone, find which of its bits can reach any
+  // obligation (state_bit_demand), and when every such bit fits a window of
+  // the narrow width that does NOT start at bit 0, align the pair there. Both
+  // engines then share ONE wide symbol; the narrow side is seeded from its
+  // window and the induction step compares exactly the window. A wide bit
+  // outside the window reaches nothing this side compares, so leaving it out
+  // of the relation cannot hide a difference; a wrong window only costs a
+  // proof (the solver still checks every output).
+  struct State_window {
+    int wide_side = 0;  // 0 = ref, 1 = impl
+    int lo        = 0;  // window [lo, lo + w_narrow) of the wide flop
+    int w_narrow  = 0;
+    int w_wide    = 0;
+  };
+  absl::flat_hash_map<std::string, State_window> state_windows;
+  if (std::getenv("LEC_WINDOW_OFF") == nullptr) {
+    Io_name_map<int> sw[2];
+    for (int s = 0; s < 2; ++s) {
+      for (auto node : (s == 0 ? ref : impl)->occurrences(collapse_gids_ptr).nodes()) {
+        if (graph_util::type_op_of(node) != Ntype_op::Flop) {
+          continue;
+        }
+        auto q = node.get_driver_pin(0);
+        if (q.is_invalid()) {
+          continue;
+        }
+        const auto key      = eff(node.get_hier_name());
+        const int  w        = std::max(1, gu::real_width(q));
+        auto [it, inserted] = sw[s].try_emplace(key, w);
+        if (!inserted && it->second != w) {
+          it->second = -1;  // ambiguous key on its own side: never windowed
+        }
+      }
+    }
+    std::vector<std::string> wide_keys[2];
+    for (const auto& [key, w0] : sw[0]) {
+      auto it = sw[1].find(key);
+      if (it == sw[1].end() || w0 <= 0 || it->second <= 0 || w0 == it->second) {
+        continue;
+      }
+      wide_keys[w0 > it->second ? 0 : 1].push_back(key);
+    }
+    for (int s = 0; s < 2; ++s) {
+      if (wide_keys[s].empty()) {
+        continue;
+      }
+      Encoder denc(tm);
+      denc.set_sub_lib(sub_lib);
+      denc.set_name_alias(&name_alias);
+      denc.set_collapse_defs(collapse_ptr);
+      denc.set_ignore_memory(&opts.ignore_memory);
+      denc.set_state_boxes(state_boxes_ptr);
+      denc.set_comb_boxes(comb_boxes_ptr);
+      denc.set_force_multi_clock(force_multi_clock);
+      denc.set_shared_bbox(&shared_bbox);
+      denc.set_emit_props(false);
+      denc.set_box_keys(s == 0 ? &ref_box_keys : &impl_box_keys);
+      denc.set_mem_keys(s == 0 ? &ref_mem_cut_keys : &impl_mem_cut_keys);
+      Encoded de = denc.encode(s == 0 ? ref : impl, nullptr, s == 0 ? "wr_" : "wi_");
+      if (!de.ok) {
+        continue;
+      }
+      const auto demand = state_bit_demand(de, wide_keys[s]);
+      for (const auto& key : wide_keys[s]) {
+        auto dit = demand.find(key);
+        if (dit == demand.end() || !dit->second.any()) {
+          continue;
+        }
+        const int w_wide   = sw[s].at(key);
+        const int w_narrow = sw[1 - s].at(key);
+        const int lo_bit   = dit->second.lowest();
+        const int hi_bit   = dit->second.highest();
+        if (hi_bit - lo_bit + 1 > w_narrow) {
+          continue;  // live bits do not fit the narrow flop: keep the bit-0 alignment
+        }
+        const int lo = std::min(lo_bit, w_wide - w_narrow);
+        if (lo <= 0) {
+          continue;  // bit-0 alignment already is this window
+        }
+        state_windows.emplace(key, State_window{s, lo, w_narrow, w_wide});
+        if (std::getenv("LEC_DUMP_OBS") != nullptr) {
+          std::fprintf(stderr,
+                       "[LEC_WINDOW] %s: %s[%d:%d] (live bits %d..%d of %d) <-> %d-bit %s\n",
+                       key.c_str(),
+                       s == 0 ? "ref" : "impl",
+                       lo + w_narrow - 1,
+                       lo,
+                       lo_bit,
+                       hi_bit,
+                       w_wide,
+                       w_narrow,
+                       s == 0 ? "impl" : "ref");
+        }
+      }
+    }
+  }
+  // The narrow side's seed for a windowed key: the window of the wide symbol.
+  auto window_seed = [&](const Val& wide, const State_window& sw) -> Val {
+    auto op
+        = tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {static_cast<uint32_t>(sw.lo + sw.w_narrow - 1), static_cast<uint32_t>(sw.lo)});
+    Val v{tm.mkTerm(op, {wide.term}), sw.w_narrow, wide.is_signed};
+    if (!wide.x_mask.isNull()) {
+      v.x_mask = tm.mkTerm(op, {wide.x_mask});
+    }
+    return v;
+  };
+  auto window_note = [&]() {
+    if (state_windows.empty()) {
+      return std::string{};
+    }
+    std::vector<std::string> names;
+    for (const auto& [key, sw] : state_windows) {
+      names.push_back(std::format("{}[{}:{}]", display_name(key), sw.lo + sw.w_narrow - 1, sw.lo));
+    }
+    std::sort(names.begin(), names.end());
+    return "; state window(s): narrower flop paired with the live slice " + join_capped(names);
+  };
+
   // ── BMC engine: unroll N cycles from the reset state ──────────────────────
   // The single-step inductive miter (below) assumes an arbitrary equal current
   // state, so it false-REFUTEs on UNREACHABLE states where the two front-ends
@@ -4525,6 +4691,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     enc.set_ignore_memory(&opts.ignore_memory);
     enc.set_state_boxes(state_boxes_ptr);
     enc.set_comb_boxes(comb_boxes_ptr);
+    enc.set_force_multi_clock(force_multi_clock);
     enc.set_shared_bbox(&shared_bbox);
 
     // ---- FORMAL PHASE SCHEDULE (2f-lec / 2f-latch M10) -----------------------
@@ -4992,6 +5159,35 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           ref_state[key].x_mask = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(w), 0)});
         }
         impl_state[key] = v;
+      }
+      // State windows (see State_window above): the shared power-on symbol of
+      // a windowed key is the WIDE value; the narrow side starts at its window,
+      // not at the low bits. A key that seeds from a known `initial` keeps the
+      // legacy fit (that path compares constants, not a free shared symbol).
+      for (const auto& [key, swin] : state_windows) {
+        auto rit = ref_state.find(key);
+        if (rit == ref_state.end() || bitblast_bits.count(key) != 0 || bitblast.count(key) != 0) {
+          continue;
+        }
+        const bool synth_init  = init_no_reset || unpaired_state.count(key) != 0;
+        const bool pre_reset_x = reset_prologue && reset_state_keys.contains(key);
+        if (!synth_init && (!phase_run || livehd::graph_util::is_single_edge_phase_key(key)) && init.count(key)) {
+          continue;
+        }
+        const int W  = swin.w_wide;
+        Val       wv = synth_init && opts.gold_x == "zero"
+                           ? Val{tm.mkBitVector(static_cast<uint32_t>(W), 0), W, fsgn.at(key)}
+                           : Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(W)), "s0w_" + key), W, fsgn.at(key)};
+        Val       nv = window_seed(wv, swin);
+        // The '?' plane is the REFERENCE's (gold_x=ignore), at the ref's width.
+        if (!rit->second.x_mask.isNull() || ((synth_init || pre_reset_x) && opts.gold_x != "zero")) {
+          const int rw = swin.wide_side == 0 ? W : swin.w_narrow;
+          (swin.wide_side == 0 ? wv : nv).x_mask
+              = tm.mkTerm(cvc5::Kind::BITVECTOR_NOT, {tm.mkBitVector(static_cast<uint32_t>(rw), 0)});
+        }
+        (swin.wide_side == 0 ? wv : nv).is_signed = rit->second.is_signed;
+        ref_state[key]                            = swin.wide_side == 0 ? wv : nv;
+        impl_state[key]                           = swin.wide_side == 0 ? nv : wv;
       }
       // Explicit power-on values take precedence over speculative shared-state
       // correspondence and over the unknown-state policy for uninitialized
@@ -7087,6 +7283,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     penc.set_ignore_memory(&opts.ignore_memory);
     penc.set_state_boxes(state_boxes_ptr);
     penc.set_comb_boxes(comb_boxes_ptr);
+    penc.set_force_multi_clock(force_multi_clock);
     penc.set_shared_bbox(&shared_bbox);
     penc.set_emit_props(opts.design_assumes);
 
@@ -7581,13 +7778,43 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   enc.set_ignore_memory(&opts.ignore_memory);
   enc.set_state_boxes(state_boxes_ptr);
   enc.set_comb_boxes(comb_boxes_ptr);
+  enc.set_force_multi_clock(force_multi_clock);
   enc.set_shared_bbox(&shared_bbox);
   enc.set_emit_props(opts.design_assumes);
   enc.set_x_dontcare(opts.gold_x != "zero");  // ref X = don't-care (formal.lec.gold_x)
   enc.set_box_keys(&ref_box_keys);            // per-design box correspondence
   enc.set_mem_keys(&ref_mem_cut_keys);
   enc.set_phase_plan(ind_ref_plan.needs_plan() ? &ind_ref_plan : nullptr, -1);
-  Encoded re = enc.encode(ref, &shared, "", &shared_mems);
+  // State windows (see State_window): the shared current state of a windowed
+  // key is the WIDE value, and the narrow side is seeded from its window, so
+  // the hypothesis is exactly `narrow == wide[window]` (the next-state compare
+  // below checks the same window). Only this single-step arm; the
+  // phase-composed step above keeps the bit-0 alignment.
+  Io_name_map<Val>        window_side_shared[2];
+  const Io_name_map<Val>* ind_shared[2] = {&shared, &shared};
+  if (!state_windows.empty()) {
+    for (const auto& [key, swin] : state_windows) {
+      auto sit = shared.find(key);
+      if (sit == shared.end() || ind_bitblast.contains(key)) {
+        continue;
+      }
+      sit->second
+          = Val{tm.mkConst(tm.mkBitVectorSort(static_cast<uint32_t>(swin.w_wide)), key), swin.w_wide, sit->second.is_signed};
+    }
+    window_side_shared[0] = shared;
+    window_side_shared[1] = shared;
+    for (const auto& [key, swin] : state_windows) {
+      auto sit = shared.find(key);
+      if (sit == shared.end() || sit->second.width != swin.w_wide) {
+        continue;
+      }
+      window_side_shared[1 - swin.wide_side][key] = window_seed(sit->second, swin);
+    }
+    ind_shared[0]  = &window_side_shared[0];
+    ind_shared[1]  = &window_side_shared[1];
+    res.detail    += window_note();
+  }
+  Encoded re = enc.encode(ref, ind_shared[0], "", &shared_mems);
   enc.set_x_dontcare(false);
   if (!re.ok) {
     res.verdict      = Verdict::Unknown;
@@ -7598,7 +7825,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   enc.set_box_keys(&impl_box_keys);
   enc.set_mem_keys(&impl_mem_cut_keys);
   enc.set_phase_plan(ind_impl_plan.needs_plan() ? &ind_impl_plan : nullptr, -1);
-  Encoded ie = enc.encode(impl, &shared, "", &shared_mems);
+  Encoded ie = enc.encode(impl, ind_shared[1], "", &shared_mems);
   if (!ie.ok) {
     res.verdict      = Verdict::Unknown;
     res.unsupported  = ie.unsupported;
@@ -7689,7 +7916,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     if (!obs_plan.empty()) {
       // The wider side (the impl on a tie) gives up its unkept bits; the other
       // keeps the shared symbol, whose unkept bits then occur on one side only.
-      Io_name_map<Val> side_shared[2] = {shared, shared};
+      Io_name_map<Val> side_shared[2] = {*ind_shared[0], *ind_shared[1]};
       bool             touched[2]     = {false, false};
       for (const auto& [key, p] : obs_plan) {
         const int s         = p.w_ref > p.w_impl ? 0 : 1;
@@ -7915,10 +8142,23 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         == 0) {
       continue;  // two-sided box presence marker: constant on both sides, never a diff
     }
-    int        w    = std::max(rv.width, it->second.width);
-    cvc5::Term rfit = fit_to(tm, rv, w);
-    cvc5::Term ifit = fit_to(tm, it->second, w);
-    if (cvc5::Term u = fit_x_mask_to(tm, rv, w); !u.isNull()) {
+    // A windowed key compares the narrow next state with the WINDOW of the
+    // wide one (the relation the hypothesis assumed); the wide bits outside
+    // it reach no obligation of their side.
+    Val rcmp = rv;
+    Val icmp = it->second;
+    if (!state_windows.empty() && name.starts_with("\x01nxt:")) {
+      if (auto wit = state_windows.find(std::string_view(name).substr(5)); wit != state_windows.end()) {
+        Val& wide = wit->second.wide_side == 0 ? rcmp : icmp;
+        if (wide.width == wit->second.w_wide) {
+          wide = window_seed(wide, wit->second);
+        }
+      }
+    }
+    int        w    = std::max(rcmp.width, icmp.width);
+    cvc5::Term rfit = fit_to(tm, rcmp, w);
+    cvc5::Term ifit = fit_to(tm, icmp, w);
+    if (cvc5::Term u = fit_x_mask_to(tm, rcmp, w); !u.isNull()) {
       // ref X = don't-care (formal.lec.gold_x=ignore): exclude ref-unknown bits. The
       // shared current-state hypothesis already binds ref X-state to the
       // impl's value, so this masks exactly the ref-side don't-care choices.
@@ -8294,6 +8534,15 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // the pass unable to change a verdict it should not: the worst an ABC bug can
   // do is leave work for cvc5 -- except a false Proven, which is exactly what
   // cone_abc_test pins against cvc5 itself.
+  // Does this miter cut any STATE? A next-state/memory compare point (display
+  // names "nxt:"/"mem:") means the step starts from an ARBITRARY equal state.
+  // Taken BEFORE the cone pass below prunes the cuts it proves: a discharged
+  // `nxt:last` still means a diverging OUTPUT was computed from an arbitrary
+  // `last`, which may be unreachable (suggestions6 1.6: engine=ind REFUTED an
+  // equivalent one-hot arbiter from last=0 once ABC had proven the state cut).
+  const bool ind_has_state_cut = std::any_of(ind_diffs.begin(), ind_diffs.end(), [](const auto& d) {
+    return !d.first.empty() && (d.first[0] == '\x01' || d.first.starts_with("nxt:") || d.first.starts_with("mem:"));
+  });
   int         cones_proven = 0;
   std::string cones_note;
   if (lec_cones_try(opts.cones) && !ind_diffs.empty() && opts._split_values.empty()) {
@@ -9432,9 +9681,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         cones_note += "; cone diffs {" + join_capped(refuted) + "}";
       }
     }
+    // `keep` took every unproven cut by move: always put it back, or later
+    // readers (the witness `diff` names, the state-cut test) see moved-from
+    // empty names even when nothing was proven.
+    ind_diffs = std::move(keep);
     if (cones_proven > 0) {
-      ind_diffs = std::move(keep);
-      bad       = cvc5::Term();
+      bad = cvc5::Term();
       for (const auto& [dn, dt] : ind_diffs) {
         bad = bad.isNull() ? dt : tm.mkTerm(cvc5::Kind::OR, {bad, dt});
       }
@@ -9521,21 +9773,46 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
       diffs += t;
     }
+    // Inputs and STATE apart (suggestions6 1.6): the step starts from an
+    // arbitrary state, and that state is what a reader needs to judge whether
+    // the CEX is reachable. A paired state key is ONE shared symbol (the
+    // hypothesis says both sides hold it); a one-sided state is named per side.
+    auto is_state = [&](const std::string& name) { return ind_side[0].contains(name) || ind_side[1].contains(name); };
     std::vector<std::string> toks;
+    std::vector<std::string> state_toks;
     for (const auto& [name, v] : shared) {
       cvc5::Term val = solver.getValue(v.term);
       if (val.isNull()) {
         continue;
       }
-      toks.push_back(display_name(name) + "=" + val.getBitVectorValue(10));
+      (is_state(name) ? state_toks : toks).push_back(display_name(name) + "=" + val.getBitVectorValue(10));
     }
-    std::sort(toks.begin(), toks.end());
-    std::string w;
-    for (const auto& t : toks) {
-      if (!w.empty()) {
-        w += ", ";
+    const Encoded* side_enc[2] = {&re, &ie};
+    for (int sx = 0; sx < 2; ++sx) {
+      for (const auto& [name, v] : side_enc[sx]->inputs) {
+        if (shared.contains(name) || !ind_side[sx].contains(name) || v.term.isNull()) {
+          continue;
+        }
+        cvc5::Term val = solver.getValue(v.term);
+        if (!val.isNull()) {
+          state_toks.push_back(std::string(sx == 0 ? "ref." : "impl.") + display_name(name) + "=" + val.getBitVectorValue(10));
+        }
       }
-      w += t;
+    }
+    auto join_sorted = [](std::vector<std::string>& v) {
+      std::sort(v.begin(), v.end());
+      std::string out;
+      for (const auto& t : v) {
+        if (!out.empty()) {
+          out += ", ";
+        }
+        out += t;
+      }
+      return out;
+    };
+    std::string w = join_sorted(toks);
+    if (!state_toks.empty()) {
+      w += (w.empty() ? "" : " ") + std::string("| state: ") + join_sorted(state_toks);
     }
     return (diffs.empty() ? "" : "diff " + diffs + " @ ") + w;
   };
@@ -9673,13 +9950,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // Does this miter cut any STATE? A `\x01`-prefixed compare point is a
     // next-state/memory cut; only outputs otherwise. With no state cut there is
     // no arbitrary start state to be unreachable.
-    bool has_state_cut = false;
-    for (const auto& d : ind_diffs) {
-      if (!d.first.empty() && (d.first[0] == '\x01' || d.first.rfind("nxt:", 0) == 0 || d.first.rfind("mem:", 0) == 0)) {
-        has_state_cut = true;
-        break;
-      }
-    }
+    const bool has_state_cut = ind_has_state_cut;
     // A divergence on a COMMON output is a genuine refutation when the
     // correspondence is complete. With unmatched cut points the engine cannot
     // attribute the divergence soundly (a matched ref output may read a ref-only
@@ -10845,7 +11116,7 @@ Query_result prove_equal_isolated(hhds::Graph* ref, hhds::Graph* impl, const Lec
     return rb;
   }
   Query_result bp;
-  if (try_bounded_proven(rb, bp)) {  // bp copies rb, so rb.cvc5 is already in it
+  if (try_bounded_proven(rb, bp, &ri)) {  // bp copies rb, so rb.cvc5 is already in it
     bp.detail      = died_note + bp.detail;
     bp.elapsed_ms  = ri.elapsed_ms + rb.elapsed_ms;
     bp.cvc5       += ri.cvc5;

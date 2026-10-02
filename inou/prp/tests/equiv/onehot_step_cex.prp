@@ -1,0 +1,20 @@
+/*
+:name: onehot_step_cex
+:lec_top: onehot_step_cex
+*/
+// Round-robin pointer over a ONE-HOT register (suggestions6 1.6, the bedrock
+// br_arb_rr index-0 quirk in miniature). This reference special-cases
+// `last == 0`, a state the rotation never reaches from `last = 1`. The
+// numbered variants drop that corner:
+//   _1  no invariant: equal on every reachable state, but 1-induction fails
+//       from last=0, so LEC stops at a bounded PASS and names that state;
+//   _2  states the invariant with a plain `assume`: pass.formal proves it,
+//       LEC uses it as an induction hypothesis -> unbounded PROVEN;
+//   _3  a REACHABLE difference under the same assume -> REFUTED.
+pub mod onehot_step_cex(clk:Clock, rst:Reset, req:U4) -> (grant:U4@[0]) {
+  reg last:U4 = 1
+  if req != 0 {
+    last = ((last << 1) | (last >> 3))#[0..<4]
+  }
+  grant = if last == 0 { req } else { req & last }
+}

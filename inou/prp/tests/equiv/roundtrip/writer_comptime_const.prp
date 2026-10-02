@@ -1,0 +1,15 @@
+// suggestions6 1.2 #1: the writer printed a file-scope `comptime const ONE =
+// 0x100` as `const comptime ONE = 0` (the modifier after `const` re-reads as a
+// variable named `comptime`, and the value was lost), and a constant TUPLE as
+// `const tX = (...)` + `const comptime X = 0` + `X = tX` (an assignment to a
+// const). The re-emit must recompile and stay equivalent.
+comptime const ONE = 0x100
+comptime const MASKS = (0x0f, 0xf0, 0x33)
+const K = 3
+
+pub comb writer_comptime_const(a:U8) -> (d:U9, m:U8, p:U8) {
+  comptime const LOC = 0x55
+  d = ONE - a
+  m = a & MASKS[1]
+  wrap p = (a ^ LOC) + K
+}

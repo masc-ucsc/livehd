@@ -1,0 +1,17 @@
+/*
+:name: style_single_destination_match_clean
+:type: style
+:style: none
+*/
+// Already a `match` expression, and a `match` whose arms assign different names:
+// nothing to report.
+pub comb f(a:U8, b:U8, op:U1) -> (r:U8, s:U8) {
+  wrap r = match op {
+    == 0 { a + b }
+    == 1 { a - b }
+  }
+  match op {
+    == 0 { s = a }
+    == 1 { r = b }
+  }
+}

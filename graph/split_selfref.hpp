@@ -1,13 +1,21 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "hhds/graph.hpp"
 
 namespace livehd::graph_util {
+
+// Reuse child-output dependency summaries while lowering ONE parent graph.
+// Callee graphs must remain unchanged for the lifetime of this cache. Parent
+// rewrites are safe: no parent-node or parent-edge result is cached.
+using Comb_dependency_cache = absl::flat_hash_map<std::pair<hhds::Gid, uint32_t>, absl::flat_hash_set<uint32_t>>;
 
 // Resolve a packed self-reference exactly when a single-driver wire's defining
 // edge is attached. `driver` is already connected to `buffer`; `early_readers`
@@ -18,7 +26,7 @@ namespace livehd::graph_util {
 // This is a lowering operation, not an optimization or writer repair: after it
 // returns, every downstream pass sees the same valid LGraph.
 int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, const hhds::Pin_class& driver,
-                              const std::vector<hhds::Node_class>& early_readers);
+                              const std::vector<hhds::Node_class>& early_readers, Comb_dependency_cache* dependencies = nullptr);
 
 // Does `driver`'s backward cone still reach `target` COMBINATIONALLY? State and
 // memories are scheduling boundaries. A `Sub` is NOT: a pure-comb call is seen
@@ -32,7 +40,8 @@ int split_packed_selfref_wire(hhds::Graph* g, const hhds::Node_class& buffer, co
 // uses to decide whether to ATTEMPT a split (there an over-approximation only
 // widens the cone it hands the splitter). A wire can therefore be split and then
 // correctly report no residual self dependency here.
-[[nodiscard]] bool comb_pin_depends_on(const hhds::Pin_class& driver, const hhds::Node_class& target);
+[[nodiscard]] bool comb_pin_depends_on(const hhds::Pin_class& driver, const hhds::Node_class& target,
+                                       Comb_dependency_cache* dependencies = nullptr);
 
 // Break a false combinational loop that runs THROUGH a pure-comb sub-instance:
 // inline the offending instance into `g` so the cycle becomes ordinary logic

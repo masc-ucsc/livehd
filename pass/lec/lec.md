@@ -107,6 +107,20 @@ everything the encoder needs.
   verdict-cache key; neither trustworthy ⇒ **inconclusive**. The per-query `formal.timeout`
   bounds each worker, so a hard miter self-limits and the portfolio degrades to
   inconclusive rather than hanging.
+  **The step CEX behind a weak verdict is reported** (`Query_result::step_cex`):
+  when the result is a bounded PASS or inconclusive and the inductive leg found a
+  step counterexample, `lhd lec` prints it under the verdict line ("induction
+  step fails from an arbitrary state") and the result JSON carries it as
+  `lec.induction_cex`. The witness lists inputs, then `| state: k=v` — the
+  ARBITRARY current state (one value per paired key; `ref.`/`impl.` for
+  one-sided state). That state is the question to answer: unreachable (state
+  the invariant with a plain `assume(...)` over the register — `pass.formal`
+  proves a root's own state assume by induction and LEC then uses it as a
+  hypothesis, "PROVEN under N proven assume(s)"; `equiv/onehot_step_cex_*`) or a
+  real bug. An inductive-only CEX is never a refutation when the miter cuts any
+  state, judged on the cuts BEFORE the cone pass prunes the ones ABC proved (a
+  discharged `nxt:` cut still means the diverging output was computed from an
+  arbitrary state).
 - **Observability: unobservable flop bits leave the obligation** (`observe.cpp`,
   single-step inductive miter; `LEC_OBS_OFF=1` disables, `LEC_DUMP_OBS=1` lists
   the kept bits). A flop bit is observable iff it reaches a compared obligation
@@ -493,7 +507,23 @@ reset nor turns a reader-demoted reset UNKNOWN. `async` matters only in a
 step that is not the flop's own edge -- the phase schedule's microsteps and an
 explicit multi-clock commit, where an async reset overrides although the flop's
 clock does not commit and a sync one waits for it (encode.cpp). Under one clock
-with one step per edge the two are the same. The yosys oracle (`lgcheck`, async2sync) does see that window, so
+with one step per edge the two are the same.
+
+**Clock identity across the two designs.** Each flop's clock is traced to the
+clock INPUT that drives it (`flop_clock_input`, through width wrappers). A
+design whose flops use two or more clock inputs commits each flop on a detected
+edge of its own clock; a single-clock design encodes "one step = one edge".
+That decision is made over BOTH designs: `prove_equal` collects each side's
+clock inputs (`design_clock_inputs`) and, when the sets differ and their union
+-- restricted to names that are inputs on BOTH designs -- holds two or more,
+forces the edge-gated encoding on both sides (`Encoder::set_force_multi_clock`).
+Without it, a flop moved from `dst_clk` to `src_clk` left each side with one
+clock, both encoded as "every step is an edge", and the pair was PROVEN
+(suggestions6 1.1; `equiv/clock_identity_1`, `equiv/clock_identity_wrong`).
+The restriction keeps a renamed single clock (`clk` in Verilog, Pyrope's minted
+`clock`) one clock. A port's TYPE (`Clock`/`Reset` vs `U1`/untyped Verilog) plays
+no part: only the net that clocks or resets a flop does (`equiv/clock_identity`,
+`clock_identity_2`). The yosys oracle (`lgcheck`, async2sync) does see that window, so
 `equiv/async_mem_reset_demoted` stays a `fixme` tracker that fails only
 through its lgyosys leg while the native LEC proves it.
 

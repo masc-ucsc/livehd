@@ -1,0 +1,14 @@
+/*
+:name: pin_attr_expression_clock
+:type: error
+:error: `clock_pin` must name a `Clock` signal, not an expression
+:help: gated clock
+*/
+
+// A `clock_pin` names a Clock; an expression over a clock is not one (there
+// are no derived clocks). A gated clock is a named `Clock(clock_pin=, enable=)`.
+pub mod pin_attr_expression_clock(clk:Clock, rst:Reset, en:U1, d:U4) -> (q:U4@[]) {
+  reg x:U4:[clock_pin=clk & en] = 0  // locate_error_here
+  x = d
+  q = x
+}

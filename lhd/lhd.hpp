@@ -344,6 +344,26 @@ struct Result {
     int         crosscheck_exit_code{-1};
     bool        crosscheck_bounded{false};  // proven only by lgcheck's complete bounded miter
     int64_t     crosscheck_bound{0};        // that window, in native design cycles (formal.bound)
+    // State the proof could NOT correspond, reported only when a def ended
+    // weaker than an unbounded PROVEN (bounded / unknown): the usual reason a
+    // run stops at PASS(n). `reason` is semdiff's (no full match / ambiguous /
+    // kind/init mismatch) or "uncertain pair dropped". `suggested_match` is a
+    // HEURISTIC `formal.lec.match` string (the dropped pairs, then same width +
+    // name similarity) — a starting point to try, never assumed by the prover.
+    struct Unpaired_state {
+      std::string def;
+      std::string side;  // ref | impl
+      std::string name;
+      std::string reason;
+      int64_t     bits{0};
+    };
+    std::vector<Unpaired_state> unpaired_state{};
+    std::string                 suggested_match{};
+    // A weak verdict (bounded PASS / unknown) whose induction step failed from
+    // an ARBITRARY state: the step counterexample, inputs then `| state: k=v`.
+    // That state may be unreachable; a proven `assume` over it makes the step
+    // inductive (suggestions6 1.6). Empty when not applicable.
+    std::string                 induction_cex{};
   } lec;
 
   // Internal hand-off from Tier A (source/LNAST sync) to Tier B (final LGraph  // Internal hand-off from Tier A (source/LNAST sync)
@@ -424,6 +444,11 @@ struct Result {
   std::string satopt_json;
 
   std::string error_class;  // empty when status == pass (future_cli.md taxonomy)
+  // The pinned diagnostic category of the error that failed the run
+  // (core/diag.hpp: syntax|name|type|bitwidth|time|...), when one did: the
+  // exit-code class folds every source-level category onto `syntax`, so an
+  // overflow would otherwise read as a syntax error. Empty for kernel failures.
+  std::string error_category;
   std::string error_message;
   std::string error_hint;
 

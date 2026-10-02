@@ -200,6 +200,14 @@ sh_test(
 # sim.init_zero supplies a power-on zero only to state with neither an explicit
 # initializer nor a reset; declared initial/reset values remain unchanged. The
 # same generated driver supports both choices, including --run-only.
+# A failed --setup-only leaves no stale driver; --run-only reports its error.
+sh_test(
+    name = "lhd_sim_setup_failure_test",
+    size = "small",
+    srcs = ["lhd_sim_setup_failure_test.sh"],
+    data = ["//lhd"],
+)
+
 sh_test(
     name = "lhd_sim_init_zero_test",
     size = "large",

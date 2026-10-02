@@ -42,13 +42,7 @@ test loop_cond_sub_break.branch_vectors {
 
   tick 10 {  // watchdog; the runtime break below ends this after vector 3
     dut.x = 10
-    if clock == 0 {
-      dut.choose_add = 0x3f
-    } elif clock == 1 {
-      dut.choose_add = 0
-    } else {
-      dut.choose_add = 0x15
-    }
+    dut.choose_add = if clock == 0 { 0x3f } elif clock == 1 { 0 } else { 0x15 }
 
     step
     got_final = dut.total

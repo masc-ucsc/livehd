@@ -1,0 +1,16 @@
+/*
+:name: onehot_step_cex_2
+:lec_grep: PROVEN equivalent
+:lec_grep: PROVEN under 1 proven assume
+*/
+// The invariant stated once: pass.formal proves the one-hot assume (its own
+// induction, from `last = 1`), and LEC uses it as a hypothesis, so the clean
+// formula proves UNBOUNDED without copying the reference's last==0 corner.
+pub mod onehot_step_cex(clk:Clock, rst:Reset, req:U4) -> (grant:U4@[0]) {
+  reg last:U4 = 1
+  assume(last#+[..] == 1)
+  if req != 0 {
+    last = ((last << 1) | (last >> 3))#[0..<4]
+  }
+  grant = req & last
+}

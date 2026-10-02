@@ -194,4 +194,62 @@ for v in R2 R3; do
   else echo "ok: $v re-proves (digest keys the constant)"; fi
 done
 
+# 12) Workdir history must not weaken a verdict (suggestions6 1.4). The
+#     strategy hint is keyed by entity NAME, so it survives an impl edit: a
+#     bounded BMC pass recorded as the "winning" engine used to make the NEXT
+#     impl in the same workdir try bmc first and settle for its bounded pass,
+#     although that impl proves unbounded in a fresh workdir. The ref keeps a
+#     40-bit packed stage vector whose entry 0 (the input) is never stored;
+#     i32 stores only the 4 stages, i40 keeps the reference layout.
+cat > "$WORK/dly.v" <<'EOF'
+module br_delay(input clk, input rst, input [7:0] in, output [7:0] out, output [39:0] out_stages);
+  logic [4:0][7:0] stages;
+  assign stages[0] = in;
+  for (genvar i = 1; i <= 4; i++) begin : gen_stages
+    always_ff @(posedge clk) if (rst) stages[i] <= 0; else stages[i] <= stages[i-1];
+  end
+  assign out = stages[4];
+  assign out_stages = stages;
+endmodule
+EOF
+cat > "$WORK/i32.prp" <<'EOF'
+pub mod br_delay(clk:Clock, `in`:U8, rst:U1) -> (out:U8@[], out_stages:U40@[]) {
+  reg stages:U32:[reset_pin=rst] = 0
+  stages = (stages#[0..<24] << 8) | `in`
+  out = stages#[24..<32]
+  out_stages = (stages << 8) | `in`
+}
+EOF
+cat > "$WORK/i40.prp" <<'EOF'
+pub mod br_delay(clk:Clock, `in`:U8, rst:U1) -> (out:U8@[], out_stages:U40@[]) {
+  reg stages:U40:[reset_pin=rst] = 0
+  stages#[8..<40] = (stages#[8..<32] << 8) | `in`
+  out = stages#[32..<40]
+  out_stages = (stages#[8..<40] << 8) | `in`
+}
+EOF
+WDH="$WORK/wdh"; rm -rf "$WDH"; mkdir -p "$WDH"
+D() { "$LHD" lec --ref "verilog:$WORK/dly.v" --impl "pyrope:$WORK/$1" --top br_delay --workdir "$2" 2>&1 | grep "^lec: '" | tail -1; }
+# LEC_WINDOW_OFF disables slice pairing, so i32 can only reach a bounded pass.
+OUT=$(LEC_WINDOW_OFF=1 D i32.prp "$WDH")
+if ! echo "$OUT" | grep -q "PASS(6)"; then echo "FAIL: i32 without state windows should be bounded: $OUT"; fail=1
+elif ! python3 -c 'import json,sys; h=json.load(open(sys.argv[1])).get("hints",{}); sys.exit(any(v.get("engine")=="bmc" for v in h.values()))' \
+    "$WDH/formal_cache.json"; then echo "FAIL: a bounded pass was stored as the winning strategy"; fail=1
+else echo "ok: a bounded pass is not recorded as a strategy hint"; fi
+OUT=$(D i40.prp "$WDH")
+if ! echo "$OUT" | grep -q "PROVEN equivalent"; then echo "FAIL: i40 after i32 in one workdir is not unbounded: $OUT"; fail=1
+else echo "ok: the second impl in a shared workdir gets its own unbounded proof"; fi
+# A stale bmc hint (an older lhd wrote them) may reorder, never weaken.
+WDS="$WORK/wds"; rm -rf "$WDS"; mkdir -p "$WDS"
+echo '{"schema":1,"salt":"0","verdicts":{},"unknowns":{},"hints":{"br_delay":{"engine":"bmc","split":"","ms":1}},"pair_hints":{}}' \
+  > "$WDS/formal_cache.json"
+OUT=$(D i40.prp "$WDS")
+if ! echo "$OUT" | grep -q "PROVEN equivalent"; then echo "FAIL: a stale bmc hint weakened the verdict: $OUT"; fail=1
+else echo "ok: a stale bmc hint cannot settle for a bounded pass"; fi
+# State windows (suggestions6 1.5): the 32-bit shift register pairs with the
+# live slice [39:8] of the 40-bit reference flop and proves unbounded.
+OUT=$(D i32.prp "$WORK/wdw")
+if ! echo "$OUT" | grep -q "PROVEN equivalent.*state window"; then echo "FAIL: i32 did not prove through a state window: $OUT"; fail=1
+else echo "ok: narrower flop proves against the live slice of the wider one"; fi
+
 exit $fail

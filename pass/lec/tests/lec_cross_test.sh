@@ -176,7 +176,7 @@ section_bounded() {
     cross='"crosscheck":{"solver":"lgyosys","verdict":"proven","exit_code":2,"bounded":true,"bound":5}'
   else
     expected=10
-    cross='"crosscheck":{"solver":"lgyosys","verdict":"refuted","exit_code":1}'
+    cross='"crosscheck":{"solver":"lgyosys","verdict":"refuted","exit_code":1,"bounded":false}'
   fi
   if [ "$rc" -ne "$expected" ] || grep -qi DISAGREE "$WORK/cnt_$bound.log" || ! grep -qF "$cross" "$WORK/cnt_$bound.json"; then
     echo "FAIL: bounded counter cross-check at formal.bound=$bound returned rc=$rc, expected $expected with $cross"

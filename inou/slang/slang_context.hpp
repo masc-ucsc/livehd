@@ -135,6 +135,8 @@ struct Slang_module_state {
   // (minion_dcache_miss_handler_unit's `writeback_req_o |= mh_wb_req[i]`
   // read mh_wb_req before the child instances wrote it — LEC-refuted).
   absl::flat_hash_set<const slang::ast::Symbol*>                           wire_split_flat_;
+  absl::flat_hash_set<const slang::ast::Symbol*>                           edge_control_syms_;
+  absl::flat_hash_map<const slang::ast::Symbol*, unsigned>                 latch_writer_count_;
   absl::flat_hash_set<const slang::ast::Symbol*> latch_syms_;  // level-sensitive latch state vars (subset of reg_syms_)
   // PARTIALLY-REGISTERED vars: some bits driven by a continuous `assign`, the
   // rest nonblocking-written by an edge process. IEEE 1800 allows that (the two
@@ -560,6 +562,7 @@ private:
   // cycles fall back to source order + settled reads (LNAST-tier only).
   void        lower_members(const slang::ast::Scope& scope);
   void        lower_process(const slang::ast::ProceduralBlockSymbol& pbs);
+  bool        lower_latch_process(const slang::ast::Statement& body);
   void        lower_comb_process(const slang::ast::Statement& body);
   void lower_ff_process(const slang::ast::SignalEventControl& clock, const slang::ast::Statement& body,
                         std::vector<const slang::ast::Statement*>& prologue, const std::vector<std::string>& inactive_async_guards);

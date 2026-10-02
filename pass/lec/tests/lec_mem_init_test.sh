@@ -92,6 +92,12 @@ verdict_pp() {  # $1=ref.prp $2=impl.prp $3=top -> PROVEN | REFUTED | UNKNOWN
     | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN\|INCONCLUSIVE" | head -1
 }
 
+verdict_pp_auto() {  # verdict_pp with the default (ind|bmc) engine
+  $LHD lec --ref "pyrope:$WORK/$1" --impl "pyrope:$WORK/$2" --top "$3" \
+       --workdir "$WORK/qppa_$$_${RANDOM}" 2>&1 \
+    | grep -o "PROVEN equivalent\|REFUTED (not equivalent)\|UNKNOWN\|INCONCLUSIVE" | head -1
+}
+
 expect() { if [ "$2" != "$3" ]; then echo "FAIL: $1 -> got '$2', want '$3'"; fail=1; else echo "ok: $1 -> $2"; fi; }
 
 # A Verilog memory whose contents come from an `initial` block: slang captures
@@ -118,7 +124,11 @@ expect "verilog init wrong(snd)" "$(verdict rom_vinit_bad.v rom.prp rom.rom)" "R
 expect "ROM wrong init (sound)"  "$(verdict rom_bad.v  rom.prp rom.rom)"  "REFUTED (not equivalent)"
 expect "comb mut-array init"     "$(verdict ca_good.v  ca.prp  ca.ca)"    "PROVEN equivalent"
 expect "sync ROM init match"     "$(verdict_pp sa/srom.prp sb/srom.prp srom.srom)" "PROVEN equivalent"
-expect "sync ROM wrong (sound)"  "$(verdict_pp sa/srom.prp sc/srom.prp srom.srom)" "REFUTED (not equivalent)"
+# engine=ind alone cannot refute: its single-step CEX starts from an arbitrary
+# memory state (it used to say REFUTED only because the cut names it tested
+# had been moved out by the cone pass). The default engine's bmc leg refutes.
+expect "sync ROM wrong (ind)"    "$(verdict_pp sa/srom.prp sc/srom.prp srom.srom)" "UNKNOWN"
+expect "sync ROM wrong (sound)"  "$(verdict_pp_auto sa/srom.prp sc/srom.prp srom.srom)" "REFUTED (not equivalent)"
 
 # Round-trip the zero-write-port synchronous helper as well. Emission splits
 # its read register from the ROM, so use BMC across that state representation

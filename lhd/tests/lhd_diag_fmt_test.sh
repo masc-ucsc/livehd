@@ -41,7 +41,7 @@ echo "$out" | grep -q 'schema_version' && fail "pretty leaked the JSON envelope:
 #    diagnostics on stderr.
 "$LHD" compile "$W/bad.prp" --workdir "$W/w3" --diag-fmt pretty >"$W/o3" 2>"$W/e3" && fail "bad.prp must fail"
 grep -q 'lhd compile pyrope: fail' "$W/o3" || fail "pretty fail line missing: $(cat "$W/o3")"
-grep -q "error\[syntax\]: read of undefined variable" "$W/o3" || fail "pretty error block missing: $(cat "$W/o3")"
+grep -q "error\[name\]: read of undefined variable" "$W/o3" || fail "pretty error block missing: $(cat "$W/o3")"
 grep -q 'help: declare it' "$W/o3" || fail "pretty help line missing: $(cat "$W/o3")"
 grep -q 'livehd:.*:error:read of undefined variable' "$W/e3" || fail "pretty stderr must stay clang-style: $(cat "$W/e3")"
 

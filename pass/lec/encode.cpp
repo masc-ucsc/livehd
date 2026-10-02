@@ -217,6 +217,31 @@ std::optional<std::string> flop_clock_input(const hhds::Occurrence_node& node) {
   return std::nullopt;
 }
 
+absl::flat_hash_set<std::string> design_clock_inputs(hhds::Graph* g, const absl::flat_hash_map<std::string, bool>* collapse_defs) {
+  ankerl::unordered_dense::set<hhds::Gid> opaque_subs;
+  if (collapse_defs != nullptr) {
+    for (auto sn : g->grouped_hierarchy().nodes()) {
+      if (gu::type_op_of(sn) != Ntype_op::Sub) {
+        continue;
+      }
+      auto sio = sn.get_subnode_io();
+      if (sio != nullptr && collapse_defs->count(std::string(sio->get_name())) > 0) {
+        opaque_subs.insert(sn.get_subnode_gid());
+      }
+    }
+  }
+  absl::flat_hash_set<std::string> names;
+  for (auto node : g->occurrences(opaque_subs.empty() ? nullptr : &opaque_subs).nodes(hhds::Node_order::forward)) {
+    if (gu::type_op_of(node) != Ntype_op::Flop) {
+      continue;
+    }
+    if (auto ci = flop_clock_input(node)) {
+      names.insert(std::move(*ci));
+    }
+  }
+  return names;
+}
+
 // 2f-latch M9 -- decode a clock_pin driver that is (or reaches, through the
 // width-mask wrappers a typed port read picks up) a `Clock_cell`.
 //
@@ -3745,7 +3770,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
       clk_inputs.insert(std::move(*ci));
     }
   }
-  const bool multi_clock = clk_inputs.size() >= 2;
+  const bool multi_clock = clk_inputs.size() >= 2 || (force_multi_clock_ && !clk_inputs.empty());
 
   for (size_t fi = 0; fi < flops.size(); ++fi) {
     const auto& node  = flops[fi];

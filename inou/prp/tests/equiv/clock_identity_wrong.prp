@@ -1,0 +1,15 @@
+/*
+:name: clock_identity_wrong
+:type: equiv
+:verilog_top: clock_identity_wrong
+:pyrope_top: clock_identity_wrong
+:lec_expect: refuted
+*/
+// MUTATED pair (suggestions6 1.1): the golden synchronizes on dst_clk, this
+// side on src_clk. Pyrope -> Verilog -> LEC must REFUTE, and the lgyosys
+// oracle must not prove it either.
+pub mod clock_identity_wrong(dst_clk:Clock, src_bit:U1, src_clk:Clock) -> (dst_bit:U1@[]) {
+  reg sync:U2:[clock_pin=src_clk] = nil
+  wrap sync = (sync << 1) | src_bit
+  dst_bit = sync#[1]
+}

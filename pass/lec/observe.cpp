@@ -763,6 +763,98 @@ absl::flat_hash_map<std::string, Obs_plan> plan_observability(const Encoded& re,
   return out;
 }
 
+absl::flat_hash_map<std::string, Bit_set> state_bit_demand(const Encoded& e, const std::vector<std::string>& keys) {
+  struct Cut {
+    std::string key;
+    Val         cur, next;
+    Bit_set     seen;
+  };
+  std::vector<Cut>                 cuts;
+  absl::flat_hash_set<std::string> cut_next;
+  Bit_demand                       eng;
+  for (const auto& key : keys) {
+    const auto cur = e.inputs.find(key);
+    const auto nxt = e.outputs.find(std::string("\x01nxt:") + key);
+    if (cur == e.inputs.end() || nxt == e.outputs.end() || cur->second.term.isNull() || nxt->second.term.isNull()
+        || cur->second.width != nxt->second.width || cur->second.width <= 0) {
+      continue;
+    }
+    eng.add_target(cur->second.term, static_cast<int>(cuts.size()));
+    cut_next.insert(nxt->first);
+    cuts.push_back({key, cur->second, nxt->second, Bit_set(cur->second.width)});
+  }
+  absl::flat_hash_map<std::string, Bit_set> out;
+  if (cuts.empty()) {
+    return out;
+  }
+  // Roots: every obligation of this side other than a target's next state
+  // (the same root set plan_observability uses, one side at a time).
+  for (const auto& [name, v] : e.outputs) {
+    if (cut_next.contains(name)) {
+      continue;
+    }
+    eng.demand_all(v.term);
+    eng.demand_all(v.x_mask);
+  }
+  for (const auto& [k, t] : e.next_mem) {
+    eng.demand_all(t);
+  }
+  for (const auto& [k, t] : e.next_mem_x) {
+    eng.demand_all(t);
+  }
+  for (const auto& [k, v] : e.next_read) {
+    eng.demand_all(v.term);
+    eng.demand_all(v.x_mask);
+  }
+  for (const auto& [k, ports] : e.mem_wr) {
+    for (const auto& p : ports) {
+      eng.demand_all(p.addr);
+      eng.demand_all(p.wmask);
+      eng.demand_all(p.din);
+    }
+  }
+  for (const auto& [k, ports] : e.mem_rd) {
+    for (const auto& p : ports) {
+      eng.demand_all(p.dout);
+      eng.demand_all(p.addr);
+      eng.demand_all(p.value);
+    }
+  }
+  for (const auto& [k, mw] : e.mem_whole) {
+    eng.demand_all(mw.cond);
+    eng.demand_all(mw.bus);
+    eng.demand_all(mw.reset);
+    eng.demand_all(mw.init);
+  }
+  for (const auto& [l, r] : e.equalities) {
+    eng.demand_all(l);
+    eng.demand_all(r);
+  }
+  bool progress = true;
+  while (progress) {
+    progress = false;
+    eng.run([&](int id, const Bit_set& nb) {
+      auto&   c = cuts[static_cast<size_t>(id)];
+      Bit_set b(c.cur.width);
+      for (int x : nb.bits()) {
+        b.set(x);
+      }
+      Bit_set add = c.seen.merge(b);
+      if (!add.any()) {
+        return;
+      }
+      // A demanded current bit needs the same bit of the next state.
+      eng.demand(c.next.term, add);
+      eng.demand(c.next.x_mask, add);
+      progress = true;
+    });
+  }
+  for (auto& c : cuts) {
+    out.emplace(c.key, std::move(c.seen));
+  }
+  return out;
+}
+
 Val free_unkept_bits(cvc5::TermManager& tm, const Val& v, int width, const std::vector<int>& keep, const std::string& tag) {
   std::vector<uint8_t> kept(static_cast<size_t>(width), 0);
   for (int b : keep) {

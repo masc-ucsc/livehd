@@ -68,6 +68,35 @@ diff -u "$W/ai_def.prp" "$W/ai40.prp" || fail "--width changed the ai-mode outpu
 diff -u "$W/ai_def.prp" "$W/ai_explicit.prp" || fail "--mode ai differs from the default layout"
 diff "$W/ai_def.prp" "$W/w40.prp" >/dev/null && fail "ai mode wrapped like --mode human --width 40"
 
+# suggestions6 1.9: a multi-line `if`/`elif`/`else` EXPRESSION used to come
+# back as one 150+ column line in AI mode. Past the default 132 columns each
+# branch gets its own continuation line (also when written on one line).
+cat > "$W/chain19.prp" <<'EOF'
+const blocked = if i == 0 {
+  high#[1..] != 0
+} elif mask#[i] == 1 {
+  req#[0..<i] != 0 or high#[(i + 1)..] != 0
+} else {
+  high#[0..<i] != 0 or low_request#[0..<i] != 0
+}
+EOF
+cat > "$W/chain19_expected.prp" <<'EOF'
+const blocked = if i == 0 { high#[1..] != 0 }
+  elif mask#[i] == 1 { req#[0..<i] != 0 or high#[(i + 1)..] != 0 }
+  else { high#[0..<i] != 0 or low_request#[0..<i] != 0 }
+EOF
+"$LHD" pyrope fmt "$W/chain19.prp" --verify > "$W/chain19_ai.prp" 2>/dev/null || fail "ai if-chain fmt failed"
+diff -u "$W/chain19_expected.prp" "$W/chain19_ai.prp" || fail "a long if/elif/else expression was not wrapped between branches"
+
+# Owner ruling 2026-10-01: `const comptime`/`mut comptime` parse like
+# `comptime const`/`comptime mut`; fmt prints `comptime` first (both modes).
+printf 'const comptime N = 4\nmut comptime n = 0\n' > "$W/cpt.prp"
+printf 'comptime const N = 4\ncomptime mut n = 0\n' > "$W/cpt_expected.prp"
+for mode in ai human; do
+  "$LHD" pyrope fmt "$W/cpt.prp" --mode "$mode" --verify > "$W/cpt_$mode.prp" 2>/dev/null || fail "comptime fmt ($mode) failed"
+  diff -u "$W/cpt_expected.prp" "$W/cpt_$mode.prp" || fail "fmt --mode $mode did not print comptime first"
+done
+
 # AI mode keeps same-kind consecutive assignments unaligned; human aligns them.
 cat > "$W/assigns.prp" <<'EOF'
 a = 1
@@ -104,10 +133,10 @@ EOF
 diff -u "$W/chain_expected.prp" "$W/chain.prp" || fail "if chain did not wrap at branch boundaries"
 "$LHD" pyrope fmt -i "$W/chain.prp" --mode human --verify 2>"$W/chain.err" || fail "second chain fmt failed"
 diff -u "$W/chain_expected.prp" "$W/chain.prp" || fail "if chain formatting is not idempotent"
-# ai mode: no width limit, so the 225-column chain is already in canonical form
-cp "$W/chain_ai.prp" "$W/chain_ai_before.prp"
+# ai mode has no width limit, except that an if chain past the default 132
+# columns takes the same branch lines (suggestions6 1.9)
 "$LHD" pyrope fmt -i "$W/chain_ai.prp" --verify 2>"$W/chain_ai.err" || fail "ai chain fmt failed: $(cat "$W/chain_ai.err")"
-diff -u "$W/chain_ai_before.prp" "$W/chain_ai.prp" || fail "ai mode wrapped a long if chain"
+diff -u "$W/chain_expected.prp" "$W/chain_ai.prp" || fail "ai mode did not wrap the 225-column if chain at its branches"
 
 # The width is a soft limit: keep dotted names intact, even on narrow lines.
 cat > "$W/identifier.prp" <<'EOF'

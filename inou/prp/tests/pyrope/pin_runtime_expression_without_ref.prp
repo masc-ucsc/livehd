@@ -5,13 +5,15 @@
 
 // Docs 04b-attributes "Implicit clock and reset" (ruling 52): a `Reset` is
 // Bool-like, so it can be computed, and a `*_pin` is written without `ref`.
-// `reset_pin=!rst2` resets `r` while `rst2` is LOW. This file was an error
-// fixture while ruling 9 required `ref` (an expression over a signal "needs
-// ref"); the docs now make it the plain spelling. Two `Reset` inputs leave no
-// implicit reset, so a dropped `reset_pin` would be the reset-ambiguous error.
+// The computed reset is NAMED first: a pin names a signal, never an
+// expression (user ruling 2026-10-01; `reset_pin=!rst2` is the error fixture
+// errors/pin_attr_expression.prp). `nrst2` resets `r` while `rst2` is LOW.
+// Two `Reset` inputs leave no implicit reset, so a dropped `reset_pin` would
+// be the reset-ambiguous error.
 
 pub mod pin_runtime_expression_without_ref(rst1:Reset, rst2:Reset, d:U4) -> (q:U4@[1], p:U4@[1]) {
-  reg r:U4:[reset_pin=!rst2] = 5
+  const nrst2 = !rst2
+  reg r:U4:[reset_pin=nrst2] = 5
   reg s:U4:[reset_pin=rst1] = 5
   r = d
   s = d

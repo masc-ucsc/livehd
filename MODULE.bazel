@@ -132,7 +132,7 @@ http_archive(
 # HHDS (plain git repo — see the iassert/hlop note above)
 git_repository(
     name = "hhds",
-    commit = "06816267200151b7d2df1882c4dae8c35f33612e",
+    commit = "e3ed37a590ed8debc06daacd02400db69158581a",
     remote = "https://github.com/masc-ucsc/hhds.git",
 )
 # For local co-development swap the git_repository above for:
@@ -158,7 +158,7 @@ http_archive(
 # LiveHD's core diag.hpp / parser.hpp); see //packages:prpparse.BUILD.
 # To bump the pin, recompute integrity via:
 #   curl -sL https://github.com/masc-ucsc/tree-sitter-pyrope/archive/<commit>.zip | openssl dgst -sha256 -binary | base64
-# The pinned archive (pin cca9f54e; parser and formatter share it) keeps
+# The pinned archive (pin 66dda7f3; parser and formatter share it) keeps
 # livehd self-contained: a fresh clone builds with no sibling checkout. For
 # parser co-development the http_archive is swapped for a new_local_repository
 # on the ../tree-sitter-pyrope working tree, and the build then depends on that
@@ -167,9 +167,9 @@ http_archive(
 http_archive(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    integrity = "sha256-wyLllOvhwli77wmTKnEjXUvLN0Yn0GsRiLY1zdSkgFQ=",
-    strip_prefix = "tree-sitter-pyrope-cca9f54ef805acdbca55bdbf79c2ddfda398e53a/prpparse",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/cca9f54ef805acdbca55bdbf79c2ddfda398e53a.zip"],
+    integrity = "sha256-SeHH0KuFyDYsJ9EseIrsdvMo12un6QY7xEQ2OpAosPE=",
+    strip_prefix = "tree-sitter-pyrope-66dda7f312f582ab1831623a2982558dc4a6e3fe/prpparse",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/66dda7f312f582ab1831623a2982558dc4a6e3fe.zip"],
 )
 # For local co-development swap the http_archive above for:
 # new_local_repository(
@@ -208,9 +208,9 @@ http_archive(
 http_archive(
     name = "tree_sitter_pyrope",
     build_file = "//packages:prpfmt.BUILD",
-    integrity = "sha256-wyLllOvhwli77wmTKnEjXUvLN0Yn0GsRiLY1zdSkgFQ=",
-    strip_prefix = "tree-sitter-pyrope-cca9f54ef805acdbca55bdbf79c2ddfda398e53a",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/cca9f54ef805acdbca55bdbf79c2ddfda398e53a.zip"],
+    integrity = "sha256-SeHH0KuFyDYsJ9EseIrsdvMo12un6QY7xEQ2OpAosPE=",
+    strip_prefix = "tree-sitter-pyrope-66dda7f312f582ab1831623a2982558dc4a6e3fe",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/66dda7f312f582ab1831623a2982558dc4a6e3fe.zip"],
 )
 # For local co-development swap the http_archive above for:
 # new_local_repository(

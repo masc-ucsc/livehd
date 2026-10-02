@@ -617,7 +617,16 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
         return;
       }
       note_write(sym, current_assign_nonblocking_, lhs.sourceRange.start());
-      builder_.create_assign_stmts(wname, to_int_value(rhs));
+      if (packed_mem_regs_.contains(&sym)) {
+        // A packed vector kept as an indexed memory still assigns BITS as a
+        // whole. A plain array store broadcasts the scalar into every element
+        // (and rejects values wider than one element). Preserve the packed
+        // assignment with the same whole-bit view used by lower_named_value.
+        const auto& mi = mem_info_.at(&sym);
+        builder_.create_set_mask_stmts(wname, to_int_value(rhs), "0", std::to_string(mi.size * mi.elem_bits));
+      } else {
+        builder_.create_assign_stmts(wname, to_int_value(rhs));
+      }
       return;
     }
 

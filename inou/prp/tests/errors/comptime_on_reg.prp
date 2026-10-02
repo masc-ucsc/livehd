@@ -1,0 +1,14 @@
+/*
+:name: comptime_on_reg
+:type: error
+:error: `comptime` applies only to `const` or `mut`
+*/
+
+// `comptime` may follow `const`/`mut` (`const comptime N = 4`), but a register
+// is never compile-time: `reg comptime` (and `comptime reg`) used to be
+// accepted silently and the modifier ignored.
+pub mod m(clk:Clock, a:U4) -> (o:U4@[]) {
+  reg comptime x:U4 = 3  // locate_error_here
+  x = a
+  o = x
+}

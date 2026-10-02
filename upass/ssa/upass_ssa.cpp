@@ -1286,14 +1286,21 @@ void uPass_ssa::run(const std::shared_ptr<Lnast>& lnast, const std::vector<std::
                 collect_reg_writes(c, rw);
                 for (auto sub : lnast->children(c)) {
                   if (Lnast_ntype::is_stmts(lnast->get_type(sub))) {
-                    auto branch_pending = pending;  // copy: the pre-branch din flows in
-                    if (Lnast_ntype::is_for(ct) || Lnast_ntype::is_while(ct) || Lnast_ntype::is_tick(ct)) {
-                      // A loop body gets its own temporary namespace when
-                      // replayed or outlined. An enclosing temporary cannot
-                      // be renamed with that namespace. Keep the register
-                      // base here; tolg resolves it to the current pending D.
-                      branch_pending.clear();
+                    absl::flat_hash_map<std::string, std::string> branch_pending;
+                    if (!Lnast_ntype::is_for(ct) && !Lnast_ntype::is_while(ct) && !Lnast_ntype::is_tick(ct)) {
+                      // Only names read in this arm can use incoming D. Copying
+                      // every register for every small branch is quadratic on
+                      // large generated modules such as Rob.
+                      for (const auto& n : lnast->depth_preorder(sub)) {
+                        if (Lnast_ntype::is_ref(lnast->get_type(n))) {
+                          if (const auto it = pending.find(lnast->get_name(n)); it != pending.end()) {
+                            branch_pending.try_emplace(it->first, it->second);
+                          }
+                        }
+                      }
                     }
+                    // Loops have their own temporary namespace: keep their
+                    // incoming map empty so tolg resolves pending D by name.
                     thread_stmts(sub, branch_pending);
                   }
                 }

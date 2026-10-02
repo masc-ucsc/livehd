@@ -12,6 +12,7 @@
 #include <functional>
 #include <span>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 #include "bus_name.hpp"
@@ -1027,6 +1028,22 @@ Net_driver_census net_driver_census(const slang::ast::ValueSymbol& sym) {
 // Index each scope once, preserving whole_net_driver's initializer priority,
 // first-assignment order, and exclusion of partial/select assignments.
 struct Driver_read_cache {
+  // Expression reads are immutable after elaboration. Cache them across
+  // target queries; reconvergent generated datapaths otherwise revisit the
+  // same AST thousands of times. unordered_map keeps references stable while
+  // recursive driver queries add entries.
+  std::unordered_map<const slang::ast::Expression*, std::vector<const slang::ast::ValueSymbol*>> expression_reads;
+
+  const std::vector<const slang::ast::ValueSymbol*>& reads(const slang::ast::Expression& expr) {
+    const auto [it, inserted] = expression_reads.try_emplace(&expr);
+    if (inserted) {
+      Named_value_collector nvc;
+      expr.visit(nvc);
+      it->second = std::move(nvc.syms);
+    }
+    return it->second;
+  }
+
   absl::flat_hash_set<const slang::ast::Scope*>                                      indexed_scopes;
   absl::flat_hash_map<const slang::ast::ValueSymbol*, const slang::ast::Expression*> drivers;
 
@@ -1078,9 +1095,7 @@ bool driver_reads_target(const slang::ast::Expression& expr, const slang::ast::V
   if (depth > 16) {
     return false;
   }
-  Named_value_collector nvc;
-  expr.visit(nvc);
-  for (const auto* s : nvc.syms) {
+  for (const auto* s : cache.reads(expr)) {
     if (s == &target) {
       return true;
     }
@@ -1750,7 +1765,31 @@ void Slang_context::collect_state_vars(const slang::ast::Scope& body) {
     // reg/latch state, so a dead arm's writes here become real hardware.
     wc.decided            = [this](const slang::ast::ConditionalStatement& s) { return const_cond_value(s); };
     pbs.getBody().visit(wc);
+    if (is_latch_block) {
+      auto written = wc.nonblocking;
+      written.insert(wc.blocking.begin(), wc.blocking.end());
+      for (const auto* sym : written) {
+        ++latch_writer_count_[sym];
+      }
+    }
     if (is_edge) {
+      struct Edge_controls : slang::ast::ASTVisitor<Edge_controls, slang::ast::VisitFlags::AllGood> {
+        absl::flat_hash_set<const slang::ast::Symbol*>& controls;
+        explicit Edge_controls(absl::flat_hash_set<const slang::ast::Symbol*>& c) : controls(c) {}
+        void handle(const slang::ast::SignalEventControl& event) {
+          if (event.edge == slang::ast::EdgeKind::None) {
+            return;
+          }
+          const auto* e = &event.expr;
+          while (e->kind == ExpressionKind::Conversion) {
+            e = &e->as<slang::ast::ConversionExpression>().operand();
+          }
+          if (e->kind == ExpressionKind::NamedValue) {
+            controls.insert(&e->as<slang::ast::NamedValueExpression>().symbol);
+          }
+        }
+      } controls(edge_control_syms_);
+      pbs.getBody().visit(controls);
       auto written = wc.nonblocking;
       written.insert(wc.blocking.begin(), wc.blocking.end());
       // Elaborated generate indices are constants, but each replica still
@@ -7028,9 +7067,193 @@ void Slang_context::finalize_pending_async_resets() {
   }
 }
 
+// Extract a single-writer scalar latch's outer transparency guard before it
+// becomes data logic. Keep additional data guards in the body. A constant
+// reset rung becomes a reset pin, independent of the transparency window.
+// Decline ambiguous shapes without emitting anything; normal lowering and the
+// writer's Clock-as-data diagnostic remain the fallback.
+bool Slang_context::lower_latch_process(const slang::ast::Statement& body) {
+  const auto unwrap = [](const slang::ast::Statement* s) {
+    for (;;) {
+      if (s->kind == StatementKind::Block) {
+        const auto& b = s->as<slang::ast::BlockStatement>();
+        if (b.blockKind != slang::ast::StatementBlockKind::Sequential) {
+          return s;
+        }
+        s = &b.body;
+      } else if (s->kind == StatementKind::List && s->as<slang::ast::StatementList>().list.size() == 1) {
+        s = s->as<slang::ast::StatementList>().list.front();
+      } else {
+        return s;
+      }
+    }
+  };
+  struct Gate {
+    const slang::ast::ValueSymbol* sym;
+    bool                           high;
+  };
+  const auto plain_gate = [this](const slang::ast::Expression* e) -> std::optional<Gate> {
+    bool high = true;
+    for (;;) {
+      if (e->kind == ExpressionKind::Conversion) {
+        e = &e->as<slang::ast::ConversionExpression>().operand();
+      } else if (e->kind == ExpressionKind::UnaryOp) {
+        const auto& u = e->as<slang::ast::UnaryExpression>();
+        if (u.op != slang::ast::UnaryOperator::LogicalNot
+            && !(u.op == slang::ast::UnaryOperator::BitwiseNot && u.operand().type->getBitWidth() == 1)) {
+          return std::nullopt;
+        }
+        high = !high;
+        e    = &u.operand();
+      } else if (e->kind == ExpressionKind::BinaryOp) {
+        const auto& b = e->as<slang::ast::BinaryExpression>();
+        if (b.op != slang::ast::BinaryOperator::Equality && b.op != slang::ast::BinaryOperator::Inequality) {
+          return std::nullopt;
+        }
+        const auto value = try_eval_int(b.right());
+        if (!value || (*value != 0 && *value != 1) || b.left().type->getBitWidth() != 1) {
+          return std::nullopt;
+        }
+        if ((b.op == slang::ast::BinaryOperator::Equality) == (*value == 0)) {
+          high = !high;
+        }
+        e = &b.left();
+      } else {
+        break;
+      }
+    }
+    if (e->kind != ExpressionKind::NamedValue || e->type->getBitWidth() != 1) {
+      return std::nullopt;
+    }
+    return Gate{&e->as<slang::ast::NamedValueExpression>().symbol, high};
+  };
+  const auto* s = unwrap(&body);
+  if (s->kind != StatementKind::Conditional) {
+    return false;
+  }
+  const auto* cs = &s->as<slang::ast::ConditionalStatement>();
+  if (cs->conditions.size() != 1 || cs->conditions.front().pattern) {
+    return false;
+  }
+  Reset_arm           reset;
+  std::optional<Gate> reset_gate;
+  if (cs->ifFalse != nullptr) {
+    reset_gate = plain_gate(cs->conditions.front().expr);
+    if (!reset_gate || !harvest_reset_arm(cs->ifTrue, reset, false) || reset.stores.empty() || !reset.partials.empty()
+        || !reset.bit_stores.empty() || !reset.loads.empty()) {
+      return false;
+    }
+    s = unwrap(cs->ifFalse);
+    if (s->kind != StatementKind::Conditional) {
+      return false;
+    }
+    cs = &s->as<slang::ast::ConditionalStatement>();
+  }
+  if (cs->ifFalse != nullptr || cs->conditions.size() != 1 || cs->conditions.front().pattern) {
+    return false;
+  }
+  std::vector<const slang::ast::Expression*>         terms;
+  std::function<void(const slang::ast::Expression&)> split = [&](const auto& e) {
+    if (e.kind == ExpressionKind::BinaryOp
+        && (e.template as<slang::ast::BinaryExpression>().op == slang::ast::BinaryOperator::LogicalAnd
+            || (e.template as<slang::ast::BinaryExpression>().op == slang::ast::BinaryOperator::BinaryAnd
+                && e.template as<slang::ast::BinaryExpression>().left().type->getBitWidth() == 1
+                && e.template as<slang::ast::BinaryExpression>().right().type->getBitWidth() == 1))) {
+      const auto& b = e.template as<slang::ast::BinaryExpression>();
+      split(b.left());
+      split(b.right());
+    } else {
+      terms.push_back(&e);
+    }
+  };
+  split(*cs->conditions.front().expr);
+  std::optional<Gate> gate;
+  size_t              gate_index = 0;
+  for (size_t i = 0; i < terms.size(); ++i) {
+    const auto candidate = plain_gate(terms[i]);
+    if (!candidate) {
+      continue;
+    }
+    if (!gate || edge_control_syms_.contains(candidate->sym)) {
+      gate       = candidate;
+      gate_index = i;
+    }
+    if (edge_control_syms_.contains(candidate->sym)) {
+      break;
+    }
+  }
+  if (!gate || (!input_syms_.contains(gate->sym) && !is_module_level(*gate->sym))) {
+    return false;
+  }
+  Write_collector wc;
+  body.visit(wc);
+  wc.nonblocking.insert(wc.blocking.begin(), wc.blocking.end());
+  if (wc.nonblocking.empty()) {
+    return false;
+  }
+  for (const auto* sym : wc.nonblocking) {
+    const auto& ty = sym->getType().getCanonicalType();
+    if (!latch_syms_.contains(sym) || latch_writer_count_[sym] != 1 || !ty.isIntegral() || ty.isStruct() || ty.isUnion()
+        || struct_var_info_.contains(sym) || flat_port_syms_.contains(sym) || reset_attr_syms_.contains(sym) || sym == gate->sym
+        || (reset_gate && sym == reset_gate->sym)) {
+      return false;
+    }
+  }
+  if (reset_gate) {
+    absl::flat_hash_set<const slang::ast::ValueSymbol*> reset_written;
+    for (const auto& [sym, value] : reset.stores) {
+      reset_written.insert(sym);
+    }
+    if (reset_written.size() != wc.nonblocking.size()) {
+      return false;
+    }
+    for (const auto* sym : wc.nonblocking) {
+      if (!reset_written.contains(sym)) {
+        return false;
+      }
+    }
+    for (const auto& [sym, value] : reset.stores) {
+      emit_reg_reset_attrs(*sym, value, lname_of(*reset_gate->sym), reset_gate->high);
+    }
+  }
+  auto& ln = *builder_.lnast;
+  for (const auto* sym : emit_ordered(wc.nonblocking)) {
+    auto attr = builder_.add_child(Lnast_ntype::create_attr_set());
+    ln.add_child(attr, Lnast_node::create_ref(reg_net_of(*sym)));
+    ln.add_child(attr, Lnast_node::create_const("enable"));
+    ln.add_child(attr, Lnast_node::create_ref(lname_of(*gate->sym)));
+    if (!gate->high) {
+      attr = builder_.add_child(Lnast_ntype::create_attr_set());
+      ln.add_child(attr, Lnast_node::create_ref(reg_net_of(*sym)));
+      ln.add_child(attr, Lnast_node::create_const("enable_high"));
+      ln.add_child(attr, Lnast_node::create_const("false"));
+    }
+  }
+  std::string remaining;
+  for (size_t i = 0; i < terms.size(); ++i) {
+    if (i == gate_index) {
+      continue;
+    }
+    auto cond = booleanize(lower_rvalue(*terms[i]));
+    remaining = remaining.empty() ? cond : builder_.create_log_and_stmts(remaining, cond);
+  }
+  if (!remaining.empty()) {
+    auto branch = builder_.create_if_stmt(false);
+    builder_.add_if_cond(branch, remaining);
+    builder_.push_stmts(builder_.add_if_stmts(branch));
+  }
+  lower_statement(cs->ifTrue);
+  if (!remaining.empty()) {
+    builder_.pop_stmts();
+  }
+  return true;
+}
+
 void Slang_context::lower_comb_process(const slang::ast::Statement& body) {
   proc_kind_ = Proc_kind::comb;
-  lower_statement(body);
+  if (!lower_latch_process(body)) {
+    lower_statement(body);
+  }
   proc_kind_ = Proc_kind::none;
 }
 

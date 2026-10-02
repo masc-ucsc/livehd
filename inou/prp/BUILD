@@ -1139,6 +1139,12 @@ _STATEMATCH_FIXME = [
     "mem_fwd_selfwrite",  # ref memory vs golden two-flop representation
     "mem_pending_sync_init",  # ref memory vs golden output flop representation
     "phase_two_clock_ports",  # regs: only 0/2 paired
+    # A narrower Pyrope flop vs the LIVE SLICE of a wider golden flop, on
+    # purpose: the fixtures pin lec's state windows (prp-equiv proves them
+    # unbounded); semdiff pairs state by name AND width, so nothing pairs here.
+    "state_window_delay",
+    "state_window_valid_next",
+    "state_window_valid_next_mut",
     "struct_top_port",  # regs: only 0/1 paired
     "type_alias_generic_attr",  # regs: only 0/1 paired -- the reg lives in the GENERIC CHILD instance
     # (`add<Elem_T>`), the hand-written golden is flat, and the harness

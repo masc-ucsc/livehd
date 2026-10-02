@@ -2,14 +2,16 @@
 :name: spec_clock_reset_pin_expr
 :type: simulation
 */
-// SPEC (clock lane): a Reset can be COMPUTED -- `reset_pin` takes a Bool
-// expression over a `Reset` and data (`rst or soft_rst`).
+// SPEC (clock lane): a Reset can be COMPUTED -- a Bool expression over a
+// `Reset` and data (`rst or soft_rst`), NAMED first: `reset_pin` names a
+// signal, never an expression (user ruling 2026-10-01).
 //   qa.md Appendix 6: "Reset is Bool-like: it can be computed (`rst or
 //     soft_rst`, synchronizers)"
 //   docs 07-typesystem: "A `Reset` is Bool-like: it can be computed (`rst or
 //     soft_rst`, a synchronizer)"
 pub mod spec_clock_reset_pin_expr(clk:Clock, rst:Reset, soft:Bool, en:Bool) -> (q:U8@[0]) {
-  reg c:U8:[reset_pin=(rst or soft)] = 0
+  const any_rst = rst or soft
+  reg c:U8:[reset_pin=any_rst] = 0
   if en { wrap c = c + 1 }
   q = c
 }

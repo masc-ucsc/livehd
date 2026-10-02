@@ -4,7 +4,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <functional>
@@ -14,11 +16,14 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unistd.h>  // getpid -- the self-check scratch dir
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
-#include "file_name.hpp"  // livehd::unit_file_stem — the shared long-name policy
+#include "absl/container/flat_hash_set.h"
+#include "file_name.hpp"   // livehd::unit_file_stem — the shared long-name policy
+#include "file_utils.hpp"  // get_exe_path / read_file — the self-check recompile
 #include "lnast_prp_writer.hpp"
 #include "perf_tracing.hpp"  // TRACE_EVENT — no-op unless built with --define profiling=1
 #include "worker_pool.hpp"   // livehd::run_workers (big-stack workers)
@@ -83,12 +88,134 @@ void order_callees_first(std::vector<std::shared_ptr<Lnast>>& units, std::string
   }
   units = std::move(ordered);
 }
+
+std::string shell_quote(std::string_view s) {
+  std::string out = "'";
+  for (const char c : s) {
+    out += c == '\'' ? std::string("'\\''") : std::string(1, c);
+  }
+  return out + "'";
+}
+
+// The string value of `"key":"..."` in one JSONL record, with the simple JSON
+// escapes decoded (`\n` becomes a space: the value lands in a one-line message).
+std::string json_field(std::string_view rec, std::string_view key) {
+  const auto k = std::format("\"{}\":\"", key);
+  auto       p = rec.find(k);
+  if (p == std::string_view::npos) {
+    return {};
+  }
+  p += k.size();
+  std::string out;
+  for (; p < rec.size() && rec[p] != '"'; ++p) {
+    if (rec[p] == '\\' && p + 1 < rec.size()) {
+      ++p;
+      out += rec[p] == 'n' || rec[p] == 't' ? ' ' : rec[p];
+      continue;
+    }
+    out += rec[p];
+  }
+  while (!out.empty() && out.back() == ' ') {
+    out.pop_back();
+  }
+  return out;
+}
+
+// Self-check: the Pyrope just written must re-read. Recompile it through the
+// same front end (parse + uPass, including the type check; no graph lowering)
+// in a CHILD `lhd` -- clean process state, exactly what a user's next
+// `lhd compile` sees. Returns the child's first error ("" when it compiles, or
+// when no sibling `lhd` binary exists to run, e.g. a unit-test host).
+std::string recompile_error(const std::vector<std::string>& files) {
+  const auto lhd = livehd::file_utils::get_exe_path() + "/lhd";
+  std::error_code ec;
+  if (files.empty() || !std::filesystem::exists(lhd, ec)) {
+    return {};
+  }
+  static std::atomic<int> seq{0};
+  const auto dir = std::filesystem::temp_directory_path(ec) / std::format("lhd_prp_selfcheck_{}_{}", ::getpid(), seq++);
+  std::filesystem::remove_all(dir, ec);
+  std::filesystem::create_directories(dir, ec);
+  const auto  diag = (dir / "diag.jsonl").string();
+  std::string cmd  = shell_quote(lhd) + " compile";
+  for (const auto& f : files) {
+    cmd += " " + shell_quote(f);
+  }
+  cmd += " -q --set upass.tolg=false --set lhd.incremental=false --workdir " + shell_quote((dir / "w").string())
+         + " --emit " + shell_quote("diagnostics:" + diag) + " > " + shell_quote((dir / "log").string()) + " 2>&1";
+  const int   st  = std::system(cmd.c_str());
+  std::string err;
+  if (st != 0) {
+    // An import of a unit the writer did NOT emit is an external (blackbox,
+    // `--ignore-unknown-modules`) module: the source compile never had its body
+    // either, so the output cannot be blamed for it. An import of an emitted
+    // sibling that does not resolve is still a writer gap.
+    absl::flat_hash_set<std::string> emitted;
+    for (const auto& f : files) {
+      emitted.insert(std::filesystem::path(f).stem().string());
+    }
+    auto only_external_imports = [&](std::string_view rec) {
+      if (rec.find("\"code\":\"import-no-progress\"") == std::string_view::npos) {
+        return false;
+      }
+      const auto msg = json_field(rec, "message");
+      const auto c   = msg.find(':');
+      if (c == std::string::npos) {
+        return false;
+      }
+      bool any = false;
+      for (auto q = msg.find('"', c); q != std::string::npos; q = msg.find('"', q + 1)) {
+        const auto e = msg.find('"', q + 1);
+        if (e == std::string::npos) {
+          break;
+        }
+        const auto unit = msg.substr(q + 1, e - q - 1);
+        if (emitted.contains(unit.substr(0, unit.find('.')))) {
+          return false;
+        }
+        any = true;
+        q   = e;
+      }
+      return any;
+    };
+    bool       blamed = false;
+    const auto jsonl  = livehd::file_utils::read_file(diag);
+    for (std::string_view rest = jsonl ? std::string_view(*jsonl) : std::string_view{}; !rest.empty();) {
+      const auto nl  = rest.find('\n');
+      const auto rec = rest.substr(0, nl);
+      rest           = nl == std::string_view::npos ? std::string_view{} : rest.substr(nl + 1);
+      if (rec.find("\"severity\":\"error\"") == std::string_view::npos) {
+        continue;
+      }
+      if (only_external_imports(rec)) {
+        continue;
+      }
+      blamed = true;
+      std::string where = json_field(rec, "file");
+      if (const auto lp = rec.find("\"start_line\":"); !where.empty() && lp != std::string_view::npos) {
+        where += ":" + std::string(rec.substr(lp + 13, rec.find_first_of(",}", lp + 13) - (lp + 13)));
+      }
+      err = (where.empty() ? std::string{} : where + ": ") + json_field(rec, "message");
+      break;
+    }
+    // No diagnostics file at all (the child crashed before writing it) is a
+    // failure too, never a silent pass.
+    if (!blamed && (!jsonl || jsonl->find("\"code\":\"import-no-progress\"") == std::string::npos)) {
+      err = "the recompile failed (exit status " + std::to_string(st) + ")";
+    }
+  }
+  std::filesystem::remove_all(dir, ec);
+  return err;
+}
 }  // namespace
 
 void Pass_prp_writer::setup() {
   Eprp_method m1("pass.prp_writer", "emit LNAST as Pyrope 3.0 source files", &Pass_prp_writer::work);
   m1.add_label_optional("odir", "output directory for .prp files", ".");
   m1.add_label_optional("debug", "emit /* TODO */ for unimplemented constructs instead of failing the compile", "false");
+  m1.add_label_optional("selfcheck",
+                        "recompile the written Pyrope (parse + type check, no graphs) and fail when it does not re-read",
+                        "true");
   register_pass(m1);
 }
 
@@ -114,6 +241,8 @@ void Pass_prp_writer::work(Eprp_var& var) {
   // it cannot silently succeed with a non-reparsable / lossy stub.
   auto debug_opt = std::string(var.get("debug", "false"));
   bool debug_on  = debug_opt == "true" || debug_opt == "1";
+  auto self_opt  = std::string(var.get("selfcheck", "true"));
+  bool selfcheck = !debug_on && self_opt != "false" && self_opt != "0";
 
   if (!p.setup_directory(out_dir)) {
     livehd::diag::err("pass.prp_writer", "write-failed", "io").msg("could not create output directory: {}", out_dir).fatal();
@@ -203,6 +332,13 @@ void Pass_prp_writer::work(Eprp_var& var) {
     if (loop_implementations.contains(std::string(ln->get_top_module_name()))) {
       continue;
     }
+    // An `ln:` load synthesizes a `<file>.__pub` wrapper (the export table the
+    // import machinery reads: `f.[__pub] = "comb"`, `f = "ln:file.f"`). It is
+    // loader state, not source -- written out it re-read as assignments to
+    // undeclared names.
+    if (ln->get_top_module_name().ends_with(".__pub")) {
+      continue;
+    }
     // A deferred TEMPLATE (`mod f(b)` with an untyped param, `...args`, an
     // unbound `<T>`) is never elaborated — its body still holds the unresolved
     // comptime temps the specialization consumed, so re-emitting it produces a
@@ -247,6 +383,7 @@ void Pass_prp_writer::work(Eprp_var& var) {
     std::vector<std::shared_ptr<Lnast>>* units;
   };
   struct File_result {
+    std::string                                      path;  // the written .prp
     std::string                                      write_error;
     std::vector<std::pair<std::string, std::string>> unimplemented;
     std::vector<std::pair<std::string, std::string>> clock_as_data;
@@ -330,6 +467,7 @@ void Pass_prp_writer::work(Eprp_var& var) {
         }
       }
       out.close();
+      result.path = fname;
 
       if (!debug_on) {
         for (size_t i = 0; i < units.size(); ++i) {
@@ -374,7 +512,13 @@ void Pass_prp_writer::work(Eprp_var& var) {
   });
 
   // Publish failures in stable file order even though rendering was parallel.
+  bool                     failed = false;
+  std::vector<std::string> written;
   for (const auto& result : results) {
+    failed |= !result.clock_as_data.empty() || !result.unimplemented.empty();
+    if (!result.path.empty()) {
+      written.push_back(result.path);
+    }
     if (result.error) {
       std::rethrow_exception(result.error);
     }
@@ -398,6 +542,22 @@ void Pass_prp_writer::work(Eprp_var& var) {
           .hint(
               "the .prp was written with /* TODO */ markers; pass --set prp_writer.debug=true to keep the partial "
               "output and let the compile pass")
+          .emit();
+    }
+  }
+
+  // Never exit 0 with Pyrope that does not re-read (suggestions6 1.2: a writer
+  // gap -- a reserved word as a name, an integer seed of a Bool, an empty bit
+  // range -- used to surface only at the user's next compile). All files are
+  // checked together: an emitted file may import its emitted siblings.
+  if (selfcheck && !failed) {
+    TRACE_EVENT("pass", "prp_writer.selfcheck");
+    if (const auto err = recompile_error(written); !err.empty()) {
+      livehd::diag::err("pass.prp_writer", "prp-writer-invalid-output", "unsupported")
+          .msg("the Pyrope written to {} does not recompile: {}", out_dir, err)
+          .hint(
+              "a pass.prp_writer gap -- please report it with the source; pass --set prp_writer.selfcheck=false to keep "
+              "the output without this check")
           .emit();
     }
   }

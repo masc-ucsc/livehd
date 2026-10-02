@@ -69,4 +69,18 @@ PY
   --ref "verilog:$W/mux_ref.v" --top mux --workdir "$W/w_mux_lec" -q \
   || fail "narrow-output shift differs from the 16-to-1 word mux"
 
+# 5. An overflow is a source-level error: exit class `syntax` (exit code 6),
+#    but the summary names the diagnostic's own category, so the pretty line
+#    reads `error[bitwidth]`, never `error[syntax]` (lhdtrack suggestions6 1.8).
+cat > "$W/ovf.prp" <<'EOF2'
+pub comb ovf(a:U4, b:U4) -> (r:U4) {
+  r = a + b
+}
+EOF2
+"$LHD" compile "$W/ovf.prp" --workdir "$W/w_ovf" --result-json "$W/ovf.json" -q 2>/dev/null \
+  && fail "an overflowing U4 sum compiled"
+grep -q '"class":"syntax","category":"bitwidth"' "$W/ovf.json" || fail "overflow summary lacks category bitwidth: $(cat "$W/ovf.json")"
+"$LHD" compile "$W/ovf.prp" --workdir "$W/w_ovf2" --diag-fmt pretty 2>&1 | grep -q 'error\[bitwidth\]' \
+  || fail "pretty summary does not print error[bitwidth]"
+
 echo "PASS lhd_bitwidth_test"

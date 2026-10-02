@@ -1,0 +1,17 @@
+/*
+:name: clock_identity
+:type: equiv
+:verilog_top: clock_identity
+:pyrope_top: clock_identity
+:lec_top: clock_identity
+*/
+// Two-flop synchronizer with TWO clock inputs (suggestions6 1.1). Only
+// `dst_clk` clocks state; `src_clk` is an unused port on both sides. The golden
+// is plain Verilog (every port untyped), this side types the ports `Clock` /
+// `Reset`: a port's TYPE must not matter to LEC, only which net clocks a flop.
+// clock_identity_1.prp moves the register to `src_clk` and must REFUTE.
+pub mod clock_identity(dst_clk:Clock, dst_rst:Reset, src_bit:U1, src_clk:Clock) -> (dst_bit:U1@[]) {
+  reg sync:U2:[clock_pin=dst_clk, reset_pin=dst_rst] = 0
+  wrap sync = (sync << 1) | src_bit
+  dst_bit = sync#[1]
+}

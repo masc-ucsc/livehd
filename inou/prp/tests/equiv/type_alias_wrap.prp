@@ -1,0 +1,27 @@
+/*
+:name: type_alias_wrap
+:type: equiv
+:verilog_top: type_alias_wrap
+:pyrope_top: type_alias_wrap
+*/
+// `wrap` on a variable declared with a FILE-SCOPE `type` alias.
+//
+// The alias lives in the file shell, not in the mod's own unit, so the
+// declaration bake found no binding for `Addr` and the register had no
+// declared envelope: `wrap r += 1` could not lower and leaked to tolg as
+// "call to undefined function 'wrap'" (lhdtrack suggestions6 1.7). Both alias
+// spellings are covered: a `U5` alias and an `Unsigned(bits=W)` one.
+const W = 6
+type Addr  = U5
+type Count = Unsigned(bits=W)
+
+pub mod type_alias_wrap(clk:Clock, rst:Reset, en:U1) -> (o:U5@[], c:U6@[]) {
+  reg r:Addr = 0
+  reg n:Count = 0
+  if en == 1 {
+    wrap r += 1
+    wrap n = n + 3
+  }
+  o = r
+  c = n
+}

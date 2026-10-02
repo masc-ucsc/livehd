@@ -1,0 +1,16 @@
+/*
+:name: guard_sub_range
+:type: equiv
+:verilog_top: guard_sub_range
+:pyrope_top: guard_sub_range
+*/
+// The overflow check reads the guard of a subtraction: inside `if a > b`,
+// `a - b` is in [1, 15], so it fits a U4 without `wrap` (lhdtrack
+// suggestions6 1.8, br_credit_counter). An `elif`/`else` arm knows every
+// earlier condition is false: `else` of `a > b` is `b >= a`, so `b - a` fits
+// too. A `wrap` here would hide a real overflow if the design changed.
+pub comb guard_sub_range(a:U4, b:U4, c:U4) -> (r:U4, s:U4, t:U4) {
+  r = if a > b { a - b } else { 0 }
+  s = if b < a { a - b } else { b - a }
+  t = if a >= c { a - c } elif c > b { c - b } else { b - c }
+}

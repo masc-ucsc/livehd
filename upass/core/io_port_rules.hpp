@@ -127,6 +127,27 @@ namespace upass::io_port {
   return false;
 }
 
+// Names of scalar latch declarations, used to distinguish a physical latch
+// enable connection from an ordinary register write-enable expression.
+[[nodiscard]] inline absl::flat_hash_set<std::string> latch_names(const Lnast& u, const Lnast_nid& from) {
+  absl::flat_hash_set<std::string> names;
+  if (from.is_invalid()) {
+    return names;
+  }
+  for (const auto& n : u.depth_preorder(from)) {
+    if (!Lnast_ntype::is_declare(u.get_type(n))) {
+      continue;
+    }
+    const auto name = u.get_first_child(n);
+    const auto type = u.get_sibling_next(name);
+    const auto mode = u.get_sibling_next(type);
+    if (!mode.is_invalid() && u.get_name(mode) == "latch") {
+      names.insert(std::string(u.get_name(name)));
+    }
+  }
+  return names;
+}
+
 // Whether `callee`'s body reads input `port` as DATA: body_reads_input minus
 // the reads that are a register's `*_pin` attribute value (`clock_pin=ca`
 // uses `ca` as a clock, not as data).
@@ -138,6 +159,7 @@ namespace upass::io_port {
   const auto on_path = [](std::string_view outer, std::string_view inner) {
     return inner.size() > outer.size() && inner.starts_with(outer) && inner[outer.size()] == '.';
   };
+  const auto                            latches = latch_names(callee, stmts);
   std::function<bool(const Lnast_nid&)> reads = [&](const Lnast_nid& n) -> bool {
     const auto t = callee.get_type(n);
     if (Lnast_ntype::is_ref(t)) {
@@ -147,7 +169,9 @@ namespace upass::io_port {
     if (Lnast_ntype::is_attr_set(t)) {
       const auto tgt = callee.get_first_child(n);
       const auto key = tgt.is_invalid() ? tgt : callee.get_sibling_next(tgt);
-      if (!key.is_invalid() && callee.get_name(key).ends_with("_pin")) {
+      if (!key.is_invalid()
+          && (callee.get_name(key).ends_with("_pin")
+              || (callee.get_name(key) == "enable" && latches.contains(std::string(callee.get_name(tgt)))))) {
         return false;  // a clock/reset pin connection
       }
     }

@@ -1,0 +1,12 @@
+/*
+:name: latch_clock_data
+:type: error
+:tolg: 1
+:error: Clock.*not data
+*/
+pub mod latch_clock_data(clk:Clock, d:U1) -> (q:U1@[], bad:Bool@[]) {
+  reg held:U1:[latch=true, enable=clk, enable_high=false] = nil
+  held = d
+  q = held
+  bad = clk
+}

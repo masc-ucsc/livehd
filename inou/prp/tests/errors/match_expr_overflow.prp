@@ -1,0 +1,20 @@
+/*
+:name: match_expr_overflow
+:type: error
+:error: may not fit its declared range
+:help: wrap/saturate policy
+*/
+
+// A `match` used as an EXPRESSION is held to the destination's type like the
+// same arms written as an `if` expression or a `match` statement. Its result
+// temp has no `else` (a match is exhaustive), and the if-arm range merge used
+// to widen it with a pre-match value it never had -- unbounded, so the
+// overflow check was silently skipped (lhdtrack suggestions6 1.8).
+pub comb match_expr_overflow(a:U8, b:U8, op:U2) -> (r:U8) {
+  r = match op {  // locate_error_here
+    == 0 { a + b }
+    == 1 { a - b }
+    == 2 { a & b }
+    == 3 { a | b }
+  }
+}

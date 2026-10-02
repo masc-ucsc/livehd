@@ -602,13 +602,42 @@ class Detector {
     return pure;
   }
 
+  // A branch scope holding exactly one plain assignment with a pure value. `overflow` receives the
+  // `wrap`/`sat` modifier in front of it (empty when none); false when the scope is anything else.
+  bool single_assignment(TSNode scope, TSNode& assignment, std::string_view& overflow, Path& lhs) const {
+    bool ok    = true;
+    assignment = TSNode{};
+    overflow   = {};
+    children(scope, [&](TSNode statement, const char*) {
+      const auto sk = std::string_view(ts_node_type(statement));
+      if (sk == "comment" || sk == "{" || sk == "}" || sk == ";") {
+        return;
+      }
+      if (sk == "wrap" || sk == "sat") {
+        ok = ok && overflow.empty() && ts_node_is_null(assignment);
+        overflow = sk;
+        return;
+      }
+      if (!ts_node_is_null(assignment) || sk != "assignment") {
+        ok = false;
+      }
+      assignment = statement;
+    });
+    return ok && !ts_node_is_null(assignment) && plain_assignment(assignment, lhs) && pure_value(field(assignment, "rvalue"));
+  }
+
+  // A standalone `if` chain (needs an `else`) or `match` (always exhaustive) whose branches each only
+  // assign one destination. `wrap`/`sat` arms qualify in a `match` when every arm uses the same one.
   void conditional(TSNode node) {
-    if (std::string_view(ts_node_type(node)) != "if_expression") {
+    const auto node_kind = std::string_view(ts_node_type(node));
+    const bool is_match  = node_kind == "match_expression";
+    if (node_kind != "if_expression" && !is_match) {
       return;
     }
     bool                valid = true, has_else = false;
     std::vector<TSNode> assignments;
     Path                destination;
+    std::string_view    overflow;
     children(node, [&](TSNode child, const char* name) {
       const auto kind = std::string_view(ts_node_type(child));
       if (kind == "unique" || (name && std::string_view(name) == "init")) {
@@ -620,41 +649,43 @@ class Detector {
       if (kind != "scope_statement") {
         return;
       }
-      TSNode assignment{};
-      children(child, [&](TSNode statement, const char*) {
-        const auto sk = std::string_view(ts_node_type(statement));
-        if (sk == "comment" || sk == "{" || sk == "}" || sk == ";") {
-          return;
-        }
-        if (!ts_node_is_null(assignment) || sk != "assignment") {
-          valid = false;
-        }
-        assignment = statement;
-      });
-      Path lhs;
-      if (ts_node_is_null(assignment) || !plain_assignment(assignment, lhs) || !pure_value(field(assignment, "rvalue"))) {
+      TSNode           assignment{};
+      std::string_view arm_overflow;
+      Path             lhs;
+      if (!single_assignment(child, assignment, arm_overflow, lhs) || (!is_match && !arm_overflow.empty())) {
         valid = false;
         return;
       }
       if (assignments.empty()) {
         destination = lhs;
-      } else if (lhs != destination) {
+        overflow    = arm_overflow;
+      } else if (lhs != destination || arm_overflow != overflow) {
         valid = false;
       }
       assignments.push_back(assignment);
     });
-    if (!valid || !has_else || assignments.size() < 2) {
+    if (!valid || (!is_match && !has_else) || assignments.size() < 2) {
       return;
     }
-    const auto dst = spelling(destination, destination.size());
+    const auto dst    = spelling(destination, destination.size());
+    const auto prefix = overflow.empty() ? std::string() : std::format("{} ", overflow);
     Finding    f{};
-    f.rule    = Rule::SingleDestinationConditional;
-    f.range   = range(node, node);
-    f.message = std::format("{} exhaustive branches each assign '{}'", assignments.size(), dst);
-    f.hint    = std::format(
-        "consider '{} = if ... {{ ... }} elif ... {{ ... }} else {{ ... }}'; "
-        "preserve the existing branch order and branch values",
-        dst);
+    f.rule = Rule::SingleDestinationConditional;
+    f.range = range(node, node);
+    if (is_match) {
+      f.message = std::format("{} match arms each assign '{}'", assignments.size(), dst);
+      f.hint    = std::format(
+          "consider '{}{} = match ... {{ == V {{ value }} ... }}'; "
+          "preserve the existing arm order and arm values",
+          prefix,
+          dst);
+    } else {
+      f.message = std::format("{} exhaustive branches each assign '{}'", assignments.size(), dst);
+      f.hint    = std::format(
+          "consider '{} = if ... {{ ... }} elif ... {{ ... }} else {{ ... }}'; "
+          "preserve the existing branch order and branch values",
+          dst);
+    }
     f.attributes = {
         { "destination",                                dst},
         {"branch_count", std::to_string(assignments.size())}

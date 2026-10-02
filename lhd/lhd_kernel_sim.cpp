@@ -1697,9 +1697,44 @@ void sim_command(Options& opts, Result& res) {
 
   std::vector<prp_sim::Test_info> tests;
 
+  // A failed setup must not leave a runnable driver behind: in a reused
+  // --workdir, --run-only would otherwise build and run the PREVIOUS setup's
+  // drv.cpp and report PASS for sources that no longer compile. A failing
+  // setup deletes the old driver and records its error in kSetupFailed, so
+  // --run-only can report the real setup error instead of "no driver".
+  static constexpr std::string_view kSetupFailed = "setup_failed.txt";
+  const std::string                 setup_failed = std::format("{}/{}", simdir, kSetupFailed);
+  struct Setup_outcome {
+    const std::string& marker;
+    const Result&      res;
+    const int          uncaught = std::uncaught_exceptions();
+    std::string        thrown_cls;  // an exception the setup threw (it never reaches res here)
+    std::string        thrown_msg;
+    ~Setup_outcome() {
+      std::error_code ec;
+      if (res.status == "pass" && std::uncaught_exceptions() == uncaught) {
+        fs::remove(marker, ec);
+        return;
+      }
+      // Only a FAILED setup drops the old driver: a passing one rewrites
+      // drv.cpp write-if-different, and its unchanged drv.bin is reused.
+      const auto dir = fs::path(marker).parent_path();
+      fs::remove(dir / std::format("{}.cpp", prp_sim::kDriverBasename), ec);
+      fs::remove(dir / std::format("{}.bin", prp_sim::kDriverBasename), ec);
+      std::ofstream out(marker, std::ios::trunc);
+      const bool from_res = res.status != "pass";
+      const auto cls      = from_res ? res.error_class : thrown_cls;
+      const auto msg      = from_res ? res.error_message : thrown_msg;
+      out << (cls.empty() ? "internal" : cls) << '\n'
+          << (msg.empty() ? std::string{"the setup did not complete (see its diagnostics)"} : msg) << '\n';
+    }
+  };
+
   // ---- setup: lower DUT -> Slop, generate the single driver (drv.cpp)
+  std::optional<Setup_outcome> setup_outcome;
   if (!run_only) {
     ensure_dir(simdir);
+    setup_outcome.emplace(setup_failed, res);
     opts.language = "pyrope";
     opts.files    = sources;  // compile ALL positional sources (imports resolve across them)
     if (vcd_on) {
@@ -1715,8 +1750,19 @@ void sim_command(Options& opts, Result& res) {
     // be "refuted" over those free inputs even though the bound run satisfies it.
     opts.sets.emplace_back("compile.formal.mode", "none");
     opts.emit_dirs.push_back(Typed_path{"sim", simdir});
-    auto ir = gather_ir_inputs(opts, "sim");
-    compile_sources(opts, res, ir);
+    try {
+      auto ir = gather_ir_inputs(opts, "sim");
+      compile_sources(opts, res, ir);
+    } catch (const Lhd_error& e) {
+      setup_outcome->thrown_cls = e.cls;
+      setup_outcome->thrown_msg = e.msg;
+      throw;
+    } catch (const std::exception& e) {
+      const auto classified     = classify_engine_failure(e.what());  // what lhd_main reports for it
+      setup_outcome->thrown_cls = classified.cls;
+      setup_outcome->thrown_msg = classified.msg;
+      throw;
+    }
     if (res.status != "pass") {
       return;
     }
@@ -1755,6 +1801,7 @@ void sim_command(Options& opts, Result& res) {
         prp_sim::kDriverBasename);
     bf.close();
     res.recipe_steps.push_back(std::format("sim setup: {} test(s) in {}", tests.size(), simdir));
+    setup_outcome.reset();  // the setup passed: clear the marker now, before any test outcome
   }
 
   if (setup_only) {
@@ -1790,6 +1837,21 @@ void sim_command(Options& opts, Result& res) {
   // there is no nested bazel, no abseil, no network. (For --run-only the driver +
   // bodies are reused from a prior --setup-only; only the compile + run happen.)
   const std::string drv_cpp = std::format("{}/{}.cpp", simdir, prp_sim::kDriverBasename);
+  if (run_only && fs::exists(setup_failed)) {
+    std::ifstream fin(setup_failed);
+    std::string   klass;
+    std::getline(fin, klass);
+    std::string msg{std::istreambuf_iterator<char>(fin), std::istreambuf_iterator<char>()};
+    while (!msg.empty() && (msg.back() == '\n' || msg.back() == '\r')) {
+      msg.pop_back();
+    }
+    res.status        = "fail";
+    res.error_class   = klass.empty() ? "internal" : klass;
+    res.error_message = std::format("the last --setup-only in {} failed: {}", simroot, msg);
+    res.error_hint    = "fix that error and rerun --setup-only; --run-only never runs a driver older than the sources";
+    res.exit_code     = exit_code_for(res.error_class);
+    return;
+  }
   if (::access(drv_cpp.c_str(), R_OK) != 0) {
     res.status        = "fail";
     res.error_class   = "usage";

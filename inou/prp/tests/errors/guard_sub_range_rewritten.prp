@@ -1,0 +1,18 @@
+/*
+:name: guard_sub_range_rewritten
+:type: error
+:error: may not fit its declared range
+:help: wrap/saturate policy
+*/
+
+// The guard `x > b` narrows `x - b` only while `x` still holds the value the
+// guard compared: rewriting `x` inside the arm retires the fact, so this
+// subtraction (1 - b, negative for b > 1) must still be rejected.
+pub comb guard_sub_range_rewritten(a:U4, b:U4) -> (r:U4) {
+  mut x:U4 = a
+  r = 0
+  if x > b {
+    x = 1
+    r = x - b  // locate_error_here
+  }
+}

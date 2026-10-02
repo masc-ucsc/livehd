@@ -728,7 +728,7 @@ void write_pretty(const Options& opts, const Result& res) {
     }
   }
   if (res.status != "pass") {
-    std::print("  {}error[{}]{}: {}\n", bad, res.error_class, off, res.error_message);
+    std::print("  {}error[{}]{}: {}\n", bad, res.error_category.empty() ? res.error_class : res.error_category, off, res.error_message);
     if (!res.error_hint.empty()) {
       std::print("  help: {}\n", res.error_hint);
     }
@@ -1019,9 +1019,11 @@ void write_result(const Options& opts, const Result& res) {
       w.String(res.lec.crosscheck_verdict.c_str());
       w.Key("exit_code");
       w.Int(res.lec.crosscheck_exit_code);
+      // Always explicit: a reader that sees `verdict:proven` with no `bounded`
+      // key cannot tell an unbounded proof from an older lhd.
+      w.Key("bounded");
+      w.Bool(res.lec.crosscheck_bounded);
       if (res.lec.crosscheck_bounded) {
-        w.Key("bounded");
-        w.Bool(true);
         w.Key("bound");
         w.Int64(res.lec.crosscheck_bound);
       }
@@ -1032,6 +1034,33 @@ void write_result(const Options& opts, const Result& res) {
     if (res.lec.bounded) {
       w.Key("bound");
       w.Int64(res.lec.bound);
+    }
+    if (!res.lec.unpaired_state.empty()) {
+      w.Key("unpaired_state");
+      w.StartArray();
+      for (const auto& u : res.lec.unpaired_state) {
+        w.StartObject();
+        w.Key("def");
+        w.String(u.def.c_str());
+        w.Key("side");
+        w.String(u.side.c_str());
+        w.Key("name");
+        w.String(u.name.c_str());
+        w.Key("bits");
+        w.Int64(u.bits);
+        w.Key("reason");
+        w.String(u.reason.c_str());
+        w.EndObject();
+      }
+      w.EndArray();
+    }
+    if (!res.lec.suggested_match.empty()) {
+      w.Key("suggested_match");
+      w.String(res.lec.suggested_match.c_str());
+    }
+    if (!res.lec.induction_cex.empty()) {
+      w.Key("induction_cex");
+      w.String(res.lec.induction_cex.c_str());
     }
     w.EndObject();
   }
@@ -1100,6 +1129,10 @@ void write_result(const Options& opts, const Result& res) {
     w.StartObject();
     w.Key("class");
     w.String(res.error_class.c_str());
+    if (!res.error_category.empty()) {
+      w.Key("category");
+      w.String(res.error_category.c_str());
+    }
     w.Key("message");
     w.String(res.error_message.c_str());
     if (!res.error_hint.empty()) {

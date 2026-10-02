@@ -1,0 +1,7 @@
+pub comb quoted_call_child(i:(exception:(`_20`:U1, `_0`:U1))) -> (o:U1) {
+  o = i.exception.`_20` ^ i.exception.`_0`
+}
+pub comb quoted_call_fields(a:U1, b:U1) -> (o:U1) {
+  const child = quoted_call_child(i.exception.`_20`=a, i.exception.`_0`=b)
+  o = child.o
+}

@@ -1002,6 +1002,15 @@ protected:
   static void check_omitted_default_fit(const std::shared_ptr<Lnast>& callee, const Lnast_io_entry& e,
                                         const absl::flat_hash_map<std::string, Generic_bind>& gbinds, std::string_view bare,
                                         const livehd::diag::Span& call_span);
+  // An omitted child `Clock`/`Reset` input auto-wires to the caller's single
+  // Clock/Reset -- MINTED when the caller declares none. Warn
+  // (`clock-auto-wire-minted` / `reset-auto-wire-minted`) when the caller
+  // also has a DATA input that reads like the signal the child wants (same
+  // name as the child port, or a conventional clk/rst name): the child then
+  // follows the minted `reset`, which nothing drives unless the caller's own
+  // caller sets it, instead of that data input (lhdtrack suggestions6 1.3).
+  void warn_auto_wire_to_minted(const std::shared_ptr<Lnast>& callee, const Lnast_io_entry& e, std::string_view bare,
+                                const livehd::diag::Span& call_span) const;
   // The declared [min, max] of input `e` once `gbinds` are bound: a plain
   // integer range, a folded generic-width bound, a `:T` bound to an integer
   // type, or [0, 1] for a bool. nullopt = untyped (it takes the actual's type)

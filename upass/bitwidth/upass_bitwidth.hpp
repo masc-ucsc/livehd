@@ -117,6 +117,7 @@ public:
   void notify_if_merge_end(bool all_paths_covered) override;
   void notify_uncertain_arm_begin() override;
   void notify_uncertain_arm_end() override;
+  void notify_arm_guard(std::string_view cond, bool negated) override;
 
 private:
   // Variables whose next write carries a wrap/sat policy. A wrap/sat call is
@@ -172,8 +173,33 @@ private:
     // The vars some arm left too wide / unknown-wide (its last write was): the
     // merge keeps them wide, since a later bounded arm only covers its path.
     absl::flat_hash_set<std::string>              arm_wide;
+    // Compiler temps first written INSIDE this if (no value of their own
+    // before it): an if/match EXPRESSION's result. A path that skips every arm
+    // leaves such a temp with no value at all -- a `match` is exhaustive, so
+    // that path does not exist -- hence the arms' union alone is its range.
+    absl::flat_hash_set<std::string>              fresh_tmps;
     int                                           uncertain_arms = 0;
   };
+  // Guarded subtraction (suggestions6 1.8): `if a > b { a - b }` is never
+  // negative. cmp_facts_ maps a comparison result (or its log_not) to the
+  // ordering it asserts when true, as `big > small` (strict) or `big >= small`.
+  // Each uncertain arm pushes the orderings its guards establish
+  // (notify_arm_guard collects them for the next arm); a write to either name
+  // inside the arm retires the fact.
+  struct Order_fact {
+    std::string big;
+    std::string small;
+    bool        strict{false};
+  };
+  absl::flat_hash_map<std::string, Order_fact> cmp_facts_;
+  std::vector<Order_fact>                      pending_guards_;
+  std::vector<std::vector<Order_fact>>         guard_stack_;
+  void note_order_fact(std::string_view dst, upass::Src_span src, bool swap, bool strict);
+  [[nodiscard]] std::optional<bool> guard_orders(std::string_view big, std::string_view small) const;  // nullopt / strict?
+  void retire_guards(std::string_view name);
+  // Compiler temps whose range was dropped (clear_range): an absent bw_meta
+  // entry then means "unknown", not "never written".
+  absl::flat_hash_set<std::string> cleared_tmps_;
   std::vector<If_merge_frame> if_merge_stack_;
   // The current uncertain arm's writes (latest range per var wins). A stack so
   // a nested if's arms don't disturb the enclosing arm's write set.

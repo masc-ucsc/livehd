@@ -12,6 +12,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core",
+        # Import paths name the file pass.prp_writer writes (unit_file_stem).
+        "//core:file_name",
         "//lnast",
         # A defaulted comb input's prologue is not the module's hardware.
         "//upass/core:default_prologue_hdr",
